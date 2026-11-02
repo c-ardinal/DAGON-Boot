@@ -5,7 +5,9 @@ mod commands;
 mod config;
 mod conform;
 mod device;
+mod nodebuild;
 mod serial;
+mod serve;
 mod simrun;
 
 use std::path::Path;
@@ -54,6 +56,11 @@ Usage:
   dagon rollback --node <id> [--port <name>] [--topology <yaml>]
                                      back to the node's previously confirmed version
                                      (its other slot), then confirm it there
+  dagon build [<id>...]              cargo build each node in [build.<id>] of dagon.toml
+                                     into out/build/<id>/app-a.elf (and app-b.elf)
+  dagon serve [--port <n>] [--web <dir>] [--no-open]
+                                     the browser page and its API on 127.0.0.1 only;
+                                     opens the page with a one-time passphrase
   dagon sim run                      the four simulator scenarios (no hardware)
   dagon ai topology [--in <text>] [--out <yaml>] [--model <id>]
                                      board description (file or stdin) to topology YAML
@@ -89,6 +96,8 @@ fn main() -> ExitCode {
         ["topo", "push", rest @ ..] => run(device::topo_push(rest)),
         ["recover", rest @ ..] => run(device::recover(rest)),
         ["rollback", rest @ ..] => run(device::rollback(rest)),
+        ["build", rest @ ..] => run(nodebuild::command(rest)),
+        ["serve", rest @ ..] => run(serve::command(rest)),
         ["conform", rest @ ..] => run(conform::command(rest)),
         ["sim", "run", rest @ ..] => run(simrun::run(rest)),
         ["ai", "topology", rest @ ..] => run(ai::topology(rest)),

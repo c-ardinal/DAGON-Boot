@@ -16,15 +16,15 @@ use crate::config::{load_key, read_file, read_topology, write_file, Config, Opts
 type Res = Result<(), String>;
 
 /// Header fields chosen on the command line or in `dagon.toml`.
-struct SignOpts {
-    version: Version,
-    release_seq: u32,
-    min_bootcore: Version,
-    proto: u32,
-    bits: Option<(u32, u32)>,
+pub(crate) struct SignOpts {
+    pub version: Version,
+    pub release_seq: u32,
+    pub min_bootcore: Version,
+    pub proto: u32,
+    pub bits: Option<(u32, u32)>,
 }
 
-fn version(s: &str) -> Result<Version, String> {
+pub(crate) fn version(s: &str) -> Result<Version, String> {
     image::parse_version(s).ok_or_else(|| format!("bad version '{s}' (want major.minor.patch)"))
 }
 
@@ -42,7 +42,7 @@ fn slot_arg(s: &str) -> Result<u8, String> {
 
 /// Signs `input` (ELF or raw payload) for `node`, or, when `input` already is
 /// a signed image, verifies it and checks it belongs to `node`/`kind`/`slot`.
-fn image_for_node(
+pub(crate) fn image_for_node(
     t: &Topology,
     node: &str,
     kind: u8,

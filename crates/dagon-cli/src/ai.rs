@@ -9,7 +9,7 @@ use std::time::Duration;
 use serde_json::{json, Value};
 
 /// The API key is read from here only; it is never printed, logged or written.
-const KEY_ENV: &str = "ANTHROPIC_API_KEY";
+pub(crate) const KEY_ENV: &str = "ANTHROPIC_API_KEY";
 const MODEL_ENV: &str = "DAGON_AI_MODEL";
 const DEFAULT_MODEL: &str = "claude-opus-5-5";
 const API_URL: &str = "https://api.anthropic.com";
@@ -92,6 +92,24 @@ pub fn topology(args: &[&str]) -> Result<(), String> {
     Ok(())
 }
 
+/// Whether a Claude API key is set (its value is never shown).
+pub(crate) fn api_key_present() -> bool {
+    api_key(std::env::var(KEY_ENV)).is_ok()
+}
+
+/// For `dagon serve`: the topology YAML for `description` and its check
+/// report (JSON), with the model's questions answered through `ask`.
+pub(crate) fn topology_for(description: &str, ask: &mut Ask) -> Result<(String, String), String> {
+    if description.trim().is_empty() {
+        return Err("the board description is empty".into());
+    }
+    let key = api_key(std::env::var(KEY_ENV))?;
+    let model = std::env::var(MODEL_ENV).unwrap_or_else(|_| DEFAULT_MODEL.into());
+    let mut api = |body: &Value| post_messages(API_URL, &key, body);
+    let done = generate(description, &model, &mut api, ask)?;
+    Ok((done.yaml, done.report.to_json()))
+}
+
 fn parse_args(args: &[&str], env_model: Option<String>) -> Result<Args, String> {
     let mut a = Args {
         input: None,
@@ -138,7 +156,7 @@ struct Outcome {
 }
 
 type Api<'a> = dyn FnMut(&Value) -> Result<Value, String> + 'a;
-type Ask<'a> = dyn FnMut(&[String]) -> Result<Vec<String>, String> + 'a;
+pub(crate) type Ask<'a> = dyn FnMut(&[String]) -> Result<Vec<String>, String> + 'a;
 
 /// Model loop: draft, ask for unknowns, check, feed errors back, until the
 /// check reports 0 errors or `MAX_ROUNDS` calls are spent.

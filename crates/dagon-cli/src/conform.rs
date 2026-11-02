@@ -173,6 +173,43 @@ fn link_of(to: Target) -> LinkKind {
     }
 }
 
+/// The relay target of topology node `node` (not the hub).
+pub(crate) fn node_target(t: &dagon_topology::Topology, node: &str) -> Result<Target, String> {
+    let bin = dagon_topology::compile(t).map_err(|e| e.to_string())?;
+    let view = dagon_format::TopologyView::parse(&bin).map_err(|e| format!("{e:?}"))?;
+    let i = t
+        .nodes
+        .iter()
+        .position(|n| n.id == node)
+        .ok_or_else(|| format!("no node '{node}' in the topology"))?;
+    match Target::of_node(&view, i as u8) {
+        Some(Target::Hub) => Err(format!("'{node}' is the hub; use --usb")),
+        Some(to) => Ok(to),
+        None => Err(format!("'{node}' is not reachable through the hub")),
+    }
+}
+
+/// Runs the 12 tests on the hub's port and writes the result file and the
+/// report into `out`.
+pub(crate) fn conform_files(
+    node: &str,
+    to: Target,
+    images_dir: &std::path::Path,
+    out: &std::path::Path,
+    key: &ed25519_compact::KeyPair,
+    port: Option<&str>,
+) -> Result<Report, String> {
+    let images = IMAGE_FILES.map(|f| read_file(&images_dir.join(f)));
+    let [a, b, c, d] = images;
+    let images = [a?, b?, c?, d?];
+    let mut sign = |m: &[u8]| *key.sk.sign([SIGN_DOMAIN, m].concat(), None);
+    let mut host = serial::host(port)?;
+    let report = run(&mut host, to, link_of(to), &images, &mut sign);
+    write_file(&out.join(RESULT_FILE), json(&report, node).as_bytes())?;
+    write_file(&out.join(REPORT_FILE), html(&report, node).as_bytes())?;
+    Ok(report)
+}
+
 pub fn command(args: &[&str]) -> Result<(), String> {
     let usb = args.contains(&"--usb");
     let args: Vec<&str> = args.iter().copied().filter(|a| *a != "--usb").collect();
@@ -188,34 +225,17 @@ pub fn command(args: &[&str]) -> Result<(), String> {
     let to = if usb {
         Target::Hub
     } else {
-        let t = read_topology(&cfg.topology_path(o.get("topology"))?)?;
-        let bin = dagon_topology::compile(&t).map_err(|e| e.to_string())?;
-        let view = dagon_format::TopologyView::parse(&bin).map_err(|e| format!("{e:?}"))?;
-        let i = t
-            .nodes
-            .iter()
-            .position(|n| n.id == node)
-            .ok_or_else(|| format!("no node '{node}' in the topology"))?;
-        match Target::of_node(&view, i as u8) {
-            Some(Target::Hub) => return Err(format!("'{node}' is the hub; use --usb")),
-            Some(to) => to,
-            None => return Err(format!("'{node}' is not reachable through the hub")),
-        }
+        node_target(
+            &read_topology(&cfg.topology_path(o.get("topology"))?)?,
+            node,
+        )?
     };
     let dir = o
         .get("images")
         .map_or_else(|| PathBuf::from("out/conform").join(node), PathBuf::from);
-    let images = IMAGE_FILES.map(|f| read_file(&dir.join(f)));
-    let [a, b, c, d] = images;
-    let images = [a?, b?, c?, d?];
     let key = load_key(o.get("key"))?;
-    let mut sign = |m: &[u8]| *key.sk.sign([SIGN_DOMAIN, m].concat(), None);
-    let mut host = serial::host(o.get("port"))?;
-    let report = run(&mut host, to, link_of(to), &images, &mut sign);
-
     let out = o.get("out").map_or_else(|| dir.clone(), PathBuf::from);
-    write_file(&out.join(RESULT_FILE), json(&report, node).as_bytes())?;
-    write_file(&out.join(REPORT_FILE), html(&report, node).as_bytes())?;
+    let report = conform_files(node, to, &dir, &out, &key, o.get("port"))?;
     for c in CTS {
         if let Some(r) = report.results.iter().find(|r| r.id == c.id) {
             println!("{} {:<24} {}", Label(c.id), c.name, r.verdict.as_str());

@@ -475,3 +475,22 @@ slot-b = []
     );
     assert_eq!(t["features"][0], "slot-b");
 }
+
+#[test]
+fn the_page_built_into_dagon_is_served_with_the_release_key() {
+    assert!(
+        super::api::page_embedded(),
+        "crates/dagon-cli/page is built into dagon"
+    );
+    let server = Server::new("p".repeat(32), 1, None, std::path::PathBuf::new());
+    server.release_key.set([9; 32]).unwrap();
+    let (html, ct) = super::api::page_file(&server, "/").unwrap();
+    assert!(ct.starts_with("text/html"));
+    let html = String::from_utf8(html).unwrap();
+    assert!(html.contains(&format!("content=\"{}\"", "09".repeat(32))));
+    assert!(super::api::page_file(&server, "/fonts/OFL-Doto.txt").is_some());
+    assert!(
+        super::api::page_file(&server, "/SOURCE").is_none(),
+        "build stamp not served"
+    );
+}

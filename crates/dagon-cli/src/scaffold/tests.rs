@@ -1,5 +1,5 @@
 //! Projects generated into temporary folders, with a stand-in DAGON clone
-//! that holds packages named like the board support packages.
+//! holding packages named and declared like the board support packages.
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
@@ -15,16 +15,43 @@ fn tmp(name: &str) -> PathBuf {
     std::fs::canonicalize(&d).unwrap()
 }
 
-/// A folder standing in for a DAGON clone, with one package per name.
-fn clone_with(dir: &Path, names: &[&str]) {
-    for n in names {
-        let p = dir.join("boards").join(n);
-        std::fs::create_dir_all(&p).unwrap();
-        std::fs::write(
-            p.join("Cargo.toml"),
-            format!("[package]\nname = \"{n}\"\nversion = \"0.0.0\"\n"),
-        )
-        .unwrap();
+/// Adds package `name` to the stand-in clone; `meta` is extra manifest text
+/// (such as a `[package.metadata.dagon]` table); `template` files go into
+/// its `template/` folder.
+fn package(clone: &Path, name: &str, meta: &str, template: &[(&str, &str)]) {
+    let p = clone.join("packages").join(name);
+    std::fs::create_dir_all(&p).unwrap();
+    std::fs::write(
+        p.join("Cargo.toml"),
+        format!("[package]\nname = \"{name}\"\nversion = \"0.0.0\"\n{meta}"),
+    )
+    .unwrap();
+    for (rel, text) in template {
+        let f = p.join("template").join(rel);
+        std::fs::create_dir_all(f.parent().unwrap()).unwrap();
+        std::fs::write(f, text).unwrap();
+    }
+}
+
+const F401_TEMPLATE: &[(&str, &str)] = &[
+    (
+        "Cargo.toml",
+        "[package]\nname = \"{{node}}\"\nversion = \"0.1.0\"\n\n[dependencies]\n{{dep:dagon-board-nucleo-f401re}}\n",
+    ),
+    ("src/main.rs", "// start-up of {{node}} ({{tag}})\n"),
+    ("src/app.rs", "// app of {{node}}\n"),
+];
+
+/// A clone with the ESP32-S3 packages (built-in template) and an F401
+/// board package that ships its own template; no hub package yet.
+fn clone(d: &Path) -> DagonSource {
+    let c = d.join("dagon");
+    package(&c, "dagon-mcu-esp32s3", "", &[]);
+    package(&c, "dagon-board-m5stopwatch", "", &[]);
+    package(&c, "dagon-board-nucleo-f401re", "", F401_TEMPLATE);
+    DagonSource {
+        path: Some(c),
+        ..DagonSource::default()
     }
 }
 
@@ -36,122 +63,116 @@ fn desk() -> Topology {
     dagon_topology::parse_str(DESK).unwrap()
 }
 
-#[test]
-fn desk_demo_gets_one_crate_per_node_on_its_board_package() {
-    let d = tmp("desk");
-    let src = DagonSource {
-        path: Some(d.join("dagon")),
-        ..DagonSource::default()
-    };
-    let t = desk();
-    let pkgs: Vec<String> = t.nodes.iter().map(|n| package_of(n).name).collect();
-    assert_eq!(
-        pkgs,
-        [
-            "dagon-board-waveshare-rp2040-touch-lcd-1-28",
-            "dagon-board-nucleo-f401re",
-            "dagon-board-m5stopwatch"
-        ]
-    );
-    let names: Vec<&str> = pkgs.iter().map(String::as_str).collect();
-    clone_with(&d.join("dagon"), &names);
+fn project(d: &Path) -> PathBuf {
     let base = d.join("proj");
     std::fs::create_dir_all(&base).unwrap();
-    let w = gen(&base, &t, &src, &BTreeMap::new(), &[], false).unwrap();
-    assert!(w.iter().all(|x| x.action == "created"), "{w:?}");
-
-    let seg = read(&base, "nodes/seg/Cargo.toml");
-    assert!(seg.contains("dagon-board-nucleo-f401re = { path = "));
-    assert!(seg.contains("slot-b = [\"dagon-board-nucleo-f401re/slot-b\"]"));
-    assert!(read(&base, "nodes/seg/.cargo/config.toml").contains("thumbv7em-none-eabihf"));
-    assert!(read(&base, "nodes/hub/.cargo/config.toml").contains("thumbv6m-none-eabi"));
-    assert!(read(&base, "nodes/watch/rust-toolchain.toml").contains("esp"));
-    assert!(!base.join("nodes/seg/rust-toolchain.toml").exists());
-
-    let wiring = read(&base, "nodes/seg/src/wiring.rs");
-    assert!(wiring.contains("id: \"seg\""));
-    assert!(wiring.contains(
-        "Link::I2c { addr: 0x42, speed_hz: 400000, sda: Some(\"PB4\"), scl: Some(\"PA8\") }"
-    ));
-    let hub = read(&base, "nodes/hub/src/wiring.rs");
-    assert!(hub.contains("hub: true"));
-    assert!(hub.contains("Child { id: \"seg\", link: HubLink::I2c { sda: 16, scl: 17, speed_hz: 400000, addr: 0x42, nrst: Some(18), boot: Some(28) } }"));
-    assert!(hub
-        .contains("Child { id: \"watch\", link: HubLink::Uart { tx: 26, rx: 27, baud: 115200 } }"));
-    assert!(read(&base, "nodes/seg/src/main.rs").contains("dagon_board_nucleo_f401re::dagon_main!"));
+    base
 }
 
 #[test]
-fn gen_keeps_the_developers_code_and_rewrites_only_generated_parts() {
+fn desk_demo_uses_each_packages_template_and_skips_what_is_missing() {
+    let d = tmp("desk");
+    let src = clone(&d);
+    let base = project(&d);
+    let r = gen(&base, &desk(), &src, &BTreeMap::new(), &[], false).unwrap();
+
+    // The hub's board package does not exist yet: skipped, with the reason.
+    assert_eq!(r.skipped.len(), 1, "{:?}", r.skipped);
+    assert_eq!(r.skipped[0].0, "hub");
+    assert!(r.skipped[0]
+        .1
+        .contains("dagon-board-waveshare-rp2040-touch-lcd-1-28"));
+    assert!(!base.join("nodes/hub").exists());
+
+    // ESP32-S3: the template built into the CLI, on the real package API.
+    let watch = read(&base, "nodes/watch/Cargo.toml");
+    assert!(watch.contains("name = \"watch\""));
+    assert!(watch.contains("dagon-board-m5stopwatch = { path = "));
+    assert!(watch.contains("dagon-mcu-esp32s3 = { path = "));
+    let main = read(&base, "nodes/watch/src/main.rs");
+    assert!(main.contains("board::start(") && main.contains("NodeConfig::app(app::self_check)"));
+    assert!(read(&base, "nodes/watch/src/app.rs").contains("lease.busy(node::now_ms()"));
+    assert!(read(&base, "nodes/watch/rust-toolchain.toml").contains("esp"));
+    assert!(read(&base, "nodes/watch/.cargo/config.toml").contains("xtensa-esp32s3-none-elf"));
+
+    // F401: the template the package ships, placeholders filled.
+    assert_eq!(
+        read(&base, "nodes/seg/src/main.rs"),
+        "// start-up of seg (seg-f401-7seg)\n"
+    );
+    assert!(read(&base, "nodes/seg/Cargo.toml").contains("dagon-board-nucleo-f401re = { path = "));
+
+    // wiring.rs from the topology, for every generated node.
+    let wiring = read(&base, "nodes/seg/src/wiring.rs");
+    assert!(wiring.contains(
+        "Link::I2c { addr: 0x42, speed_hz: 400000, sda: Some(\"PB4\"), scl: Some(\"PA8\") }"
+    ));
+    assert!(read(&base, "nodes/watch/src/wiring.rs").contains("Link::Uart { baud: 115200 }"));
+}
+
+#[test]
+fn gen_keeps_the_developers_code_and_refreshes_only_generated_parts() {
     let d = tmp("regen");
-    let t = desk();
-    let names: Vec<String> = t.nodes.iter().map(|n| package_of(n).name).collect();
-    clone_with(
-        &d.join("dagon"),
-        &names.iter().map(String::as_str).collect::<Vec<_>>(),
-    );
-    let src = DagonSource {
-        path: Some(d.join("dagon")),
-        ..DagonSource::default()
-    };
-    let base = d.join("proj");
-    std::fs::create_dir_all(&base).unwrap();
-    gen(&base, &t, &src, &BTreeMap::new(), &[], false).unwrap();
+    let src = clone(&d);
+    let base = project(&d);
+    gen(&base, &desk(), &src, &BTreeMap::new(), &[], false).unwrap();
 
-    std::fs::write(base.join("nodes/seg/src/app.rs"), "// mine").unwrap();
-    std::fs::write(base.join("nodes/seg/src/main.rs"), "// my main").unwrap();
-    let cargo = base.join("nodes/seg/Cargo.toml");
-    let mut c = read(&base, "nodes/seg/Cargo.toml");
-    c.push_str("heapless = \"0.8\"\n");
-    std::fs::write(&cargo, c).unwrap();
-    std::fs::write(base.join("nodes/seg/src/wiring.rs"), "// stale").unwrap();
-
-    // The seg link moves to 0x43 in the topology.
-    let t2 = dagon_topology::parse_str(&DESK.replace("addr: 0x42", "addr: 0x43")).unwrap();
-    let w = gen(&base, &t2, &src, &BTreeMap::new(), &["seg".into()], false).unwrap();
-    let act = |p: &str| w.iter().find(|x| x.path == p).unwrap().action;
-    assert_eq!(act("nodes/seg/src/app.rs"), "kept");
-    assert_eq!(act("nodes/seg/src/main.rs"), "kept");
-    assert_eq!(act("nodes/seg/src/wiring.rs"), "rewritten");
-    assert_eq!(read(&base, "nodes/seg/src/app.rs"), "// mine");
-    assert_eq!(read(&base, "nodes/seg/src/main.rs"), "// my main");
-    assert!(read(&base, "nodes/seg/src/wiring.rs").contains("addr: 0x43"));
-    assert!(
-        read(&base, "nodes/seg/Cargo.toml").contains("heapless = \"0.8\""),
-        "own deps kept"
+    std::fs::write(base.join("nodes/watch/src/app.rs"), "// mine").unwrap();
+    std::fs::write(base.join("nodes/watch/src/main.rs"), "// my main").unwrap();
+    let cargo = base.join("nodes/watch/Cargo.toml");
+    let own = read(&base, "nodes/watch/Cargo.toml").replace(
+        "embassy-time = \"0.5\"",
+        "embassy-time = \"0.5\"\nheapless = \"0.8\"",
     );
-    assert!(
-        w.iter().all(|x| !x.path.starts_with("nodes/hub")),
-        "only the named node"
-    );
+    // A stale DAGON package entry under a target table is brought in line.
+    let own = own + "\n[target.'cfg(target_arch = \"xtensa\")'.dependencies]\ndagon-mcu-esp32s3 = { path = \"stale\" }\n";
+    std::fs::write(&cargo, own).unwrap();
 
-    let w = gen(&base, &t2, &src, &BTreeMap::new(), &["seg".into()], true).unwrap();
+    let t2 = dagon_topology::parse_str(&DESK.replace("baud: 115200", "baud: 230400")).unwrap();
+    let r = gen(&base, &t2, &src, &BTreeMap::new(), &["watch".into()], false).unwrap();
+    let act = |p: &str| r.written.iter().find(|x| x.path == p).unwrap().action;
+    assert_eq!(act("nodes/watch/src/app.rs"), "kept");
+    assert_eq!(act("nodes/watch/src/main.rs"), "kept");
+    assert_eq!(act("nodes/watch/src/wiring.rs"), "rewritten");
+    assert_eq!(act("nodes/watch/Cargo.toml"), "rewritten");
+    assert_eq!(read(&base, "nodes/watch/src/app.rs"), "// mine");
+    assert!(read(&base, "nodes/watch/src/wiring.rs").contains("baud: 230400"));
+    let c = read(&base, "nodes/watch/Cargo.toml");
+    assert!(c.contains("heapless = \"0.8\""), "own dependency kept");
+    assert!(!c.contains("\"stale\""), "{c}");
+    assert!(r.written.iter().all(|x| !x.path.starts_with("nodes/seg")));
+
+    let r = gen(&base, &t2, &src, &BTreeMap::new(), &["watch".into()], true).unwrap();
+    let act = |p: &str| r.written.iter().find(|x| x.path == p).unwrap().action;
+    assert_eq!(act("nodes/watch/src/main.rs"), "rewritten");
     assert_eq!(
-        w.iter()
-            .find(|x| x.path == "nodes/seg/src/main.rs")
-            .unwrap()
-            .action,
-        "rewritten"
-    );
-    assert_eq!(
-        read(&base, "nodes/seg/src/app.rs"),
+        read(&base, "nodes/watch/src/app.rs"),
         "// mine",
         "app.rs even with --force-main"
     );
 }
 
 #[test]
-fn a_node_chosen_by_mcu_uses_the_mcu_package_and_its_board_facts() {
+fn a_node_chosen_by_mcu_finds_the_package_that_declares_the_mcu() {
     let d = tmp("mcu");
-    let yaml = DESK.replace("    board: nucleo-f401re\n", "");
-    let t = dagon_topology::parse_str(&yaml).unwrap();
-    let seg = t.node("seg").unwrap();
-    assert_eq!(package_of(seg).name, "dagon-mcu-stm32f401re");
-    clone_with(&d.join("dagon"), &["dagon-mcu-stm32f401re"]);
+    let c = d.join("dagon");
+    let tpl: &[(&str, &str)] = &[(
+        "Cargo.toml",
+        "[package]\nname = \"{{node}}\"\n[dependencies]\n{{dep:dagon-mcu-stm32f401}}\n",
+    )];
+    // Package name and topology MCU id differ; the package declares the id.
+    package(
+        &c,
+        "dagon-mcu-stm32f401",
+        "[package.metadata.dagon]\nmcu = \"stm32f401re\"\n",
+        tpl,
+    );
     let src = DagonSource {
-        path: Some(d.join("dagon")),
+        path: Some(c),
         ..DagonSource::default()
     };
+    let yaml = DESK.replace("    board: nucleo-f401re\n", "");
+    let t = dagon_topology::parse_str(&yaml).unwrap();
     let mut boards = BTreeMap::new();
     boards.insert(
         "seg".to_string(),
@@ -159,10 +180,10 @@ fn a_node_chosen_by_mcu_uses_the_mcu_package_and_its_board_facts() {
             flash_bytes: Some(512 * 1024),
         },
     );
-    let base = d.join("proj");
-    std::fs::create_dir_all(&base).unwrap();
-    gen(&base, &t, &src, &boards, &["seg".into()], false).unwrap();
-    assert!(read(&base, "nodes/seg/Cargo.toml").contains("dagon-mcu-stm32f401re = { path = "));
+    let base = project(&d);
+    let r = gen(&base, &t, &src, &boards, &["seg".into()], false).unwrap();
+    assert!(r.skipped.is_empty(), "{:?}", r.skipped);
+    assert!(read(&base, "nodes/seg/Cargo.toml").contains("dagon-mcu-stm32f401 = { path = "));
     assert!(read(&base, "nodes/seg/src/wiring.rs").contains("flash_bytes: Some(524288)"));
 }
 
@@ -174,23 +195,19 @@ fn a_release_source_pins_the_git_tag() {
         tag: Some("v0.1.0".into()),
         path: None,
     };
-    let t = desk();
-    gen(&d, &t, &src, &BTreeMap::new(), &["seg".into()], false).unwrap();
-    assert!(read(&d, "nodes/seg/Cargo.toml").contains(
-        "dagon-board-nucleo-f401re = { git = \"https://example.invalid/dagon.git\", tag = \"v0.1.0\" }"
+    let r = gen(
+        &d,
+        &desk(),
+        &src,
+        &BTreeMap::new(),
+        &["watch".into()],
+        false,
+    )
+    .unwrap();
+    assert!(r.skipped.is_empty(), "{:?}", r.skipped);
+    assert!(read(&d, "nodes/watch/Cargo.toml").contains(
+        "dagon-board-m5stopwatch = { git = \"https://example.invalid/dagon.git\", tag = \"v0.1.0\" }"
     ));
-}
-
-#[test]
-fn a_missing_board_package_is_reported() {
-    let d = tmp("missing");
-    let src = DagonSource {
-        path: Some(d.join("empty")),
-        ..DagonSource::default()
-    };
-    std::fs::create_dir_all(d.join("empty")).unwrap();
-    let e = gen(&d, &desk(), &src, &BTreeMap::new(), &["seg".into()], false).unwrap_err();
-    assert!(e.contains("no package 'dagon-board-nucleo-f401re'"), "{e}");
 }
 
 #[test]
@@ -203,9 +220,9 @@ fn new_makes_the_project_and_a_key_outside_it() {
     assert!(keys.join(dagon_sign::SECRET_FILE).exists());
     let toml = read(&proj, "dagon.toml");
     assert!(toml.contains("topology = \"topology.yaml\"") && toml.contains("[dagon]"));
-    assert!(!toml.contains(&std::fs::read_to_string(keys.join(dagon_sign::SECRET_FILE)).unwrap()));
+    let secret = std::fs::read_to_string(keys.join(dagon_sign::SECRET_FILE)).unwrap();
+    assert!(!toml.contains(secret.trim()));
     assert_eq!(read(&proj, "topology.yaml"), DESK);
-    // Not over an existing project; the key is kept on a second project.
     assert!(new_project(&proj, "fleet", DESK, &keys).is_err());
     let again = new_project(&d.join("fleet2"), "fleet2", DESK, &keys).unwrap();
     assert!(!again.iter().any(|l| l.starts_with("key:")));
@@ -215,5 +232,10 @@ fn new_makes_the_project_and_a_key_outside_it() {
     assert_eq!(added, ["hub", "seg", "watch"]);
     let c = Config::load(Some(&cfg.to_string_lossy())).unwrap();
     assert_eq!(c.build["seg"].package, PathBuf::from("nodes/seg"));
+    assert_eq!(c.build["seg"].slot_b_feature.as_deref(), Some("slot-b"));
+    assert_eq!(
+        c.build["watch"].slot_b_feature, None,
+        "ESP images serve both slots"
+    );
     assert!(add_build_tables(&cfg, &desk()).unwrap().is_empty());
 }

@@ -13,7 +13,13 @@
 //!   nodes/<id>/src/wiring.rs constants from the topology, rewritten by gen
 //! ```
 //!
-//! `dagon gen` rewrites only wiring.rs and the board-package line of
+//! The files of a node come from its package's project template: a
+//! `template/` folder shipped inside the board (or MCU) package, so the
+//! package owns its start-up code, else a copy built into this CLI
+//! (crates/dagon-cli/templates/<package>/). Placeholders: `{{node}}`,
+//! `{{tag}}`, `{{dep:<package>}}` (the dependency line for that package).
+//!
+//! `dagon gen` rewrites only wiring.rs and the DAGON package entries of
 //! Cargo.toml, and adds missing [build.<id>] tables; everything the
 //! developer wrote stays.
 
@@ -50,174 +56,11 @@ pub struct BoardFacts {
     pub flash_bytes: Option<u32>,
 }
 
-/// What a node's support package is.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Package {
-    /// Cargo package name.
-    pub name: String,
-    /// The node names a board (else only an MCU).
-    pub board: bool,
-}
-
-/// `dagon-board-<board>` or `dagon-mcu-<mcu>`, as a cargo package name.
-pub fn package_of(n: &Node) -> Package {
-    let clean = |s: &str| s.replace(['.', '_'], "-").to_ascii_lowercase();
-    match &n.board {
-        Some(b) => Package {
-            name: format!("dagon-board-{}", clean(b)),
-            board: true,
-        },
-        None => Package {
-            name: format!("dagon-mcu-{}", clean(&n.mcu)),
-            board: false,
-        },
-    }
-}
-
-struct Family {
-    target: &'static str,
-    rustflags: &'static str,
-    extra: &'static str,
-    toolchain: Option<&'static str>,
-}
-
-fn family(mcu: &str) -> Result<Family, String> {
-    Ok(match mcu {
-        "rp2040" => Family {
-            target: "thumbv6m-none-eabi",
-            rustflags: r#"["-C", "link-arg=--nmagic", "-C", "link-arg=-Tlink.x"]"#,
-            extra: "",
-            toolchain: None,
-        },
-        "stm32f401re" => Family {
-            target: "thumbv7em-none-eabihf",
-            rustflags: r#"["-C", "link-arg=--nmagic", "-C", "link-arg=-Tlink.x"]"#,
-            extra: "runner = \"probe-rs run --chip STM32F401RETx\"\n",
-            toolchain: None,
-        },
-        "esp32s3" => Family {
-            target: "xtensa-esp32s3-none-elf",
-            rustflags: r#"["-C", "link-arg=-nostartfiles", "-C", "link-arg=-Tlinkall.x", "-C", "llvm-args=--mtext-section-literals"]"#,
-            extra: "",
-            toolchain: Some("[toolchain]\nchannel = \"esp\"\n"),
-        },
-        other => return Err(format!("no project template for MCU '{other}' yet")),
-    })
-}
-
 /// A file written (or kept) by gen, relative to the project.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Written {
     pub path: String,
     pub action: &'static str,
-}
-
-/// The dependency line of `pkg` for the configured source.
-fn dependency(pkg: &Package, src: &DagonSource, base: &Path) -> Result<String, String> {
-    if let (Some(git), Some(tag)) = (&src.git, &src.tag) {
-        return Ok(format!("{} = {{ git = {git:?}, tag = {tag:?} }}", pkg.name));
-    }
-    let root = match (&src.path, std::env::var_os(HOME_ENV)) {
-        (Some(p), _) => base.join(p),
-        (None, Some(h)) => PathBuf::from(h),
-        (None, None) => PathBuf::from(BUILT_FROM),
-    };
-    let dir = find_package(&root, &pkg.name).ok_or_else(|| {
-        format!(
-            "no package '{}' in {} (the board support package may not exist there yet)",
-            pkg.name,
-            root.display()
-        )
-    })?;
-    let dir = dir.to_string_lossy().replace('\\', "/");
-    Ok(format!("{} = {{ path = {dir:?} }}", pkg.name))
-}
-
-/// Directory of the cargo package `name` under `root` (target/, .git and
-/// node_modules skipped).
-pub fn find_package(root: &Path, name: &str) -> Option<PathBuf> {
-    let mut stack = vec![root.to_path_buf()];
-    while let Some(dir) = stack.pop() {
-        let toml = dir.join("Cargo.toml");
-        if let Ok(text) = std::fs::read_to_string(&toml) {
-            let found = toml::from_str::<toml::Value>(&text)
-                .ok()
-                .and_then(|v| v.get("package")?.get("name")?.as_str().map(|n| n == name));
-            if found == Some(true) {
-                return std::fs::canonicalize(&dir).ok().or(Some(dir));
-            }
-        }
-        let Ok(entries) = std::fs::read_dir(&dir) else {
-            continue;
-        };
-        for e in entries.flatten() {
-            let n = e.file_name();
-            let skip = matches!(n.to_str(), Some("target" | ".git" | "node_modules" | "out"));
-            if !skip && e.file_type().is_ok_and(|t| t.is_dir()) {
-                stack.push(e.path());
-            }
-        }
-    }
-    None
-}
-
-fn cargo_toml(id: &str, pkg: &Package, dep: &str) -> String {
-    format!(
-        "[package]\nname = \"{id}\"\nversion = \"{FIRST_VERSION}\"\nedition = \"2021\"\npublish = false\n\n\
-         # One crate per node: each builds for its own target.\n[workspace]\n\n\
-         [features]\n# Links the application for slot B (dagon build builds both).\n\
-         slot-b = [\"{name}/slot-b\"]\n\n\
-         [dependencies]\n# DAGON board support (rewritten by dagon gen).\n{dep}\n\n\
-         [profile.release]\nopt-level = \"s\"\nlto = true\ncodegen-units = 1\ndebug = true\npanic = \"abort\"\n",
-        name = pkg.name
-    )
-}
-
-fn cargo_config(f: &Family) -> String {
-    format!(
-        "[build]\ntarget = \"{t}\"\n\n[target.{t}]\nrustflags = {r}\n{extra}",
-        t = f.target,
-        r = f.rustflags,
-        extra = f.extra
-    ) + if f.target.starts_with("xtensa") {
-        "\n[unstable]\nbuild-std = [\"core\"]\n"
-    } else {
-        ""
-    }
-}
-
-fn main_rs(pkg: &Package) -> String {
-    let krate = pkg.name.replace('-', "_");
-    format!(
-        "//! Start-up written by `dagon gen`: the board, the DAGON node (link,\n\
-         //! update receiver, trial and confirm) and your application in app.rs.\n\
-         //! You do not need to change this file.\n\
-         #![no_std]\n#![no_main]\n\nmod app;\nmod wiring;\n\n\
-         {krate}::dagon_main!(wiring::NODE, app::run, app::self_check);\n"
-    )
-}
-
-fn app_rs(pkg: &Package) -> String {
-    let krate = pkg.name.replace('-', "_");
-    format!(
-        "//! Your application. DAGON receives updates, runs a new version on\n\
-         //! trial and confirms it; this file is never rewritten by dagon gen.\n\n\
-         use {krate} as board;\n\n\
-         /// Runs for as long as the node is up. Keep feeding `live`: if this\n\
-         /// task stops, the watchdog resets the node, and a version on trial\n\
-         /// goes back to the previous one.\n\
-         pub async fn run(io: board::UserIo, live: board::Lease) {{\n\
-         \x20   let _ = io;\n\
-         \x20   loop {{\n\
-         \x20       live.feed();\n\
-         \x20       board::Timer::after_millis(500).await;\n\
-         \x20   }}\n\
-         }}\n\n\
-         /// Whether a version on trial may be confirmed.\n\
-         pub fn self_check() -> bool {{\n\
-         \x20   true\n\
-         }}\n"
-    )
 }
 
 fn hub_link(t: &Topology, child: &str) -> Option<String> {
@@ -355,31 +198,260 @@ fn write(
     Ok(())
 }
 
-/// Replaces the board-package dependency line in an existing Cargo.toml,
-/// keeping the rest.
-fn update_dependency(
+/// What a node needs: its board package, or its MCU package when the node
+/// names no board.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Want {
+    Board(String),
+    Mcu(String),
+}
+
+pub fn want_of(n: &Node) -> Want {
+    match &n.board {
+        Some(b) => Want::Board(b.clone()),
+        None => Want::Mcu(n.mcu.clone()),
+    }
+}
+
+/// The conventional package name: `dagon-board-<board id>` or
+/// `dagon-mcu-<mcu id>`, dots and underscores turned into dashes. A package
+/// may also declare its id instead (`[package.metadata.dagon] board = ...`
+/// or `mcu = ...`), which a local clone is searched for.
+pub fn conventional_name(w: &Want) -> String {
+    let clean = |s: &str| s.replace(['.', '_'], "-").to_ascii_lowercase();
+    match w {
+        Want::Board(b) => format!("dagon-board-{}", clean(b)),
+        Want::Mcu(m) => format!("dagon-mcu-{}", clean(m)),
+    }
+}
+
+/// A package found in a local clone.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Found {
+    pub name: String,
+    pub dir: PathBuf,
+}
+
+/// Package manifests under `root` (target/, .git, node_modules and out/
+/// skipped), as (directory, parsed Cargo.toml).
+fn manifests(root: &Path) -> Vec<(PathBuf, toml::Value)> {
+    let mut out = Vec::new();
+    let mut stack = vec![root.to_path_buf()];
+    while let Some(dir) = stack.pop() {
+        if let Ok(text) = std::fs::read_to_string(dir.join("Cargo.toml")) {
+            if let Ok(v) = toml::from_str::<toml::Value>(&text) {
+                if v.get("package").is_some() {
+                    out.push((dir.clone(), v));
+                }
+            }
+        }
+        let Ok(entries) = std::fs::read_dir(&dir) else {
+            continue;
+        };
+        for e in entries.flatten() {
+            let n = e.file_name();
+            let skip = matches!(n.to_str(), Some("target" | ".git" | "node_modules" | "out"));
+            if !skip && e.file_type().is_ok_and(|t| t.is_dir()) {
+                stack.push(e.path());
+            }
+        }
+    }
+    out
+}
+
+fn package_name(v: &toml::Value) -> Option<&str> {
+    v.get("package")?.get("name")?.as_str()
+}
+
+/// The package for `w` in the clone at `root`: by its declared id, else by
+/// the conventional name.
+pub fn find_for(root: &Path, w: &Want) -> Option<Found> {
+    let all = manifests(root);
+    let (key, id) = match w {
+        Want::Board(b) => ("board", b),
+        Want::Mcu(m) => ("mcu", m),
+    };
+    let declared = all.iter().find(|(_, v)| {
+        v.get("package")
+            .and_then(|p| p.get("metadata"))
+            .and_then(|m| m.get("dagon"))
+            .and_then(|d| d.get(key))
+            .and_then(|x| x.as_str())
+            == Some(id.as_str())
+    });
+    let name = conventional_name(w);
+    let by_name = || all.iter().find(|(_, v)| package_name(v) == Some(&name));
+    let (dir, v) = declared.or_else(by_name)?;
+    Some(Found {
+        name: package_name(v)?.to_string(),
+        dir: std::fs::canonicalize(dir).unwrap_or_else(|_| dir.clone()),
+    })
+}
+
+/// The package directory named `name` in the clone at `root`.
+pub fn find_named(root: &Path, name: &str) -> Option<PathBuf> {
+    manifests(root)
+        .into_iter()
+        .find(|(_, v)| package_name(v) == Some(name))
+        .map(|(d, _)| std::fs::canonicalize(&d).unwrap_or(d))
+}
+
+fn clone_root(src: &DagonSource, base: &Path) -> Option<PathBuf> {
+    if src.git.is_some() && src.tag.is_some() {
+        return None;
+    }
+    Some(match (&src.path, std::env::var_os(HOME_ENV)) {
+        (Some(p), _) => base.join(p),
+        (None, Some(h)) => PathBuf::from(h),
+        (None, None) => PathBuf::from(BUILT_FROM),
+    })
+}
+
+/// The dependency line for package `name`.
+fn dependency(name: &str, src: &DagonSource, base: &Path) -> Result<String, String> {
+    match clone_root(src, base) {
+        None => Ok(format!(
+            "{name} = {{ git = {:?}, tag = {:?} }}",
+            src.git.as_deref().unwrap_or_default(),
+            src.tag.as_deref().unwrap_or_default()
+        )),
+        Some(root) => {
+            let dir = find_named(&root, name)
+                .ok_or_else(|| format!("no package '{name}' in {}", root.display()))?;
+            let dir = dir.to_string_lossy().replace('\\', "/");
+            let dir = dir.strip_prefix("//?/").unwrap_or(&dir).to_string();
+            Ok(format!("{name} = {{ path = {dir:?} }}"))
+        }
+    }
+}
+
+/// Project template files of a package: `template/` shipped inside the
+/// package (its own snippet), else the copy built into this CLI.
+fn template_for(name: &str, dir: Option<&Path>) -> Option<Vec<(String, String)>> {
+    if let Some(t) = dir.map(|d| d.join("template")).filter(|t| t.is_dir()) {
+        let mut files = Vec::new();
+        collect(&t, "", &mut files);
+        if !files.is_empty() {
+            return Some(files);
+        }
+    }
+    let built_in: Vec<(String, String)> = templates::TEMPLATES
+        .iter()
+        .filter(|(p, _, _)| *p == name)
+        .map(|(_, rel, text)| (rel.to_string(), text.to_string()))
+        .collect();
+    (!built_in.is_empty()).then_some(built_in)
+}
+
+fn collect(dir: &Path, rel: &str, out: &mut Vec<(String, String)>) {
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return;
+    };
+    let mut entries: Vec<_> = entries.flatten().collect();
+    entries.sort_by_key(|e| e.file_name());
+    for e in entries {
+        let name = e.file_name().to_string_lossy().into_owned();
+        let r = if rel.is_empty() {
+            name
+        } else {
+            format!("{rel}/{name}")
+        };
+        if e.path().is_dir() {
+            collect(&e.path(), &r, out);
+        } else if let Ok(text) = std::fs::read_to_string(e.path()) {
+            out.push((r, text));
+        }
+    }
+}
+
+mod templates {
+    include!(concat!(env!("OUT_DIR"), "/templates.rs"));
+}
+
+/// Fills `{{node}}`, `{{tag}}` and `{{dep:<package>}}` in a template file.
+fn render(text: &str, n: &Node, src: &DagonSource, base: &Path) -> Result<String, String> {
+    let mut out = text.replace("{{node}}", &n.id).replace("{{tag}}", &n.tag);
+    while let Some(at) = out.find("{{dep:") {
+        let end = out[at..]
+            .find("}}")
+            .map(|e| at + e)
+            .ok_or("unclosed {{dep: in a template")?;
+        let name = out[at + 6..end].trim().to_string();
+        let line = dependency(&name, src, base)?;
+        out.replace_range(at..end + 2, &line);
+    }
+    Ok(out)
+}
+
+/// Whether a dependency key is a DAGON board or MCU package.
+fn dagon_package(k: &str) -> bool {
+    k.starts_with("dagon-board-") || k.starts_with("dagon-mcu-")
+}
+
+/// Every dependency table of a manifest (`dependencies` and
+/// `target.<cfg>.dependencies`).
+fn dep_tables(doc: &mut toml_edit::DocumentMut) -> Vec<&mut toml_edit::Table> {
+    let mut out = Vec::new();
+    for (k, item) in doc.as_table_mut().iter_mut() {
+        if k == "dependencies" {
+            if let Some(t) = item.as_table_mut() {
+                out.push(t);
+            }
+        } else if k == "target" {
+            if let Some(targets) = item.as_table_mut() {
+                for (_, cfg) in targets.iter_mut() {
+                    if let Some(d) = cfg
+                        .as_table_mut()
+                        .and_then(|c| c.get_mut("dependencies"))
+                        .and_then(|d| d.as_table_mut())
+                    {
+                        out.push(d);
+                    }
+                }
+            }
+        }
+    }
+    out
+}
+
+/// Brings the DAGON package entries of an existing Cargo.toml in line with
+/// the freshly rendered template; everything else stays.
+fn refresh_manifest(
     base: &Path,
     rel: &str,
-    pkg: &Package,
-    dep: &str,
+    rendered: &str,
     out: &mut Vec<Written>,
 ) -> Result<(), String> {
     let path = contained(base, Path::new(rel))?;
     let text = std::fs::read_to_string(&path).map_err(|e| format!("{rel}: {e}"))?;
     let mut doc: toml_edit::DocumentMut =
         text.parse().map_err(|_| format!("{rel} does not parse"))?;
-    let want: toml_edit::DocumentMut = format!("[dependencies]\n{dep}\n")
+    let mut want: toml_edit::DocumentMut = rendered
         .parse()
-        .map_err(|_| "bad dependency line".to_string())?;
-    let deps = doc
-        .entry("dependencies")
-        .or_insert(toml_edit::table())
-        .as_table_mut()
-        .ok_or_else(|| format!("{rel}: dependencies is not a table"))?;
-    deps.retain(|k, _| {
-        !(k.starts_with("dagon-board-") || k.starts_with("dagon-mcu-")) || k == pkg.name
-    });
-    deps.insert(&pkg.name, want["dependencies"][&pkg.name].clone());
+        .map_err(|_| format!("template for {rel} does not parse"))?;
+    let mut fresh = std::collections::BTreeMap::new();
+    for t in dep_tables(&mut want) {
+        for (k, v) in t.iter().filter(|(k, _)| dagon_package(k)) {
+            fresh.insert(k.to_string(), v.clone());
+        }
+    }
+    for t in dep_tables(&mut doc) {
+        let keys: Vec<String> = t
+            .iter()
+            .map(|(k, _)| k.to_string())
+            .filter(|k| dagon_package(k))
+            .collect();
+        for k in keys {
+            match fresh.get(&k) {
+                Some(v) => {
+                    t.insert(&k, v.clone());
+                }
+                None => {
+                    t.remove(&k);
+                }
+            }
+        }
+    }
     let new = doc.to_string();
     let changed = new != text;
     if changed {
@@ -392,7 +464,41 @@ fn update_dependency(
     Ok(())
 }
 
+/// The template files of node `n` (rendered), or why there are none.
+fn node_files(n: &Node, src: &DagonSource, base: &Path) -> Result<Vec<(String, String)>, String> {
+    let want = want_of(n);
+    let (name, dir) = match clone_root(src, base) {
+        Some(root) => {
+            let f = find_for(&root, &want).ok_or_else(|| {
+                format!(
+                    "no board support package for {want:?} in {} (looked for {} or a \
+                     package declaring it); it may not exist yet",
+                    root.display(),
+                    conventional_name(&want)
+                )
+            })?;
+            (f.name, Some(f.dir))
+        }
+        None => (conventional_name(&want), None),
+    };
+    let files = template_for(&name, dir.as_deref())
+        .ok_or_else(|| format!("{name} has no project template yet"))?;
+    files
+        .into_iter()
+        .map(|(rel, text)| Ok((rel, render(&text, n, src, base)?)))
+        .collect()
+}
+
+/// What `gen` did, and the nodes it could not generate (with the reason).
+#[derive(Debug, Default)]
+pub struct GenReport {
+    pub written: Vec<Written>,
+    pub skipped: Vec<(String, String)>,
+}
+
 /// Generates (or refreshes) the crates of `only` (all nodes when empty).
+/// A node whose package or template is missing is skipped with the reason;
+/// the others are still generated.
 pub fn gen(
     base: &Path,
     t: &Topology,
@@ -400,68 +506,42 @@ pub fn gen(
     boards: &std::collections::BTreeMap<String, BoardFacts>,
     only: &[String],
     force_main: bool,
-) -> Result<Vec<Written>, String> {
-    let mut out = Vec::new();
+) -> Result<GenReport, String> {
+    let mut r = GenReport::default();
     for n in &t.nodes {
         if !only.is_empty() && !only.contains(&n.id) {
             continue;
         }
-        let pkg = package_of(n);
-        let fam = family(&n.mcu)?;
-        let dep = dependency(&pkg, src, base)?;
+        let files = match node_files(n, src, base) {
+            Ok(f) => f,
+            Err(e) => {
+                r.skipped.push((n.id.clone(), e));
+                continue;
+            }
+        };
         let dir = format!("nodes/{}", n.id);
-        let cargo = format!("{dir}/Cargo.toml");
-        if contained(base, Path::new(&cargo))?.exists() {
-            update_dependency(base, &cargo, &pkg, &dep, &mut out)?;
-        } else {
-            write(
-                base,
-                &cargo,
-                &cargo_toml(&n.id, &pkg, &dep),
-                false,
-                &mut out,
-            )?;
+        for (rel, text) in files {
+            let path = format!("{dir}/{rel}");
+            match rel.as_str() {
+                "Cargo.toml" if contained(base, Path::new(&path))?.exists() => {
+                    refresh_manifest(base, &path, &text, &mut r.written)?
+                }
+                "src/app.rs" => write(base, &path, &text, false, &mut r.written)?,
+                "src/main.rs" => write(base, &path, &text, force_main, &mut r.written)?,
+                "src/wiring.rs" => {}
+                _ => write(base, &path, &text, false, &mut r.written)?,
+            }
         }
-        write(
-            base,
-            &format!("{dir}/.cargo/config.toml"),
-            &cargo_config(&fam),
-            false,
-            &mut out,
-        )?;
-        if let Some(tc) = fam.toolchain {
-            write(
-                base,
-                &format!("{dir}/rust-toolchain.toml"),
-                tc,
-                false,
-                &mut out,
-            )?;
-        }
-        write(
-            base,
-            &format!("{dir}/src/main.rs"),
-            &main_rs(&pkg),
-            force_main,
-            &mut out,
-        )?;
-        write(
-            base,
-            &format!("{dir}/src/app.rs"),
-            &app_rs(&pkg),
-            false,
-            &mut out,
-        )?;
         let wiring = wiring_rs(t, n, boards.get(&n.id));
         write(
             base,
             &format!("{dir}/src/wiring.rs"),
             &wiring,
             true,
-            &mut out,
+            &mut r.written,
         )?;
     }
-    Ok(out)
+    Ok(r)
 }
 
 /// Adds `[build.<id>]` for nodes that have none (comments kept).
@@ -483,7 +563,10 @@ pub fn add_build_tables(config: &Path, t: &Topology) -> Result<Vec<String>, Stri
         }
         let mut tbl = toml_edit::Table::new();
         tbl.insert("package", toml_edit::value(format!("nodes/{}", n.id)));
-        tbl.insert("slot_b_feature", toml_edit::value("slot-b"));
+        // ESP32-S3 images run from either OTA slot: one build serves both.
+        if n.mcu != "esp32s3" {
+            tbl.insert("slot_b_feature", toml_edit::value("slot-b"));
+        }
         tbl.insert("version", toml_edit::value(FIRST_VERSION));
         builds.insert(&n.id, toml_edit::Item::Table(tbl));
         added.push(n.id.clone());
@@ -525,9 +608,12 @@ pub fn gen_command(args: &[&str]) -> Result<(), String> {
     if let Some(bad) = only.iter().find(|id| t.node(id).is_none()) {
         return Err(format!("no node '{bad}' in the topology"));
     }
-    let written = gen(&cfg.base, &t, &tables.dagon, &tables.board, &only, force)?;
-    for w in &written {
+    let report = gen(&cfg.base, &t, &tables.dagon, &tables.board, &only, force)?;
+    for w in &report.written {
         println!("{:<10} {}", w.action, w.path);
+    }
+    for (id, why) in &report.skipped {
+        println!("skipped    nodes/{id}: {why}");
     }
     for id in add_build_tables(&config, &t)? {
         println!("added      [build.{id}] to dagon.toml");

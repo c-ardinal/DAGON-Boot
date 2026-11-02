@@ -12,10 +12,8 @@
 //! This module is the request side and is tested on the host; the register
 //! and I2C work is in `node`.
 
-use dagon_proto::{flags, Frame, Status, HEADER_LEN};
-
-/// ENTER_ROM command code (not one of the agent's commands).
-pub const CMD_ENTER_ROM: u8 = 0x24;
+use dagon_proto::payload::{rom_method, EnterRom};
+use dagon_proto::{flags, Cmd, Frame, Status, HEADER_LEN};
 
 /// M5PM1 on the internal SYS I2C (SDA G47 / SCL G48).
 // Unverified: the datasheet gives SYS_CMD 0x0C = KEY 0xA + CMD 0b11
@@ -28,8 +26,8 @@ pub const M5PM1_DOWNLOAD: u8 = 0xA3;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Method {
-    ForceDownloadBoot = 1,
-    M5pm1 = 2,
+    ForceDownloadBoot,
+    M5pm1,
 }
 
 /// Reply frame size of [`enter_rom_request`].
@@ -44,14 +42,16 @@ pub fn enter_rom_request(
     out: &mut [u8; REPLY_LEN],
 ) -> Option<(usize, Option<Method>)> {
     let (f, _) = Frame::decode(request, max_payload).ok()?;
-    if f.cmd != CMD_ENTER_ROM || f.flags & (flags::RESP | flags::EVENT) != 0 {
+    if f.cmd != Cmd::EnterRom as u8 || f.flags & (flags::RESP | flags::EVENT) != 0 {
         return None;
     }
-    let (status, method) = match f.payload {
-        [1] => (Status::Ok, Some(Method::ForceDownloadBoot)),
-        [2] if cfg!(feature = "pmic-download") => (Status::Ok, Some(Method::M5pm1)),
-        [2] => (Status::Unsupported, None),
-        _ => (Status::Arg, None),
+    let (status, method) = match EnterRom::parse(f.payload).map(|r| r.method) {
+        Ok(rom_method::FORCE_DOWNLOAD_BOOT) => (Status::Ok, Some(Method::ForceDownloadBoot)),
+        Ok(rom_method::PMIC) if cfg!(feature = "pmic-download") => {
+            (Status::Ok, Some(Method::M5pm1))
+        }
+        Ok(_) => (Status::Unsupported, None),
+        Err(s) => (s, None),
     };
     out[HEADER_LEN] = status as u8;
     let n = dagon_proto::finish(out, flags::RESP, f.seq, f.cmd, 1).ok()?;
@@ -61,7 +61,7 @@ pub fn enter_rom_request(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use dagon_proto::{split_status, Cmd};
+    use dagon_proto::split_status;
 
     fn req(cmd: u8, payload: &[u8]) -> Vec<u8> {
         let mut buf = vec![0u8; 64];
@@ -81,14 +81,17 @@ mod tests {
         let mut out = [0u8; REPLY_LEN];
         let (n, m) = enter_rom_request(r, 1024, &mut out).unwrap();
         let (f, _) = Frame::decode(&out[..n], 1024).unwrap();
-        assert_eq!((f.seq, f.cmd, f.flags), (9, CMD_ENTER_ROM, flags::RESP));
+        assert_eq!(
+            (f.seq, f.cmd, f.flags),
+            (9, Cmd::EnterRom as u8, flags::RESP)
+        );
         (split_status(f.payload).unwrap().0, m)
     }
 
     #[test]
     fn methods_and_bad_arguments() {
         assert_eq!(
-            answer(&req(CMD_ENTER_ROM, &[1])),
+            answer(&req(Cmd::EnterRom as u8, &[1])),
             (Status::Ok, Some(Method::ForceDownloadBoot))
         );
         let method2 = if cfg!(feature = "pmic-download") {
@@ -96,9 +99,9 @@ mod tests {
         } else {
             (Status::Unsupported, None)
         };
-        assert_eq!(answer(&req(CMD_ENTER_ROM, &[2])), method2);
+        assert_eq!(answer(&req(Cmd::EnterRom as u8, &[2])), method2);
         for p in [&[][..], &[0], &[3], &[1, 0]] {
-            assert_eq!(answer(&req(CMD_ENTER_ROM, p)), (Status::Arg, None));
+            assert_eq!(answer(&req(Cmd::EnterRom as u8, p)), (Status::Arg, None));
         }
     }
 
@@ -107,10 +110,10 @@ mod tests {
         let mut out = [0u8; REPLY_LEN];
         let hello = req(Cmd::Hello as u8, &[0; 6]);
         assert_eq!(enter_rom_request(&hello, 1024, &mut out), None);
-        let mut resp = req(CMD_ENTER_ROM, &[1]);
+        let mut resp = req(Cmd::EnterRom as u8, &[1]);
         resp[3] = flags::RESP;
         let n = resp.len();
-        dagon_proto::finish(&mut resp, flags::RESP, 9, CMD_ENTER_ROM, n - 12).unwrap();
+        dagon_proto::finish(&mut resp, flags::RESP, 9, Cmd::EnterRom as u8, n - 12).unwrap();
         assert_eq!(enter_rom_request(&resp, 1024, &mut out), None);
     }
 }

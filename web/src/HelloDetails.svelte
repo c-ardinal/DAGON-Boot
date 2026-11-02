@@ -1,5 +1,6 @@
 <script lang="ts">
-  import { versionText, type HelloResp } from './serial/hello.ts';
+  import type { HelloResp } from './serial/hello.ts';
+  import { versionText } from './wasm/dagon.ts';
 
   let { hello, label }: { hello: HelloResp; label: string } = $props();
 

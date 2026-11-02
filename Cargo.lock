@@ -197,6 +197,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "dagon-wasm"
+version = "0.0.0"
+dependencies = [
+ "dagon-format",
+ "dagon-proto",
+ "dagon-topology",
+ "wasm-bindgen",
+]
+
+[[package]]
 name = "digest"
 version = "0.11.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"

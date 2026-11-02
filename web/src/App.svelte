@@ -1,9 +1,9 @@
 <script lang="ts">
   import { tick } from 'svelte';
   import { ANNOUNCE, HUB, HUB_NAME, NODE, PRODUCT, SKIP, STEP } from './app/copy.ts';
-  import { ConnectError, chooseAndOpen, hello } from './app/connect.ts';
+  import { ConnectError, chooseAndOpen, hello, wasmReady } from './app/connect.ts';
   import { bandOf, focusOf, hubOf, statusOf, type View } from './app/connectView.ts';
-  import { versionText } from './serial/hello.ts';
+  import { dagonReady, versionText } from './wasm/dagon.ts';
   import { MockTransport } from './serial/mock.ts';
   import { WebSerialTransport, type Transport } from './serial/transport.ts';
   import Unsupported from './Unsupported.svelte';
@@ -13,6 +13,8 @@
   const mock = params.get('mock');
   const showGraph = params.has('graph');
   const serial = navigator.serial;
+  // Fetch the .wasm alongside the first paint; connect() awaits it and reports a failure.
+  if (serial || mock !== null) dagonReady().catch(() => undefined);
 
   let view = $state<View>({ kind: 'idle' });
   let alertText = $state('');
@@ -50,7 +52,12 @@
     await transport?.close().catch(() => undefined);
     transport = null;
     alertText = '';
+    // 'choosing' marks the button busy, so presses while dagon-wasm loads are ignored.
     await show({ kind: 'choosing' });
+    if (!(await wasmReady())) {
+      if (my === attempt) await show({ kind: 'unavailable' });
+      return;
+    }
     try {
       transport = mock !== null ? new MockTransport({ silent: mock === 'silent', delayMs: 600 }) : await chooseAndOpen(serial!);
       if (mock !== null) await transport.open();
@@ -126,7 +133,7 @@
       </div>
       {#if band}
         <!-- Busy stays focusable (aria-disabled) so focus never drops to the page. -->
-        <button class="primary" bind:this={primaryEl} onclick={connect} aria-disabled={busy}>
+        <button class="primary" bind:this={primaryEl} onclick={view.kind === 'unavailable' ? () => location.reload() : connect} aria-disabled={busy}>
           {busy ? `${band.button}…` : band.button}<span aria-hidden="true">→</span>
         </button>
       {/if}

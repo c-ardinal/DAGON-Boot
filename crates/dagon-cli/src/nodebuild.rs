@@ -128,7 +128,11 @@ fn build_node(
 ) -> Result<Built, String> {
     b.validate().map_err(|e| format!("[build.{id}]: {e}"))?;
     // Resolved through symlinks and junctions; must stay in the work area.
+    // Checked through its canonical form, then passed on without the
+    // Windows `\\?\` prefix: MSVC's link.exe cannot open object files
+    // under such a --target-dir (LNK1181 for host build scripts).
     let dir = crate::paths::contained(&cfg.base, &b.package)
+        .map(crate::config::plain_path)
         .map_err(|e| format!("[build.{id}] package: {e}"))?;
     let bin = match &b.bin {
         Some(n) => n.clone(),
@@ -161,7 +165,10 @@ fn build_node(
             &bin,
             &features,
             target_dir.as_deref(),
-            pubkey_hex,
+            FirmwareEnv {
+                pubkey_hex,
+                target_tag: None,
+            },
             log,
             cancel,
         )?;
@@ -227,26 +234,40 @@ enum Line {
     Err(String),
 }
 
+/// The node tag a boot core or stage0 build embeds (apps take theirs from
+/// their own `.cargo/config.toml`).
+pub const TARGET_TAG_ENV: &str = "DAGON_TARGET_TAG";
+
+/// What a firmware build is given; a value left `None` is not passed down
+/// at all (removed from the inherited environment).
+#[derive(Clone, Copy, Default)]
+pub(crate) struct FirmwareEnv<'a> {
+    /// Checked by the caller; goes to the firmware as DAGON_PUBKEY.
+    pub pubkey_hex: Option<&'a str>,
+    /// DAGON_TARGET_TAG: the node's tag from the topology.
+    pub target_tag: Option<&'a str>,
+}
+
 /// Runs `cargo build --release --locked` in `dir`; returns the executable
 /// of binary `bin`. A crate without Cargo.lock yet (just generated) is
 /// resolved once without --locked, and keeps the lock file cargo writes.
-/// `pubkey_hex` (checked by the caller) goes to the firmware as
-/// DAGON_PUBKEY; without it DAGON_PUBKEY is not passed down at all.
 pub(crate) fn cargo_build(
     dir: &Path,
     bin: &str,
     features: &[String],
     target_dir: Option<&Path>,
-    pubkey_hex: Option<&str>,
+    fw: FirmwareEnv<'_>,
     log: &mut dyn FnMut(&str),
     cancel: &AtomicBool,
 ) -> Result<PathBuf, String> {
     let mut cmd = Command::new("cargo");
     scrub(&mut cmd);
-    match pubkey_hex {
-        Some(k) => cmd.env(PUBKEY_ENV, k),
-        None => cmd.env_remove(PUBKEY_ENV),
-    };
+    for (name, value) in [(PUBKEY_ENV, fw.pubkey_hex), (TARGET_TAG_ENV, fw.target_tag)] {
+        match value {
+            Some(v) => cmd.env(name, v),
+            None => cmd.env_remove(name),
+        };
+    }
     cmd.args([
         "build",
         "--release",

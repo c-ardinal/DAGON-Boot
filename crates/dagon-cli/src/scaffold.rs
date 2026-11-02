@@ -596,8 +596,9 @@ pub fn add_build_tables(config: &Path, t: &Topology) -> Result<Vec<String>, Stri
         }
         let mut tbl = toml_edit::Table::new();
         tbl.insert("package", toml_edit::value(format!("nodes/{}", n.id)));
-        // ESP32-S3 images run from either OTA slot: one build serves both.
-        if n.mcu != "esp32s3" {
+        // An MCU without its own slot B link (ESP32-S3: one image runs
+        // from either OTA slot) builds once.
+        if crate::deploy::has_slot_b_link(&n.mcu) {
             tbl.insert("slot_b_feature", toml_edit::value("slot-b"));
         }
         tbl.insert("version", toml_edit::value(FIRST_VERSION));

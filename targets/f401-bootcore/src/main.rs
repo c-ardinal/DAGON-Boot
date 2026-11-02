@@ -26,12 +26,12 @@ const CONFIG: BootConfig = BootConfig {
     max_attempts: board::MAX_ATTEMPTS,
 };
 
-/// Half period of the "no image" blink at the 16 MHz reset clock (about 50 ms).
-const HALT_BLINK_CYCLES: u32 = 800_000;
+/// Half period of the "no image" blink (about 50 ms).
+const HALT_BLINK_CYCLES: u32 = board::SYSCLK_HZ / 20;
 
 #[entry]
 fn main() -> ! {
-    let p = embassy_stm32::init(Default::default());
+    let p = embassy_stm32::init(board::clocks());
     let mut flash = board::BoardFlash::new(p.FLASH);
     let decision = match Log::load(&mut flash, &board::LOG) {
         Ok(mut log) => decide(&mut flash, &mut log, &board::SLOTS, &CONFIG),

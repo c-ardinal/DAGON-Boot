@@ -42,6 +42,8 @@ const TRIAL_FEED_MS: u64 = 30_000;
 const TEST_KEY_SPLASH: Duration = Duration::from_millis(1500);
 /// On time of one digit of the multiplexed display.
 const DIGIT_PERIOD: Duration = Duration::from_millis(2);
+/// Requests taking longer are timed on RTT (sizes the hub's wait windows).
+const SLOW_REQUEST_MS: u64 = 20;
 
 // 7-segment expansion board wiring. The board's part number and pin map are
 // not confirmed yet: direct drive, segments a..g + dp and three digit
@@ -75,7 +77,7 @@ fn config() -> Config {
 
 #[embassy_executor::main]
 async fn main(spawner: Spawner) {
-    let p = embassy_stm32::init(Default::default());
+    let p = embassy_stm32::init(board::clocks());
     let mut led = Output::new(p.PA5, Level::Low, Speed::Low);
     let o = |pin: Peri<'static, AnyPin>| Output::new(pin, SEG_OFF, Speed::Low);
     let segments = [
@@ -217,10 +219,16 @@ async fn serve(
                 mailbox.request();
                 feed(agent, wdt);
                 acknowledge(false);
+                let t0 = Instant::now();
                 let reply = agent.handle(&rx[..n]);
                 let reboot = reply.as_ref().is_some_and(|r| r.reboot);
                 mailbox.respond(reply.map(|r| r.frame), reboot);
                 acknowledge(true);
+                let ms = t0.elapsed().as_millis();
+                if ms >= SLOW_REQUEST_MS {
+                    // Byte 5 of a frame is the command.
+                    info!("cmd {=u8:#04x}: {} ms", rx[5], ms);
+                }
             }
             SlaveCommandKind::Read => {
                 let sent = match target.respond_to_read(mailbox.read_data()).await {

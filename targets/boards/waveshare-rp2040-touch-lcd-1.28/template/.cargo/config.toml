@@ -1,0 +1,6 @@
+[build]
+target = "thumbv6m-none-eabi"
+
+[target.thumbv6m-none-eabi]
+# --nmagic: keeps the ELF headers out of the 512-byte image header gap.
+rustflags = ["-C", "link-arg=--nmagic", "-C", "link-arg=-Tlink.x"]

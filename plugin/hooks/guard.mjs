@@ -33,7 +33,28 @@ const ENGINEER_AREAS = [/^targets\/esp32s3-[^/]+\//i, /^targets\/mcu\/esp32s3\//
 // A board package is in the area when it builds on the ESP32-S3 MCU package,
 // or does not exist yet (a new board).
 const BOARD_DIR = /^targets\/boards\/([^/]+)\//i;
-const ESP_MCU_DEP = /\bdagon-mcu-esp32s3\b/;
+const ESP_MCU_PACKAGE = "dagon-mcu-esp32s3";
+
+// Whether a Cargo.toml lists `pkg` as a dependency: a `pkg = ...` key in a
+// `[dependencies]` table (also `[target.'...'.dependencies]`), or a
+// `[dependencies.pkg]` table. Comments and other tables (dev-dependencies,
+// features, metadata) do not count.
+export function dependsOn(manifest, pkg) {
+  let inDeps = false;
+  for (const raw of String(manifest).split(/\r?\n/)) {
+    const line = raw.replace(/#.*$/, "").trim();
+    const table = /^\[([^[\]]+)\]$/.exec(line);
+    if (table) {
+      const name = table[1].trim();
+      if (name === `dependencies.${pkg}` || name.endsWith(`.dependencies.${pkg}`)) return true;
+      inDeps = name === "dependencies" || name.endsWith(".dependencies");
+      continue;
+    }
+    const key = /^["']?([A-Za-z0-9_-]+)["']?\s*=/.exec(line);
+    if (inDeps && key?.[1] === pkg) return true;
+  }
+  return false;
+}
 const ENGINEER_AREA_TEXT = "targets/mcu/esp32s3/, ESP32-S3 board packages under targets/boards/, samples/esp32s3-*/ or targets/esp32s3-*/";
 const SUBSTITUTION = /\$\(|`|<\(|>\(/;
 const JUDGE_COMMAND = /^[ \t]*dagon(\.exe)?[ \t]+(conform|sim)([ \t][^&|;$`<>(){}\r\n]*)?$/i;
@@ -131,7 +152,7 @@ function engineerRel(rel, top, deps) {
   const board = BOARD_DIR.exec(rel);
   if (!board || !top) return false;
   const manifest = (deps.readText ?? realDeps.readText)(`${slash(top)}/targets/boards/${board[1]}/Cargo.toml`);
-  return manifest === null || ESP_MCU_DEP.test(manifest);
+  return manifest === null || dependsOn(manifest, ESP_MCU_PACKAGE);
 }
 
 function inEngineerArea(abs, deps) {

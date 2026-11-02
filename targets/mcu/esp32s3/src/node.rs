@@ -31,7 +31,7 @@ use core::cell::RefCell;
 use core::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 
 use crate::{
-    board::BoardDef,
+    board::{BoardDef, PlainBoard},
     boot::EspBootSelect,
     flash::EspFlash,
     framer::{FrameCutter, INTER_BYTE_TIMEOUT_MS},
@@ -160,6 +160,16 @@ fn publish_startup(store: &mut Store, display_released: bool) {
         VERSION_KNOWN.store(true, Ordering::Release);
     }
     DISPLAY_READY.store(display_released, Ordering::Release);
+}
+
+/// The board definition of a board without extras (`board::PlainBoard`), for
+/// `NodePeripherals::board` when the app wires the link itself. Call once;
+/// a second call resets the chip (there is only one link task).
+pub fn plain_board() -> &'static mut PlainBoard {
+    static PLAIN: StaticCell<PlainBoard> = StaticCell::new();
+    PLAIN
+        .try_init(PlainBoard)
+        .unwrap_or_else(|| esp_hal::system::software_reset())
 }
 
 /// Milliseconds since boot, wrapping: the time base of [`Liveness`] deadlines

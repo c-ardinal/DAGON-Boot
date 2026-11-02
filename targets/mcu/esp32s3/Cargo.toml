@@ -5,6 +5,10 @@ edition = "2021"
 license = "MIT OR Apache-2.0"
 publish = false
 
+# Id in the topology board table; `dagon gen` finds this package by it.
+[package.metadata.dagon]
+mcu = "esp32s3"
+
 # DAGON on the ESP32-S3 (kind V, behind the ESP-IDF 2nd stage with rollback):
 # flash and otadata slot store, watchdog and liveness, boot selection, link
 # serving on a UART and USB Serial/JTAG, ROM entry, the partition table.

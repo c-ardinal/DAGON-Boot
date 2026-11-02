@@ -275,6 +275,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "dagon-board-waveshare-rp2040-touch-lcd-1-28"
+version = "0.0.0"
+dependencies = [
+ "dagon-mcu-rp2040",
+ "embassy-executor",
+ "embassy-rp",
+ "embassy-time",
+ "embedded-graphics",
+]
+
+[[package]]
 name = "dagon-core"
 version = "0.0.0"
 dependencies = [
@@ -289,6 +300,41 @@ version = "0.0.0"
 dependencies = [
  "ed25519-compact",
  "sha2",
+]
+
+[[package]]
+name = "dagon-mcu-build"
+version = "0.0.0"
+
+[[package]]
+name = "dagon-mcu-common"
+version = "0.0.0"
+dependencies = [
+ "critical-section",
+ "dagon-agent",
+ "dagon-format",
+ "dagon-port",
+ "dagon-proto",
+]
+
+[[package]]
+name = "dagon-mcu-rp2040"
+version = "0.0.0"
+dependencies = [
+ "cortex-m",
+ "dagon-agent",
+ "dagon-core",
+ "dagon-format",
+ "dagon-mcu-build",
+ "dagon-mcu-common",
+ "dagon-port",
+ "dagon-proto",
+ "embassy-executor",
+ "embassy-rp",
+ "embassy-time",
+ "embassy-usb",
+ "portable-atomic",
+ "static_cell",
 ]
 
 [[package]]
@@ -1284,26 +1330,15 @@ dependencies = [
 ]
 
 [[package]]
-name = "rp2040-common"
-version = "0.0.0"
-dependencies = [
- "cortex-m",
- "dagon-core",
- "dagon-format",
- "dagon-port",
- "dagon-proto",
- "embassy-rp",
-]
-
-[[package]]
 name = "rp2040-hub"
 version = "0.0.0"
 dependencies = [
  "cortex-m",
  "cortex-m-rt",
  "dagon-agent",
- "dagon-core",
+ "dagon-board-waveshare-rp2040-touch-lcd-1-28",
  "dagon-format",
+ "dagon-mcu-rp2040",
  "dagon-port",
  "dagon-proto",
  "embassy-executor",
@@ -1311,11 +1346,9 @@ dependencies = [
  "embassy-rp",
  "embassy-sync",
  "embassy-time",
- "embassy-usb",
  "embedded-graphics",
  "heapless 0.9.3",
  "portable-atomic",
- "rp2040-common",
  "static_cell",
 ]
 

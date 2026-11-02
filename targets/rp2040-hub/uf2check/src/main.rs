@@ -11,9 +11,9 @@ use dagon_core::boot::{self, BootConfig, Decision};
 use dagon_core::log::Log;
 use dagon_format::header::{image_kind, mcu_id, target_tag};
 use dagon_format::statelog::slot;
-use rp2040_common::layout::*;
-use rp2040_common::mapped::Mapped;
-use rp2040_common::{bl, image};
+use dagon_mcu_rp2040::layout::*;
+use dagon_mcu_rp2040::mapped::Mapped;
+use dagon_mcu_rp2040::{bl, image};
 
 const UF2_MAGIC0: u32 = 0x0A32_4655;
 const UF2_MAGIC1: u32 = 0x9E5D_5157;
@@ -121,7 +121,7 @@ fn flash_image(raw: &[u8]) -> Result<Vec<u8>, String> {
         return Err(format!("{} bytes is not whole 512-byte blocks", raw.len()));
     }
     let total = (raw.len() / 512) as u32;
-    let mut mem = vec![0xFFu8; FLASH_SIZE];
+    let mut mem = vec![0xFFu8; MIN_FLASH_SIZE];
     let mut addrs = Vec::new();
     for (i, b) in raw.chunks_exact(512).enumerate() {
         let w = |i: usize| u32::from_le_bytes(b[i * 4..i * 4 + 4].try_into().unwrap());
@@ -142,7 +142,7 @@ fn flash_image(raw: &[u8]) -> Result<Vec<u8>, String> {
         let off = addr
             .checked_sub(XIP_BASE)
             .map(|o| o as usize)
-            .filter(|o| o + len <= FLASH_SIZE)
+            .filter(|o| o + len <= MIN_FLASH_SIZE)
             .ok_or(format!("block at {addr:#x} outside flash"))?;
         mem[off..off + len].copy_from_slice(&b[32..32 + len]);
         addrs.push(addr);

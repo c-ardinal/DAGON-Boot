@@ -33,6 +33,8 @@ export class Start {
   /** Whether the failure came from making (M35) or opening. */
   making = $state(false);
   recent = $state<ProjectRef[]>([]);
+  /** A folder with a 構成 but no dagon.toml: the band asks whether to make it there. */
+  asking = $state<string | null>(null);
 
   constructor(private readonly deps: StartDeps) {}
 
@@ -85,18 +87,34 @@ export class Start {
     await this.result(await this.deps.cli.newProject(inside(this.list.path, name), c === 'sample'), true);
   }
 
-  /** "開く" on a project folder (from the list, or a recent one). */
+  /** "開く" on a project folder, or one with only a 構成 (from the list, or a recent one). */
   async open(path: string): Promise<void> {
-    await this.result(await this.deps.cli.openProject(path), false);
+    this.asking = null;
+    const r = await this.deps.cli.openProject(path);
+    if (r === 'yaml') {
+      this.failed = null;
+      this.asking = path;
+      return;
+    }
+    await this.result(r, false);
+  }
+
+  /** The answer to "このフォルダに dagon.toml を作りますか。": yes makes it and opens the project. */
+  async init(yes: boolean): Promise<void> {
+    const path = this.asking;
+    this.asking = null;
+    if (!yes || path === null) return;
+    await this.result(await this.deps.cli.initProject(path), true);
   }
 
   private async result(r: ProjectResult, making: boolean): Promise<void> {
     this.making = making;
-    this.failed = r === 'opened' ? null : r;
+    this.failed = r === 'opened' || r === 'yaml' ? null : r;
     if (r === 'opened') await this.deps.opened();
   }
 
   clear(): void {
+    this.asking = null;
     this.choice = null;
     this.list = null;
     this.failed = null;

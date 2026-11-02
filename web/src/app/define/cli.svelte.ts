@@ -38,6 +38,8 @@ export interface ProjectInfo {
 export interface FsFolder {
   name: string;
   project: boolean;
+  /** A 構成 YAML but no dagon.toml: opening it asks to make dagon.toml there. */
+  yaml?: boolean;
 }
 
 /** GET /v1/fs: the folders of `path` (under home only; key folders left out). */
@@ -54,7 +56,16 @@ export interface FsList {
  * job runs (409), `exists` the folder is not empty (409 on new), `refused`
  * outside home or a key folder (403), `failed` anything else.
  */
-export type ProjectResult = 'opened' | 'missing' | 'key' | 'busy' | 'exists' | 'refused' | 'failed';
+/** `yaml`: the folder has a 構成 but no dagon.toml (serve's 428); POST /v1/project/init makes it. */
+export type ProjectResult = 'opened' | 'missing' | 'key' | 'busy' | 'exists' | 'refused' | 'yaml' | 'failed';
+
+/** GET/PUT /v1/layout: what the YAML does not hold, in a file beside it. */
+export interface Layout {
+  /** 呼び名 by node id. */
+  names?: Record<string, string>;
+  /** Editor positions by node id. */
+  positions?: Record<string, { x: number; y: number }>;
+}
 
 /** How saving the 構成 to the project's YAML went. */
 export type SaveResult = 'saved' | 'invalid' | 'busy' | 'failed';
@@ -313,6 +324,25 @@ export class Cli {
     return this.projectCall('project/new', { path, from_sample: sample }, true);
   }
 
+  /** POST /v1/project/init {path}: dagon.toml for the folder's 構成 (after the page asked); serve switches to it. */
+  initProject(path: string): Promise<ProjectResult> {
+    return this.projectCall('project/init', { path }, true);
+  }
+
+  /** GET /v1/layout (feature `layout`): the project's 呼び名 and positions; null when there are none yet. */
+  async loadLayout(): Promise<Layout | null> {
+    if (!this.has('layout')) return null;
+    const r = await this.call('GET', 'layout');
+    return r.ok ? ((await r.json()) as Layout) : null;
+  }
+
+  /** PUT /v1/layout: the whole layout file; false when serve did not take it. */
+  async saveLayout(layout: Layout): Promise<boolean> {
+    if (!this.has('layout')) return false;
+    const r = await this.call('PUT', 'layout', layout).catch(() => null);
+    return r?.ok ?? false;
+  }
+
   private async projectCall(path: string, body: unknown, making: boolean): Promise<ProjectResult> {
     let r: Response;
     try {
@@ -326,6 +356,7 @@ export class Cli {
       return 'opened';
     }
     if (r.status === 404) return 'missing';
+    if (r.status === 428) return 'yaml';
     if (r.status === 422) return 'key';
     if (r.status === 403) return 'refused';
     if (r.status !== 409) return 'failed';

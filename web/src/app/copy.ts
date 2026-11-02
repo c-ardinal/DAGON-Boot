@@ -714,6 +714,8 @@ export const START = {
   busy: { chip: '× 作業中', sentence: '作業が終わってから、もう一度選んでください。' },
   refused: { chip: '× 開けない', sentence: 'ホームフォルダの中のフォルダを選んでください。' },
   exists: { chip: '× 作れない', sentence: 'まだ無いフォルダの名前を入れてください。' },
+  /** S46: a folder with a 構成 but no dagon.toml. */
+  initAsk: 'このフォルダに dagon.toml を作りますか。',
 } as const;
 
 /** SC-M メニュー and its one confirmation (M53). */

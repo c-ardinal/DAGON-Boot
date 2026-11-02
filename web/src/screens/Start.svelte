@@ -1,6 +1,6 @@
 <script lang="ts">
   import { tick } from 'svelte';
-  import { BAND, BUTTON, CLI_LINK, START } from '../app/copy.ts';
+  import { BAND, BUTTON, CLI_LINK, MENU, START } from '../app/copy.ts';
   import { inside, type Start, type StartChoice } from '../app/start.svelte.ts';
 
   interface Props {
@@ -73,7 +73,7 @@
         <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
         <ul class="fs" bind:this={listEl} onkeydown={listKeys}>
           {#each list.folders as f (f.name)}
-            {@const opens = s.choice === 'open' && f.project}
+            {@const opens = s.choice === 'open' && (f.project || f.yaml === true)}
             <li>
               <button class="entry" class:opens onclick={() => void (opens ? s.open(inside(list.path, f.name)) : into(inside(list.path, f.name)))}
                 ><span class="kind" aria-hidden="true">{opens ? '·' : '▸'}</span><span translate="no">{f.name}</span>{#if f.project}<span class="tag">{START.project}</span>{/if}</button
@@ -110,12 +110,17 @@
   <div class="next">
     {#if !served && !s.usable('new')}
       <p>{CLI_LINK.needCli}</p>
+    {:else if s.asking}
+      <p>{START.initAsk}</p>
     {:else if fail}
       <span class="cause">{fail.chip}</span>
       <p>{fail.sentence}</p>
     {/if}
   </div>
-  {#if making && s.online}
+  {#if s.asking}
+    <button class="secondary" onclick={() => void s.init(false)}>{MENU.cancel}</button>
+    <button class="primary" onclick={() => void s.init(true)}>{START.open}<span class="arrow" aria-hidden="true">→</span></button>
+  {:else if making && s.online}
     <button class="primary" aria-disabled={!s.list || s.loading || !s.name.trim()} onclick={() => void s.make()}
       >{s.failed && s.making ? BUTTON.retrySample : s.choice === 'sample' ? START.sample : START.new}<span class="arrow" aria-hidden="true">→</span></button
     >

@@ -8,9 +8,6 @@ use core::fmt::Write as _;
 use dagon_format::Version;
 use dagon_proto::payload::{phase, Show, SHOW_TEXT_MAX};
 use embassy_futures::select::{select, Either};
-use embassy_rp::gpio::Output;
-use embassy_rp::peripherals::SPI1;
-use embassy_rp::spi::{Async, Spi};
 use embassy_time::{Duration, Timer};
 use embedded_graphics::mono_font::ascii::{FONT_10X20, FONT_6X10};
 use embedded_graphics::mono_font::{MonoFont, MonoTextStyle};
@@ -20,12 +17,13 @@ use embedded_graphics::primitives::{Arc, Circle, PrimitiveStyle, Rectangle};
 use embedded_graphics::text::{Alignment, Text};
 use heapless::String;
 
-use rp2040_common::arm::step;
+use dagon_mcu_rp2040::arm::step;
 
-use crate::gc9a01::{Frame, Panel};
+use crate::board::gc9a01::{Frame, Panel};
+use crate::board::DisplayPins as Pins;
 use crate::nodes::{SubNode, MAX_SUBS};
 use crate::state;
-use crate::wdt::{self, Task};
+use crate::{task, GUARD};
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum Shade {
@@ -109,14 +107,6 @@ const TEST_KEY_AT: Point = Point::new(120, 218);
 const HEARTBEAT_AT: Point = Point::new(117, 6);
 const HEARTBEAT: Duration = Duration::from_secs(1);
 
-pub struct Pins {
-    pub spi: Spi<'static, SPI1, Async>,
-    pub cs: Output<'static>,
-    pub dc: Output<'static>,
-    pub rst: Output<'static>,
-    pub backlight: Output<'static>,
-}
-
 /// The LCD task (lowest priority, thread mode). It alone owns SPI1 and the
 /// panel pins. It draws into the RAM frame and sends whole frames by DMA,
 /// so it never holds the CPU for long. The backlight goes on after the
@@ -125,7 +115,7 @@ pub struct Pins {
 /// pattern and the clock set-up for 3 s and a seconds counter.
 #[embassy_executor::task]
 pub async fn task(mut pins: Pins, frame: &'static mut Frame) {
-    wdt::busy(Task::Lcd);
+    GUARD.busy(task::LCD);
     let mut panel = Panel::new(pins.spi, pins.cs, pins.dc, pins.rst).await;
     let _ = frame.clear(Rgb565::BLACK);
     if cfg!(feature = "diag") {
@@ -133,9 +123,9 @@ pub async fn task(mut pins: Pins, frame: &'static mut Frame) {
         let _ = clock_info(frame);
         panel.flush(frame).await;
         pins.backlight.set_high();
-        wdt::idle(Task::Lcd);
+        GUARD.idle(task::LCD);
         Timer::after_secs(3).await;
-        wdt::busy(Task::Lcd);
+        GUARD.busy(task::LCD);
     }
     let mut shown = state::home();
     let _ = draw(frame, &shown);
@@ -143,9 +133,9 @@ pub async fn task(mut pins: Pins, frame: &'static mut Frame) {
     pins.backlight.set_high();
     let mut beat = false;
     loop {
-        wdt::idle(Task::Lcd);
+        GUARD.idle(task::LCD);
         let event = select(state::REDRAW.wait(), Timer::after(HEARTBEAT)).await;
-        wdt::busy(Task::Lcd);
+        GUARD.busy(task::LCD);
         if matches!(event, Either::Second(())) {
             state::expire_progress();
             beat = !beat;
@@ -256,7 +246,7 @@ fn draw<D: DrawTarget<Color = Rgb565>>(d: &mut D, home: &Home) -> Result<(), D::
         let style = MonoTextStyle::new(&FONT_6X10, Rgb565::WHITE);
         Text::with_alignment(shown, TOP_AT, style, Alignment::Center).draw(d)?;
     }
-    if crate::TEST_KEY {
+    if dagon_mcu_rp2040::TEST_KEY {
         // Built with the public test key: anyone can sign images for it.
         let style = MonoTextStyle::new(&FONT_10X20, RED);
         Text::with_alignment("TEST KEY", TEST_KEY_AT, style, Alignment::Center).draw(d)?;

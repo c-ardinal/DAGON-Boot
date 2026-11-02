@@ -1,0 +1,30 @@
+[package]
+name = "dagon-rp2040-stage0"
+edition = "2021"
+license = "MIT OR Apache-2.0"
+version = "0.0.0"
+publish = false
+
+# Standalone: built for thumbv6m only, so it stays out of the host workspace.
+# Its memory.x comes from dagon-mcu-rp2040 (`image-stage0`).
+[workspace]
+
+[features]
+# Backlight patterns at each step and on panic (bring-up diagnostics).
+diag = ["dagon-mcu-rp2040/diag-panic"]
+
+[dependencies]
+dagon-mcu-rp2040 = { path = "..", default-features = false, features = ["image-stage0"] }
+dagon-format = { path = "../../../../crates/dagon-format" }
+dagon-port = { path = "../../../../crates/dagon-port" }
+cortex-m = "0.7"
+cortex-m-rt = "0.7"
+rp2040-boot2 = "0.3"
+panic-halt = "1"
+
+[profile.release]
+opt-level = "z"
+lto = "fat"
+codegen-units = 1
+panic = "abort"
+debug = true

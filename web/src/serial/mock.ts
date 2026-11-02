@@ -110,6 +110,8 @@ export interface MockOptions {
   delayMs?: number;
   /** Nodes behind the hub that do not answer RELAY. */
   quiet?: DeviceKey[];
+  /** Devices that refuse the image at XFER_END with this status (0x07 E_FLASH, 0x09 E_SIGNATURE, ...). */
+  refuse?: Partial<Record<DeviceKey, number>>;
   /** Devices that come back on their previous version after REBOOT (the new one did not start). */
   fallBack?: DeviceKey[];
   /**
@@ -173,7 +175,7 @@ export class MockTransport implements Transport {
     if (this.opts.silent) return;
     const req = parseFrame(raw);
     const hub = this.devices.get('hub')!;
-    const body = req.cmd === CMD_RELAY ? await this.relay(req.payload) : await answer(hub, req.cmd, req.payload, this.fellBack('hub'));
+    const body = req.cmd === CMD_RELAY ? await this.relay(req.payload) : await answer(hub, req.cmd, req.payload, this.fellBack('hub'), this.opts.refuse?.hub);
     const resp = encodeFrame({ flags: FLAG_RESP, seq: req.seq, cmd: req.cmd, payload: body });
     // Only the hub's own HELLO waits, so the checking state shows without slowing a scan.
     setTimeout(() => this.queue.put(resp), req.cmd === CMD.HELLO ? (this.opts.delayMs ?? 0) : 0);
@@ -198,7 +200,7 @@ export class MockTransport implements Transport {
     const dev = key && !this.quiet.has(key) ? this.devices.get(key) : undefined;
     if (!key || !dev) return Uint8Array.of(STATUS_TIMEOUT);
     const inner = parseFrame(p.subarray(RELAY_HEAD_LEN));
-    const body = await answer(dev, inner.cmd, inner.payload, this.fellBack(key));
+    const body = await answer(dev, inner.cmd, inner.payload, this.fellBack(key), this.opts.refuse?.[key]);
     if (inner.cmd === CMD_REBOOT) this.reboots.push(key);
     const resp = encodeFrame({ flags: FLAG_RESP, seq: inner.seq, cmd: inner.cmd, payload: body });
     return withStatus(STATUS_OK, resp);
@@ -211,7 +213,7 @@ function helloOf(dev: Device): HelloResp {
 
 const SLOT_REVERTED = 5;
 
-async function answer(dev: Device, cmd: number, p: Uint8Array, fallBack: boolean): Promise<Uint8Array> {
+async function answer(dev: Device, cmd: number, p: Uint8Array, fallBack: boolean, refuse?: number): Promise<Uint8Array> {
   switch (cmd) {
     case CMD.HELLO:
       return withStatus(STATUS_OK, encodeHelloResp(helloOf(dev)));
@@ -224,6 +226,10 @@ async function answer(dev: Device, cmd: number, p: Uint8Array, fallBack: boolean
     case CMD_XFER_DATA:
       return chunk(dev, cmd, p);
     case CMD_XFER_END:
+      if (refuse !== undefined && dev.xfer?.target !== TARGET_TOPOLOGY) {
+        dev.xfer = null;
+        return Uint8Array.of(refuse);
+      }
       return end(dev);
     case CMD_SET_PENDING:
       if (dev.slots[p[1]]?.state !== SLOT_WRITTEN) return Uint8Array.of(STATUS_STATE);

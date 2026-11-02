@@ -125,15 +125,16 @@
     rebooting: NODE.rebooting,
     done: NODE.done,
     silent: NODE.silent,
+    refused: NODE.refusedOther,
     previous: NODE.previous,
     unwritten: NODE.unwritten,
   };
-  const chipOf = (stage: Progress['stage']): Chip => {
-    const chip = CHIP[stage];
-    return { chip, spoken: chip.slice(chip.indexOf(' ') + 1), silent: stage === 'silent' || stage === 'previous' };
+  const chipOf = ({ stage, reason }: Progress): Chip => {
+    const chip = (stage === 'refused' && reason && NODE.refused[reason]) || CHIP[stage];
+    return { chip, spoken: chip.slice(chip.indexOf(' ') + 1), silent: stage === 'silent' || stage === 'refused' || stage === 'previous' };
   };
   const updating = $derived(UPDATING.has(op.state));
-  const chips = $derived(updating ? Object.fromEntries(Object.entries(op.progress).map(([id, p]) => [id, chipOf(p.stage)])) : {});
+  const chips = $derived(updating ? Object.fromEntries(Object.entries(op.progress).map(([id, p]) => [id, chipOf(p)])) : {});
   const percent = $derived(
     ['L19', 'L20', 'L21', 'L22'].includes(op.state) ? Object.fromEntries(Object.entries(op.progress).map(([id, p]) => [id, p.percent])) : {},
   );

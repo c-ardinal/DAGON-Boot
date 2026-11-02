@@ -38,8 +38,10 @@ const UNKNOWN: Live = { responding: null, rttMs: null, lastSeen: null, hello: nu
 
 /** Where one node is in an update (the node chip and the update-order row). */
 export interface Progress {
-  stage: 'waiting' | 'writing' | 'rebooting' | 'done' | 'silent' | 'previous' | 'unwritten';
+  stage: 'waiting' | 'writing' | 'rebooting' | 'done' | 'silent' | 'refused' | 'previous' | 'unwritten';
   percent: number;
+  /** dagon-host's reason when the node refused (`E_FLASH`, `E_SIGNATURE`, ...). */
+  reason?: string;
 }
 
 /** The chosen release and dagon-host's verdict on it. */
@@ -389,13 +391,17 @@ export class Operate {
       this.alert = ANNOUNCE.A21timeout;
       return this.go('autoFailed');
     }
-    this.stopAt(n.id, stop.failure?.running != null ? 'previous' : 'silent');
+    const why = stop.failure;
+    if (why?.running != null) return this.stopAt(n.id, 'previous');
+    // dagon-host says NO ANSWER for a timeout, a RELAY timeout or a lost link.
+    if (!why || why.reason === 'NO ANSWER') return this.stopAt(n.id, 'silent');
+    this.stopAt(n.id, 'refused', why.reason);
   }
 
-  private stopAt(id: string, stage: 'previous' | 'silent'): void {
+  private stopAt(id: string, stage: 'previous' | 'silent' | 'refused', reason?: string): void {
     const n = this.config!.nodes.find((x) => x.id === id)!;
     this.failed = id;
-    this.progress[id] = { stage, percent: this.progress[id]?.percent ?? 0 };
+    this.progress[id] = { stage, percent: this.progress[id]?.percent ?? 0, reason };
     this.status = stage === 'previous' ? ANNOUNCE.A13previous(n.name) : ANNOUNCE.A13(n.name);
     this.go(this.state === 'L21' ? 'revertedOnReconnect' : 'nodeStuck');
     this.startWatching();

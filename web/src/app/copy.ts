@@ -165,6 +165,19 @@ export const NODE = {
   unwritten: '… 未書き込み',
   rebooting: '… 再起動中',
   previous: '↺ 前のバージョン',
+  /**
+   * A node that answered and refused the update, by dagon-host's reason (the
+   * last-reason words of the detail where they exist). No answer stays
+   * `silent`; a node back on its previous version is `previous`.
+   */
+  refused: {
+    E_SIGNATURE: '× 配布元を確認できない',
+    E_KEY: '× 配布元を確認できない',
+    E_DIGEST: '× 中身の破損',
+    E_COMPAT: '× 別の機種向け',
+    E_FLASH: '× 書き込めない',
+  } as Record<string, string>,
+  refusedOther: '× 受け付けない',
   /** W7: full spoken state of a chip. */
   respondingName: '応答あり',
   silentName: '応答なし、2 回続けて返事がない',

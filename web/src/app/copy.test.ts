@@ -81,7 +81,7 @@ describe('copy', () => {
   test('chips are a symbol and a short word, never a sentence', () => {
     const { responding, silent, trial, writing, waiting, done, unwritten, rebooting, previous } = copy.NODE;
     const { sourceOk, sourceBad, topologyOk, topologyBad, notRelease } = copy.FILE;
-    const chips = [responding, silent, trial, writing, waiting, done, unwritten, rebooting, previous, sourceOk, sourceBad, topologyOk, topologyBad, notRelease, ...Object.values(copy.HUB)];
+    const chips = [responding, silent, trial, writing, waiting, done, unwritten, rebooting, previous, ...Object.values(copy.NODE.refused), copy.NODE.refusedOther, sourceOk, sourceBad, topologyOk, topologyBad, notRelease, ...Object.values(copy.HUB)];
     for (const c of chips) {
       expect(c, c).toMatch(/^(?:[●○×…↑↺✓▲◎]|▼▼) \S/);
       expect(c, c).not.toMatch(/ます|ました|。/);

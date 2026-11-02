@@ -4,7 +4,7 @@ import type { LinkClock } from '../serial/hostLink.ts';
 import { MockTransport, type MockOptions } from '../serial/mock.ts';
 import { versionText } from '../wasm/dagon.ts';
 import { bandOf } from './band.ts';
-import { ANNOUNCE, BAND, BAND_FOR } from './copy.ts';
+import { ANNOUNCE, BAND, BAND_FOR, NODE } from './copy.ts';
 import { Operate } from './operate.svelte.ts';
 import { DESK_DEMO } from './sample.ts';
 
@@ -141,6 +141,20 @@ describe('update from the page with dagon-host apply against the mock hub', () =
     expect(op.progress).toMatchObject({ seg: { stage: 'silent' }, watch: { stage: 'unwritten' }, hub: { stage: 'unwritten' } });
     expect(op.status).toBe(ANNOUNCE.A13('7セグ'));
     expect(bandOf(op.state, op.ctx, { stuck: '7セグ', unwritten: 2 })).toMatchObject(BAND_FOR.M29('7セグ'));
+    expect(t.reboots).toEqual([]);
+  }, 60_000);
+
+  test.each([
+    [0x07, 'E_FLASH', '× 書き込めない'],
+    [0x09, 'E_SIGNATURE', '× 配布元を確認できない'],
+  ])('a node that refuses (status %i) is shown with its reason, not as not answering', async (status, reason, chip) => {
+    const { t, op } = await sentTo({ refuse: { 'i2c:66': status } });
+    op.takeFile('desk-1.1.0.dgb', RELEASE);
+    await op.update();
+    expect([op.state, op.failed]).toEqual(['L22', 'seg']);
+    expect(op.progress.seg).toMatchObject({ stage: 'refused', reason });
+    expect(NODE.refused[reason]).toBe(chip);
+    expect(op.progress).toMatchObject({ watch: { stage: 'unwritten' }, hub: { stage: 'unwritten' } });
     expect(t.reboots).toEqual([]);
   }, 60_000);
 

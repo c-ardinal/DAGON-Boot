@@ -312,20 +312,11 @@ impl<T: Transport, C: Clock> Host<T, C> {
         on_event: &mut dyn FnMut(Event),
     ) -> Result<Version, T::Error> {
         let st = self.status(to).await?.status;
-        let other = match st.active {
-            0 => 1,
-            1 => 0,
-            _ => return Err(Error::NoPreviousVersion),
-        };
-        let s = st.slots[other as usize];
-        // Confirmed (we run on trial) or Written (confirmed before the
-        // running slot took over); never a Reverted or untried image.
-        if !matches!(s.state, SlotState::Confirmed | SlotState::Written) {
-            return Err(Error::NoPreviousVersion);
-        }
-        self.switch_and_confirm(to, other, s.version, node, on_event)
+        let other = rollback_slot(&st).ok_or(Error::NoPreviousVersion)?;
+        let v = st.slots[other as usize].version;
+        self.switch_and_confirm(to, other, v, node, on_event)
             .await?;
-        Ok(s.version)
+        Ok(v)
     }
 
     /// Rewrites topology node `node` from the release. A node that answers
@@ -360,6 +351,9 @@ impl<T: Transport, C: Clock> Host<T, C> {
         let boot = a.bootcore.ok_or(Error::NoImage { node })?;
         crate::rom::check_bootcore(boot, a.pubkey)?;
         let app = image_for(&b, node, slot_binding::A).ok_or(Error::NoImage { node })?;
+        if app.len() > crate::rom::F401_APP_A_LEN {
+            return Err(Error::Format(dagon_format::FormatError::BadField));
+        }
         let app_hdr: &[u8; HEADER_SIZE] = app[..HEADER_SIZE].try_into().expect("verified");
         let v = ImageHeader::parse(app_hdr)?.version;
         let log = crate::rom::initial_log(app_hdr)?;
@@ -415,11 +409,7 @@ impl<T: Transport, C: Clock> Host<T, C> {
         let begin_wait = if hdr.is_empty() { erase } else { REQUEST_MS };
         self.call(to, Cmd::XferBegin, &p[..n], begin_wait).await?;
 
-        let chunk = (hello.max_payload as usize)
-            .min(to.link_max())
-            .checked_sub(CHUNK_HEAD)
-            .filter(|&c| c > 0)
-            .ok_or(Error::BadResponse)?;
+        let chunk = chunk_len(hello.max_payload, to.link_max()).ok_or(Error::BadResponse)?;
         let hdr_chunks = hdr.len().div_ceil(chunk);
         for (i, c) in hdr.chunks(chunk).enumerate() {
             let wait = if i + 1 == hdr_chunks {
@@ -506,6 +496,31 @@ impl<T: Transport, C: Clock> Host<T, C> {
         };
         let _ = self.call(Target::Hub, Cmd::Show, &p[..n], REQUEST_MS).await;
     }
+}
+
+/// XFER data bytes per chunk for a peer announcing `max_payload` on a link
+/// carrying `link_max`; `None` when not even one byte fits.
+fn chunk_len(max_payload: u16, link_max: usize) -> Option<usize> {
+    (max_payload as usize)
+        .min(link_max)
+        .checked_sub(CHUNK_HEAD)
+        .filter(|&c| c > 0)
+}
+
+/// The slot rollback returns to: the other slot, Confirmed (we run on
+/// trial) or Written (confirmed before the running slot took over); never a
+/// Reverted, pending or empty one.
+fn rollback_slot(st: &StatusResp) -> Option<u8> {
+    let other = match st.active {
+        0 => 1u8,
+        1 => 0,
+        _ => return None,
+    };
+    let ok = matches!(
+        st.slots[other as usize].state,
+        SlotState::Confirmed | SlotState::Written
+    );
+    ok.then_some(other)
 }
 
 /// Release `bundle` verified under `pubkey` and built for `topology`.
@@ -625,4 +640,41 @@ fn image_for<'a>(b: &BundleView<'a>, node: u8, slot: u8) -> Option<&'a [u8]> {
             && (e.slot_binding == slot || e.slot_binding == slot_binding::ANY);
         fits.then(|| b.item_bytes(i))
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn chunk_len_needs_room_for_one_byte() {
+        assert_eq!(chunk_len(0, 256), None);
+        assert_eq!(chunk_len(4, 256), None);
+        assert_eq!(chunk_len(5, 256), Some(1));
+        assert_eq!(chunk_len(1088, 256), Some(252), "link limit wins");
+    }
+
+    #[test]
+    fn rollback_only_to_a_previously_confirmed_slot() {
+        let with = |active, other: SlotState| {
+            let mut st = StatusResp {
+                active,
+                confirmed: active,
+                ..Default::default()
+            };
+            st.slots[(1 - active.min(1)) as usize].state = other;
+            rollback_slot(&st)
+        };
+        assert_eq!(with(1, SlotState::Written), Some(0));
+        assert_eq!(with(0, SlotState::Confirmed), Some(1));
+        for bad in [
+            SlotState::Reverted,
+            SlotState::Empty,
+            SlotState::Pending,
+            SlotState::Trying,
+        ] {
+            assert_eq!(with(1, bad), None, "{bad:?}");
+        }
+        assert_eq!(with(0xFF, SlotState::Written), None, "nothing running");
+    }
 }

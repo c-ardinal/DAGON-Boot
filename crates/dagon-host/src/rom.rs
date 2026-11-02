@@ -65,6 +65,9 @@ pub fn check_bootcore(img: &[u8], pubkey: &[u8; 32]) -> Result<ImageHeader, Form
     Ok(h)
 }
 
+/// APP-A is sector 5 (128 KiB): header and payload must fit it.
+pub const F401_APP_A_LEN: usize = 0x2_0000;
+
 /// Bodies first, then headers, then the state log.
 pub fn f401_regions<'a>(boot: &'a [u8], app: &'a [u8], log: &'a [u8]) -> [Region<'a>; 5] {
     let (bh, bb) = boot.split_at(HEADER_SIZE);

@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { CLI_NONE, HELP, HUB, HUB_NAME, ORDER, PRODUCT, STEP } from '../app/copy.ts';
+  import { CLI_NONE, HELP, HUB, HUB_NAME, MODE, ORDER, PRODUCT, STEP } from '../app/copy.ts';
   import type { HubState, Step } from '../app/machine.ts';
 
   interface Props {
@@ -10,30 +10,57 @@
     drawerOpen: boolean;
     ondrawer: () => void;
     drawerButton?: HTMLButtonElement;
+    mode?: 'operate' | 'define';
+    onmode?: (m: 'operate' | 'define') => void;
+    /** Switching is held while an update or recovery runs (C10). */
+    modeLocked?: boolean;
+    /** Define mode: the configuration on the canvas was sent to the hub (S24). */
+    sent?: boolean;
+    /** The CLI link (K0–K3). */
+    cliLabel?: string;
+    /** 運用 cannot be entered yet: no 構成 held by the 親機. */
+    operateLocked?: boolean;
   }
 
-  let { step, hub, drawer, drawerOpen, ondrawer, drawerButton = $bindable() }: Props = $props();
+  let { step, hub, drawer, drawerOpen, ondrawer, drawerButton = $bindable(), mode = 'operate', onmode, modeLocked = false, sent = false, cliLabel = CLI_NONE, operateLocked = false }: Props = $props();
+  const off = (m: 'operate' | 'define') => (modeLocked && mode !== m) || (m === 'operate' && operateLocked && mode !== m);
   let helpOpen = $state(false);
 </script>
 
 <header>
   <span class="product" translate="no">{PRODUCT}</span>
+  {#if onmode}
+    <div class="modes" role="radiogroup" aria-label={MODE.label}>
+      {#each [['operate', MODE.operate], ['define', MODE.define]] as const as [m, label] (m)}
+        <button
+          role="radio"
+          aria-checked={mode === m}
+          aria-disabled={off(m)}
+          aria-describedby={m === 'operate' && operateLocked ? 'operate-locked' : undefined}
+          onclick={() => !off(m) && mode !== m && onmode(m)}>{label}</button
+        >
+      {/each}
+    </div>
+    {#if operateLocked && mode === 'define'}<span id="operate-locked" class="locked">{MODE.operateLocked}</span>{/if}
+  {/if}
   {#if drawer}
     <button class="secondary" aria-expanded={drawerOpen} aria-controls="drawer" bind:this={drawerButton} onclick={ondrawer}>{ORDER.heading}</button>
   {/if}
   <ol class="steps">
-    {#if step !== null}
+    {#if mode === 'define'}
+      <!-- 定義 has no steps; the 構成 file is the source of truth (owner 11/3). -->
+    {:else if step !== null}
       <li aria-current="step">
-        {#if step === 'recover'}
+        {#if STEP.of3(step) === 'recover'}
           {STEP.names.recover}
         {:else}
-          {STEP.label} <span class="step-n">{String(step).padStart(2, '0')}{STEP.of}</span>&ensp;{STEP.names[step]}
+          {STEP.label} <span class="step-n">{String(STEP.of3(step)).padStart(2, '0')}{STEP.of}</span>&ensp;{STEP.names[STEP.of3(step)]}
         {/if}
       </li>
     {/if}
   </ol>
   <span class="hub" aria-label={HUB_NAME[hub]}>{HUB[hub]}</span>
-  <span class="cli">{CLI_NONE}</span>
+  <span class="cli">{cliLabel}</span>
   <button class="secondary" aria-expanded={helpOpen} aria-controls="help" onclick={() => (helpOpen = !helpOpen)}>{HELP.heading}</button>
 </header>
 
@@ -56,6 +83,37 @@
 </section>
 
 <style>
+  .modes {
+    display: flex;
+    padding: 3px;
+    border: 1px solid var(--c-line);
+    border-radius: var(--r-full);
+  }
+  .modes button {
+    padding: var(--s-1) var(--s-4);
+    border: 0;
+    border-radius: var(--r-full);
+    background: none;
+    color: var(--c-paper);
+    font: 700 var(--t-body-size) / var(--t-body-lh) var(--f-ja);
+    cursor: pointer;
+  }
+  .modes button[aria-checked='true'] {
+    background: var(--c-paper);
+    color: var(--c-ink);
+  }
+  .locked {
+    color: var(--c-muted);
+    font: 400 var(--t-small-size) / var(--t-small-lh) var(--f-ja);
+  }
+  .modes button[aria-disabled='true'] {
+    opacity: 0.4;
+    cursor: not-allowed;
+  }
+  .modes button:focus-visible {
+    outline: 3px solid var(--c-paper);
+    outline-offset: 2px;
+  }
   header {
     grid-area: header;
     display: flex;

@@ -14,7 +14,6 @@ npm run wasm      # build crates/dagon-wasm into src/wasm/pkg (needs DAGON_PUBKE
 npm run dev       # http://127.0.0.1:5173
 npm run build     # svelte-check, then vite build into dist/ (target chrome89)
 npm run preview   # serves dist/ on http://127.0.0.1:4173
-npm run site      # after build: prepares the public site in dist/ (does not publish; see below)
 npm test          # Vitest
 npm run fonts     # re-fetch the font subsets after screen text changes
 ```
@@ -75,16 +74,6 @@ Without it `npm run wasm` and `npm run build` stop. `npm test` and `npm run dev`
 `DAGON_ALLOW_TEST_KEY=1` and the `sim` feature (`npm run wasm:dev`): when `DAGON_PUBKEY` is unset
 they use the public RFC 8032 test key, which the stand-in hubs' release (`crates/dagon-sim/fixtures`)
 is signed with, and the build warns. `npm run build` leaves the simulated desk out.
-
-## Public site (prepared, not published)
-
-The page fetches its release and boot core next to itself: `release/latest.dgb` ("配布中の最新バージョンを使う",
-and recovery when no file is on the screen) and `release/<node>-bootcore.img` (the F401 ROM path).
-`npm run site -- [--release <dgb>] [--bootcore <img>]` (defaults `out/release-latest.dgb` and
-`out/provision/seg/bootcore.img`) checks both with the dagon-wasm the page was built with and writes
-the five targets into `dist/`: the page, `release/latest.dgb`, `release/seg-bootcore.img`,
-`sample/desk-demo.yaml` and `sample/desk-demo.bin` (its canonical binary), printing their SHA-256.
-Uploading `dist/` anywhere needs the owner's go-ahead for each publication.
 
 ## Web Serial on http://127.0.0.1
 

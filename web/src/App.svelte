@@ -1,13 +1,22 @@
 <script lang="ts">
   import { tick } from 'svelte';
   import { bandOf } from './app/band.ts';
-  import { BUTTON, CANVAS, NODE, ORDER, PRODUCT, SKIP, STEP } from './app/copy.ts';
+  import { ANNOUNCE, BUTTON, CANVAS, DEFINE, NODE, ORDER, PRODUCT, SKIP, STEP } from './app/copy.ts';
   import { chooseAndOpen } from './app/connect.ts';
   import { hubOf, view, type Action } from './app/machine.ts';
   import { Operate, type Progress } from './app/operate.svelte.ts';
   import Graph, { type Chip, type Dot } from './graph/Graph.svelte';
   import Band from './screens/Band.svelte';
   import Detail from './screens/Detail.svelte';
+  import { Define } from './app/define/define.svelte.ts';
+  import { fromYaml } from './app/define/model.ts';
+  import Inspector from './screens/define/Inspector.svelte';
+  import NodeList from './screens/define/NodeList.svelte';
+  import Problems from './screens/define/Problems.svelte';
+  import Table from './screens/define/Table.svelte';
+  import CliPanel from './screens/define/CliPanel.svelte';
+  import { Cli } from './app/define/cli.svelte.ts';
+  import { CLI_LINK, CLI_STATE } from './app/copy.ts';
   import FilePanel from './screens/FilePanel.svelte';
   import Reconnect from './screens/Reconnect.svelte';
   import Header from './screens/Header.svelte';
@@ -16,7 +25,7 @@
   import { MockTransport } from './serial/mock.ts';
   import { WebSerialTransport, type Transport } from './serial/transport.ts';
   import Unsupported from './Unsupported.svelte';
-  import { dagonReady } from './wasm/dagon.ts';
+  import { dagonReady, require_release_key, set_release_key } from './wasm/dagon.ts';
 
   const params = new URLSearchParams(location.search);
   // The stand-in hubs are for development builds only.
@@ -47,6 +56,102 @@
     timer: true,
     clock: stand?.clock,
     fetchAsset: stand?.fetchAsset,
+  });
+
+  /** `dagon serve` (stage 3): K0 on a public page, its features on the page serve hands out. */
+  const cli = new Cli();
+  cli.onDevice = (need) => (need ? op.handOver() : op.cliReturned());
+  /**
+   * The release key: dagon serve writes the developer's key into the page (meta) and /v1/hello;
+   * a page it serves verifies with that key only, and with none until it is there. A standalone
+   * build keeps the key it was built with.
+   */
+  void cli.connect().then(async () => {
+    await dagonReady();
+    if (cli.state === 'none') return;
+    // Under serve the page opens the project's 構成 (dagon.toml's topology) at start.
+    const yaml = await cli.loadTopology();
+    if (yaml) d.importYaml(yaml);
+    require_release_key();
+    const key = document.querySelector<HTMLMetaElement>('meta[name="dagon-release-key"]')?.content ?? cli.hello?.release_key;
+    if (key) set_release_key(key);
+  }).catch(() => undefined);
+  const cliLabel = $derived(cli.state === 'ready' ? CLI_STATE.ready(cli.hello?.cli ?? '') : CLI_STATE[cli.state]);
+  let cliPanel = $state<'link' | 'jobs' | 'release' | 'project' | 'flash' | null>(null);
+  const runningJobs = $derived(cli.jobs.filter((j) => j.state === 'running' || j.state === 'queued' || j.state === 'question').length);
+  $effect(() => {
+    if (d.selected) cliPanel = null;
+  });
+
+  /** "このリリースを運用で使う" (X03): the release goes to the operate mode's file check. */
+  function useRelease(name: string, bytes: Uint8Array) {
+    switchMode('operate');
+    op.takeFile(name, bytes);
+  }
+
+  /** 運用 / 定義 (§5). The define document goes to the operate canvas when leaving define mode. */
+  // The page opens on 定義: 運用 needs a 構成 the 親機 holds (owner decision 11/3).
+  let mode = $state<'operate' | 'define'>('define');
+  const d = new Define();
+  const busyStates = ['L19', 'L20', 'L21', 'L22', 'L24'];
+  const modeLocked = $derived(busyStates.includes(op.state));
+
+  function switchMode(m: 'operate' | 'define') {
+    if (m === 'define' && d.doc.topo.nodes.length === 0 && op.config) {
+      d.apply(fromYaml(op.config.yaml, Object.fromEntries(op.config.nodes.map((n) => [n.id, n.name]))));
+    }
+    if (m === 'operate' && d.doc.topo.nodes.length) op.useConfig(d.config);
+    mode = m;
+    d.status = ANNOUNCE.A22(m === 'define');
+  }
+
+  /** "親機へ送る" / "つないで、親機へ送る" from define mode: the operate session sends the document. */
+  async function sendDefined() {
+    op.useConfig(d.config);
+    if (!connected) await op.connect();
+    if (connected && op.config) await op.push();
+  }
+
+  /** "保存": the 構成 back into the project's YAML through dagon serve (the page always runs under it). */
+  async function save() {
+    if (cli.state === 'ready') await cli.saveTopology(d.exportYaml().text);
+  }
+
+  /** Define mode's drawing scale: up to 32 ノード fit by zooming out; the canvas scrolls to pan. */
+  let zoom = $state(1);
+
+  /** Ctrl+Z / Ctrl+Shift+Z anywhere but in a field; Delete and L on the canvas (§12.2). */
+  function defineKeys(e: KeyboardEvent) {
+    if (mode !== 'define') return;
+    const el = e.target as HTMLElement;
+    const field = /^(INPUT|SELECT|TEXTAREA)$/.test(el.tagName);
+    const z = e.key.toLowerCase() === 'z' && (e.ctrlKey || e.metaKey);
+    if (z && !field) {
+      e.preventDefault();
+      return e.shiftKey ? d.redo() : d.undo();
+    }
+    if (field || !el.closest('#canvas')) return;
+    if (e.key === 'Delete') {
+      e.preventDefault();
+      d.removeSelected();
+    } else if (e.key === 'l' || e.key === 'L') {
+      d.focusField = 'connect';
+      d.focusRequest++;
+    }
+  }
+
+  const defineChips = $derived(
+    Object.fromEntries(
+      d.problems
+        .filter((p) => p.select?.startsWith('node:'))
+        .map((p) => [p.select!.slice(5), { chip: `${p.severity === 'warning' ? '▲' : '!'} ${p.short}`, spoken: p.short, silent: p.severity === 'error' }]),
+    ),
+  );
+  const defineDot = $derived({
+    label: DEFINE.dotNodes,
+    value: d.doc.topo.nodes.length,
+    sub: [DEFINE.dotLinks, d.doc.topo.links?.length ?? 0] as const,
+    name: DEFINE.dotNodesName(d.doc.topo.nodes.length, d.doc.topo.links?.length ?? 0),
   });
 
   serial?.addEventListener('disconnect', (e) => {
@@ -216,7 +321,8 @@
 
   $effect(() => {
     const s = step;
-    document.title = s === null || s === 'recover' ? PRODUCT : `${String(s).padStart(2, '0')} ${STEP.of} ${STEP.names[s]}｜${PRODUCT}`;
+    const s3 = s === null ? null : STEP.of3(s);
+    document.title = s3 === null || s3 === 'recover' ? PRODUCT : `${String(s3).padStart(2, '0')} ${STEP.of} ${STEP.names[s3]}｜${PRODUCT}`;
   });
 
   // Focus follows the band only after a user action changed it, never on load.
@@ -260,11 +366,108 @@
   }
 </script>
 
+{#snippet defineLeft()}
+  <NodeList
+    {d}
+    onconnect={() => void op.connect()}
+    panel={cliPanel}
+    onpanel={(p) => {
+      d.selected = null;
+      cliPanel = p as typeof cliPanel;
+    }}
+    running={runningJobs}
+    cliReady={cli.state === 'ready'}
+  />
+{/snippet}
+
+{#snippet defineCanvas()}
+  <main id="canvas" tabindex="-1" aria-describedby="canvas-help" class="define">
+    <p id="canvas-help" class="visually-hidden">{CANVAS.describe}</p>
+    <div class="toolbar">
+      <button class="secondary" aria-disabled={!d.canUndo} onclick={() => d.undo()}>{DEFINE.undo}</button>
+      <button class="secondary" aria-disabled={!d.canRedo} onclick={() => d.redo()}>{DEFINE.redo}</button>
+      <div class="seg" role="radiogroup" aria-label="{DEFINE.graph}・{DEFINE.table}">
+        <button role="radio" aria-checked={d.view === 'graph'} onclick={() => (d.view = 'graph')}>{DEFINE.graph}</button>
+        <button role="radio" aria-checked={d.view === 'table'} onclick={() => (d.view = 'table')}>{DEFINE.table}</button>
+      </div>
+      <button class="secondary" aria-disabled={zoom <= 0.5} onclick={() => (zoom = Math.max(0.5, zoom - 0.25))}>{DEFINE.zoomOut}</button>
+      <button class="secondary" aria-disabled={zoom >= 1.5} onclick={() => (zoom = Math.min(1.5, zoom + 0.25))}>{DEFINE.zoomIn}</button>
+    </div>
+    {#if d.view === 'graph'}
+      <Graph
+        config={d.doc.topo.nodes.length ? d.config : null}
+        live={{}}
+        connected={false}
+        sending={false}
+        selected={d.selected}
+        onselect={(k) => (d.selected = d.selected === k ? null : k)}
+        dot={defineDot}
+        chips={defineChips}
+        {zoom}
+      />
+    {:else}
+      <Table {d} onaddnode={() => document.querySelector<HTMLElement>('#list-h')?.focus()} />
+    {/if}
+  </main>
+{/snippet}
+
+{#snippet defineRight()}
+  <aside class="right">
+    {#if cliPanel}
+      <CliPanel {cli} {d} panel={cliPanel} onuse={useRelease} />
+    {:else if d.selected}
+      <Inspector {d} />
+    {:else}
+      <Problems {d} />
+    {/if}
+  </aside>
+{/snippet}
+
+{#snippet defineBottom()}
+  {@const empty = d.doc.topo.nodes.length === 0}
+  {@const firstError = d.problems.find((p) => p.severity === 'error')}
+  <footer id="band" class="dband" tabindex="-1">
+    <div class="next">
+      {#if cli.state !== 'ready'}
+        <p>{CLI_LINK.needCli}</p>
+      {:else if d.unreadable}
+        <span class="cause">{DEFINE.unreadableChip}</span>
+        <p>{DEFINE.unreadableSentence}</p>
+      {:else if empty}
+        <p>{DEFINE.startSentence}</p>
+      {:else if firstError}
+        <p>{DEFINE.fixSentence}</p>
+      {/if}
+    </div>
+    {#if empty}
+      <button class="primary" onclick={() => d.placeSample()}>{DEFINE.fromSample}<span class="arrow" aria-hidden="true">→</span></button>
+    {:else}
+      <button class="secondary" aria-disabled={cli.state !== 'ready'} onclick={() => void save()}>{DEFINE.save}</button>
+      {#if !firstError}
+        <!-- Optional: updating sends the 構成 before it updates (owner 11/3). -->
+        <button class="secondary" onclick={() => void sendDefined()}>{connected ? DEFINE.send : DEFINE.connectSend}</button>
+      {:else}
+        <button class="primary" onclick={() => d.fix(firstError)}>{DEFINE.fix}<span class="arrow" aria-hidden="true">→</span></button>
+      {/if}
+    {/if}
+    <div class="visually-hidden" role="status">{d.status || op.status}</div>
+    <div class="visually-hidden" role="alert">{op.alert}</div>
+  </footer>
+{/snippet}
+
 {#snippet left()}
+  {#if mode === 'define'}{@render defineLeft()}{:else}{@render operateLeft()}{/if}
+{/snippet}
+
+{#snippet operateLeft()}
   <OrderList config={op.config} selected={op.selected} onselect={(k) => op.select(k)} fold={layout === 'narrow'} {percent} />
 {/snippet}
 
 {#snippet canvas()}
+  {#if mode === 'define'}{@render defineCanvas()}{:else}{@render operateCanvas()}{/if}
+{/snippet}
+
+{#snippet operateCanvas()}
   <main id="canvas" tabindex="-1" aria-describedby="canvas-help">
     <p id="canvas-help" class="visually-hidden">{CANVAS.describe}</p>
     <Graph
@@ -281,6 +484,10 @@
 {/snippet}
 
 {#snippet right()}
+  {#if mode === 'define'}{@render defineRight()}{:else}{@render operateRight()}{/if}
+{/snippet}
+
+{#snippet operateRight()}
   <aside class="right">
     {#if showFile && op.file}
       <FilePanel file={op.file} targets={op.targets.length} />
@@ -300,6 +507,10 @@
 {/snippet}
 
 {#snippet bottom()}
+  {#if mode === 'define'}{@render defineBottom()}{:else}{@render operateBottom()}{/if}
+{/snippet}
+
+{#snippet operateBottom()}
   <Band {band} busy={op.state === 'L03'} available={(a) => RUNS.has(a)} status={op.status} alert={op.alert} onaction={act} bind:primaryEl bind:nextEl />
 {/snippet}
 
@@ -310,7 +521,20 @@
   <a class="skip" href="#band">{SKIP.next}</a>
   <!-- The DOM follows the visual order of each layout, so Tab order matches what is seen. -->
   <div class="frame {layout}" class:open={drawerOpen}>
-    <Header {step} {hub} drawer={layout === 'drawer'} {drawerOpen} ondrawer={() => (drawerOpen ? closeDrawer() : openDrawer())} bind:drawerButton />
+    <Header
+      {step}
+      {hub}
+      drawer={layout === 'drawer'}
+      {drawerOpen}
+      ondrawer={() => (drawerOpen ? closeDrawer() : openDrawer())}
+      bind:drawerButton
+      {mode}
+      onmode={switchMode}
+      {modeLocked}
+      sent={op.sent && op.config?.yaml === d.config.yaml}
+      {cliLabel}
+      operateLocked={d.doc.topo.nodes.length === 0 || d.errors > 0}
+    />
     {#if layout === 'narrow'}
       {@render bottom()}
       {@render canvas()}
@@ -344,7 +568,57 @@
   {/if}
 {/if}
 
+<svelte:window onkeydown={defineKeys} />
+
 <style>
+  main.define {
+    grid-template-rows: auto minmax(0, 1fr);
+  }
+  .toolbar {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--s-3);
+    padding: var(--s-3) var(--s-5);
+    border-bottom: 1px solid var(--c-line);
+  }
+  .seg {
+    display: flex;
+    border: 1px solid var(--c-line);
+    border-radius: var(--r-s);
+  }
+  .seg button {
+    padding: 0 var(--s-4);
+    border: 0;
+    background: none;
+    color: var(--c-paper);
+    font: 700 var(--t-small-size) / 2.5rem var(--f-ja);
+    cursor: pointer;
+  }
+  .seg button[aria-checked='true'] {
+    background: var(--c-paper);
+    color: var(--c-ink);
+  }
+  .dband {
+    grid-area: band;
+    display: flex;
+    align-items: center;
+    gap: var(--s-4);
+    min-height: var(--h-band);
+    padding: 0 var(--s-5);
+    border-top: 1px solid var(--c-line);
+  }
+  .dband .next {
+    display: flex;
+    align-items: baseline;
+    gap: var(--s-2);
+    margin-right: auto;
+  }
+  .dband .next p {
+    margin: 0;
+  }
+  .dband .cause {
+    font: 700 var(--t-heading-size) / var(--t-heading-lh) var(--f-ja);
+  }
   .skip {
     position: absolute;
     left: var(--s-4);

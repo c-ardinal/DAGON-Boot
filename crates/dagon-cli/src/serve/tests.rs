@@ -32,7 +32,11 @@ fn start(name: &str) -> Area {
         "# work area\ntopology = \"topology/t.yaml\"\n\n[build.seg]\npackage = \"targets/f401-app\"\n",
     )
     .unwrap();
-    std::fs::write(dir.join("web/index.html"), "<!doctype html><p>page").unwrap();
+    std::fs::write(
+        dir.join("web/index.html"),
+        "<!doctype html><head></head><p>page",
+    )
+    .unwrap();
     let listener = TcpListener::bind(("127.0.0.1", 0)).unwrap();
     let port = listener.local_addr().unwrap().port();
     let server = Server::new(
@@ -41,6 +45,7 @@ fn start(name: &str) -> Area {
         Some(dir.join("dagon.toml")),
         dir.join("web"),
     );
+    server.set_release_key([7; 32]);
     let s = server.clone();
     std::thread::spawn(move || super::serve(listener, s));
     Area { dir, server }
@@ -105,7 +110,14 @@ fn host_origin_and_passphrase_are_enforced() {
     assert_eq!(http(&a, "GET", "/v1/hello", &own, b"").0, 200);
     // The page itself needs no passphrase; nothing outside it is served.
     let (st, body) = http(&a, "GET", "/", &[], b"");
-    assert_eq!((st, body.as_str()), (200, "<!doctype html><p>page"));
+    let meta = format!(
+        "<meta name=\"dagon-release-key\" content=\"{}\">",
+        "07".repeat(32)
+    );
+    assert_eq!(
+        (st, body),
+        (200, format!("<!doctype html><head>{meta}</head><p>page"))
+    );
     assert_eq!(http(&a, "GET", "/../dagon.toml", &[], b"").0, 404);
 }
 
@@ -409,4 +421,596 @@ fn concurrent_build_setting_writes_all_land() {
         );
     }
     assert!(text.starts_with("# work area"));
+}
+
+#[test]
+fn the_page_carries_the_release_key_given_at_start() {
+    let a = start("relkey");
+    let (_, body) = http(&a, "GET", "/v1/hello", &[("Authorization", &auth(&a))], b"");
+    let v: serde_json::Value = serde_json::from_str(&body).unwrap();
+    assert_eq!(v["release_key"], "07".repeat(32));
+    // Non-HTML files are served as they are.
+    std::fs::write(a.dir.join("web/app.js"), "x()").unwrap();
+    assert_eq!(http(&a, "GET", "/app.js", &[], b"").1, "x()");
+}
+
+#[test]
+fn without_a_release_key_no_page_is_served() {
+    let dir = std::env::temp_dir().join(format!("dagon-serve-nokey-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(dir.join("index.html"), "<head></head>").unwrap();
+    let server = Server::new("p".repeat(32), 1, None, dir.clone());
+    assert!(super::api::page_file(&server, "/").is_none());
+    server.set_release_key([1; 32]);
+    assert!(super::api::page_file(&server, "/").is_some());
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn targets_lists_the_generated_node_crates() {
+    let a = start("nodes");
+    std::fs::create_dir_all(a.dir.join("nodes/seg")).unwrap();
+    std::fs::write(
+        a.dir.join("nodes/seg/Cargo.toml"),
+        "[package]
+name = \"seg\"
+[features]
+slot-b = []
+",
+    )
+    .unwrap();
+    let (st, body) = http(
+        &a,
+        "GET",
+        "/v1/targets",
+        &[("Authorization", &auth(&a))],
+        b"",
+    );
+    assert_eq!(st, 200);
+    let v: serde_json::Value = serde_json::from_str(&body).unwrap();
+    let t = &v["targets"][0];
+    assert_eq!(
+        (t["dir"].as_str(), t["name"].as_str()),
+        (Some("nodes/seg"), Some("seg"))
+    );
+    assert_eq!(t["features"][0], "slot-b");
+}
+
+#[test]
+fn the_page_built_into_dagon_is_served_with_the_release_key() {
+    assert!(
+        super::api::page_embedded(),
+        "crates/dagon-cli/page is built into dagon"
+    );
+    let server = Server::new("p".repeat(32), 1, None, std::path::PathBuf::new());
+    server.set_release_key([9; 32]);
+    let (html, ct) = super::api::page_file(&server, "/").unwrap();
+    assert!(ct.starts_with("text/html"));
+    let html = String::from_utf8(html).unwrap();
+    assert!(html.contains(&format!("content=\"{}\"", "09".repeat(32))));
+    assert!(super::api::page_file(&server, "/fonts/OFL-Doto.txt").is_some());
+    assert!(
+        super::api::page_file(&server, "/SOURCE").is_none(),
+        "build stamp not served"
+    );
+}
+
+/// sim-pair with the F401 as a second 親機: only "not updatable yet".
+fn two_hubs() -> String {
+    YAML.replacen("role: node", "role: coordinator", 1)
+}
+
+#[test]
+fn a_shape_not_updatable_yet_is_saved_and_still_not_compiled() {
+    let a = start("v23");
+    let b = auth(&a);
+    let h = [("Authorization", b.as_str())];
+    let y = two_hubs();
+    let report = dagon_topology::check_str(&y);
+    assert!(report.errors().count() > 0 && report.errors().all(|i| i.rule == "V-23"));
+    let (st, body) = http(&a, "PUT", "/v1/topology", &h, y.as_bytes());
+    assert_eq!(st, 200, "{body}");
+    let v: serde_json::Value = serde_json::from_str(&body).unwrap();
+    assert_eq!(v["updatable"], false);
+    assert_eq!(
+        std::fs::read_to_string(a.dir.join("topology/t.yaml")).unwrap(),
+        y
+    );
+    let t = dagon_topology::parse_str(&y).unwrap();
+    assert!(dagon_topology::compile(&t).is_err());
+}
+
+/// A server whose home is a fresh folder, with a key folder in it.
+fn with_home(name: &str) -> (Area, PathBuf) {
+    let a = start(name);
+    let home = a.dir.join("home");
+    std::fs::create_dir_all(home.join(".dagon").join("keys")).unwrap();
+    std::fs::create_dir_all(home.join("proj")).unwrap();
+    project_with_key(&home, "proj");
+    std::fs::create_dir_all(home.join("proj/topology")).unwrap();
+    std::fs::write(home.join("proj/topology/t.yaml"), YAML).unwrap();
+    a.server.home.set(home.clone()).unwrap();
+    (a, home)
+}
+
+/// home/<name>/dagon.toml with its own key pair in home/.dagon/keys/<name>;
+/// returns the public key.
+fn project_with_key(home: &std::path::Path, name: &str) -> [u8; 32] {
+    let k = dagon_sign::generate_to_dir(&home.join(".dagon/keys").join(name)).unwrap();
+    let pubkey = k.public_path.to_string_lossy().replace(char::from(92), "/");
+    std::fs::create_dir_all(home.join(name)).unwrap();
+    std::fs::write(
+        home.join(name).join("dagon.toml"),
+        format!("topology = \"topology/t.yaml\"\npubkey = {pubkey:?}\n"),
+    )
+    .unwrap();
+    k.public_key
+}
+
+fn link(link: &std::path::Path, to: &std::path::Path) {
+    #[cfg(windows)]
+    let made = std::process::Command::new("cmd")
+        .args(["/C", "mklink", "/J"])
+        .arg(link)
+        .arg(to)
+        .output()
+        .is_ok_and(|o| o.status.success());
+    #[cfg(unix)]
+    let made = std::os::unix::fs::symlink(to, link).is_ok();
+    assert!(made, "could not create the test link");
+}
+
+fn post(a: &Area, path: &str, body: serde_json::Value) -> (u16, String) {
+    let b = auth(a);
+    let h = [("Authorization", b.as_str())];
+    http(a, "POST", path, &h, body.to_string().as_bytes())
+}
+
+fn get(a: &Area, path: &str) -> (u16, String) {
+    let b = auth(a);
+    http(a, "GET", path, &[("Authorization", b.as_str())], b"")
+}
+
+#[test]
+fn projects_open_and_list_under_home_only() {
+    let (a, home) = with_home("proj-open");
+    let (st, body) = get(&a, "/v1/fs");
+    assert_eq!(st, 200, "{body}");
+    assert!(
+        body.contains("\"proj\"") && !body.contains(".dagon"),
+        "{body}"
+    );
+    let (st, body) = post(
+        &a,
+        "/v1/project/open",
+        serde_json::json!({ "path": "proj" }),
+    );
+    assert_eq!(st, 200, "{body}");
+    assert!(body.contains("\"name\":\"proj\""), "{body}");
+    assert_eq!(get(&a, "/v1/topology"), (200, YAML.to_string()));
+    let (st, body) = get(&a, "/v1/project");
+    assert!(st == 200 && body.contains("\"open\":true"), "{body}");
+    // A folder without dagon.toml.
+    std::fs::create_dir_all(home.join("empty")).unwrap();
+    assert_eq!(
+        post(
+            &a,
+            "/v1/project/open",
+            serde_json::json!({ "path": "empty" })
+        )
+        .0,
+        404
+    );
+}
+
+#[test]
+fn project_paths_outside_home_are_refused() {
+    let (a, home) = with_home("proj-refuse");
+    let outside = a.dir.join("outside");
+    std::fs::create_dir_all(&outside).unwrap();
+    std::fs::copy(a.dir.join("dagon.toml"), outside.join("dagon.toml")).unwrap();
+    link(&home.join("escape"), &outside);
+    let abs = outside.to_string_lossy().into_owned();
+    for path in [
+        "..",
+        "../outside",
+        abs.as_str(),
+        "escape",
+        "proj/../../outside",
+    ] {
+        let (st, _) = post(&a, "/v1/project/open", serde_json::json!({ "path": path }));
+        assert_eq!(st, 403, "open {path}");
+        let (st, _) = post(
+            &a,
+            "/v1/project/new",
+            serde_json::json!({ "path": format!("{path}/n") }),
+        );
+        assert_eq!(st, 403, "new {path}");
+        let q = path.replace(char::from(92), "%5C").replace(' ', "%20");
+        assert_eq!(get(&a, &format!("/v1/fs?path={q}")).0, 403, "fs {path}");
+    }
+    // The junction out of home is not listed either.
+    let (_, body) = get(&a, "/v1/fs");
+    assert!(!body.contains("escape"), "{body}");
+    assert!(!outside.join("n").exists());
+}
+
+#[test]
+fn device_names_and_key_folders_are_refused() {
+    let (a, _home) = with_home("proj-dev");
+    for path in ["NUL", "proj/COM1", "con.txt", "LPT9/x"] {
+        let (st, _) = post(&a, "/v1/project/new", serde_json::json!({ "path": path }));
+        assert_eq!(st, 403, "new {path}");
+        assert_eq!(get(&a, &format!("/v1/fs?path={path}")).0, 403, "fs {path}");
+    }
+    for path in [
+        ".dagon",
+        ".dagon/keys",
+        ".dagon/keys/x",
+        "proj/../.dagon/keys",
+    ] {
+        let (st, _) = post(&a, "/v1/project/open", serde_json::json!({ "path": path }));
+        assert_eq!(st, 403, "open {path}");
+        assert_eq!(get(&a, &format!("/v1/fs?path={path}")).0, 403, "fs {path}");
+        let (st, _) = post(&a, "/v1/project/new", serde_json::json!({ "path": path }));
+        assert_eq!(st, 403, "new {path}");
+    }
+}
+
+#[test]
+fn a_new_project_is_created_under_home_and_opened() {
+    let (a, home) = with_home("proj-new");
+    let (st, body) = post(
+        &a,
+        "/v1/project/new",
+        serde_json::json!({ "path": "fresh" }),
+    );
+    assert_eq!(st, 200, "{body}");
+    assert!(home.join("fresh/dagon.toml").is_file());
+    assert!(home.join(".dagon/keys/fresh").is_dir());
+    let (st, yaml) = get(&a, "/v1/topology");
+    assert!(st == 200 && yaml.contains("nodes: []"), "{yaml}");
+    let (st, _) = post(
+        &a,
+        "/v1/project/new",
+        serde_json::json!({ "path": "proj", "from_sample": true }),
+    );
+    assert_eq!(st, 409, "an existing folder is not overwritten");
+    let (st, _) = post(
+        &a,
+        "/v1/project/new",
+        serde_json::json!({ "path": "sample", "from_sample": true }),
+    );
+    assert_eq!(st, 200);
+    assert!(std::fs::read_to_string(home.join("sample/topology.yaml"))
+        .unwrap()
+        .contains("desk-demo"));
+}
+
+#[test]
+fn gen_is_a_job_and_listed_in_hello() {
+    let (a, _home) = with_home("gen");
+    let (_, hello) = get(&a, "/v1/hello");
+    assert!(hello.contains("\"gen\""), "{hello}");
+    assert!(!hello.contains("\"flash\""), "{hello}");
+    assert_eq!(
+        post(&a, "/v1/flash", serde_json::json!({ "node": "seg" })).0,
+        501
+    );
+    assert_eq!(
+        post(&a, "/v1/project/new", serde_json::json!({ "path": "g" })).0,
+        200
+    );
+    let (st, body) = post(&a, "/v1/gen", serde_json::json!({}));
+    assert_eq!(st, 202, "{body}");
+    assert_eq!(
+        post(&a, "/v1/gen", serde_json::json!({ "nodes": ["../x"] })).0,
+        400
+    );
+}
+
+#[cfg(windows)]
+#[test]
+fn key_folders_are_refused_in_any_case() {
+    let (a, home) = with_home("proj-case");
+    std::fs::remove_dir_all(home.join(".dagon")).unwrap();
+    let (st, _) = post(
+        &a,
+        "/v1/project/new",
+        serde_json::json!({ "path": ".DAGON/keys/x" }),
+    );
+    assert_eq!(st, 403);
+    assert!(!home.join(".dagon").exists());
+}
+
+fn hex(k: &[u8; 32]) -> String {
+    dagon_sign::to_hex(k)
+}
+
+#[test]
+fn keys_follow_the_opened_project() {
+    let (a, home) = with_home("proj-keys");
+    let other = project_with_key(&home, "other");
+    std::fs::create_dir_all(home.join("other/topology")).unwrap();
+    std::fs::write(home.join("other/topology/t.yaml"), YAML).unwrap();
+    assert_eq!(
+        post(
+            &a,
+            "/v1/project/open",
+            serde_json::json!({ "path": "other" })
+        )
+        .0,
+        200
+    );
+    let (_, hello) = get(&a, "/v1/hello");
+    let v: serde_json::Value = serde_json::from_str(&hello).unwrap();
+    assert_eq!(v["release_key"], hex(&other));
+    assert_eq!(v["key"], true, "the secret beside the pubkey signs");
+    assert_eq!(
+        v["key_id"],
+        dagon_sign::to_hex(&dagon_format::key_id(&other))
+    );
+    assert!(!hello.contains(".dagon"), "no key paths: {hello}");
+    let (_, page) = get(&a, "/");
+    assert!(page.contains(&hex(&other)), "{page}");
+    // A new project gets its own pair, and the page its public half.
+    assert_eq!(
+        post(
+            &a,
+            "/v1/project/new",
+            serde_json::json!({ "path": "fresh" })
+        )
+        .0,
+        200
+    );
+    let fresh =
+        dagon_sign::load_public_key(&home.join(".dagon/keys/fresh").join(dagon_sign::PUBLIC_FILE))
+            .unwrap();
+    let (_, hello) = get(&a, "/v1/hello");
+    assert!(
+        hello.contains(&hex(&fresh)) && !hello.contains(&hex(&other)),
+        "{hello}"
+    );
+}
+
+#[test]
+fn a_running_job_blocks_a_project_switch() {
+    let (a, home) = with_home("proj-busy");
+    let (tx, rx) = std::sync::mpsc::channel::<()>();
+    a.server
+        .spawn("test", move |_| {
+            let _ = rx.recv();
+            Ok(serde_json::Value::Null)
+        })
+        .unwrap();
+    assert_eq!(
+        post(
+            &a,
+            "/v1/project/open",
+            serde_json::json!({ "path": "proj" })
+        )
+        .0,
+        409
+    );
+    assert_eq!(
+        post(&a, "/v1/project/new", serde_json::json!({ "path": "n" })).0,
+        409
+    );
+    assert!(!home.join("n").exists());
+    assert_eq!(a.server.release_key(), Some([7; 32]));
+    tx.send(()).unwrap();
+    let t = std::time::Instant::now();
+    while a.server.busy() && t.elapsed() < std::time::Duration::from_secs(5) {
+        std::thread::yield_now();
+    }
+    assert_eq!(
+        post(
+            &a,
+            "/v1/project/open",
+            serde_json::json!({ "path": "proj" })
+        )
+        .0,
+        200
+    );
+}
+
+#[test]
+fn a_signing_key_that_does_not_match_the_pubkey_is_not_used() {
+    let (a, home) = with_home("proj-mismatch");
+    let stray = dagon_sign::generate_to_dir(&home.join(".dagon/keys/stray")).unwrap();
+    let toml = std::fs::read_to_string(home.join("proj/dagon.toml")).unwrap();
+    let sk = stray
+        .secret_path
+        .to_string_lossy()
+        .replace(char::from(92), "/");
+    assert_eq!(
+        post(
+            &a,
+            "/v1/project/open",
+            serde_json::json!({ "path": "proj" })
+        )
+        .0,
+        200
+    );
+    std::fs::write(
+        home.join("proj/dagon.toml"),
+        format!("{toml}signing_key = {sk:?}\n"),
+    )
+    .unwrap();
+    let (st, _) = post(
+        &a,
+        "/v1/project/open",
+        serde_json::json!({ "path": "proj" }),
+    );
+    assert_eq!(st, 422, "not opened with a mismatched pair");
+    let (_, hello) = get(&a, "/v1/hello");
+    let v: serde_json::Value = serde_json::from_str(&hello).unwrap();
+    assert_eq!(v["key"], false, "{hello}");
+    let (st, body) = post(&a, "/v1/sign", serde_json::json!({ "nodes": ["seg"] }));
+    assert_eq!(st, 202, "{body}");
+    let id = serde_json::from_str::<serde_json::Value>(&body).unwrap()["job"].clone();
+    let t = std::time::Instant::now();
+    let job = loop {
+        let (_, j) = get(&a, &format!("/v1/jobs/{id}"));
+        if j.contains("\"failed\"") || t.elapsed() > std::time::Duration::from_secs(5) {
+            break j;
+        }
+        std::thread::yield_now();
+    };
+    assert!(
+        job.contains("\"failed\"") && job.contains("signing key is not available"),
+        "{job}"
+    );
+    assert!(!job.contains("stray"), "no key paths to the page: {job}");
+}
+
+#[test]
+fn a_project_without_any_key_is_not_opened() {
+    if std::env::var_os(crate::config::KEY_ENV).is_some() {
+        return;
+    }
+    let (a, home) = with_home("proj-nokey");
+    std::fs::create_dir_all(home.join("bare")).unwrap();
+    std::fs::write(home.join("bare/dagon.toml"), "topology = \"t.yaml\"\n").unwrap();
+    let (st, body) = post(
+        &a,
+        "/v1/project/open",
+        serde_json::json!({ "path": "bare" }),
+    );
+    assert_eq!(st, 422, "{body}");
+    assert_eq!(a.server.release_key(), Some([7; 32]));
+}
+
+/// home/<name>/dagon.toml whose pubkey is `pubkey`.
+fn project_with_pubkey(home: &std::path::Path, name: &str, pubkey: &std::path::Path) {
+    let pk = pubkey.to_string_lossy().replace(char::from(92), "/");
+    std::fs::create_dir_all(home.join(name)).unwrap();
+    std::fs::write(
+        home.join(name).join("dagon.toml"),
+        format!("topology = \"t.yaml\"\npubkey = {pk:?}\n"),
+    )
+    .unwrap();
+}
+
+#[test]
+fn a_pubkey_naming_a_secret_key_is_refused_and_nothing_is_published() {
+    let (a, home) = with_home("proj-secret");
+    let victim = dagon_sign::generate_to_dir(&home.join(".dagon/keys/victim")).unwrap();
+    let seed = std::fs::read_to_string(&victim.secret_path).unwrap();
+    let seed = seed.trim().to_string();
+    // The secret file itself; a .pub copy of it beside it; a .pub outside
+    // the project and the key folders.
+    let copy = home.join(".dagon/keys/victim/copy.pub");
+    std::fs::write(&copy, &seed).unwrap();
+    let outside = a.dir.join("elsewhere.pub");
+    std::fs::copy(&victim.public_path, &outside).unwrap();
+    for (name, pk) in [
+        ("p1", victim.secret_path.clone()),
+        ("p2", copy.clone()),
+        ("p3", outside.clone()),
+    ] {
+        project_with_pubkey(&home, name, &pk);
+        let (st, body) = post(&a, "/v1/project/open", serde_json::json!({ "path": name }));
+        assert_eq!(st, 422, "{name}: {body}");
+        assert!(!body.contains(&seed) && !body.contains("victim"), "{body}");
+        assert_eq!(a.server.release_key(), Some([7; 32]), "{name}");
+    }
+    let (_, hello) = get(&a, "/v1/hello");
+    assert!(!hello
+        .to_ascii_lowercase()
+        .contains(&seed.to_ascii_lowercase()));
+    let (_, page) = get(&a, "/");
+    assert!(!page
+        .to_ascii_lowercase()
+        .contains(&seed.to_ascii_lowercase()));
+}
+
+/// home/proj with `pubkey` and `signing_key` as given (paths relative to
+/// the project, or absolute).
+fn project_keys(home: &std::path::Path, name: &str, pubkey: &str, signing: &std::path::Path) {
+    let sk = signing.to_string_lossy().replace(char::from(92), "/");
+    std::fs::create_dir_all(home.join(name)).unwrap();
+    std::fs::write(
+        home.join(name).join("dagon.toml"),
+        format!("topology = \"t.yaml\"\npubkey = {pubkey:?}\nsigning_key = {sk:?}\n"),
+    )
+    .unwrap();
+}
+
+#[test]
+fn a_secret_key_under_any_name_is_never_a_pubkey() {
+    let (a, home) = with_home("proj-leak");
+    let mine = dagon_sign::generate_to_dir(&home.join(".dagon/keys/mine")).unwrap();
+    let seed = std::fs::read_to_string(&mine.secret_path)
+        .unwrap()
+        .trim()
+        .to_string();
+    // A renamed copy of the signing key inside the project.
+    std::fs::create_dir_all(home.join("p1")).unwrap();
+    std::fs::write(home.join("p1/leak.pub"), &seed).unwrap();
+    project_keys(&home, "p1", "leak.pub", &mine.secret_path);
+    // A copy in another allowed folder.
+    let other = home.join(".dagon/keys/other");
+    std::fs::create_dir_all(&other).unwrap();
+    std::fs::write(other.join("x.pub"), &seed).unwrap();
+    let x = other
+        .join("x.pub")
+        .to_string_lossy()
+        .replace(char::from(92), "/");
+    project_keys(&home, "p2", &x, &mine.secret_path);
+    // Some other valid public key while the signing key is known.
+    let stranger = dagon_sign::generate_to_dir(&home.join(".dagon/keys/stranger")).unwrap();
+    let sp = stranger
+        .public_path
+        .to_string_lossy()
+        .replace(char::from(92), "/");
+    project_keys(&home, "p3", &sp, &mine.secret_path);
+    for name in ["p1", "p2", "p3"] {
+        let (st, body) = post(&a, "/v1/project/open", serde_json::json!({ "path": name }));
+        assert_eq!(st, 422, "{name}: {body}");
+        assert_eq!(a.server.release_key(), Some([7; 32]), "{name}");
+    }
+    let (_, hello) = get(&a, "/v1/hello");
+    let (_, page) = get(&a, "/");
+    for text in [hello, page] {
+        assert!(!text
+            .to_ascii_lowercase()
+            .contains(&seed.to_ascii_lowercase()));
+    }
+    // The matching pair is accepted.
+    let mp = mine
+        .public_path
+        .to_string_lossy()
+        .replace(char::from(92), "/");
+    project_keys(&home, "p4", &mp, &mine.secret_path);
+    let (st, body) = post(&a, "/v1/project/open", serde_json::json!({ "path": "p4" }));
+    assert_eq!(st, 200, "{body}");
+    assert_eq!(a.server.release_key(), Some(mine.public_key));
+}
+
+#[test]
+fn every_start_pubkey_source_goes_through_the_same_checks() {
+    let (a, home) = with_home("start-key");
+    let mine = dagon_sign::generate_to_dir(&home.join(".dagon/keys/mine")).unwrap();
+    let seed = std::fs::read_to_string(&mine.secret_path).unwrap();
+    std::fs::create_dir_all(home.join("p")).unwrap();
+    std::fs::write(home.join("p/leak.pub"), seed.trim()).unwrap();
+    let leak = home.join("p/leak.pub").to_string_lossy().into_owned();
+    let good = mine.public_path.to_string_lossy().into_owned();
+    project_keys(
+        &home,
+        "p",
+        &leak.replace(char::from(92), "/"),
+        &mine.secret_path,
+    );
+    let config = home.join("p/dagon.toml");
+    let start = |args: &[&str]| {
+        let o = crate::config::Opts::parse(args, &["pubkey", "key"]).unwrap();
+        super::start_key(&o, &a.server, Some(&config))
+    };
+    // --pubkey naming a renamed secret, and the same in dagon.toml.
+    assert!(start(&["--pubkey", &leak]).is_err());
+    assert!(start(&[]).is_err());
+    // --pubkey with the matching public key.
+    assert_eq!(start(&["--pubkey", &good]).unwrap(), mine.public_key);
 }

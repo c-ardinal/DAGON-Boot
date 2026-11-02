@@ -16,6 +16,7 @@ dagon-sim = { path = "../dagon-sim", optional = true }
 dagon-port = { path = "../dagon-port", optional = true }
 dagon-proto = { path = "../dagon-proto" }
 dagon-topology = { path = "../dagon-topology" }
+yaml_serde = "0.10"
 js-sys = "0.3.107"
 wasm-bindgen = "0.2.130"
 wasm-bindgen-futures = "0.4"

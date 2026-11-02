@@ -458,6 +458,9 @@ fn build_put(server: &Server, id: &str, req: &Request) -> Res {
 
 fn job_build(job: &mut Job, cfg: Config, v: Value) -> Result<Value, String> {
     let nodes = nodes_of(&v).map_err(|_| "nodes must be node ids".to_string())?;
+    if let Some(p) = &cfg.pubkey {
+        page_safe(public_key(&cfg, p))?;
+    }
     let cancel = job.cancel_flag();
     let built = nodebuild::build_nodes(&cfg, &nodes, &mut |l| job.log(l), &cancel)?;
     let list: Vec<Value> = built

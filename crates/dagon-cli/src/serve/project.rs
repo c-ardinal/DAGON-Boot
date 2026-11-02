@@ -175,8 +175,14 @@ pub fn new(server: &Arc<Server>, req: &Request) -> Response {
             return Err(busy());
         }
         let keys = home.join(".dagon").join("keys").join(&name);
-        crate::scaffold::new_project(&dir, &name, &yaml, &keys)
-            .map_err(|e| Response::error(409, &e))?;
+        crate::scaffold::new_project(&dir, &name, &yaml, &keys).map_err(|e| {
+            let shown = e.replace(&*keys.to_string_lossy(), "<key folder>");
+            eprintln!("dagon serve: new project: {shown}");
+            Response::error(
+                409,
+                "the project could not be created; see the dagon serve terminal",
+            )
+        })?;
         switch(server, dir.join(CONFIG_FILE))
     })();
     r.unwrap_or_else(|e| e)

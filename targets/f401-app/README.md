@@ -16,9 +16,9 @@ it starts the confirmed slot (8 s watchdog). Both run at 84 MHz from the HSI.
 This app is the DAGON node: an I2C target at 0x42 on I2C3 (SCL PA8 = D7,
 SDA PB4 = D5) serving dagon-agent through the mailbox, and its own version on
 the 7-segment display (`1.1.` for 1.1.x; builds with the public test key
-show `tSt` for 1.5 s first). It feeds the watchdog while confirmed, and on
-trial only for 30 s after start, so an image that never gets CONFIRM resets
-and is rolled back. RTT shows the boot state and every request that takes
+show `tSt` for 1.5 s first). It feeds the watchdog only while confirmed, so
+an image that never gets CONFIRM resets when the 4 s trial watchdog runs out
+and is rolled back after three attempts. RTT shows the boot state and every request that takes
 20 ms or more (`cmd 0x20: N ms` for SET_PENDING).
 
 Features: `slot-b` links for APP-B; `confirm` confirms its own trial at
@@ -28,8 +28,9 @@ start (bench use without a hub); `conform` is the conformance build (below). The
 ## Build
 
 The verifying key is embedded at build time. `DAGON_PUBKEY` takes the public
-key file of `dagon key gen` (or its 64 hex digits); unset, the build uses the
-public RFC 8032 test key and warns.
+key file of `dagon key gen` (or its 64 hex digits). Unset, the build fails,
+unless `DAGON_ALLOW_TEST_KEY=1` asks for the public RFC 8032 test key (the
+build warns and the display shows `tSt` at start).
 
 ```sh
 export DAGON_PUBKEY=/path/outside/the/repo/dagon-signing.pub

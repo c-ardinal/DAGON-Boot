@@ -124,6 +124,7 @@ pub async fn run(mut pins: Pins<'_>) {
     pins.backlight.set_high();
     if cfg!(feature = "diag") {
         let _ = test_pattern(&mut display);
+        let _ = clock_info(&mut display);
         Timer::after_secs(3).await;
     }
     let first = Home {
@@ -146,6 +147,9 @@ pub async fn run(mut pins: Pins<'_>) {
                 }
             }
             Either::Second(()) => {
+                if cfg!(feature = "diag") {
+                    let _ = uptime(&mut display);
+                }
                 beat = !beat;
                 let c = if beat {
                     Rgb565::CSS_GRAY
@@ -180,6 +184,46 @@ fn test_pattern<D: DrawTarget<Color = Rgb565>>(d: &mut D) -> Result<(), D::Error
     Circle::with_center(Point::new(120, 120), 200)
         .into_styled(PrimitiveStyle::with_stroke(Rgb565::YELLOW, 4))
         .draw(d)?;
+    Ok(())
+}
+
+/// Clock set-up as the app sees it: the watchdog tick register (CYCLES in
+/// bits 0-8, ENABLE bit 9, RUNNING bit 10) and the HAL's clock rates.
+fn clock_info<D: DrawTarget<Color = Rgb565>>(d: &mut D) -> Result<(), D::Error> {
+    use embassy_rp::clocks;
+    const WATCHDOG_TICK: *const u32 = 0x4005_802C as *const u32;
+    // SAFETY: read-only access to a watchdog register.
+    let tick = unsafe { WATCHDOG_TICK.read_volatile() };
+    let style = MonoTextStyle::new(&FONT_6X10, Rgb565::WHITE);
+    let mut line: String<40> = String::new();
+    let rows = [
+        ("tick", tick),
+        ("ref", clocks::clk_ref_freq()),
+        ("sys", clocks::clk_sys_freq()),
+        ("xosc", clocks::xosc_freq()),
+    ];
+    for (i, (name, v)) in rows.iter().enumerate() {
+        line.clear();
+        let _ = write!(line, "{name}={v:#x} ({v})");
+        let at = Point::new(120, 20 + 12 * i as i32);
+        Rectangle::new(at - Point::new(100, 9), Size::new(200, 12))
+            .into_styled(PrimitiveStyle::with_fill(Rgb565::BLACK))
+            .draw(d)?;
+        Text::with_alignment(&line, at, style, Alignment::Center).draw(d)?;
+    }
+    Ok(())
+}
+
+/// Seconds since the app started by the HAL clock; compare with a watch.
+fn uptime<D: DrawTarget<Color = Rgb565>>(d: &mut D) -> Result<(), D::Error> {
+    let mut line: String<16> = String::new();
+    let _ = write!(line, "t={}s", embassy_time::Instant::now().as_secs());
+    let at = Point::new(120, 228);
+    Rectangle::new(at - Point::new(30, 9), Size::new(60, 12))
+        .into_styled(PrimitiveStyle::with_fill(Rgb565::BLACK))
+        .draw(d)?;
+    let style = MonoTextStyle::new(&FONT_6X10, Rgb565::WHITE);
+    Text::with_alignment(&line, at, style, Alignment::Center).draw(d)?;
     Ok(())
 }
 

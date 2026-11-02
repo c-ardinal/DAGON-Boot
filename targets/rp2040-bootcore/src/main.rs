@@ -26,6 +26,34 @@ include!(concat!(env!("OUT_DIR"), "/pubkey.rs"));
 
 const HALT_MS: u32 = 500;
 
+/// Puts the clocks back the way the chip starts: clk_sys and clk_ref on the
+/// ring oscillator, the PLL-fed clocks off, both PLLs powered down. The app
+/// then sets its clocks up from the same state as after a cold reset. The
+/// watchdog keeps counting meanwhile (slower on the ring oscillator).
+fn hand_back_clocks() {
+    use embassy_rp::pac;
+    use pac::clocks::vals::{ClkRefCtrlSrc, ClkSysCtrlSrc};
+    let c = pac::CLOCKS;
+    c.clk_sys_ctrl()
+        .modify(|w| w.set_src(ClkSysCtrlSrc::CLK_REF));
+    while c.clk_sys_selected().read() != 1 {}
+    c.clk_ref_ctrl()
+        .modify(|w| w.set_src(ClkRefCtrlSrc::ROSC_CLKSRC_PH));
+    while c.clk_ref_selected().read() != 1 {}
+    c.clk_peri_ctrl().modify(|w| w.set_enable(false));
+    c.clk_usb_ctrl().modify(|w| w.set_enable(false));
+    c.clk_adc_ctrl().modify(|w| w.set_enable(false));
+    c.clk_rtc_ctrl().modify(|w| w.set_enable(false));
+    for pll in [pac::PLL_SYS, pac::PLL_USB] {
+        pll.pwr().write(|w| {
+            w.set_pd(true);
+            w.set_vcopd(true);
+            w.set_postdivpd(true);
+            w.set_dsmpd(true);
+        });
+    }
+}
+
 const CONFIG: BootConfig = BootConfig {
     pubkey: PUBKEY,
     mcu_id: mcu_id::RP2040,
@@ -48,6 +76,7 @@ fn main() -> ! {
     };
     if let Decision::Boot { entry, .. } = decision {
         wdt.feed(Duration::from_millis(WDT_MS as u64));
+        hand_back_clocks();
         jump(entry);
     }
     wdt.stop();

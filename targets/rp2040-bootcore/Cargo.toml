@@ -18,7 +18,7 @@ diag = ["rp2040-common/diag-panic"]
 rp2040-common = { path = "common", features = ["rp"] }
 dagon-core = { path = "../../crates/dagon-core" }
 dagon-format ={ path = "../../crates/dagon-format" }
-embassy-rp = { version = "0.10.0", features = ["rp2040", "critical-section-impl", "boot2-none"] }
+embassy-rp = { version = "0.10.0", features = ["rp2040", "critical-section-impl", "boot2-none", "unstable-pac"] }
 embassy-time = "0.5"
 cortex-m = "0.7"
 cortex-m-rt = "0.7"

@@ -60,6 +60,7 @@ export class WebSerialTransport implements Transport {
   private readonly queue = new FrameQueue();
   private reader: ReadableStreamDefaultReader<Uint8Array> | null = null;
   private pump: Promise<void> | null = null;
+  private closing = false;
 
   constructor(readonly port: SerialPort) {}
 
@@ -69,6 +70,7 @@ export class WebSerialTransport implements Transport {
   }
 
   async close(): Promise<void> {
+    this.closing = true;
     await this.reader?.cancel().catch(() => undefined);
     await this.pump;
     this.queue.clear();
@@ -90,22 +92,25 @@ export class WebSerialTransport implements Transport {
   }
 
   private async readLoop(): Promise<void> {
-    const readable = this.port.readable;
-    if (!readable) return;
     const decoder = new FrameDecoder();
-    const reader = readable.getReader();
-    this.reader = reader;
-    try {
-      for (;;) {
-        const { value, done } = await reader.read();
-        if (done) break;
-        if (value) for (const f of decoder.push(value)) this.queue.put(f);
+    // Non-fatal errors (break, framing, parity, buffer overrun) error the
+    // current stream and the port then offers a fresh `readable`; fatal ones
+    // (device lost) leave it null, which ends the loop.
+    while (this.port.readable && !this.closing) {
+      const reader = this.port.readable.getReader();
+      this.reader = reader;
+      try {
+        for (;;) {
+          const { value, done } = await reader.read();
+          if (done) return;
+          if (value) for (const f of decoder.push(value)) this.queue.put(f);
+        }
+      } catch {
+        // Retry with the next readable, if any.
+      } finally {
+        reader.releaseLock();
+        this.reader = null;
       }
-    } catch {
-      // The device went away; the page learns it from the `disconnect` event.
-    } finally {
-      reader.releaseLock();
-      this.reader = null;
     }
   }
 }

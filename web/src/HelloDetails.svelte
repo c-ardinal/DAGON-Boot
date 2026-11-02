@@ -33,9 +33,24 @@
   details {
     width: 100%;
   }
+  /* Own border keeps 3 px of room: 1 px line normally, 3 px paper on focus. */
   summary {
+    padding: 2px calc(var(--s-3) + 2px);
+    border: 1px solid var(--c-line);
+    border-radius: var(--r-m);
     cursor: pointer;
     font: 700 var(--t-small-size) / var(--t-small-lh) var(--f-ja);
+  }
+  summary:focus-visible {
+    padding: 0 var(--s-3);
+    border: 3px solid var(--c-paper);
+    outline: 3px solid transparent;
+    outline-offset: -3px;
+  }
+  @media (hover: hover) and (pointer: fine) {
+    summary:hover {
+      background: var(--c-hover);
+    }
   }
   dl {
     display: grid;

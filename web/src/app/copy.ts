@@ -93,7 +93,7 @@ export const NODE = {
   hubSlot: '親機を置く場所',
   /** S04 / S38 */
   responding: '● 応答あり',
-  trying: '● 試している',
+  trying: '● 確認待ち',
   details: '詳しく見る',
 } as const;
 
@@ -105,7 +105,7 @@ export const ANNOUNCE = {
 
 /** Words that never appear in operating-mode guidance, chips or results. */
 export const FORBIDDEN_WORDS = [
-  '署名', 'ROM', 'CDC', 'スロット', 'ブートローダ', 'エラーコード', 'トポロジ',
+  '署名', 'ROM', 'CDC','ブートローダ', 'エラーコード', 'トポロジ',
   'マニフェスト', 'ハッシュ', 'ポート', 'シリアル', 'フラッシュ', 'ファームウェア',
   'パーティション', 'コマンド', 'タイムアウト', 'WASM', 'Web Serial', '確定', '試行中',
   '巻き戻り', 'エラー', '不正', '致命的', '無効',

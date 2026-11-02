@@ -1,19 +1,13 @@
 <script lang="ts">
-  import { ANNOUNCE, BAND, HUB, HUB_NAME, NODE, PRODUCT, SKIP, STEP, UNSUPPORTED, type BandCopy } from './app/copy.ts';
-  import { ConnectError, chooseAndOpen, hello, type ConnectFailure } from './app/connect.ts';
-  import { versionText, type HelloResp } from './serial/hello.ts';
+  import { tick } from 'svelte';
+  import { ANNOUNCE, HUB, HUB_NAME, NODE, PRODUCT, SKIP, STEP } from './app/copy.ts';
+  import { ConnectError, chooseAndOpen, hello } from './app/connect.ts';
+  import { bandOf, focusOf, hubOf, statusOf, type View } from './app/connectView.ts';
+  import { versionText } from './serial/hello.ts';
   import { MockTransport } from './serial/mock.ts';
   import { WebSerialTransport, type Transport } from './serial/transport.ts';
   import Unsupported from './Unsupported.svelte';
   import HelloDetails from './HelloDetails.svelte';
-
-  type View =
-    | { kind: 'idle' }
-    | { kind: 'choosing' }
-    | { kind: 'checking' }
-    | { kind: 'connected'; hello: HelloResp }
-    | { kind: 'failed'; failure: ConnectFailure }
-    | { kind: 'lost' };
 
   const params = new URLSearchParams(location.search);
   const mock = params.get('mock');
@@ -21,37 +15,29 @@
   const serial = navigator.serial;
 
   let view = $state<View>({ kind: 'idle' });
-  let announce = $state('');
   let alertText = $state('');
   let transport: Transport | null = null;
+  /** Bumped per attempt and on disconnect; results of an older attempt are dropped. */
+  let attempt = 0;
+  let primaryEl = $state<HTMLButtonElement>();
+  let nextEl = $state<HTMLDivElement>();
 
-  const BAND_OF: Record<ConnectFailure, BandCopy> = {
-    'not-found': BAND.M04,
-    busy: BAND.M05,
-    denied: BAND.M06,
-    'no-response': BAND.M08,
-  };
+  const band = $derived(bandOf(view));
+  const hub = $derived(hubOf(view));
+  const status = $derived(statusOf(view));
+  const busy = $derived(view.kind === 'choosing');
 
-  const band = $derived.by((): BandCopy | null => {
-    switch (view.kind) {
-      case 'idle':
-      case 'choosing':
-        return BAND.M03;
-      case 'failed':
-        return BAND_OF[view.failure];
-      case 'lost':
-        return BAND.M34;
-      default:
-        return null;
-    }
-  });
-
-  const hub = $derived(
-    view.kind === 'checking' ? 'checking' : view.kind === 'connected' ? 'connected' : view.kind === 'lost' ? 'lost' : 'idle',
-  );
+  /** Moves to `v` after a user action and puts focus where the band now asks for it. */
+  async function show(v: View) {
+    view = v;
+    await tick();
+    (focusOf(v) === 'button' ? primaryEl : nextEl)?.focus();
+  }
 
   serial?.addEventListener('disconnect', (e) => {
     if (transport instanceof WebSerialTransport && e.target === transport.port) {
+      attempt++;
+      transport.close().catch(() => undefined);
       transport = null;
       view = { kind: 'lost' };
       alertText = ANNOUNCE.A21lost;
@@ -59,20 +45,25 @@
   });
 
   async function connect() {
+    if (busy) return;
+    const my = ++attempt;
     await transport?.close().catch(() => undefined);
     transport = null;
     alertText = '';
-    view = { kind: 'choosing' };
+    await show({ kind: 'choosing' });
     try {
       transport = mock !== null ? new MockTransport({ silent: mock === 'silent', delayMs: 600 }) : await chooseAndOpen(serial!);
       if (mock !== null) await transport.open();
-      view = { kind: 'checking' };
-      announce = ANNOUNCE.A05;
-      view = { kind: 'connected', hello: await hello(transport) };
+      if (my !== attempt) return;
+      await show({ kind: 'checking' });
+      const h = await hello(transport);
+      if (my !== attempt) return;
+      await show({ kind: 'connected', hello: h });
     } catch (e) {
+      if (my !== attempt) return;
       await transport?.close().catch(() => undefined);
       transport = null;
-      view = { kind: 'failed', failure: e instanceof ConnectError ? e.failure : 'no-response' };
+      await show({ kind: 'failed', failure: e instanceof ConnectError ? e.failure : 'no-response' });
     }
   }
 </script>
@@ -127,18 +118,19 @@
     </main>
 
     <footer id="band" tabindex="-1">
-      <div class="next">
+      <div class="next" tabindex="-1" bind:this={nextEl}>
         {#if band}
           {#if band.chip}<span class="cause">{band.chip}</span>{/if}
           <p>{band.sentence}</p>
         {/if}
       </div>
       {#if band}
-        <button class="primary" onclick={connect} disabled={view.kind === 'choosing'}>
-          {view.kind === 'choosing' ? '…' : band.button}<span aria-hidden="true">→</span>
+        <!-- Busy stays focusable (aria-disabled) so focus never drops to the page. -->
+        <button class="primary" bind:this={primaryEl} onclick={connect} aria-disabled={busy}>
+          {busy ? `${band.button}…` : band.button}<span aria-hidden="true">→</span>
         </button>
       {/if}
-      <div class="visually-hidden" role="status">{announce}</div>
+      <div class="visually-hidden" role="status">{status}</div>
       <div class="visually-hidden" role="alert">{alertText}</div>
     </footer>
   </div>
@@ -320,7 +312,10 @@
   .primary:active {
     transform: scale(0.97);
   }
-  .primary:disabled {
+  .next:focus {
+    outline: none;
+  }
+  .primary[aria-disabled='true'] {
     background: var(--c-layer-2);
     color: var(--c-muted);
     cursor: default;

@@ -17,6 +17,10 @@ describe('copy', () => {
     expect(shown.filter((s) => s.includes('...') || s.includes('：'))).toEqual([]);
   });
 
+  test('slots are called スロット (Aスロット, Bスロット, 予備スロット), never 面', () => {
+    expect(shown.filter((s) => /(?:[AB]|予備)\s?面/.test(s))).toEqual([]);
+  });
+
   test('sentences are one sentence in polite form', () => {
     const sentences = [...Object.values(copy.BAND).map((b) => b.sentence), copy.UNSUPPORTED.sentence];
     for (const s of sentences) {

@@ -96,4 +96,12 @@ describe('define session', () => {
     expect(LINK.bundle('CAN', 0, 0)).toBe('CAN');
     expect(LINK.bundle('I2C', 5, 3)).toBe('I2C · 5 本（うち共有 3）');
   });
+
+  test('an empty file or one that is not a 構成 mapping is C09, not a crash', () => {
+    const d = new Define();
+    for (const text of ['', '42', '[a, b]', 'name: x']) {
+      expect(d.importYaml(text), JSON.stringify(text)).toBe(false);
+      expect(d.unreadable).toBe(true);
+    }
+  });
 });

@@ -16,6 +16,8 @@
   import { Start, type StartChoice } from './app/start.svelte.ts';
   import Menu from './screens/Menu.svelte';
   import Restart from './screens/Restart.svelte';
+  import Unsaved from './screens/Unsaved.svelte';
+  import { Autosave } from './app/define/autosave.svelte.ts';
   import StartScreen from './screens/Start.svelte';
   import Inspector from './screens/define/Inspector.svelte';
   import NodeList from './screens/define/NodeList.svelte';
@@ -119,8 +121,10 @@
   }
 
   /** The open project's 構成 (its YAML through serve): 運用 when it is updatable as it is, else 定義 (§7.2b). */
+  // SC-S0 is reached only through `leave` (menu, 最初からやり直す), so no unsaved edit is here when a project opens.
   async function openWork(want?: 'operate' | 'define') {
     const yaml = await cli.loadTopology().catch(() => null);
+    local = false;
     op.reset();
     d.reset();
     if (yaml) {
@@ -146,6 +150,7 @@
 
   /** Without serve (development stand-ins): an empty 構成 or the sample, not saved. */
   function startLocal(c: 'new' | 'sample') {
+    local = true;
     op.reset();
     d.reset();
     if (c === 'sample') d.load(fromYaml(DESK_DEMO_YAML, Object.fromEntries(DESK_DEMO.nodes.map((n) => [n.id, n.name]))));
@@ -156,8 +161,13 @@
   let menuOpen = $state(false);
   let restartOpen = $state(false);
   let restartButton = $state<HTMLButtonElement>();
+  /** Menu 新しく作る / 見本から新しく作る / 開く: the 構成 is saved first (or the dialog asks). */
   function toStart(c: StartChoice) {
     menuOpen = false;
+    void autosave.leave(() => goStart(c));
+  }
+
+  function goStart(c: StartChoice) {
     cliPanel = null;
     screen = 'start';
     void start.refresh();
@@ -168,6 +178,11 @@
   function restart() {
     restartOpen = false;
     menuOpen = false;
+    void autosave.leave(restartNow);
+  }
+
+  function restartNow() {
+    local = false;
     op.reset();
     d.reset();
     cli.clearJobs();
@@ -183,10 +198,10 @@
     void tick().then(() => restartButton?.focus());
   }
 
-  /** 運用 pressed while it cannot be entered: M68 / M69 in the band until the 構成 changes. */
-  let locked = $state<{ why: Operable; at: number } | null>(null);
+  /** 運用 pressed while it cannot be entered: M68 / M69 (or 未保存) in the band until the 構成 changes. */
+  let locked = $state<{ why: Operable | 'unsaved'; at: number } | null>(null);
   const lockShown = $derived(locked && locked.at === d.revision ? locked.why : null);
-  function lock(why: Operable) {
+  function lock(why: Operable | 'unsaved') {
     locked = { why, at: d.revision };
   }
   const cliLabel = $derived(cli.state === 'ready' ? CLI_STATE.ready(cli.hello?.cli ?? '') : CLI_STATE[cli.state]);
@@ -197,7 +212,8 @@
   });
 
   /** "このリリースを運用で使う" (X03): the release goes to the operate mode's file check. */
-  function useRelease(name: string, bytes: Uint8Array) {
+  async function useRelease(name: string, bytes: Uint8Array) {
+    if (!(await autosave.ready())) return lock('unsaved');
     switchMode('operate');
     op.takeFile(name, bytes);
   }
@@ -210,6 +226,15 @@
   function switchMode(m: 'operate' | 'define') {
     // 運用 only with a 構成 that has no problems and is updatable (§5.2); the YAML decides, never the 親機.
     if (m === 'operate' && d.operable !== 'ok') return lock(d.operable);
+    // ... and only the saved one, the 構成 build, sign and release use too.
+    if (m === 'operate' && autosave.pending) {
+      void autosave.ready().then((ok) => (ok ? enterMode(m) : lock('unsaved')));
+      return;
+    }
+    enterMode(m);
+  }
+
+  function enterMode(m: 'operate' | 'define') {
     // A file checked against another 構成 (L16–L18, e.g. after "ファイルの構成を取り込む") is checked again.
     const recheck = m === 'operate' && op.file !== null && ['L16', 'L17', 'L18'].includes(op.state) && op.config?.yaml !== d.config.yaml;
     if (m === 'operate') op.useConfig(d.config);
@@ -224,16 +249,34 @@
 
   /** "親機へ送る" / "つないで、親機へ送る" from define mode: the operate session sends the document. */
   async function sendDefined() {
+    // The 親機 gets the saved 構成 only.
+    if (!(await autosave.ready())) return lock('unsaved');
     op.useConfig(d.config);
     if (!connected) await op.connect();
     if (connected && op.config) await op.push();
   }
 
-  /** "保存": the 構成 back into the project's YAML through dagon serve (the page always runs under it). */
+  /** Development stand-ins (?mock, ?sim without serve): an unsaved 構成 on the page, nothing to save to. */
+  let local = $state(false);
+  /** Edits go to the project's YAML by themselves (UC-D04); 保存 saves at once. */
+  const autosave = new Autosave(d, { put: (yaml) => cli.saveTopology(yaml), enabled: () => screen === 'work' && !local });
+  $effect(() => {
+    void d.revision;
+    autosave.edited();
+  });
+  $effect(() => {
+    const warn = (e: BeforeUnloadEvent) => {
+      if (!autosave.pending) return;
+      void autosave.now();
+      e.preventDefault();
+    };
+    addEventListener('beforeunload', warn);
+    return () => removeEventListener('beforeunload', warn);
+  });
+
+  /** "保存": the 構成 into the project's YAML now. */
   async function save() {
-    if (cli.state !== 'ready') return;
-    const at = d.revision;
-    d.saved(at, await cli.saveTopology(d.exportYaml().text));
+    await autosave.now();
   }
 
   /** "ファイルの構成を取り込む" (§7.6): the release's 構成 replaces this one (undoable) and goes to the YAML. */
@@ -562,6 +605,9 @@
       {#if d.saveFailure}
         <span class="cause">{SAVE[d.saveFailure].chip}</span>
         <p>{SAVE[d.saveFailure].sentence}</p>
+      {:else if lockShown === 'unsaved'}
+        <span class="cause">{SAVE.unsaved}</span>
+        <p>{MODE.lockedUnsaved.sentence}</p>
       {:else if lockShown === 'unsupported'}
         <span class="cause">{MODE.lockedUnsupported.chip}</span>
         <p>{MODE.lockedUnsupported.sentence}</p>
@@ -585,7 +631,7 @@
       <!-- E1: C02 on the canvas says what this does. -->
       <button class="primary" onclick={() => void op.connect()}>{BUTTON.connectDiscover}<span class="arrow" aria-hidden="true">→</span></button>
     {:else}
-      {#if d.unsaved && cli.state === 'ready'}<span class="unsaved">{SAVE.unsaved}</span>{/if}
+      {#if d.unsaved && !local}<span class="unsaved">{SAVE.unsaved}</span>{/if}
       <button class="secondary" aria-disabled={cli.state !== 'ready'} onclick={() => void save()}>{DEFINE.save}</button>
       {#if firstError}
         <button class="primary" onclick={() => d.fix(firstError)}>{DEFINE.fix}<span class="arrow" aria-hidden="true">→</span></button>
@@ -665,7 +711,7 @@
   <a class="skip" href="#canvas">{SKIP.canvas}</a>
   <a class="skip" href="#band">{SKIP.next}</a>
   <!-- The DOM follows the visual order of each layout, so Tab order matches what is seen. -->
-  <div class="frame {layout}" class:open={drawerOpen} class:modal={restartOpen}>
+  <div class="frame {layout}" class:open={drawerOpen} class:modal={restartOpen || autosave.asking !== null}>
     <Header
       step={screen === 'start' ? null : step}
       {hub}
@@ -718,6 +764,14 @@
   />
   {#if restartOpen}
     <Restart onconfirm={restart} oncancel={cancelRestart} />
+  {/if}
+  {#if autosave.asking}
+    <Unsaved
+      reason={SAVE[d.saveFailure ?? 'failed'].chip}
+      onsave={() => void autosave.saveAgain()}
+      ondiscard={() => autosave.discard()}
+      onstay={() => autosave.stay()}
+    />
   {/if}
   {#if dialogOpen}
     <Reconnect left={reconnectLeft} onreconnect={() => void op.reconnectHub()} onclose={() => (dialogDismissed = true)} />

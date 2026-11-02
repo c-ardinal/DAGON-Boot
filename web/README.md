@@ -9,6 +9,12 @@ There is no public site and no page of its own outside serve; the page fetches n
 other origin and offers no download-to-save (releases stay in the project's `out/`). It opens on
 SC-S0 (新しく作る / 見本から新しく作る / 開く) until serve has a project open.
 
+構成 edits go to the project's YAML by themselves (PUT /v1/topology about 500 ms after the last
+edit; 保存 saves at once). Until a save goes through the band shows 「● 未保存」 and why; 運用 and
+親機へ送る wait for the saved 構成, and leaving the project (menu, 最初からやり直す, closing the
+tab) saves first and asks when it cannot. Known limit: the YAML is written out from the page's
+document, so comments in the file are not kept.
+
 ## Commands
 
 Needs the `wasm32-unknown-unknown` Rust target (listed in `rust-toolchain.toml`) and `wasm-pack`

@@ -357,7 +357,8 @@ export class Operate {
   private onEvent(e: UpdateEvent): void {
     const n = this.config?.nodes[e.node];
     if (!n) return;
-    this.sentVersion[n.id] = e.version;
+    // Only the transfer carries the release's version; FAILED / REJECTED carry the version the node still runs.
+    if (e.phase === PHASE.transfer) this.sentVersion[n.id] = e.version;
     const was = this.progress[n.id] ?? { stage: 'waiting', percent: 0 };
     if (e.phase === PHASE.transfer || e.phase === PHASE.verify) {
       if (was.stage !== 'writing') this.status = ANNOUNCE.A11(n.name);

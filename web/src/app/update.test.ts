@@ -122,6 +122,18 @@ describe('update from the page with dagon-host apply against the mock hub', () =
     expect([v(t.helloOf('hub').activeVersion), t.helloOf('hub').trial]).toEqual(['1.1.0', false]);
   }, 60_000);
 
+  test('hub not back within 45 s and back on its previous version when chosen again: stopped there, not done', async () => {
+    const { t, op } = await sentTo({ hubAway: Infinity, fallBack: ['hub'] });
+    op.takeFile('desk-1.1.0.dgb', RELEASE);
+    await op.update();
+    expect(op.state).toBe('L21');
+    t.replug();
+    await op.reconnectHub();
+    expect(v(t.helloOf('hub').activeVersion)).toBe('1.0.0');
+    expect([op.state, op.failed, op.progress.hub.stage]).toEqual(['L22', 'hub', 'previous']);
+    expect(op.status).toBe(ANNOUNCE.A13previous('メイン'));
+  }, 60_000);
+
   test('a USB disconnect while the hub reboots is not taken for a lost connection', async () => {
     const { op } = await sentTo({ hubAway: 5 });
     op.takeFile('desk-1.1.0.dgb', RELEASE);

@@ -60,14 +60,14 @@ pub type SlotElfs = Vec<(char, Vec<u8>)>;
 /// The ELF files of `node`'s last successful build, checked against its
 /// record: (slot, bytes) and the recorded version.
 pub fn last_build(cfg: &Config, node: &str) -> Result<(BuildRecord, SlotElfs), String> {
-    let dir = node_dir(cfg, node);
+    let dir = crate::paths::contained(&cfg.base, &node_dir(cfg, node))?;
     let text = std::fs::read_to_string(dir.join(RECORD))
         .map_err(|_| format!("{node} has no successful build; run the build first"))?;
     let rec: BuildRecord =
         serde_json::from_str(&text).map_err(|e| format!("{node}: bad build record: {e}"))?;
     let mut out = Vec::new();
     for (slot, sha) in &rec.slots {
-        let path = elf_path(cfg, node, *slot);
+        let path = crate::paths::contained(&cfg.base, &elf_path(cfg, node, *slot))?;
         let bytes = std::fs::read(&path).map_err(|e| format!("{}: {e}", path.display()))?;
         if sha_hex(&bytes) != *sha {
             return Err(format!("{} changed since it was built", path.display()));

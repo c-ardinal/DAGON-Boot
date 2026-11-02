@@ -297,10 +297,6 @@ mod conform {
     /// above the 4 s a 128 KiB sector erase may take between two feeds.
     pub const WDT_MS: u32 = 12_000;
 
-    /// Scratch address when no slot may be destroyed (on trial): outside the
-    /// flash, so CT-02/CT-03 fail with "outside flash" instead of erasing.
-    const NO_SCRATCH: u32 = 0xFFFF_FFFF;
-
     /// Answers a CONF_RUN request; false for any other frame.
     pub fn serve(
         agent: &mut Agent<Store, DefaultHooks>,
@@ -311,8 +307,7 @@ mod conform {
         let state = agent.store().log_state();
         let setup = NodeSetup {
             declared: &board::FLASH_REGIONS,
-            scratch: f401_node::scratch_slot(&state, SLOT)
-                .map_or(NO_SCRATCH, |s| board::SLOTS.slots[s as usize]),
+            scratch: f401_node::scratch_addr(&state, SLOT, &board::SLOTS),
         };
         let mut out = [0u8; RESPONSE_MAX];
         let flash = agent.store().flash();

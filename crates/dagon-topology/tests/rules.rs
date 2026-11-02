@@ -52,6 +52,27 @@ fn v03_one_coordinator() {
 }
 
 #[test]
+fn v23_more_than_eight_nodes_is_described_but_not_updatable() {
+    let extra: String = (0..7)
+        .map(|i| format!("  - id: extra{i}\n    mcu: esp32s3\n    role: node\n    port: vendor-stage2\n    tag: extra{i}\n"))
+        .collect();
+    let yaml = DEMO.replacen("nodes:\n", &format!("nodes:\n{extra}"), 1);
+    let report = check_str(&yaml);
+    assert!(
+        report
+            .errors()
+            .any(|i| i.rule == "V-23" && i.path == "nodes"),
+        "{:?}",
+        report.issues
+    );
+    assert!(
+        !report.errors().any(|i| i.rule == "V-02"),
+        "{:?}",
+        report.issues
+    );
+}
+
+#[test]
 fn v04_links_name_known_nodes() {
     assert_fires(
         &mutate("from: hub\n    to: watch", "from: ghost\n    to: watch"),

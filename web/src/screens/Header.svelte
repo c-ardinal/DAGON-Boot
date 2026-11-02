@@ -18,9 +18,12 @@
     sent?: boolean;
     /** The CLI link (K0–K3). */
     cliLabel?: string;
+    /** 運用 cannot be entered yet: no 構成 held by the 親機. */
+    operateLocked?: boolean;
   }
 
-  let { step, hub, drawer, drawerOpen, ondrawer, drawerButton = $bindable(), mode = 'operate', onmode, modeLocked = false, sent = false, cliLabel = CLI_NONE }: Props = $props();
+  let { step, hub, drawer, drawerOpen, ondrawer, drawerButton = $bindable(), mode = 'operate', onmode, modeLocked = false, sent = false, cliLabel = CLI_NONE, operateLocked = false }: Props = $props();
+  const off = (m: 'operate' | 'define') => (modeLocked && mode !== m) || (m === 'operate' && operateLocked && mode !== m);
   let helpOpen = $state(false);
 </script>
 
@@ -29,22 +32,29 @@
   {#if onmode}
     <div class="modes" role="radiogroup" aria-label={MODE.label}>
       {#each [['operate', MODE.operate], ['define', MODE.define]] as const as [m, label] (m)}
-        <button role="radio" aria-checked={mode === m} aria-disabled={modeLocked && mode !== m} onclick={() => !modeLocked && mode !== m && onmode(m)}>{label}</button>
+        <button
+          role="radio"
+          aria-checked={mode === m}
+          aria-disabled={off(m)}
+          aria-describedby={m === 'operate' && operateLocked ? 'operate-locked' : undefined}
+          onclick={() => !off(m) && mode !== m && onmode(m)}>{label}</button
+        >
       {/each}
     </div>
+    {#if operateLocked && mode === 'define'}<span id="operate-locked" class="locked">{MODE.operateLocked}</span>{/if}
   {/if}
   {#if drawer}
     <button class="secondary" aria-expanded={drawerOpen} aria-controls="drawer" bind:this={drawerButton} onclick={ondrawer}>{ORDER.heading}</button>
   {/if}
   <ol class="steps">
     {#if mode === 'define'}
-      <li>{sent ? MODE.sent : MODE.unsent}</li>
+      <!-- 定義 has no steps; the 構成 file is the source of truth (owner 11/3). -->
     {:else if step !== null}
       <li aria-current="step">
-        {#if step === 'recover'}
+        {#if STEP.of3(step) === 'recover'}
           {STEP.names.recover}
         {:else}
-          {STEP.label} <span class="step-n">{String(step).padStart(2, '0')}{STEP.of}</span>&ensp;{STEP.names[step]}
+          {STEP.label} <span class="step-n">{String(STEP.of3(step)).padStart(2, '0')}{STEP.of}</span>&ensp;{STEP.names[STEP.of3(step)]}
         {/if}
       </li>
     {/if}
@@ -91,6 +101,10 @@
   .modes button[aria-checked='true'] {
     background: var(--c-paper);
     color: var(--c-ink);
+  }
+  .locked {
+    color: var(--c-muted);
+    font: 400 var(--t-small-size) / var(--t-small-lh) var(--f-ja);
   }
   .modes button[aria-disabled='true'] {
     opacity: 0.4;

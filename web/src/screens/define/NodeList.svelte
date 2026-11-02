@@ -1,8 +1,8 @@
 <script lang="ts">
   import { CLI_NAV, DEFINE, INSPECT } from '../../app/copy.ts';
   import type { Define } from '../../app/define/define.svelte.ts';
-  import { canPlace, mcus } from '../../app/define/model.ts';
-  import { supportedBoards } from '../../wasm/dagon.ts';
+  import { canPlace, MAX_NODES, mcus } from '../../app/define/model.ts';
+  import { dagonReady, supportedBoards } from '../../wasm/dagon.ts';
 
   interface Props {
     d: Define;
@@ -16,10 +16,19 @@
   }
 
   let { d, onconnect, panel = null, onpanel, running = 0, cliReady = false }: Props = $props();
-  const boards = supportedBoards();
-  const mcuList = mcus();
+  // The first paint does not wait for dagon-wasm: the lists fill once it is there.
+  let boards = $state<ReturnType<typeof supportedBoards>>([]);
+  let mcuList = $state<ReturnType<typeof mcus>>([]);
+  $effect(() => {
+    void dagonReady()
+      .then(() => {
+        boards = supportedBoards();
+        mcuList = mcus();
+      })
+      .catch(() => undefined);
+  });
   let by = $state<'product' | 'mcu'>('product');
-  const full = $derived(d.doc.topo.nodes.length >= 8);
+  const full = $derived(d.doc.topo.nodes.length >= MAX_NODES);
   const placed = (id: string) => d.doc.topo.nodes.some((n) => n.board === id);
 </script>
 

@@ -17,7 +17,8 @@
   const ready = $derived(cli.state === 'ready');
   const nodes = $derived(d.config.nodes);
   const ids = $derived(nodes.map((n) => n.id));
-  const clean = $derived(d.errors === 0 && !d.problems.some((p) => p.rule === 'B-01'));
+  /** Making and building the project: every check passes but V-23 (a shape not updatable yet still builds). */
+  const clean = $derived(!d.problems.some((p) => (p.severity === 'error' && p.rule !== 'V-23') || p.rule === 'B-01'));
   const latest = (kind: string) => cli.jobs.find((j) => j.kind === kind);
   const ok = (kind: string) => latest(kind)?.state === 'succeeded';
   let selectedJob = $state<number | null>(null);

@@ -16,7 +16,7 @@
   import Table from './screens/define/Table.svelte';
   import CliPanel from './screens/define/CliPanel.svelte';
   import { Cli } from './app/define/cli.svelte.ts';
-  import { CLI_STATE } from './app/copy.ts';
+  import { CLI_LINK, CLI_STATE } from './app/copy.ts';
   import FilePanel from './screens/FilePanel.svelte';
   import Reconnect from './screens/Reconnect.svelte';
   import Header from './screens/Header.svelte';
@@ -25,7 +25,7 @@
   import { MockTransport } from './serial/mock.ts';
   import { WebSerialTransport, type Transport } from './serial/transport.ts';
   import Unsupported from './Unsupported.svelte';
-  import { dagonReady } from './wasm/dagon.ts';
+  import { dagonReady, require_release_key, set_release_key } from './wasm/dagon.ts';
 
   const params = new URLSearchParams(location.search);
   // The stand-in hubs are for development builds only.
@@ -61,7 +61,21 @@
   /** `dagon serve` (stage 3): K0 on a public page, its features on the page serve hands out. */
   const cli = new Cli();
   cli.onDevice = (need) => (need ? op.handOver() : op.cliReturned());
-  void cli.connect();
+  /**
+   * The release key: dagon serve writes the developer's key into the page (meta) and /v1/hello;
+   * a page it serves verifies with that key only, and with none until it is there. A standalone
+   * build keeps the key it was built with.
+   */
+  void cli.connect().then(async () => {
+    await dagonReady();
+    if (cli.state === 'none') return;
+    // Under serve the page opens the project's 構成 (dagon.toml's topology) at start.
+    const yaml = await cli.loadTopology();
+    if (yaml) d.importYaml(yaml);
+    require_release_key();
+    const key = document.querySelector<HTMLMetaElement>('meta[name="dagon-release-key"]')?.content ?? cli.hello?.release_key;
+    if (key) set_release_key(key);
+  }).catch(() => undefined);
   const cliLabel = $derived(cli.state === 'ready' ? CLI_STATE.ready(cli.hello?.cli ?? '') : CLI_STATE[cli.state]);
   let cliPanel = $state<'link' | 'jobs' | 'release' | 'project' | 'flash' | null>(null);
   const runningJobs = $derived(cli.jobs.filter((j) => j.state === 'running' || j.state === 'queued' || j.state === 'question').length);
@@ -76,7 +90,8 @@
   }
 
   /** 運用 / 定義 (§5). The define document goes to the operate canvas when leaving define mode. */
-  let mode = $state<'operate' | 'define'>('operate');
+  // The page opens on 定義: 運用 needs a 構成 the 親機 holds (owner decision 11/3).
+  let mode = $state<'operate' | 'define'>('define');
   const d = new Define();
   const busyStates = ['L19', 'L20', 'L21', 'L22', 'L24'];
   const modeLocked = $derived(busyStates.includes(op.state));
@@ -97,21 +112,13 @@
     if (connected && op.config) await op.push();
   }
 
-  function download(name: string, text: string) {
-    const a = document.createElement('a');
-    a.href = URL.createObjectURL(new Blob([text], { type: 'application/yaml' }));
-    a.download = name;
-    a.click();
-    URL.revokeObjectURL(a.href);
+  /** "保存": the 構成 back into the project's YAML through dagon serve (the page always runs under it). */
+  async function save() {
+    if (cli.state === 'ready') await cli.saveTopology(d.exportYaml().text);
   }
 
-  let yamlInput = $state<HTMLInputElement>();
-  async function pickedYaml(e: Event) {
-    const input = e.currentTarget as HTMLInputElement;
-    const f = input.files?.[0];
-    input.value = '';
-    if (f) d.importYaml(await f.text());
-  }
+  /** Define mode's drawing scale: up to 32 ノード fit by zooming out; the canvas scrolls to pan. */
+  let zoom = $state(1);
 
   /** Ctrl+Z / Ctrl+Shift+Z anywhere but in a field; Delete and L on the canvas (§12.2). */
   function defineKeys(e: KeyboardEvent) {
@@ -314,7 +321,8 @@
 
   $effect(() => {
     const s = step;
-    document.title = s === null || s === 'recover' ? PRODUCT : `${String(s).padStart(2, '0')} ${STEP.of} ${STEP.names[s]}｜${PRODUCT}`;
+    const s3 = s === null ? null : STEP.of3(s);
+    document.title = s3 === null || s3 === 'recover' ? PRODUCT : `${String(s3).padStart(2, '0')} ${STEP.of} ${STEP.names[s3]}｜${PRODUCT}`;
   });
 
   // Focus follows the band only after a user action changed it, never on load.
@@ -382,7 +390,8 @@
         <button role="radio" aria-checked={d.view === 'graph'} onclick={() => (d.view = 'graph')}>{DEFINE.graph}</button>
         <button role="radio" aria-checked={d.view === 'table'} onclick={() => (d.view = 'table')}>{DEFINE.table}</button>
       </div>
-      <button class="secondary" onclick={() => yamlInput?.click()}>{DEFINE.importYaml}</button>
+      <button class="secondary" aria-disabled={zoom <= 0.5} onclick={() => (zoom = Math.max(0.5, zoom - 0.25))}>{DEFINE.zoomOut}</button>
+      <button class="secondary" aria-disabled={zoom >= 1.5} onclick={() => (zoom = Math.min(1.5, zoom + 0.25))}>{DEFINE.zoomIn}</button>
     </div>
     {#if d.view === 'graph'}
       <Graph
@@ -394,6 +403,7 @@
         onselect={(k) => (d.selected = d.selected === k ? null : k)}
         dot={defineDot}
         chips={defineChips}
+        {zoom}
       />
     {:else}
       <Table {d} onaddnode={() => document.querySelector<HTMLElement>('#list-h')?.focus()} />
@@ -418,26 +428,27 @@
   {@const firstError = d.problems.find((p) => p.severity === 'error')}
   <footer id="band" class="dband" tabindex="-1">
     <div class="next">
-      {#if d.unreadable}
+      {#if cli.state !== 'ready'}
+        <p>{CLI_LINK.needCli}</p>
+      {:else if d.unreadable}
         <span class="cause">{DEFINE.unreadableChip}</span>
         <p>{DEFINE.unreadableSentence}</p>
       {:else if empty}
-        <p>{DEFINE.emptySentence}</p>
+        <p>{DEFINE.startSentence}</p>
       {:else if firstError}
         <p>{DEFINE.fixSentence}</p>
-      {:else if !op.sent}
-        <p>{DEFINE.sendSentence}</p>
       {/if}
     </div>
-    {#if !empty}
-      <button class="secondary" onclick={() => { const f = d.exportYaml(); download(f.name, f.text); }}>{DEFINE.exportYaml}</button>
-    {/if}
     {#if empty}
-      <button class="primary" onclick={() => void op.connect()}>{DEFINE.connectDiscover}<span class="arrow" aria-hidden="true">→</span></button>
-    {:else if firstError}
-      <button class="primary" onclick={() => d.fix(firstError)}>{DEFINE.fix}<span class="arrow" aria-hidden="true">→</span></button>
-    {:else if !op.sent}
-      <button class="primary" onclick={() => void sendDefined()}>{connected ? DEFINE.send : DEFINE.connectSend}<span class="arrow" aria-hidden="true">→</span></button>
+      <button class="primary" onclick={() => d.placeSample()}>{DEFINE.fromSample}<span class="arrow" aria-hidden="true">→</span></button>
+    {:else}
+      <button class="secondary" aria-disabled={cli.state !== 'ready'} onclick={() => void save()}>{DEFINE.save}</button>
+      {#if !firstError}
+        <!-- Optional: updating sends the 構成 before it updates (owner 11/3). -->
+        <button class="secondary" onclick={() => void sendDefined()}>{connected ? DEFINE.send : DEFINE.connectSend}</button>
+      {:else}
+        <button class="primary" onclick={() => d.fix(firstError)}>{DEFINE.fix}<span class="arrow" aria-hidden="true">→</span></button>
+      {/if}
     {/if}
     <div class="visually-hidden" role="status">{d.status || op.status}</div>
     <div class="visually-hidden" role="alert">{op.alert}</div>
@@ -522,6 +533,7 @@
       {modeLocked}
       sent={op.sent && op.config?.yaml === d.config.yaml}
       {cliLabel}
+      operateLocked={d.doc.topo.nodes.length === 0 || d.errors > 0}
     />
     {#if layout === 'narrow'}
       {@render bottom()}
@@ -541,7 +553,6 @@
       {@render bottom()}
     {/if}
   </div>
-  <input class="visually-hidden" type="file" accept=".yaml,.yml" tabindex="-1" aria-hidden="true" bind:this={yamlInput} onchange={pickedYaml} />
   <input
     class="visually-hidden"
     type="file"

@@ -37,9 +37,11 @@
     onselect: (key: string) => void;
     dot: Dot | null;
     chips?: Record<string, Chip>;
+    /** Drawing scale (define mode's zoom; scrolling pans). */
+    zoom?: number;
   }
 
-  let { config, live, connected, sending, selected, onselect, dot, chips = {} }: Props = $props();
+  let { config, live, connected, sending, selected, onselect, dot, chips = {}, zoom = 1 }: Props = $props();
 
   const NODE_W = 240;
   const MIN_W = 600;
@@ -193,7 +195,7 @@
 
 <div class="box" bind:contentRect={box}>
   <!-- svelte-ignore a11y_no_static_element_interactions -->
-  <div class="canvas" bind:this={canvas} style:width="{W}px" style:height="{H}px" onkeydown={onKey}>
+  <div class="canvas" bind:this={canvas} style:width="{W}px" style:height="{H}px" style:zoom={zoom === 1 ? undefined : zoom} onkeydown={onKey}>
     <svg class="links" width={W} height={H} viewBox="0 0 {W} {H}" aria-hidden="true">
       <path d="M0 0H{W}V{H}H0Z" fill="var(--c-layer-0)" />
       <path d={layerPath(L1_TOP, H)} fill="var(--c-layer-1)" />

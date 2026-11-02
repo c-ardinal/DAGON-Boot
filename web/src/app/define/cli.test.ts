@@ -75,9 +75,9 @@ describe('dagon serve link', () => {
     const cli = new Cli(f.deps);
     await cli.connect();
     await cli.saveTopology('dagon: 1\n');
-    expect(f.calls.at(-1)).toMatchObject({ url: '/v1/topology', method: 'PUT', body: 'dagon: 1\n' });
+    expect(f.calls[f.calls.length - 1]).toMatchObject({ url: '/v1/topology', method: 'PUT', body: 'dagon: 1\n' });
     const job = (await cli.gen(['hub', 'seg']))!;
-    expect(f.calls.at(-1)).toMatchObject({ url: '/v1/gen', body: JSON.stringify({ nodes: ['hub', 'seg'] }) });
+    expect(f.calls[f.calls.length - 1]).toMatchObject({ url: '/v1/gen', body: JSON.stringify({ nodes: ['hub', 'seg'] }) });
     cli.event({ type: 'job.state', job: job.id, state: 'running' });
     cli.event({ type: 'job.progress', job: job.id, stage: 'gen', percent: 40 });
     cli.event({ type: 'job.log', job: job.id, lines: ['nodes/hub/src/main.rs', 'nodes/seg/src/main.rs'] });
@@ -85,7 +85,7 @@ describe('dagon serve link', () => {
     expect(cli.jobs[0]).toMatchObject({ state: 'question', percent: 40, question: { id: 'q1' } });
     expect(cli.jobs[0].lines).toHaveLength(2);
     await cli.answer(cli.jobs[0], 'つないだ');
-    expect(f.calls.at(-1)).toMatchObject({ url: `/v1/jobs/${job.id}/answer`, body: JSON.stringify({ answer: 'つないだ' }) });
+    expect(f.calls[f.calls.length - 1]).toMatchObject({ url: `/v1/jobs/${job.id}/answer`, body: JSON.stringify({ answer: 'つないだ' }) });
     cli.event({ type: 'job.result', job: job.id, data: { files: 6 } });
     cli.event({ type: 'job.state', job: job.id, state: 'succeeded' });
     expect(cli.jobs[0]).toMatchObject({ state: 'succeeded', result: { files: 6 }, ended: 1000 });
@@ -100,7 +100,7 @@ describe('dagon serve link', () => {
     cli.event({ type: 'device.need', job: 1 });
     await new Promise((r) => setTimeout(r, 0));
     expect(cli.holdsHub).toBe(true);
-    expect(f.calls.at(-1)).toMatchObject({ url: '/v1/device', method: 'POST', body: JSON.stringify({ state: 'released' }) });
+    expect(f.calls[f.calls.length - 1]).toMatchObject({ url: '/v1/device', method: 'POST', body: JSON.stringify({ state: 'released' }) });
     cli.event({ type: 'device.returned', job: 1 });
     expect([cli.holdsHub, seen]).toEqual([false, [true, false]]);
   });
@@ -110,6 +110,6 @@ describe('dagon serve link', () => {
     const cli = new Cli(f.deps);
     await cli.connect();
     expect(await cli.releaseBytes('r1')).toEqual(Uint8Array.of(1, 2, 3));
-    expect(f.calls.at(-1)).toMatchObject({ url: '/v1/release/r1', auth: `Bearer ${PASS}` });
+    expect(f.calls[f.calls.length - 1]).toMatchObject({ url: '/v1/release/r1', auth: `Bearer ${PASS}` });
   });
 });

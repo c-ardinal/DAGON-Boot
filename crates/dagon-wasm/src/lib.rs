@@ -14,7 +14,10 @@ mod watch;
 
 pub use define::{board_template, supported_mcus, topo_parse};
 pub use frame::{frame_encode, FrameCutter};
-pub use host::{check_bootcore_for, check_release_for, watch_interval_ms, WasmHost};
+pub use host::{
+    check_bootcore_for, check_release_for, require_release_key, set_release_key, watch_interval_ms,
+    WasmHost,
+};
 #[cfg(feature = "sim")]
 pub use sim::SimDesk;
 
@@ -148,7 +151,7 @@ pub fn version_older(a: u32, b: u32) -> bool {
 /// The page verifies releases with the public RFC 8032 test key.
 #[wasm_bindgen]
 pub fn release_key_is_test() -> bool {
-    host::PUBKEY == TEST_PUBKEY_BYTES
+    host::release_key() == Some(TEST_PUBKEY_BYTES)
 }
 
 const TEST_PUBKEY_BYTES: [u8; 32] = [
@@ -220,6 +223,12 @@ mod tests {
         let mut dgb = golden("release.dgb");
         // The default build embeds the test key the golden release is signed with.
         assert_eq!(PUBKEY.to_vec(), pubkey());
+        // A run-time key replaces it; a required one refuses until it is set.
+        let other = "ab".repeat(32);
+        crate::host::set_release_key(&other).unwrap();
+        assert_eq!(release_refusal(&dgb, &topo), Some("key"));
+        crate::host::set_release_key(TEST_PUBKEY).unwrap();
+        assert_eq!(release_refusal(&dgb, &topo), None);
         assert!(release_key_is_test());
         assert!(version_older(0x0100_0000, 0x0101_0000));
         assert!(!version_older(0x0101_0000, 0x0101_0000));

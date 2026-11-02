@@ -10,7 +10,10 @@ use crate::report::{Issue, Report, Severity};
 use crate::schema::{ControlKind, Link, LinkKind, Node, Role, Tier, Topology, UartIface};
 
 pub const SCHEMA_VERSION: u32 = 1;
-const MAX_NODES: usize = 8;
+/// Nodes a 構成 may describe (and the editor draw).
+const MAX_NODES: usize = 32;
+/// Nodes updating reaches today; more is a shape not updatable yet (V-23).
+const MAX_UPDATABLE_NODES: usize = 8;
 const MAX_ID_LEN: usize = 15;
 const MAX_TAG_LEN: usize = 16;
 const BAUD_RATES: &[u32] = &[9_600, 57_600, 115_200, 460_800];
@@ -311,6 +314,14 @@ impl<'a> Ctx<'a> {
             .filter(|n| n.role == Role::Coordinator)
             .map(|n| n.id.as_str())
             .collect();
+        let n = self.t.nodes.len();
+        if n > MAX_UPDATABLE_NODES {
+            self.err(
+                "V-23",
+                "nodes",
+                format!("{n} nodes; updating covers up to {MAX_UPDATABLE_NODES}"),
+            );
+        }
         if hubs.len() > 1 {
             self.err(
                 "V-23",

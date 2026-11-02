@@ -14,6 +14,8 @@ export interface Hello {
   api_key: boolean;
   key: boolean;
   key_id: string | null;
+  /** The developer's public key (64 hex digits) the page verifies releases with. */
+  release_key?: string;
 }
 
 export type JobKind = 'build' | 'sign' | 'release' | 'gen' | 'flash' | 'conform' | 'ai_topology' | string;
@@ -172,6 +174,13 @@ export class Cli {
     const job: Job = { id: r.job, kind, state: 'queued', target, stage: '', percent: null, lines: [], result: null, question: null, started: this.d.now(), ended: null };
     this.jobs = [job, ...this.jobs];
     return this.jobs[0];
+  }
+
+  /** GET /v1/topology: the project's 構成 YAML, or null when it has none yet. */
+  async loadTopology(): Promise<string | null> {
+    if (this.state !== 'ready') return null;
+    const r = await this.call('GET', 'topology');
+    return r.ok ? await r.text() : null;
   }
 
   /** PUT /v1/topology: the 構成 YAML into the project's topology.yaml; the CLI checks it too (422 when not pushable). */

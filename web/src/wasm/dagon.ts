@@ -14,7 +14,7 @@ import init, {
 import type { HostLink } from './pkg/dagon_wasm.js';
 import type { HelloReq, HelloResp } from '../serial/hello.ts';
 
-export { check_release_for, initSync, topo_check, topo_compile, verify_release, watch_interval_ms } from './pkg/dagon_wasm.js';
+export { check_release_for, initSync, require_release_key, set_release_key, topo_check, topo_compile, verify_release, watch_interval_ms } from './pkg/dagon_wasm.js';
 
 export type TargetKind = 'hub' | 'i2c' | 'uart';
 

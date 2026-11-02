@@ -12,7 +12,6 @@
     "prebuild": "npm run wasm",
     "build": "svelte-check --tsconfig ./tsconfig.json && vite build",
     "preview": "vite preview",
-    "site": "node scripts/site.mjs",
     "pretest": "npm run wasm:dev",
     "test": "vitest run",
     "fonts": "node scripts/fonts.mjs"

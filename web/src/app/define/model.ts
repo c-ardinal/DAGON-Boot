@@ -101,7 +101,8 @@ export interface BoardTemplate {
   link: { kind: 'i2c' | 'uart'; iface: string | null; addr: number | null; baud: number | null; control: 'full' | 'cooperative'; romEntry: string | null } | null;
 }
 
-export const MAX_NODES = 8;
+/** Nodes the editor places and draws; updating reaches 8 (V-23 says when more). */
+export const MAX_NODES = 32;
 /** The STM32 ROM loader's address: never offered (V-18). */
 export const ROM_ADDR = 0x39;
 const I2C_FIRST = 0x08;

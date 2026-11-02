@@ -10,11 +10,15 @@ export const SKIP = {
   next: '次にすることへ',
 } as const;
 
-/** Header step indicator: "手順 02/06 構成を用意"; recovery shows its name only. */
+/**
+ * Header step indicator in three steps (owner 11/3): ① つなぐ ② ファイル ③ 更新.
+ * The operate machine's six steps fold into them (STEP.of3); recovery shows its name only.
+ */
 export const STEP = {
   label: '手順',
-  of: '/06',
-  names: { 1: 'つなぐ', 2: '構成を用意', 3: '親機へ送る', 4: 'ファイル', 5: '更新', 6: '完了', recover: '復旧' } as Record<Step, string>,
+  of: '/03',
+  names: { 1: 'つなぐ', 2: 'ファイル', 3: '更新', recover: '復旧' } as Record<1 | 2 | 3 | 'recover', string>,
+  of3: (s: Step): 1 | 2 | 3 | 'recover' => (s === 'recover' ? s : s <= 3 ? 1 : s === 4 ? 2 : 3),
 } as const;
 
 /** M48: hub connection in the header (no node counts here). */
@@ -401,7 +405,7 @@ export interface FixWords {
 /** §11.2: how to fix each rule, one sentence. */
 export const RULE_FIX: Record<string, (w: FixWords) => string> = {
   'V-01': () => 'dagon の新しいバージョンで書き出したファイルを読み込んでください。',
-  'V-02': (w) => (w.many ? 'ノードを 8 つまでにしてください。' : `名前「${w.id}」の 2 つのどちらかを変えてください。`),
+  'V-02': (w) => (w.many ? 'ノードを 32 までにしてください。' : `名前「${w.id}」の 2 つのどちらかを変えてください。`),
   'V-03': () => '親機を 1 つだけにしてください。',
   'V-04': () => '子機どうしのリンクを消し、親機とつないでください。',
   'V-05': (w) => `${w.to}を親機とリンクでつないでください。`,
@@ -432,6 +436,8 @@ export const MODE = {
   define: '定義',
   label: 'モード',
   unsent: '構成 未送信',
+  /** The 運用 switch is held until the 親機 holds a 構成 (owner decision 11/3). */
+  operateLocked: '構成の問題を直すと、運用に切り替えられます。',
   sent: '構成 送信済み',
 } as const;
 
@@ -456,6 +462,8 @@ export const DEFINE = {
   table: '表',
   exportYaml: '書き出す',
   importYaml: '読み込む',
+  zoomIn: '大きく',
+  zoomOut: '小さく',
   /** M49 dot numbers in define mode. */
   dotNodes: 'ノード',
   dotLinks: 'リンク',
@@ -473,6 +481,11 @@ export const DEFINE = {
   problemName: (short: string, rule: string, sentence: string) => `${short}、規則 ${rule}、${sentence}`,
   /** Bottom band (C02, C05, C06, C09). */
   emptySentence: '親機を USB でパソコンにつないでから、『つないで、自動で見つける』を押してください。',
+  /** A project without a 構成 yet (the page always runs under dagon serve, owner 11/3). */
+  startSentence: 'ノードを置くか、見本から作ってください。',
+  fromSample: '見本から作る',
+  /** Writes the 構成 back to the project's YAML through dagon serve. */
+  save: '保存',
   fixSentence: '直すと、親機へ送れます。',
   sendSentence: '親機へ送ると、更新できるようになります。',
   send: '親機へ送る',

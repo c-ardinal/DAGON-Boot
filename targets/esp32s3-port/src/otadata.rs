@@ -1,4 +1,5 @@
-//! What otadata's selected entry says about its slot, in STATUS terms.
+//! otadata: what the selected entry says about its slot in STATUS terms, and
+//! the encoding of a new trial entry.
 //!
 //! The rollback-enabled 2nd stage turns an entry left PendingVerify into
 //! Aborted on the next boot and falls back to the other slot; STATUS reports
@@ -41,7 +42,9 @@ pub fn selected_view(running: u8, selected: u8, state: Option<u32>) -> Option<Se
         raw::PENDING_VERIFY if is_running => SlotState::Trying,
         // Not booted although selected and on trial: the 2nd stage fell back.
         raw::PENDING_VERIFY | raw::ABORTED | raw::INVALID => SlotState::Reverted,
-        raw::VALID | raw::UNDEFINED => SlotState::Confirmed,
+        raw::VALID | raw::UNDEFINED if is_running => SlotState::Confirmed,
+        // Selected and final but not booted: its image failed to load, the
+        // 2nd stage fell back. Only the header can tell what is there.
         _ => return None,
     };
     Some(SelectedView {
@@ -49,6 +52,77 @@ pub fn selected_view(running: u8, selected: u8, state: Option<u32>) -> Option<Se
         state: slot_state,
         reason: (slot_state == SlotState::Reverted).then_some(reason::TRIAL_EXHAUSTED),
     })
+}
+
+/// One otadata entry: `ota_seq` u32, `seq_label` [20], `ota_state` u32, `crc` u32.
+pub const ENTRY_LEN: usize = 32;
+/// Entry `i` lives at the start of otadata sector `i`.
+pub const SECTOR_LEN: u32 = 0x1000;
+const OTA_SLOT_COUNT: u32 = 2;
+
+/// CRC of an entry: the 2nd stage's `esp_rom_crc32_le(UINT32_MAX, &ota_seq, 4)`
+/// (reflected 0x04C11DB7, init 0, final xor 0xFFFFFFFF).
+pub fn seq_crc(seq: u32) -> u32 {
+    let mut crc = 0u32;
+    for b in seq.to_le_bytes() {
+        crc ^= u32::from(b);
+        for _ in 0..8 {
+            crc = (crc >> 1) ^ if crc & 1 != 0 { 0xEDB8_8320 } else { 0 };
+        }
+    }
+    !crc
+}
+
+fn u32_at(e: &[u8; ENTRY_LEN], at: usize) -> u32 {
+    u32::from_le_bytes([e[at], e[at + 1], e[at + 2], e[at + 3]])
+}
+
+/// `ota_seq` of an entry the 2nd stage counts (state is not considered).
+fn valid_seq(e: &[u8; ENTRY_LEN]) -> Option<u32> {
+    let seq = u32_at(e, 0);
+    (seq != u32::MAX && u32_at(e, 28) == seq_crc(seq)).then_some(seq)
+}
+
+/// Entry the 2nd stage could boot from: counted and not Aborted/Invalid.
+fn bootable(e: &[u8; ENTRY_LEN]) -> bool {
+    valid_seq(e).is_some() && !matches!(u32_at(e, 24), raw::ABORTED | raw::INVALID)
+}
+
+/// The entry that selects OTA slot `ota_index` for one trial (state New), and
+/// the sector it goes to. Written whole in one program after erasing that
+/// sector, so a power cut leaves either the old selection (erased entry,
+/// ignored) or the complete new one; never a new seq with an old state.
+///
+/// Seq and CRC follow ESP-IDF's `esp_rewrite_ota_data` (the 2nd stage boots
+/// ota_((seq - 1) % 2) from the highest counted seq), with two differences
+/// that keep the fallback alive: the seq is always above every counted seq,
+/// and an entry the 2nd stage could still boot is only overwritten when the
+/// other one is not bootable anyway.
+pub fn trial_entry(current: &[[u8; ENTRY_LEN]; 2], ota_index: u8) -> (usize, [u8; ENTRY_LEN]) {
+    let id = u32::from(ota_index);
+    let seqs = [valid_seq(&current[0]), valid_seq(&current[1])];
+    let sector = match (bootable(&current[0]), bootable(&current[1])) {
+        (true, true) => usize::from(seqs[0] > seqs[1]), // the older one
+        (true, false) => 1,
+        _ => 0,
+    };
+    let seq = match seqs[0].max(seqs[1]) {
+        None => id + 1,
+        // Smallest seq above `top` that maps to `id`.
+        Some(top) => {
+            let base = top - top % OTA_SLOT_COUNT + (id + 1) % OTA_SLOT_COUNT;
+            if base > top {
+                base
+            } else {
+                base + OTA_SLOT_COUNT
+            }
+        }
+    };
+    let mut e = current[sector];
+    e[0..4].copy_from_slice(&seq.to_le_bytes());
+    e[24..28].copy_from_slice(&raw::NEW.to_le_bytes());
+    e[28..32].copy_from_slice(&seq_crc(seq).to_le_bytes());
+    (sector, e)
 }
 
 #[cfg(test)]
@@ -95,6 +169,104 @@ mod tests {
             view(SLOT_A, SLOT_A, raw::UNDEFINED),
             Some((SlotState::Confirmed, None))
         );
+    }
+
+    #[test]
+    fn final_selection_that_did_not_boot_is_not_confirmed() {
+        assert_eq!(view(SLOT_A, SLOT_B, raw::VALID), None);
+        assert_eq!(view(SLOT_B, SLOT_A, raw::UNDEFINED), None);
+    }
+
+    // Entries from esp-bootloader-esp-idf's own otadata tests.
+    const BLANK: [u8; ENTRY_LEN] = [0xFF; ENTRY_LEN];
+
+    fn entry(seq: u32, state: u32, crc: [u8; 4]) -> [u8; ENTRY_LEN] {
+        let mut e = BLANK;
+        e[0..4].copy_from_slice(&seq.to_le_bytes());
+        e[24..28].copy_from_slice(&state.to_le_bytes());
+        e[28..32].copy_from_slice(&crc);
+        e
+    }
+
+    #[test]
+    fn seq_crc_matches_known_entries() {
+        assert_eq!(seq_crc(1).to_le_bytes(), [154, 152, 67, 71]);
+        assert_eq!(seq_crc(2).to_le_bytes(), [116, 55, 246, 85]);
+        assert_eq!(seq_crc(3).to_le_bytes(), [17, 80, 74, 237]);
+    }
+
+    #[test]
+    fn trial_entry_from_blank_otadata() {
+        assert_eq!(
+            trial_entry(&[BLANK, BLANK], 0),
+            (0, entry(1, raw::NEW, [154, 152, 67, 71]))
+        );
+        // ota_1 from blank gets seq 2 (never 0), like ESP-IDF.
+        assert_eq!(
+            trial_entry(&[BLANK, BLANK], 1),
+            (0, entry(2, raw::NEW, [116, 55, 246, 85]))
+        );
+    }
+
+    #[test]
+    fn trial_entry_goes_to_the_other_sector_with_next_seq() {
+        let valid_a = entry(1, raw::VALID, [154, 152, 67, 71]);
+        assert_eq!(
+            trial_entry(&[valid_a, BLANK], 1),
+            (1, entry(2, raw::NEW, [116, 55, 246, 85]))
+        );
+        // Both bootable (A confirmed earlier, B confirmed now): the older
+        // entry (A's) is replaced, B's stays as the fallback.
+        let valid_b = entry(2, raw::VALID, [116, 55, 246, 85]);
+        assert_eq!(
+            trial_entry(&[valid_a, valid_b], 0),
+            (0, entry(3, raw::NEW, [17, 80, 74, 237]))
+        );
+    }
+
+    fn seq_of(e: &[u8; ENTRY_LEN]) -> u32 {
+        u32_at(e, 0)
+    }
+
+    #[test]
+    fn trial_entry_after_rollback_keeps_the_running_entry() {
+        // B was tried and aborted, A runs from sector 0.
+        let valid_a = entry(1, raw::VALID, [154, 152, 67, 71]);
+        let aborted_b = entry(2, raw::ABORTED, [116, 55, 246, 85]);
+        // Retrying B: sector 1 (the aborted one) gets seq 4, A stays.
+        let (sector, e) = trial_entry(&[valid_a, aborted_b], 1);
+        assert_eq!((sector, seq_of(&e)), (1, 4));
+        assert_eq!((seq_of(&e) - 1) % 2, 1);
+        // Trying A again: still sector 1, seq 3.
+        let (sector, e) = trial_entry(&[valid_a, aborted_b], 0);
+        assert_eq!((sector, seq_of(&e)), (1, 3));
+        // Mirrored: A aborted in sector 0, B runs from sector 1.
+        let aborted_a = entry(3, raw::ABORTED, [17, 80, 74, 237]);
+        let valid_b = entry(2, raw::VALID, [116, 55, 246, 85]);
+        let (sector, e) = trial_entry(&[aborted_a, valid_b], 0);
+        assert_eq!((sector, seq_of(&e)), (0, 5));
+    }
+
+    #[test]
+    fn new_seq_is_always_the_highest_and_maps_to_the_slot() {
+        for top in 1..20u32 {
+            let current = [entry(top, raw::VALID, seq_crc(top).to_le_bytes()), BLANK];
+            for id in 0..2u8 {
+                let (_, e) = trial_entry(&current, id);
+                let seq = seq_of(&e);
+                assert!(seq > top && seq <= top + 2, "top {top} id {id} seq {seq}");
+                assert_eq!((seq - 1) % 2, u32::from(id));
+                assert_eq!(u32_at(&e, 28), seq_crc(seq));
+                assert_eq!(u32_at(&e, 24), raw::NEW);
+            }
+        }
+    }
+
+    #[test]
+    fn trial_entry_ignores_entries_with_bad_crc() {
+        let corrupt = entry(5, raw::VALID, [0, 0, 0, 0]);
+        let (sector, e) = trial_entry(&[corrupt, BLANK], 0);
+        assert_eq!((sector, seq_of(&e)), (0, 1));
     }
 
     #[test]

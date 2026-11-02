@@ -9,100 +9,225 @@
 
 [English: README.md](README.md)
 
-小さなマイコンのネットワークに、署名付きの A/B ファームウェア更新と自動の巻き戻しを、1 台の親機（hub）を通して PC やブラウザから行います。
+**動くハードウェアを簡単に作り、作ったあとも育て続ける。**
 
-## 概要
+DAGON Boot は、いくつかのマイコンを組み合わせて何かを作り、机や壁や腕に置いたあとも良くしていきたい開発者（はじめての方から経験者まで）のためのものです。ボード（またはそのマイコン）を選び、つなぎ方を描き、アプリを Rust で書くだけで、残りは DAGON が受け持ちます。
 
-親機（RP2040）は PC と USB でつながり、子機とは I2C（STM32F401）や UART（ESP32-S3）でつながります。PC は署名付きのリリースを検査し、各子機へ親機経由でイメージを送り、子機を新しいスロットで試行起動させ、子機が新しい版で応答したら確定させます。新しいイメージが確定されないままの子機は、ウォッチドッグでリセットされて前のスロットで起動し直します。まったく応答しなくなった STM32F401 は、PC が親機を通して操作する STM32 の ROM の I2C ブートローダで書き直せます。
+- **ビルドできるプロジェクト。** `dagon new` と `dagon gen` が、ノードごとに起動・配線・自分のコードを書く空の `app.rs` を持つ Rust の crate を作ります。フラッシュの配置、イメージヘッダ、リンカの番地、ブートローダは DAGON が決めます。
+- **全体を安全に更新。** PC の USB につないだ親機が、各ノードへ新しいバージョンを送ります。イメージはすべて署名付きです。ノードは新しいバージョンを試行起動し、確定されなければ自分で前のバージョンに戻ります。応答しなくなったノードも親機経由で書き直せます。
+- **同じことができるブラウザのツールとコマンド。** DAGON Console（`dagon serve`）は、ノードとリンクをグラフで見せ、編集のたびに検査し、ビルド・署名・更新まで行います。どの手順も `dagon` コマンドでもできます。
+- **Claude の手助け。** 新しいプロジェクトには、よくある場面（ビルドが失敗した、一覧に無いボードを使いたい、構成の問題が分からない）のための Claude Code の指示とスキルが入っています。
 
-すべての形式（イメージヘッダ、リリースのマニフェスト、`.dgb` リリースバンドル、状態ログ、構成バイナリ）と通信プロトコルはこのリポジトリで定義しています。ファームウェア、`dagon` コマンドラインツール、ブラウザのツール DAGON Console（WebAssembly 経由）が同じ Rust の crate を使います。
+## この文書の言葉
+
+- **ノード**: 構成の中の 1 つのマイコン。
+- **親機**: PC と USB でつながるノード。ほかのノードへ更新を中継します。
+- **子機**: 親機から I2C か UART でつながるノード。
+- **構成**: ノード、そのリンク、更新の順番（`topology.yaml`）。
+
+## 対応するハードウェア
+
+| マイコン | デスクのデモでの役割 | 対応表のボード | 要るフラッシュ |
+|---|---|---|---|
+| RP2040（`rp2040`） | 親機 | Waveshare RP2040-Touch-LCD-1.28（`waveshare-rp2040-touch-lcd-1.28`） | 4 MiB |
+| STM32F401RE（`stm32f401re`） | 子機（I2C） | NUCLEO-F401RE（`nucleo-f401re`） | 512 KiB |
+| ESP32-S3（`esp32s3`） | 子機（UART） | M5StopWatch（`m5stopwatch`） | 16 MiB |
+
+**ボードでもマイコンでも選べます。** 対応表のボードは、ピン・既定のリンク・付属の部品を持っているので、選ぶだけです。同じマイコンを載せたほかのボードはマイコンで選び、フラッシュ容量と親機につないだピンを入れます（[自分のボード（マイコンで選ぶ）](#自分のボードマイコンで選ぶ)を参照）。
+
+## 必要なもの
+
+| ツール | 要る場面 | 入れ方 |
+|---|---|---|
+| Rust（`rustup`） | いつも | <https://rustup.rs> |
+| Rust のターゲット `thumbv6m-none-eabi`、`thumbv7em-none-eabihf` | RP2040、STM32F401RE | `rustup target add thumbv6m-none-eabi thumbv7em-none-eabihf` |
+| `espup` と `esp` のツールチェーン | ESP32-S3 | `cargo install espup` のあと `espup install` |
+| `probe-rs` と ST-LINK | STM32F401RE の初回書込み | `cargo install probe-rs-tools`（Windows は ST-LINK のドライバも） |
+| C コンパイラ | `dagon` CLI をソースからビルドするとき（`ring` crate） | Windows は MSVC の Build Tools、ほかは `cc` |
+| Chrome か Edge 89 以降 | DAGON Console（Web Serial） | — |
+
+このリポジトリのクローンから `dagon` CLI を入れます:
+
+```sh
+cargo install --path crates/dagon-cli
+dagon --help
+```
+
+DAGON Console は `dagon` に組み込まれています。Node.js が要るのは、DAGON Console そのものを開発するときだけです（`web/README.md`）。
+
+## はじめから更新まで
+
+例はデスクのデモです: 丸い LCD の RP2040 親機、7 セグメント表示にバージョンを出す NUCLEO-F401RE（I2C）、M5StopWatch（UART）。手順 2 で自分の構成に置き換えます。
+
+### 1. プロジェクトを始める
+
+```sh
+dagon new my-fleet
+cd my-fleet
+```
+
+`dagon new` は `dagon.toml`、`topology.yaml`（デスクのデモ。`--from <yaml>` で自分の構成）、`.gitignore`、Claude Code のファイル（下）を作り、まだ無ければ署名の鍵の組を `~/.dagon/keys/my-fleet`（または `--keys <dir>`）に作ります。秘密鍵はプロジェクトの外、git の作業ツリーの外に置かれ、`dagon.toml` には公開鍵の場所だけが書かれます。署名するときは秘密鍵の場所を CLI に教えます:
+
+```sh
+export DAGON_SIGNING_KEY=~/.dagon/keys/my-fleet/dagon-signing.key
+```
+
+### 2. DAGON Console で構成を作る
+
+```sh
+dagon serve
+```
+
+DAGON Console が 127.0.0.1 だけで、使い捨てのパスフレーズ付きでブラウザに開きます。ノードリストからノードを置き（製品でもマイコンでも選べます）、リンクでつなぎ、検査が示す問題を直します。編集は `topology.yaml` に保存されます。プロジェクトが無いときは、作るか開く画面から始まります。
+
+コマンドでは `dagon topo check topology.yaml` で検査します。言葉で書いた説明から Claude API で構成の案を作ることもできます:
+
+```sh
+export ANTHROPIC_API_KEY=...        # 読むのは CLI だけ。表示も保存もしない
+dagon ai topology --in boards.txt --out topology.yaml
+```
+
+### 3. ノードの crate を作る
+
+```sh
+dagon gen
+```
+
+ノードごとに `nodes/<id>/` に crate ができます。アプリは `nodes/<id>/src/app.rs` に書きます: 仕事をする task と、試行中のバージョンを確定してよいかを答える `self_check` です。構成を変えたら何度でも `dagon gen` を実行できます。書き直すのは `src/wiring.rs` と `Cargo.toml` の DAGON のパッケージの行だけで、`app.rs` には触れません（`main.rs` も `--force-main` のときだけ）。DAGON Console では『プロジェクトを作る』が同じことをします。
+
+### 4. ビルド
+
+```sh
+dagon build            # または: dagon build seg
+```
+
+各ノードを `out/build/<id>/app-a.elf` と、スロット B 用の `app-b.elf` にビルドします（ESP32-S3 のイメージは両方のスロットで使えるので 1 つ）。`dagon.toml` の公開鍵が埋め込まれます。バージョンは `dagon.toml` の `[build.<id>]` から取ります。
+
+### 5. 最初のバージョンを書き込む（ノードごとに 1 回）
+
+ノードには、ブートコアと最初のアプリを、そのノード自身のケーブルで 1 回だけ書き込みます。`dagon.toml` のこの部分は、`dagon new` も `dagon gen` もまだ書かないので、手で加えます。
+
+DAGON のクローンで、プロジェクトの公開鍵（`dagon.toml` の `pubkey`）を使ってブート用のイメージをビルドします（詳しくは MCU のパッケージの README: [rp2040](targets/mcu/rp2040/README.md)、[stm32f401re](targets/mcu/stm32f401re/README.md)）:
+
+```sh
+export DAGON_PUBKEY=~/.dagon/keys/my-fleet/dagon-signing.pub
+(cd <DAGON のクローン>/targets/mcu/rp2040/stage0 && cargo build --release)
+(cd <DAGON のクローン>/targets/mcu/rp2040/bootcore && cargo build --release)
+(cd <DAGON のクローン>/targets/mcu/stm32f401re/bootcore && cargo build --release)
+```
+
+続けて、`dagon rescue hub` か `dagon provision` で書き込むノードごとに `[provision.<id>]` を `dagon.toml` に加えます（ESP32-S3 は下の別の手順で書き込みます）。パスは絶対パスでなければ `dagon.toml` からの相対です。親機は `stage0` も要ります:
+
+```toml
+[provision.hub]
+stage0 = "<DAGON のクローン>/targets/mcu/rp2040/stage0/target/thumbv6m-none-eabi/release/dagon-rp2040-stage0"
+bootcore = "<DAGON のクローン>/targets/mcu/rp2040/bootcore/target/thumbv6m-none-eabi/release/dagon-rp2040-bootcore"
+app = "out/build/hub/app-a.elf"
+version = "0.1.0"
+
+[provision.seg]
+bootcore = "<DAGON のクローン>/targets/mcu/stm32f401re/bootcore/target/thumbv7em-none-eabihf/release/dagon-stm32f401re-bootcore"
+app = "out/build/seg/app-a.elf"
+version = "0.1.0"
+```
+
+ブートコアはデスクのデモの tag（`hub-rp2040-lcd`、`seg-f401-7seg`）を受け付けるので、これらのボードでは `topology.yaml` の tag をそのままにします。
+
+```sh
+dagon rescue hub       # out/provision/hub/rescue.uf2: BOOT を押しながら USB をつなぎ、RPI-RP2 にコピー
+dagon provision seg    # out/provision/seg/flash.bin と ST-LINK 用の probe-rs のコマンド
+```
+
+ESP32-S3 は [targets/boards/m5stopwatch](targets/boards/m5stopwatch/README.md) の手順で USB-C から書き込みます。そのあと親機をつなぎ、すべてのノードが応答するか確かめます:
+
+```sh
+dagon status
+```
+
+### 6. 更新し、必要なら戻す
+
+`[build.<id>]` のバージョンを上げてビルドし、署名して送ります。DAGON Console ではビルド → 署名 → リリース → 渡す のあと、運用モードで Web Serial から更新します。コマンドでは:
+
+```sh
+dagon build
+dagon image sign out/build/seg/app-a.elf --node seg --version 0.2.0 --slot a --out out/rel/seg-a.img
+dagon image sign out/build/seg/app-b.elf --node seg --version 0.2.0 --slot b --out out/rel/seg-b.img
+# ... ほかのノードも同様
+dagon release build out/rel --name r0.2 --out out/release-0.2.dgb
+dagon apply out/release-0.2.dgb
+```
+
+`dagon apply` は署名と、リリースがこの構成に対して作られたことを確かめ、構成を親機へ送り、子機を更新してから親機を更新します。ノードは新しいバージョンを試行起動し、確定されなければウォッチドッグでリセットされて前のバージョンで起動し直します。
+
+```sh
+dagon rollback --node seg     # 前に確定したバージョンへ戻す
+dagon recover seg             # 応答しなくなったノード
+```
+
+すべてのコマンドとオプションは `dagon --help` で確認できます。
+
+## プロジェクトでの Claude の手助け
+
+`dagon new` はプロジェクトに Claude Code のファイルも書きます。プロジェクトのフォルダで開いた Claude Code は、構成のファイル、コマンド、守ることを知った状態で始まります:
+
+| ファイル | 役目 |
+|---|---|
+| `CLAUDE.md` | プロジェクトの配置、自分のファイルと生成されるファイルの区別、コマンド、守ること（鍵に触れない、ハードウェアの値は推測せず質問する） |
+| `.claude/skills/fix-a-failing-build/SKILL.md` | `dagon build` が失敗したとき: 原因を探し、`nodes/<id>/src` の自分のコードだけを直して、もう一度ビルドする |
+| `.claude/skills/add-a-board-by-mcu/SKILL.md` | 対応表に無いボードをマイコンで選んで加える。値はボードの資料から出典付きで |
+| `.claude/skills/explain-a-topology-problem/SKILL.md` | 構成の検査が示す問題を分かる言葉で説明し、いちばん小さい直し方を示す |
+
+これらのファイルには鍵も、この PC のパスも入りません。署名の鍵と Claude の API キーは `dagon` CLI の中にとどまります。Claude にはそれらを開かないよう指示してあり、署名と実機への書込みは開発者が行います。
+
+このリポジトリの `plugin/` は、DAGON を新しいマイコンへ移植するための Claude Code のプラグイン（`/dagon-port`）で、適合試験（`dagon conform`）で確かめます。
+
+## 自分のボード（マイコンで選ぶ）
+
+`topology.yaml` のそのノードから `board:` を外し、ボードの値を `dagon.toml` に書きます:
+
+```yaml
+  - id: seg
+    mcu: stm32f401re
+    role: node
+    port: self-boot
+    flash_map: f401-default
+    tag: seg-f401-7seg
+```
+
+```toml
+[board.seg]
+flash_bytes = 524288
+```
+
+I2C の子機では、リンクにノード側のピン（`node_pins`）を書きます。足りないものは検査と `dagon gen` が知らせます。`add-a-board-by-mcu` スキルを使えば Claude と一緒に進められます。
+
+## ハードウェアなしで試す
+
+```sh
+dagon sim run
+```
+
+シミュレータ上の 4 つの通しシナリオ: 転送中の電断を含む更新、確定しないイメージ、改ざんしたリリース、全消去した F401 の ROM ブートローダ経由の復活。
 
 ## 現在できること
 
 このリポジトリのコードとテストが示していること:
 
 - 形式とプロトコル: `dagon-format` と `dagon-proto`。`crates/dagon-format/golden/` の黄金ベクタで照合しています。
-- 子機側: `dagon-agent`（非稼働スロットへイメージを受け取り、署名と SHA-256 を検査し、切り替えと確定を行う）と `dagon-core`（起動の判断: 回数を限った試行起動と巻き戻し）。
-- PC 側: `dagon-host`（状態、自動で見つける、構成の送信、更新、前の版に戻す、確定、復旧）、`dagon-romlink`（STM32 の I2C ROM ブートローダの手順）、`dagon` CLI。これらは `dagon-sim`（F401 子機付きの模擬親機、電断点付きのフラッシュ、損失のあるリンク、ROM ブートローダの模擬）を相手にテストしています。
-- `dagon sim run`: シミュレータ上の 4 つの通しシナリオ。転送中の電断を含む更新、確定しないイメージ、改ざんしたリリース（PC が拒否し、PC 側の検査を外すと子機が拒否）、全消去した F401 の ROM ブートローダ経由の復活。
+- ノード側: `dagon-agent`（非稼働スロットへイメージを受け取り、署名と SHA-256 を検査し、切り替えと確定を行う）と `dagon-core`（起動の判断: 回数を限った試行起動と巻き戻し）。
+- PC 側: `dagon-host`（状態、自動で見つける、構成の送信、更新、前のバージョンに戻す、確定、復旧）、`dagon-romlink`（STM32 の I2C ROM ブートローダの手順）、`dagon` CLI。これらは `dagon-sim`（F401 子機付きの模擬親機、電断点付きのフラッシュ、損失のあるリンク、ROM ブートローダの模擬）を相手にテストしています。
+- プロジェクト: `dagon new`、`dagon gen`、`dagon build` が、MCU ごと（`targets/mcu/*`）とボードごと（`targets/boards/*`）の支援パッケージの上にノードの crate を作り、ビルドします。
 - `dagon conform`: `dagon-conform` の 12 件の適合試験。模擬の F401 に対し、親機経由でも直結でも 12 件すべて合格します。
-- 構成 YAML: 21 件の検証規則と対応ボードの表（`dagon-topology`）。`topology/desk-demo.yaml` はこれを通ります。
-- MCU ごとの支援パッケージ（`targets/mcu/rp2040`、`targets/mcu/stm32f401re`、`targets/mcu/esp32s3`。ブート用のイメージを含む）とボードごとの支援パッケージ（`targets/boards/*`）。ファームウェア: RP2040 親機（`targets/rp2040-hub`）、F401 のデモ子機（`samples/f401-app`）、ESP32-S3 子機（ボードのパッケージ `targets/boards/m5stopwatch`（factory のファームウェアを含む）、サンプルのアプリ `samples/esp32s3-app`、ESP-IDF の 2nd stage と組み合わせ）。親機のファームウェアは親機の実機に書き込み済みで起動しますが、親機の実機での確認（PC との通信、表示）はまだ進行中です。F401 と ESP32-S3 のファームウェアの実機での確認と、実機での通しの流れはまだです（「制限事項」を参照）。
-- `web/` のブラウザのツール DAGON Console（開発中。現在できることは `web/README.md` を参照）。
+- 構成 YAML: 22 件の検証規則と対応ボードの表（`dagon-topology`）。`topology/desk-demo.yaml` はこれを通ります。
+- DAGON Console（`web/`。`dagon serve` が配る。いまできることは `web/README.md` を参照）。
+- ファームウェア: RP2040 親機（`targets/rp2040-hub`）、F401 のデモ子機（`samples/f401-app`）、ESP32-S3 子機（`targets/boards/m5stopwatch`、`samples/esp32s3-app`）。親機のファームウェアは親機の実機に書き込み済みで起動します。それ以外の実機での確認はまだ進行中です（「制限事項」を参照）。
 
-## はじめかた
+## 既にあるファームウェアに DAGON を組み込む
 
-CLI をビルドします（Rust stable。「開発に必要なもの」を参照）:
+`dagon new` のプロジェクトではないファームウェアの場合:
 
-```sh
-cargo build --release -p dagon-cli      # 実行ファイル: target/release/dagon
-```
-
-ハードウェアなしでシミュレータ上で一通り試す:
-
-```sh
-dagon sim run
-```
-
-鍵（秘密鍵は git の作業ツリーの外に置きます。中にあると CLI が使用を拒否します）:
-
-```sh
-dagon key gen --out ~/.dagon/keys
-export DAGON_SIGNING_KEY=~/.dagon/keys/dagon-signing.key
-export DAGON_PUBKEY=~/.dagon/keys/dagon-signing.pub   # ファームウェアのビルドが埋め込む
-```
-
-初期導入。`targets/` のファームウェアをビルドし（各ディレクトリの README にコマンドがあります）、`dagon.toml` の `[provision.<node>]` を ELF ファイルに向けてから:
-
-```sh
-dagon rescue hub        # out/provision/hub/rescue.uf2: BOOT を押しながら USB をつなぎ、RPI-RP2 にコピー
-dagon provision seg     # out/provision/seg/flash.bin と ST-LINK 用の probe-rs のコマンド
-```
-
-更新。各子機の新しいアプリを両スロット分署名し、構成に対してリリースを作り、適用します:
-
-```sh
-dagon image sign app.elf --node seg --version 1.1.0 --slot a --out out/rel/seg-a.img
-dagon image sign app-b.elf --node seg --version 1.1.0 --slot b --out out/rel/seg-b.img
-# ... 親機も同様
-dagon release build out/rel --name r1.1 --out out/release-1.1.dgb
-dagon status
-dagon apply out/release-1.1.dgb
-dagon recover seg       # 子機が応答しなくなったとき
-```
-
-`dagon apply` は、`dagon.toml` の構成と違う構成で作られたリリースを拒否します。親機は USB ID `c0de:cafe` または製品名 "DAGON hub" で見つけます（`--port` でも指定できます）。
-
-子機の適合試験（`out/conform/<node>` に `good-a.img`、`good-b.img`、`no-confirm-a.img`、`no-confirm-b.img` を置く）:
-
-```sh
-dagon conform --node seg            # result.json と report.html を書き出す
-```
-
-自然言語のボードの説明から Claude API で構成を作る（キーは環境変数から読み、表示しません）:
-
-```sh
-export ANTHROPIC_API_KEY=...
-dagon ai topology --in boards.txt --out topology/mine.yaml
-```
-
-すべてのコマンドとオプションは `dagon --help` で確認できます。
-
-## DAGON Console（開発）
-
-`web/README.md` を参照してください。Node.js、npm、`wasm-pack` 0.15.1 があれば:
-
-```sh
-cd web
-npm install
-npm run dev       # http://127.0.0.1:5173（Chrome または Edge 89 以降、Web Serial）
-```
-
-## 自分のファームウェアに DAGON を組み込む
-
-1. crate をリリースのタグに固定した git 依存として加えます。例:
-   `dagon-agent = { git = "<リポジトリの URL>", tag = "<リリースのタグ>" }`。`dagon-format`、`dagon-proto`、`dagon-port`、ブートコアを作るなら `dagon-core` も同様です。
-2. RP2040 か STM32F401RE なら、MCU のパッケージ（`targets/mcu/<mcu>`。フラッシュの割り付け、リンカの割り付け、ブート用のイメージ、見守り、リンク）とボードのパッケージ（`targets/boards/<board id>`）を使うか、自分のボード用に MCU のパッケージの `BoardDef` を実装します。MCU のパッケージの README に、約 20 行の完全なアプリがあります。それ以外の MCU では、既存のボードと同じ形にフラッシュを割り付けます: ブートコア、状態ログ 2 面、スロット A と B。各スロットの先頭に 512 バイトの署名付きイメージヘッダ、本体はスロット先頭 + 0x200。アプリはスロットの本体アドレスにリンクします（MCU のパッケージの README に割り付けがあります）。ボードを構成 YAML に加えます。
+1. crate をリリースのタグに固定した git 依存として加えます。例: `dagon-agent = { git = "<リポジトリの URL>", tag = "<リリースのタグ>" }`。`dagon-format`、`dagon-proto`、`dagon-port`、ブートコアを作るなら `dagon-core` も同様です。
+2. 対応するマイコンなら、MCU のパッケージ（`targets/mcu/<mcu>`。フラッシュの配置、リンカの割り付け、ブート用のイメージ、見守り、リンク）とボードのパッケージ（`targets/boards/<board id>`）を使うか、自分のボード用に MCU のパッケージの `BoardDef` を実装します。MCU のパッケージの README に、約 20 行の完全なアプリがあります。ほかのマイコンでは同じ形にフラッシュを割り付けます: ブートコア、状態ログ 2 面、スロット A と B。各スロットの先頭に 512 バイトの署名付きイメージヘッダ、本体はスロット先頭 + 0x200。
 3. ボード用に `dagon-port` の trait（`Flash`、`Link`、`Reset`、`Watchdog`、`BootSelectS` か `BootSelectV`）と `dagon_agent::SlotStore` を実装し、リンクとフックを渡してエージェントを起動します:
 
    ```rust
@@ -112,7 +237,7 @@ npm run dev       # http://127.0.0.1:5173（Chrome または Edge 89 以降、We
    ```
 
    確定済みのあいだはウォッチドッグに給餌し、試行中は限られた時間だけ給餌して、確定されないイメージがリセットされ巻き戻るようにします。
-4. `dagon conform` で移植を確かめ、初期導入は `dagon image sign` → `dagon release build` → `dagon provision`、以後は `dagon apply` を使います。
+4. `dagon conform` で移植を確かめます。
 
 ## リポジトリの構成
 
@@ -122,30 +247,28 @@ npm run dev       # http://127.0.0.1:5173（Chrome または Edge 89 以降、We
 | `crates/dagon-proto` | 通信プロトコル v1: フレーム、コマンド、ペイロード |
 | `crates/dagon-port` | ボードの trait（フラッシュ、リンク、リセット、ウォッチドッグ、起動先の選択、I2C、子機の制御線） |
 | `crates/dagon-core` | 起動の判断（試行、回数、巻き戻し） |
-| `crates/dagon-agent` | 子機側の更新の受け手 |
+| `crates/dagon-agent` | ノード側の更新の受け手 |
 | `crates/dagon-conform` | 12 件の適合試験と結果ファイルの形式 |
-| `crates/dagon-sim` | シミュレータ: フラッシュ、リンク、ROM ブートローダ、子機、親機 |
+| `crates/dagon-sim` | シミュレータ: フラッシュ、リンク、ROM ブートローダ、ノード、親機 |
 | `crates/dagon-topology` | 構成 YAML、検証規則、対応ボード |
 | `crates/dagon-sign` | 鍵、イメージの署名、リリースの作成、初期導入用ファイル |
-| `crates/dagon-host` | CLI とブラウザが共有する PC 側の手順 |
+| `crates/dagon-host` | CLI と DAGON Console が共有する PC 側の手順 |
 | `crates/dagon-romlink` | STM32 の I2C ROM ブートローダの手順 |
-| `crates/dagon-cli` | `dagon` コマンド |
+| `crates/dagon-cli` | `dagon` コマンド（DAGON Console を組み込み） |
 | `crates/dagon-wasm` | DAGON Console 用の WebAssembly バインディング |
-| `targets/` | ファームウェア: RP2040 親機、STM32F401 子機、ESP32-S3 子機、立ち上げ用ツール。MCU ごと（`targets/mcu/*`）とボードごと（`targets/boards/*`）の支援パッケージ |
+| `targets/` | MCU ごと（`targets/mcu/*`）とボードごと（`targets/boards/*`）の支援パッケージ、RP2040 親機のファームウェア、立ち上げ用ツール |
 | `samples/` | 支援パッケージを使うサンプルのアプリ（DAGON の一部ではない） |
-| `web/` | ブラウザのツール DAGON Console（Svelte、Vite、TypeScript） |
+| `web/` | DAGON Console（Svelte、Vite、TypeScript） |
 | `topology/` | 構成の例 |
-| `plugin/` | 新しいボードへの移植に使う Claude Code のプラグイン（エージェント、スキル、フック） |
+| `plugin/` | 新しいマイコンへの移植に使う Claude Code のプラグイン（エージェント、スキル、フック） |
 | `scripts/licences.py` | 下の依存ライブラリのライセンス表を生成する |
 
-## 開発に必要なもの
+## DAGON そのものを開発するとき
 
-- Rust stable と `rust-toolchain.toml` のターゲット（`thumbv6m-none-eabi`、`thumbv7em-none-eabihf`、`wasm32-unknown-unknown`）
-- `crates/dagon-wasm` 用の `wasm-pack` 0.15.1（対応する `wasm-bindgen` と `wasm-opt` は自分で取得します）
-- `web/` 用の Node.js と npm（`web/README.md` を参照）
-- ESP32-S3 のファームウェア用: `espup` で入れる Xtensa 用 Rust ツールチェーン（ESP32-S3 のパッケージは `esp` チャネルを使う）。2nd stage はビルド済みのものを `targets/mcu/esp32s3/vendor/` に同梱する予定（まだ入っていない）。それまでと、改めてビルドするときは、ESP-IDF v6.1 で `targets/esp32s3-2ndstage` からビルドする
-- F401 を ST-LINK で書く `probe-rs`、RP2040 の立ち上げ用イメージに使う `elf2uf2-rs`
-- C コンパイラ: `ring` crate（`dagon ai topology` の TLS）が C のコードをビルドします
+- [必要なもの](#必要なもの)のすべてと、`wasm32-unknown-unknown` のターゲット（ターゲットはすべて `rust-toolchain.toml` にあります）
+- `crates/dagon-wasm` 用の `wasm-pack` 0.15.1（対応する `wasm-bindgen` と `wasm-opt` は自分で取得します）と、`web/` 用の Node.js と npm
+- ESP32-S3 の 2nd stage を `targets/esp32s3-2ndstage` からビルドし直すときは ESP-IDF v6.1（ビルド済みのものを `targets/mcu/esp32s3/vendor/` に同梱する予定。まだ入っていない）
+- RP2040 の立ち上げ用イメージに使う `elf2uf2-rs`
 
 ## ライセンス (MIT / Apache-2.0 デュアル)
 
@@ -601,5 +724,5 @@ npm packages (`web/package-lock.json`): 86. Only those marked "page" ship in the
 - 署名の鍵は PC 上のファイルで、公開鍵はファームウェアに組み込まれます。ハードウェアの信頼の起点（セキュアブートのヒューズやハードウェアの鍵保管）はありません。
 - 実機でのすべてのフラッシュ操作に対する電断の網羅的な調査はまだ行っていません。電断はシミュレータでテストしています。
 - USB の VID:PID `c0de:cafe` は試験用の ID で、割り当てを受けたものではありません。
-- F401 子機と ESP32-S3 子機のファームウェアの実機での確認はまだです。親機（LCD 付き RP2040）のファームウェアは実機に書き込み済みで起動しますが、PC との通信と表示はまだ確認中で、3 台での通しの流れも同様です。
+- F401 子機と ESP32-S3 子機のファームウェアの実機での確認はまだです。親機（LCD 付き RP2040）のファームウェアは実機に書き込み済みで起動しますが、PC との通信と表示はまだ確認中で、3 ノードでの通しの流れも同様です。
 - `dagon conform` は同期の試験手順を動かすもので CLI 専用です。ブラウザでは適合試験を実行しません。

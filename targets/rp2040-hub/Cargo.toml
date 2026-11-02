@@ -1,0 +1,42 @@
+[package]
+name = "rp2040-hub"
+edition = "2021"
+license = "MIT OR Apache-2.0"
+version = "0.0.0"
+publish = false
+
+# Standalone: built for thumbv6m only, so it stays out of the host workspace.
+# `pack/` is a host tool with its own workspace.
+[workspace]
+exclude = ["pack"]
+
+[features]
+# Link for APP-B instead of APP-A (same source, two link addresses).
+slot-b = []
+
+[dependencies]
+rp2040-common = { path = "../rp2040-bootcore/common", features = ["rp"] }
+dagon-agent = { path = "../../crates/dagon-agent" }
+dagon-format = { path = "../../crates/dagon-format" }
+dagon-port = { path = "../../crates/dagon-port" }
+dagon-proto = { path = "../../crates/dagon-proto" }
+embassy-rp = { version = "0.10.0", features = ["rp2040", "time-driver", "critical-section-impl", "boot2-none"] }
+embassy-usb = "0.6.0"
+embassy-executor = { version = "0.10", features = ["platform-cortex-m", "executor-thread"] }
+embassy-time = "0.5"
+embassy-futures = "0.1"
+embassy-sync = "0.8"
+embedded-graphics = "0.8"
+embedded-hal-bus = "0.3"
+mipidsi = "0.10"
+cortex-m = "0.7"
+cortex-m-rt = "0.7"
+heapless = "0.9"
+panic-halt = "1"
+
+[profile.release]
+opt-level = "z"
+lto = "fat"
+codegen-units = 1
+panic = "abort"
+debug = true

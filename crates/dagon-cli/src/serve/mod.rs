@@ -14,6 +14,7 @@
 mod api;
 mod http;
 mod jobs;
+mod project;
 mod ws;
 
 use std::io::Write;

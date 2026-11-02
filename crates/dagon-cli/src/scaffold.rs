@@ -31,7 +31,7 @@ use serde::Deserialize;
 use crate::config::{read_topology, Config, Opts};
 use crate::paths::{contained, write_atomic};
 
-const SAMPLE: &str = include_str!("../../../topology/desk-demo.yaml");
+pub const SAMPLE: &str = include_str!("../../../topology/desk-demo.yaml");
 /// The DAGON clone this CLI was built from (default crate source).
 const BUILT_FROM: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../..");
 /// Overrides the DAGON clone used as crate source.
@@ -601,22 +601,33 @@ pub fn gen_command(args: &[&str]) -> Result<(), String> {
         .collect();
     let o = Opts::parse(&args, &["config"])?;
     let config = PathBuf::from(o.get("config").unwrap_or(crate::config::CONFIG_FILE));
+    let only: Vec<String> = o.pos.iter().map(|s| s.to_string()).collect();
+    for line in gen_project(&config, &only, force)? {
+        println!("{line}");
+    }
+    Ok(())
+}
+
+/// `dagon gen` for the project whose dagon.toml is `config`: the lines it
+/// reports (written, skipped, added, notes).
+pub fn gen_project(config: &Path, only: &[String], force: bool) -> Result<Vec<String>, String> {
     let cfg = Config::load(Some(&config.to_string_lossy()))?;
     let t = read_topology(&contained(&cfg.base, &cfg.topology_path(None)?)?)?;
-    let tables = project_tables(&config)?;
-    let only: Vec<String> = o.pos.iter().map(|s| s.to_string()).collect();
+    let tables = project_tables(config)?;
     if let Some(bad) = only.iter().find(|id| t.node(id).is_none()) {
         return Err(format!("no node '{bad}' in the topology"));
     }
-    let report = gen(&cfg.base, &t, &tables.dagon, &tables.board, &only, force)?;
-    for w in &report.written {
-        println!("{:<10} {}", w.action, w.path);
-    }
+    let report = gen(&cfg.base, &t, &tables.dagon, &tables.board, only, force)?;
+    let mut out: Vec<String> = report
+        .written
+        .iter()
+        .map(|w| format!("{:<10} {}", w.action, w.path))
+        .collect();
     for (id, why) in &report.skipped {
-        println!("skipped    nodes/{id}: {why}");
+        out.push(format!("skipped    nodes/{id}: {why}"));
     }
-    for id in add_build_tables(&config, &t)? {
-        println!("added      [build.{id}] to dagon.toml");
+    for id in add_build_tables(config, &t)? {
+        out.push(format!("added      [build.{id}] to dagon.toml"));
     }
     for n in &t.nodes {
         if n.board.is_none()
@@ -626,13 +637,25 @@ pub fn gen_command(args: &[&str]) -> Result<(), String> {
                 .and_then(|b| b.flash_bytes)
                 .is_none()
         {
-            println!(
+            out.push(format!(
                 "note: {} is chosen by MCU; set flash_bytes in [board.{}]",
                 n.id, n.id
-            );
+            ));
         }
     }
-    Ok(())
+    Ok(out)
+}
+
+/// A 構成 with no nodes yet, for a project started from scratch.
+pub fn empty_topology(name: &str) -> String {
+    format!(
+        "dagon: 1
+name: {name:?}
+nodes: []
+update:
+  order: []
+"
+    )
 }
 
 /// `dagon new <dir> [--from <yaml>] [--keys <dir>]`

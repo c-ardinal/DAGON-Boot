@@ -42,10 +42,14 @@ struct JobEntry {
 pub struct Server {
     pub pass: String,
     pub port: u16,
-    /// dagon.toml of the work area (None: no file, defaults only).
-    pub config: Option<PathBuf>,
+    /// dagon.toml of the open project (None: no file, defaults only);
+    /// changed by opening or creating a project.
+    config: std::sync::RwLock<Option<PathBuf>>,
     /// Folder of the page; empty: the page built into the executable.
     pub web: PathBuf,
+    /// The folder projects may be opened or created under; unset: the
+    /// user's home.
+    pub home: std::sync::OnceLock<PathBuf>,
     /// Public key the page verifies releases with, given at start.
     pub release_key: std::sync::OnceLock<[u8; 32]>,
     /// Pages connected to the event stream (passphrase checked).
@@ -66,8 +70,9 @@ impl Server {
         Arc::new(Server {
             pass,
             port,
-            config,
+            config: std::sync::RwLock::new(config),
             web,
+            home: std::sync::OnceLock::new(),
             release_key: std::sync::OnceLock::new(),
             pages: AtomicUsize::new(0),
             events: Mutex::default(),
@@ -78,6 +83,18 @@ impl Server {
             device_cv: Condvar::new(),
             hub: Mutex::new(()),
         })
+    }
+
+    /// dagon.toml of the open project.
+    pub fn config_path(&self) -> Option<PathBuf> {
+        self.config.read().ok().and_then(|c| c.clone())
+    }
+
+    /// Switches to the project whose dagon.toml is `path`.
+    pub fn set_config(&self, path: PathBuf) {
+        if let Ok(mut c) = self.config.write() {
+            *c = Some(path);
+        }
     }
 
     /// Sends `event` to every connected page.

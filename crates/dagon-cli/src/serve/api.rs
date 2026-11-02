@@ -56,8 +56,7 @@ fn page_safe<T>(r: Result<T, String>) -> Result<T, String> {
 
 fn config(server: &Server) -> Result<Config, String> {
     let p = server
-        .config
-        .as_ref()
+        .config_path()
         .map(|p| p.to_string_lossy().into_owned());
     Config::load(p.as_deref())
 }
@@ -103,12 +102,63 @@ pub fn handle(server: &Arc<Server>, req: &Request) -> Response {
         ("POST", ["jobs", id, "answer"]) => answer(server, id, req),
         ("POST", ["jobs", id, "cancel"]) => cancel(server, id),
         ("POST", ["device"]) => device(server, req),
+        ("GET", ["project"]) => Ok(super::project::get(server)),
+        ("POST", ["project", "open"]) => Ok(super::project::open(server, req)),
+        ("POST", ["project", "new"]) => Ok(super::project::new(server, req)),
+        ("GET", ["fs"]) => Ok(super::project::list(server, req)),
+        ("POST", ["gen"]) => gen_start(server, req),
+        ("POST", ["flash"] | ["doctor"]) => Ok(Response::error(
+            501,
+            "this dagon has no flash or doctor yet",
+        )),
         _ => Ok(Response::error(404, "no such endpoint")),
     };
     r.unwrap_or_else(|e| e)
 }
 
+/// What this serve offers the page. `flash` and `doctor` join when this
+/// dagon has those commands.
+const FEATURES: [&str; 8] = [
+    "topology_save",
+    "ai_topology",
+    "build",
+    "sign",
+    "release",
+    "conform",
+    "gen",
+    "project",
+];
+
 type Res = Result<Response, Response>;
+
+/// POST /v1/gen {nodes?, force_main?}: `dagon gen` for the open project;
+/// dagon.toml is edited under the files lock.
+fn gen_start(server: &Arc<Server>, req: &Request) -> Res {
+    let v = body_json(req)?;
+    let only = match v.get("nodes") {
+        None | Some(Value::Null) => Vec::new(),
+        Some(_) => nodes_of(&v)?,
+    };
+    let force = v["force_main"].as_bool().unwrap_or(false);
+    let config = server
+        .config_path()
+        .ok_or_else(|| Response::error(409, "no project is open"))?;
+    let s = Arc::clone(server);
+    match server.spawn("gen", move |job| {
+        let lines = {
+            let _lock = s.files.lock().map_err(|_| "lock".to_string())?;
+            crate::scaffold::gen_project(&config, &only, force)?
+        };
+        for l in &lines {
+            job.log(l);
+        }
+        let skipped: Vec<&String> = lines.iter().filter(|l| l.starts_with("skipped")).collect();
+        Ok(json!({ "lines": lines.len(), "skipped": skipped }))
+    }) {
+        Some(id) => Ok(accepted(id)),
+        None => Err(Response::error(429, "too many jobs running")),
+    }
+}
 type Work = fn(&mut Job, Config, Value) -> Result<Value, String>;
 
 fn start(server: &Arc<Server>, req: &Request, kind: &str, work: Work) -> Res {
@@ -133,7 +183,7 @@ fn hello(server: &Server) -> Response {
     json_ok(json!({
         "cli": env!("CARGO_PKG_VERSION"),
         "workspace": workspace,
-        "features": ["topology_save", "ai_topology", "build", "sign", "release", "conform"],
+        "features": FEATURES,
         "api_key": crate::ai::api_key_present(),
         "key": key.is_some(),
         "key_id": key,
@@ -248,7 +298,9 @@ fn topology_put(server: &Server, req: &Request) -> Res {
         std::str::from_utf8(&req.body).map_err(|_| Response::error(400, "YAML must be UTF-8"))?;
     let report = dagon_topology::check_str(yaml);
     let report_json: Value = serde_json::from_str(&report.to_json()).unwrap_or(Value::Null);
-    if !report.is_pushable() {
+    // A 構成 whose only errors are V-23 (a shape updating does not cover
+    // yet) is saved; compile, send, release and apply still refuse it.
+    if report.errors().any(|i| i.rule != "V-23") {
         return Err(Response::json(422, &json!({ "report": report_json })));
     }
     let _lock = server
@@ -256,7 +308,9 @@ fn topology_put(server: &Server, req: &Request) -> Res {
         .lock()
         .map_err(|_| Response::error(500, "lock"))?;
     crate::paths::write_atomic(&p, yaml.as_bytes()).map_err(|e| Response::error(500, &e))?;
-    Ok(json_ok(json!({ "report": report_json })))
+    Ok(json_ok(
+        json!({ "report": report_json, "updatable": report.is_pushable() }),
+    ))
 }
 
 fn build_get(server: &Server, id: &str) -> Res {
@@ -277,8 +331,7 @@ fn build_put(server: &Server, id: &str, req: &Request) -> Res {
         .map_err(|e| Response::error(400, &format!("bad build settings: {e}")))?;
     b.validate().map_err(|e| Response::error(400, &e))?;
     let path = server
-        .config
-        .clone()
+        .config_path()
         .ok_or_else(|| Response::error(409, "no dagon.toml in the work area"))?;
     // Read, edit and replace under one lock so concurrent PUTs all land.
     let _lock = server

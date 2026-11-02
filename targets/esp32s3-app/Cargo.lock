@@ -231,6 +231,7 @@ dependencies = [
  "embassy-time",
  "esp-bootloader-esp-idf",
  "esp-hal",
+ "esp-hal-co5300",
  "esp-rtos",
 ]
 
@@ -818,6 +819,15 @@ dependencies = [
  "ufmt-write",
  "xtensa-lx",
  "xtensa-lx-rt",
+]
+
+[[package]]
+name = "esp-hal-co5300"
+version = "0.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "64f9183e4119781cbf95263ad8b66d23f5f0c1987f0ff9714cce7b3c01e33f36"
+dependencies = [
+ "esp-hal",
 ]
 
 [[package]]

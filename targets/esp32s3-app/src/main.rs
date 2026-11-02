@@ -5,7 +5,8 @@
 //! | Task | Executor | Owns |
 //! |---|---|---|
 //! | DAGON link (`node::start`) | interrupt executor, priority 2 | UART0, USB Serial/JTAG, flash, RTC/super watchdogs, internal I2C |
-//! | `heartbeat` (demo work) | thread mode (this `main`), below every interrupt | nothing yet |
+//! | `heartbeat` (demo work) | thread mode (this `main`), below every interrupt | nothing |
+//! | `display_task` | thread mode | SPI2, DMA channel 0, AMOLED pins G39-G42, G45, G46 |
 //!
 //! Every task registers in [`LIVENESS`] and announces a deadline before each
 //! piece of work; the watchdog is fed only while none is overdue, so a stuck
@@ -21,6 +22,8 @@ use dagon_esp32s3_agent::node::{self, NodeConfig, NodePeripherals};
 use embassy_executor::Spawner;
 use embassy_time::{Duration, Timer};
 use esp_hal::timer::timg::TimerGroup;
+
+mod display;
 
 esp_bootloader_esp_idf::esp_app_desc!();
 
@@ -65,6 +68,22 @@ async fn main(spawner: Spawner) {
     // refused and the trial rolls back, which is the right outcome.
     if let Some(lease) = LIVENESS.register() {
         if let Ok(task) = heartbeat(lease) {
+            spawner.spawn(task);
+        }
+    }
+    let screen = display::DisplayPeripherals {
+        spi2: p.SPI2,
+        dma: p.DMA_CH0,
+        cs: p.GPIO39,
+        sck: p.GPIO40,
+        d0: p.GPIO41,
+        d1: p.GPIO42,
+        d2: p.GPIO46,
+        d3: p.GPIO45,
+    };
+    // The version display is optional: without a lease it is not started.
+    if let Some(lease) = LIVENESS.register() {
+        if let Ok(task) = display::display_task(screen, lease) {
             spawner.spawn(task);
         }
     }

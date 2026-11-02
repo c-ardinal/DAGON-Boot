@@ -49,6 +49,30 @@ pub fn route_rear_uart(i2c0: I2C0<'_>, sda: GPIO47<'_>, scl: GPIO48<'_>) -> Resu
     ioe_update(&mut i2c, IOE_REG_MODE_L, PYG1_BIT, 0)
 }
 
+/// PYG5 (PYB_OLED_RST): AMOLED reset, active low.
+const PYG5_BIT: u8 = 1 << 4;
+/// Reset pulse width of the AMOLED controller.
+const OLED_RESET_LOW_MS: u32 = 10;
+
+/// Pulses the AMOLED reset (PYG5 low, then high, push-pull output) once and
+/// leaves it released. The I2C bus is released afterwards; the panel needs
+/// its own settling time before the first command.
+pub fn release_display_reset(
+    i2c0: I2C0<'_>,
+    sda: GPIO47<'_>,
+    scl: GPIO48<'_>,
+) -> Result<(), I2cError> {
+    let mut i2c = I2c::new(i2c0, I2cConfig::default())
+        .map_err(|_| I2cError::Timeout)?
+        .with_sda(sda)
+        .with_scl(scl);
+    ioe_update(&mut i2c, IOE_REG_OUT_L, 0, PYG5_BIT)?;
+    ioe_update(&mut i2c, IOE_REG_DRV_L, 0, PYG5_BIT)?;
+    ioe_update(&mut i2c, IOE_REG_MODE_L, PYG5_BIT, 0)?;
+    esp_hal::delay::Delay::new().delay_millis(OLED_RESET_LOW_MS);
+    ioe_update(&mut i2c, IOE_REG_OUT_L, PYG5_BIT, 0)
+}
+
 /// Rear UART0 at 115200 8N1 on G43 (TX) / G44 (RX).
 pub fn rear_uart<'d>(uart0: UART0<'d>, tx: GPIO43<'d>, rx: GPIO44<'d>) -> Uart<'d, Blocking> {
     // Default config is 115200 8N1 and always valid.

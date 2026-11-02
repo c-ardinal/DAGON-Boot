@@ -120,7 +120,9 @@ pub fn step(n: u8) {
     STEP.store(n, core::sync::atomic::Ordering::Relaxed);
 }
 
-/// Diagnostic builds: a panic blinks the code of the last step reached.
+/// With the `diag-panic` feature (the hub app enables it in every build,
+/// stage0 and the boot core in their diag builds) a panic blinks the code
+/// of the last step reached.
 #[cfg(feature = "diag-panic")]
 #[panic_handler]
 fn panic(_: &core::panic::PanicInfo) -> ! {

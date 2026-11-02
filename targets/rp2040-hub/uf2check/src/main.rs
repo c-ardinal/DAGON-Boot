@@ -85,7 +85,7 @@ fn load_pubkey(path: &str) -> Result<[u8; 32], String> {
 /// later partial write leaves or erases the wrong bytes.
 fn whole_sectors(addrs: &[u32]) -> Result<(), String> {
     const PAGES: usize = (SECTOR / 256) as usize;
-    if addrs.len() % PAGES != 0 {
+    if !addrs.len().is_multiple_of(PAGES) {
         return Err(format!("{} blocks is not whole sectors", addrs.len()));
     }
     for (i, run) in addrs.chunks(PAGES).enumerate() {
@@ -116,7 +116,10 @@ fn load_uf2(path: &str) -> Result<Mapped, String> {
         if w(0) != UF2_MAGIC0 || w(1) != UF2_MAGIC1 || w(127) != UF2_MAGIC_END {
             return Err(format!("{path}: not a UF2 file"));
         }
-        let (addr, len) = (w(3), (w(4) as usize).min(476));
+        let (addr, len) = (w(3), w(4) as usize);
+        if len != 256 {
+            return Err(format!("{path}: block at {addr:#x} carries {len} bytes, not 256"));
+        }
         let off = addr
             .checked_sub(XIP_BASE)
             .map(|o| o as usize)

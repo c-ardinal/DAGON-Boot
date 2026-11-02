@@ -1,8 +1,9 @@
 <script lang="ts">
-  import { DETAIL, SLOT, WIRING } from '../app/copy.ts';
+  import { DETAIL, NODE_ACTION, SLOT, TRIAL_CHOICE, WIRING } from '../app/copy.ts';
   import type { Live } from '../app/operate.svelte.ts';
   import type { Config, Link, Node } from '../app/sample.ts';
-  import { versionText, type StatusResp } from '../wasm/dagon.ts';
+  import { previousVersion } from '../app/slots.ts';
+  import { versionText, type RecoverResult, type StatusResp } from '../wasm/dagon.ts';
   import type { HelloResp } from '../serial/hello.ts';
 
   interface Props {
@@ -10,9 +11,25 @@
     live: Record<string, Live>;
     selected: string | null;
     connected: boolean;
+    /** Node actions are offered (watching, nothing running). */
+    act?: boolean;
+    /** M38 "このバージョンで確定する". */
+    onkeep?: (id: string) => void;
+    /** "前のバージョンに戻す". */
+    onback?: (id: string) => void;
+    /** The last recovery, for its figures under 詳しく見る. */
+    recovery?: { id: string; result: RecoverResult } | null;
   }
 
-  let { config, live, selected, connected }: Props = $props();
+  let { config, live, selected, connected, act = false, onkeep, onback, recovery = null }: Props = $props();
+
+  function recoveryRows(id: string): [string, string][] {
+    if (recovery?.id !== id) return [];
+    const r = recovery.result;
+    const rows: [string, string][] = [[NODE_ACTION.path, NODE_ACTION.paths[r.path]]];
+    if (r.rom) rows.push([NODE_ACTION.romRtt, DETAIL.ms(r.rom.maxRttMs)], [NODE_ACTION.romAttempts, String(r.rom.attempts)]);
+    return rows;
+  }
 
   const node = $derived(selected?.startsWith('node:') ? config?.nodes.find((n) => `node:${n.id}` === selected) : undefined);
   const link = $derived(selected?.startsWith('link:') ? config?.links.find((l) => `link:${l.to}` === selected) : undefined);
@@ -156,9 +173,30 @@
           {#each SLOT.rows as row (row)}<span class="skeleton"></span>{/each}
         </div>
       {/if}
-      {#if r.length}
+      {@const back = previousVersion(l?.status)}
+      {#if act && l?.responding && l.hello?.trial}
+        <p class="choice">{TRIAL_CHOICE.sentence}</p>
+        <div class="actions">
+          <button class="secondary" onclick={() => onkeep?.(n.id)}>{TRIAL_CHOICE.keep}</button>
+          {#if back}<button class="secondary" onclick={() => onback?.(n.id)}>{TRIAL_CHOICE.back}</button>{/if}
+        </div>
+      {:else if act && l?.responding && back}
+        <div class="actions">
+          <button class="secondary" onclick={() => onback?.(n.id)}>{NODE_ACTION.back(back)}</button>
+        </div>
+      {/if}
+      {@const rec = recoveryRows(n.id)}
+      {#if r.length || rec.length}
         <details class="more">
           <summary>{DETAIL.details}</summary>
+          {#if rec.length}
+            <dl class="raw">
+              {#each rec as [k, v] (k)}
+                <dt>{k}</dt>
+                <dd>{v}</dd>
+              {/each}
+            </dl>
+          {/if}
           <dl class="raw" translate="no">
             {#each r as [k, v] (k)}
               <dt>{k}</dt>
@@ -218,6 +256,10 @@
   }
   .title:focus {
     outline: none;
+  }
+  .choice {
+    margin: var(--s-4) 0 var(--s-3);
+    font: 400 var(--t-body-size) / var(--t-body-lh) var(--f-ja);
   }
   h3 {
     margin: var(--s-4) 0 var(--s-3);

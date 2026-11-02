@@ -69,6 +69,8 @@ export const BUTTON = {
 export const BUTTON_FOR = {
   recover: (name: string) => `${name}を復旧する`,
   updateResponding: (n: number) => `応答する ${n} つだけ先に更新`,
+  /** M50: the update after a recovery, over the nodes not written yet. */
+  updateRest: '残りのノードを更新',
 } as const;
 
 export interface BandCopy {
@@ -91,12 +93,22 @@ export const BAND = {
   M13: { sentence: '更新ファイルをこの画面に置くか、選んでください。' },
   /** M14 / M15 / M28: label-value pair, no sentence. */
   M14: { pair: ['目安', '約 1 分'] },
+  M18: { sentence: '何も書いていないので、配布ページから正しいファイルを取り直してください。' },
+  M18b: { sentence: '何も書いていないので、別のファイルを選んでください。' },
+  M19: { sentence: '何も書いていないので、別のファイルを選んでください。' },
+  M20: { sentence: '何も書いていないので、この構成向けのファイルを選んでください。' },
   M22: { sentence: '終わるまで電源と USB を抜かず、このページを開いたままにしてください（止まっても前のバージョンのまま動きます）。' },
+  M33: { sentence: '基板どうしの配線が抜けていないか確かめてから、もう一度直してください。' },
   M34: { sentence: 'USB ケーブルを挿し直してから、もう一度つないでください。' },
   M35: { chip: '× 見本を読めない', sentence: 'インターネットにつながっているか確かめてから、もう一度読み込んでください。' },
   /** M57: part of the page (dagon-wasm) did not load. */
   M57: { chip: '× 読み込めない', sentence: 'このページの一部を読み込めませんでした。ページを開き直してください。' },
 } as const satisfies Record<string, BandCopy>;
+
+/** M29: beside the recover button when nodes after the stopped one are not written yet. */
+export const BAND_FOR = {
+  M29: (stuck: string) => ({ pair: ['目安', '約 1 分'] as const, sentence: `${stuck}を直すと、残りのノードを更新できます。` }),
+} as const;
 
 /** M01: browser without Web Serial. */
 export const UNSUPPORTED = {
@@ -123,6 +135,11 @@ export const CANVAS = {
   /** M49 dot-number labels. */
   dotResponding: '応答',
   dotFound: '発見',
+  /** M49 during an update, and after it stopped. */
+  dotProgress: '進捗',
+  dotPercent: '%',
+  dotStopped: '% 停止',
+  dotProgressName: (n: number, stopped: boolean) => `進捗 ${n}%${stopped ? '、停止' : ''}`,
   dotRespondingName: (n: number, of: number) => `応答 ${n}/${of}、${of} つのノードのうち ${n} つが応答`,
   dotFoundName: (n: number) => `発見 ${n}`,
   /** S19 */
@@ -144,6 +161,34 @@ export const NODE = {
   responding: '● 応答あり',
   silent: '× 応答なし',
   trial: '● 確認待ち',
+  /** S04 / S38 during an update. */
+  writing: '▼▼ 書き込み中',
+  waiting: '… 待ち',
+  done: '✓ 完了',
+  unwritten: '… 未書き込み',
+  rebooting: '… 再起動中',
+  previous: '↺ 前のバージョン',
+  /**
+   * A node that answered and refused the update, by dagon-host's reason (the
+   * last-reason words of the detail where they exist). No answer stays
+   * `silent`; a node back on its previous version is `previous`.
+   */
+  refused: {
+    E_SIGNATURE: '× 配布元を確認できない',
+    E_KEY: '× 配布元を確認できない',
+    E_DIGEST: '× 中身の破損',
+    E_COMPAT: '× 別の機種向け',
+    E_FLASH: '× 書き込めない',
+    // dagon-host's release check, in the words of the update file's verdict.
+    source: '× 配布元を確認できない',
+    key: '× 配布元を確認できない',
+    topology: '× 構成 不一致',
+    format: '× 更新ファイルではない',
+  } as Record<string, string>,
+  refusedOther: '× 受け付けない',
+  /** S04 during a recovery. */
+  lastResort: '◎ 最後の手段',
+  cannotFix: '× 直せない',
   /** W7: full spoken state of a chip. */
   respondingName: '応答あり',
   silentName: '応答なし、2 回続けて返事がない',
@@ -186,6 +231,24 @@ export const DETAIL = {
   details: '詳しく見る',
 } as const;
 
+/** M38: a node on trial that this page did not apply (the detail, above its buttons). */
+export const TRIAL_CHOICE = {
+  sentence: 'このバージョンで確定するか、前のバージョンに戻すかを選んでください。',
+  keep: 'このバージョンで確定する',
+  back: '前のバージョンに戻す',
+} as const;
+
+/** The detail's actions and the recovery figures under 詳しく見る. */
+export const NODE_ACTION = {
+  /** UC-O10, shown when the other slot holds a version to go back to. */
+  back: (version: string) => `前のバージョン（${version}）に戻す`,
+  /** 詳しく見る: how the last recovery got through. */
+  path: '経路',
+  paths: { retransfer: '送り直し', factory: '予備へ送る', rom: '最後の手段' },
+  romRtt: '往復の最大',
+  romAttempts: 'やり直し',
+} as const;
+
 /** Slot section (M41). Inside it the rows are A / B / 予備. */
 export const SLOT = {
   heading: 'スロット',
@@ -214,6 +277,32 @@ export const WIRING = {
   print: '配線表を印刷',
 } as const;
 
+/** SC-O4: the file and dagon-host's verdict on it (the one place for the verdict). */
+export const FILE = {
+  heading: '更新ファイル',
+  /** File input label (the drop place). */
+  choose: '更新ファイルを選ぶ',
+  size: (bytes: number) => `${Math.max(1, Math.round(bytes / 1024))} KB`,
+  checking: '確認中…',
+  source: '配布元',
+  sourceOk: '✓ 確認済み',
+  sourceBad: '× 確認できない',
+  topology: '構成',
+  topologyOk: '✓ 一致',
+  topologyBad: '× 不一致',
+  notRelease: '× 更新ファイルではない',
+  targets: '対象',
+} as const;
+
+/** SC-O7: the hub reconnect dialog (M26, M27). */
+export const RECONNECT = {
+  heading: '親機の再接続',
+  sentence: '『もう一度つなぐ』を押して、同じ機器を選んでください。',
+  auto: '自動の再接続',
+  left: (s: number) => `あと ${s} s`,
+  over: '終了',
+} as const;
+
 /** Help in the header, and the operating-mode key list (S06). */
 export const HELP = {
   heading: '困ったとき',
@@ -240,6 +329,22 @@ export const ANNOUNCE = {
   A08: (n: number, of: number) => `応答 ${n}/${of}`,
   A21silent: (name: string) => `${name} 応答なし`,
   A21lost: '親機 切断',
+  A09: (name: string, size: string) => `${name} ${size}、確認中`,
+  A10ok: (n: number) => `配布元 確認済み、構成 一致、対象 ${n}`,
+  A10source: '配布元 確認できない',
+  A10topology: '構成 不一致',
+  A10format: '更新ファイルではない',
+  A11: (name: string) => `${name} 書き込み`,
+  A11percent: (n: number) => `進捗 ${n}%`,
+  A12: '親機 再起動中、自動で再接続',
+  A13: (name: string) => `更新 停止、${name}`,
+  A13previous: (name: string) => `${name} 前のバージョン`,
+  A14: (version: string) => `完了、${version}`,
+  A21timeout: '親機 再接続 時間切れ',
+  A15: (name: string, version: string) => `${name} ${version} に戻した`,
+  A16: (name: string, rest: number) => `${name} 復旧済み、残り ${rest}`,
+  /** "配布中の最新バージョンを使う" could not fetch the published release. */
+  A22latest: '配布中の最新バージョンを読み込めませんでした',
 } as const;
 
 /** Words that never appear in operating-mode guidance, chips or results. */

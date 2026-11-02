@@ -62,11 +62,50 @@ export class WebSerialTransport implements Transport {
   private pump: Promise<void> | null = null;
   private closing = false;
 
-  constructor(readonly port: SerialPort) {}
+  /** `serial` finds the device again when it came back as a new port (the hub after its reboot). */
+  constructor(
+    public port: SerialPort,
+    private readonly serial: Pick<Serial, 'getPorts'> | null = globalThis.navigator?.serial ?? null,
+  ) {}
+
+  /** Allowed ports present when this one last opened: none of them is this device coming back. */
+  private known = new Set<SerialPort>();
+  /** Only a port that was open before may be looked for again; the first open is the one the user chose. */
+  private opened = false;
 
   async open(): Promise<void> {
-    await this.port.open({ baudRate: CDC_BAUD });
+    this.port = await this.reopenable();
+    this.known = new Set((await this.serial?.getPorts()) ?? []);
+    this.opened = true;
+    this.closing = false;
     this.pump = this.readLoop();
+  }
+
+  /**
+   * Opens this port, or else the one allowed port of the same USB device
+   * (vendor and product id) that appeared since: after a reboot the hub
+   * enumerates again and the browser may hand it out as a new port, still
+   * allowed when it reports the same USB serial number. Web Serial does not
+   * show that serial number, so with no or several such ports nothing is
+   * opened (another hub of the same kind must not be taken for this one)
+   * and the user chooses again.
+   */
+  private async reopenable(): Promise<SerialPort> {
+    try {
+      await this.port.open({ baudRate: CDC_BAUD });
+      return this.port;
+    } catch (e) {
+      if (!this.opened) throw e;
+      const want = this.port.getInfo();
+      const ports = (await this.serial?.getPorts()) ?? [];
+      const back = ports.filter((p) => {
+        const info = p.getInfo();
+        return !this.known.has(p) && p !== this.port && info.usbVendorId === want.usbVendorId && info.usbProductId === want.usbProductId;
+      });
+      if (back.length !== 1) throw e;
+      await back[0].open({ baudRate: CDC_BAUD });
+      return back[0];
+    }
   }
 
   async close(): Promise<void> {

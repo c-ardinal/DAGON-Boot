@@ -1,0 +1,57 @@
+//! The simulated desk (dagon-sim) as the page's byte link: the desk-demo hub
+//! with the F401 on I2C (NRST/BOOT0 wired, ROM loader simulated) and the
+//! watch on the UART, each on 1.0.0. Tests and `?sim` in development drive
+//! dagon-host through the same `HostLink` as Web Serial, on the simulator's
+//! clock. Built with the `sim` feature only.
+
+use dagon_port::Flash;
+use dagon_sim::{demo_hub_desk, SimHub};
+use wasm_bindgen::prelude::*;
+
+#[wasm_bindgen]
+pub struct SimDesk(SimHub);
+
+#[wasm_bindgen]
+impl SimDesk {
+    #[wasm_bindgen(constructor)]
+    pub fn new(seed: u32) -> SimDesk {
+        SimDesk(demo_hub_desk(seed as u64))
+    }
+
+    /// Bytes from the page (USB CDC).
+    pub fn write(&mut self, bytes: &[u8]) {
+        self.0.usb_write(bytes);
+    }
+
+    /// Bytes for the page; empty when nothing is waiting.
+    pub fn read(&mut self) -> Vec<u8> {
+        self.0.usb_read()
+    }
+
+    /// The simulator's clock.
+    pub fn now(&self) -> f64 {
+        self.0.now_ms() as f64
+    }
+
+    pub fn advance(&mut self, ms: u32) {
+        self.0.advance_ms(ms as u64);
+    }
+
+    /// Erases the whole flash of the I2C node at `addr` and resets it: it
+    /// answers nothing any more, only its ROM loader is left.
+    pub fn wipe(&mut self, addr: u8) -> bool {
+        let now = self.0.now_ms();
+        let Some(node) = self.0.i2c_node(addr) else {
+            return false;
+        };
+        let mut i = 0;
+        while let Some((a, l)) = node.flash().sector_addr(i) {
+            if Flash::erase(node.flash(), a, l).is_err() {
+                return false;
+            }
+            i += 1;
+        }
+        node.reset(now);
+        true
+    }
+}

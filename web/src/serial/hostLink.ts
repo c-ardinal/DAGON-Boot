@@ -7,7 +7,24 @@ import type { Transport } from './transport.ts';
 /** How long one read waits for a frame before reporting "nothing yet". */
 const READ_WAIT_MS = 5;
 
-export function hostLink(t: Transport): HostLink {
+/** The clock dagon-host's timeouts run on. */
+export interface LinkClock {
+  now(): number;
+  sleep(ms: number): Promise<void>;
+}
+
+export const REAL_CLOCK: LinkClock = {
+  now: () => performance.now(),
+  sleep: (ms) => new Promise((r) => setTimeout(r, ms)),
+};
+
+/** A HostLink whose device can be replaced (the hub chosen again after its reboot). */
+export interface SwapLink extends HostLink {
+  use(t: Transport): void;
+}
+
+export function hostLink(first: Transport, clock: LinkClock = REAL_CLOCK): SwapLink {
+  let t = first;
   let rest: Uint8Array = new Uint8Array(0);
   return {
     write: (bytes) => t.write(bytes.slice()),
@@ -19,10 +36,15 @@ export function hostLink(t: Transport): HostLink {
     },
     async reopen() {
       rest = new Uint8Array(0);
-      await t.close();
+      // Closing a device that already left fails; opening is what matters.
+      await t.close().catch(() => undefined);
       await t.open();
     },
-    now: () => performance.now(),
-    sleep: (ms) => new Promise((r) => setTimeout(r, ms)),
+    now: () => clock.now(),
+    sleep: (ms) => clock.sleep(ms),
+    use(next) {
+      rest = new Uint8Array(0);
+      t = next;
+    },
   };
 }

@@ -5,13 +5,15 @@
   "type": "module",
   "license": "MIT OR Apache-2.0",
   "scripts": {
-    "wasm": "wasm-pack build ../crates/dagon-wasm --release --target web --no-pack --out-dir ../../web/src/wasm/pkg",
-    "predev": "npm run wasm",
+    "wasm": "node scripts/wasm.mjs",
+    "wasm:dev": "node scripts/wasm.mjs --test-key --sim",
+    "predev": "npm run wasm:dev",
     "dev": "vite",
     "prebuild": "npm run wasm",
     "build": "svelte-check --tsconfig ./tsconfig.json && vite build",
     "preview": "vite preview",
-    "pretest": "npm run wasm",
+    "site": "node scripts/site.mjs",
+    "pretest": "npm run wasm:dev",
     "test": "vitest run",
     "fonts": "node scripts/fonts.mjs"
   },

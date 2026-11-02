@@ -15,8 +15,8 @@ pub mod rom;
 
 pub use dagon_romlink::{RomError, Stats as RomStats};
 pub use ops::{
-    reason, ConfirmOutcome, Discovery, Event, NodeOutcome, NodeState, Outcome, RecoverAssets,
-    RecoverPath,
+    check_release, reason, ConfirmOutcome, Discovery, Event, NodeOutcome, NodeState, Outcome,
+    RecoverAssets, RecoverPath,
 };
 
 use alloc::vec;

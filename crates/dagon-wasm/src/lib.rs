@@ -7,10 +7,14 @@ extern crate alloc;
 
 mod frame;
 mod host;
+#[cfg(feature = "sim")]
+mod sim;
 mod watch;
 
 pub use frame::{frame_encode, FrameCutter};
-pub use host::{watch_interval_ms, WasmHost};
+pub use host::{check_bootcore_for, check_release_for, watch_interval_ms, WasmHost};
+#[cfg(feature = "sim")]
+pub use sim::SimDesk;
 
 use dagon_format::{BundleView, Version};
 use dagon_proto::payload::{HelloReq, HelloResp};
@@ -133,6 +137,23 @@ fn decode(body: &[u8]) -> Option<Hello> {
     })
 }
 
+/// Whether raw version `a` is older than `b` (dagon-format's ordering).
+#[wasm_bindgen]
+pub fn version_older(a: u32, b: u32) -> bool {
+    Version::from_raw(a) < Version::from_raw(b)
+}
+
+/// The page verifies releases with the public RFC 8032 test key.
+#[wasm_bindgen]
+pub fn release_key_is_test() -> bool {
+    host::PUBKEY == TEST_PUBKEY_BYTES
+}
+
+const TEST_PUBKEY_BYTES: [u8; 32] = [
+    0xd7, 0x5a, 0x98, 0x01, 0x82, 0xb1, 0x0a, 0xb7, 0xd5, 0x4b, 0xfe, 0xd3, 0xc9, 0x64, 0x07, 0x3a,
+    0x0e, 0xe1, 0x72, 0xf3, 0xda, 0xa6, 0x23, 0x25, 0xaf, 0x02, 0x1a, 0x68, 0xf7, 0x07, 0x51, 0x1a,
+];
+
 /// `major.minor.patch` of a raw version.
 #[wasm_bindgen]
 pub fn version_text(raw: u32) -> String {
@@ -188,6 +209,26 @@ mod tests {
         let last = dgb.len() - 1;
         dgb[last] ^= 1;
         assert!(verify(&dgb, &pubkey()).is_err());
+    }
+
+    #[test]
+    fn release_verdict_names_why_nothing_is_sent() {
+        use crate::host::{release_refusal, PUBKEY};
+        let topo = golden("topology_desk_demo.bin");
+        let mut dgb = golden("release.dgb");
+        // The default build embeds the test key the golden release is signed with.
+        assert_eq!(PUBKEY.to_vec(), pubkey());
+        assert!(release_key_is_test());
+        assert!(version_older(0x0100_0000, 0x0101_0000));
+        assert!(!version_older(0x0101_0000, 0x0101_0000));
+        assert_eq!(release_refusal(&dgb, &topo), None);
+        let yaml = std::fs::read_to_string(root("topology/sim-pair.yaml")).unwrap();
+        let other = dagon_topology::compile_str(&yaml).unwrap();
+        assert_eq!(release_refusal(&dgb, &other), Some("topology"));
+        assert_eq!(release_refusal(b"not a release", &topo), Some("format"));
+        let last = dgb.len() - 1;
+        dgb[last] ^= 1;
+        assert_eq!(release_refusal(&dgb, &topo), Some("source"));
     }
 
     #[test]

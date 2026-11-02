@@ -23,8 +23,10 @@ describe('copy', () => {
 
   test('sentences are one sentence in polite form', () => {
     const sentences = [...Object.values(copy.BAND).map((b) => b.sentence), copy.UNSUPPORTED.sentence];
+    // LOAD's two sentences were chosen by the owner: the cause, then the step.
+    const twoSentences: string[] = [copy.BAND.LOAD.sentence];
     for (const s of sentences) {
-      expect(s.match(/。/g)?.length, s).toBe(1);
+      expect(s.match(/。/g)?.length, s).toBe(twoSentences.includes(s) ? 2 : 1);
       expect(s.endsWith('ください。'), s).toBe(true);
       expect(s, s).not.toMatch(/[!！]/);
     }

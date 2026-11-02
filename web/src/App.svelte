@@ -48,15 +48,16 @@
 
   async function connect() {
     if (busy) return;
-    if (!(await wasmReady())) {
-      await show({ kind: 'unavailable' });
-      return;
-    }
     const my = ++attempt;
     await transport?.close().catch(() => undefined);
     transport = null;
     alertText = '';
+    // 'choosing' marks the button busy, so presses while dagon-wasm loads are ignored.
     await show({ kind: 'choosing' });
+    if (!(await wasmReady())) {
+      if (my === attempt) await show({ kind: 'unavailable' });
+      return;
+    }
     try {
       transport = mock !== null ? new MockTransport({ silent: mock === 'silent', delayMs: 600 }) : await chooseAndOpen(serial!);
       if (mock !== null) await transport.open();

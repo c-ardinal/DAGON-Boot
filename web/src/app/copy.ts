@@ -68,12 +68,10 @@ export const BAND = {
     sentence: 'USB ケーブルを挿し直してから、もう一度つないでください。',
     button: 'もう一度つなぐ',
   },
-  /**
-   * The page's own code (dagon-wasm) did not load. Borrows M35's sentence and
-   * button until the copy table has a line for this case; the button reloads.
-   */
+  /** Part of the page (dagon-wasm) did not load; the button reloads the page. */
   LOAD: {
-    sentence: 'インターネットにつながっているか確かめてから、もう一度読み込んでください。',
+    chip: '× 読み込めない',
+    sentence: 'このページの一部を読み込めませんでした。ページを開き直してください。',
     button: 'もう一度読み込む',
   },
 } as const satisfies Record<string, BandCopy>;

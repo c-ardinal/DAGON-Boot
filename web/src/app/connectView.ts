@@ -53,7 +53,7 @@ export function hubOf(v: View): HubState {
 /** Text of the single role="status" region. */
 export function statusOf(v: View): string {
   if (v.kind === 'connected') return ANNOUNCE.A05;
-  if (v.kind === 'failed') return bandOf(v)?.chip ?? '';
+  if (v.kind === 'failed' || v.kind === 'unavailable') return bandOf(v)?.chip ?? '';
   return '';
 }
 

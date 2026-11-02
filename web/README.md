@@ -76,8 +76,8 @@ Font Name, so subsetting and redistribution are allowed under the SIL Open Font 
 |---|---|---|---|---|---|
 | Doto | github.com/oliverlalan/Doto | OFL 1.1 (`OFL-Doto.txt`) | 700 | digits, `%`, `/`, space | 1.0 KB |
 | DotGothic16 | github.com/fontworks-fonts/DotGothic16 | OFL 1.1 (`OFL-DotGothic16.txt`) | 400 | digits, Latin letters, `.`, `/`, space | 3.3 KB |
-| Zen Kaku Gothic New | github.com/googlefonts/zen-kakugothic | OFL 1.1 (`OFL-ZenKakuGothicNew.txt`) | 400, 500, 700 | ASCII + every non-ASCII character in `src/` | 3 × 27 KB |
+| Zen Kaku Gothic New | github.com/googlefonts/zen-kakugothic | OFL 1.1 (`OFL-ZenKakuGothicNew.txt`) | 400, 500, 700 | ASCII + every non-ASCII character in `src/` | 3 × 28 KB |
 | JetBrains Mono | github.com/JetBrains/JetBrainsMono | OFL 1.1 (`OFL-JetBrainsMono.txt`) | 500 | ASCII, `·…→←` | 17.7 KB |
 
-Total 105 KB (budget 250 KB). Only Zen Kaku Gothic New 400 is preloaded; all faces use
+Total 106 KB (budget 250 KB). Only Zen Kaku Gothic New 400 is preloaded; all faces use
 `font-display: swap`.

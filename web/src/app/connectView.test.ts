@@ -41,6 +41,7 @@ describe('connect outcomes', () => {
     const v: View = { kind: 'unavailable' };
     expect(bandOf(v)).toBe(BAND.LOAD);
     expect(focusOf(v)).toBe('button');
+    expect(statusOf(v)).toBe(BAND.LOAD.chip);
     expect(hubOf(v)).toBe('idle');
   });
 

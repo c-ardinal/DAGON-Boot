@@ -20,7 +20,7 @@ const RELEASE_DIR: &str = "out/release";
 const CONFORM_DIR: &str = "out/conform";
 
 /// Node ids, release names: what may become a file name.
-fn plain(s: &str) -> bool {
+pub(super) fn plain(s: &str) -> bool {
     (1..=32).contains(&s.len())
         && s.bytes()
             .all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_' || b == b'.')
@@ -29,7 +29,7 @@ fn plain(s: &str) -> bool {
 }
 
 /// `p` resolved inside the work area (symlinks and junctions followed).
-fn inside(cfg: &Config, p: &Path) -> Result<PathBuf, String> {
+pub(super) fn inside(cfg: &Config, p: &Path) -> Result<PathBuf, String> {
     crate::paths::contained(&cfg.base, p)
 }
 
@@ -103,7 +103,7 @@ pub(super) fn release_key_of(cfg: &Config) -> Result<[u8; 32], String> {
 
 /// The signing key for a job. Its file path never goes to the page: the
 /// reason is printed in the serve terminal only.
-fn serve_key(cfg: &Config) -> Result<ed25519_compact::KeyPair, String> {
+pub(super) fn serve_key(cfg: &Config) -> Result<ed25519_compact::KeyPair, String> {
     page_safe(project_key(cfg))
 }
 
@@ -180,10 +180,8 @@ pub fn handle(server: &Arc<Server>, req: &Request) -> Response {
         ("POST", ["project", "init"]) => Ok(super::project::init(server, req)),
         ("GET", ["fs"]) => Ok(super::project::list(server, req)),
         ("POST", ["gen"]) => gen_start(server, req),
-        ("POST", ["flash"] | ["doctor"]) => Ok(Response::error(
-            501,
-            "this dagon has no flash or doctor yet",
-        )),
+        ("POST", ["flash"]) => start(server, req, "flash", super::devjobs::job_flash),
+        ("POST", ["doctor"]) => start(server, req, "doctor", super::devjobs::job_doctor),
         _ => Ok(Response::error(404, "no such endpoint")),
     };
     r.unwrap_or_else(|e| e)
@@ -191,7 +189,7 @@ pub fn handle(server: &Arc<Server>, req: &Request) -> Response {
 
 /// What this serve offers the page. `flash` and `doctor` join when this
 /// dagon has those commands.
-const FEATURES: [&str; 10] = [
+const FEATURES: [&str; 12] = [
     "topology_save",
     "ai_topology",
     "build",
@@ -202,6 +200,8 @@ const FEATURES: [&str; 10] = [
     "project",
     "bootcore",
     "layout",
+    "flash",
+    "doctor",
 ];
 
 /// Largest layout file (呼び名 and editor positions) accepted.

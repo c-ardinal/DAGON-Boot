@@ -694,10 +694,9 @@ fn gen_is_a_job_and_listed_in_hello() {
     let (a, _home) = with_home("gen");
     let (_, hello) = get(&a, "/v1/hello");
     assert!(hello.contains("\"gen\""), "{hello}");
-    assert!(!hello.contains("\"flash\""), "{hello}");
-    assert_eq!(
-        post(&a, "/v1/flash", serde_json::json!({ "node": "seg" })).0,
-        501
+    assert!(
+        hello.contains("\"flash\"") && hello.contains("\"doctor\""),
+        "{hello}"
     );
     assert_eq!(
         post(&a, "/v1/project/new", serde_json::json!({ "path": "g" })).0,
@@ -709,6 +708,9 @@ fn gen_is_a_job_and_listed_in_hello() {
         post(&a, "/v1/gen", serde_json::json!({ "nodes": ["../x"] })).0,
         400
     );
+    // Jobs now; a flash without a node fails in its job, writing nothing.
+    assert_eq!(post(&a, "/v1/flash", serde_json::json!({})).0, 202);
+    assert_eq!(post(&a, "/v1/doctor", serde_json::json!({})).0, 202);
 }
 
 #[cfg(windows)]

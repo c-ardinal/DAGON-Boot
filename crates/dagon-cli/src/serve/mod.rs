@@ -12,6 +12,7 @@
 //!   reports only whether they exist and the key id.
 
 mod api;
+mod devjobs;
 mod http;
 mod jobs;
 mod project;

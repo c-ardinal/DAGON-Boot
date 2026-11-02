@@ -208,7 +208,16 @@ mod tests {
         // The start of a frame announcing 1000 payload bytes, a 30 ms
         // stall, then the real answer. Kept, the partial frame would swallow
         // the answer while waiting for its 1000 bytes and time out.
-        let head = [0xDA, 0x6F, 0x01, flags::RESP, 0x82, Cmd::Hello as u8, 0xE8, 0x03];
+        let head = [
+            0xDA,
+            0x6F,
+            0x01,
+            flags::RESP,
+            0x82,
+            Cmd::Hello as u8,
+            0xE8,
+            0x03,
+        ];
         let mut stream = steady(&head);
         let mut rest = steady(&hello_resp(0x82));
         rest[0].0 = 30;
@@ -236,6 +245,9 @@ mod tests {
         let (mut l, clock) = link(Vec::new());
         assert!(block_on(l.hello(0x84)).is_none());
         let t = clock.get();
-        assert!((HELLO_TIMEOUT_MS as u64..HELLO_TIMEOUT_MS as u64 + GAP_MS).contains(&t), "{t}");
+        assert!(
+            (HELLO_TIMEOUT_MS as u64..HELLO_TIMEOUT_MS as u64 + GAP_MS).contains(&t),
+            "{t}"
+        );
     }
 }

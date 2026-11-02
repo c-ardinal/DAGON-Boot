@@ -94,9 +94,10 @@ pub(crate) fn plan(
     let home = dagon_home();
     for part in parts {
         lines.push(format!(
-            "  build    {:<8} {}",
+            "  build    {:<8} {} (tag {})",
             part.name,
-            home.join(part.package).display()
+            home.join(part.package).display(),
+            n.tag
         ));
     }
     let b = cfg
@@ -146,7 +147,19 @@ fn inputs(
             part.name,
             dir.display()
         ));
-        let exe = nodebuild::cargo_build(&dir, &bin, &[], Some(&target), Some(&hex), log, cancel)?;
+        let exe = nodebuild::cargo_build(
+            &dir,
+            &bin,
+            &[],
+            Some(&target),
+            nodebuild::FirmwareEnv {
+                pubkey_hex: Some(&hex),
+                // The boot core accepts only images carrying this tag.
+                target_tag: Some(&n.tag),
+            },
+            log,
+            cancel,
+        )?;
         built.push((part.name, exe));
     }
     nodebuild::build_nodes_keyed(cfg, &[node.to_string()], Some(fw_key), log, cancel)?;
@@ -406,6 +419,7 @@ mod tests {
             plan.contains("stage0") && plan.contains("targets/rp2040-hub"),
             "{plan}"
         );
+        assert!(plan.contains("(tag hub-rp2040-lcd)"), "{plan}");
         match provision_files(&t, "hub", &built(&cfg, true), &out, &key()).unwrap() {
             FirstWrite::Uf2 { file, blocks } => {
                 assert_eq!(file, out.join("rescue.uf2"));
@@ -431,6 +445,7 @@ mod tests {
             plan.contains("stm32f401re") && plan.contains("samples/f401-app"),
             "{plan}"
         );
+        assert!(plan.contains("(tag seg-f401-7seg)"), "{plan}");
         match provision_files(&t, "seg", &built(&cfg, false), &out, &key()).unwrap() {
             FirstWrite::ProbeRs {
                 bin,

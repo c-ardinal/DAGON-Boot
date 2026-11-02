@@ -41,64 +41,55 @@ target = "thumbv7em-none-eabihf"
 rustflags = ["-C", "link-arg=--nmagic", "-C", "link-arg=-Tlink.x", "-C", "link-arg=-Tdefmt.x"]
 ```
 
-`src/main.rs` (no build.rs: the memory map comes from this package):
+`src/main.rs` (no build.rs: the memory map comes from this package; this
+is what `dagon new` generates, see `../../boards/nucleo-f401re/template`):
 
 ```rust
 #![no_std]
 #![no_main]
 
-use dagon_board_nucleo_f401re::{self as board, Board, BoardDef, Io};
-use dagon_mcu_stm32f401re::watchdog::{now_ms, Guard, Lease, Level, Trial};
-use dagon_mcu_stm32f401re::clocks;
+mod app;
+
+use dagon_board_nucleo_f401re::{self as board, Board, BoardDef};
+use dagon_mcu_stm32f401re::watchdog::{now_ms, Guard, Trial};
+use dagon_mcu_stm32f401re::{clocks, node};
 use embassy_executor::Spawner;
-use embassy_time::Timer;
 use {defmt_rtt as _, panic_probe as _};
 
-// Task 0 serves DAGON, task 1 is the app. Unconfirmed images never feed:
-// they reset after the boot core's trial period unless the hub confirmed.
-static GUARD: Guard<2> = Guard::new(
-    [Level::Preempting, Level::Background],
-    Trial::NeverFeed,
-    now_ms,
-);
+// DAGON's link is guard task 0, app.rs's tasks follow. Unconfirmed images
+// never feed: they reset after the boot core's trial period unless the
+// 親機 confirmed them.
+const TASKS: usize = node::APP_TASKS + app::TASKS;
+static GUARD: Guard<TASKS> = Guard::new(node::levels::<TASKS>(), Trial::NeverFeed, now_ms);
 
 #[embassy_executor::main]
 async fn main(spawner: Spawner) {
     let (dagon, io) = Board::split(embassy_stm32::init(clocks()));
-    board::start(spawner, dagon, &GUARD, "my-node", self_check).unwrap();
-    spawner.spawn(app(io, GUARD.lease(1)).unwrap());
-}
-
-/// Whether a version on trial may be confirmed (your health check).
-fn self_check() -> bool {
-    true
-}
-
-#[embassy_executor::task]
-async fn app(_io: Io, live: Lease) {
-    loop {
-        live.busy(500); // a piece of work stuck past 500 ms resets the chip
-        // Your work here.
-        live.idle();
-        Timer::after_millis(500).await;
-    }
+    let tag = dagon_mcu_stm32f401re::TARGET_TAG;
+    board::start(spawner, dagon, &GUARD, tag, app::self_check).ok();
+    app::start(spawner, io, &GUARD, node::APP_TASKS);
 }
 ```
 
+`src/app.rs` holds `TASKS`, `self_check()` and `start()`, which spawns the
+app's tasks, each with a `Lease` (`lease.busy(budget_ms)` before a piece of
+work, `lease.idle()` when waiting).
+
 `board::start` (`node::start` for this board) opens the slot store (it
 fails if the state log is unreadable), takes over the IWDG with the boot
-core's period, opens the board's I2C target and spawns the serving task
-(guard task `node::DAGON_TASK`, 0) and the feeder. `"my-node"` is the
-node's image target tag; `self_check` decides whether a version on trial
-may be confirmed. An app that keeps `embassy_stm32::Peripherals` itself
-passes `dagon_pins!(p)` instead of splitting. Build with `DAGON_PUBKEY` set (below);
-`--features slot-b` links the same app for slot B.
-
-The serving task is declared `Preempting` even on the same executor: a
-request that erases a sector blocks the executor, and this level freezes
-the app's deadline meanwhile instead of counting it as stuck. The demo node
-(`../../../samples/f401-app`) runs serving on an interrupt executor instead,
-from the same pieces (`open_store`, `install_watchdog`, `serve`).
+core's period, opens the board's I2C target, spawns the serving task (guard
+task `node::DAGON_TASK`, 0, `Preempting`) on DAGON's high-priority executor
+(`exec`, an interrupt executor on the unused USART6 vector at P6) and the
+feeder on `spawner`. The app's tasks run in thread mode below it, so the
+親機 is answered whatever they do. The node's tag comes from
+`DAGON_TARGET_TAG` in `.cargo/config.toml`
+(`DAGON_TARGET_TAG = { value = "my-node", force = true }` under `[env]`);
+`self_check` decides whether a version on trial may be confirmed. An app
+that keeps `embassy_stm32::Peripherals` itself passes `dagon_pins!(p)`
+instead of splitting. Build with `DAGON_PUBKEY` set (below);
+`--features slot-b` links the same app for slot B. The demo node
+(`../../../samples/f401-app`) uses the same pieces (`open_store`,
+`install_watchdog`, `exec`, `serve`) with its own display task.
 
 ## Features
 
@@ -106,7 +97,7 @@ from the same pieces (`open_store`, `install_watchdog`, `serve`).
 |---|---|
 | (none) | layout, slot store, mailbox (host-testable) |
 | `hal` | `clocks`, `flash`, `watchdog`; `PUBKEY` / `TEST_KEY` (the boot core stops here) |
-| `node` | `node` (board definition, start-up, serving loop); logs through defmt |
+| `node` (default) | `node` (board definition, start-up, serving loop) and `exec` (binds USART6's vector); logs through defmt |
 | `conform` | the conformance build's CONF_RUN in front of the agent |
 | `slot-b` | link the app for APP slot B |
 | `image-bootcore` | link the boot core instead of an app |
@@ -133,12 +124,13 @@ from the HSI (`clocks()`).
 
 ```sh
 export DAGON_PUBKEY=/path/outside/the/repo/dagon-signing.pub
-(cd targets/mcu/stm32f401re/bootcore && cargo build --release)
+(cd targets/mcu/stm32f401re/bootcore && DAGON_TARGET_TAG=my-node cargo build --release)
 ```
 
-It accepts app images tagged `layout::TARGET_TAG` (the demo node's
-`seg-f401-7seg`); with nothing startable it blinks PA5 (LD2 on NUCLEO
-boards).
+It is built per node: it accepts only app images tagged with
+`DAGON_TARGET_TAG` (the node's tag, as in the app's `.cargo/config.toml`;
+`seg-f401-7seg` for the demo node), and its build fails without it. With
+nothing startable it blinks PA5 (LD2 on NUCLEO boards).
 
 ## Keys
 

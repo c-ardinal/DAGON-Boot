@@ -1,11 +1,12 @@
-//! The sub nodes shown on the LCD and polled with HELLO: from the stored
-//! topology display copy when it is valid, else the desk demo wiring.
+//! The sub nodes polled with HELLO (and shown by a display): from the
+//! stored topology display copy when it is valid, else the fallback list
+//! the app passes to `relay::start`.
 
+use crate::layout::TOPOLOGY;
 use dagon_format::topology::{iface, TopologyView, HEAD_SIZE, MAX_SIZE};
 use dagon_port::Flash;
 use dagon_proto::payload::link;
 use heapless::Vec;
-use dagon_mcu_rp2040::layout::TOPOLOGY;
 
 /// Sub nodes the home screen has room for.
 pub const MAX_SUBS: usize = 3;
@@ -41,13 +42,9 @@ pub const fn named(index: u8, s: &str, link: u8, addr: u8) -> SubNode {
     }
 }
 
-const DESK_DEMO: [SubNode; 2] = [
-    named(1, "seg", link::I2C0, 0x42),
-    named(2, "watch", link::PIO_UART, link::UART_ADDR),
-];
-
-pub fn load<F: Flash>(flash: &mut F) -> Subs {
-    from_topology(flash).unwrap_or_else(|| Vec::from_slice(&DESK_DEMO).unwrap_or_default())
+/// The node list: the topology display copy, else `fallback`.
+pub fn load<F: Flash>(flash: &mut F, fallback: &[SubNode]) -> Subs {
+    from_topology(flash).unwrap_or_else(|| fallback.iter().take(MAX_SUBS).copied().collect())
 }
 
 fn from_topology<F: Flash>(flash: &mut F) -> Option<Subs> {

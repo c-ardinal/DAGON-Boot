@@ -9,7 +9,7 @@ use embassy_rp::Peri;
 use embassy_time::{Duration, Instant, Timer};
 
 pub use dagon_mcu_common::guard::{
-    Dog, Lease, Trial, Watch, BUSY_LIMIT_MS, BUSY_MARGIN_MS,
+    levels, Dog, Lease, Trial, Watch, BUSY_LIMIT_MS, BUSY_MARGIN_MS,
 };
 pub use dagon_mcu_common::liveness::Level;
 

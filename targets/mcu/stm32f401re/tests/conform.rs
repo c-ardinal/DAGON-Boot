@@ -4,9 +4,9 @@
 use dagon_conform::node::{run, NodeSetup};
 use dagon_core::log::{LogState, SlotRef};
 use dagon_format::Version;
+use dagon_mcu_stm32f401re::{scratch_addr, scratch_slot, NO_SCRATCH};
 use dagon_port::{Flash, FlashError, FlashRegion};
 use dagon_proto::payload::ConfRunReq;
-use dagon_mcu_stm32f401re::{scratch_addr, scratch_slot, NO_SCRATCH};
 
 use dagon_mcu_stm32f401re::layout;
 

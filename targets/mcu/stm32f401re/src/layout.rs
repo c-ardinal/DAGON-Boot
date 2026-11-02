@@ -23,10 +23,6 @@ pub const SLOTS: SlotLayout = SlotLayout {
     slot_len: 0x2_0000,
 };
 
-/// Image target tag the boot core built from this package accepts: the
-/// F401 sample node's (a node with another tag needs its own boot core
-/// build).
-pub const TARGET_TAG: [u8; 16] = dagon_format::header::target_tag("seg-f401-7seg");
 pub const MCU_ID: u16 = dagon_format::header::mcu_id::STM32F401XE;
 /// Smallest flash the layout fits (APP-B ends in sector 6).
 pub const MIN_FLASH_SIZE: usize = 512 * 1024;

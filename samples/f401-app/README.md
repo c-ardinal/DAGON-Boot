@@ -39,7 +39,7 @@ build warns and the display shows `tSt` at start).
 
 ```sh
 export DAGON_PUBKEY=/path/outside/the/repo/dagon-signing.pub
-(cd targets/mcu/stm32f401re/bootcore && cargo build --release)
+(cd targets/mcu/stm32f401re/bootcore && DAGON_TARGET_TAG=seg-f401-7seg cargo build --release)
 (cd samples/f401-app && cargo build --release)
 ```
 
@@ -119,7 +119,7 @@ Write it with ST-LINK (not through the hub), as a fresh first install:
 
 ```sh
 export DAGON_PUBKEY=/path/outside/the/repo/dagon-signing.pub
-(cd targets/mcu/stm32f401re/bootcore && cargo build --release)
+(cd targets/mcu/stm32f401re/bootcore && DAGON_TARGET_TAG=seg-f401-7seg cargo build --release)
 (cd samples/f401-app && cargo build --release --features conform --target-dir target/conform)
 ```
 

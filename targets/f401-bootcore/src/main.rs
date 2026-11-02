@@ -2,6 +2,9 @@
 //! of the pending slot, rollback after the attempts run out, otherwise the
 //! confirmed slot), starts the watchdog and jumps. With no startable slot it
 //! blinks LD2 fast and stays here.
+//!
+//! Images are verified with `f401_board::PUBKEY` (`DAGON_PUBKEY` at build
+//! time, else the public test key, see `f401_board::TEST_KEY`).
 #![no_std]
 #![no_main]
 
@@ -16,16 +19,8 @@ use embassy_stm32::gpio::{Level, Output, Speed};
 use embassy_stm32::wdg::IndependentWatchdog;
 use f401_board as board;
 
-/// Verifying key, embedded at build time: 64 hex digits in `DAGON_PUBKEY`
-/// (the public key printed by `dagon key gen`). Unset, it is the RFC 8032
-/// section 7.1 TEST 1 public key, which only accepts TEST_KEY images.
-const PUBKEY: [u8; 32] = hex32(match option_env!("DAGON_PUBKEY") {
-    Some(k) => k,
-    None => "d75a980182b10ab7d54bfed3c964073a0ee172f3daa62325af021a68f707511a",
-});
-
 const CONFIG: BootConfig = BootConfig {
-    pubkey: PUBKEY,
+    pubkey: board::PUBKEY,
     mcu_id: board::MCU_ID,
     target_tag: board::TARGET_TAG,
     max_attempts: board::MAX_ATTEMPTS,
@@ -33,26 +28,6 @@ const CONFIG: BootConfig = BootConfig {
 
 /// Half period of the "no image" blink at the 16 MHz reset clock (about 50 ms).
 const HALT_BLINK_CYCLES: u32 = 800_000;
-
-const fn hex32(s: &str) -> [u8; 32] {
-    const fn nib(c: u8) -> u8 {
-        match c {
-            b'0'..=b'9' => c - b'0',
-            b'a'..=b'f' => c - b'a' + 10,
-            b'A'..=b'F' => c - b'A' + 10,
-            _ => panic!("DAGON_PUBKEY: not a hex digit"),
-        }
-    }
-    let b = s.as_bytes();
-    assert!(b.len() == 64, "DAGON_PUBKEY: need 64 hex digits");
-    let mut out = [0u8; 32];
-    let mut i = 0;
-    while i < 32 {
-        out[i] = nib(b[2 * i]) << 4 | nib(b[2 * i + 1]);
-        i += 1;
-    }
-    out
-}
 
 #[entry]
 fn main() -> ! {

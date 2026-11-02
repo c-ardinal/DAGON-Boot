@@ -51,6 +51,9 @@ async fn main(_spawner: Spawner) {
     };
     let s = log.state;
     let on_trial = s.on_trial() && s.active() == SLOT;
+    if board::TEST_KEY {
+        info!("TEST KEY: built with the public test verifying key");
+    }
     info!(
         "app {} slot {} confirm-build={} on_trial={} attempts={} confirmed_slot={} last_reason={}",
         Display2Format(&version),

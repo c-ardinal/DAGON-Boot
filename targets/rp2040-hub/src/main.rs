@@ -43,7 +43,8 @@ use rp2040_common::rp::RpFlash;
 use static_cell::{ConstStaticCell, StaticCell};
 
 use gc9a01::Frame;
-use relay::{I2cLink, PioStream, RpI2c, UartLink};
+use relay::{I2cLink, PioStream, RpI2c};
+use rp2040_common::uart::UartLink;
 use store::HubStore;
 
 include!(concat!(env!("OUT_DIR"), "/pubkey.rs"));
@@ -148,13 +149,18 @@ fn main() -> ! {
     let high = EXECUTOR_PC.start(interrupt::SWI_IRQ_0);
     high.spawn(hub::task(p.USB, serial, pc).expect("task pool"));
     high.spawn(links::i2c_task(I2cLink::new(RpI2c(i2c))).expect("task pool"));
-    high.spawn(links::uart_task(UartLink::new(PioStream { tx, rx })).expect("task pool"));
+    let uart = UartLink::new(PioStream { tx, rx }, now_ms as fn() -> u64);
+    high.spawn(links::uart_task(uart).expect("task pool"));
 
     let frame = FRAME.take();
     EXECUTOR_LOW.init(Executor::new()).run(|low| {
         low.spawn(lcd::task(lcd_pins, frame).expect("task pool"));
         low.spawn(wdt::task().expect("task pool"));
     })
+}
+
+fn now_ms() -> u64 {
+    embassy_time::Instant::now().as_millis()
 }
 
 fn on_trial(st: &StatusResp) -> bool {

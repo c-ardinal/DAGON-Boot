@@ -28,12 +28,15 @@ impl<const N: usize> FrameReader<N> {
 
     /// [`FrameReader::push`] for a link with an inter-byte limit: bytes
     /// arriving at `now_ms` [`GAP_MS`] or more after the previous ones
-    /// first drop the partial frame buffered so far.
+    /// first drop the partial frame buffered so far. With no bytes it only
+    /// applies that rule (a timed-out wait).
     pub fn push_at(&mut self, data: &[u8], now_ms: u64) -> usize {
         if self.len > 0 && now_ms.saturating_sub(self.last_ms) >= GAP_MS {
             self.clear();
         }
-        self.last_ms = now_ms;
+        if !data.is_empty() {
+            self.last_ms = now_ms;
+        }
         self.push(data)
     }
 

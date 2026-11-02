@@ -339,7 +339,7 @@ export const ANNOUNCE = {
   A15: (name: string, version: string) => `${name} ${version} に戻した`,
   A16: (name: string, rest: number) => `${name} 復旧済み、残り ${rest}`,
   /** "配布中の最新バージョンを使う" could not fetch the published release. */
-  A22latest: '配布中の最新バージョン 読み込めない',
+  A22latest: '配布中の最新バージョンを読み込めませんでした',
 } as const;
 
 /** Words that never appear in operating-mode guidance, chips or results. */

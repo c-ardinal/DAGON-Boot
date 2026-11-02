@@ -297,7 +297,18 @@ fn known_secrets(cfg: &Config) -> Vec<PathBuf> {
 /// process knows of (whatever the file is called), and, with a signing key
 /// known, its public half. Messages carry no paths.
 pub fn checked_pubkey(cfg: &Config, path: &Path) -> Result<[u8; 32], String> {
-    let k = dagon_sign::load_public_key(path).map_err(|_| "the pubkey file is not a public key")?;
+    // Read as raw bytes: whether it is a secret seed is decided before
+    // whether it is a valid point, so a secret always reports as one.
+    // dagon_sign::load_public_key adds nothing more than the point check
+    // check_pubkey_bytes makes.
+    let text = std::fs::read_to_string(path).map_err(|_| "the pubkey file cannot be read")?;
+    let k = key_hex(text.trim()).ok_or("the pubkey file is not a public key")?;
+    check_pubkey_bytes(cfg, k)
+}
+
+/// [`checked_pubkey`] for key bytes already read: not a secret seed this
+/// process knows of, a valid point, and the signing key's public half.
+pub fn check_pubkey_bytes(cfg: &Config, k: [u8; 32]) -> Result<[u8; 32], String> {
     if known_secrets(cfg)
         .iter()
         .filter_map(|s| dagon_sign::load_key_pair(s).ok())
@@ -305,6 +316,9 @@ pub fn checked_pubkey(cfg: &Config, path: &Path) -> Result<[u8; 32], String> {
     {
         return Err("the pubkey file holds a secret key".into());
     }
+    ed25519_compact::PublicKey::new(k)
+        .validate()
+        .map_err(|_| "the pubkey is not a valid public key")?;
     if let Some(s) = signing_key_path(cfg) {
         let kp = dagon_sign::load_key_pair(&s).map_err(|_| "the signing key cannot be read")?;
         if *kp.pk != k {
@@ -313,6 +327,39 @@ pub fn checked_pubkey(cfg: &Config, path: &Path) -> Result<[u8; 32], String> {
     }
     allow_key(&k, test_key_allowed())?;
     Ok(k)
+}
+
+/// The key a firmware build embeds, checked: pubkey in dagon.toml, else
+/// DAGON_PUBKEY from the environment (a key file or its 64 hex digits);
+/// None when neither is set (the build then follows its test key rule).
+pub fn build_pubkey(cfg: &Config) -> Result<Option<[u8; 32]>, String> {
+    if let Some(p) = &cfg.pubkey {
+        return checked_pubkey(cfg, p)
+            .map(Some)
+            .map_err(|e| format!("pubkey in dagon.toml: {e}"));
+    }
+    let Some(v) = std::env::var_os(crate::nodebuild::PUBKEY_ENV) else {
+        return Ok(None);
+    };
+    let v = v.to_string_lossy().trim().to_string();
+    let k = match key_hex(&v) {
+        Some(k) => check_pubkey_bytes(cfg, k),
+        None => checked_pubkey(cfg, Path::new(&v)),
+    };
+    k.map(Some)
+        .map_err(|e| format!("{}: {e}", crate::nodebuild::PUBKEY_ENV))
+}
+
+/// 64 hex digits as 32 bytes.
+fn key_hex(s: &str) -> Option<[u8; 32]> {
+    if s.len() != 64 || !s.bytes().all(|b| b.is_ascii_hexdigit()) {
+        return None;
+    }
+    let mut k = [0u8; 32];
+    for (i, b) in k.iter_mut().enumerate() {
+        *b = u8::from_str_radix(&s[2 * i..2 * i + 2], 16).ok()?;
+    }
+    Some(k)
 }
 
 /// Environment variable that permits the public RFC 8032 test key.

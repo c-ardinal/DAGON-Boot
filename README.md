@@ -1,3 +1,10 @@
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="assets/product-symbol/lockup-horizontal-dark-2400w.png">
+    <img src="assets/product-symbol/lockup-horizontal-light-2400w.png" alt="DAGON Boot" width="480">
+  </picture>
+</p>
+
 # DAGON Boot (Dual-bank Atomic Gateway for On-device Nodes)
 
 [日本語版 / Japanese: README.ja.md](README.ja.md)
@@ -65,8 +72,8 @@ cargo install --path crates/dagon-cli
 dagon --help
 ```
 
-DAGON Console is built into `dagon`; Node.js is only needed to work on the
-page itself (`web/README.md`).
+DAGON Console is built into `dagon`; Node.js is only needed to work on
+DAGON Console itself (`web/README.md`).
 
 ## The journey
 
@@ -101,7 +108,7 @@ dagon serve
 DAGON Console opens in the browser, on 127.0.0.1 only, with a one-time
 passphrase. Place nodes from the node list (by product or by MCU), link
 them, and fix what the check reports; every edit is saved to
-`topology.yaml`. Without a project, `dagon serve` starts on a page that
+`topology.yaml`. Without a project, `dagon serve` starts on a screen that
 creates or opens one.
 
 From the command line the same is `dagon topo check topology.yaml`, or a
@@ -155,7 +162,9 @@ export DAGON_PUBKEY=~/.dagon/keys/my-fleet/dagon-signing.pub
 (cd <DAGON clone>/targets/mcu/stm32f401re/bootcore && cargo build --release)
 ```
 
-Then add one `[provision.<id>]` table per node to `dagon.toml`; paths are
+Then add a `[provision.<id>]` table to `dagon.toml` for each node handled
+by `dagon rescue hub` or `dagon provision` (the ESP32-S3 follows its own
+procedure, below); paths are
 relative to `dagon.toml` unless absolute. The hub needs `stage0` as well:
 
 ```toml
@@ -384,8 +393,8 @@ Points to note:
   `dagon ai topology`).
 - `subtle`, `rp-pac`, `rp2040-boot2` and `source-map-js` are BSD-3-Clause.
 - `lightningcss` (MPL-2.0) is a build-time dependency of the web tooling
-  only; nothing from it ships in the page.
-- The page ships the Svelte client runtime and the two packages it
+  only; nothing from it ships in DAGON Console.
+- DAGON Console ships the Svelte client runtime and the two packages it
   imports, `clsx` and `esm-env` (all MIT); every other npm package is a
   build or test tool (column "Ships in").
 - Fonts in `web/public/fonts/` are under the SIL Open Font License 1.1:

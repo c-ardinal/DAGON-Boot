@@ -1,3 +1,10 @@
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="assets/product-symbol/lockup-horizontal-dark-2400w.png">
+    <img src="assets/product-symbol/lockup-horizontal-light-2400w.png" alt="DAGON Boot" width="480">
+  </picture>
+</p>
+
 # DAGON Boot (Dual-bank Atomic Gateway for On-device Nodes)
 
 [English: README.md](README.md)
@@ -46,7 +53,7 @@ cargo install --path crates/dagon-cli
 dagon --help
 ```
 
-DAGON Console は `dagon` に組み込まれています。Node.js が要るのは、ページそのものを開発するときだけです（`web/README.md`）。
+DAGON Console は `dagon` に組み込まれています。Node.js が要るのは、DAGON Console そのものを開発するときだけです（`web/README.md`）。
 
 ## はじめから更新まで
 
@@ -71,7 +78,7 @@ export DAGON_SIGNING_KEY=~/.dagon/keys/my-fleet/dagon-signing.key
 dagon serve
 ```
 
-DAGON Console が 127.0.0.1 だけで、使い捨てのパスフレーズ付きでブラウザに開きます。ノードリストからノードを置き（製品でもマイコンでも選べます）、リンクでつなぎ、検査が示す問題を直します。編集は `topology.yaml` に保存されます。プロジェクトが無いときは、作るか開くページから始まります。
+DAGON Console が 127.0.0.1 だけで、使い捨てのパスフレーズ付きでブラウザに開きます。ノードリストからノードを置き（製品でもマイコンでも選べます）、リンクでつなぎ、検査が示す問題を直します。編集は `topology.yaml` に保存されます。プロジェクトが無いときは、作るか開く画面から始まります。
 
 コマンドでは `dagon topo check topology.yaml` で検査します。言葉で書いた説明から Claude API で構成の案を作ることもできます:
 
@@ -109,7 +116,7 @@ export DAGON_PUBKEY=~/.dagon/keys/my-fleet/dagon-signing.pub
 (cd <DAGON のクローン>/targets/mcu/stm32f401re/bootcore && cargo build --release)
 ```
 
-続けて、ノードごとに `[provision.<id>]` を `dagon.toml` に加えます。パスは絶対パスでなければ `dagon.toml` からの相対です。親機は `stage0` も要ります:
+続けて、`dagon rescue hub` か `dagon provision` で書き込むノードごとに `[provision.<id>]` を `dagon.toml` に加えます（ESP32-S3 は下の別の手順で書き込みます）。パスは絶対パスでなければ `dagon.toml` からの相対です。親機は `stage0` も要ります:
 
 ```toml
 [provision.hub]
@@ -278,8 +285,8 @@ dagon sim run
 - `ring` は Apache-2.0 AND ISC（両方が適用されます）。
 - `webpki-roots` は CDLA-Permissive-2.0 です（`dagon ai topology` の TLS クライアントが使う外部データ、Mozilla のルート証明書のデータを含みます）。
 - `subtle`、`rp-pac`、`rp2040-boot2`、`source-map-js` は BSD-3-Clause です。
-- `lightningcss`（MPL-2.0）は web のビルドツールのビルド時の依存だけで、ページには何も含まれません。
-- ページに含まれる npm のコードは、Svelte のクライアント用ランタイムと、それが読み込む `clsx` と `esm-env`（いずれも MIT）だけです。他の npm パッケージはビルドとテストの道具です（表の "Ships in" 列）。
+- `lightningcss`（MPL-2.0）は web のビルドツールのビルド時の依存だけで、DAGON Console には何も含まれません。
+- DAGON Console に含まれる npm のコードは、Svelte のクライアント用ランタイムと、それが読み込む `clsx` と `esm-env`（いずれも MIT）だけです。他の npm パッケージはビルドとテストの道具です（表の "Ships in" 列）。
 - `web/public/fonts/` の書体は SIL Open Font License 1.1 です: Doto、DotGothic16、Zen Kaku Gothic New、JetBrains Mono（ライセンス文はファイルの隣にあります。`web/README.md` を参照）。
 
 Rust crates: 316 packages, 350 name/version pairs. "Used by": `crates/` is the host workspace, `samples/...` the sample apps, other names are firmware packages under `targets/`.

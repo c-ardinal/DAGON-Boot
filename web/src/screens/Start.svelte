@@ -48,6 +48,7 @@
 
 <main id="canvas" class="start" tabindex="-1" aria-labelledby="start-h">
   <h1 id="start-h" class="visually-hidden">{START.heading}</h1>
+  <img class="mark" src="./icons/favicon-180.png" alt="" width="72" height="72" />
   <div class="choices">
     {#each CHOICES as [c, no, label], i (c)}
       <button class="choice" bind:this={buttons[i]} aria-pressed={s.choice === c} aria-disabled={!s.usable(c)} onclick={() => void s.choose(c)}
@@ -137,6 +138,9 @@
   }
   .start:focus {
     outline: none;
+  }
+  .mark {
+    border-radius: 16px;
   }
   .choices {
     display: grid;

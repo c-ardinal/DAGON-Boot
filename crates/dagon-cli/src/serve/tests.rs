@@ -987,3 +987,30 @@ fn a_secret_key_under_any_name_is_never_a_pubkey() {
     assert_eq!(st, 200, "{body}");
     assert_eq!(a.server.release_key(), Some(mine.public_key));
 }
+
+#[test]
+fn every_start_pubkey_source_goes_through_the_same_checks() {
+    let (a, home) = with_home("start-key");
+    let mine = dagon_sign::generate_to_dir(&home.join(".dagon/keys/mine")).unwrap();
+    let seed = std::fs::read_to_string(&mine.secret_path).unwrap();
+    std::fs::create_dir_all(home.join("p")).unwrap();
+    std::fs::write(home.join("p/leak.pub"), seed.trim()).unwrap();
+    let leak = home.join("p/leak.pub").to_string_lossy().into_owned();
+    let good = mine.public_path.to_string_lossy().into_owned();
+    project_keys(
+        &home,
+        "p",
+        &leak.replace(char::from(92), "/"),
+        &mine.secret_path,
+    );
+    let config = home.join("p/dagon.toml");
+    let start = |args: &[&str]| {
+        let o = crate::config::Opts::parse(args, &["pubkey", "key"]).unwrap();
+        super::start_key(&o, &a.server, Some(&config))
+    };
+    // --pubkey naming a renamed secret, and the same in dagon.toml.
+    assert!(start(&["--pubkey", &leak]).is_err());
+    assert!(start(&[]).is_err());
+    // --pubkey with the matching public key.
+    assert_eq!(start(&["--pubkey", &good]).unwrap(), mine.public_key);
+}

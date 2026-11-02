@@ -1,0 +1,10 @@
+[build]
+target = "thumbv6m-none-eabi"
+
+[target.thumbv6m-none-eabi]
+# RAM image: the bootrom starts a RAM UF2 at its lowest address, where the
+# `.entry` trampoline sits, so the ELF entry must be that trampoline.
+rustflags = [
+    "-C", "link-arg=--nmagic", "-C", "link-arg=-Tlink.x",
+    "-C", "link-arg=--entry=dump_entry",
+]

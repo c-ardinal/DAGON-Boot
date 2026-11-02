@@ -1,0 +1,29 @@
+[package]
+name = "rp2040-dump"
+edition = "2021"
+license = "MIT OR Apache-2.0"
+version = "0.0.0"
+publish = false
+
+# Bring-up tool: runs from SRAM only (loaded by the BOOTSEL bootrom from a
+# RAM UF2), never writes flash, and streams flash contents over USB CDC.
+[workspace]
+
+[dependencies]
+dagon-format = { path = "../../crates/dagon-format" }
+embassy-rp = { version = "0.10.0", features = ["rp2040", "time-driver", "critical-section-impl", "boot2-none"] }
+embassy-usb = "0.6.0"
+embassy-executor = { version = "0.10", features = ["platform-cortex-m", "executor-thread"] }
+embassy-time = "0.5"
+embassy-futures = "0.1"
+cortex-m = "0.7"
+cortex-m-rt = "0.7"
+heapless = "0.9"
+panic-halt = "1"
+
+[profile.release]
+opt-level = "z"
+lto = "fat"
+codegen-units = 1
+panic = "abort"
+debug = true

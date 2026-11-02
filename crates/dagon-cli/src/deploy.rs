@@ -118,16 +118,49 @@ pub(crate) fn has_slot_b_link(mcu: &str) -> bool {
     dagon_sign::image::slot(mcu, image_kind::APP, slot_binding::B).is_some()
 }
 
+/// MCUs whose builds deploy cannot turn into images yet: an ESP32-S3 app
+/// ELF needs the ESP image conversion first.
+const NOT_DEPLOYABLE: [&str; 1] = ["esp32s3"];
+
+/// The nodes a deploy takes, and a note per node it leaves out.
+#[derive(Debug, PartialEq, Eq)]
+pub(crate) struct Picked {
+    pub nodes: Vec<String>,
+    pub skipped: Vec<String>,
+}
+
 /// `pos`, else every `[build.<id>]` node, ordered as the topology updates
-/// them; each must be in the topology and build both slots.
-pub(crate) fn pick_nodes(cfg: &Config, t: &Topology, pos: &[&str]) -> Result<Vec<String>, String> {
-    let wanted: Vec<String> = if pos.is_empty() {
+/// them; each must be in the topology and build both slots. Without `pos`,
+/// nodes deploy cannot release yet are left out with a note; named, they
+/// stop the deploy.
+pub(crate) fn pick_nodes(cfg: &Config, t: &Topology, pos: &[&str]) -> Result<Picked, String> {
+    let mut wanted: Vec<String> = if pos.is_empty() {
         cfg.build.keys().cloned().collect()
     } else {
         pos.iter().map(|s| s.to_string()).collect()
     };
     if wanted.is_empty() {
         return Err("no [build.<id>] tables in dagon.toml".into());
+    }
+    let mut skipped = Vec::new();
+    let mcu_of = |id: &str| t.node(id).map(|n| n.mcu.clone());
+    let unsupported = |mcu: &str| NOT_DEPLOYABLE.contains(&mcu);
+    for id in &wanted {
+        let Some(mcu) = mcu_of(id).filter(|m| unsupported(m)) else {
+            continue;
+        };
+        let note = format!(
+            "{id} ({mcu}): deploy cannot turn its build into an image yet; update it with \
+             the ESP tools"
+        );
+        if !pos.is_empty() {
+            return Err(note);
+        }
+        skipped.push(note);
+    }
+    wanted.retain(|id| !mcu_of(id).is_some_and(|m| unsupported(&m)));
+    if wanted.is_empty() {
+        return Err(format!("nothing to deploy: {}", skipped.join("; ")));
     }
     for id in &wanted {
         let n = t
@@ -152,10 +185,10 @@ pub(crate) fn pick_nodes(cfg: &Config, t: &Topology, pos: &[&str]) -> Result<Vec
             .position(|x| x == id)
             .unwrap_or(order.len() + t.nodes.iter().position(|n| n.id == id).unwrap_or(0))
     };
-    let mut ids = wanted;
-    ids.sort_by_key(|id| rank(id));
-    ids.dedup();
-    Ok(ids)
+    let mut nodes = wanted;
+    nodes.sort_by_key(|id| rank(id));
+    nodes.dedup();
+    Ok(Picked { nodes, skipped })
 }
 
 /// Signs every built slot of `elfs` as `version` and writes the release.
@@ -242,7 +275,10 @@ pub fn command(args: &[&str]) -> Result<(), String> {
     let o = Opts::parse(&args, &["version", "port", "topology", "key", "config"])?;
     let cfg = Config::load(o.get("config"))?;
     let t = read_topology(&cfg.topology_path(o.get("topology"))?)?;
-    let nodes = pick_nodes(&cfg, &t, &o.pos)?;
+    let Picked { nodes, skipped } = pick_nodes(&cfg, &t, &o.pos)?;
+    for note in &skipped {
+        eprintln!("note: skipped {note}");
+    }
     let key = load_key(o.get("key"))?;
     let latest = release_path(&cfg);
     let previous = release_versions(&t, &latest, &key.pk).unwrap_or_else(|e| {

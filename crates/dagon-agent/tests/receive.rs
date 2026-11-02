@@ -431,6 +431,8 @@ fn unknown_and_hub_commands_are_unsupported_on_nodes() {
         n.call(Cmd::Show, &[1, 1, 0, 0, 0, 0, 0]).0,
         Status::Unsupported
     );
+    // The app handles ENTER_ROM before the agent sees it.
+    assert_eq!(n.call(Cmd::EnterRom, &[1]).0, Status::Unsupported);
     let begin = XferBegin {
         target: target::TOPOLOGY,
         slot: 0,

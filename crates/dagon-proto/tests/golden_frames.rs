@@ -283,3 +283,20 @@ fn hub_command_vectors() {
     // write_len 2, read_len 1, data
     expect_at(&file, &[(5, &[0x61, 6, 0, 2, 0, 1, 0, 0x00, 0xFF])]);
 }
+
+/// ENTER_ROM was added after G1 (owner-approved, additive).
+#[test]
+fn enter_rom_vector() {
+    let req = EnterRom {
+        method: rom_method::FORCE_DOWNLOAD_BOOT,
+    };
+    let file = golden(
+        "frame_enter_rom.bin",
+        &frame(0, 0x14, Cmd::EnterRom, |b| req.encode(b).unwrap()),
+    );
+    assert_eq!(EnterRom::parse(decode(&file).payload).unwrap(), req);
+    // SOF, ver, flags, seq, cmd, len 1; method FORCE_DOWNLOAD_BOOT; CRC
+    expect_at(&file, &[(0, &[0xDA, 0x6F, 1, 0, 0x14, 0x24, 1, 0, 1])]);
+    assert_eq!(file.len(), 13);
+    assert_crc(&file);
+}

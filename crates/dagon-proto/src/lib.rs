@@ -46,6 +46,9 @@ pub enum Cmd {
     SetPending = 0x20,
     Reboot = 0x21,
     Confirm = 0x22,
+    /// Node (kind V) replies OK, then enters its ROM loader. Added after G1,
+    /// owner-approved, additive: the other commands are unchanged.
+    EnterRom = 0x24,
     Show = 0x41,
     Relay = 0x50,
     SubCtl = 0x60,
@@ -54,7 +57,7 @@ pub enum Cmd {
 }
 
 impl Cmd {
-    pub const ALL: [Cmd; 14] = [
+    pub const ALL: [Cmd; 15] = [
         Cmd::Hello,
         Cmd::Status,
         Cmd::XferBegin,
@@ -64,6 +67,7 @@ impl Cmd {
         Cmd::SetPending,
         Cmd::Reboot,
         Cmd::Confirm,
+        Cmd::EnterRom,
         Cmd::Show,
         Cmd::Relay,
         Cmd::SubCtl,
@@ -285,7 +289,8 @@ mod tests {
 
     #[test]
     fn command_and_status_tables() {
-        assert_eq!(Cmd::ALL.len(), 14);
+        assert_eq!(Cmd::ALL.len(), 15);
+        assert_eq!(Cmd::from_u8(0x24), Some(Cmd::EnterRom));
         assert_eq!(Status::ALL.len(), 12);
         assert_eq!(Cmd::from_u8(0x15), Some(Cmd::XferHdr));
         assert_eq!(Cmd::from_u8(0x03), None);

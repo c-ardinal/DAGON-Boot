@@ -18,5 +18,6 @@ dagon-sign = { path = "../dagon-sign" }
 dagon-proto = { path = "../dagon-proto" }
 dagon-sim = { path = "../dagon-sim" }
 dagon-host = { path = "../dagon-host" }
+dagon-port = { path = "../dagon-port" }
 # MPL-2.0. No libudev: Linux builds need no system library.
 serialport = { version = "4.10", default-features = false }

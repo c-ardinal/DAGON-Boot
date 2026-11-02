@@ -1,5 +1,5 @@
 //! Host-side procedures shared by the CLI and the browser: discover, status,
-//! topology push, apply, rollback, confirm (recover follows).
+//! topology push, apply, rollback, confirm, recover.
 //!
 //! Everything runs through two small traits the caller supplies: a
 //! [`Transport`] carrying the byte stream to the hub (serial port, Web
@@ -11,8 +11,13 @@
 extern crate alloc;
 
 mod ops;
+pub mod rom;
 
-pub use ops::{ConfirmOutcome, Discovery, Event, NodeOutcome, NodeState, Outcome};
+pub use dagon_romlink::{RomError, Stats as RomStats};
+pub use ops::{
+    reason, ConfirmOutcome, Discovery, Event, NodeOutcome, NodeState, Outcome, RecoverAssets,
+    RecoverPath,
+};
 
 use alloc::vec;
 use alloc::vec::Vec;
@@ -36,12 +41,8 @@ pub trait Transport {
     async fn reopen(&mut self) -> core::result::Result<(), Self::Error>;
 }
 
-/// Monotonic time source.
-#[allow(async_fn_in_trait)]
-pub trait Clock {
-    fn now_ms(&self) -> u64;
-    async fn sleep_ms(&mut self, ms: u32);
-}
+/// Monotonic time source (the same trait the ROM procedure uses).
+pub use dagon_romlink::Clock;
 
 /// Where a request goes: the hub itself, or a node behind it via RELAY.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -128,6 +129,8 @@ pub enum Error<E> {
         running: Version,
         trial: bool,
     },
+    /// The ROM loader session failed (after its retries).
+    Rom(dagon_romlink::RomError),
     Unsupported,
 }
 

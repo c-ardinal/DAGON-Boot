@@ -1,0 +1,48 @@
+# Simulator pair: the simulated RP2040 hub and an F401 on I2C. Used by
+# `dagon sim run` and the dagon-host tests.
+dagon: 1
+name: sim-pair
+nodes:
+  - id: hub
+    mcu: rp2040
+    board: waveshare-rp2040-touch-lcd-1.28
+    role: coordinator
+    port: self-boot
+    flash_map: rp2040-4m
+    max_attempts: 3
+    listen_window_ms: 0
+    tag: hub-rp2040-lcd
+  - id: seg
+    mcu: stm32f401re
+    board: nucleo-f401re
+    role: node
+    port: self-boot
+    flash_map: f401-default
+    max_attempts: 3
+    listen_window_ms: 50
+    tag: seg-f401-7seg
+buses:
+  - id: i2c-main
+    kind: i2c
+    controller: i2c0
+    sda: 16
+    scl: 17
+    speed_hz: 400000
+    pullups: external
+links:
+  - from: hub
+    to: seg
+    kind: i2c
+    bus: i2c-main
+    addr: 0x42
+    node_pins: { sda: PB4, scl: PA8 }
+    control:
+      kind: full
+      nrst: 18
+      boot: 28
+      rom_entry: stm32-i2c-rom
+recovery:
+  hub: [local]
+  seg: [local, redistribute, rom-forced]
+update:
+  order: [seg, hub]

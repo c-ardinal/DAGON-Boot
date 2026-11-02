@@ -7,6 +7,7 @@ version.workspace = true
 [dependencies]
 dagon-conform = { path = "../dagon-conform" }
 dagon-format = { path = "../dagon-format" }
+dagon-port = { path = "../dagon-port" }
 dagon-proto = { path = "../dagon-proto" }
 dagon-romlink = { path = "../dagon-romlink" }
 

@@ -104,6 +104,7 @@ fn phase_name(p: u8) -> &'static str {
         phase::CONFIRM => "confirmed",
         phase::REJECTED => "REJECTED",
         phase::FAILED => "FAILED",
+        phase::ROM => "rom",
         _ => "?",
     }
 }
@@ -115,6 +116,78 @@ fn pubkey(o: &Opts<'_>, cfg: &Config) -> Result<[u8; 32], String> {
         Some(p) => dagon_sign::load_public_key(&p).map_err(|e| e.to_string()),
         None => Ok(*load_key(o.get("key"))?.pk),
     }
+}
+
+pub fn recover(args: &[&str]) -> Res {
+    let o = Opts::parse(
+        args,
+        &[
+            "port", "topology", "config", "release", "bootcore", "pubkey", "key",
+        ],
+    )?;
+    let [node] = o.pos[..] else {
+        return Err("recover needs <node>".into());
+    };
+    let cfg = Config::load(o.get("config"))?;
+    let t = read_topology(&cfg.topology_path(o.get("topology"))?)?;
+    let bin = topology_bin(&t)?;
+    let index = t
+        .nodes
+        .iter()
+        .position(|n| n.id == node)
+        .ok_or_else(|| format!("no node '{node}' in the topology"))? as u8;
+    let dgb = o
+        .get("release")
+        .map(PathBuf::from)
+        .or(cfg.release.clone())
+        .ok_or("no release: pass --release <dgb> or set release in dagon.toml")?;
+    let release = read_file(&dgb)?;
+    let boot_path = o.get("bootcore").map_or_else(
+        || cfg.provision_dir().join(node).join("bootcore.img"),
+        PathBuf::from,
+    );
+    // Only the ROM path needs it; a missing file is reported if it gets there.
+    let boot = std::fs::read(&boot_path).ok();
+    let key = pubkey(&o, &cfg)?;
+    let assets = dagon_host::RecoverAssets {
+        release: &release,
+        topology: &bin,
+        pubkey: &key,
+        bootcore: boot.as_deref(),
+    };
+    let mut host = serial::host(o.get("port"))?;
+    let mut print = |e: Event| {
+        println!(
+            "{node}: {} {}% ({})",
+            phase_name(e.phase),
+            e.percent,
+            e.version
+        );
+    };
+    let (path, v) = block_on(host.recover(index, &assets, &mut print)).map_err(|e| match e {
+        dagon_host::Error::NoImage { .. } if boot.is_none() => format!(
+            "{node} does not answer; the ROM path needs {}",
+            boot_path.display()
+        ),
+        e => format!("recover {node}: {e:?}"),
+    })?;
+    match path {
+        dagon_host::RecoverPath::Rom(s) => println!(
+            "{node}: rewritten through the ROM loader, {v}; {} frames, max round trip {} ms, \
+             {} ms, {} session(s){}",
+            s.frames,
+            s.max_rtt_ms,
+            s.elapsed_ms,
+            s.attempts,
+            if s.no_stretch {
+                ""
+            } else {
+                ", stretching commands"
+            }
+        ),
+        p => println!("{node}: {p:?}, {v}"),
+    }
+    Ok(())
 }
 
 pub fn apply(args: &[&str]) -> Res {

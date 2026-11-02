@@ -1,0 +1,28 @@
+[package]
+name = "rp2040-bootcore"
+edition = "2021"
+license = "MIT OR Apache-2.0"
+version = "0.0.0"
+publish = false
+
+# Standalone: built for thumbv6m only, so it stays out of the host workspace.
+# `common/` is its own package (host-testable).
+[workspace]
+exclude = ["common"]
+
+[dependencies]
+rp2040-common = { path = "common", features = ["rp"] }
+dagon-core = { path = "../../crates/dagon-core" }
+dagon-format ={ path = "../../crates/dagon-format" }
+embassy-rp = { version = "0.10.0", features = ["rp2040", "critical-section-impl", "boot2-none"] }
+embassy-time = "0.5"
+cortex-m = "0.7"
+cortex-m-rt = "0.7"
+panic-halt = "1"
+
+[profile.release]
+opt-level = "z"
+lto = "fat"
+codegen-units = 1
+panic = "abort"
+debug = true

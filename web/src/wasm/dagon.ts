@@ -7,6 +7,7 @@ import init, {
   frame_encode,
   hello_decode,
   hello_request,
+  release_versions,
   supported_boards as boards,
   version_older,
   version_text,
@@ -227,6 +228,14 @@ export function decodeHelloResp(body: Uint8Array): HelloResp {
 /** Raw version `a` is older than `b`, by dagon-format's ordering. */
 export function versionOlder(a: number, b: number): boolean {
   return version_older(a, b);
+}
+
+/** The version a release gives each topology node (by node index); empty when it cannot be read. */
+export function releaseVersions(bundle: Uint8Array): Map<number, number> {
+  const flat = release_versions(bundle);
+  const out = new Map<number, number>();
+  for (let i = 0; i + 1 < flat.length; i += 2) if (!out.has(flat[i])) out.set(flat[i], flat[i + 1]);
+  return out;
 }
 
 /** `major.minor.patch` of a raw version u32. */

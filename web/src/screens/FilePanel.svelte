@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { DIFF, FILE } from '../app/copy.ts';
+  import { DIFF, FILE, PLAN } from '../app/copy.ts';
   import type { DiffRow } from '../app/define/diff.ts';
   import type { ReleaseFile } from '../app/operate.svelte.ts';
 
@@ -7,11 +7,13 @@
     file: ReleaseFile;
     /** Nodes the update runs on. */
     targets: number;
+    /** About how long the update takes (案, M21's 目安). */
+    minutes?: number;
     /** §7.6: how the file's 構成 differs (L17); empty otherwise. */
     diff?: DiffRow[];
   }
 
-  let { file, targets, diff = [] }: Props = $props();
+  let { file, targets, minutes, diff = [] }: Props = $props();
 
   /** dagon-host checks the source first, then the configuration: a source refusal leaves the configuration unchecked. */
   const rows = $derived.by((): [string, string, boolean][] => {
@@ -63,7 +65,9 @@
     </table>
   {/if}
   {#if file.verdict === 'pass'}
-    <p class="pair"><span class="label">{FILE.targets}</span> {targets}</p>
+    <p class="pair">
+      <span class="label">{FILE.targets}</span> {targets}{#if minutes}&emsp;<span class="label">{PLAN.estimateLabel}</span> {PLAN.minutes(minutes)}{/if}
+    </p>
   {/if}
 </section>
 

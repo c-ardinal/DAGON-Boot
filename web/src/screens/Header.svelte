@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { CLI_NONE, HELP, HUB, HUB_NAME, MENU, MODE, ORDER, PRODUCT, STEP } from '../app/copy.ts';
+  import { CLI_NONE, HELP, HUB, HUB_NAME, HUB_TOGGLE, MENU, MODE, ORDER, PRODUCT, STEP } from '../app/copy.ts';
   import type { HubState, Step } from '../app/machine.ts';
 
   interface Props {
@@ -23,9 +23,38 @@
     /** SC-M: the menu under the header. */
     menuOpen?: boolean;
     onmenu?: () => void;
+    /** The update ran to the end (L23): all three steps are done. */
+    done?: boolean;
+    /** The 親機 つなぐ / 切断 toggle; absent on the start screen. */
+    onhub?: () => void;
+    /** Why the toggle cannot be used now (it stays focusable; pressing it shows this in the band). */
+    hubLocked?: string | null;
   }
 
-  let { step, hub, drawer, drawerOpen, ondrawer, drawerButton = $bindable(), mode = 'operate', onmode, modeLocked = false, cliLabel = CLI_NONE, operateLocked = false, onlocked, menuOpen = false, onmenu }: Props = $props();
+  let {
+    step,
+    hub,
+    drawer,
+    drawerOpen,
+    ondrawer,
+    drawerButton = $bindable(),
+    mode = 'operate',
+    onmode,
+    modeLocked = false,
+    cliLabel = CLI_NONE,
+    operateLocked = false,
+    onlocked,
+    menuOpen = false,
+    onmenu,
+    done = false,
+    onhub,
+    hubLocked = null,
+  }: Props = $props();
+  const now = $derived(step === null ? null : STEP.of3(step));
+  /** Position of the current step; recovery happens in the third (更新). */
+  const at = $derived(now === 'recover' ? 3 : now);
+  /** Connected (or checking): the toggle releases the hub; otherwise it connects. */
+  const linked = $derived(!['idle', 'lost'].includes(hub));
   const off = (m: 'operate' | 'define') => (modeLocked && mode !== m) || (m === 'operate' && operateLocked && mode !== m);
   function pick(m: 'operate' | 'define') {
     if (mode === m) return;
@@ -52,20 +81,25 @@
   {#if drawer}
     <button class="secondary" aria-expanded={drawerOpen} aria-controls="drawer" bind:this={drawerButton} onclick={ondrawer}>{ORDER.heading}</button>
   {/if}
-  <ol class="steps">
-    {#if mode === 'define'}
-      <!-- 定義 has no steps; the 構成 file is the source of truth (owner 11/3). -->
-    {:else if step !== null}
-      <li aria-current="step">
-        {#if STEP.of3(step) === 'recover'}
-          {STEP.names.recover}
-        {:else}
-          {STEP.label} <span class="step-n">{String(STEP.of3(step)).padStart(2, '0')}{STEP.of}</span>&ensp;{STEP.names[STEP.of3(step)]}
-        {/if}
-      </li>
+  <!-- 定義 has no steps; the 構成 file is the source of truth (owner 11/3). In 運用 all three always show. -->
+  <ol class="steps" aria-label={STEP.label}>
+    {#if mode !== 'define' && at !== null}
+      {#each [1, 2, 3] as const as n (n)}
+        {@const past = done || n < at}
+        <li class:now={!done && n === at} class:past aria-current={!done && n === at ? 'step' : undefined}>
+          <span class="step-n">{past ? '✓' : String(n).padStart(2, '0')}</span>
+          {n === 3 && now === 'recover' ? STEP.names.recover : STEP.names[n]}
+        </li>
+      {/each}
     {/if}
   </ol>
   <span class="hub" aria-label={HUB_NAME[hub]}>{HUB[hub]}</span>
+  {#if onhub}
+    <button class="secondary toggle" aria-disabled={hubLocked !== null} aria-describedby={hubLocked ? 'hub-why' : undefined} onclick={onhub}
+      >{linked ? HUB_TOGGLE.disconnect : HUB_TOGGLE.connect}</button
+    >
+    {#if hubLocked}<span id="hub-why" class="visually-hidden">{hubLocked}</span>{/if}
+  {/if}
   <span class="cli">{cliLabel}</span>
   <button class="secondary" aria-expanded={helpOpen} aria-controls="help" onclick={() => (helpOpen = !helpOpen)}>{HELP.heading}</button>
   {#if onmenu}
@@ -144,9 +178,46 @@
     border-radius: 5px;
   }
   .steps {
+    display: flex;
+    align-items: center;
+    gap: var(--s-1);
     margin: 0 auto 0 0;
     padding: 0;
     list-style: none;
+  }
+  .steps li {
+    position: relative;
+    display: flex;
+    align-items: baseline;
+    gap: var(--s-2);
+    padding: var(--s-1) var(--s-3);
+    border-radius: var(--r-full);
+    color: var(--c-muted);
+  }
+  .steps li + li {
+    margin-left: var(--s-4);
+  }
+  /* Steps are joined by a short rule: the order reads without words. */
+  .steps li + li::before {
+    content: '';
+    position: absolute;
+    right: 100%;
+    top: 50%;
+    width: var(--s-4);
+    height: 1px;
+    background: var(--c-line);
+  }
+  .steps li.past {
+    color: var(--c-paper);
+  }
+  .steps li.now {
+    background: var(--c-paper);
+    color: var(--c-ink);
+    font-weight: 700;
+  }
+  .toggle[aria-disabled='true'] {
+    color: var(--c-muted);
+    cursor: not-allowed;
   }
   .step-n {
     font-family: var(--f-version);

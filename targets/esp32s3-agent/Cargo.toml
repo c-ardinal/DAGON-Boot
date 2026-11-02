@@ -1,0 +1,22 @@
+[package]
+name = "dagon-esp32s3-agent"
+version = "0.0.0"
+edition = "2021"
+license = "MIT OR Apache-2.0"
+publish = false
+
+# Standalone workspace: built with the espup Xtensa toolchain, not the host one.
+[workspace]
+
+[dependencies]
+esp-hal = { version = "1.2.2", features = ["esp32s3", "unstable"] }
+esp-bootloader-esp-idf = { version = "0.6.0", features = ["esp32s3"] }
+
+[profile.release]
+opt-level = "s"
+lto = "fat"
+codegen-units = 1
+debug = 2
+
+[profile.dev]
+opt-level = "s"

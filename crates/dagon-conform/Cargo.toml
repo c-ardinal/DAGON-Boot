@@ -7,3 +7,9 @@ version.workspace = true
 [dependencies]
 dagon-core = { path = "../dagon-core" }
 dagon-agent = { path = "../dagon-agent" }
+dagon-format = { path = "../dagon-format" }
+dagon-port = { path = "../dagon-port" }
+dagon-proto = { path = "../dagon-proto" }
+
+[dev-dependencies]
+ed25519-compact = { version = "2.6", default-features = false }

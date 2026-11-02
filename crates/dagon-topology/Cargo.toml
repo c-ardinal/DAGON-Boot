@@ -6,3 +6,5 @@ version.workspace = true
 
 [dependencies]
 dagon-format = { path = "../dagon-format" }
+serde = { version = "1", features = ["derive"] }
+yaml_serde = "0.10"

@@ -99,11 +99,14 @@ pub fn command(args: &[&str]) -> Result<(), String> {
         )
     })?;
     server.set_release_key(key);
+    if let Some(b) = crate::banner() {
+        println!("{b}\n");
+    }
     if web.as_os_str().is_empty() {
-        println!("page: built into this executable");
+        println!("DAGON Console: built into this executable");
     } else if !web.join("index.html").exists() {
         eprintln!(
-            "note: {} has no index.html; build the page (npm run build in web/) or pass --web",
+            "note: {} has no index.html; build DAGON Console (npm run build in web/) or pass --web",
             web.display()
         );
     }
@@ -113,7 +116,7 @@ pub fn command(args: &[&str]) -> Result<(), String> {
     );
     let url = format!("http://127.0.0.1:{port}/#{}", server.pass);
     println!("dagon serve on http://127.0.0.1:{port}/ (Ctrl+C stops it)");
-    println!("open: {url}");
+    println!("open DAGON Console: {url}");
     if !no_open {
         open_browser(&url);
     }

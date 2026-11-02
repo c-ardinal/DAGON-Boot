@@ -71,16 +71,17 @@ Usage:
   dagon build [<id>...]              cargo build each node in [build.<id>] of dagon.toml
                                      into out/build/<id>/app-a.elf (and app-b.elf)
   dagon serve [--port <n>] [--web <dir>] [--pubkey <file>] [--no-open]
-                                     the browser page (built into dagon, or --web) and
-                                     its API on 127.0.0.1 only; opens the page with a
-                                     one-time passphrase. The page verifies releases
-                                     with the public key given here (--pubkey, pubkey in
-                                     dagon.toml, or the signing key's public half)
+                                     DAGON Console, the browser tool (built into dagon,
+                                     or --web), and its API on 127.0.0.1 only; opens it
+                                     with a one-time passphrase. DAGON Console verifies
+                                     releases with the public key given here (--pubkey,
+                                     pubkey in dagon.toml, or the signing key's public half)
   dagon sim run                      the four simulator scenarios (no hardware)
   dagon ai topology [--in <text>] [--out <yaml>] [--model <id>]
                                      board description (file or stdin) to topology YAML
                                      via the Claude API, checked to 0 errors ($ANTHROPIC_API_KEY)
   dagon --help
+  dagon --version
 
 The hub is found by USB ID c0de:cafe or product \"DAGON hub\" unless --port
 is given. Defaults come from ./dagon.toml (or --config <file>). The secret key file is
@@ -97,6 +98,10 @@ fn main() -> ExitCode {
     match args.as_slice() {
         [] | ["--help" | "-h" | "help", ..] => {
             println!("{USAGE}");
+            ExitCode::SUCCESS
+        }
+        ["--version" | "-V" | "version"] => {
+            println!("{}", version_text(banner()));
             ExitCode::SUCCESS
         }
         ["key", "gen", rest @ ..] => key_gen(rest),
@@ -207,5 +212,47 @@ fn topo_check(args: &[&str]) -> ExitCode {
         ExitCode::SUCCESS
     } else {
         ExitCode::FAILURE
+    }
+}
+
+const BANNER: &str = include_str!("../../../assets/ascii-art/banner.txt");
+
+/// The ASCII banner, only for a person at a terminal: piped and
+/// machine-readable output never carries it.
+fn banner() -> Option<String> {
+    use std::io::IsTerminal;
+    std::io::stdout().is_terminal().then(banner_text)
+}
+
+fn banner_text() -> String {
+    let lines: Vec<&str> = BANNER.lines().map(str::trim_end).collect();
+    lines.join("\n").trim_matches('\n').to_owned()
+}
+
+fn version_text(banner: Option<String>) -> String {
+    let line = format!("dagon {}", env!("CARGO_PKG_VERSION"));
+    match banner {
+        Some(b) => format!("{b}\n\n{line}"),
+        None => line,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn version_without_terminal_is_one_clean_line() {
+        let v = version_text(None);
+        assert_eq!(v, format!("dagon {}", env!("CARGO_PKG_VERSION")));
+        assert!(!v.contains('\n'));
+    }
+
+    #[test]
+    fn version_at_terminal_starts_with_the_banner() {
+        let v = version_text(Some(banner_text()));
+        assert!(v.starts_with(banner_text().as_str()));
+        assert!(v.ends_with(&format!("\n\ndagon {}", env!("CARGO_PKG_VERSION"))));
+        assert!(!banner_text().contains('\r'));
     }
 }

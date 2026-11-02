@@ -36,7 +36,7 @@
 </script>
 
 <header>
-  <span class="product" translate="no">{PRODUCT}</span>
+  <span class="product" translate="no"><img class="mark" src="./icons/favicon-48.png" alt="" width="24" height="24" />{PRODUCT}</span>
   {#if onmode}
     <div class="modes" role="radiogroup" aria-label={MODE.label}>
       {#each [['operate', MODE.operate], ['define', MODE.define]] as const as [m, label] (m)}
@@ -134,8 +134,14 @@
     white-space: nowrap;
   }
   .product {
+    display: flex;
+    align-items: center;
+    gap: var(--s-2);
     font: 500 var(--t-mono-size) / 1 var(--f-mono);
     letter-spacing: 0.12em;
+  }
+  .mark {
+    border-radius: 5px;
   }
   .steps {
     margin: 0 auto 0 0;

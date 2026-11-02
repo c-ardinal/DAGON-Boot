@@ -3,7 +3,7 @@
 // acts, one sentence each. Comments name the copy-table ids.
 import type { Action, HubState, Step } from './machine.ts';
 
-export const PRODUCT = 'DAGON BOOT';
+export const PRODUCT = 'DAGON Console';
 
 export const SKIP = {
   canvas: 'キャンバスへ',

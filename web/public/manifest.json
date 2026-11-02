@@ -1,0 +1,11 @@
+{
+  "name": "DAGON Console",
+  "short_name": "DAGON Console",
+  "display": "browser",
+  "background_color": "#0A0A0A",
+  "theme_color": "#0A0A0A",
+  "icons": [
+    { "src": "icons/favicon-180.png", "sizes": "180x180", "type": "image/png" },
+    { "src": "icons/favicon-512.png", "sizes": "512x512", "type": "image/png" }
+  ]
+}

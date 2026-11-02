@@ -6,7 +6,11 @@ use std::rc::Rc;
 
 use dagon_format::header::{image_kind, target_tag};
 use dagon_format::Version;
-use dagon_host::{Clock, ConfirmOutcome, Error, Event, Host, Outcome, Target, Transport};
+use dagon_host::{
+    rom, Clock, ConfirmOutcome, Error, Event, Host, Outcome, RecoverAssets, RecoverPath, Target,
+    Transport,
+};
+use dagon_port::Flash;
 use dagon_proto::payload::{phase, SlotState};
 use dagon_proto::{flags, Cmd};
 use dagon_sign::image::{self, sign_image, ImageSpec};
@@ -19,53 +23,7 @@ const SEED: [u8; 32] = [
     0x44, 0x49, 0xc5, 0x69, 0x7b, 0x32, 0x69, 0x19, 0x70, 0x3b, 0xac, 0x03, 0x1c, 0xae, 0x7f, 0x60,
 ];
 
-const YAML: &str = "dagon: 1
-name: sim-pair
-nodes:
-  - id: hub
-    mcu: rp2040
-    board: waveshare-rp2040-touch-lcd-1.28
-    role: coordinator
-    port: self-boot
-    flash_map: rp2040-4m
-    max_attempts: 3
-    listen_window_ms: 0
-    tag: hub-rp2040
-  - id: seg
-    mcu: stm32f401re
-    board: nucleo-f401re
-    role: node
-    port: self-boot
-    flash_map: f401-default
-    max_attempts: 3
-    listen_window_ms: 50
-    tag: seg-f401-7seg
-buses:
-  - id: i2c-main
-    kind: i2c
-    controller: i2c0
-    sda: 16
-    scl: 17
-    speed_hz: 400000
-    pullups: external
-links:
-  - from: hub
-    to: seg
-    kind: i2c
-    bus: i2c-main
-    addr: 0x42
-    node_pins: { sda: PB4, scl: PA8 }
-    control:
-      kind: full
-      nrst: 18
-      boot: 28
-      rom_entry: stm32-i2c-rom
-recovery:
-  hub: [local]
-  seg: [local, redistribute, rom-forced]
-update:
-  order: [seg, hub]
-";
+const YAML: &str = include_str!("../../../topology/sim-pair.yaml");
 
 const SEG: u8 = 1;
 const SEG_AT: Target = Target::I2c(NODE_I2C_ADDR);
@@ -345,4 +303,154 @@ fn old_hub_firmware_answering_after_reboot_is_waited_out() {
     assert!(*s.reopens.borrow() >= 3);
     let hub = block_on(h.status(Target::Hub)).unwrap();
     assert_eq!((hub.status.active, hub.status.confirmed), (1, 1));
+}
+
+fn bootcore() -> Vec<u8> {
+    let (flags, caps) = image::default_bits(image_kind::BOOTCORE);
+    let mcu = "stm32f401re";
+    let spec = ImageSpec {
+        image_kind: image_kind::BOOTCORE,
+        port_kind: image::port_kind_of("self-boot").unwrap(),
+        mcu_id: image::mcu_id_of(mcu).unwrap(),
+        slot: image::slot(mcu, image_kind::BOOTCORE, 0).unwrap(),
+        version: Version::new(1, 0, 0),
+        build_flags: flags,
+        release_seq: 1,
+        min_bootcore_version: Version::new(0, 0, 0),
+        target_tag: target_tag("seg-f401-7seg"),
+        proto_version: 1,
+        capabilities: caps,
+    };
+    sign_image(&spec, &[0xB0; 2000], &key()).unwrap()
+}
+
+#[test]
+fn rom_plan_matches_the_provision_binary() {
+    let (boot, app) = (bootcore(), seg_img(0, Version::new(1, 1, 0)));
+    let log = rom::initial_log(app[..512].try_into().unwrap()).unwrap();
+    let want = dagon_sign::provision::f401_flash(
+        (
+            &image::slot("stm32f401re", image_kind::BOOTCORE, 0).unwrap(),
+            &boot,
+        ),
+        (
+            &image::slot("stm32f401re", image_kind::APP, 0).unwrap(),
+            &app,
+        ),
+    );
+    let mut got = vec![0xFF; want.len()];
+    for r in rom::f401_regions(&boot, &app, &log) {
+        let off = (r.addr - rom::F401_BOOTCORE) as usize;
+        got[off..off + r.data.len()].copy_from_slice(r.data);
+    }
+    assert!(got == want, "ROM regions and provision binary differ");
+}
+
+/// Erases the whole F401 and resets it: nothing answers on I2C any more.
+fn wipe_seg(s: &Sim) {
+    let mut hub = s.hub.borrow_mut();
+    let now = hub.now_ms();
+    let node = hub.i2c_node(NODE_I2C_ADDR).unwrap();
+    let mut i = 0;
+    while let Some((a, l)) = node.flash().sector_addr(i) {
+        Flash::erase(node.flash(), a, l).unwrap();
+        i += 1;
+    }
+    node.reset(now);
+}
+
+fn recover_seg(s: &Sim) -> (RecoverPath, Version) {
+    let (rel, topo, boot) = (release(), topology(YAML), bootcore());
+    let assets = RecoverAssets {
+        release: &rel,
+        topology: &topo,
+        pubkey: &key().pk,
+        bootcore: Some(&boot),
+    };
+    block_on(host(s).recover(SEG, &assets, &mut |_| {})).unwrap()
+}
+
+#[test]
+fn erased_f401_comes_back_through_the_rom_loader() {
+    for no_stretch in [true, false] {
+        let s = sim();
+        if !no_stretch {
+            let mut hub = s.hub.borrow_mut();
+            let rom = &mut hub.i2c_node(NODE_I2C_ADDR).unwrap().rom;
+            rom.commands.retain(|&c| c != 0x32 && c != 0x45);
+        }
+        wipe_seg(&s);
+        assert!(
+            block_on(host(&s).hello(SEG_AT)).is_err(),
+            "silent after erase"
+        );
+
+        let (path, v) = recover_seg(&s);
+        let RecoverPath::Rom(stats) = path else {
+            panic!("expected the ROM path, got {path:?}");
+        };
+        assert_eq!((stats.no_stretch, stats.attempts), (no_stretch, 1));
+        assert_eq!(v, Version::new(1, 1, 0));
+        let st = block_on(host(&s).status(SEG_AT)).unwrap();
+        assert_eq!((st.hello.active_version, st.hello.trial), (v, false));
+        assert_eq!((st.status.active, st.status.confirmed), (0, 0));
+        let mut hub = s.hub.borrow_mut();
+        assert_eq!(hub.screen.as_ref().unwrap().phase, phase::CONFIRM);
+        assert_eq!(hub.i2c_node(NODE_I2C_ADDR).unwrap().rom.timeouts, 0);
+    }
+}
+
+#[test]
+fn rom_session_gives_up_after_three_attempts() {
+    let s = sim();
+    {
+        let mut hub = s.hub.borrow_mut();
+        // 128 KiB sector 5 then stays BUSY for 12.8 s.
+        hub.i2c_node(NODE_I2C_ADDR).unwrap().rom.erase_ms_per_kib = 100;
+    }
+    wipe_seg(&s);
+    let (rel, topo, boot) = (release(), topology(YAML), bootcore());
+    let assets = RecoverAssets {
+        release: &rel,
+        topology: &topo,
+        pubkey: &key().pk,
+        bootcore: Some(&boot),
+    };
+    let r = block_on(host(&s).recover(SEG, &assets, &mut |_| {}));
+    assert!(
+        matches!(r, Err(Error::Rom(dagon_host::RomError::Busy))),
+        "{r:?}"
+    );
+    let mut hub = s.hub.borrow_mut();
+    assert_eq!(hub.screen.as_ref().unwrap().phase, phase::FAILED);
+    assert!(
+        !hub.i2c_node(NODE_I2C_ADDR).unwrap().boot0(),
+        "BOOT0 left low"
+    );
+}
+
+#[test]
+fn answering_node_is_recovered_by_a_normal_transfer() {
+    let s = sim();
+    let (path, v) = recover_seg(&s);
+    assert_eq!((path, v), (RecoverPath::Retransfer, Version::new(1, 1, 0)));
+    let st = block_on(host(&s).status(SEG_AT)).unwrap();
+    assert_eq!((st.hello.active_version, st.status.active), (v, 1));
+}
+
+#[test]
+fn rom_path_needs_a_valid_boot_core() {
+    let s = sim();
+    wipe_seg(&s);
+    let (rel, topo) = (release(), topology(YAML));
+    let mut boot = bootcore();
+    boot[600] ^= 1;
+    let assets = RecoverAssets {
+        release: &rel,
+        topology: &topo,
+        pubkey: &key().pk,
+        bootcore: Some(&boot),
+    };
+    let r = block_on(host(&s).recover(SEG, &assets, &mut |_| {}));
+    assert!(matches!(r, Err(Error::Format(_))));
 }

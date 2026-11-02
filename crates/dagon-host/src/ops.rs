@@ -5,7 +5,7 @@ use alloc::vec;
 use alloc::vec::Vec;
 use dagon_conform::timeout::{erase_ms, POLL_MS, REBOOT_WAIT_MS, REQUEST_MS, VERIFY_MS};
 use dagon_format::bundle::BundleView;
-use dagon_format::header::{image_kind, slot_binding, HEADER_SIZE};
+use dagon_format::header::{image_kind, mcu_id, slot_binding, HEADER_SIZE};
 use dagon_format::topology::{self, TopologyView};
 use dagon_format::{sha256, ImageHeader, Version};
 use dagon_proto::payload::{
@@ -138,14 +138,7 @@ impl<T: Transport, C: Clock> Host<T, C> {
         nodes: Option<&[u8]>,
         on_event: &mut dyn FnMut(Event),
     ) -> Result<Vec<NodeOutcome<T::Error>>, T::Error> {
-        let b = BundleView::parse(bundle)?;
-        b.verify(pubkey)?;
-        let topo = TopologyView::parse(topology)?;
-        let release = b.manifest().fields().topology_sha256;
-        let local = sha256(topology);
-        if release != local {
-            return Err(Error::TopologyMismatch { release, local });
-        }
+        let (b, topo) = check_release(bundle, topology, pubkey)?;
         self.push_topology(topology).await?;
 
         let mut plan = plan(&b, &topo, nodes);
@@ -335,9 +328,62 @@ impl<T: Transport, C: Clock> Host<T, C> {
         Ok(s.version)
     }
 
-    /// Rewrites a node that no longer answers (ROM path). Not implemented yet.
-    pub async fn recover(&mut self, _to: Target) -> Result<(), T::Error> {
-        Err(Error::Unsupported)
+    /// Rewrites topology node `node` from the release. A node that answers
+    /// HELLO (its app, or the factory agent: HELLO mode = agent) gets its
+    /// image through the normal transfer. An STM32F401 that does not answer
+    /// and whose link has the I2C ROM entry is rewritten through the ROM
+    /// loader: boot core, APP-A and a fresh state log, then its HELLO.
+    pub async fn recover(
+        &mut self,
+        node: u8,
+        a: &RecoverAssets<'_>,
+        on_event: &mut dyn FnMut(Event),
+    ) -> Result<(RecoverPath, Version), T::Error> {
+        let (b, topo) = check_release(a.release, a.topology, a.pubkey)?;
+        let to = Target::of_node(&topo, node).ok_or(Error::Unreachable { node })?;
+        match self.hello(to).await {
+            Ok(h) => {
+                let path = if h.mode == payload::mode::AGENT {
+                    RecoverPath::Factory
+                } else {
+                    RecoverPath::Retransfer
+                };
+                let v = self.update_node(&b, node, to, on_event).await?;
+                return Ok((path, v));
+            }
+            Err(Error::Transport(e)) => return Err(Error::Transport(e)),
+            Err(_) => {}
+        }
+        if !rom_reachable(&topo, node) {
+            return Err(Error::Unreachable { node });
+        }
+        let boot = a.bootcore.ok_or(Error::NoImage { node })?;
+        crate::rom::check_bootcore(boot, a.pubkey)?;
+        let app = image_for(&b, node, slot_binding::A).ok_or(Error::NoImage { node })?;
+        let app_hdr: &[u8; HEADER_SIZE] = app[..HEADER_SIZE].try_into().expect("verified");
+        let v = ImageHeader::parse(app_hdr)?.version;
+        let log = crate::rom::initial_log(app_hdr)?;
+        let regions = crate::rom::f401_regions(boot, app, &log);
+        let plan = dagon_romlink::Plan {
+            erase: &crate::rom::F401_ERASE,
+            regions: &regions,
+        };
+        self.emit(on_event, node, phase::ROM, 0, v).await;
+        let stats = {
+            let mut link = crate::rom::HubRom::new(self, on_event, node, v);
+            dagon_romlink::flash(&mut link, &plan).await
+        };
+        let stats = match stats {
+            Ok(s) => s,
+            Err(e) => {
+                self.show(node, phase::FAILED, 0, v, b"ROM FAILED").await;
+                return Err(Error::Rom(e));
+            }
+        };
+        self.set_applied(to, v);
+        self.await_version(to, v).await?;
+        self.emit(on_event, node, phase::CONFIRM, 100, v).await;
+        Ok((RecoverPath::Rom(stats), v))
     }
 
     /// XFER_BEGIN, XFER_HDR chunks, XFER_DATA chunks, XFER_END with digest
@@ -428,7 +474,7 @@ impl<T: Transport, C: Clock> Host<T, C> {
 
     /// Reports `ev` and shows it on the hub LCD (best effort: the hub may be
     /// rebooting).
-    async fn emit(
+    pub(crate) async fn emit(
         &mut self,
         on_event: &mut dyn FnMut(Event),
         node: u8,
@@ -460,6 +506,55 @@ impl<T: Transport, C: Clock> Host<T, C> {
         };
         let _ = self.call(Target::Hub, Cmd::Show, &p[..n], REQUEST_MS).await;
     }
+}
+
+/// Release `bundle` verified under `pubkey` and built for `topology`.
+fn check_release<'a, E>(
+    bundle: &'a [u8],
+    topology: &'a [u8],
+    pubkey: &[u8; 32],
+) -> Result<(BundleView<'a>, TopologyView<'a>), E> {
+    let b = BundleView::parse(bundle)?;
+    b.verify(pubkey)?;
+    let topo = TopologyView::parse(topology)?;
+    let release = b.manifest().fields().topology_sha256;
+    let local = sha256(topology);
+    if release != local {
+        return Err(Error::TopologyMismatch { release, local });
+    }
+    Ok((b, topo))
+}
+
+/// An STM32F401 on I2C whose link enters the ROM loader through NRST/BOOT0.
+fn rom_reachable(topo: &TopologyView<'_>, node: u8) -> bool {
+    let n = (node as usize) < topo.node_count();
+    let f401 = n && topo.node(node as usize).mcu_id == mcu_id::STM32F401XE;
+    let rom = (0..topo.link_count()).map(|i| topo.link(i)).any(|l| {
+        l.to == node
+            && l.iface == topology::iface::I2C_BUS
+            && l.rom_entry == topology::rom_entry::STM32_I2C_ROM
+    });
+    f401 && rom
+}
+
+/// What [`Host::recover`] needs: the release, the current topology binary,
+/// the verifying key and, for the ROM path, the signed boot core.
+#[derive(Clone, Copy, Debug)]
+pub struct RecoverAssets<'a> {
+    pub release: &'a [u8],
+    pub topology: &'a [u8],
+    pub pubkey: &'a [u8; 32],
+    pub bootcore: Option<&'a [u8]>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum RecoverPath {
+    /// The app answered; the image went through the normal transfer.
+    Retransfer,
+    /// The factory agent answered and received the image.
+    Factory,
+    /// Rewritten through the ROM loader.
+    Rom(dagon_romlink::Stats),
 }
 
 /// Short LCD text for a failed update (ASCII, at most 32 bytes).

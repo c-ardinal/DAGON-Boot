@@ -12,7 +12,7 @@ register in the `Liveness` registry.
 
 `heartbeat` is a placeholder: it counts a beat per second, each beat
 announced to the watchdog with a 500 ms budget. CONFIRM is accepted once at
-least one beat has completed. Watchdog, trial window and ENTER_ROM behaviour
+least one beat has completed. Watchdog, trial and ENTER_ROM behaviour
 are those of the DAGON side (`targets/esp32s3-agent/README.md`).
 
 ## Build

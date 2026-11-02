@@ -114,6 +114,14 @@ impl NodeConfig {
     }
 }
 
+/// Starts the RTC WDT (4 s) right away. Call it first, right after
+/// `esp_hal::init` (which stops every watchdog), so an image that stalls
+/// before [`start`] still resets and, on trial, rolls back. The link task
+/// takes the watchdog over later.
+pub fn arm_watchdog(rtc_timer: RTC_TIMER<'_>) {
+    RtcWatchdog::new(Rtc::new(rtc_timer).rwdt).start(TRIAL_WDT_MS);
+}
+
 /// Milliseconds since boot, wrapping: the time base of [`Liveness`] deadlines
 /// (the one the watchdog checks them against).
 pub fn now_ms() -> u32 {
@@ -263,7 +271,7 @@ impl Link {
             uart,
             usb,
             board,
-            lease: liveness.register()?,
+            lease: liveness.register_preempting()?,
         })
     }
 
@@ -315,7 +323,8 @@ impl Link {
         let now = self.agent.store().wdt.now_ms();
         self.lease.busy(now, REQUEST_BUDGET_MS);
         self.answer(frame, via).await;
-        self.lease.idle();
+        let now = self.agent.store().wdt.now_ms();
+        self.lease.idle(now);
     }
 
     async fn answer(&mut self, frame: &[u8], via: Via) {

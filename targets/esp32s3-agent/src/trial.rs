@@ -125,7 +125,7 @@ mod tests {
         now.set(100_000);
         w.feed();
         assert_eq!(fed.get(), 1, "overdue at 100 ms");
-        task.idle();
+        task.idle(100);
         w.feed();
         assert_eq!(fed.get(), 2);
     }

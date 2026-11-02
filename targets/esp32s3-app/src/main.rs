@@ -40,7 +40,8 @@ fn self_check() -> bool {
 
 #[esp_rtos::main]
 async fn main(spawner: Spawner) {
-    let p = esp_hal::init(esp_hal::Config::default());
+    let mut p = esp_hal::init(esp_hal::Config::default());
+    node::arm_watchdog(p.RTC_TIMER.reborrow());
     esp_rtos::start(TimerGroup::new(p.TIMG0).timer0, p.FROM_CPU_INTR0);
     let dagon = NodePeripherals {
         rtc_timer: p.RTC_TIMER,
@@ -75,7 +76,7 @@ async fn heartbeat(lease: Lease) {
     loop {
         lease.busy(node::now_ms(), BEAT_BUDGET_MS);
         BEATS.fetch_add(1, Ordering::Relaxed);
-        lease.idle();
+        lease.idle(node::now_ms());
         Timer::after(BEAT_PERIOD).await;
     }
 }

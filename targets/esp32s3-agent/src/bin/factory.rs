@@ -14,7 +14,8 @@ static LIVENESS: Liveness = Liveness::new();
 
 #[esp_rtos::main]
 async fn main(_spawner: Spawner) {
-    let p = esp_hal::init(esp_hal::Config::default());
+    let mut p = esp_hal::init(esp_hal::Config::default());
+    node::arm_watchdog(p.RTC_TIMER.reborrow());
     esp_rtos::start(TimerGroup::new(p.TIMG0).timer0, p.FROM_CPU_INTR0);
     let dagon = NodePeripherals {
         rtc_timer: p.RTC_TIMER,

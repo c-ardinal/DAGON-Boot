@@ -78,16 +78,20 @@ after method 1. A broken ESP-IDF 2nd stage cannot be recovered this way.
   serves requests one at a time, so the agent is only ever touched there.
 - The app's tasks run on the thread-mode executor (`#[esp_rtos::main]`),
   below every interrupt: DAGON traffic preempts them and never waits on them.
-- Trial: the RTC WDT (4 s) starts with the link task and is not fed while
-  the image is on trial. The PC has to CONFIRM within about 4 s of the start;
-  otherwise the watch resets and the 2nd stage rolls back (one attempt).
+- Trial: the RTC WDT (4 s) is started right after `esp_hal::init`
+  (`node::arm_watchdog`, before anything that can stall) and is not fed
+  while the image is on trial. The PC has to CONFIRM within about 4 s of the
+  start; otherwise the watch resets and the 2nd stage rolls back (one
+  attempt).
 - Once confirmed the link task feeds it (every 500 ms and during long flash
   work), but only while every task in the `Liveness` registry is within the
   deadline it announced (`Lease::busy(now, budget)` before a piece of work,
-  `Lease::idle()` when waiting). A task stuck in its work stops the feeding
-  and the watch resets instead of hanging. The link task announces a budget
-  for each request. ENTER_ROM stops the watchdogs before its reset (see
-  above).
+  `Lease::idle(now)` when waiting). A task stuck in its work stops the
+  feeding and the watch resets instead of hanging. The link task announces a
+  budget for each request and is registered as preempting: while it is busy
+  (a slot erase can take about 30 s) only its own deadline counts, and the
+  other tasks' deadlines move later by the time it held the CPU. ENTER_ROM
+  stops the watchdogs before its reset (see above).
 - Both receivers drop a partial frame after 20 ms without a byte and look for
   the next SOF.
 

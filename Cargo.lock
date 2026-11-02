@@ -184,6 +184,8 @@ dependencies = [
  "dagon-format",
  "dagon-port",
  "dagon-proto",
+ "dagon-sign",
+ "dagon-topology",
  "ed25519-compact",
 ]
 

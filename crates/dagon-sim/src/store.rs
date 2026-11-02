@@ -23,6 +23,9 @@ pub struct Layout {
     pub slots: [(u32, u32); 2],
     /// Hub display copy of the topology (body only), if this board keeps one.
     pub topology: Option<(u32, u32)>,
+    /// Factory (spare) slot, reported as STATUS slot 2; written only by
+    /// [`SimStore::provision_factory`], never a boot or transfer target.
+    pub factory: Option<(u32, u32)>,
 }
 
 impl Layout {
@@ -33,6 +36,7 @@ impl Layout {
         log: (0x0800_8000, 0x4000),
         slots: [(0x0802_0000, 0x2_0000), (0x0804_0000, 0x2_0000)],
         topology: None,
+        factory: None,
     };
 
     /// Hub on RP2040 with 2 MiB flash.
@@ -41,6 +45,17 @@ impl Layout {
         log: (0x1001_0000, 0x1000),
         slots: [(0x1002_0000, 0x8_0000), (0x100A_0000, 0x8_0000)],
         topology: Some((0x1012_0000, 0x1_0000)),
+        factory: None,
+    };
+
+    /// ESP32-S3 watch (4 MiB modelled): loader, selection data, two OTA
+    /// slots and a factory slot. Simplified to kind S semantics.
+    pub const ESP32S3_WATCH: Layout = Layout {
+        bootcore: (0x0000_0000, 0x1_0000),
+        log: (0x0001_0000, 0x1000),
+        slots: [(0x0011_0000, 0x10_0000), (0x0021_0000, 0x10_0000)],
+        topology: None,
+        factory: Some((0x0031_0000, 0x0F_0000)),
     };
 }
 
@@ -85,11 +100,18 @@ impl SimStore {
         }
     }
 
+    /// Slot 0/1 = A/B, 2 = factory.
+    fn slot_base(&self, slot: u8) -> Option<u32> {
+        match slot {
+            0 | 1 => Some(self.layout.slots[slot as usize].0),
+            2 => self.layout.factory.map(|f| f.0),
+            _ => None,
+        }
+    }
+
     fn header_at(&mut self, slot: u8) -> Option<[u8; HEADER_SIZE]> {
         let mut h = [0u8; HEADER_SIZE];
-        self.flash
-            .read(self.layout.slots[slot as usize].0, &mut h)
-            .ok()?;
+        self.flash.read(self.slot_base(slot)?, &mut h).ok()?;
         ImageHeader::parse(&h).ok().map(|_| h)
     }
 
@@ -191,6 +213,31 @@ impl SimStore {
         self.append(Self::log_record(kind::CONFIRMED, slot, reason::NONE, &hdr))
     }
 
+    /// Erases every unit touching `start..end`.
+    fn erase_range(&mut self, start: u32, end: u32) -> Result<(), StoreError> {
+        let mut a = start;
+        while a < end {
+            let unit = self.flash.unit_at(a).ok_or(StoreError::Range)?;
+            let unit_start = a - (a - unit.start) % unit.erase_size;
+            self.flash
+                .erase(unit_start, unit.erase_size)
+                .map_err(|_| StoreError::Flash)?;
+            a = unit_start + unit.erase_size;
+        }
+        Ok(())
+    }
+
+    /// Writes an image (header inline, then body) into the factory slot.
+    pub fn provision_factory(&mut self, image: &[u8]) -> Result<(), StoreError> {
+        let (base, len) = self.layout.factory.ok_or(StoreError::Unsupported)?;
+        if image.len() < HEADER_SIZE || image.len() > len as usize {
+            return Err(StoreError::Range);
+        }
+        self.erase_range(base, base + image.len() as u32)?;
+        self.program(base + HEADER_SIZE as u32, &image[HEADER_SIZE..])?;
+        self.program(base, &image[..HEADER_SIZE])
+    }
+
     fn bootcore_present(&mut self) -> bool {
         let (b, l) = self.layout.bootcore;
         let mut buf = vec![0u8; l as usize];
@@ -255,8 +302,8 @@ impl SlotStore for SimStore {
             confirmed: statelog::slot::NONE,
             ..Default::default()
         };
-        let mut digests = [None; 2];
-        for s in 0..2u8 {
+        let mut digests = [None; 3];
+        for s in 0..3u8 {
             if let Some(h) = self.header_at(s) {
                 let info = &mut st.slots[s as usize];
                 info.state = SlotState::Written;
@@ -312,16 +359,7 @@ impl SlotStore for SimStore {
         } else {
             body
         };
-        let mut a = start;
-        while a < body + len.max(1) {
-            let unit = self.flash.unit_at(a).ok_or(StoreError::Range)?;
-            let unit_start = a - (a - unit.start) % unit.erase_size;
-            self.flash
-                .erase(unit_start, unit.erase_size)
-                .map_err(|_| StoreError::Flash)?;
-            a = unit_start + unit.erase_size;
-        }
-        Ok(())
+        self.erase_range(start, body + len.max(1))
     }
 
     fn write(&mut self, t: u8, slot: u8, offset: u32, data: &[u8]) -> Result<(), StoreError> {

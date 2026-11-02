@@ -1,0 +1,111 @@
+import { FrameDecoder } from './frame.ts';
+
+/**
+ * Frame-level link to the hub, the shape dagon-host drives (and what
+ * dagon-wasm will receive from the page): whole frames in, whole frames out.
+ * The page owns choosing and opening the device; protocol steps live in
+ * dagon-host.
+ */
+export interface Transport {
+  open(): Promise<void>;
+  close(): Promise<void>;
+  /** Sends one complete frame. */
+  write(frame: Uint8Array): Promise<void>;
+  /** Next complete, CRC-checked frame, or null when `timeoutMs` passes first. */
+  read(timeoutMs: number): Promise<Uint8Array | null>;
+}
+
+/** Queue of received frames with timed waits; shared by the real and mock links. */
+export class FrameQueue {
+  private frames: Uint8Array[] = [];
+  private waiter: ((f: Uint8Array | null) => void) | null = null;
+
+  put(frame: Uint8Array): void {
+    if (this.waiter) {
+      const w = this.waiter;
+      this.waiter = null;
+      w(frame);
+    } else {
+      this.frames.push(frame);
+    }
+  }
+
+  take(timeoutMs: number): Promise<Uint8Array | null> {
+    const ready = this.frames.shift();
+    if (ready) return Promise.resolve(ready);
+    if (this.waiter) return Promise.reject(new Error('concurrent read'));
+    return new Promise((resolve) => {
+      const timer = setTimeout(() => {
+        this.waiter = null;
+        resolve(null);
+      }, timeoutMs);
+      this.waiter = (f) => {
+        clearTimeout(timer);
+        resolve(f);
+      };
+    });
+  }
+
+  clear(): void {
+    this.frames = [];
+    this.waiter?.(null);
+    this.waiter = null;
+  }
+}
+
+// USB CDC ignores the line rate, but `open` requires one.
+const CDC_BAUD = 115200;
+
+export class WebSerialTransport implements Transport {
+  private readonly queue = new FrameQueue();
+  private reader: ReadableStreamDefaultReader<Uint8Array> | null = null;
+  private pump: Promise<void> | null = null;
+
+  constructor(readonly port: SerialPort) {}
+
+  async open(): Promise<void> {
+    await this.port.open({ baudRate: CDC_BAUD });
+    this.pump = this.readLoop();
+  }
+
+  async close(): Promise<void> {
+    await this.reader?.cancel().catch(() => undefined);
+    await this.pump;
+    this.queue.clear();
+    await this.port.close();
+  }
+
+  async write(frame: Uint8Array): Promise<void> {
+    const w = this.port.writable?.getWriter();
+    if (!w) throw new Error('port not open');
+    try {
+      await w.write(frame);
+    } finally {
+      w.releaseLock();
+    }
+  }
+
+  read(timeoutMs: number): Promise<Uint8Array | null> {
+    return this.queue.take(timeoutMs);
+  }
+
+  private async readLoop(): Promise<void> {
+    const readable = this.port.readable;
+    if (!readable) return;
+    const decoder = new FrameDecoder();
+    const reader = readable.getReader();
+    this.reader = reader;
+    try {
+      for (;;) {
+        const { value, done } = await reader.read();
+        if (done) break;
+        if (value) for (const f of decoder.push(value)) this.queue.put(f);
+      }
+    } catch {
+      // The device went away; the page learns it from the `disconnect` event.
+    } finally {
+      reader.releaseLock();
+      this.reader = null;
+    }
+  }
+}

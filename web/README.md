@@ -1,0 +1,75 @@
+# web
+
+Browser UI for DAGON Boot: Svelte 5 + Vite + TypeScript, built for Chrome / Edge 89 and later
+(the first versions with Web Serial). Screen text is Japanese only and lives in `src/app/copy.ts`.
+
+## Commands
+
+```sh
+npm install
+npm run dev       # http://127.0.0.1:5173
+npm run build     # svelte-check, then vite build into dist/ (target chrome89)
+npm run preview   # serves dist/ on http://127.0.0.1:4173
+npm test          # Vitest
+npm run fonts     # re-fetch the font subsets after screen text changes
+```
+
+Query parameters for development:
+
+| Parameter | Effect |
+|---|---|
+| `?mock` | Uses an in-memory hub instead of Web Serial; "パソコンとつなぐ" answers HELLO as the sample hub (1.0.0). |
+| `?mock=silent` | In-memory device that never answers (no-response path). |
+| `?graph` | Shows the graph prototype (sample hub, 7-segment and watch nodes) in the canvas. |
+
+## Layout
+
+| Path | Contents |
+|---|---|
+| `src/serial/frame.ts` | DAGON link v1 frame codec and stream deframer (same bytes as `crates/dagon-proto`; tests compare against `crates/dagon-format/golden/frame_*.bin`). |
+| `src/serial/transport.ts` | `Transport` (open / close / write frame / read frame with timeout) and the Web Serial implementation. |
+| `src/serial/mock.ts` | Mock transport answering HELLO in the same frame format. |
+| `src/app/connect.ts` | Device chooser, error mapping, HELLO exchange. |
+| `src/app/copy.ts` | All screen and announcement text. |
+| `src/graph/` | Graph prototype: own SVG (layers, wire bundles, ties, ports) + HTML (nodes, chips), roving focus with arrow keys. |
+| `src/styles/tokens.css` | Design tokens: colour, type, spacing, radius, z-index, motion. |
+
+`Transport` carries whole frames: the page owns choosing and opening the device, and the protocol
+steps belong to `dagon-host`, which will receive a `Transport` through `dagon-wasm`.
+
+## Web Serial on http://127.0.0.1
+
+The Web Serial API is exposed only in secure contexts. Loopback origins (`http://127.0.0.1`,
+`http://localhost`) count as potentially trustworthy, so `vite preview` / `dagon serve` pages on
+127.0.0.1 get `navigator.serial` without HTTPS. Checked in headless Edge 156 against
+`vite preview`: `isSecureContext` is `true`, `navigator.serial` exists and the `serial` permissions
+policy allows it. Choosing and opening a real device needs a person in front of the browser.
+
+## npm dependencies
+
+All are development dependencies; nothing from npm except the Svelte runtime ships in the bundle.
+
+| Package | Version | Licence |
+|---|---|---|
+| svelte | 5.57 | MIT |
+| vite | 8.3 | MIT |
+| @sveltejs/vite-plugin-svelte | 7.3 | MIT |
+| vitest | 5.0 | MIT |
+| svelte-check | 4.7 | MIT |
+| typescript | 6.0 | Apache-2.0 |
+
+## Fonts
+
+Self-hosted from `public/fonts/` (no third-party CDN at run time). Subsets come from the Google Fonts
+API (`npm run fonts`); the licence texts sit next to the files. None of the four declares a Reserved
+Font Name, so subsetting and redistribution are allowed under the SIL Open Font License 1.1.
+
+| Font | Upstream | Licence | Weights | Subset | Size |
+|---|---|---|---|---|---|
+| Doto | github.com/oliverlalan/Doto | OFL 1.1 (`OFL-Doto.txt`) | 700 | digits, `%`, `/`, space | 1.0 KB |
+| DotGothic16 | github.com/fontworks-fonts/DotGothic16 | OFL 1.1 (`OFL-DotGothic16.txt`) | 400 | digits, Latin letters, `.`, `/`, space | 3.3 KB |
+| Zen Kaku Gothic New | github.com/googlefonts/zen-kakugothic | OFL 1.1 (`OFL-ZenKakuGothicNew.txt`) | 400, 500, 700 | ASCII + every non-ASCII character in `src/` | 3 × 26 KB |
+| JetBrains Mono | github.com/JetBrains/JetBrainsMono | OFL 1.1 (`OFL-JetBrainsMono.txt`) | 500 | ASCII, `·…→←` | 17.7 KB |
+
+Total 100 KB (budget 250 KB). Only Zen Kaku Gothic New 400 is preloaded; all faces use
+`font-display: swap`.

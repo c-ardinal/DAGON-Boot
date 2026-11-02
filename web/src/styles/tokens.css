@@ -1,0 +1,117 @@
+/* Design tokens: colour, type, spacing, radius, elevation, motion. Only these
+   values are used in components; contrast pairs that fail AA (paper on signal,
+   signal or muted on paper) are never combined. */
+:root {
+  /* colour */
+  --c-ink: #0a0a0a;
+  --c-layer-0: #0f0f0e;
+  --c-layer-1: #141413;
+  --c-layer-2: #1e1e1c;
+  --c-paper: #f1efe8;
+  --c-muted: #9a9892;
+  --c-line: #7a7873;
+  --c-signal: #ff4b3a;
+  --c-hover: #141413;
+  --c-scrim: rgb(10 10 10 / 0.8);
+
+  /* type families */
+  --f-dot: 'Doto', 'JetBrains Mono', monospace;
+  --f-version: 'DotGothic16', 'JetBrains Mono', 'Yu Gothic UI', monospace;
+  --f-ja: 'Zen Kaku Gothic New', 'Hiragino Sans', 'Hiragino Kaku Gothic ProN', 'Yu Gothic UI', 'Meiryo',
+    'Noto Sans JP', system-ui, sans-serif;
+  --f-mono: 'JetBrains Mono', Consolas, 'Courier New', monospace;
+
+  /* type steps: size / line-height (rem, 1rem = 16px) */
+  --t-display-size: 10rem; /* 160 */
+  --t-display-lh: 1;
+  --t-version-size: 2.75rem; /* 44 */
+  --t-version-lh: 1.1;
+  --t-version-small-size: 1.25rem; /* 20, in lists and tables */
+  --t-version-small-lh: 1.2;
+  --t-title-size: 1.75rem; /* 28 */
+  --t-title-lh: 1.4;
+  --t-heading-size: 1.25rem; /* 20 */
+  --t-heading-lh: 1.5;
+  --t-body-size: 1rem; /* 16 */
+  --t-body-lh: 1.75;
+  --t-small-size: 0.875rem; /* 14 */
+  --t-small-lh: 1.7;
+  --t-caption-size: 0.75rem; /* 12, chips, layer labels, times only */
+  --t-caption-lh: 1.6;
+  --t-mono-size: 0.8125rem; /* 13 */
+  --t-mono-lh: 1.5;
+  --t-mono-log-lh: 1.6;
+
+  /* spacing: 4px steps only */
+  --s-1: 0.25rem;
+  --s-2: 0.5rem;
+  --s-3: 0.75rem;
+  --s-4: 1rem;
+  --s-5: 1.5rem;
+  --s-6: 2rem;
+  --s-7: 3rem;
+  --s-8: 4rem;
+  --s-9: 6rem;
+
+  /* component sizes */
+  --h-header: 3.5rem; /* 56 */
+  --h-band: 5rem; /* 80 */
+  --h-primary: 3.25rem; /* 52 */
+  --h-secondary: 2.75rem; /* 44 */
+  --h-chip: 1.5rem; /* 24 */
+  --w-node: 15rem; /* 240 */
+  --w-left: 18.75rem; /* 300 */
+  --w-right: 21.25rem; /* 340 */
+
+  /* radius */
+  --r-0: 0;
+  --r-s: 6px;
+  --r-m: 12px;
+  --r-l: 20px;
+  --r-full: 9999px;
+
+  /* z-index */
+  --z-layer: 0;
+  --z-link: 10;
+  --z-node: 20;
+  --z-chip: 30;
+  --z-drag: 40;
+  --z-chrome: 50;
+  --z-scrim: 55;
+  --z-dialog: 60;
+  --z-announce: 70;
+
+  /* motion */
+  --ease-out: cubic-bezier(0.23, 1, 0.32, 1);
+  --ease-in-out: cubic-bezier(0.77, 0, 0.175, 1);
+  --dur-press: 120ms;
+  --dur-flash: 90ms;
+  --dur-quick: 160ms;
+  --dur-ui: 200ms;
+  --dur-line: 260ms;
+  --dur-reduced: 150ms;
+}
+
+@media (max-width: 1279px) {
+  :root {
+    --t-display-size: 6rem;
+  }
+}
+
+@media (max-width: 767px) {
+  :root {
+    --t-display-size: 4rem;
+  }
+}
+
+@media (prefers-contrast: more) {
+  :root {
+    --c-line: var(--c-paper);
+  }
+}
+
+@media (prefers-reduced-transparency: reduce) {
+  :root {
+    --c-scrim: var(--c-ink);
+  }
+}

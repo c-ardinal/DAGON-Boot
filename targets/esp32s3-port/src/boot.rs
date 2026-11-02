@@ -124,6 +124,17 @@ impl<'a, 'd> EspBootSelect<'a, 'd> {
         })
     }
 
+    /// Both raw otadata entries (sector 0, sector 1).
+    pub fn entries(&self) -> Result<[[u8; otadata::ENTRY_LEN]; 2], BootSelectError> {
+        let mut fs = self.storage.borrow_mut();
+        let mut current = [[0u8; otadata::ENTRY_LEN]; 2];
+        for (i, e) in current.iter_mut().enumerate() {
+            fs.read(OTADATA.offset + i as u32 * otadata::SECTOR_LEN, e)
+                .map_err(|_| BootSelectError::Write)?;
+        }
+        Ok(current)
+    }
+
     /// Marks the running OTA slot valid (ends its trial) and reads it back.
     /// Nothing to do when running factory, already valid, or booted as the
     /// fallback after otadata's selection was aborted.
@@ -165,19 +176,16 @@ impl BootSelectV for EspBootSelect<'_, '_> {
     /// The new entry is one erase plus one 32-byte program, see
     /// [`otadata::trial_entry`].
     fn set_next(&mut self, slot: u8) -> Result<(), BootSelectError> {
-        let target = subtype_of(slot).ok_or(BootSelectError::Slot)?;
+        subtype_of(slot).ok_or(BootSelectError::Slot)?;
         if slot == SLOT_FACTORY {
             return self.select_factory();
         }
-        let base = OTADATA.offset;
+        let current = self.entries()?;
+        // `None`: the seq space is used up; otadata stays as it is.
+        let (sector, entry) =
+            otadata::trial_entry(&current, slot, self.running).ok_or(BootSelectError::Write)?;
+        let at = OTADATA.offset + sector as u32 * otadata::SECTOR_LEN;
         let mut fs = self.storage.borrow_mut();
-        let mut current = [[0u8; otadata::ENTRY_LEN]; 2];
-        for (i, e) in current.iter_mut().enumerate() {
-            fs.read(base + i as u32 * otadata::SECTOR_LEN, e)
-                .map_err(|_| BootSelectError::Write)?;
-        }
-        let (sector, entry) = otadata::trial_entry(&current, slot);
-        let at = base + sector as u32 * otadata::SECTOR_LEN;
         fs.erase(at, at + otadata::SECTOR_LEN)
             .map_err(|_| BootSelectError::Write)?;
         fs.write_nor(at, &entry)
@@ -189,13 +197,12 @@ impl BootSelectV for EspBootSelect<'_, '_> {
         if readback != entry {
             return Err(BootSelectError::Write);
         }
-        // What the 2nd stage will pick, through the crate's reading of otadata.
-        match self.selection() {
-            Ok(Selection {
-                slot: s,
-                state: Some(OtaImageState::New),
-            }) if subtype_of(s) == Some(target) => Ok(()),
-            _ => Err(BootSelectError::Write),
+        // What the 2nd stage will pick. Counted as the 2nd stage does: the
+        // crate's reader refuses both entries when the other one is corrupt.
+        if otadata::selects_trial(&self.entries()?, sector, slot) {
+            Ok(())
+        } else {
+            Err(BootSelectError::Write)
         }
     }
 

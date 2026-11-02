@@ -132,11 +132,77 @@ dependencies = [
 ]
 
 [[package]]
+name = "dagon-agent"
+version = "0.0.0"
+dependencies = [
+ "dagon-core",
+ "dagon-format",
+ "dagon-port",
+ "dagon-proto",
+]
+
+[[package]]
+name = "dagon-conform"
+version = "0.0.0"
+dependencies = [
+ "dagon-agent",
+ "dagon-core",
+ "dagon-format",
+ "dagon-port",
+ "dagon-proto",
+]
+
+[[package]]
+name = "dagon-core"
+version = "0.0.0"
+dependencies = [
+ "dagon-format",
+ "dagon-port",
+ "dagon-proto",
+]
+
+[[package]]
 name = "dagon-esp32s3-agent"
 version = "0.0.0"
 dependencies = [
+ "dagon-agent",
+ "dagon-conform",
+ "dagon-esp32s3-port",
+ "dagon-format",
+ "dagon-port",
+ "dagon-proto",
  "esp-bootloader-esp-idf",
  "esp-hal",
+]
+
+[[package]]
+name = "dagon-esp32s3-port"
+version = "0.0.0"
+dependencies = [
+ "dagon-format",
+ "dagon-port",
+ "dagon-proto",
+ "esp-bootloader-esp-idf",
+ "esp-hal",
+]
+
+[[package]]
+name = "dagon-format"
+version = "0.0.0"
+dependencies = [
+ "ed25519-compact",
+ "sha2",
+]
+
+[[package]]
+name = "dagon-port"
+version = "0.0.0"
+
+[[package]]
+name = "dagon-proto"
+version = "0.0.0"
+dependencies = [
+ "dagon-format",
 ]
 
 [[package]]
@@ -277,6 +343,12 @@ checksum = "d4b8a88685455ed29a21542a33abd9cb6510b6b129abadabdcef0f4c55bc8f61"
 dependencies = [
  "litrs",
 ]
+
+[[package]]
+name = "ed25519-compact"
+version = "2.6.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1454db4f2edb7f0e8fe0c5b375b0c978fc63244cc9f010d160e417eb10139aa8"
 
 [[package]]
 name = "embassy-embedded-hal"

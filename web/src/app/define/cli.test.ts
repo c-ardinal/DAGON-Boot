@@ -153,6 +153,17 @@ describe('dagon serve link', () => {
     expect(f.calls[f.calls.length - 1].url).toBe('/v1/fs?path=%2Fhome%2Fu%2Fa%20b');
   });
 
+  test('書き込む is offered only for the MCU families serve\'s flash writes', async () => {
+    const f = fake();
+    const cli = new Cli(f.deps);
+    await cli.connect();
+    expect(cli.canFlash('rp2040')).toBe(false);
+    cli.hello = { ...cli.hello!, features: [...cli.hello!.features, 'flash'], flash_mcus: ['rp2040', 'stm32f401re'] };
+    expect(['rp2040', 'stm32f401re', 'esp32s3'].map((m) => cli.canFlash(m))).toEqual([true, true, false]);
+    cli.hello = { ...cli.hello!, flash_mcus: undefined };
+    expect(cli.canFlash('rp2040')).toBe(false);
+  });
+
   test('a folder with only a 構成 is its own answer (428), and init opens it with hello read again', async () => {
     const f = fake();
     const cli = new Cli(f.deps);

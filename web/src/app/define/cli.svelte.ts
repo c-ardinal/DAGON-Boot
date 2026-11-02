@@ -17,6 +17,8 @@ export interface Hello {
   key_id: string | null;
   /** The developer's public key (64 hex digits) the page verifies releases with. */
   release_key?: string;
+  /** MCU families POST /v1/flash can write (rp2040, stm32f401re). */
+  flash_mcus?: string[];
 }
 
 /** A project serve knows: its folder and its name. */
@@ -125,6 +127,11 @@ export class Cli {
       history: deps.history ?? globalThis.history,
       now: deps.now ?? (() => Date.now()),
     };
+  }
+
+  /** Whether serve's flash can write a node of MCU family `mcu`. */
+  canFlash(mcu: string): boolean {
+    return this.has('flash') && (this.hello?.flash_mcus ?? []).includes(mcu);
   }
 
   /** Whether a feature of /v1/hello is there (gen, flash, build, ...). */

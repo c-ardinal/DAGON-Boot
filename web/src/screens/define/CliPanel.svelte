@@ -106,16 +106,21 @@
       {#each flashOrder as n (n.id)}
         {@const fam = FLASH.families[mcuOf(n.id)]}
         {@const fj = flashJob(n.id)}
+        {@const flashing = fj?.state === 'queued' || fj?.state === 'running' || fj?.state === 'question'}
         <li>
           <span class="who"><strong>{n.name}</strong><span translate="no">{n.product} · {n.mcu}</span></span>
-          {#if fam}<span class="pair"><span class="label">{FLASH.via}</span> {fam[0]}</span><p>{fam[1]}</p>{/if}
+          {#if fam}<span class="pair"><span class="label">{FLASH.via}</span> {fam[0]}</span>{#if cli.canFlash(mcuOf(n.id))}<p>{fam[1]}</p>{/if}{/if}
           {#if fj?.question}
             <p>{FLASH.confirm(n.name)}</p>
             <button class="secondary" onclick={() => void cli.answer(fj, FLASH.no)}>{FLASH.no}</button>
             <button class="primary" onclick={() => void cli.answer(fj, FLASH.yes)}>{FLASH.yes}</button>
           {/if}
           <span class="chip">{fj?.state === 'succeeded' ? FLASH.done : fj?.state === 'running' || fj?.state === 'question' ? FLASH.running : fj?.state === 'failed' ? FLASH.notFound : ''}</span>
-          <button class="primary" aria-disabled={!cli.has('flash')} onclick={() => cli.has('flash') && void cli.flash(n.id)}>{FLASH.write}</button>
+          {#if cli.canFlash(mcuOf(n.id))}
+            <button class="primary" aria-disabled={flashing} onclick={() => !flashing && void cli.flash(n.id)}>{FLASH.write}</button>
+          {:else}
+            <p>{FLASH.otherTools}</p>
+          {/if}
         </li>
       {/each}
     </ul>

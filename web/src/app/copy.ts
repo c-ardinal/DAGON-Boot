@@ -730,6 +730,8 @@ export const FLASH = {
   hubFirst: '親機から書き込んでください（親機が無いと子機を確かめられません）。',
   /** 案: the confirmation before serve writes the board (its job question). */
   confirm: (name: string) => `${name} に書き込みます。よろしいですか。`,
+  /** 案: a family serve's flash does not write yet (ESP32-S3). */
+  otherTools: 'このマイコンは、今は ESP のツールで書き込んでください。',
   yes: 'はい',
   no: 'いいえ',
   done: '✓ 書き込み済み',

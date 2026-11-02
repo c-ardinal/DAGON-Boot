@@ -265,6 +265,10 @@ fn hello(server: &Server) -> Response {
         .as_ref()
         .and_then(|c| project_key(c).ok())
         .map(|k| to_hex(&dagon_format::key_id(&k.pk)));
+    let flash_mcus: Vec<&str> = ["rp2040", "stm32f401re", "esp32s3"]
+        .into_iter()
+        .filter(|m| crate::flash::flashable(m))
+        .collect();
     json_ok(json!({
         "cli": env!("CARGO_PKG_VERSION"),
         "workspace": workspace,
@@ -273,6 +277,8 @@ fn hello(server: &Server) -> Response {
         "key": key.is_some(),
         "key_id": key,
         "release_key": server.release_key().map(|k| to_hex(&k)),
+        // The MCU families POST /v1/flash can write.
+        "flash_mcus": flash_mcus,
         // null until a project is open (the page shows the start screen).
         "project": server.config_path().map(|_| workspace.clone()),
     }))
@@ -730,6 +736,10 @@ fn layout_path(server: &Server) -> Result<PathBuf, Response> {
 /// GET /v1/layout: 呼び名 and editor positions (404 before the first save).
 fn layout_get(server: &Server) -> Res {
     let p = layout_path(server)?;
+    let big = std::fs::metadata(&p).is_ok_and(|m| m.len() > MAX_LAYOUT as u64);
+    if big {
+        return Err(Response::error(413, "the layout file is too large"));
+    }
     let bytes = std::fs::read(p).map_err(|_| Response::error(404, "no layout yet"))?;
     Ok(Response::bytes("application/json", bytes))
 }

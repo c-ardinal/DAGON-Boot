@@ -42,6 +42,8 @@ const TRIAL_FEED_MS: u64 = 30_000;
 const TEST_KEY_SPLASH: Duration = Duration::from_millis(1500);
 /// On time of one digit of the multiplexed display.
 const DIGIT_PERIOD: Duration = Duration::from_millis(2);
+/// Requests taking longer are timed on RTT (sizes the hub's wait windows).
+const SLOW_REQUEST_MS: u64 = 20;
 
 // 7-segment expansion board wiring. The board's part number and pin map are
 // not confirmed yet: direct drive, segments a..g + dp and three digit
@@ -60,6 +62,7 @@ bind_interrupts!(struct Irqs {
 });
 
 type Store = KindSStore<board::BoardFlash<'static>>;
+type Wdt = IndependentWatchdog<'static, peripherals::IWDG>;
 
 fn config() -> Config {
     Config {
@@ -75,7 +78,7 @@ fn config() -> Config {
 
 #[embassy_executor::main]
 async fn main(spawner: Spawner) {
-    let p = embassy_stm32::init(Default::default());
+    let p = embassy_stm32::init(board::clocks());
     let mut led = Output::new(p.PA5, Level::Low, Speed::Low);
     let o = |pin: Peri<'static, AnyPin>| Output::new(pin, SEG_OFF, Speed::Low);
     let segments = [
@@ -133,14 +136,14 @@ async fn main(spawner: Spawner) {
         }
     }
 
-    let mut wdt = IndependentWatchdog::new(
-        p.IWDG,
-        if on_trial {
-            board::TRIAL_WDT_MS
-        } else {
-            board::CONFIRMED_WDT_MS
-        } * 1000,
-    );
+    let wdt_ms = if cfg!(feature = "conform") {
+        conform::WDT_MS
+    } else if on_trial {
+        board::TRIAL_WDT_MS
+    } else {
+        board::CONFIRMED_WDT_MS
+    };
+    let mut wdt = IndependentWatchdog::new(p.IWDG, wdt_ms * 1000);
     wdt.unleash();
 
     let mut i2c_cfg = i2c::Config::default();
@@ -163,7 +166,7 @@ fn own_header(store: &mut Store) -> Option<[u8; HEADER_SIZE]> {
 async fn serve(
     agent: &mut Agent<Store, DefaultHooks>,
     target: &mut I2c<'static, embassy_stm32::mode::Async, i2c::MultiMaster>,
-    wdt: &mut IndependentWatchdog<'static, peripherals::IWDG>,
+    wdt: &mut Wdt,
     led: &mut Output<'static>,
 ) -> ! {
     let started = Instant::now();
@@ -217,10 +220,18 @@ async fn serve(
                 mailbox.request();
                 feed(agent, wdt);
                 acknowledge(false);
-                let reply = agent.handle(&rx[..n]);
-                let reboot = reply.as_ref().is_some_and(|r| r.reboot);
-                mailbox.respond(reply.map(|r| r.frame), reboot);
+                let t0 = Instant::now();
+                if !conform::serve(agent, &rx[..n], wdt, &mut mailbox) {
+                    let reply = agent.handle(&rx[..n]);
+                    let reboot = reply.as_ref().is_some_and(|r| r.reboot);
+                    mailbox.respond(reply.map(|r| r.frame), reboot);
+                }
                 acknowledge(true);
+                let ms = t0.elapsed().as_millis();
+                if ms >= SLOW_REQUEST_MS {
+                    // Byte 5 of a frame is the command.
+                    info!("cmd {=u8:#04x}: {} ms", rx[5], ms);
+                }
             }
             SlaveCommandKind::Read => {
                 let sent = match target.respond_to_read(mailbox.read_data()).await {
@@ -271,5 +282,58 @@ async fn display(
             Timer::after(DIGIT_PERIOD).await;
             digits[i].set_level(DIGIT_OFF);
         }
+    }
+}
+
+/// Conformance build (`conform`): CONF_RUN runs dagon-conform's node-side
+/// tests in front of the agent.
+#[cfg(feature = "conform")]
+mod conform {
+    use super::*;
+    use dagon_conform::node::{handle_frame, NodeSetup, RESPONSE_MAX};
+
+    /// IWDG timeout for this build. The HAL assumes a 32 kHz LSI; the F401's
+    /// LSI may run at up to 47 kHz, which shortens this to about 8.2 s, still
+    /// above the 4 s a 128 KiB sector erase may take between two feeds.
+    pub const WDT_MS: u32 = 12_000;
+
+    /// Answers a CONF_RUN request; false for any other frame.
+    pub fn serve(
+        agent: &mut Agent<Store, DefaultHooks>,
+        request: &[u8],
+        wdt: &mut Wdt,
+        mailbox: &mut Mailbox,
+    ) -> bool {
+        let state = agent.store().log_state();
+        let setup = NodeSetup {
+            declared: &board::FLASH_REGIONS,
+            scratch: f401_node::scratch_addr(&state, SLOT, &board::SLOTS),
+        };
+        let mut out = [0u8; RESPONSE_MAX];
+        let flash = agent.store().flash();
+        let max = max_payload::I2C;
+        match handle_frame(request, max, flash, &setup, &mut out, &mut || wdt.pet()) {
+            Some(n) => {
+                mailbox.respond(Some(&out[..n]), false);
+                true
+            }
+            None => false,
+        }
+    }
+}
+
+#[cfg(not(feature = "conform"))]
+mod conform {
+    use super::*;
+
+    pub const WDT_MS: u32 = 0;
+
+    pub fn serve(
+        _: &mut Agent<Store, DefaultHooks>,
+        _: &[u8],
+        _: &mut Wdt,
+        _: &mut Mailbox,
+    ) -> bool {
+        false
     }
 }

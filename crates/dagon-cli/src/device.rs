@@ -104,6 +104,7 @@ fn phase_name(p: u8) -> &'static str {
         phase::CONFIRM => "confirmed",
         phase::REJECTED => "REJECTED",
         phase::FAILED => "FAILED",
+        phase::ROM => "rom",
         _ => "?",
     }
 }
@@ -117,9 +118,90 @@ fn pubkey(o: &Opts<'_>, cfg: &Config) -> Result<[u8; 32], String> {
     }
 }
 
-pub fn apply(args: &[&str]) -> Res {
+pub fn recover(args: &[&str]) -> Res {
     let o = Opts::parse(
         args,
+        &[
+            "port", "topology", "config", "release", "bootcore", "pubkey", "key",
+        ],
+    )?;
+    let [node] = o.pos[..] else {
+        return Err("recover needs <node>".into());
+    };
+    let cfg = Config::load(o.get("config"))?;
+    let t = read_topology(&cfg.topology_path(o.get("topology"))?)?;
+    let bin = topology_bin(&t)?;
+    let index = t
+        .nodes
+        .iter()
+        .position(|n| n.id == node)
+        .ok_or_else(|| format!("no node '{node}' in the topology"))? as u8;
+    let dgb = o
+        .get("release")
+        .map(PathBuf::from)
+        .or(cfg.release.clone())
+        .ok_or("no release: pass --release <dgb> or set release in dagon.toml")?;
+    let release = read_file(&dgb)?;
+    let boot_path = o.get("bootcore").map_or_else(
+        || cfg.provision_dir().join(node).join("bootcore.img"),
+        PathBuf::from,
+    );
+    // Only the ROM path needs it; a missing file is reported if it gets there.
+    let boot = std::fs::read(&boot_path).ok();
+    let key = pubkey(&o, &cfg)?;
+    let assets = dagon_host::RecoverAssets {
+        release: &release,
+        topology: &bin,
+        pubkey: &key,
+        bootcore: boot.as_deref(),
+    };
+    let mut host = serial::host(o.get("port"))?;
+    let mut print = |e: Event| {
+        println!(
+            "{node}: {} {}% ({})",
+            phase_name(e.phase),
+            e.percent,
+            e.version
+        );
+    };
+    let (path, v) = block_on(host.recover(index, &assets, &mut print)).map_err(|e| match e {
+        dagon_host::Error::NoImage { .. } if boot.is_none() => format!(
+            "{node} does not answer; the ROM path needs {}",
+            boot_path.display()
+        ),
+        e => format!("recover {node}: {e:?}"),
+    })?;
+    match path {
+        dagon_host::RecoverPath::Rom(s) => println!(
+            "{node}: rewritten through the ROM loader, {v}; {} frames, max round trip {} ms, \
+             {} ms, {} session(s){}",
+            s.frames,
+            s.max_rtt_ms,
+            s.elapsed_ms,
+            s.attempts,
+            if s.no_stretch {
+                ""
+            } else {
+                ", stretching commands"
+            }
+        ),
+        p => println!("{node}: {p:?}, {v}"),
+    }
+    Ok(())
+}
+
+/// Flag of `apply`: skip the PC-side signature and digest checks.
+const NO_HOST_VERIFY: &str = "--no-host-verify";
+
+pub fn apply(args: &[&str]) -> Res {
+    let no_verify = args.contains(&NO_HOST_VERIFY);
+    let args: Vec<&str> = args
+        .iter()
+        .copied()
+        .filter(|a| *a != NO_HOST_VERIFY)
+        .collect();
+    let o = Opts::parse(
+        &args,
         &["port", "topology", "config", "node", "pubkey", "key"],
     )?;
     let cfg = Config::load(o.get("config"))?;
@@ -144,7 +226,15 @@ pub fn apply(args: &[&str]) -> Res {
         })
         .collect::<Result<Vec<u8>, String>>()?;
     let only = (!picked.is_empty()).then_some(picked.as_slice());
-    let key = pubkey(&o, &cfg)?;
+    let key = if no_verify {
+        eprintln!(
+            "warning: {NO_HOST_VERIFY}: signatures and digests are left to the nodes; \
+             the topology must still match"
+        );
+        None
+    } else {
+        Some(pubkey(&o, &cfg)?)
+    };
     let bundle = read_file(Path::new(&dgb))?;
 
     let mut host = serial::host(o.get("port"))?;
@@ -162,8 +252,11 @@ pub fn apply(args: &[&str]) -> Res {
             e.version
         );
     };
-    let report = block_on(host.apply(&bundle, &bin, &key, only, &mut print))
-        .map_err(|e| format!("apply refused: {e:?}"))?;
+    let run = match &key {
+        Some(k) => block_on(host.apply(&bundle, &bin, k, only, &mut print)),
+        None => block_on(host.apply_unverified(&bundle, &bin, only, &mut print)),
+    };
+    let report = run.map_err(|e| format!("apply refused: {e:?}"))?;
     let mut ok = true;
     for r in &report {
         let line = match &r.outcome {

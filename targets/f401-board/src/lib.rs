@@ -10,10 +10,11 @@ pub use layout::*;
 
 use dagon_core::key;
 
-/// Verifying key, embedded at build time from `DAGON_PUBKEY` (64 hex
-/// digits, the public key printed by `dagon key gen`). Unset, it is the
-/// public RFC 8032 test key and the build prints a warning.
-pub const PUBKEY: [u8; 32] = match option_env!("DAGON_PUBKEY") {
+/// Verifying key, embedded at build time from `DAGON_PUBKEY`: the path to
+/// the public key file from `dagon key gen`, or its 64 hex digits (see
+/// build.rs). Unset, it is the public RFC 8032 test key and the build prints
+/// a warning.
+pub const PUBKEY: [u8; 32] = match option_env!("DAGON_PUBKEY_HEX") {
     Some(hex) => key::pubkey_from_hex(hex),
     None => key::TEST_PUBKEY,
 };
@@ -22,30 +23,38 @@ pub const PUBKEY: [u8; 32] = match option_env!("DAGON_PUBKEY") {
 /// firmware accepts. HELLO and displays should show "TEST KEY".
 pub const TEST_KEY: bool = key::is_test_key(&PUBKEY);
 
+/// Core clock set by [`clocks`].
+pub const SYSCLK_HZ: u32 = 84_000_000;
+
+/// 84 MHz from the HSI through the PLL (16 MHz / 16 x 336 / 4; 48 MHz on Q),
+/// APB1 42 MHz. HSI keeps it independent of whether the ST-LINK MCO feeds
+/// HSE on this board. Safe to apply again after a jump: the HAL moves the
+/// core to HSI before it reprograms the PLL.
+pub fn clocks() -> embassy_stm32::Config {
+    use embassy_stm32::rcc::{
+        AHBPrescaler, APBPrescaler, Pll, PllMul, PllPDiv, PllPreDiv, PllQDiv, PllSource, Sysclk,
+    };
+    let mut c = embassy_stm32::Config::default();
+    c.rcc.hsi = true;
+    c.rcc.pll_src = PllSource::HSI;
+    c.rcc.pll = Some(Pll {
+        prediv: PllPreDiv::DIV16,
+        mul: PllMul::MUL336,
+        divp: Some(PllPDiv::DIV4),
+        divq: Some(PllQDiv::DIV7),
+        divr: None,
+    });
+    c.rcc.sys = Sysclk::PLL1_P;
+    c.rcc.ahb_pre = AHBPrescaler::DIV1;
+    c.rcc.apb1_pre = APBPrescaler::DIV2;
+    c.rcc.apb2_pre = APBPrescaler::DIV1;
+    c
+}
+
 use dagon_port::{Flash, FlashError, FlashRegion};
 use embassy_stm32::flash::{Blocking, Flash as Hal, FLASH_BASE, FLASH_SIZE};
 use embassy_stm32::peripherals::FLASH;
 use embassy_stm32::Peri;
-
-/// Regions DAGON may erase and write: the two log faces and the two APP
-/// slots. Reads are allowed anywhere in flash; the boot core sectors are
-/// never erased or written through this port.
-const WRITABLE: [FlashRegion; 2] = [
-    FlashRegion {
-        start: 0x0800_8000,
-        len: 0x8000,
-        erase_size: 0x4000,
-        write_size: 4,
-        erased_value: 0xFF,
-    },
-    FlashRegion {
-        start: 0x0802_0000,
-        len: 0x4_0000,
-        erase_size: 0x2_0000,
-        write_size: 4,
-        erased_value: 0xFF,
-    },
-];
 
 pub struct BoardFlash<'d>(Hal<'d, Blocking>);
 
@@ -56,7 +65,7 @@ impl<'d> BoardFlash<'d> {
 }
 
 fn region(addr: u32, len: u32) -> Result<&'static FlashRegion, FlashError> {
-    WRITABLE
+    FLASH_REGIONS
         .iter()
         .find(|r| addr >= r.start && addr.saturating_add(len) <= r.start + r.len)
         .ok_or(FlashError::Range)
@@ -73,7 +82,7 @@ fn offset(addr: u32, len: usize) -> Result<u32, FlashError> {
 
 impl Flash for BoardFlash<'_> {
     fn geometry(&self) -> &[FlashRegion] {
-        &WRITABLE
+        &FLASH_REGIONS
     }
 
     fn read(&mut self, addr: u32, buf: &mut [u8]) -> Result<(), FlashError> {

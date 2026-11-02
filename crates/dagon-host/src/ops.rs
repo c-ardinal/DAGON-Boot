@@ -5,7 +5,7 @@ use alloc::vec;
 use alloc::vec::Vec;
 use dagon_conform::timeout::{erase_ms, POLL_MS, REBOOT_WAIT_MS, REQUEST_MS, VERIFY_MS};
 use dagon_format::bundle::BundleView;
-use dagon_format::header::{image_kind, slot_binding, HEADER_SIZE};
+use dagon_format::header::{image_kind, mcu_id, slot_binding, HEADER_SIZE};
 use dagon_format::topology::{self, TopologyView};
 use dagon_format::{sha256, ImageHeader, Version};
 use dagon_proto::payload::{
@@ -138,14 +138,34 @@ impl<T: Transport, C: Clock> Host<T, C> {
         nodes: Option<&[u8]>,
         on_event: &mut dyn FnMut(Event),
     ) -> Result<Vec<NodeOutcome<T::Error>>, T::Error> {
-        let b = BundleView::parse(bundle)?;
-        b.verify(pubkey)?;
-        let topo = TopologyView::parse(topology)?;
-        let release = b.manifest().fields().topology_sha256;
-        let local = sha256(topology);
-        if release != local {
-            return Err(Error::TopologyMismatch { release, local });
-        }
+        self.apply_release(bundle, topology, Some(pubkey), nodes, on_event)
+            .await
+    }
+
+    /// [`Host::apply`] with the host-side signature and digest checks
+    /// skipped (`pubkey = None`), so the nodes' own checks reject a tampered
+    /// image (E_SIGNATURE, E_DIGEST) for demonstration. The bundle must
+    /// still parse and the topology must still match.
+    pub async fn apply_unverified(
+        &mut self,
+        bundle: &[u8],
+        topology: &[u8],
+        nodes: Option<&[u8]>,
+        on_event: &mut dyn FnMut(Event),
+    ) -> Result<Vec<NodeOutcome<T::Error>>, T::Error> {
+        self.apply_release(bundle, topology, None, nodes, on_event)
+            .await
+    }
+
+    async fn apply_release(
+        &mut self,
+        bundle: &[u8],
+        topology: &[u8],
+        pubkey: Option<&[u8; 32]>,
+        nodes: Option<&[u8]>,
+        on_event: &mut dyn FnMut(Event),
+    ) -> Result<Vec<NodeOutcome<T::Error>>, T::Error> {
+        let (b, topo) = check_release(bundle, topology, pubkey)?;
         self.push_topology(topology).await?;
 
         let mut plan = plan(&b, &topo, nodes);
@@ -189,7 +209,13 @@ impl<T: Transport, C: Clock> Host<T, C> {
                 _ => phase::FAILED,
             };
             let v = st.hello.active_version;
-            self.emit(on_event, node, ph, 0, v).await;
+            on_event(Event {
+                node,
+                phase: ph,
+                percent: 0,
+                version: v,
+            });
+            self.show(node, ph, 0, v, reason(e).as_bytes()).await;
         }
         r
     }
@@ -204,7 +230,12 @@ impl<T: Transport, C: Clock> Host<T, C> {
     ) -> Result<Version, T::Error> {
         let slot = free_slot(&st.status).ok_or(Error::NoImage { node })?;
         let img = image_for(b, node, slot).ok_or(Error::NoImage { node })?;
-        let h = ImageHeader::parse(img[..HEADER_SIZE].try_into().expect("verified"))?;
+        // Unverified releases reach here too: check the length, not assume.
+        let raw: &[u8; HEADER_SIZE] = img
+            .get(..HEADER_SIZE)
+            .and_then(|h| h.try_into().ok())
+            .ok_or(Error::Format(dagon_format::FormatError::Truncated))?;
+        let h = ImageHeader::parse(raw)?;
         let v = h.version;
         let (hdr, body) = img.split_at(HEADER_SIZE);
         self.emit(on_event, node, phase::TRANSFER, 0, v).await;
@@ -257,6 +288,10 @@ impl<T: Transport, C: Clock> Host<T, C> {
             _ => (REBOOT_WAIT_MS, POLL_MS),
         };
         let deadline = self.clock.now_ms() + limit as u64;
+        // Another version may answer until the reset really happens (the
+        // old firmware still running) or for good (rolled back); only the
+        // end of the window tells them apart.
+        let mut other = None;
         loop {
             // ponytail: reopens before every hub attempt; add a grace period
             // for slow enumeration if real ports need it.
@@ -264,19 +299,20 @@ impl<T: Transport, C: Clock> Host<T, C> {
             if reopened {
                 match self.hello(to).await {
                     Ok(h) if h.active_version == v => return Ok(h),
-                    Ok(h) => {
-                        return Err(Error::WrongVersion {
-                            expected: v,
-                            running: h.active_version,
-                            trial: h.trial,
-                        })
-                    }
+                    Ok(h) => other = Some(h),
                     Err(Error::Transport(_) | Error::Timeout | Error::Relay(_)) => {}
                     Err(e) => return Err(e),
                 }
             }
             if self.clock.now_ms() >= deadline {
-                return Err(Error::Timeout);
+                return Err(match other {
+                    Some(h) => Error::WrongVersion {
+                        expected: v,
+                        running: h.active_version,
+                        trial: h.trial,
+                    },
+                    None => Error::Timeout,
+                });
             }
             self.clock.sleep_ms(pause).await;
         }
@@ -308,23 +344,73 @@ impl<T: Transport, C: Clock> Host<T, C> {
         on_event: &mut dyn FnMut(Event),
     ) -> Result<Version, T::Error> {
         let st = self.status(to).await?.status;
-        let other = match st.active {
-            0 => 1,
-            1 => 0,
-            _ => return Err(Error::NoPreviousVersion),
-        };
-        let s = st.slots[other as usize];
-        if matches!(s.state, SlotState::Empty | SlotState::Pending) {
-            return Err(Error::NoPreviousVersion);
-        }
-        self.switch_and_confirm(to, other, s.version, node, on_event)
+        let other = rollback_slot(&st).ok_or(Error::NoPreviousVersion)?;
+        let v = st.slots[other as usize].version;
+        self.switch_and_confirm(to, other, v, node, on_event)
             .await?;
-        Ok(s.version)
+        Ok(v)
     }
 
-    /// Rewrites a node that no longer answers (ROM path). Not implemented yet.
-    pub async fn recover(&mut self, _to: Target) -> Result<(), T::Error> {
-        Err(Error::Unsupported)
+    /// Rewrites topology node `node` from the release. A node that answers
+    /// HELLO (its app, or the factory agent: HELLO mode = agent) gets its
+    /// image through the normal transfer. An STM32F401 that does not answer
+    /// and whose link has the I2C ROM entry is rewritten through the ROM
+    /// loader: boot core, APP-A and a fresh state log, then its HELLO.
+    pub async fn recover(
+        &mut self,
+        node: u8,
+        a: &RecoverAssets<'_>,
+        on_event: &mut dyn FnMut(Event),
+    ) -> Result<(RecoverPath, Version), T::Error> {
+        let (b, topo) = check_release(a.release, a.topology, Some(a.pubkey))?;
+        let to = Target::of_node(&topo, node).ok_or(Error::Unreachable { node })?;
+        match self.hello(to).await {
+            Ok(h) => {
+                let path = if h.mode == payload::mode::AGENT {
+                    RecoverPath::Factory
+                } else {
+                    RecoverPath::Retransfer
+                };
+                let v = self.update_node(&b, node, to, on_event).await?;
+                return Ok((path, v));
+            }
+            Err(Error::Transport(e)) => return Err(Error::Transport(e)),
+            Err(_) => {}
+        }
+        if !rom_reachable(&topo, node) {
+            return Err(Error::Unreachable { node });
+        }
+        let boot = a.bootcore.ok_or(Error::NoImage { node })?;
+        crate::rom::check_bootcore(boot, a.pubkey)?;
+        let app = image_for(&b, node, slot_binding::A).ok_or(Error::NoImage { node })?;
+        crate::rom::check_app_a(app)?;
+        let app_hdr: &[u8; HEADER_SIZE] = app
+            .get(..HEADER_SIZE)
+            .and_then(|h| h.try_into().ok())
+            .ok_or(Error::Format(dagon_format::FormatError::Truncated))?;
+        let v = ImageHeader::parse(app_hdr)?.version;
+        let log = crate::rom::initial_log(app_hdr)?;
+        let regions = crate::rom::f401_regions(boot, app, &log);
+        let plan = dagon_romlink::Plan {
+            erase: &crate::rom::F401_ERASE,
+            regions: &regions,
+        };
+        self.emit(on_event, node, phase::ROM, 0, v).await;
+        let stats = {
+            let mut link = crate::rom::HubRom::new(self, on_event, node, v);
+            dagon_romlink::flash(&mut link, &plan).await
+        };
+        let stats = match stats {
+            Ok(s) => s,
+            Err(e) => {
+                self.show(node, phase::FAILED, 0, v, b"ROM FAILED").await;
+                return Err(Error::Rom(e));
+            }
+        };
+        self.set_applied(to, v);
+        self.await_version(to, v).await?;
+        self.emit(on_event, node, phase::CONFIRM, 100, v).await;
+        Ok((RecoverPath::Rom(stats), v))
     }
 
     /// XFER_BEGIN, XFER_HDR chunks, XFER_DATA chunks, XFER_END with digest
@@ -356,7 +442,7 @@ impl<T: Transport, C: Clock> Host<T, C> {
         let begin_wait = if hdr.is_empty() { erase } else { REQUEST_MS };
         self.call(to, Cmd::XferBegin, &p[..n], begin_wait).await?;
 
-        let chunk = (hello.max_payload as usize).min(to.link_max()) - CHUNK_HEAD;
+        let chunk = chunk_len(hello.max_payload, to.link_max()).ok_or(Error::BadResponse)?;
         let hdr_chunks = hdr.len().div_ceil(chunk);
         for (i, c) in hdr.chunks(chunk).enumerate() {
             let wait = if i + 1 == hdr_chunks {
@@ -411,7 +497,7 @@ impl<T: Transport, C: Clock> Host<T, C> {
 
     /// Reports `ev` and shows it on the hub LCD (best effort: the hub may be
     /// rebooting).
-    async fn emit(
+    pub(crate) async fn emit(
         &mut self,
         on_event: &mut dyn FnMut(Event),
         node: u8,
@@ -425,16 +511,121 @@ impl<T: Transport, C: Clock> Host<T, C> {
             percent,
             version,
         });
+        self.show(node, ph, percent, version, &[]).await;
+    }
+
+    /// SHOW on the hub LCD, best effort.
+    async fn show(&mut self, node: u8, ph: u8, percent: u8, version: Version, text: &[u8]) {
         let show = Show {
             node,
             phase: ph,
             percent,
             version,
-            text: &[],
+            text,
         };
-        let mut p = [0u8; 7];
-        let n = show.encode(&mut p).expect("7 bytes");
+        let mut p = [0u8; 7 + payload::SHOW_TEXT_MAX];
+        let Ok(n) = show.encode(&mut p) else {
+            return;
+        };
         let _ = self.call(Target::Hub, Cmd::Show, &p[..n], REQUEST_MS).await;
+    }
+}
+
+/// XFER data bytes per chunk for a peer announcing `max_payload` on a link
+/// carrying `link_max`; `None` when not even one byte fits.
+fn chunk_len(max_payload: u16, link_max: usize) -> Option<usize> {
+    (max_payload as usize)
+        .min(link_max)
+        .checked_sub(CHUNK_HEAD)
+        .filter(|&c| c > 0)
+}
+
+/// The slot rollback returns to: the other slot, Confirmed (we run on
+/// trial) or Written (confirmed before the running slot took over); never a
+/// Reverted, pending or empty one.
+fn rollback_slot(st: &StatusResp) -> Option<u8> {
+    let other = match st.active {
+        0 => 1u8,
+        1 => 0,
+        _ => return None,
+    };
+    let ok = matches!(
+        st.slots[other as usize].state,
+        SlotState::Confirmed | SlotState::Written
+    );
+    ok.then_some(other)
+}
+
+/// Release `bundle` built for `topology` and, when `pubkey` is given,
+/// verified under it.
+fn check_release<'a, E>(
+    bundle: &'a [u8],
+    topology: &'a [u8],
+    pubkey: Option<&[u8; 32]>,
+) -> Result<(BundleView<'a>, TopologyView<'a>), E> {
+    let b = BundleView::parse(bundle)?;
+    if let Some(k) = pubkey {
+        b.verify(k)?;
+    }
+    let topo = TopologyView::parse(topology)?;
+    let release = b.manifest().fields().topology_sha256;
+    let local = sha256(topology);
+    if release != local {
+        return Err(Error::TopologyMismatch { release, local });
+    }
+    Ok((b, topo))
+}
+
+/// An STM32F401 on I2C whose link enters the ROM loader through NRST/BOOT0.
+fn rom_reachable(topo: &TopologyView<'_>, node: u8) -> bool {
+    let n = (node as usize) < topo.node_count();
+    let f401 = n && topo.node(node as usize).mcu_id == mcu_id::STM32F401XE;
+    let rom = (0..topo.link_count()).map(|i| topo.link(i)).any(|l| {
+        l.to == node
+            && l.iface == topology::iface::I2C_BUS
+            && l.rom_entry == topology::rom_entry::STM32_I2C_ROM
+    });
+    f401 && rom
+}
+
+/// What [`Host::recover`] needs: the release, the current topology binary,
+/// the verifying key and, for the ROM path, the signed boot core.
+#[derive(Clone, Copy, Debug)]
+pub struct RecoverAssets<'a> {
+    pub release: &'a [u8],
+    pub topology: &'a [u8],
+    pub pubkey: &'a [u8; 32],
+    pub bootcore: Option<&'a [u8]>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum RecoverPath {
+    /// The app answered; the image went through the normal transfer.
+    Retransfer,
+    /// The factory agent answered and received the image.
+    Factory,
+    /// Rewritten through the ROM loader.
+    Rom(dagon_romlink::Stats),
+}
+
+/// Short LCD text for a failed update (ASCII, at most 32 bytes).
+pub fn reason<E>(e: &Error<E>) -> &'static str {
+    match e {
+        Error::Rejected { status, .. } => match status {
+            Status::Signature => "E_SIGNATURE",
+            Status::Key => "E_KEY",
+            Status::Compat => "E_COMPAT",
+            Status::Digest => "E_DIGEST",
+            Status::Flash => "E_FLASH",
+            Status::State => "E_STATE",
+            Status::Range => "E_RANGE",
+            _ => "REJECTED",
+        },
+        Error::Timeout | Error::Relay(_) | Error::Transport(_) => "NO ANSWER",
+        Error::WrongVersion { .. } => "ROLLED BACK",
+        Error::DigestMismatch => "E_DIGEST",
+        Error::NoImage { .. } => "NO IMAGE",
+        _ => "FAILED",
     }
 }
 
@@ -485,4 +676,41 @@ fn image_for<'a>(b: &BundleView<'a>, node: u8, slot: u8) -> Option<&'a [u8]> {
             && (e.slot_binding == slot || e.slot_binding == slot_binding::ANY);
         fits.then(|| b.item_bytes(i))
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn chunk_len_needs_room_for_one_byte() {
+        assert_eq!(chunk_len(0, 256), None);
+        assert_eq!(chunk_len(4, 256), None);
+        assert_eq!(chunk_len(5, 256), Some(1));
+        assert_eq!(chunk_len(1088, 256), Some(252), "link limit wins");
+    }
+
+    #[test]
+    fn rollback_only_to_a_previously_confirmed_slot() {
+        let with = |active, other: SlotState| {
+            let mut st = StatusResp {
+                active,
+                confirmed: active,
+                ..Default::default()
+            };
+            st.slots[(1 - active.min(1)) as usize].state = other;
+            rollback_slot(&st)
+        };
+        assert_eq!(with(1, SlotState::Written), Some(0));
+        assert_eq!(with(0, SlotState::Confirmed), Some(1));
+        for bad in [
+            SlotState::Reverted,
+            SlotState::Empty,
+            SlotState::Pending,
+            SlotState::Trying,
+        ] {
+            assert_eq!(with(1, bad), None, "{bad:?}");
+        }
+        assert_eq!(with(0xFF, SlotState::Written), None, "nothing running");
+    }
 }

@@ -30,3 +30,4 @@ data; images carry the `TEST_KEY` build flag). Public key:
 | `frame_show.bin` | SHOW node 1, phase TRANSFER, 42 %, 1.1.0, text `seg` |
 | `frame_subctl.bin` | SUBCTL nrst = pulse, boot0 = high |
 | `frame_i2c_raw_get.bin` | I2C_RAW writing `00 FF`, reading 1 byte |
+| `frame_enter_rom.bin` | ENTER_ROM (0x24) method = 1 FORCE_DOWNLOAD_BOOT, seq 0x14. Added after G1, owner-approved, additive: the files above are unchanged |

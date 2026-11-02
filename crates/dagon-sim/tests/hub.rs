@@ -243,6 +243,12 @@ fn i2c_scan_finds_only_present_targets() {
     pc.subctl(&mut hub, nrst::PULSE, boot0::LOW);
     assert_eq!(hub.bus.scan(), vec![NODE_I2C_ADDR]);
 
+    // Same lines through the port trait, as hub logic would drive them.
+    block_on(dagon_port::SubControl::pulse_reset(&mut hub.bus, true)).unwrap();
+    assert_eq!(hub.bus.scan(), vec![ROM_ADDR]);
+    block_on(dagon_port::SubControl::pulse_reset(&mut hub.bus, false)).unwrap();
+    assert_eq!(hub.bus.scan(), vec![NODE_I2C_ADDR]);
+
     let mut empty = demo_hub(*kp().pk, 1);
     assert!(empty.bus.scan().is_empty(), "erased node stays silent");
 }
@@ -266,16 +272,18 @@ fn rom_get_and_get_id() {
 
     pc.subctl(&mut hub, nrst::PULSE, boot0::HIGH);
     assert_eq!(pc.rom(&mut hub, &[cmd::GET, 0xFF], 1), [ACK]);
-    let n = pc.rom(&mut hub, &[], 1)[0] as usize;
-    let rest = pc.rom(&mut hub, &[], n as u16 + 1);
-    assert_eq!(rest[0], 0x11, "I2C protocol V1.1");
-    assert!(rest[1..].contains(&cmd::NS_WRITE_MEMORY) && rest[1..].contains(&cmd::NS_ERASE));
+    // The data frame comes whole in one read; extra bytes read as 0xFF.
+    let data = pc.rom(&mut hub, &[], 32);
+    let n = data[0] as usize;
+    assert_eq!(data[1], 0x11, "I2C protocol V1.1");
+    let cmds = &data[2..2 + n];
+    assert!(cmds.contains(&cmd::NS_WRITE_MEMORY) && cmds.contains(&cmd::NS_ERASE));
+    assert!(data[2 + n..].iter().all(|&b| b == 0xFF));
     assert_eq!(pc.rom(&mut hub, &[], 1), [ACK]);
 
-    assert_eq!(
-        pc.rom(&mut hub, &[cmd::GET_ID, 0xFD], 5),
-        [ACK, 1, 0x04, 0x33, ACK]
-    );
+    assert_eq!(pc.rom(&mut hub, &[cmd::GET_ID, 0xFD], 1), [ACK]);
+    assert_eq!(pc.rom(&mut hub, &[], 3), [1, 0x04, 0x33]);
+    assert_eq!(pc.rom(&mut hub, &[], 1), [ACK]);
     assert_eq!(
         pc.rom(&mut hub, &[cmd::GET, 0x00], 1),
         [NACK],
@@ -319,7 +327,8 @@ fn rom_erase_write_read_with_busy_and_frame_timeout() {
         pc.rom(&mut hub, &[addr[0], addr[1], addr[2], addr[3], ax], 1),
         [ACK]
     );
-    assert_eq!(pc.rom(&mut hub, &[3, !3], 5), [ACK, 0xDE, 0xAD, 0xBE, 0xEF]);
+    assert_eq!(pc.rom(&mut hub, &[3, !3], 1), [ACK]);
+    assert_eq!(pc.rom(&mut hub, &[], 4), [0xDE, 0xAD, 0xBE, 0xEF]);
 
     // Over 1000 ms between frames of an open command: the loader resets.
     assert_eq!(pc.rom(&mut hub, &[cmd::READ_MEMORY, 0xEE], 1), [ACK]);

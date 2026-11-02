@@ -6,9 +6,32 @@ license = "MIT OR Apache-2.0"
 publish = false
 
 # Standalone workspace: built with the espup Xtensa toolchain, not the host one.
+# The receiver (`store`) and the trial watchdog also build and test on the host.
 [workspace]
 
+[features]
+# Conformance build: answers CONF_RUN (node-side tests) in front of the agent.
+conform = ["dep:dagon-conform"]
+# Test build that refuses CONFIRM, so its trial always rolls back.
+no-confirm = []
+
+[[bin]]
+name = "app"
+test = false
+
+[[bin]]
+name = "factory"
+test = false
+
 [dependencies]
+dagon-agent = { path = "../../crates/dagon-agent" }
+dagon-conform = { path = "../../crates/dagon-conform", optional = true }
+dagon-esp32s3-port = { path = "../esp32s3-port" }
+dagon-format = { path = "../../crates/dagon-format" }
+dagon-port = { path = "../../crates/dagon-port" }
+dagon-proto = { path = "../../crates/dagon-proto" }
+
+[target.'cfg(target_arch = "xtensa")'.dependencies]
 esp-hal = { version = "1.2.2", features = ["esp32s3", "unstable"] }
 esp-bootloader-esp-idf = { version = "0.6.0", features = ["esp32s3"] }
 
@@ -18,5 +41,15 @@ lto = "fat"
 codegen-units = 1
 debug = 2
 
+# Size-tuned Ed25519: at "s" the field arithmetic is inlined into one
+# function of several hundred KiB.
+[profile.release.package.ed25519-compact]
+opt-level = "z"
+
 [profile.dev]
 opt-level = "s"
+
+# esp-bootloader-esp-idf computes `ota_seq - 1` for any counted seq, 0 included
+# (otadata written by older tools); release builds already wrap.
+[profile.dev.package.esp-bootloader-esp-idf]
+overflow-checks = false

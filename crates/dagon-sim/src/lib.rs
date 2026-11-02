@@ -44,7 +44,7 @@ pub fn hub_config(pubkey: [u8; 32]) -> Config {
         pubkey,
         mcu_id: mcu_id::RP2040,
         port_kind: port_kind::SELF_BOOT,
-        target_tag: target_tag("hub-rp2040"),
+        target_tag: target_tag("hub-rp2040-lcd"),
         role: role::HUB,
         mode: mode::APP,
         max_payload: max_payload::USB as u16,
@@ -81,6 +81,71 @@ pub fn demo_hub(pubkey: [u8; 32], seed: u64) -> SimHub {
     f401.i2c_addr = Some(NODE_I2C_ADDR);
     let mut h = SimHub::new(hub);
     h.add_i2c(f401, true);
+    h
+}
+
+/// ESP32-S3 watch on the PIO UART link (kind V header fields; the slot
+/// handling is simulated like kind S).
+pub fn watch_config(pubkey: [u8; 32]) -> Config {
+    Config {
+        pubkey,
+        mcu_id: mcu_id::ESP32S3,
+        port_kind: port_kind::VENDOR_STAGE2,
+        target_tag: target_tag("watch-s3"),
+        role: role::NODE,
+        mode: mode::APP,
+        max_payload: max_payload::UART as u16,
+    }
+}
+
+/// Pre-signed desk-demo images and release (RFC 8032 section 7.1 TEST 1
+/// key, public test data), so nothing is signed at run time. Regenerated
+/// and checked by the `desk_fixtures` test.
+pub mod desk {
+    /// The TEST 1 public key the fixtures verify under.
+    pub const PUBKEY: [u8; 32] = [
+        0xd7, 0x5a, 0x98, 0x01, 0x82, 0xb1, 0x0a, 0xb7, 0xd5, 0x4b, 0xfe, 0xd3, 0xc9, 0x64, 0x07,
+        0x3a, 0x0e, 0xe1, 0x72, 0xf3, 0xda, 0xa6, 0x23, 0x25, 0xaf, 0x02, 0x1a, 0x68, 0xf7, 0x07,
+        0x51, 0x1a,
+    ];
+    /// Hub (RP2040) APP 1.0.0 for slot A.
+    pub const HUB_1_0_0: &[u8] = include_bytes!("../fixtures/desk-hub-1.0.0.img");
+    /// Seg (F401) APP 1.0.0 for slot A.
+    pub const SEG_1_0_0: &[u8] = include_bytes!("../fixtures/desk-seg-1.0.0.img");
+    /// Watch (ESP32-S3) APP 1.0.0, runs from any slot.
+    pub const WATCH_1_0_0: &[u8] = include_bytes!("../fixtures/desk-watch-1.0.0.img");
+    /// Release 1.1.0 (.dgb) for the desk-demo topology: seg A/B, watch,
+    /// hub A/B, plus the topology.
+    pub const RELEASE_1_1_0: &[u8] = include_bytes!("../fixtures/desk-1.1.0.dgb");
+}
+
+/// The desk demo, every node confirmed on 1.0.0: hub (RP2040, USB), seg
+/// (F401 on I2C at [`NODE_I2C_ADDR`], NRST/BOOT0 wired) and watch
+/// (ESP32-S3 behind a clean [`SimLink`] on the PIO UART, factory slot also
+/// holding 1.0.0). Keys: [`desk::PUBKEY`].
+pub fn demo_hub_desk(seed: u64) -> SimHub {
+    let pk = desk::PUBKEY;
+    let mut h = demo_hub(pk, seed);
+    h.node
+        .provision(desk::HUB_1_0_0, 0)
+        .expect("hub fixture fits");
+    h.i2c_node(NODE_I2C_ADDR)
+        .expect("seg")
+        .provision(desk::SEG_1_0_0, 0)
+        .expect("seg fixture fits");
+    let mut watch = SimNode::new(
+        watch_config(pk),
+        SimFlash::esp32s3_4m(seed ^ 2),
+        Layout::ESP32S3_WATCH,
+    );
+    watch
+        .store()
+        .provision_factory(desk::WATCH_1_0_0)
+        .expect("factory fits");
+    watch
+        .provision(desk::WATCH_1_0_0, 0)
+        .expect("watch fixture fits");
+    h.set_uart(SimLink::new(seed ^ 3), watch);
     h
 }
 

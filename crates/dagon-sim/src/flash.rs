@@ -87,6 +87,21 @@ impl SimFlash {
         )
     }
 
+    /// ESP32-S3 SPI flash, first 4 MiB from offset 0 (4 KiB sectors, 4-byte
+    /// writes).
+    pub fn esp32s3_4m(seed: u64) -> Self {
+        SimFlash::new(
+            &[FlashRegion {
+                start: 0,
+                len: 0x40_0000,
+                erase_size: 0x1000,
+                write_size: 4,
+                erased_value: 0xFF,
+            }],
+            seed,
+        )
+    }
+
     pub fn ops(&self) -> &[FlashOp] {
         &self.ops
     }

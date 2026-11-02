@@ -2,7 +2,12 @@
 target = "xtensa-esp32s3-none-elf"
 
 [target.xtensa-esp32s3-none-elf]
-rustflags = ["-C", "link-arg=-nostartfiles", "-C", "link-arg=-Tlinkall.x"]
+# Literals next to the code: a function larger than l32r's reach (the Ed25519
+# field arithmetic inlined at opt-level "s") otherwise fails to link.
+rustflags = [
+    "-C", "link-arg=-nostartfiles", "-C", "link-arg=-Tlinkall.x",
+    "-C", "llvm-args=--mtext-section-literals",
+]
 
 [unstable]
 build-std = ["core"]

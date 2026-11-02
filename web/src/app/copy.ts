@@ -1,6 +1,7 @@
 // Every visible and announced string of the page. Chips and labels use the
 // "label value" / "symbol + word" form; sentences appear only where the user
-// acts, one sentence each. Ids are the copy-table ids.
+// acts, one sentence each. Comments name the copy-table ids.
+import type { Action, HubState, Step } from './machine.ts';
 
 export const PRODUCT = 'DAGON BOOT';
 
@@ -9,10 +10,11 @@ export const SKIP = {
   next: '次にすることへ',
 } as const;
 
-/** Header step indicator: label, number and step name. */
+/** Header step indicator: "手順 02/06 構成を用意"; recovery shows its name only. */
 export const STEP = {
   label: '手順',
-  connect: { n: '01/06', name: 'つなぐ' },
+  of: '/06',
+  names: { 1: 'つなぐ', 2: '構成を用意', 3: '親機へ送る', 4: 'ファイル', 5: '更新', 6: '完了', recover: '復旧' } as Record<Step, string>,
 } as const;
 
 /** M48: hub connection in the header (no node counts here). */
@@ -20,54 +22,80 @@ export const HUB = {
   idle: '○ 親機 未接続',
   checking: '… 親機 確認中',
   connected: '● 親機 接続中',
+  reconnecting: '… 親機 再接続中',
   lost: '× 親機 切断',
-} as const;
+  cli: '● 親機 CLI 使用中',
+} as const satisfies Record<HubState, string>;
 
 /** M48 accessible names ("親機、接続中"). */
 export const HUB_NAME = {
   idle: '親機、未接続',
   checking: '親機、確認中',
   connected: '親機、接続中',
+  reconnecting: '親機、再接続中',
   lost: '親機、切断',
+  cli: '親機、CLI 使用中',
+} as const satisfies Record<HubState, string>;
+
+/** CLI link in the header (K0). */
+export const CLI_NONE = 'CLI 未連携';
+
+/** Bottom-band buttons (fixed names); per-node names are in BUTTON_FOR. */
+export const BUTTON = {
+  copyUrl: 'この URL をコピー',
+  connectDiscover: 'つないで、自動で見つける',
+  connect: 'パソコンとつなぐ',
+  placeSample: '見本を置く',
+  reselect: '選び直す',
+  reload: 'もう一度読み込む',
+  push: '親機へ送る',
+  pushAgain: 'もう一度送る',
+  scanAgain: 'もう一度探す',
+  defineFix: '定義で直す',
+  chooseFile: '更新ファイルを選ぶ',
+  useLatest: '配布中の最新バージョンを使う',
+  otherFile: '別のファイルを選ぶ',
+  resendFileTopology: 'ファイルの構成で送り直す',
+  update: '更新',
+  reconnect: 'もう一度つなぐ',
+  recoverAgain: 'もう一度直す',
+  copyLog: '記録をコピー',
+  retrySample: 'もう一度読み込む',
+  placeInDefine: '定義で置く',
+  showJobs: '作業を見る',
+} as const satisfies Record<Exclude<Action, 'recover' | 'updateResponding'>, string>;
+
+/** Buttons named after a node or a count (M14, M47). */
+export const BUTTON_FOR = {
+  recover: (name: string) => `${name}を復旧する`,
+  updateResponding: (n: number) => `応答する ${n} つだけ先に更新`,
 } as const;
 
 export interface BandCopy {
   /** Cause chip, shown before the sentence (absent when shown elsewhere). */
   chip?: string;
-  sentence: string;
-  button: string;
+  /** A label-value pair in place of a sentence. */
+  pair?: readonly [string, string];
+  sentence?: string;
 }
 
-/** Bottom band per connect state. */
+/** Bottom band: the cause chip and the one sentence beside the buttons. */
 export const BAND = {
-  M03: {
-    sentence: '次に出る一覧で「DAGON hub」を選び、『接続』を押してください。',
-    button: 'パソコンとつなぐ',
-  },
-  M04: {
-    chip: '× 見つからない',
-    sentence: 'USB ケーブルを挿し直してから、もう一度押してください。',
-    button: 'パソコンとつなぐ',
-  },
-  M05: {
-    chip: '× ほかで使用中',
-    sentence: '親機を使っているタブやアプリ（dagon CLI を含む）を閉じてから、もう一度押してください。',
-    button: 'パソコンとつなぐ',
-  },
-  M06: {
-    chip: '× 許可なし',
-    sentence: '配布ページのリンクから開き直してください。',
-    button: 'パソコンとつなぐ',
-  },
-  M08: {
-    chip: '× 応答なし',
-    sentence: '一覧から「DAGON hub」を選び直してください。',
-    button: '選び直す',
-  },
-  M34: {
-    sentence: 'USB ケーブルを挿し直してから、もう一度つないでください。',
-    button: 'もう一度つなぐ',
-  },
+  M03: { sentence: '次に出る一覧で「DAGON hub」を選び、『接続』を押してください。' },
+  M04: { chip: '× 見つからない', sentence: 'USB ケーブルを挿し直してから、もう一度押してください。' },
+  M05: { chip: '× ほかで使用中', sentence: '親機を使っているタブやアプリ（dagon CLI を含む）を閉じてから、もう一度押してください。' },
+  M06: { chip: '× 許可なし', sentence: '配布ページのリンクから開き直してください。' },
+  M08: { chip: '× 応答なし', sentence: '一覧から「DAGON hub」を選び直してください。' },
+  M10: { sentence: '机の上と同じか確かめてから、親機へ送ってください。' },
+  M12: { chip: '× 送れない', sentence: 'USB ケーブルを確かめてから、もう一度送ってください。' },
+  M13: { sentence: '更新ファイルをこの画面に置くか、選んでください。' },
+  /** M14 / M15 / M28: label-value pair, no sentence. */
+  M14: { pair: ['目安', '約 1 分'] },
+  M22: { sentence: '終わるまで電源と USB を抜かず、このページを開いたままにしてください（止まっても前のバージョンのまま動きます）。' },
+  M34: { sentence: 'USB ケーブルを挿し直してから、もう一度つないでください。' },
+  M35: { chip: '× 見本を読めない', sentence: 'インターネットにつながっているか確かめてから、もう一度読み込んでください。' },
+  /** M57: part of the page (dagon-wasm) did not load. */
+  M57: { chip: '× 読み込めない', sentence: 'このページの一部を読み込めませんでした。ページを開き直してください。' },
 } as const satisfies Record<string, BandCopy>;
 
 /** M01: browser without Web Serial. */
@@ -79,33 +107,144 @@ export const UNSUPPORTED = {
   button: 'この URL をコピー',
 } as const;
 
-/** Node card on the canvas. */
-export const NODE = {
+/** Canvas: layers, empty receptacles, dot numbers. */
+export const CANVAS = {
   layerL0: 'L0 パソコン',
   layerL1: 'L1 親機',
   layerL2: 'L2 子機',
-  /** M49 dot-number label and its full accessible name. */
-  dotResponding: '応答',
-  dotRespondingName: (n: number, of: number) => `応答 ${n}/${of}、${of} つのノードのうち ${n} つが応答`,
   pc: 'このパソコン（ブラウザ）',
-  hub: '親機',
-  /** S01: empty receptacle in L1. */
+  /** S01 */
   hubSlot: '親機を置く場所',
+  nodeSlot: '子機を置く場所',
+  /** C02 */
+  empty: '親機を USB でパソコンにつないでから、『つないで、自動で見つける』を押してください。',
+  /** S17: canvas description for screen readers. */
+  describe: '矢印でノードを移り、Enter で選びます。ほかのキーは「困ったとき」の「キー操作」にあります。',
+  /** M49 dot-number labels. */
+  dotResponding: '応答',
+  dotFound: '発見',
+  dotRespondingName: (n: number, of: number) => `応答 ${n}/${of}、${of} つのノードのうち ${n} つが応答`,
+  dotFoundName: (n: number) => `発見 ${n}`,
+  /** S19 */
+  wiringLink: '配線表を見る',
+} as const;
+
+/** Node card. */
+export const NODE = {
+  roleHub: '親機',
+  roleNode: '子機',
+  mcu: 'MCU',
+  /** The hub's own connection line. */
+  usb: 'USB（パソコン）',
+  /** S03 pin headings and the no-wire value. */
+  reset: 'リセット',
+  boot: '起動',
+  noWire: 'なし（本体側で切替）',
   /** S04 / S38 */
   responding: '● 応答あり',
-  trying: '● 確認待ち',
+  silent: '× 応答なし',
+  trial: '● 確認待ち',
+  /** W7: full spoken state of a chip. */
+  respondingName: '応答あり',
+  silentName: '応答なし、2 回続けて返事がない',
+  trialName: '確認待ち',
+  /** Spoken name of a node: the visible short chips spelled out. */
+  name: (p: { name: string; product: string; mcu: string; role: string; via: string; state: string; version: string }) =>
+    [p.name, `${p.product} · ${p.mcu}`, p.role, p.via, p.state, p.version && `バージョン ${p.version}`].filter(Boolean).join('、'),
+  viaName: (via: string) => `親機と ${via}`,
+} as const;
+
+/** Link chip (S18) and its spoken name. */
+export const LINK = {
+  bundle: (kind: string, n: number, shared: number) => `${kind} · ${n} 本${shared ? `（うち共有 ${shared}）` : ''}`,
+  name: (label: string, from: string, to: string, addr: string) => `${label}、${from}から ${to}へのリンク${addr ? `、${addr}` : ''}`,
+} as const;
+
+/** Left column (S02, M43). */
+export const ORDER = {
+  heading: '更新の順',
+  none: 'なし',
+} as const;
+
+/** Right column. */
+export const DETAIL = {
+  /** M40 */
+  nothingSelected: 'ノードを選ぶと、ここに詳細が出ます。',
+  /** M42 */
+  introHeading: 'はじめに',
+  introSteps: ['構成を用意（見本か自動で見つける）', '親機へ送る', '更新'],
+  introNote: '止まっても 復旧で戻せる',
+  /** S36 */
+  rtt: '往復',
+  lastSeen: '最後の応答',
+  attempts: '試行回数',
+  lastReason: '最後に戻った理由',
+  ms: (n: number) => `${n} ms`,
+  none: 'なし',
+  /** Values of the last-reason code (STATUS last_reason). */
+  reasons: { 1: '中身の破損', 2: '配布元を確認できない', 3: '新しいバージョンで起動できない', 5: '起動できるバージョンなし' } as Record<number, string>,
   details: '詳しく見る',
+} as const;
+
+/** Slot section (M41). Inside it the rows are A / B / 予備. */
+export const SLOT = {
+  heading: 'スロット',
+  rows: ['A', 'B', '予備'],
+  /** Slot state u8 → word. */
+  states: ['空', '書いた', '次に試す', '確認待ち', '確定', '戻された'],
+  inUse: '使用中',
+  previous: '前のバージョン',
+  /** The watch's factory slot holds an image. */
+  present: 'あり',
+} as const;
+
+/** S20 wiring table. */
+export const WIRING = {
+  heading: '配線表',
+  cols: ['信号', '親機', '子機', '共有'],
+  shared: '共有',
+  own: '—',
+  ownName: 'このノードだけ',
+  legendHeading: '表の見方',
+  legend: [
+    ['共有', 'SDA・SCL は I2C の子機すべて、GND は全ノードで同じ配線'],
+    ['—', 'このノードだけの配線'],
+  ],
+  copy: '配線表をコピー',
+  print: '配線表を印刷',
+} as const;
+
+/** Help in the header, and the operating-mode key list (S06). */
+export const HELP = {
+  heading: '困ったとき',
+  rows: [
+    ['一覧に何も出ない', 'データ用のケーブルに替えてください（充電専用では出ません）。'],
+    ['「DAGON hub」が無い', '親機の画面が点いているか確かめてください。'],
+    ['何を置けばいいか分からない', '『つないで、自動で見つける』を押してください。'],
+    ['手元に無い', '『配布中の最新バージョンを使う』を押してください。'],
+    ['止まって見える', '経過が増えていれば進んでいます（1 つのノードに 1 分ほど）。'],
+  ],
+  keysHeading: 'キー操作',
+  keys: [
+    ['Tab', 'ノードへ移る'],
+    ['矢印', '隣のノードへ'],
+    ['Enter', '選ぶ'],
+  ],
 } as const;
 
 /** Visually hidden announcements (role="status" / alert). */
 export const ANNOUNCE = {
   A05: '親機 接続、ノード確認中',
+  A06: (n: number) => `発見 ${n}`,
+  A07: '構成 送信済み',
+  A08: (n: number, of: number) => `応答 ${n}/${of}`,
+  A21silent: (name: string) => `${name} 応答なし`,
   A21lost: '親機 切断',
 } as const;
 
 /** Words that never appear in operating-mode guidance, chips or results. */
 export const FORBIDDEN_WORDS = [
-  '署名', 'ROM', 'CDC','ブートローダ', 'エラーコード', 'トポロジ',
+  '署名', 'ROM', 'CDC', 'ブートローダ', 'エラーコード', 'トポロジ',
   'マニフェスト', 'ハッシュ', 'ポート', 'シリアル', 'フラッシュ', 'ファームウェア',
   'パーティション', 'コマンド', 'タイムアウト', 'WASM', 'Web Serial', '確定', '試行中',
   '巻き戻り', 'エラー', '不正', '致命的', '無効',

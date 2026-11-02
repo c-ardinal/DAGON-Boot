@@ -1,9 +1,12 @@
 #![forbid(unsafe_code)]
 
+mod ai;
 mod commands;
 mod config;
+mod conform;
 mod device;
 mod serial;
+mod simrun;
 
 use std::path::Path;
 use std::process::ExitCode;
@@ -29,11 +32,29 @@ Usage:
   dagon status [--port <name>] [--topology <yaml>]
                                      HELLO and STATUS of the hub and each topology node
   dagon apply [<dgb>] [--node <id>]... [--port <name>] [--topology <yaml>]
-        [--pubkey <file>] [--key <file>]
+        [--pubkey <file>] [--key <file>] [--no-host-verify]
                                      verify the release, check it matches the topology,
                                      push the topology, update children then the hub
+                                     (--no-host-verify: leave signature and digest
+                                     checks to the nodes; demonstration only)
+  dagon conform --node <id> [--usb] [--images <dir>] [--out <dir>] [--port <name>]
+        [--topology <yaml>] [--key <file>]
+                                     the 12 conformance tests through the hub (or with
+                                     --usb on a node plugged in directly); writes
+                                     result.json and report.html. <dir> holds good-a.img,
+                                     good-b.img, no-confirm-a.img, no-confirm-b.img
+                                     (default out/conform/<id>)
   dagon topo push [<yaml>] [--port <name>]
                                      send the topology canonical binary to the hub
+  dagon recover <node> [--release <dgb>] [--bootcore <img>] [--port <name>]
+        [--topology <yaml>] [--pubkey <file>] [--key <file>]
+                                     rewrite a node from the release: normal transfer if
+                                     it answers, else the F401 ROM loader (boot core from
+                                     <provision_dir>/<node>/bootcore.img by default)
+  dagon sim run                      the four simulator scenarios (no hardware)
+  dagon ai topology [--in <text>] [--out <yaml>] [--model <id>]
+                                     board description (file or stdin) to topology YAML
+                                     via the Claude API, checked to 0 errors ($ANTHROPIC_API_KEY)
   dagon --help
 
 The hub is found by USB ID c0de:cafe or product \"DAGON hub\" unless --port
@@ -63,6 +84,10 @@ fn main() -> ExitCode {
         ["status", rest @ ..] => run(device::status(rest)),
         ["apply", rest @ ..] => run(device::apply(rest)),
         ["topo", "push", rest @ ..] => run(device::topo_push(rest)),
+        ["recover", rest @ ..] => run(device::recover(rest)),
+        ["conform", rest @ ..] => run(conform::command(rest)),
+        ["sim", "run", rest @ ..] => run(simrun::run(rest)),
+        ["ai", "topology", rest @ ..] => run(ai::topology(rest)),
         _ => usage_error("unknown command"),
     }
 }

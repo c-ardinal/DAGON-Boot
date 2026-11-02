@@ -66,3 +66,133 @@ button {
   clip-path: inset(50%);
   white-space: nowrap;
 }
+
+/* Shared controls. Focus never adds an outer ring: the control's own border
+   turns into a 3 px paper frame (1 px border + 2 px inside), so nothing moves.
+   The transparent outline shows up in forced-colors mode. */
+.secondary {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--s-2);
+  height: var(--h-secondary);
+  padding: 0 var(--s-5);
+  border: 1px solid var(--c-line);
+  border-radius: var(--r-m);
+  background: var(--c-ink);
+  font: 700 var(--t-body-size) / 1 var(--f-ja);
+  white-space: nowrap;
+  cursor: pointer;
+  outline: 3px solid transparent;
+  outline-offset: -3px;
+}
+.secondary[aria-expanded='true'] {
+  background: var(--c-paper);
+  color: var(--c-ink);
+}
+.secondary:focus-visible {
+  border-color: var(--c-paper);
+  box-shadow: inset 0 0 0 2px var(--c-paper);
+}
+.secondary[aria-expanded='true']:focus-visible {
+  box-shadow: inset 0 0 0 2px var(--c-ink);
+}
+/* Unavailable: L2 fill and muted text; the reason sits next to it. */
+.secondary[aria-disabled='true'] {
+  background: var(--c-layer-2);
+  color: var(--c-muted);
+  cursor: default;
+}
+@media (hover: hover) and (pointer: fine) {
+  .secondary:not([aria-expanded='true'], [aria-disabled='true']):hover {
+    background: var(--c-hover);
+  }
+}
+
+.primary {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--s-2);
+  height: var(--h-primary);
+  padding: 0 var(--s-6);
+  border: 0;
+  border-radius: var(--r-full);
+  background: var(--c-signal);
+  color: var(--c-ink);
+  font: 700 var(--t-body-size) / 1 var(--f-ja);
+  white-space: nowrap;
+  cursor: pointer;
+  outline: 3px solid transparent;
+  outline-offset: 0;
+  transition: transform var(--dur-press) var(--ease-out);
+}
+.primary:focus-visible {
+  outline-color: var(--c-paper);
+}
+.primary:active {
+  transform: scale(0.97);
+}
+.primary[aria-disabled='true'] {
+  background: var(--c-layer-2);
+  color: var(--c-muted);
+  cursor: default;
+}
+.primary .arrow {
+  transition: transform var(--dur-press) var(--ease-out);
+}
+@media (hover: hover) and (pointer: fine) {
+  .primary:not([aria-disabled='true']):hover .arrow {
+    transform: translateX(4px);
+  }
+}
+
+.chip {
+  display: inline-flex;
+  align-items: center;
+  height: var(--h-chip);
+  padding: 0 var(--s-2);
+  border: 1px solid var(--c-line);
+  border-radius: var(--r-full);
+  background: var(--c-ink);
+  color: var(--c-paper);
+  font: 700 var(--t-caption-size) / 1 var(--f-ja);
+  letter-spacing: 0.04em;
+  white-space: nowrap;
+}
+
+.skeleton {
+  display: block;
+  border-radius: var(--r-s);
+  background: var(--c-layer-2);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .primary,
+  .primary .arrow {
+    transition: none;
+  }
+  .primary:active {
+    transform: none;
+  }
+}
+
+/* Printing prints only the marked part, black on white. */
+@media print {
+  html {
+    background: #fff;
+    color: #000;
+  }
+  body * {
+    visibility: hidden;
+  }
+  [data-print],
+  [data-print] * {
+    visibility: visible;
+    color: #000;
+  }
+  [data-print] {
+    position: absolute;
+    top: 0;
+    left: 0;
+  }
+}

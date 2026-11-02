@@ -10,9 +10,11 @@ export default defineConfig({
     target: 'chrome89',
     cssTarget: 'chrome89',
   },
-  server: { host: '127.0.0.1' },
+  // The sample topology is read from the repository's topology/ folder.
+  server: { host: '127.0.0.1', fs: { allow: ['..'] } },
   preview: { host: '127.0.0.1' },
   test: {
     include: ['src/**/*.test.ts'],
+    setupFiles: ['src/wasm/test-setup.ts'],
   },
 });

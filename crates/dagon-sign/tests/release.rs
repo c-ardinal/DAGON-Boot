@@ -280,17 +280,73 @@ fn f401_flash_places_bootcore_log_and_app() {
     assert_eq!(&bin[0x2_0000..], &app[..]);
 }
 
+/// Sector start address -> UF2 block indices that write into it.
+fn uf2_sectors(uf2: &[u8]) -> std::collections::BTreeMap<u32, Vec<u32>> {
+    let word = |b: &[u8], i: usize| u32::from_le_bytes(b[i * 4..i * 4 + 4].try_into().unwrap());
+    let mut m = std::collections::BTreeMap::<u32, Vec<u32>>::new();
+    for b in uf2.chunks(512) {
+        m.entry(word(b, 3) & !0xFFF).or_default().push(word(b, 5));
+    }
+    m
+}
+
+#[test]
+fn rescue_uf2_writes_whole_sectors_in_aligned_runs() {
+    // stage0 ending mid-sector, as a real build does.
+    let stage0 = vec![0xA5; 0x3954];
+    let boot = sign_image(
+        &spec(
+            "rp2040",
+            image_kind::BOOTCORE,
+            0,
+            "hub-rp2040-lcd",
+            Version::new(1, 0, 0),
+        ),
+        &body(0),
+        &key(),
+    )
+    .unwrap();
+    let app = sign_image(
+        &spec(
+            "rp2040",
+            image_kind::APP,
+            0,
+            "hub-rp2040-lcd",
+            Version::new(1, 0, 0),
+        ),
+        &body(1),
+        &key(),
+    )
+    .unwrap();
+    let bs = image::slot("rp2040", image_kind::BOOTCORE, 0).unwrap();
+    let as_ = image::slot("rp2040", image_kind::APP, 0).unwrap();
+    let uf2 = provision::hub_rescue_uf2(&stage0, (&bs, &boot), (&as_, &app));
+    let sectors = uf2_sectors(&uf2);
+    assert!(sectors.contains_key(&0x1000_3000), "stage0 tail sector");
+    for (s, blocks) in &sectors {
+        let first = blocks[0];
+        assert_eq!(blocks.len(), 16, "sector {s:#x} written whole");
+        assert_eq!(first % 16, 0, "sector {s:#x} starts at block {first}");
+        assert!(
+            blocks.iter().zip(first..).all(|(b, i)| *b == i),
+            "{s:#x} consecutive"
+        );
+    }
+    let total = u32::from_le_bytes(uf2[24..28].try_into().unwrap());
+    assert_eq!(total as usize, uf2.len() / 512);
+}
+
 #[test]
 fn uf2_blocks_are_well_formed() {
     let mut f = FlashImage::default();
     f.put(0x1000_0000, &[1; 300]);
     let uf2 = f.to_uf2(UF2_FAMILY_RP2040);
-    assert_eq!(uf2.len(), 2 * 512);
+    assert_eq!(uf2.len(), 16 * 512, "one whole 4 KiB sector");
     let word = |b: &[u8], i: usize| u32::from_le_bytes(b[i * 4..i * 4 + 4].try_into().unwrap());
     let second = &uf2[512..];
     assert_eq!(word(second, 0), 0x0A32_4655);
     assert_eq!(word(second, 3), 0x1000_0100, "target address");
-    assert_eq!((word(second, 5), word(second, 6)), (1, 2), "block 1 of 2");
+    assert_eq!((word(second, 5), word(second, 6)), (1, 16), "block 1 of 16");
     assert_eq!(word(second, 7), UF2_FAMILY_RP2040);
     assert_eq!(&second[32..32 + 44], &[1; 44]);
     assert_eq!(second[32 + 44], 0xFF);

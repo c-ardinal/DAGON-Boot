@@ -611,3 +611,62 @@ fn failed_compaction_erase_keeps_the_active_face() {
         .unwrap();
     assert_eq!(Log::load(&mut f, &LOG).unwrap().generation, before.0 + 1);
 }
+
+/// Flash whose `n`-th write from now fails (0 = the next one).
+struct FailingWrite {
+    mem: Mem,
+    fail_in: Option<usize>,
+}
+
+impl Flash for FailingWrite {
+    fn geometry(&self) -> &[FlashRegion] {
+        &[]
+    }
+    fn read(&mut self, addr: u32, buf: &mut [u8]) -> Result<(), FlashError> {
+        self.mem.read(addr, buf)
+    }
+    fn erase(&mut self, addr: u32, len: u32) -> Result<(), FlashError> {
+        self.mem.erase(addr, len)
+    }
+    fn write(&mut self, addr: u32, data: &[u8]) -> Result<(), FlashError> {
+        match self.fail_in {
+            Some(0) => {
+                self.fail_in = None;
+                Err(FlashError::Hw)
+            }
+            Some(n) => {
+                self.fail_in = Some(n - 1);
+                self.mem.write(addr, data)
+            }
+            None => self.mem.write(addr, data),
+        }
+    }
+}
+
+#[test]
+fn failed_compaction_write_keeps_the_active_face() {
+    // The torn tail leaves A confirmed only: compaction writes SNAPSHOT, then
+    // the face header.
+    for fail_in in 0..2 {
+        let mut m = with_pending_b();
+        let rec3 = LOG.faces[0] + 32 + 2 * 32;
+        let byte = m.bytes[(rec3 + 8 - BASE) as usize];
+        m.put(rec3 + 8, &[byte ^ 1]);
+        let mut f = FailingWrite {
+            mem: m,
+            fail_in: Some(fail_in),
+        };
+        let mut log = Log::load(&mut f, &LOG).unwrap();
+        let before = (log.generation, log.state);
+        let a = log.state.confirmed.unwrap();
+        assert!(log
+            .append(&mut f, kind::CONFIRMED, a, reason::NONE)
+            .is_err());
+        assert_eq!((log.generation, log.state), before, "fail_in {fail_in}");
+        let again = Log::load(&mut f, &LOG).unwrap();
+        assert_eq!((again.generation, again.state), before);
+        log.append(&mut f, kind::CONFIRMED, a, reason::NONE)
+            .unwrap();
+        assert_eq!(Log::load(&mut f, &LOG).unwrap().generation, before.0 + 1);
+    }
+}

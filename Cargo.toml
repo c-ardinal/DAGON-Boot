@@ -1,6 +1,7 @@
 [workspace]
 resolver = "2"
-members = ["crates/*"]
+# f401-node: host-testable logic of the F401 app (the app itself is thumb-only).
+members = ["crates/*", "targets/f401-node"]
 exclude = ["targets/esp32s3-*"]
 
 [workspace.package]

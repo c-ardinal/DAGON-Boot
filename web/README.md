@@ -10,7 +10,7 @@ Needs the `wasm32-unknown-unknown` Rust target (listed in `rust-toolchain.toml`)
 
 ```sh
 npm install
-npm run wasm      # build crates/dagon-wasm into src/wasm/pkg (also run before dev, build and test)
+npm run wasm      # build crates/dagon-wasm into src/wasm/pkg (needs DAGON_PUBKEY; see Release key)
 npm run dev       # http://127.0.0.1:5173
 npm run build     # svelte-check, then vite build into dist/ (target chrome89)
 npm run preview   # serves dist/ on http://127.0.0.1:4173
@@ -55,10 +55,18 @@ steps belong to `dagon-host`, which will receive a `Transport` through `dagon-wa
 
 ## Release key
 
-The page checks releases (and `apply` verifies them) with a public key built into `dagon-wasm`:
-set `DAGON_PUBKEY` to the `.pub` file from `dagon key gen` (or its 64 hex digits) when running
-`npm run wasm` / `dev` / `build`, the same key the CLI and the boards use. Unset, the build warns
-and uses the public RFC 8032 test key.
+The page checks releases (and `apply` verifies them) with a public key built into `dagon-wasm`.
+For real use set `DAGON_PUBKEY` to the `.pub` file from `dagon key gen` (or its 64 hex digits),
+the same key the CLI and the boards use, before `npm run wasm` / `build` / `dev`:
+
+```sh
+DAGON_PUBKEY=../keys/dagon.pub npm run build
+```
+
+Without it `npm run wasm` and `npm run build` stop. `npm test` and `npm run dev` build with
+`DAGON_ALLOW_TEST_KEY=1` (`npm run wasm:test-key`): when `DAGON_PUBKEY` is unset they use the
+public RFC 8032 test key, which the stand-in hub's release (`crates/dagon-sim/fixtures`) is
+signed with, and the build warns.
 
 ## Web Serial on http://127.0.0.1
 

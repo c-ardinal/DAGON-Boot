@@ -44,7 +44,7 @@ pub fn hub_config(pubkey: [u8; 32]) -> Config {
         pubkey,
         mcu_id: mcu_id::RP2040,
         port_kind: port_kind::SELF_BOOT,
-        target_tag: target_tag("hub-rp2040"),
+        target_tag: target_tag("hub-rp2040-lcd"),
         role: role::HUB,
         mode: mode::APP,
         max_payload: max_payload::USB as u16,

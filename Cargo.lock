@@ -221,6 +221,18 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "00d174d5400e5e8fd687ad1049e2f578285fa914201b1af7e8b112a4546bd826"
 
 [[package]]
+name = "f401-node"
+version = "0.0.0"
+dependencies = [
+ "dagon-agent",
+ "dagon-core",
+ "dagon-format",
+ "dagon-port",
+ "dagon-proto",
+ "ed25519-compact",
+]
+
+[[package]]
 name = "getrandom"
 version = "0.4.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"

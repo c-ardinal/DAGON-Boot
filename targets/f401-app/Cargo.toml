@@ -11,15 +11,18 @@ publish = false
 [features]
 # Link for APP-B (0x08040200) instead of APP-A (0x08020200).
 slot-b = []
-# Confirm the own trial at start-up and feed the watchdog.
+# Confirm the own trial at start-up (bench use without a hub).
 confirm = []
 
 [dependencies]
-dagon-core = { path = "../../crates/dagon-core" }
+dagon-agent = { path = "../../crates/dagon-agent" }
 dagon-format = { path = "../../crates/dagon-format" }
-dagon-port = { path = "../../crates/dagon-port" }
+dagon-proto = { path = "../../crates/dagon-proto" }
 f401-board = { path = "../f401-board" }
-embassy-stm32 = { version = "0.6.0", features = ["stm32f401re", "time-driver-any", "defmt"] }
+f401-node = { path = "../f401-node" }
+# unstable-pac: NACK the own address (I2C CR1.ACK) while a request runs.
+embassy-stm32 = { version = "0.6.0", features = ["stm32f401re", "time-driver-any", "defmt", "unstable-pac"] }
+embassy-futures = "0.1"
 embassy-executor = { version = "0.10", features = ["platform-cortex-m", "executor-thread", "defmt"] }
 embassy-time = { version = "0.5", features = ["defmt"] }
 cortex-m = { version = "0.7", features = ["critical-section-single-core"] }
@@ -27,6 +30,8 @@ cortex-m-rt = "0.7"
 defmt = "1"
 defmt-rtt = "1"
 panic-probe = { version = "1", features = ["print-defmt"] }
+# Smaller verifier code (the agent checks image signatures).
+ed25519-compact = { version = "2.6", default-features = false, features = ["opt_size"] }
 
 [profile.release]
 opt-level = "z"

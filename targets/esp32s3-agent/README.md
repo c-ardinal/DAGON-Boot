@@ -28,6 +28,37 @@ in on. Built on `targets/esp32s3-port`.
 - Known limit: otadata keeps no image digest, so a slot re-received after a
   rollback keeps showing 5 until it is set pending again.
 
+## Factory recovery agent
+
+`factory` is the same agent over the same receiver, answering HELLO with
+mode 3. The 2nd stage boots it when otadata selects nothing bootable (blank,
+or the only trial aborted). It verifies each image like the app does (header
+signature, key, `mcu_id`, `target_tag` at the last XFER_HDR, before
+anything is erased; body SHA-256 at XFER_END, before the header is written)
+and receives into ota_0 or ota_1; SET_PENDING, REBOOT and CONFIRM then hand
+over to the app. Factory itself is never a receive target: it is only
+rewritten through the ROM loader.
+
+## ROM entry (ENTER_ROM, cmd 0x24)
+
+Both binaries answer ENTER_ROM `method` u8 with OK, then switch to the ESP32
+ROM download mode (E_ARG for other methods, nothing happens):
+
+- method 1: sets `RTC_CNTL_OPTION1_REG.FORCE_DOWNLOAD_BOOT` and does a
+  software reset (the RTC domain keeps the bit). If the bit does not read
+  back, it goes on with method 2.
+- method 2: sends the M5PM1 power manager the Download command
+  (`SYS_CMD` 0x0C) on the internal I2C (G47/G48).
+- If neither takes, the node resets normally and the agent answers again; the
+  PC then tries method 2.
+
+The watch has no external reset and its strapping pins are only sampled at a
+chip reset, so holding G0 low from outside does not reach the ROM loader:
+this cooperative path (or the power button held about 2 s) is the only one.
+Not yet checked on the watch: that the ROM loader listens on the rear UART0
+after method 1, and the M5PM1 I2C address (0x6E) and command byte (0xA3)
+used by method 2. A broken ESP-IDF 2nd stage cannot be recovered this way.
+
 ## Trial watchdog
 
 The RTC WDT (4 s) runs from start-up and the serving loop feeds it. On trial
@@ -116,3 +147,23 @@ above made with `DAGON_PUBKEY` set to the signing key's public key, and the
 
 The 2nd stage prints its boot log on UART0 and USB at every reset; the frame
 cutter skips it.
+
+## Conformance run through the hub (rear UART)
+
+The result that counts is the run through the hub. Same images and first
+install as above (steps 1 to 4, over USB-C), then:
+
+1. Wiring: hub PIO UART GPIO26 (TX) to the watch's rear G44 (RX), hub GPIO27
+   (RX) to rear G43 (TX), and GND. 115200 8N1. The app routes the rear pins
+   to UART0 at start-up.
+2. Charge the watch, unplug USB-C (rear UART and USB are not used at the same
+   time); the watch runs on its battery.
+3. With the hub app on USB to the PC: `dagon conform --node watch` (the node
+   id from the topology), images as in step 5 above. The hub relays every
+   request over the PIO UART, so `max_payload` matches the UART link.
+   Expected as above; the run leaves the watch on the other slot, confirmed.
+4. Factory path: select factory (blank otadata, for example by
+   `espflash erase-region 0xD000 0x2000` over USB-C), plug out USB-C again,
+   then `dagon recover watch`: HELLO answers mode 3, the image goes into
+   ota_0 or ota_1, SET_PENDING, REBOOT, and the app answers mode 0 on trial
+   until CONFIRM.

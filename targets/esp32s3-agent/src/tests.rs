@@ -15,7 +15,7 @@ use dagon_port::{Flash, FlashError, FlashRegion, Watchdog};
 use dagon_proto::payload::{target::APP, SlotState};
 
 /// NOR flash: erase sets 0xFF, a write needs aligned, erased bytes.
-struct FakeFlash(Vec<u8>);
+pub(crate) struct FakeFlash(pub(crate) Vec<u8>);
 
 impl Flash for FakeFlash {
     fn geometry(&self) -> &[FlashRegion] {
@@ -49,9 +49,9 @@ impl Flash for FakeFlash {
 }
 
 /// otadata plus the 2nd stage's choice at reset.
-struct FakeOta {
-    entries: [[u8; ENTRY_LEN]; 2],
-    running: u8,
+pub(crate) struct FakeOta {
+    pub(crate) entries: [[u8; ENTRY_LEN]; 2],
+    pub(crate) running: u8,
 }
 
 fn set_state(e: &mut [u8; ENTRY_LEN], state: u32) {
@@ -69,7 +69,7 @@ impl FakeOta {
     /// Rollback-enabled 2nd stage: highest bootable seq; New becomes
     /// PendingVerify (trial), PendingVerify left over becomes Aborted and the
     /// next one is tried; nothing bootable boots factory.
-    fn boot(&mut self) {
+    pub(crate) fn boot(&mut self) {
         loop {
             let pick = (0..2)
                 .filter_map(|i| Counted::of(&self.entries[i]).map(|c| (i, c)))
@@ -119,7 +119,7 @@ impl Otadata for FakeOta {
 }
 
 #[derive(Default)]
-struct Feeds(u32);
+pub(crate) struct Feeds(u32);
 
 impl Watchdog for Feeds {
     fn start(&mut self, _: u32) {}
@@ -128,9 +128,9 @@ impl Watchdog for Feeds {
     }
 }
 
-type Store = EspStore<FakeFlash, FakeOta, Feeds>;
+pub(crate) type Store = EspStore<FakeFlash, FakeOta, Feeds>;
 
-fn store() -> Store {
+pub(crate) fn store() -> Store {
     EspStore::new(
         FakeFlash(vec![0xFF; FLASH_SIZE as usize]),
         FakeOta::blank(),

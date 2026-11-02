@@ -12,6 +12,7 @@
 //! `DAGON_TARGET_TAG` (default `watch-s3`).
 #![cfg_attr(not(test), no_std)]
 
+pub mod rom;
 pub mod store;
 pub mod trial;
 
@@ -104,3 +105,5 @@ const fn tag16(s: &str) -> [u8; 16] {
 
 #[cfg(test)]
 mod tests;
+#[cfg(test)]
+mod tests_factory;

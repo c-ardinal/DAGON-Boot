@@ -171,6 +171,7 @@ dependencies = [
  "dagon-format",
  "dagon-port",
  "dagon-proto",
+ "ed25519-compact",
  "esp-bootloader-esp-idf",
  "esp-hal",
 ]

@@ -2,6 +2,8 @@
 //! Serial/JTAG go to the agent (and, in a conformance build, CONF_RUN to the
 //! node-side tests); the reply goes back on the link the request came in on.
 //! The loop feeds the RTC WDT, bounded by [`TRIAL_FEED_MS`] while on trial.
+//! ENTER_ROM is answered here, then the node switches to the ROM loader
+//! ([`crate::rom`]).
 
 use core::cell::RefCell;
 
@@ -19,6 +21,9 @@ use dagon_port::{BootSelectV, Reset, Watchdog};
 use dagon_proto::payload::SlotState;
 use esp_bootloader_esp_idf::partitions::FlashStorage;
 use esp_hal::{
+    delay::Delay,
+    i2c::master::{Config as I2cConfig, Error as I2cError, I2c},
+    peripherals::{GPIO47, GPIO48, I2C0, LPWR},
     rtc_cntl::Rtc,
     time::{Duration, Instant},
     uart::Uart,
@@ -26,11 +31,22 @@ use esp_hal::{
     Blocking,
 };
 
+use crate::rom::{self, Method};
 use crate::store::{EspStore, Otadata};
 use crate::trial::{TrialWatchdog, TRIAL_FEED_MS};
 
 /// Give up on a USB reply after this long (host stopped reading).
 const USB_SEND_TIMEOUT: Duration = Duration::from_millis(200);
+/// Time the M5PM1 gets to reset the chip into download mode.
+const M5PM1_WAIT_MS: u32 = 1000;
+
+/// Internal SYS I2C (M5IOE1 expander, M5PM1 power manager), kept for
+/// ENTER_ROM method 2 after the rear pins are routed.
+struct SysBus<'d> {
+    i2c0: I2C0<'d>,
+    sda: GPIO47<'d>,
+    scl: GPIO48<'d>,
+}
 
 type Store<'a, 'd> =
     EspStore<EspFlash<'a, 'd>, EspBootSelect<'a, 'd>, TrialWatchdog<RtcWatchdog, EspClock>>;
@@ -73,8 +89,13 @@ pub fn run(mode: u8) -> ! {
     let mut rwdt = RtcWatchdog::new(Rtc::new(p.RTC_TIMER).rwdt);
     rwdt.start(TRIAL_WDT_MS);
 
+    let mut sys = SysBus {
+        i2c0: p.I2C0,
+        sda: p.GPIO47,
+        scl: p.GPIO48,
+    };
     // Without the expander the rear pins stay at their default (UART).
-    let _ = board::route_rear_uart(p.I2C0, p.GPIO47, p.GPIO48);
+    let _ = board::route_rear_uart(sys.i2c0.reborrow(), sys.sda.reborrow(), sys.scl.reborrow());
     let mut uart = board::rear_uart(p.UART0, p.GPIO43, p.GPIO44);
     let mut usb = UsbSerialJtag::new(p.USB_DEVICE);
 
@@ -107,7 +128,7 @@ pub fn run(mode: u8) -> ! {
             Ok(1) => {
                 if let Some(f) = uart_rx.push(b[0]) {
                     last = Instant::now();
-                    serve(&mut agent, f, &mut |r| uart_send(&mut uart, r));
+                    serve(&mut agent, &mut sys, f, &mut |r| uart_send(&mut uart, r));
                 }
             }
             Ok(_) => {}
@@ -117,14 +138,29 @@ pub fn run(mode: u8) -> ! {
         if let Ok(byte) = usb.read_byte() {
             if let Some(f) = usb_rx.push(byte) {
                 last = Instant::now();
-                serve(&mut agent, f, &mut |r| usb_send(&mut usb, r));
+                serve(&mut agent, &mut sys, f, &mut |r| usb_send(&mut usb, r));
             }
         }
     }
 }
 
-/// Answers one request frame; resets after the reply to REBOOT.
-fn serve(agent: &mut Node<'_, '_>, frame: &[u8], send: &mut dyn FnMut(&[u8])) {
+/// Answers one request frame; resets after the reply to REBOOT, switches to
+/// the ROM loader after the reply to ENTER_ROM.
+fn serve(
+    agent: &mut Node<'_, '_>,
+    sys: &mut SysBus<'_>,
+    frame: &[u8],
+    send: &mut dyn FnMut(&[u8]),
+) {
+    let mut rom_reply = [0u8; rom::REPLY_LEN];
+    let max = dagon_proto::max_payload::UART;
+    if let Some((n, method)) = rom::enter_rom_request(frame, max, &mut rom_reply) {
+        send(&rom_reply[..n]);
+        if let Some(m) = method {
+            enter_rom(m, sys);
+        }
+        return;
+    }
     #[cfg(feature = "conform")]
     {
         let mut out = [0u8; dagon_conform::node::RESPONSE_MAX];
@@ -177,6 +213,32 @@ fn conform(agent: &mut Node<'_, '_>, frame: &[u8], out: &mut [u8]) -> Option<usi
     };
     let (flash, wdt) = (&mut store.flash, &mut store.wdt);
     handle_frame(frame, max, flash, &setup, out, &mut || wdt.feed())
+}
+
+/// Method 1, falling back to method 2 when the force bit does not read back;
+/// when neither takes, a normal reset brings the agent back.
+fn enter_rom(method: Method, sys: &mut SysBus<'_>) -> ! {
+    if method == Method::ForceDownloadBoot {
+        let rtc = LPWR::regs();
+        rtc.option1()
+            .modify(|_, w| w.force_download_boot().set_bit());
+        if rtc.option1().read().force_download_boot().bit_is_set() {
+            // A software reset keeps the RTC domain, so the ROM sees the bit.
+            esp_hal::system::software_reset();
+        }
+    }
+    if m5pm1_download(sys).is_ok() {
+        Delay::new().delay_millis(M5PM1_WAIT_MS);
+    }
+    esp_hal::system::software_reset()
+}
+
+fn m5pm1_download(sys: &mut SysBus<'_>) -> Result<(), I2cError> {
+    let mut i2c = I2c::new(sys.i2c0.reborrow(), I2cConfig::default())
+        .map_err(|_| I2cError::Timeout)?
+        .with_sda(sys.sda.reborrow())
+        .with_scl(sys.scl.reborrow());
+    i2c.write(rom::M5PM1_ADDR, &[rom::M5PM1_SYS_CMD, rom::M5PM1_DOWNLOAD])
 }
 
 fn uart_send(uart: &mut Uart<'_, Blocking>, frame: &[u8]) {

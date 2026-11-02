@@ -17,8 +17,11 @@ header signature on a node (E_SIGNATURE) with --no-host-verify. Use
 `apply --node hub` or `--node seg` to show each node refusing. Same inputs
 give byte-identical outputs.
 
-The output folder is rebuilt from a clean state on every run (only the
-cargo build cache in <out>/build is kept), the CLI itself is built into
+<out> must be a new or empty folder, or one this script made before (it
+holds the marker file .dagon-demo-data); never the repository, a folder
+containing it, or the home folder. On every run the script deletes only
+its own earlier outputs there (images/, the .dgb files, SHA256SUMS) and
+keeps the cargo build cache in <out>/build. The CLI is built into
 <out>/build/cli so nothing is written inside the repository, and the run
 stops before building anything when --key is not the secret half of
 --pubkey.
@@ -83,16 +86,39 @@ def check_key_pair(cli_output, pubkey_text):
                  "every image; pass the matching pair")
 
 
+MARKER = ".dagon-demo-data"
+TAMPERED = ("release-1.1-tampered.dgb", "release-1.1-tampered-crcfix.dgb")
+SUMS = "SHA256SUMS"
+
+
+def outputs(out):
+    """The files and folders this script writes into `out` (not the cache)."""
+    return [out / "images", *(out / r for r in VERSIONS.values()),
+            *(out / t for t in TAMPERED), out / SUMS]
+
+
+def check_out(out, root=ROOT, home=None):
+    """Exits unless `out` is safe to write into and clean (see the module help)."""
+    home = (home or pathlib.Path.home()).resolve()
+    if out == root or root in out.parents or out in root.parents:
+        sys.exit(f"--out must not be the repository, lie inside it or contain it ({root})")
+    if out == home or out in home.parents or out.parent == out:
+        sys.exit("--out must not be the home folder, one of its parents or a drive root")
+    if out.exists() and not out.is_dir():
+        sys.exit(f"--out is not a folder: {out}")
+    if out.exists() and any(out.iterdir()) and not (out / MARKER).is_file():
+        sys.exit(f"{out} is not empty and was not made by this script; pick a new folder")
+
+
 def clean_out(out):
-    """Empties `out` except the cargo build cache in out/build."""
+    """Marks `out` as this script's and deletes only its earlier outputs."""
     out.mkdir(parents=True, exist_ok=True)
-    for child in out.iterdir():
-        if child.name == "build":
-            continue
-        if child.is_dir() and not child.is_symlink():
-            shutil.rmtree(child)
-        else:
-            child.unlink()
+    (out / MARKER).write_text("output folder of scripts/demo-data.py\n")
+    for p in outputs(out):
+        if p.is_dir() and not p.is_symlink():
+            shutil.rmtree(p)
+        elif p.exists() or p.is_symlink():
+            p.unlink()
 
 
 def build(node, slot, out, pubkey):
@@ -141,8 +167,7 @@ def main():
     ap.add_argument("--topology", type=pathlib.Path, default=ROOT / "topology" / "desk-demo.yaml")
     a = ap.parse_args()
     out, key, pubkey = a.out.resolve(), a.key.resolve(), a.pubkey.resolve()
-    if out == ROOT or ROOT in out.parents:
-        sys.exit(f"--out must lie outside the repository ({ROOT})")
+    check_out(out)
     for f in (key, pubkey, a.topology):
         if not f.is_file():
             sys.exit(f"not a file: {f}")
@@ -168,10 +193,11 @@ def main():
     tamper(out / "release-1.1.dgb", out / "release-1.1-tampered.dgb", fix_crc=False)
     tamper(out / "release-1.1.dgb", out / "release-1.1-tampered-crcfix.dgb", fix_crc=True)
 
-    files = sorted(p for p in out.rglob("*") if p.is_file() and "build" not in p.relative_to(out).parts)
+    files = sorted(f for p in outputs(out) if p.name != SUMS
+                   for f in ([p] if p.is_file() else p.rglob("*")) if f.is_file())
     sums = [f"{hashlib.sha256(p.read_bytes()).hexdigest()}  {p.relative_to(out).as_posix()}"
-            for p in files if p.name != "SHA256SUMS"]
-    (out / "SHA256SUMS").write_text("\n".join(sums) + "\n")
+            for p in files]
+    (out / SUMS).write_text("\n".join(sums) + "\n")
     print("\n".join(sums))
     print(f"demo data in {out}")
 

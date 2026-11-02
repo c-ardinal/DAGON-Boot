@@ -38,23 +38,17 @@
   const mcuOf = (id: string) => d.doc.topo.nodes.find((n) => n.id === id)?.mcu ?? '';
 
   async function makeProject() {
-    await cli.saveTopology(toYaml(d.doc.topo));
+    // The project is made from the YAML: a 構成 serve did not take is not made into one.
+    const at = d.revision;
+    const r = await cli.saveTopology(toYaml(d.doc.topo));
+    d.saved(at, r);
+    if (r !== 'saved') return;
     await cli.gen(ids);
   }
 
   async function use() {
     if (!release?.release) return;
     onuse(`${release.release}.dgb`, await cli.releaseBytes(release.release));
-  }
-
-  async function download() {
-    if (!release?.release) return;
-    const bytes = await cli.releaseBytes(release.release);
-    const a = document.createElement('a');
-    a.href = URL.createObjectURL(new Blob([bytes as BlobPart]));
-    a.download = `${release.release}.dgb`;
-    a.click();
-    URL.revokeObjectURL(a.href);
   }
 </script>
 
@@ -155,7 +149,6 @@
         <h3><span class="n">04</span>{RELEASE_STEPS.steps[3]}</h3>
         <div class="actions">
           <button class="primary" aria-disabled={!release?.release} onclick={() => void use()}>{RELEASE_STEPS.useInOperate}</button>
-          <button class="secondary" aria-disabled={!release?.release} onclick={() => void download()}>{RELEASE_STEPS.download}</button>
         </div>
       </li>
     </ol>

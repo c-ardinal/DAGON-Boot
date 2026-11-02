@@ -35,7 +35,6 @@ describe('operating mode against the desk hub', () => {
 
     await op.push();
     expect(op.state).toBe('L12');
-    expect(op.sent).toBe(true);
     expect(t.received).toEqual(topo_compile(DESK_DEMO.yaml));
   }, 20_000);
 
@@ -81,12 +80,22 @@ describe('operating mode against the desk hub', () => {
     expect(op.state).toBe('L09');
   }, 20_000);
 
-  test('a placed sample, then connecting: send first', async () => {
-    const { op } = session();
-    op.placeSample();
+  // Superseded: connecting with a 構成 used to stop at L09 ("send first") until this page had sent it.
+  // The project's YAML is the one source of truth (owner 11/3): connecting goes straight to watching.
+  test('a 構成 on the canvas, then connecting: watching at once, nothing to send first', async () => {
+    const { t, op } = session();
+    op.useConfig(DESK_DEMO);
     expect(op.state).toBe('L02');
     await op.connect();
-    expect(op.state).toBe('L09');
+    expect(op.state).toBe('L12');
+    expect(t.received).toBeNull();
+  }, 20_000);
+
+  test('"最初からやり直す" drops the connection and the records and waits at L02', async () => {
+    const { op } = session();
+    await op.connect();
+    op.reset();
+    expect([op.state, op.config, op.file, op.live]).toEqual(['L02', null, null, {}]);
   }, 20_000);
 
   test('a device that does not answer: choose again', async () => {

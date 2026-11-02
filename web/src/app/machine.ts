@@ -11,7 +11,7 @@ export type L =
 export type Action =
   | 'copyUrl' | 'connectDiscover' | 'connect' | 'placeSample' | 'reselect' | 'reload'
   | 'push' | 'pushAgain' | 'scanAgain' | 'defineFix' | 'chooseFile' | 'useLatest'
-  | 'recover' | 'updateResponding' | 'otherFile' | 'resendFileTopology' | 'update'
+  | 'recover' | 'updateResponding' | 'otherFile' | 'update'
   | 'reconnect' | 'recoverAgain' | 'copyLog' | 'retrySample' | 'placeInDefine' | 'showJobs';
 
 /** Actions that leave this page or mode instead of moving the machine. */
@@ -21,7 +21,7 @@ export const LEAVING: ReadonlySet<Action> = new Set(['copyUrl', 'reload', 'defin
 export type Ev =
   | Exclude<Action, 'copyUrl' | 'reload' | 'defineFix' | 'copyLog' | 'placeInDefine' | 'showJobs'>
   | 'dismissed' | 'openFailed' | 'wasmFailed' | 'chosen' | 'noAnswer'
-  | 'helloDiscover' | 'helloConfigured' | 'helloUnsent' | 'scanned' | 'pushed' | 'pushFailed'
+  | 'helloDiscover' | 'helloConfigured' | 'scanned' | 'pushed' | 'pushFailed'
   | 'watchAlarm' | 'watchOk' | 'read' | 'badSource' | 'topoDiff' | 'pass'
   | 'hubTurn' | 'nodeStuck' | 'doneNoHub' | 'confirmed' | 'autoFailed' | 'reconnected' | 'revertedOnReconnect'
   | 'fixedNoRest' | 'fixedRest' | 'gaveUp' | 'rollback' | 'sampleFailed' | 'cliClaim' | 'cliReturn' | 'lost';
@@ -54,7 +54,7 @@ export const MACHINE: Record<L, Spec> = {
   L02: {
     step: (c) => (c.hasConfig ? 1 : 2),
     primary: (c) => (c.hasConfig ? 'connect' : 'connectDiscover'),
-    secondary: (c) => (c.hasConfig ? [] : ['placeSample']),
+    // The sample comes from the start screen (SC-S0), not from here (owner 11/3).
     on: { connect: 'L03', connectDiscover: 'L03', placeSample: 'L02', sampleFailed: 'L27' },
   },
   // The chooser is open: the button stays (busy) and a second press changes nothing.
@@ -63,7 +63,8 @@ export const MACHINE: Record<L, Spec> = {
   L05: { step: 1, primary: (c) => (c.failure === 'unavailable' ? 'reload' : 'connect'), on: { connect: 'L03' } },
   L06: {
     step: 1,
-    on: { noAnswer: 'L07', helloDiscover: 'L08', helloConfigured: 'L12', helloUnsent: 'L09', ...toLost },
+    // The 構成 is the project's YAML: connecting never asks whether the 親機 holds it (owner 11/3).
+    on: { noAnswer: 'L07', helloDiscover: 'L08', helloConfigured: 'L12', ...toLost },
   },
   L07: { step: 1, primary: 'reselect', on: { reselect: 'L03' } },
   L08: { step: 2, on: { scanned: 'L09', ...toLost } },
@@ -89,8 +90,9 @@ export const MACHINE: Record<L, Spec> = {
   L17: {
     step: 4,
     primary: 'otherFile',
-    secondary: ['resendFileTopology'],
-    on: { otherFile: 'L14', resendFileTopology: 'L10', ...toLost },
+    // The 構成 is replaced in 定義 (ファイルの構成を取り込む), never from here (owner 11/3).
+    secondary: ['defineFix'],
+    on: { otherFile: 'L14', ...toLost },
   },
   L18: { step: 5, primary: 'update', secondary: ['otherFile'], on: { update: 'L19', otherFile: 'L14', watchAlarm: 'L13', ...toLost } },
   L19: { step: 5, on: { hubTurn: 'L20', nodeStuck: 'L22', doneNoHub: 'L23', ...toLost } },

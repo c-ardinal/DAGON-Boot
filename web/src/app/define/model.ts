@@ -4,6 +4,7 @@
 // Validity is never decided here: topo_check (dagon-topology in WASM) does it.
 import { board_template, supported_mcus, topo_parse } from '../../wasm/pkg/dagon_wasm.js';
 import { supportedBoards, type Board } from '../../wasm/dagon.ts';
+import { INSPECT } from '../copy.ts';
 import type { Config, Link as GLink, Node as GNode, Wire } from '../sample.ts';
 
 export interface TNode {
@@ -122,8 +123,10 @@ export function emptyDoc(name = 'my-desk'): Doc {
 
 /** A YAML file as a document; throws when it is not YAML at all. */
 export function fromYaml(yaml: string, names: Record<string, string> = {}): Doc {
-  const t = topo_parse(yaml) as Topo;
-  return { topo: { buses: [], links: [], recovery: {}, ...t }, names };
+  const t = topo_parse(yaml) as Topo | null;
+  // An empty file or one that is not a mapping with nodes is not a 構成 (C09), not a crash.
+  if (!t || typeof t !== 'object' || Array.isArray(t) || !Array.isArray(t.nodes)) throw new Error('not a topology');
+  return { topo: { buses: [], links: [], recovery: {}, ...t, update: t.update ?? { order: [] } }, names };
 }
 
 const hub = (t: Topo) => t.nodes.find((n) => n.role === 'coordinator');
@@ -430,8 +433,11 @@ export function toConfig(doc: Doc, boards: Board[]): Config {
     const pn = t.nodes.find((x) => x.id === p);
     return pn?.role === 'coordinator' ? 1 : depth(p, seen) + 1;
   };
+  const mcuTable = mcus();
   const nodes: GNode[] = t.nodes.map((n, i) => {
     const b = boards.find((x) => x.id === n.board);
+    // A node chosen by MCU (no board): 「自作 · RP2040」, the MCU's name and not its id.
+    const mcuName = b?.mcuName ?? mcuTable.find((m) => m.id === n.mcu)?.name ?? n.mcu;
     const l = links.find((x) => x.to === n.id);
     const via = !l ? '' : l.kind === 'i2c' ? `I2C ${hex(l.addr)}` : l.kind === 'uart' ? `UART ${l.baud ?? ''}`.trim() : l.kind === 'can' ? 'CAN' : 'Ethernet';
     return {
@@ -439,8 +445,8 @@ export function toConfig(doc: Doc, boards: Board[]): Config {
       no: i + 1,
       name: doc.names[n.id] ?? n.id,
       role: n.role === 'coordinator' ? 'hub' : 'node',
-      product: b?.product ?? n.mcu,
-      mcu: b?.mcuName ?? n.mcu,
+      product: b?.product ?? INSPECT.boardOwn,
+      mcu: mcuName,
       via,
       reset: gpio(l?.control?.nrst),
       boot: gpio(l?.control?.boot),

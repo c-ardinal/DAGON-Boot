@@ -128,7 +128,11 @@ fn build_node(
 ) -> Result<Built, String> {
     b.validate().map_err(|e| format!("[build.{id}]: {e}"))?;
     // Resolved through symlinks and junctions; must stay in the work area.
+    // Checked through its canonical form, then passed on without the
+    // Windows `\\?\` prefix: MSVC's link.exe cannot open object files
+    // under such a --target-dir (LNK1181 for host build scripts).
     let dir = crate::paths::contained(&cfg.base, &b.package)
+        .map(crate::config::plain_path)
         .map_err(|e| format!("[build.{id}] package: {e}"))?;
     let bin = match &b.bin {
         Some(n) => n.clone(),

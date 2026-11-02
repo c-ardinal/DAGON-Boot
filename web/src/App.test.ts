@@ -1,7 +1,7 @@
 import { render } from 'svelte/server';
 import { afterEach, describe, expect, test, vi } from 'vitest';
 import App from './App.svelte';
-import { BAND, UNSUPPORTED } from './app/copy.ts';
+import { BAND, BUTTON, CANVAS, UNSUPPORTED } from './app/copy.ts';
 
 // The first paint must not depend on dagon-wasm: rendering the component
 // touches no WASM export, so a missing .wasm cannot leave the page blank.
@@ -26,11 +26,13 @@ function stubBrowser(search: string, serial: unknown) {
 afterEach(() => vi.unstubAllGlobals());
 
 describe('first paint without dagon-wasm', () => {
-  test('the empty state and its connect button render', () => {
+  test('the empty state, its sentence and its buttons render', () => {
     stubBrowser('?mock', undefined);
     const { body } = render(App);
     expect(body).toContain(BAND.M03.sentence);
-    expect(body).toContain(BAND.M03.button);
+    expect(body).toContain(CANVAS.empty);
+    expect(body).toContain(BUTTON.connectDiscover);
+    expect(body).toContain(BUTTON.placeSample);
   });
 
   test('the unsupported-browser screen renders', () => {

@@ -1,8 +1,9 @@
 //! Independent watchdog, fed by its own task only while no task has
 //! overrun the deadline of the work it is in, so a stuck task resets the
-//! node instead of hanging silently. Trial semantics: a trial image keeps
-//! feeding for [`TRIAL_FEED`] only, so without CONFIRM it resets and the
-//! boot core counts the attempt.
+//! node instead of hanging silently. A trial image is never fed: without
+//! CONFIRM it resets when the trial watchdog (4 s) runs out, and the boot
+//! core counts the attempt (rolling back after the third, about 15 s).
+//! Feeding starts once the image is confirmed.
 
 use core::cell::{Cell, RefCell};
 use core::sync::atomic::{AtomicBool, Ordering};
@@ -14,8 +15,6 @@ use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex as Cs;
 use embassy_sync::blocking_mutex::Mutex;
 use embassy_time::{Duration, Instant, Timer};
 
-/// How long a trial image keeps the watchdog fed while waiting for CONFIRM.
-const TRIAL_FEED: Duration = Duration::from_secs(30);
 const FEED_EVERY: Duration = Duration::from_millis(500);
 /// Longest a task may stay inside one piece of work.
 const BUSY_LIMIT: Duration = Duration::from_secs(5);
@@ -73,11 +72,10 @@ fn all_alive() -> bool {
         .all(|t| t.is_none_or(|until| now < until))
 }
 
-/// Feeds unless a trial is past its window. Also called right before a
-/// request and from long flash work, which is progress of its own.
+/// Feeds unless the image is on trial. Also called right before a request
+/// and from long flash work, which is progress of its own.
 pub fn keepalive() {
-    let trial_over = Instant::now() >= Instant::from_ticks(0) + TRIAL_FEED;
-    if ON_TRIAL.load(Ordering::Relaxed) && trial_over {
+    if ON_TRIAL.load(Ordering::Relaxed) {
         return;
     }
     WDT.lock(|w| {

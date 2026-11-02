@@ -11,9 +11,9 @@
 //!   watchdog task (IWDG, LED heartbeat).
 //!
 //! Watchdog: fed by its task only while no task is past the deadline of its
-//! current work. On trial it is fed for 30 s only, so an image that never
-//! gets CONFIRM resets and the boot core counts the attempt (rolling back
-//! after the last one).
+//! current work, and never while on trial: an image that does not get
+//! CONFIRM resets when the 4 s trial watchdog runs out and the boot core
+//! counts the attempt (rolling back after the third).
 //!
 //! `confirm`: confirms its own trial at start-up (bench use without a hub).
 #![no_std]

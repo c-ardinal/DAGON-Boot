@@ -181,6 +181,39 @@ pub fn selects_trial(current: &[[u8; ENTRY_LEN]; 2], sector: usize, ota_index: u
     c.slot == ota_index && c.state == raw::NEW && other.is_none_or(|o| o.seq < c.seq)
 }
 
+/// What CONFIRM has to do to otadata.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ConfirmStep {
+    /// Nothing: otadata does not select `running` (factory, or booted as the
+    /// fallback), or the entry is already final.
+    Done,
+    /// Rewrite this sector with this entry (same seq, state Valid).
+    Write(usize, [u8; ENTRY_LEN]),
+    /// The selected entry for `running` is Aborted, Invalid or unknown.
+    Refused,
+}
+
+/// CONFIRM of the running slot, counted as the 2nd stage does: the selected
+/// entry is the highest counted seq; an entry that does not count (bad CRC,
+/// erased) is ignored.
+pub fn confirm_entry(current: &[[u8; ENTRY_LEN]; 2], running: u8) -> ConfirmStep {
+    let selected = (0..2)
+        .filter_map(|i| Counted::of(&current[i]).map(|c| (i, c)))
+        .max_by_key(|(_, c)| c.seq);
+    let Some((i, c)) = selected.filter(|(_, c)| c.slot == running) else {
+        return ConfirmStep::Done;
+    };
+    match c.state {
+        raw::VALID | raw::UNDEFINED => ConfirmStep::Done,
+        raw::NEW | raw::PENDING_VERIFY => {
+            let mut e = current[i];
+            e[24..28].copy_from_slice(&raw::VALID.to_le_bytes());
+            ConfirmStep::Write(i, e)
+        }
+        _ => ConfirmStep::Refused,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -386,6 +419,35 @@ mod tests {
         let mut cur = [BLANK, unknown];
         apply(&mut cur, SLOT_A, SLOT_FACTORY);
         assert!(selects_trial(&cur, 0, SLOT_A));
+    }
+
+    #[test]
+    fn confirm_rewrites_the_running_trial_entry_despite_a_corrupt_other_sector() {
+        let pv_b = entry(2, raw::PENDING_VERIFY, seq_crc(2).to_le_bytes());
+        let mut valid_b = pv_b;
+        valid_b[24..28].copy_from_slice(&raw::VALID.to_le_bytes());
+        for other in [
+            BLANK,
+            entry(9, raw::VALID, [1, 2, 3, 4]),
+            entry(1, 0x77, seq_crc(1).to_le_bytes()),
+        ] {
+            assert_eq!(
+                confirm_entry(&[other, pv_b], SLOT_B),
+                ConfirmStep::Write(1, valid_b)
+            );
+        }
+        assert_eq!(confirm_entry(&[BLANK, valid_b], SLOT_B), ConfirmStep::Done);
+        // Booted as the fallback, or factory: nothing to confirm.
+        assert_eq!(confirm_entry(&[BLANK, pv_b], SLOT_A), ConfirmStep::Done);
+        assert_eq!(
+            confirm_entry(&[BLANK, BLANK], SLOT_FACTORY),
+            ConfirmStep::Done
+        );
+        let aborted = entry(2, raw::ABORTED, seq_crc(2).to_le_bytes());
+        assert_eq!(
+            confirm_entry(&[BLANK, aborted], SLOT_B),
+            ConfirmStep::Refused
+        );
     }
 
     #[test]

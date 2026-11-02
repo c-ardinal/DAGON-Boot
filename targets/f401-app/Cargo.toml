@@ -13,9 +13,12 @@ publish = false
 slot-b = []
 # Confirm the own trial at start-up (bench use without a hub).
 confirm = []
+# Conformance build: serves CONF_RUN (dagon-conform node-side tests).
+conform = ["dep:dagon-conform"]
 
 [dependencies]
 dagon-agent = { path = "../../crates/dagon-agent" }
+dagon-conform = { path = "../../crates/dagon-conform", optional = true }
 dagon-format = { path = "../../crates/dagon-format" }
 dagon-proto = { path = "../../crates/dagon-proto" }
 f401-board = { path = "../f401-board" }

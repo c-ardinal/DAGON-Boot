@@ -85,6 +85,7 @@ version = "0.0.0"
 dependencies = [
  "dagon-core",
  "dagon-format",
+ "dagon-port",
  "ed25519-compact",
 ]
 

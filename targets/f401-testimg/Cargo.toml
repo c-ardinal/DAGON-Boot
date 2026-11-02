@@ -10,5 +10,6 @@ publish = false
 
 [dependencies]
 dagon-core = { path = "../../crates/dagon-core" }
+dagon-port = { path = "../../crates/dagon-port" }
 dagon-format = { path = "../../crates/dagon-format" }
 ed25519-compact = { version = "2.6", default-features = false }

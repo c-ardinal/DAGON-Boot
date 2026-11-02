@@ -3,6 +3,7 @@
 
 use dagon_core::boot::SlotLayout;
 use dagon_core::log::LogLayout;
+use dagon_port::FlashRegion;
 
 /// Boot core: sectors 0-1. Its own signed header is the trailer at the end.
 pub const BOOTCORE: u32 = 0x0800_0000;
@@ -26,3 +27,24 @@ pub const MCU_ID: u16 = dagon_format::header::mcu_id::STM32F401XE;
 pub const MAX_ATTEMPTS: u8 = 3;
 pub const TRIAL_WDT_MS: u32 = 4_000;
 pub const CONFIRMED_WDT_MS: u32 = 8_000;
+
+/// Regions DAGON may erase and write (the flash port's geometry, and the
+/// layout a conformance build declares): the two log faces and the two APP
+/// slots. Reads are allowed anywhere in flash; the boot core sectors are
+/// never erased or written through the port.
+pub const FLASH_REGIONS: [FlashRegion; 2] = [
+    FlashRegion {
+        start: LOG.faces[0],
+        len: 2 * LOG.face_len,
+        erase_size: LOG.face_len,
+        write_size: 4,
+        erased_value: 0xFF,
+    },
+    FlashRegion {
+        start: SLOTS.slots[0],
+        len: 2 * SLOTS.slot_len,
+        erase_size: SLOTS.slot_len,
+        write_size: 4,
+        erased_value: 0xFF,
+    },
+];

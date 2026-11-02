@@ -13,4 +13,5 @@ dagon-port = { path = "../../crates/dagon-port" }
 dagon-proto = { path = "../../crates/dagon-proto" }
 
 [dev-dependencies]
+dagon-conform = { path = "../../crates/dagon-conform" }
 ed25519-compact = { version = "2.6", default-features = false }

@@ -199,6 +199,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "dagon-conform"
+version = "0.0.0"
+dependencies = [
+ "dagon-agent",
+ "dagon-core",
+ "dagon-format",
+ "dagon-port",
+ "dagon-proto",
+]
+
+[[package]]
 name = "dagon-core"
 version = "0.0.0"
 dependencies = [
@@ -652,6 +663,7 @@ dependencies = [
  "cortex-m",
  "cortex-m-rt",
  "dagon-agent",
+ "dagon-conform",
  "dagon-format",
  "dagon-proto",
  "defmt 1.2.0",

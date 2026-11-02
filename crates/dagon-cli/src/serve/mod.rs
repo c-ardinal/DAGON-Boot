@@ -111,11 +111,21 @@ fn open_command(file: &Path) -> (&'static str, Vec<std::ffi::OsString>) {
     }
 }
 
+/// Creates `path` (never over an existing file or link), readable by the
+/// owner only on Unix; the per-user temporary folder covers Windows.
+fn write_private(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
+    let mut o = std::fs::OpenOptions::new();
+    o.write(true).create_new(true);
+    #[cfg(unix)]
+    std::os::unix::fs::OpenOptionsExt::mode(&mut o, 0o600);
+    o.open(path)?.write_all(bytes)
+}
+
 fn open_browser(url: &str) {
     let name = passphrase().map(|r| format!("dagon-open-{}.html", &r[..12]));
     let file = name.map(|n| std::env::temp_dir().join(n));
     let opened = file.as_ref().is_ok_and(|f| {
-        std::fs::write(f, launcher_page(url)).is_ok() && {
+        write_private(f, launcher_page(url).as_bytes()).is_ok() && {
             let (prog, args) = open_command(f);
             std::process::Command::new(prog).args(args).spawn().is_ok()
         }

@@ -29,7 +29,10 @@ pub fn contained(base: &Path, path: &Path) -> Result<PathBuf, String> {
     } else {
         base.join(path)
     };
-    for c in full.components() {
+    // Only the part below the work area is checked: the work area itself
+    // may sit anywhere.
+    let below = full.strip_prefix(base).unwrap_or(&full);
+    for c in below.components() {
         if let Component::Normal(n) = c {
             if device_name(&n.to_string_lossy()) {
                 return Err("device names are not allowed in paths".into());
@@ -99,6 +102,20 @@ mod tests {
         let d = area("dev");
         assert!(contained(&d.join("in"), Path::new("sub/NUL")).is_err());
         let _ = std::fs::remove_dir_all(&d);
+    }
+
+    #[test]
+    fn device_names_above_the_work_area_do_not_count() {
+        // A work area under a folder named like a device is still usable:
+        // only parts below the work area are checked. (Windows cannot make
+        // such a folder, so the check is on the path text.)
+        let base = PathBuf::from("/srv/aux.d/area");
+        let full = base.join("out/x");
+        let below = full.strip_prefix(&base).unwrap();
+        assert!(below
+            .components()
+            .all(|c| !device_name(&c.as_os_str().to_string_lossy())));
+        assert!(device_name("aux.d"));
     }
 
     #[test]

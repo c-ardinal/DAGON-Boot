@@ -336,6 +336,9 @@ mod tests {
         assert!(with(&|b| b.package = PathBuf::from("C:/abs")).is_err());
         assert!(with(&|b| b.features = vec!["a,b".into()]).is_err());
         assert!(with(&|b| b.bin = Some("x y".into())).is_err());
+        // A name cargo would read as an option.
+        assert!(with(&|b| b.bin = Some("--offline".into())).is_err());
+        assert!(with(&|b| b.features = vec!["-x".into()]).is_err());
         assert!(with(&|b| b.version = Some("one".into())).is_err());
     }
 

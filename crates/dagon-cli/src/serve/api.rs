@@ -297,7 +297,7 @@ fn sha_hex(b: &[u8]) -> String {
 /// Signs the built applications of `nodes` with the CLI's key.
 fn job_sign(job: &mut Job, cfg: Config, v: Value) -> Result<Value, String> {
     let nodes = nodes_of(&v).map_err(|_| "nodes must be node ids".to_string())?;
-    let t = read_topology(&cfg.topology_path(None)?)?;
+    let t = read_topology(&inside(&cfg, &cfg.topology_path(None)?)?)?;
     let key = serve_key()?;
     let cancel = job.cancel_flag();
     sign_nodes(&cfg, &t, &nodes, &key, &mut |l| job.log(l), &cancel)
@@ -380,7 +380,7 @@ fn job_release(job: &mut Job, cfg: Config, v: Value) -> Result<Value, String> {
     let name = v["name"].as_str().filter(|n| plain(n) && n.len() <= 16);
     let name = name.ok_or("name must be up to 16 plain characters")?;
     let want = version(v["version"].as_str().ok_or("version is required")?)?;
-    let t = read_topology(&cfg.topology_path(None)?)?;
+    let t = read_topology(&inside(&cfg, &cfg.topology_path(None)?)?)?;
     let key = serve_key()?;
     let cancel = job.cancel_flag();
     release_from(&cfg, &t, want, name, &key, &mut |l| job.log(l), &cancel)
@@ -471,7 +471,7 @@ fn job_conform(job: &mut Job, cfg: Config, v: Value) -> Result<Value, String> {
         .as_str()
         .filter(|n| plain(n))
         .ok_or("node is required")?;
-    let t = read_topology(&cfg.topology_path(None)?)?;
+    let t = read_topology(&inside(&cfg, &cfg.topology_path(None)?)?)?;
     let to = crate::conform::node_target(&t, node)?;
     let dir = inside(&cfg, &cfg.base.join(CONFORM_DIR).join(node))?;
     let key = serve_key()?;

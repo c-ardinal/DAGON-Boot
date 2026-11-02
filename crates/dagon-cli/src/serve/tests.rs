@@ -292,6 +292,48 @@ fn device_jobs_wait_for_the_page_to_release_the_port() {
 }
 
 #[test]
+fn saves_replace_existing_files() {
+    // The atomic save renames over an existing file (on Windows too).
+    let a = start("replace");
+    let b = auth(&a);
+    let h = [("Authorization", b.as_str())];
+    for name in ["one", "two", "three"] {
+        let y = YAML.replace("name: sim-pair", &format!("name: {name}"));
+        assert_eq!(http(&a, "PUT", "/v1/topology", &h, y.as_bytes()).0, 200);
+        assert_eq!(
+            std::fs::read_to_string(a.dir.join("topology/t.yaml")).unwrap(),
+            y
+        );
+        let body = format!(r#"{{"package":"targets/f401-app","version":"1.0.0","bin":"{name}"}}"#);
+        assert_eq!(
+            http(&a, "PUT", "/v1/nodes/seg/build", &h, body.as_bytes()).0,
+            200
+        );
+        let toml = std::fs::read_to_string(a.dir.join("dagon.toml")).unwrap();
+        assert!(toml.contains(&format!("bin = \"{name}\"")), "{toml}");
+    }
+}
+
+#[test]
+fn the_launcher_file_is_new_and_private() {
+    let f = std::env::temp_dir().join(format!("dagon-open-t-{}.html", std::process::id()));
+    let _ = std::fs::remove_file(&f);
+    super::write_private(&f, b"x").unwrap();
+    assert!(
+        super::write_private(&f, b"y").is_err(),
+        "never over an existing file"
+    );
+    assert_eq!(std::fs::read(&f).unwrap(), b"x");
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let mode = std::fs::metadata(&f).unwrap().permissions().mode();
+        assert_eq!(mode & 0o777, 0o600);
+    }
+    let _ = std::fs::remove_file(&f);
+}
+
+#[test]
 fn the_browser_is_opened_without_the_passphrase_on_its_command_line() {
     let url = "http://127.0.0.1:5/#0123456789abcdef0123456789abcdef";
     let page = super::launcher_page(url);

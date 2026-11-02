@@ -62,6 +62,7 @@ impl BuildInputs {
         }
         let plain = |s: &str| {
             !s.is_empty()
+                && !s.starts_with('-')
                 && s.bytes()
                     .all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_')
         };
@@ -107,7 +108,7 @@ impl Config {
             None if Path::new(CONFIG_FILE).exists() => PathBuf::from(CONFIG_FILE),
             None => {
                 return Ok(Config {
-                    base: PathBuf::from("."),
+                    base: base_of(Path::new(CONFIG_FILE)),
                     ..Config::default()
                 })
             }
@@ -116,7 +117,7 @@ impl Config {
             .map_err(|e| format!("cannot read {}: {e}", path.display()))?;
         let mut c: Config =
             toml::from_str(&text).map_err(|e| format!("{}: {e}", path.display()))?;
-        let dir = path.parent().unwrap_or(Path::new("")).to_path_buf();
+        let dir = base_of(&path);
         c.base = dir.clone();
         let rel = |p: &mut PathBuf| *p = dir.join(&*p);
         c.topology.as_mut().map(rel);
@@ -143,6 +144,33 @@ impl Config {
         self.provision_dir
             .clone()
             .unwrap_or_else(|| PathBuf::from(DEFAULT_PROVISION_DIR))
+    }
+}
+
+/// The work area of config file `path`: its directory as an absolute path,
+/// so paths joined to it never depend on (or repeat) the current
+/// directory. `dagon.toml` alone gives the current directory.
+pub fn base_of(path: &Path) -> PathBuf {
+    let dir = match path.parent() {
+        Some(d) if !d.as_os_str().is_empty() => d,
+        _ => Path::new("."),
+    };
+    match std::fs::canonicalize(dir) {
+        Ok(abs) => plain_path(abs),
+        Err(_) => std::env::current_dir().map_or(dir.to_path_buf(), |c| c.join(dir)),
+    }
+}
+
+/// Windows' extended-length path prefix, as `canonicalize` returns it.
+const VERBATIM: &str = concat!('\\', '\\', '?', '\\');
+
+/// Drops the extended-length prefix from a drive path so it prints and
+/// passes to other tools as usual.
+fn plain_path(p: PathBuf) -> PathBuf {
+    let s = p.to_string_lossy();
+    match s.strip_prefix(VERBATIM) {
+        Some(rest) if rest.as_bytes().get(1) == Some(&b':') => PathBuf::from(rest),
+        _ => p,
     }
 }
 
@@ -279,6 +307,34 @@ mod tests {
         assert!(allow_key(&test, false).is_err());
         assert!(allow_key(&test, true).is_ok());
         assert!(allow_key(&[7; 32], false).is_ok());
+    }
+
+    #[test]
+    fn the_work_area_is_the_config_files_absolute_directory() {
+        let here = std::fs::canonicalize(".").unwrap();
+        let alone = base_of(Path::new("dagon.toml"));
+        assert!(alone.is_absolute());
+        assert_eq!(std::fs::canonicalize(&alone).unwrap(), here);
+        let sub = base_of(Path::new("src/dagon.toml"));
+        assert_eq!(std::fs::canonicalize(&sub).unwrap(), here.join("src"));
+        assert!(!sub.to_string_lossy().starts_with(VERBATIM));
+    }
+
+    #[test]
+    fn config_paths_join_the_work_area_once() {
+        let d = std::env::temp_dir().join(format!("dagon-cfg-{}", std::process::id()));
+        std::fs::create_dir_all(d.join("sub")).unwrap();
+        std::fs::write(
+            d.join("sub/dagon.toml"),
+            "topology = \"t.yaml\"
+",
+        )
+        .unwrap();
+        let c = Config::load(Some(&d.join("sub/dagon.toml").to_string_lossy())).unwrap();
+        assert!(c.base.is_absolute());
+        assert_eq!(c.topology.unwrap(), c.base.join("t.yaml"));
+        assert!(crate::paths::contained(&c.base, &c.base.join("t.yaml")).is_ok());
+        let _ = std::fs::remove_dir_all(&d);
     }
 
     #[test]

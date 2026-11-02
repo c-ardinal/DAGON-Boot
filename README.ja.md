@@ -20,7 +20,7 @@
 - `dagon sim run`: シミュレータ上の 4 つの通しシナリオ。転送中の電断を含む更新、確定しないイメージ、改ざんしたリリース（PC が拒否し、PC 側の検査を外すと子機が拒否）、全消去した F401 の ROM ブートローダ経由の復活。
 - `dagon conform`: `dagon-conform` の 12 件の適合試験。模擬の F401 に対し、親機経由でも直結でも 12 件すべて合格します。
 - 構成 YAML: 21 件の検証規則と対応ボードの表（`dagon-topology`）。`topology/desk-demo.yaml` はこれを通ります。
-- ファームウェア: RP2040 親機（`targets/rp2040-stage0`、`rp2040-bootcore`、`rp2040-hub`）、F401 子機（`targets/f401-bootcore`、`f401-app`）、ESP32-S3 子機（`targets/esp32s3-port`、`esp32s3-agent`、ESP-IDF の 2nd stage と組み合わせ）。実機での通しの流れは確認中です（「制限事項」を参照）。
+- ファームウェア: RP2040 親機（`targets/rp2040-stage0`、`rp2040-bootcore`、`rp2040-hub`）、F401 子機（`targets/f401-bootcore`、`f401-app`）、ESP32-S3 子機（`targets/esp32s3-port`、`esp32s3-agent`、ESP-IDF の 2nd stage と組み合わせ）。親機のファームウェアは親機の実機に書き込み済みで起動しますが、親機の実機での確認（PC との通信、表示）はまだ進行中です。F401 と ESP32-S3 のファームウェアの実機での確認と、実機での通しの流れはまだです（「制限事項」を参照）。
 - `web/` のブラウザのページ（開発中。現在できることは `web/README.md` を参照）。
 
 ## はじめかた
@@ -155,9 +155,10 @@ npm run dev       # http://127.0.0.1:5173（Chrome または Edge 89 以降、We
 - `webpki-roots` は CDLA-Permissive-2.0 です（`dagon ai topology` の TLS クライアントが使う外部データ、Mozilla のルート証明書のデータを含みます）。
 - `subtle`、`rp-pac`、`rp2040-boot2`、`source-map-js` は BSD-3-Clause です。
 - `lightningcss`（MPL-2.0）は web のビルドツールのビルド時の依存だけで、ページには何も含まれません。
+- ページに含まれる npm のコードは、Svelte のクライアント用ランタイムと、それが読み込む `clsx` と `esm-env`（いずれも MIT）だけです。他の npm パッケージはビルドとテストの道具です（表の "Ships in" 列）。
 - `web/public/fonts/` の書体は SIL Open Font License 1.1 です: Doto、DotGothic16、Zen Kaku Gothic New、JetBrains Mono（ライセンス文はファイルの隣にあります。`web/README.md` を参照）。
 
-Rust crates: 307 packages, 340 name/version pairs. "Used by": `crates/` is the host workspace, other names are firmware packages under `targets/`.
+Rust crates: 310 packages, 343 name/version pairs. "Used by": `crates/` is the host workspace, other names are firmware packages under `targets/`.
 
 | Crate | Versions | Licence | Used by |
 |---|---|---|---|
@@ -270,10 +271,10 @@ Rust crates: 307 packages, 340 name/version pairs. "Used by": `crates/` is the h
 | float-cmp | 0.9.0 | MIT | rp2040-hub |
 | fnv | 1.0.7 | Apache-2.0 / MIT | esp32s3-agent, esp32s3-port, f401-app, f401-bringup, rp2040-bringup, rp2040-hub |
 | fugit | 0.5.0 | MIT OR Apache-2.0 | esp32s3-agent, esp32s3-port |
-| futures-core | 0.3.34 | MIT OR Apache-2.0 | esp32s3-agent, esp32s3-port, f401-app, f401-board, f401-bootcore, f401-bringup, rp2040-bootcore, rp2040-bringup, rp2040-hub |
+| futures-core | 0.3.34 | MIT OR Apache-2.0 | crates/, esp32s3-agent, esp32s3-port, f401-app, f401-board, f401-bootcore, f401-bringup, rp2040-bootcore, rp2040-bringup, rp2040-hub |
 | futures-sink | 0.3.34 | MIT OR Apache-2.0 | esp32s3-agent, esp32s3-port, f401-app, f401-board, f401-bootcore, f401-bringup, rp2040-bootcore, rp2040-bringup, rp2040-hub |
-| futures-task | 0.3.34 | MIT OR Apache-2.0 | esp32s3-agent, esp32s3-port, f401-app, f401-board, f401-bootcore, f401-bringup |
-| futures-util | 0.3.34 | MIT OR Apache-2.0 | esp32s3-agent, esp32s3-port, f401-app, f401-board, f401-bootcore, f401-bringup |
+| futures-task | 0.3.34 | MIT OR Apache-2.0 | crates/, esp32s3-agent, esp32s3-port, f401-app, f401-board, f401-bootcore, f401-bringup |
+| futures-util | 0.3.34 | MIT OR Apache-2.0 | crates/, esp32s3-agent, esp32s3-port, f401-app, f401-board, f401-bootcore, f401-bringup |
 | gcd | 2.3.0 | MIT/Apache-2.0 | esp32s3-agent, esp32s3-port |
 | generator | 0.8.11 | MIT/Apache-2.0 | f401-app, f401-bringup, rp2040-bringup, rp2040-hub |
 | generic-array | 0.14.7 | MIT | esp32s3-agent, esp32s3-port, rp2040-bootcore, rp2040-bringup, rp2040-hub |
@@ -330,7 +331,7 @@ Rust crates: 307 packages, 340 name/version pairs. "Used by": `crates/` is the h
 | petgraph | 0.7.1 | MIT OR Apache-2.0 | rp2040-bootcore, rp2040-bringup, rp2040-hub |
 | phf_shared | 0.11.3 | MIT | rp2040-bootcore, rp2040-bringup, rp2040-hub |
 | pico-args | 0.5.0 | MIT | rp2040-bootcore, rp2040-bringup, rp2040-hub |
-| pin-project-lite | 0.2.17 | Apache-2.0 OR MIT | esp32s3-agent, esp32s3-port, f401-app, f401-board, f401-bootcore, f401-bringup, rp2040-bringup, rp2040-hub |
+| pin-project-lite | 0.2.17 | Apache-2.0 OR MIT | crates/, esp32s3-agent, esp32s3-port, f401-app, f401-board, f401-bootcore, f401-bringup, rp2040-bringup, rp2040-hub |
 | pio | 0.3.0 | MIT | rp2040-bootcore, rp2040-bringup, rp2040-hub |
 | pio-core | 0.3.0 | MIT | rp2040-bootcore, rp2040-bringup, rp2040-hub |
 | pio-parser | 0.3.0 | MIT | rp2040-bootcore, rp2040-bringup, rp2040-hub |
@@ -385,6 +386,7 @@ Rust crates: 307 packages, 340 name/version pairs. "Used by": `crates/` is the h
 | sharded-slab | 0.1.7 | MIT | f401-app, f401-bringup, rp2040-bringup, rp2040-hub |
 | shlex | 2.0.1 | MIT OR Apache-2.0 | crates/, f401-app, f401-bringup, rp2040-bringup, rp2040-hub |
 | siphasher | 1.0.4 | MIT OR Apache-2.0 | rp2040-bootcore, rp2040-bringup, rp2040-hub |
+| slab | 0.4.12 | MIT | crates/ |
 | smallvec | 1.16.4 | MIT OR Apache-2.0 | f401-app, f401-bringup, rp2040-bootcore, rp2040-bringup, rp2040-hub |
 | smart-leds | 0.4.0 | MIT OR Apache-2.0 | rp2040-bootcore, rp2040-bringup, rp2040-hub |
 | smart-leds-trait | 0.3.2 | MIT OR Apache-2.0 | rp2040-bootcore, rp2040-bringup, rp2040-hub |
@@ -408,6 +410,7 @@ Rust crates: 307 packages, 340 name/version pairs. "Used by": `crates/` is the h
 | thiserror | 2.0.21 | MIT OR Apache-2.0 | crates/, esp32s3-agent, esp32s3-port, f401-app, f401-bringup |
 | thiserror-impl | 2.0.21 | MIT OR Apache-2.0 | crates/, esp32s3-agent, esp32s3-port, f401-app, f401-bringup |
 | thread_local | 1.1.10 | MIT OR Apache-2.0 | f401-app, f401-bringup, rp2040-bringup, rp2040-hub |
+| tokio | 1.54.1 | MIT | crates/ |
 | toml | 0.8.23 | MIT OR Apache-2.0 | crates/ |
 | toml_datetime | 0.6.11, 1.1.2+spec-1.1.0 | MIT OR Apache-2.0 | crates/, esp32s3-agent, esp32s3-port |
 | toml_edit | 0.22.27, 0.25.17+spec-1.1.0 | MIT OR Apache-2.0 | crates/, esp32s3-agent, esp32s3-port |
@@ -442,6 +445,7 @@ Rust crates: 307 packages, 340 name/version pairs. "Used by": `crates/` is the h
 | walkdir | 2.5.0 | Unlicense/MIT | rp2040-bootcore, rp2040-bringup, rp2040-hub |
 | wasi | 0.11.1+wasi-snapshot-preview1 | Apache-2.0 WITH LLVM-exception OR Apache-2.0 OR MIT | crates/ |
 | wasm-bindgen | 0.2.130 | MIT OR Apache-2.0 | crates/ |
+| wasm-bindgen-futures | 0.4.80 | MIT OR Apache-2.0 | crates/ |
 | wasm-bindgen-macro | 0.2.130 | MIT OR Apache-2.0 | crates/ |
 | wasm-bindgen-macro-support | 0.2.130 | MIT OR Apache-2.0 | crates/ |
 | wasm-bindgen-shared | 0.2.130 | MIT OR Apache-2.0 | crates/ |
@@ -469,96 +473,96 @@ Rust crates: 307 packages, 340 name/version pairs. "Used by": `crates/` is the h
 | zeroize | 1.9.1 | Apache-2.0 OR MIT | crates/ |
 | zmij | 1.0.23 | MIT | crates/ |
 
-npm packages (`web/package-lock.json`): 86, all build and test time only except the Svelte runtime, which ships in the page.
+npm packages (`web/package-lock.json`): 86. Only those marked "page" ship in the built page (the Svelte client runtime and what it imports); the rest are build and test tools.
 
-| Package | Version | Licence |
-|---|---|---|
-| @jridgewell/gen-mapping | 0.3.13 | MIT |
-| @jridgewell/remapping | 2.3.5 | MIT |
-| @jridgewell/resolve-uri | 3.1.2 | MIT |
-| @jridgewell/sourcemap-codec | 1.6.0 | MIT |
-| @jridgewell/trace-mapping | 0.3.31 | MIT |
-| @oxc-project/types | 0.156.0 | MIT |
-| @rolldown/binding-android-arm-eabi | 1.2.16 | MIT |
-| @rolldown/binding-android-arm64 | 1.2.16 | MIT |
-| @rolldown/binding-darwin-arm64 | 1.2.16 | MIT |
-| @rolldown/binding-darwin-x64 | 1.2.16 | MIT |
-| @rolldown/binding-freebsd-x64 | 1.2.16 | MIT |
-| @rolldown/binding-linux-arm-gnueabihf | 1.2.16 | MIT |
-| @rolldown/binding-linux-arm64-gnu | 1.2.16 | MIT |
-| @rolldown/binding-linux-arm64-musl | 1.2.16 | MIT |
-| @rolldown/binding-linux-ppc64-gnu | 1.2.16 | MIT |
-| @rolldown/binding-linux-s390x-gnu | 1.2.16 | MIT |
-| @rolldown/binding-linux-x64-gnu | 1.2.16 | MIT |
-| @rolldown/binding-linux-x64-musl | 1.2.16 | MIT |
-| @rolldown/binding-openharmony-arm64 | 1.2.16 | MIT |
-| @rolldown/binding-win32-arm64-msvc | 1.2.16 | MIT |
-| @rolldown/binding-win32-x64-msvc | 1.2.16 | MIT |
-| @rolldown/pluginutils | 1.0.1 | MIT |
-| @sveltejs/acorn-typescript | 1.0.13 | MIT |
-| @sveltejs/load-config | 0.2.3 | MIT |
-| @sveltejs/vite-plugin-svelte | 7.3.1 | MIT |
-| @types/chai | 5.2.3 | MIT |
-| @types/deep-eql | 4.0.2 | MIT |
-| @types/estree | 1.0.10 | MIT |
-| @vitest/mocker | 5.0.5 | MIT |
-| @vitest/spy | 5.0.5 | MIT |
-| acorn | 8.19.0 | MIT |
-| aria-query | 5.3.1 | Apache-2.0 |
-| assertion-error | 2.0.1 | MIT |
-| axobject-query | 4.1.0 | Apache-2.0 |
-| chai | 6.3.0 | MIT |
-| chokidar | 4.0.3 | MIT |
-| clsx | 2.1.1 | MIT |
-| deepmerge | 4.3.1 | MIT |
-| detect-libc | 2.1.2 | Apache-2.0 |
-| devalue | 5.9.4 | MIT |
-| es-module-lexer | 2.3.2 | MIT |
-| esm-env | 1.2.2 | MIT |
-| esrap | 2.4.0 | MIT |
-| estree-walker | 3.0.3 | MIT |
-| expect-type | 1.4.0 | Apache-2.0 |
-| fdir | 6.5.0 | MIT |
-| fsevents | 2.3.3 | MIT |
-| is-reference | 3.0.3 | MIT |
-| lightningcss | 1.33.0 | MPL-2.0 |
-| lightningcss-android-arm64 | 1.33.0 | MPL-2.0 |
-| lightningcss-darwin-arm64 | 1.33.0 | MPL-2.0 |
-| lightningcss-darwin-x64 | 1.33.0 | MPL-2.0 |
-| lightningcss-freebsd-x64 | 1.33.0 | MPL-2.0 |
-| lightningcss-linux-arm-gnueabihf | 1.33.0 | MPL-2.0 |
-| lightningcss-linux-arm64-gnu | 1.33.0 | MPL-2.0 |
-| lightningcss-linux-arm64-musl | 1.33.0 | MPL-2.0 |
-| lightningcss-linux-x64-gnu | 1.33.0 | MPL-2.0 |
-| lightningcss-linux-x64-musl | 1.33.0 | MPL-2.0 |
-| lightningcss-win32-arm64-msvc | 1.33.0 | MPL-2.0 |
-| lightningcss-win32-x64-msvc | 1.33.0 | MPL-2.0 |
-| locate-character | 3.0.0 | MIT |
-| magic-string | 0.30.21 | MIT |
-| magic-string | 1.4.5 | MIT |
-| mri | 1.2.0 | MIT |
-| nanoid | 3.3.20 | MIT |
-| obug | 2.2.1 | MIT |
-| obug | 3.0.0 | MIT |
-| picocolors | 1.1.1 | ISC |
-| picomatch | 4.0.7 | MIT |
-| postcss | 8.5.32 | MIT |
-| readdirp | 4.1.2 | MIT |
-| rolldown | 1.2.16 | MIT |
-| sade | 1.8.1 | MIT |
-| source-map-js | 1.2.2 | BSD-3-Clause |
-| std-env | 4.3.0 | MIT |
-| svelte | 5.57.3 | MIT |
-| svelte-check | 4.7.8 | MIT |
-| tinybench | 6.2.3 | MIT |
-| tinyexec | 1.3.1 | MIT |
-| tinyglobby | 0.2.17 | MIT |
-| typescript | 6.0.3 | Apache-2.0 |
-| vite | 8.3.5 | MIT |
-| vitefu | 1.1.3 | MIT |
-| vitest | 5.0.5 | MIT |
-| why-is-node-running | 3.2.1 | MIT |
-| zimmerframe | 1.1.5 | MIT |
+| Package | Version | Licence | Ships in |
+|---|---|---|---|
+| @jridgewell/gen-mapping | 0.3.13 | MIT | build/test |
+| @jridgewell/remapping | 2.3.5 | MIT | build/test |
+| @jridgewell/resolve-uri | 3.1.2 | MIT | build/test |
+| @jridgewell/sourcemap-codec | 1.6.0 | MIT | build/test |
+| @jridgewell/trace-mapping | 0.3.31 | MIT | build/test |
+| @oxc-project/types | 0.156.0 | MIT | build/test |
+| @rolldown/binding-android-arm-eabi | 1.2.16 | MIT | build/test |
+| @rolldown/binding-android-arm64 | 1.2.16 | MIT | build/test |
+| @rolldown/binding-darwin-arm64 | 1.2.16 | MIT | build/test |
+| @rolldown/binding-darwin-x64 | 1.2.16 | MIT | build/test |
+| @rolldown/binding-freebsd-x64 | 1.2.16 | MIT | build/test |
+| @rolldown/binding-linux-arm-gnueabihf | 1.2.16 | MIT | build/test |
+| @rolldown/binding-linux-arm64-gnu | 1.2.16 | MIT | build/test |
+| @rolldown/binding-linux-arm64-musl | 1.2.16 | MIT | build/test |
+| @rolldown/binding-linux-ppc64-gnu | 1.2.16 | MIT | build/test |
+| @rolldown/binding-linux-s390x-gnu | 1.2.16 | MIT | build/test |
+| @rolldown/binding-linux-x64-gnu | 1.2.16 | MIT | build/test |
+| @rolldown/binding-linux-x64-musl | 1.2.16 | MIT | build/test |
+| @rolldown/binding-openharmony-arm64 | 1.2.16 | MIT | build/test |
+| @rolldown/binding-win32-arm64-msvc | 1.2.16 | MIT | build/test |
+| @rolldown/binding-win32-x64-msvc | 1.2.16 | MIT | build/test |
+| @rolldown/pluginutils | 1.0.1 | MIT | build/test |
+| @sveltejs/acorn-typescript | 1.0.13 | MIT | build/test |
+| @sveltejs/load-config | 0.2.3 | MIT | build/test |
+| @sveltejs/vite-plugin-svelte | 7.3.1 | MIT | build/test |
+| @types/chai | 5.2.3 | MIT | build/test |
+| @types/deep-eql | 4.0.2 | MIT | build/test |
+| @types/estree | 1.0.10 | MIT | build/test |
+| @vitest/mocker | 5.0.5 | MIT | build/test |
+| @vitest/spy | 5.0.5 | MIT | build/test |
+| acorn | 8.19.0 | MIT | build/test |
+| aria-query | 5.3.1 | Apache-2.0 | build/test |
+| assertion-error | 2.0.1 | MIT | build/test |
+| axobject-query | 4.1.0 | Apache-2.0 | build/test |
+| chai | 6.3.0 | MIT | build/test |
+| chokidar | 4.0.3 | MIT | build/test |
+| clsx | 2.1.1 | MIT | page |
+| deepmerge | 4.3.1 | MIT | build/test |
+| detect-libc | 2.1.2 | Apache-2.0 | build/test |
+| devalue | 5.9.4 | MIT | build/test |
+| es-module-lexer | 2.3.2 | MIT | build/test |
+| esm-env | 1.2.2 | MIT | page |
+| esrap | 2.4.0 | MIT | build/test |
+| estree-walker | 3.0.3 | MIT | build/test |
+| expect-type | 1.4.0 | Apache-2.0 | build/test |
+| fdir | 6.5.0 | MIT | build/test |
+| fsevents | 2.3.3 | MIT | build/test |
+| is-reference | 3.0.3 | MIT | build/test |
+| lightningcss | 1.33.0 | MPL-2.0 | build/test |
+| lightningcss-android-arm64 | 1.33.0 | MPL-2.0 | build/test |
+| lightningcss-darwin-arm64 | 1.33.0 | MPL-2.0 | build/test |
+| lightningcss-darwin-x64 | 1.33.0 | MPL-2.0 | build/test |
+| lightningcss-freebsd-x64 | 1.33.0 | MPL-2.0 | build/test |
+| lightningcss-linux-arm-gnueabihf | 1.33.0 | MPL-2.0 | build/test |
+| lightningcss-linux-arm64-gnu | 1.33.0 | MPL-2.0 | build/test |
+| lightningcss-linux-arm64-musl | 1.33.0 | MPL-2.0 | build/test |
+| lightningcss-linux-x64-gnu | 1.33.0 | MPL-2.0 | build/test |
+| lightningcss-linux-x64-musl | 1.33.0 | MPL-2.0 | build/test |
+| lightningcss-win32-arm64-msvc | 1.33.0 | MPL-2.0 | build/test |
+| lightningcss-win32-x64-msvc | 1.33.0 | MPL-2.0 | build/test |
+| locate-character | 3.0.0 | MIT | build/test |
+| magic-string | 0.30.21 | MIT | build/test |
+| magic-string | 1.4.5 | MIT | build/test |
+| mri | 1.2.0 | MIT | build/test |
+| nanoid | 3.3.20 | MIT | build/test |
+| obug | 2.2.1 | MIT | build/test |
+| obug | 3.0.0 | MIT | build/test |
+| picocolors | 1.1.1 | ISC | build/test |
+| picomatch | 4.0.7 | MIT | build/test |
+| postcss | 8.5.32 | MIT | build/test |
+| readdirp | 4.1.2 | MIT | build/test |
+| rolldown | 1.2.16 | MIT | build/test |
+| sade | 1.8.1 | MIT | build/test |
+| source-map-js | 1.2.2 | BSD-3-Clause | build/test |
+| std-env | 4.3.0 | MIT | build/test |
+| svelte | 5.57.3 | MIT | page |
+| svelte-check | 4.7.8 | MIT | build/test |
+| tinybench | 6.2.3 | MIT | build/test |
+| tinyexec | 1.3.1 | MIT | build/test |
+| tinyglobby | 0.2.17 | MIT | build/test |
+| typescript | 6.0.3 | Apache-2.0 | build/test |
+| vite | 8.3.5 | MIT | build/test |
+| vitefu | 1.1.3 | MIT | build/test |
+| vitest | 5.0.5 | MIT | build/test |
+| why-is-node-running | 3.2.1 | MIT | build/test |
+| zimmerframe | 1.1.5 | MIT | build/test |
 
 ## 自作コードの範囲
 
@@ -572,7 +576,8 @@ npm packages (`web/package-lock.json`): 86, all build and test time only except 
 
 ## 無改変のベンダーコンポーネント
 
-- ESP32-S3 の 2nd stage ブートローダ: 公式の ESP-IDF v6.1 のブートローダを、アプリのロールバックを有効にして公式のソースからビルドしたもの（`targets/esp32s3-2ndstage` で自作したのはプロジェクトのファイルと `sdkconfig.defaults` だけ）。ESP32-S3 のポートは otadata を通してスロットを選びます。
+- ESP32-S3 の 2nd stage ブートローダ: 公式の ESP-IDF v6.1 のブートローダを、アプリのロールバックを有効にして公式のソースからビルドしたもの（`targets/esp32s3-2ndstage` で自作したのはプロジェクトのファイルと `sdkconfig.defaults` だけ）。
+- `esp-bootloader-esp-idf`（crate、MIT OR Apache-2.0）: ESP32-S3 のポートが otadata の読み書きに改変せずに使っています。この 2nd stage でのスロットの選択は otadata で行います。
 - RP2040 の boot2: `rp2040-boot2` crate（BSD-3-Clause）の generic 03h の second stage を、`targets/rp2040-stage0` がフラッシュの先頭に改変せずに置いています。
 - STM32F401 の ROM にあるシステムメモリのブートローダ（文書化された I2C の手順で復旧に使います）。
 
@@ -582,5 +587,5 @@ npm packages (`web/package-lock.json`): 86, all build and test time only except 
 - 署名の鍵は PC 上のファイルで、公開鍵はファームウェアに組み込まれます。ハードウェアの信頼の起点（セキュアブートのヒューズやハードウェアの鍵保管）はありません。
 - 実機でのすべてのフラッシュ操作に対する電断の網羅的な調査はまだ行っていません。電断はシミュレータでテストしています。
 - USB の VID:PID `c0de:cafe` は試験用の ID で、割り当てを受けたものではありません。
-- 親機のハードウェア（LCD 付き RP2040）と 3 台での通しの流れは、まだ実機で確認中です。
+- F401 子機と ESP32-S3 子機のファームウェアの実機での確認はまだです。親機（LCD 付き RP2040）のファームウェアは実機に書き込み済みで起動しますが、PC との通信と表示はまだ確認中で、3 台での通しの流れも同様です。
 - `dagon conform` は同期の試験手順を動かすもので CLI 専用です。ブラウザでは適合試験を実行しません。

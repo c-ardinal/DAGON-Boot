@@ -33,6 +33,7 @@ export const FAILURE_BAND = {
   unavailable: BAND.M57,
 } as const;
 
+/** One short sentence in every operating state (W9, owner 11/2); L01 has no band (SC-00). */
 function words(s: L, c: Ctx, n: Names): BandCopy {
   switch (s) {
     case 'L02':
@@ -42,16 +43,33 @@ function words(s: L, c: Ctx, n: Names): BandCopy {
     case 'L05':
     case 'L07':
       return c.failure ? FAILURE_BAND[c.failure] : BAND.M03;
+    case 'L06':
+      return BAND.M59;
+    case 'L08':
+      return BAND.M60;
     case 'L09':
       return BAND.M10;
+    case 'L10':
+      return BAND.M61;
     case 'L11':
       return BAND.M12;
     case 'L12':
       return BAND.M13;
     case 'L13':
-      return BAND.M14;
+      return BAND.M62b;
+    case 'L14':
+    case 'L15':
+      return BAND.M63;
+    case 'L20':
+      return BAND.M64;
+    case 'L21':
+      return BAND.M26;
     case 'L22':
-      return n.unwritten && n.stuck ? BAND_FOR.M29(n.stuck) : BAND.M14;
+      return n.unwritten && n.stuck ? BAND_FOR.M29(n.stuck) : BAND.M65;
+    case 'L23':
+      return BAND.M66;
+    case 'L28':
+      return BAND.M67;
     case 'L16':
     case 'L17':
       return REFUSAL_BAND[c.refusal ?? 'source'];

@@ -1,4 +1,19 @@
-import { newFrameStream } from './frame.ts';
+import { decodeHelloResp, encodeHelloReq } from '../wasm/dagon.ts';
+import { CMD, MAX_PAYLOAD_USB, STATUS_OK, encodeFrame, newFrameStream, parseFrame } from './frame.ts';
+import { ROLE_HUB, type HelloResp } from './hello.ts';
+
+/**
+ * Why reopening the rebooted hub did not get it back (the diagnostic log
+ * under the reconnect dialog). `away`: the port the page had would not
+ * open; `none`: no other allowed device of the same kind appeared;
+ * `several`: more than one appeared and no version to tell them by;
+ * `silent`: a candidate did not answer HELLO; `notHub`: it answered as a
+ * node; `version`: a hub not on trial with the version just sent.
+ */
+export type ReconnectNote =
+  | { kind: 'away' | 'none' | 'silent' | 'notHub' }
+  | { kind: 'several'; count: number }
+  | { kind: 'version'; version: number; trial: boolean };
 
 /**
  * Frame-level link to the hub, the shape dagon-host drives (and what
@@ -13,6 +28,49 @@ export interface Transport {
   write(frame: Uint8Array): Promise<void>;
   /** Next complete, CRC-checked frame, or null when `timeoutMs` passes first. */
   read(timeoutMs: number): Promise<Uint8Array | null>;
+  /** The hub reboots onto `version` on trial: reopening it later keeps only that hub. */
+  expectHub?(version: number): void;
+  /** Why the reopens since `expectHub` did not get the hub back, oldest first. */
+  notes?(): ReconnectNote[];
+}
+
+/** The hub on trial with the version the page just sent it (dagon-host then confirms it). */
+export function isHubOnTrial(h: HelloResp | null, version: number | null): boolean {
+  return h !== null && h.role === ROLE_HUB && h.trial && h.activeVersion === version;
+}
+
+/** Why a HELLO answer is not the hub on trial with the version just sent. */
+export function whyNot(h: HelloResp | null): ReconnectNote {
+  if (h === null) return { kind: 'silent' };
+  if (h.role !== ROLE_HUB) return { kind: 'notHub' };
+  return { kind: 'version', version: h.activeVersion, trial: h.trial };
+}
+
+/** How long a candidate port has to answer HELLO. */
+const PROBE_MS = 500;
+/** Distinct reasons kept for the diagnostic log. */
+const MAX_NOTES = 8;
+
+/** HELLO on a port the page is not using yet; null when it does not open or answer as a DAGON device. */
+export async function probeHello(port: SerialPort, waitMs = PROBE_MS): Promise<HelloResp | null> {
+  const t = new WebSerialTransport(port, null);
+  try {
+    await t.open();
+  } catch {
+    return null;
+  }
+  try {
+    const req = encodeHelloReq({ protoVer: 1, maxPayload: MAX_PAYLOAD_USB });
+    await t.write(encodeFrame({ flags: 0, seq: 0, cmd: CMD.HELLO, payload: req }));
+    const raw = await t.read(waitMs);
+    const f = raw && parseFrame(raw);
+    if (!f || f.cmd !== CMD.HELLO || f.payload[0] !== STATUS_OK) return null;
+    return decodeHelloResp(f.payload.subarray(1));
+  } catch {
+    return null;
+  } finally {
+    await t.close().catch(() => undefined);
+  }
 }
 
 /** Queue of received frames with timed waits; shared by the real and mock links. */
@@ -70,25 +128,53 @@ export class WebSerialTransport implements Transport {
 
   /** Allowed ports present when this one last opened: none of them is this device coming back. */
   private known = new Set<SerialPort>();
+  /** Ports the browser reported connected since (navigator.serial 'connect'): candidates even when known. */
+  private back = new Set<SerialPort>();
   /** Only a port that was open before may be looked for again; the first open is the one the user chose. */
   private opened = false;
+  /** The version the hub reboots onto (expectHub); null when none was sent. */
+  private expected: number | null = null;
+  private log: ReconnectNote[] = [];
 
   async open(): Promise<void> {
     this.port = await this.reopenable();
     this.known = new Set((await this.serial?.getPorts()) ?? []);
+    this.back.clear();
     this.opened = true;
     this.closing = false;
     this.pump = this.readLoop();
   }
 
+  expectHub(version: number): void {
+    this.expected = version;
+    this.log = [];
+  }
+
+  notes(): ReconnectNote[] {
+    return [...this.log];
+  }
+
+  /** navigator.serial 'connect': an allowed device came (back). */
+  arrived(port: SerialPort): void {
+    if (port !== this.port) this.back.add(port);
+  }
+
+  private note(n: ReconnectNote): void {
+    // Each reason once: the reopen loop repeats the same ones every second.
+    if (this.log.some((x) => JSON.stringify(x) === JSON.stringify(n))) return;
+    this.log = [...this.log, n].slice(-MAX_NOTES);
+  }
+
   /**
-   * Opens this port, or else the one allowed port of the same USB device
+   * Opens this port, or else the allowed port of the same USB device
    * (vendor and product id) that appeared since: after a reboot the hub
    * enumerates again and the browser may hand it out as a new port, still
    * allowed when it reports the same USB serial number. Web Serial does not
-   * show that serial number, so with no or several such ports nothing is
-   * opened (another hub of the same kind must not be taken for this one)
-   * and the user chooses again.
+   * show that serial number, so one such port is taken as it is (dagon-host
+   * then reads its version), and of several only the hub on trial with the
+   * version just sent (`expectHub`) is kept; otherwise nothing is opened
+   * (another hub of the same kind must not be taken for this one) and the
+   * user chooses again.
    */
   private async reopenable(): Promise<SerialPort> {
     try {
@@ -96,16 +182,35 @@ export class WebSerialTransport implements Transport {
       return this.port;
     } catch (e) {
       if (!this.opened) throw e;
-      const want = this.port.getInfo();
-      const ports = (await this.serial?.getPorts()) ?? [];
-      const back = ports.filter((p) => {
-        const info = p.getInfo();
-        return !this.known.has(p) && p !== this.port && info.usbVendorId === want.usbVendorId && info.usbProductId === want.usbProductId;
-      });
-      if (back.length !== 1) throw e;
-      await back[0].open({ baudRate: CDC_BAUD });
-      return back[0];
+      this.note({ kind: 'away' });
+      const pick = await this.candidate();
+      if (!pick) throw e;
+      await pick.open({ baudRate: CDC_BAUD });
+      return pick;
     }
+  }
+
+  /** The one port that is this hub coming back, or null (with the reason noted). */
+  private async candidate(): Promise<SerialPort | null> {
+    const want = this.port.getInfo();
+    const ports = (await this.serial?.getPorts()) ?? [];
+    const same = ports.filter((p) => {
+      const info = p.getInfo();
+      return (!this.known.has(p) || this.back.has(p)) && p !== this.port && info.usbVendorId === want.usbVendorId && info.usbProductId === want.usbProductId;
+    });
+    if (same.length === 1) return same[0];
+    if (same.length === 0 || this.expected === null) {
+      this.note(same.length === 0 ? { kind: 'none' } : { kind: 'several', count: same.length });
+      return null;
+    }
+    const mine: SerialPort[] = [];
+    for (const p of same) {
+      const h = await probeHello(p);
+      if (isHubOnTrial(h, this.expected)) mine.push(p);
+      else this.note(whyNot(h));
+    }
+    if (mine.length > 1) this.note({ kind: 'several', count: mine.length });
+    return mine.length === 1 ? mine[0] : null;
   }
 
   async close(): Promise<void> {

@@ -3,11 +3,12 @@
 // opens the device; every request, timeout and retry is dagon-host's.
 import { hostLink, type LinkClock, type SwapLink } from '../serial/hostLink.ts';
 import type { HelloResp } from '../serial/hello.ts';
-import type { Transport } from '../serial/transport.ts';
+import { isHubOnTrial, whyNot, type ReconnectNote, type Transport } from '../serial/transport.ts';
 import {
   PHASE,
   check_release_for,
   newHost,
+  releaseVersions,
   release_topology,
   topo_compile,
   versionText,
@@ -22,7 +23,7 @@ import {
 import { FAILURE_BAND } from './band.ts';
 import { ConnectError, wasmReady } from './connect.ts';
 import { ANNOUNCE, FILE } from './copy.ts';
-import { WATCHED, next, type ConnectFailure, type Ctx, type Ev, type L } from './machine.ts';
+import { HUB_LOCKED, WATCHED, next, type ConnectFailure, type Ctx, type Ev, type L } from './machine.ts';
 import { DESK_DEMO, targetKey, type Config, type Node } from './sample.ts';
 
 /** What the page knows about one node from the hub. */
@@ -44,6 +45,18 @@ export interface Progress {
   percent: number;
   /** dagon-host's reason when the node refused (`E_FLASH`, `E_SIGNATURE`, ...). */
   reason?: string;
+}
+
+/** Stages in which a node's water rises with its progress (SC-O5); a finished or stopped node drains. */
+const FILLING: ReadonlySet<Progress['stage']> = new Set(['writing', 'lastResort', 'rebooting']);
+
+/** How full each node being written is, 0–100 (the node's background on the canvas). */
+export function waterOf(progress: Record<string, Progress>): Record<string, number> {
+  return Object.fromEntries(
+    Object.entries(progress)
+      .filter(([, p]) => FILLING.has(p.stage))
+      .map(([id, p]) => [id, Math.min(100, Math.max(0, p.percent))]),
+  );
 }
 
 /** The chosen release and dagon-host's verdict on it. */
@@ -151,6 +164,12 @@ export class Operate {
   fileTopology = $state<Record<string, unknown> | null>(null);
   /** "最新のリリースを使う" found no release (M58 in the band until the next step). */
   latestMissing = $state(false);
+  /** The version the chosen release gives each node (shown as "↑ 1.0.0 → 1.1.0" before the update). */
+  fileVersions = $state<Record<string, number>>({});
+  /** Date.now() when the running update or recovery started (elapsed time); null when none runs. */
+  startedAt = $state<number | null>(null);
+  /** Why the page could not get the rebooted hub back by itself (L21's diagnostic log). */
+  reconnectNotes = $state<ReconnectNote[]>([]);
 
   private link: SwapLink | null = null;
   /** Version each node was given in this run. */
@@ -167,7 +186,7 @@ export class Operate {
   constructor(private readonly deps: Deps) {}
 
   get ctx(): Ctx {
-    return { hasConfig: this.config !== null, failure: this.failure, refusal: this.refusal };
+    return { hasConfig: this.config !== null, failure: this.failure, refusal: this.refusal, answering: this.responding > 0 };
   }
 
   get responding(): number {
@@ -193,6 +212,19 @@ export class Operate {
     this.session++;
     await this.drop();
     this.go('cliClaim', false);
+  }
+
+  /**
+   * The header's 切断: the port is closed but its permission is kept (no
+   * forget()), so the CLI or a later つなぐ can open it; the session waits at L02.
+   */
+  async disconnect(): Promise<void> {
+    if (HUB_LOCKED.has(this.state) || next(this.state, 'disconnect') === this.state) return;
+    this.session++;
+    await this.drop();
+    this.alert = '';
+    this.status = ANNOUNCE.A21lost;
+    this.go('disconnect', false);
   }
 
   /** The CLI gave the port back (device.returned): the user connects again (L26). */
@@ -402,6 +434,9 @@ export class Operate {
       return this.go(k === 'topology' ? 'topoDiff' : 'badSource');
     }
     this.file = { ...file, verdict: 'pass' };
+    const given = releaseVersions(bytes);
+    // ponytail: topology node index = position in config.nodes, as in update().
+    this.fileVersions = Object.fromEntries(this.config.nodes.flatMap((n, i) => (given.has(i) ? [[n.id, given.get(i)!]] : [])));
     this.rest = false;
     this.targets = this.answering();
     this.status = ANNOUNCE.A10ok(this.targets.length);
@@ -416,6 +451,7 @@ export class Operate {
     const my = this.session;
     this.go('update');
     this.stopWatching();
+    this.startedAt = Date.now();
     this.failed = null;
     this.sentVersion = {};
     this.progress = Object.fromEntries(this.targets.map((id) => [id, { stage: 'waiting', percent: 0 }]));
@@ -431,6 +467,7 @@ export class Operate {
     }
     if (my !== this.session) return;
     this.reconnectUntil = null;
+    this.startedAt = null;
     this.finish(results);
   }
 
@@ -445,12 +482,26 @@ export class Operate {
       this.progress[n.id] = { stage: 'writing', percent: e.phase === PHASE.verify ? 100 : e.percent };
     } else if (e.phase === PHASE.reboot && n.role === 'hub') {
       this.progress[n.id] = { stage: 'rebooting', percent: 100 };
-      this.reconnectUntil = this.now() + HUB_RECONNECT_MS;
-      this.status = ANNOUNCE.A12;
-      this.go('hubTurn');
+      this.hubAway(this.sentVersion[n.id]);
     } else if (e.phase === PHASE.confirm) {
       this.progress[n.id] = { stage: 'done', percent: 100 };
     }
+  }
+
+  /** The hub reboots onto `version`: dagon-host reopens it for 45 s (L20), keeping only that hub. */
+  private hubAway(version: number | undefined): void {
+    if (version !== undefined) this.transport?.expectHub?.(version);
+    this.reconnectNotes = [];
+    this.reconnectUntil = this.now() + HUB_RECONNECT_MS;
+    this.status = ANNOUNCE.A12;
+    this.go('hubTurn');
+  }
+
+  /** dagon-host gave up reopening the hub (L21): the dialog opens, with why. */
+  private autoFailed(): void {
+    this.reconnectNotes = this.transport?.notes?.() ?? [];
+    this.alert = ANNOUNCE.A21timeout;
+    this.go('autoFailed');
   }
 
   /** The clock dagon-host's reconnect window runs on. */
@@ -468,10 +519,7 @@ export class Operate {
     const stop = results.find((r) => r.outcome === 'failed');
     if (!stop) return this.done();
     const n = c.nodes[stop.node];
-    if (n.role === 'hub' && this.state === 'L20' && stop.failure?.reason === 'NO ANSWER') {
-      this.alert = ANNOUNCE.A21timeout;
-      return this.go('autoFailed');
-    }
+    if (n.role === 'hub' && this.state === 'L20' && stop.failure?.reason === 'NO ANSWER') return this.autoFailed();
     const why = stop.failure;
     const f = why?.running != null ? { stage: 'previous' as const } : failureStage(why?.reason ?? 'NO ANSWER');
     // A stopped update has no "cannot fix" yet: an unnamed failure is a refusal of the update.
@@ -498,20 +546,43 @@ export class Operate {
    * "もう一度つなぐ" while the hub reboots: the user chooses it again. While
    * dagon-host still reopens (L20) the chosen device goes under its next
    * reopen; after that (L21) dagon-host applies the confirm rule to it.
+   * `onlyMine` (a device the browser reported connected, nobody chose it):
+   * taken only when it is the hub on trial with the version just sent.
+   * Resolves whether the device was taken.
    */
-  async reconnectHub(): Promise<void> {
-    if (!this.deps.reselect || !this.link || (this.state !== 'L20' && this.state !== 'L21')) return;
+  async reconnectHub(pick = this.deps.reselect, onlyMine = false): Promise<boolean> {
+    if (!pick || !this.link || (this.state !== 'L20' && this.state !== 'L21')) return false;
     let t: Transport;
     try {
-      t = await this.deps.reselect();
+      t = await pick();
     } catch {
-      return;
+      return false;
     }
     const old = this.transport;
-    this.transport = t;
     this.link.use(t);
+    if (onlyMine && !(await this.isMyHub())) {
+      if (old) this.link.use(old);
+      void t.close().catch(() => undefined);
+      return false;
+    }
+    this.transport = t;
     if (old && old !== t) void old.close().catch(() => undefined);
-    if (this.state !== 'L21') return;
+    if (this.state === 'L21') await this.confirmChosen();
+    return true;
+  }
+
+  /** The device now under the link is the hub on trial with the version just sent (else its reason is noted). */
+  private async isMyHub(): Promise<boolean> {
+    const hub = this.config?.nodes.find((n) => n.role === 'hub');
+    const h = await this.call((x) => x.hello('hub', 0)).catch(() => null);
+    if (isHubOnTrial(h, hub ? (this.sentVersion[hub.id] ?? null) : null)) return true;
+    const why = whyNot(h);
+    if (!this.reconnectNotes.some((x) => JSON.stringify(x) === JSON.stringify(why))) this.reconnectNotes = [...this.reconnectNotes, why];
+    return false;
+  }
+
+  /** L21: the chosen hub is confirmed when it runs the version just sent, else it stops there (L22). */
+  private async confirmChosen(): Promise<void> {
     try {
       const r = await this.call((h) => h.confirm('hub', 0, false));
       const hub = this.config!.nodes.find((n) => n.role === 'hub')!;
@@ -622,6 +693,7 @@ export class Operate {
     this.lastKind = kind;
     this.recovering = n.id;
     this.recovered = null;
+    this.startedAt = Date.now();
     this.progress = { ...this.progress, [n.id]: { stage: 'writing', percent: 0 } };
     const on = (e: UpdateEvent) => {
       if (my !== this.session || this.config?.nodes[e.node]?.id !== n.id) return;
@@ -632,9 +704,7 @@ export class Operate {
       // The hub reboots onto it: the same reconnect and confirm rule as an update (L20 / L21).
       if (e.phase === PHASE.reboot && n.role === 'hub') {
         this.progress[n.id] = { stage: 'rebooting', percent: 100 };
-        this.reconnectUntil = this.now() + HUB_RECONNECT_MS;
-        this.status = ANNOUNCE.A12;
-        this.go('hubTurn');
+        this.hubAway(this.sentVersion[n.id]);
       }
     };
     let r: RecoverResult;
@@ -643,10 +713,12 @@ export class Operate {
     } catch (e) {
       if (my !== this.session) return;
       this.reconnectUntil = null;
+      this.startedAt = null;
       return this.recoveryFailed(n, e instanceof Error ? e.message : '');
     }
     if (my !== this.session) return;
     this.reconnectUntil = null;
+    this.startedAt = null;
     this.recovered = r;
     this.progress[n.id] = { stage: 'done', percent: 100 };
     this.live[n.id] = { ...(this.live[n.id] ?? UNKNOWN), responding: true, lastSeen: Date.now() };
@@ -668,11 +740,8 @@ export class Operate {
 
   /** A recovery or rollback that did not get through, shown with dagon-host's reason. */
   private recoveryFailed(n: Node, reason: string): void {
-    if (this.state === 'L20' && reason === 'NO ANSWER') {
-      // The rebooted hub was not reopened in time: the user chooses it again (L21).
-      this.alert = ANNOUNCE.A21timeout;
-      return this.go('autoFailed');
-    }
+    // The rebooted hub was not reopened in time: the user chooses it again (L21).
+    if (this.state === 'L20' && reason === 'NO ANSWER') return this.autoFailed();
     const percent = this.progress[n.id]?.percent ?? 0;
     this.progress[n.id] = { ...failureStage(reason), percent };
     this.status = REFUSALS.includes(reason) ? refusalAnnounce(reason as Refusal) : ANNOUNCE.A13(n.name);
@@ -705,6 +774,9 @@ export class Operate {
     this.rest = false;
     this.fileTopology = null;
     this.latestMissing = false;
+    this.fileVersions = {};
+    this.startedAt = null;
+    this.reconnectNotes = [];
     this.sentVersion = {};
   }
 

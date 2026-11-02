@@ -8,7 +8,7 @@ import { ANNOUNCE, BAND, BAND_FOR, NODE } from './copy.ts';
 import { Define } from './define/define.svelte.ts';
 import { topoDiff } from './define/diff.ts';
 import { fromYaml, type Topo } from './define/model.ts';
-import { Operate } from './operate.svelte.ts';
+import { Operate, waterOf } from './operate.svelte.ts';
 import { DESK_DEMO, DESK_DEMO_YAML } from './sample.ts';
 
 const repo = (rel: string) => new URL(`../../../${rel}`, import.meta.url);
@@ -192,6 +192,91 @@ describe('update from the page with dagon-host apply against the mock hub', () =
     expect(op.progress).toMatchObject({ watch: { stage: 'unwritten' }, hub: { stage: 'unwritten' } });
     expect(t.reboots).toEqual([]);
   }, 60_000);
+
+  test('before the update each target shows what it gets: the version the release gives it', async () => {
+    const { op } = await sentTo();
+    op.takeFile('desk-1.1.0.dgb', RELEASE);
+    expect(Object.fromEntries(Object.entries(op.fileVersions).map(([id, raw]) => [id, v(raw)]))).toEqual({ hub: '1.1.0', seg: '1.1.0', watch: '1.1.0' });
+  }, 20_000);
+
+  test('the hub back by itself within 45 s: the reconnect dialog state (L21) is never entered', async () => {
+    const { op } = await sentTo({ hubAway: 3 });
+    op.takeFile('desk-1.1.0.dgb', RELEASE);
+    const seen = new Set<string>();
+    let running = true;
+    const run = op.update().finally(() => (running = false));
+    while (running) {
+      seen.add(op.state);
+      await new Promise((r) => setTimeout(r, 0));
+    }
+    await run;
+    expect(seen.has('L20')).toBe(true);
+    expect(seen.has('L21')).toBe(false);
+    expect([op.state, op.startedAt]).toEqual(['L23', null]);
+  }, 60_000);
+
+  test('auto reconnect failed (L21): a device the browser reports is taken by itself when it is the hub on trial with the version just sent', async () => {
+    const { t, op } = await sentTo({ hubAway: Infinity });
+    op.takeFile('desk-1.1.0.dgb', RELEASE);
+    await op.update();
+    expect(op.state).toBe('L21');
+    t.replug();
+    const took = await op.reconnectHub(async () => {
+      await t.open();
+      return t;
+    }, true);
+    expect([took, op.state]).toEqual([true, 'L23']);
+    expect([v(t.helloOf('hub').activeVersion), t.helloOf('hub').trial]).toEqual(['1.1.0', false]);
+  }, 60_000);
+
+  test('auto reconnect failed: a reported device that is not the hub on trial is left alone, with the reason noted', async () => {
+    const { t, op } = await sentTo({ hubAway: Infinity, fallBack: ['hub'] });
+    op.takeFile('desk-1.1.0.dgb', RELEASE);
+    await op.update();
+    expect(op.state).toBe('L21');
+    t.replug();
+    const took = await op.reconnectHub(async () => {
+      await t.open();
+      return t;
+    }, true);
+    expect([took, op.state]).toEqual([false, 'L21']);
+    expect(op.reconnectNotes).toEqual([{ kind: 'version', version: t.helloOf('hub').activeVersion, trial: false }]);
+    // The user can still choose it: then it is shown stopped on its previous version (L22).
+    await op.reconnectHub();
+    expect([op.state, op.progress.hub.stage]).toEqual(['L22', 'previous']);
+  }, 60_000);
+
+  test('the header 切断 releases the hub to L02 while idle, and does nothing while an update runs', async () => {
+    const { t, op } = await sentTo({ hubAway: Infinity });
+    await op.disconnect();
+    expect([op.state, op.status]).toEqual(['L02', ANNOUNCE.A21lost]);
+    await expect(t.write(new Uint8Array(1))).rejects.toThrow('port not open');
+
+    await op.connect();
+    expect(op.state).toBe('L12');
+    op.takeFile('desk-1.1.0.dgb', RELEASE);
+    const run = op.update();
+    while (op.state !== 'L19') await new Promise((r) => setTimeout(r, 0));
+    await op.disconnect();
+    expect(op.state).not.toBe('L02');
+    await run;
+    expect(op.state).toBe('L21');
+    await op.disconnect();
+    expect(op.state).toBe('L21');
+  }, 60_000);
+
+  test('the water fill follows each node being written and drains when it is done or stopped', () => {
+    expect(
+      waterOf({
+        hub: { stage: 'waiting', percent: 0 },
+        seg: { stage: 'writing', percent: 62 },
+        watch: { stage: 'rebooting', percent: 100 },
+        x: { stage: 'done', percent: 100 },
+        y: { stage: 'silent', percent: 40 },
+        z: { stage: 'lastResort', percent: 140 },
+      }),
+    ).toEqual({ seg: 62, watch: 100, z: 100 });
+  });
 
   test('the hub came back on its previous version: stopped there, marked previous', async () => {
     const { t, op } = await sentTo({ fallBack: ['hub'] });

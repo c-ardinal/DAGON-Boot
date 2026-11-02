@@ -108,7 +108,67 @@ export const BAND = {
   M58: { chip: '× リリース なし', sentence: '定義でリリースを作るか、更新ファイルを選んでください。' },
   /** M57: part of the page (dagon-wasm) did not load. */
   M57: { chip: '× 読み込めない', sentence: 'このページの一部を読み込めませんでした。ページを開き直してください。' },
+  /** M26: L21 (the dialog's sentence, and the band's once the dialog is closed). */
+  M26: { sentence: '『もう一度つなぐ』を押して、同じ機器を選んでください。' },
+  M59: { sentence: 'そのまま待ってください（数秒で終わります）。' },
+  M60: { sentence: '見つかったノードが降りてくるまで、そのまま待ってください。' },
+  M61: { sentence: '送り終わるまで、USB を抜かないでください。' },
+  /**
+   * 案 (replaces M62, owner 11/2: the answering nodes are updated first, recovery is the side action):
+   * L13, with a power and wiring hint for the silent ones.
+   */
+  M62b: { sentence: '応答しないノードは電源と配線を確かめ、応答するノードから先に更新してください。' },
+  M63: { sentence: '確かめ終わるまで、そのまま待ってください。' },
+  M64: { sentence: '親機が再起動したら自動でつなぎ直すので、そのまま待ってください。' },
+  M65: { pair: ['目安', '約 1 分'], sentence: '止まったノードを復旧すると、新しいバージョンで動きます。' },
+  M66: { sentence: 'すべてのノードが新しいバージョンで動いています。' },
+  M67: { sentence: 'CLI の作業が終わると、自動でつなぎ直します。' },
 } as const satisfies Record<string, BandCopy>;
+
+/**
+ * The header's つなぐ / 切断 (S30, owner 11/2) and, 案, why it cannot be
+ * used in a state (the band says it when it is pressed then).
+ */
+export const HUB_TOGGLE = {
+  connect: 'パソコンとつなぐ',
+  disconnect: '切断',
+  locked: {
+    L03: '一覧で選び終わるまで、そのまま待ってください。',
+    L08: '探し終わるまで、切断できません。',
+    L10: '送り終わるまで、切断できません。',
+    L19: '更新が終わるまで、切断できません。',
+    L20: '親機とつなぎ直すまで、切断できません。',
+    L21: '親機とつなぎ直すまで、切断できません。',
+    L24: '復旧が終わるまで、切断できません。',
+    L28: 'CLI の作業が終わるまで、切断できません。',
+  } as Partial<Record<string, string>>,
+} as const;
+
+/** 案: before an update, what each target node gets and about how long it takes (L18, SC-O4). */
+export const PLAN = {
+  up: (from: string, to: string) => `↑ ${from} → ${to}`,
+  upName: (from: string, to: string) => `更新あり、${from} から ${to}`,
+  same: (v: string) => `＝ 同じ ${v}`,
+  sameName: (v: string) => `同じ、${v}`,
+  unknown: '?',
+  estimate: (min: number) => `目安 約 ${min} 分`,
+  estimateLabel: '目安',
+  minutes: (min: number) => `約 ${min} 分`,
+} as const;
+
+/** S28 and SC-O5: elapsed and remaining time under the dot number while updating or recovering. */
+export const TIME = {
+  elapsed: '経過',
+  left: '残り',
+  soon: 'まもなく',
+  /** m:ss, or h:mm:ss past an hour. */
+  clock: (ms: number) => {
+    const s = Math.max(0, Math.floor(ms / 1000));
+    const two = (n: number) => String(n).padStart(2, '0');
+    return s >= 3600 ? `${Math.floor(s / 3600)}:${two(Math.floor(s / 60) % 60)}:${two(s % 60)}` : `${Math.floor(s / 60)}:${two(s % 60)}`;
+  },
+  about: (ms: number) => (ms < 30_000 ? 'まもなく' : `約 ${Math.ceil(ms / 60_000)} 分`),
+} as const;
 
 /** M29: beside the recover button when nodes after the stopped one are not written yet. */
 export const BAND_FOR = {
@@ -301,13 +361,22 @@ export const FILE = {
   targets: '対象',
 } as const;
 
-/** SC-O7: the hub reconnect dialog (M26, M27). */
+/** SC-O7: the hub reconnect dialog (M26), and M27 beside the hub while the page reconnects by itself (L20). */
 export const RECONNECT = {
   heading: '親機の再接続',
-  sentence: '『もう一度つなぐ』を押して、同じ機器を選んでください。',
+  sentence: BAND.M26.sentence,
   auto: '自動の再接続',
   left: (s: number) => `あと ${s} s`,
-  over: '終了',
+  /** 案: why the page could not reconnect by itself (the diagnostic log under 詳しく見る). */
+  why: '詳しく見る',
+  notes: {
+    away: '前の親機 開けない',
+    none: '同じ種類の機器 現れない',
+    several: (n: number) => `同じ種類の機器 ${n} つ（どれか決められない）`,
+    silent: '現れた機器 応答なし',
+    notHub: '現れた機器 子機',
+    version: (v: string, trial: boolean) => `現れた親機 ${v}${trial ? '' : '（前のバージョン）'}`,
+  },
 } as const;
 
 /** Help in the header, and the operating-mode key list (S06). */

@@ -1,7 +1,7 @@
 import { render } from 'svelte/server';
 import { afterEach, describe, expect, test, vi } from 'vitest';
 import App from './App.svelte';
-import { BAND, BUTTON, CANVAS, UNSUPPORTED } from './app/copy.ts';
+import { BUTTON, CANVAS, CLI_LINK, DEFINE, UNSUPPORTED } from './app/copy.ts';
 
 // The first paint must not depend on dagon-wasm: rendering the component
 // touches no WASM export, so a missing .wasm cannot leave the page blank.
@@ -26,10 +26,13 @@ function stubBrowser(search: string, serial: unknown) {
 afterEach(() => vi.unstubAllGlobals());
 
 describe('first paint without dagon-wasm', () => {
-  test('the empty state, its sentence and its buttons render', () => {
+  test('the page opens on 定義 (運用 waits for a 構成 on the 親機); its empty state renders', () => {
     stubBrowser('?mock', undefined);
     const { body } = render(App);
-    expect(body).toContain(BAND.M03.sentence);
+    // Not served by dagon serve here: the band says how to start it (C11).
+    expect(body).toContain(CLI_LINK.needCli);
+    expect(body).toContain(DEFINE.fromSample);
+    expect(body).toContain(DEFINE.listHeading);
     expect(body).toContain(CANVAS.empty);
     expect(body).toContain(BUTTON.connectDiscover);
     expect(body).toContain(BUTTON.placeSample);

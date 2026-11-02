@@ -210,10 +210,45 @@ pub fn watch_interval_ms() -> u32 {
     crate::watch::INTERVAL_MS
 }
 
-/// Release verification key, fixed at build time (`DAGON_PUBKEY`, see build.rs).
+/// Release verification key of a standalone build (`DAGON_PUBKEY`, see build.rs).
 pub const PUBKEY: [u8; 32] = hex32(env!("DAGON_PUBKEY_HEX"));
 
+std::thread_local! {
+    /// The developer's key set at run time (the page served by `dagon serve` reads it from its
+    /// `dagon-release-key` meta or /v1/hello).
+    static RUNTIME_KEY: core::cell::Cell<Option<[u8; 32]>> = const { core::cell::Cell::new(None) };
+    /// Set by a page that must verify with the run-time key: until it is set, nothing verifies.
+    static KEY_REQUIRED: core::cell::Cell<bool> = const { core::cell::Cell::new(false) };
+}
+
+/// The key releases verify under: the run-time one, else the build's own, or
+/// none while a run-time key is required and not set yet.
+pub fn release_key() -> Option<[u8; 32]> {
+    RUNTIME_KEY
+        .with(|k| k.get())
+        .or_else(|| (!KEY_REQUIRED.with(|r| r.get())).then_some(PUBKEY))
+}
+
+/// Sets the verification key from its 64 hex digits; throws on anything else.
+#[wasm_bindgen]
+pub fn set_release_key(hex: &str) -> Result<(), JsError> {
+    let h = hex.trim();
+    if h.len() != 64 || !h.bytes().all(|b| b.is_ascii_hexdigit()) {
+        return Err(JsError::new("release key must be 64 hex digits"));
+    }
+    RUNTIME_KEY.with(|k| k.set(Some(hex32(h))));
+    Ok(())
+}
+
+/// From now on verify only with a run-time key ([`set_release_key`]); until
+/// it is set every release is refused (`key`). For pages served by `dagon serve`.
+#[wasm_bindgen]
+pub fn require_release_key() {
+    KEY_REQUIRED.with(|r| r.set(true));
+}
+
 const fn hex32(s: &str) -> [u8; 32] {
+    // Only ever given 64 hex digits (checked by build.rs or set_release_key).
     const fn nib(c: u8) -> u8 {
         match c {
             b'0'..=b'9' => c - b'0',
@@ -248,7 +283,10 @@ pub fn refusal<E>(e: &Error<E>) -> &'static str {
 
 /// The verdict on `bundle` for `topology` under [`PUBKEY`]; `None` when it passes.
 pub fn release_refusal(bundle: &[u8], topology: &[u8]) -> Option<&'static str> {
-    check_release::<()>(bundle, topology, Some(&PUBKEY))
+    let Some(key) = release_key() else {
+        return Some("key");
+    };
+    check_release::<()>(bundle, topology, Some(&key))
         .err()
         .map(|e| refusal(&e))
 }
@@ -267,7 +305,8 @@ pub fn check_release_for(bundle: &[u8], topology: &[u8]) -> Result<(), JsError> 
 /// [`PUBKEY`] as dagon-host checks it; throws with the failure name.
 #[wasm_bindgen]
 pub fn check_bootcore_for(img: &[u8]) -> Result<(), JsError> {
-    dagon_host::rom::check_bootcore(img, &PUBKEY)
+    let key = release_key().ok_or_else(|| JsError::new("no release key"))?;
+    dagon_host::rom::check_bootcore(img, &key)
         .map(|_| ())
         .map_err(|e| JsError::new(&alloc::format!("{e:?}")))
 }
@@ -344,7 +383,13 @@ impl WasmHost {
                 let _ = on_event.call1(&JsValue::NULL, &event_js(&e));
             };
             let out = h
-                .apply(&bundle, &topology, &PUBKEY, nodes.as_deref(), &mut emit)
+                .apply(
+                    &bundle,
+                    &topology,
+                    &release_key().ok_or_else(|| JsValue::from(JsError::new("key")))?,
+                    nodes.as_deref(),
+                    &mut emit,
+                )
                 .await
                 .map_err(|e| JsValue::from(JsError::new(refusal(&e))))?;
             Ok(out.iter().map(outcome_js).collect::<Array>().into())
@@ -371,10 +416,11 @@ impl WasmHost {
             let mut emit = |e: Event| {
                 let _ = on_event.call1(&JsValue::NULL, &event_js(&e));
             };
+            let key = release_key().ok_or_else(|| JsValue::from(JsError::new("key")))?;
             let assets = RecoverAssets {
                 release: &release,
                 topology: &topology,
-                pubkey: &PUBKEY,
+                pubkey: &key,
                 bootcore: bootcore.as_deref(),
             };
             let (path, v) = h

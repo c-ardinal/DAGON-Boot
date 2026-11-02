@@ -101,6 +101,30 @@ fn project_json(server: &Server) -> Value {
     }
 }
 
+/// The 構成 files (*.yaml, *.yml) directly in `dir`, by name.
+fn yaml_files(dir: &Path) -> Vec<String> {
+    let mut out: Vec<String> = std::fs::read_dir(dir)
+        .map(|d| {
+            d.flatten()
+                .filter(|e| e.file_type().is_ok_and(|t| t.is_file()))
+                .map(|e| e.file_name().to_string_lossy().into_owned())
+                .filter(|n| is_yaml(n))
+                .collect()
+        })
+        .unwrap_or_default();
+    out.sort();
+    out.truncate(MAX_ENTRIES);
+    out
+}
+
+fn is_yaml(name: &str) -> bool {
+    let low = name.to_ascii_lowercase();
+    (low.ends_with(".yaml") || low.ends_with(".yml"))
+        && !name.starts_with('.')
+        && !name.contains(['/', '\\'])
+        && !crate::paths::device_name(name)
+}
+
 fn path_of(req: &Request) -> Result<String, Response> {
     let v: Value =
         serde_json::from_slice(&req.body).map_err(|_| Response::error(400, "body must be JSON"))?;
@@ -110,8 +134,13 @@ fn path_of(req: &Request) -> Result<String, Response> {
         .ok_or_else(|| Response::error(400, "path is required"))
 }
 
+/// GET /v1/project: the open project and the recent ones.
 pub fn get(server: &Server) -> Response {
-    Response::json(200, &project_json(server))
+    let mut v = project_json(server);
+    if let Ok(h) = home(server) {
+        v["recent"] = super::recent::json(&h);
+    }
+    Response::json(200, &v)
 }
 
 fn busy() -> Response {
@@ -130,8 +159,12 @@ fn switch(server: &Server, cfg: PathBuf) -> Result<Response, Response> {
             "the project has no usable public key; see the dagon serve terminal",
         )
     })?;
+    let dir = c.base.clone();
     if !server.switch_project(cfg, key) {
         return Err(busy());
+    }
+    if let Ok(h) = home(server) {
+        super::recent::add(&h, &dir);
     }
     Ok(Response::json(200, &project_json(server)))
 }
@@ -143,9 +176,73 @@ pub fn open(server: &Arc<Server>, req: &Request) -> Response {
         let dir = under_home(&home, &path_of(req)?).map_err(|e| Response::error(403, &e))?;
         let cfg = dir.join(CONFIG_FILE);
         if !cfg.is_file() {
-            return Err(Response::error(404, "no dagon.toml in that folder"));
+            let yaml = yaml_files(&dir);
+            if yaml.is_empty() {
+                return Err(Response::error(404, "no dagon.toml in that folder"));
+            }
+            // Only a 構成: the page asks whether to make dagon.toml here
+            // (POST /v1/project/init).
+            return Err(Response::json(
+                428,
+                &json!({ "error": "the folder has a topology but no dagon.toml", "yaml": yaml }),
+            ));
         }
         switch(server, cfg)
+    })();
+    r.unwrap_or_else(|e| e)
+}
+
+/// POST /v1/project/init {path, yaml?}: dagon.toml in a folder that has a
+/// 構成 but none, for that YAML (`yaml`, or the folder's only one); key
+/// pair in ~/.dagon/keys/<folder> when none. Then opens it.
+pub fn init(server: &Arc<Server>, req: &Request) -> Response {
+    let r = (|| {
+        let v: Value = serde_json::from_slice(&req.body)
+            .map_err(|_| Response::error(400, "body must be JSON"))?;
+        let home = home(server)?;
+        let raw = v["path"]
+            .as_str()
+            .ok_or_else(|| Response::error(400, "path is required"))?;
+        let dir = under_home(&home, raw).map_err(|e| Response::error(403, &e))?;
+        if dir == home {
+            return Err(Response::error(
+                403,
+                "choose a folder inside the home folder",
+            ));
+        }
+        let found = yaml_files(&dir);
+        let yaml = match v["yaml"].as_str() {
+            Some(y) if found.iter().any(|f| f == y) => y.to_string(),
+            Some(_) => return Err(Response::error(404, "no such topology in that folder")),
+            None if found.len() == 1 => found[0].clone(),
+            None if found.is_empty() => {
+                return Err(Response::error(404, "no topology in that folder"))
+            }
+            None => {
+                return Err(Response::error(
+                    400,
+                    "the folder has several; name one in yaml",
+                ))
+            }
+        };
+        let name = dir
+            .file_name()
+            .map(|n| n.to_string_lossy().into_owned())
+            .filter(|n| !n.is_empty())
+            .ok_or_else(|| Response::error(400, "the folder needs a name"))?;
+        if server.busy() {
+            return Err(busy());
+        }
+        let keys = home.join(".dagon").join("keys").join(&name);
+        crate::scaffold::init_project(&dir, &name, &yaml, &keys).map_err(|e| {
+            let shown = e.replace(&*keys.to_string_lossy(), "<key folder>");
+            eprintln!("dagon serve: init project: {shown}");
+            Response::error(
+                409,
+                "dagon.toml could not be created; see the dagon serve terminal",
+            )
+        })?;
+        switch(server, dir.join(CONFIG_FILE))
     })();
     r.unwrap_or_else(|e| e)
 }
@@ -227,7 +324,7 @@ pub fn list(server: &Server, req: &Request) -> Response {
         let home = home(server)?;
         let dir = under_home(&home, &raw).map_err(|e| Response::error(403, &e))?;
         let keys = key_dirs(&home);
-        let mut entries: Vec<(String, bool)> = std::fs::read_dir(&dir)
+        let mut entries: Vec<(String, bool, bool)> = std::fs::read_dir(&dir)
             .map_err(|_| Response::error(404, "not a folder"))?
             .flatten()
             .filter(|e| e.file_type().is_ok_and(|t| t.is_dir()))
@@ -235,10 +332,9 @@ pub fn list(server: &Server, req: &Request) -> Response {
                 let p = std::fs::canonicalize(e.path()).ok()?;
                 // Links out of home and key folders are not shown.
                 (p.starts_with(&home) && !keys.iter().any(|k| in_dir(&p, k))).then(|| {
-                    (
-                        e.file_name().to_string_lossy().into_owned(),
-                        p.join(CONFIG_FILE).is_file(),
-                    )
+                    let project = p.join(CONFIG_FILE).is_file();
+                    let yaml = !project && !yaml_files(&p).is_empty();
+                    (e.file_name().to_string_lossy().into_owned(), project, yaml)
                 })
             })
             .collect();
@@ -246,7 +342,7 @@ pub fn list(server: &Server, req: &Request) -> Response {
         entries.truncate(MAX_ENTRIES);
         let list: Vec<Value> = entries
             .into_iter()
-            .map(|(name, project)| json!({ "name": name, "project": project }))
+            .map(|(name, project, yaml)| json!({ "name": name, "project": project, "yaml": yaml }))
             .collect();
         let parent = (dir != home).then(|| dir.parent().map(shown)).flatten();
         Ok(Response::json(

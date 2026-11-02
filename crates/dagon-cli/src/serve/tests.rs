@@ -435,14 +435,16 @@ fn the_page_carries_the_release_key_given_at_start() {
 }
 
 #[test]
-fn without_a_release_key_no_page_is_served() {
+fn without_a_release_key_the_page_carries_none() {
     let dir = std::env::temp_dir().join(format!("dagon-serve-nokey-{}", std::process::id()));
     std::fs::create_dir_all(&dir).unwrap();
     std::fs::write(dir.join("index.html"), "<head></head>").unwrap();
     let server = Server::new("p".repeat(32), 1, None, dir.clone());
-    assert!(super::api::page_file(&server, "/").is_none());
+    let (page, _) = super::api::page_file(&server, "/").unwrap();
+    assert!(!String::from_utf8_lossy(&page).contains("dagon-release-key"));
     server.set_release_key([1; 32]);
-    assert!(super::api::page_file(&server, "/").is_some());
+    let (page, _) = super::api::page_file(&server, "/").unwrap();
+    assert!(String::from_utf8_lossy(&page).contains(&"01".repeat(32)));
     let _ = std::fs::remove_dir_all(&dir);
 }
 
@@ -1012,5 +1014,222 @@ fn every_start_pubkey_source_goes_through_the_same_checks() {
     assert!(start(&["--pubkey", &leak]).is_err());
     assert!(start(&[]).is_err());
     // --pubkey with the matching public key.
-    assert_eq!(start(&["--pubkey", &good]).unwrap(), mine.public_key);
+    assert_eq!(start(&["--pubkey", &good]).unwrap(), Some(mine.public_key));
+}
+
+/// serve started with no project and no key (a fresh folder): home is the
+/// area's own folder.
+fn bare(name: &str) -> (Area, PathBuf) {
+    let dir = std::env::temp_dir().join(format!("dagon-serve-{name}-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    let home = dir.join("home");
+    std::fs::create_dir_all(&home).unwrap();
+    std::fs::create_dir_all(dir.join("web")).unwrap();
+    std::fs::write(
+        dir.join("web/index.html"),
+        "<!doctype html><head></head><p>page",
+    )
+    .unwrap();
+    let listener = TcpListener::bind(("127.0.0.1", 0)).unwrap();
+    let port = listener.local_addr().unwrap().port();
+    let server = Server::new(
+        "0123456789abcdef0123456789abcdef".into(),
+        port,
+        None,
+        dir.join("web"),
+    );
+    server.home.set(home.clone()).unwrap();
+    let s = server.clone();
+    std::thread::spawn(move || super::serve(listener, s));
+    (Area { dir, server }, home)
+}
+
+#[test]
+fn serve_without_a_project_starts_keyless_and_takes_the_new_projects_key() {
+    let (a, home) = bare("bare");
+    let (st, hello) = get(&a, "/v1/hello");
+    assert_eq!(st, 200);
+    let v: serde_json::Value = serde_json::from_str(&hello).unwrap();
+    assert!(
+        v["project"].is_null() && v["release_key"].is_null(),
+        "{hello}"
+    );
+    let (st, page) = http(&a, "GET", "/", &[], b"");
+    assert!(st == 200 && !page.contains("dagon-release-key"), "{page}");
+    let (st, p) = get(&a, "/v1/project");
+    assert!(st == 200 && p.contains("\"open\":false"), "{p}");
+    assert_eq!(
+        post(
+            &a,
+            "/v1/project/new",
+            serde_json::json!({ "path": "fresh" })
+        )
+        .0,
+        200
+    );
+    let fresh =
+        dagon_sign::load_public_key(&home.join(".dagon/keys/fresh").join(dagon_sign::PUBLIC_FILE))
+            .unwrap();
+    let (_, hello) = get(&a, "/v1/hello");
+    let v: serde_json::Value = serde_json::from_str(&hello).unwrap();
+    assert_eq!(v["release_key"], hex(&fresh));
+    assert_eq!(v["project"], "fresh");
+    let (_, page) = http(&a, "GET", "/", &[], b"");
+    assert!(page.contains(&hex(&fresh)));
+}
+
+#[test]
+fn start_key_is_none_without_any_source() {
+    if std::env::var_os(crate::config::KEY_ENV).is_some() {
+        return;
+    }
+    let (a, _home) = bare("bare-key");
+    let o = crate::config::Opts::parse(&[], &["pubkey", "key"]).unwrap();
+    let none = super::start_key(&o, &a.server, None);
+    // Without dagon.toml in the current folder (the test's) there is none.
+    if !std::path::Path::new(crate::config::CONFIG_FILE).exists() {
+        assert_eq!(none.unwrap(), None);
+    }
+}
+
+#[test]
+fn recent_projects_are_kept_newest_first_and_only_under_home() {
+    let (a, home) = bare("recent");
+    for i in 0..12 {
+        let (st, _) = post(
+            &a,
+            "/v1/project/new",
+            serde_json::json!({ "path": format!("p{i}") }),
+        );
+        assert_eq!(st, 200);
+    }
+    assert_eq!(
+        post(&a, "/v1/project/open", serde_json::json!({ "path": "p3" })).0,
+        200
+    );
+    let (_, body) = get(&a, "/v1/project");
+    let v: serde_json::Value = serde_json::from_str(&body).unwrap();
+    let names: Vec<&str> = v["recent"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|r| r["name"].as_str().unwrap())
+        .collect();
+    assert_eq!(names.len(), super::recent::MAX_RECENT);
+    assert_eq!(&names[..3], ["p3", "p11", "p10"]);
+    // Entries outside home, in a key folder or without dagon.toml are not shown.
+    let outside = a.dir.join("outside");
+    std::fs::create_dir_all(&outside).unwrap();
+    std::fs::write(outside.join("dagon.toml"), "").unwrap();
+    std::fs::write(home.join(".dagon/keys/p1/dagon.toml"), "").unwrap();
+    let list = serde_json::json!([
+        outside.to_string_lossy(),
+        home.join(".dagon/keys/p1").to_string_lossy(),
+        home.join("nothing").to_string_lossy(),
+        home.join("p5").to_string_lossy(),
+    ]);
+    std::fs::write(home.join(".dagon/recent.json"), list.to_string()).unwrap();
+    let (_, body) = get(&a, "/v1/project");
+    let v: serde_json::Value = serde_json::from_str(&body).unwrap();
+    let recent = v["recent"].as_array().unwrap();
+    assert_eq!(recent.len(), 1, "{body}");
+    assert_eq!(recent[0]["name"], "p5");
+    assert!(!body.contains(".dagon"));
+}
+
+#[test]
+fn a_folder_with_only_a_topology_is_offered_dagon_toml() {
+    let (a, home) = bare("yamlonly");
+    std::fs::create_dir_all(home.join("y")).unwrap();
+    std::fs::write(home.join("y/desk.yaml"), YAML).unwrap();
+    let (_, fs) = get(&a, "/v1/fs");
+    assert!(
+        fs.contains("\"name\":\"y\",\"project\":false,\"yaml\":true"),
+        "{fs}"
+    );
+    let (st, body) = post(&a, "/v1/project/open", serde_json::json!({ "path": "y" }));
+    assert_eq!(st, 428, "{body}");
+    assert!(body.contains("desk.yaml"), "{body}");
+    // Refused: outside home, the home itself, a key folder, another file.
+    assert_eq!(
+        post(&a, "/v1/project/init", serde_json::json!({ "path": ".." })).0,
+        403
+    );
+    assert_eq!(
+        post(&a, "/v1/project/init", serde_json::json!({ "path": "" })).0,
+        403
+    );
+    assert_eq!(
+        post(
+            &a,
+            "/v1/project/init",
+            serde_json::json!({ "path": ".dagon" })
+        )
+        .0,
+        403
+    );
+    assert_eq!(
+        post(
+            &a,
+            "/v1/project/init",
+            serde_json::json!({ "path": "y", "yaml": "../t.yaml" })
+        )
+        .0,
+        404
+    );
+    assert!(!home.join("y/dagon.toml").exists());
+    let (st, body) = post(&a, "/v1/project/init", serde_json::json!({ "path": "y" }));
+    assert_eq!(st, 200, "{body}");
+    assert!(std::fs::read_to_string(home.join("y/dagon.toml"))
+        .unwrap()
+        .contains("topology = \"desk.yaml\""));
+    assert_eq!(get(&a, "/v1/topology"), (200, YAML.to_string()));
+    let (_, hello) = get(&a, "/v1/hello");
+    assert!(!serde_json::from_str::<serde_json::Value>(&hello).unwrap()["release_key"].is_null());
+    // Once there, init is refused and open works.
+    assert_eq!(
+        post(&a, "/v1/project/init", serde_json::json!({ "path": "y" })).0,
+        409
+    );
+    assert_eq!(
+        post(&a, "/v1/project/open", serde_json::json!({ "path": "y" })).0,
+        200
+    );
+    // Nothing at all: 404.
+    std::fs::create_dir_all(home.join("empty")).unwrap();
+    assert_eq!(
+        post(
+            &a,
+            "/v1/project/open",
+            serde_json::json!({ "path": "empty" })
+        )
+        .0,
+        404
+    );
+}
+
+#[test]
+fn the_layout_is_kept_beside_the_topology() {
+    let a = start("layout");
+    let b = auth(&a);
+    let h = [("Authorization", b.as_str())];
+    assert_eq!(http(&a, "GET", "/v1/layout", &h, b"").0, 404);
+    let layout = serde_json::json!({ "names": { "seg": "7セグ" }, "positions": { "seg": { "x": 1, "y": 2 } } });
+    let (st, _) = http(&a, "PUT", "/v1/layout", &h, layout.to_string().as_bytes());
+    assert_eq!(st, 200);
+    let (st, body) = http(&a, "GET", "/v1/layout", &h, b"");
+    assert_eq!(st, 200);
+    assert_eq!(
+        serde_json::from_str::<serde_json::Value>(&body).unwrap(),
+        layout
+    );
+    assert!(a.dir.join("topology/t.layout.json").is_file());
+    assert_eq!(http(&a, "PUT", "/v1/layout", &h, b"[1]").0, 400);
+    assert_eq!(http(&a, "PUT", "/v1/layout", &h, b"not json").0, 400);
+    let big = format!("{{\"x\":\"{}\"}}", "a".repeat(300 * 1024));
+    assert_eq!(http(&a, "PUT", "/v1/layout", &h, big.as_bytes()).0, 413);
+    // A topology path out of the project: the layout beside it is refused.
+    std::fs::write(a.dir.join("dagon.toml"), "topology = \"../outside.yaml\"\n").unwrap();
+    assert_eq!(http(&a, "GET", "/v1/layout", &h, b"").0, 403);
+    assert_eq!(http(&a, "PUT", "/v1/layout", &h, b"{}").0, 403);
 }

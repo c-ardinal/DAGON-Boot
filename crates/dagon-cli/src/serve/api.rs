@@ -161,7 +161,11 @@ pub fn handle(server: &Arc<Server>, req: &Request) -> Response {
         ("POST", ["build"]) => start(server, req, "build", job_build),
         ("POST", ["sign"]) => start(server, req, "sign", job_sign),
         ("POST", ["release"]) => start(server, req, "release", job_release),
+        ("GET", ["release", "latest"]) => release_latest(server),
         ("GET", ["release", id]) => release_get(server, id),
+        ("GET", ["bootcore", node]) => bootcore_get(server, node),
+        ("GET", ["layout"]) => layout_get(server),
+        ("PUT", ["layout"]) => layout_put(server, req),
         ("POST", ["conform"]) => start(server, req, "conform", job_conform),
         ("GET", ["conform", node]) => conform_get(server, node),
         ("POST", ["ai", "topology"]) => start(server, req, "ai_topology", job_ai_topology),
@@ -173,6 +177,7 @@ pub fn handle(server: &Arc<Server>, req: &Request) -> Response {
         ("GET", ["project"]) => Ok(super::project::get(server)),
         ("POST", ["project", "open"]) => Ok(super::project::open(server, req)),
         ("POST", ["project", "new"]) => Ok(super::project::new(server, req)),
+        ("POST", ["project", "init"]) => Ok(super::project::init(server, req)),
         ("GET", ["fs"]) => Ok(super::project::list(server, req)),
         ("POST", ["gen"]) => gen_start(server, req),
         ("POST", ["flash"] | ["doctor"]) => Ok(Response::error(
@@ -186,7 +191,7 @@ pub fn handle(server: &Arc<Server>, req: &Request) -> Response {
 
 /// What this serve offers the page. `flash` and `doctor` join when this
 /// dagon has those commands.
-const FEATURES: [&str; 8] = [
+const FEATURES: [&str; 10] = [
     "topology_save",
     "ai_topology",
     "build",
@@ -195,7 +200,12 @@ const FEATURES: [&str; 8] = [
     "conform",
     "gen",
     "project",
+    "bootcore",
+    "layout",
 ];
+
+/// Largest layout file (呼び名 and editor positions) accepted.
+const MAX_LAYOUT: usize = 256 * 1024;
 
 type Res = Result<Response, Response>;
 
@@ -263,6 +273,8 @@ fn hello(server: &Server) -> Response {
         "key": key.is_some(),
         "key_id": key,
         "release_key": server.release_key().map(|k| to_hex(&k)),
+        // null until a project is open (the page shows the start screen).
+        "project": server.config_path().map(|_| workspace.clone()),
     }))
 }
 
@@ -641,7 +653,106 @@ fn release_get(server: &Server, id: &str) -> Res {
     let p = inside(&cfg, &cfg.base.join(RELEASE_DIR).join(format!("{id}.dgb")))
         .map_err(|e| Response::error(403, &e))?;
     let bytes = std::fs::read(p).map_err(|_| Response::error(404, "no such release"))?;
+    verified(server, bytes, |b, k| {
+        dagon_format::bundle::BundleView::parse(b)
+            .and_then(|v| v.verify(k))
+            .is_ok()
+    })
+}
+
+/// The bytes, once they verify under the open project's key (the one the
+/// page verifies with): a file signed otherwise is not handed out.
+fn verified(server: &Server, bytes: Vec<u8>, ok: impl Fn(&[u8], &[u8; 32]) -> bool) -> Res {
+    let key = server
+        .release_key()
+        .ok_or_else(|| Response::error(409, "no project is open"))?;
+    if !ok(&bytes, &key) {
+        return Err(Response::error(
+            422,
+            "the file does not verify with the project's key",
+        ));
+    }
     Ok(Response::bytes("application/octet-stream", bytes))
+}
+
+/// GET /v1/release/latest: the newest .dgb of the project's out/release.
+fn release_latest(server: &Server) -> Res {
+    let cfg = config(server).map_err(|e| Response::error(500, &e))?;
+    let dir = inside(&cfg, &cfg.base.join(RELEASE_DIR)).map_err(|e| Response::error(403, &e))?;
+    let newest = std::fs::read_dir(&dir)
+        .map_err(|_| Response::error(404, "no release yet"))?
+        .flatten()
+        .filter(|e| e.file_type().is_ok_and(|t| t.is_file()))
+        .filter_map(|e| {
+            let name = e.file_name().to_string_lossy().into_owned();
+            let id = name.strip_suffix(".dgb")?.to_string();
+            let at = e.metadata().and_then(|m| m.modified()).ok()?;
+            plain(&id).then_some((at, id))
+        })
+        .max()
+        .ok_or_else(|| Response::error(404, "no release yet"))?;
+    release_get(server, &newest.1)
+}
+
+/// GET /v1/bootcore/{node}: the node's signed boot core (the ROM path):
+/// [provision.<node>] bootcore, else <provision_dir>/<node>/bootcore.img.
+fn bootcore_get(server: &Server, node: &str) -> Res {
+    if !plain(node) {
+        return Err(Response::error(400, "bad node id"));
+    }
+    let cfg = config(server).map_err(|e| Response::error(500, &e))?;
+    let p = match cfg.provision.get(node) {
+        Some(inputs) => inputs.bootcore.clone(),
+        None => cfg
+            .base
+            .join(cfg.provision_dir())
+            .join(node)
+            .join("bootcore.img"),
+    };
+    let p = inside(&cfg, &p).map_err(|e| Response::error(403, &e))?;
+    let bytes = std::fs::read(p).map_err(|_| Response::error(404, "no boot core for this node"))?;
+    verified(server, bytes, |b, k| {
+        let kind = dagon_sign::image::verify_image(b, k).map(|h| h.image_kind);
+        kind.is_ok_and(|k| k == image_kind::BOOTCORE)
+    })
+}
+
+/// The layout file beside the 構成: `<topology>.layout.json`.
+fn layout_path(server: &Server) -> Result<PathBuf, Response> {
+    let p = topology_path(server)?;
+    let name = p
+        .file_stem()
+        .map(|s| format!("{}.layout.json", s.to_string_lossy()))
+        .ok_or_else(|| Response::error(409, "dagon.toml names no topology"))?;
+    let cfg = config(server).map_err(|e| Response::error(500, &e))?;
+    inside(&cfg, &p.with_file_name(name)).map_err(|e| Response::error(403, &e))
+}
+
+/// GET /v1/layout: 呼び名 and editor positions (404 before the first save).
+fn layout_get(server: &Server) -> Res {
+    let p = layout_path(server)?;
+    let bytes = std::fs::read(p).map_err(|_| Response::error(404, "no layout yet"))?;
+    Ok(Response::bytes("application/json", bytes))
+}
+
+/// PUT /v1/layout: a JSON object, written whole.
+fn layout_put(server: &Server, req: &Request) -> Res {
+    if req.body.len() > MAX_LAYOUT {
+        return Err(Response::error(413, "layout too large"));
+    }
+    let v: Value = serde_json::from_slice(&req.body)
+        .map_err(|_| Response::error(400, "layout must be JSON"))?;
+    if !v.is_object() {
+        return Err(Response::error(400, "layout must be a JSON object"));
+    }
+    let p = layout_path(server)?;
+    let text = serde_json::to_vec_pretty(&v).map_err(|e| Response::error(500, &e.to_string()))?;
+    let _lock = server
+        .files
+        .lock()
+        .map_err(|_| Response::error(500, "lock"))?;
+    crate::paths::write_atomic(&p, &text).map_err(|e| Response::error(500, &e))?;
+    Ok(json_ok(json!({ "saved": true })))
 }
 
 /// The 12 conformance tests on `node` through the hub, after the page
@@ -757,8 +868,11 @@ pub fn page_file(server: &Server, path: &str) -> Option<(Vec<u8>, &'static str)>
     if !ct.starts_with("text/html") {
         return Some((bytes, ct));
     }
-    let key = server.release_key()?;
-    Some((inject_key(&bytes, &key)?, ct))
+    match server.release_key() {
+        Some(key) => Some((inject_key(&bytes, &key)?, ct)),
+        // No project yet: the start screen, with nothing to verify with.
+        None => Some((bytes, ct)),
+    }
 }
 
 fn inject_key(html: &[u8], key: &[u8; 32]) -> Option<Vec<u8>> {
@@ -927,6 +1041,107 @@ mod tests {
         assert!(sign_nodes(&cfg, &t, &seg, &key, &mut |_| {}, &AtomicBool::new(false)).is_err());
         assert!(!sign_path(&cfg, "seg", 'a').exists());
         assert!(signed_images(&cfg, v).is_err());
+        let _ = std::fs::remove_dir_all(&cfg.base);
+    }
+
+    /// A server on `cfg`'s work area (dagon.toml there) verifying with `key`.
+    fn server_on(cfg: &Config, key: [u8; 32]) -> Arc<Server> {
+        let toml = cfg.base.join("dagon.toml");
+        std::fs::write(&toml, "topology = \"t.yaml\"\n").unwrap();
+        let s = Server::new("p".repeat(32), 1, Some(toml), PathBuf::new());
+        s.set_release_key(key);
+        s
+    }
+
+    fn status(r: Res) -> u16 {
+        match r {
+            Ok(r) | Err(r) => r.status,
+        }
+    }
+
+    #[test]
+    fn the_latest_release_is_served_only_when_it_verifies() {
+        let (cfg, t) = built_area("latest");
+        let key = test_key();
+        let server = server_on(&cfg, *key.pk);
+        assert_eq!(status(release_latest(&server)), 404, "none yet");
+        sign_nodes(
+            &cfg,
+            &t,
+            &["seg".into()],
+            &key,
+            &mut |_| {},
+            &AtomicBool::new(false),
+        )
+        .unwrap();
+        let v = dagon_format::Version::new(1, 1, 0);
+        let stop = AtomicBool::new(false);
+        release_from(&cfg, &t, v, "r1", &key, &mut |_| {}, &stop).unwrap();
+        std::thread::sleep(std::time::Duration::from_millis(20));
+        release_from(&cfg, &t, v, "r2", &key, &mut |_| {}, &stop).unwrap();
+        let r2 = std::fs::read(cfg.base.join(RELEASE_DIR).join("r2.dgb")).unwrap();
+        let got = release_latest(&server).unwrap();
+        assert_eq!((got.status, got.body.clone()), (200, r2));
+        // Signed with another key than the project's: not handed out.
+        server.set_release_key([9; 32]);
+        assert_eq!(status(release_latest(&server)), 422);
+        assert_eq!(status(release_get(&server, "r1")), 422);
+        // A file that is no release at all.
+        server.set_release_key(*key.pk);
+        std::fs::write(cfg.base.join(RELEASE_DIR).join("r1.dgb"), b"junk").unwrap();
+        assert_eq!(status(release_get(&server, "r1")), 422);
+        assert_eq!(status(release_get(&server, "..")), 400);
+        let _ = std::fs::remove_dir_all(&cfg.base);
+    }
+
+    fn bootcore_image(key: &ed25519_compact::KeyPair) -> Vec<u8> {
+        use dagon_sign::image::{self, sign_image, ImageSpec};
+        let (flags, caps) = image::default_bits(image_kind::BOOTCORE);
+        let mcu = "stm32f401re";
+        let spec = ImageSpec {
+            image_kind: image_kind::BOOTCORE,
+            port_kind: dagon_topology::port_kind_of("self-boot").unwrap(),
+            mcu_id: dagon_topology::mcu_id_of(mcu).unwrap(),
+            slot: image::slot(mcu, image_kind::BOOTCORE, 0).unwrap(),
+            version: dagon_format::Version::new(1, 0, 0),
+            build_flags: flags,
+            release_seq: 1,
+            min_bootcore_version: dagon_format::Version::new(0, 0, 0),
+            target_tag: dagon_format::header::target_tag("seg-f401-7seg"),
+            proto_version: 1,
+            capabilities: caps,
+        };
+        sign_image(&spec, &[0xB0; 2000], key).unwrap()
+    }
+
+    #[test]
+    fn a_boot_core_is_served_only_when_it_verifies() {
+        let (cfg, _) = built_area("bootcore");
+        let key = test_key();
+        let server = server_on(&cfg, *key.pk);
+        assert_eq!(status(bootcore_get(&server, "seg")), 404);
+        assert_eq!(status(bootcore_get(&server, "..")), 400);
+        let dir = cfg.base.join(cfg.provision_dir()).join("seg");
+        std::fs::create_dir_all(&dir).unwrap();
+        let img = bootcore_image(&key);
+        std::fs::write(dir.join("bootcore.img"), &img).unwrap();
+        let got = bootcore_get(&server, "seg").unwrap();
+        assert_eq!((got.status, got.body.clone()), (200, img.clone()));
+        server.set_release_key([9; 32]);
+        assert_eq!(status(bootcore_get(&server, "seg")), 422, "another key");
+        server.set_release_key(*key.pk);
+        let mut bad = img.clone();
+        let last = bad.len() - 1;
+        bad[last] ^= 1;
+        std::fs::write(dir.join("bootcore.img"), &bad).unwrap();
+        assert_eq!(status(bootcore_get(&server, "seg")), 422, "changed payload");
+        // [provision.seg] bootcore naming a file outside the project.
+        std::fs::write(
+            cfg.base.join("dagon.toml"),
+            "topology = \"t.yaml\"\n[provision.seg]\nbootcore = \"../outside.img\"\napp = \"a\"\n",
+        )
+        .unwrap();
+        assert_eq!(status(bootcore_get(&server, "seg")), 403);
         let _ = std::fs::remove_dir_all(&cfg.base);
     }
 

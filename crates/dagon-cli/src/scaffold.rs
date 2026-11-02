@@ -745,6 +745,28 @@ pub fn new_project(dir: &Path, name: &str, yaml: &str, keys: &Path) -> Result<Ve
     }
     dagon_topology::parse_str(yaml).map_err(|e| format!("topology: {e}"))?;
     std::fs::create_dir_all(dir).map_err(|e| format!("cannot create {}: {e}", dir.display()))?;
+    for (f, text) in [("topology.yaml", yaml), (".gitignore", "/out/\ntarget/\n")] {
+        write_atomic(&dir.join(f), text.as_bytes())?;
+    }
+    let mut made = init_project(dir, name, "topology.yaml", keys)?;
+    made.push("created    topology.yaml".into());
+    made.push("created    .gitignore".into());
+    Ok(made)
+}
+
+/// dagon.toml for the 構成 `topology` (a file name in `dir`) and, when
+/// `keys` holds none, a signing key pair there. Refuses a folder that
+/// already has a dagon.toml.
+pub fn init_project(
+    dir: &Path,
+    name: &str,
+    topology: &str,
+    keys: &Path,
+) -> Result<Vec<String>, String> {
+    let config = dir.join(crate::config::CONFIG_FILE);
+    if config.exists() {
+        return Err("the folder already has a dagon.toml".into());
+    }
     let mut made = Vec::new();
     let secret = keys.join(dagon_sign::SECRET_FILE);
     if !secret.exists() {
@@ -766,22 +788,15 @@ pub fn new_project(dir: &Path, name: &str, yaml: &str, keys: &Path) -> Result<Ve
     let src = src.to_string_lossy().replace('\\', "/");
     let src = src.strip_prefix("//?/").unwrap_or(&src).to_string();
     let toml = format!(
-        "# DAGON project {name:?}.\ntopology = \"topology.yaml\"\n\
+        "# DAGON project {name:?}.\ntopology = {topology:?}\n\
          # Public key the firmware and the page verify images with (the secret\n\
          # key stays outside the project: DAGON_SIGNING_KEY).\npubkey = {pubkey:?}\n\n\
          # Where the generated crates take the DAGON board support packages from:\n\
          # a release (git and tag) or, for development, a local clone (path).\n\
          [dagon]\n# git = \"<DAGON repository URL>\"\n# tag = \"<release tag>\"\npath = {src:?}\n"
     );
-    let files = [
-        ("dagon.toml", toml.as_str()),
-        ("topology.yaml", yaml),
-        (".gitignore", "/out/\ntarget/\n"),
-    ];
-    for (f, text) in files {
-        write_atomic(&dir.join(f), text.as_bytes())?;
-        made.push(format!("created    {f}"));
-    }
+    write_atomic(&config, toml.as_bytes())?;
+    made.push("created    dagon.toml".into());
     Ok(made)
 }
 

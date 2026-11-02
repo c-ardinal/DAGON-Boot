@@ -15,6 +15,7 @@ mod api;
 mod http;
 mod jobs;
 mod project;
+mod recent;
 mod ws;
 
 use std::io::Write;
@@ -51,13 +52,21 @@ fn passphrase() -> Result<String, String> {
 /// `dagon serve [--port <n>] [--web <dir>] [--no-open] [--config <file>]`
 /// The key the page verifies with at start, through the same checks as an
 /// opened project: --pubkey, pubkey in dagon.toml (also only from the
-/// project or a key folder), else the public half of the signing key.
-fn start_key(o: &Opts<'_>, server: &Server, config: Option<&Path>) -> Result<[u8; 32], String> {
+/// project or a key folder), else the public half of the signing key
+/// (--key or DAGON_SIGNING_KEY). None when none of them is given: serve
+/// starts on the start screen and the key comes with the project.
+fn start_key(
+    o: &Opts<'_>,
+    server: &Server,
+    config: Option<&Path>,
+) -> Result<Option<[u8; 32]>, String> {
     let c = api::config_at(server, config)?;
+    let explicit_key = o.get("key").is_some() || std::env::var_os(crate::config::KEY_ENV).is_some();
     match (o.get("pubkey"), &c.pubkey) {
-        (Some(p), _) => crate::config::checked_pubkey(&c, Path::new(p)),
-        (None, Some(_)) => api::release_key_of(&c),
-        (None, None) => Ok(*crate::config::load_key(o.get("key"))?.pk),
+        (Some(p), _) => crate::config::checked_pubkey(&c, Path::new(p)).map(Some),
+        (None, Some(_)) => api::release_key_of(&c).map(Some),
+        (None, None) if explicit_key => Ok(Some(*crate::config::load_key(o.get("key"))?.pk)),
+        (None, None) => Ok(None),
     }
 }
 
@@ -98,7 +107,9 @@ pub fn command(args: &[&str]) -> Result<(), String> {
              (from dagon key gen) or set pubkey in dagon.toml ({e})"
         )
     })?;
-    server.set_release_key(key);
+    if let Some(k) = key {
+        server.set_release_key(k);
+    }
     if web.as_os_str().is_empty() {
         println!("page: built into this executable");
     } else if !web.join("index.html").exists() {
@@ -107,10 +118,13 @@ pub fn command(args: &[&str]) -> Result<(), String> {
             web.display()
         );
     }
-    println!(
-        "release key: {}",
-        dagon_sign::to_hex(&dagon_format::key_id(&key))
-    );
+    match key {
+        Some(k) => println!(
+            "release key: {}",
+            dagon_sign::to_hex(&dagon_format::key_id(&k))
+        ),
+        None => println!("no project yet: open or create one on the page"),
+    }
     let url = format!("http://127.0.0.1:{port}/#{}", server.pass);
     println!("dagon serve on http://127.0.0.1:{port}/ (Ctrl+C stops it)");
     println!("open: {url}");

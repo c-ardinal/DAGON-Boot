@@ -279,6 +279,7 @@ name = "dagon-board-waveshare-rp2040-touch-lcd-1-28"
 version = "0.0.0"
 dependencies = [
  "dagon-mcu-rp2040",
+ "embassy-executor",
  "embassy-rp",
  "embassy-time",
  "embedded-graphics",
@@ -310,6 +311,7 @@ name = "dagon-mcu-common"
 version = "0.0.0"
 dependencies = [
  "critical-section",
+ "dagon-agent",
  "dagon-format",
  "dagon-port",
  "dagon-proto",

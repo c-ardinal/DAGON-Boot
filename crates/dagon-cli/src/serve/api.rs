@@ -144,37 +144,78 @@ fn json_ok(v: Value) -> Response {
     Response::json(200, &v)
 }
 
-/// Firmware packages under targets/ with their features, and the board table.
+/// Firmware packages with their features, and the board table. Packages are
+/// directories with a Cargo.toml: `targets/<pkg>`, one level deeper for the
+/// support packages (`targets/mcu/<mcu>`, `targets/boards/<board>`), and the
+/// sample apps under `samples/<pkg>`.
 fn targets(server: &Server) -> Res {
     let cfg = config(server).map_err(|e| Response::error(500, &e))?;
     let mut out = Vec::new();
-    if let Ok(dirs) = std::fs::read_dir(cfg.base.join("targets")) {
-        let mut dirs: Vec<PathBuf> = dirs.filter_map(|d| d.ok().map(|d| d.path())).collect();
-        dirs.sort();
-        for d in dirs {
-            let Ok(text) = std::fs::read_to_string(d.join("Cargo.toml")) else {
-                continue;
-            };
-            let Ok(v) = toml::from_str::<toml::Value>(&text) else {
-                continue;
-            };
-            let features: Vec<String> = v
-                .get("features")
-                .and_then(|f| f.as_table())
-                .map(|t| t.keys().filter(|k| *k != "default").cloned().collect())
-                .unwrap_or_default();
-            out.push(json!({
-                "dir": format!("targets/{}", d.file_name().unwrap_or_default().to_string_lossy()),
-                "name": v.get("package").and_then(|p| p.get("name")).and_then(|n| n.as_str()),
-                "features": features,
-            }));
-        }
+    for rel in package_dirs(&cfg.base) {
+        let Ok(text) = std::fs::read_to_string(cfg.base.join(&rel).join("Cargo.toml")) else {
+            continue;
+        };
+        let Ok(v) = toml::from_str::<toml::Value>(&text) else {
+            continue;
+        };
+        let features: Vec<String> = v
+            .get("features")
+            .and_then(|f| f.as_table())
+            .map(|t| t.keys().filter(|k| *k != "default").cloned().collect())
+            .unwrap_or_default();
+        out.push(json!({
+            "dir": rel,
+            "name": v.get("package").and_then(|p| p.get("name")).and_then(|n| n.as_str()),
+            "features": features,
+        }));
     }
     let boards: Vec<Value> = dagon_topology::boards::BOARDS
         .iter()
         .map(|b| json!({"id": b.id, "product": b.product, "mcu": b.mcu}))
         .collect();
     Ok(json_ok(json!({ "targets": out, "boards": boards })))
+}
+
+/// Package directories relative to `base`, `/`-separated and sorted:
+/// `targets/*` and `samples/*` with a Cargo.toml, and for a directory under
+/// `targets/` without one (a group such as `mcu` or `boards`), its children.
+fn package_dirs(base: &std::path::Path) -> Vec<String> {
+    fn children(dir: &std::path::Path) -> Vec<PathBuf> {
+        let mut v: Vec<PathBuf> = std::fs::read_dir(dir)
+            .map(|d| d.filter_map(|e| e.ok().map(|e| e.path())).collect())
+            .unwrap_or_default();
+        v.retain(|p| p.is_dir());
+        v.sort();
+        v
+    }
+    let rel = |p: &std::path::Path| {
+        p.strip_prefix(base)
+            .unwrap_or(p)
+            .components()
+            .map(|c| c.as_os_str().to_string_lossy().into_owned())
+            .collect::<Vec<_>>()
+            .join("/")
+    };
+    let mut out = Vec::new();
+    for d in children(&base.join("targets")) {
+        if d.join("Cargo.toml").is_file() {
+            out.push(rel(&d));
+        } else {
+            out.extend(
+                children(&d)
+                    .into_iter()
+                    .filter(|c| c.join("Cargo.toml").is_file())
+                    .map(|c| rel(&c)),
+            );
+        }
+    }
+    out.extend(
+        children(&base.join("samples"))
+            .into_iter()
+            .filter(|c| c.join("Cargo.toml").is_file())
+            .map(|c| rel(&c)),
+    );
+    out
 }
 
 fn topology_path(server: &Server) -> Result<PathBuf, Response> {
@@ -633,6 +674,39 @@ mod tests {
         };
         let yaml = include_str!("../../../../topology/sim-pair.yaml");
         (cfg, dagon_topology::parse_str(yaml).unwrap())
+    }
+
+    #[test]
+    fn package_dirs_cover_support_packages_and_samples() {
+        let base = std::env::temp_dir().join(format!("dagon-pkgdirs-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&base);
+        for d in [
+            "targets/f401-app",
+            "targets/mcu/esp32s3",
+            "targets/boards/m5stopwatch",
+            "targets/esp32s3-2ndstage",
+            "samples/esp32s3-app",
+        ] {
+            std::fs::create_dir_all(base.join(d)).unwrap();
+            if d != "targets/esp32s3-2ndstage" {
+                std::fs::write(
+                    base.join(d).join("Cargo.toml"),
+                    "[package]
+",
+                )
+                .unwrap();
+            }
+        }
+        assert_eq!(
+            package_dirs(&base),
+            [
+                "targets/boards/m5stopwatch",
+                "targets/f401-app",
+                "targets/mcu/esp32s3",
+                "samples/esp32s3-app",
+            ]
+        );
+        let _ = std::fs::remove_dir_all(&base);
     }
 
     #[test]

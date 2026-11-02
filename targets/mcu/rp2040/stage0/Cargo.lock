@@ -112,6 +112,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "dagon-agent"
+version = "0.0.0"
+dependencies = [
+ "dagon-core",
+ "dagon-format",
+ "dagon-port",
+ "dagon-proto",
+]
+
+[[package]]
 name = "dagon-core"
 version = "0.0.0"
 dependencies = [
@@ -137,6 +147,7 @@ name = "dagon-mcu-common"
 version = "0.0.0"
 dependencies = [
  "critical-section",
+ "dagon-agent",
  "dagon-format",
  "dagon-port",
  "dagon-proto",

@@ -260,6 +260,7 @@ name = "dagon-mcu-common"
 version = "0.0.0"
 dependencies = [
  "critical-section",
+ "dagon-agent",
  "dagon-format",
  "dagon-port",
  "dagon-proto",

@@ -59,11 +59,17 @@
         await opened.open();
         return opened;
       }
-      opened = await chooseAndOpen(serial!);
-      return opened;
+      // `opened` follows only once Operate took it as this hub (reconnectChosen).
+      return chooseAndOpen(serial!);
     },
     timer: true,
     clock: stand?.clock,
+    // The CLI gave the hub back: the device the page had, opened again without the chooser.
+    again: async () => {
+      if (!opened) throw new Error('no device');
+      await opened.open();
+      return opened;
+    },
     // The project's files through dagon serve only (stand-ins in development); nothing public.
     latest: async () => (cli.state === 'ready' ? await cli.latestRelease() : null) ?? (await stand?.latest?.()) ?? null,
     bootcore: async (id) => (cli.state === 'ready' ? await cli.bootcore(id) : null) ?? (await stand?.bootcore?.(id)) ?? null,
@@ -338,19 +344,24 @@
    */
   serial?.addEventListener('connect', (e) => {
     const port = portOf(e);
+    // One device at a time: candidates reported together are judged in turn.
+    connecting = connecting.then(() => hubConnected(port)).catch(() => undefined);
+  });
+  let connecting: Promise<void> = Promise.resolve();
+  /** "もう一度つなぐ": the device the user chose, kept only when Operate took it as this hub. */
+  async function reconnectChosen() {
+    if (await op.reconnectHub()) opened = op.device;
+  }
+  async function hubConnected(port: SerialPort) {
     if (opened instanceof WebSerialTransport) opened.arrived(port);
     if (op.state !== 'L21') return;
-    let t: WebSerialTransport | null = null;
-    void op
-      .reconnectHub(async () => {
-        t = new WebSerialTransport(port);
-        await t.open();
-        return t;
-      }, true)
-      .then((took) => {
-        if (took && t) opened = t;
-      });
-  });
+    const t = new WebSerialTransport(port);
+    const took = await op.reconnectHub(async () => {
+      await t.open();
+      return t;
+    }, true);
+    if (took) opened = t;
+  }
 
   let primaryEl = $state<HTMLButtonElement>();
   let nextEl = $state<HTMLDivElement>();
@@ -549,6 +560,7 @@
       responding: op.responding,
       unwritten,
       rest: op.rest && op.state === 'L18',
+      finish: op.finished,
     });
     if (dialogOpen) return { ...b, primary: null };
     if (op.latestMissing) return { ...b, ...BAND.M58 };
@@ -592,7 +604,7 @@
       case 'reselect':
         return void op.connect();
       case 'reconnect':
-        return void (op.state === 'L20' || op.state === 'L21' ? op.reconnectHub() : op.connect());
+        return void (op.state === 'L20' || op.state === 'L21' ? reconnectChosen() : op.connect());
       case 'chooseFile':
       case 'updateResponding':
       case 'otherFile':
@@ -858,7 +870,7 @@
     />
   {/if}
   {#if dialogOpen}
-    <Reconnect notes={op.reconnectNotes} onreconnect={() => void op.reconnectHub()} onclose={() => (dialogDismissed = true)} />
+    <Reconnect notes={op.reconnectNotes} onreconnect={() => void reconnectChosen()} onclose={() => (dialogDismissed = true)} />
   {/if}
 {/if}
 

@@ -2,6 +2,7 @@
 // named buttons the machine allows there.
 import { BAND, BAND_FOR, BUTTON, BUTTON_FOR, type BandCopy } from './copy.ts';
 import { view, type Action, type Ctx, type L } from './machine.ts';
+import type { Finish } from './operate.svelte.ts';
 
 export interface Button {
   action: Action;
@@ -21,6 +22,8 @@ export interface Names {
   unwritten?: number;
   /** The update covers the nodes left after a recovery (M50). */
   rest?: boolean;
+  /** What the last run left (L23): the band says only that. */
+  finish?: Finish | null;
 }
 
 const REFUSAL_BAND = { source: BAND.M18, key: BAND.M18b, format: BAND.M19, topology: BAND.M20 } as const;
@@ -56,7 +59,8 @@ function words(s: L, c: Ctx, n: Names): BandCopy {
     case 'L12':
       return BAND.M13;
     case 'L13':
-      return BAND.M62b;
+      // Nothing left to update first: recovery is the main action (M62).
+      return c.answering === false ? BAND.M62 : BAND.M62b;
     case 'L14':
     case 'L15':
       return BAND.M63;
@@ -67,7 +71,7 @@ function words(s: L, c: Ctx, n: Names): BandCopy {
     case 'L22':
       return n.unwritten && n.stuck ? BAND_FOR.M29(n.stuck) : BAND.M65;
     case 'L23':
-      return BAND.M66;
+      return done(n.finish);
     case 'L28':
       return BAND.M67;
     case 'L16':
@@ -86,6 +90,14 @@ function words(s: L, c: Ctx, n: Names): BandCopy {
     default:
       return {};
   }
+}
+
+/** L23 says only what is true: all updated, some not (they did not answer), or one node rolled back or recovered. */
+function done(f: Finish | null | undefined): BandCopy {
+  if (f?.kind === 'rolledBack') return BAND_FOR.M66back(f.name, f.version);
+  if (f?.kind === 'recovered') return BAND_FOR.M66fixed(f.name, f.version);
+  if (f?.kind === 'updated' && f.left > 0) return BAND_FOR.M66some(f.left);
+  return BAND.M66;
 }
 
 function label(a: Action, n: Names): string {

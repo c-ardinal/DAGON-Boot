@@ -118,6 +118,8 @@ export const BAND = {
    * L13, with a power and wiring hint for the silent ones.
    */
   M62b: { sentence: '応答しないノードは電源と配線を確かめ、応答するノードから先に更新してください。' },
+  /** M62: L13 when the answering nodes need nothing more (already updated, or after 「応答する n つだけ先に更新」). */
+  M62: { pair: ['目安', '約 1 分'], sentence: '印の付いたノードは、復旧すると元どおりに動きます。' },
   M63: { sentence: '確かめ終わるまで、そのまま待ってください。' },
   M64: { sentence: '親機が再起動したら自動でつなぎ直すので、そのまま待ってください。' },
   M65: { pair: ['目安', '約 1 分'], sentence: '止まったノードを復旧すると、新しいバージョンで動きます。' },
@@ -173,6 +175,12 @@ export const TIME = {
 /** M29: beside the recover button when nodes after the stopped one are not written yet. */
 export const BAND_FOR = {
   M29: (stuck: string) => ({ pair: ['目安', '約 1 分'] as const, sentence: `${stuck}を直すと、残りのノードを更新できます。` }),
+  /** 案 (L23 when M66 is not true): the nodes that did not answer were not updated. */
+  M66some: (n: number) => ({ sentence: `応答しなかった ${n} つのノードは前のままなので、電源と配線を確かめてから復旧してください。` }),
+  /** 案 (L23 after 「前のバージョンに戻す」). */
+  M66back: (name: string, version: string) => ({ sentence: `${name}は前のバージョン ${version} で動いています。` }),
+  /** 案 (L23 after a recovery with nothing left to update). */
+  M66fixed: (name: string, version: string) => ({ sentence: `${name}は直り、${version} で動いています。` }),
 } as const;
 
 /** M01: browser without Web Serial. */
@@ -375,6 +383,7 @@ export const RECONNECT = {
     several: (n: number) => `同じ種類の機器 ${n} つ（どれか決められない）`,
     silent: '現れた機器 応答なし',
     notHub: '現れた機器 子機',
+    otherHub: '現れた機器 別の親機',
     version: (v: string, trial: boolean) => `現れた親機 ${v}${trial ? '' : '（前のバージョン）'}`,
   },
 } as const;

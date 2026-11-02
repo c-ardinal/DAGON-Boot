@@ -7,11 +7,12 @@ import { ROLE_HUB, type HelloResp } from './hello.ts';
  * under the reconnect dialog). `away`: the port the page had would not
  * open; `none`: no other allowed device of the same kind appeared;
  * `several`: more than one appeared and no version to tell them by;
+ * `otherHub`: a hub with another MCU or release key than the one connected;
  * `silent`: a candidate did not answer HELLO; `notHub`: it answered as a
  * node; `version`: a hub not on trial with the version just sent.
  */
 export type ReconnectNote =
-  | { kind: 'away' | 'none' | 'silent' | 'notHub' }
+  | { kind: 'away' | 'none' | 'silent' | 'notHub' | 'otherHub' }
   | { kind: 'several'; count: number }
   | { kind: 'version'; version: number; trial: boolean };
 
@@ -37,6 +38,13 @@ export interface Transport {
 /** The hub on trial with the version the page just sent it (dagon-host then confirms it). */
 export function isHubOnTrial(h: HelloResp | null, version: number | null): boolean {
   return h !== null && h.role === ROLE_HUB && h.trial && h.activeVersion === version;
+}
+
+const NOTE_KINDS: readonly string[] = ['away', 'none', 'silent', 'notHub', 'otherHub', 'several', 'version'];
+
+/** A ReconnectNote (thrown where a candidate is turned down). */
+export function isNote(e: unknown): e is ReconnectNote {
+  return typeof e === 'object' && e !== null && NOTE_KINDS.includes((e as { kind?: string }).kind ?? '');
 }
 
 /** Why a HELLO answer is not the hub on trial with the version just sent. */
@@ -170,9 +178,10 @@ export class WebSerialTransport implements Transport {
    * (vendor and product id) that appeared since: after a reboot the hub
    * enumerates again and the browser may hand it out as a new port, still
    * allowed when it reports the same USB serial number. Web Serial does not
-   * show that serial number, so one such port is taken as it is (dagon-host
-   * then reads its version), and of several only the hub on trial with the
-   * version just sent (`expectHub`) is kept; otherwise nothing is opened
+   * show that serial number, so once a version was sent (`expectHub`) only
+   * the hub on trial with it is kept, even when one port appeared (dagon-host
+   * checks the version only); with none sent, a single port is taken as it
+   * is. Otherwise nothing is opened
    * (another hub of the same kind must not be taken for this one) and the
    * user chooses again.
    */
@@ -198,7 +207,8 @@ export class WebSerialTransport implements Transport {
       const info = p.getInfo();
       return (!this.known.has(p) || this.back.has(p)) && p !== this.port && info.usbVendorId === want.usbVendorId && info.usbProductId === want.usbProductId;
     });
-    if (same.length === 1) return same[0];
+    // Without a version to tell by (no update ran), the one that appeared is taken as it is.
+    if (same.length === 1 && this.expected === null) return same[0];
     if (same.length === 0 || this.expected === null) {
       this.note(same.length === 0 ? { kind: 'none' } : { kind: 'several', count: same.length });
       return null;

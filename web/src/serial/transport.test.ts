@@ -187,6 +187,18 @@ describe('WebSerialTransport read loop', () => {
       expect(u.notes()).toEqual([{ kind: 'away' }, { kind: 'several', count: 2 }]);
     });
 
+    test('one device appeared after a version was sent: taken only when it is the hub on trial with it', async () => {
+      const wrong = await rebooted([answering(hub(V100, false))], V110);
+      await expect(wrong.open()).rejects.toThrow('lost');
+      expect(wrong.notes()).toEqual([{ kind: 'away' }, { kind: 'version', version: V100, trial: false }]);
+
+      const back = answering(hub(V110, true));
+      const right = await rebooted([back], V110);
+      await right.open();
+      expect(right.port).toBe(back);
+      await right.close();
+    });
+
     test('a candidate that does not answer, and none at all, are noted for the diagnostic log', async () => {
       const t = await rebooted([answering(null), answering({ ...hub(V110, true), role: ROLE_NODE })], V110);
       await expect(t.open()).rejects.toThrow('lost');

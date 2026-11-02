@@ -68,17 +68,24 @@ export class WebSerialTransport implements Transport {
     private readonly serial: Pick<Serial, 'getPorts'> | null = globalThis.navigator?.serial ?? null,
   ) {}
 
+  /** Allowed ports present when this one last opened: none of them is this device coming back. */
+  private known = new Set<SerialPort>();
+
   async open(): Promise<void> {
     this.port = await this.reopenable();
+    this.known = new Set((await this.serial?.getPorts()) ?? []);
     this.closing = false;
     this.pump = this.readLoop();
   }
 
   /**
-   * Opens this port, or else an already allowed port of the same USB device
-   * (vendor and product id): after a reboot the hub enumerates again and the
-   * browser may hand it out as a new port, still allowed when it reports
-   * the same USB serial number.
+   * Opens this port, or else the one allowed port of the same USB device
+   * (vendor and product id) that appeared since: after a reboot the hub
+   * enumerates again and the browser may hand it out as a new port, still
+   * allowed when it reports the same USB serial number. Web Serial does not
+   * show that serial number, so with no or several such ports nothing is
+   * opened (another hub of the same kind must not be taken for this one)
+   * and the user chooses again.
    */
   private async reopenable(): Promise<SerialPort> {
     try {
@@ -87,17 +94,13 @@ export class WebSerialTransport implements Transport {
     } catch (e) {
       const want = this.port.getInfo();
       const ports = (await this.serial?.getPorts()) ?? [];
-      for (const p of ports) {
+      const back = ports.filter((p) => {
         const info = p.getInfo();
-        if (p === this.port || info.usbVendorId !== want.usbVendorId || info.usbProductId !== want.usbProductId) continue;
-        try {
-          await p.open({ baudRate: CDC_BAUD });
-          return p;
-        } catch {
-          // Not this one; try the next.
-        }
-      }
-      throw e;
+        return !this.known.has(p) && p !== this.port && info.usbVendorId === want.usbVendorId && info.usbProductId === want.usbProductId;
+      });
+      if (back.length !== 1) throw e;
+      await back[0].open({ baudRate: CDC_BAUD });
+      return back[0];
     }
   }
 

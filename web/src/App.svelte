@@ -47,7 +47,9 @@
   });
 
   serial?.addEventListener('disconnect', (e) => {
-    if (opened instanceof WebSerialTransport && e.target === opened.port) op.lose();
+    // Chrome's SerialConnectionEvent names the port; the spec's event targets it.
+    const port = (e as Event & { port?: SerialPort }).port ?? e.target;
+    if (opened instanceof WebSerialTransport && port === opened.port) op.lose();
   });
 
   let primaryEl = $state<HTMLButtonElement>();

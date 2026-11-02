@@ -5,6 +5,10 @@ edition = "2021"
 license = "MIT OR Apache-2.0"
 publish = false
 
+# Id in the topology board table; `dagon gen` finds this package by it.
+[package.metadata.dagon]
+board = "m5stopwatch"
+
 # M5StopWatch board layer for DAGON: pins, the rear-pin UART/USB switch and
 # AMOLED reset through the M5IOE1 expander, the M5PM1 power manager, the
 # AMOLED bus pins. Everything chip-level comes from dagon-mcu-esp32s3.

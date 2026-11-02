@@ -14,6 +14,7 @@
 mod api;
 mod http;
 mod jobs;
+mod project;
 mod ws;
 
 use std::io::Write;
@@ -51,7 +52,7 @@ fn passphrase() -> Result<String, String> {
 pub fn command(args: &[&str]) -> Result<(), String> {
     let no_open = args.contains(&"--no-open");
     let args: Vec<&str> = args.iter().copied().filter(|a| *a != "--no-open").collect();
-    let o = Opts::parse(&args, &["port", "web", "config"])?;
+    let o = Opts::parse(&args, &["port", "web", "config", "pubkey", "key"])?;
     if !o.pos.is_empty() {
         return Err("serve takes options only".into());
     }
@@ -61,10 +62,22 @@ pub fn command(args: &[&str]) -> Result<(), String> {
             .exists()
             .then(|| PathBuf::from(CONFIG_FILE)),
     };
-    let base = Config::load(o.get("config"))?.base;
-    let web = o
-        .get("web")
-        .map_or_else(|| base.join(DEFAULT_WEB), PathBuf::from);
+    let cfg = Config::load(o.get("config"))?;
+    // The page verifies releases with the developer's public key, given
+    // now (not baked into the page): --pubkey, pubkey in dagon.toml, or the
+    // public half of the signing key. The test key needs
+    // DAGON_ALLOW_TEST_KEY=1.
+    let key = crate::device::pubkey(&o, &cfg).map_err(|e| {
+        format!(
+            "dagon serve needs the developer's public key: pass --pubkey <file> \
+             (from dagon key gen) or set pubkey in dagon.toml ({e})"
+        )
+    })?;
+    let web = match o.get("web") {
+        Some(w) => PathBuf::from(w),
+        None if api::page_embedded() => PathBuf::new(),
+        None => cfg.base.join(DEFAULT_WEB),
+    };
     let port: u16 = o
         .get("port")
         .map_or(Ok(0), |p| p.parse().map_err(|_| "--port must be a number"))?;
@@ -72,13 +85,28 @@ pub fn command(args: &[&str]) -> Result<(), String> {
     let listener = TcpListener::bind(("127.0.0.1", port))
         .map_err(|e| format!("cannot listen on 127.0.0.1:{port}: {e}"))?;
     let port = listener.local_addr().map_err(|e| e.to_string())?.port();
-    let server = Server::new(passphrase()?, port, config, web.clone());
-    if !web.join("index.html").exists() {
+    let server = Server::new(passphrase()?, port, config.clone(), web.clone());
+    if o.get("pubkey").is_none() && cfg.pubkey.is_some() {
+        let c = api::config_at(&server, config.as_deref())?;
+        let checked = api::release_key_of(&c)
+            .map_err(|e| format!("dagon serve: pubkey in dagon.toml: {e}"))?;
+        if checked != key {
+            return Err("dagon serve: pubkey in dagon.toml changed while starting".into());
+        }
+    }
+    server.set_release_key(key);
+    if web.as_os_str().is_empty() {
+        println!("page: built into this executable");
+    } else if !web.join("index.html").exists() {
         eprintln!(
             "note: {} has no index.html; build the page (npm run build in web/) or pass --web",
             web.display()
         );
     }
+    println!(
+        "release key: {}",
+        dagon_sign::to_hex(&dagon_format::key_id(&key))
+    );
     let url = format!("http://127.0.0.1:{port}/#{}", server.pass);
     println!("dagon serve on http://127.0.0.1:{port}/ (Ctrl+C stops it)");
     println!("open: {url}");
@@ -184,7 +212,7 @@ fn connection(mut stream: TcpStream, server: &Arc<Server>) {
             Response::error(401, "passphrase required")
         }
     } else if req.method == "GET" {
-        match api::static_file(&server.web, path) {
+        match api::page_file(server, path) {
             Some((body, ct)) => Response::bytes(ct, body),
             None => Response::error(404, "not found"),
         }

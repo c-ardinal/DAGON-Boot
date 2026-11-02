@@ -8,6 +8,7 @@ import init, {
   hello_decode,
   hello_request,
   supported_boards as boards,
+  version_older,
   version_text,
 } from './pkg/dagon_wasm.js';
 import type { HostLink } from './pkg/dagon_wasm.js';
@@ -221,6 +222,11 @@ export function decodeHelloResp(body: Uint8Array): HelloResp {
   } finally {
     h.free();
   }
+}
+
+/** Raw version `a` is older than `b`, by dagon-format's ordering. */
+export function versionOlder(a: number, b: number): boolean {
+  return version_older(a, b);
 }
 
 /** `major.minor.patch` of a raw version u32. */

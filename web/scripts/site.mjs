@@ -16,8 +16,8 @@
 import { createHash } from 'node:crypto';
 import { resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { mkdir, readFile, writeFile } from 'node:fs/promises';
-import { initSync, check_bootcore_for, check_release_for, topo_compile } from '../src/wasm/pkg/dagon_wasm.js';
+import { mkdir, readdir, readFile, writeFile } from 'node:fs/promises';
+import { initSync, check_bootcore_for, check_release_for, release_key_is_test, topo_compile } from '../src/wasm/pkg/dagon_wasm.js';
 
 const web = new URL('..', import.meta.url);
 const repo = new URL('..', web);
@@ -27,7 +27,16 @@ const arg = (name, fallback) => {
   return i > 0 ? pathToFileURL(resolve(process.argv[i + 1])) : new URL(fallback, repo);
 };
 
-initSync({ module: await readFile(new URL('src/wasm/pkg/dagon_wasm_bg.wasm', web)) });
+const sha = (b) => createHash('sha256').update(b).digest('hex');
+const wasm = await readFile(new URL('src/wasm/pkg/dagon_wasm_bg.wasm', web));
+// The checks below use src/wasm/pkg: it must be the very wasm dist/ serves.
+const served = (await readdir(new URL('assets/', dist)).catch(() => [])).filter((f) => /^dagon_wasm_bg-.*\.wasm$/.test(f));
+if (served.length !== 1) throw new Error('dist/assets has no single dagon-wasm: run `npm run build` first');
+if (sha(await readFile(new URL(`assets/${served[0]}`, dist))) !== sha(wasm)) {
+  throw new Error('src/wasm/pkg is not the wasm in dist/: run `npm run build` again (npm test and dev rebuild it)');
+}
+initSync({ module: wasm });
+const testKey = release_key_is_test();
 
 const yaml = await readFile(new URL('topology/desk-demo.yaml', repo), 'utf8');
 const topology = topo_compile(yaml);
@@ -36,9 +45,6 @@ const bootcore = await readFile(arg('bootcore', 'out/provision/seg/bootcore.img'
 check_release_for(release, topology);
 check_bootcore_for(bootcore);
 
-await readFile(new URL('index.html', dist)).catch(() => {
-  throw new Error('dist/index.html is missing: run `npm run build` first');
-});
 await mkdir(new URL('release/', dist), { recursive: true });
 await mkdir(new URL('sample/', dist), { recursive: true });
 const files = {
@@ -49,7 +55,6 @@ const files = {
 };
 for (const [path, bytes] of Object.entries(files)) await writeFile(new URL(path, dist), bytes);
 
-const sha = (b) => createHash('sha256').update(b).digest('hex');
-console.log('dist/ prepared (not published):');
-console.log(`  page              index.html, assets/ (wasm ${sha(await readFile(new URL('src/wasm/pkg/dagon_wasm_bg.wasm', web))).slice(0, 16)}…)`);
+console.log(`dist/ prepared (not published)${testKey ? ' -- TEST KEY: the page accepts releases signed with the public RFC 8032 test key' : ''}:`);
+console.log(`  page              index.html, assets/ (wasm ${sha(wasm).slice(0, 16)}…)`);
 for (const [path, bytes] of Object.entries(files)) console.log(`  ${path.padEnd(26)} ${String(bytes.length).padStart(7)} B  sha256 ${sha(bytes)}`);

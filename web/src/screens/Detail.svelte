@@ -2,6 +2,7 @@
   import { DETAIL, NODE_ACTION, SLOT, TRIAL_CHOICE, WIRING } from '../app/copy.ts';
   import type { Live } from '../app/operate.svelte.ts';
   import type { Config, Link, Node } from '../app/sample.ts';
+  import { previousVersion } from '../app/slots.ts';
   import { versionText, type RecoverResult, type StatusResp } from '../wasm/dagon.ts';
   import type { HelloResp } from '../serial/hello.ts';
 
@@ -21,15 +22,6 @@
   }
 
   let { config, live, selected, connected, act = false, onkeep, onback, recovery = null }: Props = $props();
-
-  const SLOT_WRITTEN = 1;
-
-  /** The version rollback goes back to: the other slot, confirmed before or written (dagon-host's rule). */
-  function previous(s: StatusResp | null | undefined): string | null {
-    if (!s || s.active > 1) return null;
-    const other = s.slots[1 - s.active];
-    return other.state === SLOT_CONFIRMED || other.state === SLOT_WRITTEN ? versionText(other.version) : null;
-  }
 
   function recoveryRows(id: string): [string, string][] {
     if (recovery?.id !== id) return [];
@@ -181,7 +173,7 @@
           {#each SLOT.rows as row (row)}<span class="skeleton"></span>{/each}
         </div>
       {/if}
-      {@const back = previous(l?.status)}
+      {@const back = previousVersion(l?.status)}
       {#if act && l?.responding && l.hello?.trial}
         <p class="choice">{TRIAL_CHOICE.sentence}</p>
         <div class="actions">

@@ -763,16 +763,54 @@ pub fn new_project(dir: &Path, name: &str, yaml: &str, keys: &Path) -> Result<Ve
         return Err(format!("{} exists and is not empty", dir.display()));
     }
     dagon_topology::parse_str(yaml).map_err(|e| format!("topology: {e}"))?;
+    let existed = dir.exists();
     std::fs::create_dir_all(dir).map_err(|e| format!("cannot create {}: {e}", dir.display()))?;
     let files = [("topology.yaml", yaml), (".gitignore", "/out/\ntarget/\n")];
-    for (f, text) in files.into_iter().chain(CLAUDE_FILES) {
-        write_atomic(&dir.join(f), text.as_bytes())?;
-    }
-    let mut made = init_project(dir, name, "topology.yaml", keys)?;
+    let written = files
+        .into_iter()
+        .chain(CLAUDE_FILES)
+        .try_for_each(|(f, text)| write_atomic(&dir.join(f), text.as_bytes()));
+    let made = written.and_then(|_| init_project(dir, name, "topology.yaml", keys));
+    let mut made = match made {
+        Ok(m) => m,
+        Err(e) => {
+            // The folder was empty (or not there): what is in it now is this
+            // call's, so taking it away lets the next try start clean.
+            undo_new(dir, existed);
+            return Err(e);
+        }
+    };
     for (f, _) in files.into_iter().chain(CLAUDE_FILES) {
         made.push(format!("created    {f}"));
     }
     Ok(made)
+}
+
+/// Removes what a failed `new_project` wrote into `dir` (empty before):
+/// its files and the folders they made, and `dir` itself when it was new.
+fn undo_new(dir: &Path, existed: bool) {
+    for (f, _) in [
+        ("topology.yaml", ""),
+        (".gitignore", ""),
+        ("dagon.toml", ""),
+    ]
+    .into_iter()
+    .chain(CLAUDE_FILES)
+    {
+        let p = dir.join(f);
+        let _ = std::fs::remove_file(&p);
+        // Folders the file needed, innermost first; only while empty.
+        let mut up = p.parent();
+        while let Some(d) = up.filter(|d| *d != dir) {
+            if std::fs::remove_dir(d).is_err() {
+                break;
+            }
+            up = d.parent();
+        }
+    }
+    if !existed {
+        let _ = std::fs::remove_dir(dir);
+    }
 }
 
 /// dagon.toml for the 構成 `topology` (a file name in `dir`) and, when

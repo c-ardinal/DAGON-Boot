@@ -79,10 +79,9 @@ fn flash_with(
     let key = serve_key(cfg)?;
     job.progress("building", None);
     let w = prepare(cfg, &t, node, &key, &out, job)?;
-    let question = format!(
-        "{}\nWrite to the board now? Answer yes to write; any other answer writes nothing.",
-        steps.join("\n")
-    );
+    // The page shows this question (its own wording, with はい / いいえ);
+    // the plan is in the log above. 案: the owner has not fixed the words.
+    let question = format!("{node} に書き込みます。よろしいですか。");
     if !confirmed(&job.ask(ASK, &question)?) {
         return Err("nothing written to the board".into());
     }

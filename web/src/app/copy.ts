@@ -728,6 +728,10 @@ export const FLASH = {
     esp32s3: ['USB-C', 'USB-C でつないでから、書き込んでください（つながらないときは BOOT を押しながら）。'],
   } as Record<string, [string, string]>,
   hubFirst: '親機から書き込んでください（親機が無いと子機を確かめられません）。',
+  /** 案: the confirmation before serve writes the board (its job question). */
+  confirm: (name: string) => `${name} に書き込みます。よろしいですか。`,
+  yes: 'はい',
+  no: 'いいえ',
   done: '✓ 書き込み済み',
   running: '● 実行中',
   notFound: '× 見つからない',

@@ -436,3 +436,22 @@ fn new_gen_build_rp2040_hub() {
 fn new_gen_build_f401_node() {
     new_gen_build("seg");
 }
+
+#[test]
+fn a_new_project_whose_key_cannot_be_made_leaves_nothing_behind() {
+    let d = tmp("new-undo");
+    // Keys inside a git work tree are refused: key generation fails after
+    // the project's files were written.
+    std::fs::create_dir_all(d.join("repo/.git")).unwrap();
+    let dir = d.join("proj");
+    let e = new_project(&dir, "proj", SAMPLE, &d.join("repo/keys")).unwrap_err();
+    assert!(!dir.exists(), "{e}");
+    // An empty folder given by the user stays, empty.
+    std::fs::create_dir_all(&dir).unwrap();
+    assert!(new_project(&dir, "proj", SAMPLE, &d.join("repo/keys")).is_err());
+    assert_eq!(std::fs::read_dir(&dir).unwrap().count(), 0);
+    // The retry with a usable key folder works.
+    new_project(&dir, "proj", SAMPLE, &d.join("keys")).unwrap();
+    assert!(dir.join("dagon.toml").is_file() && dir.join("CLAUDE.md").is_file());
+    let _ = std::fs::remove_dir_all(&d);
+}

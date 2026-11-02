@@ -665,7 +665,10 @@ fn release_get(server: &Server, id: &str) -> Res {
 fn verified(server: &Server, bytes: Vec<u8>, ok: impl Fn(&[u8], &[u8; 32]) -> bool) -> Res {
     let key = server
         .release_key()
-        .ok_or_else(|| Response::error(409, "no project is open"))?;
+        .ok_or_else(|| match server.config_path() {
+            Some(_) => Response::error(409, "the open project has no public key to verify with"),
+            None => Response::error(409, "no project is open"),
+        })?;
     if !ok(&bytes, &key) {
         return Err(Response::error(
             422,
@@ -1108,6 +1111,25 @@ mod tests {
             capabilities: caps,
         };
         sign_image(&spec, &[0xB0; 2000], key).unwrap()
+    }
+
+    #[test]
+    fn without_a_key_the_reason_says_which_is_missing() {
+        let msg = |s: &Server| {
+            let r = verified(s, vec![1], |_, _| true).unwrap_err();
+            (r.status, String::from_utf8_lossy(&r.body).into_owned())
+        };
+        let none = Server::new("p".repeat(32), 1, None, PathBuf::new());
+        let (st, body) = msg(&none);
+        assert!(st == 409 && body.contains("no project is open"), "{body}");
+        let open = Server::new(
+            "p".repeat(32),
+            1,
+            Some(PathBuf::from("dagon.toml")),
+            PathBuf::new(),
+        );
+        let (st, body) = msg(&open);
+        assert!(st == 409 && body.contains("no public key"), "{body}");
     }
 
     #[test]

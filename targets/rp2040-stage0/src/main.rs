@@ -4,7 +4,9 @@
 //! images are verified before they are ever selected.
 //!
 //! Nothing to start: the backlight blinks fast (100 ms) forever. The `diag`
-//! build lights it at entry and blinks once before starting the boot core.
+//! build lights it at entry; a panic blinks the code of the last step
+//! (1 entry, 2 reading the log, 3 checking the boot core) and a failed check
+//! blinks code 4, each followed by a long pause.
 #![no_std]
 #![no_main]
 
@@ -13,7 +15,7 @@ use dagon_format::header::image_kind;
 use dagon_format::statelog::slot;
 #[cfg(not(feature = "diag"))]
 use panic_halt as _;
-use rp2040_common::arm::{jump, led, XipFlash};
+use rp2040_common::arm::{jump, led, step, XipFlash};
 use rp2040_common::layout::{BL_LOG, BL_SLOT, BL_SLOT_SIZE};
 use rp2040_common::{bl, image};
 
@@ -22,17 +24,19 @@ use rp2040_common::{bl, image};
 static BOOT2: [u8; 256] = rp2040_boot2::BOOT_LOADER_GENERIC_03H;
 
 const HALT_MS: u32 = 100;
-const BLINK_MS: u32 = 300;
 
 #[entry]
 fn main() -> ! {
+    step(1);
     if cfg!(feature = "diag") {
         led::init();
     }
     let mut flash = XipFlash;
+    step(2);
     let named = bl::confirmed(&mut flash, BL_LOG).filter(|m| m.slot <= slot::B);
     let s = named.map_or(slot::A, |m| m.slot);
     let base = BL_SLOT[s as usize];
+    step(3);
     match image::check(
         &mut flash,
         base,
@@ -43,7 +47,6 @@ fn main() -> ! {
     ) {
         Ok(body) => {
             if cfg!(feature = "diag") {
-                led::blinks(1, BLINK_MS, led::ROSC_MS);
                 led::set(false);
             }
             jump(body)
@@ -51,6 +54,9 @@ fn main() -> ! {
         // Nothing to start: recover with BOOTSEL and the install UF2.
         Err(_) => {
             led::init();
+            if cfg!(feature = "diag") {
+                led::code(4)
+            }
             led::halt(HALT_MS, led::ROSC_MS)
         }
     }

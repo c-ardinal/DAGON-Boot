@@ -76,13 +76,35 @@ pub mod led {
         cortex_m::asm::delay(ms.saturating_mul(cycles_per_ms));
     }
 
-    /// `n` blinks (off/on, `ms` each), ending on.
-    pub fn blinks(n: u32, ms: u32, cycles_per_ms: u32) {
-        for _ in 0..n {
+    const CLK_SYS_CTRL: *const u32 = (0x4000_8000 + 0x3C) as *const u32;
+    const CODE_BLINK_MS: u32 = 250;
+    const CODE_PAUSE_MS: u32 = 1_500;
+
+    /// Cycles per millisecond for the clock clk_sys runs on now: the PLL
+    /// (aux source) after HAL init, else the reset clock.
+    pub fn cycles_per_ms() -> u32 {
+        // SAFETY: read-only access to a clocks register.
+        let aux = unsafe { CLK_SYS_CTRL.read_volatile() } & 1 != 0;
+        if aux {
+            PLL_MS
+        } else {
+            ROSC_MS
+        }
+    }
+
+    /// Repeats forever: `n` blinks, then a long dark pause. Counting the
+    /// blinks tells which code (see the hub README) stopped the board.
+    pub fn code(n: u8) -> ! {
+        let c = cycles_per_ms();
+        loop {
             set(false);
-            wait(ms, cycles_per_ms);
-            set(true);
-            wait(ms, cycles_per_ms);
+            wait(CODE_PAUSE_MS, c);
+            for _ in 0..n {
+                set(true);
+                wait(CODE_BLINK_MS, c);
+                set(false);
+                wait(CODE_BLINK_MS, c);
+            }
         }
     }
 
@@ -97,13 +119,20 @@ pub mod led {
     }
 }
 
-/// Diagnostic builds: a panic flickers the backlight (20 ms at 125 MHz,
-/// about 0.4 s still on the reset clock in stage0).
+/// Diagnostic step code: the last step a stage reached, shown by the
+/// diagnostic panic handler as a blink count.
+pub static STEP: core::sync::atomic::AtomicU8 = core::sync::atomic::AtomicU8::new(0);
+
+pub fn step(n: u8) {
+    STEP.store(n, core::sync::atomic::Ordering::Relaxed);
+}
+
+/// Diagnostic builds: a panic blinks the code of the last step reached.
 #[cfg(feature = "diag-panic")]
 #[panic_handler]
 fn panic(_: &core::panic::PanicInfo) -> ! {
     led::init();
-    led::halt(20, led::PLL_MS)
+    led::code(STEP.load(core::sync::atomic::Ordering::Relaxed))
 }
 
 /// Starts the image whose vector table is at XIP address `body`.

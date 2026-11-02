@@ -36,7 +36,7 @@ use embassy_time::Instant;
 use embassy_usb::class::cdc_acm::{CdcAcmClass, State};
 #[cfg(not(feature = "diag"))]
 use panic_halt as _;
-use rp2040_common::arm::led;
+use rp2040_common::arm::step;
 use rp2040_common::layout::HUB_TAG;
 use rp2040_common::rp::RpFlash;
 
@@ -58,16 +58,13 @@ const USB_PID: u16 = 0xcafe;
 const PIO_UART_BAUD: u32 = 115_200;
 const I2C_HZ: u32 = 400_000;
 const LCD_SPI_HZ: u32 = 40_000_000;
-/// `diag` build: three blinks of this length at entry.
-const DIAG_BLINK_MS: u32 = 300;
 
 #[embassy_executor::main]
 async fn main(_spawner: Spawner) {
+    // `diag` panic codes: 10 before HAL init, 11 after it, 12 at USB setup.
+    step(10);
     let p = embassy_rp::init(Default::default());
-    if cfg!(feature = "diag") {
-        led::init();
-        led::blinks(3, DIAG_BLINK_MS, led::PLL_MS);
-    }
+    step(11);
     let _backlight = Output::new(p.PIN_25, Level::High);
 
     let mut store = HubStore {
@@ -103,6 +100,7 @@ async fn main(_spawner: Spawner) {
         rst: Output::new(p.PIN_13, Level::High),
     };
 
+    step(12);
     let mut usb_cfg = embassy_usb::Config::new(USB_VID, USB_PID);
     usb_cfg.manufacturer = Some("DAGON");
     usb_cfg.product = Some("DAGON hub");

@@ -5,8 +5,9 @@
 //! each header's `load_addr` to be its slot body (the hub's `Flash` speaks
 //! XIP addresses). Every start arms the watchdog for 8 s; the app keeps
 //! feeding it. With nothing startable the watchdog stops and the backlight
-//! blinks at 1 Hz (reinstall with BOOTSEL + UF2). The `diag` build blinks
-//! twice at entry.
+//! blinks at 1 Hz (reinstall with BOOTSEL + UF2). In the `diag` build a
+//! panic blinks the code of the last step (6 before HAL init, 7 after it,
+//! 8 deciding) and nothing startable blinks code 9.
 #![no_std]
 #![no_main]
 
@@ -17,14 +18,13 @@ use embassy_rp::watchdog::Watchdog;
 use embassy_time::Duration;
 #[cfg(not(feature = "diag"))]
 use panic_halt as _;
-use rp2040_common::arm::{jump, led};
+use rp2040_common::arm::{jump, led, step};
 use rp2040_common::layout::{APP_LOG_LAYOUT, APP_SLOTS, HUB_TAG, MAX_ATTEMPTS, WDT_MS};
 use rp2040_common::rp::RpFlash;
 
 include!(concat!(env!("OUT_DIR"), "/pubkey.rs"));
 
 const HALT_MS: u32 = 500;
-const BLINK_MS: u32 = 300;
 
 const CONFIG: BootConfig = BootConfig {
     pubkey: PUBKEY,
@@ -35,15 +35,13 @@ const CONFIG: BootConfig = BootConfig {
 
 #[cortex_m_rt::entry]
 fn main() -> ! {
+    step(6);
     let p = embassy_rp::init(Default::default());
-    if cfg!(feature = "diag") {
-        led::init();
-        led::blinks(2, BLINK_MS, led::PLL_MS);
-        led::set(false);
-    }
+    step(7);
     let mut flash = RpFlash::new(p.FLASH);
     let mut wdt = Watchdog::new(p.WATCHDOG);
     wdt.start(Duration::from_millis(WDT_MS as u64));
+    step(8);
     let decision = match Log::load(&mut flash, &APP_LOG_LAYOUT) {
         Ok(mut log) => boot::decide(&mut flash, &mut log, &APP_SLOTS, &CONFIG),
         Err(_) => Decision::NoImage,
@@ -54,5 +52,8 @@ fn main() -> ! {
     }
     wdt.stop();
     led::init();
+    if cfg!(feature = "diag") {
+        led::code(9)
+    }
     led::halt(HALT_MS, led::PLL_MS)
 }

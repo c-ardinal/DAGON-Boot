@@ -8,6 +8,7 @@ use dagon_format::header::{image_kind, target_tag};
 use dagon_format::Version;
 use dagon_host::{Clock, ConfirmOutcome, Error, Event, Host, Outcome, Target, Transport};
 use dagon_proto::payload::{phase, SlotState};
+use dagon_proto::{flags, Cmd};
 use dagon_sign::image::{self, sign_image, ImageSpec};
 use dagon_sim::{block_on, demo_hub, SimHub, TrialApp, NODE_I2C_ADDR};
 use ed25519_compact::{KeyPair, Seed};
@@ -126,6 +127,8 @@ fn sim() -> Sim {
         hub: Rc::new(RefCell::new(hub)),
         pending: Vec::new(),
         reopens: Rc::default(),
+        late_reboot: 0,
+        held: None,
     }
 }
 
@@ -134,11 +137,23 @@ struct Sim {
     hub: Rc<RefCell<SimHub>>,
     pending: Vec<u8>,
     reopens: Rc<RefCell<u32>>,
+    /// The hub's old firmware keeps answering for this many reopens after
+    /// acknowledging REBOOT.
+    late_reboot: u32,
+    held: Option<Vec<u8>>,
 }
 
 impl Transport for Sim {
     type Error = ();
     async fn write(&mut self, bytes: &[u8]) -> Result<(), ()> {
+        let is_reboot = bytes.len() > 5 && bytes[3] == 0 && bytes[5] == Cmd::Reboot as u8;
+        if is_reboot && self.late_reboot > 0 {
+            let mut ack = vec![0u8; dagon_proto::frame_len(1)];
+            dagon_proto::finish(&mut ack, flags::RESP, bytes[4], bytes[5], 1).unwrap();
+            self.pending.extend(ack);
+            self.held = Some(bytes.to_vec());
+            return Ok(());
+        }
         self.hub.borrow_mut().usb_write(bytes);
         Ok(())
     }
@@ -151,6 +166,14 @@ impl Transport for Sim {
     }
     async fn reopen(&mut self) -> Result<(), ()> {
         *self.reopens.borrow_mut() += 1;
+        if self.held.is_some() {
+            self.late_reboot -= 1;
+            if self.late_reboot == 0 {
+                let mut hub = self.hub.borrow_mut();
+                hub.usb_write(&self.held.take().unwrap());
+                hub.usb_read();
+            }
+        }
         Ok(())
     }
 }
@@ -287,6 +310,7 @@ fn node_that_falls_back_stops_the_run_and_confirm_rule() {
     );
     let screen = s.hub.borrow().screen.clone().unwrap();
     assert_eq!((screen.node, screen.phase), (SEG, phase::FAILED));
+    assert_eq!(screen.text, b"E_STATE");
 
     // On trial with the version this session applied: CONFIRM is sent (and
     // refused by the node's self-check). A fresh session must ask first.
@@ -295,4 +319,30 @@ fn node_that_falls_back_stops_the_run_and_confirm_rule() {
     let mut fresh = host(&s);
     let r = block_on(fresh.confirm(SEG_AT, false)).unwrap();
     assert_eq!(r, ConfirmOutcome::NeedsChoice(Version::new(1, 1, 0)));
+
+    // The trial watchdog takes it back to A; B is Reverted, not a target.
+    for _ in 0..4 {
+        s.hub.borrow_mut().advance_ms(10_000);
+    }
+    let st = block_on(h.status(SEG_AT)).unwrap().status;
+    assert_eq!((st.active, st.slots[1].state), (0, SlotState::Reverted));
+    let r = block_on(h.rollback(SEG_AT, SEG, &mut |_| {}));
+    assert!(matches!(r, Err(Error::NoPreviousVersion)));
+}
+
+#[test]
+fn old_hub_firmware_answering_after_reboot_is_waited_out() {
+    let mut s = sim();
+    s.late_reboot = 3;
+    let mut h = host(&s);
+    let out = block_on(h.apply(&release(), &topology(YAML), &key().pk, None, &mut |_| {})).unwrap();
+    let v = Version::new(1, 1, 0);
+    assert!(
+        out.iter()
+            .all(|o| matches!(o.outcome, Outcome::Done(x) if x == v)),
+        "{out:?}"
+    );
+    assert!(*s.reopens.borrow() >= 3);
+    let hub = block_on(h.status(Target::Hub)).unwrap();
+    assert_eq!((hub.status.active, hub.status.confirmed), (1, 1));
 }

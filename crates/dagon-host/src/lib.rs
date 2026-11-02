@@ -12,7 +12,7 @@ extern crate alloc;
 
 mod ops;
 
-pub use ops::{ConfirmOutcome, Discovery, Event, NodeOutcome, NodeState, Outcome};
+pub use ops::{reason, ConfirmOutcome, Discovery, Event, NodeOutcome, NodeState, Outcome};
 
 use alloc::vec;
 use alloc::vec::Vec;

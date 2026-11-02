@@ -189,7 +189,13 @@ impl<T: Transport, C: Clock> Host<T, C> {
                 _ => phase::FAILED,
             };
             let v = st.hello.active_version;
-            self.emit(on_event, node, ph, 0, v).await;
+            on_event(Event {
+                node,
+                phase: ph,
+                percent: 0,
+                version: v,
+            });
+            self.show(node, ph, 0, v, reason(e).as_bytes()).await;
         }
         r
     }
@@ -257,6 +263,10 @@ impl<T: Transport, C: Clock> Host<T, C> {
             _ => (REBOOT_WAIT_MS, POLL_MS),
         };
         let deadline = self.clock.now_ms() + limit as u64;
+        // Another version may answer until the reset really happens (the
+        // old firmware still running) or for good (rolled back); only the
+        // end of the window tells them apart.
+        let mut other = None;
         loop {
             // ponytail: reopens before every hub attempt; add a grace period
             // for slow enumeration if real ports need it.
@@ -264,19 +274,20 @@ impl<T: Transport, C: Clock> Host<T, C> {
             if reopened {
                 match self.hello(to).await {
                     Ok(h) if h.active_version == v => return Ok(h),
-                    Ok(h) => {
-                        return Err(Error::WrongVersion {
-                            expected: v,
-                            running: h.active_version,
-                            trial: h.trial,
-                        })
-                    }
+                    Ok(h) => other = Some(h),
                     Err(Error::Transport(_) | Error::Timeout | Error::Relay(_)) => {}
                     Err(e) => return Err(e),
                 }
             }
             if self.clock.now_ms() >= deadline {
-                return Err(Error::Timeout);
+                return Err(match other {
+                    Some(h) => Error::WrongVersion {
+                        expected: v,
+                        running: h.active_version,
+                        trial: h.trial,
+                    },
+                    None => Error::Timeout,
+                });
             }
             self.clock.sleep_ms(pause).await;
         }
@@ -314,7 +325,9 @@ impl<T: Transport, C: Clock> Host<T, C> {
             _ => return Err(Error::NoPreviousVersion),
         };
         let s = st.slots[other as usize];
-        if matches!(s.state, SlotState::Empty | SlotState::Pending) {
+        // Confirmed (we run on trial) or Written (confirmed before the
+        // running slot took over); never a Reverted or untried image.
+        if !matches!(s.state, SlotState::Confirmed | SlotState::Written) {
             return Err(Error::NoPreviousVersion);
         }
         self.switch_and_confirm(to, other, s.version, node, on_event)
@@ -356,7 +369,11 @@ impl<T: Transport, C: Clock> Host<T, C> {
         let begin_wait = if hdr.is_empty() { erase } else { REQUEST_MS };
         self.call(to, Cmd::XferBegin, &p[..n], begin_wait).await?;
 
-        let chunk = (hello.max_payload as usize).min(to.link_max()) - CHUNK_HEAD;
+        let chunk = (hello.max_payload as usize)
+            .min(to.link_max())
+            .checked_sub(CHUNK_HEAD)
+            .filter(|&c| c > 0)
+            .ok_or(Error::BadResponse)?;
         let hdr_chunks = hdr.len().div_ceil(chunk);
         for (i, c) in hdr.chunks(chunk).enumerate() {
             let wait = if i + 1 == hdr_chunks {
@@ -425,16 +442,44 @@ impl<T: Transport, C: Clock> Host<T, C> {
             percent,
             version,
         });
+        self.show(node, ph, percent, version, &[]).await;
+    }
+
+    /// SHOW on the hub LCD, best effort.
+    async fn show(&mut self, node: u8, ph: u8, percent: u8, version: Version, text: &[u8]) {
         let show = Show {
             node,
             phase: ph,
             percent,
             version,
-            text: &[],
+            text,
         };
-        let mut p = [0u8; 7];
-        let n = show.encode(&mut p).expect("7 bytes");
+        let mut p = [0u8; 7 + payload::SHOW_TEXT_MAX];
+        let Ok(n) = show.encode(&mut p) else {
+            return;
+        };
         let _ = self.call(Target::Hub, Cmd::Show, &p[..n], REQUEST_MS).await;
+    }
+}
+
+/// Short LCD text for a failed update (ASCII, at most 32 bytes).
+pub fn reason<E>(e: &Error<E>) -> &'static str {
+    match e {
+        Error::Rejected { status, .. } => match status {
+            Status::Signature => "E_SIGNATURE",
+            Status::Key => "E_KEY",
+            Status::Compat => "E_COMPAT",
+            Status::Digest => "E_DIGEST",
+            Status::Flash => "E_FLASH",
+            Status::State => "E_STATE",
+            Status::Range => "E_RANGE",
+            _ => "REJECTED",
+        },
+        Error::Timeout | Error::Relay(_) | Error::Transport(_) => "NO ANSWER",
+        Error::WrongVersion { .. } => "ROLLED BACK",
+        Error::DigestMismatch => "E_DIGEST",
+        Error::NoImage { .. } => "NO IMAGE",
+        _ => "FAILED",
     }
 }
 

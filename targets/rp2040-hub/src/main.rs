@@ -34,7 +34,9 @@ use embassy_rp::usb::{self, Driver};
 use embassy_rp::watchdog::Watchdog;
 use embassy_time::Instant;
 use embassy_usb::class::cdc_acm::{CdcAcmClass, State};
+#[cfg(not(feature = "diag"))]
 use panic_halt as _;
+use rp2040_common::arm::led;
 use rp2040_common::layout::HUB_TAG;
 use rp2040_common::rp::RpFlash;
 
@@ -56,9 +58,17 @@ const USB_PID: u16 = 0xcafe;
 const PIO_UART_BAUD: u32 = 115_200;
 const I2C_HZ: u32 = 400_000;
 const LCD_SPI_HZ: u32 = 40_000_000;
+/// `diag` build: three blinks of this length at entry.
+const DIAG_BLINK_MS: u32 = 300;
+
 #[embassy_executor::main]
 async fn main(_spawner: Spawner) {
     let p = embassy_rp::init(Default::default());
+    if cfg!(feature = "diag") {
+        led::init();
+        led::blinks(3, DIAG_BLINK_MS, led::PLL_MS);
+    }
+    let _backlight = Output::new(p.PIN_25, Level::High);
 
     let mut store = HubStore {
         flash: RpFlash::new(p.FLASH),
@@ -69,7 +79,6 @@ async fn main(_spawner: Spawner) {
     let serial = core::str::from_utf8(&serial_hex).unwrap_or("0");
 
     let sub = sub::SubLines::new(p.PIN_18, p.PIN_28);
-    let _backlight = Output::new(p.PIN_25, Level::High);
 
     let Pio {
         mut common,

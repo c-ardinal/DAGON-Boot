@@ -12,6 +12,8 @@ publish = false
 [features]
 # embassy-rp flash adapter (boot core and app; stage0 only reads through XIP).
 rp = ["dep:embassy-rp"]
+# Panic handler that flickers the backlight (diagnostic firmware builds).
+diag-panic = []
 
 [dependencies]
 dagon-core = { path = "../../../crates/dagon-core" }

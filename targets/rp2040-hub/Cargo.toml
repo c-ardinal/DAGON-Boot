@@ -11,6 +11,8 @@ publish = false
 [features]
 # Link for APP-B instead of APP-A (same source, two link addresses).
 slot-b = []
+# Backlight patterns at entry and on panic (bring-up diagnostics).
+diag = ["rp2040-common/diag-panic"]
 
 [dependencies]
 rp2040-common = { path = "../rp2040-bootcore/common", features = ["rp"] }

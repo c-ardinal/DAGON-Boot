@@ -8,6 +8,10 @@ publish = false
 # Standalone: built for thumbv6m only, so it stays out of the host workspace.
 [workspace]
 
+[features]
+# Backlight patterns at each step and on panic (bring-up diagnostics).
+diag = ["rp2040-common/diag-panic"]
+
 [dependencies]
 rp2040-common = { path = "../rp2040-bootcore/common" }
 dagon-format = { path = "../../crates/dagon-format" }

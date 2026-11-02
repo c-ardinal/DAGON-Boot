@@ -10,6 +10,10 @@ publish = false
 [workspace]
 exclude = ["common"]
 
+[features]
+# Backlight patterns at each step and on panic (bring-up diagnostics).
+diag = ["rp2040-common/diag-panic"]
+
 [dependencies]
 rp2040-common = { path = "common", features = ["rp"] }
 dagon-core = { path = "../../crates/dagon-core" }

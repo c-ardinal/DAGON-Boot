@@ -18,6 +18,9 @@ no-confirm = []
 # ENTER_ROM method 2 through the M5PM1 power manager (unconfirmed values).
 pmic-download = ["dagon-esp32s3-agent/pmic-download"]
 
+[lib]
+path = "src/lib.rs"
+
 [[bin]]
 name = "app"
 path = "src/main.rs"
@@ -25,6 +28,10 @@ test = false
 
 [dependencies]
 dagon-esp32s3-agent = { path = "../esp32s3-agent" }
+
+# The firmware; the library (`digits`) also builds and tests on the host.
+[target.'cfg(target_arch = "xtensa")'.dependencies]
+esp-hal-co5300 = "0.1.0"
 esp-hal = { version = "1.2.2", features = ["esp32s3", "unstable"] }
 esp-bootloader-esp-idf = { version = "0.6.0", features = ["esp32s3"] }
 esp-rtos = { version = "0.4.0", features = ["esp32s3", "embassy"] }

@@ -8,12 +8,28 @@ register in the `Liveness` registry.
 | Task | Executor | Owns |
 |---|---|---|
 | DAGON link (`node::start`) | interrupt executor, priority 2 | UART0 (rear G43/G44), USB Serial/JTAG, flash, RTC/super watchdogs, internal I2C |
-| `heartbeat` (demo) | thread mode (`#[esp_rtos::main]`), below every interrupt | nothing yet |
+| `heartbeat` (demo) | thread mode (`#[esp_rtos::main]`), below every interrupt | nothing |
+| `display_task` | thread mode | SPI2, DMA channel 0, AMOLED pins (CS G39, SCK G40, D0-D3 G41/G42/G46/G45) |
 
 `heartbeat` is a placeholder: it counts a beat per second, each beat
 announced to the watchdog with a 500 ms budget. CONFIRM is accepted once at
 least one beat has completed. Watchdog, trial and ENTER_ROM behaviour
 are those of the DAGON side (`targets/esp32s3-agent/README.md`).
+
+`display_task` shows the running version (`node::running_version()`, from
+the image header) in large seven-segment digits on the 466×466 AMOLED
+(CO5300 over QSPI, driver crate `esp-hal-co5300`). The panel reset is on the
+internal I2C expander, which the DAGON side owns: it pulses the reset once at
+start and then sets `node::display_ready()`; the task waits for that, runs
+the panel initialisation (about 1.5 s of fixed waits, once) and draws once,
+with a liveness budget per step. It never talks to the internal I2C and the
+link task preempts it at any time. If the panel does not answer, the screen
+stays dark and nothing else changes. `src/digits.rs` lays the digits out
+(host tested): light strokes on true black, kept inside the round screen,
+as large as the line allows; `---` when the version is unknown.
+
+Not yet checked on the watch: the panel initialisation (the crate's default
+sequence, column offset 6) and whether the AMOLED supply is on by default.
 
 ## Build
 
@@ -28,6 +44,8 @@ only; the build then warns).
 cargo build --release                                              # app
 cargo build --release --features conform --target-dir target/conform
 cargo build --release --features conform,no-confirm --target-dir target/noconfirm
+# digit layout on the host
+DAGON_ALLOW_TEST_KEY=1 cargo +stable test --lib --target x86_64-pc-windows-msvc
 ```
 
 Features: `conform` (the node answers CONF_RUN), `no-confirm` (refuses

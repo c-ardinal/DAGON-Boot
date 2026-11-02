@@ -11,9 +11,13 @@ Serial/JTAG port; requests are answered on the link they came in on. Built on
 | `factory` | this crate | factory | 3 (agent), the recovery target when otadata selects nothing bootable |
 | `app` | `targets/esp32s3-app` | ota_0 / ota_1 | 0 (app) |
 
-An app uses the public API only: `node::start(peripherals, link_irq,
+An app uses the public API only: `node::arm_watchdog` right after
+`esp_hal::init`, `node::start(armed, peripherals, link_irq,
 NodeConfig::app(self_check), &LIVENESS)` after `esp_rtos::start`, and a
-`liveness::Lease` per task of its own.
+`liveness::Lease` per task of its own. At start the link task also releases
+the AMOLED reset (M5IOE1 PYG5, on the internal I2C it owns) once, next to the
+rear-pin routing, and then publishes `node::running_version()` (from the
+startup STATUS) and `node::display_ready()`; the internal I2C is not shared.
 
 ## Receiver (`store::EspStore`)
 

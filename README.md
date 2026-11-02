@@ -224,7 +224,7 @@ Points to note:
   Doto, DotGothic16, Zen Kaku Gothic New and JetBrains Mono (licence texts
   next to the files; see `web/README.md`).
 
-Rust crates: 315 packages, 349 name/version pairs. "Used by": `crates/` is the host workspace, other names are firmware packages under `targets/`.
+Rust crates: 316 packages, 350 name/version pairs. "Used by": `crates/` is the host workspace, other names are firmware packages under `targets/`.
 
 | Crate | Versions | Licence | Used by |
 |---|---|---|---|
@@ -316,6 +316,7 @@ Rust crates: 315 packages, 349 name/version pairs. "Used by": `crates/` is the h
 | esp-bootloader-esp-idf | 0.6.0 | MIT OR Apache-2.0 | esp32s3-agent, esp32s3-app, esp32s3-port |
 | esp-config | 0.8.0 | MIT OR Apache-2.0 | esp32s3-agent, esp32s3-app, esp32s3-port |
 | esp-hal | 1.2.2 | MIT OR Apache-2.0 | esp32s3-agent, esp32s3-app, esp32s3-port |
+| esp-hal-co5300 | 0.1.0 | MIT OR Apache-2.0 | esp32s3-app |
 | esp-hal-procmacros | 0.23.0 | MIT OR Apache-2.0 | esp32s3-agent, esp32s3-app, esp32s3-port |
 | esp-metadata-generated | 0.5.3 | MIT OR Apache-2.0 | esp32s3-agent, esp32s3-app, esp32s3-port |
 | esp-riscv-rt | 0.15.0 | MIT OR Apache-2.0 | esp32s3-agent, esp32s3-app, esp32s3-port |

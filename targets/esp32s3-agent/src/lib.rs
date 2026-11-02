@@ -28,6 +28,8 @@ pub mod node;
 
 use dagon_agent::Config;
 use dagon_format::header::{mcu_id, port_kind};
+/// Image version (re-exported for `node::running_version`).
+pub use dagon_format::Version;
 use dagon_proto::payload::role;
 
 /// Release public key the agent accepts (resolved by `build.rs`).

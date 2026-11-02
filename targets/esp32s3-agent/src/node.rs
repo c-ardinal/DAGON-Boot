@@ -26,7 +26,7 @@
 //!   otherwise the node stays in the app ([`ROM_REPLY_LOST`] counts it).
 
 use core::cell::RefCell;
-use core::sync::atomic::{AtomicU32, Ordering};
+use core::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 
 use dagon_agent::{Agent, Hooks, SlotStore, StoreError, IDLE_TIMEOUT_MS};
 use dagon_esp32s3_port::{
@@ -69,6 +69,7 @@ use crate::rom::{self, Method, Step};
 use crate::serve::{self, Next, Then};
 use crate::store::{EspStore, Otadata};
 use crate::trial::TrialWatchdog;
+use crate::Version;
 
 /// Priority of the link executor (the app's tasks run in thread mode, below).
 pub const LINK_PRIORITY: Priority = Priority::Priority2;
@@ -137,6 +138,39 @@ pub struct WatchdogArmed(());
 pub fn arm_watchdog(rtc_timer: RTC_TIMER<'_>) -> WatchdogArmed {
     RtcWatchdog::new(Rtc::new(rtc_timer).rwdt).start(TRIAL_WDT_MS);
     WatchdogArmed(())
+}
+
+/// Version of the running image from the startup STATUS (its header in the
+/// dagon partition); `None` before the link task has read it, or when the
+/// running slot has no header.
+pub fn running_version() -> Option<Version> {
+    VERSION_KNOWN
+        .load(Ordering::Acquire)
+        .then(|| Version::from_raw(RUNNING_VERSION.load(Ordering::Acquire)))
+}
+
+/// The AMOLED reset has been released by the DAGON side; the app's display
+/// task may start talking to the panel (after its own settling time).
+pub fn display_ready() -> bool {
+    DISPLAY_READY.load(Ordering::Acquire)
+}
+
+static RUNNING_VERSION: AtomicU32 = AtomicU32::new(0);
+static VERSION_KNOWN: AtomicBool = AtomicBool::new(false);
+static DISPLAY_READY: AtomicBool = AtomicBool::new(false);
+
+fn publish_startup(store: &mut Store, display_released: bool) {
+    let st = store.status();
+    let has_header = st
+        .slots
+        .get(st.active as usize)
+        .is_some_and(|s| s.digest16 != [0; 16]);
+    if has_header {
+        let v = st.slots[st.active as usize].version;
+        RUNNING_VERSION.store(v.raw(), Ordering::Release);
+        VERSION_KNOWN.store(true, Ordering::Release);
+    }
+    DISPLAY_READY.store(display_released, Ordering::Release);
 }
 
 /// Milliseconds since boot, wrapping: the time base of [`Liveness`] deadlines
@@ -271,6 +305,14 @@ impl Link {
             board.sda.reborrow(),
             board.scl.reborrow(),
         );
+        // Board bring-up, once: the AMOLED reset is released here because
+        // the expander sits on the internal I2C this side owns.
+        let display_released = board::release_display_reset(
+            board.i2c0.reborrow(),
+            board.sda.reborrow(),
+            board.scl.reborrow(),
+        )
+        .is_ok();
         let uart = board::rear_uart(p.uart0, p.gpio43, p.gpio44).into_async();
         let usb = UsbSerialJtag::new(p.usb_device).into_async();
 
@@ -283,6 +325,7 @@ impl Link {
         } else {
             store.wdt.end_trial();
         }
+        publish_startup(&mut store, display_released);
         let hooks = NodeHooks {
             self_check: cfg.self_check,
         };

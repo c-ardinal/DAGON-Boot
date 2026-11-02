@@ -19,6 +19,8 @@ const UART_FRAME: usize = frame_len(max_payload::UART);
 /// Timeouts for the hub's own display HELLO.
 const POLL_TIMEOUT_I2C_MS: u16 = 50;
 const POLL_TIMEOUT_UART_MS: u16 = 200;
+/// Bound on one I2C_RAW transaction (the PC's ROM frame deadline is 500 ms).
+const ROM_TIMEOUT: Duration = Duration::from_millis(500);
 
 /// I2C0 master (GPIO16/17).
 pub struct RpI2c<'d>(pub I2c<'d, I2C0, Async>);
@@ -167,7 +169,8 @@ impl<I: I2cBus, S: StreamPort> Links<I, S> {
     ) -> Result<usize, Status> {
         self.reader.clear();
         self.uart.write(inner).await.map_err(|_| Status::Timeout)?;
-        let seq = inner[4];
+        // A request too short to carry a seq gets no answer (times out).
+        let seq = inner.get(4).copied();
         loop {
             let left = deadline
                 .saturating_duration_since(Instant::now())
@@ -179,7 +182,7 @@ impl<I: I2cBus, S: StreamPort> Links<I, S> {
             self.reader.push(&b);
             while let Some(n) = self.reader.poll() {
                 let f = self.reader.frame(n);
-                if f[3] & flags::RESP != 0 && f[4] == seq && n <= out.len() {
+                if f[3] & flags::RESP != 0 && Some(f[4]) == seq && n <= out.len() {
                     out[..n].copy_from_slice(f);
                     self.reader.consume(n);
                     return Ok(n);
@@ -187,6 +190,25 @@ impl<I: I2cBus, S: StreamPort> Links<I, S> {
                 self.reader.consume(n);
             }
         }
+    }
+
+    /// I2C_RAW: one write transaction (if `data` is not empty, closed by
+    /// STOP), then one read transaction filling `read` (if not empty). A
+    /// NACK or a stuck bus answers E_TIMEOUT.
+    pub async fn rom(&mut self, addr: u8, data: &[u8], read: &mut [u8]) -> Result<(), Status> {
+        if !data.is_empty() {
+            with_timeout(ROM_TIMEOUT, self.i2c.write(addr, data))
+                .await
+                .map_err(|_| Status::Timeout)?
+                .map_err(|_| Status::Timeout)?;
+        }
+        if !read.is_empty() {
+            with_timeout(ROM_TIMEOUT, self.i2c.read(addr, read))
+                .await
+                .map_err(|_| Status::Timeout)?
+                .map_err(|_| Status::Timeout)?;
+        }
+        Ok(())
     }
 
     /// The hub's own read-only HELLO (seq from the 0x80..=0xFF space).

@@ -12,6 +12,8 @@ pub const MAX_SUBS: usize = 3;
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct SubNode {
+    /// Topology node index (SHOW `node`); the hub is 0.
+    pub index: u8,
     /// ASCII, NUL padded.
     pub name: [u8; 16],
     pub link: u8,
@@ -28,10 +30,11 @@ impl SubNode {
 pub type Subs = Vec<SubNode, MAX_SUBS>;
 
 /// The hub itself on the home screen.
-pub const HUB: SubNode = named("hub", 0, 0);
+pub const HUB: SubNode = named(0, "hub", 0, 0);
 
-pub const fn named(s: &str, link: u8, addr: u8) -> SubNode {
+pub const fn named(index: u8, s: &str, link: u8, addr: u8) -> SubNode {
     SubNode {
+        index,
         name: dagon_format::header::target_tag(s),
         link,
         addr,
@@ -39,8 +42,8 @@ pub const fn named(s: &str, link: u8, addr: u8) -> SubNode {
 }
 
 const DESK_DEMO: [SubNode; 2] = [
-    named("seg", link::I2C0, 0x42),
-    named("watch", link::PIO_UART, link::UART_ADDR),
+    named(1, "seg", link::I2C0, 0x42),
+    named(2, "watch", link::PIO_UART, link::UART_ADDR),
 ];
 
 pub fn load<F: Flash>(flash: &mut F) -> Subs {
@@ -66,6 +69,7 @@ fn from_topology<F: Flash>(flash: &mut F) -> Option<Subs> {
         let to = l.to as usize;
         let tag = (to < t.node_count()).then(|| t.node(to).target_tag)?;
         let _ = subs.push(SubNode {
+            index: l.to,
             name: short_name(&tag),
             link: lk,
             addr,

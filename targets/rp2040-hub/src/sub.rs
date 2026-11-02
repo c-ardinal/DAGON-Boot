@@ -24,6 +24,11 @@ impl<'d> SubLines<'d> {
             boot0: Output::new(boot0, Level::Low),
         }
     }
+
+    /// BOOT0 as last set (I2C_RAW is only allowed while it is high).
+    pub fn boot0_high(&self) -> bool {
+        self.boot0.is_set_high()
+    }
 }
 
 impl SubControl for SubLines<'_> {

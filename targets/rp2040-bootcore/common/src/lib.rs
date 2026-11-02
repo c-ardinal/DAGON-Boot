@@ -5,6 +5,7 @@
 #![no_std]
 
 pub mod bl;
+pub mod cmd;
 pub mod frames;
 pub mod image;
 pub mod layout;

@@ -1,16 +1,17 @@
-//! `dagon_port::Flash` over the embassy-rp blocking flash driver.
+//! `dagon_port::Flash` over the embassy-rp blocking flash driver, addressed
+//! by XIP address.
 
 use dagon_port::{Flash, FlashError, FlashRegion};
 use embassy_rp::flash::{Blocking, Flash as RpDriver, ERASE_SIZE};
 use embassy_rp::peripherals::FLASH;
 use embassy_rp::Peri;
 
-use crate::layout::FLASH_SIZE;
+use crate::layout::{FLASH_SIZE, XIP_BASE};
 
 pub struct RpFlash(RpDriver<'static, FLASH, Blocking, FLASH_SIZE>);
 
 const REGIONS: [FlashRegion; 1] = [FlashRegion {
-    start: 0,
+    start: XIP_BASE,
     len: FLASH_SIZE as u32,
     erase_size: ERASE_SIZE as u32,
     write_size: 1,
@@ -30,6 +31,11 @@ impl RpFlash {
     }
 }
 
+/// Flash offset of XIP address `addr`.
+fn off(addr: u32) -> Result<u32, FlashError> {
+    addr.checked_sub(XIP_BASE).ok_or(FlashError::Range)
+}
+
 fn hw(e: embassy_rp::flash::Error) -> FlashError {
     match e {
         embassy_rp::flash::Error::OutOfBounds => FlashError::Range,
@@ -44,14 +50,15 @@ impl Flash for RpFlash {
     }
 
     fn read(&mut self, addr: u32, buf: &mut [u8]) -> Result<(), FlashError> {
-        self.0.blocking_read(addr, buf).map_err(hw)
+        self.0.blocking_read(off(addr)?, buf).map_err(hw)
     }
 
     fn erase(&mut self, addr: u32, len: u32) -> Result<(), FlashError> {
-        self.0.blocking_erase(addr, addr + len).map_err(hw)
+        let o = off(addr)?;
+        self.0.blocking_erase(o, o + len).map_err(hw)
     }
 
     fn write(&mut self, addr: u32, data: &[u8]) -> Result<(), FlashError> {
-        self.0.blocking_write(addr, data).map_err(hw)
+        self.0.blocking_write(off(addr)?, data).map_err(hw)
     }
 }

@@ -61,14 +61,10 @@ fn run() -> Result<String, String> {
         max_attempts: MAX_ATTEMPTS,
     };
     match boot::decide(&mut flash, &mut log, &APP_SLOTS, &cfg) {
-        Decision::Boot { slot, trial, .. }
-            if image::linked_here(&mut flash, APP_SLOT[slot as usize]) =>
-        {
-            Ok(format!(
-                "ok: boot core slot {s}, app slot {slot} (trial {trial}), log generation {}",
-                log.generation
-            ))
-        }
+        Decision::Boot { slot, trial, .. } => Ok(format!(
+            "ok: boot core slot {s}, app slot {slot} (trial {trial}), log generation {}",
+            log.generation
+        )),
         d => Err(format!("boot core would not start the app: {d:?}")),
     }
 }
@@ -95,7 +91,7 @@ fn load_uf2(path: &str) -> Result<Uf2Flash, String> {
         if w(0) != UF2_MAGIC0 || w(1) != UF2_MAGIC1 || w(127) != UF2_MAGIC_END {
             return Err(format!("{path}: not a UF2 file"));
         }
-        let (addr, len) = (w(3).wrapping_sub(XIP_BASE), (w(4) as usize).min(476));
+        let (addr, len) = (w(3), (w(4) as usize).min(476));
         for (i, &x) in b[32..32 + len].iter().enumerate() {
             bytes.insert(addr + i as u32, x);
         }

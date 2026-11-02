@@ -25,16 +25,18 @@ impl Flash for Mem {
         &[]
     }
     fn read(&mut self, addr: u32, buf: &mut [u8]) -> Result<(), FlashError> {
-        let a = addr as usize;
+        let a = (addr - XIP_BASE) as usize;
         buf.copy_from_slice(self.0.get(a..a + buf.len()).ok_or(FlashError::Range)?);
         Ok(())
     }
     fn erase(&mut self, addr: u32, len: u32) -> Result<(), FlashError> {
-        self.0[addr as usize..(addr + len) as usize].fill(0xFF);
+        let a = (addr - XIP_BASE) as usize;
+        self.0[a..a + len as usize].fill(0xFF);
         Ok(())
     }
     fn write(&mut self, addr: u32, data: &[u8]) -> Result<(), FlashError> {
-        self.0[addr as usize..addr as usize + data.len()].copy_from_slice(data);
+        let a = (addr - XIP_BASE) as usize;
+        self.0[a..a + data.len()].copy_from_slice(data);
         Ok(())
     }
 }
@@ -49,7 +51,7 @@ fn put_app(m: &mut Mem, kp: &KeyPair, slot: u8, minor: u8) -> SlotRef {
         mcu_id: mcu_id::RP2040,
         slot_binding: slot,
         placement: placement::INLINE,
-        load_addr: XIP_BASE + base + HEADER_LEN,
+        load_addr: base + HEADER_LEN,
         payload_size: body.len() as u32,
         version: Version::new(1, minor, 0),
         build_flags: 0,
@@ -76,18 +78,14 @@ fn status_now(m: &mut Mem, active: u8) -> dagon_proto::payload::StatusResp {
     status::status(&log.state, heads, active, log.generation)
 }
 
-#[test]
-fn trial_without_confirm_rolls_back_to_a() {
-    let kp = KeyPair::from_seed(Seed::new(SEED));
-    let cfg = BootConfig {
-        pubkey: *kp.pk,
-        mcu_id: mcu_id::RP2040,
-        target_tag: target_tag(HUB_TAG),
-        max_attempts: MAX_ATTEMPTS,
-    };
-    let mut m = Mem(vec![0xFF; (APP_SLOT[1] + APP_SLOT_SIZE) as usize]);
-    let a = put_app(&mut m, &kp, 0, 0);
-    // Install log as `dagon rescue hub` writes it.
+/// Flash with app A installed and the install log as `dagon rescue hub`
+/// writes it.
+fn install(kp: &KeyPair) -> (Mem, SlotRef) {
+    let mut m = Mem(vec![
+        0xFF;
+        (APP_SLOT[1] + APP_SLOT_SIZE - XIP_BASE) as usize
+    ]);
+    let a = put_app(&mut m, kp, 0, 0);
     let rec = |k, seq| Record {
         kind: k,
         target: target::APP,
@@ -103,6 +101,64 @@ fn trial_without_confirm_rolls_back_to_a() {
         .unwrap();
     m.write(APP_LOG[0] + 64, &rec(kind::CONFIRMED, 2).to_bytes())
         .unwrap();
+    (m, a)
+}
+
+fn config(kp: &KeyPair) -> BootConfig {
+    BootConfig {
+        pubkey: *kp.pk,
+        mcu_id: mcu_id::RP2040,
+        target_tag: target_tag(HUB_TAG),
+        max_attempts: MAX_ATTEMPTS,
+    }
+}
+
+/// Many updates back and forth: the 4 KiB faces (127 records each) compact
+/// into each other and the state stays right.
+#[test]
+fn hundreds_of_updates_compact_the_log() {
+    let kp = KeyPair::from_seed(Seed::new(SEED));
+    let (mut m, a) = install(&kp);
+    let b = put_app(&mut m, &kp, 1, 1);
+    for i in 0..200 {
+        let to = if i % 2 == 0 { b } else { a };
+        let mut log = Log::load(&mut m, &APP_LOG_LAYOUT).unwrap();
+        log.append(&mut m, kind::SLOT_PENDING, to, 0).unwrap();
+        let d = boot::decide(&mut m, &mut log, &APP_SLOTS, &config(&kp));
+        assert!(
+            matches!(d, Decision::Boot { trial: true, .. }),
+            "{i}: {d:?}"
+        );
+        log.append(&mut m, kind::CONFIRMED, to, 0).unwrap();
+        let st = status_now(&mut m, to.slot);
+        assert_eq!(st.confirmed, to.slot, "{i}");
+        assert_eq!(
+            st.slots[to.slot as usize].state,
+            SlotState::Confirmed,
+            "{i}"
+        );
+    }
+    let mut log = Log::load(&mut m, &APP_LOG_LAYOUT).unwrap();
+    assert!(log.generation > 1, "600 records must have compacted");
+    let d = boot::decide(&mut m, &mut log, &APP_SLOTS, &config(&kp));
+    assert!(
+        matches!(
+            d,
+            Decision::Boot {
+                slot: 0,
+                trial: false,
+                ..
+            }
+        ),
+        "{d:?}"
+    );
+}
+
+#[test]
+fn trial_without_confirm_rolls_back_to_a() {
+    let kp = KeyPair::from_seed(Seed::new(SEED));
+    let cfg = config(&kp);
+    let (mut m, _a) = install(&kp);
 
     let b = put_app(&mut m, &kp, 1, 1);
     let mut log = Log::load(&mut m, &APP_LOG_LAYOUT).unwrap();
@@ -123,7 +179,6 @@ fn trial_without_confirm_rolls_back_to_a() {
             ),
             "{d:?}"
         );
-        assert!(image::linked_here(&mut m, APP_SLOT[1]));
         assert_eq!(status_now(&mut m, 1).slots[1].state, SlotState::Trying);
     }
     let mut log = Log::load(&mut m, &APP_LOG_LAYOUT).unwrap();

@@ -1,5 +1,6 @@
-//! Hub flash layout (offsets from the start of flash; XIP maps it at
-//! `XIP_BASE`). Fixed: never move these.
+//! Hub flash layout as XIP addresses (flash offset + `XIP_BASE`), the
+//! address space every `Flash` here uses and image headers' `load_addr`
+//! names. Fixed: never move these.
 
 use dagon_core::boot::SlotLayout;
 use dagon_core::log::LogLayout;
@@ -8,17 +9,21 @@ pub const XIP_BASE: u32 = 0x1000_0000;
 pub const FLASH_SIZE: usize = 4 * 1024 * 1024;
 pub const SECTOR: u32 = 4096;
 
+const fn xip(offset: u32) -> u32 {
+    XIP_BASE + offset
+}
+
 /// boot2 (256 B) + stage0.
-pub const STAGE0: u32 = 0x00_0000;
-pub const BL_LOG: [u32; 2] = [0x00_4000, 0x00_5000];
-pub const APP_LOG: [u32; 2] = [0x00_6000, 0x00_7000];
+pub const STAGE0: u32 = xip(0x00_0000);
+pub const BL_LOG: [u32; 2] = [xip(0x00_4000), xip(0x00_5000)];
+pub const APP_LOG: [u32; 2] = [xip(0x00_6000), xip(0x00_7000)];
 /// Boot core slots. B is reserved (no boot core self-update).
-pub const BL_SLOT: [u32; 2] = [0x00_8000, 0x02_8000];
+pub const BL_SLOT: [u32; 2] = [xip(0x00_8000), xip(0x02_8000)];
 pub const BL_SLOT_SIZE: u32 = 128 * 1024;
-pub const APP_SLOT: [u32; 2] = [0x04_8000, 0x14_8000];
+pub const APP_SLOT: [u32; 2] = [xip(0x04_8000), xip(0x14_8000)];
 pub const APP_SLOT_SIZE: u32 = 1024 * 1024;
 /// Display copy of the topology (first 4 KiB of the topology store, unsigned).
-pub const TOPOLOGY: u32 = 0x24_8000;
+pub const TOPOLOGY: u32 = xip(0x24_8000);
 pub const TOPOLOGY_SIZE: u32 = 4096;
 
 /// Inline image header at the slot start; the body (vector table) follows.

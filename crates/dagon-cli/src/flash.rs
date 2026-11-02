@@ -223,11 +223,8 @@ fn is_rp2040_rom(info: &str) -> bool {
     let header = lines
         .next()
         .is_some_and(|l| l.starts_with("UF2 Bootloader"));
-    header
-        && lines.any(|l| {
-            l.split_once(':')
-                .is_some_and(|(k, v)| k.trim() == "Board-ID" && v.trim() == UF2_BOARD)
-        })
+    let board = format!("Board-ID: {UF2_BOARD}");
+    header && lines.any(|l| l == board)
 }
 
 /// The MCU families `flash` can write (the page offers it for these).
@@ -568,6 +565,12 @@ mod tests {
             "\nUF2 Bootloader v3.0\nBoard-ID: RPI-RP2\n",
             "\r\nUF2 Bootloader v3.0\r\nBoard-ID: RPI-RP2\r\n",
             "  UF2 Bootloader v3.0\nBoard-ID: RPI-RP2\n",
+            "UF2 Bootloader v3.0\n Board-ID: RPI-RP2\n",
+            "UF2 Bootloader v3.0\nBoard-ID: RPI-RP2 \n",
+            "UF2 Bootloader v3.0\nBoard-ID : RPI-RP2\n",
+            "UF2 Bootloader v3.0\nBoard-ID:RPI-RP2\n",
+            "UF2 Bootloader v3.0\nBoard-ID:  RPI-RP2\n",
+            "UF2 Bootloader v3.0\r\n Board-ID : RPI-RP2 \r\n",
             "",
         ] {
             assert!(!is_rp2040_rom(not), "{not:?}");

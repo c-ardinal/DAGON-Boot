@@ -279,9 +279,9 @@ pub fn rescue(args: &[&str]) -> Res {
 fn provision_node(o: &Opts<'_>, node: &str) -> Res {
     let cfg = Config::load(o.get("config"))?;
     let t = read_topology(&cfg.topology_path(o.get("topology"))?)?;
-    let n = t
-        .node(node)
-        .ok_or_else(|| format!("no node '{node}' in the topology"))?;
+    if t.node(node).is_none() {
+        return Err(format!("no node '{node}' in the topology"));
+    }
     let inputs = cfg
         .provision
         .get(node)
@@ -289,6 +289,77 @@ fn provision_node(o: &Opts<'_>, node: &str) -> Res {
     let dir = o
         .get("out")
         .map_or_else(|| cfg.provision_dir().join(node), PathBuf::from);
+    let key = load_key(o.get("key"))?;
+    match provision_files(&t, node, inputs, &dir, &key)? {
+        FirstWrite::ProbeRs {
+            bin,
+            bytes,
+            commands,
+        } => println!(
+            "{}: {bytes} bytes\nwrite with ST-LINK:\n{}",
+            bin.display(),
+            command_lines("probe-rs", &commands)
+        ),
+        FirstWrite::Uf2 { file, blocks } => println!(
+            "{}: {blocks} blocks\nhold BOOT while plugging in USB, then copy the file to the RPI-RP2 drive",
+            file.display()
+        ),
+    }
+    Ok(())
+}
+
+/// How the first-install files reach the board.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum FirstWrite {
+    /// F401: `flash.bin` written with probe-rs through an ST-LINK; `commands`
+    /// are the probe-rs argument lists, in order.
+    ProbeRs {
+        bin: PathBuf,
+        bytes: usize,
+        commands: Vec<Vec<String>>,
+    },
+    /// RP2040: `rescue.uf2` copied to the RPI-RP2 drive (BOOT held at power-up).
+    Uf2 { file: PathBuf, blocks: usize },
+}
+
+/// One line per command, `program` then its arguments.
+pub(crate) fn command_lines(program: &str, commands: &[Vec<String>]) -> String {
+    commands
+        .iter()
+        .map(|args| format!("{program} {}\n", args.join(" ")))
+        .collect()
+}
+
+/// probe-rs argument lists that erase the F401 and write `bin` from the
+/// start of its flash, then reset it.
+pub(crate) fn f401_probe_rs(bin: &Path) -> Vec<Vec<String>> {
+    let words = |s: String| s.split(' ').map(String::from).collect::<Vec<_>>();
+    let chip = format!("--chip {F401_CHIP}");
+    let mut download = words(format!(
+        "download {chip} --binary-format bin --base-address {:#010x}",
+        provision::F401_FLASH_BASE
+    ));
+    // The path may hold spaces: one argument, never split.
+    download.push(bin.display().to_string());
+    vec![
+        words(format!("erase {chip}")),
+        download,
+        words(format!("reset {chip}")),
+    ]
+}
+
+/// Signs `inputs` for `node` and writes the first-install files into `dir`
+/// (bootcore.img, app-a.img, then flash.bin and commands.txt or rescue.uf2).
+pub(crate) fn provision_files(
+    t: &Topology,
+    node: &str,
+    inputs: &crate::config::ProvisionInputs,
+    dir: &Path,
+    key: &KeyPair,
+) -> Result<FirstWrite, String> {
+    let n = t
+        .node(node)
+        .ok_or_else(|| format!("no node '{node}' in the topology"))?;
     let app_v = inputs.version.as_deref().map(version).transpose()?;
     let boot_v = inputs
         .bootcore_version
@@ -305,24 +376,23 @@ fn provision_node(o: &Opts<'_>, node: &str) -> Res {
             bits: None,
         })
     };
-    let key = load_key(o.get("key"))?;
     let boot = image_for_node(
-        &t,
+        t,
         node,
         image_kind::BOOTCORE,
         slot_binding::A,
         &read_file(&inputs.bootcore)?,
         sign_opts(boot_v, Version::default()).as_ref(),
-        &key,
+        key,
     )?;
     let app = image_for_node(
-        &t,
+        t,
         node,
         image_kind::APP,
         slot_binding::A,
         &read_file(&inputs.app)?,
         sign_opts(app_v, boot_v.unwrap_or_default()).as_ref(),
-        &key,
+        key,
     )?;
     let boot_slot = image::slot(&n.mcu, image_kind::BOOTCORE, slot_binding::A).expect("checked");
     let app_slot = image::slot(&n.mcu, image_kind::APP, slot_binding::A).expect("checked");
@@ -338,19 +408,16 @@ fn provision_node(o: &Opts<'_>, node: &str) -> Res {
             let bin = provision::f401_flash((&boot_slot, &boot), (&app_slot, &app));
             let bin_path = dir.join("flash.bin");
             write_file(&bin_path, &bin)?;
-            let cmds = format!(
-                "probe-rs erase --chip {F401_CHIP}\n\
-                 probe-rs download --chip {F401_CHIP} --binary-format bin --base-address {:#010x} {}\n\
-                 probe-rs reset --chip {F401_CHIP}\n",
-                provision::F401_FLASH_BASE,
-                bin_path.display()
-            );
-            write_file(&dir.join("commands.txt"), cmds.as_bytes())?;
-            println!(
-                "{}: {} bytes\nwrite with ST-LINK:\n{cmds}",
-                bin_path.display(),
-                bin.len()
-            );
+            let commands = f401_probe_rs(&bin_path);
+            write_file(
+                &dir.join("commands.txt"),
+                command_lines("probe-rs", &commands).as_bytes(),
+            )?;
+            Ok(FirstWrite::ProbeRs {
+                bin: bin_path,
+                bytes: bin.len(),
+                commands,
+            })
         }
         "rp2040" => {
             let stage0_path = inputs
@@ -369,13 +436,11 @@ fn provision_node(o: &Opts<'_>, node: &str) -> Res {
             let uf2 = provision::hub_rescue_uf2(&stage0, (&boot_slot, &boot), (&app_slot, &app));
             let uf2_path = dir.join("rescue.uf2");
             write_file(&uf2_path, &uf2)?;
-            println!(
-                "{}: {} blocks\nhold BOOT while plugging in USB, then copy the file to the RPI-RP2 drive",
-                uf2_path.display(),
-                uf2.len() / 512
-            );
+            Ok(FirstWrite::Uf2 {
+                file: uf2_path,
+                blocks: uf2.len() / 512,
+            })
         }
-        other => return Err(format!("provision does not support {other} yet")),
+        other => Err(format!("provision does not support {other} yet")),
     }
-    Ok(())
 }

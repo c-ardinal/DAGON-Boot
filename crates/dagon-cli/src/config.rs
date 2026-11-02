@@ -173,7 +173,7 @@ const VERBATIM: &str = concat!('\\', '\\', '?', '\\');
 
 /// Drops the extended-length prefix from a drive path so it prints and
 /// passes to other tools as usual.
-fn plain_path(p: PathBuf) -> PathBuf {
+pub(crate) fn plain_path(p: PathBuf) -> PathBuf {
     let s = p.to_string_lossy();
     match s.strip_prefix(VERBATIM) {
         Some(rest) if rest.as_bytes().get(1) == Some(&b':') => PathBuf::from(rest),

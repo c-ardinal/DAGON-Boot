@@ -48,10 +48,21 @@ type R = Result<String, String>;
 /// ID, title, scenario.
 type Scenario = (&'static str, &'static str, fn() -> R);
 
+/// The simulated hub as dagon-host's transport and clock.
 #[derive(Clone)]
-struct Sim {
+pub(crate) struct Sim {
     hub: Rc<RefCell<SimHub>>,
     pending: Vec<u8>,
+}
+
+impl Sim {
+    #[cfg(test)]
+    pub(crate) fn new(hub: SimHub) -> Sim {
+        Sim {
+            hub: Rc::new(RefCell::new(hub)),
+            pending: Vec::new(),
+        }
+    }
 }
 
 impl Transport for Sim {

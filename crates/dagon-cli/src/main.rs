@@ -4,7 +4,10 @@ mod ai;
 mod commands;
 mod config;
 mod conform;
+mod deploy;
 mod device;
+mod doctor;
+mod flash;
 mod nodebuild;
 mod paths;
 mod scaffold;
@@ -70,6 +73,16 @@ Usage:
                                      --force-main)
   dagon build [<id>...]              cargo build each node in [build.<id>] of dagon.toml
                                      into out/build/<id>/app-a.elf (and app-b.elf)
+  dagon deploy [<id>...] [--version <x.y.z>] [--yes] [--port <name>] [--topology <yaml>]
+        [--key <file>]               build, sign both slots, release build and apply in one
+                                     go; version defaults to one patch above the last
+                                     release; lists node -> version and asks first
+  dagon flash <id> [--dry-run] [--yes] [--out <dir>] [--topology <yaml>] [--key <file>]
+                                     first write of the hub (RP2040: UF2 to the RPI-RP2
+                                     drive) or an F401 (probe-rs); builds the boot core
+                                     (and stage0) with the key; prints the plan first
+  dagon doctor [--fix]               tools each MCU family of the topology needs; --fix
+                                     installs what needs no administrator rights
   dagon serve [--port <n>] [--web <dir>] [--pubkey <file>] [--no-open]
                                      DAGON Console, the browser tool (built into dagon,
                                      or --web), and its API on 127.0.0.1 only; opens it
@@ -118,6 +131,9 @@ fn main() -> ExitCode {
         ["recover", rest @ ..] => run(device::recover(rest)),
         ["rollback", rest @ ..] => run(device::rollback(rest)),
         ["build", rest @ ..] => run(nodebuild::command(rest)),
+        ["deploy", rest @ ..] => run(deploy::command(rest)),
+        ["flash", rest @ ..] => run(flash::command(rest)),
+        ["doctor", rest @ ..] => run(doctor::command(rest)),
         ["new", rest @ ..] => run(scaffold::new_command(rest)),
         ["gen", rest @ ..] => run(scaffold::gen_command(rest)),
         ["serve", rest @ ..] => run(serve::command(rest)),

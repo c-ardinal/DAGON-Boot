@@ -26,16 +26,16 @@ dagon-proto = { path = "../../crates/dagon-proto" }
 esp-hal = { version = "1.2.2", features = ["esp32s3", "unstable"] }
 esp-bootloader-esp-idf = { version = "0.6.0", features = ["esp32s3"] }
 
-# esp-bootloader-esp-idf computes `ota_seq - 1` with wrapping intent (an
-# erased otadata switched to ota_1 gets ota_seq 0, which the 2nd stage maps to
-# ota_1 as well); overflow checks would turn that into a panic.
 [profile.release]
 opt-level = "s"
 lto = "fat"
 codegen-units = 1
 debug = 2
-overflow-checks = false
 
 [profile.dev]
 opt-level = "s"
+
+# esp-bootloader-esp-idf computes `ota_seq - 1` for any counted seq, 0 included
+# (otadata written by older tools); release builds already wrap.
+[profile.dev.package.esp-bootloader-esp-idf]
 overflow-checks = false

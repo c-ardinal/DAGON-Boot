@@ -32,11 +32,20 @@ cargo +stable test --lib --target x86_64-pc-windows-msvc
 
 ## Rollback check on the watch (USB-C)
 
-From the repository root, with `targets/esp32s3-2ndstage` built (`idf.py bootloader`).
-The 16 MB flash size must be given every time: the 2nd stage reads no further
-than the size in its header, and ota_1 starts at 0x410000.
+Prerequisites:
+
+- The rollback-enabled 2nd stage is built first: in `targets/esp32s3-2ndstage`,
+  `idf.py set-target esp32s3` then `idf.py bootloader` (ESP-IDF v6.1), giving
+  `targets/esp32s3-2ndstage/build/bootloader/bootloader.bin`.
+- The test apps are built (`cargo build --release` here); `E` below is that
+  release output directory.
+
+Run from the repository root. The 16 MB flash size must be given every time:
+the 2nd stage reads no further than the size in its header, and ota_1 starts
+at 0x410000.
 
 ```sh
+# release output directory of this crate
 E=targets/esp32s3-port/target/xtensa-esp32s3-none-elf/release
 F="--chip esp32s3 --flash-size 16mb --partition-table-offset 0x8000 \
    --bootloader targets/esp32s3-2ndstage/build/bootloader/bootloader.bin \
@@ -55,4 +64,13 @@ Expected (one line per boot, `status[slot]` is the STATUS state:
 3. Key `1`: `testapp-noconfirm` with `running=ota_1 ... status[ota_1]=3`, a count
    to 3000 ms, a reset, then `testapp-confirm` with
    `running=ota_0 selected=ota_1 state=Some(Aborted) reset=Watchdog status[ota_1]=5 reason=3 ROLLED BACK from ota_1`.
-4. Key `r`: still ota_0. Key `f`: back to factory.
+4. Key `r`: still ota_0.
+5. Key `f`: back to `running=factory selected=factory state=None` (otadata blank
+   again). Then key `1`: from blank otadata the entry for ota_1 gets seq 2
+   (not 0), and `testapp-noconfirm` starts with `running=ota_1 ...
+   status[ota_1]=3`. After its reset there is no confirmed slot to fall back
+   to, so the 2nd stage boots factory:
+   `running=factory selected=ota_1 state=Some(Aborted) reset=Watchdog status[ota_1]=5 reason=3 ROLLED BACK from ota_1`.
+
+If the monitor drops on a watchdog reset, reopen it (`espflash monitor`) and
+press `s` for the status line.

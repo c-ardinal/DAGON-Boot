@@ -1,9 +1,10 @@
-//! `status`, `apply`, `topo push`: thin shells over dagon-host on the hub's
-//! serial port.
+//! `status`, `apply`, `rollback`, `recover`, `topo push`: thin shells over
+//! dagon-host on the hub's serial port.
 
 use std::path::{Path, PathBuf};
 
-use dagon_host::{Event, NodeState, Outcome, Target};
+use dagon_format::Version;
+use dagon_host::{Clock, Event, Host, NodeState, Outcome, Target, Transport};
 use dagon_proto::payload::phase;
 use dagon_sign::to_hex;
 use dagon_sim::block_on;
@@ -73,6 +74,46 @@ pub fn status(args: &[&str]) -> Res {
             None => println!("{}: not reachable through the hub", n.id),
         }
     }
+    Ok(())
+}
+
+/// Rolls topology node `node` back to the version in its other slot and
+/// confirms it there; returns that version.
+pub fn rollback_node<T: Transport, C: Clock>(
+    host: &mut Host<T, C>,
+    t: &Topology,
+    node: &str,
+    on_event: &mut dyn FnMut(Event),
+) -> Result<Version, String> {
+    let i = t
+        .nodes
+        .iter()
+        .position(|n| n.id == node)
+        .ok_or_else(|| format!("no node '{node}' in the topology"))?;
+    let bin = topology_bin(t)?;
+    let view = dagon_format::TopologyView::parse(&bin).map_err(|e| format!("{e:?}"))?;
+    let to = Target::of_node(&view, i as u8)
+        .ok_or_else(|| format!("'{node}' is not reachable through the hub"))?;
+    block_on(host.rollback(to, i as u8, on_event)).map_err(|e| match e {
+        dagon_host::Error::NoPreviousVersion => {
+            format!("'{node}' has no previously confirmed version to go back to")
+        }
+        e => format!("rollback {node}: {e:?}"),
+    })
+}
+
+pub fn rollback(args: &[&str]) -> Res {
+    let o = Opts::parse(args, &["node", "port", "topology", "config"])?;
+    if !o.pos.is_empty() {
+        return Err("rollback takes --node <id>".into());
+    }
+    let node = o.need("node")?;
+    let cfg = Config::load(o.get("config"))?;
+    let t = read_topology(&cfg.topology_path(o.get("topology"))?)?;
+    let mut host = serial::host(o.get("port"))?;
+    let mut print = |e: Event| println!("{node}: {} ({})", phase_name(e.phase), e.version);
+    let v = rollback_node(&mut host, &t, node, &mut print)?;
+    println!("{node}: back on {v}, confirmed");
     Ok(())
 }
 

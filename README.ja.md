@@ -1,3 +1,10 @@
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="assets/product-symbol/lockup-horizontal-dark-2400w.png">
+    <img src="assets/product-symbol/lockup-horizontal-light-2400w.png" alt="DAGON Boot" width="480">
+  </picture>
+</p>
+
 # DAGON Boot (Dual-bank Atomic Gateway for On-device Nodes)
 
 [English: README.md](README.md)
@@ -8,7 +15,7 @@
 
 親機（RP2040）は PC と USB でつながり、子機とは I2C（STM32F401）や UART（ESP32-S3）でつながります。PC は署名付きのリリースを検査し、各子機へ親機経由でイメージを送り、子機を新しいスロットで試行起動させ、子機が新しい版で応答したら確定させます。新しいイメージが確定されないままの子機は、ウォッチドッグでリセットされて前のスロットで起動し直します。まったく応答しなくなった STM32F401 は、PC が親機を通して操作する STM32 の ROM の I2C ブートローダで書き直せます。
 
-すべての形式（イメージヘッダ、リリースのマニフェスト、`.dgb` リリースバンドル、状態ログ、構成バイナリ）と通信プロトコルはこのリポジトリで定義しています。ファームウェア、`dagon` コマンドラインツール、ブラウザのページ（WebAssembly 経由）が同じ Rust の crate を使います。
+すべての形式（イメージヘッダ、リリースのマニフェスト、`.dgb` リリースバンドル、状態ログ、構成バイナリ）と通信プロトコルはこのリポジトリで定義しています。ファームウェア、`dagon` コマンドラインツール、ブラウザのツール DAGON Console（WebAssembly 経由）が同じ Rust の crate を使います。
 
 ## 現在できること
 
@@ -21,7 +28,7 @@
 - `dagon conform`: `dagon-conform` の 12 件の適合試験。模擬の F401 に対し、親機経由でも直結でも 12 件すべて合格します。
 - 構成 YAML: 21 件の検証規則と対応ボードの表（`dagon-topology`）。`topology/desk-demo.yaml` はこれを通ります。
 - MCU ごとの支援パッケージ（`targets/mcu/rp2040`、`targets/mcu/stm32f401re`、`targets/mcu/esp32s3`。ブート用のイメージを含む）とボードごとの支援パッケージ（`targets/boards/*`）。ファームウェア: RP2040 親機（`targets/rp2040-hub`）、F401 のデモ子機（`samples/f401-app`）、ESP32-S3 子機（ボードのパッケージ `targets/boards/m5stopwatch`（factory のファームウェアを含む）、サンプルのアプリ `samples/esp32s3-app`、ESP-IDF の 2nd stage と組み合わせ）。親機のファームウェアは親機の実機に書き込み済みで起動しますが、親機の実機での確認（PC との通信、表示）はまだ進行中です。F401 と ESP32-S3 のファームウェアの実機での確認と、実機での通しの流れはまだです（「制限事項」を参照）。
-- `web/` のブラウザのページ（開発中。現在できることは `web/README.md` を参照）。
+- `web/` のブラウザのツール DAGON Console（開発中。現在できることは `web/README.md` を参照）。
 
 ## はじめかた
 
@@ -81,7 +88,7 @@ dagon ai topology --in boards.txt --out topology/mine.yaml
 
 すべてのコマンドとオプションは `dagon --help` で確認できます。
 
-## ブラウザの UI（開発）
+## DAGON Console（開発）
 
 `web/README.md` を参照してください。Node.js、npm、`wasm-pack` 0.15.1 があれば:
 
@@ -123,10 +130,10 @@ npm run dev       # http://127.0.0.1:5173（Chrome または Edge 89 以降、We
 | `crates/dagon-host` | CLI とブラウザが共有する PC 側の手順 |
 | `crates/dagon-romlink` | STM32 の I2C ROM ブートローダの手順 |
 | `crates/dagon-cli` | `dagon` コマンド |
-| `crates/dagon-wasm` | ブラウザのページ用の WebAssembly バインディング |
+| `crates/dagon-wasm` | DAGON Console 用の WebAssembly バインディング |
 | `targets/` | ファームウェア: RP2040 親機、STM32F401 子機、ESP32-S3 子機、立ち上げ用ツール。MCU ごと（`targets/mcu/*`）とボードごと（`targets/boards/*`）の支援パッケージ |
 | `samples/` | 支援パッケージを使うサンプルのアプリ（DAGON の一部ではない） |
-| `web/` | ブラウザのページ（Svelte、Vite、TypeScript） |
+| `web/` | ブラウザのツール DAGON Console（Svelte、Vite、TypeScript） |
 | `topology/` | 構成の例 |
 | `plugin/` | 新しいボードへの移植に使う Claude Code のプラグイン（エージェント、スキル、フック） |
 | `scripts/licences.py` | 下の依存ライブラリのライセンス表を生成する |
@@ -155,8 +162,8 @@ npm run dev       # http://127.0.0.1:5173（Chrome または Edge 89 以降、We
 - `ring` は Apache-2.0 AND ISC（両方が適用されます）。
 - `webpki-roots` は CDLA-Permissive-2.0 です（`dagon ai topology` の TLS クライアントが使う外部データ、Mozilla のルート証明書のデータを含みます）。
 - `subtle`、`rp-pac`、`rp2040-boot2`、`source-map-js` は BSD-3-Clause です。
-- `lightningcss`（MPL-2.0）は web のビルドツールのビルド時の依存だけで、ページには何も含まれません。
-- ページに含まれる npm のコードは、Svelte のクライアント用ランタイムと、それが読み込む `clsx` と `esm-env`（いずれも MIT）だけです。他の npm パッケージはビルドとテストの道具です（表の "Ships in" 列）。
+- `lightningcss`（MPL-2.0）は web のビルドツールのビルド時の依存だけで、DAGON Console には何も含まれません。
+- DAGON Console に含まれる npm のコードは、Svelte のクライアント用ランタイムと、それが読み込む `clsx` と `esm-env`（いずれも MIT）だけです。他の npm パッケージはビルドとテストの道具です（表の "Ships in" 列）。
 - `web/public/fonts/` の書体は SIL Open Font License 1.1 です: Doto、DotGothic16、Zen Kaku Gothic New、JetBrains Mono（ライセンス文はファイルの隣にあります。`web/README.md` を参照）。
 
 Rust crates: 316 packages, 350 name/version pairs. "Used by": `crates/` is the host workspace, `samples/...` the sample apps, other names are firmware packages under `targets/`.

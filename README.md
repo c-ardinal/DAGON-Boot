@@ -1,3 +1,10 @@
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="assets/product-symbol/lockup-horizontal-dark-2400w.png">
+    <img src="assets/product-symbol/lockup-horizontal-light-2400w.png" alt="DAGON Boot" width="480">
+  </picture>
+</p>
+
 # DAGON Boot (Dual-bank Atomic Gateway for On-device Nodes)
 
 [日本語版 / Japanese: README.ja.md](README.ja.md)
@@ -18,7 +25,7 @@ through the STM32 ROM I2C boot loader, driven by the PC through the hub.
 All formats (image header, release manifest, `.dgb` release bundle, state
 log, topology binary) and the link protocol are defined in this repository;
 the same Rust crates are used by the firmware, the `dagon` command line tool
-and the browser page (through WebAssembly).
+and DAGON Console, the browser tool (through WebAssembly).
 
 ## What works today
 
@@ -51,8 +58,8 @@ What the code and its tests in this repository show:
   hardware; on-device validation of the hub (host communication, display) is
   still in progress. On-device checks of the F401 and ESP32-S3 firmware and
   the full flow on hardware are still pending (see Limitations).
-- The browser page in `web/` (under development; `web/README.md` lists what
-  it does today).
+- DAGON Console, the browser tool in `web/` (under development;
+  `web/README.md` lists what it does today).
 
 ## Quick start
 
@@ -120,7 +127,7 @@ dagon ai topology --in boards.txt --out topology/mine.yaml
 
 `dagon --help` lists every command and option.
 
-## Browser UI (development)
+## DAGON Console (development)
 
 See `web/README.md`. In short, with Node.js, npm and `wasm-pack` 0.15.1:
 
@@ -178,10 +185,10 @@ npm run dev       # http://127.0.0.1:5173 (Chrome or Edge 89+, Web Serial)
 | `crates/dagon-host` | PC-side procedures shared by the CLI and the browser |
 | `crates/dagon-romlink` | STM32 I2C ROM loader procedure |
 | `crates/dagon-cli` | The `dagon` command |
-| `crates/dagon-wasm` | WebAssembly bindings for the browser page |
+| `crates/dagon-wasm` | WebAssembly bindings for DAGON Console |
 | `targets/` | Firmware: RP2040 hub, STM32F401 node, ESP32-S3 node, bring-up tools; support packages per MCU (`targets/mcu/*`) and per board (`targets/boards/*`) |
 | `samples/` | Sample apps built on the support packages (not part of DAGON) |
-| `web/` | Browser page (Svelte, Vite, TypeScript) |
+| `web/` | DAGON Console, the browser tool (Svelte, Vite, TypeScript) |
 | `topology/` | Example topologies |
 | `plugin/` | Claude Code plugin (agents, skills, hooks) used to port DAGON to new boards |
 | `scripts/licences.py` | Generates the dependency licence tables below |
@@ -227,8 +234,8 @@ Points to note:
   `dagon ai topology`).
 - `subtle`, `rp-pac`, `rp2040-boot2` and `source-map-js` are BSD-3-Clause.
 - `lightningcss` (MPL-2.0) is a build-time dependency of the web tooling
-  only; nothing from it ships in the page.
-- The page ships the Svelte client runtime and the two packages it
+  only; nothing from it ships in DAGON Console.
+- DAGON Console ships the Svelte client runtime and the two packages it
   imports, `clsx` and `esm-env` (all MIT); every other npm package is a
   build or test tool (column "Ships in").
 - Fonts in `web/public/fonts/` are under the SIL Open Font License 1.1:

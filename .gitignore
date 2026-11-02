@@ -33,3 +33,6 @@ keys/
 
 # CLI outputs (images, bundles, provisioning files)
 /out/
+
+# The owner's source files of the product symbol: never committed
+assets/product-symbol/no_commit/

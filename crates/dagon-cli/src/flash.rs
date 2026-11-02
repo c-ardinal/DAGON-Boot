@@ -15,7 +15,7 @@ use ed25519_compact::KeyPair;
 
 use crate::commands::{command_lines, provision_files, FirstWrite};
 use crate::config::{load_key, read_topology, Config, Opts, ProvisionInputs};
-use crate::deploy::{confirm, pubkey_file, YES};
+use crate::deploy::{confirm, firmware_key, YES};
 use crate::nodebuild;
 
 const DRY_RUN: &str = "--dry-run";
@@ -42,16 +42,16 @@ pub(crate) fn parts(mcu: &str) -> Option<&'static [Part]> {
     const RP2040: &[Part] = &[
         Part {
             name: "stage0",
-            package: "targets/rp2040-stage0",
+            package: "targets/mcu/rp2040/stage0",
         },
         Part {
             name: "bootcore",
-            package: "targets/rp2040-bootcore",
+            package: "targets/mcu/rp2040/bootcore",
         },
     ];
     const F401: &[Part] = &[Part {
         name: "bootcore",
-        package: "targets/f401-bootcore",
+        package: "targets/mcu/stm32f401re/bootcore",
     }];
     match mcu {
         "rp2040" => Some(RP2040),
@@ -136,8 +136,8 @@ fn inputs(
         return Ok(p.clone());
     }
     let n = t.node(node).ok_or("checked in plan")?;
-    let pubkey = pubkey_file(cfg, key)?;
-    let env = [("DAGON_PUBKEY", pubkey.as_str())];
+    let fw_key = firmware_key(cfg, key)?;
+    let hex = dagon_sign::to_hex(&fw_key);
     let cancel = AtomicBool::new(false);
     let mut log = |l: &str| println!("{l}");
     let mut built = Vec::new();
@@ -146,10 +146,18 @@ fn inputs(
         let bin = nodebuild::package_name(&dir)?;
         let target = cfg.base.join("out/flash/target").join(part.name);
         println!("{node}: building {} in {}", part.name, dir.display());
-        let exe = nodebuild::cargo_build(&dir, &bin, &[], Some(&target), &env, &mut log, &cancel)?;
+        let exe = nodebuild::cargo_build(
+            &dir,
+            &bin,
+            &[],
+            Some(&target),
+            Some(&hex),
+            &mut log,
+            &cancel,
+        )?;
         built.push((part.name, exe));
     }
-    nodebuild::build_nodes_with(cfg, &[node.to_string()], &env, &mut log, &cancel)?;
+    nodebuild::build_nodes_keyed(cfg, &[node.to_string()], Some(fw_key), &mut log, &cancel)?;
     let take = |name: &str| built.iter().find(|p| p.0 == name).map(|p| p.1.clone());
     let version = cfg.build.get(node).and_then(|b| b.version.clone());
     Ok(ProvisionInputs {
@@ -418,12 +426,18 @@ mod tests {
         );
         let plan = plan(&cfg, &t, "seg", &out).unwrap().join("\n");
         assert!(
-            plan.contains("bootcore") && plan.contains("f401-bootcore"),
+            plan.contains("bootcore") && plan.contains("stm32f401re"),
             "{plan}"
         );
         assert!(plan.contains("targets/f401-app"), "{plan}");
         let hub = super::plan(&cfg, &t, "hub", &out);
         assert!(hub.is_err(), "no [build.hub] either");
+        for mcu in ["rp2040", "stm32f401re"] {
+            for p in parts(mcu).unwrap() {
+                let toml = dagon_home().join(p.package).join("Cargo.toml");
+                assert!(toml.is_file(), "{} is not in the checkout", toml.display());
+            }
+        }
         assert_eq!(
             parts("rp2040")
                 .unwrap()

@@ -5,7 +5,7 @@ import { execFileSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { decide, parseStatusZ, postCheck } from "./guard.mjs";
+import { decide, dependsOn, parseStatusZ, postCheck } from "./guard.mjs";
 
 const PORT_WT = "C:/w/dagon-port-R";
 const toplevel = (d) => (String(d).replace(/\\/g, "/").toLowerCase().startsWith("c:/w/dagon-port-r") ? PORT_WT : "C:/repo");
@@ -33,6 +33,47 @@ test("port-engineer Write to dagon-conform is denied as read-only", () => {
 
 test("port-engineer Write to targets/esp32s3-* is allowed", () => {
   expectPass(wr("C:/repo/targets/esp32s3-watch/src/lib.rs", engineer), offSession);
+});
+
+test("port-engineer area follows the MCU / board / samples layout", () => {
+  const manifests = {
+    "C:/repo/targets/boards/m5stopwatch/Cargo.toml": '[dependencies]\ndagon-mcu-esp32s3 = { path = "../../mcu/esp32s3" }\n',
+    "C:/repo/targets/boards/rp2040-touch-lcd/Cargo.toml": '[dependencies]\ndagon-mcu-rp2040 = { path = "../../mcu/rp2040" }\n',
+  };
+  const d = deps({ readText: (f) => manifests[f] ?? null });
+  expectPass(wr("C:/repo/targets/mcu/esp32s3/src/node.rs", engineer), d);
+  expectPass(wr("C:/repo/targets/boards/m5stopwatch/src/lib.rs", engineer), d);
+  expectPass(wr("C:/repo/targets/boards/new-s3-board/Cargo.toml", engineer), d);
+  expectPass(wr("C:/repo/samples/esp32s3-app/src/main.rs", engineer), d);
+  expectDeny(wr("C:/repo/targets/boards/rp2040-touch-lcd/src/lib.rs", engineer), d, /may only edit/);
+  expectDeny(wr("C:/repo/targets/mcu/rp2040/src/lib.rs", engineer), d, /may only edit/);
+  expectDeny(wr("C:/repo/samples/rp2040-hub/src/main.rs", engineer), d, /may only edit/);
+  expectPass(sh("cd targets/mcu/esp32s3 && sed -i s/a/b/ src/lib.rs", engineer), d);
+  expectDeny(sh("cd targets/mcu/rp2040 && sed -i s/a/b/ src/lib.rs", engineer), d);
+
+  const status =
+    " M targets/mcu/esp32s3/src/node.rs\0 M targets/boards/m5stopwatch/src/lib.rs\0 M targets/boards/rp2040-touch-lcd/src/lib.rs\0";
+  const post = deps({
+    portWorktrees: () => [PORT_WT],
+    readText: (f) => manifests[f.replace(PORT_WT, "C:/repo")] ?? null,
+    run: (_r, a) => (a[0] === "status" ? status : ""),
+  });
+  const r = postCheck(sh("cargo fmt", engineer), post);
+  assert.equal(r.decision, "block");
+  assert.match(r.reason, /rp2040-touch-lcd/);
+  assert.doesNotMatch(r.reason, /esp32s3|m5stopwatch/);
+});
+
+test("dependsOn reads dependency tables, not comments or other tables", () => {
+  const pkg = "dagon-mcu-esp32s3";
+  assert.ok(dependsOn('[dependencies]\ndagon-mcu-esp32s3 = { path = "x" }\n', pkg));
+  assert.ok(dependsOn("[target.'cfg(target_arch = \"xtensa\")'.dependencies]\ndagon-mcu-esp32s3 = \"0.1\"\n", pkg));
+  assert.ok(dependsOn('[dependencies.dagon-mcu-esp32s3]\npath = "x"\n', pkg));
+  assert.ok(!dependsOn("# needs dagon-mcu-esp32s3 later\n[dependencies]\nesp-hal = \"1\"\n", pkg));
+  assert.ok(!dependsOn('[dev-dependencies]\ndagon-mcu-esp32s3 = { path = "x" }\n', pkg));
+  assert.ok(!dependsOn('[features]\nx = ["dagon-mcu-esp32s3/conform"]\n', pkg));
+  assert.ok(!dependsOn('[dependencies]\ndagon-mcu-esp32s3-extra = "1"\n', pkg));
+  assert.ok(!dependsOn('[package.metadata.dagon]\nmcu = "esp32s3"\n', pkg));
 });
 
 test("outside a port session protected crates are writable", () => {

@@ -8,10 +8,12 @@ import { versionText } from '../wasm/dagon.ts';
 import { bandOf } from './band.ts';
 import { ANNOUNCE, BAND, BUTTON_FOR, NODE } from './copy.ts';
 import { DESK_DEMO } from './sample.ts';
-import { Operate, bootcorePath, failureStage, LATEST_RELEASE } from './operate.svelte.ts';
+import { Operate, failureStage } from './operate.svelte.ts';
 
 const repo = (rel: string) => new Uint8Array(readFileSync(new URL(`../../../${rel}`, import.meta.url)));
-/** The public site's files: the desk release 1.1.0 and the F401 boot core, both under the test key. */
+/** The project's files dagon serve hands out (release/latest, the boot core): the desk release 1.1.0 and the F401 boot core, both under the test key. */
+const LATEST_RELEASE = 'release/latest.dgb';
+const bootcorePath = (id: string) => `bootcore/${id}`;
 const SITE: Record<string, Uint8Array> = {
   [LATEST_RELEASE]: repo('crates/dagon-sim/fixtures/desk-1.1.0.dgb'),
   [bootcorePath('seg')]: repo('crates/dagon-wasm/fixtures/f401-bootcore-1.0.0.img'),
@@ -44,7 +46,8 @@ function session(t: Transport, clock: LinkClock, fetchAsset: Fetch = site) {
       return t;
     },
     clock,
-    fetchAsset,
+    latest: () => fetchAsset(LATEST_RELEASE),
+    bootcore: (id) => fetchAsset(bootcorePath(id)),
   });
 }
 
@@ -120,7 +123,7 @@ describe('recovery from the page with dagon-host recover', () => {
     expect(t.helloOf('uart').mode).toBe(0);
   }, 120_000);
 
-  test('no release on the screen nor on the site: the page asks for one, then recovers with it', async () => {
+  test('no release on the screen nor in the project: the page asks for one, then recovers with it', async () => {
     const sim = simDesk(3)!;
     sim.desk().wipe(0x42);
     const op = session(sim.transport, sim.clock, async (p) => (p === LATEST_RELEASE ? null : site(p)));
@@ -131,7 +134,7 @@ describe('recovery from the page with dagon-host recover', () => {
     expect([op.state, op.recovered?.path]).toEqual(['L23', 'rom']);
   }, 120_000);
 
-  test('ROM path without the boot core on the site cannot fix the node (L25)', async () => {
+  test('ROM path without the project boot core cannot fix the node (L25)', async () => {
     const sim = simDesk(5)!;
     sim.desk().wipe(0x42);
     const op = session(sim.transport, sim.clock, async (p) => (p === LATEST_RELEASE ? site(p) : null));
@@ -251,7 +254,7 @@ describe('recovery from the page with dagon-host recover', () => {
     expect([v(t.helloOf('hub').activeVersion), t.helloOf('hub').trial]).toEqual(['1.0.0', false]);
   }, 120_000);
 
-  test('"配布中の最新バージョンを使う" takes the published release; without it the page says so', async () => {
+  test('"最新のリリースを使う" takes the project latest release through serve; without one the band says M58', async () => {
     const t = new MockTransport();
     const op = session(t, fastClock());
     await op.connect();
@@ -264,7 +267,7 @@ describe('recovery from the page with dagon-host recover', () => {
     await op2.connect();
     await op2.push();
     expect(await op2.useLatest()).toBe(false);
-    expect([op2.state, op2.alert]).toEqual(['L12', ANNOUNCE.A22latest]);
+    expect([op2.state, op2.alert, op2.latestMissing]).toEqual(['L12', ANNOUNCE.A22latest, true]);
 
     const bad = SITE[LATEST_RELEASE].slice();
     bad[bad.length - 1] ^= 1;

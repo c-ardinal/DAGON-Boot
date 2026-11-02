@@ -6,52 +6,40 @@
 
 use portable_atomic::{AtomicU32, Ordering};
 
-use dagon_agent::{Agent, DefaultHooks, SlotStore};
+use dagon_mcu_rp2040::arm::step;
+use dagon_mcu_rp2040::cmd;
+use dagon_mcu_rp2040::node::AppAgent;
+use dagon_mcu_rp2040::store::ACTIVE;
+use dagon_mcu_rp2040::sub::SubLines;
+use dagon_mcu_rp2040::usb::{self, CdcLink, REBOOT_DELAY};
+use dagon_mcu_rp2040::watchdog::Watch;
+use dagon_agent::SlotStore;
 use dagon_port::{Nrst, SubControl};
 use dagon_proto::payload::{boot0, link, nrst, Relay, Show, SlotState, SubCtl};
 use dagon_proto::{flags, max_payload, Cmd, Frame, Status, HEADER_LEN, MAX_FRAME};
 use embassy_executor::Spawner;
 use embassy_rp::peripherals::USB;
-use embassy_rp::usb::Driver;
 use embassy_rp::Peri;
-use embassy_time::{with_timeout, Duration, Timer};
-use embassy_usb::class::cdc_acm::{CdcAcmClass, State};
-use embassy_usb::driver::EndpointError;
-use embassy_usb::UsbDevice;
+use embassy_time::Timer;
 use heapless::Vec;
-use rp2040_common::arm::step;
-use rp2040_common::cmd;
-use rp2040_common::frames::FrameReader;
-use static_cell::StaticCell;
 
 use crate::lcd::{Progress, Shade};
 use crate::links::{Op, Port, Req, I2C_PORT, UART_PORT};
+use crate::nodes;
 use crate::state::{self, Seen};
-use crate::store::{HubStore, ACTIVE};
-use crate::sub::SubLines;
-use crate::wdt::{self, Task};
-use crate::{nodes, Irqs};
+use crate::{task, GUARD};
 
-pub const USB_PACKET: u16 = 64;
-const USB_VID: u16 = 0xc0de;
-const USB_PID: u16 = 0xcafe;
-
-static USB_BUFS: StaticCell<([u8; 256], [u8; 256], [u8; 64])> = StaticCell::new();
-static USB_STATE: StaticCell<State> = StaticCell::new();
-const USB_WRITE_TIMEOUT: Duration = Duration::from_millis(500);
-/// Lets the REBOOT reply leave before the reset drops USB.
-const REBOOT_DELAY: Duration = Duration::from_millis(50);
+/// USB product string.
+const PRODUCT: &str = "DAGON hub";
 /// I2C_RAW target: the STM32 ROM bootloader.
 const ROM_ADDR: u8 = 0x39;
 /// Bound on one I2C_RAW request at the link task.
 const RAW_TIMEOUT_MS: u16 = 1_000;
 
-pub type Cdc = CdcAcmClass<'static, Driver<'static, USB>>;
-
 static NEXT_ID: AtomicU32 = AtomicU32::new(1);
 
 pub struct Pc {
-    pub agent: Agent<HubStore, DefaultHooks>,
+    pub agent: AppAgent,
     pub sub: SubLines<'static>,
     pub resp: [u8; MAX_FRAME],
 }
@@ -60,58 +48,25 @@ pub struct Pc {
 /// (its types stay in that executor), starts it, then serves the PC.
 #[embassy_executor::task]
 pub async fn task(usb: Peri<'static, USB>, serial: &'static str, pc: Pc) -> ! {
-    let mut cfg = embassy_usb::Config::new(USB_VID, USB_PID);
-    cfg.manufacturer = Some("DAGON");
-    cfg.product = Some("DAGON hub");
-    cfg.serial_number = Some(serial);
-    let (config_desc, bos_desc, control_buf) = USB_BUFS.init(([0; 256], [0; 256], [0; 64]));
-    let mut builder = embassy_usb::Builder::new(
-        Driver::new(usb, Irqs),
-        cfg,
-        config_desc,
-        bos_desc,
-        &mut [],
-        control_buf,
-    );
-    let class = CdcAcmClass::new(&mut builder, USB_STATE.init(State::new()), USB_PACKET);
-    let device = builder.build();
+    let (device, link) = usb::new(usb, PRODUCT, serial);
     // SAFETY: awaited directly inside this embassy task, whose context
     // comes from the interrupt executor running it.
     let spawner = unsafe { Spawner::for_current_executor() }.await;
-    spawner.spawn(usb_task(device).expect("task pool"));
-    serve(pc, class).await
+    spawner.spawn(usb::run(device).expect("task pool"));
+    serve(pc, link).await
 }
 
-#[embassy_executor::task]
-async fn usb_task(mut usb: UsbDevice<'static, Driver<'static, USB>>) -> ! {
-    usb.run().await
-}
-
-async fn serve(mut pc: Pc, mut class: Cdc) -> ! {
+async fn serve(mut pc: Pc, mut link: CdcLink) -> ! {
     pc.publish(true);
-    let mut rx = FrameReader::<{ MAX_FRAME + USB_PACKET as usize }>::new(max_payload::USB);
-    let mut pkt = [0u8; USB_PACKET as usize];
     loop {
-        wdt::idle(Task::Pc);
-        let got = recv(&mut class, &mut pkt).await;
-        wdt::busy(Task::Pc);
-        let Ok(n) = got else {
-            rx.clear();
-            continue;
-        };
-        let mut rest = &pkt[..n];
-        while !rest.is_empty() {
-            let k = rx.push(rest);
-            rest = &rest[k..];
-            while let Some(len) = rx.poll() {
-                let (out, reboot) = pc.handle(rx.frame(len)).await;
-                rx.consume(len);
-                let _ = send(&mut class, &pc.resp[..out]).await;
-                if reboot {
-                    Timer::after(REBOOT_DELAY).await;
-                    wdt::reboot();
-                }
-            }
+        GUARD.idle(task::PC);
+        let request = link.read_frame().await;
+        GUARD.busy(task::PC);
+        let (out, reboot) = pc.handle(request).await;
+        let _ = link.write_frame(&pc.resp[..out]).await;
+        if reboot {
+            Timer::after(REBOOT_DELAY).await;
+            GUARD.reboot();
         }
     }
 }
@@ -202,9 +157,9 @@ impl Pc {
             data: Vec::from_slice(data).unwrap_or_default(),
         };
         // The link task holds the deadline while it works on the request.
-        wdt::idle(Task::Pc);
+        GUARD.idle(task::PC);
         let resp = port.call(req).await;
-        wdt::busy(Task::Pc);
+        GUARD.busy(task::PC);
         let n = resp.data.len();
         self.resp[HEADER_LEN + 1..HEADER_LEN + 1 + n].copy_from_slice(&resp.data);
         (resp.status, if resp.status == Status::Ok { n } else { 0 })
@@ -260,28 +215,4 @@ fn show(p: &[u8]) -> Status {
         }
         Err(e) => e,
     }
-}
-
-async fn recv(class: &mut Cdc, pkt: &mut [u8]) -> Result<usize, EndpointError> {
-    class.wait_connection().await;
-    class.read_packet(pkt).await
-}
-
-/// Writes one frame; gives up if the host stops reading.
-async fn send(class: &mut Cdc, data: &[u8]) -> Result<(), EndpointError> {
-    if data.is_empty() {
-        return Ok(());
-    }
-    let write = async {
-        for chunk in data.chunks(USB_PACKET as usize) {
-            class.write_packet(chunk).await?;
-        }
-        if data.len().is_multiple_of(USB_PACKET as usize) {
-            class.write_packet(&[]).await?;
-        }
-        Ok(())
-    };
-    with_timeout(USB_WRITE_TIMEOUT, write)
-        .await
-        .unwrap_or(Err(EndpointError::Disabled))
 }

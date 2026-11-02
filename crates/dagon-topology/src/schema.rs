@@ -75,6 +75,8 @@ pub struct Link {
     pub iface: Option<UartIface>,
     pub pins: Option<UartPins>,
     pub baud: Option<u32>,
+    /// Required for I2C and UART links (V-01); CAN and Ethernet links may omit it.
+    #[serde(default)]
     pub control: Control,
 }
 
@@ -83,6 +85,9 @@ pub struct Link {
 pub enum LinkKind {
     I2c,
     Uart,
+    /// Between 親機 (or deeper): written in a 構成, not updatable yet (V-23).
+    Can,
+    Ethernet,
 }
 
 /// Node-side I2C pin names (MCU pin names such as `PB4`).
@@ -108,20 +113,26 @@ pub struct UartPins {
     pub rx: u8,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Default, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Control {
+    #[serde(default = "cooperative")]
     pub kind: ControlKind,
     pub nrst: Option<u8>,
     pub boot: Option<u8>,
     pub rom_entry: Option<RomEntry>,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum ControlKind {
     Full,
+    #[default]
     Cooperative,
+}
+
+fn cooperative() -> ControlKind {
+    ControlKind::Cooperative
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]

@@ -152,7 +152,7 @@ fn phase_name(p: u8) -> &'static str {
 
 /// Verifying key: `--pubkey <file>`, `pubkey` in dagon.toml, else the
 /// public half of the signing key.
-fn pubkey(o: &Opts<'_>, cfg: &Config) -> Result<[u8; 32], String> {
+pub(crate) fn pubkey(o: &Opts<'_>, cfg: &Config) -> Result<[u8; 32], String> {
     match o.get("pubkey").map(PathBuf::from).or(cfg.pubkey.clone()) {
         Some(p) => {
             let k = dagon_sign::load_public_key(&p).map_err(|e| e.to_string())?;

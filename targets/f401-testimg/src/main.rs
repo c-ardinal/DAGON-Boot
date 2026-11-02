@@ -16,7 +16,7 @@ use dagon_format::{key_id, sha256, Version};
 use ed25519_compact::{KeyPair, Seed};
 
 #[allow(dead_code)]
-#[path = "../../f401-board/src/layout.rs"]
+#[path = "../../mcu/stm32f401re/src/layout.rs"]
 mod layout;
 
 const TEST_SEED: [u8; 32] = [

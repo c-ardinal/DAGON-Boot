@@ -10,60 +10,61 @@
 #![no_std]
 #![no_main]
 
-mod gc9a01;
 mod hub;
 mod lcd;
 mod links;
 mod nodes;
-mod relay;
 mod state;
-mod store;
-mod sub;
-mod wdt;
 
-use dagon_agent::{Agent, Config, DefaultHooks, SlotStore};
-use dagon_format::header::{mcu_id, port_kind, target_tag};
-use dagon_proto::payload::{mode, role, SlotState, StatusResp};
-use dagon_proto::{max_payload, MAX_FRAME};
+use board::{hold_touch, Board, BoardDef};
+use dagon_board_waveshare_rp2040_touch_lcd_1_28 as board;
+use dagon_mcu_rp2040::arm::{led, step};
+use dagon_mcu_rp2040::layout::HUB_TAG;
+use dagon_mcu_rp2040::node;
+use dagon_mcu_rp2040::uart::UartLink;
+use dagon_mcu_rp2040::watchdog::{feed_forever, now_ms, Guard, Level, Trial};
+use dagon_proto::payload::role;
+use dagon_proto::MAX_FRAME;
 use embassy_executor::{Executor, InterruptExecutor};
-use embassy_rp::gpio::{Level, Output};
-use embassy_rp::i2c::{self, I2c};
 use embassy_rp::interrupt;
 use embassy_rp::interrupt::{InterruptExt, Priority};
-use embassy_rp::peripherals::{DMA_CH0, I2C0, PIO0, USB};
-use embassy_rp::pio::{self, Pio};
-use embassy_rp::pio_programs::uart::{PioUartRx, PioUartRxProgram, PioUartTx, PioUartTxProgram};
-use embassy_rp::spi::{self, Spi};
-use embassy_rp::usb;
-use embassy_rp::watchdog::Watchdog;
-use embassy_rp::{bind_interrupts, dma};
-use rp2040_common::arm::step;
-use rp2040_common::layout::HUB_TAG;
-use rp2040_common::rp::RpFlash;
+use embassy_rp::peripherals::{DMA_CH0, I2C0, PIO0};
+use embassy_rp::{bind_interrupts, dma, i2c, pio};
 use static_cell::{ConstStaticCell, StaticCell};
 
-use gc9a01::Frame;
-use relay::{I2cLink, PioStream, RpI2c};
-use rp2040_common::uart::UartLink;
-use store::HubStore;
-
-include!(concat!(env!("OUT_DIR"), "/pubkey.rs"));
+use board::gc9a01::{self, Frame};
 
 bind_interrupts!(pub struct Irqs {
-    USBCTRL_IRQ => usb::InterruptHandler<USB>;
     I2C0_IRQ => i2c::InterruptHandler<I2C0>;
     PIO0_IRQ_0 => pio::InterruptHandler<PIO0>;
     DMA_IRQ_0 => dma::InterruptHandler<DMA_CH0>;
 });
 
-const PIO_UART_BAUD: u32 = 115_200;
-const I2C_HZ: u32 = 400_000;
-/// Conservative for the panel wiring (the controller allows more).
-const LCD_SPI_HZ: u32 = 20_000_000;
+/// Watchdog guard tasks: PC, I2C link and UART link on the preempting
+/// executor, the LCD in thread mode.
+pub mod task {
+    pub const PC: usize = 0;
+    pub const I2C: usize = 1;
+    pub const UART: usize = 2;
+    pub const LCD: usize = 3;
+}
+
+/// Self-feeding window on trial; longer than the host's 45 s reconnect limit.
+const TRIAL_FEED_MS: u64 = 60_000;
+
+pub static GUARD: Guard<4> = Guard::new(
+    [
+        Level::Preempting,
+        Level::Preempting,
+        Level::Preempting,
+        Level::Background,
+    ],
+    Trial::FeedUntilMs(TRIAL_FEED_MS),
+    now_ms,
+);
 
 static EXECUTOR_PC: InterruptExecutor = InterruptExecutor::new();
 static EXECUTOR_LOW: StaticCell<Executor> = StaticCell::new();
-static SERIAL: StaticCell<[u8; 16]> = StaticCell::new();
 /// The LCD frame buffer, placed statically (never built on the stack).
 static FRAME: ConstStaticCell<Frame> = ConstStaticCell::new(Frame([0; gc9a01::FRAME_BYTES]));
 
@@ -84,61 +85,28 @@ unsafe fn SWI_IRQ_0() {
 fn main() -> ! {
     // Panic blink codes: 10 before HAL init, 11 after it, 12 at USB setup,
     // 13 polling nodes, 14 answering the PC, 15 drawing.
+    led::select(board::DIAG_LED);
     step(10);
-    let p = embassy_rp::init(Default::default());
+    let (dagon, io) = Board::split(embassy_rp::init(Default::default()));
     step(11);
 
-    let mut store = HubStore {
-        flash: RpFlash::new(p.FLASH),
-    };
-    let st = store.status();
-    wdt::install(Watchdog::new(p.WATCHDOG), !on_trial(&st));
-    let serial = SERIAL.init(hex(&store.flash.unique_id()));
-    let serial = core::str::from_utf8(serial).unwrap_or("0");
-
-    let sub = sub::SubLines::new(p.PIN_18, p.PIN_28);
-    // Touch controller held out of reset and otherwise left alone.
-    let _touch_rst = Output::new(p.PIN_22, Level::High);
-
-    let Pio {
-        mut common,
-        sm0,
-        sm1,
-        ..
-    } = Pio::new(p.PIO0, Irqs);
-    let tx_prog = PioUartTxProgram::new(&mut common);
-    let rx_prog = PioUartRxProgram::new(&mut common);
-    let tx = PioUartTx::new(PIO_UART_BAUD, &mut common, sm0, p.PIN_26, &tx_prog);
-    let rx = PioUartRx::new(PIO_UART_BAUD, &mut common, sm1, p.PIN_27, &rx_prog);
-    let mut i2c_cfg = i2c::Config::default();
-    i2c_cfg.frequency = I2C_HZ;
-    let i2c = I2c::new_async(p.I2C0, p.PIN_17, p.PIN_16, Irqs, i2c_cfg);
-
-    let mut spi_cfg = spi::Config::default();
-    spi_cfg.frequency = LCD_SPI_HZ;
-    let lcd_pins = lcd::Pins {
-        spi: Spi::new_txonly(p.SPI1, p.PIN_10, p.PIN_11, p.DMA_CH0, Irqs, spi_cfg),
-        cs: Output::new(p.PIN_9, Level::High),
-        dc: Output::new(p.PIN_8, Level::Low),
-        rst: Output::new(p.PIN_13, Level::High),
-        // Off until the first full frame is on the panel.
-        backlight: Output::new(p.PIN_25, Level::Low),
-    };
+    let mut agent = node::open::<Board, 4>(
+        dagon.flash,
+        dagon.watchdog,
+        &GUARD,
+        task::PC,
+        HUB_TAG,
+        role::HUB,
+        node::always,
+    );
+    let serial = node::serial(&mut agent.store().flash);
+    let sub = io.sub_ctl.lines();
+    let _touch_rst = hold_touch(io.touch_rst);
+    let uart = UartLink::new(io.sub_uart.stream(Irqs), now_ms as fn() -> u64);
+    let i2c = io.sub_i2c.link(Irqs);
+    let lcd_pins = io.display.pins(Irqs);
 
     step(12);
-    let agent = Agent::new(
-        Config {
-            pubkey: PUBKEY,
-            mcu_id: mcu_id::RP2040,
-            port_kind: port_kind::SELF_BOOT,
-            target_tag: target_tag(HUB_TAG),
-            role: role::HUB,
-            mode: mode::APP,
-            max_payload: max_payload::USB as u16,
-        },
-        store,
-        DefaultHooks,
-    );
     let pc = hub::Pc {
         agent,
         sub,
@@ -147,32 +115,18 @@ fn main() -> ! {
 
     interrupt::SWI_IRQ_0.set_priority(Priority::P1);
     let high = EXECUTOR_PC.start(interrupt::SWI_IRQ_0);
-    high.spawn(hub::task(p.USB, serial, pc).expect("task pool"));
-    high.spawn(links::i2c_task(I2cLink::new(RpI2c(i2c))).expect("task pool"));
-    let uart = UartLink::new(PioStream { tx, rx }, now_ms as fn() -> u64);
+    high.spawn(hub::task(dagon.usb, serial, pc).expect("task pool"));
+    high.spawn(links::i2c_task(i2c).expect("task pool"));
     high.spawn(links::uart_task(uart).expect("task pool"));
 
     let frame = FRAME.take();
     EXECUTOR_LOW.init(Executor::new()).run(|low| {
         low.spawn(lcd::task(lcd_pins, frame).expect("task pool"));
-        low.spawn(wdt::task().expect("task pool"));
+        low.spawn(feed().expect("task pool"));
     })
 }
 
-fn now_ms() -> u64 {
-    embassy_time::Instant::now().as_millis()
-}
-
-fn on_trial(st: &StatusResp) -> bool {
-    st.slots.get(st.active as usize).map(|s| s.state) == Some(SlotState::Trying)
-}
-
-fn hex(id: &[u8; 8]) -> [u8; 16] {
-    const DIGITS: &[u8; 16] = b"0123456789ABCDEF";
-    let mut out = [0u8; 16];
-    for (i, b) in id.iter().enumerate() {
-        out[2 * i] = DIGITS[(b >> 4) as usize];
-        out[2 * i + 1] = DIGITS[(b & 0xF) as usize];
-    }
-    out
+#[embassy_executor::task]
+async fn feed() -> ! {
+    feed_forever(&GUARD).await
 }

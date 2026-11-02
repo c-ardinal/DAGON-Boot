@@ -11,12 +11,13 @@ use embassy_sync::channel::Channel;
 use embassy_time::{with_timeout, Duration, Timer};
 use heapless::Vec;
 
-use crate::lcd::Shade;
-use rp2040_common::uart::{UartLink, UART_FRAME};
+use dagon_mcu_rp2040::links::{I2cLink, PioStream, RpI2c, I2C_FRAME};
+use dagon_mcu_rp2040::uart::{UartLink, UART_FRAME};
+use embassy_rp::peripherals::{I2C0, PIO0};
 
-use crate::relay::{I2cLink, PioStream, RpI2c, I2C_FRAME};
+use crate::lcd::Shade;
 use crate::state::{self, Seen};
-use crate::wdt::{self, Task};
+use crate::{task, GUARD};
 
 const POLL_EVERY: Duration = Duration::from_secs(2);
 /// Largest request or response body carried through a port.
@@ -115,15 +116,15 @@ fn next_seq(seq: &mut u8) -> u8 {
 }
 
 #[embassy_executor::task]
-pub async fn i2c_task(mut link: I2cLink<RpI2c<'static>>) -> ! {
+pub async fn i2c_task(mut link: I2cLink<RpI2c<'static, I2C0>>) -> ! {
     let mut seq = 0x80;
     loop {
-        wdt::idle(Task::I2c);
+        GUARD.idle(task::I2C);
         let event = select(I2C_PORT.req.receive(), Timer::after(POLL_EVERY)).await;
-        wdt::busy(Task::I2c);
+        GUARD.busy(task::I2C);
         match event {
             Either::First(req) => {
-                wdt::busy_for(Task::I2c, Duration::from_millis(req.timeout_ms as u64));
+                GUARD.busy_for(task::I2C, req.timeout_ms as u64);
                 let mut out = [0u8; DATA_MAX];
                 let (status, n) = match req.op {
                     Op::Relay => {
@@ -156,15 +157,15 @@ pub async fn i2c_task(mut link: I2cLink<RpI2c<'static>>) -> ! {
 }
 
 #[embassy_executor::task]
-pub async fn uart_task(mut link: UartLink<PioStream<'static>, fn() -> u64>) -> ! {
+pub async fn uart_task(mut link: UartLink<PioStream<'static, PIO0, 0, 1>, fn() -> u64>) -> ! {
     let mut seq = 0x80;
     loop {
-        wdt::idle(Task::Uart);
+        GUARD.idle(task::UART);
         let event = select(UART_PORT.req.receive(), Timer::after(POLL_EVERY)).await;
-        wdt::busy(Task::Uart);
+        GUARD.busy(task::UART);
         match event {
             Either::First(req) => {
-                wdt::busy_for(Task::Uart, Duration::from_millis(req.timeout_ms as u64));
+                GUARD.busy_for(task::UART, req.timeout_ms as u64);
                 let mut out = [0u8; UART_FRAME];
                 let r = link.exchange(&req.data, req.timeout_ms, &mut out).await;
                 let (status, n) = r.map_or_else(|s| (s, 0), |n| (Status::Ok, n));

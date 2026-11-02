@@ -10,6 +10,7 @@ mod doctor;
 mod flash;
 mod nodebuild;
 mod paths;
+mod scaffold;
 mod serial;
 mod serve;
 mod simrun;
@@ -61,6 +62,15 @@ Usage:
   dagon rollback --node <id> [--port <name>] [--topology <yaml>]
                                      back to the node's previously confirmed version
                                      (its other slot), then confirm it there
+  dagon new <dir> [--from <yaml>] [--keys <dir>]
+                                     a project folder: dagon.toml, topology.yaml (the desk
+                                     sample unless --from), and a signing key pair in
+                                     --keys (default ~/.dagon/keys/<name>) if none is there
+  dagon gen [<id>...] [--force-main]
+                                     one Rust crate per node in nodes/<id> on the board
+                                     support packages; rewrites only wiring.rs and the
+                                     package line, never app.rs (main.rs only with
+                                     --force-main)
   dagon build [<id>...]              cargo build each node in [build.<id>] of dagon.toml
                                      into out/build/<id>/app-a.elf (and app-b.elf)
   dagon deploy [<id>...] [--version <x.y.z>] [--yes] [--port <name>] [--topology <yaml>]
@@ -73,9 +83,12 @@ Usage:
                                      (and stage0) with the key; prints the plan first
   dagon doctor [--fix]               tools each MCU family of the topology needs; --fix
                                      installs what needs no administrator rights
-  dagon serve [--port <n>] [--web <dir>] [--no-open]
-                                     the browser page and its API on 127.0.0.1 only;
-                                     opens the page with a one-time passphrase
+  dagon serve [--port <n>] [--web <dir>] [--pubkey <file>] [--no-open]
+                                     the browser page (built into dagon, or --web) and
+                                     its API on 127.0.0.1 only; opens the page with a
+                                     one-time passphrase. The page verifies releases
+                                     with the public key given here (--pubkey, pubkey in
+                                     dagon.toml, or the signing key's public half)
   dagon sim run                      the four simulator scenarios (no hardware)
   dagon ai topology [--in <text>] [--out <yaml>] [--model <id>]
                                      board description (file or stdin) to topology YAML
@@ -116,6 +129,8 @@ fn main() -> ExitCode {
         ["deploy", rest @ ..] => run(deploy::command(rest)),
         ["flash", rest @ ..] => run(flash::command(rest)),
         ["doctor", rest @ ..] => run(doctor::command(rest)),
+        ["new", rest @ ..] => run(scaffold::new_command(rest)),
+        ["gen", rest @ ..] => run(scaffold::gen_command(rest)),
         ["serve", rest @ ..] => run(serve::command(rest)),
         ["conform", rest @ ..] => run(conform::command(rest)),
         ["sim", "run", rest @ ..] => run(simrun::run(rest)),

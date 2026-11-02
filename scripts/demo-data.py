@@ -41,10 +41,10 @@ import zlib
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 VERSIONS = {"1.0.0": "release-1.0.dgb", "1.1.0": "release-1.1.dgb"}
-# node id -> (firmware package dir under targets/, Rust target triple)
+# node id -> (firmware package dir under the repository root, Rust target triple)
 FIRMWARE = {
-    "hub": ("rp2040-hub", "thumbv6m-none-eabi"),
-    "seg": ("f401-app", "thumbv7em-none-eabihf"),
+    "hub": ("targets/rp2040-hub", "thumbv6m-none-eabi"),
+    "seg": ("samples/f401-app", "thumbv7em-none-eabihf"),
 }
 SLOTS = ("a", "b")
 # Bundle layout (crates/dagon-format/src/bundle.rs, header.rs).
@@ -123,8 +123,9 @@ def clean_out(out):
 
 def build(node, slot, out, pubkey):
     """Builds `node`'s app for `slot` with the package's own cargo config."""
-    pkg, triple = FIRMWARE[node]
-    pkg_dir = ROOT / "targets" / pkg
+    pkg_path, triple = FIRMWARE[node]
+    pkg_dir = ROOT / pkg_path
+    pkg = pkg_dir.name
     env = {k: v for k, v in os.environ.items() if k != "DAGON_ALLOW_TEST_KEY"}
     env["DAGON_PUBKEY"] = str(pubkey)
     tgt = out / "build" / f"{pkg}-{slot}"

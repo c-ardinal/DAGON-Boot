@@ -203,13 +203,19 @@ pub(crate) fn confirm(listing: &str, input: &mut dyn BufRead) -> bool {
 /// Flag of `deploy` (and `flash`): do not ask before writing.
 pub(crate) const YES: &str = "--yes";
 
-/// Writes the public half of `key` (hex) under the work area's `out/` and
-/// returns the file for `DAGON_PUBKEY`: some firmware build scripts take a
-/// file only, not the hex itself.
-pub(crate) fn pubkey_file(cfg: &Config, key: &KeyPair) -> Result<String, String> {
-    let path = cfg.base.join("out/dagon-signing.pub");
-    write_file(&path, dagon_sign::to_hex(&*key.pk).as_bytes())?;
-    Ok(path.display().to_string())
+/// The key the firmware embeds: the build key of dagon.toml or
+/// DAGON_PUBKEY ([`crate::config::build_pubkey`]), else the signing key's
+/// public half. A build key other than the signing key is refused: the
+/// boards would reject every image signed here.
+pub(crate) fn firmware_key(cfg: &Config, key: &KeyPair) -> Result<[u8; 32], String> {
+    match crate::config::build_pubkey(cfg)? {
+        Some(k) if k != *key.pk => Err(
+            "the build key (pubkey in dagon.toml or DAGON_PUBKEY) is not the signing key's \
+             public half"
+                .into(),
+        ),
+        _ => Ok(*key.pk),
+    }
 }
 
 /// `dagon deploy [<id>...] [--version x.y.z] [--yes] [--port <name>]
@@ -236,12 +242,12 @@ pub fn command(args: &[&str]) -> Result<(), String> {
         )?,
     };
 
-    let pubkey = pubkey_file(&cfg, &key)?;
+    let fw_key = firmware_key(&cfg, &key)?;
     let mut log = |l: &str| println!("{l}");
-    nodebuild::build_nodes_with(
+    nodebuild::build_nodes_keyed(
         &cfg,
         &nodes,
-        &[("DAGON_PUBKEY", &pubkey)],
+        Some(fw_key),
         &mut log,
         &AtomicBool::new(false),
     )?;

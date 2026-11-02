@@ -167,6 +167,20 @@ fn picks_only_nodes_that_build_both_slots() {
 }
 
 #[test]
+fn firmware_embeds_the_signing_key_and_refuses_another_build_key() {
+    let (mut cfg, _) = work_area("fwkey");
+    let key = key();
+    let other = KeyPair::from_seed(Seed::new([8; 32]));
+    let pubfile = cfg.base.join("other.pub");
+    std::fs::write(&pubfile, dagon_sign::to_hex(&*other.pk)).unwrap();
+    cfg.pubkey = Some(pubfile);
+    assert!(firmware_key(&cfg, &key).is_err());
+    std::fs::write(cfg.pubkey.as_ref().unwrap(), dagon_sign::to_hex(&*key.pk)).unwrap();
+    assert_eq!(firmware_key(&cfg, &key).unwrap(), *key.pk);
+    let _ = std::fs::remove_dir_all(&cfg.base);
+}
+
+#[test]
 fn version_counts_up_one_patch() {
     assert_eq!(next_version([]).unwrap(), FIRST);
     let v = next_version([Version::new(1, 3, 0), Version::new(1, 1, 9)]).unwrap();

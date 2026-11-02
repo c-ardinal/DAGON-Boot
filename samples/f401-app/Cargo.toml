@@ -1,0 +1,40 @@
+[package]
+name = "f401-app"
+edition = "2021"
+license = "MIT OR Apache-2.0"
+version = "0.0.0"
+publish = false
+
+# Standalone: built for thumbv7em only, so it stays out of the host workspace.
+[workspace]
+
+[features]
+# Link for APP-B (0x08040200) instead of APP-A (0x08020200).
+slot-b = ["dagon-board-nucleo-f401re/slot-b"]
+# Confirm the own trial at start-up (bench use without a hub).
+confirm = []
+# Conformance build: serves CONF_RUN (dagon-conform node-side tests).
+conform = ["dagon-board-nucleo-f401re/conform"]
+
+[dependencies]
+dagon-board-nucleo-f401re = { path = "../../targets/boards/nucleo-f401re" }
+dagon-mcu-stm32f401re = { path = "../../targets/mcu/stm32f401re", features = ["node"] }
+dagon-agent = { path = "../../crates/dagon-agent" }
+embassy-stm32 = { version = "0.6.0", features = ["stm32f401re", "time-driver-any", "defmt"] }
+embassy-executor = { version = "0.10", features = ["platform-cortex-m", "executor-thread", "executor-interrupt", "defmt"] }
+embassy-time = { version = "0.5", features = ["defmt"] }
+static_cell = "2"
+cortex-m = { version = "0.7", features = ["critical-section-single-core"] }
+cortex-m-rt = "0.7"
+defmt = "1"
+defmt-rtt = "1"
+panic-probe = { version = "1", features = ["print-defmt"] }
+# Smaller verifier code (the agent checks image signatures).
+ed25519-compact = { version = "2.6", default-features = false, features = ["opt_size"] }
+
+[profile.release]
+opt-level = "z"
+lto = "fat"
+codegen-units = 1
+panic = "abort"
+debug = true

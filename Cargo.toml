@@ -1,7 +1,8 @@
 [workspace]
 resolver = "2"
-# f401-node: host-testable logic of the F401 app (the app itself is thumb-only).
-members = ["crates/*", "targets/f401-node"]
+# Firmware packages (targets/, samples/) are standalone; the MCU packages
+# under targets/mcu/ run their host tests on their own.
+members = ["crates/*"]
 exclude = ["targets/esp32s3-*"]
 
 [workspace.package]

@@ -1,13 +1,16 @@
 # Hub firmware (RP2040-Touch-LCD-1.28)
 
-Three images share the 4 MiB flash:
+DAGON's own hub firmware, built on the RP2040 MCU package
+(`../mcu/rp2040`: layout, boot images, watchdog, USB, links) and the board
+package (`../boards/waveshare-rp2040-touch-lcd-1.28`: pins, display,
+sub-node wiring). Three images share the 4 MiB flash:
 
 | Offset | Size | Content |
 |---|---|---|
-| 0x000000 | 16 KiB | boot2 (generic 03h) + stage0 (`../rp2040-stage0`), never updated |
+| 0x000000 | 16 KiB | boot2 (generic 03h) + stage0 (`../mcu/rp2040/stage0`), never updated |
 | 0x004000 | 2 × 4 KiB | boot core state log A/B |
 | 0x006000 | 2 × 4 KiB | app state log A/B |
-| 0x008000 | 128 KiB | boot core slot A (`../rp2040-bootcore`); slot B at 0x028000 is reserved |
+| 0x008000 | 128 KiB | boot core slot A (`../mcu/rp2040/bootcore`); slot B at 0x028000 is reserved |
 | 0x048000 | 1 MiB | hub app slot A (this package); slot B at 0x148000 |
 | 0x248000 | 4 KiB | topology display copy (XFER target 3) |
 
@@ -31,8 +34,8 @@ warns and the LCD shows TEST KEY):
 
 ```sh
 export DAGON_PUBKEY=/path/outside/the/repo/dagon-signing.pub
-(cd targets/rp2040-stage0 && cargo build --release)
-(cd targets/rp2040-bootcore && cargo build --release)
+(cd targets/mcu/rp2040/stage0 && cargo build --release)
+(cd targets/mcu/rp2040/bootcore && cargo build --release)
 (cd targets/rp2040-hub && cargo build --release)
 (cd targets/rp2040-hub && cargo build --release --features slot-b --target-dir target/slot-b)
 ```

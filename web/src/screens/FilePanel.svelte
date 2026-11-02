@@ -1,14 +1,17 @@
 <script lang="ts">
-  import { FILE } from '../app/copy.ts';
+  import { DIFF, FILE } from '../app/copy.ts';
+  import type { DiffRow } from '../app/define/diff.ts';
   import type { ReleaseFile } from '../app/operate.svelte.ts';
 
   interface Props {
     file: ReleaseFile;
     /** Nodes the update runs on. */
     targets: number;
+    /** §7.6: how the file's 構成 differs (L17); empty otherwise. */
+    diff?: DiffRow[];
   }
 
-  let { file, targets }: Props = $props();
+  let { file, targets, diff = [] }: Props = $props();
 
   /** dagon-host checks the source first, then the configuration: a source refusal leaves the configuration unchecked. */
   const rows = $derived.by((): [string, string, boolean][] => {
@@ -47,6 +50,17 @@
         <dd class:bad>{value}</dd>
       {/each}
     </dl>
+  {/if}
+  {#if diff.length}
+    <table class="diff">
+      <caption>{DIFF.heading}</caption>
+      <thead><tr>{#each DIFF.cols as c (c)}<th scope="col">{c}</th>{/each}</tr></thead>
+      <tbody>
+        {#each diff as r, i (i)}
+          <tr><th scope="row">{r.what}</th><td translate="no">{r.here}</td><td translate="no">{r.file}</td></tr>
+        {/each}
+      </tbody>
+    </table>
   {/if}
   {#if file.verdict === 'pass'}
     <p class="pair"><span class="label">{FILE.targets}</span> {targets}</p>
@@ -106,6 +120,39 @@
   p {
     margin: 0;
     font: 400 var(--t-body-size) / var(--t-body-lh) var(--f-ja);
+  }
+  .diff {
+    width: 100%;
+    margin-top: var(--s-5);
+    border-collapse: collapse;
+    font: 400 var(--t-small-size) / var(--t-small-lh) var(--f-ja);
+  }
+  .diff caption {
+    margin-bottom: var(--s-3);
+    text-align: left;
+    font: 700 var(--t-body-size) / var(--t-body-lh) var(--f-ja);
+  }
+  .diff th,
+  .diff td {
+    padding: var(--s-2) var(--s-3) var(--s-2) 0;
+    border-bottom: 1px solid var(--c-line);
+    text-align: left;
+    vertical-align: top;
+  }
+  .diff thead th {
+    color: var(--c-muted);
+    font-weight: 400;
+    white-space: nowrap;
+  }
+  .diff tbody th {
+    min-width: 5em;
+  }
+  .diff td {
+    font-family: var(--f-mono);
+    overflow-wrap: anywhere;
+  }
+  .diff td:last-child {
+    color: var(--c-signal);
   }
   .pair {
     margin-top: var(--s-5);

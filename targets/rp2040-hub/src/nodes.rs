@@ -5,7 +5,7 @@ use dagon_format::topology::{iface, TopologyView, HEAD_SIZE, MAX_SIZE};
 use dagon_port::Flash;
 use dagon_proto::payload::link;
 use heapless::Vec;
-use rp2040_common::layout::TOPOLOGY;
+use dagon_mcu_rp2040::layout::TOPOLOGY;
 
 /// Sub nodes the home screen has room for.
 pub const MAX_SUBS: usize = 3;

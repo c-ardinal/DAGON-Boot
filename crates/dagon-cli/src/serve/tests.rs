@@ -1143,6 +1143,15 @@ fn recent_projects_are_kept_newest_first_and_only_under_home() {
     assert_eq!(recent.len(), 1, "{body}");
     assert_eq!(recent[0]["name"], "p5");
     assert!(!body.contains(".dagon"));
+    // An oversized recent.json is ignored, not read whole.
+    let mut big = String::from("[");
+    big.push_str(&format!("{:?}", home.join("p5").to_string_lossy()));
+    big.push_str(&" ".repeat(300 * 1024));
+    big.push(']');
+    std::fs::write(home.join(".dagon/recent.json"), big).unwrap();
+    let (_, body) = get(&a, "/v1/project");
+    let v: serde_json::Value = serde_json::from_str(&body).unwrap();
+    assert_eq!(v["recent"], serde_json::json!([]), "{body}");
 }
 
 #[test]
@@ -1236,6 +1245,9 @@ fn the_layout_is_kept_beside_the_topology() {
     assert_eq!(http(&a, "PUT", "/v1/layout", &h, b"not json").0, 400);
     let big = format!("{{\"x\":\"{}\"}}", "a".repeat(300 * 1024));
     assert_eq!(http(&a, "PUT", "/v1/layout", &h, big.as_bytes()).0, 413);
+    // A layout file grown too large on disk is not read whole or served.
+    std::fs::write(a.dir.join("topology/t.layout.json"), &big).unwrap();
+    assert_eq!(http(&a, "GET", "/v1/layout", &h, b"").0, 413);
     // A topology path out of the project: the layout beside it is refused.
     std::fs::write(a.dir.join("dagon.toml"), "topology = \"../outside.yaml\"\n").unwrap();
     assert_eq!(http(&a, "GET", "/v1/layout", &h, b"").0, 403);

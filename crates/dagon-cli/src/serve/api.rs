@@ -736,11 +736,9 @@ fn layout_path(server: &Server) -> Result<PathBuf, Response> {
 /// GET /v1/layout: 呼び名 and editor positions (404 before the first save).
 fn layout_get(server: &Server) -> Res {
     let p = layout_path(server)?;
-    let big = std::fs::metadata(&p).is_ok_and(|m| m.len() > MAX_LAYOUT as u64);
-    if big {
-        return Err(Response::error(413, "the layout file is too large"));
-    }
-    let bytes = std::fs::read(p).map_err(|_| Response::error(404, "no layout yet"))?;
+    let bytes = crate::paths::read_capped(&p, MAX_LAYOUT)
+        .map_err(|_| Response::error(404, "no layout yet"))?
+        .ok_or_else(|| Response::error(413, "the layout file is too large"))?;
     Ok(Response::bytes("application/json", bytes))
 }
 

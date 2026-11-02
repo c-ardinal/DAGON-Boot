@@ -59,6 +59,17 @@ pub fn contained(base: &Path, path: &Path) -> Result<PathBuf, String> {
     }
 }
 
+/// The bytes of `path` when it holds at most `max`; `Ok(None)` when it is
+/// larger. Reads at most `max + 1` bytes whatever the file's size.
+pub fn read_capped(path: &Path, max: usize) -> std::io::Result<Option<Vec<u8>>> {
+    use std::io::Read;
+    let mut out = Vec::new();
+    std::fs::File::open(path)?
+        .take(max as u64 + 1)
+        .read_to_end(&mut out)?;
+    Ok((out.len() <= max).then_some(out))
+}
+
 static TMP: AtomicU64 = AtomicU64::new(0);
 
 /// Writes `bytes` to `path` through a temporary file in the same directory
@@ -81,6 +92,18 @@ pub fn write_atomic(path: &Path, bytes: &[u8]) -> Result<(), String> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn capped_reads_stop_past_the_limit() {
+        let d = std::env::temp_dir().join(format!("dagon-capped-{}", std::process::id()));
+        std::fs::create_dir_all(&d).unwrap();
+        let f = d.join("f");
+        std::fs::write(&f, [7u8; 10]).unwrap();
+        assert_eq!(super::read_capped(&f, 10).unwrap(), Some(vec![7u8; 10]));
+        assert_eq!(super::read_capped(&f, 9).unwrap(), None);
+        assert!(super::read_capped(&d.join("missing"), 9).is_err());
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
     use super::*;
 
     fn area(name: &str) -> PathBuf {

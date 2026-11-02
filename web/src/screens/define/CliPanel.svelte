@@ -22,6 +22,17 @@
   const latest = (kind: string) => cli.jobs.find((j) => j.kind === kind);
   const ok = (kind: string) => latest(kind)?.state === 'succeeded';
   let selectedJob = $state<number | null>(null);
+  /** Nodes whose 書き込む was pressed and whose job serve has not answered yet. */
+  let starting = $state<string[]>([]);
+  async function flashNode(id: string) {
+    if (starting.includes(id)) return;
+    starting = [...starting, id];
+    try {
+      await cli.flash(id);
+    } finally {
+      starting = starting.filter((s) => s !== id);
+    }
+  }
   const job = $derived(cli.jobs.find((j) => j.id === selectedJob) ?? cli.jobs[0]);
   let version = $state('1.0.0');
   let releaseName = $state('release');
@@ -106,7 +117,7 @@
       {#each flashOrder as n (n.id)}
         {@const fam = FLASH.families[mcuOf(n.id)]}
         {@const fj = flashJob(n.id)}
-        {@const flashing = fj?.state === 'queued' || fj?.state === 'running' || fj?.state === 'question'}
+        {@const flashing = starting.includes(n.id) || fj?.state === 'queued' || fj?.state === 'running' || fj?.state === 'question'}
         <li>
           <span class="who"><strong>{n.name}</strong><span translate="no">{n.product} · {n.mcu}</span></span>
           {#if fam}<span class="pair"><span class="label">{FLASH.via}</span> {fam[0]}</span>{#if cli.canFlash(mcuOf(n.id))}<p>{fam[1]}</p>{/if}{/if}
@@ -117,7 +128,7 @@
           {/if}
           <span class="chip">{fj?.state === 'succeeded' ? FLASH.done : fj?.state === 'running' || fj?.state === 'question' ? FLASH.running : fj?.state === 'failed' ? FLASH.notFound : ''}</span>
           {#if cli.canFlash(mcuOf(n.id))}
-            <button class="primary" aria-disabled={flashing} onclick={() => !flashing && void cli.flash(n.id)}>{FLASH.write}</button>
+            <button class="primary" disabled={flashing} onclick={() => void flashNode(n.id)}>{FLASH.write}</button>
           {:else}
             <p>{FLASH.otherTools}</p>
           {/if}

@@ -12,7 +12,7 @@ use crate::config::CONFIG_FILE;
 pub const MAX_RECENT: usize = 10;
 const FILE: &str = "recent.json";
 /// A recent.json larger than this is ignored (it holds at most 10 paths).
-const MAX_FILE: u64 = 256 * 1024;
+const MAX_FILE: usize = 256 * 1024;
 
 fn file(home: &Path) -> PathBuf {
     home.join(".dagon").join(FILE)
@@ -31,10 +31,10 @@ fn listable(home: &Path, dir: &Path) -> Option<PathBuf> {
 
 /// The listed folders, newest first (unusable entries left out).
 pub fn read(home: &Path) -> Vec<PathBuf> {
-    let small = std::fs::metadata(file(home)).is_ok_and(|m| m.len() <= MAX_FILE);
-    let text = small
-        .then(|| std::fs::read_to_string(file(home)).ok())
+    let text = crate::paths::read_capped(&file(home), MAX_FILE)
+        .ok()
         .flatten()
+        .and_then(|b| String::from_utf8(b).ok())
         .unwrap_or_default();
     let list: Vec<String> = serde_json::from_str(&text).unwrap_or_default();
     let mut out: Vec<PathBuf> = Vec::new();

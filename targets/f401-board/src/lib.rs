@@ -10,10 +10,11 @@ pub use layout::*;
 
 use dagon_core::key;
 
-/// Verifying key, embedded at build time from `DAGON_PUBKEY` (64 hex
-/// digits, the public key printed by `dagon key gen`). Unset, it is the
-/// public RFC 8032 test key and the build prints a warning.
-pub const PUBKEY: [u8; 32] = match option_env!("DAGON_PUBKEY") {
+/// Verifying key, embedded at build time from `DAGON_PUBKEY`: the path to
+/// the public key file from `dagon key gen`, or its 64 hex digits (see
+/// build.rs). Unset, it is the public RFC 8032 test key and the build prints
+/// a warning.
+pub const PUBKEY: [u8; 32] = match option_env!("DAGON_PUBKEY_HEX") {
     Some(hex) => key::pubkey_from_hex(hex),
     None => key::TEST_PUBKEY,
 };

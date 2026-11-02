@@ -79,6 +79,15 @@ fn hello_vectors() {
     let f = decode(&file);
     assert_eq!((f.seq, f.cmd), (0x01, Cmd::Hello as u8));
     assert_eq!(HelloReq::parse(f.payload).unwrap().max_payload, 1088);
+    // SOF, ver, flags, seq, cmd, len u16; proto_ver u32, max_payload u16; CRC
+    expect_at(
+        &file,
+        &[(
+            0,
+            &[0xDA, 0x6F, 1, 0, 1, 0x01, 6, 0, 1, 0, 0, 0, 0x40, 0x04],
+        )],
+    );
+    assert_crc(&file);
 
     let file = golden(
         "frame_hello_resp.bin",
@@ -90,6 +99,34 @@ fn hello_vectors() {
     let (st, body) = split_status(f.payload).unwrap();
     assert_eq!(st, Status::Ok);
     assert_eq!(HelloResp::parse(body).unwrap(), hello_resp());
+    expect_at(
+        &file,
+        &[
+            (0, &[0xDA, 0x6F, 1, flags::RESP, 1, 0x01, 25, 0]),
+            (8, &[0x00]),                    // status OK
+            (9, &[1, 0, 0, 0]),              // proto_ver
+            (13, &[1, 1, 0x02, 0x00]),       // role node, port_kind S, mcu_id F401
+            (17, &[0]),                      // mode app
+            (18, &[0x00, 0x00, 0x01, 0x01]), // active_version 1.1.0
+            (22, &[1]),                      // trial
+            (23, &KEY_ID),
+            (31, &[0x00, 0x01]), // max_payload 256
+        ],
+    );
+    assert_crc(&file);
+}
+
+fn expect_at(file: &[u8], table: &[(usize, &[u8])]) {
+    for (off, bytes) in table {
+        assert_eq!(&file[*off..off + bytes.len()], *bytes, "bytes at {off}");
+    }
+}
+
+/// CRC-32 over bytes 2 .. end-4, stored little-endian in the last 4 bytes.
+fn assert_crc(file: &[u8]) {
+    let n = file.len();
+    let crc = dagon_format::crc32(&file[2..n - 4]).to_le_bytes();
+    assert_eq!(file[n - 4..], crc);
 }
 
 #[test]
@@ -121,6 +158,24 @@ fn status_vector() {
     let (_, body) = split_status(decode(&file).payload).unwrap();
     assert_eq!(StatusResp::parse(body).unwrap(), s);
     assert_eq!(body.len(), StatusResp::LEN);
+    let mut a = vec![1, 0x00, 0x00, 0x00, 0x01]; // A: written, 1.0.0
+    a.extend([0xA0; 16]);
+    let mut b = vec![3, 0x00, 0x00, 0x01, 0x01]; // B: trying, 1.1.0
+    b.extend([0xB1; 16]);
+    expect_at(
+        &file,
+        &[
+            (6, &[72, 0]), // len = status + 71
+            (8, &[0x00]),
+            (9, &a), // slots are 21 bytes: state, version, digest16
+            (30, &b),
+            (51, &[0; 21]),      // factory empty
+            (72, &[1, 0, 1, 0]), // active, confirmed, attempts, last_reason
+            (76, &[1, 0, 0, 0]), // log_generation
+        ],
+    );
+    assert_eq!(file.len(), 84);
+    assert_crc(&file);
 }
 
 #[test]
@@ -136,6 +191,12 @@ fn xfer_vectors() {
         &frame(0, 0x03, Cmd::XferBegin, |b| begin.encode(b).unwrap()),
     );
     assert_eq!(XferBegin::parse(decode(&file).payload).unwrap(), begin);
+    // target APP, slot B, total_len 1536, hdr_len 512
+    expect_at(
+        &file,
+        &[(5, &[0x10, 8, 0, 0, 1, 0x00, 0x06, 0, 0, 0x00, 0x02])],
+    );
+    assert_crc(&file);
 
     let data: Vec<u8> = (0..252u32).map(|i| i as u8).collect();
     let chunk = XferChunk {
@@ -148,6 +209,7 @@ fn xfer_vectors() {
     );
     assert_eq!(XferChunk::parse(decode(&file).payload).unwrap(), chunk);
     assert_eq!(file.len(), 268, "max I2C frame");
+    expect_at(&file, &[(5, &[0x15, 0x00, 0x01, 252, 0, 0, 0, 0, 1, 2])]); // len 256, offset 252
 }
 
 #[test]
@@ -166,6 +228,11 @@ fn relay_vector() {
     let r = Relay::parse(decode(&file).payload).unwrap();
     assert_eq!(r, relay);
     assert_eq!(decode(r.inner).cmd, Cmd::Hello as u8);
+    // len 4 + 18; link I2C0, addr 0x42, timeout 300 ms, then the inner frame verbatim
+    expect_at(
+        &file,
+        &[(5, &[0x50, 22, 0, 1, 0x42, 0x2C, 0x01]), (12, &inner)],
+    );
 }
 
 #[test]
@@ -182,6 +249,16 @@ fn hub_command_vectors() {
         &frame(0, 0x11, Cmd::Show, |b| show.encode(b).unwrap()),
     );
     assert_eq!(Show::parse(decode(&file).payload).unwrap(), show);
+    // node, phase, percent, version u32, text
+    expect_at(
+        &file,
+        &[(
+            5,
+            &[
+                0x41, 10, 0, 1, 1, 42, 0x00, 0x00, 0x01, 0x01, b's', b'e', b'g',
+            ],
+        )],
+    );
 
     let sub = SubCtl {
         nrst: nrst::PULSE,
@@ -192,6 +269,7 @@ fn hub_command_vectors() {
         &frame(0, 0x12, Cmd::SubCtl, |b| sub.encode(b).unwrap()),
     );
     assert_eq!(SubCtl::parse(decode(&file).payload).unwrap(), sub);
+    expect_at(&file, &[(5, &[0x60, 2, 0, 2, 1])]); // nrst pulse, boot0 high
 
     let raw = I2cRaw {
         read_len: 1,
@@ -202,4 +280,6 @@ fn hub_command_vectors() {
         &frame(0, 0x13, Cmd::I2cRaw, |b| raw.encode(b).unwrap()),
     );
     assert_eq!(I2cRaw::parse(decode(&file).payload).unwrap(), raw);
+    // write_len 2, read_len 1, data
+    expect_at(&file, &[(5, &[0x61, 6, 0, 2, 0, 1, 0, 0x00, 0xFF])]);
 }

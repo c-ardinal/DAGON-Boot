@@ -4,9 +4,13 @@
 //! for kind S, [`BootSelectV`] for kind V), [`Clock`], [`Watchdog`].
 //! Hub side: [`StreamPort`], [`I2cBus`], [`SubControl`].
 //!
-//! Link-type traits are async (they wait on peripherals); flash, clock and
-//! watchdog are blocking. This crate only declares traits; `unsafe` belongs in
-//! the board implementations (jump, RAM-resident flash routines, registers).
+//! Link-type and hub-side traits are async (they wait on peripherals or on a
+//! remote hub); flash, clock and watchdog are blocking. This crate only
+//! declares traits; `unsafe` belongs in the board implementations (jump,
+//! RAM-resident flash routines, registers).
+//!
+//! Compatibility rule: these traits are frozen. Any method added later comes
+//! with a default implementation, so existing ports keep compiling.
 #![no_std]
 #![allow(async_fn_in_trait)]
 
@@ -73,6 +77,12 @@ pub enum LinkError {
 pub trait Link {
     /// Waits up to `timeout_ms` for one complete frame; returns its length.
     async fn recv_frame(&mut self, buf: &mut [u8], timeout_ms: u32) -> Result<usize, LinkError>;
+
+    /// Sends one frame and returns only once it has left the node: the last
+    /// bit is on the wire (UART: transmitter empty, not just queued; USB: the
+    /// host has taken the data) or, on an I2C target, the master has read the
+    /// whole response. Callers reset right after the reply to REBOOT, so
+    /// returning earlier would lose that reply.
     async fn send_frame(&mut self, frame: &[u8]) -> Result<(), LinkError>;
     fn kind(&self) -> LinkKind;
 }
@@ -149,11 +159,32 @@ pub trait I2cBus {
     async fn write_read(&mut self, addr: u8, data: &[u8], buf: &mut [u8]) -> Result<(), BusError>;
 }
 
+/// NRST action, as in the SUBCTL command.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[repr(u8)]
+pub enum Nrst {
+    /// Release (Hi-Z).
+    Release = 0,
+    /// Hold low.
+    Low = 1,
+    /// Low for about 10 ms, then release; timed by the hub.
+    Pulse = 2,
+}
+
 /// Hub: control lines of a sub MCU. NRST is only pulled low or released
 /// (Hi-Z), never driven high.
+///
+/// Implemented on the hub over GPIO, and on the PC side by sending one SUBCTL
+/// frame per call and awaiting the reply (a hub timeout maps to
+/// [`BusError::Timeout`]).
 pub trait SubControl {
-    /// `true` = hold NRST low, `false` = release.
-    fn set_reset(&mut self, asserted: bool);
-    /// `true` = BOOT0 high (ROM loader on next reset).
-    fn set_boot(&mut self, high: bool);
+    /// Sets BOOT0 (`true` = high, ROM loader on the next reset) and applies
+    /// `nrst`, in that order, so a [`Nrst::Pulse`] samples the new BOOT0.
+    /// Returns after the action (including the whole pulse) is done.
+    async fn set_lines(&mut self, nrst: Nrst, boot0_high: bool) -> Result<(), BusError>;
+
+    /// Resets the sub MCU with a ~10 ms NRST pulse, BOOT0 as given.
+    async fn pulse_reset(&mut self, boot0_high: bool) -> Result<(), BusError> {
+        self.set_lines(Nrst::Pulse, boot0_high).await
+    }
 }

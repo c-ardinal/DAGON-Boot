@@ -1,0 +1,7 @@
+{
+  "name": "dagon",
+  "description": "Port DAGON Boot to a new MCU and author board topologies, with the conformance suite guarded against edits.",
+  "version": "0.1.0",
+  "author": { "name": "DAGON Boot contributors" },
+  "license": "MIT OR Apache-2.0"
+}

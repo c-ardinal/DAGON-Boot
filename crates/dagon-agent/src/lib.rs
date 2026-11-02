@@ -31,7 +31,8 @@ pub enum StoreError {
 /// `target` is the XFER target (`payload::target::APP`, or
 /// `payload::target::TOPOLOGY` with `slot = 0` on the hub); `slot` is 0 = A,
 /// 1 = B. Offsets are relative to the start of the image body. The agent never
-/// asks to erase or write the running slot or the confirmed slot.
+/// asks to erase or write the running slot or the confirmed slot. Methods
+/// added after the freeze come with default implementations.
 pub trait SlotStore {
     /// Current STATUS: kind S folds the state log, kind V maps the vendor
     /// selection data (ESP: otadata).
@@ -47,10 +48,15 @@ pub trait SlotStore {
     fn erase(&mut self, target: u8, slot: u8, len: u32) -> Result<(), StoreError>;
 
     /// Writes body bytes. Offsets arrive in order without gaps; chunks are
-    /// not aligned to the flash write unit, so buffer or pad as needed.
+    /// not aligned to the flash write unit or page, so an implementation may
+    /// buffer a tail. It must have flushed everything to flash (padding the
+    /// last unit with the erased value) before returning from the call whose
+    /// `offset + data.len()` equals the `len` given to [`SlotStore::erase`]:
+    /// that is the last fragment, and the agent reads the body back right
+    /// after it to verify the SHA-256.
     fn write(&mut self, target: u8, slot: u8, offset: u32, data: &[u8]) -> Result<(), StoreError>;
 
-    /// Reads back body bytes (used for SHA-256 verification).
+    /// Reads back body bytes from flash (used for SHA-256 verification).
     fn read(&mut self, target: u8, slot: u8, offset: u32, buf: &mut [u8])
         -> Result<(), StoreError>;
 
@@ -89,8 +95,8 @@ pub struct Progress {
     pub total: u32,
 }
 
-/// Application hooks. Every method has a default, and methods added later
-/// will too, so implementing only what you need keeps compiling.
+/// Application hooks. Every method has a default, and methods added after
+/// the freeze will too, so implementing only what you need keeps compiling.
 pub trait Hooks {
     /// Self-check on CONFIRM while on trial. `false` keeps the slot
     /// unconfirmed and answers E_STATE. Default: confirm.

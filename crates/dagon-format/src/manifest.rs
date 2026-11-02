@@ -84,7 +84,7 @@ impl ManifestEntry {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct Constraint {
     pub kind: u8,
     pub node_a: u8,

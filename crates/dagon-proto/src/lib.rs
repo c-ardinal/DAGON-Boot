@@ -141,7 +141,7 @@ impl<'a> Frame<'a> {
     /// Decodes one frame at the start of `buf`; returns it and its length.
     /// For byte streams, resynchronise with [`find_sof`] after an error.
     pub fn decode(buf: &'a [u8], max_payload: usize) -> Result<(Frame<'a>, usize), FrameError> {
-        if buf.len() >= 2 && buf[..2] != SOF {
+        if buf.iter().zip(SOF).any(|(&b, s)| b != s) {
             return Err(FrameError::BadSof);
         }
         if buf.len() < HEADER_LEN {
@@ -277,6 +277,9 @@ mod tests {
         buf[9] ^= 1;
         assert_eq!(Frame::decode(&buf[..n], 256), Err(FrameError::BadCrc));
         assert_eq!(Frame::decode(b"xx", 256), Err(FrameError::BadSof));
+        assert_eq!(Frame::decode(b"x", 256), Err(FrameError::BadSof));
+        assert_eq!(Frame::decode(b"\xDAx", 256), Err(FrameError::BadSof));
+        assert_eq!(Frame::decode(b"\xDA", 256), Err(FrameError::Incomplete));
         assert_eq!(find_sof(b"boot log\xDA\x6F", 0), Some(8));
     }
 

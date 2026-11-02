@@ -1,6 +1,7 @@
 //! Byte layouts shared by every DAGON component: image header, manifest,
-//! release bundle (`.dgb`), state log, plus CRC-32, SHA-256 and Ed25519
-//! verification. All multi-byte fields are little-endian.
+//! release bundle (`.dgb`), state log, topology canonical binary, plus
+//! CRC-32, SHA-256 and Ed25519 verification. All multi-byte fields are
+//! little-endian.
 #![no_std]
 #![forbid(unsafe_code)]
 
@@ -9,12 +10,14 @@ pub mod header;
 pub mod le;
 pub mod manifest;
 pub mod statelog;
+pub mod topology;
 pub mod version;
 
 pub use bundle::{BundleItem, BundleView};
 pub use header::ImageHeader;
 pub use manifest::{Constraint, ManifestEntry, ManifestFields, ManifestView};
 pub use statelog::{FaceHeader, Record};
+pub use topology::{TopoLink, TopoNode, TopologyView};
 pub use version::Version;
 
 /// Errors from parsing or verifying a structure.

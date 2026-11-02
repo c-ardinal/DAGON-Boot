@@ -359,8 +359,29 @@ pub fn run(args: &[&str]) -> Result<(), String> {
 
 #[cfg(test)]
 mod tests {
+    use super::*;
+
     #[test]
     fn all_scenarios_pass() {
         super::run(&[]).unwrap();
+    }
+
+    #[test]
+    fn rollback_command_returns_the_node_to_its_previous_version() {
+        let w = world().unwrap();
+        let out = w.apply(&w.release).unwrap();
+        assert!(all_done(&out), "{out:?}");
+        let t = dagon_topology::parse_str(&yaml()).unwrap();
+        let mut events = Vec::new();
+        let v = crate::device::rollback_node(&mut w.host(), &t, "seg", &mut |e| events.push(e))
+            .unwrap();
+        assert_eq!(v, OLD);
+        w.expect(SEG_AT, OLD).unwrap();
+        let st = block_on(w.host().status(SEG_AT)).unwrap().status;
+        assert_eq!((st.active, st.confirmed), (0, 0));
+        assert_eq!(st.slots[0].state, SlotState::Confirmed);
+        w.expect(Target::Hub, NEW).unwrap();
+        let unknown = crate::device::rollback_node(&mut w.host(), &t, "nope", &mut |_| {});
+        assert!(unknown.is_err());
     }
 }

@@ -15,6 +15,7 @@ diag = ["rp2040-common/diag-panic"]
 [dependencies]
 rp2040-common = { path = "../rp2040-bootcore/common" }
 dagon-format = { path = "../../crates/dagon-format" }
+dagon-port = { path = "../../crates/dagon-port" }
 cortex-m = "0.7"
 cortex-m-rt = "0.7"
 rp2040-boot2 = "0.3"

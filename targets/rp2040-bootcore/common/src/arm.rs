@@ -1,36 +1,14 @@
-//! Target-only pieces: read flash through XIP, and start an image.
+//! Target-only pieces: the XIP flash reader, the backlight, and starting an
+//! image.
 
-use dagon_port::{Flash, FlashError, FlashRegion};
-
-use crate::layout::{FLASH_SIZE, XIP_BASE};
+use crate::layout::XIP_BASE;
+use crate::mapped::Mapped;
 
 /// Read-only flash through the XIP window (stage0 never writes).
-pub struct XipFlash;
-
-impl Flash for XipFlash {
-    fn geometry(&self) -> &[FlashRegion] {
-        &[]
-    }
-
-    fn read(&mut self, addr: u32, buf: &mut [u8]) -> Result<(), FlashError> {
-        let off = addr.checked_sub(XIP_BASE).ok_or(FlashError::Range)?;
-        if off as usize + buf.len() > FLASH_SIZE {
-            return Err(FlashError::Range);
-        }
-        // SAFETY: the range lies inside the memory-mapped XIP window, which is
-        // always readable and not written while stage0 runs.
-        let src = unsafe { core::slice::from_raw_parts(addr as *const u8, buf.len()) };
-        buf.copy_from_slice(src);
-        Ok(())
-    }
-
-    fn erase(&mut self, _addr: u32, _len: u32) -> Result<(), FlashError> {
-        Err(FlashError::Hw)
-    }
-
-    fn write(&mut self, _addr: u32, _data: &[u8]) -> Result<(), FlashError> {
-        Err(FlashError::Hw)
-    }
+pub fn xip_flash() -> Mapped {
+    // SAFETY: the XIP window maps the whole flash read-only at XIP_BASE and
+    // nothing writes flash while stage0 runs.
+    unsafe { Mapped::new(XIP_BASE as *const u8, XIP_BASE, crate::layout::FLASH_SIZE) }
 }
 
 /// The LCD backlight (GPIO25) driven straight through the registers, so
@@ -96,20 +74,20 @@ pub mod led {
     /// Repeats forever: `n` blinks, then a long dark pause. Counting the
     /// blinks tells which code (see the hub README) stopped the board.
     pub fn code(n: u8) -> ! {
-        code2(n, 0)
+        codes(&[n])
     }
 
-    /// Like [`code`] with a second group of `k` blinks after a short pause
-    /// (`k = 0`: none).
-    pub fn code2(n: u8, k: u8) -> ! {
+    /// Like [`code`] with several groups separated by short pauses.
+    pub fn codes(groups: &[u8]) -> ! {
         let c = cycles_per_ms();
         loop {
             set(false);
             wait(CODE_PAUSE_MS, c);
-            group(n, c);
-            if k > 0 {
-                wait(CODE_GAP_MS, c);
-                group(k, c);
+            for (i, &n) in groups.iter().enumerate() {
+                if i > 0 {
+                    wait(CODE_GAP_MS, c);
+                }
+                group(n, c);
             }
         }
     }

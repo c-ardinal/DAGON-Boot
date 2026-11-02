@@ -9,6 +9,7 @@ pub mod cmd;
 pub mod frames;
 pub mod image;
 pub mod layout;
+pub mod mapped;
 pub mod status;
 
 #[cfg(target_os = "none")]

@@ -4,7 +4,6 @@
 //!
 //! uf2check <hub.uf2> <dagon-signing.pub>
 
-use std::collections::BTreeMap;
 use std::process::ExitCode;
 use std::{env, fs};
 
@@ -12,8 +11,8 @@ use dagon_core::boot::{self, BootConfig, Decision};
 use dagon_core::log::Log;
 use dagon_format::header::{image_kind, mcu_id, target_tag};
 use dagon_format::statelog::slot;
-use dagon_port::{Flash, FlashError, FlashRegion};
 use rp2040_common::layout::*;
+use rp2040_common::mapped::Mapped;
 use rp2040_common::{bl, image};
 
 const UF2_MAGIC0: u32 = 0x0A32_4655;
@@ -80,42 +79,23 @@ fn load_pubkey(path: &str) -> Result<[u8; 32], String> {
         .ok_or(format!("{path}: expected 64 hex digits"))
 }
 
-/// Flash contents (offsets from the start of flash) the UF2 writes.
-struct Uf2Flash(BTreeMap<u32, u8>);
-
-fn load_uf2(path: &str) -> Result<Uf2Flash, String> {
+/// The flash a UF2 leaves (erased where it writes nothing), read through
+/// the same mapped reader stage0 uses on the board.
+fn load_uf2(path: &str) -> Result<Mapped, String> {
     let raw = fs::read(path).map_err(|e| format!("{path}: {e}"))?;
-    let mut bytes = BTreeMap::new();
+    let mut mem = vec![0xFFu8; FLASH_SIZE];
     for b in raw.chunks_exact(512) {
         let w = |i: usize| u32::from_le_bytes(b[i * 4..i * 4 + 4].try_into().unwrap());
         if w(0) != UF2_MAGIC0 || w(1) != UF2_MAGIC1 || w(127) != UF2_MAGIC_END {
             return Err(format!("{path}: not a UF2 file"));
         }
         let (addr, len) = (w(3), (w(4) as usize).min(476));
-        for (i, &x) in b[32..32 + len].iter().enumerate() {
-            bytes.insert(addr + i as u32, x);
-        }
+        let off = addr
+            .checked_sub(XIP_BASE)
+            .map(|o| o as usize)
+            .filter(|o| o + len <= FLASH_SIZE)
+            .ok_or(format!("{path}: block at {addr:#x} outside flash"))?;
+        mem[off..off + len].copy_from_slice(&b[32..32 + len]);
     }
-    Ok(Uf2Flash(bytes))
-}
-
-impl Flash for Uf2Flash {
-    fn geometry(&self) -> &[FlashRegion] {
-        &[]
-    }
-    fn read(&mut self, addr: u32, buf: &mut [u8]) -> Result<(), FlashError> {
-        for (i, b) in buf.iter_mut().enumerate() {
-            *b = *self.0.get(&(addr + i as u32)).unwrap_or(&0xFF);
-        }
-        Ok(())
-    }
-    fn erase(&mut self, _: u32, _: u32) -> Result<(), FlashError> {
-        Err(FlashError::Hw)
-    }
-    fn write(&mut self, addr: u32, data: &[u8]) -> Result<(), FlashError> {
-        for (i, &b) in data.iter().enumerate() {
-            self.0.insert(addr + i as u32, b);
-        }
-        Ok(())
-    }
+    Ok(Mapped::over(Box::leak(mem.into_boxed_slice()), XIP_BASE))
 }

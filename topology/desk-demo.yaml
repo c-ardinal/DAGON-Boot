@@ -27,7 +27,7 @@ nodes:
     role: node
     port: vendor-stage2
     flash_map: esp32s3-16m
-    max_attempts: 3
+    max_attempts: 1
     tag: watch-s3
 
 buses:
@@ -62,11 +62,9 @@ links:
       rom_entry: force-download-boot
 
 recovery:
+  hub: [local]
   seg: [local, redistribute, rom-forced]
   watch: [local, redistribute, rom-coop]
 
 update:
   order: [seg, watch, hub]
-
-constraints:
-  - lockstep: [hub, seg, watch]

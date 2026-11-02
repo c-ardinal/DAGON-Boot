@@ -1,8 +1,13 @@
 #![forbid(unsafe_code)]
-//! Signing keys for DAGON images.
+//! Signing for DAGON: keys, signed images, release bundles and
+//! first-install flash contents.
 //!
 //! The secret key file only ever goes to a directory outside every git work
 //! tree, is never overwritten, and is never printed or logged.
+
+pub mod image;
+pub mod provision;
+pub mod release;
 
 use std::fmt;
 use std::fs::{self, OpenOptions};

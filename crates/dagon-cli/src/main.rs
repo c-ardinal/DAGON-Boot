@@ -1,5 +1,8 @@
 #![forbid(unsafe_code)]
 
+mod commands;
+mod config;
+
 use std::path::Path;
 use std::process::ExitCode;
 
@@ -8,7 +11,25 @@ const USAGE: &str = "dagon - DAGON Boot command line tool
 Usage:
   dagon key gen --out <dir>          generate a signing key pair (dir must be outside any git work tree)
   dagon topo check [--json] <yaml>   validate a topology file
-  dagon --help";
+  dagon topo compile <yaml> [--out <bin>]
+                                     topology canonical binary
+  dagon image sign <elf|bin> --node <id> --version <x.y.z> --out <img>
+        [--slot a|b] [--kind app|bootcore|agent] [--seq <n>] [--min-bootcore <x.y.z>]
+        [--proto <n>] [--flags <list>] [--caps <list>] [--topology <yaml>] [--key <file>]
+                                     build and sign an image for a topology node
+  dagon release build <img|dir>... --name <name> [--out <dgb>] [--topology <yaml>]
+        [--topology-bin <bin>] [--key <file>]
+                                     check, sign the manifest and write the .dgb
+  dagon provision <node> [--out <dir>] [--topology <yaml>] [--key <file>]
+                                     first-install files from [provision.<node>] in dagon.toml
+  dagon rescue hub [--out <dir>] [--topology <yaml>] [--key <file>]
+                                     hub rescue UF2 (boot2, stage0, logs, boot core, app)
+  dagon --help
+
+Defaults come from ./dagon.toml (or --config <file>). The secret key file is
+--key <file> or $DAGON_SIGNING_KEY and must lie outside any git work tree.
+--flags: verify-enforced,debug,sim-only  --caps: confirm-by-hub,reboot-to-update,
+rom-entry-coop,sig-verifier";
 
 /// Exit code for bad command-line usage.
 const EXIT_USAGE: u8 = 2;
@@ -23,7 +44,22 @@ fn main() -> ExitCode {
         }
         ["key", "gen", rest @ ..] => key_gen(rest),
         ["topo", "check", rest @ ..] => topo_check(rest),
+        ["topo", "compile", rest @ ..] => run(commands::topo_compile(rest)),
+        ["image", "sign", rest @ ..] => run(commands::image_sign(rest)),
+        ["release", "build", rest @ ..] => run(commands::release_build(rest)),
+        ["provision", rest @ ..] => run(commands::provision(rest)),
+        ["rescue", rest @ ..] => run(commands::rescue(rest)),
         _ => usage_error("unknown command"),
+    }
+}
+
+fn run(r: Result<(), String>) -> ExitCode {
+    match r {
+        Ok(()) => ExitCode::SUCCESS,
+        Err(e) => {
+            eprintln!("error: {e}");
+            ExitCode::FAILURE
+        }
     }
 }
 

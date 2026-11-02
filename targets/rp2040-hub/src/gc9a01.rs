@@ -1,21 +1,25 @@
-//! GC9A01 240x240 round panel over 4-wire SPI (mode 0): DC low for the
-//! command byte, high for its parameters and pixel data, CS held low for a
-//! whole command or a whole pixel stream. Pixels are RGB565, big-endian on
-//! the wire. The init sequence is the panel vendor's (manufacturer
-//! registers, power, gamma), then inversion on, sleep out, display on.
+//! GC9A01 240x240 round panel over 4-wire SPI (mode 0). The picture is
+//! drawn into a frame buffer in RAM ([`Frame`]); [`Panel::flush`] sends the
+//! whole frame with one DMA transfer (window 0..239 set, RAMWR, CS held low
+//! for the stream). Commands are framed by CS with DC low for the command
+//! byte and high for its parameters. Pixels are RGB565, high byte first.
+//! The init sequence is the panel vendor's (manufacturer registers, power,
+//! gamma), then inversion on, sleep out, display on.
 
 use core::convert::Infallible;
 
 use embassy_rp::gpio::Output;
 use embassy_rp::peripherals::SPI1;
-use embassy_rp::spi::{Blocking, Spi};
-use embassy_time::{block_for, Duration};
+use embassy_rp::spi::{Async, Spi};
+use embassy_time::Timer;
 use embedded_graphics::pixelcolor::raw::RawU16;
 use embedded_graphics::pixelcolor::Rgb565;
 use embedded_graphics::prelude::*;
 use embedded_graphics::primitives::Rectangle;
 
 pub const SIZE: u32 = 240;
+/// Bytes of one full frame.
+pub const FRAME_BYTES: usize = (SIZE * SIZE * 2) as usize;
 
 const CASET: u8 = 0x2A;
 const RASET: u8 = 0x2B;
@@ -99,11 +103,8 @@ const INIT: &[(u8, &[u8])] = &[
     (INVON, &[]),
 ];
 
-/// Bytes per SPI burst of a solid fill.
-const FILL_CHUNK: usize = 64;
-
 pub struct Panel<'d> {
-    spi: Spi<'d, SPI1, Blocking>,
+    spi: Spi<'d, SPI1, Async>,
     cs: Output<'d>,
     dc: Output<'d>,
     /// Held high for as long as the panel is used: dropping the pin would
@@ -112,9 +113,10 @@ pub struct Panel<'d> {
 }
 
 impl<'d> Panel<'d> {
-    /// Hardware reset, init sequence, then the whole frame cleared to black.
-    pub fn new(
-        spi: Spi<'d, SPI1, Blocking>,
+    /// Hardware reset and the init sequence; the frame memory is left as
+    /// it is (send a frame before turning the backlight on).
+    pub async fn new(
+        spi: Spi<'d, SPI1, Async>,
         cs: Output<'d>,
         dc: Output<'d>,
         rst: Output<'d>,
@@ -122,70 +124,65 @@ impl<'d> Panel<'d> {
         let mut p = Panel { spi, cs, dc, rst };
         p.cs.set_high();
         p.rst.set_high();
-        block_for(Duration::from_millis(10));
+        Timer::after_millis(10).await;
         p.rst.set_low();
-        block_for(Duration::from_millis(10));
+        Timer::after_millis(10).await;
         p.rst.set_high();
-        block_for(Duration::from_millis(120));
+        Timer::after_millis(120).await;
         for &(cmd, args) in INIT {
-            p.command(cmd, args);
+            p.command(cmd, args).await;
         }
-        p.command(SLPOUT, &[]);
-        block_for(Duration::from_millis(120));
-        p.command(DISPON, &[]);
-        block_for(Duration::from_millis(20));
-        let _ = p.clear(Rgb565::BLACK);
+        p.command(SLPOUT, &[]).await;
+        Timer::after_millis(120).await;
+        p.command(DISPON, &[]).await;
+        Timer::after_millis(20).await;
         p
     }
 
     /// One command with its parameters under a single CS frame.
-    fn command(&mut self, cmd: u8, args: &[u8]) {
+    async fn command(&mut self, cmd: u8, args: &[u8]) {
         self.cs.set_low();
         self.dc.set_low();
-        let _ = self.spi.blocking_write(&[cmd]);
+        let _ = self.spi.write(&[cmd]).await;
         self.dc.set_high();
         if !args.is_empty() {
-            let _ = self.spi.blocking_write(args);
+            let _ = self.spi.write(args).await;
         }
         self.cs.set_high();
     }
 
-    /// Sets the window and starts RAMWR; leaves CS low and DC high for the
-    /// pixel stream that follows. Call [`Panel::end`] after it.
-    fn begin(&mut self, area: &Rectangle) {
-        let (x0, y0) = (area.top_left.x as u16, area.top_left.y as u16);
-        let (x1, y1) = (
-            x0 + area.size.width as u16 - 1,
-            y0 + area.size.height as u16 - 1,
-        );
-        let [a, b] = x0.to_be_bytes();
-        let [c, d] = x1.to_be_bytes();
-        self.command(CASET, &[a, b, c, d]);
-        let [a, b] = y0.to_be_bytes();
-        let [c, d] = y1.to_be_bytes();
-        self.command(RASET, &[a, b, c, d]);
+    /// Sends a whole frame: window 0..239 x 0..239, RAMWR, then the pixels
+    /// in one DMA transfer with CS low throughout.
+    pub async fn flush(&mut self, frame: &Frame) {
+        let last = (SIZE - 1) as u8;
+        self.command(CASET, &[0, 0, 0, last]).await;
+        self.command(RASET, &[0, 0, 0, last]).await;
         self.cs.set_low();
         self.dc.set_low();
-        let _ = self.spi.blocking_write(&[RAMWR]);
+        let _ = self.spi.write(&[RAMWR]).await;
         self.dc.set_high();
-    }
-
-    fn end(&mut self) {
+        let _ = self.spi.write(&frame.0[..]).await;
         self.cs.set_high();
     }
 }
 
-fn be(c: Rgb565) -> [u8; 2] {
-    RawU16::from(c).into_inner().to_be_bytes()
+/// The picture in RAM: RGB565, high byte first, row by row.
+pub struct Frame(pub [u8; FRAME_BYTES]);
+
+impl Frame {
+    fn put(&mut self, p: Point, c: Rgb565) {
+        let i = (p.y as usize * SIZE as usize + p.x as usize) * 2;
+        self.0[i..i + 2].copy_from_slice(&RawU16::from(c).into_inner().to_be_bytes());
+    }
 }
 
-impl OriginDimensions for Panel<'_> {
+impl OriginDimensions for Frame {
     fn size(&self) -> Size {
         Size::new(SIZE, SIZE)
     }
 }
 
-impl DrawTarget for Panel<'_> {
+impl DrawTarget for Frame {
     type Color = Rgb565;
     type Error = Infallible;
 
@@ -196,65 +193,22 @@ impl DrawTarget for Panel<'_> {
         let screen = self.bounding_box();
         for Pixel(p, c) in pixels {
             if screen.contains(p) {
-                self.begin(&Rectangle::new(p, Size::new(1, 1)));
-                let _ = self.spi.blocking_write(&be(c));
-                self.end();
+                self.put(p, c);
             }
         }
-        Ok(())
-    }
-
-    fn fill_contiguous<I>(&mut self, area: &Rectangle, colors: I) -> Result<(), Self::Error>
-    where
-        I: IntoIterator<Item = Self::Color>,
-    {
-        let clipped = area.intersection(&self.bounding_box());
-        if clipped.size != area.size {
-            // Partly off screen: per pixel, clipped.
-            let pixels = area.points().zip(colors).map(|(p, c)| Pixel(p, c));
-            return self.draw_iter(pixels);
-        }
-        if area.is_zero_sized() {
-            return Ok(());
-        }
-        self.begin(area);
-        let mut buf = [0u8; FILL_CHUNK];
-        let mut n = 0;
-        for c in colors
-            .into_iter()
-            .take(area.size.width as usize * area.size.height as usize)
-        {
-            buf[n..n + 2].copy_from_slice(&be(c));
-            n += 2;
-            if n == FILL_CHUNK {
-                let _ = self.spi.blocking_write(&buf);
-                n = 0;
-            }
-        }
-        if n > 0 {
-            let _ = self.spi.blocking_write(&buf[..n]);
-        }
-        self.end();
         Ok(())
     }
 
     fn fill_solid(&mut self, area: &Rectangle, color: Self::Color) -> Result<(), Self::Error> {
         let area = area.intersection(&self.bounding_box());
-        if area.is_zero_sized() {
-            return Ok(());
+        let px = RawU16::from(color).into_inner().to_be_bytes();
+        for y in area.rows() {
+            let row = y as usize * SIZE as usize;
+            for x in area.columns() {
+                let i = (row + x as usize) * 2;
+                self.0[i..i + 2].copy_from_slice(&px);
+            }
         }
-        let mut buf = [0u8; FILL_CHUNK];
-        for px in buf.chunks_exact_mut(2) {
-            px.copy_from_slice(&be(color));
-        }
-        let mut left = area.size.width as usize * area.size.height as usize * 2;
-        self.begin(&area);
-        while left > 0 {
-            let n = left.min(FILL_CHUNK);
-            let _ = self.spi.blocking_write(&buf[..n]);
-            left -= n;
-        }
-        self.end();
         Ok(())
     }
 }

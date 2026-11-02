@@ -79,6 +79,7 @@ impl SlotStore for HubStore {
         while at < end {
             self.flash.erase(at, SECTOR).map_err(flash_err)?;
             wdt::keepalive();
+            wdt::busy(wdt::Task::Pc);
             at += SECTOR;
         }
         Ok(())

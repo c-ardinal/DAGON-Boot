@@ -10,9 +10,7 @@ use dagon_proto::payload::{phase, Show, SHOW_TEXT_MAX};
 use embassy_futures::select::{select, Either};
 use embassy_rp::gpio::Output;
 use embassy_rp::peripherals::SPI1;
-use embassy_rp::spi::{Blocking, Spi};
-use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
-use embassy_sync::signal::Signal;
+use embassy_rp::spi::{Async, Spi};
 use embassy_time::{Duration, Timer};
 use embedded_graphics::mono_font::ascii::{FONT_10X20, FONT_6X10};
 use embedded_graphics::mono_font::{MonoFont, MonoTextStyle};
@@ -24,8 +22,10 @@ use heapless::String;
 
 use rp2040_common::arm::step;
 
-use crate::gc9a01::Panel;
+use crate::gc9a01::{Frame, Panel};
 use crate::nodes::{SubNode, MAX_SUBS};
+use crate::state;
+use crate::wdt::{self, Task};
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum Shade {
@@ -79,8 +79,6 @@ pub struct Home {
     pub progress: Option<Progress>,
 }
 
-pub static HOME: Signal<CriticalSectionRawMutex, Home> = Signal::new();
-
 const HUB_AT: Point = Point::new(120, 80);
 const HUB_D: u32 = 90;
 const LEFT: Point = Point::new(55, 160);
@@ -107,60 +105,65 @@ const TOP_CHARS: usize = 22;
 const HEARTBEAT_AT: Point = Point::new(117, 6);
 const HEARTBEAT: Duration = Duration::from_secs(1);
 
-pub struct Pins<'d> {
-    pub spi: Spi<'d, SPI1, Blocking>,
-    pub cs: Output<'d>,
-    pub dc: Output<'d>,
-    pub rst: Output<'d>,
-    pub backlight: Output<'d>,
+pub struct Pins {
+    pub spi: Spi<'static, SPI1, Async>,
+    pub cs: Output<'static>,
+    pub dc: Output<'static>,
+    pub rst: Output<'static>,
+    pub backlight: Output<'static>,
 }
 
-/// Sets the panel up (cleared to black) with the backlight off, turns the
-/// backlight on, draws the home screen at once (nodes not polled yet), then
-/// redraws whenever [`HOME`] changes; a heartbeat square at the top toggles
-/// every second. The `diag` build first shows a test pattern for 3 s.
-pub async fn run(mut pins: Pins<'_>) {
-    let mut display = Panel::new(pins.spi, pins.cs, pins.dc, pins.rst);
-    pins.backlight.set_high();
+/// The LCD task (lowest priority, thread mode). It alone owns SPI1 and the
+/// panel pins. It draws into the RAM frame and sends whole frames by DMA,
+/// so it never holds the CPU for long. The backlight goes on after the
+/// first full frame. It redraws when [`state::REDRAW`] fires and toggles a
+/// heartbeat square every second. The `diag` build first shows a test
+/// pattern and the clock set-up for 3 s and a seconds counter.
+#[embassy_executor::task]
+pub async fn task(mut pins: Pins, frame: &'static mut Frame) {
+    wdt::busy(Task::Lcd);
+    let mut panel = Panel::new(pins.spi, pins.cs, pins.dc, pins.rst).await;
+    let _ = frame.clear(Rgb565::BLACK);
     if cfg!(feature = "diag") {
-        let _ = test_pattern(&mut display);
-        let _ = clock_info(&mut display);
+        let _ = test_pattern(frame);
+        let _ = clock_info(frame);
+        panel.flush(frame).await;
+        pins.backlight.set_high();
+        wdt::idle(Task::Lcd);
         Timer::after_secs(3).await;
+        wdt::busy(Task::Lcd);
     }
-    let first = Home {
-        hub: Node {
-            node: crate::nodes::HUB,
-            ..Default::default()
-        },
-        ..Default::default()
-    };
-    let _ = draw(&mut display, &first);
-    let mut shown = first;
+    let mut shown = state::home();
+    let _ = draw(frame, &shown);
+    panel.flush(frame).await;
+    pins.backlight.set_high();
     let mut beat = false;
     loop {
-        match select(HOME.wait(), Timer::after(HEARTBEAT)).await {
-            Either::First(home) => {
-                if home != shown {
-                    step(15);
-                    let _ = draw(&mut display, &home);
-                    shown = home;
-                }
-            }
-            Either::Second(()) => {
-                if cfg!(feature = "diag") {
-                    let _ = uptime(&mut display);
-                }
-                beat = !beat;
-                let c = if beat {
-                    Rgb565::CSS_GRAY
-                } else {
-                    Rgb565::BLACK
-                };
-                let _ = Rectangle::new(HEARTBEAT_AT, Size::new(6, 6))
-                    .into_styled(PrimitiveStyle::with_fill(c))
-                    .draw(&mut display);
-            }
+        wdt::idle(Task::Lcd);
+        let event = select(state::REDRAW.wait(), Timer::after(HEARTBEAT)).await;
+        wdt::busy(Task::Lcd);
+        if matches!(event, Either::Second(())) {
+            state::expire_progress();
+            beat = !beat;
         }
+        let home = state::home();
+        if home != shown {
+            step(15);
+            let _ = draw(frame, &home);
+            shown = home;
+        }
+        let c = if beat {
+            Rgb565::CSS_GRAY
+        } else {
+            Rgb565::BLACK
+        };
+        let _ = Rectangle::new(HEARTBEAT_AT, Size::new(6, 6))
+            .into_styled(PrimitiveStyle::with_fill(c))
+            .draw(frame);
+        if cfg!(feature = "diag") {
+            let _ = uptime(frame);
+        }
+        panel.flush(frame).await;
     }
 }
 

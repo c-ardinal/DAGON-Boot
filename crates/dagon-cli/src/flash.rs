@@ -86,26 +86,24 @@ pub(crate) fn plan(
         )
     })?;
     let mut lines = vec![format!("flash {node} ({}):", n.mcu)];
-    if let Some(p) = cfg.provision.get(node) {
+    if cfg.provision.contains_key(node) {
         lines.push(format!(
-            "  use      [provision.{node}] in dagon.toml (no build)"
+            "  ignore   [provision.{node}]: flash always builds with the signing key's public half"
         ));
-        lines.push(format!("  app      {}", p.app.display()));
-    } else {
-        let home = dagon_home();
-        for part in parts {
-            lines.push(format!(
-                "  build    {:<8} {}",
-                part.name,
-                home.join(part.package).display()
-            ));
-        }
-        let b = cfg
-            .build
-            .get(node)
-            .ok_or_else(|| format!("no [build.{node}] or [provision.{node}] in dagon.toml"))?;
-        lines.push(format!("  build    app      {}", b.package.display()));
     }
+    let home = dagon_home();
+    for part in parts {
+        lines.push(format!(
+            "  build    {:<8} {}",
+            part.name,
+            home.join(part.package).display()
+        ));
+    }
+    let b = cfg
+        .build
+        .get(node)
+        .ok_or_else(|| format!("no [build.{node}] in dagon.toml"))?;
+    lines.push(format!("  build    app      {}", b.package.display()));
     let write = match n.mcu.as_str() {
         "rp2040" => vec![
             format!("  make     {}", out.join("rescue.uf2").display()),
@@ -124,17 +122,15 @@ pub(crate) fn plan(
     Ok(lines)
 }
 
-/// The first-install inputs: `[provision.<id>]` as given, else the parts
-/// and the app built now with `key` embedded.
+/// The first-install inputs, all built now with the signing key's public
+/// half embedded. Prebuilt `[provision.<id>]` files are never used: a boot
+/// core with another key would refuse every image signed later.
 fn inputs(
     cfg: &Config,
     t: &Topology,
     node: &str,
     key: &KeyPair,
 ) -> Result<ProvisionInputs, String> {
-    if let Some(p) = cfg.provision.get(node) {
-        return Ok(p.clone());
-    }
     let n = t.node(node).ok_or("checked in plan")?;
     let fw_key = firmware_key(cfg, key)?;
     let hex = dagon_sign::to_hex(&fw_key);
@@ -171,8 +167,8 @@ fn inputs(
     })
 }
 
-/// Builds (unless `[provision.<id>]` names the files) and writes the
-/// first-install files into `out`.
+/// Builds the parts and the app and writes the first-install files into
+/// `out`.
 pub(crate) fn prepare(
     cfg: &Config,
     t: &Topology,
@@ -184,13 +180,28 @@ pub(crate) fn prepare(
     provision_files(t, node, &i, out, key)
 }
 
-/// The RP2040 boot ROM drive among `roots`: the one whose INFO_UF2.TXT
-/// names RPI-RP2.
-pub(crate) fn find_uf2_drive(roots: &[PathBuf]) -> Option<PathBuf> {
-    roots
+/// The RP2040 boot ROM drive among `roots` (its INFO_UF2.TXT names
+/// RPI-RP2): `Ok(None)` while there is none, an error when there are
+/// several, since the file must reach exactly the board being flashed.
+pub(crate) fn find_uf2_drive(roots: &[PathBuf]) -> Result<Option<PathBuf>, String> {
+    let found: Vec<&PathBuf> = roots
         .iter()
-        .find(|r| std::fs::read_to_string(r.join(UF2_INFO)).is_ok_and(|s| s.contains(UF2_BOARD)))
-        .cloned()
+        .filter(|r| std::fs::read_to_string(r.join(UF2_INFO)).is_ok_and(|s| s.contains(UF2_BOARD)))
+        .collect();
+    match found[..] {
+        [] => Ok(None),
+        [one] => Ok(Some(one.clone())),
+        _ => Err(format!(
+            "{} {UF2_BOARD} drives are connected ({}); unplug every board but the one to \
+             flash, then run flash again. Nothing was copied.",
+            found.len(),
+            found
+                .iter()
+                .map(|p| p.display().to_string())
+                .collect::<Vec<_>>()
+                .join(", ")
+        )),
+    }
 }
 
 /// Where a removable drive shows up on this system.
@@ -212,7 +223,7 @@ fn copy_uf2(file: &Path) -> Result<(), String> {
     println!("waiting for the {UF2_BOARD} drive: hold BOOT while plugging the hub's USB in");
     let until = Instant::now() + DRIVE_WAIT;
     let drive = loop {
-        if let Some(d) = find_uf2_drive(&drive_roots()) {
+        if let Some(d) = find_uf2_drive(&drive_roots())? {
             break d;
         }
         if Instant::now() >= until {
@@ -296,50 +307,51 @@ pub fn command(args: &[&str]) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::config::BuildInputs;
     use ed25519_compact::Seed;
 
     const YAML: &str = include_str!("../../../topology/desk-demo.yaml");
 
-    /// Work area whose `[provision.<id>]` names raw stand-in payloads, so
-    /// nothing is built.
+    /// A work area with `[build.<id>]` for hub and seg, and the topology.
     fn area(name: &str) -> (Config, Topology) {
         let base = std::env::temp_dir().join(format!("dagon-flash-{name}-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&base);
         std::fs::create_dir_all(&base).unwrap();
+        let mut cfg = Config {
+            base,
+            ..Config::default()
+        };
+        for (id, package) in [("hub", "targets/rp2040-hub"), ("seg", "samples/f401-app")] {
+            cfg.build.insert(
+                id.into(),
+                BuildInputs {
+                    package: PathBuf::from(package),
+                    bin: None,
+                    features: vec![],
+                    slot_b_feature: Some("slot-b".into()),
+                    version: None,
+                },
+            );
+        }
+        (cfg, dagon_topology::parse_str(YAML).unwrap())
+    }
+
+    /// What the builds hand to the file step, as raw stand-in payloads.
+    fn built(cfg: &Config, with_stage0: bool) -> ProvisionInputs {
         let file = |n: &str, len: usize| {
-            let p = base.join(n);
+            let p = cfg.base.join(n);
             std::fs::write(&p, (0..len).map(|i| i as u8).collect::<Vec<_>>()).unwrap();
             p
         };
-        let mut cfg = Config {
-            base: base.clone(),
-            ..Config::default()
-        };
-        cfg.provision.insert(
-            "hub".into(),
-            ProvisionInputs {
-                stage0: Some(file("stage0.bin", 2000)),
-                bootcore: file("hub-boot.bin", 4000),
-                app: file("hub-app.bin", 8000),
-                version: Some("1.0.0".into()),
-                bootcore_version: None,
-                release_seq: None,
-                proto_version: None,
-            },
-        );
-        cfg.provision.insert(
-            "seg".into(),
-            ProvisionInputs {
-                stage0: None,
-                bootcore: file("seg-boot.bin", 4000),
-                app: file("seg-app.bin", 6000),
-                version: Some("1.0.0".into()),
-                bootcore_version: None,
-                release_seq: None,
-                proto_version: None,
-            },
-        );
-        (cfg, dagon_topology::parse_str(YAML).unwrap())
+        ProvisionInputs {
+            stage0: with_stage0.then(|| file("stage0.bin", 2000)),
+            bootcore: file("boot.bin", 4000),
+            app: file("app.bin", 8000),
+            version: Some(FIRST_VERSION.into()),
+            bootcore_version: None,
+            release_seq: None,
+            proto_version: None,
+        }
     }
 
     fn key() -> KeyPair {
@@ -355,8 +367,11 @@ mod tests {
             plan.contains("rescue.uf2") && plan.contains("RPI-RP2"),
             "{plan}"
         );
-        assert!(plan.contains("[provision.hub]"), "{plan}");
-        match prepare(&cfg, &t, "hub", &key(), &out).unwrap() {
+        assert!(
+            plan.contains("stage0") && plan.contains("targets/rp2040-hub"),
+            "{plan}"
+        );
+        match provision_files(&t, "hub", &built(&cfg, true), &out, &key()).unwrap() {
             FirstWrite::Uf2 { file, blocks } => {
                 assert_eq!(file, out.join("rescue.uf2"));
                 let len = std::fs::metadata(&file).unwrap().len() as usize;
@@ -377,7 +392,11 @@ mod tests {
             plan.contains("flash.bin") && plan.contains("probe-rs"),
             "{plan}"
         );
-        match prepare(&cfg, &t, "seg", &key(), &out).unwrap() {
+        assert!(
+            plan.contains("stm32f401re") && plan.contains("samples/f401-app"),
+            "{plan}"
+        );
+        match provision_files(&t, "seg", &built(&cfg, false), &out, &key()).unwrap() {
             FirstWrite::ProbeRs {
                 bin,
                 bytes,
@@ -396,77 +415,71 @@ mod tests {
     }
 
     #[test]
+    fn prebuilt_provision_files_are_never_used() {
+        let (mut cfg, t) = area("prov");
+        let prebuilt = built(&cfg, false);
+        cfg.provision.insert("seg".into(), prebuilt.clone());
+        let plan = plan(&cfg, &t, "seg", &cfg.base.join("out"))
+            .unwrap()
+            .join("\n");
+        assert!(plan.contains("ignore   [provision.seg]"), "{plan}");
+        assert!(plan.contains("build    bootcore"), "{plan}");
+        assert!(
+            !plan.contains(&prebuilt.app.display().to_string()),
+            "{plan}"
+        );
+        let _ = std::fs::remove_dir_all(&cfg.base);
+    }
+
+    #[test]
     fn other_families_and_unknown_nodes_are_refused_before_anything_runs() {
-        let (cfg, t) = area("esp");
+        let (mut cfg, t) = area("esp");
         let out = cfg.base.join("out");
         assert!(plan(&cfg, &t, "watch", &out)
             .unwrap_err()
             .contains("esp32s3"));
         assert!(plan(&cfg, &t, "nope", &out).is_err());
+        cfg.build.clear();
+        assert!(plan(&cfg, &t, "seg", &out)
+            .unwrap_err()
+            .contains("[build.seg]"));
         let _ = std::fs::remove_dir_all(&cfg.base);
     }
 
     #[test]
-    fn without_provision_files_the_plan_builds_the_parts_and_the_app() {
-        let (mut cfg, t) = area("build");
-        cfg.provision.clear();
-        let out = cfg.base.join("out");
-        assert!(plan(&cfg, &t, "seg", &out)
-            .unwrap_err()
-            .contains("[build.seg]"));
-        cfg.build.insert(
-            "seg".into(),
-            crate::config::BuildInputs {
-                package: PathBuf::from("targets/f401-app"),
-                bin: None,
-                features: vec![],
-                slot_b_feature: Some("slot-b".into()),
-                version: None,
-            },
-        );
-        let plan = plan(&cfg, &t, "seg", &out).unwrap().join("\n");
-        assert!(
-            plan.contains("bootcore") && plan.contains("stm32f401re"),
-            "{plan}"
-        );
-        assert!(plan.contains("targets/f401-app"), "{plan}");
-        let hub = super::plan(&cfg, &t, "hub", &out);
-        assert!(hub.is_err(), "no [build.hub] either");
+    fn the_parts_are_in_this_checkout() {
         for mcu in ["rp2040", "stm32f401re"] {
             for p in parts(mcu).unwrap() {
                 let toml = dagon_home().join(p.package).join("Cargo.toml");
                 assert!(toml.is_file(), "{} is not in the checkout", toml.display());
             }
         }
-        assert_eq!(
-            parts("rp2040")
-                .unwrap()
-                .iter()
-                .map(|p| p.name)
-                .collect::<Vec<_>>(),
-            ["stage0", "bootcore"]
-        );
-        let _ = std::fs::remove_dir_all(&cfg.base);
+        let names: Vec<&str> = parts("rp2040").unwrap().iter().map(|p| p.name).collect();
+        assert_eq!(names, ["stage0", "bootcore"]);
     }
 
     #[test]
-    fn finds_the_rp2040_boot_drive_by_its_info_file() {
+    fn copies_only_to_a_single_rp2040_boot_drive() {
         let base = std::env::temp_dir().join(format!("dagon-uf2-{}", std::process::id()));
-        let (other, rp) = (base.join("usb"), base.join("rp"));
-        std::fs::create_dir_all(&other).unwrap();
-        std::fs::create_dir_all(&rp).unwrap();
+        let (other, rp, rp2) = (base.join("usb"), base.join("rp"), base.join("rp2"));
+        for d in [&other, &rp, &rp2] {
+            std::fs::create_dir_all(d).unwrap();
+        }
         std::fs::write(other.join(UF2_INFO), "Board-ID: SOMETHING-ELSE").unwrap();
-        std::fs::write(
-            rp.join(UF2_INFO),
-            "UF2 Bootloader v3.0\nModel: Raspberry Pi RP2\nBoard-ID: RPI-RP2\n",
-        )
-        .unwrap();
+        let info = "UF2 Bootloader v3.0\nModel: Raspberry Pi RP2\nBoard-ID: RPI-RP2\n";
+        std::fs::write(rp.join(UF2_INFO), info).unwrap();
+        std::fs::write(rp2.join(UF2_INFO), info).unwrap();
         let none = base.join("missing");
         assert_eq!(
             find_uf2_drive(&[none.clone(), other.clone(), rp.clone()]),
-            Some(rp)
+            Ok(Some(rp.clone()))
         );
-        assert_eq!(find_uf2_drive(&[none, other]), None);
+        assert_eq!(find_uf2_drive(&[none.clone(), other.clone()]), Ok(None));
+        let two = find_uf2_drive(&[rp, other, rp2]).unwrap_err();
+        assert!(
+            two.contains("2 RPI-RP2 drives") && two.contains("unplug"),
+            "{two}"
+        );
         let _ = std::fs::remove_dir_all(&base);
     }
 }

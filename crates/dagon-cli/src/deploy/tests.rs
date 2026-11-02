@@ -92,7 +92,7 @@ fn deploys_every_built_node_one_patch_up_through_the_simulated_hub() {
     let nodes = pick_nodes(&cfg, &t, &[]).unwrap();
     assert_eq!(nodes, ["seg", "hub"], "the topology's update order");
 
-    let previous = release_versions(&t, &release_path(&cfg)).unwrap();
+    let previous = release_versions(&t, &release_path(&cfg), &key.pk).unwrap();
     assert!(previous.is_empty(), "no release yet");
     let v = next_version(
         previous
@@ -122,7 +122,12 @@ fn deploys_every_built_node_one_patch_up_through_the_simulated_hub() {
     }
 
     // The next deploy counts up from the release just made.
-    let after = release_versions(&t, &p.release).unwrap();
+    let after = release_versions(&t, &p.release, &key.pk).unwrap();
+    let other = KeyPair::from_seed(Seed::new([8; 32]));
+    assert!(
+        release_versions(&t, &p.release, &other.pk).is_err(),
+        "a release that does not verify is not read"
+    );
     assert_eq!(after.get("seg"), Some(&v));
     assert_eq!(
         next_version(after.values().copied()).unwrap(),

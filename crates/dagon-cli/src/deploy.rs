@@ -60,10 +60,12 @@ pub(crate) fn release_path(cfg: &Config) -> PathBuf {
         .unwrap_or_else(|| cfg.base.join(DEFAULT_RELEASE))
 }
 
-/// Node id → newest version in the release at `path` (none: no file).
+/// Node id → newest version in the release at `path` (none: no file),
+/// read only once the release verifies under `pubkey`.
 pub(crate) fn release_versions(
     t: &Topology,
     path: &Path,
+    pubkey: &[u8; 32],
 ) -> Result<BTreeMap<String, Version>, String> {
     let bytes = match std::fs::read(path) {
         Ok(b) => b,
@@ -71,6 +73,12 @@ pub(crate) fn release_versions(
         Err(e) => return Err(format!("cannot read {}: {e}", path.display())),
     };
     let b = BundleView::parse(&bytes).map_err(|e| format!("{}: {e:?}", path.display()))?;
+    b.verify(pubkey).map_err(|e| {
+        format!(
+            "{} does not verify under the signing key: {e:?}",
+            path.display()
+        )
+    })?;
     let m = b.manifest();
     let mut out = BTreeMap::new();
     for i in 0..m.entry_count() {
@@ -229,7 +237,10 @@ pub fn command(args: &[&str]) -> Result<(), String> {
     let nodes = pick_nodes(&cfg, &t, &o.pos)?;
     let key = load_key(o.get("key"))?;
     let latest = release_path(&cfg);
-    let previous = release_versions(&t, &latest)?;
+    let previous = release_versions(&t, &latest, &key.pk).unwrap_or_else(|e| {
+        eprintln!("warning: {e}; its versions are not used");
+        BTreeMap::new()
+    });
     let version = match o.get("version") {
         Some(v) => version(v)?,
         // Every node of the last release counts, so versions keep rising
@@ -265,9 +276,10 @@ pub fn command(args: &[&str]) -> Result<(), String> {
             p.release.display()
         ));
     }
-    write_file(&latest, &p.bundle)?;
     let mut host = crate::serial::host(o.get("port"))?;
-    crate::device::apply_bundle(&mut host, &p.bundle, &t, Some(&key.pk), None)
+    crate::device::apply_bundle(&mut host, &p.bundle, &t, Some(&key.pk), None)?;
+    // Only an applied release is the one the next deploy counts from.
+    write_file(&latest, &p.bundle)
 }
 
 #[cfg(test)]

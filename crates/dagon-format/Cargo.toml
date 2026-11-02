@@ -5,3 +5,8 @@ license.workspace = true
 version.workspace = true
 
 [dependencies]
+ed25519-compact = { version = "2.6", default-features = false }
+sha2 = { version = "0.11", default-features = false }
+
+[dev-dependencies]
+ed25519-compact = { version = "2.6", default-features = false }

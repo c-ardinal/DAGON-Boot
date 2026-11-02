@@ -44,7 +44,10 @@ pub struct Server {
     pub port: u16,
     /// dagon.toml of the work area (None: no file, defaults only).
     pub config: Option<PathBuf>,
+    /// Folder of the page; empty: the page built into the executable.
     pub web: PathBuf,
+    /// Public key the page verifies releases with, given at start.
+    pub release_key: std::sync::OnceLock<[u8; 32]>,
     /// Pages connected to the event stream (passphrase checked).
     pub pages: AtomicUsize,
     events: Mutex<Vec<mpsc::SyncSender<String>>>,
@@ -65,6 +68,7 @@ impl Server {
             port,
             config,
             web,
+            release_key: std::sync::OnceLock::new(),
             pages: AtomicUsize::new(0),
             events: Mutex::default(),
             jobs: Mutex::default(),

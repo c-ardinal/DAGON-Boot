@@ -32,7 +32,11 @@ fn start(name: &str) -> Area {
         "# work area\ntopology = \"topology/t.yaml\"\n\n[build.seg]\npackage = \"targets/f401-app\"\n",
     )
     .unwrap();
-    std::fs::write(dir.join("web/index.html"), "<!doctype html><p>page").unwrap();
+    std::fs::write(
+        dir.join("web/index.html"),
+        "<!doctype html><head></head><p>page",
+    )
+    .unwrap();
     let listener = TcpListener::bind(("127.0.0.1", 0)).unwrap();
     let port = listener.local_addr().unwrap().port();
     let server = Server::new(
@@ -41,6 +45,7 @@ fn start(name: &str) -> Area {
         Some(dir.join("dagon.toml")),
         dir.join("web"),
     );
+    server.release_key.set([7; 32]).unwrap();
     let s = server.clone();
     std::thread::spawn(move || super::serve(listener, s));
     Area { dir, server }
@@ -105,7 +110,14 @@ fn host_origin_and_passphrase_are_enforced() {
     assert_eq!(http(&a, "GET", "/v1/hello", &own, b"").0, 200);
     // The page itself needs no passphrase; nothing outside it is served.
     let (st, body) = http(&a, "GET", "/", &[], b"");
-    assert_eq!((st, body.as_str()), (200, "<!doctype html><p>page"));
+    let meta = format!(
+        "<meta name=\"dagon-release-key\" content=\"{}\">",
+        "07".repeat(32)
+    );
+    assert_eq!(
+        (st, body),
+        (200, format!("<!doctype html><head>{meta}</head><p>page"))
+    );
     assert_eq!(http(&a, "GET", "/../dagon.toml", &[], b"").0, 404);
 }
 
@@ -409,4 +421,57 @@ fn concurrent_build_setting_writes_all_land() {
         );
     }
     assert!(text.starts_with("# work area"));
+}
+
+#[test]
+fn the_page_carries_the_release_key_given_at_start() {
+    let a = start("relkey");
+    let (_, body) = http(&a, "GET", "/v1/hello", &[("Authorization", &auth(&a))], b"");
+    let v: serde_json::Value = serde_json::from_str(&body).unwrap();
+    assert_eq!(v["release_key"], "07".repeat(32));
+    // Non-HTML files are served as they are.
+    std::fs::write(a.dir.join("web/app.js"), "x()").unwrap();
+    assert_eq!(http(&a, "GET", "/app.js", &[], b"").1, "x()");
+}
+
+#[test]
+fn without_a_release_key_no_page_is_served() {
+    let dir = std::env::temp_dir().join(format!("dagon-serve-nokey-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(dir.join("index.html"), "<head></head>").unwrap();
+    let server = Server::new("p".repeat(32), 1, None, dir.clone());
+    assert!(super::api::page_file(&server, "/").is_none());
+    server.release_key.set([1; 32]).unwrap();
+    assert!(super::api::page_file(&server, "/").is_some());
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn targets_lists_the_generated_node_crates() {
+    let a = start("nodes");
+    std::fs::create_dir_all(a.dir.join("nodes/seg")).unwrap();
+    std::fs::write(
+        a.dir.join("nodes/seg/Cargo.toml"),
+        "[package]
+name = \"seg\"
+[features]
+slot-b = []
+",
+    )
+    .unwrap();
+    let (st, body) = http(
+        &a,
+        "GET",
+        "/v1/targets",
+        &[("Authorization", &auth(&a))],
+        b"",
+    );
+    assert_eq!(st, 200);
+    let v: serde_json::Value = serde_json::from_str(&body).unwrap();
+    let t = &v["targets"][0];
+    assert_eq!(
+        (t["dir"].as_str(), t["name"].as_str()),
+        (Some("nodes/seg"), Some("seg"))
+    );
+    assert_eq!(t["features"][0], "slot-b");
 }

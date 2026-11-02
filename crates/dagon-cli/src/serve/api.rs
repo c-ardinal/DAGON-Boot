@@ -137,6 +137,7 @@ fn hello(server: &Server) -> Response {
         "api_key": crate::ai::api_key_present(),
         "key": key.is_some(),
         "key_id": key,
+        "release_key": server.release_key.get().map(|k| to_hex(k)),
     }))
 }
 
@@ -144,11 +145,15 @@ fn json_ok(v: Value) -> Response {
     Response::json(200, &v)
 }
 
-/// Firmware packages under targets/ with their features, and the board table.
+/// Firmware packages with their features: a generated project's node
+/// crates (nodes/*) and, in a DAGON clone, targets/*; and the board table.
 fn targets(server: &Server) -> Res {
     let cfg = config(server).map_err(|e| Response::error(500, &e))?;
     let mut out = Vec::new();
-    if let Ok(dirs) = std::fs::read_dir(cfg.base.join("targets")) {
+    for top in ["nodes", "targets"] {
+        let Ok(dirs) = std::fs::read_dir(cfg.base.join(top)) else {
+            continue;
+        };
         let mut dirs: Vec<PathBuf> = dirs.filter_map(|d| d.ok().map(|d| d.path())).collect();
         dirs.sort();
         for d in dirs {
@@ -164,7 +169,7 @@ fn targets(server: &Server) -> Res {
                 .map(|t| t.keys().filter(|k| *k != "default").cloned().collect())
                 .unwrap_or_default();
             out.push(json!({
-                "dir": format!("targets/{}", d.file_name().unwrap_or_default().to_string_lossy()),
+                "dir": format!("{top}/{}", d.file_name().unwrap_or_default().to_string_lossy()),
                 "name": v.get("package").and_then(|p| p.get("name")).and_then(|n| n.as_str()),
                 "features": features,
             }));
@@ -556,6 +561,64 @@ fn device(server: &Server, req: &Request) -> Res {
     Ok(json_ok(json!({ "state": "released" })))
 }
 
+mod page {
+    include!(concat!(env!("OUT_DIR"), "/web_assets.rs"));
+}
+
+/// Whether a page is built into this executable.
+pub fn page_embedded() -> bool {
+    page::ASSETS.iter().any(|(p, _)| *p == "index.html")
+}
+
+/// A file of the page: from the executable when `server.web` is empty,
+/// otherwise from that folder. HTML gets the release key as
+/// `<meta name="dagon-release-key">`; without a key no HTML is served.
+pub fn page_file(server: &Server, path: &str) -> Option<(Vec<u8>, &'static str)> {
+    let (bytes, ct) = if server.web.as_os_str().is_empty() {
+        embedded_file(path)?
+    } else {
+        static_file(&server.web, path)?
+    };
+    if !ct.starts_with("text/html") {
+        return Some((bytes, ct));
+    }
+    let key = server.release_key.get()?;
+    Some((inject_key(&bytes, key)?, ct))
+}
+
+fn inject_key(html: &[u8], key: &[u8; 32]) -> Option<Vec<u8>> {
+    let text = std::str::from_utf8(html).ok()?;
+    let meta = format!(
+        "<meta name=\"dagon-release-key\" content=\"{}\">",
+        to_hex(key)
+    );
+    let at = text.find("<head>").map(|i| i + "<head>".len()).unwrap_or(0);
+    Some(format!("{}{meta}{}", &text[..at], &text[at..]).into_bytes())
+}
+
+fn embedded_file(path: &str) -> Option<(Vec<u8>, &'static str)> {
+    let rel = path.split(['?', '#']).next()?.trim_start_matches('/');
+    let rel = if rel.is_empty() { "index.html" } else { rel };
+    let (_, bytes) = page::ASSETS.iter().find(|(p, _)| *p == rel)?;
+    Some((bytes.to_vec(), content_type(rel)))
+}
+
+fn content_type(rel: &str) -> &'static str {
+    match rel.rsplit('.').next().unwrap_or("") {
+        "html" => "text/html; charset=utf-8",
+        "js" => "text/javascript",
+        "css" => "text/css",
+        "wasm" => "application/wasm",
+        "woff2" => "font/woff2",
+        "svg" => "image/svg+xml",
+        "json" => "application/json",
+        "png" => "image/png",
+        "yaml" => "application/yaml",
+        "txt" => "text/plain; charset=utf-8",
+        _ => "application/octet-stream",
+    }
+}
+
 /// Static file under `web` for `path` (the built page), or None.
 pub fn static_file(web: &Path, path: &str) -> Option<(Vec<u8>, &'static str)> {
     let rel = path.split(['?', '#']).next()?.trim_start_matches('/');
@@ -578,21 +641,7 @@ pub fn static_file(web: &Path, path: &str) -> Option<(Vec<u8>, &'static str)> {
         return None;
     }
     let bytes = std::fs::read(file).ok()?;
-    let ext = rel.rsplit('.').next().unwrap_or("");
-    let ct = match ext {
-        "html" => "text/html; charset=utf-8",
-        "js" => "text/javascript",
-        "css" => "text/css",
-        "wasm" => "application/wasm",
-        "woff2" => "font/woff2",
-        "svg" => "image/svg+xml",
-        "json" => "application/json",
-        "png" => "image/png",
-        "yaml" => "application/yaml",
-        "txt" => "text/plain; charset=utf-8",
-        _ => "application/octet-stream",
-    };
-    Some((bytes, ct))
+    Some((bytes, content_type(rel)))
 }
 
 #[cfg(test)]

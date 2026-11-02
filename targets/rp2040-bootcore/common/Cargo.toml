@@ -1,0 +1,27 @@
+[package]
+name = "rp2040-common"
+edition = "2021"
+license = "MIT OR Apache-2.0"
+version = "0.0.0"
+publish = false
+
+# Shared by the hub stage0, boot core and app. Host-testable:
+#   cargo test --target x86_64-pc-windows-msvc   (or your host triple)
+[workspace]
+
+[features]
+# embassy-rp flash adapter (boot core and app; stage0 only reads through XIP).
+rp = ["dep:embassy-rp"]
+
+[dependencies]
+dagon-core = { path = "../../../crates/dagon-core" }
+dagon-format ={ path = "../../../crates/dagon-format" }
+dagon-port = { path = "../../../crates/dagon-port" }
+dagon-proto = { path = "../../../crates/dagon-proto" }
+embassy-rp = { version = "0.10.0", default-features = false, features = ["rp2040"], optional = true }
+
+[dev-dependencies]
+ed25519-compact = { version = "2.6", default-features = false }
+
+[target.'cfg(target_os = "none")'.dependencies]
+cortex-m = "0.7"

@@ -97,8 +97,14 @@ button {
 .secondary[aria-expanded='true']:focus-visible {
   box-shadow: inset 0 0 0 2px var(--c-ink);
 }
+/* Unavailable: L2 fill and muted text; the reason sits next to it. */
+.secondary[aria-disabled='true'] {
+  background: var(--c-layer-2);
+  color: var(--c-muted);
+  cursor: default;
+}
 @media (hover: hover) and (pointer: fine) {
-  .secondary:not([aria-expanded='true']):hover {
+  .secondary:not([aria-expanded='true'], [aria-disabled='true']):hover {
     background: var(--c-hover);
   }
 }

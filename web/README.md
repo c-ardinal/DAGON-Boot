@@ -18,7 +18,7 @@ npm test          # Vitest
 npm run fonts     # re-fetch the font subsets after screen text changes
 ```
 
-Query parameters for development:
+Query parameters for development (`npm run dev` only; production builds leave the stand-in hub out):
 
 | Parameter | Effect |
 |---|---|

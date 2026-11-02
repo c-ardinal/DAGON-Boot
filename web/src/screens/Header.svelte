@@ -1,18 +1,26 @@
 <script lang="ts">
-  import { CLI_NONE, HELP, HUB, HUB_NAME, PRODUCT, STEP } from '../app/copy.ts';
+  import { CLI_NONE, HELP, HUB, HUB_NAME, ORDER, PRODUCT, STEP } from '../app/copy.ts';
   import type { HubState, Step } from '../app/machine.ts';
 
   interface Props {
     step: Step | null;
     hub: HubState;
+    /** Show the button that opens the update-order drawer (768–1279 px). */
+    drawer: boolean;
+    drawerOpen: boolean;
+    ondrawer: () => void;
+    drawerButton?: HTMLButtonElement;
   }
 
-  let { step, hub }: Props = $props();
+  let { step, hub, drawer, drawerOpen, ondrawer, drawerButton = $bindable() }: Props = $props();
   let helpOpen = $state(false);
 </script>
 
 <header>
   <span class="product" translate="no">{PRODUCT}</span>
+  {#if drawer}
+    <button class="secondary" aria-expanded={drawerOpen} aria-controls="drawer" bind:this={drawerButton} onclick={ondrawer}>{ORDER.heading}</button>
+  {/if}
   <ol class="steps">
     {#if step !== null}
       <li aria-current="step">
@@ -58,6 +66,9 @@
     border-bottom: 1px solid var(--c-line);
     z-index: var(--z-chrome);
     font: 400 var(--t-small-size) / 1 var(--f-ja);
+  }
+  header > * {
+    white-space: nowrap;
   }
   .product {
     font: 500 var(--t-mono-size) / 1 var(--f-mono);
@@ -105,6 +116,15 @@
   }
   .keys {
     margin-top: var(--s-2);
+  }
+  @media (max-width: 1279px) {
+    header {
+      gap: var(--s-4);
+      padding: 0 var(--s-4);
+    }
+    header .secondary {
+      padding: 0 var(--s-4);
+    }
   }
   @media (max-width: 767px) {
     header {

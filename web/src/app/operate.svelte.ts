@@ -260,6 +260,7 @@ export class Operate {
     this.stopWatching();
     const t = this.transport;
     this.transport = null;
+    this.host?.free();
     this.host = null;
     await t?.close().catch(() => undefined);
   }

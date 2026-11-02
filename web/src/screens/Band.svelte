@@ -5,6 +5,8 @@
   interface Props {
     band: Band;
     busy: boolean;
+    /** False for buttons whose procedure this page does not run yet: shown unavailable. */
+    available: (a: Action) => boolean;
     status: string;
     alert: string;
     onaction: (a: Action) => void;
@@ -12,7 +14,7 @@
     nextEl?: HTMLDivElement;
   }
 
-  let { band, busy, status, alert, onaction, primaryEl = $bindable(), nextEl = $bindable() }: Props = $props();
+  let { band, busy, available, status, alert, onaction, primaryEl = $bindable(), nextEl = $bindable() }: Props = $props();
 </script>
 
 <footer id="band" tabindex="-1">
@@ -24,14 +26,16 @@
   {#if band.secondary.length}
     <div class="side">
       {#each band.secondary as b (b.action)}
-        <button class="secondary" onclick={() => onaction(b.action)}>{b.label}</button>
+        {@const off = !available(b.action)}
+        <button class="secondary" aria-disabled={off} onclick={() => !off && onaction(b.action)}>{b.label}</button>
       {/each}
     </div>
   {/if}
   {#if band.primary}
     {@const p = band.primary}
-    <!-- Busy stays focusable (aria-disabled) so focus never drops to the page. -->
-    <button class="primary" bind:this={primaryEl} aria-disabled={busy} onclick={() => !busy && onaction(p.action)}>
+    {@const off = busy || !available(p.action)}
+    <!-- Busy and unavailable stay focusable (aria-disabled) so focus never drops to the page. -->
+    <button class="primary" bind:this={primaryEl} aria-disabled={off} onclick={() => !off && onaction(p.action)}>
       {busy ? `${p.label}…` : p.label}<span class="arrow" aria-hidden="true">→</span>
     </button>
   {/if}

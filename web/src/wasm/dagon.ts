@@ -51,6 +51,8 @@ export interface Host {
   discover(): Promise<Discovery>;
   pushTopology(bin: Uint8Array): Promise<void>;
   watch(kind: TargetKind, addr: number): Promise<WatchRound>;
+  /** Releases the WASM side; calls still running finish on their own. */
+  free(): void;
 }
 
 export function newHost(link: HostLink): Host {
@@ -61,6 +63,7 @@ export function newHost(link: HostLink): Host {
     discover: () => h.discover(),
     pushTopology: (bin) => h.push_topology(bin),
     watch: (k, a) => h.watch(k, a),
+    free: () => h.free(),
   };
 }
 

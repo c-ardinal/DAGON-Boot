@@ -86,6 +86,22 @@ export interface ConfirmResult {
   version: number;
 }
 
+/** ROM-path figures of a recovery (dagon-romlink's Stats). */
+export interface RomStats {
+  attempts: number;
+  frames: number;
+  maxRttMs: number;
+  elapsedMs: number;
+  noStretch: boolean;
+}
+
+export interface RecoverResult {
+  /** The normal transfer to the app, to the factory agent, or the ROM loader. */
+  path: 'retransfer' | 'factory' | 'rom';
+  version: number;
+  rom: RomStats | null;
+}
+
 /** Why a release is refused before anything is sent (dagon-host's check). */
 export type Refusal = 'source' | 'key' | 'topology' | 'format';
 
@@ -99,6 +115,10 @@ export interface Host {
   /** `dagon apply`; rejects with a Refusal (or a reason) when nothing was sent. */
   apply(bundle: Uint8Array, topology: Uint8Array, nodes: number[] | null, onEvent: (e: UpdateEvent) => void): Promise<NodeResult[]>;
   confirm(kind: TargetKind, addr: number, force: boolean): Promise<ConfirmResult>;
+  /** `dagon recover` of topology node `node`; rejects with a Refusal or dagon-host's reason. */
+  recover(node: number, release: Uint8Array, topology: Uint8Array, bootcore: Uint8Array | null, onEvent: (e: UpdateEvent) => void): Promise<RecoverResult>;
+  /** Back to the version in the other slot; resolves to it. */
+  rollback(kind: TargetKind, addr: number, node: number, onEvent: (e: UpdateEvent) => void): Promise<number>;
   /** Releases the WASM side; calls still running finish on their own. */
   free(): void;
 }
@@ -113,6 +133,8 @@ export function newHost(link: HostLink): Host {
     watch: (k, a) => h.watch(k, a),
     apply: (b, t, n, on) => h.apply(b, t, n ? Uint8Array.from(n) : undefined, on),
     confirm: (k, a, f) => h.confirm(k, a, f),
+    recover: (n, r, t, b, on) => h.recover(n, r, t, b ?? undefined, on),
+    rollback: (k, a, n, on) => h.rollback(k, a, n, on),
     free: () => h.free(),
   };
 }

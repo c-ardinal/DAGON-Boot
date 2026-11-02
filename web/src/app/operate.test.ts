@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'vitest';
-import { devTransport } from '../serial/devHub.ts';
+import { devHub } from '../serial/devHub.ts';
 import { MockTransport, type MockOptions } from '../serial/mock.ts';
 import { topo_compile } from '../wasm/dagon.ts';
 import { ConnectError } from './connect.ts';
@@ -72,7 +72,7 @@ describe('operating mode against the desk hub', () => {
   test('the page’s ?mock hub answers inside dagon-host’s request time', async () => {
     const op = new Operate({
       open: async () => {
-        const t = devTransport(new URLSearchParams('mock'))!;
+        const t = devHub(new URLSearchParams('mock'))!.transport;
         await t.open();
         return t;
       },

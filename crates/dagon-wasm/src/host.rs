@@ -8,7 +8,7 @@ use core::cell::RefCell;
 
 use dagon_host::{
     check_release, reason, Clock, ConfirmOutcome, Discovery, Error, Event, Host, NodeOutcome,
-    NodeState, Outcome, Target, Transport,
+    NodeState, Outcome, RecoverAssets, RecoverPath, RomStats, Target, Transport,
 };
 use dagon_proto::payload::{HelloResp, SlotInfo, StatusResp};
 use js_sys::{Array, Object, Promise, Reflect, Uint8Array};
@@ -263,6 +263,15 @@ pub fn check_release_for(bundle: &[u8], topology: &[u8]) -> Result<(), JsError> 
     }
 }
 
+/// A signed STM32F401 boot core the ROM path may write, checked under
+/// [`PUBKEY`] as dagon-host checks it; throws with the failure name.
+#[wasm_bindgen]
+pub fn check_bootcore_for(img: &[u8]) -> Result<(), JsError> {
+    dagon_host::rom::check_bootcore(img, &PUBKEY)
+        .map(|_| ())
+        .map_err(|e| JsError::new(&alloc::format!("{e:?}")))
+}
+
 fn outcome_js(r: &NodeOutcome<JsValue>) -> JsValue {
     let o = Object::new();
     set(&o, "node", r.node.into());
@@ -290,6 +299,16 @@ fn failure_js(e: &Error<JsValue>) -> JsValue {
     };
     set(&o, "running", running);
     set(&o, "trial", trial.into());
+    o.into()
+}
+
+fn rom_stats_js(s: &RomStats) -> JsValue {
+    let o = Object::new();
+    set(&o, "attempts", s.attempts.into());
+    set(&o, "frames", s.frames.into());
+    set(&o, "maxRttMs", s.max_rtt_ms.into());
+    set(&o, "elapsedMs", (s.elapsed_ms as f64).into());
+    set(&o, "noStretch", s.no_stretch.into());
     o.into()
 }
 
@@ -329,6 +348,66 @@ impl WasmHost {
                 .await
                 .map_err(|e| JsValue::from(JsError::new(refusal(&e))))?;
             Ok(out.iter().map(outcome_js).collect::<Array>().into())
+        })
+    }
+
+    /// `dagon recover`: rewrites topology node `node` from `release` (checked
+    /// under the built-in key): the normal transfer when it answers (its
+    /// app, or the factory agent), else the STM32 ROM loader through the
+    /// hub with `bootcore`. Resolves to `{path: 'retransfer' | 'factory' |
+    /// 'rom', version, rom}` (`rom`: `{attempts, frames, maxRttMs,
+    /// elapsedMs, noStretch}` on the ROM path); rejects with the refusal
+    /// kind or dagon-host's reason.
+    pub fn recover(
+        &self,
+        node: u8,
+        release: Vec<u8>,
+        topology: Vec<u8>,
+        bootcore: Option<Vec<u8>>,
+        on_event: js_sys::Function,
+    ) -> Promise {
+        self.run(|h, _| async move {
+            let mut h = h.try_borrow_mut().map_err(|_| busy())?;
+            let mut emit = |e: Event| {
+                let _ = on_event.call1(&JsValue::NULL, &event_js(&e));
+            };
+            let assets = RecoverAssets {
+                release: &release,
+                topology: &topology,
+                pubkey: &PUBKEY,
+                bootcore: bootcore.as_deref(),
+            };
+            let (path, v) = h
+                .recover(node, &assets, &mut emit)
+                .await
+                .map_err(|e| JsValue::from(JsError::new(refusal(&e))))?;
+            let o = Object::new();
+            let (name, rom) = match path {
+                RecoverPath::Retransfer => ("retransfer", JsValue::NULL),
+                RecoverPath::Factory => ("factory", JsValue::NULL),
+                RecoverPath::Rom(s) => ("rom", rom_stats_js(&s)),
+            };
+            set(&o, "path", name.into());
+            set(&o, "version", v.raw().into());
+            set(&o, "rom", rom);
+            Ok(o.into())
+        })
+    }
+
+    /// Back to the version in the other slot (SET_PENDING, REBOOT, its
+    /// HELLO, CONFIRM). Resolves to that version; rejects with dagon-host's
+    /// reason (`FAILED` when there is no previous version to go back to).
+    pub fn rollback(&self, kind: &str, addr: u8, node: u8, on_event: js_sys::Function) -> Promise {
+        let to = target(kind, addr);
+        self.run(|h, _| async move {
+            let mut h = h.try_borrow_mut().map_err(|_| busy())?;
+            let mut emit = |e: Event| {
+                let _ = on_event.call1(&JsValue::NULL, &event_js(&e));
+            };
+            h.rollback(to?, node, &mut emit)
+                .await
+                .map(|v| JsValue::from(v.raw()))
+                .map_err(|e| fail(&e))
         })
     }
 

@@ -69,6 +69,8 @@ export const BUTTON = {
 export const BUTTON_FOR = {
   recover: (name: string) => `${name}を復旧する`,
   updateResponding: (n: number) => `応答する ${n} つだけ先に更新`,
+  /** M50: the update after a recovery, over the nodes not written yet. */
+  updateRest: '残りのノードを更新',
 } as const;
 
 export interface BandCopy {
@@ -96,6 +98,7 @@ export const BAND = {
   M19: { sentence: '何も書いていないので、別のファイルを選んでください。' },
   M20: { sentence: '何も書いていないので、この構成向けのファイルを選んでください。' },
   M22: { sentence: '終わるまで電源と USB を抜かず、このページを開いたままにしてください（止まっても前のバージョンのまま動きます）。' },
+  M33: { sentence: '基板どうしの配線が抜けていないか確かめてから、もう一度直してください。' },
   M34: { sentence: 'USB ケーブルを挿し直してから、もう一度つないでください。' },
   M35: { chip: '× 見本を読めない', sentence: 'インターネットにつながっているか確かめてから、もう一度読み込んでください。' },
   /** M57: part of the page (dagon-wasm) did not load. */
@@ -178,6 +181,9 @@ export const NODE = {
     E_FLASH: '× 書き込めない',
   } as Record<string, string>,
   refusedOther: '× 受け付けない',
+  /** S04 during a recovery. */
+  lastResort: '◎ 最後の手段',
+  cannotFix: '× 直せない',
   /** W7: full spoken state of a chip. */
   respondingName: '応答あり',
   silentName: '応答なし、2 回続けて返事がない',
@@ -218,6 +224,24 @@ export const DETAIL = {
   /** Values of the last-reason code (STATUS last_reason). */
   reasons: { 1: '中身の破損', 2: '配布元を確認できない', 3: '新しいバージョンで起動できない', 5: '起動できるバージョンなし' } as Record<number, string>,
   details: '詳しく見る',
+} as const;
+
+/** M38: a node on trial that this page did not apply (the detail, above its buttons). */
+export const TRIAL_CHOICE = {
+  sentence: 'このバージョンで確定するか、前のバージョンに戻すかを選んでください。',
+  keep: 'このバージョンで確定する',
+  back: '前のバージョンに戻す',
+} as const;
+
+/** The detail's actions and the recovery figures under 詳しく見る. */
+export const NODE_ACTION = {
+  /** UC-O10, shown when the other slot holds a version to go back to. */
+  back: (version: string) => `前のバージョン（${version}）に戻す`,
+  /** 詳しく見る: how the last recovery got through. */
+  path: '経路',
+  paths: { retransfer: '送り直し', factory: '予備へ送る', rom: '最後の手段' },
+  romRtt: '往復の最大',
+  romAttempts: 'やり直し',
 } as const;
 
 /** Slot section (M41). Inside it the rows are A / B / 予備. */
@@ -312,6 +336,10 @@ export const ANNOUNCE = {
   A13previous: (name: string) => `${name} 前のバージョン`,
   A14: (version: string) => `完了、${version}`,
   A21timeout: '親機 再接続 時間切れ',
+  A15: (name: string, version: string) => `${name} ${version} に戻した`,
+  A16: (name: string, rest: number) => `${name} 復旧済み、残り ${rest}`,
+  /** "配布中の最新バージョンを使う" could not fetch the published release. */
+  A22latest: '配布中の最新バージョン 読み込めない',
 } as const;
 
 /** Words that never appear in operating-mode guidance, chips or results. */

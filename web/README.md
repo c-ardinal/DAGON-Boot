@@ -14,6 +14,7 @@ npm run wasm      # build crates/dagon-wasm into src/wasm/pkg (needs DAGON_PUBKE
 npm run dev       # http://127.0.0.1:5173
 npm run build     # svelte-check, then vite build into dist/ (target chrome89)
 npm run preview   # serves dist/ on http://127.0.0.1:4173
+npm run site      # after build: prepares the public site in dist/ (does not publish; see below)
 npm test          # Vitest
 npm run fonts     # re-fetch the font subsets after screen text changes
 ```
@@ -26,6 +27,12 @@ Query parameters for development (`npm run dev` only; production builds leave th
 | `?mock=silent` | In-memory device that never answers (no-response path). |
 | `&quiet=uart,i2c:66` | With `?mock`: these nodes do not answer RELAY (not-answering path after two monitoring rounds; `quiet=uart,i2c:66` is the hub alone). |
 | `&away` | With `?mock`: after its REBOOT the hub stays away until chosen again (the reconnect dialog, after the 45 s automatic reopening). |
+| `&factory=uart` | With `?mock`: these nodes answer as their factory agent (recovery takes the factory path). |
+| `?sim` | The simulated desk (`crates/dagon-sim` through dagon-wasm's `SimDesk`, `sim` feature): hub, F401 with its ROM loader, watch, on the simulator's clock. `&wipe` erases the F401 first, so "7セグを復旧する" takes the ROM path. |
+
+With `?mock` and `?sim` the repository's test-key release (`crates/dagon-sim/fixtures/desk-1.1.0.dgb`)
+and F401 boot core (`crates/dagon-wasm/fixtures/f401-bootcore-1.0.0.img`) stand in for the public
+site's `release/latest.dgb` and `release/seg-bootcore.img`; production builds leave them out.
 
 A simulated hub plugs in as one more `Transport` in `src/serial/devHub.ts`, under its own parameter.
 
@@ -38,10 +45,11 @@ A simulated hub plugs in as one more `Transport` in `src/serial/devHub.ts`, unde
 | `src/serial/hello.ts` | HELLO payload types and the response encoder the mock uses. |
 | `src/serial/mock.ts` | In-memory desk hub (see `?mock`) in the same frame format. |
 | `src/serial/devHub.ts` | Picks the stand-in hub from the page URL. |
+| `src/serial/simHub.ts` | The simulated desk as a `Transport` and clock (builds with the `sim` feature). |
 | `src/serial/hostLink.ts` | The byte link `dagon-host` runs on, over a `Transport`; the device under it can be replaced (the hub chosen again after its reboot). |
 | `src/wasm/dagon.ts` | The only entry to `crates/dagon-wasm`: frame encoding and stream cutting, HELLO request / response, version text, board table, topology check and compile, release verification. `src/wasm/pkg/` is build output and not committed. |
 | `src/app/machine.ts` | Operating-mode state machine: states, main and side actions, transitions (`machine.test.ts` checks one main action at most and no dead ends). |
-| `src/app/operate.svelte.ts` | The operating-mode session: connect, find, send, monitoring every `watch_interval_ms()`, release check and update (`apply`, hub reconnect, confirm rule), all through `dagon-host` in `dagon-wasm`. |
+| `src/app/operate.svelte.ts` | The operating-mode session: connect, find, send, monitoring every `watch_interval_ms()`, release check and update (`apply`, hub reconnect, confirm rule), recovery (`recover`: re-transfer, factory, ROM path) and going back (`rollback`), all through `dagon-host` in `dagon-wasm`. |
 | `src/app/band.ts` | Bottom band per state: cause chip, sentence, named buttons. |
 | `src/app/sample.ts` | The sample desk set-up (`topology/desk-demo.yaml` plus names and wiring). |
 | `src/app/connect.ts` | Device chooser and error mapping. |
@@ -64,9 +72,19 @@ DAGON_PUBKEY=../keys/dagon.pub npm run build
 ```
 
 Without it `npm run wasm` and `npm run build` stop. `npm test` and `npm run dev` build with
-`DAGON_ALLOW_TEST_KEY=1` (`npm run wasm:test-key`): when `DAGON_PUBKEY` is unset they use the
-public RFC 8032 test key, which the stand-in hub's release (`crates/dagon-sim/fixtures`) is
-signed with, and the build warns.
+`DAGON_ALLOW_TEST_KEY=1` and the `sim` feature (`npm run wasm:dev`): when `DAGON_PUBKEY` is unset
+they use the public RFC 8032 test key, which the stand-in hubs' release (`crates/dagon-sim/fixtures`)
+is signed with, and the build warns. `npm run build` leaves the simulated desk out.
+
+## Public site (prepared, not published)
+
+The page fetches its release and boot core next to itself: `release/latest.dgb` ("配布中の最新バージョンを使う",
+and recovery when no file is on the screen) and `release/<node>-bootcore.img` (the F401 ROM path).
+`npm run site -- [--release <dgb>] [--bootcore <img>]` (defaults `out/release-latest.dgb` and
+`out/provision/seg/bootcore.img`) checks both with the dagon-wasm the page was built with and writes
+the five targets into `dist/`: the page, `release/latest.dgb`, `release/seg-bootcore.img`,
+`sample/desk-demo.yaml` and `sample/desk-demo.bin` (its canonical binary), printing their SHA-256.
+Uploading `dist/` anywhere needs the owner's go-ahead for each publication.
 
 ## Web Serial on http://127.0.0.1
 

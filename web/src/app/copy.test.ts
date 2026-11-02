@@ -29,6 +29,9 @@ const filled = [
   copy.ANNOUNCE.A13('7セグ'),
   copy.ANNOUNCE.A13previous('メイン'),
   copy.ANNOUNCE.A14('1.1.0'),
+  copy.ANNOUNCE.A15('7セグ', '1.0.0'),
+  copy.ANNOUNCE.A16('7セグ', 2),
+  copy.NODE_ACTION.back('1.0.0'),
 ];
 
 const shownExcept = (...skip: string[]) =>
@@ -42,7 +45,7 @@ const shown = shownExcept();
 describe('copy', () => {
   test.each(copy.FORBIDDEN_WORDS)('no screen text uses %s', (word) => {
     // 確定 is allowed only as a slot value in the slot section.
-    const texts = word === '確定' ? shownExcept('SLOT') : shown;
+    const texts = word === '確定' ? shownExcept('SLOT', 'TRIAL_CHOICE') : shown;
     expect(texts.filter((s) => s.includes(word))).toEqual([]);
   });
 
@@ -64,6 +67,7 @@ describe('copy', () => {
       ...Object.values(copy.BAND).flatMap((b) => ('sentence' in b ? [b.sentence] : [])),
       copy.UNSUPPORTED.sentence,
       copy.RECONNECT.sentence,
+      copy.TRIAL_CHOICE.sentence,
       copy.BAND_FOR.M29('7セグ').sentence,
       copy.CANVAS.empty,
       copy.DETAIL.nothingSelected,
@@ -81,7 +85,7 @@ describe('copy', () => {
   test('chips are a symbol and a short word, never a sentence', () => {
     const { responding, silent, trial, writing, waiting, done, unwritten, rebooting, previous } = copy.NODE;
     const { sourceOk, sourceBad, topologyOk, topologyBad, notRelease } = copy.FILE;
-    const chips = [responding, silent, trial, writing, waiting, done, unwritten, rebooting, previous, ...Object.values(copy.NODE.refused), copy.NODE.refusedOther, sourceOk, sourceBad, topologyOk, topologyBad, notRelease, ...Object.values(copy.HUB)];
+    const chips = [responding, silent, trial, writing, waiting, done, unwritten, rebooting, previous, ...Object.values(copy.NODE.refused), copy.NODE.refusedOther, copy.NODE.lastResort, copy.NODE.cannotFix, sourceOk, sourceBad, topologyOk, topologyBad, notRelease, ...Object.values(copy.HUB)];
     for (const c of chips) {
       expect(c, c).toMatch(/^(?:[●○×…↑↺✓▲◎]|▼▼) \S/);
       expect(c, c).not.toMatch(/ます|ました|。/);

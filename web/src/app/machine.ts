@@ -74,13 +74,14 @@ export const MACHINE: Record<L, Spec> = {
     step: 4,
     primary: 'chooseFile',
     secondary: ['useLatest'],
-    on: { push: 'L10', watchAlarm: 'L13', chooseFile: 'L14', useLatest: 'L14', cliClaim: 'L28', ...toLost },
+    // rollback: M38's "前のバージョンに戻す" for a node left on trial.
+    on: { push: 'L10', watchAlarm: 'L13', chooseFile: 'L14', useLatest: 'L14', cliClaim: 'L28', rollback: 'L24', ...toLost },
   },
   L13: {
     step: 4,
     primary: 'recover',
     secondary: ['updateResponding'],
-    on: { recover: 'L24', watchOk: 'L12', updateResponding: 'L14', ...toLost },
+    on: { recover: 'L24', watchOk: 'L12', updateResponding: 'L14', rollback: 'L24', ...toLost },
   },
   L14: { step: 4, on: { read: 'L15', ...toLost } },
   L15: { step: 4, on: { badSource: 'L16', topoDiff: 'L17', pass: 'L18', ...toLost } },

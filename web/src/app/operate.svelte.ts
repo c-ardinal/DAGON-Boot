@@ -13,6 +13,7 @@ import {
   watch_interval_ms,
   type Host,
   type NodeResult,
+  type RecoverResult,
   type Refusal,
   type StatusResp,
   type UpdateEvent,
@@ -38,7 +39,7 @@ const UNKNOWN: Live = { responding: null, rttMs: null, lastSeen: null, hello: nu
 
 /** Where one node is in an update (the node chip and the update-order row). */
 export interface Progress {
-  stage: 'waiting' | 'writing' | 'rebooting' | 'done' | 'silent' | 'refused' | 'previous' | 'unwritten';
+  stage: 'waiting' | 'writing' | 'lastResort' | 'rebooting' | 'done' | 'silent' | 'refused' | 'previous' | 'unwritten' | 'cannotFix';
   percent: number;
   /** dagon-host's reason when the node refused (`E_FLASH`, `E_SIGNATURE`, ...). */
   reason?: string;
@@ -66,6 +67,25 @@ export interface Deps {
   reselect?: () => Promise<Transport>;
   /** Clock of dagon-host's timeouts (tests run it fast). */
   clock?: LinkClock;
+  /**
+   * A file of the public site next to the page (`release/latest.dgb`,
+   * `release/<node>-bootcore.img`); null when it is not there.
+   */
+  fetchAsset?: (path: string) => Promise<Uint8Array | null>;
+}
+
+/** The published release recovery and "配布中の最新バージョンを使う" take. */
+export const LATEST_RELEASE = 'release/latest.dgb';
+/** The signed boot core the ROM path writes for a node. */
+export const bootcorePath = (id: string): string => `release/${id}-bootcore.img`;
+
+async function fetchNextToPage(path: string): Promise<Uint8Array | null> {
+  try {
+    const r = await fetch(new URL(path, document.baseURI));
+    return r.ok ? new Uint8Array(await r.arrayBuffer()) : null;
+  } catch {
+    return null;
+  }
 }
 
 export class Operate {
@@ -92,6 +112,12 @@ export class Operate {
   failed = $state<string | null>(null);
   /** Clock time when dagon-host stops reopening the rebooted hub. */
   reconnectUntil = $state<number | null>(null);
+  /** The node being recovered or rolled back (and tried again from L25). */
+  recovering = $state<string | null>(null);
+  /** How the last recovery got through: the ROM path shows its figures in the detail. */
+  recovered = $state<RecoverResult | null>(null);
+  /** The update after a recovery covers the nodes not written yet ("残りのノードを更新"). */
+  rest = $state(false);
 
   private link: SwapLink | null = null;
   /** Version each node was given in this run. */
@@ -323,6 +349,7 @@ export class Operate {
       return this.go(k === 'topology' ? 'topoDiff' : 'badSource');
     }
     this.file = { ...file, verdict: 'pass' };
+    this.rest = false;
     this.targets = this.answering();
     this.status = ANNOUNCE.A10ok(this.targets.length);
     this.go('pass');
@@ -444,6 +471,120 @@ export class Operate {
     } catch {
       this.alert = ANNOUNCE.A21timeout;
     }
+  }
+
+  /** The node "（ノード）を復旧する" names: the stopped one (L22, L25) or the first silent one (L13). */
+  get recoverTarget(): Node | undefined {
+    const id = this.state === 'L25' ? this.recovering : this.state === 'L22' ? this.failed : this.stuck?.id;
+    return this.config?.nodes.find((n) => n.id === id);
+  }
+
+  private fetchAsset(path: string): Promise<Uint8Array | null> {
+    return (this.deps.fetchAsset ?? fetchNextToPage)(path);
+  }
+
+  /** "配布中の最新バージョンを使う": the published release, checked like a chosen file. */
+  async useLatest(): Promise<boolean> {
+    const bytes = await this.fetchAsset(LATEST_RELEASE);
+    if (!bytes) {
+      this.alert = ANNOUNCE.A22latest;
+      return false;
+    }
+    this.takeFile(LATEST_RELEASE.split('/').pop()!, bytes);
+    return true;
+  }
+
+  /**
+   * "（ノード）を復旧する" / "もう一度直す": dagon-host's recover with the
+   * release on the screen (else the published one) and, for the ROM path,
+   * the published boot core. Without any release it asks for one
+   * (`needFile`); `chosen` is that file.
+   */
+  async recover(chosen?: { name: string; bytes: Uint8Array }): Promise<'needFile' | void> {
+    const c = this.config;
+    const n = this.recoverTarget;
+    if (!c || !n || !['L13', 'L22', 'L25'].includes(this.state)) return;
+    const topo = topo_compile(c.yaml);
+    let release = chosen?.bytes ?? (this.file?.verdict === 'pass' ? this.file.bytes : null);
+    if (chosen) {
+      try {
+        check_release_for(chosen.bytes, topo);
+      } catch {
+        this.alert = ANNOUNCE.A10source;
+        return;
+      }
+      this.file = { name: chosen.name, size: chosen.bytes.length, bytes: chosen.bytes, verdict: 'pass' };
+    }
+    release ??= await this.fetchAsset(LATEST_RELEASE);
+    if (!release) return 'needFile';
+    const bytes = release;
+    const bootcore = await this.fetchAsset(bootcorePath(n.id));
+    const index = c.nodes.indexOf(n);
+    await this.runRecovery(n, this.state === 'L25' ? 'recoverAgain' : 'recover', (h, on) => h.recover(index, bytes, topo, bootcore, on));
+  }
+
+  /** "前のバージョンに戻す" (the detail of a node, UC-O10 / M38): the version in the other slot. */
+  async rollback(id: string): Promise<void> {
+    const c = this.config;
+    const n = c?.nodes.find((x) => x.id === id);
+    if (!c || !n) return;
+    const index = c.nodes.indexOf(n);
+    await this.runRecovery(n, 'rollback', async (h, on) => {
+      const v = await h.rollback(n.target.kind, n.target.addr, index, on);
+      return { path: 'retransfer', version: v, rom: null };
+    });
+  }
+
+  /** "このバージョンで確定する" (M38): keeps the version a node runs on trial. */
+  async keepTrial(id: string): Promise<void> {
+    const n = this.config?.nodes.find((x) => x.id === id);
+    if (!n || !this.host) return;
+    try {
+      await this.call((h) => h.confirm(n.target.kind, n.target.addr, true));
+    } catch {
+      // The next watch round shows whether it still answers.
+    }
+    await this.refreshStatus(id);
+  }
+
+  private async runRecovery(n: Node, ev: Ev, run: (h: Host, on: (e: UpdateEvent) => void) => Promise<RecoverResult>): Promise<void> {
+    const my = this.session;
+    this.go(ev);
+    if (this.state !== 'L24') return;
+    this.stopWatching();
+    this.recovering = n.id;
+    this.recovered = null;
+    this.progress = { ...this.progress, [n.id]: { stage: 'writing', percent: 0 } };
+    const on = (e: UpdateEvent) => {
+      if (my !== this.session || this.config?.nodes[e.node]?.id !== n.id) return;
+      if (e.phase === PHASE.rom) this.progress[n.id] = { stage: 'lastResort', percent: e.percent };
+      else if (e.phase === PHASE.transfer) this.progress[n.id] = { stage: 'writing', percent: e.percent };
+    };
+    let r: RecoverResult;
+    try {
+      r = await this.call((h) => run(h, on));
+    } catch {
+      if (my !== this.session) return;
+      this.progress[n.id] = { stage: 'cannotFix', percent: this.progress[n.id]?.percent ?? 0 };
+      this.status = ANNOUNCE.A13(n.name);
+      return this.go('gaveUp');
+    }
+    if (my !== this.session) return;
+    this.recovered = r;
+    this.progress[n.id] = { stage: 'done', percent: 100 };
+    this.live[n.id] = { ...(this.live[n.id] ?? UNKNOWN), responding: true, lastSeen: Date.now() };
+    const rest = this.file?.verdict === 'pass' ? Object.entries(this.progress).filter(([, p]) => p.stage === 'unwritten').map(([id]) => id) : [];
+    if (ev === 'rollback') this.status = ANNOUNCE.A15(n.name, versionText(r.version));
+    else this.status = ANNOUNCE.A16(n.name, rest.length);
+    if (rest.length) {
+      this.targets = rest;
+      this.rest = true;
+      this.go('fixedRest');
+    } else {
+      this.go('fixedNoRest');
+    }
+    this.startWatching();
+    await this.refreshStatus(n.id);
   }
 
   /** dagon-host runs one call at a time; calls queue here. */

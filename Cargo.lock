@@ -229,8 +229,12 @@ version = "0.0.0"
 dependencies = [
  "dagon-format",
  "dagon-host",
+ "dagon-port",
  "dagon-proto",
+ "dagon-sign",
+ "dagon-sim",
  "dagon-topology",
+ "ed25519-compact",
  "js-sys",
  "wasm-bindgen",
  "wasm-bindgen-futures",

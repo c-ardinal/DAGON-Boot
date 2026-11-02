@@ -19,6 +19,8 @@ export interface Names {
   responding?: number;
   /** Nodes after the stopped one that were not written (L22). */
   unwritten?: number;
+  /** The update covers the nodes left after a recovery (M50). */
+  rest?: boolean;
 }
 
 const REFUSAL_BAND = { source: BAND.M18, key: BAND.M18b, format: BAND.M19, topology: BAND.M20 } as const;
@@ -57,6 +59,8 @@ function words(s: L, c: Ctx, n: Names): BandCopy {
     case 'L19':
     case 'L24':
       return BAND.M22;
+    case 'L25':
+      return BAND.M33;
     case 'L26':
       return BAND.M34;
     case 'L27':
@@ -69,6 +73,7 @@ function words(s: L, c: Ctx, n: Names): BandCopy {
 function label(a: Action, n: Names): string {
   if (a === 'recover') return BUTTON_FOR.recover(n.stuck ?? '');
   if (a === 'updateResponding') return BUTTON_FOR.updateResponding(n.responding ?? 0);
+  if (a === 'update' && n.rest) return BUTTON_FOR.updateRest;
   return BUTTON[a];
 }
 

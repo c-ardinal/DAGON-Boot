@@ -34,6 +34,8 @@ const SLOT_WRITTEN = 1;
 const SLOT_PENDING = 2;
 const SLOT_TRYING = 3;
 const SLOT_CONFIRMED = 4;
+const MODE_APP = 0;
+const MODE_AGENT = 3;
 
 const KEY_ID = Uint8Array.of(0x3f, 0x9a, 0x21, 0xc7, 0x00, 0x00, 0x00, 0x00);
 const V100 = versionRaw(1, 0, 0);
@@ -110,6 +112,8 @@ export interface MockOptions {
   delayMs?: number;
   /** Nodes behind the hub that do not answer RELAY. */
   quiet?: DeviceKey[];
+  /** Devices answering as their factory agent (HELLO mode 3) until the next REBOOT. */
+  factory?: DeviceKey[];
   /** Devices that refuse the image at XFER_END with this status (0x07 E_FLASH, 0x09 E_SIGNATURE, ...). */
   refuse?: Partial<Record<DeviceKey, number>>;
   /** Devices that come back on their previous version after REBOOT (the new one did not start). */
@@ -127,6 +131,7 @@ export class MockTransport implements Transport {
   private readonly devices: Map<DeviceKey, Device>;
   private readonly quiet: Set<DeviceKey>;
   private isOpen = false;
+  private refuse: Partial<Record<DeviceKey, number>>;
   /** Devices that took a REBOOT, in order. */
   readonly reboots: DeviceKey[] = [];
   /** Failing opens left while the rebooting hub is away. */
@@ -139,12 +144,22 @@ export class MockTransport implements Transport {
   constructor(private readonly opts: MockOptions = {}) {
     this.devices = deskDevices(opts.hello ?? SAMPLE_HUB_HELLO);
     this.quiet = new Set(opts.quiet);
+    this.refuse = { ...opts.refuse };
+    for (const k of opts.factory ?? []) {
+      const d = this.devices.get(k);
+      if (d) d.hello = { ...d.hello, mode: MODE_AGENT };
+    }
   }
 
   /** Makes a node stop or start answering. */
   setQuiet(key: DeviceKey, quiet: boolean): void {
     if (quiet) this.quiet.add(key);
     else this.quiet.delete(key);
+  }
+
+  /** Makes a device refuse the image at XFER_END with `status`, or stop refusing. */
+  setRefuse(key: DeviceKey, status?: number): void {
+    this.refuse = { ...this.refuse, [key]: status };
   }
 
   /** The rebooted hub's USB device is back. */
@@ -175,7 +190,7 @@ export class MockTransport implements Transport {
     if (this.opts.silent) return;
     const req = parseFrame(raw);
     const hub = this.devices.get('hub')!;
-    const body = req.cmd === CMD_RELAY ? await this.relay(req.payload) : await answer(hub, req.cmd, req.payload, this.fellBack('hub'), this.opts.refuse?.hub);
+    const body = req.cmd === CMD_RELAY ? await this.relay(req.payload) : await answer(hub, req.cmd, req.payload, this.fellBack('hub'), this.refuse.hub);
     const resp = encodeFrame({ flags: FLAG_RESP, seq: req.seq, cmd: req.cmd, payload: body });
     // Only the hub's own HELLO waits, so the checking state shows without slowing a scan.
     setTimeout(() => this.queue.put(resp), req.cmd === CMD.HELLO ? (this.opts.delayMs ?? 0) : 0);
@@ -200,7 +215,7 @@ export class MockTransport implements Transport {
     const dev = key && !this.quiet.has(key) ? this.devices.get(key) : undefined;
     if (!key || !dev) return Uint8Array.of(STATUS_TIMEOUT);
     const inner = parseFrame(p.subarray(RELAY_HEAD_LEN));
-    const body = await answer(dev, inner.cmd, inner.payload, this.fellBack(key), this.opts.refuse?.[key]);
+    const body = await answer(dev, inner.cmd, inner.payload, this.fellBack(key), this.refuse[key]);
     if (inner.cmd === CMD_REBOOT) this.reboots.push(key);
     const resp = encodeFrame({ flags: FLAG_RESP, seq: inner.seq, cmd: inner.cmd, payload: body });
     return withStatus(STATUS_OK, resp);
@@ -281,6 +296,7 @@ async function end(dev: Device): Promise<Uint8Array> {
 function reboot(dev: Device, fallBack: boolean): void {
   const next = dev.pending;
   dev.pending = null;
+  dev.hello = { ...dev.hello, mode: MODE_APP };
   if (next === null) return;
   if (fallBack) {
     dev.slots[next].state = SLOT_REVERTED;

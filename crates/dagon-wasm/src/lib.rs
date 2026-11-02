@@ -7,10 +7,14 @@ extern crate alloc;
 
 mod frame;
 mod host;
+#[cfg(feature = "sim")]
+mod sim;
 mod watch;
 
 pub use frame::{frame_encode, FrameCutter};
-pub use host::{check_release_for, watch_interval_ms, WasmHost};
+pub use host::{check_bootcore_for, check_release_for, watch_interval_ms, WasmHost};
+#[cfg(feature = "sim")]
+pub use sim::SimDesk;
 
 use dagon_format::{BundleView, Version};
 use dagon_proto::payload::{HelloReq, HelloResp};

@@ -1,10 +1,12 @@
 #![forbid(unsafe_code)]
 
+use std::path::Path;
 use std::process::ExitCode;
 
 const USAGE: &str = "dagon - DAGON Boot command line tool
 
 Usage:
+  dagon key gen --out <dir>          generate a signing key pair (dir must be outside any git work tree)
   dagon topo check [--json] <yaml>   validate a topology file
   dagon --help";
 
@@ -19,6 +21,7 @@ fn main() -> ExitCode {
             println!("{USAGE}");
             ExitCode::SUCCESS
         }
+        ["key", "gen", rest @ ..] => key_gen(rest),
         ["topo", "check", rest @ ..] => topo_check(rest),
         _ => usage_error("unknown command"),
     }
@@ -27,6 +30,28 @@ fn main() -> ExitCode {
 fn usage_error(msg: &str) -> ExitCode {
     eprintln!("error: {msg}\n\n{USAGE}");
     ExitCode::from(EXIT_USAGE)
+}
+
+fn key_gen(args: &[&str]) -> ExitCode {
+    let ["--out", dir] = args else {
+        return usage_error("key gen needs --out <dir>");
+    };
+    match dagon_sign::generate_to_dir(Path::new(dir)) {
+        Ok(k) => {
+            println!("public_key: {}", dagon_sign::to_hex(&k.public_key));
+            println!("key_id:     {}", dagon_sign::to_hex(&k.key_id));
+            println!("public key file: {}", k.public_path.display());
+            println!(
+                "secret key file: {} (keep it private; never commit it)",
+                k.secret_path.display()
+            );
+            ExitCode::SUCCESS
+        }
+        Err(e) => {
+            eprintln!("error: {e}");
+            ExitCode::FAILURE
+        }
+    }
 }
 
 fn topo_check(args: &[&str]) -> ExitCode {

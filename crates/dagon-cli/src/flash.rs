@@ -218,7 +218,8 @@ pub(crate) fn find_uf2_drive(roots: &[PathBuf]) -> Result<Option<PathBuf>, Strin
 /// Whether INFO_UF2.TXT is the RP2040 boot ROM's: a `UF2 Bootloader` first
 /// line and the exact line `Board-ID: RPI-RP2` (not a part of another ID).
 fn is_rp2040_rom(info: &str) -> bool {
-    let mut lines = info.lines().map(str::trim).filter(|l| !l.is_empty());
+    // The literal first line (lines() drops only the line break).
+    let mut lines = info.lines();
     let header = lines
         .next()
         .is_some_and(|l| l.starts_with("UF2 Bootloader"));
@@ -564,6 +565,9 @@ mod tests {
             "UF2 Bootloader v3.0\nNote: Board-ID: RPI-RP2\n",
             "Board-ID: RPI-RP2\n",
             "My stick\nUF2 Bootloader v3.0\nBoard-ID: RPI-RP2\n",
+            "\nUF2 Bootloader v3.0\nBoard-ID: RPI-RP2\n",
+            "\r\nUF2 Bootloader v3.0\r\nBoard-ID: RPI-RP2\r\n",
+            "  UF2 Bootloader v3.0\nBoard-ID: RPI-RP2\n",
             "",
         ] {
             assert!(!is_rp2040_rom(not), "{not:?}");

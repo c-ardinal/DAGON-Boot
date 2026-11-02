@@ -186,6 +186,44 @@ fn firmware_embeds_the_signing_key_and_refuses_another_build_key() {
 }
 
 #[test]
+fn a_generated_desk_project_deploys_every_node_including_the_esp32s3() {
+    let (mut cfg, _) = work_area("desk");
+    cfg.build.clear();
+    let desk = include_str!("../../../../topology/desk-demo.yaml");
+    let t = dagon_topology::parse_str(desk).unwrap();
+    let toml = cfg.base.join("dagon.toml");
+    std::fs::write(&toml, "").unwrap();
+    crate::scaffold::add_build_tables(&toml, &t).unwrap();
+    let gen = Config::load(Some(&toml.to_string_lossy())).unwrap();
+    assert!(gen.build["watch"].slot_b_feature.is_none(), "one ESP build");
+    assert!(gen.build["seg"].slot_b_feature.is_some());
+
+    let nodes = pick_nodes(&gen, &t, &[]).unwrap();
+    assert_eq!(nodes, ["seg", "watch", "hub"]);
+    let mut elfs = built(&["seg".into(), "hub".into()]);
+    elfs.insert(1, ("watch".into(), vec![('a', vec![0x5a; 5000])]));
+    let p = prepare(
+        &gen,
+        &t,
+        &key(),
+        Version::new(1, 0, 1),
+        &BTreeMap::new(),
+        &elfs,
+    )
+    .unwrap();
+    assert!(
+        p.listing().contains("watch  (none) -> 1.0.1"),
+        "{}",
+        p.listing()
+    );
+    assert!(BundleView::parse(&p.bundle)
+        .unwrap()
+        .verify(&key().pk)
+        .is_ok());
+    let _ = std::fs::remove_dir_all(&cfg.base);
+}
+
+#[test]
 fn version_counts_up_one_patch() {
     assert_eq!(next_version([]).unwrap(), FIRST);
     let v = next_version([Version::new(1, 3, 0), Version::new(1, 1, 9)]).unwrap();

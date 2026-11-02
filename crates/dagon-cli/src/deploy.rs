@@ -112,6 +112,12 @@ fn configured(cfg: &Config, node: &str) -> Vec<Version> {
         .collect()
 }
 
+/// Whether apps for `mcu` are linked separately for slot B. Not for an MCU
+/// whose one image runs from either slot (ESP32-S3): it builds once.
+pub(crate) fn has_slot_b_link(mcu: &str) -> bool {
+    dagon_sign::image::slot(mcu, image_kind::APP, slot_binding::B).is_some()
+}
+
 /// `pos`, else every `[build.<id>]` node, ordered as the topology updates
 /// them; each must be in the topology and build both slots.
 pub(crate) fn pick_nodes(cfg: &Config, t: &Topology, pos: &[&str]) -> Result<Vec<String>, String> {
@@ -124,16 +130,18 @@ pub(crate) fn pick_nodes(cfg: &Config, t: &Topology, pos: &[&str]) -> Result<Vec
         return Err("no [build.<id>] tables in dagon.toml".into());
     }
     for id in &wanted {
-        if t.node(id).is_none() {
-            return Err(format!("no node '{id}' in the topology"));
-        }
+        let n = t
+            .node(id)
+            .ok_or_else(|| format!("no node '{id}' in the topology"))?;
         let b = cfg
             .build
             .get(id)
             .ok_or_else(|| format!("no [build.{id}] in dagon.toml"))?;
-        if b.slot_b_feature.is_none() {
+        if has_slot_b_link(&n.mcu) && b.slot_b_feature.is_none() {
             return Err(format!(
-                "[build.{id}] needs slot_b_feature: a release carries slot A and B images"
+                "[build.{id}] needs slot_b_feature: a release carries slot A and B images \
+                 for {}",
+                n.mcu
             ));
         }
     }

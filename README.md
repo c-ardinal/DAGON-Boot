@@ -44,9 +44,10 @@ What the code and its tests in this repository show:
 - Firmware for the RP2040 hub (`targets/rp2040-stage0`, `rp2040-bootcore`,
   `rp2040-hub`), the F401 node (`targets/f401-bootcore`, `f401-app`) and the
   ESP32-S3 node (`targets/esp32s3-port`, `esp32s3-agent`, with the ESP-IDF
-  2nd stage). The hub firmware boots on the hub hardware; the on-device
-  checks of the F401 and ESP32-S3 firmware are still pending, and so is the
-  full flow on hardware (see Limitations).
+  2nd stage). The hub firmware has been flashed and starts on the hub
+  hardware; on-device validation of the hub (host communication, display) is
+  still in progress. On-device checks of the F401 and ESP32-S3 firmware and
+  the full flow on hardware are still pending (see Limitations).
 - The browser page in `web/` (under development; `web/README.md` lists what
   it does today).
 
@@ -673,7 +674,8 @@ written for this project.
   hardware has not been done yet; power cuts are tested in the simulator.
 - The USB VID:PID `c0de:cafe` is a test ID, not an assigned one.
 - On-device checks are still pending for the F401 node and the ESP32-S3
-  node firmware; the hub hardware (RP2040 with LCD) and the full
-  three-board flow are still being validated on hardware.
+  node firmware. The hub firmware (RP2040 with LCD) has been flashed and
+  starts on the hardware, but its host communication and display are still
+  being validated, and so is the full three-board flow.
 - `dagon conform` drives the synchronous test sequence and is CLI only; the
   browser does not run conformance tests.

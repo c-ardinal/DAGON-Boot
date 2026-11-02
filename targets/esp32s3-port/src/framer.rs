@@ -6,12 +6,16 @@ use dagon_proto::{find_sof, frame_len, max_payload, Frame, FrameError, SOF};
 
 /// Largest frame on the UART link (1024-byte payload).
 pub const MAX_UART_FRAME: usize = frame_len(max_payload::UART);
+/// A partial frame is dropped after this long without a byte.
+pub const INTER_BYTE_TIMEOUT_MS: u32 = 20;
 
 pub struct FrameCutter {
     buf: [u8; MAX_UART_FRAME],
     len: usize,
     /// Length of the frame handed out by the last `push`, dropped on the next.
     done: usize,
+    /// Arrival time (ms, wrapping) of the last byte given to `push_at`.
+    last_ms: u32,
 }
 
 impl Default for FrameCutter {
@@ -26,7 +30,19 @@ impl FrameCutter {
             buf: [0; MAX_UART_FRAME],
             len: 0,
             done: 0,
+            last_ms: 0,
         }
+    }
+
+    /// [`FrameCutter::push`] for a byte that arrived at `now_ms`: a partial
+    /// frame older than [`INTER_BYTE_TIMEOUT_MS`] is dropped first, and the
+    /// search for the next SOF starts over.
+    pub fn push_at(&mut self, byte: u8, now_ms: u32) -> Option<&[u8]> {
+        if self.len > self.done && now_ms.wrapping_sub(self.last_ms) >= INTER_BYTE_TIMEOUT_MS {
+            self.clear();
+        }
+        self.last_ms = now_ms;
+        self.push(byte)
     }
 
     /// Forgets any partial frame (after a receive error).
@@ -125,6 +141,35 @@ mod tests {
         let f = frame(8, &[0x55; max_payload::UART]);
         assert_eq!(f.len(), MAX_UART_FRAME);
         assert_eq!(cut(&[f.clone(), f.clone()].concat()), vec![f.clone(), f]);
+    }
+
+    #[test]
+    fn a_20_ms_gap_drops_the_partial_frame() {
+        let f = frame(10, b"abcdef");
+        let mut c = FrameCutter::new();
+        // Head of a frame, then silence: the rest alone never completes.
+        for &b in &f[..6] {
+            assert!(c.push_at(b, 100).is_none());
+        }
+        let rest: Vec<_> = f[6..]
+            .iter()
+            .filter_map(|&b| c.push_at(b, 120).map(<[u8]>::to_vec))
+            .collect();
+        assert!(rest.is_empty());
+        // A whole frame with gaps below 20 ms goes through.
+        let got: Vec<_> = f
+            .iter()
+            .enumerate()
+            .filter_map(|(i, &b)| c.push_at(b, 200 + 19 * i as u32).map(<[u8]>::to_vec))
+            .collect();
+        assert_eq!(got, vec![f.clone()]);
+        // A completed frame is not a partial one: the next frame may start
+        // much later.
+        let got: Vec<_> = f
+            .iter()
+            .filter_map(|&b| c.push_at(b, 5_000).map(<[u8]>::to_vec))
+            .collect();
+        assert_eq!(got, vec![f]);
     }
 
     #[test]

@@ -1,4 +1,4 @@
-import { FrameDecoder } from './frame.ts';
+import { newFrameStream } from './frame.ts';
 
 /**
  * Frame-level link to the hub, the shape dagon-host drives (and what
@@ -92,7 +92,15 @@ export class WebSerialTransport implements Transport {
   }
 
   private async readLoop(): Promise<void> {
-    const decoder = new FrameDecoder();
+    const decoder = newFrameStream();
+    try {
+      await this.readStreams(decoder);
+    } finally {
+      decoder.free();
+    }
+  }
+
+  private async readStreams(decoder: { push(chunk: Uint8Array): Uint8Array[] }): Promise<void> {
     // Non-fatal errors (break, framing, parity, buffer overrun) error the
     // current stream and the port then offers a fresh `readable`; fatal ones
     // (device lost) leave it null, which ends the loop.

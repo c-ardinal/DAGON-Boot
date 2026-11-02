@@ -32,13 +32,13 @@ A simulated hub plugs in as one more `Transport` in `src/serial/devHub.ts`, unde
 
 | Path | Contents |
 |---|---|
-| `src/serial/frame.ts` | DAGON link v1 frame codec and stream deframer (same bytes as `crates/dagon-proto`; tests compare against `crates/dagon-format/golden/frame_*.bin`). |
+| `src/serial/frame.ts` | DAGON link v1 frame field names and split; encoding, CRC and the stream cutter are `crates/dagon-proto` through dagon-wasm (tests compare against `crates/dagon-format/golden/frame_*.bin`). |
 | `src/serial/transport.ts` | `Transport` (open / close / write frame / read frame with timeout) and the Web Serial implementation. |
 | `src/serial/hello.ts` | HELLO payload types and the response encoder the mock uses. |
 | `src/serial/mock.ts` | In-memory desk hub (see `?mock`) in the same frame format. |
 | `src/serial/devHub.ts` | Picks the stand-in hub from the page URL. |
 | `src/serial/hostLink.ts` | The byte link `dagon-host` runs on, over a `Transport`. |
-| `src/wasm/dagon.ts` | The only entry to `crates/dagon-wasm`: HELLO request / response, version text, board table, topology check and compile, release verification. `src/wasm/pkg/` is build output and not committed. |
+| `src/wasm/dagon.ts` | The only entry to `crates/dagon-wasm`: frame encoding and stream cutting, HELLO request / response, version text, board table, topology check and compile, release verification. `src/wasm/pkg/` is build output and not committed. |
 | `src/app/machine.ts` | Operating-mode state machine: states, main and side actions, transitions (`machine.test.ts` checks one main action at most and no dead ends). |
 | `src/app/operate.svelte.ts` | The operating-mode session: connect, find, send, monitoring every `watch_interval_ms()`, all through `dagon-host` in `dagon-wasm`. |
 | `src/app/band.ts` | Bottom band per state: cause chip, sentence, named buttons. |

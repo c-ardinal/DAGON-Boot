@@ -99,7 +99,28 @@ fn sim() -> Sim {
         reopens: Rc::default(),
         late_reboot: 0,
         held: None,
+        faults: Rc::default(),
     }
+}
+
+/// Injected link faults, keyed by the request's command (the inner one for
+/// RELAY).
+#[derive(Default)]
+struct Faults {
+    /// (command, n): the next n requests never reach the hub.
+    drop_req: Vec<(u8, u32)>,
+    /// (command, k): the response to every k-th such request is lost after
+    /// the hub (and node) handled it.
+    drop_resp_every: Option<(u8, usize)>,
+    /// Every request written: (command, RETRY flag set).
+    seen: Vec<(u8, bool)>,
+}
+
+/// Command and RETRY flag of a request frame (inner frame for RELAY).
+fn effective(b: &[u8]) -> (u8, bool) {
+    const INNER: usize = 8 + 4;
+    let at = if b[5] == Cmd::Relay as u8 { INNER } else { 0 };
+    (b[at + 5], b[at + 3] & flags::RETRY != 0)
 }
 
 #[derive(Clone)]
@@ -107,6 +128,7 @@ struct Sim {
     hub: Rc<RefCell<SimHub>>,
     pending: Vec<u8>,
     reopens: Rc<RefCell<u32>>,
+    faults: Rc<RefCell<Faults>>,
     /// The hub's old firmware keeps answering for this many reopens after
     /// acknowledging REBOOT.
     late_reboot: u32,
@@ -124,7 +146,21 @@ impl Transport for Sim {
             self.held = Some(bytes.to_vec());
             return Ok(());
         }
-        self.hub.borrow_mut().usb_write(bytes);
+        let (cmd, retry) = effective(bytes);
+        let mut f = self.faults.borrow_mut();
+        f.seen.push((cmd, retry));
+        if let Some(d) = f.drop_req.iter_mut().find(|d| d.0 == cmd && d.1 > 0) {
+            d.1 -= 1;
+            return Ok(());
+        }
+        let mut hub = self.hub.borrow_mut();
+        hub.usb_write(bytes);
+        let n = f.seen.iter().filter(|s| s.0 == cmd).count();
+        if f.drop_resp_every
+            .is_some_and(|(c, k)| c == cmd && n.is_multiple_of(k))
+        {
+            hub.usb_read();
+        }
         Ok(())
     }
     async fn read(&mut self, buf: &mut [u8]) -> Result<usize, ()> {
@@ -528,4 +564,114 @@ fn rom_path_needs_a_valid_boot_core() {
     };
     let r = block_on(host(&s).recover(SEG, &assets, &mut |_| {}));
     assert!(matches!(r, Err(Error::Format(_))));
+}
+
+const HELLO: u8 = Cmd::Hello as u8;
+
+#[test]
+fn lost_requests_are_resent_with_backoff() {
+    let s = sim();
+    s.faults.borrow_mut().drop_req.push((HELLO, 2));
+    let t0 = s.hub.borrow().now_ms();
+    let h = block_on(host(&s).hello(SEG_AT)).unwrap();
+    assert_eq!(h.active_version, Version::new(1, 0, 0));
+    let seen = s.faults.borrow().seen.clone();
+    assert_eq!(seen, [(HELLO, false), (HELLO, true), (HELLO, true)]);
+    let waited = s.hub.borrow().now_ms() - t0;
+    assert!(
+        waited >= 2 * 600 + 50 + 100,
+        "two timeouts and two backoffs: {waited} ms"
+    );
+}
+
+#[test]
+fn resending_stops_after_three_retries() {
+    let s = sim();
+    s.faults.borrow_mut().drop_req.push((HELLO, 10));
+    let r = block_on(host(&s).hello(SEG_AT));
+    assert!(matches!(r, Err(Error::Timeout)), "{r:?}");
+    assert_eq!(s.faults.borrow().seen.len(), 4);
+}
+
+#[test]
+fn a_node_that_nacks_is_retried_through_relay() {
+    let s = sim();
+    // NACK at the node: the hub answers RELAY with E_TIMEOUT.
+    let addr = Target::I2c(0x43);
+    let r = block_on(host(&s).hello(addr));
+    assert!(matches!(r, Err(Error::Relay(dagon_proto::Status::Timeout))));
+    let seen = s.faults.borrow().seen.clone();
+    assert_eq!(seen.len(), 4);
+    assert!(seen[1..].iter().all(|&(c, retry)| c == HELLO && retry));
+}
+
+#[test]
+fn apply_survives_lost_replies_without_writing_twice() {
+    let s = sim();
+    // Every third XFER_DATA reply is lost after the node wrote the chunk;
+    // the resend (same seq) gets the kept reply, not a second write.
+    s.faults.borrow_mut().drop_resp_every = Some((Cmd::XferData as u8, 3));
+    let mut h = host(&s);
+    let out =
+        block_on(h.apply(&release(), &topology(&yaml()), &key().pk, None, &mut |_| {})).unwrap();
+    let v = Version::new(1, 1, 0);
+    assert!(
+        out.iter()
+            .all(|o| matches!(o.outcome, Outcome::Done(x) if x == v)),
+        "{out:?}"
+    );
+    let f = s.faults.borrow();
+    assert!(f.seen.iter().any(|&(c, r)| c == Cmd::XferData as u8 && r));
+    let reboots = f.seen.iter().filter(|s| s.0 == Cmd::Reboot as u8).count();
+    assert_eq!(reboots, 2, "one REBOOT per board, never resent");
+}
+
+#[test]
+fn a_lost_reboot_reply_is_not_resent() {
+    let s = sim();
+    s.faults.borrow_mut().drop_resp_every = Some((Cmd::Reboot as u8, 1));
+    let mut h = host(&s);
+    let out = block_on(h.apply(
+        &release(),
+        &topology(&yaml()),
+        &key().pk,
+        Some(&[SEG]),
+        &mut |_| {},
+    ))
+    .unwrap();
+    assert!(matches!(out[0].outcome, Outcome::Done(_)), "{out:?}");
+    let reboots = s
+        .faults
+        .borrow()
+        .seen
+        .iter()
+        .filter(|s| s.0 == Cmd::Reboot as u8)
+        .count();
+    assert_eq!(reboots, 1);
+}
+
+#[test]
+fn f401_confirm_lands_inside_a_4_s_trial() {
+    let s = sim();
+    s.hub
+        .borrow_mut()
+        .i2c_node(NODE_I2C_ADDR)
+        .unwrap()
+        .trial_wdt_ms = 4_000;
+    let out = block_on(host(&s).apply(
+        &release(),
+        &topology(&yaml()),
+        &key().pk,
+        Some(&[SEG]),
+        &mut |_| {},
+    ))
+    .unwrap();
+    assert!(matches!(out[0].outcome, Outcome::Done(_)), "{out:?}");
+    s.hub.borrow_mut().advance_ms(20_000);
+    let st = block_on(host(&s).status(SEG_AT)).unwrap().status;
+    assert_eq!(
+        (st.active, st.confirmed),
+        (1, 1),
+        "confirmed, not rolled back"
+    );
 }

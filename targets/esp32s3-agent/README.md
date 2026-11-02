@@ -44,6 +44,10 @@ rewritten through the ROM loader.
 Both binaries answer ENTER_ROM `method` u8 with OK, then switch to the ESP32
 ROM download mode (E_ARG for other methods, nothing happens):
 
+- First, for either method, the RTC watchdog is stopped and the super
+  watchdog left on auto-feed: both survive the software reset and nothing in
+  the ROM loader feeds them over UART0, so the 4 s trial watchdog would
+  otherwise reset the loader in the middle of flashing.
 - method 1: sets `RTC_CNTL_OPTION1_REG.FORCE_DOWNLOAD_BOOT` and does a
   software reset (the RTC domain keeps the bit). If it does not take, the
   same reset brings the agent back; there is no automatic fallback.

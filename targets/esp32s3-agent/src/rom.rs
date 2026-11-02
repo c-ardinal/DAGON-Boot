@@ -30,6 +30,31 @@ pub enum Method {
     M5pm1,
 }
 
+/// One action of the switch to the ROM loader, run by `node` in order once
+/// the OK reply has left the link.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Step {
+    /// Disable the RTC watchdog and keep the super watchdog auto-fed: both
+    /// sit in the RTC domain, survive the software reset, and nothing in
+    /// the ROM loader feeds them, so a running one would reset the loader
+    /// (and with it FORCE_DOWNLOAD_BOOT) a few seconds into flashing.
+    StopWatchdogs,
+    ForceDownloadBoot,
+    /// M5PM1 Download command, then a pause for it to act.
+    PmicDownload,
+    /// Software reset: into the ROM loader if the method took, otherwise
+    /// back into the agent.
+    Reset,
+}
+
+/// The actions for `method`, in order.
+pub const fn steps(method: Method) -> &'static [Step] {
+    match method {
+        Method::ForceDownloadBoot => &[Step::StopWatchdogs, Step::ForceDownloadBoot, Step::Reset],
+        Method::M5pm1 => &[Step::StopWatchdogs, Step::PmicDownload, Step::Reset],
+    }
+}
+
 /// Reply frame size of [`enter_rom_request`].
 pub const REPLY_LEN: usize = dagon_proto::frame_len(1);
 
@@ -103,6 +128,18 @@ mod tests {
         for p in [&[][..], &[0], &[3], &[1, 0]] {
             assert_eq!(answer(&req(Cmd::EnterRom as u8, p)), (Status::Arg, None));
         }
+    }
+
+    #[test]
+    fn watchdogs_stop_before_the_mode_switch_and_reset_comes_last() {
+        for m in [Method::ForceDownloadBoot, Method::M5pm1] {
+            let s = steps(m);
+            assert_eq!(s.first(), Some(&Step::StopWatchdogs), "{m:?}");
+            assert_eq!(s.last(), Some(&Step::Reset), "{m:?}");
+            assert_eq!(s.iter().filter(|&&x| x == Step::Reset).count(), 1);
+        }
+        assert_eq!(steps(Method::ForceDownloadBoot)[1], Step::ForceDownloadBoot);
+        assert_eq!(steps(Method::M5pm1)[1], Step::PmicDownload);
     }
 
     #[test]

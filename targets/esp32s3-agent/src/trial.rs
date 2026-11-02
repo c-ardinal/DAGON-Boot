@@ -38,6 +38,11 @@ impl<W: Watchdog, C: Clock> TrialWatchdog<W, C> {
     pub fn on_trial(&self) -> bool {
         self.deadline_us.is_some()
     }
+
+    /// The wrapped watchdog (to stop it before leaving the app).
+    pub fn inner(&mut self) -> &mut W {
+        &mut self.wdt
+    }
 }
 
 impl<W: Watchdog, C: Clock> Watchdog for TrialWatchdog<W, C> {

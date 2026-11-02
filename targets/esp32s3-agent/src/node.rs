@@ -27,14 +27,14 @@ use esp_hal::{
 };
 use esp_hal::{
     peripherals::{GPIO47, GPIO48, I2C0, LPWR},
-    rtc_cntl::Rtc,
+    rtc_cntl::{Rtc, Swd},
     time::{Duration, Instant},
     uart::Uart,
     usb::usb_serial_jtag::UsbSerialJtag,
     Blocking,
 };
 
-use crate::rom::{self, Method};
+use crate::rom::{self, Method, Step};
 use crate::store::{EspStore, Otadata};
 use crate::trial::{TrialWatchdog, TRIAL_FEED_MS};
 
@@ -44,9 +44,11 @@ const USB_SEND_TIMEOUT: Duration = Duration::from_millis(200);
 #[cfg(feature = "pmic-download")]
 const M5PM1_WAIT_MS: u32 = 1000;
 
-/// Internal SYS I2C (M5IOE1 expander, M5PM1 power manager), kept after the
-/// rear pins are routed for ENTER_ROM method 2 (`pmic-download`).
-struct SysBus<'d> {
+/// What ENTER_ROM needs besides the RWDT: the super watchdog, and the
+/// internal SYS I2C (M5IOE1 expander, M5PM1 power manager) kept after the
+/// rear pins are routed, for method 2 (`pmic-download`).
+struct RomBoard<'d> {
+    swd: Swd,
     i2c0: I2C0<'d>,
     sda: GPIO47<'d>,
     scl: GPIO48<'d>,
@@ -90,10 +92,12 @@ fn trying(store: &mut Store<'_, '_>) -> bool {
 /// mode (`payload::mode::APP` in ota_0/ota_1, `AGENT` in factory).
 pub fn run(mode: u8) -> ! {
     let p = esp_hal::init(esp_hal::Config::default());
-    let mut rwdt = RtcWatchdog::new(Rtc::new(p.RTC_TIMER).rwdt);
+    let rtc = Rtc::new(p.RTC_TIMER);
+    let mut rwdt = RtcWatchdog::new(rtc.rwdt);
     rwdt.start(TRIAL_WDT_MS);
 
-    let mut sys = SysBus {
+    let mut sys = RomBoard {
+        swd: rtc.swd,
         i2c0: p.I2C0,
         sda: p.GPIO47,
         scl: p.GPIO48,
@@ -152,7 +156,7 @@ pub fn run(mode: u8) -> ! {
 /// the ROM loader after the reply to ENTER_ROM.
 fn serve(
     agent: &mut Node<'_, '_>,
-    sys: &mut SysBus<'_>,
+    sys: &mut RomBoard<'_>,
     frame: &[u8],
     send: &mut dyn FnMut(&[u8]),
 ) {
@@ -161,7 +165,7 @@ fn serve(
     if let Some((n, method)) = rom::enter_rom_request(frame, max, &mut rom_reply) {
         send(&rom_reply[..n]);
         if let Some(m) = method {
-            enter_rom(m, sys);
+            enter_rom(m, sys, agent.store().wdt.inner());
         }
         return;
     }
@@ -219,33 +223,42 @@ fn conform(agent: &mut Node<'_, '_>, frame: &[u8], out: &mut [u8]) -> Option<usi
     handle_frame(frame, max, flash, &setup, out, &mut || wdt.feed())
 }
 
-/// Runs the method; when it does not take, a normal reset brings the agent
-/// back (no fallback to the other method).
-fn enter_rom(method: Method, sys: &mut SysBus<'_>) -> ! {
-    match method {
-        Method::ForceDownloadBoot => {
-            let rtc = LPWR::regs();
-            rtc.option1()
-                .modify(|_, w| w.force_download_boot().set_bit());
-            // A software reset keeps the RTC domain, so the ROM sees the bit;
-            // if it did not stick, the same reset just restarts the agent.
-        }
-        #[cfg(feature = "pmic-download")]
-        Method::M5pm1 => {
-            if m5pm1_download(sys).is_ok() {
-                Delay::new().delay_millis(M5PM1_WAIT_MS);
+/// Runs [`rom::steps`] after the reply has been sent: watchdogs off, the
+/// method, then a software reset (into the ROM loader if the method took,
+/// otherwise back into the agent).
+fn enter_rom(method: Method, board: &mut RomBoard<'_>, rwdt: &mut RtcWatchdog) -> ! {
+    for step in rom::steps(method) {
+        match step {
+            Step::StopWatchdogs => {
+                rwdt.stop();
+                // `Swd::disable` turns the super watchdog's auto-feed on.
+                board.swd.disable();
             }
+            Step::ForceDownloadBoot => {
+                LPWR::regs()
+                    .option1()
+                    .modify(|_, w| w.force_download_boot().set_bit());
+            }
+            Step::PmicDownload => pmic_download(board),
+            Step::Reset => break,
         }
-        // Not produced without `pmic-download` (answered E_UNSUPPORTED).
-        #[cfg(not(feature = "pmic-download"))]
-        Method::M5pm1 => {}
     }
-    let _ = sys;
     esp_hal::system::software_reset()
 }
 
 #[cfg(feature = "pmic-download")]
-fn m5pm1_download(sys: &mut SysBus<'_>) -> Result<(), I2cError> {
+fn pmic_download(board: &mut RomBoard<'_>) {
+    if m5pm1_download(board).is_ok() {
+        Delay::new().delay_millis(M5PM1_WAIT_MS);
+    }
+}
+
+/// Not reached: without `pmic-download` method 2 answers E_UNSUPPORTED.
+#[cfg(not(feature = "pmic-download"))]
+fn pmic_download(_: &mut RomBoard<'_>) {}
+
+#[cfg(feature = "pmic-download")]
+fn m5pm1_download(sys: &mut RomBoard<'_>) -> Result<(), I2cError> {
     let mut i2c = I2c::new(sys.i2c0.reborrow(), I2cConfig::default())
         .map_err(|_| I2cError::Timeout)?
         .with_sda(sys.sda.reborrow())

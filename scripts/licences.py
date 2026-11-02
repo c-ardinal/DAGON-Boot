@@ -12,6 +12,10 @@ import subprocess
 import sys
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
+# npm packages whose code ends up in the built page: the Svelte client
+# runtime and the packages its client code imports (checked in svelte's
+# src/internal/client and src/internal/shared; devalue is server only).
+SHIPPED = {"svelte", "clsx", "esm-env"}
 
 
 def cargo_workspaces():
@@ -67,12 +71,14 @@ def main():
         used = ", ".join(sorted(users))
         print(f"| {name} | {', '.join(sorted(vers))} | {' / '.join(sorted(lics))} | {used} |")
     npm = npm_packages()
-    print(f"\nnpm packages (`web/package-lock.json`): {len(npm)}, all build and test "
-          "time only except the Svelte runtime, which ships in the page.\n")
-    print("| Package | Version | Licence |")
-    print("|---|---|---|")
+    print(f"\nnpm packages (`web/package-lock.json`): {len(npm)}. Only those marked "
+          "\"page\" ship in the built page (the Svelte client runtime and what it "
+          "imports); the rest are build and test tools.\n")
+    print("| Package | Version | Licence | Ships in |")
+    print("|---|---|---|---|")
     for (name, ver), lic in sorted(npm.items()):
-        print(f"| {name} | {ver} | {lic} |")
+        where = "page" if name in SHIPPED else "build/test"
+        print(f"| {name} | {ver} | {lic} | {where} |")
     summary = {}
     for (lic, _) in crates.values():
         summary[lic] = summary.get(lic, 0) + 1

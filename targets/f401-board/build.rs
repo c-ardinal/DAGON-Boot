@@ -10,7 +10,15 @@ fn is_key_hex(s: &str) -> bool {
 
 fn main() {
     println!("cargo:rerun-if-env-changed=DAGON_PUBKEY");
+    println!("cargo:rerun-if-env-changed=DAGON_ALLOW_TEST_KEY");
     let Ok(value) = env::var("DAGON_PUBKEY") else {
+        if env::var("DAGON_ALLOW_TEST_KEY").as_deref() != Ok("1") {
+            panic!(
+                "DAGON_PUBKEY is unset: set it to the public key file from `dagon key gen` \
+                 (or its 64 hex digits), or set DAGON_ALLOW_TEST_KEY=1 to build with the \
+                 public RFC 8032 test key (TEST KEY)"
+            );
+        }
         println!(
             "cargo:warning=DAGON_PUBKEY is unset: built with the public RFC 8032 test key \
              (TEST KEY), which accepts images signed with a published secret"

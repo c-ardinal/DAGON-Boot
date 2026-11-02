@@ -147,7 +147,7 @@ describe('WebSerialTransport read loop', () => {
       return p;
     }
 
-    async function rebooted(after: ReturnType<typeof answering>[], sent?: number) {
+    async function rebooted(after: ReturnType<typeof answering>[], sent?: number, first: HelloResp | null = null) {
       let lost = false;
       const mine = Object.assign(answering(null), {
         open: async () => {
@@ -159,7 +159,7 @@ describe('WebSerialTransport read loop', () => {
       const t = new WebSerialTransport(mine as unknown as SerialPort, serial);
       await t.open();
       await t.close();
-      if (sent !== undefined) t.expectHub(sent);
+      if (sent !== undefined) t.expectHub(sent, first);
       lost = true;
       ports = [mine, ...after];
       return t;
@@ -197,6 +197,33 @@ describe('WebSerialTransport read loop', () => {
       await right.open();
       expect(right.port).toBe(back);
       await right.close();
+    });
+
+    test.each([
+      ['another MCU', { mcuId: 9 }],
+      ['another release key', { keyId: Uint8Array.of(1, 2, 3, 4, 5, 6, 7, 8) }],
+    ])('L20: a hub of the same USB kind on trial with the version just sent but %s is not this 親機: closed, not kept, logged', async (_, differs) => {
+      const first = hub(V100, false);
+      const impostor = answering({ ...hub(V110, true), ...differs });
+      const t = await rebooted([impostor], V110, first);
+      await expect(t.open()).rejects.toThrow('lost');
+      expect(t.notes()).toEqual([{ kind: 'away' }, { kind: 'otherHub' }]);
+      expect([impostor.opens, impostor.readable]).toEqual([1, null]);
+
+      const mine = answering(hub(V110, true));
+      const u = await rebooted([impostor, mine], V110, first);
+      await u.open();
+      expect(u.port).toBe(mine);
+      await u.close();
+    });
+
+    test('once the expected version is cleared, a single device that appeared is taken as it is again', async () => {
+      const one = answering(hub(V100, false));
+      const t = await rebooted([one], V110);
+      t.expectHub(null);
+      await t.open();
+      expect(t.port).toBe(one);
+      await t.close();
     });
 
     test('a candidate that does not answer, and none at all, are noted for the diagnostic log', async () => {

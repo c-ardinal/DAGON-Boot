@@ -29,15 +29,32 @@ export interface Transport {
   write(frame: Uint8Array): Promise<void>;
   /** Next complete, CRC-checked frame, or null when `timeoutMs` passes first. */
   read(timeoutMs: number): Promise<Uint8Array | null>;
-  /** The hub reboots onto `version` on trial: reopening it later keeps only that hub. */
-  expectHub?(version: number): void;
+  /**
+   * The hub `first` reboots onto `version` on trial: reopening it later keeps
+   * only that hub (notThisHub); null clears it.
+   */
+  expectHub?(version: number | null, first?: HubIdentity | null): void;
   /** Why the reopens since `expectHub` did not get the hub back, oldest first. */
   notes?(): ReconnectNote[];
 }
 
-/** The hub on trial with the version the page just sent it (dagon-host then confirms it). */
-export function isHubOnTrial(h: HelloResp | null, version: number | null): boolean {
-  return h !== null && h.role === ROLE_HUB && h.trial && h.activeVersion === version;
+/** What "the same 親機" means: HELLO carries no serial number, so the MCU and release key of the first HELLO. */
+export type HubIdentity = Pick<HelloResp, 'mcuId' | 'keyId'>;
+
+/**
+ * The one check every path that adopts a port goes through (dagon-host's
+ * reopen in L20, the device reported or chosen in L21, the CLI's hand-back):
+ * why the device answering `h` is not the 親機 first seen as `first`, or null.
+ * With `version` it must also be on trial with that version (the one just
+ * sent); without it a hub back on its previous version still passes, for
+ * CONFIRM to stop there (L22).
+ */
+export function notThisHub(h: HelloResp | null, first: HubIdentity | null, version: number | null): ReconnectNote | null {
+  if (h === null) return { kind: 'silent' };
+  if (h.role !== ROLE_HUB) return { kind: 'notHub' };
+  if (first && (h.mcuId !== first.mcuId || h.keyId.join() !== first.keyId.join())) return { kind: 'otherHub' };
+  if (version !== null && !(h.trial && h.activeVersion === version)) return { kind: 'version', version: h.activeVersion, trial: h.trial };
+  return null;
 }
 
 const NOTE_KINDS: readonly string[] = ['away', 'none', 'silent', 'notHub', 'otherHub', 'several', 'version'];
@@ -45,13 +62,6 @@ const NOTE_KINDS: readonly string[] = ['away', 'none', 'silent', 'notHub', 'othe
 /** A ReconnectNote (thrown where a candidate is turned down). */
 export function isNote(e: unknown): e is ReconnectNote {
   return typeof e === 'object' && e !== null && NOTE_KINDS.includes((e as { kind?: string }).kind ?? '');
-}
-
-/** Why a HELLO answer is not the hub on trial with the version just sent. */
-export function whyNot(h: HelloResp | null): ReconnectNote {
-  if (h === null) return { kind: 'silent' };
-  if (h.role !== ROLE_HUB) return { kind: 'notHub' };
-  return { kind: 'version', version: h.activeVersion, trial: h.trial };
 }
 
 /** How long a candidate port has to answer HELLO. */
@@ -142,6 +152,8 @@ export class WebSerialTransport implements Transport {
   private opened = false;
   /** The version the hub reboots onto (expectHub); null when none was sent. */
   private expected: number | null = null;
+  /** The hub as first seen (expectHub); null when not known. */
+  private identity: HubIdentity | null = null;
   private log: ReconnectNote[] = [];
 
   async open(): Promise<void> {
@@ -153,8 +165,10 @@ export class WebSerialTransport implements Transport {
     this.pump = this.readLoop();
   }
 
-  expectHub(version: number): void {
+  /** `version` the hub reboots onto; null once that is over (confirmed, stopped or given up). */
+  expectHub(version: number | null, first: HubIdentity | null = null): void {
     this.expected = version;
+    this.identity = version === null ? null : first;
     this.log = [];
   }
 
@@ -216,8 +230,9 @@ export class WebSerialTransport implements Transport {
     const mine: SerialPort[] = [];
     for (const p of same) {
       const h = await probeHello(p);
-      if (isHubOnTrial(h, this.expected)) mine.push(p);
-      else this.note(whyNot(h));
+      const why = notThisHub(h, this.identity, this.expected);
+      if (why) this.note(why);
+      else mine.push(p);
     }
     if (mine.length > 1) this.note({ kind: 'several', count: mine.length });
     return mine.length === 1 ? mine[0] : null;

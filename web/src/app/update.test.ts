@@ -369,6 +369,56 @@ describe('update from the page with dagon-host apply against the mock hub', () =
     expect(op.responding).toBe(3);
   }, 20_000);
 
+  test('the CLI gives back another 親機 than the one connected: closed, L26 (M34), the reason in the log', async () => {
+    const t = new MockTransport();
+    const other = new MockTransport({ hello: { ...SAMPLE_HUB_HELLO, mcuId: 9 } });
+    const op = new Operate({
+      open: async () => {
+        await t.open();
+        return t;
+      },
+      again: async () => {
+        await other.open();
+        return other;
+      },
+      clock: fastClock(),
+    });
+    await op.connect();
+    await op.push();
+    await op.handOver();
+    await op.cliReturned();
+    expect([op.state, op.reconnectNotes]).toEqual(['L26', [{ kind: 'otherHub' }]]);
+    expect(bandOf(op.state, op.ctx).sentence).toBe(BAND.M34.sentence);
+    await expect(other.write(new Uint8Array(1))).rejects.toThrow('port not open');
+  }, 20_000);
+
+  test('the version to keep a reopened hub by is cleared once the hub is confirmed', async () => {
+    class Recording extends MockTransport {
+      expected: (number | null)[] = [];
+      expectHub(v: number | null): void {
+        this.expected.push(v);
+      }
+    }
+    const t = new Recording();
+    const op = new Operate({
+      open: async () => {
+        await t.open();
+        return t;
+      },
+      clock: fastClock(),
+    });
+    await op.connect();
+    await op.push();
+    op.takeFile('desk-1.1.0.dgb', RELEASE);
+    t.expected = [];
+    await op.update();
+    expect(op.state).toBe('L23');
+    const sent = t.expected.findIndex((x) => x !== null);
+    expect(v(t.expected[sent]!)).toBe('1.1.0');
+    expect(t.expected[t.expected.length - 1]).toBeNull();
+    expect(t.expected.slice(sent + 1)).toContain(null);
+  }, 60_000);
+
   test('the CLI gives the hub back but it cannot be opened: L26, connect again (M34)', async () => {
     const t = new MockTransport();
     const op = new Operate({

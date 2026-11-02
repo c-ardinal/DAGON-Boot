@@ -2,8 +2,8 @@
 // and what dagon-host (through dagon-wasm) reports. The page only chooses and
 // opens the device; every request, timeout and retry is dagon-host's.
 import { hostLink, type LinkClock, type SwapLink } from '../serial/hostLink.ts';
-import { ROLE_HUB, type HelloResp } from '../serial/hello.ts';
-import { isHubOnTrial, isNote, whyNot, type ReconnectNote, type Transport } from '../serial/transport.ts';
+import type { HelloResp } from '../serial/hello.ts';
+import { isNote, notThisHub, type ReconnectNote, type Transport } from '../serial/transport.ts';
 import {
   PHASE,
   check_release_for,
@@ -235,6 +235,8 @@ export class Operate {
     if (to === this.state && ev !== 'placeSample') return;
     this.state = to;
     this.latestMissing = false;
+    // Out of the hub's reboot (confirmed, stopped, lost, ...): no version to keep a reopened device by any more.
+    if (to !== 'L20' && to !== 'L21') this.transport?.expectHub?.(null);
     if (focus) this.focusRequest++;
   }
 
@@ -261,11 +263,14 @@ export class Operate {
   /**
    * The CLI gave the port back (device.returned): the page opens the device
    * it had again by itself and goes on watching (L12, M67); when that fails
-   * the user connects again (L26, M34).
+   * the user connects again (L26, M34). It must be the same 親機 as before
+   * (notThisHub against the first HELLO); otherwise it is closed and the
+   * reason goes to the log.
    */
   async cliReturned(): Promise<void> {
     if (this.state !== 'L28') return;
     const my = ++this.session;
+    this.reconnectNotes = [];
     try {
       if (!this.deps.again) throw new Error('nothing to reopen');
       const t = await this.deps.again();
@@ -273,9 +278,13 @@ export class Operate {
       this.transport = t;
       this.link = hostLink(t, this.deps.clock);
       this.host = newHost(this.link);
-      this.hubHello = await this.call((h) => h.hello('hub', 0));
-    } catch {
+      const h = await this.call((x) => x.hello('hub', 0));
+      const why = this.notThisHub(h, false);
+      if (why) throw why;
+      this.hubHello ??= h;
+    } catch (e) {
       if (my !== this.session) return;
+      if (isNote(e)) this.noteWhy(e);
       await this.drop();
       this.alert = ANNOUNCE.A21lost;
       return this.go('lost', false);
@@ -549,7 +558,7 @@ export class Operate {
 
   /** The hub reboots onto `version`: dagon-host reopens it for 45 s (L20), keeping only that hub. */
   private hubAway(version: number | undefined): void {
-    if (version !== undefined) this.transport?.expectHub?.(version);
+    if (version !== undefined) this.transport?.expectHub?.(version, this.hubHello);
     this.reconnectNotes = [];
     this.reconnectUntil = this.now() + HUB_RECONNECT_MS;
     this.status = ANNOUNCE.A12;
@@ -658,11 +667,8 @@ export class Operate {
    * back on its previous version: CONFIRM then stops there (L22).
    */
   private notThisHub(h: HelloResp, onTrial: boolean): ReconnectNote | null {
-    const first = this.hubHello;
-    if (h.role !== ROLE_HUB) return { kind: 'notHub' };
-    if (first && (h.mcuId !== first.mcuId || h.keyId.join() !== first.keyId.join())) return { kind: 'otherHub' };
-    if (onTrial && !isHubOnTrial(h, this.hubSent())) return whyNot(h);
-    return null;
+    // ponytail: -1 matches no version, so a device nobody chose is never kept when nothing was sent.
+    return notThisHub(h, this.hubHello, onTrial ? (this.hubSent() ?? -1) : null);
   }
 
   /** `t` replaces the device under the link; the one it replaces is closed. */

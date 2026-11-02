@@ -212,11 +212,29 @@ fn drive_roots() -> Vec<PathBuf> {
             .collect();
     }
     let user = std::env::var("USER").unwrap_or_default();
-    let mut roots = vec![PathBuf::from("/Volumes").join(UF2_BOARD)];
-    for base in ["/media", "/run/media"] {
-        roots.push(Path::new(base).join(&user).join(UF2_BOARD));
-    }
-    roots
+    let parents = [
+        PathBuf::from("/Volumes"),
+        Path::new("/media").join(&user),
+        Path::new("/run/media").join(&user),
+        PathBuf::from("/media"),
+        PathBuf::from("/mnt"),
+    ];
+    mounts_under(&parents)
+}
+
+/// Every directory directly under `parents`: a second board mounts under
+/// another name ("RPI-RP2 1"), so names are not guessed.
+fn mounts_under(parents: &[PathBuf]) -> Vec<PathBuf> {
+    let mut out: Vec<PathBuf> = parents
+        .iter()
+        .filter_map(|p| std::fs::read_dir(p).ok())
+        .flatten()
+        .filter_map(|e| e.ok().map(|e| e.path()))
+        .filter(|p| p.is_dir())
+        .collect();
+    out.sort();
+    out.dedup();
+    out
 }
 
 fn copy_uf2(file: &Path) -> Result<(), String> {
@@ -480,6 +498,29 @@ mod tests {
             two.contains("2 RPI-RP2 drives") && two.contains("unplug"),
             "{two}"
         );
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    #[test]
+    fn a_second_board_under_another_mount_name_is_seen() {
+        let base = std::env::temp_dir().join(format!("dagon-mnt-{}", std::process::id()));
+        let (volumes, media) = (base.join("Volumes"), base.join("media/user"));
+        let info = "Model: Raspberry Pi RP2\nBoard-ID: RPI-RP2\n";
+        for d in [volumes.join("RPI-RP2"), volumes.join("RPI-RP2 1")] {
+            std::fs::create_dir_all(&d).unwrap();
+            std::fs::write(d.join(UF2_INFO), info).unwrap();
+        }
+        std::fs::create_dir_all(media.join("USB STICK")).unwrap();
+        std::fs::write(volumes.join("not-a-dir"), "x").unwrap();
+        let parents = [volumes.clone(), media.clone(), base.join("missing")];
+        let roots = mounts_under(&parents);
+        assert_eq!(roots.len(), 3, "{roots:?}");
+        let err = find_uf2_drive(&roots).unwrap_err();
+        assert!(err.contains("2 RPI-RP2 drives"), "{err}");
+
+        std::fs::remove_dir_all(volumes.join("RPI-RP2")).unwrap();
+        let one = find_uf2_drive(&mounts_under(&parents)).unwrap();
+        assert_eq!(one, Some(volumes.join("RPI-RP2 1")));
         let _ = std::fs::remove_dir_all(&base);
     }
 }

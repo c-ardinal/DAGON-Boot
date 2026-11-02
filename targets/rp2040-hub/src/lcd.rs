@@ -101,6 +101,8 @@ const ARC: u32 = 9;
 /// Top text line; the round panel is narrower up there.
 const TOP_AT: Point = Point::new(120, 22);
 const TOP_CHARS: usize = 22;
+/// "TEST KEY" marker near the bottom (above the diag seconds counter).
+const TEST_KEY_AT: Point = Point::new(120, 218);
 /// A small square at the top that toggles every second while the hub runs.
 const HEARTBEAT_AT: Point = Point::new(117, 6);
 const HEARTBEAT: Duration = Duration::from_secs(1);
@@ -221,7 +223,7 @@ fn clock_info<D: DrawTarget<Color = Rgb565>>(d: &mut D) -> Result<(), D::Error> 
 fn uptime<D: DrawTarget<Color = Rgb565>>(d: &mut D) -> Result<(), D::Error> {
     let mut line: String<16> = String::new();
     let _ = write!(line, "t={}s", embassy_time::Instant::now().as_secs());
-    let at = Point::new(120, 228);
+    let at = Point::new(120, 236);
     Rectangle::new(at - Point::new(30, 9), Size::new(60, 12))
         .into_styled(PrimitiveStyle::with_fill(Rgb565::BLACK))
         .draw(d)?;
@@ -251,6 +253,11 @@ fn draw<D: DrawTarget<Color = Rgb565>>(d: &mut D, home: &Home) -> Result<(), D::
         let shown = &line[..line.len().min(TOP_CHARS)];
         let style = MonoTextStyle::new(&FONT_6X10, Rgb565::WHITE);
         Text::with_alignment(shown, TOP_AT, style, Alignment::Center).draw(d)?;
+    }
+    if crate::TEST_KEY {
+        // Built with the public test key: anyone can sign images for it.
+        let style = MonoTextStyle::new(&FONT_10X20, Rgb565::RED);
+        Text::with_alignment("TEST KEY", TEST_KEY_AT, style, Alignment::Center).draw(d)?;
     }
     Ok(())
 }

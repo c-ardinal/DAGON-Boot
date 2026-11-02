@@ -224,7 +224,8 @@ impl<S: StreamPort> UartLink<S> {
             if left == 0 || self.port.read(&mut b, left).await.is_err() {
                 return Err(Status::Timeout);
             }
-            self.reader.push(&b);
+            // A partial frame left by a 20 ms pause is dropped first.
+            self.reader.push_at(&b, Instant::now().as_millis());
             while let Some(n) = self.reader.poll() {
                 let f = self.reader.frame(n);
                 if f[3] & flags::RESP != 0 && Some(f[4]) == seq && n <= out.len() {

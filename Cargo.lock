@@ -63,6 +63,10 @@ version = "0.0.0"
 dependencies = [
  "dagon-agent",
  "dagon-core",
+ "dagon-format",
+ "dagon-port",
+ "dagon-proto",
+ "ed25519-compact",
 ]
 
 [[package]]

@@ -6,7 +6,7 @@ use dagon_core::log::{LogState, SlotRef};
 use dagon_format::Version;
 use dagon_port::{Flash, FlashError, FlashRegion};
 use dagon_proto::payload::ConfRunReq;
-use f401_node::scratch_slot;
+use f401_node::{scratch_addr, scratch_slot, NO_SCRATCH};
 
 #[allow(dead_code)]
 #[path = "../../f401-board/src/layout.rs"]
@@ -80,4 +80,29 @@ fn node_tests_pass_and_only_touch_the_spare_slot() {
     assert!(m.bytes[a..a + 0x2_0000].iter().all(|&b| b == 0x11));
     let log = (layout::LOG.faces[0] - BASE) as usize;
     assert!(m.bytes[log..log + 0x8000].iter().all(|&b| b == 0x11));
+}
+
+#[test]
+fn on_trial_erase_tests_fail_without_erasing() {
+    let mut m = Mem {
+        bytes: vec![0x11; 512 * 1024],
+        erased: Vec::new(),
+    };
+    let mut trial = confirmed(0);
+    trial.pending = trial.confirmed.map(|c| SlotRef { slot: 1, ..c });
+    trial.attempts = 1;
+    let scratch = scratch_addr(&trial, 1, &layout::SLOTS);
+    assert_eq!(scratch, NO_SCRATCH);
+    let setup = NodeSetup {
+        declared: &layout::FLASH_REGIONS,
+        scratch,
+    };
+    for test_id in [2, 3] {
+        let req = ConfRunReq { test_id, param: 0 };
+        let o = run(&mut m, &setup, req, &mut || {}).unwrap();
+        assert!(!o.pass, "CT-{test_id:02} passed");
+        assert!(o.detail.as_bytes().ends_with(b"outside flash"));
+    }
+    assert!(m.erased.is_empty());
+    assert!(m.bytes.iter().all(|&b| b == 0x11));
 }

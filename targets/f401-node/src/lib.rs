@@ -10,14 +10,24 @@ mod store;
 
 pub use store::KindSStore;
 
+use dagon_core::boot::SlotLayout;
 use dagon_core::log::LogState;
 
-/// The APP slot a conformance build may destroy as scratch: the one neither
-/// running nor confirmed. `None` while on trial (one slot runs, the other is
-/// the confirmed one to roll back to).
+/// Scratch address when no slot may be destroyed: outside the flash, so the
+/// conformance erase/write tests fail ("outside flash") without erasing.
+pub const NO_SCRATCH: u32 = 0xFFFF_FFFF;
+
+/// The APP slot a conformance build may destroy as scratch: neither running,
+/// nor confirmed, nor holding the pending (staged or on trial) image. `None`
+/// on trial and while an update waits for its first boot.
 pub fn scratch_slot(state: &LogState, running: u8) -> Option<u8> {
-    let confirmed = state.confirmed.map(|c| c.slot);
-    (0..2u8).find(|&s| s != running && Some(s) != confirmed)
+    let held = [state.confirmed, state.pending].map(|r| r.map(|r| r.slot));
+    (0..2u8).find(|&s| s != running && !held.contains(&Some(s)))
+}
+
+/// Start of the scratch slot, or [`NO_SCRATCH`].
+pub fn scratch_addr(state: &LogState, running: u8, slots: &SlotLayout) -> u32 {
+    scratch_slot(state, running).map_or(NO_SCRATCH, |s| slots.slots[s as usize])
 }
 
 #[cfg(test)]
@@ -54,5 +64,12 @@ mod tests {
             ..LogState::default()
         };
         assert_eq!(scratch_slot(&trial, 1), None);
+        // B staged as pending, not started yet: it must survive too.
+        let staged = LogState {
+            confirmed: at(0),
+            pending: at(1),
+            ..LogState::default()
+        };
+        assert_eq!(scratch_slot(&staged, 0), None);
     }
 }

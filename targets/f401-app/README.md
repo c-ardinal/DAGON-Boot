@@ -96,13 +96,18 @@ write, CT-07 Ed25519, CT-08 SHA-256), answered through the same I2C mailbox.
 
 - Declared layout: the board's writable regions (log faces 0x08008000,
   2 × 16 KiB; APP slots 0x08020000, 2 × 128 KiB).
-- Scratch: the start of the APP slot that is neither running nor confirmed
-  (APP-B while running a confirmed APP-A). CT-02/CT-03 erase that whole
-  128 KiB sector, so any image there is gone afterwards. On trial there is
-  no such slot and CT-02/CT-03 fail ("outside flash") without erasing.
-- Watchdog: 12 s for this build (about 8.2 s if the LSI runs at its fast
-  end), fed through the tests' feed hook, so a sector erase (up to 4 s)
-  cannot reset the node. The other behaviour is the same as the normal app.
+- Scratch: the start of the APP slot that is neither running, nor
+  confirmed, nor pending (APP-B while running a confirmed APP-A with no
+  update staged). CT-02/CT-03 erase that whole 128 KiB sector, so an old
+  image there is gone afterwards. With no such slot (on trial, or an update
+  staged) CT-02/CT-03 fail ("outside flash") without erasing.
+- Watchdog: 12 s for this build, on trial too (about 8.2 s if the LSI runs
+  at its fast end), fed through the tests' feed hook, so a sector erase (up
+  to 4 s) cannot reset the node. An unconfirmed trial of this build is
+  therefore reset 12 s after it stops feeding instead of 4 s.
+- CT-02 and CT-03 each erase the sector twice; the node NACKs its address
+  for the whole test, up to about 8 s. The other behaviour is the same as
+  the normal app.
 
 Write it with ST-LINK (not through the hub), as a fresh first install:
 

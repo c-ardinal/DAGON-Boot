@@ -5,8 +5,9 @@
 //!
 //! Nothing to start: the backlight blinks fast (100 ms) forever. The `diag`
 //! build lights it at entry; a panic blinks the code of the last step
-//! (1 entry, 2 reading the log, 3 checking the boot core) and a failed check
-//! blinks code 4, each followed by a long pause.
+//! (1 entry, 2 reading the log, 3 checking the boot core); a failed check
+//! blinks 4 (5 if the log named no slot), a short pause, then which test
+//! failed (`image::Fail`, 7 if SHA-256 itself is wrong), then a long pause.
 #![no_std]
 #![no_main]
 
@@ -52,10 +53,13 @@ fn main() -> ! {
             jump(body)
         }
         // Nothing to start: recover with BOOTSEL and the install UF2.
-        Err(_) => {
+        Err(why) => {
             led::init();
             if cfg!(feature = "diag") {
-                led::code(4)
+                // 4, then which test failed (7: SHA-256 itself is wrong);
+                // 5 instead of 4 when the boot core log names no slot.
+                let k = if image::sha_ok() { why as u8 } else { 7 };
+                led::code2(if named.is_some() { 4 } else { 5 }, k)
             }
             led::halt(HALT_MS, led::ROSC_MS)
         }

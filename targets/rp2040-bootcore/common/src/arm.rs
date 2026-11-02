@@ -78,7 +78,8 @@ pub mod led {
 
     const CLK_SYS_CTRL: *const u32 = (0x4000_8000 + 0x3C) as *const u32;
     const CODE_BLINK_MS: u32 = 250;
-    const CODE_PAUSE_MS: u32 = 1_500;
+    const CODE_PAUSE_MS: u32 = 2_000;
+    const CODE_GAP_MS: u32 = 800;
 
     /// Cycles per millisecond for the clock clk_sys runs on now: the PLL
     /// (aux source) after HAL init, else the reset clock.
@@ -95,16 +96,30 @@ pub mod led {
     /// Repeats forever: `n` blinks, then a long dark pause. Counting the
     /// blinks tells which code (see the hub README) stopped the board.
     pub fn code(n: u8) -> ! {
+        code2(n, 0)
+    }
+
+    /// Like [`code`] with a second group of `k` blinks after a short pause
+    /// (`k = 0`: none).
+    pub fn code2(n: u8, k: u8) -> ! {
         let c = cycles_per_ms();
         loop {
             set(false);
             wait(CODE_PAUSE_MS, c);
-            for _ in 0..n {
-                set(true);
-                wait(CODE_BLINK_MS, c);
-                set(false);
-                wait(CODE_BLINK_MS, c);
+            group(n, c);
+            if k > 0 {
+                wait(CODE_GAP_MS, c);
+                group(k, c);
             }
+        }
+    }
+
+    fn group(n: u8, c: u32) {
+        for _ in 0..n {
+            set(true);
+            wait(CODE_BLINK_MS, c);
+            set(false);
+            wait(CODE_BLINK_MS, c);
         }
     }
 

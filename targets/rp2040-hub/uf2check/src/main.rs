@@ -51,7 +51,7 @@ fn run() -> Result<String, String> {
         named.as_ref(),
         image_kind::BOOTCORE,
     )
-    .map_err(|r| format!("stage0 would not start boot core slot {s} (reason {r})"))?;
+    .map_err(|r| format!("stage0 would not start boot core slot {s} ({r:?})"))?;
 
     let mut log = Log::load(&mut flash, &APP_LOG_LAYOUT).map_err(|e| format!("app log: {e:?}"))?;
     let cfg = BootConfig {

@@ -736,7 +736,26 @@ fn home() -> Result<PathBuf, String> {
         .ok_or_else(|| "cannot find the home folder; pass --keys <dir>".into())
 }
 
-/// Creates the project folder: dagon.toml, topology.yaml, .gitignore and,
+/// Claude Code instructions and skills for the developer's own Claude Code:
+/// fixed text, so a project never carries keys or paths of this PC in them.
+const CLAUDE_FILES: [(&str, &str); 4] = [
+    ("CLAUDE.md", include_str!("scaffold/claude/CLAUDE.md")),
+    (
+        ".claude/skills/fix-a-failing-build/SKILL.md",
+        include_str!("scaffold/claude/fix-a-failing-build.md"),
+    ),
+    (
+        ".claude/skills/add-a-board-by-mcu/SKILL.md",
+        include_str!("scaffold/claude/add-a-board-by-mcu.md"),
+    ),
+    (
+        ".claude/skills/explain-a-topology-problem/SKILL.md",
+        include_str!("scaffold/claude/explain-a-topology-problem.md"),
+    ),
+];
+
+/// Creates the project folder: dagon.toml, topology.yaml, .gitignore, the
+/// Claude Code files and,
 /// when `keys` holds none, a signing key pair there (outside any git work
 /// tree). Refuses a non-empty folder.
 pub fn new_project(dir: &Path, name: &str, yaml: &str, keys: &Path) -> Result<Vec<String>, String> {
@@ -778,7 +797,7 @@ pub fn new_project(dir: &Path, name: &str, yaml: &str, keys: &Path) -> Result<Ve
         ("topology.yaml", yaml),
         (".gitignore", "/out/\ntarget/\n"),
     ];
-    for (f, text) in files {
+    for (f, text) in files.into_iter().chain(CLAUDE_FILES) {
         write_atomic(&dir.join(f), text.as_bytes())?;
         made.push(format!("created    {f}"));
     }

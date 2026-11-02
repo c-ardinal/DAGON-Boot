@@ -2,23 +2,249 @@
 
 [日本語版 / Japanese: README.ja.md](README.ja.md)
 
-Signed A/B firmware updates with automatic rollback for a small network of
-microcontrollers, driven from a PC or a browser through one hub.
+**Make hardware that works, easily, and keep growing it after it ships.**
 
-## Overview
+DAGON Boot is for developers, from first-timers to experienced firmware
+engineers, who build something out of a few microcontrollers and want to
+keep improving it once it is on the desk, the wall or the wrist. You choose
+the boards (or just their MCUs), draw how they connect, and write your
+application in Rust. DAGON takes care of the rest:
 
-A hub (RP2040) is connected to the PC over USB and to its nodes over I2C
-(STM32F401) or UART (ESP32-S3). The PC verifies a signed release, sends each
-node its image through the hub, switches the node to the new slot on trial
-and confirms it once the node answers with the new version. A node whose new
-image never gets confirmed is reset by its watchdog and boots the previous
-slot again. An STM32F401 that no longer answers at all can be rewritten
-through the STM32 ROM I2C boot loader, driven by the PC through the hub.
+- **A project that builds.** `dagon new` and `dagon gen` give every node a
+  Rust crate with its start-up, its wiring and an empty `app.rs` for your
+  code. Flash layout, image headers, linker addresses and the boot loader
+  are decided for you.
+- **Safe updates for the whole group.** One hub on your PC's USB sends each
+  node its new version. Every image is signed; a node runs a new version on
+  trial and goes back to the previous one by itself when the new one never
+  gets confirmed. A node that no longer answers can be rewritten through the
+  hub.
+- **A browser tool and a command line that do the same.** DAGON Console
+  (`dagon serve`) shows the nodes and links as a graph, checks them as you
+  edit, builds, signs and updates. Every step is also a `dagon` command.
+- **Help from Claude.** A new project comes with Claude Code instructions
+  and skills for the common questions: a failing build, a board that is not
+  in the list, a problem in the topology.
 
-All formats (image header, release manifest, `.dgb` release bundle, state
-log, topology binary) and the link protocol are defined in this repository;
-the same Rust crates are used by the firmware, the `dagon` command line tool
-and the browser page (through WebAssembly).
+## Words used here
+
+- **node**: one microcontroller of your setup.
+- **hub**: the node on the PC's USB. It relays updates to the other nodes.
+- **child**: a node the hub reaches over I2C or UART.
+- **topology**: the nodes, how they are linked, and the update order
+  (`topology.yaml`).
+
+## Supported hardware
+
+| MCU | Role in the desk demo | Board in the table | Flash it needs |
+|---|---|---|---|
+| RP2040 (`rp2040`) | hub | Waveshare RP2040-Touch-LCD-1.28 (`waveshare-rp2040-touch-lcd-1.28`) | 4 MiB |
+| STM32F401RE (`stm32f401re`) | child, I2C | NUCLEO-F401RE (`nucleo-f401re`) | 512 KiB |
+| ESP32-S3 (`esp32s3`) | child, UART | M5StopWatch (`m5stopwatch`) | 16 MiB |
+
+**Choose by board or by MCU.** A board from the table brings its pins,
+default link and extras; you only pick it. Any other board with one of
+these MCUs can be chosen by its MCU: you give its flash size and the pins
+wired to the hub (see [Your own board](#your-own-board-chosen-by-mcu)).
+
+## Prerequisites
+
+| Tool | When | How |
+|---|---|---|
+| Rust (`rustup`) | always | <https://rustup.rs> |
+| Rust targets `thumbv6m-none-eabi`, `thumbv7em-none-eabihf` | RP2040, STM32F401RE | `rustup target add thumbv6m-none-eabi thumbv7em-none-eabihf` |
+| `espup` and its `esp` toolchain | ESP32-S3 | `cargo install espup`, then `espup install` |
+| `probe-rs` and an ST-LINK | first write of an STM32F401RE | `cargo install probe-rs-tools` (ST-LINK driver on Windows) |
+| A C compiler | building the `dagon` CLI from source (the `ring` crate) | MSVC Build Tools on Windows, `cc` elsewhere |
+| Chrome or Edge 89+ | DAGON Console (Web Serial) | — |
+
+Install the `dagon` CLI from a clone of this repository:
+
+```sh
+cargo install --path crates/dagon-cli
+dagon --help
+```
+
+DAGON Console is built into `dagon`; Node.js is only needed to work on the
+page itself (`web/README.md`).
+
+## The journey
+
+The example is the desk demo: an RP2040 hub with a round LCD, a
+NUCLEO-F401RE showing its version on a 7-segment display (I2C), and an
+M5StopWatch (UART). Replace it with your own topology at step 2.
+
+### 1. Start a project
+
+```sh
+dagon new my-fleet
+cd my-fleet
+```
+
+`dagon new` creates `dagon.toml`, `topology.yaml` (the desk demo, or your
+own with `--from <yaml>`), `.gitignore`, the Claude Code files (below) and,
+if none exists yet, a signing key pair in `~/.dagon/keys/my-fleet` (or
+`--keys <dir>`). The secret key stays outside the project and outside any
+git work tree; `dagon.toml` only names the public key. Tell the CLI where
+the secret key is when you sign:
+
+```sh
+export DAGON_SIGNING_KEY=~/.dagon/keys/my-fleet/dagon-signing.key
+```
+
+### 2. Define the topology in DAGON Console
+
+```sh
+dagon serve
+```
+
+DAGON Console opens in the browser, on 127.0.0.1 only, with a one-time
+passphrase. Place nodes from the node list (by product or by MCU), link
+them, and fix what the check reports; every edit is saved to
+`topology.yaml`. Without a project, `dagon serve` starts on a page that
+creates or opens one.
+
+From the command line the same is `dagon topo check topology.yaml`, or a
+first draft from a plain-language description through the Claude API:
+
+```sh
+export ANTHROPIC_API_KEY=...        # read by the CLI only, never shown or saved
+dagon ai topology --in boards.txt --out topology.yaml
+```
+
+### 3. Generate the node crates
+
+```sh
+dagon gen
+```
+
+One crate per node in `nodes/<id>/`. Write your application in
+`nodes/<id>/src/app.rs`: a task that does the work and a `self_check` that
+says whether a version on trial may be confirmed. `dagon gen` can run
+again any time the topology changes: it rewrites `src/wiring.rs` and the
+DAGON package lines of `Cargo.toml`, and never touches `app.rs` (nor
+`main.rs`, unless `--force-main`). DAGON Console does the same with
+"プロジェクトを作る".
+
+### 4. Build
+
+```sh
+dagon build            # or: dagon build seg
+```
+
+Each node is built into `out/build/<id>/app-a.elf` and, for slot B,
+`app-b.elf` (an ESP32-S3 image serves both slots, so it has one), with the
+public key from `dagon.toml` embedded. The
+version comes from `[build.<id>]` in `dagon.toml`.
+
+### 5. Write the first version (once per node)
+
+A node needs its boot core and first application written once over its own
+cable. Build the boot core with the project's public key (the MCU package
+READMEs: [rp2040](targets/mcu/rp2040/README.md),
+[stm32f401re](targets/mcu/stm32f401re/README.md); the hub also needs
+its `stage0`) and point `[provision.<id>]` in `dagon.toml` at them and at
+your build:
+
+```toml
+[provision.seg]
+bootcore = "<boot core ELF>"
+app = "out/build/seg/app-a.elf"
+version = "0.1.0"
+```
+
+```sh
+dagon rescue hub       # out/provision/hub/rescue.uf2: hold BOOT, plug in USB, copy it to RPI-RP2
+dagon provision seg    # out/provision/seg/flash.bin and the probe-rs commands for the ST-LINK
+```
+
+The ESP32-S3 is written over USB-C with the steps in
+[targets/boards/m5stopwatch](targets/boards/m5stopwatch/README.md).
+Then connect the hub and check that every node answers:
+
+```sh
+dagon status
+```
+
+### 6. Update, and go back
+
+Raise the version in `[build.<id>]`, build, then sign and send. In DAGON
+Console this is ビルド → 署名 → リリース → 渡す, then the update in 運用
+mode, over Web Serial. From the command line:
+
+```sh
+dagon build
+dagon image sign out/build/seg/app-a.elf --node seg --version 0.2.0 --slot a --out out/rel/seg-a.img
+dagon image sign out/build/seg/app-b.elf --node seg --version 0.2.0 --slot b --out out/rel/seg-b.img
+# ... the same for the other nodes
+dagon release build out/rel --name r0.2 --out out/release-0.2.dgb
+dagon apply out/release-0.2.dgb
+```
+
+`dagon apply` checks the signatures and that the release was built for this
+topology, sends the topology to the hub, updates the children and then the
+hub. A node runs the new version on trial; if it is not confirmed, its
+watchdog resets it and it boots the previous version again.
+
+```sh
+dagon rollback --node seg     # back to the previously confirmed version
+dagon recover seg             # a node that no longer answers
+```
+
+`dagon --help` lists every command and option.
+
+## Claude help in your project
+
+`dagon new` also writes Claude Code files into the project, so Claude Code
+opened in the project folder knows the layout, the commands and the rules:
+
+| File | What it is for |
+|---|---|
+| `CLAUDE.md` | The project layout, which files are yours and which are generated, the commands, and the rules (keys stay out, hardware facts are asked, not guessed) |
+| `.claude/skills/fix-a-failing-build/SKILL.md` | A `dagon build` fails: find the cause, fix only your code in `nodes/<id>/src`, build again |
+| `.claude/skills/add-a-board-by-mcu/SKILL.md` | Add a board that is not in the table, chosen by its MCU, with each value taken from the board's documents |
+| `.claude/skills/explain-a-topology-problem/SKILL.md` | Explain a problem the topology check reports, and propose the smallest fix |
+
+The files hold no keys and no paths of your PC. Signing keys and the
+Claude API key stay with the `dagon` CLI: Claude is told never to open
+them, and signing or writing to hardware is left to you.
+
+In this repository, `plugin/` is the Claude Code plugin used to port DAGON
+to a new MCU (`/dagon-port`), checked by the conformance tests
+(`dagon conform`).
+
+## Your own board (chosen by MCU)
+
+Leave out `board:` for the node in `topology.yaml` and give its facts in
+`dagon.toml`:
+
+```yaml
+  - id: seg
+    mcu: stm32f401re
+    role: node
+    port: self-boot
+    flash_map: f401-default
+    tag: seg-f401-7seg
+```
+
+```toml
+[board.seg]
+flash_bytes = 524288
+```
+
+For an I2C child, the link names the pins on the node (`node_pins`). The
+check and `dagon gen` tell you what is still missing; the
+`add-a-board-by-mcu` skill walks through it with you.
+
+## Try it without hardware
+
+```sh
+dagon sim run
+```
+
+Four end-to-end scenarios in the simulator: an update with a power cut
+during the transfer, an image that never confirms, tampered releases, and
+an erased F401 brought back through its ROM boot loader.
 
 ## What works today
 
@@ -31,121 +257,38 @@ What the code and its tests in this repository show:
   boot decision: trial with a bounded number of attempts, then rollback).
 - The PC side: `dagon-host` (status, discover, topology push, apply, rollback,
   confirm, recover), `dagon-romlink` (the STM32 I2C ROM loader procedure) and
-  the `dagon` CLI. They are tested against `dagon-sim`, a simulated hub with
-  an F401 node, flash with power-cut points, lossy links and the ROM loader.
-- `dagon sim run`: four end-to-end scenarios in the simulator: an update with
-  a power cut during the transfer, an image that never confirms, tampered
-  releases (rejected by the PC, and by the node when host checks are
-  skipped), and an erased F401 brought back through the ROM loader.
+  the `dagon` CLI, tested against `dagon-sim`, a simulated hub with an F401
+  node, flash with power-cut points, lossy links and the ROM loader.
+- Projects: `dagon new`, `dagon gen` and `dagon build` make and build the
+  node crates on the support packages per MCU (`targets/mcu/*`) and per
+  board (`targets/boards/*`).
 - `dagon conform`: the 12 conformance tests of `dagon-conform`; 12 of 12 pass
   against the simulated F401, through the hub and directly.
 - Topology YAML: 21 validation rules and the supported-board table
   (`dagon-topology`); `topology/desk-demo.yaml` passes them.
-- Support packages per MCU (`targets/mcu/rp2040`, `targets/mcu/stm32f401re`,
-  `targets/mcu/esp32s3`, with their boot images) and per board
-  (`targets/boards/*`); firmware for the RP2040 hub (`targets/rp2040-hub`),
-  the F401 demo node (`samples/f401-app`) and the ESP32-S3 node (board
-  package `targets/boards/m5stopwatch` with the factory firmware, sample app
-  `samples/esp32s3-app`, with the ESP-IDF 2nd stage). The hub firmware has
-  been flashed and starts on the hub
-  hardware; on-device validation of the hub (host communication, display) is
-  still in progress. On-device checks of the F401 and ESP32-S3 firmware and
-  the full flow on hardware are still pending (see Limitations).
-- The browser page in `web/` (under development; `web/README.md` lists what
+- DAGON Console (`web/`, served by `dagon serve`; `web/README.md` lists what
   it does today).
+- Firmware: the RP2040 hub (`targets/rp2040-hub`), the F401 demo node
+  (`samples/f401-app`) and the ESP32-S3 node (`targets/boards/m5stopwatch`,
+  `samples/esp32s3-app`). The hub firmware has been flashed and starts on
+  the hub hardware; on-device checks of the rest are still in progress (see
+  Limitations).
 
-## Quick start
+## Adding DAGON to existing firmware
 
-Build the CLI (Rust stable, see Development prerequisites):
-
-```sh
-cargo build --release -p dagon-cli      # binary: target/release/dagon
-```
-
-Try everything in the simulator, no hardware needed:
-
-```sh
-dagon sim run
-```
-
-Keys (the secret key must stay outside any git work tree; the CLI refuses
-one inside):
-
-```sh
-dagon key gen --out ~/.dagon/keys
-export DAGON_SIGNING_KEY=~/.dagon/keys/dagon-signing.key
-export DAGON_PUBKEY=~/.dagon/keys/dagon-signing.pub   # embedded by firmware builds
-```
-
-First install. Build the firmware in `targets/` (each directory's README has
-the commands), point `[provision.<node>]` in `dagon.toml` at the ELF files,
-then:
-
-```sh
-dagon rescue hub        # out/provision/hub/rescue.uf2: hold BOOT, plug in USB, copy to RPI-RP2
-dagon provision seg     # out/provision/seg/flash.bin and the probe-rs commands for ST-LINK
-```
-
-Update. Sign the new app for both slots of each node, build the release
-against the topology, and apply it:
-
-```sh
-dagon image sign app.elf --node seg --version 1.1.0 --slot a --out out/rel/seg-a.img
-dagon image sign app-b.elf --node seg --version 1.1.0 --slot b --out out/rel/seg-b.img
-# ... the same for the hub
-dagon release build out/rel --name r1.1 --out out/release-1.1.dgb
-dagon status
-dagon apply out/release-1.1.dgb
-dagon recover seg       # if a node no longer answers
-```
-
-`dagon apply` refuses a release built for a different topology than the one
-in `dagon.toml`. The hub is found by USB ID `c0de:cafe` or the product name
-"DAGON hub" (or pass `--port`).
-
-Conformance of a node (images `good-a.img`, `good-b.img`, `no-confirm-a.img`,
-`no-confirm-b.img` in `out/conform/<node>`):
-
-```sh
-dagon conform --node seg            # writes result.json and report.html
-```
-
-Topology from a plain-language board description through the Claude API (the
-key is read from the environment and never printed):
-
-```sh
-export ANTHROPIC_API_KEY=...
-dagon ai topology --in boards.txt --out topology/mine.yaml
-```
-
-`dagon --help` lists every command and option.
-
-## Browser UI (development)
-
-See `web/README.md`. In short, with Node.js, npm and `wasm-pack` 0.15.1:
-
-```sh
-cd web
-npm install
-npm run dev       # http://127.0.0.1:5173 (Chrome or Edge 89+, Web Serial)
-```
-
-## Adopting DAGON in your firmware
+For firmware that is not a `dagon new` project:
 
 1. Add the crates as git dependencies pinned to a release tag, for example
    `dagon-agent = { git = "<repository URL>", tag = "<release tag>" }`, and
    the same for `dagon-format`, `dagon-proto`, `dagon-port` and, for a boot
    core, `dagon-core`.
-2. On an RP2040 or STM32F401RE, use the MCU package (`targets/mcu/<mcu>`,
-   flash layout, linker map, boot images, watchdog, links) and a board
-   package (`targets/boards/<board id>`), or implement the MCU package's
-   `BoardDef` for your own board: the READMEs of the MCU packages show a
-   complete app in about 20 lines. Elsewhere, lay out the flash like the
-   existing boards: a boot core, two state log faces, and slots A and B,
-   each starting with the 512-byte signed image header and the body at slot
-   start + 0x200, and link the application for the body address of its slot
-   (the MCU package READMEs list the maps). Add the board to the topology
-   YAML.
+2. On a supported MCU, use the MCU package (`targets/mcu/<mcu>`: flash
+   layout, linker map, boot images, watchdog, links) and a board package
+   (`targets/boards/<board id>`), or implement the MCU package's `BoardDef`
+   for your own board; the MCU package READMEs show a complete app in about
+   20 lines. On another MCU, lay out the flash the same way: a boot core,
+   two state log faces, and slots A and B, each starting with the 512-byte
+   signed image header and the body at slot start + 0x200.
 3. Implement the `dagon-port` traits for your board (`Flash`, `Link`,
    `Reset`, `Watchdog`, and `BootSelectS` or `BootSelectV`) and a
    `dagon_agent::SlotStore`, then start the agent with your link and hooks:
@@ -158,9 +301,7 @@ npm run dev       # http://127.0.0.1:5173 (Chrome or Edge 89+, Web Serial)
 
    Feed the watchdog while confirmed, and only for a limited time while on
    trial, so an image that is never confirmed is reset and rolled back.
-4. Check the port with `dagon conform`, then `dagon image sign` →
-   `dagon release build` → `dagon provision` for the first install and
-   `dagon apply` afterwards.
+4. Check the port with `dagon conform`.
 
 ## Repository layout
 
@@ -175,32 +316,27 @@ npm run dev       # http://127.0.0.1:5173 (Chrome or Edge 89+, Web Serial)
 | `crates/dagon-sim` | Simulator: flash, links, ROM loader, nodes, hub |
 | `crates/dagon-topology` | Topology YAML, validation rules, supported boards |
 | `crates/dagon-sign` | Keys, image signing, release build, first-install files |
-| `crates/dagon-host` | PC-side procedures shared by the CLI and the browser |
+| `crates/dagon-host` | PC-side procedures shared by the CLI and DAGON Console |
 | `crates/dagon-romlink` | STM32 I2C ROM loader procedure |
-| `crates/dagon-cli` | The `dagon` command |
-| `crates/dagon-wasm` | WebAssembly bindings for the browser page |
-| `targets/` | Firmware: RP2040 hub, STM32F401 node, ESP32-S3 node, bring-up tools; support packages per MCU (`targets/mcu/*`) and per board (`targets/boards/*`) |
+| `crates/dagon-cli` | The `dagon` command, with DAGON Console built in |
+| `crates/dagon-wasm` | WebAssembly bindings for DAGON Console |
+| `targets/` | Support packages per MCU (`targets/mcu/*`) and per board (`targets/boards/*`); RP2040 hub firmware; bring-up tools |
 | `samples/` | Sample apps built on the support packages (not part of DAGON) |
-| `web/` | Browser page (Svelte, Vite, TypeScript) |
+| `web/` | DAGON Console (Svelte, Vite, TypeScript) |
 | `topology/` | Example topologies |
-| `plugin/` | Claude Code plugin (agents, skills, hooks) used to port DAGON to new boards |
+| `plugin/` | Claude Code plugin (agents, skills, hooks) used to port DAGON to new MCUs |
 | `scripts/licences.py` | Generates the dependency licence tables below |
 
-## Development prerequisites
+## Working on DAGON itself
 
-- Rust stable with the targets in `rust-toolchain.toml` (`thumbv6m-none-eabi`,
-  `thumbv7em-none-eabihf`, `wasm32-unknown-unknown`)
+- Everything in [Prerequisites](#prerequisites), plus the
+  `wasm32-unknown-unknown` target (all targets are in `rust-toolchain.toml`)
 - `wasm-pack` 0.15.1 for `crates/dagon-wasm` (it fetches the matching
-  `wasm-bindgen` and `wasm-opt` itself)
-- Node.js and npm for `web/` (see `web/README.md`)
-- For the ESP32-S3 firmware: the Xtensa Rust toolchain installed with
-  `espup` (the ESP32-S3 packages use the `esp` channel). The 2nd stage is
-  to be shipped prebuilt in `targets/mcu/esp32s3/vendor/` (not added yet);
-  until then, and to rebuild it, ESP-IDF v6.1 builds it from
-  `targets/esp32s3-2ndstage`
-- `probe-rs` to flash the F401 over ST-LINK, `elf2uf2-rs` for the RP2040
-  bring-up image
-- A C compiler: the `ring` crate (TLS for `dagon ai topology`) builds C code
+  `wasm-bindgen` and `wasm-opt` itself), and Node.js and npm for `web/`
+- ESP-IDF v6.1 to rebuild the ESP32-S3 2nd stage from
+  `targets/esp32s3-2ndstage` (to be shipped prebuilt in
+  `targets/mcu/esp32s3/vendor/`, not added yet)
+- `elf2uf2-rs` for the RP2040 bring-up image
 
 ## License (MIT / Apache-2.0 dual)
 

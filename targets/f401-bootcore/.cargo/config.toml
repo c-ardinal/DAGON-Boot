@@ -1,0 +1,6 @@
+[build]
+target = "thumbv7em-none-eabihf"
+
+[target.thumbv7em-none-eabihf]
+# Compact SHA-256 rounds keep the boot core inside its 32,256-byte budget.
+rustflags = ["-C", "link-arg=-Tlink.x", "--cfg", 'sha2_backend_soft="compact"']

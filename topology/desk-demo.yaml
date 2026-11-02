@@ -1,0 +1,70 @@
+# Desk demo: RP2040 hub, NUCLEO-F401RE on I2C, M5StopWatch on UART.
+dagon: 1
+name: desk-demo
+
+nodes:
+  - id: hub
+    mcu: rp2040
+    board: waveshare-rp2040-touch-lcd-1.28
+    role: coordinator
+    port: self-boot
+    flash_map: rp2040-4m
+    max_attempts: 3
+    listen_window_ms: 0
+    tag: hub-rp2040-lcd
+  - id: seg
+    mcu: stm32f401re
+    board: nucleo-f401re
+    role: node
+    port: self-boot
+    flash_map: f401-default
+    max_attempts: 3
+    listen_window_ms: 50
+    tag: seg-f401-7seg
+  - id: watch
+    mcu: esp32s3
+    board: m5stopwatch
+    role: node
+    port: vendor-stage2
+    flash_map: esp32s3-16m
+    max_attempts: 1
+    tag: watch-s3
+
+buses:
+  - id: i2c-main
+    kind: i2c
+    controller: i2c0
+    sda: 16
+    scl: 17
+    speed_hz: 400000
+    pullups: external
+
+links:
+  - from: hub
+    to: seg
+    kind: i2c
+    bus: i2c-main
+    addr: 0x42
+    node_pins: { sda: PB4, scl: PA8 }
+    control:
+      kind: full
+      nrst: 18
+      boot: 28
+      rom_entry: stm32-i2c-rom
+  - from: hub
+    to: watch
+    kind: uart
+    iface: pio-uart
+    pins: { tx: 26, rx: 27 }
+    baud: 115200
+    control:
+      kind: cooperative
+      rom_entry: force-download-boot
+
+recovery:
+  hub: [local]
+  seg: [local, redistribute, rom-forced]
+  watch: [local, redistribute, rom-coop]
+
+update:
+  order: [seg, watch, hub]

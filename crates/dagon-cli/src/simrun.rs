@@ -5,13 +5,14 @@
 use std::cell::RefCell;
 use std::rc::Rc;
 
-use dagon_format::bundle::BundleView;
+use dagon_format::bundle::{dest, BundleView};
 use dagon_format::header::{image_kind, target_tag, HEADER_SIZE, SIGNED_LEN};
 use dagon_format::statelog::reason;
 use dagon_format::Version;
 use dagon_host::{Clock, Error, Host, Outcome, RecoverAssets, RecoverPath, Target, Transport};
 use dagon_port::Flash;
 use dagon_proto::payload::SlotState;
+use dagon_proto::Status;
 use dagon_sign::image::{self, sign_image, ImageSpec};
 use dagon_sim::{block_on, demo_hub, CutPoint, SimHub, TrialApp, NODE_I2C_ADDR};
 use ed25519_compact::{KeyPair, Seed};
@@ -256,26 +257,36 @@ fn s2() -> R {
 fn s3() -> R {
     let w = world()?;
     let b = BundleView::parse(&w.release).map_err(|e| format!("{e:?}"))?;
-    let start = (0..b.item_count())
+    let seg_items: Vec<usize> = (0..b.item_count())
         .map(|i| b.item(i))
-        .find(|it| it.entry_index == 0)
-        .ok_or("no image item")?
-        .offset as usize;
-    for (what, at) in [
-        ("header", 0x20),
-        ("payload", HEADER_SIZE + 100),
-        ("signature", SIGNED_LEN + 5),
+        .filter(|it| it.dest == dest::SUB_STORE)
+        .map(|it| it.offset as usize)
+        .collect();
+    for (what, at, node_says) in [
+        ("header", 0x20, Status::Signature),
+        ("payload", HEADER_SIZE + 100, Status::Digest),
+        ("signature", SIGNED_LEN + 5, Status::Signature),
     ] {
         let mut bad = w.release.clone();
-        bad[start + at] ^= 0x01;
+        seg_items.iter().for_each(|&off| bad[off + at] ^= 0x01);
         match w.apply(&bad) {
             Err(Error::Format(_)) => {}
             r => return Err(format!("{what} flip accepted: {r:?}")),
         }
+        // Without the PC-side check the node itself must refuse it.
+        let out = block_on(
+            w.host()
+                .apply_unverified(&bad, &w.topology, None, &mut |_| {}),
+        )
+        .map_err(|e| format!("{what}, no host verify: {e:?}"))?;
+        match out.first().map(|o| &o.outcome) {
+            Some(Outcome::Failed(Error::Rejected { status, .. })) if *status == node_says => {}
+            o => return Err(format!("{what}: node did not answer {node_says:?}: {o:?}")),
+        }
     }
     w.expect(SEG_AT, OLD)?;
     w.expect(Target::Hub, OLD)?;
-    Ok("3 tampered releases refused, nothing written".into())
+    Ok("3 tampered releases refused by the PC, and by the F401 (E_SIGNATURE, E_DIGEST) with no host verify".into())
 }
 
 /// The F401 fully erased, then rewritten through the ROM loader.

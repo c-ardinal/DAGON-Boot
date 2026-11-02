@@ -190,9 +190,18 @@ pub fn recover(args: &[&str]) -> Res {
     Ok(())
 }
 
+/// Flag of `apply`: skip the PC-side signature and digest checks.
+const NO_HOST_VERIFY: &str = "--no-host-verify";
+
 pub fn apply(args: &[&str]) -> Res {
+    let no_verify = args.contains(&NO_HOST_VERIFY);
+    let args: Vec<&str> = args
+        .iter()
+        .copied()
+        .filter(|a| *a != NO_HOST_VERIFY)
+        .collect();
     let o = Opts::parse(
-        args,
+        &args,
         &["port", "topology", "config", "node", "pubkey", "key"],
     )?;
     let cfg = Config::load(o.get("config"))?;
@@ -217,7 +226,15 @@ pub fn apply(args: &[&str]) -> Res {
         })
         .collect::<Result<Vec<u8>, String>>()?;
     let only = (!picked.is_empty()).then_some(picked.as_slice());
-    let key = pubkey(&o, &cfg)?;
+    let key = if no_verify {
+        eprintln!(
+            "warning: {NO_HOST_VERIFY}: signatures and digests are left to the nodes; \
+             the topology must still match"
+        );
+        None
+    } else {
+        Some(pubkey(&o, &cfg)?)
+    };
     let bundle = read_file(Path::new(&dgb))?;
 
     let mut host = serial::host(o.get("port"))?;
@@ -235,8 +252,11 @@ pub fn apply(args: &[&str]) -> Res {
             e.version
         );
     };
-    let report = block_on(host.apply(&bundle, &bin, &key, only, &mut print))
-        .map_err(|e| format!("apply refused: {e:?}"))?;
+    let run = match &key {
+        Some(k) => block_on(host.apply(&bundle, &bin, k, only, &mut print)),
+        None => block_on(host.apply_unverified(&bundle, &bin, only, &mut print)),
+    };
+    let report = run.map_err(|e| format!("apply refused: {e:?}"))?;
     let mut ok = true;
     for r in &report {
         let line = match &r.outcome {

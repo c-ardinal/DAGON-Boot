@@ -244,6 +244,52 @@ fn tampered_release_refused() {
 }
 
 #[test]
+fn without_host_verify_the_node_rejects_tampered_images() {
+    use dagon_format::bundle::{dest, BundleView};
+    use dagon_format::header::{HEADER_SIZE, SIGNED_LEN};
+    use dagon_proto::Status;
+    let cases = [
+        (0x18, Status::Signature, "E_SIGNATURE"),
+        (HEADER_SIZE + 100, Status::Digest, "E_DIGEST"),
+        (SIGNED_LEN + 5, Status::Signature, "E_SIGNATURE"),
+    ];
+    for (at, status, text) in cases {
+        let s = sim();
+        let mut b = release();
+        let seg_items: Vec<usize> = {
+            let v = BundleView::parse(&b).unwrap();
+            (0..v.item_count())
+                .map(|i| v.item(i))
+                .filter(|it| it.dest == dest::SUB_STORE)
+                .map(|it| it.offset as usize)
+                .collect()
+        };
+        for off in seg_items {
+            b[off + at] ^= 1;
+        }
+        let topo = topology(&yaml());
+        let mut h = host(&s);
+        assert!(block_on(h.apply(&b, &topo, &key().pk, None, &mut |_| {})).is_err());
+        let out = block_on(h.apply_unverified(&b, &topo, None, &mut |_| {})).unwrap();
+        match &out[0].outcome {
+            Outcome::Failed(Error::Rejected { status: st, .. }) => assert_eq!(*st, status),
+            o => panic!("flip at {at:#x}: {o:?}"),
+        }
+        assert!(matches!(out[1].outcome, Outcome::NotStarted));
+        let screen = s.hub.borrow().screen.clone().unwrap();
+        assert_eq!(
+            (screen.phase, screen.text.as_slice()),
+            (phase::REJECTED, text.as_bytes())
+        );
+        let st = block_on(h.status(SEG_AT)).unwrap();
+        assert_eq!(
+            (st.hello.active_version, st.status.active),
+            (Version::new(1, 0, 0), 0)
+        );
+    }
+}
+
+#[test]
 fn partial_apply_skips_the_hub() {
     let s = sim();
     let mut h = host(&s);
@@ -386,12 +432,26 @@ fn recover_seg(s: &Sim) -> (RecoverPath, Version) {
 
 #[test]
 fn erased_f401_comes_back_through_the_rom_loader() {
-    for no_stretch in [true, false] {
+    // A V1.1 command list (17 codes) as on the F401.
+    let v11 = [
+        0x00, 0x01, 0x02, 0x11, 0x21, 0x31, 0x32, 0x44, 0x45, 0x63, 0x64, 0x73, 0x74, 0x82, 0x83,
+        0x92, 0x93,
+    ];
+    // (no_stretch, 17-code list, expected over-reads). Strict reads fail an
+    // over-read: only the 19-byte Get guess against a shorter list may
+    // over-read, and the driver then re-reads Get exactly.
+    for (no_stretch, full_list, over) in [(true, true, 0), (true, false, 1), (false, false, 1)] {
         let s = sim();
-        if !no_stretch {
+        {
             let mut hub = s.hub.borrow_mut();
             let rom = &mut hub.i2c_node(NODE_I2C_ADDR).unwrap().rom;
-            rom.commands.retain(|&c| c != 0x32 && c != 0x45);
+            rom.strict_reads = true;
+            if full_list {
+                rom.commands = v11.to_vec();
+            }
+            if !no_stretch {
+                rom.commands.retain(|&c| c != 0x32 && c != 0x45);
+            }
         }
         wipe_seg(&s);
         assert!(
@@ -410,7 +470,8 @@ fn erased_f401_comes_back_through_the_rom_loader() {
         assert_eq!((st.status.active, st.status.confirmed), (0, 0));
         let mut hub = s.hub.borrow_mut();
         assert_eq!(hub.screen.as_ref().unwrap().phase, phase::CONFIRM);
-        assert_eq!(hub.i2c_node(NODE_I2C_ADDR).unwrap().rom.timeouts, 0);
+        let rom = &hub.i2c_node(NODE_I2C_ADDR).unwrap().rom;
+        assert_eq!((rom.timeouts, rom.over_reads), (0, over));
     }
 }
 

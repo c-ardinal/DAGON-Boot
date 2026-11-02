@@ -2,7 +2,7 @@
 //! rescue UF2, each with a state log that starts with the slot A image
 //! provisioned and confirmed.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 use dagon_format::header::{self, ImageHeader, HEADER_SIZE};
 use dagon_format::statelog::{self, kind, reason, slot, FaceHeader, Record};
@@ -76,10 +76,21 @@ impl FlashImage {
     }
 
     /// UF2 file, one 256-byte block per written page, ascending.
+    /// UF2 file covering every touched 4 KiB sector whole: its 16 pages in
+    /// ascending order, unwritten bytes 0xFF. The RP2040 boot ROM erases a
+    /// sector per 4 KiB write it receives; a sector split across two writes
+    /// loses the part written first, so sectors must never straddle them.
     pub fn to_uf2(&self, family_id: u32) -> Vec<u8> {
-        let n = self.pages.len() as u32;
-        let mut out = Vec::with_capacity(self.pages.len() * 512);
-        for (i, (&addr, page)) in self.pages.iter().enumerate() {
+        let sectors: BTreeSet<u32> = self.pages.keys().map(|a| a & !(UF2_SECTOR - 1)).collect();
+        let pages: Vec<(u32, [u8; PAGE])> = sectors
+            .iter()
+            .flat_map(|&s| (s..s + UF2_SECTOR).step_by(PAGE))
+            .map(|a| (a, self.pages.get(&a).copied().unwrap_or([0xFF; PAGE])))
+            .collect();
+        let n = pages.len() as u32;
+        let mut out = Vec::with_capacity(pages.len() * 512);
+        for (i, (addr, page)) in pages.iter().enumerate() {
+            let addr = *addr;
             let mut block = [0u8; 512];
             let words = [
                 UF2_MAGIC0,
@@ -102,6 +113,8 @@ impl FlashImage {
     }
 }
 
+/// RP2040 flash erase sector.
+const UF2_SECTOR: u32 = 0x1000;
 const UF2_MAGIC0: u32 = 0x0A32_4655;
 const UF2_MAGIC1: u32 = 0x9E5D_5157;
 const UF2_MAGIC_END: u32 = 0x0AB1_6F30;

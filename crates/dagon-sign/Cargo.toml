@@ -5,5 +5,7 @@ license.workspace = true
 version.workspace = true
 
 [dependencies]
+dagon-format = { path = "../dagon-format" }
+dagon-topology = { path = "../dagon-topology" }
 ed25519-compact = { version = "2", default-features = false, features = ["random", "std"] }
 sha2 = "0.11"

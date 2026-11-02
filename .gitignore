@@ -30,3 +30,6 @@ rustc-ice-*.txt
 .env
 .env.*
 keys/
+
+# CLI outputs (images, bundles, provisioning files)
+/out/

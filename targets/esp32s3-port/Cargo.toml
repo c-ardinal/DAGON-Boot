@@ -1,0 +1,41 @@
+[package]
+name = "dagon-esp32s3-port"
+version = "0.0.0"
+edition = "2021"
+license = "MIT OR Apache-2.0"
+publish = false
+
+# Standalone workspace: built with the espup Xtensa toolchain, not the host one.
+# The pure modules (layout, framer) also build and test on the host.
+[workspace]
+
+[[bin]]
+name = "testapp-confirm"
+test = false
+
+[[bin]]
+name = "testapp-noconfirm"
+test = false
+
+[dependencies]
+dagon-format = { path = "../../crates/dagon-format" }
+dagon-port = { path = "../../crates/dagon-port" }
+dagon-proto = { path = "../../crates/dagon-proto" }
+
+[target.'cfg(target_arch = "xtensa")'.dependencies]
+esp-hal = { version = "1.2.2", features = ["esp32s3", "unstable"] }
+esp-bootloader-esp-idf = { version = "0.6.0", features = ["esp32s3"] }
+
+# esp-bootloader-esp-idf computes `ota_seq - 1` with wrapping intent (an
+# erased otadata switched to ota_1 gets ota_seq 0, which the 2nd stage maps to
+# ota_1 as well); overflow checks would turn that into a panic.
+[profile.release]
+opt-level = "s"
+lto = "fat"
+codegen-units = 1
+debug = 2
+overflow-checks = false
+
+[profile.dev]
+opt-level = "s"
+overflow-checks = false

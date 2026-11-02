@@ -1,17 +1,22 @@
 import { readFileSync } from 'node:fs';
 import { describe, expect, test } from 'vitest';
-import { CMD, FLAG_RESP, FrameDecoder, crc32, encodeFrame, parseFrame } from './frame.ts';
+import { CMD, FLAG_RESP, encodeFrame, newFrameStream, parseFrame } from './frame.ts';
 import { decodeHelloResp, encodeHelloReq, versionText } from '../wasm/dagon.ts';
 import { encodeHelloResp, versionRaw } from './hello.ts';
 
 const golden = (name: string): Uint8Array =>
   new Uint8Array(readFileSync(new URL(`../../../crates/dagon-format/golden/${name}`, import.meta.url)));
 
-describe('frame codec against the Rust golden frames', () => {
-  test('crc32 check value', () => {
-    expect(crc32(new TextEncoder().encode('123456789'))).toBe(0xcbf43926);
-  });
+const cut = (...chunks: Uint8Array[]): Uint8Array[][] => {
+  const s = newFrameStream();
+  try {
+    return chunks.map((c) => s.push(c));
+  } finally {
+    s.free();
+  }
+};
 
+describe('frame codec (dagon-wasm) against the Rust golden frames', () => {
   test('HELLO request is byte-identical', () => {
     const file = golden('frame_hello_req.bin');
     const built = encodeFrame({ flags: 0, seq: 1, cmd: CMD.HELLO, payload: encodeHelloReq({ protoVer: 1, maxPayload: 1088 }) });
@@ -20,7 +25,7 @@ describe('frame codec against the Rust golden frames', () => {
 
   test('HELLO response decodes and re-encodes identically', () => {
     const file = golden('frame_hello_resp.bin');
-    const [raw] = new FrameDecoder().push(file);
+    const [[raw]] = cut(file);
     const f = parseFrame(raw);
     expect(f.flags & FLAG_RESP).toBe(FLAG_RESP);
     expect(f.payload[0]).toBe(0);
@@ -33,30 +38,26 @@ describe('frame codec against the Rust golden frames', () => {
     expect(again).toEqual(file);
   });
 
-  test('every golden frame passes the stream decoder', () => {
+  test('every golden frame passes the stream cutter', () => {
     for (const name of ['frame_relay_hello.bin', 'frame_status_resp.bin', 'frame_xfer_hdr.bin', 'frame_show.bin']) {
       const file = golden(name);
-      expect(new FrameDecoder().push(file)).toEqual([file]);
+      expect(cut(file)).toEqual([[file]]);
     }
   });
 });
 
-describe('stream decoder', () => {
+describe('stream cutter', () => {
   const a = encodeFrame({ flags: 0, seq: 7, cmd: CMD.HELLO, payload: Uint8Array.of(1, 2, 3) });
 
   test('skips noise, waits for split frames, drops bad CRC', () => {
-    const d = new FrameDecoder();
     const noise = new TextEncoder().encode('boot log\xda');
     const bad = a.slice();
     bad[9] ^= 1;
-    expect(d.push(noise)).toEqual([]);
-    expect(d.push(bad)).toEqual([]);
-    expect(d.push(a.subarray(0, 5))).toEqual([]);
-    expect(d.push(a.subarray(5))).toEqual([a]);
+    expect(cut(noise, bad, a.subarray(0, 5), a.subarray(5))).toEqual([[], [], [], [a]]);
   });
 
   test('two frames in one chunk', () => {
-    expect(new FrameDecoder().push(Uint8Array.of(...a, ...a))).toEqual([a, a]);
+    expect(cut(Uint8Array.of(...a, ...a))).toEqual([[a, a]]);
   });
 
   test('version u32 layout', () => {

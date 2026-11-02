@@ -13,7 +13,7 @@ import init, {
 import type { HostLink } from './pkg/dagon_wasm.js';
 import type { HelloReq, HelloResp } from '../serial/hello.ts';
 
-export { initSync, topo_check, topo_compile, verify_release, watch_interval_ms } from './pkg/dagon_wasm.js';
+export { check_release_for, initSync, topo_check, topo_compile, verify_release, watch_interval_ms } from './pkg/dagon_wasm.js';
 
 export type TargetKind = 'hub' | 'i2c' | 'uart';
 
@@ -52,6 +52,43 @@ export interface Discovery {
   nodes: { kind: TargetKind; addr: number; hello: HelloResp }[];
 }
 
+/** Progress of an update (dagon-host's Event; `phase` is the SHOW phase). */
+export interface UpdateEvent {
+  /** Topology node index. */
+  node: number;
+  phase: number;
+  percent: number;
+  version: number;
+}
+
+/** SHOW phases (dagon_proto::payload::phase). */
+export const PHASE = { transfer: 1, verify: 2, reboot: 3, confirm: 4, rejected: 5, failed: 6, rom: 7 } as const;
+
+export interface NodeFailure {
+  /** dagon-host's short reason: `NO ANSWER`, `ROLLED BACK`, `E_SIGNATURE`, ... */
+  reason: string;
+  /** Version the node came back on, when it is not the new one. */
+  running: number | null;
+  trial: boolean;
+}
+
+export interface NodeResult {
+  node: number;
+  kind: TargetKind;
+  addr: number;
+  outcome: 'done' | 'failed' | 'notStarted';
+  version: number | null;
+  failure: NodeFailure | null;
+}
+
+export interface ConfirmResult {
+  outcome: 'confirmed' | 'notOnTrial' | 'needsChoice';
+  version: number;
+}
+
+/** Why a release is refused before anything is sent (dagon-host's check). */
+export type Refusal = 'source' | 'key' | 'topology' | 'format';
+
 /** dagon-host's procedures for one hub session, with the shapes dagon-wasm returns. */
 export interface Host {
   hello(kind: TargetKind, addr: number): Promise<HelloResp>;
@@ -59,6 +96,9 @@ export interface Host {
   discover(): Promise<Discovery>;
   pushTopology(bin: Uint8Array): Promise<void>;
   watch(kind: TargetKind, addr: number): Promise<WatchRound>;
+  /** `dagon apply`; rejects with a Refusal (or a reason) when nothing was sent. */
+  apply(bundle: Uint8Array, topology: Uint8Array, nodes: number[] | null, onEvent: (e: UpdateEvent) => void): Promise<NodeResult[]>;
+  confirm(kind: TargetKind, addr: number, force: boolean): Promise<ConfirmResult>;
   /** Releases the WASM side; calls still running finish on their own. */
   free(): void;
 }
@@ -71,6 +111,8 @@ export function newHost(link: HostLink): Host {
     discover: () => h.discover(),
     pushTopology: (bin) => h.push_topology(bin),
     watch: (k, a) => h.watch(k, a),
+    apply: (b, t, n, on) => h.apply(b, t, n ? Uint8Array.from(n) : undefined, on),
+    confirm: (k, a, f) => h.confirm(k, a, f),
     free: () => h.free(),
   };
 }

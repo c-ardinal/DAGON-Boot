@@ -62,11 +62,43 @@ export class WebSerialTransport implements Transport {
   private pump: Promise<void> | null = null;
   private closing = false;
 
-  constructor(readonly port: SerialPort) {}
+  /** `serial` finds the device again when it came back as a new port (the hub after its reboot). */
+  constructor(
+    public port: SerialPort,
+    private readonly serial: Pick<Serial, 'getPorts'> | null = globalThis.navigator?.serial ?? null,
+  ) {}
 
   async open(): Promise<void> {
-    await this.port.open({ baudRate: CDC_BAUD });
+    this.port = await this.reopenable();
+    this.closing = false;
     this.pump = this.readLoop();
+  }
+
+  /**
+   * Opens this port, or else an already allowed port of the same USB device
+   * (vendor and product id): after a reboot the hub enumerates again and the
+   * browser may hand it out as a new port, still allowed when it reports
+   * the same USB serial number.
+   */
+  private async reopenable(): Promise<SerialPort> {
+    try {
+      await this.port.open({ baudRate: CDC_BAUD });
+      return this.port;
+    } catch (e) {
+      const want = this.port.getInfo();
+      const ports = (await this.serial?.getPorts()) ?? [];
+      for (const p of ports) {
+        const info = p.getInfo();
+        if (p === this.port || info.usbVendorId !== want.usbVendorId || info.usbProductId !== want.usbProductId) continue;
+        try {
+          await p.open({ baudRate: CDC_BAUD });
+          return p;
+        } catch {
+          // Not this one; try the next.
+        }
+      }
+      throw e;
+    }
   }
 
   async close(): Promise<void> {

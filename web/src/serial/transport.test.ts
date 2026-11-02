@@ -55,6 +55,23 @@ describe('WebSerialTransport read loop', () => {
     await t.close();
   });
 
+  test('after the device left, opens the same USB device that came back as another allowed port, and reads again', async () => {
+    const ids = { usbVendorId: 0x2e8a, usbProductId: 0x000a };
+    const gone = Object.assign(new FakePort([]), {
+      open: () => Promise.reject(new DOMException('lost', 'NetworkError')),
+      getInfo: () => ids,
+    });
+    const other = Object.assign(new FakePort([readable(() => undefined)]), { getInfo: () => ({ usbVendorId: 1 }) });
+    const back = Object.assign(new FakePort([readable((c) => c.enqueue(frame))]), { getInfo: () => ids });
+    const serial = { getPorts: async () => [gone, other, back] as unknown as SerialPort[] };
+    const t = new WebSerialTransport(gone as unknown as SerialPort, serial);
+    await t.close();
+    await t.open();
+    expect(t.port).toBe(back);
+    expect(await t.read(500)).toEqual(frame);
+    await t.close();
+  });
+
   test('ends when the port has no readable left (device lost)', async () => {
     const t = new WebSerialTransport(port([readable((c) => c.error(new DOMException('lost', 'NetworkError')))]));
     await t.open();

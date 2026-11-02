@@ -8,9 +8,11 @@
     onselect: (key: string) => void;
     /** One-column layout: the list folds under its heading. */
     fold: boolean;
+    /** During an update: each target node's percent (the one place for it). */
+    percent?: Record<string, number>;
   }
 
-  let { config, selected, onselect, fold }: Props = $props();
+  let { config, selected, onselect, fold, percent = {} }: Props = $props();
 
   const rows = $derived(config ? config.order.map((id) => config.nodes.find((n) => n.id === id)!) : []);
 </script>
@@ -20,8 +22,12 @@
     <ol>
       {#each rows as n (n.id)}
         {@const key = `node:${n.id}`}
+        {@const p = percent[n.id]}
         <li>
-          <button aria-pressed={selected === key} onclick={() => onselect(key)}>[{n.no}] {n.name}</button>
+          <button aria-pressed={selected === key} onclick={() => onselect(key)}>
+            <span class="row"><span>[{n.no}] {n.name}</span>{#if p !== undefined}<span class="pct">{p}%</span>{/if}</span>
+            {#if p !== undefined}<progress max="100" value={p} aria-label="{n.name} {p}%"></progress>{/if}
+          </button>
         </li>
       {/each}
     </ol>
@@ -93,6 +99,30 @@
     li button:not([aria-pressed='true']):hover {
       background: var(--c-hover);
     }
+  }
+  .row {
+    display: flex;
+    justify-content: space-between;
+    gap: var(--s-3);
+  }
+  .pct {
+    font: 400 var(--t-mono-size) / var(--t-body-lh) var(--f-mono);
+    font-variant-numeric: tabular-nums;
+  }
+  progress {
+    display: block;
+    width: 100%;
+    height: 4px;
+    margin-top: var(--s-2);
+    border: 0;
+    appearance: none;
+    background: var(--c-layer-2);
+  }
+  progress::-webkit-progress-bar {
+    background: var(--c-layer-2);
+  }
+  progress::-webkit-progress-value {
+    background: var(--c-paper);
   }
   .none {
     margin: var(--s-3) 0 0;

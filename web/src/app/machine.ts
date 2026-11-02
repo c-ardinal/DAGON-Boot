@@ -33,6 +33,8 @@ export interface Ctx {
   /** A configuration is on the canvas. */
   hasConfig: boolean;
   failure?: ConnectFailure;
+  /** Why the chosen file was refused (L16, L17). */
+  refusal?: 'source' | 'key' | 'topology' | 'format';
 }
 
 /** Header step: 01–06, or recovery. */
@@ -91,7 +93,8 @@ export const MACHINE: Record<L, Spec> = {
   },
   L18: { step: 5, primary: 'update', secondary: ['otherFile'], on: { update: 'L19', otherFile: 'L14', watchAlarm: 'L13', ...toLost } },
   L19: { step: 5, on: { hubTurn: 'L20', nodeStuck: 'L22', doneNoHub: 'L23', ...toLost } },
-  L20: { step: 5, on: { confirmed: 'L23', autoFailed: 'L21' } },
+  // nodeStuck: the hub came back in time but on its previous version.
+  L20: { step: 5, on: { confirmed: 'L23', autoFailed: 'L21', nodeStuck: 'L22' } },
   L21: { step: 5, primary: 'reconnect', on: { reconnect: 'L21', reconnected: 'L23', revertedOnReconnect: 'L22' } },
   L22: { step: 5, primary: 'recover', on: { recover: 'L24', ...toLost } },
   L23: { step: 6, secondary: ['otherFile'], on: { watchAlarm: 'L13', rollback: 'L24', otherFile: 'L14', ...toLost } },

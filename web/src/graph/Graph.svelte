@@ -4,7 +4,16 @@
     label: string;
     value: number;
     of?: number;
+    /** Unit after the number ("%", "% 停止"). */
+    unit?: string;
     name: string;
+  }
+
+  /** A node chip set by the page (update progress) instead of the watch result. */
+  export interface Chip {
+    chip: string;
+    spoken: string;
+    silent: boolean;
   }
 </script>
 
@@ -25,9 +34,10 @@
     selected: string | null;
     onselect: (key: string) => void;
     dot: Dot | null;
+    chips?: Record<string, Chip>;
   }
 
-  let { config, live, connected, sending, selected, onselect, dot }: Props = $props();
+  let { config, live, connected, sending, selected, onselect, dot, chips = {} }: Props = $props();
 
   const NODE_W = 240;
   const MIN_W = 600;
@@ -135,6 +145,7 @@
 
   function markOf(n: Node): Mark {
     if (!connected) return null;
+    if (chips[n.id]) return chips[n.id];
     const l = live[n.id];
     if (!l || l.responding === null) return 'skeleton';
     if (!l.responding) return { chip: NODE.silent, spoken: NODE.silentName, silent: true };
@@ -204,7 +215,7 @@
     {#if dot}
       <div class="dot" style:top="{L1_TOP + 48}px" role="img" aria-label={dot.name}>
         <span class="dot-label">{dot.label}</span>
-        <span class="dot-num">{dot.value}</span>{#if dot.of !== undefined}<span class="dot-of">/{dot.of}</span>{/if}
+        <span class="dot-num">{dot.value}</span>{#if dot.of !== undefined}<span class="dot-of">/{dot.of}</span>{/if}{#if dot.unit}<span class="dot-of">{dot.unit}</span>{/if}
       </div>
     {/if}
 

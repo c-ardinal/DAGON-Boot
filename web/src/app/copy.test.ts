@@ -18,6 +18,17 @@ const filled = [
   copy.ANNOUNCE.A06(3),
   copy.ANNOUNCE.A08(2, 3),
   copy.ANNOUNCE.A21silent('ウォッチ'),
+  copy.BAND_FOR.M29('7セグ').sentence,
+  copy.CANVAS.dotProgressName(64, true),
+  copy.FILE.size(8416),
+  copy.RECONNECT.left(30),
+  copy.ANNOUNCE.A09('release-1.1.dgb', '595 KB'),
+  copy.ANNOUNCE.A10ok(3),
+  copy.ANNOUNCE.A11('7セグ'),
+  copy.ANNOUNCE.A11percent(50),
+  copy.ANNOUNCE.A13('7セグ'),
+  copy.ANNOUNCE.A13previous('メイン'),
+  copy.ANNOUNCE.A14('1.1.0'),
 ];
 
 const shownExcept = (...skip: string[]) =>
@@ -52,6 +63,8 @@ describe('copy', () => {
     const sentences = [
       ...Object.values(copy.BAND).flatMap((b) => ('sentence' in b ? [b.sentence] : [])),
       copy.UNSUPPORTED.sentence,
+      copy.RECONNECT.sentence,
+      copy.BAND_FOR.M29('7セグ').sentence,
       copy.CANVAS.empty,
       copy.DETAIL.nothingSelected,
       ...copy.HELP.rows.map(([, s]) => s),
@@ -66,9 +79,11 @@ describe('copy', () => {
   });
 
   test('chips are a symbol and a short word, never a sentence', () => {
-    const chips = [copy.NODE.responding, copy.NODE.silent, copy.NODE.trial, ...Object.values(copy.HUB)];
+    const { responding, silent, trial, writing, waiting, done, unwritten, rebooting, previous } = copy.NODE;
+    const { sourceOk, sourceBad, topologyOk, topologyBad, notRelease } = copy.FILE;
+    const chips = [responding, silent, trial, writing, waiting, done, unwritten, rebooting, previous, sourceOk, sourceBad, topologyOk, topologyBad, notRelease, ...Object.values(copy.HUB)];
     for (const c of chips) {
-      expect(c, c).toMatch(/^[●○×…↑↺✓▲◎] \S/);
+      expect(c, c).toMatch(/^(?:[●○×…↑↺✓▲◎]|▼▼) \S/);
       expect(c, c).not.toMatch(/ます|ました|。/);
     }
   });

@@ -583,8 +583,9 @@ fn rollback_slot(st: &StatusResp) -> Option<u8> {
 }
 
 /// Release `bundle` built for `topology` and, when `pubkey` is given,
-/// verified under it.
-fn check_release<'a, E>(
+/// verified under it. The check [`Host::apply`] runs before sending
+/// anything; callers may run it first to show the verdict.
+pub fn check_release<'a, E>(
     bundle: &'a [u8],
     topology: &'a [u8],
     pubkey: Option<&[u8; 32]>,

@@ -22,9 +22,10 @@ Query parameters for development (`npm run dev` only; production builds leave th
 
 | Parameter | Effect |
 |---|---|
-| `?mock` | Uses an in-memory desk hub instead of Web Serial: the sample hub, the 7-segment node on I2C 0x42 and the watch on UART, all on 1.0.0. It answers HELLO, STATUS, RELAY to the two nodes and the topology transfer, so finding, sending and monitoring run through `dagon-host` unchanged. |
+| `?mock` | Uses an in-memory desk hub instead of Web Serial: the sample hub, the 7-segment node on I2C 0x42 and the watch on UART, all on 1.0.0. It answers HELLO, STATUS, RELAY to the two nodes, the topology transfer and the update steps (XFER, SET_PENDING, REBOOT, CONFIRM, SHOW), so finding, sending, monitoring and updating run through `dagon-host` unchanged. Pick `crates/dagon-sim/fixtures/desk-1.1.0.dgb` as the update file. |
 | `?mock=silent` | In-memory device that never answers (no-response path). |
-| `&quiet=uart,i2c:66` | With `?mock`: these nodes do not answer RELAY (not-answering path after two monitoring rounds). |
+| `&quiet=uart,i2c:66` | With `?mock`: these nodes do not answer RELAY (not-answering path after two monitoring rounds; `quiet=uart,i2c:66` is the hub alone). |
+| `&away` | With `?mock`: after its REBOOT the hub stays away until chosen again (the reconnect dialog, after the 45 s automatic reopening). |
 
 A simulated hub plugs in as one more `Transport` in `src/serial/devHub.ts`, under its own parameter.
 
@@ -37,20 +38,27 @@ A simulated hub plugs in as one more `Transport` in `src/serial/devHub.ts`, unde
 | `src/serial/hello.ts` | HELLO payload types and the response encoder the mock uses. |
 | `src/serial/mock.ts` | In-memory desk hub (see `?mock`) in the same frame format. |
 | `src/serial/devHub.ts` | Picks the stand-in hub from the page URL. |
-| `src/serial/hostLink.ts` | The byte link `dagon-host` runs on, over a `Transport`. |
+| `src/serial/hostLink.ts` | The byte link `dagon-host` runs on, over a `Transport`; the device under it can be replaced (the hub chosen again after its reboot). |
 | `src/wasm/dagon.ts` | The only entry to `crates/dagon-wasm`: frame encoding and stream cutting, HELLO request / response, version text, board table, topology check and compile, release verification. `src/wasm/pkg/` is build output and not committed. |
 | `src/app/machine.ts` | Operating-mode state machine: states, main and side actions, transitions (`machine.test.ts` checks one main action at most and no dead ends). |
-| `src/app/operate.svelte.ts` | The operating-mode session: connect, find, send, monitoring every `watch_interval_ms()`, all through `dagon-host` in `dagon-wasm`. |
+| `src/app/operate.svelte.ts` | The operating-mode session: connect, find, send, monitoring every `watch_interval_ms()`, release check and update (`apply`, hub reconnect, confirm rule), all through `dagon-host` in `dagon-wasm`. |
 | `src/app/band.ts` | Bottom band per state: cause chip, sentence, named buttons. |
 | `src/app/sample.ts` | The sample desk set-up (`topology/desk-demo.yaml` plus names and wiring). |
 | `src/app/connect.ts` | Device chooser and error mapping. |
 | `src/app/copy.ts` | All screen and announcement text. |
 | `src/graph/` | The layered graph: own SVG (layers, wire bundles, ties, ports) + HTML (nodes, chips), roving focus with arrow keys. |
-| `src/screens/` | Header, bottom band, update order (left column), detail (right column). |
+| `src/screens/` | Header, bottom band, update order (left column), detail and update file (right column), hub reconnect dialog. |
 | `src/styles/tokens.css` | Design tokens: colour, type, spacing, radius, z-index, motion. |
 
 `Transport` carries whole frames: the page owns choosing and opening the device, and the protocol
 steps belong to `dagon-host`, which will receive a `Transport` through `dagon-wasm`.
+
+## Release key
+
+The page checks releases (and `apply` verifies them) with a public key built into `dagon-wasm`:
+set `DAGON_PUBKEY` to the `.pub` file from `dagon key gen` (or its 64 hex digits) when running
+`npm run wasm` / `dev` / `build`, the same key the CLI and the boards use. Unset, the build warns
+and uses the public RFC 8032 test key.
 
 ## Web Serial on http://127.0.0.1
 
@@ -85,8 +93,8 @@ Font Name, so subsetting and redistribution are allowed under the SIL Open Font 
 |---|---|---|---|---|---|
 | Doto | github.com/oliverlalan/Doto | OFL 1.1 (`OFL-Doto.txt`) | 700 | digits, `%`, `/`, space | 1.0 KB |
 | DotGothic16 | github.com/fontworks-fonts/DotGothic16 | OFL 1.1 (`OFL-DotGothic16.txt`) | 400 | digits, Latin letters, `.`, `/`, space | 3.3 KB |
-| Zen Kaku Gothic New | github.com/googlefonts/zen-kakugothic | OFL 1.1 (`OFL-ZenKakuGothicNew.txt`) | 400, 500, 700 | ASCII + every non-ASCII character in `src/` | 3 × 38 KB |
+| Zen Kaku Gothic New | github.com/googlefonts/zen-kakugothic | OFL 1.1 (`OFL-ZenKakuGothicNew.txt`) | 400, 500, 700 | ASCII + every non-ASCII character in `src/` | 3 × 39 KB |
 | JetBrains Mono | github.com/JetBrains/JetBrainsMono | OFL 1.1 (`OFL-JetBrainsMono.txt`) | 500 | ASCII, `·…→←` | 17.7 KB |
 
-Total 106 KB (budget 250 KB). Only Zen Kaku Gothic New 400 is preloaded; all faces use
+Total 140 KB (budget 250 KB). Only Zen Kaku Gothic New 400 is preloaded; all faces use
 `font-display: swap`.

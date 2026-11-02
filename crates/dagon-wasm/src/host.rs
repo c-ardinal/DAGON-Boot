@@ -6,7 +6,10 @@
 use alloc::rc::Rc;
 use core::cell::RefCell;
 
-use dagon_host::{reason, Clock, Discovery, Error, Host, NodeState, Target, Transport};
+use dagon_host::{
+    check_release, reason, Clock, ConfirmOutcome, Discovery, Error, Event, Host, NodeOutcome,
+    NodeState, Outcome, Target, Transport,
+};
 use dagon_proto::payload::{HelloResp, SlotInfo, StatusResp};
 use js_sys::{Array, Object, Promise, Reflect, Uint8Array};
 use wasm_bindgen::prelude::*;
@@ -205,6 +208,149 @@ impl WasmHost {
 #[wasm_bindgen]
 pub fn watch_interval_ms() -> u32 {
     crate::watch::INTERVAL_MS
+}
+
+/// Release verification key, fixed at build time (`DAGON_PUBKEY`, see build.rs).
+pub const PUBKEY: [u8; 32] = hex32(env!("DAGON_PUBKEY_HEX"));
+
+const fn hex32(s: &str) -> [u8; 32] {
+    const fn nib(c: u8) -> u8 {
+        match c {
+            b'0'..=b'9' => c - b'0',
+            b'a'..=b'f' => c - b'a' + 10,
+            b'A'..=b'F' => c - b'A' + 10,
+            _ => panic!("DAGON_PUBKEY: not hex"),
+        }
+    }
+    let b = s.as_bytes();
+    let mut out = [0u8; 32];
+    let mut i = 0;
+    while i < 32 {
+        out[i] = (nib(b[2 * i]) << 4) | nib(b[2 * i + 1]);
+        i += 1;
+    }
+    out
+}
+
+/// Why dagon-host refuses a release before sending anything: `source`
+/// (signature, digest or CRC), `key` (signed with another key), `topology`
+/// (built for another configuration), `format` (not a release).
+pub fn refusal<E>(e: &Error<E>) -> &'static str {
+    use dagon_format::FormatError as F;
+    match e {
+        Error::TopologyMismatch { .. } => "topology",
+        Error::Format(F::UnknownKey) => "key",
+        Error::Format(F::BadSignature | F::DigestMismatch | F::BadCrc) => "source",
+        Error::Format(_) => "format",
+        _ => reason(e),
+    }
+}
+
+/// The verdict on `bundle` for `topology` under [`PUBKEY`]; `None` when it passes.
+pub fn release_refusal(bundle: &[u8], topology: &[u8]) -> Option<&'static str> {
+    check_release::<()>(bundle, topology, Some(&PUBKEY))
+        .err()
+        .map(|e| refusal(&e))
+}
+
+/// dagon-host's release check, the one `apply` runs first. Throws with the
+/// refusal kind (`source`, `key`, `topology`, `format`).
+#[wasm_bindgen]
+pub fn check_release_for(bundle: &[u8], topology: &[u8]) -> Result<(), JsError> {
+    match release_refusal(bundle, topology) {
+        None => Ok(()),
+        Some(k) => Err(JsError::new(k)),
+    }
+}
+
+fn outcome_js(r: &NodeOutcome<JsValue>) -> JsValue {
+    let o = Object::new();
+    set(&o, "node", r.node.into());
+    target_js(&o, r.target);
+    let (kind, version, why) = match &r.outcome {
+        Outcome::Done(v) => ("done", JsValue::from(v.raw()), JsValue::NULL),
+        Outcome::Failed(e) => ("failed", JsValue::NULL, failure_js(e)),
+        Outcome::NotStarted => ("notStarted", JsValue::NULL, JsValue::NULL),
+    };
+    set(&o, "outcome", kind.into());
+    set(&o, "version", version);
+    set(&o, "failure", why);
+    o.into()
+}
+
+/// `{reason, running, trial}`: `reason` is dagon-host's short text
+/// (`NO ANSWER`, `ROLLED BACK`, `E_SIGNATURE`, ...); `running` the version
+/// the node came back on, when it came back on another one.
+fn failure_js(e: &Error<JsValue>) -> JsValue {
+    let o = Object::new();
+    set(&o, "reason", reason(e).into());
+    let (running, trial) = match e {
+        Error::WrongVersion { running, trial, .. } => (JsValue::from(running.raw()), *trial),
+        _ => (JsValue::NULL, false),
+    };
+    set(&o, "running", running);
+    set(&o, "trial", trial.into());
+    o.into()
+}
+
+fn event_js(e: &Event) -> JsValue {
+    let o = Object::new();
+    set(&o, "node", e.node.into());
+    set(&o, "phase", e.phase.into());
+    set(&o, "percent", e.percent.into());
+    set(&o, "version", e.version.raw().into());
+    o.into()
+}
+
+#[allow(clippy::await_holding_refcell_ref)]
+#[wasm_bindgen]
+impl WasmHost {
+    /// `dagon apply`: checks the release under the built-in key, pushes the
+    /// topology, then updates the nodes (children in update order, the hub
+    /// last, reconnecting after its reboot, CONFIRM in the windows).
+    /// `nodes` limits the run to these topology node indices. `on_event`
+    /// gets `{node, phase, percent, version}`. Resolves to one
+    /// `{node, kind, addr, outcome, version, failure}` per planned node;
+    /// rejects with the refusal kind when nothing was sent.
+    pub fn apply(
+        &self,
+        bundle: Vec<u8>,
+        topology: Vec<u8>,
+        nodes: Option<Vec<u8>>,
+        on_event: js_sys::Function,
+    ) -> Promise {
+        self.run(|h, _| async move {
+            let mut h = h.try_borrow_mut().map_err(|_| busy())?;
+            let mut emit = |e: Event| {
+                let _ = on_event.call1(&JsValue::NULL, &event_js(&e));
+            };
+            let out = h
+                .apply(&bundle, &topology, &PUBKEY, nodes.as_deref(), &mut emit)
+                .await
+                .map_err(|e| JsValue::from(JsError::new(refusal(&e))))?;
+            Ok(out.iter().map(outcome_js).collect::<Array>().into())
+        })
+    }
+
+    /// The confirm rule after a manual reconnect: CONFIRM only when the
+    /// target runs on trial the version this session applied (or `force`).
+    /// Resolves to `{outcome: 'confirmed' | 'notOnTrial' | 'needsChoice', version}`.
+    pub fn confirm(&self, kind: &str, addr: u8, force: bool) -> Promise {
+        let to = target(kind, addr);
+        self.run(|h, _| async move {
+            let mut h = h.try_borrow_mut().map_err(|_| busy())?;
+            let r = h.confirm(to?, force).await.map_err(|e| fail(&e))?;
+            let (kind, v) = match r {
+                ConfirmOutcome::Confirmed(v) => ("confirmed", v),
+                ConfirmOutcome::NotOnTrial(v) => ("notOnTrial", v),
+                ConfirmOutcome::NeedsChoice(v) => ("needsChoice", v),
+            };
+            let o = Object::new();
+            set(&o, "outcome", kind.into());
+            set(&o, "version", v.raw().into());
+            Ok(o.into())
+        })
+    }
 }
 
 fn set(o: &Object, k: &str, v: JsValue) {

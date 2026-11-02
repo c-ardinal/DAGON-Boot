@@ -10,7 +10,7 @@ mod host;
 mod watch;
 
 pub use frame::{frame_encode, FrameCutter};
-pub use host::{watch_interval_ms, WasmHost};
+pub use host::{check_release_for, watch_interval_ms, WasmHost};
 
 use dagon_format::{BundleView, Version};
 use dagon_proto::payload::{HelloReq, HelloResp};
@@ -188,6 +188,23 @@ mod tests {
         let last = dgb.len() - 1;
         dgb[last] ^= 1;
         assert!(verify(&dgb, &pubkey()).is_err());
+    }
+
+    #[test]
+    fn release_verdict_names_why_nothing_is_sent() {
+        use crate::host::{release_refusal, PUBKEY};
+        let topo = golden("topology_desk_demo.bin");
+        let mut dgb = golden("release.dgb");
+        // The default build embeds the test key the golden release is signed with.
+        assert_eq!(PUBKEY.to_vec(), pubkey());
+        assert_eq!(release_refusal(&dgb, &topo), None);
+        let yaml = std::fs::read_to_string(root("topology/sim-pair.yaml")).unwrap();
+        let other = dagon_topology::compile_str(&yaml).unwrap();
+        assert_eq!(release_refusal(&dgb, &other), Some("topology"));
+        assert_eq!(release_refusal(b"not a release", &topo), Some("format"));
+        let last = dgb.len() - 1;
+        dgb[last] ^= 1;
+        assert_eq!(release_refusal(&dgb, &topo), Some("source"));
     }
 
     #[test]

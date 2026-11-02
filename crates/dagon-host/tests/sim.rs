@@ -25,6 +25,18 @@ const SEED: [u8; 32] = [
 
 const YAML: &str = include_str!("../../../topology/sim-pair.yaml");
 
+/// The simulated hub's `target_tag`, as text.
+fn hub_tag() -> String {
+    let tag = dagon_sim::hub_config([0; 32]).target_tag;
+    let end = tag.iter().position(|&b| b == 0).unwrap_or(tag.len());
+    String::from_utf8_lossy(&tag[..end]).into_owned()
+}
+
+/// The sim topology with the hub tag the simulator actually accepts.
+fn yaml() -> String {
+    YAML.replace("tag: hub-rp2040-lcd", &format!("tag: {}", hub_tag()))
+}
+
 const SEG: u8 = 1;
 const SEG_AT: Target = Target::I2c(NODE_I2C_ADDR);
 
@@ -55,7 +67,7 @@ fn seg_img(slot: u8, v: Version) -> Vec<u8> {
 }
 
 fn hub_img(slot: u8, v: Version) -> Vec<u8> {
-    img("rp2040", "hub-rp2040", slot, v, 0x11 + slot)
+    img("rp2040", &hub_tag(), slot, v, 0x11 + slot)
 }
 
 fn topology(yaml: &str) -> Vec<u8> {
@@ -64,10 +76,10 @@ fn topology(yaml: &str) -> Vec<u8> {
 
 /// Release 1.1.0 for hub and seg, both slots.
 fn release() -> Vec<u8> {
-    let t = dagon_topology::parse_str(YAML).unwrap();
+    let t = dagon_topology::parse_str(&yaml()).unwrap();
     let v = Version::new(1, 1, 0);
     let images = [seg_img(0, v), seg_img(1, v), hub_img(0, v), hub_img(1, v)];
-    dagon_sign::release::build(&t, &topology(YAML), &images, "r1.1", &key())
+    dagon_sign::release::build(&t, &topology(&yaml()), &images, "r1.1", &key())
         .unwrap()
         .bundle
 }
@@ -170,7 +182,7 @@ fn full_apply_then_rollback() {
     let mut h = host(&s);
     let mut events = Vec::new();
     let out = block_on(
-        h.apply(&release(), &topology(YAML), &key().pk, None, &mut |e| {
+        h.apply(&release(), &topology(&yaml()), &key().pk, None, &mut |e| {
             events.push(e)
         }),
     )
@@ -212,7 +224,7 @@ fn full_apply_then_rollback() {
 fn topology_mismatch_refuses_before_sending() {
     let s = sim();
     let mut h = host(&s);
-    let other = topology(&YAML.replace("addr: 0x42", "addr: 0x43"));
+    let other = topology(&yaml().replace("addr: 0x42", "addr: 0x43"));
     let t0 = s.hub.borrow().now_ms();
     let r = block_on(h.apply(&release(), &other, &key().pk, None, &mut |_| {}));
     assert!(matches!(r, Err(Error::TopologyMismatch { .. })));
@@ -227,7 +239,7 @@ fn tampered_release_refused() {
     let mut b = release();
     let n = b.len();
     b[n - 10] ^= 1;
-    let r = block_on(h.apply(&b, &topology(YAML), &key().pk, None, &mut |_| {}));
+    let r = block_on(h.apply(&b, &topology(&yaml()), &key().pk, None, &mut |_| {}));
     assert!(matches!(r, Err(Error::Format(_))));
 }
 
@@ -237,7 +249,7 @@ fn partial_apply_skips_the_hub() {
     let mut h = host(&s);
     let out = block_on(h.apply(
         &release(),
-        &topology(YAML),
+        &topology(&yaml()),
         &key().pk,
         Some(&[SEG]),
         &mut |_| {},
@@ -257,7 +269,8 @@ fn node_that_falls_back_stops_the_run_and_confirm_rule() {
         .unwrap()
         .trial_app = TrialApp::NeverConfirms;
     let mut h = host(&s);
-    let out = block_on(h.apply(&release(), &topology(YAML), &key().pk, None, &mut |_| {})).unwrap();
+    let out =
+        block_on(h.apply(&release(), &topology(&yaml()), &key().pk, None, &mut |_| {})).unwrap();
     assert!(matches!(
         out[0].outcome,
         Outcome::Failed(Error::Rejected { .. })
@@ -293,7 +306,8 @@ fn old_hub_firmware_answering_after_reboot_is_waited_out() {
     let mut s = sim();
     s.late_reboot = 3;
     let mut h = host(&s);
-    let out = block_on(h.apply(&release(), &topology(YAML), &key().pk, None, &mut |_| {})).unwrap();
+    let out =
+        block_on(h.apply(&release(), &topology(&yaml()), &key().pk, None, &mut |_| {})).unwrap();
     let v = Version::new(1, 1, 0);
     assert!(
         out.iter()
@@ -360,7 +374,7 @@ fn wipe_seg(s: &Sim) {
 }
 
 fn recover_seg(s: &Sim) -> (RecoverPath, Version) {
-    let (rel, topo, boot) = (release(), topology(YAML), bootcore());
+    let (rel, topo, boot) = (release(), topology(&yaml()), bootcore());
     let assets = RecoverAssets {
         release: &rel,
         topology: &topo,
@@ -409,7 +423,7 @@ fn rom_session_gives_up_after_three_attempts() {
         hub.i2c_node(NODE_I2C_ADDR).unwrap().rom.erase_ms_per_kib = 100;
     }
     wipe_seg(&s);
-    let (rel, topo, boot) = (release(), topology(YAML), bootcore());
+    let (rel, topo, boot) = (release(), topology(&yaml()), bootcore());
     let assets = RecoverAssets {
         release: &rel,
         topology: &topo,
@@ -442,7 +456,7 @@ fn answering_node_is_recovered_by_a_normal_transfer() {
 fn rom_path_needs_a_valid_boot_core() {
     let s = sim();
     wipe_seg(&s);
-    let (rel, topo) = (release(), topology(YAML));
+    let (rel, topo) = (release(), topology(&yaml()));
     let mut boot = bootcore();
     boot[600] ^= 1;
     let assets = RecoverAssets {

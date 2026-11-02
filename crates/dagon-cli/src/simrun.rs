@@ -17,6 +17,18 @@ use dagon_sim::{block_on, demo_hub, CutPoint, SimHub, TrialApp, NODE_I2C_ADDR};
 use ed25519_compact::{KeyPair, Seed};
 
 const YAML: &str = include_str!("../../../topology/sim-pair.yaml");
+
+/// The simulated hub's `target_tag`, as text.
+fn hub_tag() -> String {
+    let tag = dagon_sim::hub_config([0; 32]).target_tag;
+    let end = tag.iter().position(|&b| b == 0).unwrap_or(tag.len());
+    String::from_utf8_lossy(&tag[..end]).into_owned()
+}
+
+/// The sim topology with the hub tag the simulator actually accepts.
+fn yaml() -> String {
+    YAML.replace("tag: hub-rp2040-lcd", &format!("tag: {}", hub_tag()))
+}
 /// RFC 8032 section 7.1 TEST 1 key (public test data).
 const SEED: [u8; 32] = [
     0x9d, 0x61, 0xb1, 0x9d, 0xef, 0xfd, 0x5a, 0x60, 0xba, 0x84, 0x4a, 0xf4, 0x92, 0xec, 0x2c, 0xc4,
@@ -115,13 +127,13 @@ fn seg_img(key: &KeyPair, slot: u8, v: Version) -> Vec<u8> {
 }
 
 fn hub_img(key: &KeyPair, slot: u8, v: Version) -> Vec<u8> {
-    sign(key, "rp2040", image_kind::APP, "hub-rp2040", slot, v, 8000)
+    sign(key, "rp2040", image_kind::APP, &hub_tag(), slot, v, 8000)
 }
 
 /// Hub and F401 on 1.0.0 (slot A, confirmed), release 1.1.0 for both.
 fn world() -> Result<World, String> {
     let key = KeyPair::from_seed(Seed::new(SEED));
-    let t = dagon_topology::parse_str(YAML).map_err(|e| e.to_string())?;
+    let t = dagon_topology::parse_str(&yaml()).map_err(|e| e.to_string())?;
     let topology = dagon_topology::compile(&t).map_err(|e| e.to_string())?;
     let images = [
         seg_img(&key, 0, NEW),

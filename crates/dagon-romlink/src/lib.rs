@@ -173,9 +173,7 @@ impl<'l, L: RomLink> Session<'l, L> {
 
     async fn run(&mut self, plan: &Plan<'_>) -> Result<(), RomError> {
         self.l.set_timeout_ms(FRAME_TIMEOUT_MS);
-        self.l.pulse_reset(true).await?;
-        self.l.sleep_ms(ROM_START_MS).await;
-        self.last = self.l.now_ms();
+        self.restart().await?;
         self.get().await?;
         for &s in plan.erase {
             self.erase(s).await?;
@@ -246,29 +244,49 @@ impl<'l, L: RomLink> Session<'l, L> {
         self.send(&[c, !c]).await
     }
 
+    /// Restarts the loader (NRST pulse, BOOT0 high): no command open.
+    async fn restart(&mut self) -> Result<(), RomError> {
+        self.l.pulse_reset(true).await?;
+        self.l.sleep_ms(ROM_START_MS).await;
+        self.last = self.l.now_ms();
+        Ok(())
+    }
+
     /// Get: ACK frame, data frame (N, version, N command codes), ACK frame,
     /// each one I2C read. The data frame's length is only known from its
-    /// first byte, so it is read at the length of a V1.1 loader's list and,
-    /// if N says otherwise, Get is sent again and read at the exact length
-    /// (as stm32flash does on I2C).
+    /// first byte. Fast path: read it at the length of a V1.1 loader's list
+    /// ([`GET_GUESS_N`]). If that read fails (a loader may stretch the clock
+    /// rather than pad an over-read) or N differs, restart the loader, Get
+    /// again reading 1 byte to learn N (unless the first read already gave
+    /// it), restart once more and read exactly N + 2 bytes, as stm32flash
+    /// does on I2C.
     async fn get(&mut self) -> Result<(), RomError> {
         let mut b = [0u8; 258];
-        let mut n = GET_GUESS_N;
-        let len = loop {
-            self.command(cmd::GET).await?;
-            let frame = &mut b[..n as usize + 2];
-            self.read(frame).await?;
-            if frame[0] == n {
-                break frame.len();
+        let guess = GET_GUESS_N as usize + 2;
+        self.command(cmd::GET).await?;
+        let fast = self.read(&mut b[..guess]).await;
+        let n = match fast {
+            Ok(()) if b[0] == GET_GUESS_N => None,
+            Ok(()) => Some(b[0]),
+            Err(_) => {
+                self.restart().await?;
+                self.command(cmd::GET).await?;
+                self.read(&mut b[..1]).await?;
+                Some(b[0])
             }
-            if n != GET_GUESS_N {
-                return Err(RomError::Refused(frame[0]));
+        };
+        let len = match n {
+            None => guess,
+            Some(n) => {
+                self.restart().await?;
+                self.command(cmd::GET).await?;
+                let len = n as usize + 2;
+                self.read(&mut b[..len]).await?;
+                if b[0] != n {
+                    return Err(RomError::Refused(b[0]));
+                }
+                len
             }
-            // The rest of this reply is lost with the frame; the loader
-            // takes a new command after its trailing ACK.
-            let mut a = [0u8];
-            self.read(&mut a).await?;
-            n = frame[0];
         };
         let mut a = [0u8];
         self.read(&mut a).await?;
@@ -384,7 +402,11 @@ mod tests {
         st: St,
         now: u64,
         gets: u32,
-        split_reads: u32,
+        short_reads: u32,
+        over_reads: u32,
+        /// Over-reads fail (a loader stretching the clock) instead of
+        /// returning 0xFF padding.
+        strict_over: bool,
         fail_erase_once: bool,
         late_once: bool,
         boot0: bool,
@@ -399,7 +421,9 @@ mod tests {
             st: St::Command,
             now: 0,
             gets: 0,
-            split_reads: 0,
+            short_reads: 0,
+            over_reads: 0,
+            strict_over: false,
             fail_erase_once: false,
             late_once: false,
             boot0: false,
@@ -506,13 +530,21 @@ mod tests {
         async fn read(&mut self, addr: u8, buf: &mut [u8]) -> Result<(), BusError> {
             assert_eq!(addr, ROM_ADDR);
             self.now += 1;
+            // One read takes one whole frame: a shorter read loses the rest
+            // of it, a longer one is padded or (strict) fails.
             let f = self.frames.pop_front().ok_or(BusError::Nack)?;
+            if buf.len() > f.len() {
+                self.over_reads += 1;
+                if self.strict_over {
+                    return Err(BusError::Timeout);
+                }
+            }
             if buf.len() < f.len() {
-                self.split_reads += 1;
-                return Err(BusError::Io);
+                self.short_reads += 1;
             }
             buf.fill(0xFF);
-            buf[..f.len()].copy_from_slice(&f);
+            let n = buf.len().min(f.len());
+            buf[..n].copy_from_slice(&f[..n]);
             Ok(())
         }
         async fn write_read(&mut self, a: u8, d: &[u8], buf: &mut [u8]) -> Result<(), BusError> {
@@ -583,14 +615,27 @@ mod tests {
 
     #[test]
     fn writes_with_one_read_per_frame() {
-        for cmds in [&V11[..], &[0x00, 0x01, 0x02, 0x11, 0x31, 0x44][..]] {
+        let short = [0x00, 0x01, 0x02, 0x11, 0x31, 0x44];
+        let mut long = V11.to_vec();
+        long.push(0xA1);
+        // (codes, strict over-read, Gets, short reads, over-reads)
+        let cases: [(&[u8], bool, u32, u32, u32); 6] = [
+            (&V11, false, 1, 0, 0),
+            (&V11, true, 1, 0, 0),
+            (&short, false, 2, 0, 1),
+            (&short, true, 3, 1, 1),
+            (&long, false, 2, 1, 0),
+            (&long, true, 2, 1, 0),
+        ];
+        for (cmds, strict, gets, shorts, overs) in cases {
             let mut f = fake(cmds);
+            f.strict_over = strict;
             let s = block_on(flash(&mut f, &PLAN)).unwrap();
-            assert_eq!(f.split_reads, 0);
+            let seen = (f.gets, f.short_reads, f.over_reads);
+            assert_eq!(seen, (gets, shorts, overs), "{} codes", cmds.len());
             assert!(REGIONS.iter().all(|r| written(&f, r)));
-            assert_eq!((s.attempts, s.no_stretch), (1, cmds.len() == 17));
-            // A V1.1 list is read in one go; another length takes a second Get.
-            assert_eq!(f.gets, if cmds.len() == 17 { 1 } else { 2 });
+            assert_eq!(s.attempts, 1, "{} codes, strict {strict}", cmds.len());
+            assert_eq!(s.no_stretch, cmds.contains(&cmd::NS_ERASE));
             assert!(!f.boot0, "back to the application");
         }
     }

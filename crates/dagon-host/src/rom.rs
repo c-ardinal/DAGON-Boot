@@ -68,6 +68,14 @@ pub fn check_bootcore(img: &[u8], pubkey: &[u8; 32]) -> Result<ImageHeader, Form
 /// APP-A is sector 5 (128 KiB): header and payload must fit it.
 pub const F401_APP_A_LEN: usize = 0x2_0000;
 
+/// An APP-A image (header + payload) that fits its sector.
+pub fn check_app_a(img: &[u8]) -> Result<(), FormatError> {
+    if img.len() < HEADER_SIZE || img.len() > F401_APP_A_LEN {
+        return Err(FormatError::BadField);
+    }
+    Ok(())
+}
+
 /// Bodies first, then headers, then the state log.
 pub fn f401_regions<'a>(boot: &'a [u8], app: &'a [u8], log: &'a [u8]) -> [Region<'a>; 5] {
     let (bh, bb) = boot.split_at(HEADER_SIZE);
@@ -198,5 +206,14 @@ impl<'h, T: Transport, C: Clock> HubRom<'h, T, C> {
             timeout: FRAME_TIMEOUT_MS,
             shown: 0,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn app_a_larger_than_its_sector_is_refused() {
+        assert!(super::check_app_a(&alloc::vec![0; super::F401_APP_A_LEN + 1]).is_err());
+        assert!(super::check_app_a(&alloc::vec![0; super::F401_APP_A_LEN]).is_ok());
     }
 }

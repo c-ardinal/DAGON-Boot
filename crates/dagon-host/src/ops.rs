@@ -351,9 +351,7 @@ impl<T: Transport, C: Clock> Host<T, C> {
         let boot = a.bootcore.ok_or(Error::NoImage { node })?;
         crate::rom::check_bootcore(boot, a.pubkey)?;
         let app = image_for(&b, node, slot_binding::A).ok_or(Error::NoImage { node })?;
-        if app.len() > crate::rom::F401_APP_A_LEN {
-            return Err(Error::Format(dagon_format::FormatError::BadField));
-        }
+        crate::rom::check_app_a(app)?;
         let app_hdr: &[u8; HEADER_SIZE] = app[..HEADER_SIZE].try_into().expect("verified");
         let v = ImageHeader::parse(app_hdr)?.version;
         let log = crate::rom::initial_log(app_hdr)?;

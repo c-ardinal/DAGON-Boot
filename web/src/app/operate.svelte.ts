@@ -615,7 +615,8 @@ export class Operate {
     this.live[n.id] = { ...(this.live[n.id] ?? UNKNOWN), responding: true, lastSeen: Date.now() };
     const rest = this.file?.verdict === 'pass' ? Object.entries(this.progress).filter(([, p]) => p.stage === 'unwritten').map(([id]) => id) : [];
     this.status = kind === 'rollback' ? ANNOUNCE.A15(n.name, versionText(r.version)) : ANNOUNCE.A16(n.name, rest.length);
-    if (this.state === 'L20') {
+    // The hub's REBOOT event moved the state on while dagon-host ran.
+    if ((this.state as L) === 'L20') {
       this.go('confirmed');
     } else if (rest.length) {
       this.targets = rest;

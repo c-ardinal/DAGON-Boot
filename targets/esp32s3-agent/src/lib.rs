@@ -3,15 +3,20 @@
 //!
 //! - [`store::EspStore`]: the agent's `SlotStore` (OTA partitions, detached
 //!   headers in the dagon partition, otadata)
-//! - [`trial::TrialWatchdog`]: bounded self-feed while on trial
-//! - `node` (Xtensa): board bring-up and the serving loop for the `app`
-//!   (ota_0/ota_1) and `factory` binaries
+//! - [`trial::TrialWatchdog`]: bounded self-feed while on trial, gated by
+//!   [`liveness::Liveness`] (every task within its announced deadline)
+//! - [`rom`]: the ENTER_ROM request (cooperative ROM download mode)
+//! - `node` (Xtensa): `node::start` takes the peripherals DAGON owns and
+//!   runs the link task (rear UART0 and USB Serial/JTAG, async) on a
+//!   high-priority interrupt executor. Used by the `factory` binary here and
+//!   by the app in `targets/esp32s3-app`.
 //!
 //! Build-time identity: `DAGON_PUBKEY` (path to the `.pub` file, or 64 hex
 //! digits; unset: the RFC 8032 test key, with a build warning) and
 //! `DAGON_TARGET_TAG` (default `watch-s3`).
 #![cfg_attr(not(test), no_std)]
 
+pub mod liveness;
 pub mod rom;
 pub mod store;
 pub mod trial;

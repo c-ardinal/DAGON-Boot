@@ -5,22 +5,17 @@ edition = "2021"
 license = "MIT OR Apache-2.0"
 publish = false
 
-# Standalone workspace: built with the espup Xtensa toolchain, not the host one.
-# The receiver (`store`) and the trial watchdog also build and test on the host.
+# DAGON side of the watch: the library apps link (`node::start`) and the
+# factory recovery agent. Standalone workspace, built with the espup Xtensa
+# toolchain; the pure modules also build and test on the host.
 [workspace]
 
 [features]
 # Conformance build: answers CONF_RUN (node-side tests) in front of the agent.
 conform = ["dep:dagon-conform"]
-# Test build that refuses CONFIRM, so its trial always rolls back.
-no-confirm = []
 # ENTER_ROM method 2 through the M5PM1 power manager. Off until its I2C
 # address and Download command byte are confirmed.
 pmic-download = []
-
-[[bin]]
-name = "app"
-test = false
 
 [[bin]]
 name = "factory"
@@ -40,6 +35,12 @@ ed25519-compact = { version = "2.6", default-features = false }
 [target.'cfg(target_arch = "xtensa")'.dependencies]
 esp-hal = { version = "1.2.2", features = ["esp32s3", "unstable"] }
 esp-bootloader-esp-idf = { version = "0.6.0", features = ["esp32s3"] }
+esp-rtos = { version = "0.4.0", features = ["esp32s3", "embassy"] }
+embassy-executor = "0.10"
+embassy-futures = "0.1"
+embassy-time = "0.5"
+embedded-io-async = "0.7"
+static_cell = "2"
 
 [profile.release]
 opt-level = "s"

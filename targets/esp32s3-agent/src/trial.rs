@@ -1,19 +1,19 @@
-//! Trial watchdog: an app on trial feeds the RTC WDT only for a bounded
-//! window, so an image that never gets confirmed is reset and the 2nd stage
-//! rolls it back.
+//! Trial watchdog: an app on trial never feeds the RTC WDT, so an image that
+//! is not confirmed within the WDT timeout (4 s from start) is reset and the
+//! 2nd stage rolls it back (one attempt). Once confirmed it feeds, and with a
+//! [`Liveness`] registry attached only while every task is within the
+//! deadline it announced.
 
 use dagon_port::{Clock, Watchdog};
 
-/// Self-feed window of an app on trial. A CONFIRM must arrive within it;
-/// after it the WDT runs out and the 2nd stage falls back. Window, WDT and
-/// two boots stay inside the PC's 30 s wait for the rolled-back HELLO.
-pub const TRIAL_FEED_MS: u32 = 15_000;
+use crate::liveness::Liveness;
 
 pub struct TrialWatchdog<W, C> {
     wdt: W,
     clock: C,
-    /// Feeding stops at this time (µs); `None` once confirmed.
-    deadline_us: Option<u64>,
+    /// Running unconfirmed: no feeding at all.
+    trial: bool,
+    liveness: Option<&'static Liveness>,
 }
 
 impl<W: Watchdog, C: Clock> TrialWatchdog<W, C> {
@@ -21,22 +21,36 @@ impl<W: Watchdog, C: Clock> TrialWatchdog<W, C> {
         Self {
             wdt,
             clock,
-            deadline_us: None,
+            trial: false,
+            liveness: None,
         }
     }
 
-    /// Starts the self-feed window, `window_ms` from now.
-    pub fn begin_trial(&mut self, window_ms: u32) {
-        self.deadline_us = Some(self.clock.now_us() + u64::from(window_ms) * 1000);
+    /// Feeds only while no task registered in `liveness` is overdue.
+    pub fn with_liveness(self, liveness: &'static Liveness) -> Self {
+        Self {
+            liveness: Some(liveness),
+            ..self
+        }
     }
 
-    /// Confirmed: feed for good.
+    /// Milliseconds since boot, wrapping (the [`Liveness`] time base).
+    pub fn now_ms(&self) -> u32 {
+        (self.clock.now_us() / 1000) as u32
+    }
+
+    /// Running on trial: stop feeding until [`TrialWatchdog::end_trial`].
+    pub fn begin_trial(&mut self) {
+        self.trial = true;
+    }
+
+    /// Confirmed: feed (subject to liveness) from now on.
     pub fn end_trial(&mut self) {
-        self.deadline_us = None;
+        self.trial = false;
     }
 
     pub fn on_trial(&self) -> bool {
-        self.deadline_us.is_some()
+        self.trial
     }
 
     /// The wrapped watchdog (to stop it before leaving the app).
@@ -51,7 +65,11 @@ impl<W: Watchdog, C: Clock> Watchdog for TrialWatchdog<W, C> {
     }
 
     fn feed(&mut self) {
-        if self.deadline_us.is_none_or(|d| self.clock.now_us() < d) {
+        if self.trial {
+            return;
+        }
+        let now_ms = self.now_ms();
+        if self.liveness.is_none_or(|l| !l.overdue(now_ms)) {
             self.wdt.feed();
         }
     }
@@ -80,18 +98,35 @@ mod tests {
     }
 
     #[test]
-    fn feeds_until_the_window_ends_unless_confirmed() {
+    fn no_feeding_on_trial_until_confirmed() {
         let (fed, now) = (Rc::new(Cell::new(0)), Rc::new(Cell::new(0)));
         let mut w = TrialWatchdog::new(Count(fed.clone()), Fake(now.clone()));
         w.feed();
-        w.begin_trial(1000);
-        now.set(999_999);
-        w.feed();
-        now.set(1_000_000);
-        w.feed();
-        assert_eq!(fed.get(), 2);
+        w.begin_trial();
+        for t in [0, 1_000, 3_999_000] {
+            now.set(t);
+            w.feed();
+        }
+        assert_eq!(fed.get(), 1, "fed on trial");
         w.end_trial();
         w.feed();
-        assert_eq!(fed.get(), 3);
+        assert_eq!(fed.get(), 2);
+    }
+
+    #[test]
+    fn an_overdue_task_stops_the_feeding() {
+        static L: Liveness = Liveness::new();
+        let (fed, now) = (Rc::new(Cell::new(0)), Rc::new(Cell::new(0)));
+        let mut w = TrialWatchdog::new(Count(fed.clone()), Fake(now.clone())).with_liveness(&L);
+        let task = L.register().unwrap();
+        task.busy(0, 100);
+        now.set(99_000);
+        w.feed();
+        now.set(100_000);
+        w.feed();
+        assert_eq!(fed.get(), 1, "overdue at 100 ms");
+        task.idle();
+        w.feed();
+        assert_eq!(fed.get(), 2);
     }
 }

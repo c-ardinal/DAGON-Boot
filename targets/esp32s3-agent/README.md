@@ -1,14 +1,19 @@
 # esp32s3-agent
 
-DAGON node for the M5StopWatch (ESP32-S3, 16 MB): the dagon-agent serving
-the rear UART0 (G43 TX / G44 RX, 115200 8N1) and, for direct work over
-USB-C, the USB Serial/JTAG port. Requests are answered on the link they came
-in on. Built on `targets/esp32s3-port`.
+DAGON side of the M5StopWatch (ESP32-S3, 16 MB): the library every watch
+image links, and the factory recovery agent. The dagon-agent serves the rear
+UART0 (G43 TX / G44 RX, 115200 8N1) and, for direct work over USB-C, the USB
+Serial/JTAG port; requests are answered on the link they came in on. Built on
+`targets/esp32s3-port`; the flashed partition table is `partitions.csv` here.
 
-| Binary | Partition | HELLO mode |
-|---|---|---|
-| `app` | ota_0 / ota_1 | 0 (app) |
-| `factory` | factory | 3 (agent), the recovery target when otadata selects nothing bootable |
+| Image | Where | Partition | HELLO mode |
+|---|---|---|---|
+| `factory` | this crate | factory | 3 (agent), the recovery target when otadata selects nothing bootable |
+| `app` | `targets/esp32s3-app` | ota_0 / ota_1 | 0 (app) |
+
+An app uses the public API only: `node::start(peripherals, link_irq,
+NodeConfig::app(self_check), &LIVENESS)` after `esp_rtos::start`, and a
+`liveness::Lease` per task of its own.
 
 ## Receiver (`store::EspStore`)
 
@@ -41,8 +46,9 @@ rewritten through the ROM loader.
 
 ## ROM entry (ENTER_ROM, cmd 0x24)
 
-Both binaries answer ENTER_ROM `method` u8 with OK, then switch to the ESP32
-ROM download mode (E_ARG for other methods, nothing happens):
+Every image (app and factory) answers ENTER_ROM `method` u8 with OK, then
+switches to the ESP32 ROM download mode (E_ARG for other methods, nothing
+happens):
 
 - First, for either method, the RTC watchdog is stopped and the super
   watchdog left on auto-feed: both survive the software reset and nothing in
@@ -63,11 +69,27 @@ this cooperative path (or the power button held about 2 s) is the only one.
 Not yet checked on the watch: that the ROM loader listens on the rear UART0
 after method 1. A broken ESP-IDF 2nd stage cannot be recovered this way.
 
-## Trial watchdog
+## Tasks, priorities and the watchdog
 
-The RTC WDT (4 s) runs from start-up and the serving loop feeds it. On trial
-the app feeds it for 15 s only; a CONFIRM inside that window ends the trial,
-otherwise the watch resets and the 2nd stage rolls back.
+- `node::start` runs the link task on an esp-rtos interrupt executor at
+  priority 2 (software interrupt 1). The link task is the only owner of
+  UART0, USB Serial/JTAG, the flash, the RTC and super watchdogs and the
+  internal I2C. It waits on both links with interrupt-driven async reads and
+  serves requests one at a time, so the agent is only ever touched there.
+- The app's tasks run on the thread-mode executor (`#[esp_rtos::main]`),
+  below every interrupt: DAGON traffic preempts them and never waits on them.
+- Trial: the RTC WDT (4 s) starts with the link task and is not fed while
+  the image is on trial. The PC has to CONFIRM within about 4 s of the start;
+  otherwise the watch resets and the 2nd stage rolls back (one attempt).
+- Once confirmed the link task feeds it (every 500 ms and during long flash
+  work), but only while every task in the `Liveness` registry is within the
+  deadline it announced (`Lease::busy(now, budget)` before a piece of work,
+  `Lease::idle()` when waiting). A task stuck in its work stops the feeding
+  and the watch resets instead of hanging. The link task announces a budget
+  for each request. ENTER_ROM stops the watchdogs before its reset (see
+  above).
+- Both receivers drop a partial frame after 20 ms without a byte and look for
+  the next SOF.
 
 ## Build and test
 
@@ -81,93 +103,16 @@ from a trial, REBOOT without CONFIRM: the 2nd stage rolls back.
 
 ```sh
 # from this directory (espup toolchain)
-cargo build --release                                             # app, factory
-cargo build --release --features conform --target-dir target/conform
-cargo build --release --features conform,no-confirm --target-dir target/noconfirm
-# receiver and trial watchdog on the host
+cargo build --release                       # factory
+# receiver, liveness, trial watchdog, ROM entry and factory flow on the host
 cargo +stable test --lib --target x86_64-pc-windows-msvc
 ```
 
-Features: `conform` answers CONF_RUN (CT-01/02/03/07/08) in front of the
-agent, using the first erase unit of the OTA slot that is neither running nor
-the fallback as scratch. `no-confirm` refuses CONFIRM (E_STATE), so its trial
-always rolls back.
+Library features (the app forwards them): `conform` answers CONF_RUN
+(CT-01/02/03/07/08) in front of the agent, using the first erase unit of the
+OTA slot that is neither running nor the fallback as scratch;
+`pmic-download` builds ENTER_ROM method 2.
 
-## Conformance run over USB-C (direct)
+The app build and the conformance runs (USB-C direct and through the hub)
+are in `targets/esp32s3-app/README.md`.
 
-Prerequisites: the rollback-enabled 2nd stage
-(`targets/esp32s3-2ndstage/build/bootloader/bootloader.bin`), the three builds
-above made with `DAGON_PUBKEY` set to the signing key's public key, and the
-`dagon` CLI with that key. Run from the repository root.
-
-1. Raw app images (what goes into the OTA partitions):
-
-   ```sh
-   R=targets/esp32s3-agent/target/xtensa-esp32s3-none-elf/release
-   C=targets/esp32s3-agent/target/conform/xtensa-esp32s3-none-elf/release
-   N=targets/esp32s3-agent/target/noconfirm/xtensa-esp32s3-none-elf/release
-   espflash save-image --chip esp32s3 --flash-size 16mb $C/app out/watch-good.bin
-   espflash save-image --chip esp32s3 --flash-size 16mb $N/app out/watch-noconfirm.bin
-   ```
-
-2. Signed images: `good` twice with different versions, `no_confirm` with a
-   third one.
-
-   ```sh
-   dagon image sign out/watch-good.bin --node watch --version 1.0.0 --out out/watch-good-1.0.0.img
-   dagon image sign out/watch-good.bin --node watch --version 1.1.0 --out out/watch-good-1.1.0.img
-   dagon image sign out/watch-noconfirm.bin --node watch --version 1.2.0 --out out/watch-noconfirm-1.2.0.img
-   ```
-
-3. First install over USB-C. The 16 MB flash size and the table offset are
-   needed every time.
-
-   ```sh
-   F="--chip esp32s3 --flash-size 16mb --partition-table-offset 0x8000 \
-      --bootloader targets/esp32s3-2ndstage/build/bootloader/bootloader.bin \
-      --partition-table targets/esp32s3-agent/partitions.csv"
-   espflash flash $F --erase-parts otadata,dagon --target-app-partition factory $R/factory
-   # good 1.0.0 into ota_0: body at the partition, header in the dagon partition
-   head -c 512 out/watch-good-1.0.0.img > out/hdr.bin
-   tail -c +513 out/watch-good-1.0.0.img > out/body.bin
-   espflash write-bin 0x110000 out/body.bin
-   espflash write-bin 0x710000 out/hdr.bin
-   # otadata entry 0: seq 1 (ota_0), state Valid, CRC of seq 1
-   { printf '\001\000\000\000'; printf '\377%.0s' $(seq 20); printf '\002\000\000\000\232\230\103\107'; } > out/otadata.bin
-   espflash write-bin 0xD000 out/otadata.bin
-   ```
-
-4. Check over the USB-C serial port: HELLO answers mode 0, version 1.0.0,
-   trial 0; STATUS shows slot A state 4, `active` 0, `confirmed` 0.
-
-5. Run the conformance sequence against the USB-C serial port with
-   `good = [watch-good-1.1.0.img, watch-good-1.1.0.img]` and
-   `no_confirm = [watch-noconfirm-1.2.0.img, watch-noconfirm-1.2.0.img]`.
-   The agent announces the UART `max_payload` (1024) on both links, so the
-   PC side must treat this direct link as UART for CT-18. Expected: CT-11
-   ends on 1.1.0 in B confirmed (A written, 1.0.0); CT-12 returns to B within
-   about 20 s (15 s window + 4 s WDT + two boots) with A state 5 and last
-   reason 3 (TRIAL_EXHAUSTED).
-
-The 2nd stage prints its boot log on UART0 and USB at every reset; the frame
-cutter skips it.
-
-## Conformance run through the hub (rear UART)
-
-The result that counts is the run through the hub. Same images and first
-install as above (steps 1 to 4, over USB-C), then:
-
-1. Wiring: hub PIO UART GPIO26 (TX) to the watch's rear G44 (RX), hub GPIO27
-   (RX) to rear G43 (TX), and GND. 115200 8N1. The app routes the rear pins
-   to UART0 at start-up.
-2. Charge the watch, unplug USB-C (rear UART and USB are not used at the same
-   time); the watch runs on its battery.
-3. With the hub app on USB to the PC: `dagon conform --node watch` (the node
-   id from the topology), images as in step 5 above. The hub relays every
-   request over the PIO UART, so `max_payload` matches the UART link.
-   Expected as above; the run leaves the watch on the other slot, confirmed.
-4. Factory path: select factory (blank otadata, for example by
-   `espflash erase-region 0xD000 0x2000` over USB-C), plug out USB-C again,
-   then `dagon recover watch`: HELLO answers mode 3, the image goes into
-   ota_0 or ota_1, SET_PENDING, REBOOT, and the app answers mode 0 on trial
-   until CONFIRM.

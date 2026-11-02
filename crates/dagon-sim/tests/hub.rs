@@ -331,6 +331,34 @@ fn rom_erase_write_read_with_busy_and_frame_timeout() {
     assert_eq!(hub.i2c_node(NODE_I2C_ADDR).unwrap().rom.timeouts, 1);
 }
 
+#[test]
+fn rom_stretched_erase_through_i2c_raw() {
+    let mut hub = hub_with_f401();
+    let mut pc = Pc { seq: 0 };
+    pc.subctl(&mut hub, nrst::PULSE, boot0::HIGH);
+
+    assert_eq!(pc.rom(&mut hub, &[cmd::ERASE, 0xBB], 1), [ACK]);
+    assert_eq!(pc.rom(&mut hub, &[0x00, 0x00, 0x00], 1), [ACK]);
+    let t0 = hub.now_ms();
+    assert_eq!(pc.rom(&mut hub, &[0x00, 0x05, 0x05], 1), [ACK], "sector 5");
+    assert!(hub.now_ms() - t0 >= 2048);
+
+    assert_eq!(pc.rom(&mut hub, &[cmd::ERASE, 0xBB], 1), [ACK]);
+    assert_eq!(
+        pc.rom(&mut hub, &[0xFF, 0xFF, 0x00], 1),
+        [ACK],
+        "mass erase"
+    );
+    let node = hub.i2c_node(NODE_I2C_ADDR).unwrap();
+    assert_eq!(node.rom.timeouts, 0);
+    let f = node.flash();
+    let erased = (0..8).all(|s| {
+        let (a, l) = f.sector_addr(s).unwrap();
+        f.peek(a, l).unwrap().iter().all(|&b| b == 0xFF)
+    });
+    assert!(erased, "boot core, log and app sectors are blank");
+}
+
 /// XFER_BEGIN .. XFER_END, SET_PENDING and REBOOT to the I2C node.
 fn transfer(pc: &mut Pc, hub: &mut SimHub, slot: u8, img: &[u8]) {
     let mut b = [0u8; 8];

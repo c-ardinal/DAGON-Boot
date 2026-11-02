@@ -6,12 +6,11 @@
 //!
 //! | method | How | When it does not take |
 //! |---|---|---|
-//! | 1 | `RTC_CNTL_OPTION1_REG.FORCE_DOWNLOAD_BOOT`, then a software reset | the bit does not read back: method 2 |
-//! | 2 | M5PM1 power manager `SYS_CMD` Download over the internal I2C | normal software reset (the agent answers again) |
+//! | 1 | `RTC_CNTL_OPTION1_REG.FORCE_DOWNLOAD_BOOT`, then a software reset | normal software reset (the agent answers again) |
+//! | 2 | M5PM1 power manager `SYS_CMD` Download over the internal I2C; only with the `pmic-download` feature, else E_UNSUPPORTED | normal software reset |
 //!
-//! Method 1 is the first choice; the PC sends method 2 when the agent still
-//! answers HELLO after method 1. This module is the request side and is
-//! tested on the host; the register and I2C work is in `node`.
+//! This module is the request side and is tested on the host; the register
+//! and I2C work is in `node`.
 
 use dagon_proto::{flags, Frame, Status, HEADER_LEN};
 
@@ -19,9 +18,10 @@ use dagon_proto::{flags, Frame, Status, HEADER_LEN};
 pub const CMD_ENTER_ROM: u8 = 0x24;
 
 /// M5PM1 on the internal SYS I2C (SDA G47 / SCL G48).
-// ponytail: unverified. The datasheet gives SYS_CMD 0x0C = KEY 0xA + CMD
-// 0b11 (Download); KEY in the high nibble and the 7-bit address 0x6E are
-// assumptions. Confirm both on the watch before relying on method 2.
+// Unverified: the datasheet gives SYS_CMD 0x0C = KEY 0xA + CMD 0b11
+// (Download); KEY in the high nibble and the 7-bit address 0x6E are
+// assumptions, hence the feature gate until M5Stack documents or the
+// hardware confirm them.
 pub const M5PM1_ADDR: u8 = 0x6E;
 pub const M5PM1_SYS_CMD: u8 = 0x0C;
 pub const M5PM1_DOWNLOAD: u8 = 0xA3;
@@ -36,8 +36,8 @@ pub enum Method {
 pub const REPLY_LEN: usize = dagon_proto::frame_len(1);
 
 /// Answers an ENTER_ROM request: OK with the method to run after the reply
-/// has been sent, or E_ARG (nothing to run). `None`: not an ENTER_ROM
-/// request.
+/// has been sent, E_UNSUPPORTED for method 2 without `pmic-download`, or
+/// E_ARG (nothing to run either way). `None`: not an ENTER_ROM request.
 pub fn enter_rom_request(
     request: &[u8],
     max_payload: usize,
@@ -47,16 +47,13 @@ pub fn enter_rom_request(
     if f.cmd != CMD_ENTER_ROM || f.flags & (flags::RESP | flags::EVENT) != 0 {
         return None;
     }
-    let method = match f.payload {
-        [1] => Some(Method::ForceDownloadBoot),
-        [2] => Some(Method::M5pm1),
-        _ => None,
+    let (status, method) = match f.payload {
+        [1] => (Status::Ok, Some(Method::ForceDownloadBoot)),
+        [2] if cfg!(feature = "pmic-download") => (Status::Ok, Some(Method::M5pm1)),
+        [2] => (Status::Unsupported, None),
+        _ => (Status::Arg, None),
     };
-    out[HEADER_LEN] = if method.is_some() {
-        Status::Ok
-    } else {
-        Status::Arg
-    } as u8;
+    out[HEADER_LEN] = status as u8;
     let n = dagon_proto::finish(out, flags::RESP, f.seq, f.cmd, 1).ok()?;
     Some((n, method))
 }
@@ -94,10 +91,12 @@ mod tests {
             answer(&req(CMD_ENTER_ROM, &[1])),
             (Status::Ok, Some(Method::ForceDownloadBoot))
         );
-        assert_eq!(
-            answer(&req(CMD_ENTER_ROM, &[2])),
+        let method2 = if cfg!(feature = "pmic-download") {
             (Status::Ok, Some(Method::M5pm1))
-        );
+        } else {
+            (Status::Unsupported, None)
+        };
+        assert_eq!(answer(&req(CMD_ENTER_ROM, &[2])), method2);
         for p in [&[][..], &[0], &[3], &[1, 0]] {
             assert_eq!(answer(&req(CMD_ENTER_ROM, p)), (Status::Arg, None));
         }

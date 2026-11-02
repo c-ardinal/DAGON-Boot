@@ -14,6 +14,9 @@ publish = false
 conform = ["dep:dagon-conform"]
 # Test build that refuses CONFIRM, so its trial always rolls back.
 no-confirm = []
+# ENTER_ROM method 2 through the M5PM1 power manager. Off until its I2C
+# address and Download command byte are confirmed.
+pmic-download = []
 
 [[bin]]
 name = "app"

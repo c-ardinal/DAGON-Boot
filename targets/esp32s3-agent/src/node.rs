@@ -20,9 +20,12 @@ use dagon_esp32s3_port::{
 use dagon_port::{BootSelectV, Reset, Watchdog};
 use dagon_proto::payload::SlotState;
 use esp_bootloader_esp_idf::partitions::FlashStorage;
+#[cfg(feature = "pmic-download")]
 use esp_hal::{
     delay::Delay,
     i2c::master::{Config as I2cConfig, Error as I2cError, I2c},
+};
+use esp_hal::{
     peripherals::{GPIO47, GPIO48, I2C0, LPWR},
     rtc_cntl::Rtc,
     time::{Duration, Instant},
@@ -38,10 +41,11 @@ use crate::trial::{TrialWatchdog, TRIAL_FEED_MS};
 /// Give up on a USB reply after this long (host stopped reading).
 const USB_SEND_TIMEOUT: Duration = Duration::from_millis(200);
 /// Time the M5PM1 gets to reset the chip into download mode.
+#[cfg(feature = "pmic-download")]
 const M5PM1_WAIT_MS: u32 = 1000;
 
-/// Internal SYS I2C (M5IOE1 expander, M5PM1 power manager), kept for
-/// ENTER_ROM method 2 after the rear pins are routed.
+/// Internal SYS I2C (M5IOE1 expander, M5PM1 power manager), kept after the
+/// rear pins are routed for ENTER_ROM method 2 (`pmic-download`).
 struct SysBus<'d> {
     i2c0: I2C0<'d>,
     sda: GPIO47<'d>,
@@ -215,24 +219,32 @@ fn conform(agent: &mut Node<'_, '_>, frame: &[u8], out: &mut [u8]) -> Option<usi
     handle_frame(frame, max, flash, &setup, out, &mut || wdt.feed())
 }
 
-/// Method 1, falling back to method 2 when the force bit does not read back;
-/// when neither takes, a normal reset brings the agent back.
+/// Runs the method; when it does not take, a normal reset brings the agent
+/// back (no fallback to the other method).
 fn enter_rom(method: Method, sys: &mut SysBus<'_>) -> ! {
-    if method == Method::ForceDownloadBoot {
-        let rtc = LPWR::regs();
-        rtc.option1()
-            .modify(|_, w| w.force_download_boot().set_bit());
-        if rtc.option1().read().force_download_boot().bit_is_set() {
-            // A software reset keeps the RTC domain, so the ROM sees the bit.
-            esp_hal::system::software_reset();
+    match method {
+        Method::ForceDownloadBoot => {
+            let rtc = LPWR::regs();
+            rtc.option1()
+                .modify(|_, w| w.force_download_boot().set_bit());
+            // A software reset keeps the RTC domain, so the ROM sees the bit;
+            // if it did not stick, the same reset just restarts the agent.
         }
+        #[cfg(feature = "pmic-download")]
+        Method::M5pm1 => {
+            if m5pm1_download(sys).is_ok() {
+                Delay::new().delay_millis(M5PM1_WAIT_MS);
+            }
+        }
+        // Not produced without `pmic-download` (answered E_UNSUPPORTED).
+        #[cfg(not(feature = "pmic-download"))]
+        Method::M5pm1 => {}
     }
-    if m5pm1_download(sys).is_ok() {
-        Delay::new().delay_millis(M5PM1_WAIT_MS);
-    }
+    let _ = sys;
     esp_hal::system::software_reset()
 }
 
+#[cfg(feature = "pmic-download")]
 fn m5pm1_download(sys: &mut SysBus<'_>) -> Result<(), I2cError> {
     let mut i2c = I2c::new(sys.i2c0.reborrow(), I2cConfig::default())
         .map_err(|_| I2cError::Timeout)?

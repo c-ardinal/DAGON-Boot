@@ -45,19 +45,19 @@ Both binaries answer ENTER_ROM `method` u8 with OK, then switch to the ESP32
 ROM download mode (E_ARG for other methods, nothing happens):
 
 - method 1: sets `RTC_CNTL_OPTION1_REG.FORCE_DOWNLOAD_BOOT` and does a
-  software reset (the RTC domain keeps the bit). If the bit does not read
-  back, it goes on with method 2.
-- method 2: sends the M5PM1 power manager the Download command
-  (`SYS_CMD` 0x0C) on the internal I2C (G47/G48).
-- If neither takes, the node resets normally and the agent answers again; the
-  PC then tries method 2.
+  software reset (the RTC domain keeps the bit). If it does not take, the
+  same reset brings the agent back; there is no automatic fallback.
+- method 2: the M5PM1 power manager's Download command (`SYS_CMD` 0x0C) on
+  the internal I2C (G47/G48). Off by default and answered E_UNSUPPORTED: it
+  waits for the M5PM1 I2C address and command byte to be confirmed by M5Stack
+  documentation or on the hardware. The non-default feature `pmic-download`
+  builds it with the assumed values (address 0x6E, byte 0xA3).
 
 The watch has no external reset and its strapping pins are only sampled at a
 chip reset, so holding G0 low from outside does not reach the ROM loader:
 this cooperative path (or the power button held about 2 s) is the only one.
 Not yet checked on the watch: that the ROM loader listens on the rear UART0
-after method 1, and the M5PM1 I2C address (0x6E) and command byte (0xA3)
-used by method 2. A broken ESP-IDF 2nd stage cannot be recovered this way.
+after method 1. A broken ESP-IDF 2nd stage cannot be recovered this way.
 
 ## Trial watchdog
 

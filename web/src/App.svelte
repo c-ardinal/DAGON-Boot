@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { tick } from 'svelte';
+  import { tick, untrack } from 'svelte';
   import { bandOf } from './app/band.ts';
   import { ANNOUNCE, BAND, BUTTON, CANVAS, DEFINE, DIFF, HUB_TOGGLE, MODE, NODE, ORDER, PLAN, PRODUCT, RECONNECT, SAVE, SKIP, STEP, TIME } from './app/copy.ts';
   import { chooseAndOpen } from './app/connect.ts';
@@ -24,7 +24,7 @@
   import Problems from './screens/define/Problems.svelte';
   import Table from './screens/define/Table.svelte';
   import CliPanel from './screens/define/CliPanel.svelte';
-  import { Cli } from './app/define/cli.svelte.ts';
+  import { Cli, type Layout } from './app/define/cli.svelte.ts';
   import { CLI_LINK, CLI_STATE } from './app/copy.ts';
   import FilePanel from './screens/FilePanel.svelte';
   import Reconnect from './screens/Reconnect.svelte';
@@ -130,18 +130,35 @@
   // SC-S0 is reached only through `leave` (menu, 最初からやり直す), so no unsaved edit is here when a project opens.
   async function openWork(want?: 'operate' | 'define') {
     const yaml = await cli.loadTopology().catch(() => null);
+    // 呼び名 and positions live beside the YAML (GET /v1/layout).
+    projectLayout = (await cli.loadLayout().catch(() => null)) ?? {};
     local = false;
     op.reset();
     d.reset();
     if (yaml) {
       try {
-        d.load(fromYaml(yaml));
+        d.load(fromYaml(yaml, projectLayout.names ?? {}));
       } catch {
         d.unreadable = true;
       }
     }
+    layoutNames = JSON.stringify(d.doc.names);
     enterWork(want);
   }
+
+  /** The project's layout file as last read or written; names follow the edits. */
+  let projectLayout: Layout = {};
+  let layoutNames = '';
+  $effect(() => {
+    const names = JSON.stringify(d.doc.names);
+    if (screen !== 'work' || local) return;
+    untrack(() => {
+      if (names === layoutNames) return;
+      layoutNames = names;
+      projectLayout = { ...projectLayout, names: { ...d.doc.names } };
+      void cli.saveLayout(projectLayout);
+    });
+  });
 
   function enterWork(want?: 'operate' | 'define') {
     start.clear();

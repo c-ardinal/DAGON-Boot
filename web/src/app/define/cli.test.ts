@@ -18,15 +18,24 @@ function fake(opts: { status?: number; hash?: string } = {}) {
   const sent: string[] = [];
   let sock: { onopen?: () => void; onmessage?: (m: { data: string }) => void; onclose?: () => void; send: (s: string) => void } | null = null;
   let replaced = '';
+  let layout = '';
   const deps: CliDeps = {
     fetch: (async (url: string, init: RequestInit) => {
       calls.push({ url, method: init.method ?? 'GET', auth: (init.headers as Record<string, string>).Authorization, body: init.body });
       if (opts.status) return new Response('', { status: opts.status });
       if (url === '/v1/hello') return Response.json(HELLO);
       if (url.startsWith('/v1/release/')) return new Response(Uint8Array.of(1, 2, 3));
+      if (url === '/v1/layout') {
+        if (init.method === 'PUT') {
+          layout = String(init.body);
+          return Response.json({ saved: true });
+        }
+        return layout ? new Response(layout) : Response.json({ error: 'no layout yet' }, { status: 404 });
+      }
+      if (url === '/v1/project/init') return Response.json({ open: true });
       if (url === '/v1/project/open') {
         const path = JSON.parse(String(init.body)).path as string;
-        const status = { empty: 404, badkey: 422, busy: 409, '..': 403 }[path];
+        const status = { empty: 404, badkey: 422, busy: 409, '..': 403, yamlonly: 428 }[path];
         if (status) return Response.json({ error: status === 409 ? 'a job is running; switch projects when it ends' : 'no' }, { status });
         return Response.json({ open: true, path: `/home/u/${path}`, name: path });
       }
@@ -142,6 +151,41 @@ describe('dagon serve link', () => {
     expect(f.calls[f.calls.length - 2]).toMatchObject({ url: '/v1/project/new', body: JSON.stringify({ path: '/home/u/fresh', from_sample: true }) });
     await cli.fs('/home/u/a b');
     expect(f.calls[f.calls.length - 1].url).toBe('/v1/fs?path=%2Fhome%2Fu%2Fa%20b');
+  });
+
+  test('書き込む is offered only for the MCU families serve\'s flash writes', async () => {
+    const f = fake();
+    const cli = new Cli(f.deps);
+    await cli.connect();
+    expect(cli.canFlash('rp2040')).toBe(false);
+    cli.hello = { ...cli.hello!, features: [...cli.hello!.features, 'flash'], flash_mcus: ['rp2040', 'stm32f401re'] };
+    expect(['rp2040', 'stm32f401re', 'esp32s3'].map((m) => cli.canFlash(m))).toEqual([true, true, false]);
+    cli.hello = { ...cli.hello!, flash_mcus: undefined };
+    expect(cli.canFlash('rp2040')).toBe(false);
+  });
+
+  test('a folder with only a 構成 is its own answer (428), and init opens it with hello read again', async () => {
+    const f = fake();
+    const cli = new Cli(f.deps);
+    await cli.connect();
+    expect(await cli.openProject('yamlonly')).toBe('yaml');
+    expect(await cli.initProject('/home/u/yamlonly')).toBe('opened');
+    expect(f.calls[f.calls.length - 2]).toMatchObject({ url: '/v1/project/init', method: 'POST', body: JSON.stringify({ path: '/home/u/yamlonly' }) });
+    expect(f.calls[f.calls.length - 1].url).toBe('/v1/hello');
+  });
+
+  test('the layout (呼び名, positions) is read and written whole through serve, only with the layout feature', async () => {
+    const f = fake();
+    const cli = new Cli(f.deps);
+    await cli.connect();
+    expect(await cli.loadLayout()).toBeNull();
+    expect(f.calls.some((c) => c.url === '/v1/layout')).toBe(false);
+    cli.hello = { ...cli.hello!, features: [...cli.hello!.features, 'layout'] };
+    expect(await cli.loadLayout()).toBeNull();
+    const l = { names: { seg: '7セグ' }, positions: { seg: { x: 10, y: 20 } } };
+    expect(await cli.saveLayout(l)).toBe(true);
+    expect(f.calls[f.calls.length - 1]).toMatchObject({ url: '/v1/layout', method: 'PUT', body: JSON.stringify(l) });
+    expect(await cli.loadLayout()).toEqual(l);
   });
 
   test('the latest release and a boot core come only through serve; none is null', async () => {

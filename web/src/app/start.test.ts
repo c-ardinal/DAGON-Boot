@@ -14,6 +14,7 @@ function fakeCli(features: string[], answer: ProjectResult = 'opened') {
       return p ? { path: p, parent: HOME.path, folders: [] } : HOME;
     },
     openProject: async (p: string) => (calls.push(`open ${p}`), answer),
+    initProject: async (p: string) => (calls.push(`init ${p}`), 'opened'),
     newProject: async (p: string, sample: boolean) => (calls.push(`new ${p} ${sample}`), answer),
   } as unknown as Cli;
   return { cli, calls };
@@ -42,6 +43,30 @@ describe('SC-S0 start', () => {
     await s.open('C:/Users/u/desk');
     await s.browse('C:/Users/u/work');
     expect(calls).toEqual(['fs ', 'new C:/Users/u/desk-demo true', 'fs C:/Users/u', 'open C:/Users/u/desk', 'fs C:/Users/u/work']);
+  });
+
+  test('a folder with only a 構成 asks first: yes makes dagon.toml and opens it, no stays', async () => {
+    const { cli, calls } = fakeCli(['project'], 'yaml');
+    let opened = 0;
+    const s = new Start({ cli, opened: async () => void opened++, local: null });
+    await s.choose('open');
+    await s.open('C:/Users/u/y');
+    expect([s.asking, s.failed, opened]).toEqual(['C:/Users/u/y', null, 0]);
+    await s.init(false);
+    expect([s.asking, opened]).toEqual([null, 0]);
+    await s.open('C:/Users/u/y');
+    await s.init(true);
+    expect([s.asking, s.failed, opened]).toEqual([null, null, 1]);
+    expect(calls.slice(-3)).toEqual(['open C:/Users/u/y', 'open C:/Users/u/y', 'init C:/Users/u/y']);
+  });
+
+  test('the recent list is serve\'s, at most 5 shown', async () => {
+    const { cli } = fakeCli(['project']);
+    const recent = Array.from({ length: 10 }, (_, i) => ({ path: `C:/Users/u/p${i}`, name: `p${i}` }));
+    (cli as unknown as { project: () => Promise<unknown> }).project = async () => ({ open: false, recent });
+    const s = new Start({ cli, opened: async () => undefined, local: null });
+    await s.refresh();
+    expect(s.recent.map((r) => r.name)).toEqual(['p0', 'p1', 'p2', 'p3', 'p4']);
   });
 
   test('a refusal stays on SC-S0 with its reason; nothing opens', async () => {

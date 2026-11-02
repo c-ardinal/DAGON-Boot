@@ -728,6 +728,12 @@ export const FLASH = {
     esp32s3: ['USB-C', 'USB-C でつないでから、書き込んでください（つながらないときは BOOT を押しながら）。'],
   } as Record<string, [string, string]>,
   hubFirst: '親機から書き込んでください（親機が無いと子機を確かめられません）。',
+  /** 案: the confirmation before serve writes the board (its job question). */
+  confirm: (name: string) => `${name} に書き込みます。よろしいですか。`,
+  /** 案: a family serve's flash does not write yet (ESP32-S3). */
+  otherTools: 'このマイコンは、今は ESP のツールで書き込んでください。',
+  yes: 'はい',
+  no: 'いいえ',
   done: '✓ 書き込み済み',
   running: '● 実行中',
   notFound: '× 見つからない',
@@ -792,6 +798,8 @@ export const START = {
   busy: { chip: '× 作業中', sentence: '作業が終わってから、もう一度選んでください。' },
   refused: { chip: '× 開けない', sentence: 'ホームフォルダの中のフォルダを選んでください。' },
   exists: { chip: '× 作れない', sentence: 'まだ無いフォルダの名前を入れてください。' },
+  /** S46: a folder with a 構成 but no dagon.toml. */
+  initAsk: 'このフォルダに dagon.toml を作りますか。',
 } as const;
 
 /** SC-M メニュー and its one confirmation (M53). */

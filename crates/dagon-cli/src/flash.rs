@@ -7,7 +7,7 @@
 
 use std::path::{Path, PathBuf};
 use std::process::Command;
-use std::sync::atomic::AtomicBool;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
 use dagon_topology::Topology;
@@ -131,18 +131,22 @@ fn inputs(
     t: &Topology,
     node: &str,
     key: &KeyPair,
+    log: &mut dyn FnMut(&str),
+    cancel: &AtomicBool,
 ) -> Result<ProvisionInputs, String> {
     let n = t.node(node).ok_or("checked in plan")?;
     let fw_key = firmware_key(cfg, key)?;
     let hex = dagon_sign::to_hex(&fw_key);
-    let cancel = AtomicBool::new(false);
-    let mut log = |l: &str| println!("{l}");
     let mut built = Vec::new();
     for part in parts(&n.mcu).ok_or("checked in plan")? {
         let dir = dagon_home().join(part.package);
         let bin = nodebuild::package_name(&dir)?;
         let target = cfg.base.join("out/flash/target").join(part.name);
-        println!("{node}: building {} in {}", part.name, dir.display());
+        log(&format!(
+            "{node}: building {} in {}",
+            part.name,
+            dir.display()
+        ));
         let exe = nodebuild::cargo_build(
             &dir,
             &bin,
@@ -153,12 +157,12 @@ fn inputs(
                 // The boot core accepts only images carrying this tag.
                 target_tag: Some(&n.tag),
             },
-            &mut log,
-            &cancel,
+            log,
+            cancel,
         )?;
         built.push((part.name, exe));
     }
-    nodebuild::build_nodes_keyed(cfg, &[node.to_string()], Some(fw_key), &mut log, &cancel)?;
+    nodebuild::build_nodes_keyed(cfg, &[node.to_string()], Some(fw_key), log, cancel)?;
     let take = |name: &str| built.iter().find(|p| p.0 == name).map(|p| p.1.clone());
     let version = cfg.build.get(node).and_then(|b| b.version.clone());
     Ok(ProvisionInputs {
@@ -180,8 +184,10 @@ pub(crate) fn prepare(
     node: &str,
     key: &KeyPair,
     out: &Path,
+    log: &mut dyn FnMut(&str),
+    cancel: &AtomicBool,
 ) -> Result<FirstWrite, String> {
-    let i = inputs(cfg, t, node, key)?;
+    let i = inputs(cfg, t, node, key, log, cancel)?;
     provision_files(t, node, &i, out, key)
 }
 
@@ -191,7 +197,7 @@ pub(crate) fn prepare(
 pub(crate) fn find_uf2_drive(roots: &[PathBuf]) -> Result<Option<PathBuf>, String> {
     let found: Vec<&PathBuf> = roots
         .iter()
-        .filter(|r| std::fs::read_to_string(r.join(UF2_INFO)).is_ok_and(|s| s.contains(UF2_BOARD)))
+        .filter(|r| std::fs::read_to_string(r.join(UF2_INFO)).is_ok_and(|s| is_rp2040_rom(&s)))
         .collect();
     match found[..] {
         [] => Ok(None),
@@ -207,6 +213,23 @@ pub(crate) fn find_uf2_drive(roots: &[PathBuf]) -> Result<Option<PathBuf>, Strin
                 .join(", ")
         )),
     }
+}
+
+/// Whether INFO_UF2.TXT is the RP2040 boot ROM's: a `UF2 Bootloader` first
+/// line and the exact line `Board-ID: RPI-RP2` (not a part of another ID).
+fn is_rp2040_rom(info: &str) -> bool {
+    // The literal first line (lines() drops only the line break).
+    let mut lines = info.lines();
+    let header = lines
+        .next()
+        .is_some_and(|l| l.starts_with("UF2 Bootloader"));
+    let board = format!("Board-ID: {UF2_BOARD}");
+    header && lines.any(|l| l == board)
+}
+
+/// The MCU families `flash` can write (the page offers it for these).
+pub(crate) fn flashable(mcu: &str) -> bool {
+    parts(mcu).is_some()
 }
 
 /// Where a removable drive shows up on this system.
@@ -242,10 +265,27 @@ fn mounts_under(parents: &[PathBuf]) -> Vec<PathBuf> {
     out
 }
 
-fn copy_uf2(file: &Path) -> Result<(), String> {
-    println!("waiting for the {UF2_BOARD} drive: hold BOOT while plugging the hub's USB in");
+/// Writes the first-install files to the board (after the confirmation).
+pub(crate) fn write(
+    w: &FirstWrite,
+    log: &mut dyn FnMut(&str),
+    cancel: &AtomicBool,
+) -> Result<(), String> {
+    match w {
+        FirstWrite::ProbeRs { commands, .. } => run_probe_rs(commands, log),
+        FirstWrite::Uf2 { file, .. } => copy_uf2(file, log, cancel),
+    }
+}
+
+fn copy_uf2(file: &Path, log: &mut dyn FnMut(&str), cancel: &AtomicBool) -> Result<(), String> {
+    log(&format!(
+        "waiting for the {UF2_BOARD} drive: hold BOOT while plugging the hub's USB in"
+    ));
     let until = Instant::now() + DRIVE_WAIT;
     let drive = loop {
+        if cancel.load(Ordering::Relaxed) {
+            return Err("cancelled; nothing was copied".into());
+        }
         if let Some(d) = find_uf2_drive(&drive_roots())? {
             break d;
         }
@@ -261,13 +301,16 @@ fn copy_uf2(file: &Path) -> Result<(), String> {
     };
     let dest = drive.join("rescue.uf2");
     std::fs::copy(file, &dest).map_err(|e| format!("cannot copy to {}: {e}", dest.display()))?;
-    println!("copied to {}; the hub restarts on its own", dest.display());
+    log(&format!(
+        "copied to {}; the hub restarts on its own",
+        dest.display()
+    ));
     Ok(())
 }
 
-fn run_probe_rs(commands: &[Vec<String>]) -> Result<(), String> {
+fn run_probe_rs(commands: &[Vec<String>], log: &mut dyn FnMut(&str)) -> Result<(), String> {
     for args in commands {
-        println!("+ probe-rs {}", args.join(" "));
+        log(&format!("+ probe-rs {}", args.join(" ")));
         let ok = Command::new("probe-rs")
             .args(args)
             .status()
@@ -302,9 +345,11 @@ pub fn command(args: &[&str]) -> Result<(), String> {
     let steps = plan(&cfg, &t, node, &out)?.join("\n");
     println!("{steps}");
     let key = load_key(o.get("key"))?;
-    let write = prepare(&cfg, &t, node, &key, &out)?;
+    let mut log = |l: &str| println!("{l}");
+    let cancel = AtomicBool::new(false);
+    let w = prepare(&cfg, &t, node, &key, &out, &mut log, &cancel)?;
     if dry {
-        match &write {
+        match &w {
             FirstWrite::ProbeRs { commands, .. } => {
                 print!(
                     "dry run; would run:\n{}",
@@ -321,10 +366,7 @@ pub fn command(args: &[&str]) -> Result<(), String> {
     if !yes && !confirm("", &mut std::io::stdin().lock()) {
         return Err("nothing written to the board".into());
     }
-    match &write {
-        FirstWrite::ProbeRs { commands, .. } => run_probe_rs(commands),
-        FirstWrite::Uf2 { file, .. } => copy_uf2(file),
-    }
+    write(&w, &mut log, &cancel)
 }
 
 #[cfg(test)]
@@ -509,10 +551,37 @@ mod tests {
     }
 
     #[test]
+    fn only_the_rp2040_boot_rom_is_an_rp2040_drive() {
+        let rom = "UF2 Bootloader v3.0\r\nModel: Raspberry Pi RP2\r\nBoard-ID: RPI-RP2\r\n";
+        assert!(is_rp2040_rom(rom));
+        for not in [
+            "UF2 Bootloader v3.0\nBoard-ID: NOT-RPI-RP2\n",
+            "UF2 Bootloader v3.0\nBoard-ID: RPI-RP2-CLONE\n",
+            "UF2 Bootloader v3.0\nBoard-ID: RPI-RP2350\n",
+            "UF2 Bootloader v3.0\nModel: RPI-RP2\n",
+            "UF2 Bootloader v3.0\nNote: Board-ID: RPI-RP2\n",
+            "Board-ID: RPI-RP2\n",
+            "My stick\nUF2 Bootloader v3.0\nBoard-ID: RPI-RP2\n",
+            "\nUF2 Bootloader v3.0\nBoard-ID: RPI-RP2\n",
+            "\r\nUF2 Bootloader v3.0\r\nBoard-ID: RPI-RP2\r\n",
+            "  UF2 Bootloader v3.0\nBoard-ID: RPI-RP2\n",
+            "UF2 Bootloader v3.0\n Board-ID: RPI-RP2\n",
+            "UF2 Bootloader v3.0\nBoard-ID: RPI-RP2 \n",
+            "UF2 Bootloader v3.0\nBoard-ID : RPI-RP2\n",
+            "UF2 Bootloader v3.0\nBoard-ID:RPI-RP2\n",
+            "UF2 Bootloader v3.0\nBoard-ID:  RPI-RP2\n",
+            "UF2 Bootloader v3.0\r\n Board-ID : RPI-RP2 \r\n",
+            "",
+        ] {
+            assert!(!is_rp2040_rom(not), "{not:?}");
+        }
+    }
+
+    #[test]
     fn a_second_board_under_another_mount_name_is_seen() {
         let base = std::env::temp_dir().join(format!("dagon-mnt-{}", std::process::id()));
         let (volumes, media) = (base.join("Volumes"), base.join("media/user"));
-        let info = "Model: Raspberry Pi RP2\nBoard-ID: RPI-RP2\n";
+        let info = "UF2 Bootloader v3.0\nModel: Raspberry Pi RP2\nBoard-ID: RPI-RP2\n";
         for d in [volumes.join("RPI-RP2"), volumes.join("RPI-RP2 1")] {
             std::fs::create_dir_all(&d).unwrap();
             std::fs::write(d.join(UF2_INFO), info).unwrap();

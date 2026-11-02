@@ -8,7 +8,7 @@ use std::process::Command;
 use crate::config::{read_topology, Config, Opts};
 
 const FIX: &str = "--fix";
-const FAMILIES: [&str; 3] = ["rp2040", "stm32f401re", "esp32s3"];
+pub(crate) const FAMILIES: [&str; 3] = ["rp2040", "stm32f401re", "esp32s3"];
 
 /// What a check finds in a command's output.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -170,6 +170,11 @@ pub(crate) fn doctor(
         ok &= good;
     }
     ok
+}
+
+/// The checks for `mcus` (no installs), one line each to `out`.
+pub(crate) fn check(mcus: &[String], out: &mut dyn FnMut(&str)) -> bool {
+    doctor(mcus, false, &mut probe_cmd, &mut |_| None, out)
 }
 
 fn probe_cmd(args: &[&str]) -> Option<String> {

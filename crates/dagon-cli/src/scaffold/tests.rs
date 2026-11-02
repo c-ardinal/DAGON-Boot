@@ -392,7 +392,12 @@ fn topology_names_and_tags_cannot_break_out_of_generated_code() {
 /// builds: run with --ignored).
 fn new_gen_build(node: &str) {
     let d = tmp(&format!("e2e-{node}"));
-    let dir = d.join("proj");
+    // As deep as a project in a beginner's documents folder can be: slot B
+    // (in its own target folder) must still link the host build scripts.
+    let dir = d
+        .join("documents-of-a-beginner")
+        .join("projects-in-a-rather-deep-folder")
+        .join("proj");
     new_project(&dir, "proj", SAMPLE, &d.join("keys")).unwrap();
     let config = dir.join(crate::config::CONFIG_FILE);
     let lines = gen_project(&config, &[node.to_string()], false).unwrap();
@@ -406,6 +411,10 @@ fn new_gen_build(node: &str) {
         &std::sync::atomic::AtomicBool::new(false),
     );
     assert!(r.is_ok(), "{}", log.join("\n"));
+    // Both slots where the board has slot B (all but the ESP32-S3, whose
+    // second slot is the vendor's).
+    let slots = r.unwrap()[0].slots.len();
+    assert_eq!(slots, if node == "watch" { 1 } else { 2 });
     assert!(dir.join("nodes").join(node).join("Cargo.lock").is_file());
     let _ = std::fs::remove_dir_all(&d);
 }
@@ -426,4 +435,23 @@ fn new_gen_build_rp2040_hub() {
 #[ignore = "builds firmware for the STM32F401"]
 fn new_gen_build_f401_node() {
     new_gen_build("seg");
+}
+
+#[test]
+fn a_new_project_whose_key_cannot_be_made_leaves_nothing_behind() {
+    let d = tmp("new-undo");
+    // Keys inside a git work tree are refused: key generation fails after
+    // the project's files were written.
+    std::fs::create_dir_all(d.join("repo/.git")).unwrap();
+    let dir = d.join("proj");
+    let e = new_project(&dir, "proj", SAMPLE, &d.join("repo/keys")).unwrap_err();
+    assert!(!dir.exists(), "{e}");
+    // An empty folder given by the user stays, empty.
+    std::fs::create_dir_all(&dir).unwrap();
+    assert!(new_project(&dir, "proj", SAMPLE, &d.join("repo/keys")).is_err());
+    assert_eq!(std::fs::read_dir(&dir).unwrap().count(), 0);
+    // The retry with a usable key folder works.
+    new_project(&dir, "proj", SAMPLE, &d.join("keys")).unwrap();
+    assert!(dir.join("dagon.toml").is_file() && dir.join("CLAUDE.md").is_file());
+    let _ = std::fs::remove_dir_all(&d);
 }

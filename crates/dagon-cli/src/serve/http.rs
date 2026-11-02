@@ -116,6 +116,7 @@ fn reason(status: u16) -> &'static str {
         409 => "Conflict",
         413 => "Payload Too Large",
         422 => "Unprocessable Entity",
+        428 => "Precondition Required",
         429 => "Too Many Requests",
         503 => "Service Unavailable",
         501 => "Not Implemented",

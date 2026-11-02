@@ -9,7 +9,7 @@ use std::time::Duration;
 use serde_json::{json, Value};
 
 /// The API key is read from here only; it is never printed, logged or written.
-const KEY_ENV: &str = "ANTHROPIC_API_KEY";
+pub(crate) const KEY_ENV: &str = "ANTHROPIC_API_KEY";
 const MODEL_ENV: &str = "DAGON_AI_MODEL";
 const DEFAULT_MODEL: &str = "claude-opus-5-5";
 const API_URL: &str = "https://api.anthropic.com";

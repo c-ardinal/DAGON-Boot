@@ -1,6 +1,11 @@
 //! `dagon build`: per node `cargo build` following `[build.<id>]` in
 //! dagon.toml, producing the ELF files `dagon image sign` takes:
 //! `out/build/<id>/app-a.elf` and, with `slot_b_feature`, `app-b.elf`.
+//!
+//! Each build starts from an empty `out/build/<id>/`; `build.json` is
+//! written last and only when every slot built, naming the outputs, their
+//! SHA-256 and the version. Signing takes only what that record lists, so
+//! a failed build or a slot no longer configured leaves nothing to sign.
 
 use std::io::{BufRead, BufReader};
 use std::path::{Path, PathBuf};
@@ -9,11 +14,24 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc;
 use std::time::Duration;
 
+use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use crate::config::{BuildInputs, Config, Opts};
 
 const OUT_DIR: &str = "out/build";
+const RECORD: &str = "build.json";
+/// Secrets the CLI holds that a build (build scripts, proc macros) must not
+/// see: the signing key path and the Claude API key.
+pub const SECRET_ENV: [&str; 2] = [crate::config::KEY_ENV, crate::ai::KEY_ENV];
+
+/// What the last successful build of a node produced.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct BuildRecord {
+    pub version: Option<String>,
+    /// (slot letter, SHA-256 hex of the ELF).
+    pub slots: Vec<(char, String)>,
+}
 const POLL: Duration = Duration::from_millis(100);
 
 /// One node's build outputs.
@@ -25,10 +43,38 @@ pub struct Built {
 }
 
 pub fn elf_path(cfg: &Config, node: &str, slot: char) -> PathBuf {
-    cfg.base
-        .join(OUT_DIR)
-        .join(node)
-        .join(format!("app-{slot}.elf"))
+    node_dir(cfg, node).join(format!("app-{slot}.elf"))
+}
+
+fn node_dir(cfg: &Config, node: &str) -> PathBuf {
+    cfg.base.join(OUT_DIR).join(node)
+}
+
+fn sha_hex(b: &[u8]) -> String {
+    dagon_sign::to_hex(&dagon_format::sha256(b))
+}
+
+/// (slot letter, ELF bytes) of a recorded build.
+pub type SlotElfs = Vec<(char, Vec<u8>)>;
+
+/// The ELF files of `node`'s last successful build, checked against its
+/// record: (slot, bytes) and the recorded version.
+pub fn last_build(cfg: &Config, node: &str) -> Result<(BuildRecord, SlotElfs), String> {
+    let dir = node_dir(cfg, node);
+    let text = std::fs::read_to_string(dir.join(RECORD))
+        .map_err(|_| format!("{node} has no successful build; run the build first"))?;
+    let rec: BuildRecord =
+        serde_json::from_str(&text).map_err(|e| format!("{node}: bad build record: {e}"))?;
+    let mut out = Vec::new();
+    for (slot, sha) in &rec.slots {
+        let path = elf_path(cfg, node, *slot);
+        let bytes = std::fs::read(&path).map_err(|e| format!("{}: {e}", path.display()))?;
+        if sha_hex(&bytes) != *sha {
+            return Err(format!("{} changed since it was built", path.display()));
+        }
+        out.push((*slot, bytes));
+    }
+    Ok((rec, out))
 }
 
 /// Builds `nodes` (all configured nodes when empty). `log` gets cargo's
@@ -73,7 +119,17 @@ fn build_node(
         let feats = b.features.iter().cloned().chain([f.clone()]).collect();
         slots.push(('b', feats, Some(dir.join("target").join("slot-b"))));
     }
+    let out_dir = node_dir(cfg, id);
+    match std::fs::remove_dir_all(&out_dir) {
+        Ok(()) => {}
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+        Err(e) => return Err(format!("cannot clear {}: {e}", out_dir.display())),
+    }
     let mut built = Vec::new();
+    let mut record = BuildRecord {
+        version: b.version.clone(),
+        slots: Vec::new(),
+    };
     for (slot, features, target_dir) in slots {
         log(&format!(
             "{id}: building slot {slot} in {}",
@@ -92,8 +148,12 @@ fn build_node(
             "{id}: slot {slot} -> {} ({size} bytes)",
             dest.display()
         ));
+        let bytes = std::fs::read(&dest).map_err(|e| format!("{}: {e}", dest.display()))?;
+        record.slots.push((slot, sha_hex(&bytes)));
         built.push((slot, dest, size));
     }
+    let text = serde_json::to_string_pretty(&record).map_err(|e| e.to_string())?;
+    crate::config::write_file(&out_dir.join(RECORD), text.as_bytes())?;
     Ok(Built {
         node: id.into(),
         slots: built,
@@ -112,6 +172,13 @@ fn package_name(dir: &Path) -> Result<String, String> {
         .ok_or_else(|| format!("{}: no package name", path.display()))
 }
 
+/// Removes the CLI's secrets from a child's environment.
+fn scrub(cmd: &mut Command) {
+    for k in SECRET_ENV {
+        cmd.env_remove(k);
+    }
+}
+
 enum Line {
     Out(String),
     Err(String),
@@ -128,6 +195,7 @@ fn cargo_build(
     cancel: &AtomicBool,
 ) -> Result<PathBuf, String> {
     let mut cmd = Command::new("cargo");
+    scrub(&mut cmd);
     cmd.args([
         "build",
         "--release",
@@ -218,6 +286,19 @@ mod tests {
     use super::*;
 
     #[test]
+    fn cargo_does_not_inherit_the_cli_secrets() {
+        let mut cmd = Command::new("cargo");
+        scrub(&mut cmd);
+        let removed: Vec<String> = cmd
+            .get_envs()
+            .filter(|(_, v)| v.is_none())
+            .map(|(k, _)| k.to_string_lossy().into_owned())
+            .collect();
+        assert!(removed.iter().any(|k| k == "DAGON_SIGNING_KEY"));
+        assert!(removed.iter().any(|k| k == "ANTHROPIC_API_KEY"));
+    }
+
+    #[test]
     fn picks_the_executable_of_the_named_binary() {
         let line = r#"{"reason":"compiler-artifact","target":{"name":"f401-app"},"executable":"C:\\t\\f401-app"}"#;
         assert_eq!(
@@ -262,10 +343,14 @@ mod tests {
         std::fs::write(
             pkg.join("Cargo.toml"),
             "[package]\nname = \"tiny\"\nversion = \"0.0.0\"\nedition = \"2021\"\n\
-             [features]\nslot-b = []\n[workspace]\n",
+             [features]\nslot-b = []\nbroken = []\n[workspace]\n",
         )
         .unwrap();
-        std::fs::write(pkg.join("src/main.rs"), "fn main() {}\n").unwrap();
+        std::fs::write(
+            pkg.join("src/main.rs"),
+            "#[cfg(feature = \"broken\")]\ncompile_error!(\"broken\");\nfn main() {}\n",
+        )
+        .unwrap();
         // --locked needs a lock file; an empty package resolves offline.
         let gen = Command::new("cargo")
             .args(["generate-lockfile", "--offline"])
@@ -298,6 +383,26 @@ mod tests {
         assert_eq!(built[0].slots.len(), 2);
         assert!(elf_path(&cfg, "tiny", 'a').exists() && elf_path(&cfg, "tiny", 'b').exists());
         assert!(lines.iter().any(|l| l.contains("slot b")));
+        let (rec, elfs) = last_build(&cfg, "tiny").unwrap();
+        assert_eq!(elfs.iter().map(|e| e.0).collect::<Vec<_>>(), ['a', 'b']);
+        assert_eq!(rec.slots.len(), 2);
+
+        // A tampered output is not handed to signing.
+        std::fs::write(elf_path(&cfg, "tiny", 'a'), b"other").unwrap();
+        assert!(last_build(&cfg, "tiny").is_err());
+
+        // Without slot B configured, the old app-b.elf goes away.
+        let quiet = &AtomicBool::new(false);
+        cfg.build.get_mut("tiny").unwrap().slot_b_feature = None;
+        build_nodes(&cfg, &[], &mut |_| {}, quiet).unwrap();
+        assert!(!elf_path(&cfg, "tiny", 'b').exists());
+        assert_eq!(last_build(&cfg, "tiny").unwrap().1.len(), 1);
+
+        // A failed build leaves nothing signable.
+        cfg.build.get_mut("tiny").unwrap().features = vec!["broken".into()];
+        assert!(build_nodes(&cfg, &[], &mut |_| {}, quiet).is_err());
+        assert!(last_build(&cfg, "tiny").is_err());
+        assert!(!elf_path(&cfg, "tiny", 'a').exists());
         let _ = std::fs::remove_dir_all(&base);
     }
 }

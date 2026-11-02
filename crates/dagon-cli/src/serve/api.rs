@@ -234,49 +234,85 @@ fn sign_path(cfg: &Config, node: &str, slot: char) -> PathBuf {
     cfg.base.join(SIGN_DIR).join(format!("{node}-{slot}.img"))
 }
 
+fn sign_record_path(cfg: &Config, node: &str) -> PathBuf {
+    cfg.base.join(SIGN_DIR).join(format!("{node}.json"))
+}
+
+/// What the last successful signing of a node produced: (file name,
+/// SHA-256 hex) per image, and the version.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+struct SignRecord {
+    version: String,
+    images: Vec<(String, String)>,
+}
+
+fn sha_hex(b: &[u8]) -> String {
+    to_hex(&dagon_format::sha256(b))
+}
+
 /// Signs the built applications of `nodes` with the CLI's key.
 fn job_sign(job: &mut Job, cfg: Config, v: Value) -> Result<Value, String> {
     let nodes = nodes_of(&v).map_err(|_| "nodes must be node ids".to_string())?;
     let t = read_topology(&cfg.topology_path(None)?)?;
     let key = load_key(None)?;
+    sign_nodes(&cfg, &t, &nodes, &key, &mut |l| job.log(l))
+}
+
+/// Signs exactly what each node's last successful build recorded, with the
+/// version recorded there. A node's previous images and record are removed
+/// first, so a failure leaves nothing of that node to release.
+fn sign_nodes(
+    cfg: &Config,
+    t: &dagon_topology::Topology,
+    nodes: &[String],
+    key: &ed25519_compact::KeyPair,
+    log: &mut dyn FnMut(&str),
+) -> Result<Value, String> {
     let mut out = Vec::new();
-    for node in &nodes {
-        let b = cfg
-            .build
-            .get(node)
-            .ok_or_else(|| format!("no [build.{node}] in dagon.toml"))?;
-        let ver = b
+    for node in nodes {
+        let rec_path = sign_record_path(cfg, node);
+        for p in [
+            rec_path.clone(),
+            sign_path(cfg, node, 'a'),
+            sign_path(cfg, node, 'b'),
+        ] {
+            match std::fs::remove_file(&p) {
+                Ok(()) => {}
+                Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+                Err(e) => return Err(format!("cannot remove {}: {e}", p.display())),
+            }
+        }
+        let (built, elfs) = nodebuild::last_build(cfg, node)?;
+        let ver = built
             .version
-            .as_deref()
-            .ok_or_else(|| format!("[build.{node}] has no version"))?;
+            .ok_or_else(|| format!("{node} was built without a version in [build.{node}]"))?;
         let opts = SignOpts {
-            version: version(ver)?,
+            version: version(&ver)?,
             release_seq: 1,
             min_bootcore: Default::default(),
             proto: 1,
             bits: None,
         };
-        for slot in ['a', 'b'] {
-            let elf = nodebuild::elf_path(&cfg, node, slot);
-            if !elf.exists() {
-                continue;
-            }
+        let mut record = SignRecord {
+            version: ver.clone(),
+            images: Vec::new(),
+        };
+        for (slot, elf) in elfs {
             let binding = if slot == 'a' {
                 slot_binding::A
             } else {
                 slot_binding::B
             };
-            let img = image_for_node(
-                &t,
-                node,
-                image_kind::APP,
-                binding,
-                &read_file(&elf)?,
-                Some(&opts),
-                &key,
-            )?;
-            write_file(&sign_path(&cfg, node, slot), &img)?;
-            job.log(&format!(
+            let img = image_for_node(t, node, image_kind::APP, binding, &elf, Some(&opts), key)?;
+            let path = sign_path(cfg, node, slot);
+            write_file(&path, &img)?;
+            let file = path
+                .file_name()
+                .unwrap_or_default()
+                .to_string_lossy()
+                .into_owned();
+            record.images.push((file, sha_hex(&img)));
+            log(&format!(
                 "{node}: slot {slot} signed, {} bytes, {ver}",
                 img.len()
             ));
@@ -284,6 +320,8 @@ fn job_sign(job: &mut Job, cfg: Config, v: Value) -> Result<Value, String> {
                 json!({"node": node, "slot": slot.to_string(), "bytes": img.len(), "version": ver}),
             );
         }
+        let text = serde_json::to_string_pretty(&record).map_err(|e| e.to_string())?;
+        write_file(&rec_path, text.as_bytes())?;
     }
     Ok(json!({ "images": out }))
 }
@@ -294,33 +332,65 @@ fn job_release(job: &mut Job, cfg: Config, v: Value) -> Result<Value, String> {
     let name = name.ok_or("name must be up to 16 plain characters")?;
     let want = version(v["version"].as_str().ok_or("version is required")?)?;
     let t = read_topology(&cfg.topology_path(None)?)?;
-    let topo_bin = dagon_topology::compile(&t).map_err(|e| e.to_string())?;
-    let mut files: Vec<PathBuf> = std::fs::read_dir(cfg.base.join(SIGN_DIR))
+    let key = load_key(None)?;
+    release_from(&cfg, &t, want, name, &key, &mut |l| job.log(l))
+}
+
+/// Images listed by the sign records only (each checked against its
+/// recorded SHA-256), all of version `want`.
+fn signed_images(cfg: &Config, want: dagon_format::Version) -> Result<Vec<Vec<u8>>, String> {
+    let dir = cfg.base.join(SIGN_DIR);
+    let mut records: Vec<PathBuf> = std::fs::read_dir(&dir)
         .map_err(|_| "nothing signed yet".to_string())?
         .filter_map(|e| e.ok().map(|e| e.path()))
-        .filter(|p| p.extension().is_some_and(|x| x == "img"))
+        .filter(|p| p.extension().is_some_and(|x| x == "json"))
         .collect();
-    files.sort();
+    records.sort();
     let mut images = Vec::new();
-    for f in &files {
-        let img = read_file(f)?;
-        let raw: &[u8; HEADER_SIZE] = img
-            .get(..HEADER_SIZE)
-            .and_then(|h| h.try_into().ok())
-            .ok_or_else(|| format!("{}: not an image", f.display()))?;
-        let h = ImageHeader::parse(raw).map_err(|e| format!("{}: {e:?}", f.display()))?;
-        if h.version != want {
-            return Err(format!("{} is {}, not {want}", f.display(), h.version));
+    for r in &records {
+        let rec: SignRecord =
+            serde_json::from_slice(&read_file(r)?).map_err(|e| format!("{}: {e}", r.display()))?;
+        for (file, sha) in &rec.images {
+            if !plain(file) {
+                return Err(format!("{}: bad file name", r.display()));
+            }
+            let img = read_file(&dir.join(file))?;
+            if sha_hex(&img) != *sha {
+                return Err(format!("{file} changed since it was signed"));
+            }
+            let raw: &[u8; HEADER_SIZE] = img
+                .get(..HEADER_SIZE)
+                .and_then(|h| h.try_into().ok())
+                .ok_or_else(|| format!("{file}: not an image"))?;
+            let h = ImageHeader::parse(raw).map_err(|e| format!("{file}: {e:?}"))?;
+            if h.version != want {
+                return Err(format!("{file} is {}, not {want}", h.version));
+            }
+            images.push(img);
         }
-        images.push(img);
     }
-    let key = load_key(None)?;
-    let r = dagon_sign::release::build(&t, &topo_bin, &images, name, &key)
-        .map_err(|e| e.to_string())?;
+    if images.is_empty() {
+        return Err("nothing signed yet".into());
+    }
+    Ok(images)
+}
+
+fn release_from(
+    cfg: &Config,
+    t: &dagon_topology::Topology,
+    want: dagon_format::Version,
+    name: &str,
+    key: &ed25519_compact::KeyPair,
+    log: &mut dyn FnMut(&str),
+) -> Result<Value, String> {
+    let topo_bin = dagon_topology::compile(t).map_err(|e| e.to_string())?;
+    let images = signed_images(cfg, want)?;
+    let r =
+        dagon_sign::release::build(t, &topo_bin, &images, name, key).map_err(|e| e.to_string())?;
     let out = cfg.base.join(RELEASE_DIR).join(format!("{name}.dgb"));
     write_file(&out, &r.bundle)?;
     let sha = to_hex(&dagon_format::sha256(&topo_bin));
-    job.log(&format!(
+    log(&format!(
         "release {name}: {} images, {} bytes",
         images.len(),
         r.bundle.len()
@@ -459,6 +529,80 @@ pub fn static_file(web: &Path, path: &str) -> Option<(Vec<u8>, &'static str)> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// RFC 8032 section 7.1 TEST 1 key (public test data).
+    fn test_key() -> ed25519_compact::KeyPair {
+        let seed = [
+            0x9d, 0x61, 0xb1, 0x9d, 0xef, 0xfd, 0x5a, 0x60, 0xba, 0x84, 0x4a, 0xf4, 0x92, 0xec,
+            0x2c, 0xc4, 0x44, 0x49, 0xc5, 0x69, 0x7b, 0x32, 0x69, 0x19, 0x70, 0x3b, 0xac, 0x03,
+            0x1c, 0xae, 0x7f, 0x60,
+        ];
+        ed25519_compact::KeyPair::from_seed(ed25519_compact::Seed::new(seed))
+    }
+
+    /// A work area whose seg node has a recorded build of 1.1.0 (raw
+    /// payloads for both slots), as `dagon build` leaves it.
+    fn built_area(name: &str) -> (Config, dagon_topology::Topology) {
+        let base = std::env::temp_dir().join(format!("dagon-sign-{name}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&base);
+        let dir = base.join("out/build/seg");
+        std::fs::create_dir_all(&dir).unwrap();
+        let mut slots = Vec::new();
+        for slot in ['a', 'b'] {
+            let body = vec![slot as u8; 1500];
+            std::fs::write(dir.join(format!("app-{slot}.elf")), &body).unwrap();
+            slots.push((slot, sha_hex(&body)));
+        }
+        let rec = nodebuild::BuildRecord {
+            version: Some("1.1.0".into()),
+            slots,
+        };
+        std::fs::write(dir.join("build.json"), serde_json::to_string(&rec).unwrap()).unwrap();
+        let cfg = Config {
+            base,
+            ..Config::default()
+        };
+        let yaml = include_str!("../../../../topology/sim-pair.yaml");
+        (cfg, dagon_topology::parse_str(yaml).unwrap())
+    }
+
+    #[test]
+    fn signing_uses_only_the_recorded_build() {
+        let (cfg, t) = built_area("recorded");
+        let key = test_key();
+        let seg = ["seg".to_string()];
+        sign_nodes(&cfg, &t, &seg, &key, &mut |_| {}).unwrap();
+        assert!(sign_path(&cfg, "seg", 'a').exists() && sign_path(&cfg, "seg", 'b').exists());
+
+        // A stale image that no record lists never reaches a release.
+        std::fs::write(cfg.base.join(SIGN_DIR).join("hub-a.img"), b"stale").unwrap();
+        let v = dagon_format::Version::new(1, 1, 0);
+        assert_eq!(signed_images(&cfg, v).unwrap().len(), 2);
+        let r = release_from(&cfg, &t, v, "r1", &key, &mut |_| {}).unwrap();
+        assert_eq!(r["release"], "r1");
+        assert!(signed_images(&cfg, dagon_format::Version::new(1, 0, 0)).is_err());
+
+        // A signed image changed afterwards is refused.
+        std::fs::write(sign_path(&cfg, "seg", 'b'), b"changed").unwrap();
+        assert!(signed_images(&cfg, v).is_err());
+
+        // An ELF changed after its build: signing fails and leaves nothing
+        // of seg to release.
+        std::fs::write(nodebuild::elf_path(&cfg, "seg", 'a'), b"later").unwrap();
+        assert!(sign_nodes(&cfg, &t, &seg, &key, &mut |_| {}).is_err());
+        assert!(!sign_path(&cfg, "seg", 'a').exists());
+        assert!(signed_images(&cfg, v).is_err());
+        let _ = std::fs::remove_dir_all(&cfg.base);
+    }
+
+    #[test]
+    fn no_build_record_means_nothing_to_sign() {
+        let (cfg, t) = built_area("unbuilt");
+        std::fs::remove_file(cfg.base.join("out/build/seg/build.json")).unwrap();
+        let r = sign_nodes(&cfg, &t, &["seg".to_string()], &test_key(), &mut |_| {});
+        assert!(r.is_err());
+        let _ = std::fs::remove_dir_all(&cfg.base);
+    }
 
     #[test]
     fn names_that_may_become_files() {

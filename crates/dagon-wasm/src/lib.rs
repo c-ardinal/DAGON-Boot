@@ -5,9 +5,11 @@
 
 extern crate alloc;
 
+mod frame;
 mod host;
 mod watch;
 
+pub use frame::{frame_encode, FrameCutter};
 pub use host::{watch_interval_ms, WasmHost};
 
 use dagon_format::{BundleView, Version};

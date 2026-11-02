@@ -1,7 +1,15 @@
 // The page's single entry to dagon-wasm (built into ./pkg by `npm run wasm`).
 // Converts the generated classes into plain objects so nothing outside this
 // file has to free WASM memory.
-import init, { WasmHost, hello_decode, hello_request, supported_boards as boards, version_text } from './pkg/dagon_wasm.js';
+import init, {
+  FrameCutter,
+  WasmHost,
+  frame_encode,
+  hello_decode,
+  hello_request,
+  supported_boards as boards,
+  version_text,
+} from './pkg/dagon_wasm.js';
 import type { HostLink } from './pkg/dagon_wasm.js';
 import type { HelloReq, HelloResp } from '../serial/hello.ts';
 
@@ -64,6 +72,27 @@ export function newHost(link: HostLink): Host {
     pushTopology: (bin) => h.push_topology(bin),
     watch: (k, a) => h.watch(k, a),
     free: () => h.free(),
+  };
+}
+
+/** A complete link frame (header, payload, CRC), encoded by dagon-proto. */
+export function encodeFrameBytes(flags: number, seq: number, cmd: number, payload: Uint8Array): Uint8Array {
+  return frame_encode(flags, seq, cmd, payload);
+}
+
+/** Stream cutter: SOF search, length and CRC checks are dagon-proto's. */
+export interface FrameStream {
+  /** Each complete, CRC-checked frame in `chunk` (and earlier partial bytes). */
+  push(chunk: Uint8Array): Uint8Array[];
+  /** Releases the WASM side. */
+  free(): void;
+}
+
+export function frameStream(maxPayload: number): FrameStream {
+  const c = new FrameCutter(maxPayload);
+  return {
+    push: (chunk) => Array.from(c.push(chunk) as Uint8Array[]),
+    free: () => c.free(),
   };
 }
 

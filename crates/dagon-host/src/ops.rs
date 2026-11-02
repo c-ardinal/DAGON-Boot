@@ -3,7 +3,7 @@
 
 use alloc::vec;
 use alloc::vec::Vec;
-use dagon_conform::timeout::{erase_ms, POLL_MS, REBOOT_WAIT_MS, REQUEST_MS, VERIFY_MS};
+use dagon_conform::timeout::{erase_ms, REBOOT_WAIT_MS, REQUEST_MS, VERIFY_MS};
 use dagon_format::bundle::BundleView;
 use dagon_format::header::{image_kind, mcu_id, slot_binding, HEADER_SIZE};
 use dagon_format::topology::{self, TopologyView};
@@ -20,6 +20,23 @@ use crate::{Clock, Error, Host, Result, Target, Transport};
 /// well inside the 60 s the hub keeps its trial watchdog fed, so CONFIRM
 /// always lands in time.
 pub const HUB_RECONNECT_MS: u32 = 45_000;
+/// Nodes (F401, watch) do not feed their watchdog on trial: an image gets
+/// about [`NODE_TRIAL_MS`] per boot attempt before it is reset. The new
+/// version's HELLO is polled this often so CONFIRM lands well inside one
+/// attempt (one poll costs at most two [`REQUEST_MS`] round trips).
+pub const NODE_POLL_MS: u32 = 300;
+/// Trial watchdog of a node's boot attempt.
+pub const NODE_TRIAL_MS: u32 = 4_000;
+/// Boot attempts before a node rolls back (F401; the watch tries once).
+pub const NODE_MAX_ATTEMPTS: u32 = 3;
+const _: () = {
+    // Poll pause plus a missed poll (RELAY wait + node wait) fits a trial.
+    assert!(NODE_POLL_MS + 2 * REQUEST_MS < NODE_TRIAL_MS);
+    // Waiting for the new HELLO covers the F401's full local rollback
+    // (3 attempts of about 4 s plus start-up), so silence there is not
+    // taken for a lost node.
+    assert!(REBOOT_WAIT_MS >= NODE_MAX_ATTEMPTS * (NODE_TRIAL_MS + 1_000) + 2_000);
+};
 /// Pause between reopen attempts while the hub is away.
 pub const REOPEN_MS: u32 = 1_000;
 /// RELAY timeout per address while discovering.
@@ -269,8 +286,15 @@ impl<T: Transport, C: Clock> Host<T, C> {
         sp.encode(&mut p).expect("2 bytes");
         self.call(to, Cmd::SetPending, &p, VERIFY_MS).await?;
         self.emit(on_event, node, phase::REBOOT, 0, v).await;
-        self.call(to, Cmd::Reboot, &[reboot_mode::NORMAL], REQUEST_MS)
-            .await?;
+        // Not resent: a node that already reset has forgotten the seq and
+        // would reboot again. A lost reply is settled by the HELLO polls.
+        match self
+            .call(to, Cmd::Reboot, &[reboot_mode::NORMAL], REQUEST_MS)
+            .await
+        {
+            Ok(_) | Err(Error::Timeout | Error::Relay(Status::Timeout)) => {}
+            Err(e) => return Err(e),
+        }
         self.set_applied(to, v);
         let h = self.await_version(to, v).await?;
         if h.trial {
@@ -285,7 +309,7 @@ impl<T: Transport, C: Clock> Host<T, C> {
     async fn await_version(&mut self, to: Target, v: Version) -> Result<HelloResp, T::Error> {
         let (limit, pause) = match to {
             Target::Hub => (HUB_RECONNECT_MS, REOPEN_MS),
-            _ => (REBOOT_WAIT_MS, POLL_MS),
+            _ => (REBOOT_WAIT_MS, NODE_POLL_MS),
         };
         let deadline = self.clock.now_ms() + limit as u64;
         // Another version may answer until the reset really happens (the
@@ -297,7 +321,7 @@ impl<T: Transport, C: Clock> Host<T, C> {
             // for slow enumeration if real ports need it.
             let reopened = to != Target::Hub || self.transport.reopen().await.is_ok();
             if reopened {
-                match self.hello(to).await {
+                match self.hello_within(to, REQUEST_MS).await {
                     Ok(h) if h.active_version == v => return Ok(h),
                     Ok(h) => other = Some(h),
                     Err(Error::Transport(_) | Error::Timeout | Error::Relay(_)) => {}
@@ -527,7 +551,9 @@ impl<T: Transport, C: Clock> Host<T, C> {
         let Ok(n) = show.encode(&mut p) else {
             return;
         };
-        let _ = self.call(Target::Hub, Cmd::Show, &p[..n], REQUEST_MS).await;
+        let _ = self
+            .call_once(Target::Hub, Cmd::Show, &p[..n], REQUEST_MS)
+            .await;
     }
 }
 

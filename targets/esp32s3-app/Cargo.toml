@@ -1,0 +1,51 @@
+[package]
+name = "dagon-esp32s3-app"
+version = "0.0.0"
+edition = "2021"
+license = "MIT OR Apache-2.0"
+publish = false
+
+# The watch's demo app (ota_0/ota_1 image). DAGON comes in through the public
+# API of `dagon-esp32s3-agent` (`node::start`, `liveness`). Standalone
+# workspace, built with the espup Xtensa toolchain.
+[workspace]
+
+[features]
+# Conformance build: the node answers CONF_RUN (node-side tests).
+conform = ["dagon-esp32s3-agent/conform"]
+# Test build that refuses CONFIRM, so its trial always rolls back.
+no-confirm = []
+# ENTER_ROM method 2 through the M5PM1 power manager (unconfirmed values).
+pmic-download = ["dagon-esp32s3-agent/pmic-download"]
+
+[[bin]]
+name = "app"
+path = "src/main.rs"
+test = false
+
+[dependencies]
+dagon-esp32s3-agent = { path = "../esp32s3-agent" }
+esp-hal = { version = "1.2.2", features = ["esp32s3", "unstable"] }
+esp-bootloader-esp-idf = { version = "0.6.0", features = ["esp32s3"] }
+esp-rtos = { version = "0.4.0", features = ["esp32s3", "embassy"] }
+embassy-executor = "0.10"
+embassy-time = "0.5"
+
+[profile.release]
+opt-level = "s"
+lto = "fat"
+codegen-units = 1
+debug = 2
+
+# Size-tuned Ed25519: at "s" the field arithmetic is inlined into one
+# function of several hundred KiB.
+[profile.release.package.ed25519-compact]
+opt-level = "z"
+
+[profile.dev]
+opt-level = "s"
+
+# esp-bootloader-esp-idf computes `ota_seq - 1` for any counted seq, 0 included
+# (otadata written by older tools); release builds already wrap.
+[profile.dev.package.esp-bootloader-esp-idf]
+overflow-checks = false

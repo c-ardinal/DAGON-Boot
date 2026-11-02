@@ -31,6 +31,12 @@ impl RtcWatchdog {
     pub fn new(rwdt: Rwdt) -> Self {
         Self { rwdt }
     }
+
+    /// Disables the RWDT. It lives in the RTC domain, so it would keep
+    /// running through a software reset into the ROM loader and reset it.
+    pub fn stop(&mut self) {
+        self.rwdt.disable();
+    }
 }
 
 impl Watchdog for RtcWatchdog {

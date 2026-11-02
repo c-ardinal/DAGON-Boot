@@ -57,6 +57,17 @@ export interface ReleaseFile {
 export const HUB_RECONNECT_MS = 45_000;
 const REFUSALS: readonly string[] = ['source', 'key', 'topology', 'format'];
 
+/** dagon-host's release check (check_release_for, apply, recover) threw this: which refusal it names. */
+export function refusalOf(e: unknown): Refusal {
+  const m = e instanceof Error ? e.message : String(e);
+  return (REFUSALS.includes(m) ? m : 'format') as Refusal;
+}
+
+/** The announcement of a refused release, the same wherever the check ran (file, recovery). */
+export function refusalAnnounce(k: Refusal): string {
+  return k === 'topology' ? ANNOUNCE.A10topology : k === 'format' ? ANNOUNCE.A10format : ANNOUNCE.A10source;
+}
+
 export interface Deps {
   /** Opens the device: the browser chooser, or a stand-in hub. Throws ConnectError. */
   open: () => Promise<Transport>;
@@ -79,9 +90,6 @@ export const LATEST_RELEASE = 'release/latest.dgb';
 /** The signed boot core the ROM path writes for a node. */
 export const bootcorePath = (id: string): string => `release/${id}-bootcore.img`;
 
-/** Release refusals from dagon-host's check, as the node refusal they amount to. */
-const RELEASE_REFUSAL: Record<string, string> = { source: 'E_SIGNATURE', key: 'E_KEY' };
-
 /**
  * dagon-host's reason for a node that did not get through, as its chip:
  * no answer (`NO ANSWER`: timeout, RELAY timeout, lost link), back on the
@@ -91,8 +99,8 @@ const RELEASE_REFUSAL: Record<string, string> = { source: 'E_SIGNATURE', key: 'E
 export function failureStage(reason: string): Pick<Progress, 'stage' | 'reason'> {
   if (reason === 'NO ANSWER') return { stage: 'silent' };
   if (reason === 'ROLLED BACK') return { stage: 'previous' };
-  const r = RELEASE_REFUSAL[reason] ?? reason;
-  if (r.startsWith('E_') || r === 'REJECTED') return { stage: 'refused', reason: r };
+  // A refused release (source, key, topology, format) keeps its kind: the chip says which.
+  if (REFUSALS.includes(reason) || reason.startsWith('E_') || reason === 'REJECTED') return { stage: 'refused', reason };
   return { stage: 'cannotFix' };
 }
 
@@ -359,10 +367,10 @@ export class Operate {
     try {
       check_release_for(bytes, topo_compile(this.config.yaml));
     } catch (e) {
-      const k = (e instanceof Error && REFUSALS.includes(e.message) ? e.message : 'format') as Refusal;
+      const k = refusalOf(e);
       this.file = { ...file, verdict: k };
       this.refusal = k;
-      this.status = k === 'topology' ? ANNOUNCE.A10topology : k === 'format' ? ANNOUNCE.A10format : ANNOUNCE.A10source;
+      this.status = refusalAnnounce(k);
       return this.go(k === 'topology' ? 'topoDiff' : 'badSource');
     }
     this.file = { ...file, verdict: 'pass' };
@@ -525,8 +533,8 @@ export class Operate {
     if (chosen) {
       try {
         check_release_for(chosen.bytes, topo);
-      } catch {
-        this.alert = ANNOUNCE.A10source;
+      } catch (e) {
+        this.alert = refusalAnnounce(refusalOf(e));
         return;
       }
       this.file = { name: chosen.name, size: chosen.bytes.length, bytes: chosen.bytes, verdict: 'pass' };
@@ -638,7 +646,7 @@ export class Operate {
     }
     const percent = this.progress[n.id]?.percent ?? 0;
     this.progress[n.id] = { ...failureStage(reason), percent };
-    this.status = ANNOUNCE.A13(n.name);
+    this.status = REFUSALS.includes(reason) ? refusalAnnounce(reason as Refusal) : ANNOUNCE.A13(n.name);
     this.go(this.state === 'L20' ? 'nodeStuck' : 'gaveUp');
   }
 

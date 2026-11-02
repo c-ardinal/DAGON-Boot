@@ -179,6 +179,11 @@ export const NODE = {
     E_DIGEST: '× 中身の破損',
     E_COMPAT: '× 別の機種向け',
     E_FLASH: '× 書き込めない',
+    // dagon-host's release check, in the words of the update file's verdict.
+    source: '× 配布元を確認できない',
+    key: '× 配布元を確認できない',
+    topology: '× 構成 不一致',
+    format: '× 更新ファイルではない',
   } as Record<string, string>,
   refusedOther: '× 受け付けない',
   /** S04 during a recovery. */

@@ -7,6 +7,7 @@ import type { Transport } from '../serial/transport.ts';
 import { versionText } from '../wasm/dagon.ts';
 import { bandOf } from './band.ts';
 import { ANNOUNCE, BAND, BUTTON_FOR, NODE } from './copy.ts';
+import { DESK_DEMO } from './sample.ts';
 import { Operate, bootcorePath, failureStage, LATEST_RELEASE } from './operate.svelte.ts';
 
 const repo = (rel: string) => new Uint8Array(readFileSync(new URL(`../../../${rel}`, import.meta.url)));
@@ -18,6 +19,7 @@ const SITE: Record<string, Uint8Array> = {
 type Fetch = (path: string) => Promise<Uint8Array | null>;
 const site: Fetch = async (path) => SITE[path] ?? null;
 const nothing: Fetch = async () => null;
+const SIM_PAIR_YAML = new TextDecoder().decode(repo('topology/sim-pair.yaml'));
 const v = (raw: number | undefined) => (raw === undefined ? '' : versionText(raw));
 
 function fastClock(): LinkClock {
@@ -156,10 +158,45 @@ describe('recovery from the page with dagon-host recover', () => {
     expect(failureStage('NO ANSWER')).toEqual({ stage: 'silent' });
     expect(failureStage('ROLLED BACK')).toEqual({ stage: 'previous' });
     expect(failureStage('E_SIGNATURE')).toEqual({ stage: 'refused', reason: 'E_SIGNATURE' });
-    expect(failureStage('source')).toEqual({ stage: 'refused', reason: 'E_SIGNATURE' });
-    expect(failureStage('key')).toEqual({ stage: 'refused', reason: 'E_KEY' });
+    for (const k of ['source', 'key', 'topology', 'format']) expect(failureStage(k)).toEqual({ stage: 'refused', reason: k });
     expect(failureStage('NO IMAGE')).toEqual({ stage: 'cannotFix' });
   });
+
+  test('recovery refused for another configuration says 構成 不一致, as the update does', async () => {
+    const { op } = await stoppedAt({ refuse: { 'i2c:66': 0x07 } });
+    op.config = { ...DESK_DEMO, yaml: SIM_PAIR_YAML };
+    await op.recover();
+    expect(op.state).toBe('L25');
+    expect(op.progress.seg).toMatchObject({ stage: 'refused', reason: 'topology' });
+    expect(NODE.refused.topology).toBe('× 構成 不一致');
+    expect(op.status).toBe(ANNOUNCE.A10topology);
+  }, 120_000);
+
+  test('recovery with a published file that is not a release says 更新ファイルではない', async () => {
+    const t = new MockTransport({ quiet: ['i2c:66'] });
+    const op = session(t, fastClock(), async (p) => (p === LATEST_RELEASE ? new TextEncoder().encode('not a release') : null));
+    await silentNode(op);
+    await op.recover();
+    expect(op.state).toBe('L25');
+    expect(op.progress.seg).toMatchObject({ stage: 'refused', reason: 'format' });
+    expect(NODE.refused.format).toBe('× 更新ファイルではない');
+    expect(op.status).toBe(ANNOUNCE.A10format);
+  }, 120_000);
+
+  test('a file chosen for recovery is refused with its own words: source, configuration, not a release', async () => {
+    const t = new MockTransport({ quiet: ['i2c:66'] });
+    const op = session(t, fastClock(), nothing);
+    await silentNode(op);
+    const bad = SITE[LATEST_RELEASE].slice();
+    bad[bad.length - 1] ^= 1;
+    await op.recover({ name: 'tampered.dgb', bytes: bad });
+    expect([op.state, op.alert]).toEqual(['L13', ANNOUNCE.A10source]);
+    await op.recover({ name: 'notes.txt', bytes: new TextEncoder().encode('hello') });
+    expect([op.state, op.alert]).toEqual(['L13', ANNOUNCE.A10format]);
+    op.config = { ...DESK_DEMO, yaml: SIM_PAIR_YAML };
+    await op.recover({ name: 'desk-1.1.0.dgb', bytes: SITE[LATEST_RELEASE] });
+    expect([op.state, op.alert]).toEqual(['L13', ANNOUNCE.A10topology]);
+  }, 120_000);
 
   test('a rollback that gets no answer shows 応答なし; "もう一度直す" rolls back again, it does not install the release', async () => {
     const t = new MockTransport();

@@ -109,41 +109,95 @@ fn whole_sectors(addrs: &[u32]) -> Result<(), String> {
 /// the same mapped reader stage0 uses on the board.
 fn load_uf2(path: &str) -> Result<Mapped, String> {
     let raw = fs::read(path).map_err(|e| format!("{path}: {e}"))?;
-    let mut mem = vec![0xFFu8; FLASH_SIZE];
+    let mem = flash_image(&raw).map_err(|e| format!("{path}: {e}"))?;
+    Ok(Mapped::over(Box::leak(mem.into_boxed_slice()), XIP_BASE))
+}
+
+/// Checks a UF2 file block by block (magic, blockNo = index, numBlocks =
+/// block count, 256-byte payloads in flash, whole sectors, nothing after
+/// the last block) and returns the flash it leaves.
+fn flash_image(raw: &[u8]) -> Result<Vec<u8>, String> {
     if raw.is_empty() || !raw.len().is_multiple_of(512) {
-        return Err(format!(
-            "{path}: {} bytes is not whole 512-byte blocks",
-            raw.len()
-        ));
+        return Err(format!("{} bytes is not whole 512-byte blocks", raw.len()));
     }
     let total = (raw.len() / 512) as u32;
+    let mut mem = vec![0xFFu8; FLASH_SIZE];
     let mut addrs = Vec::new();
     for (i, b) in raw.chunks_exact(512).enumerate() {
         let w = |i: usize| u32::from_le_bytes(b[i * 4..i * 4 + 4].try_into().unwrap());
         if w(0) != UF2_MAGIC0 || w(1) != UF2_MAGIC1 || w(127) != UF2_MAGIC_END {
-            return Err(format!("{path}: not a UF2 file"));
+            return Err("not a UF2 file".into());
         }
         let (addr, len) = (w(3), w(4) as usize);
         if w(5) != i as u32 || w(6) != total {
             return Err(format!(
-                "{path}: block {i} says it is block {} of {} (file has {total})",
+                "block {i} says it is block {} of {} (file has {total})",
                 w(5),
                 w(6)
             ));
         }
         if len != 256 {
-            return Err(format!(
-                "{path}: block at {addr:#x} carries {len} bytes, not 256"
-            ));
+            return Err(format!("block at {addr:#x} carries {len} bytes, not 256"));
         }
         let off = addr
             .checked_sub(XIP_BASE)
             .map(|o| o as usize)
             .filter(|o| o + len <= FLASH_SIZE)
-            .ok_or(format!("{path}: block at {addr:#x} outside flash"))?;
+            .ok_or(format!("block at {addr:#x} outside flash"))?;
         mem[off..off + len].copy_from_slice(&b[32..32 + len]);
         addrs.push(addr);
     }
-    whole_sectors(&addrs).map_err(|e| format!("{path}: {e}"))?;
-    Ok(Mapped::over(Box::leak(mem.into_boxed_slice()), XIP_BASE))
+    whole_sectors(&addrs)?;
+    Ok(mem)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A UF2 of `pages` consecutive pages from `start`, numbered as given.
+    fn uf2(start: u32, pages: u32, number: impl Fn(u32) -> (u32, u32)) -> Vec<u8> {
+        let mut out = Vec::new();
+        for i in 0..pages {
+            let (no, total) = number(i);
+            let mut b = [0u8; 512];
+            let words = [
+                UF2_MAGIC0,
+                UF2_MAGIC1,
+                0x2000,
+                start + 256 * i,
+                256,
+                no,
+                total,
+            ];
+            for (k, v) in words.iter().enumerate() {
+                b[k * 4..k * 4 + 4].copy_from_slice(&v.to_le_bytes());
+            }
+            b[508..].copy_from_slice(&UF2_MAGIC_END.to_le_bytes());
+            out.extend_from_slice(&b);
+        }
+        out
+    }
+
+    #[test]
+    fn whole_sector_in_order_passes() {
+        assert!(flash_image(&uf2(XIP_BASE, 16, |i| (i, 16))).is_ok());
+    }
+
+    #[test]
+    fn block_numbers_must_match_their_place() {
+        // Right addresses, block numbers shifted by one.
+        assert!(flash_image(&uf2(XIP_BASE, 16, |i| (i + 1, 16))).is_err());
+        // numBlocks not the file's block count.
+        assert!(flash_image(&uf2(XIP_BASE, 16, |i| (i, 17))).is_err());
+    }
+
+    #[test]
+    fn partial_sector_and_trailing_bytes_fail() {
+        assert!(flash_image(&uf2(XIP_BASE, 15, |i| (i, 15))).is_err());
+        assert!(flash_image(&uf2(XIP_BASE + 256, 16, |i| (i, 16))).is_err());
+        let mut raw = uf2(XIP_BASE, 16, |i| (i, 16));
+        raw.extend_from_slice(b"junk");
+        assert!(flash_image(&raw).is_err());
+    }
 }

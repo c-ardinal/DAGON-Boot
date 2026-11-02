@@ -1,0 +1,15 @@
+[package]
+name = "f401-board"
+edition = "2021"
+license = "MIT OR Apache-2.0"
+version = "0.0.0"
+publish = false
+
+# Standalone: built for thumbv7em only, so it stays out of the host workspace.
+[workspace]
+
+[dependencies]
+dagon-core = { path = "../../crates/dagon-core" }
+dagon-format = { path = "../../crates/dagon-format" }
+dagon-port = { path = "../../crates/dagon-port" }
+embassy-stm32 = { version = "0.6.0", features = ["stm32f401re"] }

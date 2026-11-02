@@ -95,7 +95,8 @@ fn release_assemble_reproduces_golden_manifest_and_bundle() {
             dest: dest::SUB_STORE,
         })
         .collect();
-    let topo = golden("topology.bin");
+    let topo = topology_bin();
+    assert_eq!(topo, golden("topology_desk_demo.bin"));
     let r = release::assemble("release-1.1", 1, &items, &topo, &key()).unwrap();
     assert_eq!(r.manifest, golden("manifest.bin"));
     assert_eq!(r.bundle, golden("release.dgb"));
@@ -109,8 +110,10 @@ fn release_assemble_reproduces_golden_manifest_and_bundle() {
         .unwrap();
 }
 
+const DESK_DEMO: &str = include_str!("../../../topology/desk-demo.yaml");
+
 fn desk_demo() -> Topology {
-    dagon_topology::parse_str(include_str!("../../../topology/desk-demo.yaml")).unwrap()
+    dagon_topology::parse_str(DESK_DEMO).unwrap()
 }
 
 fn hub_app(slot: u8) -> Vec<u8> {
@@ -124,9 +127,8 @@ fn hub_app(slot: u8) -> Vec<u8> {
     sign_image(&s, &body(slot ^ 1), &key()).unwrap()
 }
 
-/// Opaque stand-in until the canonical topology encoder exists.
 fn topology_bin() -> Vec<u8> {
-    b"desk-demo canonical topology".to_vec()
+    dagon_topology::compile(&desk_demo()).unwrap()
 }
 
 #[test]
@@ -138,7 +140,11 @@ fn release_build_with_desk_demo() {
     let b = BundleView::parse(&r.bundle).unwrap();
     b.verify(&TEST_PUBLIC_KEY).unwrap();
     let m = b.manifest();
-    assert_eq!(m.fields().topology_sha256, sha256(&topology_bin()));
+    assert_eq!(
+        m.fields().topology_sha256,
+        sha256(&golden("topology_desk_demo.bin")),
+        "manifest binds the compiled desk-demo topology"
+    );
     let order: Vec<(u8, u8, u8)> = (0..m.entry_count())
         .map(|i| {
             let e = m.entry(i);
@@ -220,7 +226,13 @@ fn release_build_rejects_bad_sets() {
     );
     s.proto_version = 2;
     let skewed = sign_image(&s, &body(1), &key()).unwrap();
-    assert_eq!(check(vec![f401_app(0), skewed]), "RB-05", "lockstep proto");
+    let images = vec![f401_app(0), skewed];
+    assert!(release::build(&t, &topo, &images, "r", &key()).is_ok());
+    let yaml = format!("{DESK_DEMO}\nconstraints:\n  - lockstep: [hub, seg]\n");
+    let locked = dagon_topology::parse_str(&yaml).unwrap();
+    let topo = dagon_topology::compile(&locked).unwrap();
+    let err = release::build(&locked, &topo, &images, "r", &key()).unwrap_err();
+    assert_eq!(err.check, "RB-05", "lockstep proto");
 }
 
 #[test]

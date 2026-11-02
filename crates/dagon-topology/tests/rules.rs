@@ -148,10 +148,8 @@ fn v14_update_order() {
 
 #[test]
 fn v15_constraints_reference_nodes() {
-    assert_fires(
-        &mutate("lockstep: [hub, seg, watch]", "lockstep: [hub, seg, cam]"),
-        "V-15",
-    );
+    let yaml = format!("{DEMO}\nconstraints:\n  - lockstep: [hub, seg, cam]\n");
+    assert_fires(&yaml, "V-15");
 }
 
 #[test]

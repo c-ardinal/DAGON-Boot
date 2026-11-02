@@ -4,11 +4,13 @@
 use std::fmt;
 
 use dagon_format::header::{
-    self, build_flags, capabilities, image_kind, mcu_id, placement, port_kind, slot_binding,
-    ImageHeader, HEADER_SIZE, SIGNED_LEN,
+    self, build_flags, capabilities, image_kind, placement, slot_binding, ImageHeader, HEADER_SIZE,
+    SIGNED_LEN,
 };
 use dagon_format::{sha256, Version};
 use ed25519_compact::KeyPair;
+
+pub use dagon_topology::{mcu_id_of, parse_version, port_kind_of};
 
 /// RFC 8032 section 7.1 "TEST 1" public key. Images signed with it always
 /// carry the TEST_KEY build flag, and only those do.
@@ -99,23 +101,6 @@ pub fn slot_of(mcu: &str, h: &ImageHeader) -> Option<Slot> {
     slot(mcu, h.image_kind, s)
 }
 
-pub fn mcu_id_of(mcu: &str) -> Option<u16> {
-    match mcu {
-        "rp2040" => Some(mcu_id::RP2040),
-        "stm32f401re" => Some(mcu_id::STM32F401XE),
-        "esp32s3" => Some(mcu_id::ESP32S3),
-        _ => None,
-    }
-}
-
-pub fn port_kind_of(port: &str) -> Option<u8> {
-    match port {
-        "self-boot" => Some(port_kind::SELF_BOOT),
-        "vendor-stage2" => Some(port_kind::VENDOR_STAGE2),
-        _ => None,
-    }
-}
-
 pub fn image_kind_of(name: &str) -> Option<u8> {
     match name {
         "app" => Some(image_kind::APP),
@@ -123,17 +108,6 @@ pub fn image_kind_of(name: &str) -> Option<u8> {
         "agent" => Some(image_kind::AGENT),
         _ => None,
     }
-}
-
-/// `"major.minor.patch"` (as shown by `Version`'s Display).
-pub fn parse_version(s: &str) -> Option<Version> {
-    let mut it = s.trim().split('.');
-    let major = it.next()?.parse().ok()?;
-    let minor = it.next()?.parse().ok()?;
-    let patch = it.next()?.parse().ok()?;
-    it.next()
-        .is_none()
-        .then(|| Version::new(major, minor, patch))
 }
 
 /// Comma-separated flag names into a bit set.

@@ -55,7 +55,41 @@ fn link_kind(k: LinkKind) -> &'static str {
     match k {
         LinkKind::I2c => "i2c",
         LinkKind::Uart => "uart",
+        LinkKind::Can => "can",
+        LinkKind::Ethernet => "ethernet",
     }
+}
+
+/// The MCU table for choosing a node by MCU: `[{id, port, flashMap,
+/// flashBytes, gpioCount, boards: [board id]}]`. `flashBytes` is what the
+/// flash map needs, so a board without that much flash cannot hold it.
+#[wasm_bindgen]
+pub fn supported_mcus() -> JsValue {
+    boards::MCUS
+        .iter()
+        .map(|m| {
+            let o = Object::new();
+            set(&o, "id", m.id.into());
+            set(&o, "port", m.port.into());
+            let fm = boards::default_flash_map(m.id);
+            set(&o, "flashMap", fm.map_or(JsValue::NULL, |f| f.name.into()));
+            set(
+                &o,
+                "flashBytes",
+                fm.map_or(JsValue::NULL, |f| f.bytes.into()),
+            );
+            set(&o, "gpioCount", m.gpio_count.into());
+            let names: Array = BOARDS
+                .iter()
+                .filter(|b| b.mcu == m.id)
+                .map(|b| JsValue::from(b.mcu_name))
+                .take(1)
+                .collect();
+            set(&o, "name", names.get(0));
+            JsValue::from(o)
+        })
+        .collect::<Array>()
+        .into()
 }
 
 fn control_kind(k: ControlKind) -> &'static str {

@@ -6,7 +6,7 @@ import deskDemoYaml from '../../../topology/desk-demo.yaml?raw';
 
 export const DESK_DEMO_YAML: string = deskDemoYaml;
 
-export type LinkKind = 'I2C' | 'UART';
+export type LinkKind = 'I2C' | 'UART' | 'CAN' | 'Ethernet';
 
 /** How dagon-host reaches a node: the hub itself, or RELAY on I2C / UART. */
 export interface Target {
@@ -29,6 +29,8 @@ export interface Node {
   reset: string | null;
   boot: string | null;
   target: Target;
+  /** Row on the graph: 0 親機, 1 子機, 2 and on deeper. Absent: by role. */
+  depth?: number;
 }
 
 export interface Wire {

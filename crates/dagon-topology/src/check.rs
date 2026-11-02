@@ -67,6 +67,7 @@ pub fn check(t: &Topology) -> Report {
     c.v20();
     c.v21();
     c.v22();
+    c.v23();
     Report { issues: c.issues }
 }
 
@@ -93,7 +94,15 @@ pub fn effective_tiers(t: &Topology, id: &str) -> Vec<Tier> {
         .unwrap_or_default()
 }
 
-/// Board for a node: the named one, else the first table entry for its MCU.
+/// The board a node names. Pin and flash-size checks use only this (P1): a
+/// node chosen by MCU is checked against the MCU's GPIO range, and its flash
+/// size against the project's `[board.<id>]`, not against a stand-in board.
+pub fn named_board(n: &Node) -> Option<&'static Board> {
+    n.board.as_deref().and_then(boards::board)
+}
+
+/// Board for a node's capabilities (I2C target, ROM loader pins): the named
+/// one, else the first table entry for its MCU.
 pub fn node_board(n: &Node) -> Option<&'static Board> {
     match &n.board {
         Some(id) => boards::board(id),
@@ -125,11 +134,21 @@ impl<'a> Ctx<'a> {
     }
 
     fn coordinator_board(&self) -> Option<&'static Board> {
-        self.coordinator().and_then(node_board)
+        self.coordinator().and_then(named_board)
     }
 
     fn links(&self) -> impl Iterator<Item = (usize, &'a Link)> + 'a {
         self.t.links.iter().enumerate()
+    }
+
+    /// Links from the 親機 to its 子機 over I2C or UART: the ones the hub's
+    /// own pins, controllers and PIO serve. Other links (between 親機,
+    /// deeper, CAN, Ethernet) are reported by V-23 instead.
+    fn hub_links(&self) -> impl Iterator<Item = (usize, &'a Link)> + 'a {
+        let hub = self.coordinator().map(|c| c.id.clone());
+        self.t.links.iter().enumerate().filter(move |(_, l)| {
+            Some(&l.from) == hub.as_ref() && matches!(l.kind, LinkKind::I2c | LinkKind::Uart)
+        })
     }
 
     /// Schema version and the fields the schema requires only in some cases.
@@ -216,6 +235,8 @@ impl<'a> Ctx<'a> {
                         );
                     }
                 }
+                // Described only; V-23 says they are not updatable yet.
+                LinkKind::Can | LinkKind::Ethernet => {}
             }
         }
     }
@@ -261,46 +282,71 @@ impl<'a> Ctx<'a> {
             .iter()
             .filter(|n| n.role == Role::Coordinator)
             .count();
-        if count != 1 {
-            self.err(
-                "V-03",
-                "nodes",
-                format!("need exactly one coordinator, got {count}"),
-            );
+        // Several coordinators are a shape that is not updatable yet (V-23).
+        if count == 0 {
+            self.err("V-03", "nodes", "need a coordinator, got none");
         }
     }
 
     fn v04(&mut self) {
         for (i, l) in self.links() {
             let p = link_path(i);
+            for (end, id) in [("from", &l.from), ("to", &l.to)] {
+                if self.t.node(id).is_none() {
+                    self.err("V-04", format!("{p}.{end}"), format!("unknown node '{id}'"));
+                }
+            }
+        }
+    }
+
+    /// Shapes a 構成 may describe but that cannot be updated yet: more than
+    /// one coordinator, links that do not run from the coordinator to a node
+    /// (between coordinators, to grandchildren and deeper), and CAN or
+    /// Ethernet links. Updating covers one 親機 with its direct 子機 today.
+    fn v23(&mut self) {
+        let hubs: Vec<&str> = self
+            .t
+            .nodes
+            .iter()
+            .filter(|n| n.role == Role::Coordinator)
+            .map(|n| n.id.as_str())
+            .collect();
+        if hubs.len() > 1 {
+            self.err(
+                "V-23",
+                "nodes",
+                format!("{} coordinators {hubs:?}; updating covers one", hubs.len()),
+            );
+        }
+        for (i, l) in self.links() {
+            let p = link_path(i);
+            if matches!(l.kind, LinkKind::Can | LinkKind::Ethernet) {
+                self.err(
+                    "V-23",
+                    format!("{p}.kind"),
+                    "CAN and Ethernet links are not updatable yet",
+                );
+            }
             match self.t.node(&l.from) {
-                Some(n) if n.role == Role::Coordinator => {}
-                Some(_) => self.err(
-                    "V-04",
+                Some(n) if n.role != Role::Coordinator => self.err(
+                    "V-23",
                     format!("{p}.from"),
                     format!(
-                        "'{}' is not the coordinator; links run from the coordinator only",
+                        "'{}' is not a coordinator; updating reaches direct nodes only",
                         l.from
                     ),
                 ),
-                None => self.err(
-                    "V-04",
-                    format!("{p}.from"),
-                    format!("unknown node '{}'", l.from),
-                ),
+                _ => {}
             }
-            match self.t.node(&l.to) {
-                Some(n) if n.role == Role::Node => {}
-                Some(_) => self.err(
-                    "V-04",
+            if let Some(n) = self.t.node(&l.to).filter(|n| n.role == Role::Coordinator) {
+                self.err(
+                    "V-23",
                     format!("{p}.to"),
-                    format!("'{}' is the coordinator; links end at a node", l.to),
-                ),
-                None => self.err(
-                    "V-04",
-                    format!("{p}.to"),
-                    format!("unknown node '{}'", l.to),
-                ),
+                    format!(
+                        "'{}' is a coordinator; links between coordinators are not updatable yet",
+                        n.id
+                    ),
+                );
             }
         }
     }
@@ -369,7 +415,7 @@ impl<'a> Ctx<'a> {
             pins.push((format!("buses[{i}].sda"), b.sda));
             pins.push((format!("buses[{i}].scl"), b.scl));
         }
-        for (i, l) in self.links() {
+        for (i, l) in self.hub_links() {
             let p = link_path(i);
             if let Some(u) = l.pins {
                 pins.push((format!("{p}.pins.tx"), u.tx));
@@ -399,6 +445,22 @@ impl<'a> Ctx<'a> {
                     );
                 }
             }
+        } else if let Some(mcu) = self
+            .coordinator()
+            .and_then(|c| boards::mcu(&c.mcu))
+            .filter(|m| m.gpio_count > 0)
+        {
+            // P1: a coordinator chosen by MCU is checked against the MCU's GPIOs.
+            for (path, gpio) in &pins {
+                if *gpio >= mcu.gpio_count {
+                    let msg = format!(
+                        "GPIO{gpio} is not a {} GPIO (0-{})",
+                        mcu.id,
+                        mcu.gpio_count - 1
+                    );
+                    self.err("V-07", path.clone(), msg);
+                }
+            }
         }
         let mut first: BTreeMap<u8, &str> = BTreeMap::new();
         for (path, gpio) in &pins {
@@ -416,7 +478,7 @@ impl<'a> Ctx<'a> {
 
     fn v09(&mut self) {
         let bus_pins: BTreeSet<u8> = self.t.buses.iter().flat_map(|b| [b.sda, b.scl]).collect();
-        for (i, l) in self.links() {
+        for (i, l) in self.hub_links() {
             let (Some(UartIface::HwUart0), Some(u)) = (l.iface, l.pins) else {
                 continue;
             };
@@ -440,10 +502,8 @@ impl<'a> Ctx<'a> {
 
     fn v10(&mut self) {
         let pio_links = self
-            .t
-            .links
-            .iter()
-            .filter(|l| l.iface == Some(UartIface::PioUart))
+            .hub_links()
+            .filter(|(_, l)| l.iface == Some(UartIface::PioUart))
             .count();
         if pio_links * PIO_UART_STATE_MACHINES > RP2040_PIO_STATE_MACHINES {
             self.err(
@@ -458,7 +518,10 @@ impl<'a> Ctx<'a> {
     }
 
     fn v11(&mut self) {
-        for (i, l) in self.links() {
+        for (i, l) in self
+            .links()
+            .filter(|(_, l)| matches!(l.kind, LinkKind::I2c | LinkKind::Uart))
+        {
             if l.control.kind == ControlKind::Cooperative && l.control.rom_entry.is_none() {
                 self.err(
                     "V-11",
@@ -591,7 +654,8 @@ impl<'a> Ctx<'a> {
                     self.err("V-16", path, format!("flash map '{name}' is for {}", m.mcu))
                 }
                 Some(m) => {
-                    if let Some(b) = node_board(n).filter(|b| m.bytes > b.flash_bytes) {
+                    // P1: a node chosen by MCU has its flash size in dagon.toml, checked there.
+                    if let Some(b) = named_board(n).filter(|b| m.bytes > b.flash_bytes) {
                         self.err(
                             "V-16",
                             path,

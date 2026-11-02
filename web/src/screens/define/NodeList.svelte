@@ -1,7 +1,7 @@
 <script lang="ts">
-  import { DEFINE } from '../../app/copy.ts';
+  import { DEFINE, INSPECT } from '../../app/copy.ts';
   import type { Define } from '../../app/define/define.svelte.ts';
-  import { canPlace } from '../../app/define/model.ts';
+  import { canPlace, mcus } from '../../app/define/model.ts';
   import { supportedBoards } from '../../wasm/dagon.ts';
 
   interface Props {
@@ -11,12 +11,29 @@
 
   let { d, onconnect }: Props = $props();
   const boards = supportedBoards();
+  const mcuList = mcus();
+  let by = $state<'product' | 'mcu'>('product');
+  const full = $derived(d.doc.topo.nodes.length >= 8);
   const placed = (id: string) => d.doc.topo.nodes.some((n) => n.board === id);
 </script>
 
 <section class="list" aria-labelledby="list-h">
   <h2 id="list-h">{DEFINE.listHeading}</h2>
   <p class="help">{DEFINE.listHelp}</p>
+  <div class="by" role="radiogroup" aria-label={DEFINE.chooseBy}>
+    <button role="radio" aria-checked={by === 'product'} onclick={() => (by = 'product')}>{DEFINE.byProduct}</button>
+    <button role="radio" aria-checked={by === 'mcu'} onclick={() => (by = 'mcu')}>{DEFINE.byMcu}</button>
+  </div>
+  {#if by === 'mcu'}
+    <ul>
+      {#each mcuList as m (m.id)}
+        <li>
+          <span class="what"><span translate="no">{m.name}</span><span class="mcu"><span class="k">{INSPECT.board}</span> {INSPECT.boardOwn}</span></span>
+          <button class="small" aria-disabled={full} aria-label="{m.name} {DEFINE.place}" onclick={() => !full && d.placeMcu(m.id, m.name)}>{DEFINE.place}</button>
+        </li>
+      {/each}
+    </ul>
+  {:else}
   <ul>
     {#each boards as b (b.id)}
       {@const ok = canPlace(d.doc, b.id)}
@@ -30,6 +47,7 @@
       </li>
     {/each}
   </ul>
+  {/if}
   <h3>{DEFINE.firstHeading}</h3>
   <div class="first">
     <button class="secondary" onclick={() => d.placeSample()}>{DEFINE.placeSample}</button>
@@ -102,6 +120,28 @@
   .small[aria-disabled='true'] {
     opacity: 0.4;
     cursor: not-allowed;
+  }
+  .by {
+    display: flex;
+    margin-bottom: var(--s-4);
+    border: 1px solid var(--c-line);
+    border-radius: var(--r-s);
+  }
+  .by button {
+    flex: 1;
+    padding: var(--s-2);
+    border: 0;
+    background: none;
+    color: var(--c-paper);
+    font: 700 var(--t-small-size) / var(--t-small-lh) var(--f-ja);
+    cursor: pointer;
+  }
+  .by button[aria-checked='true'] {
+    background: var(--c-paper);
+    color: var(--c-ink);
+  }
+  .k {
+    color: var(--c-muted);
   }
   .first {
     display: grid;

@@ -3,7 +3,7 @@
 import { supportedBoards } from '../../wasm/dagon.ts';
 import { ANNOUNCE } from '../copy.ts';
 import { DESK_DEMO, DESK_DEMO_YAML, type Config } from '../sample.ts';
-import { emptyDoc, fromYaml, place, removeLink, removeNode, toConfig, toYaml, type Doc } from './model.ts';
+import { emptyDoc, fromYaml, place, placeMcu, removeLink, removeNode, toConfig, toYaml, type Doc } from './model.ts';
 import { problems, type Problem } from './problems.ts';
 
 /** Undo depth; older steps fall off. */
@@ -80,6 +80,15 @@ export class Define {
     this.apply(r.doc);
     this.selected = `node:${r.id}`;
     this.status = ANNOUNCE.A01(product, r.doc.topo.nodes.find((n) => n.id === r.id)!.role === 'coordinator');
+  }
+
+  /** "置く" by MCU (§4): a node without a board; its flash size is the developer's to fill. */
+  placeMcu(mcu: string, name: string): void {
+    const r = placeMcu(this.doc, mcu);
+    if (!r.id) return;
+    this.apply(r.doc);
+    this.selected = `node:${r.id}`;
+    this.status = ANNOUNCE.A01(name, r.doc.topo.nodes.find((n) => n.id === r.id)!.role === 'coordinator');
   }
 
   /** Delete on the selected node or link (A03). */

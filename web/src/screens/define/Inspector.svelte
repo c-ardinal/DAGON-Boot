@@ -2,7 +2,7 @@
   import { tick } from 'svelte';
   import { INSPECT } from '../../app/copy.ts';
   import type { Define } from '../../app/define/define.svelte.ts';
-  import { connect, freeAddrs, removeLink, removeNode, setBus, setLink, setLinkKind, setName, setNode, template, type TLink } from '../../app/define/model.ts';
+  import { boardMissing, connect, freeAddrs, removeLink, removeNode, setBoard, setBus, setLink, setLinkKind, setName, setNode, template, type TLink } from '../../app/define/model.ts';
   import type { Problem } from '../../app/define/problems.ts';
 
   interface Props {
@@ -81,19 +81,38 @@
           <option value="node">{INSPECT.roles.node}</option>
         </select>{@render bad('role')}</label
       >
-      {#if node.role === 'node'}
-        <label
-          >{INSPECT.connectTo}<select
-            data-field="connect"
-            value={nodeLink >= 0 ? 'hub' : ''}
-            onchange={(e) => d.apply(e.currentTarget.value ? connect(d.doc, node.id) : removeLink(d.doc, nodeLink))}
-          >
-            <option value="">{INSPECT.none}</option>
-            {#if hub}<option value="hub">{name(hub.id)}</option>{/if}
-          </select></label
+      <label
+        >{INSPECT.connectTo}<select
+          data-field="connect"
+          value={nodeLink >= 0 ? (t.links ?? [])[nodeLink].from : ''}
+          onchange={(e) => {
+            const parent = e.currentTarget.value;
+            const without = nodeLink >= 0 ? removeLink(d.doc, nodeLink) : d.doc;
+            d.apply(parent ? connect(without, node.id, parent) : without);
+          }}
         >
-      {/if}
+          <option value="">{INSPECT.none}</option>
+          {#each t.nodes.filter((x) => x.id !== node.id) as p (p.id)}<option value={p.id}>{name(p.id)}</option>{/each}
+        </select></label
+      >
     </div>
+    {#if !node.board}
+      <h3>{INSPECT.board}{#if boardMissing(d.doc, node.id)}&ensp;<span class="warn">{INSPECT.boardUnset}</span>{/if}</h3>
+      <div class="grid">
+        <label
+          >{INSPECT.flashSize}<select
+            data-field="board.flash"
+            value={d.doc.boards?.[node.id]?.flashBytes ?? ''}
+            aria-invalid={issues('board.flash').some((p) => p.severity === 'error')}
+            aria-describedby="flash-help"
+            onchange={(e) => d.apply(setBoard(d.doc, node.id, { flashBytes: e.currentTarget.value ? Number(e.currentTarget.value) : undefined }))}
+          >
+            <option value="">{INSPECT.unset}</option>
+            {#each [18, 19, 20, 21, 22, 23, 24, 25] as p (p)}<option value={2 ** p}>{2 ** p >= 2 ** 20 ? `${2 ** (p - 20)} MiB` : `${2 ** (p - 10)} KiB`}</option>{/each}
+          </select><span id="flash-help" class="help">{INSPECT.flashHelp}</span>{@render bad('board.flash')}</label
+        >
+      </div>
+    {/if}
     <dl class="pair"><dt>{INSPECT.product}</dt><dd translate="no">{d.config.nodes.find((n) => n.id === node.id)?.product} · {d.config.nodes.find((n) => n.id === node.id)?.mcu}</dd></dl>
     {#if nodeLink >= 0}
       {@render controlPins((t.links ?? [])[nodeLink], nodeLink)}
@@ -112,9 +131,9 @@
     <h2 id="inspector-h" tabindex="-1">{name(link.from)} → {name(link.to)}</h2>
     <fieldset class="seg">
       <legend>{INSPECT.kind}</legend>
-      {#each ['i2c', 'uart'] as k (k)}
+      {#each ['i2c', 'uart', 'can', 'ethernet'] as k (k)}
         <label
-          ><input type="radio" name="kind" value={k} checked={link.kind === k} onchange={() => d.apply(setLinkKind(d.doc, linkIndex, k as TLink['kind']))} />{INSPECT.kinds[k]}</label
+          ><input type="radio" name="kind" value={k} checked={link.kind === k} onchange={() => d.apply(setLinkKind(d.doc, linkIndex, k as TLink['kind']))} />{INSPECT.kinds[k] ?? INSPECT.kindsMore[k]}</label
         >
       {/each}
     </fieldset>
@@ -144,7 +163,7 @@
           </select>{@render bad('node_pins')}</label
         >
       </div>
-    {:else}
+    {:else if link.kind === 'uart'}
       <div class="grid">
         <label>{INSPECT.uartPins} TX<input data-field="pins" type="number" value={link.pins?.tx ?? ''} onchange={(e) => d.apply(setLink(d.doc, linkIndex, 'pins.tx', num(e.currentTarget.value)))} />{@render bad('pins')}</label>
         <label>{INSPECT.uartPins} RX<input type="number" value={link.pins?.rx ?? ''} onchange={(e) => d.apply(setLink(d.doc, linkIndex, 'pins.rx', num(e.currentTarget.value)))} /></label>
@@ -242,6 +261,17 @@
   [aria-invalid='true'] {
     border-color: var(--c-signal);
   }
+  h3 {
+    margin: var(--s-4) 0 var(--s-3);
+    font: 700 var(--t-heading-size) / var(--t-heading-lh) var(--f-ja);
+  }
+  .warn {
+    font: 700 var(--t-small-size) / var(--t-small-lh) var(--f-ja);
+  }
+  .help {
+    color: var(--c-muted);
+    font-weight: 400;
+  }
   .bad {
     color: var(--c-signal);
     font: 700 var(--t-small-size) / var(--t-small-lh) var(--f-ja);
@@ -273,7 +303,8 @@
     margin-bottom: var(--s-3);
   }
   .seg {
-    display: flex;
+    display: grid;
+    grid-template-columns: 1fr 1fr;
     gap: 0;
     margin: 0 0 var(--s-4);
     padding: 0;

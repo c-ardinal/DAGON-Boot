@@ -382,6 +382,10 @@ export const RULE_SHORT: Record<string, string> = {
   'V-20': 'I2C の速さ',
   'V-21': 'I2C でつなげないノード',
   'V-22': 'リセット・起動の配線 未設定',
+  'V-23': 'まだ更新できない構成',
+  /** Checked by the page (dagon.toml's [board.<id>]), not by dagon-topology. */
+  'B-01': 'ボード 未設定',
+  'B-02': '容量が足りない',
 };
 
 /** Names a §11.2 sentence needs: the node (呼び名), its board, its id, and whether there are too many nodes. */
@@ -390,6 +394,8 @@ export interface FixWords {
   board: string;
   id: string;
   many: boolean;
+  /** A size such as "512 KiB" (B-02). */
+  size?: string;
 }
 
 /** §11.2: how to fix each rule, one sentence. */
@@ -415,6 +421,9 @@ export const RULE_FIX: Record<string, (w: FixWords) => string> = {
   'V-20': () => '共有の 2 本線（I2C）の速さを 400 kHz 以下にしてください。',
   'V-21': (w) => `${w.to}は UART でつないでください。`,
   'V-22': (w) => `最後の手段で復旧するには、『直す』で ${w.to}のリセット・起動の配線を設定してください（このままでも親機へ送れます）。`,
+  'V-23': () => '更新するには、親機を 1 つにして子機を親機へ直接つないでください（このままでも書き出せます）。',
+  'B-01': (w) => `『直す』で ${w.to}のボードの容量を入れてください。`,
+  'B-02': (w) => `${w.to}は容量が ${w.size ?? ''} 以上のボードにしてください。`,
 };
 
 /** Header: the two modes (運用｜定義) and whether the configuration was sent (S24). */
@@ -430,6 +439,10 @@ export const MODE = {
 export const DEFINE = {
   /** SC-D1 left column. */
   listHeading: 'ノードリスト',
+  /** §5.2 SC-D1: choose by product or by MCU. */
+  byProduct: '製品',
+  byMcu: 'マイコン',
+  chooseBy: '選び方',
   listHelp: '選んで Enter で置けます。',
   place: '置く',
   placed: '配置済み',
@@ -497,6 +510,13 @@ export const INSPECT = {
   pullups: 'プルアップ',
   pullupKinds: { external: '外付け', board: '基板上' } as Record<string, string>,
   inUse: (what: string) => `（使用中: ${what}）`,
+  /** §4.3: the board of a node chosen by MCU. */
+  board: 'ボード',
+  boardOwn: '自作',
+  flashSize: 'フラッシュ容量',
+  flashHelp: 'ボードの資料にある大きさ',
+  boardUnset: '▲ ボード 未設定',
+  kindsMore: { can: 'CAN（親機どうし）', ethernet: 'Ethernet（親機どうし）' } as Record<string, string>,
 } as const;
 
 /** SC-T: the table view (S03 words in its cells). */

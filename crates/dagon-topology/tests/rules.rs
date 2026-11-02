@@ -52,11 +52,60 @@ fn v03_one_coordinator() {
 }
 
 #[test]
-fn v04_single_hop() {
+fn v04_links_name_known_nodes() {
     assert_fires(
-        &mutate("from: hub\n    to: watch", "from: seg\n    to: watch"),
+        &mutate("from: hub\n    to: watch", "from: ghost\n    to: watch"),
         "V-04",
     );
+}
+
+#[test]
+fn v23_grandchild_is_described_but_not_updatable() {
+    // seg → watch: a grandchild. A valid 構成 shape, not one updating reaches yet.
+    let yaml = mutate("from: hub\n    to: watch", "from: seg\n    to: watch");
+    let rules = error_rules(&yaml);
+    assert!(rules.contains("V-23"), "{rules:?}");
+    assert!(!rules.contains("V-04"), "{rules:?}");
+    assert!(!check_str(&yaml).is_pushable());
+}
+
+#[test]
+fn v23_several_coordinators_over_can() {
+    let yaml = DEMO
+        .replacen(
+            "nodes:\n",
+            "nodes:\n  - id: hub2\n    mcu: rp2040\n    role: coordinator\n    port: self-boot\n    tag: hub2\n",
+            1,
+        )
+        .replacen("links:\n", "links:\n  - from: hub\n    to: hub2\n    kind: can\n", 1)
+        .replacen("order: [seg, watch, hub]", "order: [seg, watch, hub2, hub]", 1);
+    let report = check_str(&yaml);
+    let v23: Vec<_> = report
+        .errors()
+        .filter(|i| i.rule == "V-23")
+        .map(|i| i.path.as_str())
+        .collect();
+    assert!(v23.contains(&"nodes"), "{v23:?}");
+    assert!(v23.contains(&"links[0].kind"), "{v23:?}");
+    assert!(v23.contains(&"links[0].to"), "{v23:?}");
+    // The shape itself parses: no V-01, and the coordinator count is not V-03.
+    let rules = error_rules(&yaml);
+    assert!(
+        !rules.contains("V-01") && !rules.contains("V-03"),
+        "{rules:?}"
+    );
+    assert!(dagon_topology::compile_str(&yaml).is_err());
+}
+
+#[test]
+fn p1_coordinator_chosen_by_mcu_is_checked_by_its_gpio_range() {
+    // Without a named board the hub is checked against RP2040 GPIO0-29, not a board header.
+    let by_mcu = mutate("    board: waveshare-rp2040-touch-lcd-1.28\n", "");
+    let r = check_str(&by_mcu);
+    assert!(r.issues.is_empty(), "{:?}", r.issues);
+    assert!(!error_rules(&by_mcu.replacen("nrst: 18", "nrst: 20", 1)).contains("V-07"));
+    assert_fires(&by_mcu.replacen("nrst: 18", "nrst: 30", 1), "V-07");
+    assert_fires(&DEMO.replacen("nrst: 18", "nrst: 20", 1), "V-07");
 }
 
 #[test]

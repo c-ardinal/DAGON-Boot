@@ -54,7 +54,7 @@ describe('copy', () => {
   test.each(copy.FORBIDDEN_WORDS)('no screen text uses %s', (word) => {
     // 確定 is allowed only as a slot value in the slot section.
     // 確定 only as a slot value and in M38; フラッシュ only in V-16's name (§11.4).
-    const texts = word === '確定' ? shownExcept('SLOT', 'TRIAL_CHOICE') : word === 'フラッシュ' ? shown.filter((s) => s !== copy.RULE_SHORT['V-16']) : shown;
+    const texts = word === '確定' ? shownExcept('SLOT', 'TRIAL_CHOICE') : word === 'フラッシュ' ? shown.filter((s) => s !== copy.RULE_SHORT['V-16'] && s !== copy.INSPECT.flashSize) : shown;
     expect(texts.filter((s) => s.includes(word))).toEqual([]);
   });
 

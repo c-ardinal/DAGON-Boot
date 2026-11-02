@@ -3,7 +3,7 @@
 // says how to fix it (§11.2) and finds the item and field it points at.
 import { topo_check } from '../../wasm/dagon.ts';
 import { RULE_FIX, RULE_SHORT, type FixWords } from '../copy.ts';
-import { MAX_NODES, type Doc } from './model.ts';
+import { boardMissing, flashTooSmall, MAX_NODES, type Doc } from './model.ts';
 
 export interface Issue {
   rule: string;
@@ -53,7 +53,7 @@ function sentence(i: Issue, w: Where, doc: Doc): string {
   const link = w.link !== undefined ? t.links?.[w.link] : undefined;
   const to = nameOf(doc, link?.to ?? w.node);
   const board = t.nodes.find((n) => n.id === w.node)?.board;
-  const fill: FixWords = { to, board: board ?? to, id: w.node ?? '', many: t.nodes.length > MAX_NODES };
+  const fill: FixWords = { to, board: board ?? to, id: w.node ?? '', many: t.nodes.length > MAX_NODES, size: i.rule === 'B-02' ? i.message : undefined };
   return RULE_FIX[i.rule]?.(fill) ?? '';
 }
 
@@ -67,10 +67,21 @@ function select(w: Where, doc: Doc): string | null {
   return null;
 }
 
+const kib = (b: number) => (b >= 1 << 20 ? `${b >> 20} MiB` : `${b >> 10} KiB`);
+
+/** The board fields of nodes chosen by MCU (§4.3): missing (B-01, before making the project) or too small (B-02). */
+function boardIssues(doc: Doc): Issue[] {
+  return doc.topo.nodes.flatMap((n, i): Issue[] => {
+    const need = flashTooSmall(doc, n.id);
+    if (need) return [{ rule: 'B-02', severity: 'error', path: `nodes[${i}].board.flash`, message: kib(need) }];
+    return boardMissing(doc, n.id) ? [{ rule: 'B-01', severity: 'warning', path: `nodes[${i}].board.flash`, message: '' }] : [];
+  });
+}
+
 /** topo_check on the document (as JSON, which the YAML parser reads), errors first. */
 export function problems(doc: Doc): Problem[] {
   const report = JSON.parse(topo_check(JSON.stringify(doc.topo))) as { issues: Issue[] };
-  return report.issues
+  return [...report.issues, ...boardIssues(doc)]
     .map((i) => {
       const w = where(i.path, doc);
       return { ...i, short: RULE_SHORT[i.rule] ?? i.rule, sentence: sentence(i, w, doc), select: select(w, doc), field: w.rest };

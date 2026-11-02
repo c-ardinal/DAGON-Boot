@@ -43,6 +43,7 @@ DAGON Boot は、いくつかのマイコンを組み合わせて何かを作り
 | Rust のターゲット `thumbv6m-none-eabi`、`thumbv7em-none-eabihf` | RP2040、STM32F401RE | `rustup target add thumbv6m-none-eabi thumbv7em-none-eabihf` |
 | `espup` と `esp` のツールチェーン | ESP32-S3 | `cargo install espup` のあと `espup install` |
 | `probe-rs` と ST-LINK | STM32F401RE の初回書込み | `cargo install probe-rs-tools`（Windows は ST-LINK のドライバも） |
+| `espflash` | ESP32-S3 の初回書込み | `cargo install espflash` |
 | C コンパイラ | `dagon` CLI をソースからビルドするとき（`ring` crate） | Windows は MSVC の Build Tools、ほかは `cc` |
 | Chrome か Edge 89 以降 | DAGON Console（Web Serial） | — |
 
@@ -51,6 +52,13 @@ DAGON Boot は、いくつかのマイコンを組み合わせて何かを作り
 ```sh
 cargo install --path crates/dagon-cli
 dagon --help
+```
+
+続けて、構成に要るツールを `dagon` に確かめさせます（プロジェクトのフォルダで実行します。それ以外では全部のマイコンの家族を確かめます）:
+
+```sh
+dagon doctor           # あるものと足りないもの
+dagon doctor --fix     # 管理者権限の要らないものを入れる
 ```
 
 DAGON Console は `dagon` に組み込まれています。Node.js が要るのは、DAGON Console そのものを開発するときだけです（`web/README.md`）。
@@ -105,59 +113,34 @@ dagon build            # または: dagon build seg
 
 ### 5. 最初のバージョンを書き込む（ノードごとに 1 回）
 
-ノードには、ブートコアと最初のアプリを、そのノード自身のケーブルで 1 回だけ書き込みます。`dagon.toml` のこの部分は、`dagon new` も `dagon gen` もまだ書かないので、手で加えます。
-
-DAGON のクローンで、プロジェクトの公開鍵（`dagon.toml` の `pubkey`）を使ってブート用のイメージをビルドします（詳しくは MCU のパッケージの README: [rp2040](targets/mcu/rp2040/README.md)、[stm32f401re](targets/mcu/stm32f401re/README.md)）:
+ノードには、ブートコアと最初のアプリを、そのノード自身のケーブルで 1 回だけ書き込みます。`DAGON_SIGNING_KEY` を設定し（手順 1）、ノードをつないで実行します:
 
 ```sh
-export DAGON_PUBKEY=~/.dagon/keys/my-fleet/dagon-signing.pub
-(cd <DAGON のクローン>/targets/mcu/rp2040/stage0 && cargo build --release)
-(cd <DAGON のクローン>/targets/mcu/rp2040/bootcore && cargo build --release)
-(cd <DAGON のクローン>/targets/mcu/stm32f401re/bootcore && cargo build --release)
+dagon flash hub        # RP2040: BOOT を押しながら USB をつなぐと、rescue.uf2 を RPI-RP2 のドライブにコピー
+dagon flash seg        # STM32F401RE: ST-LINK 経由で probe-rs が書き込む
 ```
 
-続けて、`dagon rescue hub` か `dagon provision` で書き込むノードごとに `[provision.<id>]` を `dagon.toml` に加えます（ESP32-S3 は下の別の手順で書き込みます）。パスは絶対パスでなければ `dagon.toml` からの相対です。親機は `stage0` も要ります:
+`dagon flash` は先に手順を表示し、ボードに触れる前に確認を求めます（`--yes` で確認を省き、`--dry-run` は `out/` にファイルを作るだけ）。ブートコア（親機は `stage0` も）を CLI をビルドした DAGON のクローン（または `DAGON_HOME`）から、ノードのアプリと一緒に、署名の鍵の公開側でビルドします。ブートコアはデスクのデモの tag（`hub-rp2040-lcd`、`seg-f401-7seg`）を受け付けるので、これらのボードでは `topology.yaml` の tag をそのままにします。
 
-```toml
-[provision.hub]
-stage0 = "<DAGON のクローン>/targets/mcu/rp2040/stage0/target/thumbv6m-none-eabi/release/dagon-rp2040-stage0"
-bootcore = "<DAGON のクローン>/targets/mcu/rp2040/bootcore/target/thumbv6m-none-eabi/release/dagon-rp2040-bootcore"
-app = "out/build/hub/app-a.elf"
-version = "0.1.0"
-
-[provision.seg]
-bootcore = "<DAGON のクローン>/targets/mcu/stm32f401re/bootcore/target/thumbv7em-none-eabihf/release/dagon-stm32f401re-bootcore"
-app = "out/build/seg/app-a.elf"
-version = "0.1.0"
-```
-
-ブートコアはデスクのデモの tag（`hub-rp2040-lcd`、`seg-f401-7seg`）を受け付けるので、これらのボードでは `topology.yaml` の tag をそのままにします。
-
-```sh
-dagon rescue hub       # out/provision/hub/rescue.uf2: BOOT を押しながら USB をつなぎ、RPI-RP2 にコピー
-dagon provision seg    # out/provision/seg/flash.bin と ST-LINK 用の probe-rs のコマンド
-```
-
-ESP32-S3 は [targets/boards/m5stopwatch](targets/boards/m5stopwatch/README.md) の手順で USB-C から書き込みます。そのあと親機をつなぎ、すべてのノードが応答するか確かめます:
+ESP32-S3 は `dagon flash` がまだ扱いません。[targets/boards/m5stopwatch](targets/boards/m5stopwatch/README.md) の手順で USB-C から書き込みます。そのあと親機をつなぎ、すべてのノードが応答するか確かめます:
 
 ```sh
 dagon status
 ```
 
+`dagon flash` を使わない場合（自分でビルドしたブート用のイメージを使うとき）: `dagon rescue hub` と `dagon provision <id>` が、`dagon.toml` の `[provision.<id>]`（親機は `stage0`、ほかに `bootcore`、`app`、`version`）から同じファイルを作ります。ブート用のイメージのビルドは MCU のパッケージの README にあります。
+
 ### 6. 更新し、必要なら戻す
 
-`[build.<id>]` のバージョンを上げてビルドし、署名して送ります。DAGON Console ではビルド → 署名 → リリース → 渡す のあと、運用モードで Web Serial から更新します。コマンドでは:
+コードを変えたら:
 
 ```sh
-dagon build
-dagon image sign out/build/seg/app-a.elf --node seg --version 0.2.0 --slot a --out out/rel/seg-a.img
-dagon image sign out/build/seg/app-b.elf --node seg --version 0.2.0 --slot b --out out/rel/seg-b.img
-# ... ほかのノードも同様
-dagon release build out/rel --name r0.2 --out out/release-0.2.dgb
-dagon apply out/release-0.2.dgb
+dagon deploy hub seg               # または: dagon deploy hub seg --version 1.2.0
 ```
 
-`dagon apply` は署名と、リリースがこの構成に対して作られたことを確かめ、構成を親機へ送り、子機を更新してから親機を更新します。ノードは新しいバージョンを試行起動し、確定されなければウォッチドッグでリセットされて前のバージョンで起動し直します。
+`dagon deploy` はスロット A と B をビルドし、署名し、リリースを作り、ノードごとに今のバージョンと新しいバージョンを並べて、適用の前に確認を求めます（`--yes` で省けます）。バージョンの既定は、知っているいちばん新しいものの 1 つ上のパッチです。ノードの id を省くと `[build.<id>]` のすべてのノードが対象で、どれも両方のスロットをビルドする必要があります。そのため ESP32-S3 のノード（1 つのイメージで両方のスロットに使う）は、まだ `dagon deploy` で扱えません。1 つずつの手順は `dagon build`、`dagon image sign`、`dagon release build`、`dagon apply` です（`dagon --help`）。DAGON Console ではビルド → 署名 → リリース → 渡す のあと、運用モードで Web Serial から更新します。
+
+適用では、署名と、リリースがこの構成に対して作られたことを確かめ、構成を親機へ送り、子機を更新してから親機を更新します。ノードは新しいバージョンを試行起動し、確定されなければウォッチドッグでリセットされて前のバージョンで起動し直します。
 
 ```sh
 dagon rollback --node seg     # 前に確定したバージョンへ戻す

@@ -62,6 +62,7 @@ wired to the hub (see [Your own board](#your-own-board-chosen-by-mcu)).
 | Rust targets `thumbv6m-none-eabi`, `thumbv7em-none-eabihf` | RP2040, STM32F401RE | `rustup target add thumbv6m-none-eabi thumbv7em-none-eabihf` |
 | `espup` and its `esp` toolchain | ESP32-S3 | `cargo install espup`, then `espup install` |
 | `probe-rs` and an ST-LINK | first write of an STM32F401RE | `cargo install probe-rs-tools` (ST-LINK driver on Windows) |
+| `espflash` | first write of an ESP32-S3 | `cargo install espflash` |
 | A C compiler | building the `dagon` CLI from source (the `ring` crate) | MSVC Build Tools on Windows, `cc` elsewhere |
 | Chrome or Edge 89+ | DAGON Console (Web Serial) | — |
 
@@ -70,6 +71,14 @@ Install the `dagon` CLI from a clone of this repository:
 ```sh
 cargo install --path crates/dagon-cli
 dagon --help
+```
+
+Then let `dagon` check the tools your topology needs (run it in a project
+folder; elsewhere it checks every MCU family):
+
+```sh
+dagon doctor           # what is there and what is missing
+dagon doctor --fix     # installs what needs no administrator rights
 ```
 
 DAGON Console is built into `dagon`; Node.js is only needed to work on
@@ -147,71 +156,53 @@ version comes from `[build.<id>]` in `dagon.toml`.
 ### 5. Write the first version (once per node)
 
 A node needs its boot core and first application written once over its own
-cable. `dagon new` and `dagon gen` do not write this part of `dagon.toml`
-yet; add it by hand.
-
-Build the boot images in your DAGON clone with the project's public key
-(the `pubkey` of `dagon.toml`; details in the MCU package READMEs:
-[rp2040](targets/mcu/rp2040/README.md),
-[stm32f401re](targets/mcu/stm32f401re/README.md)):
+cable. With `DAGON_SIGNING_KEY` set (step 1), connect the node and run:
 
 ```sh
-export DAGON_PUBKEY=~/.dagon/keys/my-fleet/dagon-signing.pub
-(cd <DAGON clone>/targets/mcu/rp2040/stage0 && cargo build --release)
-(cd <DAGON clone>/targets/mcu/rp2040/bootcore && cargo build --release)
-(cd <DAGON clone>/targets/mcu/stm32f401re/bootcore && cargo build --release)
+dagon flash hub        # RP2040: hold BOOT while plugging in USB; rescue.uf2 is copied to the RPI-RP2 drive
+dagon flash seg        # STM32F401RE: through the ST-LINK with probe-rs
 ```
 
-Then add a `[provision.<id>]` table to `dagon.toml` for each node handled
-by `dagon rescue hub` or `dagon provision` (the ESP32-S3 follows its own
-procedure, below); paths are
-relative to `dagon.toml` unless absolute. The hub needs `stage0` as well:
+`dagon flash` prints its plan first and asks before it touches the board
+(`--yes` skips the question; `--dry-run` only makes the files under
+`out/`). It builds the boot core (and the hub's `stage0`) from the DAGON
+clone the CLI was built from (or `DAGON_HOME`) and the node's app, all
+with the public half of your signing key. The boot cores accept the desk
+demo's tags (`hub-rp2040-lcd`, `seg-f401-7seg`), so keep those tags in
+`topology.yaml` for these boards.
 
-```toml
-[provision.hub]
-stage0 = "<DAGON clone>/targets/mcu/rp2040/stage0/target/thumbv6m-none-eabi/release/dagon-rp2040-stage0"
-bootcore = "<DAGON clone>/targets/mcu/rp2040/bootcore/target/thumbv6m-none-eabi/release/dagon-rp2040-bootcore"
-app = "out/build/hub/app-a.elf"
-version = "0.1.0"
-
-[provision.seg]
-bootcore = "<DAGON clone>/targets/mcu/stm32f401re/bootcore/target/thumbv7em-none-eabihf/release/dagon-stm32f401re-bootcore"
-app = "out/build/seg/app-a.elf"
-version = "0.1.0"
-```
-
-The boot cores accept the desk demo's tags (`hub-rp2040-lcd`,
-`seg-f401-7seg`), so keep those tags in `topology.yaml` for these boards.
-
-```sh
-dagon rescue hub       # out/provision/hub/rescue.uf2: hold BOOT, plug in USB, copy it to RPI-RP2
-dagon provision seg    # out/provision/seg/flash.bin and the probe-rs commands for the ST-LINK
-```
-
-The ESP32-S3 is written over USB-C with the steps in
-[targets/boards/m5stopwatch](targets/boards/m5stopwatch/README.md).
+`dagon flash` does not handle the ESP32-S3 yet: write it over USB-C with
+the steps in [targets/boards/m5stopwatch](targets/boards/m5stopwatch/README.md).
 Then connect the hub and check that every node answers:
 
 ```sh
 dagon status
 ```
 
+Without `dagon flash` (boot images you built yourself): `dagon rescue hub`
+and `dagon provision <id>` make the same files from `[provision.<id>]`
+tables in `dagon.toml` (`stage0` for the hub, `bootcore`, `app`,
+`version`); the MCU package READMEs show how to build the boot images.
+
 ### 6. Update, and go back
 
-Raise the version in `[build.<id>]`, build, then sign and send. In DAGON
-Console this is ビルド → 署名 → リリース → 渡す, then the update in 運用
-mode, over Web Serial. From the command line:
+Change your code, then:
 
 ```sh
-dagon build
-dagon image sign out/build/seg/app-a.elf --node seg --version 0.2.0 --slot a --out out/rel/seg-a.img
-dagon image sign out/build/seg/app-b.elf --node seg --version 0.2.0 --slot b --out out/rel/seg-b.img
-# ... the same for the other nodes
-dagon release build out/rel --name r0.2 --out out/release-0.2.dgb
-dagon apply out/release-0.2.dgb
+dagon deploy hub seg               # or: dagon deploy hub seg --version 1.2.0
 ```
 
-`dagon apply` checks the signatures and that the release was built for this
+`dagon deploy` builds slots A and B, signs them, makes the release, lists
+each node with its old and new version and asks before applying (`--yes`
+skips the question). The version defaults to one patch above the newest
+one it knows. Without node ids it takes every node in `[build.<id>]`; each
+must build both slots, so an ESP32-S3 node (one image serves both of its
+slots) is not handled by `dagon deploy` yet. The single steps are
+`dagon build`, `dagon image sign`, `dagon release build` and `dagon apply`
+(`dagon --help`). In DAGON Console the same is ビルド → 署名 → リリース →
+渡す, then the update in 運用 mode, over Web Serial.
+
+Applying checks the signatures and that the release was built for this
 topology, sends the topology to the hub, updates the children and then the
 hub. A node runs the new version on trial; if it is not confirmed, its
 watchdog resets it and it boots the previous version again.

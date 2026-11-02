@@ -1,5 +1,6 @@
 #![forbid(unsafe_code)]
 
+mod ai;
 mod commands;
 mod config;
 mod device;
@@ -41,6 +42,9 @@ Usage:
                                      it answers, else the F401 ROM loader (boot core from
                                      <provision_dir>/<node>/bootcore.img by default)
   dagon sim run                      the four simulator scenarios (no hardware)
+  dagon ai topology [--in <text>] [--out <yaml>] [--model <id>]
+                                     board description (file or stdin) to topology YAML
+                                     via the Claude API, checked to 0 errors ($ANTHROPIC_API_KEY)
   dagon --help
 
 The hub is found by USB ID c0de:cafe or product \"DAGON hub\" unless --port
@@ -72,6 +76,7 @@ fn main() -> ExitCode {
         ["topo", "push", rest @ ..] => run(device::topo_push(rest)),
         ["recover", rest @ ..] => run(device::recover(rest)),
         ["sim", "run", rest @ ..] => run(simrun::run(rest)),
+        ["ai", "topology", rest @ ..] => run(ai::topology(rest)),
         _ => usage_error("unknown command"),
     }
 }

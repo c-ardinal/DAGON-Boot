@@ -1,0 +1,468 @@
+//! `dagon ai topology`: a natural-language board description becomes topology
+//! YAML through the Claude Messages API. Each draft goes through the same
+//! checks as `topo check`; errors go back to the model until none are left.
+//! Values the model cannot derive are asked of the user instead of guessed.
+
+use std::io::{BufRead, Read, Write};
+use std::time::Duration;
+
+use serde_json::{json, Value};
+
+/// The API key is read from here only; it is never printed, logged or written.
+const KEY_ENV: &str = "ANTHROPIC_API_KEY";
+const MODEL_ENV: &str = "DAGON_AI_MODEL";
+const DEFAULT_MODEL: &str = "claude-opus-5-5";
+const API_URL: &str = "https://api.anthropic.com";
+const API_VERSION: &str = "2023-06-01";
+const MAX_TOKENS: u32 = 16_000;
+/// Model calls per run, counting question rounds and fix rounds.
+const MAX_ROUNDS: usize = 8;
+const HTTP_TIMEOUT: Duration = Duration::from_secs(600);
+const TOOL: &str = "submit_topology";
+const DEFAULT_OUT: &str = "topology.yaml";
+
+const INSTRUCTIONS: &str = "You write DAGON Boot topology YAML files from a natural-language \
+description of a board setup (hub, nodes, buses, links, addresses, pins).
+
+Rules:
+- Use only the keys and values defined by the schema below (Rust serde types; unknown keys are \
+rejected). Do not invent keys. MCU, board, port and flash map names come from the board table.
+- Never guess. Any value that cannot be derived with certainty from the description or the board \
+table (pin numbers, I2C addresses, UART interface, baud rate, reset/boot pins, pull-ups) must be \
+asked: put one plain question per missing value in `questions`. Never fill in a \
+plausible-looking value. When you ask questions, `yaml` may be an empty string or a partial draft.
+- When nothing is missing, return the complete YAML in `yaml` and an empty `questions` list.
+- Every answer is sent back to you via `submit_topology`: either the user's answers or the \
+checker report (JSON) of your YAML. Fix every reported error and submit the whole file again.
+- The example shows the format only; its pins and addresses belong to that setup alone.
+
+Always reply by calling `submit_topology`.";
+
+const SCHEMA_RS: &str = include_str!("../../dagon-topology/src/schema.rs");
+const BOARDS_RS: &str = include_str!("../../dagon-topology/src/boards.rs");
+const CHECK_RS: &str = include_str!("../../dagon-topology/src/check.rs");
+const EXAMPLE_YAML: &str = include_str!("../../../topology/desk-demo.yaml");
+
+struct Args {
+    input: Option<String>,
+    out: String,
+    model: String,
+}
+
+/// `dagon ai topology [--in <file>] [--out <yaml>] [--model <id>]`
+pub fn topology(args: &[&str]) -> Result<(), String> {
+    let a = parse_args(args, std::env::var(MODEL_ENV).ok())?;
+    let key = api_key(std::env::var(KEY_ENV))?;
+    let description = match &a.input {
+        Some(p) => std::fs::read_to_string(p).map_err(|e| format!("cannot read {p}: {e}"))?,
+        None => {
+            let mut s = String::new();
+            std::io::stdin()
+                .read_to_string(&mut s)
+                .map_err(|e| format!("cannot read the description from stdin: {e}"))?;
+            s
+        }
+    };
+    if description.trim().is_empty() {
+        return Err("the board description is empty".into());
+    }
+    let interactive = a.input.is_some();
+    let mut api = |body: &Value| post_messages(API_URL, &key, body);
+    let mut ask = |qs: &[String]| {
+        if interactive {
+            prompt(qs)
+        } else {
+            Err(unanswered(qs))
+        }
+    };
+    let done = generate(&description, &a.model, &mut api, &mut ask)?;
+    std::fs::write(&a.out, &done.yaml).map_err(|e| format!("cannot write {}: {e}", a.out))?;
+    for i in done.report.warnings() {
+        println!("warning {} {}: {}", i.rule, i.path, i.message);
+    }
+    println!(
+        "{}: 0 error(s), {} warning(s) after {} model call(s)",
+        a.out,
+        done.report.warnings().count(),
+        done.rounds
+    );
+    for (q, ans) in &done.answers {
+        println!("you supplied: {q} -> {ans}");
+    }
+    Ok(())
+}
+
+fn parse_args(args: &[&str], env_model: Option<String>) -> Result<Args, String> {
+    let mut a = Args {
+        input: None,
+        out: DEFAULT_OUT.into(),
+        model: env_model.unwrap_or_else(|| DEFAULT_MODEL.into()),
+    };
+    let mut it = args.iter();
+    while let Some(flag) = it.next() {
+        let mut value = || {
+            it.next()
+                .map(|v| v.to_string())
+                .ok_or_else(|| format!("{flag} needs a value"))
+        };
+        match *flag {
+            "--in" => a.input = Some(value()?),
+            "--out" => a.out = value()?,
+            "--model" => a.model = value()?,
+            other => {
+                return Err(format!(
+                    "unknown argument {other}; usage: dagon ai topology [--in <file>] [--out <yaml>] [--model <id>]"
+                ))
+            }
+        }
+    }
+    Ok(a)
+}
+
+fn api_key(v: Result<String, std::env::VarError>) -> Result<String, String> {
+    match v {
+        Ok(k) if !k.trim().is_empty() => Ok(k.trim().to_string()),
+        _ => Err(format!(
+            "{KEY_ENV} is not set; export your Claude API key in that environment variable"
+        )),
+    }
+}
+
+#[derive(Debug)]
+struct Outcome {
+    yaml: String,
+    report: dagon_topology::Report,
+    /// (question, answer) pairs the user supplied.
+    answers: Vec<(String, String)>,
+    rounds: usize,
+}
+
+type Api<'a> = dyn FnMut(&Value) -> Result<Value, String> + 'a;
+type Ask<'a> = dyn FnMut(&[String]) -> Result<Vec<String>, String> + 'a;
+
+/// Model loop: draft, ask for unknowns, check, feed errors back, until the
+/// check reports 0 errors or `MAX_ROUNDS` calls are spent.
+fn generate(
+    description: &str,
+    model: &str,
+    api: &mut Api,
+    ask: &mut Ask,
+) -> Result<Outcome, String> {
+    let mut messages = vec![json!({
+        "role": "user",
+        "content": format!("Board description:\n\n{description}"),
+    })];
+    let mut answers = Vec::new();
+    let mut last_errors = String::new();
+    for round in 1..=MAX_ROUNDS {
+        let resp = api(&request(model, &messages))?;
+        let (id, yaml, questions) = tool_call(&resp)?;
+        messages.push(json!({ "role": "assistant", "content": resp["content"] }));
+        let (feedback, is_error) = if !questions.is_empty() {
+            let got = ask(&questions)?;
+            let text = questions
+                .iter()
+                .zip(&got)
+                .map(|(q, a)| format!("Q: {q}\nA: {a}"))
+                .collect::<Vec<_>>()
+                .join("\n");
+            answers.extend(questions.into_iter().zip(got));
+            (format!("User answers:\n{text}"), false)
+        } else {
+            let report = dagon_topology::check_str(&yaml);
+            if report.is_pushable() {
+                return Ok(Outcome {
+                    yaml,
+                    report,
+                    answers,
+                    rounds: round,
+                });
+            }
+            last_errors = report
+                .errors()
+                .map(|i| format!("  {} {}: {}", i.rule, i.path, i.message))
+                .collect::<Vec<_>>()
+                .join("\n");
+            (format!("Checker report:\n{}", report.to_json()), true)
+        };
+        messages.push(json!({
+            "role": "user",
+            "content": [{
+                "type": "tool_result",
+                "tool_use_id": id,
+                "content": feedback,
+                "is_error": is_error,
+            }],
+        }));
+    }
+    Err(format!(
+        "no error-free topology after {MAX_ROUNDS} model calls; last errors:\n{last_errors}"
+    ))
+}
+
+fn request(model: &str, messages: &[Value]) -> Value {
+    let system = format!(
+        "{INSTRUCTIONS}\n\n<schema file=\"schema.rs\">\n{SCHEMA_RS}</schema>\n\n\
+         <board_table file=\"boards.rs\">\n{BOARDS_RS}</board_table>\n\n\
+         <checks file=\"check.rs\">\n{CHECK_RS}</checks>\n\n\
+         <example file=\"desk-demo.yaml\">\n{EXAMPLE_YAML}</example>"
+    );
+    json!({
+        "model": model,
+        "max_tokens": MAX_TOKENS,
+        // The large constant prefix is cached across the rounds of one run.
+        "system": [{ "type": "text", "text": system, "cache_control": { "type": "ephemeral" } }],
+        "tools": [{
+            "name": TOOL,
+            "description": "Submit the topology YAML draft and any questions for values that cannot be derived.",
+            "input_schema": {
+                "type": "object",
+                "properties": {
+                    "yaml": { "type": "string", "description": "The whole topology YAML file (may be empty while questions are open)." },
+                    "questions": { "type": "array", "items": { "type": "string" }, "description": "One question per unknown value; empty when the YAML is complete." }
+                },
+                "required": ["yaml", "questions"]
+            }
+        }],
+        "tool_choice": { "type": "tool", "name": TOOL },
+        "messages": messages,
+    })
+}
+
+/// The `submit_topology` call in a Messages API response: (id, yaml, questions).
+fn tool_call(resp: &Value) -> Result<(String, String, Vec<String>), String> {
+    let block = resp["content"]
+        .as_array()
+        .and_then(|c| {
+            c.iter()
+                .find(|b| b["type"] == "tool_use" && b["name"] == TOOL)
+        })
+        .ok_or_else(|| {
+            format!(
+                "the model did not call {TOOL} (stop_reason {})",
+                resp["stop_reason"]
+            )
+        })?;
+    if resp["stop_reason"] == "max_tokens" {
+        return Err("the model reply was cut off at max_tokens".into());
+    }
+    let id = block["id"]
+        .as_str()
+        .ok_or("tool call without id")?
+        .to_string();
+    let yaml = block["input"]["yaml"].as_str().unwrap_or("").to_string();
+    let questions = block["input"]["questions"]
+        .as_array()
+        .map(|qs| {
+            qs.iter()
+                .filter_map(Value::as_str)
+                .map(str::to_string)
+                .collect()
+        })
+        .unwrap_or_default();
+    Ok((id, yaml, questions))
+}
+
+fn post_messages(base: &str, key: &str, body: &Value) -> Result<Value, String> {
+    let agent: ureq::Agent = ureq::Agent::config_builder()
+        .timeout_global(Some(HTTP_TIMEOUT))
+        .http_status_as_error(false)
+        .build()
+        .into();
+    let mut resp = agent
+        .post(format!("{base}/v1/messages"))
+        .header("x-api-key", key)
+        .header("anthropic-version", API_VERSION)
+        .header("content-type", "application/json")
+        .send(body.to_string())
+        .map_err(|e| format!("Claude API request failed: {e}"))?;
+    let status = resp.status();
+    let text = resp
+        .body_mut()
+        .read_to_string()
+        .map_err(|e| format!("cannot read the Claude API response: {e}"))?;
+    let v: Value = serde_json::from_str(&text)
+        .map_err(|e| format!("Claude API returned non-JSON (HTTP {status}): {e}"))?;
+    if !status.is_success() {
+        let msg = v["error"]["message"].as_str().unwrap_or("no message");
+        return Err(format!("Claude API error (HTTP {status}): {msg}"));
+    }
+    Ok(v)
+}
+
+fn prompt(qs: &[String]) -> Result<Vec<String>, String> {
+    eprintln!("The model needs these values (it does not guess them):");
+    let stdin = std::io::stdin();
+    let mut lines = stdin.lock().lines();
+    qs.iter()
+        .map(|q| {
+            eprint!("? {q}\n> ");
+            let _ = std::io::stderr().flush();
+            match lines.next() {
+                Some(Ok(l)) => Ok(l.trim().to_string()),
+                _ => Err(unanswered(qs)),
+            }
+        })
+        .collect()
+}
+
+fn unanswered(qs: &[String]) -> String {
+    let list: String = qs.iter().map(|q| format!("\n  - {q}")).collect();
+    format!(
+        "the model needs values it cannot derive; add them to the description and run again \
+         with --in <file>:{list}"
+    )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::collections::VecDeque;
+    use std::io::BufReader;
+    use std::net::TcpListener;
+
+    fn reply(id: &str, yaml: &str, questions: &[&str]) -> Value {
+        json!({
+            "content": [{ "type": "tool_use", "id": id, "name": TOOL,
+                          "input": { "yaml": yaml, "questions": questions } }],
+            "stop_reason": "tool_use",
+        })
+    }
+
+    #[test]
+    fn asks_then_fixes_until_check_passes() {
+        let mut replies = VecDeque::from([
+            reply("t1", "", &["I2C address of seg?"]),
+            reply("t2", "dagon: 1\nname: broken\n", &[]),
+            reply("t3", EXAMPLE_YAML, &[]),
+        ]);
+        let mut sent = Vec::new();
+        let mut api = |b: &Value| {
+            sent.push(b.clone());
+            Ok(replies.pop_front().unwrap())
+        };
+        let mut asked = Vec::new();
+        let mut ask = |qs: &[String]| {
+            asked.extend_from_slice(qs);
+            Ok(vec!["0x42".to_string()])
+        };
+        let out = generate("hub and seg", "m-test", &mut api, &mut ask).unwrap();
+        assert_eq!(out.rounds, 3);
+        assert_eq!(out.yaml, EXAMPLE_YAML);
+        assert!(out.report.is_pushable());
+        assert_eq!(asked, ["I2C address of seg?"]);
+        assert_eq!(out.answers, [("I2C address of seg?".into(), "0x42".into())]);
+        assert_eq!(sent[0]["model"], "m-test");
+        assert_eq!(sent[0]["tool_choice"]["name"], TOOL);
+        // Round 2 carries the answer, round 3 the checker errors, both as tool results.
+        let r2 = &sent[1]["messages"][2]["content"][0];
+        assert_eq!(r2["tool_use_id"], "t1");
+        assert!(r2["content"].as_str().unwrap().contains("A: 0x42"));
+        let r3 = &sent[2]["messages"][4]["content"][0];
+        assert_eq!(r3["tool_use_id"], "t2");
+        assert_eq!(r3["is_error"], true);
+        assert!(r3["content"].as_str().unwrap().contains("\"ok\":false"));
+    }
+
+    #[test]
+    fn gives_up_after_max_rounds() {
+        let mut calls = 0;
+        let mut api = |_: &Value| {
+            calls += 1;
+            Ok(reply("t", "not: [valid", &[]))
+        };
+        let mut ask = |_: &[String]| -> Result<Vec<String>, String> { unreachable!() };
+        let e = generate("x", "m", &mut api, &mut ask).unwrap_err();
+        assert_eq!(calls, MAX_ROUNDS);
+        assert!(e.contains("no error-free topology"), "{e}");
+    }
+
+    #[test]
+    fn non_interactive_questions_are_printed_as_error() {
+        let mut api = |_: &Value| Ok(reply("t", "", &["baud rate of watch?"]));
+        let mut ask = |qs: &[String]| Err(unanswered(qs));
+        let e = generate("x", "m", &mut api, &mut ask).unwrap_err();
+        assert!(e.contains("baud rate of watch?"), "{e}");
+    }
+
+    #[test]
+    fn missing_key_is_a_clear_error() {
+        let e = api_key(Err(std::env::VarError::NotPresent)).unwrap_err();
+        assert!(e.contains(KEY_ENV));
+        assert!(api_key(Ok("  ".into())).is_err());
+        assert_eq!(api_key(Ok("k\n".into())).unwrap(), "k");
+    }
+
+    #[test]
+    fn args_and_model_override() {
+        let a = parse_args(&[], None).unwrap();
+        assert_eq!(
+            (a.out.as_str(), a.model.as_str()),
+            (DEFAULT_OUT, DEFAULT_MODEL)
+        );
+        assert!(a.input.is_none());
+        let a = parse_args(&["--in", "d.txt", "--model", "m2"], Some("m1".into())).unwrap();
+        assert_eq!(
+            (a.input.as_deref(), a.model.as_str()),
+            (Some("d.txt"), "m2")
+        );
+        assert_eq!(parse_args(&[], Some("m1".into())).unwrap().model, "m1");
+        assert!(parse_args(&["--out"], None).is_err());
+        assert!(parse_args(&["--bogus"], None).is_err());
+    }
+
+    /// One-shot local HTTP server standing in for the API (no network).
+    fn mock_server(status: &str, body: &str) -> (String, std::thread::JoinHandle<String>) {
+        let l = TcpListener::bind("127.0.0.1:0").unwrap();
+        let base = format!("http://{}", l.local_addr().unwrap());
+        let resp = format!(
+            "HTTP/1.1 {status}\r\ncontent-type: application/json\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{body}",
+            body.len()
+        );
+        let h = std::thread::spawn(move || {
+            let (mut s, _) = l.accept().unwrap();
+            let mut r = BufReader::new(s.try_clone().unwrap());
+            let mut head = String::new();
+            let mut len = 0;
+            loop {
+                let mut line = String::new();
+                r.read_line(&mut line).unwrap();
+                if let Some(v) = line.to_ascii_lowercase().strip_prefix("content-length:") {
+                    len = v.trim().parse().unwrap();
+                }
+                if line == "\r\n" {
+                    break;
+                }
+                head.push_str(&line);
+            }
+            let mut body = vec![0; len];
+            r.read_exact(&mut body).unwrap();
+            s.write_all(resp.as_bytes()).unwrap();
+            head + "\r\n" + &String::from_utf8(body).unwrap()
+        });
+        (base, h)
+    }
+
+    #[test]
+    fn http_request_shape() {
+        let ok = reply("t1", "y", &[]).to_string();
+        let (base, h) = mock_server("200 OK", &ok);
+        let v = post_messages(&base, "sk-test", &json!({ "model": "m" })).unwrap();
+        assert_eq!(v["content"][0]["id"], "t1");
+        let req = h.join().unwrap().to_ascii_lowercase();
+        assert!(req.starts_with("post /v1/messages "), "{req}");
+        assert!(req.contains("x-api-key: sk-test"));
+        assert!(req.contains(&format!("anthropic-version: {API_VERSION}")));
+        assert!(req.ends_with("{\"model\":\"m\"}"));
+    }
+
+    #[test]
+    fn http_error_message_without_key() {
+        let body = r#"{"type":"error","error":{"type":"authentication_error","message":"invalid x-api-key"}}"#;
+        let (base, h) = mock_server("401 Unauthorized", body);
+        let e = post_messages(&base, "sk-secret", &json!({})).unwrap_err();
+        h.join().unwrap();
+        assert!(e.contains("401") && e.contains("invalid x-api-key"), "{e}");
+        assert!(!e.contains("sk-secret"));
+    }
+}

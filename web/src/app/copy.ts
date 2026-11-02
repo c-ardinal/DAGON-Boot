@@ -329,6 +329,10 @@ export const ANNOUNCE = {
   A08: (n: number, of: number) => `応答 ${n}/${of}`,
   A21silent: (name: string) => `${name} 応答なし`,
   A21lost: '親機 切断',
+  A01: (product: string, hub: boolean) => `${product} 配置、${hub ? '親機' : '子機'}`,
+  A03: (name: string) => `${name} 削除、Ctrl+Z で戻せる`,
+  A04: (errors: number, warnings: number) => `問題 ${errors}、注意 ${warnings}`,
+  A22: (define: boolean) => (define ? '定義モード' : '運用モード'),
   A09: (name: string, size: string) => `${name} ${size}、確認中`,
   A10ok: (n: number) => `配布元 確認済み、構成 一致、対象 ${n}`,
   A10source: '配布元 確認できない',
@@ -354,3 +358,154 @@ export const FORBIDDEN_WORDS = [
   'パーティション', 'コマンド', 'タイムアウト', 'WASM', 'Web Serial', '確定', '試行中',
   '巻き戻り', 'エラー', '不正', '致命的', '無効',
 ] as const;
+
+/** S07: short names of the check rules (problem chips and the problem list). */
+export const RULE_SHORT: Record<string, string> = {
+  'V-01': 'ファイルの形式',
+  'V-02': '名前の重なりとノードの数',
+  'V-03': '親機の数',
+  'V-04': '子機どうしのリンク',
+  'V-05': 'つながっていないノード',
+  'V-06': '起動の方式',
+  'V-07': '親機に無いピン',
+  'V-08': 'ピンの重なり',
+  'V-09': 'UART のピン',
+  'V-10': 'UART の数',
+  'V-11': '起動の切り替え方',
+  'V-12': '復旧の層',
+  'V-13': '最後の手段のピン',
+  'V-14': '更新の順番',
+  'V-15': '互換の決まり',
+  'V-16': 'フラッシュの大きさ',
+  'V-17': 'I2C のピン',
+  'V-18': 'アドレスの重なり',
+  'V-20': 'I2C の速さ',
+  'V-21': 'I2C でつなげないノード',
+  'V-22': 'リセット・起動の配線 未設定',
+};
+
+/** Names a §11.2 sentence needs: the node (呼び名), its board, its id, and whether there are too many nodes. */
+export interface FixWords {
+  to: string;
+  board: string;
+  id: string;
+  many: boolean;
+}
+
+/** §11.2: how to fix each rule, one sentence. */
+export const RULE_FIX: Record<string, (w: FixWords) => string> = {
+  'V-01': () => 'dagon の新しいバージョンで書き出したファイルを読み込んでください。',
+  'V-02': (w) => (w.many ? 'ノードを 8 つまでにしてください。' : `名前「${w.id}」の 2 つのどちらかを変えてください。`),
+  'V-03': () => '親機を 1 つだけにしてください。',
+  'V-04': () => '子機どうしのリンクを消し、親機とつないでください。',
+  'V-05': (w) => `${w.to}を親機とリンクでつないでください。`,
+  'V-06': (w) => `『直す』で ${w.board} に合う起動の方式にしてください。`,
+  'V-07': () => '親機のピンを、16・17・18・26・27・28 のどれかに変えてください。',
+  'V-08': () => '重なったピンのどちらか 1 か所を、空いているピンに変えてください。',
+  'V-09': () => '『直す』で PIO の UART に替えてください。',
+  'V-10': () => 'UART のリンクを 1 本減らしてください。',
+  'V-11': (w) => `${w.to}の起動の切り替え方を選んでください（最後の手段で直すときに使います）。`,
+  'V-12': () => '詳しい設定の「復旧の層」から最後の手段を外してください。',
+  'V-13': (w) => `${w.to}を PA8・PB4、PB6・PB7、PB10・PB3 のどれかの組につないでください。`,
+  'V-14': () => '『直す』で親機を最後にして並べてください。',
+  'V-15': () => '互換の決まりから、無いノードを外してください。',
+  'V-16': () => '既定の配置に戻してください。',
+  'V-17': () => '共有の 2 本線（I2C）を親機の GPIO 16・17 にしてください。',
+  'V-18': (w) => `${w.to}のアドレスを、空いている番号に変えてください。`,
+  'V-20': () => '共有の 2 本線（I2C）の速さを 400 kHz 以下にしてください。',
+  'V-21': (w) => `${w.to}は UART でつないでください。`,
+  'V-22': (w) => `最後の手段で復旧するには、『直す』で ${w.to}のリセット・起動の配線を設定してください（このままでも親機へ送れます）。`,
+};
+
+/** Header: the two modes (運用｜定義) and whether the configuration was sent (S24). */
+export const MODE = {
+  operate: '運用',
+  define: '定義',
+  label: 'モード',
+  unsent: '構成 未送信',
+  sent: '構成 送信済み',
+} as const;
+
+/** Define mode (SC-D1–D3, SC-T, SC-M, §11.1). */
+export const DEFINE = {
+  /** SC-D1 left column. */
+  listHeading: 'ノードリスト',
+  listHelp: '選んで Enter で置けます。',
+  place: '置く',
+  placed: '配置済み',
+  firstHeading: 'はじめての方へ',
+  placeSample: '見本を置く',
+  connectDiscover: 'つないで、自動で見つける',
+  /** Canvas toolbar. */
+  undo: '元に戻す',
+  redo: 'やり直す',
+  graph: 'グラフ',
+  table: '表',
+  exportYaml: '書き出す',
+  importYaml: '読み込む',
+  /** M49 dot numbers in define mode. */
+  dotNodes: 'ノード',
+  dotLinks: 'リンク',
+  dotNodesName: (n: number, l: number) => `ノード ${n}、リンク ${l}`,
+  /** S25: nothing selected and nothing to fix. */
+  nothingSelected: 'ノードかリンクを選ぶと、ここで直せます。',
+  /** SC-D3 (S23, S15). */
+  problems: (n: number) => `! 問題 ${n}`,
+  problemsNone: '問題 0',
+  cautions: (m: number) => `▲ 注意 ${m}`,
+  fix: '直す',
+  ruleId: '規則 ID',
+  yamlPath: 'YAML の場所',
+  details: '詳しく見る',
+  problemName: (short: string, rule: string, sentence: string) => `${short}、規則 ${rule}、${sentence}`,
+  /** Bottom band (C02, C05, C06, C09). */
+  emptySentence: '親機を USB でパソコンにつないでから、『つないで、自動で見つける』を押してください。',
+  fixSentence: '直すと、親機へ送れます。',
+  sendSentence: '親機へ送ると、更新できるようになります。',
+  send: '親機へ送る',
+  connectSend: 'つないで、親機へ送る',
+  unreadableChip: '× 読めない形式',
+  unreadableSentence: 'dagon で書き出した .yaml ファイルを選んでください。',
+} as const;
+
+/** SC-D2 inspector labels; 詳しい設定 shows the schema names as they are (§11.4, 2 段目). */
+export const INSPECT = {
+  name: '呼び名',
+  id: '名前 id',
+  role: '役割',
+  roles: { coordinator: '親機', node: '子機' } as Record<string, string>,
+  product: '製品名 · MCU',
+  connectTo: 'つなぐ先',
+  none: 'なし',
+  reset: 'リセット',
+  boot: '起動',
+  unset: '未設定',
+  advanced: '詳しい設定',
+  kind: '種類',
+  kinds: { i2c: 'I2C（共有の 2 本線）', uart: 'UART（1 対 1 の配線）' } as Record<string, string>,
+  addr: 'アドレス（16 進）',
+  freeAddr: '空いている番号',
+  nodePins: '相手側のピン',
+  uartPins: '親機のピン',
+  baud: 'ボーレート',
+  removeLink: 'このリンクを消す',
+  removeNode: 'このノードを消す',
+  bus: '共有の 2 本線（I2C）',
+  busPins: 'ピン',
+  speed: '速さ',
+  speeds: { 100000: '100 kHz', 400000: '400 kHz' } as Record<number, string>,
+  pullups: 'プルアップ',
+  pullupKinds: { external: '外付け', board: '基板上' } as Record<string, string>,
+  inUse: (what: string) => `（使用中: ${what}）`,
+} as const;
+
+/** SC-T: the table view (S03 words in its cells). */
+export const TABLE = {
+  tabs: ['ノード', 'リンク', '配線'],
+  nodeCols: ['番号', '呼び名', '製品名 · MCU', '役割', 'つなぎ方', 'ピン'],
+  linkCols: ['元', '先', '種類', 'アドレス', 'ピン'],
+  addNode: 'ノードを加える',
+  addLink: 'リンクを加える',
+  edit: '編集',
+  remove: '消す',
+} as const;

@@ -6,6 +6,8 @@
     of?: number;
     /** Unit after the number ("%", "% 停止"). */
     unit?: string;
+    /** A label-value pair under the number ("リンク 2"). */
+    sub?: readonly [string, string | number];
     name: string;
   }
 
@@ -144,8 +146,8 @@
   type Mark = { chip: string; spoken: string; silent: boolean } | 'skeleton' | null;
 
   function markOf(n: Node): Mark {
-    if (!connected) return null;
     if (chips[n.id]) return chips[n.id];
+    if (!connected) return null;
     const l = live[n.id];
     if (!l || l.responding === null) return 'skeleton';
     if (!l.responding) return { chip: NODE.silent, spoken: NODE.silentName, silent: true };
@@ -216,6 +218,7 @@
       <div class="dot" style:top="{L1_TOP + 48}px" role="img" aria-label={dot.name}>
         <span class="dot-label">{dot.label}</span>
         <span class="dot-num">{dot.value}</span>{#if dot.of !== undefined}<span class="dot-of">/{dot.of}</span>{/if}{#if dot.unit}<span class="dot-of">{dot.unit}</span>{/if}
+        {#if dot.sub}<span class="dot-sub"><span class="dot-label">{dot.sub[0]}</span> {dot.sub[1]}</span>{/if}
       </div>
     {/if}
 
@@ -359,6 +362,14 @@
   }
   .dot-of {
     font: 700 var(--t-version-size) / 1 var(--f-dot);
+  }
+  .dot-sub {
+    grid-column: 1 / -1;
+    margin-top: var(--s-3);
+    font: 400 var(--t-body-size) / var(--t-body-lh) var(--f-ja);
+  }
+  .dot-sub .dot-label {
+    display: inline;
   }
   .pc {
     position: absolute;

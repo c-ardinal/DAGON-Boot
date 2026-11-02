@@ -5,12 +5,14 @@
 
 extern crate alloc;
 
+mod define;
 mod frame;
 mod host;
 #[cfg(feature = "sim")]
 mod sim;
 mod watch;
 
+pub use define::{board_template, topo_parse};
 pub use frame::{frame_encode, FrameCutter};
 pub use host::{check_bootcore_for, check_release_for, watch_interval_ms, WasmHost};
 #[cfg(feature = "sim")]

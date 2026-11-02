@@ -179,7 +179,15 @@ export class Operate {
     if (focus) this.focusRequest++;
   }
 
-  placeSample(): void {
+  /** A configuration made in define mode takes the canvas (not sent yet). */
+  useConfig(c: Config): void {
+    if (this.config?.yaml === c.yaml) return;
+    this.config = c;
+    this.sent = false;
+    this.live = Object.fromEntries(c.nodes.map((n) => [n.id, this.live[n.id] ?? UNKNOWN]));
+  }
+
+    placeSample(): void {
     this.config = DESK_DEMO;
     this.sent = false;
     this.live = Object.fromEntries(DESK_DEMO.nodes.map((n) => [n.id, UNKNOWN]));

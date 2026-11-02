@@ -32,6 +32,14 @@ const filled = [
   copy.ANNOUNCE.A15('7セグ', '1.0.0'),
   copy.ANNOUNCE.A16('7セグ', 2),
   copy.NODE_ACTION.back('1.0.0'),
+  copy.ANNOUNCE.A01('NUCLEO-F401RE', false),
+  copy.ANNOUNCE.A03('ウォッチ'),
+  copy.ANNOUNCE.A04(2, 1),
+  copy.DEFINE.dotNodesName(3, 2),
+  copy.DEFINE.problems(2),
+  copy.DEFINE.cautions(1),
+  copy.INSPECT.inUse('7セグのリセット'),
+  ...Object.values(copy.RULE_FIX).map((f) => f({ to: '7セグ', board: 'NUCLEO-F401RE', id: 'seg', many: false })),
 ];
 
 const shownExcept = (...skip: string[]) =>
@@ -45,12 +53,15 @@ const shown = shownExcept();
 describe('copy', () => {
   test.each(copy.FORBIDDEN_WORDS)('no screen text uses %s', (word) => {
     // 確定 is allowed only as a slot value in the slot section.
-    const texts = word === '確定' ? shownExcept('SLOT', 'TRIAL_CHOICE') : shown;
+    // 確定 only as a slot value and in M38; フラッシュ only in V-16's name (§11.4).
+    const texts = word === '確定' ? shownExcept('SLOT', 'TRIAL_CHOICE') : word === 'フラッシュ' ? shown.filter((s) => s !== copy.RULE_SHORT['V-16']) : shown;
     expect(texts.filter((s) => s.includes(word))).toEqual([]);
   });
 
   test('no ASCII ellipsis, no colon in label-value pairs', () => {
-    expect(shown.filter((s) => s.includes('...') || s.includes('：') || /\S:\s/.test(s))).toEqual([]);
+    // §7.11 writes the in-use note of a pin choice as 「（使用中: …）」 itself.
+    const notes = new Set([copy.INSPECT.inUse('7セグのリセット')]);
+    expect(shown.filter((s) => !notes.has(s) && (s.includes('...') || s.includes('：') || /\S:\s/.test(s)))).toEqual([]);
   });
 
   test('slots are called スロット (A, B, 予備 inside the slot section), never 面', () => {

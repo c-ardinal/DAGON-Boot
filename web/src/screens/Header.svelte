@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { CLI_NONE, HELP, HUB, HUB_NAME, ORDER, PRODUCT, STEP } from '../app/copy.ts';
+  import { CLI_NONE, HELP, HUB, HUB_NAME, MODE, ORDER, PRODUCT, STEP } from '../app/copy.ts';
   import type { HubState, Step } from '../app/machine.ts';
 
   interface Props {
@@ -10,19 +10,34 @@
     drawerOpen: boolean;
     ondrawer: () => void;
     drawerButton?: HTMLButtonElement;
+    mode?: 'operate' | 'define';
+    onmode?: (m: 'operate' | 'define') => void;
+    /** Switching is held while an update or recovery runs (C10). */
+    modeLocked?: boolean;
+    /** Define mode: the configuration on the canvas was sent to the hub (S24). */
+    sent?: boolean;
   }
 
-  let { step, hub, drawer, drawerOpen, ondrawer, drawerButton = $bindable() }: Props = $props();
+  let { step, hub, drawer, drawerOpen, ondrawer, drawerButton = $bindable(), mode = 'operate', onmode, modeLocked = false, sent = false }: Props = $props();
   let helpOpen = $state(false);
 </script>
 
 <header>
   <span class="product" translate="no">{PRODUCT}</span>
+  {#if onmode}
+    <div class="modes" role="radiogroup" aria-label={MODE.label}>
+      {#each [['operate', MODE.operate], ['define', MODE.define]] as const as [m, label] (m)}
+        <button role="radio" aria-checked={mode === m} aria-disabled={modeLocked && mode !== m} onclick={() => !modeLocked && mode !== m && onmode(m)}>{label}</button>
+      {/each}
+    </div>
+  {/if}
   {#if drawer}
     <button class="secondary" aria-expanded={drawerOpen} aria-controls="drawer" bind:this={drawerButton} onclick={ondrawer}>{ORDER.heading}</button>
   {/if}
   <ol class="steps">
-    {#if step !== null}
+    {#if mode === 'define'}
+      <li>{sent ? MODE.sent : MODE.unsent}</li>
+    {:else if step !== null}
       <li aria-current="step">
         {#if step === 'recover'}
           {STEP.names.recover}
@@ -56,6 +71,33 @@
 </section>
 
 <style>
+  .modes {
+    display: flex;
+    padding: 3px;
+    border: 1px solid var(--c-line);
+    border-radius: var(--r-full);
+  }
+  .modes button {
+    padding: var(--s-1) var(--s-4);
+    border: 0;
+    border-radius: var(--r-full);
+    background: none;
+    color: var(--c-paper);
+    font: 700 var(--t-body-size) / var(--t-body-lh) var(--f-ja);
+    cursor: pointer;
+  }
+  .modes button[aria-checked='true'] {
+    background: var(--c-paper);
+    color: var(--c-ink);
+  }
+  .modes button[aria-disabled='true'] {
+    opacity: 0.4;
+    cursor: not-allowed;
+  }
+  .modes button:focus-visible {
+    outline: 3px solid var(--c-paper);
+    outline-offset: 2px;
+  }
   header {
     grid-area: header;
     display: flex;

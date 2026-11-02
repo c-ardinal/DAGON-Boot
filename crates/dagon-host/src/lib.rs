@@ -154,6 +154,8 @@ pub struct Host<T: Transport, C: Clock> {
     seq: u8,
     rx: Vec<u8>,
     applied: Vec<(Target, Version)>,
+    /// Targets that answered this session's opening HELLO.
+    opened: Vec<Target>,
 }
 
 impl<T: Transport, C: Clock> Host<T, C> {
@@ -164,6 +166,7 @@ impl<T: Transport, C: Clock> Host<T, C> {
             seq: 0,
             rx: Vec::new(),
             applied: Vec::new(),
+            opened: Vec::new(),
         }
     }
 
@@ -246,7 +249,8 @@ impl<T: Transport, C: Clock> Host<T, C> {
     /// the target to answer; returns the body after an OK status.
     ///
     /// A request in the plain-response class (`timeout_ms` =
-    /// [`REQUEST_MS`]) of a command that is safe to repeat is sent again
+    /// [`REQUEST_MS`]), or a CONFIRM, of a command that is safe to repeat is
+    /// sent again
     /// when nothing answers or the node NACKs (RELAY E_TIMEOUT), up to
     /// [`RETRY_BACKOFF_MS`]`.len()` times. A resend keeps the seq (outer and
     /// inner) and sets the RETRY flag; receivers keep the last seq and reply
@@ -259,7 +263,8 @@ impl<T: Transport, C: Clock> Host<T, C> {
         payload: &[u8],
         timeout_ms: u32,
     ) -> Result<Vec<u8>, T::Error> {
-        let retries = if timeout_ms == REQUEST_MS && repeatable(cmd) {
+        let resend = timeout_ms == REQUEST_MS || cmd == Cmd::Confirm;
+        let retries = if resend && repeatable(cmd) {
             RETRY_BACKOFF_MS.len()
         } else {
             0
@@ -278,7 +283,40 @@ impl<T: Transport, C: Clock> Host<T, C> {
         self.call_with(to, cmd, payload, timeout_ms, 0).await
     }
 
+    /// Opens the session with `to` on first use, then sends the request.
+    ///
+    /// Receivers keep the last (seq, cmd) and its reply across host
+    /// sessions, and a new session restarts its seq count, so its first
+    /// request could match the previous session's last one and get that
+    /// stored reply. The first request to each target in a session is
+    /// therefore an opening HELLO whose reply is dropped; only after the
+    /// target has answered it does the caller's request go out, with a seq
+    /// different from the HELLO's, so it cannot match what the target keeps.
     async fn call_with(
+        &mut self,
+        to: Target,
+        cmd: Cmd,
+        payload: &[u8],
+        timeout_ms: u32,
+        retries: usize,
+    ) -> Result<Vec<u8>, T::Error> {
+        if !self.opened.contains(&to) {
+            let hello = hello_request(to);
+            self.attempts(to, Cmd::Hello, &hello, timeout_ms.min(REQUEST_MS), retries)
+                .await
+                .or_else(|e| match e {
+                    // An answer, even a refusal, means the target now keeps
+                    // this session's seq.
+                    Error::Rejected { .. } | Error::BadResponse => Ok(Vec::new()),
+                    e => Err(e),
+                })?;
+            self.opened.push(to);
+        }
+        self.attempts(to, cmd, payload, timeout_ms, retries).await
+    }
+
+    /// One request, sent up to `retries` more times when unanswered.
+    async fn attempts(
         &mut self,
         to: Target,
         cmd: Cmd,
@@ -327,16 +365,11 @@ impl<T: Transport, C: Clock> Host<T, C> {
         timeout_ms: u32,
         retry: bool,
     ) -> Result<HelloResp, T::Error> {
-        let req = HelloReq {
-            proto_ver: dagon_proto::PROTO_VERSION as u32,
-            max_payload: to.link_max() as u16,
-        };
-        let mut b = [0u8; 6];
-        let n = req.encode(&mut b).expect("6 bytes");
+        let b = hello_request(to);
         let body = if retry {
-            self.call(to, Cmd::Hello, &b[..n], timeout_ms).await?
+            self.call(to, Cmd::Hello, &b, timeout_ms).await?
         } else {
-            self.call_once(to, Cmd::Hello, &b[..n], timeout_ms).await?
+            self.call_once(to, Cmd::Hello, &b, timeout_ms).await?
         };
         HelloResp::parse(&body).map_err(|_| Error::BadResponse)
     }
@@ -349,6 +382,17 @@ impl<T: Transport, C: Clock> Host<T, C> {
     pub async fn hello(&mut self, to: Target) -> Result<HelloResp, T::Error> {
         self.hello_with(to, REQUEST_MS, true).await
     }
+}
+
+fn hello_request(to: Target) -> [u8; 6] {
+    let mut b = [0u8; 6];
+    HelloReq {
+        proto_ver: dagon_proto::PROTO_VERSION as u32,
+        max_payload: to.link_max() as u16,
+    }
+    .encode(&mut b)
+    .expect("6 bytes");
+    b
 }
 
 /// Waits before each resend of a plain request.

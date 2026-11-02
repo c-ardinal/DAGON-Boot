@@ -13,6 +13,7 @@ fn main() {
     println!("cargo:rerun-if-changed=memory.x");
 
     println!("cargo:rerun-if-env-changed=DAGON_PUBKEY");
+    println!("cargo:rerun-if-env-changed=DAGON_ALLOW_TEST_KEY");
     let hex = match env::var("DAGON_PUBKEY") {
         Ok(path) => {
             println!("cargo:rerun-if-changed={path}");
@@ -22,6 +23,13 @@ fn main() {
                 .to_string()
         }
         Err(_) => {
+            if env::var("DAGON_ALLOW_TEST_KEY").as_deref() != Ok("1") {
+                panic!(
+                    "DAGON_PUBKEY is unset: set it to the public key file from `dagon key gen` \
+                     (or its 64 hex digits), or set DAGON_ALLOW_TEST_KEY=1 to build with the \
+                     public RFC 8032 test key (TEST KEY)"
+                );
+            }
             println!(
                 "cargo:warning=DAGON_PUBKEY is unset: built with the public RFC 8032 test key \
                  (TEST KEY), which accepts images signed with a published secret"

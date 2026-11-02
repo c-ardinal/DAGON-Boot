@@ -15,7 +15,7 @@ static LIVENESS: Liveness = Liveness::new();
 #[esp_rtos::main]
 async fn main(_spawner: Spawner) {
     let mut p = esp_hal::init(esp_hal::Config::default());
-    node::arm_watchdog(p.RTC_TIMER.reborrow());
+    let armed = node::arm_watchdog(p.RTC_TIMER.reborrow());
     esp_rtos::start(TimerGroup::new(p.TIMG0).timer0, p.FROM_CPU_INTR0);
     let dagon = NodePeripherals {
         rtc_timer: p.RTC_TIMER,
@@ -28,5 +28,11 @@ async fn main(_spawner: Spawner) {
         gpio47: p.GPIO47,
         gpio48: p.GPIO48,
     };
-    node::start(dagon, p.FROM_CPU_INTR1, NodeConfig::factory(), &LIVENESS);
+    node::start(
+        armed,
+        dagon,
+        p.FROM_CPU_INTR1,
+        NodeConfig::factory(),
+        &LIVENESS,
+    );
 }

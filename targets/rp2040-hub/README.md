@@ -25,7 +25,9 @@ watchdog runs at 8 s. The app feeds it while confirmed, and on trial only for
 ## Build
 
 The verification key is embedded at build time from the public key file of
-`dagon key gen`:
+`dagon key gen` (`DAGON_PUBKEY`). Without it the build fails, unless
+`DAGON_ALLOW_TEST_KEY=1` asks for the public RFC 8032 test key (the build
+warns and the LCD shows TEST KEY):
 
 ```sh
 export DAGON_PUBKEY=/path/outside/the/repo/dagon-signing.pub

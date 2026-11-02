@@ -201,11 +201,10 @@ impl Pc {
             read_len,
             data: Vec::from_slice(data).unwrap_or_default(),
         };
-        wdt::busy_for(
-            Task::Pc,
-            Duration::from_millis(timeout_ms as u64) + Duration::from_secs(1),
-        );
+        // The link task holds the deadline while it works on the request.
+        wdt::idle(Task::Pc);
         let resp = port.call(req).await;
+        wdt::busy(Task::Pc);
         let n = resp.data.len();
         self.resp[HEADER_LEN + 1..HEADER_LEN + 1 + n].copy_from_slice(&resp.data);
         (resp.status, if resp.status == Status::Ok { n } else { 0 })

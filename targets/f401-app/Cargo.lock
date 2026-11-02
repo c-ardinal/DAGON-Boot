@@ -677,6 +677,7 @@ dependencies = [
  "f401-board",
  "f401-node",
  "panic-probe",
+ "rp2040-common",
  "static_cell",
 ]
 
@@ -962,6 +963,17 @@ name = "regex-syntax"
 version = "0.8.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d6f6ff9a378485b298a5286656da665ba74413d36db0979633275d2e708145d4"
+
+[[package]]
+name = "rp2040-common"
+version = "0.0.0"
+dependencies = [
+ "cortex-m",
+ "dagon-core",
+ "dagon-format",
+ "dagon-port",
+ "dagon-proto",
+]
 
 [[package]]
 name = "rustc_version"

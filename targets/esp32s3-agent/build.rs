@@ -1,7 +1,8 @@
 //! Embeds the image verification key from `DAGON_PUBKEY`: the path to the
 //! public key file from `dagon key gen` (as for the RP2040 and F401 builds),
-//! or the 64 hex digits themselves. Unset, the public RFC 8032 test key is
-//! used and the build warns.
+//! or the 64 hex digits themselves. Unset, the build fails unless
+//! `DAGON_ALLOW_TEST_KEY=1` opts in to the public RFC 8032 test key (then it
+//! warns).
 use std::{env, fs};
 
 const TEST_KEY_HEX: &str = "d75a980182b10ab7d54bfed3c964073a0ee172f3daa62325af021a68f707511a";
@@ -12,8 +13,16 @@ fn is_key_hex(s: &str) -> bool {
 
 fn main() {
     println!("cargo:rerun-if-env-changed=DAGON_PUBKEY");
+    println!("cargo:rerun-if-env-changed=DAGON_ALLOW_TEST_KEY");
     let hex = match env::var("DAGON_PUBKEY") {
         Err(_) => {
+            if env::var("DAGON_ALLOW_TEST_KEY").as_deref() != Ok("1") {
+                panic!(
+                    "DAGON_PUBKEY is unset: set it to the public key file from `dagon key gen` \
+                     (or its 64 hex digits), or set DAGON_ALLOW_TEST_KEY=1 to build with the \
+                     public RFC 8032 test key (TEST KEY)"
+                );
+            }
             println!(
                 "cargo:warning=DAGON_PUBKEY is unset: built with the public RFC 8032 test key \
                  (TEST KEY), which accepts images signed with a published secret"

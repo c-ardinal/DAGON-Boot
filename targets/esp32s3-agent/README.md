@@ -36,9 +36,13 @@ otherwise the watch resets and the 2nd stage rolls back.
 
 ## Build and test
 
-Build-time identity: `DAGON_PUBKEY` (64 hex digits, the release public key;
-default is the RFC 8032 test key) and `DAGON_TARGET_TAG` (the topology node
-tag; default `watch-s3`).
+Build-time identity: `DAGON_PUBKEY` (path to the release public key file from
+`dagon key gen`, or its 64 hex digits; unset, the public RFC 8032 test key is
+built in and the build prints a warning) and `DAGON_TARGET_TAG` (the topology
+node tag; default `watch-s3`).
+
+SET_PENDING while the running slot is on trial answers E_STATE. To go back
+from a trial, REBOOT without CONFIRM: the 2nd stage rolls back.
 
 ```sh
 # from this directory (espup toolchain)

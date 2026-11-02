@@ -1,0 +1,36 @@
+[package]
+name = "f401-app"
+edition = "2021"
+license = "MIT OR Apache-2.0"
+version = "0.0.0"
+publish = false
+
+# Standalone: built for thumbv7em only, so it stays out of the host workspace.
+[workspace]
+
+[features]
+# Link for APP-B (0x08040200) instead of APP-A (0x08020200).
+slot-b = []
+# Confirm the own trial at start-up and feed the watchdog.
+confirm = []
+
+[dependencies]
+dagon-core = { path = "../../crates/dagon-core" }
+dagon-format = { path = "../../crates/dagon-format" }
+dagon-port = { path = "../../crates/dagon-port" }
+f401-board = { path = "../f401-board" }
+embassy-stm32 = { version = "0.6.0", features = ["stm32f401re", "time-driver-any", "defmt"] }
+embassy-executor = { version = "0.10", features = ["platform-cortex-m", "executor-thread", "defmt"] }
+embassy-time = { version = "0.5", features = ["defmt"] }
+cortex-m = { version = "0.7", features = ["critical-section-single-core"] }
+cortex-m-rt = "0.7"
+defmt = "1"
+defmt-rtt = "1"
+panic-probe = { version = "1", features = ["print-defmt"] }
+
+[profile.release]
+opt-level = "z"
+lto = "fat"
+codegen-units = 1
+panic = "abort"
+debug = true

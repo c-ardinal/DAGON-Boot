@@ -1,0 +1,20 @@
+# Defaults for the dagon CLI. Paths are relative to this file.
+topology = "topology/desk-demo.yaml"
+release = "out/release-latest.dgb"
+provision_dir = "out/provision"
+
+# First-install inputs for `dagon provision <node>` and `dagon rescue hub`.
+# Each of stage0/bootcore/app is an ELF (or raw binary laid out for its
+# slot), signed here, or an already signed .img used as is. Point them at
+# the firmware build outputs, then uncomment.
+#
+# [provision.seg]
+# bootcore = "<path to the F401 boot core ELF>"
+# app = "<path to the F401 app ELF linked for slot A>"
+# version = "1.0.0"
+#
+# [provision.hub]
+# stage0 = "<path to the RP2040 stage0 ELF (with boot2)>"
+# bootcore = "<path to the RP2040 boot core ELF linked for BL-A>"
+# app = "<path to the hub app ELF linked for APP-A>"
+# version = "1.0.0"

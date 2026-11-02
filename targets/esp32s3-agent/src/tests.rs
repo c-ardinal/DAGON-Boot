@@ -319,6 +319,50 @@ fn set_pending_back_to_the_previously_confirmed_slot() {
     assert_eq!(st.slots[1].state, SlotState::Written);
 }
 
+fn set_pending_frame(slot: u8) -> Vec<u8> {
+    use dagon_proto::payload::SetPending;
+    let mut f = vec![0u8; dagon_proto::frame_len(2)];
+    SetPending { target: APP, slot }
+        .encode(&mut f[dagon_proto::HEADER_LEN..])
+        .unwrap();
+    let n = dagon_proto::finish(&mut f, 0, 7, dagon_proto::Cmd::SetPending as u8, 2).unwrap();
+    f.truncate(n);
+    f
+}
+
+#[test]
+fn set_pending_is_refused_while_on_trial() {
+    use crate::{refuse_set_pending_on_trial, REFUSAL_LEN};
+    use dagon_proto::{split_status, Frame, Status};
+    let mut s = store();
+    let mut out = [0u8; REFUSAL_LEN];
+    let ha = receive(&mut s, SLOT_A, 0);
+    s.set_pending(SLOT_A, &ha).unwrap();
+    s.ota.boot();
+    s.confirm(SLOT_A, &ha).unwrap();
+    // Confirmed: SET_PENDING goes through to the agent.
+    assert_eq!(
+        refuse_set_pending_on_trial(&mut s, &set_pending_frame(1), &mut out),
+        None
+    );
+    let hb = receive(&mut s, SLOT_B, 1);
+    s.set_pending(SLOT_B, &hb).unwrap();
+    s.ota.boot();
+    let before = s.ota.entries;
+    // On trial in B: refused with E_STATE, otadata untouched.
+    let n = refuse_set_pending_on_trial(&mut s, &set_pending_frame(0), &mut out).unwrap();
+    let (f, _) = Frame::decode(&out[..n], 1024).unwrap();
+    assert_eq!((f.seq, f.cmd), (7, dagon_proto::Cmd::SetPending as u8));
+    assert_eq!(split_status(f.payload).unwrap().0, Status::State);
+    assert_eq!(s.ota.entries, before);
+    assert_eq!(s.status().slots[1].state, SlotState::Trying);
+    // Other commands are not touched.
+    let mut hello = set_pending_frame(0);
+    dagon_proto::finish(&mut hello, 0, 7, dagon_proto::Cmd::Hello as u8, 2).unwrap();
+    assert!(Frame::decode(&hello, 1024).is_ok());
+    assert_eq!(refuse_set_pending_on_trial(&mut s, &hello, &mut out), None);
+}
+
 #[test]
 fn trial_from_blank_otadata_rolls_back_to_factory() {
     let mut s = store();

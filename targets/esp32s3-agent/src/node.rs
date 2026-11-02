@@ -133,6 +133,11 @@ fn serve(agent: &mut Node<'_, '_>, frame: &[u8], send: &mut dyn FnMut(&[u8])) {
             return;
         }
     }
+    let mut refusal = [0u8; crate::REFUSAL_LEN];
+    if let Some(n) = crate::refuse_set_pending_on_trial(agent.store(), frame, &mut refusal) {
+        send(&refusal[..n]);
+        return;
+    }
     let Some(reply) = agent.handle(frame) else {
         return;
     };

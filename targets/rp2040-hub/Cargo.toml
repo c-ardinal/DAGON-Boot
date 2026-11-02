@@ -11,11 +11,12 @@ publish = false
 [features]
 # Link for APP-B instead of APP-A (same source, two link addresses).
 slot-b = []
-# Backlight patterns at entry and on panic (bring-up diagnostics).
-diag = ["rp2040-common/diag-panic"]
+# LCD test pattern at start (bring-up diagnostics).
+diag = []
 
 [dependencies]
-rp2040-common = { path = "../rp2040-bootcore/common", features = ["rp"] }
+# diag-panic: a panic blinks the backlight with the last step code.
+rp2040-common = { path = "../rp2040-bootcore/common", features = ["rp", "diag-panic"] }
 dagon-agent = { path = "../../crates/dagon-agent" }
 dagon-core = { path = "../../crates/dagon-core" }
 dagon-format = { path = "../../crates/dagon-format" }
@@ -31,7 +32,6 @@ embedded-graphics = "0.8"
 cortex-m = "0.7"
 cortex-m-rt = "0.7"
 heapless = "0.9"
-panic-halt = "1"
 
 [profile.release]
 opt-level = "z"

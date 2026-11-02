@@ -35,8 +35,6 @@ use embassy_rp::usb::{self, Driver};
 use embassy_rp::watchdog::Watchdog;
 use embassy_time::Instant;
 use embassy_usb::class::cdc_acm::{CdcAcmClass, State};
-#[cfg(not(feature = "diag"))]
-use panic_halt as _;
 use rp2040_common::arm::step;
 use rp2040_common::layout::HUB_TAG;
 use rp2040_common::rp::RpFlash;
@@ -63,7 +61,8 @@ const LCD_SPI_HZ: u32 = 20_000_000;
 
 #[embassy_executor::main]
 async fn main(_spawner: Spawner) {
-    // `diag` panic codes: 10 before HAL init, 11 after it, 12 at USB setup.
+    // Panic blink codes: 10 before HAL init, 11 after it, 12 at USB setup,
+    // 13 polling nodes, 14 answering the PC, 15 drawing.
     step(10);
     let p = embassy_rp::init(Default::default());
     step(11);

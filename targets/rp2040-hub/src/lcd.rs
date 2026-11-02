@@ -7,18 +7,22 @@ use core::fmt::Write as _;
 
 use dagon_format::Version;
 use dagon_proto::payload::{phase, Show, SHOW_TEXT_MAX};
+use embassy_futures::select::{select, Either};
 use embassy_rp::gpio::Output;
 use embassy_rp::peripherals::SPI1;
 use embassy_rp::spi::{Blocking, Spi};
 use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
 use embassy_sync::signal::Signal;
+use embassy_time::{Duration, Timer};
 use embedded_graphics::mono_font::ascii::{FONT_10X20, FONT_6X10};
 use embedded_graphics::mono_font::{MonoFont, MonoTextStyle};
 use embedded_graphics::pixelcolor::Rgb565;
 use embedded_graphics::prelude::*;
-use embedded_graphics::primitives::{Arc, Circle, PrimitiveStyle};
+use embedded_graphics::primitives::{Arc, Circle, PrimitiveStyle, Rectangle};
 use embedded_graphics::text::{Alignment, Text};
 use heapless::String;
+
+use rp2040_common::arm::step;
 
 use crate::gc9a01::Panel;
 use crate::nodes::{SubNode, MAX_SUBS};
@@ -99,6 +103,9 @@ const ARC: u32 = 9;
 /// Top text line; the round panel is narrower up there.
 const TOP_AT: Point = Point::new(120, 22);
 const TOP_CHARS: usize = 22;
+/// A small square at the top that toggles every second while the hub runs.
+const HEARTBEAT_AT: Point = Point::new(117, 6);
+const HEARTBEAT: Duration = Duration::from_secs(1);
 
 pub struct Pins<'d> {
     pub spi: Spi<'d, SPI1, Blocking>,
@@ -110,14 +117,14 @@ pub struct Pins<'d> {
 
 /// Sets the panel up (cleared to black) with the backlight off, turns the
 /// backlight on, draws the home screen at once (nodes not polled yet), then
-/// redraws whenever [`HOME`] changes. The `diag` build first shows a test
-/// pattern for 3 s.
+/// redraws whenever [`HOME`] changes; a heartbeat square at the top toggles
+/// every second. The `diag` build first shows a test pattern for 3 s.
 pub async fn run(mut pins: Pins<'_>) {
     let mut display = Panel::new(pins.spi, pins.cs, pins.dc, pins.rst);
     pins.backlight.set_high();
     if cfg!(feature = "diag") {
         let _ = test_pattern(&mut display);
-        embassy_time::Timer::after_secs(3).await;
+        Timer::after_secs(3).await;
     }
     let first = Home {
         hub: Node {
@@ -127,12 +134,28 @@ pub async fn run(mut pins: Pins<'_>) {
         ..Default::default()
     };
     let _ = draw(&mut display, &first);
-    let mut shown = Some(first);
+    let mut shown = first;
+    let mut beat = false;
     loop {
-        let home = HOME.wait().await;
-        if shown.as_ref() != Some(&home) {
-            let _ = draw(&mut display, &home);
-            shown = Some(home);
+        match select(HOME.wait(), Timer::after(HEARTBEAT)).await {
+            Either::First(home) => {
+                if home != shown {
+                    step(15);
+                    let _ = draw(&mut display, &home);
+                    shown = home;
+                }
+            }
+            Either::Second(()) => {
+                beat = !beat;
+                let c = if beat {
+                    Rgb565::CSS_GRAY
+                } else {
+                    Rgb565::BLACK
+                };
+                let _ = Rectangle::new(HEARTBEAT_AT, Size::new(6, 6))
+                    .into_styled(PrimitiveStyle::with_fill(c))
+                    .draw(&mut display);
+            }
         }
     }
 }
@@ -142,7 +165,6 @@ pub async fn run(mut pins: Pins<'_>) {
 /// pixels below it (per-pixel writes), the word DIAG (glyph streams) and a
 /// yellow ring (circle).
 fn test_pattern<D: DrawTarget<Color = Rgb565>>(d: &mut D) -> Result<(), D::Error> {
-    use embedded_graphics::primitives::Rectangle;
     let bands = [(40, Rgb565::RED), (80, Rgb565::GREEN), (120, Rgb565::BLUE)];
     for (y, c) in bands {
         Rectangle::new(Point::new(0, y), Size::new(240, 40))

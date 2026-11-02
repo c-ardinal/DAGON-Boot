@@ -12,6 +12,7 @@ use embassy_rp::usb::Driver;
 use embassy_time::{with_timeout, Duration, Instant, Timer};
 use embassy_usb::class::cdc_acm::CdcAcmClass;
 use embassy_usb::driver::EndpointError;
+use rp2040_common::arm::step;
 use rp2040_common::cmd;
 use rp2040_common::frames::FrameReader;
 
@@ -81,6 +82,7 @@ impl Hub<'_> {
     /// Answers one request into `self.resp`; returns its length (0: no
     /// answer) and whether to reboot after sending it.
     async fn handle(&mut self, request: &[u8]) -> (usize, bool) {
+        step(14);
         let Ok((f, _)) = Frame::decode(request, max_payload::USB) else {
             return (0, false);
         };
@@ -178,6 +180,7 @@ impl Hub<'_> {
     /// Display-only HELLO to every node, then refresh the LCD. Ends the
     /// progress screen once the PC has been quiet.
     async fn poll(&mut self) {
+        step(13);
         let st = self.agent.store().status();
         let subs = nodes::load(&mut self.agent.store().flash);
         let me = st.slots[ACTIVE as usize];

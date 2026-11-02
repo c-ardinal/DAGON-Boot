@@ -168,7 +168,10 @@ impl<I: I2cBus, S: StreamPort> Links<I, S> {
         out: &mut [u8],
     ) -> Result<usize, Status> {
         self.reader.clear();
-        self.uart.write(inner).await.map_err(|_| Status::Timeout)?;
+        with_deadline(deadline, self.uart.write(inner))
+            .await
+            .map_err(|_| Status::Timeout)?
+            .map_err(|_| Status::Timeout)?;
         // A request too short to carry a seq gets no answer (times out).
         let seq = inner.get(4).copied();
         loop {

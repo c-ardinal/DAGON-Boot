@@ -177,17 +177,9 @@ impl<T: Transport, C: Clock> Host<T, C> {
         self.applied.push((to, v));
     }
 
-    fn frame(&mut self, cmd: Cmd, payload: &[u8]) -> (u8, Vec<u8>) {
+    fn next_seq(&mut self) -> u8 {
         self.seq = (self.seq + 1) & SEQ_MASK;
-        let mut out = vec![0u8; dagon_proto::frame_len(payload.len())];
-        let f = Frame {
-            flags: 0,
-            seq: self.seq,
-            cmd: cmd as u8,
-            payload,
-        };
-        f.encode(&mut out).expect("sized for the payload");
-        (self.seq, out)
+        self.seq
     }
 
     /// Next response frame for (`seq`, `cmd`) in the receive buffer; other
@@ -216,16 +208,17 @@ impl<T: Transport, C: Clock> Host<T, C> {
         }
     }
 
-    /// One request to the hub; returns the response payload (status first).
+    /// Sends one request frame to the hub and waits for its response
+    /// payload (status first).
     async fn exchange(
         &mut self,
+        seq: u8,
         cmd: Cmd,
-        payload: &[u8],
+        frame: &[u8],
         wait_ms: u32,
     ) -> Result<Vec<u8>, T::Error> {
-        let (seq, frame) = self.frame(cmd, payload);
         self.transport
-            .write(&frame)
+            .write(frame)
             .await
             .map_err(Error::Transport)?;
         let deadline = self.clock.now_ms() + wait_ms as u64;
@@ -251,6 +244,14 @@ impl<T: Transport, C: Clock> Host<T, C> {
 
     /// One request to `to` (through RELAY for nodes) with `timeout_ms` for
     /// the target to answer; returns the body after an OK status.
+    ///
+    /// A request in the plain-response class (`timeout_ms` =
+    /// [`REQUEST_MS`]) of a command that is safe to repeat is sent again
+    /// when nothing answers or the node NACKs (RELAY E_TIMEOUT), up to
+    /// [`RETRY_BACKOFF_MS`]`.len()` times. A resend keeps the seq (outer and
+    /// inner) and sets the RETRY flag; receivers keep the last seq and reply
+    /// and answer a repeat with that reply instead of running it again, so
+    /// a request that did run is not run twice.
     pub async fn call(
         &mut self,
         to: Target,
@@ -258,47 +259,132 @@ impl<T: Transport, C: Clock> Host<T, C> {
         payload: &[u8],
         timeout_ms: u32,
     ) -> Result<Vec<u8>, T::Error> {
-        let Some((link, addr)) = to.relay() else {
-            let p = self.exchange(cmd, payload, timeout_ms).await?;
-            return ok_body(cmd, &p);
+        let retries = if timeout_ms == REQUEST_MS && repeatable(cmd) {
+            RETRY_BACKOFF_MS.len()
+        } else {
+            0
         };
-        let (seq, inner) = self.frame(cmd, payload);
-        let relay = Relay {
-            link,
-            addr,
-            timeout_ms: timeout_ms.min(u16::MAX as u32) as u16,
-            inner: &inner,
-        };
-        let mut p = vec![0u8; Relay::HEAD_LEN + inner.len()];
-        relay.encode(&mut p).expect("sized for the frame");
-        let resp = self
-            .exchange(Cmd::Relay, &p, timeout_ms + REQUEST_MS)
-            .await?;
-        let (status, body) = split_status(&resp).ok_or(Error::BadResponse)?;
-        if status != Status::Ok {
-            return Err(Error::Relay(status));
-        }
-        let (f, _) = Frame::decode(body, to.link_max()).map_err(|_| Error::BadResponse)?;
-        if f.flags & flags::RESP == 0 || f.seq != seq || f.cmd != cmd as u8 {
-            return Err(Error::BadResponse);
-        }
-        ok_body(cmd, f.payload)
+        self.call_with(to, cmd, payload, timeout_ms, retries).await
     }
 
-    async fn hello_within(&mut self, to: Target, timeout_ms: u32) -> Result<HelloResp, T::Error> {
+    /// [`Host::call`] without resending (polls that repeat by themselves).
+    pub async fn call_once(
+        &mut self,
+        to: Target,
+        cmd: Cmd,
+        payload: &[u8],
+        timeout_ms: u32,
+    ) -> Result<Vec<u8>, T::Error> {
+        self.call_with(to, cmd, payload, timeout_ms, 0).await
+    }
+
+    async fn call_with(
+        &mut self,
+        to: Target,
+        cmd: Cmd,
+        payload: &[u8],
+        timeout_ms: u32,
+        retries: usize,
+    ) -> Result<Vec<u8>, T::Error> {
+        let seq = self.next_seq();
+        let relay = to.relay().map(|r| (r, self.next_seq()));
+        let mut attempt = 0;
+        loop {
+            let fl = if attempt == 0 { 0 } else { flags::RETRY };
+            let r = match relay {
+                None => {
+                    let frame = encode(fl, seq, cmd as u8, payload);
+                    self.exchange(seq, cmd, &frame, timeout_ms).await
+                }
+                Some(((link, addr), outer)) => {
+                    let inner = encode(fl, seq, cmd as u8, payload);
+                    let relay = Relay {
+                        link,
+                        addr,
+                        timeout_ms: timeout_ms.min(u16::MAX as u32) as u16,
+                        inner: &inner,
+                    };
+                    let mut p = vec![0u8; Relay::HEAD_LEN + inner.len()];
+                    relay.encode(&mut p).expect("sized for the frame");
+                    let frame = encode(fl, outer, Cmd::Relay as u8, &p);
+                    self.exchange(outer, Cmd::Relay, &frame, timeout_ms + REQUEST_MS)
+                        .await
+                        .and_then(|resp| relayed(&resp, to, seq, cmd))
+                }
+            };
+            let again = matches!(r, Err(Error::Timeout | Error::Relay(Status::Timeout)));
+            if !again || attempt >= retries {
+                return r.and_then(|p| ok_body(cmd, &p));
+            }
+            self.clock.sleep_ms(RETRY_BACKOFF_MS[attempt]).await;
+            attempt += 1;
+        }
+    }
+
+    async fn hello_with(
+        &mut self,
+        to: Target,
+        timeout_ms: u32,
+        retry: bool,
+    ) -> Result<HelloResp, T::Error> {
         let req = HelloReq {
             proto_ver: dagon_proto::PROTO_VERSION as u32,
             max_payload: to.link_max() as u16,
         };
         let mut b = [0u8; 6];
         let n = req.encode(&mut b).expect("6 bytes");
-        let body = self.call(to, Cmd::Hello, &b[..n], timeout_ms).await?;
+        let body = if retry {
+            self.call(to, Cmd::Hello, &b[..n], timeout_ms).await?
+        } else {
+            self.call_once(to, Cmd::Hello, &b[..n], timeout_ms).await?
+        };
         HelloResp::parse(&body).map_err(|_| Error::BadResponse)
     }
 
-    pub async fn hello(&mut self, to: Target) -> Result<HelloResp, T::Error> {
-        self.hello_within(to, REQUEST_MS).await
+    /// One HELLO with no resend (discovery probes, polls after REBOOT).
+    async fn hello_within(&mut self, to: Target, timeout_ms: u32) -> Result<HelloResp, T::Error> {
+        self.hello_with(to, timeout_ms, false).await
     }
+
+    pub async fn hello(&mut self, to: Target) -> Result<HelloResp, T::Error> {
+        self.hello_with(to, REQUEST_MS, true).await
+    }
+}
+
+/// Waits before each resend of a plain request.
+pub const RETRY_BACKOFF_MS: [u32; 3] = [50, 100, 200];
+
+/// Commands a resend cannot harm: reads, the hub display, and the transfer
+/// and state steps the receiver deduplicates by seq. Not REBOOT (a node that
+/// already reset has no memory of the seq), nor the hub's line and raw I2C
+/// controls (no seq memory on the hub side).
+fn repeatable(cmd: Cmd) -> bool {
+    !matches!(cmd, Cmd::Reboot | Cmd::SubCtl | Cmd::I2cRaw)
+}
+
+fn encode(fl: u8, seq: u8, cmd: u8, payload: &[u8]) -> Vec<u8> {
+    let mut out = vec![0u8; dagon_proto::frame_len(payload.len())];
+    let f = Frame {
+        flags: fl,
+        seq,
+        cmd,
+        payload,
+    };
+    f.encode(&mut out).expect("sized for the payload");
+    out
+}
+
+/// The node's response payload inside a RELAY response.
+fn relayed<E>(resp: &[u8], to: Target, seq: u8, cmd: Cmd) -> Result<Vec<u8>, E> {
+    let (status, body) = split_status(resp).ok_or(Error::BadResponse)?;
+    if status != Status::Ok {
+        return Err(Error::Relay(status));
+    }
+    let (f, _) = Frame::decode(body, to.link_max()).map_err(|_| Error::BadResponse)?;
+    if f.flags & flags::RESP == 0 || f.seq != seq || f.cmd != cmd as u8 {
+        return Err(Error::BadResponse);
+    }
+    Ok(f.payload.to_vec())
 }
 
 fn ok_body<E>(cmd: Cmd, payload: &[u8]) -> Result<Vec<u8>, E> {

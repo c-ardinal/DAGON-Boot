@@ -6,6 +6,10 @@
 //! junctions (paths::contained), with no Windows device names, and never in
 //! a key folder (`~/.dagon`, the folder of DAGON_SIGNING_KEY): those are
 //! neither listed nor opened.
+//!
+//! Opening or creating a project switches the release key the page
+//! verifies with to that project's; the page reads /v1/hello again after
+//! a switch. Switching is refused while a job runs.
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -110,6 +114,28 @@ pub fn get(server: &Server) -> Response {
     Response::json(200, &project_json(server))
 }
 
+fn busy() -> Response {
+    Response::error(409, "a job is running; switch projects when it ends")
+}
+
+/// Opens the project of `cfg` with its keys: the page's release key
+/// becomes the project's (the secret key stays in this process, unprinted).
+fn switch(server: &Server, cfg: PathBuf) -> Result<Response, Response> {
+    let c = crate::config::Config::load(Some(&cfg.to_string_lossy()))
+        .map_err(|_| Response::error(422, "its dagon.toml does not load"))?;
+    let key = super::api::release_key_of(&c).map_err(|e| {
+        eprintln!("dagon serve: project key: {e}");
+        Response::error(
+            422,
+            "the project has no usable public key; see the dagon serve terminal",
+        )
+    })?;
+    if !server.switch_project(cfg, key) {
+        return Err(busy());
+    }
+    Ok(Response::json(200, &project_json(server)))
+}
+
 /// POST /v1/project/open {path}: a folder with a dagon.toml.
 pub fn open(server: &Arc<Server>, req: &Request) -> Response {
     let r = (|| {
@@ -119,10 +145,7 @@ pub fn open(server: &Arc<Server>, req: &Request) -> Response {
         if !cfg.is_file() {
             return Err(Response::error(404, "no dagon.toml in that folder"));
         }
-        crate::config::Config::load(Some(&cfg.to_string_lossy()))
-            .map_err(|_| Response::error(422, "its dagon.toml does not load"))?;
-        server.set_config(cfg);
-        Ok(Response::json(200, &project_json(server)))
+        switch(server, cfg)
     })();
     r.unwrap_or_else(|e| e)
 }
@@ -148,11 +171,13 @@ pub fn new(server: &Arc<Server>, req: &Request) -> Response {
         } else {
             crate::scaffold::empty_topology(&name)
         };
+        if server.busy() {
+            return Err(busy());
+        }
         let keys = home.join(".dagon").join("keys").join(&name);
         crate::scaffold::new_project(&dir, &name, &yaml, &keys)
             .map_err(|e| Response::error(409, &e))?;
-        server.set_config(dir.join(CONFIG_FILE));
-        Ok(Response::json(200, &project_json(server)))
+        switch(server, dir.join(CONFIG_FILE))
     })();
     r.unwrap_or_else(|e| e)
 }

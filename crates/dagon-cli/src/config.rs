@@ -92,6 +92,8 @@ pub struct Config {
     pub provision_dir: Option<PathBuf>,
     /// Public key file `apply` verifies releases with.
     pub pubkey: Option<PathBuf>,
+    /// Secret key file `dagon serve` signs this project's images with.
+    pub signing_key: Option<PathBuf>,
     #[serde(default)]
     pub provision: BTreeMap<String, ProvisionInputs>,
     /// `dagon build` settings per node id; `package` stays relative here.
@@ -124,6 +126,7 @@ impl Config {
         c.release.as_mut().map(rel);
         c.provision_dir.as_mut().map(rel);
         c.pubkey.as_mut().map(rel);
+        c.signing_key.as_mut().map(rel);
         for inputs in c.provision.values_mut() {
             inputs.stage0.as_mut().map(rel);
             rel(&mut inputs.bootcore);

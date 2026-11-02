@@ -86,7 +86,7 @@ pub fn command(args: &[&str]) -> Result<(), String> {
         .map_err(|e| format!("cannot listen on 127.0.0.1:{port}: {e}"))?;
     let port = listener.local_addr().map_err(|e| e.to_string())?.port();
     let server = Server::new(passphrase()?, port, config, web.clone());
-    let _ = server.release_key.set(key);
+    server.set_release_key(key);
     if web.as_os_str().is_empty() {
         println!("page: built into this executable");
     } else if !web.join("index.html").exists() {

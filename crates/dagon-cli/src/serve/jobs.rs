@@ -31,6 +31,10 @@ enum Device {
     Released,
 }
 
+fn finished(j: &JobEntry) -> bool {
+    matches!(j.state, "succeeded" | "failed" | "cancelled")
+}
+
 struct JobEntry {
     kind: String,
     state: &'static str,
@@ -50,8 +54,9 @@ pub struct Server {
     /// The folder projects may be opened or created under; unset: the
     /// user's home.
     pub home: std::sync::OnceLock<PathBuf>,
-    /// Public key the page verifies releases with, given at start.
-    pub release_key: std::sync::OnceLock<[u8; 32]>,
+    /// Public key the page verifies releases with: given at start, then
+    /// the open project's.
+    release_key: std::sync::RwLock<Option<[u8; 32]>>,
     /// Pages connected to the event stream (passphrase checked).
     pub pages: AtomicUsize,
     events: Mutex<Vec<mpsc::SyncSender<String>>>,
@@ -73,7 +78,7 @@ impl Server {
             config: std::sync::RwLock::new(config),
             web,
             home: std::sync::OnceLock::new(),
-            release_key: std::sync::OnceLock::new(),
+            release_key: std::sync::RwLock::new(None),
             pages: AtomicUsize::new(0),
             events: Mutex::default(),
             jobs: Mutex::default(),
@@ -90,11 +95,39 @@ impl Server {
         self.config.read().ok().and_then(|c| c.clone())
     }
 
-    /// Switches to the project whose dagon.toml is `path`.
-    pub fn set_config(&self, path: PathBuf) {
+    pub fn release_key(&self) -> Option<[u8; 32]> {
+        self.release_key.read().ok().and_then(|k| *k)
+    }
+
+    pub fn set_release_key(&self, key: [u8; 32]) {
+        if let Ok(mut k) = self.release_key.write() {
+            *k = Some(key);
+        }
+    }
+
+    /// Whether a job has not finished yet.
+    pub fn busy(&self) -> bool {
+        self.jobs
+            .lock()
+            .expect("jobs")
+            .values()
+            .any(|j| !finished(j))
+    }
+
+    /// Switches to the project whose dagon.toml is `path` and whose pages
+    /// verify with `key`. Refused (false) while a job runs, so no job mixes
+    /// two projects' keys; the jobs lock keeps new jobs out meanwhile.
+    pub fn switch_project(&self, path: PathBuf, key: [u8; 32]) -> bool {
+        let jobs = self.jobs.lock().expect("jobs");
+        if jobs.values().any(|j| !finished(j)) {
+            return false;
+        }
         if let Ok(mut c) = self.config.write() {
             *c = Some(path);
         }
+        self.set_release_key(key);
+        drop(jobs);
+        true
     }
 
     /// Sends `event` to every connected page.
@@ -139,7 +172,6 @@ impl Server {
         let id = self.next.fetch_add(1, Ordering::Relaxed);
         let cancel = Arc::new(AtomicBool::new(false));
         let mut jobs = self.jobs.lock().expect("jobs");
-        let finished = |j: &JobEntry| matches!(j.state, "succeeded" | "failed" | "cancelled");
         if jobs.values().filter(|j| !finished(j)).count() >= MAX_RUNNING {
             return None;
         }

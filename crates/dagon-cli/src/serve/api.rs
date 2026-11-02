@@ -41,10 +41,57 @@ fn stop_if(cancel: &AtomicBool) -> Result<(), String> {
     }
 }
 
+/// The project's signing key file: `signing_key` in dagon.toml, else the
+/// secret beside its pubkey (where dagon new puts the pair), else
+/// DAGON_SIGNING_KEY.
+fn signing_key_path(cfg: &Config) -> Option<PathBuf> {
+    cfg.signing_key
+        .clone()
+        .or_else(|| {
+            let dir = cfg.pubkey.as_ref()?.parent()?;
+            Some(dir.join(dagon_sign::SECRET_FILE)).filter(|p| p.is_file())
+        })
+        .or_else(|| std::env::var_os(crate::config::KEY_ENV).map(PathBuf::from))
+}
+
+/// The project's signing key; refused when it does not match its pubkey.
+fn project_key(cfg: &Config) -> Result<ed25519_compact::KeyPair, String> {
+    let path = signing_key_path(cfg).ok_or_else(|| {
+        format!(
+            "no signing key: set signing_key in dagon.toml or {}",
+            crate::config::KEY_ENV
+        )
+    })?;
+    let key = load_key(Some(&path.to_string_lossy()))?;
+    if let Some(p) = &cfg.pubkey {
+        let pk = dagon_sign::load_public_key(p).map_err(|e| e.to_string())?;
+        if pk != *key.pk {
+            return Err(format!(
+                "the signing key {} does not match the project's pubkey",
+                path.display()
+            ));
+        }
+    }
+    Ok(key)
+}
+
+/// The key the page verifies the project's releases with: its pubkey file,
+/// else the public half of its signing key.
+pub(super) fn release_key_of(cfg: &Config) -> Result<[u8; 32], String> {
+    match &cfg.pubkey {
+        Some(p) => {
+            let k = dagon_sign::load_public_key(p).map_err(|e| e.to_string())?;
+            crate::config::allow_key(&k, crate::config::test_key_allowed())?;
+            Ok(k)
+        }
+        None => Ok(*project_key(cfg)?.pk),
+    }
+}
+
 /// The signing key for a job. Its file path never goes to the page: the
 /// reason is printed in the serve terminal only.
-fn serve_key() -> Result<ed25519_compact::KeyPair, String> {
-    page_safe(load_key(None))
+fn serve_key(cfg: &Config) -> Result<ed25519_compact::KeyPair, String> {
+    page_safe(project_key(cfg))
 }
 
 fn page_safe<T>(r: Result<T, String>) -> Result<T, String> {
@@ -177,8 +224,9 @@ fn hello(server: &Server) -> Response {
         .as_ref()
         .and_then(|c| std::fs::canonicalize(&c.base).ok())
         .and_then(|p| p.file_name().map(|n| n.to_string_lossy().into_owned()));
-    let key = load_key(None)
-        .ok()
+    let key = cfg
+        .as_ref()
+        .and_then(|c| project_key(c).ok())
         .map(|k| to_hex(&dagon_format::key_id(&k.pk)));
     json_ok(json!({
         "cli": env!("CARGO_PKG_VERSION"),
@@ -187,7 +235,7 @@ fn hello(server: &Server) -> Response {
         "api_key": crate::ai::api_key_present(),
         "key": key.is_some(),
         "key_id": key,
-        "release_key": server.release_key.get().map(|k| to_hex(k)),
+        "release_key": server.release_key().map(|k| to_hex(&k)),
     }))
 }
 
@@ -400,7 +448,7 @@ fn sha_hex(b: &[u8]) -> String {
 fn job_sign(job: &mut Job, cfg: Config, v: Value) -> Result<Value, String> {
     let nodes = nodes_of(&v).map_err(|_| "nodes must be node ids".to_string())?;
     let t = read_topology(&inside(&cfg, &cfg.topology_path(None)?)?)?;
-    let key = serve_key()?;
+    let key = serve_key(&cfg)?;
     let cancel = job.cancel_flag();
     sign_nodes(&cfg, &t, &nodes, &key, &mut |l| job.log(l), &cancel)
 }
@@ -483,7 +531,7 @@ fn job_release(job: &mut Job, cfg: Config, v: Value) -> Result<Value, String> {
     let name = name.ok_or("name must be up to 16 plain characters")?;
     let want = version(v["version"].as_str().ok_or("version is required")?)?;
     let t = read_topology(&inside(&cfg, &cfg.topology_path(None)?)?)?;
-    let key = serve_key()?;
+    let key = serve_key(&cfg)?;
     let cancel = job.cancel_flag();
     release_from(&cfg, &t, want, name, &key, &mut |l| job.log(l), &cancel)
 }
@@ -576,7 +624,7 @@ fn job_conform(job: &mut Job, cfg: Config, v: Value) -> Result<Value, String> {
     let t = read_topology(&inside(&cfg, &cfg.topology_path(None)?)?)?;
     let to = crate::conform::node_target(&t, node)?;
     let dir = inside(&cfg, &cfg.base.join(CONFORM_DIR).join(node))?;
-    let key = serve_key()?;
+    let key = serve_key(&cfg)?;
     job.progress("waiting for the hub", None);
     let report = job.with_device(|job| {
         job.progress("running", None);
@@ -679,8 +727,8 @@ pub fn page_file(server: &Server, path: &str) -> Option<(Vec<u8>, &'static str)>
     if !ct.starts_with("text/html") {
         return Some((bytes, ct));
     }
-    let key = server.release_key.get()?;
-    Some((inject_key(&bytes, key)?, ct))
+    let key = server.release_key()?;
+    Some((inject_key(&bytes, &key)?, ct))
 }
 
 fn inject_key(html: &[u8], key: &[u8; 32]) -> Option<Vec<u8>> {

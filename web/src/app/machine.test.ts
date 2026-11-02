@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'vitest';
-import { LEAVING, MACHINE, hubOf, next, view, type Ctx, type Ev, type L } from './machine.ts';
+import { HUB_LOCKED, LEAVING, MACHINE, hubOf, next, view, type Ctx, type Ev, type L } from './machine.ts';
 
 const STATES = Object.keys(MACHINE) as L[];
 const CTXS: Ctx[] = [
@@ -91,6 +91,21 @@ describe('operating-mode state machine', () => {
     ['L17', 'otherFile', 'L14'],
   ] as [L, Ev, L][])('%s --%s--> %s', (from, ev, to) => {
     expect(next(from, ev)).toBe(to);
+  });
+
+  test('the header 切断 goes back to L02 from every connected state it may be used in, and is held while working', () => {
+    for (const s of STATES) {
+      const connected = !['idle', 'lost'].includes(hubOf(s));
+      const want = connected && !HUB_LOCKED.has(s) ? 'L02' : s;
+      expect(next(s, 'disconnect'), s).toBe(want);
+    }
+    // Sending, updating, reconnecting, recovering and the CLI's turn (ui-design §7.1).
+    for (const s of ['L10', 'L19', 'L20', 'L21', 'L24', 'L28'] as L[]) expect(HUB_LOCKED.has(s), s).toBe(true);
+  });
+
+  test('L13: the answering nodes are updated first and recovery is beside it (owner 11/2)', () => {
+    expect(view('L13', { hasConfig: true })).toMatchObject({ primary: 'updateResponding', secondary: ['recover'] });
+    expect(view('L13', { hasConfig: true, answering: false })).toMatchObject({ primary: 'recover', secondary: [] });
   });
 
   test('an event that does not apply keeps the state', () => {

@@ -8,6 +8,8 @@
     unit?: string;
     /** A label-value pair under the number ("リンク 2"). */
     sub?: readonly [string, string | number];
+    /** Pairs after `sub` on the same line ("残り 約 2 分"). */
+    more?: readonly (readonly [string, string])[];
     name: string;
   }
 
@@ -16,6 +18,8 @@
     chip: string;
     spoken: string;
     silent: boolean;
+    /** A label-value line under the chip ("目安 約 1 分", "自動の再接続 あと 30 s"). */
+    note?: string;
   }
 </script>
 
@@ -39,9 +43,11 @@
     chips?: Record<string, Chip>;
     /** Drawing scale (define mode's zoom; scrolling pans). */
     zoom?: number;
+    /** Nodes being written: how full their water is, 0–100 (SC-O5, owner 11/2 and 11/3). */
+    fill?: Record<string, number>;
   }
 
-  let { config, live, connected, sending, selected, onselect, dot, chips = {}, zoom = 1 }: Props = $props();
+  let { config, live, connected, sending, selected, onselect, dot, chips = {}, zoom = 1, fill = {} }: Props = $props();
 
   const NODE_W = 240;
   const MIN_W = 600;
@@ -154,11 +160,14 @@
     onselect(key);
   }
 
+  /** Four sine periods across twice the node's width: sliding it by half loops without a seam. */
+  const WAVE = 'M0 7Q25 0 50 7T100 7T150 7T200 7T250 7T300 7T350 7T400 7V14H0Z';
+
   function layerPath(top: number, bottom: number): string {
     return `M0 ${top}Q${W / 2} ${top + 2 * ARC_SAG} ${W} ${top}V${bottom}H0Z`;
   }
 
-  type Mark = { chip: string; spoken: string; silent: boolean } | 'skeleton' | null;
+  type Mark = Chip | 'skeleton' | null;
 
   function markOf(n: Node): Mark {
     if (chips[n.id]) return chips[n.id];
@@ -233,7 +242,9 @@
       <div class="dot" style:top="{L1_TOP + 48}px" role="img" aria-label={dot.name}>
         <span class="dot-label">{dot.label}</span>
         <span class="dot-num">{dot.value}</span>{#if dot.of !== undefined}<span class="dot-of">/{dot.of}</span>{/if}{#if dot.unit}<span class="dot-of">{dot.unit}</span>{/if}
-        {#if dot.sub}<span class="dot-sub"><span class="dot-label">{dot.sub[0]}</span> {dot.sub[1]}</span>{/if}
+        {#if dot.sub}<span class="dot-sub"
+            ><span class="dot-label">{dot.sub[0]}</span> {dot.sub[1]}{#each dot.more ?? [] as [label, value] (label)}&emsp;<span class="dot-label">{label}</span> {value}{/each}</span
+          >{/if}
       </div>
     {/if}
 
@@ -251,6 +262,7 @@
       {@const key = `node:${n.id}`}
       {@const m = markOf(n)}
       {@const v = versionOf(n)}
+      {@const level = fill[n.id]}
       <button
         class="node"
         style:left="{pos[n.id].x}px"
@@ -262,6 +274,15 @@
         bind:offsetHeight={heights[n.id]}
         onclick={() => pick(key)}
       >
+        {#if level !== undefined}
+          <!-- The water rises with the node's progress; two wave layers drift at different speeds for depth. -->
+          <span class="water" aria-hidden="true">
+            <span class="surface" style:transform="translateY({100 - Math.min(100, Math.max(0, level))}%)">
+              <svg class="wave back" viewBox="0 0 400 14" preserveAspectRatio="none"><path d={WAVE} /></svg>
+              <svg class="wave front" viewBox="0 0 400 14" preserveAspectRatio="none"><path d={WAVE} /></svg>
+            </span>
+          </span>
+        {/if}
         <span class="node-band">
           <span>[{n.no}] {n.name}</span>
           {#if v}<span class="version" translate="no">{v}</span>{:else if m === 'skeleton'}<span class="skeleton version-sk"></span>{/if}
@@ -280,6 +301,7 @@
             <span class="skeleton chip-sk"></span>
           {:else if m}
             <span class="chip" class:silent={m.silent}>{m.chip}</span>
+            {#if m.note}<span class="note">{m.note}</span>{/if}
           {/if}
         </span>
       </button>
@@ -448,6 +470,69 @@
     }
   }
   /* 32 px band; the one line of name and version sits centred, on one baseline. */
+  .node-band,
+  .node-body {
+    position: relative;
+  }
+  /*
+   * Water fill (SC-O5): one layer moved with transform only. Ink-red tints of
+   * the one signal colour keep paper text near 12:1 and the muted labels above 4.5:1 (§9.1 never puts paper
+   * on full signal red). The level follows each progress value in 250 ms
+   * linear (§10 Interpolation); the waves drift on the compositor.
+   */
+  .water {
+    position: absolute;
+    inset: 0;
+    overflow: hidden;
+    border-radius: inherit;
+    pointer-events: none;
+    --wave-front: color-mix(in srgb, var(--c-signal) 30%, var(--c-ink));
+    --wave-back: color-mix(in srgb, var(--c-signal) 18%, var(--c-ink));
+  }
+  .surface {
+    position: absolute;
+    inset: 0;
+    background: var(--wave-front);
+    transition: transform 250ms linear;
+  }
+  .wave {
+    position: absolute;
+    left: 0;
+    top: -14px;
+    width: 200%;
+    height: 14px;
+  }
+  .wave.back {
+    top: -18px;
+    height: 18px;
+    fill: var(--wave-back);
+    animation: drift 7s linear infinite reverse;
+  }
+  .wave.front {
+    fill: var(--wave-front);
+    animation: drift 4.2s linear infinite;
+  }
+  @keyframes drift {
+    from {
+      translate: 0 0;
+    }
+    to {
+      translate: -50% 0;
+    }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    /* A static fill: no waves, the level jumps to each value. */
+    .wave {
+      display: none;
+    }
+    .surface {
+      transition: none;
+    }
+  }
+  .note {
+    font: 400 var(--t-small-size) / var(--t-small-lh) var(--f-ja);
+    font-variant-numeric: tabular-nums;
+  }
   .node-band {
     display: flex;
     flex-wrap: wrap;

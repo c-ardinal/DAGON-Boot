@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'vitest';
 import { bandOf } from './band.ts';
 import { BAND, BUTTON } from './copy.ts';
-import type { ConnectFailure } from './machine.ts';
+import { MACHINE, view, type ConnectFailure, type L } from './machine.ts';
 
 describe('bottom band', () => {
   // Superseded: "見本を置く" beside it; the sample now comes from SC-S0 only (owner 11/3).
@@ -33,8 +33,8 @@ describe('bottom band', () => {
     expect([b.sentence, b.primary?.label]).toEqual([BAND.M10.sentence, BUTTON.push]);
   });
 
-  test('sending has no button and no sentence; a failed send offers sending again', () => {
-    expect(bandOf('L10', { hasConfig: true })).toEqual({ primary: null, secondary: [] });
+  test('sending has no button, only how to wait; a failed send offers sending again', () => {
+    expect(bandOf('L10', { hasConfig: true })).toEqual({ ...BAND.M61, primary: null, secondary: [] });
     const b = bandOf('L11', { hasConfig: true });
     expect([b.chip, b.primary?.label]).toEqual([BAND.M12.chip, BUTTON.pushAgain]);
   });
@@ -44,13 +44,35 @@ describe('bottom band', () => {
     expect([b.sentence, b.primary?.label, b.secondary[0].label]).toEqual([BAND.M13.sentence, BUTTON.chooseFile, BUTTON.useLatest]);
   });
 
-  test('a node stopped answering: the time chip and its recovery button by name, no sentence', () => {
-    const b = bandOf('L13', { hasConfig: true }, { stuck: 'ウォッチ', responding: 2 });
-    expect([b.pair?.join(' '), b.sentence, b.primary?.label, b.secondary[0].label]).toEqual([
-      '目安 約 1 分',
-      undefined,
-      'ウォッチを復旧する',
+  // Superseded (owner 11/2): recovery was the main action; updating the answering nodes now comes first.
+  test('a node stopped answering: update the answering ones first, recovery beside it, a power and wiring hint', () => {
+    const b = bandOf('L13', { hasConfig: true, answering: true }, { stuck: 'ウォッチ', responding: 2 });
+    expect([b.sentence, b.primary?.label, b.secondary.map((x) => x.label)]).toEqual([
+      BAND.M62b.sentence,
       '応答する 2 つだけ先に更新',
+      ['ウォッチを復旧する'],
     ]);
+    expect(b.sentence).toMatch(/電源と配線/);
+  });
+
+  test('no node answers at all: recovery is the main action, nothing to update first', () => {
+    const b = bandOf('L13', { hasConfig: true, answering: false }, { stuck: 'ウォッチ', responding: 0 });
+    expect([b.primary?.label, b.secondary]).toEqual(['ウォッチを復旧する', []]);
+  });
+
+  // Same-class sweep: one short sentence in every operating state, done and no-answer included (W9, owner 11/2).
+  const FAILURE: Partial<Record<L, ConnectFailure>> = { L04: 'not-found', L05: 'busy', L07: 'no-response' };
+  test.each((Object.keys(MACHINE) as L[]).filter((s) => s !== 'L01'))('%s: one short sentence and a step to highlight', (s) => {
+    const c = { hasConfig: true, failure: FAILURE[s], refusal: 'source' as const };
+    const b = bandOf(s, c, { stuck: '7セグ', unwritten: 1 });
+    expect(b.sentence, s).toBeTruthy();
+    expect(b.sentence!.match(/。/g)?.length, s).toBeLessThanOrEqual(2);
+    expect(view(s, c).step, s).not.toBeNull();
+  });
+
+  test('done and stopped without nodes left: the result in one sentence', () => {
+    expect(bandOf('L23', { hasConfig: true }).sentence).toBe(BAND.M66.sentence);
+    expect(bandOf('L22', { hasConfig: true }, { stuck: '7セグ', unwritten: 0 }).sentence).toBe(BAND.M65.sentence);
+    expect(bandOf('L20', { hasConfig: true }).sentence).toBe(BAND.M64.sentence);
   });
 });

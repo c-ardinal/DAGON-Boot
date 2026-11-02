@@ -1,6 +1,6 @@
 # web
 
-Browser UI for DAGON Boot: Svelte 5 + Vite + TypeScript, built for Chrome / Edge 89 and later
+DAGON Console, the browser tool of DAGON Boot: Svelte 5 + Vite + TypeScript, built for Chrome / Edge 89 and later
 (the first versions with Web Serial). Screen text is Japanese only and lives in `src/app/copy.ts`.
 
 The page is local only: `dagon serve` hands it out on 127.0.0.1 from the developer's own PC and is

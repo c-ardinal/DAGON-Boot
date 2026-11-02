@@ -85,6 +85,22 @@ fn verify(bundle: &[u8], pubkey: &[u8]) -> Result<(), String> {
         .map_err(|e| format!("{e:?}"))
 }
 
+/// The version `bundle` gives each node, as `[node_index, raw_version]`
+/// pairs from its manifest (a node with A/B images appears once per image).
+/// Empty when the bundle does not parse; read only to show "1.0.0 → 1.1.0"
+/// before an update, never to decide anything.
+#[wasm_bindgen]
+pub fn release_versions(bundle: &[u8]) -> Vec<u32> {
+    let Ok(b) = BundleView::parse(bundle) else {
+        return Vec::new();
+    };
+    let m = b.manifest();
+    (0..m.entry_count())
+        .map(|i| m.entry(i))
+        .flat_map(|e| [u32::from(e.node_index), e.version.raw()])
+        .collect()
+}
+
 /// Decoded HELLO response body.
 #[wasm_bindgen]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

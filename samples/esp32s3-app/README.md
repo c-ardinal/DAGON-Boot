@@ -57,8 +57,8 @@ CONFIRM, so its trial always rolls back), `pmic-download` (ENTER_ROM method
 ## Conformance run over USB-C (direct)
 
 Prerequisites: the rollback-enabled 2nd stage
-(`targets/mcu/esp32s3/vendor/bootloader.bin`; until it is added, build it
-with the steps in `vendor/PROVENANCE.md` there), the factory firmware (binary `factory` of
+(`targets/mcu/esp32s3/vendor/bootloader.bin`, prebuilt; see
+`vendor/PROVENANCE.md` there), the factory firmware (binary `factory` of
 `targets/boards/m5stopwatch`) and the two app builds above, all made with
 `DAGON_PUBKEY` set to the signing key's public key, and the `dagon` CLI with
 that key. Run from the repository root.

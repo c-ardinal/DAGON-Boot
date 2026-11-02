@@ -1,19 +1,33 @@
+<script lang="ts" module>
+  import { RECONNECT } from '../app/copy.ts';
+  import type { ReconnectNote } from '../serial/transport.ts';
+  import { versionText } from '../wasm/dagon.ts';
+
+  /** One line of the diagnostic log, in the page's words. */
+  export function noteText(n: ReconnectNote): string {
+    switch (n.kind) {
+      case 'several':
+        return RECONNECT.notes.several(n.count);
+      case 'version':
+        return RECONNECT.notes.version(versionText(n.version), n.trial);
+      default:
+        return RECONNECT.notes[n.kind];
+    }
+  }
+</script>
+
 <script lang="ts">
-  import { BUTTON, RECONNECT } from '../app/copy.ts';
+  import { BUTTON } from '../app/copy.ts';
 
   interface Props {
-    /** Seconds dagon-host still reopens the hub by itself; null once that is over. */
-    left: number | null;
+    /** Why the page could not reconnect by itself (dagon-host's 45 s are over: this dialog opens only then). */
+    notes: ReconnectNote[];
     onreconnect: () => void;
     /** Closed with Escape: the band offers the same button. */
     onclose: () => void;
   }
 
-  let { left, onreconnect, onclose }: Props = $props();
-
-  /** M27: shown in 5 s steps. */
-  const STEP_S = 5;
-  const shown = $derived(left === null ? null : Math.ceil(left / STEP_S) * STEP_S);
+  let { notes, onreconnect, onclose }: Props = $props();
 
   let dialog: HTMLDialogElement;
   let button: HTMLButtonElement;
@@ -26,16 +40,20 @@
   });
 </script>
 
-<dialog bind:this={dialog} aria-labelledby="reconnect-h" onclose={onclose}>
+<dialog bind:this={dialog} aria-labelledby="reconnect-h" {onclose}>
   <h2 id="reconnect-h">{RECONNECT.heading}</h2>
   <p>{RECONNECT.sentence}</p>
-  <p class="pair">
-    <span class="label">{RECONNECT.auto}</span>
-    {shown === null ? RECONNECT.over : RECONNECT.left(shown)}
-  </p>
   <button class="primary" bind:this={button} onclick={onreconnect}>
     {BUTTON.reconnect}<span class="arrow" aria-hidden="true">→</span>
   </button>
+  {#if notes.length}
+    <details>
+      <summary>{RECONNECT.why}</summary>
+      <ul>
+        {#each notes as n, i (i)}<li>{noteText(n)}</li>{/each}
+      </ul>
+    </details>
+  {/if}
 </dialog>
 
 <style>
@@ -47,8 +65,27 @@
     background: var(--c-layer-1);
     color: var(--c-paper);
   }
+  dialog[open] {
+    animation: enter 220ms var(--ease-out);
+  }
   dialog::backdrop {
     background: var(--c-scrim);
+  }
+  @keyframes enter {
+    from {
+      opacity: 0;
+      transform: scale(0.96);
+    }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    dialog[open] {
+      animation: fade var(--dur-reduced) ease;
+    }
+    @keyframes fade {
+      from {
+        opacity: 0;
+      }
+    }
   }
   h2 {
     margin: 0 0 var(--s-4);
@@ -59,14 +96,20 @@
     margin: 0 0 var(--s-5);
     font: 400 var(--t-body-size) / var(--t-body-lh) var(--f-ja);
   }
-  .pair {
-    font-variant-numeric: tabular-nums;
-  }
-  .label {
-    color: var(--c-muted);
-  }
   .primary {
     display: flex;
     margin: 0 auto;
+  }
+  details {
+    margin-top: var(--s-5);
+    font: 400 var(--t-small-size) / var(--t-small-lh) var(--f-ja);
+  }
+  summary {
+    color: var(--c-muted);
+    cursor: pointer;
+  }
+  ul {
+    margin: var(--s-2) 0 0;
+    padding-left: var(--s-4);
   }
 </style>

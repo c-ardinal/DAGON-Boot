@@ -41,15 +41,20 @@ fn main() -> ! {
         Ok(mut log) => boot::decide(&mut flash, &mut log, &APP_SLOTS, &CONFIG),
         Err(_) => Decision::NoImage,
     };
-    if let Decision::Boot { slot, entry, .. } = decision {
-        // An image linked for the other slot would crash; let the watchdog
-        // reset instead so a trial is counted and rolled back.
-        if image::linked_here(&mut flash, APP_SLOT[slot as usize]) {
-            wdt.feed(Duration::from_millis(WDT_MS as u64));
-            jump(entry);
+    match decision {
+        Decision::Boot { slot, entry, trial } => {
+            if image::linked_here(&mut flash, APP_SLOT[slot as usize]) {
+                wdt.feed(Duration::from_millis(WDT_MS as u64));
+                jump(entry);
+            }
+            // Linked for the other slot, it would crash. On trial the
+            // watchdog resets so the attempt counts and rolls back; a
+            // confirmed image like that cannot recover, so stop and blink.
+            if !trial {
+                wdt.stop();
+            }
         }
-    } else {
-        wdt.stop();
+        Decision::NoImage => wdt.stop(),
     }
     let mut led = Output::new(p.PIN_25, Level::High);
     loop {

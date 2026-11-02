@@ -1,7 +1,11 @@
 // Run with: node --test plugin/hooks/guard.test.mjs
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { decide, postCheck } from "./guard.mjs";
+import { execFileSync } from "node:child_process";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { decide, parseStatusZ, postCheck } from "./guard.mjs";
 
 const PORT_WT = "C:/w/dagon-port-R";
 const toplevel = (d) => (String(d).replace(/\\/g, "/").toLowerCase().startsWith("c:/w/dagon-port-r") ? PORT_WT : "C:/repo");
@@ -121,10 +125,84 @@ test("backstop: PostToolUse blocks when protected crates changed", () => {
 });
 
 test("backstop: port-engineer changes outside targets/esp32s3-* are blocked", () => {
-  const status = " M targets/esp32s3-x/src/lib.rs\n M Cargo.toml\n";
+  const status = " M targets/esp32s3-x/src/lib.rs\0 M Cargo.toml\0";
   const d = deps({ portWorktrees: () => [PORT_WT], run: (_r, a) => (a[0] === "status" ? status : "") });
   const r = postCheck(sh("cargo fmt", engineer), d);
   assert.equal(r.decision, "block");
   assert.match(r.reason, /Cargo\.toml/);
   assert.doesNotMatch(r.reason, /esp32s3-x/);
+});
+
+test("popd, opaque cd, globs, quotes and variables fail closed", () => {
+  expectDeny(sh("pushd targets/esp32s3-a && popd && rm Cargo.toml", engineer), offSession);
+  expectDeny(sh("cd targets/esp32s3-a && cd - && rm Cargo.toml", engineer), offSession);
+  expectDeny(sh("cd ~ && rm -rf x"), inSession);
+  expectDeny(sh("rm -rf crates/dagon-c*re"), inSession);
+  expectDeny(sh("cd crates && rm -rf dagon-{core,sim}"), inSession);
+  expectDeny(sh('rm -rf crates/dagon-"core"'), inSession);
+  expectDeny(sh("D=crates/dagon-co; rm -rf ${D}re"), inSession);
+  expectPass(sh("cd targets/esp32s3-a && rm -f build/*.o"), inSession);
+  expectPass(sh("pushd targets/esp32s3-a && cargo build && popd"), inSession);
+});
+
+test("parseStatusZ keeps the leading status column and rename origins", () => {
+  assert.deepEqual(parseStatusZ(" M targets/esp32s3-a/src/lib.rs\0R  new.rs\0old.rs\0?? x y.rs\0"), [
+    "targets/esp32s3-a/src/lib.rs",
+    "new.rs",
+    "old.rs",
+    "x y.rs",
+  ]);
+});
+
+// ---------- real git (no stubs) ----------
+
+function scratchRepo() {
+  const base = mkdtempSync(join(tmpdir(), "dagon-guard-"));
+  const repo = join(base, "repo");
+  const g = (cwd, ...args) => execFileSync("git", ["-C", cwd, ...args], { stdio: "pipe" });
+  for (const f of ["crates/dagon-core/src/lib.rs", "crates/dagon-sim/src/lib.rs", "targets/esp32s3-a/src/lib.rs", "Cargo.toml"]) {
+    mkdirSync(join(repo, f, ".."), { recursive: true });
+    writeFileSync(join(repo, f), "orig\n");
+  }
+  g(repo, "init", "-q", "-b", "develop");
+  g(repo, "add", ".");
+  g(repo, "-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "-m", "init");
+  const port = join(base, "dagon-port-R");
+  g(repo, "worktree", "add", "-q", port, "-b", "port/R");
+  return { base, repo, port, cleanup: () => rmSync(base, { recursive: true, force: true }) };
+}
+
+test("N1 real git: legit engineer edit of a committed target file passes the backstop", (t) => {
+  const s = scratchRepo();
+  t.after(s.cleanup);
+  writeFileSync(join(s.port, "targets/esp32s3-a/src/lib.rs"), "engineer edit\n");
+  const input = sh("cargo build", { cwd: join(s.port, "targets/esp32s3-a"), agent_type: "dagon:port-engineer" });
+  assert.equal(postCheck(input), null);
+  writeFileSync(join(s.port, "Cargo.toml"), "outside\n");
+  assert.match(postCheck(input).reason, /Cargo\.toml/);
+});
+
+test("N2 real git: non-repo cwd still sees the port worktree", (t) => {
+  const s = scratchRepo();
+  t.after(s.cleanup);
+  const P = s.port.replace(/\\/g, "/");
+  const cwd = { cwd: s.base };
+  expectDeny(sh(`cd ${P} && sed -i s/a/b/ crates/dagon-core/src/lib.rs`, cwd), undefined, /read-only/);
+  expectDeny(sh(`sed -i s/a/b/ ${P}/crates/dagon-core/src/lib.rs`, cwd), undefined, /read-only/);
+  expectDeny(sh(`git -C ${P} checkout develop -- crates/dagon-sim`, cwd), undefined, /read-only/);
+  expectDeny(wr(`${P}/crates/dagon-core/src/lib.rs`, cwd), undefined, /read-only/);
+  expectPass(sh(`ls ${P}`, cwd));
+
+  const tamper = sh(`cp x ${P}/crates/dagon-c*/src/`, cwd);
+  assert.equal(postCheck(tamper), null);
+  writeFileSync(join(s.port, "crates/dagon-core/src/lib.rs"), "tampered\n");
+  const r = postCheck(tamper);
+  assert.equal(r.decision, "block");
+  assert.equal(r.continue, false);
+  assert.match(r.reason, /crates\/dagon-core\/src\/lib\.rs/);
+
+  const f = postCheck({ ...tamper, hook_event_name: "PostToolUseFailure" });
+  assert.equal(f.continue, false);
+  assert.equal(f.hookSpecificOutput.hookEventName, "PostToolUseFailure");
+  assert.equal(f.decision, undefined);
 });

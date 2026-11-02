@@ -18,7 +18,7 @@
 // by the PostToolUse diff check, not prevented.
 
 import { execFileSync } from "node:child_process";
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readFileSync, statSync } from "node:fs";
 import { dirname, isAbsolute, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -33,7 +33,7 @@ const FILE_TOOLS = new Set(["Write", "Edit", "MultiEdit", "NotebookEdit"]);
 const SHELL_TOOLS = new Set(["Bash", "PowerShell"]);
 const ENGINEER = "dagon:port-engineer";
 const JUDGE = "dagon:conformance-judge";
-const CD_COMMANDS = new Set(["cd", "pushd", "chdir", "set-location", "sl"]);
+const CD_COMMANDS = new Set(["cd", "pushd", "popd", "chdir", "set-location", "sl"]);
 const NULL_SINKS = new Set(["/dev/null", "$null", "nul"]);
 
 const READONLY_COMMANDS = new Set([
@@ -67,7 +67,7 @@ const unquote = (w) => w.replace(/^["']+|["']+$/g, "");
 
 function git(dir, args) {
   let d = dir;
-  while (d && !existsSync(d)) {
+  while (d && !(existsSync(d) && statSync(d).isDirectory())) {
     const up = dirname(d);
     if (up === d) return null;
     d = up;
@@ -77,7 +77,7 @@ function git(dir, args) {
       encoding: "utf8",
       stdio: ["ignore", "pipe", "ignore"],
       timeout: 5000,
-    }).trim();
+    }); // untrimmed: porcelain output starts with significant spaces
   } catch {
     return null;
   }
@@ -96,7 +96,7 @@ function parsePortWorktrees(porcelain) {
 
 export const realDeps = {
   env: process.env,
-  toplevel: (dir) => git(dir, ["rev-parse", "--show-toplevel"]),
+  toplevel: (dir) => git(dir, ["rev-parse", "--show-toplevel"])?.trim() || null,
   portWorktrees: (dir) => parsePortWorktrees(git(dir, ["worktree", "list", "--porcelain"])),
   run: git,
 };
@@ -116,7 +116,21 @@ const dirInEngineerArea = (dir, deps) => inEngineerArea(`${slash(dir)}/x`, deps)
 function isPortSession(input, deps, dirs = []) {
   if (String(input.agent_type ?? "").startsWith("dagon:")) return true;
   if (deps.env.DAGON_PORT_SESSION === "1") return true;
-  return [input.cwd, ...dirs].some((d) => d && deps.portWorktrees(d).length > 0);
+  return [...new Set([input.cwd, ...dirs])].some((d) => d && deps.portWorktrees(d).length > 0);
+}
+
+// Every directory a shell command may act in: each segment's cwd (after cd /
+// git -C) and every path-like argument or redirect target.
+function touchedDirs(segments) {
+  const dirs = new Set();
+  for (const seg of segments) {
+    if (seg.cwd === null) continue;
+    dirs.add(slash(seg.cwd));
+    for (const w of [...seg.words.slice(1), ...seg.targets]) {
+      if (!w.startsWith("-") && /[/\\]|^[A-Za-z]:|^\.\.?$/.test(w)) dirs.add(dirname(absPath(seg.cwd, w)));
+    }
+  }
+  return [...dirs];
 }
 
 const deny = (reason) => ({
@@ -142,7 +156,12 @@ function isReadOnlyCommand(words) {
   return subs.has(String(words[i] ?? "").toLowerCase());
 }
 
-// Splits a command into segments, tracking the working directory through cd.
+// A directory argument we cannot resolve statically (cd, cd -, cd ~, $VAR).
+const isOpaqueDir = (w) => !w || w === "-" || /^~|\$|%/.test(w);
+const moveDir = (dir, w) => (isOpaqueDir(w) ? null : isAbsolute(w) || /^[A-Za-z]:/.test(w) ? resolve(w) : dir && resolve(dir, w));
+
+// Splits a command into segments, tracking the working directory through
+// cd / pushd / popd. An untrackable directory becomes null (fail closed).
 function parseShell(command, cwd) {
   const raw = command
     .replace(/\d*>&\d+/g, " ")
@@ -151,29 +170,43 @@ function parseShell(command, cwd) {
     .map((s) => s.trim())
     .filter(Boolean);
   let dir = cwd ?? ".";
+  const stack = [];
   return raw.map((text) => {
     const targets = [...text.matchAll(/\d*>>?\s*([^\s<>]+)/g)]
       .map((m) => unquote(m[1]))
       .filter((t) => !NULL_SINKS.has(t.toLowerCase()));
     const words = text.replace(/\d*>>?\s*[^\s<>]+/g, " ").split(/\s+/).map(unquote).filter(Boolean);
     const cmd = String(words[0] ?? "").toLowerCase();
-    if (CD_COMMANDS.has(cmd) && words[1]) dir = resolve(dir, words[1]);
+    if (cmd === "popd") dir = stack.length ? stack.pop() : null;
+    else if (cmd === "pushd") {
+      stack.push(dir);
+      dir = moveDir(dir, words[1]);
+    } else if (CD_COMMANDS.has(cmd)) dir = moveDir(dir, words[1]);
     const gitC = cmd === "git" ? words.indexOf("-C") : -1;
-    const segCwd = gitC > 0 && words[gitC + 1] ? resolve(dir, words[gitC + 1]) : dir;
+    const segCwd = gitC > 0 ? moveDir(dir, words[gitC + 1]) : dir;
     return { text, words, targets, cwd: segCwd, readOnly: isReadOnlyCommand(words) };
   });
 }
 
+const GLOB = /[*?[\]{}]/;
+
 function segmentHitsProtected(seg) {
+  if (seg.cwd === null) return !(seg.readOnly && seg.targets.length === 0);
   const targetHit = seg.targets.some(
     (t) => PROTECTED_WORD.test(t) || PROTECTED_IN_PATH.test(absPath(seg.cwd, t)),
   );
   if (targetHit) return true;
   if (seg.readOnly) return false;
-  return PROTECTED_WORD.test(seg.text.replace(PACKAGE_FLAG, " ")) || PROTECTED_IN_PATH.test(slash(seg.cwd));
+  const text = seg.text.replace(PACKAGE_FLAG, " ").replace(/["']/g, "");
+  if (PROTECTED_WORD.test(text) || PROTECTED_IN_PATH.test(slash(seg.cwd))) return true;
+  // Globs and variables that could expand into a protected crate.
+  return seg.words.slice(1).some(
+    (w) => /\$/.test(w) || (GLOB.test(w) && /(^|\/)crates(\/|$)/i.test(absPath(seg.cwd, w))),
+  );
 }
 
 function engineerSegmentAllowed(seg, deps) {
+  if (seg.cwd === null) return seg.readOnly && seg.targets.length === 0;
   const targetsOk = seg.targets.every((t) => inEngineerArea(absPath(seg.cwd, t), deps));
   if (!targetsOk) return false;
   if (seg.readOnly) return true;
@@ -200,7 +233,7 @@ function decideShell(input, deps) {
   const segments = parseShell(command, input.cwd);
   const hasSubstitution = SUBSTITUTION.test(command);
   const hitsProtected = segments.some(segmentHitsProtected);
-  if ((hasSubstitution || hitsProtected) && isPortSession(input, deps)) {
+  if ((hasSubstitution || hitsProtected) && isPortSession(input, deps, touchedDirs(segments))) {
     return deny(hitsProtected ? MSG_PROTECTED : MSG_SUBSTITUTION);
   }
   if (input.agent_type === ENGINEER && !segments.every((s) => engineerSegmentAllowed(s, deps))) {
@@ -222,35 +255,59 @@ export function decide(input, deps = realDeps) {
   return isFile ? decideFile(input, deps) : decideShell(input, deps);
 }
 
-// PostToolUse backstop: after a shell call in a port session, every port
-// worktree must have no change under the protected crates (relative to its
-// fork point from develop), and port-engineer must not have changed anything
-// outside targets/esp32s3-*/.
+// Paths from `git status --porcelain -z`: "XY path\0", renames/copies add "\0origpath".
+export function parseStatusZ(out) {
+  const entries = String(out ?? "").split("\0").filter(Boolean);
+  const paths = [];
+  for (let i = 0; i < entries.length; i++) {
+    paths.push(entries[i].slice(3));
+    if (/^[RC]/.test(entries[i])) paths.push(entries[++i]);
+  }
+  return paths.filter(Boolean);
+}
+
+const lines = (out) => String(out ?? "").split(/\r?\n/).map((s) => s.trim()).filter(Boolean);
+
+function changedOutsideRules(root, isPortWorktree, input, deps) {
+  const base = deps.run(root, ["merge-base", "HEAD", "develop"])?.trim() || "HEAD";
+  const files = [
+    ...lines(deps.run(root, ["diff", "--name-only", base, "--", ...PROTECTED])),
+    ...lines(deps.run(root, ["ls-files", "--others", "--exclude-standard", "--", ...PROTECTED])),
+  ];
+  if (input.agent_type === ENGINEER && isPortWorktree) {
+    const status = parseStatusZ(deps.run(root, ["status", "--porcelain", "-z", "--untracked-files=all"]));
+    files.push(...status.filter((p) => !ENGINEER_REL.test(slash(p))));
+  }
+  return files.map((f) => `${slash(root)}: ${f}`);
+}
+
+// PostToolUse / PostToolUseFailure backstop: after a shell call in a port
+// session, every repository and port worktree the call could have touched must
+// have no change under the protected crates (relative to the fork point from
+// develop), and port-engineer must not have changed anything in a port
+// worktree outside targets/esp32s3-*/.
 export function postCheck(input, deps = realDeps) {
-  if (!SHELL_TOOLS.has(input.tool_name) || !isPortSession(input, deps)) return null;
-  const roots = new Set(deps.portWorktrees(input.cwd ?? "."));
-  const top = deps.toplevel(input.cwd ?? ".");
-  if (top) roots.add(top);
+  if (!SHELL_TOOLS.has(input.tool_name)) return null;
+  const dirs = [input.cwd ?? ".", ...touchedDirs(parseShell(String(input.tool_input?.command ?? ""), input.cwd))];
+  if (!isPortSession(input, deps, dirs)) return null;
+  const portRoots = new Set();
+  const roots = new Set();
+  for (const d of new Set(dirs)) {
+    for (const wt of deps.portWorktrees(d)) portRoots.add(slash(resolve(wt)));
+    const top = deps.toplevel(d);
+    if (top) roots.add(slash(resolve(top)));
+  }
   const offenders = [];
-  for (const root of roots) {
-    const base = deps.run(root, ["merge-base", "HEAD", "develop"]) || "HEAD";
-    const lines = [
-      deps.run(root, ["diff", "--name-only", base, "--", ...PROTECTED]),
-      deps.run(root, ["ls-files", "--others", "--exclude-standard", "--", ...PROTECTED]),
-    ];
-    if (input.agent_type === ENGINEER) {
-      const status = String(deps.run(root, ["status", "--porcelain", "--untracked-files=all"]) ?? "");
-      const paths = status.split(/\r?\n/).filter(Boolean).flatMap((l) => l.slice(3).split(" -> "));
-      lines.push(paths.filter((p) => !ENGINEER_REL.test(slash(unquote(p)))).join("\n"));
-    }
-    const files = lines.join("\n").split(/\r?\n/).map((s) => s.trim()).filter(Boolean);
-    offenders.push(...files.map((f) => `${slash(root)}: ${f}`));
+  for (const root of new Set([...portRoots, ...roots])) {
+    offenders.push(...changedOutsideRules(root, portRoots.has(root), input, deps));
   }
   if (offenders.length === 0) return null;
   const reason =
     `Port session integrity violation, files changed that must not be: ${[...new Set(offenders)].join(", ")}. ` +
     "Do not try to repair this yourself. Stop the run and report it to a human.";
-  return { decision: "block", reason, continue: false, stopReason: reason };
+  const event = input.hook_event_name === "PostToolUseFailure" ? "PostToolUseFailure" : "PostToolUse";
+  const base = { continue: false, stopReason: reason, hookSpecificOutput: { hookEventName: event, additionalContext: reason } };
+  return event === "PostToolUse" ? { decision: "block", reason, ...base } : base;
 }
 
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {

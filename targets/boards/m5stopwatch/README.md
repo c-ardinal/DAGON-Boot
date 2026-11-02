@@ -61,6 +61,14 @@ over with SET_PENDING, REBOOT and CONFIRM.
 cargo build --release --bin factory
 ```
 
+## Project template
+
+`template/` is what `dagon gen` writes for a node on this board (the package
+is found by `[package.metadata.dagon] board = "m5stopwatch"`): `Cargo.toml`
+with the `{{node}}` / `{{dep:<package>}}` placeholders, `.cargo/config.toml`,
+`rust-toolchain.toml`, `src/main.rs` (the start-up above) and `src/app.rs`
+(the developer's file). `src/wiring.rs` comes from the topology.
+
 ## Test apps
 
 - `testapp-confirm`: marks its slot Valid right after boot, keeps feeding the

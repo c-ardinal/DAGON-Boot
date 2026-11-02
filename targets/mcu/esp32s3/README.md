@@ -34,6 +34,14 @@ All three have defaults, so an ESP32-S3 board without extras needs only its
 link UART pins, its node tag (`NodePeripherals::target_tag`) and
 `board::PlainBoard`.
 
+## Project template
+
+`template/` is what `dagon gen` writes for an ESP32-S3 node chosen by MCU
+only (the package is found by `[package.metadata.dagon] mcu = "esp32s3"`):
+the same files as a board template, with a `src/main.rs` that wires the link
+UART itself (the TX / RX pins are set there) and uses `node::plain_board()`
+and the node tag from the generated `wiring.rs`.
+
 ## API notes
 
 - Task liveness is deadline based: a task announces work with

@@ -5,7 +5,7 @@ import { execFileSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { decide, parseStatusZ, postCheck } from "./guard.mjs";
+import { decide, dependsOn, parseStatusZ, postCheck } from "./guard.mjs";
 
 const PORT_WT = "C:/w/dagon-port-R";
 const toplevel = (d) => (String(d).replace(/\\/g, "/").toLowerCase().startsWith("c:/w/dagon-port-r") ? PORT_WT : "C:/repo");
@@ -62,6 +62,18 @@ test("port-engineer area follows the MCU / board / samples layout", () => {
   assert.equal(r.decision, "block");
   assert.match(r.reason, /rp2040-touch-lcd/);
   assert.doesNotMatch(r.reason, /esp32s3|m5stopwatch/);
+});
+
+test("dependsOn reads dependency tables, not comments or other tables", () => {
+  const pkg = "dagon-mcu-esp32s3";
+  assert.ok(dependsOn('[dependencies]\ndagon-mcu-esp32s3 = { path = "x" }\n', pkg));
+  assert.ok(dependsOn("[target.'cfg(target_arch = \"xtensa\")'.dependencies]\ndagon-mcu-esp32s3 = \"0.1\"\n", pkg));
+  assert.ok(dependsOn('[dependencies.dagon-mcu-esp32s3]\npath = "x"\n', pkg));
+  assert.ok(!dependsOn("# needs dagon-mcu-esp32s3 later\n[dependencies]\nesp-hal = \"1\"\n", pkg));
+  assert.ok(!dependsOn('[dev-dependencies]\ndagon-mcu-esp32s3 = { path = "x" }\n', pkg));
+  assert.ok(!dependsOn('[features]\nx = ["dagon-mcu-esp32s3/conform"]\n', pkg));
+  assert.ok(!dependsOn('[dependencies]\ndagon-mcu-esp32s3-extra = "1"\n', pkg));
+  assert.ok(!dependsOn('[package.metadata.dagon]\nmcu = "esp32s3"\n', pkg));
 });
 
 test("outside a port session protected crates are writable", () => {

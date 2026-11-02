@@ -1,0 +1,7 @@
+# ESP-IDF and cargo build outputs for the ESP32-S3 workspaces
+esp32s3-*/build/
+esp32s3-*/sdkconfig
+esp32s3-*/sdkconfig.old
+esp32s3-*/dependencies.lock
+esp32s3-*/managed_components/
+esp32s3-*/target/

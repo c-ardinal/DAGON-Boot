@@ -13,6 +13,11 @@
 //! | 8 | CT-08 sha-256 | FIPS 180-2 vectors (one-shot and incremental) match |
 //!
 //! `param` is unused (send 0). Other test ids answer E_UNSUPPORTED.
+//!
+//! `feed` is called before and after every erase, after every 256 bytes read
+//! back, every 4 KiB hashed and every signature check, so a watchdog that
+//! cannot be stopped keeps running through a test. The longest gap is one
+//! erase of the scratch erase unit.
 
 use crate::{detail, Detail};
 use dagon_format::header::{self, HEADER_SIZE};
@@ -65,13 +70,18 @@ impl From<TestResult> for Outcome {
 
 /// Runs one node-side test. `None` for a test id that does not run in the
 /// node.
-pub fn run<F: Flash>(flash: &mut F, setup: &NodeSetup<'_>, req: ConfRunReq) -> Option<Outcome> {
+pub fn run<F: Flash>(
+    flash: &mut F,
+    setup: &NodeSetup<'_>,
+    req: ConfRunReq,
+    feed: &mut dyn FnMut(),
+) -> Option<Outcome> {
     let r = match req.test_id {
         1 => ct01_geometry(flash, setup),
-        2 => ct02_erase(flash, setup),
-        3 => ct03_write(flash, setup),
-        7 => ct07_ed25519(),
-        8 => ct08_sha256(),
+        2 => ct02_erase(flash, setup, feed),
+        3 => ct03_write(flash, setup, feed),
+        7 => ct07_ed25519(feed),
+        8 => ct08_sha256(feed),
         _ => return None,
     };
     Some(r.into())
@@ -79,13 +89,15 @@ pub fn run<F: Flash>(flash: &mut F, setup: &NodeSetup<'_>, req: ConfRunReq) -> O
 
 /// Answers a CONF_RUN request frame; writes the response frame to `out`
 /// (at least [`RESPONSE_MAX`] bytes) and returns its length. `None` when the
-/// frame is not a CONF_RUN request: pass it on to the agent.
+/// frame is not a CONF_RUN request: pass it on to the agent. `feed` feeds
+/// the watchdog during the test.
 pub fn handle_frame<F: Flash>(
     request: &[u8],
     max_payload: usize,
     flash: &mut F,
     setup: &NodeSetup<'_>,
     out: &mut [u8],
+    feed: &mut dyn FnMut(),
 ) -> Option<usize> {
     let (frame, _) = Frame::decode(request, max_payload).ok()?;
     if frame.cmd != Cmd::ConfRun as u8 || frame.flags & (flags::RESP | flags::EVENT) != 0 {
@@ -94,7 +106,7 @@ pub fn handle_frame<F: Flash>(
     let body = &mut out[HEADER_LEN + 1..];
     let (status, len) = match ConfRunReq::parse(frame.payload) {
         Err(s) => (s, 0),
-        Ok(req) => match run(flash, setup, req) {
+        Ok(req) => match run(flash, setup, req, feed) {
             None => (Status::Unsupported, 0),
             Some(o) => {
                 let resp = ConfRunResp {
@@ -172,10 +184,16 @@ fn pattern(i: u32) -> u8 {
     (i as u8).wrapping_mul(37) ^ 0x5A
 }
 
-fn erase<F: Flash>(flash: &mut F, addr: u32, len: u32) -> Result<(), Detail> {
-    flash
-        .erase(addr, len)
-        .map_err(|e| detail!("erase {:#x}: {:?}", addr, e))
+fn erase<F: Flash>(
+    flash: &mut F,
+    addr: u32,
+    len: u32,
+    feed: &mut dyn FnMut(),
+) -> Result<(), Detail> {
+    feed();
+    let r = flash.erase(addr, len);
+    feed();
+    r.map_err(|e| detail!("erase {:#x}: {:?}", addr, e))
 }
 
 fn write_pattern<F: Flash>(flash: &mut F, addr: u32, len: u32, from: u32) -> Result<(), Detail> {
@@ -195,6 +213,7 @@ fn check<F: Flash>(
     addr: u32,
     len: u32,
     expect: impl Fn(u32) -> u8,
+    feed: &mut dyn FnMut(),
 ) -> Result<(), Detail> {
     let mut buf = [0u8; CHUNK];
     let mut off = 0u32;
@@ -204,6 +223,7 @@ fn check<F: Flash>(
         flash
             .read(addr + off, b)
             .map_err(|e| detail!("read {:#x}: {:?}", addr + off, e))?;
+        feed();
         if let Some(i) = (0..n).find(|&i| b[i as usize] != expect(off + i)) {
             let at = addr + off + i;
             return Err(detail!(
@@ -218,29 +238,37 @@ fn check<F: Flash>(
     Ok(())
 }
 
-fn ct02_erase<F: Flash>(flash: &mut F, setup: &NodeSetup<'_>) -> TestResult {
+fn ct02_erase<F: Flash>(
+    flash: &mut F,
+    setup: &NodeSetup<'_>,
+    feed: &mut dyn FnMut(),
+) -> TestResult {
     let r = scratch_region(flash, setup)?;
     let at = setup.scratch;
-    erase(flash, at, r.erase_size)?;
+    erase(flash, at, r.erase_size, feed)?;
     write_pattern(flash, at, r.write_size, 0)?;
-    erase(flash, at, r.erase_size)?;
-    check(flash, at, r.erase_size, |_| r.erased_value)?;
+    erase(flash, at, r.erase_size, feed)?;
+    check(flash, at, r.erase_size, |_| r.erased_value, feed)?;
     Ok(r.erase_size)
 }
 
-fn ct03_write<F: Flash>(flash: &mut F, setup: &NodeSetup<'_>) -> TestResult {
+fn ct03_write<F: Flash>(
+    flash: &mut F,
+    setup: &NodeSetup<'_>,
+    feed: &mut dyn FnMut(),
+) -> TestResult {
     let r = scratch_region(flash, setup)?;
     let at = setup.scratch;
     // One long aligned write, then one write unit right after it.
     let first = (CHUNK as u32 / r.write_size * r.write_size).min(r.erase_size);
     let second = r.write_size.min(r.erase_size - first);
-    erase(flash, at, r.erase_size)?;
+    erase(flash, at, r.erase_size, feed)?;
     write_pattern(flash, at, first, 0)?;
     if second > 0 {
         write_pattern(flash, at + first, second, first)?;
     }
-    check(flash, at, first + second, pattern)?;
-    erase(flash, at, r.erase_size)?;
+    check(flash, at, first + second, pattern, feed)?;
+    erase(flash, at, r.erase_size, feed)?;
     Ok(first + second)
 }
 
@@ -268,13 +296,16 @@ const FLIP_BITS: [(usize, u8); 10] = [
     (0x1FF, 1),
 ];
 
-fn ct07_ed25519() -> TestResult {
+fn ct07_ed25519(feed: &mut dyn FnMut()) -> TestResult {
+    feed();
     verify_signed(&RFC8032_PK, b"", b"", &RFC8032_SIG)
         .map_err(|e| detail!("RFC 8032 TEST 1: {:?}", e))?;
+    feed();
     header::verify_header(SIGNED_HEADER, &RFC8032_PK)
         .map_err(|e| detail!("signed header: {:?}", e))?;
     let mut rejected = 0;
     for (byte, bit) in FLIP_BITS {
+        feed();
         let mut h = *SIGNED_HEADER;
         h[byte] ^= 1 << bit;
         if header::verify_header(&h, &RFC8032_PK).is_ok() {
@@ -301,7 +332,10 @@ const SHA_VECTORS: [(&[u8], [u8; 32]); 3] = [
 ];
 const MILLION_A: [u8; 32] = hex("cdc76e5c9914fb9281a1c7e284d73e67f1809a48a497200e046d39ccc7112cd0");
 
-fn ct08_sha256() -> TestResult {
+/// 64-byte blocks hashed between two feeds (4 KiB).
+const BLOCKS_PER_FEED: u32 = 64;
+
+fn ct08_sha256(feed: &mut dyn FnMut()) -> TestResult {
     for (i, (msg, want)) in SHA_VECTORS.iter().enumerate() {
         if sha256(msg) != *want {
             return Err(detail!("vector {} one-shot mismatch", i));
@@ -313,7 +347,12 @@ fn ct08_sha256() -> TestResult {
         }
     }
     let mut h = Sha256::new();
-    (0..1_000_000 / 64).for_each(|_| h.update(&[b'a'; 64]));
+    for i in 0..1_000_000u32 / 64 {
+        if i.is_multiple_of(BLOCKS_PER_FEED) {
+            feed();
+        }
+        h.update(&[b'a'; 64]);
+    }
     if h.finalize() != MILLION_A {
         return Err(detail!("million 'a' mismatch"));
     }
@@ -345,7 +384,11 @@ mod tests {
 
     #[test]
     fn crypto_tests_pass_on_host() {
-        assert_eq!(ct07_ed25519(), Ok(FLIP_BITS.len() as u32));
-        assert_eq!(ct08_sha256(), Ok(7));
+        let mut feeds = 0u32;
+        let mut feed = || feeds += 1;
+        assert_eq!(ct07_ed25519(&mut feed), Ok(FLIP_BITS.len() as u32));
+        assert_eq!(ct08_sha256(&mut feed), Ok(7));
+        // 12 signature checks + one feed per 4 KiB of the million 'a'.
+        assert_eq!(feeds, 12 + 15_625u32.div_ceil(BLOCKS_PER_FEED));
     }
 }

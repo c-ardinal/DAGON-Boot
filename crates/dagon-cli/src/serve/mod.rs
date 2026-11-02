@@ -49,6 +49,18 @@ fn passphrase() -> Result<String, String> {
 }
 
 /// `dagon serve [--port <n>] [--web <dir>] [--no-open] [--config <file>]`
+/// The key the page verifies with at start, through the same checks as an
+/// opened project: --pubkey, pubkey in dagon.toml (also only from the
+/// project or a key folder), else the public half of the signing key.
+fn start_key(o: &Opts<'_>, server: &Server, config: Option<&Path>) -> Result<[u8; 32], String> {
+    let c = api::config_at(server, config)?;
+    match (o.get("pubkey"), &c.pubkey) {
+        (Some(p), _) => crate::config::checked_pubkey(&c, Path::new(p)),
+        (None, Some(_)) => api::release_key_of(&c),
+        (None, None) => Ok(*crate::config::load_key(o.get("key"))?.pk),
+    }
+}
+
 pub fn command(args: &[&str]) -> Result<(), String> {
     let no_open = args.contains(&"--no-open");
     let args: Vec<&str> = args.iter().copied().filter(|a| *a != "--no-open").collect();
@@ -67,12 +79,6 @@ pub fn command(args: &[&str]) -> Result<(), String> {
     // now (not baked into the page): --pubkey, pubkey in dagon.toml, or the
     // public half of the signing key. The test key needs
     // DAGON_ALLOW_TEST_KEY=1.
-    let key = crate::device::pubkey(&o, &cfg).map_err(|e| {
-        format!(
-            "dagon serve needs the developer's public key: pass --pubkey <file> \
-             (from dagon key gen) or set pubkey in dagon.toml ({e})"
-        )
-    })?;
     let web = match o.get("web") {
         Some(w) => PathBuf::from(w),
         None if api::page_embedded() => PathBuf::new(),
@@ -86,14 +92,12 @@ pub fn command(args: &[&str]) -> Result<(), String> {
         .map_err(|e| format!("cannot listen on 127.0.0.1:{port}: {e}"))?;
     let port = listener.local_addr().map_err(|e| e.to_string())?.port();
     let server = Server::new(passphrase()?, port, config.clone(), web.clone());
-    if o.get("pubkey").is_none() && cfg.pubkey.is_some() {
-        let c = api::config_at(&server, config.as_deref())?;
-        let checked = api::release_key_of(&c)
-            .map_err(|e| format!("dagon serve: pubkey in dagon.toml: {e}"))?;
-        if checked != key {
-            return Err("dagon serve: pubkey in dagon.toml changed while starting".into());
-        }
-    }
+    let key = start_key(&o, &server, config.as_deref()).map_err(|e| {
+        format!(
+            "dagon serve needs the developer's public key: pass --pubkey <file> \
+             (from dagon key gen) or set pubkey in dagon.toml ({e})"
+        )
+    })?;
     server.set_release_key(key);
     if web.as_os_str().is_empty() {
         println!("page: built into this executable");

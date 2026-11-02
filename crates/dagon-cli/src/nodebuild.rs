@@ -93,16 +93,15 @@ pub fn build_nodes(
     } else {
         nodes.to_vec()
     };
-    if let Some(p) = &cfg.pubkey {
-        crate::config::checked_pubkey(cfg, p).map_err(|e| format!("pubkey in dagon.toml: {e}"))?;
-    }
+    // Checked once; the firmware gets these bytes, not the file again.
+    let key = crate::config::build_pubkey(cfg)?.map(|k| dagon_sign::to_hex(&k));
     let mut out = Vec::new();
     for id in ids {
         let inputs = cfg
             .build
             .get(&id)
             .ok_or_else(|| format!("no [build.{id}] in dagon.toml"))?;
-        out.push(build_node(cfg, &id, inputs, log, cancel)?);
+        out.push(build_node(cfg, &id, inputs, key.as_deref(), log, cancel)?);
     }
     Ok(out)
 }
@@ -111,6 +110,7 @@ fn build_node(
     cfg: &Config,
     id: &str,
     b: &BuildInputs,
+    pubkey_hex: Option<&str>,
     log: &mut dyn FnMut(&str),
     cancel: &AtomicBool,
 ) -> Result<Built, String> {
@@ -149,7 +149,7 @@ fn build_node(
             &bin,
             &features,
             target_dir.as_deref(),
-            cfg.pubkey.as_deref(),
+            pubkey_hex,
             log,
             cancel,
         )?;
@@ -218,22 +218,23 @@ enum Line {
 /// Runs `cargo build --release --locked` in `dir`; returns the executable
 /// of binary `bin`. A crate without Cargo.lock yet (just generated) is
 /// resolved once without --locked, and keeps the lock file cargo writes.
-/// `pubkey` (the project's) goes to the firmware as DAGON_PUBKEY, over the
-/// environment's.
+/// `pubkey_hex` (checked by the caller) goes to the firmware as
+/// DAGON_PUBKEY; without it DAGON_PUBKEY is not passed down at all.
 fn cargo_build(
     dir: &Path,
     bin: &str,
     features: &[String],
     target_dir: Option<&Path>,
-    pubkey: Option<&Path>,
+    pubkey_hex: Option<&str>,
     log: &mut dyn FnMut(&str),
     cancel: &AtomicBool,
 ) -> Result<PathBuf, String> {
     let mut cmd = Command::new("cargo");
     scrub(&mut cmd);
-    if let Some(p) = pubkey {
-        cmd.env(PUBKEY_ENV, p);
-    }
+    match pubkey_hex {
+        Some(k) => cmd.env(PUBKEY_ENV, k),
+        None => cmd.env_remove(PUBKEY_ENV),
+    };
     cmd.args([
         "build",
         "--release",
@@ -377,9 +378,8 @@ mod tests {
             "const K: &str = env!(\"DAGON_PUBKEY\");\nfn main() { println!(\"{K}\"); }\n",
         )
         .unwrap();
-        let pubkey = dagon_sign::generate_to_dir(&base.join("keys"))
-            .unwrap()
-            .public_path;
+        let pair = dagon_sign::generate_to_dir(&base.join("keys")).unwrap();
+        let pubkey = pair.public_path.clone();
         let mut cfg = Config {
             base: base.clone(),
             pubkey: Some(pubkey),
@@ -403,6 +403,13 @@ mod tests {
             &AtomicBool::new(false),
         );
         assert!(r.is_ok(), "{lines:?}");
+        // The firmware gets the checked key itself, not the file's path.
+        let exe = &r.unwrap()[0].slots[0].1;
+        let out = Command::new(exe).output().unwrap();
+        assert_eq!(
+            String::from_utf8_lossy(&out.stdout).trim(),
+            dagon_sign::to_hex(&pair.public_key)
+        );
         assert!(lines.iter().any(|l| l.contains("no Cargo.lock yet")));
         assert!(pkg.join("Cargo.lock").is_file(), "the lock file is kept");
         // Next time it builds --locked, without the note.
@@ -432,7 +439,7 @@ mod tests {
         std::fs::write(&leak, seed).unwrap();
         cfg.pubkey = Some(leak);
         let e = build_nodes(&cfg, &[], &mut |_| {}, &AtomicBool::new(false)).unwrap_err();
-        assert!(e.contains("secret"), "{e}");
+        assert!(e.contains("holds a secret key"), "{e}");
         let _ = std::fs::remove_dir_all(&base);
     }
 

@@ -138,10 +138,11 @@ dependencies = [
 name = "dagon-sim"
 version = "0.0.0"
 dependencies = [
- "dagon-conform",
- "dagon-core",
- "dagon-romlink",
- "dagon-sign",
+ "dagon-agent",
+ "dagon-format",
+ "dagon-port",
+ "dagon-proto",
+ "ed25519-compact",
 ]
 
 [[package]]

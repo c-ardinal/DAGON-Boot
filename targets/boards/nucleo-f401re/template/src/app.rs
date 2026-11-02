@@ -19,7 +19,8 @@ pub fn self_check() -> bool {
 }
 
 /// Starts your tasks; each takes one guard task from `first` on. `io`
-/// holds LD2 and the header pins.
+/// holds LD2, the 7-segment pins and `io.spare`
+/// (USART2, I2C1, B1, ADC1 and their pins).
 pub fn start<const N: usize>(spawner: Spawner, io: Io, guard: &'static Guard<N>, first: usize) {
     spawner.spawn(work(io, guard.lease(first)).expect("task pool"));
 }
@@ -29,6 +30,7 @@ pub fn start<const N: usize>(spawner: Spawner, io: Io, guard: &'static Guard<N>,
 /// previous one.
 #[embassy_executor::task]
 async fn work(io: Io, lease: Lease) {
+    // For example, the user button B1: `Input::new(io.spare.pc13, Pull::None)`.
     let mut led = Output::new(io.led, Level::Low, Speed::Low);
     loop {
         lease.busy(WORK_BUDGET_MS);

@@ -36,6 +36,6 @@ async fn main(spawner: Spawner) {
         fallback: &[],
         self_check: app::self_check,
     };
-    board::start(spawner, dagon, io, &GUARD, cfg);
-    app::start(spawner, &GUARD, board::APP_TASKS);
+    let spare = board::start(spawner, dagon, io, &GUARD, cfg);
+    app::start(spawner, spare, &GUARD, board::APP_TASKS);
 }

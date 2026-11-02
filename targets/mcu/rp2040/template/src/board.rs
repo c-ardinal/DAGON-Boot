@@ -6,7 +6,7 @@ use dagon_mcu_rp2040::links::{I2cLink, RpI2c};
 use dagon_mcu_rp2040::node::{BoardDef, DagonParts};
 use dagon_mcu_rp2040::relay::Links;
 use embassy_rp::i2c::{self, I2c};
-use embassy_rp::peripherals::{I2C0, PIN_16, PIN_17};
+use embassy_rp::peripherals::{I2C0, PIN_16, PIN_17, PIN_25};
 use embassy_rp::{bind_interrupts, Peri, Peripherals};
 
 bind_interrupts!(struct Irqs {
@@ -19,11 +19,17 @@ const I2C_HZ: u32 = 400_000;
 pub struct Board;
 
 /// What DAGON's relay and your app get besides DAGON's own peripherals.
-/// Add the pins and peripherals your app uses.
 pub struct Io {
     pub i2c: Peri<'static, I2C0>,
     pub sda: Peri<'static, PIN_16>,
     pub scl: Peri<'static, PIN_17>,
+    pub spare: Spare,
+}
+
+/// What your app gets. Add the pins and peripherals your app uses.
+pub struct Spare {
+    /// GPIO25 (the LED on Raspberry Pi Pico-style boards).
+    pub pin_25: Peri<'static, PIN_25>,
 }
 
 impl BoardDef for Board {
@@ -44,20 +50,23 @@ impl BoardDef for Board {
             i2c: p.I2C0,
             sda: p.PIN_16,
             scl: p.PIN_17,
+            spare: Spare { pin_25: p.PIN_25 },
         };
         (dagon, io)
     }
 }
 
 /// The relay's links: I2C0 to the 子機 (no PIO UART, no STM32 recovery
-/// lines on this wiring; add them like the Waveshare board package does).
-pub fn links(io: Io) -> Links {
+/// lines on this wiring; add them like the Waveshare board package does),
+/// and what is left for the app.
+pub fn links(io: Io) -> (Links, Spare) {
     let mut cfg = i2c::Config::default();
     cfg.frequency = I2C_HZ;
     let bus = I2c::new_async(io.i2c, io.scl, io.sda, Irqs, cfg);
-    Links {
+    let links = Links {
         i2c: Some(I2cLink::new(RpI2c(bus))),
         uart: None,
         sub: None,
-    }
+    };
+    (links, io.spare)
 }

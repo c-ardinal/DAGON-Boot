@@ -38,6 +38,7 @@ async fn main(spawner: Spawner) {
         fallback: &[],
         self_check: app::self_check,
     };
-    relay::start::<Board, TASKS>(spawner, dagon, board::links(io), &GUARD, cfg);
-    app::start(spawner, &GUARD, relay::TASKS);
+    let (links, spare) = board::links(io);
+    relay::start::<Board, TASKS>(spawner, dagon, links, &GUARD, cfg);
+    app::start(spawner, spare, &GUARD, relay::TASKS);
 }

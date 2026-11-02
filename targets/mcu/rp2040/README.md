@@ -55,8 +55,8 @@ async fn main(spawner: embassy_executor::Spawner) {
         fallback: &[],
         self_check: app::self_check,
     };
-    board::start(spawner, dagon, io, &GUARD, cfg);
-    app::start(spawner, &GUARD, board::APP_TASKS);
+    let spare = board::start(spawner, dagon, io, &GUARD, cfg);
+    app::start(spawner, spare, &GUARD, board::APP_TASKS);
 }
 ```
 
@@ -69,12 +69,15 @@ pub fn self_check() -> bool {
     true
 }
 
-pub fn start<const N: usize>(spawner: Spawner, guard: &'static Guard<N>, first: usize) {
-    spawner.spawn(work(guard.lease(first)).expect("task pool"));
+/// `spare`: the pins and peripherals DAGON does not use.
+pub fn start<const N: usize>(spawner: Spawner, spare: Spare, guard: &'static Guard<N>, first: usize) {
+    spawner.spawn(work(spare, guard.lease(first)).expect("task pool"));
 }
 
 #[embassy_executor::task]
-async fn work(lease: Lease) {
+async fn work(spare: Spare, lease: Lease) {
+    // e.g. a free GPIO: let mut out = Output::new(spare.pin_0, Level::Low);
+    let _ = spare;
     loop {
         lease.busy(500); // a piece of work stuck past its budget resets the chip
         // Your work here.
@@ -89,7 +92,8 @@ async fn work(lease: Lease) {
 one task per sub-node link on DAGON's high-priority executor (`exec`, an
 interrupt executor on SWI_IRQ_0 at P1, guard tasks 0..3 `Preempting`), and
 the watchdog feeder and the display on `spawner` (thread mode,
-`Background`). Your tasks run in thread mode below the relay, so they never
+`Background`), and returns the board's `Spare` pins and peripherals (free
+GPIOs, I2C1, SPI0, UART0/1, PIO1, ADC, DMA channels) for the app. Your tasks run in thread mode below the relay, so they never
 delay it; a stuck one stops the feeding and the chip resets (a version on
 trial then rolls back). Build with `DAGON_PUBKEY` set (below);
 `--features slot-b` links the same app for slot B.

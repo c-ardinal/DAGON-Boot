@@ -25,7 +25,7 @@ use crate::paths::contained;
 const MAX_ENTRIES: usize = 500;
 
 /// The user's home folder (or the server's override), resolved.
-fn home(server: &Server) -> Result<PathBuf, Response> {
+pub(super) fn home(server: &Server) -> Result<PathBuf, Response> {
     let h = match server.home.get() {
         Some(h) => h.clone().into_os_string(),
         None => std::env::var_os("USERPROFILE")
@@ -36,7 +36,7 @@ fn home(server: &Server) -> Result<PathBuf, Response> {
 }
 
 /// Folders that hold keys: never listed, opened or written.
-fn key_dirs(home: &Path) -> Vec<PathBuf> {
+pub(super) fn key_dirs(home: &Path) -> Vec<PathBuf> {
     let mut out = vec![home.join(".dagon")];
     if let Some(k) = std::env::var_os(KEY_ENV) {
         let k = PathBuf::from(k);
@@ -54,7 +54,7 @@ fn key_dirs(home: &Path) -> Vec<PathBuf> {
 
 /// Whether `p` is `dir` or inside it; without regard to case on Windows,
 /// where `.DAGON` is `.dagon` even before it exists.
-fn in_dir(p: &Path, dir: &Path) -> bool {
+pub(super) fn in_dir(p: &Path, dir: &Path) -> bool {
     if cfg!(windows) {
         let low = |x: &Path| PathBuf::from(x.to_string_lossy().to_lowercase());
         low(p).starts_with(low(dir))
@@ -121,7 +121,7 @@ fn busy() -> Response {
 /// Opens the project of `cfg` with its keys: the page's release key
 /// becomes the project's (the secret key stays in this process, unprinted).
 fn switch(server: &Server, cfg: PathBuf) -> Result<Response, Response> {
-    let c = crate::config::Config::load(Some(&cfg.to_string_lossy()))
+    let c = super::api::config_at(server, Some(&cfg))
         .map_err(|_| Response::error(422, "its dagon.toml does not load"))?;
     let key = super::api::release_key_of(&c).map_err(|e| {
         eprintln!("dagon serve: project key: {e}");

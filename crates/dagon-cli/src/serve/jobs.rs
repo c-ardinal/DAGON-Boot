@@ -191,6 +191,7 @@ impl Server {
                 result: None,
             },
         );
+        let config = self.config_path();
         drop(jobs);
         self.set_state(id, "queued");
         let server = self.clone();
@@ -198,6 +199,7 @@ impl Server {
             server.set_state(id, "running");
             let mut job = Job {
                 id,
+                config,
                 server: server.clone(),
                 cancel,
                 lines: Vec::new(),
@@ -249,6 +251,8 @@ impl Server {
 /// A running job's handle on the server.
 pub struct Job {
     pub id: u64,
+    /// dagon.toml of the project open when the job was registered.
+    pub config: Option<PathBuf>,
     server: Arc<Server>,
     cancel: Arc<AtomicBool>,
     lines: Vec<String>,

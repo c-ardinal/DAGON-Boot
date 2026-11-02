@@ -94,6 +94,10 @@ pub struct Config {
     pub pubkey: Option<PathBuf>,
     /// Secret key file `dagon serve` signs this project's images with.
     pub signing_key: Option<PathBuf>,
+    /// Folders besides the work area that `dagon serve` takes key files
+    /// from (the key folders); filled by serve, empty elsewhere.
+    #[serde(skip)]
+    pub key_roots: Vec<PathBuf>,
     #[serde(default)]
     pub provision: BTreeMap<String, ProvisionInputs>,
     /// `dagon build` settings per node id; `package` stays relative here.

@@ -54,6 +54,43 @@ fn signing_key_path(cfg: &Config) -> Option<PathBuf> {
         .or_else(|| std::env::var_os(crate::config::KEY_ENV).map(PathBuf::from))
 }
 
+/// A key file named in dagon.toml (or DAGON_SIGNING_KEY), resolved; it
+/// must lie in the work area or a key folder. Messages carry no paths.
+fn key_file(cfg: &Config, p: &Path, what: &str) -> Result<PathBuf, String> {
+    let p = std::fs::canonicalize(p).map_err(|_| format!("the {what} file is not there"))?;
+    let base = std::fs::canonicalize(&cfg.base).unwrap_or_else(|_| cfg.base.clone());
+    if super::project::in_dir(&p, &base)
+        || cfg.key_roots.iter().any(|r| super::project::in_dir(&p, r))
+    {
+        Ok(p)
+    } else {
+        Err(format!(
+            "the {what} file is outside the project and the key folders"
+        ))
+    }
+}
+
+/// The project's public key from its pubkey file: only a `.pub` file that
+/// is not a copy of the secret key beside it, holding a valid key.
+fn public_key(cfg: &Config, p: &Path) -> Result<[u8; 32], String> {
+    let p = key_file(cfg, p, "pubkey")?;
+    let is_pub = p.extension().is_some_and(|e| e.eq_ignore_ascii_case("pub"));
+    if !is_pub {
+        return Err("pubkey must name a .pub file (from dagon key gen)".into());
+    }
+    let text = std::fs::read_to_string(&p).map_err(|_| "the pubkey file cannot be read")?;
+    let secret = p
+        .parent()
+        .map(|d| d.join(dagon_sign::SECRET_FILE))
+        .and_then(|s| std::fs::read_to_string(s).ok());
+    if secret.is_some_and(|s| s.trim().eq_ignore_ascii_case(text.trim())) {
+        return Err("the pubkey file holds a secret key".into());
+    }
+    let k = dagon_sign::load_public_key(&p).map_err(|_| "the pubkey file is not a public key")?;
+    crate::config::allow_key(&k, crate::config::test_key_allowed())?;
+    Ok(k)
+}
+
 /// The project's signing key; refused when it does not match its pubkey.
 fn project_key(cfg: &Config) -> Result<ed25519_compact::KeyPair, String> {
     let path = signing_key_path(cfg).ok_or_else(|| {
@@ -62,13 +99,16 @@ fn project_key(cfg: &Config) -> Result<ed25519_compact::KeyPair, String> {
             crate::config::KEY_ENV
         )
     })?;
-    let key = load_key(Some(&path.to_string_lossy()))?;
+    let path = key_file(cfg, &path, "signing key")?;
+    let key = load_key(Some(&path.to_string_lossy())).map_err(|_| {
+        "the signing key file cannot be used (malformed, inside a git work tree, or the test key)"
+            .to_string()
+    })?;
     if let Some(p) = &cfg.pubkey {
-        let pk = dagon_sign::load_public_key(p).map_err(|e| e.to_string())?;
-        if pk != *key.pk {
+        if public_key(cfg, p)? != *key.pk {
             return Err(format!(
-                "the signing key {} does not match the project's pubkey",
-                path.display()
+                "the signing key (key id {}) does not match the project's pubkey",
+                to_hex(&dagon_format::key_id(&key.pk))
             ));
         }
     }
@@ -79,11 +119,7 @@ fn project_key(cfg: &Config) -> Result<ed25519_compact::KeyPair, String> {
 /// else the public half of its signing key.
 pub(super) fn release_key_of(cfg: &Config) -> Result<[u8; 32], String> {
     match &cfg.pubkey {
-        Some(p) => {
-            let k = dagon_sign::load_public_key(p).map_err(|e| e.to_string())?;
-            crate::config::allow_key(&k, crate::config::test_key_allowed())?;
-            Ok(k)
-        }
+        Some(p) => public_key(cfg, p),
         None => Ok(*project_key(cfg)?.pk),
     }
 }
@@ -102,10 +138,18 @@ fn page_safe<T>(r: Result<T, String>) -> Result<T, String> {
 }
 
 fn config(server: &Server) -> Result<Config, String> {
-    let p = server
-        .config_path()
-        .map(|p| p.to_string_lossy().into_owned());
-    Config::load(p.as_deref())
+    config_at(server, server.config_path().as_deref())
+}
+
+/// The project of dagon.toml `path`, with the key folders it may take key
+/// files from.
+pub(super) fn config_at(server: &Server, path: Option<&Path>) -> Result<Config, String> {
+    let p = path.map(|p| p.to_string_lossy().into_owned());
+    let mut c = Config::load(p.as_deref())?;
+    c.key_roots = super::project::home(server)
+        .map(|h| super::project::key_dirs(&h))
+        .unwrap_or_default();
+    Ok(c)
 }
 
 fn body_json(req: &Request) -> Result<Value, Response> {
@@ -187,11 +231,12 @@ fn gen_start(server: &Arc<Server>, req: &Request) -> Res {
         Some(_) => nodes_of(&v)?,
     };
     let force = v["force_main"].as_bool().unwrap_or(false);
-    let config = server
-        .config_path()
-        .ok_or_else(|| Response::error(409, "no project is open"))?;
+    if server.config_path().is_none() {
+        return Err(Response::error(409, "no project is open"));
+    }
     let s = Arc::clone(server);
     match server.spawn("gen", move |job| {
+        let config = job.config.clone().ok_or("no project is open")?;
         let lines = {
             let _lock = s.files.lock().map_err(|_| "lock".to_string())?;
             crate::scaffold::gen_project(&config, &only, force)?
@@ -210,8 +255,13 @@ type Work = fn(&mut Job, Config, Value) -> Result<Value, String>;
 
 fn start(server: &Arc<Server>, req: &Request, kind: &str, work: Work) -> Res {
     let v = body_json(req)?;
-    let cfg = config(server).map_err(|e| Response::error(500, &e))?;
-    match server.spawn(kind, move |job| work(job, cfg, v)) {
+    let s = Arc::clone(server);
+    // The project is the one registered with the job (under the jobs lock),
+    // so a project switch never lands between the two.
+    match server.spawn(kind, move |job| {
+        let cfg = config_at(&s, job.config.as_deref())?;
+        work(job, cfg, v)
+    }) {
         Some(id) => Ok(accepted(id)),
         None => Err(Response::error(429, "too many jobs running")),
     }

@@ -817,7 +817,7 @@ fn a_running_job_blocks_a_project_switch() {
 #[test]
 fn a_signing_key_that_does_not_match_the_pubkey_is_not_used() {
     let (a, home) = with_home("proj-mismatch");
-    let stray = dagon_sign::generate_to_dir(&home.join("stray")).unwrap();
+    let stray = dagon_sign::generate_to_dir(&home.join(".dagon/keys/stray")).unwrap();
     let toml = std::fs::read_to_string(home.join("proj/dagon.toml")).unwrap();
     let sk = stray
         .secret_path
@@ -873,4 +873,48 @@ fn a_project_without_any_key_is_not_opened() {
     );
     assert_eq!(st, 422, "{body}");
     assert_eq!(a.server.release_key(), Some([7; 32]));
+}
+
+/// home/<name>/dagon.toml whose pubkey is `pubkey`.
+fn project_with_pubkey(home: &std::path::Path, name: &str, pubkey: &std::path::Path) {
+    let pk = pubkey.to_string_lossy().replace(char::from(92), "/");
+    std::fs::create_dir_all(home.join(name)).unwrap();
+    std::fs::write(
+        home.join(name).join("dagon.toml"),
+        format!("topology = \"t.yaml\"\npubkey = {pk:?}\n"),
+    )
+    .unwrap();
+}
+
+#[test]
+fn a_pubkey_naming_a_secret_key_is_refused_and_nothing_is_published() {
+    let (a, home) = with_home("proj-secret");
+    let victim = dagon_sign::generate_to_dir(&home.join(".dagon/keys/victim")).unwrap();
+    let seed = std::fs::read_to_string(&victim.secret_path).unwrap();
+    let seed = seed.trim().to_string();
+    // The secret file itself; a .pub copy of it beside it; a .pub outside
+    // the project and the key folders.
+    let copy = home.join(".dagon/keys/victim/copy.pub");
+    std::fs::write(&copy, &seed).unwrap();
+    let outside = a.dir.join("elsewhere.pub");
+    std::fs::copy(&victim.public_path, &outside).unwrap();
+    for (name, pk) in [
+        ("p1", victim.secret_path.clone()),
+        ("p2", copy.clone()),
+        ("p3", outside.clone()),
+    ] {
+        project_with_pubkey(&home, name, &pk);
+        let (st, body) = post(&a, "/v1/project/open", serde_json::json!({ "path": name }));
+        assert_eq!(st, 422, "{name}: {body}");
+        assert!(!body.contains(&seed) && !body.contains("victim"), "{body}");
+        assert_eq!(a.server.release_key(), Some([7; 32]), "{name}");
+    }
+    let (_, hello) = get(&a, "/v1/hello");
+    assert!(!hello
+        .to_ascii_lowercase()
+        .contains(&seed.to_ascii_lowercase()));
+    let (_, page) = get(&a, "/");
+    assert!(!page
+        .to_ascii_lowercase()
+        .contains(&seed.to_ascii_lowercase()));
 }

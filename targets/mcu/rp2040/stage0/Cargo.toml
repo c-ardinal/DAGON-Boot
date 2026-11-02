@@ -14,7 +14,7 @@ publish = false
 diag = ["dagon-mcu-rp2040/diag-panic"]
 
 [dependencies]
-dagon-mcu-rp2040 = { path = "..", features = ["image-stage0"] }
+dagon-mcu-rp2040 = { path = "..", default-features = false, features = ["image-stage0"] }
 dagon-format = { path = "../../../../crates/dagon-format" }
 dagon-port = { path = "../../../../crates/dagon-port" }
 cortex-m = "0.7"

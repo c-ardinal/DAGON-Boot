@@ -47,9 +47,9 @@ rustflags = ["-C", "link-arg=--nmagic", "-C", "link-arg=-Tlink.x", "-C", "link-a
 #![no_std]
 #![no_main]
 
-use dagon_board_nucleo_f401re::{Board, BoardDef, Io};
+use dagon_board_nucleo_f401re::{self as board, Board, BoardDef, Io};
 use dagon_mcu_stm32f401re::watchdog::{now_ms, Guard, Lease, Level, Trial};
-use dagon_mcu_stm32f401re::{clocks, node};
+use dagon_mcu_stm32f401re::clocks;
 use embassy_executor::Spawner;
 use embassy_time::Timer;
 use {defmt_rtt as _, panic_probe as _};
@@ -65,23 +65,33 @@ static GUARD: Guard<2> = Guard::new(
 #[embassy_executor::main]
 async fn main(spawner: Spawner) {
     let (dagon, io) = Board::split(embassy_stm32::init(clocks()));
-    node::start::<Board, 2>(spawner, dagon, &GUARD, 0, "my-node").unwrap();
+    board::start(spawner, dagon, &GUARD, "my-node", self_check).unwrap();
     spawner.spawn(app(io, GUARD.lease(1)).unwrap());
+}
+
+/// Whether a version on trial may be confirmed (your health check).
+fn self_check() -> bool {
+    true
 }
 
 #[embassy_executor::task]
 async fn app(_io: Io, live: Lease) {
     loop {
-        live.feed(); // stop calling this and the watchdog resets the chip
+        live.busy(500); // a piece of work stuck past 500 ms resets the chip
+        // Your work here.
+        live.idle();
         Timer::after_millis(500).await;
     }
 }
 ```
 
-`node::start` opens the slot store (it fails if the state log is
-unreadable), takes over the IWDG with the boot core's period, opens the
-board's I2C target and spawns the serving task and the feeder. `"my-node"`
-is the node's image target tag. Build with `DAGON_PUBKEY` set (below);
+`board::start` (`node::start` for this board) opens the slot store (it
+fails if the state log is unreadable), takes over the IWDG with the boot
+core's period, opens the board's I2C target and spawns the serving task
+(guard task `node::DAGON_TASK`, 0) and the feeder. `"my-node"` is the
+node's image target tag; `self_check` decides whether a version on trial
+may be confirmed. An app that keeps `embassy_stm32::Peripherals` itself
+passes `dagon_pins!(p)` instead of splitting. Build with `DAGON_PUBKEY` set (below);
 `--features slot-b` links the same app for slot B.
 
 The serving task is declared `Preempting` even on the same executor: a
@@ -140,7 +150,7 @@ digits) and is embedded at build time. Unset, the build fails, unless
 ## Tests
 
 ```sh
-cargo test --target <host triple>
+cargo test --no-default-features --target <host triple>
 ```
 
 [`BoardDef`]: src/node.rs

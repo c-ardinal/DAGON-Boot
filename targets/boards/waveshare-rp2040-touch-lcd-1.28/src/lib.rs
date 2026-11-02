@@ -15,13 +15,14 @@
 //!
 //! [`Board`] implements [`BoardDef`]: DAGON takes the flash, the watchdog
 //! and USB; the app gets [`Io`]. The `Io` parts have helpers that set them
-//! up the way DAGON's hub does.
+//! up the way DAGON's hub does. An app that keeps the chip's peripherals
+//! itself moves out only DAGON's with [`dagon_pins!`] and calls `start`.
 #![no_std]
 
 pub mod gc9a01;
 
 use dagon_mcu_rp2040::links::{I2cLink, PioStream, RpI2c};
-use dagon_mcu_rp2040::node::DagonParts;
+pub use dagon_mcu_rp2040::node::DagonParts;
 use dagon_mcu_rp2040::sub::SubLines;
 pub use dagon_mcu_rp2040::BoardDef;
 use embassy_rp::gpio::{Level, Output};
@@ -44,6 +45,33 @@ pub const UART_BAUD: u32 = 115_200;
 pub const LCD_SPI_HZ: u32 = 20_000_000;
 
 pub struct Board;
+
+/// Moves DAGON's peripherals (flash, watchdog, USB) out of
+/// `embassy_rp::Peripherals`; the rest stays the app's.
+#[macro_export]
+macro_rules! dagon_pins {
+    ($p:ident) => {
+        $crate::DagonParts {
+            flash: $p.FLASH,
+            watchdog: $p.WATCHDOG,
+            usb: $p.USB,
+        }
+    };
+}
+
+/// Starts DAGON on this board (USB link; guard task
+/// `dagon_mcu_rp2040::node::DAGON_TASK` serves it): see
+/// `dagon_mcu_rp2040::node::start`.
+#[cfg(feature = "usb")]
+pub fn start<const N: usize>(
+    spawner: embassy_executor::Spawner,
+    parts: DagonParts,
+    guard: &'static dagon_mcu_rp2040::watchdog::Guard<N>,
+    tag: &'static str,
+    self_check: fn() -> bool,
+) {
+    dagon_mcu_rp2040::node::start::<Board, N>(spawner, parts, guard, tag, self_check);
+}
 
 impl BoardDef for Board {
     const BOARD_ID: &'static str = BOARD_ID;

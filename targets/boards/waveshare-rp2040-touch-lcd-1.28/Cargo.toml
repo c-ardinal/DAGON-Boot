@@ -9,16 +9,22 @@ publish = false
 # board id `waveshare-rp2040-touch-lcd-1.28`). Built for thumbv6m only.
 [workspace]
 
+[package.metadata.dagon]
+board = "waveshare-rp2040-touch-lcd-1.28"
+
 [features]
+# usb by default: a generated node names this package without features.
+default = ["usb"]
 # Forwarded to the MCU package: link the app for APP slot B.
 slot-b = ["dagon-mcu-rp2040/slot-b"]
 # DAGON over USB CDC (`node::start`).
-usb = ["dagon-mcu-rp2040/usb"]
+usb = ["dagon-mcu-rp2040/usb", "dep:embassy-executor"]
 # A panic blinks the last step code on the backlight.
 diag-panic = ["dagon-mcu-rp2040/diag-panic"]
 
 [dependencies]
-dagon-mcu-rp2040 = { path = "../../mcu/rp2040", features = ["hal"] }
+dagon-mcu-rp2040 = { path = "../../mcu/rp2040", default-features = false, features = ["hal"] }
 embassy-rp = { version = "0.10.0", features = ["rp2040"] }
 embassy-time = "0.5"
+embassy-executor = { version = "0.10", optional = true }
 embedded-graphics = "0.8"

@@ -10,7 +10,7 @@ publish = false
 [workspace]
 
 [dependencies]
-dagon-mcu-stm32f401re = { path = "..", features = ["hal", "image-bootcore"] }
+dagon-mcu-stm32f401re = { path = "..", default-features = false, features = ["hal", "image-bootcore"] }
 dagon-core = { path = "../../../../crates/dagon-core" }
 dagon-port = { path = "../../../../crates/dagon-port" }
 embassy-stm32 = { version = "0.6.0", features = ["stm32f401re"] }

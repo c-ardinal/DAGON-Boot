@@ -62,10 +62,10 @@ pub trait Watch: Sync {
     fn reboot(&self) -> !;
 }
 
-/// One task's handle on the guard. An app task that loops calls
-/// [`Lease::feed`] each round: if it stops for longer than
-/// [`BUSY_LIMIT_MS`], the watchdog resets the chip (and an image on trial
-/// rolls back).
+/// One task's handle on the guard. A task announces each piece of work
+/// with [`Lease::busy`] and waits with [`Lease::idle`]: if it stays busy
+/// past its budget, the watchdog stops being fed and resets the chip (an
+/// image on trial then rolls back).
 #[derive(Clone, Copy)]
 pub struct Lease {
     pub watch: &'static dyn Watch,
@@ -73,9 +73,10 @@ pub struct Lease {
 }
 
 impl Lease {
-    /// The task is alive and working: renew its deadline.
-    pub fn feed(&self) {
-        self.watch.busy(self.task);
+    /// A piece of work starts that ends within `budget_ms` (plus
+    /// [`BUSY_MARGIN_MS`] slack).
+    pub fn busy(&self, budget_ms: u64) {
+        self.watch.busy_for(self.task, budget_ms);
     }
 
     /// The task waits for something with no deadline of its own.

@@ -10,6 +10,7 @@ publish = false
 [workspace]
 
 [dependencies]
+dagon-agent = { path = "../../../crates/dagon-agent" }
 dagon-format = { path = "../../../crates/dagon-format" }
 dagon-port = { path = "../../../crates/dagon-port" }
 dagon-proto = { path = "../../../crates/dagon-proto" }

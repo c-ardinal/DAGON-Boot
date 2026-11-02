@@ -10,9 +10,12 @@ publish = false
 #   cargo test --no-default-features --target <host triple>
 [workspace]
 
+[package.metadata.dagon]
+board = "nucleo-f401re"
+
 [features]
 default = ["hal"]
-hal = ["dep:dagon-mcu-stm32f401re", "dep:embassy-stm32"]
+hal = ["dep:dagon-mcu-stm32f401re", "dep:embassy-stm32", "dep:embassy-executor"]
 # Forwarded to the MCU package: link the app for APP slot B.
 slot-b = ["dagon-mcu-stm32f401re/slot-b"]
 # Forwarded to the MCU package: the conformance build.
@@ -20,5 +23,6 @@ conform = ["dagon-mcu-stm32f401re/conform"]
 
 [dependencies]
 dagon-format = { path = "../../../crates/dagon-format" }
+embassy-executor = { version = "0.10", optional = true }
 dagon-mcu-stm32f401re = { path = "../../mcu/stm32f401re", features = ["node"], optional = true }
 embassy-stm32 = { version = "0.6.0", features = ["stm32f401re"], optional = true }

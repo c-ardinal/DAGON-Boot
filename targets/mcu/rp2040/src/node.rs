@@ -7,7 +7,8 @@
 //! `rp2040-4m` flash map) and needs [`MIN_FLASH_SIZE`] bytes; a board with
 //! less fails to build, a larger one keeps the rest for the app.
 
-use dagon_agent::{Agent, Config, DefaultHooks, SlotStore};
+use dagon_agent::{Agent, Config, SlotStore};
+pub use dagon_mcu_common::hooks::{always, SelfCheck};
 use dagon_format::header::{mcu_id, port_kind, target_tag};
 use dagon_proto::max_payload;
 use dagon_proto::payload::{mode, SlotState, StatusResp};
@@ -44,8 +45,12 @@ pub trait BoardDef {
     fn split(p: Peripherals) -> (DagonParts, Self::UserIo);
 }
 
-/// The agent of an RP2040 node, with the default hooks.
-pub type AppAgent = Agent<AppStore, DefaultHooks>;
+/// The agent of an RP2040 node; its hooks run the app's CONFIRM check.
+pub type AppAgent = Agent<AppStore, SelfCheck>;
+
+/// The guard task [`start`] gives DAGON's serving task; the app's tasks
+/// take the others.
+pub const DAGON_TASK: usize = 0;
 
 /// The agent configuration of an RP2040 node reached over USB. `role` is
 /// its topology role (`dagon_proto::payload::role`).
@@ -69,7 +74,8 @@ pub fn on_trial(st: &StatusResp) -> bool {
 /// Opens the slot store, takes over the watchdog the boot core started
 /// (fed once right away) and builds the agent. `task` is the guard task
 /// that serves the agent; `tag` and `role` are the node's image target
-/// tag and topology role.
+/// tag and topology role; `self_check` decides whether a version on trial
+/// may be confirmed.
 pub fn open<B: BoardDef, const N: usize>(
     flash: Peri<'static, FLASH>,
     watchdog: Peri<'static, WATCHDOG>,
@@ -77,6 +83,7 @@ pub fn open<B: BoardDef, const N: usize>(
     task: usize,
     tag: &str,
     role: u8,
+    self_check: fn() -> bool,
 ) -> AppAgent {
     const { assert!(B::FLASH_SIZE >= MIN_FLASH_SIZE, "the DAGON RP2040 layout needs 4 MiB of flash") };
     #[cfg(target_os = "none")]
@@ -90,7 +97,7 @@ pub fn open<B: BoardDef, const N: usize>(
     };
     guard.install(Wdt::new(watchdog), on_trial(&store.status()));
     guard.feed();
-    Agent::new(config(tag, role), store, DefaultHooks)
+    Agent::new(config(tag, role), store, SelfCheck(self_check))
 }
 
 static SERIAL: StaticCell<[u8; 16]> = StaticCell::new();
@@ -126,20 +133,21 @@ mod usb_node {
 
     /// Starts DAGON on a node whose DAGON link is USB, on the executor of
     /// `spawner`: the USB device, the agent serving task (guard task
-    /// `task`, preempting level if this executor preempts the app's) and
-    /// the watchdog feeder. `tag` is the node's image target tag; `name`
-    /// shows on the host as the USB product.
+    /// [`DAGON_TASK`]; declare it `Preempting`) and the watchdog feeder.
+    /// `tag` is the node's image target tag (also the USB product name);
+    /// `self_check` decides whether a version on trial may be confirmed.
     pub fn start<B: BoardDef, const N: usize>(
         spawner: Spawner,
         parts: DagonParts,
         guard: &'static Guard<N>,
-        task: usize,
-        tag: &str,
-        name: &'static str,
+        tag: &'static str,
+        self_check: fn() -> bool,
     ) {
-        let mut agent = open::<B, N>(parts.flash, parts.watchdog, guard, task, tag, role::NODE);
+        let task = DAGON_TASK;
+        let mut agent =
+            open::<B, N>(parts.flash, parts.watchdog, guard, task, tag, role::NODE, self_check);
         let serial = serial(&mut agent.store().flash);
-        let (device, link) = usb::new(parts.usb, name, serial);
+        let (device, link) = usb::new(parts.usb, tag, serial);
         spawner.spawn(usb::run(device).expect("task pool"));
         spawner.spawn(serve(link, agent, guard, task).expect("task pool"));
         spawner.spawn(feed(guard).expect("task pool"));

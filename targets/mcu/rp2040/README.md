@@ -46,8 +46,7 @@ rustflags = ["-C", "link-arg=--nmagic", "-C", "link-arg=-Tlink.x"]
 #![no_std]
 #![no_main]
 
-use dagon_board_waveshare_rp2040_touch_lcd_1_28::{Board, BoardDef, Io};
-use dagon_mcu_rp2040::node;
+use dagon_board_waveshare_rp2040_touch_lcd_1_28::{self as board, Board, BoardDef, Io};
 use dagon_mcu_rp2040::watchdog::{now_ms, Guard, Lease, Level, Trial};
 use embassy_executor::Spawner;
 use embassy_time::Timer;
@@ -64,23 +63,33 @@ static GUARD: Guard<2> = Guard::new(
 #[embassy_executor::main]
 async fn main(spawner: Spawner) {
     let (dagon, io) = Board::split(embassy_rp::init(Default::default()));
-    node::start::<Board, 2>(spawner, dagon, &GUARD, 0, "my-node", "my node");
+    board::start(spawner, dagon, &GUARD, "my-node", self_check);
     spawner.spawn(app(io, GUARD.lease(1)).unwrap());
+}
+
+/// Whether a version on trial may be confirmed (your health check).
+fn self_check() -> bool {
+    true
 }
 
 #[embassy_executor::task]
 async fn app(_io: Io, live: Lease) {
     loop {
-        live.feed(); // stop calling this and the watchdog resets the chip
+        live.busy(500); // a piece of work stuck past 500 ms resets the chip
+        // Your work here.
+        live.idle();
         Timer::after_millis(500).await;
     }
 }
 ```
 
-`node::start` opens the slot store, takes over the watchdog the boot core
-started, and spawns the USB device, the agent and the watchdog feeder.
-`"my-node"` is the node's image target tag (as in the topology),
-`"my node"` the USB product name. Build with `DAGON_PUBKEY` set (below);
+`board::start` (`node::start` for this board) opens the slot store, takes
+over the watchdog the boot core started, and spawns the USB device, the
+agent (guard task `node::DAGON_TASK`, 0) and the watchdog feeder.
+`"my-node"` is the node's image target tag (as in the topology; also the
+USB product name); `self_check` decides whether a version on trial may be
+confirmed. An app that keeps `embassy_rp::Peripherals` itself passes
+`dagon_pins!(p)` instead of splitting. Build with `DAGON_PUBKEY` set (below);
 `cargo build --release --features slot-b` links the same app for slot B.
 
 The serving task is declared `Preempting` even on the same executor: while
@@ -147,7 +156,7 @@ digits) and is embedded at build time. Unset, the build fails, unless
 ## Tests
 
 ```sh
-cargo test --target <host triple>
+cargo test --no-default-features --target <host triple>
 ```
 
 [`BoardDef`]: src/node.rs

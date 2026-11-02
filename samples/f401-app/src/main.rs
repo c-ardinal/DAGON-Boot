@@ -22,7 +22,7 @@
 #![no_main]
 
 use board::{Board, BoardDef};
-use dagon_agent::{Agent, DefaultHooks, SlotStore};
+use dagon_agent::{Agent, SlotStore};
 use dagon_board_nucleo_f401re as board;
 use dagon_board_nucleo_f401re::seg;
 use dagon_mcu_stm32f401re::node::{self, ACTIVE};
@@ -114,7 +114,7 @@ fn main() -> ! {
     let period = node::watchdog_period_ms(on_trial);
     node::install_watchdog(dagon.iwdg, &GUARD, period, &store);
     let (target, regs) = Board::open_link(dagon.link);
-    let agent = Agent::new(node::config(TAG), store, DefaultHooks);
+    let agent = Agent::new(node::config(TAG), store, node::SelfCheck(node::always));
 
     interrupt::USART6.set_priority(Priority::P6);
     let high = EXECUTOR_HIGH.start(interrupt::USART6);

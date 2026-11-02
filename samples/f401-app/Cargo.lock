@@ -204,6 +204,7 @@ version = "0.0.0"
 dependencies = [
  "dagon-format",
  "dagon-mcu-stm32f401re",
+ "embassy-executor",
  "embassy-stm32",
 ]
 
@@ -244,6 +245,7 @@ name = "dagon-mcu-common"
 version = "0.0.0"
 dependencies = [
  "critical-section",
+ "dagon-agent",
  "dagon-format",
  "dagon-port",
  "dagon-proto",

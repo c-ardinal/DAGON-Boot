@@ -90,8 +90,15 @@ fn main() -> ! {
     let (dagon, io) = Board::split(embassy_rp::init(Default::default()));
     step(11);
 
-    let mut agent =
-        node::open::<Board, 4>(dagon.flash, dagon.watchdog, &GUARD, task::PC, HUB_TAG, role::HUB);
+    let mut agent = node::open::<Board, 4>(
+        dagon.flash,
+        dagon.watchdog,
+        &GUARD,
+        task::PC,
+        HUB_TAG,
+        role::HUB,
+        node::always,
+    );
     let serial = node::serial(&mut agent.store().flash);
     let sub = io.sub_ctl.lines();
     let _touch_rst = hold_touch(io.touch_rst);

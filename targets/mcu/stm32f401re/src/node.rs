@@ -7,8 +7,9 @@
 //! Flash size is check-only: the layout is fixed (`layout`, the topology's
 //! `f401-default` flash map) and needs [`MIN_FLASH_SIZE`] bytes.
 
-use dagon_agent::{Agent, Config, DefaultHooks, Hooks, SlotStore, IDLE_TIMEOUT_MS};
-use dagon_core::log::LogError;
+use dagon_agent::{Agent, Config, Hooks, SlotStore, IDLE_TIMEOUT_MS};
+pub use dagon_core::log::LogError;
+pub use dagon_mcu_common::hooks::{always, SelfCheck};
 use dagon_format::header::{port_kind, target_tag, ImageHeader, HEADER_SIZE};
 use dagon_format::Version;
 use dagon_proto::payload::{mode, role};
@@ -31,7 +32,12 @@ use crate::watchdog::{Guard, Iwdg, Watch};
 /// The DAGON link: an I2C target (listening at the node's address).
 pub type I2cTarget = I2c<'static, Async, MultiMaster>;
 pub type Store = KindSStore<F401Flash<'static>>;
-pub type AppAgent = Agent<Store, DefaultHooks>;
+/// The agent of a node on this MCU; its hooks run the app's CONFIRM check.
+pub type AppAgent = Agent<Store, SelfCheck>;
+
+/// The guard task [`start`] gives DAGON's serving task; the app's tasks
+/// take the others.
+pub const DAGON_TASK: usize = 0;
 
 /// Slot this build is linked for (`slot-b`).
 pub const ACTIVE: u8 = if cfg!(feature = "slot-b") { 1 } else { 0 };
@@ -136,21 +142,24 @@ pub fn config(tag: &str) -> Config {
 
 /// Starts DAGON on the executor of `spawner`: opens the store, takes over
 /// the watchdog, opens the link and spawns the serving task (guard task
-/// `task`) and a feeder. Fails if the state log is unreadable (nothing is
+/// [`DAGON_TASK`]; declare it `Preempting`) and a feeder. `tag` is the
+/// node's image target tag; `self_check` decides whether a version on
+/// trial may be confirmed. Fails if the state log is unreadable (nothing is
 /// started then; the watchdog resets the chip).
 pub fn start<B: BoardDef, const N: usize>(
     spawner: Spawner,
     parts: DagonParts<B::Link>,
     guard: &'static Guard<N>,
-    task: usize,
     tag: &str,
+    self_check: fn() -> bool,
 ) -> Result<(), LogError> {
+    let task = DAGON_TASK;
     const { assert!(B::FLASH_SIZE >= MIN_FLASH_SIZE, "the DAGON F401 layout needs 512 KiB of flash") };
     let store = open_store(parts.flash)?;
     let period = watchdog_period_ms(on_trial(&store));
     install_watchdog(parts.iwdg, guard, period, &store);
     let (target, regs) = B::open_link(parts.link);
-    let agent = Agent::new(config(tag), store, DefaultHooks);
+    let agent = Agent::new(config(tag), store, SelfCheck(self_check));
     spawner.spawn(serve(agent, target, regs, guard, task).expect("task pool"));
     spawner.spawn(feed(guard).expect("task pool"));
     Ok(())

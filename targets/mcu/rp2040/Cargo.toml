@@ -7,10 +7,15 @@ publish = false
 build = "build.rs"
 
 # DAGON MCU package for the RP2040. Without features it is host-testable:
-#   cargo test --target <host triple>
+#   cargo test --no-default-features --target <host triple>
 [workspace]
 
+[package.metadata.dagon]
+mcu = "rp2040"
+
 [features]
+# usb by default: a generated node names this package without features.
+default = ["usb"]
 # The embassy-rp parts: flash port, watchdog guard, slot store, link
 # drivers, sub-MCU control lines, and the verifying key from DAGON_PUBKEY.
 hal = ["dep:embassy-rp", "dep:embassy-time", "dep:dagon-agent", "dep:static_cell", "dep:portable-atomic"]

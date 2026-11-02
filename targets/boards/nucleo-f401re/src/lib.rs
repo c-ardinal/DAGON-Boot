@@ -15,14 +15,36 @@
 //! the ST-LINK UART. Adjust [`Board::split`] once the board is known.
 //!
 //! [`Board`] implements `BoardDef`: DAGON takes the flash, the IWDG and the
-//! I2C3 target; the app gets [`Io`]. This package binds the I2C3 and DMA1
-//! stream 2/4 interrupts itself.
+//! I2C3 target; the app gets [`Io`]. An app that keeps the chip's
+//! peripherals itself moves out only DAGON's with `dagon_pins!` and calls
+//! `start`. This package binds the I2C3 and DMA1 stream 2/4 interrupts
+//! itself.
 #![no_std]
 
 pub mod seg;
 
 #[cfg(feature = "hal")]
 pub use hal::*;
+
+/// Moves DAGON's peripherals (flash, IWDG, the I2C3 link with its DMA
+/// streams) out of `embassy_stm32::Peripherals`; the rest stays the app's.
+#[cfg(feature = "hal")]
+#[macro_export]
+macro_rules! dagon_pins {
+    ($p:ident) => {
+        $crate::DagonParts {
+            flash: $p.FLASH,
+            iwdg: $p.IWDG,
+            link: $crate::Link {
+                i2c: $p.I2C3,
+                scl: $p.PA8,
+                sda: $p.PB4,
+                tx_dma: $p.DMA1_CH4,
+                rx_dma: $p.DMA1_CH2,
+            },
+        }
+    };
+}
 
 /// The node's 7-bit I2C target address (the STM32 ROM loader keeps 0x39).
 pub const I2C_ADDR: u8 = 0x42;
@@ -31,7 +53,9 @@ pub const FLASH_SIZE: usize = 512 * 1024;
 
 #[cfg(feature = "hal")]
 mod hal {
-    use dagon_mcu_stm32f401re::node::{DagonParts, I2cTarget};
+    pub use dagon_mcu_stm32f401re::node::DagonParts;
+    use dagon_mcu_stm32f401re::node::{I2cTarget, LogError};
+    use dagon_mcu_stm32f401re::watchdog::Guard;
     pub use dagon_mcu_stm32f401re::BoardDef;
     use embassy_stm32::gpio::{AnyPin, Level, Output, Speed};
     use embassy_stm32::i2c::{self, I2c, SlaveAddrConfig};
@@ -54,13 +78,26 @@ mod hal {
 
     pub struct Board;
 
+    /// Starts DAGON on this board (I2C target link; guard task
+    /// `dagon_mcu_stm32f401re::node::DAGON_TASK` serves it): see
+    /// `dagon_mcu_stm32f401re::node::start`.
+    pub fn start<const N: usize>(
+        spawner: embassy_executor::Spawner,
+        parts: DagonParts<Link>,
+        guard: &'static Guard<N>,
+        tag: &'static str,
+        self_check: fn() -> bool,
+    ) -> Result<(), LogError> {
+        dagon_mcu_stm32f401re::node::start::<Board, N>(spawner, parts, guard, tag, self_check)
+    }
+
     /// The DAGON link's peripherals and pins.
     pub struct Link {
-        i2c: Peri<'static, I2C3>,
-        scl: Peri<'static, PA8>,
-        sda: Peri<'static, PB4>,
-        tx_dma: Peri<'static, DMA1_CH4>,
-        rx_dma: Peri<'static, DMA1_CH2>,
+        pub i2c: Peri<'static, I2C3>,
+        pub scl: Peri<'static, PA8>,
+        pub sda: Peri<'static, PB4>,
+        pub tx_dma: Peri<'static, DMA1_CH4>,
+        pub rx_dma: Peri<'static, DMA1_CH2>,
     }
 
     /// What the app gets on this board.

@@ -14,8 +14,8 @@ Full arguments: `$ARGUMENTS`
 
 | Input | Meaning |
 |---|---|
-| `mcu` | MCU name, for example `esp32s3`. Used as the `targets/<mcu>-*` prefix. |
-| `board` | Board name, for example `m5stopwatch`. |
+| `mcu` | MCU id from the topology board table, for example `esp32s3`. The MCU package is `targets/mcu/<mcu>/` (crate `dagon-mcu-<mcu>`). |
+| `board` | Board id from the topology board table, for example `m5stopwatch`. The board package is `targets/boards/<board>/` (crate `dagon-board-<board>`). |
 | `kind` | Port kind, `S` or `V`, as defined in `crates/dagon-port`. Stop and ask if it is neither. |
 | `--max-hours N` | Wall-clock limit. Default 6, or 3 with `--rerun`. |
 | `--max-iterations N` | Iteration limit. Default 30. |
@@ -43,7 +43,7 @@ Full arguments: `$ARGUMENTS`
    Shell commands that write must not use command substitution (`$(...)`, backticks);
    the guard denies them during a port session.
 3. If this is an ESP32-S3 target, delegate implementation work to the `port-engineer` agent;
-   otherwise implement under `targets/<mcu>-<board>/` yourself under the same rules.
+   otherwise implement in the MCU and board packages yourself under the same rules.
 
 ## Steps
 
@@ -52,10 +52,16 @@ Full arguments: `$ARGUMENTS`
    erase granularity, write alignment), boot method (reset vector or ROM boot flow, boot
    mode pins) and link layout (memory regions the linker script needs). Every row cites
    its source (document, section or page, URL). If a value cannot be found, ask the human.
-2. **Create the target.** Create `targets/<mcu>-<board>/` as a standalone crate with its own
-   `[workspace]` table (target crates are excluded from the root workspace; do not edit the
-   root `Cargo.toml`). Depend on shared crates by path, for example
-   `dagon-port = { path = "../../crates/dagon-port" }`.
+2. **Create the packages.** Two standalone crates, each with its own `[workspace]` table
+   (do not edit the root `Cargo.toml`):
+   - the MCU package `targets/mcu/<mcu>/` (`dagon-mcu-<mcu>`): everything that depends on the
+     chip, not the board. If it already exists (a re-run, or a new board on a supported MCU),
+     change it only where the chip work needs it;
+   - the board package `targets/boards/<board>/` (`dagon-board-<board>`): pins, which link is
+     wired where, flash size, extras such as an IO expander or a display reset.
+   Depend on shared crates by path, for example
+   `dagon-port = { path = "../../../crates/dagon-port" }`. A sample app using them goes in
+   `samples/<mcu>-app/`.
 3. **Implement the six traits** from `crates/dagon-port` for kind `$kind`, plus the linker
    script and boot glue the table requires. Build until clean.
 4. **Simulator.** Ask `conformance-judge` to run `dagon sim` scenarios S1 and S2 with this
@@ -65,7 +71,7 @@ Full arguments: `$ARGUMENTS`
 6. **Fix loop.** For each failing test, read the judge's reason, fix the target, commit on
    the run branch (`fix(<mcu>): <what> for <test id>`), and go back to step 4. Each pass
    through steps 4-6 is one iteration.
-7. After every iteration, write `targets/<mcu>-<board>/port-progress.json`:
+7. After every iteration, write `targets/boards/<board>/port-progress.json`:
    `{"run": "<RUN>", "iteration": N, "elapsed_s": S, "passed": P, "total": 12}` and keep the
    result file `dagon conform` wrote for that iteration.
 
@@ -82,7 +88,7 @@ Stop when the first of these holds, then report to the human:
 
 1. Tag the final commit locally: `git tag port-$RUN-pass` on success, `port-$RUN-stop` otherwise.
    Do not push the branch or the tag.
-2. Write `targets/<mcu>-<board>/PORT_REPORT.md`: inputs, the layout table with sources,
+2. Write `targets/boards/<board>/PORT_REPORT.md`: inputs, the layout table with sources,
    iteration count, total time, per-iteration fix history (test id, judge reason, change,
    commit), final judge totals, and open issues. Commit it on the run branch.
 3. Report to the human: outcome, iterations, elapsed time, tag name, report path.

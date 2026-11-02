@@ -150,7 +150,7 @@ fn generate(
 ) -> Result<Outcome, String> {
     let mut messages = vec![json!({
         "role": "user",
-        "content": format!("Board description:\n\n{description}"),
+        "content": [{ "type": "text", "text": format!("Board description:\n\n{description}") }],
     })];
     let mut answers = Vec::new();
     let mut last_errors = String::new();
@@ -201,6 +201,15 @@ fn generate(
 }
 
 fn request(model: &str, messages: &[Value]) -> Value {
+    // A cache breakpoint on the newest block bills only the delta next round.
+    let mut messages = messages.to_vec();
+    if let Some(block) = messages
+        .last_mut()
+        .and_then(|m| m["content"].as_array_mut())
+        .and_then(|c| c.last_mut())
+    {
+        block["cache_control"] = json!({ "type": "ephemeral" });
+    }
     let system = format!(
         "{INSTRUCTIONS}\n\n<schema file=\"schema.rs\">\n{SCHEMA_RS}</schema>\n\n\
          <board_table file=\"boards.rs\">\n{BOARDS_RS}</board_table>\n\n\
@@ -267,6 +276,9 @@ fn post_messages(base: &str, key: &str, body: &Value) -> Result<Value, String> {
     let agent: ureq::Agent = ureq::Agent::config_builder()
         .timeout_global(Some(HTTP_TIMEOUT))
         .http_status_as_error(false)
+        // A redirect would carry x-api-key to another host: never follow one.
+        .max_redirects(0)
+        .https_only(base.starts_with("https://"))
         .build()
         .into();
     let mut resp = agent
@@ -277,6 +289,11 @@ fn post_messages(base: &str, key: &str, body: &Value) -> Result<Value, String> {
         .send(body.to_string())
         .map_err(|e| format!("Claude API request failed: {e}"))?;
     let status = resp.status();
+    if status.is_redirection() {
+        return Err(format!(
+            "Claude API answered with a redirect (HTTP {status}); not followed"
+        ));
+    }
     let text = resp
         .body_mut()
         .read_to_string()
@@ -454,6 +471,34 @@ mod tests {
         assert!(req.contains("x-api-key: sk-test"));
         assert!(req.contains(&format!("anthropic-version: {API_VERSION}")));
         assert!(req.ends_with("{\"model\":\"m\"}"));
+    }
+
+    #[test]
+    fn http_redirect_is_not_followed() {
+        let never = TcpListener::bind("127.0.0.1:0").unwrap();
+        never.set_nonblocking(true).unwrap();
+        let target = format!("http://{}/v1/messages", never.local_addr().unwrap());
+        let (base, h) = mock_server(&format!("302 Found\r\nlocation: {target}"), "");
+        let e = post_messages(&base, "sk-secret", &json!({})).unwrap_err();
+        h.join().unwrap();
+        assert!(e.contains("302") && e.contains("not followed"), "{e}");
+        assert!(!e.contains("sk-secret"));
+        assert!(never.accept().is_err(), "redirect target was contacted");
+    }
+
+    #[test]
+    fn last_message_gets_cache_breakpoint_only_in_request() {
+        let msg = |role: &str, t: &str| json!({ "role": role, "content": [{ "type": "text", "text": t }] });
+        let msgs = vec![msg("user", "a"), msg("assistant", "b"), msg("user", "c")];
+        let r = request("m", &msgs);
+        assert_eq!(
+            r["messages"][2]["content"][0]["cache_control"]["type"],
+            "ephemeral"
+        );
+        assert!(r["messages"][0]["content"][0]
+            .get("cache_control")
+            .is_none());
+        assert!(msgs[2]["content"][0].get("cache_control").is_none());
     }
 
     #[test]

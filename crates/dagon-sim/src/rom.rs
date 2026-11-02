@@ -23,7 +23,7 @@
 //! frames while a command is open resets the loader (the command is lost).
 
 use crate::flash::SimFlash;
-use dagon_port::Flash;
+use dagon_port::{BusError, Flash};
 use std::collections::VecDeque;
 
 pub const ROM_ADDR: u8 = 0x39;
@@ -86,6 +86,11 @@ pub struct SimRom {
     pub write_ms: u64,
     /// Self-resets caused by the frame timeout.
     pub timeouts: u32,
+    /// Reads longer than the frame they got (always counted).
+    pub over_reads: u32,
+    /// Off (default): bytes past the frame read as 0xFF. On: such a read
+    /// fails, so host tests can prove a driver never over-reads.
+    pub strict_reads: bool,
     expect: Expect,
     out: VecDeque<Out>,
     last_ms: u64,
@@ -101,6 +106,8 @@ impl Default for SimRom {
             erase_ms_per_kib: 16,
             write_ms: 4,
             timeouts: 0,
+            over_reads: 0,
+            strict_reads: false,
             expect: Expect::Command,
             out: VecDeque::new(),
             last_ms: 0,
@@ -149,8 +156,10 @@ impl SimRom {
         }
     }
 
-    /// Host read transaction.
-    pub fn read(&mut self, buf: &mut [u8], now_ms: u64) {
+    /// Host read transaction. Reading past the end of the frame counts in
+    /// [`SimRom::over_reads`]; with [`SimRom::strict_reads`] it also fails
+    /// with `Nack` (the frame is still consumed).
+    pub fn read(&mut self, buf: &mut [u8], now_ms: u64) -> Result<(), BusError> {
         self.frame_start(now_ms);
         let frame = match self.out.front() {
             Some(Out::AckAt(t)) if now_ms < *t => vec![BUSY],
@@ -164,6 +173,13 @@ impl SimRom {
         buf.fill(0xFF);
         let n = buf.len().min(frame.len());
         buf[..n].copy_from_slice(&frame[..n]);
+        if buf.len() > frame.len() {
+            self.over_reads += 1;
+            if self.strict_reads {
+                return Err(BusError::Nack);
+            }
+        }
+        Ok(())
     }
 
     /// Queues ACK, then each data frame.
@@ -335,7 +351,7 @@ mod tests {
                 rom.write(flash, f, now);
                 *now += 1;
                 let mut b = [0u8];
-                rom.read(&mut b, *now);
+                rom.read(&mut b, *now).unwrap();
                 b[0]
             })
             .collect()
@@ -384,7 +400,7 @@ mod tests {
         );
         assert_eq!(got, [ACK, ACK, BUSY]);
         let mut b = [0u8];
-        rom.read(&mut b, now + 2048 + 900);
+        rom.read(&mut b, now + 2048 + 900).unwrap();
         assert_eq!(b, [ACK], "timeout counts from the end of the erase");
     }
 
@@ -397,11 +413,11 @@ mod tests {
         let (mut flash, mut now) = (dirty_f401(), 0);
         rom.write(&mut flash, &[0x00, 0xFF], &mut now);
         let mut b = [0u8; 9];
-        rom.read(&mut b[..1], now);
+        rom.read(&mut b[..1], now).unwrap();
         assert_eq!(b[0], ACK);
-        rom.read(&mut b, now);
+        rom.read(&mut b, now).unwrap();
         assert_eq!(b, [6, 0x11, 0x00, 0x01, 0x02, 0x11, 0x31, 0x44, 0xFF]);
-        rom.read(&mut b[..1], now);
+        rom.read(&mut b[..1], now).unwrap();
         assert_eq!(b[0], ACK);
         assert_eq!(
             frames(&mut rom, &mut flash, &mut now, &[&[0x45, 0xBA]]),
@@ -418,7 +434,7 @@ mod tests {
         let (mut rom, mut flash, mut now) = (SimRom::default(), dirty_f401(), 0);
         let read = |rom: &mut SimRom, n: usize| {
             let mut b = vec![0u8; n];
-            rom.read(&mut b, 0);
+            rom.read(&mut b, 0).unwrap();
             b
         };
 
@@ -443,5 +459,46 @@ mod tests {
         assert_eq!(read(&mut rom, 1), [ACK]);
         assert_eq!(read(&mut rom, 2), [0x00, 0xFF]);
         assert_eq!(read(&mut rom, 2), [NACK, 0xFF]);
+
+        // Get data cut after the version byte: the command codes are lost.
+        rom.write(&mut flash, &[0x00, 0xFF], &mut now);
+        assert_eq!(read(&mut rom, 1), [ACK]);
+        assert_eq!(read(&mut rom, 2), [COMMANDS.len() as u8, 0x11]);
+        assert_eq!(read(&mut rom, 1), [ACK], "next frame, not a command code");
+
+        // Get Version read as one 3-byte transaction yields only the ACK
+        // frame; the version and the final ACK are separate frames.
+        rom.write(&mut flash, &[0x01, 0xFE], &mut now);
+        assert_eq!(read(&mut rom, 3), [ACK, 0xFF, 0xFF]);
+        assert_eq!(read(&mut rom, 1), [0x11]);
+        assert_eq!(read(&mut rom, 1), [ACK]);
+        assert_eq!(read(&mut rom, 1), [NACK]);
+        assert_eq!(rom.over_reads, 4);
+    }
+
+    #[test]
+    fn strict_reads_fail_and_count_over_reads() {
+        let mut rom = SimRom {
+            strict_reads: true,
+            ..SimRom::default()
+        };
+        let (mut flash, mut now) = (dirty_f401(), 0);
+        let mut b = [0u8; 3];
+
+        // Frame-exact driver: Get Version as 1 + 1 + 1 byte reads.
+        rom.write(&mut flash, &[0x01, 0xFE], &mut now);
+        for want in [ACK, 0x11, ACK] {
+            rom.read(&mut b[..1], now).unwrap();
+            assert_eq!(b[0], want);
+        }
+        assert_eq!(rom.over_reads, 0);
+
+        // Over-read: fails, is counted, and the frame is still consumed.
+        rom.write(&mut flash, &[0x01, 0xFE], &mut now);
+        assert_eq!(rom.read(&mut b, now), Err(BusError::Nack));
+        assert_eq!(b, [ACK, 0xFF, 0xFF]);
+        assert_eq!(rom.over_reads, 1);
+        rom.read(&mut b[..1], now).unwrap();
+        assert_eq!(b[0], 0x11);
     }
 }

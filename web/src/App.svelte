@@ -3,7 +3,7 @@
   import { ANNOUNCE, HUB, HUB_NAME, NODE, PRODUCT, SKIP, STEP } from './app/copy.ts';
   import { ConnectError, chooseAndOpen, hello } from './app/connect.ts';
   import { bandOf, focusOf, hubOf, statusOf, type View } from './app/connectView.ts';
-  import { versionText } from './serial/hello.ts';
+  import { versionText } from './wasm/dagon.ts';
   import { MockTransport } from './serial/mock.ts';
   import { WebSerialTransport, type Transport } from './serial/transport.ts';
   import Unsupported from './Unsupported.svelte';

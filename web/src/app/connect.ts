@@ -1,5 +1,6 @@
 import { CMD, FLAG_RESP, MAX_PAYLOAD_USB, PROTO_VERSION, STATUS_OK, encodeFrame, parseFrame } from '../serial/frame.ts';
-import { decodeHelloResp, encodeHelloReq, type HelloResp } from '../serial/hello.ts';
+import type { HelloResp } from '../serial/hello.ts';
+import { decodeHelloResp, encodeHelloReq } from '../wasm/dagon.ts';
 import { WebSerialTransport, type Transport } from '../serial/transport.ts';
 
 // ponytail: keep equal to dagon-host's HELLO timeout once that crate defines it.

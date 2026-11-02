@@ -2,5 +2,6 @@ import { mount } from 'svelte';
 import './styles/tokens.css';
 import './styles/base.css';
 import App from './App.svelte';
+import { initDagon } from './wasm/dagon.ts';
 
-mount(App, { target: document.getElementById('app')! });
+void initDagon().then(() => mount(App, { target: document.getElementById('app')! }));

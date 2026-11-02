@@ -14,5 +14,6 @@ export default defineConfig({
   preview: { host: '127.0.0.1' },
   test: {
     include: ['src/**/*.test.ts'],
+    setupFiles: ['src/wasm/test-setup.ts'],
   },
 });

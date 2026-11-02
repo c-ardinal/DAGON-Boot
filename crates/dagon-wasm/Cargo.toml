@@ -1,0 +1,15 @@
+[package]
+name = "dagon-wasm"
+edition.workspace = true
+license.workspace = true
+version.workspace = true
+publish = false
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+dagon-format = { path = "../dagon-format" }
+dagon-proto = { path = "../dagon-proto" }
+dagon-topology = { path = "../dagon-topology" }
+wasm-bindgen = "0.2.130"

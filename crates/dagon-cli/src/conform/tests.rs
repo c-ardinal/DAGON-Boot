@@ -95,6 +95,11 @@ impl HubSim {
         if !is_conf_run(r.inner, max_payload::I2C) {
             return None;
         }
+        assert!(
+            r.timeout_ms as u32 >= dagon_conform::timeout::CONF_RUN_MS,
+            "CONF_RUN relayed with {} ms",
+            r.timeout_ms
+        );
         let mut hub = self.hub.borrow_mut();
         hub.advance_ms(dagon_sim::hub::PC_ROUND_TRIP_MS);
         let inner = conf_run(hub.i2c_node(r.addr)?, r.inner, max_payload::I2C);

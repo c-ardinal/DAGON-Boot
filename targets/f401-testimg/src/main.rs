@@ -155,7 +155,9 @@ fn flat_binary(elf: &[u8], base: u32) -> Res<Vec<u8>> {
 }
 
 /// Face A with PROVISION + CONFIRMED for the confirmed image and, if given,
-/// SLOT_PENDING for the pending image.
+/// SLOT_PENDING for the pending image, followed by an erased face B (the file
+/// spans both sectors, so flashing it also blanks a leftover face B whose
+/// higher generation would otherwise win over the new face A).
 fn log(out: &str, confirmed: &str, pending: Option<&str>) -> Res<()> {
     let mut face = FaceHeader { generation: 1 }.to_bytes().to_vec();
     let c = read_ref(confirmed)?;
@@ -179,9 +181,11 @@ fn log(out: &str, confirmed: &str, pending: Option<&str>) -> Res<()> {
         };
         face.extend_from_slice(&r.to_bytes());
     }
+    let [a, b] = layout::LOG.faces;
+    face.resize((b - a + layout::LOG.face_len) as usize, 0xFF);
     std::fs::write(out, face).map_err(|e| format!("{out}: {e}"))?;
     println!(
-        "{out}: flash at {:#010x} (state log face A)",
+        "{out}: flash at {:#010x} (state log face A, face B erased)",
         layout::LOG.faces[0]
     );
     Ok(())

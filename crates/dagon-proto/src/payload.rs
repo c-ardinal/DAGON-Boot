@@ -30,6 +30,14 @@ pub mod reboot_mode {
     pub const NORMAL: u8 = 0;
 }
 
+/// ENTER_ROM `method`.
+pub mod rom_method {
+    /// Set FORCE_DOWNLOAD_BOOT, then software reset.
+    pub const FORCE_DOWNLOAD_BOOT: u8 = 1;
+    /// Ask the PMIC to restart the MCU in download mode.
+    pub const PMIC: u8 = 2;
+}
+
 /// RELAY `link`.
 pub mod link {
     pub const I2C0: u8 = 1;
@@ -499,6 +507,27 @@ impl SubCtl {
     }
 }
 
+/// ENTER_ROM request (added after G1, owner-approved, additive). Response:
+/// status only; the node enters its ROM loader after sending it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct EnterRom {
+    pub method: u8,
+}
+
+impl EnterRom {
+    pub fn parse(b: &[u8]) -> Result<Self, Status> {
+        let mut r = Rd(b);
+        let v = EnterRom { method: r.u8()? };
+        if !matches!(v.method, rom_method::FORCE_DOWNLOAD_BOOT | rom_method::PMIC) {
+            return Err(Status::Arg);
+        }
+        r.end().map(|_| v)
+    }
+    pub fn encode(&self, out: &mut [u8]) -> Result<usize, FrameError> {
+        Ok(Wr::new(out).u8(self.method)?.done())
+    }
+}
+
 /// I2C_RAW request (to the ROM loader at 0x39). Response body: the bytes read.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct I2cRaw<'a> {
@@ -630,5 +659,14 @@ mod tests {
         };
         assert!(show.encode(&mut b).is_err());
         assert_eq!(SubCtl::parse(&[3, 0]), Err(Status::Arg));
+        assert_eq!(
+            EnterRom::parse(&[2]),
+            Ok(EnterRom {
+                method: rom_method::PMIC
+            })
+        );
+        for bad in [&[0][..], &[3], &[], &[1, 0]] {
+            assert_eq!(EnterRom::parse(bad), Err(Status::Arg));
+        }
     }
 }

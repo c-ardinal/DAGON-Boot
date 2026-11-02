@@ -1,15 +1,24 @@
 <script lang="ts">
   import { tick } from 'svelte';
   import { bandOf } from './app/band.ts';
-  import { ANNOUNCE, BUTTON, CANVAS, DEFINE, NODE, ORDER, PRODUCT, SKIP, STEP } from './app/copy.ts';
+  import { ANNOUNCE, BAND, BUTTON, CANVAS, DEFINE, DIFF, MODE, NODE, ORDER, PRODUCT, SAVE, SKIP, STEP } from './app/copy.ts';
   import { chooseAndOpen } from './app/connect.ts';
   import { hubOf, view, type Action } from './app/machine.ts';
   import { Operate, type Progress } from './app/operate.svelte.ts';
   import Graph, { type Chip, type Dot } from './graph/Graph.svelte';
   import Band from './screens/Band.svelte';
   import Detail from './screens/Detail.svelte';
-  import { Define } from './app/define/define.svelte.ts';
-  import { fromYaml } from './app/define/model.ts';
+  import { Define, type Operable } from './app/define/define.svelte.ts';
+  import { topoDiff } from './app/define/diff.ts';
+  import { fromYaml, type Topo } from './app/define/model.ts';
+  import { problemChip } from './app/define/problems.ts';
+  import { DESK_DEMO, DESK_DEMO_YAML } from './app/sample.ts';
+  import { Start, type StartChoice } from './app/start.svelte.ts';
+  import Menu from './screens/Menu.svelte';
+  import Restart from './screens/Restart.svelte';
+  import Unsaved from './screens/Unsaved.svelte';
+  import { Autosave } from './app/define/autosave.svelte.ts';
+  import StartScreen from './screens/Start.svelte';
   import Inspector from './screens/define/Inspector.svelte';
   import NodeList from './screens/define/NodeList.svelte';
   import Problems from './screens/define/Problems.svelte';
@@ -55,27 +64,146 @@
     },
     timer: true,
     clock: stand?.clock,
-    fetchAsset: stand?.fetchAsset,
+    // The project's files through dagon serve only (stand-ins in development); nothing public.
+    latest: async () => (cli.state === 'ready' ? await cli.latestRelease() : null) ?? (await stand?.latest?.()) ?? null,
+    bootcore: async (id) => (cli.state === 'ready' ? await cli.bootcore(id) : null) ?? (await stand?.bootcore?.(id)) ?? null,
   });
 
-  /** `dagon serve` (stage 3): K0 on a public page, its features on the page serve hands out. */
+  /** `dagon serve` (§8): the page is always its page; K0/K3 when it cannot be reached. */
   const cli = new Cli();
+  /** The 定義 document: the project's 構成 as edited (§5.2: its YAML is the one source of truth). */
+  const d = new Define();
   cli.onDevice = (need) => (need ? op.handOver() : op.cliReturned());
+
+  /** SC-S0 until a project is open (§7.2b); then 定義 and 運用. */
+  let screen = $state<'start' | 'work'>('start');
+  const start = new Start({
+    cli,
+    // serve switched to the project's keys (Cli refreshed hello): the page verifies with that key from now on.
+    opened: async () => {
+      useReleaseKey();
+      await openWork();
+    },
+    // Development stand-ins (?mock, ?sim) have no serve: an unsaved 構成 on the page.
+    local: dev ? (c) => startLocal(c) : null,
+  });
+  /** `#mode=operate` / `#mode=define` (§5.2): the mode a reload or a shared URL comes back to. */
+  const wantMode = /(?:^|[#&])mode=(operate|define)\b/.exec(globalThis.location?.hash ?? '')?.[1] as 'operate' | 'define' | undefined;
+
   /**
    * The release key: dagon serve writes the developer's key into the page (meta) and /v1/hello;
-   * a page it serves verifies with that key only, and with none until it is there. A standalone
-   * build keeps the key it was built with.
+   * a page it serves verifies with that key only, and with none until it is there.
    */
-  void cli.connect().then(async () => {
-    await dagonReady();
-    if (cli.state === 'none') return;
-    // Under serve the page opens the project's 構成 (dagon.toml's topology) at start.
-    const yaml = await cli.loadTopology();
-    if (yaml) d.importYaml(yaml);
-    require_release_key();
-    const key = document.querySelector<HTMLMetaElement>('meta[name="dagon-release-key"]')?.content ?? cli.hello?.release_key;
+  void cli
+    .connect()
+    .then(async () => {
+      await dagonReady();
+      if (cli.state === 'none') return;
+      require_release_key();
+      useReleaseKey(document.querySelector<HTMLMetaElement>('meta[name="dagon-release-key"]')?.content);
+      if (cli.state !== 'ready') return;
+      // A project open in serve opens at once; without one the page stays on SC-S0.
+      if (cli.has('project')) {
+        const p = await cli.project();
+        start.recent = (p.recent ?? []).slice(0, 5);
+        if (p.open) await openWork(wantMode);
+      } else if (await cli.loadTopology()) {
+        await openWork(wantMode);
+      }
+    })
+    .catch(() => undefined)
+    .finally(() => (start.loading = false));
+
+  /** The key releases are verified with: serve's (hello, or the page's meta at first); never a secret. */
+  function useReleaseKey(meta?: string) {
+    const key = cli.hello?.release_key ?? meta;
     if (key) set_release_key(key);
-  }).catch(() => undefined);
+  }
+
+  /** The open project's 構成 (its YAML through serve): 運用 when it is updatable as it is, else 定義 (§7.2b). */
+  // SC-S0 is reached only through `leave` (menu, 最初からやり直す), so no unsaved edit is here when a project opens.
+  async function openWork(want?: 'operate' | 'define') {
+    const yaml = await cli.loadTopology().catch(() => null);
+    local = false;
+    op.reset();
+    d.reset();
+    if (yaml) {
+      try {
+        d.load(fromYaml(yaml));
+      } catch {
+        d.unreadable = true;
+      }
+    }
+    enterWork(want);
+  }
+
+  function enterWork(want?: 'operate' | 'define') {
+    start.clear();
+    screen = 'work';
+    menuOpen = false;
+    const m = want !== 'define' && d.operable === 'ok' ? 'operate' : 'define';
+    mode = 'define';
+    switchMode(m);
+    // #mode=operate on a 構成 that cannot be operated: 定義 with the reason (§5.2).
+    if (want === 'operate' && m === 'define') lock(d.operable);
+  }
+
+  /** Without serve (development stand-ins): an empty 構成 or the sample, not saved. */
+  function startLocal(c: 'new' | 'sample') {
+    local = true;
+    op.reset();
+    d.reset();
+    if (c === 'sample') d.load(fromYaml(DESK_DEMO_YAML, Object.fromEntries(DESK_DEMO.nodes.map((n) => [n.id, n.name]))));
+    enterWork('define');
+  }
+
+  /** SC-M: the menu under the header, and its one confirmation (M53). */
+  let menuOpen = $state(false);
+  let restartOpen = $state(false);
+  let restartButton = $state<HTMLButtonElement>();
+  /** Menu 新しく作る / 見本から新しく作る / 開く: the 構成 is saved first (or the dialog asks). */
+  function toStart(c: StartChoice) {
+    menuOpen = false;
+    void autosave.leave(() => goStart(c));
+  }
+
+  function goStart(c: StartChoice) {
+    cliPanel = null;
+    screen = 'start';
+    void start.refresh();
+    void start.choose(c);
+  }
+
+  /** "最初からやり直す": the page's records go and SC-S0 opens; the project's files stay (§7.20). */
+  function restart() {
+    restartOpen = false;
+    menuOpen = false;
+    void autosave.leave(restartNow);
+  }
+
+  function restartNow() {
+    local = false;
+    op.reset();
+    d.reset();
+    cli.clearJobs();
+    cliPanel = null;
+    start.clear();
+    mode = 'define';
+    screen = 'start';
+    void start.refresh();
+  }
+
+  function cancelRestart() {
+    restartOpen = false;
+    void tick().then(() => restartButton?.focus());
+  }
+
+  /** 運用 pressed while it cannot be entered: M68 / M69 (or 未保存) in the band until the 構成 changes. */
+  let locked = $state<{ why: Operable | 'unsaved'; at: number } | null>(null);
+  const lockShown = $derived(locked && locked.at === d.revision ? locked.why : null);
+  function lock(why: Operable | 'unsaved') {
+    locked = { why, at: d.revision };
+  }
   const cliLabel = $derived(cli.state === 'ready' ? CLI_STATE.ready(cli.hello?.cli ?? '') : CLI_STATE[cli.state]);
   let cliPanel = $state<'link' | 'jobs' | 'release' | 'project' | 'flash' | null>(null);
   const runningJobs = $derived(cli.jobs.filter((j) => j.state === 'running' || j.state === 'queued' || j.state === 'question').length);
@@ -84,38 +212,82 @@
   });
 
   /** "このリリースを運用で使う" (X03): the release goes to the operate mode's file check. */
-  function useRelease(name: string, bytes: Uint8Array) {
+  async function useRelease(name: string, bytes: Uint8Array) {
+    if (!(await autosave.ready())) return lock('unsaved');
     switchMode('operate');
     op.takeFile(name, bytes);
   }
 
   /** 運用 / 定義 (§5). The define document goes to the operate canvas when leaving define mode. */
-  // The page opens on 定義: 運用 needs a 構成 the 親機 holds (owner decision 11/3).
   let mode = $state<'operate' | 'define'>('define');
-  const d = new Define();
   const busyStates = ['L19', 'L20', 'L21', 'L22', 'L24'];
   const modeLocked = $derived(busyStates.includes(op.state));
 
   function switchMode(m: 'operate' | 'define') {
-    if (m === 'define' && d.doc.topo.nodes.length === 0 && op.config) {
-      d.apply(fromYaml(op.config.yaml, Object.fromEntries(op.config.nodes.map((n) => [n.id, n.name]))));
+    // 運用 only with a 構成 that has no problems and is updatable (§5.2); the YAML decides, never the 親機.
+    if (m === 'operate' && d.operable !== 'ok') return lock(d.operable);
+    // ... and only the saved one, the 構成 build, sign and release use too.
+    if (m === 'operate' && autosave.pending) {
+      void autosave.ready().then((ok) => (ok ? enterMode(m) : lock('unsaved')));
+      return;
     }
-    if (m === 'operate' && d.doc.topo.nodes.length) op.useConfig(d.config);
+    enterMode(m);
+  }
+
+  function enterMode(m: 'operate' | 'define') {
+    // A file checked against another 構成 (L16–L18, e.g. after "ファイルの構成を取り込む") is checked again.
+    const recheck = m === 'operate' && op.file !== null && ['L16', 'L17', 'L18'].includes(op.state) && op.config?.yaml !== d.config.yaml;
+    if (m === 'operate') op.useConfig(d.config);
     mode = m;
     d.status = ANNOUNCE.A22(m === 'define');
+    if (recheck && op.file) op.takeFile(op.file.name, op.file.bytes);
   }
+
+  $effect(() => {
+    if (screen === 'work') history.replaceState(history.state, '', `${location.pathname}${location.search}#mode=${mode}`);
+  });
 
   /** "親機へ送る" / "つないで、親機へ送る" from define mode: the operate session sends the document. */
   async function sendDefined() {
+    // The 親機 gets the saved 構成 only.
+    if (!(await autosave.ready())) return lock('unsaved');
     op.useConfig(d.config);
     if (!connected) await op.connect();
     if (connected && op.config) await op.push();
   }
 
-  /** "保存": the 構成 back into the project's YAML through dagon serve (the page always runs under it). */
+  /** Development stand-ins (?mock, ?sim without serve): an unsaved 構成 on the page, nothing to save to. */
+  let local = $state(false);
+  /** Edits go to the project's YAML by themselves (UC-D04); 保存 saves at once. */
+  const autosave = new Autosave(d, { put: (yaml) => cli.saveTopology(yaml), enabled: () => screen === 'work' && !local });
+  $effect(() => {
+    void d.revision;
+    autosave.edited();
+  });
+  $effect(() => {
+    const warn = (e: BeforeUnloadEvent) => {
+      if (!autosave.pending) return;
+      void autosave.now();
+      e.preventDefault();
+    };
+    addEventListener('beforeunload', warn);
+    return () => removeEventListener('beforeunload', warn);
+  });
+
+  /** "保存": the 構成 into the project's YAML now. */
   async function save() {
-    if (cli.state === 'ready') await cli.saveTopology(d.exportYaml().text);
+    await autosave.now();
   }
+
+  /** "ファイルの構成を取り込む" (§7.6): the release's 構成 replaces this one (undoable) and goes to the YAML. */
+  async function importFileTopology() {
+    const t = op.fileTopology;
+    if (!t) return;
+    d.importRelease(t as unknown as Topo);
+    op.fileTopology = null;
+    await save();
+  }
+  const fileDiff = $derived(op.state === 'L17' && op.fileTopology ? topoDiff(d.doc.topo, op.fileTopology as unknown as Topo, d.doc.names) : []);
 
   /** Define mode's drawing scale: up to 32 ノード fit by zooming out; the canvas scrolls to pan. */
   let zoom = $state(1);
@@ -144,7 +316,7 @@
     Object.fromEntries(
       d.problems
         .filter((p) => p.select?.startsWith('node:'))
-        .map((p) => [p.select!.slice(5), { chip: `${p.severity === 'warning' ? '▲' : '!'} ${p.short}`, spoken: p.short, silent: p.severity === 'error' }]),
+        .map((p) => [p.select!.slice(5), { chip: `${problemChip(p).mark} ${p.short}`, spoken: p.short, silent: problemChip(p).kind === 'error' }]),
     ),
   );
   const defineDot = $derived({
@@ -221,8 +393,8 @@
 
   /** Buttons whose procedures this page runs today; the others show as unavailable. */
   const RUNS: ReadonlySet<Action> = new Set([
-    'connectDiscover', 'connect', 'reselect', 'reconnect', 'placeSample', 'push', 'pushAgain', 'scanAgain', 'reload',
-    'chooseFile', 'updateResponding', 'otherFile', 'update', 'useLatest', 'recover', 'recoverAgain',
+    'connectDiscover', 'connect', 'reselect', 'reconnect', 'push', 'pushAgain', 'scanAgain', 'reload',
+    'chooseFile', 'updateResponding', 'otherFile', 'update', 'useLatest', 'recover', 'recoverAgain', 'defineFix',
   ]);
 
   /** States that show the update's progress (node chips, percent, the dot number). */
@@ -246,7 +418,8 @@
     return { chip, spoken: chip.slice(chip.indexOf(' ') + 1), silent: ['silent', 'refused', 'previous', 'cannotFix'].includes(stage) };
   };
   const updating = $derived(UPDATING.has(op.state));
-  const chips = $derived(updating ? Object.fromEntries(Object.entries(op.progress).map(([id, p]) => [id, chipOf(p)])) : {});
+  const diffChips = $derived(Object.fromEntries(fileDiff.flatMap((r) => r.nodes).map((id) => [id, { chip: DIFF.chip, spoken: DIFF.spoken, silent: true }])));
+  const chips = $derived(updating ? Object.fromEntries(Object.entries(op.progress).map(([id, p]) => [id, chipOf(p)])) : diffChips);
   const percent = $derived(
     PERCENT.has(op.state) ? Object.fromEntries(Object.entries(op.progress).map(([id, p]) => [id, p.percent])) : {},
   );
@@ -304,6 +477,7 @@
       rest: op.rest && op.state === 'L18',
     });
     if (dialogOpen) return { ...b, primary: null };
+    if (op.latestMissing) return { ...b, ...BAND.M58 };
     if (op.state === 'L20') return { ...b, primary: { action: 'reconnect' as const, label: BUTTON.reconnect } };
     return b;
   });
@@ -351,8 +525,8 @@
         return void recover();
       case 'recoverAgain':
         return void recover(true);
-      case 'placeSample':
-        return op.placeSample();
+      case 'defineFix':
+        return switchMode('define');
       case 'push':
       case 'pushAgain':
         return void op.push();
@@ -425,29 +599,46 @@
 
 {#snippet defineBottom()}
   {@const empty = d.doc.topo.nodes.length === 0}
-  {@const firstError = d.problems.find((p) => p.severity === 'error')}
+  {@const firstError = d.problems.find((p) => p.severity === 'error' && p.rule !== 'V-23')}
   <footer id="band" class="dband" tabindex="-1">
     <div class="next">
-      {#if cli.state !== 'ready'}
+      {#if d.saveFailure}
+        <span class="cause">{SAVE[d.saveFailure].chip}</span>
+        <p>{SAVE[d.saveFailure].sentence}</p>
+      {:else if lockShown === 'unsaved'}
+        <span class="cause">{SAVE.unsaved}</span>
+        <p>{MODE.lockedUnsaved.sentence}</p>
+      {:else if lockShown === 'unsupported'}
+        <span class="cause">{MODE.lockedUnsupported.chip}</span>
+        <p>{MODE.lockedUnsupported.sentence}</p>
+      {:else if lockShown}
+        <p>{MODE.lockedProblems.sentence}</p>
+      {:else if cli.state !== 'ready'}
         <p>{CLI_LINK.needCli}</p>
       {:else if d.unreadable}
         <span class="cause">{DEFINE.unreadableChip}</span>
         <p>{DEFINE.unreadableSentence}</p>
-      {:else if empty}
-        <p>{DEFINE.startSentence}</p>
       {:else if firstError}
         <p>{DEFINE.fixSentence}</p>
+      {:else if d.operable === 'unsupported'}
+        <p>{DEFINE.unsupportedSentence}</p>
       {/if}
     </div>
+    {#if op.fileTopology && op.state === 'L17'}
+      <button class="secondary" onclick={() => void importFileTopology()}>{DEFINE.importFileTopology}</button>
+    {/if}
     {#if empty}
-      <button class="primary" onclick={() => d.placeSample()}>{DEFINE.fromSample}<span class="arrow" aria-hidden="true">→</span></button>
+      <!-- E1: C02 on the canvas says what this does. -->
+      <button class="primary" onclick={() => void op.connect()}>{BUTTON.connectDiscover}<span class="arrow" aria-hidden="true">→</span></button>
     {:else}
+      {#if d.unsaved && !local}<span class="unsaved">{SAVE.unsaved}</span>{/if}
       <button class="secondary" aria-disabled={cli.state !== 'ready'} onclick={() => void save()}>{DEFINE.save}</button>
-      {#if !firstError}
+      {#if firstError}
+        <button class="primary" onclick={() => d.fix(firstError)}>{DEFINE.fix}<span class="arrow" aria-hidden="true">→</span></button>
+      {:else if d.operable === 'ok'}
         <!-- Optional: updating sends the 構成 before it updates (owner 11/3). -->
         <button class="secondary" onclick={() => void sendDefined()}>{connected ? DEFINE.send : DEFINE.connectSend}</button>
-      {:else}
-        <button class="primary" onclick={() => d.fix(firstError)}>{DEFINE.fix}<span class="arrow" aria-hidden="true">→</span></button>
+        <button class="primary" onclick={() => switchMode('operate')}>{DEFINE.toOperate}<span class="arrow" aria-hidden="true">→</span></button>
       {/if}
     {/if}
     <div class="visually-hidden" role="status">{d.status || op.status}</div>
@@ -490,7 +681,7 @@
 {#snippet operateRight()}
   <aside class="right">
     {#if showFile && op.file}
-      <FilePanel file={op.file} targets={op.targets.length} />
+      <FilePanel file={op.file} targets={op.targets.length} diff={fileDiff} />
     {:else}
       <Detail
         config={op.config}
@@ -520,22 +711,30 @@
   <a class="skip" href="#canvas">{SKIP.canvas}</a>
   <a class="skip" href="#band">{SKIP.next}</a>
   <!-- The DOM follows the visual order of each layout, so Tab order matches what is seen. -->
-  <div class="frame {layout}" class:open={drawerOpen}>
+  <div class="frame {layout}" class:open={drawerOpen} class:modal={restartOpen || autosave.asking !== null}>
     <Header
-      {step}
+      step={screen === 'start' ? null : step}
       {hub}
-      drawer={layout === 'drawer'}
+      drawer={layout === 'drawer' && screen === 'work'}
       {drawerOpen}
       ondrawer={() => (drawerOpen ? closeDrawer() : openDrawer())}
       bind:drawerButton
       {mode}
-      onmode={switchMode}
+      onmode={screen === 'start' ? undefined : switchMode}
       {modeLocked}
-      sent={op.sent && op.config?.yaml === d.config.yaml}
       {cliLabel}
-      operateLocked={d.doc.topo.nodes.length === 0 || d.errors > 0}
+      operateLocked={d.operable !== 'ok'}
+      onlocked={() => lock(d.operable)}
+      {menuOpen}
+      onmenu={() => (menuOpen = !menuOpen)}
     />
-    {#if layout === 'narrow'}
+    {#if menuOpen}
+      <Menu onstart={toStart} onrestart={() => (restartOpen = true)} locked={modeLocked} bind:restartButton />
+    {/if}
+    {#if screen === 'start'}
+      <aside class="left"></aside>
+      <StartScreen s={start} served={cli.state === 'ready'} />
+    {:else if layout === 'narrow'}
       {@render bottom()}
       {@render canvas()}
       {@render right()}
@@ -563,6 +762,17 @@
     onchange={picked}
     oncancel={() => (pickForRecovery = false)}
   />
+  {#if restartOpen}
+    <Restart onconfirm={restart} oncancel={cancelRestart} />
+  {/if}
+  {#if autosave.asking}
+    <Unsaved
+      reason={SAVE[d.saveFailure ?? 'failed'].chip}
+      onsave={() => void autosave.saveAgain()}
+      ondiscard={() => autosave.discard()}
+      onstay={() => autosave.stay()}
+    />
+  {/if}
   {#if dialogOpen}
     <Reconnect left={reconnectLeft} onreconnect={() => void op.reconnectHub()} onclose={() => (dialogDismissed = true)} />
   {/if}
@@ -616,6 +826,11 @@
   .dband .next p {
     margin: 0;
   }
+  .dband .unsaved {
+    color: var(--c-muted);
+    font: 700 var(--t-small-size) / var(--t-small-lh) var(--f-ja);
+    white-space: nowrap;
+  }
   .dband .cause {
     font: 700 var(--t-heading-size) / var(--t-heading-lh) var(--f-ja);
   }
@@ -636,9 +851,10 @@
     grid-template-areas:
       'header header header'
       'help help help'
+      'menu menu menu'
       'left canvas right'
       'band band band';
-    grid-template-rows: auto auto minmax(0, 1fr) auto;
+    grid-template-rows: auto auto auto minmax(0, 1fr) auto;
     grid-template-columns: var(--w-left) minmax(0, 1fr) var(--w-right);
     height: 100vh;
   }
@@ -679,7 +895,7 @@
   }
   /* One column, top to bottom: next step, canvas, detail, the folded update order. */
   .frame.narrow {
-    grid-template-areas: 'header' 'help' 'band' 'canvas' 'right' 'left';
+    grid-template-areas: 'header' 'help' 'menu' 'band' 'canvas' 'right' 'left';
     grid-template-rows: auto;
     grid-template-columns: minmax(0, 1fr);
     height: auto;
@@ -692,5 +908,9 @@
   }
   #drawer:focus {
     outline: none;
+  }
+  /* Q2: while a dialog is open its own button is the one main action. */
+  .frame.modal :global(footer .primary) {
+    visibility: hidden;
   }
 </style>

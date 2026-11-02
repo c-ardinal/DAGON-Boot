@@ -45,6 +45,12 @@ function where(path: string, doc: Doc): Where {
   return { rest: path };
 }
 
+/** The chip of a problem (S23, S45): ! an error, ▲ a caution, ◇ a shape not updatable yet. */
+export function problemChip(p: Pick<Issue, 'rule' | 'severity'>): { mark: '!' | '▲' | '◇'; kind: 'error' | 'warning' | 'unsupported' } {
+  if (p.rule === 'V-23') return { mark: '◇', kind: 'unsupported' };
+  return p.severity === 'warning' ? { mark: '▲', kind: 'warning' } : { mark: '!', kind: 'error' };
+}
+
 const nameOf = (doc: Doc, id: string | undefined) => (id ? (doc.names[id] ?? id) : '');
 
 /** §11.2, filled with the names of the nodes and links the issue is about. */

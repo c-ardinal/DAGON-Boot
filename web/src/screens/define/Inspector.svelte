@@ -3,7 +3,7 @@
   import { INSPECT } from '../../app/copy.ts';
   import type { Define } from '../../app/define/define.svelte.ts';
   import { boardMissing, connect, freeAddrs, removeLink, removeNode, setBoard, setBus, setLink, setLinkKind, setName, setNode, template, type TLink } from '../../app/define/model.ts';
-  import type { Problem } from '../../app/define/problems.ts';
+  import { problemChip, type Problem } from '../../app/define/problems.ts';
 
   interface Props {
     d: Define;
@@ -53,7 +53,9 @@
 
 {#snippet bad(field: string)}
   {#each issues(field) as p (p.rule + p.path)}
-    <span class="bad" id="bad-{p.rule}-{field}">! {p.short}</span>
+    {@const c = problemChip(p)}
+    <!-- B-01 is said once, beside the ボード heading (§11.0b). -->
+    {#if p.rule !== 'B-01'}<span class={c.kind} id="bad-{p.rule}-{field}">{c.mark} {p.short}</span>{/if}
   {/each}
 {/snippet}
 
@@ -272,8 +274,13 @@
     color: var(--c-muted);
     font-weight: 400;
   }
-  .bad {
+  .error {
     color: var(--c-signal);
+    font: 700 var(--t-small-size) / var(--t-small-lh) var(--f-ja);
+  }
+  .warning,
+  .unsupported {
+    color: var(--c-paper);
     font: 700 var(--t-small-size) / var(--t-small-lh) var(--f-ja);
   }
   .pair {

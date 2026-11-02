@@ -110,15 +110,31 @@ fn whole_sectors(addrs: &[u32]) -> Result<(), String> {
 fn load_uf2(path: &str) -> Result<Mapped, String> {
     let raw = fs::read(path).map_err(|e| format!("{path}: {e}"))?;
     let mut mem = vec![0xFFu8; FLASH_SIZE];
+    if raw.is_empty() || !raw.len().is_multiple_of(512) {
+        return Err(format!(
+            "{path}: {} bytes is not whole 512-byte blocks",
+            raw.len()
+        ));
+    }
+    let total = (raw.len() / 512) as u32;
     let mut addrs = Vec::new();
-    for b in raw.chunks_exact(512) {
+    for (i, b) in raw.chunks_exact(512).enumerate() {
         let w = |i: usize| u32::from_le_bytes(b[i * 4..i * 4 + 4].try_into().unwrap());
         if w(0) != UF2_MAGIC0 || w(1) != UF2_MAGIC1 || w(127) != UF2_MAGIC_END {
             return Err(format!("{path}: not a UF2 file"));
         }
         let (addr, len) = (w(3), w(4) as usize);
+        if w(5) != i as u32 || w(6) != total {
+            return Err(format!(
+                "{path}: block {i} says it is block {} of {} (file has {total})",
+                w(5),
+                w(6)
+            ));
+        }
         if len != 256 {
-            return Err(format!("{path}: block at {addr:#x} carries {len} bytes, not 256"));
+            return Err(format!(
+                "{path}: block at {addr:#x} carries {len} bytes, not 256"
+            ));
         }
         let off = addr
             .checked_sub(XIP_BASE)

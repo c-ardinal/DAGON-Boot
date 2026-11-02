@@ -12,7 +12,8 @@
 //!   by the app in `targets/esp32s3-app`.
 //!
 //! Build-time identity: `DAGON_PUBKEY` (path to the `.pub` file, or 64 hex
-//! digits; unset: the RFC 8032 test key, with a build warning) and
+//! digits; unset: the build fails unless `DAGON_ALLOW_TEST_KEY=1` opts in to
+//! the RFC 8032 test key, with a build warning) and
 //! `DAGON_TARGET_TAG` (default `watch-s3`).
 #![cfg_attr(not(test), no_std)]
 

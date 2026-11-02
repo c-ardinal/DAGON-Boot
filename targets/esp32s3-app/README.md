@@ -18,8 +18,10 @@ are those of the DAGON side (`targets/esp32s3-agent/README.md`).
 ## Build
 
 Build-time identity as for the DAGON side: `DAGON_PUBKEY` (path to the
-release public key file, or its 64 hex digits; unset, the public RFC 8032
-test key with a build warning) and `DAGON_TARGET_TAG` (default `watch-s3`).
+release public key file, or its 64 hex digits) and `DAGON_TARGET_TAG`
+(default `watch-s3`). Without `DAGON_PUBKEY` the build fails unless
+`DAGON_ALLOW_TEST_KEY=1` opts in to the public RFC 8032 test key (test builds
+only; the build then warns).
 
 ```sh
 # from this directory (espup toolchain)
@@ -36,8 +38,9 @@ CONFIRM, so its trial always rolls back), `pmic-download` (ENTER_ROM method
 
 Prerequisites: the rollback-enabled 2nd stage
 (`targets/esp32s3-2ndstage/build/bootloader/bootloader.bin`), the factory
-(`targets/esp32s3-agent`) and the two app builds above, all made with `DAGON_PUBKEY` set to the signing key's public key, and the
-`dagon` CLI with that key. Run from the repository root.
+(`targets/esp32s3-agent`) and the two app builds above, all made with
+`DAGON_PUBKEY` set to the signing key's public key, and the `dagon` CLI with
+that key. Run from the repository root.
 
 1. Raw app images (what goes into the OTA partitions):
 

@@ -107,9 +107,11 @@ after method 1. A broken ESP-IDF 2nd stage cannot be recovered this way.
 ## Build and test
 
 Build-time identity: `DAGON_PUBKEY` (path to the release public key file from
-`dagon key gen`, or its 64 hex digits; unset, the public RFC 8032 test key is
-built in and the build prints a warning) and `DAGON_TARGET_TAG` (the topology
-node tag; default `watch-s3`).
+`dagon key gen`, or its 64 hex digits) and `DAGON_TARGET_TAG` (the topology
+node tag; default `watch-s3`). Without `DAGON_PUBKEY` the build fails, unless
+`DAGON_ALLOW_TEST_KEY=1` is set: then the public RFC 8032 test key is built
+in (TEST KEY, any image signed with its published secret is accepted) and
+the build prints a warning. Use that only for test builds.
 
 SET_PENDING while the running slot is on trial answers E_STATE. To go back
 from a trial, REBOOT without CONFIRM: the 2nd stage rolls back.
@@ -118,7 +120,8 @@ from a trial, REBOOT without CONFIRM: the 2nd stage rolls back.
 # from this directory (espup toolchain)
 cargo build --release                       # factory
 # receiver, liveness, trial watchdog, ROM entry and factory flow on the host
-cargo +stable test --lib --target x86_64-pc-windows-msvc
+# (test builds: the host tests sign with their own keys)
+DAGON_ALLOW_TEST_KEY=1 cargo +stable test --lib --target x86_64-pc-windows-msvc
 ```
 
 Library features (the app forwards them): `conform` answers CONF_RUN

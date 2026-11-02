@@ -4,7 +4,7 @@ use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
 use ed25519_compact::KeyPair;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
 pub const CONFIG_FILE: &str = "dagon.toml";
 /// Environment variable holding the secret key file path.
@@ -28,9 +28,64 @@ pub struct ProvisionInputs {
     pub proto_version: Option<u32>,
 }
 
-/// Unknown tables (such as build settings) are ignored here.
+/// How `dagon build` builds one node's application: a cargo package built
+/// for slot A and, when `slot_b_feature` is set, again for slot B.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct BuildInputs {
+    /// Directory of the node's cargo package, relative to dagon.toml.
+    pub package: PathBuf,
+    /// Binary target; defaults to the package name.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub bin: Option<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub features: Vec<String>,
+    /// Feature that links the application for slot B.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub slot_b_feature: Option<String>,
+    /// Version the built application is signed with.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub version: Option<String>,
+}
+
+impl BuildInputs {
+    /// Checks the values a browser may write: a relative package path that
+    /// stays inside the work area, plain names, a valid version.
+    pub fn validate(&self) -> Result<(), String> {
+        let inside = self.package.is_relative()
+            && self
+                .package
+                .components()
+                .all(|c| matches!(c, std::path::Component::Normal(_)));
+        if !inside || self.package.as_os_str().is_empty() {
+            return Err("package must be a relative path inside the work area".into());
+        }
+        let plain = |s: &str| {
+            !s.is_empty()
+                && s.bytes()
+                    .all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_')
+        };
+        let names = self
+            .bin
+            .iter()
+            .chain(&self.features)
+            .chain(&self.slot_b_feature);
+        if let Some(bad) = names.into_iter().find(|n| !plain(n)) {
+            return Err(format!("'{bad}' is not a plain name"));
+        }
+        if let Some(v) = &self.version {
+            crate::commands::version(v)?;
+        }
+        Ok(())
+    }
+}
+
+/// Unknown tables are ignored here.
 #[derive(Debug, Default, Deserialize)]
 pub struct Config {
+    /// Directory of the dagon.toml read (the work area); empty when none.
+    #[serde(skip)]
+    pub base: PathBuf,
     pub topology: Option<PathBuf>,
     pub release: Option<PathBuf>,
     pub provision_dir: Option<PathBuf>,
@@ -38,6 +93,9 @@ pub struct Config {
     pub pubkey: Option<PathBuf>,
     #[serde(default)]
     pub provision: BTreeMap<String, ProvisionInputs>,
+    /// `dagon build` settings per node id; `package` stays relative here.
+    #[serde(default)]
+    pub build: BTreeMap<String, BuildInputs>,
 }
 
 impl Config {
@@ -47,13 +105,19 @@ impl Config {
         let path = match path {
             Some(p) => PathBuf::from(p),
             None if Path::new(CONFIG_FILE).exists() => PathBuf::from(CONFIG_FILE),
-            None => return Ok(Config::default()),
+            None => {
+                return Ok(Config {
+                    base: PathBuf::from("."),
+                    ..Config::default()
+                })
+            }
         };
         let text = std::fs::read_to_string(&path)
             .map_err(|e| format!("cannot read {}: {e}", path.display()))?;
         let mut c: Config =
             toml::from_str(&text).map_err(|e| format!("{}: {e}", path.display()))?;
         let dir = path.parent().unwrap_or(Path::new("")).to_path_buf();
+        c.base = dir.clone();
         let rel = |p: &mut PathBuf| *p = dir.join(&*p);
         c.topology.as_mut().map(rel);
         c.release.as_mut().map(rel);
@@ -220,7 +284,7 @@ mod tests {
     #[test]
     fn config_ignores_unknown_tables() {
         let c: Config = toml::from_str(
-            "topology = \"t.yaml\"\n[build.seg]\ncmd = \"x\"\n[provision.seg]\nbootcore = \"b\"\napp = \"a\"\nversion = \"1.0.0\"\n",
+            "topology = \"t.yaml\"\n[serve]\nx = 1\n[build.seg]\npackage = \"targets/f401-app\"\n[provision.seg]\nbootcore = \"b\"\napp = \"a\"\nversion = \"1.0.0\"\n",
         )
         .unwrap();
         assert_eq!(c.provision["seg"].version.as_deref(), Some("1.0.0"));

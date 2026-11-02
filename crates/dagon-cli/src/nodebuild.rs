@@ -1,0 +1,303 @@
+//! `dagon build`: per node `cargo build` following `[build.<id>]` in
+//! dagon.toml, producing the ELF files `dagon image sign` takes:
+//! `out/build/<id>/app-a.elf` and, with `slot_b_feature`, `app-b.elf`.
+
+use std::io::{BufRead, BufReader};
+use std::path::{Path, PathBuf};
+use std::process::{Command, Stdio};
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::mpsc;
+use std::time::Duration;
+
+use serde_json::Value;
+
+use crate::config::{BuildInputs, Config, Opts};
+
+const OUT_DIR: &str = "out/build";
+const POLL: Duration = Duration::from_millis(100);
+
+/// One node's build outputs.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Built {
+    pub node: String,
+    /// (slot letter, ELF path, size in bytes).
+    pub slots: Vec<(char, PathBuf, u64)>,
+}
+
+pub fn elf_path(cfg: &Config, node: &str, slot: char) -> PathBuf {
+    cfg.base
+        .join(OUT_DIR)
+        .join(node)
+        .join(format!("app-{slot}.elf"))
+}
+
+/// Builds `nodes` (all configured nodes when empty). `log` gets cargo's
+/// output line by line; `cancel` stops the running cargo.
+pub fn build_nodes(
+    cfg: &Config,
+    nodes: &[String],
+    log: &mut dyn FnMut(&str),
+    cancel: &AtomicBool,
+) -> Result<Vec<Built>, String> {
+    let ids: Vec<String> = if nodes.is_empty() {
+        cfg.build.keys().cloned().collect()
+    } else {
+        nodes.to_vec()
+    };
+    let mut out = Vec::new();
+    for id in ids {
+        let inputs = cfg
+            .build
+            .get(&id)
+            .ok_or_else(|| format!("no [build.{id}] in dagon.toml"))?;
+        out.push(build_node(cfg, &id, inputs, log, cancel)?);
+    }
+    Ok(out)
+}
+
+fn build_node(
+    cfg: &Config,
+    id: &str,
+    b: &BuildInputs,
+    log: &mut dyn FnMut(&str),
+    cancel: &AtomicBool,
+) -> Result<Built, String> {
+    b.validate().map_err(|e| format!("[build.{id}]: {e}"))?;
+    let dir = cfg.base.join(&b.package);
+    let bin = match &b.bin {
+        Some(n) => n.clone(),
+        None => package_name(&dir)?,
+    };
+    let mut slots = vec![('a', b.features.clone(), None)];
+    if let Some(f) = &b.slot_b_feature {
+        let feats = b.features.iter().cloned().chain([f.clone()]).collect();
+        slots.push(('b', feats, Some(dir.join("target").join("slot-b"))));
+    }
+    let mut built = Vec::new();
+    for (slot, features, target_dir) in slots {
+        log(&format!(
+            "{id}: building slot {slot} in {}",
+            b.package.display()
+        ));
+        let exe = cargo_build(&dir, &bin, &features, target_dir.as_deref(), log, cancel)?;
+        let dest = elf_path(cfg, id, slot);
+        if let Some(parent) = dest.parent() {
+            std::fs::create_dir_all(parent)
+                .map_err(|e| format!("cannot create {}: {e}", parent.display()))?;
+        }
+        std::fs::copy(&exe, &dest)
+            .map_err(|e| format!("cannot copy {} to {}: {e}", exe.display(), dest.display()))?;
+        let size = std::fs::metadata(&dest).map(|m| m.len()).unwrap_or(0);
+        log(&format!(
+            "{id}: slot {slot} -> {} ({size} bytes)",
+            dest.display()
+        ));
+        built.push((slot, dest, size));
+    }
+    Ok(Built {
+        node: id.into(),
+        slots: built,
+    })
+}
+
+fn package_name(dir: &Path) -> Result<String, String> {
+    let path = dir.join("Cargo.toml");
+    let text = std::fs::read_to_string(&path)
+        .map_err(|e| format!("cannot read {}: {e}", path.display()))?;
+    let v: toml::Value = toml::from_str(&text).map_err(|e| format!("{}: {e}", path.display()))?;
+    v.get("package")
+        .and_then(|p| p.get("name"))
+        .and_then(|n| n.as_str())
+        .map(String::from)
+        .ok_or_else(|| format!("{}: no package name", path.display()))
+}
+
+enum Line {
+    Out(String),
+    Err(String),
+}
+
+/// Runs `cargo build --release --locked` in `dir`; returns the executable
+/// of binary `bin`.
+fn cargo_build(
+    dir: &Path,
+    bin: &str,
+    features: &[String],
+    target_dir: Option<&Path>,
+    log: &mut dyn FnMut(&str),
+    cancel: &AtomicBool,
+) -> Result<PathBuf, String> {
+    let mut cmd = Command::new("cargo");
+    cmd.args([
+        "build",
+        "--release",
+        "--locked",
+        "--message-format=json-render-diagnostics",
+    ])
+    .current_dir(dir)
+    .stdin(Stdio::null())
+    .stdout(Stdio::piped())
+    .stderr(Stdio::piped());
+    if !features.is_empty() {
+        cmd.args(["--features", &features.join(",")]);
+    }
+    if let Some(t) = target_dir {
+        cmd.arg("--target-dir").arg(t);
+    }
+    let mut child = cmd
+        .spawn()
+        .map_err(|e| format!("cannot run cargo in {}: {e}", dir.display()))?;
+    let (tx, rx) = mpsc::channel();
+    let out = child.stdout.take().expect("piped");
+    let err = child.stderr.take().expect("piped");
+    let t1 = tx.clone();
+    std::thread::spawn(move || {
+        BufReader::new(out)
+            .lines()
+            .map_while(Result::ok)
+            .for_each(|l| drop(t1.send(Line::Out(l))))
+    });
+    std::thread::spawn(move || {
+        BufReader::new(err)
+            .lines()
+            .map_while(Result::ok)
+            .for_each(|l| drop(tx.send(Line::Err(l))))
+    });
+    let mut exe = None;
+    loop {
+        if cancel.load(Ordering::Relaxed) {
+            let _ = child.kill();
+            let _ = child.wait();
+            return Err("cancelled".into());
+        }
+        match rx.recv_timeout(POLL) {
+            Ok(Line::Err(l)) => log(&l),
+            Ok(Line::Out(l)) => {
+                if let Some(p) = artifact(&l, bin) {
+                    exe = Some(p);
+                }
+            }
+            Err(mpsc::RecvTimeoutError::Timeout) => {}
+            Err(mpsc::RecvTimeoutError::Disconnected) => break,
+        }
+    }
+    let status = child.wait().map_err(|e| format!("cargo: {e}"))?;
+    if !status.success() {
+        return Err(format!("cargo build failed in {}", dir.display()));
+    }
+    exe.ok_or_else(|| format!("cargo built no binary named '{bin}' in {}", dir.display()))
+}
+
+/// The executable of `bin` in one line of cargo's JSON messages.
+fn artifact(line: &str, bin: &str) -> Option<PathBuf> {
+    let v: Value = serde_json::from_str(line).ok()?;
+    let ours = v["reason"] == "compiler-artifact" && v["target"]["name"] == bin;
+    ours.then(|| v["executable"].as_str().map(PathBuf::from))
+        .flatten()
+}
+
+/// `dagon build [<id>...] [--config <file>]`
+pub fn command(args: &[&str]) -> Result<(), String> {
+    let o = Opts::parse(args, &["config"])?;
+    let cfg = Config::load(o.get("config"))?;
+    if cfg.build.is_empty() {
+        return Err("no [build.<id>] tables in dagon.toml".into());
+    }
+    let nodes: Vec<String> = o.pos.iter().map(|s| s.to_string()).collect();
+    let mut log = |l: &str| println!("{l}");
+    let built = build_nodes(&cfg, &nodes, &mut log, &AtomicBool::new(false))?;
+    for b in &built {
+        let files: Vec<String> = b.slots.iter().map(|s| s.1.display().to_string()).collect();
+        println!("{}: {}", b.node, files.join(", "));
+    }
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn picks_the_executable_of_the_named_binary() {
+        let line = r#"{"reason":"compiler-artifact","target":{"name":"f401-app"},"executable":"C:\\t\\f401-app"}"#;
+        assert_eq!(
+            artifact(line, "f401-app"),
+            Some(PathBuf::from("C:\\t\\f401-app"))
+        );
+        assert_eq!(artifact(line, "other"), None);
+        let lib =
+            r#"{"reason":"compiler-artifact","target":{"name":"f401-app"},"executable":null}"#;
+        assert_eq!(artifact(lib, "f401-app"), None);
+        assert_eq!(artifact("not json", "f401-app"), None);
+    }
+
+    #[test]
+    fn build_inputs_stay_inside_the_work_area() {
+        let ok = BuildInputs {
+            package: PathBuf::from("targets/f401-app"),
+            bin: None,
+            features: vec!["conform".into()],
+            slot_b_feature: Some("slot-b".into()),
+            version: Some("1.1.0".into()),
+        };
+        assert!(ok.validate().is_ok());
+        let with = |f: &dyn Fn(&mut BuildInputs)| {
+            let mut b = ok.clone();
+            f(&mut b);
+            b.validate()
+        };
+        assert!(with(&|b| b.package = PathBuf::from("../elsewhere")).is_err());
+        assert!(with(&|b| b.package = PathBuf::from("C:/abs")).is_err());
+        assert!(with(&|b| b.features = vec!["a,b".into()]).is_err());
+        assert!(with(&|b| b.bin = Some("x y".into())).is_err());
+        assert!(with(&|b| b.version = Some("one".into())).is_err());
+    }
+
+    #[test]
+    fn builds_a_package_and_copies_its_elf() {
+        // A tiny host binary package stands in for a firmware package.
+        let base = std::env::temp_dir().join(format!("dagon-build-{}", std::process::id()));
+        let pkg = base.join("pkg");
+        std::fs::create_dir_all(pkg.join("src")).unwrap();
+        std::fs::write(
+            pkg.join("Cargo.toml"),
+            "[package]\nname = \"tiny\"\nversion = \"0.0.0\"\nedition = \"2021\"\n\
+             [features]\nslot-b = []\n[workspace]\n",
+        )
+        .unwrap();
+        std::fs::write(pkg.join("src/main.rs"), "fn main() {}\n").unwrap();
+        // --locked needs a lock file; an empty package resolves offline.
+        let gen = Command::new("cargo")
+            .args(["generate-lockfile", "--offline"])
+            .current_dir(&pkg)
+            .status()
+            .unwrap();
+        assert!(gen.success());
+        let mut cfg = Config {
+            base: base.clone(),
+            ..Config::default()
+        };
+        cfg.build.insert(
+            "tiny".into(),
+            BuildInputs {
+                package: PathBuf::from("pkg"),
+                bin: None,
+                features: vec![],
+                slot_b_feature: Some("slot-b".into()),
+                version: None,
+            },
+        );
+        let mut lines = Vec::new();
+        let built = build_nodes(
+            &cfg,
+            &[],
+            &mut |l| lines.push(l.to_string()),
+            &AtomicBool::new(false),
+        )
+        .unwrap();
+        assert_eq!(built[0].slots.len(), 2);
+        assert!(elf_path(&cfg, "tiny", 'a').exists() && elf_path(&cfg, "tiny", 'b').exists());
+        assert!(lines.iter().any(|l| l.contains("slot b")));
+        let _ = std::fs::remove_dir_all(&base);
+    }
+}

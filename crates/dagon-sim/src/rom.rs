@@ -1,15 +1,18 @@
 //! SimRom: the STM32 system-memory boot loader on I2C (ST AN4221), as seen by
 //! an I2C controller at 7-bit address [`ROM_ADDR`].
 //!
-//! Every host frame is one I2C transaction. A write is a "send command" or
-//! "send data" frame; reads drain the bytes the loader has queued (ACK/NACK,
-//! data, BUSY while a No-Stretch erase or write is still running).
+//! Every frame is one I2C transaction in either direction. A write is a
+//! "send command" or "send data" frame. Each read returns the next reply
+//! frame from its start: ACK/NACK/BUSY frames are one byte, data frames are
+//! read whole. A read shorter than the frame truncates it (the rest is lost);
+//! bytes past the end of the frame read as 0xFF (released bus). With no
+//! frame pending a read gets NACK. Below, `[..]` is one reply frame.
 //!
-//! - Get `00 FF` -> ACK, `N`, version, `N` command codes, ACK
-//! - Get Version `01 FE` -> ACK, version, ACK
-//! - Get ID `02 FD` -> ACK, `01`, PID high, PID low, ACK
-//! - Read Memory `11 EE` -> ACK; address (4 B big-endian + XOR) -> ACK;
-//!   `N-1` + complement -> ACK, `N` bytes
+//! - Get `00 FF` -> `[ACK]` `[N, version, N command codes]` `[ACK]`
+//! - Get Version `01 FE` -> `[ACK]` `[version]` `[ACK]`
+//! - Get ID `02 FD` -> `[ACK]` `[01, PID high, PID low]` `[ACK]`
+//! - Read Memory `11 EE` -> `[ACK]`; address (4 B big-endian + XOR) ->
+//!   `[ACK]`; `N-1` + complement -> `[ACK]` `[N bytes]`
 //! - Write Memory `31 CE` / No-Stretch `32 CD` -> ACK; address -> ACK;
 //!   `N-1`, `N` data bytes, XOR of all -> ACK (No-Stretch: BUSY until written)
 //! - Erase `44 BB` / No-Stretch `45 BA` -> ACK; count `N-1` (2 B big-endian)
@@ -64,9 +67,9 @@ enum Expect {
     ErasePages { stretch: bool, n: usize },
 }
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Debug)]
 enum Out {
-    Byte(u8),
+    Frame(Vec<u8>),
     /// ACK once the clock reaches this time; BUSY before.
     AckAt(u64),
 }
@@ -142,32 +145,32 @@ impl SimRom {
         self.expect = next;
         self.last_ms = *now_ms;
         if !reply {
-            self.out.push_back(Out::Byte(NACK));
+            self.out.push_back(Out::Frame(vec![NACK]));
         }
     }
 
     /// Host read transaction.
     pub fn read(&mut self, buf: &mut [u8], now_ms: u64) {
         self.frame_start(now_ms);
-        for b in buf {
-            *b = match self.out.front().copied() {
-                Some(Out::Byte(x)) => {
-                    self.out.pop_front();
-                    x
-                }
-                Some(Out::AckAt(t)) if now_ms >= t => {
-                    self.out.pop_front();
-                    ACK
-                }
-                Some(Out::AckAt(_)) => BUSY,
-                None => NACK,
-            };
+        let frame = match self.out.front() {
+            Some(Out::AckAt(t)) if now_ms < *t => vec![BUSY],
+            Some(Out::AckAt(_)) => vec![ACK],
+            Some(Out::Frame(f)) => f.clone(),
+            None => vec![NACK],
+        };
+        if frame != [BUSY] {
+            self.out.pop_front();
         }
+        buf.fill(0xFF);
+        let n = buf.len().min(frame.len());
+        buf[..n].copy_from_slice(&frame[..n]);
     }
 
-    fn ack(&mut self, bytes: &[u8]) {
-        self.out.push_back(Out::Byte(ACK));
-        self.out.extend(bytes.iter().map(|&b| Out::Byte(b)));
+    /// Queues ACK, then each data frame.
+    fn ack(&mut self, frames: &[&[u8]]) {
+        self.out.push_back(Out::Frame(vec![ACK]));
+        self.out
+            .extend(frames.iter().map(|f| Out::Frame(f.to_vec())));
     }
 
     /// Finishes a long operation: No-Stretch answers BUSY until done,
@@ -201,7 +204,7 @@ impl SimRom {
                 let mut buf = vec![0u8; d.first().map_or(0, |&n| n as usize + 1)];
                 let ok = d.len() == 2 && d[1] == !d[0] && flash.read(addr, &mut buf).is_ok();
                 if ok {
-                    self.ack(&buf);
+                    self.ack(&[&buf]);
                 }
                 (Expect::Command, ok)
             }
@@ -259,17 +262,16 @@ impl SimRom {
             cmd::GET => {
                 let mut b = vec![self.commands.len() as u8, self.version];
                 b.extend_from_slice(&self.commands);
-                b.push(ACK);
-                self.ack(&b);
+                self.ack(&[&b, &[ACK]]);
                 Expect::Command
             }
             cmd::GET_VERSION => {
-                self.ack(&[self.version, ACK]);
+                self.ack(&[&[self.version], &[ACK]]);
                 Expect::Command
             }
             cmd::GET_ID => {
                 let [hi, lo] = self.product_id.to_be_bytes();
-                self.ack(&[0x01, hi, lo, ACK]);
+                self.ack(&[&[0x01, hi, lo], &[ACK]]);
                 Expect::Command
             }
             cmd::READ_MEMORY => {
@@ -395,8 +397,10 @@ mod tests {
         let (mut flash, mut now) = (dirty_f401(), 0);
         rom.write(&mut flash, &[0x00, 0xFF], &mut now);
         let mut b = [0u8; 9];
+        rom.read(&mut b[..1], now);
+        assert_eq!(b[0], ACK);
         rom.read(&mut b, now);
-        assert_eq!(b, [ACK, 6, 0x11, 0x00, 0x01, 0x02, 0x11, 0x31, 0x44]);
+        assert_eq!(b, [6, 0x11, 0x00, 0x01, 0x02, 0x11, 0x31, 0x44, 0xFF]);
         rom.read(&mut b[..1], now);
         assert_eq!(b[0], ACK);
         assert_eq!(
@@ -407,5 +411,37 @@ mod tests {
             frames(&mut rom, &mut flash, &mut now, &[&[0x32, 0xCD]]),
             [NACK]
         );
+    }
+
+    #[test]
+    fn each_read_is_one_reply_frame() {
+        let (mut rom, mut flash, mut now) = (SimRom::default(), dirty_f401(), 0);
+        let read = |rom: &mut SimRom, n: usize| {
+            let mut b = vec![0u8; n];
+            rom.read(&mut b, 0);
+            b
+        };
+
+        // ACK folded into the data read: only the ACK frame comes back.
+        rom.write(&mut flash, &[0x00, 0xFF], &mut now);
+        assert_eq!(read(&mut rom, 3), [ACK, 0xFF, 0xFF]);
+
+        // Data frame split over two reads: the second read is the next frame.
+        let head = read(&mut rom, 1);
+        assert_eq!(head, [COMMANDS.len() as u8]);
+        let rest = read(&mut rom, COMMANDS.len() + 1);
+        assert_eq!(rest[0], ACK, "trailing ACK, not the version byte");
+        assert!(rest[1..].iter().all(|&b| b == 0xFF));
+        assert_eq!(read(&mut rom, 1), [NACK], "nothing pending");
+
+        // Read Memory data truncated by a short read is lost.
+        rom.write(&mut flash, &[0x11, 0xEE], &mut now);
+        assert_eq!(read(&mut rom, 1), [ACK]);
+        rom.write(&mut flash, &[0x08, 0x02, 0x00, 0x00, 0x0A], &mut now);
+        assert_eq!(read(&mut rom, 1), [ACK]);
+        rom.write(&mut flash, &[3, !3], &mut now);
+        assert_eq!(read(&mut rom, 1), [ACK]);
+        assert_eq!(read(&mut rom, 2), [0x00, 0xFF]);
+        assert_eq!(read(&mut rom, 2), [NACK, 0xFF]);
     }
 }

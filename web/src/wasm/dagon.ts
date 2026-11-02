@@ -1,10 +1,71 @@
 // The page's single entry to dagon-wasm (built into ./pkg by `npm run wasm`).
 // Converts the generated classes into plain objects so nothing outside this
 // file has to free WASM memory.
-import init, { hello_decode, hello_request, supported_boards as boards, version_text } from './pkg/dagon_wasm.js';
+import init, { WasmHost, hello_decode, hello_request, supported_boards as boards, version_text } from './pkg/dagon_wasm.js';
+import type { HostLink } from './pkg/dagon_wasm.js';
 import type { HelloReq, HelloResp } from '../serial/hello.ts';
 
-export { initSync, topo_check, topo_compile, verify_release } from './pkg/dagon_wasm.js';
+export { initSync, topo_check, topo_compile, verify_release, watch_interval_ms } from './pkg/dagon_wasm.js';
+
+export type TargetKind = 'hub' | 'i2c' | 'uart';
+
+export interface SlotInfo {
+  /** 0 empty, 1 written, 2 next to try, 3 on trial, 4 confirmed, 5 rolled back. */
+  state: number;
+  version: number;
+  digest16: Uint8Array;
+}
+
+export interface StatusResp {
+  /** A, B, factory. */
+  slots: [SlotInfo, SlotInfo, SlotInfo];
+  /** Running slot, 0xFF none. */
+  active: number;
+  confirmed: number;
+  attempts: number;
+  lastReason: number;
+  logGeneration: number;
+}
+
+export interface NodeState {
+  hello: HelloResp;
+  status: StatusResp;
+}
+
+export interface WatchRound {
+  /** False only after two misses in a row. */
+  responding: boolean;
+  rttMs: number | null;
+  hello: HelloResp | null;
+}
+
+export interface Discovery {
+  hub: HelloResp;
+  nodes: { kind: TargetKind; addr: number; hello: HelloResp }[];
+}
+
+/** dagon-host's procedures for one hub session, with the shapes dagon-wasm returns. */
+export interface Host {
+  hello(kind: TargetKind, addr: number): Promise<HelloResp>;
+  status(kind: TargetKind, addr: number): Promise<NodeState>;
+  discover(): Promise<Discovery>;
+  pushTopology(bin: Uint8Array): Promise<void>;
+  watch(kind: TargetKind, addr: number): Promise<WatchRound>;
+  /** Releases the WASM side; calls still running finish on their own. */
+  free(): void;
+}
+
+export function newHost(link: HostLink): Host {
+  const h = new WasmHost(link);
+  return {
+    hello: (k, a) => h.hello(k, a),
+    status: (k, a) => h.status(k, a),
+    discover: () => h.discover(),
+    pushTopology: (bin) => h.push_topology(bin),
+    watch: (k, a) => h.watch(k, a),
+    free: () => h.free(),
+  };
+}
 
 let loading: Promise<unknown> | undefined;
 

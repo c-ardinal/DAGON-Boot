@@ -1,145 +1,203 @@
 <script lang="ts">
   import { tick } from 'svelte';
-  import { ANNOUNCE, HUB, HUB_NAME, NODE, PRODUCT, SKIP, STEP } from './app/copy.ts';
-  import { ConnectError, chooseAndOpen, hello, wasmReady } from './app/connect.ts';
-  import { bandOf, focusOf, hubOf, statusOf, type View } from './app/connectView.ts';
-  import { dagonReady, versionText } from './wasm/dagon.ts';
-  import { MockTransport } from './serial/mock.ts';
+  import { bandOf } from './app/band.ts';
+  import { CANVAS, ORDER, PRODUCT, SKIP, STEP } from './app/copy.ts';
+  import { chooseAndOpen } from './app/connect.ts';
+  import { hubOf, view, type Action } from './app/machine.ts';
+  import { Operate } from './app/operate.svelte.ts';
+  import Graph, { type Dot } from './graph/Graph.svelte';
+  import Band from './screens/Band.svelte';
+  import Detail from './screens/Detail.svelte';
+  import Header from './screens/Header.svelte';
+  import OrderList from './screens/OrderList.svelte';
+  import { devTransport } from './serial/devHub.ts';
   import { WebSerialTransport, type Transport } from './serial/transport.ts';
   import Unsupported from './Unsupported.svelte';
-  import HelloDetails from './HelloDetails.svelte';
+  import { dagonReady } from './wasm/dagon.ts';
 
   const params = new URLSearchParams(location.search);
-  const mock = params.get('mock');
-  const showGraph = params.has('graph');
+  // The stand-in hub is for development builds only.
+  const dev = import.meta.env.DEV && params.has('mock');
   const serial = navigator.serial;
-  // Fetch the .wasm alongside the first paint; connect() awaits it and reports a failure.
-  if (serial || mock !== null) dagonReady().catch(() => undefined);
+  // Fetch the .wasm alongside the first paint; connecting awaits it and reports a failure.
+  if (serial || dev) dagonReady().catch(() => undefined);
 
-  let view = $state<View>({ kind: 'idle' });
-  let alertText = $state('');
-  let transport: Transport | null = null;
-  /** Bumped per attempt and on disconnect; results of an older attempt are dropped. */
-  let attempt = 0;
-  let primaryEl = $state<HTMLButtonElement>();
-  let nextEl = $state<HTMLDivElement>();
-
-  const band = $derived(bandOf(view));
-  const hub = $derived(hubOf(view));
-  const status = $derived(statusOf(view));
-  const busy = $derived(view.kind === 'choosing');
-
-  /** Moves to `v` after a user action and puts focus where the band now asks for it. */
-  async function show(v: View) {
-    view = v;
-    await tick();
-    (focusOf(v) === 'button' ? primaryEl : nextEl)?.focus();
-  }
-
-  serial?.addEventListener('disconnect', (e) => {
-    if (transport instanceof WebSerialTransport && e.target === transport.port) {
-      attempt++;
-      transport.close().catch(() => undefined);
-      transport = null;
-      view = { kind: 'lost' };
-      alertText = ANNOUNCE.A21lost;
-    }
+  let opened: Transport | null = null;
+  const op = new Operate({
+    open: async () => {
+      const t = dev ? devTransport(params) : null;
+      if (t) await t.open();
+      opened = t ?? (await chooseAndOpen(serial!));
+      return opened;
+    },
+    timer: true,
   });
 
-  async function connect() {
-    if (busy) return;
-    const my = ++attempt;
-    await transport?.close().catch(() => undefined);
-    transport = null;
-    alertText = '';
-    // 'choosing' marks the button busy, so presses while dagon-wasm loads are ignored.
-    await show({ kind: 'choosing' });
-    if (!(await wasmReady())) {
-      if (my === attempt) await show({ kind: 'unavailable' });
-      return;
+  serial?.addEventListener('disconnect', (e) => {
+    if (opened instanceof WebSerialTransport && e.target === opened.port) op.lose();
+  });
+
+  let primaryEl = $state<HTMLButtonElement>();
+  let nextEl = $state<HTMLDivElement>();
+  /** wide ≥ 1280 px: three columns; drawer 768–1279 px: the update order opens from the header; narrow ≤ 767 px: one column. */
+  let layout = $state<'wide' | 'drawer' | 'narrow'>('wide');
+  $effect(() => {
+    const narrowMq = matchMedia('(max-width: 767px)');
+    const drawerMq = matchMedia('(max-width: 1279px)');
+    const on = () => (layout = narrowMq.matches ? 'narrow' : drawerMq.matches ? 'drawer' : 'wide');
+    on();
+    narrowMq.addEventListener('change', on);
+    drawerMq.addEventListener('change', on);
+    return () => {
+      narrowMq.removeEventListener('change', on);
+      drawerMq.removeEventListener('change', on);
+    };
+  });
+
+  let drawerOpen = $state(false);
+  let drawerEl = $state<HTMLElement>();
+  let drawerButton = $state<HTMLButtonElement>();
+  $effect(() => {
+    if (layout !== 'drawer') drawerOpen = false;
+  });
+
+  async function openDrawer() {
+    drawerOpen = true;
+    await tick();
+    (focusables()[0] ?? drawerEl)?.focus();
+  }
+
+  function closeDrawer() {
+    drawerOpen = false;
+    drawerButton?.focus();
+  }
+
+  function focusables(): HTMLElement[] {
+    return [...(drawerEl?.querySelectorAll<HTMLElement>('button, [href], summary, [tabindex]:not([tabindex="-1"])') ?? [])];
+  }
+
+  /** Keeps Tab inside the open drawer; Escape closes it and returns focus to its header button. */
+  function drawerKeys(e: KeyboardEvent) {
+    if (e.key === 'Escape') {
+      e.preventDefault();
+      return closeDrawer();
     }
-    try {
-      transport = mock !== null ? new MockTransport({ silent: mock === 'silent', delayMs: 600 }) : await chooseAndOpen(serial!);
-      if (mock !== null) await transport.open();
-      if (my !== attempt) return;
-      await show({ kind: 'checking' });
-      const h = await hello(transport);
-      if (my !== attempt) return;
-      await show({ kind: 'connected', hello: h });
-    } catch (e) {
-      if (my !== attempt) return;
-      await transport?.close().catch(() => undefined);
-      transport = null;
-      await show({ kind: 'failed', failure: e instanceof ConnectError ? e.failure : 'no-response' });
+    if (e.key !== 'Tab') return;
+    const f = focusables();
+    if (f.length === 0) return e.preventDefault();
+    const first = f[0];
+    const last = f[f.length - 1];
+    if (e.shiftKey && (document.activeElement === first || document.activeElement === drawerEl)) {
+      e.preventDefault();
+      last.focus();
+    } else if (!e.shiftKey && document.activeElement === last) {
+      e.preventDefault();
+      first.focus();
+    }
+  }
+
+  /** Buttons whose procedures this page runs today; the others show as unavailable. */
+  const RUNS: ReadonlySet<Action> = new Set(['connectDiscover', 'connect', 'reselect', 'reconnect', 'placeSample', 'push', 'pushAgain', 'scanAgain', 'reload']);
+
+  const hub = $derived(hubOf(op.state));
+  const connected = $derived(!['idle', 'lost'].includes(hub));
+  const step = $derived(view(op.state, op.ctx).step);
+  const band = $derived(bandOf(op.state, op.ctx, { stuck: op.stuck?.name, responding: op.responding }));
+  const dot = $derived.by((): Dot | null => {
+    const c = op.config;
+    if (!c || !connected || op.state === 'L06') return null;
+    if (op.state === 'L08' || op.state === 'L09') return { label: CANVAS.dotFound, value: op.found, name: CANVAS.dotFoundName(op.found) };
+    const n = c.nodes.length;
+    return { label: CANVAS.dotResponding, value: op.responding, of: n, name: CANVAS.dotRespondingName(op.responding, n) };
+  });
+
+  $effect(() => {
+    const s = step;
+    document.title = s === null || s === 'recover' ? PRODUCT : `${String(s).padStart(2, '0')} ${STEP.of} ${STEP.names[s]}｜${PRODUCT}`;
+  });
+
+  // Focus follows the band only after a user action changed it, never on load.
+  $effect(() => {
+    if (op.focusRequest === 0) return;
+    void tick().then(() => (band.primary ? primaryEl : nextEl)?.focus());
+  });
+
+  function act(a: Action) {
+    switch (a) {
+      case 'connectDiscover':
+      case 'connect':
+      case 'reselect':
+      case 'reconnect':
+        return void op.connect();
+      case 'placeSample':
+        return op.placeSample();
+      case 'push':
+      case 'pushAgain':
+        return void op.push();
+      case 'scanAgain':
+        return void op.discover();
+      case 'reload':
+        return location.reload();
+      default:
+        return;
     }
   }
 </script>
 
-{#if !serial && mock === null}
+{#snippet left()}
+  <OrderList config={op.config} selected={op.selected} onselect={(k) => op.select(k)} fold={layout === 'narrow'} />
+{/snippet}
+
+{#snippet canvas()}
+  <main id="canvas" tabindex="-1" aria-describedby="canvas-help">
+    <p id="canvas-help" class="visually-hidden">{CANVAS.describe}</p>
+    <Graph
+      config={op.config}
+      live={op.live}
+      {connected}
+      sending={op.state === 'L10'}
+      selected={op.selected}
+      onselect={(k) => op.select(op.selected === k ? null : k)}
+      {dot}
+    />
+  </main>
+{/snippet}
+
+{#snippet right()}
+  <aside class="right">
+    <Detail config={op.config} live={op.live} selected={op.selected} {connected} />
+  </aside>
+{/snippet}
+
+{#snippet bottom()}
+  <Band {band} busy={op.state === 'L03'} available={(a) => RUNS.has(a)} status={op.status} alert={op.alert} onaction={act} bind:primaryEl bind:nextEl />
+{/snippet}
+
+{#if !serial && !dev}
   <Unsupported />
 {:else}
   <a class="skip" href="#canvas">{SKIP.canvas}</a>
   <a class="skip" href="#band">{SKIP.next}</a>
-  <div class="frame">
-    <header>
-      <span class="product" translate="no">{PRODUCT}</span>
-      <ol class="steps">
-        <li aria-current="step">
-          {STEP.label} <span class="step-n">{STEP.connect.n}</span>
-          {STEP.connect.name}
-        </li>
-      </ol>
-      <span class="hub" aria-label={HUB_NAME[hub]}>{HUB[hub]}</span>
-    </header>
-
-    <main id="canvas" tabindex="-1">
-      {#if showGraph}
-        {#await import('./graph/Graph.svelte') then { default: Graph }}
-          <Graph />
-        {/await}
-      {:else}
-        <section class="layer l0">
-          <span class="layer-label">{NODE.layerL0}</span>
-          <div class="pc">{NODE.pc}</div>
-        </section>
-        <section class="layer l1">
-          <span class="layer-label">{NODE.layerL1}</span>
-          {#if view.kind === 'connected'}
-            <article class="node">
-              <div class="node-band">
-                <h2>{NODE.hub}</h2>
-                <span class="version" translate="no">{versionText(view.hello.activeVersion)}</span>
-              </div>
-              <div class="node-body">
-                <span class="chip">{view.hello.trial ? NODE.trying : NODE.responding}</span>
-                <HelloDetails hello={view.hello} label={NODE.details} />
-              </div>
-            </article>
-          {:else}
-            <div class="slot" aria-hidden={view.kind === 'checking' ? 'true' : undefined}>
-              {#if view.kind === 'checking'}<span class="skeleton"></span>{:else}{NODE.hubSlot}{/if}
-            </div>
-          {/if}
-        </section>
+  <!-- The DOM follows the visual order of each layout, so Tab order matches what is seen. -->
+  <div class="frame {layout}" class:open={drawerOpen}>
+    <Header {step} {hub} drawer={layout === 'drawer'} {drawerOpen} ondrawer={() => (drawerOpen ? closeDrawer() : openDrawer())} bind:drawerButton />
+    {#if layout === 'narrow'}
+      {@render bottom()}
+      {@render canvas()}
+      {@render right()}
+      <aside class="left">{@render left()}</aside>
+    {:else}
+      {#if layout === 'wide'}
+        <aside class="left">{@render left()}</aside>
+      {:else if drawerOpen}
+        <div class="left" id="drawer" role="dialog" aria-modal="true" aria-label={ORDER.heading} tabindex="-1" bind:this={drawerEl} onkeydown={drawerKeys}>
+          {@render left()}
+        </div>
       {/if}
-    </main>
-
-    <footer id="band" tabindex="-1">
-      <div class="next" tabindex="-1" bind:this={nextEl}>
-        {#if band}
-          {#if band.chip}<span class="cause">{band.chip}</span>{/if}
-          <p>{band.sentence}</p>
-        {/if}
-      </div>
-      {#if band}
-        <!-- Busy stays focusable (aria-disabled) so focus never drops to the page. -->
-        <button class="primary" bind:this={primaryEl} onclick={view.kind === 'unavailable' ? () => location.reload() : connect} aria-disabled={busy}>
-          {busy ? `${band.button}…` : band.button}<span aria-hidden="true">→</span>
-        </button>
-      {/if}
-      <div class="visually-hidden" role="status">{status}</div>
-      <div class="visually-hidden" role="alert">{alertText}</div>
-    </footer>
+      {@render canvas()}
+      {@render right()}
+      {@render bottom()}
+    {/if}
   </div>
 {/if}
 
@@ -158,190 +216,64 @@
   }
   .frame {
     display: grid;
-    grid-template-rows: var(--h-header) minmax(0, 1fr) var(--h-band);
+    grid-template-areas:
+      'header header header'
+      'help help help'
+      'left canvas right'
+      'band band band';
+    grid-template-rows: auto auto minmax(0, 1fr) auto;
+    grid-template-columns: var(--w-left) minmax(0, 1fr) var(--w-right);
     height: 100vh;
   }
-  header {
-    display: flex;
-    align-items: center;
-    gap: var(--s-5);
-    padding: 0 var(--s-5);
-    border-bottom: 1px solid var(--c-line);
-    z-index: var(--z-chrome);
+  .left,
+  .right {
+    min-height: 0;
+    overflow: auto;
+    background: var(--c-ink);
   }
-  .product {
-    font: 500 var(--t-mono-size) / 1 var(--f-mono);
-    letter-spacing: 0.12em;
+  .left {
+    grid-area: left;
+    border-right: 1px solid var(--c-line);
   }
-  .steps {
-    margin: 0 auto 0 0;
-    padding: 0;
-    list-style: none;
-    font: 400 var(--t-small-size) / 1 var(--f-ja);
-  }
-  .step-n {
-    font-family: var(--f-version);
-    font-variant-numeric: tabular-nums;
-  }
-  .hub {
-    font: 400 var(--t-small-size) / 1 var(--f-ja);
+  .right {
+    grid-area: right;
+    border-left: 1px solid var(--c-line);
   }
   main {
+    grid-area: canvas;
     display: grid;
-    grid-template-rows: auto 1fr;
+    min-height: 0;
     background: var(--c-layer-0);
-    overflow: auto;
   }
-  .layer {
-    position: relative;
-    display: grid;
-    justify-items: center;
-    align-content: start;
-    gap: var(--s-4);
-    padding: var(--s-6);
-  }
-  .l1 {
-    background: var(--c-layer-1);
-  }
-  .layer-label {
-    justify-self: start;
-    font: 500 var(--t-caption-size) / var(--t-caption-lh) var(--f-ja);
-    letter-spacing: 0.04em;
-    color: var(--c-muted);
-  }
-  .pc {
-    width: var(--w-node);
-    padding: var(--s-3) 0;
-    border: 1px solid var(--c-line);
-    border-radius: var(--r-m);
-    text-align: center;
-    font: 400 var(--t-small-size) / var(--t-small-lh) var(--f-ja);
-  }
-  .slot {
-    width: var(--w-node);
-    min-height: 10rem;
-    display: grid;
-    place-items: center;
-    border: 2px dashed var(--c-line);
-    border-radius: var(--r-l);
-    color: var(--c-muted);
-    font: 400 var(--t-small-size) / var(--t-small-lh) var(--f-ja);
-  }
-  .skeleton {
-    width: 50%;
-    height: var(--s-4);
-    border-radius: var(--r-s);
-    background: var(--c-layer-2);
-  }
-  .node {
-    width: var(--w-node);
-    border: 1px solid var(--c-line);
-    border-radius: var(--r-m);
-    background: var(--c-ink);
-    overflow: hidden;
-  }
-  .node-band {
-    display: flex;
-    justify-content: space-between;
-    align-items: baseline;
-    padding: var(--s-2) var(--s-3);
-    border-bottom: 1px solid var(--c-line);
-  }
-  .node-band h2 {
-    margin: 0;
-    font: 700 var(--t-small-size) / var(--t-small-lh) var(--f-ja);
-  }
-  .version {
-    font: 400 var(--t-version-small-size) / var(--t-version-small-lh) var(--f-version);
-    letter-spacing: 0.02em;
-    font-variant-numeric: tabular-nums;
-  }
-  .node-body {
-    display: grid;
-    gap: var(--s-2);
-    justify-items: start;
-    padding: var(--s-3) var(--s-4);
-  }
-  .chip {
-    display: inline-flex;
-    align-items: center;
-    height: var(--h-chip);
-    padding: 0 var(--s-2);
-    border: 1px solid var(--c-line);
-    border-radius: var(--r-full);
-    font: 700 var(--t-caption-size) / 1 var(--f-ja);
-    letter-spacing: 0.04em;
-  }
-  footer {
-    display: flex;
-    align-items: center;
-    gap: var(--s-6);
-    padding: 0 var(--s-5);
-    border-top: 1px solid var(--c-line);
-    z-index: var(--z-chrome);
-  }
-  .next {
-    display: flex;
-    align-items: baseline;
-    gap: var(--s-2);
-    margin-right: auto;
-  }
-  .next p {
-    margin: 0;
-    font: 400 var(--t-body-size) / var(--t-body-lh) var(--f-ja);
-    text-wrap: pretty;
-  }
-  .cause {
-    font: 700 var(--t-heading-size) / var(--t-heading-lh) var(--f-ja);
-    letter-spacing: 0.02em;
-    white-space: nowrap;
-  }
-  .primary {
-    display: inline-flex;
-    align-items: center;
-    gap: var(--s-2);
-    height: var(--h-primary);
-    padding: 0 var(--s-6);
-    border: 0;
-    border-radius: var(--r-full);
-    background: var(--c-signal);
-    color: var(--c-ink);
-    font: 700 var(--t-body-size) / 1 var(--f-ja);
-    white-space: nowrap;
-    cursor: pointer;
-    outline: 3px solid transparent;
-    outline-offset: 0;
-    transition: transform var(--dur-press) var(--ease-out);
-  }
-  .primary:focus-visible {
-    outline-color: var(--c-paper);
-  }
-  .primary:active {
-    transform: scale(0.97);
-  }
-  .next:focus {
+  main:focus {
     outline: none;
   }
-  .primary[aria-disabled='true'] {
-    background: var(--c-layer-2);
-    color: var(--c-muted);
-    cursor: default;
-  }
-  .primary span {
-    transition: transform var(--dur-press) var(--ease-out);
-  }
-  @media (hover: hover) and (pointer: fine) {
-    .primary:hover span {
-      transform: translateX(4px);
+  @media (max-width: 1439px) {
+    .frame {
+      grid-template-columns: 17.5rem minmax(0, 1fr) 20rem;
     }
   }
-  @media (prefers-reduced-motion: reduce) {
-    .primary,
-    .primary span {
-      transition: none;
-    }
-    .primary:active {
-      transform: none;
-    }
+  /* 768–1279 px: the update order is a 300 px drawer that pushes the canvas aside. */
+  .frame.drawer {
+    grid-template-columns: 0 minmax(0, 1fr) 20rem;
+  }
+  .frame.drawer.open {
+    grid-template-columns: var(--w-left) minmax(0, 1fr) 20rem;
+  }
+  /* One column, top to bottom: next step, canvas, detail, the folded update order. */
+  .frame.narrow {
+    grid-template-areas: 'header' 'help' 'band' 'canvas' 'right' 'left';
+    grid-template-rows: auto;
+    grid-template-columns: minmax(0, 1fr);
+    height: auto;
+  }
+  .narrow .left,
+  .narrow .right {
+    overflow: visible;
+    border: 0;
+    border-top: 1px solid var(--c-line);
+  }
+  #drawer:focus {
+    outline: none;
   }
 </style>

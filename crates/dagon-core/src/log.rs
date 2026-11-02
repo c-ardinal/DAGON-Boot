@@ -1,12 +1,16 @@
 //! APP state log: a pure fold of records into [`LogState`], plus loading the
 //! newest valid face from flash and appending records to it.
 //!
-//! Not handled yet: compaction into the other face when a face fills up or
-//! ends in a torn record. Such a face stays readable but refuses appends
-//! ([`LogError::Full`]).
+//! When the face is full or ends in a record failing its CRC (a write cut by
+//! power loss), the next append first compacts: it erases the other face,
+//! copies the folded state there (ROLLBACK for the last reason, SLOT_PENDING,
+//! SNAPSHOT carrying the confirmed slot and the attempts) and writes that
+//! face's header with `generation + 1` last. Until that header is written the
+//! old face stays the valid one, so a cut compaction is simply redone. The
+//! "reverted" marker of STATUS is not carried over.
 
 use dagon_format::statelog::{
-    kind, slot, target, FaceHeader, Record, FACE_HEADER_SIZE, RECORD_SIZE,
+    kind, reason, slot, target, FaceHeader, Record, FACE_HEADER_SIZE, RECORD_SIZE,
 };
 use dagon_format::Version;
 use dagon_port::{Flash, FlashError};
@@ -84,6 +88,14 @@ impl LogState {
                 last_reason: r.reason,
                 ..self
             },
+            // SNAPSHOT (compaction): the confirmed slot, with `reason`
+            // holding the attempts of the pending slot copied before it.
+            kind::SNAPSHOT => LogState {
+                confirmed: Some(this),
+                attempts: if self.pending.is_some() { r.reason } else { 0 },
+                reverted,
+                ..self
+            },
             _ => self,
         }
     }
@@ -115,7 +127,7 @@ pub enum LogError {
     Flash(FlashError),
     /// Neither face has a valid header.
     NoValidFace,
-    /// The face cannot take another record (full, or ends in a torn record).
+    /// Even a freshly compacted face cannot take the record (face too small).
     Full,
 }
 
@@ -130,8 +142,11 @@ impl From<FlashError> for LogError {
 pub struct Log {
     pub state: LogState,
     pub generation: u32,
-    face_end: u32,
-    /// Address of the next erased record, `None` when appends are refused.
+    layout: LogLayout,
+    /// Index of the active face in `layout.faces`.
+    face: usize,
+    /// Address of the next erased record, `None` when the face must be
+    /// compacted before the next append.
     next: Option<u32>,
     next_seq: u32,
 }
@@ -141,26 +156,27 @@ impl Log {
     /// folds its records up to the first erased one. A record failing its CRC
     /// ends the scan.
     pub fn load<F: Flash>(flash: &mut F, layout: &LogLayout) -> Result<Log, LogError> {
-        let mut best: Option<(u32, u32)> = None;
-        for &face in &layout.faces {
+        let mut best: Option<(usize, u32)> = None;
+        for (i, &face) in layout.faces.iter().enumerate() {
             let mut h = [0u8; FACE_HEADER_SIZE];
             flash.read(face, &mut h)?;
             if let Ok(fh) = FaceHeader::parse(&h) {
                 if best.is_none_or(|(_, g)| fh.generation > g) {
-                    best = Some((face, fh.generation));
+                    best = Some((i, fh.generation));
                 }
             }
         }
         let (face, generation) = best.ok_or(LogError::NoValidFace)?;
-        let face_end = face + layout.face_len;
         let mut log = Log {
             state: LogState::default(),
             generation,
-            face_end,
+            layout: *layout,
+            face,
             next: None,
             next_seq: 1,
         };
-        let mut addr = face + FACE_HEADER_SIZE as u32;
+        let face_end = log.face_end();
+        let mut addr = layout.faces[face] + FACE_HEADER_SIZE as u32;
         while addr + RECORD_SIZE as u32 <= face_end {
             let mut b = [0u8; RECORD_SIZE];
             flash.read(addr, &mut b)?;
@@ -176,7 +192,8 @@ impl Log {
         Ok(log)
     }
 
-    /// Appends one APP record and folds it into `state`.
+    /// Appends one APP record and folds it into `state`, compacting into the
+    /// other face first when this one cannot take it.
     pub fn append<F: Flash>(
         &mut self,
         flash: &mut F,
@@ -184,8 +201,23 @@ impl Log {
         at: SlotRef,
         reason: u8,
     ) -> Result<(), LogError> {
+        if self.next.is_none() {
+            self.compact(flash)?;
+        }
         let addr = self.next.ok_or(LogError::Full)?;
-        let r = Record {
+        let r = self.record(kind, at, reason);
+        flash.write(addr, &r.to_bytes())?;
+        self.state = self.state.apply(&r);
+        self.advance(addr);
+        Ok(())
+    }
+
+    fn face_end(&self) -> u32 {
+        self.layout.faces[self.face] + self.layout.face_len
+    }
+
+    fn record(&self, kind: u8, at: SlotRef, reason: u8) -> Record {
+        Record {
             kind,
             target: target::APP,
             slot: at.slot,
@@ -193,12 +225,50 @@ impl Log {
             seq: self.next_seq,
             version: at.version,
             digest16: at.digest16,
-        };
-        flash.write(addr, &r.to_bytes())?;
-        self.state = self.state.apply(&r);
+        }
+    }
+
+    /// Moves past the record just written at `addr`.
+    fn advance(&mut self, addr: u32) {
         self.next_seq = self.next_seq.wrapping_add(1);
         let after = addr + RECORD_SIZE as u32;
-        self.next = (after + RECORD_SIZE as u32 <= self.face_end).then_some(after);
+        self.next = (after + RECORD_SIZE as u32 <= self.face_end()).then_some(after);
+    }
+
+    /// Copies the folded state into the other face and makes it active.
+    fn compact<F: Flash>(&mut self, flash: &mut F) -> Result<(), LogError> {
+        let s = self.state;
+        let carry = [
+            s.confirmed
+                .filter(|_| s.last_reason != reason::NONE)
+                .map(|c| (kind::ROLLBACK, c, s.last_reason)),
+            s.pending.map(|p| (kind::SLOT_PENDING, p, reason::NONE)),
+            s.confirmed.map(|c| (kind::SNAPSHOT, c, s.attempts)),
+        ];
+        let old = *self;
+        self.face ^= 1;
+        let face = self.layout.faces[self.face];
+        flash.erase(face, self.layout.face_len)?;
+        self.next = Some(face + FACE_HEADER_SIZE as u32);
+        self.state = LogState::default();
+        for (kind, at, why) in carry.into_iter().flatten() {
+            let addr = self.next.ok_or(LogError::Full)?;
+            let r = self.record(kind, at, why);
+            if let Err(e) = flash.write(addr, &r.to_bytes()) {
+                *self = old;
+                return Err(e.into());
+            }
+            self.state = self.state.apply(&r);
+            self.advance(addr);
+        }
+        let header = FaceHeader {
+            generation: old.generation.wrapping_add(1),
+        };
+        if let Err(e) = flash.write(face, &header.to_bytes()) {
+            *self = old;
+            return Err(e.into());
+        }
+        self.generation = header.generation;
         Ok(())
     }
 }
@@ -206,7 +276,6 @@ impl Log {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use dagon_format::statelog::reason;
 
     fn rec(kind: u8, slot: u8) -> Record {
         Record {
@@ -261,6 +330,24 @@ mod tests {
         let s = fold(&[rec(kind::PROVISION, 0), rec(kind::SLOT_PENDING, 1)]);
         assert!(!s.on_trial());
         assert_eq!(s.active(), 0);
+    }
+
+    #[test]
+    fn snapshot_carries_confirmed_and_attempts() {
+        let s = fold(&[
+            rec(kind::SLOT_PENDING, 1),
+            Record {
+                reason: 2,
+                ..rec(kind::SNAPSHOT, 0)
+            },
+        ]);
+        assert_eq!(s.confirmed.map(|c| c.slot), Some(0));
+        assert_eq!((s.attempts, s.active()), (2, 1));
+        let s = fold(&[Record {
+            reason: 2,
+            ..rec(kind::SNAPSHOT, 0)
+        }]);
+        assert_eq!((s.attempts, s.active()), (0, 0));
     }
 
     #[test]

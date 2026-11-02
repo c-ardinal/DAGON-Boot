@@ -90,6 +90,10 @@ fn cfg() -> BootConfig {
 
 /// Signed image for `slot`; returns (header, body).
 fn image(slot: u8, minor: u8) -> ([u8; HEADER_SIZE], Vec<u8>) {
+    image_at(slot, minor, SLOTS.slots[slot as usize] + HEADER_SIZE as u32)
+}
+
+fn image_at(slot: u8, minor: u8, load_addr: u32) -> ([u8; HEADER_SIZE], Vec<u8>) {
     let kp = KeyPair::from_seed(Seed::new(SEED));
     let body: Vec<u8> = (0..2048u32).map(|i| (i ^ minor as u32) as u8).collect();
     let mut h = ImageHeader {
@@ -98,7 +102,7 @@ fn image(slot: u8, minor: u8) -> ([u8; HEADER_SIZE], Vec<u8>) {
         mcu_id: mcu_id::STM32F401XE,
         slot_binding: slot,
         placement: placement::INLINE,
-        load_addr: SLOTS.slots[slot as usize] + HEADER_SIZE as u32,
+        load_addr,
         payload_size: body.len() as u32,
         version: Version::new(1, minor, 0),
         build_flags: build_flags::TEST_KEY,
@@ -133,6 +137,10 @@ fn install(m: &mut Mem, slot: u8, (hdr, body): &([u8; HEADER_SIZE], Vec<u8>)) ->
 }
 
 fn write_log(m: &mut Mem, face: usize, generation: u32, recs: &[(u8, SlotRef)]) {
+    write_face(m, &LOG, face, generation, recs);
+}
+
+fn write_face(m: &mut Mem, at: &LogLayout, face: usize, generation: u32, recs: &[(u8, SlotRef)]) {
     let mut out = FaceHeader { generation }.to_bytes().to_vec();
     for (i, (kind, r)) in recs.iter().enumerate() {
         let rec = Record {
@@ -146,8 +154,8 @@ fn write_log(m: &mut Mem, face: usize, generation: u32, recs: &[(u8, SlotRef)]) 
         };
         out.extend_from_slice(&rec.to_bytes());
     }
-    m.erase(LOG.faces[face], LOG.face_len).unwrap();
-    m.put(LOG.faces[face], &out);
+    m.erase(at.faces[face], at.face_len).unwrap();
+    m.put(at.faces[face], &out);
 }
 
 /// Device with A confirmed (provisioned) and B pending.
@@ -384,17 +392,167 @@ fn newer_face_wins() {
 }
 
 #[test]
-fn torn_record_stops_appends() {
+fn load_addr_must_be_slot_body() {
+    let mut m = Mem::new();
+    let a = install(&mut m, A, &image(A, 0));
+    let b = install(&mut m, B, &image_at(B, 1, SLOTS.slots[B as usize]));
+    write_log(
+        &mut m,
+        0,
+        1,
+        &[
+            (kind::PROVISION, a),
+            (kind::CONFIRMED, a),
+            (kind::SLOT_PENDING, b),
+        ],
+    );
+    assert_eq!(
+        boot(&mut m),
+        Decision::Boot {
+            slot: A,
+            entry: entry(A),
+            trial: false
+        }
+    );
+    assert_eq!(state(&mut m).last_reason, reason::SIG_INVALID);
+}
+
+#[test]
+fn rollback_without_confirmed_slot_writes_nothing() {
+    let mut m = Mem::new();
+    let b = install(&mut m, B, &image(B, 1));
+    let mut bad = b;
+    bad.digest16[0] ^= 1;
+    write_log(&mut m, 0, 1, &[(kind::SLOT_PENDING, bad)]);
+    assert_eq!(boot(&mut m), Decision::NoImage);
+    assert_eq!(m.writes, 0);
+}
+
+/// Hub-sized faces: 4 KiB, 127 records each.
+const SMALL: LogLayout = LogLayout {
+    faces: [0x0800_8000, 0x0800_9000],
+    face_len: 0x1000,
+};
+
+#[test]
+fn full_face_compacts_into_other_face() {
+    let mut m = Mem::new();
+    let a = install(&mut m, A, &image(A, 0));
+    let b = install(&mut m, B, &image(B, 1));
+    assert_eq!(Log::load(&mut m, &SMALL), Err(LogError::NoValidFace));
+    write_face(
+        &mut m,
+        &SMALL,
+        0,
+        1,
+        &[(kind::PROVISION, a), (kind::CONFIRMED, a)],
+    );
+    // Fill face 0 with pending/attempt cycles, then keep going through two
+    // more compactions; the state must survive each switch.
+    for i in 0..300u32 {
+        let mut log = Log::load(&mut m, &SMALL).unwrap();
+        let k = if i % 3 == 0 {
+            kind::SLOT_PENDING
+        } else {
+            kind::BOOT_ATTEMPT
+        };
+        log.append(&mut m, k, b, reason::NONE).unwrap();
+        let again = Log::load(&mut m, &SMALL).unwrap();
+        assert_eq!(again.state, log.state, "record {i}");
+        assert_eq!(again.state.attempts, (i % 3) as u8);
+        assert_eq!(again.state.confirmed, Some(a));
+    }
+    let log = Log::load(&mut m, &SMALL).unwrap();
+    assert!(
+        log.generation >= 3,
+        "two compactions at least, got {}",
+        log.generation
+    );
+}
+
+#[test]
+fn compaction_keeps_last_reason_and_attempts() {
+    let mut m = Mem::new();
+    let a = install(&mut m, A, &image(A, 0));
+    let b = install(&mut m, B, &image(B, 1));
+    let recs = [
+        (kind::PROVISION, a),
+        (kind::SLOT_PENDING, b),
+        (kind::BOOT_ATTEMPT, b),
+    ];
+    write_face(&mut m, &SMALL, 0, 1, &recs);
+    let mut log = Log::load(&mut m, &SMALL).unwrap();
+    log.append(&mut m, kind::ROLLBACK, a, reason::TRIAL_EXHAUSTED)
+        .unwrap();
+    log.append(&mut m, kind::SLOT_PENDING, b, reason::NONE)
+        .unwrap();
+    log.append(&mut m, kind::BOOT_ATTEMPT, b, reason::NONE)
+        .unwrap();
+    log.append(&mut m, kind::BOOT_ATTEMPT, b, reason::NONE)
+        .unwrap();
+    // Pad the face to the end with records for another target.
+    let used = 32 + 7 * 32;
+    let mut addr = SMALL.faces[0] + used;
+    while addr + 32 <= SMALL.faces[0] + SMALL.face_len {
+        let r = Record {
+            kind: kind::CONFIRMED,
+            target: target::BOOTCORE,
+            slot: 0,
+            reason: 0,
+            seq: 0,
+            version: Version::new(0, 0, 0),
+            digest16: [0; 16],
+        };
+        m.put(addr, &r.to_bytes());
+        addr += 32;
+    }
+    let mut log = Log::load(&mut m, &SMALL).unwrap();
+    let before = log.state;
+    log.append(&mut m, kind::BOOT_ATTEMPT, b, reason::NONE)
+        .unwrap();
+    let after = Log::load(&mut m, &SMALL).unwrap();
+    assert_eq!(after.generation, 2);
+    assert_eq!(after.state.attempts, before.attempts + 1);
+    assert_eq!(after.state.pending, before.pending);
+    assert_eq!(after.state.confirmed, Some(a));
+    assert_eq!(after.state.last_reason, reason::TRIAL_EXHAUSTED);
+}
+
+#[test]
+fn torn_tail_compacts_on_next_append() {
     let mut m = with_pending_b();
-    // Third record's CRC broken: scan stops there, appends refused.
+    // Third record (SLOT_PENDING B) torn: the fold keeps the prefix.
     let rec3 = LOG.faces[0] + 32 + 2 * 32;
     let byte = m.bytes[(rec3 + 8 - BASE) as usize];
     m.put(rec3 + 8, &[byte ^ 1]);
     let mut log = Log::load(&mut m, &LOG).unwrap();
     assert_eq!(log.state.pending, None);
     let a = log.state.confirmed.unwrap();
-    assert_eq!(
-        log.append(&mut m, kind::CONFIRMED, a, reason::NONE),
-        Err(LogError::Full)
-    );
+    let b = install(&mut m, B, &image(B, 1));
+    log.append(&mut m, kind::SLOT_PENDING, b, reason::NONE)
+        .unwrap();
+    let again = Log::load(&mut m, &LOG).unwrap();
+    assert_eq!(again.generation, 2);
+    assert_eq!(again.state.confirmed, Some(a));
+    assert_eq!(again.state.pending, Some(b));
+    // The torn face is no longer the active one, and a trial proceeds.
+    assert!(matches!(
+        boot(&mut m),
+        Decision::Boot {
+            slot: B,
+            trial: true,
+            ..
+        }
+    ));
+}
+
+#[test]
+fn cut_compaction_leaves_old_face_valid() {
+    let mut m = with_pending_b();
+    let log = Log::load(&mut m, &LOG).unwrap();
+    // Other face erased and partly written, header never written.
+    m.erase(LOG.faces[1], LOG.face_len).unwrap();
+    m.put(LOG.faces[1] + 32, &[0u8; 32]);
+    let again = Log::load(&mut m, &LOG).unwrap();
+    assert_eq!((again.generation, again.state), (log.generation, log.state));
 }

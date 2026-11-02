@@ -140,18 +140,39 @@ version comes from `[build.<id>]` in `dagon.toml`.
 ### 5. Write the first version (once per node)
 
 A node needs its boot core and first application written once over its own
-cable. Build the boot core with the project's public key (the MCU package
-READMEs: [rp2040](targets/mcu/rp2040/README.md),
-[stm32f401re](targets/mcu/stm32f401re/README.md); the hub also needs
-its `stage0`) and point `[provision.<id>]` in `dagon.toml` at them and at
-your build:
+cable. `dagon new` and `dagon gen` do not write this part of `dagon.toml`
+yet; add it by hand.
+
+Build the boot images in your DAGON clone with the project's public key
+(the `pubkey` of `dagon.toml`; details in the MCU package READMEs:
+[rp2040](targets/mcu/rp2040/README.md),
+[stm32f401re](targets/mcu/stm32f401re/README.md)):
+
+```sh
+export DAGON_PUBKEY=~/.dagon/keys/my-fleet/dagon-signing.pub
+(cd <DAGON clone>/targets/mcu/rp2040/stage0 && cargo build --release)
+(cd <DAGON clone>/targets/mcu/rp2040/bootcore && cargo build --release)
+(cd <DAGON clone>/targets/mcu/stm32f401re/bootcore && cargo build --release)
+```
+
+Then add one `[provision.<id>]` table per node to `dagon.toml`; paths are
+relative to `dagon.toml` unless absolute. The hub needs `stage0` as well:
 
 ```toml
+[provision.hub]
+stage0 = "<DAGON clone>/targets/mcu/rp2040/stage0/target/thumbv6m-none-eabi/release/dagon-rp2040-stage0"
+bootcore = "<DAGON clone>/targets/mcu/rp2040/bootcore/target/thumbv6m-none-eabi/release/dagon-rp2040-bootcore"
+app = "out/build/hub/app-a.elf"
+version = "0.1.0"
+
 [provision.seg]
-bootcore = "<boot core ELF>"
+bootcore = "<DAGON clone>/targets/mcu/stm32f401re/bootcore/target/thumbv7em-none-eabihf/release/dagon-stm32f401re-bootcore"
 app = "out/build/seg/app-a.elf"
 version = "0.1.0"
 ```
+
+The boot cores accept the desk demo's tags (`hub-rp2040-lcd`,
+`seg-f401-7seg`), so keep those tags in `topology.yaml` for these boards.
 
 ```sh
 dagon rescue hub       # out/provision/hub/rescue.uf2: hold BOOT, plug in USB, copy it to RPI-RP2
@@ -264,7 +285,7 @@ What the code and its tests in this repository show:
   board (`targets/boards/*`).
 - `dagon conform`: the 12 conformance tests of `dagon-conform`; 12 of 12 pass
   against the simulated F401, through the hub and directly.
-- Topology YAML: 21 validation rules and the supported-board table
+- Topology YAML: 22 validation rules and the supported-board table
   (`dagon-topology`); `topology/desk-demo.yaml` passes them.
 - DAGON Console (`web/`, served by `dagon serve`; `web/README.md` lists what
   it does today).

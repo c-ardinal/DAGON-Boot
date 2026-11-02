@@ -98,14 +98,33 @@ dagon build            # または: dagon build seg
 
 ### 5. 最初のバージョンを書き込む（ノードごとに 1 回）
 
-ノードには、ブートコアと最初のアプリを、そのノード自身のケーブルで 1 回だけ書き込みます。プロジェクトの公開鍵でブートコアをビルドし（MCU のパッケージの README: [rp2040](targets/mcu/rp2040/README.md)、[stm32f401re](targets/mcu/stm32f401re/README.md)。親機は `stage0` も要ります）、`dagon.toml` の `[provision.<id>]` をそれと自分のビルドに向けます:
+ノードには、ブートコアと最初のアプリを、そのノード自身のケーブルで 1 回だけ書き込みます。`dagon.toml` のこの部分は、`dagon new` も `dagon gen` もまだ書かないので、手で加えます。
+
+DAGON のクローンで、プロジェクトの公開鍵（`dagon.toml` の `pubkey`）を使ってブート用のイメージをビルドします（詳しくは MCU のパッケージの README: [rp2040](targets/mcu/rp2040/README.md)、[stm32f401re](targets/mcu/stm32f401re/README.md)）:
+
+```sh
+export DAGON_PUBKEY=~/.dagon/keys/my-fleet/dagon-signing.pub
+(cd <DAGON のクローン>/targets/mcu/rp2040/stage0 && cargo build --release)
+(cd <DAGON のクローン>/targets/mcu/rp2040/bootcore && cargo build --release)
+(cd <DAGON のクローン>/targets/mcu/stm32f401re/bootcore && cargo build --release)
+```
+
+続けて、ノードごとに `[provision.<id>]` を `dagon.toml` に加えます。パスは絶対パスでなければ `dagon.toml` からの相対です。親機は `stage0` も要ります:
 
 ```toml
+[provision.hub]
+stage0 = "<DAGON のクローン>/targets/mcu/rp2040/stage0/target/thumbv6m-none-eabi/release/dagon-rp2040-stage0"
+bootcore = "<DAGON のクローン>/targets/mcu/rp2040/bootcore/target/thumbv6m-none-eabi/release/dagon-rp2040-bootcore"
+app = "out/build/hub/app-a.elf"
+version = "0.1.0"
+
 [provision.seg]
-bootcore = "<ブートコアの ELF>"
+bootcore = "<DAGON のクローン>/targets/mcu/stm32f401re/bootcore/target/thumbv7em-none-eabihf/release/dagon-stm32f401re-bootcore"
 app = "out/build/seg/app-a.elf"
 version = "0.1.0"
 ```
+
+ブートコアはデスクのデモの tag（`hub-rp2040-lcd`、`seg-f401-7seg`）を受け付けるので、これらのボードでは `topology.yaml` の tag をそのままにします。
 
 ```sh
 dagon rescue hub       # out/provision/hub/rescue.uf2: BOOT を押しながら USB をつなぎ、RPI-RP2 にコピー
@@ -192,7 +211,7 @@ dagon sim run
 - PC 側: `dagon-host`（状態、自動で見つける、構成の送信、更新、前のバージョンに戻す、確定、復旧）、`dagon-romlink`（STM32 の I2C ROM ブートローダの手順）、`dagon` CLI。これらは `dagon-sim`（F401 子機付きの模擬親機、電断点付きのフラッシュ、損失のあるリンク、ROM ブートローダの模擬）を相手にテストしています。
 - プロジェクト: `dagon new`、`dagon gen`、`dagon build` が、MCU ごと（`targets/mcu/*`）とボードごと（`targets/boards/*`）の支援パッケージの上にノードの crate を作り、ビルドします。
 - `dagon conform`: `dagon-conform` の 12 件の適合試験。模擬の F401 に対し、親機経由でも直結でも 12 件すべて合格します。
-- 構成 YAML: 21 件の検証規則と対応ボードの表（`dagon-topology`）。`topology/desk-demo.yaml` はこれを通ります。
+- 構成 YAML: 22 件の検証規則と対応ボードの表（`dagon-topology`）。`topology/desk-demo.yaml` はこれを通ります。
 - DAGON Console（`web/`。`dagon serve` が配る。いまできることは `web/README.md` を参照）。
 - ファームウェア: RP2040 親機（`targets/rp2040-hub`）、F401 のデモ子機（`samples/f401-app`）、ESP32-S3 子機（`targets/boards/m5stopwatch`、`samples/esp32s3-app`）。親機のファームウェアは親機の実機に書き込み済みで起動します。それ以外の実機での確認はまだ進行中です（「制限事項」を参照）。
 

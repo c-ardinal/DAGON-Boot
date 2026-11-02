@@ -389,23 +389,30 @@ fn dagon_package(k: &str) -> bool {
 }
 
 /// Every dependency table of a manifest (`dependencies` and
-/// `target.<cfg>.dependencies`).
-fn dep_tables(doc: &mut toml_edit::DocumentMut) -> Vec<&mut toml_edit::Table> {
+/// `target.<cfg>.dependencies`), with its key path.
+fn dep_tables(doc: &mut toml_edit::DocumentMut) -> Vec<(Vec<String>, &mut toml_edit::Table)> {
     let mut out = Vec::new();
     for (k, item) in doc.as_table_mut().iter_mut() {
         if k == "dependencies" {
             if let Some(t) = item.as_table_mut() {
-                out.push(t);
+                out.push((vec!["dependencies".to_string()], t));
             }
         } else if k == "target" {
             if let Some(targets) = item.as_table_mut() {
-                for (_, cfg) in targets.iter_mut() {
-                    if let Some(d) = cfg
+                for (cfg, c) in targets.iter_mut() {
+                    if let Some(d) = c
                         .as_table_mut()
                         .and_then(|c| c.get_mut("dependencies"))
                         .and_then(|d| d.as_table_mut())
                     {
-                        out.push(d);
+                        out.push((
+                            vec![
+                                "target".into(),
+                                cfg.get().to_string(),
+                                "dependencies".into(),
+                            ],
+                            d,
+                        ));
                     }
                 }
             }
@@ -414,8 +421,12 @@ fn dep_tables(doc: &mut toml_edit::DocumentMut) -> Vec<&mut toml_edit::Table> {
     out
 }
 
+type DagonDeps = std::collections::BTreeMap<Vec<String>, Vec<(String, toml_edit::Item)>>;
+
 /// Brings the DAGON package entries of an existing Cargo.toml in line with
-/// the freshly rendered template; everything else stays.
+/// the freshly rendered template: replaced, added where missing (also a
+/// package the template newly needs) and removed where the template has
+/// none; everything else stays.
 fn refresh_manifest(
     base: &Path,
     rel: &str,
@@ -429,27 +440,46 @@ fn refresh_manifest(
     let mut want: toml_edit::DocumentMut = rendered
         .parse()
         .map_err(|_| format!("template for {rel} does not parse"))?;
-    let mut fresh = std::collections::BTreeMap::new();
-    for t in dep_tables(&mut want) {
-        for (k, v) in t.iter().filter(|(k, _)| dagon_package(k)) {
-            fresh.insert(k.to_string(), v.clone());
+    let mut fresh = DagonDeps::new();
+    for (id, t) in dep_tables(&mut want) {
+        let deps: Vec<(String, toml_edit::Item)> = t
+            .iter()
+            .filter(|(k, _)| dagon_package(k))
+            .map(|(k, v)| (k.to_string(), v.clone()))
+            .collect();
+        if !deps.is_empty() {
+            fresh.insert(id, deps);
         }
     }
-    for t in dep_tables(&mut doc) {
-        let keys: Vec<String> = t
+    for (id, t) in dep_tables(&mut doc) {
+        let keep: Vec<&str> = fresh
+            .get(&id)
+            .map(|d| d.iter().map(|(k, _)| k.as_str()).collect())
+            .unwrap_or_default();
+        let stale: Vec<String> = t
             .iter()
             .map(|(k, _)| k.to_string())
-            .filter(|k| dagon_package(k))
+            .filter(|k| dagon_package(k) && !keep.contains(&k.as_str()))
             .collect();
-        for k in keys {
-            match fresh.get(&k) {
-                Some(v) => {
-                    t.insert(&k, v.clone());
-                }
-                None => {
-                    t.remove(&k);
-                }
-            }
+        for k in stale {
+            t.remove(&k);
+        }
+    }
+    for (id, deps) in fresh {
+        let mut t = doc.as_table_mut();
+        for seg in &id {
+            t = t
+                .entry(seg)
+                .or_insert_with(|| {
+                    let mut n = toml_edit::Table::new();
+                    n.set_implicit(true);
+                    toml_edit::Item::Table(n)
+                })
+                .as_table_mut()
+                .ok_or_else(|| format!("{rel}: [{}] is not a table", id.join(".")))?;
+        }
+        for (k, v) in deps {
+            t.insert(&k, v);
         }
     }
     let new = doc.to_string();

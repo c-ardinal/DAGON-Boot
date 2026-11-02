@@ -239,3 +239,88 @@ fn new_makes_the_project_and_a_key_outside_it() {
     );
     assert!(add_build_tables(&cfg, &desk()).unwrap().is_empty());
 }
+
+#[test]
+fn regen_restores_a_deleted_dagon_dependency() {
+    let d = tmp("regen-del");
+    let src = clone(&d);
+    let base = project(&d);
+    gen(
+        &base,
+        &desk(),
+        &src,
+        &BTreeMap::new(),
+        &["seg".into()],
+        false,
+    )
+    .unwrap();
+    let cargo = base.join("nodes/seg/Cargo.toml");
+    let without: String = read(&base, "nodes/seg/Cargo.toml")
+        .lines()
+        .filter(|l| !l.starts_with("dagon-board-nucleo-f401re"))
+        .map(|l| format!("{l}\n"))
+        .collect();
+    std::fs::write(&cargo, without).unwrap();
+    let r = gen(
+        &base,
+        &desk(),
+        &src,
+        &BTreeMap::new(),
+        &["seg".into()],
+        false,
+    )
+    .unwrap();
+    assert!(r
+        .written
+        .iter()
+        .any(|w| w.path == "nodes/seg/Cargo.toml" && w.action == "rewritten"));
+    assert!(read(&base, "nodes/seg/Cargo.toml").contains("dagon-board-nucleo-f401re = { path = "));
+}
+
+#[test]
+fn regen_adds_a_dagon_package_the_template_newly_needs() {
+    let d = tmp("regen-new");
+    let src = clone(&d);
+    let base = project(&d);
+    gen(
+        &base,
+        &desk(),
+        &src,
+        &BTreeMap::new(),
+        &["seg".into()],
+        false,
+    )
+    .unwrap();
+    // The board package's template now also needs the MCU package, in a
+    // target table the existing manifest does not have.
+    let c = d.join("dagon");
+    package(&c, "dagon-mcu-stm32f401re", "", &[]);
+    std::fs::write(
+        c.join("packages/dagon-board-nucleo-f401re/template/Cargo.toml"),
+        "[package]\nname = \"{{node}}\"\nversion = \"0.1.0\"\n\n[dependencies]\n{{dep:dagon-board-nucleo-f401re}}\n\n[target.'cfg(target_os = \"none\")'.dependencies]\n{{dep:dagon-mcu-stm32f401re}}\n",
+    )
+    .unwrap();
+    gen(
+        &base,
+        &desk(),
+        &src,
+        &BTreeMap::new(),
+        &["seg".into()],
+        false,
+    )
+    .unwrap();
+    let m = read(&base, "nodes/seg/Cargo.toml");
+    let doc: toml_edit::DocumentMut = m.parse().unwrap();
+    assert!(
+        doc["dependencies"]
+            .get("dagon-board-nucleo-f401re")
+            .is_some(),
+        "{m}"
+    );
+    assert!(
+        doc["target"]["cfg(target_os = \"none\")"]["dependencies"]
+            .get("dagon-mcu-stm32f401re")
+            .is_some(),
+        "{m}"
+    );
+}

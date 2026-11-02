@@ -1,6 +1,6 @@
 import { readFileSync } from 'node:fs';
 import { describe, expect, test } from 'vitest';
-import { decodeHelloResp, supported_boards, topo_check, topo_compile, verify_release } from './dagon.ts';
+import { decodeHelloResp, supportedBoards, topo_check, topo_compile, verify_release } from './dagon.ts';
 
 const repo = (rel: string) => new URL(`../../../${rel}`, import.meta.url);
 const golden = (name: string) => new Uint8Array(readFileSync(repo(`crates/dagon-format/golden/${name}`)));
@@ -12,7 +12,7 @@ const TEST_PUBKEY = Uint8Array.from(
 
 describe('dagon-wasm exports', () => {
   test('supported boards come from the Rust table', () => {
-    const mcus = supported_boards().map((b) => b.mcu);
+    const mcus = supportedBoards().map((b) => b.mcu);
     expect(mcus).toContain('rp2040');
     expect(mcus).toContain('stm32f401re');
   });

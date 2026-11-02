@@ -68,6 +68,14 @@ export const BAND = {
     sentence: 'USB ケーブルを挿し直してから、もう一度つないでください。',
     button: 'もう一度つなぐ',
   },
+  /**
+   * The page's own code (dagon-wasm) did not load. Borrows M35's sentence and
+   * button until the copy table has a line for this case; the button reloads.
+   */
+  LOAD: {
+    sentence: 'インターネットにつながっているか確かめてから、もう一度読み込んでください。',
+    button: 'もう一度読み込む',
+  },
 } as const satisfies Record<string, BandCopy>;
 
 /** M01: browser without Web Serial. */

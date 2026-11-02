@@ -10,7 +10,9 @@ export type View =
   | { kind: 'checking' }
   | { kind: 'connected'; hello: HelloResp }
   | { kind: 'failed'; failure: ConnectFailure }
-  | { kind: 'lost' };
+  | { kind: 'lost' }
+  /** dagon-wasm did not load; the only way on is reloading the page. */
+  | { kind: 'unavailable' };
 
 const BAND_OF: Record<ConnectFailure, BandCopy> = {
   'not-found': BAND.M04,
@@ -28,6 +30,8 @@ export function bandOf(v: View): BandCopy | null {
       return BAND_OF[v.failure];
     case 'lost':
       return BAND.M34;
+    case 'unavailable':
+      return BAND.LOAD;
     default:
       return null;
   }

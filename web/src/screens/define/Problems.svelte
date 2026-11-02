@@ -1,12 +1,14 @@
 <script lang="ts">
   import { DEFINE } from '../../app/copy.ts';
   import type { Define } from '../../app/define/define.svelte.ts';
+  import { problemChip } from '../../app/define/problems.ts';
 
   interface Props {
     d: Define;
   }
 
   let { d }: Props = $props();
+  const unsupported = $derived(d.problems.filter((p) => problemChip(p).kind === 'unsupported').length);
 </script>
 
 <section class="problems" aria-labelledby="problems-h">
@@ -14,11 +16,12 @@
     <p class="lead">{DEFINE.nothingSelected}</p>
     {#if d.doc.topo.nodes.length}<h2 id="problems-h">{DEFINE.problemsNone}</h2>{/if}
   {:else}
-    <h2 id="problems-h" tabindex="-1">{DEFINE.problems(d.errors)}{#if d.warnings}&ensp;{DEFINE.cautions(d.warnings)}{/if}</h2>
+    <h2 id="problems-h" tabindex="-1">{DEFINE.problems(d.errors - unsupported)}{#if d.warnings}&ensp;{DEFINE.cautions(d.warnings)}{/if}{#if unsupported}&ensp;{DEFINE.unsupported(unsupported)}{/if}</h2>
     <ul>
       {#each d.problems as p, i (i)}
-        <li class:warn={p.severity === 'warning'} aria-label={DEFINE.problemName(p.short, p.rule, p.sentence)}>
-          <p class="head"><span>{p.severity === 'warning' ? '▲' : '!'} {p.short}</span><span class="rule" translate="no">{p.rule}</span></p>
+        {@const c = problemChip(p)}
+        <li class:warn={c.kind !== 'error'} aria-label={DEFINE.problemName(p.short, p.rule, p.sentence)}>
+          <p class="head"><span>{c.mark} {p.short}</span><span class="rule" translate="no">{p.rule}</span></p>
           <p class="fix-s">{p.sentence}</p>
           {#if p.select}<button class="secondary" onclick={() => d.fix(p)}>{DEFINE.fix}</button>{/if}
         </li>

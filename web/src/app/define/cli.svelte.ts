@@ -2,8 +2,9 @@
 // the URL fragment kept in sessionStorage, API calls with it as a Bearer
 // token, and the event WebSocket for job progress, logs, results, questions
 // and the hub hand-over. Keys never come here: hello reports only whether
-// a key exists and its id. Paths are never sent; serve takes them from
-// dagon.toml.
+// a key exists and its id. Paths are never sent (serve takes them from
+// dagon.toml) except where to open or make a project, chosen from serve's own
+// GET /v1/fs list (§8.2).
 
 export type CliState = 'none' | 'connecting' | 'ready' | 'stopped' | 'denied';
 
@@ -17,6 +18,43 @@ export interface Hello {
   /** The developer's public key (64 hex digits) the page verifies releases with. */
   release_key?: string;
 }
+
+/** A project serve knows: its folder and its name. */
+export interface ProjectRef {
+  path: string;
+  name: string;
+}
+
+/** GET /v1/project: whether a project is open, and which. */
+export interface ProjectInfo {
+  open: boolean;
+  path?: string;
+  name?: string;
+  /** Recent projects, when serve keeps them (up to 5, newest first). */
+  recent?: ProjectRef[];
+}
+
+/** One folder of GET /v1/fs; `project` when it holds a dagon.toml. */
+export interface FsFolder {
+  name: string;
+  project: boolean;
+}
+
+/** GET /v1/fs: the folders of `path` (under home only; key folders left out). */
+export interface FsList {
+  path: string;
+  /** null at the home folder. */
+  parent: string | null;
+  folders: FsFolder[];
+}
+
+/**
+ * How opening or making a project went (POST /v1/project/open, /new):
+ * `missing` no dagon.toml (404), `key` its key is unusable (422), `busy` a
+ * job runs (409), `exists` the folder is not empty (409 on new), `refused`
+ * outside home or a key folder (403), `failed` anything else.
+ */
+export type ProjectResult = 'opened' | 'missing' | 'key' | 'busy' | 'exists' | 'refused' | 'failed';
 
 export type JobKind = 'build' | 'sign' | 'release' | 'gen' | 'flash' | 'conform' | 'ai_topology' | string;
 export type JobState = 'queued' | 'running' | 'question' | 'succeeded' | 'failed' | 'cancelled' | 'unknown';
@@ -225,6 +263,72 @@ export class Cli {
     const r = await this.call('GET', `release/${encodeURIComponent(id)}`);
     if (!r.ok) throw new Error(String(r.status));
     return new Uint8Array(await r.arrayBuffer());
+  }
+
+  /** GET /v1/release/latest: the project's latest .dgb ("最新のリリースを使う"); null when there is none. */
+  async latestRelease(): Promise<Uint8Array | null> {
+    if (this.state !== 'ready') return null;
+    const r = await this.call('GET', 'release/latest');
+    return r.ok ? new Uint8Array(await r.arrayBuffer()) : null;
+  }
+
+  /** GET /v1/bootcore/{node}: the node's signed boot core for the ROM path (feature `bootcore`); null when there is none. */
+  async bootcore(node: string): Promise<Uint8Array | null> {
+    if (!this.has('bootcore')) return null;
+    const r = await this.call('GET', `bootcore/${encodeURIComponent(node)}`);
+    return r.ok ? new Uint8Array(await r.arrayBuffer()) : null;
+  }
+
+  /** GET /v1/project (feature `project`): the open project, if any (SC-S0). */
+  project(): Promise<ProjectInfo> {
+    return this.json<ProjectInfo>('GET', 'project');
+  }
+
+  /** GET /v1/fs (feature `project`): the folders of `path` under the home folder; serve normalises and confines it. */
+  fs(path?: string): Promise<FsList> {
+    return this.json<FsList>('GET', path === undefined ? 'fs' : `fs?path=${encodeURIComponent(path)}`);
+  }
+
+  /** POST /v1/project/open {path}: a folder with dagon.toml; serve switches to its keys. */
+  openProject(path: string): Promise<ProjectResult> {
+    return this.projectCall('project/open', { path }, false);
+  }
+
+  /** POST /v1/project/new {path, from_sample}: `dagon new` in the new folder `path` (its name is the project's). */
+  newProject(path: string, sample: boolean): Promise<ProjectResult> {
+    return this.projectCall('project/new', { path, from_sample: sample }, true);
+  }
+
+  private async projectCall(path: string, body: unknown, making: boolean): Promise<ProjectResult> {
+    let r: Response;
+    try {
+      r = await this.call('POST', path, body);
+    } catch {
+      return 'failed';
+    }
+    if (r.ok) {
+      // The project's keys replace the last one's: hello says which (release_key, key_id, workspace).
+      await this.refreshHello();
+      return 'opened';
+    }
+    if (r.status === 404) return 'missing';
+    if (r.status === 422) return 'key';
+    if (r.status === 403) return 'refused';
+    if (r.status !== 409) return 'failed';
+    // 409 is a running job, or (making) a folder that is not empty.
+    const msg = String(((await r.json().catch(() => ({}))) as { error?: string }).error ?? '');
+    return making && !/job/.test(msg) ? 'exists' : 'busy';
+  }
+
+  /** GET /v1/hello again (after switching projects). */
+  async refreshHello(): Promise<void> {
+    const r = await this.call('GET', 'hello').catch(() => null);
+    if (r?.ok) this.hello = (await r.json()) as Hello;
+  }
+
+  /** "最初からやり直す": the jobs this page shows are its records too (serve's files stay). */
+  clearJobs(): void {
+    this.jobs = [];
   }
 
   /** GET/PUT /v1/nodes/{id}/board (dev-flow §5.1), when serve offers it. */

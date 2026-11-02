@@ -46,16 +46,6 @@
     if (!release?.release) return;
     onuse(`${release.release}.dgb`, await cli.releaseBytes(release.release));
   }
-
-  async function download() {
-    if (!release?.release) return;
-    const bytes = await cli.releaseBytes(release.release);
-    const a = document.createElement('a');
-    a.href = URL.createObjectURL(new Blob([bytes as BlobPart]));
-    a.download = `${release.release}.dgb`;
-    a.click();
-    URL.revokeObjectURL(a.href);
-  }
 </script>
 
 {#snippet stateChip(j: Job | undefined)}
@@ -155,7 +145,6 @@
         <h3><span class="n">04</span>{RELEASE_STEPS.steps[3]}</h3>
         <div class="actions">
           <button class="primary" aria-disabled={!release?.release} onclick={() => void use()}>{RELEASE_STEPS.useInOperate}</button>
-          <button class="secondary" aria-disabled={!release?.release} onclick={() => void download()}>{RELEASE_STEPS.download}</button>
         </div>
       </li>
     </ol>

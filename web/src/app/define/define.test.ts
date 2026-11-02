@@ -1,7 +1,9 @@
 import { describe, expect, test } from 'vitest';
 import { RULE_FIX } from '../copy.ts';
 import { Define } from './define.svelte.ts';
-import { connect, setLink, setLinkKind } from './model.ts';
+import { connect, placeMcu, setLink, setLinkKind, setNode } from './model.ts';
+import { problemChip } from './problems.ts';
+import { LINK } from '../copy.ts';
 
 describe('define session', () => {
   test('the sample checks clean; placing, undo and redo walk the history', () => {
@@ -55,5 +57,43 @@ describe('define session', () => {
     expect(e.config.yaml).toBe(d.config.yaml);
     expect(e.importYaml('nodes: [')).toBe(false);
     expect(e.unreadable).toBe(true);
+  });
+
+  test('運用 can be entered only with a 構成 that has no problems and is updatable (M68 / M69)', () => {
+    const d = new Define();
+    expect(d.operable).toBe('empty');
+    d.placeSample();
+    expect(d.operable).toBe('ok');
+    d.apply(setLink(d.doc, 0, 'addr', 0x39));
+    expect(d.operable).toBe('problems');
+    d.undo();
+    // A second 親機 over CAN: a shape updating does not reach yet (V-23 only).
+    const r = placeMcu(d.doc, 'rp2040');
+    d.apply(connect(setNode(r.doc, r.id, 'role', 'coordinator'), r.id, 'hub'));
+    expect(new Set(d.problems.filter((p) => p.severity === 'error').map((p) => p.rule))).toEqual(new Set(['V-23']));
+    expect(d.operable).toBe('unsupported');
+    expect(problemChip(d.problems.find((p) => p.rule === 'V-23')!)).toEqual({ mark: '◇', kind: 'unsupported' });
+  });
+
+  test('"最初からやり直す" empties the 構成 and its history; load opens a 構成 without undo past it', () => {
+    const d = new Define();
+    d.placeSample();
+    d.reset();
+    expect([d.doc.topo.nodes.length, d.canUndo]).toEqual([0, false]);
+  });
+
+  test('a node chosen by MCU reads 「自作 · MCU 名」, and its missing board is a caution (▲), not an error', () => {
+    const d = new Define();
+    d.placeSample();
+    const r = placeMcu(d.doc, 'rp2040');
+    d.apply(connect(r.doc, r.id));
+    const n = d.config.nodes.find((x) => x.id === r.id)!;
+    expect([n.product, n.mcu]).toEqual(['自作', 'RP2040']);
+    expect(problemChip(d.problems.find((p) => p.rule === 'B-01')!)).toEqual({ mark: '▲', kind: 'warning' });
+  });
+
+  test('a CAN link bundle says its kind, not 「0 本」', () => {
+    expect(LINK.bundle('CAN', 0, 0)).toBe('CAN');
+    expect(LINK.bundle('I2C', 5, 3)).toBe('I2C · 5 本（うち共有 3）');
   });
 });

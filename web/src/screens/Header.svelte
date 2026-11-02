@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { CLI_NONE, HELP, HUB, HUB_NAME, MODE, ORDER, PRODUCT, STEP } from '../app/copy.ts';
+  import { CLI_NONE, HELP, HUB, HUB_NAME, MENU, MODE, ORDER, PRODUCT, STEP } from '../app/copy.ts';
   import type { HubState, Step } from '../app/machine.ts';
 
   interface Props {
@@ -14,16 +14,24 @@
     onmode?: (m: 'operate' | 'define') => void;
     /** Switching is held while an update or recovery runs (C10). */
     modeLocked?: boolean;
-    /** Define mode: the configuration on the canvas was sent to the hub (S24). */
-    sent?: boolean;
     /** The CLI link (K0–K3). */
     cliLabel?: string;
-    /** 運用 cannot be entered yet: no 構成 held by the 親機. */
+    /** 運用 cannot be entered: no 構成, problems, or a shape not updatable yet (§5.2). */
     operateLocked?: boolean;
+    /** 運用 was pressed while locked: the band says why (M68, M69). */
+    onlocked?: () => void;
+    /** SC-M: the menu under the header. */
+    menuOpen?: boolean;
+    onmenu?: () => void;
   }
 
-  let { step, hub, drawer, drawerOpen, ondrawer, drawerButton = $bindable(), mode = 'operate', onmode, modeLocked = false, sent = false, cliLabel = CLI_NONE, operateLocked = false }: Props = $props();
+  let { step, hub, drawer, drawerOpen, ondrawer, drawerButton = $bindable(), mode = 'operate', onmode, modeLocked = false, cliLabel = CLI_NONE, operateLocked = false, onlocked, menuOpen = false, onmenu }: Props = $props();
   const off = (m: 'operate' | 'define') => (modeLocked && mode !== m) || (m === 'operate' && operateLocked && mode !== m);
+  function pick(m: 'operate' | 'define') {
+    if (mode === m) return;
+    if (m === 'operate' && operateLocked && !modeLocked) return onlocked?.();
+    if (!off(m)) onmode?.(m);
+  }
   let helpOpen = $state(false);
 </script>
 
@@ -36,12 +44,10 @@
           role="radio"
           aria-checked={mode === m}
           aria-disabled={off(m)}
-          aria-describedby={m === 'operate' && operateLocked ? 'operate-locked' : undefined}
-          onclick={() => !off(m) && mode !== m && onmode(m)}>{label}</button
+          onclick={() => pick(m)}>{label}</button
         >
       {/each}
     </div>
-    {#if operateLocked && mode === 'define'}<span id="operate-locked" class="locked">{MODE.operateLocked}</span>{/if}
   {/if}
   {#if drawer}
     <button class="secondary" aria-expanded={drawerOpen} aria-controls="drawer" bind:this={drawerButton} onclick={ondrawer}>{ORDER.heading}</button>
@@ -62,6 +68,9 @@
   <span class="hub" aria-label={HUB_NAME[hub]}>{HUB[hub]}</span>
   <span class="cli">{cliLabel}</span>
   <button class="secondary" aria-expanded={helpOpen} aria-controls="help" onclick={() => (helpOpen = !helpOpen)}>{HELP.heading}</button>
+  {#if onmenu}
+    <button class="secondary" aria-expanded={menuOpen} aria-controls="menu" onclick={onmenu}>{MENU.button}</button>
+  {/if}
 </header>
 
 <section id="help" class="help" hidden={!helpOpen} aria-label={HELP.heading}>
@@ -101,10 +110,6 @@
   .modes button[aria-checked='true'] {
     background: var(--c-paper);
     color: var(--c-ink);
-  }
-  .locked {
-    color: var(--c-muted);
-    font: 400 var(--t-small-size) / var(--t-small-lh) var(--f-ja);
   }
   .modes button[aria-disabled='true'] {
     opacity: 0.4;

@@ -23,6 +23,17 @@ function fake(opts: { status?: number; hash?: string } = {}) {
       if (opts.status) return new Response('', { status: opts.status });
       if (url === '/v1/hello') return Response.json(HELLO);
       if (url.startsWith('/v1/release/')) return new Response(Uint8Array.of(1, 2, 3));
+      if (url === '/v1/project/open') {
+        const path = JSON.parse(String(init.body)).path as string;
+        const status = { empty: 404, badkey: 422, busy: 409, '..': 403 }[path];
+        if (status) return Response.json({ error: status === 409 ? 'a job is running; switch projects when it ends' : 'no' }, { status });
+        return Response.json({ open: true, path: `/home/u/${path}`, name: path });
+      }
+      if (url === '/v1/project/new') {
+        const path = JSON.parse(String(init.body)).path as string;
+        if (path.endsWith('/proj')) return Response.json({ error: 'the folder is not empty' }, { status: 409 });
+        return Response.json({ open: true, path, name: path.split('/').pop() });
+      }
       if (init.method === 'POST' && ['/v1/gen', '/v1/build', '/v1/sign', '/v1/release', '/v1/flash'].includes(url)) return Response.json({ job: calls.length }, { status: 202 });
       return Response.json({});
     }) as unknown as typeof fetch,
@@ -111,5 +122,36 @@ describe('dagon serve link', () => {
     await cli.connect();
     expect(await cli.releaseBytes('r1')).toEqual(Uint8Array.of(1, 2, 3));
     expect(f.calls[f.calls.length - 1]).toMatchObject({ url: '/v1/release/r1', auth: `Bearer ${PASS}` });
+  });
+
+  test('projects: open and new follow serve (404, 422, 409, 403), and hello is read again after a switch', async () => {
+    const f = fake();
+    const cli = new Cli(f.deps);
+    await cli.connect();
+    const hellos = () => f.calls.filter((c) => c.url === '/v1/hello').length;
+    expect(await cli.openProject('desk')).toBe('opened');
+    expect(hellos()).toBe(2);
+    expect(await cli.openProject('empty')).toBe('missing');
+    expect(await cli.openProject('badkey')).toBe('key');
+    expect(await cli.openProject('busy')).toBe('busy');
+    expect(await cli.openProject('..')).toBe('refused');
+    expect(hellos()).toBe(2);
+    expect(await cli.newProject('/home/u/proj', false)).toBe('exists');
+    expect(await cli.newProject('/home/u/fresh', true)).toBe('opened');
+    expect(f.calls[f.calls.length - 2]).toMatchObject({ url: '/v1/project/new', body: JSON.stringify({ path: '/home/u/fresh', from_sample: true }) });
+    await cli.fs('/home/u/a b');
+    expect(f.calls[f.calls.length - 1].url).toBe('/v1/fs?path=%2Fhome%2Fu%2Fa%20b');
+  });
+
+  test('the latest release and a boot core come only through serve; none is null', async () => {
+    const f = fake();
+    const cli = new Cli(f.deps);
+    await cli.connect();
+    expect(await cli.latestRelease()).toEqual(Uint8Array.of(1, 2, 3));
+    expect(f.calls[f.calls.length - 1]).toMatchObject({ url: '/v1/release/latest', auth: `Bearer ${PASS}` });
+    // No `bootcore` feature in hello: nothing is asked.
+    const n = f.calls.length;
+    expect(await cli.bootcore('seg')).toBeNull();
+    expect(f.calls.length).toBe(n);
   });
 });

@@ -8,12 +8,15 @@
 //! Lock-free (atomics only), so any task or interrupt priority may use it.
 //!
 //! One task may register as preempting ([`Liveness::register_preempting`]):
-//! the link task, which runs above the others and blocks them while it works
-//! (a slot erase takes up to about 30 s). While it is busy only its own
-//! deadline counts, and when it goes idle every other busy deadline moves
-//! later by the time it held the CPU, so starved tasks are not blamed.
+//! the link task, which runs above the others. Around each synchronous
+//! section in which it keeps the CPU (agent request handling, flash erase,
+//! write and verify; a slot erase takes up to about 30 s) it calls
+//! [`Lease::hold_cpu`] and [`Lease::release_cpu`]. During such a section only
+//! its own deadline counts, and afterwards every other busy deadline moves
+//! later by exactly the section's length. Time it spends awaiting (reply
+//! transmission, waiting for input) is not excused: lower tasks can run then.
 
-use core::sync::atomic::{AtomicU32, AtomicU8, Ordering};
+use core::sync::atomic::{AtomicBool, AtomicU32, AtomicU8, Ordering};
 
 /// Tasks that can register.
 pub const MAX_TASKS: usize = 4;
@@ -29,8 +32,10 @@ pub struct Liveness {
     deadline: [AtomicU32; MAX_TASKS],
     /// Slot of the preempting task, or `NONE`.
     preempting: AtomicU8,
-    /// When the preempting task last went busy (ms, wrapping).
-    preempt_since: AtomicU32,
+    /// The preempting task is inside a synchronous section.
+    holding: AtomicBool,
+    /// Start of that section (ms, wrapping).
+    hold_since: AtomicU32,
 }
 
 /// One task's registration.
@@ -45,7 +50,8 @@ impl Liveness {
             state: [const { AtomicU8::new(FREE) }; MAX_TASKS],
             deadline: [const { AtomicU32::new(0) }; MAX_TASKS],
             preempting: AtomicU8::new(NONE),
-            preempt_since: AtomicU32::new(0),
+            holding: AtomicBool::new(false),
+            hold_since: AtomicU32::new(0),
         }
     }
 
@@ -70,21 +76,17 @@ impl Liveness {
     }
 
     /// Whether a busy task is past its deadline at `now_ms`. While the
-    /// preempting task is busy, only its deadline is checked.
+    /// preempting task holds the CPU, only its own deadline is checked.
     pub fn overdue(&self, now_ms: u32) -> bool {
         let late = |i: usize| {
             self.state[i].load(Ordering::Acquire) == BUSY
                 && now_ms.wrapping_sub(self.deadline[i].load(Ordering::Acquire)) as i32 >= 0
         };
-        match self.preempting_busy() {
-            Some(p) => late(p),
-            None => (0..MAX_TASKS).any(late),
-        }
-    }
-
-    fn preempting_busy(&self) -> Option<usize> {
         let p = self.preempting.load(Ordering::Acquire);
-        (p != NONE && self.state[p as usize].load(Ordering::Acquire) == BUSY).then_some(p as usize)
+        if p != NONE && self.holding.load(Ordering::Acquire) {
+            return late(p as usize);
+        }
+        (0..MAX_TASKS).any(late)
     }
 }
 
@@ -98,28 +100,40 @@ impl Lease {
     /// Starts work that must finish within `budget_ms` of `now_ms`.
     pub fn busy(&self, now_ms: u32, budget_ms: u32) {
         let o = self.owner;
-        if self.is_preempting() && o.state[self.slot].load(Ordering::Acquire) != BUSY {
-            o.preempt_since.store(now_ms, Ordering::Release);
-        }
         o.deadline[self.slot].store(now_ms.wrapping_add(budget_ms), Ordering::Release);
         o.state[self.slot].store(BUSY, Ordering::Release);
     }
 
-    /// Back to waiting for an event at `now_ms`: no deadline. For the
-    /// preempting task, the other busy deadlines move later by the time it
-    /// was busy.
-    pub fn idle(&self, now_ms: u32) {
+    /// Back to waiting for an event: no deadline.
+    pub fn idle(&self) {
+        self.owner.state[self.slot].store(IDLE, Ordering::Release);
+    }
+
+    /// Preempting task only: from `now_ms` on it keeps the CPU without
+    /// yielding (no effect for other leases).
+    pub fn hold_cpu(&self, now_ms: u32) {
         let o = self.owner;
-        let was_busy = o.state[self.slot].swap(IDLE, Ordering::AcqRel) == BUSY;
-        if !(was_busy && self.is_preempting()) {
-            return;
+        if self.is_preempting() && !o.holding.load(Ordering::Acquire) {
+            o.hold_since.store(now_ms, Ordering::Release);
+            o.holding.store(true, Ordering::Release);
         }
-        let held = now_ms.wrapping_sub(o.preempt_since.load(Ordering::Acquire));
+    }
+
+    /// Preempting task only: the synchronous section ends at `now_ms`; every
+    /// other busy deadline moves later by its length. Returns that length.
+    pub fn release_cpu(&self, now_ms: u32) -> u32 {
+        let o = self.owner;
+        if !self.is_preempting() || !o.holding.load(Ordering::Acquire) {
+            return 0;
+        }
+        let held = now_ms.wrapping_sub(o.hold_since.load(Ordering::Acquire));
         for i in (0..MAX_TASKS).filter(|&i| i != self.slot) {
             if o.state[i].load(Ordering::Acquire) == BUSY {
                 o.deadline[i].fetch_add(held, Ordering::AcqRel);
             }
         }
+        o.holding.store(false, Ordering::Release);
+        held
     }
 
     fn is_preempting(&self) -> bool {
@@ -130,6 +144,7 @@ impl Lease {
 impl Drop for Lease {
     fn drop(&mut self) {
         if self.is_preempting() {
+            self.owner.holding.store(false, Ordering::Release);
             self.owner.preempting.store(NONE, Ordering::Release);
         }
         self.owner.state[self.slot].store(FREE, Ordering::Release);
@@ -149,7 +164,7 @@ mod tests {
         a.busy(1_000, 500);
         assert!(!L.overdue(1_499));
         assert!(L.overdue(1_500));
-        a.idle(1_600);
+        a.idle();
         assert!(!L.overdue(9_999));
         // Deadlines across the u32 wrap.
         b.busy(u32::MAX - 10, 100);
@@ -161,27 +176,49 @@ mod tests {
     }
 
     #[test]
-    fn a_long_preempting_task_does_not_starve_the_others() {
+    fn a_long_synchronous_section_does_not_starve_the_others() {
         static L: Liveness = Liveness::new();
         let link = L.register_preempting().unwrap();
         let demo = L.register().unwrap();
         assert!(L.register_preempting().is_none());
-        // Demo starts 500 ms of work, then the link erases for 5 s and the
-        // demo cannot run meanwhile.
+        // Demo starts 500 ms of work, then the link erases for 5 s without
+        // yielding: the demo cannot run meanwhile.
         demo.busy(1_000, 500);
         link.busy(1_100, 30_000);
+        link.hold_cpu(1_100);
         assert!(!L.overdue(1_600));
         assert!(!L.overdue(6_000));
-        link.idle(6_100);
+        assert_eq!(link.release_cpu(6_100), 5_000);
         // The demo's deadline moved by the 5 s the link held the CPU.
         assert!(!L.overdue(6_100));
         assert!(!L.overdue(6_499));
-        // Genuinely stuck after the link went idle: overdue, feeding stops.
+        // Genuinely stuck after the section: overdue, feeding stops.
         assert!(L.overdue(6_500));
-        // A stuck link is caught on its own deadline.
-        demo.idle(6_500);
+        link.idle();
+        // A link stuck inside a section is caught on its own deadline.
+        demo.idle();
         link.busy(7_000, 1_000);
+        link.hold_cpu(7_000);
         assert!(L.overdue(8_000));
+        link.release_cpu(8_000);
+    }
+
+    #[test]
+    fn awaiting_the_reply_does_not_excuse_a_stuck_task() {
+        static L: Liveness = Liveness::new();
+        let link = L.register_preempting().unwrap();
+        let demo = L.register().unwrap();
+        demo.busy(1_000, 500);
+        // Short synchronous handling, then 5 s waiting for the reply to
+        // leave: the demo could run but does not.
+        link.busy(1_000, 30_000);
+        link.hold_cpu(1_000);
+        assert_eq!(link.release_cpu(1_050), 50);
+        assert!(!L.overdue(1_549));
+        assert!(L.overdue(1_550));
+        assert!(L.overdue(6_000));
+        link.idle();
+        assert!(L.overdue(6_000), "the link going idle excuses nothing");
     }
 
     #[test]

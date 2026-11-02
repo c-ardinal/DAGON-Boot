@@ -7,6 +7,9 @@
 //! Usage:
 //!   f401-testimg image <app.elf> <out.img> <a|b> <major.minor.patch>
 //!   f401-testimg log <out.bin> <confirmed.img> [<pending.img>]
+//!
+//! Images carry `DAGON_TARGET_TAG` (at run time; default the demo node's
+//! `seg-f401-7seg`), which must match the boot core's.
 
 use std::process::ExitCode;
 
@@ -25,6 +28,11 @@ const TEST_SEED: [u8; 32] = [
 ];
 
 const PT_LOAD: u32 = 1;
+
+/// The image target tag to sign for.
+fn tag() -> String {
+    std::env::var("DAGON_TARGET_TAG").unwrap_or_else(|_| "seg-f401-7seg".into())
+}
 
 fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
@@ -79,7 +87,7 @@ fn image(elf: &str, out: &str, slot: &str, version: &str) -> Res<()> {
         min_bootcore_version: Version::default(),
         payload_sha256: sha256(&body),
         key_id: key_id(&kp.pk),
-        target_tag: layout::TARGET_TAG,
+        target_tag: target_tag(&tag()),
         proto_version: 1,
         capabilities: capabilities::CONFIRM_BY_HUB,
         signature: [0; 64],

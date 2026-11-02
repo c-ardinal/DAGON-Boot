@@ -3,16 +3,16 @@
 //! state every 2 ms, read the response, every access bounded by the
 //! request's deadline. The UART link is [`crate::uart`].
 
+use crate::uart::{hello_answer, hello_request};
 use dagon_port::{BusError, I2cBus, StreamPort};
 use dagon_proto::mailbox::{self, STATE_LEN};
 use dagon_proto::payload::HelloResp;
 use dagon_proto::{frame_len, max_payload, Frame, Status};
-use embassy_rp::i2c::{self, AbortReason, Async, I2c};
 use embassy_rp::i2c::Instance as I2cInstance;
+use embassy_rp::i2c::{self, AbortReason, Async, I2c};
 use embassy_rp::pio::Instance as PioInstance;
 use embassy_rp::pio_programs::uart::{PioUartRx, PioUartTx};
 use embassy_time::{with_deadline, with_timeout, Duration, Instant, Timer};
-use crate::uart::{hello_answer, hello_request};
 
 const MAILBOX_POLL: Duration = Duration::from_millis(2);
 pub const I2C_FRAME: usize = frame_len(max_payload::I2C);

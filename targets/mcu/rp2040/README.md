@@ -2,35 +2,24 @@
 
 DAGON for RP2040 firmware: the flash layout and linker map, the boot images
 (stage0 and the boot core), the flash port, the liveness-gated watchdog, the
-slot store, DAGON over USB CDC, link drivers (I2C controller with the DAGON
-mailbox, PIO UART) and sub-MCU control lines. Topology MCU id `rp2040`,
-flash map `rp2040-4m`.
+slot store, DAGON over USB CDC, DAGON's high-priority executor, the 親機
+relay (PC link, relaying to 子機 over I2C0 and a PIO UART, the STM32 ROM
+recovery path) and the link drivers. Topology MCU id `rp2040`, flash map
+`rp2040-4m`. RP2040 nodes are 親機.
 
 Board-specific values (pins, which link is wired where, flash size, display
 and other extras) live in a board package that implements [`BoardDef`]
 (`src/node.rs`), for example `../../boards/waveshare-rp2040-touch-lcd-1.28`.
-A board without a package needs only its own `BoardDef` (a few lines naming
-the flash size and splitting the peripherals).
+A board without a package needs only its own `BoardDef` and links (see
+`template/src/board.rs`).
 
-## A minimal app
+## A 親機 with your own task
 
-`Cargo.toml` (paths, or git dependencies on a release tag):
-
-```toml
-[features]
-slot-b = ["dagon-board-waveshare-rp2040-touch-lcd-1-28/slot-b"]
-
-[dependencies]
-dagon-board-waveshare-rp2040-touch-lcd-1-28 = { path = ".../targets/boards/waveshare-rp2040-touch-lcd-1.28", features = ["usb"] }
-dagon-mcu-rp2040 = { path = ".../targets/mcu/rp2040", features = ["usb"] }
-embassy-rp = { version = "0.10.0", features = ["rp2040", "time-driver", "critical-section-impl"] }
-embassy-executor = { version = "0.10", features = ["platform-cortex-m", "executor-thread"] }
-embassy-time = "0.5"
-cortex-m-rt = "0.7"
-panic-halt = "1"
-```
-
-`.cargo/config.toml`:
+This is what `dagon new` generates for the Waveshare board
+(`../../boards/waveshare-rp2040-touch-lcd-1.28/template`). `Cargo.toml`
+names the two packages without features (paths, or git dependencies on a
+release tag); `.cargo/config.toml` sets the target, the link arguments and
+the node's tag:
 
 ```toml
 [build]
@@ -38,75 +27,85 @@ target = "thumbv6m-none-eabi"
 
 [target.thumbv6m-none-eabi]
 rustflags = ["-C", "link-arg=--nmagic", "-C", "link-arg=-Tlink.x"]
+
+[env]
+DAGON_TARGET_TAG = { value = "my-hub", force = true }
 ```
 
 `src/main.rs` (no build.rs: the memory map comes from this package):
 
 ```rust
-#![no_std]
-#![no_main]
+use dagon_board_waveshare_rp2040_touch_lcd_1_28::{self as board, Board, BoardDef};
+use dagon_mcu_rp2040::relay::{self, RelayConfig};
+use dagon_mcu_rp2040::watchdog::{now_ms, Guard, Trial};
 
-use dagon_board_waveshare_rp2040_touch_lcd_1_28::{self as board, Board, BoardDef, Io};
-use dagon_mcu_rp2040::watchdog::{now_ms, Guard, Lease, Level, Trial};
-use embassy_executor::Spawner;
-use embassy_time::Timer;
-use panic_halt as _;
-
-// Task 0 serves DAGON, task 1 is the app. Unconfirmed images keep feeding
-// for 60 s after boot, then roll back unless the host confirmed them.
-static GUARD: Guard<2> = Guard::new(
-    [Level::Preempting, Level::Background],
+const TASKS: usize = board::APP_TASKS + app::TASKS;
+static GUARD: Guard<TASKS> = Guard::new(
+    relay::levels::<TASKS>(),
     Trial::FeedUntilMs(60_000),
     now_ms,
 );
 
 #[embassy_executor::main]
-async fn main(spawner: Spawner) {
+async fn main(spawner: embassy_executor::Spawner) {
     let (dagon, io) = Board::split(embassy_rp::init(Default::default()));
-    board::start(spawner, dagon, &GUARD, "my-node", self_check);
-    spawner.spawn(app(io, GUARD.lease(1)).unwrap());
+    let cfg = RelayConfig {
+        tag: dagon_mcu_rp2040::TARGET_TAG,
+        name: "my-hub",
+        fallback: &[],
+        self_check: app::self_check,
+    };
+    board::start(spawner, dagon, io, &GUARD, cfg);
+    app::start(spawner, &GUARD, board::APP_TASKS);
 }
+```
 
-/// Whether a version on trial may be confirmed (your health check).
-fn self_check() -> bool {
+`src/app.rs`, the developer's file:
+
+```rust
+pub const TASKS: usize = 1;
+
+pub fn self_check() -> bool {
     true
 }
 
+pub fn start<const N: usize>(spawner: Spawner, guard: &'static Guard<N>, first: usize) {
+    spawner.spawn(work(guard.lease(first)).expect("task pool"));
+}
+
 #[embassy_executor::task]
-async fn app(_io: Io, live: Lease) {
+async fn work(lease: Lease) {
     loop {
-        live.busy(500); // a piece of work stuck past 500 ms resets the chip
+        lease.busy(500); // a piece of work stuck past its budget resets the chip
         // Your work here.
-        live.idle();
-        Timer::after_millis(500).await;
+        lease.idle();
+        Timer::after(Duration::from_secs(1)).await;
     }
 }
 ```
 
-`board::start` (`node::start` for this board) opens the slot store, takes
-over the watchdog the boot core started, and spawns the USB device, the
-agent (guard task `node::DAGON_TASK`, 0) and the watchdog feeder.
-`"my-node"` is the node's image target tag (as in the topology; also the
-USB product name); `self_check` decides whether a version on trial may be
-confirmed. An app that keeps `embassy_rp::Peripherals` itself passes
-`dagon_pins!(p)` instead of splitting. Build with `DAGON_PUBKEY` set (below);
-`cargo build --release --features slot-b` links the same app for slot B.
+`board::start` runs the relay: it opens the slot store and the agent
+(taking over the watchdog the boot core started), spawns the PC task and
+one task per sub-node link on DAGON's high-priority executor (`exec`, an
+interrupt executor on SWI_IRQ_0 at P1, guard tasks 0..3 `Preempting`), and
+the watchdog feeder and the display on `spawner` (thread mode,
+`Background`). Your tasks run in thread mode below the relay, so they never
+delay it; a stuck one stops the feeding and the chip resets (a version on
+trial then rolls back). Build with `DAGON_PUBKEY` set (below);
+`--features slot-b` links the same app for slot B.
 
-The serving task is declared `Preempting` even on the same executor: while
-it erases a slot (it does not yield) the app cannot run, and this level
-freezes the app's deadline meanwhile instead of counting it as stuck.
-
-DAGON's own hub firmware (`../../rp2040-hub`) uses the same pieces with its
-own task layout: `node::open` for the agent, `usb::new` / `usb::run` for
-the link, the board package's helpers for its sub-node links.
+DAGON's own hub firmware (`../../rp2040-hub`) is this with the demo's
+fallback node list and its tag `hub-rp2040-lcd`. Without the relay,
+`node::start` serves a plain USB node the same way.
 
 ## Features
 
 | Feature | Adds |
 |---|---|
-| (none) | layout, image checks, STATUS mapping, frames, liveness (host-testable) |
+| (none) | layout, image checks, STATUS mapping, frames, liveness, tag check (host-testable) |
 | `hal` | `node`, `flash`, `watchdog`, `store`, `links`, `sub`; `PUBKEY` / `TEST_KEY` |
-| `usb` | `usb` and `node::start` (this package binds `USBCTRL_IRQ`) |
+| `usb` | `usb`, `exec` and `node::start` (this package binds `USBCTRL_IRQ` and `SWI_IRQ_0`) |
+| `relay` (default) | `relay`: the 親機 relay |
 | `slot-b` | link the app for APP slot B |
 | `image-stage0`, `image-bootcore` | link the boot images instead of an app |
 | `diag-panic` | a panic blinks the last `arm::step` code on the board's LED |
@@ -138,11 +137,14 @@ this package (their memory maps and the boot core's key come from here):
 ```sh
 export DAGON_PUBKEY=/path/outside/the/repo/dagon-signing.pub
 (cd targets/mcu/rp2040/stage0 && cargo build --release)
-(cd targets/mcu/rp2040/bootcore && cargo build --release)
+(cd targets/mcu/rp2040/bootcore && DAGON_TARGET_TAG=my-hub cargo build --release)
 ```
 
-The boot core accepts app images tagged `layout::HUB_TAG` (DAGON's hub
-firmware). Their status LED is GPIO25 (the hub board's backlight);
+The boot core is built per node: it accepts only app images tagged with
+`DAGON_TARGET_TAG` (the node's tag, as in the app's `.cargo/config.toml`;
+`hub-rp2040-lcd` for DAGON's hub firmware), and its build fails without
+it. A host test (`tests/hub_boot.rs`) shows another node's image refused.
+Their status LED is GPIO25 (the hub board's backlight);
 `DAGON_DIAG_LED=<gpio>` at build time picks another one. Both builds take
 `--features diag` for step blink codes (see the hub README).
 

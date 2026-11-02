@@ -6,11 +6,15 @@ use dagon_core::log::{Log, SlotRef};
 use dagon_format::header::*;
 use dagon_format::statelog::{kind, reason, target, FaceHeader, Record};
 use dagon_format::{key_id, sha256, Version};
+use dagon_mcu_rp2040::layout::*;
+use dagon_mcu_rp2040::tag::checked_tag;
+use dagon_mcu_rp2040::{image, status};
 use dagon_port::{Flash, FlashError, FlashRegion};
 use dagon_proto::payload::SlotState;
 use ed25519_compact::{KeyPair, Seed};
-use dagon_mcu_rp2040::layout::*;
-use dagon_mcu_rp2040::{image, status};
+
+/// The demo hub's tag (the images here carry it).
+const HUB_TAG: &str = "hub-rp2040-lcd";
 
 /// RFC 8032 section 7.1 TEST 1 key (public test data).
 const SEED: [u8; 32] = [
@@ -211,4 +215,28 @@ fn trial_without_confirm_rolls_back_to_a() {
         (SlotState::Confirmed, SlotState::Reverted)
     );
     assert_eq!((st.confirmed, st.last_reason), (0, reason::TRIAL_EXHAUSTED));
+}
+
+/// A boot core built for another node's tag starts none of these images
+/// (both are tagged for the demo hub); built for their tag it starts A.
+#[test]
+fn boot_core_refuses_another_nodes_tag() {
+    let kp = KeyPair::from_seed(Seed::new(SEED));
+    let (mut m, _) = install(&kp);
+    let mine = BootConfig {
+        target_tag: checked_tag("my-hub"),
+        ..config(&kp)
+    };
+    let mut log = Log::load(&mut m, &APP_LOG_LAYOUT).unwrap();
+    let d = boot::decide(&mut m, &mut log, &APP_SLOTS, &mine);
+    assert!(matches!(d, Decision::NoImage), "{d:?}");
+
+    let (mut m, _) = install(&kp);
+    let theirs = BootConfig {
+        target_tag: checked_tag(HUB_TAG),
+        ..config(&kp)
+    };
+    let mut log = Log::load(&mut m, &APP_LOG_LAYOUT).unwrap();
+    let d = boot::decide(&mut m, &mut log, &APP_SLOTS, &theirs);
+    assert!(matches!(d, Decision::Boot { .. }), "{d:?}");
 }

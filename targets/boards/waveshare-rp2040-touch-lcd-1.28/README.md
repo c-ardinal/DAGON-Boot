@@ -23,6 +23,13 @@ id `waveshare-rp2040-touch-lcd-1.28`; Cargo package names cannot hold the
   to sub nodes.
 - Flash: 4 MiB (`FLASH_SIZE`, checked against the MCU layout).
 
-Features: `usb` (DAGON over USB, `node::start`), `slot-b`, `diag-panic`
-(forwarded to the MCU package). See `../../mcu/rp2040/README.md` for a
+`start` runs the DAGON 親機 on this board: the relay of the MCU package
+over the board's I2C0, PIO UART and STM32 control lines, the touch
+controller held out of reset and, with `display`, the round display's home
+screen (guard task `DISPLAY_TASK`; the app's tasks start at `APP_TASKS`).
+This package binds I2C0_IRQ, PIO0_IRQ_0 and DMA_IRQ_0 (`Irqs`).
+
+Features: `relay` and `display` (default), `diag` (display test pattern),
+`slot-b`, `diag-panic` (forwarded to the MCU package). `template/` is the
+project `dagon new` generates for a 親機 on this board. See `../../mcu/rp2040/README.md` for a
 complete app and `../../rp2040-hub` for DAGON's hub firmware on this board.

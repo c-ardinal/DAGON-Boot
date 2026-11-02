@@ -14,13 +14,17 @@ build = "build.rs"
 mcu = "rp2040"
 
 [features]
-# usb by default: a generated node names this package without features.
-default = ["usb"]
+# The 親機 relay by default: a generated node names this package without
+# features (RP2040 nodes are 親機).
+default = ["relay"]
 # The embassy-rp parts: flash port, watchdog guard, slot store, link
 # drivers, sub-MCU control lines, and the verifying key from DAGON_PUBKEY.
 hal = ["dep:embassy-rp", "dep:embassy-time", "dep:dagon-agent", "dep:static_cell", "dep:portable-atomic"]
-# DAGON over USB CDC (device, frame link, agent serving loop).
-usb = ["hal", "dep:embassy-usb", "dep:embassy-executor"]
+# DAGON over USB CDC (device, frame link, agent serving loop) and DAGON's
+# high-priority executor (SWI_IRQ_0).
+usb = ["hal", "embassy-rp?/rt", "dep:embassy-usb", "dep:embassy-executor"]
+# The 親機 relay (PC link, sub-node links, ROM recovery path).
+relay = ["usb", "dep:embassy-sync", "dep:embassy-futures", "dep:heapless"]
 # The final binary's memory.x comes from this package: an APP slot body
 # (slot A, or B with `slot-b`) unless it is a boot image.
 slot-b = []
@@ -40,7 +44,10 @@ dagon-agent = { path = "../../../crates/dagon-agent", optional = true }
 embassy-rp = { version = "0.10.0", default-features = false, features = ["rp2040", "boot2-none"], optional = true }
 embassy-time = { version = "0.5", optional = true }
 embassy-usb = { version = "0.6.0", optional = true }
-embassy-executor = { version = "0.10", optional = true }
+embassy-executor = { version = "0.10", features = ["platform-cortex-m", "executor-interrupt"], optional = true }
+embassy-sync = { version = "0.8", optional = true }
+embassy-futures = { version = "0.1", optional = true }
+heapless = { version = "0.9", optional = true }
 static_cell = { version = "2", optional = true }
 # static_cell needs CAS, which thumbv6m only has through a critical section.
 portable-atomic = { version = "1", features = ["critical-section"], optional = true }

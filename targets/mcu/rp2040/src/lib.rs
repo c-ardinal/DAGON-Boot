@@ -13,7 +13,10 @@
 //!   controller with the DAGON mailbox, a PIO UART stream) and sub-MCU
 //!   control lines ([`sub`]); the verifying key embedded at build time
 //!   ([`PUBKEY`], [`TEST_KEY`]).
-//! - `usb`: DAGON over USB CDC ([`usb`]) and `node::start`.
+//! - `usb`: DAGON over USB CDC ([`usb`]), DAGON's high-priority executor
+//!   ([`exec`]) and `node::start`.
+//! - `relay`: the 親機 relay ([`relay`]: PC link, relaying to sub nodes,
+//!   ROM recovery path, sub-node polling).
 //! - Linker memory map: an APP slot body by default (slot B with
 //!   `slot-b`), so apps need no build.rs; `image-stage0` / `image-bootcore`
 //!   for the boot images in `stage0/` and `bootcore/`.
@@ -21,7 +24,7 @@
 //! Board pins, flash size and extras live in a board package.
 #![no_std]
 
-pub use dagon_mcu_common::{frames, liveness, mapped, uart};
+pub use dagon_mcu_common::{frames, liveness, mapped, tag, uart};
 
 pub mod bl;
 pub mod cmd;
@@ -32,12 +35,16 @@ pub mod status;
 #[cfg(target_os = "none")]
 pub mod arm;
 
+#[cfg(feature = "usb")]
+pub mod exec;
 #[cfg(feature = "hal")]
 pub mod flash;
 #[cfg(feature = "hal")]
 pub mod links;
 #[cfg(feature = "hal")]
 pub mod node;
+#[cfg(feature = "relay")]
+pub mod relay;
 #[cfg(feature = "hal")]
 pub mod store;
 #[cfg(feature = "hal")]
@@ -49,6 +56,15 @@ pub mod watchdog;
 
 #[cfg(feature = "hal")]
 pub use node::BoardDef;
+
+/// This node's image target tag, from `DAGON_TARGET_TAG` at build time
+/// (empty if unset). The boot core accepts only images with this tag, and
+/// the node's agent announces it; a generated project sets it in its
+/// `.cargo/config.toml`. Up to 16 ASCII characters.
+pub const TARGET_TAG: &str = match option_env!("DAGON_TARGET_TAG") {
+    Some(t) => t,
+    None => "",
+};
 
 /// The topology's MCU id and flash map this package implements.
 pub const TOPOLOGY_MCU: &str = "rp2040";

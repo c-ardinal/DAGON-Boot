@@ -6,4 +6,7 @@ target = "thumbv7em-none-eabihf"
 rustflags = ["-C", "link-arg=--nmagic", "-C", "link-arg=-Tlink.x", "-C", "link-arg=-Tdefmt.x"]
 
 [env]
+# This node's image target tag: the app announces it, and the boot core
+# for this node must be built with the same DAGON_TARGET_TAG.
+DAGON_TARGET_TAG = { value = "{{tag}}", force = true }
 DEFMT_LOG = "info"

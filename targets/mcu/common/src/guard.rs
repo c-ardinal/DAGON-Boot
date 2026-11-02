@@ -22,6 +22,18 @@ pub const BUSY_LIMIT_MS: u64 = 5_000;
 /// Slack added to a declared bound ([`Guard::busy_for`]).
 pub const BUSY_MARGIN_MS: u64 = 2_000;
 
+/// Levels for a guard whose first `preempting` tasks run on DAGON's
+/// high-priority executor and the rest in thread mode.
+pub const fn levels<const N: usize>(preempting: usize) -> [Level; N] {
+    let mut l = [Level::Background; N];
+    let mut i = 0;
+    while i < preempting && i < N {
+        l[i] = Level::Preempting;
+        i += 1;
+    }
+    l
+}
+
 /// The MCU's watchdog peripheral, as the guard drives it.
 pub trait Dog {
     /// Restart the watchdog countdown.

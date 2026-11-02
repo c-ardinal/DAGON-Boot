@@ -8,7 +8,13 @@ use crate::mapped::Mapped;
 pub fn xip_flash() -> Mapped {
     // SAFETY: the XIP window maps the whole flash read-only at XIP_BASE and
     // nothing writes flash while stage0 runs.
-    unsafe { Mapped::new(XIP_BASE as *const u8, XIP_BASE, crate::layout::MIN_FLASH_SIZE) }
+    unsafe {
+        Mapped::new(
+            XIP_BASE as *const u8,
+            XIP_BASE,
+            crate::layout::MIN_FLASH_SIZE,
+        )
+    }
 }
 
 /// A diagnostic LED (the board package names the GPIO, e.g. a display
@@ -32,7 +38,10 @@ pub mod led {
         let mut n: u32 = 0;
         let mut i = 0;
         while i < v.len() {
-            assert!(v[i].is_ascii_digit(), "DAGON_DIAG_LED: a decimal GPIO number");
+            assert!(
+                v[i].is_ascii_digit(),
+                "DAGON_DIAG_LED: a decimal GPIO number"
+            );
             n = n * 10 + (v[i] - b'0') as u32;
             i += 1;
         }

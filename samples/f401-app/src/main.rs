@@ -6,8 +6,8 @@
 //! (dagon-mcu-stm32f401re) and the board package (dagon-board-nucleo-f401re).
 //!
 //! Tasks (each peripheral owned by one task):
-//! - interrupt executor on the unused USART6 interrupt (preempts thread
-//!   mode): mailbox serving (`node::serve`), owning I2C3 (target) and the
+//! - DAGON's interrupt executor (`exec`, on the unused USART6 interrupt;
+//!   preempts thread mode): mailbox serving (`node::serve`), owning I2C3 (target) and the
 //!   agent with the flash, so the hub is answered whatever the display does;
 //! - thread executor: display multiplexing (segment and digit pins) and the
 //!   watchdog task (IWDG, LED heartbeat).
@@ -29,17 +29,13 @@ use dagon_mcu_stm32f401re::node::{self, ACTIVE};
 use dagon_mcu_stm32f401re::watchdog::{now_ms, Guard, Level, Trial};
 use defmt::{error, info, Display2Format};
 use defmt_rtt as _;
-use embassy_executor::{Executor, InterruptExecutor};
+use embassy_executor::Executor;
 use embassy_stm32::gpio::{Level as Pin, Output, Speed};
-use embassy_stm32::interrupt;
-use embassy_stm32::interrupt::{InterruptExt, Priority};
 use embassy_time::{Duration, Instant, Timer};
 use panic_probe as _;
 use static_cell::StaticCell;
 
 const SELF_CONFIRM: bool = cfg!(feature = "confirm");
-/// Image target tag of this node.
-const TAG: &str = "seg-f401-7seg";
 
 /// How long "TEST KEY" (`tSt`) shows before the version.
 const TEST_KEY_SPLASH: Duration = Duration::from_millis(1500);
@@ -58,15 +54,7 @@ static GUARD: Guard<2> = Guard::new(
     now_ms,
 );
 
-static EXECUTOR_HIGH: InterruptExecutor = InterruptExecutor::new();
 static EXECUTOR_LOW: StaticCell<Executor> = StaticCell::new();
-
-#[interrupt]
-unsafe fn USART6() {
-    // SAFETY: the executor's own interrupt (USART6 is unused); started in
-    // main before use.
-    unsafe { EXECUTOR_HIGH.on_interrupt() }
-}
 
 #[cortex_m_rt::entry]
 fn main() -> ! {
@@ -114,10 +102,13 @@ fn main() -> ! {
     let period = node::watchdog_period_ms(on_trial);
     node::install_watchdog(dagon.iwdg, &GUARD, period, &store);
     let (target, regs) = Board::open_link(dagon.link);
-    let agent = Agent::new(node::config(TAG), store, node::SelfCheck(node::always));
+    let agent = Agent::new(
+        node::config(dagon_mcu_stm32f401re::TARGET_TAG),
+        store,
+        node::SelfCheck(node::always),
+    );
 
-    interrupt::USART6.set_priority(Priority::P6);
-    let high = EXECUTOR_HIGH.start(interrupt::USART6);
+    let high = dagon_mcu_stm32f401re::exec::start();
     high.spawn(node::serve(agent, target, regs, &GUARD, task::SERVE).unwrap());
 
     low.run(|s| {

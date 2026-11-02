@@ -1,23 +1,22 @@
-//! Child-link tasks. Each owns its bus (I2C0 for I2C nodes, the PIO UART for
-//! the UART node), serves RELAY / I2C_RAW requests from the PC task through
+//! Child-link tasks. Each owns its bus (I2C0 for I2C nodes, the PIO UART on
+//! PIO0 for the UART node), serves RELAY / I2C_RAW requests from the PC task through
 //! a channel, and polls its nodes with a display HELLO every 2 s while the
 //! PC is quiet. Every bus operation is bounded by a deadline.
 
 use dagon_proto::payload::link;
 use dagon_proto::Status;
 use embassy_futures::select::{select, Either};
+use embassy_rp::peripherals::{I2C0, PIO0};
 use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex as Cs;
 use embassy_sync::channel::Channel;
 use embassy_time::{with_timeout, Duration, Timer};
 use heapless::Vec;
 
-use dagon_mcu_rp2040::links::{I2cLink, PioStream, RpI2c, I2C_FRAME};
-use dagon_mcu_rp2040::uart::{UartLink, UART_FRAME};
-use embassy_rp::peripherals::{I2C0, PIO0};
-
-use crate::lcd::Shade;
-use crate::state::{self, Seen};
-use crate::{task, GUARD};
+use super::state::{self, Seen, Shade};
+use super::task;
+use crate::links::{I2cLink, PioStream, RpI2c, I2C_FRAME};
+use crate::uart::{UartLink, UART_FRAME};
+use crate::watchdog::Watch;
 
 const POLL_EVERY: Duration = Duration::from_secs(2);
 /// Largest request or response body carried through a port.
@@ -116,15 +115,15 @@ fn next_seq(seq: &mut u8) -> u8 {
 }
 
 #[embassy_executor::task]
-pub async fn i2c_task(mut link: I2cLink<RpI2c<'static, I2C0>>) -> ! {
+pub async fn i2c_task(mut link: I2cLink<RpI2c<'static, I2C0>>, watch: &'static dyn Watch) -> ! {
     let mut seq = 0x80;
     loop {
-        GUARD.idle(task::I2C);
+        watch.idle(task::I2C);
         let event = select(I2C_PORT.req.receive(), Timer::after(POLL_EVERY)).await;
-        GUARD.busy(task::I2C);
+        watch.busy(task::I2C);
         match event {
             Either::First(req) => {
-                GUARD.busy_for(task::I2C, req.timeout_ms as u64);
+                watch.busy_for(task::I2C, req.timeout_ms as u64);
                 let mut out = [0u8; DATA_MAX];
                 let (status, n) = match req.op {
                     Op::Relay => {
@@ -157,15 +156,18 @@ pub async fn i2c_task(mut link: I2cLink<RpI2c<'static, I2C0>>) -> ! {
 }
 
 #[embassy_executor::task]
-pub async fn uart_task(mut link: UartLink<PioStream<'static, PIO0, 0, 1>, fn() -> u64>) -> ! {
+pub async fn uart_task(
+    mut link: UartLink<PioStream<'static, PIO0, 0, 1>, fn() -> u64>,
+    watch: &'static dyn Watch,
+) -> ! {
     let mut seq = 0x80;
     loop {
-        GUARD.idle(task::UART);
+        watch.idle(task::UART);
         let event = select(UART_PORT.req.receive(), Timer::after(POLL_EVERY)).await;
-        GUARD.busy(task::UART);
+        watch.busy(task::UART);
         match event {
             Either::First(req) => {
-                GUARD.busy_for(task::UART, req.timeout_ms as u64);
+                watch.busy_for(task::UART, req.timeout_ms as u64);
                 let mut out = [0u8; UART_FRAME];
                 let r = link.exchange(&req.data, req.timeout_ms, &mut out).await;
                 let (status, n) = r.map_or_else(|s| (s, 0), |n| (Status::Ok, n));

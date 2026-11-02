@@ -1,6 +1,9 @@
-//! Start-up written by `dagon new`: your board (board.rs), the DAGON node
-//! (USB link, update receiver, trial and confirm) and your application in
-//! app.rs. You do not need to change this file.
+//! Start-up written by `dagon new`: your board (board.rs), the DAGON 親機
+//! (PC link, relaying to the 子機) and your application in app.rs. You do
+//! not need to change this file.
+//!
+//! DAGON's relay runs on a high-priority interrupt executor; your tasks in
+//! app.rs run on the main executor below it, so they never delay the relay.
 #![no_std]
 #![no_main]
 
@@ -10,25 +13,31 @@ mod board;
 mod wiring;
 
 use board::Board;
-use dagon_mcu_rp2040::node;
-use dagon_mcu_rp2040::watchdog::{now_ms, Guard, Level, Trial};
+use dagon_mcu_rp2040::relay::{self, RelayConfig};
+use dagon_mcu_rp2040::watchdog::{now_ms, Guard, Trial};
 use dagon_mcu_rp2040::BoardDef;
 use embassy_executor::Spawner;
 use panic_halt as _;
 
-/// Watchdog guard: task 0 serves DAGON, task 1 is the app. A version on
-/// trial keeps feeding for 60 s after boot; unless the host confirms it in
-/// that time, the watchdog resets the chip and the previous version comes
-/// back.
-static GUARD: Guard<2> = Guard::new(
-    [Level::Preempting, Level::Background],
-    Trial::FeedUntilMs(60_000),
-    now_ms,
-);
+/// Watchdog guard tasks: the relay's, then app.rs's.
+const TASKS: usize = relay::TASKS + app::TASKS;
+
+/// A version on trial keeps feeding for 60 s after boot; unless the PC
+/// confirms it in that time, the watchdog resets the chip and the previous
+/// version comes back.
+static GUARD: Guard<TASKS> =
+    Guard::new(relay::levels::<TASKS>(), Trial::FeedUntilMs(60_000), now_ms);
 
 #[embassy_executor::main]
 async fn main(spawner: Spawner) {
     let (dagon, io) = Board::split(embassy_rp::init(Default::default()));
-    node::start::<Board, 2>(spawner, dagon, &GUARD, "{{tag}}", app::self_check);
-    app::start(spawner, io, GUARD.lease(1));
+    let cfg = RelayConfig {
+        // DAGON_TARGET_TAG in .cargo/config.toml (the boot core uses it too).
+        tag: dagon_mcu_rp2040::TARGET_TAG,
+        name: "{{node}}",
+        fallback: &[],
+        self_check: app::self_check,
+    };
+    relay::start::<Board, TASKS>(spawner, dagon, board::links(io), &GUARD, cfg);
+    app::start(spawner, &GUARD, relay::TASKS);
 }

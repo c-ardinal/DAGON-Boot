@@ -8,8 +8,8 @@
 //! less fails to build, a larger one keeps the rest for the app.
 
 use dagon_agent::{Agent, Config, SlotStore};
-pub use dagon_mcu_common::hooks::{always, SelfCheck};
 use dagon_format::header::{mcu_id, port_kind, target_tag};
+pub use dagon_mcu_common::hooks::{always, SelfCheck};
 use dagon_proto::max_payload;
 use dagon_proto::payload::{mode, SlotState, StatusResp};
 use embassy_rp::peripherals::{FLASH, USB, WATCHDOG};
@@ -51,6 +51,14 @@ pub type AppAgent = Agent<AppStore, SelfCheck>;
 /// The guard task [`start`] gives DAGON's serving task; the app's tasks
 /// take the others.
 pub const DAGON_TASK: usize = 0;
+/// The first guard task of the app's own tasks.
+pub const APP_TASKS: usize = DAGON_TASK + 1;
+
+/// Liveness levels for a guard with DAGON's serving task and `N - 1` app
+/// tasks in thread mode.
+pub const fn levels<const N: usize>() -> [crate::watchdog::Level; N] {
+    crate::watchdog::levels::<N>(APP_TASKS)
+}
 
 /// The agent configuration of an RP2040 node reached over USB. `role` is
 /// its topology role (`dagon_proto::payload::role`).
@@ -85,7 +93,12 @@ pub fn open<B: BoardDef, const N: usize>(
     role: u8,
     self_check: fn() -> bool,
 ) -> AppAgent {
-    const { assert!(B::FLASH_SIZE >= MIN_FLASH_SIZE, "the DAGON RP2040 layout needs 4 MiB of flash") };
+    const {
+        assert!(
+            B::FLASH_SIZE >= MIN_FLASH_SIZE,
+            "the DAGON RP2040 layout needs 4 MiB of flash"
+        )
+    };
     #[cfg(target_os = "none")]
     if let Some(gpio) = B::DIAG_LED {
         crate::arm::led::select(gpio);
@@ -126,16 +139,20 @@ pub use usb_node::*;
 mod usb_node {
     use dagon_proto::payload::role;
     use embassy_executor::Spawner;
+    use embassy_rp::peripherals::USB;
+    use embassy_rp::Peri;
 
     use super::*;
-    use crate::usb::{self, serve_agent, CdcLink};
+    use crate::usb::{self, serve_agent};
     use crate::watchdog::{feed_forever, Watch};
 
-    /// Starts DAGON on a node whose DAGON link is USB, on the executor of
-    /// `spawner`: the USB device, the agent serving task (guard task
-    /// [`DAGON_TASK`]; declare it `Preempting`) and the watchdog feeder.
-    /// `tag` is the node's image target tag (also the USB product name);
-    /// `self_check` decides whether a version on trial may be confirmed.
+    /// Starts DAGON on a node whose DAGON link is USB: the USB device and
+    /// the agent serving task (guard task [`DAGON_TASK`]; declare it
+    /// `Preempting`) on DAGON's high-priority executor (`crate::exec`), the
+    /// watchdog feeder on `spawner` (the app's executor). `tag` is the
+    /// node's image target tag (also the USB product name); `self_check`
+    /// decides whether a version on trial may be confirmed. A 親機 uses
+    /// `crate::relay::start` instead.
     pub fn start<B: BoardDef, const N: usize>(
         spawner: Spawner,
         parts: DagonParts,
@@ -144,17 +161,37 @@ mod usb_node {
         self_check: fn() -> bool,
     ) {
         let task = DAGON_TASK;
-        let mut agent =
-            open::<B, N>(parts.flash, parts.watchdog, guard, task, tag, role::NODE, self_check);
+        let mut agent = open::<B, N>(
+            parts.flash,
+            parts.watchdog,
+            guard,
+            task,
+            tag,
+            role::NODE,
+            self_check,
+        );
         let serial = serial(&mut agent.store().flash);
-        let (device, link) = usb::new(parts.usb, tag, serial);
-        spawner.spawn(usb::run(device).expect("task pool"));
-        spawner.spawn(serve(link, agent, guard, task).expect("task pool"));
+        let high = crate::exec::start();
+        high.spawn(serve(parts.usb, tag, serial, agent, guard, task).expect("task pool"));
         spawner.spawn(feed(guard).expect("task pool"));
     }
 
+    /// Builds the USB device inside the high-priority executor (its types
+    /// stay there), runs it and serves the agent.
     #[embassy_executor::task]
-    async fn serve(link: CdcLink, agent: AppAgent, watch: &'static dyn Watch, task: usize) -> ! {
+    async fn serve(
+        usb: Peri<'static, USB>,
+        product: &'static str,
+        serial: &'static str,
+        agent: AppAgent,
+        watch: &'static dyn Watch,
+        task: usize,
+    ) -> ! {
+        let (device, link) = usb::new(usb, product, serial);
+        // SAFETY: awaited directly inside this embassy task, whose context
+        // comes from the interrupt executor running it.
+        let spawner = unsafe { Spawner::for_current_executor() }.await;
+        spawner.spawn(usb::run(device).expect("task pool"));
         serve_agent(link, agent, watch, task).await
     }
 

@@ -4,3 +4,8 @@ target = "thumbv6m-none-eabi"
 [target.thumbv6m-none-eabi]
 # --nmagic: keeps the ELF headers out of the 512-byte image header gap.
 rustflags = ["-C", "link-arg=--nmagic", "-C", "link-arg=-Tlink.x"]
+
+[env]
+# This node's image target tag: the app announces it, and the boot core
+# for this node must be built with the same DAGON_TARGET_TAG.
+DAGON_TARGET_TAG = { value = "{{tag}}", force = true }

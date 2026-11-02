@@ -1,18 +1,12 @@
 //! The PC task (high-priority interrupt executor): DAGON frames from USB
 //! CDC. RELAY and I2C_RAW go to the link task that owns the bus, SHOW to
-//! the shared display state, SUBCTL to the F401 control lines (owned
-//! here); everything else is the hub's own agent (owned here, with the
-//! flash).
+//! the shared state (a display shows it), SUBCTL to the sub node's control
+//! lines (owned here); everything else is the 親機's own agent (owned
+//! here, with the flash). A link or the control lines the board does not
+//! have answer E_UNSUPPORTED.
 
 use portable_atomic::{AtomicU32, Ordering};
 
-use dagon_mcu_rp2040::arm::step;
-use dagon_mcu_rp2040::cmd;
-use dagon_mcu_rp2040::node::AppAgent;
-use dagon_mcu_rp2040::store::ACTIVE;
-use dagon_mcu_rp2040::sub::SubLines;
-use dagon_mcu_rp2040::usb::{self, CdcLink, REBOOT_DELAY};
-use dagon_mcu_rp2040::watchdog::Watch;
 use dagon_agent::SlotStore;
 use dagon_port::{Nrst, SubControl};
 use dagon_proto::payload::{boot0, link, nrst, Relay, Show, SlotState, SubCtl};
@@ -23,14 +17,18 @@ use embassy_rp::Peri;
 use embassy_time::Timer;
 use heapless::Vec;
 
-use crate::lcd::{Progress, Shade};
-use crate::links::{Op, Port, Req, I2C_PORT, UART_PORT};
-use crate::nodes;
-use crate::state::{self, Seen};
-use crate::{task, GUARD};
+use super::nodes::{self, SubNode};
+use super::ports::{Op, Port, Req, I2C_PORT, UART_PORT};
+use super::state::{self, Progress, Seen, Shade};
+use super::task;
+use crate::arm::step;
+use crate::cmd;
+use crate::node::AppAgent;
+use crate::store::ACTIVE;
+use crate::sub::SubLines;
+use crate::usb::{self, CdcLink, REBOOT_DELAY};
+use crate::watchdog::Watch;
 
-/// USB product string.
-const PRODUCT: &str = "DAGON hub";
 /// I2C_RAW target: the STM32 ROM bootloader.
 const ROM_ADDR: u8 = 0x39;
 /// Bound on one I2C_RAW request at the link task.
@@ -40,15 +38,24 @@ static NEXT_ID: AtomicU32 = AtomicU32::new(1);
 
 pub struct Pc {
     pub agent: AppAgent,
-    pub sub: SubLines<'static>,
+    pub sub: Option<SubLines<'static>>,
+    pub has_i2c: bool,
+    pub has_uart: bool,
+    pub fallback: &'static [SubNode],
+    pub watch: &'static dyn Watch,
     pub resp: [u8; MAX_FRAME],
 }
 
 /// Runs inside the high-priority executor: builds the USB device there
 /// (its types stay in that executor), starts it, then serves the PC.
 #[embassy_executor::task]
-pub async fn task(usb: Peri<'static, USB>, serial: &'static str, pc: Pc) -> ! {
-    let (device, link) = usb::new(usb, PRODUCT, serial);
+pub async fn task(
+    usb: Peri<'static, USB>,
+    product: &'static str,
+    serial: &'static str,
+    pc: Pc,
+) -> ! {
+    let (device, link) = usb::new(usb, product, serial);
     // SAFETY: awaited directly inside this embassy task, whose context
     // comes from the interrupt executor running it.
     let spawner = unsafe { Spawner::for_current_executor() }.await;
@@ -59,14 +66,14 @@ pub async fn task(usb: Peri<'static, USB>, serial: &'static str, pc: Pc) -> ! {
 async fn serve(mut pc: Pc, mut link: CdcLink) -> ! {
     pc.publish(true);
     loop {
-        GUARD.idle(task::PC);
+        pc.watch.idle(task::PC);
         let request = link.read_frame().await;
-        GUARD.busy(task::PC);
+        pc.watch.busy(task::PC);
         let (out, reboot) = pc.handle(request).await;
         let _ = link.write_frame(&pc.resp[..out]).await;
         if reboot {
             Timer::after(REBOOT_DELAY).await;
-            GUARD.reboot();
+            pc.watch.reboot();
         }
     }
 }
@@ -86,7 +93,7 @@ impl Pc {
             },
         });
         if subs {
-            state::set_subs(nodes::load(&mut self.agent.store().flash));
+            state::set_subs(nodes::load(&mut self.agent.store().flash, self.fallback));
         }
     }
 
@@ -157,9 +164,9 @@ impl Pc {
             data: Vec::from_slice(data).unwrap_or_default(),
         };
         // The link task holds the deadline while it works on the request.
-        GUARD.idle(task::PC);
+        self.watch.idle(task::PC);
         let resp = port.call(req).await;
-        GUARD.busy(task::PC);
+        self.watch.busy(task::PC);
         let n = resp.data.len();
         self.resp[HEADER_LEN + 1..HEADER_LEN + 1 + n].copy_from_slice(&resp.data);
         (resp.status, if resp.status == Status::Ok { n } else { 0 })
@@ -169,11 +176,14 @@ impl Pc {
         if !cmd::relay_fits(r.link, r.addr, r.inner.len()) {
             return (Status::Arg, 0);
         }
-        let port = if r.link == link::I2C0 {
-            &I2C_PORT
+        let (port, present) = if r.link == link::I2C0 {
+            (&I2C_PORT, self.has_i2c)
         } else {
-            &UART_PORT
+            (&UART_PORT, self.has_uart)
         };
+        if !present {
+            return (Status::Unsupported, 0);
+        }
         self.via(port, Op::Relay, r.addr, r.timeout_ms, 0, r.inner)
             .await
     }
@@ -189,7 +199,10 @@ impl Pc {
             nrst::LOW => Nrst::Low,
             _ => Nrst::Pulse,
         };
-        match self.sub.set_lines(line, s.boot0 == boot0::HIGH).await {
+        let Some(sub) = self.sub.as_mut() else {
+            return Status::Unsupported;
+        };
+        match sub.set_lines(line, s.boot0 == boot0::HIGH).await {
             Ok(()) => Status::Ok,
             Err(_) => Status::Timeout,
         }
@@ -197,7 +210,10 @@ impl Pc {
 
     /// Raw transactions to the ROM loader, only while BOOT0 is high.
     async fn i2c_raw(&mut self, p: &[u8]) -> (Status, usize) {
-        let raw = match cmd::i2c_raw(p, self.sub.boot0_high()) {
+        let Some(sub) = self.sub.as_ref().filter(|_| self.has_i2c) else {
+            return (Status::Unsupported, 0);
+        };
+        let raw = match cmd::i2c_raw(p, sub.boot0_high()) {
             Ok(r) => r,
             Err(e) => return (e, 0),
         };

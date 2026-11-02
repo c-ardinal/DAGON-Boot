@@ -14,11 +14,15 @@
 //! | Diagnostic blink codes | GPIO25 (backlight) |
 //!
 //! [`Board`] implements [`BoardDef`]: DAGON takes the flash, the watchdog
-//! and USB; the app gets [`Io`]. The `Io` parts have helpers that set them
-//! up the way DAGON's hub does. An app that keeps the chip's peripherals
-//! itself moves out only DAGON's with [`dagon_pins!`] and calls `start`.
+//! and USB; the app gets [`Io`]. [`start`] runs the DAGON 親機 on this
+//! board: the relay (`dagon_mcu_rp2040::relay`) over the board's links and,
+//! with `display`, the home screen. Guard tasks: the relay's 0..3, the
+//! display [`DISPLAY_TASK`], the app's from [`APP_TASKS`]. This package
+//! binds the I2C0, PIO0 and DMA_IRQ_0 interrupts ([`Irqs`]).
 #![no_std]
 
+#[cfg(feature = "display")]
+pub mod display;
 pub mod gc9a01;
 
 use dagon_mcu_rp2040::links::{I2cLink, PioStream, RpI2c};
@@ -32,7 +36,13 @@ use embassy_rp::peripherals::*;
 use embassy_rp::pio::{self, Pio};
 use embassy_rp::pio_programs::uart::{PioUartRx, PioUartRxProgram, PioUartTx, PioUartTxProgram};
 use embassy_rp::spi::{self, Async, Spi};
-use embassy_rp::{dma, Peri, Peripherals};
+use embassy_rp::{bind_interrupts, dma, Peri, Peripherals};
+
+bind_interrupts!(pub struct Irqs {
+    I2C0_IRQ => i2c::InterruptHandler<I2C0>;
+    PIO0_IRQ_0 => pio::InterruptHandler<PIO0>;
+    DMA_IRQ_0 => dma::InterruptHandler<DMA_CH0>;
+});
 
 pub const BOARD_ID: &str = "waveshare-rp2040-touch-lcd-1.28";
 pub const FLASH_SIZE: usize = 4 * 1024 * 1024;
@@ -59,18 +69,49 @@ macro_rules! dagon_pins {
     };
 }
 
-/// Starts DAGON on this board (USB link; guard task
-/// `dagon_mcu_rp2040::node::DAGON_TASK` serves it): see
-/// `dagon_mcu_rp2040::node::start`.
-#[cfg(feature = "usb")]
+/// Guard task of the display; the app's own tasks start at [`APP_TASKS`].
+#[cfg(feature = "relay")]
+pub const DISPLAY_TASK: usize = dagon_mcu_rp2040::relay::TASKS;
+#[cfg(feature = "relay")]
+pub const APP_TASKS: usize = DISPLAY_TASK + 1;
+
+#[cfg(feature = "display")]
+static FRAME: static_cell::ConstStaticCell<gc9a01::Frame> =
+    static_cell::ConstStaticCell::new(gc9a01::Frame([0; gc9a01::FRAME_BYTES]));
+
+/// Starts the DAGON 親機 on this board: the relay over I2C0, the PIO UART
+/// and the STM32 control lines (PC and link tasks on DAGON's high-priority
+/// executor, the feeder on `spawner`), the touch controller held out of
+/// reset, and with `display` the home screen on `spawner` (guard task
+/// [`DISPLAY_TASK`]). Declare the guard with
+/// `dagon_mcu_rp2040::relay::levels()`.
+#[cfg(feature = "relay")]
 pub fn start<const N: usize>(
     spawner: embassy_executor::Spawner,
-    parts: DagonParts,
+    dagon: DagonParts,
+    io: Io,
     guard: &'static dagon_mcu_rp2040::watchdog::Guard<N>,
-    tag: &'static str,
-    self_check: fn() -> bool,
+    cfg: dagon_mcu_rp2040::relay::RelayConfig,
 ) {
-    dagon_mcu_rp2040::node::start::<Board, N>(spawner, parts, guard, tag, self_check);
+    const {
+        assert!(
+            N > APP_TASKS - 1,
+            "the 親機 needs guard tasks 0..=DISPLAY_TASK"
+        )
+    };
+    let links = dagon_mcu_rp2040::relay::Links {
+        sub: Some(io.sub_ctl.lines()),
+        uart: Some(io.sub_uart.stream(Irqs)),
+        i2c: Some(io.sub_i2c.link(Irqs)),
+    };
+    // The touch controller stays out of reset for the life of the app.
+    core::mem::forget(hold_touch(io.touch_rst));
+    #[cfg(feature = "display")]
+    let display = io.display.pins(Irqs);
+    dagon_mcu_rp2040::relay::start::<Board, N>(spawner, dagon, links, guard, cfg);
+    #[cfg(feature = "display")]
+    spawner
+        .spawn(display::task(display, FRAME.take(), guard.lease(DISPLAY_TASK)).expect("task pool"));
 }
 
 impl BoardDef for Board {
@@ -184,7 +225,9 @@ impl SubI2c {
     ) -> I2cLink<RpI2c<'static, I2C0>> {
         let mut cfg = i2c::Config::default();
         cfg.frequency = I2C_HZ;
-        I2cLink::new(RpI2c(I2c::new_async(self.bus, self.scl, self.sda, irqs, cfg)))
+        I2cLink::new(RpI2c(I2c::new_async(
+            self.bus, self.scl, self.sda, irqs, cfg,
+        )))
     }
 }
 

@@ -1,9 +1,11 @@
 # Hub firmware (RP2040-Touch-LCD-1.28)
 
-DAGON's own hub firmware, built on the RP2040 MCU package
-(`../mcu/rp2040`: layout, boot images, watchdog, USB, links) and the board
-package (`../boards/waveshare-rp2040-touch-lcd-1.28`: pins, display,
-sub-node wiring). Three images share the 4 MiB flash:
+DAGON's own hub firmware: the 親機 relay of the RP2040 MCU package
+(`../mcu/rp2040`: relay, layout, boot images, watchdog, USB, links) on the
+board package (`../boards/waveshare-rp2040-touch-lcd-1.28`: pins, display,
+sub-node wiring), with the desk demo's node list and its tag
+`hub-rp2040-lcd` (`.cargo/config.toml`; the boot core is built with the
+same `DAGON_TARGET_TAG`). Three images share the 4 MiB flash:
 
 | Offset | Size | Content |
 |---|---|---|
@@ -35,7 +37,7 @@ warns and the LCD shows TEST KEY):
 ```sh
 export DAGON_PUBKEY=/path/outside/the/repo/dagon-signing.pub
 (cd targets/mcu/rp2040/stage0 && cargo build --release)
-(cd targets/mcu/rp2040/bootcore && cargo build --release)
+(cd targets/mcu/rp2040/bootcore && DAGON_TARGET_TAG=hub-rp2040-lcd cargo build --release)
 (cd targets/rp2040-hub && cargo build --release)
 (cd targets/rp2040-hub && cargo build --release --features slot-b --target-dir target/slot-b)
 ```
@@ -47,7 +49,7 @@ Point `[provision.hub]` in `dagon.toml` at the three release ELFs
 
 ```sh
 dagon rescue hub --key /path/outside/the/repo/dagon-signing.key
-(cd targets/rp2040-hub/uf2check && cargo run --release --target <host triple> --     ../../../out/provision/hub/rescue.uf2 /path/outside/the/repo/dagon-signing.pub)
+(cd targets/rp2040-hub/uf2check && cargo run --release --target <host triple> --     ../../../out/provision/hub/rescue.uf2 /path/outside/the/repo/dagon-signing.pub hub-rp2040-lcd)
 ```
 
 `uf2check` reads the UF2 the way stage0 and the boot core will (boot core

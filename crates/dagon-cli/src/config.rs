@@ -34,6 +34,8 @@ pub struct Config {
     pub topology: Option<PathBuf>,
     pub release: Option<PathBuf>,
     pub provision_dir: Option<PathBuf>,
+    /// Public key file `apply` verifies releases with.
+    pub pubkey: Option<PathBuf>,
     #[serde(default)]
     pub provision: BTreeMap<String, ProvisionInputs>,
 }
@@ -56,6 +58,7 @@ impl Config {
         c.topology.as_mut().map(rel);
         c.release.as_mut().map(rel);
         c.provision_dir.as_mut().map(rel);
+        c.pubkey.as_mut().map(rel);
         for inputs in c.provision.values_mut() {
             inputs.stage0.as_mut().map(rel);
             rel(&mut inputs.bootcore);
@@ -112,6 +115,14 @@ impl<'a> Opts<'a> {
             .iter()
             .rev()
             .find(|(n, _)| *n == name)
+            .map(|(_, v)| *v)
+    }
+
+    /// Every value of a repeatable option, in order.
+    pub fn all<'s>(&'s self, name: &'s str) -> impl Iterator<Item = &'a str> + 's {
+        self.opts
+            .iter()
+            .filter(move |(n, _)| *n == name)
             .map(|(_, v)| *v)
     }
 

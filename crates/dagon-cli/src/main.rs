@@ -2,6 +2,8 @@
 
 mod commands;
 mod config;
+mod device;
+mod serial;
 
 use std::path::Path;
 use std::process::ExitCode;
@@ -24,9 +26,18 @@ Usage:
                                      first-install files from [provision.<node>] in dagon.toml
   dagon rescue hub [--out <dir>] [--topology <yaml>] [--key <file>]
                                      hub rescue UF2 (boot2, stage0, logs, boot core, app)
+  dagon status [--port <name>] [--topology <yaml>]
+                                     HELLO and STATUS of the hub and each topology node
+  dagon apply [<dgb>] [--node <id>]... [--port <name>] [--topology <yaml>]
+        [--pubkey <file>] [--key <file>]
+                                     verify the release, check it matches the topology,
+                                     push the topology, update children then the hub
+  dagon topo push [<yaml>] [--port <name>]
+                                     send the topology canonical binary to the hub
   dagon --help
 
-Defaults come from ./dagon.toml (or --config <file>). The secret key file is
+The hub is found by USB ID c0de:cafe or product \"DAGON hub\" unless --port
+is given. Defaults come from ./dagon.toml (or --config <file>). The secret key file is
 --key <file> or $DAGON_SIGNING_KEY and must lie outside any git work tree.
 --flags: verify-enforced,debug,sim-only  --caps: confirm-by-hub,reboot-to-update,
 rom-entry-coop,sig-verifier";
@@ -49,6 +60,9 @@ fn main() -> ExitCode {
         ["release", "build", rest @ ..] => run(commands::release_build(rest)),
         ["provision", rest @ ..] => run(commands::provision(rest)),
         ["rescue", rest @ ..] => run(commands::rescue(rest)),
+        ["status", rest @ ..] => run(device::status(rest)),
+        ["apply", rest @ ..] => run(device::apply(rest)),
+        ["topo", "push", rest @ ..] => run(device::topo_push(rest)),
         _ => usage_error("unknown command"),
     }
 }

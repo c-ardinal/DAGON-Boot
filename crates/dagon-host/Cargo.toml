@@ -5,6 +5,13 @@ license.workspace = true
 version.workspace = true
 
 [dependencies]
+dagon-conform = { path = "../dagon-conform" }
 dagon-format = { path = "../dagon-format" }
 dagon-proto = { path = "../dagon-proto" }
 dagon-romlink = { path = "../dagon-romlink" }
+
+[dev-dependencies]
+dagon-sign = { path = "../dagon-sign" }
+dagon-sim = { path = "../dagon-sim" }
+dagon-topology = { path = "../dagon-topology" }
+ed25519-compact = { version = "2.6", default-features = false }

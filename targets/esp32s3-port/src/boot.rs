@@ -19,6 +19,7 @@ use esp_bootloader_esp_idf::{
 };
 
 use crate::layout::{slot_at, OTADATA, PARTITIONS, SLOT_A, SLOT_B, SLOT_FACTORY};
+use crate::otadata;
 
 const OTA_SLOTS: usize = 2;
 
@@ -161,24 +162,41 @@ impl BootSelectV for EspBootSelect<'_, '_> {
 
     /// Selects an OTA slot for one trial boot (state New; the 2nd stage turns
     /// it into PendingVerify and aborts it if the app resets unconfirmed).
+    /// The new entry is one erase plus one 32-byte program, see
+    /// [`otadata::trial_entry`].
     fn set_next(&mut self, slot: u8) -> Result<(), BootSelectError> {
         let target = subtype_of(slot).ok_or(BootSelectError::Slot)?;
         if slot == SLOT_FACTORY {
             return self.select_factory();
         }
-        self.with_ota(|ota| {
-            ota.set_current_app_partition(target)
+        let base = OTADATA.offset;
+        let mut fs = self.storage.borrow_mut();
+        let mut current = [[0u8; otadata::ENTRY_LEN]; 2];
+        for (i, e) in current.iter_mut().enumerate() {
+            fs.read(base + i as u32 * otadata::SECTOR_LEN, e)
                 .map_err(|_| BootSelectError::Write)?;
-            ota.set_current_ota_state(OtaImageState::New)
-                .map_err(|_| BootSelectError::Write)?;
-            let readback = ota
-                .current_app_partition()
-                .map_err(|_| BootSelectError::Write)?;
-            match (readback == target, ota.current_ota_state()) {
-                (true, Ok(OtaImageState::New)) => Ok(()),
-                _ => Err(BootSelectError::Write),
-            }
-        })
+        }
+        let (sector, entry) = otadata::trial_entry(&current, slot);
+        let at = base + sector as u32 * otadata::SECTOR_LEN;
+        fs.erase(at, at + otadata::SECTOR_LEN)
+            .map_err(|_| BootSelectError::Write)?;
+        fs.write_nor(at, &entry)
+            .map_err(|_| BootSelectError::Write)?;
+        let mut readback = [0u8; otadata::ENTRY_LEN];
+        fs.read(at, &mut readback)
+            .map_err(|_| BootSelectError::Write)?;
+        drop(fs);
+        if readback != entry {
+            return Err(BootSelectError::Write);
+        }
+        // What the 2nd stage will pick, through the crate's reading of otadata.
+        match self.selection() {
+            Ok(Selection {
+                slot: s,
+                state: Some(OtaImageState::New),
+            }) if subtype_of(s) == Some(target) => Ok(()),
+            _ => Err(BootSelectError::Write),
+        }
     }
 
     /// Blanks both otadata entries, so the 2nd stage boots factory.

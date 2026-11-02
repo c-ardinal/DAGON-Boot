@@ -1,0 +1,16 @@
+[package]
+name = "f401-node"
+edition.workspace = true
+license.workspace = true
+version.workspace = true
+publish = false
+
+[dependencies]
+dagon-agent = { path = "../../crates/dagon-agent" }
+dagon-core = { path = "../../crates/dagon-core" }
+dagon-format = { path = "../../crates/dagon-format" }
+dagon-port = { path = "../../crates/dagon-port" }
+dagon-proto = { path = "../../crates/dagon-proto" }
+
+[dev-dependencies]
+ed25519-compact = { version = "2.6", default-features = false }

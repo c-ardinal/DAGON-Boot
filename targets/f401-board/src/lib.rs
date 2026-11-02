@@ -1,11 +1,26 @@
 //! NUCLEO-F401RE board support shared by the boot core and the apps: the
-//! flash layout and the internal flash behind the `dagon_port::Flash` port.
+//! flash layout, the verifying key and the internal flash behind the
+//! `dagon_port::Flash` port.
 #![no_std]
 #![forbid(unsafe_code)]
 
 mod layout;
 
 pub use layout::*;
+
+use dagon_core::key;
+
+/// Verifying key, embedded at build time from `DAGON_PUBKEY` (64 hex
+/// digits, the public key printed by `dagon key gen`). Unset, it is the
+/// public RFC 8032 test key and the build prints a warning.
+pub const PUBKEY: [u8; 32] = match option_env!("DAGON_PUBKEY") {
+    Some(hex) => key::pubkey_from_hex(hex),
+    None => key::TEST_PUBKEY,
+};
+
+/// True when built with the public test key: anyone can sign images this
+/// firmware accepts. HELLO and displays should show "TEST KEY".
+pub const TEST_KEY: bool = key::is_test_key(&PUBKEY);
 
 use dagon_port::{Flash, FlashError, FlashRegion};
 use embassy_stm32::flash::{Blocking, Flash as Hal, FLASH_BASE, FLASH_SIZE};

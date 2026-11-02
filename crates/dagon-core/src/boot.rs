@@ -7,7 +7,7 @@ use crate::log::{Log, SlotRef};
 use dagon_format::header::{
     header_digest16, image_kind, placement, verify_header, ImageHeader, HEADER_SIZE,
 };
-use dagon_format::statelog::{kind, reason, slot};
+use dagon_format::statelog::{kind, reason};
 use dagon_format::Sha256;
 use dagon_port::Flash;
 
@@ -88,12 +88,13 @@ fn try_pending<F: Flash>(
             Err(why) => why,
         }
     };
-    let back = SlotRef {
-        slot: log.state.confirmed.map_or(slot::NONE, |c| c.slot),
-        ..p
-    };
-    // A ROLLBACK the log cannot take is retried on the next boot.
-    let _ = log.append(flash, kind::ROLLBACK, back, why);
+    // ROLLBACK names the slot the boot goes back to. With no confirmed slot
+    // there is none, so nothing is recorded (and nothing starts). A ROLLBACK
+    // the log cannot take is retried on the next boot.
+    if let Some(c) = log.state.confirmed {
+        let back = SlotRef { slot: c.slot, ..p };
+        let _ = log.append(flash, kind::ROLLBACK, back, why);
+    }
     None
 }
 
@@ -123,7 +124,9 @@ fn check<F: Flash>(
     } else {
         ImageHeader::parse(&raw).map_err(|_| reason::HASH_MISMATCH)?
     };
+    let body = base + HEADER_SIZE as u32;
     let fits = h.image_kind == image_kind::APP
+        && h.load_addr == body
         && h.mcu_id == cfg.mcu_id
         && h.target_tag == cfg.target_tag
         && h.slot_binding == r.slot
@@ -132,7 +135,6 @@ fn check<F: Flash>(
     if !fits {
         return Err(reason::SIG_INVALID);
     }
-    let body = base + HEADER_SIZE as u32;
     if body_sha256(flash, body, h.payload_size)? != h.payload_sha256 {
         return Err(reason::HASH_MISMATCH);
     }

@@ -189,6 +189,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "dagon-agent"
+version = "0.0.0"
+dependencies = [
+ "dagon-core",
+ "dagon-format",
+ "dagon-port",
+ "dagon-proto",
+]
+
+[[package]]
 name = "dagon-core"
 version = "0.0.0"
 dependencies = [
@@ -641,15 +651,18 @@ version = "0.0.0"
 dependencies = [
  "cortex-m",
  "cortex-m-rt",
- "dagon-core",
+ "dagon-agent",
  "dagon-format",
- "dagon-port",
+ "dagon-proto",
  "defmt 1.2.0",
  "defmt-rtt",
+ "ed25519-compact",
  "embassy-executor",
+ "embassy-futures",
  "embassy-stm32",
  "embassy-time",
  "f401-board",
+ "f401-node",
  "panic-probe",
 ]
 
@@ -661,6 +674,17 @@ dependencies = [
  "dagon-format",
  "dagon-port",
  "embassy-stm32",
+]
+
+[[package]]
+name = "f401-node"
+version = "0.0.0"
+dependencies = [
+ "dagon-agent",
+ "dagon-core",
+ "dagon-format",
+ "dagon-port",
+ "dagon-proto",
 ]
 
 [[package]]

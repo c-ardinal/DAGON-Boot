@@ -13,6 +13,19 @@
           }
         ]
       }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "Bash|PowerShell",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node",
+            "args": ["${CLAUDE_PLUGIN_ROOT}/hooks/guard.mjs", "post"],
+            "timeout": 20
+          }
+        ]
+      }
     ]
   }
 }

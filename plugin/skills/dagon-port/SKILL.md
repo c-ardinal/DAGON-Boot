@@ -37,7 +37,11 @@ Full arguments: `$ARGUMENTS`
 1. Record the start time. Let `RUN=<mcu>-<board>-<YYYYMMDD-HHMM>`.
 2. Create a dedicated worktree and branch for this run, and work only inside it:
    `git worktree add ../dagon-port-$RUN -b port/$RUN`
-   (the `port/` prefix marks a port session for the guard hook).
+   (while a worktree on a `port/` branch exists, the guard hook treats every session in this
+   repository as a port session). Remove the worktree with `git worktree remove` only after
+   the human has received the report.
+   Shell commands that write must not use command substitution (`$(...)`, backticks);
+   the guard denies them during a port session.
 3. If this is an ESP32-S3 target, delegate implementation work to the `port-engineer` agent;
    otherwise implement under `targets/<mcu>-<board>/` yourself under the same rules.
 
@@ -48,7 +52,10 @@ Full arguments: `$ARGUMENTS`
    erase granularity, write alignment), boot method (reset vector or ROM boot flow, boot
    mode pins) and link layout (memory regions the linker script needs). Every row cites
    its source (document, section or page, URL). If a value cannot be found, ask the human.
-2. **Create the target.** Create `targets/<mcu>-<board>/` as a crate in the workspace.
+2. **Create the target.** Create `targets/<mcu>-<board>/` as a standalone crate with its own
+   `[workspace]` table (target crates are excluded from the root workspace; do not edit the
+   root `Cargo.toml`). Depend on shared crates by path, for example
+   `dagon-port = { path = "../../crates/dagon-port" }`.
 3. **Implement the six traits** from `crates/dagon-port` for kind `$kind`, plus the linker
    script and boot glue the table requires. Build until clean.
 4. **Simulator.** Ask `conformance-judge` to run `dagon sim` scenarios S1 and S2 with this

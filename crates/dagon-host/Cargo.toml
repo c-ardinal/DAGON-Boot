@@ -1,0 +1,10 @@
+[package]
+name = "dagon-host"
+edition.workspace = true
+license.workspace = true
+version.workspace = true
+
+[dependencies]
+dagon-format = { path = "../dagon-format" }
+dagon-proto = { path = "../dagon-proto" }
+dagon-romlink = { path = "../dagon-romlink" }

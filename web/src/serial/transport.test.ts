@@ -1,5 +1,7 @@
 import { describe, expect, test } from 'vitest';
-import { CMD, encodeFrame } from './frame.ts';
+import { CMD, FLAG_RESP, STATUS_OK, encodeFrame, parseFrame } from './frame.ts';
+import { ROLE_NODE, encodeHelloResp, versionRaw, type HelloResp } from './hello.ts';
+import { SAMPLE_HUB_HELLO } from './mock.ts';
 import { WebSerialTransport } from './transport.ts';
 
 interface FakeReadable {
@@ -110,6 +112,144 @@ describe('WebSerialTransport read loop', () => {
     ports = [mine, sibling, same(), same()];
     await expect(t.open()).rejects.toThrow('lost');
     expect(t.port).toBe(mine);
+  });
+
+  describe('several devices of the same kind after the hub reboots', () => {
+    const ids = { usbVendorId: 0x2e8a, usbProductId: 0x000a };
+    const V100 = versionRaw(1, 0, 0);
+    const V110 = versionRaw(1, 1, 0);
+
+    /** A port that answers HELLO with `hello` (null: never answers), like a real hub over USB. */
+    function answering(hello: HelloResp | null) {
+      let ctrl: ReadableStreamDefaultController<Uint8Array> | null = null;
+      const p = {
+        readable: null as ReadableStream<Uint8Array> | null,
+        writable: null as WritableStream<Uint8Array> | null,
+        opens: 0,
+        async open() {
+          p.opens++;
+          p.readable = new ReadableStream<Uint8Array>({ start: (c) => void (ctrl = c) });
+          p.writable = new WritableStream<Uint8Array>({
+            write(raw) {
+              const req = parseFrame(raw);
+              if (!hello) return;
+              const body = Uint8Array.of(STATUS_OK, ...encodeHelloResp(hello));
+              ctrl?.enqueue(encodeFrame({ flags: FLAG_RESP, seq: req.seq, cmd: req.cmd, payload: body }));
+            },
+          });
+        },
+        async close() {
+          p.readable = null;
+          p.writable = null;
+        },
+        getInfo: () => ids,
+      };
+      return p;
+    }
+
+    async function rebooted(after: ReturnType<typeof answering>[], sent?: number, first: HelloResp | null = null) {
+      let lost = false;
+      const mine = Object.assign(answering(null), {
+        open: async () => {
+          if (lost) throw new DOMException('lost', 'NetworkError');
+        },
+      });
+      let ports: object[] = [mine];
+      const serial = { getPorts: async () => ports as unknown as SerialPort[] };
+      const t = new WebSerialTransport(mine as unknown as SerialPort, serial);
+      await t.open();
+      await t.close();
+      if (sent !== undefined) t.expectHub(sent, first);
+      lost = true;
+      ports = [mine, ...after];
+      return t;
+    }
+
+    const hub = (activeVersion: number, trial: boolean): HelloResp => ({ ...SAMPLE_HUB_HELLO, activeVersion, trial });
+
+    test('keeps only the hub on trial with the version just sent, and notes why the others were not taken', async () => {
+      const other = answering(hub(V100, false));
+      const back = answering(hub(V110, true));
+      const t = await rebooted([other, back], V110);
+      await t.open();
+      expect(t.port).toBe(back);
+      expect(t.notes()).toEqual([{ kind: 'away' }, { kind: 'version', version: V100, trial: false }]);
+      await t.close();
+    });
+
+    test('takes nothing when two hubs are on trial with that version, or when no version was sent', async () => {
+      const t = await rebooted([answering(hub(V110, true)), answering(hub(V110, true))], V110);
+      await expect(t.open()).rejects.toThrow('lost');
+      expect(t.notes()).toContainEqual({ kind: 'several', count: 2 });
+
+      const u = await rebooted([answering(hub(V110, true)), answering(hub(V110, true))]);
+      await expect(u.open()).rejects.toThrow('lost');
+      expect(u.notes()).toEqual([{ kind: 'away' }, { kind: 'several', count: 2 }]);
+    });
+
+    test('one device appeared after a version was sent: taken only when it is the hub on trial with it', async () => {
+      const wrong = await rebooted([answering(hub(V100, false))], V110);
+      await expect(wrong.open()).rejects.toThrow('lost');
+      expect(wrong.notes()).toEqual([{ kind: 'away' }, { kind: 'version', version: V100, trial: false }]);
+
+      const back = answering(hub(V110, true));
+      const right = await rebooted([back], V110);
+      await right.open();
+      expect(right.port).toBe(back);
+      await right.close();
+    });
+
+    test.each([
+      ['another MCU', { mcuId: 9 }],
+      ['another release key', { keyId: Uint8Array.of(1, 2, 3, 4, 5, 6, 7, 8) }],
+    ])('L20: a hub of the same USB kind on trial with the version just sent but %s is not this 親機: closed, not kept, logged', async (_, differs) => {
+      const first = hub(V100, false);
+      const impostor = answering({ ...hub(V110, true), ...differs });
+      const t = await rebooted([impostor], V110, first);
+      await expect(t.open()).rejects.toThrow('lost');
+      expect(t.notes()).toEqual([{ kind: 'away' }, { kind: 'otherHub' }]);
+      expect([impostor.opens, impostor.readable]).toEqual([1, null]);
+
+      const mine = answering(hub(V110, true));
+      const u = await rebooted([impostor, mine], V110, first);
+      await u.open();
+      expect(u.port).toBe(mine);
+      await u.close();
+    });
+
+    test('once the expected version is cleared, a single device that appeared is taken as it is again', async () => {
+      const one = answering(hub(V100, false));
+      const t = await rebooted([one], V110);
+      t.expectHub(null);
+      await t.open();
+      expect(t.port).toBe(one);
+      await t.close();
+    });
+
+    test('a candidate that does not answer, and none at all, are noted for the diagnostic log', async () => {
+      const t = await rebooted([answering(null), answering({ ...hub(V110, true), role: ROLE_NODE })], V110);
+      await expect(t.open()).rejects.toThrow('lost');
+      expect(t.notes()).toEqual([{ kind: 'away' }, { kind: 'silent' }, { kind: 'notHub' }]);
+
+      const u = await rebooted([], V110);
+      await expect(u.open()).rejects.toThrow('lost');
+      expect(u.notes()).toEqual([{ kind: 'away' }, { kind: 'none' }]);
+    });
+
+    test('a port the browser reported connected again is a candidate even though it was allowed before', async () => {
+      const back = answering(hub(V110, true));
+      const t = await rebooted([], V110);
+      // `back` was already allowed when the hub was opened…
+      (t as unknown as { known: Set<unknown> }).known.add(back);
+      const ports = (await (t as unknown as { serial: Serial }).serial.getPorts()) as unknown[];
+      ports.push(back);
+      await expect(t.open()).rejects.toThrow('lost');
+      // …and comes back through navigator.serial 'connect'.
+      t.arrived(back as unknown as SerialPort);
+      await t.open();
+      expect(t.port).toBe(back);
+      await t.close();
+    });
   });
 
   test('ends when the port has no readable left (device lost)', async () => {

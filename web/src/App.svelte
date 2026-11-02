@@ -1,10 +1,10 @@
 <script lang="ts">
   import { tick, untrack } from 'svelte';
   import { bandOf } from './app/band.ts';
-  import { ANNOUNCE, BAND, BUTTON, CANVAS, DEFINE, DIFF, MODE, NODE, ORDER, PRODUCT, SAVE, SKIP, STEP } from './app/copy.ts';
+  import { ANNOUNCE, BAND, BUTTON, CANVAS, DEFINE, DIFF, HUB_TOGGLE, MODE, NODE, ORDER, PLAN, PRODUCT, RECONNECT, SAVE, SKIP, STEP, TIME } from './app/copy.ts';
   import { chooseAndOpen } from './app/connect.ts';
-  import { hubOf, view, type Action } from './app/machine.ts';
-  import { Operate, type Progress } from './app/operate.svelte.ts';
+  import { HUB_LOCKED, hubOf, view, type Action } from './app/machine.ts';
+  import { Operate, waterOf, type Progress } from './app/operate.svelte.ts';
   import Graph, { type Chip, type Dot } from './graph/Graph.svelte';
   import Band from './screens/Band.svelte';
   import Detail from './screens/Detail.svelte';
@@ -34,7 +34,7 @@
   import { MockTransport } from './serial/mock.ts';
   import { WebSerialTransport, type Transport } from './serial/transport.ts';
   import Unsupported from './Unsupported.svelte';
-  import { dagonReady, require_release_key, set_release_key } from './wasm/dagon.ts';
+  import { dagonReady, require_release_key, set_release_key, versionText } from './wasm/dagon.ts';
 
   const params = new URLSearchParams(location.search);
   // The stand-in hubs are for development builds only.
@@ -59,11 +59,17 @@
         await opened.open();
         return opened;
       }
-      opened = await chooseAndOpen(serial!);
-      return opened;
+      // `opened` follows only once Operate took it as this hub (reconnectChosen).
+      return chooseAndOpen(serial!);
     },
     timer: true,
     clock: stand?.clock,
+    // The CLI gave the hub back: the device the page had, opened again without the chooser.
+    again: async () => {
+      if (!opened) throw new Error('no device');
+      await opened.open();
+      return opened;
+    },
     // The project's files through dagon serve only (stand-ins in development); nothing public.
     latest: async () => (cli.state === 'ready' ? await cli.latestRelease() : null) ?? (await stand?.latest?.()) ?? null,
     bootcore: async (id) => (cli.state === 'ready' ? await cli.bootcore(id) : null) ?? (await stand?.bootcore?.(id)) ?? null,
@@ -343,11 +349,36 @@
     name: DEFINE.dotNodesName(d.doc.topo.nodes.length, d.doc.topo.links?.length ?? 0),
   });
 
+  /** Chrome's SerialConnectionEvent names the port; the spec's event targets it. */
+  const portOf = (e: Event) => ((e as Event & { port?: SerialPort }).port ?? e.target) as SerialPort;
   serial?.addEventListener('disconnect', (e) => {
-    // Chrome's SerialConnectionEvent names the port; the spec's event targets it.
-    const port = (e as Event & { port?: SerialPort }).port ?? e.target;
-    if (opened instanceof WebSerialTransport && port === opened.port) op.lose();
+    if (opened instanceof WebSerialTransport && portOf(e) === opened.port) op.lose();
   });
+  /**
+   * An allowed device came (back): while dagon-host reopens the rebooted hub
+   * (L20) it is a candidate; once that is over (L21) the page takes it by
+   * itself when it is the hub on trial with the version just sent.
+   */
+  serial?.addEventListener('connect', (e) => {
+    const port = portOf(e);
+    // One device at a time: candidates reported together are judged in turn.
+    connecting = connecting.then(() => hubConnected(port)).catch(() => undefined);
+  });
+  let connecting: Promise<void> = Promise.resolve();
+  /** "もう一度つなぐ": the device the user chose, kept only when Operate took it as this hub. */
+  async function reconnectChosen() {
+    if (await op.reconnectHub()) opened = op.device;
+  }
+  async function hubConnected(port: SerialPort) {
+    if (opened instanceof WebSerialTransport) opened.arrived(port);
+    if (op.state !== 'L21') return;
+    const t = new WebSerialTransport(port);
+    const took = await op.reconnectHub(async () => {
+      await t.open();
+      return t;
+    }, true);
+    if (took) opened = t;
+  }
 
   let primaryEl = $state<HTMLButtonElement>();
   let nextEl = $state<HTMLDivElement>();
@@ -436,7 +467,33 @@
   };
   const updating = $derived(UPDATING.has(op.state));
   const diffChips = $derived(Object.fromEntries(fileDiff.flatMap((r) => r.nodes).map((id) => [id, { chip: DIFF.chip, spoken: DIFF.spoken, silent: true }])));
-  const chips = $derived(updating ? Object.fromEntries(Object.entries(op.progress).map(([id, p]) => [id, chipOf(p)])) : diffChips);
+  /** 案 (owner 11/2): ponytail: a flat minute per node, the copy's 目安; measure per link and image size if it misleads. */
+  const MINUTES_PER_NODE = 1;
+  /** L18: what each target node gets ("↑ 1.0.0 → 1.1.0") and about how long it takes. */
+  const planChips = $derived(
+    Object.fromEntries(
+      op.targets.flatMap((id): [string, Chip][] => {
+        const to = op.fileVersions[id];
+        if (to === undefined) return [];
+        const from = op.live[id]?.hello?.activeVersion;
+        const [a, b] = [from === undefined ? PLAN.unknown : versionText(from), versionText(to)];
+        const same = from === to;
+        return [[id, { chip: same ? PLAN.same(b) : PLAN.up(a, b), spoken: same ? PLAN.sameName(b) : PLAN.upName(a, b), silent: false, note: same ? undefined : PLAN.estimate(MINUTES_PER_NODE) }]];
+      }),
+    ),
+  );
+  const progressChips = $derived(
+    Object.fromEntries(
+      Object.entries(op.progress).map(([id, p]) => {
+        const c = chipOf(p);
+        // M27 beside the rebooting hub while the page reconnects by itself.
+        return [id, p.stage === 'rebooting' && reconnectLeft !== null ? { ...c, note: `${RECONNECT.auto} ${RECONNECT.left(reconnectLeft)}` } : c];
+      }),
+    ),
+  );
+  const chips = $derived(updating ? progressChips : op.state === 'L18' ? planChips : diffChips);
+  /** The water in each node while it is written (L19, L20, L24). */
+  const fill = $derived(PERCENT.has(op.state) ? waterOf(op.progress) : {});
   const percent = $derived(
     PERCENT.has(op.state) ? Object.fromEntries(Object.entries(op.progress).map(([id, p]) => [id, p.percent])) : {},
   );
@@ -466,24 +523,52 @@
   /** Node actions in the detail: while watching, with nothing running. */
   const nodeActions = $derived(['L12', 'L13', 'L23'].includes(op.state));
 
-  /** SC-O7 while the hub reboots; Escape leaves the same button in the band. */
+  /** SC-O7 only after the automatic reconnect failed (L21, owner 11/2); Escape leaves the same button in the band. */
   let dialogDismissed = $state(false);
-  const dialogOpen = $derived((op.state === 'L20' || op.state === 'L21') && !dialogDismissed);
+  const dialogOpen = $derived(op.state === 'L21' && !dialogDismissed);
   $effect(() => {
-    if (op.state !== 'L20' && op.state !== 'L21') dialogDismissed = false;
+    if (op.state !== 'L21') dialogDismissed = false;
   });
+  /** Clock for M27 (dagon-host's clock) and the elapsed time (wall clock), once a second while they show. */
   let nowMs = $state(0);
+  let wallMs = $state(Date.now());
   $effect(() => {
-    if (!dialogOpen) return;
-    const tick = () => (nowMs = op.now());
+    if (!PERCENT.has(op.state)) return;
+    const tick = () => {
+      nowMs = op.now();
+      wallMs = Date.now();
+    };
     tick();
     const t = setInterval(tick, 1000);
     return () => clearInterval(t);
   });
-  const reconnectLeft = $derived(op.reconnectUntil === null || op.state === 'L21' ? null : Math.max(0, Math.ceil((op.reconnectUntil - nowMs) / 1000)));
+  /** M27: seconds left of the automatic reconnect, in 5 s steps (L20). */
+  const RECONNECT_STEP_S = 5;
+  const reconnectLeft = $derived(
+    op.reconnectUntil === null || op.state !== 'L20'
+      ? null
+      : Math.ceil(Math.max(0, (op.reconnectUntil - nowMs) / 1000) / RECONNECT_STEP_S) * RECONNECT_STEP_S,
+  );
 
   const hub = $derived(hubOf(op.state));
   const connected = $derived(!['idle', 'lost'].includes(hub));
+  /** Why the header's つなぐ / 切断 cannot be used now. */
+  const hubLocked = $derived(HUB_LOCKED.has(op.state) ? (HUB_TOGGLE.locked[op.state] ?? null) : null);
+  /** The locked toggle was pressed: its reason stands in the band until the state changes. */
+  let hubNotice = $state<{ at: string; why: string } | null>(null);
+  const hubNoticeShown = $derived(hubNotice && hubNotice.at === op.state ? hubNotice.why : null);
+  /** The header's つなぐ / 切断 (owner 11/2): 切断 closes the port and keeps its permission. */
+  function toggleHub() {
+    if (hubLocked) {
+      hubNotice = { at: op.state, why: hubLocked };
+      if (mode === 'operate') void tick().then(() => nextEl?.focus());
+      return;
+    }
+    if (connected) return void op.disconnect();
+    if (op.state === 'L05' && op.failure === 'unavailable') return location.reload();
+    if (mode === 'define' && d.operable === 'ok') op.useConfig(d.config);
+    void op.connect();
+  }
   const step = $derived(view(op.state, op.ctx).step);
   const unwritten = $derived(Object.values(op.progress).filter((p) => p.stage === 'unwritten').length);
   const band = $derived.by(() => {
@@ -492,10 +577,11 @@
       responding: op.responding,
       unwritten,
       rest: op.rest && op.state === 'L18',
+      finish: op.finished,
     });
     if (dialogOpen) return { ...b, primary: null };
     if (op.latestMissing) return { ...b, ...BAND.M58 };
-    if (op.state === 'L20') return { ...b, primary: { action: 'reconnect' as const, label: BUTTON.reconnect } };
+    if (hubNoticeShown) return { ...b, chip: undefined, pair: undefined, sentence: hubNoticeShown };
     return b;
   });
   const dot = $derived.by((): Dot | null => {
@@ -503,7 +589,13 @@
     if (!c || !connected || op.state === 'L06') return null;
     if (PERCENT.has(op.state)) {
       const stopped = op.state === 'L22';
-      return { label: CANVAS.dotProgress, value: op.overall, unit: stopped ? CANVAS.dotStopped : CANVAS.dotPercent, name: CANVAS.dotProgressName(op.overall, stopped) };
+      const progress = { label: CANVAS.dotProgress, value: op.overall, unit: stopped ? CANVAS.dotStopped : CANVAS.dotPercent, name: CANVAS.dotProgressName(op.overall, stopped) };
+      if (op.startedAt === null) return progress;
+      // S28 and SC-O5: 経過 under the number, 残り beside it (the estimate less the time gone).
+      const gone = Math.max(0, wallMs - op.startedAt);
+      const nodes = op.state === 'L24' ? 1 : Math.max(1, op.targets.length);
+      const left = nodes * MINUTES_PER_NODE * 60_000 - gone;
+      return { ...progress, sub: [TIME.elapsed, TIME.clock(gone)] as const, more: [[TIME.left, TIME.about(left)]] as const };
     }
     if (op.state === 'L08' || op.state === 'L09') return { label: CANVAS.dotFound, value: op.found, name: CANVAS.dotFoundName(op.found) };
     const n = c.nodes.length;
@@ -529,7 +621,7 @@
       case 'reselect':
         return void op.connect();
       case 'reconnect':
-        return void (op.state === 'L20' || op.state === 'L21' ? op.reconnectHub() : op.connect());
+        return void (op.state === 'L20' || op.state === 'L21' ? reconnectChosen() : op.connect());
       case 'chooseFile':
       case 'updateResponding':
       case 'otherFile':
@@ -687,6 +779,7 @@
       onselect={(k) => op.select(op.selected === k ? null : k)}
       {dot}
       {chips}
+      {fill}
     />
   </main>
 {/snippet}
@@ -698,7 +791,7 @@
 {#snippet operateRight()}
   <aside class="right">
     {#if showFile && op.file}
-      <FilePanel file={op.file} targets={op.targets.length} diff={fileDiff} />
+      <FilePanel file={op.file} targets={op.targets.length} minutes={op.targets.length * MINUTES_PER_NODE} diff={fileDiff} />
     {:else}
       <Detail
         config={op.config}
@@ -744,6 +837,9 @@
       onlocked={() => lock(d.operable)}
       {menuOpen}
       onmenu={() => (menuOpen = !menuOpen)}
+      done={op.state === 'L23'}
+      onhub={screen === 'start' ? undefined : toggleHub}
+      {hubLocked}
     />
     {#if menuOpen}
       <Menu onstart={toStart} onrestart={() => (restartOpen = true)} locked={modeLocked} bind:restartButton />
@@ -791,7 +887,7 @@
     />
   {/if}
   {#if dialogOpen}
-    <Reconnect left={reconnectLeft} onreconnect={() => void op.reconnectHub()} onclose={() => (dialogDismissed = true)} />
+    <Reconnect notes={op.reconnectNotes} onreconnect={() => void reconnectChosen()} onclose={() => (dialogDismissed = true)} />
   {/if}
 {/if}
 

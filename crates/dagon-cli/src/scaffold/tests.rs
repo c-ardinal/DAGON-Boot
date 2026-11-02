@@ -241,6 +241,46 @@ fn new_makes_the_project_and_a_key_outside_it() {
 }
 
 #[test]
+fn new_writes_claude_files_with_no_paths_or_secrets() {
+    let d = tmp("claude");
+    let proj = d.join("fleet");
+    let keys = d.join("keys");
+    let made = new_project(&proj, "fleet", DESK, &keys).unwrap();
+    let secret = std::fs::read_to_string(keys.join(dagon_sign::SECRET_FILE)).unwrap();
+    let home = home().unwrap().to_string_lossy().replace('\\', "/");
+    let rels = [
+        "CLAUDE.md",
+        ".claude/skills/fix-a-failing-build/SKILL.md",
+        ".claude/skills/add-a-board-by-mcu/SKILL.md",
+        ".claude/skills/explain-a-topology-problem/SKILL.md",
+    ];
+    for rel in rels {
+        assert!(made.iter().any(|l| l.ends_with(rel)), "{rel} not reported");
+        let text = read(&proj, rel);
+        let flat = text.replace('\\', "/");
+        for bad in [
+            d.to_string_lossy().replace('\\', "/"),
+            home.clone(),
+            secret.trim().to_string(),
+        ] {
+            assert!(!flat.contains(&bad), "{rel} contains {bad}");
+        }
+        let b = flat.as_bytes();
+        let drive = b
+            .windows(3)
+            .any(|w| w[0].is_ascii_alphabetic() && w[1] == b':' && w[2] == b'/');
+        assert!(!drive, "{rel} names an absolute path");
+        for bad in ["/home/", "/Users/", "~/", "sk-ant-", "PRIVATE KEY", "台"] {
+            assert!(!flat.contains(bad), "{rel} contains {bad}");
+        }
+    }
+    for rel in &rels[1..] {
+        let name = rel.split('/').nth(2).unwrap();
+        assert!(read(&proj, rel).starts_with(&format!("---\nname: {name}\n")));
+    }
+}
+
+#[test]
 fn regen_restores_a_deleted_dagon_dependency() {
     let d = tmp("regen-del");
     let src = clone(&d);

@@ -88,13 +88,25 @@ pub fn build_nodes(
     log: &mut dyn FnMut(&str),
     cancel: &AtomicBool,
 ) -> Result<Vec<Built>, String> {
+    // Checked once; the firmware gets these bytes, not the file again.
+    let key = crate::config::build_pubkey(cfg)?;
+    build_nodes_keyed(cfg, nodes, key, log, cancel)
+}
+
+/// [`build_nodes`] embedding `key` (none: DAGON_PUBKEY is not passed down).
+pub fn build_nodes_keyed(
+    cfg: &Config,
+    nodes: &[String],
+    key: Option<[u8; 32]>,
+    log: &mut dyn FnMut(&str),
+    cancel: &AtomicBool,
+) -> Result<Vec<Built>, String> {
     let ids: Vec<String> = if nodes.is_empty() {
         cfg.build.keys().cloned().collect()
     } else {
         nodes.to_vec()
     };
-    // Checked once; the firmware gets these bytes, not the file again.
-    let key = crate::config::build_pubkey(cfg)?.map(|k| dagon_sign::to_hex(&k));
+    let key = key.map(|k| dagon_sign::to_hex(&k));
     let mut out = Vec::new();
     for id in ids {
         let inputs = cfg
@@ -182,7 +194,7 @@ fn build_node(
     })
 }
 
-fn package_name(dir: &Path) -> Result<String, String> {
+pub(crate) fn package_name(dir: &Path) -> Result<String, String> {
     let path = dir.join("Cargo.toml");
     let text = std::fs::read_to_string(&path)
         .map_err(|e| format!("cannot read {}: {e}", path.display()))?;
@@ -225,7 +237,7 @@ enum Line {
 /// resolved once without --locked, and keeps the lock file cargo writes.
 /// `pubkey_hex` (checked by the caller) goes to the firmware as
 /// DAGON_PUBKEY; without it DAGON_PUBKEY is not passed down at all.
-fn cargo_build(
+pub(crate) fn cargo_build(
     dir: &Path,
     bin: &str,
     features: &[String],

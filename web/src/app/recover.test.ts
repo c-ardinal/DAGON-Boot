@@ -78,7 +78,8 @@ describe('recovery from the page with dagon-host recover', () => {
     const op = session(sim.transport, sim.clock);
     await silentNode(op);
     expect(op.recoverTarget?.id).toBe('seg');
-    expect(bandOf(op.state, op.ctx, { stuck: op.recoverTarget?.name }).primary?.label).toBe(BUTTON_FOR.recover('7セグ'));
+    // Superseded (owner 11/2): recovery was the main action; with other nodes answering it is now beside "update those first".
+    expect(bandOf(op.state, op.ctx, { stuck: op.recoverTarget?.name }).secondary.map((b) => b.label)).toEqual([BUTTON_FOR.recover('7セグ')]);
 
     await op.recover();
     expect(op.state).toBe('L23');

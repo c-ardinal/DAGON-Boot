@@ -364,8 +364,9 @@ For firmware that is not a `dagon new` project:
 - `wasm-pack` 0.15.1 for `crates/dagon-wasm` (it fetches the matching
   `wasm-bindgen` and `wasm-opt` itself), and Node.js and npm for `web/`
 - ESP-IDF v6.1 to rebuild the ESP32-S3 2nd stage from
-  `targets/esp32s3-2ndstage` (to be shipped prebuilt in
-  `targets/mcu/esp32s3/vendor/`, not added yet)
+  `targets/esp32s3-2ndstage` (bundled prebuilt as
+  `targets/mcu/esp32s3/vendor/bootloader.bin`, unmodified ESP-IDF v6.1;
+  only needed to rebuild it, see `vendor/PROVENANCE.md`)
 - `elf2uf2-rs` for the RP2040 bring-up image
 
 ## License (MIT / Apache-2.0 dual)
@@ -834,10 +835,10 @@ written for this project.
 
 - ESP32-S3 2nd stage boot loader: the official ESP-IDF v6.1 bootloader, built
   from the official source with app rollback enabled
-  (`targets/esp32s3-2ndstage`: only the project files and `sdkconfig.defaults`
-  are ours). To be shipped unmodified as
+  (`targets/esp32s3-2ndstage`: only the project files and the sdkconfig
+  options in `vendor/sdkconfig.defaults` are ours). Bundled unmodified as
   `targets/mcu/esp32s3/vendor/bootloader.bin` with its provenance and licence
-  (`vendor/PROVENANCE.md`; the binary is not added yet).
+  (`vendor/PROVENANCE.md`, `vendor/LICENSE-ESP-IDF`).
 - `esp-bootloader-esp-idf` (crate, MIT OR Apache-2.0): used unmodified by
   the ESP32-S3 port to read and write otadata, which is how a slot is
   selected for that 2nd stage.

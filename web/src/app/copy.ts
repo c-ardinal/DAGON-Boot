@@ -529,3 +529,107 @@ export const TABLE = {
   edit: '編集',
   remove: '消す',
 } as const;
+
+/** SC-DN: the define mode's CLI features (S16, dev-flow §5.2's 07 and 08). */
+export const CLI_NAV = {
+  heading: 'CLI が要る機能',
+  items: {
+    link: ['01', 'CLI 連携'],
+    jobs: ['04', '作業'],
+    release: ['05', '署名とリリース'],
+    project: ['07', 'プロジェクト'],
+    flash: ['08', '書き込み'],
+  } as Record<string, [string, string]>,
+  running: (n: number) => `作業、${n} 件実行中`,
+  none: 'CLI 未連携',
+} as const;
+
+/** Header CLI link (K0–K3). */
+export const CLI_STATE = {
+  none: 'CLI 未連携',
+  connecting: 'CLI 接続中…',
+  stopped: 'CLI 停止',
+  denied: 'CLI 未連携',
+  ready: (v: string) => `CLI ${v}`,
+} as const;
+
+/** SC-D4 CLI 連携 (S09, C11, §7.13). */
+export const CLI_LINK = {
+  steps: ['ターミナルを開く', 'dagon serve を実行する', '表示されたアドレスをこのブラウザで開く'],
+  withoutCli: ['CLI なしで使える', 'グラフの編集・運用'] as const,
+  deniedChip: '× 合言葉が違う',
+  deniedSentence: 'ターミナルに表示されたアドレスを、そのまま開き直してください。',
+  stoppedSentence: 'ターミナルで dagon serve を実行し直してください。',
+  needCli: 'ターミナルで dagon serve を実行し、表示されたアドレスを開いてください。',
+  reconnect: 'もう一度つなぐ',
+  workspace: '作業場所',
+  apiKey: 'Claude の API キー',
+  key: '署名の鍵',
+  yes: 'あり',
+  no: 'なし',
+  features: '使える機能',
+  featureNames: { gen: 'プロジェクトを作る', build: 'ビルド', sign: '署名', release: 'リリースを作る', flash: '書き込む', topology_save: '構成を作業場所に保存' } as Record<string, string>,
+  unsupported: '非対応',
+} as const;
+
+/** SC-D7 作業 (S35, C14). */
+export const JOBS = {
+  heading: '作業',
+  cols: ['種類', '対象', '状態', '経過', '結果'],
+  kinds: { build: 'ビルド', sign: '署名', release: 'リリース', gen: 'プロジェクト', flash: '書き込み', conform: '適合試験', ai_topology: '構成の案' } as Record<string, string>,
+  states: { queued: '待ち', running: '実行中', question: '質問あり', succeeded: '成功', failed: '失敗', cancelled: '中止', unknown: '不明' } as Record<string, string>,
+  none: '作業 なし',
+  started: '始めた時刻',
+  cancel: '中止',
+  copyLog: 'ログをコピー',
+  failSentence: 'ログの赤い行を確かめてから、もう一度ビルドしてください。',
+  answer: 'つないだ',
+} as const;
+
+/** SC-D8 署名とリリース (S33, C15). */
+export const RELEASE_STEPS = {
+  heading: '署名とリリース',
+  steps: ['ビルド', '署名', 'リリース', '渡す'],
+  build: 'ビルド',
+  sign: '署名',
+  makeRelease: 'リリースを作る',
+  useInOperate: 'このリリースを運用で使う',
+  download: 'ダウンロード',
+  keyLabel: '鍵',
+  sizeLabel: '大きさ',
+  version: 'バージョン',
+  versionHelp: '1.1.0 のように数字 3 つで書いてください。',
+  name: '名前',
+  buildFirst: '先にビルドしてください。',
+  signFirst: '先に署名してください。',
+  noKey: 'ターミナルで dagon key gen を実行してから、署名してください。',
+  fixFirst: '直すと、親機へ送れます。',
+  done: '✓ 完了',
+} as const;
+
+/** SC-D10 プロジェクト (dev-flow §5.2). */
+export const PROJECT = {
+  heading: 'プロジェクト',
+  make: 'プロジェクトを作る',
+  made: '✓ 生成済み',
+  notMade: '● 未生成',
+  boardUnset: '▲ ボード 未設定',
+  writeHere: 'ここに書く',
+  fixFirst: '直すと、プロジェクトを作れます。',
+} as const;
+
+/** SC-D11 書き込み (dev-flow §3.2, §5.2). */
+export const FLASH = {
+  heading: '書き込み',
+  write: '書き込む',
+  via: 'つなぎ方',
+  families: {
+    rp2040: ['USB（BOOT を押しながら）', 'BOOT を押しながら USB をつないでから、書き込んでください。'],
+    stm32f401re: ['ST-LINK', 'ST-LINK を USB でつないでから、書き込んでください。'],
+    esp32s3: ['USB-C', 'USB-C でつないでから、書き込んでください（つながらないときは BOOT を押しながら）。'],
+  } as Record<string, [string, string]>,
+  hubFirst: '親機から書き込んでください（親機が無いと子機を確かめられません）。',
+  done: '✓ 書き込み済み',
+  running: '● 実行中',
+  notFound: '× 見つからない',
+} as const;

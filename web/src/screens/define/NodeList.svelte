@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { DEFINE, INSPECT } from '../../app/copy.ts';
+  import { CLI_NAV, DEFINE, INSPECT } from '../../app/copy.ts';
   import type { Define } from '../../app/define/define.svelte.ts';
   import { canPlace, mcus } from '../../app/define/model.ts';
   import { supportedBoards } from '../../wasm/dagon.ts';
@@ -7,9 +7,15 @@
   interface Props {
     d: Define;
     onconnect: () => void;
+    /** SC-DN: the CLI feature open in the right column. */
+    panel?: string | null;
+    onpanel?: (p: string) => void;
+    /** Jobs running (the 04 作業 count). */
+    running?: number;
+    cliReady?: boolean;
   }
 
-  let { d, onconnect }: Props = $props();
+  let { d, onconnect, panel = null, onpanel, running = 0, cliReady = false }: Props = $props();
   const boards = supportedBoards();
   const mcuList = mcus();
   let by = $state<'product' | 'mcu'>('product');
@@ -53,6 +59,22 @@
     <button class="secondary" onclick={() => d.placeSample()}>{DEFINE.placeSample}</button>
     <button class="secondary" onclick={onconnect}>{DEFINE.connectDiscover}</button>
   </div>
+  {#if onpanel}
+    <nav aria-labelledby="dn-h">
+      <h3 id="dn-h">{CLI_NAV.heading}</h3>
+      <ol class="dn">
+        {#each Object.entries(CLI_NAV.items) as [key, [no, label]] (key)}
+          <li>
+            <button
+              aria-current={panel === key ? 'page' : undefined}
+              aria-label="{no} {label}{key === 'jobs' && running ? `、${CLI_NAV.running(running)}` : ''}{cliReady ? '' : `、${CLI_NAV.none}`}"
+              onclick={() => onpanel(key)}><span class="no">{no}</span>{label}{#if key === 'jobs' && running}<span class="count">{running}</span>{/if}</button
+            >
+          </li>
+        {/each}
+      </ol>
+    </nav>
+  {/if}
 </section>
 
 <style>
@@ -142,6 +164,44 @@
   }
   .k {
     color: var(--c-muted);
+  }
+  .dn {
+    margin: 0;
+    padding: 0;
+    list-style: none;
+  }
+  .dn button {
+    display: flex;
+    gap: var(--s-3);
+    align-items: center;
+    width: 100%;
+    padding: var(--s-3) var(--s-4);
+    border: 0;
+    border-radius: var(--r-m);
+    background: none;
+    color: var(--c-paper);
+    font: 400 var(--t-body-size) / var(--t-body-lh) var(--f-ja);
+    text-align: left;
+    cursor: pointer;
+    outline: 3px solid transparent;
+  }
+  .dn button[aria-current='page'] {
+    background: var(--c-paper);
+    color: var(--c-ink);
+  }
+  .dn button:focus-visible {
+    outline-color: var(--c-paper);
+  }
+  .no {
+    font: 400 var(--t-body-size) / 1 var(--f-version);
+  }
+  .count {
+    margin-left: auto;
+    padding: 0 var(--s-2);
+    border-radius: var(--r-s);
+    background: var(--c-signal);
+    color: var(--c-ink);
+    font-weight: 700;
   }
   .first {
     display: grid;

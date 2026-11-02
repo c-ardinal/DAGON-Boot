@@ -16,9 +16,11 @@
     modeLocked?: boolean;
     /** Define mode: the configuration on the canvas was sent to the hub (S24). */
     sent?: boolean;
+    /** The CLI link (K0–K3). */
+    cliLabel?: string;
   }
 
-  let { step, hub, drawer, drawerOpen, ondrawer, drawerButton = $bindable(), mode = 'operate', onmode, modeLocked = false, sent = false }: Props = $props();
+  let { step, hub, drawer, drawerOpen, ondrawer, drawerButton = $bindable(), mode = 'operate', onmode, modeLocked = false, sent = false, cliLabel = CLI_NONE }: Props = $props();
   let helpOpen = $state(false);
 </script>
 
@@ -48,7 +50,7 @@
     {/if}
   </ol>
   <span class="hub" aria-label={HUB_NAME[hub]}>{HUB[hub]}</span>
-  <span class="cli">{CLI_NONE}</span>
+  <span class="cli">{cliLabel}</span>
   <button class="secondary" aria-expanded={helpOpen} aria-controls="help" onclick={() => (helpOpen = !helpOpen)}>{HELP.heading}</button>
 </header>
 

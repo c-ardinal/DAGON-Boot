@@ -179,6 +179,18 @@ export class Operate {
     if (focus) this.focusRequest++;
   }
 
+  /** `dagon serve` needs the hub's port (device.need): close Web Serial and show L28. */
+  async handOver(): Promise<void> {
+    this.session++;
+    await this.drop();
+    this.go('cliClaim', false);
+  }
+
+  /** The CLI gave the port back (device.returned): the user connects again (L26). */
+  cliReturned(): void {
+    this.go('lost', false);
+  }
+
   /** A configuration made in define mode takes the canvas (not sent yet). */
   useConfig(c: Config): void {
     if (this.config?.yaml === c.yaml) return;

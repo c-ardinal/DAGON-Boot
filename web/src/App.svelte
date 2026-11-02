@@ -14,6 +14,9 @@
   import NodeList from './screens/define/NodeList.svelte';
   import Problems from './screens/define/Problems.svelte';
   import Table from './screens/define/Table.svelte';
+  import CliPanel from './screens/define/CliPanel.svelte';
+  import { Cli } from './app/define/cli.svelte.ts';
+  import { CLI_STATE } from './app/copy.ts';
   import FilePanel from './screens/FilePanel.svelte';
   import Reconnect from './screens/Reconnect.svelte';
   import Header from './screens/Header.svelte';
@@ -54,6 +57,23 @@
     clock: stand?.clock,
     fetchAsset: stand?.fetchAsset,
   });
+
+  /** `dagon serve` (stage 3): K0 on a public page, its features on the page serve hands out. */
+  const cli = new Cli();
+  cli.onDevice = (need) => (need ? op.handOver() : op.cliReturned());
+  void cli.connect();
+  const cliLabel = $derived(cli.state === 'ready' ? CLI_STATE.ready(cli.hello?.cli ?? '') : CLI_STATE[cli.state]);
+  let cliPanel = $state<'link' | 'jobs' | 'release' | 'project' | 'flash' | null>(null);
+  const runningJobs = $derived(cli.jobs.filter((j) => j.state === 'running' || j.state === 'queued' || j.state === 'question').length);
+  $effect(() => {
+    if (d.selected) cliPanel = null;
+  });
+
+  /** "このリリースを運用で使う" (X03): the release goes to the operate mode's file check. */
+  function useRelease(name: string, bytes: Uint8Array) {
+    switchMode('operate');
+    op.takeFile(name, bytes);
+  }
 
   /** 運用 / 定義 (§5). The define document goes to the operate canvas when leaving define mode. */
   let mode = $state<'operate' | 'define'>('operate');
@@ -339,7 +359,17 @@
 </script>
 
 {#snippet defineLeft()}
-  <NodeList {d} onconnect={() => void op.connect()} />
+  <NodeList
+    {d}
+    onconnect={() => void op.connect()}
+    panel={cliPanel}
+    onpanel={(p) => {
+      d.selected = null;
+      cliPanel = p as typeof cliPanel;
+    }}
+    running={runningJobs}
+    cliReady={cli.state === 'ready'}
+  />
 {/snippet}
 
 {#snippet defineCanvas()}
@@ -373,7 +403,9 @@
 
 {#snippet defineRight()}
   <aside class="right">
-    {#if d.selected}
+    {#if cliPanel}
+      <CliPanel {cli} {d} panel={cliPanel} onuse={useRelease} />
+    {:else if d.selected}
       <Inspector {d} />
     {:else}
       <Problems {d} />
@@ -489,6 +521,7 @@
       onmode={switchMode}
       {modeLocked}
       sent={op.sent && op.config?.yaml === d.config.yaml}
+      {cliLabel}
     />
     {#if layout === 'narrow'}
       {@render bottom()}

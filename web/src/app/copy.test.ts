@@ -51,10 +51,14 @@ const shownExcept = (...skip: string[]) =>
 const shown = shownExcept();
 
 describe('copy', () => {
+  // §11.4's list is for the operate mode's guidance and results; the define mode's CLI screens
+  // (S16 05 署名とリリース, SC-D4, SC-D7, SC-D10, SC-D11) name signing and the like by design.
+  const DEFINE_CLI = ['CLI_NAV', 'CLI_LINK', 'JOBS', 'RELEASE_STEPS', 'PROJECT', 'FLASH'];
   test.each(copy.FORBIDDEN_WORDS)('no screen text uses %s', (word) => {
     // 確定 is allowed only as a slot value in the slot section.
     // 確定 only as a slot value and in M38; フラッシュ only in V-16's name (§11.4).
-    const texts = word === '確定' ? shownExcept('SLOT', 'TRIAL_CHOICE') : word === 'フラッシュ' ? shown.filter((s) => s !== copy.RULE_SHORT['V-16'] && s !== copy.INSPECT.flashSize) : shown;
+    const operate = shownExcept(...DEFINE_CLI);
+    const texts = word === '確定' ? shownExcept('SLOT', 'TRIAL_CHOICE', ...DEFINE_CLI) : word === 'フラッシュ' ? operate.filter((s) => s !== copy.RULE_SHORT['V-16'] && s !== copy.INSPECT.flashSize) : operate;
     expect(texts.filter((s) => s.includes(word))).toEqual([]);
   });
 

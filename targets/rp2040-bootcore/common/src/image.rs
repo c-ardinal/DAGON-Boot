@@ -6,7 +6,7 @@ use dagon_format::statelog::reason;
 use dagon_format::Sha256;
 use dagon_port::Flash;
 
-use crate::layout::{HEADER_LEN, XIP_BASE};
+use crate::layout::HEADER_LEN;
 
 /// The header in the slot at `base` as a reference for slot `slot`, `None`
 /// when there is no parsable header (erased or partly written).
@@ -26,19 +26,11 @@ pub fn ref_of(raw: &[u8; HEADER_SIZE], slot: u8) -> Option<SlotRef> {
     })
 }
 
-/// True if the header in the slot at flash offset `base` was built for this
-/// slot: `load_addr` is the XIP address of the body (`base + 0x200`).
-pub fn linked_here<F: Flash>(flash: &mut F, base: u32) -> bool {
-    let mut raw = [0u8; HEADER_SIZE];
-    flash.read(base, &mut raw).is_ok()
-        && ImageHeader::parse(&raw).is_ok_and(|h| h.load_addr == XIP_BASE + base + HEADER_LEN)
-}
-
 /// stage0's check of the boot core in the slot at `base` (capacity `cap`
 /// incl. header) as slot `slot`: the header is the one `expect` names (when
 /// the log names one), fits, is of `image_kind` for this MCU, is linked for
 /// this slot and the body hashes to `payload_sha256`. Errors are state log
-/// reason codes. Returns the flash offset of the body.
+/// reason codes. Returns the body address.
 pub fn check<F: Flash>(
     flash: &mut F,
     base: u32,
@@ -53,7 +45,7 @@ pub fn check<F: Flash>(
         .map_err(|_| reason::HASH_MISMATCH)?;
     let h = ImageHeader::parse(&raw).map_err(|_| reason::HASH_MISMATCH)?;
     let body = base + HEADER_LEN;
-    let fits = h.payload_size <= cap - HEADER_LEN && h.load_addr == XIP_BASE + body;
+    let fits = h.payload_size <= cap - HEADER_LEN && h.load_addr == body;
     let ours = h.image_kind == image_kind
         && h.mcu_id == mcu_id::RP2040
         && (h.slot_binding == slot || h.slot_binding == header::slot_binding::ANY);

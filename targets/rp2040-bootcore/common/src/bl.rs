@@ -60,7 +60,7 @@ pub(crate) mod tests {
             &[]
         }
         fn read(&mut self, addr: u32, buf: &mut [u8]) -> Result<(), FlashError> {
-            let a = addr as usize;
+            let a = (addr - crate::layout::XIP_BASE) as usize;
             buf.copy_from_slice(self.0.get(a..a + buf.len()).ok_or(FlashError::Range)?);
             Ok(())
         }
@@ -85,7 +85,7 @@ pub(crate) mod tests {
     }
 
     fn face(m: &mut Mem, at: u32, generation: u32, recs: &[Record]) {
-        let a = at as usize;
+        let a = (at - crate::layout::XIP_BASE) as usize;
         m.0[a..a + 32].copy_from_slice(&FaceHeader { generation }.to_bytes());
         for (i, r) in recs.iter().enumerate() {
             m.0[a + 32 + i * 32..a + 64 + i * 32].copy_from_slice(&r.to_bytes());

@@ -6,8 +6,8 @@ import { simDesk } from '../serial/simHub.ts';
 import type { Transport } from '../serial/transport.ts';
 import { versionText } from '../wasm/dagon.ts';
 import { bandOf } from './band.ts';
-import { ANNOUNCE, BAND, BUTTON_FOR } from './copy.ts';
-import { Operate, bootcorePath, LATEST_RELEASE } from './operate.svelte.ts';
+import { ANNOUNCE, BAND, BUTTON_FOR, NODE } from './copy.ts';
+import { Operate, bootcorePath, failureStage, LATEST_RELEASE } from './operate.svelte.ts';
 
 const repo = (rel: string) => new Uint8Array(readFileSync(new URL(`../../../${rel}`, import.meta.url)));
 /** The public site's files: the desk release 1.1.0 and the F401 boot core, both under the test key. */
@@ -34,6 +34,10 @@ function fastClock(): LinkClock {
 function session(t: Transport, clock: LinkClock, fetchAsset: Fetch = site) {
   return new Operate({
     open: async () => {
+      await t.open();
+      return t;
+    },
+    reselect: async () => {
       await t.open();
       return t;
     },
@@ -86,7 +90,10 @@ describe('recovery from the page with dagon-host recover', () => {
     expect(op.recoverTarget?.id).toBe('seg');
 
     await op.recover();
-    expect([op.state, op.progress.seg.stage]).toEqual(['L25', 'cannotFix']);
+    // The node refused again: its reason stays (× 書き込めない), not a generic failure nor 応答なし.
+    expect(op.state).toBe('L25');
+    expect(op.progress.seg).toMatchObject({ stage: 'refused', reason: 'E_FLASH' });
+    expect(NODE.refused[op.progress.seg.reason!]).toBe('× 書き込めない');
     expect(bandOf(op.state, op.ctx).sentence).toBe(BAND.M33.sentence);
     expect(op.recoverTarget?.id).toBe('seg');
 
@@ -145,6 +152,68 @@ describe('recovery from the page with dagon-host recover', () => {
     expect([v(t.helloOf('i2c:66').activeVersion), t.helloOf('i2c:66').trial]).toEqual(['1.0.0', false]);
   }, 120_000);
 
+  test('dagon-host reasons map to their chips: no answer, previous version, refusals, release refusals, the rest', () => {
+    expect(failureStage('NO ANSWER')).toEqual({ stage: 'silent' });
+    expect(failureStage('ROLLED BACK')).toEqual({ stage: 'previous' });
+    expect(failureStage('E_SIGNATURE')).toEqual({ stage: 'refused', reason: 'E_SIGNATURE' });
+    expect(failureStage('source')).toEqual({ stage: 'refused', reason: 'E_SIGNATURE' });
+    expect(failureStage('key')).toEqual({ stage: 'refused', reason: 'E_KEY' });
+    expect(failureStage('NO IMAGE')).toEqual({ stage: 'cannotFix' });
+  });
+
+  test('a rollback that gets no answer shows 応答なし; "もう一度直す" rolls back again, it does not install the release', async () => {
+    const t = new MockTransport();
+    const op = session(t, fastClock());
+    await op.connect();
+    await op.push();
+    op.takeFile('desk-1.1.0.dgb', SITE[LATEST_RELEASE]);
+    await op.update();
+    expect(op.state).toBe('L23');
+
+    t.setQuiet('i2c:66', true);
+    await op.rollback('seg');
+    expect([op.state, op.progress.seg.stage, op.recoverTarget?.id]).toEqual(['L25', 'silent', 'seg']);
+
+    t.setQuiet('i2c:66', false);
+    await op.retry();
+    expect(op.state).toBe('L23');
+    expect(op.status).toBe(ANNOUNCE.A15('7セグ', '1.0.0'));
+    expect([v(t.helloOf('i2c:66').activeVersion), t.helloOf('i2c:66').trial]).toEqual(['1.0.0', false]);
+  }, 120_000);
+
+  test('recovering the hub: not back in 45 s, chosen again (L21), then confirmed on the release', async () => {
+    const { t, op } = await stoppedAt({ refuse: { hub: 0x07 } });
+    expect([op.failed, op.recoverTarget?.id]).toEqual(['hub', 'hub']);
+    t.setRefuse('hub');
+    t.setHubAway(Infinity);
+    await op.recover();
+    expect([op.state, op.alert]).toEqual(['L21', ANNOUNCE.A21timeout]);
+    expect(t.helloOf('hub').trial).toBe(true);
+
+    t.replug();
+    await op.reconnectHub();
+    expect(op.state).toBe('L23');
+    expect([v(t.helloOf('hub').activeVersion), t.helloOf('hub').trial]).toEqual(['1.1.0', false]);
+  }, 120_000);
+
+  test('rolling the hub back: not back in 45 s, chosen again (L21), then confirmed on the previous version', async () => {
+    const t = new MockTransport();
+    const op = session(t, fastClock());
+    await op.connect();
+    await op.push();
+    op.takeFile('desk-1.1.0.dgb', SITE[LATEST_RELEASE]);
+    await op.update();
+    expect(op.state).toBe('L23');
+
+    t.setHubAway(Infinity);
+    await op.rollback('hub');
+    expect(op.state).toBe('L21');
+    t.replug();
+    await op.reconnectHub();
+    expect(op.state).toBe('L23');
+    expect([v(t.helloOf('hub').activeVersion), t.helloOf('hub').trial]).toEqual(['1.0.0', false]);
+  }, 120_000);
+
   test('"配布中の最新バージョンを使う" takes the published release; without it the page says so', async () => {
     const t = new MockTransport();
     const op = session(t, fastClock());
@@ -159,5 +228,13 @@ describe('recovery from the page with dagon-host recover', () => {
     await op2.push();
     expect(await op2.useLatest()).toBe(false);
     expect([op2.state, op2.alert]).toEqual(['L12', ANNOUNCE.A22latest]);
+
+    const bad = SITE[LATEST_RELEASE].slice();
+    bad[bad.length - 1] ^= 1;
+    const op3 = session(new MockTransport(), fastClock(), async () => bad);
+    await op3.connect();
+    await op3.push();
+    expect(await op3.useLatest()).toBe(false);
+    expect(op3.state).toBe('L16');
   }, 60_000);
 });

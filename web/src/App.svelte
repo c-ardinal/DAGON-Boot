@@ -162,8 +162,8 @@
 
   /** The file chooser is open for a recovery that found no release. */
   let pickForRecovery = false;
-  async function recover() {
-    if ((await op.recover()) === 'needFile') {
+  async function recover(again = false) {
+    if ((await (again ? op.retry() : op.recover())) === 'needFile') {
       pickForRecovery = true;
       fileInput?.click();
     }
@@ -242,8 +242,9 @@
       case 'useLatest':
         return void op.useLatest();
       case 'recover':
-      case 'recoverAgain':
         return void recover();
+      case 'recoverAgain':
+        return void recover(true);
       case 'placeSample':
         return op.placeSample();
       case 'push':

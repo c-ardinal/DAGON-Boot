@@ -99,7 +99,8 @@ export const MACHINE: Record<L, Spec> = {
   L21: { step: 5, primary: 'reconnect', on: { reconnect: 'L21', reconnected: 'L23', revertedOnReconnect: 'L22' } },
   L22: { step: 5, primary: 'recover', on: { recover: 'L24', ...toLost } },
   L23: { step: 6, secondary: ['otherFile'], on: { watchAlarm: 'L13', rollback: 'L24', otherFile: 'L14', ...toLost } },
-  L24: { step: 'recover', on: { fixedNoRest: 'L23', fixedRest: 'L18', gaveUp: 'L25', ...toLost } },
+  // hubTurn: recovering or rolling back the hub reboots it; reconnecting is L20 / L21's.
+  L24: { step: 'recover', on: { fixedNoRest: 'L23', fixedRest: 'L18', gaveUp: 'L25', hubTurn: 'L20', ...toLost } },
   L25: { step: 'recover', primary: 'recoverAgain', secondary: ['copyLog'], on: { recoverAgain: 'L24', ...toLost } },
   L26: { step: 1, primary: 'reconnect', on: { reconnect: 'L03' } },
   L27: { step: 2, primary: 'retrySample', secondary: ['placeInDefine'], on: { retrySample: 'L02' } },

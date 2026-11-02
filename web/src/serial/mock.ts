@@ -132,6 +132,7 @@ export class MockTransport implements Transport {
   private readonly quiet: Set<DeviceKey>;
   private isOpen = false;
   private refuse: Partial<Record<DeviceKey, number>>;
+  private hubAway: number;
   /** Devices that took a REBOOT, in order. */
   readonly reboots: DeviceKey[] = [];
   /** Failing opens left while the rebooting hub is away. */
@@ -145,6 +146,7 @@ export class MockTransport implements Transport {
     this.devices = deskDevices(opts.hello ?? SAMPLE_HUB_HELLO);
     this.quiet = new Set(opts.quiet);
     this.refuse = { ...opts.refuse };
+    this.hubAway = opts.hubAway ?? 2;
     for (const k of opts.factory ?? []) {
       const d = this.devices.get(k);
       if (d) d.hello = { ...d.hello, mode: MODE_AGENT };
@@ -160,6 +162,11 @@ export class MockTransport implements Transport {
   /** Makes a device refuse the image at XFER_END with `status`, or stop refusing. */
   setRefuse(key: DeviceKey, status?: number): void {
     this.refuse = { ...this.refuse, [key]: status };
+  }
+
+  /** Opens that fail after the hub's next REBOOT (`Infinity`: until `replug()`). */
+  setHubAway(opens: number): void {
+    this.hubAway = opens;
   }
 
   /** The rebooted hub's USB device is back. */
@@ -196,7 +203,7 @@ export class MockTransport implements Transport {
     setTimeout(() => this.queue.put(resp), req.cmd === CMD.HELLO ? (this.opts.delayMs ?? 0) : 0);
     if (req.cmd === CMD_REBOOT && body[0] === STATUS_OK) {
       this.reboots.push('hub');
-      this.away = this.opts.hubAway ?? 2;
+      this.away = this.hubAway;
     }
   }
 

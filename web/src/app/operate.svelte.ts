@@ -79,6 +79,23 @@ export const LATEST_RELEASE = 'release/latest.dgb';
 /** The signed boot core the ROM path writes for a node. */
 export const bootcorePath = (id: string): string => `release/${id}-bootcore.img`;
 
+/** Release refusals from dagon-host's check, as the node refusal they amount to. */
+const RELEASE_REFUSAL: Record<string, string> = { source: 'E_SIGNATURE', key: 'E_KEY' };
+
+/**
+ * dagon-host's reason for a node that did not get through, as its chip:
+ * no answer (`NO ANSWER`: timeout, RELAY timeout, lost link), back on the
+ * previous version (`ROLLED BACK`), an explicit refusal (`E_FLASH`, ...),
+ * or a failure the page has no word for (cannot fix).
+ */
+export function failureStage(reason: string): Pick<Progress, 'stage' | 'reason'> {
+  if (reason === 'NO ANSWER') return { stage: 'silent' };
+  if (reason === 'ROLLED BACK') return { stage: 'previous' };
+  const r = RELEASE_REFUSAL[reason] ?? reason;
+  if (r.startsWith('E_') || r === 'REJECTED') return { stage: 'refused', reason: r };
+  return { stage: 'cannotFix' };
+}
+
 async function fetchNextToPage(path: string): Promise<Uint8Array | null> {
   try {
     const r = await fetch(new URL(path, document.baseURI));
@@ -420,13 +437,12 @@ export class Operate {
       return this.go('autoFailed');
     }
     const why = stop.failure;
-    if (why?.running != null) return this.stopAt(n.id, 'previous');
-    // dagon-host says NO ANSWER for a timeout, a RELAY timeout or a lost link.
-    if (!why || why.reason === 'NO ANSWER') return this.stopAt(n.id, 'silent');
-    this.stopAt(n.id, 'refused', why.reason);
+    const f = why?.running != null ? { stage: 'previous' as const } : failureStage(why?.reason ?? 'NO ANSWER');
+    // A stopped update has no "cannot fix" yet: an unnamed failure is a refusal of the update.
+    this.stopAt(n.id, f.stage === 'cannotFix' ? 'refused' : f.stage, f.reason);
   }
 
-  private stopAt(id: string, stage: 'previous' | 'silent' | 'refused', reason?: string): void {
+  private stopAt(id: string, stage: Progress['stage'], reason?: string): void {
     const n = this.config!.nodes.find((x) => x.id === id)!;
     this.failed = id;
     this.progress[id] = { stage, percent: this.progress[id]?.percent ?? 0, reason };
@@ -491,14 +507,14 @@ export class Operate {
       return false;
     }
     this.takeFile(LATEST_RELEASE.split('/').pop()!, bytes);
-    return true;
+    return this.file?.verdict === 'pass';
   }
 
   /**
-   * "（ノード）を復旧する" / "もう一度直す": dagon-host's recover with the
-   * release on the screen (else the published one) and, for the ROM path,
-   * the published boot core. Without any release it asks for one
-   * (`needFile`); `chosen` is that file.
+   * "（ノード）を復旧する": dagon-host's recover with the release on the
+   * screen (else the published one) and, for the ROM path, the published
+   * boot core. Without any release it asks for one (`needFile`); `chosen`
+   * is that file.
    */
   async recover(chosen?: { name: string; bytes: Uint8Array }): Promise<'needFile' | void> {
     const c = this.config;
@@ -520,7 +536,14 @@ export class Operate {
     const bytes = release;
     const bootcore = await this.fetchAsset(bootcorePath(n.id));
     const index = c.nodes.indexOf(n);
-    await this.runRecovery(n, this.state === 'L25' ? 'recoverAgain' : 'recover', (h, on) => h.recover(index, bytes, topo, bootcore, on));
+    await this.runRecovery(n, 'recover', (h, on) => h.recover(index, bytes, topo, bootcore, on));
+  }
+
+  /** "もう一度直す" (L25): the operation that failed, again (a rollback stays a rollback). */
+  async retry(): Promise<'needFile' | void> {
+    if (this.state !== 'L25') return;
+    if (this.lastKind === 'rollback' && this.recovering) return this.rollback(this.recovering);
+    return this.recover();
   }
 
   /** "前のバージョンに戻す" (the detail of a node, UC-O10 / M38): the version in the other slot. */
@@ -547,11 +570,19 @@ export class Operate {
     await this.refreshStatus(id);
   }
 
-  private async runRecovery(n: Node, ev: Ev, run: (h: Host, on: (e: UpdateEvent) => void) => Promise<RecoverResult>): Promise<void> {
+  /** What ran last in L24, so "もう一度直す" repeats it. */
+  private lastKind: 'recover' | 'rollback' = 'recover';
+
+  private async runRecovery(
+    n: Node,
+    kind: 'recover' | 'rollback',
+    run: (h: Host, on: (e: UpdateEvent) => void) => Promise<RecoverResult>,
+  ): Promise<void> {
     const my = this.session;
-    this.go(ev);
+    this.go(this.state === 'L25' ? 'recoverAgain' : kind);
     if (this.state !== 'L24') return;
     this.stopWatching();
+    this.lastKind = kind;
     this.recovering = n.id;
     this.recovered = null;
     this.progress = { ...this.progress, [n.id]: { stage: 'writing', percent: 0 } };
@@ -559,24 +590,34 @@ export class Operate {
       if (my !== this.session || this.config?.nodes[e.node]?.id !== n.id) return;
       if (e.phase === PHASE.rom) this.progress[n.id] = { stage: 'lastResort', percent: e.percent };
       else if (e.phase === PHASE.transfer) this.progress[n.id] = { stage: 'writing', percent: e.percent };
+      // TRANSFER and REBOOT carry the version the node is given (FAILED carries the one it runs).
+      if (e.phase === PHASE.transfer || e.phase === PHASE.reboot) this.sentVersion[n.id] = e.version;
+      // The hub reboots onto it: the same reconnect and confirm rule as an update (L20 / L21).
+      if (e.phase === PHASE.reboot && n.role === 'hub') {
+        this.progress[n.id] = { stage: 'rebooting', percent: 100 };
+        this.reconnectUntil = this.now() + HUB_RECONNECT_MS;
+        this.status = ANNOUNCE.A12;
+        this.go('hubTurn');
+      }
     };
     let r: RecoverResult;
     try {
       r = await this.call((h) => run(h, on));
-    } catch {
+    } catch (e) {
       if (my !== this.session) return;
-      this.progress[n.id] = { stage: 'cannotFix', percent: this.progress[n.id]?.percent ?? 0 };
-      this.status = ANNOUNCE.A13(n.name);
-      return this.go('gaveUp');
+      this.reconnectUntil = null;
+      return this.recoveryFailed(n, e instanceof Error ? e.message : '');
     }
     if (my !== this.session) return;
+    this.reconnectUntil = null;
     this.recovered = r;
     this.progress[n.id] = { stage: 'done', percent: 100 };
     this.live[n.id] = { ...(this.live[n.id] ?? UNKNOWN), responding: true, lastSeen: Date.now() };
     const rest = this.file?.verdict === 'pass' ? Object.entries(this.progress).filter(([, p]) => p.stage === 'unwritten').map(([id]) => id) : [];
-    if (ev === 'rollback') this.status = ANNOUNCE.A15(n.name, versionText(r.version));
-    else this.status = ANNOUNCE.A16(n.name, rest.length);
-    if (rest.length) {
+    this.status = kind === 'rollback' ? ANNOUNCE.A15(n.name, versionText(r.version)) : ANNOUNCE.A16(n.name, rest.length);
+    if (this.state === 'L20') {
+      this.go('confirmed');
+    } else if (rest.length) {
       this.targets = rest;
       this.rest = true;
       this.go('fixedRest');
@@ -585,6 +626,19 @@ export class Operate {
     }
     this.startWatching();
     await this.refreshStatus(n.id);
+  }
+
+  /** A recovery or rollback that did not get through, shown with dagon-host's reason. */
+  private recoveryFailed(n: Node, reason: string): void {
+    if (this.state === 'L20' && reason === 'NO ANSWER') {
+      // The rebooted hub was not reopened in time: the user chooses it again (L21).
+      this.alert = ANNOUNCE.A21timeout;
+      return this.go('autoFailed');
+    }
+    const percent = this.progress[n.id]?.percent ?? 0;
+    this.progress[n.id] = { ...failureStage(reason), percent };
+    this.status = ANNOUNCE.A13(n.name);
+    this.go(this.state === 'L20' ? 'nodeStuck' : 'gaveUp');
   }
 
   /** dagon-host runs one call at a time; calls queue here. */

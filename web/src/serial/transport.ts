@@ -70,10 +70,13 @@ export class WebSerialTransport implements Transport {
 
   /** Allowed ports present when this one last opened: none of them is this device coming back. */
   private known = new Set<SerialPort>();
+  /** Only a port that was open before may be looked for again; the first open is the one the user chose. */
+  private opened = false;
 
   async open(): Promise<void> {
     this.port = await this.reopenable();
     this.known = new Set((await this.serial?.getPorts()) ?? []);
+    this.opened = true;
     this.closing = false;
     this.pump = this.readLoop();
   }
@@ -92,6 +95,7 @@ export class WebSerialTransport implements Transport {
       await this.port.open({ baudRate: CDC_BAUD });
       return this.port;
     } catch (e) {
+      if (!this.opened) throw e;
       const want = this.port.getInfo();
       const ports = (await this.serial?.getPorts()) ?? [];
       const back = ports.filter((p) => {

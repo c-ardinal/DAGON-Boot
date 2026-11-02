@@ -44,8 +44,9 @@ What the code and its tests in this repository show:
 - Firmware for the RP2040 hub (`targets/rp2040-stage0`, `rp2040-bootcore`,
   `rp2040-hub`), the F401 node (`targets/f401-bootcore`, `f401-app`) and the
   ESP32-S3 node (MCU package `targets/mcu/esp32s3`, board package
-  `targets/boards/m5stopwatch`, factory firmware `targets/esp32s3-agent`,
-  sample app `samples/esp32s3-app`, with the ESP-IDF 2nd stage). The hub firmware has been flashed and starts on the hub
+  `targets/boards/m5stopwatch` with the factory firmware, sample app
+  `samples/esp32s3-app`, with the ESP-IDF 2nd stage). The hub firmware has
+  been flashed and starts on the hub
   hardware; on-device validation of the hub (host communication, display) is
   still in progress. On-device checks of the F401 and ESP32-S3 firmware and
   the full flow on hardware are still pending (see Limitations).
@@ -187,8 +188,10 @@ npm run dev       # http://127.0.0.1:5173 (Chrome or Edge 89+, Web Serial)
   `wasm-bindgen` and `wasm-opt` itself)
 - Node.js and npm for `web/` (see `web/README.md`)
 - For the ESP32-S3 firmware: the Xtensa Rust toolchain installed with
-  `espup` (the ESP32-S3 packages use the `esp` channel) and ESP-IDF v6.1 to
-  build the 2nd stage in `targets/esp32s3-2ndstage`
+  `espup` (the ESP32-S3 packages use the `esp` channel). The 2nd stage is
+  to be shipped prebuilt in `targets/mcu/esp32s3/vendor/` (not added yet);
+  until then, and to rebuild it, ESP-IDF v6.1 builds it from
+  `targets/esp32s3-2ndstage`
 - `probe-rs` to flash the F401 over ST-LINK, `elf2uf2-rs` for the RP2040
   bring-up image
 - A C compiler: the `ring` crate (TLS for `dagon ai topology`) builds C code
@@ -230,279 +233,279 @@ Rust crates: 316 packages, 350 name/version pairs. "Used by": `crates/` is the h
 
 | Crate | Versions | Licence | Used by |
 |---|---|---|---|
-| aho-corasick | 1.1.5 | Unlicense OR MIT | boards/m5stopwatch, esp32s3-agent, f401-app, f401-board, f401-bootcore, f401-bringup, mcu/esp32s3, rp2040-bootcore, rp2040-bringup, rp2040-dump, rp2040-hub, samples/esp32s3-app |
-| aligned | 0.4.3 | MIT OR Apache-2.0 | boards/m5stopwatch, esp32s3-agent, f401-app, f401-board, f401-bootcore, f401-bringup, mcu/esp32s3, samples/esp32s3-app |
-| allocator-api2 | 0.3.1 | MIT OR Apache-2.0 | boards/m5stopwatch, esp32s3-agent, mcu/esp32s3, samples/esp32s3-app |
+| aho-corasick | 1.1.5 | Unlicense OR MIT | boards/m5stopwatch, f401-app, f401-board, f401-bootcore, f401-bringup, mcu/esp32s3, rp2040-bootcore, rp2040-bringup, rp2040-dump, rp2040-hub, samples/esp32s3-app |
+| aligned | 0.4.3 | MIT OR Apache-2.0 | boards/m5stopwatch, f401-app, f401-board, f401-bootcore, f401-bringup, mcu/esp32s3, samples/esp32s3-app |
+| allocator-api2 | 0.3.1 | MIT OR Apache-2.0 | boards/m5stopwatch, mcu/esp32s3, samples/esp32s3-app |
 | arrayvec | 0.7.8 | MIT OR Apache-2.0 | rp2040-bootcore, rp2040-bringup, rp2040-dump, rp2040-hub |
-| as-slice | 0.2.1 | MIT OR Apache-2.0 | boards/m5stopwatch, esp32s3-agent, f401-app, f401-board, f401-bootcore, f401-bringup, mcu/esp32s3, samples/esp32s3-app |
+| as-slice | 0.2.1 | MIT OR Apache-2.0 | boards/m5stopwatch, f401-app, f401-board, f401-bootcore, f401-bringup, mcu/esp32s3, samples/esp32s3-app |
 | ascii-canvas | 4.0.0 | Apache-2.0/MIT | rp2040-bootcore, rp2040-bringup, rp2040-dump, rp2040-hub |
-| autocfg | 1.5.1 | Apache-2.0 OR MIT | boards/m5stopwatch, esp32s3-agent, f401-app, f401-board, f401-bootcore, f401-bringup, mcu/esp32s3, rp2040-bootcore, rp2040-bringup, rp2040-dump, rp2040-hub, samples/esp32s3-app |
+| autocfg | 1.5.1 | Apache-2.0 OR MIT | boards/m5stopwatch, f401-app, f401-board, f401-bootcore, f401-bringup, mcu/esp32s3, rp2040-bootcore, rp2040-bringup, rp2040-dump, rp2040-hub, samples/esp32s3-app |
 | az | 1.2.1, 1.3.0 | MIT/Apache-2.0 | rp2040-bootcore, rp2040-bringup, rp2040-dump, rp2040-hub |
 | bare-metal | 0.2.5 | MIT OR Apache-2.0 | f401-app, f401-board, f401-bootcore, f401-bringup, rp2040-bootcore, rp2040-bootcore/common, rp2040-bringup, rp2040-dump, rp2040-hub, rp2040-hub/uf2check, rp2040-stage0 |
 | base64 | 0.23.1 | MIT OR Apache-2.0 | crates/ |
 | bit-set | 0.8.0 | Apache-2.0 OR MIT | rp2040-bootcore, rp2040-bringup, rp2040-dump, rp2040-hub |
 | bit-vec | 0.8.0 | Apache-2.0 OR MIT | rp2040-bootcore, rp2040-bringup, rp2040-dump, rp2040-hub |
 | bit_field | 0.10.3 | Apache-2.0/MIT | f401-app, f401-board, f401-bootcore, f401-bringup |
-| bitfield | 0.13.2, 0.19.5 | MIT OR Apache-2.0 | boards/m5stopwatch, esp32s3-agent, f401-app, f401-board, f401-bootcore, f401-bringup, mcu/esp32s3, rp2040-bootcore, rp2040-bootcore/common, rp2040-bringup, rp2040-dump, rp2040-hub, rp2040-hub/uf2check, rp2040-stage0, samples/esp32s3-app |
-| bitfield-macros | 0.19.5 | MIT OR Apache-2.0 | boards/m5stopwatch, esp32s3-agent, mcu/esp32s3, rp2040-bringup, rp2040-dump, rp2040-hub, samples/esp32s3-app |
-| bitflags | 1.3.2, 2.13.2 | MIT OR Apache-2.0 / MIT/Apache-2.0 | boards/m5stopwatch, crates/, esp32s3-agent, f401-app, f401-board, f401-bootcore, f401-bringup, mcu/esp32s3, rp2040-bootcore, rp2040-bringup, rp2040-dump, rp2040-hub, samples/esp32s3-app |
-| block-buffer | 0.10.4, 0.12.1 | MIT OR Apache-2.0 | boards/m5stopwatch, crates/, esp32s3-agent, f401-app, f401-board, f401-bootcore, f401-testimg, mcu/esp32s3, rp2040-bootcore, rp2040-bootcore/common, rp2040-bringup, rp2040-dump, rp2040-hub, rp2040-hub/uf2check, rp2040-stage0, samples/esp32s3-app |
-| block-device-driver | 0.2.0 | MIT | boards/m5stopwatch, esp32s3-agent, f401-app, f401-board, f401-bootcore, f401-bringup, mcu/esp32s3, samples/esp32s3-app |
+| bitfield | 0.13.2, 0.19.5 | MIT OR Apache-2.0 | boards/m5stopwatch, f401-app, f401-board, f401-bootcore, f401-bringup, mcu/esp32s3, rp2040-bootcore, rp2040-bootcore/common, rp2040-bringup, rp2040-dump, rp2040-hub, rp2040-hub/uf2check, rp2040-stage0, samples/esp32s3-app |
+| bitfield-macros | 0.19.5 | MIT OR Apache-2.0 | boards/m5stopwatch, mcu/esp32s3, rp2040-bringup, rp2040-dump, rp2040-hub, samples/esp32s3-app |
+| bitflags | 1.3.2, 2.13.2 | MIT OR Apache-2.0 / MIT/Apache-2.0 | boards/m5stopwatch, crates/, f401-app, f401-board, f401-bootcore, f401-bringup, mcu/esp32s3, rp2040-bootcore, rp2040-bringup, rp2040-dump, rp2040-hub, samples/esp32s3-app |
+| block-buffer | 0.10.4, 0.12.1 | MIT OR Apache-2.0 | boards/m5stopwatch, crates/, f401-app, f401-board, f401-bootcore, f401-testimg, mcu/esp32s3, rp2040-bootcore, rp2040-bootcore/common, rp2040-bringup, rp2040-dump, rp2040-hub, rp2040-hub/uf2check, rp2040-stage0, samples/esp32s3-app |
+| block-device-driver | 0.2.0 | MIT | boards/m5stopwatch, f401-app, f401-board, f401-bootcore, f401-bringup, mcu/esp32s3, samples/esp32s3-app |
 | bumpalo | 3.20.3 | MIT OR Apache-2.0 | crates/ |
-| bytemuck | 1.25.2 | Zlib OR Apache-2.0 OR MIT | boards/m5stopwatch, esp32s3-agent, mcu/esp32s3, rp2040-bootcore, rp2040-bringup, rp2040-dump, rp2040-hub, samples/esp32s3-app |
-| byteorder | 1.5.0 | Unlicense OR MIT | boards/m5stopwatch, esp32s3-agent, f401-app, f401-board, f401-bootcore, f401-bringup, mcu/esp32s3, rp2040-bootcore, rp2040-bringup, rp2040-dump, rp2040-hub, samples/esp32s3-app |
+| bytemuck | 1.25.2 | Zlib OR Apache-2.0 OR MIT | boards/m5stopwatch, mcu/esp32s3, rp2040-bootcore, rp2040-bringup, rp2040-dump, rp2040-hub, samples/esp32s3-app |
+| byteorder | 1.5.0 | Unlicense OR MIT | boards/m5stopwatch, f401-app, f401-board, f401-bootcore, f401-bringup, mcu/esp32s3, rp2040-bootcore, rp2040-bringup, rp2040-dump, rp2040-hub, samples/esp32s3-app |
 | bytes | 1.12.1 | MIT | crates/ |
-| cc | 1.10.0, 1.11.0 | MIT OR Apache-2.0 | boards/m5stopwatch, crates/, esp32s3-agent, f401-app, f401-bringup, mcu/esp32s3, rp2040-bringup, rp2040-dump, rp2040-hub, samples/esp32s3-app |
-| cfg-if | 1.0.5 | MIT OR Apache-2.0 | boards/m5stopwatch, crates/, esp32s3-agent, f401-app, f401-board, f401-bootcore, f401-bringup, f401-testimg, mcu/esp32s3, rp2040-bootcore, rp2040-bootcore/common, rp2040-bringup, rp2040-dump, rp2040-hub, rp2040-hub/uf2check, rp2040-stage0, samples/esp32s3-app |
+| cc | 1.10.0, 1.11.0 | MIT OR Apache-2.0 | boards/m5stopwatch, crates/, f401-app, f401-bringup, mcu/esp32s3, rp2040-bringup, rp2040-dump, rp2040-hub, samples/esp32s3-app |
+| cfg-if | 1.0.5 | MIT OR Apache-2.0 | boards/m5stopwatch, crates/, f401-app, f401-board, f401-bootcore, f401-bringup, f401-testimg, mcu/esp32s3, rp2040-bootcore, rp2040-bootcore/common, rp2040-bringup, rp2040-dump, rp2040-hub, rp2040-hub/uf2check, rp2040-stage0, samples/esp32s3-app |
 | codespan-reporting | 0.11.1 | Apache-2.0 | rp2040-bootcore, rp2040-bringup, rp2040-dump, rp2040-hub |
-| const-default | 1.0.0 | MIT | boards/m5stopwatch, esp32s3-agent, mcu/esp32s3, samples/esp32s3-app |
+| const-default | 1.0.0 | MIT | boards/m5stopwatch, mcu/esp32s3, samples/esp32s3-app |
 | const-oid | 0.10.2 | Apache-2.0 OR MIT | crates/ |
-| cordyceps | 0.3.5 | MIT | boards/m5stopwatch, esp32s3-agent, f401-app, f401-bringup, mcu/esp32s3, rp2040-bringup, rp2040-dump, rp2040-hub, samples/esp32s3-app |
+| cordyceps | 0.3.5 | MIT | boards/m5stopwatch, f401-app, f401-bringup, mcu/esp32s3, rp2040-bringup, rp2040-dump, rp2040-hub, samples/esp32s3-app |
 | core-foundation | 0.10.1 | MIT OR Apache-2.0 | crates/ |
 | core-foundation-sys | 0.8.7 | MIT OR Apache-2.0 | crates/ |
 | cortex-m | 0.7.10 | MIT OR Apache-2.0 | f401-app, f401-board, f401-bootcore, f401-bringup, rp2040-bootcore, rp2040-bootcore/common, rp2040-bringup, rp2040-dump, rp2040-hub, rp2040-hub/uf2check, rp2040-stage0 |
 | cortex-m-macros | 0.7.8 | MIT OR Apache-2.0 | f401-app, f401-board, f401-bootcore, f401-bringup, rp2040-bootcore, rp2040-bootcore/common, rp2040-bringup, rp2040-dump, rp2040-hub, rp2040-hub/uf2check, rp2040-stage0 |
 | cortex-m-rt | 0.7.7 | MIT OR Apache-2.0 | f401-app, f401-board, f401-bootcore, f401-bringup, rp2040-bootcore, rp2040-bringup, rp2040-dump, rp2040-hub, rp2040-stage0 |
 | cortex-m-rt-macros | 0.7.7 | MIT OR Apache-2.0 | f401-app, f401-board, f401-bootcore, f401-bringup, rp2040-bootcore, rp2040-bringup, rp2040-dump, rp2040-hub, rp2040-stage0 |
-| cpufeatures | 0.2.17, 0.3.1 | MIT OR Apache-2.0 | boards/m5stopwatch, crates/, esp32s3-agent, f401-app, f401-board, f401-bootcore, f401-testimg, mcu/esp32s3, rp2040-bootcore, rp2040-bootcore/common, rp2040-bringup, rp2040-dump, rp2040-hub, rp2040-hub/uf2check, rp2040-stage0, samples/esp32s3-app |
+| cpufeatures | 0.2.17, 0.3.1 | MIT OR Apache-2.0 | boards/m5stopwatch, crates/, f401-app, f401-board, f401-bootcore, f401-testimg, mcu/esp32s3, rp2040-bootcore, rp2040-bootcore/common, rp2040-bringup, rp2040-dump, rp2040-hub, rp2040-hub/uf2check, rp2040-stage0, samples/esp32s3-app |
 | crc-any | 2.5.1 | MIT | rp2040-bootcore, rp2040-bringup, rp2040-dump, rp2040-hub, rp2040-stage0 |
-| critical-section | 1.2.0 | MIT OR Apache-2.0 | boards/m5stopwatch, esp32s3-agent, f401-app, f401-board, f401-bootcore, f401-bringup, mcu/esp32s3, rp2040-bootcore, rp2040-bootcore/common, rp2040-bringup, rp2040-dump, rp2040-hub, rp2040-hub/uf2check, rp2040-stage0, samples/esp32s3-app |
+| critical-section | 1.2.0 | MIT OR Apache-2.0 | boards/m5stopwatch, f401-app, f401-board, f401-bootcore, f401-bringup, mcu/esp32s3, rp2040-bootcore, rp2040-bootcore/common, rp2040-bringup, rp2040-dump, rp2040-hub, rp2040-hub/uf2check, rp2040-stage0, samples/esp32s3-app |
 | crunchy | 0.2.4 | MIT | rp2040-bootcore, rp2040-bringup, rp2040-dump, rp2040-hub |
-| crypto-common | 0.1.7, 0.2.2 | MIT OR Apache-2.0 | boards/m5stopwatch, crates/, esp32s3-agent, f401-app, f401-board, f401-bootcore, f401-testimg, mcu/esp32s3, rp2040-bootcore, rp2040-bootcore/common, rp2040-bringup, rp2040-dump, rp2040-hub, rp2040-hub/uf2check, rp2040-stage0, samples/esp32s3-app |
-| darling | 0.20.11, 0.21.3, 0.24.1 | MIT | boards/m5stopwatch, esp32s3-agent, f401-app, f401-bringup, mcu/esp32s3, rp2040-bringup, rp2040-dump, rp2040-hub, samples/esp32s3-app |
-| darling_core | 0.20.11, 0.21.3, 0.24.1 | MIT | boards/m5stopwatch, esp32s3-agent, f401-app, f401-bringup, mcu/esp32s3, rp2040-bringup, rp2040-dump, rp2040-hub, samples/esp32s3-app |
-| darling_macro | 0.20.11, 0.21.3, 0.24.1 | MIT | boards/m5stopwatch, esp32s3-agent, f401-app, f401-bringup, mcu/esp32s3, rp2040-bringup, rp2040-dump, rp2040-hub, samples/esp32s3-app |
+| crypto-common | 0.1.7, 0.2.2 | MIT OR Apache-2.0 | boards/m5stopwatch, crates/, f401-app, f401-board, f401-bootcore, f401-testimg, mcu/esp32s3, rp2040-bootcore, rp2040-bootcore/common, rp2040-bringup, rp2040-dump, rp2040-hub, rp2040-hub/uf2check, rp2040-stage0, samples/esp32s3-app |
+| darling | 0.20.11, 0.21.3, 0.24.1 | MIT | boards/m5stopwatch, f401-app, f401-bringup, mcu/esp32s3, rp2040-bringup, rp2040-dump, rp2040-hub, samples/esp32s3-app |
+| darling_core | 0.20.11, 0.21.3, 0.24.1 | MIT | boards/m5stopwatch, f401-app, f401-bringup, mcu/esp32s3, rp2040-bringup, rp2040-dump, rp2040-hub, samples/esp32s3-app |
+| darling_macro | 0.20.11, 0.21.3, 0.24.1 | MIT | boards/m5stopwatch, f401-app, f401-bringup, mcu/esp32s3, rp2040-bringup, rp2040-dump, rp2040-hub, samples/esp32s3-app |
 | debug-helper | 0.3.14 | MIT | rp2040-bootcore, rp2040-bringup, rp2040-dump, rp2040-hub, rp2040-stage0 |
-| defmt | 0.3.101, 1.2.0 | MIT OR Apache-2.0 | boards/m5stopwatch, esp32s3-agent, f401-app, f401-bringup, mcu/esp32s3, samples/esp32s3-app |
-| defmt-macros | 1.2.0 | MIT OR Apache-2.0 | boards/m5stopwatch, esp32s3-agent, f401-app, f401-bringup, mcu/esp32s3, samples/esp32s3-app |
-| defmt-parser | 1.1.0 | MIT OR Apache-2.0 | boards/m5stopwatch, esp32s3-agent, f401-app, f401-bringup, mcu/esp32s3, samples/esp32s3-app |
+| defmt | 0.3.101, 1.2.0 | MIT OR Apache-2.0 | boards/m5stopwatch, f401-app, f401-bringup, mcu/esp32s3, samples/esp32s3-app |
+| defmt-macros | 1.2.0 | MIT OR Apache-2.0 | boards/m5stopwatch, f401-app, f401-bringup, mcu/esp32s3, samples/esp32s3-app |
+| defmt-parser | 1.1.0 | MIT OR Apache-2.0 | boards/m5stopwatch, f401-app, f401-bringup, mcu/esp32s3, samples/esp32s3-app |
 | defmt-rtt | 1.3.1 | MIT OR Apache-2.0 | f401-app, f401-bringup |
-| delegate | 0.13.5 | MIT OR Apache-2.0 | boards/m5stopwatch, esp32s3-agent, mcu/esp32s3, samples/esp32s3-app |
-| digest | 0.10.7, 0.11.3 | MIT OR Apache-2.0 | boards/m5stopwatch, crates/, esp32s3-agent, f401-app, f401-board, f401-bootcore, f401-testimg, mcu/esp32s3, rp2040-bootcore, rp2040-bootcore/common, rp2040-bringup, rp2040-dump, rp2040-hub, rp2040-hub/uf2check, rp2040-stage0, samples/esp32s3-app |
-| document-features | 0.2.12 | MIT OR Apache-2.0 | boards/m5stopwatch, esp32s3-agent, f401-app, f401-board, f401-bootcore, f401-bringup, mcu/esp32s3, rp2040-bootcore, rp2040-bringup, rp2040-dump, rp2040-hub, samples/esp32s3-app |
-| ed25519-compact | 2.6.0 | MIT | boards/m5stopwatch, crates/, esp32s3-agent, f401-app, f401-board, f401-bootcore, f401-testimg, mcu/esp32s3, rp2040-bootcore, rp2040-bootcore/common, rp2040-dump, rp2040-hub, rp2040-hub/uf2check, rp2040-stage0, samples/esp32s3-app |
+| delegate | 0.13.5 | MIT OR Apache-2.0 | boards/m5stopwatch, mcu/esp32s3, samples/esp32s3-app |
+| digest | 0.10.7, 0.11.3 | MIT OR Apache-2.0 | boards/m5stopwatch, crates/, f401-app, f401-board, f401-bootcore, f401-testimg, mcu/esp32s3, rp2040-bootcore, rp2040-bootcore/common, rp2040-bringup, rp2040-dump, rp2040-hub, rp2040-hub/uf2check, rp2040-stage0, samples/esp32s3-app |
+| document-features | 0.2.12 | MIT OR Apache-2.0 | boards/m5stopwatch, f401-app, f401-board, f401-bootcore, f401-bringup, mcu/esp32s3, rp2040-bootcore, rp2040-bringup, rp2040-dump, rp2040-hub, samples/esp32s3-app |
+| ed25519-compact | 2.6.0 | MIT | boards/m5stopwatch, crates/, f401-app, f401-board, f401-bootcore, f401-testimg, mcu/esp32s3, rp2040-bootcore, rp2040-bootcore/common, rp2040-dump, rp2040-hub, rp2040-hub/uf2check, rp2040-stage0, samples/esp32s3-app |
 | either | 1.19.0 | MIT OR Apache-2.0 | rp2040-bootcore, rp2040-bringup, rp2040-dump, rp2040-hub |
-| embassy-embedded-hal | 0.6.0 | MIT OR Apache-2.0 | boards/m5stopwatch, esp32s3-agent, f401-app, f401-board, f401-bootcore, f401-bringup, mcu/esp32s3, rp2040-bootcore, rp2040-bringup, rp2040-dump, rp2040-hub, samples/esp32s3-app |
-| embassy-executor | 0.10.0 | MIT OR Apache-2.0 | boards/m5stopwatch, esp32s3-agent, f401-app, f401-bringup, mcu/esp32s3, rp2040-bringup, rp2040-dump, rp2040-hub, samples/esp32s3-app |
-| embassy-executor-macros | 0.8.0 | MIT OR Apache-2.0 | boards/m5stopwatch, esp32s3-agent, f401-app, f401-bringup, mcu/esp32s3, rp2040-bringup, rp2040-dump, rp2040-hub, samples/esp32s3-app |
-| embassy-executor-timer-queue | 0.1.0 | MIT OR Apache-2.0 | boards/m5stopwatch, esp32s3-agent, f401-app, f401-bringup, mcu/esp32s3, rp2040-bringup, rp2040-dump, rp2040-hub, samples/esp32s3-app |
-| embassy-futures | 0.1.2 | MIT OR Apache-2.0 | boards/m5stopwatch, esp32s3-agent, f401-app, f401-board, f401-bootcore, f401-bringup, mcu/esp32s3, rp2040-bootcore, rp2040-bringup, rp2040-dump, rp2040-hub, samples/esp32s3-app |
-| embassy-hal-internal | 0.4.0, 0.5.0 | MIT OR Apache-2.0 | boards/m5stopwatch, esp32s3-agent, f401-app, f401-board, f401-bootcore, f401-bringup, mcu/esp32s3, rp2040-bootcore, rp2040-bringup, rp2040-dump, rp2040-hub, samples/esp32s3-app |
+| embassy-embedded-hal | 0.6.0 | MIT OR Apache-2.0 | boards/m5stopwatch, f401-app, f401-board, f401-bootcore, f401-bringup, mcu/esp32s3, rp2040-bootcore, rp2040-bringup, rp2040-dump, rp2040-hub, samples/esp32s3-app |
+| embassy-executor | 0.10.0 | MIT OR Apache-2.0 | boards/m5stopwatch, f401-app, f401-bringup, mcu/esp32s3, rp2040-bringup, rp2040-dump, rp2040-hub, samples/esp32s3-app |
+| embassy-executor-macros | 0.8.0 | MIT OR Apache-2.0 | boards/m5stopwatch, f401-app, f401-bringup, mcu/esp32s3, rp2040-bringup, rp2040-dump, rp2040-hub, samples/esp32s3-app |
+| embassy-executor-timer-queue | 0.1.0 | MIT OR Apache-2.0 | boards/m5stopwatch, f401-app, f401-bringup, mcu/esp32s3, rp2040-bringup, rp2040-dump, rp2040-hub, samples/esp32s3-app |
+| embassy-futures | 0.1.2 | MIT OR Apache-2.0 | boards/m5stopwatch, f401-app, f401-board, f401-bootcore, f401-bringup, mcu/esp32s3, rp2040-bootcore, rp2040-bringup, rp2040-dump, rp2040-hub, samples/esp32s3-app |
+| embassy-hal-internal | 0.4.0, 0.5.0 | MIT OR Apache-2.0 | boards/m5stopwatch, f401-app, f401-board, f401-bootcore, f401-bringup, mcu/esp32s3, rp2040-bootcore, rp2040-bringup, rp2040-dump, rp2040-hub, samples/esp32s3-app |
 | embassy-net-driver | 0.2.0 | MIT OR Apache-2.0 | f401-app, f401-board, f401-bootcore, f401-bringup, rp2040-bringup, rp2040-dump, rp2040-hub |
 | embassy-net-driver-channel | 0.4.0 | MIT OR Apache-2.0 | rp2040-bringup, rp2040-dump, rp2040-hub |
 | embassy-rp | 0.10.0 | MIT OR Apache-2.0 | rp2040-bootcore, rp2040-bringup, rp2040-dump, rp2040-hub |
 | embassy-stm32 | 0.6.0 | MIT OR Apache-2.0 | f401-app, f401-board, f401-bootcore, f401-bringup |
-| embassy-sync | 0.6.2, 0.7.2, 0.8.0 | MIT OR Apache-2.0 | boards/m5stopwatch, esp32s3-agent, f401-app, f401-board, f401-bootcore, f401-bringup, mcu/esp32s3, rp2040-bootcore, rp2040-bringup, rp2040-dump, rp2040-hub, samples/esp32s3-app |
-| embassy-time | 0.5.1 | MIT OR Apache-2.0 | boards/m5stopwatch, esp32s3-agent, f401-app, f401-board, f401-bootcore, f401-bringup, mcu/esp32s3, rp2040-bootcore, rp2040-bringup, rp2040-dump, rp2040-hub, samples/esp32s3-app |
-| embassy-time-driver | 0.2.2 | MIT OR Apache-2.0 | boards/m5stopwatch, esp32s3-agent, f401-app, f401-board, f401-bootcore, f401-bringup, mcu/esp32s3, rp2040-bootcore, rp2040-bringup, rp2040-dump, rp2040-hub, samples/esp32s3-app |
-| embassy-time-queue-utils | 0.3.2 | MIT OR Apache-2.0 | boards/m5stopwatch, esp32s3-agent, f401-app, f401-bringup, mcu/esp32s3, rp2040-bringup, rp2040-dump, rp2040-hub, samples/esp32s3-app |
+| embassy-sync | 0.6.2, 0.7.2, 0.8.0 | MIT OR Apache-2.0 | boards/m5stopwatch, f401-app, f401-board, f401-bootcore, f401-bringup, mcu/esp32s3, rp2040-bootcore, rp2040-bringup, rp2040-dump, rp2040-hub, samples/esp32s3-app |
+| embassy-time | 0.5.1 | MIT OR Apache-2.0 | boards/m5stopwatch, f401-app, f401-board, f401-bootcore, f401-bringup, mcu/esp32s3, rp2040-bootcore, rp2040-bringup, rp2040-dump, rp2040-hub, samples/esp32s3-app |
+| embassy-time-driver | 0.2.2 | MIT OR Apache-2.0 | boards/m5stopwatch, f401-app, f401-board, f401-bootcore, f401-bringup, mcu/esp32s3, rp2040-bootcore, rp2040-bringup, rp2040-dump, rp2040-hub, samples/esp32s3-app |
+| embassy-time-queue-utils | 0.3.2 | MIT OR Apache-2.0 | boards/m5stopwatch, f401-app, f401-bringup, mcu/esp32s3, rp2040-bringup, rp2040-dump, rp2040-hub, samples/esp32s3-app |
 | embassy-usb | 0.6.0 | MIT OR Apache-2.0 | rp2040-bringup, rp2040-dump, rp2040-hub |
-| embassy-usb-driver | 0.2.2 | MIT OR Apache-2.0 | boards/m5stopwatch, esp32s3-agent, f401-app, f401-board, f401-bootcore, f401-bringup, mcu/esp32s3, rp2040-bootcore, rp2040-bringup, rp2040-dump, rp2040-hub, samples/esp32s3-app |
-| embassy-usb-synopsys-otg | 0.3.3, 0.4.0 | MIT OR Apache-2.0 | boards/m5stopwatch, esp32s3-agent, f401-app, f401-board, f401-bootcore, f401-bringup, mcu/esp32s3, samples/esp32s3-app |
-| embedded-can | 0.4.1 | MIT OR Apache-2.0 | boards/m5stopwatch, esp32s3-agent, f401-app, f401-board, f401-bootcore, f401-bringup, mcu/esp32s3, samples/esp32s3-app |
+| embassy-usb-driver | 0.2.2 | MIT OR Apache-2.0 | boards/m5stopwatch, f401-app, f401-board, f401-bootcore, f401-bringup, mcu/esp32s3, rp2040-bootcore, rp2040-bringup, rp2040-dump, rp2040-hub, samples/esp32s3-app |
+| embassy-usb-synopsys-otg | 0.3.3, 0.4.0 | MIT OR Apache-2.0 | boards/m5stopwatch, f401-app, f401-board, f401-bootcore, f401-bringup, mcu/esp32s3, samples/esp32s3-app |
+| embedded-can | 0.4.1 | MIT OR Apache-2.0 | boards/m5stopwatch, f401-app, f401-board, f401-bootcore, f401-bringup, mcu/esp32s3, samples/esp32s3-app |
 | embedded-graphics | 0.8.2 | MIT OR Apache-2.0 | rp2040-hub |
 | embedded-graphics-core | 0.4.1 | MIT OR Apache-2.0 | rp2040-hub |
-| embedded-hal | 0.2.7, 1.0.0 | MIT OR Apache-2.0 | boards/m5stopwatch, esp32s3-agent, f401-app, f401-board, f401-bootcore, f401-bringup, mcu/esp32s3, rp2040-bootcore, rp2040-bootcore/common, rp2040-bringup, rp2040-dump, rp2040-hub, rp2040-hub/uf2check, rp2040-stage0, samples/esp32s3-app |
-| embedded-hal-async | 1.0.0 | MIT OR Apache-2.0 | boards/m5stopwatch, esp32s3-agent, f401-app, f401-board, f401-bootcore, f401-bringup, mcu/esp32s3, rp2040-bootcore, rp2040-bringup, rp2040-dump, rp2040-hub, samples/esp32s3-app |
+| embedded-hal | 0.2.7, 1.0.0 | MIT OR Apache-2.0 | boards/m5stopwatch, f401-app, f401-board, f401-bootcore, f401-bringup, mcu/esp32s3, rp2040-bootcore, rp2040-bootcore/common, rp2040-bringup, rp2040-dump, rp2040-hub, rp2040-hub/uf2check, rp2040-stage0, samples/esp32s3-app |
+| embedded-hal-async | 1.0.0 | MIT OR Apache-2.0 | boards/m5stopwatch, f401-app, f401-board, f401-bootcore, f401-bringup, mcu/esp32s3, rp2040-bootcore, rp2040-bringup, rp2040-dump, rp2040-hub, samples/esp32s3-app |
 | embedded-hal-nb | 1.0.0 | MIT OR Apache-2.0 | f401-app, f401-board, f401-bootcore, f401-bringup, rp2040-bootcore, rp2040-bringup, rp2040-dump, rp2040-hub |
-| embedded-io | 0.6.1, 0.7.1 | MIT OR Apache-2.0 | boards/m5stopwatch, esp32s3-agent, f401-app, f401-board, f401-bootcore, f401-bringup, mcu/esp32s3, rp2040-bootcore, rp2040-bringup, rp2040-dump, rp2040-hub, samples/esp32s3-app |
-| embedded-io-async | 0.6.1, 0.7.0 | MIT OR Apache-2.0 | boards/m5stopwatch, esp32s3-agent, f401-app, f401-board, f401-bootcore, f401-bringup, mcu/esp32s3, rp2040-bootcore, rp2040-bringup, rp2040-dump, rp2040-hub, samples/esp32s3-app |
-| embedded-storage | 0.3.2 | MIT OR Apache-2.0 | boards/m5stopwatch, esp32s3-agent, f401-app, f401-board, f401-bootcore, f401-bringup, mcu/esp32s3, rp2040-bootcore, rp2040-bringup, rp2040-dump, rp2040-hub, samples/esp32s3-app |
-| embedded-storage-async | 0.4.2 | MIT OR Apache-2.0 | boards/m5stopwatch, esp32s3-agent, f401-app, f401-board, f401-bootcore, f401-bringup, mcu/esp32s3, rp2040-bootcore, rp2040-bringup, rp2040-dump, rp2040-hub, samples/esp32s3-app |
+| embedded-io | 0.6.1, 0.7.1 | MIT OR Apache-2.0 | boards/m5stopwatch, f401-app, f401-board, f401-bootcore, f401-bringup, mcu/esp32s3, rp2040-bootcore, rp2040-bringup, rp2040-dump, rp2040-hub, samples/esp32s3-app |
+| embedded-io-async | 0.6.1, 0.7.0 | MIT OR Apache-2.0 | boards/m5stopwatch, f401-app, f401-board, f401-bootcore, f401-bringup, mcu/esp32s3, rp2040-bootcore, rp2040-bringup, rp2040-dump, rp2040-hub, samples/esp32s3-app |
+| embedded-storage | 0.3.2 | MIT OR Apache-2.0 | boards/m5stopwatch, f401-app, f401-board, f401-bootcore, f401-bringup, mcu/esp32s3, rp2040-bootcore, rp2040-bringup, rp2040-dump, rp2040-hub, samples/esp32s3-app |
+| embedded-storage-async | 0.4.2 | MIT OR Apache-2.0 | boards/m5stopwatch, f401-app, f401-board, f401-bootcore, f401-bringup, mcu/esp32s3, rp2040-bootcore, rp2040-bringup, rp2040-dump, rp2040-hub, samples/esp32s3-app |
 | ena | 0.14.4 | MIT OR Apache-2.0 | rp2040-bootcore, rp2040-bringup, rp2040-dump, rp2040-hub |
 | encode_unicode | 0.3.6 | MIT/Apache-2.0 | rp2040-bringup, rp2040-dump, rp2040-hub |
-| enumset | 1.1.15 | MIT/Apache-2.0 | boards/m5stopwatch, esp32s3-agent, mcu/esp32s3, samples/esp32s3-app |
-| enumset_derive | 0.15.1 | MIT/Apache-2.0 | boards/m5stopwatch, esp32s3-agent, mcu/esp32s3, samples/esp32s3-app |
-| equivalent | 1.0.3 | Apache-2.0 OR MIT | boards/m5stopwatch, crates/, esp32s3-agent, mcu/esp32s3, rp2040-bootcore, rp2040-bringup, rp2040-dump, rp2040-hub, samples/esp32s3-app |
-| esp-alloc | 0.11.0 | MIT OR Apache-2.0 | boards/m5stopwatch, esp32s3-agent, mcu/esp32s3, samples/esp32s3-app |
-| esp-bootloader-esp-idf | 0.6.0 | MIT OR Apache-2.0 | boards/m5stopwatch, esp32s3-agent, mcu/esp32s3, samples/esp32s3-app |
-| esp-config | 0.8.0 | MIT OR Apache-2.0 | boards/m5stopwatch, esp32s3-agent, mcu/esp32s3, samples/esp32s3-app |
-| esp-hal | 1.2.2 | MIT OR Apache-2.0 | boards/m5stopwatch, esp32s3-agent, mcu/esp32s3, samples/esp32s3-app |
+| enumset | 1.1.15 | MIT/Apache-2.0 | boards/m5stopwatch, mcu/esp32s3, samples/esp32s3-app |
+| enumset_derive | 0.15.1 | MIT/Apache-2.0 | boards/m5stopwatch, mcu/esp32s3, samples/esp32s3-app |
+| equivalent | 1.0.3 | Apache-2.0 OR MIT | boards/m5stopwatch, crates/, mcu/esp32s3, rp2040-bootcore, rp2040-bringup, rp2040-dump, rp2040-hub, samples/esp32s3-app |
+| esp-alloc | 0.11.0 | MIT OR Apache-2.0 | boards/m5stopwatch, mcu/esp32s3, samples/esp32s3-app |
+| esp-bootloader-esp-idf | 0.6.0 | MIT OR Apache-2.0 | boards/m5stopwatch, mcu/esp32s3, samples/esp32s3-app |
+| esp-config | 0.8.0 | MIT OR Apache-2.0 | boards/m5stopwatch, mcu/esp32s3, samples/esp32s3-app |
+| esp-hal | 1.2.2 | MIT OR Apache-2.0 | boards/m5stopwatch, mcu/esp32s3, samples/esp32s3-app |
 | esp-hal-co5300 | 0.1.0 | MIT OR Apache-2.0 | samples/esp32s3-app |
-| esp-hal-procmacros | 0.23.0 | MIT OR Apache-2.0 | boards/m5stopwatch, esp32s3-agent, mcu/esp32s3, samples/esp32s3-app |
-| esp-metadata-generated | 0.5.3 | MIT OR Apache-2.0 | boards/m5stopwatch, esp32s3-agent, mcu/esp32s3, samples/esp32s3-app |
-| esp-riscv-rt | 0.15.0 | MIT OR Apache-2.0 | boards/m5stopwatch, esp32s3-agent, mcu/esp32s3, samples/esp32s3-app |
-| esp-rom-sys | 0.1.5 | MIT OR Apache-2.0 | boards/m5stopwatch, esp32s3-agent, mcu/esp32s3, samples/esp32s3-app |
-| esp-rtos | 0.4.0 | MIT OR Apache-2.0 | boards/m5stopwatch, esp32s3-agent, mcu/esp32s3, samples/esp32s3-app |
-| esp-storage | 0.10.0 | MIT OR Apache-2.0 | boards/m5stopwatch, esp32s3-agent, mcu/esp32s3, samples/esp32s3-app |
-| esp-sync | 0.3.0 | MIT OR Apache-2.0 | boards/m5stopwatch, esp32s3-agent, mcu/esp32s3, samples/esp32s3-app |
-| esp32 | 0.41.0 | MIT OR Apache-2.0 | boards/m5stopwatch, esp32s3-agent, mcu/esp32s3, samples/esp32s3-app |
-| esp32c2 | 0.30.0 | MIT OR Apache-2.0 | boards/m5stopwatch, esp32s3-agent, mcu/esp32s3, samples/esp32s3-app |
-| esp32c3 | 0.33.0 | MIT OR Apache-2.0 | boards/m5stopwatch, esp32s3-agent, mcu/esp32s3, samples/esp32s3-app |
-| esp32c5 | 0.3.0 | MIT OR Apache-2.0 | boards/m5stopwatch, esp32s3-agent, mcu/esp32s3, samples/esp32s3-app |
-| esp32c6 | 0.24.0 | MIT OR Apache-2.0 | boards/m5stopwatch, esp32s3-agent, mcu/esp32s3, samples/esp32s3-app |
-| esp32c61 | 0.4.0 | MIT OR Apache-2.0 | boards/m5stopwatch, esp32s3-agent, mcu/esp32s3, samples/esp32s3-app |
-| esp32h2 | 0.20.0 | MIT OR Apache-2.0 | boards/m5stopwatch, esp32s3-agent, mcu/esp32s3, samples/esp32s3-app |
-| esp32p4 | 0.3.0 | MIT OR Apache-2.0 | boards/m5stopwatch, esp32s3-agent, mcu/esp32s3, samples/esp32s3-app |
-| esp32s2 | 0.32.0 | MIT OR Apache-2.0 | boards/m5stopwatch, esp32s3-agent, mcu/esp32s3, samples/esp32s3-app |
-| esp32s3 | 0.36.0 | MIT OR Apache-2.0 | boards/m5stopwatch, esp32s3-agent, mcu/esp32s3, samples/esp32s3-app |
-| esp32s31 | 0.3.0 | MIT OR Apache-2.0 | boards/m5stopwatch, esp32s3-agent, mcu/esp32s3, samples/esp32s3-app |
-| find-msvc-tools | 0.1.15 | MIT OR Apache-2.0 | boards/m5stopwatch, crates/, esp32s3-agent, f401-app, f401-bringup, mcu/esp32s3, rp2040-bringup, rp2040-dump, rp2040-hub, samples/esp32s3-app |
+| esp-hal-procmacros | 0.23.0 | MIT OR Apache-2.0 | boards/m5stopwatch, mcu/esp32s3, samples/esp32s3-app |
+| esp-metadata-generated | 0.5.3 | MIT OR Apache-2.0 | boards/m5stopwatch, mcu/esp32s3, samples/esp32s3-app |
+| esp-riscv-rt | 0.15.0 | MIT OR Apache-2.0 | boards/m5stopwatch, mcu/esp32s3, samples/esp32s3-app |
+| esp-rom-sys | 0.1.5 | MIT OR Apache-2.0 | boards/m5stopwatch, mcu/esp32s3, samples/esp32s3-app |
+| esp-rtos | 0.4.0 | MIT OR Apache-2.0 | boards/m5stopwatch, mcu/esp32s3, samples/esp32s3-app |
+| esp-storage | 0.10.0 | MIT OR Apache-2.0 | boards/m5stopwatch, mcu/esp32s3, samples/esp32s3-app |
+| esp-sync | 0.3.0 | MIT OR Apache-2.0 | boards/m5stopwatch, mcu/esp32s3, samples/esp32s3-app |
+| esp32 | 0.41.0 | MIT OR Apache-2.0 | boards/m5stopwatch, mcu/esp32s3, samples/esp32s3-app |
+| esp32c2 | 0.30.0 | MIT OR Apache-2.0 | boards/m5stopwatch, mcu/esp32s3, samples/esp32s3-app |
+| esp32c3 | 0.33.0 | MIT OR Apache-2.0 | boards/m5stopwatch, mcu/esp32s3, samples/esp32s3-app |
+| esp32c5 | 0.3.0 | MIT OR Apache-2.0 | boards/m5stopwatch, mcu/esp32s3, samples/esp32s3-app |
+| esp32c6 | 0.24.0 | MIT OR Apache-2.0 | boards/m5stopwatch, mcu/esp32s3, samples/esp32s3-app |
+| esp32c61 | 0.4.0 | MIT OR Apache-2.0 | boards/m5stopwatch, mcu/esp32s3, samples/esp32s3-app |
+| esp32h2 | 0.20.0 | MIT OR Apache-2.0 | boards/m5stopwatch, mcu/esp32s3, samples/esp32s3-app |
+| esp32p4 | 0.3.0 | MIT OR Apache-2.0 | boards/m5stopwatch, mcu/esp32s3, samples/esp32s3-app |
+| esp32s2 | 0.32.0 | MIT OR Apache-2.0 | boards/m5stopwatch, mcu/esp32s3, samples/esp32s3-app |
+| esp32s3 | 0.36.0 | MIT OR Apache-2.0 | boards/m5stopwatch, mcu/esp32s3, samples/esp32s3-app |
+| esp32s31 | 0.3.0 | MIT OR Apache-2.0 | boards/m5stopwatch, mcu/esp32s3, samples/esp32s3-app |
+| find-msvc-tools | 0.1.15 | MIT OR Apache-2.0 | boards/m5stopwatch, crates/, f401-app, f401-bringup, mcu/esp32s3, rp2040-bringup, rp2040-dump, rp2040-hub, samples/esp32s3-app |
 | fixed | 1.29.0, 1.31.0 | MIT/Apache-2.0 | rp2040-bootcore, rp2040-bringup, rp2040-dump, rp2040-hub |
 | fixedbitset | 0.5.7 | MIT OR Apache-2.0 | rp2040-bootcore, rp2040-bringup, rp2040-dump, rp2040-hub |
 | float-cmp | 0.9.0 | MIT | rp2040-hub |
-| fnv | 1.0.7 | Apache-2.0 / MIT | boards/m5stopwatch, esp32s3-agent, f401-app, f401-bringup, mcu/esp32s3, rp2040-bringup, rp2040-dump, rp2040-hub, samples/esp32s3-app |
-| fugit | 0.5.0 | MIT OR Apache-2.0 | boards/m5stopwatch, esp32s3-agent, mcu/esp32s3, samples/esp32s3-app |
-| futures-core | 0.3.34 | MIT OR Apache-2.0 | boards/m5stopwatch, crates/, esp32s3-agent, f401-app, f401-board, f401-bootcore, f401-bringup, mcu/esp32s3, rp2040-bootcore, rp2040-bringup, rp2040-dump, rp2040-hub, samples/esp32s3-app |
-| futures-sink | 0.3.34 | MIT OR Apache-2.0 | boards/m5stopwatch, esp32s3-agent, f401-app, f401-board, f401-bootcore, f401-bringup, mcu/esp32s3, rp2040-bootcore, rp2040-bringup, rp2040-dump, rp2040-hub, samples/esp32s3-app |
-| futures-task | 0.3.34 | MIT OR Apache-2.0 | boards/m5stopwatch, crates/, esp32s3-agent, f401-app, f401-board, f401-bootcore, f401-bringup, mcu/esp32s3, samples/esp32s3-app |
-| futures-util | 0.3.34 | MIT OR Apache-2.0 | boards/m5stopwatch, crates/, esp32s3-agent, f401-app, f401-board, f401-bootcore, f401-bringup, mcu/esp32s3, samples/esp32s3-app |
-| gcd | 2.3.0 | MIT/Apache-2.0 | boards/m5stopwatch, esp32s3-agent, mcu/esp32s3, samples/esp32s3-app |
-| generator | 0.8.11 | MIT/Apache-2.0 | boards/m5stopwatch, esp32s3-agent, f401-app, f401-bringup, mcu/esp32s3, rp2040-bringup, rp2040-dump, rp2040-hub, samples/esp32s3-app |
-| generic-array | 0.14.7 | MIT | boards/m5stopwatch, esp32s3-agent, mcu/esp32s3, rp2040-bootcore, rp2040-bringup, rp2040-dump, rp2040-hub, samples/esp32s3-app |
+| fnv | 1.0.7 | Apache-2.0 / MIT | boards/m5stopwatch, f401-app, f401-bringup, mcu/esp32s3, rp2040-bringup, rp2040-dump, rp2040-hub, samples/esp32s3-app |
+| fugit | 0.5.0 | MIT OR Apache-2.0 | boards/m5stopwatch, mcu/esp32s3, samples/esp32s3-app |
+| futures-core | 0.3.34 | MIT OR Apache-2.0 | boards/m5stopwatch, crates/, f401-app, f401-board, f401-bootcore, f401-bringup, mcu/esp32s3, rp2040-bootcore, rp2040-bringup, rp2040-dump, rp2040-hub, samples/esp32s3-app |
+| futures-sink | 0.3.34 | MIT OR Apache-2.0 | boards/m5stopwatch, f401-app, f401-board, f401-bootcore, f401-bringup, mcu/esp32s3, rp2040-bootcore, rp2040-bringup, rp2040-dump, rp2040-hub, samples/esp32s3-app |
+| futures-task | 0.3.34 | MIT OR Apache-2.0 | boards/m5stopwatch, crates/, f401-app, f401-board, f401-bootcore, f401-bringup, mcu/esp32s3, samples/esp32s3-app |
+| futures-util | 0.3.34 | MIT OR Apache-2.0 | boards/m5stopwatch, crates/, f401-app, f401-board, f401-bootcore, f401-bringup, mcu/esp32s3, samples/esp32s3-app |
+| gcd | 2.3.0 | MIT/Apache-2.0 | boards/m5stopwatch, mcu/esp32s3, samples/esp32s3-app |
+| generator | 0.8.11 | MIT/Apache-2.0 | boards/m5stopwatch, f401-app, f401-bringup, mcu/esp32s3, rp2040-bringup, rp2040-dump, rp2040-hub, samples/esp32s3-app |
+| generic-array | 0.14.7 | MIT | boards/m5stopwatch, mcu/esp32s3, rp2040-bootcore, rp2040-bringup, rp2040-dump, rp2040-hub, samples/esp32s3-app |
 | getrandom | 0.2.17, 0.4.3 | MIT OR Apache-2.0 | crates/ |
 | half | 2.7.1 | MIT OR Apache-2.0 | rp2040-bootcore, rp2040-bringup, rp2040-dump, rp2040-hub |
-| hash32 | 0.3.1 | MIT OR Apache-2.0 | boards/m5stopwatch, esp32s3-agent, f401-app, f401-board, f401-bootcore, f401-bringup, mcu/esp32s3, rp2040-bootcore, rp2040-bringup, rp2040-dump, rp2040-hub, samples/esp32s3-app |
-| hashbrown | 0.17.1 | MIT OR Apache-2.0 | boards/m5stopwatch, crates/, esp32s3-agent, mcu/esp32s3, rp2040-bootcore, rp2040-bringup, rp2040-dump, rp2040-hub, samples/esp32s3-app |
-| heapless | 0.8.0, 0.9.3 | MIT OR Apache-2.0 | boards/m5stopwatch, esp32s3-agent, f401-app, f401-board, f401-bootcore, f401-bringup, mcu/esp32s3, rp2040-bootcore, rp2040-bringup, rp2040-dump, rp2040-hub, samples/esp32s3-app |
-| heck | 0.5.0 | MIT OR Apache-2.0 | boards/m5stopwatch, esp32s3-agent, mcu/esp32s3, samples/esp32s3-app |
+| hash32 | 0.3.1 | MIT OR Apache-2.0 | boards/m5stopwatch, f401-app, f401-board, f401-bootcore, f401-bringup, mcu/esp32s3, rp2040-bootcore, rp2040-bringup, rp2040-dump, rp2040-hub, samples/esp32s3-app |
+| hashbrown | 0.17.1 | MIT OR Apache-2.0 | boards/m5stopwatch, crates/, mcu/esp32s3, rp2040-bootcore, rp2040-bringup, rp2040-dump, rp2040-hub, samples/esp32s3-app |
+| heapless | 0.8.0, 0.9.3 | MIT OR Apache-2.0 | boards/m5stopwatch, f401-app, f401-board, f401-bootcore, f401-bringup, mcu/esp32s3, rp2040-bootcore, rp2040-bringup, rp2040-dump, rp2040-hub, samples/esp32s3-app |
+| heck | 0.5.0 | MIT OR Apache-2.0 | boards/m5stopwatch, mcu/esp32s3, samples/esp32s3-app |
 | http | 1.5.0 | MIT OR Apache-2.0 | crates/ |
 | httparse | 1.10.1 | MIT OR Apache-2.0 | crates/ |
-| hybrid-array | 0.4.15 | MIT OR Apache-2.0 | boards/m5stopwatch, crates/, esp32s3-agent, f401-app, f401-board, f401-bootcore, f401-testimg, mcu/esp32s3, rp2040-bootcore, rp2040-bootcore/common, rp2040-dump, rp2040-hub, rp2040-hub/uf2check, rp2040-stage0, samples/esp32s3-app |
-| ident_case | 1.0.1 | MIT/Apache-2.0 | boards/m5stopwatch, esp32s3-agent, f401-app, f401-bringup, mcu/esp32s3, rp2040-bringup, rp2040-dump, rp2040-hub, samples/esp32s3-app |
-| indexmap | 2.14.2 | Apache-2.0 OR MIT | boards/m5stopwatch, crates/, esp32s3-agent, mcu/esp32s3, rp2040-bootcore, rp2040-bringup, rp2040-dump, rp2040-hub, samples/esp32s3-app |
-| indoc | 2.0.8 | MIT OR Apache-2.0 | boards/m5stopwatch, esp32s3-agent, mcu/esp32s3, samples/esp32s3-app |
-| instability | 0.3.14 | MIT | boards/m5stopwatch, esp32s3-agent, mcu/esp32s3, samples/esp32s3-app |
+| hybrid-array | 0.4.15 | MIT OR Apache-2.0 | boards/m5stopwatch, crates/, f401-app, f401-board, f401-bootcore, f401-testimg, mcu/esp32s3, rp2040-bootcore, rp2040-bootcore/common, rp2040-dump, rp2040-hub, rp2040-hub/uf2check, rp2040-stage0, samples/esp32s3-app |
+| ident_case | 1.0.1 | MIT/Apache-2.0 | boards/m5stopwatch, f401-app, f401-bringup, mcu/esp32s3, rp2040-bringup, rp2040-dump, rp2040-hub, samples/esp32s3-app |
+| indexmap | 2.14.2 | Apache-2.0 OR MIT | boards/m5stopwatch, crates/, mcu/esp32s3, rp2040-bootcore, rp2040-bringup, rp2040-dump, rp2040-hub, samples/esp32s3-app |
+| indoc | 2.0.8 | MIT OR Apache-2.0 | boards/m5stopwatch, mcu/esp32s3, samples/esp32s3-app |
+| instability | 0.3.14 | MIT | boards/m5stopwatch, mcu/esp32s3, samples/esp32s3-app |
 | io-kit-sys | 0.4.1 | MIT / Apache-2.0 | crates/ |
 | itertools | 0.14.0 | MIT OR Apache-2.0 | rp2040-bootcore, rp2040-bringup, rp2040-dump, rp2040-hub |
-| itoa | 1.0.18 | MIT OR Apache-2.0 | boards/m5stopwatch, crates/, esp32s3-agent, mcu/esp32s3, samples/esp32s3-app |
-| jiff | 0.2.38 | Unlicense OR MIT | boards/m5stopwatch, esp32s3-agent, mcu/esp32s3, samples/esp32s3-app |
-| jiff-core | 0.1.1 | Unlicense OR MIT | boards/m5stopwatch, esp32s3-agent, mcu/esp32s3, samples/esp32s3-app |
-| jiff-static | 0.2.38 | Unlicense OR MIT | boards/m5stopwatch, esp32s3-agent, mcu/esp32s3, samples/esp32s3-app |
+| itoa | 1.0.18 | MIT OR Apache-2.0 | boards/m5stopwatch, crates/, mcu/esp32s3, samples/esp32s3-app |
+| jiff | 0.2.38 | Unlicense OR MIT | boards/m5stopwatch, mcu/esp32s3, samples/esp32s3-app |
+| jiff-core | 0.1.1 | Unlicense OR MIT | boards/m5stopwatch, mcu/esp32s3, samples/esp32s3-app |
+| jiff-static | 0.2.38 | Unlicense OR MIT | boards/m5stopwatch, mcu/esp32s3, samples/esp32s3-app |
 | js-sys | 0.3.107 | MIT OR Apache-2.0 | crates/ |
 | keccak | 0.1.6 | Apache-2.0 OR MIT | rp2040-bootcore, rp2040-bringup, rp2040-dump, rp2040-hub |
 | lalrpop | 0.22.2 | Apache-2.0 OR MIT | rp2040-bootcore, rp2040-bringup, rp2040-dump, rp2040-hub |
 | lalrpop-util | 0.22.2 | Apache-2.0 OR MIT | rp2040-bootcore, rp2040-bringup, rp2040-dump, rp2040-hub |
-| lazy_static | 1.5.1 | MIT OR Apache-2.0 | boards/m5stopwatch, esp32s3-agent, f401-app, f401-bringup, mcu/esp32s3, rp2040-bringup, rp2040-dump, rp2040-hub, samples/esp32s3-app |
-| libc | 0.2.191 | MIT OR Apache-2.0 | boards/m5stopwatch, crates/, esp32s3-agent, f401-app, f401-board, f401-bootcore, f401-bringup, f401-testimg, mcu/esp32s3, rp2040-bootcore, rp2040-bootcore/common, rp2040-bringup, rp2040-dump, rp2040-hub, rp2040-hub/uf2check, rp2040-stage0, samples/esp32s3-app |
+| lazy_static | 1.5.1 | MIT OR Apache-2.0 | boards/m5stopwatch, f401-app, f401-bringup, mcu/esp32s3, rp2040-bringup, rp2040-dump, rp2040-hub, samples/esp32s3-app |
+| libc | 0.2.191 | MIT OR Apache-2.0 | boards/m5stopwatch, crates/, f401-app, f401-board, f401-bootcore, f401-bringup, f401-testimg, mcu/esp32s3, rp2040-bootcore, rp2040-bootcore/common, rp2040-bringup, rp2040-dump, rp2040-hub, rp2040-hub/uf2check, rp2040-stage0, samples/esp32s3-app |
 | libyaml-rs | 0.3.0 | MIT | crates/ |
-| linked_list_allocator | 0.10.6 | Apache-2.0/MIT | boards/m5stopwatch, esp32s3-agent, mcu/esp32s3, samples/esp32s3-app |
-| litrs | 1.0.1 | MIT OR Apache-2.0 | boards/m5stopwatch, esp32s3-agent, f401-app, f401-board, f401-bootcore, f401-bringup, mcu/esp32s3, rp2040-bootcore, rp2040-bringup, rp2040-dump, rp2040-hub, samples/esp32s3-app |
+| linked_list_allocator | 0.10.6 | Apache-2.0/MIT | boards/m5stopwatch, mcu/esp32s3, samples/esp32s3-app |
+| litrs | 1.0.1 | MIT OR Apache-2.0 | boards/m5stopwatch, f401-app, f401-board, f401-bootcore, f401-bringup, mcu/esp32s3, rp2040-bootcore, rp2040-bringup, rp2040-dump, rp2040-hub, samples/esp32s3-app |
 | lock_api | 0.4.14 | MIT OR Apache-2.0 | rp2040-bootcore, rp2040-bringup, rp2040-dump, rp2040-hub |
-| log | 0.4.35 | MIT OR Apache-2.0 | boards/m5stopwatch, crates/, esp32s3-agent, f401-app, f401-bringup, mcu/esp32s3, rp2040-bootcore, rp2040-bringup, rp2040-dump, rp2040-hub, samples/esp32s3-app |
-| loom | 0.7.2 | MIT | boards/m5stopwatch, esp32s3-agent, f401-app, f401-bringup, mcu/esp32s3, rp2040-bringup, rp2040-dump, rp2040-hub, samples/esp32s3-app |
+| log | 0.4.35 | MIT OR Apache-2.0 | boards/m5stopwatch, crates/, f401-app, f401-bringup, mcu/esp32s3, rp2040-bootcore, rp2040-bringup, rp2040-dump, rp2040-hub, samples/esp32s3-app |
+| loom | 0.7.2 | MIT | boards/m5stopwatch, f401-app, f401-bringup, mcu/esp32s3, rp2040-bringup, rp2040-dump, rp2040-hub, samples/esp32s3-app |
 | mach2 | 0.4.3 | BSD-2-Clause OR MIT OR Apache-2.0 | crates/ |
-| matchers | 0.2.0 | MIT | boards/m5stopwatch, esp32s3-agent, f401-app, f401-bringup, mcu/esp32s3, rp2040-bringup, rp2040-dump, rp2040-hub, samples/esp32s3-app |
-| memchr | 2.8.3 | Unlicense OR MIT | boards/m5stopwatch, crates/, esp32s3-agent, f401-app, f401-board, f401-bootcore, f401-bringup, mcu/esp32s3, rp2040-bootcore, rp2040-bringup, rp2040-dump, rp2040-hub, samples/esp32s3-app |
+| matchers | 0.2.0 | MIT | boards/m5stopwatch, f401-app, f401-bringup, mcu/esp32s3, rp2040-bringup, rp2040-dump, rp2040-hub, samples/esp32s3-app |
+| memchr | 2.8.3 | Unlicense OR MIT | boards/m5stopwatch, crates/, f401-app, f401-board, f401-bootcore, f401-bringup, mcu/esp32s3, rp2040-bootcore, rp2040-bringup, rp2040-dump, rp2040-hub, samples/esp32s3-app |
 | micromath | 2.1.0 | Apache-2.0 OR MIT | rp2040-hub |
-| nb | 0.1.3, 1.1.0 | MIT OR Apache-2.0 | boards/m5stopwatch, esp32s3-agent, f401-app, f401-board, f401-bootcore, f401-bringup, mcu/esp32s3, rp2040-bootcore, rp2040-bootcore/common, rp2040-bringup, rp2040-dump, rp2040-hub, rp2040-hub/uf2check, rp2040-stage0, samples/esp32s3-app |
+| nb | 0.1.3, 1.1.0 | MIT OR Apache-2.0 | boards/m5stopwatch, f401-app, f401-board, f401-bootcore, f401-bringup, mcu/esp32s3, rp2040-bootcore, rp2040-bootcore/common, rp2040-bringup, rp2040-dump, rp2040-hub, rp2040-hub/uf2check, rp2040-stage0, samples/esp32s3-app |
 | new_debug_unreachable | 1.0.6 | MIT | rp2040-bootcore, rp2040-bringup, rp2040-dump, rp2040-hub |
 | nix | 0.26.4 | MIT | crates/ |
-| nu-ansi-term | 0.50.3 | MIT | boards/m5stopwatch, esp32s3-agent, f401-app, f401-bringup, mcu/esp32s3, rp2040-bringup, rp2040-dump, rp2040-hub, samples/esp32s3-app |
-| num-traits | 0.2.19 | MIT OR Apache-2.0 | boards/m5stopwatch, esp32s3-agent, f401-app, f401-board, f401-bootcore, f401-bringup, mcu/esp32s3, rp2040-bootcore, rp2040-bringup, rp2040-dump, rp2040-hub, samples/esp32s3-app |
+| nu-ansi-term | 0.50.3 | MIT | boards/m5stopwatch, f401-app, f401-bringup, mcu/esp32s3, rp2040-bringup, rp2040-dump, rp2040-hub, samples/esp32s3-app |
+| num-traits | 0.2.19 | MIT OR Apache-2.0 | boards/m5stopwatch, f401-app, f401-board, f401-bootcore, f401-bringup, mcu/esp32s3, rp2040-bootcore, rp2040-bringup, rp2040-dump, rp2040-hub, samples/esp32s3-app |
 | num_enum | 0.7.6 | BSD-3-Clause OR MIT OR Apache-2.0 | rp2040-bootcore, rp2040-bringup, rp2040-dump, rp2040-hub |
 | num_enum_derive | 0.7.6 | BSD-3-Clause OR MIT OR Apache-2.0 | rp2040-bootcore, rp2040-bringup, rp2040-dump, rp2040-hub |
-| object | 0.37.3 | Apache-2.0 OR MIT | boards/m5stopwatch, esp32s3-agent, mcu/esp32s3, samples/esp32s3-app |
-| once_cell | 1.21.4 | MIT OR Apache-2.0 | boards/m5stopwatch, crates/, esp32s3-agent, f401-app, f401-bringup, mcu/esp32s3, rp2040-bringup, rp2040-dump, rp2040-hub, samples/esp32s3-app |
+| object | 0.37.3 | Apache-2.0 OR MIT | boards/m5stopwatch, mcu/esp32s3, samples/esp32s3-app |
+| once_cell | 1.21.4 | MIT OR Apache-2.0 | boards/m5stopwatch, crates/, f401-app, f401-bringup, mcu/esp32s3, rp2040-bringup, rp2040-dump, rp2040-hub, samples/esp32s3-app |
 | panic-halt | 1.0.0 | MIT OR Apache-2.0 | rp2040-bootcore, rp2040-bringup, rp2040-dump, rp2040-stage0 |
 | panic-probe | 1.0.0 | MIT OR Apache-2.0 | f401-app, f401-bringup |
 | parking_lot | 0.12.5 | MIT OR Apache-2.0 | rp2040-bootcore, rp2040-bringup, rp2040-dump, rp2040-hub |
 | parking_lot_core | 0.9.12 | MIT OR Apache-2.0 | rp2040-bootcore, rp2040-bringup, rp2040-dump, rp2040-hub |
-| paste | 1.0.15 | MIT OR Apache-2.0 | boards/m5stopwatch, esp32s3-agent, mcu/esp32s3, rp2040-bootcore, rp2040-bringup, rp2040-dump, rp2040-hub, samples/esp32s3-app |
+| paste | 1.0.15 | MIT OR Apache-2.0 | boards/m5stopwatch, mcu/esp32s3, rp2040-bootcore, rp2040-bringup, rp2040-dump, rp2040-hub, samples/esp32s3-app |
 | percent-encoding | 2.3.2 | MIT OR Apache-2.0 | crates/ |
 | petgraph | 0.7.1 | MIT OR Apache-2.0 | rp2040-bootcore, rp2040-bringup, rp2040-dump, rp2040-hub |
 | phf_shared | 0.11.3 | MIT | rp2040-bootcore, rp2040-bringup, rp2040-dump, rp2040-hub |
 | pico-args | 0.5.0 | MIT | rp2040-bootcore, rp2040-bringup, rp2040-dump, rp2040-hub |
-| pin-project-lite | 0.2.17 | Apache-2.0 OR MIT | boards/m5stopwatch, crates/, esp32s3-agent, f401-app, f401-board, f401-bootcore, f401-bringup, mcu/esp32s3, rp2040-bringup, rp2040-dump, rp2040-hub, samples/esp32s3-app |
+| pin-project-lite | 0.2.17 | Apache-2.0 OR MIT | boards/m5stopwatch, crates/, f401-app, f401-board, f401-bootcore, f401-bringup, mcu/esp32s3, rp2040-bringup, rp2040-dump, rp2040-hub, samples/esp32s3-app |
 | pio | 0.3.0 | MIT | rp2040-bootcore, rp2040-bringup, rp2040-dump, rp2040-hub |
 | pio-core | 0.3.0 | MIT | rp2040-bootcore, rp2040-bringup, rp2040-dump, rp2040-hub |
 | pio-parser | 0.3.0 | MIT | rp2040-bootcore, rp2040-bringup, rp2040-dump, rp2040-hub |
 | pio-proc | 0.3.0 | MIT | rp2040-bootcore, rp2040-bringup, rp2040-dump, rp2040-hub |
-| portable-atomic | 1.15.0 | Apache-2.0 OR MIT | boards/m5stopwatch, esp32s3-agent, f401-app, f401-board, f401-bootcore, f401-bringup, mcu/esp32s3, rp2040-bringup, rp2040-dump, rp2040-hub, samples/esp32s3-app |
-| portable-atomic-util | 0.2.8 | Apache-2.0 OR MIT | boards/m5stopwatch, esp32s3-agent, mcu/esp32s3, samples/esp32s3-app |
+| portable-atomic | 1.15.0 | Apache-2.0 OR MIT | boards/m5stopwatch, f401-app, f401-board, f401-bootcore, f401-bringup, mcu/esp32s3, rp2040-bringup, rp2040-dump, rp2040-hub, samples/esp32s3-app |
+| portable-atomic-util | 0.2.8 | Apache-2.0 OR MIT | boards/m5stopwatch, mcu/esp32s3, samples/esp32s3-app |
 | precomputed-hash | 0.1.1 | MIT | rp2040-bootcore, rp2040-bringup, rp2040-dump, rp2040-hub |
-| proc-macro-crate | 3.5.0 | MIT OR Apache-2.0 | boards/m5stopwatch, esp32s3-agent, mcu/esp32s3, samples/esp32s3-app |
+| proc-macro-crate | 3.5.0 | MIT OR Apache-2.0 | boards/m5stopwatch, mcu/esp32s3, samples/esp32s3-app |
 | proc-macro-error-attr2 | 2.0.0 | MIT OR Apache-2.0 | rp2040-bootcore, rp2040-bringup, rp2040-dump, rp2040-hub |
 | proc-macro-error2 | 2.0.1 | MIT OR Apache-2.0 | rp2040-bootcore, rp2040-bringup, rp2040-dump, rp2040-hub |
-| proc-macro2 | 1.0.107 | MIT OR Apache-2.0 | boards/m5stopwatch, crates/, esp32s3-agent, f401-app, f401-board, f401-bootcore, f401-bringup, mcu/esp32s3, rp2040-bootcore, rp2040-bootcore/common, rp2040-bringup, rp2040-dump, rp2040-hub, rp2040-hub/uf2check, rp2040-stage0, samples/esp32s3-app |
-| quote | 1.0.47 | MIT OR Apache-2.0 | boards/m5stopwatch, crates/, esp32s3-agent, f401-app, f401-board, f401-bootcore, f401-bringup, mcu/esp32s3, rp2040-bootcore, rp2040-bootcore/common, rp2040-bringup, rp2040-dump, rp2040-hub, rp2040-hub/uf2check, rp2040-stage0, samples/esp32s3-app |
+| proc-macro2 | 1.0.107 | MIT OR Apache-2.0 | boards/m5stopwatch, crates/, f401-app, f401-board, f401-bootcore, f401-bringup, mcu/esp32s3, rp2040-bootcore, rp2040-bootcore/common, rp2040-bringup, rp2040-dump, rp2040-hub, rp2040-hub/uf2check, rp2040-stage0, samples/esp32s3-app |
+| quote | 1.0.47 | MIT OR Apache-2.0 | boards/m5stopwatch, crates/, f401-app, f401-board, f401-bootcore, f401-bringup, mcu/esp32s3, rp2040-bootcore, rp2040-bootcore/common, rp2040-bringup, rp2040-dump, rp2040-hub, rp2040-hub/uf2check, rp2040-stage0, samples/esp32s3-app |
 | r-efi | 6.0.0 | MIT OR Apache-2.0 OR LGPL-2.1-or-later | crates/ |
-| rand_core | 0.10.1, 0.6.4, 0.9.5 | MIT OR Apache-2.0 | boards/m5stopwatch, esp32s3-agent, f401-app, f401-board, f401-bootcore, f401-bringup, mcu/esp32s3, rp2040-bootcore, rp2040-bringup, rp2040-dump, rp2040-hub, samples/esp32s3-app |
+| rand_core | 0.10.1, 0.6.4, 0.9.5 | MIT OR Apache-2.0 | boards/m5stopwatch, f401-app, f401-board, f401-bootcore, f401-bringup, mcu/esp32s3, rp2040-bootcore, rp2040-bringup, rp2040-dump, rp2040-hub, samples/esp32s3-app |
 | redox_syscall | 0.5.18 | MIT | rp2040-bootcore, rp2040-bringup, rp2040-dump, rp2040-hub |
 | regex | 1.13.1 | MIT OR Apache-2.0 | f401-app, f401-board, f401-bootcore, f401-bringup, rp2040-bootcore, rp2040-bringup, rp2040-dump, rp2040-hub |
-| regex-automata | 0.4.18 | MIT OR Apache-2.0 | boards/m5stopwatch, esp32s3-agent, f401-app, f401-board, f401-bootcore, f401-bringup, mcu/esp32s3, rp2040-bootcore, rp2040-bringup, rp2040-dump, rp2040-hub, samples/esp32s3-app |
-| regex-syntax | 0.8.11 | MIT OR Apache-2.0 | boards/m5stopwatch, esp32s3-agent, f401-app, f401-board, f401-bootcore, f401-bringup, mcu/esp32s3, rp2040-bootcore, rp2040-bringup, rp2040-dump, rp2040-hub, samples/esp32s3-app |
+| regex-automata | 0.4.18 | MIT OR Apache-2.0 | boards/m5stopwatch, f401-app, f401-board, f401-bootcore, f401-bringup, mcu/esp32s3, rp2040-bootcore, rp2040-bringup, rp2040-dump, rp2040-hub, samples/esp32s3-app |
+| regex-syntax | 0.8.11 | MIT OR Apache-2.0 | boards/m5stopwatch, f401-app, f401-board, f401-bootcore, f401-bringup, mcu/esp32s3, rp2040-bootcore, rp2040-bringup, rp2040-dump, rp2040-hub, samples/esp32s3-app |
 | rgb | 0.8.53 | MIT | rp2040-bootcore, rp2040-bringup, rp2040-dump, rp2040-hub |
 | ring | 0.17.14 | Apache-2.0 AND ISC | crates/ |
-| riscv | 0.15.0 | ISC | boards/m5stopwatch, esp32s3-agent, mcu/esp32s3, samples/esp32s3-app |
-| riscv-macros | 0.3.0 | MIT OR Apache-2.0 | boards/m5stopwatch, esp32s3-agent, mcu/esp32s3, samples/esp32s3-app |
-| riscv-pac | 0.2.0 | ISC | boards/m5stopwatch, esp32s3-agent, mcu/esp32s3, samples/esp32s3-app |
-| riscv-rt | 0.16.0 | ISC | boards/m5stopwatch, esp32s3-agent, mcu/esp32s3, samples/esp32s3-app |
-| riscv-rt-macros | 0.6.1 | MIT OR Apache-2.0 | boards/m5stopwatch, esp32s3-agent, mcu/esp32s3, samples/esp32s3-app |
-| riscv-target-parser | 0.1.3 | ISC | boards/m5stopwatch, esp32s3-agent, mcu/esp32s3, samples/esp32s3-app |
-| rlsf | 0.2.3 | MIT/Apache-2.0 | boards/m5stopwatch, esp32s3-agent, mcu/esp32s3, samples/esp32s3-app |
+| riscv | 0.15.0 | ISC | boards/m5stopwatch, mcu/esp32s3, samples/esp32s3-app |
+| riscv-macros | 0.3.0 | MIT OR Apache-2.0 | boards/m5stopwatch, mcu/esp32s3, samples/esp32s3-app |
+| riscv-pac | 0.2.0 | ISC | boards/m5stopwatch, mcu/esp32s3, samples/esp32s3-app |
+| riscv-rt | 0.16.0 | ISC | boards/m5stopwatch, mcu/esp32s3, samples/esp32s3-app |
+| riscv-rt-macros | 0.6.1 | MIT OR Apache-2.0 | boards/m5stopwatch, mcu/esp32s3, samples/esp32s3-app |
+| riscv-target-parser | 0.1.3 | ISC | boards/m5stopwatch, mcu/esp32s3, samples/esp32s3-app |
+| rlsf | 0.2.3 | MIT/Apache-2.0 | boards/m5stopwatch, mcu/esp32s3, samples/esp32s3-app |
 | rp-pac | 7.0.0 | BSD-3-Clause | rp2040-bootcore, rp2040-bringup, rp2040-dump, rp2040-hub |
 | rp2040-boot2 | 0.3.0 | BSD-3-Clause | rp2040-bootcore, rp2040-bringup, rp2040-dump, rp2040-hub, rp2040-stage0 |
 | rustc_version | 0.2.3 | MIT/Apache-2.0 | f401-app, f401-board, f401-bootcore, f401-bringup, rp2040-bootcore, rp2040-bootcore/common, rp2040-bringup, rp2040-dump, rp2040-hub, rp2040-hub/uf2check, rp2040-stage0 |
 | rustls | 0.23.46 | Apache-2.0 OR ISC OR MIT | crates/ |
 | rustls-pki-types | 1.15.1 | MIT OR Apache-2.0 | crates/ |
 | rustls-webpki | 0.103.16 | ISC | crates/ |
-| rustversion | 1.0.23 | MIT OR Apache-2.0 | boards/m5stopwatch, crates/, esp32s3-agent, f401-app, f401-bringup, mcu/esp32s3, rp2040-bootcore, rp2040-bringup, rp2040-dump, rp2040-hub, samples/esp32s3-app |
-| ryu | 1.0.23 | Apache-2.0 OR BSL-1.0 | boards/m5stopwatch, crates/, esp32s3-agent, mcu/esp32s3, samples/esp32s3-app |
+| rustversion | 1.0.23 | MIT OR Apache-2.0 | boards/m5stopwatch, crates/, f401-app, f401-bringup, mcu/esp32s3, rp2040-bootcore, rp2040-bringup, rp2040-dump, rp2040-hub, samples/esp32s3-app |
+| ryu | 1.0.23 | Apache-2.0 OR BSL-1.0 | boards/m5stopwatch, crates/, mcu/esp32s3, samples/esp32s3-app |
 | same-file | 1.0.6 | Unlicense/MIT | rp2040-bootcore, rp2040-bringup, rp2040-dump, rp2040-hub |
-| scoped-tls | 1.0.1 | MIT/Apache-2.0 | boards/m5stopwatch, esp32s3-agent, f401-app, f401-bringup, mcu/esp32s3, rp2040-bringup, rp2040-dump, rp2040-hub, samples/esp32s3-app |
+| scoped-tls | 1.0.1 | MIT/Apache-2.0 | boards/m5stopwatch, f401-app, f401-bringup, mcu/esp32s3, rp2040-bringup, rp2040-dump, rp2040-hub, samples/esp32s3-app |
 | scopeguard | 1.2.0 | MIT OR Apache-2.0 | crates/, rp2040-bootcore, rp2040-bringup, rp2040-dump, rp2040-hub |
-| sdio | 0.5.3 | MIT OR Apache-2.0 | boards/m5stopwatch, esp32s3-agent, mcu/esp32s3, samples/esp32s3-app |
+| sdio | 0.5.3 | MIT OR Apache-2.0 | boards/m5stopwatch, mcu/esp32s3, samples/esp32s3-app |
 | sdio-host | 0.9.0 | MIT OR Apache-2.0 | f401-app, f401-board, f401-bootcore, f401-bringup |
 | semver | 0.9.0 | MIT/Apache-2.0 | f401-app, f401-board, f401-bootcore, f401-bringup, rp2040-bootcore, rp2040-bootcore/common, rp2040-bringup, rp2040-dump, rp2040-hub, rp2040-hub/uf2check, rp2040-stage0 |
 | semver-parser | 0.7.0 | MIT/Apache-2.0 | f401-app, f401-board, f401-bootcore, f401-bringup, rp2040-bootcore, rp2040-bootcore/common, rp2040-bringup, rp2040-dump, rp2040-hub, rp2040-hub/uf2check, rp2040-stage0 |
-| serde | 1.0.229 | MIT OR Apache-2.0 | boards/m5stopwatch, crates/, esp32s3-agent, mcu/esp32s3, rp2040-bringup, rp2040-dump, rp2040-hub, samples/esp32s3-app |
-| serde_core | 1.0.229 | MIT OR Apache-2.0 | boards/m5stopwatch, crates/, esp32s3-agent, mcu/esp32s3, rp2040-bringup, rp2040-dump, rp2040-hub, samples/esp32s3-app |
-| serde_derive | 1.0.229 | MIT OR Apache-2.0 | boards/m5stopwatch, crates/, esp32s3-agent, mcu/esp32s3, rp2040-bringup, rp2040-dump, rp2040-hub, samples/esp32s3-app |
+| serde | 1.0.229 | MIT OR Apache-2.0 | boards/m5stopwatch, crates/, mcu/esp32s3, rp2040-bringup, rp2040-dump, rp2040-hub, samples/esp32s3-app |
+| serde_core | 1.0.229 | MIT OR Apache-2.0 | boards/m5stopwatch, crates/, mcu/esp32s3, rp2040-bringup, rp2040-dump, rp2040-hub, samples/esp32s3-app |
+| serde_derive | 1.0.229 | MIT OR Apache-2.0 | boards/m5stopwatch, crates/, mcu/esp32s3, rp2040-bringup, rp2040-dump, rp2040-hub, samples/esp32s3-app |
 | serde_json | 1.0.154 | MIT OR Apache-2.0 | crates/ |
 | serde_spanned | 0.6.9 | MIT OR Apache-2.0 | crates/ |
-| serde_yaml | 0.9.34+deprecated | MIT OR Apache-2.0 | boards/m5stopwatch, esp32s3-agent, mcu/esp32s3, samples/esp32s3-app |
+| serde_yaml | 0.9.34+deprecated | MIT OR Apache-2.0 | boards/m5stopwatch, mcu/esp32s3, samples/esp32s3-app |
 | serialport | 4.10.1 | MPL-2.0 | crates/ |
 | sha1 | 0.11.0 | MIT OR Apache-2.0 | crates/ |
-| sha2 | 0.11.1 | MIT OR Apache-2.0 | boards/m5stopwatch, crates/, esp32s3-agent, f401-app, f401-board, f401-bootcore, f401-testimg, mcu/esp32s3, rp2040-bootcore, rp2040-bootcore/common, rp2040-dump, rp2040-hub, rp2040-hub/uf2check, rp2040-stage0, samples/esp32s3-app |
+| sha2 | 0.11.1 | MIT OR Apache-2.0 | boards/m5stopwatch, crates/, f401-app, f401-board, f401-bootcore, f401-testimg, mcu/esp32s3, rp2040-bootcore, rp2040-bootcore/common, rp2040-dump, rp2040-hub, rp2040-hub/uf2check, rp2040-stage0, samples/esp32s3-app |
 | sha2-const-stable | 0.1.0 | MIT OR Apache-2.0 | rp2040-bootcore, rp2040-bringup, rp2040-dump, rp2040-hub |
 | sha3 | 0.10.9 | MIT OR Apache-2.0 | rp2040-bootcore, rp2040-bringup, rp2040-dump, rp2040-hub |
-| sharded-slab | 0.1.7 | MIT | boards/m5stopwatch, esp32s3-agent, f401-app, f401-bringup, mcu/esp32s3, rp2040-bringup, rp2040-dump, rp2040-hub, samples/esp32s3-app |
-| shlex | 2.0.1 | MIT OR Apache-2.0 | boards/m5stopwatch, crates/, esp32s3-agent, f401-app, f401-bringup, mcu/esp32s3, rp2040-bringup, rp2040-dump, rp2040-hub, samples/esp32s3-app |
+| sharded-slab | 0.1.7 | MIT | boards/m5stopwatch, f401-app, f401-bringup, mcu/esp32s3, rp2040-bringup, rp2040-dump, rp2040-hub, samples/esp32s3-app |
+| shlex | 2.0.1 | MIT OR Apache-2.0 | boards/m5stopwatch, crates/, f401-app, f401-bringup, mcu/esp32s3, rp2040-bringup, rp2040-dump, rp2040-hub, samples/esp32s3-app |
 | siphasher | 1.0.4 | MIT OR Apache-2.0 | rp2040-bootcore, rp2040-bringup, rp2040-dump, rp2040-hub |
 | slab | 0.4.12 | MIT | crates/ |
-| smallvec | 1.16.4 | MIT OR Apache-2.0 | boards/m5stopwatch, esp32s3-agent, f401-app, f401-bringup, mcu/esp32s3, rp2040-bootcore, rp2040-bringup, rp2040-dump, rp2040-hub, samples/esp32s3-app |
+| smallvec | 1.16.4 | MIT OR Apache-2.0 | boards/m5stopwatch, f401-app, f401-bringup, mcu/esp32s3, rp2040-bootcore, rp2040-bringup, rp2040-dump, rp2040-hub, samples/esp32s3-app |
 | smart-leds | 0.4.0 | MIT OR Apache-2.0 | rp2040-bootcore, rp2040-bringup, rp2040-dump, rp2040-hub |
 | smart-leds-trait | 0.3.2 | MIT OR Apache-2.0 | rp2040-bootcore, rp2040-bringup, rp2040-dump, rp2040-hub |
-| somni-expr | 0.3.2 | MIT OR Apache-2.0 | boards/m5stopwatch, esp32s3-agent, mcu/esp32s3, samples/esp32s3-app |
-| somni-parser | 0.3.1 | MIT OR Apache-2.0 | boards/m5stopwatch, esp32s3-agent, mcu/esp32s3, samples/esp32s3-app |
-| somni-template | 0.3.2 | MIT OR Apache-2.0 | boards/m5stopwatch, esp32s3-agent, mcu/esp32s3, samples/esp32s3-app |
+| somni-expr | 0.3.2 | MIT OR Apache-2.0 | boards/m5stopwatch, mcu/esp32s3, samples/esp32s3-app |
+| somni-parser | 0.3.1 | MIT OR Apache-2.0 | boards/m5stopwatch, mcu/esp32s3, samples/esp32s3-app |
+| somni-template | 0.3.2 | MIT OR Apache-2.0 | boards/m5stopwatch, mcu/esp32s3, samples/esp32s3-app |
 | ssmarshal | 1.0.0 | MIT OR Apache-2.0 | rp2040-bringup, rp2040-dump, rp2040-hub |
-| stable_deref_trait | 1.2.1 | MIT OR Apache-2.0 | boards/m5stopwatch, esp32s3-agent, f401-app, f401-board, f401-bootcore, f401-bringup, mcu/esp32s3, rp2040-bootcore, rp2040-bringup, rp2040-dump, rp2040-hub, samples/esp32s3-app |
+| stable_deref_trait | 1.2.1 | MIT OR Apache-2.0 | boards/m5stopwatch, f401-app, f401-board, f401-bootcore, f401-bringup, mcu/esp32s3, rp2040-bootcore, rp2040-bringup, rp2040-dump, rp2040-hub, samples/esp32s3-app |
 | static_assertions | 1.1.0 | MIT OR Apache-2.0 | f401-app, f401-board, f401-bootcore, f401-bringup |
-| static_cell | 2.1.1 | MIT OR Apache-2.0 | boards/m5stopwatch, esp32s3-agent, f401-app, mcu/esp32s3, rp2040-hub, samples/esp32s3-app |
+| static_cell | 2.1.1 | MIT OR Apache-2.0 | boards/m5stopwatch, f401-app, mcu/esp32s3, rp2040-hub, samples/esp32s3-app |
 | stm32-fmc | 0.4.0 | MIT/Apache-2.0 | f401-app, f401-board, f401-bootcore, f401-bringup |
 | stm32-metapac | 21.0.0 | MIT OR Apache-2.0 | f401-app, f401-board, f401-bootcore, f401-bringup |
 | string_cache | 0.8.9 | MIT OR Apache-2.0 | rp2040-bootcore, rp2040-bringup, rp2040-dump, rp2040-hub |
-| strsim | 0.11.1 | MIT | boards/m5stopwatch, esp32s3-agent, f401-app, f401-bringup, mcu/esp32s3, rp2040-bringup, rp2040-dump, rp2040-hub, samples/esp32s3-app |
-| strum | 0.27.2 | MIT | boards/m5stopwatch, esp32s3-agent, mcu/esp32s3, samples/esp32s3-app |
-| strum_macros | 0.27.2 | MIT | boards/m5stopwatch, esp32s3-agent, mcu/esp32s3, samples/esp32s3-app |
+| strsim | 0.11.1 | MIT | boards/m5stopwatch, f401-app, f401-bringup, mcu/esp32s3, rp2040-bringup, rp2040-dump, rp2040-hub, samples/esp32s3-app |
+| strum | 0.27.2 | MIT | boards/m5stopwatch, mcu/esp32s3, samples/esp32s3-app |
+| strum_macros | 0.27.2 | MIT | boards/m5stopwatch, mcu/esp32s3, samples/esp32s3-app |
 | subtle | 2.6.1 | BSD-3-Clause | crates/ |
-| syn | 1.0.109, 2.0.119, 3.0.9 | MIT OR Apache-2.0 | boards/m5stopwatch, crates/, esp32s3-agent, f401-app, f401-board, f401-bootcore, f401-bringup, mcu/esp32s3, rp2040-bootcore, rp2040-bootcore/common, rp2040-bringup, rp2040-dump, rp2040-hub, rp2040-hub/uf2check, rp2040-stage0, samples/esp32s3-app |
+| syn | 1.0.109, 2.0.119, 3.0.9 | MIT OR Apache-2.0 | boards/m5stopwatch, crates/, f401-app, f401-board, f401-bootcore, f401-bringup, mcu/esp32s3, rp2040-bootcore, rp2040-bootcore/common, rp2040-bringup, rp2040-dump, rp2040-hub, rp2040-hub/uf2check, rp2040-stage0, samples/esp32s3-app |
 | term | 1.2.1 | MIT OR Apache-2.0 | rp2040-bootcore, rp2040-bringup, rp2040-dump, rp2040-hub |
-| termcolor | 1.4.1 | Unlicense OR MIT | boards/m5stopwatch, esp32s3-agent, mcu/esp32s3, rp2040-bootcore, rp2040-bringup, rp2040-dump, rp2040-hub, samples/esp32s3-app |
-| thiserror | 2.0.21 | MIT OR Apache-2.0 | boards/m5stopwatch, crates/, esp32s3-agent, f401-app, f401-bringup, mcu/esp32s3, samples/esp32s3-app |
-| thiserror-impl | 2.0.21 | MIT OR Apache-2.0 | boards/m5stopwatch, crates/, esp32s3-agent, f401-app, f401-bringup, mcu/esp32s3, samples/esp32s3-app |
-| thread_local | 1.1.10 | MIT OR Apache-2.0 | boards/m5stopwatch, esp32s3-agent, f401-app, f401-bringup, mcu/esp32s3, rp2040-bringup, rp2040-dump, rp2040-hub, samples/esp32s3-app |
+| termcolor | 1.4.1 | Unlicense OR MIT | boards/m5stopwatch, mcu/esp32s3, rp2040-bootcore, rp2040-bringup, rp2040-dump, rp2040-hub, samples/esp32s3-app |
+| thiserror | 2.0.21 | MIT OR Apache-2.0 | boards/m5stopwatch, crates/, f401-app, f401-bringup, mcu/esp32s3, samples/esp32s3-app |
+| thiserror-impl | 2.0.21 | MIT OR Apache-2.0 | boards/m5stopwatch, crates/, f401-app, f401-bringup, mcu/esp32s3, samples/esp32s3-app |
+| thread_local | 1.1.10 | MIT OR Apache-2.0 | boards/m5stopwatch, f401-app, f401-bringup, mcu/esp32s3, rp2040-bringup, rp2040-dump, rp2040-hub, samples/esp32s3-app |
 | tokio | 1.54.1 | MIT | crates/ |
 | toml | 0.8.23 | MIT OR Apache-2.0 | crates/ |
-| toml_datetime | 0.6.11, 1.1.2+spec-1.1.0 | MIT OR Apache-2.0 | boards/m5stopwatch, crates/, esp32s3-agent, mcu/esp32s3, samples/esp32s3-app |
-| toml_edit | 0.22.27, 0.25.17+spec-1.1.0 | MIT OR Apache-2.0 | boards/m5stopwatch, crates/, esp32s3-agent, mcu/esp32s3, samples/esp32s3-app |
-| toml_parser | 1.1.5+spec-1.1.0 | MIT OR Apache-2.0 | boards/m5stopwatch, esp32s3-agent, mcu/esp32s3, samples/esp32s3-app |
+| toml_datetime | 0.6.11, 1.1.2+spec-1.1.0 | MIT OR Apache-2.0 | boards/m5stopwatch, crates/, mcu/esp32s3, samples/esp32s3-app |
+| toml_edit | 0.22.27, 0.25.17+spec-1.1.0 | MIT OR Apache-2.0 | boards/m5stopwatch, crates/, mcu/esp32s3, samples/esp32s3-app |
+| toml_parser | 1.1.5+spec-1.1.0 | MIT OR Apache-2.0 | boards/m5stopwatch, mcu/esp32s3, samples/esp32s3-app |
 | toml_write | 0.1.2 | MIT OR Apache-2.0 | crates/ |
-| tracing | 0.1.44 | MIT | boards/m5stopwatch, esp32s3-agent, f401-app, f401-bringup, mcu/esp32s3, rp2040-bringup, rp2040-dump, rp2040-hub, samples/esp32s3-app |
-| tracing-attributes | 0.1.31 | MIT | boards/m5stopwatch, esp32s3-agent, f401-app, f401-bringup, mcu/esp32s3, rp2040-bringup, rp2040-dump, rp2040-hub, samples/esp32s3-app |
-| tracing-core | 0.1.36 | MIT | boards/m5stopwatch, esp32s3-agent, f401-app, f401-bringup, mcu/esp32s3, rp2040-bringup, rp2040-dump, rp2040-hub, samples/esp32s3-app |
-| tracing-log | 0.2.0 | MIT | boards/m5stopwatch, esp32s3-agent, f401-app, f401-bringup, mcu/esp32s3, rp2040-bringup, rp2040-dump, rp2040-hub, samples/esp32s3-app |
-| tracing-subscriber | 0.3.23 | MIT | boards/m5stopwatch, esp32s3-agent, f401-app, f401-bringup, mcu/esp32s3, rp2040-bringup, rp2040-dump, rp2040-hub, samples/esp32s3-app |
+| tracing | 0.1.44 | MIT | boards/m5stopwatch, f401-app, f401-bringup, mcu/esp32s3, rp2040-bringup, rp2040-dump, rp2040-hub, samples/esp32s3-app |
+| tracing-attributes | 0.1.31 | MIT | boards/m5stopwatch, f401-app, f401-bringup, mcu/esp32s3, rp2040-bringup, rp2040-dump, rp2040-hub, samples/esp32s3-app |
+| tracing-core | 0.1.36 | MIT | boards/m5stopwatch, f401-app, f401-bringup, mcu/esp32s3, rp2040-bringup, rp2040-dump, rp2040-hub, samples/esp32s3-app |
+| tracing-log | 0.2.0 | MIT | boards/m5stopwatch, f401-app, f401-bringup, mcu/esp32s3, rp2040-bringup, rp2040-dump, rp2040-hub, samples/esp32s3-app |
+| tracing-subscriber | 0.3.23 | MIT | boards/m5stopwatch, f401-app, f401-bringup, mcu/esp32s3, rp2040-bringup, rp2040-dump, rp2040-hub, samples/esp32s3-app |
 | trait-set | 0.3.0 | MIT | f401-app, f401-board, f401-bootcore, f401-bringup |
-| typenum | 1.20.1 | MIT OR Apache-2.0 | boards/m5stopwatch, crates/, esp32s3-agent, f401-app, f401-board, f401-bootcore, f401-testimg, mcu/esp32s3, rp2040-bootcore, rp2040-bootcore/common, rp2040-bringup, rp2040-dump, rp2040-hub, rp2040-hub/uf2check, rp2040-stage0, samples/esp32s3-app |
-| ufmt-write | 0.1.0 | MIT OR Apache-2.0 | boards/m5stopwatch, esp32s3-agent, mcu/esp32s3, samples/esp32s3-app |
+| typenum | 1.20.1 | MIT OR Apache-2.0 | boards/m5stopwatch, crates/, f401-app, f401-board, f401-bootcore, f401-testimg, mcu/esp32s3, rp2040-bootcore, rp2040-bootcore/common, rp2040-bringup, rp2040-dump, rp2040-hub, rp2040-hub/uf2check, rp2040-stage0, samples/esp32s3-app |
+| ufmt-write | 0.1.0 | MIT OR Apache-2.0 | boards/m5stopwatch, mcu/esp32s3, samples/esp32s3-app |
 | unescaper | 0.1.10 | MIT OR GPL-3.0-only | crates/ |
-| unicode-ident | 1.0.27 | (MIT OR Apache-2.0) AND Unicode-3.0 | boards/m5stopwatch, crates/, esp32s3-agent, f401-app, f401-board, f401-bootcore, f401-bringup, mcu/esp32s3, rp2040-bootcore, rp2040-bootcore/common, rp2040-bringup, rp2040-dump, rp2040-hub, rp2040-hub/uf2check, rp2040-stage0, samples/esp32s3-app |
+| unicode-ident | 1.0.27 | (MIT OR Apache-2.0) AND Unicode-3.0 | boards/m5stopwatch, crates/, f401-app, f401-board, f401-bootcore, f401-bringup, mcu/esp32s3, rp2040-bootcore, rp2040-bootcore/common, rp2040-bringup, rp2040-dump, rp2040-hub, rp2040-hub/uf2check, rp2040-stage0, samples/esp32s3-app |
 | unicode-width | 0.1.14 | MIT OR Apache-2.0 | rp2040-bootcore, rp2040-bringup, rp2040-dump, rp2040-hub |
 | unicode-xid | 0.2.6 | MIT OR Apache-2.0 | rp2040-bootcore, rp2040-bringup, rp2040-dump, rp2040-hub |
-| unsafe-libyaml | 0.2.11 | MIT | boards/m5stopwatch, esp32s3-agent, mcu/esp32s3, samples/esp32s3-app |
+| unsafe-libyaml | 0.2.11 | MIT | boards/m5stopwatch, mcu/esp32s3, samples/esp32s3-app |
 | untrusted | 0.9.0 | ISC | crates/ |
 | ureq | 3.5.0 | MIT OR Apache-2.0 | crates/ |
 | ureq-proto | 0.6.5 | MIT OR Apache-2.0 | crates/ |
@@ -511,10 +514,10 @@ Rust crates: 316 packages, 350 name/version pairs. "Used by": `crates/` is the h
 | usbd-hid-descriptors | 0.10.2 | MIT OR Apache-2.0 | rp2040-bringup, rp2040-dump, rp2040-hub |
 | usbd-hid-macros | 0.10.2 | MIT OR Apache-2.0 | rp2040-bringup, rp2040-dump, rp2040-hub |
 | utf8-zero | 0.8.1 | MIT OR Apache-2.0 | crates/ |
-| valuable | 0.1.1 | MIT | boards/m5stopwatch, esp32s3-agent, f401-app, f401-bringup, mcu/esp32s3, rp2040-bringup, rp2040-dump, rp2040-hub, samples/esp32s3-app |
-| vcell | 0.1.3 | MIT OR Apache-2.0 | boards/m5stopwatch, esp32s3-agent, f401-app, f401-board, f401-bootcore, f401-bringup, mcu/esp32s3, rp2040-bootcore, rp2040-bootcore/common, rp2040-bringup, rp2040-dump, rp2040-hub, rp2040-hub/uf2check, rp2040-stage0, samples/esp32s3-app |
-| version_check | 0.9.5 | MIT/Apache-2.0 | boards/m5stopwatch, esp32s3-agent, mcu/esp32s3, rp2040-bootcore, rp2040-bringup, rp2040-dump, rp2040-hub, samples/esp32s3-app |
-| void | 1.0.2 | MIT | boards/m5stopwatch, esp32s3-agent, f401-app, f401-board, f401-bootcore, f401-bringup, mcu/esp32s3, rp2040-bootcore, rp2040-bootcore/common, rp2040-bringup, rp2040-dump, rp2040-hub, rp2040-hub/uf2check, rp2040-stage0, samples/esp32s3-app |
+| valuable | 0.1.1 | MIT | boards/m5stopwatch, f401-app, f401-bringup, mcu/esp32s3, rp2040-bringup, rp2040-dump, rp2040-hub, samples/esp32s3-app |
+| vcell | 0.1.3 | MIT OR Apache-2.0 | boards/m5stopwatch, f401-app, f401-board, f401-bootcore, f401-bringup, mcu/esp32s3, rp2040-bootcore, rp2040-bootcore/common, rp2040-bringup, rp2040-dump, rp2040-hub, rp2040-hub/uf2check, rp2040-stage0, samples/esp32s3-app |
+| version_check | 0.9.5 | MIT/Apache-2.0 | boards/m5stopwatch, mcu/esp32s3, rp2040-bootcore, rp2040-bringup, rp2040-dump, rp2040-hub, samples/esp32s3-app |
+| void | 1.0.2 | MIT | boards/m5stopwatch, f401-app, f401-board, f401-bootcore, f401-bringup, mcu/esp32s3, rp2040-bootcore, rp2040-bootcore/common, rp2040-bringup, rp2040-dump, rp2040-hub, rp2040-hub/uf2check, rp2040-stage0, samples/esp32s3-app |
 | volatile-register | 0.2.2 | MIT OR Apache-2.0 | f401-app, f401-board, f401-bootcore, f401-bringup, rp2040-bootcore, rp2040-bootcore/common, rp2040-bringup, rp2040-dump, rp2040-hub, rp2040-hub/uf2check, rp2040-stage0 |
 | walkdir | 2.5.0 | Unlicense/MIT | rp2040-bootcore, rp2040-bringup, rp2040-dump, rp2040-hub |
 | wasi | 0.11.1+wasi-snapshot-preview1 | Apache-2.0 WITH LLVM-exception OR Apache-2.0 OR MIT | crates/ |
@@ -524,10 +527,10 @@ Rust crates: 316 packages, 350 name/version pairs. "Used by": `crates/` is the h
 | wasm-bindgen-macro-support | 0.2.130 | MIT OR Apache-2.0 | crates/ |
 | wasm-bindgen-shared | 0.2.130 | MIT OR Apache-2.0 | crates/ |
 | webpki-roots | 1.0.11 | CDLA-Permissive-2.0 | crates/ |
-| winapi-util | 0.1.11 | Unlicense OR MIT | boards/m5stopwatch, esp32s3-agent, mcu/esp32s3, rp2040-bootcore, rp2040-bringup, rp2040-dump, rp2040-hub, samples/esp32s3-app |
-| windows-link | 0.2.1 | MIT OR Apache-2.0 | boards/m5stopwatch, esp32s3-agent, f401-app, f401-bringup, mcu/esp32s3, rp2040-bootcore, rp2040-bringup, rp2040-dump, rp2040-hub, samples/esp32s3-app |
-| windows-result | 0.4.1 | MIT OR Apache-2.0 | boards/m5stopwatch, esp32s3-agent, f401-app, f401-bringup, mcu/esp32s3, rp2040-bringup, rp2040-dump, rp2040-hub, samples/esp32s3-app |
-| windows-sys | 0.52.0, 0.61.2 | MIT OR Apache-2.0 | boards/m5stopwatch, crates/, esp32s3-agent, f401-app, f401-bringup, mcu/esp32s3, rp2040-bootcore, rp2040-bringup, rp2040-dump, rp2040-hub, samples/esp32s3-app |
+| winapi-util | 0.1.11 | Unlicense OR MIT | boards/m5stopwatch, mcu/esp32s3, rp2040-bootcore, rp2040-bringup, rp2040-dump, rp2040-hub, samples/esp32s3-app |
+| windows-link | 0.2.1 | MIT OR Apache-2.0 | boards/m5stopwatch, f401-app, f401-bringup, mcu/esp32s3, rp2040-bootcore, rp2040-bringup, rp2040-dump, rp2040-hub, samples/esp32s3-app |
+| windows-result | 0.4.1 | MIT OR Apache-2.0 | boards/m5stopwatch, f401-app, f401-bringup, mcu/esp32s3, rp2040-bringup, rp2040-dump, rp2040-hub, samples/esp32s3-app |
+| windows-sys | 0.52.0, 0.61.2 | MIT OR Apache-2.0 | boards/m5stopwatch, crates/, f401-app, f401-bringup, mcu/esp32s3, rp2040-bootcore, rp2040-bringup, rp2040-dump, rp2040-hub, samples/esp32s3-app |
 | windows-targets | 0.52.6 | MIT OR Apache-2.0 | crates/ |
 | windows_aarch64_gnullvm | 0.52.6 | MIT OR Apache-2.0 | crates/ |
 | windows_aarch64_msvc | 0.52.6 | MIT OR Apache-2.0 | crates/ |
@@ -537,10 +540,10 @@ Rust crates: 316 packages, 350 name/version pairs. "Used by": `crates/` is the h
 | windows_x86_64_gnu | 0.52.6 | MIT OR Apache-2.0 | crates/ |
 | windows_x86_64_gnullvm | 0.52.6 | MIT OR Apache-2.0 | crates/ |
 | windows_x86_64_msvc | 0.52.6 | MIT OR Apache-2.0 | crates/ |
-| winnow | 0.7.14, 1.0.4 | MIT | boards/m5stopwatch, crates/, esp32s3-agent, mcu/esp32s3, samples/esp32s3-app |
-| xtensa-lx | 0.13.0 | MIT OR Apache-2.0 | boards/m5stopwatch, esp32s3-agent, mcu/esp32s3, samples/esp32s3-app |
-| xtensa-lx-rt | 0.23.0 | MIT OR Apache-2.0 | boards/m5stopwatch, esp32s3-agent, mcu/esp32s3, samples/esp32s3-app |
-| xtensa-lx-rt-proc-macros | 0.5.0 | MIT OR Apache-2.0 | boards/m5stopwatch, esp32s3-agent, mcu/esp32s3, samples/esp32s3-app |
+| winnow | 0.7.14, 1.0.4 | MIT | boards/m5stopwatch, crates/, mcu/esp32s3, samples/esp32s3-app |
+| xtensa-lx | 0.13.0 | MIT OR Apache-2.0 | boards/m5stopwatch, mcu/esp32s3, samples/esp32s3-app |
+| xtensa-lx-rt | 0.23.0 | MIT OR Apache-2.0 | boards/m5stopwatch, mcu/esp32s3, samples/esp32s3-app |
+| xtensa-lx-rt-proc-macros | 0.5.0 | MIT OR Apache-2.0 | boards/m5stopwatch, mcu/esp32s3, samples/esp32s3-app |
 | yaml_serde | 0.10.7 | MIT OR Apache-2.0 | crates/ |
 | zerocopy | 0.8.63 | BSD-2-Clause OR Apache-2.0 OR MIT | rp2040-bootcore, rp2040-bringup, rp2040-dump, rp2040-hub |
 | zerocopy-derive | 0.8.63 | BSD-2-Clause OR Apache-2.0 OR MIT | rp2040-bootcore, rp2040-bringup, rp2040-dump, rp2040-hub |
@@ -660,7 +663,9 @@ written for this project.
 - ESP32-S3 2nd stage boot loader: the official ESP-IDF v6.1 bootloader, built
   from the official source with app rollback enabled
   (`targets/esp32s3-2ndstage`: only the project files and `sdkconfig.defaults`
-  are ours).
+  are ours). To be shipped unmodified as
+  `targets/mcu/esp32s3/vendor/bootloader.bin` with its provenance and licence
+  (`vendor/PROVENANCE.md`; the binary is not added yet).
 - `esp-bootloader-esp-idf` (crate, MIT OR Apache-2.0): used unmodified by
   the ESP32-S3 port to read and write otadata, which is how a slot is
   selected for that 2nd stage.

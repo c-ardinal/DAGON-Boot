@@ -49,6 +49,18 @@ For another ESP32-S3 board: copy this crate and change the pins in
 `rear_uart` / `dagon_pins!`, the `BoardDef` extras (or use the MCU crate's
 `PlainBoard`), `FLASH_SIZE` and `TARGET_TAG`.
 
+## Factory firmware
+
+Binary `factory`: DAGON's recovery agent alone for the factory partition
+(`NodeConfig::factory()`, HELLO mode 3). The 2nd stage boots it when otadata
+selects nothing bootable; it receives an image into ota_0 or ota_1 and hands
+over with SET_PENDING, REBOOT and CONFIRM.
+
+```sh
+# from this directory (espup toolchain; DAGON_PUBKEY set to the release key)
+cargo build --release --bin factory
+```
+
 ## Test apps
 
 - `testapp-confirm`: marks its slot Valid right after boot, keeps feeding the
@@ -66,9 +78,9 @@ cargo build --release
 
 Prerequisites:
 
-- The rollback-enabled 2nd stage is built first: in `targets/esp32s3-2ndstage`,
-  `idf.py set-target esp32s3` then `idf.py bootloader` (ESP-IDF v6.1), giving
-  `targets/esp32s3-2ndstage/build/bootloader/bootloader.bin`.
+- The rollback-enabled 2nd stage: `targets/mcu/esp32s3/vendor/bootloader.bin`
+  (prebuilt, unmodified ESP-IDF; until it is added, build it from
+  `targets/esp32s3-2ndstage` with the steps in `vendor/PROVENANCE.md` there).
 - The test apps are built (`cargo build --release` here); `E` below is that
   release output directory.
 
@@ -80,7 +92,7 @@ at 0x410000.
 # release output directory of this crate
 E=targets/boards/m5stopwatch/target/xtensa-esp32s3-none-elf/release
 F="--chip esp32s3 --flash-size 16mb --partition-table-offset 0x8000 \
-   --bootloader targets/esp32s3-2ndstage/build/bootloader/bootloader.bin \
+   --bootloader targets/mcu/esp32s3/vendor/bootloader.bin \
    --partition-table targets/mcu/esp32s3/partitions.csv"
 espflash flash $F --erase-parts otadata --target-app-partition factory $E/testapp-confirm
 espflash flash $F --target-app-partition ota_0 $E/testapp-confirm

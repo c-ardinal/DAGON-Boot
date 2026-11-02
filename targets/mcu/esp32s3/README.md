@@ -34,6 +34,20 @@ All three have defaults, so an ESP32-S3 board without extras needs only its
 link UART pins, its node tag (`NodePeripherals::target_tag`) and
 `board::PlainBoard`.
 
+## API notes
+
+- Task liveness is deadline based: a task announces work with
+  `Lease::busy(now, budget_ms)` and ends it with `Lease::idle()`; there is no
+  bare `feed()`. A task that waits without a deadline is not blamed, a task
+  stuck past its budget stops the watchdog feeding (owner-approved design).
+- There is no `UserIo` bundle: the app keeps the peripherals returned by
+  `esp_hal::init`, and the board package's macros (`dagon_pins!`, and e.g.
+  `display_pins!`) move out only what DAGON or a board extra takes.
+- The ESP-IDF 2nd stage is to ship prebuilt and unmodified in `vendor/` (see
+  `vendor/PROVENANCE.md`; the binary is not added yet, build it with the
+  steps there); the factory firmware is a binary of the board
+  package, since it needs the board's pins.
+
 ## Receiver (`store::EspStore`)
 
 - Body: written to the OTA partition of the slot (A = ota_0, B = ota_1) from
@@ -54,7 +68,7 @@ link UART pins, its node tag (`NodePeripherals::target_tag`) and
 
 ## Factory recovery agent
 
-`factory` (`targets/esp32s3-agent`) is the same agent over the same
+`factory` (a binary of the board package, e.g. `dagon-board-m5stopwatch`) is the same agent over the same
 receiver, answering HELLO with mode 3. The 2nd stage boots it when otadata selects nothing bootable (blank,
 or the only trial aborted). It verifies each image like the app does (header
 signature, key, `mcu_id`, `target_tag` at the last XFER_HDR, before

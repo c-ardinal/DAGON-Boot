@@ -57,15 +57,16 @@ CONFIRM, so its trial always rolls back), `pmic-download` (ENTER_ROM method
 ## Conformance run over USB-C (direct)
 
 Prerequisites: the rollback-enabled 2nd stage
-(`targets/esp32s3-2ndstage/build/bootloader/bootloader.bin`), the factory
-(`targets/esp32s3-agent`, the factory firmware) and the two app builds above, all made with
+(`targets/mcu/esp32s3/vendor/bootloader.bin`; until it is added, build it
+with the steps in `vendor/PROVENANCE.md` there), the factory firmware (binary `factory` of
+`targets/boards/m5stopwatch`) and the two app builds above, all made with
 `DAGON_PUBKEY` set to the signing key's public key, and the `dagon` CLI with
 that key. Run from the repository root.
 
 1. Raw app images (what goes into the OTA partitions):
 
    ```sh
-   R=targets/esp32s3-agent/target/xtensa-esp32s3-none-elf/release
+   R=targets/boards/m5stopwatch/target/xtensa-esp32s3-none-elf/release
    C=samples/esp32s3-app/target/conform/xtensa-esp32s3-none-elf/release
    N=samples/esp32s3-app/target/noconfirm/xtensa-esp32s3-none-elf/release
    espflash save-image --chip esp32s3 --flash-size 16mb $C/app out/watch-good.bin
@@ -86,7 +87,7 @@ that key. Run from the repository root.
 
    ```sh
    F="--chip esp32s3 --flash-size 16mb --partition-table-offset 0x8000 \
-      --bootloader targets/esp32s3-2ndstage/build/bootloader/bootloader.bin \
+      --bootloader targets/mcu/esp32s3/vendor/bootloader.bin \
       --partition-table targets/mcu/esp32s3/partitions.csv"
    espflash flash $F --erase-parts otadata,dagon --target-app-partition factory $R/factory
    # good 1.0.0 into ota_0: body at the partition, header in the dagon partition

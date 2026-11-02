@@ -16,6 +16,12 @@ publish = false
 # address and Download command byte are confirmed.
 pmic-download = []
 
+# DAGON's factory firmware for this board: the recovery agent alone, for the
+# factory partition (HELLO mode agent).
+[[bin]]
+name = "factory"
+test = false
+
 # Rollback check apps (see the README): one confirms itself, one never does.
 [[bin]]
 name = "testapp-confirm"
@@ -31,6 +37,8 @@ dagon-port = { path = "../../../crates/dagon-port" }
 dagon-proto = { path = "../../../crates/dagon-proto" }
 esp-hal = { version = "1.2.2", features = ["esp32s3", "unstable"] }
 esp-bootloader-esp-idf = { version = "0.6.0", features = ["esp32s3"] }
+esp-rtos = { version = "0.4.0", features = ["esp32s3", "embassy"] }
+embassy-executor = "0.10"
 static_cell = "2"
 
 [profile.release]

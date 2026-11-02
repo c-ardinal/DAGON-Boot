@@ -189,8 +189,10 @@ dependencies = [
  "dagon-mcu-esp32s3",
  "dagon-port",
  "dagon-proto",
+ "embassy-executor",
  "esp-bootloader-esp-idf",
  "esp-hal",
+ "esp-rtos",
  "static_cell",
 ]
 

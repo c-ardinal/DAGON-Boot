@@ -57,14 +57,13 @@ export const BUTTON = {
   scanAgain: 'もう一度探す',
   defineFix: '定義で直す',
   chooseFile: '更新ファイルを選ぶ',
-  useLatest: '配布中の最新バージョンを使う',
+  useLatest: '最新のリリースを使う',
   otherFile: '別のファイルを選ぶ',
-  resendFileTopology: 'ファイルの構成で送り直す',
   update: '更新',
   reconnect: 'もう一度つなぐ',
   recoverAgain: 'もう一度直す',
   copyLog: '記録をコピー',
-  retrySample: 'もう一度読み込む',
+  retrySample: 'もう一度作る',
   placeInDefine: '定義で置く',
   showJobs: '作業を見る',
 } as const satisfies Record<Exclude<Action, 'recover' | 'updateResponding'>, string>;
@@ -90,21 +89,23 @@ export const BAND = {
   M03: { sentence: '次に出る一覧で「DAGON hub」を選び、『接続』を押してください。' },
   M04: { chip: '× 見つからない', sentence: 'USB ケーブルを挿し直してから、もう一度押してください。' },
   M05: { chip: '× ほかで使用中', sentence: '親機を使っているタブやアプリ（dagon CLI を含む）を閉じてから、もう一度押してください。' },
-  M06: { chip: '× 許可なし', sentence: '配布ページのリンクから開き直してください。' },
+  M06: { chip: '× 許可なし', sentence: 'ターミナルに表示されたアドレスから開き直してください。' },
   M08: { chip: '× 応答なし', sentence: '一覧から「DAGON hub」を選び直してください。' },
   M10: { sentence: '机の上と同じか確かめてから、親機へ送ってください。' },
   M12: { chip: '× 送れない', sentence: 'USB ケーブルを確かめてから、もう一度送ってください。' },
   M13: { sentence: '更新ファイルをこの画面に置くか、選んでください。' },
   /** M14 / M15 / M28: label-value pair, no sentence. */
   M14: { pair: ['目安', '約 1 分'] },
-  M18: { sentence: '何も書いていないので、配布ページから正しいファイルを取り直してください。' },
+  M18: { sentence: '何も書いていないので、定義でリリースをもう一度作るか、正しいファイルを選んでください。' },
   M18b: { sentence: '何も書いていないので、別のファイルを選んでください。' },
   M19: { sentence: '何も書いていないので、別のファイルを選んでください。' },
   M20: { sentence: '何も書いていないので、この構成向けのファイルを選んでください。' },
   M22: { sentence: '終わるまで電源と USB を抜かず、このページを開いたままにしてください（止まっても前のバージョンのまま動きます）。' },
   M33: { sentence: '基板どうしの配線が抜けていないか確かめてから、もう一度直してください。' },
   M34: { sentence: 'USB ケーブルを挿し直してから、もう一度つないでください。' },
-  M35: { chip: '× 見本を読めない', sentence: 'インターネットにつながっているか確かめてから、もう一度読み込んでください。' },
+  M35: { chip: '× 作れない', sentence: 'そのフォルダに書き込めるか確かめてから、もう一度選んでください。' },
+  /** M58: "最新のリリースを使う" found no release in the project. */
+  M58: { chip: '× リリース なし', sentence: '定義でリリースを作るか、更新ファイルを選んでください。' },
   /** M57: part of the page (dagon-wasm) did not load. */
   M57: { chip: '× 読み込めない', sentence: 'このページの一部を読み込めませんでした。ページを開き直してください。' },
 } as const satisfies Record<string, BandCopy>;
@@ -205,7 +206,8 @@ export const NODE = {
 
 /** Link chip (S18) and its spoken name. */
 export const LINK = {
-  bundle: (kind: string, n: number, shared: number) => `${kind} · ${n} 本${shared ? `（うち共有 ${shared}）` : ''}`,
+  /** CAN and Ethernet carry no wires the page draws: the kind alone. */
+  bundle: (kind: string, n: number, shared: number) => (n ? `${kind} · ${n} 本${shared ? `（うち共有 ${shared}）` : ''}` : kind),
   name: (label: string, from: string, to: string, addr: string) => `${label}、${from}から ${to}へのリンク${addr ? `、${addr}` : ''}`,
 } as const;
 
@@ -221,7 +223,8 @@ export const DETAIL = {
   nothingSelected: 'ノードを選ぶと、ここに詳細が出ます。',
   /** M42 */
   introHeading: 'はじめに',
-  introSteps: ['構成を用意（見本か自動で見つける）', '親機へ送る', '更新'],
+  /** M42: the same three steps as the header. */
+  introSteps: ['つなぐ', 'ファイル', '更新'],
   introNote: '止まっても 復旧で戻せる',
   /** S36 */
   rtt: '往復',
@@ -314,7 +317,7 @@ export const HELP = {
     ['一覧に何も出ない', 'データ用のケーブルに替えてください（充電専用では出ません）。'],
     ['「DAGON hub」が無い', '親機の画面が点いているか確かめてください。'],
     ['何を置けばいいか分からない', '『つないで、自動で見つける』を押してください。'],
-    ['手元に無い', '『配布中の最新バージョンを使う』を押してください。'],
+    ['手元に無い', '『最新のリリースを使う』を押してください。'],
     ['止まって見える', '経過が増えていれば進んでいます（1 つのノードに 1 分ほど）。'],
   ],
   keysHeading: 'キー操作',
@@ -351,8 +354,8 @@ export const ANNOUNCE = {
   A21timeout: '親機 再接続 時間切れ',
   A15: (name: string, version: string) => `${name} ${version} に戻した`,
   A16: (name: string, rest: number) => `${name} 復旧済み、残り ${rest}`,
-  /** "配布中の最新バージョンを使う" could not fetch the published release. */
-  A22latest: '配布中の最新バージョンを読み込めませんでした',
+  /** "最新のリリースを使う" found no release in the project (M58). */
+  A22latest: 'リリース なし',
 } as const;
 
 /** Words that never appear in operating-mode guidance, chips or results. */
@@ -430,15 +433,17 @@ export const RULE_FIX: Record<string, (w: FixWords) => string> = {
   'B-02': (w) => `${w.to}は容量が ${w.size ?? ''} 以上のボードにしてください。`,
 };
 
-/** Header: the two modes (運用｜定義) and whether the configuration was sent (S24). */
+/** Header: the two modes (運用｜定義). */
 export const MODE = {
   operate: '運用',
   define: '定義',
   label: 'モード',
-  unsent: '構成 未送信',
-  /** The 運用 switch is held until the 親機 holds a 構成 (owner decision 11/3). */
-  operateLocked: '構成の問題を直すと、運用に切り替えられます。',
-  sent: '構成 送信済み',
+  /** M68: 運用 pressed while the 構成 is a shape not updatable yet (§5.2). */
+  lockedUnsupported: { chip: '◇ まだ更新できない構成', sentence: '親機 1 つとその子機の、8 ノードまでの形にすると、運用を使えます。' },
+  /** 案: 運用 or 親機へ送る pressed while the 構成 is not in the project's YAML. */
+  lockedUnsaved: { sentence: '構成を保存すると、運用と親機へ送るを使えます。' },
+  /** M69: 運用 pressed with no 構成 or one with problems. */
+  lockedProblems: { sentence: '構成を作り、問題を直すと、運用を使えます。' },
 } as const;
 
 /** Define mode (SC-D1–D3, SC-T, SC-M, §11.1). */
@@ -453,7 +458,6 @@ export const DEFINE = {
   place: '置く',
   placed: '配置済み',
   firstHeading: 'はじめての方へ',
-  placeSample: '見本を置く',
   connectDiscover: 'つないで、自動で見つける',
   /** Canvas toolbar. */
   undo: '元に戻す',
@@ -474,6 +478,8 @@ export const DEFINE = {
   problems: (n: number) => `! 問題 ${n}`,
   problemsNone: '問題 0',
   cautions: (m: number) => `▲ 注意 ${m}`,
+  /** S45: shapes not updatable yet, after the cautions. */
+  unsupported: (k: number) => `◇ 未対応 ${k}`,
   fix: '直す',
   ruleId: '規則 ID',
   yamlPath: 'YAML の場所',
@@ -481,12 +487,15 @@ export const DEFINE = {
   problemName: (short: string, rule: string, sentence: string) => `${short}、規則 ${rule}、${sentence}`,
   /** Bottom band (C02, C05, C06, C09). */
   emptySentence: '親機を USB でパソコンにつないでから、『つないで、自動で見つける』を押してください。',
-  /** A project without a 構成 yet (the page always runs under dagon serve, owner 11/3). */
-  startSentence: 'ノードを置くか、見本から作ってください。',
-  fromSample: '見本から作る',
+  /** E5: 運用 from 定義 (§6.2). */
+  toOperate: '運用へ',
   /** Writes the 構成 back to the project's YAML through dagon serve. */
   save: '保存',
   fixSentence: '直すと、親機へ送れます。',
+  /** C19: E6, only shapes not updatable yet. */
+  unsupportedSentence: '更新するには、親機を 1 つにし、子機をその親機に直接つないでください（このままでも保存と書き出しはできます）。',
+  /** §7.6: the 構成 of the release file chosen in 運用 replaces this one (undoable, saved to the YAML). */
+  importFileTopology: 'ファイルの構成を取り込む',
   sendSentence: '親機へ送ると、更新できるようになります。',
   send: '親機へ送る',
   connectSend: 'つないで、親機へ送る',
@@ -607,7 +616,6 @@ export const RELEASE_STEPS = {
   sign: '署名',
   makeRelease: 'リリースを作る',
   useInOperate: 'このリリースを運用で使う',
-  download: 'ダウンロード',
   keyLabel: '鍵',
   sizeLabel: '大きさ',
   version: 'バージョン',
@@ -645,4 +653,75 @@ export const FLASH = {
   done: '✓ 書き込み済み',
   running: '● 実行中',
   notFound: '× 見つからない',
+} as const;
+
+/** §7.6: the 構成 differences of a release made for another 構成 (SC-O4, L17). */
+export const DIFF = {
+  heading: '構成の違い',
+  cols: ['ノード・リンク', 'この構成', 'ファイル'],
+  none: 'なし',
+  /** The chip on the graph's differing nodes. */
+  chip: '× 違い',
+  spoken: '違い',
+  /** No topology in the file: links and addresses were not compared. */
+  linksUnchecked: 'リンク・アドレス 未確認',
+} as const;
+
+/**
+ * Saving the 構成 to the project's YAML (案, §11.0 W1–W3; not yet in the
+ * §11.1 table): the edits stay on the page, marked 未保存, until a save goes through.
+ */
+export const SAVE = {
+  unsaved: '● 未保存',
+  /** 422: the CLI's own check refused the 構成. */
+  invalid: { chip: '× 保存できない', sentence: '問題を直してから、もう一度保存してください。' },
+  /** 409: a job holds the project. */
+  busy: { chip: '× 作業中', sentence: '作業が終わってから、もう一度保存してください。' },
+  failed: { chip: '× 保存できない', sentence: 'ターミナルで dagon serve が動いているか確かめてから、もう一度保存してください。' },
+} as const;
+
+/** 案: leaving the project while its 構成 could not be saved (the dialog). */
+export const UNSAVED = {
+  heading: '保存していない変更があります',
+  sentence: 'もう一度保存するか、変更を捨てて進むかを選んでください。',
+  save: 'もう一度保存する',
+  discard: '変更を捨てて進む',
+  stay: 'やめる',
+} as const;
+
+/** SC-S0 始め (S46, M35). */
+export const START = {
+  heading: '始め',
+  new: '新しく作る',
+  sample: '見本から新しく作る',
+  open: '開く',
+  recent: '最近のプロジェクト',
+  recentNone: 'なし',
+  up: '上へ',
+  place: '場所',
+  name: '名前',
+  cantMake: '× 作れない',
+  cantOpen: '× 開けない',
+  loading: '読込み中…',
+  /** The folder of a project (it holds dagon.toml). */
+  project: '● プロジェクト',
+  /**
+   * Why serve did not open or make it (案, §11.0 W1–W3; not yet in the §11.3
+   * table): 404 / 422 / 409 / 403. A folder that cannot be written is M35.
+   */
+  missing: { chip: '× 開けない', sentence: 'dagon.toml のあるフォルダを選んでください。' },
+  key: { chip: '× 鍵を使えない', sentence: 'dagon serve のターミナルで鍵の理由を確かめてから、もう一度選んでください。' },
+  busy: { chip: '× 作業中', sentence: '作業が終わってから、もう一度選んでください。' },
+  refused: { chip: '× 開けない', sentence: 'ホームフォルダの中のフォルダを選んでください。' },
+  exists: { chip: '× 作れない', sentence: 'まだ無いフォルダの名前を入れてください。' },
+} as const;
+
+/** SC-M メニュー and its one confirmation (M53). */
+export const MENU = {
+  button: 'メニュー',
+  restart: '最初からやり直す',
+  restartHeading: '最初からやり直しますか',
+  restartSentence: 'このページの記録を消して、始めの画面に戻ります（元に戻せません。プロジェクトのファイルと基板の中のプログラムは変わりません）。',
+  restartConfirm: '消して最初からやり直す',
+  cancel: 'やめる',
 } as const;

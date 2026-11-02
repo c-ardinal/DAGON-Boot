@@ -3,6 +3,18 @@
 Browser UI for DAGON Boot: Svelte 5 + Vite + TypeScript, built for Chrome / Edge 89 and later
 (the first versions with Web Serial). Screen text is Japanese only and lives in `src/app/copy.ts`.
 
+The page is local only: `dagon serve` hands it out on 127.0.0.1 from the developer's own PC and is
+the only place it reads or writes anything (the project's 構成 YAML, releases, boot cores, jobs).
+There is no public site and no page of its own outside serve; the page fetches nothing from any
+other origin and offers no download-to-save (releases stay in the project's `out/`). It opens on
+SC-S0 (新しく作る / 見本から新しく作る / 開く) until serve has a project open.
+
+構成 edits go to the project's YAML by themselves (PUT /v1/topology about 500 ms after the last
+edit; 保存 saves at once). Until a save goes through the band shows 「● 未保存」 and why; 運用 and
+親機へ送る wait for the saved 構成, and leaving the project (menu, 最初からやり直す, closing the
+tab) saves first and asks when it cannot. Known limit: the YAML is written out from the page's
+document, so comments in the file are not kept.
+
 ## Commands
 
 Needs the `wasm32-unknown-unknown` Rust target (listed in `rust-toolchain.toml`) and `wasm-pack`
@@ -29,9 +41,11 @@ Query parameters for development (`npm run dev` only; production builds leave th
 | `&factory=uart` | With `?mock`: these nodes answer as their factory agent (recovery takes the factory path). |
 | `?sim` | The simulated desk (`crates/dagon-sim` through dagon-wasm's `SimDesk`, `sim` feature): hub, F401 with its ROM loader, watch, on the simulator's clock. `&wipe` erases the F401 first, so "7セグを復旧する" takes the ROM path. |
 
-With `?mock` and `?sim` the repository's test-key release (`crates/dagon-sim/fixtures/desk-1.1.0.dgb`)
-and F401 boot core (`crates/dagon-wasm/fixtures/f401-bootcore-1.0.0.img`) stand in for the public
-site's `release/latest.dgb` and `release/seg-bootcore.img`; production builds leave them out.
+With `?mock` and `?sim` (no serve behind the dev server) the repository's test-key release
+(`crates/dagon-sim/fixtures/desk-1.1.0.dgb`) and F401 boot core
+(`crates/dagon-wasm/fixtures/f401-bootcore-1.0.0.img`) stand in for the project's files that serve
+hands out (GET /v1/release/latest, GET /v1/bootcore/{node}), and SC-S0's 新しく作る / 見本から新しく作る
+start an unsaved 構成 on the page. Production builds leave every stand-in out.
 
 A simulated hub plugs in as one more `Transport` in `src/serial/devHub.ts`, under its own parameter.
 
@@ -54,7 +68,9 @@ A simulated hub plugs in as one more `Transport` in `src/serial/devHub.ts`, unde
 | `src/app/connect.ts` | Device chooser and error mapping. |
 | `src/app/copy.ts` | All screen and announcement text. |
 | `src/graph/` | The layered graph: own SVG (layers, wire bundles, ties, ports) + HTML (nodes, chips), roving focus with arrow keys. |
-| `src/screens/` | Header, bottom band, update order (left column), detail and update file (right column), hub reconnect dialog. |
+| `src/app/start.svelte.ts` | SC-S0: making and opening projects through serve (GET /v1/project, GET /v1/fs, POST /v1/project/open, /new). |
+| `src/app/define/` | 定義: the document and its history, the check's problems, the 構成 differences of a release (L17), and the serve link (`cli.svelte.ts`: passphrase, API, events, saving the YAML). |
+| `src/screens/` | Header, menu and its restart dialog, SC-S0, bottom band, update order (left column), detail and update file (right column), hub reconnect dialog; `define/` holds 定義's columns. |
 | `src/styles/tokens.css` | Design tokens: colour, type, spacing, radius, z-index, motion. |
 
 `Transport` carries whole frames: the page owns choosing and opening the device, and the protocol
@@ -62,15 +78,21 @@ steps belong to `dagon-host`, which will receive a `Transport` through `dagon-wa
 
 ## Release key
 
-The page checks releases (and `apply` verifies them) with a public key built into `dagon-wasm`.
-For real use set `DAGON_PUBKEY` to the `.pub` file from `dagon key gen` (or its 64 hex digits),
-the same key the CLI and the boards use, before `npm run wasm` / `build` / `dev`:
+Keys never reach the browser; only the public release key does. At run time the page verifies
+releases (and `apply` verifies them) with the key `dagon serve` gives it: the
+`<meta name="dagon-release-key">` serve writes into the page, then `release_key` in GET /v1/hello.
+When serve switches projects (SC-S0's 開く / 新しく作る) the page reads hello again and takes that
+project's key. A page served by serve checks with no key until one has arrived
+(`require_release_key`).
+
+`dagon-wasm` is still built with a key: set `DAGON_PUBKEY` to the `.pub` file from `dagon key gen`
+(or its 64 hex digits) before `npm run wasm` / `build` / `dev`:
 
 ```sh
 DAGON_PUBKEY=../keys/dagon.pub npm run build
 ```
 
-Without it `npm run wasm` and `npm run build` stop. `npm test` and `npm run dev` build with
+Without it (and without `DAGON_ALLOW_TEST_KEY=1`) `npm run wasm` and `npm run build` stop. `npm test` and `npm run dev` build with
 `DAGON_ALLOW_TEST_KEY=1` and the `sim` feature (`npm run wasm:dev`): when `DAGON_PUBKEY` is unset
 they use the public RFC 8032 test key, which the stand-in hubs' release (`crates/dagon-sim/fixtures`)
 is signed with, and the build warns. `npm run build` leaves the simulated desk out.
@@ -78,8 +100,8 @@ is signed with, and the build warns. `npm run build` leaves the simulated desk o
 ## Web Serial on http://127.0.0.1
 
 The Web Serial API is exposed only in secure contexts. Loopback origins (`http://127.0.0.1`,
-`http://localhost`) count as potentially trustworthy, so `vite preview` / `dagon serve` pages on
-127.0.0.1 get `navigator.serial` without HTTPS. Checked in headless Edge 156 against
+`http://localhost`) count as potentially trustworthy, so `dagon serve` pages (and `vite preview` in
+development) on 127.0.0.1 get `navigator.serial` without HTTPS. Checked in headless Edge 156 against
 `vite preview`: `isSecureContext` is `true`, `navigator.serial` exists and the `serial` permissions
 policy allows it. Choosing and opening a real device needs a person in front of the browser.
 

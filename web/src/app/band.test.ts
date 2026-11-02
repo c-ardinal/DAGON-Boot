@@ -4,11 +4,17 @@ import { BAND, BUTTON } from './copy.ts';
 import type { ConnectFailure } from './machine.ts';
 
 describe('bottom band', () => {
-  test('empty canvas: the connect sentence, find automatically as the main button, the sample beside it', () => {
+  // Superseded: "見本を置く" beside it; the sample now comes from SC-S0 only (owner 11/3).
+  test('empty canvas: the connect sentence, find automatically as the main button, nothing beside it', () => {
     const b = bandOf('L02', { hasConfig: false });
     expect(b.sentence).toBe(BAND.M03.sentence);
     expect(b.primary?.label).toBe(BUTTON.connectDiscover);
-    expect(b.secondary.map((s) => s.label)).toEqual([BUTTON.placeSample]);
+    expect(b.secondary).toEqual([]);
+  });
+
+  test('a file for another 構成 (L17): choose another, or fix it in 定義; no sending from here', () => {
+    const b = bandOf('L17', { hasConfig: true, refusal: 'topology' });
+    expect([b.sentence, b.primary?.label, b.secondary.map((s) => s.label)]).toEqual([BAND.M20.sentence, BUTTON.otherFile, [BUTTON.defineFix]]);
   });
 
   test.each([

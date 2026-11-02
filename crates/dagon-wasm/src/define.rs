@@ -51,6 +51,17 @@ pub fn topo_parse(yaml: &str) -> Result<JsValue, JsError> {
     Ok(to_js(&v))
 }
 
+/// The 構成 release `bundle` was made for, as a plain object like
+/// `topo_parse` gives, with the ids, boards and node pins of `current` (the
+/// 構成 on the page) where tags match; null when the release has no topology
+/// item. Throws when `bundle` is not a release.
+#[wasm_bindgen]
+pub fn release_topology(bundle: &[u8], current: &str) -> Result<JsValue, JsError> {
+    crate::release_topo::release_topology_value(bundle, current)
+        .map(|v| v.as_ref().map_or(JsValue::NULL, to_js))
+        .map_err(|e| JsError::new(&e))
+}
+
 fn link_kind(k: LinkKind) -> &'static str {
     match k {
         LinkKind::I2c => "i2c",

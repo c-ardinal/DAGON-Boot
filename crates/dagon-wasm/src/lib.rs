@@ -8,11 +8,12 @@ extern crate alloc;
 mod define;
 mod frame;
 mod host;
+mod release_topo;
 #[cfg(feature = "sim")]
 mod sim;
 mod watch;
 
-pub use define::{board_template, supported_mcus, topo_parse};
+pub use define::{board_template, release_topology, supported_mcus, topo_parse};
 pub use frame::{frame_encode, FrameCutter};
 pub use host::{
     check_bootcore_for, check_release_for, require_release_key, set_release_key, watch_interval_ms,

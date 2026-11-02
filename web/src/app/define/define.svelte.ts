@@ -3,11 +3,18 @@
 import { supportedBoards } from '../../wasm/dagon.ts';
 import { ANNOUNCE } from '../copy.ts';
 import { DESK_DEMO, DESK_DEMO_YAML, type Config } from '../sample.ts';
-import { emptyDoc, fromYaml, place, placeMcu, removeLink, removeNode, toConfig, toYaml, type Doc } from './model.ts';
+import { emptyDoc, fromYaml, place, placeMcu, removeLink, removeNode, toConfig, toYaml, type Doc, type Topo } from './model.ts';
+import type { SaveResult } from './cli.svelte.ts';
 import { problems, type Problem } from './problems.ts';
 
 /** Undo depth; older steps fall off. */
 const HISTORY = 100;
+
+/**
+ * Whether 運用 can be entered (§5.2): a 構成 with no problems in a shape
+ * updating covers. `empty` and `problems` say M69, `unsupported` M68.
+ */
+export type Operable = 'ok' | 'empty' | 'problems' | 'unsupported';
 
 export class Define {
   doc = $state<Doc>(emptyDoc());
@@ -27,12 +34,40 @@ export class Define {
   private future: Doc[] = [];
   /** Bumped by every change, so the derived check and view follow. */
   revision = $state(0);
+  /** The revision last in the project's YAML (opened or saved). */
+  savedAt = $state(0);
+  /** Why the last save did not go through; the edits stay on the page (null after a save). */
+  saveFailure = $state<Exclude<SaveResult, 'saved'> | null>(null);
 
   /** Nothing placed yet (E1) is not a problem to list. */
   readonly problems: Problem[] = $derived(this.revision >= 0 && this.doc.topo.nodes.length ? problems(this.doc) : []);
   readonly errors = $derived(this.problems.filter((p) => p.severity === 'error').length);
   readonly warnings = $derived(this.problems.length - this.errors);
   readonly config: Config = $derived(toConfig(this.doc, supportedBoards()));
+  readonly operable: Operable = $derived(
+    this.doc.topo.nodes.length === 0
+      ? 'empty'
+      : this.problems.some((p) => p.severity === 'error' && p.rule !== 'V-23')
+        ? 'problems'
+        : this.problems.some((p) => p.rule === 'V-23')
+          ? 'unsupported'
+          : 'ok',
+  );
+  /** Edits on the page that the project's YAML does not have yet. */
+  get unsaved(): boolean {
+    return this.revision !== this.savedAt;
+  }
+
+  /** The answer to saving revision `at`: the document stays as it is either way. */
+  saved(at: number, r: SaveResult): void {
+    if (r === 'saved') {
+      this.savedAt = at;
+      this.saveFailure = null;
+    } else {
+      this.saveFailure = r;
+    }
+  }
+
   get canUndo(): boolean {
     return this.revision >= 0 && this.past.length > 0;
   }
@@ -130,6 +165,39 @@ export class Define {
     this.unreadable = false;
     this.selected = null;
     return true;
+  }
+
+  /** A project's 構成 as opened (no undo back past it). */
+  load(doc: Doc): void {
+    this.past = [];
+    this.future = [];
+    this.doc = doc;
+    this.selected = null;
+    this.unreadable = false;
+    this.revision++;
+    this.savedAt = this.revision;
+    this.saveFailure = null;
+  }
+
+  /** "最初からやり直す": nothing placed and no history (the project's files stay). */
+  reset(): void {
+    this.load(emptyDoc());
+    this.status = '';
+    this.alert = '';
+    this.view = 'graph';
+  }
+
+  /**
+   * "ファイルの構成を取り込む" (§7.6): the 構成 a release was made for
+   * replaces this one, keeping the names and board fields of the nodes it
+   * shares; undoable.
+   */
+  importRelease(topo: Topo): void {
+    const t = { buses: [], links: [], recovery: {}, ...topo };
+    const ids = new Set(t.nodes.map((n) => n.id));
+    const keep = <T>(r: Record<string, T> | undefined) => Object.fromEntries(Object.entries(r ?? {}).filter(([id]) => ids.has(id)));
+    this.apply({ topo: t, names: keep(this.doc.names), boards: keep(this.doc.boards) });
+    this.selected = null;
   }
 
   /** Undo or redo can remove what was selected. */

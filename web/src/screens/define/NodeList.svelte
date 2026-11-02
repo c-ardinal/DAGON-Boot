@@ -65,7 +65,6 @@
   {/if}
   <h3>{DEFINE.firstHeading}</h3>
   <div class="first">
-    <button class="secondary" onclick={() => d.placeSample()}>{DEFINE.placeSample}</button>
     <button class="secondary" onclick={onconnect}>{DEFINE.connectDiscover}</button>
   </div>
   {#if onpanel}

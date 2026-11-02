@@ -18,6 +18,7 @@
 
 pub mod liveness;
 pub mod rom;
+pub mod serve;
 pub mod store;
 pub mod trial;
 

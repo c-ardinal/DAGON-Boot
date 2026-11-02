@@ -48,7 +48,9 @@ rewritten through the ROM loader.
 
 Every image (app and factory) answers ENTER_ROM `method` u8 with OK, then
 switches to the ESP32 ROM download mode (E_ARG for other methods, nothing
-happens):
+happens). The switch happens only once the OK has left the node (UART
+transmitter idle, or USB written and flushed, within 500 ms); if it did not,
+the node stays in the app and the host retries.
 
 - First, for either method, the RTC watchdog is stopped and the super
   watchdog left on auto-feed: both survive the software reset and nothing in
@@ -78,22 +80,29 @@ after method 1. A broken ESP-IDF 2nd stage cannot be recovered this way.
   serves requests one at a time, so the agent is only ever touched there.
 - The app's tasks run on the thread-mode executor (`#[esp_rtos::main]`),
   below every interrupt: DAGON traffic preempts them and never waits on them.
-- Trial: the RTC WDT (4 s) is started right after `esp_hal::init`
-  (`node::arm_watchdog`, before anything that can stall) and is not fed
+- Trial: the RTC WDT (4 s) is started once, right after `esp_hal::init`
+  (`node::arm_watchdog`, whose token `node::start` requires). It is neither
+  fed nor restarted until the trial status has been read, and not at all
   while the image is on trial. The PC has to CONFIRM within about 4 s of the
   start; otherwise the watch resets and the 2nd stage rolls back (one
   attempt).
 - Once confirmed the link task feeds it (every 500 ms and during long flash
   work), but only while every task in the `Liveness` registry is within the
   deadline it announced (`Lease::busy(now, budget)` before a piece of work,
-  `Lease::idle(now)` when waiting). A task stuck in its work stops the
-  feeding and the watch resets instead of hanging. The link task announces a
-  budget for each request and is registered as preempting: while it is busy
-  (a slot erase can take about 30 s) only its own deadline counts, and the
-  other tasks' deadlines move later by the time it held the CPU. ENTER_ROM
-  stops the watchdogs before its reset (see above).
-- Both receivers drop a partial frame after 20 ms without a byte and look for
-  the next SOF.
+  `Lease::idle()` when waiting). A task stuck in its work stops the feeding
+  and the watch resets instead of hanging. The link task announces a budget
+  for each request and is registered as preempting: only while it holds the
+  CPU in a synchronous section (handling a request, a slot erase of up to
+  about 30 s, the CONFIRM check) its own deadline alone counts, and
+  afterwards the other tasks' deadlines move later by that section's length.
+  Time it spends awaiting (sending the reply, waiting for input) excuses
+  nothing. ENTER_ROM stops the watchdogs before its reset (see above).
+- Both receivers drop a partial frame after 20 ms or more without a byte and
+  look for the next SOF. The bytes of one read share its completion time,
+  and after a synchronous section of 20 ms or more any partial frame is
+  dropped, since the FIFO may have collected bytes with gaps the read cannot
+  see. Residual limit: a whole frame that arrived entirely during such a
+  section is accepted even if its own bytes had gaps.
 
 ## Build and test
 
@@ -119,4 +128,3 @@ OTA slot that is neither running nor the fallback as scratch;
 
 The app build and the conformance runs (USB-C direct and through the hub)
 are in `targets/esp32s3-app/README.md`.
-

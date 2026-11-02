@@ -14,16 +14,26 @@
 //!   back. Once confirmed it is fed only while every task registered in the
 //!   [`Liveness`] registry is within its deadline; the link task registers
 //!   too and announces a budget for every request.
-//! - UART0 and USB receivers drop a partial frame after 20 ms without a byte.
+//! - UART0 and USB receivers drop a partial frame after 20 ms without a byte
+//!   (inclusive). Bytes of one read share its completion time; after a
+//!   synchronous section of 20 ms or more any partial frame is dropped, since
+//!   the FIFO may have collected bytes with gaps the read cannot see. Residual
+//!   limit: a whole frame that arrived entirely during such a section is
+//!   accepted even if its own bytes had gaps.
+//! - Liveness: the link lease holds the CPU only around synchronous work
+//!   (decide the reply, flash, CONFIRM check), not across awaits.
+//! - ENTER_ROM: the ROM switch happens only after the OK has left the node;
+//!   otherwise the node stays in the app ([`ROM_REPLY_LOST`] counts it).
 
 use core::cell::RefCell;
+use core::sync::atomic::{AtomicU32, Ordering};
 
 use dagon_agent::{Agent, Hooks, SlotStore, StoreError, IDLE_TIMEOUT_MS};
 use dagon_esp32s3_port::{
     board,
     boot::EspBootSelect,
     flash::EspFlash,
-    framer::FrameCutter,
+    framer::{FrameCutter, INTER_BYTE_TIMEOUT_MS},
     otadata::ENTRY_LEN,
     sys::{EspClock, EspReset, RtcWatchdog},
     TRIAL_WDT_MS,
@@ -56,6 +66,7 @@ use static_cell::StaticCell;
 
 use crate::liveness::{Lease, Liveness};
 use crate::rom::{self, Method, Step};
+use crate::serve::{self, Next, Then};
 use crate::store::{EspStore, Otadata};
 use crate::trial::TrialWatchdog;
 
@@ -65,8 +76,9 @@ pub const LINK_PRIORITY: Priority = Priority::Priority2;
 const FEED_PERIOD: Duration = Duration::from_millis(500);
 /// Time one request may take, a full slot erase included.
 const REQUEST_BUDGET_MS: u32 = 120_000;
-/// Give up on a USB reply after this long (host stopped reading).
-const USB_SEND_TIMEOUT: Duration = Duration::from_millis(200);
+/// Give up on a reply after this long (USB: host stopped reading; the largest
+/// UART frame takes about 90 ms).
+const SEND_TIMEOUT: Duration = Duration::from_millis(500);
 /// Time the M5PM1 gets to reset the chip into download mode.
 #[cfg(feature = "pmic-download")]
 const M5PM1_WAIT_MS: u32 = 1000;
@@ -114,12 +126,17 @@ impl NodeConfig {
     }
 }
 
+/// Proof that the RTC WDT runs; [`start`] requires it.
+pub struct WatchdogArmed(());
+
 /// Starts the RTC WDT (4 s) right away. Call it first, right after
 /// `esp_hal::init` (which stops every watchdog), so an image that stalls
-/// before [`start`] still resets and, on trial, rolls back. The link task
-/// takes the watchdog over later.
-pub fn arm_watchdog(rtc_timer: RTC_TIMER<'_>) {
+/// before [`start`] still resets and, on trial, rolls back. This is the only
+/// start: the link task never restarts it and feeds it only once it knows
+/// the image is confirmed.
+pub fn arm_watchdog(rtc_timer: RTC_TIMER<'_>) -> WatchdogArmed {
     RtcWatchdog::new(Rtc::new(rtc_timer).rwdt).start(TRIAL_WDT_MS);
+    WatchdogArmed(())
 }
 
 /// Milliseconds since boot, wrapping: the time base of [`Liveness`] deadlines
@@ -134,6 +151,7 @@ pub fn now_ms() -> u32 {
 /// Call once, after `esp_rtos::start`. If the flashed partition table does
 /// not match, the task stops and the watchdog resets the chip.
 pub fn start(
+    _armed: WatchdogArmed,
     p: NodePeripherals<'static>,
     link_irq: FROM_CPU_INTR1<'static>,
     cfg: NodeConfig,
@@ -237,9 +255,9 @@ impl Link {
         liveness: &'static Liveness,
     ) -> Option<Self> {
         static STORAGE: StaticCell<RefCell<FlashStorage<'static>>> = StaticCell::new();
+        // Armed by `arm_watchdog`; not restarted here (a start feeds it).
         let rtc = Rtc::new(p.rtc_timer);
-        let mut rwdt = RtcWatchdog::new(rtc.rwdt);
-        rwdt.start(TRIAL_WDT_MS);
+        let rwdt = RtcWatchdog::new(rtc.rwdt);
 
         let mut board = RomBoard {
             swd: rtc.swd,
@@ -262,6 +280,8 @@ impl Link {
         let mut store = EspStore::new(EspFlash::new(storage), boot, wdt);
         if trying(&mut store) {
             store.wdt.begin_trial();
+        } else {
+            store.wdt.end_trial();
         }
         let hooks = NodeHooks {
             self_check: cfg.self_check,
@@ -294,20 +314,34 @@ impl Link {
             .await;
             match ev {
                 Either3::First(Ok(n)) => {
+                    let t = now_ms();
                     for &b in &ub[..n] {
-                        if let Some(f) = uart_cut.push_at(b, now_ms()) {
+                        if let Some(f) = uart_cut.push_at(b, t) {
                             last = Instant::now();
-                            self.serve(f, Via::Uart).await;
+                            if self.serve(f, Via::Uart).await >= INTER_BYTE_TIMEOUT_MS {
+                                // Bytes that came in meanwhile wait in the FIFO
+                                // and read as one batch with one time: no
+                                // partial frame may run across that section.
+                                uart_cut.drop_partial();
+                                usb_cut.drop_partial();
+                            }
                         }
                     }
                 }
                 // FIFO overflow or line error: the partial frame is lost.
                 Either3::First(Err(_)) => uart_cut.clear(),
                 Either3::Second(Ok(n)) => {
+                    let t = now_ms();
                     for &b in &vb[..n] {
-                        if let Some(f) = usb_cut.push_at(b, now_ms()) {
+                        if let Some(f) = usb_cut.push_at(b, t) {
                             last = Instant::now();
-                            self.serve(f, Via::Usb).await;
+                            if self.serve(f, Via::Usb).await >= INTER_BYTE_TIMEOUT_MS {
+                                // Bytes that came in meanwhile wait in the FIFO
+                                // and read as one batch with one time: no
+                                // partial frame may run across that section.
+                                uart_cut.drop_partial();
+                                usb_cut.drop_partial();
+                            }
                         }
                     }
                 }
@@ -318,88 +352,112 @@ impl Link {
     }
 
     /// Answers one request; resets after the reply to REBOOT, switches to the
-    /// ROM loader after the reply to ENTER_ROM.
-    async fn serve(&mut self, frame: &[u8], via: Via) {
-        let now = self.agent.store().wdt.now_ms();
-        self.lease.busy(now, REQUEST_BUDGET_MS);
-        self.answer(frame, via).await;
-        let now = self.agent.store().wdt.now_ms();
-        self.lease.idle(now);
+    /// ROM loader after the reply to ENTER_ROM if that reply left the node.
+    /// Returns the longest synchronous section (ms) it ran.
+    async fn serve(&mut self, frame: &[u8], via: Via) -> u32 {
+        let start = now_ms();
+        self.lease.busy(start, REQUEST_BUDGET_MS);
+        self.lease.hold_cpu(start);
+        let mut out = [0u8; REPLY_MAX];
+        let decided = self.decide(frame, &mut out);
+        let mut held = self.lease.release_cpu(now_ms());
+        if let Some((n, then)) = decided {
+            let sent = send(&mut self.uart, &mut self.usb, via, &out[..n]).await;
+            held = held.max(self.after_reply(serve::next(then, sent)));
+        }
+        self.lease.idle();
+        held
     }
 
-    async fn answer(&mut self, frame: &[u8], via: Via) {
-        let Link {
-            agent,
-            uart,
-            usb,
-            board,
-            ..
-        } = self;
-        let mut rom_reply = [0u8; rom::REPLY_LEN];
+    /// The synchronous part: the reply to send and what follows it.
+    fn decide(&mut self, frame: &[u8], out: &mut [u8; REPLY_MAX]) -> Option<(usize, Then)> {
         let max = dagon_proto::max_payload::UART;
+        let mut rom_reply = [0u8; rom::REPLY_LEN];
         if let Some((n, method)) = rom::enter_rom_request(frame, max, &mut rom_reply) {
-            send(uart, usb, via, &rom_reply[..n]).await;
-            if let Some(m) = method {
-                enter_rom(m, board, agent.store().wdt.inner());
-            }
-            return;
+            out[..n].copy_from_slice(&rom_reply[..n]);
+            return Some((n, method.map_or(Then::Nothing, Then::Rom)));
         }
+        let agent = &mut self.agent;
         #[cfg(feature = "conform")]
-        {
-            let mut out = [0u8; dagon_conform::node::RESPONSE_MAX];
-            if let Some(n) = conform(agent, frame, &mut out) {
-                send(uart, usb, via, &out[..n]).await;
-                return;
-            }
+        if let Some(n) = conform(agent, frame, &mut out[..]) {
+            return Some((n, Then::Nothing));
         }
         let mut refusal = [0u8; crate::REFUSAL_LEN];
         if let Some(n) = crate::refuse_set_pending_on_trial(agent.store(), frame, &mut refusal) {
-            send(uart, usb, via, &refusal[..n]).await;
-            return;
+            out[..n].copy_from_slice(&refusal[..n]);
+            return Some((n, Then::Nothing));
         }
-        let Some(reply) = agent.handle(frame) else {
-            return;
+        let reply = agent.handle(frame)?;
+        let n = reply.frame.len();
+        out.get_mut(..n)?.copy_from_slice(reply.frame);
+        let then = if reply.reboot {
+            Then::Reboot
+        } else {
+            Then::CheckTrial
         };
-        let reboot = reply.reboot;
-        send(uart, usb, via, reply.frame).await;
-        if reboot {
-            agent.hooks().before_reboot();
-            EspReset.reset();
-        }
-        let store = agent.store();
-        if store.wdt.on_trial() && !trying(store) {
-            store.wdt.end_trial();
+        Some((n, then))
+    }
+
+    /// Runs the step after a reply; returns how long it kept the CPU (ms).
+    fn after_reply(&mut self, next: Next) -> u32 {
+        match next {
+            Next::Stay => 0,
+            Next::EnterRom(m) => enter_rom(m, &mut self.board, self.agent.store().wdt.inner()),
+            Next::RomReplyLost => {
+                ROM_REPLY_LOST.fetch_add(1, Ordering::Relaxed);
+                0
+            }
+            Next::Reset => {
+                self.agent.hooks().before_reboot();
+                EspReset.reset()
+            }
+            Next::CheckTrial => {
+                self.lease.hold_cpu(now_ms());
+                let store = self.agent.store();
+                if store.wdt.on_trial() && !trying(store) {
+                    store.wdt.end_trial();
+                }
+                self.lease.release_cpu(now_ms())
+            }
         }
     }
 }
 
-/// Sends a reply and waits until it has left the node (the caller may reset
-/// right after). A lost reply is recovered by the sender's retry (same seq).
+/// ENTER_ROM requests not acted on because their OK did not leave the node.
+pub static ROM_REPLY_LOST: AtomicU32 = AtomicU32::new(0);
+
+/// Room for the largest reply frame (agent STATUS 84 B, CONF_RUN 82 B).
+const REPLY_MAX: usize = 128;
+
+/// Sends a reply and waits until it has left the node (UART: transmitter
+/// idle; USB: written and flushed), within [`SEND_TIMEOUT`]. `false` when it
+/// did not. A lost reply is recovered by the sender's retry (same seq).
 async fn send(
     uart: &mut Uart<'static, Async>,
     usb: &mut UsbSerialJtag<'static, Async>,
     via: Via,
     frame: &[u8],
-) {
-    match via {
+) -> bool {
+    let done = match via {
         Via::Uart => {
-            let mut sent = 0;
-            while sent < frame.len() {
-                match uart.write_async(&frame[sent..]).await {
-                    Ok(n) => sent += n,
-                    Err(_) => return,
+            with_timeout(SEND_TIMEOUT, async {
+                let mut sent = 0;
+                while sent < frame.len() {
+                    sent += uart.write_async(&frame[sent..]).await.map_err(|_| ())?;
                 }
-            }
-            let _ = uart.flush_async().await;
+                uart.flush_async().await.map_err(|_| ())
+            })
+            .await
         }
         Via::Usb => {
-            let _ = with_timeout(USB_SEND_TIMEOUT, async {
-                usb.write_all(frame).await?;
-                usb.flush().await
+            with_timeout(SEND_TIMEOUT, async {
+                usb.write_all(frame).await.map_err(|_| ())?;
+                usb.flush().await.map_err(|_| ())
             })
-            .await;
+            .await
         }
-    }
+    };
+    matches!(done, Ok(Ok(())))
 }
 
 /// CONF_RUN in a conformance build. The scratch unit is the first erase unit

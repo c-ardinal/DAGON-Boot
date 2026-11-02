@@ -34,6 +34,16 @@ impl FrameCutter {
         }
     }
 
+    /// Drops a partial frame, if any; a frame already handed out stays valid
+    /// until the next push. For bytes whose arrival time is unknown, e.g.
+    /// after the receiver could not run for longer than
+    /// [`INTER_BYTE_TIMEOUT_MS`].
+    pub fn drop_partial(&mut self) {
+        if self.len > self.done {
+            self.len = self.done;
+        }
+    }
+
     /// [`FrameCutter::push`] for a byte that arrived at `now_ms`: a partial
     /// frame older than [`INTER_BYTE_TIMEOUT_MS`] is dropped first, and the
     /// search for the next SOF starts over.
@@ -168,6 +178,28 @@ mod tests {
         let got: Vec<_> = f
             .iter()
             .filter_map(|&b| c.push_at(b, 5_000).map(<[u8]>::to_vec))
+            .collect();
+        assert_eq!(got, vec![f]);
+    }
+
+    #[test]
+    fn drop_partial_keeps_nothing_but_whole_frames() {
+        let f = frame(11, b"xyz");
+        let mut c = FrameCutter::new();
+        for &b in &f[..4] {
+            assert!(c.push(b).is_none());
+        }
+        c.drop_partial();
+        let rest: Vec<_> = f[4..]
+            .iter()
+            .filter_map(|&b| c.push(b).map(<[u8]>::to_vec))
+            .collect();
+        assert!(rest.is_empty());
+        // Nothing partial: a following whole frame is unaffected.
+        c.drop_partial();
+        let got: Vec<_> = f
+            .iter()
+            .filter_map(|&b| c.push(b).map(<[u8]>::to_vec))
             .collect();
         assert_eq!(got, vec![f]);
     }

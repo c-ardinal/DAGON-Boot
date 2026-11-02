@@ -116,8 +116,13 @@ fn build_node(
 ) -> Result<Built, String> {
     b.validate().map_err(|e| format!("[build.{id}]: {e}"))?;
     // Resolved through symlinks and junctions; must stay in the work area.
-    let dir = crate::paths::contained(&cfg.base, &b.package)
-        .map_err(|e| format!("[build.{id}] package: {e}"))?;
+    // Without the extended-length prefix canonicalising adds on Windows: given to
+    // cargo as the target folder, the MSVC linker cannot open the build
+    // scripts' objects in a deep folder (LNK1181), where a plain path works.
+    let dir = crate::config::plain_path(
+        crate::paths::contained(&cfg.base, &b.package)
+            .map_err(|e| format!("[build.{id}] package: {e}"))?,
+    );
     let bin = match &b.bin {
         Some(n) => n.clone(),
         None => package_name(&dir)?,
@@ -469,6 +474,16 @@ mod tests {
     }
 
     #[test]
+    fn the_package_folder_goes_to_cargo_without_the_verbatim_prefix() {
+        let dir = std::env::temp_dir();
+        let canon = std::fs::canonicalize(&dir).unwrap();
+        let plain = crate::config::plain_path(canon.clone());
+        let verbatim: String = [char::from(92), char::from(92), '?'].iter().collect();
+        assert!(!plain.to_string_lossy().starts_with(&verbatim));
+        assert_eq!(std::fs::canonicalize(&plain).unwrap(), canon);
+    }
+
+    #[test]
     fn builds_a_package_and_copies_its_elf() {
         // A tiny host binary package stands in for a firmware package.
         let base = std::env::temp_dir().join(format!("dagon-build-{}", std::process::id()));
@@ -485,6 +500,9 @@ mod tests {
             "#[cfg(feature = \"broken\")]\ncompile_error!(\"broken\");\nfn main() {}\n",
         )
         .unwrap();
+        // Firmware crates' dependencies have build scripts, linked for the
+        // host: both slots (slot B in its own target folder) must link one.
+        std::fs::write(pkg.join("build.rs"), "fn main() {}\n").unwrap();
         // --locked needs a lock file; an empty package resolves offline.
         std::fs::create_dir_all(pkg.join("src/bin")).unwrap();
         std::fs::write(pkg.join("src/bin/other.rs"), "fn main() {}\n").unwrap();

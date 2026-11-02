@@ -703,11 +703,7 @@ fn bootcore_get(server: &Server, node: &str) -> Res {
     let cfg = config(server).map_err(|e| Response::error(500, &e))?;
     let p = match cfg.provision.get(node) {
         Some(inputs) => inputs.bootcore.clone(),
-        None => cfg
-            .base
-            .join(cfg.provision_dir())
-            .join(node)
-            .join("bootcore.img"),
+        None => cfg.provision_dir().join(node).join("bootcore.img"),
     };
     let p = inside(&cfg, &p).map_err(|e| Response::error(403, &e))?;
     let bytes = std::fs::read(p).map_err(|_| Response::error(404, "no boot core for this node"))?;
@@ -1121,7 +1117,7 @@ mod tests {
         let server = server_on(&cfg, *key.pk);
         assert_eq!(status(bootcore_get(&server, "seg")), 404);
         assert_eq!(status(bootcore_get(&server, "..")), 400);
-        let dir = cfg.base.join(cfg.provision_dir()).join("seg");
+        let dir = cfg.provision_dir().join("seg");
         std::fs::create_dir_all(&dir).unwrap();
         let img = bootcore_image(&key);
         std::fs::write(dir.join("bootcore.img"), &img).unwrap();

@@ -147,10 +147,12 @@ impl Config {
             })
     }
 
+    /// Where `dagon provision` writes and recovery reads: `provision_dir`,
+    /// else out/provision beside dagon.toml (like every other path in it).
     pub fn provision_dir(&self) -> PathBuf {
         self.provision_dir
             .clone()
-            .unwrap_or_else(|| PathBuf::from(DEFAULT_PROVISION_DIR))
+            .unwrap_or_else(|| self.base.join(DEFAULT_PROVISION_DIR))
     }
 }
 
@@ -173,7 +175,7 @@ const VERBATIM: &str = concat!('\\', '\\', '?', '\\');
 
 /// Drops the extended-length prefix from a drive path so it prints and
 /// passes to other tools as usual.
-fn plain_path(p: PathBuf) -> PathBuf {
+pub(crate) fn plain_path(p: PathBuf) -> PathBuf {
     let s = p.to_string_lossy();
     match s.strip_prefix(VERBATIM) {
         Some(rest) if rest.as_bytes().get(1) == Some(&b':') => PathBuf::from(rest),
@@ -396,6 +398,31 @@ pub fn read_file(path: &Path) -> Result<Vec<u8>, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_provision_folder_is_beside_dagon_toml_by_default() {
+        let dir = std::env::temp_dir().join(format!("dagon-provdir-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let toml = dir.join("dagon.toml");
+        std::fs::write(
+            &toml,
+            "topology = \"t.yaml\"
+",
+        )
+        .unwrap();
+        let c = Config::load(Some(&toml.to_string_lossy())).unwrap();
+        assert_eq!(c.provision_dir(), c.base.join("out/provision"));
+        assert!(c.provision_dir().is_absolute());
+        std::fs::write(
+            &toml,
+            "provision_dir = \"p\"
+",
+        )
+        .unwrap();
+        let c = Config::load(Some(&toml.to_string_lossy())).unwrap();
+        assert_eq!(c.provision_dir(), c.base.join("p"));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 
     #[test]
     fn opts_split_positional_and_named() {

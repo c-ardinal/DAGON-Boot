@@ -160,7 +160,28 @@ pub fn load_key(arg: Option<&str>) -> Result<KeyPair, String> {
             path.display()
         ));
     }
-    dagon_sign::load_key_pair(&path).map_err(|e| e.to_string())
+    let key = dagon_sign::load_key_pair(&path).map_err(|e| e.to_string())?;
+    allow_key(&key.pk, test_key_allowed())?;
+    Ok(key)
+}
+
+/// Environment variable that permits the public RFC 8032 test key.
+pub const ALLOW_TEST_KEY_ENV: &str = "DAGON_ALLOW_TEST_KEY";
+
+pub fn test_key_allowed() -> bool {
+    std::env::var(ALLOW_TEST_KEY_ENV).is_ok_and(|v| v == "1")
+}
+
+/// Refuses the public test key (its secret is published) unless `allowed`
+/// (`DAGON_ALLOW_TEST_KEY=1`).
+pub fn allow_key(public: &[u8; 32], allowed: bool) -> Result<(), String> {
+    if *public == dagon_sign::image::TEST_PUBLIC_KEY && !allowed {
+        return Err(format!(
+            "this is the public RFC 8032 test key, whose secret is published; \
+             set {ALLOW_TEST_KEY_ENV}=1 to use it for tests"
+        ));
+    }
+    Ok(())
 }
 
 pub fn write_file(path: &Path, bytes: &[u8]) -> Result<(), String> {
@@ -186,6 +207,14 @@ mod tests {
         assert_eq!(o.get("out"), Some("x"));
         assert!(Opts::parse(&["--bad", "x"], &["out"]).is_err());
         assert!(Opts::parse(&["--out"], &["out"]).is_err());
+    }
+
+    #[test]
+    fn test_key_needs_explicit_opt_in() {
+        let test = dagon_sign::image::TEST_PUBLIC_KEY;
+        assert!(allow_key(&test, false).is_err());
+        assert!(allow_key(&test, true).is_ok());
+        assert!(allow_key(&[7; 32], false).is_ok());
     }
 
     #[test]

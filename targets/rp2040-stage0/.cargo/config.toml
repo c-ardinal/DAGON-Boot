@@ -1,0 +1,9 @@
+[build]
+target = "thumbv6m-none-eabi"
+
+[target.thumbv6m-none-eabi]
+# Compact SHA-256 (the unrolled one alone is ~9 KiB of the 16 KiB budget).
+rustflags = [
+    "-C", "link-arg=--nmagic", "-C", "link-arg=-Tlink.x",
+    "--cfg", "sha2_backend_soft=\"compact\"",
+]

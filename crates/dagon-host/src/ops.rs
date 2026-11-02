@@ -138,6 +138,33 @@ impl<T: Transport, C: Clock> Host<T, C> {
         nodes: Option<&[u8]>,
         on_event: &mut dyn FnMut(Event),
     ) -> Result<Vec<NodeOutcome<T::Error>>, T::Error> {
+        self.apply_release(bundle, topology, Some(pubkey), nodes, on_event)
+            .await
+    }
+
+    /// [`Host::apply`] with the host-side signature and digest checks
+    /// skipped (`pubkey = None`), so the nodes' own checks reject a tampered
+    /// image (E_SIGNATURE, E_DIGEST) for demonstration. The bundle must
+    /// still parse and the topology must still match.
+    pub async fn apply_unverified(
+        &mut self,
+        bundle: &[u8],
+        topology: &[u8],
+        nodes: Option<&[u8]>,
+        on_event: &mut dyn FnMut(Event),
+    ) -> Result<Vec<NodeOutcome<T::Error>>, T::Error> {
+        self.apply_release(bundle, topology, None, nodes, on_event)
+            .await
+    }
+
+    async fn apply_release(
+        &mut self,
+        bundle: &[u8],
+        topology: &[u8],
+        pubkey: Option<&[u8; 32]>,
+        nodes: Option<&[u8]>,
+        on_event: &mut dyn FnMut(Event),
+    ) -> Result<Vec<NodeOutcome<T::Error>>, T::Error> {
         let (b, topo) = check_release(bundle, topology, pubkey)?;
         self.push_topology(topology).await?;
 
@@ -203,7 +230,12 @@ impl<T: Transport, C: Clock> Host<T, C> {
     ) -> Result<Version, T::Error> {
         let slot = free_slot(&st.status).ok_or(Error::NoImage { node })?;
         let img = image_for(b, node, slot).ok_or(Error::NoImage { node })?;
-        let h = ImageHeader::parse(img[..HEADER_SIZE].try_into().expect("verified"))?;
+        // Unverified releases reach here too: check the length, not assume.
+        let raw: &[u8; HEADER_SIZE] = img
+            .get(..HEADER_SIZE)
+            .and_then(|h| h.try_into().ok())
+            .ok_or(Error::Format(dagon_format::FormatError::Truncated))?;
+        let h = ImageHeader::parse(raw)?;
         let v = h.version;
         let (hdr, body) = img.split_at(HEADER_SIZE);
         self.emit(on_event, node, phase::TRANSFER, 0, v).await;
@@ -330,7 +362,7 @@ impl<T: Transport, C: Clock> Host<T, C> {
         a: &RecoverAssets<'_>,
         on_event: &mut dyn FnMut(Event),
     ) -> Result<(RecoverPath, Version), T::Error> {
-        let (b, topo) = check_release(a.release, a.topology, a.pubkey)?;
+        let (b, topo) = check_release(a.release, a.topology, Some(a.pubkey))?;
         let to = Target::of_node(&topo, node).ok_or(Error::Unreachable { node })?;
         match self.hello(to).await {
             Ok(h) => {
@@ -521,14 +553,17 @@ fn rollback_slot(st: &StatusResp) -> Option<u8> {
     ok.then_some(other)
 }
 
-/// Release `bundle` verified under `pubkey` and built for `topology`.
+/// Release `bundle` built for `topology` and, when `pubkey` is given,
+/// verified under it.
 fn check_release<'a, E>(
     bundle: &'a [u8],
     topology: &'a [u8],
-    pubkey: &[u8; 32],
+    pubkey: Option<&[u8; 32]>,
 ) -> Result<(BundleView<'a>, TopologyView<'a>), E> {
     let b = BundleView::parse(bundle)?;
-    b.verify(pubkey)?;
+    if let Some(k) = pubkey {
+        b.verify(k)?;
+    }
     let topo = TopologyView::parse(topology)?;
     let release = b.manifest().fields().topology_sha256;
     let local = sha256(topology);

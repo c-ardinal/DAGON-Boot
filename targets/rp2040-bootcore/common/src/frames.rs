@@ -1,12 +1,19 @@
 //! Cuts DAGON frames out of a byte stream (USB CDC, UART): SOF search,
-//! length and CRC check, resync on garbage.
+//! length and CRC check, resync on garbage, and (for UART links, through
+//! [`FrameReader::push_at`]) a partial frame dropped after [`GAP_MS`]
+//! without a byte.
 
 use dagon_proto::{Frame, FrameError, SOF};
+
+/// Longest pause between two bytes of one frame on a UART link.
+pub const GAP_MS: u64 = 20;
 
 pub struct FrameReader<const N: usize> {
     buf: [u8; N],
     len: usize,
     max_payload: usize,
+    /// Time of the last byte pushed with [`FrameReader::push_at`].
+    last_ms: u64,
 }
 
 impl<const N: usize> FrameReader<N> {
@@ -15,7 +22,19 @@ impl<const N: usize> FrameReader<N> {
             buf: [0; N],
             len: 0,
             max_payload,
+            last_ms: 0,
         }
+    }
+
+    /// [`FrameReader::push`] for a link with an inter-byte limit: bytes
+    /// arriving at `now_ms` more than [`GAP_MS`] after the previous ones
+    /// first drop the partial frame buffered so far.
+    pub fn push_at(&mut self, data: &[u8], now_ms: u64) -> usize {
+        if self.len > 0 && now_ms.saturating_sub(self.last_ms) > GAP_MS {
+            self.clear();
+        }
+        self.last_ms = now_ms;
+        self.push(data)
     }
 
     pub fn clear(&mut self) {
@@ -97,6 +116,23 @@ mod tests {
             }
         }
         assert_eq!(got, [1, 2]);
+    }
+
+    #[test]
+    fn partial_frame_is_dropped_after_a_gap() {
+        let (f, n) = frame(7, &[9, 9]);
+        let mut r = FrameReader::<128>::new(256);
+        // First half, then silence longer than the gap: the half is gone,
+        // and the frame sent again in full is found on its own.
+        r.push_at(&f[..5], 0);
+        assert_eq!(r.poll(), None);
+        r.push_at(&f[..n], GAP_MS + 1);
+        assert_eq!(r.poll(), Some(n));
+        r.consume(n);
+        // Within the gap the bytes are kept together.
+        r.push_at(&f[..5], 100);
+        r.push_at(&f[5..n], 100 + GAP_MS);
+        assert_eq!(r.poll(), Some(n));
     }
 
     extern crate std;

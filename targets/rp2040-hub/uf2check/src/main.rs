@@ -4,7 +4,6 @@
 //!
 //! uf2check <hub.uf2> <dagon-signing.pub>
 
-use std::collections::BTreeMap;
 use std::process::ExitCode;
 use std::{env, fs};
 
@@ -12,8 +11,8 @@ use dagon_core::boot::{self, BootConfig, Decision};
 use dagon_core::log::Log;
 use dagon_format::header::{image_kind, mcu_id, target_tag};
 use dagon_format::statelog::slot;
-use dagon_port::{Flash, FlashError, FlashRegion};
 use rp2040_common::layout::*;
+use rp2040_common::mapped::Mapped;
 use rp2040_common::{bl, image};
 
 const UF2_MAGIC0: u32 = 0x0A32_4655;
@@ -51,7 +50,7 @@ fn run() -> Result<String, String> {
         named.as_ref(),
         image_kind::BOOTCORE,
     )
-    .map_err(|r| format!("stage0 would not start boot core slot {s} (reason {r})"))?;
+    .map_err(|r| format!("stage0 would not start boot core slot {s} ({r:?})"))?;
 
     let mut log = Log::load(&mut flash, &APP_LOG_LAYOUT).map_err(|e| format!("app log: {e:?}"))?;
     let cfg = BootConfig {
@@ -80,42 +79,55 @@ fn load_pubkey(path: &str) -> Result<[u8; 32], String> {
         .ok_or(format!("{path}: expected 64 hex digits"))
 }
 
-/// Flash contents (offsets from the start of flash) the UF2 writes.
-struct Uf2Flash(BTreeMap<u32, u8>);
+/// The bootrom erases a 4 KiB sector when a block starts it, so every
+/// sector a UF2 touches must be 16 consecutive 256-byte blocks, starting at
+/// a block index that is a multiple of 16 at the sector start; otherwise a
+/// later partial write leaves or erases the wrong bytes.
+fn whole_sectors(addrs: &[u32]) -> Result<(), String> {
+    const PAGES: usize = (SECTOR / 256) as usize;
+    if !addrs.len().is_multiple_of(PAGES) {
+        return Err(format!("{} blocks is not whole sectors", addrs.len()));
+    }
+    for (i, run) in addrs.chunks(PAGES).enumerate() {
+        let start = run[0];
+        let whole = start % SECTOR == 0
+            && run
+                .iter()
+                .enumerate()
+                .all(|(k, &a)| a == start + 256 * k as u32);
+        if !whole {
+            return Err(format!(
+                "block {} ({start:#x}) does not start a whole sector",
+                i * PAGES
+            ));
+        }
+    }
+    Ok(())
+}
 
-fn load_uf2(path: &str) -> Result<Uf2Flash, String> {
+/// The flash a UF2 leaves (erased where it writes nothing), read through
+/// the same mapped reader stage0 uses on the board.
+fn load_uf2(path: &str) -> Result<Mapped, String> {
     let raw = fs::read(path).map_err(|e| format!("{path}: {e}"))?;
-    let mut bytes = BTreeMap::new();
+    let mut mem = vec![0xFFu8; FLASH_SIZE];
+    let mut addrs = Vec::new();
     for b in raw.chunks_exact(512) {
         let w = |i: usize| u32::from_le_bytes(b[i * 4..i * 4 + 4].try_into().unwrap());
         if w(0) != UF2_MAGIC0 || w(1) != UF2_MAGIC1 || w(127) != UF2_MAGIC_END {
             return Err(format!("{path}: not a UF2 file"));
         }
-        let (addr, len) = (w(3), (w(4) as usize).min(476));
-        for (i, &x) in b[32..32 + len].iter().enumerate() {
-            bytes.insert(addr + i as u32, x);
+        let (addr, len) = (w(3), w(4) as usize);
+        if len != 256 {
+            return Err(format!("{path}: block at {addr:#x} carries {len} bytes, not 256"));
         }
+        let off = addr
+            .checked_sub(XIP_BASE)
+            .map(|o| o as usize)
+            .filter(|o| o + len <= FLASH_SIZE)
+            .ok_or(format!("{path}: block at {addr:#x} outside flash"))?;
+        mem[off..off + len].copy_from_slice(&b[32..32 + len]);
+        addrs.push(addr);
     }
-    Ok(Uf2Flash(bytes))
-}
-
-impl Flash for Uf2Flash {
-    fn geometry(&self) -> &[FlashRegion] {
-        &[]
-    }
-    fn read(&mut self, addr: u32, buf: &mut [u8]) -> Result<(), FlashError> {
-        for (i, b) in buf.iter_mut().enumerate() {
-            *b = *self.0.get(&(addr + i as u32)).unwrap_or(&0xFF);
-        }
-        Ok(())
-    }
-    fn erase(&mut self, _: u32, _: u32) -> Result<(), FlashError> {
-        Err(FlashError::Hw)
-    }
-    fn write(&mut self, addr: u32, data: &[u8]) -> Result<(), FlashError> {
-        for (i, &b) in data.iter().enumerate() {
-            self.0.insert(addr + i as u32, b);
-        }
-        Ok(())
-    }
+    whole_sectors(&addrs).map_err(|e| format!("{path}: {e}"))?;
+    Ok(Mapped::over(Box::leak(mem.into_boxed_slice()), XIP_BASE))
 }

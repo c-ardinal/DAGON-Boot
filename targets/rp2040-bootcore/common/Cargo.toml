@@ -12,6 +12,9 @@ publish = false
 [features]
 # embassy-rp flash adapter (boot core and app; stage0 only reads through XIP).
 rp = ["dep:embassy-rp"]
+# Panic handler that blinks the last step code on the backlight (always on
+# in the hub app, diag builds of stage0 and the boot core).
+diag-panic = []
 
 [dependencies]
 dagon-core = { path = "../../../crates/dagon-core" }

@@ -7,25 +7,25 @@ use core::fmt::Write as _;
 
 use dagon_format::Version;
 use dagon_proto::payload::{phase, Show, SHOW_TEXT_MAX};
+use embassy_futures::select::{select, Either};
 use embassy_rp::gpio::Output;
 use embassy_rp::peripherals::SPI1;
-use embassy_rp::spi::{Blocking, Spi};
-use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
-use embassy_sync::signal::Signal;
-use embassy_time::Delay;
+use embassy_rp::spi::{Async, Spi};
+use embassy_time::{Duration, Timer};
 use embedded_graphics::mono_font::ascii::{FONT_10X20, FONT_6X10};
 use embedded_graphics::mono_font::{MonoFont, MonoTextStyle};
 use embedded_graphics::pixelcolor::Rgb565;
 use embedded_graphics::prelude::*;
-use embedded_graphics::primitives::{Arc, Circle, PrimitiveStyle};
+use embedded_graphics::primitives::{Arc, Circle, PrimitiveStyle, Rectangle};
 use embedded_graphics::text::{Alignment, Text};
-use embedded_hal_bus::spi::ExclusiveDevice;
 use heapless::String;
-use mipidsi::interface::SpiInterface;
-use mipidsi::models::GC9A01;
-use mipidsi::options::ColorInversion;
 
+use rp2040_common::arm::step;
+
+use crate::gc9a01::{Frame, Panel};
 use crate::nodes::{SubNode, MAX_SUBS};
+use crate::state;
+use crate::wdt::{self, Task};
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum Shade {
@@ -79,8 +79,6 @@ pub struct Home {
     pub progress: Option<Progress>,
 }
 
-pub static HOME: Signal<CriticalSectionRawMutex, Home> = Signal::new();
-
 const HUB_AT: Point = Point::new(120, 80);
 const HUB_D: u32 = 90;
 const LEFT: Point = Point::new(55, 160);
@@ -103,37 +101,135 @@ const ARC: u32 = 9;
 /// Top text line; the round panel is narrower up there.
 const TOP_AT: Point = Point::new(120, 22);
 const TOP_CHARS: usize = 22;
+/// "TEST KEY" marker near the bottom (above the diag seconds counter).
+const TEST_KEY_AT: Point = Point::new(120, 218);
+/// A small square at the top that toggles every second while the hub runs.
+const HEARTBEAT_AT: Point = Point::new(117, 6);
+const HEARTBEAT: Duration = Duration::from_secs(1);
 
-pub struct Pins<'d> {
-    pub spi: Spi<'d, SPI1, Blocking>,
-    pub cs: Output<'d>,
-    pub dc: Output<'d>,
-    pub rst: Output<'d>,
+pub struct Pins {
+    pub spi: Spi<'static, SPI1, Async>,
+    pub cs: Output<'static>,
+    pub dc: Output<'static>,
+    pub rst: Output<'static>,
+    pub backlight: Output<'static>,
 }
 
-/// Draws the home screen whenever [`HOME`] changes. Returns only if the
-/// panel cannot be set up (the hub keeps working without it).
-pub async fn run(pins: Pins<'_>) {
-    let dev = ExclusiveDevice::new_no_delay(pins.spi, pins.cs).unwrap_or_else(|e| match e {});
-    let mut buf = [0u8; 512];
-    let di = SpiInterface::new(dev, pins.dc, &mut buf);
-    // Calibration knobs if colours look wrong on the panel: inversion and
-    // `.color_order(ColorOrder::Bgr)`.
-    let Ok(mut display) = mipidsi::Builder::new(GC9A01, di)
-        .reset_pin(pins.rst)
-        .invert_colors(ColorInversion::Inverted)
-        .init(&mut Delay)
-    else {
-        return;
-    };
-    let mut shown: Option<Home> = None;
-    loop {
-        let home = HOME.wait().await;
-        if shown.as_ref() != Some(&home) {
-            let _ = draw(&mut display, &home);
-            shown = Some(home);
-        }
+/// The LCD task (lowest priority, thread mode). It alone owns SPI1 and the
+/// panel pins. It draws into the RAM frame and sends whole frames by DMA,
+/// so it never holds the CPU for long. The backlight goes on after the
+/// first full frame. It redraws when [`state::REDRAW`] fires and toggles a
+/// heartbeat square every second. The `diag` build first shows a test
+/// pattern and the clock set-up for 3 s and a seconds counter.
+#[embassy_executor::task]
+pub async fn task(mut pins: Pins, frame: &'static mut Frame) {
+    wdt::busy(Task::Lcd);
+    let mut panel = Panel::new(pins.spi, pins.cs, pins.dc, pins.rst).await;
+    let _ = frame.clear(Rgb565::BLACK);
+    if cfg!(feature = "diag") {
+        let _ = test_pattern(frame);
+        let _ = clock_info(frame);
+        panel.flush(frame).await;
+        pins.backlight.set_high();
+        wdt::idle(Task::Lcd);
+        Timer::after_secs(3).await;
+        wdt::busy(Task::Lcd);
     }
+    let mut shown = state::home();
+    let _ = draw(frame, &shown);
+    panel.flush(frame).await;
+    pins.backlight.set_high();
+    let mut beat = false;
+    loop {
+        wdt::idle(Task::Lcd);
+        let event = select(state::REDRAW.wait(), Timer::after(HEARTBEAT)).await;
+        wdt::busy(Task::Lcd);
+        if matches!(event, Either::Second(())) {
+            state::expire_progress();
+            beat = !beat;
+        }
+        let home = state::home();
+        if home != shown {
+            step(15);
+            let _ = draw(frame, &home);
+            shown = home;
+        }
+        let c = if beat {
+            Rgb565::CSS_GRAY
+        } else {
+            Rgb565::BLACK
+        };
+        let _ = Rectangle::new(HEARTBEAT_AT, Size::new(6, 6))
+            .into_styled(PrimitiveStyle::with_fill(c))
+            .draw(frame);
+        if cfg!(feature = "diag") {
+            let _ = uptime(frame);
+        }
+        panel.flush(frame).await;
+    }
+}
+
+/// Which drawing paths land: red/green/blue bands (large solid fills), a
+/// white square in the middle (small solid fill), a white line of single
+/// pixels below it (per-pixel writes), the word DIAG (glyph streams) and a
+/// yellow ring (circle).
+fn test_pattern<D: DrawTarget<Color = Rgb565>>(d: &mut D) -> Result<(), D::Error> {
+    let bands = [(40, Rgb565::RED), (80, Rgb565::GREEN), (120, Rgb565::BLUE)];
+    for (y, c) in bands {
+        Rectangle::new(Point::new(0, y), Size::new(240, 40))
+            .into_styled(PrimitiveStyle::with_fill(c))
+            .draw(d)?;
+    }
+    Rectangle::new(Point::new(110, 90), Size::new(20, 20))
+        .into_styled(PrimitiveStyle::with_fill(Rgb565::WHITE))
+        .draw(d)?;
+    d.draw_iter((70..170).map(|x| Pixel(Point::new(x, 170), Rgb565::WHITE)))?;
+    let style = MonoTextStyle::new(&FONT_10X20, Rgb565::WHITE);
+    Text::with_alignment("DIAG", Point::new(120, 200), style, Alignment::Center).draw(d)?;
+    Circle::with_center(Point::new(120, 120), 200)
+        .into_styled(PrimitiveStyle::with_stroke(Rgb565::YELLOW, 4))
+        .draw(d)?;
+    Ok(())
+}
+
+/// Clock set-up as the app sees it: the watchdog tick register (CYCLES in
+/// bits 0-8, ENABLE bit 9, RUNNING bit 10) and the HAL's clock rates.
+fn clock_info<D: DrawTarget<Color = Rgb565>>(d: &mut D) -> Result<(), D::Error> {
+    use embassy_rp::clocks;
+    const WATCHDOG_TICK: *const u32 = 0x4005_802C as *const u32;
+    // SAFETY: read-only access to a watchdog register.
+    let tick = unsafe { WATCHDOG_TICK.read_volatile() };
+    let style = MonoTextStyle::new(&FONT_6X10, Rgb565::WHITE);
+    let mut line: String<40> = String::new();
+    let rows = [
+        ("tick", tick),
+        ("ref", clocks::clk_ref_freq()),
+        ("sys", clocks::clk_sys_freq()),
+        ("xosc", clocks::xosc_freq()),
+    ];
+    for (i, (name, v)) in rows.iter().enumerate() {
+        line.clear();
+        let _ = write!(line, "{name}={v:#x} ({v})");
+        let at = Point::new(120, 20 + 12 * i as i32);
+        Rectangle::new(at - Point::new(100, 9), Size::new(200, 12))
+            .into_styled(PrimitiveStyle::with_fill(Rgb565::BLACK))
+            .draw(d)?;
+        Text::with_alignment(&line, at, style, Alignment::Center).draw(d)?;
+    }
+    Ok(())
+}
+
+/// Seconds since the app started by the HAL clock; compare with a watch.
+fn uptime<D: DrawTarget<Color = Rgb565>>(d: &mut D) -> Result<(), D::Error> {
+    let mut line: String<16> = String::new();
+    let _ = write!(line, "t={}s", embassy_time::Instant::now().as_secs());
+    let at = Point::new(120, 236);
+    Rectangle::new(at - Point::new(30, 9), Size::new(60, 12))
+        .into_styled(PrimitiveStyle::with_fill(Rgb565::BLACK))
+        .draw(d)?;
+    let style = MonoTextStyle::new(&FONT_6X10, Rgb565::WHITE);
+    Text::with_alignment(&line, at, style, Alignment::Center).draw(d)?;
+    Ok(())
 }
 
 fn draw<D: DrawTarget<Color = Rgb565>>(d: &mut D, home: &Home) -> Result<(), D::Error> {
@@ -157,6 +253,11 @@ fn draw<D: DrawTarget<Color = Rgb565>>(d: &mut D, home: &Home) -> Result<(), D::
         let shown = &line[..line.len().min(TOP_CHARS)];
         let style = MonoTextStyle::new(&FONT_6X10, Rgb565::WHITE);
         Text::with_alignment(shown, TOP_AT, style, Alignment::Center).draw(d)?;
+    }
+    if crate::TEST_KEY {
+        // Built with the public test key: anyone can sign images for it.
+        let style = MonoTextStyle::new(&FONT_10X20, Rgb565::RED);
+        Text::with_alignment("TEST KEY", TEST_KEY_AT, style, Alignment::Center).draw(d)?;
     }
     Ok(())
 }

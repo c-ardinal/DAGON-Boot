@@ -258,6 +258,7 @@ dependencies = [
  "cortex-m",
  "cortex-m-rt",
  "dagon-format",
+ "dagon-port",
  "panic-halt",
  "rp2040-boot2",
  "rp2040-common",

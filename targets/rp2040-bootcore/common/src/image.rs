@@ -26,11 +26,36 @@ pub fn ref_of(raw: &[u8; HEADER_SIZE], slot: u8) -> Option<SlotRef> {
     })
 }
 
+/// Why [`check`] refused an image (diagnostic blink code `K`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[repr(u8)]
+pub enum Fail {
+    /// Header unreadable or not a valid header (magic, version, fields).
+    Header = 1,
+    /// Header SHA-256 is not the one the log names.
+    Digest = 2,
+    /// Payload larger than the slot.
+    Size = 3,
+    /// Wrong image kind, MCU or slot binding.
+    Kind = 4,
+    /// `load_addr` is not this slot's body.
+    LoadAddr = 5,
+    /// Body SHA-256 differs from `payload_sha256`.
+    Body = 6,
+}
+
+impl Fail {
+    /// State log reason code.
+    pub fn reason(self) -> u8 {
+        reason::HASH_MISMATCH
+    }
+}
+
 /// stage0's check of the boot core in the slot at `base` (capacity `cap`
 /// incl. header) as slot `slot`: the header is the one `expect` names (when
 /// the log names one), fits, is of `image_kind` for this MCU, is linked for
-/// this slot and the body hashes to `payload_sha256`. Errors are state log
-/// reason codes. Returns the body address.
+/// this slot and the body hashes to `payload_sha256`. Returns the body
+/// address.
 pub fn check<F: Flash>(
     flash: &mut F,
     base: u32,
@@ -38,25 +63,35 @@ pub fn check<F: Flash>(
     slot: u8,
     expect: Option<&SlotRef>,
     image_kind: u8,
-) -> Result<u32, u8> {
+) -> Result<u32, Fail> {
     let mut raw = [0u8; HEADER_SIZE];
-    flash
-        .read(base, &mut raw)
-        .map_err(|_| reason::HASH_MISMATCH)?;
-    let h = ImageHeader::parse(&raw).map_err(|_| reason::HASH_MISMATCH)?;
-    let body = base + HEADER_LEN;
-    let fits = h.payload_size <= cap - HEADER_LEN && h.load_addr == body;
+    flash.read(base, &mut raw).map_err(|_| Fail::Header)?;
+    let h = ImageHeader::parse(&raw).map_err(|_| Fail::Header)?;
+    if expect.is_some_and(|m| m.digest16 != header::header_digest16(&raw)) {
+        return Err(Fail::Digest);
+    }
+    if h.payload_size > cap - HEADER_LEN {
+        return Err(Fail::Size);
+    }
     let ours = h.image_kind == image_kind
         && h.mcu_id == mcu_id::RP2040
         && (h.slot_binding == slot || h.slot_binding == header::slot_binding::ANY);
-    let named = expect.is_none_or(|m| m.digest16 == header::header_digest16(&raw));
-    if !named || !fits || !ours {
-        return Err(reason::HASH_MISMATCH);
+    if !ours {
+        return Err(Fail::Kind);
+    }
+    let body = base + HEADER_LEN;
+    if h.load_addr != body {
+        return Err(Fail::LoadAddr);
     }
     if hash(flash, body, h.payload_size) != Some(h.payload_sha256) {
-        return Err(reason::HASH_MISMATCH);
+        return Err(Fail::Body);
     }
     Ok(body)
+}
+
+/// SHA-256 works on this build: the FIPS 180-2 "abc" vector.
+pub fn sha_ok() -> bool {
+    dagon_format::sha256(b"abc")[..4] == [0xba, 0x78, 0x16, 0xbf]
 }
 
 /// SHA-256 of `len` bytes at `addr`.

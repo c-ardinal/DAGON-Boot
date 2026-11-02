@@ -3,9 +3,17 @@
 //! version on the 3-digit 7-segment display (`1.1.` for 1.1.x). Built for
 //! slot A or B (`slot-b`); the boot core picks which one runs.
 //!
-//! Watchdog: fed every [`FEED_PERIOD`] once confirmed. On trial it is fed
-//! for [`TRIAL_FEED_MS`] only, so an image that never gets CONFIRM resets and
-//! the boot core counts the attempt (rolling back after the last one).
+//! Tasks (each peripheral owned by one task):
+//! - interrupt executor on the unused USART6 interrupt (preempts thread
+//!   mode): mailbox serving, owning I2C3 (target) and the agent with the
+//!   flash, so the hub is answered whatever the display does;
+//! - thread executor: display multiplexing (segment and digit pins) and the
+//!   watchdog task (IWDG, LED heartbeat).
+//!
+//! Watchdog: fed by its task only while no task is past the deadline of its
+//! current work, and never while on trial: an image that does not get
+//! CONFIRM resets when the 4 s trial watchdog runs out and the boot core
+//! counts the attempt (rolling back after the third).
 //!
 //! `confirm`: confirms its own trial at start-up (bench use without a hub).
 #![no_std]
@@ -18,10 +26,12 @@ use dagon_proto::payload::{mode, role};
 use dagon_proto::{frame_len, max_payload};
 use defmt::{error, info, warn, Display2Format};
 use defmt_rtt as _;
-use embassy_executor::Spawner;
+use embassy_executor::{Executor, InterruptExecutor};
 use embassy_futures::select::{select, Either};
 use embassy_stm32::gpio::{AnyPin, Level, Output, Speed};
 use embassy_stm32::i2c::{self, I2c, SlaveAddrConfig, SlaveCommandKind};
+use embassy_stm32::interrupt;
+use embassy_stm32::interrupt::{InterruptExt, Priority};
 use embassy_stm32::wdg::IndependentWatchdog;
 use embassy_stm32::{bind_interrupts, dma, pac, peripherals, Peri};
 use embassy_time::{Duration, Instant, Timer};
@@ -29,15 +39,15 @@ use f401_board as board;
 use f401_node::mailbox::Mailbox;
 use f401_node::{seg, KindSStore};
 use panic_probe as _;
+use static_cell::StaticCell;
 
 const SLOT: u8 = if cfg!(feature = "slot-b") { 1 } else { 0 };
 const SELF_CONFIRM: bool = cfg!(feature = "confirm");
 
 /// 7-bit I2C target address (the STM32 ROM loader keeps 0x39).
 const I2C_ADDR: u8 = 0x42;
-const FEED_PERIOD: Duration = Duration::from_millis(500);
-/// How long a trial image keeps the watchdog fed while waiting for CONFIRM.
-const TRIAL_FEED_MS: u64 = 30_000;
+/// How often the serving task wakes to drop an abandoned transfer.
+const TICK: Duration = Duration::from_millis(500);
 /// How long "TEST KEY" (`tSt`) shows before the version.
 const TEST_KEY_SPLASH: Duration = Duration::from_millis(1500);
 /// On time of one digit of the multiplexed display.
@@ -62,7 +72,20 @@ bind_interrupts!(struct Irqs {
 });
 
 type Store = KindSStore<board::BoardFlash<'static>>;
-type Wdt = IndependentWatchdog<'static, peripherals::IWDG>;
+type Target = I2c<'static, embassy_stm32::mode::Async, i2c::MultiMaster>;
+
+mod wdt;
+use wdt::Task;
+
+static EXECUTOR_HIGH: InterruptExecutor = InterruptExecutor::new();
+static EXECUTOR_LOW: StaticCell<Executor> = StaticCell::new();
+
+#[interrupt]
+unsafe fn USART6() {
+    // SAFETY: the executor's own interrupt (USART6 is unused); started in
+    // main before use.
+    unsafe { EXECUTOR_HIGH.on_interrupt() }
+}
 
 fn config() -> Config {
     Config {
@@ -76,10 +99,10 @@ fn config() -> Config {
     }
 }
 
-#[embassy_executor::main]
-async fn main(spawner: Spawner) {
+#[cortex_m_rt::entry]
+fn main() -> ! {
     let p = embassy_stm32::init(board::clocks());
-    let mut led = Output::new(p.PA5, Level::Low, Speed::Low);
+    let led = Output::new(p.PA5, Level::Low, Speed::Low);
     let o = |pin: Peri<'static, AnyPin>| Output::new(pin, SEG_OFF, Speed::Low);
     let segments = [
         o(p.PA10.into()), // a  D2
@@ -93,17 +116,17 @@ async fn main(spawner: Spawner) {
     ];
     let d = |pin: Peri<'static, AnyPin>| Output::new(pin, DIGIT_OFF, Speed::Low);
     let digits = [d(p.PA1.into()), d(p.PA4.into()), d(p.PB0.into())];
+    let low = EXECUTOR_LOW.init(Executor::new());
 
     let mut store =
         match KindSStore::load(board::BoardFlash::new(p.FLASH), &board::LOG, board::SLOTS) {
             Ok(s) => s,
             Err(e) => {
                 error!("state log unreadable: {}", defmt::Debug2Format(&e));
-                spawner.spawn(display(segments, digits, seg::DASHES, seg::DASHES).unwrap());
-                loop {
-                    led.toggle();
-                    Timer::after_millis(100).await;
-                }
+                low.run(|s| {
+                    s.spawn(display(segments, digits, seg::DASHES, seg::DASHES).unwrap());
+                    s.spawn(blink(led).unwrap());
+                })
             }
         };
     let own = own_header(&mut store);
@@ -117,7 +140,6 @@ async fn main(spawner: Spawner) {
     } else {
         seg::version(version)
     };
-    spawner.spawn(display(segments, digits, splash, seg::version(version)).unwrap());
 
     let s = store.log_state();
     let on_trial = s.on_trial() && s.active() == SLOT;
@@ -143,16 +165,36 @@ async fn main(spawner: Spawner) {
     } else {
         board::CONFIRMED_WDT_MS
     };
-    let mut wdt = IndependentWatchdog::new(p.IWDG, wdt_ms * 1000);
-    wdt.unleash();
+    let s = store.log_state();
+    wdt::install(
+        IndependentWatchdog::new(p.IWDG, wdt_ms * 1000),
+        s.on_trial() && s.active() == SLOT,
+    );
 
     let mut i2c_cfg = i2c::Config::default();
     i2c_cfg.sda_pullup = true;
     i2c_cfg.scl_pullup = true;
-    let mut target = I2c::new(p.I2C3, p.PA8, p.PB4, p.DMA1_CH4, p.DMA1_CH2, Irqs, i2c_cfg)
+    let target = I2c::new(p.I2C3, p.PA8, p.PB4, p.DMA1_CH4, p.DMA1_CH2, Irqs, i2c_cfg)
         .into_slave_multimaster(SlaveAddrConfig::basic(I2C_ADDR));
-    let mut agent = Agent::new(config(), store, DefaultHooks);
-    serve(&mut agent, &mut target, &mut wdt, &mut led).await
+    let agent = Agent::new(config(), store, DefaultHooks);
+
+    interrupt::USART6.set_priority(Priority::P6);
+    let high = EXECUTOR_HIGH.start(interrupt::USART6);
+    high.spawn(serve(agent, target).unwrap());
+
+    low.run(|s| {
+        s.spawn(display(segments, digits, splash, seg::version(version)).unwrap());
+        s.spawn(wdt::task(led).unwrap());
+    })
+}
+
+/// Blinks the LED fast forever (no usable state log).
+#[embassy_executor::task]
+async fn blink(mut led: Output<'static>) -> ! {
+    loop {
+        led.toggle();
+        Timer::after_millis(100).await;
+    }
 }
 
 fn own_header(store: &mut Store) -> Option<[u8; HEADER_SIZE]> {
@@ -160,48 +202,33 @@ fn own_header(store: &mut Store) -> Option<[u8; HEADER_SIZE]> {
     store.read_header(SLOT, &mut h).ok().map(|_| h)
 }
 
-/// The mailbox loop. Requests are handled synchronously with the own address
-/// NACKed, so a hub poll during an erase or write never meets a stretched
-/// clock (instruction fetch from flash stalls while it is busy).
-async fn serve(
-    agent: &mut Agent<Store, DefaultHooks>,
-    target: &mut I2c<'static, embassy_stm32::mode::Async, i2c::MultiMaster>,
-    wdt: &mut Wdt,
-    led: &mut Output<'static>,
-) -> ! {
-    let started = Instant::now();
+/// The mailbox loop (high-priority executor). Requests are handled
+/// synchronously with the own address NACKed, so a hub poll during an erase
+/// or write never meets a stretched clock (instruction fetch from flash
+/// stalls while it is busy).
+#[embassy_executor::task]
+async fn serve(mut agent: Agent<Store, DefaultHooks>, mut target: Target) -> ! {
     let mut mailbox = Mailbox::default();
     let mut rx = [0u8; frame_len(max_payload::I2C)];
     let mut last_request: Option<Instant> = None;
-    let mut next_tick = started;
-    // Feeds unless this is a trial past its window; also called right before
-    // each request so an erase starts with a full watchdog period.
-    let feed = |agent: &mut Agent<Store, DefaultHooks>,
-                wdt: &mut IndependentWatchdog<'static, peripherals::IWDG>| {
-        let s = agent.store().log_state();
-        let trial = s.on_trial() && s.active() == SLOT;
-        if !trial || started.elapsed().as_millis() < TRIAL_FEED_MS {
-            wdt.pet();
-        }
-    };
     loop {
-        // Ticks on time even while the hub keeps the bus busy.
-        if Instant::now() >= next_tick {
-            next_tick = Instant::now() + FEED_PERIOD;
-            feed(agent, wdt);
-            if last_request.is_some_and(|t| t.elapsed().as_millis() >= IDLE_TIMEOUT_MS as u64) {
-                agent.abort();
-                last_request = None;
-            }
-            led.toggle();
-        }
-        let cmd = match select(target.listen(), Timer::at(next_tick)).await {
+        wdt::idle(Task::Serve);
+        let event = select(target.listen(), Timer::after(TICK)).await;
+        wdt::busy(Task::Serve);
+        let cmd = match event {
             Either::First(Ok(cmd)) => cmd,
             Either::First(Err(e)) => {
                 warn!("i2c: {}", e);
                 continue;
             }
-            Either::Second(()) => continue,
+            Either::Second(()) => {
+                let idle_ms = IDLE_TIMEOUT_MS as u64;
+                if last_request.is_some_and(|t| t.elapsed().as_millis() >= idle_ms) {
+                    agent.abort();
+                    last_request = None;
+                }
+                continue;
+            }
         };
         match cmd.kind {
             SlaveCommandKind::Write => {
@@ -218,15 +245,18 @@ async fn serve(
                 }
                 last_request = Some(Instant::now());
                 mailbox.request();
-                feed(agent, wdt);
+                // An erase starts with a full watchdog period.
+                wdt::keepalive();
                 acknowledge(false);
                 let t0 = Instant::now();
-                if !conform::serve(agent, &rx[..n], wdt, &mut mailbox) {
+                if !conform::serve(&mut agent, &rx[..n], &mut mailbox) {
                     let reply = agent.handle(&rx[..n]);
                     let reboot = reply.as_ref().is_some_and(|r| r.reboot);
                     mailbox.respond(reply.map(|r| r.frame), reboot);
                 }
                 acknowledge(true);
+                let s = agent.store().log_state();
+                wdt::set_trial(s.on_trial() && s.active() == SLOT);
                 let ms = t0.elapsed().as_millis();
                 if ms >= SLOW_REQUEST_MS {
                     // Byte 5 of a frame is the command.
@@ -265,6 +295,7 @@ async fn display(
 ) {
     let started = Instant::now();
     loop {
+        wdt::busy(Task::Display);
         let codes = if started.elapsed() < TEST_KEY_SPLASH {
             first
         } else {
@@ -301,7 +332,6 @@ mod conform {
     pub fn serve(
         agent: &mut Agent<Store, DefaultHooks>,
         request: &[u8],
-        wdt: &mut Wdt,
         mailbox: &mut Mailbox,
     ) -> bool {
         let state = agent.store().log_state();
@@ -312,7 +342,12 @@ mod conform {
         let mut out = [0u8; RESPONSE_MAX];
         let flash = agent.store().flash();
         let max = max_payload::I2C;
-        match handle_frame(request, max, flash, &setup, &mut out, &mut || wdt.pet()) {
+        // Long tests feed through this hook and count as progress.
+        let mut feed = || {
+            wdt::busy(Task::Serve);
+            wdt::keepalive();
+        };
+        match handle_frame(request, max, flash, &setup, &mut out, &mut feed) {
             Some(n) => {
                 mailbox.respond(Some(&out[..n]), false);
                 true
@@ -328,12 +363,7 @@ mod conform {
 
     pub const WDT_MS: u32 = 0;
 
-    pub fn serve(
-        _: &mut Agent<Store, DefaultHooks>,
-        _: &[u8],
-        _: &mut Wdt,
-        _: &mut Mailbox,
-    ) -> bool {
+    pub fn serve(_: &mut Agent<Store, DefaultHooks>, _: &[u8], _: &mut Mailbox) -> bool {
         false
     }
 }

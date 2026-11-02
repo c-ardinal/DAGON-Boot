@@ -3,6 +3,13 @@
 //! compile, release verification, HELLO payloads and version text. Each
 //! export is a thin wrapper so the page and the CLI apply the same code.
 
+extern crate alloc;
+
+mod host;
+mod watch;
+
+pub use host::{watch_interval_ms, WasmHost};
+
 use dagon_format::{BundleView, Version};
 use dagon_proto::payload::{HelloReq, HelloResp};
 use dagon_topology::boards::BOARDS;

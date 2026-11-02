@@ -92,6 +92,7 @@ version = "0.0.0"
 dependencies = [
  "dagon-format",
  "dagon-host",
+ "dagon-port",
  "dagon-proto",
  "dagon-sign",
  "dagon-sim",

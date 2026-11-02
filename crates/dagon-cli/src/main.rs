@@ -4,6 +4,7 @@ mod commands;
 mod config;
 mod device;
 mod serial;
+mod simrun;
 
 use std::path::Path;
 use std::process::ExitCode;
@@ -34,6 +35,12 @@ Usage:
                                      push the topology, update children then the hub
   dagon topo push [<yaml>] [--port <name>]
                                      send the topology canonical binary to the hub
+  dagon recover <node> [--release <dgb>] [--bootcore <img>] [--port <name>]
+        [--topology <yaml>] [--pubkey <file>] [--key <file>]
+                                     rewrite a node from the release: normal transfer if
+                                     it answers, else the F401 ROM loader (boot core from
+                                     <provision_dir>/<node>/bootcore.img by default)
+  dagon sim run                      the four simulator scenarios (no hardware)
   dagon --help
 
 The hub is found by USB ID c0de:cafe or product \"DAGON hub\" unless --port
@@ -63,6 +70,8 @@ fn main() -> ExitCode {
         ["status", rest @ ..] => run(device::status(rest)),
         ["apply", rest @ ..] => run(device::apply(rest)),
         ["topo", "push", rest @ ..] => run(device::topo_push(rest)),
+        ["recover", rest @ ..] => run(device::recover(rest)),
+        ["sim", "run", rest @ ..] => run(simrun::run(rest)),
         _ => usage_error("unknown command"),
     }
 }

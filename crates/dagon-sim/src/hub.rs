@@ -10,9 +10,9 @@ use crate::link::SimLink;
 use crate::node::SimNode;
 use crate::rom::ROM_ADDR;
 use dagon_format::Version;
-use dagon_port::BusError;
+use dagon_port::{BusError, Nrst};
 use dagon_proto::mailbox::{State, STATE_LEN};
-use dagon_proto::payload::{link, nrst, I2cRaw, Relay, Show, SubCtl};
+use dagon_proto::payload::{boot0, link, nrst, I2cRaw, Relay, Show, SubCtl};
 use dagon_proto::{find_sof, flags, frame_len, max_payload, Cmd, Frame, FrameError, Status};
 
 /// Cost of one PC <-> hub request on the simulated clock.
@@ -218,6 +218,25 @@ impl SimBus {
             n.set_boot0(high);
         }
     }
+
+    /// SUBCTL semantics: BOOT0 first, then the NRST action (a pulse holds
+    /// NRST low for [`NRST_PULSE_MS`]). `Io` if no node is wired.
+    pub fn set_lines(&mut self, nrst: Nrst, boot0_high: bool) -> Result<(), BusError> {
+        if self.sub.is_none() {
+            return Err(BusError::Io);
+        }
+        self.set_boot(boot0_high);
+        match nrst {
+            Nrst::Low => self.set_reset(true),
+            Nrst::Release => self.set_reset(false),
+            Nrst::Pulse => {
+                self.set_reset(true);
+                self.advance_ms(NRST_PULSE_MS);
+                self.set_reset(false);
+            }
+        }
+        Ok(())
+    }
 }
 
 impl Default for SimBus {
@@ -338,21 +357,15 @@ impl SimHub {
             Ok(s) => s,
             Err(e) => return (e, Vec::new()),
         };
-        if self.bus.sub.is_none() {
-            return (Status::Unsupported, Vec::new());
+        let line = match s.nrst {
+            nrst::LOW => Nrst::Low,
+            nrst::RELEASE => Nrst::Release,
+            _ => Nrst::Pulse,
+        };
+        match self.bus.set_lines(line, s.boot0 == boot0::HIGH) {
+            Ok(()) => (Status::Ok, Vec::new()),
+            Err(_) => (Status::Unsupported, Vec::new()),
         }
-        self.bus
-            .set_boot(s.boot0 == dagon_proto::payload::boot0::HIGH);
-        match s.nrst {
-            nrst::LOW => self.bus.set_reset(true),
-            nrst::RELEASE => self.bus.set_reset(false),
-            _ => {
-                self.bus.set_reset(true);
-                self.advance_ms(NRST_PULSE_MS);
-                self.bus.set_reset(false);
-            }
-        }
-        (Status::Ok, Vec::new())
     }
 
     /// Raw transactions to the ROM loader, accepted only while BOOT0 is high.

@@ -3,7 +3,7 @@
 //! drive them with [`crate::block_on`].
 
 use crate::hub::SimBus;
-use dagon_port::{BusError, I2cBus, StreamPort};
+use dagon_port::{BusError, I2cBus, Nrst, StreamPort, SubControl};
 
 impl I2cBus for SimBus {
     async fn write(&mut self, addr: u8, data: &[u8]) -> Result<(), BusError> {
@@ -33,5 +33,12 @@ impl StreamPort for SimBus {
     async fn write(&mut self, data: &[u8]) -> Result<(), BusError> {
         self.uart_write(data);
         Ok(())
+    }
+}
+
+/// NRST and BOOT0 of the wired I2C node.
+impl SubControl for SimBus {
+    async fn set_lines(&mut self, nrst: Nrst, boot0_high: bool) -> Result<(), BusError> {
+        SimBus::set_lines(self, nrst, boot0_high)
     }
 }

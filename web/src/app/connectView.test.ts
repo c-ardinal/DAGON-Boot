@@ -37,12 +37,21 @@ describe('connect outcomes', () => {
     expect(focusOf({ kind: 'lost' })).toBe('button');
   });
 
+  test('dagon-wasm missing: reload sentence and button, focus on the button', () => {
+    const v: View = { kind: 'unavailable' };
+    expect(bandOf(v)).toBe(BAND.LOAD);
+    expect(focusOf(v)).toBe('button');
+    expect(statusOf(v)).toBe(BAND.LOAD.chip);
+    expect(hubOf(v)).toBe('idle');
+  });
+
   test('every state has an exit: a button, or a state the page leaves by itself', () => {
     const states: View[] = [
       { kind: 'idle' },
       { kind: 'choosing' },
       { kind: 'failed', failure: 'busy' },
       { kind: 'lost' },
+      { kind: 'unavailable' },
     ];
     for (const v of states) expect(bandOf(v)?.button).toBeTruthy();
   });

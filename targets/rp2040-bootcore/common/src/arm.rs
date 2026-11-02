@@ -13,13 +13,13 @@ impl Flash for XipFlash {
     }
 
     fn read(&mut self, addr: u32, buf: &mut [u8]) -> Result<(), FlashError> {
-        let end = addr as usize + buf.len();
-        if end > FLASH_SIZE {
+        let off = addr.checked_sub(XIP_BASE).ok_or(FlashError::Range)?;
+        if off as usize + buf.len() > FLASH_SIZE {
             return Err(FlashError::Range);
         }
         // SAFETY: the range lies inside the memory-mapped XIP window, which is
         // always readable and not written while stage0 runs.
-        let src = unsafe { core::slice::from_raw_parts((XIP_BASE + addr) as *const u8, buf.len()) };
+        let src = unsafe { core::slice::from_raw_parts(addr as *const u8, buf.len()) };
         buf.copy_from_slice(src);
         Ok(())
     }
@@ -33,10 +33,10 @@ impl Flash for XipFlash {
     }
 }
 
-/// Starts the image whose vector table is at flash offset `body`.
+/// Starts the image whose vector table is at XIP address `body`.
 /// Interrupts must not be in use (NVIC enables and pendings are cleared).
 pub fn jump(body: u32) -> ! {
-    let vtor = XIP_BASE + body;
+    let vtor = body;
     // SAFETY: `body` holds a verified image linked for this address; the
     // caller has no live interrupt sources, so switching VTOR and the stack
     // pointer here hands the core over cleanly.

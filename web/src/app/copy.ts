@@ -68,6 +68,12 @@ export const BAND = {
     sentence: 'USB ケーブルを挿し直してから、もう一度つないでください。',
     button: 'もう一度つなぐ',
   },
+  /** Part of the page (dagon-wasm) did not load; the button reloads the page. */
+  LOAD: {
+    chip: '× 読み込めない',
+    sentence: 'このページの一部を読み込めませんでした。ページを開き直してください。',
+    button: 'もう一度読み込む',
+  },
 } as const satisfies Record<string, BandCopy>;
 
 /** M01: browser without Web Serial. */

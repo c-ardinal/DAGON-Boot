@@ -21,6 +21,7 @@ dagon-proto = { path = "../../../crates/dagon-proto" }
 embassy-rp = { version = "0.10.0", default-features = false, features = ["rp2040"], optional = true }
 
 [dev-dependencies]
+dagon-sim = { path = "../../../crates/dagon-sim" }
 ed25519-compact = { version = "2.6", default-features = false }
 
 [target.'cfg(target_os = "none")'.dependencies]

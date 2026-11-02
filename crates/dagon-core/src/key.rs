@@ -1,7 +1,8 @@
 //! Build-time verifying key helpers for firmware.
 //!
-//! Boards embed the public key from the `DAGON_PUBKEY` environment variable
-//! (64 hex digits, as printed by `dagon key gen`) and fall back to
+//! Boards embed the public key named by the `DAGON_PUBKEY` environment
+//! variable (the public key file from `dagon key gen`; 64 hex digits) and
+//! may fall back to
 //! [`TEST_PUBKEY`]. Firmware built with the test key accepts any image signed
 //! with its published secret, so it must say so (HELLO, displays) via
 //! [`is_test_key`].

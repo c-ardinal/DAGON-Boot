@@ -1,9 +1,11 @@
 //! Hub boot core: dagon-core's kind S decision over the hub layout. A
 //! pending app slot is tried (signature + SHA-256, BOOT_ATTEMPT before the
 //! jump) until the attempts run out, then rolled back; otherwise the
-//! confirmed slot starts after a SHA-256 check. Every start arms the
-//! watchdog for 8 s; the app keeps feeding it. With nothing startable the
-//! backlight blinks (reinstall with BOOTSEL + UF2).
+//! confirmed slot starts after a SHA-256 check. dagon-core also requires
+//! each header's `load_addr` to be its slot body (the hub's `Flash` speaks
+//! XIP addresses). Every start arms the watchdog for 8 s; the app keeps
+//! feeding it. With nothing startable the watchdog stops and the backlight
+//! blinks (reinstall with BOOTSEL + UF2).
 #![no_std]
 #![no_main]
 
@@ -15,8 +17,7 @@ use embassy_rp::watchdog::Watchdog;
 use embassy_time::Duration;
 use panic_halt as _;
 use rp2040_common::arm::jump;
-use rp2040_common::image;
-use rp2040_common::layout::{APP_LOG_LAYOUT, APP_SLOT, APP_SLOTS, HUB_TAG, MAX_ATTEMPTS, WDT_MS};
+use rp2040_common::layout::{APP_LOG_LAYOUT, APP_SLOTS, HUB_TAG, MAX_ATTEMPTS, WDT_MS};
 use rp2040_common::rp::RpFlash;
 
 include!(concat!(env!("OUT_DIR"), "/pubkey.rs"));
@@ -41,16 +42,11 @@ fn main() -> ! {
         Ok(mut log) => boot::decide(&mut flash, &mut log, &APP_SLOTS, &CONFIG),
         Err(_) => Decision::NoImage,
     };
-    if let Decision::Boot { slot, entry, .. } = decision {
-        // An image linked for the other slot would crash; let the watchdog
-        // reset instead so a trial is counted and rolled back.
-        if image::linked_here(&mut flash, APP_SLOT[slot as usize]) {
-            wdt.feed(Duration::from_millis(WDT_MS as u64));
-            jump(entry);
-        }
-    } else {
-        wdt.stop();
+    if let Decision::Boot { entry, .. } = decision {
+        wdt.feed(Duration::from_millis(WDT_MS as u64));
+        jump(entry);
     }
+    wdt.stop();
     let mut led = Output::new(p.PIN_25, Level::High);
     loop {
         cortex_m::asm::delay(BLINK_CYCLES);

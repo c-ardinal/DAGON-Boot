@@ -304,8 +304,7 @@ impl SimNode {
             return Err(BusError::Nack);
         }
         if self.run == Run::Rom {
-            self.rom.read(buf, now_ms);
-            return Ok(());
+            return self.rom.read(buf, now_ms);
         }
         if buf.len() == STATE_LEN {
             let state = match &self.mailbox {

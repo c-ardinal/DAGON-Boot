@@ -1,7 +1,8 @@
 import { readFileSync } from 'node:fs';
 import { describe, expect, test } from 'vitest';
 import { CMD, FLAG_RESP, FrameDecoder, crc32, encodeFrame, parseFrame } from './frame.ts';
-import { decodeHelloReq, decodeHelloResp, encodeHelloReq, encodeHelloResp, versionRaw, versionText } from './hello.ts';
+import { decodeHelloResp, encodeHelloReq, versionText } from '../wasm/dagon.ts';
+import { encodeHelloResp, versionRaw } from './hello.ts';
 
 const golden = (name: string): Uint8Array =>
   new Uint8Array(readFileSync(new URL(`../../../crates/dagon-format/golden/${name}`, import.meta.url)));
@@ -15,7 +16,6 @@ describe('frame codec against the Rust golden frames', () => {
     const file = golden('frame_hello_req.bin');
     const built = encodeFrame({ flags: 0, seq: 1, cmd: CMD.HELLO, payload: encodeHelloReq({ protoVer: 1, maxPayload: 1088 }) });
     expect(built).toEqual(file);
-    expect(decodeHelloReq(parseFrame(file).payload)).toEqual({ protoVer: 1, maxPayload: 1088 });
   });
 
   test('HELLO response decodes and re-encodes identically', () => {

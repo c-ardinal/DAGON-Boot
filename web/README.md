@@ -5,8 +5,12 @@ Browser UI for DAGON Boot: Svelte 5 + Vite + TypeScript, built for Chrome / Edge
 
 ## Commands
 
+Needs the `wasm32-unknown-unknown` Rust target (listed in `rust-toolchain.toml`) and `wasm-pack`
+0.15.1 on `PATH`; `wasm-pack` fetches the matching `wasm-bindgen` and `wasm-opt` itself.
+
 ```sh
 npm install
+npm run wasm      # build crates/dagon-wasm into src/wasm/pkg (also run before dev, build and test)
 npm run dev       # http://127.0.0.1:5173
 npm run build     # svelte-check, then vite build into dist/ (target chrome89)
 npm run preview   # serves dist/ on http://127.0.0.1:4173
@@ -28,7 +32,9 @@ Query parameters for development:
 |---|---|
 | `src/serial/frame.ts` | DAGON link v1 frame codec and stream deframer (same bytes as `crates/dagon-proto`; tests compare against `crates/dagon-format/golden/frame_*.bin`). |
 | `src/serial/transport.ts` | `Transport` (open / close / write frame / read frame with timeout) and the Web Serial implementation. |
+| `src/serial/hello.ts` | HELLO payload types and the response encoder the mock uses. |
 | `src/serial/mock.ts` | Mock transport answering HELLO in the same frame format. |
+| `src/wasm/dagon.ts` | The only entry to `crates/dagon-wasm`: HELLO request / response, version text, board table, topology check and compile, release verification. `src/wasm/pkg/` is build output and not committed. |
 | `src/app/connect.ts` | Device chooser, error mapping, HELLO exchange. |
 | `src/app/copy.ts` | All screen and announcement text. |
 | `src/graph/` | Graph prototype: own SVG (layers, wire bundles, ties, ports) + HTML (nodes, chips), roving focus with arrow keys. |
@@ -48,6 +54,8 @@ policy allows it. Choosing and opening a real device needs a person in front of 
 ## npm dependencies
 
 All are development dependencies; nothing from npm except the Svelte runtime ships in the bundle.
+The page also fetches `dagon_wasm_bg.wasm` (about 360 KB, 140 KB gzip) in parallel with the first
+paint; connecting waits for it, and if it does not load the bottom band offers reloading the page.
 
 | Package | Version | Licence |
 |---|---|---|
@@ -68,8 +76,8 @@ Font Name, so subsetting and redistribution are allowed under the SIL Open Font 
 |---|---|---|---|---|---|
 | Doto | github.com/oliverlalan/Doto | OFL 1.1 (`OFL-Doto.txt`) | 700 | digits, `%`, `/`, space | 1.0 KB |
 | DotGothic16 | github.com/fontworks-fonts/DotGothic16 | OFL 1.1 (`OFL-DotGothic16.txt`) | 400 | digits, Latin letters, `.`, `/`, space | 3.3 KB |
-| Zen Kaku Gothic New | github.com/googlefonts/zen-kakugothic | OFL 1.1 (`OFL-ZenKakuGothicNew.txt`) | 400, 500, 700 | ASCII + every non-ASCII character in `src/` | 3 × 26 KB |
+| Zen Kaku Gothic New | github.com/googlefonts/zen-kakugothic | OFL 1.1 (`OFL-ZenKakuGothicNew.txt`) | 400, 500, 700 | ASCII + every non-ASCII character in `src/` | 3 × 28 KB |
 | JetBrains Mono | github.com/JetBrains/JetBrainsMono | OFL 1.1 (`OFL-JetBrainsMono.txt`) | 500 | ASCII, `·…→←` | 17.7 KB |
 
-Total 100 KB (budget 250 KB). Only Zen Kaku Gothic New 400 is preloaded; all faces use
+Total 106 KB (budget 250 KB). Only Zen Kaku Gothic New 400 is preloaded; all faces use
 `font-display: swap`.

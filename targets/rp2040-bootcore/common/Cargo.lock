@@ -225,6 +225,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "dagon-agent"
+version = "0.0.0"
+dependencies = [
+ "dagon-core",
+ "dagon-format",
+ "dagon-port",
+ "dagon-proto",
+]
+
+[[package]]
 name = "dagon-core"
 version = "0.0.0"
 dependencies = [
@@ -250,6 +260,16 @@ name = "dagon-proto"
 version = "0.0.0"
 dependencies = [
  "dagon-format",
+]
+
+[[package]]
+name = "dagon-sim"
+version = "0.0.0"
+dependencies = [
+ "dagon-agent",
+ "dagon-format",
+ "dagon-port",
+ "dagon-proto",
 ]
 
 [[package]]
@@ -982,6 +1002,7 @@ dependencies = [
  "dagon-format",
  "dagon-port",
  "dagon-proto",
+ "dagon-sim",
  "ed25519-compact",
  "embassy-rp",
 ]

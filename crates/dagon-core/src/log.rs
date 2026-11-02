@@ -235,8 +235,19 @@ impl Log {
         self.next = (after + RECORD_SIZE as u32 <= self.face_end()).then_some(after);
     }
 
-    /// Copies the folded state into the other face and makes it active.
+    /// Copies the folded state into the other face and makes it active. On
+    /// any error the log stays on the current face, so a retry never erases
+    /// the only valid face.
     fn compact<F: Flash>(&mut self, flash: &mut F) -> Result<(), LogError> {
+        let old = *self;
+        let result = self.copy_to_other_face(flash);
+        if result.is_err() {
+            *self = old;
+        }
+        result
+    }
+
+    fn copy_to_other_face<F: Flash>(&mut self, flash: &mut F) -> Result<(), LogError> {
         let s = self.state;
         let carry = [
             s.confirmed
@@ -245,38 +256,29 @@ impl Log {
             s.pending.map(|p| (kind::SLOT_PENDING, p, reason::NONE)),
             s.confirmed.map(|c| (kind::SNAPSHOT, c, s.attempts)),
         ];
-        let old = *self;
-        let face = self.layout.faces[self.face ^ 1];
-        // Flip only once the erase worked: a failed erase must leave this
-        // face active, or a retry would erase the only valid face.
-        flash.erase(face, self.layout.face_len)?;
+        let generation = self.generation.wrapping_add(1);
         self.face ^= 1;
+        let face = self.layout.faces[self.face];
+        flash.erase(face, self.layout.face_len)?;
         self.next = Some(face + FACE_HEADER_SIZE as u32);
         self.state = LogState::default();
         for (kind, at, why) in carry.into_iter().flatten() {
             let addr = self.next.ok_or(LogError::Full)?;
             let r = self.record(kind, at, why);
-            if let Err(e) = flash.write(addr, &r.to_bytes()) {
-                *self = old;
-                return Err(e.into());
-            }
+            flash.write(addr, &r.to_bytes())?;
             self.state = self.state.apply(&r);
             self.advance(addr);
         }
-        let header = FaceHeader {
-            generation: old.generation.wrapping_add(1),
-        };
-        if let Err(e) = flash.write(face, &header.to_bytes()) {
-            *self = old;
-            return Err(e.into());
-        }
-        self.generation = header.generation;
+        flash.write(face, &FaceHeader { generation }.to_bytes())?;
+        self.generation = generation;
         Ok(())
     }
 }
 
 #[cfg(test)]
 mod tests {
+    extern crate std;
+
     use super::*;
 
     fn rec(kind: u8, slot: u8) -> Record {
@@ -293,6 +295,66 @@ mod tests {
 
     fn fold(rs: &[Record]) -> LogState {
         rs.iter().fold(LogState::default(), |s, r| s.apply(r))
+    }
+
+    /// Two 96-byte faces at 0 and 96, erased.
+    struct Tiny(std::vec::Vec<u8>);
+
+    impl Flash for Tiny {
+        fn geometry(&self) -> &[dagon_port::FlashRegion] {
+            &[]
+        }
+        fn read(&mut self, addr: u32, buf: &mut [u8]) -> Result<(), FlashError> {
+            buf.copy_from_slice(&self.0[addr as usize..][..buf.len()]);
+            Ok(())
+        }
+        fn erase(&mut self, addr: u32, len: u32) -> Result<(), FlashError> {
+            self.0[addr as usize..][..len as usize].fill(0xFF);
+            Ok(())
+        }
+        fn write(&mut self, addr: u32, data: &[u8]) -> Result<(), FlashError> {
+            self.0[addr as usize..][..data.len()].copy_from_slice(data);
+            Ok(())
+        }
+    }
+
+    #[test]
+    fn compaction_that_does_not_fit_keeps_the_active_face() {
+        let layout = LogLayout {
+            faces: [0, 96],
+            face_len: 96,
+        };
+        let mut flash = Tiny(std::vec![0xFF; 192]);
+        flash
+            .write(0, &FaceHeader { generation: 1 }.to_bytes())
+            .unwrap();
+        let a = SlotRef::of(&rec(kind::CONFIRMED, 0));
+        let b = SlotRef::of(&rec(kind::SLOT_PENDING, 1));
+        // Three records to carry (ROLLBACK, SLOT_PENDING, SNAPSHOT), room
+        // for two: the copy runs out of space.
+        let mut log = Log {
+            state: LogState {
+                confirmed: Some(a),
+                pending: Some(b),
+                last_reason: reason::TRIAL_EXHAUSTED,
+                ..LogState::default()
+            },
+            generation: 1,
+            layout,
+            face: 0,
+            next: None,
+            next_seq: 5,
+        };
+        let before = log;
+        for _ in 0..2 {
+            assert_eq!(
+                log.append(&mut flash, kind::BOOT_ATTEMPT, b, reason::NONE),
+                Err(LogError::Full)
+            );
+            assert_eq!(log, before);
+            // Face 0 is never the one erased.
+            assert_eq!(&flash.0[..32], &FaceHeader { generation: 1 }.to_bytes()[..]);
+        }
     }
 
     #[test]

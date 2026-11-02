@@ -12,7 +12,9 @@ use embassy_time::{with_timeout, Duration, Timer};
 use heapless::Vec;
 
 use crate::lcd::Shade;
-use crate::relay::{I2cLink, PioStream, RpI2c, UartLink, I2C_FRAME, UART_FRAME};
+use rp2040_common::uart::{UartLink, UART_FRAME};
+
+use crate::relay::{I2cLink, PioStream, RpI2c, I2C_FRAME};
 use crate::state::{self, Seen};
 use crate::wdt::{self, Task};
 
@@ -154,7 +156,7 @@ pub async fn i2c_task(mut link: I2cLink<RpI2c<'static>>) -> ! {
 }
 
 #[embassy_executor::task]
-pub async fn uart_task(mut link: UartLink<PioStream<'static>>) -> ! {
+pub async fn uart_task(mut link: UartLink<PioStream<'static>, fn() -> u64>) -> ! {
     let mut seq = 0x80;
     loop {
         wdt::idle(Task::Uart);

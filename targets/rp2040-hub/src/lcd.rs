@@ -97,6 +97,8 @@ fn sub_at(count: usize) -> &'static [Point] {
 }
 
 const RING: u32 = 5;
+/// Height of the small state line under a node's version.
+const STATE_LINE: i32 = 10;
 const ARC: u32 = 9;
 /// Top text line; the round panel is narrower up there.
 const TOP_AT: Point = Point::new(120, 22);
@@ -256,7 +258,7 @@ fn draw<D: DrawTarget<Color = Rgb565>>(d: &mut D, home: &Home) -> Result<(), D::
     }
     if crate::TEST_KEY {
         // Built with the public test key: anyone can sign images for it.
-        let style = MonoTextStyle::new(&FONT_10X20, Rgb565::RED);
+        let style = MonoTextStyle::new(&FONT_10X20, RED);
         Text::with_alignment("TEST KEY", TEST_KEY_AT, style, Alignment::Center).draw(d)?;
     }
     Ok(())
@@ -277,11 +279,11 @@ fn label(ph: u8) -> &'static str {
 
 fn phase_colour(ph: u8) -> Rgb565 {
     match ph {
-        phase::CONFIRM => Rgb565::GREEN,
-        phase::REJECTED => Rgb565::RED,
-        phase::FAILED => Rgb565::YELLOW,
-        phase::ROM => Rgb565::CSS_PURPLE,
-        _ => Rgb565::BLUE,
+        phase::CONFIRM => GREEN,
+        phase::REJECTED => RED,
+        phase::FAILED => YELLOW,
+        phase::ROM => PURPLE,
+        _ => BLUE,
     }
 }
 
@@ -312,9 +314,11 @@ fn node<D: DrawTarget<Color = Rgb565>>(
     }
     let style = MonoTextStyle::new(font, Rgb565::WHITE);
     let line = font.character_size.height as i32;
+    // Name, version, then the state in words so colour is never the only
+    // cue.
     Text::with_alignment(
         n.node.name(),
-        at - Point::new(0, line / 2),
+        at - Point::new(0, line / 2 + STATE_LINE / 2),
         style,
         Alignment::Center,
     )
@@ -330,19 +334,79 @@ fn node<D: DrawTarget<Color = Rgb565>>(
     }
     Text::with_alignment(
         &v,
-        at + Point::new(0, line / 2 + 2),
+        at + Point::new(0, line / 2 + 2 - STATE_LINE / 2),
         style,
+        Alignment::Center,
+    )
+    .draw(d)?;
+    let mut word: String<8> = String::new();
+    let c = match shown {
+        Some(p) => {
+            match p.phase {
+                phase::TRANSFER => {
+                    let _ = write!(word, "{}%", p.percent);
+                }
+                _ => {
+                    let _ = word.push_str(short_label(p.phase));
+                }
+            }
+            phase_colour(p.phase)
+        }
+        None => {
+            let _ = word.push_str(state_word(n.shade));
+            colour(n.shade)
+        }
+    };
+    let small = MonoTextStyle::new(&FONT_6X10, c);
+    Text::with_alignment(
+        &word,
+        at + Point::new(0, line / 2 + 2 + STATE_LINE / 2 + 2),
+        small,
         Alignment::Center,
     )
     .draw(d)?;
     Ok(())
 }
 
+/// At most 6 characters: fits under the version in a small node ring.
+fn short_label(ph: u8) -> &'static str {
+    match ph {
+        phase::VERIFY => "verify",
+        phase::REBOOT => "reboot",
+        phase::CONFIRM => "ok",
+        phase::REJECTED => "reject",
+        phase::FAILED => "failed",
+        phase::ROM => "ROM",
+        _ => "",
+    }
+}
+
+/// At most 6 characters, as [`short_label`].
+fn state_word(s: Shade) -> &'static str {
+    match s {
+        Shade::Unknown => "...",
+        Shade::Confirmed => "ok",
+        Shade::Trial => "trial",
+        Shade::NoAnswer => "silent",
+    }
+}
+
+/// The five LCD state colours (green confirmed, blue transfer/trial,
+/// yellow rolled back, red rejected/no answer, purple ROM path), lightened
+/// where needed so each keeps at least 4.5:1 against the black background
+/// (pure blue and dark purple do not).
+const GREEN: Rgb565 = Rgb565::new(0, 56, 10); // about #00E052
+const BLUE: Rgb565 = Rgb565::new(8, 40, 31); // about #42A2FF
+const YELLOW: Rgb565 = Rgb565::new(31, 56, 0); // about #FFE000
+const RED: Rgb565 = Rgb565::new(31, 12, 8); // about #FF3142
+const PURPLE: Rgb565 = Rgb565::new(24, 28, 31); // about #C672FF
+const GREY: Rgb565 = Rgb565::new(18, 37, 18); // about #949594
+
 fn colour(s: Shade) -> Rgb565 {
     match s {
-        Shade::Unknown => Rgb565::CSS_GRAY,
-        Shade::Confirmed => Rgb565::GREEN,
-        Shade::Trial => Rgb565::BLUE,
-        Shade::NoAnswer => Rgb565::RED,
+        Shade::Unknown => GREY,
+        Shade::Confirmed => GREEN,
+        Shade::Trial => BLUE,
+        Shade::NoAnswer => RED,
     }
 }

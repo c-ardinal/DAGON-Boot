@@ -12,6 +12,7 @@ pub mod layout;
 pub mod liveness;
 pub mod mapped;
 pub mod status;
+pub mod uart;
 
 #[cfg(target_os = "none")]
 pub mod arm;

@@ -1,24 +1,24 @@
-//! One link per child bus, over the dagon-port hub traits: the I2C mailbox
-//! (write the request, poll the 3-byte state every 2 ms, read the response)
-//! and a byte stream (write, then cut the response out of it). Every bus
-//! access is bounded by the request's deadline.
+//! Hub bus drivers over the dagon-port traits (I2C0 master, PIO UART
+//! stream) and the I2C mailbox link: write the request, poll the 3-byte
+//! state every 2 ms, read the response, every access bounded by the
+//! request's deadline. The UART link is `rp2040_common::uart`.
 
 use dagon_port::{BusError, I2cBus, StreamPort};
 use dagon_proto::mailbox::{self, STATE_LEN};
-use dagon_proto::payload::{HelloReq, HelloResp};
-use dagon_proto::{flags, frame_len, max_payload, split_status, Cmd, Frame, Status, PROTO_VERSION};
+use dagon_proto::payload::HelloResp;
+use dagon_proto::{frame_len, max_payload, Frame, Status};
 use embassy_rp::i2c::{self, AbortReason, Async, I2c};
 use embassy_rp::peripherals::{I2C0, PIO0};
 use embassy_rp::pio_programs::uart::{PioUartRx, PioUartTx};
 use embassy_time::{with_deadline, with_timeout, Duration, Instant, Timer};
-use rp2040_common::frames::FrameReader;
+use rp2040_common::uart::{hello_answer, hello_request};
 
 const MAILBOX_POLL: Duration = Duration::from_millis(2);
 pub const I2C_FRAME: usize = frame_len(max_payload::I2C);
-pub const UART_FRAME: usize = frame_len(max_payload::UART);
-/// Timeouts for the hub's own display HELLO.
+/// Bound on one byte entering the PIO UART TX FIFO.
+const BYTE_WRITE_TIMEOUT: Duration = Duration::from_millis(5);
+/// Timeout of the hub's own display HELLO on I2C.
 const POLL_TIMEOUT_I2C_MS: u16 = 50;
-const POLL_TIMEOUT_UART_MS: u16 = 200;
 /// Bound on one I2C_RAW transaction (the PC's ROM frame deadline is 500 ms).
 const ROM_TIMEOUT: Duration = Duration::from_millis(500);
 
@@ -67,9 +67,14 @@ impl StreamPort for PioStream<'_> {
             .map_err(|_| BusError::Timeout)?;
         Ok(1)
     }
+    /// Each byte must enter the TX FIFO within [`BYTE_WRITE_TIMEOUT`] (one
+    /// byte takes about 87 us at 115200 bit/s), so a stuck state machine
+    /// cannot hold the link task.
     async fn write(&mut self, data: &[u8]) -> Result<(), BusError> {
         for &b in data {
-            self.tx.write_u8(b).await;
+            with_timeout(BYTE_WRITE_TIMEOUT, self.tx.write_u8(b))
+                .await
+                .map_err(|_| BusError::Timeout)?;
         }
         Ok(())
     }
@@ -77,25 +82,6 @@ impl StreamPort for PioStream<'_> {
 
 fn deadline(timeout_ms: u16) -> Instant {
     Instant::now() + Duration::from_millis(timeout_ms as u64)
-}
-
-/// The hub's own read-only HELLO request (seq from the 0x80..=0xFF space).
-fn hello_request(max: usize, seq: u8, out: &mut [u8; 32]) -> Option<usize> {
-    let body = HelloReq {
-        proto_ver: PROTO_VERSION as u32,
-        max_payload: max as u16,
-    }
-    .encode(&mut out[8..])
-    .ok()?;
-    dagon_proto::finish(out, 0, seq, Cmd::Hello as u8, body).ok()
-}
-
-fn hello_answer(resp: &[u8], max: usize) -> Option<HelloResp> {
-    let (f, _) = Frame::decode(resp, max).ok()?;
-    match split_status(f.payload)? {
-        (Status::Ok, b) => HelloResp::parse(b).ok(),
-        _ => None,
-    }
 }
 
 /// I2C0 master: mailbox exchanges and raw ROM transactions.
@@ -183,69 +169,5 @@ impl<I: I2cBus> I2cLink<I> {
             .await
             .ok()?;
         hello_answer(&resp[..len], max_payload::I2C)
-    }
-}
-
-/// PIO UART: frames cut out of the byte stream.
-pub struct UartLink<S> {
-    port: S,
-    reader: FrameReader<{ UART_FRAME * 2 }>,
-}
-
-impl<S: StreamPort> UartLink<S> {
-    pub fn new(port: S) -> Self {
-        UartLink {
-            port,
-            reader: FrameReader::new(max_payload::UART),
-        }
-    }
-
-    /// Writes the request frame `inner` and stores the response frame with
-    /// the same seq in `out`; returns its length.
-    pub async fn exchange(
-        &mut self,
-        inner: &[u8],
-        timeout_ms: u16,
-        out: &mut [u8],
-    ) -> Result<usize, Status> {
-        let deadline = deadline(timeout_ms);
-        self.reader.clear();
-        with_deadline(deadline, self.port.write(inner))
-            .await
-            .map_err(|_| Status::Timeout)?
-            .map_err(|_| Status::Timeout)?;
-        // A request too short to carry a seq gets no answer (times out).
-        let seq = inner.get(4).copied();
-        loop {
-            let left = deadline
-                .saturating_duration_since(Instant::now())
-                .as_millis() as u32;
-            let mut b = [0u8; 1];
-            if left == 0 || self.port.read(&mut b, left).await.is_err() {
-                return Err(Status::Timeout);
-            }
-            // A partial frame left by a 20 ms pause is dropped first.
-            self.reader.push_at(&b, Instant::now().as_millis());
-            while let Some(n) = self.reader.poll() {
-                let f = self.reader.frame(n);
-                if f[3] & flags::RESP != 0 && Some(f[4]) == seq && n <= out.len() {
-                    out[..n].copy_from_slice(f);
-                    self.reader.consume(n);
-                    return Ok(n);
-                }
-                self.reader.consume(n);
-            }
-        }
-    }
-
-    pub async fn hello(&mut self, seq: u8) -> Option<HelloResp> {
-        let mut req = [0u8; 32];
-        let n = hello_request(max_payload::UART, seq, &mut req)?;
-        let mut resp = [0u8; I2C_FRAME];
-        let len = self
-            .exchange(&req[..n], POLL_TIMEOUT_UART_MS, &mut resp)
-            .await
-            .ok()?;
-        hello_answer(&resp[..len], max_payload::UART)
     }
 }

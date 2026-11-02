@@ -7,6 +7,7 @@ mod conform;
 mod device;
 mod nodebuild;
 mod paths;
+mod scaffold;
 mod serial;
 mod serve;
 mod simrun;
@@ -58,16 +59,29 @@ Usage:
   dagon rollback --node <id> [--port <name>] [--topology <yaml>]
                                      back to the node's previously confirmed version
                                      (its other slot), then confirm it there
+  dagon new <dir> [--from <yaml>] [--keys <dir>]
+                                     a project folder: dagon.toml, topology.yaml (the desk
+                                     sample unless --from), and a signing key pair in
+                                     --keys (default ~/.dagon/keys/<name>) if none is there
+  dagon gen [<id>...] [--force-main]
+                                     one Rust crate per node in nodes/<id> on the board
+                                     support packages; rewrites only wiring.rs and the
+                                     package line, never app.rs (main.rs only with
+                                     --force-main)
   dagon build [<id>...]              cargo build each node in [build.<id>] of dagon.toml
                                      into out/build/<id>/app-a.elf (and app-b.elf)
-  dagon serve [--port <n>] [--web <dir>] [--no-open]
-                                     the browser page and its API on 127.0.0.1 only;
-                                     opens the page with a one-time passphrase
+  dagon serve [--port <n>] [--web <dir>] [--pubkey <file>] [--no-open]
+                                     DAGON Console, the browser tool (built into dagon,
+                                     or --web), and its API on 127.0.0.1 only; opens it
+                                     with a one-time passphrase. DAGON Console verifies
+                                     releases with the public key given here (--pubkey,
+                                     pubkey in dagon.toml, or the signing key's public half)
   dagon sim run                      the four simulator scenarios (no hardware)
   dagon ai topology [--in <text>] [--out <yaml>] [--model <id>]
                                      board description (file or stdin) to topology YAML
                                      via the Claude API, checked to 0 errors ($ANTHROPIC_API_KEY)
   dagon --help
+  dagon --version
 
 The hub is found by USB ID c0de:cafe or product \"DAGON hub\" unless --port
 is given. Defaults come from ./dagon.toml (or --config <file>). The secret key file is
@@ -86,6 +100,10 @@ fn main() -> ExitCode {
             println!("{USAGE}");
             ExitCode::SUCCESS
         }
+        ["--version" | "-V" | "version"] => {
+            println!("{}", version_text(banner()));
+            ExitCode::SUCCESS
+        }
         ["key", "gen", rest @ ..] => key_gen(rest),
         ["key", "pub", rest @ ..] => run(key_pub(rest)),
         ["topo", "check", rest @ ..] => topo_check(rest),
@@ -100,6 +118,8 @@ fn main() -> ExitCode {
         ["recover", rest @ ..] => run(device::recover(rest)),
         ["rollback", rest @ ..] => run(device::rollback(rest)),
         ["build", rest @ ..] => run(nodebuild::command(rest)),
+        ["new", rest @ ..] => run(scaffold::new_command(rest)),
+        ["gen", rest @ ..] => run(scaffold::gen_command(rest)),
         ["serve", rest @ ..] => run(serve::command(rest)),
         ["conform", rest @ ..] => run(conform::command(rest)),
         ["sim", "run", rest @ ..] => run(simrun::run(rest)),
@@ -192,5 +212,47 @@ fn topo_check(args: &[&str]) -> ExitCode {
         ExitCode::SUCCESS
     } else {
         ExitCode::FAILURE
+    }
+}
+
+const BANNER: &str = include_str!("../../../assets/ascii-art/banner.txt");
+
+/// The ASCII banner, only for a person at a terminal: piped and
+/// machine-readable output never carries it.
+fn banner() -> Option<String> {
+    use std::io::IsTerminal;
+    std::io::stdout().is_terminal().then(banner_text)
+}
+
+fn banner_text() -> String {
+    let lines: Vec<&str> = BANNER.lines().map(str::trim_end).collect();
+    lines.join("\n").trim_matches('\n').to_owned()
+}
+
+fn version_text(banner: Option<String>) -> String {
+    let line = format!("dagon {}", env!("CARGO_PKG_VERSION"));
+    match banner {
+        Some(b) => format!("{b}\n\n{line}"),
+        None => line,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn version_without_terminal_is_one_clean_line() {
+        let v = version_text(None);
+        assert_eq!(v, format!("dagon {}", env!("CARGO_PKG_VERSION")));
+        assert!(!v.contains('\n'));
+    }
+
+    #[test]
+    fn version_at_terminal_starts_with_the_banner() {
+        let v = version_text(Some(banner_text()));
+        assert!(v.starts_with(banner_text().as_str()));
+        assert!(v.ends_with(&format!("\n\ndagon {}", env!("CARGO_PKG_VERSION"))));
+        assert!(!banner_text().contains('\r'));
     }
 }

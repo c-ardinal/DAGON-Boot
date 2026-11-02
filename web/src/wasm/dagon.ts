@@ -7,6 +7,7 @@ import init, {
   frame_encode,
   hello_decode,
   hello_request,
+  release_versions,
   supported_boards as boards,
   version_older,
   version_text,
@@ -14,7 +15,7 @@ import init, {
 import type { HostLink } from './pkg/dagon_wasm.js';
 import type { HelloReq, HelloResp } from '../serial/hello.ts';
 
-export { check_release_for, initSync, topo_check, topo_compile, verify_release, watch_interval_ms } from './pkg/dagon_wasm.js';
+export { check_release_for, initSync, release_topology, require_release_key, set_release_key, topo_check, topo_compile, verify_release, watch_interval_ms } from './pkg/dagon_wasm.js';
 
 export type TargetKind = 'hub' | 'i2c' | 'uart';
 
@@ -227,6 +228,14 @@ export function decodeHelloResp(body: Uint8Array): HelloResp {
 /** Raw version `a` is older than `b`, by dagon-format's ordering. */
 export function versionOlder(a: number, b: number): boolean {
   return version_older(a, b);
+}
+
+/** The version a release gives each topology node (by node index); empty when it cannot be read. */
+export function releaseVersions(bundle: Uint8Array): Map<number, number> {
+  const flat = release_versions(bundle);
+  const out = new Map<number, number>();
+  for (let i = 0; i + 1 < flat.length; i += 2) if (!out.has(flat[i])) out.set(flat[i], flat[i + 1]);
+  return out;
 }
 
 /** `major.minor.patch` of a raw version u32. */

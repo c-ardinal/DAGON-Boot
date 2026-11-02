@@ -41,10 +41,70 @@ fn stop_if(cancel: &AtomicBool) -> Result<(), String> {
     }
 }
 
+/// A key file named in dagon.toml (or DAGON_SIGNING_KEY), resolved; it
+/// must lie in the work area or a key folder. Messages carry no paths.
+fn key_file(cfg: &Config, p: &Path, what: &str) -> Result<PathBuf, String> {
+    let p = std::fs::canonicalize(p).map_err(|_| format!("the {what} file is not there"))?;
+    let base = std::fs::canonicalize(&cfg.base).unwrap_or_else(|_| cfg.base.clone());
+    if super::project::in_dir(&p, &base)
+        || cfg.key_roots.iter().any(|r| super::project::in_dir(&p, r))
+    {
+        Ok(p)
+    } else {
+        Err(format!(
+            "the {what} file is outside the project and the key folders"
+        ))
+    }
+}
+
+/// The project's public key from its pubkey file: only a `.pub` file that
+/// is not a copy of the secret key beside it, holding a valid key.
+fn public_key(cfg: &Config, p: &Path) -> Result<[u8; 32], String> {
+    let p = key_file(cfg, p, "pubkey")?;
+    let is_pub = p.extension().is_some_and(|e| e.eq_ignore_ascii_case("pub"));
+    if !is_pub {
+        return Err("pubkey must name a .pub file (from dagon key gen)".into());
+    }
+    crate::config::checked_pubkey(cfg, &p)
+}
+
+/// The project's signing key; refused when it does not match its pubkey.
+fn project_key(cfg: &Config) -> Result<ed25519_compact::KeyPair, String> {
+    let path = crate::config::signing_key_path(cfg).ok_or_else(|| {
+        format!(
+            "no signing key: set signing_key in dagon.toml or {}",
+            crate::config::KEY_ENV
+        )
+    })?;
+    let path = key_file(cfg, &path, "signing key")?;
+    let key = load_key(Some(&path.to_string_lossy())).map_err(|_| {
+        "the signing key file cannot be used (malformed, inside a git work tree, or the test key)"
+            .to_string()
+    })?;
+    if let Some(p) = &cfg.pubkey {
+        if public_key(cfg, p)? != *key.pk {
+            return Err(format!(
+                "the signing key (key id {}) does not match the project's pubkey",
+                to_hex(&dagon_format::key_id(&key.pk))
+            ));
+        }
+    }
+    Ok(key)
+}
+
+/// The key the page verifies the project's releases with: its pubkey file,
+/// else the public half of its signing key.
+pub(super) fn release_key_of(cfg: &Config) -> Result<[u8; 32], String> {
+    match &cfg.pubkey {
+        Some(p) => public_key(cfg, p),
+        None => Ok(*project_key(cfg)?.pk),
+    }
+}
+
 /// The signing key for a job. Its file path never goes to the page: the
 /// reason is printed in the serve terminal only.
-fn serve_key() -> Result<ed25519_compact::KeyPair, String> {
-    page_safe(load_key(None))
+fn serve_key(cfg: &Config) -> Result<ed25519_compact::KeyPair, String> {
+    page_safe(project_key(cfg))
 }
 
 fn page_safe<T>(r: Result<T, String>) -> Result<T, String> {
@@ -55,11 +115,18 @@ fn page_safe<T>(r: Result<T, String>) -> Result<T, String> {
 }
 
 fn config(server: &Server) -> Result<Config, String> {
-    let p = server
-        .config
-        .as_ref()
-        .map(|p| p.to_string_lossy().into_owned());
-    Config::load(p.as_deref())
+    config_at(server, server.config_path().as_deref())
+}
+
+/// The project of dagon.toml `path`, with the key folders it may take key
+/// files from.
+pub(super) fn config_at(server: &Server, path: Option<&Path>) -> Result<Config, String> {
+    let p = path.map(|p| p.to_string_lossy().into_owned());
+    let mut c = Config::load(p.as_deref())?;
+    c.key_roots = super::project::home(server)
+        .map(|h| super::project::key_dirs(&h))
+        .unwrap_or_default();
+    Ok(c)
 }
 
 fn body_json(req: &Request) -> Result<Value, Response> {
@@ -103,18 +170,75 @@ pub fn handle(server: &Arc<Server>, req: &Request) -> Response {
         ("POST", ["jobs", id, "answer"]) => answer(server, id, req),
         ("POST", ["jobs", id, "cancel"]) => cancel(server, id),
         ("POST", ["device"]) => device(server, req),
+        ("GET", ["project"]) => Ok(super::project::get(server)),
+        ("POST", ["project", "open"]) => Ok(super::project::open(server, req)),
+        ("POST", ["project", "new"]) => Ok(super::project::new(server, req)),
+        ("GET", ["fs"]) => Ok(super::project::list(server, req)),
+        ("POST", ["gen"]) => gen_start(server, req),
+        ("POST", ["flash"] | ["doctor"]) => Ok(Response::error(
+            501,
+            "this dagon has no flash or doctor yet",
+        )),
         _ => Ok(Response::error(404, "no such endpoint")),
     };
     r.unwrap_or_else(|e| e)
 }
 
+/// What this serve offers the page. `flash` and `doctor` join when this
+/// dagon has those commands.
+const FEATURES: [&str; 8] = [
+    "topology_save",
+    "ai_topology",
+    "build",
+    "sign",
+    "release",
+    "conform",
+    "gen",
+    "project",
+];
+
 type Res = Result<Response, Response>;
+
+/// POST /v1/gen {nodes?, force_main?}: `dagon gen` for the open project;
+/// dagon.toml is edited under the files lock.
+fn gen_start(server: &Arc<Server>, req: &Request) -> Res {
+    let v = body_json(req)?;
+    let only = match v.get("nodes") {
+        None | Some(Value::Null) => Vec::new(),
+        Some(_) => nodes_of(&v)?,
+    };
+    let force = v["force_main"].as_bool().unwrap_or(false);
+    if server.config_path().is_none() {
+        return Err(Response::error(409, "no project is open"));
+    }
+    let s = Arc::clone(server);
+    match server.spawn("gen", move |job| {
+        let config = job.config.clone().ok_or("no project is open")?;
+        let lines = {
+            let _lock = s.files.lock().map_err(|_| "lock".to_string())?;
+            crate::scaffold::gen_project(&config, &only, force)?
+        };
+        for l in &lines {
+            job.log(l);
+        }
+        let skipped: Vec<&String> = lines.iter().filter(|l| l.starts_with("skipped")).collect();
+        Ok(json!({ "lines": lines.len(), "skipped": skipped }))
+    }) {
+        Some(id) => Ok(accepted(id)),
+        None => Err(Response::error(429, "too many jobs running")),
+    }
+}
 type Work = fn(&mut Job, Config, Value) -> Result<Value, String>;
 
 fn start(server: &Arc<Server>, req: &Request, kind: &str, work: Work) -> Res {
     let v = body_json(req)?;
-    let cfg = config(server).map_err(|e| Response::error(500, &e))?;
-    match server.spawn(kind, move |job| work(job, cfg, v)) {
+    let s = Arc::clone(server);
+    // The project is the one registered with the job (under the jobs lock),
+    // so a project switch never lands between the two.
+    match server.spawn(kind, move |job| {
+        let cfg = config_at(&s, job.config.as_deref())?;
+        work(job, cfg, v)
+    }) {
         Some(id) => Ok(accepted(id)),
         None => Err(Response::error(429, "too many jobs running")),
     }
@@ -127,16 +251,18 @@ fn hello(server: &Server) -> Response {
         .as_ref()
         .and_then(|c| std::fs::canonicalize(&c.base).ok())
         .and_then(|p| p.file_name().map(|n| n.to_string_lossy().into_owned()));
-    let key = load_key(None)
-        .ok()
+    let key = cfg
+        .as_ref()
+        .and_then(|c| project_key(c).ok())
         .map(|k| to_hex(&dagon_format::key_id(&k.pk)));
     json_ok(json!({
         "cli": env!("CARGO_PKG_VERSION"),
         "workspace": workspace,
-        "features": ["topology_save", "ai_topology", "build", "sign", "release", "conform"],
+        "features": FEATURES,
         "api_key": crate::ai::api_key_present(),
         "key": key.is_some(),
         "key_id": key,
+        "release_key": server.release_key().map(|k| to_hex(&k)),
     }))
 }
 
@@ -147,7 +273,7 @@ fn json_ok(v: Value) -> Response {
 /// Firmware packages with their features, and the board table. Packages are
 /// directories with a Cargo.toml: `targets/<pkg>`, one level deeper for the
 /// support packages (`targets/mcu/<mcu>`, `targets/boards/<board>`), and the
-/// sample apps under `samples/<pkg>`.
+/// sample apps under `samples/<pkg>`; in a generated project, `nodes/<id>`.
 fn targets(server: &Server) -> Res {
     let cfg = config(server).map_err(|e| Response::error(500, &e))?;
     let mut out = Vec::new();
@@ -209,6 +335,13 @@ fn package_dirs(base: &std::path::Path) -> Vec<String> {
             );
         }
     }
+    // A generated project's node crates.
+    out.extend(
+        children(&base.join("nodes"))
+            .into_iter()
+            .filter(|c| c.join("Cargo.toml").is_file())
+            .map(|c| rel(&c)),
+    );
     out.extend(
         children(&base.join("samples"))
             .into_iter()
@@ -240,7 +373,9 @@ fn topology_put(server: &Server, req: &Request) -> Res {
         std::str::from_utf8(&req.body).map_err(|_| Response::error(400, "YAML must be UTF-8"))?;
     let report = dagon_topology::check_str(yaml);
     let report_json: Value = serde_json::from_str(&report.to_json()).unwrap_or(Value::Null);
-    if !report.is_pushable() {
+    // A 構成 whose only errors are V-23 (a shape updating does not cover
+    // yet) is saved; compile, send, release and apply still refuse it.
+    if report.errors().any(|i| i.rule != "V-23") {
         return Err(Response::json(422, &json!({ "report": report_json })));
     }
     let _lock = server
@@ -248,7 +383,9 @@ fn topology_put(server: &Server, req: &Request) -> Res {
         .lock()
         .map_err(|_| Response::error(500, "lock"))?;
     crate::paths::write_atomic(&p, yaml.as_bytes()).map_err(|e| Response::error(500, &e))?;
-    Ok(json_ok(json!({ "report": report_json })))
+    Ok(json_ok(
+        json!({ "report": report_json, "updatable": report.is_pushable() }),
+    ))
 }
 
 fn build_get(server: &Server, id: &str) -> Res {
@@ -269,8 +406,7 @@ fn build_put(server: &Server, id: &str, req: &Request) -> Res {
         .map_err(|e| Response::error(400, &format!("bad build settings: {e}")))?;
     b.validate().map_err(|e| Response::error(400, &e))?;
     let path = server
-        .config
-        .clone()
+        .config_path()
         .ok_or_else(|| Response::error(409, "no dagon.toml in the work area"))?;
     // Read, edit and replace under one lock so concurrent PUTs all land.
     let _lock = server
@@ -299,6 +435,9 @@ fn build_put(server: &Server, id: &str, req: &Request) -> Res {
 
 fn job_build(job: &mut Job, cfg: Config, v: Value) -> Result<Value, String> {
     let nodes = nodes_of(&v).map_err(|_| "nodes must be node ids".to_string())?;
+    if let Some(p) = &cfg.pubkey {
+        page_safe(public_key(&cfg, p))?;
+    }
     let cancel = job.cancel_flag();
     let built = nodebuild::build_nodes(&cfg, &nodes, &mut |l| job.log(l), &cancel)?;
     let list: Vec<Value> = built
@@ -339,7 +478,7 @@ fn sha_hex(b: &[u8]) -> String {
 fn job_sign(job: &mut Job, cfg: Config, v: Value) -> Result<Value, String> {
     let nodes = nodes_of(&v).map_err(|_| "nodes must be node ids".to_string())?;
     let t = read_topology(&inside(&cfg, &cfg.topology_path(None)?)?)?;
-    let key = serve_key()?;
+    let key = serve_key(&cfg)?;
     let cancel = job.cancel_flag();
     sign_nodes(&cfg, &t, &nodes, &key, &mut |l| job.log(l), &cancel)
 }
@@ -422,7 +561,7 @@ fn job_release(job: &mut Job, cfg: Config, v: Value) -> Result<Value, String> {
     let name = name.ok_or("name must be up to 16 plain characters")?;
     let want = version(v["version"].as_str().ok_or("version is required")?)?;
     let t = read_topology(&inside(&cfg, &cfg.topology_path(None)?)?)?;
-    let key = serve_key()?;
+    let key = serve_key(&cfg)?;
     let cancel = job.cancel_flag();
     release_from(&cfg, &t, want, name, &key, &mut |l| job.log(l), &cancel)
 }
@@ -515,7 +654,7 @@ fn job_conform(job: &mut Job, cfg: Config, v: Value) -> Result<Value, String> {
     let t = read_topology(&inside(&cfg, &cfg.topology_path(None)?)?)?;
     let to = crate::conform::node_target(&t, node)?;
     let dir = inside(&cfg, &cfg.base.join(CONFORM_DIR).join(node))?;
-    let key = serve_key()?;
+    let key = serve_key(&cfg)?;
     job.progress("waiting for the hub", None);
     let report = job.with_device(|job| {
         job.progress("running", None);
@@ -597,6 +736,64 @@ fn device(server: &Server, req: &Request) -> Res {
     Ok(json_ok(json!({ "state": "released" })))
 }
 
+mod page {
+    include!(concat!(env!("OUT_DIR"), "/web_assets.rs"));
+}
+
+/// Whether a page is built into this executable.
+pub fn page_embedded() -> bool {
+    page::ASSETS.iter().any(|(p, _)| *p == "index.html")
+}
+
+/// A file of the page: from the executable when `server.web` is empty,
+/// otherwise from that folder. HTML gets the release key as
+/// `<meta name="dagon-release-key">`; without a key no HTML is served.
+pub fn page_file(server: &Server, path: &str) -> Option<(Vec<u8>, &'static str)> {
+    let (bytes, ct) = if server.web.as_os_str().is_empty() {
+        embedded_file(path)?
+    } else {
+        static_file(&server.web, path)?
+    };
+    if !ct.starts_with("text/html") {
+        return Some((bytes, ct));
+    }
+    let key = server.release_key()?;
+    Some((inject_key(&bytes, &key)?, ct))
+}
+
+fn inject_key(html: &[u8], key: &[u8; 32]) -> Option<Vec<u8>> {
+    let text = std::str::from_utf8(html).ok()?;
+    let meta = format!(
+        "<meta name=\"dagon-release-key\" content=\"{}\">",
+        to_hex(key)
+    );
+    let at = text.find("<head>").map(|i| i + "<head>".len()).unwrap_or(0);
+    Some(format!("{}{meta}{}", &text[..at], &text[at..]).into_bytes())
+}
+
+fn embedded_file(path: &str) -> Option<(Vec<u8>, &'static str)> {
+    let rel = path.split(['?', '#']).next()?.trim_start_matches('/');
+    let rel = if rel.is_empty() { "index.html" } else { rel };
+    let (_, bytes) = page::ASSETS.iter().find(|(p, _)| *p == rel)?;
+    Some((bytes.to_vec(), content_type(rel)))
+}
+
+fn content_type(rel: &str) -> &'static str {
+    match rel.rsplit('.').next().unwrap_or("") {
+        "html" => "text/html; charset=utf-8",
+        "js" => "text/javascript",
+        "css" => "text/css",
+        "wasm" => "application/wasm",
+        "woff2" => "font/woff2",
+        "svg" => "image/svg+xml",
+        "json" => "application/json",
+        "png" => "image/png",
+        "yaml" => "application/yaml",
+        "txt" => "text/plain; charset=utf-8",
+        _ => "application/octet-stream",
+    }
+}
+
 /// Static file under `web` for `path` (the built page), or None.
 pub fn static_file(web: &Path, path: &str) -> Option<(Vec<u8>, &'static str)> {
     let rel = path.split(['?', '#']).next()?.trim_start_matches('/');
@@ -619,21 +816,7 @@ pub fn static_file(web: &Path, path: &str) -> Option<(Vec<u8>, &'static str)> {
         return None;
     }
     let bytes = std::fs::read(file).ok()?;
-    let ext = rel.rsplit('.').next().unwrap_or("");
-    let ct = match ext {
-        "html" => "text/html; charset=utf-8",
-        "js" => "text/javascript",
-        "css" => "text/css",
-        "wasm" => "application/wasm",
-        "woff2" => "font/woff2",
-        "svg" => "image/svg+xml",
-        "json" => "application/json",
-        "png" => "image/png",
-        "yaml" => "application/yaml",
-        "txt" => "text/plain; charset=utf-8",
-        _ => "application/octet-stream",
-    };
-    Some((bytes, ct))
+    Some((bytes, content_type(rel)))
 }
 
 #[cfg(test)]

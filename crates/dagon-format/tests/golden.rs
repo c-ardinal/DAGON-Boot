@@ -88,9 +88,107 @@ fn image(slot: u8) -> Vec<u8> {
     [&h.to_bytes()[..], &body].concat()
 }
 
-/// Opaque bytes standing in for a topology canonical binary.
+/// Canonical binary of the desk demo: hub (RP2040) with seg (F401 on I2C0
+/// GPIO16/17, address 0x42, NRST GPIO18, BOOT0 GPIO28) and watch (ESP32-S3
+/// on PIO UART GPIO26/27 at 115200).
 fn topology() -> Vec<u8> {
-    (0..96u8).map(|i| i ^ 0x5A).collect()
+    use dagon_format::topology::{self as tp, *};
+    let node = |index, role, mcu, port, attempts, listen, tiers, rank, tag| TopoNode {
+        index,
+        role,
+        mcu_id: mcu,
+        port_kind: port,
+        max_attempts: attempts,
+        listen_window_ms: listen,
+        map_id: map_id::DEFAULT,
+        recovery_tiers: tiers,
+        order_rank: rank,
+        target_tag: target_tag(tag),
+    };
+    let nodes = [
+        node(
+            0,
+            tp::role::COORDINATOR,
+            mcu_id::RP2040,
+            port_kind::SELF_BOOT,
+            3,
+            0,
+            [tier::LOCAL, tier::NONE, tier::NONE],
+            2,
+            "hub-rp2040-lcd",
+        ),
+        node(
+            1,
+            tp::role::NODE,
+            mcu_id::STM32F401XE,
+            port_kind::SELF_BOOT,
+            3,
+            50,
+            [tier::LOCAL, tier::REDISTRIBUTE, tier::ROM_FORCED],
+            0,
+            "seg-f401-7seg",
+        ),
+        node(
+            2,
+            tp::role::NODE,
+            mcu_id::ESP32S3,
+            port_kind::VENDOR_STAGE2,
+            1,
+            0,
+            [tier::LOCAL, tier::REDISTRIBUTE, tier::ROM_COOP],
+            1,
+            "watch-s3",
+        ),
+    ];
+    let links = [
+        TopoLink {
+            from: 0,
+            to: 1,
+            iface: iface::I2C_BUS,
+            control: control::FULL,
+            tx_pin: 16,
+            rx_pin: 17,
+            nrst_pin: 18,
+            boot_pin: 28,
+            baud: 400_000,
+            rom_entry: rom_entry::STM32_I2C_ROM,
+            i2c_addr: 0x42,
+            bus_id: 0,
+        },
+        TopoLink {
+            from: 0,
+            to: 2,
+            iface: iface::PIO_UART,
+            control: control::COOPERATIVE,
+            tx_pin: 26,
+            rx_pin: 27,
+            nrst_pin: tp::NONE,
+            boot_pin: tp::NONE,
+            baud: 115_200,
+            rom_entry: rom_entry::FORCE_DOWNLOAD_BOOT,
+            i2c_addr: tp::NONE,
+            bus_id: tp::NONE,
+        },
+    ];
+    let mut out = vec![0u8; tp::MAX_SIZE];
+    let n = tp::encode(&nodes, &links, &[], &mut out).unwrap();
+    out.truncate(n);
+    out
+}
+
+/// Asserts the planned field offsets directly, independent of the encoder.
+fn expect_at(file: &[u8], table: &[(usize, &[u8])]) {
+    for (off, bytes) in table {
+        assert_eq!(
+            &file[*off..off + bytes.len()],
+            *bytes,
+            "bytes at {off:#05x}"
+        );
+    }
+}
+
+fn le32(v: u32) -> [u8; 4] {
+    v.to_le_bytes()
 }
 
 fn manifest_bytes(images: &[Vec<u8>]) -> Vec<u8> {
@@ -178,6 +276,31 @@ fn image_header_vector() {
         "version u32 LE at 0x018"
     );
     assert_eq!(h.payload_sha256, sha256(&file[HEADER_SIZE..]));
+    let kid = key_id(&TEST_PUBKEY);
+    let sha = sha256(&file[HEADER_SIZE..]);
+    expect_at(
+        &file,
+        &[
+            (0x000, b"DGIM"),
+            (0x004, &[1, 0]),                   // hdr_version
+            (0x006, &[0x00, 0x02]),             // hdr_size 512
+            (0x008, &[0x01, 0x01]),             // image_kind APP, port_kind SELF_BOOT
+            (0x00A, &[0x02, 0x00]),             // mcu_id STM32F401xE
+            (0x00C, &[0x00, 0x00, 0x00, 0x00]), // slot A, inline, reserved
+            (0x010, &le32(0x0802_0200)),        // load_addr
+            (0x014, &le32(1024)),               // payload_size
+            (0x018, &[0x00, 0x00, 0x01, 0x01]), // version 1.1.0
+            (0x01C, &le32(8)),                  // build_flags TEST_KEY
+            (0x020, &le32(1)),                  // release_seq
+            (0x024, &[0x00, 0x00, 0x00, 0x01]), // min_bootcore_version 1.0.0
+            (0x028, &sha),
+            (0x048, &kid),
+            (0x050, b"seg-f401-7seg\0\0\0"),
+            (0x060, &le32(1)), // proto_version
+            (0x064, &le32(1)), // capabilities CONFIRM_BY_HUB
+            (0x068, &[0; 0x1C0 - 0x068]),
+        ],
+    );
 
     for bit_at in [0x018, 0x050, 0x1C0] {
         let mut bad = raw;
@@ -204,6 +327,29 @@ fn manifest_vector() {
     assert_eq!(m.bytes().len(), manifest::total_size(2, 0));
     let e = m.entry(1);
     assert_eq!(e.slot_binding, 1);
+    let hdr_a = header_digest(&image(0)[..HEADER_SIZE].try_into().unwrap());
+    expect_at(
+        &file,
+        &[
+            (0x00, b"DGMF"),
+            (0x04, &[1, 0]),      // mf_version
+            (0x06, &[2, 0]),      // entry_count, constraint_count
+            (0x08, &le32(1)),     // release_seq
+            (0x0C, &le32(0x110)), // total_size 0x50 + 2*64 + 64
+            (0x10, &sha256(&topology())),
+            (0x30, b"release-1.1\0\0\0\0\0"),
+            (0x40, &key_id(&TEST_PUBKEY)),
+            (0x48, &[0; 8]),
+            // entry 0: node 1, APP, slot A, REQUIRED, 1.1.0, 1024 B, proto 1
+            (0x50, &[1, 1, 0, 1, 0x00, 0x00, 0x01, 0x01]),
+            (0x58, &le32(1024)),
+            (0x5C, &le32(1)),
+            (0x60, &hdr_a),
+            (0x80, &[0; 16]),      // order_rank 0, reserved
+            (0x90, &[1, 1, 1, 1]), // entry 1 slot B
+            (0xC0, &[1]),          // entry 1 order_rank
+        ],
+    );
     let mut out = vec![0u8; file.len()];
     manifest::encode(&m.fields(), &[m.entry(0), e], &[], &mut out).unwrap();
     assert_eq!(
@@ -230,7 +376,28 @@ fn release_bundle_vector() {
     let it = b.item(t);
     assert_eq!((it.dest, it.entry_index), (dest::TOPOLOGY, NO_ENTRY));
     assert_eq!(it.length as usize, topology().len());
-    assert_eq!(b.item_bytes(t), &golden("topology.bin", &topology())[..]);
+    assert_eq!(b.item_bytes(t), &topology()[..]);
+    let topo_len = topology().len() as u32;
+    expect_at(
+        &file,
+        &[
+            (0x00, b"DGBN"),
+            (0x04, &[1, 0, 3, 0]), // bn_version, item_count, reserved
+            (0x08, &le32(0x40)),   // manifest_off = 16 + 3*16
+            (0x0C, &le32(0x110)),  // manifest_len
+            // items: entry_index, dest, reserved u16, offset, length, crc32
+            (0x10, &[0, 2, 0, 0]),
+            (0x14, &le32(0x150)),
+            (0x18, &le32(0x600)),
+            (0x1C, &le32(crc32(&image(0)))),
+            (0x20, &[1, 2, 0, 0]),
+            (0x24, &le32(0x750)),
+            (0x30, &[0xFF, 3, 0, 0]), // topology: NO_ENTRY, dest 3
+            (0x34, &le32(0xD50)),
+            (0x38, &le32(topo_len)),
+            (0x3C, &le32(crc32(&topology()))),
+        ],
+    );
 
     // Tampered body: CRC caught first; with the CRC patched, the SHA-256 chain.
     let body_at = b.item(0).offset as usize + HEADER_SIZE;
@@ -294,6 +461,25 @@ fn state_log_vector() {
     let file = golden("statelog_face.bin", &state_log());
     let fh = FaceHeader::parse(&file[..32].try_into().unwrap()).unwrap();
     assert_eq!(fh.generation, 1);
+    let d16 = &header_digest(&image(0)[..HEADER_SIZE].try_into().unwrap())[..16];
+    expect_at(
+        &file,
+        &[
+            (0x00, b"DGSL"),
+            (0x04, &[1, 0, 32, 0]), // format_version, record_size
+            (0x08, &le32(1)),       // generation
+            (0x0C, &[0xFF; 16]),    // reserved stays erased
+            (0x1C, &le32(crc32(&file[..0x1C]))),
+            // record 0: PROVISION, APP, slot A, no reason, seq 1, 1.1.0
+            (0x20, &[0x08, 0, 0, 0]),
+            (0x24, &le32(1)),
+            (0x28, &[0x00, 0x00, 0x01, 0x01]),
+            (0x2C, d16),
+            (0x3C, &le32(crc32(&file[0x20..0x3C]))),
+            (0xA0, &[0x04, 0, 0, 0x03]), // record 4: ROLLBACK to A, TRIAL_EXHAUSTED
+            (0xC0, &[0xFF; 32]),         // end of log
+        ],
+    );
     let recs: Vec<&[u8; 32]> = file[32..]
         .chunks(32)
         .map(|c| c.try_into().unwrap())
@@ -312,4 +498,76 @@ fn state_log_vector() {
     let mut torn = *recs[3];
     torn[8] ^= 1;
     assert_eq!(Record::parse(&torn), Err(FormatError::BadCrc));
+}
+
+#[test]
+fn topology_desk_demo_vector() {
+    use dagon_format::topology::{self as tp, TopologyView};
+    let file = golden("topology_desk_demo.bin", &topology());
+    let t = TopologyView::parse(&file).unwrap();
+    assert_eq!(
+        (t.node_count(), t.link_count(), t.constraint_count()),
+        (3, 2, 0)
+    );
+    assert_eq!(t.link(0).i2c_addr, 0x42);
+    assert_eq!(t.node(2).target_tag, target_tag("watch-s3"));
+    expect_at(
+        &file,
+        &[
+            (0x00, b"DGTP"),
+            (0x04, &[1, 0, 3, 2]), // tp_version, node_count, link_count
+            (0x08, &le32(0xA0)),   // body_size = whole binary
+            (0x0C, &[0; 20]),      // unused key_id, constraint_count 0, reserved
+            // nodes: index, role, mcu_id, port_kind, max_attempts,
+            // listen_window_ms, map_id, recovery_tiers[3], order_rank, reserved[3], tag
+            (
+                0x20,
+                &[0, 0, 0x01, 0x00, 1, 3, 0, 0, 0, 1, 0, 0, 2, 0, 0, 0],
+            ),
+            (0x30, b"hub-rp2040-lcd\0\0"),
+            (
+                0x40,
+                &[1, 1, 0x02, 0x00, 1, 3, 50, 0, 0, 1, 2, 3, 0, 0, 0, 0],
+            ),
+            (0x50, b"seg-f401-7seg\0\0\0"),
+            (
+                0x60,
+                &[2, 1, 0x03, 0x00, 2, 1, 0, 0, 0, 1, 2, 4, 1, 0, 0, 0],
+            ),
+            (0x70, b"watch-s3\0\0\0\0\0\0\0\0"),
+            // links: from, to, iface, control, tx/SDA, rx/SCL, nrst, boot,
+            // baud u32, rom_entry, i2c_addr, bus_id, reserved
+            (
+                0x80,
+                &[
+                    0, 1, 3, 1, 16, 17, 18, 28, 0x80, 0x1A, 0x06, 0x00, 3, 0x42, 0, 0,
+                ],
+            ),
+            (
+                0x90,
+                &[
+                    0, 2, 2, 2, 26, 27, 0xFF, 0xFF, 0x00, 0xC2, 0x01, 0x00, 1, 0xFF, 0xFF, 0,
+                ],
+            ),
+        ],
+    );
+    assert_eq!(file.len(), 0xA0);
+
+    // Non-canonical inputs are rejected both ways.
+    let mut bad = file.clone();
+    bad[0x0D] = 1; // reserved head byte
+    assert_eq!(TopologyView::parse(&bad).err(), Some(FormatError::BadField));
+    let mut bad = file.clone();
+    bad[0x2D] = 1; // reserved node byte
+    assert_eq!(TopologyView::parse(&bad).err(), Some(FormatError::BadField));
+    let (n0, n1) = (t.node(0), t.node(1));
+    let mut out = [0u8; tp::MAX_SIZE];
+    assert_eq!(
+        tp::encode(&[n1, n0], &[], &[], &mut out),
+        Err(FormatError::BadField)
+    );
+    assert_eq!(
+        tp::encode(&[n0, n1, t.node(2)], &[t.link(1), t.link(0)], &[], &mut out),
+        Err(FormatError::BadField)
+    );
 }

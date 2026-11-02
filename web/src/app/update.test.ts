@@ -5,8 +5,11 @@ import { MockTransport, type MockOptions } from '../serial/mock.ts';
 import { versionText } from '../wasm/dagon.ts';
 import { bandOf } from './band.ts';
 import { ANNOUNCE, BAND, BAND_FOR, NODE } from './copy.ts';
+import { Define } from './define/define.svelte.ts';
+import { topoDiff } from './define/diff.ts';
+import { fromYaml, type Topo } from './define/model.ts';
 import { Operate } from './operate.svelte.ts';
-import { DESK_DEMO } from './sample.ts';
+import { DESK_DEMO, DESK_DEMO_YAML } from './sample.ts';
 
 const repo = (rel: string) => new URL(`../../../${rel}`, import.meta.url);
 /** dagon-sim's desk release 1.1.0: hub A/B, seg A/B and watch images for desk-demo, test key. */
@@ -97,6 +100,26 @@ describe('update from the page with dagon-host apply against the mock hub', () =
     expect([op.state, op.refusal]).toEqual(['L17', 'topology']);
     expect(bandOf(op.state, op.ctx).sentence).toBe(BAND.M20.sentence);
     expect(t.reboots).toEqual([]);
+  }, 20_000);
+
+  test('L17: the differences are shown, and 定義 takes the 構成 of the file so the same file then passes', async () => {
+    const { op } = await sentTo();
+    const d = new Define();
+    d.load(fromYaml(DESK_DEMO_YAML.replace('addr: 0x42', 'addr: 0x43')));
+    op.useConfig(d.config);
+    op.takeFile('desk-1.1.0.dgb', RELEASE);
+    expect([op.state, op.refusal]).toEqual(['L17', 'topology']);
+    const file = op.fileTopology as unknown as Topo;
+    const rows = topoDiff(d.doc.topo, file, d.doc.names);
+    expect(rows).toEqual([expect.objectContaining({ here: expect.stringContaining('0x43'), file: expect.stringContaining('0x42'), nodes: ['seg'] })]);
+
+    d.importRelease(file);
+    expect(d.errors).toBe(0);
+    op.useConfig(d.config);
+    op.takeFile('desk-1.1.0.dgb', RELEASE);
+    expect([op.state, op.file?.verdict]).toEqual(['L18', 'pass']);
+    d.undo();
+    expect(d.doc.topo.links?.[0].addr).toBe(0x43);
   }, 20_000);
 
   test('not a release at all', async () => {

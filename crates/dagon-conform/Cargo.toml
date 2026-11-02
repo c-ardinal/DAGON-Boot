@@ -1,0 +1,9 @@
+[package]
+name = "dagon-conform"
+edition.workspace = true
+license.workspace = true
+version.workspace = true
+
+[dependencies]
+dagon-core = { path = "../dagon-core" }
+dagon-agent = { path = "../dagon-agent" }

@@ -1,0 +1,11 @@
+[package]
+name = "dagon-sim"
+edition.workspace = true
+license.workspace = true
+version.workspace = true
+
+[dependencies]
+dagon-core = { path = "../dagon-core" }
+dagon-romlink = { path = "../dagon-romlink" }
+dagon-conform = { path = "../dagon-conform" }
+dagon-sign = { path = "../dagon-sign" }

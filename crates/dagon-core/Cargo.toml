@@ -1,0 +1,10 @@
+[package]
+name = "dagon-core"
+edition.workspace = true
+license.workspace = true
+version.workspace = true
+
+[dependencies]
+dagon-format = { path = "../dagon-format" }
+dagon-proto = { path = "../dagon-proto" }
+dagon-port = { path = "../dagon-port" }

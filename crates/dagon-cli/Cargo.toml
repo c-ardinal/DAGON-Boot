@@ -1,0 +1,16 @@
+[package]
+name = "dagon-cli"
+edition.workspace = true
+license.workspace = true
+version.workspace = true
+
+[[bin]]
+name = "dagon"
+path = "src/main.rs"
+
+[dependencies]
+dagon-topology = { path = "../dagon-topology" }
+dagon-sign = { path = "../dagon-sign" }
+dagon-proto = { path = "../dagon-proto" }
+dagon-sim = { path = "../dagon-sim" }
+dagon-host = { path = "../dagon-host" }

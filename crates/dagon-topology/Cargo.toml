@@ -1,0 +1,8 @@
+[package]
+name = "dagon-topology"
+edition.workspace = true
+license.workspace = true
+version.workspace = true
+
+[dependencies]
+dagon-format = { path = "../dagon-format" }

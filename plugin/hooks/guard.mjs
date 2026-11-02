@@ -10,7 +10,9 @@
 //   - the repository of the session cwd (or of the written file) has a
 //     worktree on a "port/*" branch (the dagon-port skill runs each attempt
 //     in such a worktree).
-// Additionally port-engineer may only write under targets/esp32s3-*/ and
+// Additionally port-engineer may only write in the ESP32-S3 port area (the
+// MCU package targets/mcu/esp32s3/, board packages under targets/boards/ that
+// build on it or are new, samples/esp32s3-*/ and targets/esp32s3-*/) and
 // conformance-judge may only run `dagon conform` / `dagon sim`.
 //
 // ponytail: shell commands are judged by string inspection (fail-closed on
@@ -26,7 +28,13 @@ const PROTECTED = ["crates/dagon-conform", "crates/dagon-sim", "crates/dagon-cor
 const PROTECTED_IN_PATH = /(^|\/)crates\/dagon-(conform|sim|core)(\/|$)/i;
 const PROTECTED_WORD = /dagon-(conform|sim|core)\b/i;
 const PACKAGE_FLAG = /(^|\s)(-p|--package)(\s+|=)\S+/g;
-const ENGINEER_REL = /^targets\/esp32s3-[^/]+\//i;
+// Port area of port-engineer, relative to the repository root.
+const ENGINEER_AREAS = [/^targets\/esp32s3-[^/]+\//i, /^targets\/mcu\/esp32s3\//i, /^samples\/esp32s3-[^/]+\//i];
+// A board package is in the area when it builds on the ESP32-S3 MCU package,
+// or does not exist yet (a new board).
+const BOARD_DIR = /^targets\/boards\/([^/]+)\//i;
+const ESP_MCU_DEP = /\bdagon-mcu-esp32s3\b/;
+const ENGINEER_AREA_TEXT = "targets/mcu/esp32s3/, ESP32-S3 board packages under targets/boards/, samples/esp32s3-*/ or targets/esp32s3-*/";
 const SUBSTITUTION = /\$\(|`|<\(|>\(/;
 const JUDGE_COMMAND = /^[ \t]*dagon(\.exe)?[ \t]+(conform|sim)([ \t][^&|;$`<>(){}\r\n]*)?$/i;
 const FILE_TOOLS = new Set(["Write", "Edit", "MultiEdit", "NotebookEdit"]);
@@ -53,7 +61,7 @@ const MSG_PROTECTED =
 const MSG_SUBSTITUTION =
   "Port session: command substitution ($(...), backticks, <(...)) is not allowed; run the inner command on its own.";
 const MSG_ENGINEER =
-  "port-engineer may only edit files under targets/esp32s3-*/ (shell writes: cd into the target directory first, " +
+  `port-engineer may only edit files under ${ENGINEER_AREA_TEXT} (shell writes: cd into the target directory first, ` +
   "no absolute, '..', '~' or '$' arguments). Changes to shared crates go to a human, who forwards them to the firmware owners.";
 const MSG_JUDGE_WRITE = "conformance-judge has no write access.";
 const MSG_JUDGE_SHELL =
@@ -96,6 +104,13 @@ function parsePortWorktrees(porcelain) {
 
 export const realDeps = {
   env: process.env,
+  readText: (file) => {
+    try {
+      return readFileSync(file, "utf8");
+    } catch {
+      return null;
+    }
+  },
   toplevel: (dir) => git(dir, ["rev-parse", "--show-toplevel"])?.trim() || null,
   portWorktrees: (dir) => parsePortWorktrees(git(dir, ["worktree", "list", "--porcelain"])),
   run: git,
@@ -110,7 +125,19 @@ function repoRel(abs, deps) {
   return rel.startsWith("..") || isAbsolute(rel) ? null : rel;
 }
 
-const inEngineerArea = (abs, deps) => ENGINEER_REL.test(repoRel(abs, deps) ?? "");
+// `rel` is relative to the repository root `top`.
+function engineerRel(rel, top, deps) {
+  if (ENGINEER_AREAS.some((r) => r.test(rel))) return true;
+  const board = BOARD_DIR.exec(rel);
+  if (!board || !top) return false;
+  const manifest = (deps.readText ?? realDeps.readText)(`${slash(top)}/targets/boards/${board[1]}/Cargo.toml`);
+  return manifest === null || ESP_MCU_DEP.test(manifest);
+}
+
+function inEngineerArea(abs, deps) {
+  const rel = repoRel(abs, deps);
+  return rel !== null && engineerRel(rel, deps.toplevel(dirname(abs)), deps);
+}
 const dirInEngineerArea = (dir, deps) => inEngineerArea(`${slash(dir)}/x`, deps);
 
 function isPortSession(input, deps, dirs = []) {
@@ -276,7 +303,7 @@ function changedOutsideRules(root, isPortWorktree, input, deps) {
   ];
   if (input.agent_type === ENGINEER && isPortWorktree) {
     const status = parseStatusZ(deps.run(root, ["status", "--porcelain", "-z", "--untracked-files=all"]));
-    files.push(...status.filter((p) => !ENGINEER_REL.test(slash(p))));
+    files.push(...status.filter((p) => !engineerRel(slash(p), root, deps)));
   }
   return files.map((f) => `${slash(root)}: ${f}`);
 }
@@ -285,7 +312,7 @@ function changedOutsideRules(root, isPortWorktree, input, deps) {
 // session, every repository and port worktree the call could have touched must
 // have no change under the protected crates (relative to the fork point from
 // develop), and port-engineer must not have changed anything in a port
-// worktree outside targets/esp32s3-*/.
+// worktree outside its port area.
 export function postCheck(input, deps = realDeps) {
   if (!SHELL_TOOLS.has(input.tool_name)) return null;
   const dirs = [input.cwd ?? ".", ...touchedDirs(parseShell(String(input.tool_input?.command ?? ""), input.cwd))];

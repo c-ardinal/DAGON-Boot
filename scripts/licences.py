@@ -1,7 +1,8 @@
 """Prints the third-party dependency licence tables for the README.
 
-Reads every Cargo.lock in the repository (the root workspace and each
-firmware package under targets/) through `cargo metadata`, and
+Reads every Cargo.lock in the repository (the root workspace, each firmware
+package under targets/ including targets/mcu/* and targets/boards/*, and the
+sample apps under samples/) through `cargo metadata`, and
 web/package-lock.json. Run from the repository root:
 
     python scripts/licences.py > deps.md
@@ -20,8 +21,14 @@ SHIPPED = {"svelte", "clsx", "esm-env"}
 
 def cargo_workspaces():
     yield ROOT, "crates/"
-    for lock in sorted((ROOT / "targets").glob("*/Cargo.lock")):
-        yield lock.parent, lock.parent.name
+    # Firmware packages (targets/<pkg>), support packages one level deeper
+    # (targets/mcu/<mcu>, targets/boards/<board>) and the sample apps.
+    locks = [*(ROOT / "targets").glob("*/Cargo.lock"),
+             *(ROOT / "targets").glob("*/*/Cargo.lock"),
+             *(ROOT / "samples").glob("*/Cargo.lock")]
+    for lock in sorted(locks):
+        rel = lock.parent.relative_to(ROOT).as_posix()
+        yield lock.parent, rel.removeprefix("targets/")
 
 
 def cargo_packages():
@@ -62,8 +69,8 @@ def main():
         e[1].add(lic)
         e[2] |= users
     print(f"Rust crates: {len(by_name)} packages, {len(crates)} name/version pairs. "
-          "\"Used by\": `crates/` is the host workspace, other names are firmware "
-          "packages under `targets/`.\n")
+          "\"Used by\": `crates/` is the host workspace, `samples/...` the sample "
+          "apps, other names are firmware packages under `targets/`.\n")
     print("| Crate | Versions | Licence | Used by |")
     print("|---|---|---|---|")
     for name in sorted(by_name, key=str.lower):

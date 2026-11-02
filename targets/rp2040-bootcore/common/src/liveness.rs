@@ -5,7 +5,8 @@
 //! Each task, while working, holds a deadline. The watchdog may be fed only
 //! while no deadline has passed. Background tasks cannot run while a
 //! preempting task works, so their deadlines are frozen meanwhile: while
-//! any preempting task is busy only preempting deadlines are judged, and
+//! any preempting task is busy background deadlines are judged at the time
+//! the preempting level got busy (a passed one stays passed), and
 //! when the last one goes idle every background deadline moves on by the
 //! time the preempting level was busy.
 
@@ -66,12 +67,17 @@ impl<const N: usize> Liveness<N> {
         }
     }
 
-    /// True while no judged deadline has passed.
+    /// True while no deadline has passed. A background deadline counts up
+    /// to the moment the preempting level got busy (its clock is frozen
+    /// from then on), so one that had already passed stays passed.
     pub fn alive(&self, now: u64) -> bool {
-        let only_preempting = self.preempting_busy();
-        (0..N)
-            .filter(|&i| !only_preempting || self.levels[i] == Level::Preempting)
-            .all(|i| self.deadline[i].is_none_or(|d| now < d))
+        (0..N).all(|i| {
+            let clock = match (self.levels[i], self.preempting_since) {
+                (Level::Background, Some(since)) => since,
+                _ => now,
+            };
+            self.deadline[i].is_none_or(|d| clock < d)
+        })
     }
 }
 
@@ -102,6 +108,26 @@ mod tests {
         assert!(l.alive(15_999));
         // Genuinely stuck afterwards: feeding stops.
         assert!(!l.alive(16_100));
+    }
+
+    #[test]
+    fn steady_requests_do_not_hide_a_stuck_background_task() {
+        // F401: the display task is stuck; the hub keeps sending requests
+        // (10 ms of serving every 100 ms). The pre-request feed is gated,
+        // so feeding stops once the display deadline, moved on only by
+        // the serving time, has passed.
+        let mut l = hub();
+        l.busy(LCD, 0, 1_000);
+        let mut fed_after = None;
+        for t in (100..3_000).step_by(100) {
+            l.busy(PC, t, 1_000);
+            if !l.alive(t) && fed_after.is_none() {
+                fed_after = Some(t);
+            }
+            l.idle(PC, t + 10);
+        }
+        // 1 s plus about 100 ms of serving, not forever.
+        assert!(fed_after.is_some_and(|t| t <= 1_200), "{fed_after:?}");
     }
 
     #[test]

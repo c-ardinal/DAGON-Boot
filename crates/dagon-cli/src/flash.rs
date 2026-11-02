@@ -197,7 +197,7 @@ pub(crate) fn prepare(
 pub(crate) fn find_uf2_drive(roots: &[PathBuf]) -> Result<Option<PathBuf>, String> {
     let found: Vec<&PathBuf> = roots
         .iter()
-        .filter(|r| std::fs::read_to_string(r.join(UF2_INFO)).is_ok_and(|s| s.contains(UF2_BOARD)))
+        .filter(|r| std::fs::read_to_string(r.join(UF2_INFO)).is_ok_and(|s| is_rp2040_rom(&s)))
         .collect();
     match found[..] {
         [] => Ok(None),
@@ -213,6 +213,25 @@ pub(crate) fn find_uf2_drive(roots: &[PathBuf]) -> Result<Option<PathBuf>, Strin
                 .join(", ")
         )),
     }
+}
+
+/// Whether INFO_UF2.TXT is the RP2040 boot ROM's: a `UF2 Bootloader` first
+/// line and the exact line `Board-ID: RPI-RP2` (not a part of another ID).
+fn is_rp2040_rom(info: &str) -> bool {
+    let mut lines = info.lines().map(str::trim).filter(|l| !l.is_empty());
+    let header = lines
+        .next()
+        .is_some_and(|l| l.starts_with("UF2 Bootloader"));
+    header
+        && lines.any(|l| {
+            l.split_once(':')
+                .is_some_and(|(k, v)| k.trim() == "Board-ID" && v.trim() == UF2_BOARD)
+        })
+}
+
+/// The MCU families `flash` can write (the page offers it for these).
+pub(crate) fn flashable(mcu: &str) -> bool {
+    parts(mcu).is_some()
 }
 
 /// Where a removable drive shows up on this system.
@@ -534,10 +553,28 @@ mod tests {
     }
 
     #[test]
+    fn only_the_rp2040_boot_rom_is_an_rp2040_drive() {
+        let rom = "UF2 Bootloader v3.0\r\nModel: Raspberry Pi RP2\r\nBoard-ID: RPI-RP2\r\n";
+        assert!(is_rp2040_rom(rom));
+        for not in [
+            "UF2 Bootloader v3.0\nBoard-ID: NOT-RPI-RP2\n",
+            "UF2 Bootloader v3.0\nBoard-ID: RPI-RP2-CLONE\n",
+            "UF2 Bootloader v3.0\nBoard-ID: RPI-RP2350\n",
+            "UF2 Bootloader v3.0\nModel: RPI-RP2\n",
+            "UF2 Bootloader v3.0\nNote: Board-ID: RPI-RP2\n",
+            "Board-ID: RPI-RP2\n",
+            "My stick\nUF2 Bootloader v3.0\nBoard-ID: RPI-RP2\n",
+            "",
+        ] {
+            assert!(!is_rp2040_rom(not), "{not:?}");
+        }
+    }
+
+    #[test]
     fn a_second_board_under_another_mount_name_is_seen() {
         let base = std::env::temp_dir().join(format!("dagon-mnt-{}", std::process::id()));
         let (volumes, media) = (base.join("Volumes"), base.join("media/user"));
-        let info = "Model: Raspberry Pi RP2\nBoard-ID: RPI-RP2\n";
+        let info = "UF2 Bootloader v3.0\nModel: Raspberry Pi RP2\nBoard-ID: RPI-RP2\n";
         for d in [volumes.join("RPI-RP2"), volumes.join("RPI-RP2 1")] {
             std::fs::create_dir_all(&d).unwrap();
             std::fs::write(d.join(UF2_INFO), info).unwrap();

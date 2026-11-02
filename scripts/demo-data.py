@@ -17,6 +17,12 @@ header signature on a node (E_SIGNATURE) with --no-host-verify. Use
 `apply --node hub` or `--node seg` to show each node refusing. Same inputs
 give byte-identical outputs.
 
+The output folder is rebuilt from a clean state on every run (only the
+cargo build cache in <out>/build is kept), the CLI itself is built into
+<out>/build/cli so nothing is written inside the repository, and the run
+stops before building anything when --key is not the secret half of
+--pubkey.
+
     python scripts/demo-data.py --key <secret key file> --pubkey <public key file> [--out <dir>]
 """
 import argparse
@@ -49,9 +55,44 @@ def run(cmd, env=None):
     subprocess.run([str(c) for c in cmd], check=True, env=env)
 
 
+# Cargo target directory for the CLI, outside the repository (set in main).
+CLI_TARGET = None
+
+
+def dagon_cmd(*args):
+    return ["cargo", "run", "-q", "--locked", "--manifest-path", ROOT / "Cargo.toml",
+            "--target-dir", CLI_TARGET, "-p", "dagon-cli", "--", *args]
+
+
 def dagon(*args):
-    run(["cargo", "run", "-q", "--locked", "--manifest-path", ROOT / "Cargo.toml",
-         "-p", "dagon-cli", "--", *args])
+    run(dagon_cmd(*args))
+
+
+def public_key_of(cli_output):
+    """The hex public key in `dagon key pub` output."""
+    for line in cli_output.splitlines():
+        if line.startswith("public_key:"):
+            return line.split(":", 1)[1].strip().lower()
+    sys.exit("dagon key pub printed no public key")
+
+
+def check_key_pair(cli_output, pubkey_text):
+    """Exits unless the signing key's public half equals the --pubkey file."""
+    if public_key_of(cli_output) != pubkey_text.strip().lower():
+        sys.exit("--key is not the secret half of --pubkey: the firmware would reject "
+                 "every image; pass the matching pair")
+
+
+def clean_out(out):
+    """Empties `out` except the cargo build cache in out/build."""
+    out.mkdir(parents=True, exist_ok=True)
+    for child in out.iterdir():
+        if child.name == "build":
+            continue
+        if child.is_dir() and not child.is_symlink():
+            shutil.rmtree(child)
+        else:
+            child.unlink()
 
 
 def build(node, slot, out, pubkey):
@@ -106,10 +147,16 @@ def main():
         if not f.is_file():
             sys.exit(f"not a file: {f}")
 
+    global CLI_TARGET
+    CLI_TARGET = out / "build" / "cli"
+    pub = subprocess.run([str(c) for c in dagon_cmd("key", "pub", "--key", key)],
+                         check=True, capture_output=True, text=True)
+    check_key_pair(pub.stdout, pubkey.read_text())
+    clean_out(out)
+
     elves = {(n, s): build(n, s, out, pubkey) for n in FIRMWARE for s in SLOTS}
 
     images = out / "images"
-    shutil.rmtree(images, ignore_errors=True)
     for version, release in VERSIONS.items():
         vdir = images / version
         for (node, slot), elf in elves.items():

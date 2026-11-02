@@ -18,6 +18,7 @@ const USAGE: &str = "dagon - DAGON Boot command line tool
 
 Usage:
   dagon key gen --out <dir>          generate a signing key pair (dir must be outside any git work tree)
+  dagon key pub [--key <file>]       public key (hex) and key id of the signing key
   dagon topo check [--json] <yaml>   validate a topology file
   dagon topo compile <yaml> [--out <bin>]
                                      topology canonical binary
@@ -86,6 +87,7 @@ fn main() -> ExitCode {
             ExitCode::SUCCESS
         }
         ["key", "gen", rest @ ..] => key_gen(rest),
+        ["key", "pub", rest @ ..] => run(key_pub(rest)),
         ["topo", "check", rest @ ..] => topo_check(rest),
         ["topo", "compile", rest @ ..] => run(commands::topo_compile(rest)),
         ["image", "sign", rest @ ..] => run(commands::image_sign(rest)),
@@ -119,6 +121,18 @@ fn run(r: Result<(), String>) -> ExitCode {
 fn usage_error(msg: &str) -> ExitCode {
     eprintln!("error: {msg}\n\n{USAGE}");
     ExitCode::from(EXIT_USAGE)
+}
+
+/// Prints the public half of the signing key (never the secret).
+fn key_pub(args: &[&str]) -> Result<(), String> {
+    let o = config::Opts::parse(args, &["key"])?;
+    let k = config::load_key(o.get("key"))?;
+    println!("public_key: {}", dagon_sign::to_hex(&*k.pk));
+    println!(
+        "key_id:     {}",
+        dagon_sign::to_hex(&dagon_format::key_id(&k.pk))
+    );
+    Ok(())
 }
 
 fn key_gen(args: &[&str]) -> ExitCode {

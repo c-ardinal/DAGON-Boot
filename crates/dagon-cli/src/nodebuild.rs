@@ -85,6 +85,18 @@ pub fn build_nodes(
     log: &mut dyn FnMut(&str),
     cancel: &AtomicBool,
 ) -> Result<Vec<Built>, String> {
+    build_nodes_with(cfg, nodes, &[], log, cancel)
+}
+
+/// [`build_nodes`] with extra environment variables for cargo (deploy and
+/// flash pass `DAGON_PUBKEY`).
+pub fn build_nodes_with(
+    cfg: &Config,
+    nodes: &[String],
+    env: &[(&str, &str)],
+    log: &mut dyn FnMut(&str),
+    cancel: &AtomicBool,
+) -> Result<Vec<Built>, String> {
     let ids: Vec<String> = if nodes.is_empty() {
         cfg.build.keys().cloned().collect()
     } else {
@@ -96,7 +108,7 @@ pub fn build_nodes(
             .build
             .get(&id)
             .ok_or_else(|| format!("no [build.{id}] in dagon.toml"))?;
-        out.push(build_node(cfg, &id, inputs, log, cancel)?);
+        out.push(build_node(cfg, &id, inputs, env, log, cancel)?);
     }
     Ok(out)
 }
@@ -105,6 +117,7 @@ fn build_node(
     cfg: &Config,
     id: &str,
     b: &BuildInputs,
+    env: &[(&str, &str)],
     log: &mut dyn FnMut(&str),
     cancel: &AtomicBool,
 ) -> Result<Built, String> {
@@ -138,7 +151,15 @@ fn build_node(
             "{id}: building slot {slot} in {}",
             b.package.display()
         ));
-        let exe = cargo_build(&dir, &bin, &features, target_dir.as_deref(), log, cancel)?;
+        let exe = cargo_build(
+            &dir,
+            &bin,
+            &features,
+            target_dir.as_deref(),
+            env,
+            log,
+            cancel,
+        )?;
         let dest = elf_path(cfg, id, slot);
         if let Some(parent) = dest.parent() {
             std::fs::create_dir_all(parent)
@@ -163,7 +184,7 @@ fn build_node(
     })
 }
 
-fn package_name(dir: &Path) -> Result<String, String> {
+pub(crate) fn package_name(dir: &Path) -> Result<String, String> {
     let path = dir.join("Cargo.toml");
     let text = std::fs::read_to_string(&path)
         .map_err(|e| format!("cannot read {}: {e}", path.display()))?;
@@ -187,18 +208,20 @@ enum Line {
     Err(String),
 }
 
-/// Runs `cargo build --release --locked` in `dir`; returns the executable
-/// of binary `bin`.
-fn cargo_build(
+/// Runs `cargo build --release --locked` in `dir` (so its `.cargo/config.toml`
+/// applies); returns the executable of binary `bin`.
+pub(crate) fn cargo_build(
     dir: &Path,
     bin: &str,
     features: &[String],
     target_dir: Option<&Path>,
+    env: &[(&str, &str)],
     log: &mut dyn FnMut(&str),
     cancel: &AtomicBool,
 ) -> Result<PathBuf, String> {
     let mut cmd = Command::new("cargo");
     scrub(&mut cmd);
+    cmd.envs(env.iter().copied());
     cmd.args([
         "build",
         "--release",

@@ -259,7 +259,6 @@ pub fn apply(args: &[&str]) -> Res {
         _ => return Err("apply takes at most one <dgb>".into()),
     };
     let t = read_topology(&cfg.topology_path(o.get("topology"))?)?;
-    let bin = topology_bin(&t)?;
     let ids: Vec<String> = t.nodes.iter().map(|n| n.id.clone()).collect();
     let picked = o
         .all("node")
@@ -283,6 +282,24 @@ pub fn apply(args: &[&str]) -> Res {
     let bundle = read_file(Path::new(&dgb))?;
 
     let mut host = serial::host(o.get("port"))?;
+    apply_bundle(&mut host, &bundle, &t, key.as_ref(), only)
+}
+
+/// Applies `bundle` (verified under `key`, or unverified when `None`) to
+/// the nodes of `t` through `host`, printing progress and one result line
+/// per node.
+pub fn apply_bundle<T: Transport, C: Clock>(
+    host: &mut Host<T, C>,
+    bundle: &[u8],
+    t: &Topology,
+    key: Option<&[u8; 32]>,
+    only: Option<&[u8]>,
+) -> Res
+where
+    T::Error: std::fmt::Debug,
+{
+    let bin = topology_bin(t)?;
+    let ids: Vec<String> = t.nodes.iter().map(|n| n.id.clone()).collect();
     let name = |n: u8| ids.get(n as usize).map_or("?", String::as_str);
     let mut print = |e: Event| {
         let pct = if e.phase == phase::TRANSFER {
@@ -297,9 +314,9 @@ pub fn apply(args: &[&str]) -> Res {
             e.version
         );
     };
-    let run = match &key {
-        Some(k) => block_on(host.apply(&bundle, &bin, k, only, &mut print)),
-        None => block_on(host.apply_unverified(&bundle, &bin, only, &mut print)),
+    let run = match key {
+        Some(k) => block_on(host.apply(bundle, &bin, k, only, &mut print)),
+        None => block_on(host.apply_unverified(bundle, &bin, only, &mut print)),
     };
     let report = run.map_err(|e| format!("apply refused: {e:?}"))?;
     let mut ok = true;

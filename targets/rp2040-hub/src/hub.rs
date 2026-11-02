@@ -70,7 +70,9 @@ impl Hub<'_> {
                 }
                 Either::First(Err(_)) => rx.clear(),
                 Either::Second(()) => {
-                    if Instant::now() >= self.quiet_until {
+                    // The diag build leaves the child links idle, to tell
+                    // their effect apart from the rest of the hub.
+                    if Instant::now() >= self.quiet_until && !cfg!(feature = "diag") {
                         self.poll().await;
                     }
                     next_poll = Instant::now() + POLL_EVERY;

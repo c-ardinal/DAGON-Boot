@@ -106,6 +106,9 @@ pub struct Panel<'d> {
     spi: Spi<'d, SPI1, Blocking>,
     cs: Output<'d>,
     dc: Output<'d>,
+    /// Held high for as long as the panel is used: dropping the pin would
+    /// release it to the pad default (pull-down) and reset the panel.
+    rst: Output<'d>,
 }
 
 impl<'d> Panel<'d> {
@@ -114,15 +117,15 @@ impl<'d> Panel<'d> {
         spi: Spi<'d, SPI1, Blocking>,
         cs: Output<'d>,
         dc: Output<'d>,
-        mut rst: Output<'d>,
+        rst: Output<'d>,
     ) -> Self {
-        let mut p = Panel { spi, cs, dc };
+        let mut p = Panel { spi, cs, dc, rst };
         p.cs.set_high();
-        rst.set_high();
+        p.rst.set_high();
         block_for(Duration::from_millis(10));
-        rst.set_low();
+        p.rst.set_low();
         block_for(Duration::from_millis(10));
-        rst.set_high();
+        p.rst.set_high();
         block_for(Duration::from_millis(120));
         for &(cmd, args) in INIT {
             p.command(cmd, args);

@@ -321,9 +321,12 @@ dependencies = [
  "dagon-sim",
  "ed25519-compact",
  "embassy-executor",
+ "embassy-futures",
  "embassy-rp",
+ "embassy-sync",
  "embassy-time",
  "embassy-usb",
+ "heapless 0.9.3",
  "portable-atomic",
  "static_cell",
 ]
@@ -455,6 +458,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "5d0d3b15c9d7dc4fec1d8cb77112472fb008b3b28c51ad23838d83587a6d2f1e"
 dependencies = [
  "cordyceps",
+ "cortex-m",
  "critical-section",
  "document-features",
  "embassy-executor-macros",
@@ -1267,6 +1271,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8af65855c40b2c35079514c5489abffc0429347fef25d8467ff98ad84b4322d3"
 dependencies = [
  "cortex-m",
+ "cortex-m-rt",
 ]
 
 [[package]]

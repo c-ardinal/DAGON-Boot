@@ -1,19 +1,19 @@
 //! Receiver side of an RP2040 app: APP-A/B slots, the app state log and the
 //! topology display copy, behind dagon-agent's `SlotStore`.
 
+use crate::flash::RpFlash;
+use crate::layout::{
+    body_capacity, sectors, APP_LOG_LAYOUT, APP_SLOT, APP_SLOT_SIZE, HEADER_LEN, SECTOR, TOPOLOGY,
+    TOPOLOGY_SIZE,
+};
+use crate::watchdog::Watch;
+use crate::{image, status};
 use dagon_agent::{SlotStore, StoreError};
 use dagon_core::log::Log;
 use dagon_format::header::HEADER_SIZE;
 use dagon_format::statelog::kind;
 use dagon_port::Flash;
 use dagon_proto::payload::{target, StatusResp};
-use crate::layout::{
-    body_capacity, sectors, APP_LOG_LAYOUT, APP_SLOT, APP_SLOT_SIZE, HEADER_LEN, SECTOR, TOPOLOGY,
-    TOPOLOGY_SIZE,
-};
-use crate::flash::RpFlash;
-use crate::watchdog::Watch;
-use crate::{image, status};
 
 /// Slot this build is linked for (`slot-b`).
 pub const ACTIVE: u8 = if cfg!(feature = "slot-b") { 1 } else { 0 };

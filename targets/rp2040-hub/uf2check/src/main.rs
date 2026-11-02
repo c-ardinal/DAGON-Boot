@@ -2,7 +2,10 @@
 //! it: stage0's choice and check of the boot core, then the boot core's
 //! dagon-core decision for the app. Exits non-zero if either would not start.
 //!
-//! uf2check <hub.uf2> <dagon-signing.pub>
+//! uf2check <hub.uf2> <dagon-signing.pub> <target tag>
+//!
+//! The target tag is the one the boot core was built with
+//! (`DAGON_TARGET_TAG`, e.g. `hub-rp2040-lcd` for the demo hub).
 
 use std::process::ExitCode;
 use std::{env, fs};
@@ -34,9 +37,12 @@ fn main() -> ExitCode {
 
 fn run() -> Result<String, String> {
     let args: Vec<String> = env::args().skip(1).collect();
-    let [uf2, pubkey] = &args[..] else {
-        return Err("usage: uf2check <hub.uf2> <dagon-signing.pub>".into());
+    let [uf2, pubkey, tag] = &args[..] else {
+        return Err("usage: uf2check <hub.uf2> <dagon-signing.pub> <target tag>".into());
     };
+    if tag.is_empty() || tag.len() > 16 {
+        return Err("target tag: 1 to 16 characters".into());
+    }
     let mut flash = load_uf2(uf2)?;
     let pubkey = load_pubkey(pubkey)?;
 
@@ -56,7 +62,7 @@ fn run() -> Result<String, String> {
     let cfg = BootConfig {
         pubkey,
         mcu_id: mcu_id::RP2040,
-        target_tag: target_tag(HUB_TAG),
+        target_tag: target_tag(tag),
         max_attempts: MAX_ATTEMPTS,
     };
     match boot::decide(&mut flash, &mut log, &APP_SLOTS, &cfg) {

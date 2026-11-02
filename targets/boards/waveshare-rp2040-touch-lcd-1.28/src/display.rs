@@ -1,12 +1,12 @@
-//! Round LCD (GC9A01A, 240x240) home screen: the hub in the centre, the sub
-//! nodes below it, each with its version and a state colour. While the PC
-//! sends SHOW, the named node's ring becomes an arc that grows with the
-//! percentage in the phase colour, with a line of text on top.
+//! Round LCD (GC9A01A, 240x240) home screen of the 親機 relay: the hub in
+//! the centre, the sub nodes below it, each with its version and a state
+//! colour. While the PC sends SHOW, the named node's ring becomes an arc
+//! that grows with the percentage in the phase colour, with a line of text
+//! on top. It reads `dagon_mcu_rp2040::relay::state`.
 
 use core::fmt::Write as _;
 
-use dagon_format::Version;
-use dagon_proto::payload::{phase, Show, SHOW_TEXT_MAX};
+use dagon_proto::payload::phase;
 use embassy_futures::select::{select, Either};
 use embassy_time::{Duration, Timer};
 use embedded_graphics::mono_font::ascii::{FONT_10X20, FONT_6X10};
@@ -18,64 +18,11 @@ use embedded_graphics::text::{Alignment, Text};
 use heapless::String;
 
 use dagon_mcu_rp2040::arm::step;
+use dagon_mcu_rp2040::relay::state::{self, Home, Node, Progress, Shade};
+use dagon_mcu_rp2040::watchdog::Lease;
 
-use crate::board::gc9a01::{Frame, Panel};
-use crate::board::DisplayPins as Pins;
-use crate::nodes::{SubNode, MAX_SUBS};
-use crate::state;
-use crate::{task, GUARD};
-
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub enum Shade {
-    #[default]
-    Unknown,
-    Confirmed,
-    Trial,
-    NoAnswer,
-}
-
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub struct Node {
-    pub node: SubNode,
-    pub version: Option<Version>,
-    pub shade: Shade,
-}
-
-/// The last SHOW.
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
-pub struct Progress {
-    pub node: u8,
-    pub phase: u8,
-    pub percent: u8,
-    pub version: Version,
-    /// Printable ASCII of the SHOW text (the font has nothing else).
-    pub text: String<SHOW_TEXT_MAX>,
-}
-
-impl From<&Show<'_>> for Progress {
-    fn from(s: &Show<'_>) -> Self {
-        let mut text = String::new();
-        if s.text.iter().all(|b| (0x20..0x7F).contains(b)) {
-            s.text.iter().for_each(|&b| {
-                let _ = text.push(b as char);
-            });
-        }
-        Progress {
-            node: s.node,
-            phase: s.phase,
-            percent: s.percent.min(100),
-            version: s.version,
-            text,
-        }
-    }
-}
-
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
-pub struct Home {
-    pub hub: Node,
-    pub subs: heapless::Vec<Node, MAX_SUBS>,
-    pub progress: Option<Progress>,
-}
+use crate::gc9a01::{Frame, Panel};
+use crate::DisplayPins as Pins;
 
 const HUB_AT: Point = Point::new(120, 80);
 const HUB_D: u32 = 90;
@@ -113,9 +60,12 @@ const HEARTBEAT: Duration = Duration::from_secs(1);
 /// first full frame. It redraws when [`state::REDRAW`] fires and toggles a
 /// heartbeat square every second. The `diag` build first shows a test
 /// pattern and the clock set-up for 3 s and a seconds counter.
+/// `lease`: the display's guard task (thread mode, `Background`).
 #[embassy_executor::task]
-pub async fn task(mut pins: Pins, frame: &'static mut Frame) {
-    GUARD.busy(task::LCD);
+pub async fn task(mut pins: Pins, frame: &'static mut Frame, lease: Lease) {
+    // A whole piece of drawing must end within the default work limit.
+    let busy = || lease.watch.busy(lease.task);
+    busy();
     let mut panel = Panel::new(pins.spi, pins.cs, pins.dc, pins.rst).await;
     let _ = frame.clear(Rgb565::BLACK);
     if cfg!(feature = "diag") {
@@ -123,9 +73,9 @@ pub async fn task(mut pins: Pins, frame: &'static mut Frame) {
         let _ = clock_info(frame);
         panel.flush(frame).await;
         pins.backlight.set_high();
-        GUARD.idle(task::LCD);
+        lease.idle();
         Timer::after_secs(3).await;
-        GUARD.busy(task::LCD);
+        busy();
     }
     let mut shown = state::home();
     let _ = draw(frame, &shown);
@@ -133,9 +83,9 @@ pub async fn task(mut pins: Pins, frame: &'static mut Frame) {
     pins.backlight.set_high();
     let mut beat = false;
     loop {
-        GUARD.idle(task::LCD);
+        lease.idle();
         let event = select(state::REDRAW.wait(), Timer::after(HEARTBEAT)).await;
-        GUARD.busy(task::LCD);
+        busy();
         if matches!(event, Either::Second(())) {
             state::expire_progress();
             beat = !beat;

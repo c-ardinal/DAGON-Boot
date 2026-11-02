@@ -2,10 +2,10 @@
 //! answering: a request the rules reject must get the same status from the
 //! sim; one they accept reaches the bus (and times out there).
 
+use dagon_mcu_rp2040::cmd;
 use dagon_proto::payload::{boot0, link, nrst, I2cRaw, Relay, Show, SubCtl};
 use dagon_proto::{finish, frame_len, max_payload, split_status, Cmd, Frame, Status};
 use dagon_sim::{demo_hub, SimHub};
-use dagon_mcu_rp2040::cmd;
 
 fn ask(h: &mut SimHub, c: Cmd, payload: &[u8]) -> Status {
     let mut buf = vec![0u8; frame_len(payload.len())];

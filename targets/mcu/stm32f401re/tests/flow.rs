@@ -9,11 +9,11 @@ use dagon_core::log::{Log, LogLayout, SlotRef};
 use dagon_format::header::*;
 use dagon_format::statelog::{kind, reason, FaceHeader};
 use dagon_format::{key_id, sha256, Version};
+use dagon_mcu_stm32f401re::KindSStore;
 use dagon_port::{Flash, FlashError, FlashRegion};
 use dagon_proto::payload::*;
 use dagon_proto::{max_payload, split_status, Cmd, Frame, Status};
 use ed25519_compact::{KeyPair, Seed};
-use dagon_mcu_stm32f401re::KindSStore;
 
 /// RFC 8032 section 7.1 TEST 1 key (public test data).
 const SEED: [u8; 32] = [

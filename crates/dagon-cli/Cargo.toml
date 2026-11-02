@@ -9,6 +9,10 @@ name = "dagon"
 path = "src/main.rs"
 
 [dependencies]
+dagon-format = { path = "../dagon-format" }
+ed25519-compact = { version = "2", default-features = false }
+serde = { version = "1", features = ["derive"] }
+toml = "0.8"
 dagon-topology = { path = "../dagon-topology" }
 dagon-sign = { path = "../dagon-sign" }
 dagon-proto = { path = "../dagon-proto" }

@@ -79,11 +79,38 @@ fn load_pubkey(path: &str) -> Result<[u8; 32], String> {
         .ok_or(format!("{path}: expected 64 hex digits"))
 }
 
+/// The bootrom erases a 4 KiB sector when a block starts it, so every
+/// sector a UF2 touches must be 16 consecutive 256-byte blocks, starting at
+/// a block index that is a multiple of 16 at the sector start; otherwise a
+/// later partial write leaves or erases the wrong bytes.
+fn whole_sectors(addrs: &[u32]) -> Result<(), String> {
+    const PAGES: usize = (SECTOR / 256) as usize;
+    if addrs.len() % PAGES != 0 {
+        return Err(format!("{} blocks is not whole sectors", addrs.len()));
+    }
+    for (i, run) in addrs.chunks(PAGES).enumerate() {
+        let start = run[0];
+        let whole = start % SECTOR == 0
+            && run
+                .iter()
+                .enumerate()
+                .all(|(k, &a)| a == start + 256 * k as u32);
+        if !whole {
+            return Err(format!(
+                "block {} ({start:#x}) does not start a whole sector",
+                i * PAGES
+            ));
+        }
+    }
+    Ok(())
+}
+
 /// The flash a UF2 leaves (erased where it writes nothing), read through
 /// the same mapped reader stage0 uses on the board.
 fn load_uf2(path: &str) -> Result<Mapped, String> {
     let raw = fs::read(path).map_err(|e| format!("{path}: {e}"))?;
     let mut mem = vec![0xFFu8; FLASH_SIZE];
+    let mut addrs = Vec::new();
     for b in raw.chunks_exact(512) {
         let w = |i: usize| u32::from_le_bytes(b[i * 4..i * 4 + 4].try_into().unwrap());
         if w(0) != UF2_MAGIC0 || w(1) != UF2_MAGIC1 || w(127) != UF2_MAGIC_END {
@@ -96,6 +123,8 @@ fn load_uf2(path: &str) -> Result<Mapped, String> {
             .filter(|o| o + len <= FLASH_SIZE)
             .ok_or(format!("{path}: block at {addr:#x} outside flash"))?;
         mem[off..off + len].copy_from_slice(&b[32..32 + len]);
+        addrs.push(addr);
     }
+    whole_sectors(&addrs).map_err(|e| format!("{path}: {e}"))?;
     Ok(Mapped::over(Box::leak(mem.into_boxed_slice()), XIP_BASE))
 }

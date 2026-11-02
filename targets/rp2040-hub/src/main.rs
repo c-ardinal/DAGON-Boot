@@ -9,6 +9,7 @@
 #![no_std]
 #![no_main]
 
+mod gc9a01;
 mod hub;
 mod lcd;
 mod nodes;
@@ -57,7 +58,8 @@ const USB_VID: u16 = 0xc0de;
 const USB_PID: u16 = 0xcafe;
 const PIO_UART_BAUD: u32 = 115_200;
 const I2C_HZ: u32 = 400_000;
-const LCD_SPI_HZ: u32 = 40_000_000;
+/// Conservative for the panel wiring (the controller allows more).
+const LCD_SPI_HZ: u32 = 20_000_000;
 
 #[embassy_executor::main]
 async fn main(_spawner: Spawner) {

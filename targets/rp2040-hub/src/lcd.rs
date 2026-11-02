@@ -12,19 +12,15 @@ use embassy_rp::peripherals::SPI1;
 use embassy_rp::spi::{Blocking, Spi};
 use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
 use embassy_sync::signal::Signal;
-use embassy_time::Delay;
 use embedded_graphics::mono_font::ascii::{FONT_10X20, FONT_6X10};
 use embedded_graphics::mono_font::{MonoFont, MonoTextStyle};
 use embedded_graphics::pixelcolor::Rgb565;
 use embedded_graphics::prelude::*;
 use embedded_graphics::primitives::{Arc, Circle, PrimitiveStyle};
 use embedded_graphics::text::{Alignment, Text};
-use embedded_hal_bus::spi::ExclusiveDevice;
 use heapless::String;
-use mipidsi::interface::SpiInterface;
-use mipidsi::models::GC9A01;
-use mipidsi::options::ColorInversion;
 
+use crate::gc9a01::Panel;
 use crate::nodes::{SubNode, MAX_SUBS};
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -111,21 +107,10 @@ pub struct Pins<'d> {
     pub rst: Output<'d>,
 }
 
-/// Draws the home screen whenever [`HOME`] changes. Returns only if the
-/// panel cannot be set up (the hub keeps working without it).
+/// Sets the panel up (cleared to black), then draws the home screen
+/// whenever [`HOME`] changes.
 pub async fn run(pins: Pins<'_>) {
-    let dev = ExclusiveDevice::new_no_delay(pins.spi, pins.cs).unwrap_or_else(|e| match e {});
-    let mut buf = [0u8; 512];
-    let di = SpiInterface::new(dev, pins.dc, &mut buf);
-    // Calibration knobs if colours look wrong on the panel: inversion and
-    // `.color_order(ColorOrder::Bgr)`.
-    let Ok(mut display) = mipidsi::Builder::new(GC9A01, di)
-        .reset_pin(pins.rst)
-        .invert_colors(ColorInversion::Inverted)
-        .init(&mut Delay)
-    else {
-        return;
-    };
+    let mut display = Panel::new(pins.spi, pins.cs, pins.dc, pins.rst);
     let mut shown: Option<Home> = None;
     loop {
         let home = HOME.wait().await;

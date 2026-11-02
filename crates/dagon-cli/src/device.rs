@@ -1,0 +1,184 @@
+//! `status`, `apply`, `topo push`: thin shells over dagon-host on the hub's
+//! serial port.
+
+use std::path::{Path, PathBuf};
+
+use dagon_host::{Event, NodeState, Outcome, Target};
+use dagon_proto::payload::phase;
+use dagon_sign::to_hex;
+use dagon_sim::block_on;
+use dagon_topology::Topology;
+
+use crate::config::{load_key, read_file, read_topology, Config, Opts};
+use crate::serial;
+
+type Res = Result<(), String>;
+
+fn topology_bin(t: &Topology) -> Result<Vec<u8>, String> {
+    dagon_topology::compile(t).map_err(|e| e.to_string())
+}
+
+fn show_state(name: &str, s: &NodeState) {
+    let st = &s.status;
+    let slots: Vec<String> = st
+        .slots
+        .iter()
+        .zip(["A", "B", "F"])
+        .map(|(x, n)| format!("{n}:{:?} {}", x.state, x.version))
+        .collect();
+    println!(
+        "{name}: version {}{}, mcu {:#06x}, active {}, confirmed {}, attempts {}, last reason {}, [{}]",
+        s.hello.active_version,
+        if s.hello.trial { " (on trial)" } else { "" },
+        s.hello.mcu_id,
+        st.active,
+        st.confirmed,
+        st.attempts,
+        st.last_reason,
+        slots.join(", ")
+    );
+}
+
+/// The topology from `--topology` or `dagon.toml`, if any.
+fn optional_topology(o: &Opts<'_>, cfg: &Config) -> Result<Option<Topology>, String> {
+    match o
+        .get("topology")
+        .map(PathBuf::from)
+        .or(cfg.topology.clone())
+    {
+        Some(p) => read_topology(&p).map(Some),
+        None => Ok(None),
+    }
+}
+
+pub fn status(args: &[&str]) -> Res {
+    let o = Opts::parse(args, &["port", "topology", "config"])?;
+    let cfg = Config::load(o.get("config"))?;
+    let t = optional_topology(&o, &cfg)?;
+    let mut host = serial::host(o.get("port"))?;
+    let hub = block_on(host.status(Target::Hub)).map_err(|e| format!("hub: {e:?}"))?;
+    show_state("hub", &hub);
+    let Some(t) = t else {
+        return Ok(());
+    };
+    let bin = topology_bin(&t)?;
+    let view = dagon_format::TopologyView::parse(&bin).map_err(|e| format!("{e:?}"))?;
+    for (i, n) in t.nodes.iter().enumerate() {
+        match Target::of_node(&view, i as u8) {
+            Some(Target::Hub) => {}
+            Some(to) => match block_on(host.status(to)) {
+                Ok(s) => show_state(&n.id, &s),
+                Err(e) => println!("{}: no answer ({e:?})", n.id),
+            },
+            None => println!("{}: not reachable through the hub", n.id),
+        }
+    }
+    Ok(())
+}
+
+pub fn topo_push(args: &[&str]) -> Res {
+    let o = Opts::parse(args, &["port", "config"])?;
+    let cfg = Config::load(o.get("config"))?;
+    let path = match o.pos[..] {
+        [p] => PathBuf::from(p),
+        [] => cfg.topology_path(None)?,
+        _ => return Err("topo push takes at most one <yaml>".into()),
+    };
+    let bin = topology_bin(&read_topology(&path)?)?;
+    let mut host = serial::host(o.get("port"))?;
+    block_on(host.push_topology(&bin)).map_err(|e| format!("topo push: {e:?}"))?;
+    println!(
+        "{}: {} bytes sent to the hub, sha256 {}",
+        path.display(),
+        bin.len(),
+        to_hex(&dagon_format::sha256(&bin))
+    );
+    Ok(())
+}
+
+fn phase_name(p: u8) -> &'static str {
+    match p {
+        phase::TRANSFER => "transfer",
+        phase::VERIFY => "verify",
+        phase::REBOOT => "reboot",
+        phase::CONFIRM => "confirmed",
+        phase::REJECTED => "REJECTED",
+        phase::FAILED => "FAILED",
+        _ => "?",
+    }
+}
+
+/// Verifying key: `--pubkey <file>`, `pubkey` in dagon.toml, else the
+/// public half of the signing key.
+fn pubkey(o: &Opts<'_>, cfg: &Config) -> Result<[u8; 32], String> {
+    match o.get("pubkey").map(PathBuf::from).or(cfg.pubkey.clone()) {
+        Some(p) => dagon_sign::load_public_key(&p).map_err(|e| e.to_string()),
+        None => Ok(*load_key(o.get("key"))?.pk),
+    }
+}
+
+pub fn apply(args: &[&str]) -> Res {
+    let o = Opts::parse(
+        args,
+        &["port", "topology", "config", "node", "pubkey", "key"],
+    )?;
+    let cfg = Config::load(o.get("config"))?;
+    let dgb = match o.pos[..] {
+        [p] => PathBuf::from(p),
+        [] => cfg
+            .release
+            .clone()
+            .ok_or("no release: pass <dgb> or set release in dagon.toml")?,
+        _ => return Err("apply takes at most one <dgb>".into()),
+    };
+    let t = read_topology(&cfg.topology_path(o.get("topology"))?)?;
+    let bin = topology_bin(&t)?;
+    let ids: Vec<String> = t.nodes.iter().map(|n| n.id.clone()).collect();
+    let picked = o
+        .all("node")
+        .map(|id| {
+            ids.iter()
+                .position(|x| x == id)
+                .map(|i| i as u8)
+                .ok_or_else(|| format!("no node '{id}' in the topology"))
+        })
+        .collect::<Result<Vec<u8>, String>>()?;
+    let only = (!picked.is_empty()).then_some(picked.as_slice());
+    let key = pubkey(&o, &cfg)?;
+    let bundle = read_file(Path::new(&dgb))?;
+
+    let mut host = serial::host(o.get("port"))?;
+    let name = |n: u8| ids.get(n as usize).map_or("?", String::as_str);
+    let mut print = |e: Event| {
+        let pct = if e.phase == phase::TRANSFER {
+            format!(" {}%", e.percent)
+        } else {
+            String::new()
+        };
+        println!(
+            "{}: {}{pct} ({})",
+            name(e.node),
+            phase_name(e.phase),
+            e.version
+        );
+    };
+    let report = block_on(host.apply(&bundle, &bin, &key, only, &mut print))
+        .map_err(|e| format!("apply refused: {e:?}"))?;
+    let mut ok = true;
+    for r in &report {
+        let line = match &r.outcome {
+            Outcome::Done(v) => format!("done, {v}"),
+            Outcome::Failed(e) => {
+                ok = false;
+                format!("stopped: {e:?}")
+            }
+            Outcome::NotStarted => "not started".into(),
+        };
+        println!("{}: {line}", name(r.node));
+    }
+    if ok {
+        Ok(())
+    } else {
+        Err("apply stopped; see above".into())
+    }
+}

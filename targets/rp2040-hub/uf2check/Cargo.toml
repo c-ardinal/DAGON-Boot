@@ -12,4 +12,4 @@ publish = false
 dagon-core = { path = "../../../crates/dagon-core" }
 dagon-format = { path = "../../../crates/dagon-format" }
 dagon-port = { path = "../../../crates/dagon-port" }
-rp2040-common = { path = "../../rp2040-bootcore/common" }
+dagon-mcu-rp2040 = { path = "../../mcu/rp2040" }

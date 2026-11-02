@@ -1,0 +1,24 @@
+[package]
+name = "dagon-board-waveshare-rp2040-touch-lcd-1-28"
+edition = "2021"
+license = "MIT OR Apache-2.0"
+version = "0.0.0"
+publish = false
+
+# DAGON board package for the Waveshare RP2040-Touch-LCD-1.28 (topology
+# board id `waveshare-rp2040-touch-lcd-1.28`). Built for thumbv6m only.
+[workspace]
+
+[features]
+# Forwarded to the MCU package: link the app for APP slot B.
+slot-b = ["dagon-mcu-rp2040/slot-b"]
+# DAGON over USB CDC (`node::start`).
+usb = ["dagon-mcu-rp2040/usb"]
+# A panic blinks the last step code on the backlight.
+diag-panic = ["dagon-mcu-rp2040/diag-panic"]
+
+[dependencies]
+dagon-mcu-rp2040 = { path = "../../mcu/rp2040", features = ["hal"] }
+embassy-rp = { version = "0.10.0", features = ["rp2040"] }
+embassy-time = "0.5"
+embedded-graphics = "0.8"

@@ -1,0 +1,55 @@
+[package]
+name = "dagon-mcu-stm32f401re"
+edition = "2021"
+license = "MIT OR Apache-2.0"
+version = "0.0.0"
+publish = false
+build = "build.rs"
+
+# DAGON MCU package for the STM32F401RE. Without features it is
+# host-testable:
+#   cargo test --target <host triple>
+[workspace]
+
+[features]
+# The embassy-stm32 parts every image uses: clocks, flash port, IWDG
+# guard; the verifying key from DAGON_PUBKEY (the boot core stops here).
+hal = ["dep:embassy-stm32", "dep:embassy-time", "dep:cortex-m", "dep:ed25519-compact"]
+# Node start-up and the I2C target serving loop (logs through defmt: the
+# app links a defmt logger, e.g. defmt-rtt).
+node = ["hal", "embassy-stm32?/defmt", "dep:embassy-futures", "dep:embassy-executor", "dep:defmt"]
+# Conformance build: CONF_RUN runs dagon-conform's node-side tests.
+conform = ["node", "dep:dagon-conform"]
+# The final binary's memory.x comes from this package: an APP slot body
+# (slot A, or B with `slot-b`) unless it is the boot core.
+slot-b = []
+image-bootcore = []
+
+[dependencies]
+dagon-agent = { path = "../../../crates/dagon-agent" }
+dagon-core = { path = "../../../crates/dagon-core" }
+dagon-format = { path = "../../../crates/dagon-format" }
+dagon-port = { path = "../../../crates/dagon-port" }
+dagon-proto = { path = "../../../crates/dagon-proto" }
+dagon-mcu-common = { path = "../common" }
+dagon-conform = { path = "../../../crates/dagon-conform", optional = true }
+# unstable-pac: NACK the own address (I2C CR1.ACK) while a request runs.
+embassy-stm32 = { version = "0.6.0", features = ["stm32f401re", "unstable-pac"], optional = true }
+embassy-time = { version = "0.5", optional = true }
+embassy-futures = { version = "0.1", optional = true }
+embassy-executor = { version = "0.10", optional = true }
+cortex-m = { version = "0.7", optional = true }
+defmt = { version = "1", optional = true }
+# Smaller verifier code for every image (the boot core must fit 32,256 bytes).
+ed25519-compact = { version = "2.6", default-features = false, features = ["opt_size"], optional = true }
+
+[build-dependencies]
+dagon-mcu-build = { path = "../build" }
+# build.rs includes src/layout.rs (one source for addresses and memory.x).
+dagon-core = { path = "../../../crates/dagon-core" }
+dagon-format = { path = "../../../crates/dagon-format" }
+dagon-port = { path = "../../../crates/dagon-port" }
+
+[dev-dependencies]
+dagon-conform = { path = "../../../crates/dagon-conform" }
+ed25519-compact = { version = "2.6", default-features = false }

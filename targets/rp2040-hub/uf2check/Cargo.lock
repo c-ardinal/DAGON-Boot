@@ -100,6 +100,33 @@ dependencies = [
 ]
 
 [[package]]
+name = "dagon-mcu-build"
+version = "0.0.0"
+
+[[package]]
+name = "dagon-mcu-common"
+version = "0.0.0"
+dependencies = [
+ "critical-section",
+ "dagon-format",
+ "dagon-port",
+ "dagon-proto",
+]
+
+[[package]]
+name = "dagon-mcu-rp2040"
+version = "0.0.0"
+dependencies = [
+ "cortex-m",
+ "dagon-core",
+ "dagon-format",
+ "dagon-mcu-build",
+ "dagon-mcu-common",
+ "dagon-port",
+ "dagon-proto",
+]
+
+[[package]]
 name = "dagon-port"
 version = "0.0.0"
 
@@ -191,24 +218,13 @@ dependencies = [
 ]
 
 [[package]]
-name = "rp2040-common"
-version = "0.0.0"
-dependencies = [
- "cortex-m",
- "dagon-core",
- "dagon-format",
- "dagon-port",
- "dagon-proto",
-]
-
-[[package]]
 name = "rp2040-uf2check"
 version = "0.0.0"
 dependencies = [
  "dagon-core",
  "dagon-format",
+ "dagon-mcu-rp2040",
  "dagon-port",
- "rp2040-common",
 ]
 
 [[package]]

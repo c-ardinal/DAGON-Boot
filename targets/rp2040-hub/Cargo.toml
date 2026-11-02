@@ -10,20 +10,19 @@ publish = false
 
 [features]
 # Link for APP-B instead of APP-A (same source, two link addresses).
-slot-b = []
+slot-b = ["dagon-board-waveshare-rp2040-touch-lcd-1-28/slot-b"]
 # LCD test pattern at start (bring-up diagnostics).
 diag = []
 
 [dependencies]
 # diag-panic: a panic blinks the backlight with the last step code.
-rp2040-common = { path = "../rp2040-bootcore/common", features = ["rp", "diag-panic"] }
+dagon-board-waveshare-rp2040-touch-lcd-1-28 = { path = "../boards/waveshare-rp2040-touch-lcd-1.28", features = ["usb", "diag-panic"] }
+dagon-mcu-rp2040 = { path = "../mcu/rp2040", features = ["usb"] }
 dagon-agent = { path = "../../crates/dagon-agent" }
-dagon-core = { path = "../../crates/dagon-core" }
 dagon-format = { path = "../../crates/dagon-format" }
 dagon-port = { path = "../../crates/dagon-port" }
 dagon-proto = { path = "../../crates/dagon-proto" }
 embassy-rp = { version = "0.10.0", features = ["rp2040", "time-driver", "critical-section-impl", "boot2-none"] }
-embassy-usb = "0.6.0"
 embassy-executor = { version = "0.10", features = ["platform-cortex-m", "executor-thread", "executor-interrupt"] }
 embassy-time = "0.5"
 embassy-futures = "0.1"

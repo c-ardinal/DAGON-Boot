@@ -41,9 +41,10 @@ What the code and its tests in this repository show:
   against the simulated F401, through the hub and directly.
 - Topology YAML: 21 validation rules and the supported-board table
   (`dagon-topology`); `topology/desk-demo.yaml` passes them.
-- Firmware for the RP2040 hub (`targets/rp2040-stage0`, `rp2040-bootcore`,
-  `rp2040-hub`), the F401 node (`targets/f401-bootcore`, `f401-app`) and the
-  ESP32-S3 node (`targets/esp32s3-port`, `esp32s3-agent`, with the ESP-IDF
+- Support packages per MCU (`targets/mcu/rp2040`, `targets/mcu/stm32f401re`,
+  with their boot images) and per board (`targets/boards/*`); firmware for
+  the RP2040 hub (`targets/rp2040-hub`), the F401 demo node
+  (`samples/f401-app`) and the ESP32-S3 node (`targets/esp32s3-port`, `esp32s3-agent`, with the ESP-IDF
   2nd stage). The hub firmware has been flashed and starts on the hub
   hardware; on-device validation of the hub (host communication, display) is
   still in progress. On-device checks of the F401 and ESP32-S3 firmware and
@@ -133,11 +134,16 @@ npm run dev       # http://127.0.0.1:5173 (Chrome or Edge 89+, Web Serial)
    `dagon-agent = { git = "<repository URL>", tag = "<release tag>" }`, and
    the same for `dagon-format`, `dagon-proto`, `dagon-port` and, for a boot
    core, `dagon-core`.
-2. Lay out the flash like the existing boards: a boot core, two state log
-   faces, and slots A and B, each starting with the 512-byte signed image
-   header and the body at slot start + 0x200. Link the application for the
-   body address of its slot (see `targets/f401-app` and `targets/rp2040-hub`;
-   their READMEs list the maps). Add the board to the topology YAML.
+2. On an RP2040 or STM32F401RE, use the MCU package (`targets/mcu/<mcu>`,
+   flash layout, linker map, boot images, watchdog, links) and a board
+   package (`targets/boards/<board id>`), or implement the MCU package's
+   `BoardDef` for your own board: the READMEs of the MCU packages show a
+   complete app in about 20 lines. Elsewhere, lay out the flash like the
+   existing boards: a boot core, two state log faces, and slots A and B,
+   each starting with the 512-byte signed image header and the body at slot
+   start + 0x200, and link the application for the body address of its slot
+   (the MCU package READMEs list the maps). Add the board to the topology
+   YAML.
 3. Implement the `dagon-port` traits for your board (`Flash`, `Link`,
    `Reset`, `Watchdog`, and `BootSelectS` or `BootSelectV`) and a
    `dagon_agent::SlotStore`, then start the agent with your link and hooks:
@@ -664,7 +670,7 @@ written for this project.
   selected for that 2nd stage.
 - RP2040 boot2: the generic 03h second-stage loader from the `rp2040-boot2`
   crate (BSD-3-Clause), placed unmodified at the start of flash by
-  `targets/rp2040-stage0`.
+  `targets/mcu/rp2040/stage0`.
 - The STM32F401 system memory boot loader in ROM (used for recovery through
   its documented I2C protocol).
 

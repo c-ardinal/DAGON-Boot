@@ -20,7 +20,7 @@
 - `dagon sim run`: シミュレータ上の 4 つの通しシナリオ。転送中の電断を含む更新、確定しないイメージ、改ざんしたリリース（PC が拒否し、PC 側の検査を外すと子機が拒否）、全消去した F401 の ROM ブートローダ経由の復活。
 - `dagon conform`: `dagon-conform` の 12 件の適合試験。模擬の F401 に対し、親機経由でも直結でも 12 件すべて合格します。
 - 構成 YAML: 21 件の検証規則と対応ボードの表（`dagon-topology`）。`topology/desk-demo.yaml` はこれを通ります。
-- ファームウェア: RP2040 親機（`targets/rp2040-stage0`、`rp2040-bootcore`、`rp2040-hub`）、F401 子機（`targets/f401-bootcore`、`f401-app`）、ESP32-S3 子機（`targets/esp32s3-port`、`esp32s3-agent`、ESP-IDF の 2nd stage と組み合わせ）。親機のファームウェアは親機の実機に書き込み済みで起動しますが、親機の実機での確認（PC との通信、表示）はまだ進行中です。F401 と ESP32-S3 のファームウェアの実機での確認と、実機での通しの流れはまだです（「制限事項」を参照）。
+- MCU ごとの支援パッケージ（`targets/mcu/rp2040`、`targets/mcu/stm32f401re`。ブート用のイメージを含む）とボードごとの支援パッケージ（`targets/boards/*`）。ファームウェア: RP2040 親機（`targets/rp2040-hub`）、F401 のデモ子機（`samples/f401-app`）、ESP32-S3 子機（`targets/esp32s3-port`、`esp32s3-agent`、ESP-IDF の 2nd stage と組み合わせ）。親機のファームウェアは親機の実機に書き込み済みで起動しますが、親機の実機での確認（PC との通信、表示）はまだ進行中です。F401 と ESP32-S3 のファームウェアの実機での確認と、実機での通しの流れはまだです（「制限事項」を参照）。
 - `web/` のブラウザのページ（開発中。現在できることは `web/README.md` を参照）。
 
 ## はじめかた
@@ -95,7 +95,7 @@ npm run dev       # http://127.0.0.1:5173（Chrome または Edge 89 以降、We
 
 1. crate をリリースのタグに固定した git 依存として加えます。例:
    `dagon-agent = { git = "<リポジトリの URL>", tag = "<リリースのタグ>" }`。`dagon-format`、`dagon-proto`、`dagon-port`、ブートコアを作るなら `dagon-core` も同様です。
-2. 既存のボードと同じ形にフラッシュを割り付けます: ブートコア、状態ログ 2 面、スロット A と B。各スロットの先頭に 512 バイトの署名付きイメージヘッダ、本体はスロット先頭 + 0x200。アプリはスロットの本体アドレスにリンクします（`targets/f401-app` と `targets/rp2040-hub` の README に割り付けがあります）。ボードを構成 YAML に加えます。
+2. RP2040 か STM32F401RE なら、MCU のパッケージ（`targets/mcu/<mcu>`。フラッシュの割り付け、リンカの割り付け、ブート用のイメージ、見守り、リンク）とボードのパッケージ（`targets/boards/<board id>`）を使うか、自分のボード用に MCU のパッケージの `BoardDef` を実装します。MCU のパッケージの README に、約 20 行の完全なアプリがあります。それ以外の MCU では、既存のボードと同じ形にフラッシュを割り付けます: ブートコア、状態ログ 2 面、スロット A と B。各スロットの先頭に 512 バイトの署名付きイメージヘッダ、本体はスロット先頭 + 0x200。アプリはスロットの本体アドレスにリンクします（MCU のパッケージの README に割り付けがあります）。ボードを構成 YAML に加えます。
 3. ボード用に `dagon-port` の trait（`Flash`、`Link`、`Reset`、`Watchdog`、`BootSelectS` か `BootSelectV`）と `dagon_agent::SlotStore` を実装し、リンクとフックを渡してエージェントを起動します:
 
    ```rust
@@ -584,7 +584,7 @@ npm packages (`web/package-lock.json`): 86. Only those marked "page" ship in the
 
 - ESP32-S3 の 2nd stage ブートローダ: 公式の ESP-IDF v6.1 のブートローダを、アプリのロールバックを有効にして公式のソースからビルドしたもの（`targets/esp32s3-2ndstage` で自作したのはプロジェクトのファイルと `sdkconfig.defaults` だけ）。
 - `esp-bootloader-esp-idf`（crate、MIT OR Apache-2.0）: ESP32-S3 のポートが otadata の読み書きに改変せずに使っています。この 2nd stage でのスロットの選択は otadata で行います。
-- RP2040 の boot2: `rp2040-boot2` crate（BSD-3-Clause）の generic 03h の second stage を、`targets/rp2040-stage0` がフラッシュの先頭に改変せずに置いています。
+- RP2040 の boot2: `rp2040-boot2` crate（BSD-3-Clause）の generic 03h の second stage を、`targets/mcu/rp2040/stage0` がフラッシュの先頭に改変せずに置いています。
 - STM32F401 の ROM にあるシステムメモリのブートローダ（文書化された I2C の手順で復旧に使います）。
 
 ## 制限事項

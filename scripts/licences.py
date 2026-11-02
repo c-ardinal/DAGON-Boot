@@ -1,7 +1,7 @@
 """Prints the third-party dependency licence tables for the README.
 
 Reads every Cargo.lock in the repository (the root workspace and each
-firmware package under targets/) through `cargo metadata`, and
+firmware package under targets/ and samples/) through `cargo metadata`, and
 web/package-lock.json. Run from the repository root:
 
     python scripts/licences.py > deps.md
@@ -20,8 +20,10 @@ SHIPPED = {"svelte", "clsx", "esm-env"}
 
 def cargo_workspaces():
     yield ROOT, "crates/"
-    for lock in sorted((ROOT / "targets").glob("*/Cargo.lock")):
-        yield lock.parent, lock.parent.name
+    for top in ("targets", "samples"):
+        for lock in sorted((ROOT / top).rglob("Cargo.lock")):
+            if "target" not in lock.relative_to(ROOT / top).parts[:-1]:
+                yield lock.parent, lock.parent.name
 
 
 def cargo_packages():

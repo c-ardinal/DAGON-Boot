@@ -1,0 +1,20 @@
+[package]
+name = "dagon-mcu-common"
+edition = "2021"
+license = "MIT OR Apache-2.0"
+version = "0.0.0"
+publish = false
+
+# MCU-independent parts of the DAGON MCU packages, host-testable:
+#   cargo test --target <host triple>
+[workspace]
+
+[dependencies]
+dagon-format = { path = "../../../crates/dagon-format" }
+dagon-port = { path = "../../../crates/dagon-port" }
+dagon-proto = { path = "../../../crates/dagon-proto" }
+critical-section = "1"
+
+[dev-dependencies]
+critical-section = { version = "1", features = ["std"] }
+dagon-sim = { path = "../../../crates/dagon-sim" }

@@ -23,6 +23,8 @@ dagon-format = { path = "../../crates/dagon-format" }
 dagon-proto = { path = "../../crates/dagon-proto" }
 f401-board = { path = "../f401-board" }
 f401-node = { path = "../f401-node" }
+# Board-independent watchdog liveness accounting (shared with the hub).
+rp2040-common = { path = "../rp2040-bootcore/common" }
 # unstable-pac: NACK the own address (I2C CR1.ACK) while a request runs.
 embassy-stm32 = { version = "0.6.0", features = ["stm32f401re", "time-driver-any", "defmt", "unstable-pac"] }
 embassy-futures = "0.1"

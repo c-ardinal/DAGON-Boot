@@ -27,10 +27,10 @@ impl<const N: usize> FrameReader<N> {
     }
 
     /// [`FrameReader::push`] for a link with an inter-byte limit: bytes
-    /// arriving at `now_ms` more than [`GAP_MS`] after the previous ones
+    /// arriving at `now_ms` [`GAP_MS`] or more after the previous ones
     /// first drop the partial frame buffered so far.
     pub fn push_at(&mut self, data: &[u8], now_ms: u64) -> usize {
-        if self.len > 0 && now_ms.saturating_sub(self.last_ms) > GAP_MS {
+        if self.len > 0 && now_ms.saturating_sub(self.last_ms) >= GAP_MS {
             self.clear();
         }
         self.last_ms = now_ms;
@@ -126,12 +126,12 @@ mod tests {
         // and the frame sent again in full is found on its own.
         r.push_at(&f[..5], 0);
         assert_eq!(r.poll(), None);
-        r.push_at(&f[..n], GAP_MS + 1);
+        r.push_at(&f[..n], GAP_MS);
         assert_eq!(r.poll(), Some(n));
         r.consume(n);
         // Within the gap the bytes are kept together.
         r.push_at(&f[..5], 100);
-        r.push_at(&f[5..n], 100 + GAP_MS);
+        r.push_at(&f[5..n], 100 + GAP_MS - 1);
         assert_eq!(r.poll(), Some(n));
     }
 

@@ -9,6 +9,7 @@ pub mod cmd;
 pub mod frames;
 pub mod image;
 pub mod layout;
+pub mod liveness;
 pub mod mapped;
 pub mod status;
 

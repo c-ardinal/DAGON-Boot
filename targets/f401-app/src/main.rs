@@ -246,7 +246,7 @@ async fn serve(mut agent: Agent<Store, DefaultHooks>, mut target: Target) -> ! {
                 last_request = Some(Instant::now());
                 mailbox.request();
                 // An erase starts with a full watchdog period.
-                wdt::keepalive();
+                wdt::feed();
                 acknowledge(false);
                 let t0 = Instant::now();
                 if !conform::serve(&mut agent, &rx[..n], &mut mailbox) {
@@ -345,7 +345,7 @@ mod conform {
         // Long tests feed through this hook and count as progress.
         let mut feed = || {
             wdt::busy(Task::Serve);
-            wdt::keepalive();
+            wdt::feed();
         };
         match handle_frame(request, max, flash, &setup, &mut out, &mut feed) {
             Some(n) => {

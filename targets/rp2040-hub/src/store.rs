@@ -78,8 +78,9 @@ impl SlotStore for HubStore {
         let mut at = base;
         while at < end {
             self.flash.erase(at, SECTOR).map_err(flash_err)?;
-            wdt::keepalive();
+            // Lease renewal of the PC task, then a gated feed.
             wdt::busy(wdt::Task::Pc);
+            wdt::feed();
             at += SECTOR;
         }
         Ok(())

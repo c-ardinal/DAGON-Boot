@@ -158,7 +158,7 @@ npm run dev       # http://127.0.0.1:5173（Chrome または Edge 89 以降、We
 - ページに含まれる npm のコードは、Svelte のクライアント用ランタイムと、それが読み込む `clsx` と `esm-env`（いずれも MIT）だけです。他の npm パッケージはビルドとテストの道具です（表の "Ships in" 列）。
 - `web/public/fonts/` の書体は SIL Open Font License 1.1 です: Doto、DotGothic16、Zen Kaku Gothic New、JetBrains Mono（ライセンス文はファイルの隣にあります。`web/README.md` を参照）。
 
-Rust crates: 315 packages, 349 name/version pairs. "Used by": `crates/` is the host workspace, other names are firmware packages under `targets/`.
+Rust crates: 316 packages, 350 name/version pairs. "Used by": `crates/` is the host workspace, other names are firmware packages under `targets/`.
 
 | Crate | Versions | Licence | Used by |
 |---|---|---|---|
@@ -250,6 +250,7 @@ Rust crates: 315 packages, 349 name/version pairs. "Used by": `crates/` is the h
 | esp-bootloader-esp-idf | 0.6.0 | MIT OR Apache-2.0 | esp32s3-agent, esp32s3-app, esp32s3-port |
 | esp-config | 0.8.0 | MIT OR Apache-2.0 | esp32s3-agent, esp32s3-app, esp32s3-port |
 | esp-hal | 1.2.2 | MIT OR Apache-2.0 | esp32s3-agent, esp32s3-app, esp32s3-port |
+| esp-hal-co5300 | 0.1.0 | MIT OR Apache-2.0 | esp32s3-app |
 | esp-hal-procmacros | 0.23.0 | MIT OR Apache-2.0 | esp32s3-agent, esp32s3-app, esp32s3-port |
 | esp-metadata-generated | 0.5.3 | MIT OR Apache-2.0 | esp32s3-agent, esp32s3-app, esp32s3-port |
 | esp-riscv-rt | 0.15.0 | MIT OR Apache-2.0 | esp32s3-agent, esp32s3-app, esp32s3-port |

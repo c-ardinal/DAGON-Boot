@@ -8,20 +8,24 @@
 //! blinks at 1 Hz (reinstall with BOOTSEL + UF2). In the `diag` build a
 //! panic blinks the code of the last step (6 before HAL init, 7 after it,
 //! 8 deciding) and nothing startable blinks code 9.
+//!
+//! It accepts only images tagged with its node's tag: `DAGON_TARGET_TAG`
+//! at build time (the build fails without it).
 #![no_std]
 #![no_main]
 
 use dagon_core::boot::{self, BootConfig, Decision};
 use dagon_core::log::Log;
-use dagon_format::header::{mcu_id, target_tag};
+use dagon_format::header::mcu_id;
+use dagon_mcu_rp2040::arm::{jump, led, step};
+use dagon_mcu_rp2040::flash::RpFlash;
+use dagon_mcu_rp2040::layout::{APP_LOG_LAYOUT, APP_SLOTS, MAX_ATTEMPTS, WDT_MS};
+use dagon_mcu_rp2040::tag::checked_tag;
+use dagon_mcu_rp2040::{PUBKEY, TARGET_TAG};
 use embassy_rp::watchdog::Watchdog;
 use embassy_time::Duration;
 #[cfg(not(feature = "diag"))]
 use panic_halt as _;
-use dagon_mcu_rp2040::arm::{jump, led, step};
-use dagon_mcu_rp2040::layout::{APP_LOG_LAYOUT, APP_SLOTS, HUB_TAG, MAX_ATTEMPTS, WDT_MS};
-use dagon_mcu_rp2040::flash::RpFlash;
-use dagon_mcu_rp2040::PUBKEY;
 
 const HALT_MS: u32 = 500;
 
@@ -56,12 +60,14 @@ fn hand_back_clocks() {
 const CONFIG: BootConfig = BootConfig {
     pubkey: PUBKEY,
     mcu_id: mcu_id::RP2040,
-    target_tag: target_tag(HUB_TAG),
+    target_tag: checked_tag(TARGET_TAG),
     max_attempts: MAX_ATTEMPTS,
 };
 
 #[cortex_m_rt::entry]
 fn main() -> ! {
+    // The diag panic handler blinks the selected LED.
+    led::select(led::BOOT_GPIO);
     step(6);
     let p = embassy_rp::init(Default::default());
     step(7);

@@ -2,10 +2,13 @@
 //! confirms it; dagon gen never rewrites this file.
 
 use dagon_board_nucleo_f401re::Io;
-use dagon_mcu_stm32f401re::watchdog::Lease;
+use dagon_mcu_stm32f401re::watchdog::{Guard, Lease};
 use embassy_executor::Spawner;
 use embassy_stm32::gpio::{Level, Output, Speed};
 use embassy_time::{Duration, Timer};
+
+/// How many watchdog guard tasks your application uses.
+pub const TASKS: usize = 1;
 
 /// Longest one piece of work may take before the board is reset.
 const WORK_BUDGET_MS: u64 = 500;
@@ -15,10 +18,11 @@ pub fn self_check() -> bool {
     true
 }
 
-/// Starts the application's task. `io` holds LD2 and the header pins;
-/// `lease` is the task's handle on the watchdog.
-pub fn start(spawner: Spawner, io: Io, lease: Lease) {
-    spawner.spawn(work(io, lease).expect("task pool"));
+/// Starts your tasks; each takes one guard task from `first` on. `io`
+/// holds LD2, the 7-segment pins and `io.spare`
+/// (USART2, I2C1, B1, ADC1 and their pins).
+pub fn start<const N: usize>(spawner: Spawner, io: Io, guard: &'static Guard<N>, first: usize) {
+    spawner.spawn(work(io, guard.lease(first)).expect("task pool"));
 }
 
 /// Blinks LD2, announcing a deadline before each piece of work: a stuck
@@ -26,6 +30,7 @@ pub fn start(spawner: Spawner, io: Io, lease: Lease) {
 /// previous one.
 #[embassy_executor::task]
 async fn work(io: Io, lease: Lease) {
+    // For example, the user button B1: `Input::new(io.spare.pc13, Pull::None)`.
     let mut led = Output::new(io.led, Level::Low, Speed::Low);
     loop {
         lease.busy(WORK_BUDGET_MS);

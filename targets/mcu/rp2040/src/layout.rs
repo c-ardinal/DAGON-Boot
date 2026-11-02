@@ -39,10 +39,6 @@ pub const MAX_ATTEMPTS: u8 = 3;
 /// Watchdog period for every boot (below the RP2040 limit of 8.388 s).
 pub const WDT_MS: u32 = 8_000;
 
-/// Image target tag of DAGON's own hub firmware: the boot core built from
-/// this package accepts app images with this tag.
-pub const HUB_TAG: &str = "hub-rp2040-lcd";
-
 /// RAM every image links against.
 pub const RAM: u32 = 0x2000_0000;
 pub const RAM_LEN: u32 = 256 * 1024;

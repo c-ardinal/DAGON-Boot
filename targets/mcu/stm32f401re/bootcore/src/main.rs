@@ -5,7 +5,9 @@
 //!
 //! Images are verified with `dagon_mcu_stm32f401re::PUBKEY` (`DAGON_PUBKEY`
 //! at build time; the public test key only with `DAGON_ALLOW_TEST_KEY=1`).
-//! The halt LED is PA5 (LD2 on NUCLEO boards).
+//! The halt LED is PA5 (LD2 on NUCLEO boards). It accepts only images
+//! tagged with its node's tag: `DAGON_TARGET_TAG` at build time (the build
+//! fails without it).
 #![no_std]
 #![no_main]
 
@@ -15,17 +17,18 @@ use cortex_m::peripheral::{NVIC, SCB};
 use cortex_m_rt::entry;
 use dagon_core::boot::{decide, BootConfig, Decision};
 use dagon_core::log::Log;
+use dagon_mcu_stm32f401re::flash::F401Flash;
+use dagon_mcu_stm32f401re::layout as board;
+use dagon_mcu_stm32f401re::tag::checked_tag;
+use dagon_mcu_stm32f401re::{clocks, PUBKEY, SYSCLK_HZ, TARGET_TAG};
 use dagon_port::BootSelectS;
 use embassy_stm32::gpio::{Level, Output, Speed};
 use embassy_stm32::wdg::IndependentWatchdog;
-use dagon_mcu_stm32f401re::flash::F401Flash;
-use dagon_mcu_stm32f401re::layout as board;
-use dagon_mcu_stm32f401re::{clocks, PUBKEY, SYSCLK_HZ};
 
 const CONFIG: BootConfig = BootConfig {
     pubkey: PUBKEY,
     mcu_id: board::MCU_ID,
-    target_tag: board::TARGET_TAG,
+    target_tag: checked_tag(TARGET_TAG),
     max_attempts: board::MAX_ATTEMPTS,
 };
 

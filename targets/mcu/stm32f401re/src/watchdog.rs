@@ -10,7 +10,9 @@ use embassy_stm32::peripherals::IWDG;
 use embassy_stm32::wdg::IndependentWatchdog;
 use embassy_time::Instant;
 
-pub use dagon_mcu_common::guard::{Dog, Lease, Trial, Watch, BUSY_LIMIT_MS, BUSY_MARGIN_MS};
+pub use dagon_mcu_common::guard::{
+    levels, Dog, Lease, Trial, Watch, BUSY_LIMIT_MS, BUSY_MARGIN_MS,
+};
 pub use dagon_mcu_common::liveness::Level;
 
 /// The IWDG as the guard drives it.

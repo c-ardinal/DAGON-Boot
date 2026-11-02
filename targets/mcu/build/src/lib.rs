@@ -48,7 +48,12 @@ pub fn embed_pubkey() {
         "DAGON_PUBKEY: expected 64 hex digits (or a file holding them)"
     );
     let bytes: Vec<String> = (0..32)
-        .map(|i| format!("{:#04x}", u8::from_str_radix(&hex[i * 2..i * 2 + 2], 16).unwrap()))
+        .map(|i| {
+            format!(
+                "{:#04x}",
+                u8::from_str_radix(&hex[i * 2..i * 2 + 2], 16).unwrap()
+            )
+        })
         .collect();
     fs::write(
         out_dir().join("pubkey.rs"),

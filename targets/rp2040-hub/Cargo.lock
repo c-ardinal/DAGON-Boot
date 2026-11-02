@@ -278,11 +278,16 @@ dependencies = [
 name = "dagon-board-waveshare-rp2040-touch-lcd-1-28"
 version = "0.0.0"
 dependencies = [
+ "dagon-format",
  "dagon-mcu-rp2040",
+ "dagon-proto",
  "embassy-executor",
+ "embassy-futures",
  "embassy-rp",
  "embassy-time",
  "embedded-graphics",
+ "heapless 0.9.3",
+ "static_cell",
 ]
 
 [[package]]
@@ -330,9 +335,12 @@ dependencies = [
  "dagon-port",
  "dagon-proto",
  "embassy-executor",
+ "embassy-futures",
  "embassy-rp",
+ "embassy-sync",
  "embassy-time",
  "embassy-usb",
+ "heapless 0.9.3",
  "portable-atomic",
  "static_cell",
 ]
@@ -1333,21 +1341,12 @@ dependencies = [
 name = "rp2040-hub"
 version = "0.0.0"
 dependencies = [
- "cortex-m",
  "cortex-m-rt",
- "dagon-agent",
  "dagon-board-waveshare-rp2040-touch-lcd-1-28",
- "dagon-format",
  "dagon-mcu-rp2040",
- "dagon-port",
  "dagon-proto",
  "embassy-executor",
- "embassy-futures",
  "embassy-rp",
- "embassy-sync",
- "embassy-time",
- "embedded-graphics",
- "heapless 0.9.3",
  "portable-atomic",
  "static_cell",
 ]

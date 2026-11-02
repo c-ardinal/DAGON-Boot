@@ -1,18 +1,75 @@
-//! State shared between the tasks, each value behind a critical-section
-//! mutex (the tasks run on different executors and priorities). Writers:
-//! the PC task (sub-node list, hub's own state, SHOW progress, quiet time),
-//! the link tasks (what each node answered). Reader: the LCD task.
+//! State shared between the relay tasks and a display, each value behind a
+//! critical-section mutex (the tasks run on different executors and
+//! priorities). Writers: the PC task (sub-node list, the 親機's own state,
+//! SHOW progress, quiet time), the link tasks (what each node answered).
+//! Reader: a display ([`home`], [`REDRAW`]) or the app.
 
 use core::cell::{Cell, RefCell};
 
 use dagon_format::Version;
+use dagon_proto::payload::{Show, SHOW_TEXT_MAX};
 use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex as Cs;
 use embassy_sync::blocking_mutex::Mutex;
 use embassy_sync::signal::Signal;
 use embassy_time::{Duration, Instant};
 
-use crate::lcd::{Home, Node, Progress, Shade};
-use crate::nodes::{self, Subs};
+use heapless::String;
+
+use super::nodes::{self, SubNode, Subs, MAX_SUBS};
+
+/// How a node is doing, as far as the 親機 knows.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum Shade {
+    #[default]
+    Unknown,
+    Confirmed,
+    Trial,
+    NoAnswer,
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct Node {
+    pub node: SubNode,
+    pub version: Option<Version>,
+    pub shade: Shade,
+}
+
+/// The last SHOW.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct Progress {
+    pub node: u8,
+    pub phase: u8,
+    pub percent: u8,
+    pub version: Version,
+    /// Printable ASCII of the SHOW text.
+    pub text: String<SHOW_TEXT_MAX>,
+}
+
+impl From<&Show<'_>> for Progress {
+    fn from(s: &Show<'_>) -> Self {
+        let mut text = String::new();
+        if s.text.iter().all(|b| (0x20..0x7F).contains(b)) {
+            s.text.iter().for_each(|&b| {
+                let _ = text.push(b as char);
+            });
+        }
+        Progress {
+            node: s.node,
+            phase: s.phase,
+            percent: s.percent.min(100),
+            version: s.version,
+            text,
+        }
+    }
+}
+
+/// Everything a home screen shows.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct Home {
+    pub hub: Node,
+    pub subs: heapless::Vec<Node, MAX_SUBS>,
+    pub progress: Option<Progress>,
+}
 
 /// No own polling (and the progress screen stays) for this long after a
 /// RELAY or SHOW: the PC drives the nodes.

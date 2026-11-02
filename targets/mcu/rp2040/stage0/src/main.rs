@@ -16,12 +16,12 @@
 use cortex_m_rt::entry;
 use dagon_format::header::image_kind;
 use dagon_format::statelog::slot;
-use dagon_port::Flash;
-#[cfg(not(feature = "diag"))]
-use panic_halt as _;
 use dagon_mcu_rp2040::arm::{jump, led, step, xip_flash};
 use dagon_mcu_rp2040::layout::{BL_LOG, BL_SLOT, BL_SLOT_SIZE, RAM, RAM_LEN, STAGE0};
 use dagon_mcu_rp2040::{bl, image};
+use dagon_port::Flash;
+#[cfg(not(feature = "diag"))]
+use panic_halt as _;
 
 #[link_section = ".boot2"]
 #[used]

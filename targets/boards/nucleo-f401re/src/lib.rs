@@ -59,7 +59,10 @@ mod hal {
     pub use dagon_mcu_stm32f401re::BoardDef;
     use embassy_stm32::gpio::{AnyPin, Level, Output, Speed};
     use embassy_stm32::i2c::{self, I2c, SlaveAddrConfig};
-    use embassy_stm32::peripherals::{DMA1_CH2, DMA1_CH4, I2C3, PA5, PA8, PB4};
+    use embassy_stm32::peripherals::{
+        ADC1, DMA1_CH2, DMA1_CH4, I2C1, I2C3, PA2, PA3, PA5, PA8, PB4, PB8, PB9, PC0, PC1, PC13,
+        USART2,
+    };
     use embassy_stm32::{bind_interrupts, dma, pac, peripherals, Peri, Peripherals};
 
     use super::{seg, BOARD_ID, FLASH_SIZE, I2C_ADDR};
@@ -104,6 +107,23 @@ mod hal {
     pub struct Io {
         pub led: Peri<'static, PA5>,
         pub display: SegDisplay,
+        pub spare: Spare,
+    }
+
+    /// A few common peripherals DAGON does not use: the ST-LINK virtual
+    /// COM port (USART2 on PA2/PA3), I2C1 on the Arduino D15/D14 pins
+    /// (PB8/PB9), the user button B1 (PC13), ADC1 with A4/A5 (PC1/PC0).
+    pub struct Spare {
+        pub usart2: Peri<'static, USART2>,
+        pub pa2: Peri<'static, PA2>,
+        pub pa3: Peri<'static, PA3>,
+        pub i2c1: Peri<'static, I2C1>,
+        pub pb8: Peri<'static, PB8>,
+        pub pb9: Peri<'static, PB9>,
+        pub pc13: Peri<'static, PC13>,
+        pub adc1: Peri<'static, ADC1>,
+        pub pc0: Peri<'static, PC0>,
+        pub pc1: Peri<'static, PC1>,
     }
 
     /// The 7-segment display's pins: segments a..g and dp, digit selects.
@@ -151,6 +171,18 @@ mod hal {
                         p.PA0.into(),  // dp A0
                     ],
                     digits: [p.PA1.into(), p.PA4.into(), p.PB0.into()],
+                },
+                spare: Spare {
+                    usart2: p.USART2,
+                    pa2: p.PA2,
+                    pa3: p.PA3,
+                    i2c1: p.I2C1,
+                    pb8: p.PB8,
+                    pb9: p.PB9,
+                    pc13: p.PC13,
+                    adc1: p.ADC1,
+                    pc0: p.PC0,
+                    pc1: p.PC1,
                 },
             };
             let dagon = DagonParts {

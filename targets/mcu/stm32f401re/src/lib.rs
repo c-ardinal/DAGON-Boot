@@ -7,7 +7,8 @@
 //!   ([`flash`]), the liveness-gated IWDG ([`watchdog`]); the verifying key
 //!   embedded at build time ([`PUBKEY`], [`TEST_KEY`]).
 //! - `node`: the board definition and node start-up ([`node`],
-//!   [`BoardDef`]); logs through defmt.
+//!   [`BoardDef`]) with DAGON's high-priority executor ([`exec`]); logs
+//!   through defmt.
 //! - `conform`: the conformance build's CONF_RUN serving.
 //! - Linker memory map: an APP slot body by default (slot B with
 //!   `slot-b`), so apps need no build.rs; `image-bootcore` for the boot
@@ -25,6 +26,8 @@ pub use store::KindSStore;
 mod clocks;
 #[cfg(feature = "hal")]
 pub use clocks::{clocks, SYSCLK_HZ};
+#[cfg(feature = "node")]
+pub mod exec;
 #[cfg(feature = "hal")]
 pub mod flash;
 #[cfg(feature = "node")]
@@ -34,7 +37,16 @@ pub mod watchdog;
 #[cfg(feature = "node")]
 pub use node::BoardDef;
 
-pub use dagon_mcu_common::liveness;
+pub use dagon_mcu_common::{liveness, tag};
+
+/// This node's image target tag, from `DAGON_TARGET_TAG` at build time
+/// (empty if unset). The boot core accepts only images with this tag, and
+/// the node's agent announces it; a generated project sets it in its
+/// `.cargo/config.toml`. Up to 16 ASCII characters.
+pub const TARGET_TAG: &str = match option_env!("DAGON_TARGET_TAG") {
+    Some(t) => t,
+    None => "",
+};
 
 /// The topology's MCU id and flash map this package implements.
 pub const TOPOLOGY_MCU: &str = "stm32f401re";

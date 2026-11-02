@@ -136,7 +136,7 @@ npm run dev       # http://127.0.0.1:5173（Chrome または Edge 89 以降、We
 - Rust stable と `rust-toolchain.toml` のターゲット（`thumbv6m-none-eabi`、`thumbv7em-none-eabihf`、`wasm32-unknown-unknown`）
 - `crates/dagon-wasm` 用の `wasm-pack` 0.15.1（対応する `wasm-bindgen` と `wasm-opt` は自分で取得します）
 - `web/` 用の Node.js と npm（`web/README.md` を参照）
-- ESP32-S3 のファームウェア用: `espup` で入れる Xtensa 用 Rust ツールチェーン（ESP32-S3 のパッケージは `esp` チャネルを使う）。2nd stage はビルド済みのものを `targets/mcu/esp32s3/vendor/` に同梱する予定（まだ入っていない）。それまでと、改めてビルドするときは、ESP-IDF v6.1 で `targets/esp32s3-2ndstage` からビルドする
+- ESP32-S3 のファームウェア用: `espup` で入れる Xtensa 用 Rust ツールチェーン（ESP32-S3 のパッケージは `esp` チャネルを使う）。2nd stage はビルド済みのものを `targets/mcu/esp32s3/vendor/` に同梱している。ESP-IDF v6.1 は改めてビルドするときだけ必要（`targets/esp32s3-2ndstage` から。`vendor/PROVENANCE.md` を参照）
 - F401 を ST-LINK で書く `probe-rs`、RP2040 の立ち上げ用イメージに使う `elf2uf2-rs`
 - C コンパイラ: `ring` crate（`dagon ai topology` の TLS）が C のコードをビルドします
 
@@ -583,7 +583,7 @@ npm packages (`web/package-lock.json`): 86. Only those marked "page" ship in the
 
 ## 無改変のベンダーコンポーネント
 
-- ESP32-S3 の 2nd stage ブートローダ: 公式の ESP-IDF v6.1 のブートローダを、アプリのロールバックを有効にして公式のソースからビルドしたもの（`targets/esp32s3-2ndstage` で自作したのはプロジェクトのファイルと `sdkconfig.defaults` だけ）。無改変のまま `targets/mcu/esp32s3/vendor/bootloader.bin` として、出どころとライセンスを添えて同梱する予定（`vendor/PROVENANCE.md`。バイナリはまだ入っていない）。
+- ESP32-S3 の 2nd stage ブートローダ: 公式の ESP-IDF v6.1 のブートローダを、アプリのロールバックを有効にして公式のソースからビルドしたもの（`targets/esp32s3-2ndstage` で自作したのはプロジェクトのファイルと `vendor/sdkconfig.defaults` の sdkconfig オプションだけ）。無改変のまま `targets/mcu/esp32s3/vendor/bootloader.bin` として、出どころとライセンスを添えて同梱している（`vendor/PROVENANCE.md`、`vendor/LICENSE-ESP-IDF`）。
 - `esp-bootloader-esp-idf`（crate、MIT OR Apache-2.0）: ESP32-S3 のポートが otadata の読み書きに改変せずに使っています。この 2nd stage でのスロットの選択は otadata で行います。
 - RP2040 の boot2: `rp2040-boot2` crate（BSD-3-Clause）の generic 03h の second stage を、`targets/mcu/rp2040/stage0` がフラッシュの先頭に改変せずに置いています。
 - STM32F401 の ROM にあるシステムメモリのブートローダ（文書化された I2C の手順で復旧に使います）。

@@ -87,8 +87,7 @@ cargo build --release
 Prerequisites:
 
 - The rollback-enabled 2nd stage: `targets/mcu/esp32s3/vendor/bootloader.bin`
-  (prebuilt, unmodified ESP-IDF; until it is added, build it from
-  `targets/esp32s3-2ndstage` with the steps in `vendor/PROVENANCE.md` there).
+  (prebuilt, unmodified ESP-IDF v6.1; see `vendor/PROVENANCE.md` there).
 - The test apps are built (`cargo build --release` here); `E` below is that
   release output directory.
 

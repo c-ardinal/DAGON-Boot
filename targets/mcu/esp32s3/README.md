@@ -51,9 +51,9 @@ and the node tag from the generated `wiring.rs`.
 - There is no `UserIo` bundle: the app keeps the peripherals returned by
   `esp_hal::init`, and the board package's macros (`dagon_pins!`, and e.g.
   `display_pins!`) move out only what DAGON or a board extra takes.
-- The ESP-IDF 2nd stage is to ship prebuilt and unmodified in `vendor/` (see
-  `vendor/PROVENANCE.md`; the binary is not added yet, build it with the
-  steps there); the factory firmware is a binary of the board
+- The ESP-IDF 2nd stage ships prebuilt and unmodified in `vendor/`
+  (`vendor/bootloader.bin`; provenance and rebuild steps in
+  `vendor/PROVENANCE.md`); the factory firmware is a binary of the board
   package, since it needs the board's pins.
 
 ## Receiver (`store::EspStore`)

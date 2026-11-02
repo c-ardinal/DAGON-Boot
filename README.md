@@ -194,10 +194,10 @@ npm run dev       # http://127.0.0.1:5173 (Chrome or Edge 89+, Web Serial)
   `wasm-bindgen` and `wasm-opt` itself)
 - Node.js and npm for `web/` (see `web/README.md`)
 - For the ESP32-S3 firmware: the Xtensa Rust toolchain installed with
-  `espup` (the ESP32-S3 packages use the `esp` channel). The 2nd stage is
-  to be shipped prebuilt in `targets/mcu/esp32s3/vendor/` (not added yet);
-  until then, and to rebuild it, ESP-IDF v6.1 builds it from
-  `targets/esp32s3-2ndstage`
+  `espup` (the ESP32-S3 packages use the `esp` channel). The 2nd stage
+  ships prebuilt in `targets/mcu/esp32s3/vendor/`; ESP-IDF v6.1 is needed
+  only to rebuild it (from `targets/esp32s3-2ndstage`, see
+  `vendor/PROVENANCE.md`)
 - `probe-rs` to flash the F401 over ST-LINK, `elf2uf2-rs` for the RP2040
   bring-up image
 - A C compiler: the `ring` crate (TLS for `dagon ai topology`) builds C code
@@ -668,10 +668,10 @@ written for this project.
 
 - ESP32-S3 2nd stage boot loader: the official ESP-IDF v6.1 bootloader, built
   from the official source with app rollback enabled
-  (`targets/esp32s3-2ndstage`: only the project files and `sdkconfig.defaults`
-  are ours). To be shipped unmodified as
+  (`targets/esp32s3-2ndstage`: only the project files and the sdkconfig
+  options in `vendor/sdkconfig.defaults` are ours). Shipped unmodified as
   `targets/mcu/esp32s3/vendor/bootloader.bin` with its provenance and licence
-  (`vendor/PROVENANCE.md`; the binary is not added yet).
+  (`vendor/PROVENANCE.md`, `vendor/LICENSE-ESP-IDF`).
 - `esp-bootloader-esp-idf` (crate, MIT OR Apache-2.0): used unmodified by
   the ESP32-S3 port to read and write otadata, which is how a slot is
   selected for that 2nd stage.

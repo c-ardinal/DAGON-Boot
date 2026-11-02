@@ -264,6 +264,57 @@ pub fn load_key(arg: Option<&str>) -> Result<KeyPair, String> {
     Ok(key)
 }
 
+/// The project's signing key file: `signing_key` in dagon.toml, else the
+/// secret beside its pubkey (where dagon new puts the pair), else
+/// DAGON_SIGNING_KEY.
+pub fn signing_key_path(cfg: &Config) -> Option<PathBuf> {
+    cfg.signing_key
+        .clone()
+        .or_else(|| {
+            let dir = cfg.pubkey.as_ref()?.parent()?;
+            Some(dir.join(dagon_sign::SECRET_FILE)).filter(|p| p.is_file())
+        })
+        .or_else(|| std::env::var_os(KEY_ENV).map(PathBuf::from))
+}
+
+/// Every secret key file the project or the environment names.
+fn known_secrets(cfg: &Config) -> Vec<PathBuf> {
+    let beside = cfg
+        .pubkey
+        .as_ref()
+        .and_then(|p| p.parent())
+        .map(|d| d.join(dagon_sign::SECRET_FILE));
+    let env = std::env::var_os(KEY_ENV).map(PathBuf::from);
+    [cfg.signing_key.clone(), beside, env]
+        .into_iter()
+        .flatten()
+        .filter(|p| p.is_file())
+        .collect()
+}
+
+/// The project's public key from `path` (its pubkey file), for the page
+/// and the firmware: a valid Ed25519 point, never a secret seed this
+/// process knows of (whatever the file is called), and, with a signing key
+/// known, its public half. Messages carry no paths.
+pub fn checked_pubkey(cfg: &Config, path: &Path) -> Result<[u8; 32], String> {
+    let k = dagon_sign::load_public_key(path).map_err(|_| "the pubkey file is not a public key")?;
+    if known_secrets(cfg)
+        .iter()
+        .filter_map(|s| dagon_sign::load_key_pair(s).ok())
+        .any(|kp| kp.sk.seed().as_ref() == k.as_slice())
+    {
+        return Err("the pubkey file holds a secret key".into());
+    }
+    if let Some(s) = signing_key_path(cfg) {
+        let kp = dagon_sign::load_key_pair(&s).map_err(|_| "the signing key cannot be read")?;
+        if *kp.pk != k {
+            return Err("pubkey is not the public half of the project's signing key".into());
+        }
+    }
+    allow_key(&k, test_key_allowed())?;
+    Ok(k)
+}
+
 /// Environment variable that permits the public RFC 8032 test key.
 pub const ALLOW_TEST_KEY_ENV: &str = "DAGON_ALLOW_TEST_KEY";
 

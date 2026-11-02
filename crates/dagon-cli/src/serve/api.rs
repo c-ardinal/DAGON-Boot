@@ -41,19 +41,6 @@ fn stop_if(cancel: &AtomicBool) -> Result<(), String> {
     }
 }
 
-/// The project's signing key file: `signing_key` in dagon.toml, else the
-/// secret beside its pubkey (where dagon new puts the pair), else
-/// DAGON_SIGNING_KEY.
-fn signing_key_path(cfg: &Config) -> Option<PathBuf> {
-    cfg.signing_key
-        .clone()
-        .or_else(|| {
-            let dir = cfg.pubkey.as_ref()?.parent()?;
-            Some(dir.join(dagon_sign::SECRET_FILE)).filter(|p| p.is_file())
-        })
-        .or_else(|| std::env::var_os(crate::config::KEY_ENV).map(PathBuf::from))
-}
-
 /// A key file named in dagon.toml (or DAGON_SIGNING_KEY), resolved; it
 /// must lie in the work area or a key folder. Messages carry no paths.
 fn key_file(cfg: &Config, p: &Path, what: &str) -> Result<PathBuf, String> {
@@ -78,22 +65,12 @@ fn public_key(cfg: &Config, p: &Path) -> Result<[u8; 32], String> {
     if !is_pub {
         return Err("pubkey must name a .pub file (from dagon key gen)".into());
     }
-    let text = std::fs::read_to_string(&p).map_err(|_| "the pubkey file cannot be read")?;
-    let secret = p
-        .parent()
-        .map(|d| d.join(dagon_sign::SECRET_FILE))
-        .and_then(|s| std::fs::read_to_string(s).ok());
-    if secret.is_some_and(|s| s.trim().eq_ignore_ascii_case(text.trim())) {
-        return Err("the pubkey file holds a secret key".into());
-    }
-    let k = dagon_sign::load_public_key(&p).map_err(|_| "the pubkey file is not a public key")?;
-    crate::config::allow_key(&k, crate::config::test_key_allowed())?;
-    Ok(k)
+    crate::config::checked_pubkey(cfg, &p)
 }
 
 /// The project's signing key; refused when it does not match its pubkey.
 fn project_key(cfg: &Config) -> Result<ed25519_compact::KeyPair, String> {
-    let path = signing_key_path(cfg).ok_or_else(|| {
+    let path = crate::config::signing_key_path(cfg).ok_or_else(|| {
         format!(
             "no signing key: set signing_key in dagon.toml or {}",
             crate::config::KEY_ENV

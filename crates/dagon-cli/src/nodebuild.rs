@@ -93,6 +93,9 @@ pub fn build_nodes(
     } else {
         nodes.to_vec()
     };
+    if let Some(p) = &cfg.pubkey {
+        crate::config::checked_pubkey(cfg, p).map_err(|e| format!("pubkey in dagon.toml: {e}"))?;
+    }
     let mut out = Vec::new();
     for id in ids {
         let inputs = cfg
@@ -374,8 +377,9 @@ mod tests {
             "const K: &str = env!(\"DAGON_PUBKEY\");\nfn main() { println!(\"{K}\"); }\n",
         )
         .unwrap();
-        let pubkey = base.join("dagon-signing.pub");
-        std::fs::write(&pubkey, "00").unwrap();
+        let pubkey = dagon_sign::generate_to_dir(&base.join("keys"))
+            .unwrap()
+            .public_path;
         let mut cfg = Config {
             base: base.clone(),
             pubkey: Some(pubkey),
@@ -421,6 +425,14 @@ mod tests {
             .unwrap();
             assert!(build_nodes(&cfg, &[], &mut |_| {}, &AtomicBool::new(false)).is_err());
         }
+        // A secret key named as the pubkey never goes into firmware.
+        let seed =
+            std::fs::read_to_string(base.join("keys").join(dagon_sign::SECRET_FILE)).unwrap();
+        let leak = base.join("keys/leak.pub");
+        std::fs::write(&leak, seed).unwrap();
+        cfg.pubkey = Some(leak);
+        let e = build_nodes(&cfg, &[], &mut |_| {}, &AtomicBool::new(false)).unwrap_err();
+        assert!(e.contains("secret"), "{e}");
         let _ = std::fs::remove_dir_all(&base);
     }
 

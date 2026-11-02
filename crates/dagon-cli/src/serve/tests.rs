@@ -823,11 +823,6 @@ fn a_signing_key_that_does_not_match_the_pubkey_is_not_used() {
         .secret_path
         .to_string_lossy()
         .replace(char::from(92), "/");
-    std::fs::write(
-        home.join("proj/dagon.toml"),
-        format!("{toml}signing_key = {sk:?}\n"),
-    )
-    .unwrap();
     assert_eq!(
         post(
             &a,
@@ -837,6 +832,17 @@ fn a_signing_key_that_does_not_match_the_pubkey_is_not_used() {
         .0,
         200
     );
+    std::fs::write(
+        home.join("proj/dagon.toml"),
+        format!("{toml}signing_key = {sk:?}\n"),
+    )
+    .unwrap();
+    let (st, _) = post(
+        &a,
+        "/v1/project/open",
+        serde_json::json!({ "path": "proj" }),
+    );
+    assert_eq!(st, 422, "not opened with a mismatched pair");
     let (_, hello) = get(&a, "/v1/hello");
     let v: serde_json::Value = serde_json::from_str(&hello).unwrap();
     assert_eq!(v["key"], false, "{hello}");
@@ -917,4 +923,67 @@ fn a_pubkey_naming_a_secret_key_is_refused_and_nothing_is_published() {
     assert!(!page
         .to_ascii_lowercase()
         .contains(&seed.to_ascii_lowercase()));
+}
+
+/// home/proj with `pubkey` and `signing_key` as given (paths relative to
+/// the project, or absolute).
+fn project_keys(home: &std::path::Path, name: &str, pubkey: &str, signing: &std::path::Path) {
+    let sk = signing.to_string_lossy().replace(char::from(92), "/");
+    std::fs::create_dir_all(home.join(name)).unwrap();
+    std::fs::write(
+        home.join(name).join("dagon.toml"),
+        format!("topology = \"t.yaml\"\npubkey = {pubkey:?}\nsigning_key = {sk:?}\n"),
+    )
+    .unwrap();
+}
+
+#[test]
+fn a_secret_key_under_any_name_is_never_a_pubkey() {
+    let (a, home) = with_home("proj-leak");
+    let mine = dagon_sign::generate_to_dir(&home.join(".dagon/keys/mine")).unwrap();
+    let seed = std::fs::read_to_string(&mine.secret_path)
+        .unwrap()
+        .trim()
+        .to_string();
+    // A renamed copy of the signing key inside the project.
+    std::fs::create_dir_all(home.join("p1")).unwrap();
+    std::fs::write(home.join("p1/leak.pub"), &seed).unwrap();
+    project_keys(&home, "p1", "leak.pub", &mine.secret_path);
+    // A copy in another allowed folder.
+    let other = home.join(".dagon/keys/other");
+    std::fs::create_dir_all(&other).unwrap();
+    std::fs::write(other.join("x.pub"), &seed).unwrap();
+    let x = other
+        .join("x.pub")
+        .to_string_lossy()
+        .replace(char::from(92), "/");
+    project_keys(&home, "p2", &x, &mine.secret_path);
+    // Some other valid public key while the signing key is known.
+    let stranger = dagon_sign::generate_to_dir(&home.join(".dagon/keys/stranger")).unwrap();
+    let sp = stranger
+        .public_path
+        .to_string_lossy()
+        .replace(char::from(92), "/");
+    project_keys(&home, "p3", &sp, &mine.secret_path);
+    for name in ["p1", "p2", "p3"] {
+        let (st, body) = post(&a, "/v1/project/open", serde_json::json!({ "path": name }));
+        assert_eq!(st, 422, "{name}: {body}");
+        assert_eq!(a.server.release_key(), Some([7; 32]), "{name}");
+    }
+    let (_, hello) = get(&a, "/v1/hello");
+    let (_, page) = get(&a, "/");
+    for text in [hello, page] {
+        assert!(!text
+            .to_ascii_lowercase()
+            .contains(&seed.to_ascii_lowercase()));
+    }
+    // The matching pair is accepted.
+    let mp = mine
+        .public_path
+        .to_string_lossy()
+        .replace(char::from(92), "/");
+    project_keys(&home, "p4", &mp, &mine.secret_path);
+    let (st, body) = post(&a, "/v1/project/open", serde_json::json!({ "path": "p4" }));
+    assert_eq!(st, 200, "{body}");
+    assert_eq!(a.server.release_key(), Some(mine.public_key));
 }

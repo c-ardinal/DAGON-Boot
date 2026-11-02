@@ -174,11 +174,14 @@ pub fn load_key_pair(secret_path: &Path) -> Result<KeyPair, KeyError> {
     Ok(KeyPair::from_seed(Seed::new(seed)))
 }
 
-/// Load a public key file written by `generate_to_dir`.
+/// Load a public key file written by `generate_to_dir`: 64 hex digits that
+/// decode to an Ed25519 point of large order (not just any 32 bytes).
 pub fn load_public_key(public_path: &Path) -> Result<[u8; 32], KeyError> {
     let text = fs::read_to_string(public_path)?;
     let pk = from_hex::<32>(&text).ok_or_else(|| KeyError::Malformed(public_path.to_path_buf()))?;
-    PublicKey::from_slice(&pk).map_err(|_| KeyError::Malformed(public_path.to_path_buf()))?;
+    PublicKey::new(pk)
+        .validate()
+        .map_err(|_| KeyError::Malformed(public_path.to_path_buf()))?;
     Ok(pk)
 }
 
@@ -206,6 +209,14 @@ mod tests {
             generated.public_key
         );
         assert_eq!(generated.key_id, key_id(&generated.public_key));
+
+        // Not a point, and a small-order point: not public keys.
+        let bad = dir.join("bad.pub");
+        for hex in ["ff".repeat(32), "00".repeat(32)] {
+            fs::write(&bad, &hex).unwrap();
+            assert!(load_public_key(&bad).is_err(), "{hex}");
+        }
+        fs::remove_file(&bad).unwrap();
 
         let sig = pair.sk.sign(b"dagon", None);
         PublicKey::new(generated.public_key)

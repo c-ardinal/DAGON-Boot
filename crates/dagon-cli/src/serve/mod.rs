@@ -85,7 +85,15 @@ pub fn command(args: &[&str]) -> Result<(), String> {
     let listener = TcpListener::bind(("127.0.0.1", port))
         .map_err(|e| format!("cannot listen on 127.0.0.1:{port}: {e}"))?;
     let port = listener.local_addr().map_err(|e| e.to_string())?.port();
-    let server = Server::new(passphrase()?, port, config, web.clone());
+    let server = Server::new(passphrase()?, port, config.clone(), web.clone());
+    if o.get("pubkey").is_none() && cfg.pubkey.is_some() {
+        let c = api::config_at(&server, config.as_deref())?;
+        let checked = api::release_key_of(&c)
+            .map_err(|e| format!("dagon serve: pubkey in dagon.toml: {e}"))?;
+        if checked != key {
+            return Err("dagon serve: pubkey in dagon.toml changed while starting".into());
+        }
+    }
     server.set_release_key(key);
     if web.as_os_str().is_empty() {
         println!("page: built into this executable");

@@ -1,0 +1,59 @@
+[package]
+name = "dagon-board-m5stopwatch"
+version = "0.0.0"
+edition = "2021"
+license = "MIT OR Apache-2.0"
+publish = false
+
+# M5StopWatch board layer for DAGON: pins, the rear-pin UART/USB switch and
+# AMOLED reset through the M5IOE1 expander, the M5PM1 power manager, the
+# AMOLED bus pins. Everything chip-level comes from dagon-mcu-esp32s3.
+# Standalone workspace, built with the espup Xtensa toolchain.
+[workspace]
+
+[features]
+# ENTER_ROM method 2 through the M5PM1 power manager. Off until its I2C
+# address and Download command byte are confirmed.
+pmic-download = []
+
+# DAGON's factory firmware for this board: the recovery agent alone, for the
+# factory partition (HELLO mode agent).
+[[bin]]
+name = "factory"
+test = false
+
+# Rollback check apps (see the README): one confirms itself, one never does.
+[[bin]]
+name = "testapp-confirm"
+test = false
+
+[[bin]]
+name = "testapp-noconfirm"
+test = false
+
+[dependencies]
+dagon-mcu-esp32s3 = { path = "../../mcu/esp32s3" }
+dagon-port = { path = "../../../crates/dagon-port" }
+dagon-proto = { path = "../../../crates/dagon-proto" }
+esp-hal = { version = "1.2.2", features = ["esp32s3", "unstable"] }
+esp-bootloader-esp-idf = { version = "0.6.0", features = ["esp32s3"] }
+esp-rtos = { version = "0.4.0", features = ["esp32s3", "embassy"] }
+embassy-executor = "0.10"
+static_cell = "2"
+
+[profile.release]
+opt-level = "s"
+lto = "fat"
+codegen-units = 1
+debug = 2
+
+[profile.release.package.ed25519-compact]
+opt-level = "z"
+
+[profile.dev]
+opt-level = "s"
+
+# esp-bootloader-esp-idf computes `ota_seq - 1` for any counted seq, 0 included
+# (otadata written by older tools); release builds already wrap.
+[profile.dev.package.esp-bootloader-esp-idf]
+overflow-checks = false

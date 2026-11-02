@@ -72,6 +72,7 @@ dependencies = [
  "dagon-format",
  "dagon-port",
  "dagon-proto",
+ "ed25519-compact",
 ]
 
 [[package]]

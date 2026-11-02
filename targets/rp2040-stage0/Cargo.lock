@@ -112,6 +112,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "dagon-core"
+version = "0.0.0"
+dependencies = [
+ "dagon-format",
+ "dagon-port",
+ "dagon-proto",
+]
+
+[[package]]
 name = "dagon-format"
 version = "0.0.0"
 dependencies = [
@@ -236,6 +245,7 @@ name = "rp2040-common"
 version = "0.0.0"
 dependencies = [
  "cortex-m",
+ "dagon-core",
  "dagon-format",
  "dagon-port",
  "dagon-proto",

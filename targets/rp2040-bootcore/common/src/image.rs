@@ -1,42 +1,50 @@
 //! Inline images in a slot: header at the slot start, body right after.
 
+use dagon_core::log::SlotRef;
 use dagon_format::header::{self, mcu_id, ImageHeader, HEADER_SIZE};
 use dagon_format::statelog::reason;
 use dagon_format::Sha256;
 use dagon_port::Flash;
 
-use crate::layout::HEADER_LEN;
-use crate::log::Mark;
+use crate::layout::{HEADER_LEN, XIP_BASE};
 
-/// The header in the slot at `base` as a mark for slot `slot`, `None` when
-/// there is no parsable header (erased or partly written).
-pub fn head_mark<F: Flash>(flash: &mut F, base: u32, slot: u8) -> Option<Mark> {
+/// The header in the slot at `base` as a reference for slot `slot`, `None`
+/// when there is no parsable header (erased or partly written).
+pub fn head_ref<F: Flash>(flash: &mut F, base: u32, slot: u8) -> Option<SlotRef> {
     let mut raw = [0u8; HEADER_SIZE];
     flash.read(base, &mut raw).ok()?;
-    mark_of(&raw, slot)
+    ref_of(&raw, slot)
 }
 
-/// A raw header as a mark for slot `slot`; `None` if it does not parse.
-pub fn mark_of(raw: &[u8; HEADER_SIZE], slot: u8) -> Option<Mark> {
+/// A raw header as a reference for slot `slot`; `None` if it does not parse.
+pub fn ref_of(raw: &[u8; HEADER_SIZE], slot: u8) -> Option<SlotRef> {
     let h = ImageHeader::parse(raw).ok()?;
-    Some(Mark {
+    Some(SlotRef {
         slot,
         version: h.version,
         digest16: header::header_digest16(raw),
     })
 }
 
-/// Checks the image in the slot at `base` (capacity `cap` incl. header)
-/// as slot `slot` before starting it: the header is the one `expect` names
-/// (when the log names one), fits, is of
-/// `image_kind` for this MCU and the body hashes to `payload_sha256`.
-/// Errors are state log reason codes. Returns the flash offset of the body.
+/// True if the header in the slot at flash offset `base` was built for this
+/// slot: `load_addr` is the XIP address of the body (`base + 0x200`).
+pub fn linked_here<F: Flash>(flash: &mut F, base: u32) -> bool {
+    let mut raw = [0u8; HEADER_SIZE];
+    flash.read(base, &mut raw).is_ok()
+        && ImageHeader::parse(&raw).is_ok_and(|h| h.load_addr == XIP_BASE + base + HEADER_LEN)
+}
+
+/// stage0's check of the boot core in the slot at `base` (capacity `cap`
+/// incl. header) as slot `slot`: the header is the one `expect` names (when
+/// the log names one), fits, is of `image_kind` for this MCU, is linked for
+/// this slot and the body hashes to `payload_sha256`. Errors are state log
+/// reason codes. Returns the flash offset of the body.
 pub fn check<F: Flash>(
     flash: &mut F,
     base: u32,
     cap: u32,
     slot: u8,
-    expect: Option<&Mark>,
+    expect: Option<&SlotRef>,
     image_kind: u8,
 ) -> Result<u32, u8> {
     let mut raw = [0u8; HEADER_SIZE];
@@ -44,7 +52,8 @@ pub fn check<F: Flash>(
         .read(base, &mut raw)
         .map_err(|_| reason::HASH_MISMATCH)?;
     let h = ImageHeader::parse(&raw).map_err(|_| reason::HASH_MISMATCH)?;
-    let fits = h.payload_size <= cap - HEADER_LEN;
+    let body = base + HEADER_LEN;
+    let fits = h.payload_size <= cap - HEADER_LEN && h.load_addr == XIP_BASE + body;
     let ours = h.image_kind == image_kind
         && h.mcu_id == mcu_id::RP2040
         && (h.slot_binding == slot || h.slot_binding == header::slot_binding::ANY);
@@ -52,22 +61,10 @@ pub fn check<F: Flash>(
     if !named || !fits || !ours {
         return Err(reason::HASH_MISMATCH);
     }
-    let body = base + HEADER_LEN;
     if hash(flash, body, h.payload_size) != Some(h.payload_sha256) {
         return Err(reason::HASH_MISMATCH);
     }
     Ok(body)
-}
-
-/// Key ID and Ed25519 signature of the header in the slot at `base`.
-pub fn verify<F: Flash>(flash: &mut F, base: u32, pubkey: &[u8; 32]) -> Result<(), u8> {
-    let mut raw = [0u8; HEADER_SIZE];
-    flash
-        .read(base, &mut raw)
-        .map_err(|_| reason::SIG_INVALID)?;
-    header::verify_header(&raw, pubkey)
-        .map(|_| ())
-        .map_err(|_| reason::SIG_INVALID)
 }
 
 /// SHA-256 of `len` bytes at `addr`.

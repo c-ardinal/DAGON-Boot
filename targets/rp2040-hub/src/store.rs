@@ -2,16 +2,17 @@
 //! topology display copy.
 
 use dagon_agent::{SlotStore, StoreError};
+use dagon_core::log::Log;
 use dagon_format::header::HEADER_SIZE;
-use dagon_format::statelog::{kind, target as log_target};
+use dagon_format::statelog::kind;
 use dagon_port::Flash;
 use dagon_proto::payload::{target, StatusResp};
 use rp2040_common::layout::{
-    body_capacity, sectors, APP_LOG, APP_SLOT, APP_SLOT_SIZE, HEADER_LEN, SECTOR, TOPOLOGY,
+    body_capacity, sectors, APP_LOG_LAYOUT, APP_SLOT, APP_SLOT_SIZE, HEADER_LEN, SECTOR, TOPOLOGY,
     TOPOLOGY_SIZE,
 };
 use rp2040_common::rp::RpFlash;
-use rp2040_common::{image, log, status};
+use rp2040_common::{image, status};
 
 use crate::wdt;
 
@@ -48,16 +49,19 @@ fn flash_err(_: dagon_port::FlashError) -> StoreError {
 
 impl HubStore {
     fn append(&mut self, k: u8, slot: u8, header: &[u8; HEADER_SIZE]) -> Result<(), StoreError> {
-        let mark = image::mark_of(header, slot).ok_or(StoreError::Flash)?;
-        log::append(&mut self.flash, APP_LOG, k, log_target::APP, mark, 0).map_err(flash_err)
+        let at = image::ref_of(header, slot).ok_or(StoreError::Flash)?;
+        let mut log = Log::load(&mut self.flash, &APP_LOG_LAYOUT).map_err(|_| StoreError::Flash)?;
+        log.append(&mut self.flash, k, at, 0)
+            .map_err(|_| StoreError::Flash)
     }
 }
 
 impl SlotStore for HubStore {
     fn status(&mut self) -> StatusResp {
-        let (fold, cur) = log::read(&mut self.flash, APP_LOG, log_target::APP).unwrap_or_default();
-        let heads = [0u8, 1].map(|s| image::head_mark(&mut self.flash, APP_SLOT[s as usize], s));
-        status::status(&fold, heads, ACTIVE, cur.map_or(0, |c| c.generation))
+        let (state, generation) = Log::load(&mut self.flash, &APP_LOG_LAYOUT)
+            .map_or((Default::default(), 0), |l| (l.state, l.generation));
+        let heads = [0u8, 1].map(|s| image::head_ref(&mut self.flash, APP_SLOT[s as usize], s));
+        status::status(&state, heads, ACTIVE, generation)
     }
 
     fn capacity(&self, t: u8, slot: u8) -> u32 {

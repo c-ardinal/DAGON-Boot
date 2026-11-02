@@ -1,6 +1,9 @@
 //! Hub flash layout (offsets from the start of flash; XIP maps it at
 //! `XIP_BASE`). Fixed: never move these.
 
+use dagon_core::boot::SlotLayout;
+use dagon_core::log::LogLayout;
+
 pub const XIP_BASE: u32 = 0x1000_0000;
 pub const FLASH_SIZE: usize = 4 * 1024 * 1024;
 pub const SECTOR: u32 = 4096;
@@ -27,6 +30,19 @@ pub const LOG_FACE_SIZE: u32 = SECTOR;
 pub const MAX_ATTEMPTS: u8 = 3;
 /// Watchdog period for every boot (below the RP2040 limit of 8.388 s).
 pub const WDT_MS: u32 = 8_000;
+
+/// Image `target_tag` of hub images (boot core and app).
+pub const HUB_TAG: &str = "hub-rp2040-lcd";
+
+/// The app log and slots for dagon-core.
+pub const APP_LOG_LAYOUT: LogLayout = LogLayout {
+    faces: APP_LOG,
+    face_len: LOG_FACE_SIZE,
+};
+pub const APP_SLOTS: SlotLayout = SlotLayout {
+    slots: APP_SLOT,
+    slot_len: APP_SLOT_SIZE,
+};
 
 /// Body capacity of a slot of `slot_size` bytes.
 pub const fn body_capacity(slot_size: u32) -> u32 {

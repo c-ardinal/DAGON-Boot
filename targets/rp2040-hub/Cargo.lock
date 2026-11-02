@@ -1312,6 +1312,7 @@ name = "rp2040-common"
 version = "0.0.0"
 dependencies = [
  "cortex-m",
+ "dagon-core",
  "dagon-format",
  "dagon-port",
  "dagon-proto",
@@ -1325,6 +1326,7 @@ dependencies = [
  "cortex-m",
  "cortex-m-rt",
  "dagon-agent",
+ "dagon-core",
  "dagon-format",
  "dagon-port",
  "dagon-proto",

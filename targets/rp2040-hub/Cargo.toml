@@ -6,9 +6,7 @@ version = "0.0.0"
 publish = false
 
 # Standalone: built for thumbv6m only, so it stays out of the host workspace.
-# `pack/` is a host tool with its own workspace.
 [workspace]
-exclude = ["pack"]
 
 [features]
 # Link for APP-B instead of APP-A (same source, two link addresses).
@@ -17,6 +15,7 @@ slot-b = []
 [dependencies]
 rp2040-common = { path = "../rp2040-bootcore/common", features = ["rp"] }
 dagon-agent = { path = "../../crates/dagon-agent" }
+dagon-core = { path = "../../crates/dagon-core" }
 dagon-format = { path = "../../crates/dagon-format" }
 dagon-port = { path = "../../crates/dagon-port" }
 dagon-proto = { path = "../../crates/dagon-proto" }

@@ -14,10 +14,14 @@ publish = false
 rp = ["dep:embassy-rp"]
 
 [dependencies]
-dagon-format = { path = "../../../crates/dagon-format" }
+dagon-core = { path = "../../../crates/dagon-core" }
+dagon-format ={ path = "../../../crates/dagon-format" }
 dagon-port = { path = "../../../crates/dagon-port" }
 dagon-proto = { path = "../../../crates/dagon-proto" }
 embassy-rp = { version = "0.10.0", default-features = false, features = ["rp2040"], optional = true }
+
+[dev-dependencies]
+ed25519-compact = { version = "2.6", default-features = false }
 
 [target.'cfg(target_os = "none")'.dependencies]
 cortex-m = "0.7"

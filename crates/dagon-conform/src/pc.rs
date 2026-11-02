@@ -71,7 +71,12 @@ pub enum SetupError {
     SameVersion,
     /// The first HELLO / STATUS did not answer.
     Unreachable,
+    /// The first HELLO announced a `max_payload` too small for any XFER chunk.
+    BadHello,
 }
+
+/// Smallest usable HELLO `max_payload`: 4-byte offset + 1 data byte.
+const MIN_MAX_PAYLOAD: u16 = 5;
 
 const RESP_MAX: usize = 1 + StatusResp::LEN;
 const HELLO_ROUNDS: u32 = 20;
@@ -158,6 +163,9 @@ impl<'a, 's, C: Channel> Runner<'a, 's, C> {
             return Err(SetupError::SameVersion);
         }
         let hello = hello_once(&mut ch).map_err(|_| SetupError::Unreachable)?;
+        if hello.max_payload < MIN_MAX_PAYLOAD {
+            return Err(SetupError::BadHello);
+        }
         Ok(Runner {
             ch,
             link,
@@ -299,8 +307,13 @@ impl<'a, 's, C: Channel> Runner<'a, 's, C> {
         self.call(Cmd::XferBegin, &p, timeout::REQUEST_MS)
     }
 
+    /// Data bytes per XFER chunk. Clamped so that a bad HELLO seen later (for
+    /// example after a reboot) cannot underflow or overrun the frame buffer.
     fn chunk_max(&self) -> usize {
-        self.hello.max_payload as usize - 4
+        (self.hello.max_payload as usize)
+            .min(dagon_proto::max_payload::USB)
+            .saturating_sub(4)
+            .max(1)
     }
 
     /// Sends `part` as XFER_HDR or XFER_DATA chunks; the last chunk gets

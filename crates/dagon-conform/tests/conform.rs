@@ -151,6 +151,8 @@ struct Mem {
     status: StatusResp,
     bodies: [Vec<u8>; 2],
     headers: [[u8; HEADER_SIZE]; 2],
+    /// Last CONFIRM: (slot, previously confirmed slot).
+    last_confirm: Option<(u8, u8)>,
 }
 
 impl Mem {
@@ -175,6 +177,7 @@ impl Mem {
             status,
             bodies: [a, vec![0xFF; CAP]],
             headers: [hdr, [0xFF; HEADER_SIZE]],
+            last_confirm: None,
         }
     }
 }
@@ -224,6 +227,7 @@ impl SlotStore for Mem {
     }
     fn confirm(&mut self, slot: u8, _h: &[u8; HEADER_SIZE]) -> Result<(), StoreError> {
         let old = self.status.confirmed;
+        self.last_confirm = Some((slot, old));
         if old != slot && (old as usize) < 2 {
             self.status.slots[old as usize].state = SlotState::Written;
         }
@@ -241,6 +245,14 @@ struct Faults {
     no_rollback: bool,
     wrong_reason: bool,
     erase_does_nothing: bool,
+    /// The agent answers OK to XFER_BEGIN for the running slot.
+    begin_active_accepted: bool,
+    /// The agent answers OK where it should reject an incompatible header.
+    compat_ignored: bool,
+    /// CONFIRM only lives in RAM: the next boot sees the slot on trial again.
+    confirm_not_persisted: bool,
+    /// HELLO announces this `max_payload`.
+    hello_max_payload: Option<u16>,
 }
 
 struct FakeNode {
@@ -287,7 +299,15 @@ impl FakeNode {
     /// Boot core decision on every reset.
     fn boot(&mut self) {
         self.reboots += 1;
+        let lost = self.agent.store().last_confirm.take();
         let st = &mut self.agent.store().status;
+        if let (true, Some((slot, old))) = (self.faults.confirm_not_persisted, lost) {
+            st.slots[slot as usize].state = SlotState::Trying;
+            st.confirmed = old;
+            if (old as usize) < 2 {
+                st.slots[old as usize].state = SlotState::Confirmed;
+            }
+        }
         if let Some(p) = st.slots[..2]
             .iter()
             .position(|s| s.state == SlotState::Pending)
@@ -314,6 +334,32 @@ impl FakeNode {
         } else {
             self.now + BOOT_MS
         };
+    }
+
+    /// Rewrites the agent's answer for the injected faults.
+    fn misbehave(&mut self, cmd: Cmd, req: &[u8], body: &mut Vec<u8>) {
+        let f = self.faults;
+        let active = self.agent.store().status.active;
+        match (cmd, body[0]) {
+            (Cmd::XferBegin, s)
+                if f.begin_active_accepted
+                    && s == Status::State as u8
+                    && XferBegin::parse(req).unwrap().slot == active =>
+            {
+                *body = vec![Status::Ok as u8];
+            }
+            (Cmd::XferHdr, s) if f.compat_ignored && s == Status::Compat as u8 => {
+                let c = XferChunk::parse(req).unwrap();
+                let next = c.offset + c.data.len() as u32;
+                *body = [&[Status::Ok as u8][..], &next.to_le_bytes()].concat();
+            }
+            (Cmd::Hello, 0) if f.hello_max_payload.is_some() => {
+                let n = body.len();
+                let mp = f.hello_max_payload.unwrap_or_default();
+                body[n - 2..].copy_from_slice(&mp.to_le_bytes());
+            }
+            _ => {}
+        }
     }
 
     /// Trial watchdog of an app that never confirms.
@@ -369,6 +415,7 @@ impl Channel for &mut FakeNode {
             &mut self.flash,
             &setup,
             &mut out,
+            &mut || {},
         ) {
             Some(len) => (out[..len].to_vec(), false),
             None => {
@@ -378,11 +425,13 @@ impl Channel for &mut FakeNode {
         };
         let (f, _) = Frame::decode(&frame, MAX_FRAME).unwrap();
         assert_eq!(f.seq, self.seq);
-        resp[..f.payload.len()].copy_from_slice(f.payload);
+        let mut body = f.payload.to_vec();
+        self.misbehave(cmd, payload, &mut body);
+        resp[..body.len()].copy_from_slice(&body);
         if reboot {
             self.boot();
         }
-        Ok(f.payload.len())
+        Ok(body.len())
     }
     fn now_ms(&mut self) -> u64 {
         self.now
@@ -545,13 +594,13 @@ fn node_side_geometry_checks() {
         test_id: id,
         param: 0,
     };
-    assert!(node::run(&mut f, &ok, req(1)).unwrap().pass);
+    assert!(node::run(&mut f, &ok, req(1), &mut || {}).unwrap().pass);
     let other = [REGIONS[0]];
     let bad = NodeSetup {
         declared: &other,
         ..ok
     };
-    assert!(!node::run(&mut f, &bad, req(1)).unwrap().pass);
+    assert!(!node::run(&mut f, &bad, req(1), &mut || {}).unwrap().pass);
     let mut overlap = MemFlash::new();
     overlap.regions[1].start = 0x0800_4000;
     let decl = overlap.regions.clone();
@@ -562,6 +611,7 @@ fn node_side_geometry_checks() {
             ..ok
         },
         req(1),
+        &mut || {},
     )
     .unwrap();
     assert!(!o.pass);
@@ -570,9 +620,13 @@ fn node_side_geometry_checks() {
         scratch: SCRATCH + 4,
         ..ok
     };
-    assert!(!node::run(&mut f, &unaligned, req(2)).unwrap().pass);
-    assert!(node::run(&mut f, &ok, req(3)).unwrap().pass);
-    assert_eq!(node::run(&mut f, &ok, req(4)), None);
+    assert!(
+        !node::run(&mut f, &unaligned, req(2), &mut || {})
+            .unwrap()
+            .pass
+    );
+    assert!(node::run(&mut f, &ok, req(3), &mut || {}).unwrap().pass);
+    assert_eq!(node::run(&mut f, &ok, req(4), &mut || {}), None);
 }
 
 #[test]
@@ -593,7 +647,7 @@ fn handle_frame_passes_other_commands_on() {
     .encode(&mut req)
     .unwrap();
     assert_eq!(
-        node::handle_frame(&req[..n], 256, &mut f, &setup, &mut out),
+        node::handle_frame(&req[..n], 256, &mut f, &setup, &mut out, &mut || {}),
         None
     );
     let n = Frame {
@@ -604,7 +658,7 @@ fn handle_frame_passes_other_commands_on() {
     }
     .encode(&mut req)
     .unwrap();
-    let len = node::handle_frame(&req[..n], 256, &mut f, &setup, &mut out).unwrap();
+    let len = node::handle_frame(&req[..n], 256, &mut f, &setup, &mut out, &mut || {}).unwrap();
     let (fr, _) = Frame::decode(&out[..len], 256).unwrap();
     assert_eq!(split_status(fr.payload).unwrap().0, Status::Unsupported);
 }
@@ -638,4 +692,72 @@ fn result_file_shape() {
     assert!(s.ends_with("}\n  ]\n}\n"));
     let order: Vec<u8> = CTS.iter().map(|c| c.id).collect();
     assert_eq!(order, [1, 2, 3, 7, 8, 4, 20, 9, 10, 11, 12, 18]);
+}
+
+fn faulty(faults: Faults) -> Report {
+    let mut n = FakeNode::new(LinkKind::Uart, faults);
+    run(&mut n, LinkKind::Uart)
+}
+
+#[test]
+fn accepting_xfer_to_the_running_slot_fails_ct04() {
+    let r = faulty(Faults {
+        begin_active_accepted: true,
+        ..Default::default()
+    });
+    assert_eq!(verdict(&r, 4), Verdict::Fail);
+    assert_eq!(verdict(&r, 9), Verdict::Pass);
+}
+
+#[test]
+fn ignoring_mcu_id_and_target_tag_fails_ct20() {
+    let r = faulty(Faults {
+        compat_ignored: true,
+        ..Default::default()
+    });
+    assert_eq!(verdict(&r, 20), Verdict::Fail);
+    assert_eq!(verdict(&r, 4), Verdict::Pass);
+}
+
+#[test]
+fn confirm_lost_on_reboot_fails_ct11_and_ct18() {
+    let r = faulty(Faults {
+        confirm_not_persisted: true,
+        ..Default::default()
+    });
+    assert_eq!(verdict(&r, 10), Verdict::Pass);
+    assert_eq!(verdict(&r, 11), Verdict::Fail);
+    assert_eq!(verdict(&r, 18), Verdict::Fail);
+}
+
+#[test]
+fn tiny_hello_max_payload_is_rejected_at_setup() {
+    let imgs = Imgs::new();
+    let mut signer = sign;
+    let faults = Faults {
+        hello_max_payload: Some(4),
+        ..Default::default()
+    };
+    let mut n = FakeNode::new(LinkKind::Uart, faults);
+    let e = Runner::new(&mut n, LinkKind::Uart, imgs.images(), &mut signer).err();
+    assert_eq!(e, Some(SetupError::BadHello));
+}
+
+#[test]
+fn node_tests_feed_the_watchdog_around_erases() {
+    let mut f = MemFlash::new();
+    let setup = NodeSetup {
+        declared: &REGIONS,
+        scratch: SCRATCH,
+    };
+    for (id, min) in [(2u8, 4 + 0x8000 / 256), (3, 4 + 1)] {
+        let mut feeds = 0u32;
+        let req = ConfRunReq {
+            test_id: id,
+            param: 0,
+        };
+        let o = node::run(&mut f, &setup, req, &mut || feeds += 1).unwrap();
+        assert!(o.pass);
+        assert!(feeds >= min, "CT-0{id}: {feeds} feeds");
+    }
 }

@@ -38,7 +38,11 @@
   const mcuOf = (id: string) => d.doc.topo.nodes.find((n) => n.id === id)?.mcu ?? '';
 
   async function makeProject() {
-    await cli.saveTopology(toYaml(d.doc.topo));
+    // The project is made from the YAML: a 構成 serve did not take is not made into one.
+    const at = d.revision;
+    const r = await cli.saveTopology(toYaml(d.doc.topo));
+    d.saved(at, r);
+    if (r !== 'saved') return;
     await cli.gen(ids);
   }
 

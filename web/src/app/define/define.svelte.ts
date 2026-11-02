@@ -4,6 +4,7 @@ import { supportedBoards } from '../../wasm/dagon.ts';
 import { ANNOUNCE } from '../copy.ts';
 import { DESK_DEMO, DESK_DEMO_YAML, type Config } from '../sample.ts';
 import { emptyDoc, fromYaml, place, placeMcu, removeLink, removeNode, toConfig, toYaml, type Doc, type Topo } from './model.ts';
+import type { SaveResult } from './cli.svelte.ts';
 import { problems, type Problem } from './problems.ts';
 
 /** Undo depth; older steps fall off. */
@@ -33,6 +34,10 @@ export class Define {
   private future: Doc[] = [];
   /** Bumped by every change, so the derived check and view follow. */
   revision = $state(0);
+  /** The revision last in the project's YAML (opened or saved). */
+  savedAt = $state(0);
+  /** Why the last save did not go through; the edits stay on the page (null after a save). */
+  saveFailure = $state<Exclude<SaveResult, 'saved'> | null>(null);
 
   /** Nothing placed yet (E1) is not a problem to list. */
   readonly problems: Problem[] = $derived(this.revision >= 0 && this.doc.topo.nodes.length ? problems(this.doc) : []);
@@ -48,6 +53,21 @@ export class Define {
           ? 'unsupported'
           : 'ok',
   );
+  /** Edits on the page that the project's YAML does not have yet. */
+  get unsaved(): boolean {
+    return this.revision !== this.savedAt;
+  }
+
+  /** The answer to saving revision `at`: the document stays as it is either way. */
+  saved(at: number, r: SaveResult): void {
+    if (r === 'saved') {
+      this.savedAt = at;
+      this.saveFailure = null;
+    } else {
+      this.saveFailure = r;
+    }
+  }
+
   get canUndo(): boolean {
     return this.revision >= 0 && this.past.length > 0;
   }
@@ -155,6 +175,8 @@ export class Define {
     this.selected = null;
     this.unreadable = false;
     this.revision++;
+    this.savedAt = this.revision;
+    this.saveFailure = null;
   }
 
   /** "最初からやり直す": nothing placed and no history (the project's files stay). */

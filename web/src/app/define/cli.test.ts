@@ -1,5 +1,6 @@
 import { describe, expect, test } from 'vitest';
 import { Cli, type CliDeps } from './cli.svelte.ts';
+import { Define } from './define.svelte.ts';
 
 const PASS = '0123456789abcdef0123456789abcdef';
 const HELLO = { cli: '0.1.0', workspace: 'my-fleet', features: ['build', 'sign', 'release', 'gen'], api_key: false, key: true, key_id: '3f9a21c7aabbccdd' };
@@ -85,7 +86,7 @@ describe('dagon serve link', () => {
     const f = fake();
     const cli = new Cli(f.deps);
     await cli.connect();
-    await cli.saveTopology('dagon: 1\n');
+    expect(await cli.saveTopology('dagon: 1\n')).toBe('saved');
     expect(f.calls[f.calls.length - 1]).toMatchObject({ url: '/v1/topology', method: 'PUT', body: 'dagon: 1\n' });
     const job = (await cli.gen(['hub', 'seg']))!;
     expect(f.calls[f.calls.length - 1]).toMatchObject({ url: '/v1/gen', body: JSON.stringify({ nodes: ['hub', 'seg'] }) });
@@ -153,5 +154,36 @@ describe('dagon serve link', () => {
     const n = f.calls.length;
     expect(await cli.bootcore('seg')).toBeNull();
     expect(f.calls.length).toBe(n);
+  });
+
+  test('a save serve refuses (422, 409) or cannot take keeps the edits on the page, marked unsaved, with the reason', async () => {
+    const f = fake();
+    const answers: (number | 'down')[] = [422, 409, 200, 'down'];
+    const base = f.deps.fetch!;
+    f.deps.fetch = (async (url: string, init: RequestInit) => {
+      if (url === '/v1/topology' && init.method === 'PUT') {
+        const status = answers.shift()!;
+        if (status === 'down') throw new TypeError('connection refused');
+        return status === 200 ? Response.json({ updatable: true }) : Response.json({ error: 'no' }, { status });
+      }
+      return base(url, init);
+    }) as unknown as typeof fetch;
+    const cli = new Cli(f.deps);
+    await cli.connect();
+    const d = new Define();
+    d.placeSample();
+    const yaml = d.exportYaml().text;
+    const save = async () => d.saved(d.revision, await cli.saveTopology(d.exportYaml().text));
+
+    await save();
+    expect([d.saveFailure, d.unsaved, d.exportYaml().text]).toEqual(['invalid', true, yaml]);
+    await save();
+    expect([d.saveFailure, d.unsaved]).toEqual(['busy', true]);
+    await save();
+    expect([d.saveFailure, d.unsaved]).toEqual([null, false]);
+
+    d.undo();
+    await save();
+    expect([d.saveFailure, d.unsaved, d.doc.topo.nodes]).toEqual(['failed', true, []]);
   });
 });

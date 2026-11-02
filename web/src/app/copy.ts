@@ -665,6 +665,19 @@ export const DIFF = {
   linksUnchecked: 'リンク・アドレス 未確認',
 } as const;
 
+/**
+ * Saving the 構成 to the project's YAML (案, §11.0 W1–W3; not yet in the
+ * §11.1 table): the edits stay on the page, marked 未保存, until a save goes through.
+ */
+export const SAVE = {
+  unsaved: '● 未保存',
+  /** 422: the CLI's own check refused the 構成. */
+  invalid: { chip: '× 保存できない', sentence: '問題を直してから、もう一度保存してください。' },
+  /** 409: a job holds the project. */
+  busy: { chip: '× 作業中', sentence: '作業が終わってから、もう一度保存してください。' },
+  failed: { chip: '× 保存できない', sentence: 'ターミナルで dagon serve が動いているか確かめてから、もう一度保存してください。' },
+} as const;
+
 /** SC-S0 始め (S46, M35). */
 export const START = {
   heading: '始め',

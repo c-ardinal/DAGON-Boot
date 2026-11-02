@@ -56,6 +56,9 @@ export interface FsList {
  */
 export type ProjectResult = 'opened' | 'missing' | 'key' | 'busy' | 'exists' | 'refused' | 'failed';
 
+/** How saving the 構成 to the project's YAML went. */
+export type SaveResult = 'saved' | 'invalid' | 'busy' | 'failed';
+
 export type JobKind = 'build' | 'sign' | 'release' | 'gen' | 'flash' | 'conform' | 'ai_topology' | string;
 export type JobState = 'queued' | 'running' | 'question' | 'succeeded' | 'failed' | 'cancelled' | 'unknown';
 
@@ -221,10 +224,21 @@ export class Cli {
     return r.ok ? await r.text() : null;
   }
 
-  /** PUT /v1/topology: the 構成 YAML into the project's topology.yaml; the CLI checks it too (422 when not pushable). */
-  async saveTopology(yaml: string): Promise<void> {
-    const r = await this.d.fetch('/v1/topology', { method: 'PUT', headers: { Authorization: `Bearer ${this.pass}`, 'Content-Type': 'application/yaml' }, body: yaml });
-    if (!r.ok) throw new Error(String(r.status));
+  /**
+   * PUT /v1/topology: the 構成 YAML into the project's topology.yaml. The CLI
+   * checks it too: `invalid` when it refuses the 構成 (422), `busy` while a
+   * job holds the project (409), `failed` for anything else or no answer.
+   * Shapes not updatable yet (V-23 only) are saved.
+   */
+  async saveTopology(yaml: string): Promise<SaveResult> {
+    if (this.state !== 'ready') return 'failed';
+    try {
+      const r = await this.d.fetch('/v1/topology', { method: 'PUT', headers: { Authorization: `Bearer ${this.pass}`, 'Content-Type': 'application/yaml' }, body: yaml });
+      if (r.ok) return 'saved';
+      return r.status === 422 ? 'invalid' : r.status === 409 ? 'busy' : 'failed';
+    } catch {
+      return 'failed';
+    }
   }
 
   gen(nodes: string[]): Promise<Job | null> {

@@ -1,7 +1,7 @@
 <script lang="ts">
   import { tick } from 'svelte';
   import { bandOf } from './app/band.ts';
-  import { ANNOUNCE, BAND, BUTTON, CANVAS, DEFINE, DIFF, MODE, NODE, ORDER, PRODUCT, SKIP, STEP } from './app/copy.ts';
+  import { ANNOUNCE, BAND, BUTTON, CANVAS, DEFINE, DIFF, MODE, NODE, ORDER, PRODUCT, SAVE, SKIP, STEP } from './app/copy.ts';
   import { chooseAndOpen } from './app/connect.ts';
   import { hubOf, view, type Action } from './app/machine.ts';
   import { Operate, type Progress } from './app/operate.svelte.ts';
@@ -231,7 +231,9 @@
 
   /** "保存": the 構成 back into the project's YAML through dagon serve (the page always runs under it). */
   async function save() {
-    if (cli.state === 'ready') await cli.saveTopology(d.exportYaml().text).catch(() => undefined);
+    if (cli.state !== 'ready') return;
+    const at = d.revision;
+    d.saved(at, await cli.saveTopology(d.exportYaml().text));
   }
 
   /** "ファイルの構成を取り込む" (§7.6): the release's 構成 replaces this one (undoable) and goes to the YAML. */
@@ -557,7 +559,10 @@
   {@const firstError = d.problems.find((p) => p.severity === 'error' && p.rule !== 'V-23')}
   <footer id="band" class="dband" tabindex="-1">
     <div class="next">
-      {#if lockShown === 'unsupported'}
+      {#if d.saveFailure}
+        <span class="cause">{SAVE[d.saveFailure].chip}</span>
+        <p>{SAVE[d.saveFailure].sentence}</p>
+      {:else if lockShown === 'unsupported'}
         <span class="cause">{MODE.lockedUnsupported.chip}</span>
         <p>{MODE.lockedUnsupported.sentence}</p>
       {:else if lockShown}
@@ -580,6 +585,7 @@
       <!-- E1: C02 on the canvas says what this does. -->
       <button class="primary" onclick={() => void op.connect()}>{BUTTON.connectDiscover}<span class="arrow" aria-hidden="true">→</span></button>
     {:else}
+      {#if d.unsaved && cli.state === 'ready'}<span class="unsaved">{SAVE.unsaved}</span>{/if}
       <button class="secondary" aria-disabled={cli.state !== 'ready'} onclick={() => void save()}>{DEFINE.save}</button>
       {#if firstError}
         <button class="primary" onclick={() => d.fix(firstError)}>{DEFINE.fix}<span class="arrow" aria-hidden="true">→</span></button>
@@ -765,6 +771,11 @@
   }
   .dband .next p {
     margin: 0;
+  }
+  .dband .unsaved {
+    color: var(--c-muted);
+    font: 700 var(--t-small-size) / var(--t-small-lh) var(--f-ja);
+    white-space: nowrap;
   }
   .dband .cause {
     font: 700 var(--t-heading-size) / var(--t-heading-lh) var(--f-ja);

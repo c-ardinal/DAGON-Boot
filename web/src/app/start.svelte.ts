@@ -7,7 +7,7 @@ import type { Cli, FsList, ProjectRef, ProjectResult } from './define/cli.svelte
 export type StartChoice = 'new' | 'sample' | 'open';
 
 /** Why the last open or make did not go through (the band's chip and sentence). */
-export type StartFailure = Exclude<ProjectResult, 'opened'>;
+export type StartFailure = Exclude<ProjectResult, 'opened' | 'yaml'>;
 
 export interface StartDeps {
   cli: Cli;

@@ -11,7 +11,7 @@ ESP-IDF contributors).
 | File | Content |
 |---|---|
 | `bootloader.bin` | `build/bootloader/bootloader.bin` of the build below, copied unchanged |
-| `sdkconfig.defaults` | the only sdkconfig options set; every other option is the ESP-IDF v6.1 default |
+| `sdkconfig.defaults` | the only sdkconfig options set (read by `targets/esp32s3-2ndstage`); every other option is the ESP-IDF v6.1 default |
 | `SHA256SUMS` | `sha256sum bootloader.bin` |
 | `LICENSE-ESP-IDF` | ESP-IDF `LICENSE` (Apache-2.0) |
 
@@ -39,22 +39,24 @@ ESP-IDF contributors).
 
 PowerShell, ESP-IDF v6.1 checked out at `$env:IDF_PATH` and its tools
 installed (`install.ps1 esp32s3`). Run outside MSYS / Git Bash (the export
-script refuses an `MSYSTEM` environment). The build directory and generated
-`sdkconfig` go outside the repository:
+script refuses an `MSYSTEM` environment). The project's `CMakeLists.txt`
+takes its options from this directory's `sdkconfig.defaults` (the single
+source, target included), so a plain build there is enough. Its `build/`,
+`sdkconfig` and `dependencies.lock` are ignored by git; delete `sdkconfig`
+first if one is left from an earlier build.
 
 ```powershell
 . "$env:IDF_PATH\export.ps1"
-$P = "<repo>\targets\esp32s3-2ndstage"
-$D = "<repo>\targets\mcu\esp32s3\vendor\sdkconfig.defaults"
-$O = "<scratch dir>"
-idf.py -C $P -B "$O\build" -D "SDKCONFIG=$O\sdkconfig" -D "SDKCONFIG_DEFAULTS=$D" set-target esp32s3
-idf.py -C $P -B "$O\build" -D "SDKCONFIG=$O\sdkconfig" -D "SDKCONFIG_DEFAULTS=$D" bootloader partition-table
+cd <repo>\targets\esp32s3-2ndstage
+idf.py build
 git -C $env:IDF_PATH describe --tags --exact-match   # v6.1
 git -C $env:IDF_PATH rev-parse HEAD                  # commit above
-Copy-Item "$O\build\bootloader\bootloader.bin" "<repo>\targets\mcu\esp32s3\vendor\"
+Copy-Item build\bootloader\bootloader.bin ..\mcu\esp32s3\vendor\
 ```
 
-Two clean builds in different directories gave the SHA-256 above. Rebuilding
+Three clean builds gave the SHA-256 above: two out of tree (`idf.py -C
+<project> -B <dir> -D SDKCONFIG=<dir>\sdkconfig ... bootloader`, in different
+directories) and one plain `idf.py build` in the project. Rebuilding
 with the same ESP-IDF commit, toolchain and `sdkconfig.defaults` must give the
 same SHA-256; a different one means a different toolchain or source.
 

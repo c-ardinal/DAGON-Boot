@@ -19,16 +19,10 @@ use ed25519_compact::{KeyPair, Seed};
 
 const YAML: &str = include_str!("../../../topology/sim-pair.yaml");
 
-/// The simulated hub's `target_tag`, as text.
-fn hub_tag() -> String {
-    let tag = dagon_sim::hub_config([0; 32]).target_tag;
-    let end = tag.iter().position(|&b| b == 0).unwrap_or(tag.len());
-    String::from_utf8_lossy(&tag[..end]).into_owned()
-}
-
-/// The sim topology with the hub tag the simulator actually accepts.
-fn yaml() -> String {
-    YAML.replace("tag: hub-rp2040-lcd", &format!("tag: {}", hub_tag()))
+/// Node `id`'s tag in the sim topology: images are signed for it.
+fn topology_tag(id: &str) -> String {
+    let t = dagon_topology::parse_str(YAML).expect("sim topology parses");
+    t.node(id).expect("node in the sim topology").tag.clone()
 }
 /// RFC 8032 section 7.1 TEST 1 key (public test data).
 const SEED: [u8; 32] = [
@@ -131,7 +125,7 @@ fn seg_img(key: &KeyPair, slot: u8, v: Version) -> Vec<u8> {
         key,
         "stm32f401re",
         image_kind::APP,
-        "seg-f401-7seg",
+        &topology_tag("seg"),
         slot,
         v,
         6000,
@@ -139,13 +133,21 @@ fn seg_img(key: &KeyPair, slot: u8, v: Version) -> Vec<u8> {
 }
 
 fn hub_img(key: &KeyPair, slot: u8, v: Version) -> Vec<u8> {
-    sign(key, "rp2040", image_kind::APP, &hub_tag(), slot, v, 8000)
+    sign(
+        key,
+        "rp2040",
+        image_kind::APP,
+        &topology_tag("hub"),
+        slot,
+        v,
+        8000,
+    )
 }
 
 /// Hub and F401 on 1.0.0 (slot A, confirmed), release 1.1.0 for both.
 fn world() -> Result<World, String> {
     let key = KeyPair::from_seed(Seed::new(SEED));
-    let t = dagon_topology::parse_str(&yaml()).map_err(|e| e.to_string())?;
+    let t = dagon_topology::parse_str(YAML).map_err(|e| e.to_string())?;
     let topology = dagon_topology::compile(&t).map_err(|e| e.to_string())?;
     let images = [
         seg_img(&key, 0, NEW),
@@ -318,7 +320,7 @@ fn s4() -> R {
         &w.key,
         "stm32f401re",
         image_kind::BOOTCORE,
-        "seg-f401-7seg",
+        &topology_tag("seg"),
         0,
         OLD,
         4000,
@@ -382,7 +384,7 @@ mod tests {
         let w = world().unwrap();
         let out = w.apply(&w.release).unwrap();
         assert!(all_done(&out), "{out:?}");
-        let t = dagon_topology::parse_str(&yaml()).unwrap();
+        let t = dagon_topology::parse_str(YAML).unwrap();
         let mut events = Vec::new();
         let v = crate::device::rollback_node(&mut w.host(), &t, "seg", &mut |e| events.push(e))
             .unwrap();

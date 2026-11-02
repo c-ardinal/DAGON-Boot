@@ -67,7 +67,6 @@ async fn main(_spawner: Spawner) {
     step(10);
     let p = embassy_rp::init(Default::default());
     step(11);
-    let _backlight = Output::new(p.PIN_25, Level::High);
 
     let mut store = HubStore {
         flash: RpFlash::new(p.FLASH),
@@ -100,6 +99,8 @@ async fn main(_spawner: Spawner) {
         cs: Output::new(p.PIN_9, Level::High),
         dc: Output::new(p.PIN_8, Level::Low),
         rst: Output::new(p.PIN_13, Level::High),
+        // Off until the panel is reset, set up and cleared.
+        backlight: Output::new(p.PIN_25, Level::Low),
     };
 
     step(12);

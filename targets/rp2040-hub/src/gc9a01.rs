@@ -23,7 +23,6 @@ const RAMWR: u8 = 0x2C;
 const SLPOUT: u8 = 0x11;
 const DISPON: u8 = 0x29;
 const INVON: u8 = 0x21;
-const TEON: u8 = 0x35;
 
 /// MADCTL: row and column order flipped (upright on this board), BGR panel.
 const MADCTL: u8 = 0xC8;
@@ -97,7 +96,6 @@ const INIT: &[(u8, &[u8])] = &[
     ),
     (0x74, &[0x10, 0x85, 0x80, 0x00, 0x00, 0x4E, 0x00]),
     (0x98, &[0x3E, 0x07]),
-    (TEON, &[]),
     (INVON, &[]),
 ];
 

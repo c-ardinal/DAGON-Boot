@@ -105,13 +105,29 @@ pub struct Pins<'d> {
     pub cs: Output<'d>,
     pub dc: Output<'d>,
     pub rst: Output<'d>,
+    pub backlight: Output<'d>,
 }
 
-/// Sets the panel up (cleared to black), then draws the home screen
-/// whenever [`HOME`] changes.
-pub async fn run(pins: Pins<'_>) {
+/// Sets the panel up (cleared to black) with the backlight off, turns the
+/// backlight on, draws the home screen at once (nodes not polled yet), then
+/// redraws whenever [`HOME`] changes. The `diag` build first shows a test
+/// pattern for 3 s.
+pub async fn run(mut pins: Pins<'_>) {
     let mut display = Panel::new(pins.spi, pins.cs, pins.dc, pins.rst);
-    let mut shown: Option<Home> = None;
+    pins.backlight.set_high();
+    if cfg!(feature = "diag") {
+        let _ = test_pattern(&mut display);
+        embassy_time::Timer::after_secs(3).await;
+    }
+    let first = Home {
+        hub: Node {
+            node: crate::nodes::HUB,
+            ..Default::default()
+        },
+        ..Default::default()
+    };
+    let _ = draw(&mut display, &first);
+    let mut shown = Some(first);
     loop {
         let home = HOME.wait().await;
         if shown.as_ref() != Some(&home) {
@@ -119,6 +135,30 @@ pub async fn run(pins: Pins<'_>) {
             shown = Some(home);
         }
     }
+}
+
+/// Which drawing paths land: red/green/blue bands (large solid fills), a
+/// white square in the middle (small solid fill), a white line of single
+/// pixels below it (per-pixel writes), the word DIAG (glyph streams) and a
+/// yellow ring (circle).
+fn test_pattern<D: DrawTarget<Color = Rgb565>>(d: &mut D) -> Result<(), D::Error> {
+    use embedded_graphics::primitives::Rectangle;
+    let bands = [(40, Rgb565::RED), (80, Rgb565::GREEN), (120, Rgb565::BLUE)];
+    for (y, c) in bands {
+        Rectangle::new(Point::new(0, y), Size::new(240, 40))
+            .into_styled(PrimitiveStyle::with_fill(c))
+            .draw(d)?;
+    }
+    Rectangle::new(Point::new(110, 90), Size::new(20, 20))
+        .into_styled(PrimitiveStyle::with_fill(Rgb565::WHITE))
+        .draw(d)?;
+    d.draw_iter((70..170).map(|x| Pixel(Point::new(x, 170), Rgb565::WHITE)))?;
+    let style = MonoTextStyle::new(&FONT_10X20, Rgb565::WHITE);
+    Text::with_alignment("DIAG", Point::new(120, 200), style, Alignment::Center).draw(d)?;
+    Circle::with_center(Point::new(120, 120), 200)
+        .into_styled(PrimitiveStyle::with_stroke(Rgb565::YELLOW, 4))
+        .draw(d)?;
+    Ok(())
 }
 
 fn draw<D: DrawTarget<Color = Rgb565>>(d: &mut D, home: &Home) -> Result<(), D::Error> {

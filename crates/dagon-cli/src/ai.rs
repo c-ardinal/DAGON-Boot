@@ -99,15 +99,33 @@ pub(crate) fn api_key_present() -> bool {
 
 /// For `dagon serve`: the topology YAML for `description` and its check
 /// report (JSON), with the model's questions answered through `ask`.
-pub(crate) fn topology_for(description: &str, ask: &mut Ask) -> Result<(String, String), String> {
+pub(crate) fn topology_for(
+    description: &str,
+    ask: &mut Ask,
+    cancel: &std::sync::atomic::AtomicBool,
+) -> Result<(String, String), String> {
     if description.trim().is_empty() {
         return Err("the board description is empty".into());
     }
     let key = api_key(std::env::var(KEY_ENV))?;
     let model = std::env::var(MODEL_ENV).unwrap_or_else(|_| DEFAULT_MODEL.into());
-    let mut api = |body: &Value| post_messages(API_URL, &key, body);
+    let mut post = |body: &Value| post_messages(API_URL, &key, body);
+    let mut api = |body: &Value| unless_cancelled(cancel, &mut post, body);
     let done = generate(description, &model, &mut api, ask)?;
     Ok((done.yaml, done.report.to_json()))
+}
+
+/// One model call, refused once `cancel` is set (a cancelled job stops at
+/// its next call).
+fn unless_cancelled(
+    cancel: &std::sync::atomic::AtomicBool,
+    api: &mut Api,
+    body: &Value,
+) -> Result<Value, String> {
+    if cancel.load(std::sync::atomic::Ordering::Relaxed) {
+        return Err("cancelled".into());
+    }
+    api(body)
 }
 
 fn parse_args(args: &[&str], env_model: Option<String>) -> Result<Args, String> {
@@ -352,6 +370,21 @@ fn unanswered(qs: &[String]) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_cancelled_job_makes_no_model_call() {
+        let flag = std::sync::atomic::AtomicBool::new(true);
+        let mut calls = 0;
+        let mut fake = |_: &Value| {
+            calls += 1;
+            Ok(json!({}))
+        };
+        let mut api = |b: &Value| unless_cancelled(&flag, &mut fake, b);
+        let mut ask = |_: &[String]| Ok(Vec::new());
+        let r = generate("a hub", "m", &mut api, &mut ask);
+        assert_eq!(r.unwrap_err(), "cancelled");
+        assert_eq!(calls, 0);
+    }
     use std::collections::VecDeque;
     use std::io::BufReader;
     use std::net::TcpListener;

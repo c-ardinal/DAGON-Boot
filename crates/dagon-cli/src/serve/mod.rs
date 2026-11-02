@@ -33,6 +33,12 @@ const HTTP_TIMEOUT: Duration = Duration::from_secs(30);
 const WS_AUTH_TIMEOUT: Duration = Duration::from_secs(10);
 const WS_POLL: Duration = Duration::from_millis(500);
 const DEFAULT_WEB: &str = "web/dist";
+/// Connections handled at once; more get 503 straight away.
+pub const MAX_CONNECTIONS: usize = 32;
+/// Pages on the event stream at once.
+pub const MAX_PAGES: usize = 8;
+/// How long the browser-launch file stays before it is deleted.
+const LAUNCHER_LIFETIME: Duration = Duration::from_secs(60);
 
 /// A fresh passphrase: 128 random bits as hex.
 fn passphrase() -> Result<String, String> {
@@ -83,26 +89,73 @@ pub fn command(args: &[&str]) -> Result<(), String> {
     Ok(())
 }
 
-fn open_browser(url: &str) {
-    let r = if cfg!(windows) {
-        std::process::Command::new("cmd")
-            .args(["/C", "start", "", url])
-            .spawn()
+/// A local page that forwards to `url`. Opening it keeps the passphrase
+/// out of the browser's command line (visible in the process list).
+fn launcher_page(url: &str) -> String {
+    let js = serde_json::to_string(url).unwrap_or_default();
+    format!(
+        "<!doctype html><meta charset=\"utf-8\"><meta name=\"referrer\" content=\"no-referrer\">\
+         <title>dagon serve</title><script>location.replace({js});</script>"
+    )
+}
+
+/// The program and arguments that open `file` in the default browser.
+fn open_command(file: &Path) -> (&'static str, Vec<std::ffi::OsString>) {
+    let f = file.as_os_str().to_os_string();
+    if cfg!(windows) {
+        ("cmd", vec!["/C".into(), "start".into(), "".into(), f])
     } else if cfg!(target_os = "macos") {
-        std::process::Command::new("open").arg(url).spawn()
+        ("open", vec![f])
     } else {
-        std::process::Command::new("xdg-open").arg(url).spawn()
-    };
-    if r.is_err() {
+        ("xdg-open", vec![f])
+    }
+}
+
+/// Creates `path` (never over an existing file or link), readable by the
+/// owner only on Unix; the per-user temporary folder covers Windows.
+fn write_private(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
+    let mut o = std::fs::OpenOptions::new();
+    o.write(true).create_new(true);
+    #[cfg(unix)]
+    std::os::unix::fs::OpenOptionsExt::mode(&mut o, 0o600);
+    o.open(path)?.write_all(bytes)
+}
+
+fn open_browser(url: &str) {
+    let name = passphrase().map(|r| format!("dagon-open-{}.html", &r[..12]));
+    let file = name.map(|n| std::env::temp_dir().join(n));
+    let opened = file.as_ref().is_ok_and(|f| {
+        write_private(f, launcher_page(url).as_bytes()).is_ok() && {
+            let (prog, args) = open_command(f);
+            std::process::Command::new(prog).args(args).spawn().is_ok()
+        }
+    });
+    if let Ok(f) = file {
+        std::thread::spawn(move || {
+            std::thread::sleep(LAUNCHER_LIFETIME);
+            let _ = std::fs::remove_file(f);
+        });
+    }
+    if !opened {
         eprintln!("could not open a browser; open the URL above");
     }
 }
 
 /// Accepts connections forever, one thread each.
 pub fn serve(listener: TcpListener, server: Arc<Server>) {
-    for stream in listener.incoming().flatten() {
+    let active = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    for mut stream in listener.incoming().flatten() {
+        if active.fetch_add(1, Ordering::Relaxed) >= MAX_CONNECTIONS {
+            active.fetch_sub(1, Ordering::Relaxed);
+            let _ = http::write_response(&mut stream, &Response::error(503, "busy"));
+            continue;
+        }
         let server = server.clone();
-        std::thread::spawn(move || connection(stream, &server));
+        let active = active.clone();
+        std::thread::spawn(move || {
+            connection(stream, &server);
+            active.fetch_sub(1, Ordering::Relaxed);
+        });
     }
 }
 
@@ -179,7 +232,13 @@ fn events(mut stream: TcpStream, server: &Arc<Server>, req: &Request) {
         let _ = ws::write_frame(&mut stream, ws::op::CLOSE, &4401u16.to_be_bytes());
         return;
     }
+    if server.pages.fetch_add(1, Ordering::Relaxed) >= MAX_PAGES {
+        server.pages.fetch_sub(1, Ordering::Relaxed);
+        let _ = ws::write_frame(&mut stream, ws::op::CLOSE, &4429u16.to_be_bytes());
+        return;
+    }
     let Ok(reader) = stream.try_clone() else {
+        server.pages.fetch_sub(1, Ordering::Relaxed);
         return;
     };
     let _ = reader.set_read_timeout(None);
@@ -187,7 +246,6 @@ fn events(mut stream: TcpStream, server: &Arc<Server>, req: &Request) {
     let closed = Arc::new(AtomicBool::new(false));
     spawn_reader(reader, writer.clone(), closed.clone());
     let rx = server.subscribe();
-    server.pages.fetch_add(1, Ordering::Relaxed);
     let _ = send(&writer, r#"{"type":"ready"}"#);
     while !closed.load(Ordering::Relaxed) {
         match rx.recv_timeout(WS_POLL) {

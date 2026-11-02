@@ -60,14 +60,14 @@ pub type SlotElfs = Vec<(char, Vec<u8>)>;
 /// The ELF files of `node`'s last successful build, checked against its
 /// record: (slot, bytes) and the recorded version.
 pub fn last_build(cfg: &Config, node: &str) -> Result<(BuildRecord, SlotElfs), String> {
-    let dir = node_dir(cfg, node);
+    let dir = crate::paths::contained(&cfg.base, &node_dir(cfg, node))?;
     let text = std::fs::read_to_string(dir.join(RECORD))
         .map_err(|_| format!("{node} has no successful build; run the build first"))?;
     let rec: BuildRecord =
         serde_json::from_str(&text).map_err(|e| format!("{node}: bad build record: {e}"))?;
     let mut out = Vec::new();
     for (slot, sha) in &rec.slots {
-        let path = elf_path(cfg, node, *slot);
+        let path = crate::paths::contained(&cfg.base, &elf_path(cfg, node, *slot))?;
         let bytes = std::fs::read(&path).map_err(|e| format!("{}: {e}", path.display()))?;
         if sha_hex(&bytes) != *sha {
             return Err(format!("{} changed since it was built", path.display()));
@@ -109,7 +109,9 @@ fn build_node(
     cancel: &AtomicBool,
 ) -> Result<Built, String> {
     b.validate().map_err(|e| format!("[build.{id}]: {e}"))?;
-    let dir = cfg.base.join(&b.package);
+    // Resolved through symlinks and junctions; must stay in the work area.
+    let dir = crate::paths::contained(&cfg.base, &b.package)
+        .map_err(|e| format!("[build.{id}] package: {e}"))?;
     let bin = match &b.bin {
         Some(n) => n.clone(),
         None => package_name(&dir)?,
@@ -119,7 +121,8 @@ fn build_node(
         let feats = b.features.iter().cloned().chain([f.clone()]).collect();
         slots.push(('b', feats, Some(dir.join("target").join("slot-b"))));
     }
-    let out_dir = node_dir(cfg, id);
+    let out_dir = crate::paths::contained(&cfg.base, &node_dir(cfg, id))
+        .map_err(|e| format!("[build.{id}] output: {e}"))?;
     match std::fs::remove_dir_all(&out_dir) {
         Ok(()) => {}
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
@@ -201,6 +204,8 @@ fn cargo_build(
         "--release",
         "--locked",
         "--message-format=json-render-diagnostics",
+        "--bin",
+        bin,
     ])
     .current_dir(dir)
     .stdin(Stdio::null())
@@ -331,6 +336,9 @@ mod tests {
         assert!(with(&|b| b.package = PathBuf::from("C:/abs")).is_err());
         assert!(with(&|b| b.features = vec!["a,b".into()]).is_err());
         assert!(with(&|b| b.bin = Some("x y".into())).is_err());
+        // A name cargo would read as an option.
+        assert!(with(&|b| b.bin = Some("--offline".into())).is_err());
+        assert!(with(&|b| b.features = vec!["-x".into()]).is_err());
         assert!(with(&|b| b.version = Some("one".into())).is_err());
     }
 
@@ -352,6 +360,8 @@ mod tests {
         )
         .unwrap();
         // --locked needs a lock file; an empty package resolves offline.
+        std::fs::create_dir_all(pkg.join("src/bin")).unwrap();
+        std::fs::write(pkg.join("src/bin/other.rs"), "fn main() {}\n").unwrap();
         let gen = Command::new("cargo")
             .args(["generate-lockfile", "--offline"])
             .current_dir(&pkg)
@@ -383,6 +393,10 @@ mod tests {
         assert_eq!(built[0].slots.len(), 2);
         assert!(elf_path(&cfg, "tiny", 'a').exists() && elf_path(&cfg, "tiny", 'b').exists());
         assert!(lines.iter().any(|l| l.contains("slot b")));
+        let other = pkg
+            .join("target/release")
+            .join(format!("other{}", std::env::consts::EXE_SUFFIX));
+        assert!(!other.exists(), "only the named binary is built (--bin)");
         let (rec, elfs) = last_build(&cfg, "tiny").unwrap();
         assert_eq!(elfs.iter().map(|e| e.0).collect::<Vec<_>>(), ['a', 'b']);
         assert_eq!(rec.slots.len(), 2);

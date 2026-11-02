@@ -30,7 +30,12 @@ pub fn read_request(stream: &mut TcpStream) -> Result<Request, String> {
     let mut r = BufReader::new(stream);
     let mut head = Vec::new();
     while !head.ends_with(b"\r\n\r\n") {
-        let n = r.read_until(b'\n', &mut head).map_err(|e| e.to_string())?;
+        // Never reads past MAX_HEAD, even inside one endless line.
+        let room = (MAX_HEAD + 1).saturating_sub(head.len()) as u64;
+        let n = (&mut r)
+            .take(room)
+            .read_until(b'\n', &mut head)
+            .map_err(|e| e.to_string())?;
         if n == 0 || head.len() > MAX_HEAD {
             return Err("bad request head".into());
         }
@@ -111,6 +116,8 @@ fn reason(status: u16) -> &'static str {
         409 => "Conflict",
         413 => "Payload Too Large",
         422 => "Unprocessable Entity",
+        429 => "Too Many Requests",
+        503 => "Service Unavailable",
         501 => "Not Implemented",
         _ => "Error",
     }

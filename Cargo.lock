@@ -237,6 +237,7 @@ name = "f401-node"
 version = "0.0.0"
 dependencies = [
  "dagon-agent",
+ "dagon-conform",
  "dagon-core",
  "dagon-format",
  "dagon-port",

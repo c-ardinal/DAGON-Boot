@@ -56,26 +56,6 @@ use embassy_stm32::flash::{Blocking, Flash as Hal, FLASH_BASE, FLASH_SIZE};
 use embassy_stm32::peripherals::FLASH;
 use embassy_stm32::Peri;
 
-/// Regions DAGON may erase and write: the two log faces and the two APP
-/// slots. Reads are allowed anywhere in flash; the boot core sectors are
-/// never erased or written through this port.
-const WRITABLE: [FlashRegion; 2] = [
-    FlashRegion {
-        start: 0x0800_8000,
-        len: 0x8000,
-        erase_size: 0x4000,
-        write_size: 4,
-        erased_value: 0xFF,
-    },
-    FlashRegion {
-        start: 0x0802_0000,
-        len: 0x4_0000,
-        erase_size: 0x2_0000,
-        write_size: 4,
-        erased_value: 0xFF,
-    },
-];
-
 pub struct BoardFlash<'d>(Hal<'d, Blocking>);
 
 impl<'d> BoardFlash<'d> {
@@ -85,7 +65,7 @@ impl<'d> BoardFlash<'d> {
 }
 
 fn region(addr: u32, len: u32) -> Result<&'static FlashRegion, FlashError> {
-    WRITABLE
+    FLASH_REGIONS
         .iter()
         .find(|r| addr >= r.start && addr.saturating_add(len) <= r.start + r.len)
         .ok_or(FlashError::Range)
@@ -102,7 +82,7 @@ fn offset(addr: u32, len: usize) -> Result<u32, FlashError> {
 
 impl Flash for BoardFlash<'_> {
     fn geometry(&self) -> &[FlashRegion] {
-        &WRITABLE
+        &FLASH_REGIONS
     }
 
     fn read(&mut self, addr: u32, buf: &mut [u8]) -> Result<(), FlashError> {

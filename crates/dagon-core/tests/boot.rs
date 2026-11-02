@@ -556,3 +556,58 @@ fn cut_compaction_leaves_old_face_valid() {
     let again = Log::load(&mut m, &LOG).unwrap();
     assert_eq!((again.generation, again.state), (log.generation, log.state));
 }
+
+/// Flash whose next erase fails after leaving garbage in the erased range.
+struct FailingErase {
+    mem: Mem,
+    fail_next: bool,
+}
+
+impl Flash for FailingErase {
+    fn geometry(&self) -> &[FlashRegion] {
+        &[]
+    }
+    fn read(&mut self, addr: u32, buf: &mut [u8]) -> Result<(), FlashError> {
+        self.mem.read(addr, buf)
+    }
+    fn erase(&mut self, addr: u32, len: u32) -> Result<(), FlashError> {
+        self.mem.erase(addr, len)?;
+        if std::mem::take(&mut self.fail_next) {
+            self.mem.put(addr, &[0u8; 32]);
+            return Err(FlashError::Hw);
+        }
+        Ok(())
+    }
+    fn write(&mut self, addr: u32, data: &[u8]) -> Result<(), FlashError> {
+        self.mem.write(addr, data)
+    }
+}
+
+#[test]
+fn failed_compaction_erase_keeps_the_active_face() {
+    let mut m = with_pending_b();
+    // Torn third record: the next append must compact first.
+    let rec3 = LOG.faces[0] + 32 + 2 * 32;
+    let byte = m.bytes[(rec3 + 8 - BASE) as usize];
+    m.put(rec3 + 8, &[byte ^ 1]);
+    let mut f = FailingErase {
+        mem: m,
+        fail_next: true,
+    };
+    let mut log = Log::load(&mut f, &LOG).unwrap();
+    let before = (log.generation, log.state);
+    let a = log.state.confirmed.unwrap();
+    assert!(log
+        .append(&mut f, kind::CONFIRMED, a, reason::NONE)
+        .is_err());
+    f.fail_next = true;
+    assert!(log
+        .append(&mut f, kind::CONFIRMED, a, reason::NONE)
+        .is_err());
+    let again = Log::load(&mut f, &LOG).unwrap();
+    assert_eq!((again.generation, again.state), before);
+    // Once erasing works, the retry compacts normally.
+    log.append(&mut f, kind::CONFIRMED, a, reason::NONE)
+        .unwrap();
+    assert_eq!(Log::load(&mut f, &LOG).unwrap().generation, before.0 + 1);
+}

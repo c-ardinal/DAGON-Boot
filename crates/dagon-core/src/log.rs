@@ -246,9 +246,11 @@ impl Log {
             s.confirmed.map(|c| (kind::SNAPSHOT, c, s.attempts)),
         ];
         let old = *self;
-        self.face ^= 1;
-        let face = self.layout.faces[self.face];
+        let face = self.layout.faces[self.face ^ 1];
+        // Flip only once the erase worked: a failed erase must leave this
+        // face active, or a retry would erase the only valid face.
         flash.erase(face, self.layout.face_len)?;
+        self.face ^= 1;
         self.next = Some(face + FACE_HEADER_SIZE as u32);
         self.state = LogState::default();
         for (kind, at, why) in carry.into_iter().flatten() {

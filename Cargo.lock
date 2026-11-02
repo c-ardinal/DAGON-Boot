@@ -243,6 +243,7 @@ dependencies = [
  "js-sys",
  "wasm-bindgen",
  "wasm-bindgen-futures",
+ "yaml_serde",
 ]
 
 [[package]]

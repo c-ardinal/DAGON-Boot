@@ -8,20 +8,26 @@ pub struct Mcu {
     pub id: &'static str,
     /// Port kind the MCU must use (`self-boot` or `vendor-stage2`).
     pub port: &'static str,
+    /// GPIO0..GPIOn-1 a node without a named board is checked against (P1);
+    /// 0 when its pins are named by port (`PB4`), not numbered.
+    pub gpio_count: u8,
 }
 
 pub const MCUS: &[Mcu] = &[
     Mcu {
         id: "rp2040",
         port: "self-boot",
+        gpio_count: 30,
     },
     Mcu {
         id: "stm32f401re",
         port: "self-boot",
+        gpio_count: 0,
     },
     Mcu {
         id: "esp32s3",
         port: "vendor-stage2",
+        gpio_count: 49,
     },
 ];
 

@@ -88,6 +88,7 @@ describe('operating-mode state machine', () => {
     ['L26', 'reconnect', 'L03'],
     ['L12', 'cliClaim', 'L28'],
     ['L28', 'cliReturn', 'L12'],
+    ['L17', 'otherFile', 'L14'],
   ] as [L, Ev, L][])('%s --%s--> %s', (from, ev, to) => {
     expect(next(from, ev)).toBe(to);
   });
@@ -96,8 +97,13 @@ describe('operating-mode state machine', () => {
     expect(next('L12', 'pushed')).toBe('L12');
   });
 
-  test('empty canvas: find automatically, or place the sample; with a configuration: connect', () => {
-    expect(view('L02', { hasConfig: false })).toEqual({ step: 2, primary: 'connectDiscover', secondary: ['placeSample'] });
+  test('運用 never sends or replaces the 構成 from L17 (owner 11/3): its side action leaves for 定義', () => {
+    expect(view('L17', { hasConfig: true }).secondary).toEqual(['defineFix']);
+    expect(Object.values(MACHINE.L17.on)).not.toContain('L10');
+  });
+
+  test('empty canvas: find automatically; with a configuration: connect', () => {
+    expect(view('L02', { hasConfig: false })).toEqual({ step: 2, primary: 'connectDiscover', secondary: [] });
     expect(view('L02', { hasConfig: true })).toEqual({ step: 1, primary: 'connect', secondary: [] });
   });
 

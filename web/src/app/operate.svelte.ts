@@ -8,6 +8,7 @@ import {
   PHASE,
   check_release_for,
   newHost,
+  release_topology,
   topo_compile,
   versionText,
   watch_interval_ms,
@@ -79,16 +80,17 @@ export interface Deps {
   /** Clock of dagon-host's timeouts (tests run it fast). */
   clock?: LinkClock;
   /**
-   * A file of the public site next to the page (`release/latest.dgb`,
-   * `release/<node>-bootcore.img`); null when it is not there.
+   * The project's latest release through dagon serve (GET /v1/release/latest),
+   * which "最新のリリースを使う" and a recovery without a file take; null when
+   * there is none. The page fetches nothing from anywhere else.
    */
-  fetchAsset?: (path: string) => Promise<Uint8Array | null>;
+  latest?: () => Promise<Uint8Array | null>;
+  /** The signed boot core of node `id` the ROM path writes, through dagon serve; null when there is none. */
+  bootcore?: (id: string) => Promise<Uint8Array | null>;
 }
 
-/** The published release recovery and "配布中の最新バージョンを使う" take. */
-export const LATEST_RELEASE = 'release/latest.dgb';
-/** The signed boot core the ROM path writes for a node. */
-export const bootcorePath = (id: string): string => `release/${id}-bootcore.img`;
+/** The file name "最新のリリースを使う" shows. */
+export const LATEST_NAME = 'latest.dgb';
 
 /**
  * dagon-host's reason for a node that did not get through, as its chip:
@@ -104,10 +106,10 @@ export function failureStage(reason: string): Pick<Progress, 'stage' | 'reason'>
   return { stage: 'cannotFix' };
 }
 
-async function fetchNextToPage(path: string): Promise<Uint8Array | null> {
+/** The 構成 in a release's topology item (dagon-wasm reads it), or null when it has none or cannot be read. */
+function fileTopologyOf(bytes: Uint8Array, yaml: string): Record<string, unknown> | null {
   try {
-    const r = await fetch(new URL(path, document.baseURI));
-    return r.ok ? new Uint8Array(await r.arrayBuffer()) : null;
+    return (release_topology(bytes, yaml) as Record<string, unknown> | null) ?? null;
   } catch {
     return null;
   }
@@ -118,8 +120,6 @@ export class Operate {
   failure = $state<ConnectFailure | undefined>();
   config = $state<Config | null>(null);
   live = $state<Record<string, Live>>({});
-  /** This page sent the configuration on the canvas to the hub. */
-  sent = $state(false);
   /** Nodes found by the last scan (hub included). */
   found = $state(0);
   /** `node:<id>` or `link:<to>`. */
@@ -143,6 +143,14 @@ export class Operate {
   recovered = $state<RecoverResult | null>(null);
   /** The update after a recovery covers the nodes not written yet ("残りのノードを更新"). */
   rest = $state(false);
+  /**
+   * The 構成 a release made for another 構成 was made for (L17, §7.6): shown
+   * as differences, and taken in 定義 by "ファイルの構成を取り込む". Null when
+   * the file carries none.
+   */
+  fileTopology = $state<Record<string, unknown> | null>(null);
+  /** "最新のリリースを使う" found no release (M58 in the band until the next step). */
+  latestMissing = $state(false);
 
   private link: SwapLink | null = null;
   /** Version each node was given in this run. */
@@ -176,12 +184,31 @@ export class Operate {
     const to = next(this.state, ev);
     if (to === this.state && ev !== 'placeSample') return;
     this.state = to;
+    this.latestMissing = false;
     if (focus) this.focusRequest++;
+  }
+
+  /** `dagon serve` needs the hub's port (device.need): close Web Serial and show L28. */
+  async handOver(): Promise<void> {
+    this.session++;
+    await this.drop();
+    this.go('cliClaim', false);
+  }
+
+  /** The CLI gave the port back (device.returned): the user connects again (L26). */
+  cliReturned(): void {
+    this.go('lost', false);
+  }
+
+  /** A configuration made in define mode takes the canvas (not sent yet). */
+  useConfig(c: Config): void {
+    if (this.config?.yaml === c.yaml) return;
+    this.config = c;
+    this.live = Object.fromEntries(c.nodes.map((n) => [n.id, this.live[n.id] ?? UNKNOWN]));
   }
 
   placeSample(): void {
     this.config = DESK_DEMO;
-    this.sent = false;
     this.live = Object.fromEntries(DESK_DEMO.nodes.map((n) => [n.id, UNKNOWN]));
     this.go('placeSample', false);
   }
@@ -220,7 +247,7 @@ export class Operate {
     if (my !== this.session) return;
     this.status = ANNOUNCE.A05;
     if (discover) return this.discover(my);
-    this.go(this.sent ? 'helloConfigured' : 'helloUnsent');
+    this.go('helloConfigured');
     this.startWatching();
   }
 
@@ -269,7 +296,6 @@ export class Operate {
       const bin = topo_compile(this.config.yaml);
       await this.call((h) => h.pushTopology(bin));
       if (my !== this.session) return;
-      this.sent = true;
       this.status = ANNOUNCE.A07;
       this.go('pushed');
     } catch {
@@ -362,6 +388,7 @@ export class Operate {
     const file: ReleaseFile = { name, size: bytes.length, bytes, verdict: 'checking' };
     this.file = file;
     this.refusal = undefined;
+    this.fileTopology = null;
     this.status = ANNOUNCE.A09(name, FILE.size(bytes.length));
     this.go('read', false);
     try {
@@ -370,6 +397,7 @@ export class Operate {
       const k = refusalOf(e);
       this.file = { ...file, verdict: k };
       this.refusal = k;
+      if (k === 'topology') this.fileTopology = fileTopologyOf(bytes, this.config.yaml);
       this.status = refusalAnnounce(k);
       return this.go(k === 'topology' ? 'topoDiff' : 'badSource');
     }
@@ -503,24 +531,25 @@ export class Operate {
     return this.config?.nodes.find((n) => n.id === id);
   }
 
-  private fetchAsset(path: string): Promise<Uint8Array | null> {
-    return (this.deps.fetchAsset ?? fetchNextToPage)(path);
+  private async latest(): Promise<Uint8Array | null> {
+    return (await this.deps.latest?.().catch(() => null)) ?? null;
   }
 
-  /** "配布中の最新バージョンを使う": the published release, checked like a chosen file. */
+  /** "最新のリリースを使う": the project's latest release, checked like a chosen file. */
   async useLatest(): Promise<boolean> {
-    const bytes = await this.fetchAsset(LATEST_RELEASE);
+    const bytes = await this.latest();
     if (!bytes) {
       this.alert = ANNOUNCE.A22latest;
+      this.latestMissing = true;
       return false;
     }
-    this.takeFile(LATEST_RELEASE.split('/').pop()!, bytes);
+    this.takeFile(LATEST_NAME, bytes);
     return this.file?.verdict === 'pass';
   }
 
   /**
    * "（ノード）を復旧する": dagon-host's recover with the release on the
-   * screen (else the published one) and, for the ROM path, the published
+   * screen (else the project's latest) and, for the ROM path, the project's
    * boot core. Without any release it asks for one (`needFile`); `chosen`
    * is that file.
    */
@@ -539,10 +568,10 @@ export class Operate {
       }
       this.file = { name: chosen.name, size: chosen.bytes.length, bytes: chosen.bytes, verdict: 'pass' };
     }
-    release ??= await this.fetchAsset(LATEST_RELEASE);
+    release ??= await this.latest();
     if (!release) return 'needFile';
     const bytes = release;
-    const bootcore = await this.fetchAsset(bootcorePath(n.id));
+    const bootcore = (await this.deps.bootcore?.(n.id).catch(() => null)) ?? null;
     const index = c.nodes.indexOf(n);
     await this.runRecovery(n, 'recover', (h, on) => h.recover(index, bytes, topo, bootcore, on));
   }
@@ -648,6 +677,35 @@ export class Operate {
     this.progress[n.id] = { ...failureStage(reason), percent };
     this.status = REFUSALS.includes(reason) ? refusalAnnounce(reason as Refusal) : ANNOUNCE.A13(n.name);
     this.go(this.state === 'L20' ? 'nodeStuck' : 'gaveUp');
+  }
+
+  /**
+   * "最初からやり直す" (SC-M): the page's records go (connection, file,
+   * progress) and the session waits at L02; the project's files are untouched.
+   */
+  reset(): void {
+    this.session++;
+    void this.drop();
+    this.state = 'L02';
+    this.failure = undefined;
+    this.config = null;
+    this.live = {};
+    this.found = 0;
+    this.selected = null;
+    this.status = '';
+    this.alert = '';
+    this.file = null;
+    this.refusal = undefined;
+    this.targets = [];
+    this.progress = {};
+    this.failed = null;
+    this.reconnectUntil = null;
+    this.recovering = null;
+    this.recovered = null;
+    this.rest = false;
+    this.fileTopology = null;
+    this.latestMissing = false;
+    this.sentVersion = {};
   }
 
   /** dagon-host runs one call at a time; calls queue here. */

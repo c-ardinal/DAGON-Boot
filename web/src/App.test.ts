@@ -1,7 +1,7 @@
 import { render } from 'svelte/server';
 import { afterEach, describe, expect, test, vi } from 'vitest';
 import App from './App.svelte';
-import { BAND, BUTTON, CANVAS, UNSUPPORTED } from './app/copy.ts';
+import { CLI_LINK, DEFINE, MODE, START, UNSUPPORTED } from './app/copy.ts';
 
 // The first paint must not depend on dagon-wasm: rendering the component
 // touches no WASM export, so a missing .wasm cannot leave the page blank.
@@ -26,13 +26,21 @@ function stubBrowser(search: string, serial: unknown) {
 afterEach(() => vi.unstubAllGlobals());
 
 describe('first paint without dagon-wasm', () => {
-  test('the empty state, its sentence and its buttons render', () => {
+  // Superseded: the page used to open on an empty 定義 (E1) with "見本から作る".
+  // It now opens on SC-S0 until a project is open (owner 11/3, ui-design §7.2b).
+  test('the page opens on SC-S0: three choices, recent projects, no mode switch or steps yet', () => {
     stubBrowser('?mock', undefined);
     const { body } = render(App);
-    expect(body).toContain(BAND.M03.sentence);
-    expect(body).toContain(CANVAS.empty);
-    expect(body).toContain(BUTTON.connectDiscover);
-    expect(body).toContain(BUTTON.placeSample);
+    for (const label of [START.new, START.sample, START.open, START.recent]) expect(body).toContain(label);
+    expect(body).not.toContain(MODE.label);
+    expect(body).not.toContain(DEFINE.listHeading);
+  });
+
+  test('not served by dagon serve: the choices are unavailable and the band says how to start it (C11)', () => {
+    stubBrowser('', { addEventListener: () => undefined });
+    const { body } = render(App);
+    expect(body).toContain(CLI_LINK.needCli);
+    expect(body).toMatch(/aria-pressed="false" aria-disabled="true"/);
   });
 
   test('the unsupported-browser screen renders', () => {

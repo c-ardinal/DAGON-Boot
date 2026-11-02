@@ -123,8 +123,10 @@ export function emptyDoc(name = 'my-desk'): Doc {
 
 /** A YAML file as a document; throws when it is not YAML at all. */
 export function fromYaml(yaml: string, names: Record<string, string> = {}): Doc {
-  const t = topo_parse(yaml) as Topo;
-  return { topo: { buses: [], links: [], recovery: {}, ...t }, names };
+  const t = topo_parse(yaml) as Topo | null;
+  // An empty file or one that is not a mapping with nodes is not a 構成 (C09), not a crash.
+  if (!t || typeof t !== 'object' || Array.isArray(t) || !Array.isArray(t.nodes)) throw new Error('not a topology');
+  return { topo: { buses: [], links: [], recovery: {}, ...t, update: t.update ?? { order: [] } }, names };
 }
 
 const hub = (t: Topo) => t.nodes.find((n) => n.role === 'coordinator');

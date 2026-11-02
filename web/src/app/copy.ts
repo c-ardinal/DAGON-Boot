@@ -440,6 +440,8 @@ export const MODE = {
   label: 'モード',
   /** M68: 運用 pressed while the 構成 is a shape not updatable yet (§5.2). */
   lockedUnsupported: { chip: '◇ まだ更新できない構成', sentence: '親機 1 つとその子機の、8 ノードまでの形にすると、運用を使えます。' },
+  /** 案: 運用 or 親機へ送る pressed while the 構成 is not in the project's YAML. */
+  lockedUnsaved: { sentence: '構成を保存すると、運用と親機へ送るを使えます。' },
   /** M69: 運用 pressed with no 構成 or one with problems. */
   lockedProblems: { sentence: '構成を作り、問題を直すと、運用を使えます。' },
 } as const;
@@ -676,6 +678,15 @@ export const SAVE = {
   /** 409: a job holds the project. */
   busy: { chip: '× 作業中', sentence: '作業が終わってから、もう一度保存してください。' },
   failed: { chip: '× 保存できない', sentence: 'ターミナルで dagon serve が動いているか確かめてから、もう一度保存してください。' },
+} as const;
+
+/** 案: leaving the project while its 構成 could not be saved (the dialog). */
+export const UNSAVED = {
+  heading: '保存していない変更があります',
+  sentence: 'もう一度保存するか、変更を捨てて進むかを選んでください。',
+  save: 'もう一度保存する',
+  discard: '変更を捨てて進む',
+  stay: 'やめる',
 } as const;
 
 /** SC-S0 始め (S46, M35). */

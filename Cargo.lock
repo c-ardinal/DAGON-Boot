@@ -201,9 +201,12 @@ name = "dagon-wasm"
 version = "0.0.0"
 dependencies = [
  "dagon-format",
+ "dagon-host",
  "dagon-proto",
  "dagon-topology",
+ "js-sys",
  "wasm-bindgen",
+ "wasm-bindgen-futures",
 ]
 
 [[package]]
@@ -242,6 +245,30 @@ dependencies = [
  "dagon-port",
  "dagon-proto",
  "ed25519-compact",
+]
+
+[[package]]
+name = "futures-core"
+version = "0.3.34"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "92d699e522242e69e3003b94ecc1f960f3a5e015aa7c5d7486e65ad01dd94f5e"
+
+[[package]]
+name = "futures-task"
+version = "0.3.34"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "cd417de3d1d015fc3bfd2b1ea46dfc7bab72ef86f1cc7cc9c78e728b34a6d1fd"
+
+[[package]]
+name = "futures-util"
+version = "0.3.34"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0d50a92467f8ba5dd6e3ee5d4bd04d73ab2e4e1c44474a0674821dfce14b79bc"
+dependencies = [
+ "futures-core",
+ "futures-task",
+ "pin-project-lite",
+ "slab",
 ]
 
 [[package]]
@@ -305,6 +332,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8dc09d2154098bbf4ef54eab6b117a3c24cbbffe94046b16ee6d6d4510584d3a"
 dependencies = [
  "cfg-if",
+ "futures-util",
  "wasm-bindgen",
 ]
 
@@ -345,6 +373,12 @@ dependencies = [
  "cfg-if",
  "libc",
 ]
+
+[[package]]
+name = "pin-project-lite"
+version = "0.2.17"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a89322df9ebe1c1578d689c92318e070967d1042b512afbe49518723f4e6d5cd"
 
 [[package]]
 name = "proc-macro2"
@@ -457,6 +491,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "slab"
+version = "0.4.12"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0c790de23124f9ab44544d7ac05d60440adc586479ce501c1d6d7da3cd8c9cf5"
+
+[[package]]
 name = "syn"
 version = "3.0.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -485,6 +525,15 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn",
+]
+
+[[package]]
+name = "tokio"
+version = "1.54.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b52fd3255258d26fac7264ab5a76b53c13367136dc011d3d6ad4f8ed070396a3"
+dependencies = [
+ "pin-project-lite",
 ]
 
 [[package]]
@@ -559,6 +608,17 @@ dependencies = [
  "rustversion",
  "wasm-bindgen-macro",
  "wasm-bindgen-shared",
+]
+
+[[package]]
+name = "wasm-bindgen-futures"
+version = "0.4.80"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5e14e0327cb5368ad60ccb22d04a9827a693c95a926d8d125e9fa39e0baec501"
+dependencies = [
+ "js-sys",
+ "tokio",
+ "wasm-bindgen",
 ]
 
 [[package]]

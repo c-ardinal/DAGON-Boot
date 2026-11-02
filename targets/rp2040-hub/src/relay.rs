@@ -1,14 +1,16 @@
-//! Forwards whole frames to sub nodes: I2C0 mailbox (write the request, poll
-//! the 3-byte state every 2 ms, read the response) or the PIO UART (write,
-//! then cut the response out of the byte stream).
+//! Forwards whole frames to sub nodes over the dagon-port hub traits: I2C
+//! mailbox (write the request, poll the 3-byte state every 2 ms, read the
+//! response) or a byte stream (write, then cut the response out of it).
+//! Every bus access is bounded by the RELAY timeout.
 
+use dagon_port::{BusError, I2cBus, StreamPort};
 use dagon_proto::mailbox::{self, STATE_LEN};
 use dagon_proto::payload::{link, HelloReq, HelloResp};
 use dagon_proto::{flags, frame_len, max_payload, split_status, Cmd, Frame, Status, PROTO_VERSION};
-use embassy_rp::i2c::{Async, I2c};
+use embassy_rp::i2c::{self, AbortReason, Async, I2c};
 use embassy_rp::peripherals::{I2C0, PIO0};
 use embassy_rp::pio_programs::uart::{PioUartRx, PioUartTx};
-use embassy_time::{with_deadline, Duration, Instant, Timer};
+use embassy_time::{with_deadline, with_timeout, Duration, Instant, Timer};
 use rp2040_common::frames::FrameReader;
 
 const MAILBOX_POLL: Duration = Duration::from_millis(2);
@@ -18,11 +20,63 @@ const UART_FRAME: usize = frame_len(max_payload::UART);
 const POLL_TIMEOUT_I2C_MS: u16 = 50;
 const POLL_TIMEOUT_UART_MS: u16 = 200;
 
-pub struct Links<'d> {
-    pub i2c: I2c<'d, I2C0, Async>,
+/// I2C0 master (GPIO16/17).
+pub struct RpI2c<'d>(pub I2c<'d, I2C0, Async>);
+
+fn bus(e: i2c::Error) -> BusError {
+    match e {
+        i2c::Error::Abort(AbortReason::NoAcknowledge) => BusError::Nack,
+        _ => BusError::Io,
+    }
+}
+
+impl I2cBus for RpI2c<'_> {
+    async fn write(&mut self, addr: u8, data: &[u8]) -> Result<(), BusError> {
+        self.0
+            .write_async(addr, data.iter().copied())
+            .await
+            .map_err(bus)
+    }
+    async fn read(&mut self, addr: u8, buf: &mut [u8]) -> Result<(), BusError> {
+        self.0.read_async(addr, buf).await.map_err(bus)
+    }
+    async fn write_read(&mut self, addr: u8, data: &[u8], buf: &mut [u8]) -> Result<(), BusError> {
+        self.0
+            .write_read_async(addr, data.iter().copied(), buf)
+            .await
+            .map_err(bus)
+    }
+}
+
+/// PIO UART (TX GPIO26, RX GPIO27).
+pub struct PioStream<'d> {
     pub tx: PioUartTx<'d, PIO0, 0>,
     pub rx: PioUartRx<'d, PIO0, 1>,
-    uart: FrameReader<{ UART_FRAME * 2 }>,
+}
+
+impl StreamPort for PioStream<'_> {
+    async fn read(&mut self, buf: &mut [u8], timeout_ms: u32) -> Result<usize, BusError> {
+        let Some(first) = buf.first_mut() else {
+            return Ok(0);
+        };
+        let wait = Duration::from_millis(timeout_ms as u64);
+        *first = with_timeout(wait, self.rx.read_u8())
+            .await
+            .map_err(|_| BusError::Timeout)?;
+        Ok(1)
+    }
+    async fn write(&mut self, data: &[u8]) -> Result<(), BusError> {
+        for &b in data {
+            self.tx.write_u8(b).await;
+        }
+        Ok(())
+    }
+}
+
+pub struct Links<I, S> {
+    i2c: I,
+    uart: S,
+    reader: FrameReader<{ UART_FRAME * 2 }>,
 }
 
 /// Payload limit of a RELAY link, `None` for an unknown link.
@@ -34,17 +88,12 @@ pub fn link_max(l: u8) -> Option<usize> {
     }
 }
 
-impl<'d> Links<'d> {
-    pub fn new(
-        i2c: I2c<'d, I2C0, Async>,
-        tx: PioUartTx<'d, PIO0, 0>,
-        rx: PioUartRx<'d, PIO0, 1>,
-    ) -> Self {
+impl<I: I2cBus, S: StreamPort> Links<I, S> {
+    pub fn new(i2c: I, uart: S) -> Self {
         Links {
             i2c,
-            tx,
-            rx,
-            uart: FrameReader::new(max_payload::UART),
+            uart,
+            reader: FrameReader::new(max_payload::UART),
         }
     }
 
@@ -73,25 +122,23 @@ impl<'d> Links<'d> {
         deadline: Instant,
         out: &mut [u8],
     ) -> Result<usize, Status> {
+        let timeout = |_| Status::Timeout;
         // A NACK (absent or busy node) is retried until the deadline.
-        loop {
-            let w = self.i2c.write_async(addr, inner.iter().copied());
-            match with_deadline(deadline, w).await {
-                Ok(Ok(())) => break,
-                Ok(Err(_)) => Timer::after(MAILBOX_POLL).await,
-                Err(_) => return Err(Status::Timeout),
-            }
-            if Instant::now() >= deadline {
-                return Err(Status::Timeout);
-            }
+        while with_deadline(deadline, self.i2c.write(addr, inner))
+            .await
+            .map_err(timeout)?
+            .is_err()
+        {
+            Timer::after(MAILBOX_POLL).await;
         }
         loop {
             Timer::after(MAILBOX_POLL).await;
-            if Instant::now() >= deadline {
-                return Err(Status::Timeout);
-            }
             let mut st = [0u8; STATE_LEN];
-            if self.i2c.read_async(addr, &mut st).await.is_err() {
+            if with_deadline(deadline, self.i2c.read(addr, &mut st))
+                .await
+                .map_err(timeout)?
+                .is_err()
+            {
                 continue;
             }
             let Some(mailbox::State::Ready(n)) = mailbox::State::parse(st) else {
@@ -101,9 +148,9 @@ impl<'d> Links<'d> {
             if n > out.len().min(I2C_FRAME) {
                 return Err(Status::Frame);
             }
-            self.i2c
-                .read_async(addr, &mut out[..n])
+            with_deadline(deadline, self.i2c.read(addr, &mut out[..n]))
                 .await
+                .map_err(timeout)?
                 .map_err(|_| Status::Frame)?;
             return match Frame::decode(&out[..n], max_payload::I2C) {
                 Ok((_, len)) if len == n => Ok(n),
@@ -118,24 +165,26 @@ impl<'d> Links<'d> {
         deadline: Instant,
         out: &mut [u8],
     ) -> Result<usize, Status> {
-        self.uart.clear();
-        for &b in inner {
-            self.tx.write_u8(b).await;
-        }
+        self.reader.clear();
+        self.uart.write(inner).await.map_err(|_| Status::Timeout)?;
         let seq = inner[4];
         loop {
-            let b = with_deadline(deadline, self.rx.read_u8())
-                .await
-                .map_err(|_| Status::Timeout)?;
-            self.uart.push(&[b]);
-            while let Some(n) = self.uart.poll() {
-                let f = self.uart.frame(n);
+            let left = deadline
+                .saturating_duration_since(Instant::now())
+                .as_millis() as u32;
+            let mut b = [0u8; 1];
+            if left == 0 || self.uart.read(&mut b, left).await.is_err() {
+                return Err(Status::Timeout);
+            }
+            self.reader.push(&b);
+            while let Some(n) = self.reader.poll() {
+                let f = self.reader.frame(n);
                 if f[3] & flags::RESP != 0 && f[4] == seq && n <= out.len() {
                     out[..n].copy_from_slice(f);
-                    self.uart.consume(n);
+                    self.reader.consume(n);
                     return Ok(n);
                 }
-                self.uart.consume(n);
+                self.reader.consume(n);
             }
         }
     }

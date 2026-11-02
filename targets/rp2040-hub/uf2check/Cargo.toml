@@ -1,0 +1,15 @@
+[package]
+name = "rp2040-uf2check"
+edition = "2021"
+license = "MIT OR Apache-2.0"
+version = "0.0.0"
+publish = false
+
+# Host tool: cargo run --release --target <host triple> -- <hub.uf2> <dagon-signing.pub>
+[workspace]
+
+[dependencies]
+dagon-core = { path = "../../../crates/dagon-core" }
+dagon-format = { path = "../../../crates/dagon-format" }
+dagon-port = { path = "../../../crates/dagon-port" }
+rp2040-common = { path = "../../rp2040-bootcore/common" }

@@ -36,10 +36,11 @@ use embassy_usb::class::cdc_acm::{CdcAcmClass, State};
 use embassy_usb::driver::EndpointError;
 use panic_halt as _;
 use rp2040_common::frames::FrameReader;
+use rp2040_common::layout::HUB_TAG;
 use rp2040_common::rp::RpFlash;
 
 use lcd::{Home, Node, Shade, HOME};
-use relay::Links;
+use relay::{Links, PioStream, RpI2c};
 use store::{HubStore, ACTIVE};
 
 include!(concat!(env!("OUT_DIR"), "/pubkey.rs"));
@@ -50,8 +51,6 @@ bind_interrupts!(struct Irqs {
     PIO0_IRQ_0 => pio::InterruptHandler<PIO0>;
 });
 
-/// Image `target_tag` the hub accepts.
-const HUB_TAG: &str = "hub-rp2040-lcd";
 const USB_VID: u16 = 0xc0de;
 const USB_PID: u16 = 0xcafe;
 const USB_PACKET: u16 = 64;
@@ -139,7 +138,7 @@ async fn main(_spawner: Spawner) {
     );
     let mut hub = Hub {
         agent,
-        links: Links::new(i2c, tx, rx),
+        links: Links::new(RpI2c(i2c), PioStream { tx, rx }),
         resp: [0; MAX_FRAME],
         quiet_until: Instant::now(),
         poll_seq: 0x80,
@@ -171,7 +170,7 @@ fn hex(id: &[u8; 8]) -> [u8; 16] {
 
 struct Hub<'d> {
     agent: Agent<HubStore, DefaultHooks>,
-    links: Links<'d>,
+    links: Links<RpI2c<'d>, PioStream<'d>>,
     resp: [u8; MAX_FRAME],
     quiet_until: Instant,
     poll_seq: u8,

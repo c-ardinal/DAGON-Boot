@@ -16,8 +16,8 @@ table) follows at +0x200. The app is linked per slot: default A,
 `--features slot-b` for B.
 
 stage0 picks the boot core slot from its log (slot A while empty) and checks
-its SHA-256. The boot core picks the app slot: a pending slot is tried up to
-3 times (signature + SHA-256, BOOT_ATTEMPT before the jump) and then rolled
+its SHA-256. The boot core runs dagon-core's boot decision over the app log
+and slots: a pending slot is tried up to 3 times (signature + SHA-256, BOOT_ATTEMPT before the jump) and then rolled
 back; otherwise the confirmed slot is started after a SHA-256 check. The
 watchdog runs at 8 s. The app feeds it while confirmed, and on trial only for
 60 s after boot, so an unconfirmed app is reset and counted.
@@ -37,20 +37,18 @@ export DAGON_PUBKEY=/path/outside/the/repo/dagon-signing.pub
 
 ## Initial install UF2
 
+Point `[provision.hub]` in `dagon.toml` at the three release ELFs
+(stage0, boot core, app slot A) with `version = "1.0.0"`, then:
+
 ```sh
-elf2uf2-rs targets/rp2040-stage0/target/thumbv6m-none-eabi/release/rp2040-stage0 out/stage0.uf2
-elf2uf2-rs targets/rp2040-bootcore/target/thumbv6m-none-eabi/release/rp2040-bootcore out/bootcore.uf2
-elf2uf2-rs targets/rp2040-hub/target/thumbv6m-none-eabi/release/rp2040-hub out/hub-a.uf2
-(cd targets/rp2040-hub/pack && cargo run --release --target <host triple> -- \
-    --stage0 ../../../out/stage0.uf2 --bootcore ../../../out/bootcore.uf2 \
-    --hub ../../../out/hub-a.uf2 --key /path/outside/the/repo/dagon-signing.key \
-    --version 1.0.0 --out ../../../out/hub-install.uf2)
+dagon rescue hub --key /path/outside/the/repo/dagon-signing.key
+(cd targets/rp2040-hub/uf2check && cargo run --release --target <host triple> --     ../../../out/provision/hub/rescue.uf2 /path/outside/the/repo/dagon-signing.pub)
 ```
 
-`pack` signs both headers, writes both logs (PROVISION + CONFIRMED for slot
-A) and reads the result back the way stage0 and the boot core will before
-writing the UF2. Hold BOOT, plug in USB (or press RESET), and copy
-`hub-install.uf2` to the `RPI-RP2` drive.
+`uf2check` reads the UF2 the way stage0 and the boot core will (boot core
+log, image checks, dagon-core's boot decision) and fails if the hub would
+not start. Hold BOOT, plug in USB (or press RESET), and copy `rescue.uf2` to
+the `RPI-RP2` drive.
 
 ## On the device
 

@@ -2,6 +2,7 @@
 //! dagon.toml only, never from the browser.
 
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
 use dagon_format::header::{image_kind, slot_binding, ImageHeader, HEADER_SIZE};
@@ -24,6 +25,33 @@ fn plain(s: &str) -> bool {
         && s.bytes()
             .all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_' || b == b'.')
         && !s.starts_with('.')
+        && !crate::paths::device_name(s)
+}
+
+/// `p` resolved inside the work area (symlinks and junctions followed).
+fn inside(cfg: &Config, p: &Path) -> Result<PathBuf, String> {
+    crate::paths::contained(&cfg.base, p)
+}
+
+fn stop_if(cancel: &AtomicBool) -> Result<(), String> {
+    if cancel.load(Ordering::Relaxed) {
+        Err("cancelled".into())
+    } else {
+        Ok(())
+    }
+}
+
+/// The signing key for a job. Its file path never goes to the page: the
+/// reason is printed in the serve terminal only.
+fn serve_key() -> Result<ed25519_compact::KeyPair, String> {
+    page_safe(load_key(None))
+}
+
+fn page_safe<T>(r: Result<T, String>) -> Result<T, String> {
+    r.map_err(|e| {
+        eprintln!("dagon serve: signing key: {e}");
+        "the signing key is not available; see the dagon serve terminal".to_string()
+    })
 }
 
 fn config(server: &Server) -> Result<Config, String> {
@@ -86,7 +114,10 @@ type Work = fn(&mut Job, Config, Value) -> Result<Value, String>;
 fn start(server: &Arc<Server>, req: &Request, kind: &str, work: Work) -> Res {
     let v = body_json(req)?;
     let cfg = config(server).map_err(|e| Response::error(500, &e))?;
-    Ok(accepted(server.spawn(kind, move |job| work(job, cfg, v))))
+    match server.spawn(kind, move |job| work(job, cfg, v)) {
+        Some(id) => Ok(accepted(id)),
+        None => Err(Response::error(429, "too many jobs running")),
+    }
 }
 
 /// Versions, work area, abilities; whether keys exist (never the keys).
@@ -148,8 +179,11 @@ fn targets(server: &Server) -> Res {
 
 fn topology_path(server: &Server) -> Result<PathBuf, Response> {
     let cfg = config(server).map_err(|e| Response::error(500, &e))?;
-    cfg.topology
-        .ok_or_else(|| Response::error(409, "dagon.toml names no topology"))
+    let p = cfg
+        .topology
+        .clone()
+        .ok_or_else(|| Response::error(409, "dagon.toml names no topology"))?;
+    inside(&cfg, &p).map_err(|e| Response::error(403, &e))
 }
 
 fn topology_get(server: &Server) -> Res {
@@ -168,7 +202,11 @@ fn topology_put(server: &Server, req: &Request) -> Res {
     if !report.is_pushable() {
         return Err(Response::json(422, &json!({ "report": report_json })));
     }
-    write_file(&p, yaml.as_bytes()).map_err(|e| Response::error(500, &e))?;
+    let _lock = server
+        .files
+        .lock()
+        .map_err(|_| Response::error(500, "lock"))?;
+    crate::paths::write_atomic(&p, yaml.as_bytes()).map_err(|e| Response::error(500, &e))?;
     Ok(json_ok(json!({ "report": report_json })))
 }
 
@@ -193,6 +231,11 @@ fn build_put(server: &Server, id: &str, req: &Request) -> Res {
         .config
         .clone()
         .ok_or_else(|| Response::error(409, "no dagon.toml in the work area"))?;
+    // Read, edit and replace under one lock so concurrent PUTs all land.
+    let _lock = server
+        .files
+        .lock()
+        .map_err(|_| Response::error(500, "lock"))?;
     let text = std::fs::read_to_string(&path).map_err(|e| Response::error(500, &e.to_string()))?;
     let mut doc: toml_edit::DocumentMut = text
         .parse()
@@ -208,7 +251,8 @@ fn build_put(server: &Server, id: &str, req: &Request) -> Res {
         .ok_or_else(|| Response::error(409, "build in dagon.toml is not a table"))?;
     builds.set_implicit(true);
     builds.insert(id, toml_edit::Item::Table(table.as_table().clone()));
-    write_file(&path, doc.to_string().as_bytes()).map_err(|e| Response::error(500, &e))?;
+    crate::paths::write_atomic(&path, doc.to_string().as_bytes())
+        .map_err(|e| Response::error(500, &e))?;
     Ok(json_ok(serde_json::to_value(&b).unwrap_or(Value::Null)))
 }
 
@@ -254,8 +298,9 @@ fn sha_hex(b: &[u8]) -> String {
 fn job_sign(job: &mut Job, cfg: Config, v: Value) -> Result<Value, String> {
     let nodes = nodes_of(&v).map_err(|_| "nodes must be node ids".to_string())?;
     let t = read_topology(&cfg.topology_path(None)?)?;
-    let key = load_key(None)?;
-    sign_nodes(&cfg, &t, &nodes, &key, &mut |l| job.log(l))
+    let key = serve_key()?;
+    let cancel = job.cancel_flag();
+    sign_nodes(&cfg, &t, &nodes, &key, &mut |l| job.log(l), &cancel)
 }
 
 /// Signs exactly what each node's last successful build recorded, with the
@@ -267,15 +312,18 @@ fn sign_nodes(
     nodes: &[String],
     key: &ed25519_compact::KeyPair,
     log: &mut dyn FnMut(&str),
+    cancel: &AtomicBool,
 ) -> Result<Value, String> {
     let mut out = Vec::new();
     for node in nodes {
-        let rec_path = sign_record_path(cfg, node);
+        stop_if(cancel)?;
+        let rec_path = inside(cfg, &sign_record_path(cfg, node))?;
         for p in [
             rec_path.clone(),
             sign_path(cfg, node, 'a'),
             sign_path(cfg, node, 'b'),
         ] {
+            let p = inside(cfg, &p)?;
             match std::fs::remove_file(&p) {
                 Ok(()) => {}
                 Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
@@ -298,13 +346,14 @@ fn sign_nodes(
             images: Vec::new(),
         };
         for (slot, elf) in elfs {
+            stop_if(cancel)?;
             let binding = if slot == 'a' {
                 slot_binding::A
             } else {
                 slot_binding::B
             };
             let img = image_for_node(t, node, image_kind::APP, binding, &elf, Some(&opts), key)?;
-            let path = sign_path(cfg, node, slot);
+            let path = inside(cfg, &sign_path(cfg, node, slot))?;
             write_file(&path, &img)?;
             let file = path
                 .file_name()
@@ -332,14 +381,15 @@ fn job_release(job: &mut Job, cfg: Config, v: Value) -> Result<Value, String> {
     let name = name.ok_or("name must be up to 16 plain characters")?;
     let want = version(v["version"].as_str().ok_or("version is required")?)?;
     let t = read_topology(&cfg.topology_path(None)?)?;
-    let key = load_key(None)?;
-    release_from(&cfg, &t, want, name, &key, &mut |l| job.log(l))
+    let key = serve_key()?;
+    let cancel = job.cancel_flag();
+    release_from(&cfg, &t, want, name, &key, &mut |l| job.log(l), &cancel)
 }
 
 /// Images listed by the sign records only (each checked against its
 /// recorded SHA-256), all of version `want`.
 fn signed_images(cfg: &Config, want: dagon_format::Version) -> Result<Vec<Vec<u8>>, String> {
-    let dir = cfg.base.join(SIGN_DIR);
+    let dir = inside(cfg, &cfg.base.join(SIGN_DIR))?;
     let mut records: Vec<PathBuf> = std::fs::read_dir(&dir)
         .map_err(|_| "nothing signed yet".to_string())?
         .filter_map(|e| e.ok().map(|e| e.path()))
@@ -348,13 +398,14 @@ fn signed_images(cfg: &Config, want: dagon_format::Version) -> Result<Vec<Vec<u8
     records.sort();
     let mut images = Vec::new();
     for r in &records {
+        let r = &inside(cfg, r)?;
         let rec: SignRecord =
             serde_json::from_slice(&read_file(r)?).map_err(|e| format!("{}: {e}", r.display()))?;
         for (file, sha) in &rec.images {
             if !plain(file) {
                 return Err(format!("{}: bad file name", r.display()));
             }
-            let img = read_file(&dir.join(file))?;
+            let img = read_file(&inside(cfg, &dir.join(file))?)?;
             if sha_hex(&img) != *sha {
                 return Err(format!("{file} changed since it was signed"));
             }
@@ -382,12 +433,16 @@ fn release_from(
     name: &str,
     key: &ed25519_compact::KeyPair,
     log: &mut dyn FnMut(&str),
+    cancel: &AtomicBool,
 ) -> Result<Value, String> {
+    stop_if(cancel)?;
     let topo_bin = dagon_topology::compile(t).map_err(|e| e.to_string())?;
     let images = signed_images(cfg, want)?;
+    stop_if(cancel)?;
     let r =
         dagon_sign::release::build(t, &topo_bin, &images, name, key).map_err(|e| e.to_string())?;
-    let out = cfg.base.join(RELEASE_DIR).join(format!("{name}.dgb"));
+    stop_if(cancel)?;
+    let out = inside(cfg, &cfg.base.join(RELEASE_DIR).join(format!("{name}.dgb")))?;
     write_file(&out, &r.bundle)?;
     let sha = to_hex(&dagon_format::sha256(&topo_bin));
     log(&format!(
@@ -403,7 +458,8 @@ fn release_get(server: &Server, id: &str) -> Res {
         return Err(Response::error(400, "bad release id"));
     }
     let cfg = config(server).map_err(|e| Response::error(500, &e))?;
-    let p = cfg.base.join(RELEASE_DIR).join(format!("{id}.dgb"));
+    let p = inside(&cfg, &cfg.base.join(RELEASE_DIR).join(format!("{id}.dgb")))
+        .map_err(|e| Response::error(403, &e))?;
     let bytes = std::fs::read(p).map_err(|_| Response::error(404, "no such release"))?;
     Ok(Response::bytes("application/octet-stream", bytes))
 }
@@ -417,8 +473,8 @@ fn job_conform(job: &mut Job, cfg: Config, v: Value) -> Result<Value, String> {
         .ok_or("node is required")?;
     let t = read_topology(&cfg.topology_path(None)?)?;
     let to = crate::conform::node_target(&t, node)?;
-    let dir = cfg.base.join(CONFORM_DIR).join(node);
-    let key = load_key(None)?;
+    let dir = inside(&cfg, &cfg.base.join(CONFORM_DIR).join(node))?;
+    let key = serve_key()?;
     job.progress("waiting for the hub", None);
     let report = job.with_device(|job| {
         job.progress("running", None);
@@ -438,6 +494,7 @@ fn conform_get(server: &Server, node: &str) -> Res {
         .join(CONFORM_DIR)
         .join(node)
         .join(crate::conform::RESULT_FILE);
+    let p = inside(&cfg, &p).map_err(|e| Response::error(403, &e))?;
     let bytes = std::fs::read(p).map_err(|_| Response::error(404, "no result yet"))?;
     Ok(Response::bytes("application/json", bytes))
 }
@@ -448,10 +505,11 @@ fn job_ai_topology(job: &mut Job, _cfg: Config, v: Value) -> Result<Value, Strin
         .as_str()
         .ok_or("description is required")?
         .to_string();
+    let cancel = job.cancel_flag();
     let mut ask = |qs: &[String]| -> Result<Vec<String>, String> {
         qs.iter().enumerate().map(|(i, q)| job.ask(i, q)).collect()
     };
-    let (yaml, report) = crate::ai::topology_for(&description, &mut ask)?;
+    let (yaml, report) = crate::ai::topology_for(&description, &mut ask, &cancel)?;
     let report: Value = serde_json::from_str(&report).unwrap_or(Value::Null);
     Ok(json!({ "yaml": yaml, "report": report }))
 }
@@ -502,13 +560,24 @@ fn device(server: &Server, req: &Request) -> Res {
 pub fn static_file(web: &Path, path: &str) -> Option<(Vec<u8>, &'static str)> {
     let rel = path.split(['?', '#']).next()?.trim_start_matches('/');
     let rel = if rel.is_empty() { "index.html" } else { rel };
-    let safe = rel
-        .split('/')
-        .all(|c| !c.is_empty() && c != ".." && c != "." && !c.contains('\\') && !c.contains(':'));
+    let safe = rel.split('/').all(|c| {
+        !c.is_empty()
+            && c != ".."
+            && c != "."
+            && !c.contains('\\')
+            && !c.contains(':')
+            && !crate::paths::device_name(c)
+    });
     if !safe {
         return None;
     }
-    let bytes = std::fs::read(web.join(rel)).ok()?;
+    // Symlinks and junctions are followed, and must stay in the page root.
+    let root = std::fs::canonicalize(web).ok()?;
+    let file = std::fs::canonicalize(web.join(rel)).ok()?;
+    if !file.starts_with(&root) || !file.is_file() {
+        return None;
+    }
+    let bytes = std::fs::read(file).ok()?;
     let ext = rel.rsplit('.').next().unwrap_or("");
     let ct = match ext {
         "html" => "text/html; charset=utf-8",
@@ -571,14 +640,23 @@ mod tests {
         let (cfg, t) = built_area("recorded");
         let key = test_key();
         let seg = ["seg".to_string()];
-        sign_nodes(&cfg, &t, &seg, &key, &mut |_| {}).unwrap();
+        sign_nodes(&cfg, &t, &seg, &key, &mut |_| {}, &AtomicBool::new(false)).unwrap();
         assert!(sign_path(&cfg, "seg", 'a').exists() && sign_path(&cfg, "seg", 'b').exists());
 
         // A stale image that no record lists never reaches a release.
         std::fs::write(cfg.base.join(SIGN_DIR).join("hub-a.img"), b"stale").unwrap();
         let v = dagon_format::Version::new(1, 1, 0);
         assert_eq!(signed_images(&cfg, v).unwrap().len(), 2);
-        let r = release_from(&cfg, &t, v, "r1", &key, &mut |_| {}).unwrap();
+        let r = release_from(
+            &cfg,
+            &t,
+            v,
+            "r1",
+            &key,
+            &mut |_| {},
+            &AtomicBool::new(false),
+        )
+        .unwrap();
         assert_eq!(r["release"], "r1");
         assert!(signed_images(&cfg, dagon_format::Version::new(1, 0, 0)).is_err());
 
@@ -589,17 +667,87 @@ mod tests {
         // An ELF changed after its build: signing fails and leaves nothing
         // of seg to release.
         std::fs::write(nodebuild::elf_path(&cfg, "seg", 'a'), b"later").unwrap();
-        assert!(sign_nodes(&cfg, &t, &seg, &key, &mut |_| {}).is_err());
+        assert!(sign_nodes(&cfg, &t, &seg, &key, &mut |_| {}, &AtomicBool::new(false)).is_err());
         assert!(!sign_path(&cfg, "seg", 'a').exists());
         assert!(signed_images(&cfg, v).is_err());
         let _ = std::fs::remove_dir_all(&cfg.base);
     }
 
     #[test]
+    fn key_errors_reach_the_page_without_paths() {
+        let r: Result<(), String> =
+            Err("refusing to use a secret key stored inside a git work tree: C:/x/k.key".into());
+        let e = page_safe(r).unwrap_err();
+        assert!(!e.contains("k.key") && !e.contains("C:/"), "{e}");
+    }
+
+    #[test]
+    fn cancelled_sign_and_release_write_nothing() {
+        let (cfg, t) = built_area("cancel");
+        let key = test_key();
+        let stop = AtomicBool::new(true);
+        let seg = ["seg".to_string()];
+        assert_eq!(
+            sign_nodes(&cfg, &t, &seg, &key, &mut |_| {}, &stop).unwrap_err(),
+            "cancelled"
+        );
+        assert!(!sign_path(&cfg, "seg", 'a').exists());
+        sign_nodes(&cfg, &t, &seg, &key, &mut |_| {}, &AtomicBool::new(false)).unwrap();
+        let v = dagon_format::Version::new(1, 1, 0);
+        assert_eq!(
+            release_from(&cfg, &t, v, "r1", &key, &mut |_| {}, &stop).unwrap_err(),
+            "cancelled"
+        );
+        assert!(!cfg.base.join(RELEASE_DIR).join("r1.dgb").exists());
+        let _ = std::fs::remove_dir_all(&cfg.base);
+    }
+
+    #[test]
+    fn device_names_are_not_plain_names() {
+        for n in ["CON", "nul", "com1", "LPT3.txt", "aux.dgb"] {
+            assert!(!plain(n), "{n}");
+        }
+        let dir = std::env::temp_dir().join(format!("dagon-webdev-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        assert!(static_file(&dir, "/con").is_none());
+        assert!(static_file(&dir, "/assets/NUL.js").is_none());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn static_files_do_not_follow_links_out_of_the_page() {
+        let base = std::env::temp_dir().join(format!("dagon-weblink-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&base);
+        std::fs::create_dir_all(base.join("web")).unwrap();
+        std::fs::create_dir_all(base.join("secret")).unwrap();
+        std::fs::write(base.join("secret/k.txt"), "key").unwrap();
+        let link = base.join("web").join("out");
+        #[cfg(windows)]
+        let made = std::process::Command::new("cmd")
+            .args(["/C", "mklink", "/J"])
+            .arg(&link)
+            .arg(base.join("secret"))
+            .output()
+            .is_ok_and(|o| o.status.success());
+        #[cfg(unix)]
+        let made = std::os::unix::fs::symlink(base.join("secret"), &link).is_ok();
+        assert!(made);
+        assert!(static_file(&base.join("web"), "/out/k.txt").is_none());
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    #[test]
     fn no_build_record_means_nothing_to_sign() {
         let (cfg, t) = built_area("unbuilt");
         std::fs::remove_file(cfg.base.join("out/build/seg/build.json")).unwrap();
-        let r = sign_nodes(&cfg, &t, &["seg".to_string()], &test_key(), &mut |_| {});
+        let r = sign_nodes(
+            &cfg,
+            &t,
+            &["seg".to_string()],
+            &test_key(),
+            &mut |_| {},
+            &AtomicBool::new(false),
+        );
         assert!(r.is_err());
         let _ = std::fs::remove_dir_all(&cfg.base);
     }

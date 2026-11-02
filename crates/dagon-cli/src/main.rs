@@ -6,6 +6,7 @@ mod config;
 mod conform;
 mod device;
 mod nodebuild;
+mod paths;
 mod serial;
 mod serve;
 mod simrun;

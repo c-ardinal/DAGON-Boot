@@ -288,5 +288,83 @@ fn device_jobs_wait_for_the_page_to_release_the_port() {
         seen.push(next_text(&mut s).1);
     }
     assert!(seen.iter().any(|t| t.contains("\"ran\"")));
-    assert_eq!(srv.job_json(id).unwrap()["state"], "succeeded");
+    assert_eq!(srv.job_json(id.unwrap()).unwrap()["state"], "succeeded");
+}
+
+#[test]
+fn the_browser_is_opened_without_the_passphrase_on_its_command_line() {
+    let url = "http://127.0.0.1:5/#0123456789abcdef0123456789abcdef";
+    let page = super::launcher_page(url);
+    assert!(page.contains(url));
+    let file = std::env::temp_dir().join("dagon-open-test.html");
+    let (prog, args) = super::open_command(&file);
+    let line = format!("{prog} {:?}", args);
+    assert!(!line.contains("0123456789abcdef"), "{line}");
+}
+
+#[test]
+fn an_endless_request_line_is_cut_at_the_head_limit() {
+    let a = start("headlimit");
+    let mut s = TcpStream::connect(("127.0.0.1", a.server.port)).unwrap();
+    let line = vec![b'a'; super::http::MAX_HEAD + 4096];
+    let _ = s.write_all(b"GET /");
+    let _ = s.write_all(&line);
+    let mut out = String::new();
+    let _ = s.read_to_string(&mut out);
+    assert!(
+        out.starts_with("HTTP/1.1 400"),
+        "{}",
+        &out[..out.len().min(40)]
+    );
+}
+
+#[test]
+fn connections_beyond_the_limit_get_503() {
+    let a = start("connlimit");
+    let idle: Vec<TcpStream> = (0..super::MAX_CONNECTIONS)
+        .map(|_| TcpStream::connect(("127.0.0.1", a.server.port)).unwrap())
+        .collect();
+    std::thread::sleep(std::time::Duration::from_millis(200));
+    // The server answers 503 at once, before reading any request.
+    let mut extra = TcpStream::connect(("127.0.0.1", a.server.port)).unwrap();
+    let mut out = String::new();
+    let _ = extra.read_to_string(&mut out);
+    assert!(out.starts_with("HTTP/1.1 503"), "{out}");
+    drop(idle);
+}
+
+#[test]
+fn configured_paths_outside_the_work_area_are_refused() {
+    let a = start("escape");
+    std::fs::write(a.dir.join("dagon.toml"), "topology = \"../outside.yaml\"\n").unwrap();
+    let b = auth(&a);
+    let h = [("Authorization", b.as_str())];
+    assert_eq!(http(&a, "GET", "/v1/topology", &h, b"").0, 403);
+    assert_eq!(http(&a, "PUT", "/v1/topology", &h, YAML.as_bytes()).0, 403);
+    assert!(!a.dir.parent().unwrap().join("outside.yaml").exists());
+}
+
+#[test]
+fn concurrent_build_setting_writes_all_land() {
+    let a = Arc::new(start("concurrent"));
+    let threads: Vec<_> = (0..8)
+        .map(|i| {
+            let a = a.clone();
+            std::thread::spawn(move || {
+                let b = auth(&a);
+                let body = format!(r#"{{"package":"targets/n{i}","version":"1.0.{i}"}}"#);
+                let path = format!("/v1/nodes/n{i}/build");
+                http(&a, "PUT", &path, &[("Authorization", &b)], body.as_bytes()).0
+            })
+        })
+        .collect();
+    assert!(threads.into_iter().all(|t| t.join().unwrap() == 200));
+    let text = std::fs::read_to_string(a.dir.join("dagon.toml")).unwrap();
+    for i in 0..8 {
+        assert!(
+            text.contains(&format!("[build.n{i}]")),
+            "n{i} lost:\n{text}"
+        );
+    }
+    assert!(text.starts_with("# work area"));
 }

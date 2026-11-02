@@ -3,8 +3,9 @@
 #![no_std]
 #![no_main]
 
-use dagon_esp32s3_agent::liveness::Liveness;
-use dagon_esp32s3_agent::node::{self, NodeConfig, NodePeripherals};
+use dagon_board_m5stopwatch::{self as board, dagon_pins};
+use dagon_mcu_esp32s3::liveness::Liveness;
+use dagon_mcu_esp32s3::node::{self, NodeConfig};
 use embassy_executor::Spawner;
 use esp_hal::timer::timg::TimerGroup;
 
@@ -17,22 +18,5 @@ async fn main(_spawner: Spawner) {
     let mut p = esp_hal::init(esp_hal::Config::default());
     let armed = node::arm_watchdog(p.RTC_TIMER.reborrow());
     esp_rtos::start(TimerGroup::new(p.TIMG0).timer0, p.FROM_CPU_INTR0);
-    let dagon = NodePeripherals {
-        rtc_timer: p.RTC_TIMER,
-        uart0: p.UART0,
-        gpio43: p.GPIO43,
-        gpio44: p.GPIO44,
-        usb_device: p.USB_DEVICE,
-        flash: p.FLASH,
-        i2c0: p.I2C0,
-        gpio47: p.GPIO47,
-        gpio48: p.GPIO48,
-    };
-    node::start(
-        armed,
-        dagon,
-        p.FROM_CPU_INTR1,
-        NodeConfig::factory(),
-        &LIVENESS,
-    );
+    board::start(armed, dagon_pins!(p), NodeConfig::factory(), &LIVENESS);
 }

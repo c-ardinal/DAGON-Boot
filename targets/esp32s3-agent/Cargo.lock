@@ -183,14 +183,15 @@ dependencies = [
 ]
 
 [[package]]
-name = "dagon-conform"
+name = "dagon-board-m5stopwatch"
 version = "0.0.0"
 dependencies = [
- "dagon-agent",
- "dagon-core",
- "dagon-format",
+ "dagon-mcu-esp32s3",
  "dagon-port",
  "dagon-proto",
+ "esp-bootloader-esp-idf",
+ "esp-hal",
+ "static_cell",
 ]
 
 [[package]]
@@ -203,35 +204,15 @@ dependencies = [
 ]
 
 [[package]]
-name = "dagon-esp32s3-agent"
+name = "dagon-esp32s3-factory"
 version = "0.0.0"
 dependencies = [
- "dagon-agent",
- "dagon-conform",
- "dagon-esp32s3-port",
- "dagon-format",
- "dagon-port",
- "dagon-proto",
- "ed25519-compact",
+ "dagon-board-m5stopwatch",
+ "dagon-mcu-esp32s3",
  "embassy-executor",
- "embassy-futures",
- "embassy-time",
- "embedded-io-async 0.7.0",
  "esp-bootloader-esp-idf",
  "esp-hal",
  "esp-rtos",
- "static_cell",
-]
-
-[[package]]
-name = "dagon-esp32s3-port"
-version = "0.0.0"
-dependencies = [
- "dagon-format",
- "dagon-port",
- "dagon-proto",
- "esp-bootloader-esp-idf",
- "esp-hal",
 ]
 
 [[package]]
@@ -240,6 +221,24 @@ version = "0.0.0"
 dependencies = [
  "ed25519-compact",
  "sha2",
+]
+
+[[package]]
+name = "dagon-mcu-esp32s3"
+version = "0.0.0"
+dependencies = [
+ "dagon-agent",
+ "dagon-format",
+ "dagon-port",
+ "dagon-proto",
+ "embassy-executor",
+ "embassy-futures",
+ "embassy-time",
+ "embedded-io-async 0.7.0",
+ "esp-bootloader-esp-idf",
+ "esp-hal",
+ "esp-rtos",
+ "static_cell",
 ]
 
 [[package]]

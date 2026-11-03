@@ -516,8 +516,13 @@ fn sign_nodes(
 ) -> Result<Value, String> {
     // Every node's inputs are checked before anything is removed: a typo
     // in the list or a missing build leaves the signed images as they are.
+    // One sign at a time: they share the .new/.old names in out/sign.
+    let _one = SIGN_LOCK.lock().unwrap_or_else(|p| p.into_inner());
     let mut ready = Vec::new();
-    for node in nodes {
+    for (i, node) in nodes.iter().enumerate() {
+        if nodes[..i].contains(node) {
+            return Err(format!("node '{node}' is listed twice"));
+        }
         if t.node(node).is_none() {
             return Err(format!("no node '{node}' in the topology"));
         }
@@ -569,6 +574,9 @@ fn sign_nodes(
     commit_files(&files, &mut |from, to| std::fs::rename(from, to))?;
     Ok(json!({ "images": out }))
 }
+
+/// Held for a whole sign (stage and commit).
+static SIGN_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
 /// One file of a sign: its final path and new bytes (None: the old file
 /// goes, a slot no longer signed).
@@ -654,16 +662,24 @@ fn commit_files(
         }
     }
     if let Some(e) = failed {
+        let mut undo = Vec::new();
         for (path, moved, placed) in done.into_iter().rev() {
             if placed {
-                let _ = std::fs::remove_file(path);
+                if let Err(x) = std::fs::remove_file(path) {
+                    undo.push(format!("{}: {x}", path.display()));
+                }
             }
             if moved {
-                let _ = std::fs::rename(old_of(path), path);
+                if let Err(x) = std::fs::rename(old_of(path), path) {
+                    undo.push(format!("{} not restored: {x}", path.display()));
+                }
             }
         }
         remove_new();
-        return Err(e);
+        if undo.is_empty() {
+            return Err(e);
+        }
+        return Err(format!("{e}; undoing it failed too ({})", undo.join("; ")));
     }
     for (path, moved, _) in done {
         if moved {
@@ -1293,6 +1309,30 @@ mod tests {
         let new = sign_folder(&cfg);
         assert_eq!(new.len(), 6, "no .new or .old left: {:?}", new.keys());
         assert_ne!(new, old);
+        let _ = std::fs::remove_dir_all(&cfg.base);
+    }
+
+    #[test]
+    fn signs_run_one_at_a_time_and_a_node_is_listed_once() {
+        let (cfg, t) = built_area("concurrent");
+        build_hub(&cfg);
+        let key = test_key();
+        let both = ["seg".to_string(), "hub".to_string()];
+        let twice = ["seg".to_string(), "seg".to_string()];
+        let go = AtomicBool::new(false);
+        let e = sign_nodes(&cfg, &t, &twice, &key, &mut |_| {}, &go).unwrap_err();
+        assert!(e.contains("twice"), "{e}");
+        std::thread::scope(|sc| {
+            for _ in 0..4 {
+                sc.spawn(|| {
+                    sign_nodes(&cfg, &t, &both, &key, &mut |_| {}, &AtomicBool::new(false)).unwrap()
+                });
+            }
+        });
+        let files = sign_folder(&cfg);
+        assert_eq!(files.len(), 6, "no .new or .old left: {:?}", files.keys());
+        let v = dagon_format::Version::new(1, 1, 0);
+        assert_eq!(signed_images(&cfg, v).unwrap().len(), 4);
         let _ = std::fs::remove_dir_all(&cfg.base);
     }
 

@@ -30,54 +30,78 @@ const UF2_BOARD: &str = "RPI-RP2";
 /// Version of the first install when dagon.toml gives none.
 const FIRST_VERSION: &str = "1.0.0";
 
-/// A DAGON firmware part built from the DAGON checkout.
+/// A DAGON firmware part built from the project's DAGON source.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct Part {
     pub name: &'static str,
-    /// Cargo package directory, relative to the DAGON checkout.
-    pub package: String,
-    /// Binary target; `None`: the package's own name.
+    /// The DAGON package the part belongs to, found by name in the source.
+    pub anchor: String,
+    /// The part's own package folder inside that package ("" for itself).
+    pub sub: &'static str,
+    /// Binary target; `None`: the part package's own name.
     pub bin: Option<&'static str>,
 }
 
 /// The parts each MCU family's first install needs besides the app, for a
 /// node on `board`. The one place that knows where they live.
 pub(crate) fn parts(mcu: &str, board: Option<&str>) -> Option<Vec<Part>> {
-    let part = |name, package: &str, bin| Part {
+    let part = |name, anchor: String, sub, bin| Part {
         name,
-        package: package.into(),
+        anchor,
+        sub,
         bin,
     };
+    let mcu_pkg = || format!("dagon-mcu-{mcu}");
     match mcu {
         "rp2040" => Some(vec![
-            part("stage0", "targets/mcu/rp2040/stage0", None),
-            part("bootcore", "targets/mcu/rp2040/bootcore", None),
+            part("stage0", mcu_pkg(), "stage0", None),
+            part("bootcore", mcu_pkg(), "bootcore", None),
         ]),
-        "stm32f401re" => Some(vec![part(
-            "bootcore",
-            "targets/mcu/stm32f401re/bootcore",
-            None,
-        )]),
+        "stm32f401re" => Some(vec![part("bootcore", mcu_pkg(), "bootcore", None)]),
         // The recovery agent for the factory partition ships with the
         // board package: a node without one has none to write.
         "esp32s3" => board.map(|b| {
-            vec![part(
-                "factory",
-                &format!("targets/boards/{b}"),
-                Some("factory"),
-            )]
+            let board_pkg = format!("dagon-board-{}", b.replace('.', "-"));
+            vec![part("factory", board_pkg, "", Some("factory"))]
         }),
         _ => None,
     }
 }
 
-/// The DAGON checkout the parts are built from: `DAGON_HOME`, else the one
-/// this CLI was built from.
-pub(crate) fn dagon_home() -> PathBuf {
-    let home = std::env::var_os("DAGON_HOME")
-        .map(PathBuf::from)
-        .unwrap_or_else(|| Path::new(env!("CARGO_MANIFEST_DIR")).join("../.."));
-    std::fs::canonicalize(&home).map_or(home, crate::config::plain_path)
+/// The root of the project's DAGON source: its clone (path mode), or
+/// cargo's checkout of the `[dagon]` release tag (fetched when missing).
+pub(crate) fn source_root(cfg: &Config) -> Result<PathBuf, String> {
+    let r = crate::dagonsrc::root(&cfg.dagon, &cfg.base)?;
+    Ok(std::fs::canonicalize(&r).map_or(r, crate::config::plain_path))
+}
+
+/// Package folder of `part` under `root`.
+pub(crate) fn part_dir(root: &Path, part: &Part) -> Result<PathBuf, String> {
+    let at = crate::scaffold::find_named(root, &part.anchor)
+        .ok_or_else(|| format!("no package {} in {}", part.anchor, root.display()))?;
+    let at = crate::config::plain_path(at);
+    Ok(if part.sub.is_empty() {
+        at
+    } else {
+        at.join(part.sub)
+    })
+}
+
+/// How the plan names where `part` comes from.
+fn part_origin(cfg: &Config, part: &Part) -> String {
+    let rel = if part.sub.is_empty() {
+        part.anchor.clone()
+    } else {
+        format!("{}/{}", part.anchor, part.sub)
+    };
+    match crate::dagonsrc::clone_root(&cfg.dagon, &cfg.base) {
+        Some(root) => part_dir(&root, part).map_or(rel, |d| d.display().to_string()),
+        None => format!(
+            "{rel} of DAGON {} ({})",
+            cfg.dagon.tag.as_deref().unwrap_or("?"),
+            cfg.dagon.git.as_deref().unwrap_or("?")
+        ),
+    }
 }
 
 /// What `flash` will do, one line each, printed before it starts.
@@ -104,12 +128,11 @@ pub(crate) fn plan(
             "  ignore   [provision.{node}]: flash always builds with the signing key's public half"
         ));
     }
-    let home = dagon_home();
     for part in &parts {
         lines.push(format!(
             "  build    {:<8} {} (tag {})",
             part.name,
-            home.join(&part.package).display(),
+            part_origin(cfg, part),
             n.tag
         ));
     }
@@ -129,10 +152,8 @@ pub(crate) fn plan(
         ],
         "esp32s3" => {
             let mut l = vec![format!(
-                "  check    {} against SHA256SUMS (the unmodified ESP-IDF 2nd stage)",
-                home.join(crate::esp::VENDOR_DIR)
-                    .join("bootloader.bin")
-                    .display()
+                "  check    {}/bootloader.bin of the DAGON source against SHA256SUMS (the unmodified ESP-IDF 2nd stage)",
+                crate::esp::VENDOR_DIR
             )];
             l.push(format!("  make     in {}:", out.display()));
             l.extend(
@@ -170,9 +191,11 @@ fn inputs(
     let n = t.node(node).ok_or("checked in plan")?;
     let fw_key = firmware_key(cfg, key)?;
     let hex = dagon_sign::to_hex(&fw_key);
+    let root = source_root(cfg)?;
+    log(&format!("{node}: DAGON source {}", root.display()));
     let mut built = Vec::new();
     for part in parts(&n.mcu, n.board.as_deref()).ok_or("checked in plan")? {
-        let dir = dagon_home().join(&part.package);
+        let dir = part_dir(&root, &part)?;
         let bin = match part.bin {
             Some(b) => b.to_string(),
             None => nodebuild::package_name(&dir)?,
@@ -230,7 +253,7 @@ pub(crate) fn prepare(
     match t.node(node).map(|n| n.mcu.as_str()) {
         Some("esp32s3") => {
             let app = crate::esp::save_image(&i.app, &out.join("app.bin"))?;
-            esp_files(t, node, &i, &app, &dagon_home(), out, key)
+            esp_files(t, node, &i, &app, &source_root(cfg)?, out, key)
         }
         _ => provision_files(t, node, &i, out, key),
     }
@@ -633,6 +656,13 @@ mod tests {
         }
     }
 
+    /// The DAGON checkout this test runs in.
+    fn here() -> PathBuf {
+        std::fs::canonicalize(crate::dagonsrc::BUILT_FROM)
+            .map(crate::config::plain_path)
+            .unwrap()
+    }
+
     fn key() -> KeyPair {
         KeyPair::from_seed(Seed::new([9; 32]))
     }
@@ -729,10 +759,67 @@ mod tests {
     }
 
     #[test]
+    fn in_release_mode_the_boot_images_come_from_cargos_checkout_of_the_tag() {
+        let (mut cfg, t) = area("tag");
+        let pkg = crate::dagonsrc::tests::package;
+        let url = crate::dagonsrc::tests::repo(
+            &cfg.base.join("release"),
+            "v3.1.4",
+            &[
+                ("crates/dagon-format/Cargo.toml", &pkg("dagon-format")),
+                ("crates/dagon-format/lib.rs", ""),
+                ("targets/mcu/rp2040/Cargo.toml", &pkg("dagon-mcu-rp2040")),
+                ("targets/mcu/rp2040/lib.rs", ""),
+                (
+                    "targets/mcu/rp2040/stage0/Cargo.toml",
+                    &pkg("dagon-rp2040-stage0"),
+                ),
+                ("targets/mcu/rp2040/stage0/lib.rs", ""),
+                (
+                    "targets/mcu/rp2040/bootcore/Cargo.toml",
+                    &pkg("dagon-rp2040-bootcore"),
+                ),
+                ("targets/mcu/rp2040/bootcore/lib.rs", ""),
+            ],
+        );
+        cfg.dagon = crate::scaffold::DagonSource {
+            git: Some(url.clone()),
+            tag: Some("v3.1.4".into()),
+            path: None,
+        };
+        let plan = plan(&cfg, &t, "hub", &cfg.base.join("out"))
+            .unwrap()
+            .join("\n");
+        assert!(
+            plan.contains("dagon-mcu-rp2040/bootcore of DAGON v3.1.4"),
+            "{plan}"
+        );
+
+        let root = source_root(&cfg).unwrap();
+        assert!(
+            !root.starts_with(&cfg.base),
+            "cargo's checkout, not the repository"
+        );
+        for p in parts("rp2040", None).unwrap() {
+            let dir = part_dir(&root, &p).unwrap();
+            assert!(dir.starts_with(&root) && dir.join("Cargo.toml").is_file());
+            assert!(dir.ends_with(p.sub), "{}", dir.display());
+        }
+
+        cfg.dagon.tag = Some("v0.0.0-missing".into());
+        let e = source_root(&cfg).unwrap_err();
+        assert!(
+            e.contains("cannot get the DAGON source v0.0.0-missing"),
+            "{e}"
+        );
+        let _ = std::fs::remove_dir_all(&cfg.base);
+    }
+
+    #[test]
     fn the_parts_are_in_this_checkout() {
         for mcu in ["rp2040", "stm32f401re", "esp32s3"] {
             for p in parts(mcu, Some("m5stopwatch")).unwrap() {
-                let toml = dagon_home().join(p.package).join("Cargo.toml");
+                let toml = part_dir(&here(), &p).unwrap().join("Cargo.toml");
                 assert!(toml.is_file(), "{} is not in the checkout", toml.display());
             }
         }
@@ -760,7 +847,7 @@ mod tests {
         let out = cfg.base.join("out/watch");
         let plan = plan(&cfg, &t, "watch", &out).unwrap().join("\n");
         for want in [
-            "targets/boards/m5stopwatch (tag watch-s3)",
+            "m5stopwatch (tag watch-s3)",
             "SHA256SUMS",
             "bootloader.bin  at 0x0",
             "otadata.bin     in otadata",
@@ -771,7 +858,7 @@ mod tests {
 
         let i = built(&cfg, false);
         let app = vec![0xE9; 7000];
-        let w = esp_files(&t, "watch", &i, &app, &dagon_home(), &out, &key()).unwrap();
+        let w = esp_files(&t, "watch", &i, &app, &here(), &out, &key()).unwrap();
         let FirstWrite::Espflash { files, commands } = w else {
             panic!("{w:?}")
         };

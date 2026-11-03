@@ -8,6 +8,12 @@ use super::*;
 
 const DESK: &str = include_str!("../../../../topology/desk-demo.yaml");
 
+/// Today's source of a DAGON developer's project: this clone.
+fn dev() -> crate::dagonsrc::NewSource {
+    let here = std::fs::canonicalize(crate::dagonsrc::BUILT_FROM).unwrap();
+    crate::dagonsrc::NewSource::Clone(crate::config::plain_path(here))
+}
+
 fn tmp(name: &str) -> PathBuf {
     let d = std::env::temp_dir().join(format!("dagon-scaffold-{name}-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&d);
@@ -188,15 +194,28 @@ fn a_node_chosen_by_mcu_finds_the_package_that_declares_the_mcu() {
 }
 
 #[test]
-fn a_release_source_pins_the_git_tag() {
+fn a_release_source_pins_the_git_tag_and_reads_its_packages_from_cargos_checkout() {
     let d = tmp("git");
+    // A stand-in release repository, tagged, served from a local file URL.
+    let c = d.join("release");
+    package(&c, "dagon-board-m5stopwatch", "", &[]);
+    package(
+        &c,
+        "dagon-format",
+        "[lib]\npath = \"lib.rs\"\n[workspace]\n",
+        &[],
+    );
+    std::fs::write(c.join("packages/dagon-format/lib.rs"), "").unwrap();
+    let url = crate::dagonsrc::tests::commit_and_tag(&c, "v0.1.0");
+    let base = d.join("proj");
+    std::fs::create_dir_all(&base).unwrap();
     let src = DagonSource {
-        git: Some("https://example.invalid/dagon.git".into()),
+        git: Some(url.clone()),
         tag: Some("v0.1.0".into()),
         path: None,
     };
     let r = gen(
-        &d,
+        &base,
         &desk(),
         &src,
         &BTreeMap::new(),
@@ -205,9 +224,56 @@ fn a_release_source_pins_the_git_tag() {
     )
     .unwrap();
     assert!(r.skipped.is_empty(), "{:?}", r.skipped);
-    assert!(read(&d, "nodes/watch/Cargo.toml").contains(
-        "dagon-board-m5stopwatch = { git = \"https://example.invalid/dagon.git\", tag = \"v0.1.0\" }"
-    ));
+    assert!(read(&base, "nodes/watch/Cargo.toml").contains(&format!(
+        "dagon-board-m5stopwatch = {{ git = {url:?}, tag = \"v0.1.0\" }}"
+    )));
+
+    // A tag the repository does not have: the reason, and nothing written.
+    let missing = DagonSource {
+        tag: Some("v9.0.0".into()),
+        ..src
+    };
+    let e = gen(
+        &base,
+        &desk(),
+        &missing,
+        &BTreeMap::new(),
+        &["seg".into()],
+        false,
+    );
+    let why = format!("{e:?}");
+    assert!(why.contains("cannot get the DAGON source v9.0.0"), "{why}");
+}
+
+#[test]
+fn new_pins_this_clis_release_unless_a_clone_is_asked_for() {
+    let d = tmp("new-release");
+    let keys = d.join("keys");
+    let release = crate::dagonsrc::NewSource::Release {
+        git: crate::dagonsrc::REPO_URL.into(),
+        tag: crate::dagonsrc::release_tag(),
+    };
+    new_project(&d.join("a"), "a", DESK, &keys, &release).unwrap();
+    let c = Config::load(Some(&d.join("a/dagon.toml").to_string_lossy())).unwrap();
+    assert_eq!(c.dagon.git.as_deref(), Some(crate::dagonsrc::REPO_URL));
+    assert_eq!(c.dagon.tag, Some(format!("v{}", env!("CARGO_PKG_VERSION"))));
+    assert_eq!(c.dagon.path, None);
+
+    let clone =
+        crate::dagonsrc::NewSource::from_options(Some(&d.to_string_lossy()), None, None).unwrap();
+    new_project(&d.join("b"), "b", DESK, &keys, &clone).unwrap();
+    let c = Config::load(Some(&d.join("b/dagon.toml").to_string_lossy())).unwrap();
+    assert!(c.dagon.path.is_some() && c.dagon.git.is_none());
+
+    let other = crate::dagonsrc::NewSource::from_options(None, Some("file:///x"), None).unwrap();
+    assert_eq!(
+        other,
+        crate::dagonsrc::NewSource::Release {
+            git: "file:///x".into(),
+            tag: crate::dagonsrc::release_tag()
+        }
+    );
+    assert!(crate::dagonsrc::NewSource::from_options(Some("."), Some("g"), None).is_err());
 }
 
 #[test]
@@ -215,7 +281,7 @@ fn new_makes_the_project_and_a_key_outside_it() {
     let d = tmp("new");
     let proj = d.join("fleet");
     let keys = d.join("keys");
-    let made = new_project(&proj, "fleet", DESK, &keys).unwrap();
+    let made = new_project(&proj, "fleet", DESK, &keys, &dev()).unwrap();
     assert!(made.iter().any(|l| l.starts_with("key:")));
     assert!(keys.join(dagon_sign::SECRET_FILE).exists());
     let toml = read(&proj, "dagon.toml");
@@ -223,8 +289,8 @@ fn new_makes_the_project_and_a_key_outside_it() {
     let secret = std::fs::read_to_string(keys.join(dagon_sign::SECRET_FILE)).unwrap();
     assert!(!toml.contains(secret.trim()));
     assert_eq!(read(&proj, "topology.yaml"), DESK);
-    assert!(new_project(&proj, "fleet", DESK, &keys).is_err());
-    let again = new_project(&d.join("fleet2"), "fleet2", DESK, &keys).unwrap();
+    assert!(new_project(&proj, "fleet", DESK, &keys, &dev()).is_err());
+    let again = new_project(&d.join("fleet2"), "fleet2", DESK, &keys, &dev()).unwrap();
     assert!(!again.iter().any(|l| l.starts_with("key:")));
 
     let cfg = proj.join("dagon.toml");
@@ -245,7 +311,7 @@ fn new_writes_claude_files_with_no_paths_or_secrets() {
     let d = tmp("claude");
     let proj = d.join("fleet");
     let keys = d.join("keys");
-    let made = new_project(&proj, "fleet", DESK, &keys).unwrap();
+    let made = new_project(&proj, "fleet", DESK, &keys, &dev()).unwrap();
     let secret = std::fs::read_to_string(keys.join(dagon_sign::SECRET_FILE)).unwrap();
     let home = home().unwrap().to_string_lossy().replace('\\', "/");
     let rels = [
@@ -398,7 +464,7 @@ fn new_gen_build(node: &str) {
         .join("documents-of-a-beginner")
         .join("projects-in-a-rather-deep-folder")
         .join("proj");
-    new_project(&dir, "proj", SAMPLE, &d.join("keys")).unwrap();
+    new_project(&dir, "proj", SAMPLE, &d.join("keys"), &dev()).unwrap();
     let config = dir.join(crate::config::CONFIG_FILE);
     let lines = gen_project(&config, &[node.to_string()], false).unwrap();
     assert!(!lines.iter().any(|l| l.starts_with("skipped")), "{lines:?}");
@@ -444,14 +510,14 @@ fn a_new_project_whose_key_cannot_be_made_leaves_nothing_behind() {
     // the project's files were written.
     std::fs::create_dir_all(d.join("repo/.git")).unwrap();
     let dir = d.join("proj");
-    let e = new_project(&dir, "proj", SAMPLE, &d.join("repo/keys")).unwrap_err();
+    let e = new_project(&dir, "proj", SAMPLE, &d.join("repo/keys"), &dev()).unwrap_err();
     assert!(!dir.exists(), "{e}");
     // An empty folder given by the user stays, empty.
     std::fs::create_dir_all(&dir).unwrap();
-    assert!(new_project(&dir, "proj", SAMPLE, &d.join("repo/keys")).is_err());
+    assert!(new_project(&dir, "proj", SAMPLE, &d.join("repo/keys"), &dev()).is_err());
     assert_eq!(std::fs::read_dir(&dir).unwrap().count(), 0);
     // The retry with a usable key folder works.
-    new_project(&dir, "proj", SAMPLE, &d.join("keys")).unwrap();
+    new_project(&dir, "proj", SAMPLE, &d.join("keys"), &dev()).unwrap();
     assert!(dir.join("dagon.toml").is_file() && dir.join("CLAUDE.md").is_file());
     let _ = std::fs::remove_dir_all(&d);
 }

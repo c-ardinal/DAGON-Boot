@@ -32,10 +32,6 @@ use crate::config::{read_topology, Config, Opts};
 use crate::paths::{contained, write_atomic};
 
 pub const SAMPLE: &str = include_str!("../../../topology/desk-demo.yaml");
-/// The DAGON clone this CLI was built from (default crate source).
-const BUILT_FROM: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../..");
-/// Overrides the DAGON clone used as crate source.
-const HOME_ENV: &str = "DAGON_HOME";
 const FIRST_VERSION: &str = "0.1.0";
 
 /// Where generated projects take the DAGON crates from (`[dagon]`).
@@ -296,20 +292,9 @@ pub fn find_named(root: &Path, name: &str) -> Option<PathBuf> {
         .map(|(d, _)| std::fs::canonicalize(&d).unwrap_or(d))
 }
 
-fn clone_root(src: &DagonSource, base: &Path) -> Option<PathBuf> {
-    if src.git.is_some() && src.tag.is_some() {
-        return None;
-    }
-    Some(match (&src.path, std::env::var_os(HOME_ENV)) {
-        (Some(p), _) => base.join(p),
-        (None, Some(h)) => PathBuf::from(h),
-        (None, None) => PathBuf::from(BUILT_FROM),
-    })
-}
-
 /// The dependency line for package `name`.
 fn dependency(name: &str, src: &DagonSource, base: &Path) -> Result<String, String> {
-    match clone_root(src, base) {
+    match crate::dagonsrc::clone_root(src, base) {
         None => Ok(format!(
             "{name} = {{ git = {:?}, tag = {:?} }}",
             src.git.as_deref().unwrap_or_default(),
@@ -499,21 +484,19 @@ fn refresh_manifest(
 /// The template files of node `n` (rendered), or why there are none.
 fn node_files(n: &Node, src: &DagonSource, base: &Path) -> Result<Vec<(String, String)>, String> {
     let want = want_of(n);
-    let (name, dir) = match clone_root(src, base) {
-        Some(root) => {
-            let f = find_for(&root, &want).ok_or_else(|| {
-                format!(
-                    "no board support package for {want:?} in {} (looked for {} or a \
-                     package declaring it); it may not exist yet",
-                    root.display(),
-                    conventional_name(&want)
-                )
-            })?;
-            (f.name, Some(f.dir))
-        }
-        None => (conventional_name(&want), None),
-    };
-    let files = template_for(&name, dir.as_deref())
+    // The release's checkout (fetched by cargo) or the local clone: the
+    // templates come from the same version the crates depend on.
+    let root = crate::dagonsrc::root(src, base)?;
+    let f = find_for(&root, &want).ok_or_else(|| {
+        format!(
+            "no board support package for {want:?} in {} (looked for {} or a \
+             package declaring it); it may not exist yet",
+            root.display(),
+            conventional_name(&want)
+        )
+    })?;
+    let name = f.name;
+    let files = template_for(&name, Some(&f.dir))
         .ok_or_else(|| format!("{name} has no project template yet"))?;
     files
         .into_iter()
@@ -698,7 +681,10 @@ update:
 
 /// `dagon new <dir> [--from <yaml>] [--keys <dir>]`
 pub fn new_command(args: &[&str]) -> Result<(), String> {
-    let o = Opts::parse(args, &["from", "keys"])?;
+    let o = Opts::parse(
+        args,
+        &["from", "keys", "dagon-path", "dagon-git", "dagon-tag"],
+    )?;
     let [dir] = o.pos[..] else {
         return Err("new needs <dir>".into());
     };
@@ -716,7 +702,12 @@ pub fn new_command(args: &[&str]) -> Result<(), String> {
         Some(k) => PathBuf::from(k),
         None => home()?.join(".dagon").join("keys").join(&name),
     };
-    let made = new_project(&dir, &name, &yaml, &keys)?;
+    let src = crate::dagonsrc::NewSource::from_options(
+        o.get("dagon-path"),
+        o.get("dagon-git"),
+        o.get("dagon-tag"),
+    )?;
+    let made = new_project(&dir, &name, &yaml, &keys, &src)?;
     for line in &made {
         println!("{line}");
     }
@@ -758,7 +749,13 @@ const CLAUDE_FILES: [(&str, &str); 4] = [
 /// Claude Code files and,
 /// when `keys` holds none, a signing key pair there (outside any git work
 /// tree). Refuses a non-empty folder.
-pub fn new_project(dir: &Path, name: &str, yaml: &str, keys: &Path) -> Result<Vec<String>, String> {
+pub fn new_project(
+    dir: &Path,
+    name: &str,
+    yaml: &str,
+    keys: &Path,
+    src: &crate::dagonsrc::NewSource,
+) -> Result<Vec<String>, String> {
     if dir.exists() && std::fs::read_dir(dir).map_or(true, |mut d| d.next().is_some()) {
         return Err(format!("{} exists and is not empty", dir.display()));
     }
@@ -770,7 +767,7 @@ pub fn new_project(dir: &Path, name: &str, yaml: &str, keys: &Path) -> Result<Ve
         .into_iter()
         .chain(CLAUDE_FILES)
         .try_for_each(|(f, text)| write_atomic(&dir.join(f), text.as_bytes()));
-    let made = written.and_then(|_| init_project(dir, name, "topology.yaml", keys));
+    let made = written.and_then(|_| init_project(dir, name, "topology.yaml", keys, src));
     let mut made = match made {
         Ok(m) => m,
         Err(e) => {
@@ -821,6 +818,7 @@ pub fn init_project(
     name: &str,
     topology: &str,
     keys: &Path,
+    src: &crate::dagonsrc::NewSource,
 ) -> Result<Vec<String>, String> {
     let config = dir.join(crate::config::CONFIG_FILE);
     if config.exists() {
@@ -840,18 +838,14 @@ pub fn init_project(
         .join(dagon_sign::PUBLIC_FILE)
         .to_string_lossy()
         .replace('\\', "/");
-    let src = std::env::var_os(HOME_ENV).map_or_else(
-        || std::fs::canonicalize(BUILT_FROM).unwrap_or_else(|_| PathBuf::from(BUILT_FROM)),
-        PathBuf::from,
-    );
-    let src = crate::config::forward_path(&src);
     let toml = format!(
         "# DAGON project {name:?}.\ntopology = {topology:?}\n\
          # Public key the firmware and the page verify images with (the secret\n\
          # key stays outside the project: DAGON_SIGNING_KEY).\npubkey = {pubkey:?}\n\n\
-         # Where the generated crates take the DAGON board support packages from:\n\
+         # Where the generated crates and the boot images take DAGON from:\n\
          # a release (git and tag) or, for development, a local clone (path).\n\
-         [dagon]\n# git = \"<DAGON repository URL>\"\n# tag = \"<release tag>\"\npath = {src:?}\n"
+         [dagon]\n{}",
+        src.toml()
     );
     write_atomic(&config, toml.as_bytes())?;
     made.push("created    dagon.toml".into());

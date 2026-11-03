@@ -122,7 +122,8 @@
         </select></label
       >
     </div>
-    {#if node.role === 'coordinator'}
+    <!-- A 親機 linked from another node has that node above it (つなぐ先); one nobody links to has its own uplink. -->
+    {#if node.role === 'coordinator' && nodeLink < 0}
       {@const up = node.uplink ?? { kind: 'usb-cdc' as LinkKind, host: 'pc-cli' as UplinkHost }}
       <fieldset class="seg kinds">
         <legend>{INSPECT.uplink}</legend>

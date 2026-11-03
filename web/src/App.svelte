@@ -143,7 +143,7 @@
     if (key) set_release_key(key);
   }
 
-  /** The open project's 構成 (its YAML through serve): 運用 when it is updatable as it is, else 定義 (§7.2b). */
+  /** The open project's 構成 (its YAML through serve): 運用 when it has no problems, else 定義 (§7.2b). */
   // SC-S0 is reached only through `leave` (menu, 最初からやり直す), so no unsaved edit is here when a project opens.
   async function openWork(want?: 'operate' | 'define') {
     const yaml = await cli.loadTopology().catch(() => null);
@@ -238,7 +238,7 @@
     void tick().then(() => restartButton?.focus());
   }
 
-  /** 運用 pressed while it cannot be entered: M68 / M69 (or 未保存) in the band until the 構成 changes. */
+  /** 運用 pressed while it cannot be entered: M69 (or 未保存) in the band until the 構成 changes. */
   let locked = $state<{ why: Operable | 'unsaved'; at: number } | null>(null);
   const lockShown = $derived(locked && locked.at === d.revision ? locked.why : null);
   function lock(why: Operable | 'unsaved') {
@@ -264,7 +264,7 @@
   const modeLocked = $derived(busyStates.includes(op.state));
 
   function switchMode(m: 'operate' | 'define') {
-    // 運用 only with a 構成 that has no problems and is updatable (§5.2); the YAML decides, never the 親機.
+    // 運用 only with a 構成 that has no problems (§5.2; parts not updatable yet are skipped there); the YAML decides, never the 親機.
     if (m === 'operate' && d.operable !== 'ok') return lock(d.operable);
     // ... and only the saved one, the 構成 build, sign and release use too.
     if (m === 'operate' && autosave.pending) {
@@ -628,7 +628,8 @@
       return { ...progress, sub: [TIME.elapsed, TIME.clock(gone)] as const, more: [[TIME.left, TIME.about(left)]] as const };
     }
     if (op.state === 'L08' || op.state === 'L09') return { label: CANVAS.dotFound, value: op.found, name: CANVAS.dotFoundName(op.found) };
-    const n = c.nodes.length;
+    // Out of the nodes updating reaches: the others are never watched (V-23).
+    const n = op.reach.length;
     return { label: CANVAS.dotResponding, value: op.responding, of: n, name: CANVAS.dotRespondingName(op.responding, n) };
   });
 
@@ -738,7 +739,7 @@
 
 {#snippet defineBottom()}
   {@const empty = d.doc.topo.nodes.length === 0}
-  {@const firstError = d.problems.find((p) => p.severity === 'error' && p.rule !== 'V-23')}
+  {@const firstError = d.problems.find((p) => p.severity === 'error')}
   <footer id="band" class="dband" tabindex="-1">
     <div class="next">
       {#if d.saveFailure}
@@ -747,9 +748,6 @@
       {:else if lockShown === 'unsaved'}
         <span class="cause">{SAVE.unsaved}</span>
         <p>{MODE.lockedUnsaved.sentence}</p>
-      {:else if lockShown === 'unsupported'}
-        <span class="cause">{MODE.lockedUnsupported.chip}</span>
-        <p>{MODE.lockedUnsupported.sentence}</p>
       {:else if lockShown}
         <p>{MODE.lockedProblems.sentence}</p>
       {:else if cli.state !== 'ready'}
@@ -762,8 +760,8 @@
         <p>{DEFINE.unreadableSentence}</p>
       {:else if firstError}
         <p>{DEFINE.fixSentence}</p>
-      {:else if d.operable === 'unsupported'}
-        <p>{DEFINE.unsupportedSentence}</p>
+      {:else if d.notYet}
+        <p>{DEFINE.notYetSentence(d.notYet)}</p>
       {/if}
     </div>
     {#if op.fileTopology && op.state === 'L17'}

@@ -212,13 +212,22 @@ export class Operate {
     return { hasConfig: this.config !== null, failure: this.failure, refusal: this.refusal, answering: this.needUpdate > 0 };
   }
 
+  /**
+   * The nodes updating reaches, in 構成 order: the compiled topology's
+   * nodes, so a node's topology index is its position here. The others
+   * (V-23) are drawn but never watched, updated or recovered.
+   */
+  get reach(): Node[] {
+    return this.config?.nodes.filter((n) => !n.notYet) ?? [];
+  }
+
   /** Answering nodes not yet on the chosen release's version (all answering ones before an update ran). */
   get needUpdate(): number {
-    return this.config?.nodes.filter((n) => this.live[n.id]?.responding === true && !this.updated.has(n.id)).length ?? 0;
+    return this.reach.filter((n) => this.live[n.id]?.responding === true && !this.updated.has(n.id)).length;
   }
 
   get responding(): number {
-    return this.config?.nodes.filter((n) => this.live[n.id]?.responding === true).length ?? 0;
+    return this.reach.filter((n) => this.live[n.id]?.responding === true).length;
   }
 
   /** The device the session runs on now (the page's disconnect handling compares ports with it). */
@@ -228,8 +237,8 @@ export class Operate {
 
   /** The first node in update order that stopped answering. */
   get stuck(): Node | undefined {
-    const c = this.config;
-    return c?.order.map((id) => c.nodes.find((n) => n.id === id)!).find((n) => this.live[n.id]?.responding === false);
+    const reach = this.reach;
+    return this.config?.order.map((id) => reach.find((n) => n.id === id)).find((n) => n && this.live[n.id]?.responding === false);
   }
 
   private go(ev: Ev, focus = true): void {
@@ -429,7 +438,7 @@ export class Operate {
     const my = this.session;
     const before = this.responding;
     try {
-      for (const n of c.nodes) {
+      for (const n of this.reach) {
         const r = await this.call((h) => h.watch(n.target.kind, n.target.addr));
         if (my !== this.session) return;
         const was = this.live[n.id] ?? UNKNOWN;
@@ -450,7 +459,7 @@ export class Operate {
     } finally {
       this.watching = false;
     }
-    if (this.responding !== before) this.status = ANNOUNCE.A08(this.responding, c.nodes.length);
+    if (this.responding !== before) this.status = ANNOUNCE.A08(this.responding, this.reach.length);
     // L12 and L23 move to L13 by themselves while a node does not answer: it stays visible and recoverable
     // (after "応答する n つだけ先に更新" the ones left out are named there).
     if ((this.state === 'L12' || this.state === 'L23') && this.stuck) this.go('watchAlarm', false);
@@ -458,7 +467,7 @@ export class Operate {
   }
 
   private async refreshStatus(id: string): Promise<void> {
-    const n = this.config?.nodes.find((x) => x.id === id);
+    const n = this.reach.find((x) => x.id === id);
     if (!n || this.live[id]?.responding === false) return;
     try {
       const s = await this.call((h) => h.status(n.target.kind, n.target.addr));
@@ -476,7 +485,7 @@ export class Operate {
 
   /** The nodes an update runs on: those answering now (the hub alone when only it answers). */
   private answering(): string[] {
-    return this.config?.nodes.filter((n) => this.live[n.id]?.responding === true).map((n) => n.id) ?? [];
+    return this.reach.filter((n) => this.live[n.id]?.responding === true).map((n) => n.id);
   }
 
   /**
@@ -507,12 +516,12 @@ export class Operate {
     }
     this.file = { ...file, verdict: 'pass' };
     const given = releaseVersions(bytes);
-    // ponytail: topology node index = position in config.nodes, as in update().
+    // ponytail: topology node index = position in reach, as in update().
     this.updated.clear();
-    this.fileVersions = Object.fromEntries(this.config.nodes.flatMap((n, i) => (given.has(i) ? [[n.id, given.get(i)!]] : [])));
+    this.fileVersions = Object.fromEntries(this.reach.flatMap((n, i) => (given.has(i) ? [[n.id, given.get(i)!]] : [])));
     this.rest = false;
     this.targets = this.answering();
-    this.status = ANNOUNCE.A10ok(this.targets.length);
+    this.status = ANNOUNCE.A10ok(this.targets.length, this.config.nodes.length - this.reach.length);
     this.go('pass');
   }
 
@@ -529,8 +538,9 @@ export class Operate {
     this.failed = null;
     this.sentVersion = {};
     this.progress = Object.fromEntries(this.targets.map((id) => [id, { stage: 'waiting', percent: 0 }]));
-    // ponytail: topology node index = position in config.nodes (true for the sample, which follows its YAML).
-    const nodes = this.targets.map((id) => c.nodes.findIndex((n) => n.id === id));
+    // ponytail: topology node index = position in reach (true for the sample, which follows its YAML).
+    const reach = this.reach;
+    const nodes = this.targets.map((id) => reach.findIndex((n) => n.id === id));
     let results: NodeResult[];
     try {
       results = await this.call((h) => h.apply(f.bytes, topo_compile(c.yaml), nodes, (e) => void (my === this.session && this.onEvent(e))));
@@ -546,7 +556,7 @@ export class Operate {
   }
 
   private onEvent(e: UpdateEvent): void {
-    const n = this.config?.nodes[e.node];
+    const n = this.reach[e.node];
     if (!n) return;
     // Only the transfer carries the release's version; FAILED / REJECTED carry the version the node still runs.
     if (e.phase === PHASE.transfer) this.sentVersion[n.id] = e.version;
@@ -586,9 +596,9 @@ export class Operate {
 
   /** Where the run ended: all done, a node that stopped, or the hub to choose again. */
   private finish(results: NodeResult[]): void {
-    const c = this.config!;
+    const reach = this.reach;
     for (const r of results) {
-      const id = c.nodes[r.node]?.id;
+      const id = reach[r.node]?.id;
       if (id && r.outcome === 'notStarted') this.progress[id] = { stage: 'unwritten', percent: 0 };
       // A confirmed node runs the new version now, also when a later node stops the run.
       const hello = id ? this.live[id]?.hello : null;
@@ -598,7 +608,7 @@ export class Operate {
     }
     const stop = results.find((r) => r.outcome === 'failed');
     if (!stop) return this.done();
-    const n = c.nodes[stop.node];
+    const n = reach[stop.node];
     if (n.role === 'hub' && this.state === 'L20' && stop.failure?.reason === 'NO ANSWER') return this.autoFailed();
     const why = stop.failure;
     const f = why?.running != null ? { stage: 'previous' as const } : failureStage(why?.reason ?? 'NO ANSWER');
@@ -618,7 +628,7 @@ export class Operate {
   private done(): void {
     const v = Object.values(this.sentVersion)[0];
     this.status = ANNOUNCE.A14(v === undefined ? '' : versionText(v));
-    this.finished = { kind: 'updated', left: this.config?.nodes.filter((n) => !this.updated.has(n.id)).length ?? 0 };
+    this.finished = { kind: 'updated', left: this.reach.filter((n) => !this.updated.has(n.id)).length };
     this.go(this.state === 'L20' ? 'confirmed' : this.state === 'L21' ? 'reconnected' : 'doneNoHub');
     this.startWatching();
   }
@@ -692,7 +702,7 @@ export class Operate {
 
   /** The version just sent to the hub, if any. */
   private hubSent(): number | null {
-    const hub = this.config?.nodes.find((n) => n.role === 'hub');
+    const hub = this.reach.find((n) => n.role === 'hub');
     return hub ? (this.sentVersion[hub.id] ?? null) : null;
   }
 
@@ -702,7 +712,7 @@ export class Operate {
 
   /** L21: the hub confirmed on the version just sent goes on to L23; on its previous version it stops there (L22). */
   private confirmed(r: ConfirmResult): void {
-    const hub = this.config!.nodes.find((n) => n.role === 'hub')!;
+    const hub = this.reach.find((n) => n.role === 'hub')!;
     const mine = r.outcome === 'confirmed' || (r.outcome === 'notOnTrial' && r.version === this.sentVersion[hub.id]);
     this.alert = '';
     if (!mine) return this.stopAt(hub.id, 'previous');
@@ -720,7 +730,7 @@ export class Operate {
   /** The node "（ノード）を復旧する" names: the stopped one (L22, L25) or the first silent one (L13). */
   get recoverTarget(): Node | undefined {
     const id = this.state === 'L25' ? this.recovering : this.state === 'L22' ? this.failed : this.stuck?.id;
-    return this.config?.nodes.find((n) => n.id === id);
+    return this.reach.find((n) => n.id === id);
   }
 
   private async latest(): Promise<Uint8Array | null> {
@@ -764,7 +774,7 @@ export class Operate {
     if (!release) return 'needFile';
     const bytes = release;
     const bootcore = (await this.deps.bootcore?.(n.id).catch(() => null)) ?? null;
-    const index = c.nodes.indexOf(n);
+    const index = this.reach.indexOf(n);
     await this.runRecovery(n, 'recover', (h, on) => h.recover(index, bytes, topo, bootcore, on));
   }
 
@@ -777,10 +787,10 @@ export class Operate {
 
   /** "前のバージョンに戻す" (the detail of a node, UC-O10 / M38): the version in the other slot. */
   async rollback(id: string): Promise<void> {
-    const c = this.config;
-    const n = c?.nodes.find((x) => x.id === id);
-    if (!c || !n) return;
-    const index = c.nodes.indexOf(n);
+    const reach = this.reach;
+    const n = reach.find((x) => x.id === id);
+    if (!n) return;
+    const index = reach.indexOf(n);
     await this.runRecovery(n, 'rollback', async (h, on) => {
       const v = await h.rollback(n.target.kind, n.target.addr, index, on);
       return { path: 'retransfer', version: v, rom: null };
@@ -789,7 +799,7 @@ export class Operate {
 
   /** "このバージョンで確定する" (M38): keeps the version a node runs on trial. */
   async keepTrial(id: string): Promise<void> {
-    const n = this.config?.nodes.find((x) => x.id === id);
+    const n = this.reach.find((x) => x.id === id);
     if (!n || !this.host) return;
     try {
       await this.call((h) => h.confirm(n.target.kind, n.target.addr, true));
@@ -818,7 +828,7 @@ export class Operate {
     this.startedAt = Date.now();
     this.progress = { ...this.progress, [n.id]: { stage: 'writing', percent: 0 } };
     const on = (e: UpdateEvent) => {
-      if (my !== this.session || this.config?.nodes[e.node]?.id !== n.id) return;
+      if (my !== this.session || this.reach[e.node]?.id !== n.id) return;
       if (e.phase === PHASE.rom) this.progress[n.id] = { stage: 'lastResort', percent: e.percent };
       else if (e.phase === PHASE.transfer) this.progress[n.id] = { stage: 'writing', percent: e.percent };
       // TRANSFER and REBOOT carry the version the node is given (FAILED carries the one it runs).

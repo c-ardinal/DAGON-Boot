@@ -40,7 +40,12 @@ describe('define document', () => {
     const r = check(toYaml(doc.topo));
     expect([r.ok, r.errors]).toEqual([true, 0]);
     expect(doc.topo.update.order).toEqual(['nucleo', 'm5stopwatch', 'hub']);
-    expect(canPlace(doc, 'nucleo-f401re')).toBe(false);
+    // The same board again: a second one of it; a board with no link of its own is a second 親機.
+    expect(canPlace(doc, 'nucleo-f401re')).toBe(true);
+    const two = place(doc, 'waveshare-rp2040-touch-lcd-1.28');
+    expect(two.doc.topo.nodes.find((n) => n.id === two.id)?.role).toBe('coordinator');
+    expect(two.doc.topo.update.order[two.doc.topo.update.order.length - 1]).toBe('hub');
+    expect(check(toYaml(two.doc.topo)).errors).toBe(0);
   });
 
   test("the hub's new I2C bus and PIO UART link take its board's [coordinator] pins", () => {
@@ -108,9 +113,20 @@ describe('define document', () => {
     expect(doc.topo.links![doc.topo.links!.length - 1]).toMatchObject({ from: 'hub', to: hub2, kind: 'can' });
     const v23 = problems(doc).filter((p) => p.rule === 'V-23');
     expect(v23.length).toBeGreaterThan(0);
-    expect(v23[0].sentence).toContain('更新するには');
+    // Information, never an error: nothing tells the 構成 is wrong.
+    expect(v23.every((p) => p.severity === 'info')).toBe(true);
+    expect(problems(doc).filter((p) => p.severity === 'error')).toEqual([]);
+    expect(v23[0].sentence).toContain('飛ばします');
+    expect(v23[0].sentence).not.toContain('してください');
+    // The CAN hop to it is not available yet either (V-24), told as skipped, not as a thing to fix.
+    const v24 = problems(doc).find((p) => p.rule === 'V-24' && p.select === `link:${hub2}`)!;
+    expect(v24.sentence).toContain('飛ばす');
+    expect(v24.sentence).not.toContain('してください');
     const c = toConfig(doc, supportedBoards());
-    expect(c.nodes.find((n) => n.id === hub2)!.depth).toBe(0);
+    // Linked from the first 親機, the second one sits below it, skipped as a second 親機's tree.
+    expect(c.nodes.find((n) => n.id === hub2)).toMatchObject({ depth: 1, notYet: 'second-hub' });
+    expect(c.nodes.filter((n) => n.notYet).map((n) => n.id)).toEqual([hub2]);
+    expect(topo_compile(toYaml(doc.topo))).toEqual(topo_compile(DESK_DEMO_YAML));
 
     let deep = removeNode(fromYaml(DESK_DEMO_YAML), 'watch');
     deep = place(deep, 'm5stopwatch').doc;
@@ -118,8 +134,14 @@ describe('define document', () => {
     // No [coordinator] on the F401: UART0 pins of the 親機 MCU's definition (the former fixed 0/1).
     expect(deep.topo.links!.find((l) => l.from === 'seg')).toMatchObject({ iface: 'hw-uart0', pins: { tx: 0, rx: 1 } });
     const cfg = toConfig(deep, supportedBoards());
-    expect(cfg.nodes.map((n) => [n.id, n.depth])).toEqual([['hub', 0], ['seg', 1], ['m5stopwatch', 2]]);
+    expect(cfg.nodes.map((n) => [n.id, n.depth, n.notYet])).toEqual([['hub', 0, undefined], ['seg', 1, undefined], ['m5stopwatch', 2, 'deep']]);
+    // Any depth: a node below the 孫機 is placed and connected too.
+    const deeper = connect(placeMcu(deep, 'rp2040').doc, 'rp2040', 'm5stopwatch');
+    const dc = toConfig(deeper, supportedBoards());
+    expect(dc.nodes.find((n) => n.id === 'rp2040')).toMatchObject({ depth: 3, notYet: 'deep' });
     expect(problems(deep).map((p) => p.rule)).toContain('V-23');
+    // Valid as placed: the 孫機's link carries its board's way into its loader, so nothing is an error.
+    expect(problems(deep).filter((p) => p.severity === 'error')).toEqual([]);
     expect(topo_check(toYaml(deep.topo))).toContain('V-23');
   });
 
@@ -129,8 +151,9 @@ describe('define document', () => {
     expect(yaml).toContain('uplink');
     expect(fromYaml(yaml).topo.nodes.find((n) => n.id === 'hub')?.uplink).toEqual({ kind: 'wifi-tcp', host: 'browser' });
     expect(topo_compile(yaml)).toEqual(topo_compile(DESK_DEMO_YAML));
-    expect(toConfig(doc, supportedBoards()).uplink).toEqual({ kind: 'wifi-tcp', host: 'browser' });
-    expect(toConfig(fromYaml(DESK_DEMO_YAML), supportedBoards()).uplink).toBeUndefined();
+    const hubOf = (c: ReturnType<typeof toConfig>) => c.nodes.find((n) => n.id === 'hub')!;
+    expect(hubOf(toConfig(doc, supportedBoards())).uplink).toEqual({ kind: 'wifi-tcp', host: 'browser' });
+    expect(hubOf(toConfig(fromYaml(DESK_DEMO_YAML), supportedBoards())).uplink).toBeUndefined();
     expect(setUplink(doc, 'hub', null).topo.nodes.find((n) => n.id === 'hub')?.uplink).toBeUndefined();
   });
 

@@ -2,12 +2,14 @@
 // check itself is dagon-topology's; this file only names each rule (S07),
 // says how to fix it (§11.2) and finds the item and field it points at.
 import { topo_check } from '../../wasm/dagon.ts';
+import { topo_skipped } from '../../wasm/pkg/dagon_wasm.js';
 import { RULE_FIX, RULE_SHORT, type FixWords } from '../copy.ts';
 import { boardMissing, flashTooSmall, MAX_NODES, type Doc } from './model.ts';
 
 export interface Issue {
   rule: string;
-  severity: 'error' | 'warning';
+  /** `info`: a valid part updating skips for now (V-23), never a problem to fix. */
+  severity: 'error' | 'warning' | 'info';
   /** YAML path such as `links[0].control.nrst`. */
   path: string;
   message: string;
@@ -45,7 +47,7 @@ function where(path: string, doc: Doc): Where {
   return { rest: path };
 }
 
-/** The chip of a problem (S23, S45): ! an error, ▲ a caution, ◇ a shape not updatable yet. */
+/** The chip of a problem (S23, S45): ! an error, ▲ a caution, ◇ a part not updatable yet. */
 export function problemChip(p: Pick<Issue, 'rule' | 'severity'>): { mark: '!' | '▲' | '◇'; kind: 'error' | 'warning' | 'unsupported' } {
   // V-24 (a hop the firmware cannot do yet) is the same kind of "not yet" as V-23.
   if (p.rule === 'V-23' || p.rule === 'V-24') return { mark: '◇', kind: 'unsupported' };
@@ -55,12 +57,19 @@ export function problemChip(p: Pick<Issue, 'rule' | 'severity'>): { mark: '!' | 
 const nameOf = (doc: Doc, id: string | undefined) => (id ? (doc.names[id] ?? id) : '');
 
 /** §11.2, filled with the names of the nodes and links the issue is about. */
-function sentence(i: Issue, w: Where, doc: Doc): string {
+function sentence(i: Issue, w: Where, doc: Doc, skipped: Record<string, string>): string {
   const t = doc.topo;
   const link = w.link !== undefined ? t.links?.[w.link] : undefined;
   const to = nameOf(doc, link?.to ?? w.node);
   const board = t.nodes.find((n) => n.id === w.node)?.board;
-  const fill: FixWords = { to, board: board ?? to, id: w.node ?? '', many: t.nodes.length > MAX_NODES, size: i.rule === 'B-02' ? i.message : undefined };
+  const fill: FixWords = {
+    to,
+    board: board ?? to,
+    id: w.node ?? '',
+    many: t.nodes.length > MAX_NODES,
+    size: i.rule === 'B-02' ? i.message : undefined,
+    skipped: (link?.to ?? w.node ?? '') in skipped,
+  };
   return RULE_FIX[i.rule]?.(fill) ?? '';
 }
 
@@ -74,6 +83,8 @@ function select(w: Where, doc: Doc): string | null {
   return null;
 }
 
+const RANK: Record<Issue['severity'], number> = { error: 0, warning: 1, info: 2 };
+
 const kib = (b: number) => (b >= 1 << 20 ? `${b >> 20} MiB` : `${b >> 10} KiB`);
 
 /** The board fields of nodes chosen by MCU (§4.3): missing (B-01, before making the project) or too small (B-02). */
@@ -85,13 +96,15 @@ function boardIssues(doc: Doc): Issue[] {
   });
 }
 
-/** topo_check on the document (as JSON, which the YAML parser reads), errors first. */
+/** topo_check on the document (as JSON, which the YAML parser reads): errors, then cautions, then what is not updatable yet. */
 export function problems(doc: Doc): Problem[] {
-  const report = JSON.parse(topo_check(JSON.stringify(doc.topo))) as { issues: Issue[] };
+  const text = JSON.stringify(doc.topo);
+  const report = JSON.parse(topo_check(text)) as { issues: Issue[] };
+  const skipped = topo_skipped(text) as Record<string, string>;
   return [...report.issues, ...boardIssues(doc)]
     .map((i) => {
       const w = where(i.path, doc);
-      return { ...i, short: RULE_SHORT[i.rule] ?? i.rule, sentence: sentence(i, w, doc), select: select(w, doc), field: w.rest };
+      return { ...i, short: RULE_SHORT[i.rule] ?? i.rule, sentence: sentence(i, w, doc, skipped), select: select(w, doc), field: w.rest };
     })
-    .sort((a, b) => (a.severity === b.severity ? 0 : a.severity === 'error' ? -1 : 1));
+    .sort((a, b) => RANK[a.severity] - RANK[b.severity]);
 }

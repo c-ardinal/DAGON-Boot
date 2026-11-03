@@ -278,7 +278,7 @@ export class Cli {
    * PUT /v1/topology: the 構成 YAML into the project's topology.yaml. The CLI
    * checks it too: `invalid` when it refuses the 構成 (422), `busy` while a
    * job holds the project (409), `failed` for anything else or no answer.
-   * Shapes not updatable yet (V-23 only) are saved.
+   * Parts not updatable yet (V-23, information only) are saved.
    */
   async saveTopology(yaml: string): Promise<SaveResult> {
     if (this.state !== 'ready') return 'failed';

@@ -444,11 +444,12 @@ fn hello_request(to: Target) -> [u8; 6] {
 pub const RETRY_BACKOFF_MS: [u32; 3] = [50, 100, 200];
 
 /// Commands a resend cannot harm: reads, the hub display, and the transfer
-/// and state steps the receiver deduplicates by seq. Not REBOOT (a node that
-/// already reset has no memory of the seq), nor the hub's line and raw I2C
+/// and state steps the receiver deduplicates by seq (CONFIRM among them).
+/// Not REBOOT or ENTER_ROM (a node that already reset, or left for its ROM
+/// loader, has no memory of the seq), nor the hub's line and raw I2C
 /// controls (no seq memory on the hub side).
 fn repeatable(cmd: Cmd) -> bool {
-    !matches!(cmd, Cmd::Reboot | Cmd::SubCtl | Cmd::I2cRaw)
+    !matches!(cmd, Cmd::Reboot | Cmd::EnterRom | Cmd::SubCtl | Cmd::I2cRaw)
 }
 
 fn encode(fl: u8, seq: u8, cmd: u8, payload: &[u8]) -> Vec<u8> {
@@ -481,5 +482,19 @@ fn ok_body<E>(cmd: Cmd, payload: &[u8]) -> Result<Vec<u8>, E> {
         Some((Status::Ok, body)) => Ok(body.to_vec()),
         Some((status, _)) => Err(Error::Rejected { cmd, status }),
         None => Err(Error::BadResponse),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn only_commands_a_resend_cannot_harm_are_resent() {
+        let never = [Cmd::Reboot, Cmd::EnterRom, Cmd::SubCtl, Cmd::I2cRaw];
+        for c in Cmd::ALL {
+            assert_eq!(repeatable(c), !never.contains(&c), "{c:?}");
+        }
+        assert!(repeatable(Cmd::Confirm));
     }
 }

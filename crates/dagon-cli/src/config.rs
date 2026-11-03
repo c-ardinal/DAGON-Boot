@@ -386,6 +386,17 @@ fn key_hex(s: &str) -> Option<[u8; 32]> {
     Some(k)
 }
 
+/// The key id of `public` as printed, marked when it is the published
+/// RFC 8032 test key (anyone can sign for it).
+pub fn key_id_text(public: &[u8; 32]) -> String {
+    let id = dagon_sign::to_hex(&dagon_format::key_id(public));
+    if *public == dagon_sign::image::TEST_PUBLIC_KEY {
+        format!("{id} (TEST KEY: the published RFC 8032 key; anyone can sign for it)")
+    } else {
+        id
+    }
+}
+
 /// Environment variable that permits the public RFC 8032 test key.
 pub const ALLOW_TEST_KEY_ENV: &str = "DAGON_ALLOW_TEST_KEY";
 
@@ -420,6 +431,15 @@ pub fn read_file(path: &Path) -> Result<Vec<u8>, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_test_key_is_marked_wherever_its_id_is_printed() {
+        let test = dagon_sign::image::TEST_PUBLIC_KEY;
+        assert!(key_id_text(&test).contains("TEST KEY"));
+        let other = *ed25519_compact::KeyPair::from_seed(ed25519_compact::Seed::new([3; 32])).pk;
+        let t = key_id_text(&other);
+        assert_eq!(t.len(), 16, "{t}");
+    }
 
     #[test]
     fn verbatim_prefixes_are_dropped_for_drives_and_unc_shares() {

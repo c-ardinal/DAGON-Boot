@@ -126,10 +126,7 @@ pub fn command(args: &[&str]) -> Result<(), String> {
         );
     }
     match key {
-        Some(k) => println!(
-            "release key: {}",
-            dagon_sign::to_hex(&dagon_format::key_id(&k))
-        ),
+        Some(k) => println!("release key: {}", crate::config::key_id_text(&k)),
         None => println!("no project yet: open or create one on the page"),
     }
     let url = format!("http://127.0.0.1:{port}/#{}", server.pass);

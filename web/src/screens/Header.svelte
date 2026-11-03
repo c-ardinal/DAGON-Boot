@@ -266,11 +266,43 @@
       padding: 0 var(--s-4);
     }
   }
+  /*
+   * 767 px and below (C-390): rows on purpose, in the DOM (and Tab) order —
+   * the product and the modes; the three steps (運用); the 親機 state, its
+   * toggle and the CLI state; then 困ったとき and メニュー side by side.
+   */
   @media (max-width: 767px) {
     header {
-      flex-wrap: wrap;
-      gap: var(--s-2) var(--s-4);
-      padding: var(--s-2) var(--s-4);
+      display: grid;
+      grid-template-columns: auto 1fr 1fr;
+      align-items: center;
+      gap: var(--s-2);
+      padding: var(--s-2) var(--s-3) var(--s-3);
+    }
+    header .secondary,
+    .modes button {
+      padding: 0 var(--s-3);
+    }
+    .product {
+      grid-column: 1 / 3;
+    }
+    .modes {
+      justify-self: end;
+    }
+    .steps {
+      grid-column: 1 / -1;
+      margin: 0;
+    }
+    .steps:empty {
+      display: none;
+    }
+    .hub,
+    .cli {
+      grid-column: 1;
+    }
+    .toggle {
+      grid-column: 2 / -1;
+      justify-self: start;
     }
   }
 </style>

@@ -21,8 +21,8 @@ it starts the confirmed slot (8 s watchdog). Both run at 84 MHz from the HSI.
 
 This app is the DAGON node: an I2C target at 0x42 on I2C3 (SCL PA8 = D7,
 SDA PB4 = D5) serving dagon-agent through the mailbox, and its own version on
-the stacked X-NUCLEO-53L0A1's 4-digit display (` 110` for 1.1.0: the
-shield wires no digit points; builds with the public test key show `tESt`
+the stacked X-NUCLEO-53L0A1's 4-digit display: the shield has no decimal points, so the
+version shows as its digits side by side (` 110` for 1.1.0, ` 120` for 1.2.0; builds with the public test key show `tESt`
 for 1.5 s first). The display runs on I2C1 (PB8/PB9) from the app's
 executor and keeps the shield's VL53L0X sensors in XSHUT. It feeds the watchdog only while confirmed, so
 an image that never gets CONFIRM resets when the 4 s trial watchdog runs out
@@ -66,7 +66,7 @@ probe-rs reset --chip STM32F401RETx
 
 `flash.bin` holds the signed boot core, state log face A (APP-A provisioned
 and confirmed) and APP-A; the chip erase blanks face B. The display shows
-`110`. RTT: `probe-rs attach --chip STM32F401RETx
+` 110`. RTT: `probe-rs attach --chip STM32F401RETx
 samples/f401-app/target/thumbv7em-none-eabihf/release/f401-app` prints
 `app 1.1.0 slot 0 on_trial=false`.
 
@@ -88,13 +88,13 @@ probe-rs download --chip STM32F401RETx --binary-format bin --base-address 0x0800
 probe-rs reset --chip STM32F401RETx
 ```
 
-Expected: `120` on trial (RTT `on_trial=true attempts=1`). With no CONFIRM
+Expected: ` 120` on trial (RTT `on_trial=true attempts=1`). With no CONFIRM
 the app stops feeding after 30 s, the watchdog resets it 4 s later, and after
-the third attempt the boot core rolls back: `110` again, RTT
+the third attempt the boot core rolls back: ` 110` again, RTT
 `last_reason=` the trial-exhausted code. About two minutes in total.
 
 To see a trial confirmed instead, build B with `--features slot-b,confirm`,
-sign and write it the same way (and the log again): it stays on `120`
+sign and write it the same way (and the log again): it stays on ` 120`
 after further resets.
 
 ## Conformance build

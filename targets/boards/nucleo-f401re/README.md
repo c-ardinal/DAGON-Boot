@@ -39,8 +39,11 @@ on DAGON's I2C3 bus.
   image's version from its header.
 - `seg`: text for the 4 digits (host-testable with `shield`'s register
   writes: `cargo test --no-default-features --target <host triple>`).
-  `seg::version` shows `major.minor.patch` (1.2.0 as `120`, no points),
-  `major.minor.` when that does not fit.
+- The shield has no decimal points: a `.` in `seg` text is accepted but
+  not shown, so versions appear as their digits side by side,
+  right-aligned. `seg::version` shows `major.minor.patch` (1.2.0 as
+  ` 120`, 1.10.7 as `1107`), else `major.minor` (10.10.x as `1010`), else
+  `----`.
 - Flash: 512 KiB (`FLASH_SIZE`, checked against the MCU layout).
 
 Features: `slot-b`, `conform` (forwarded to the MCU package). See

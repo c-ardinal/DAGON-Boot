@@ -257,6 +257,31 @@ pub struct Coordinator {
     pub uart0_rx: Vec<u8>,
 }
 
+/// The pins a board wires new links to when it is the 親機 (numbered
+/// GPIOs, as the topology's `buses[]` and `links[].pins` take them).
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct HubPins {
+    pub i2c: HubI2c,
+    pub pio_uart: HubUart,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct HubI2c {
+    /// One of the board's `i2c` controllers.
+    pub controller: String,
+    pub sda: u8,
+    pub scl: u8,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct HubUart {
+    pub tx: u8,
+    pub rx: u8,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct I2cPair {
@@ -410,6 +435,8 @@ pub struct BoardDef {
     pub i2c_pairs: Vec<I2cPair>,
     /// `None` for the coordinator.
     pub default_link: Option<DefaultLink>,
+    /// Pins of a new I2C bus / PIO UART link when this board is the 親機.
+    pub coordinator: Option<HubPins>,
     /// Parts built from the board package itself.
     #[serde(default, rename = "part")]
     pub parts: Vec<Part>,

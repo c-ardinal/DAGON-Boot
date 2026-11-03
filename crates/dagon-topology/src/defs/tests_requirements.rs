@@ -232,3 +232,33 @@ fn board_numbers_are_usable() {
     let e = requirements::check_board(&board(&watch.replace("115_200", "0")), esp).unwrap_err();
     assert!(e.contains("baud"), "{e}");
 }
+
+#[test]
+fn coordinator_pins_are_usable() {
+    let rp = Registry::builtin().mcu("rp2040").unwrap();
+    let lcd =
+        include_str!("../../../../targets/boards/waveshare-rp2040-touch-lcd-1.28/dagon-board.toml");
+    let board = |t: &str| toml::from_str::<BoardDef>(t).unwrap();
+    // The pins the page used before it read them from the definition.
+    let h = board(lcd).coordinator.unwrap();
+    assert_eq!(
+        (h.i2c.controller.as_str(), h.i2c.sda, h.i2c.scl),
+        ("i2c0", 16, 17)
+    );
+    assert_eq!((h.pio_uart.tx, h.pio_uart.rx), (26, 27));
+    for (from, to, what) in [
+        ("tx = 26", "tx = 30", "below gpio_count"),
+        ("tx = 26", "tx = 16", "four different"),
+        (
+            "{ controller = \"i2c0\", sda = 16, scl = 17 }",
+            "{ controller = \"i2c1\", sda = 16, scl = 17 }",
+            "none of the board's i2c",
+        ),
+    ] {
+        let e = requirements::check_board(&board(&lcd.replace(from, to)), rp).unwrap_err();
+        assert!(e.contains(what), "{to}: {e}");
+    }
+    let f4 = Registry::builtin().mcu("stm32f401re").unwrap();
+    let e = requirements::check_board(&board(lcd), f4).unwrap_err();
+    assert!(e.contains("cannot be the 親機"), "{e}");
+}

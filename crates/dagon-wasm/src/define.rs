@@ -192,5 +192,19 @@ fn board_template_in(reg: &dagon_topology::defs::Registry, id: &str) -> JsValue 
         x.into()
     });
     set(&o, "link", link);
+    let hub = b.coordinator.as_ref().map_or(JsValue::NULL, |h| {
+        let i2c = Object::new();
+        set(&i2c, "controller", h.i2c.controller.as_str().into());
+        set(&i2c, "sda", h.i2c.sda.into());
+        set(&i2c, "scl", h.i2c.scl.into());
+        let uart = Object::new();
+        set(&uart, "tx", h.pio_uart.tx.into());
+        set(&uart, "rx", h.pio_uart.rx.into());
+        let x = Object::new();
+        set(&x, "i2c", i2c.into());
+        set(&x, "pioUart", uart.into());
+        x.into()
+    });
+    set(&o, "coordinator", hub);
     o.into()
 }

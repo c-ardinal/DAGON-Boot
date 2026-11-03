@@ -180,6 +180,17 @@ pub const BOARD: &[Requirement<BoardCheck>] = &[
             fail(l.baud == Some(0), || "default_link.baud is 0".into())
         },
     },
+    Requirement {
+        engine: "page link defaults, topology check V-07/V-17",
+        fields: &[
+            "coordinator.i2c.sda",
+            "coordinator.i2c.scl",
+            "coordinator.pio_uart.tx",
+            "coordinator.pio_uart.rx",
+        ],
+        rule: "the MCU has [coordinator]; four distinct pins below its gpio_count (numbered pins only); i2c.controller one of the board's i2c controllers",
+        check: hub_pins,
+    },
 ];
 
 /// Every MCU requirement, the first failure named by its engine.
@@ -396,6 +407,44 @@ fn coordinator(m: &McuDef) -> Result<(), String> {
             m.gpio_count
         )
     })
+}
+
+fn hub_pins(b: &BoardDef, m: &McuDef) -> Result<(), String> {
+    let Some(h) = &b.coordinator else {
+        return Ok(());
+    };
+    fail(m.coordinator.is_none(), || {
+        format!(
+            "coordinator pins on a board whose MCU {} cannot be the 親機",
+            m.id
+        )
+    })?;
+    fail(m.gpio_count == 0, || {
+        format!(
+            "coordinator pins are numbered but {} names its pins by port",
+            m.id
+        )
+    })?;
+    let pins = [h.i2c.sda, h.i2c.scl, h.pio_uart.tx, h.pio_uart.rx];
+    if let Some(p) = pins.iter().find(|&&p| p >= m.gpio_count) {
+        return Err(format!(
+            "coordinator pin GPIO{p} is not below gpio_count {}",
+            m.gpio_count
+        ));
+    }
+    let distinct = pins.iter().collect::<std::collections::BTreeSet<_>>().len() == pins.len();
+    fail(!distinct, || {
+        "coordinator pins must be four different GPIOs".into()
+    })?;
+    fail(
+        !b.i2c_pairs.iter().any(|p| p.controller == h.i2c.controller),
+        || {
+            format!(
+                "coordinator I2C controller {} is none of the board's i2c",
+                h.i2c.controller
+            )
+        },
+    )
 }
 
 fn rom_i2c(m: &McuDef) -> Result<(), String> {

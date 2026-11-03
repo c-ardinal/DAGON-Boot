@@ -19,3 +19,9 @@ header = [
 
 # I2C1 is used on the board itself (GPIO6/7).
 i2c = [{ controller = "i2c0", sda = "GPIO16", scl = "GPIO17" }]
+
+# As the 親機: a new I2C bus is i2c0 on GPIO16/17 and a new PIO UART link
+# GPIO26 (TX) / GPIO27 (RX), the pins the board crate drives (src/lib.rs).
+[coordinator]
+i2c = { controller = "i2c0", sda = 16, scl = 17 }
+pio_uart = { tx = 26, rx = 27 }

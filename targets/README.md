@@ -61,6 +61,7 @@ Writer kinds:
 | `header` | `[{ pin, label }]`; `label` left out until confirmed on the board |
 | `i2c` | `[{ controller, sda, scl }]` pairs usable from the header |
 | `[default_link]` | How a node board is wired unless the topology says otherwise: `kind` (`i2c`, `uart`, `can`, `ethernet`), `iface` (`hw-uart0`, `pio-uart`), `addr`, `baud`, `control` (`full`, `cooperative`), `rom_entry` (`force-download-boot`, `m5pm1`, `stm32-i2c-rom`). Left out for the coordinator |
+| `[coordinator]` | Pins the page wires new links to when this board is the 親機: `i2c = { controller, sda, scl }` (a new I2C bus; `controller` is one of the board's `i2c`) and `pio_uart = { tx, rx }` (a new PIO UART link), numbered GPIOs below the MCU's `gpio_count`. Only on boards whose MCU has `[coordinator]` |
 | `[[part]]` | Parts built from the board package itself (`name`, `sub`, `bin`) |
 
 ## What leaves this machine

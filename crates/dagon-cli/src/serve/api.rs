@@ -526,22 +526,12 @@ fn sign_nodes(
         let parsed = version(&ver)?;
         ready.push((node, ver, parsed, elfs));
     }
+    // All images are signed in memory first; files change only after
+    // every one succeeded, so a bad ELF, a signing error or a cancel
+    // leaves the old images and records as they were.
     let mut out = Vec::new();
+    let mut signed = Vec::new();
     for (node, ver, parsed, elfs) in ready {
-        stop_if(cancel)?;
-        let rec_path = inside(cfg, &sign_record_path(cfg, node))?;
-        for p in [
-            rec_path.clone(),
-            sign_path(cfg, node, 'a'),
-            sign_path(cfg, node, 'b'),
-        ] {
-            let p = inside(cfg, &p)?;
-            match std::fs::remove_file(&p) {
-                Ok(()) => {}
-                Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
-                Err(e) => return Err(format!("cannot remove {}: {e}", p.display())),
-            }
-        }
         let opts = SignOpts {
             version: parsed,
             release_seq: 1,
@@ -549,10 +539,7 @@ fn sign_nodes(
             proto: 1,
             bits: None,
         };
-        let mut record = SignRecord {
-            version: ver.clone(),
-            images: Vec::new(),
-        };
+        let mut images = Vec::new();
         for (slot, elf) in elfs {
             stop_if(cancel)?;
             let binding = if slot == 'a' {
@@ -561,14 +548,6 @@ fn sign_nodes(
                 slot_binding::B
             };
             let img = image_for_node(t, node, image_kind::APP, binding, &elf, Some(&opts), key)?;
-            let path = inside(cfg, &sign_path(cfg, node, slot))?;
-            write_file(&path, &img)?;
-            let file = path
-                .file_name()
-                .unwrap_or_default()
-                .to_string_lossy()
-                .into_owned();
-            record.images.push((file, sha_hex(&img)));
             log(&format!(
                 "{node}: slot {slot} signed, {} bytes, {ver}",
                 img.len()
@@ -576,11 +555,79 @@ fn sign_nodes(
             out.push(
                 json!({"node": node, "slot": slot.to_string(), "bytes": img.len(), "version": ver}),
             );
+            images.push((slot, img));
         }
-        let text = serde_json::to_string_pretty(&record).map_err(|e| e.to_string())?;
-        write_file(&rec_path, text.as_bytes())?;
+        signed.push((node, ver, images));
+    }
+    stop_if(cancel)?;
+    for (node, ver, images) in signed {
+        replace_signed(cfg, node, &ver, &images)?;
     }
     Ok(json!({ "images": out }))
+}
+
+/// Puts a node's newly signed images and their record in place: each is
+/// written beside its final name first (a failure there removes those and
+/// changes nothing), then renamed over the old one, the record last. Old
+/// images of slots no longer signed go before the record.
+fn replace_signed(
+    cfg: &Config,
+    node: &str,
+    ver: &str,
+    images: &[(char, Vec<u8>)],
+) -> Result<(), String> {
+    let rec_path = inside(cfg, &sign_record_path(cfg, node))?;
+    let mut record = SignRecord {
+        version: ver.to_string(),
+        images: Vec::new(),
+    };
+    let mut files = Vec::new();
+    for (slot, img) in images {
+        let path = inside(cfg, &sign_path(cfg, node, *slot))?;
+        let name = path
+            .file_name()
+            .unwrap_or_default()
+            .to_string_lossy()
+            .into_owned();
+        record.images.push((name, sha_hex(img)));
+        files.push((path, img.clone()));
+    }
+    let text = serde_json::to_string_pretty(&record).map_err(|e| e.to_string())?;
+    files.push((rec_path, text.into_bytes()));
+    let staged: Vec<(PathBuf, PathBuf)> =
+        files.iter().map(|(p, _)| (p.clone(), staging(p))).collect();
+    for ((_, bytes), (_, tmp)) in files.iter().zip(&staged) {
+        if let Err(e) = write_file(tmp, bytes) {
+            for (_, t) in &staged {
+                let _ = std::fs::remove_file(t);
+            }
+            return Err(e);
+        }
+    }
+    let (record_file, image_files) = staged.split_last().expect("the record is last");
+    for (path, tmp) in image_files {
+        std::fs::rename(tmp, path)
+            .map_err(|e| format!("cannot replace {}: {e}", path.display()))?;
+    }
+    for slot in ['a', 'b'] {
+        if images.iter().all(|(s, _)| *s != slot) {
+            let old = inside(cfg, &sign_path(cfg, node, slot))?;
+            match std::fs::remove_file(&old) {
+                Ok(()) => {}
+                Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+                Err(e) => return Err(format!("cannot remove {}: {e}", old.display())),
+            }
+        }
+    }
+    let (path, tmp) = record_file;
+    std::fs::rename(tmp, path).map_err(|e| format!("cannot replace {}: {e}", path.display()))
+}
+
+/// Where a file is written before it replaces `path` (same folder).
+fn staging(path: &Path) -> PathBuf {
+    let mut name = path.file_name().unwrap_or_default().to_os_string();
+    name.push(".new");
+    path.with_file_name(name)
 }
 
 /// Builds a release from every signed image, all of `version`.
@@ -1068,6 +1115,77 @@ mod tests {
             2,
             "still the signed build"
         );
+        let _ = std::fs::remove_dir_all(&cfg.base);
+    }
+
+    /// The signed images and record of seg, byte for byte.
+    fn signed_files(cfg: &Config) -> Vec<Vec<u8>> {
+        [
+            sign_path(cfg, "seg", 'a'),
+            sign_path(cfg, "seg", 'b'),
+            sign_record_path(cfg, "seg"),
+        ]
+        .iter()
+        .map(|p| std::fs::read(p).unwrap())
+        .collect()
+    }
+
+    /// seg's slot A build replaced by `body` (recorded, so the build check
+    /// passes).
+    fn rebuild_slot_a(cfg: &Config, body: &[u8]) {
+        let dir = cfg.base.join("out/build/seg");
+        std::fs::write(dir.join("app-a.elf"), body).unwrap();
+        let b = std::fs::read(dir.join("app-b.elf")).unwrap();
+        let rec = nodebuild::BuildRecord {
+            version: Some("1.1.0".into()),
+            slots: vec![('a', sha_hex(body)), ('b', sha_hex(&b))],
+        };
+        std::fs::write(dir.join("build.json"), serde_json::to_string(&rec).unwrap()).unwrap();
+    }
+
+    #[test]
+    fn a_failed_sign_leaves_the_old_images_and_record() {
+        let (cfg, t) = built_area("keep");
+        let key = test_key();
+        let seg = ["seg".to_string()];
+        let go = AtomicBool::new(false);
+        sign_nodes(&cfg, &t, &seg, &key, &mut |_| {}, &go).unwrap();
+        let old = signed_files(&cfg);
+
+        // A build that cannot be signed (an empty slot A).
+        rebuild_slot_a(&cfg, b"");
+        assert!(sign_nodes(&cfg, &t, &seg, &key, &mut |_| {}, &go).is_err());
+        assert_eq!(signed_files(&cfg), old, "malformed build");
+
+        // Cancelled after slot A was signed, before slot B.
+        rebuild_slot_a(&cfg, &[0x42; 1500]);
+        let stop = AtomicBool::new(false);
+        let r = sign_nodes(
+            &cfg,
+            &t,
+            &seg,
+            &key,
+            &mut |_| stop.store(true, Ordering::Relaxed),
+            &stop,
+        );
+        assert_eq!(r.unwrap_err(), "cancelled");
+        assert_eq!(signed_files(&cfg), old, "cancelled");
+
+        // A file that cannot be written.
+        std::fs::create_dir_all(staging(&sign_path(&cfg, "seg", 'b'))).unwrap();
+        assert!(sign_nodes(&cfg, &t, &seg, &key, &mut |_| {}, &go).is_err());
+        assert_eq!(signed_files(&cfg), old, "write failure");
+        assert!(
+            !staging(&sign_path(&cfg, "seg", 'a')).exists(),
+            "no staged file left"
+        );
+        std::fs::remove_dir_all(staging(&sign_path(&cfg, "seg", 'b'))).unwrap();
+
+        // Then it goes through, and the release takes the new images.
+        sign_nodes(&cfg, &t, &seg, &key, &mut |_| {}, &go).unwrap();
+        assert_ne!(signed_files(&cfg), old);
+        let v = dagon_format::Version::new(1, 1, 0);
+        assert_eq!(signed_images(&cfg, v).unwrap().len(), 2);
         let _ = std::fs::remove_dir_all(&cfg.base);
     }
 

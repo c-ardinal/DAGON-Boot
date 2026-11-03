@@ -7,7 +7,7 @@ and not on the board. Kind V: the stock ESP-IDF 2nd stage with app rollback
 | Module | Provides |
 |---|---|
 | `store` | the agent's receiver: OTA slots, detached headers, otadata (below) |
-| `node` | `arm_watchdog`, `start` (the link task), `running_version`, `display_ready`, `now_ms` |
+| `node` | `arm_watchdog`, `start` (the link task), `running_version`, `now_ms` |
 | `liveness`, `trial` | watchdog policy: no feed before CONFIRM, then deadline-based |
 | `rom`, `serve` | ENTER_ROM and what follows a reply |
 | `link` | link UART settings (`uart_config`, 115200 8N1), a polling `UartLink` |
@@ -26,7 +26,7 @@ UART already set up on its pins with `link::uart_config()`, USB Serial/JTAG,
 the flash, the RTC timer, and a `&'static mut dyn BoardDef`:
 
 - `bring_up()`: runs once in the link task before it serves (IO expander pin
-  routing, releasing a display reset; the result feeds `display_ready`).
+  routing for the link). Displays and other peripherals are the app's.
 - `pmic_download_supported()` / `pmic_download()`: ENTER_ROM method 2
   through the board's power manager, if it has one.
 
@@ -49,8 +49,8 @@ and the node tag from the generated `wiring.rs`.
   bare `feed()`. A task that waits without a deadline is not blamed, a task
   stuck past its budget stops the watchdog feeding (owner-approved design).
 - There is no `UserIo` bundle: the app keeps the peripherals returned by
-  `esp_hal::init`, and the board package's macros (`dagon_pins!`, and e.g.
-  `display_pins!`) move out only what DAGON or a board extra takes.
+  `esp_hal::init`, and the board package's macro (`dagon_pins!`) moves out
+  only what DAGON takes.
 - The ESP-IDF 2nd stage ships prebuilt and unmodified in `vendor/`
   (`vendor/bootloader.bin`; provenance and rebuild steps in
   `vendor/PROVENANCE.md`); the factory firmware is a binary of the board

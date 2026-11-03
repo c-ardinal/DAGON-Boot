@@ -138,17 +138,10 @@ pub fn running_version() -> Option<Version> {
         .then(|| Version::from_raw(RUNNING_VERSION.load(Ordering::Acquire)))
 }
 
-/// The board reported its display released (`BoardDef::bring_up`); the app's display
-/// task may start talking to the panel (after its own settling time).
-pub fn display_ready() -> bool {
-    DISPLAY_READY.load(Ordering::Acquire)
-}
-
 static RUNNING_VERSION: AtomicU32 = AtomicU32::new(0);
 static VERSION_KNOWN: AtomicBool = AtomicBool::new(false);
-static DISPLAY_READY: AtomicBool = AtomicBool::new(false);
 
-fn publish_startup(store: &mut Store, display_released: bool) {
+fn publish_startup(store: &mut Store) {
     let st = store.status();
     let has_header = st
         .slots
@@ -159,7 +152,6 @@ fn publish_startup(store: &mut Store, display_released: bool) {
         RUNNING_VERSION.store(v.raw(), Ordering::Release);
         VERSION_KNOWN.store(true, Ordering::Release);
     }
-    DISPLAY_READY.store(display_released, Ordering::Release);
 }
 
 /// The board definition of a board without extras (`board::PlainBoard`), for
@@ -287,7 +279,7 @@ impl Link {
         let rwdt = RtcWatchdog::new(rtc.rwdt);
 
         // Board bring-up, once, before serving anything.
-        let bring_up = p.board.bring_up();
+        p.board.bring_up();
         let board = RomBoard {
             swd: rtc.swd,
             board: p.board,
@@ -304,7 +296,7 @@ impl Link {
         } else {
             store.wdt.end_trial();
         }
-        publish_startup(&mut store, bring_up.display_ready);
+        publish_startup(&mut store);
         let hooks = NodeHooks {
             self_check: cfg.self_check,
         };

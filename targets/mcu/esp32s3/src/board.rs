@@ -1,27 +1,17 @@
 //! What a board crate supplies to the MCU layer.
 //!
 //! The MCU layer knows the ESP32-S3; a board crate knows the board: which
-//! pins carry the link UART, IO expanders, power managers, displays. It
+//! pins carry the link UART, IO expanders, power managers. It
 //! hands the MCU layer a configured link UART (see `link::uart_config`) and
 //! an implementation of [`BoardDef`] for the rest. A new ESP32-S3 board needs a
 //! board crate (or just these two things in the app), nothing else.
-
-/// Result of [`BoardDef::bring_up`].
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub struct BringUp {
-    /// The display's reset has been released; the app may start talking to
-    /// it (published as `node::display_ready`).
-    pub display_ready: bool,
-}
 
 /// Board extras the link task drives. Every method has a default, so a
 /// plain board implements nothing: `impl BoardDef for MyBoard {}`.
 pub trait BoardDef: Send {
     /// Runs once in the link task, before it serves anything: pin routing
-    /// through an IO expander, releasing resets. Keep it short (milliseconds).
-    fn bring_up(&mut self) -> BringUp {
-        BringUp::default()
-    }
+    /// through an IO expander for the link. Keep it short (milliseconds).
+    fn bring_up(&mut self) {}
 
     /// ENTER_ROM method 2 is available: the board's power manager can
     /// restart the chip in download mode. Default: no (method 2 answers

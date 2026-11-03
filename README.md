@@ -322,6 +322,39 @@ Four end-to-end scenarios in the simulator: an update with a power cut
 during the transfer, an image that never confirms, tampered releases, and
 an erased F401 brought back through its ROM boot loader.
 
+### Swapping a link (つながりを差し替える)
+
+Every hop in a 構成 has a kind: `usb-cdc`, `uart`, `i2c`, `ble`,
+`wifi-tcp`, `ethernet` or `can`. A 親機 can also declare its uplink, the
+hop towards whatever drives it, and what is at the other end:
+
+```yaml
+  - id: hub
+    ...
+    uplink: { kind: uart, host: browser }   # pc-cli | browser | embedded
+```
+
+Without `uplink` it is `usb-cdc` to dagon on a PC, as before; the uplink is
+not part of the compiled topology, so existing 構成 and their releases stay
+the same. In DAGON Console's 定義 the inspector offers each kind for a link
+and, on the 親機, for its uplink. Kinds the firmware of either end does not
+implement yet are marked ◇ まだ使えない; the 構成 may still name them
+(problem まだ使えないつながり), and `dagon gen` refuses them with the hop's
+name (`uplink of hub over ble: not available yet on rp2040`). Today the
+firmware offers the hub's USB CDC uplink, I2C and UART to its 子機, and
+the ESP32-S3's UART or USB CDC towards its 親機.
+
+The demo shows the swap without new radios:
+
+```sh
+dagon demo --uplink uart          # or usb-cdc (default), wifi-tcp
+```
+
+The simulated uplink follows the demo 構成: change the 親機's uplink in
+定義 (USB, UART, Wi-Fi) and the same update runs over the other medium, with
+its own frame size, speed and behaviour while the 親機 reboots (USB CDC
+and Wi-Fi reconnect; a UART adapter stays).
+
 ## What works today
 
 What the code and its tests in this repository show:

@@ -426,6 +426,16 @@ pub enum Origin {
     Project,
 }
 
+impl Origin {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Builtin => "builtin",
+            Self::Tree => "source-tree",
+            Self::Project => "project",
+        }
+    }
+}
+
 /// Every MCU and board known: builtin, a DAGON source tree, project
 /// definitions. Order is definition order; the first board of an MCU is
 /// its default.
@@ -437,8 +447,9 @@ pub struct Registry {
     /// JSON form the browser loads ([`Registry::to_json`]).
     mcu_sources: Vec<DefSource>,
     board_sources: Vec<DefSource>,
-    /// Where each MCU definition came from, in `mcus` order.
+    /// Where each definition came from, in `mcus` / `boards` order.
     mcu_origins: Vec<Origin>,
+    board_origins: Vec<Origin>,
 }
 
 impl Registry {
@@ -454,14 +465,11 @@ impl Registry {
         load::load(sources)
     }
 
-    /// The definitions as JSON (their TOML text and the text files they
-    /// reference), for a loader without a filesystem.
+    /// The definitions as JSON for a loader without a filesystem (the
+    /// browser): their TOML and the text files they reference, with no
+    /// local path, comment or doctor command in it.
     pub fn to_json(&self) -> String {
-        let all = load::JsonForm {
-            mcus: self.mcu_sources.clone(),
-            boards: self.board_sources.clone(),
-        };
-        serde_json::to_string(&all).expect("definitions serialise")
+        load::public_json(self)
     }
 
     /// A registry from [`Registry::to_json`]'s form, validated as on load
@@ -486,6 +494,12 @@ impl Registry {
     pub fn mcu_origin(&self, id: &str) -> Option<Origin> {
         let i = self.mcus.iter().position(|m| m.id == id)?;
         self.mcu_origins.get(i).copied()
+    }
+
+    /// Where board `id`'s definition was read from.
+    pub fn board_origin(&self, id: &str) -> Option<Origin> {
+        let i = self.boards.iter().position(|b| b.id == id)?;
+        self.board_origins.get(i).copied()
     }
 
     pub fn board(&self, id: &str) -> Option<&BoardDef> {

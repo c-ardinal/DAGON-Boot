@@ -311,18 +311,29 @@ mod tests {
         (ok, lines, asked)
     }
 
-    /// The builtin definitions as the project's (JSON is never trusted),
-    /// plus `rp2040b`: an RP2040 copy under another id.
-    fn project_registry() -> Registry {
-        let mut v: serde_json::Value =
-            serde_json::from_str(&Registry::builtin().to_json()).unwrap();
+    /// The builtin definitions plus a project's `rp2040b`: an RP2040 copy
+    /// under another id, registered from its dagon.toml.
+    fn project_registry(name: &str) -> Registry {
+        let dir = std::env::temp_dir().join(format!("dagon-doctor-{name}-{}", std::process::id()));
+        for sub in ["m/stage0", "m/bootcore"] {
+            std::fs::create_dir_all(dir.join(sub)).unwrap();
+        }
         let toml = include_str!("../../../targets/mcu/rp2040/dagon-mcu.toml")
             .replace("id = \"rp2040\"", "id = \"rp2040b\"")
             .replace("wire_id = 0x0001", "wire_id = 0x00F1")
             .replace("name = \"rp2040-4m\"", "name = \"rp2040b-4m\"");
-        let mcus = v["mcus"].as_array_mut().unwrap();
-        mcus.push(serde_json::json!({ "label": "project", "toml": toml }));
-        Registry::from_json(&v.to_string()).unwrap()
+        std::fs::write(dir.join("m/dagon-mcu.toml"), toml).unwrap();
+        std::fs::write(
+            dir.join("dagon.toml"),
+            "mcu_files = [\"m/dagon-mcu.toml\"]
+",
+        )
+        .unwrap();
+        let reg = Registry::load(&[dagon_topology::defs::Source::Project(
+            &dir.join("dagon.toml"),
+        )]);
+        std::fs::remove_dir_all(&dir).unwrap();
+        reg.unwrap()
     }
 
     #[test]
@@ -344,25 +355,25 @@ mod tests {
 
     #[test]
     fn project_commands_run_only_after_the_user_agrees() {
-        let reg = project_registry();
+        let reg = project_registry("consent");
         let fake = Fake::new(&[RUST[0], RUST[1]]);
         let adds = [(
             "rustup target add thumbv6m-none-eabi",
             "rustup target list --installed",
             "thumbv6m-none-eabi\n",
         )];
-        let (ok, lines, asked) = run_in(&reg, &fake, &["rp2040"], true, &adds, false);
+        let (ok, lines, asked) = run_in(&reg, &fake, &["rp2040b"], true, &adds, false);
         assert!(!ok, "a check not run is not a pass: {lines:?}");
         assert_eq!(asked.len(), 1, "{asked:?}");
         assert!(asked[0].contains("rustup target list --installed"));
         let skip = lines.iter().find(|l| l.starts_with("SKIP")).unwrap();
         assert!(
-            skip.contains("target thumbv6m-none-eabi (rp2040)"),
+            skip.contains("target thumbv6m-none-eabi (rp2040b)"),
             "{skip}"
         );
         assert!(fake.installed.borrow().is_empty());
 
-        let (ok, lines, asked) = run_in(&reg, &fake, &["rp2040"], true, &adds, true);
+        let (ok, lines, asked) = run_in(&reg, &fake, &["rp2040b"], true, &adds, true);
         assert!(ok, "{lines:?}");
         assert_eq!(asked.len(), 2, "the probe, then the fix: {asked:?}");
         assert!(asked[1].contains("rustup target add thumbv6m-none-eabi"));
@@ -380,7 +391,7 @@ mod tests {
             ("rustup target list --installed", "thumbv6m-none-eabi\n"),
         ]);
         let (ok, lines, _) = run_in(
-            &project_registry(),
+            &project_registry("merge"),
             &fake,
             &["rp2040", "rp2040b"],
             false,

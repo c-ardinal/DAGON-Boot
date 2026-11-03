@@ -154,6 +154,19 @@ fn definitions_are_served_behind_the_same_guards_with_the_projects_boards() {
     let reg = dagon_topology::defs::Registry::from_json(&body).unwrap();
     assert_eq!(reg.board("desk-pico").unwrap().product, "Desk Pico");
     assert!(reg.mcu("esp32s3").is_some());
+    // Nothing local leaves: no project or DAGON source path, no command.
+    let plain = body.replace("\\\\", "\\");
+    let src = std::path::Path::new(crate::dagonsrc::BUILT_FROM);
+    for local in [
+        a.dir.display().to_string(),
+        src.display().to_string(),
+        src.canonicalize().unwrap().display().to_string(),
+        "dagon.toml".into(),
+        "targets/".into(),
+        "rustup".into(),
+    ] {
+        assert!(!plain.contains(&local), "{local} in {body}");
+    }
 
     // A broken project definition is a 500 without its path.
     std::fs::write(

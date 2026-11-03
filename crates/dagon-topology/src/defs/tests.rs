@@ -644,16 +644,26 @@ fn addresses_near_u32_max_are_errors_not_overflows() {
 
 #[test]
 fn the_json_form_round_trips_and_is_validated_again() {
+    // Doctor commands stay on this machine; everything else comes back.
+    let without_doctor = |r: &Registry| -> Vec<McuDef> {
+        r.mcus()
+            .iter()
+            .map(|m| McuDef {
+                doctor: Vec::new(),
+                ..m.clone()
+            })
+            .collect()
+    };
     let back = Registry::from_json(&reg().to_json()).unwrap();
-    assert_eq!(back.mcus(), reg().mcus());
+    assert_eq!(back.mcus(), without_doctor(reg()));
     assert_eq!(back.boards(), reg().boards());
     // A project registry (MCU file + inline board) survives too.
     let project = fake_registry("json", 400_000);
     let back = Registry::from_json(&project.to_json()).unwrap();
-    assert_eq!(back.mcus(), project.mcus());
+    assert_eq!(back.mcus(), without_doctor(&project));
     assert_eq!(back.boards(), project.boards());
     // Every definition is checked again: a bad sector in transit fails.
-    let bad = reg().to_json().replace("sector = 0x1000", "sector = 0x80");
+    let bad = reg().to_json().replace("sector = 4096", "sector = 128");
     let e = Registry::from_json(&bad).unwrap_err();
     assert!(e.msg.contains("UF2 builder"), "{e}");
     assert!(Registry::from_json("{\"mcus\": []}").is_err());
@@ -671,4 +681,72 @@ fn each_mcu_records_where_its_definition_came_from() {
     // Definitions received as JSON are never trusted to run commands.
     let back = Registry::from_json(&reg().to_json()).unwrap();
     assert_eq!(back.mcu_origin("rp2040"), Some(Origin::Project));
+    assert_eq!(project.board_origin("fake-board"), Some(Origin::Project));
+    assert_eq!(tree.board_origin("m5stopwatch"), Some(Origin::Tree));
+    assert_eq!(reg().board_origin("nucleo-f401re"), Some(Origin::Builtin));
+}
+
+#[test]
+fn the_json_form_carries_no_path_comment_or_command() {
+    let dir = scratch("public");
+    let secret = "sk-ant-FAKE-TOKEN-0123";
+    let mcu = FAKE_MCU.replace(
+        "id = \"fake-m0\"",
+        &format!(
+            "# kept at {} with {secret}\nid = \"fake-m0\"",
+            dir.display()
+        ),
+    );
+    let doctor = format!(
+        "\n[[doctor]]\nwhat = \"tool\"\nprobe = [\"{}\", \"{secret}\"]\nexpect = \"runs\"\nhint = \"{secret}\"\n",
+        dir.join("tool.exe").display().to_string().replace('\\', "/")
+    );
+    write(&dir.join("m/dagon-mcu.toml"), &format!("{mcu}{doctor}"));
+    std::fs::create_dir_all(dir.join("m/bootcore")).unwrap();
+    let board = FAKE_BOARD.replace("product", "[board.fake-board]\nproduct");
+    write(
+        &dir.join("dagon.toml"),
+        &format!("mcu_files = [\"m/dagon-mcu.toml\"]\n{board}"),
+    );
+    let project = Registry::load(&[
+        Source::Tree(&source_root()),
+        Source::Project(&dir.join("dagon.toml")),
+    ])
+    .unwrap();
+    assert!(!project.mcu("fake-m0").unwrap().doctor.is_empty());
+    let home = std::env::var("USERPROFILE")
+        .or_else(|_| std::env::var("HOME"))
+        .unwrap_or_default();
+    for (what, json) in [("builtin", reg().to_json()), ("loaded", project.to_json())] {
+        let plain = json.replace("\\\\", "\\");
+        for local in [
+            dir.display().to_string(),
+            source_root().canonicalize().unwrap().display().to_string(),
+            source_root().display().to_string(),
+            home.clone(),
+            "targets/mcu".into(),
+            "dagon.toml".into(),
+        ] {
+            assert!(
+                local.is_empty() || !plain.contains(&local),
+                "{what} JSON has {local}"
+            );
+        }
+        for word in [secret, "doctor", "rustup", "tool.exe", "# "] {
+            assert!(!json.contains(word), "{what} JSON has {word}");
+        }
+    }
+    // Labels say where a definition came from without saying where it is.
+    let form: serde_json::Value = serde_json::from_str(&project.to_json()).unwrap();
+    let labels: Vec<&str> = form["mcus"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .chain(form["boards"].as_array().unwrap())
+        .map(|d| d["label"].as_str().unwrap())
+        .collect();
+    assert!(labels.contains(&"source-tree MCU rp2040"), "{labels:?}");
+    assert!(labels.contains(&"project MCU fake-m0"), "{labels:?}");
+    assert!(labels.contains(&"project board fake-board"), "{labels:?}");
+    std::fs::remove_dir_all(dir).unwrap();
 }

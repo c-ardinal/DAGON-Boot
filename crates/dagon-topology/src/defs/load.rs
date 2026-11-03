@@ -206,6 +206,7 @@ fn empty() -> Registry {
         mcu_sources: Vec::new(),
         board_sources: Vec::new(),
         mcu_origins: Vec::new(),
+        board_origins: Vec::new(),
     }
 }
 
@@ -226,8 +227,9 @@ impl Registry {
         Ok(())
     }
 
-    fn push_board(&mut self, text: &str, pkg: &Pkg<'_>) -> Result<(), DefError> {
+    fn push_board(&mut self, text: &str, pkg: &Pkg<'_>, origin: Origin) -> Result<(), DefError> {
         self.boards.push(parse_board(text, pkg)?);
+        self.board_origins.push(origin);
         self.board_sources.push(DefSource {
             label: pkg.label(),
             toml: text.to_string(),
@@ -242,6 +244,50 @@ fn file_refs(files: &[(String, String)]) -> Vec<(&str, &str)> {
     files
         .iter()
         .map(|(n, t)| (n.as_str(), t.as_str()))
+        .collect()
+}
+
+/// The JSON form with nothing local in it: each definition is labelled by
+/// its origin, kind and id (no path), its TOML is re-written without
+/// comments and without `[[doctor]]` (commands stay on this machine), and
+/// referenced text files lose their comment lines.
+pub(super) fn public_json(reg: &Registry) -> String {
+    let public = |kind: &str, id: &str, origin: Origin, s: &DefSource| DefSource {
+        label: format!("{} {kind} {id}", origin.as_str()),
+        toml: public_toml(&s.toml),
+        files: s
+            .files
+            .iter()
+            .map(|(n, t)| (n.clone(), uncommented(t)))
+            .collect(),
+    };
+    let all = JsonForm {
+        mcus: (reg.mcus.iter().zip(&reg.mcu_origins).zip(&reg.mcu_sources))
+            .map(|((m, o), s)| public("MCU", &m.id, *o, s))
+            .collect(),
+        boards: (reg
+            .boards
+            .iter()
+            .zip(&reg.board_origins)
+            .zip(&reg.board_sources))
+        .map(|((b, o), s)| public("board", &b.id, *o, s))
+        .collect(),
+    };
+    serde_json::to_string(&all).expect("definitions serialise")
+}
+
+/// A loaded definition's TOML, re-written: values only, no `doctor`.
+fn public_toml(text: &str) -> String {
+    let mut t: toml::Table = toml::from_str(text).expect("a loaded definition parses");
+    t.remove("doctor");
+    toml::to_string(&t).expect("a table serialises")
+}
+
+/// `text` without its `#` comment lines.
+fn uncommented(text: &str) -> String {
+    text.lines()
+        .filter(|l| !l.trim_start().starts_with('#'))
+        .map(|l| format!("{l}\n"))
         .collect()
 }
 
@@ -268,6 +314,7 @@ pub(super) fn from_json(json: &str) -> Result<Registry, DefError> {
                 label: &s.label,
                 files: &[],
             },
+            Origin::Project,
         )?;
     }
     validate(&reg)?;
@@ -280,7 +327,7 @@ pub(super) fn builtin() -> Result<Registry, DefError> {
         reg.push_mcu(text, &Pkg::Embedded { label, files }, Origin::Builtin)?;
     }
     for (label, text) in BUILTIN_BOARDS {
-        reg.push_board(text, &Pkg::Embedded { label, files: &[] })?;
+        reg.push_board(text, &Pkg::Embedded { label, files: &[] }, Origin::Builtin)?;
     }
     validate(&reg)?;
     Ok(reg)
@@ -333,7 +380,7 @@ fn tree(root: &Path) -> Result<Registry, DefError> {
     }
     for dir in packages(&targets.join("boards"), BOARD_FILE)? {
         let text = read(&dir.join(BOARD_FILE))?;
-        reg.push_board(&text, &Pkg::Dir(dir))?;
+        reg.push_board(&text, &Pkg::Dir(dir), Origin::Tree)?;
     }
     Ok(reg)
 }
@@ -393,6 +440,7 @@ fn project(reg: &mut Registry, dagon_toml: &Path) -> Result<(), DefError> {
                 label: &label,
                 files: &[],
             },
+            Origin::Project,
         )?;
     }
     Ok(())

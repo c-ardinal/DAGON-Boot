@@ -21,13 +21,25 @@ it starts the confirmed slot (8 s watchdog). Both run at 84 MHz from the HSI.
 
 This app is the DAGON node: an I2C target at 0x42 on I2C3 (SCL PA8 = D7,
 SDA PB4 = D5) serving dagon-agent through the mailbox, and its own version on
-the stacked X-NUCLEO-53L0A1's 4-digit display: the shield has no decimal points, so the
-version shows as its digits side by side (` 110` for 1.1.0, ` 120` for 1.2.0; builds with the public test key show `tESt`
-for 1.5 s first). The display runs on I2C1 (PB8/PB9) from the app's
-executor and keeps the shield's VL53L0X sensors in XSHUT. It feeds the watchdog only while confirmed, so
+the stacked X-NUCLEO-53L0A1's 4-digit display. The display runs on I2C1
+(PB8/PB9) from the app's executor and keeps the shield's VL53L0X sensors in
+XSHUT. It feeds the watchdog only while confirmed, so
 an image that never gets CONFIRM resets when the 4 s trial watchdog runs out
 and is rolled back after three attempts. RTT shows the boot state and every request that takes
 20 ms or more (`cmd 0x20: N ms` for SET_PENDING).
+
+Version display (this app's own format, `seg::version` of the board
+package):
+
+- `major.minor.patch` right-aligned on the 4 digits, each `.` set as the
+  point of the digit before it. The shield's decimal-point wiring is not
+  confirmed yet; the driver currently does not light it, so for now the
+  digits show side by side: ` 110` for 1.1.0, ` 120` for 1.2.0, `1107`
+  for 1.10.7.
+- `major.minor.` when that does not fit (10.10.x: `1010` for now), else
+  `----`.
+- Builds with the public test key show `tESt` for 1.5 s first; an
+  unreadable state log shows `----`.
 
 Features: `slot-b` links for APP-B; `confirm` confirms its own trial at
 start (bench use without a hub); `conform` is the conformance build (below). The display wiring is in the board

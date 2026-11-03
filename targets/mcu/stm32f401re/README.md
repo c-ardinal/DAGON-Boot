@@ -89,7 +89,7 @@ that keeps `embassy_stm32::Peripherals` itself passes `dagon_pins!(p)`
 instead of splitting. Build with `DAGON_PUBKEY` set (below);
 `--features slot-b` links the same app for slot B. The demo node
 (`../../../samples/f401-app`) uses the same pieces (`open_store`,
-`install_watchdog`, `exec`, `serve`) with its own display task.
+`install_watchdog`, `exec`, `serve`).
 
 ## Features
 

@@ -5,11 +5,11 @@
 //! taken (still shown before the confirmation); several need the user's
 //! choice or a selector; none stops the write.
 
-use std::collections::BTreeMap;
+use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Condvar, Mutex, OnceLock};
+use std::sync::{Mutex, MutexGuard};
 use std::time::{Duration, Instant};
 
 use dagon_topology::defs::{McuDef, UsbHint, Writer};
@@ -300,92 +300,70 @@ fn read_info(file: &Path) -> Option<String> {
 
 type Reader = fn(&Path) -> Option<String>;
 
-/// One read of a volume's info file, shared by every scan in the process
-/// (CLI or concurrent serve jobs).
-enum VolumeRead {
-    Reading,
-    /// When the read returned, and what it read.
-    Done(Instant, Option<String>),
-}
+/// Held by the one UF2 scan running in this process (CLI or serve jobs).
+static SCAN: Mutex<()> = Mutex::new(());
+/// Volumes whose read thread, from an earlier scan that stopped waiting
+/// for it, is still running: a silent volume holds one thread.
+static READING: Mutex<BTreeSet<PathBuf>> = Mutex::new(BTreeSet::new());
+const LOCK_POLL: Duration = Duration::from_millis(10);
 
-/// The process-wide volume reader: info file path -> its latest read.
-struct Volumes {
-    reads: Mutex<BTreeMap<PathBuf, VolumeRead>>,
-    returned: Condvar,
-}
-
-fn volumes() -> &'static Volumes {
-    static VOLUMES: OnceLock<Volumes> = OnceLock::new();
-    VOLUMES.get_or_init(|| Volumes {
-        reads: Mutex::new(BTreeMap::new()),
-        returned: Condvar::new(),
-    })
-}
-
-/// The result of a read of `file` that returned at or after `since`.
-fn fresh(
-    reads: &BTreeMap<PathBuf, VolumeRead>,
-    file: &Path,
-    since: Instant,
-) -> Option<Option<String>> {
-    match reads.get(file) {
-        Some(VolumeRead::Done(at, info)) if *at >= since => Some(info.clone()),
-        _ => None,
-    }
+fn reading() -> MutexGuard<'static, BTreeSet<PathBuf>> {
+    READING.lock().unwrap_or_else(|e| e.into_inner())
 }
 
 /// The UF2 boot drives among `roots`: `info_file` there starts with the
 /// `info_header` line. A `Board-ID: <board_id>` line (exactly) labels the
-/// drive as the definition's MCU. A volume is read on its own thread unless
-/// a read of it is already running (this scan then waits for that read's
-/// result); those with no result within `wait` are returned second, to be
-/// asked again on the next scan. A volume that never answers holds one
-/// thread, however many scans ask.
+/// drive as the definition's MCU. Scans run one at a time; within one,
+/// each volume is read on its own thread. Volumes with no answer within
+/// `wait` (from the call, the wait for another scan included) are returned
+/// second, to be asked again by the next scan: all of them when another
+/// scan held the lock that long, and a volume whose earlier read is still
+/// running.
 pub(crate) fn uf2_drives(
     roots: &[PathBuf],
     want: &Uf2Want<'_>,
     wait: Duration,
     read: Reader,
 ) -> (Vec<Candidate>, Vec<PathBuf>) {
-    let start = Instant::now();
-    let until = start + wait;
-    let v = volumes();
-    let files: Vec<PathBuf> = roots.iter().map(|r| r.join(want.info_file)).collect();
-    let mut reads = v.reads.lock().unwrap_or_else(|e| e.into_inner());
-    for f in &files {
-        let running = matches!(reads.get(f), Some(VolumeRead::Reading));
-        if running || fresh(&reads, f, start).is_some() {
+    let until = Instant::now() + wait;
+    let _scan = loop {
+        match SCAN.try_lock() {
+            Ok(g) => break g,
+            Err(std::sync::TryLockError::Poisoned(e)) => break e.into_inner(),
+            Err(std::sync::TryLockError::WouldBlock) if Instant::now() < until => {
+                std::thread::sleep(LOCK_POLL)
+            }
+            Err(std::sync::TryLockError::WouldBlock) => return (Vec::new(), roots.to_vec()),
+        }
+    };
+    let (tx, rx) = std::sync::mpsc::channel();
+    for (i, r) in roots.iter().enumerate() {
+        if !reading().insert(r.clone()) {
             continue;
         }
-        reads.insert(f.clone(), VolumeRead::Reading);
-        let file = f.clone();
+        let (tx, root, file) = (tx.clone(), r.clone(), r.join(want.info_file));
         std::thread::spawn(move || {
             let info = read(&file);
-            let v = volumes();
-            let mut reads = v.reads.lock().unwrap_or_else(|e| e.into_inner());
-            reads.insert(file, VolumeRead::Done(Instant::now(), info));
-            v.returned.notify_all();
+            reading().remove(&root);
+            let _ = tx.send((i, info));
         });
     }
-    loop {
-        let now = Instant::now();
-        if now >= until || files.iter().all(|f| fresh(&reads, f, start).is_some()) {
-            break;
-        }
-        reads = v
-            .returned
-            .wait_timeout(reads, until - now)
-            .unwrap_or_else(|e| e.into_inner())
-            .0;
+    drop(tx);
+    let mut infos: Vec<Option<Option<String>>> = vec![None; roots.len()];
+    while let Ok((i, info)) = rx.recv_timeout(until.saturating_duration_since(Instant::now())) {
+        infos[i] = Some(info);
     }
-    let mut found = Vec::new();
-    let mut late = Vec::new();
-    for (r, f) in roots.iter().zip(&files) {
-        match fresh(&reads, f, start) {
-            Some(info) => found.extend(info.and_then(|i| uf2_candidate(r, &i, want))),
-            None => late.push(r.clone()),
-        }
-    }
+    let late = roots
+        .iter()
+        .zip(&infos)
+        .filter(|(_, i)| i.is_none())
+        .map(|(r, _)| r.clone())
+        .collect();
+    let found = roots
+        .iter()
+        .zip(infos)
+        .filter_map(|(r, info)| uf2_candidate(r, info.flatten()?.as_str(), want))
+        .collect();
     (found, late)
 }
 
@@ -597,6 +575,13 @@ mod tests {
         assert_eq!(other.label, "USB c0de:cafe X");
     }
 
+    /// The timing tests run one after another: the scan lock is
+    /// process-wide, so a scan from a parallel test would make theirs busy.
+    fn timing_tests_alone() -> MutexGuard<'static, ()> {
+        static ALONE: Mutex<()> = Mutex::new(());
+        ALONE.lock().unwrap_or_else(|e| e.into_inner())
+    }
+
     fn drives(roots: &[PathBuf]) -> Vec<Candidate> {
         let (found, late) = uf2_drives(roots, &RP, Duration::from_secs(5), read_info);
         assert!(late.is_empty());
@@ -738,6 +723,7 @@ mod tests {
 
     #[test]
     fn a_volume_that_does_not_answer_is_skipped_not_waited_for() {
+        let _alone = timing_tests_alone();
         fn read(file: &Path) -> Option<String> {
             if file.starts_with("/hung") {
                 std::thread::sleep(Duration::from_secs(5));
@@ -753,75 +739,71 @@ mod tests {
         assert_eq!(found[0].id, PathBuf::from("/rp").display().to_string());
     }
 
-    #[test]
-    fn a_volume_still_being_read_gets_no_second_thread() {
-        static READS: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
-        fn read(_: &Path) -> Option<String> {
-            READS.fetch_add(1, Ordering::SeqCst);
-            std::thread::sleep(Duration::from_millis(800));
-            None
-        }
-        let roots = [PathBuf::from("/still-pending")];
-        for _ in 0..3 {
-            let (found, late) = uf2_drives(&roots, &RP, Duration::from_millis(50), read);
-            assert!(found.is_empty());
-            assert_eq!(late, roots);
-        }
-        assert_eq!(
-            READS.load(Ordering::SeqCst),
-            1,
-            "one read in flight, not three"
-        );
-        std::thread::sleep(Duration::from_millis(1200));
-        let _ = uf2_drives(&roots, &RP, Duration::from_millis(50), read);
-        assert_eq!(READS.load(Ordering::SeqCst), 2, "read again once returned");
+    /// UF2 info a fake volume answers after `ms`.
+    fn slow_rp(ms: u64) -> Option<String> {
+        std::thread::sleep(Duration::from_millis(ms));
+        Some("UF2 Bootloader v3.0\nBoard-ID: RPI-RP2\n".into())
     }
 
     #[test]
-    fn concurrent_scans_both_get_a_volume_one_of_them_is_reading() {
+    fn a_silent_volume_holds_one_thread_and_is_asked_again_later() {
+        let _alone = timing_tests_alone();
         static READS: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
         fn read(_: &Path) -> Option<String> {
             READS.fetch_add(1, Ordering::SeqCst);
-            std::thread::sleep(Duration::from_millis(400));
-            Some("UF2 Bootloader v3.0\nBoard-ID: RPI-RP2\n".into())
+            slow_rp(800)
         }
-        let roots = [PathBuf::from("/slow-rp")];
-        let a = {
-            let roots = roots.clone();
-            std::thread::spawn(move || uf2_drives(&roots, &RP, Duration::from_secs(3), read))
-        };
-        std::thread::sleep(Duration::from_millis(100));
-        let b = uf2_drives(&roots, &RP, Duration::from_secs(3), read);
-        let a = a.join().unwrap();
-        for (found, late) in [a, b] {
+        let roots = [PathBuf::from("/silent-rp")];
+        for _ in 0..3 {
+            let (found, late) = uf2_drives(&roots, &RP, Duration::from_millis(50), read);
+            assert!(found.is_empty());
+            assert_eq!(late, roots, "not answered yet, never dropped");
+        }
+        assert_eq!(READS.load(Ordering::SeqCst), 1, "one thread, not three");
+        std::thread::sleep(Duration::from_millis(1000));
+        // Once that read is over, the volume is read again and found.
+        let (found, late) = uf2_drives(&roots, &RP, Duration::from_secs(3), read);
+        assert!(late.is_empty());
+        assert_eq!(found.len(), 1);
+        assert_eq!(READS.load(Ordering::SeqCst), 2);
+    }
+
+    #[test]
+    fn three_concurrent_scans_all_get_a_slow_volume() {
+        let _alone = timing_tests_alone();
+        fn read(_: &Path) -> Option<String> {
+            slow_rp(300)
+        }
+        let roots = vec![PathBuf::from("/slow-rp-3")];
+        let scans: Vec<_> = (0..3)
+            .map(|_| {
+                let roots = roots.clone();
+                std::thread::spawn(move || uf2_drives(&roots, &RP, Duration::from_secs(5), read))
+            })
+            .collect();
+        for s in scans {
+            let (found, late) = s.join().unwrap();
             assert!(late.is_empty());
             assert_eq!(found.len(), 1, "{found:?}");
             assert!(found[0].label.contains("RP2040"));
         }
-        assert_eq!(
-            READS.load(Ordering::SeqCst),
-            1,
-            "the second scan waited on the first read"
-        );
     }
 
     #[test]
-    fn a_scan_that_gives_up_on_a_read_another_owns_gets_it_next_time() {
+    fn a_scan_kept_waiting_by_another_reports_busy_and_finds_it_next_time() {
+        let _alone = timing_tests_alone();
         fn read(_: &Path) -> Option<String> {
-            std::thread::sleep(Duration::from_millis(500));
-            Some("UF2 Bootloader v3.0\nBoard-ID: RPI-RP2\n".into())
+            slow_rp(500)
         }
-        let roots = [PathBuf::from("/slow-rp-2")];
+        let roots = vec![PathBuf::from("/slow-rp-4")];
         let owner = {
             let roots = roots.clone();
             std::thread::spawn(move || uf2_drives(&roots, &RP, Duration::from_secs(3), read))
         };
         std::thread::sleep(Duration::from_millis(50));
-        // Gives up before the read returns: late, not lost.
         let (found, late) = uf2_drives(&roots, &RP, Duration::from_millis(100), read);
         assert!(found.is_empty());
-        assert_eq!(late, roots);
-        // Its next scan, while the same read still runs, gets the result.
+        assert_eq!(late, roots, "busy: every volume late, none excluded");
         let (found, _) = uf2_drives(&roots, &RP, Duration::from_secs(3), read);
         assert_eq!(found.len(), 1);
         assert_eq!(owner.join().unwrap().0.len(), 1);

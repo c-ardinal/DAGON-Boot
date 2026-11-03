@@ -459,6 +459,9 @@ fn validate(reg: &Registry) -> Result<(), DefError> {
         if let Some(o) = reg.mcus[..i].iter().find(|o| o.id == m.id) {
             return err(at, format!("defined twice ({})", o.name));
         }
+        if m.wire_id == 0 {
+            return err(at, "wire_id 0 is not an MCU id");
+        }
         if let Some(o) = reg.mcus[..i].iter().find(|o| o.wire_id == m.wire_id) {
             return err(
                 at,

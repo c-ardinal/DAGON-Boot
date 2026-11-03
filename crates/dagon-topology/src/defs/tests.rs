@@ -280,6 +280,10 @@ fn project_may_not_redefine_an_id() {
     let e = Registry::load(&[Source::Project(&dir.join("dagon.toml"))]).unwrap_err();
     assert!(e.msg.contains("wire_id"), "{e}");
 
+    write(&dir.join("m/dagon-mcu.toml"), &FAKE_MCU.replace("0x7F01", "0"));
+    let e = Registry::load(&[Source::Project(&dir.join("dagon.toml"))]).unwrap_err();
+    assert!(e.msg.contains("wire_id 0"), "{e}");
+
     write(&dir.join("dagon.toml"), "[board.x]\nid = \"x\"\n");
     let e = Registry::load(&[Source::Project(&dir.join("dagon.toml"))]).unwrap_err();
     assert!(e.msg.contains("table name"), "{e}");

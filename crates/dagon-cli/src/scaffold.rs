@@ -388,9 +388,11 @@ fn render(text: &str, n: &Node, src: &DagonSource, base: &Path) -> Result<String
     Ok(out.replace("{{node}}", &n.id).replace("{{tag}}", &tag))
 }
 
-/// Whether a dependency key is a DAGON board or MCU package.
-fn dagon_package(k: &str) -> bool {
-    k.starts_with("dagon-board-") || k.starts_with("dagon-mcu-")
+/// Whether a dependency is a DAGON board or MCU package, by its effective
+/// package name: `package = "..."` when renamed, else the key.
+fn dagon_package(k: &str, item: &toml_edit::Item) -> bool {
+    let name = item.get("package").and_then(|v| v.as_str()).unwrap_or(k);
+    name.starts_with("dagon-board-") || name.starts_with("dagon-mcu-")
 }
 
 /// Why the node crate at `manifest` (relative to `base`) does not take its
@@ -411,7 +413,7 @@ pub fn source_mismatch(
     let clone =
         crate::dagonsrc::clone_root(src, base).map(|r| std::fs::canonicalize(&r).unwrap_or(r));
     for (_, t) in dep_tables(&mut doc) {
-        for (name, item) in t.iter().filter(|(k, _)| dagon_package(k)) {
+        for (name, item) in t.iter().filter(|(k, v)| dagon_package(k, v)) {
             let field = |k: &str| item.get(k).and_then(|v| v.as_str()).map(String::from);
             let (git, tag, dep_path) = (field("git"), field("tag"), field("path"));
             let ok = match &clone {
@@ -502,7 +504,7 @@ fn refresh_manifest(
     for (id, t) in dep_tables(&mut want) {
         let deps: Vec<(String, toml_edit::Item)> = t
             .iter()
-            .filter(|(k, _)| dagon_package(k))
+            .filter(|(k, v)| dagon_package(k, v))
             .map(|(k, v)| (k.to_string(), v.clone()))
             .collect();
         if !deps.is_empty() {
@@ -516,8 +518,8 @@ fn refresh_manifest(
             .unwrap_or_default();
         let stale: Vec<String> = t
             .iter()
+            .filter(|(k, v)| dagon_package(k, v) && !keep.contains(k))
             .map(|(k, _)| k.to_string())
-            .filter(|k| dagon_package(k) && !keep.contains(&k.as_str()))
             .collect();
         for k in stale {
             t.remove(&k);

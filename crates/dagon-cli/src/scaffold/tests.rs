@@ -529,3 +529,34 @@ fn a_new_project_whose_key_cannot_be_made_leaves_nothing_behind() {
     assert!(dir.join("dagon.toml").is_file() && dir.join("CLAUDE.md").is_file());
     let _ = std::fs::remove_dir_all(&d);
 }
+
+const RENAMED_STALE: &str = "[package]\nname = \"seg\"\nversion = \"0.1.0\"\n\n[dependencies]\nboard = { package = \"dagon-board-nucleo-f401re\", git = \"https://example.invalid/dagon\", tag = \"v0.0.1\" }\n";
+
+#[test]
+fn a_renamed_dagon_dependency_with_a_stale_tag_is_refused() {
+    let d = tmp("renamed-check");
+    std::fs::write(d.join("Cargo.toml"), RENAMED_STALE).unwrap();
+    let src = DagonSource {
+        git: Some("https://example.invalid/dagon".into()),
+        tag: Some("v0.2.0".into()),
+        path: None,
+    };
+    let why = source_mismatch(&d, Path::new("Cargo.toml"), &src)
+        .unwrap()
+        .expect("stale tag must be refused");
+    assert!(why.contains("board") && why.contains("v0.0.1"), "{why}");
+}
+
+#[test]
+fn gen_refresh_replaces_a_renamed_dagon_dependency() {
+    let d = tmp("renamed-gen");
+    let src = clone(&d);
+    let base = project(&d);
+    let nodes = ["seg".to_string()];
+    gen(&base, &desk(), &src, &BTreeMap::new(), &nodes, false).unwrap();
+    std::fs::write(base.join("nodes/seg/Cargo.toml"), RENAMED_STALE).unwrap();
+    gen(&base, &desk(), &src, &BTreeMap::new(), &nodes, false).unwrap();
+    let m = read(&base, "nodes/seg/Cargo.toml");
+    assert!(!m.contains("v0.0.1") && !m.contains("board = {"), "{m}");
+    assert!(m.contains("dagon-board-nucleo-f401re = { path = "), "{m}");
+}

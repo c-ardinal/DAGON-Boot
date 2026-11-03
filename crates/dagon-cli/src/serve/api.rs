@@ -7,6 +7,7 @@ use std::sync::Arc;
 
 use dagon_format::header::{image_kind, slot_binding, ImageHeader, HEADER_SIZE};
 use dagon_sign::to_hex;
+use dagon_topology::defs::Registry;
 use dagon_topology::schema::{Uplink, UplinkHost};
 use serde_json::{json, Value};
 
@@ -161,6 +162,7 @@ pub fn handle(server: &Arc<Server>, req: &Request) -> Response {
     let r = match (req.method.as_str(), parts.as_slice()) {
         ("GET", ["hello"]) => Ok(hello(server)),
         ("GET", ["targets"]) => targets(server),
+        ("GET", ["definitions"]) => definitions(server),
         ("GET", ["topology"]) => topology_get(server),
         ("PUT", ["topology"]) => topology_put(server, req),
         ("GET", ["nodes", id, "build"]) => build_get(server, id),
@@ -357,8 +359,11 @@ fn hello(server: &Server) -> Response {
         .as_ref()
         .and_then(|c| project_key(c).ok())
         .map(|k| to_hex(&dagon_format::key_id(&k.pk)));
-    let flash_mcus: Vec<&str> = ["rp2040", "stm32f401re", "esp32s3"]
+    let mut defined: Vec<_> = registry_of(cfg.as_ref()).mcus().to_vec();
+    defined.sort_by_key(|m| m.wire_id);
+    let flash_mcus: Vec<String> = defined
         .into_iter()
+        .map(|m| m.id)
         .filter(|m| crate::flash::flashable(m))
         .collect();
     let sim = server.sim.get();
@@ -424,11 +429,38 @@ fn targets(server: &Server) -> Res {
             "features": features,
         }));
     }
-    let boards: Vec<Value> = dagon_topology::boards::BOARDS
+    let boards: Vec<Value> = registry_of(Some(&cfg))
+        .boards()
         .iter()
         .map(|b| json!({"id": b.id, "product": b.product, "mcu": b.mcu}))
         .collect();
     Ok(json_ok(json!({ "targets": out, "boards": boards })))
+}
+
+/// The MCU and board definitions of the open project (its DAGON source and
+/// its own), the builtin set without one or when they do not load.
+fn registry_of(cfg: Option<&Config>) -> Registry {
+    cfg.and_then(|c| crate::defs::registry(c).ok())
+        .unwrap_or_else(|| Registry::builtin().clone())
+}
+
+/// GET /v1/definitions: the definitions in use as `Registry::to_json`
+/// gives them, for the page's dagon-wasm (`load_definitions`).
+fn definitions(server: &Server) -> Res {
+    let reg = match config(server) {
+        Ok(cfg) => crate::defs::registry(&cfg).map_err(|e| {
+            eprintln!("dagon serve: {e}");
+            Response::error(
+                500,
+                "the project's definitions do not load; see the dagon serve terminal",
+            )
+        })?,
+        Err(_) => Registry::builtin().clone(),
+    };
+    Ok(Response::bytes(
+        "application/json",
+        reg.to_json().into_bytes(),
+    ))
 }
 
 /// Package directories relative to `base`, `/`-separated and sorted:

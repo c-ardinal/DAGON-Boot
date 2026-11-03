@@ -6,7 +6,7 @@ use std::path::{Path, PathBuf};
 
 use super::load::{parse_board_dir, parse_mcu_dir, parse_mcu_text};
 use super::*;
-use crate::{boards, check, mcu_id_of, port_kind_of};
+use crate::{boards, mcu_id_of, port_kind_of};
 
 fn reg() -> &'static Registry {
     Registry::builtin()
@@ -104,21 +104,16 @@ fn boards_match_the_table_field_for_field() {
 }
 
 #[test]
-fn coordinator_and_rom_rules_match_check() {
+fn coordinator_and_rom_rules_match_the_former_check_constants() {
+    // The values check.rs held before it read them from the definitions.
     let c = reg().mcu("rp2040").unwrap().coordinator.as_ref().unwrap();
-    assert_eq!(
-        usize::from(c.pio_state_machines),
-        check::RP2040_PIO_STATE_MACHINES
-    );
-    assert_eq!(
-        usize::from(c.pio_uart_state_machines),
-        check::PIO_UART_STATE_MACHINES
-    );
-    assert_eq!(c.uart0_tx, check::RP2040_UART0_TX);
-    assert_eq!(c.uart0_rx, check::RP2040_UART0_RX);
+    assert_eq!(c.pio_state_machines, 8);
+    assert_eq!(c.pio_uart_state_machines, 2);
+    assert_eq!(c.uart0_tx, [0, 12, 16, 28]);
+    assert_eq!(c.uart0_rx, [1, 13, 17, 29]);
     let rom = reg().mcu("stm32f401re").unwrap().rom_i2c.as_ref().unwrap();
-    assert_eq!(rom.addr, check::STM32_ROM_ADDR);
-    assert_eq!(Some(&rom.max_hz), check::I2C_SPEEDS.iter().max());
+    assert_eq!(rom.addr, 0x39);
+    assert_eq!(rom.max_hz, 400_000);
     for id in ["stm32f401re", "esp32s3"] {
         assert!(reg().mcu(id).unwrap().coordinator.is_none());
     }
@@ -212,6 +207,64 @@ fn scratch(name: &str) -> PathBuf {
 fn write(path: &Path, text: &str) {
     std::fs::create_dir_all(path.parent().unwrap()).unwrap();
     std::fs::write(path, text).unwrap();
+}
+
+/// The desk demo with its F401 node replaced by the fake MCU and board.
+fn fake_desk(addr: &str) -> crate::Topology {
+    let yaml = include_str!("../../../../topology/desk-demo.yaml")
+        .replace("mcu: stm32f401re", "mcu: fake-m0")
+        .replace("board: nucleo-f401re", "board: fake-board")
+        .replace("flash_map: f401-default", "flash_map: fake-1m")
+        .replace("{ sda: PB4, scl: PA8 }", "{ sda: GPIO2, scl: GPIO3 }")
+        .replace("addr: 0x42", &format!("addr: {addr}"));
+    crate::parse_str(&yaml).unwrap()
+}
+
+/// A registry with the fake MCU (its ROM I2C loader capped at `max_hz`).
+fn fake_registry(name: &str, max_hz: u32) -> Registry {
+    let dir = scratch(name);
+    let rom = format!(
+        "\n[rom_i2c]\naddr = 0x3A\nmax_hz = {max_hz}\n\
+         pairs = [{{ controller = \"i2c0\", sda = \"GPIO2\", scl = \"GPIO3\" }}]\n"
+    );
+    write(&dir.join("m/dagon-mcu.toml"), &format!("{FAKE_MCU}{rom}"));
+    std::fs::create_dir_all(dir.join("m/bootcore")).unwrap();
+    let board = FAKE_BOARD.replace("product", "[board.fake-board]\nproduct");
+    write(
+        &dir.join("dagon.toml"),
+        &format!("mcu_files = [\"m/dagon-mcu.toml\"]\n{board}"),
+    );
+    let r = Registry::load(&[Source::Project(&dir.join("dagon.toml"))]).unwrap();
+    std::fs::remove_dir_all(dir).unwrap();
+    r
+}
+
+fn rules(r: &crate::Report) -> Vec<&'static str> {
+    r.errors().map(|i| i.rule).collect()
+}
+
+#[test]
+fn checks_and_compile_follow_a_project_registry() {
+    let reg = fake_registry("check-with", 400_000);
+    let t = fake_desk("0x42");
+    assert_eq!(rules(&crate::check_with(&reg, &t)), Vec::<&str>::new());
+    let bin = crate::compile_with(&reg, &t).unwrap();
+    assert!(!bin.is_empty());
+    // The builtin set does not know the fake MCU.
+    assert!(rules(&crate::check(&t)).contains(&"V-06"));
+    assert!(crate::compile(&t).is_err());
+    // Its ROM loader's address is reserved on the bus (from the definition).
+    assert_eq!(
+        rules(&crate::check_with(&reg, &fake_desk("0x3A"))),
+        ["V-18"]
+    );
+    assert_eq!(
+        rules(&crate::check_with(&reg, &fake_desk("0x39"))),
+        Vec::<&str>::new()
+    );
+    // Its ROM loader caps the bus speed.
+    let slow = fake_registry("check-with-slow", 100_000);
+    assert_eq!(rules(&crate::check_with(&slow, &t)), ["V-20"]);
 }
 
 #[test]

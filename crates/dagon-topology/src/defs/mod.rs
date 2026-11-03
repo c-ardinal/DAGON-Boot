@@ -9,7 +9,7 @@ mod tests;
 
 use std::sync::OnceLock;
 
-use dagon_format::header::{image_kind, placement, slot_binding, HEADER_SIZE};
+use dagon_format::header::{image_kind, placement, port_kind, slot_binding, HEADER_SIZE};
 use serde::Deserialize;
 
 use crate::schema::{ControlKind, LinkKind, RomEntry, UartIface};
@@ -27,6 +27,21 @@ pub enum PortKind {
 }
 
 impl PortKind {
+    const ALL: [PortKind; 2] = [Self::SelfBoot, Self::VendorStage2];
+
+    /// The kind a topology `port` names.
+    pub fn from_name(name: &str) -> Option<PortKind> {
+        Self::ALL.into_iter().find(|k| k.as_str() == name)
+    }
+
+    /// Image header `port_kind`.
+    pub fn wire(self) -> u8 {
+        match self {
+            Self::SelfBoot => port_kind::SELF_BOOT,
+            Self::VendorStage2 => port_kind::VENDOR_STAGE2,
+        }
+    }
+
     pub fn as_str(self) -> &'static str {
         match self {
             Self::SelfBoot => "self-boot",

@@ -19,6 +19,8 @@ export interface Hello {
   release_key?: string;
   /** MCU families POST /v1/flash can write (rp2040, stm32f401re). */
   flash_mcus?: string[];
+  /** `dagon demo`: a simulated desk, never a real hub (its speed, and the 子機 set to fail). */
+  sim?: { speed: number; fail: string | null } | null;
 }
 
 /** A project serve knows: its folder and its name. */
@@ -164,6 +166,28 @@ export class Cli {
     }
     this.state = 'ready';
     this.openEvents();
+  }
+
+  /** The simulated desk of `dagon demo`, when this serve has one. */
+  get sim(): { speed: number; fail: string | null } | null {
+    return this.state === 'ready' && this.hello?.sim ? this.hello.sim : null;
+  }
+
+  /** POST /v1/sim/write: bytes for the simulated hub. */
+  async simWrite(bytes: Uint8Array): Promise<void> {
+    const r = await this.d.fetch('/v1/sim/write', {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${this.pass}`, 'Content-Type': 'application/octet-stream' },
+      body: bytes.slice(),
+    });
+    if (!r.ok) throw new Error(String(r.status));
+  }
+
+  /** GET /v1/sim/read: what the simulated hub answered within `waitMs`. */
+  async simRead(waitMs: number): Promise<Uint8Array> {
+    const r = await this.call('GET', `sim/read?wait=${Math.round(waitMs)}`);
+    if (!r.ok) throw new Error(String(r.status));
+    return new Uint8Array(await r.arrayBuffer());
   }
 
   private call(method: string, path: string, body?: unknown): Promise<Response> {

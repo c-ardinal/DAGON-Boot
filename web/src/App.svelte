@@ -31,6 +31,7 @@
   import Header from './screens/Header.svelte';
   import OrderList from './screens/OrderList.svelte';
   import { devHub } from './serial/devHub.ts';
+  import { serveSim, type SimStand } from './serial/serveSim.ts';
   import { MockTransport } from './serial/mock.ts';
   import { WebSerialTransport, type Transport } from './serial/transport.ts';
   import Unsupported from './Unsupported.svelte';
@@ -45,16 +46,24 @@
   if (serial || dev) dagonReady().catch(() => undefined);
 
   let opened: Transport | null = null;
+  /** `dagon demo`'s simulated desk through serve, made once serve says it has one; null for a real hub. */
+  let simStand: SimStand | null = null;
+  function simHub(): SimStand | null {
+    const s = cli.sim;
+    if (!s) return null;
+    simStand ??= serveSim(cli, s.speed);
+    return simStand;
+  }
   const op = new Operate({
     open: async () => {
-      const t = stand?.transport ?? null;
+      const t = stand?.transport ?? simHub()?.transport ?? null;
       if (t) await t.open();
       opened = t ?? (await chooseAndOpen(serial!));
       return opened;
     },
     // The stand-in hub comes back by itself; a real one is chosen again in the browser.
     reselect: async () => {
-      if (dev && opened) {
+      if ((dev || simHub()) && opened) {
         if (opened instanceof MockTransport) opened.replug();
         await opened.open();
         return opened;
@@ -63,7 +72,10 @@
       return chooseAndOpen(serial!);
     },
     timer: true,
-    clock: stand?.clock,
+    // The simulated desk's clock runs at the demo's speed; a real hub keeps the default.
+    get clock() {
+      return stand?.clock ?? simHub()?.clock;
+    },
     // The CLI gave the hub back: the device the page had, opened again without the chooser.
     again: async () => {
       if (!opened) throw new Error('no device');
@@ -816,7 +828,7 @@
   <Band {band} busy={op.state === 'L03'} available={(a) => RUNS.has(a)} status={op.status} alert={op.alert} onaction={act} bind:primaryEl bind:nextEl />
 {/snippet}
 
-{#if !serial && !dev}
+{#if !serial && !dev && !cli.sim}
   <Unsupported />
 {:else}
   <a class="skip" href="#canvas">{SKIP.canvas}</a>
@@ -824,6 +836,7 @@
   <!-- The DOM follows the visual order of each layout, so Tab order matches what is seen. -->
   <div class="frame {layout}" class:open={drawerOpen} class:modal={restartOpen || autosave.asking !== null}>
     <Header
+      sim={cli.sim !== null}
       step={screen === 'start' ? null : step}
       {hub}
       drawer={layout === 'drawer' && screen === 'work'}

@@ -809,6 +809,12 @@ export const START = {
   initAsk: 'このフォルダに dagon.toml を作りますか。',
 } as const;
 
+/** `dagon demo`: the simulated desk, marked wherever the page is (案). */
+export const SIM = {
+  badge: '模擬',
+  label: '模擬の親機と子機（実機ではありません）',
+} as const;
+
 /** SC-M メニュー and its one confirmation (M53). */
 export const MENU = {
   button: 'メニュー',

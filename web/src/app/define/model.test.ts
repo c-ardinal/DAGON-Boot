@@ -136,9 +136,10 @@ describe('define document', () => {
     const cfg = toConfig(deep, supportedBoards());
     expect(cfg.nodes.map((n) => [n.id, n.depth, n.notYet])).toEqual([['hub', 0, undefined], ['seg', 1, undefined], ['m5stopwatch', 2, 'deep']]);
     // Any depth: a node below the 孫機 is placed and connected too.
-    const deeper = connect(placeMcu(deep, 'rp2040').doc, 'rp2040', 'm5stopwatch');
+    const deeper = connect(place(deep, 'nucleo-f401re').doc, 'nucleo', 'm5stopwatch');
+    expect(problems(deeper).filter((p) => p.severity === 'error')).toEqual([]);
     const dc = toConfig(deeper, supportedBoards());
-    expect(dc.nodes.find((n) => n.id === 'rp2040')).toMatchObject({ depth: 3, notYet: 'deep' });
+    expect(dc.nodes.find((n) => n.id === 'nucleo')).toMatchObject({ depth: 3, notYet: 'deep' });
     expect(problems(deep).map((p) => p.rule)).toContain('V-23');
     // Valid as placed: the 孫機's link carries its board's way into its loader, so nothing is an error.
     expect(problems(deep).filter((p) => p.severity === 'error')).toEqual([]);

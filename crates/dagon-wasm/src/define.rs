@@ -63,13 +63,24 @@ pub fn release_topology(bundle: &[u8], current: &str) -> Result<JsValue, JsError
 }
 
 /// Nodes updating skips for now (V-23), `{id: why}` with why one of
-/// `second-hub`, `deep`, `link-kind`, `too-many`; empty when the YAML does
-/// not parse or updating reaches every node.
+/// `second-hub`, `deep`, `link-kind`, `too-many`, or every node with
+/// `cut-invalid` where nothing else applies when the part updating would
+/// reach does not pass the checks on its own; empty when the YAML does not
+/// parse, has errors (its problems say what to fix first) or updating
+/// reaches every node.
 #[wasm_bindgen]
 pub fn topo_skipped(yaml: &str) -> JsValue {
     let o = Object::new();
-    if let Ok(t) = dagon_topology::parse_str(yaml) {
-        for (id, why) in dagon_topology::updatable(&t).1 {
+    let Ok(t) = dagon_topology::parse_str(yaml) else {
+        return o.into();
+    };
+    let cut = with_registry(|reg| {
+        dagon_topology::check_with(reg, &t)
+            .is_pushable()
+            .then(|| dagon_topology::cut_with(reg, &t))
+    });
+    if let Some(cut) = cut {
+        for (id, why) in cut.skipped {
             set(&o, &id, why.code().into());
         }
     }

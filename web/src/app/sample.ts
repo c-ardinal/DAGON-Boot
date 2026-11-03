@@ -41,7 +41,7 @@ export interface Node {
 export type UplinkHost = 'pc-cli' | 'browser' | 'embedded';
 
 /** dagon_topology::Skip codes: why updating does not reach a node yet. */
-export type Skip = 'second-hub' | 'deep' | 'link-kind' | 'too-many';
+export type Skip = 'second-hub' | 'deep' | 'link-kind' | 'too-many' | 'cut-invalid';
 
 export interface Wire {
   signal: string;

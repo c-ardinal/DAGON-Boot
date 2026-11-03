@@ -108,11 +108,13 @@ impl Seen {
 /// What to show after `new` was observed where `old` was shown. A HELLO
 /// cannot tell a rolled-back node from a confirmed one, so the shade stays
 /// rolled back while the version stays the same, and a version on trial
-/// that is replaced by another one without trial was rolled back.
+/// replaced by a lower one without trial was rolled back (a higher one
+/// means a newer update got confirmed in between; STATUS tells exactly,
+/// see [`Seen::from_status`]).
 pub fn merge(old: Seen, new: Seen) -> Seen {
     let confirmed = new.shade == Shade::Confirmed && new.version.is_some();
     let rolled = match old.shade {
-        Shade::Trial => confirmed && old.version != new.version,
+        Shade::Trial => confirmed && new.version < old.version,
         Shade::RolledBack => confirmed && old.version == new.version,
         _ => false,
     };
@@ -149,6 +151,12 @@ mod tests {
             merge(r, seen(Shade::Confirmed, 3)),
             seen(Shade::Confirmed, 3)
         );
+    }
+
+    #[test]
+    fn trial_followed_by_a_newer_confirmed_version_is_not_a_rollback() {
+        let r = merge(seen(Shade::Trial, 2), seen(Shade::Confirmed, 3));
+        assert_eq!(r, seen(Shade::Confirmed, 3));
     }
 
     #[test]

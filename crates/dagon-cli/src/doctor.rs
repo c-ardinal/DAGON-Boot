@@ -34,6 +34,7 @@ fn rust(what: &str) -> Check {
             expect: Expect::Runs,
             fix: None,
             hint: RUST_HINT.into(),
+            slow: false,
         },
         for_mcu: Vec::new(),
         ask: false,
@@ -195,10 +196,8 @@ fn one(c: &Check, fix: bool, io: &mut Io<'_>) -> bool {
     if !good && fix {
         let fix_cmd = d.fix.as_deref();
         if let Some(cmd) = fix_cmd.filter(|cmd| gate(c, cmd, &mut io.consent) == Gate::Run) {
-            // ponytail: the one slow install is named by its tool; a
-            // definition field would carry it once a second one appears.
-            if cmd[0] == "espup" {
-                (io.out)("installing the esp toolchain; this takes a while");
+            if d.slow {
+                (io.out)(&format!("installing the {}; this takes a while", d.what));
             }
             (io.out)(&format!("fix   {}", cmd.join(" ")));
             good = (io.install)(&args(cmd)).is_some() && passes(d, io.probe);
@@ -598,6 +597,11 @@ hint = \"{secret}\"
         ];
         let (ok, lines) = run(&fake, &["esp32s3"], true, &adds);
         assert!(ok, "{lines:?}");
-        assert!(lines.iter().any(|l| l.contains("takes a while")));
+        // Only the entry its definition marks `slow` says so, before its fix.
+        let slow: Vec<_> = lines
+            .iter()
+            .filter(|l| l.contains("takes a while"))
+            .collect();
+        assert_eq!(slow, ["installing the esp toolchain; this takes a while"]);
     }
 }

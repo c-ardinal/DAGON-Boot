@@ -346,6 +346,9 @@ pub struct DoctorCheck {
     pub fix: Option<Vec<String>>,
     #[serde(default)]
     pub hint: String,
+    /// `fix` takes long enough that the user is told before it starts.
+    #[serde(default)]
+    pub slow: bool,
 }
 
 /// `dagon-mcu.toml`.

@@ -34,7 +34,7 @@ errors; kind fields accept only the values listed below.
 | `[rom_i2c]` | ROM I2C bootloader (`stm32-i2c-rom`): `name` (as check messages call it), `addr`, `max_hz`, `erase_sectors`, `pairs = [{ controller, sda, scl }]` it listens on |
 | (coordinator) | A topology may make the MCU its coordinator only when `[coordinator]` is defined (V-25) |
 | `[connection]` | How the user connects it for a write: `label`, `hint` |
-| `[[doctor]]` | Tool check: `what`, `probe` (command), `expect` (`"runs"`, `{ line = "..." }`, `{ prefix = "..." }`), `fix` (command), `hint` |
+| `[[doctor]]` | Tool check: `what`, `probe` (command), `expect` (`"runs"`, `{ line = "..." }`, `{ prefix = "..." }`), `fix` (command), `hint`, `slow` (`true`: `dagon doctor --fix` says the install takes a while before it starts) |
 
 Slot geometry: `inline` puts the 512-byte header at the slot start and the
 payload after it; `trailer` puts the payload at the slot start and the

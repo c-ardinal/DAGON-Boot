@@ -61,6 +61,7 @@ what = "esp toolchain"
 probe = ["rustup", "toolchain", "list"]
 expect = { prefix = "esp" }
 fix = ["espup", "install"]
+slow = true
 
 [[doctor]]
 what = "espflash"

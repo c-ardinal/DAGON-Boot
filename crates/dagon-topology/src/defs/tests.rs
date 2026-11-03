@@ -658,3 +658,17 @@ fn the_json_form_round_trips_and_is_validated_again() {
     assert!(e.msg.contains("UF2 builder"), "{e}");
     assert!(Registry::from_json("{\"mcus\": []}").is_err());
 }
+
+#[test]
+fn each_mcu_records_where_its_definition_came_from() {
+    assert_eq!(reg().mcu_origin("rp2040"), Some(Origin::Builtin));
+    let project = fake_registry("origin", 400_000);
+    assert_eq!(project.mcu_origin("rp2040"), Some(Origin::Builtin));
+    assert_eq!(project.mcu_origin("fake-m0"), Some(Origin::Project));
+    assert_eq!(project.mcu_origin("nope"), None);
+    let tree = Registry::load(&[Source::Tree(&source_root())]).unwrap();
+    assert_eq!(tree.mcu_origin("esp32s3"), Some(Origin::Tree));
+    // Definitions received as JSON are never trusted to run commands.
+    let back = Registry::from_json(&reg().to_json()).unwrap();
+    assert_eq!(back.mcu_origin("rp2040"), Some(Origin::Project));
+}

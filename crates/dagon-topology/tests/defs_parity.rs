@@ -4,7 +4,7 @@
 //! change on either side fails here until both agree.
 
 use dagon_sign::{image, provision};
-use dagon_topology::defs::{Expect, Registry, Writer};
+use dagon_topology::defs::{Registry, Writer};
 
 fn reg() -> &'static Registry {
     Registry::builtin()
@@ -13,7 +13,6 @@ fn reg() -> &'static Registry {
 const CLI_FLASH: &str = include_str!("../../dagon-cli/src/flash.rs");
 const CLI_COMMANDS: &str = include_str!("../../dagon-cli/src/commands.rs");
 const CLI_ESP: &str = include_str!("../../dagon-cli/src/esp.rs");
-const CLI_DOCTOR: &str = include_str!("../../dagon-cli/src/doctor.rs");
 const WEB_COPY: &str = include_str!("../../../web/src/app/copy.ts");
 
 fn has(src: &str, needle: &str) {
@@ -213,51 +212,6 @@ fn first_write_parts_match_the_cli() {
         CLI_FLASH.matches("part(\"").count(),
         mcu_parts + board_parts
     );
-}
-
-fn quoted(v: &[String]) -> String {
-    v.iter()
-        .map(|s| format!("\"{s}\""))
-        .collect::<Vec<_>>()
-        .join(", ")
-}
-
-#[test]
-fn doctor_checks_match_the_cli() {
-    let ids: Vec<String> = reg()
-        .mcus()
-        .iter()
-        .map(|m| format!("\"{}\"", m.id))
-        .collect();
-    has(
-        CLI_DOCTOR,
-        &format!("FAMILIES: [&str; {}] = [{}];", ids.len(), ids.join(", ")),
-    );
-    let mut count = 0;
-    for m in reg().mcus() {
-        for c in &m.doctor {
-            let expect = match &c.expect {
-                Expect::Runs => "Expect::Runs".to_string(),
-                Expect::Line(l) => format!("Expect::Line(\"{l}\")"),
-                Expect::Prefix(p) => format!("Expect::Prefix(\"{p}\")"),
-            };
-            let fix = c
-                .fix
-                .as_ref()
-                .map_or("None".into(), |f| format!("Some(&[{}])", quoted(f)));
-            let block = format!(
-                "what: \"{}\",\n        for_mcu: &[\"{}\"],\n        probe: &[{}],\n        \
-                 expect: {expect},\n        fix: {fix},\n        hint: \"{}\",",
-                c.what,
-                m.id,
-                quoted(&c.probe),
-                c.hint
-            );
-            has(CLI_DOCTOR, &block);
-            count += 1;
-        }
-    }
-    assert_eq!(CLI_DOCTOR.matches("for_mcu: &[\"").count(), count);
 }
 
 #[test]

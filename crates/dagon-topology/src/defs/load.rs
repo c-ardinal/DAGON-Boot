@@ -4,7 +4,7 @@
 use std::fmt;
 use std::path::{Component, Path, PathBuf};
 
-use super::{BoardDef, McuDef, Part, Partition, Placement, Registry, Slot, Writer, HEADER};
+use super::{BoardDef, McuDef, Origin, Part, Partition, Placement, Registry, Slot, Writer, HEADER};
 
 pub const MCU_FILE: &str = "dagon-mcu.toml";
 pub const BOARD_FILE: &str = "dagon-board.toml";
@@ -205,11 +205,12 @@ fn empty() -> Registry {
         boards: Vec::new(),
         mcu_sources: Vec::new(),
         board_sources: Vec::new(),
+        mcu_origins: Vec::new(),
     }
 }
 
 impl Registry {
-    fn push_mcu(&mut self, text: &str, pkg: &Pkg<'_>) -> Result<(), DefError> {
+    fn push_mcu(&mut self, text: &str, pkg: &Pkg<'_>, origin: Origin) -> Result<(), DefError> {
         let m = parse_mcu(text, pkg)?;
         let files = match &m.partitions {
             Some(rel) => vec![(rel.clone(), pkg.text(rel)?)],
@@ -221,6 +222,7 @@ impl Registry {
             files,
         });
         self.mcus.push(m);
+        self.mcu_origins.push(origin);
         Ok(())
     }
 
@@ -255,6 +257,8 @@ pub(super) fn from_json(json: &str) -> Result<Registry, DefError> {
                 label: &s.label,
                 files: &files,
             },
+            // JSON comes from outside: never trusted to run anything.
+            Origin::Project,
         )?;
     }
     for s in &form.boards {
@@ -273,7 +277,7 @@ pub(super) fn from_json(json: &str) -> Result<Registry, DefError> {
 pub(super) fn builtin() -> Result<Registry, DefError> {
     let mut reg = empty();
     for (label, text, files) in BUILTIN_MCUS {
-        reg.push_mcu(text, &Pkg::Embedded { label, files })?;
+        reg.push_mcu(text, &Pkg::Embedded { label, files }, Origin::Builtin)?;
     }
     for (label, text) in BUILTIN_BOARDS {
         reg.push_board(text, &Pkg::Embedded { label, files: &[] })?;
@@ -325,7 +329,7 @@ fn tree(root: &Path) -> Result<Registry, DefError> {
     let mut reg = empty();
     for dir in packages(&targets.join("mcu"), MCU_FILE)? {
         let text = read(&dir.join(MCU_FILE))?;
-        reg.push_mcu(&text, &Pkg::Dir(dir))?;
+        reg.push_mcu(&text, &Pkg::Dir(dir), Origin::Tree)?;
     }
     for dir in packages(&targets.join("boards"), BOARD_FILE)? {
         let text = read(&dir.join(BOARD_FILE))?;
@@ -358,7 +362,7 @@ fn project(reg: &mut Registry, dagon_toml: &Path) -> Result<(), DefError> {
         if reg.mcu(&id).is_some() {
             return err(path.display(), format!("MCU '{id}' is already defined"));
         }
-        reg.push_mcu(&text, &pkg)?;
+        reg.push_mcu(&text, &pkg, Origin::Project)?;
     }
     for (id, table) in defs.board {
         let toml::Value::Table(mut t) = table else {

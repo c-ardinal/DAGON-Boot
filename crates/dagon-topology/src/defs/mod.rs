@@ -413,6 +413,19 @@ pub struct BoardDef {
     pub parts: Vec<Part>,
 }
 
+/// Where an MCU definition was read from. Commands a [`Origin::Project`]
+/// definition names (doctor probes and fixes) never run without the user's
+/// explicit confirmation.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Origin {
+    /// Embedded in this dagon.
+    Builtin,
+    /// The project's DAGON source tree.
+    Tree,
+    /// The project's own files (or definitions received as JSON).
+    Project,
+}
+
 /// Every MCU and board known: builtin, a DAGON source tree, project
 /// definitions. Order is definition order; the first board of an MCU is
 /// its default.
@@ -424,6 +437,8 @@ pub struct Registry {
     /// JSON form the browser loads ([`Registry::to_json`]).
     mcu_sources: Vec<DefSource>,
     board_sources: Vec<DefSource>,
+    /// Where each MCU definition came from, in `mcus` order.
+    mcu_origins: Vec<Origin>,
 }
 
 impl Registry {
@@ -465,6 +480,12 @@ impl Registry {
 
     pub fn mcu(&self, id: &str) -> Option<&McuDef> {
         self.mcus.iter().find(|m| m.id == id)
+    }
+
+    /// Where MCU `id`'s definition was read from.
+    pub fn mcu_origin(&self, id: &str) -> Option<Origin> {
+        let i = self.mcus.iter().position(|m| m.id == id)?;
+        self.mcu_origins.get(i).copied()
     }
 
     pub fn board(&self, id: &str) -> Option<&BoardDef> {

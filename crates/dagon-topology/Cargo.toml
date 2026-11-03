@@ -11,3 +11,10 @@ yaml_serde = "0.10"
 # The definition format (dagon-mcu.toml, dagon-board.toml); already in the
 # lock file through dagon-cli. Parse only: no writer needed.
 toml = { version = "0.8", default-features = false, features = ["parse"] }
+
+[dev-dependencies]
+# Parity tests: the definitions match today's tables (these crates depend
+# on this one; the cycle is through dev-dependencies only).
+dagon-host = { path = "../dagon-host" }
+dagon-romlink = { path = "../dagon-romlink" }
+dagon-sign = { path = "../dagon-sign" }

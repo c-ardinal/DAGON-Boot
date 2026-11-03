@@ -224,6 +224,9 @@ name = "dagon-topology"
 version = "0.0.0"
 dependencies = [
  "dagon-format",
+ "dagon-host",
+ "dagon-romlink",
+ "dagon-sign",
  "serde",
  "toml",
  "yaml_serde",

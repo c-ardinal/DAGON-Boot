@@ -167,8 +167,66 @@ fn spellings(dir: &Path) -> Vec<String> {
     v
 }
 
+/// Every folder of this machine a serve job's lines may name for project
+/// `cfg`, and what the page sees instead, most specific first: each app
+/// (its package name), each project-defined MCU/board package, the DAGON
+/// source, the project, the home folder (cargo's registry paths).
+pub(crate) fn page_swaps(cfg: &Config, reg: &Registry) -> Vec<(String, String)> {
+    let mut swaps = Vec::new();
+    for (node, b) in &cfg.build {
+        let label = app_label(cfg, node);
+        for f in spellings(&cfg.base.join(&b.package)) {
+            swaps.push((f, label.clone()));
+        }
+        // As dagon.toml writes it, either slash (a bare one-word folder
+        // would match ordinary words in the lines; its absolute form is
+        // replaced above).
+        let written = b.package.display().to_string();
+        if written.contains(['/', '\\']) {
+            swaps.push((written.replace('\\', "/"), label.clone()));
+            swaps.push((written.replace('/', "\\"), label));
+        }
+    }
+    let owned = reg
+        .mcus()
+        .iter()
+        .map(|m| (Want::Mcu(m.id.clone()), &m.package))
+        .chain(
+            reg.boards()
+                .iter()
+                .map(|b| (Want::Board(b.id.clone()), &b.package)),
+        );
+    for (owner, package) in owned {
+        if let Some(p) = package {
+            let label = project_package(&owner);
+            swaps.extend(spellings(p).into_iter().map(|f| (f, label.clone())));
+        }
+    }
+    if let Some(root) = crate::dagonsrc::clone_root(&cfg.dagon, &cfg.base) {
+        swaps.extend(
+            spellings(&root)
+                .into_iter()
+                .map(|f| (f, "<DAGON source>".into())),
+        );
+    }
+    swaps.extend(
+        spellings(&cfg.base)
+            .into_iter()
+            .map(|f| (f, "<project>".into())),
+    );
+    let home = std::env::var_os("USERPROFILE").or_else(|| std::env::var_os("HOME"));
+    if let Some(h) = home.filter(|h| !h.is_empty()) {
+        swaps.extend(
+            spellings(Path::new(&h))
+                .into_iter()
+                .map(|f| (f, "~".into())),
+        );
+    }
+    swaps
+}
+
 /// `line` with each folder of `swaps` replaced by its name.
-fn hidden(line: &str, swaps: &[(String, String)]) -> String {
+pub(crate) fn hidden(line: &str, swaps: &[(String, String)]) -> String {
     swaps
         .iter()
         .filter(|(f, _)| !f.is_empty())

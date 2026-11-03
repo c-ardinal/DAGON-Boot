@@ -318,7 +318,8 @@ fn gen_start(server: &Arc<Server>, req: &Request) -> Res {
     let s = Arc::clone(server);
     match server.spawn("gen", move |job| {
         let config = job.config.clone().ok_or("no project is open")?;
-        project_registry(&config_at(&s, Some(&config))?)?;
+        let cfg = config_at(&s, Some(&config))?;
+        job.hide_folders(crate::flash::page_swaps(&cfg, &project_registry(&cfg)?));
         let lines = {
             let _lock = s.files.lock().map_err(|_| "lock".to_string())?;
             crate::scaffold::gen_project(&config, &only, force)?
@@ -345,7 +346,10 @@ fn start(server: &Arc<Server>, req: &Request, kind: &str, work: Work) -> Res {
         // A project whose definitions do not load runs no job: the page is
         // told without the reason (it goes to the terminal), never a raw
         // definition error from deeper down.
-        project_registry(&cfg)?;
+        let reg = project_registry(&cfg)?;
+        // Every job's lines (cargo's, probe-rs', espflash's included) and
+        // error reach the page through the one scrubbing logger.
+        job.hide_folders(crate::flash::page_swaps(&cfg, &reg));
         work(job, cfg, v)
     }) {
         Some(id) => Ok(accepted(id)),

@@ -208,13 +208,14 @@ impl Server {
                 lines: Vec::new(),
                 flushed: Instant::now(),
                 sent: 0,
+                swaps: Vec::new(),
             };
             let r = work(&mut job);
             job.flush();
             let (state, data) = match r {
                 Ok(v) => ("succeeded", v),
                 Err(_) if job.cancelled() => ("cancelled", Value::Null),
-                Err(e) => ("failed", json!({ "error": e })),
+                Err(e) => ("failed", json!({ "error": job.page_text(&e) })),
             };
             if let Some(j) = server.jobs.lock().expect("jobs").get_mut(&id) {
                 j.result = Some(data.clone());
@@ -262,6 +263,9 @@ pub struct Job {
     flushed: Instant,
     /// Log lines taken so far (for [`MAX_LOG_LINES`]).
     sent: usize,
+    /// Folders of this machine and what the page sees instead
+    /// ([`crate::flash::page_swaps`]); applied to every line and error.
+    swaps: Vec<(String, String)>,
 }
 
 impl Job {
@@ -279,8 +283,21 @@ impl Job {
         );
     }
 
-    /// Adds a log line; lines go out in batches.
+    /// From now on, every log line and the job's error name these folders
+    /// as the page should see them (package names, <project>, ...).
+    pub fn hide_folders(&mut self, swaps: Vec<(String, String)>) {
+        self.swaps = swaps;
+    }
+
+    /// `text` as the page may see it.
+    pub fn page_text(&self, text: &str) -> String {
+        crate::flash::hidden(text, &self.swaps)
+    }
+
+    /// Adds a log line (folders hidden, see [`Job::hide_folders`]); lines
+    /// go out in batches.
     pub fn log(&mut self, line: &str) {
+        let line = &self.page_text(line);
         self.sent += 1;
         if self.sent > MAX_LOG_LINES {
             if self.sent == MAX_LOG_LINES + 1 {

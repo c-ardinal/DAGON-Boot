@@ -1588,3 +1588,85 @@ fn the_demo_uplink_follows_the_saved_topology() {
     assert_eq!(http(&d, "PUT", "/v1/topology", &h, YAML.as_bytes()).0, 200);
     assert_eq!(sim(&d)["uplink"], "usb-cdc");
 }
+
+/// Every job serve starts is spawned where the scrubbing logger is set up
+/// (start and gen_start): a new spawn without it fails here.
+#[test]
+fn every_serve_job_logs_through_the_scrubbing_logger() {
+    let code = |src: &'static str| src.split("#[cfg(test)]").next().unwrap();
+    let api = code(include_str!("api.rs"));
+    let others = [
+        code(include_str!("devjobs.rs")),
+        code(include_str!("project.rs")),
+        code(include_str!("mod.rs")),
+    ];
+    assert_eq!(
+        api.matches("server.spawn(").count(),
+        2,
+        "start and gen_start only"
+    );
+    assert_eq!(api.matches("job.hide_folders(").count(), 2, "one per spawn");
+    for src in others {
+        assert!(!src.contains(".spawn(\"") && !src.contains("server.spawn("));
+    }
+}
+
+/// /v1/build runs cargo: its lines and error name the app by its package,
+/// never a folder of this machine.
+#[test]
+fn build_output_reaches_the_page_without_local_folders() {
+    let a = start("pagebuild");
+    let app = a.dir.join("private/token/app");
+    std::fs::create_dir_all(app.join("src")).unwrap();
+    std::fs::write(
+        app.join("Cargo.toml"),
+        "[package]\nname = \"fake-app\"\nversion = \"0.0.0\"\nedition = \"2021\"\n[workspace]\n",
+    )
+    .unwrap();
+    // Does not compile: cargo names the package folder in its lines.
+    std::fs::write(
+        app.join("src/main.rs"),
+        "fn main() { let x: u8 = \"no\"; }\n",
+    )
+    .unwrap();
+    std::fs::write(
+        a.dir.join("dagon.toml"),
+        "topology = \"topology/t.yaml\"\n[build.seg]\npackage = \"private/token/app\"\n",
+    )
+    .unwrap();
+    let rx = a.server.subscribe();
+    let (st, started) = post(&a, "/v1/build", serde_json::json!({ "nodes": ["seg"] }));
+    assert_eq!(st, 202, "{started}");
+    let id = serde_json::from_str::<serde_json::Value>(&started).unwrap()["job"].clone();
+    let mut text = Vec::new();
+    loop {
+        let ev = rx
+            .recv_timeout(std::time::Duration::from_secs(300))
+            .unwrap();
+        let ev: serde_json::Value = serde_json::from_str(&ev).unwrap();
+        if ev["job"] != id {
+            continue;
+        }
+        if ev["type"] == "job.log" {
+            text.extend(
+                ev["lines"]
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .map(|l| l.to_string()),
+            );
+        }
+        if ev["type"] == "job.result" {
+            text.push(ev["data"].to_string());
+            break;
+        }
+    }
+    let all = text.join("\n");
+    assert!(all.contains("Compiling fake-app"), "{all}");
+    assert!(all.contains("fake-app (the seg app)"), "{all}");
+    let canon = std::fs::canonicalize(&a.dir).unwrap();
+    let canon = crate::config::plain_path(canon).display().to_string();
+    for local in ["private", "token", &*a.dir.to_string_lossy(), &canon] {
+        assert!(!all.contains(local), "{local} reached the page: {all}");
+    }
+}

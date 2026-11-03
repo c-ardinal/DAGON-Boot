@@ -1,7 +1,8 @@
 import { describe, expect, test } from 'vitest';
 import { RULE_FIX } from '../copy.ts';
 import { Define } from './define.svelte.ts';
-import { connect, placeMcu, setLink, setLinkKind, setNode } from './model.ts';
+import { connect, emptyDoc, placeMcu, setLink, setLinkKind, setNode } from './model.ts';
+import { DESK_DEMO_YAML } from '../sample.ts';
 import { problemChip } from './problems.ts';
 import { LINK } from '../copy.ts';
 
@@ -90,6 +91,22 @@ describe('define session', () => {
     const n = d.config.nodes.find((x) => x.id === r.id)!;
     expect([n.product, n.mcu]).toEqual(['自作', 'RP2040']);
     expect(problemChip(d.problems.find((p) => p.rule === 'B-01')!)).toEqual({ mark: '▲', kind: 'warning' });
+  });
+
+  test('a coordinator whose MCU cannot be one is V-25, with its own name and fix sentence', () => {
+    const d = new Define();
+    const espHub = DESK_DEMO_YAML.replace(
+      '    mcu: rp2040\n    board: waveshare-rp2040-touch-lcd-1.28\n    role: coordinator\n    port: self-boot\n    flash_map: rp2040-4m',
+      '    mcu: esp32s3\n    role: coordinator\n    port: vendor-stage2',
+    );
+    expect(d.importYaml(espHub)).toBe(true);
+    const p = d.problems.find((x) => x.rule === 'V-25')!;
+    expect([p.short, p.sentence]).toEqual(['親機にできないマイコン', 'hubの代わりに、親機にできるマイコンのノードを親機にしてください。']);
+  });
+
+  test('by MCU, only an MCU whose definition has [coordinator] becomes the 親機', () => {
+    expect(placeMcu(emptyDoc(), 'esp32s3').doc.topo.nodes[0].role).toBe('node');
+    expect(placeMcu(emptyDoc(), 'rp2040').doc.topo.nodes[0].role).toBe('coordinator');
   });
 
   test('a CAN link bundle says its kind, not 「0 本」', () => {

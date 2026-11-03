@@ -2,7 +2,7 @@
 // shapes of dagon-topology's schema) plus the page-side display names. Every
 // edit is a pure function returning a new document, so undo keeps snapshots.
 // Validity is never decided here: topo_check (dagon-topology in WASM) does it.
-import { board_template, link_kinds, supported_mcus, topo_parse } from '../../wasm/pkg/dagon_wasm.js';
+import { board_template, coordinator_capable, link_kinds, rom_i2c_addrs, supported_mcus, topo_parse } from '../../wasm/pkg/dagon_wasm.js';
 import { supportedBoards, type Board } from '../../wasm/dagon.ts';
 import { INSPECT } from '../copy.ts';
 import type { Config, Link as GLink, Node as GNode, Wire } from '../sample.ts';
@@ -132,8 +132,6 @@ export interface BoardTemplate {
 
 /** Nodes the editor places and draws; updating reaches 8 (V-23 says when more). */
 export const MAX_NODES = 32;
-/** The STM32 ROM loader's address: never offered (V-18). */
-export const ROM_ADDR = 0x39;
 const I2C_FIRST = 0x08;
 const I2C_LAST = 0x77;
 /** The hub's I2C pins and PIO UART pins (hackathon §4.1; V-17, V-09). */
@@ -209,7 +207,7 @@ export function placeMcu(doc: Doc, mcu: string): { doc: Doc; id: string } {
   const m = mcus().find((x) => x.id === mcu);
   if (!m || doc.topo.nodes.length >= MAX_NODES) return { doc, id: '' };
   const t = doc.topo;
-  const asHub = !hub(t) && m.port === 'self-boot' && mcu === 'rp2040';
+  const asHub = !hub(t) && coordinator_capable(mcu);
   const id = asHub ? freeId(t, 'hub') : freeId(t, mcu);
   const node: TNode = {
     id,
@@ -245,11 +243,12 @@ export function setBoard(doc: Doc, id: string, fields: BoardFields): Doc {
   return { ...doc, boards: { ...doc.boards, [id]: { ...doc.boards?.[id], ...fields } } };
 }
 
-/** I2C addresses no other link on `bus` uses, without the ROM loader's. */
+/** I2C addresses no other link on `bus` uses, without the defined ROM loaders' (V-18). */
 export function freeAddrs(t: Topo, except?: number): number[] {
   const used = new Set((t.links ?? []).filter((l, i) => l.kind === 'i2c' && i !== except).map((l) => l.addr));
+  const rom = rom_i2c_addrs();
   const out: number[] = [];
-  for (let a = I2C_FIRST; a <= I2C_LAST; a++) if (a !== ROM_ADDR && !used.has(a)) out.push(a);
+  for (let a = I2C_FIRST; a <= I2C_LAST; a++) if (!rom.includes(a) && !used.has(a)) out.push(a);
   return out;
 }
 

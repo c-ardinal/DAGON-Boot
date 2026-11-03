@@ -7,6 +7,8 @@ import init, {
   frame_encode,
   hello_decode,
   hello_request,
+  load_definitions,
+  mcu_connection,
   release_versions,
   supported_boards as boards,
   version_older,
@@ -171,6 +173,25 @@ let loading: Promise<unknown> | undefined;
  */
 export function dagonReady(): Promise<unknown> {
   return (loading ??= init());
+}
+
+/**
+ * Uses the MCU and board definitions `dagon serve` sends (GET /v1/definitions);
+ * the builtin set stays when there are none or they do not load. True when loaded.
+ */
+export function useDefinitions(json: string | null): boolean {
+  if (!json) return false;
+  try {
+    load_definitions(json);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/** How the user connects `mcu` for a write (its definition's [connection]); null for an unknown MCU. */
+export function mcuConnection(mcu: string): { label: string; hint: string } | null {
+  return (mcu_connection(mcu) as { label: string; hint: string } | null) ?? null;
 }
 
 export interface Board {

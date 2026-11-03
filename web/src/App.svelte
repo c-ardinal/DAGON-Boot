@@ -35,7 +35,7 @@
   import { MockTransport } from './serial/mock.ts';
   import { WebSerialTransport, type Transport } from './serial/transport.ts';
   import Unsupported from './Unsupported.svelte';
-  import { dagonReady, require_release_key, set_release_key, versionText } from './wasm/dagon.ts';
+  import { dagonReady, require_release_key, set_release_key, useDefinitions, versionText } from './wasm/dagon.ts';
 
   const params = new URLSearchParams(location.search);
   // The stand-in hubs are for development builds only.
@@ -102,6 +102,7 @@
     // serve switched to the project's keys (Cli refreshed hello): the page verifies with that key from now on.
     opened: async () => {
       useReleaseKey();
+      useDefinitions(await cli.definitions());
       await openWork();
     },
     // Development stand-ins (?mock, ?sim) have no serve: an unsaved 構成 on the page.
@@ -122,6 +123,8 @@
       require_release_key();
       useReleaseKey(document.querySelector<HTMLMetaElement>('meta[name="dagon-release-key"]')?.content);
       if (cli.state !== 'ready') return;
+      // The project's MCU and board definitions; the builtin set when serve has none (or no serve).
+      useDefinitions(await cli.definitions());
       // A project open in serve opens at once; without one the page stays on SC-S0.
       if (cli.has('project')) {
         const p = await cli.project();

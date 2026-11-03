@@ -1,6 +1,6 @@
 //! The builtin definitions carry what signing, provisioning, the host's ROM
 //! path and the CLI know today. Public values are compared directly;
-//! private CLI/web constants are checked against their source text, so a
+//! private CLI constants are checked against their source text, so a
 //! change on either side fails here until both agree.
 
 use dagon_sign::{image, provision};
@@ -13,7 +13,6 @@ fn reg() -> &'static Registry {
 const CLI_FLASH: &str = include_str!("../../dagon-cli/src/flash.rs");
 const CLI_COMMANDS: &str = include_str!("../../dagon-cli/src/commands.rs");
 const CLI_ESP: &str = include_str!("../../dagon-cli/src/esp.rs");
-const WEB_COPY: &str = include_str!("../../../web/src/app/copy.ts");
 
 fn has(src: &str, needle: &str) {
     assert!(src.contains(needle), "source no longer has: {needle}");
@@ -212,15 +211,4 @@ fn first_write_parts_match_the_cli() {
         CLI_FLASH.matches("part(\"").count(),
         mcu_parts + board_parts
     );
-}
-
-#[test]
-fn connection_copy_matches_the_web() {
-    for m in reg().mcus() {
-        let c = &m.connection;
-        has(
-            WEB_COPY,
-            &format!("{}: ['{}', '{}'],", m.id, c.label, c.hint),
-        );
-    }
 }

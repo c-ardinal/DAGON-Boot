@@ -76,6 +76,16 @@ describe('dagon serve link', () => {
     expect(JSON.stringify(cli.hello)).not.toContain('secret');
   });
 
+  test('the definitions are asked with the passphrase; a serve without them gives none', async () => {
+    const f = fake();
+    const cli = new Cli(f.deps);
+    await cli.connect();
+    expect(await cli.definitions()).toBe('{}');
+    expect(f.calls[f.calls.length - 1]).toMatchObject({ url: '/v1/definitions', method: 'GET', auth: `Bearer ${PASS}` });
+    const old = new Cli(fake({ status: 404 }).deps);
+    expect(await old.definitions()).toBeNull();
+  });
+
   test('a public page (no passphrase) stays K0; a wrong passphrase is K0 with its notice; a dead CLI is K3', async () => {
     const none = new Cli(fake({ hash: '' }).deps);
     await none.connect();

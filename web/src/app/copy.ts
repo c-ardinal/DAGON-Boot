@@ -480,6 +480,7 @@ export const RULE_SHORT: Record<string, string> = {
   'V-22': 'リセット・起動の配線 未設定',
   'V-23': 'まだ更新できない構成',
   'V-24': 'まだ使えないつながり',
+  'V-25': '親機にできないマイコン',
   /** Checked by the page (dagon.toml's [board.<id>]), not by dagon-topology. */
   'B-01': 'ボード 未設定',
   'B-02': '容量が足りない',
@@ -520,6 +521,7 @@ export const RULE_FIX: Record<string, (w: FixWords) => string> = {
   'V-22': (w) => `最後の手段で復旧するには、『直す』で ${w.to}のリセット・起動の配線を設定してください（このままでも親機へ送れます）。`,
   'V-23': () => '更新するには、親機を 1 つにして子機を親機へ直接つないでください（このままでも書き出せます）。',
   'V-24': (w) => `${w.to ? `${w.to}の` : ''}つながりは、まだ使えない種類です。プロジェクトを作るには、使える種類を選んでください（このままでも保存できます）。`,
+  'V-25': (w) => `${w.to}の代わりに、親機にできるマイコンのノードを親機にしてください。`,
   'B-01': (w) => `『直す』で ${w.to}のボードの容量を入れてください。`,
   'B-02': (w) => `${w.to}は容量が ${w.size ?? ''} 以上のボードにしてください。`,
 };
@@ -746,12 +748,8 @@ export const PROJECT = {
 export const FLASH = {
   heading: '書き込み',
   write: '書き込む',
+  /** How each MCU is connected comes from its definition ([connection], dagon-wasm's mcu_connection). */
   via: 'つなぎ方',
-  families: {
-    rp2040: ['USB（BOOT を押しながら）', 'BOOT を押しながら USB をつないでから、書き込んでください。'],
-    stm32f401re: ['ST-LINK', 'ST-LINK を USB でつないでから、書き込んでください。'],
-    esp32s3: ['USB-C', 'USB-C でつないでから、書き込んでください（つながらないときは BOOT を押しながら）。'],
-  } as Record<string, [string, string]>,
   hubFirst: '親機から書き込んでください（親機が無いと子機を確かめられません）。',
   /** 案: the confirmation before serve writes the board (its job question). */
   confirm: (name: string) => `${name} に書き込みます。よろしいですか。`,

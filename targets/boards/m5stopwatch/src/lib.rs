@@ -6,24 +6,22 @@
 //! |---|---|
 //! | DAGON link | rear bus MUX_IO_1/2 = UART0 TX G43 / RX G44 ([`rear_uart`]), plus USB Serial/JTAG on USB-C |
 //! | Rear pins UART/USB switch | M5IOE1 IO expander PYG1 on the internal I2C (SDA G47, SCL G48), driven low at bring-up |
-//! | AMOLED reset | M5IOE1 PYG5, pulsed once at bring-up (then `node::display_ready`) |
-//! | AMOLED bus | CO5300 over QSPI: CS G39, SCK G40, D0-D3 G41/G42/G46/G45, TE G38 ([`DisplayPins`]) |
 //! | Power manager | M5PM1 on the internal I2C; ENTER_ROM method 2 only with the `pmic-download` feature (unconfirmed values) |
 //! | Flash | 16 MB ([`FLASH_SIZE`]); DAGON's partition table from the MCU crate |
 //!
 //! An app starts DAGON with [`start`] (see the README for the few lines).
+//! The display and the other peripherals are the app's, not DAGON's.
 #![no_std]
 
 use core::fmt;
 
-use dagon_mcu_esp32s3::board::{BoardDef, BringUp};
+use dagon_mcu_esp32s3::board::BoardDef;
 use dagon_mcu_esp32s3::liveness::Liveness;
 use dagon_mcu_esp32s3::node::{self, NodeConfig, NodePeripherals, WatchdogArmed};
 use esp_hal::{
     i2c::master::{Config as I2cConfig, Error as I2cError, I2c},
     peripherals::{
-        DMA_CH0, FLASH, FROM_CPU_INTR1, GPIO39, GPIO40, GPIO41, GPIO42, GPIO43, GPIO44, GPIO45,
-        GPIO46, GPIO47, GPIO48, I2C0, RTC_TIMER, SPI2, UART0, USB_DEVICE,
+        FLASH, FROM_CPU_INTR1, GPIO43, GPIO44, GPIO47, GPIO48, I2C0, RTC_TIMER, UART0, USB_DEVICE,
     },
     time::{Duration, Instant},
     uart::Uart,
@@ -37,9 +35,6 @@ pub const FLASH_SIZE: u32 = 16 * 1024 * 1024;
 /// Image `target_tag` of this board's node (the topology's `watch` node);
 /// `DAGON_TARGET_TAG` at build time overrides it.
 pub const TARGET_TAG: &str = "watch-s3";
-/// AMOLED panel: 466 x 466, starting 6 columns into the CO5300's memory.
-pub const PANEL_SIZE: u16 = 466;
-pub const PANEL_COLUMN_OFFSET: u16 = 6;
 
 /// M5IOE1 I/O expander on the internal SYS I2C bus (SDA G47, SCL G48).
 const IOE_ADDR: u8 = 0x4F;
@@ -48,10 +43,6 @@ const IOE_REG_OUT_L: u8 = 0x05;
 const IOE_REG_DRV_L: u8 = 0x13;
 /// PYG1 (PYB_MUX_CTR): low = rear MUX_IO_1/2 carry UART0, high = USB.
 const PYG1_BIT: u8 = 1 << 0;
-/// PYG5 (PYB_OLED_RST): AMOLED reset, active low.
-const PYG5_BIT: u8 = 1 << 4;
-/// Reset pulse width of the AMOLED controller.
-const OLED_RESET_LOW_MS: u32 = 10;
 
 /// M5PM1 power manager on the internal SYS I2C.
 // Unverified: the datasheet gives SYS_CMD 0x0C = KEY 0xA + CMD 0b11
@@ -101,16 +92,6 @@ pub fn route_rear_uart(i2c0: I2C0<'_>, sda: GPIO47<'_>, scl: GPIO48<'_>) -> Resu
     ioe_update(&mut i2c, IOE_REG_MODE_L, PYG1_BIT, 0)
 }
 
-/// Pulses the AMOLED reset (PYG5 low, then high, push-pull output) once and
-/// leaves it released.
-fn release_display_reset(i2c: &mut I2c<'_, Blocking>) -> Result<(), I2cError> {
-    ioe_update(i2c, IOE_REG_OUT_L, 0, PYG5_BIT)?;
-    ioe_update(i2c, IOE_REG_DRV_L, 0, PYG5_BIT)?;
-    ioe_update(i2c, IOE_REG_MODE_L, PYG5_BIT, 0)?;
-    esp_hal::delay::Delay::new().delay_millis(OLED_RESET_LOW_MS);
-    ioe_update(i2c, IOE_REG_OUT_L, PYG5_BIT, 0)
-}
-
 /// The DAGON link UART: UART0 on the rear pins, `link::uart_config()`.
 pub fn rear_uart<'d>(uart0: UART0<'d>, tx: GPIO43<'d>, rx: GPIO44<'d>) -> Uart<'d, Blocking> {
     // The link settings (115200 8N1) are always valid.
@@ -129,18 +110,15 @@ pub struct M5StopWatch {
 }
 
 impl BoardDef for M5StopWatch {
-    /// Rear pins to UART0, then the AMOLED reset pulse.
-    fn bring_up(&mut self) -> BringUp {
+    /// Rear pins to UART0.
+    fn bring_up(&mut self) {
         let Ok(mut i2c) = sys_i2c(&mut self.i2c0, &mut self.sda, &mut self.scl) else {
-            return BringUp::default();
+            return;
         };
         // Without the expander the rear pins stay at their default (UART).
         let _ = ioe_update(&mut i2c, IOE_REG_OUT_L, 0, PYG1_BIT)
             .and_then(|_| ioe_update(&mut i2c, IOE_REG_DRV_L, 0, PYG1_BIT))
             .and_then(|_| ioe_update(&mut i2c, IOE_REG_MODE_L, PYG1_BIT, 0));
-        BringUp {
-            display_ready: release_display_reset(&mut i2c).is_ok(),
-        }
     }
 
     fn pmic_download_supported(&self) -> bool {
@@ -214,36 +192,6 @@ pub fn start(armed: WatchdogArmed, pins: DagonPins, cfg: NodeConfig, liveness: &
         board,
     };
     node::start(armed, p, pins.link_irq, cfg, liveness);
-}
-
-/// The AMOLED's bus pins (QSPI on SPI2 with a DMA channel); fill it with
-/// [`display_pins!`]. The TE line (G38) is not used.
-pub struct DisplayPins {
-    pub spi2: SPI2<'static>,
-    pub dma: DMA_CH0<'static>,
-    pub cs: GPIO39<'static>,
-    pub sck: GPIO40<'static>,
-    pub d0: GPIO41<'static>,
-    pub d1: GPIO42<'static>,
-    pub d2: GPIO46<'static>,
-    pub d3: GPIO45<'static>,
-}
-
-/// `let screen = display_pins!(p);`
-#[macro_export]
-macro_rules! display_pins {
-    ($p:ident) => {
-        $crate::DisplayPins {
-            spi2: $p.SPI2,
-            dma: $p.DMA_CH0,
-            cs: $p.GPIO39,
-            sck: $p.GPIO40,
-            d0: $p.GPIO41,
-            d1: $p.GPIO42,
-            d2: $p.GPIO46,
-            d3: $p.GPIO45,
-        }
-    };
 }
 
 /// Text console on both the rear UART and USB Serial/JTAG (USB-C). The USB

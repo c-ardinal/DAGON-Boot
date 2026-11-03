@@ -75,7 +75,10 @@ On load: unknown fields; unique MCU ids, wire ids, flash map names and board
 ids; a board's MCU exists; every slot, detached header and layout region
 lies inside every flash map of the MCU and none overlap; one slot per image
 and binding; detached headers inside their partition; referenced files are
-relative, stay inside the package and (when loaded from disk) exist.
+relative, stay inside the package and (when loaded from disk) exist; so do
+part folders (`sub`), and part `name` / `bin` are plain names. Addresses
+that run past 32 bits are errors. Inline `[board.<id>]` boards have no
+package, so they may not list parts.
 Doctor `fix` and writer commands from a project definition never run
 without the user's explicit confirmation.
 

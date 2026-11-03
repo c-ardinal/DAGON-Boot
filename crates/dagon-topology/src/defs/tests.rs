@@ -4,7 +4,7 @@
 
 use std::path::{Path, PathBuf};
 
-use super::load::{parse_mcu_dir, parse_mcu_text};
+use super::load::{parse_board_dir, parse_mcu_dir, parse_mcu_text};
 use super::*;
 use crate::{boards, check, mcu_id_of, port_kind_of};
 
@@ -218,6 +218,7 @@ fn write(path: &Path, text: &str) {
 fn fake_mcu_and_board_load_from_a_project_without_code_changes() {
     let dir = scratch("fake");
     write(&dir.join("defs/fake-m0/dagon-mcu.toml"), FAKE_MCU);
+    std::fs::create_dir_all(dir.join("defs/fake-m0/bootcore")).unwrap();
     let board = FAKE_BOARD.replace("product", "[board.fake-board]\nproduct");
     write(
         &dir.join("dagon.toml"),
@@ -254,6 +255,7 @@ fn fake_mcu_and_board_load_from_a_project_without_code_changes() {
 #[test]
 fn project_may_not_redefine_an_id() {
     let dir = scratch("redefine");
+    std::fs::create_dir_all(dir.join("m/bootcore")).unwrap();
     let board = FAKE_BOARD.replace("product", "[board.nucleo-f401re]\nproduct");
     write(
         &dir.join("dagon.toml"),
@@ -280,7 +282,10 @@ fn project_may_not_redefine_an_id() {
     let e = Registry::load(&[Source::Project(&dir.join("dagon.toml"))]).unwrap_err();
     assert!(e.msg.contains("wire_id"), "{e}");
 
-    write(&dir.join("m/dagon-mcu.toml"), &FAKE_MCU.replace("0x7F01", "0"));
+    write(
+        &dir.join("m/dagon-mcu.toml"),
+        &FAKE_MCU.replace("0x7F01", "0"),
+    );
     let e = Registry::load(&[Source::Project(&dir.join("dagon.toml"))]).unwrap_err();
     assert!(e.msg.contains("wire_id 0"), "{e}");
 
@@ -402,4 +407,120 @@ fn referenced_files_exist_and_stay_inside_the_package() {
     write(&pkg.join("vendor/bootloader.bin"), "");
     assert_eq!(parse_mcu_dir(&pkg).unwrap().id, "esp32s3");
     std::fs::remove_dir_all(dir).unwrap();
+}
+
+/// Path escapes as TOML string bodies (`\\` is one backslash).
+const ESCAPES: [&str; 7] = [
+    "../../outside",
+    "bootcore/../../x",
+    "/abs",
+    "C:/x",
+    "C:x",
+    "boot\\\\core",
+    "./bootcore",
+];
+
+#[test]
+fn part_folders_and_names_stay_inside_the_package() {
+    for bad in ESCAPES {
+        let t = FAKE_MCU.replace("sub = \"bootcore\"", &format!("sub = \"{bad}\""));
+        let e = mcu_err(&t);
+        assert!(e.contains("inside the package"), "{bad}: {e}");
+    }
+    for bad in ["../x", "a/b", "a\\\\b", "", "C:x"] {
+        let t = FAKE_MCU.replace("name = \"bootcore\"", &format!("name = \"{bad}\""));
+        let e = mcu_err(&t);
+        assert!(e.contains("part name/bin"), "{bad}: {e}");
+        let t = FAKE_MCU.replace("sub = \"bootcore\"", &format!("bin = \"{bad}\""));
+        let e = mcu_err(&t);
+        assert!(e.contains("part name/bin"), "{bad}: {e}");
+    }
+}
+
+#[test]
+fn part_folders_exist_on_disk_and_symlinks_cannot_leave() {
+    let dir = scratch("parts");
+    let pkg = dir.join("pkg");
+    write(&pkg.join("dagon-mcu.toml"), FAKE_MCU);
+    let e = parse_mcu_dir(&pkg).unwrap_err().to_string();
+    assert!(e.contains("'bootcore' is not a folder"), "{e}");
+    std::fs::create_dir_all(pkg.join("bootcore")).unwrap();
+    assert_eq!(parse_mcu_dir(&pkg).unwrap().id, "fake-m0");
+
+    let board = dir.join("board");
+    let text = format!("id = \"b\"\n{FAKE_BOARD}\n[[part]]\nname = \"factory\"\nsub = \"fw\"\n");
+    write(&board.join("dagon-board.toml"), &text);
+    let e = parse_board_dir(&board).unwrap_err().to_string();
+    assert!(e.contains("'fw' is not a folder"), "{e}");
+    for bad in ESCAPES {
+        write(
+            &board.join("dagon-board.toml"),
+            &text.replace("\"fw\"", &format!("\"{bad}\"")),
+        );
+        let e = parse_board_dir(&board).unwrap_err().to_string();
+        assert!(e.contains("inside the package"), "{bad}: {e}");
+    }
+
+    // A folder link pointing out of the package (skipped where links need
+    // privileges the test run lacks, e.g. Windows without developer mode).
+    std::fs::create_dir_all(dir.join("outside")).unwrap();
+    std::fs::remove_dir_all(pkg.join("bootcore")).unwrap();
+    #[cfg(unix)]
+    let linked = std::os::unix::fs::symlink(dir.join("outside"), pkg.join("bootcore"));
+    #[cfg(windows)]
+    let linked = std::os::windows::fs::symlink_dir(dir.join("outside"), pkg.join("bootcore"));
+    match linked {
+        Ok(()) => {
+            let e = parse_mcu_dir(&pkg).unwrap_err().to_string();
+            assert!(e.contains("'bootcore' is not a folder inside"), "{e}");
+        }
+        Err(e) => eprintln!("symlink case skipped: {e}"),
+    }
+    std::fs::remove_dir_all(dir).unwrap();
+}
+
+#[test]
+fn inline_project_boards_have_no_parts() {
+    let dir = scratch("inline-parts");
+    let board = FAKE_BOARD
+        .replace("mcu = \"fake-m0\"", "mcu = \"rp2040\"")
+        .replace("0x20_0000", "0x40_0000")
+        .replace("product", "[board.mine]\nproduct");
+    write(
+        &dir.join("dagon.toml"),
+        &format!("{board}\n[[board.mine.part]]\nname = \"factory\"\n"),
+    );
+    let e = Registry::load(&[Source::Project(&dir.join("dagon.toml"))]).unwrap_err();
+    assert!(e.msg.contains("no parts"), "{e}");
+    write(&dir.join("dagon.toml"), &board);
+    let r = Registry::load(&[Source::Project(&dir.join("dagon.toml"))]).unwrap();
+    assert_eq!(r.board("mine").unwrap().mcu, "rp2040");
+    std::fs::remove_dir_all(dir).unwrap();
+}
+
+#[test]
+fn addresses_near_u32_max_are_errors_not_overflows() {
+    let t = FAKE_MCU.replace("at = 0x0015_0000", "at = 0xFFFF_FF00");
+    let e = mcu_err(&t);
+    assert!(e.contains("32-bit address space"), "{e}");
+    let t = FAKE_MCU.replace(
+        "at = 0x0010_0000\nsize = 0x8000",
+        "at = 0xFFFF_F000\nsize = 0x1000",
+    );
+    // Ends exactly at 2^32: one past the address space.
+    let e = mcu_err(&t);
+    assert!(e.contains("32-bit address space"), "{e}");
+    let t = FAKE_MCU.replace(
+        "at = 0x0010_0000\nsize = 0x8000",
+        "at = 0xFFFF_E000\nsize = 0x1000",
+    );
+    let e = mcu_err(&t);
+    assert!(e.contains("outside flash map"), "{e}");
+    let text = include_str!("../../../../targets/mcu/esp32s3/dagon-mcu.toml");
+    let csv = include_str!("../../../../targets/mcu/esp32s3/partitions.csv")
+        .replace("0x710000, 64K", "0xFFFFF000, 0x4000");
+    let e = parse_mcu_text(text, &[("partitions.csv", &csv)])
+        .unwrap_err()
+        .to_string();
+    assert!(e.contains("32-bit address space"), "{e}");
 }

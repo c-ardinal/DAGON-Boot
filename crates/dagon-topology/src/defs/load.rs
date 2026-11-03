@@ -4,7 +4,9 @@
 use std::fmt;
 use std::path::{Component, Path, PathBuf};
 
-use super::{Binding, BoardDef, McuDef, Partition, Placement, Registry, Slot, Writer, HEADER};
+use super::{
+    Binding, BoardDef, McuDef, Part, Partition, Placement, Registry, Slot, Writer, HEADER,
+};
 
 pub const MCU_FILE: &str = "dagon-mcu.toml";
 pub const BOARD_FILE: &str = "dagon-board.toml";
@@ -63,8 +65,23 @@ impl Pkg<'_> {
         }
     }
 
-    /// Checks `rel` stays inside the package (and exists, on disk).
+    /// Checks the file `rel` stays inside the package (and exists, on disk).
     fn check(&self, rel: &str) -> Result<(), DefError> {
+        self.contained(rel, true)
+    }
+
+    /// Checks the folder `rel` stays inside the package (and exists, on
+    /// disk); "" is the package itself.
+    fn check_dir(&self, rel: &str) -> Result<(), DefError> {
+        if rel.is_empty() {
+            return Ok(());
+        }
+        self.contained(rel, false)
+    }
+
+    /// Relative, plain components only (no `..`, root, drive or `\`); on
+    /// disk the resolved path (symlinks followed) must stay in the package.
+    fn contained(&self, rel: &str, file: bool) -> Result<(), DefError> {
         let at = || self.label();
         let p = Path::new(rel);
         let plain = !rel.is_empty()
@@ -80,9 +97,31 @@ impl Pkg<'_> {
         let inside = std::fs::canonicalize(dir.join(p))
             .ok()
             .zip(std::fs::canonicalize(dir).ok())
-            .is_some_and(|(f, d)| f.starts_with(d) && f.is_file());
+            .is_some_and(|(f, d)| f.starts_with(d) && if file { f.is_file() } else { f.is_dir() });
         if !inside {
-            return err(at(), format!("'{rel}' is not a file inside the package"));
+            let what = if file { "file" } else { "folder" };
+            return err(at(), format!("'{rel}' is not a {what} inside the package"));
+        }
+        Ok(())
+    }
+
+    /// Part folders stay in the package; names and binary targets are
+    /// plain names.
+    fn check_parts(&self, parts: &[Part]) -> Result<(), DefError> {
+        for p in parts {
+            for name in std::iter::once(&p.name).chain(&p.bin) {
+                let plain = !name.is_empty()
+                    && name
+                        .bytes()
+                        .all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_');
+                if !plain {
+                    return err(
+                        self.label(),
+                        format!("part name/bin '{name}' must be letters, digits, '-' or '_'"),
+                    );
+                }
+            }
+            self.check_dir(&p.sub)?;
         }
         Ok(())
     }
@@ -153,7 +192,8 @@ pub(super) fn builtin() -> Result<Registry, DefError> {
             .push(parse_mcu(text, &Pkg::Embedded { label, files })?);
     }
     for (label, text) in BUILTIN_BOARDS {
-        reg.boards.push(parse_board(label, text)?);
+        reg.boards
+            .push(parse_board(text, &Pkg::Embedded { label, files: &[] })?);
     }
     validate(&reg)?;
     Ok(reg)
@@ -208,8 +248,8 @@ fn tree(root: &Path) -> Result<Registry, DefError> {
         reg.mcus.push(parse_mcu(&text, &Pkg::Dir(dir))?);
     }
     for dir in packages(&targets.join("boards"), BOARD_FILE)? {
-        let path = dir.join(BOARD_FILE);
-        reg.boards.push(parse_board(path.display(), &read(&path)?)?);
+        let text = read(&dir.join(BOARD_FILE))?;
+        reg.boards.push(parse_board(&text, &Pkg::Dir(dir))?);
     }
     Ok(reg)
 }
@@ -253,6 +293,12 @@ fn project(reg: &mut Registry, dagon_toml: &Path) -> Result<(), DefError> {
         let b: BoardDef = t
             .try_into()
             .or_else(|e| err(format!("{at} [board.{id}]"), e.to_string()))?;
+        if !b.parts.is_empty() {
+            return err(
+                &at,
+                format!("board.{id}: an inline board has no package, so no parts"),
+            );
+        }
         if reg.board(&b.id).is_some() {
             return err(&at, format!("board '{id}' is already defined"));
         }
@@ -261,8 +307,10 @@ fn project(reg: &mut Registry, dagon_toml: &Path) -> Result<(), DefError> {
     Ok(())
 }
 
-fn parse_board(at: impl fmt::Display, text: &str) -> Result<BoardDef, DefError> {
-    toml::from_str(text).or_else(|e| err(at, e.to_string()))
+fn parse_board(text: &str, pkg: &Pkg<'_>) -> Result<BoardDef, DefError> {
+    let b: BoardDef = toml::from_str(text).or_else(|e| err(pkg.label(), e.to_string()))?;
+    pkg.check_parts(&b.parts)?;
+    Ok(b)
 }
 
 fn parse_mcu(text: &str, pkg: &Pkg<'_>) -> Result<McuDef, DefError> {
@@ -280,6 +328,7 @@ fn parse_mcu(text: &str, pkg: &Pkg<'_>) -> Result<McuDef, DefError> {
         pkg.check(bootloader)?;
         pkg.check(checksums)?;
     }
+    pkg.check_parts(&m.parts)?;
     m.slots = m
         .slot_defs
         .iter()
@@ -347,6 +396,11 @@ fn resolve(table: &[Partition], s: &super::SlotDef) -> Result<Slot, String> {
         }
         _ => return Err(format!("{what}: give either at + size or partition")),
     };
+    if start.checked_add(size).is_none() {
+        return Err(format!(
+            "{what}: {start:#x}+{size:#x} runs past the 32-bit address space"
+        ));
+    }
     let detached = (s.header_at, &s.header_partition, s.header);
     let slot = |header_addr, load_addr, max_payload| Slot {
         image: s.image,
@@ -374,7 +428,10 @@ fn resolve(table: &[Partition], s: &super::SlotDef) -> Result<Slot, String> {
                     "{what}: header_offset is outside partition '{name}'"
                 ));
             }
-            Ok(slot(p.offset + s.header_offset, start, size))
+            let at = p.offset.checked_add(s.header_offset).ok_or_else(|| {
+                format!("{what}: header in '{name}' runs past the 32-bit address space")
+            })?;
+            Ok(slot(at, start, size))
         }
         (_, _, Placement::Detached) => Err(format!(
             "{what}: a detached header needs header_at or header_partition"
@@ -513,6 +570,11 @@ pub(super) fn parse_mcu_text(text: &str, files: &[(&str, &str)]) -> Result<McuDe
             files,
         },
     )
+}
+
+#[cfg(test)]
+pub(super) fn parse_board_dir(dir: &Path) -> Result<BoardDef, DefError> {
+    parse_board(&read(&dir.join(BOARD_FILE))?, &Pkg::Dir(dir.to_path_buf()))
 }
 
 #[cfg(test)]

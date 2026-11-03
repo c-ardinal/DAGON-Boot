@@ -39,6 +39,30 @@ fn package(clone: &Path, name: &str, meta: &str, template: &[(&str, &str)]) {
     }
 }
 
+/// The template the M5StopWatch board package ships.
+const WATCH_TEMPLATE: &[(&str, &str)] = &[
+    (
+        ".cargo/config.toml",
+        include_str!("../../../../targets/boards/m5stopwatch/template/.cargo/config.toml"),
+    ),
+    (
+        "Cargo.toml.tpl",
+        include_str!("../../../../targets/boards/m5stopwatch/template/Cargo.toml.tpl"),
+    ),
+    (
+        "rust-toolchain.toml",
+        include_str!("../../../../targets/boards/m5stopwatch/template/rust-toolchain.toml"),
+    ),
+    (
+        "src/app.rs",
+        include_str!("../../../../targets/boards/m5stopwatch/template/src/app.rs"),
+    ),
+    (
+        "src/main.rs",
+        include_str!("../../../../targets/boards/m5stopwatch/template/src/main.rs"),
+    ),
+];
+
 // The manifest under its template name, as the board packages ship it.
 const F401_TEMPLATE: &[(&str, &str)] = &[
     (
@@ -54,7 +78,7 @@ const F401_TEMPLATE: &[(&str, &str)] = &[
 fn clone(d: &Path) -> DagonSource {
     let c = d.join("dagon");
     package(&c, "dagon-mcu-esp32s3", "", &[]);
-    package(&c, "dagon-board-m5stopwatch", "", &[]);
+    package(&c, "dagon-board-m5stopwatch", "", WATCH_TEMPLATE);
     package(&c, "dagon-board-nucleo-f401re", "", F401_TEMPLATE);
     DagonSource {
         path: Some(c),
@@ -91,7 +115,7 @@ fn desk_demo_uses_each_packages_template_and_skips_what_is_missing() {
         .contains("dagon-board-waveshare-rp2040-touch-lcd-1-28"));
     assert!(!base.join("nodes/hub").exists());
 
-    // ESP32-S3: the template built into the CLI, on the real package API.
+    // ESP32-S3: the template the board package ships, on the real package API.
     let watch = read(&base, "nodes/watch/Cargo.toml");
     assert!(watch.contains("name = \"watch\""));
     assert!(watch.contains("dagon-board-m5stopwatch = { path = "));
@@ -199,7 +223,7 @@ fn a_release_source_pins_the_git_tag_and_reads_its_packages_from_cargos_checkout
     let d = tmp("git");
     // A stand-in release repository, tagged, served from a local file URL.
     let c = d.join("release");
-    package(&c, "dagon-board-m5stopwatch", "", &[]);
+    package(&c, "dagon-board-m5stopwatch", "", WATCH_TEMPLATE);
     package(
         &c,
         "dagon-format",

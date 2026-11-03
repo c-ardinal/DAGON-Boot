@@ -15,8 +15,7 @@
 //!
 //! The files of a node come from its package's project template: a
 //! `template/` folder shipped inside the board (or MCU) package, so the
-//! package owns its start-up code, else a copy built into this CLI
-//! (crates/dagon-cli/templates/<package>/). Placeholders: `{{node}}`,
+//! package owns its start-up code. Placeholders: `{{node}}`,
 //! `{{tag}}`, `{{dep:<package>}}` (the dependency line for that package).
 //!
 //! `dagon gen` rewrites only wiring.rs and the DAGON package entries of
@@ -309,22 +308,11 @@ fn dependency(name: &str, src: &DagonSource, base: &Path) -> Result<String, Stri
     }
 }
 
-/// Project template files of a package: `template/` shipped inside the
-/// package (its own snippet), else the copy built into this CLI.
-fn template_for(name: &str, dir: Option<&Path>) -> Option<Vec<(String, String)>> {
-    if let Some(t) = dir.map(|d| d.join("template")).filter(|t| t.is_dir()) {
-        let mut files = Vec::new();
-        collect(&t, "", &mut files);
-        if !files.is_empty() {
-            return Some(real_names(files));
-        }
-    }
-    let built_in: Vec<(String, String)> = templates::TEMPLATES
-        .iter()
-        .filter(|(p, _, _)| *p == name)
-        .map(|(_, rel, text)| (rel.to_string(), text.to_string()))
-        .collect();
-    (!built_in.is_empty()).then(|| real_names(built_in))
+/// Project template files of a package: the `template/` it ships.
+fn template_for(dir: &Path) -> Option<Vec<(String, String)>> {
+    let mut files = Vec::new();
+    collect(&dir.join("template"), "", &mut files);
+    (!files.is_empty()).then(|| real_names(files))
 }
 
 /// Suffix of template files kept under another name: a template manifest
@@ -364,10 +352,6 @@ fn collect(dir: &Path, rel: &str, out: &mut Vec<(String, String)>) {
             out.push((r, text));
         }
     }
-}
-
-mod templates {
-    include!(concat!(env!("OUT_DIR"), "/templates.rs"));
 }
 
 /// Fills `{{node}}`, `{{tag}}` and `{{dep:<package>}}` in a template file.
@@ -651,8 +635,8 @@ fn node_files(
     })?;
     let name = f.name;
     let hops = hop_placeholders(t, n)?;
-    let files = template_for(&name, Some(&f.dir))
-        .ok_or_else(|| format!("{name} has no project template yet"))?;
+    let files =
+        template_for(&f.dir).ok_or_else(|| format!("{name} has no project template yet"))?;
     files
         .into_iter()
         .map(|(rel, text)| Ok((rel, render(&text, n, &hops, src, base)?)))

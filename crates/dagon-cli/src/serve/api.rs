@@ -512,8 +512,22 @@ fn sign_nodes(
     log: &mut dyn FnMut(&str),
     cancel: &AtomicBool,
 ) -> Result<Value, String> {
-    let mut out = Vec::new();
+    // Every node's inputs are checked before anything is removed: a typo
+    // in the list or a missing build leaves the signed images as they are.
+    let mut ready = Vec::new();
     for node in nodes {
+        if t.node(node).is_none() {
+            return Err(format!("no node '{node}' in the topology"));
+        }
+        let (built, elfs) = nodebuild::last_build(cfg, node)?;
+        let ver = built
+            .version
+            .ok_or_else(|| format!("{node} was built without a version in [build.{node}]"))?;
+        let parsed = version(&ver)?;
+        ready.push((node, ver, parsed, elfs));
+    }
+    let mut out = Vec::new();
+    for (node, ver, parsed, elfs) in ready {
         stop_if(cancel)?;
         let rec_path = inside(cfg, &sign_record_path(cfg, node))?;
         for p in [
@@ -528,12 +542,8 @@ fn sign_nodes(
                 Err(e) => return Err(format!("cannot remove {}: {e}", p.display())),
             }
         }
-        let (built, elfs) = nodebuild::last_build(cfg, node)?;
-        let ver = built
-            .version
-            .ok_or_else(|| format!("{node} was built without a version in [build.{node}]"))?;
         let opts = SignOpts {
-            version: version(&ver)?,
+            version: parsed,
             release_seq: 1,
             min_bootcore: Default::default(),
             proto: 1,
@@ -1042,12 +1052,22 @@ mod tests {
         std::fs::write(sign_path(&cfg, "seg", 'b'), b"changed").unwrap();
         assert!(signed_images(&cfg, v).is_err());
 
-        // An ELF changed after its build: signing fails and leaves nothing
-        // of seg to release.
+        // Signed again; then requests that fail their checks remove
+        // nothing: an unknown node, an ELF changed after its build.
+        sign_nodes(&cfg, &t, &seg, &key, &mut |_| {}, &AtomicBool::new(false)).unwrap();
+        let before = std::fs::read(sign_path(&cfg, "seg", 'a')).unwrap();
+        let typo = ["seg".to_string(), "sge".to_string()];
+        let e =
+            sign_nodes(&cfg, &t, &typo, &key, &mut |_| {}, &AtomicBool::new(false)).unwrap_err();
+        assert!(e.contains("sge"), "{e}");
         std::fs::write(nodebuild::elf_path(&cfg, "seg", 'a'), b"later").unwrap();
         assert!(sign_nodes(&cfg, &t, &seg, &key, &mut |_| {}, &AtomicBool::new(false)).is_err());
-        assert!(!sign_path(&cfg, "seg", 'a').exists());
-        assert!(signed_images(&cfg, v).is_err());
+        assert_eq!(std::fs::read(sign_path(&cfg, "seg", 'a')).unwrap(), before);
+        assert_eq!(
+            signed_images(&cfg, v).unwrap().len(),
+            2,
+            "still the signed build"
+        );
         let _ = std::fs::remove_dir_all(&cfg.base);
     }
 

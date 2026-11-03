@@ -103,7 +103,7 @@ fn main() -> ! {
     node::install_watchdog(dagon.iwdg, &GUARD, period, &store);
     let (target, regs) = Board::open_link(dagon.link);
     let agent = Agent::new(
-        node::config(dagon_mcu_stm32f401re::TARGET_TAG),
+        node::config(dagon_mcu_stm32f401re::target_tag!()),
         store,
         node::SelfCheck(node::always),
     );

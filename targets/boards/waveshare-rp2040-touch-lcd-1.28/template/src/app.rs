@@ -20,7 +20,7 @@ pub fn self_check() -> bool {
 
 /// Starts your tasks; each takes one guard task from `first` on. `spare`
 /// holds the pins and peripherals DAGON does not use (GPIOs, I2C1, SPI0,
-/// UART0/1, PIO1, ADC, DMA channels).
+/// UART0/1, PIO1, ADC, DMA channels, PWM slices, CORE1).
 pub fn start<const N: usize>(
     spawner: Spawner,
     spare: Spare,

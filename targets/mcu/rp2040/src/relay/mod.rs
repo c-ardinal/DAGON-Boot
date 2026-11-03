@@ -11,7 +11,7 @@
 //! (`Background`). [`start`] also spawns the watchdog feeder on the app's
 //! executor.
 
-pub mod nodes;
+pub use crate::nodes;
 mod pc;
 mod ports;
 pub mod state;

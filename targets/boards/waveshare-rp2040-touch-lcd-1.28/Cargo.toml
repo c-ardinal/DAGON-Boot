@@ -16,11 +16,22 @@ board = "waveshare-rp2040-touch-lcd-1.28"
 # The 親機 relay and the display by default: a generated node names this
 # package without features.
 default = ["relay", "display"]
+# The HAL side (embassy-rp): the board split, interrupts, link set-up.
+# Without it only the screen layout builds, for host tests:
+#   cargo test --no-default-features --target <host triple>
+hal = [
+    "dagon-mcu-rp2040/usb",
+    "dep:embassy-rp",
+    "dep:embassy-time",
+    "dep:embassy-executor",
+    "dep:embassy-futures",
+    "dep:static_cell",
+]
 # Forwarded to the MCU package: link the app for APP slot B.
 slot-b = ["dagon-mcu-rp2040/slot-b"]
 # The 親機 relay (`start`): PC link, I2C0 and PIO UART to sub nodes, the
 # STM32 ROM recovery lines.
-relay = ["dagon-mcu-rp2040/relay"]
+relay = ["hal", "dagon-mcu-rp2040/relay"]
 # The round display's home screen of the relay (`display`).
 display = ["relay"]
 # The display first shows a test pattern and the clock set-up (bring-up).
@@ -29,13 +40,13 @@ diag = []
 diag-panic = ["dagon-mcu-rp2040/diag-panic"]
 
 [dependencies]
-dagon-mcu-rp2040 = { path = "../../mcu/rp2040", default-features = false, features = ["usb"] }
+dagon-mcu-rp2040 = { path = "../../mcu/rp2040", default-features = false }
 dagon-format = { path = "../../../crates/dagon-format" }
 dagon-proto = { path = "../../../crates/dagon-proto" }
-embassy-rp = { version = "0.10.0", features = ["rp2040"] }
-embassy-time = "0.5"
-embassy-executor = "0.10"
-embassy-futures = "0.1"
+embassy-rp = { version = "0.10.0", features = ["rp2040"], optional = true }
+embassy-time = { version = "0.5", optional = true }
+embassy-executor = { version = "0.10", optional = true }
+embassy-futures = { version = "0.1", optional = true }
 embedded-graphics = "0.8"
 heapless = "0.9"
-static_cell = "2"
+static_cell = { version = "2", optional = true }

@@ -9,7 +9,7 @@ use portable_atomic::{AtomicU32, Ordering};
 
 use dagon_agent::SlotStore;
 use dagon_port::{Nrst, SubControl};
-use dagon_proto::payload::{boot0, link, nrst, Relay, Show, SlotState, SubCtl};
+use dagon_proto::payload::{boot0, link, nrst, HelloResp, Relay, Show, StatusResp, SubCtl};
 use dagon_proto::{flags, max_payload, Cmd, Frame, Status, HEADER_LEN, MAX_FRAME};
 use embassy_executor::Spawner;
 use embassy_rp::peripherals::USB;
@@ -19,12 +19,11 @@ use heapless::Vec;
 
 use super::nodes::{self, SubNode};
 use super::ports::{Op, Port, Req, I2C_PORT, UART_PORT};
-use super::state::{self, Progress, Seen, Shade};
+use super::state::{self, Progress, Seen};
 use super::task;
 use crate::arm::step;
 use crate::cmd;
 use crate::node::AppAgent;
-use crate::store::ACTIVE;
 use crate::sub::SubLines;
 use crate::usb::{self, CdcLink, REBOOT_DELAY};
 use crate::watchdog::Watch;
@@ -83,15 +82,7 @@ impl Pc {
     /// display copy) with the other tasks.
     fn publish(&mut self, subs: bool) {
         let st = self.agent.store().status();
-        let me = st.slots[ACTIVE as usize];
-        state::set_hub(Seen {
-            version: Some(me.version),
-            shade: if me.state == SlotState::Trying {
-                Shade::Trial
-            } else {
-                Shade::Confirmed
-            },
-        });
+        state::set_hub(Seen::from_status(&st));
         if subs {
             state::set_subs(nodes::load(&mut self.agent.store().flash, self.fallback));
         }
@@ -184,8 +175,21 @@ impl Pc {
         if !present {
             return (Status::Unsupported, 0);
         }
-        self.via(port, Op::Relay, r.addr, r.timeout_ms, 0, r.inner)
-            .await
+        let (status, n) = self
+            .via(port, Op::Relay, r.addr, r.timeout_ms, 0, r.inner)
+            .await;
+        if status == Status::Ok {
+            let max = if r.link == link::I2C0 {
+                max_payload::I2C
+            } else {
+                max_payload::UART
+            };
+            let answer = &self.resp[HEADER_LEN + 1..HEADER_LEN + 1 + n];
+            if let Some(seen) = relayed_seen(answer, max) {
+                state::set_seen_at(r.link, r.addr, seen);
+            }
+        }
+        (status, n)
     }
 
     /// BOOT0 first, then NRST (a pulse samples the new BOOT0).
@@ -230,5 +234,20 @@ fn show(p: &[u8]) -> Status {
             Status::Ok
         }
         Err(e) => e,
+    }
+}
+
+/// What a relayed HELLO or STATUS answer tells about its node.
+fn relayed_seen(frame: &[u8], max: usize) -> Option<Seen> {
+    let (f, _) = Frame::decode(frame, max).ok()?;
+    let (Status::Ok, body) = dagon_proto::split_status(f.payload)? else {
+        return None;
+    };
+    match Cmd::from_u8(f.cmd)? {
+        Cmd::Hello => Some(Seen::from_hello(HelloResp::parse(body).ok().as_ref())),
+        Cmd::Status => StatusResp::parse(body)
+            .ok()
+            .map(|st| Seen::from_status(&st)),
+        _ => None,
     }
 }

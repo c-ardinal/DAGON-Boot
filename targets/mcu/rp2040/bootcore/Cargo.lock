@@ -280,6 +280,7 @@ dependencies = [
  "dagon-proto",
  "embassy-rp",
  "embassy-time",
+ "heapless",
  "portable-atomic",
  "static_cell",
 ]

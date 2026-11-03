@@ -1396,15 +1396,33 @@ fn the_demo_uplink_follows_the_saved_topology() {
             (Some(kind), Some(max), Some(reconnect))
         );
     }
-    // A kind the demo does not simulate leaves the medium as it was.
-    let y = YAML.replacen(
-        "    tag: hub-rp2040-lcd
+    // An uplink the demo cannot simulate (a kind other than USB, UART or
+    // Wi-Fi, or a custom device driving the 親機) is refused: the saved
+    // 構成 and the simulated medium both stay on Wi-Fi.
+    for (uplink, kind, host) in [
+        ("{ kind: ble, host: browser }", "ble", "browser"),
+        ("{ kind: uart, host: embedded }", "uart", "embedded"),
+    ] {
+        let y = YAML.replacen(
+            "    tag: hub-rp2040-lcd
 ",
-        "    tag: hub-rp2040-lcd
-    uplink: { kind: ble }
-",
-        1,
-    );
-    assert_eq!(http(&d, "PUT", "/v1/topology", &h, y.as_bytes()).0, 200);
-    assert_eq!(sim(&d)["uplink"], "wifi-tcp");
+            &format!(
+                "    tag: hub-rp2040-lcd
+    uplink: {uplink}
+"
+            ),
+            1,
+        );
+        let (status, body) = http(&d, "PUT", "/v1/topology", &h, y.as_bytes());
+        assert_eq!(status, 422, "{uplink}");
+        let v: serde_json::Value = serde_json::from_str(&body).unwrap();
+        assert_eq!(v["demo_uplink"]["kind"], kind, "{body}");
+        assert_eq!(v["demo_uplink"]["host"], host, "{body}");
+        assert_eq!(sim(&d)["uplink"], "wifi-tcp");
+        let (_, saved) = http(&d, "GET", "/v1/topology", &h, b"");
+        assert!(saved.contains("kind: wifi-tcp"), "{saved}");
+    }
+    // Without an uplink the 親機 is on USB again.
+    assert_eq!(http(&d, "PUT", "/v1/topology", &h, YAML.as_bytes()).0, 200);
+    assert_eq!(sim(&d)["uplink"], "usb-cdc");
 }

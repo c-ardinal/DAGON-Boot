@@ -784,6 +784,11 @@ export const SAVE = {
   unsaved: '● 未保存',
   /** 422: the CLI's own check refused the 構成. */
   invalid: { chip: '× 保存できない', sentence: '問題を直してから、もう一度保存してください。' },
+  /** 422 in dagon demo: an uplink the demo cannot simulate (案). */
+  demoLink: {
+    chip: '× デモでは使えないつながり',
+    sentence: 'デモで試せる親機のつながりは USB・UART・Wi-Fi（つなぐ先はパソコンかブラウザ）です。そのどれかを選んでください。',
+  },
   /** 409: a job holds the project. */
   busy: { chip: '× 作業中', sentence: '作業が終わってから、もう一度保存してください。' },
   failed: { chip: '× 保存できない', sentence: 'ターミナルで dagon serve が動いているか確かめてから、もう一度保存してください。' },

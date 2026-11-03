@@ -7,6 +7,7 @@ use std::sync::Arc;
 
 use dagon_format::header::{image_kind, slot_binding, ImageHeader, HEADER_SIZE};
 use dagon_sign::to_hex;
+use dagon_topology::schema::{Uplink, UplinkHost};
 use serde_json::{json, Value};
 
 use super::http::{Request, Response};
@@ -220,13 +221,31 @@ const DEMO_HIDDEN: [&str; 4] = ["project", "flash", "doctor", "conform"];
 
 /// The simulated medium a 構成's 親機 uplink names (None: not one the
 /// demo simulates, or no 親機).
-fn demo_uplink(yaml: &str) -> Option<super::sim::Medium> {
-    let t = dagon_topology::parse_str(yaml).ok()?;
-    let hub = t
-        .nodes
-        .iter()
-        .find(|n| n.role == dagon_topology::schema::Role::Coordinator)?;
-    super::sim::Medium::of(dagon_topology::Topology::uplink(hub).kind)
+/// The medium `dagon demo` simulates for a 構成's 親機: Ok(None) without a
+/// 親機, Err(uplink) for one it cannot simulate (a kind other than USB, UART
+/// or Wi-Fi, or a custom device driving it), so the link on the screen is
+/// always the one in use.
+fn demo_uplink(yaml: &str) -> Result<Option<super::sim::Medium>, Uplink> {
+    let Some(hub) = dagon_topology::parse_str(yaml).ok().and_then(|t| {
+        t.nodes
+            .into_iter()
+            .find(|n| n.role == dagon_topology::schema::Role::Coordinator)
+    }) else {
+        return Ok(None);
+    };
+    let u = dagon_topology::Topology::uplink(&hub);
+    match super::sim::Medium::of(u.kind) {
+        Some(m) if u.host != UplinkHost::Embedded => Ok(Some(m)),
+        _ => Err(u),
+    }
+}
+
+fn host_name(h: UplinkHost) -> &'static str {
+    match h {
+        UplinkHost::PcCli => "pc-cli",
+        UplinkHost::Browser => "browser",
+        UplinkHost::Embedded => "embedded",
+    }
 }
 
 /// The longest GET /v1/sim/read waits for an answer.
@@ -488,16 +507,28 @@ fn topology_put(server: &Server, req: &Request) -> Res {
     if report.errors().any(|i| i.rule != "V-23") {
         return Err(Response::json(422, &json!({ "report": report_json })));
     }
+    // dagon demo: the 構成's uplink picks the simulated medium; one the
+    // demo cannot simulate is not saved, so the 構成 and the medium agree.
+    let medium = match server.sim.get().map(|_| demo_uplink(yaml)) {
+        Some(Err(u)) => {
+            return Err(Response::json(
+                422,
+                &json!({
+                    "report": report_json,
+                    "demo_uplink": { "kind": u.kind.name(), "host": host_name(u.host) },
+                }),
+            ))
+        }
+        Some(Ok(m)) => m,
+        None => None,
+    };
     let _lock = server
         .files
         .lock()
         .map_err(|_| Response::error(500, "lock"))?;
     crate::paths::write_atomic(&p, yaml.as_bytes()).map_err(|e| Response::error(500, &e))?;
-    // dagon demo: the 構成's uplink picks the simulated medium.
-    if let Some(sim) = server.sim.get() {
-        if let Some(m) = demo_uplink(yaml) {
-            sim.set_medium(m);
-        }
+    if let (Some(sim), Some(m)) = (server.sim.get(), medium) {
+        sim.set_medium(m);
     }
     Ok(json_ok(
         json!({ "report": report_json, "updatable": report.is_pushable() }),

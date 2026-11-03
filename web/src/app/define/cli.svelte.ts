@@ -72,7 +72,7 @@ export interface Layout {
 }
 
 /** How saving the 構成 to the project's YAML went. */
-export type SaveResult = 'saved' | 'invalid' | 'busy' | 'failed';
+export type SaveResult = 'saved' | 'invalid' | 'demoLink' | 'busy' | 'failed';
 
 export type JobKind = 'build' | 'sign' | 'release' | 'gen' | 'flash' | 'conform' | 'ai_topology' | string;
 export type JobState = 'queued' | 'running' | 'question' | 'succeeded' | 'failed' | 'cancelled' | 'unknown';
@@ -287,7 +287,12 @@ export class Cli {
         if (this.hello?.sim) await this.refreshHello();
         return 'saved';
       }
-      return r.status === 422 ? 'invalid' : r.status === 409 ? 'busy' : 'failed';
+      if (r.status === 422) {
+        // dagon demo: an uplink it cannot simulate is not saved (the link shown is the one in use).
+        const body = (await r.json().catch(() => null)) as { demo_uplink?: unknown } | null;
+        return body?.demo_uplink ? 'demoLink' : 'invalid';
+      }
+      return r.status === 409 ? 'busy' : 'failed';
     } catch {
       return 'failed';
     }

@@ -4,10 +4,10 @@
 use std::fmt;
 
 use dagon_format::header::{
-    self, build_flags, capabilities, image_kind, placement, slot_binding, ImageHeader, HEADER_SIZE,
-    SIGNED_LEN,
+    self, build_flags, capabilities, image_kind, slot_binding, ImageHeader, HEADER_SIZE, SIGNED_LEN,
 };
 use dagon_format::{sha256, Version};
+use dagon_topology::defs::Registry;
 use ed25519_compact::KeyPair;
 
 pub use dagon_topology::{mcu_id_of, parse_version, port_kind_of};
@@ -32,63 +32,26 @@ pub struct Slot {
     pub slot_binding: u8,
 }
 
-const KIB: u32 = 1024;
-const MIB: u32 = 1024 * KIB;
-
-const fn inline(base: u32, size: u32, binding: u8) -> Slot {
-    Slot {
-        header_addr: base,
-        load_addr: base + HEADER_SIZE as u32,
-        max_payload: size - HEADER_SIZE as u32,
-        placement: placement::INLINE,
-        slot_binding: binding,
-    }
+/// Slot for an image of `kind` in slot `slot` (`slot_binding::A` / `B`) on
+/// `mcu` (topology MCU id), from the builtin MCU definitions. Single-slot
+/// images (a trailer boot core, images bound to `any` slot) answer for
+/// slot A only.
+pub fn slot(mcu: &str, kind: u8, slot: u8) -> Option<Slot> {
+    slot_with(Registry::builtin(), mcu, kind, slot)
 }
 
-const RP2040_XIP: u32 = 0x1000_0000;
-const F401_FLASH: u32 = 0x0800_0000;
-/// ESP32-S3 `dagon` partition holding the detached headers.
-const ESP_DAGON_PART: u32 = 0x71_0000;
-
-/// Slot for an image of `kind` in slot `slot` (`slot_binding::A` / `B`) on
-/// `mcu` (topology MCU id). Single-slot images (F401 boot core, ESP images
-/// that run from either partition) answer for slot A only.
-pub fn slot(mcu: &str, kind: u8, slot: u8) -> Option<Slot> {
-    use slot_binding::{A, B};
-    let s = match (mcu, kind, slot) {
-        ("rp2040", image_kind::BOOTCORE, A) => inline(RP2040_XIP + 0x8000, 128 * KIB, A),
-        ("rp2040", image_kind::BOOTCORE, B) => inline(RP2040_XIP + 0x2_8000, 128 * KIB, B),
-        ("rp2040", image_kind::APP, A) => inline(RP2040_XIP + 0x4_8000, MIB, A),
-        ("rp2040", image_kind::APP, B) => inline(RP2040_XIP + 0x14_8000, MIB, B),
-        ("stm32f401re", image_kind::BOOTCORE, A) => Slot {
-            header_addr: F401_FLASH + 0x7E00,
-            load_addr: F401_FLASH,
-            max_payload: 0x7E00,
-            placement: placement::TRAILER,
-            slot_binding: A,
-        },
-        ("stm32f401re", image_kind::APP, A) => inline(F401_FLASH + 0x2_0000, 128 * KIB, A),
-        ("stm32f401re", image_kind::APP, B) => inline(F401_FLASH + 0x4_0000, 128 * KIB, B),
-        // ponytail: ESP images are MMU-mapped and run from either OTA
-        // partition, so load_addr names ota_0; per-partition headers are
-        // placed by the receiver.
-        ("esp32s3", image_kind::APP, A) => Slot {
-            header_addr: ESP_DAGON_PART,
-            load_addr: 0x11_0000,
-            max_payload: 3 * MIB,
-            placement: placement::DETACHED,
-            slot_binding: slot_binding::ANY,
-        },
-        ("esp32s3", image_kind::AGENT, A) => Slot {
-            header_addr: ESP_DAGON_PART + 0x2000,
-            load_addr: 0x1_0000,
-            max_payload: MIB,
-            placement: placement::DETACHED,
-            slot_binding: slot_binding::ANY,
-        },
-        _ => return None,
-    };
-    Some(s)
+/// [`slot`] from the MCU definitions of `reg`.
+pub fn slot_with(reg: &Registry, mcu: &str, kind: u8, slot: u8) -> Option<Slot> {
+    // ponytail: ESP images are MMU-mapped and run from either OTA
+    // partition, so load_addr names ota_0; per-partition headers are
+    // placed by the receiver.
+    reg.slot(mcu, kind, slot).map(|s| Slot {
+        header_addr: s.header_addr,
+        load_addr: s.load_addr,
+        max_payload: s.max_payload,
+        placement: s.placement.wire(),
+        slot_binding: s.binding.wire(),
+    })
 }
 
 /// Slot of an already-signed header (`slot_binding::ANY` maps to slot A).

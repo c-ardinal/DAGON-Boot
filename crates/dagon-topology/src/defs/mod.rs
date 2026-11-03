@@ -3,8 +3,6 @@
 //! `targets/README.md`. Kinds (port, image, placement, writer, link, ROM
 //! entry) are closed sets in code; everything else is data.
 
-#[cfg(test)]
-mod former;
 mod load;
 pub mod requirements;
 #[cfg(test)]

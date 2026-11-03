@@ -4,7 +4,6 @@
 
 use std::path::{Path, PathBuf};
 
-use super::former as boards;
 use super::load::{parse_board_dir, parse_mcu_dir, parse_mcu_text};
 use super::*;
 use crate::{mcu_id_of, port_kind_of};
@@ -17,18 +16,24 @@ fn source_root() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("../..")
 }
 
+// The values below are the port registry, flash maps and board table
+// the topology checks held (boards.rs) before they read the definitions.
+
 #[test]
 fn mcus_match_the_port_registry() {
     let ids: Vec<&str> = reg().mcus().iter().map(|m| m.id.as_str()).collect();
-    let table: Vec<&str> = boards::MCUS.iter().map(|m| m.id).collect();
-    assert_eq!(ids, table);
-    for t in boards::MCUS {
-        let m = reg().mcu(t.id).unwrap();
-        assert_eq!(m.port.as_str(), t.port, "{}", t.id);
-        assert_eq!(m.gpio_count, t.gpio_count, "{}", t.id);
-        assert_eq!(Some(m.wire_id), mcu_id_of(t.id), "{}", t.id);
+    assert_eq!(ids, ["rp2040", "stm32f401re", "esp32s3"]);
+    for (id, port, gpio_count) in [
+        ("rp2040", "self-boot", 30),
+        ("stm32f401re", "self-boot", 0),
+        ("esp32s3", "vendor-stage2", 49),
+    ] {
+        let m = reg().mcu(id).unwrap();
+        assert_eq!(m.port.as_str(), port, "{id}");
+        assert_eq!(m.gpio_count, gpio_count, "{id}");
+        assert_eq!(Some(m.wire_id), mcu_id_of(id), "{id}");
         assert!(port_kind_of(m.port.as_str()).is_some());
-        assert_eq!(reg().mcu_by_wire(m.wire_id).unwrap().id, t.id);
+        assert_eq!(reg().mcu_by_wire(m.wire_id).unwrap().id, id);
     }
 }
 
@@ -43,16 +48,17 @@ fn flash_maps_match_the_table() {
                 .map(move |f| (f.name.as_str(), m.id.as_str(), f.bytes))
         })
         .collect();
-    let table: Vec<(&str, &str, u32)> = boards::FLASH_MAPS
-        .iter()
-        .map(|f| (f.name, f.mcu, f.bytes))
-        .collect();
+    let table = [
+        ("rp2040-4m", "rp2040", 4 << 20),
+        ("f401-default", "stm32f401re", 512 << 10),
+        ("esp32s3-16m", "esp32s3", 16 << 20),
+    ];
     assert_eq!(all, table);
-    for t in boards::FLASH_MAPS {
-        let (m, f) = reg().flash_map(t.name).unwrap();
-        assert_eq!((m.id.as_str(), f.bytes), (t.mcu, t.bytes));
-        let d = boards::default_flash_map(t.mcu).unwrap();
-        assert_eq!(m.default_flash_map().name, d.name);
+    for (name, mcu, bytes) in table {
+        let (m, f) = reg().flash_map(name).unwrap();
+        assert_eq!((m.id.as_str(), f.bytes), (mcu, bytes));
+        // The first map of an MCU is its default (one each here).
+        assert_eq!(m.default_flash_map().name, name);
     }
 }
 
@@ -62,15 +68,115 @@ fn pairs(p: &[I2cPair]) -> Vec<(&str, &str, &str)> {
         .collect()
 }
 
-fn table_pairs(p: &[boards::I2cPair]) -> Vec<(&str, &str, &str)> {
-    p.iter().map(|p| (p.controller, p.sda, p.scl)).collect()
+type Pair = (&'static str, &'static str, &'static str);
+type FormerLink = (
+    LinkKind,
+    Option<UartIface>,
+    Option<u8>,
+    Option<u32>,
+    ControlKind,
+    Option<RomEntry>,
+);
+
+/// One board as the former table held it.
+struct Former {
+    id: &'static str,
+    product: &'static str,
+    mcu_name: &'static str,
+    mcu: &'static str,
+    header: &'static [(&'static str, Option<&'static str>)],
+    i2c_pairs: &'static [Pair],
+    rom_i2c_pairs: &'static [Pair],
+    i2c_target: bool,
+    flash_bytes: u32,
+    default_link: Option<FormerLink>,
+    drawing: &'static str,
 }
+
+const F401_ROM_I2C: &[Pair] = &[
+    ("i2c3", "PB4", "PA8"),
+    ("i2c1", "PB7", "PB6"),
+    ("i2c2", "PB3", "PB10"),
+];
+
+const FORMER_BOARDS: [Former; 3] = [
+    Former {
+        id: "waveshare-rp2040-touch-lcd-1.28",
+        product: "Waveshare RP2040-Touch-LCD-1.28",
+        mcu_name: "RP2040",
+        mcu: "rp2040",
+        header: &[
+            ("GPIO16", None),
+            ("GPIO17", None),
+            ("GPIO18", None),
+            ("GPIO26", None),
+            ("GPIO27", None),
+            ("GPIO28", None),
+        ],
+        i2c_pairs: &[("i2c0", "GPIO16", "GPIO17")],
+        rom_i2c_pairs: &[],
+        i2c_target: true,
+        flash_bytes: 4 << 20,
+        default_link: None,
+        drawing: "round-lcd",
+    },
+    Former {
+        id: "nucleo-f401re",
+        product: "NUCLEO-F401RE",
+        mcu_name: "STM32F401RE",
+        mcu: "stm32f401re",
+        header: &[
+            ("PB4", Some("D5")),
+            ("PA8", Some("D7")),
+            ("NRST", None),
+            ("BOOT0", None),
+        ],
+        i2c_pairs: &[
+            ("i2c3", "PB4", "PA8"),
+            ("i2c1", "PB7", "PB6"),
+            ("i2c2", "PB3", "PB10"),
+            ("i2c1", "PB9", "PB8"),
+        ],
+        rom_i2c_pairs: F401_ROM_I2C,
+        i2c_target: true,
+        flash_bytes: 512 << 10,
+        default_link: Some((
+            LinkKind::I2c,
+            None,
+            Some(0x42),
+            None,
+            ControlKind::Full,
+            Some(RomEntry::Stm32I2cRom),
+        )),
+        drawing: "nucleo-64",
+    },
+    Former {
+        id: "m5stopwatch",
+        product: "M5StopWatch",
+        mcu_name: "ESP32-S3",
+        mcu: "esp32s3",
+        header: &[("GPIO43", Some("G43")), ("GPIO44", Some("G44"))],
+        i2c_pairs: &[],
+        rom_i2c_pairs: &[],
+        i2c_target: false,
+        flash_bytes: 16 << 20,
+        default_link: Some((
+            LinkKind::Uart,
+            Some(UartIface::PioUart),
+            None,
+            Some(115_200),
+            ControlKind::Cooperative,
+            Some(RomEntry::ForceDownloadBoot),
+        )),
+        drawing: "stopwatch",
+    },
+];
 
 #[test]
 fn boards_match_the_table_field_for_field() {
     let ids: Vec<&str> = reg().boards().iter().map(|b| b.id.as_str()).collect();
-    assert_eq!(ids, boards::BOARDS.iter().map(|b| b.id).collect::<Vec<_>>());
-    for t in boards::BOARDS {
+    assert_eq!(ids, FORMER_BOARDS.iter().map(|b| b.id).collect::<Vec<_>>());
+    for t in &FORMER_BOARDS {
         let b = reg().board(t.id).unwrap();
         let m = reg().mcu(&b.mcu).unwrap();
         assert_eq!(b.product, t.product);
@@ -81,26 +187,19 @@ fn boards_match_the_table_field_for_field() {
             .iter()
             .map(|h| (h.pin.as_str(), h.label.as_deref()))
             .collect();
-        let want: Vec<(&str, Option<&str>)> =
-            t.header.iter().map(|h| (h.pin, h.position)).collect();
-        assert_eq!(header, want, "{}", t.id);
-        assert_eq!(pairs(&b.i2c_pairs), table_pairs(t.i2c_pairs), "{}", t.id);
+        assert_eq!(header, t.header, "{}", t.id);
+        assert_eq!(pairs(&b.i2c_pairs), t.i2c_pairs, "{}", t.id);
         let rom = m.rom_i2c.as_ref().map_or(vec![], |r| pairs(&r.pairs));
-        assert_eq!(rom, table_pairs(t.rom_i2c_pairs), "{}", t.id);
+        assert_eq!(rom, t.rom_i2c_pairs, "{}", t.id);
         assert_eq!(b.i2c_target, t.i2c_target);
         assert_eq!(b.flash_bytes, t.flash_bytes);
         assert_eq!(b.drawing, t.drawing);
         let link = b
             .default_link
             .map(|l| (l.kind, l.iface, l.addr, l.baud, l.control, l.rom_entry));
-        let want = t
-            .default_link
-            .map(|l| (l.kind, l.iface, l.addr, l.baud, l.control, l.rom_entry));
-        assert_eq!(link, want, "{}", t.id);
-        assert_eq!(
-            reg().default_board(t.mcu).map(|b| &b.id[..]),
-            boards::default_board(t.mcu).map(|b| b.id)
-        );
+        assert_eq!(link, t.default_link, "{}", t.id);
+        // The first board of an MCU is its default (one each here).
+        assert_eq!(reg().default_board(t.mcu).map(|b| &b.id[..]), Some(t.id));
     }
 }
 

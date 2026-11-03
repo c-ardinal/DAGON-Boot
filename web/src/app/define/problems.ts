@@ -47,7 +47,8 @@ function where(path: string, doc: Doc): Where {
 
 /** The chip of a problem (S23, S45): ! an error, ▲ a caution, ◇ a shape not updatable yet. */
 export function problemChip(p: Pick<Issue, 'rule' | 'severity'>): { mark: '!' | '▲' | '◇'; kind: 'error' | 'warning' | 'unsupported' } {
-  if (p.rule === 'V-23') return { mark: '◇', kind: 'unsupported' };
+  // V-24 (a hop the firmware cannot do yet) is the same kind of "not yet" as V-23.
+  if (p.rule === 'V-23' || p.rule === 'V-24') return { mark: '◇', kind: 'unsupported' };
   return p.severity === 'warning' ? { mark: '▲', kind: 'warning' } : { mark: '!', kind: 'error' };
 }
 

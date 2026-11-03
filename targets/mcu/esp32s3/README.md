@@ -7,16 +7,70 @@ and not on the board. Kind V: the stock ESP-IDF 2nd stage with app rollback
 | Module | Provides |
 |---|---|
 | `store` | the agent's receiver: OTA slots, detached headers, otadata (below) |
-| `node` | `arm_watchdog`, `start` (the link task), `running_version`, `display_ready`, `now_ms` |
+| `node` | `arm_watchdog`, `start` (the link task), `running_version`, `now_ms` |
 | `liveness`, `trial` | watchdog policy: no feed before CONFIRM, then deadline-based |
 | `rom`, `serve` | ENTER_ROM and what follows a reply |
-| `link` | link UART settings (`uart_config`, 115200 8N1), a polling `UartLink` |
+| `link` | link UART settings (`uart_config`, 115200 8N1) |
+| `links` | the node's uplinks as `Link`s (`Uart`, `UsbCdc`) and `LINK_KINDS` |
 | `flash`, `boot`, `sys` | `Flash`, `BootSelectV` over otadata, `Clock` / `Watchdog` / `Reset` |
 | `layout`, `partitions.csv`, `otadata`, `framer` | partition table (needs 8 MB flash or more), otadata, frame cutter |
 | `board` | the `BoardDef` trait a board crate implements |
 
 Reset on panic is on by default (feature `panic-reset`), so a trial image
 that panics rolls back.
+
+## Links
+
+Every hop carries whole DAGON frames through one interface,
+`dagon_mcu_common::link::Link` (`read_frame`, `write_frame`, `flush`,
+`max_payload`, `reconnect`); the serve loops are generic over it. The
+kinds this package offers (`links::LINK_KINDS`):
+
+| Kind | Up | Down |
+|---|---|---|
+| `usb-cdc` | Yes | No |
+| `uart` | Yes | No |
+| `i2c` | NotYet | No |
+| `ble` | NotYet | No |
+| `wifi-tcp` | NotYet | No |
+| `ethernet` | NotYet | No |
+| `can` | NotYet | No |
+
+- Up `uart`: UART0 at 115200 8N1 (`links::Uart`), and up `usb-cdc`: the
+  chip's USB Serial/JTAG (`links::UsbCdc`, `Reconnect::Reenumerates`);
+  the node serves both at once.
+
+### Generator contract
+
+The kind names are exactly the 構成's: `usb-cdc`, `uart`, `i2c`, `ble`,
+`wifi-tcp`, `ethernet`, `can`. In a project template:
+
+- `{{uplink}}` renders to one Rust path naming the node's uplink kind:
+  `dagon_mcu_esp32s3::links::Kind::<Variant>`;
+- `{{downlinks}}` renders to the downlink kinds, comma-separated (empty
+  for a 子機): `dagon_mcu_esp32s3::links::Kind::<Variant>, ...`.
+
+Variants by name: `usb-cdc` `UsbCdc`, `uart` `Uart`, `i2c` `I2c`, `ble`
+`Ble`, `wifi-tcp` `WifiTcp`, `ethernet` `Ethernet`, `can` `Can`. The
+template checks them at compile time; a kind this package does not offer
+in that direction stops the build with a message naming the hop, e.g.
+`uplink ble: not available yet on esp32s3`:
+
+```rust
+use dagon_mcu_esp32s3::links::{self, Kind};
+
+#[rustfmt::skip]
+const UPLINK: Kind = {{uplink}};
+#[rustfmt::skip]
+const DOWNLINKS: &[Kind] = &[{{downlinks}}];
+const _: () = links::require_uplink(UPLINK);
+const _: () = links::require_downlinks(DOWNLINKS);
+```
+
+The node serves UART and USB Serial/JTAG at once whichever is named the
+uplink (the check above still stops a kind not offered); link types are
+constructed as
+`dagon_mcu_esp32s3::links::<Kind>::new(..)`.
 
 ## Board layer
 
@@ -26,7 +80,7 @@ UART already set up on its pins with `link::uart_config()`, USB Serial/JTAG,
 the flash, the RTC timer, and a `&'static mut dyn BoardDef`:
 
 - `bring_up()`: runs once in the link task before it serves (IO expander pin
-  routing, releasing a display reset; the result feeds `display_ready`).
+  routing for the link). Displays and other peripherals are the app's.
 - `pmic_download_supported()` / `pmic_download()`: ENTER_ROM method 2
   through the board's power manager, if it has one.
 
@@ -49,8 +103,8 @@ and the node tag from the generated `wiring.rs`.
   bare `feed()`. A task that waits without a deadline is not blamed, a task
   stuck past its budget stops the watchdog feeding (owner-approved design).
 - There is no `UserIo` bundle: the app keeps the peripherals returned by
-  `esp_hal::init`, and the board package's macros (`dagon_pins!`, and e.g.
-  `display_pins!`) move out only what DAGON or a board extra takes.
+  `esp_hal::init`, and the board package's macro (`dagon_pins!`) moves out
+  only what DAGON takes.
 - The ESP-IDF 2nd stage ships prebuilt and unmodified in `vendor/`
   (`vendor/bootloader.bin`; provenance and rebuild steps in
   `vendor/PROVENANCE.md`); the factory firmware is a binary of the board

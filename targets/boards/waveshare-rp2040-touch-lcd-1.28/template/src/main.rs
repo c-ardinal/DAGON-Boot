@@ -8,14 +8,23 @@
 #![no_main]
 
 mod app;
-#[allow(dead_code)]
 mod wiring;
 
 use dagon_board_waveshare_rp2040_touch_lcd_1_28::{self as board, Board, BoardDef};
+use dagon_mcu_rp2040::links::{self, Kind};
 use dagon_mcu_rp2040::relay::{self, RelayConfig};
 use dagon_mcu_rp2040::watchdog::{now_ms, Guard, Trial};
 use embassy_executor::Spawner;
 use panic_halt as _;
+
+/// The hops of this node, from the 構成 (dagon gen writes them): the
+/// build stops here, naming the hop, if a kind is not available yet.
+#[rustfmt::skip]
+const UPLINK: Kind = {{uplink}};
+#[rustfmt::skip]
+const DOWNLINKS: &[Kind] = &[{{downlinks}}];
+const _: () = links::require_uplink(UPLINK);
+const _: () = links::require_downlinks(DOWNLINKS);
 
 /// Watchdog guard tasks: the relay's and the display's, then app.rs's.
 const TASKS: usize = board::APP_TASKS + app::TASKS;
@@ -36,6 +45,6 @@ async fn main(spawner: Spawner) {
         fallback: &[],
         self_check: app::self_check,
     };
-    let spare = board::start(spawner, dagon, io, &GUARD, cfg);
+    let spare = board::start(spawner, dagon, io, &GUARD, cfg, UPLINK, DOWNLINKS);
     app::start(spawner, spare, &GUARD, board::APP_TASKS);
 }

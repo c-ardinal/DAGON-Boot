@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'vitest';
 import { bandOf } from './band.ts';
-import { BAND, BUTTON } from './copy.ts';
+import { BAND, BUTTON, SIM } from './copy.ts';
 import { MACHINE, view, type ConnectFailure, type L } from './machine.ts';
 
 describe('bottom band', () => {
@@ -10,6 +10,14 @@ describe('bottom band', () => {
     expect(b.sentence).toBe(BAND.M03.sentence);
     expect(b.primary?.label).toBe(BUTTON.connectDiscover);
     expect(b.secondary).toEqual([]);
+  });
+
+  test('dagon demo: before connecting, the band says no device list appears for the simulated 親機', () => {
+    for (const st of ['L02', 'L03'] as const) {
+      expect(bandOf(st, { hasConfig: true }, { sim: true }).sentence).toBe(SIM.connect.sentence);
+    }
+    expect(bandOf('L04', { hasConfig: true }, { sim: true }).sentence).toBe(SIM.connect.sentence);
+    expect(bandOf('L02', { hasConfig: true }).sentence).toBe(BAND.M03.sentence);
   });
 
   test('a file for another 構成 (L17): choose another, or fix it in 定義; no sending from here', () => {

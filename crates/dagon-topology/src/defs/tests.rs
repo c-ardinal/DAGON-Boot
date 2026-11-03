@@ -286,11 +286,11 @@ fn checks_and_compile_follow_a_project_registry() {
     hub.nodes[0].board = None;
     hub.nodes[0].flash_map = None;
     let r = crate::check_with(&reg, &hub);
-    let v24: Vec<_> = r.errors().filter(|i| i.rule == "V-24").collect();
-    assert_eq!(v24.len(), 1, "{r:?}");
-    assert_eq!(v24[0].path, "nodes[0].mcu");
+    let v25: Vec<_> = r.errors().filter(|i| i.rule == "V-25").collect();
+    assert_eq!(v25.len(), 1, "{r:?}");
+    assert_eq!(v25[0].path, "nodes[0].mcu");
     assert_eq!(
-        v24[0].message,
+        v25[0].message,
         "fake-m0 cannot be the coordinator: its MCU definition has no [coordinator] section"
     );
 }

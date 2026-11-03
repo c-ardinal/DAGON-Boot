@@ -1,8 +1,10 @@
 //! Validation rules for `dagon topo check`.
 //!
-//! Errors V-01..V-21 (no V-19), V-23 and V-24, and one warning (V-22).
-//! Errors block `topo push`; warnings do not.
+//! Errors V-01..V-21 (no V-19), V-23 and V-25; warnings V-22 and V-24
+//! (V-24 is an error for an uplink on a 子機). Errors block `topo push`;
+//! warnings do not.
 
+use crate::links::{self, Dir};
 use std::collections::{BTreeMap, BTreeSet};
 
 use crate::defs::{BoardDef, Coordinator, McuDef, PortKind, Registry};
@@ -72,6 +74,7 @@ pub fn check_with(reg: &Registry, t: &Topology) -> Report {
     c.v22();
     c.v23();
     c.v24();
+    c.v25();
     Report { issues: c.issues }
 }
 
@@ -136,6 +139,69 @@ impl<'a> Ctx<'a> {
             path: path.into(),
             message: message.into(),
         });
+    }
+
+    fn warn(&mut self, rule: &'static str, path: impl Into<String>, message: impl Into<String>) {
+        self.issues.push(Issue {
+            rule,
+            severity: Severity::Warning,
+            path: path.into(),
+            message: message.into(),
+        });
+    }
+
+    /// Hops whose kind the MCU firmware at either end does not implement
+    /// yet (まだ使えないつながり): accepted and drawn, reported by name;
+    /// `dagon gen` refuses them. An uplink on a 子機 is an error.
+    fn v24(&mut self) {
+        for (i, n) in self.t.nodes.iter().enumerate() {
+            let Some(up) = n.uplink else { continue };
+            if n.role != Role::Coordinator {
+                self.err(
+                    "V-24",
+                    format!("nodes[{i}].uplink"),
+                    format!("'{}' is a 子機; only a 親機 has an uplink", n.id),
+                );
+                continue;
+            }
+            if links::known(&n.mcu) && !links::available(&n.mcu, Dir::Up).contains(&up.kind) {
+                self.warn(
+                    "V-24",
+                    format!("nodes[{i}].uplink.kind"),
+                    format!(
+                        "uplink of '{}' over {}: not available yet on {}",
+                        n.id,
+                        up.kind.name(),
+                        n.mcu
+                    ),
+                );
+            }
+        }
+        for (i, l) in self.links() {
+            let (Some(from), Some(to)) = (self.t.node(&l.from), self.t.node(&l.to)) else {
+                continue;
+            };
+            let missing: Vec<&str> = [(from, Dir::Down), (to, Dir::Up)]
+                .into_iter()
+                .filter(|(n, d)| {
+                    links::known(&n.mcu) && !links::available(&n.mcu, *d).contains(&l.kind)
+                })
+                .map(|(n, _)| n.mcu.as_str())
+                .collect();
+            if !missing.is_empty() {
+                self.warn(
+                    "V-24",
+                    format!("{}.kind", link_path(i)),
+                    format!(
+                        "link {} -> {} over {}: not available yet on {}",
+                        l.from,
+                        l.to,
+                        l.kind.name(),
+                        missing.join(", ")
+                    ),
+                );
+            }
+        }
     }
 
     fn coordinator(&self) -> Option<&'a Node> {
@@ -269,7 +335,11 @@ impl<'a> Ctx<'a> {
                     }
                 }
                 // Described only; V-23 says they are not updatable yet.
-                LinkKind::Can | LinkKind::Ethernet => {}
+                LinkKind::Can
+                | LinkKind::Ethernet
+                | LinkKind::UsbCdc
+                | LinkKind::Ble
+                | LinkKind::WifiTcp => {}
             }
         }
     }
@@ -361,11 +431,14 @@ impl<'a> Ctx<'a> {
         }
         for (i, l) in self.links() {
             let p = link_path(i);
-            if matches!(l.kind, LinkKind::Can | LinkKind::Ethernet) {
+            if !l.kind.compiles() {
                 self.err(
                     "V-23",
                     format!("{p}.kind"),
-                    "CAN and Ethernet links are not updatable yet",
+                    format!(
+                        "{} links between a 親機 and a 子機 are not updatable yet",
+                        l.kind.name()
+                    ),
                 );
             }
             match self.t.node(&l.from) {
@@ -396,7 +469,7 @@ impl<'a> Ctx<'a> {
     /// `[coordinator]` section). Only the first coordinator, the one the hub
     /// rules check: further ones are a shape not updatable yet (V-23).
     /// Unknown MCUs are V-06's.
-    fn v24(&mut self) {
+    fn v25(&mut self) {
         let first = self
             .t
             .nodes
@@ -409,7 +482,7 @@ impl<'a> Ctx<'a> {
             };
             if m.coordinator.is_none() {
                 self.err(
-                    "V-24",
+                    "V-25",
                     format!("nodes[{i}].mcu"),
                     format!(
                         "{} cannot be the coordinator: its MCU definition has no [coordinator] section",

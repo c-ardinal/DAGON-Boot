@@ -7,15 +7,14 @@ extras on top of `dagon-mcu-esp32s3` (`targets/mcu/esp32s3`).
 |---|---|
 | DAGON link | rear bus MUX_IO_1/2 = UART0 TX G43 / RX G44 (`rear_uart`), plus USB Serial/JTAG on USB-C |
 | Rear pins UART/USB switch | M5IOE1 IO expander (I2C 0x4F) PYG1 on the internal I2C (SDA G47, SCL G48), driven low at bring-up |
-| AMOLED reset | M5IOE1 PYG5, pulsed once at bring-up (low 10 ms, then high); then `node::display_ready()` |
-| AMOLED bus | CO5300, QSPI on SPI2 + DMA channel 0: CS G39, SCK G40, D0-D3 G41/G42/G46/G45, TE G38 unused (`DisplayPins`, `display_pins!`); 466 x 466, column offset 6 |
 | Power manager | M5PM1 on the internal I2C; ENTER_ROM method 2 only with the `pmic-download` feature (address 0x6E and command 0xA3 are unconfirmed assumptions) |
 | Flash | 16 MB (`FLASH_SIZE`, espflash `--flash-size 16mb`); partition table from the MCU crate |
 | Node tag | `watch-s3` (`TARGET_TAG`, the `DAGON_TARGET_TAG` default) |
 
 `M5StopWatch` implements the MCU crate's `BoardDef`. It owns the internal I2C
 bus and is moved into the DAGON link task by `start`, so nothing else on the
-watch may use that bus.
+watch may use that bus afterwards. An app that needs it (the display power,
+for example) uses it before `start`, through `p.I2C0.reborrow()`.
 
 ## Adding DAGON to an app
 

@@ -9,9 +9,9 @@ publish = false
 [package.metadata.dagon]
 board = "m5stopwatch"
 
-# M5StopWatch board layer for DAGON: pins, the rear-pin UART/USB switch and
-# AMOLED reset through the M5IOE1 expander, the M5PM1 power manager, the
-# AMOLED bus pins. Everything chip-level comes from dagon-mcu-esp32s3.
+# M5StopWatch board layer for DAGON: pins, the rear-pin UART/USB switch
+# through the M5IOE1 expander, the M5PM1 power manager. Everything chip-level
+# comes from dagon-mcu-esp32s3; the display is the app's.
 # Standalone workspace, built with the espup Xtensa toolchain.
 [workspace]
 

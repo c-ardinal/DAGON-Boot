@@ -2,8 +2,8 @@
 
 Demo app of the M5StopWatch (ESP32-S3), the image that goes into ota_0 and
 ota_1. It is a sample, not part of DAGON: DAGON comes in through the
-board package `targets/boards/m5stopwatch` (`board::start`, `dagon_pins!`,
-`display_pins!`) and the public API of `targets/mcu/esp32s3` only:
+board package `targets/boards/m5stopwatch` (`board::start`, `dagon_pins!`)
+and the public API of `targets/mcu/esp32s3` only:
 `board::start` runs the agent's link task, and the app's own tasks register
 in the `Liveness` registry.
 
@@ -11,7 +11,7 @@ in the `Liveness` registry.
 |---|---|---|
 | DAGON link (`board::start`) | interrupt executor, priority 2 | UART0 (rear G43/G44), USB Serial/JTAG, flash, RTC/super watchdogs, internal I2C |
 | `heartbeat` (demo) | thread mode (`#[esp_rtos::main]`), below every interrupt | nothing |
-| `display_task` | thread mode | SPI2, DMA channel 0, AMOLED pins (CS G39, SCK G40, D0-D3 G41/G42/G46/G45) |
+| `display_task` | thread mode | SPI2, AMOLED pins (CS G39, SCK G40, D0-D3 G41/G42/G46/G45, TE G38) |
 
 `heartbeat` is a placeholder: it counts a beat per second, each beat
 announced to the watchdog with a 500 ms budget. CONFIRM is accepted once at
@@ -20,18 +20,47 @@ are those of the MCU package (`targets/mcu/esp32s3/README.md`).
 
 `display_task` shows the running version (`node::running_version()`, from
 the image header) in large seven-segment digits on the 466×466 AMOLED
-(CO5300 over QSPI, driver crate `esp-hal-co5300`). The panel reset is on the
-internal I2C expander, which the DAGON side owns: it pulses the reset once at
-start and then sets `node::display_ready()`; the task waits for that, runs
-the panel initialisation (about 1.5 s of fixed waits, once) and draws once,
-with a liveness budget per step. It never talks to the internal I2C and the
-link task preempts it at any time. If the panel does not answer, the screen
-stays dark and nothing else changes. `src/digits.rs` lays the digits out
-(host tested): light strokes on true black, kept inside the round screen,
-as large as the line allows; `---` when the version is unknown.
+(CO5300 over QSPI): light digits on a black screen, brightness 0x60, drawn
+once. `src/digits.rs` lays the digits out (host tested): kept inside the
+round screen, as large as the line allows; `---` when the version is
+unknown. The task runs below the DAGON link task with a liveness budget per
+step; if the panel has no power or does not take the commands the screen
+stays dark and nothing else changes.
 
-Not yet checked on the watch: the panel initialisation (the crate's default
-sequence, column offset 6) and whether the AMOLED supply is on by default.
+### Panel power and initialisation
+
+The display belongs to this app, not to DAGON. Its power and reset lines sit
+on the internal I2C bus (I2C0, SDA G47, SCL G48), which DAGON's link task
+owns once `board::start` has run, so `main` does the power part first
+(`src/power.rs`, on `p.I2C0.reborrow()`). The steps follow M5Stack's
+M5StopWatch-UserDemo V0.5 (`hal_pmic.cpp`, `hal_ioe.cpp`, M5GFX
+`Panel_AMOLED`); this sequence lights the panel on the watch, from power-on
+and after a chip reset:
+
+1. M5PM1 (0x6E), 100 kHz: I2C sleep off (0x09 bits 3:0 = 0), LDO hold
+   (0x07 bit 5), watchdog off (0x0A = 0). The official demo's charging and
+   power-button settings are left out.
+2. M5IOE1 (0x4F): a wake access, then I2C_CFG 0x23 = 0x10 (400 kHz); the
+   ESP side switches to 400 kHz, waits 50 ms and wakes it again. At 400 kHz
+   the expander now and then answers garbage, so every write is read back
+   and retried.
+3. M5IOE1 IO1, IO3, IO4, IO5, IO8, IO9, IO10 as push-pull outputs (pull-ups
+   and pull-downs off); IO3, IO4, IO5 (AMOLED reset, released without a
+   pulse), IO8 (L3B_EN, the panel's LDO) high; IO1 (rear pins to UART) and
+   IO10 low. IO8 is read back from the input register every 80 ms until it
+   is high (10 tries), then 50 ms.
+4. Panel, SPI2 mode 0 at 80 MHz: a command is opcode 0x02 plus the 24-bit
+   address `cmd << 8` and its arguments on one line; pixels are opcode 0x32
+   with `00 2C 00` (then `3C` for the next chunks) and RGB565 on four lines.
+   `11`, 150 ms, `C4 80`, `35 80`, `44 01 D2`, `53 20`, `20`, `36 00`,
+   `51 A0`, `29`, `3A 55`, `36 00`, `51 60`. Columns start at 6 in the
+   controller's memory (the clear covers 468 columns). Reading the panel
+   returns zeros and tells nothing.
+
+After an update the chip only resets: the power manager and the expander
+keep their state and nothing turns the panel off, so the app runs this whole
+sequence again on every start rather than relying on what the previous image
+left behind.
 
 ## Build
 

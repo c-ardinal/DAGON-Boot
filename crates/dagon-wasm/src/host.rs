@@ -27,6 +27,10 @@ export interface HostLink {
   read(max: number): Promise<Uint8Array>;
   /** Closes and opens the link again (the hub's USB device leaves on reboot). */
   reopen(): Promise<void>;
+  /** Largest frame payload of the link to the hub. */
+  maxPayload(): number;
+  /** 'reopen' (USB CDC, TCP) or 'stays' (a UART adapter). */
+  reconnectKind(): 'reopen' | 'stays';
   /** Monotonic milliseconds. */
   now(): number;
   sleep(ms: number): Promise<void>;
@@ -44,6 +48,12 @@ extern "C" {
     fn read(this: &HostLink, max: u32) -> Result<Promise, JsValue>;
     #[wasm_bindgen(method, catch)]
     fn reopen(this: &HostLink) -> Result<Promise, JsValue>;
+    /// Largest frame payload of the link to the hub.
+    #[wasm_bindgen(method, js_name = maxPayload)]
+    fn max_payload(this: &HostLink) -> u32;
+    /// `reopen` (USB CDC, TCP) or `stays` (a UART adapter).
+    #[wasm_bindgen(method, js_name = reconnectKind)]
+    fn reconnect_kind(this: &HostLink) -> String;
     #[wasm_bindgen(method)]
     fn now(this: &HostLink) -> f64;
     #[wasm_bindgen(method)]
@@ -55,6 +65,16 @@ pub struct JsClock(HostLink);
 
 impl Transport for JsTransport {
     type Error = JsValue;
+    fn max_payload(&self) -> usize {
+        self.0.max_payload() as usize
+    }
+    fn reconnect_kind(&self) -> dagon_host::Reconnect {
+        if self.0.reconnect_kind() == "stays" {
+            dagon_host::Reconnect::Stays
+        } else {
+            dagon_host::Reconnect::Reopen
+        }
+    }
     async fn write(&mut self, bytes: &[u8]) -> Result<(), JsValue> {
         JsFuture::from(self.0.write(bytes)?).await.map(|_| ())
     }

@@ -11,6 +11,7 @@ use dagon_proto::payload::{HelloReq, HelloResp};
 use dagon_proto::{flags, frame_len, max_payload, split_status, Cmd, Frame, Status, PROTO_VERSION};
 
 use crate::frames::{FrameReader, GAP_MS};
+use crate::link::{Link, LinkError, Reconnect};
 
 pub const UART_FRAME: usize = frame_len(max_payload::UART);
 /// Timeout of the hub's own display HELLO on the UART.
@@ -35,11 +36,18 @@ pub fn hello_answer(resp: &[u8], max: usize) -> Option<HelloResp> {
     }
 }
 
-/// UART link; `now` gives milliseconds on a monotonic clock.
+/// UART link to a child node (the requesting end); `now` gives
+/// milliseconds on a monotonic clock. As a [`Link`], `write_frame` sends a
+/// request and starts its deadline ([`UartLink::set_timeout`]) and
+/// `read_frame` returns the next complete frame before that deadline.
 pub struct UartLink<S, C> {
     port: S,
     now: C,
     reader: FrameReader<{ UART_FRAME * 2 }>,
+    timeout_ms: u16,
+    deadline: u64,
+    /// Length of the frame handed out last (dropped on the next read).
+    last: usize,
 }
 
 impl<S: StreamPort, C: Fn() -> u64> UartLink<S, C> {
@@ -48,7 +56,15 @@ impl<S: StreamPort, C: Fn() -> u64> UartLink<S, C> {
             port,
             now,
             reader: FrameReader::new(max_payload::UART),
+            timeout_ms: 0,
+            deadline: 0,
+            last: 0,
         }
+    }
+
+    /// The deadline the next request gets, from the start of its write.
+    pub fn set_timeout(&mut self, timeout_ms: u16) {
+        self.timeout_ms = timeout_ms;
     }
 
     /// Writes the request frame `inner` and stores the response frame with
@@ -60,45 +76,16 @@ impl<S: StreamPort, C: Fn() -> u64> UartLink<S, C> {
         timeout_ms: u16,
         out: &mut [u8],
     ) -> Result<usize, Status> {
-        let deadline = (self.now)() + timeout_ms as u64;
-        self.reader.clear();
-        // The whole write counts against the deadline: byte by byte, each
-        // bounded by the port, so a slow line cannot outlast the request.
-        for b in inner.chunks(1) {
-            if (self.now)() >= deadline {
-                return Err(Status::Timeout);
-            }
-            self.port.write(b).await.map_err(|_| Status::Timeout)?;
-        }
+        self.set_timeout(timeout_ms);
+        self.write_frame(inner).await.map_err(|_| Status::Timeout)?;
         // A request too short to carry a seq gets no answer (times out).
         let seq = inner.get(4).copied();
         loop {
-            let now = (self.now)();
-            let left = deadline.saturating_sub(now);
-            if left == 0 {
-                return Err(Status::Timeout);
-            }
-            let mut b = [0u8; 1];
-            // Waits are cut at the gap so a stalled partial frame is
-            // dropped even when no further byte arrives.
-            match self.port.read(&mut b, left.min(GAP_MS) as u32).await {
-                Ok(1) => {
-                    self.reader.push_at(&b, (self.now)());
-                }
-                Ok(_) => {}
-                Err(_) => {
-                    self.reader.push_at(&[], (self.now)());
-                    continue;
-                }
-            }
-            while let Some(n) = self.reader.poll() {
-                let f = self.reader.frame(n);
-                if f[3] & flags::RESP != 0 && Some(f[4]) == seq && n <= out.len() {
-                    out[..n].copy_from_slice(f);
-                    self.reader.consume(n);
-                    return Ok(n);
-                }
-                self.reader.consume(n);
+            let f = self.read_frame().await.map_err(|_| Status::Timeout)?;
+            let n = f.len();
+            if f[3] & flags::RESP != 0 && Some(f[4]) == seq && n <= out.len() {
+                out[..n].copy_from_slice(f);
+                return Ok(n);
             }
         }
     }
@@ -112,6 +99,62 @@ impl<S: StreamPort, C: Fn() -> u64> UartLink<S, C> {
             .await
             .ok()?;
         hello_answer(&resp[..len], max_payload::UART)
+    }
+}
+
+impl<S: StreamPort, C: Fn() -> u64> Link for UartLink<S, C> {
+    fn max_payload(&self) -> usize {
+        max_payload::UART
+    }
+
+    fn reconnect(&self) -> Reconnect {
+        Reconnect::Persistent
+    }
+
+    /// The next complete frame before the request's deadline. Waits are
+    /// cut at the gap so a stalled partial frame is dropped even when no
+    /// further byte arrives.
+    async fn read_frame(&mut self) -> Result<&[u8], LinkError> {
+        if self.last > 0 {
+            self.reader.consume(self.last);
+            self.last = 0;
+        }
+        loop {
+            if let Some(n) = self.reader.poll() {
+                self.last = n;
+                return Ok(self.reader.frame(n));
+            }
+            let left = self.deadline.saturating_sub((self.now)());
+            if left == 0 {
+                return Err(LinkError::Timeout);
+            }
+            let mut b = [0u8; 1];
+            match self.port.read(&mut b, left.min(GAP_MS) as u32).await {
+                Ok(1) => {
+                    self.reader.push_at(&b, (self.now)());
+                }
+                Ok(_) => {}
+                Err(_) => {
+                    self.reader.push_at(&[], (self.now)());
+                }
+            }
+        }
+    }
+
+    /// Sends a request: stale input is dropped and the deadline starts.
+    /// The whole write counts against it: byte by byte, each bounded by
+    /// the port, so a slow line cannot outlast the request.
+    async fn write_frame(&mut self, frame: &[u8]) -> Result<(), LinkError> {
+        self.deadline = (self.now)() + self.timeout_ms as u64;
+        self.reader.clear();
+        self.last = 0;
+        for b in frame.chunks(1) {
+            if (self.now)() >= self.deadline {
+                return Err(LinkError::Timeout);
+            }
+            self.port.write(b).await.map_err(|_| LinkError::Timeout)?;
+        }
+        Ok(())
     }
 }
 

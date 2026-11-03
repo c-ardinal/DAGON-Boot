@@ -7,7 +7,7 @@
 //! |---|---|---|
 //! | DAGON link (`board::start`) | interrupt executor, priority 2 | UART0, USB Serial/JTAG, flash, RTC/super watchdogs, internal I2C |
 //! | `heartbeat` (demo work) | thread mode (this `main`), below every interrupt | nothing |
-//! | `display_task` | thread mode | SPI2, DMA channel 0, AMOLED pins G39-G42, G45, G46 |
+//! | `display_task` | thread mode | SPI2, AMOLED pins G38-G42, G45, G46 (power: `power`, before `board::start`, on the internal I2C) |
 //!
 //! Every task registers in [`LIVENESS`] and announces a deadline before each
 //! piece of work; the watchdog is fed only while none is overdue, so a stuck
@@ -18,7 +18,7 @@
 
 use core::sync::atomic::{AtomicU32, Ordering};
 
-use dagon_board_m5stopwatch::{self as board, dagon_pins, display_pins};
+use dagon_board_m5stopwatch::{self as board, dagon_pins};
 use dagon_mcu_esp32s3::liveness::{Lease, Liveness};
 use dagon_mcu_esp32s3::node::{self, NodeConfig};
 use embassy_executor::Spawner;
@@ -26,6 +26,7 @@ use embassy_time::{Duration, Timer};
 use esp_hal::timer::timg::TimerGroup;
 
 mod display;
+mod power;
 
 esp_bootloader_esp_idf::esp_app_desc!();
 
@@ -48,6 +49,10 @@ async fn main(spawner: Spawner) {
     let mut p = esp_hal::init(esp_hal::Config::default());
     let armed = node::arm_watchdog(p.RTC_TIMER.reborrow());
     esp_rtos::start(TimerGroup::new(p.TIMG0).timer0, p.FROM_CPU_INTR0);
+    // The panel supply is on the internal I2C bus, which DAGON owns once
+    // started: power it first, on every start (an update only resets the chip).
+    let powered =
+        power::panel_power_on(p.I2C0.reborrow(), p.GPIO47.reborrow(), p.GPIO48.reborrow());
     board::start(
         armed,
         dagon_pins!(p),
@@ -61,10 +66,19 @@ async fn main(spawner: Spawner) {
             spawner.spawn(task);
         }
     }
-    let screen = display_pins!(p);
+    let screen = display::DisplayPins {
+        spi2: p.SPI2,
+        cs: p.GPIO39,
+        sck: p.GPIO40,
+        d0: p.GPIO41,
+        d1: p.GPIO42,
+        d2: p.GPIO46,
+        d3: p.GPIO45,
+        te: p.GPIO38,
+    };
     // The version display is optional: without a lease it is not started.
     if let Some(lease) = LIVENESS.register() {
-        if let Ok(task) = display::display_task(screen, lease) {
+        if let Ok(task) = display::display_task(screen, lease, powered) {
             spawner.spawn(task);
         }
     }

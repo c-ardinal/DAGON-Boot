@@ -281,25 +281,25 @@ fn v18_v20_name_the_rom_loader_from_its_definition() {
 }
 
 #[test]
-fn v24_coordinator_mcu_needs_a_coordinator_section() {
+fn v25_coordinator_mcu_needs_a_coordinator_section() {
     let esp_hub = mutate(
         "    mcu: rp2040\n    board: waveshare-rp2040-touch-lcd-1.28\n    role: coordinator\n    port: self-boot\n    flash_map: rp2040-4m",
         "    mcu: esp32s3\n    role: coordinator\n    port: vendor-stage2",
     );
     let r = check_str(&esp_hub);
-    let v24: Vec<_> = r.errors().filter(|i| i.rule == "V-24").collect();
-    assert_eq!(v24.len(), 1, "{:?}", r.issues);
-    assert_eq!(v24[0].path, "nodes[0].mcu");
+    let v25: Vec<_> = r.errors().filter(|i| i.rule == "V-25").collect();
+    assert_eq!(v25.len(), 1, "{:?}", r.issues);
+    assert_eq!(v25[0].path, "nodes[0].mcu");
     assert_eq!(
-        v24[0].message,
+        v25[0].message,
         "esp32s3 cannot be the coordinator: its MCU definition has no [coordinator] section"
     );
-    // A second coordinator (here the F401) is V-23's shape, not V-24's.
+    // A second coordinator (here the F401) is V-23's shape, not V-25's.
     let two_hubs = DEMO.replacen("role: node", "role: coordinator", 1);
     assert_eq!(error_rules(&two_hubs), BTreeSet::from(["V-23"]));
     // An unknown MCU is V-06's alone.
     let unknown = mutate("    mcu: rp2040\n", "    mcu: nope\n");
-    assert!(!error_rules(&unknown).contains("V-24"));
+    assert!(!error_rules(&unknown).contains("V-25"));
     assert!(error_rules(&unknown).contains("V-06"));
 }
 
@@ -357,4 +357,102 @@ fn board_table_starts_with_demo_boards() {
         let h = f401.header.iter().find(|h| h.pin == pin).unwrap();
         assert_eq!(h.position, None, "{pin} position is not confirmed yet");
     }
+}
+
+/// desk-demo with the hub's uplink set to `kind` (host `host`).
+fn with_uplink(kind: &str, host: &str) -> String {
+    mutate(
+        "    tag: hub-rp2040-lcd
+",
+        &format!(
+            "    tag: hub-rp2040-lcd
+    uplink: {{ kind: {kind}, host: {host} }}
+"
+        ),
+    )
+}
+
+fn warnings(yaml: &str) -> Vec<(String, String, String)> {
+    check_str(yaml)
+        .issues
+        .into_iter()
+        .filter(|i| i.severity == Severity::Warning)
+        .map(|i| (i.rule.to_string(), i.path, i.message))
+        .collect()
+}
+
+#[test]
+fn every_link_kind_and_uplink_round_trips_through_the_schema() {
+    for k in dagon_topology::schema::LinkKind::ALL {
+        let t = dagon_topology::parse_str(&with_uplink(k.name(), "browser")).unwrap();
+        let hub = t.node("hub").unwrap();
+        let up = dagon_topology::Topology::uplink(hub);
+        assert_eq!(
+            (up.kind, up.host),
+            (k, dagon_topology::schema::UplinkHost::Browser)
+        );
+    }
+    let t = dagon_topology::parse_str(DEMO).unwrap();
+    let up = dagon_topology::Topology::uplink(t.node("hub").unwrap());
+    assert_eq!(
+        up.kind,
+        dagon_topology::schema::LinkKind::UsbCdc,
+        "omitted: usb-cdc"
+    );
+    assert!(check_str(&with_uplink("usb-cdc", "pc-cli"))
+        .issues
+        .is_empty());
+}
+
+#[test]
+fn the_uplink_does_not_change_the_compiled_topology() {
+    let golden = dagon_topology::compile_str(DEMO).unwrap();
+    for k in ["usb-cdc", "uart", "wifi-tcp", "ble"] {
+        assert_eq!(
+            dagon_topology::compile_str(&with_uplink(k, "embedded")).unwrap(),
+            golden,
+            "{k}"
+        );
+    }
+}
+
+#[test]
+fn v24_names_a_hop_its_firmware_cannot_do_yet_without_blocking() {
+    let yaml = with_uplink("wifi-tcp", "browser");
+    let w = warnings(&yaml);
+    assert_eq!(w.len(), 1, "{w:?}");
+    assert_eq!(w[0].0, "V-24");
+    assert!(
+        w[0].1.ends_with("uplink.kind") && w[0].2.contains("hub") && w[0].2.contains("wifi-tcp"),
+        "{w:?}"
+    );
+    assert!(check_str(&yaml).is_pushable(), "a warning only");
+    // A link the 親機 or the 子機 cannot do: V-24 names both ends, V-23 says
+    // it cannot be updated.
+    // The link's kind (the first `kind: i2c` is the bus's).
+    let ble = mutate(
+        "    kind: i2c
+    bus: ",
+        "    kind: ble
+    bus: ",
+    );
+    let w = warnings(&ble);
+    assert!(
+        w.iter()
+            .any(|x| x.0 == "V-24" && x.2.contains("hub -> seg") && x.2.contains("ble")),
+        "{w:?}"
+    );
+    assert_fires(&ble, "V-23");
+}
+
+#[test]
+fn v24_an_uplink_belongs_to_a_coordinator() {
+    let yaml = mutate(
+        "    tag: seg-f401-7seg
+",
+        "    tag: seg-f401-7seg
+    uplink: { kind: usb-cdc }
+",
+    );
+    assert_fires(&yaml, "V-24");
 }

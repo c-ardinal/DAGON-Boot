@@ -33,7 +33,6 @@ dagon-mcu-esp32s3 = { path = "../../targets/mcu/esp32s3" }
 # The firmware; the library (`digits`) also builds and tests on the host.
 [target.'cfg(target_arch = "xtensa")'.dependencies]
 dagon-board-m5stopwatch = { path = "../../targets/boards/m5stopwatch" }
-esp-hal-co5300 = "0.1.0"
 esp-hal = { version = "1.2.2", features = ["esp32s3", "unstable"] }
 esp-bootloader-esp-idf = { version = "0.6.0", features = ["esp32s3"] }
 esp-rtos = { version = "0.4.0", features = ["esp32s3", "embassy"] }

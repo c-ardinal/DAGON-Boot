@@ -190,7 +190,11 @@ fn link(t: &Topology, l: &Link) -> Result<TopoLink, CompileError> {
             let baud = l.baud.unwrap_or(DEFAULT_BAUD);
             (iface, pins.tx, pins.rx, baud, tp::NONE, tp::NONE)
         }
-        LinkKind::Can | LinkKind::Ethernet => {
+        LinkKind::Can
+        | LinkKind::Ethernet
+        | LinkKind::UsbCdc
+        | LinkKind::Ble
+        | LinkKind::WifiTcp => {
             return Err(bad(format!(
                 "link to '{}' is not updatable yet (V-23)",
                 l.to

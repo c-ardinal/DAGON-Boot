@@ -2,7 +2,7 @@
   import { tick, untrack } from 'svelte';
   import { bandOf } from './app/band.ts';
   import { ANNOUNCE, BAND, BUTTON, CANVAS, DEFINE, DIFF, HUB_TOGGLE, MODE, NODE, ORDER, PLAN, PRODUCT, RECONNECT, SAVE, SKIP, STEP, TIME } from './app/copy.ts';
-  import { chooseAndOpen } from './app/connect.ts';
+  import { webSerial } from './app/connect.ts';
   import { HUB_LOCKED, hubOf, view, type Action } from './app/machine.ts';
   import { Operate, waterOf, type Progress } from './app/operate.svelte.ts';
   import Graph, { type Chip, type Dot } from './graph/Graph.svelte';
@@ -31,6 +31,7 @@
   import Header from './screens/Header.svelte';
   import OrderList from './screens/OrderList.svelte';
   import { devHub } from './serial/devHub.ts';
+  import { serveSim, type SimStand } from './serial/serveSim.ts';
   import { MockTransport } from './serial/mock.ts';
   import { WebSerialTransport, type Transport } from './serial/transport.ts';
   import Unsupported from './Unsupported.svelte';
@@ -45,25 +46,36 @@
   if (serial || dev) dagonReady().catch(() => undefined);
 
   let opened: Transport | null = null;
+  /** `dagon demo`'s simulated desk through serve, made once serve says it has one; null for a real hub. */
+  let simStand: SimStand | null = null;
+  function simHub(): SimStand | null {
+    const s = cli.sim;
+    if (!s) return null;
+    simStand ??= serveSim(cli, s.speed);
+    return simStand;
+  }
   const op = new Operate({
     open: async () => {
-      const t = stand?.transport ?? null;
+      const t = stand?.transport ?? simHub()?.transport ?? null;
       if (t) await t.open();
-      opened = t ?? (await chooseAndOpen(serial!));
+      opened = t ?? (await ports.chooseAndOpen());
       return opened;
     },
     // The stand-in hub comes back by itself; a real one is chosen again in the browser.
     reselect: async () => {
-      if (dev && opened) {
+      if ((dev || simHub()) && opened) {
         if (opened instanceof MockTransport) opened.replug();
         await opened.open();
         return opened;
       }
       // `opened` follows only once Operate took it as this hub (reconnectChosen).
-      return chooseAndOpen(serial!);
+      return ports.chooseAndOpen();
     },
     timer: true,
-    clock: stand?.clock,
+    // The simulated desk's clock runs at the demo's speed; a real hub keeps the default.
+    get clock() {
+      return stand?.clock ?? simHub()?.clock;
+    },
     // The CLI gave the hub back: the device the page had, opened again without the chooser.
     again: async () => {
       if (!opened) throw new Error('no device');
@@ -79,6 +91,8 @@
   const cli = new Cli();
   /** The 定義 document: the project's 構成 as edited (§5.2: its YAML is the one source of truth). */
   const d = new Define();
+  /** Web Serial, which the page never uses while it drives the simulated desk. */
+  const ports = webSerial(serial, () => cli.sim !== null);
   cli.onDevice = (need) => (need ? op.handOver() : op.cliReturned());
 
   /** SC-S0 until a project is open (§7.2b); then 定義 and 運用. */
@@ -351,7 +365,7 @@
 
   /** Chrome's SerialConnectionEvent names the port; the spec's event targets it. */
   const portOf = (e: Event) => ((e as Event & { port?: SerialPort }).port ?? e.target) as SerialPort;
-  serial?.addEventListener('disconnect', (e) => {
+  ports.on('disconnect', (e) => {
     if (opened instanceof WebSerialTransport && portOf(e) === opened.port) op.lose();
   });
   /**
@@ -359,7 +373,7 @@
    * (L20) it is a candidate; once that is over (L21) the page takes it by
    * itself when it is the hub on trial with the version just sent.
    */
-  serial?.addEventListener('connect', (e) => {
+  ports.on('connect', (e) => {
     const port = portOf(e);
     // One device at a time: candidates reported together are judged in turn.
     connecting = connecting.then(() => hubConnected(port)).catch(() => undefined);
@@ -579,6 +593,7 @@
       rest: op.rest && op.state === 'L18',
       finish: op.finished,
       refused: op.returnRefused?.kind,
+      sim: cli.sim !== null,
     });
     if (dialogOpen) return { ...b, primary: null };
     if (op.latestMissing) return { ...b, ...BAND.M58 };
@@ -816,7 +831,7 @@
   <Band {band} busy={op.state === 'L03'} available={(a) => RUNS.has(a)} status={op.status} alert={op.alert} onaction={act} bind:primaryEl bind:nextEl />
 {/snippet}
 
-{#if !serial && !dev}
+{#if !serial && !dev && !cli.sim}
   <Unsupported />
 {:else}
   <a class="skip" href="#canvas">{SKIP.canvas}</a>
@@ -824,6 +839,7 @@
   <!-- The DOM follows the visual order of each layout, so Tab order matches what is seen. -->
   <div class="frame {layout}" class:open={drawerOpen} class:modal={restartOpen || autosave.asking !== null}>
     <Header
+      sim={cli.sim !== null}
       step={screen === 'start' ? null : step}
       {hub}
       drawer={layout === 'drawer' && screen === 'work'}

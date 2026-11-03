@@ -9,9 +9,10 @@
 //! - [`layout`]: the partition table (`partitions.csv`), [`otadata`],
 //!   [`framer`]
 //! - Xtensa only: `flash::EspFlash` (`Flash`), `boot::EspBootSelect`
-//!   (`BootSelectV`), `sys` (`Clock`, `Watchdog`, `Reset`), `link::UartLink`
-//!   (`Link`), and `node`: `node::start` runs the link task on a
-//!   high-priority interrupt executor
+//!   (`BootSelectV`), `sys` (`Clock`, `Watchdog`, `Reset`), `link` (UART
+//!   settings), and `node`: `node::start` runs the link task on a
+//!   high-priority interrupt executor; [`links`]: the node's uplinks as
+//!   `dagon_mcu_common::link::Link`s
 //! - [`board::BoardDef`]: what a board crate supplies (bring-up, optional PMIC
 //!   ROM entry); pins and wiring live there, not here
 //!
@@ -24,6 +25,7 @@
 pub mod board;
 pub mod framer;
 pub mod layout;
+pub mod links;
 pub mod liveness;
 pub mod otadata;
 pub mod rom;

@@ -117,6 +117,12 @@ impl HubSim {
 
 impl Transport for HubSim {
     type Error = ();
+    fn max_payload(&self) -> usize {
+        dagon_proto::max_payload::USB
+    }
+    fn reconnect_kind(&self) -> dagon_host::Reconnect {
+        dagon_host::Reconnect::Reopen
+    }
     async fn write(&mut self, bytes: &[u8]) -> Result<(), ()> {
         let frames = self.cut.borrow_mut().push(bytes, max_payload::USB);
         for f in frames {
@@ -159,6 +165,12 @@ struct DirectSim {
 
 impl Transport for DirectSim {
     type Error = ();
+    fn max_payload(&self) -> usize {
+        dagon_proto::max_payload::USB
+    }
+    fn reconnect_kind(&self) -> dagon_host::Reconnect {
+        dagon_host::Reconnect::Reopen
+    }
     async fn write(&mut self, bytes: &[u8]) -> Result<(), ()> {
         let frames = self.cut.borrow_mut().push(bytes, max_payload::UART);
         let now = self.now.get();

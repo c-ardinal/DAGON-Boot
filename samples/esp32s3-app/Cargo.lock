@@ -226,7 +226,6 @@ dependencies = [
  "embassy-time",
  "esp-bootloader-esp-idf",
  "esp-hal",
- "esp-hal-co5300",
  "esp-rtos",
 ]
 
@@ -239,12 +238,24 @@ dependencies = [
 ]
 
 [[package]]
+name = "dagon-mcu-common"
+version = "0.0.0"
+dependencies = [
+ "critical-section",
+ "dagon-agent",
+ "dagon-format",
+ "dagon-port",
+ "dagon-proto",
+]
+
+[[package]]
 name = "dagon-mcu-esp32s3"
 version = "0.0.0"
 dependencies = [
  "dagon-agent",
  "dagon-conform",
  "dagon-format",
+ "dagon-mcu-common",
  "dagon-port",
  "dagon-proto",
  "embassy-executor",
@@ -822,15 +833,6 @@ dependencies = [
  "ufmt-write",
  "xtensa-lx",
  "xtensa-lx-rt",
-]
-
-[[package]]
-name = "esp-hal-co5300"
-version = "0.1.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "64f9183e4119781cbf95263ad8b66d23f5f0c1987f0ff9714cce7b3c01e33f36"
-dependencies = [
- "esp-hal",
 ]
 
 [[package]]

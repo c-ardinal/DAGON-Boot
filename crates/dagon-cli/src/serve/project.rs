@@ -233,7 +233,14 @@ pub fn init(server: &Arc<Server>, req: &Request) -> Response {
             return Err(busy());
         }
         let keys = home.join(".dagon").join("keys").join(&name);
-        crate::scaffold::init_project(&dir, &name, &yaml, &keys).map_err(|e| {
+        crate::scaffold::init_project(
+            &dir,
+            &name,
+            &yaml,
+            &keys,
+            &crate::dagonsrc::NewSource::default_for_new(),
+        )
+        .map_err(|e| {
             let shown = e.replace(&*keys.to_string_lossy(), "<key folder>");
             eprintln!("dagon serve: init project: {shown}");
             Response::error(
@@ -271,7 +278,14 @@ pub fn new(server: &Arc<Server>, req: &Request) -> Response {
             return Err(busy());
         }
         let keys = home.join(".dagon").join("keys").join(&name);
-        crate::scaffold::new_project(&dir, &name, &yaml, &keys).map_err(|e| {
+        crate::scaffold::new_project(
+            &dir,
+            &name,
+            &yaml,
+            &keys,
+            &crate::dagonsrc::NewSource::default_for_new(),
+        )
+        .map_err(|e| {
             let shown = e.replace(&*keys.to_string_lossy(), "<key folder>");
             eprintln!("dagon serve: new project: {shown}");
             Response::error(

@@ -10,7 +10,6 @@
 
 mod app;
 mod board;
-#[allow(dead_code)]
 mod wiring;
 
 use board::Board;
@@ -22,7 +21,9 @@ use {defmt_rtt as _, panic_probe as _};
 
 /// The hops of this node, from the 構成 (dagon gen writes them): the
 /// build stops here, naming the hop, if a kind is not available yet.
+#[rustfmt::skip]
 const UPLINK: Kind = {{uplink}};
+#[rustfmt::skip]
 const DOWNLINKS: &[Kind] = &[{{downlinks}}];
 const _: () = links::require_uplink(UPLINK);
 const _: () = links::require_downlinks(DOWNLINKS);

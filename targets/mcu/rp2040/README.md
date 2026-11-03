@@ -152,7 +152,9 @@ in that direction stops the build with a message naming the hop, e.g.
 ```rust
 use dagon_mcu_rp2040::links::{self, Kind};
 
+#[rustfmt::skip]
 const UPLINK: Kind = {{uplink}};
+#[rustfmt::skip]
 const DOWNLINKS: &[Kind] = &[{{downlinks}}];
 const _: () = links::require_uplink(UPLINK);
 const _: () = links::require_downlinks(DOWNLINKS);

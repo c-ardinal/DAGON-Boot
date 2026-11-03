@@ -172,6 +172,13 @@ export const TIME = {
   about: (ms: number) => (ms < 30_000 ? 'まもなく' : `約 ${Math.ceil(ms / 60_000)} 分`),
 } as const;
 
+/** 案 (C-389): L26's cause chip when the device the CLI gave back was not this 親機. */
+export const BAND_CHIP = {
+  otherHub: '× 別の親機',
+  notHub: '× 親機ではない',
+  silent: '× 応答なし',
+} as const;
+
 /** M29: beside the recover button when nodes after the stopped one are not written yet. */
 export const BAND_FOR = {
   M29: (stuck: string) => ({ pair: ['目安', '約 1 分'] as const, sentence: `${stuck}を直すと、残りのノードを更新できます。` }),

@@ -4,7 +4,7 @@ import type { LinkClock } from '../serial/hostLink.ts';
 import { MockTransport, SAMPLE_HUB_HELLO, type MockOptions } from '../serial/mock.ts';
 import { versionText } from '../wasm/dagon.ts';
 import { bandOf } from './band.ts';
-import { ANNOUNCE, BAND, BAND_FOR, BUTTON_FOR, NODE } from './copy.ts';
+import { ANNOUNCE, BAND, BAND_CHIP, BAND_FOR, BUTTON_FOR, NODE } from './copy.ts';
 import { Define } from './define/define.svelte.ts';
 import { topoDiff } from './define/diff.ts';
 import { fromYaml, type Topo } from './define/model.ts';
@@ -390,6 +390,11 @@ describe('update from the page with dagon-host apply against the mock hub', () =
     expect([op.state, op.reconnectNotes]).toEqual(['L26', [{ kind: 'otherHub' }]]);
     expect(bandOf(op.state, op.ctx).sentence).toBe(BAND.M34.sentence);
     await expect(other.write(new Uint8Array(1))).rejects.toThrow('port not open');
+    // C-389: the reason shows on L26 itself, as its cause chip; connecting again clears it.
+    expect(op.returnRefused).toEqual({ kind: 'otherHub' });
+    expect(bandOf(op.state, op.ctx, { refused: op.returnRefused?.kind })).toMatchObject({ chip: BAND_CHIP.otherHub, sentence: BAND.M34.sentence });
+    await op.connect();
+    expect(op.returnRefused).toBeNull();
   }, 20_000);
 
   test('the version to keep a reopened hub by is cleared once the hub is confirmed', async () => {

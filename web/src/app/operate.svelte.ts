@@ -183,6 +183,8 @@ export class Operate {
   startedAt = $state<number | null>(null);
   /** Why the page could not get the rebooted hub back by itself (L21's diagnostic log). */
   reconnectNotes = $state<ReconnectNote[]>([]);
+  /** Why the device the CLI gave back was not taken (L26 shows it, C-389); null otherwise. */
+  returnRefused = $state<ReconnectNote | null>(null);
   /** The hub's HELLO when the user connected: what "the same 親機" means after its reboot. */
   private hubHello: HelloResp | null = null;
   /** What the last update, recovery or rollback left (L23). */
@@ -271,6 +273,7 @@ export class Operate {
     if (this.state !== 'L28') return;
     const my = ++this.session;
     this.reconnectNotes = [];
+    this.returnRefused = null;
     try {
       if (!this.deps.again) throw new Error('nothing to reopen');
       const t = await this.deps.again();
@@ -284,7 +287,10 @@ export class Operate {
       this.hubHello ??= h;
     } catch (e) {
       if (my !== this.session) return;
-      if (isNote(e)) this.noteWhy(e);
+      if (isNote(e)) {
+        this.noteWhy(e);
+        this.returnRefused = e;
+      }
       await this.drop();
       this.alert = ANNOUNCE.A21lost;
       return this.go('lost', false);
@@ -313,6 +319,7 @@ export class Operate {
    * With nothing on the canvas, connecting goes on to find the nodes.
    */
   async connect(): Promise<void> {
+    this.returnRefused = null;
     if (this.state === 'L03') return;
     const discover = !this.config;
     const my = ++this.session;
@@ -871,6 +878,7 @@ export class Operate {
    * progress) and the session waits at L02; the project's files are untouched.
    */
   reset(): void {
+    this.returnRefused = null;
     this.session++;
     void this.drop();
     this.state = 'L02';

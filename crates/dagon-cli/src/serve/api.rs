@@ -7,7 +7,7 @@ use std::sync::Arc;
 
 use dagon_format::header::{image_kind, slot_binding, ImageHeader, HEADER_SIZE};
 use dagon_sign::to_hex;
-use dagon_topology::defs::{page_safe as plain_name, Origin, Registry, PROJECT_TEXT};
+use dagon_topology::defs::{page_safe as plain_name, Registry};
 use dagon_topology::schema::{Uplink, UplinkHost};
 use serde_json::{json, Value};
 
@@ -435,18 +435,8 @@ fn targets(server: &Server) -> Res {
     let boards: Vec<Value> = reg
         .boards()
         .iter()
-        .map(|b| {
-            // A project's own words reach the page only as plain names.
-            let own = reg.board_origin(&b.id) == Some(Origin::Project);
-            let text = |s: &str| {
-                if own && !plain_name(s) {
-                    PROJECT_TEXT.to_string()
-                } else {
-                    s.to_string()
-                }
-            };
-            json!({"id": text(&b.id), "product": text(&b.product), "mcu": text(&b.mcu)})
-        })
+        // A project's own words were made safe when its definitions loaded.
+        .map(|b| json!({"id": b.id, "product": b.product, "mcu": b.mcu}))
         .collect();
     Ok(json_ok(json!({ "targets": out, "boards": boards })))
 }

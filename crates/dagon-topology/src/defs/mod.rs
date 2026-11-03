@@ -4,6 +4,7 @@
 //! entry) are closed sets in code; everything else is data.
 
 mod load;
+mod project_text;
 pub mod requirements;
 #[cfg(test)]
 mod tests;

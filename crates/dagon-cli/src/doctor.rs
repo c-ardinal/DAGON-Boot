@@ -7,7 +7,7 @@
 
 use std::process::Command;
 
-use dagon_topology::defs::{page_safe, DoctorCheck, Expect, Origin, Registry, PROJECT_TEXT};
+use dagon_topology::defs::{DoctorCheck, Expect, Origin, Registry};
 
 use crate::config::{read_topology, Config, Opts};
 
@@ -128,21 +128,10 @@ fn gate(c: &Check, cmd: &[String], consent: &mut Option<&mut Consent<'_>>) -> Ga
     }
 }
 
-/// A project check's name where nobody can confirm it (the page): never
-/// the project's own words, only its place and MCU ids that are plain.
+/// A project check's name where nobody can confirm it (the page): only its
+/// place and MCU ids (a project's ids are plain, checked on load).
 fn unattended_name(c: &Check) -> String {
-    let ids: Vec<&str> = c
-        .for_mcu
-        .iter()
-        .map(|id| {
-            if page_safe(id) {
-                id.as_str()
-            } else {
-                PROJECT_TEXT
-            }
-        })
-        .collect();
-    format!("project check {} for {}", c.index, ids.join(", "))
+    format!("project check {} for {}", c.index, c.for_mcu.join(", "))
 }
 
 /// Everything [`doctor`] does outside: run probes and installs, ask, print.

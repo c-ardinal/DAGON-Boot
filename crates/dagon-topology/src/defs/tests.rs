@@ -395,6 +395,74 @@ fn checks_and_compile_follow_a_project_registry() {
     );
 }
 
+/// A project registry from `mcu` and `board` texts (the fake ones edited).
+fn project_registry(name: &str, mcu: &str, board: &str) -> Result<Registry, DefError> {
+    let dir = scratch(name);
+    write(&dir.join("m/dagon-mcu.toml"), mcu);
+    std::fs::create_dir_all(dir.join("m/bootcore")).unwrap();
+    let board = board.replace(
+        "product",
+        "[board.fake-board]
+product",
+    );
+    write(
+        &dir.join("dagon.toml"),
+        &format!(
+            "mcu_files = [\"m/dagon-mcu.toml\"]
+{board}"
+        ),
+    );
+    let r = Registry::load(&[Source::Project(&dir.join("dagon.toml"))]);
+    std::fs::remove_dir_all(dir).unwrap();
+    r
+}
+
+#[test]
+fn a_projects_words_are_made_safe_on_load_for_every_consumer() {
+    let rom = "
+[rom_i2c]
+name = \"<b>Loader</b> at C:/Users/me\"
+addr = 0x3A
+max_hz = 400_000
+               pairs = [{ controller = \"i2c0\", sda = \"GPIO2\", scl = \"GPIO3\" }]
+";
+    let mcu = format!("{FAKE_MCU}{rom}")
+        .replace("name = \"FAKE-M0\"", "name = \"FAKE <script>\"")
+        .replace("label = \"SWD\"", "label = \"see C:/Users/me/notes\"");
+    let board = FAKE_BOARD.replace("\"Fake Board\"", "\"Fake <i>Board</i>\"");
+    let reg = project_registry("words", &mcu, &board).unwrap();
+    let m = reg.mcu("fake-m0").unwrap();
+    assert_eq!(
+        (m.name.as_str(), m.connection.label.as_str()),
+        (PROJECT_TEXT, PROJECT_TEXT)
+    );
+    assert_eq!(reg.board("fake-board").unwrap().product, PROJECT_TEXT);
+    // Check messages read the stored words: none of the project's own reach them.
+    let r = crate::check_with(&reg, &fake_desk("0x3A"));
+    let msgs: Vec<_> = r.errors().map(|i| i.message.clone()).collect();
+    assert_eq!(msgs, ["0x3a is reserved for the project-text on this bus"]);
+    // Identifiers and writer parameters other text names must be plain.
+    for (from, to) in [
+        ("id = \"fake-m0\"", "id = \"fake m0 <x>\""),
+        ("chip = \"FAKE0\"", "chip = \"C:/tools/chip\""),
+        ("name = \"fake-1m\"", "name = \"fake/1m\""),
+    ] {
+        let e = project_registry("plain", &FAKE_MCU.replace(from, to), FAKE_BOARD).unwrap_err();
+        assert!(e.msg.contains("must be at most 40 characters"), "{to}: {e}");
+    }
+    let e = project_registry(
+        "pin",
+        FAKE_MCU,
+        &FAKE_BOARD.replace("pin = \"GPIO2\"", "pin = \"<GPIO2>\""),
+    )
+    .unwrap_err();
+    assert!(e.msg.contains("header.pin"), "{e}");
+    // The builtin set keeps its own (non-ASCII) words.
+    assert!(!page_safe(
+        &Registry::builtin().mcu("rp2040").unwrap().connection.hint
+    ));
+}
+
 #[test]
 fn fake_mcu_and_board_load_from_a_project_without_code_changes() {
     let dir = scratch("fake");

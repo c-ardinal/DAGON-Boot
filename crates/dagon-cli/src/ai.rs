@@ -6,9 +6,7 @@
 use std::io::{BufRead, Read, Write};
 use std::time::Duration;
 
-use dagon_topology::defs::{
-    page_safe, BoardDef, I2cPair, McuDef, Origin, Registry, Writer, PROJECT_TEXT,
-};
+use dagon_topology::defs::{BoardDef, I2cPair, McuDef, Registry, Writer};
 use dagon_topology::schema::{ControlKind, LinkKind, RomEntry, UartIface};
 use serde_json::{json, Value};
 
@@ -248,36 +246,13 @@ fn generate(
 /// by field from an allow-list: ids, names, pins and their labels, flash
 /// sizes, link kinds, the writer kind. Nothing else a definition holds
 /// (doctor commands and hints, file names, comments) is ever sent.
-/// A project's own strings go under the page's rule (`page_safe`, else
-/// `project-text`); builtin and source-tree facts go as they are.
+/// A project's own words were made safe when its definitions loaded
+/// (`page_safe`, else `project-text`; identifiers must be plain).
 fn board_table(reg: &Registry) -> String {
-    let own = |o: Option<Origin>, mut v: Value| {
-        if o == Some(Origin::Project) {
-            plain_names(&mut v);
-        }
-        v
-    };
-    let mcus: Vec<Value> = reg
-        .mcus()
-        .iter()
-        .map(|m| own(reg.mcu_origin(&m.id), mcu_facts(m)))
-        .collect();
-    let boards: Vec<Value> = reg
-        .boards()
-        .iter()
-        .map(|b| own(reg.board_origin(&b.id), board_facts(b)))
-        .collect();
+    let mcus: Vec<Value> = reg.mcus().iter().map(mcu_facts).collect();
+    let boards: Vec<Value> = reg.boards().iter().map(board_facts).collect();
     serde_json::to_string_pretty(&json!({ "mcus": mcus, "boards": boards }))
         .expect("facts serialise")
-}
-
-fn plain_names(v: &mut Value) {
-    match v {
-        Value::String(s) if !page_safe(s) => *s = PROJECT_TEXT.into(),
-        Value::Array(a) => a.iter_mut().for_each(plain_names),
-        Value::Object(o) => o.values_mut().for_each(plain_names),
-        _ => {}
-    }
 }
 
 fn names(kinds: &[LinkKind]) -> Vec<&'static str> {
@@ -753,10 +728,10 @@ mod tests {
         let pico = &board("desk-pico");
         // A project's words that are not plain names go as project-text.
         let path = board("desk-path");
-        assert_eq!(path["product"], PROJECT_TEXT);
+        assert_eq!(path["product"], dagon_topology::defs::PROJECT_TEXT);
         assert_eq!(
             path["header"][0],
-            json!({ "pin": "GPIO4", "label": PROJECT_TEXT })
+            json!({ "pin": "GPIO4", "label": dagon_topology::defs::PROJECT_TEXT })
         );
         assert_eq!(pico["product"], "Desk Pico");
         // Builtin facts go as they are.

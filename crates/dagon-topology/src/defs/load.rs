@@ -214,8 +214,20 @@ fn empty() -> Registry {
 }
 
 impl Registry {
-    fn push_mcu(&mut self, text: &str, pkg: &Pkg<'_>, origin: Origin) -> Result<(), DefError> {
-        let m = parse_mcu(text, pkg)?;
+    /// `own`: a project's own definition, made safe here (project_text);
+    /// definitions received as JSON were made safe where they were sent.
+    fn push_mcu(
+        &mut self,
+        text: &str,
+        pkg: &Pkg<'_>,
+        origin: Origin,
+        own: bool,
+    ) -> Result<(), DefError> {
+        let mut m = parse_mcu(text, pkg)?;
+        if own {
+            let at = format!("{} (MCU '{}')", pkg.label(), m.id);
+            super::project_text::mcu(&mut m).or_else(|e| err(&at, e))?;
+        }
         let files = match &m.partitions {
             Some(rel) => vec![(rel.clone(), pkg.text(rel)?)],
             None => Vec::new(),
@@ -230,8 +242,19 @@ impl Registry {
         Ok(())
     }
 
-    fn push_board(&mut self, text: &str, pkg: &Pkg<'_>, origin: Origin) -> Result<(), DefError> {
-        self.boards.push(parse_board(text, pkg)?);
+    fn push_board(
+        &mut self,
+        text: &str,
+        pkg: &Pkg<'_>,
+        origin: Origin,
+        own: bool,
+    ) -> Result<(), DefError> {
+        let mut b = parse_board(text, pkg)?;
+        if own {
+            let at = format!("{} (board '{}')", pkg.label(), b.id);
+            super::project_text::board(&mut b).or_else(|e| err(&at, e))?;
+        }
+        self.boards.push(b);
         self.board_origins.push(origin);
         self.board_sources.push(DefSource {
             label: pkg.label(),
@@ -364,6 +387,7 @@ pub(super) fn from_json(json: &str) -> Result<Registry, DefError> {
             },
             // JSON comes from outside: never trusted to run anything.
             Origin::Project,
+            false,
         )?;
     }
     for s in &form.boards {
@@ -374,6 +398,7 @@ pub(super) fn from_json(json: &str) -> Result<Registry, DefError> {
                 files: &[],
             },
             Origin::Project,
+            false,
         )?;
     }
     validate(&reg)?;
@@ -383,10 +408,20 @@ pub(super) fn from_json(json: &str) -> Result<Registry, DefError> {
 pub(super) fn builtin() -> Result<Registry, DefError> {
     let mut reg = empty();
     for (label, text, files) in BUILTIN_MCUS {
-        reg.push_mcu(text, &Pkg::Embedded { label, files }, Origin::Builtin)?;
+        reg.push_mcu(
+            text,
+            &Pkg::Embedded { label, files },
+            Origin::Builtin,
+            false,
+        )?;
     }
     for (label, text) in BUILTIN_BOARDS {
-        reg.push_board(text, &Pkg::Embedded { label, files: &[] }, Origin::Builtin)?;
+        reg.push_board(
+            text,
+            &Pkg::Embedded { label, files: &[] },
+            Origin::Builtin,
+            false,
+        )?;
     }
     validate(&reg)?;
     Ok(reg)
@@ -435,11 +470,11 @@ fn tree(root: &Path) -> Result<Registry, DefError> {
     let mut reg = empty();
     for dir in packages(&targets.join("mcu"), MCU_FILE)? {
         let text = read(&dir.join(MCU_FILE))?;
-        reg.push_mcu(&text, &Pkg::Dir(dir), Origin::Tree)?;
+        reg.push_mcu(&text, &Pkg::Dir(dir), Origin::Tree, false)?;
     }
     for dir in packages(&targets.join("boards"), BOARD_FILE)? {
         let text = read(&dir.join(BOARD_FILE))?;
-        reg.push_board(&text, &Pkg::Dir(dir), Origin::Tree)?;
+        reg.push_board(&text, &Pkg::Dir(dir), Origin::Tree, false)?;
     }
     Ok(reg)
 }
@@ -468,7 +503,7 @@ fn project(reg: &mut Registry, dagon_toml: &Path) -> Result<(), DefError> {
         if reg.mcu(&id).is_some() {
             return err(path.display(), format!("MCU '{id}' is already defined"));
         }
-        reg.push_mcu(&text, &pkg, Origin::Project)?;
+        reg.push_mcu(&text, &pkg, Origin::Project, true)?;
     }
     for (id, table) in defs.board {
         let toml::Value::Table(mut t) = table else {
@@ -500,6 +535,7 @@ fn project(reg: &mut Registry, dagon_toml: &Path) -> Result<(), DefError> {
                 files: &[],
             },
             Origin::Project,
+            true,
         )?;
     }
     Ok(())

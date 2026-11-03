@@ -17,6 +17,9 @@ mod http;
 mod jobs;
 mod project;
 mod recent;
+mod sim;
+
+pub use sim::SimDevice;
 mod ws;
 
 use std::io::Write;
@@ -75,6 +78,12 @@ fn start_key(
 }
 
 pub fn command(args: &[&str]) -> Result<(), String> {
+    run(args, None)
+}
+
+/// `dagon serve`, with the simulated desk of `dagon demo` when `sim` is
+/// given (the page then reaches it instead of a real hub).
+pub fn run(args: &[&str], sim: Option<Arc<SimDevice>>) -> Result<(), String> {
     // serve's output is a log for a person (a terminal, or a file it is
     // sent to): the banner opens it. Machine-readable output never has it.
     println!("{}\n", crate::banner_text());
@@ -116,6 +125,9 @@ pub fn command(args: &[&str]) -> Result<(), String> {
     })?;
     if let Some(k) = key {
         server.set_release_key(k);
+    }
+    if let Some(s) = sim {
+        let _ = server.sim.set(s);
     }
     if web.as_os_str().is_empty() {
         println!("DAGON Console: built into this executable");

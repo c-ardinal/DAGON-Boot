@@ -4,6 +4,7 @@ mod ai;
 mod commands;
 mod config;
 mod conform;
+mod demo;
 mod deploy;
 mod device;
 mod doctor;
@@ -93,6 +94,10 @@ Usage:
                                      releases with the public key given here (--pubkey,
                                      pubkey in dagon.toml, or the signing key's public half)
   dagon sim run                      the four simulator scenarios (no hardware)
+  dagon demo [--sim-speed <x>] [--sim-fail seg|watch] [--port <n>] [--no-open]
+                                     DAGON Console against a SIMULATED desk (親機 + 2 子機)
+                                     with a demo key made for it: try updates without
+                                     boards; --sim-fail makes that 子機's update fall back
   dagon ai topology [--in <text>] [--out <yaml>] [--model <id>]
                                      board description (file or stdin) to topology YAML
                                      via the Claude API, checked to 0 errors ($ANTHROPIC_API_KEY)
@@ -140,6 +145,7 @@ fn main() -> ExitCode {
         ["new", rest @ ..] => run(scaffold::new_command(rest)),
         ["gen", rest @ ..] => run(scaffold::gen_command(rest)),
         ["serve", rest @ ..] => run(serve::command(rest)),
+        ["demo", rest @ ..] => run(demo::command(rest)),
         ["conform", rest @ ..] => run(conform::command(rest)),
         ["sim", "run", rest @ ..] => run(simrun::run(rest)),
         ["ai", "topology", rest @ ..] => run(ai::topology(rest)),

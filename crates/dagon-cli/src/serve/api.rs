@@ -182,9 +182,42 @@ pub fn handle(server: &Arc<Server>, req: &Request) -> Response {
         ("POST", ["gen"]) => gen_start(server, req),
         ("POST", ["flash"]) => start(server, req, "flash", super::devjobs::job_flash),
         ("POST", ["doctor"]) => start(server, req, "doctor", super::devjobs::job_doctor),
+        ("POST", ["sim", "write"]) => sim_write(server, req),
+        ("GET", ["sim", "read"]) => sim_read(server, req),
         _ => Ok(Response::error(404, "no such endpoint")),
     };
     r.unwrap_or_else(|e| e)
+}
+
+/// The longest GET /v1/sim/read waits for an answer.
+const SIM_READ_MAX_MS: u64 = 1_000;
+
+fn sim_of(server: &Server) -> Result<&Arc<super::SimDevice>, Response> {
+    server
+        .sim
+        .get()
+        .ok_or_else(|| Response::error(404, "no simulated desk (dagon demo)"))
+}
+
+/// POST /v1/sim/write: bytes for the simulated hub's USB port.
+fn sim_write(server: &Server, req: &Request) -> Res {
+    sim_of(server)?.write(&req.body);
+    Ok(json_ok(json!({})))
+}
+
+/// GET /v1/sim/read?wait=<ms>: what the simulated hub answered (empty
+/// when nothing came within the wait).
+fn sim_read(server: &Server, req: &Request) -> Res {
+    let sim = sim_of(server)?;
+    let wait = req
+        .path
+        .split_once('?')
+        .and_then(|(_, q)| q.split('&').find_map(|kv| kv.strip_prefix("wait=")))
+        .and_then(|w| w.parse::<u64>().ok())
+        .unwrap_or(0)
+        .min(SIM_READ_MAX_MS);
+    let bytes = sim.read(std::time::Duration::from_millis(wait));
+    Ok(Response::bytes("application/octet-stream", bytes))
 }
 
 /// What this serve offers the page. `flash` and `doctor` join when this
@@ -269,14 +302,22 @@ fn hello(server: &Server) -> Response {
         .into_iter()
         .filter(|m| crate::flash::flashable(m))
         .collect();
+    let sim = server.sim.get();
+    let mut features = FEATURES.to_vec();
+    if sim.is_some() {
+        features.push("sim");
+    }
     json_ok(json!({
         "cli": env!("CARGO_PKG_VERSION"),
         "workspace": workspace,
-        "features": FEATURES,
+        "features": features,
         "api_key": crate::ai::api_key_present(),
         "key": key.is_some(),
         "key_id": key,
         "release_key": server.release_key().map(|k| to_hex(&k)),
+        // The simulated desk of dagon demo: the page shows 模擬 and reaches
+        // it through /v1/sim.
+        "sim": sim.map(|s| json!({ "speed": s.speed, "fail": s.fail })),
         // The MCU families POST /v1/flash can write.
         "flash_mcus": flash_mcus,
         // null until a project is open (the page shows the start screen).

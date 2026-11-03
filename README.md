@@ -161,6 +161,7 @@ cable. With `DAGON_SIGNING_KEY` set (step 1), connect the node and run:
 ```sh
 dagon flash hub        # RP2040: hold BOOT while plugging in USB; rescue.uf2 is copied to the RPI-RP2 drive
 dagon flash seg        # STM32F401RE: through the ST-LINK with probe-rs
+dagon flash watch      # ESP32-S3: over USB-C with espflash
 ```
 
 `dagon flash` prints its plan first and asks before it touches the board
@@ -171,8 +172,19 @@ with the public half of your signing key. The boot cores accept the desk
 demo's tags (`hub-rp2040-lcd`, `seg-f401-7seg`), so keep those tags in
 `topology.yaml` for these boards.
 
-`dagon flash` does not handle the ESP32-S3 yet: write it over USB-C with
-the steps in [targets/boards/m5stopwatch](targets/boards/m5stopwatch/README.md).
+For an ESP32-S3 node, `dagon flash` builds the board's factory agent and
+the app, turns the app into an ESP image (`espflash save-image --chip
+esp32s3 --flash-size 16mb`), signs it, and writes with `espflash`: the
+bundled unmodified ESP-IDF 2nd stage at 0x0 (refused unless its SHA-256
+matches `targets/mcu/esp32s3/vendor/SHA256SUMS`), the partition table
+(`targets/mcu/esp32s3/partitions.csv`, at 0x8000), the factory agent, the
+app in ota_0 (0x110000) with its signed header in the `dagon` partition
+(0x710000), and the otadata entry that starts it as confirmed (0xD000).
+Exactly one ESP32-S3 must be connected over USB-C (USB Serial/JTAG,
+`303a:1001`); with none or several it stops before writing. `--dry-run`
+lists the files with their offsets and the `espflash` commands
+(`out/provision/<id>/commands.txt`).
+
 Then connect the hub and check that every node answers:
 
 ```sh
@@ -189,15 +201,16 @@ tables in `dagon.toml` (`stage0` for the hub, `bootcore`, `app`,
 Change your code, then:
 
 ```sh
-dagon deploy hub seg               # or: dagon deploy hub seg --version 1.2.0
+dagon deploy                       # or: dagon deploy seg watch --version 1.2.0
 ```
 
 `dagon deploy` builds slots A and B, signs them, makes the release, lists
 each node with its old and new version and asks before applying (`--yes`
 skips the question). The version defaults to one patch above the newest
-one it knows. Without node ids it takes every node in `[build.<id>]`; each
-must build both slots, so an ESP32-S3 node (one image serves both of its
-slots) is not handled by `dagon deploy` yet. The single steps are
+one it knows. Without node ids it takes every node in `[build.<id>]`. An
+ESP32-S3 node is built once (its image runs from either OTA slot); deploy
+turns the build into an ESP image (`espflash save-image`) and signs that,
+and the hub relays it like any other node's. The single steps are
 `dagon build`, `dagon image sign`, `dagon release build` and `dagon apply`
 (`dagon --help`). In DAGON Console the same is ビルド → 署名 → リリース →
 渡す, then the update in 運用 mode, over Web Serial.

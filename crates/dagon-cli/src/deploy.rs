@@ -295,6 +295,7 @@ pub fn command(args: &[&str]) -> Result<(), String> {
         &cfg,
         &nodes,
         Some(fw_key),
+        None,
         &mut log,
         &AtomicBool::new(false),
     )?;

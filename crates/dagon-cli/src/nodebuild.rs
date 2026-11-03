@@ -90,14 +90,17 @@ pub fn build_nodes(
 ) -> Result<Vec<Built>, String> {
     // Checked once; the firmware gets these bytes, not the file again.
     let key = crate::config::build_pubkey(cfg)?;
-    build_nodes_keyed(cfg, nodes, key, log, cancel)
+    build_nodes_keyed(cfg, nodes, key, None, log, cancel)
 }
 
 /// [`build_nodes`] embedding `key` (none: DAGON_PUBKEY is not passed down).
+/// A package may also lie inside `source` (the project's DAGON source, for
+/// its samples), not only inside the work area.
 pub fn build_nodes_keyed(
     cfg: &Config,
     nodes: &[String],
     key: Option<[u8; 32]>,
+    source: Option<&Path>,
     log: &mut dyn FnMut(&str),
     cancel: &AtomicBool,
 ) -> Result<Vec<Built>, String> {
@@ -113,7 +116,15 @@ pub fn build_nodes_keyed(
             .build
             .get(&id)
             .ok_or_else(|| format!("no [build.{id}] in dagon.toml"))?;
-        out.push(build_node(cfg, &id, inputs, key.as_deref(), log, cancel)?);
+        out.push(build_node(
+            cfg,
+            &id,
+            inputs,
+            key.as_deref(),
+            source,
+            log,
+            cancel,
+        )?);
     }
     Ok(out)
 }
@@ -123,17 +134,16 @@ fn build_node(
     id: &str,
     b: &BuildInputs,
     pubkey_hex: Option<&str>,
+    source: Option<&Path>,
     log: &mut dyn FnMut(&str),
     cancel: &AtomicBool,
 ) -> Result<Built, String> {
-    b.validate().map_err(|e| format!("[build.{id}]: {e}"))?;
-    // Resolved through symlinks and junctions; must stay in the work area.
     // Checked through its canonical form, then passed on without the
     // Windows `\\?\` prefix: MSVC's link.exe cannot open object files
     // under such a --target-dir (LNK1181 for host build scripts).
-    let dir = crate::paths::contained(&cfg.base, &b.package)
+    let dir = package_dir(cfg, b, source)
         .map(crate::config::plain_path)
-        .map_err(|e| format!("[build.{id}] package: {e}"))?;
+        .map_err(|e| format!("[build.{id}]{e}"))?;
     let bin = match &b.bin {
         Some(n) => n.clone(),
         None => package_name(&dir)?,
@@ -194,6 +204,19 @@ fn build_node(
         node: id.into(),
         slots: built,
     })
+}
+
+/// `b`'s package folder, resolved through symlinks and junctions: inside
+/// the work area, or inside `source` when given.
+fn package_dir(cfg: &Config, b: &BuildInputs, source: Option<&Path>) -> Result<PathBuf, String> {
+    let in_source =
+        source.and_then(|s| crate::paths::contained(s, &cfg.base.join(&b.package)).ok());
+    if let Some(dir) = in_source {
+        b.validate_names().map_err(|e| format!(": {e}"))?;
+        return Ok(dir);
+    }
+    b.validate().map_err(|e| format!(": {e}"))?;
+    crate::paths::contained(&cfg.base, &b.package).map_err(|e| format!(" package: {e}"))
 }
 
 pub(crate) fn package_name(dir: &Path) -> Result<String, String> {
@@ -499,6 +522,42 @@ mod tests {
         assert!(with(&|b| b.bin = Some("--offline".into())).is_err());
         assert!(with(&|b| b.features = vec!["-x".into()]).is_err());
         assert!(with(&|b| b.version = Some("one".into())).is_err());
+    }
+
+    #[test]
+    fn a_package_inside_the_dagon_source_is_taken_only_when_the_source_is_given() {
+        let here = std::fs::canonicalize(crate::dagonsrc::BUILT_FROM).unwrap();
+        let base = std::env::temp_dir().join(format!("dagon-insrc-{}", std::process::id()));
+        std::fs::create_dir_all(&base).unwrap();
+        let cfg = Config {
+            base: base.clone(),
+            ..Config::default()
+        };
+        let sample = BuildInputs {
+            package: here.join("samples/f401-app"),
+            bin: None,
+            features: vec![],
+            slot_b_feature: None,
+            version: None,
+        };
+        let dir = package_dir(&cfg, &sample, Some(&here)).unwrap();
+        assert!(dir.join("Cargo.toml").is_file(), "{}", dir.display());
+        assert!(
+            package_dir(&cfg, &sample, None).is_err(),
+            "only flash passes the source"
+        );
+        // Names are still checked; a folder outside both is refused.
+        let bad = BuildInputs {
+            bin: Some("--offline".into()),
+            ..sample.clone()
+        };
+        assert!(package_dir(&cfg, &bad, Some(&here)).is_err());
+        let outside = BuildInputs {
+            package: std::env::temp_dir(),
+            ..sample
+        };
+        assert!(package_dir(&cfg, &outside, Some(&here)).is_err());
+        let _ = std::fs::remove_dir_all(&base);
     }
 
     #[test]

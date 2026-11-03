@@ -106,6 +106,14 @@ pub(crate) fn same_source(cfg: &Config, node: &str) -> Result<(), String> {
     }
 }
 
+/// Whether `node`'s package lies inside the DAGON source at `root` (a
+/// sample): built from that source, it is on the boot images' DAGON.
+fn package_in_source(cfg: &Config, node: &str, root: &Path) -> bool {
+    cfg.build
+        .get(node)
+        .is_some_and(|b| crate::paths::contained(root, &cfg.base.join(&b.package)).is_ok())
+}
+
 /// How the plan names where `part` comes from.
 fn part_origin(cfg: &Config, part: &Part) -> String {
     let rel = if part.sub.is_empty() {
@@ -208,10 +216,13 @@ fn inputs(
     cancel: &AtomicBool,
 ) -> Result<ProvisionInputs, String> {
     let n = t.node(node).ok_or("checked in plan")?;
-    same_source(cfg, node)?;
+    let root = source_root(cfg)?;
+    let in_source = package_in_source(cfg, node, &root);
+    if !in_source {
+        same_source(cfg, node)?;
+    }
     let fw_key = firmware_key(cfg, key)?;
     let hex = dagon_sign::to_hex(&fw_key);
-    let root = source_root(cfg)?;
     log(&format!("{node}: DAGON source {}", root.display()));
     let mut built = Vec::new();
     for part in parts(&n.mcu, n.board.as_deref()).ok_or("checked in plan")? {
@@ -241,7 +252,8 @@ fn inputs(
         )?;
         built.push((part.name, exe));
     }
-    nodebuild::build_nodes_keyed(cfg, &[node.to_string()], Some(fw_key), log, cancel)?;
+    let source = in_source.then_some(root.as_path());
+    nodebuild::build_nodes_keyed(cfg, &[node.to_string()], Some(fw_key), source, log, cancel)?;
     let take = |name: &str| built.iter().find(|p| p.0 == name).map(|p| p.1.clone());
     let version = cfg.build.get(node).and_then(|b| b.version.clone());
     Ok(ProvisionInputs {
@@ -1043,5 +1055,18 @@ mod tests {
         let one = find_uf2_drive(&mounts_under(&parents)).unwrap();
         assert_eq!(one, Some(volumes.join("RPI-RP2 1")));
         let _ = std::fs::remove_dir_all(&base);
+    }
+
+    #[test]
+    fn a_package_in_the_dagon_source_needs_no_source_check() {
+        let (mut cfg, _) = area("insrc");
+        let root = here();
+        cfg.build.get_mut("seg").unwrap().package = root.join("samples/f401-app");
+        assert!(package_in_source(&cfg, "seg", &root));
+        assert!(
+            !package_in_source(&cfg, "hub", &root),
+            "targets/rp2040-hub is in the project"
+        );
+        let _ = std::fs::remove_dir_all(&cfg.base);
     }
 }

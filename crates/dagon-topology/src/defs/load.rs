@@ -417,10 +417,16 @@ fn resolve(table: &[Partition], s: &super::SlotDef) -> Result<Slot, String> {
             "{what}: {size:#x} bytes cannot hold a header and a payload"
         ));
     }
+    let header_fits = |at: u32| match at.checked_add(HEADER) {
+        Some(_) => Ok(slot(at, start, size)),
+        None => Err(format!(
+            "{what}: header at {at:#x} runs past the 32-bit address space"
+        )),
+    };
     match detached {
         (None, None, Placement::Inline) => Ok(slot(start, start + HEADER, size - HEADER)),
         (None, None, Placement::Trailer) => Ok(slot(start + size - HEADER, start, size - HEADER)),
-        (Some(at), None, Placement::Detached) => Ok(slot(at, start, size)),
+        (Some(at), None, Placement::Detached) => header_fits(at),
         (None, Some(name), Placement::Detached) => {
             let p = partition(table, name)?;
             if u64::from(s.header_offset) + u64::from(HEADER) > u64::from(p.size) {
@@ -431,7 +437,7 @@ fn resolve(table: &[Partition], s: &super::SlotDef) -> Result<Slot, String> {
             let at = p.offset.checked_add(s.header_offset).ok_or_else(|| {
                 format!("{what}: header in '{name}' runs past the 32-bit address space")
             })?;
-            Ok(slot(at, start, size))
+            header_fits(at)
         }
         (_, _, Placement::Detached) => Err(format!(
             "{what}: a detached header needs header_at or header_partition"
@@ -446,6 +452,15 @@ fn resolve(table: &[Partition], s: &super::SlotDef) -> Result<Slot, String> {
 fn geometry(m: &McuDef) -> Result<(), String> {
     if m.flash_maps.is_empty() {
         return Err("needs at least one flash_map".into());
+    }
+    for f in &m.flash_maps {
+        // Ends are exclusive u32 addresses everywhere, slots included.
+        if f.bytes == 0 || f.base.checked_add(f.bytes).is_none() {
+            return Err(format!(
+                "flash map '{}' ({:#x}+{:#x}) is empty or runs past the 32-bit address space",
+                f.name, f.base, f.bytes
+            ));
+        }
     }
     let mut regions: Vec<(String, u32, u32)> = Vec::new();
     for s in &m.slots {

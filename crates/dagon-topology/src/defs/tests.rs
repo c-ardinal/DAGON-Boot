@@ -580,6 +580,42 @@ fn inline_project_boards_have_no_parts() {
 }
 
 #[test]
+fn flash_maps_and_detached_headers_past_u32_are_rejected() {
+    for (base, bytes) in [("0xFFF0_0000", "0x10_0000"), ("0xFFFF_0000", "0x2_0000")] {
+        let t = FAKE_MCU.replace(
+            "base = 0x0010_0000\nbytes = 0x10_0000",
+            &format!("base = {base}\nbytes = {bytes}"),
+        );
+        let e = mcu_err(&t);
+        assert!(
+            e.contains("flash map 'fake-1m'") && e.contains("32-bit"),
+            "{e}"
+        );
+    }
+    let e = mcu_err(&FAKE_MCU.replace("bytes = 0x10_0000", "bytes = 0"));
+    assert!(e.contains("is empty"), "{e}");
+    let detached = |at: &str| {
+        FAKE_MCU.replace(
+            "header = \"inline\"\nat = 0x0015_0000",
+            &format!("header = \"detached\"\nheader_at = {at}\nat = 0x0015_0000"),
+        )
+    };
+    let e = mcu_err(&detached("0xFFFF_FF00"));
+    assert!(e.contains("header at 0xffffff00 runs past"), "{e}");
+    // Inside u32 but outside the map: the map check still catches it.
+    let e = mcu_err(&detached("0xFFFF_FD00"));
+    assert!(
+        e.contains("header") && e.contains("outside flash map"),
+        "{e}"
+    );
+    let ok = detached("0x0019_0000");
+    assert_eq!(
+        parse_mcu_text(&ok, &[]).unwrap().slots[2].header_addr,
+        0x0019_0000
+    );
+}
+
+#[test]
 fn addresses_near_u32_max_are_errors_not_overflows() {
     let t = FAKE_MCU.replace("at = 0x0015_0000", "at = 0xFFFF_FF00");
     let e = mcu_err(&t);

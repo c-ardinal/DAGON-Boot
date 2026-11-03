@@ -35,6 +35,9 @@ const HTTP_TIMEOUT: Duration = Duration::from_secs(30);
 /// The page must send the passphrase this soon after opening the stream.
 const WS_AUTH_TIMEOUT: Duration = Duration::from_secs(10);
 const WS_POLL: Duration = Duration::from_millis(500);
+/// A page that takes no event for this long is dropped (it reconnects and
+/// reads state again), so a stalled tab never holds an event thread.
+const WS_WRITE_TIMEOUT: Duration = Duration::from_secs(5);
 const DEFAULT_WEB: &str = "web/dist";
 /// Connections handled at once; more get 503 straight away.
 pub const MAX_CONNECTIONS: usize = 32;
@@ -292,6 +295,7 @@ fn events(mut stream: TcpStream, server: &Arc<Server>, req: &Request) {
         return;
     };
     let _ = reader.set_read_timeout(None);
+    let _ = stream.set_write_timeout(Some(WS_WRITE_TIMEOUT));
     let writer = Arc::new(Mutex::new(stream));
     let closed = Arc::new(AtomicBool::new(false));
     spawn_reader(reader, writer.clone(), closed.clone());
@@ -307,6 +311,10 @@ fn events(mut stream: TcpStream, server: &Arc<Server>, req: &Request) {
             Err(mpsc::RecvTimeoutError::Timeout) => {}
             Err(mpsc::RecvTimeoutError::Disconnected) => break,
         }
+    }
+    // Ends the reader thread too.
+    if let Ok(s) = writer.lock() {
+        let _ = s.shutdown(std::net::Shutdown::Both);
     }
     server.pages.fetch_sub(1, Ordering::Relaxed);
 }

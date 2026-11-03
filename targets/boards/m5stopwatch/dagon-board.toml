@@ -1,0 +1,25 @@
+# DAGON board definition (format: targets/README.md).
+id = "m5stopwatch"
+product = "M5StopWatch"
+mcu = "esp32s3"
+flash_bytes = 0x100_0000
+# esp-hal has no I2C target mode for the ESP32-S3.
+i2c_target = false
+drawing = "stopwatch"
+
+header = [
+    { pin = "GPIO43", label = "G43" },
+    { pin = "GPIO44", label = "G44" },
+]
+
+[default_link]
+kind = "uart"
+iface = "pio-uart"
+baud = 115_200
+control = "cooperative"
+rom_entry = "force-download-boot"
+
+# The recovery agent for the factory partition ships with this package.
+[[part]]
+name = "factory"
+bin = "factory"

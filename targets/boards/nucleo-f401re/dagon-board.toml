@@ -1,0 +1,28 @@
+# DAGON board definition (format: targets/README.md).
+id = "nucleo-f401re"
+product = "NUCLEO-F401RE"
+mcu = "stm32f401re"
+flash_bytes = 0x8_0000
+i2c_target = true
+drawing = "nucleo-64"
+
+header = [
+    { pin = "PB4", label = "D5" },
+    { pin = "PA8", label = "D7" },
+    { pin = "NRST" },
+    { pin = "BOOT0" },
+]
+
+# D14/D15 (PB9/PB8) are I2C1 too but the ROM does not listen there.
+i2c = [
+    { controller = "i2c3", sda = "PB4", scl = "PA8" },
+    { controller = "i2c1", sda = "PB7", scl = "PB6" },
+    { controller = "i2c2", sda = "PB3", scl = "PB10" },
+    { controller = "i2c1", sda = "PB9", scl = "PB8" },
+]
+
+[default_link]
+kind = "i2c"
+addr = 0x42
+control = "full"
+rom_entry = "stm32-i2c-rom"

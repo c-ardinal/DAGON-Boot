@@ -318,6 +318,7 @@ fn gen_start(server: &Arc<Server>, req: &Request) -> Res {
     let s = Arc::clone(server);
     match server.spawn("gen", move |job| {
         let config = job.config.clone().ok_or("no project is open")?;
+        project_registry(&config_at(&s, Some(&config))?)?;
         let lines = {
             let _lock = s.files.lock().map_err(|_| "lock".to_string())?;
             crate::scaffold::gen_project(&config, &only, force)?
@@ -341,6 +342,10 @@ fn start(server: &Arc<Server>, req: &Request, kind: &str, work: Work) -> Res {
     // so a project switch never lands between the two.
     match server.spawn(kind, move |job| {
         let cfg = config_at(&s, job.config.as_deref())?;
+        // A project whose definitions do not load runs no job: the page is
+        // told without the reason (it goes to the terminal), never a raw
+        // definition error from deeper down.
+        project_registry(&cfg)?;
         work(job, cfg, v)
     }) {
         Some(id) => Ok(accepted(id)),

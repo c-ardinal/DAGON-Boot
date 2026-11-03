@@ -201,6 +201,39 @@ fn definitions_are_served_behind_the_same_guards_with_the_projects_boards() {
     );
     assert_eq!(st, 500);
     assert!(body.contains(super::api::DEFS_ERROR), "{body}");
+    // Every job of the project stops before it starts, with the same words.
+    for (path, body) in [
+        ("/v1/sign", r#"{"nodes":["seg"]}"#),
+        ("/v1/release", r#"{"version":"1.0.0"}"#),
+        ("/v1/flash", r#"{"node":"seg"}"#),
+        ("/v1/build", r#"{}"#),
+        ("/v1/gen", r#"{}"#),
+    ] {
+        let h = [
+            ("Authorization", bearer.as_str()),
+            ("Content-Type", "application/json"),
+        ];
+        let (st, started) = http(&a, "POST", path, &h, body.as_bytes());
+        assert_eq!(st, 202, "{path}: {started}");
+        let v: serde_json::Value = serde_json::from_str(&started).unwrap();
+        let job_path = format!("/v1/jobs/{}", v["job"]);
+        let t = std::time::Instant::now();
+        let job = loop {
+            let (_, j) = http(&a, "GET", &job_path, &[("Authorization", &bearer)], b"");
+            if j.contains(r#""failed""#) || t.elapsed() > std::time::Duration::from_secs(5) {
+                break j;
+            }
+            std::thread::yield_now();
+        };
+        assert!(
+            job.contains(r#""failed""#) && job.contains(super::api::DEFS_ERROR),
+            "{path}: {job}"
+        );
+        assert!(
+            !job.contains("nope"),
+            "{path}: the reason stays in the terminal: {job}"
+        );
+    }
 }
 
 #[test]

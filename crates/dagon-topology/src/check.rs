@@ -1,8 +1,8 @@
 //! Validation rules for `dagon topo check`.
 //!
-//! Errors V-01..V-21 (no V-19), V-23 and V-25; warnings V-22 and V-24
-//! (V-24 is an error for an uplink on a 子機). Errors block `topo push`;
-//! warnings do not.
+//! Errors V-01..V-21 (no V-19) and V-25; warnings V-22 and V-24 (V-24 is
+//! an error for an uplink on a 子機); information V-23 (a valid part that
+//! updating skips for now). Errors block `topo push`; the others do not.
 
 use crate::links::{self, Dir};
 use std::collections::{BTreeMap, BTreeSet};
@@ -14,8 +14,7 @@ use crate::schema::{ControlKind, Link, LinkKind, Node, Role, Tier, Topology, Uar
 pub const SCHEMA_VERSION: u32 = 1;
 /// Nodes a 構成 may describe (and the editor draw).
 const MAX_NODES: usize = 32;
-/// Nodes updating reaches today; more is a shape not updatable yet (V-23).
-const MAX_UPDATABLE_NODES: usize = 8;
+use crate::reach::MAX_UPDATABLE_NODES;
 const MAX_ID_LEN: usize = 15;
 const MAX_TAG_LEN: usize = 16;
 const BAUD_RATES: &[u32] = &[9_600, 57_600, 115_200, 460_800];
@@ -407,10 +406,20 @@ impl<'a> Ctx<'a> {
         }
     }
 
-    /// Shapes a 構成 may describe but that cannot be updated yet: more than
-    /// one coordinator, links that do not run from the coordinator to a node
-    /// (between coordinators, to grandchildren and deeper), and CAN or
-    /// Ethernet links. Updating covers one 親機 with its direct 子機 today.
+    fn info(&mut self, rule: &'static str, path: impl Into<String>, message: impl Into<String>) {
+        self.issues.push(Issue {
+            rule,
+            severity: Severity::Info,
+            path: path.into(),
+            message: message.into(),
+        });
+    }
+
+    /// Valid shapes that updating does not reach yet, told as information
+    /// (never errors): more than one coordinator and their trees, nodes
+    /// below a 子機, links of a kind the compiled topology cannot carry, and
+    /// nodes beyond eight. Updating covers one 親機 with its direct 子機
+    /// today and skips the rest (see [`crate::updatable`]).
     fn v23(&mut self) {
         let hubs: Vec<&str> = self
             .t
@@ -421,48 +430,63 @@ impl<'a> Ctx<'a> {
             .collect();
         let n = self.t.nodes.len();
         if n > MAX_UPDATABLE_NODES {
-            self.err(
+            self.info(
                 "V-23",
                 "nodes",
-                format!("{n} nodes; updating covers up to {MAX_UPDATABLE_NODES}"),
+                format!(
+                    "{n} nodes; updating reaches {MAX_UPDATABLE_NODES} for now and skips the rest"
+                ),
             );
         }
         if hubs.len() > 1 {
-            self.err(
+            self.info(
                 "V-23",
                 "nodes",
-                format!("{} coordinators {hubs:?}; updating covers one", hubs.len()),
+                format!(
+                    "{} coordinators {hubs:?}; updating reaches '{}' for now and skips the others' trees",
+                    hubs.len(),
+                    hubs[0]
+                ),
             );
         }
         for (i, l) in self.links() {
             let p = link_path(i);
             if !l.kind.compiles() {
-                self.err(
+                self.info(
                     "V-23",
                     format!("{p}.kind"),
                     format!(
-                        "{} links between a 親機 and a 子機 are not updatable yet",
-                        l.kind.name()
+                        "{} link to '{}': not updatable yet, updating skips it",
+                        l.kind.name(),
+                        l.to
                     ),
                 );
             }
             match self.t.node(&l.from) {
-                Some(n) if n.role != Role::Coordinator => self.err(
+                Some(n) if n.role != Role::Coordinator => self.info(
                     "V-23",
                     format!("{p}.from"),
                     format!(
-                        "'{}' is not a coordinator; updating reaches direct nodes only",
-                        l.from
+                        "'{}' is below the 子機 '{}': not updatable yet, updating skips it",
+                        l.to, l.from
+                    ),
+                ),
+                Some(n) if hubs.first() != Some(&n.id.as_str()) => self.info(
+                    "V-23",
+                    format!("{p}.from"),
+                    format!(
+                        "'{}' is under the second 親機 '{}': not updatable yet, updating skips it",
+                        l.to, l.from
                     ),
                 ),
                 _ => {}
             }
             if let Some(n) = self.t.node(&l.to).filter(|n| n.role == Role::Coordinator) {
-                self.err(
+                self.info(
                     "V-23",
                     format!("{p}.to"),
                     format!(
-                        "'{}' is a coordinator; links between coordinators are not updatable yet",
+                        "'{}' is a 親機 linked from another node: not updatable yet, updating skips it",
                         n.id
                     ),
                 );

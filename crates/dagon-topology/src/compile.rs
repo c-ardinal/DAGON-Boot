@@ -54,7 +54,8 @@ fn bad(msg: impl Into<String>) -> CompileError {
 }
 
 /// Canonical binary of a topology that passes `check` (warnings allowed),
-/// against the builtin definitions.
+/// against the builtin definitions. Only its updatable part is encoded
+/// ([`crate::updatable`]); for a 構成 updating reaches whole that is all of it.
 pub fn compile(t: &Topology) -> Result<Vec<u8>, CompileError> {
     compile_with(Registry::builtin(), t)
 }
@@ -65,7 +66,7 @@ pub fn compile_with(reg: &Registry, t: &Topology) -> Result<Vec<u8>, CompileErro
     if !report.is_pushable() {
         return Err(CompileError::Invalid(report));
     }
-    encode(reg, t)
+    encode(reg, &crate::updatable(t).0)
 }
 
 pub fn parse_str(yaml: &str) -> Result<Topology, CompileError> {
@@ -195,6 +196,7 @@ fn link(t: &Topology, l: &Link) -> Result<TopoLink, CompileError> {
         | LinkKind::UsbCdc
         | LinkKind::Ble
         | LinkKind::WifiTcp => {
+            // updatable() leaves these out; reaching here is a caller's bug.
             return Err(bad(format!(
                 "link to '{}' is not updatable yet (V-23)",
                 l.to

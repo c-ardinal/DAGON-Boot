@@ -556,9 +556,9 @@ fn topology_put(server: &Server, req: &Request) -> Res {
     let reg = registry_of(server).map_err(|e| Response::error(500, &e))?;
     let report = dagon_topology::check_str_with(&reg, yaml);
     let report_json: Value = serde_json::from_str(&report.to_json()).unwrap_or(Value::Null);
-    // A 構成 whose only errors are V-23 (a shape updating does not cover
-    // yet) is saved; compile, send, release and apply still refuse it.
-    if report.errors().any(|i| i.rule != "V-23") {
+    // A part updating does not reach yet (V-23) is information, not an
+    // error: the 構成 is saved and its updatable part compiled.
+    if !report.is_pushable() {
         return Err(Response::json(422, &json!({ "report": report_json })));
     }
     // dagon demo: the 構成's uplink picks the simulated medium; one the
@@ -585,8 +585,21 @@ fn topology_put(server: &Server, req: &Request) -> Res {
         sim.set_medium(m);
     }
     Ok(json_ok(
-        json!({ "report": report_json, "updatable": report.is_pushable() }),
+        json!({ "report": report_json, "updatable": true, "skipped": skipped_of(yaml) }),
     ))
+}
+
+/// `{id: why}` of the nodes updating skips for now (`Skip::code`).
+fn skipped_of(yaml: &str) -> Value {
+    let skipped = dagon_topology::parse_str(yaml)
+        .map(|t| dagon_topology::updatable(&t).1)
+        .unwrap_or_default();
+    Value::Object(
+        skipped
+            .into_iter()
+            .map(|(id, why)| (id, Value::from(why.code())))
+            .collect(),
+    )
 }
 
 fn build_get(server: &Server, id: &str) -> Res {
@@ -707,7 +720,7 @@ fn sign_nodes(
             return Err(format!("node '{node}' is listed twice"));
         }
         if t.node(node).is_none() {
-            return Err(format!("no node '{node}' in the topology"));
+            return Err(format!("no updatable node '{node}' in the topology"));
         }
         let (built, elfs) = nodebuild::last_build(cfg, node)?;
         let ver = built

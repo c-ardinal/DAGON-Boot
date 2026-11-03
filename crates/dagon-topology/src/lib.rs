@@ -6,8 +6,11 @@ mod check;
 mod compile;
 pub mod defs;
 pub mod links;
+mod reach;
 mod report;
 pub mod schema;
+
+pub use reach::{updatable, Skip, MAX_UPDATABLE_NODES};
 
 pub use check::{
     check, check_str, check_str_with, check_with, effective_tiers, rom_forced_unavailable,

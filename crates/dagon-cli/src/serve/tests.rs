@@ -665,23 +665,30 @@ fn two_hubs() -> String {
 }
 
 #[test]
-fn a_shape_not_updatable_yet_is_saved_and_still_not_compiled() {
+fn a_shape_not_updatable_yet_is_saved_and_its_updatable_part_compiled() {
     let a = start("v23");
     let b = auth(&a);
     let h = [("Authorization", b.as_str())];
     let y = two_hubs();
     let report = dagon_topology::check_str(&y);
-    assert!(report.errors().count() > 0 && report.errors().all(|i| i.rule == "V-23"));
+    assert_eq!(report.errors().count(), 0, "{}", report.to_json());
+    assert!(report.issues.iter().any(|i| i.rule == "V-23"));
     let (st, body) = http(&a, "PUT", "/v1/topology", &h, y.as_bytes());
     assert_eq!(st, 200, "{body}");
     let v: serde_json::Value = serde_json::from_str(&body).unwrap();
-    assert_eq!(v["updatable"], false);
+    assert_eq!(v["updatable"], true);
+    assert_eq!(v["skipped"], serde_json::json!({ "seg": "second-hub" }));
     assert_eq!(
         std::fs::read_to_string(a.dir.join("topology/t.yaml")).unwrap(),
         y
     );
+    // The second 親機 is skipped: the compiled topology is the 親機 alone.
     let t = dagon_topology::parse_str(&y).unwrap();
-    assert!(dagon_topology::compile(&t).is_err());
+    let (sub, _) = dagon_topology::updatable(&t);
+    assert_eq!(
+        dagon_topology::compile(&t).unwrap(),
+        dagon_topology::compile(&sub).unwrap()
+    );
 }
 
 /// A server whose home is a fresh folder, with a key folder in it.

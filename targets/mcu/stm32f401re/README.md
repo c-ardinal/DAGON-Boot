@@ -65,7 +65,7 @@ static GUARD: Guard<TASKS> = Guard::new(node::levels::<TASKS>(), Trial::NeverFee
 #[embassy_executor::main]
 async fn main(spawner: Spawner) {
     let (dagon, io) = Board::split(embassy_stm32::init(clocks()));
-    let tag = dagon_mcu_stm32f401re::TARGET_TAG;
+    let tag = dagon_mcu_stm32f401re::target_tag!();
     board::start(spawner, dagon, &GUARD, tag, app::self_check).ok();
     app::start(spawner, io, &GUARD, node::APP_TASKS);
 }

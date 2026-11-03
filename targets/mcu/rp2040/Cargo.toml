@@ -24,7 +24,7 @@ hal = ["dep:embassy-rp", "dep:embassy-time", "dep:dagon-agent", "dep:static_cell
 # high-priority executor (SWI_IRQ_0).
 usb = ["hal", "embassy-rp?/rt", "dep:embassy-usb", "dep:embassy-executor"]
 # The 親機 relay (PC link, sub-node links, ROM recovery path).
-relay = ["usb", "dep:embassy-sync", "dep:embassy-futures", "dep:heapless"]
+relay = ["usb", "dep:embassy-sync", "dep:embassy-futures"]
 # The final binary's memory.x comes from this package: an APP slot body
 # (slot A, or B with `slot-b`) unless it is a boot image.
 slot-b = []
@@ -47,7 +47,7 @@ embassy-usb = { version = "0.6.0", optional = true }
 embassy-executor = { version = "0.10", features = ["platform-cortex-m", "executor-interrupt"], optional = true }
 embassy-sync = { version = "0.8", optional = true }
 embassy-futures = { version = "0.1", optional = true }
-heapless = { version = "0.9", optional = true }
+heapless = "0.9"
 static_cell = { version = "2", optional = true }
 # static_cell needs CAS, which thumbv6m only has through a critical section.
 portable-atomic = { version = "1", features = ["critical-section"], optional = true }

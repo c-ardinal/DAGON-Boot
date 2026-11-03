@@ -1,55 +1,27 @@
-//! Round LCD (GC9A01A, 240x240) home screen of the 親機 relay: the hub in
-//! the centre, the sub nodes below it, each with its version and a state
-//! colour. While the PC sends SHOW, the named node's ring becomes an arc
-//! that grows with the percentage in the phase colour, with a line of text
-//! on top. It reads `dagon_mcu_rp2040::relay::state`.
+//! The round LCD (GC9A01A, 240x240) task of the 親機 relay: it draws the
+//! home screen ([`crate::screen`]) from `dagon_mcu_rp2040::relay::state`
+//! and sends whole frames to the panel.
 
 use core::fmt::Write as _;
 
-use dagon_proto::payload::phase;
 use embassy_futures::select::{select, Either};
 use embassy_time::{Duration, Timer};
 use embedded_graphics::mono_font::ascii::{FONT_10X20, FONT_6X10};
-use embedded_graphics::mono_font::{MonoFont, MonoTextStyle};
+use embedded_graphics::mono_font::MonoTextStyle;
 use embedded_graphics::pixelcolor::Rgb565;
 use embedded_graphics::prelude::*;
-use embedded_graphics::primitives::{Arc, Circle, PrimitiveStyle, Rectangle};
+use embedded_graphics::primitives::{Circle, PrimitiveStyle, Rectangle};
 use embedded_graphics::text::{Alignment, Text};
 use heapless::String;
 
 use dagon_mcu_rp2040::arm::step;
-use dagon_mcu_rp2040::relay::state::{self, Home, Node, Progress, Shade};
+use dagon_mcu_rp2040::relay::state;
 use dagon_mcu_rp2040::watchdog::Lease;
 
 use crate::gc9a01::{Frame, Panel};
+use crate::screen;
 use crate::DisplayPins as Pins;
 
-const HUB_AT: Point = Point::new(120, 80);
-const HUB_D: u32 = 90;
-const LEFT: Point = Point::new(55, 160);
-const BOTTOM: Point = Point::new(120, 190);
-const RIGHT: Point = Point::new(185, 160);
-const SUB_D: u32 = 60;
-
-/// Sub node positions by how many there are.
-fn sub_at(count: usize) -> &'static [Point] {
-    match count {
-        0 => &[],
-        1 => &[BOTTOM],
-        2 => &[LEFT, RIGHT],
-        _ => &[LEFT, BOTTOM, RIGHT],
-    }
-}
-
-const RING: u32 = 5;
-/// Height of the small state line under a node's version.
-const STATE_LINE: i32 = 10;
-const ARC: u32 = 9;
-/// Top text line; the round panel is narrower up there.
-const TOP_AT: Point = Point::new(120, 22);
-const TOP_CHARS: usize = 22;
-/// "TEST KEY" marker near the bottom (above the diag seconds counter).
-const TEST_KEY_AT: Point = Point::new(120, 218);
 /// A small square at the top that toggles every second while the hub runs.
 const HEARTBEAT_AT: Point = Point::new(117, 6);
 const HEARTBEAT: Duration = Duration::from_secs(1);
@@ -78,7 +50,7 @@ pub async fn task(mut pins: Pins, frame: &'static mut Frame, lease: Lease) {
         busy();
     }
     let mut shown = state::home();
-    let _ = draw(frame, &shown);
+    let _ = screen::draw(frame, &shown, dagon_mcu_rp2040::TEST_KEY);
     panel.flush(frame).await;
     pins.backlight.set_high();
     let mut beat = false;
@@ -93,7 +65,7 @@ pub async fn task(mut pins: Pins, frame: &'static mut Frame, lease: Lease) {
         let home = state::home();
         if home != shown {
             step(15);
-            let _ = draw(frame, &home);
+            let _ = screen::draw(frame, &home, dagon_mcu_rp2040::TEST_KEY);
             shown = home;
         }
         let c = if beat {
@@ -172,181 +144,4 @@ fn uptime<D: DrawTarget<Color = Rgb565>>(d: &mut D) -> Result<(), D::Error> {
     let style = MonoTextStyle::new(&FONT_6X10, Rgb565::WHITE);
     Text::with_alignment(&line, at, style, Alignment::Center).draw(d)?;
     Ok(())
-}
-
-fn draw<D: DrawTarget<Color = Rgb565>>(d: &mut D, home: &Home) -> Result<(), D::Error> {
-    d.clear(Rgb565::BLACK)?;
-    let p = home.progress.as_ref();
-    node(d, HUB_AT, HUB_D, &home.hub, p, &FONT_10X20)?;
-    for (&at, n) in sub_at(home.subs.len()).iter().zip(&home.subs) {
-        node(d, at, SUB_D, n, p, &FONT_6X10)?;
-    }
-    if let Some(p) = p {
-        let name = core::iter::once(&home.hub)
-            .chain(&home.subs)
-            .find(|n| n.node.index == p.node)
-            .map_or("?", |n| n.node.name());
-        let mut line: String<64> = String::new();
-        if p.text.is_empty() {
-            let _ = write!(line, "{name}: {} {}%", label(p.phase), p.percent);
-        } else {
-            let _ = write!(line, "{name}: {}", p.text);
-        }
-        let shown = &line[..line.len().min(TOP_CHARS)];
-        let style = MonoTextStyle::new(&FONT_6X10, Rgb565::WHITE);
-        Text::with_alignment(shown, TOP_AT, style, Alignment::Center).draw(d)?;
-    }
-    if dagon_mcu_rp2040::TEST_KEY {
-        // Built with the public test key: anyone can sign images for it.
-        let style = MonoTextStyle::new(&FONT_10X20, RED);
-        Text::with_alignment("TEST KEY", TEST_KEY_AT, style, Alignment::Center).draw(d)?;
-    }
-    Ok(())
-}
-
-fn label(ph: u8) -> &'static str {
-    match ph {
-        phase::TRANSFER => "transfer",
-        phase::VERIFY => "verify",
-        phase::REBOOT => "reboot",
-        phase::CONFIRM => "confirmed",
-        phase::REJECTED => "rejected",
-        phase::FAILED => "failed",
-        phase::ROM => "ROM",
-        _ => "",
-    }
-}
-
-fn phase_colour(ph: u8) -> Rgb565 {
-    match ph {
-        phase::CONFIRM => GREEN,
-        phase::REJECTED => RED,
-        phase::FAILED => YELLOW,
-        phase::ROM => PURPLE,
-        _ => BLUE,
-    }
-}
-
-fn node<D: DrawTarget<Color = Rgb565>>(
-    d: &mut D,
-    at: Point,
-    diameter: u32,
-    n: &Node,
-    progress: Option<&Progress>,
-    font: &MonoFont<'_>,
-) -> Result<(), D::Error> {
-    let shown = progress.filter(|p| p.node == n.node.index);
-    match shown {
-        Some(p) => {
-            Circle::with_center(at, diameter)
-                .into_styled(PrimitiveStyle::with_stroke(Rgb565::CSS_DIM_GRAY, RING))
-                .draw(d)?;
-            let sweep = p.percent as f32 * 3.6;
-            Arc::with_center(at, diameter, (-90.0f32).deg(), sweep.deg())
-                .into_styled(PrimitiveStyle::with_stroke(phase_colour(p.phase), ARC))
-                .draw(d)?;
-        }
-        None => {
-            Circle::with_center(at, diameter)
-                .into_styled(PrimitiveStyle::with_stroke(colour(n.shade), RING))
-                .draw(d)?;
-        }
-    }
-    let style = MonoTextStyle::new(font, Rgb565::WHITE);
-    let line = font.character_size.height as i32;
-    // Name, version, then the state in words so colour is never the only
-    // cue.
-    Text::with_alignment(
-        n.node.name(),
-        at - Point::new(0, line / 2 + STATE_LINE / 2),
-        style,
-        Alignment::Center,
-    )
-    .draw(d)?;
-    let mut v: String<16> = String::new();
-    match shown.map(|p| p.version).or(n.version) {
-        Some(ver) => {
-            let _ = write!(v, "{ver}");
-        }
-        None => {
-            let _ = v.push_str("--");
-        }
-    }
-    Text::with_alignment(
-        &v,
-        at + Point::new(0, line / 2 + 2 - STATE_LINE / 2),
-        style,
-        Alignment::Center,
-    )
-    .draw(d)?;
-    let mut word: String<8> = String::new();
-    let c = match shown {
-        Some(p) => {
-            match p.phase {
-                phase::TRANSFER => {
-                    let _ = write!(word, "{}%", p.percent);
-                }
-                _ => {
-                    let _ = word.push_str(short_label(p.phase));
-                }
-            }
-            phase_colour(p.phase)
-        }
-        None => {
-            let _ = word.push_str(state_word(n.shade));
-            colour(n.shade)
-        }
-    };
-    let small = MonoTextStyle::new(&FONT_6X10, c);
-    Text::with_alignment(
-        &word,
-        at + Point::new(0, line / 2 + 2 + STATE_LINE / 2 + 2),
-        small,
-        Alignment::Center,
-    )
-    .draw(d)?;
-    Ok(())
-}
-
-/// At most 6 characters: fits under the version in a small node ring.
-fn short_label(ph: u8) -> &'static str {
-    match ph {
-        phase::VERIFY => "verify",
-        phase::REBOOT => "reboot",
-        phase::CONFIRM => "ok",
-        phase::REJECTED => "reject",
-        phase::FAILED => "failed",
-        phase::ROM => "ROM",
-        _ => "",
-    }
-}
-
-/// At most 6 characters, as [`short_label`].
-fn state_word(s: Shade) -> &'static str {
-    match s {
-        Shade::Unknown => "...",
-        Shade::Confirmed => "ok",
-        Shade::Trial => "trial",
-        Shade::NoAnswer => "silent",
-    }
-}
-
-/// The five LCD state colours (green confirmed, blue transfer/trial,
-/// yellow rolled back, red rejected/no answer, purple ROM path), lightened
-/// where needed so each keeps at least 4.5:1 against the black background
-/// (pure blue and dark purple do not).
-const GREEN: Rgb565 = Rgb565::new(0, 56, 10); // about #00E052
-const BLUE: Rgb565 = Rgb565::new(8, 40, 31); // about #42A2FF
-const YELLOW: Rgb565 = Rgb565::new(31, 56, 0); // about #FFE000
-const RED: Rgb565 = Rgb565::new(31, 12, 8); // about #FF3142
-const PURPLE: Rgb565 = Rgb565::new(24, 28, 31); // about #C672FF
-const GREY: Rgb565 = Rgb565::new(18, 37, 18); // about #949594
-
-fn colour(s: Shade) -> Rgb565 {
-    match s {
-        Shade::Unknown => GREY,
-        Shade::Confirmed => GREEN,
-        Shade::Trial => BLUE,
-        Shade::NoAnswer => RED,
-    }
 }

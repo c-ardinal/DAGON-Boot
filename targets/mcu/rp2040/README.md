@@ -50,7 +50,7 @@ static GUARD: Guard<TASKS> = Guard::new(
 async fn main(spawner: embassy_executor::Spawner) {
     let (dagon, io) = Board::split(embassy_rp::init(Default::default()));
     let cfg = RelayConfig {
-        tag: dagon_mcu_rp2040::TARGET_TAG,
+        tag: dagon_mcu_rp2040::target_tag!(),
         name: "my-hub",
         fallback: &[],
         self_check: app::self_check,

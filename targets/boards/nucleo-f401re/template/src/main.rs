@@ -30,7 +30,7 @@ static GUARD: Guard<TASKS> = Guard::new(node::levels::<TASKS>(), Trial::NeverFee
 async fn main(spawner: Spawner) {
     let (dagon, io) = Board::split(embassy_stm32::init(clocks()));
     // DAGON_TARGET_TAG in .cargo/config.toml (the boot core uses it too).
-    let tag = dagon_mcu_stm32f401re::TARGET_TAG;
+    let tag = dagon_mcu_stm32f401re::target_tag!();
     // An unreadable state log: nothing starts and the watchdog resets.
     board::start(spawner, dagon, &GUARD, tag, app::self_check).ok();
     app::start(spawner, io, &GUARD, node::APP_TASKS);

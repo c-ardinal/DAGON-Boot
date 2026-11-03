@@ -31,7 +31,7 @@ async fn main(spawner: Spawner) {
     let (dagon, io) = Board::split(embassy_rp::init(Default::default()));
     let cfg = RelayConfig {
         // DAGON_TARGET_TAG in .cargo/config.toml (the boot core uses it too).
-        tag: dagon_mcu_rp2040::TARGET_TAG,
+        tag: dagon_mcu_rp2040::target_tag!(),
         name: "{{node}}",
         fallback: &[],
         self_check: app::self_check,

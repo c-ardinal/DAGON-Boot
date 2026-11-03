@@ -405,6 +405,9 @@ Points to note:
 - Fonts in `web/public/fonts/` are under the SIL Open Font License 1.1:
   Doto, DotGothic16, Zen Kaku Gothic New and JetBrains Mono (licence texts
   next to the files; see `web/README.md`).
+- The hub display's Japanese state words use bitmaps rasterised from Noto
+  Sans JP (SIL Open Font License 1.1; licence in
+  `targets/boards/waveshare-rp2040-touch-lcd-1.28/fonts/`).
 
 Rust crates: 316 packages, 350 name/version pairs. "Used by": `crates/` is the host workspace, `samples/...` the sample apps, other names are firmware packages under `targets/`.
 

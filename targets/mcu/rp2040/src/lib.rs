@@ -30,7 +30,9 @@ pub mod bl;
 pub mod cmd;
 pub mod image;
 pub mod layout;
+pub mod nodes;
 pub mod status;
+pub mod view;
 
 #[cfg(target_os = "none")]
 pub mod arm;
@@ -65,6 +67,18 @@ pub const TARGET_TAG: &str = match option_env!("DAGON_TARGET_TAG") {
     Some(t) => t,
     None => "",
 };
+
+/// This node's [`TARGET_TAG`], checked at compile time in the crate that
+/// uses it: an app built without a valid `DAGON_TARGET_TAG` (empty, longer
+/// than 16 characters, not printable ASCII) fails to build, like its boot
+/// core does.
+#[macro_export]
+macro_rules! target_tag {
+    () => {{
+        const _: [u8; 16] = $crate::tag::checked_tag($crate::TARGET_TAG);
+        $crate::TARGET_TAG
+    }};
+}
 
 /// The topology's MCU id and flash map this package implements.
 pub const TOPOLOGY_MCU: &str = "rp2040";

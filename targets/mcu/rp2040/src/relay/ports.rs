@@ -12,7 +12,7 @@ use embassy_sync::channel::Channel;
 use embassy_time::{with_timeout, Duration, Timer};
 use heapless::Vec;
 
-use super::state::{self, Seen, Shade};
+use super::state::{self, Seen};
 use super::task;
 use crate::links::{I2cLink, PioStream, RpI2c, I2C_FRAME};
 use crate::uart::{UartLink, UART_FRAME};
@@ -93,20 +93,7 @@ impl Port {
 }
 
 fn seen(h: Option<dagon_proto::payload::HelloResp>) -> Seen {
-    match h {
-        Some(h) if h.trial => Seen {
-            version: Some(h.active_version),
-            shade: Shade::Trial,
-        },
-        Some(h) => Seen {
-            version: Some(h.active_version),
-            shade: Shade::Confirmed,
-        },
-        None => Seen {
-            version: None,
-            shade: Shade::NoAnswer,
-        },
-    }
+    Seen::from_hello(h.as_ref())
 }
 
 fn next_seq(seq: &mut u8) -> u8 {

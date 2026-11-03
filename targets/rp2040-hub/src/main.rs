@@ -57,7 +57,7 @@ fn main() -> ! {
     let (dagon, io) = Board::split(embassy_rp::init(Default::default()));
     step(11);
     let cfg = RelayConfig {
-        tag: dagon_mcu_rp2040::TARGET_TAG,
+        tag: dagon_mcu_rp2040::target_tag!(),
         name: "DAGON hub",
         fallback: &DESK_DEMO,
         self_check: always,

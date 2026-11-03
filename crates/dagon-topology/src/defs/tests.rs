@@ -136,7 +136,7 @@ fn source_tree_loads_and_equals_builtin() {
     assert_eq!(Registry::load(&[]).unwrap(), *reg());
 }
 
-const FAKE_MCU: &str = r#"
+pub(super) const FAKE_MCU: &str = r#"
 id = "fake-m0"
 name = "FAKE-M0"
 wire_id = 0x7F01
@@ -185,7 +185,7 @@ label = "SWD"
 hint = "SWD probe"
 "#;
 
-const FAKE_BOARD: &str = r#"
+pub(super) const FAKE_BOARD: &str = r#"
 product = "Fake Board"
 mcu = "fake-m0"
 flash_bytes = 0x20_0000
@@ -386,7 +386,7 @@ fn board_with_an_unknown_mcu_is_rejected() {
     std::fs::remove_dir_all(dir).unwrap();
 }
 
-fn mcu_err(text: &str) -> String {
+pub(super) fn mcu_err(text: &str) -> String {
     parse_mcu_text(text, &[]).unwrap_err().to_string()
 }
 

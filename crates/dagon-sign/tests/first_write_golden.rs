@@ -136,6 +136,38 @@ fn every_slot_is_where_it_was() {
     assert_eq!(image::slot("fake", image_kind::APP, slot_binding::A), None);
 }
 
+/// The engines need exactly what they declare to the definition loader.
+#[test]
+fn engines_match_their_declared_requirements() {
+    use dagon_format::header::HEADER_SIZE;
+    use dagon_format::statelog::target;
+    use dagon_topology::defs::requirements;
+    let (_, img) = signed("rp2040", image_kind::APP, slot_binding::A);
+    let face = provision::initial_log(target::APP, &img);
+    assert_eq!(face.len() as u32, requirements::LOG_FACE_MIN);
+    assert_eq!(HEADER_SIZE as u32, requirements::HEADER);
+    // One UF2 block carries one FlashImage page.
+    let mut f = provision::FlashImage::default();
+    f.put(0x100, &[1]);
+    let uf2 = f.to_uf2_with(1, requirements::PAGE);
+    assert_eq!(uf2.len(), 512);
+    assert_eq!(&uf2[16..20], &requirements::PAGE.to_le_bytes());
+}
+
+#[test]
+#[should_panic(expected = "UF2 builder's requirement")]
+fn uf2_builder_refuses_a_sector_its_requirement_rejects() {
+    provision::FlashImage::default().to_uf2_with(1, 0x80);
+}
+
+#[test]
+#[should_panic(expected = "ends at 2^32")]
+fn uf2_builder_refuses_a_sector_ending_at_2_pow_32() {
+    let mut f = provision::FlashImage::default();
+    f.put(0xFFFF_F000, &[1]);
+    f.to_uf2_with(1, 0x1000);
+}
+
 #[test]
 fn first_install_follows_the_writer_and_layout_of_the_definition() {
     let reg = dagon_topology::defs::Registry::builtin();

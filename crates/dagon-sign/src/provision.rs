@@ -7,7 +7,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use dagon_format::header::{self, ImageHeader, HEADER_SIZE};
 use dagon_format::statelog::{self, kind, reason, slot, FaceHeader, Record};
 
-use dagon_topology::defs::{McuDef, Registry, Writer};
+use dagon_topology::defs::{requirements, McuDef, Registry, Writer};
 
 use crate::image::Slot;
 
@@ -31,7 +31,8 @@ pub fn initial_log(target: u8, image: &[u8]) -> Vec<u8> {
     out
 }
 
-const PAGE: usize = 256;
+/// The page the definitions are checked against (`requirements::PAGE`).
+const PAGE: usize = requirements::PAGE as usize;
 
 /// Sparse flash contents in 256-byte pages; unwritten bytes read 0xFF.
 #[derive(Default)]
@@ -86,10 +87,19 @@ impl FlashImage {
         self.to_uf2_with(family_id, DEFAULT_UF2_SECTOR)
     }
 
-    /// [`to_uf2`](Self::to_uf2) with the writer's erase `sector` (a power
-    /// of two, a multiple of 256).
+    /// [`to_uf2`](Self::to_uf2) with the writer's erase `sector`, which
+    /// must meet [`requirements::uf2_sector_ok`] and end below 2^32 (as
+    /// definitions are checked to on load).
     pub fn to_uf2_with(&self, family_id: u32, sector: u32) -> Vec<u8> {
+        assert!(
+            requirements::uf2_sector_ok(sector),
+            "UF2 sector {sector:#x} breaks the UF2 builder's requirement"
+        );
         let sectors: BTreeSet<u32> = self.pages.keys().map(|a| a & !(sector - 1)).collect();
+        assert!(
+            sectors.iter().all(|s| s.checked_add(sector).is_some()),
+            "a UF2 sector ends at 2^32"
+        );
         let pages: Vec<(u32, [u8; PAGE])> = sectors
             .iter()
             .flat_map(|&s| (s..s + sector).step_by(PAGE))
@@ -162,7 +172,14 @@ pub fn first_install(
         for face in log.faces {
             f.blank(face, log.face_size);
         }
-        f.put(log.faces[0], &initial_log(target, image));
+        let face = initial_log(target, image);
+        assert!(
+            face.len() as u32 <= log.face_size,
+            "{}: a provisioned face needs {} bytes (requirements::LOG_FACE_MIN)",
+            mcu.id,
+            face.len()
+        );
+        f.put(log.faces[0], &face);
     }
     f.put_image(boot.0, boot.1);
     f.put_image(app.0, app.1);

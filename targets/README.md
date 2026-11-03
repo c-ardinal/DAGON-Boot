@@ -72,7 +72,14 @@ resolve inside its own folder.
 
 ## Validation
 
-On load: unknown fields; unique MCU ids, wire ids, flash map names and board
+Every number a definition holds is checked against what the engine that
+reads it needs; the engines declare those requirements in
+`dagon-topology/src/defs/requirements.rs` (UF2 `sector`: a power of two of
+at least 256; log `face_size`: at least 96 bytes; slots larger than a
+header; every region inside every flash map, none overlapping; and so on).
+A numeric field without a declared requirement fails the tests.
+
+Also on load: unknown fields; unique MCU ids, wire ids, flash map names and board
 ids; a board's MCU exists; every slot, detached header and layout region
 lies inside every flash map of the MCU and none overlap; one slot per image
 and binding; detached headers inside their partition; referenced files are

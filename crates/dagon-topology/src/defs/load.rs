@@ -4,9 +4,7 @@
 use std::fmt;
 use std::path::{Component, Path, PathBuf};
 
-use super::{
-    Binding, BoardDef, McuDef, Part, Partition, Placement, Registry, Slot, Writer, HEADER,
-};
+use super::{BoardDef, McuDef, Part, Partition, Placement, Registry, Slot, Writer, HEADER};
 
 pub const MCU_FILE: &str = "dagon-mcu.toml";
 pub const BOARD_FILE: &str = "dagon-board.toml";
@@ -335,7 +333,7 @@ fn parse_mcu(text: &str, pkg: &Pkg<'_>) -> Result<McuDef, DefError> {
         .map(|s| resolve(&m.partition_table, s))
         .collect::<Result<_, _>>()
         .or_else(|e| err(&at, e))?;
-    geometry(&m).or_else(|e| err(&at, e))?;
+    super::requirements::check_mcu(&m).or_else(|e| err(&at, e))?;
     Ok(m)
 }
 
@@ -396,12 +394,8 @@ fn resolve(table: &[Partition], s: &super::SlotDef) -> Result<Slot, String> {
         }
         _ => return Err(format!("{what}: give either at + size or partition")),
     };
-    if start.checked_add(size).is_none() {
-        return Err(format!(
-            "{what}: {start:#x}+{size:#x} runs past the 32-bit address space"
-        ));
-    }
-    let detached = (s.header_at, &s.header_partition, s.header);
+    // Saturating: sizes and bounds are the requirements' to report
+    // (requirements::slots), resolution only must not wrap.
     let slot = |header_addr, load_addr, max_payload| Slot {
         image: s.image,
         binding: s.binding,
@@ -412,32 +406,18 @@ fn resolve(table: &[Partition], s: &super::SlotDef) -> Result<Slot, String> {
         load_addr,
         max_payload,
     };
-    if size <= HEADER && s.header != Placement::Detached {
-        return Err(format!(
-            "{what}: {size:#x} bytes cannot hold a header and a payload"
-        ));
-    }
-    let header_fits = |at: u32| match at.checked_add(HEADER) {
-        Some(_) => Ok(slot(at, start, size)),
-        None => Err(format!(
-            "{what}: header at {at:#x} runs past the 32-bit address space"
+    let payload = size.saturating_sub(HEADER);
+    match (s.header_at, &s.header_partition, s.header) {
+        (None, None, Placement::Inline) => Ok(slot(start, start.saturating_add(HEADER), payload)),
+        (None, None, Placement::Trailer) => Ok(slot(
+            start.saturating_add(size).saturating_sub(HEADER),
+            start,
+            payload,
         )),
-    };
-    match detached {
-        (None, None, Placement::Inline) => Ok(slot(start, start + HEADER, size - HEADER)),
-        (None, None, Placement::Trailer) => Ok(slot(start + size - HEADER, start, size - HEADER)),
-        (Some(at), None, Placement::Detached) => header_fits(at),
+        (Some(at), None, Placement::Detached) => Ok(slot(at, start, size)),
         (None, Some(name), Placement::Detached) => {
             let p = partition(table, name)?;
-            if u64::from(s.header_offset) + u64::from(HEADER) > u64::from(p.size) {
-                return Err(format!(
-                    "{what}: header_offset is outside partition '{name}'"
-                ));
-            }
-            let at = p.offset.checked_add(s.header_offset).ok_or_else(|| {
-                format!("{what}: header in '{name}' runs past the 32-bit address space")
-            })?;
-            header_fits(at)
+            Ok(slot(p.offset.saturating_add(s.header_offset), start, size))
         }
         (_, _, Placement::Detached) => Err(format!(
             "{what}: a detached header needs header_at or header_partition"
@@ -446,78 +426,6 @@ fn resolve(table: &[Partition], s: &super::SlotDef) -> Result<Slot, String> {
             "{what}: header_at/header_partition are for detached headers"
         )),
     }
-}
-
-/// Slots and fixed regions lie inside every flash map and never overlap.
-fn geometry(m: &McuDef) -> Result<(), String> {
-    if m.flash_maps.is_empty() {
-        return Err("needs at least one flash_map".into());
-    }
-    for f in &m.flash_maps {
-        // Ends are exclusive u32 addresses everywhere, slots included.
-        if f.bytes == 0 || f.base.checked_add(f.bytes).is_none() {
-            return Err(format!(
-                "flash map '{}' ({:#x}+{:#x}) is empty or runs past the 32-bit address space",
-                f.name, f.base, f.bytes
-            ));
-        }
-    }
-    let mut regions: Vec<(String, u32, u32)> = Vec::new();
-    for s in &m.slots {
-        let name = format!("slot {:?}/{:?}", s.image, s.binding);
-        if s.placement == Placement::Detached {
-            regions.push((format!("{name} header"), s.header_addr, HEADER));
-        }
-        regions.push((name, s.start, s.size));
-    }
-    if let Some(r) = m.layout.stage0 {
-        regions.push(("stage0".into(), r.at, r.size));
-    }
-    for (name, log) in [
-        ("bootcore_log", m.layout.bootcore_log),
-        ("app_log", m.layout.app_log),
-    ] {
-        for (i, face) in log
-            .iter()
-            .flat_map(|l| l.faces.map(|f| (f, l.face_size)))
-            .enumerate()
-        {
-            regions.push((format!("{name} face {i}"), face.0, face.1));
-        }
-    }
-    let end = |at: u32, size: u32| u64::from(at) + u64::from(size);
-    for f in &m.flash_maps {
-        for (name, at, size) in &regions {
-            if *size == 0 || *at < f.base || end(*at, *size) > end(f.base, f.bytes) {
-                return Err(format!(
-                    "{name} ({at:#x}+{size:#x}) is outside flash map '{}'",
-                    f.name
-                ));
-            }
-        }
-    }
-    for (i, (a, a_at, a_size)) in regions.iter().enumerate() {
-        for (b, b_at, b_size) in &regions[i + 1..] {
-            if u64::from(*a_at) < end(*b_at, *b_size) && u64::from(*b_at) < end(*a_at, *a_size) {
-                return Err(format!("{a} overlaps {b}"));
-            }
-        }
-    }
-    for (i, s) in m.slots.iter().enumerate() {
-        let clash = m.slots[..i].iter().any(|o| {
-            o.image == s.image
-                && (o.binding == s.binding
-                    || o.binding == Binding::Any
-                    || s.binding == Binding::Any)
-        });
-        if clash {
-            return Err(format!(
-                "slot {:?}/{:?} is defined twice",
-                s.image, s.binding
-            ));
-        }
-    }
-    Ok(())
 }
 
 /// Registry-wide rules: unique ids, wire ids and flash map names; every
@@ -530,9 +438,6 @@ fn validate(reg: &Registry) -> Result<(), DefError> {
         }
         if let Some(o) = reg.mcus[..i].iter().find(|o| o.id == m.id) {
             return err(at, format!("defined twice ({})", o.name));
-        }
-        if m.wire_id == 0 {
-            return err(at, "wire_id 0 is not an MCU id");
         }
         if let Some(o) = reg.mcus[..i].iter().find(|o| o.wire_id == m.wire_id) {
             return err(
@@ -563,15 +468,7 @@ fn validate(reg: &Registry) -> Result<(), DefError> {
         let Some(m) = reg.mcu(&b.mcu) else {
             return err(at, format!("MCU '{}' is not defined", b.mcu));
         };
-        if !m.flash_maps.iter().any(|f| f.bytes <= b.flash_bytes) {
-            return err(
-                at,
-                format!(
-                    "flash_bytes {:#x} holds none of {}'s flash maps",
-                    b.flash_bytes, m.id
-                ),
-            );
-        }
+        super::requirements::check_board(b, m).or_else(|e| err(&at, e))?;
     }
     Ok(())
 }

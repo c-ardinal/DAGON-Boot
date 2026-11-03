@@ -4,20 +4,22 @@
 //! entry) are closed sets in code; everything else is data.
 
 mod load;
+pub mod requirements;
 #[cfg(test)]
 mod tests;
+#[cfg(test)]
+mod tests_requirements;
 
 use std::sync::OnceLock;
 
-use dagon_format::header::{image_kind, placement, port_kind, slot_binding, HEADER_SIZE};
+use dagon_format::header::{image_kind, placement, port_kind, slot_binding};
 use serde::Deserialize;
 
 use crate::schema::{ControlKind, LinkKind, RomEntry, UartIface};
 
 pub use load::{DefError, Source};
 
-/// Bytes of an image header.
-const HEADER: u32 = HEADER_SIZE as u32;
+use requirements::HEADER;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
 #[serde(rename_all = "kebab-case")]

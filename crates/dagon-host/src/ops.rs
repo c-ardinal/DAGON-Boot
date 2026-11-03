@@ -309,7 +309,7 @@ impl<T: Transport, C: Clock> Host<T, C> {
     async fn await_version(&mut self, to: Target, v: Version) -> Result<HelloResp, T::Error> {
         let (limit, pause) = match to {
             Target::Hub => (HUB_RECONNECT_MS, REOPEN_MS),
-            _ => (REBOOT_WAIT_MS, NODE_POLL_MS),
+            _ => (REBOOT_WAIT_MS, self.node_poll_ms),
         };
         let deadline = self.clock.now_ms() + limit as u64;
         // Another version may answer until the reset really happens (the

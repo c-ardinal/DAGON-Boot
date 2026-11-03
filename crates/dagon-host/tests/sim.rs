@@ -758,6 +758,17 @@ fn subctl_and_i2c_raw_are_never_resent() {
     assert_eq!((count(&s, Cmd::SubCtl), count(&s, Cmd::I2cRaw)), (1, 1));
 }
 
+#[test]
+fn conf_run_is_never_resent() {
+    let s = sim();
+    let mut h = opened(&s);
+    block_on(h.hello(SEG_AT)).unwrap();
+    s.faults.borrow_mut().drop_req.push((Cmd::ConfRun as u8, 1));
+    let r = block_on(h.call(SEG_AT, Cmd::ConfRun, &[1], REQUEST_MS));
+    assert!(r.is_err(), "{r:?}");
+    assert_eq!(count(&s, Cmd::ConfRun), 1, "a conformance step runs once");
+}
+
 /// Flash writes into seg's slot B (0x08040000..0x08060000).
 fn slot_b_writes(s: &Sim) -> Vec<(u32, u32)> {
     let mut hub = s.hub.borrow_mut();
@@ -829,6 +840,46 @@ fn a_lost_reboot_reply_is_not_resent() {
     let out = apply_seg(&s);
     assert!(matches!(out[0].outcome, Outcome::Done(_)), "{out:?}");
     assert_eq!(count(&s, Cmd::Reboot), 1);
+}
+
+/// Simulated ms from REBOOT to CONFIRM on seg while its first four HELLO
+/// polls after the reboot are lost (still booting), polling every
+/// `spacing` ms.
+fn confirm_after_lost_polls(spacing: u32) -> u64 {
+    let s = sim();
+    let mut h = host(&s);
+    h.node_poll_ms = spacing;
+    let (faults, hub) = (s.faults.clone(), s.hub.clone());
+    let mut at = [0u64; 2];
+    let out = block_on(h.apply(
+        &release(),
+        &topology(&yaml()),
+        &key().pk,
+        Some(&[SEG]),
+        &mut |e| match e.phase {
+            phase::REBOOT => {
+                faults.borrow_mut().drop_req.push((HELLO, 4));
+                at[0] = hub.borrow().now_ms();
+            }
+            phase::CONFIRM => at[1] = hub.borrow().now_ms(),
+            _ => {}
+        },
+    ))
+    .unwrap();
+    assert!(matches!(out[0].outcome, Outcome::Done(_)), "{out:?}");
+    at[1] - at[0]
+}
+
+#[test]
+fn polling_every_300_ms_is_what_keeps_confirm_inside_the_trial() {
+    use dagon_host::{NODE_POLL_MS, NODE_TRIAL_MS};
+    let at_300 = confirm_after_lost_polls(NODE_POLL_MS);
+    assert!(at_300 < NODE_TRIAL_MS as u64, "{at_300} ms");
+    let at_500 = confirm_after_lost_polls(500);
+    assert!(
+        at_500 >= NODE_TRIAL_MS as u64,
+        "{at_500} ms: 500 ms would miss it"
+    );
 }
 
 #[test]

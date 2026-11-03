@@ -16,7 +16,7 @@ pub mod rom;
 pub use dagon_romlink::{RomError, Stats as RomStats};
 pub use ops::{
     check_release, reason, ConfirmOutcome, Discovery, Event, NodeOutcome, NodeState, Outcome,
-    RecoverAssets, RecoverPath,
+    RecoverAssets, RecoverPath, NODE_POLL_MS, NODE_TRIAL_MS,
 };
 
 use alloc::vec;
@@ -162,6 +162,9 @@ pub struct Host<T: Transport, C: Clock> {
     /// What the link holds may predate this session (a new session, or
     /// the port reopened): it is read away before the next request.
     stale: bool,
+    /// Pause between a node's HELLO polls after REBOOT
+    /// ([`NODE_POLL_MS`]; tests show a longer one misses the trial).
+    pub node_poll_ms: u32,
 }
 
 impl<T: Transport, C: Clock> Host<T, C> {
@@ -174,6 +177,7 @@ impl<T: Transport, C: Clock> Host<T, C> {
             applied: Vec::new(),
             opened: Vec::new(),
             stale: true,
+            node_poll_ms: ops::NODE_POLL_MS,
         }
     }
 
@@ -446,11 +450,21 @@ pub const RETRY_BACKOFF_MS: [u32; 3] = [50, 100, 200];
 /// Commands a resend cannot harm: reads, the hub display, and the transfer
 /// and state steps the receiver deduplicates by seq (CONFIRM among them).
 /// Not REBOOT or ENTER_ROM (a node that already reset, or left for its ROM
-/// loader, has no memory of the seq), nor the hub's line and raw I2C
+/// loader, has no memory of the seq), nor CONF_RUN (a conformance step
+/// acts on the node every time it runs), nor the hub's line and raw I2C
 /// controls (no seq memory on the hub side).
 fn repeatable(cmd: Cmd) -> bool {
-    !matches!(cmd, Cmd::Reboot | Cmd::EnterRom | Cmd::SubCtl | Cmd::I2cRaw)
+    !NEVER_RESENT.contains(&cmd)
 }
+
+/// Commands whose second run is not the first one's answer.
+const NEVER_RESENT: [Cmd; 5] = [
+    Cmd::Reboot,
+    Cmd::EnterRom,
+    Cmd::ConfRun,
+    Cmd::SubCtl,
+    Cmd::I2cRaw,
+];
 
 fn encode(fl: u8, seq: u8, cmd: u8, payload: &[u8]) -> Vec<u8> {
     let mut out = vec![0u8; dagon_proto::frame_len(payload.len())];
@@ -491,10 +505,31 @@ mod tests {
 
     #[test]
     fn only_commands_a_resend_cannot_harm_are_resent() {
-        let never = [Cmd::Reboot, Cmd::EnterRom, Cmd::SubCtl, Cmd::I2cRaw];
+        let never = [
+            Cmd::Reboot,
+            Cmd::EnterRom,
+            Cmd::ConfRun,
+            Cmd::SubCtl,
+            Cmd::I2cRaw,
+        ];
         for c in Cmd::ALL {
             assert_eq!(repeatable(c), !never.contains(&c), "{c:?}");
         }
-        assert!(repeatable(Cmd::Confirm));
+        // The rest are reads, the hub display and steps the receiver
+        // deduplicates by seq.
+        for c in [
+            Cmd::Hello,
+            Cmd::Status,
+            Cmd::XferBegin,
+            Cmd::XferData,
+            Cmd::XferEnd,
+            Cmd::XferHdr,
+            Cmd::SetPending,
+            Cmd::Confirm,
+            Cmd::Show,
+            Cmd::Relay,
+        ] {
+            assert!(repeatable(c), "{c:?}");
+        }
     }
 }

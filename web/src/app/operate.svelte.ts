@@ -590,6 +590,11 @@ export class Operate {
     for (const r of results) {
       const id = c.nodes[r.node]?.id;
       if (id && r.outcome === 'notStarted') this.progress[id] = { stage: 'unwritten', percent: 0 };
+      // A confirmed node runs the new version now, also when a later node stops the run.
+      const hello = id ? this.live[id]?.hello : null;
+      if (id && hello && r.outcome === 'done' && r.version !== null) {
+        this.live[id] = { ...this.live[id]!, hello: { ...hello, activeVersion: r.version, trial: false } };
+      }
     }
     const stop = results.find((r) => r.outcome === 'failed');
     if (!stop) return this.done();

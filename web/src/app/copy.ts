@@ -813,6 +813,8 @@ export const START = {
 export const SIM = {
   badge: '模擬',
   label: '模擬の親機と子機（実機ではありません）',
+  /** Before connecting: no device list appears for the simulated 親機. */
+  connect: { sentence: '模擬の親機につなぎます。機器を選ぶ一覧は出ません。' },
 } as const;
 
 /** SC-M メニュー and its one confirmation (M53). */

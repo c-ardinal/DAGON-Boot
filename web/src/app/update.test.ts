@@ -179,6 +179,16 @@ describe('update from the page with dagon-host apply against the mock hub', () =
     expect(t.reboots).toEqual([]);
   }, 60_000);
 
+  test('a run that stops at a later node shows the earlier confirmed node on its new version', async () => {
+    const { t, op } = await sentTo();
+    op.takeFile('desk-1.1.0.dgb', RELEASE);
+    t.setQuiet('uart', true);
+    await op.update();
+    expect([op.state, op.failed]).toEqual(['L22', 'watch']);
+    expect(op.progress.seg.stage).toBe('done');
+    expect([v(op.live.seg?.hello?.activeVersion ?? 0), op.live.seg?.hello?.trial]).toEqual(['1.1.0', false]);
+  }, 60_000);
+
   test.each([
     [0x07, 'E_FLASH', '× 書き込めない'],
     [0x09, 'E_SIGNATURE', '× 配布元を確認できない'],

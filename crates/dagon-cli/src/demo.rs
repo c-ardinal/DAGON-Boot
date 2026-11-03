@@ -190,7 +190,16 @@ pub fn command(args: &[&str]) -> Result<(), String> {
             NODES.join(" or ")
         ));
     }
-    let dir = std::env::temp_dir().join(DEMO_DIR);
+    // Per user: a temporary folder may be shared (Linux /tmp).
+    let user = std::env::var("USERNAME")
+        .or_else(|_| std::env::var("USER"))
+        .unwrap_or_default();
+    let user: String = user.chars().filter(|c| c.is_ascii_alphanumeric()).collect();
+    let dir = std::env::temp_dir().join(if user.is_empty() {
+        DEMO_DIR.to_string()
+    } else {
+        format!("{DEMO_DIR}-{user}")
+    });
     let (config, key) = project(&dir)?;
     let hub = desk(&key, fail, 1)?;
     let mut sim = crate::serve::SimDevice::new(hub, speed, fail.map(String::from));

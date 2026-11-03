@@ -51,6 +51,7 @@ is what `dagon new` generates, see `../../boards/nucleo-f401re/template`):
 mod app;
 
 use dagon_board_nucleo_f401re::{self as board, Board, BoardDef};
+use dagon_mcu_stm32f401re::links::{self, Kind};
 use dagon_mcu_stm32f401re::watchdog::{now_ms, Guard, Trial};
 use dagon_mcu_stm32f401re::{clocks, node};
 use embassy_executor::Spawner;
@@ -59,6 +60,12 @@ use {defmt_rtt as _, panic_probe as _};
 // DAGON's link is guard task 0, app.rs's tasks follow. Unconfirmed images
 // never feed: they reset after the boot core's trial period unless the
 // 親機 confirmed them.
+// The hops, as dagon gen writes them from the 構成.
+const UPLINK: Kind = Kind::I2c;
+const DOWNLINKS: &[Kind] = &[];
+const _: () = links::require_uplink(UPLINK);
+const _: () = links::require_downlinks(DOWNLINKS);
+
 const TASKS: usize = node::APP_TASKS + app::TASKS;
 static GUARD: Guard<TASKS> = Guard::new(node::levels::<TASKS>(), Trial::NeverFeed, now_ms);
 
@@ -66,7 +73,7 @@ static GUARD: Guard<TASKS> = Guard::new(node::levels::<TASKS>(), Trial::NeverFee
 async fn main(spawner: Spawner) {
     let (dagon, io) = Board::split(embassy_stm32::init(clocks()));
     let tag = dagon_mcu_stm32f401re::target_tag!();
-    board::start(spawner, dagon, &GUARD, tag, app::self_check).ok();
+    board::start(spawner, dagon, &GUARD, tag, app::self_check, UPLINK).ok();
     app::start(spawner, io, &GUARD, node::APP_TASKS);
 }
 ```
@@ -90,6 +97,57 @@ instead of splitting. Build with `DAGON_PUBKEY` set (below);
 `--features slot-b` links the same app for slot B. The demo node
 (`../../../samples/f401-app`) uses the same pieces (`open_store`,
 `install_watchdog`, `exec`, `serve`).
+
+## Links
+
+Every hop carries whole DAGON frames through one interface,
+`dagon_mcu_common::link::Link` (`read_frame`, `write_frame`, `flush`,
+`max_payload`, `reconnect`); the serve loops are generic over it. The
+kinds this package offers (`links::LINK_KINDS`):
+
+| Kind | Up | Down |
+|---|---|---|
+| `usb-cdc` | NotYet | No |
+| `uart` | NotYet | No |
+| `i2c` | Yes | No |
+| `ble` | NotYet | No |
+| `wifi-tcp` | NotYet | No |
+| `ethernet` | NotYet | No |
+| `can` | NotYet | No |
+
+- Up `i2c`: the I2C target with the DAGON mailbox (`links::I2c`); the board
+  package names the peripheral, pins and address (`uplink_i2c()`).
+
+### Generator contract
+
+The kind names are exactly the 構成's: `usb-cdc`, `uart`, `i2c`, `ble`,
+`wifi-tcp`, `ethernet`, `can`. In a project template:
+
+- `{{uplink}}` renders to one Rust path naming the node's uplink kind:
+  `dagon_mcu_stm32f401re::links::Kind::<Variant>`;
+- `{{downlinks}}` renders to the downlink kinds, comma-separated (empty
+  for a 子機): `dagon_mcu_stm32f401re::links::Kind::<Variant>, ...`.
+
+Variants by name: `usb-cdc` `UsbCdc`, `uart` `Uart`, `i2c` `I2c`, `ble`
+`Ble`, `wifi-tcp` `WifiTcp`, `ethernet` `Ethernet`, `can` `Can`. The
+template checks them at compile time; a kind this package does not offer
+in that direction stops the build with a message naming the hop, e.g.
+`uplink ble: not available yet on stm32f401re`:
+
+```rust
+use dagon_mcu_stm32f401re::links::{self, Kind};
+
+#[rustfmt::skip]
+const UPLINK: Kind = {{uplink}};
+#[rustfmt::skip]
+const DOWNLINKS: &[Kind] = &[{{downlinks}}];
+const _: () = links::require_uplink(UPLINK);
+const _: () = links::require_downlinks(DOWNLINKS);
+```
+
+The board package's `start` takes `UPLINK` (a 子機 has no downlinks) and
+builds the link on the board's pins; link types are constructed as
+`dagon_mcu_stm32f401re::links::<Kind>::new(..)`.
 
 ## Features
 

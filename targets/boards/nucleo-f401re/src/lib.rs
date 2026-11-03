@@ -60,6 +60,7 @@ pub const FLASH_SIZE: usize = 512 * 1024;
 
 #[cfg(feature = "hal")]
 mod hal {
+    use dagon_mcu_stm32f401re::links::Kind;
     pub use dagon_mcu_stm32f401re::node::DagonParts;
     use dagon_mcu_stm32f401re::node::{I2cTarget, LogError};
     use dagon_mcu_stm32f401re::watchdog::Guard;
@@ -94,8 +95,18 @@ mod hal {
         guard: &'static Guard<N>,
         tag: &'static str,
         self_check: fn() -> bool,
+        uplink: Kind,
     ) -> Result<(), LogError> {
-        dagon_mcu_stm32f401re::node::start::<Board, N>(spawner, parts, guard, tag, self_check)
+        dagon_mcu_stm32f401re::node::start::<Board, N>(
+            spawner, parts, guard, tag, self_check, uplink,
+        )
+    }
+
+    /// Up `i2c` on this board: I2C3 on PA8/PB4 as a target at
+    /// [`I2C_ADDR`](super::I2C_ADDR) with the DAGON mailbox.
+    pub fn uplink_i2c(link: Link) -> dagon_mcu_stm32f401re::links::I2c {
+        let (target, regs) = Board::open_link(link);
+        dagon_mcu_stm32f401re::links::I2c::new(target, regs)
     }
 
     /// The DAGON link's peripherals and pins.

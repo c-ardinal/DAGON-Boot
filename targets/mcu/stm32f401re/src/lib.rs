@@ -18,6 +18,7 @@
 #![no_std]
 
 pub mod layout;
+pub mod links;
 pub mod mailbox;
 mod store;
 pub use store::KindSStore;

@@ -29,6 +29,7 @@ conform = ["dep:dagon-conform"]
 dagon-agent = { path = "../../../crates/dagon-agent" }
 dagon-conform = { path = "../../../crates/dagon-conform", optional = true }
 dagon-format = { path = "../../../crates/dagon-format" }
+dagon-mcu-common = { path = "../common" }
 dagon-port = { path = "../../../crates/dagon-port" }
 dagon-proto = { path = "../../../crates/dagon-proto" }
 

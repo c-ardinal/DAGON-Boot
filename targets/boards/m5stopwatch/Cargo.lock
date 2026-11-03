@@ -214,11 +214,23 @@ dependencies = [
 ]
 
 [[package]]
+name = "dagon-mcu-common"
+version = "0.0.0"
+dependencies = [
+ "critical-section",
+ "dagon-agent",
+ "dagon-format",
+ "dagon-port",
+ "dagon-proto",
+]
+
+[[package]]
 name = "dagon-mcu-esp32s3"
 version = "0.0.0"
 dependencies = [
  "dagon-agent",
  "dagon-format",
+ "dagon-mcu-common",
  "dagon-port",
  "dagon-proto",
  "embassy-executor",

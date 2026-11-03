@@ -10,13 +10,67 @@ and not on the board. Kind V: the stock ESP-IDF 2nd stage with app rollback
 | `node` | `arm_watchdog`, `start` (the link task), `running_version`, `now_ms` |
 | `liveness`, `trial` | watchdog policy: no feed before CONFIRM, then deadline-based |
 | `rom`, `serve` | ENTER_ROM and what follows a reply |
-| `link` | link UART settings (`uart_config`, 115200 8N1), a polling `UartLink` |
+| `link` | link UART settings (`uart_config`, 115200 8N1) |
+| `links` | the node's uplinks as `Link`s (`Uart`, `UsbCdc`) and `LINK_KINDS` |
 | `flash`, `boot`, `sys` | `Flash`, `BootSelectV` over otadata, `Clock` / `Watchdog` / `Reset` |
 | `layout`, `partitions.csv`, `otadata`, `framer` | partition table (needs 8 MB flash or more), otadata, frame cutter |
 | `board` | the `BoardDef` trait a board crate implements |
 
 Reset on panic is on by default (feature `panic-reset`), so a trial image
 that panics rolls back.
+
+## Links
+
+Every hop carries whole DAGON frames through one interface,
+`dagon_mcu_common::link::Link` (`read_frame`, `write_frame`, `flush`,
+`max_payload`, `reconnect`); the serve loops are generic over it. The
+kinds this package offers (`links::LINK_KINDS`):
+
+| Kind | Up | Down |
+|---|---|---|
+| `usb-cdc` | Yes | No |
+| `uart` | Yes | No |
+| `i2c` | NotYet | No |
+| `ble` | NotYet | No |
+| `wifi-tcp` | NotYet | No |
+| `ethernet` | NotYet | No |
+| `can` | NotYet | No |
+
+- Up `uart`: UART0 at 115200 8N1 (`links::Uart`), and up `usb-cdc`: the
+  chip's USB Serial/JTAG (`links::UsbCdc`, `Reconnect::Reenumerates`);
+  the node serves both at once.
+
+### Generator contract
+
+The kind names are exactly the 構成's: `usb-cdc`, `uart`, `i2c`, `ble`,
+`wifi-tcp`, `ethernet`, `can`. In a project template:
+
+- `{{uplink}}` renders to one Rust path naming the node's uplink kind:
+  `dagon_mcu_esp32s3::links::Kind::<Variant>`;
+- `{{downlinks}}` renders to the downlink kinds, comma-separated (empty
+  for a 子機): `dagon_mcu_esp32s3::links::Kind::<Variant>, ...`.
+
+Variants by name: `usb-cdc` `UsbCdc`, `uart` `Uart`, `i2c` `I2c`, `ble`
+`Ble`, `wifi-tcp` `WifiTcp`, `ethernet` `Ethernet`, `can` `Can`. The
+template checks them at compile time; a kind this package does not offer
+in that direction stops the build with a message naming the hop, e.g.
+`uplink ble: not available yet on esp32s3`:
+
+```rust
+use dagon_mcu_esp32s3::links::{self, Kind};
+
+#[rustfmt::skip]
+const UPLINK: Kind = {{uplink}};
+#[rustfmt::skip]
+const DOWNLINKS: &[Kind] = &[{{downlinks}}];
+const _: () = links::require_uplink(UPLINK);
+const _: () = links::require_downlinks(DOWNLINKS);
+```
+
+The node serves UART and USB Serial/JTAG at once whichever is named the
+uplink (the check above still stops a kind not offered); link types are
+constructed as
+`dagon_mcu_esp32s3::links::<Kind>::new(..)`.
 
 ## Board layer
 

@@ -22,6 +22,7 @@
 use board::{Board, BoardDef};
 use dagon_board_waveshare_rp2040_touch_lcd_1_28 as board;
 use dagon_mcu_rp2040::arm::{led, step};
+use dagon_mcu_rp2040::links::Kind;
 use dagon_mcu_rp2040::node::always;
 use dagon_mcu_rp2040::relay::{self, named, RelayConfig, SubNode};
 use dagon_mcu_rp2040::watchdog::{now_ms, Guard, Trial};
@@ -64,6 +65,14 @@ fn main() -> ! {
     };
     EXECUTOR_LOW.init(Executor::new()).run(|low| {
         step(12);
-        board::start(low, dagon, io, &GUARD, cfg);
+        board::start(
+            low,
+            dagon,
+            io,
+            &GUARD,
+            cfg,
+            Kind::UsbCdc,
+            &[Kind::I2c, Kind::Uart],
+        );
     })
 }

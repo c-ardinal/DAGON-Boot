@@ -107,8 +107,9 @@ DAGON Console itself (`web/README.md`).
 ## The journey
 
 The example is the desk demo: an RP2040 hub with a round LCD, a
-NUCLEO-F401RE showing its version on a 7-segment display (I2C), and an
-M5StopWatch (UART). Replace it with your own topology at step 2.
+NUCLEO-F401RE (I2C) and an M5StopWatch (UART). What their sample apps do
+is in `samples/f401-app` and `samples/esp32s3-app`. Replace it with your
+own topology at step 2.
 
 ### 1. Start a project
 

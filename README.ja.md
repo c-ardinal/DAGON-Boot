@@ -74,7 +74,7 @@ DAGON Console は `dagon` に組み込まれています。Node.js が要るの�
 
 ## はじめから更新まで
 
-例はデスクのデモです: 丸い LCD の RP2040 親機、7 セグメント表示にバージョンを出す NUCLEO-F401RE（I2C）、M5StopWatch（UART）。手順 2 で自分の構成に置き換えます。
+例はデスクのデモです: 丸い LCD の RP2040 親機、NUCLEO-F401RE（I2C）、M5StopWatch（UART）。子機のサンプルのアプリの動きは `samples/f401-app` と `samples/esp32s3-app` にあります。手順 2 で自分の構成に置き換えます。
 
 ### 1. プロジェクトを始める
 
@@ -132,7 +132,7 @@ dagon flash watch      # ESP32-S3: USB-C 経由で espflash が書き込む
 
 `dagon flash` は先に手順を表示し、ボードに触れる前に確認を求めます（`--yes` で確認を省きます）。`--dry-run` も書き込みの手前まではすべて行います: 部品とアプリをビルドし、初回書込みのファイルを provision のフォルダ（`dagon.toml` の横の `out/provision/<id>/`、`dagon.toml` に `provision_dir` があればその下、`--out <dir>` で別の場所）に作り、ボードにだけ触れません。ブートコア（親機は `stage0` も）を CLI をビルドした DAGON のクローン（または `DAGON_HOME`）から、ノードのアプリと一緒に、署名の鍵の公開側でビルドします。ブートコアはデスクのデモの tag（`hub-rp2040-lcd`、`seg-f401-7seg`）を受け付けるので、これらのボードでは `topology.yaml` の tag をそのままにします。
 
-ESP32-S3 のノードでは、`dagon flash` がボードの factory エージェントとアプリをビルドし、アプリを ESP のイメージにして（`espflash save-image --chip esp32s3 --flash-size 16mb`）署名し、`espflash` で書き込みます: 同梱の無改変の ESP-IDF 2nd stage を 0x0 に（SHA-256 が `targets/mcu/esp32s3/vendor/SHA256SUMS` と一致しなければ書きません）、パーティション表（`targets/mcu/esp32s3/partitions.csv`、0x8000）、factory エージェント、ota_0（0x110000）にアプリ、`dagon` パーティション（0x710000）にその署名済みヘッダ、確定済みとして起動させる otadata の項目（0xD000）。USB-C でつながった ESP32-S3（USB Serial/JTAG、`303a:1001`）がちょうど 1 台のときだけ書き込み、0 台や 2 台以上なら書く前に止まります。`--dry-run` はファイルとそのオフセット、`espflash` のコマンドを示します（同じ provision のフォルダの `commands.txt`）。
+ESP32-S3 のノードでは、`dagon flash` がボードの factory エージェントとアプリをビルドし、アプリを ESP のイメージにして（`espflash save-image --chip esp32s3 --flash-size 16mb`）署名し、`espflash` で書き込みます: 同梱の無改変の ESP-IDF 2nd stage を 0x0 に（SHA-256 が `targets/mcu/esp32s3/vendor/SHA256SUMS` と一致しなければ書きません）、パーティション表（`targets/mcu/esp32s3/partitions.csv`、0x8000）、factory エージェント、ota_0（0x110000）にアプリ、`dagon` パーティション（0x710000）にその署名済みヘッダ、確定済みとして起動させる otadata の項目（0xD000）。USB-C でつながった ESP32-S3（USB Serial/JTAG、`303a:1001`）がちょうど 1 つのときだけ書き込み、つながっていないときや 2 つ以上のときは書く前に止まります。`--dry-run` はファイルとそのオフセット、`espflash` のコマンドを示します（同じ provision のフォルダの `commands.txt`）。
 
 そのあと親機をつなぎ、すべてのノードが応答するか確かめます:
 

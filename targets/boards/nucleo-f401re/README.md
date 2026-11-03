@@ -12,7 +12,7 @@ implements the STM32F401RE MCU package's `BoardDef`.
 | Shield centre VL53L0X GPIO1 (fitted; input only, not handed out) | PA4 (A2) |
 
 The shield's 4-digit display (common anode, static drive, a segment lights
-while its expander pin is low; no digit points wired) and the VL53L0X XSHUT
+while its expander pin is low) and the VL53L0X XSHUT
 lines hang off two STMPE1600 on I2C1 (ST UM2047 Figure 4):
 
 | Expander (7-bit) | GPIO 0..6 | GPIO 7..13 | GPIO 14 | GPIO 15 |
@@ -20,7 +20,9 @@ lines hang off two STMPE1600 on I2C1 (ST UM2047 Figure 4):
 | U21 at 0x43 | digit 1 (left) | digit 2 | XSHUT left | XSHUT right |
 | U19 at 0x42 | digit 3 | digit 4 (right) | unused (input) | XSHUT centre |
 
-Within a digit, GPIO n+0..n+6 = segments e, f, g, a, d, b, c. Start-up
+Within a digit, GPIO n+0..n+6 = segments e, f, g, a, d, b, c. The
+shield's decimal-point wiring is not confirmed yet; the driver currently
+does not light it. Start-up
 writes (`shield::INIT`, levels before directions so nothing flashes):
 U19 GPSR (0x12) = 0x3FFF, GPDR (0x14) = 0xBFFF; U21 GPSR = 0x3FFF,
 GPDR = 0xFFFF: all segments off, all three sensors held in XSHUT. Each
@@ -37,15 +39,15 @@ on DAGON's I2C3 bus.
   calling app task (its interrupts at P7, below DAGON's executor), each
   write bounded by a 20 ms timeout. `running_version()` reads the running
   image's version from its header.
-- `seg`: text for the 4 digits (host-testable with `shield`'s register
-  writes: `cargo test --no-default-features --target <host triple>`).
-- The shield has no decimal points: a `.` in `seg` text is accepted but
-  not shown, so versions appear as their digits side by side,
-  right-aligned. `seg::version` shows `major.minor.patch` (1.2.0 as
-  ` 120`, 1.10.7 as `1107`), else `major.minor` (10.10.x as `1010`), else
-  `----`.
+- `seg`: text for the 4 characters, one code per digit (segments a..g,
+  bit 7 the point). `seg::render` takes up to 4 of `0`-`9`, space, `-`,
+  `t`, `S`, `E`, right-aligned; a `.` sets the point of the character
+  before it and takes no digit (not lit, see above); anything else is
+  `None`. Host-testable with `shield`'s register writes:
+  `cargo test --no-default-features --target <host triple>`.
 - Flash: 512 KiB (`FLASH_SIZE`, checked against the MCU layout).
 
 Features: `slot-b`, `conform` (forwarded to the MCU package). See
 `../../mcu/stm32f401re/README.md` for a complete app and
-`../../../samples/f401-app` for the demo node.
+`../../../samples/f401-app` for the demo node (what it shows is in its
+README).

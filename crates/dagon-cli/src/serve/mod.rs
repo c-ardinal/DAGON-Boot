@@ -75,6 +75,9 @@ fn start_key(
 }
 
 pub fn command(args: &[&str]) -> Result<(), String> {
+    // serve's output is a log for a person (a terminal, or a file it is
+    // sent to): the banner opens it. Machine-readable output never has it.
+    println!("{}\n", crate::banner_text());
     let no_open = args.contains(&"--no-open");
     let args: Vec<&str> = args.iter().copied().filter(|a| *a != "--no-open").collect();
     let o = Opts::parse(&args, &["port", "web", "config", "pubkey", "key"])?;
@@ -113,9 +116,6 @@ pub fn command(args: &[&str]) -> Result<(), String> {
     })?;
     if let Some(k) = key {
         server.set_release_key(k);
-    }
-    if let Some(b) = crate::banner() {
-        println!("{b}\n");
     }
     if web.as_os_str().is_empty() {
         println!("DAGON Console: built into this executable");

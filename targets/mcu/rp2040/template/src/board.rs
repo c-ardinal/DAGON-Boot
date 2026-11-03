@@ -93,5 +93,10 @@ pub fn links(io: Io, uplink: Kind, downlinks: &[Kind]) -> (Links, Spare) {
         core::mem::forget(common);
         PioStream { tx, rx }
     });
-    (Links { i2c, uart, sub: None }, io.spare)
+    let links = Links {
+        i2c,
+        uart,
+        sub: None,
+    };
+    (links, io.spare)
 }

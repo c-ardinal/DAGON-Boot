@@ -291,10 +291,17 @@ fn write_plan(cfg: &Config, mcu: &McuDef, out: &Path, paths: Paths) -> Result<Ve
             let sums = Path::new(esp.checksums)
                 .file_name()
                 .map_or(esp.checksums.into(), |n| n.to_string_lossy());
+            let bootloader = match &mcu.package {
+                // A project's own MCU package.
+                Some(p) => shown(cfg, &p.join(esp.bootloader), paths),
+                None => format!(
+                    "{}/{} of the DAGON source",
+                    source_relative(cfg, &Want::Mcu(mcu.id.clone())),
+                    esp.bootloader
+                ),
+            };
             let mut l = vec![format!(
-                "  check    {}/{} of the DAGON source against {sums} (the unmodified ESP-IDF 2nd stage)",
-                source_relative(cfg, &Want::Mcu(mcu.id.clone())),
-                esp.bootloader
+                "  check    {bootloader} against {sums} (the unmodified ESP-IDF 2nd stage)"
             )];
             l.push(format!("  make     in {}:", shown(cfg, out, paths)));
             l.extend(

@@ -62,6 +62,20 @@ pub fn release_topology(bundle: &[u8], current: &str) -> Result<JsValue, JsError
         .map_err(|e| JsError::new(&e))
 }
 
+/// Nodes updating skips for now (V-23), `{id: why}` with why one of
+/// `second-hub`, `deep`, `link-kind`, `too-many`; empty when the YAML does
+/// not parse or updating reaches every node.
+#[wasm_bindgen]
+pub fn topo_skipped(yaml: &str) -> JsValue {
+    let o = Object::new();
+    if let Ok(t) = dagon_topology::parse_str(yaml) {
+        for (id, why) in dagon_topology::updatable(&t).1 {
+            set(&o, &id, why.code().into());
+        }
+    }
+    o.into()
+}
+
 fn link_kind(k: LinkKind) -> &'static str {
     k.name()
 }

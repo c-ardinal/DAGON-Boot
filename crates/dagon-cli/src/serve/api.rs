@@ -151,6 +151,12 @@ fn nodes_of(v: &Value) -> Result<Vec<String>, Response> {
 pub fn handle(server: &Arc<Server>, req: &Request) -> Response {
     let path = req.path.split('?').next().unwrap_or("");
     let parts: Vec<&str> = path.trim_start_matches("/v1/").split('/').collect();
+    if server.sim.get().is_some() && demo_refuses(&parts) {
+        return Response::error(
+            403,
+            "not in dagon demo (a simulated desk with its own project)",
+        );
+    }
     let r = match (req.method.as_str(), parts.as_slice()) {
         ("GET", ["hello"]) => Ok(hello(server)),
         ("GET", ["targets"]) => targets(server),
@@ -188,6 +194,29 @@ pub fn handle(server: &Arc<Server>, req: &Request) -> Response {
     };
     r.unwrap_or_else(|e| e)
 }
+
+/// What dagon demo refuses: other projects (opening one would load its
+/// signing key) and everything that touches real hardware or the machine.
+const DEMO_REFUSED: [&str; 8] = [
+    "project/open",
+    "project/new",
+    "project/init",
+    "fs",
+    "flash",
+    "doctor",
+    "conform",
+    "device",
+];
+
+fn demo_refuses(parts: &[&str]) -> bool {
+    let route = parts.join("/");
+    DEMO_REFUSED
+        .iter()
+        .any(|r| route == *r || route.starts_with(&format!("{r}/")))
+}
+
+/// Features dagon demo leaves out of hello (the page hides them).
+const DEMO_HIDDEN: [&str; 4] = ["project", "flash", "doctor", "conform"];
 
 /// The longest GET /v1/sim/read waits for an answer.
 const SIM_READ_MAX_MS: u64 = 1_000;
@@ -305,6 +334,7 @@ fn hello(server: &Server) -> Response {
     let sim = server.sim.get();
     let mut features = FEATURES.to_vec();
     if sim.is_some() {
+        features.retain(|f| !DEMO_HIDDEN.contains(f));
         features.push("sim");
     }
     json_ok(json!({

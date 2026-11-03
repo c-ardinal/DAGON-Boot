@@ -71,8 +71,7 @@ pub fn add(home: &Path, dir: &Path) {
 
 /// A path as the page shows it (forward slashes, no verbatim prefix).
 pub fn shown(p: &Path) -> String {
-    let s = p.to_string_lossy().replace('\\', "/");
-    s.strip_prefix("//?/").unwrap_or(&s).to_string()
+    crate::config::forward_path(p)
 }
 
 /// The list for GET /v1/project.

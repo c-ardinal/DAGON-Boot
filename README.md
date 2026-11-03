@@ -81,6 +81,9 @@ dagon doctor           # what is there and what is missing
 dagon doctor --fix     # installs what needs no administrator rights
 ```
 
+For an STM32F401RE node, `dagon doctor` also checks that an ST-LINK is
+plugged in (`probe-rs list`); that one it cannot fix for you.
+
 DAGON Console is built into `dagon`; Node.js is only needed to work on
 DAGON Console itself (`web/README.md`).
 
@@ -165,8 +168,11 @@ dagon flash watch      # ESP32-S3: over USB-C with espflash
 ```
 
 `dagon flash` prints its plan first and asks before it touches the board
-(`--yes` skips the question; `--dry-run` only makes the files under
-`out/`). It builds the boot core (and the hub's `stage0`) from the DAGON
+(`--yes` skips the question). `--dry-run` still does everything up to
+the write: it builds the parts and the app and makes the first-install
+files in the provision folder (`out/provision/<id>/` beside `dagon.toml`,
+or under `provision_dir` when `dagon.toml` sets it; `--out <dir>`
+chooses another), and only leaves the board untouched. It builds the boot core (and the hub's `stage0`) from the DAGON
 clone the CLI was built from (or `DAGON_HOME`) and the node's app, all
 with the public half of your signing key. The boot cores accept the desk
 demo's tags (`hub-rp2040-lcd`, `seg-f401-7seg`), so keep those tags in
@@ -183,7 +189,7 @@ app in ota_0 (0x110000) with its signed header in the `dagon` partition
 Exactly one ESP32-S3 must be connected over USB-C (USB Serial/JTAG,
 `303a:1001`); with none or several it stops before writing. `--dry-run`
 lists the files with their offsets and the `espflash` commands
-(`out/provision/<id>/commands.txt`).
+(`commands.txt` in the same provision folder).
 
 Then connect the hub and check that every node answers:
 
@@ -206,8 +212,10 @@ dagon deploy                       # or: dagon deploy seg watch --version 1.2.0
 
 `dagon deploy` builds slots A and B, signs them, makes the release, lists
 each node with its old and new version and asks before applying (`--yes`
-skips the question). The version defaults to one patch above the newest
-one it knows. Without node ids it takes every node in `[build.<id>]`. An
+skips the question). The old version is the node's version in the last
+release (`out/release-latest.dgb`, or `release` in `dagon.toml`), read once
+that release verifies under your key; it is not read from the boards. The
+version defaults to one patch above the newest one it knows. Without node ids it takes every node in `[build.<id>]`. An
 ESP32-S3 node is built once (its image runs from either OTA slot); deploy
 turns the build into an ESP image (`espflash save-image`) and signs that,
 and the hub relays it like any other node's. The single steps are

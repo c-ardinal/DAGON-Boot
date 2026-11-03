@@ -35,6 +35,9 @@ const HTTP_TIMEOUT: Duration = Duration::from_secs(30);
 /// The page must send the passphrase this soon after opening the stream.
 const WS_AUTH_TIMEOUT: Duration = Duration::from_secs(10);
 const WS_POLL: Duration = Duration::from_millis(500);
+/// A page that takes no event for this long is dropped (it reconnects and
+/// reads state again), so a stalled tab never holds an event thread.
+const WS_WRITE_TIMEOUT: Duration = Duration::from_secs(5);
 const DEFAULT_WEB: &str = "web/dist";
 /// Connections handled at once; more get 503 straight away.
 pub const MAX_CONNECTIONS: usize = 32;
@@ -72,6 +75,9 @@ fn start_key(
 }
 
 pub fn command(args: &[&str]) -> Result<(), String> {
+    // serve's output is a log for a person (a terminal, or a file it is
+    // sent to): the banner opens it. Machine-readable output never has it.
+    println!("{}\n", crate::banner_text());
     let no_open = args.contains(&"--no-open");
     let args: Vec<&str> = args.iter().copied().filter(|a| *a != "--no-open").collect();
     let o = Opts::parse(&args, &["port", "web", "config", "pubkey", "key"])?;
@@ -111,9 +117,6 @@ pub fn command(args: &[&str]) -> Result<(), String> {
     if let Some(k) = key {
         server.set_release_key(k);
     }
-    if let Some(b) = crate::banner() {
-        println!("{b}\n");
-    }
     if web.as_os_str().is_empty() {
         println!("DAGON Console: built into this executable");
     } else if !web.join("index.html").exists() {
@@ -123,10 +126,7 @@ pub fn command(args: &[&str]) -> Result<(), String> {
         );
     }
     match key {
-        Some(k) => println!(
-            "release key: {}",
-            dagon_sign::to_hex(&dagon_format::key_id(&k))
-        ),
+        Some(k) => println!("release key: {}", crate::config::key_id_text(&k)),
         None => println!("no project yet: open or create one on the page"),
     }
     let url = format!("http://127.0.0.1:{port}/#{}", server.pass);
@@ -292,6 +292,7 @@ fn events(mut stream: TcpStream, server: &Arc<Server>, req: &Request) {
         return;
     };
     let _ = reader.set_read_timeout(None);
+    let _ = stream.set_write_timeout(Some(WS_WRITE_TIMEOUT));
     let writer = Arc::new(Mutex::new(stream));
     let closed = Arc::new(AtomicBool::new(false));
     spawn_reader(reader, writer.clone(), closed.clone());
@@ -307,6 +308,10 @@ fn events(mut stream: TcpStream, server: &Arc<Server>, req: &Request) {
             Err(mpsc::RecvTimeoutError::Timeout) => {}
             Err(mpsc::RecvTimeoutError::Disconnected) => break,
         }
+    }
+    // Ends the reader thread too.
+    if let Ok(s) = writer.lock() {
+        let _ = s.shutdown(std::net::Shutdown::Both);
     }
     server.pages.fetch_sub(1, Ordering::Relaxed);
 }

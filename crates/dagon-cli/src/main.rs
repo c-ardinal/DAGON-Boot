@@ -167,10 +167,7 @@ fn key_pub(args: &[&str]) -> Result<(), String> {
     let o = config::Opts::parse(args, &["key"])?;
     let k = config::load_key(o.get("key"))?;
     println!("public_key: {}", dagon_sign::to_hex(&*k.pk));
-    println!(
-        "key_id:     {}",
-        dagon_sign::to_hex(&dagon_format::key_id(&k.pk))
-    );
+    println!("key_id:     {}", config::key_id_text(&k.pk));
     Ok(())
 }
 

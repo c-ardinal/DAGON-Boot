@@ -101,6 +101,7 @@ fn sim() -> Sim {
         late_reboot: 0,
         held: None,
         faults: Rc::default(),
+        inject: Rc::default(),
     }
 }
 
@@ -139,6 +140,9 @@ struct Sim {
     /// acknowledging REBOOT.
     late_reboot: u32,
     held: Option<Vec<u8>>,
+    /// Bytes that arrive just before the hub's reply to the next request
+    /// (a previous session's replies still on the link).
+    inject: Rc<RefCell<Vec<u8>>>,
 }
 
 impl Transport for Sim {
@@ -152,6 +156,7 @@ impl Transport for Sim {
             self.held = Some(bytes.to_vec());
             return Ok(());
         }
+        self.pending.extend(self.inject.borrow_mut().drain(..));
         let (cmd, retry) = effective(bytes);
         let mut f = self.faults.borrow_mut();
         f.seen.push((cmd, retry));
@@ -640,6 +645,41 @@ fn a_new_session_never_gets_the_previous_sessions_stored_reply() {
     );
 }
 
+/// A HELLO reply for every PC seq whose body is no HELLO: taken for an
+/// answer, it fails the caller's HELLO.
+fn stale_hellos() -> Vec<u8> {
+    let mut out = Vec::new();
+    for seq in 0..=0x7Fu8 {
+        let mut f = vec![0u8; dagon_proto::frame_len(1)];
+        dagon_proto::finish(&mut f, flags::RESP, seq, Cmd::Hello as u8, 1).unwrap();
+        out.extend(f);
+    }
+    out
+}
+
+#[test]
+fn replies_of_a_previous_session_still_on_the_link_are_not_taken() {
+    let s = sim();
+    let mut h = host(&s);
+    // They arrive right before the reply to this session's opening HELLO,
+    // one of them with its seq.
+    s.inject.borrow_mut().extend(stale_hellos());
+    let st = block_on(h.status(Target::Hub));
+    assert!(st.is_ok(), "{st:?}");
+    assert_eq!(st.unwrap().hello.active_version, Version::new(1, 0, 0));
+}
+
+#[test]
+fn what_the_link_held_before_a_reopen_is_not_taken() {
+    let s = sim();
+    let mut h = host(&s);
+    block_on(h.status(Target::Hub)).unwrap();
+    h.transport.pending.extend(stale_hellos());
+    block_on(h.reopen()).unwrap();
+    let st = block_on(h.status(Target::Hub));
+    assert!(st.is_ok(), "{st:?}");
+}
+
 #[test]
 fn a_session_opens_each_target_once() {
     let s = sim();
@@ -718,6 +758,17 @@ fn subctl_and_i2c_raw_are_never_resent() {
     assert_eq!((count(&s, Cmd::SubCtl), count(&s, Cmd::I2cRaw)), (1, 1));
 }
 
+#[test]
+fn conf_run_is_never_resent() {
+    let s = sim();
+    let mut h = opened(&s);
+    block_on(h.hello(SEG_AT)).unwrap();
+    s.faults.borrow_mut().drop_req.push((Cmd::ConfRun as u8, 1));
+    let r = block_on(h.call(SEG_AT, Cmd::ConfRun, &[1], REQUEST_MS));
+    assert!(r.is_err(), "{r:?}");
+    assert_eq!(count(&s, Cmd::ConfRun), 1, "a conformance step runs once");
+}
+
 /// Flash writes into seg's slot B (0x08040000..0x08060000).
 fn slot_b_writes(s: &Sim) -> Vec<(u32, u32)> {
     let mut hub = s.hub.borrow_mut();
@@ -789,6 +840,46 @@ fn a_lost_reboot_reply_is_not_resent() {
     let out = apply_seg(&s);
     assert!(matches!(out[0].outcome, Outcome::Done(_)), "{out:?}");
     assert_eq!(count(&s, Cmd::Reboot), 1);
+}
+
+/// Simulated ms from REBOOT to CONFIRM on seg while its first four HELLO
+/// polls after the reboot are lost (still booting), polling every
+/// `spacing` ms.
+fn confirm_after_lost_polls(spacing: u32) -> u64 {
+    let s = sim();
+    let mut h = host(&s);
+    h.node_poll_ms = spacing;
+    let (faults, hub) = (s.faults.clone(), s.hub.clone());
+    let mut at = [0u64; 2];
+    let out = block_on(h.apply(
+        &release(),
+        &topology(&yaml()),
+        &key().pk,
+        Some(&[SEG]),
+        &mut |e| match e.phase {
+            phase::REBOOT => {
+                faults.borrow_mut().drop_req.push((HELLO, 4));
+                at[0] = hub.borrow().now_ms();
+            }
+            phase::CONFIRM => at[1] = hub.borrow().now_ms(),
+            _ => {}
+        },
+    ))
+    .unwrap();
+    assert!(matches!(out[0].outcome, Outcome::Done(_)), "{out:?}");
+    at[1] - at[0]
+}
+
+#[test]
+fn polling_every_300_ms_is_what_keeps_confirm_inside_the_trial() {
+    use dagon_host::{NODE_POLL_MS, NODE_TRIAL_MS};
+    let at_300 = confirm_after_lost_polls(NODE_POLL_MS);
+    assert!(at_300 < NODE_TRIAL_MS as u64, "{at_300} ms");
+    let at_500 = confirm_after_lost_polls(500);
+    assert!(
+        at_500 >= NODE_TRIAL_MS as u64,
+        "{at_500} ms: 500 ms would miss it"
+    );
 }
 
 #[test]

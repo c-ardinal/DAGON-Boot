@@ -31,3 +31,25 @@ fn json_output_carries_no_banner() {
     let text = String::from_utf8(out.stdout).expect("utf-8");
     serde_json::from_str::<serde_json::Value>(&text).expect("stdout is JSON only");
 }
+
+#[test]
+fn the_serve_log_starts_with_the_banner_even_in_a_file() {
+    const BANNER: &str = include_str!("../../../assets/ascii-art/banner.txt");
+    let first = BANNER
+        .lines()
+        .map(str::trim_end)
+        .find(|l| !l.is_empty())
+        .unwrap();
+    // A bad option ends serve right after its log opens (stdout is a pipe).
+    let out = Command::new(EXE)
+        .args(["serve", "--no-open", "--port", "not-a-number"])
+        .output()
+        .expect("run dagon");
+    assert!(!out.status.success());
+    let text = String::from_utf8(out.stdout).expect("utf-8");
+    let top = text
+        .lines()
+        .find(|l| !l.trim().is_empty())
+        .unwrap_or_default();
+    assert_eq!(top.trim_end(), first, "{text}");
+}

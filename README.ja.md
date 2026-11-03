@@ -61,6 +61,8 @@ dagon doctor           # あるものと足りないもの
 dagon doctor --fix     # 管理者権限の要らないものを入れる
 ```
 
+STM32F401RE のノードがあると、`dagon doctor` は ST-LINK がつながっているかも確かめます（`probe-rs list`）。これは `--fix` では直せません。
+
 DAGON Console は `dagon` に組み込まれています。Node.js が要るのは、DAGON Console そのものを開発するときだけです（`web/README.md`）。
 
 ## はじめから更新まで
@@ -121,9 +123,9 @@ dagon flash seg        # STM32F401RE: ST-LINK 経由で probe-rs が書き込む
 dagon flash watch      # ESP32-S3: USB-C 経由で espflash が書き込む
 ```
 
-`dagon flash` は先に手順を表示し、ボードに触れる前に確認を求めます（`--yes` で確認を省き、`--dry-run` は `out/` にファイルを作るだけ）。ブートコア（親機は `stage0` も）を CLI をビルドした DAGON のクローン（または `DAGON_HOME`）から、ノードのアプリと一緒に、署名の鍵の公開側でビルドします。ブートコアはデスクのデモの tag（`hub-rp2040-lcd`、`seg-f401-7seg`）を受け付けるので、これらのボードでは `topology.yaml` の tag をそのままにします。
+`dagon flash` は先に手順を表示し、ボードに触れる前に確認を求めます（`--yes` で確認を省きます）。`--dry-run` も書き込みの手前まではすべて行います: 部品とアプリをビルドし、初回書込みのファイルを provision のフォルダ（`dagon.toml` の横の `out/provision/<id>/`、`dagon.toml` に `provision_dir` があればその下、`--out <dir>` で別の場所）に作り、ボードにだけ触れません。ブートコア（親機は `stage0` も）を CLI をビルドした DAGON のクローン（または `DAGON_HOME`）から、ノードのアプリと一緒に、署名の鍵の公開側でビルドします。ブートコアはデスクのデモの tag（`hub-rp2040-lcd`、`seg-f401-7seg`）を受け付けるので、これらのボードでは `topology.yaml` の tag をそのままにします。
 
-ESP32-S3 のノードでは、`dagon flash` がボードの factory エージェントとアプリをビルドし、アプリを ESP のイメージにして（`espflash save-image --chip esp32s3 --flash-size 16mb`）署名し、`espflash` で書き込みます: 同梱の無改変の ESP-IDF 2nd stage を 0x0 に（SHA-256 が `targets/mcu/esp32s3/vendor/SHA256SUMS` と一致しなければ書きません）、パーティション表（`targets/mcu/esp32s3/partitions.csv`、0x8000）、factory エージェント、ota_0（0x110000）にアプリ、`dagon` パーティション（0x710000）にその署名済みヘッダ、確定済みとして起動させる otadata の項目（0xD000）。USB-C でつながった ESP32-S3（USB Serial/JTAG、`303a:1001`）がちょうど 1 台のときだけ書き込み、0 台や 2 台以上なら書く前に止まります。`--dry-run` はファイルとそのオフセット、`espflash` のコマンドを示します（`out/provision/<id>/commands.txt`）。
+ESP32-S3 のノードでは、`dagon flash` がボードの factory エージェントとアプリをビルドし、アプリを ESP のイメージにして（`espflash save-image --chip esp32s3 --flash-size 16mb`）署名し、`espflash` で書き込みます: 同梱の無改変の ESP-IDF 2nd stage を 0x0 に（SHA-256 が `targets/mcu/esp32s3/vendor/SHA256SUMS` と一致しなければ書きません）、パーティション表（`targets/mcu/esp32s3/partitions.csv`、0x8000）、factory エージェント、ota_0（0x110000）にアプリ、`dagon` パーティション（0x710000）にその署名済みヘッダ、確定済みとして起動させる otadata の項目（0xD000）。USB-C でつながった ESP32-S3（USB Serial/JTAG、`303a:1001`）がちょうど 1 台のときだけ書き込み、0 台や 2 台以上なら書く前に止まります。`--dry-run` はファイルとそのオフセット、`espflash` のコマンドを示します（同じ provision のフォルダの `commands.txt`）。
 
 そのあと親機をつなぎ、すべてのノードが応答するか確かめます:
 
@@ -141,7 +143,7 @@ dagon status
 dagon deploy                       # または: dagon deploy seg watch --version 1.2.0
 ```
 
-`dagon deploy` はスロット A と B をビルドし、署名し、リリースを作り、ノードごとに今のバージョンと新しいバージョンを並べて、適用の前に確認を求めます（`--yes` で省けます）。バージョンの既定は、知っているいちばん新しいものの 1 つ上のパッチです。ノードの id を省くと `[build.<id>]` のすべてのノードが対象です。ESP32-S3 のノードは 1 回だけビルドし（イメージはどちらの OTA スロットでも動く）、deploy がそれを ESP のイメージにして（`espflash save-image`）署名し、親機がほかのノードと同じように中継します。1 つずつの手順は `dagon build`、`dagon image sign`、`dagon release build`、`dagon apply` です（`dagon --help`）。DAGON Console ではビルド → 署名 → リリース → 渡す のあと、運用モードで Web Serial から更新します。
+`dagon deploy` はスロット A と B をビルドし、署名し、リリースを作り、ノードごとに今のバージョンと新しいバージョンを並べて、適用の前に確認を求めます（`--yes` で省けます）。今のバージョンは、前回のリリース（`out/release-latest.dgb`、または `dagon.toml` の `release`）がその鍵で検証できたときに、そのリリースにあるノードのバージョンです。ボードから読むのではありません。バージョンの既定は、知っているいちばん新しいものの 1 つ上のパッチです。ノードの id を省くと `[build.<id>]` のすべてのノードが対象です。ESP32-S3 のノードは 1 回だけビルドし（イメージはどちらの OTA スロットでも動く）、deploy がそれを ESP のイメージにして（`espflash save-image`）署名し、親機がほかのノードと同じように中継します。1 つずつの手順は `dagon build`、`dagon image sign`、`dagon release build`、`dagon apply` です（`dagon --help`）。DAGON Console ではビルド → 署名 → リリース → 渡す のあと、運用モードで Web Serial から更新します。
 
 適用では、署名と、リリースがこの構成に対して作られたことを確かめ、構成を親機へ送り、子機を更新してから親機を更新します。ノードは新しいバージョンを試行起動し、確定されなければウォッチドッグでリセットされて前のバージョンで起動し直します。
 

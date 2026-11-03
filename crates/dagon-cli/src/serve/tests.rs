@@ -1253,3 +1253,31 @@ fn the_layout_is_kept_beside_the_topology() {
     assert_eq!(http(&a, "GET", "/v1/layout", &h, b"").0, 403);
     assert_eq!(http(&a, "PUT", "/v1/layout", &h, b"{}").0, 403);
 }
+
+#[test]
+fn a_page_that_stops_reading_events_is_dropped() {
+    use std::sync::atomic::Ordering;
+    let a = start("stall");
+    // Signed in, then never reads: the socket buffers fill up.
+    let s = events(&a, &a.server.pass.clone());
+    let t = std::time::Instant::now();
+    while a.server.pages.load(Ordering::Relaxed) == 0 && t.elapsed().as_secs() < 5 {
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
+    assert_eq!(a.server.pages.load(Ordering::Relaxed), 1);
+    let big = "x".repeat(60 * 1024);
+    let t = std::time::Instant::now();
+    while a.server.pages.load(Ordering::Relaxed) == 1 && t.elapsed().as_secs() < 30 {
+        for _ in 0..64 {
+            a.server
+                .emit(serde_json::json!({ "type": "job.log", "lines": [big] }));
+        }
+        std::thread::sleep(std::time::Duration::from_millis(20));
+    }
+    assert_eq!(
+        a.server.pages.load(Ordering::Relaxed),
+        0,
+        "the event thread let go of the stalled page"
+    );
+    drop(s);
+}

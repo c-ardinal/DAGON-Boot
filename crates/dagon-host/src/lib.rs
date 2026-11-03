@@ -16,7 +16,7 @@ pub mod rom;
 pub use dagon_romlink::{RomError, Stats as RomStats};
 pub use ops::{
     check_release, reason, ConfirmOutcome, Discovery, Event, NodeOutcome, NodeState, Outcome,
-    RecoverAssets, RecoverPath,
+    RecoverAssets, RecoverPath, NODE_POLL_MS, NODE_TRIAL_MS,
 };
 
 use alloc::vec;
@@ -145,6 +145,9 @@ pub type Result<T, E> = core::result::Result<T, Error<E>>;
 /// PC requests use seq 0x00..=0x7F; the hub's own polling uses the rest.
 const SEQ_MASK: u8 = 0x7F;
 const READ_CHUNK: usize = 1024;
+/// Reads that clearing out what the link still holds may take (each
+/// returns at once or after the transport's short read wait).
+const DRAIN_READS: usize = 64;
 
 /// A session with one hub. Remembers the versions it applied, for the
 /// confirm rule after a manual reconnect.
@@ -156,6 +159,12 @@ pub struct Host<T: Transport, C: Clock> {
     applied: Vec<(Target, Version)>,
     /// Targets that answered this session's opening HELLO.
     opened: Vec<Target>,
+    /// What the link holds may predate this session (a new session, or
+    /// the port reopened): it is read away before the next request.
+    stale: bool,
+    /// Pause between a node's HELLO polls after REBOOT
+    /// ([`NODE_POLL_MS`]; tests show a longer one misses the trial).
+    pub node_poll_ms: u32,
 }
 
 impl<T: Transport, C: Clock> Host<T, C> {
@@ -167,7 +176,36 @@ impl<T: Transport, C: Clock> Host<T, C> {
             rx: Vec::new(),
             applied: Vec::new(),
             opened: Vec::new(),
+            stale: true,
+            node_poll_ms: ops::NODE_POLL_MS,
         }
+    }
+
+    /// Drops everything received so far and what the link still holds:
+    /// none of it can answer a request not sent yet.
+    async fn drain(&mut self) -> Result<(), T::Error> {
+        self.rx.clear();
+        let mut buf = [0u8; READ_CHUNK];
+        for _ in 0..DRAIN_READS {
+            let n = self
+                .transport
+                .read(&mut buf)
+                .await
+                .map_err(Error::Transport)?;
+            if n == 0 {
+                break;
+            }
+        }
+        self.stale = false;
+        Ok(())
+    }
+
+    /// Closes and opens the link again (the hub's USB device comes back
+    /// after REBOOT); what the old link held is not read as an answer.
+    pub async fn reopen(&mut self) -> Result<(), T::Error> {
+        self.transport.reopen().await.map_err(Error::Transport)?;
+        self.stale = true;
+        Ok(())
     }
 
     /// Version this session last applied to `to`.
@@ -292,6 +330,13 @@ impl<T: Transport, C: Clock> Host<T, C> {
     /// therefore an opening HELLO whose reply is dropped; only after the
     /// target has answered it does the caller's request go out, with a seq
     /// different from the HELLO's, so it cannot match what the target keeps.
+    ///
+    /// Replies of the previous session can also still be on the link. The
+    /// target answers in order, so they come before this session's HELLO
+    /// reply; but one of them could be taken for it (the same seq and
+    /// command). What arrived with or after that reply, and anything left
+    /// from before the session or a reopen, is read away before the
+    /// caller's request is sent.
     async fn call_with(
         &mut self,
         to: Target,
@@ -300,6 +345,9 @@ impl<T: Transport, C: Clock> Host<T, C> {
         timeout_ms: u32,
         retries: usize,
     ) -> Result<Vec<u8>, T::Error> {
+        if self.stale {
+            self.drain().await?;
+        }
         if !self.opened.contains(&to) {
             let hello = hello_request(to);
             self.attempts(to, Cmd::Hello, &hello, timeout_ms.min(REQUEST_MS), retries)
@@ -311,6 +359,7 @@ impl<T: Transport, C: Clock> Host<T, C> {
                     e => Err(e),
                 })?;
             self.opened.push(to);
+            self.drain().await?;
         }
         self.attempts(to, cmd, payload, timeout_ms, retries).await
     }
@@ -399,12 +448,23 @@ fn hello_request(to: Target) -> [u8; 6] {
 pub const RETRY_BACKOFF_MS: [u32; 3] = [50, 100, 200];
 
 /// Commands a resend cannot harm: reads, the hub display, and the transfer
-/// and state steps the receiver deduplicates by seq. Not REBOOT (a node that
-/// already reset has no memory of the seq), nor the hub's line and raw I2C
+/// and state steps the receiver deduplicates by seq (CONFIRM among them).
+/// Not REBOOT or ENTER_ROM (a node that already reset, or left for its ROM
+/// loader, has no memory of the seq), nor CONF_RUN (a conformance step
+/// acts on the node every time it runs), nor the hub's line and raw I2C
 /// controls (no seq memory on the hub side).
 fn repeatable(cmd: Cmd) -> bool {
-    !matches!(cmd, Cmd::Reboot | Cmd::SubCtl | Cmd::I2cRaw)
+    !NEVER_RESENT.contains(&cmd)
 }
+
+/// Commands whose second run is not the first one's answer.
+const NEVER_RESENT: [Cmd; 5] = [
+    Cmd::Reboot,
+    Cmd::EnterRom,
+    Cmd::ConfRun,
+    Cmd::SubCtl,
+    Cmd::I2cRaw,
+];
 
 fn encode(fl: u8, seq: u8, cmd: u8, payload: &[u8]) -> Vec<u8> {
     let mut out = vec![0u8; dagon_proto::frame_len(payload.len())];
@@ -436,5 +496,40 @@ fn ok_body<E>(cmd: Cmd, payload: &[u8]) -> Result<Vec<u8>, E> {
         Some((Status::Ok, body)) => Ok(body.to_vec()),
         Some((status, _)) => Err(Error::Rejected { cmd, status }),
         None => Err(Error::BadResponse),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn only_commands_a_resend_cannot_harm_are_resent() {
+        let never = [
+            Cmd::Reboot,
+            Cmd::EnterRom,
+            Cmd::ConfRun,
+            Cmd::SubCtl,
+            Cmd::I2cRaw,
+        ];
+        for c in Cmd::ALL {
+            assert_eq!(repeatable(c), !never.contains(&c), "{c:?}");
+        }
+        // The rest are reads, the hub display and steps the receiver
+        // deduplicates by seq.
+        for c in [
+            Cmd::Hello,
+            Cmd::Status,
+            Cmd::XferBegin,
+            Cmd::XferData,
+            Cmd::XferEnd,
+            Cmd::XferHdr,
+            Cmd::SetPending,
+            Cmd::Confirm,
+            Cmd::Show,
+            Cmd::Relay,
+        ] {
+            assert!(repeatable(c), "{c:?}");
+        }
     }
 }

@@ -309,7 +309,7 @@ impl<T: Transport, C: Clock> Host<T, C> {
     async fn await_version(&mut self, to: Target, v: Version) -> Result<HelloResp, T::Error> {
         let (limit, pause) = match to {
             Target::Hub => (HUB_RECONNECT_MS, REOPEN_MS),
-            _ => (REBOOT_WAIT_MS, NODE_POLL_MS),
+            _ => (REBOOT_WAIT_MS, self.node_poll_ms),
         };
         let deadline = self.clock.now_ms() + limit as u64;
         // Another version may answer until the reset really happens (the
@@ -319,7 +319,7 @@ impl<T: Transport, C: Clock> Host<T, C> {
         loop {
             // ponytail: reopens before every hub attempt; add a grace period
             // for slow enumeration if real ports need it.
-            let reopened = to != Target::Hub || self.transport.reopen().await.is_ok();
+            let reopened = to != Target::Hub || self.reopen().await.is_ok();
             if reopened {
                 match self.hello_within(to, REQUEST_MS).await {
                     Ok(h) if h.active_version == v => return Ok(h),

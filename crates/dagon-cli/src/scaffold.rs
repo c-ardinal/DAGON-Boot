@@ -318,8 +318,7 @@ fn dependency(name: &str, src: &DagonSource, base: &Path) -> Result<String, Stri
         Some(root) => {
             let dir = find_named(&root, name)
                 .ok_or_else(|| format!("no package '{name}' in {}", root.display()))?;
-            let dir = dir.to_string_lossy().replace('\\', "/");
-            let dir = dir.strip_prefix("//?/").unwrap_or(&dir).to_string();
+            let dir = crate::config::forward_path(&dir);
             Ok(format!("{name} = {{ path = {dir:?} }}"))
         }
     }
@@ -845,8 +844,7 @@ pub fn init_project(
         || std::fs::canonicalize(BUILT_FROM).unwrap_or_else(|_| PathBuf::from(BUILT_FROM)),
         PathBuf::from,
     );
-    let src = src.to_string_lossy().replace('\\', "/");
-    let src = src.strip_prefix("//?/").unwrap_or(&src).to_string();
+    let src = crate::config::forward_path(&src);
     let toml = format!(
         "# DAGON project {name:?}.\ntopology = {topology:?}\n\
          # Public key the firmware and the page verify images with (the secret\n\

@@ -303,8 +303,11 @@ type Reader = fn(&Path) -> Option<String>;
 /// Held by the one UF2 scan running in this process (CLI or serve jobs).
 static SCAN: Mutex<()> = Mutex::new(());
 /// Reads that outlived the scan that started them: still running (a
-/// silent volume holds this one thread), or finished with what they read.
-static READS: Mutex<BTreeMap<PathBuf, Read>> = Mutex::new(BTreeMap::new());
+/// silent volume holds this one thread), or finished with what they read;
+/// by volume and info file (MCUs with another UF2 writer read another).
+static READS: Mutex<BTreeMap<ReadKey, Read>> = Mutex::new(BTreeMap::new());
+
+type ReadKey = (PathBuf, String);
 const LOCK_POLL: Duration = Duration::from_millis(10);
 /// How old a late read's result may be for the next scan to use it: it
 /// returned at most one scan and one poll before that scan began.
@@ -315,7 +318,7 @@ enum Read {
     Finished(Option<String>, Instant),
 }
 
-fn reads() -> MutexGuard<'static, BTreeMap<PathBuf, Read>> {
+fn reads() -> MutexGuard<'static, BTreeMap<ReadKey, Read>> {
     READS.lock().unwrap_or_else(|e| e.into_inner())
 }
 
@@ -352,10 +355,13 @@ pub(crate) fn uf2_drives(
     let (tx, rx) = std::sync::mpsc::channel();
     {
         let mut kept = reads();
+        // A finished read of a volume no longer mounted is never asked for.
+        kept.retain(|(path, _), r| matches!(r, Read::Running) || roots.contains(path));
+        let key = |r: &PathBuf| (r.clone(), want.info_file.to_string());
         for (i, r) in roots.iter().enumerate() {
-            match kept.remove(r) {
+            match kept.remove(&key(r)) {
                 Some(Read::Running) => {
-                    kept.insert(r.clone(), Read::Running);
+                    kept.insert(key(r), Read::Running);
                     continue;
                 }
                 Some(Read::Finished(info, at)) if at.elapsed() <= LATE_RESULT_AGE => {
@@ -364,12 +370,12 @@ pub(crate) fn uf2_drives(
                 }
                 _ => {}
             }
-            kept.insert(r.clone(), Read::Running);
-            let (tx, root, file) = (tx.clone(), r.clone(), r.join(want.info_file));
+            kept.insert(key(r), Read::Running);
+            let (tx, k, file) = (tx.clone(), key(r), r.join(want.info_file));
             std::thread::spawn(move || {
                 let info = read(&file);
                 // Kept for the next scan in case this one has given up.
-                reads().insert(root, Read::Finished(info.clone(), Instant::now()));
+                reads().insert(k, Read::Finished(info.clone(), Instant::now()));
                 let _ = tx.send((i, info));
             });
         }
@@ -378,7 +384,7 @@ pub(crate) fn uf2_drives(
     while let Ok((i, info)) = rx.recv_timeout(until.saturating_duration_since(Instant::now())) {
         infos[i] = Some(info);
         // Taken by this scan: not handed to the next.
-        reads().remove(&roots[i]);
+        reads().remove(&(roots[i].clone(), want.info_file.to_string()));
     }
     let late = roots
         .iter()
@@ -817,6 +823,27 @@ mod tests {
         assert!(late.is_empty());
         assert_eq!(found.len(), 1);
         assert_eq!(READS_DONE.load(Ordering::SeqCst), 1);
+    }
+
+    #[test]
+    fn a_late_read_is_kept_per_info_file_and_dropped_once_unmounted() {
+        let _alone = timing_tests_alone();
+        fn read(_: &Path) -> Option<String> {
+            slow_rp(300)
+        }
+        let roots = [PathBuf::from("/late-keyed-rp")];
+        let other = Uf2Want {
+            info_file: "OTHER.TXT",
+            ..RP
+        };
+        let _ = uf2_drives(&roots, &RP, Duration::from_millis(100), read);
+        std::thread::sleep(Duration::from_millis(400));
+        let kept = |file: &str| reads().contains_key(&(roots[0].clone(), file.to_string()));
+        assert!(kept(RP.info_file));
+        assert!(!kept("OTHER.TXT"), "another info file is not this read");
+        // A scan of other volumes forgets the finished read of this one.
+        let _ = uf2_drives(&[], &other, Duration::from_millis(100), read);
+        assert!(!kept(RP.info_file));
     }
 
     #[test]

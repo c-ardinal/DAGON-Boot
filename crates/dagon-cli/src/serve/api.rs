@@ -561,6 +561,9 @@ fn topology_put(server: &Server, req: &Request) -> Res {
     if !report.is_pushable() {
         return Err(Response::json(422, &json!({ "report": report_json })));
     }
+    let cut = dagon_topology::parse_str(yaml)
+        .ok()
+        .map(|t| dagon_topology::cut_with(&reg, &t));
     // dagon demo: the 構成's uplink picks the simulated medium; one the
     // demo cannot simulate is not saved, so the 構成 and the medium agree.
     let medium = match server.sim.get().map(|_| demo_uplink(yaml)) {
@@ -585,19 +588,18 @@ fn topology_put(server: &Server, req: &Request) -> Res {
         sim.set_medium(m);
     }
     Ok(json_ok(
-        json!({ "report": report_json, "updatable": true, "skipped": skipped_of(yaml) }),
+        json!({ "report": report_json, "updatable": cut.as_ref().is_some_and(|c| c.topology.is_some()), "skipped": skipped_of(cut.as_ref()) }),
     ))
 }
 
-/// `{id: why}` of the nodes updating skips for now (`Skip::code`).
-fn skipped_of(yaml: &str) -> Value {
-    let skipped = dagon_topology::parse_str(yaml)
-        .map(|t| dagon_topology::updatable(&t).1)
-        .unwrap_or_default();
+/// `{id: why}` of the nodes updating skips for now (`Skip::code`); every
+/// node (`cut-invalid` where nothing else applies) when no part is updatable.
+fn skipped_of(cut: Option<&dagon_topology::Cut>) -> Value {
     Value::Object(
-        skipped
-            .into_iter()
-            .map(|(id, why)| (id, Value::from(why.code())))
+        cut.map(|c| c.skipped.as_slice())
+            .unwrap_or_default()
+            .iter()
+            .map(|(id, why)| (id.clone(), Value::from(why.code())))
             .collect(),
     )
 }

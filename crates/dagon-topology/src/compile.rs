@@ -55,7 +55,8 @@ fn bad(msg: impl Into<String>) -> CompileError {
 
 /// Canonical binary of a topology that passes `check` (warnings allowed),
 /// against the builtin definitions. Only its updatable part is encoded
-/// ([`crate::updatable`]); for a 構成 updating reaches whole that is all of it.
+/// ([`crate::cut_with`]), after it passes `check` on its own; for a 構成
+/// updating reaches whole that is all of it.
 pub fn compile(t: &Topology) -> Result<Vec<u8>, CompileError> {
     compile_with(Registry::builtin(), t)
 }
@@ -66,7 +67,12 @@ pub fn compile_with(reg: &Registry, t: &Topology) -> Result<Vec<u8>, CompileErro
     if !report.is_pushable() {
         return Err(CompileError::Invalid(report));
     }
-    encode(reg, &crate::updatable(t).0)
+    // The part updating reaches is checked on its own before it is encoded.
+    let cut = crate::cut_with(reg, t);
+    match cut.topology {
+        Some(part) => encode(reg, &part),
+        None => Err(CompileError::Invalid(cut.report)),
+    }
 }
 
 pub fn parse_str(yaml: &str) -> Result<Topology, CompileError> {

@@ -1082,7 +1082,7 @@ fn conform_get(server: &Server, node: &str) -> Res {
 }
 
 /// Topology from a description; the model's questions go to the page.
-fn job_ai_topology(job: &mut Job, _cfg: Config, v: Value) -> Result<Value, String> {
+fn job_ai_topology(job: &mut Job, cfg: Config, v: Value) -> Result<Value, String> {
     let description = v["description"]
         .as_str()
         .ok_or("description is required")?
@@ -1091,7 +1091,8 @@ fn job_ai_topology(job: &mut Job, _cfg: Config, v: Value) -> Result<Value, Strin
     let mut ask = |qs: &[String]| -> Result<Vec<String>, String> {
         qs.iter().enumerate().map(|(i, q)| job.ask(i, q)).collect()
     };
-    let (yaml, report) = crate::ai::topology_for(&description, &mut ask, &cancel)?;
+    let reg = registry_of(Some(&cfg));
+    let (yaml, report) = crate::ai::topology_for(&description, &reg, &mut ask, &cancel)?;
     let report: Value = serde_json::from_str(&report).unwrap_or(Value::Null);
     Ok(json!({ "yaml": yaml, "report": report }))
 }

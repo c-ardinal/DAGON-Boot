@@ -6,6 +6,7 @@
 use std::io::{BufRead, Read, Write};
 use std::time::Duration;
 
+use dagon_topology::defs::Registry;
 use serde_json::{json, Value};
 
 /// The API key is read from here only; it is never printed, logged or written.
@@ -39,7 +40,6 @@ checker report (JSON) of your YAML. Fix every reported error and submit the whol
 Always reply by calling `submit_topology`.";
 
 const SCHEMA_RS: &str = include_str!("../../dagon-topology/src/schema.rs");
-const BOARDS_RS: &str = include_str!("../../dagon-topology/src/boards.rs");
 const CHECK_RS: &str = include_str!("../../dagon-topology/src/check.rs");
 const EXAMPLE_YAML: &str = include_str!("../../../topology/desk-demo.yaml");
 
@@ -75,7 +75,10 @@ pub fn topology(args: &[&str]) -> Result<(), String> {
             Err(unanswered(qs))
         }
     };
-    let done = generate(&description, &a.model, &mut api, &mut ask)?;
+    let reg = crate::config::Config::load(None)
+        .and_then(|c| crate::defs::registry(&c))
+        .unwrap_or_else(|_| Registry::builtin().clone());
+    let done = generate(&description, &a.model, &reg, &mut api, &mut ask)?;
     std::fs::write(&a.out, &done.yaml).map_err(|e| format!("cannot write {}: {e}", a.out))?;
     for i in done.report.warnings() {
         println!("warning {} {}: {}", i.rule, i.path, i.message);
@@ -101,6 +104,7 @@ pub(crate) fn api_key_present() -> bool {
 /// report (JSON), with the model's questions answered through `ask`.
 pub(crate) fn topology_for(
     description: &str,
+    reg: &Registry,
     ask: &mut Ask,
     cancel: &std::sync::atomic::AtomicBool,
 ) -> Result<(String, String), String> {
@@ -111,7 +115,7 @@ pub(crate) fn topology_for(
     let model = std::env::var(MODEL_ENV).unwrap_or_else(|_| DEFAULT_MODEL.into());
     let mut post = |body: &Value| post_messages(API_URL, &key, body);
     let mut api = |body: &Value| unless_cancelled(cancel, &mut post, body);
-    let done = generate(description, &model, &mut api, ask)?;
+    let done = generate(description, &model, reg, &mut api, ask)?;
     Ok((done.yaml, done.report.to_json()))
 }
 
@@ -181,6 +185,7 @@ pub(crate) type Ask<'a> = dyn FnMut(&[String]) -> Result<Vec<String>, String> + 
 fn generate(
     description: &str,
     model: &str,
+    reg: &Registry,
     api: &mut Api,
     ask: &mut Ask,
 ) -> Result<Outcome, String> {
@@ -191,7 +196,7 @@ fn generate(
     let mut answers = Vec::new();
     let mut last_errors = String::new();
     for round in 1..=MAX_ROUNDS {
-        let resp = api(&request(model, &messages))?;
+        let resp = api(&request(model, reg, &messages))?;
         let (id, yaml, questions) = tool_call(&resp)?;
         messages.push(json!({ "role": "assistant", "content": resp["content"] }));
         let (feedback, is_error) = if !questions.is_empty() {
@@ -205,7 +210,7 @@ fn generate(
             answers.extend(questions.into_iter().zip(got));
             (format!("User answers:\n{text}"), false)
         } else {
-            let report = dagon_topology::check_str(&yaml);
+            let report = dagon_topology::check_str_with(reg, &yaml);
             if report.is_pushable() {
                 return Ok(Outcome {
                     yaml,
@@ -236,7 +241,24 @@ fn generate(
     ))
 }
 
-fn request(model: &str, messages: &[Value]) -> Value {
+/// Every MCU and board definition in use, as its TOML (format:
+/// targets/README.md). Only the text goes out: where a project keeps its
+/// files stays on this machine.
+fn board_table(reg: &Registry) -> String {
+    let all: Value = serde_json::from_str(&reg.to_json()).unwrap_or(Value::Null);
+    let mut out = String::new();
+    for (key, file) in [("mcus", "dagon-mcu.toml"), ("boards", "dagon-board.toml")] {
+        for d in all[key].as_array().into_iter().flatten() {
+            let toml = d["toml"].as_str().unwrap_or("");
+            out.push_str(&format!(
+                "<definition file=\"{file}\">\n{toml}</definition>\n"
+            ));
+        }
+    }
+    out
+}
+
+fn request(model: &str, reg: &Registry, messages: &[Value]) -> Value {
     // A cache breakpoint on the newest block bills only the delta next round.
     let mut messages = messages.to_vec();
     if let Some(block) = messages
@@ -248,9 +270,10 @@ fn request(model: &str, messages: &[Value]) -> Value {
     }
     let system = format!(
         "{INSTRUCTIONS}\n\n<schema file=\"schema.rs\">\n{SCHEMA_RS}</schema>\n\n\
-         <board_table file=\"boards.rs\">\n{BOARDS_RS}</board_table>\n\n\
+         <board_table>\n{}</board_table>\n\n\
          <checks file=\"check.rs\">\n{CHECK_RS}</checks>\n\n\
-         <example file=\"desk-demo.yaml\">\n{EXAMPLE_YAML}</example>"
+         <example file=\"desk-demo.yaml\">\n{EXAMPLE_YAML}</example>",
+        board_table(reg)
     );
     json!({
         "model": model,
@@ -381,7 +404,7 @@ mod tests {
         };
         let mut api = |b: &Value| unless_cancelled(&flag, &mut fake, b);
         let mut ask = |_: &[String]| Ok(Vec::new());
-        let r = generate("a hub", "m", &mut api, &mut ask);
+        let r = generate("a hub", "m", Registry::builtin(), &mut api, &mut ask);
         assert_eq!(r.unwrap_err(), "cancelled");
         assert_eq!(calls, 0);
     }
@@ -414,7 +437,14 @@ mod tests {
             asked.extend_from_slice(qs);
             Ok(vec!["0x42".to_string()])
         };
-        let out = generate("hub and seg", "m-test", &mut api, &mut ask).unwrap();
+        let out = generate(
+            "hub and seg",
+            "m-test",
+            Registry::builtin(),
+            &mut api,
+            &mut ask,
+        )
+        .unwrap();
         assert_eq!(out.rounds, 3);
         assert_eq!(out.yaml, EXAMPLE_YAML);
         assert!(out.report.is_pushable());
@@ -440,7 +470,7 @@ mod tests {
             Ok(reply("t", "not: [valid", &[]))
         };
         let mut ask = |_: &[String]| -> Result<Vec<String>, String> { unreachable!() };
-        let e = generate("x", "m", &mut api, &mut ask).unwrap_err();
+        let e = generate("x", "m", Registry::builtin(), &mut api, &mut ask).unwrap_err();
         assert_eq!(calls, MAX_ROUNDS);
         assert!(e.contains("no error-free topology"), "{e}");
     }
@@ -449,7 +479,7 @@ mod tests {
     fn non_interactive_questions_are_printed_as_error() {
         let mut api = |_: &Value| Ok(reply("t", "", &["baud rate of watch?"]));
         let mut ask = |qs: &[String]| Err(unanswered(qs));
-        let e = generate("x", "m", &mut api, &mut ask).unwrap_err();
+        let e = generate("x", "m", Registry::builtin(), &mut api, &mut ask).unwrap_err();
         assert!(e.contains("baud rate of watch?"), "{e}");
     }
 
@@ -541,7 +571,7 @@ mod tests {
     fn last_message_gets_cache_breakpoint_only_in_request() {
         let msg = |role: &str, t: &str| json!({ "role": role, "content": [{ "type": "text", "text": t }] });
         let msgs = vec![msg("user", "a"), msg("assistant", "b"), msg("user", "c")];
-        let r = request("m", &msgs);
+        let r = request("m", Registry::builtin(), &msgs);
         assert_eq!(
             r["messages"][2]["content"][0]["cache_control"]["type"],
             "ephemeral"
@@ -550,6 +580,34 @@ mod tests {
             .get("cache_control")
             .is_none());
         assert!(msgs[2]["content"][0].get("cache_control").is_none());
+    }
+
+    #[test]
+    fn the_board_table_is_the_definitions_in_use_without_their_paths() {
+        let dir = std::env::temp_dir().join(format!("dagon-ai-defs-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let toml = dir.join("dagon.toml");
+        std::fs::write(
+            &toml,
+            "[board.desk-pico]\nproduct = \"Desk Pico\"\nmcu = \"rp2040\"\n\
+             flash_bytes = 0x40_0000\ndrawing = \"pico\"\n\
+             default_link = { kind = \"i2c\", addr = 0x44, control = \"full\" }\n",
+        )
+        .unwrap();
+        let reg = Registry::load(&[dagon_topology::defs::Source::Project(&toml)]).unwrap();
+        std::fs::remove_dir_all(&dir).unwrap();
+        let system = request("m", &reg, &[])["system"][0]["text"]
+            .as_str()
+            .unwrap()
+            .to_string();
+        for m in reg.mcus() {
+            assert!(system.contains(&format!("id = \"{}\"", m.id)), "{}", m.id);
+        }
+        for b in reg.boards() {
+            assert!(system.contains(&format!("id = \"{}\"", b.id)), "{}", b.id);
+        }
+        assert!(!system.contains(&*dir.to_string_lossy()));
+        assert!(!system.contains("boards.rs"));
     }
 
     #[test]

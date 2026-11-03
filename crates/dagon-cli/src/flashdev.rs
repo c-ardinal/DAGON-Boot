@@ -5,7 +5,7 @@
 //! taken (still shown before the confirmation); several need the user's
 //! choice or a selector; none stops the write.
 
-use std::collections::BTreeSet;
+use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -302,13 +302,21 @@ type Reader = fn(&Path) -> Option<String>;
 
 /// Held by the one UF2 scan running in this process (CLI or serve jobs).
 static SCAN: Mutex<()> = Mutex::new(());
-/// Volumes whose read thread, from an earlier scan that stopped waiting
-/// for it, is still running: a silent volume holds one thread.
-static READING: Mutex<BTreeSet<PathBuf>> = Mutex::new(BTreeSet::new());
+/// Reads that outlived the scan that started them: still running (a
+/// silent volume holds this one thread), or finished with what they read.
+static READS: Mutex<BTreeMap<PathBuf, Read>> = Mutex::new(BTreeMap::new());
 const LOCK_POLL: Duration = Duration::from_millis(10);
+/// How old a late read's result may be for the next scan to use it: it
+/// returned at most one scan and one poll before that scan began.
+const LATE_RESULT_AGE: Duration = Duration::from_millis(2500);
 
-fn reading() -> MutexGuard<'static, BTreeSet<PathBuf>> {
-    READING.lock().unwrap_or_else(|e| e.into_inner())
+enum Read {
+    Running,
+    Finished(Option<String>, Instant),
+}
+
+fn reads() -> MutexGuard<'static, BTreeMap<PathBuf, Read>> {
+    READS.lock().unwrap_or_else(|e| e.into_inner())
 }
 
 /// The UF2 boot drives among `roots`: `info_file` there starts with the
@@ -318,7 +326,8 @@ fn reading() -> MutexGuard<'static, BTreeSet<PathBuf>> {
 /// `wait` (from the call, the wait for another scan included) are returned
 /// second, to be asked again by the next scan: all of them when another
 /// scan held the lock that long, and a volume whose earlier read is still
-/// running.
+/// running. A read that returns after its scan gave up is kept, and the
+/// next scan takes its result instead of reading again.
 pub(crate) fn uf2_drives(
     roots: &[PathBuf],
     want: &Uf2Want<'_>,
@@ -336,22 +345,40 @@ pub(crate) fn uf2_drives(
             Err(std::sync::TryLockError::WouldBlock) => return (Vec::new(), roots.to_vec()),
         }
     };
+    if Instant::now() >= until {
+        return (Vec::new(), roots.to_vec());
+    }
+    let mut infos: Vec<Option<Option<String>>> = vec![None; roots.len()];
     let (tx, rx) = std::sync::mpsc::channel();
-    for (i, r) in roots.iter().enumerate() {
-        if !reading().insert(r.clone()) {
-            continue;
+    {
+        let mut kept = reads();
+        for (i, r) in roots.iter().enumerate() {
+            match kept.remove(r) {
+                Some(Read::Running) => {
+                    kept.insert(r.clone(), Read::Running);
+                    continue;
+                }
+                Some(Read::Finished(info, at)) if at.elapsed() <= LATE_RESULT_AGE => {
+                    infos[i] = Some(info);
+                    continue;
+                }
+                _ => {}
+            }
+            kept.insert(r.clone(), Read::Running);
+            let (tx, root, file) = (tx.clone(), r.clone(), r.join(want.info_file));
+            std::thread::spawn(move || {
+                let info = read(&file);
+                // Kept for the next scan in case this one has given up.
+                reads().insert(root, Read::Finished(info.clone(), Instant::now()));
+                let _ = tx.send((i, info));
+            });
         }
-        let (tx, root, file) = (tx.clone(), r.clone(), r.join(want.info_file));
-        std::thread::spawn(move || {
-            let info = read(&file);
-            reading().remove(&root);
-            let _ = tx.send((i, info));
-        });
     }
     drop(tx);
-    let mut infos: Vec<Option<Option<String>>> = vec![None; roots.len()];
     while let Ok((i, info)) = rx.recv_timeout(until.saturating_duration_since(Instant::now())) {
         infos[i] = Some(info);
+        // Taken by this scan: not handed to the next.
+        reads().remove(&roots[i]);
     }
     let late = roots
         .iter()
@@ -761,11 +788,35 @@ mod tests {
         }
         assert_eq!(READS.load(Ordering::SeqCst), 1, "one thread, not three");
         std::thread::sleep(Duration::from_millis(1000));
-        // Once that read is over, the volume is read again and found.
+        // Once that read is over, the next scan takes its result.
         let (found, late) = uf2_drives(&roots, &RP, Duration::from_secs(3), read);
         assert!(late.is_empty());
         assert_eq!(found.len(), 1);
+        assert_eq!(READS.load(Ordering::SeqCst), 1);
+        // Taken: the scan after that reads the volume afresh.
+        let _ = uf2_drives(&roots, &RP, Duration::from_millis(50), read);
         assert_eq!(READS.load(Ordering::SeqCst), 2);
+    }
+
+    #[test]
+    fn a_read_that_finishes_after_its_scan_is_used_by_the_next() {
+        let _alone = timing_tests_alone();
+        static READS_DONE: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+        // 2.1 s against a 2 s limit, scaled down: 300 ms against 200 ms.
+        fn read(_: &Path) -> Option<String> {
+            READS_DONE.fetch_add(1, Ordering::SeqCst);
+            slow_rp(300)
+        }
+        let roots = [PathBuf::from("/just-late-rp")];
+        let (found, late) = uf2_drives(&roots, &RP, Duration::from_millis(200), read);
+        assert!(found.is_empty());
+        assert_eq!(late, roots);
+        std::thread::sleep(Duration::from_millis(250));
+        // The next poll takes the kept result instead of reading again.
+        let (found, late) = uf2_drives(&roots, &RP, Duration::from_millis(200), read);
+        assert!(late.is_empty());
+        assert_eq!(found.len(), 1);
+        assert_eq!(READS_DONE.load(Ordering::SeqCst), 1);
     }
 
     #[test]

@@ -31,3 +31,6 @@ pub(crate) fn registry_at(cfg: &Config, root: Option<&Path>) -> Result<Registry,
 pub(crate) fn registry(cfg: &Config) -> Result<Registry, String> {
     registry_at(cfg, None)
 }
+
+#[cfg(test)]
+mod tests;

@@ -8,12 +8,21 @@ mod app;
 mod wiring;
 
 use dagon_board_m5stopwatch::{self as board, dagon_pins};
+use dagon_mcu_esp32s3::links::{self, Kind};
 use dagon_mcu_esp32s3::liveness::Liveness;
 use dagon_mcu_esp32s3::node::{self, NodeConfig};
 use embassy_executor::Spawner;
 use esp_hal::timer::timg::TimerGroup;
 
 esp_bootloader_esp_idf::esp_app_desc!();
+
+/// The hops of this node, from the 構成 (dagon gen writes them): the
+/// build stops here, naming the hop, if a kind is not available yet. The
+/// node serves UART and USB Serial/JTAG at once, whichever is the uplink.
+const UPLINK: Kind = {{uplink}};
+const DOWNLINKS: &[Kind] = &[{{downlinks}}];
+const _: () = links::require_uplink(UPLINK);
+const _: () = links::require_downlinks(DOWNLINKS);
 
 /// Every task of the application registers here; the watchdog is fed only
 /// while none of them is overdue.

@@ -51,6 +51,7 @@ is what `dagon new` generates, see `../../boards/nucleo-f401re/template`):
 mod app;
 
 use dagon_board_nucleo_f401re::{self as board, Board, BoardDef};
+use dagon_mcu_stm32f401re::links::{self, Kind};
 use dagon_mcu_stm32f401re::watchdog::{now_ms, Guard, Trial};
 use dagon_mcu_stm32f401re::{clocks, node};
 use embassy_executor::Spawner;
@@ -59,6 +60,12 @@ use {defmt_rtt as _, panic_probe as _};
 // DAGON's link is guard task 0, app.rs's tasks follow. Unconfirmed images
 // never feed: they reset after the boot core's trial period unless the
 // 親機 confirmed them.
+// The hops, as dagon gen writes them from the 構成.
+const UPLINK: Kind = Kind::I2c;
+const DOWNLINKS: &[Kind] = &[];
+const _: () = links::require_uplink(UPLINK);
+const _: () = links::require_downlinks(DOWNLINKS);
+
 const TASKS: usize = node::APP_TASKS + app::TASKS;
 static GUARD: Guard<TASKS> = Guard::new(node::levels::<TASKS>(), Trial::NeverFeed, now_ms);
 
@@ -66,7 +73,7 @@ static GUARD: Guard<TASKS> = Guard::new(node::levels::<TASKS>(), Trial::NeverFee
 async fn main(spawner: Spawner) {
     let (dagon, io) = Board::split(embassy_stm32::init(clocks()));
     let tag = dagon_mcu_stm32f401re::target_tag!();
-    board::start(spawner, dagon, &GUARD, tag, app::self_check).ok();
+    board::start(spawner, dagon, &GUARD, tag, app::self_check, UPLINK).ok();
     app::start(spawner, io, &GUARD, node::APP_TASKS);
 }
 ```
@@ -136,8 +143,8 @@ const _: () = links::require_uplink(UPLINK);
 const _: () = links::require_downlinks(DOWNLINKS);
 ```
 
-The board package's `start` takes `UPLINK` and `DOWNLINKS` and builds each
-link on the board's pins; link types are constructed as
+The board package's `start` takes `UPLINK` (a 子機 has no downlinks) and
+builds the link on the board's pins; link types are constructed as
 `dagon_mcu_stm32f401re::links::<Kind>::new(..)`.
 
 ## Features

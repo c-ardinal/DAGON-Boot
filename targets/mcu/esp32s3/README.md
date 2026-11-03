@@ -64,8 +64,9 @@ const _: () = links::require_uplink(UPLINK);
 const _: () = links::require_downlinks(DOWNLINKS);
 ```
 
-The board package's `start` takes `UPLINK` and `DOWNLINKS` and builds each
-link on the board's pins; link types are constructed as
+The node serves UART and USB Serial/JTAG at once whichever is named the
+uplink (the check above still stops a kind not offered); link types are
+constructed as
 `dagon_mcu_esp32s3::links::<Kind>::new(..)`.
 
 ## Board layer

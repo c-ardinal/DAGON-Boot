@@ -37,8 +37,15 @@ DAGON_TARGET_TAG = { value = "my-hub", force = true }
 
 ```rust
 use dagon_board_waveshare_rp2040_touch_lcd_1_28::{self as board, Board, BoardDef};
+use dagon_mcu_rp2040::links::{self, Kind};
 use dagon_mcu_rp2040::relay::{self, RelayConfig};
 use dagon_mcu_rp2040::watchdog::{now_ms, Guard, Trial};
+
+// The hops, as dagon gen writes them from the 構成.
+const UPLINK: Kind = Kind::UsbCdc;
+const DOWNLINKS: &[Kind] = &[Kind::I2c, Kind::Uart];
+const _: () = links::require_uplink(UPLINK);
+const _: () = links::require_downlinks(DOWNLINKS);
 
 const TASKS: usize = board::APP_TASKS + app::TASKS;
 static GUARD: Guard<TASKS> = Guard::new(
@@ -56,7 +63,7 @@ async fn main(spawner: embassy_executor::Spawner) {
         fallback: &[],
         self_check: app::self_check,
     };
-    let spare = board::start(spawner, dagon, io, &GUARD, cfg);
+    let spare = board::start(spawner, dagon, io, &GUARD, cfg, UPLINK, DOWNLINKS);
     app::start(spawner, spare, &GUARD, board::APP_TASKS);
 }
 ```

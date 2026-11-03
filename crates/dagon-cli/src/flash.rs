@@ -155,18 +155,28 @@ fn shown(cfg: &Config, p: &Path, paths: Paths) -> String {
         .unwrap_or_default()
 }
 
+/// How the page's plan names a project's own package (no folder of it).
+fn project_package(owner: &Want) -> String {
+    format!(
+        "{} (the project's own package)",
+        crate::scaffold::conventional_name(owner)
+    )
+}
+
 /// How the plan names a part's folder: in its project package, or in the
 /// DAGON source.
 fn part_origin(cfg: &Config, part: &Part, paths: Paths) -> String {
     match (&part.package, paths) {
-        (Some(p), _) => {
+        (Some(p), Paths::Full) => {
             let dir = if part.sub.is_empty() {
                 p.clone()
             } else {
                 p.join(&part.sub)
             };
-            shown(cfg, &dir, paths)
+            dir.display().to_string()
         }
+        // The page never gets a project's own folder names, only the package.
+        (Some(_), Paths::Relative) => project_package(&part.owner),
         (None, Paths::Full) => origin(cfg, &part.owner, &part.sub),
         (None, Paths::Relative) => {
             let rel = source_relative(cfg, &part.owner);
@@ -291,17 +301,24 @@ fn write_plan(cfg: &Config, mcu: &McuDef, out: &Path, paths: Paths) -> Result<Ve
             let sums = Path::new(esp.checksums)
                 .file_name()
                 .map_or(esp.checksums.into(), |n| n.to_string_lossy());
-            let bootloader = match &mcu.package {
+            let check = match (&mcu.package, paths) {
                 // A project's own MCU package.
-                Some(p) => shown(cfg, &p.join(esp.bootloader), paths),
-                None => format!(
-                    "{}/{} of the DAGON source",
+                (Some(p), Paths::Full) => format!(
+                    "{} against {sums}",
+                    p.join(esp.bootloader).display()
+                ),
+                (Some(_), Paths::Relative) => format!(
+                    "the 2nd stage of {} against its checksums",
+                    project_package(&Want::Mcu(mcu.id.clone()))
+                ),
+                (None, _) => format!(
+                    "{}/{} of the DAGON source against {sums}",
                     source_relative(cfg, &Want::Mcu(mcu.id.clone())),
                     esp.bootloader
                 ),
             };
             let mut l = vec![format!(
-                "  check    {bootloader} against {sums} (the unmodified ESP-IDF 2nd stage)"
+                "  check    {check} (the unmodified ESP-IDF 2nd stage)"
             )];
             l.push(format!("  make     in {}:", shown(cfg, out, paths)));
             l.extend(

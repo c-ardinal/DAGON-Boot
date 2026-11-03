@@ -53,7 +53,7 @@ chip = "FAKE0"
 
 [[part]]
 name = "bootcore"
-sub = "bootcore"
+sub = "sk-ant-FAKE-TOKEN-4242/bootcore"
 
 [links]
 up = ["i2c"]
@@ -99,10 +99,13 @@ fn fake_project(dir: &Path) -> PathBuf {
     // The MCU package's boot core part: a stub crate, built where the
     // package is (not looked up in a DAGON source).
     write(
-        &dir.join("m/bootcore/Cargo.toml"),
+        &dir.join("m/sk-ant-FAKE-TOKEN-4242/bootcore/Cargo.toml"),
         b"[package]\nname = \"fake-bootcore\"\nversion = \"0.0.0\"\nedition = \"2021\"\n[workspace]\n",
     );
-    write(&dir.join("m/bootcore/src/main.rs"), b"fn main() {}\n");
+    write(
+        &dir.join("m/sk-ant-FAKE-TOKEN-4242/bootcore/src/main.rs"),
+        b"fn main() {}\n",
+    );
     write(&dir.join("boot.bin"), &[0xB0; 1024]);
     write(&dir.join("app.bin"), &[0xA0; 2048]);
     let toml = dir.join("dagon.toml");
@@ -221,7 +224,12 @@ fn a_project_defined_mcu_and_board_go_through_every_command() {
     let page = crate::flash::plan(&cfg, &t, "seg", &out, crate::flash::Paths::Relative)
         .unwrap()
         .join("\n");
-    assert!(page.contains("build    bootcore m/bootcore (tag"), "{page}");
+    // A project's own folder names (here a token-like one) never reach the page.
+    assert!(
+        page.contains("build    bootcore dagon-mcu-fake-m0 (the project's own package) (tag"),
+        "{page}"
+    );
+    assert!(!page.contains("sk-ant") && !page.contains("m/"), "{page}");
     assert!(page.contains("through the SWD chosen"), "{page}");
     assert!(!page.contains(&*dir.to_string_lossy()), "{page}");
     let mut log = Vec::new();
@@ -241,7 +249,8 @@ fn a_project_defined_mcu_and_board_go_through_every_command() {
     assert!(built[0].1.is_file(), "{:?}", built[0].1);
     assert!(
         log.iter()
-            .any(|l| l == "seg: building bootcore in m/bootcore"),
+            .any(|l| l
+                == "seg: building bootcore in dagon-mcu-fake-m0 (the project's own package)"),
         "{log:?}"
     );
     std::fs::remove_dir_all(&dir).unwrap();

@@ -1359,3 +1359,52 @@ fn a_demo_refuses_other_projects_and_real_hardware() {
     assert_eq!(http(&d, "GET", "/v1/project", &ok, b"").0, 200);
     assert_eq!(http(&d, "GET", "/v1/topology", &ok, b"").0, 200);
 }
+
+#[test]
+fn the_demo_uplink_follows_the_saved_topology() {
+    let d = demo_area("demo-uplink");
+    let b = auth(&d);
+    let h = [("Authorization", b.as_str())];
+    let sim = |d: &Area| {
+        let (_, hello) = http(d, "GET", "/v1/hello", &h, b"");
+        serde_json::from_str::<serde_json::Value>(&hello).unwrap()["sim"].clone()
+    };
+    assert_eq!(sim(&d)["uplink"], "usb-cdc");
+    for (kind, max, reconnect) in [("uart", 1024, "stays"), ("wifi-tcp", 1088, "reopen")] {
+        let y = YAML.replacen(
+            "    tag: hub-rp2040-lcd
+",
+            &format!(
+                "    tag: hub-rp2040-lcd
+    uplink: {{ kind: {kind}, host: browser }}
+"
+            ),
+            1,
+        );
+        assert_eq!(
+            http(&d, "PUT", "/v1/topology", &h, y.as_bytes()).0,
+            200,
+            "{kind}"
+        );
+        let s = sim(&d);
+        assert_eq!(
+            (
+                s["uplink"].as_str(),
+                s["max_payload"].as_u64(),
+                s["reconnect"].as_str()
+            ),
+            (Some(kind), Some(max), Some(reconnect))
+        );
+    }
+    // A kind the demo does not simulate leaves the medium as it was.
+    let y = YAML.replacen(
+        "    tag: hub-rp2040-lcd
+",
+        "    tag: hub-rp2040-lcd
+    uplink: { kind: ble }
+",
+        1,
+    );
+    assert_eq!(http(&d, "PUT", "/v1/topology", &h, y.as_bytes()).0, 200);
+    assert_eq!(sim(&d)["uplink"], "wifi-tcp");
+}

@@ -19,7 +19,7 @@ mod project;
 mod recent;
 mod sim;
 
-pub use sim::SimDevice;
+pub use sim::{Medium, SimDevice};
 mod ws;
 
 use std::io::Write;

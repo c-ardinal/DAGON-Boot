@@ -20,6 +20,7 @@ use dagon_sim::{demo_hub, watch_config, Layout, SimFlash, SimHub, SimLink, SimNo
 use ed25519_compact::KeyPair;
 
 use crate::config::Opts;
+use crate::serve::Medium;
 
 const YAML: &str = include_str!("../../../topology/desk-demo.yaml");
 /// Marks a folder this command made (and may make again).
@@ -137,7 +138,20 @@ fn release(key: &KeyPair) -> Result<Vec<u8>, String> {
 /// Makes the demo folder `dir` afresh (only one this command made before is
 /// replaced): its 構成, a demo key pair, dagon.toml and the release.
 /// Returns dagon.toml's path and the demo key.
-pub fn project(dir: &Path) -> Result<(PathBuf, KeyPair), String> {
+/// The demo 構成: desk-demo with the 親機's uplink set to `uplink` (it is
+/// not part of the compiled topology, so the release matches either way).
+pub fn yaml(uplink: Medium) -> String {
+    YAML.replacen(
+        "    tag: hub-rp2040-lcd\n",
+        &format!(
+            "    tag: hub-rp2040-lcd\n    uplink: {{ kind: {}, host: browser }}\n",
+            uplink.kind().name()
+        ),
+        1,
+    )
+}
+
+pub fn project(dir: &Path, uplink: Medium) -> Result<(PathBuf, KeyPair), String> {
     if dir.exists() {
         if !dir.join(MARK).is_file() {
             return Err(format!(
@@ -152,7 +166,7 @@ pub fn project(dir: &Path) -> Result<(PathBuf, KeyPair), String> {
     write(MARK, b"made by dagon demo; replaced on its next start\n")?;
     let k = dagon_sign::generate_to_dir(&dir.join("demo-key")).map_err(|e| e.to_string())?;
     let key = dagon_sign::load_key_pair(&k.secret_path).map_err(|e| e.to_string())?;
-    write("topology.yaml", YAML.as_bytes())?;
+    write("topology.yaml", yaml(uplink).as_bytes())?;
     write(
         crate::config::CONFIG_FILE,
         b"# The dagon demo project (simulated desk). Its key is a DEMO key made\n\
@@ -165,11 +179,12 @@ pub fn project(dir: &Path) -> Result<(PathBuf, KeyPair), String> {
     Ok((dir.join(crate::config::CONFIG_FILE), key))
 }
 
-/// `dagon demo [--sim-speed <x>] [--sim-fail seg|watch] [--port <n>] [--no-open]`
+/// `dagon demo [--sim-speed <x>] [--sim-fail seg|watch]
+/// [--uplink usb-cdc|uart|wifi-tcp] [--port <n>] [--no-open]`
 pub fn command(args: &[&str]) -> Result<(), String> {
     let no_open = args.contains(&"--no-open");
     let rest: Vec<&str> = args.iter().copied().filter(|a| *a != "--no-open").collect();
-    let o = Opts::parse(&rest, &["sim-speed", "sim-fail", "port"])?;
+    let o = Opts::parse(&rest, &["sim-speed", "sim-fail", "uplink", "port"])?;
     if !o.pos.is_empty() {
         return Err("demo takes options only".into());
     }
@@ -190,6 +205,13 @@ pub fn command(args: &[&str]) -> Result<(), String> {
             NODES.join(" or ")
         ));
     }
+    let uplink = match o.get("uplink") {
+        None => Medium::UsbCdc,
+        Some(u) => Medium::ALL
+            .into_iter()
+            .find(|m| m.kind().name() == u)
+            .ok_or_else(|| format!("--uplink takes usb-cdc, uart or wifi-tcp (not {u})"))?,
+    };
     // Per user: a temporary folder may be shared (Linux /tmp).
     let user = std::env::var("USERNAME")
         .or_else(|_| std::env::var("USER"))
@@ -200,12 +222,14 @@ pub fn command(args: &[&str]) -> Result<(), String> {
     } else {
         format!("{DEMO_DIR}-{user}")
     });
-    let (config, key) = project(&dir)?;
+    let (config, key) = project(&dir, uplink)?;
     let hub = desk(&key, fail, 1)?;
     let mut sim = crate::serve::SimDevice::new(hub, speed, fail.map(String::from));
+    sim.set_medium(uplink);
     sim.notes = vec![
         format!(
-            "demo: a SIMULATED desk (親機 + 2 子機, desk-demo), speed x{speed}{}",
+            "demo: a SIMULATED desk (親機 + 2 子機, desk-demo) over {}, speed x{speed}{}",
+            uplink.kind().name(),
             fail.map_or(String::new(), |f| format!(", {f}'s update set to fail"))
         ),
         format!(
@@ -234,7 +258,7 @@ mod tests {
     fn the_demo_project_is_made_afresh_with_its_own_key() {
         let dir = std::env::temp_dir().join(format!("dagon-demo-test-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
-        let (config, key) = project(&dir).unwrap();
+        let (config, key) = project(&dir, Medium::UsbCdc).unwrap();
         let cfg = crate::config::Config::load(Some(&config.to_string_lossy())).unwrap();
         // The release verifies under the demo key, and the key checks out
         // as the project's (its pubkey and signing key belong together).
@@ -250,10 +274,10 @@ mod tests {
         );
         assert_ne!(*key.pk, dagon_sign::image::TEST_PUBLIC_KEY);
         // Made again: a new key; a folder it did not make is left alone.
-        let (_, again) = project(&dir).unwrap();
+        let (_, again) = project(&dir, Medium::UsbCdc).unwrap();
         assert_ne!(*again.pk, *key.pk);
         std::fs::remove_file(dir.join(MARK)).unwrap();
-        assert!(project(&dir)
+        assert!(project(&dir, Medium::UsbCdc)
             .unwrap_err()
             .contains("not made by dagon demo"));
         let _ = std::fs::remove_dir_all(&dir);
@@ -268,10 +292,10 @@ mod tests {
     impl dagon_host::Transport for Link {
         type Error = ();
         fn max_payload(&self) -> usize {
-            dagon_proto::max_payload::USB
+            self.0.medium().max_payload()
         }
         fn reconnect_kind(&self) -> dagon_host::Reconnect {
-            dagon_host::Reconnect::Reopen
+            self.0.medium().reconnect()
         }
         async fn write(&mut self, bytes: &[u8]) -> Result<(), ()> {
             self.0.write(bytes);
@@ -305,17 +329,22 @@ mod tests {
 
     /// Release demo-1.1.0 applied to the whole desk through the demo link.
     fn update(name: &str, fail: Option<&str>) -> Vec<(u8, String)> {
+        update_over(name, fail, Medium::UsbCdc)
+    }
+
+    fn update_over(name: &str, fail: Option<&str>, uplink: Medium) -> Vec<(u8, String)> {
         const SPEED: f64 = 50.0;
         let dir = std::env::temp_dir().join(format!("dagon-demo-{name}-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
-        let (_, key) = project(&dir).unwrap();
+        let (_, key) = project(&dir, Medium::UsbCdc).unwrap();
         let bundle = std::fs::read(dir.join(format!("out/release/{RELEASE}.dgb"))).unwrap();
-        let topo = dagon_topology::compile_str(YAML).unwrap();
+        let topo = dagon_topology::compile_str(&yaml(uplink)).unwrap();
         let dev = Arc::new(crate::serve::SimDevice::new(
             desk(&key, fail, 1).unwrap(),
             SPEED,
             None,
         ));
+        dev.set_medium(uplink);
         let mut h = Host::new(Link(dev, Vec::new()), Clock(Instant::now(), SPEED));
         let out = dagon_sim::block_on(h.apply(&bundle, &topo, &key.pk, None, &mut |_| {})).unwrap();
         let _ = std::fs::remove_dir_all(&dir);
@@ -329,6 +358,15 @@ mod tests {
                 (o.node, what)
             })
             .collect()
+    }
+
+    #[test]
+    fn the_same_update_completes_over_each_uplink() {
+        for m in [Medium::Uart, Medium::WifiTcp] {
+            let out = update_over(m.kind().name(), None, m);
+            assert_eq!(out.len(), 3, "{m:?}: {out:?}");
+            assert!(out.iter().all(|(_, w)| w == "done 1.1.0"), "{m:?}: {out:?}");
+        }
     }
 
     #[test]

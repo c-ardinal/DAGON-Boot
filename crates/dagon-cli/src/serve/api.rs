@@ -218,6 +218,17 @@ fn demo_refuses(parts: &[&str]) -> bool {
 /// Features dagon demo leaves out of hello (the page hides them).
 const DEMO_HIDDEN: [&str; 4] = ["project", "flash", "doctor", "conform"];
 
+/// The simulated medium a 構成's 親機 uplink names (None: not one the
+/// demo simulates, or no 親機).
+fn demo_uplink(yaml: &str) -> Option<super::sim::Medium> {
+    let t = dagon_topology::parse_str(yaml).ok()?;
+    let hub = t
+        .nodes
+        .iter()
+        .find(|n| n.role == dagon_topology::schema::Role::Coordinator)?;
+    super::sim::Medium::of(dagon_topology::Topology::uplink(hub).kind)
+}
+
 /// The longest GET /v1/sim/read waits for an answer.
 const SIM_READ_MAX_MS: u64 = 1_000;
 
@@ -347,7 +358,17 @@ fn hello(server: &Server) -> Response {
         "release_key": server.release_key().map(|k| to_hex(&k)),
         // The simulated desk of dagon demo: the page shows 模擬 and reaches
         // it through /v1/sim.
-        "sim": sim.map(|s| json!({ "speed": s.speed, "fail": s.fail })),
+        "sim": sim.map(|s| {
+            let m = s.medium();
+            json!({
+                "speed": s.speed,
+                "fail": s.fail,
+                // The simulated uplink: its kind, frame size and reboot behaviour.
+                "uplink": m.kind().name(),
+                "max_payload": m.max_payload(),
+                "reconnect": if m.reconnect() == dagon_host::Reconnect::Stays { "stays" } else { "reopen" },
+            })
+        }),
         // The MCU families POST /v1/flash can write.
         "flash_mcus": flash_mcus,
         // null until a project is open (the page shows the start screen).
@@ -472,6 +493,12 @@ fn topology_put(server: &Server, req: &Request) -> Res {
         .lock()
         .map_err(|_| Response::error(500, "lock"))?;
     crate::paths::write_atomic(&p, yaml.as_bytes()).map_err(|e| Response::error(500, &e))?;
+    // dagon demo: the 構成's uplink picks the simulated medium.
+    if let Some(sim) = server.sim.get() {
+        if let Some(m) = demo_uplink(yaml) {
+            sim.set_medium(m);
+        }
+    }
     Ok(json_ok(
         json!({ "report": report_json, "updatable": report.is_pushable() }),
     ))

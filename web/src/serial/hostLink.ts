@@ -2,6 +2,7 @@
 // Transport: received frames are handed out as bytes, in pieces when the
 // procedure asks for less than a whole frame.
 import type { HostLink } from '../wasm/pkg/dagon_wasm.js';
+import { MAX_PAYLOAD_USB } from './frame.ts';
 import type { Transport } from './transport.ts';
 
 /** How long one read waits for a frame before reporting "nothing yet". */
@@ -28,6 +29,9 @@ export function hostLink(first: Transport, clock: LinkClock = REAL_CLOCK): SwapL
   let rest: Uint8Array = new Uint8Array(0);
   return {
     write: (bytes) => t.write(bytes.slice()),
+    // The link's own size and reboot behaviour (dagon-host asks; USB CDC when the transport does not say).
+    maxPayload: () => t.maxPayload?.() ?? MAX_PAYLOAD_USB,
+    reconnectKind: () => t.reconnectKind?.() ?? 'reopen',
     async read(max) {
       if (rest.length === 0) rest = (await t.read(READ_WAIT_MS)) ?? new Uint8Array(0);
       const out = rest.subarray(0, max);

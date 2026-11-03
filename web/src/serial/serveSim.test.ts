@@ -36,4 +36,12 @@ describe('dagon demo link', () => {
     await sim.transport.close();
     expect(await sim.transport.read(20)).toBeNull();
   });
+
+  test('the link reports the simulated uplink serve names: frame size and what a hub reboot does', () => {
+    let up = { maxPayload: 1088, reconnect: 'reopen' as const } as { maxPayload: number; reconnect: 'reopen' | 'stays' };
+    const sim = serveSim({ simWrite: async () => undefined, simRead: async () => new Uint8Array(0), simUplink: () => up }, 1);
+    expect([sim.transport.maxPayload?.(), sim.transport.reconnectKind?.()]).toEqual([1088, 'reopen']);
+    up = { maxPayload: 1024, reconnect: 'stays' };
+    expect([sim.transport.maxPayload?.(), sim.transport.reconnectKind?.()]).toEqual([1024, 'stays']);
+  });
 });

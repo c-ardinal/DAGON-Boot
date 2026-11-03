@@ -20,7 +20,7 @@ export interface Hello {
   /** MCU families POST /v1/flash can write (rp2040, stm32f401re). */
   flash_mcus?: string[];
   /** `dagon demo`: a simulated desk, never a real hub (its speed, and the 子機 set to fail). */
-  sim?: { speed: number; fail: string | null } | null;
+  sim?: { speed: number; fail: string | null; uplink?: string; max_payload?: number; reconnect?: 'reopen' | 'stays' } | null;
 }
 
 /** A project serve knows: its folder and its name. */
@@ -169,8 +169,14 @@ export class Cli {
   }
 
   /** The simulated desk of `dagon demo`, when this serve has one. */
-  get sim(): { speed: number; fail: string | null } | null {
+  get sim(): Hello['sim'] {
     return this.state === 'ready' && this.hello?.sim ? this.hello.sim : null;
+  }
+
+  /** The uplink the demo simulates now (its 構成's): frame size and reboot behaviour. */
+  simUplink(): { maxPayload: number; reconnect: 'reopen' | 'stays' } {
+    const s = this.hello?.sim;
+    return { maxPayload: s?.max_payload ?? 1088, reconnect: s?.reconnect ?? 'reopen' };
   }
 
   /** POST /v1/sim/write: bytes for the simulated hub. */
@@ -276,7 +282,11 @@ export class Cli {
     if (this.state !== 'ready') return 'failed';
     try {
       const r = await this.d.fetch('/v1/topology', { method: 'PUT', headers: { Authorization: `Bearer ${this.pass}`, 'Content-Type': 'application/yaml' }, body: yaml });
-      if (r.ok) return 'saved';
+      if (r.ok) {
+        // In dagon demo the 構成's uplink picks the simulated medium: hello says which now.
+        if (this.hello?.sim) await this.refreshHello();
+        return 'saved';
+      }
       return r.status === 422 ? 'invalid' : r.status === 409 ? 'busy' : 'failed';
     } catch {
       return 'failed';

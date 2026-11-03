@@ -13,12 +13,72 @@ use std::sync::{Condvar, Mutex};
 use std::time::{Duration, Instant};
 
 use dagon_proto::payload::{link, Relay};
-use dagon_proto::{Cmd, HEADER_LEN};
+use dagon_proto::{max_payload, Cmd, HEADER_LEN};
 use dagon_sim::SimHub;
+use dagon_topology::schema::LinkKind;
+
+/// The uplink the demo simulates between the page and the 親機.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Medium {
+    /// USB CDC: fast, gone while the hub reboots.
+    UsbCdc,
+    /// A USB-UART adapter at 115200 baud: slow, smaller frames, stays.
+    Uart,
+    /// A TCP connection over Wi-Fi: some latency, reconnects after a reboot.
+    WifiTcp,
+}
+
+impl Medium {
+    pub const ALL: [Medium; 3] = [Medium::UsbCdc, Medium::Uart, Medium::WifiTcp];
+
+    /// The medium for an uplink kind; None for kinds the demo does not simulate.
+    pub fn of(kind: LinkKind) -> Option<Medium> {
+        match kind {
+            LinkKind::UsbCdc => Some(Medium::UsbCdc),
+            LinkKind::Uart => Some(Medium::Uart),
+            LinkKind::WifiTcp => Some(Medium::WifiTcp),
+            _ => None,
+        }
+    }
+
+    pub fn kind(self) -> LinkKind {
+        match self {
+            Medium::UsbCdc => LinkKind::UsbCdc,
+            Medium::Uart => LinkKind::Uart,
+            Medium::WifiTcp => LinkKind::WifiTcp,
+        }
+    }
+
+    pub fn max_payload(self) -> usize {
+        match self {
+            Medium::UsbCdc | Medium::WifiTcp => max_payload::USB,
+            Medium::Uart => max_payload::UART,
+        }
+    }
+
+    pub fn reconnect(self) -> dagon_host::Reconnect {
+        match self {
+            Medium::Uart => dagon_host::Reconnect::Stays,
+            Medium::UsbCdc | Medium::WifiTcp => dagon_host::Reconnect::Reopen,
+        }
+    }
+
+    /// Bytes per simulated ms, and the fixed cost of one exchange.
+    fn rate_and_latency(self) -> (f64, f64) {
+        match self {
+            Medium::UsbCdc => (USB_BYTES_PER_MS, EXCHANGE_MS),
+            Medium::Uart => (UART_BYTES_PER_MS, EXCHANGE_MS),
+            Medium::WifiTcp => (WIFI_BYTES_PER_MS, WIFI_LATENCY_MS),
+        }
+    }
+}
 
 /// Bytes per simulated ms on each link (USB CDC; I2C at 400 kHz and the
 /// UART at 115200 baud, with their framing).
 const USB_BYTES_PER_MS: f64 = 1_000.0;
+/// Wi-Fi TCP: a few hundred kB/s, with a round trip of several ms.
+const WIFI_BYTES_PER_MS: f64 = 300.0;
+const WIFI_LATENCY_MS: f64 = 8.0;
 const I2C_BYTES_PER_MS: f64 = 25.0;
 const UART_BYTES_PER_MS: f64 = 11.0;
 /// Fixed cost of one exchange (USB round trip, the hub's work).
@@ -37,6 +97,8 @@ pub struct SimDevice {
     /// Lines for serve's log, under its banner (what is simulated, the
     /// demo key).
     pub notes: Vec<String>,
+    /// The uplink simulated now (the demo 構成's, changed with it).
+    medium: Mutex<Medium>,
 }
 
 struct State {
@@ -61,7 +123,17 @@ impl SimDevice {
             speed,
             fail,
             notes: Vec::new(),
+            medium: Mutex::new(Medium::UsbCdc),
         }
+    }
+
+    pub fn medium(&self) -> Medium {
+        *self.medium.lock().unwrap_or_else(|p| p.into_inner())
+    }
+
+    /// Switches the simulated uplink (the demo 構成 names another).
+    pub fn set_medium(&self, m: Medium) {
+        *self.medium.lock().unwrap_or_else(|p| p.into_inner()) = m;
     }
 
     /// The simulated desk catches up with the wall clock.
@@ -78,7 +150,12 @@ impl SimDevice {
     pub fn write(&self, bytes: &[u8]) {
         let mut st = self.state.lock().unwrap_or_else(|p| p.into_inner());
         self.sync(&mut st);
-        let due = st.hub.now_ms() + exchange_ms(bytes) as u64;
+        let medium = self.medium();
+        // A frame larger than the uplink carries never reaches the hub.
+        if bytes.len().saturating_sub(dagon_proto::frame_len(0)) > medium.max_payload() {
+            return;
+        }
+        let due = st.hub.now_ms() + exchange_ms(bytes, medium) as u64;
         st.hub.usb_write(bytes);
         let answer = st.hub.usb_read();
         if !answer.is_empty() {
@@ -120,22 +197,24 @@ impl SimDevice {
 }
 
 /// Simulated ms the exchange of request `frame` takes on its links.
-fn exchange_ms(frame: &[u8]) -> f64 {
+fn exchange_ms(frame: &[u8], medium: Medium) -> f64 {
     let cmd = frame.get(5).copied().unwrap_or(0);
     let payload = frame
         .get(HEADER_LEN..frame.len().saturating_sub(4))
         .unwrap_or(&[]);
-    let usb = frame.len() as f64 / USB_BYTES_PER_MS;
+    let (up_rate, latency) = medium.rate_and_latency();
+    // The request up and its answer back, over the uplink.
+    let usb = 2.0 * frame.len() as f64 / up_rate;
     let work = |inner_cmd: u8| match inner_cmd {
         c if c == Cmd::XferBegin as u8 => ERASE_MS,
         c if c == Cmd::XferEnd as u8 => VERIFY_MS,
         _ => 0.0,
     };
     if cmd != Cmd::Relay as u8 {
-        return EXCHANGE_MS + usb + work(cmd);
+        return latency + usb + work(cmd);
     }
     let Ok(r) = Relay::parse(payload) else {
-        return EXCHANGE_MS + usb;
+        return latency + usb;
     };
     let rate = if r.link == link::PIO_UART {
         UART_BYTES_PER_MS
@@ -144,7 +223,7 @@ fn exchange_ms(frame: &[u8]) -> f64 {
     };
     let inner_cmd = r.inner.get(5).copied().unwrap_or(0);
     // The request out and an answer of about the same size back.
-    EXCHANGE_MS + usb + 2.0 * r.inner.len() as f64 / rate + work(inner_cmd)
+    latency + usb + 2.0 * r.inner.len() as f64 / rate + work(inner_cmd)
 }
 
 #[cfg(test)]
@@ -179,15 +258,29 @@ mod tests {
     #[test]
     fn links_take_their_real_time() {
         let data = frame(Cmd::XferData as u8, &[0; 1000]);
-        let hub = exchange_ms(&data);
-        let i2c = exchange_ms(&relay(link::I2C0, &data));
-        let uart = exchange_ms(&relay(link::PIO_UART, &data));
+        let hub = exchange_ms(&data, Medium::UsbCdc);
+        let i2c = exchange_ms(&relay(link::I2C0, &data), Medium::UsbCdc);
+        let uart = exchange_ms(&relay(link::PIO_UART, &data), Medium::UsbCdc);
         assert!(hub < 5.0 && hub < i2c && i2c < uart, "{hub} {i2c} {uart}");
         // 1 KB over I2C and back: about 80 ms; the UART about 180 ms. Both
         // stay inside the 300 ms a node has to answer.
         assert!((70.0..100.0).contains(&i2c) && uart < 300.0, "{i2c} {uart}");
         let begin = frame(Cmd::XferBegin as u8, &[0; 8]);
-        assert!(exchange_ms(&relay(link::I2C0, &begin)) >= ERASE_MS);
+        assert!(exchange_ms(&relay(link::I2C0, &begin), Medium::UsbCdc) >= ERASE_MS);
+    }
+
+    #[test]
+    fn each_uplink_has_its_own_size_speed_and_reboot() {
+        let data = frame(Cmd::XferData as u8, &[0; 1000]);
+        let t: Vec<f64> = Medium::ALL.iter().map(|m| exchange_ms(&data, *m)).collect();
+        assert!(t[0] < t[2] && t[2] < t[1], "usb < wifi < uart: {t:?}");
+        assert_eq!(Medium::Uart.max_payload(), max_payload::UART);
+        assert_eq!(Medium::Uart.reconnect(), dagon_host::Reconnect::Stays);
+        assert_eq!(Medium::WifiTcp.reconnect(), dagon_host::Reconnect::Reopen);
+        for m in Medium::ALL {
+            assert_eq!(Medium::of(m.kind()), Some(m));
+        }
+        assert_eq!(Medium::of(LinkKind::Ble), None);
     }
 
     #[test]

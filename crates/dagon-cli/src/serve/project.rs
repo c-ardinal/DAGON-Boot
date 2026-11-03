@@ -82,8 +82,7 @@ fn under_home(home: &Path, path: &str) -> Result<PathBuf, String> {
 }
 
 fn shown(p: &Path) -> String {
-    let s = p.to_string_lossy().replace('\\', "/");
-    s.strip_prefix("//?/").unwrap_or(&s).to_string()
+    crate::config::forward_path(p)
 }
 
 fn project_json(server: &Server) -> Value {

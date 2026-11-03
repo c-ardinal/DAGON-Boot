@@ -173,14 +173,36 @@ pub fn base_of(path: &Path) -> PathBuf {
 /// Windows' extended-length path prefix, as `canonicalize` returns it.
 const VERBATIM: &str = concat!('\\', '\\', '?', '\\');
 
-/// Drops the extended-length prefix from a drive path so it prints and
-/// passes to other tools as usual.
+/// Drops the extended-length prefix canonicalising adds on Windows, so the
+/// path prints and passes to other tools as usual: `\\?\C:\x` becomes
+/// `C:\x` and `\\?\UNC\server\share\x` becomes `\\server\share\x`.
+/// Other verbatim paths (volume GUIDs, devices) stay as they are.
 pub(crate) fn plain_path(p: PathBuf) -> PathBuf {
     let s = p.to_string_lossy();
-    match s.strip_prefix(VERBATIM) {
-        Some(rest) if rest.as_bytes().get(1) == Some(&b':') => PathBuf::from(rest),
+    let Some(rest) = s.strip_prefix(VERBATIM) else {
+        return p;
+    };
+    if rest.as_bytes().get(1) == Some(&b':') {
+        return PathBuf::from(rest);
+    }
+    let unc = rest
+        .get(..4)
+        .filter(|h| h.eq_ignore_ascii_case(concat!("UNC", '\\')))
+        .map(|_| &rest[4..]);
+    match unc {
+        Some(share) if !share.is_empty() => {
+            PathBuf::from(format!("{}{share}", concat!('\\', '\\')))
+        }
         _ => p,
     }
+}
+
+/// `p` without the extended-length prefix, with forward slashes (for
+/// TOML, the page and messages): `C:/x`, `//server/share/x`.
+pub(crate) fn forward_path(p: &Path) -> String {
+    plain_path(p.to_path_buf())
+        .to_string_lossy()
+        .replace('\\', "/")
 }
 
 /// `--name value` options after positional arguments. Every option takes a
@@ -398,6 +420,43 @@ pub fn read_file(path: &Path) -> Result<Vec<u8>, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn verbatim_prefixes_are_dropped_for_drives_and_unc_shares() {
+        let b = char::from(92).to_string();
+        let w = |parts: &[&str]| PathBuf::from(parts.join(&b));
+        let v = |rest: &[&str]| {
+            let mut all = vec!["", "", "?"];
+            all.extend_from_slice(rest);
+            w(&all)
+        };
+        assert_eq!(
+            plain_path(v(&["C:", "work", "proj"])),
+            w(&["C:", "work", "proj"])
+        );
+        assert_eq!(
+            plain_path(v(&["UNC", "server", "share", "proj"])),
+            w(&["", "", "server", "share", "proj"])
+        );
+        assert_eq!(
+            plain_path(v(&["unc", "server", "share"])),
+            w(&["", "", "server", "share"])
+        );
+        assert_eq!(
+            forward_path(&v(&["UNC", "srv", "share", "p"])),
+            "//srv/share/p"
+        );
+        assert_eq!(forward_path(&v(&["C:", "a", "b"])), "C:/a/b");
+        for keep in [
+            v(&["Volume{0b1c}", "x"]),
+            v(&["UNC"]),
+            w(&["", "", "server", "share", "x"]),
+            w(&["C:", "x"]),
+            PathBuf::from("relative/x"),
+        ] {
+            assert_eq!(plain_path(keep.clone()), keep);
+        }
+    }
 
     #[test]
     fn the_provision_folder_is_beside_dagon_toml_by_default() {

@@ -260,6 +260,8 @@ pub struct I2cPair {
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct RomI2c {
+    /// What check messages call it (`STM32 ROM bootloader`).
+    pub name: String,
     pub addr: u8,
     pub max_hz: u32,
     /// Flash sectors a first install through the ROM erases.

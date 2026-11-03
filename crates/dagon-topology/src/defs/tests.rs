@@ -224,7 +224,7 @@ fn fake_desk(addr: &str) -> crate::Topology {
 fn fake_registry(name: &str, max_hz: u32) -> Registry {
     let dir = scratch(name);
     let rom = format!(
-        "\n[rom_i2c]\naddr = 0x3A\nmax_hz = {max_hz}\n\
+        "\n[rom_i2c]\nname = \"Fake ROM loader\"\naddr = 0x3A\nmax_hz = {max_hz}\n\
          pairs = [{{ controller = \"i2c0\", sda = \"GPIO2\", scl = \"GPIO3\" }}]\n"
     );
     write(&dir.join("m/dagon-mcu.toml"), &format!("{FAKE_MCU}{rom}"));
@@ -265,6 +265,34 @@ fn checks_and_compile_follow_a_project_registry() {
     // Its ROM loader caps the bus speed.
     let slow = fake_registry("check-with-slow", 100_000);
     assert_eq!(rules(&crate::check_with(&slow, &t)), ["V-20"]);
+    // Messages name the loader from its definition.
+    let msgs = |reg: &Registry, t: &crate::Topology| -> Vec<String> {
+        crate::check_with(reg, t)
+            .errors()
+            .map(|i| i.message.clone())
+            .collect()
+    };
+    assert_eq!(
+        msgs(&reg, &fake_desk("0x3A")),
+        ["0x3a is reserved for the Fake ROM loader on this bus"]
+    );
+    assert_eq!(
+        msgs(&slow, &t),
+        ["speed_hz must be one of [100000, 400000] (Fake ROM loader limit 100000)"]
+    );
+    // The fake MCU has no [coordinator] section: it cannot be the hub.
+    let mut hub = fake_desk("0x42");
+    hub.nodes[0].mcu = "fake-m0".into();
+    hub.nodes[0].board = None;
+    hub.nodes[0].flash_map = None;
+    let r = crate::check_with(&reg, &hub);
+    let v24: Vec<_> = r.errors().filter(|i| i.rule == "V-24").collect();
+    assert_eq!(v24.len(), 1, "{r:?}");
+    assert_eq!(v24[0].path, "nodes[0].mcu");
+    assert_eq!(
+        v24[0].message,
+        "fake-m0 cannot be the coordinator: its MCU definition has no [coordinator] section"
+    );
 }
 
 #[test]

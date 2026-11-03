@@ -247,6 +247,62 @@ fn v20_bus_speed_and_pullups() {
     assert_fires(&mutate("pullups: external", "pullups: none"), "V-20");
 }
 
+fn messages(yaml: &str, rule: &str) -> Vec<String> {
+    check_str(yaml)
+        .errors()
+        .filter(|i| i.rule == rule)
+        .map(|i| i.message.clone())
+        .collect()
+}
+
+#[test]
+fn v18_v20_name_the_rom_loader_from_its_definition() {
+    assert_eq!(
+        messages(&mutate("addr: 0x42", "addr: 0x39"), "V-18"),
+        ["0x39 is reserved for the STM32 ROM bootloader on this bus"]
+    );
+    assert_eq!(
+        messages(&mutate("speed_hz: 400000", "speed_hz: 1000000"), "V-20"),
+        ["speed_hz must be one of [100000, 400000] (STM32 ROM bootloader limit 400000)"]
+    );
+    // No node is reached through its ROM: no loader limit to name.
+    let no_rom = mutate(
+        "seg: [local, redistribute, rom-forced]",
+        "seg: [local, redistribute]",
+    );
+    assert_eq!(
+        messages(
+            &no_rom.replacen("speed_hz: 400000", "speed_hz: 1000000", 1),
+            "V-20"
+        ),
+        ["speed_hz must be one of [100000, 400000]"]
+    );
+    assert!(messages(&no_rom.replacen("addr: 0x42", "addr: 0x39", 1), "V-18").is_empty());
+}
+
+#[test]
+fn v24_coordinator_mcu_needs_a_coordinator_section() {
+    let esp_hub = mutate(
+        "    mcu: rp2040\n    board: waveshare-rp2040-touch-lcd-1.28\n    role: coordinator\n    port: self-boot\n    flash_map: rp2040-4m",
+        "    mcu: esp32s3\n    role: coordinator\n    port: vendor-stage2",
+    );
+    let r = check_str(&esp_hub);
+    let v24: Vec<_> = r.errors().filter(|i| i.rule == "V-24").collect();
+    assert_eq!(v24.len(), 1, "{:?}", r.issues);
+    assert_eq!(v24[0].path, "nodes[0].mcu");
+    assert_eq!(
+        v24[0].message,
+        "esp32s3 cannot be the coordinator: its MCU definition has no [coordinator] section"
+    );
+    // A second coordinator (here the F401) is V-23's shape, not V-24's.
+    let two_hubs = DEMO.replacen("role: node", "role: coordinator", 1);
+    assert_eq!(error_rules(&two_hubs), BTreeSet::from(["V-23"]));
+    // An unknown MCU is V-06's alone.
+    let unknown = mutate("    mcu: rp2040\n", "    mcu: nope\n");
+    assert!(!error_rules(&unknown).contains("V-24"));
+    assert!(error_rules(&unknown).contains("V-06"));
+}
+
 #[test]
 fn v21_i2c_target() {
     assert_fires(

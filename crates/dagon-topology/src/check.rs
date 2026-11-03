@@ -1,7 +1,7 @@
 //! Validation rules for `dagon topo check`.
 //!
-//! 20 errors (V-01..V-21 without V-19) and one warning (V-22). Errors block
-//! `topo push`; warnings do not.
+//! Errors V-01..V-21 (no V-19), V-23 and V-24, and one warning (V-22).
+//! Errors block `topo push`; warnings do not.
 
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -71,6 +71,7 @@ pub fn check_with(reg: &Registry, t: &Topology) -> Report {
     c.v21();
     c.v22();
     c.v23();
+    c.v24();
     Report { issues: c.issues }
 }
 
@@ -385,6 +386,34 @@ impl<'a> Ctx<'a> {
                     format!(
                         "'{}' is a coordinator; links between coordinators are not updatable yet",
                         n.id
+                    ),
+                );
+            }
+        }
+    }
+
+    /// The coordinator's MCU must define what it offers as one (its
+    /// `[coordinator]` section). Only the first coordinator, the one the hub
+    /// rules check: further ones are a shape not updatable yet (V-23).
+    /// Unknown MCUs are V-06's.
+    fn v24(&mut self) {
+        let first = self
+            .t
+            .nodes
+            .iter()
+            .enumerate()
+            .find(|(_, n)| n.role == Role::Coordinator);
+        if let Some((i, n)) = first {
+            let Some(m) = self.reg.mcu(&n.mcu) else {
+                return;
+            };
+            if m.coordinator.is_none() {
+                self.err(
+                    "V-24",
+                    format!("nodes[{i}].mcu"),
+                    format!(
+                        "{} cannot be the coordinator: its MCU definition has no [coordinator] section",
+                        m.id
                     ),
                 );
             }
@@ -751,9 +780,9 @@ impl<'a> Ctx<'a> {
                 .filter(|(_, l)| l.kind == LinkKind::I2c && l.bus.as_ref() == Some(&bus.id))
                 .collect();
             // Addresses the ROM loaders of nodes reached through them answer on.
-            let reserved: BTreeSet<u8> = on_bus
+            let reserved: BTreeMap<u8, &str> = on_bus
                 .iter()
-                .filter_map(|(_, l)| self.forced_rom(&l.to).map(|r| r.addr))
+                .filter_map(|(_, l)| self.forced_rom(&l.to).map(|r| (r.addr, r.name.as_str())))
                 .collect();
             let mut seen = BTreeSet::new();
             for (i, l) in on_bus {
@@ -773,12 +802,11 @@ impl<'a> Ctx<'a> {
                         format!("address {addr:#04x} is already used on bus '{}'", bus.id),
                     );
                 }
-                if reserved.contains(&addr) {
-                    // Wording kept from the STM32-only rule (messages unchanged).
+                if let Some(rom) = reserved.get(&addr) {
                     self.err(
                         "V-18",
                         path,
-                        format!("{addr:#04x} is reserved for the STM32 ROM bootloader on this bus"),
+                        format!("{addr:#04x} is reserved for the {rom} on this bus"),
                     );
                 }
             }
@@ -791,17 +819,19 @@ impl<'a> Ctx<'a> {
             let rom_cap = self
                 .links()
                 .filter(|(_, l)| l.kind == LinkKind::I2c && l.bus.as_ref() == Some(&b.id))
-                .filter_map(|(_, l)| self.forced_rom(&l.to).map(|r| r.max_hz))
-                .min()
-                .unwrap_or(u32::MAX);
+                .filter_map(|(_, l)| self.forced_rom(&l.to))
+                .min_by_key(|r| r.max_hz);
+            let over_cap = |s: u32| rom_cap.is_some_and(|r| s > r.max_hz);
             if b.speed_hz
-                .is_some_and(|s| !I2C_SPEEDS.contains(&s) || s > rom_cap)
+                .is_some_and(|s| !I2C_SPEEDS.contains(&s) || over_cap(s))
             {
-                // Wording kept from the STM32-only rule (messages unchanged).
+                let limit = rom_cap.map_or(String::new(), |r| {
+                    format!(" ({} limit {})", r.name, r.max_hz)
+                });
                 self.err(
                     "V-20",
                     format!("buses[{i}].speed_hz"),
-                    format!("speed_hz must be one of {I2C_SPEEDS:?} (STM32 ROM limit 400000)"),
+                    format!("speed_hz must be one of {I2C_SPEEDS:?}{limit}"),
                 );
             }
             if !matches!(b.pullups.as_deref(), Some("external" | "board")) {

@@ -48,6 +48,7 @@ sub = "bootcore"
 
 # The system-memory I2C bootloader (ROM entry kind stm32-i2c-rom).
 [rom_i2c]
+name = "STM32 ROM bootloader"
 addr = 0x39
 max_hz = 400_000
 # Boot core (0-1), state logs A/B (2-3), APP-A (5).

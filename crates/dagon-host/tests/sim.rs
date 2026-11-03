@@ -101,6 +101,7 @@ fn sim() -> Sim {
         late_reboot: 0,
         held: None,
         faults: Rc::default(),
+        inject: Rc::default(),
     }
 }
 
@@ -139,6 +140,9 @@ struct Sim {
     /// acknowledging REBOOT.
     late_reboot: u32,
     held: Option<Vec<u8>>,
+    /// Bytes that arrive just before the hub's reply to the next request
+    /// (a previous session's replies still on the link).
+    inject: Rc<RefCell<Vec<u8>>>,
 }
 
 impl Transport for Sim {
@@ -152,6 +156,7 @@ impl Transport for Sim {
             self.held = Some(bytes.to_vec());
             return Ok(());
         }
+        self.pending.extend(self.inject.borrow_mut().drain(..));
         let (cmd, retry) = effective(bytes);
         let mut f = self.faults.borrow_mut();
         f.seen.push((cmd, retry));
@@ -638,6 +643,41 @@ fn a_new_session_never_gets_the_previous_sessions_stored_reply() {
         seen[..opening].iter().any(|x| x.0 == HELLO),
         "opening HELLO first"
     );
+}
+
+/// A HELLO reply for every PC seq whose body is no HELLO: taken for an
+/// answer, it fails the caller's HELLO.
+fn stale_hellos() -> Vec<u8> {
+    let mut out = Vec::new();
+    for seq in 0..=0x7Fu8 {
+        let mut f = vec![0u8; dagon_proto::frame_len(1)];
+        dagon_proto::finish(&mut f, flags::RESP, seq, Cmd::Hello as u8, 1).unwrap();
+        out.extend(f);
+    }
+    out
+}
+
+#[test]
+fn replies_of_a_previous_session_still_on_the_link_are_not_taken() {
+    let s = sim();
+    let mut h = host(&s);
+    // They arrive right before the reply to this session's opening HELLO,
+    // one of them with its seq.
+    s.inject.borrow_mut().extend(stale_hellos());
+    let st = block_on(h.status(Target::Hub));
+    assert!(st.is_ok(), "{st:?}");
+    assert_eq!(st.unwrap().hello.active_version, Version::new(1, 0, 0));
+}
+
+#[test]
+fn what_the_link_held_before_a_reopen_is_not_taken() {
+    let s = sim();
+    let mut h = host(&s);
+    block_on(h.status(Target::Hub)).unwrap();
+    h.transport.pending.extend(stale_hellos());
+    block_on(h.reopen()).unwrap();
+    let st = block_on(h.status(Target::Hub));
+    assert!(st.is_ok(), "{st:?}");
 }
 
 #[test]

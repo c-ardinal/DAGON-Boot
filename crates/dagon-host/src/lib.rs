@@ -145,6 +145,9 @@ pub type Result<T, E> = core::result::Result<T, Error<E>>;
 /// PC requests use seq 0x00..=0x7F; the hub's own polling uses the rest.
 const SEQ_MASK: u8 = 0x7F;
 const READ_CHUNK: usize = 1024;
+/// Reads that clearing out what the link still holds may take (each
+/// returns at once or after the transport's short read wait).
+const DRAIN_READS: usize = 64;
 
 /// A session with one hub. Remembers the versions it applied, for the
 /// confirm rule after a manual reconnect.
@@ -156,6 +159,9 @@ pub struct Host<T: Transport, C: Clock> {
     applied: Vec<(Target, Version)>,
     /// Targets that answered this session's opening HELLO.
     opened: Vec<Target>,
+    /// What the link holds may predate this session (a new session, or
+    /// the port reopened): it is read away before the next request.
+    stale: bool,
 }
 
 impl<T: Transport, C: Clock> Host<T, C> {
@@ -167,7 +173,35 @@ impl<T: Transport, C: Clock> Host<T, C> {
             rx: Vec::new(),
             applied: Vec::new(),
             opened: Vec::new(),
+            stale: true,
         }
+    }
+
+    /// Drops everything received so far and what the link still holds:
+    /// none of it can answer a request not sent yet.
+    async fn drain(&mut self) -> Result<(), T::Error> {
+        self.rx.clear();
+        let mut buf = [0u8; READ_CHUNK];
+        for _ in 0..DRAIN_READS {
+            let n = self
+                .transport
+                .read(&mut buf)
+                .await
+                .map_err(Error::Transport)?;
+            if n == 0 {
+                break;
+            }
+        }
+        self.stale = false;
+        Ok(())
+    }
+
+    /// Closes and opens the link again (the hub's USB device comes back
+    /// after REBOOT); what the old link held is not read as an answer.
+    pub async fn reopen(&mut self) -> Result<(), T::Error> {
+        self.transport.reopen().await.map_err(Error::Transport)?;
+        self.stale = true;
+        Ok(())
     }
 
     /// Version this session last applied to `to`.
@@ -292,6 +326,13 @@ impl<T: Transport, C: Clock> Host<T, C> {
     /// therefore an opening HELLO whose reply is dropped; only after the
     /// target has answered it does the caller's request go out, with a seq
     /// different from the HELLO's, so it cannot match what the target keeps.
+    ///
+    /// Replies of the previous session can also still be on the link. The
+    /// target answers in order, so they come before this session's HELLO
+    /// reply; but one of them could be taken for it (the same seq and
+    /// command). What arrived with or after that reply, and anything left
+    /// from before the session or a reopen, is read away before the
+    /// caller's request is sent.
     async fn call_with(
         &mut self,
         to: Target,
@@ -300,6 +341,9 @@ impl<T: Transport, C: Clock> Host<T, C> {
         timeout_ms: u32,
         retries: usize,
     ) -> Result<Vec<u8>, T::Error> {
+        if self.stale {
+            self.drain().await?;
+        }
         if !self.opened.contains(&to) {
             let hello = hello_request(to);
             self.attempts(to, Cmd::Hello, &hello, timeout_ms.min(REQUEST_MS), retries)
@@ -311,6 +355,7 @@ impl<T: Transport, C: Clock> Host<T, C> {
                     e => Err(e),
                 })?;
             self.opened.push(to);
+            self.drain().await?;
         }
         self.attempts(to, cmd, payload, timeout_ms, retries).await
     }

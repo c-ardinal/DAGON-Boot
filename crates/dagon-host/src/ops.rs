@@ -319,7 +319,7 @@ impl<T: Transport, C: Clock> Host<T, C> {
         loop {
             // ponytail: reopens before every hub attempt; add a grace period
             // for slow enumeration if real ports need it.
-            let reopened = to != Target::Hub || self.transport.reopen().await.is_ok();
+            let reopened = to != Target::Hub || self.reopen().await.is_ok();
             if reopened {
                 match self.hello_within(to, REQUEST_MS).await {
                     Ok(h) if h.active_version == v => return Ok(h),

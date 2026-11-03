@@ -197,7 +197,13 @@ describe('define document', () => {
       // The cut keeps 構成 order, so it is the nodes' order with the skipped ones left out.
       expect(c.reach).toEqual(c.nodes.filter((n) => !n.notYet).map((n) => n.id));
       expect(c.reach).toContain('hub');
-      expect(() => topo_compile(c.yaml)).not.toThrow();
+      // The compiled table (dagon-wasm's topo_compile) lists its nodes in reach's order. Layout
+      // (dagon-format topology): node_count at byte 6, nodes of 32 bytes from 0x20, target_tag at +16.
+      const bin = topo_compile(c.yaml);
+      const tags = Array.from({ length: bin[6] }, (_, i) =>
+        new TextDecoder().decode(bin.slice(0x20 + 32 * i + 16, 0x20 + 32 * i + 32)).replace(/\0+$/, ''),
+      );
+      expect(tags).toEqual(c.reach.map((id) => doc.topo.nodes.find((n) => n.id === id)!.tag));
       compiled++;
     }
     expect(compiled).toBeGreaterThan(10);

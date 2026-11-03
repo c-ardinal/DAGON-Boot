@@ -689,6 +689,39 @@ fn a_shape_not_updatable_yet_is_saved_and_its_updatable_part_compiled() {
         dagon_topology::compile(&t).unwrap(),
         dagon_topology::compile(&sub).unwrap()
     );
+    assert_eq!(v["reach"], serde_json::json!(["hub"]));
+    assert_eq!(compiled_tags(&y), reach_tags(&t, &v));
+
+    // Reached whole: reach is every node, in the compiled table's order.
+    let (st, body) = http(&a, "PUT", "/v1/topology", &h, YAML.as_bytes());
+    assert_eq!(st, 200, "{body}");
+    let v: serde_json::Value = serde_json::from_str(&body).unwrap();
+    assert_eq!(v["reach"], serde_json::json!(["hub", "seg"]));
+    assert_eq!(v["skipped"], serde_json::json!({}));
+    let t = dagon_topology::parse_str(YAML).unwrap();
+    assert_eq!(compiled_tags(YAML), reach_tags(&t, &v));
+}
+
+/// The target tags of the compiled topology's nodes, in its order.
+fn compiled_tags(yaml: &str) -> Vec<[u8; 16]> {
+    let bin = dagon_topology::compile_str(yaml).unwrap();
+    let view = dagon_format::topology::TopologyView::parse(&bin).unwrap();
+    (0..view.node_count())
+        .map(|i| view.node(i).target_tag)
+        .collect()
+}
+
+/// The target tags of the nodes PUT /v1/topology answered as `reach`, in its order.
+fn reach_tags(t: &dagon_topology::Topology, v: &serde_json::Value) -> Vec<[u8; 16]> {
+    v["reach"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|id| {
+            let n = t.node(id.as_str().unwrap()).unwrap();
+            dagon_format::header::target_tag(&n.tag)
+        })
+        .collect()
 }
 
 /// A server whose home is a fresh folder, with a key folder in it.

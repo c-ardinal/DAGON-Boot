@@ -7,6 +7,8 @@ use std::collections::{BTreeMap, BTreeSet};
 use dagon_format::header::{self, ImageHeader, HEADER_SIZE};
 use dagon_format::statelog::{self, kind, reason, slot, FaceHeader, Record};
 
+use dagon_topology::defs::{McuDef, Registry, Writer};
+
 use crate::image::Slot;
 
 /// State log face: header (generation 1), PROVISION and CONFIRMED for
@@ -81,10 +83,16 @@ impl FlashImage {
     /// sector per 4 KiB write it receives; a sector split across two writes
     /// loses the part written first, so sectors must never straddle them.
     pub fn to_uf2(&self, family_id: u32) -> Vec<u8> {
-        let sectors: BTreeSet<u32> = self.pages.keys().map(|a| a & !(UF2_SECTOR - 1)).collect();
+        self.to_uf2_with(family_id, DEFAULT_UF2_SECTOR)
+    }
+
+    /// [`to_uf2`](Self::to_uf2) with the writer's erase `sector` (a power
+    /// of two, a multiple of 256).
+    pub fn to_uf2_with(&self, family_id: u32, sector: u32) -> Vec<u8> {
+        let sectors: BTreeSet<u32> = self.pages.keys().map(|a| a & !(sector - 1)).collect();
         let pages: Vec<(u32, [u8; PAGE])> = sectors
             .iter()
-            .flat_map(|&s| (s..s + UF2_SECTOR).step_by(PAGE))
+            .flat_map(|&s| (s..s + sector).step_by(PAGE))
             .map(|a| (a, self.pages.get(&a).copied().unwrap_or([0xFF; PAGE])))
             .collect();
         let n = pages.len() as u32;
@@ -113,51 +121,91 @@ impl FlashImage {
     }
 }
 
-/// RP2040 flash erase sector.
-const UF2_SECTOR: u32 = 0x1000;
+/// Erase sector [`FlashImage::to_uf2`] rounds to; a UF2 writer's
+/// definition (`sector`) gives its own to `to_uf2_with`.
+const DEFAULT_UF2_SECTOR: u32 = 0x1000;
+// The UF2 format's own words (not an MCU's).
 const UF2_MAGIC0: u32 = 0x0A32_4655;
 const UF2_MAGIC1: u32 = 0x9E5D_5157;
 const UF2_MAGIC_END: u32 = 0x0AB1_6F30;
 const UF2_FLAG_FAMILY: u32 = 0x0000_2000;
+
+// ponytail: kept for dagon-cli until it reads the definitions; the
+// topology parity tests hold them equal to the builtin definitions.
 pub const UF2_FAMILY_RP2040: u32 = 0xE48B_FF56;
-
 pub const F401_FLASH_BASE: u32 = 0x0800_0000;
-const F401_LOG_A: u32 = 0x0800_8000;
+pub const RP2040_STAGE0_MAX: u32 = 0x4000;
 
-/// F401 first install, written at [`F401_FLASH_BASE`] after a full chip
-/// erase: boot core (payload at 0x08000000, header in the trailer), APP state
-/// log A, APP-A. Log B and the reserved sector stay erased.
-pub fn f401_flash(boot: (&Slot, &[u8]), app: (&Slot, &[u8])) -> Vec<u8> {
+/// First-install contents of `mcu` from its definition: stage0 at its
+/// region (exactly when the layout has one), each state log with face A
+/// provisioned (PROVISION + CONFIRMED for slot A) and face B erased, and
+/// the boot core and app images in their slots. Callers check sizes.
+pub fn first_install(
+    mcu: &McuDef,
+    stage0: Option<&[u8]>,
+    boot: (&Slot, &[u8]),
+    app: (&Slot, &[u8]),
+) -> Result<FlashImage, String> {
     let mut f = FlashImage::default();
+    match (mcu.layout.stage0, stage0) {
+        (Some(r), Some(bytes)) => f.put(r.at, bytes),
+        (None, None) => {}
+        (Some(_), None) => return Err(format!("{} needs stage0", mcu.id)),
+        (None, Some(_)) => return Err(format!("{} has no stage0 region", mcu.id)),
+    }
+    let logs = [
+        (mcu.layout.bootcore_log, statelog::target::BOOTCORE, boot.1),
+        (mcu.layout.app_log, statelog::target::APP, app.1),
+    ];
+    for (log, target, image) in logs {
+        let Some(log) = log else { continue };
+        for face in log.faces {
+            f.blank(face, log.face_size);
+        }
+        f.put(log.faces[0], &initial_log(target, image));
+    }
     f.put_image(boot.0, boot.1);
-    f.put(F401_LOG_A, &initial_log(statelog::target::APP, app.1));
     f.put_image(app.0, app.1);
-    f.to_bin(F401_FLASH_BASE)
+    Ok(f)
 }
 
-const RP2040_XIP: u32 = 0x1000_0000;
-pub const RP2040_STAGE0_MAX: u32 = 0x4000;
-const RP2040_BL_LOG_A: u32 = RP2040_XIP + 0x4000;
-const RP2040_BL_LOG_B: u32 = RP2040_XIP + 0x5000;
-const RP2040_APP_LOG_A: u32 = RP2040_XIP + 0x6000;
-const RP2040_APP_LOG_B: u32 = RP2040_XIP + 0x7000;
-const RP2040_LOG_FACE: u32 = 0x1000;
+/// The file `mcu`'s writer takes for a first install: a UF2 (`uf2-drive`)
+/// or a binary from the flash base (`probe-rs`, after a chip erase). An
+/// `espflash` writer takes partitions one by one (dagon-cli).
+pub fn first_install_file(
+    mcu: &McuDef,
+    stage0: Option<&[u8]>,
+    boot: (&Slot, &[u8]),
+    app: (&Slot, &[u8]),
+) -> Result<Vec<u8>, String> {
+    let f = first_install(mcu, stage0, boot, app)?;
+    match &mcu.writer {
+        Writer::Uf2Drive { family, sector, .. } => Ok(f.to_uf2_with(*family, *sector)),
+        Writer::ProbeRs { .. } => Ok(f.to_bin(mcu.default_flash_map().base)),
+        Writer::Espflash { .. } => Err(format!(
+            "{} is written partition by partition, not as one file",
+            mcu.id
+        )),
+    }
+}
+
+fn builtin(mcu: &str) -> &'static McuDef {
+    Registry::builtin()
+        .mcu(mcu)
+        .expect("a builtin MCU definition")
+}
+
+/// F401 first install, written at the flash base after a full chip erase:
+/// boot core (payload at the base, header in the trailer), APP state log A,
+/// APP-A. Log B and the reserved sector stay erased.
+pub fn f401_flash(boot: (&Slot, &[u8]), app: (&Slot, &[u8])) -> Vec<u8> {
+    first_install_file(builtin("stm32f401re"), None, boot, app)
+        .expect("the builtin stm32f401re writer takes a binary")
+}
 
 /// Hub rescue UF2: boot2 + stage0 (raw, from the start of flash), boot core
 /// log and app log (face A provisioned, face B erased), BL-A and APP-A.
 pub fn hub_rescue_uf2(stage0: &[u8], boot: (&Slot, &[u8]), app: (&Slot, &[u8])) -> Vec<u8> {
-    let mut f = FlashImage::default();
-    f.put(RP2040_XIP, stage0);
-    f.blank(RP2040_BL_LOG_A, RP2040_LOG_FACE);
-    f.put(
-        RP2040_BL_LOG_A,
-        &initial_log(statelog::target::BOOTCORE, boot.1),
-    );
-    f.blank(RP2040_BL_LOG_B, RP2040_LOG_FACE);
-    f.blank(RP2040_APP_LOG_A, RP2040_LOG_FACE);
-    f.put(RP2040_APP_LOG_A, &initial_log(statelog::target::APP, app.1));
-    f.blank(RP2040_APP_LOG_B, RP2040_LOG_FACE);
-    f.put_image(boot.0, boot.1);
-    f.put_image(app.0, app.1);
-    f.to_uf2(UF2_FAMILY_RP2040)
+    first_install_file(builtin("rp2040"), Some(stage0), boot, app)
+        .expect("the builtin rp2040 writer takes a UF2")
 }

@@ -137,6 +137,22 @@ fn every_slot_is_where_it_was() {
 }
 
 #[test]
+fn first_install_follows_the_writer_and_layout_of_the_definition() {
+    let reg = dagon_topology::defs::Registry::builtin();
+    let (bs, boot) = signed("esp32s3", image_kind::APP, slot_binding::A);
+    let one = |mcu: &str, stage0: Option<&[u8]>| {
+        provision::first_install_file(reg.mcu(mcu).unwrap(), stage0, (&bs, &boot), (&bs, &boot))
+    };
+    assert!(one("esp32s3", None)
+        .unwrap_err()
+        .contains("partition by partition"));
+    assert!(one("rp2040", None).unwrap_err().contains("needs stage0"));
+    assert!(one("stm32f401re", Some(&[0; 4]))
+        .unwrap_err()
+        .contains("no stage0 region"));
+}
+
+#[test]
 fn signed_images_and_first_install_files_are_byte_identical() {
     let images: Vec<String> = SLOTS
         .iter()

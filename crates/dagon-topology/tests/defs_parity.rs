@@ -15,7 +15,6 @@ const CLI_FLASH: &str = include_str!("../../dagon-cli/src/flash.rs");
 const CLI_COMMANDS: &str = include_str!("../../dagon-cli/src/commands.rs");
 const CLI_ESP: &str = include_str!("../../dagon-cli/src/esp.rs");
 const CLI_DOCTOR: &str = include_str!("../../dagon-cli/src/doctor.rs");
-const SIGN_PROVISION: &str = include_str!("../../dagon-sign/src/provision.rs");
 const WEB_COPY: &str = include_str!("../../../web/src/app/copy.ts");
 
 fn has(src: &str, needle: &str) {
@@ -68,37 +67,15 @@ fn provision_layouts_match() {
     else {
         panic!("rp2040 writes a UF2 drive")
     };
+    // dagon-sign builds the first-install files from these definitions
+    // (its first_write_golden test pins the bytes); what dagon-cli still
+    // holds itself is checked here.
     assert_eq!(*family, provision::UF2_FAMILY_RP2040);
-    has(
-        SIGN_PROVISION,
-        &format!("const UF2_SECTOR: u32 = {};", rust_hex(*sector)),
-    );
+    assert_eq!(*sector, 0x1000);
     let stage0 = rp.layout.stage0.unwrap();
     assert_eq!(
         (stage0.at, stage0.size),
         (base, provision::RP2040_STAGE0_MAX)
-    );
-    has(
-        SIGN_PROVISION,
-        &format!("const RP2040_XIP: u32 = {};", rust_hex(base)),
-    );
-    let bl = rp.layout.bootcore_log.unwrap();
-    let app = rp.layout.app_log.unwrap();
-    for (name, at) in [
-        ("RP2040_BL_LOG_A", bl.faces[0]),
-        ("RP2040_BL_LOG_B", bl.faces[1]),
-        ("RP2040_APP_LOG_A", app.faces[0]),
-        ("RP2040_APP_LOG_B", app.faces[1]),
-    ] {
-        has(
-            SIGN_PROVISION,
-            &format!("const {name}: u32 = RP2040_XIP + {};", rust_hex(at - base)),
-        );
-    }
-    assert_eq!(bl.face_size, app.face_size);
-    has(
-        SIGN_PROVISION,
-        &format!("const RP2040_LOG_FACE: u32 = {};", rust_hex(bl.face_size)),
     );
     has(
         CLI_FLASH,
@@ -119,11 +96,6 @@ fn provision_layouts_match() {
 
     let f4 = reg().mcu("stm32f401re").unwrap();
     assert_eq!(f4.default_flash_map().base, provision::F401_FLASH_BASE);
-    let log_a = f4.layout.app_log.unwrap().faces[0];
-    has(
-        SIGN_PROVISION,
-        &format!("const F401_LOG_A: u32 = {};", rust_hex(log_a)),
-    );
     let Writer::ProbeRs { chip } = &f4.writer else {
         panic!("stm32f401re writes with probe-rs")
     };

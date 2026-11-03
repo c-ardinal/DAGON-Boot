@@ -5,6 +5,7 @@
 pub mod boards;
 mod check;
 mod compile;
+pub mod defs;
 mod report;
 pub mod schema;
 

@@ -17,17 +17,17 @@ const MAX_UPDATABLE_NODES: usize = 8;
 const MAX_ID_LEN: usize = 15;
 const MAX_TAG_LEN: usize = 16;
 const BAUD_RATES: &[u32] = &[9_600, 57_600, 115_200, 460_800];
-const I2C_SPEEDS: &[u32] = &[100_000, 400_000];
+pub(crate) const I2C_SPEEDS: &[u32] = &[100_000, 400_000];
 const I2C_ADDR_MIN: u8 = 0x08;
 const I2C_ADDR_MAX: u8 = 0x77;
 /// Address the STM32 ROM I2C bootloader answers on.
-const STM32_ROM_ADDR: u8 = 0x39;
+pub(crate) const STM32_ROM_ADDR: u8 = 0x39;
 // ponytail: the coordinator is always an RP2040 today; move these into the
 // port registry when a second coordinator MCU appears.
-const RP2040_PIO_STATE_MACHINES: usize = 8;
-const PIO_UART_STATE_MACHINES: usize = 2;
-const RP2040_UART0_TX: &[u8] = &[0, 12, 16, 28];
-const RP2040_UART0_RX: &[u8] = &[1, 13, 17, 29];
+pub(crate) const RP2040_PIO_STATE_MACHINES: usize = 8;
+pub(crate) const PIO_UART_STATE_MACHINES: usize = 2;
+pub(crate) const RP2040_UART0_TX: &[u8] = &[0, 12, 16, 28];
+pub(crate) const RP2040_UART0_RX: &[u8] = &[1, 13, 17, 29];
 
 /// Parse YAML and run every rule. A document that does not parse yields a
 /// single V-01 error.

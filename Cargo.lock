@@ -225,6 +225,7 @@ version = "0.0.0"
 dependencies = [
  "dagon-format",
  "serde",
+ "toml",
  "yaml_serde",
 ]
 

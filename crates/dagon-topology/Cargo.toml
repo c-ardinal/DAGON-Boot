@@ -8,3 +8,6 @@ version.workspace = true
 dagon-format = { path = "../dagon-format" }
 serde = { version = "1", features = ["derive"] }
 yaml_serde = "0.10"
+# The definition format (dagon-mcu.toml, dagon-board.toml); already in the
+# lock file through dagon-cli. Parse only: no writer needed.
+toml = { version = "0.8", default-features = false, features = ["parse"] }

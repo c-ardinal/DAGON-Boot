@@ -504,13 +504,16 @@ pub(crate) fn devices(
 /// Writes the first-install files to `device` (after the confirmation).
 pub(crate) fn write(
     w: &FirstWrite,
-    device: &str,
+    c: &flashdev::Candidate,
     log: &mut dyn FnMut(&str),
     cancel: &AtomicBool,
 ) -> Result<(), String> {
+    let device = c.id.as_str();
     match w {
         FirstWrite::ProbeRs { commands, .. } => run_probe_rs(&with_probe(commands, device), log),
-        FirstWrite::Uf2 { file, .. } => copy_uf2(file, Path::new(device), log),
+        FirstWrite::Uf2 { file, .. } => {
+            copy_uf2(file, c.path.as_deref().unwrap_or(Path::new(device)), log)
+        }
         FirstWrite::Espflash { commands, .. } => {
             run_espflash(&with_port(commands, device), log, cancel)
         }
@@ -670,7 +673,7 @@ pub fn command(args: &[&str]) -> Result<(), String> {
     if !yes && !confirm("", &mut std::io::stdin().lock()) {
         return Err("nothing written to the board".into());
     }
-    write(&w, &device.id, &mut log, &cancel)
+    write(&w, &device, &mut log, &cancel)
 }
 
 /// The device option given, which must be the one `node`'s writer takes.

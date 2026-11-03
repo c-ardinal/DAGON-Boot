@@ -26,6 +26,10 @@ pub(crate) struct Candidate {
     #[serde(rename = "device")]
     pub id: String,
     pub label: String,
+    /// The volume itself for a drive (`id` is its lossy display form, so
+    /// a mount path that is not UTF-8 is still written to exactly).
+    #[serde(skip)]
+    pub path: Option<PathBuf>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -192,6 +196,7 @@ pub(crate) fn parse_probes(out: &str) -> Vec<Candidate> {
                 label: format!("{} {}", name.trim(), kind.trim())
                     .trim()
                     .to_string(),
+                path: None,
             })
         })
         .collect()
@@ -208,6 +213,7 @@ fn ports(mcu: &str, hint: Option<UsbHint>) -> Result<Vec<Candidate>, String> {
             other => Candidate {
                 id: p.port_name,
                 label: format!("{other:?}"),
+                path: None,
             },
         })
         .collect())
@@ -229,7 +235,11 @@ pub(crate) fn usb_port(
     if hint.is_some_and(|h| (h.vid, h.pid) == (vid, pid)) {
         label.push_str(&format!(" ({mcu})"));
     }
-    Candidate { id: name, label }
+    Candidate {
+        id: name,
+        label,
+        path: None,
+    }
 }
 
 /// What a UF2 writer's definition says about its boot drive.
@@ -279,12 +289,22 @@ fn wait_drives(
     }
 }
 
-/// `file` on a volume.
+/// `file` on a volume, as text (a byte that is not UTF-8 does not hide
+/// the drive).
 fn read_info(file: &Path) -> Option<String> {
-    std::fs::read_to_string(file).ok()
+    std::fs::read(file)
+        .ok()
+        .map(|b| String::from_utf8_lossy(&b).into_owned())
 }
 
 type Reader = fn(&Path) -> Option<String>;
+
+/// Volumes with a read in flight, across scans (the server runs many).
+fn pending() -> std::sync::MutexGuard<'static, std::collections::BTreeSet<PathBuf>> {
+    static PENDING: std::sync::Mutex<std::collections::BTreeSet<PathBuf>> =
+        std::sync::Mutex::new(std::collections::BTreeSet::new());
+    PENDING.lock().unwrap_or_else(|e| e.into_inner())
+}
 
 /// The UF2 boot drives among `roots`: `info_file` there starts with the
 /// `info_header` line. A `Board-ID: <board_id>` line (exactly) labels the
@@ -298,9 +318,16 @@ pub(crate) fn uf2_drives(
 ) -> (Vec<Candidate>, Vec<PathBuf>) {
     let (tx, rx) = std::sync::mpsc::channel();
     for (i, r) in roots.iter().enumerate() {
-        let (tx, file) = (tx.clone(), r.join(want.info_file));
+        // A volume still being read from an earlier scan gets no second
+        // thread: it stays late until that read returns.
+        if !pending().insert(r.clone()) {
+            continue;
+        }
+        let (tx, root, file) = (tx.clone(), r.clone(), r.join(want.info_file));
         std::thread::spawn(move || {
-            let _ = tx.send((i, read(&file)));
+            let info = read(&file);
+            pending().remove(&root);
+            let _ = tx.send((i, info));
         });
     }
     drop(tx);
@@ -337,6 +364,7 @@ fn uf2_candidate(root: &Path, info: &str, want: &Uf2Want<'_>) -> Option<Candidat
     Some(Candidate {
         id: root.display().to_string(),
         label,
+        path: Some(root.to_path_buf()),
     })
 }
 
@@ -350,7 +378,7 @@ fn mounted_volumes() -> Vec<PathBuf> {
     if cfg!(windows) {
         return drive_letters();
     }
-    let mut out = std::fs::read_to_string("/proc/self/mountinfo")
+    let mut out = std::fs::read("/proc/self/mountinfo")
         .map(|t| mount_points(&t))
         .unwrap_or_default();
     if let Ok(dir) = std::fs::read_dir("/Volumes") {
@@ -368,18 +396,39 @@ pub(crate) fn drive_letters() -> Vec<PathBuf> {
         .collect()
 }
 
-/// The mount points (field 5) of /proc/self/mountinfo, with its octal
-/// escapes (`\040` for a space) decoded.
-pub(crate) fn mount_points(mountinfo: &str) -> Vec<PathBuf> {
-    mountinfo
-        .lines()
-        .filter_map(|l| l.split(' ').nth(4))
-        .map(|p| PathBuf::from(unescape(p)))
+/// The mount points (field 5) of /proc/self/mountinfo, read as bytes:
+/// paths need not be UTF-8, and a line too short to have one is skipped
+/// alone.
+pub(crate) fn mount_points(mountinfo: &[u8]) -> Vec<PathBuf> {
+    mount_point_bytes(mountinfo)
+        .into_iter()
+        .filter_map(path_from_bytes)
         .collect()
 }
 
-fn unescape(s: &str) -> String {
-    let b = s.as_bytes();
+/// Field 5 of each mountinfo line with its octal escapes (`\040` for a
+/// space) decoded.
+pub(crate) fn mount_point_bytes(mountinfo: &[u8]) -> Vec<Vec<u8>> {
+    mountinfo
+        .split(|&b| b == b'\n')
+        .filter_map(|l| l.split(|&b| b == b' ').nth(4))
+        .filter(|p| !p.is_empty())
+        .map(unescape)
+        .collect()
+}
+
+#[cfg(unix)]
+fn path_from_bytes(b: Vec<u8>) -> Option<PathBuf> {
+    use std::os::unix::ffi::OsStringExt;
+    Some(PathBuf::from(std::ffi::OsString::from_vec(b)))
+}
+
+#[cfg(not(unix))]
+fn path_from_bytes(b: Vec<u8>) -> Option<PathBuf> {
+    String::from_utf8(b).ok().map(PathBuf::from)
+}
+
+fn unescape(b: &[u8]) -> Vec<u8> {
     let mut out = Vec::with_capacity(b.len());
     let mut i = 0;
     while i < b.len() {
@@ -397,7 +446,7 @@ fn unescape(s: &str) -> String {
             }
         }
     }
-    String::from_utf8_lossy(&out).into_owned()
+    out
 }
 
 #[cfg(test)]
@@ -408,6 +457,7 @@ mod tests {
         Candidate {
             id: id.into(),
             label: format!("label of {id}"),
+            path: None,
         }
     }
 
@@ -554,6 +604,22 @@ mod tests {
     }
 
     #[test]
+    fn an_info_file_with_bytes_that_are_not_utf8_still_shows_the_drive() {
+        let base = std::env::temp_dir().join(format!("dagon-uf2b-{}", std::process::id()));
+        std::fs::create_dir_all(&base).unwrap();
+        std::fs::write(
+            base.join("INFO_UF2.TXT"),
+            b"UF2 Bootloader v3.0\nModel: Caf\xe9 board\nBoard-ID: RPI-RP2\n",
+        )
+        .unwrap();
+        let f = drives(std::slice::from_ref(&base));
+        assert_eq!(f.len(), 1);
+        assert!(f[0].label.contains("RP2040"), "{f:?}");
+        assert_eq!(f[0].path.as_deref(), Some(base.as_path()));
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    #[test]
     fn only_the_exact_board_id_line_labels_a_drive() {
         let base = std::env::temp_dir().join(format!("dagon-uf2l-{}", std::process::id()));
         std::fs::create_dir_all(&base).unwrap();
@@ -588,19 +654,47 @@ mod tests {
             r"36 25 8:17 / /mnt rw,nosuid - vfat /dev/sdb1 rw",
             r"37 25 8:33 / /media/u/RPI-RP2\0401 rw - vfat /dev/sdc1 rw",
             r"38 25 8:49 / /run/media/u/back\134slash rw - vfat /dev/sdd1 rw",
+            "broken line",
         ]
         .join("\n");
-        let info = info.as_str();
         assert_eq!(
-            mount_points(info),
+            mount_points(info.as_bytes()),
             [
                 "/proc",
                 "/mnt",
                 "/media/u/RPI-RP2 1",
-                "/run/media/u/back\\slash"
+                r"/run/media/u/back\slash"
             ]
             .map(PathBuf::from)
         );
+    }
+
+    /// A mount path that is not UTF-8 (raw or escaped) is kept byte for
+    /// byte and hides neither itself nor the other lines.
+    #[test]
+    fn mount_points_are_bytes_not_text() {
+        let mut info = b"36 25 8:17 / /media/u/caf\xe9 rw - vfat /dev/sdb1 rw\n".to_vec();
+        info.extend_from_slice(b"37 25 8:33 / /media/u/RPI\\377 rw - vfat /dev/sdc1 rw\n");
+        info.extend_from_slice(b"38 25 8:49 / /mnt rw - vfat /dev/sdd1 rw\n");
+        assert_eq!(
+            mount_point_bytes(&info),
+            [
+                b"/media/u/caf\xe9".to_vec(),
+                b"/media/u/RPI\xff".to_vec(),
+                b"/mnt".to_vec()
+            ]
+        );
+        assert!(mount_points(&info).contains(&PathBuf::from("/mnt")));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_non_utf8_mount_point_is_a_volume() {
+        use std::os::unix::ffi::OsStrExt;
+        let info = b"36 25 8:17 / /media/u/caf\xe9 rw - vfat /dev/sdb1 rw\n";
+        let p = mount_points(info);
+        assert_eq!(p.len(), 1);
+        assert_eq!(p[0].as_os_str().as_bytes(), b"/media/u/caf\xe9");
     }
 
     #[test]
@@ -618,5 +712,33 @@ mod tests {
         assert_eq!(late, [PathBuf::from("/hung")]);
         assert_eq!(found.len(), 1);
         assert_eq!(found[0].id, PathBuf::from("/rp").display().to_string());
+    }
+
+    #[test]
+    fn a_volume_still_being_read_gets_no_second_thread() {
+        static READS: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+        fn read(_: &Path) -> Option<String> {
+            READS.fetch_add(1, Ordering::SeqCst);
+            std::thread::sleep(Duration::from_millis(800));
+            None
+        }
+        let roots = [PathBuf::from("/still-pending")];
+        for _ in 0..3 {
+            let (found, late) = uf2_drives(&roots, &RP, Duration::from_millis(50), read);
+            assert!(found.is_empty());
+            assert_eq!(late, roots);
+        }
+        assert_eq!(
+            READS.load(Ordering::SeqCst),
+            1,
+            "one read in flight, not three"
+        );
+        std::thread::sleep(Duration::from_millis(1200));
+        assert!(
+            !pending().contains(&roots[0]),
+            "cleared once the read returns"
+        );
+        let _ = uf2_drives(&roots, &RP, Duration::from_millis(50), read);
+        assert_eq!(READS.load(Ordering::SeqCst), 2);
     }
 }

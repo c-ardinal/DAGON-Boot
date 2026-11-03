@@ -37,7 +37,7 @@ type Prepare<'a> = dyn FnMut(&Config, &Topology, &str, &KeyPair, &Path, &mut Job
     + 'a;
 type Find<'a> =
     dyn FnMut(&Config, &Topology, &str, &mut Job) -> Result<(Writer, Vec<Candidate>), String> + 'a;
-type Write<'a> = dyn FnMut(&FirstWrite, &str, &mut Job) -> Result<(), String> + 'a;
+type Write<'a> = dyn FnMut(&FirstWrite, &Candidate, &mut Job) -> Result<(), String> + 'a;
 
 /// POST /v1/flash {node, device?}: `device` names one of the candidates
 /// the writer reports; with several and none named, the job ends with the
@@ -105,7 +105,7 @@ fn flash_with(
             return Err("nothing written to the board".into());
         }
         job.progress("writing", None);
-        write(&w, &c.id, job)?;
+        write(&w, &c, job)?;
         Ok(json!({ "node": node, "written": true, "device": c.id }))
     };
     match w {
@@ -191,6 +191,7 @@ mod tests {
             .map(|id| Candidate {
                 id: id.to_string(),
                 label: "probe".into(),
+                path: None,
             })
             .collect();
         let request = json!({ "node": "seg", "device": device });
@@ -209,7 +210,7 @@ mod tests {
                     },
                     &mut |_, _, _, _| Ok((Writer::ProbeRs { chip: "X".into() }, found.clone())),
                     &mut |_, device, _| {
-                        w2.lock().unwrap().push(device.to_string());
+                        w2.lock().unwrap().push(device.id.clone());
                         Ok(())
                     },
                 )

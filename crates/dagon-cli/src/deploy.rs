@@ -207,6 +207,7 @@ pub(crate) fn prepare(
         proto: 1,
         bits: None,
     };
+    let reg = crate::defs::registry(cfg)?;
     let mut images = Vec::new();
     for (node, slots) in elfs {
         for (slot, elf) in slots {
@@ -215,7 +216,16 @@ pub(crate) fn prepare(
             } else {
                 slot_binding::A
             };
-            let img = image_for_node(t, node, image_kind::APP, binding, elf, Some(&opts), key)?;
+            let img = image_for_node(
+                &reg,
+                t,
+                node,
+                image_kind::APP,
+                binding,
+                elf,
+                Some(&opts),
+                key,
+            )?;
             write_file(&dir.join(format!("{node}-{slot}.img")), &img)?;
             images.push(img);
         }

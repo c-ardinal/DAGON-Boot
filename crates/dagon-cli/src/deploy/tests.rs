@@ -66,6 +66,7 @@ fn desk(t: &Topology, key: &KeyPair) -> Sim {
     let img = |node: &str| {
         let payload = &built(&[node.to_string()])[0].1[0].1;
         image_for_node(
+            dagon_topology::defs::Registry::builtin(),
             t,
             node,
             image_kind::APP,

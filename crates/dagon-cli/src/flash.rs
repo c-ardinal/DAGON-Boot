@@ -411,7 +411,7 @@ fn esp_files(
         proto: i.proto_version.unwrap_or(1),
         bits: None,
     };
-    let img = crate::commands::image_for_node_with(
+    let img = crate::commands::image_for_node(
         reg,
         t,
         node,

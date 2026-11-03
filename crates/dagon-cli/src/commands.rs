@@ -43,21 +43,9 @@ fn slot_arg(s: &str) -> Result<u8, String> {
 
 /// Signs `input` (ELF or raw payload) for `node`, or, when `input` already is
 /// a signed image, verifies it and checks it belongs to `node`/`kind`/`slot`.
-pub(crate) fn image_for_node(
-    t: &Topology,
-    node: &str,
-    kind: u8,
-    slot: u8,
-    input: &[u8],
-    opts: Option<&SignOpts>,
-    key: &KeyPair,
-) -> Result<Vec<u8>, String> {
-    image_for_node_with(Registry::builtin(), t, node, kind, slot, input, opts, key)
-}
-
-/// [`image_for_node`] with the MCU definitions of `reg`.
+/// Slot geometry comes from the MCU definitions of `reg`.
 #[allow(clippy::too_many_arguments)]
-pub(crate) fn image_for_node_with(
+pub(crate) fn image_for_node(
     reg: &Registry,
     t: &Topology,
     node: &str,
@@ -172,6 +160,7 @@ pub fn image_sign(args: &[&str]) -> Res {
     let key = load_key(o.get("key"))?;
     let input_bytes = read_file(Path::new(input))?;
     let img = image_for_node(
+        &crate::defs::registry(&cfg)?,
         &t,
         o.need("node")?,
         kind,
@@ -421,7 +410,7 @@ pub(crate) fn provision_files(
             bits: None,
         })
     };
-    let boot = image_for_node_with(
+    let boot = image_for_node(
         reg,
         t,
         node,
@@ -431,7 +420,7 @@ pub(crate) fn provision_files(
         sign_opts(boot_v, Version::default()).as_ref(),
         key,
     )?;
-    let app = image_for_node_with(
+    let app = image_for_node(
         reg,
         t,
         node,

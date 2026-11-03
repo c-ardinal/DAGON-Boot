@@ -709,6 +709,7 @@ fn sign_nodes(
     // All images are signed in memory first; files change only after
     // every one succeeded, so a bad ELF, a signing error or a cancel
     // leaves the old images and records as they were.
+    let reg = crate::defs::registry(cfg)?;
     let mut out = Vec::new();
     let mut signed = Vec::new();
     for (node, ver, parsed, elfs) in ready {
@@ -727,7 +728,16 @@ fn sign_nodes(
             } else {
                 slot_binding::B
             };
-            let img = image_for_node(t, node, image_kind::APP, binding, &elf, Some(&opts), key)?;
+            let img = image_for_node(
+                &reg,
+                t,
+                node,
+                image_kind::APP,
+                binding,
+                &elf,
+                Some(&opts),
+                key,
+            )?;
             log(&format!(
                 "{node}: slot {slot} signed, {} bytes, {ver}",
                 img.len()
@@ -1452,7 +1462,17 @@ mod tests {
                 };
                 imgs.push((
                     slot,
-                    image_for_node(&t, node, image_kind::APP, b, &elf, Some(&opts), &key).unwrap(),
+                    image_for_node(
+                        Registry::builtin(),
+                        &t,
+                        node,
+                        image_kind::APP,
+                        b,
+                        &elf,
+                        Some(&opts),
+                        &key,
+                    )
+                    .unwrap(),
                 ));
             }
             images.push((node, imgs));

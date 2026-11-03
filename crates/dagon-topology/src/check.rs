@@ -27,8 +27,13 @@ const I2C_ADDR_MAX: u8 = 0x77;
 /// Parse YAML and run every rule. A document that does not parse yields a
 /// single V-01 error.
 pub fn check_str(yaml: &str) -> Report {
+    check_str_with(Registry::builtin(), yaml)
+}
+
+/// [`check_str`] against the MCUs and boards of `reg`.
+pub fn check_str_with(reg: &Registry, yaml: &str) -> Report {
     match yaml_serde::from_str::<Topology>(yaml) {
-        Ok(t) => check(&t),
+        Ok(t) => check_with(reg, &t),
         Err(e) => Report {
             issues: vec![Issue {
                 rule: "V-01",

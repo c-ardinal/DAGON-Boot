@@ -169,6 +169,7 @@ version = "0.0.0"
 dependencies = [
  "dagon-conform",
  "dagon-format",
+ "dagon-host",
  "dagon-port",
  "dagon-proto",
  "dagon-romlink",

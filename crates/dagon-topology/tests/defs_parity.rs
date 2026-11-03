@@ -3,7 +3,6 @@
 //! private CLI/web constants are checked against their source text, so a
 //! change on either side fails here until both agree.
 
-use dagon_format::header::{image_kind, slot_binding};
 use dagon_sign::{image, provision};
 use dagon_topology::defs::{Expect, Registry, Writer};
 
@@ -107,26 +106,31 @@ fn provision_layouts_match() {
 
 #[test]
 fn host_rom_path_matches() {
-    use dagon_host::rom;
-    let f4 = reg().mcu("stm32f401re").unwrap();
-    let boot = reg()
-        .slot("stm32f401re", image_kind::BOOTCORE, slot_binding::A)
-        .unwrap();
-    let app = reg()
-        .slot("stm32f401re", image_kind::APP, slot_binding::A)
-        .unwrap();
-    assert_eq!(boot.start, rom::F401_BOOTCORE);
-    assert_eq!(boot.header_addr, rom::F401_BOOTCORE_HEADER);
-    assert_eq!(f4.layout.app_log.unwrap().faces[0], rom::F401_LOG_A);
-    assert_eq!(app.start, rom::F401_APP_A);
-    assert_eq!(app.size as usize, rom::F401_APP_A_LEN);
-    let r = f4.rom_i2c.as_ref().unwrap();
-    assert_eq!(r.erase_sectors, rom::F401_ERASE);
-    assert_eq!(r.addr, dagon_romlink::ROM_ADDR);
-    has(
-        include_str!("../../dagon-host/src/ops.rs"),
-        &format!("const ROM_ADDR: u8 = 0x{:X};", r.addr),
+    use dagon_host::rom::{rom_maps, RomSlot};
+    // The values dagon-host's rom.rs held before it read the definitions.
+    let maps = rom_maps(reg());
+    assert_eq!(maps.len(), 1, "only the F401 has a ROM I2C loader");
+    let m = &maps[0];
+    assert_eq!(m.wire_id, dagon_format::header::mcu_id::STM32F401XE);
+    assert_eq!(
+        m.bootcore,
+        RomSlot {
+            header: 0x0800_7E00,
+            load: 0x0800_0000,
+            max_payload: 0x7E00
+        }
     );
+    assert_eq!(
+        m.app_a,
+        RomSlot {
+            header: 0x0802_0000,
+            load: 0x0802_0200,
+            max_payload: 0x2_0000 - 512
+        }
+    );
+    assert_eq!(m.log_a, 0x0800_8000);
+    assert_eq!(m.erase, [0, 1, 2, 3, 5]);
+    assert_eq!(m.addr, dagon_romlink::ROM_ADDR);
 }
 
 #[test]

@@ -5,7 +5,7 @@ use alloc::vec;
 use alloc::vec::Vec;
 use dagon_conform::timeout::{erase_ms, REBOOT_WAIT_MS, REQUEST_MS, VERIFY_MS};
 use dagon_format::bundle::BundleView;
-use dagon_format::header::{image_kind, mcu_id, slot_binding, HEADER_SIZE};
+use dagon_format::header::{image_kind, slot_binding, HEADER_SIZE};
 use dagon_format::topology::{self, TopologyView};
 use dagon_format::{sha256, ImageHeader, Version};
 use dagon_proto::payload::{
@@ -14,6 +14,7 @@ use dagon_proto::payload::{
 };
 use dagon_proto::{Cmd, Status};
 
+use crate::rom::RomMap;
 use crate::{Clock, Error, Host, Result, Target, Transport};
 
 /// REBOOT until the hub's new HELLO, reopening the port meanwhile. Stays
@@ -42,8 +43,6 @@ pub const REOPEN_MS: u32 = 1_000;
 /// RELAY timeout per address while discovering.
 pub const DISCOVER_MS: u32 = 20;
 const I2C_SCAN: core::ops::RangeInclusive<u8> = 0x08..=0x77;
-/// STM32 ROM loader address; never probed with DAGON frames.
-const ROM_ADDR: u8 = 0x39;
 /// XFER_HDR / XFER_DATA bytes before the data: the offset.
 const CHUNK_HEAD: usize = 4;
 const PERCENT_STEP: u8 = 10;
@@ -108,12 +107,13 @@ impl<T: Transport, C: Clock> Host<T, C> {
         Ok(NodeState { hello, status })
     }
 
-    /// Hub HELLO, then a short RELAY HELLO to every I2C address (ROM loader
-    /// excluded) and one on the UART.
-    pub async fn discover(&mut self) -> Result<Discovery, T::Error> {
+    /// Hub HELLO, then a short RELAY HELLO to every I2C address but the ROM
+    /// loaders' (`rom_addrs`, from the MCU definitions: never probed with
+    /// DAGON frames) and one on the UART.
+    pub async fn discover(&mut self, rom_addrs: &[u8]) -> Result<Discovery, T::Error> {
         let hub = self.hello(Target::Hub).await?;
         let mut nodes = Vec::new();
-        let i2c = I2C_SCAN.filter(|&a| a != ROM_ADDR).map(Target::I2c);
+        let i2c = I2C_SCAN.filter(|a| !rom_addrs.contains(a)).map(Target::I2c);
         for (to, wait) in i2c
             .map(|t| (t, DISCOVER_MS))
             .chain([(Target::Uart, REQUEST_MS)])
@@ -405,22 +405,22 @@ impl<T: Transport, C: Clock> Host<T, C> {
             Err(Error::Transport(e)) => return Err(Error::Transport(e)),
             Err(_) => {}
         }
-        if !rom_reachable(&topo, node) {
+        let Some(map) = rom_map(&topo, node, a.roms) else {
             return Err(Error::Unreachable { node });
-        }
+        };
         let boot = a.bootcore.ok_or(Error::NoImage { node })?;
-        crate::rom::check_bootcore(boot, a.pubkey)?;
+        crate::rom::check_bootcore(boot, a.pubkey, map)?;
         let app = image_for(&b, node, slot_binding::A).ok_or(Error::NoImage { node })?;
-        crate::rom::check_app_a(app)?;
+        crate::rom::check_app_a(app, map)?;
         let app_hdr: &[u8; HEADER_SIZE] = app
             .get(..HEADER_SIZE)
             .and_then(|h| h.try_into().ok())
             .ok_or(Error::Format(dagon_format::FormatError::Truncated))?;
         let v = ImageHeader::parse(app_hdr)?.version;
         let log = crate::rom::initial_log(app_hdr)?;
-        let regions = crate::rom::f401_regions(boot, app, &log);
+        let regions = crate::rom::regions(boot, app, &log, map);
         let plan = dagon_romlink::Plan {
-            erase: &crate::rom::F401_ERASE,
+            erase: &map.erase,
             regions: &regions,
         };
         self.emit(on_event, node, phase::ROM, 0, v).await;
@@ -608,15 +608,19 @@ pub fn check_release<'a, E>(
 }
 
 /// An STM32F401 on I2C whose link enters the ROM loader through NRST/BOOT0.
-fn rom_reachable(topo: &TopologyView<'_>, node: u8) -> bool {
-    let n = (node as usize) < topo.node_count();
-    let f401 = n && topo.node(node as usize).mcu_id == mcu_id::STM32F401XE;
+/// The ROM map for `node` when it is reached through its ROM I2C loader:
+/// an I2C link with ROM entry stm32-i2c-rom and a map for its MCU.
+fn rom_map<'m>(topo: &TopologyView<'_>, node: u8, roms: &'m [RomMap]) -> Option<&'m RomMap> {
+    if (node as usize) >= topo.node_count() {
+        return None;
+    }
     let rom = (0..topo.link_count()).map(|i| topo.link(i)).any(|l| {
         l.to == node
             && l.iface == topology::iface::I2C_BUS
             && l.rom_entry == topology::rom_entry::STM32_I2C_ROM
     });
-    f401 && rom
+    let mcu = topo.node(node as usize).mcu_id;
+    roms.iter().find(|m| rom && m.wire_id == mcu)
 }
 
 /// What [`Host::recover`] needs: the release, the current topology binary,
@@ -627,6 +631,8 @@ pub struct RecoverAssets<'a> {
     pub topology: &'a [u8],
     pub pubkey: &'a [u8; 32],
     pub bootcore: Option<&'a [u8]>,
+    /// ROM maps of the MCUs that have a ROM I2C loader (from the Registry).
+    pub roms: &'a [RomMap],
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

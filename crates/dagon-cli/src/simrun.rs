@@ -336,6 +336,7 @@ fn s4() -> R {
         topology: &w.topology,
         pubkey: &w.key.pk,
         bootcore: Some(&boot),
+        roms: &dagon_host::rom::rom_maps(dagon_topology::defs::Registry::builtin()),
     };
     let (path, v) =
         block_on(w.host().recover(SEG, &assets, &mut |_| {})).map_err(|e| format!("{e:?}"))?;

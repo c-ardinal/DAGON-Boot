@@ -5,6 +5,7 @@ mod commands;
 mod config;
 mod conform;
 mod dagonsrc;
+mod defs;
 mod demo;
 mod deploy;
 mod device;

@@ -194,11 +194,13 @@ pub fn recover(args: &[&str]) -> Res {
     // Only the ROM path needs it; a missing file is reported if it gets there.
     let boot = std::fs::read(&boot_path).ok();
     let key = pubkey(&o, &cfg)?;
+    let roms = dagon_host::rom::rom_maps(&crate::defs::registry(&cfg)?);
     let assets = dagon_host::RecoverAssets {
         release: &release,
         topology: &bin,
         pubkey: &key,
         bootcore: boot.as_deref(),
+        roms: &roms,
     };
     let mut host = serial::host(o.get("port"))?;
     let mut print = |e: Event| {

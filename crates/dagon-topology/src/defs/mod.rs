@@ -36,6 +36,11 @@ impl PortKind {
         Self::ALL.into_iter().find(|k| k.as_str() == name)
     }
 
+    /// The kind of image header `port_kind` `wire`.
+    pub fn from_wire(wire: u8) -> Option<PortKind> {
+        Self::ALL.into_iter().find(|k| k.wire() == wire)
+    }
+
     /// Image header `port_kind`.
     pub fn wire(self) -> u8 {
         match self {

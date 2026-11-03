@@ -11,8 +11,8 @@ mod report;
 pub mod schema;
 
 pub use check::{
-    check, check_str, check_with, effective_tiers, node_board, rom_forced_unavailable,
-    SCHEMA_VERSION,
+    check, check_str, check_str_with, check_with, effective_tiers, node_board,
+    rom_forced_unavailable, SCHEMA_VERSION,
 };
 pub use compile::{
     compile, compile_str, compile_with, mcu_id_of, parse_str, parse_version, port_kind_of,

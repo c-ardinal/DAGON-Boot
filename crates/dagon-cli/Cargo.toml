@@ -29,7 +29,7 @@ dagon-topology = { path = "../dagon-topology" }
 dagon-sign = { path = "../dagon-sign" }
 dagon-proto = { path = "../dagon-proto" }
 dagon-sim = { path = "../dagon-sim" }
-dagon-host = { path = "../dagon-host" }
+dagon-host = { path = "../dagon-host", features = ["defs"] }
 dagon-port = { path = "../dagon-port" }
 dagon-conform = { path = "../dagon-conform" }
 # MPL-2.0. No libudev: Linux builds need no system library.

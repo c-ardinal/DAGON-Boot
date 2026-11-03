@@ -22,6 +22,6 @@ serde_json = "1"
 # The MCU packages' layout.rs files, included by tests/defs_layout.rs.
 dagon-core = { path = "../dagon-core" }
 dagon-port = { path = "../dagon-port" }
-dagon-host = { path = "../dagon-host" }
+dagon-host = { path = "../dagon-host", features = ["defs"] }
 dagon-romlink = { path = "../dagon-romlink" }
 dagon-sign = { path = "../dagon-sign" }

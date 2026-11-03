@@ -319,7 +319,11 @@ impl<T: Transport, C: Clock> Host<T, C> {
         loop {
             // ponytail: reopens before every hub attempt; add a grace period
             // for slow enumeration if real ports need it.
-            let reopened = to != Target::Hub || self.reopen().await.is_ok();
+            // A link that goes away with the hub is opened again; one that
+            // stays (a UART adapter) is only polled.
+            let reopened = to != Target::Hub
+                || self.transport.reconnect_kind() == crate::Reconnect::Stays
+                || self.reopen().await.is_ok();
             if reopened {
                 match self.hello_within(to, REQUEST_MS).await {
                     Ok(h) if h.active_version == v => return Ok(h),
@@ -466,7 +470,7 @@ impl<T: Transport, C: Clock> Host<T, C> {
         let begin_wait = if hdr.is_empty() { erase } else { REQUEST_MS };
         self.call(to, Cmd::XferBegin, &p[..n], begin_wait).await?;
 
-        let chunk = chunk_len(hello.max_payload, to.link_max()).ok_or(Error::BadResponse)?;
+        let chunk = chunk_len(hello.max_payload, self.link_max(to)).ok_or(Error::BadResponse)?;
         let hdr_chunks = hdr.len().div_ceil(chunk);
         for (i, c) in hdr.chunks(chunk).enumerate() {
             let wait = if i + 1 == hdr_chunks {

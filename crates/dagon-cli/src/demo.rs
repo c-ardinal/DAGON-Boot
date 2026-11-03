@@ -258,6 +258,12 @@ mod tests {
 
     impl dagon_host::Transport for Link {
         type Error = ();
+        fn max_payload(&self) -> usize {
+            dagon_proto::max_payload::USB
+        }
+        fn reconnect_kind(&self) -> dagon_host::Reconnect {
+            dagon_host::Reconnect::Reopen
+        }
         async fn write(&mut self, bytes: &[u8]) -> Result<(), ()> {
             self.0.write(bytes);
             Ok(())

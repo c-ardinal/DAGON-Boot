@@ -247,6 +247,14 @@ fn a_project_defined_mcu_and_board_go_through_every_command() {
     assert_eq!(built.len(), 1);
     assert_eq!(built[0].0, "bootcore");
     assert!(built[0].1.is_file(), "{:?}", built[0].1);
+    // cargo's own lines included.
+    assert!(!log.iter().any(|l| l.contains("sk-ant")), "{log:?}");
+    assert!(
+        log.iter()
+            .any(|l| l.contains("Compiling fake-bootcore")
+                && l.contains("(the project's own package)")),
+        "{log:?}"
+    );
     assert!(
         log.iter()
             .any(|l| l

@@ -415,6 +415,25 @@ pub(crate) fn build_parts(
                 Paths::Relative => part_origin(cfg, &part, paths),
             }
         ));
+        // cargo's own lines and errors name the folder: for the page, a
+        // project package's folder becomes its package name.
+        let folders: Vec<String> = match (&part.package, paths) {
+            (Some(_), Paths::Relative) => {
+                let canon = std::fs::canonicalize(&dir).map(crate::config::plain_path);
+                [Some(dir.clone()), canon.ok()]
+                    .into_iter()
+                    .flatten()
+                    .map(|d| d.display().to_string())
+                    .collect()
+            }
+            _ => Vec::new(),
+        };
+        let label = project_package(&part.owner);
+        let hide = |l: &str| {
+            folders
+                .iter()
+                .fold(l.to_string(), |l, f| l.replace(f.as_str(), &label))
+        };
         let exe = nodebuild::cargo_build(
             &dir,
             &bin,
@@ -425,9 +444,10 @@ pub(crate) fn build_parts(
                 // The boot core accepts only images carrying this tag.
                 target_tag: Some(&n.tag),
             },
-            log,
+            &mut |l| log(&hide(l)),
             cancel,
-        )?;
+        )
+        .map_err(|e| hide(&e))?;
         built.push((part.name, exe));
     }
     Ok(built)

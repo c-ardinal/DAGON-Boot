@@ -60,6 +60,11 @@ impl BuildInputs {
         if !inside || self.package.as_os_str().is_empty() {
             return Err("package must be a relative path inside the work area".into());
         }
+        self.validate_names()
+    }
+
+    /// Plain names (bin, features) and a valid version.
+    pub fn validate_names(&self) -> Result<(), String> {
         let plain = |s: &str| {
             !s.is_empty()
                 && !s.starts_with('-')

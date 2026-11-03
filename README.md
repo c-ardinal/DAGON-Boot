@@ -186,7 +186,14 @@ dagon flash watch      # ESP32-S3: over USB-C with espflash
 ```
 
 `dagon flash` prints its plan first and asks before it touches the board
-(`--yes` skips the question). `--dry-run` still does everything up to
+(`--yes` skips the question). It writes to a device the writer reports:
+every probe-rs probe, every serial port, every UF2 drive (USB IDs and
+the UF2 Board-ID only label them). One device is taken and shown before
+the question; with several it asks which, or takes `--probe
+<vid:pid[:serial]>`, `--port <port>` or `--drive <path>` (on Windows
+compared without regard to case, so `--drive e:` names `E:\`); with several
+and no terminal (or `--yes`) and no option, or with none, it stops
+before writing. `--dry-run` still does everything up to
 the write: it builds the parts and the app and makes the first-install
 files in the provision folder (`out/provision/<id>/` beside `dagon.toml`,
 or under `provision_dir` when `dagon.toml` sets it; `--out <dir>`
@@ -204,8 +211,7 @@ matches `targets/mcu/esp32s3/vendor/SHA256SUMS`), the partition table
 (`targets/mcu/esp32s3/partitions.csv`, at 0x8000), the factory agent, the
 app in ota_0 (0x110000) with its signed header in the `dagon` partition
 (0x710000), and the otadata entry that starts it as confirmed (0xD000).
-Exactly one ESP32-S3 must be connected over USB-C (USB Serial/JTAG,
-`303a:1001`); with none or several it stops before writing. `--dry-run`
+`--dry-run`
 lists the files with their offsets and the `espflash` commands
 (`commands.txt` in the same provision folder).
 

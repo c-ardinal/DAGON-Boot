@@ -20,16 +20,6 @@ fn has(src: &str, needle: &str) {
     assert!(src.contains(needle), "source no longer has: {needle}");
 }
 
-/// `0x0800_8000` / `0x4000` as rustfmt-era source writes them.
-fn rust_hex(v: u32) -> String {
-    let h = format!("{v:X}");
-    if h.len() <= 4 {
-        return format!("0x{h}");
-    }
-    let h = format!("{v:08X}");
-    format!("0x{}_{}", &h[..4], &h[4..])
-}
-
 #[test]
 fn every_slot_matches_dagon_sign() {
     let mut seen = 0;
@@ -56,19 +46,12 @@ fn every_slot_matches_dagon_sign() {
 fn provision_layouts_match() {
     let rp = reg().mcu("rp2040").unwrap();
     let base = rp.default_flash_map().base;
-    let Writer::Uf2Drive {
-        family,
-        sector,
-        info_file,
-        info_header,
-        board_id,
-    } = &rp.writer
-    else {
+    let Writer::Uf2Drive { family, sector, .. } = &rp.writer else {
         panic!("rp2040 writes a UF2 drive")
     };
     // dagon-sign builds the first-install files from these definitions
-    // (its first_write_golden test pins the bytes); what dagon-cli still
-    // holds itself is checked here.
+    // (its first_write_golden test pins the bytes); dagon-cli reads them
+    // too (the_cli_holds_no_mcu_knowledge).
     assert_eq!(*family, provision::UF2_FAMILY_RP2040);
     assert_eq!(*sector, 0x1000);
     let stage0 = rp.layout.stage0.unwrap();
@@ -76,32 +59,9 @@ fn provision_layouts_match() {
         (stage0.at, stage0.size),
         (base, provision::RP2040_STAGE0_MAX)
     );
-    has(
-        CLI_FLASH,
-        &format!("const UF2_INFO: &str = \"{info_file}\";"),
-    );
-    has(
-        CLI_FLASH,
-        &format!("const UF2_BOARD: &str = \"{board_id}\";"),
-    );
-    has(
-        CLI_FLASH,
-        &format!(".is_some_and(|l| l.starts_with(\"{info_header}\"));"),
-    );
-    has(
-        CLI_COMMANDS,
-        &format!("read_file(stage0_path)?, {})", rust_hex(base)),
-    );
-
     let f4 = reg().mcu("stm32f401re").unwrap();
     assert_eq!(f4.default_flash_map().base, provision::F401_FLASH_BASE);
-    let Writer::ProbeRs { chip } = &f4.writer else {
-        panic!("stm32f401re writes with probe-rs")
-    };
-    has(
-        CLI_COMMANDS,
-        &format!("const F401_CHIP: &str = \"{chip}\";"),
-    );
+    assert!(matches!(f4.writer, Writer::ProbeRs { .. }));
 }
 
 #[test]
@@ -133,85 +93,68 @@ fn host_rom_path_matches() {
     assert_eq!(m.addr, dagon_romlink::ROM_ADDR);
 }
 
-#[test]
-fn esp_writer_params_match_the_cli() {
-    let esp = reg().mcu("esp32s3").unwrap();
-    let Writer::Espflash {
-        chip,
-        flash_size,
-        table_at,
-        bootloader,
-        checksums,
-        usb_hint,
-    } = &esp.writer
-    else {
-        panic!("esp32s3 writes with espflash")
-    };
-    has(CLI_ESP, &format!("const CHIP: &str = \"{chip}\";"));
-    has(
-        CLI_ESP,
-        &format!("const FLASH_SIZE: &str = \"{flash_size}\";"),
-    );
-    has(
-        CLI_ESP,
-        &format!("const TABLE_AT: u32 = {};", rust_hex(*table_at)),
-    );
-    let usb = usb_hint.unwrap();
-    has(
-        CLI_ESP,
-        &format!(
-            "const USB_JTAG: (u16, u16) = (0x{:04X}, 0x{:04X});",
-            usb.vid, usb.pid
-        ),
-    );
-    let pkg = "targets/mcu/esp32s3";
-    let partitions = esp.partitions.as_deref().unwrap();
-    has(
-        CLI_ESP,
-        &format!("const PARTITIONS: &str = \"{pkg}/{partitions}\";"),
-    );
-    let (dir, file) = bootloader.rsplit_once('/').unwrap();
-    has(
-        CLI_ESP,
-        &format!("const VENDOR_DIR: &str = \"{pkg}/{dir}\";"),
-    );
-    has(CLI_ESP, &format!("const BOOTLOADER: &str = \"{file}\";"));
-    assert_eq!(checksums, &format!("{dir}/SHA256SUMS"));
-    has(CLI_ESP, "vendor.join(\"SHA256SUMS\")");
+/// The part of a source file before its tests.
+fn code(src: &str) -> &str {
+    src.split("#[cfg(test)]").next().unwrap_or(src)
 }
 
+/// dagon-cli's first write (flash, commands, esp) reads the definitions:
+/// no MCU or board id, writer parameter or USB ID is left in its code.
 #[test]
-fn first_write_parts_match_the_cli() {
+fn the_cli_holds_no_mcu_knowledge() {
+    let cli = [code(CLI_FLASH), code(CLI_COMMANDS), code(CLI_ESP)];
+    let mut words: Vec<String> = Vec::new();
     for m in reg().mcus() {
-        for p in &m.parts {
-            let bin = p
-                .bin
-                .as_deref()
-                .map_or("None".into(), |b| format!("Some(\"{b}\")"));
-            has(
-                CLI_FLASH,
-                &format!("part(\"{}\", mcu_pkg(), \"{}\", {bin})", p.name, p.sub),
-            );
+        words.push(format!("\"{}\"", m.id));
+        match &m.writer {
+            Writer::Uf2Drive {
+                info_file,
+                board_id,
+                ..
+            } => words.extend([info_file.clone(), board_id.clone()]),
+            Writer::ProbeRs { chip } => words.push(chip.clone()),
+            Writer::Espflash {
+                chip,
+                flash_size,
+                usb_hint,
+                ..
+            } => {
+                words.extend([format!("\"{chip}\""), format!("\"{flash_size}\"")]);
+                if let Some(u) = usb_hint {
+                    words.push(format!("0x{:04X}", u.vid));
+                }
+            }
         }
     }
     for b in reg().boards() {
-        for p in &b.parts {
-            let bin = p
-                .bin
-                .as_deref()
-                .map_or("None".into(), |b| format!("Some(\"{b}\")"));
-            has(
-                CLI_FLASH,
-                &format!("part(\"{}\", board_pkg, \"{}\", {bin})", p.name, p.sub),
-            );
+        words.push(format!("\"{}\"", b.id));
+    }
+    for w in &words {
+        for src in cli {
+            assert!(!src.contains(w.as_str()), "dagon-cli code still has {w}");
         }
     }
-    let mcu_parts: usize = reg().mcus().iter().map(|m| m.parts.len()).sum();
-    let board_parts: usize = reg().boards().iter().map(|b| b.parts.len()).sum();
-    assert_eq!(CLI_FLASH.matches("mcu_pkg(), \"").count(), mcu_parts);
+}
+
+/// The parts the CLI built before it read the definitions, now from the
+/// source tree (loading checks each part folder exists in its package).
+#[test]
+fn first_write_parts_load_from_the_tree() {
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+    let tree = Registry::load(&[dagon_topology::defs::Source::Tree(&root)]).unwrap();
+    let names = |parts: &[dagon_topology::defs::Part]| {
+        parts.iter().map(|p| p.name.clone()).collect::<Vec<_>>()
+    };
     assert_eq!(
-        CLI_FLASH.matches("part(\"").count(),
-        mcu_parts + board_parts
+        names(&tree.mcu("rp2040").unwrap().parts),
+        ["stage0", "bootcore"]
+    );
+    assert_eq!(names(&tree.mcu("stm32f401re").unwrap().parts), ["bootcore"]);
+    assert!(tree.mcu("esp32s3").unwrap().parts.is_empty());
+    let watch = &tree.board("m5stopwatch").unwrap().parts;
+    assert_eq!(
+        (names(watch), watch[0].bin.as_deref()),
+        (vec!["factory".to_string()], Some("factory"))
     );
 }
 

@@ -168,19 +168,23 @@ pub(crate) fn release_inputs(
     version: Version,
     built: Vec<(String, SlotElfs)>,
 ) -> Result<Vec<(String, SlotElfs)>, String> {
+    let reg = crate::defs::registry(cfg)?;
     built
         .into_iter()
         .map(|(node, slots)| {
-            let esp = t.node(&node).is_some_and(|n| n.mcu == crate::esp::CHIP);
-            if !esp {
+            let esp = t
+                .node(&node)
+                .and_then(|n| reg.mcu(&n.mcu))
+                .and_then(crate::esp::Esp::of);
+            let Some(esp) = esp else {
                 return Ok((node, slots));
-            }
+            };
             let out = cfg
                 .base
                 .join(DEPLOY_DIR)
                 .join(version.to_string())
                 .join(format!("{node}.bin"));
-            let image = crate::esp::save_image(&nodebuild::elf_path(cfg, &node, 'a'), &out)?;
+            let image = crate::esp::save_image(&esp, &nodebuild::elf_path(cfg, &node, 'a'), &out)?;
             Ok((node, vec![('a', image)]))
         })
         .collect()
@@ -295,6 +299,7 @@ pub fn command(args: &[&str]) -> Result<(), String> {
         &cfg,
         &nodes,
         Some(fw_key),
+        None,
         &mut log,
         &AtomicBool::new(false),
     )?;

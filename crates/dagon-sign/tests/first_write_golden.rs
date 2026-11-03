@@ -8,6 +8,17 @@ use dagon_sign::image::{self, sign_image, ImageSpec, Slot};
 use dagon_sign::{provision, to_hex};
 use ed25519_compact::{KeyPair, Seed};
 
+/// The first-install file of a builtin MCU (its writer takes one file).
+fn first_file(
+    mcu: &str,
+    stage0: Option<&[u8]>,
+    boot: (&image::Slot, &[u8]),
+    app: (&image::Slot, &[u8]),
+) -> Vec<u8> {
+    let def = dagon_topology::defs::Registry::builtin().mcu(mcu).unwrap();
+    provision::first_install_file(def, stage0, boot, app).unwrap()
+}
+
 /// RFC 8032 section 7.1 "TEST 1" seed (public test data).
 const TEST_SEED: [u8; 32] = [
     0x9d, 0x61, 0xb1, 0x9d, 0xef, 0xfd, 0x5a, 0x60, 0xba, 0x84, 0x4a, 0xf4, 0x92, 0xec, 0x2c, 0xc4,
@@ -192,10 +203,15 @@ fn signed_images_and_first_install_files_are_byte_identical() {
         .collect();
     let (bs, boot) = signed("stm32f401re", image_kind::BOOTCORE, slot_binding::A);
     let (as_, app) = signed("stm32f401re", image_kind::APP, slot_binding::A);
-    let bin = provision::f401_flash((&bs, &boot), (&as_, &app));
+    let bin = first_file("stm32f401re", None, (&bs, &boot), (&as_, &app));
     let (bs, boot) = signed("rp2040", image_kind::BOOTCORE, slot_binding::A);
     let (as_, app) = signed("rp2040", image_kind::APP, slot_binding::A);
-    let uf2 = provision::hub_rescue_uf2(&payload(0x3F00, 0x5A), (&bs, &boot), (&as_, &app));
+    let uf2 = first_file(
+        "rp2040",
+        Some(&payload(0x3F00, 0x5A)),
+        (&bs, &boot),
+        (&as_, &app),
+    );
     let got = (images, hex(&bin), bin.len(), hex(&uf2), uf2.len());
     println!("{got:#?}");
     assert_eq!(got.0, IMAGE_SHA256);

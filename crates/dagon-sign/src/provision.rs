@@ -7,7 +7,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use dagon_format::header::{self, ImageHeader, HEADER_SIZE};
 use dagon_format::statelog::{self, kind, reason, slot, FaceHeader, Record};
 
-use dagon_topology::defs::{requirements, McuDef, Registry, Writer};
+use dagon_topology::defs::{requirements, McuDef, Writer};
 
 use crate::image::Slot;
 
@@ -140,12 +140,6 @@ const UF2_MAGIC1: u32 = 0x9E5D_5157;
 const UF2_MAGIC_END: u32 = 0x0AB1_6F30;
 const UF2_FLAG_FAMILY: u32 = 0x0000_2000;
 
-// ponytail: kept for dagon-cli until it reads the definitions; the
-// topology parity tests hold them equal to the builtin definitions.
-pub const UF2_FAMILY_RP2040: u32 = 0xE48B_FF56;
-pub const F401_FLASH_BASE: u32 = 0x0800_0000;
-pub const RP2040_STAGE0_MAX: u32 = 0x4000;
-
 /// First-install contents of `mcu` from its definition: stage0 at its
 /// region (exactly when the layout has one), each state log with face A
 /// provisioned (PROVISION + CONFIRMED for slot A) and face B erased, and
@@ -204,25 +198,4 @@ pub fn first_install_file(
             mcu.id
         )),
     }
-}
-
-fn builtin(mcu: &str) -> &'static McuDef {
-    Registry::builtin()
-        .mcu(mcu)
-        .expect("a builtin MCU definition")
-}
-
-/// F401 first install, written at the flash base after a full chip erase:
-/// boot core (payload at the base, header in the trailer), APP state log A,
-/// APP-A. Log B and the reserved sector stay erased.
-pub fn f401_flash(boot: (&Slot, &[u8]), app: (&Slot, &[u8])) -> Vec<u8> {
-    first_install_file(builtin("stm32f401re"), None, boot, app)
-        .expect("the builtin stm32f401re writer takes a binary")
-}
-
-/// Hub rescue UF2: boot2 + stage0 (raw, from the start of flash), boot core
-/// log and app log (face A provisioned, face B erased), BL-A and APP-A.
-pub fn hub_rescue_uf2(stage0: &[u8], boot: (&Slot, &[u8]), app: (&Slot, &[u8])) -> Vec<u8> {
-    first_install_file(builtin("rp2040"), Some(stage0), boot, app)
-        .expect("the builtin rp2040 writer takes a UF2")
 }

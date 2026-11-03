@@ -6,10 +6,24 @@ use dagon_format::header::{build_flags, capabilities, image_kind, target_tag, HE
 use dagon_format::manifest::ManifestView;
 use dagon_format::{sha256, Version};
 use dagon_sign::image::{self, sign_image, verify_image, ImageSpec, TEST_PUBLIC_KEY};
-use dagon_sign::provision::{self, FlashImage, UF2_FAMILY_RP2040};
+use dagon_sign::provision::{self, FlashImage};
 use dagon_sign::release::{self, ReleaseItem};
 use dagon_topology::Topology;
 use ed25519_compact::{KeyPair, Seed};
+
+/// The RP2040 UF2 family ID (the UF2 spec's registry).
+const UF2_FAMILY_RP2040: u32 = 0xE48B_FF56;
+
+/// The first-install file of a builtin MCU (its writer takes one file).
+fn first_file(
+    mcu: &str,
+    stage0: Option<&[u8]>,
+    boot: (&image::Slot, &[u8]),
+    app: (&image::Slot, &[u8]),
+) -> Vec<u8> {
+    let def = dagon_topology::defs::Registry::builtin().mcu(mcu).unwrap();
+    provision::first_install_file(def, stage0, boot, app).unwrap()
+}
 
 const TEST_SEED: [u8; 32] = [
     0x9d, 0x61, 0xb1, 0x9d, 0xef, 0xfd, 0x5a, 0x60, 0xba, 0x84, 0x4a, 0xf4, 0x92, 0xec, 0x2c, 0xc4,
@@ -263,7 +277,12 @@ fn f401_flash_places_bootcore_log_and_app() {
     let boot = sign_image(&boot_spec, &body(2), &key()).unwrap();
     let app = f401_app(0);
     let app_slot = image::slot("stm32f401re", image_kind::APP, 0).unwrap();
-    let bin = provision::f401_flash((&boot_spec.slot, &boot), (&app_slot, &app));
+    let bin = first_file(
+        "stm32f401re",
+        None,
+        (&boot_spec.slot, &boot),
+        (&app_slot, &app),
+    );
     assert_eq!(&bin[..1024], &boot[HEADER_SIZE..]);
     assert_eq!(&bin[0x7E00..0x8000], &boot[..HEADER_SIZE]);
     assert_eq!(
@@ -320,7 +339,7 @@ fn rescue_uf2_writes_whole_sectors_in_aligned_runs() {
     .unwrap();
     let bs = image::slot("rp2040", image_kind::BOOTCORE, 0).unwrap();
     let as_ = image::slot("rp2040", image_kind::APP, 0).unwrap();
-    let uf2 = provision::hub_rescue_uf2(&stage0, (&bs, &boot), (&as_, &app));
+    let uf2 = first_file("rp2040", Some(&stage0), (&bs, &boot), (&as_, &app));
     let sectors = uf2_sectors(&uf2);
     assert!(sectors.contains_key(&0x1000_3000), "stage0 tail sector");
     for (s, blocks) in &sectors {

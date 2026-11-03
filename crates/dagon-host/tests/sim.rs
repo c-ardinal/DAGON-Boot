@@ -465,7 +465,11 @@ fn bootcore() -> Vec<u8> {
 fn rom_plan_matches_the_provision_binary() {
     let (boot, app) = (bootcore(), seg_img(0, Version::new(1, 1, 0)));
     let log = rom::initial_log(app[..512].try_into().unwrap()).unwrap();
-    let want = dagon_sign::provision::f401_flash(
+    let want = dagon_sign::provision::first_install_file(
+        dagon_topology::defs::Registry::builtin()
+            .mcu("stm32f401re")
+            .unwrap(),
+        None,
         (
             &image::slot("stm32f401re", image_kind::BOOTCORE, 0).unwrap(),
             &boot,
@@ -474,7 +478,8 @@ fn rom_plan_matches_the_provision_binary() {
             &image::slot("stm32f401re", image_kind::APP, 0).unwrap(),
             &app,
         ),
-    );
+    )
+    .unwrap();
     let mut got = vec![0xFF; want.len()];
     let map = f401_rom();
     for r in rom::regions(&boot, &app, &log, &map) {

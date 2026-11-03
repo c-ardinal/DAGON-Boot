@@ -1589,25 +1589,64 @@ fn the_demo_uplink_follows_the_saved_topology() {
     assert_eq!(sim(&d)["uplink"], "usb-cdc");
 }
 
-/// Every job serve starts is spawned where the scrubbing logger is set up
-/// (start and gen_start): a new spawn without it fails here.
+/// What the page receives of job `started` (its log lines and its error),
+/// decoded from the events: every string as the page reads it.
+fn job_text(rx: &std::sync::mpsc::Receiver<String>, started: &str) -> String {
+    let id = serde_json::from_str::<serde_json::Value>(started).unwrap()["job"].clone();
+    let mut text = Vec::new();
+    loop {
+        let ev = rx
+            .recv_timeout(std::time::Duration::from_secs(300))
+            .unwrap();
+        let ev: serde_json::Value = serde_json::from_str(&ev).unwrap();
+        if ev["job"] != id {
+            continue;
+        }
+        if ev["type"] == "job.log" {
+            for l in ev["lines"].as_array().unwrap() {
+                text.push(l.as_str().unwrap().to_string());
+            }
+        }
+        if ev["type"] == "job.result" {
+            if let Some(e) = ev["data"]["error"].as_str() {
+                text.push(e.to_string());
+            }
+            break;
+        }
+    }
+    text.join("\n")
+}
+
+/// Every spelling of the work area's folder.
+fn local_dirs(a: &Area) -> Vec<String> {
+    let canon = std::fs::canonicalize(&a.dir).unwrap();
+    vec![
+        a.dir.display().to_string(),
+        crate::config::plain_path(canon).display().to_string(),
+    ]
+}
+
+/// A job's first step can fail (here: dagon.toml does not parse); the
+/// error already hides the project's folder, for every kind of job.
 #[test]
-fn every_serve_job_logs_through_the_scrubbing_logger() {
-    let code = |src: &'static str| src.split("#[cfg(test)]").next().unwrap();
-    let api = code(include_str!("api.rs"));
-    let others = [
-        code(include_str!("devjobs.rs")),
-        code(include_str!("project.rs")),
-        code(include_str!("mod.rs")),
-    ];
-    assert_eq!(
-        api.matches("server.spawn(").count(),
-        2,
-        "start and gen_start only"
-    );
-    assert_eq!(api.matches("job.hide_folders(").count(), 2, "one per spawn");
-    for src in others {
-        assert!(!src.contains(".spawn(\"") && !src.contains("server.spawn("));
+fn a_job_hides_the_project_folder_before_anything_can_fail() {
+    let a = start("pagebad");
+    std::fs::write(a.dir.join("dagon.toml"), "this is = not [toml\n").unwrap();
+    let rx = a.server.subscribe();
+    for (path, body) in [
+        ("/v1/build", serde_json::json!({ "nodes": ["seg"] })),
+        ("/v1/gen", serde_json::json!({})),
+    ] {
+        let (st, started) = post(&a, path, body);
+        assert_eq!(st, 202, "{path}: {started}");
+        let text = job_text(&rx, &started);
+        assert!(text.contains("<project>"), "{path}: {text}");
+        for local in local_dirs(&a) {
+            assert!(
+                !text.contains(&local),
+                "{path}: {local} reached the page: {text}"
+            );
+        }
     }
 }
 
@@ -1637,36 +1676,17 @@ fn build_output_reaches_the_page_without_local_folders() {
     let rx = a.server.subscribe();
     let (st, started) = post(&a, "/v1/build", serde_json::json!({ "nodes": ["seg"] }));
     assert_eq!(st, 202, "{started}");
-    let id = serde_json::from_str::<serde_json::Value>(&started).unwrap()["job"].clone();
-    let mut text = Vec::new();
-    loop {
-        let ev = rx
-            .recv_timeout(std::time::Duration::from_secs(300))
-            .unwrap();
-        let ev: serde_json::Value = serde_json::from_str(&ev).unwrap();
-        if ev["job"] != id {
-            continue;
-        }
-        if ev["type"] == "job.log" {
-            text.extend(
-                ev["lines"]
-                    .as_array()
-                    .unwrap()
-                    .iter()
-                    .map(|l| l.to_string()),
-            );
-        }
-        if ev["type"] == "job.result" {
-            text.push(ev["data"].to_string());
-            break;
-        }
-    }
-    let all = text.join("\n");
+    let all = job_text(&rx, &started);
     assert!(all.contains("Compiling fake-app"), "{all}");
     assert!(all.contains("fake-app (the seg app)"), "{all}");
-    let canon = std::fs::canonicalize(&a.dir).unwrap();
-    let canon = crate::config::plain_path(canon).display().to_string();
-    for local in ["private", "token", &*a.dir.to_string_lossy(), &canon] {
-        assert!(!all.contains(local), "{local} reached the page: {all}");
+    assert!(
+        all.contains("cargo build failed in fake-app (the seg app)"),
+        "{all}"
+    );
+    for local in ["private".to_string(), "token".to_string()]
+        .into_iter()
+        .chain(local_dirs(&a))
+    {
+        assert!(!all.contains(&local), "{local} reached the page: {all}");
     }
 }

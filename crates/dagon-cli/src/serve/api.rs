@@ -122,9 +122,14 @@ fn config(server: &Server) -> Result<Config, String> {
 
 /// The project of dagon.toml `path`, with the key folders it may take key
 /// files from.
+/// Its error goes to the page (routes and jobs): the project's folder and
+/// home in it are hidden.
 pub(super) fn config_at(server: &Server, path: Option<&Path>) -> Result<Config, String> {
     let p = path.map(|p| p.to_string_lossy().into_owned());
-    let mut c = Config::load(p.as_deref())?;
+    let mut c = Config::load(p.as_deref()).map_err(|e| {
+        let swaps = crate::flash::base_swaps(path.and_then(Path::parent));
+        crate::flash::hidden(&e, &swaps)
+    })?;
     c.key_roots = super::project::home(server)
         .map(|h| super::project::key_dirs(&h))
         .unwrap_or_default();
@@ -317,9 +322,8 @@ fn gen_start(server: &Arc<Server>, req: &Request) -> Res {
     }
     let s = Arc::clone(server);
     match server.spawn("gen", move |job| {
-        let config = job.config.clone().ok_or("no project is open")?;
-        let cfg = config_at(&s, Some(&config))?;
-        job.hide_folders(crate::flash::page_swaps(&cfg, &project_registry(&cfg)?));
+        let (config, _, _) = job.project()?;
+        let config = config.ok_or("no project is open")?;
         let lines = {
             let _lock = s.files.lock().map_err(|_| "lock".to_string())?;
             crate::scaffold::gen_project(&config, &only, force)?
@@ -338,18 +342,13 @@ type Work = fn(&mut Job, Config, Value) -> Result<Value, String>;
 
 fn start(server: &Arc<Server>, req: &Request, kind: &str, work: Work) -> Res {
     let v = body_json(req)?;
-    let s = Arc::clone(server);
     // The project is the one registered with the job (under the jobs lock),
-    // so a project switch never lands between the two.
+    // so a project switch never lands between the two. Job::project loads
+    // it (a project whose definitions do not load runs no job) and from
+    // then on every line (cargo's, probe-rs', espflash's) and error reach
+    // the page through the job's one scrubbing logger.
     match server.spawn(kind, move |job| {
-        let cfg = config_at(&s, job.config.as_deref())?;
-        // A project whose definitions do not load runs no job: the page is
-        // told without the reason (it goes to the terminal), never a raw
-        // definition error from deeper down.
-        let reg = project_registry(&cfg)?;
-        // Every job's lines (cargo's, probe-rs', espflash's included) and
-        // error reach the page through the one scrubbing logger.
-        job.hide_folders(crate::flash::page_swaps(&cfg, &reg));
+        let (_, cfg, _) = job.project()?;
         work(job, cfg, v)
     }) {
         Some(id) => Ok(accepted(id)),

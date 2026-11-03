@@ -202,13 +202,16 @@ impl Server {
             server.set_state(id, "running");
             let mut job = Job {
                 id,
+                // Before anything can fail: the project's folder and home.
+                swaps: crate::flash::base_swaps(
+                    config.as_deref().and_then(std::path::Path::parent),
+                ),
                 config,
                 server: server.clone(),
                 cancel,
                 lines: Vec::new(),
                 flushed: Instant::now(),
                 sent: 0,
-                swaps: Vec::new(),
             };
             let r = work(&mut job);
             job.flush();
@@ -255,8 +258,9 @@ impl Server {
 /// A running job's handle on the server.
 pub struct Job {
     pub id: u64,
-    /// dagon.toml of the project open when the job was registered.
-    pub config: Option<PathBuf>,
+    /// dagon.toml of the project open when the job was registered; a job
+    /// reaches it only through [`Job::project`].
+    config: Option<PathBuf>,
     server: Arc<Server>,
     cancel: Arc<AtomicBool>,
     lines: Vec<String>,
@@ -283,10 +287,29 @@ impl Job {
         );
     }
 
-    /// From now on, every log line and the job's error name these folders
-    /// as the page should see them (package names, <project>, ...).
-    pub fn hide_folders(&mut self, swaps: Vec<(String, String)>) {
-        self.swaps = swaps;
+    /// The project the job was registered with: its dagon.toml, settings
+    /// and definitions. The only way a job reaches its project: from here
+    /// on every log line and the job's error also name its apps, packages
+    /// and DAGON source as the page should see them.
+    pub fn project(
+        &mut self,
+    ) -> Result<
+        (
+            Option<PathBuf>,
+            crate::config::Config,
+            dagon_topology::defs::Registry,
+        ),
+        String,
+    > {
+        let cfg = super::api::config_at(&self.server, self.config.as_deref())?;
+        let reg = super::api::project_registry(&cfg)?;
+        let more = crate::flash::page_swaps(&cfg, &reg);
+        let all = std::mem::take(&mut self.swaps)
+            .into_iter()
+            .chain(more)
+            .collect();
+        self.swaps = crate::flash::most_specific_first(all);
+        Ok((self.config.clone(), cfg, reg))
     }
 
     /// `text` as the page may see it.

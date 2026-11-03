@@ -156,7 +156,7 @@ fn shown(cfg: &Config, p: &Path, paths: Paths) -> String {
 }
 
 /// Every spelling of `dir` a line may carry: as given and canonical.
-fn spellings(dir: &Path) -> Vec<String> {
+pub(crate) fn spellings(dir: &Path) -> Vec<String> {
     let canon = std::fs::canonicalize(dir).map(crate::config::plain_path);
     let mut v: Vec<String> = [Some(dir.to_path_buf()), canon.ok()]
         .into_iter()
@@ -209,11 +209,17 @@ pub(crate) fn page_swaps(cfg: &Config, reg: &Registry) -> Vec<(String, String)> 
                 .map(|f| (f, "<DAGON source>".into())),
         );
     }
-    swaps.extend(
-        spellings(&cfg.base)
-            .into_iter()
-            .map(|f| (f, "<project>".into())),
-    );
+    swaps.extend(base_swaps(Some(&cfg.base)));
+    most_specific_first(swaps)
+}
+
+/// What every page-bound line hides even before a project loads: the
+/// project's folder (when known) as <project>, the home folder as ~.
+pub(crate) fn base_swaps(project: Option<&Path>) -> Vec<(String, String)> {
+    let mut swaps = Vec::new();
+    if let Some(p) = project {
+        swaps.extend(spellings(p).into_iter().map(|f| (f, "<project>".into())));
+    }
     let home = std::env::var_os("USERPROFILE").or_else(|| std::env::var_os("HOME"));
     if let Some(h) = home.filter(|h| !h.is_empty()) {
         swaps.extend(
@@ -222,6 +228,13 @@ pub(crate) fn page_swaps(cfg: &Config, reg: &Registry) -> Vec<(String, String)> 
                 .map(|f| (f, "~".into())),
         );
     }
+    most_specific_first(swaps)
+}
+
+/// Longest folder first, so a folder inside another is replaced before it
+/// (stable: equal lengths keep their order).
+pub(crate) fn most_specific_first(mut swaps: Vec<(String, String)>) -> Vec<(String, String)> {
+    swaps.sort_by_key(|s| std::cmp::Reverse(s.0.len()));
     swaps
 }
 
@@ -1403,6 +1416,39 @@ mod tests {
         let flash = std::fs::read(&bin).unwrap();
         // The app's inline header at its slot (0x11_0000 from the base).
         assert_eq!(&flash[0x1_0000..0x1_0004], &dagon_format::header::MAGIC);
+        let _ = std::fs::remove_dir_all(&cfg.base);
+    }
+
+    #[test]
+    fn a_folder_inside_another_is_named_before_it() {
+        let (mut cfg, _) = area("nested");
+        let template = cfg.build["seg"].clone();
+        cfg.build.clear();
+        for (node, package) in [("a", "private"), ("z", "private/token/app")] {
+            let dir = cfg.base.join(package);
+            std::fs::create_dir_all(&dir).unwrap();
+            std::fs::write(
+                dir.join("Cargo.toml"),
+                format!("[package]\nname = \"app-{node}\"\nversion = \"0.0.0\"\n"),
+            )
+            .unwrap();
+            let mut b = template.clone();
+            b.package = PathBuf::from(package);
+            cfg.build.insert(node.into(), b);
+        }
+        let swaps = page_swaps(&cfg, Registry::builtin());
+        let lens: Vec<usize> = swaps.iter().map(|(f, _)| f.len()).collect();
+        assert!(lens.windows(2).all(|w| w[0] >= w[1]), "{swaps:?}");
+        let inner = cfg.base.join("private/token/app/src/main.rs");
+        let outer = cfg.base.join("private/lib.rs");
+        let line = format!("{} and {}", inner.display(), outer.display());
+        let shown = hidden(&line, &swaps);
+        assert!(shown.contains("app-z (the z app)"), "{shown}");
+        assert!(shown.contains("app-a (the a app)"), "{shown}");
+        assert!(
+            !shown.contains("token") && !shown.contains("private"),
+            "{shown}"
+        );
         let _ = std::fs::remove_dir_all(&cfg.base);
     }
 

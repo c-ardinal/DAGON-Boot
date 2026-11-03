@@ -11,9 +11,10 @@
 //! the link task, which runs above the others. Around each synchronous
 //! section in which it keeps the CPU (agent request handling, flash erase,
 //! write and verify; a slot erase takes up to about 30 s) it calls
-//! [`Lease::hold_cpu`] and [`Lease::release_cpu`]. During such a section only
-//! its own deadline counts, and afterwards every other busy deadline moves
-//! later by exactly the section's length. Time it spends awaiting (reply
+//! [`Lease::hold_cpu`] and [`Lease::release_cpu`]. During such a section its
+//! own deadline counts against the time and the others' against the start
+//! of the section (one already overdue stays overdue); afterwards every
+//! other deadline moves later by exactly the section's length. Time it spends awaiting (reply
 //! transmission, waiting for input) is not excused: lower tasks can run then.
 
 use core::sync::atomic::{AtomicBool, AtomicU32, AtomicU8, Ordering};
@@ -76,17 +77,20 @@ impl Liveness {
     }
 
     /// Whether a busy task is past its deadline at `now_ms`. While the
-    /// preempting task holds the CPU, only its own deadline is checked.
+    /// preempting task holds the CPU the other tasks' clocks stand at the
+    /// start of the section: one already overdue then stays overdue.
     pub fn overdue(&self, now_ms: u32) -> bool {
-        let late = |i: usize| {
-            self.state[i].load(Ordering::Acquire) == BUSY
-                && now_ms.wrapping_sub(self.deadline[i].load(Ordering::Acquire)) as i32 >= 0
-        };
         let p = self.preempting.load(Ordering::Acquire);
-        if p != NONE && self.holding.load(Ordering::Acquire) {
-            return late(p as usize);
-        }
-        (0..MAX_TASKS).any(late)
+        let frozen_at = (p != NONE && self.holding.load(Ordering::Acquire))
+            .then(|| self.hold_since.load(Ordering::Acquire));
+        (0..MAX_TASKS).any(|i| {
+            let at = match frozen_at {
+                Some(since) if i != p as usize => since,
+                _ => now_ms,
+            };
+            self.state[i].load(Ordering::Acquire) == BUSY
+                && at.wrapping_sub(self.deadline[i].load(Ordering::Acquire)) as i32 >= 0
+        })
     }
 }
 
@@ -127,10 +131,11 @@ impl Lease {
             return 0;
         }
         let held = now_ms.wrapping_sub(o.hold_since.load(Ordering::Acquire));
+        // Every slot, not only busy ones: a task preempted inside `busy`
+        // between storing its deadline and its state gets the shift too
+        // (an idle or free slot's deadline is rewritten before it counts).
         for i in (0..MAX_TASKS).filter(|&i| i != self.slot) {
-            if o.state[i].load(Ordering::Acquire) == BUSY {
-                o.deadline[i].fetch_add(held, Ordering::AcqRel);
-            }
+            o.deadline[i].fetch_add(held, Ordering::AcqRel);
         }
         o.holding.store(false, Ordering::Release);
         held
@@ -201,6 +206,37 @@ mod tests {
         link.hold_cpu(7_000);
         assert!(L.overdue(8_000));
         link.release_cpu(8_000);
+    }
+
+    #[test]
+    fn a_section_does_not_excuse_a_task_already_overdue() {
+        static L: Liveness = Liveness::new();
+        let link = L.register_preempting().unwrap();
+        let demo = L.register().unwrap();
+        demo.busy(1_000, 500);
+        assert!(L.overdue(1_600));
+        // The link starts a long erase after the demo is already stuck.
+        link.busy(1_600, 30_000);
+        link.hold_cpu(1_600);
+        assert!(L.overdue(1_700), "excused while the link holds the CPU");
+        assert!(L.overdue(10_000));
+        link.release_cpu(10_000);
+        assert!(L.overdue(10_000));
+    }
+
+    #[test]
+    fn a_deadline_stored_just_before_a_section_moves_with_it() {
+        static L: Liveness = Liveness::new();
+        let link = L.register_preempting().unwrap();
+        let demo = L.register().unwrap();
+        // The demo was preempted inside `busy`: deadline stored, state
+        // still idle when the section ran.
+        L.deadline[demo.slot].store(1_500, Ordering::Release);
+        link.hold_cpu(1_000);
+        link.release_cpu(6_000);
+        L.state[demo.slot].store(BUSY, Ordering::Release);
+        assert!(!L.overdue(6_499));
+        assert!(L.overdue(6_500));
     }
 
     #[test]

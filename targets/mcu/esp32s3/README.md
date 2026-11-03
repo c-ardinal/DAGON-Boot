@@ -130,8 +130,9 @@ ESP-IDF 2nd stage cannot be recovered this way.
   and the watch resets instead of hanging. The link task announces a budget
   for each request and is registered as preempting: only while it holds the
   CPU in a synchronous section (handling a request, a slot erase of up to
-  about 30 s, the CONFIRM check) its own deadline alone counts, and
-  afterwards the other tasks' deadlines move later by that section's length.
+  about 30 s, the CONFIRM check) the other tasks' deadlines are judged at
+  the start of the section (one already passed stays passed), and afterwards
+  they move later by that section's length.
   Time it spends awaiting (sending the reply, waiting for input) excuses
   nothing. ENTER_ROM stops the watchdogs before its reset (see above).
 - Both receivers drop a partial frame after 20 ms or more without a byte and

@@ -22,6 +22,9 @@ pub enum Skip {
     LinkKind,
     /// Beyond the eight nodes updating covers (the 親機 and its first seven 子機).
     TooMany,
+    /// No chain of links up to the first 親機 (unlinked, a loop of 子機, or
+    /// no 親機 at all).
+    Unreachable,
     /// The part updating would reach does not pass the checks on its own,
     /// so nothing is updated.
     CutInvalid,
@@ -35,6 +38,7 @@ impl Skip {
             Skip::Deep => "deep",
             Skip::LinkKind => "link-kind",
             Skip::TooMany => "too-many",
+            Skip::Unreachable => "unreachable",
             Skip::CutInvalid => "cut-invalid",
         }
     }
@@ -48,6 +52,7 @@ impl Skip {
             Skip::Deep => "it is below a 子機; updating reaches the 親機's direct 子機 only",
             Skip::LinkKind => "its link kind is not one updating can use yet (I2C or UART)",
             Skip::TooMany => "updating reaches the 親機 and its first 7 子機",
+            Skip::Unreachable => "no chain of links leads to it from the first 親機",
             Skip::CutInvalid => {
                 "the part updating would reach does not pass `dagon topo check` on its own"
             }
@@ -55,15 +60,19 @@ impl Skip {
     }
 }
 
-/// The part updating reaches, checked on its own.
+/// The part updating reaches, checked on its own. Every node of the 構成
+/// is in exactly one of `reach` and `skipped`.
 #[derive(Debug, Clone)]
 pub struct Cut {
     /// The updatable part; `None` when it does not pass the checks on its
     /// own (then every node is skipped with [`Skip::CutInvalid`]).
     pub topology: Option<Topology>,
+    /// Ids of the part's nodes in its order: the compiled topology's node
+    /// indices, the one list host, CLI and page take reach from.
+    pub reach: Vec<String>,
     /// Nodes updating leaves out, in `nodes` order, with why.
     pub skipped: Vec<(String, Skip)>,
-    /// `check` on the part (empty issues when it is the whole 構成's).
+    /// `check` on the part.
     pub report: Report,
 }
 
@@ -71,23 +80,27 @@ pub struct Cut {
 /// pass is never handed on as updatable.
 pub fn cut_with(reg: &Registry, t: &Topology) -> Cut {
     let (sub, skipped) = updatable(t);
+    checked(reg, t, sub, skipped)
+}
+
+fn checked(reg: &Registry, t: &Topology, sub: Topology, skipped: Vec<(String, Skip)>) -> Cut {
     let report = check_with(reg, &sub);
     if report.is_pushable() {
         return Cut {
+            reach: sub.nodes.iter().map(|n| n.id.clone()).collect(),
             topology: Some(sub),
             skipped,
             report,
         };
     }
-    let why = |id: &str| {
-        skipped
-            .iter()
-            .find(|(s, _)| s == id)
-            .map_or(Skip::CutInvalid, |(_, w)| *w)
-    };
     Cut {
         topology: None,
-        skipped: t.nodes.iter().map(|n| (n.id.clone(), why(&n.id))).collect(),
+        reach: Vec::new(),
+        skipped: t
+            .nodes
+            .iter()
+            .map(|n| (n.id.clone(), Skip::CutInvalid))
+            .collect(),
         report,
     }
 }
@@ -95,8 +108,8 @@ pub fn cut_with(reg: &Registry, t: &Topology) -> Cut {
 /// The updatable part of `t` and the nodes it leaves out, in `nodes` order.
 /// The first 親機 is always in it; its direct I2C/UART 子機 follow in
 /// `nodes` order up to eight nodes in all. The part keeps `nodes` order, so
-/// a 構成 updating reaches whole compiles to the same bytes as before. A
-/// node with no way to the first 親機 (V-05's) is left out without a skip.
+/// a 構成 updating reaches whole compiles to the same bytes as before.
+/// Every node not in the part is skipped with a reason.
 pub fn updatable(t: &Topology) -> (Topology, Vec<(String, Skip)>) {
     let first = t
         .nodes
@@ -114,7 +127,7 @@ pub fn updatable(t: &Topology) -> (Topology, Vec<(String, Skip)>) {
                 keep.insert(&n.id);
                 None
             }
-            Err(why) => why,
+            Err(why) => Some(why),
         };
         if let Some(why) = why {
             skipped.push((n.id.clone(), why));
@@ -166,28 +179,27 @@ pub fn updatable(t: &Topology) -> (Topology, Vec<(String, Skip)>) {
     (sub, skipped)
 }
 
-/// Ok when `id` is the first 親機 or one of its direct I2C/UART 子機;
-/// Err(None) when it has no way up to a 親機.
-fn skip_of(t: &Topology, first: Option<&str>, id: &str) -> Result<(), Option<Skip>> {
-    let n = t.node(id).ok_or(None)?;
+/// Ok when `id` is the first 親機 or one of its direct I2C/UART 子機; else why not.
+fn skip_of(t: &Topology, first: Option<&str>, id: &str) -> Result<(), Skip> {
+    let n = t.node(id).ok_or(Skip::Unreachable)?;
     if n.role == Role::Coordinator {
         return if Some(id) == first {
             Ok(())
         } else {
-            Err(Some(Skip::SecondHub))
+            Err(Skip::SecondHub)
         };
     }
-    let up = t.link_to(id).ok_or(None)?;
-    // No 親機 at all (V-03's): nothing is reached, and no reason but that.
-    first.ok_or(None)?;
-    if root_of(t, id) != first {
-        return Err(root_of(t, id).map(|_| Skip::SecondHub));
+    let up = t.link_to(id).ok_or(Skip::Unreachable)?;
+    // The chain must end at a 親機: unlinked, a loop of 子機, or no 親機 at all is unreachable.
+    let root = root_of(t, id).ok_or(Skip::Unreachable)?;
+    if Some(root) != first {
+        return Err(Skip::SecondHub);
     }
     if Some(up.from.as_str()) != first {
-        return Err(Some(Skip::Deep));
+        return Err(Skip::Deep);
     }
     if !up.kind.compiles() {
-        return Err(Some(Skip::LinkKind));
+        return Err(Skip::LinkKind);
     }
     Ok(())
 }
@@ -401,5 +413,156 @@ links:
             cut.skipped
         );
         assert_eq!(cut.skipped.len(), 3);
+        assert!(cut.reach.is_empty());
+    }
+
+    #[test]
+    fn a_loop_of_children_beside_the_hub_is_unreachable_not_reached() {
+        // a -> b -> a: each has its one link (V-05 passes), and no chain ends at a 親機.
+        let uart = |from: &str, to: &str| {
+            format!("  - from: {from}\n    to: {to}\n    kind: uart\n    iface: hw-uart0\n    pins: {{ tx: 0, rx: 1 }}\n    control:\n      kind: cooperative\n      rom_entry: force-download-boot\n")
+        };
+        let yaml = fan(1, false)
+            .replace(
+                "buses:",
+                "  - id: a\n    mcu: rp2040\n    role: node\n    port: self-boot\n    tag: a\n  - id: b\n    mcu: rp2040\n    role: node\n    port: self-boot\n    tag: b\nbuses:",
+            )
+            .replace("update:", &format!("{}{}update:", uart("a", "b"), uart("b", "a")))
+            .replace("order: [n0, hub]", "order: [n0, a, b, hub]");
+        let (_, cut) = checked(&yaml);
+        assert_eq!(cut.reach, ["hub", "n0"]);
+        assert_eq!(
+            cut.skipped,
+            [
+                ("a".to_string(), Skip::Unreachable),
+                ("b".to_string(), Skip::Unreachable)
+            ]
+        );
+        assert_partition(&parse_str(&yaml).unwrap(), &cut);
+    }
+
+    #[test]
+    fn a_topology_that_passes_with_a_part_that_does_not_reports_nothing_updatable() {
+        // The part is broken by hand (its 親機 taken out): the checked cut refuses it whole.
+        let t = parse_str(&fan(2, false)).unwrap();
+        assert!(check_with(Registry::builtin(), &t).is_pushable());
+        let (mut sub, skipped) = updatable(&t);
+        sub.nodes.retain(|n| n.role != Role::Coordinator);
+        let cut = super::checked(Registry::builtin(), &t, sub, skipped);
+        assert!(cut.topology.is_none() && cut.reach.is_empty());
+        assert_eq!(
+            cut.skipped,
+            [
+                ("hub".to_string(), Skip::CutInvalid),
+                ("n0".to_string(), Skip::CutInvalid),
+                ("n1".to_string(), Skip::CutInvalid),
+            ]
+        );
+    }
+
+    /// Every node is in exactly one of reach and skipped.
+    fn assert_partition(t: &Topology, cut: &Cut) {
+        let mut all: Vec<&str> = cut
+            .reach
+            .iter()
+            .map(String::as_str)
+            .chain(cut.skipped.iter().map(|(id, _)| id.as_str()))
+            .collect();
+        all.sort_unstable();
+        let mut ids: Vec<&str> = t.nodes.iter().map(|n| n.id.as_str()).collect();
+        ids.sort_unstable();
+        assert_eq!(all, ids);
+    }
+
+    /// A generated 構成: `count` nodes (the first `hubs` are 親機), each
+    /// 子機 linked from a random node (loops possible), listed shuffled with
+    /// h0 kept the first 親機.
+    fn generated(next: &mut impl FnMut(usize) -> usize) -> String {
+        let count = 2 + next(11);
+        let hubs = 1 + next(2);
+        let name = |i: usize| {
+            if i < hubs {
+                format!("h{i}")
+            } else {
+                format!("n{i}")
+            }
+        };
+        let mut nodes = Vec::new();
+        let mut links = Vec::new();
+        for i in 0..count {
+            let id = name(i);
+            if i < hubs {
+                nodes.push(format!("  - id: {id}\n    mcu: rp2040\n    board: waveshare-rp2040-touch-lcd-1.28\n    role: coordinator\n    port: self-boot\n    flash_map: rp2040-4m\n    tag: {id}\n"));
+                if i > 0 && next(2) == 0 {
+                    links.push(format!("  - from: h0\n    to: {id}\n    kind: can\n"));
+                }
+                continue;
+            }
+            nodes.push(format!("  - id: {id}\n    mcu: stm32f401re\n    board: nucleo-f401re\n    role: node\n    port: self-boot\n    flash_map: f401-default\n    tag: {id}\n"));
+            let p = next(count);
+            let parent = if p == i { "h0".to_string() } else { name(p) };
+            links.push(if parent == "h0" && next(4) > 0 {
+                format!("  - from: h0\n    to: {id}\n    kind: i2c\n    bus: i2c-main\n    addr: {}\n    node_pins: {{ sda: PB4, scl: PA8 }}\n    control:\n      kind: cooperative\n      rom_entry: stm32-i2c-rom\n", 0x10 + i)
+            } else if parent.starts_with('h') && next(3) == 0 {
+                format!("  - from: {parent}\n    to: {id}\n    kind: can\n")
+            } else {
+                format!("  - from: {parent}\n    to: {id}\n    kind: uart\n    iface: hw-uart0\n    pins: {{ tx: 0, rx: 1 }}\n    control:\n      kind: cooperative\n      rom_entry: stm32-i2c-rom\n")
+            });
+        }
+        let mut order: Vec<usize> = (0..count).collect();
+        for k in (1..count).rev() {
+            order.swap(k, next(k + 1));
+        }
+        let at_h0 = order.iter().position(|&x| x == 0).unwrap();
+        let first_hub = order.iter().position(|&x| x < hubs).unwrap();
+        order.swap(at_h0, first_hub);
+        let listed: String = order.iter().map(|&i| nodes[i].as_str()).collect();
+        let ids: Vec<String> = order
+            .iter()
+            .filter(|&&i| i != 0)
+            .map(|&i| name(i))
+            .chain(["h0".to_string()])
+            .collect();
+        format!(
+            "dagon: 1\nname: gen\nnodes:\n{listed}buses:\n  - id: i2c-main\n    kind: i2c\n    controller: i2c0\n    sda: 16\n    scl: 17\n    speed_hz: 400000\n    pullups: external\nlinks:\n{}update:\n  order: [{}]\n",
+            links.concat(),
+            ids.join(", ")
+        )
+    }
+
+    #[test]
+    fn for_generated_topologies_reach_is_the_compiled_order_and_every_node_is_told() {
+        use dagon_format::header::target_tag;
+        use dagon_format::topology::TopologyView;
+        // ponytail: a small LCG instead of a property-testing crate; 400 shapes.
+        let mut seed: u64 = 0x5eed_7090;
+        let mut next = |n: usize| {
+            seed = seed
+                .wrapping_mul(6364136223846793005)
+                .wrapping_add(1442695040888963407);
+            (seed >> 33) as usize % n
+        };
+        let reg = Registry::builtin();
+        let mut passed = 0;
+        for _ in 0..400 {
+            let yaml = generated(&mut next);
+            let t = parse_str(&yaml).unwrap();
+            if !check_with(reg, &t).is_pushable() {
+                continue;
+            }
+            passed += 1;
+            let cut = cut_with(reg, &t);
+            assert_partition(&t, &cut);
+            assert!(cut.reach.iter().any(|id| id == "h0"), "{yaml}");
+            let bin = crate::compile_with(reg, &t).unwrap();
+            let v = TopologyView::parse(&bin).unwrap();
+            let tags: Vec<_> = (0..v.node_count()).map(|i| v.node(i).target_tag).collect();
+            let want: Vec<_> = cut.reach.iter().map(|id| target_tag(id)).collect();
+            assert_eq!(tags, want, "{yaml}");
+        }
+        assert!(
+            passed > 100,
+            "only {passed} generated topologies passed check"
+        );
     }
 }

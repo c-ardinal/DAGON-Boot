@@ -588,7 +588,7 @@ fn topology_put(server: &Server, req: &Request) -> Res {
         sim.set_medium(m);
     }
     Ok(json_ok(
-        json!({ "report": report_json, "updatable": cut.as_ref().is_some_and(|c| c.topology.is_some()), "skipped": skipped_of(cut.as_ref()) }),
+        json!({ "report": report_json, "updatable": cut.as_ref().is_some_and(|c| c.topology.is_some()), "reach": cut.as_ref().map(|c| c.reach.clone()).unwrap_or_default(), "skipped": skipped_of(cut.as_ref()) }),
     ))
 }
 

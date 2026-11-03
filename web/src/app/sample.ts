@@ -41,7 +41,7 @@ export interface Node {
 export type UplinkHost = 'pc-cli' | 'browser' | 'embedded';
 
 /** dagon_topology::Skip codes: why updating does not reach a node yet. */
-export type Skip = 'second-hub' | 'deep' | 'link-kind' | 'too-many' | 'cut-invalid';
+export type Skip = 'second-hub' | 'deep' | 'link-kind' | 'too-many' | 'unreachable' | 'cut-invalid';
 
 export interface Wire {
   signal: string;
@@ -66,6 +66,12 @@ export interface Config {
   links: Link[];
   /** Node ids, children first and the hub last. */
   order: string[];
+  /**
+   * Ids of the nodes updating reaches, in the compiled topology's order
+   * (dagon_topology::cut_with through dagon-wasm): dagon-host's node index
+   * is the place here. Every other node carries `notYet`.
+   */
+  reach: string[];
 }
 
 const NRST_HEADER = 'NRST（ヘッダの位置: 未設定）';
@@ -106,6 +112,7 @@ export const DESK_DEMO: Config = {
     },
   ],
   order: ['seg', 'watch', 'hub'],
+  reach: ['hub', 'seg', 'watch'],
 };
 
 /** dagon-host target key of a node, as the mock and discovery name it. */

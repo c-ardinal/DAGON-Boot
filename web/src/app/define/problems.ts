@@ -2,7 +2,7 @@
 // check itself is dagon-topology's; this file only names each rule (S07),
 // says how to fix it (§11.2) and finds the item and field it points at.
 import { topo_check } from '../../wasm/dagon.ts';
-import { topo_skipped } from '../../wasm/pkg/dagon_wasm.js';
+import { topo_cut } from '../../wasm/pkg/dagon_wasm.js';
 import { RULE_FIX, RULE_SHORT, type FixWords } from '../copy.ts';
 import { boardMissing, flashTooSmall, MAX_NODES, type Doc } from './model.ts';
 
@@ -100,7 +100,7 @@ function boardIssues(doc: Doc): Issue[] {
 export function problems(doc: Doc): Problem[] {
   const text = JSON.stringify(doc.topo);
   const report = JSON.parse(topo_check(text)) as { issues: Issue[] };
-  const skipped = topo_skipped(text) as Record<string, string>;
+  const skipped = (topo_cut(text) as { skipped: Record<string, string> } | null)?.skipped ?? {};
   return [...report.issues, ...boardIssues(doc)]
     .map((i) => {
       const w = where(i.path, doc);

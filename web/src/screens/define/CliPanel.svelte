@@ -21,7 +21,7 @@
   const ready = $derived(cli.state === 'ready');
   const nodes = $derived(d.config.nodes);
   /** The nodes the project, build, sign and write work on: those updating reaches (the rest are skipped, V-23). */
-  const ids = $derived(nodes.filter((n) => !n.notYet).map((n) => n.id));
+  const ids = $derived(d.config.reach);
   /** Making and building the project: no errors (a part not updatable yet is information) and every board filled. */
   const clean = $derived(!d.problems.some((p) => p.severity === 'error' || p.rule === 'B-01'));
   const latest = (kind: string) => cli.jobs.find((j) => j.kind === kind);

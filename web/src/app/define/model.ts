@@ -2,7 +2,7 @@
 // shapes of dagon-topology's schema) plus the page-side display names. Every
 // edit is a pure function returning a new document, so undo keeps snapshots.
 // Validity is never decided here: topo_check (dagon-topology in WASM) does it.
-import { board_template, coordinator_capable, coordinator_uart0, link_kinds, rom_i2c_addrs, supported_mcus, topo_parse, topo_skipped } from '../../wasm/pkg/dagon_wasm.js';
+import { board_template, coordinator_capable, coordinator_uart0, link_kinds, rom_i2c_addrs, supported_mcus, topo_cut, topo_parse } from '../../wasm/pkg/dagon_wasm.js';
 import { supportedBoards, type Board } from '../../wasm/dagon.ts';
 import { INSPECT } from '../copy.ts';
 import type { Config, Link as GLink, Node as GNode, Skip, UplinkHost, Wire } from '../sample.ts';
@@ -490,7 +490,9 @@ export function toConfig(doc: Doc, boards: Board[]): Config {
     return depth(p, seen) + 1;
   };
   const yaml = toYaml(t);
-  const skipped = topo_skipped(yaml) as Record<string, Skip>;
+  // One source for reach: the checked cut (none while the 構成 has errors, which 運用 waits for).
+  const cut = topo_cut(yaml) as { reach: string[]; skipped: Record<string, Skip> } | null;
+  const skipped = cut?.skipped ?? {};
   const mcuTable = mcus();
   const nodes: GNode[] = t.nodes.map((n, i) => {
     const b = boards.find((x) => x.id === n.board);
@@ -536,6 +538,7 @@ export function toConfig(doc: Doc, boards: Board[]): Config {
   return {
     name: t.name,
     yaml,
+    reach: cut?.reach ?? [],
     nodes,
     links: glinks,
     order: t.update.order.filter((id) => t.nodes.some((n) => n.id === id)),

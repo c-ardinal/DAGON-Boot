@@ -289,6 +289,7 @@ export const NODE = {
     deep: '子機の先にあるため',
     'link-kind': 'このつながりの種類では、まだ届かないため',
     'too-many': '更新は親機とその子機 7 つまでのため',
+    unreachable: 'どの親機からもリンクがたどれないため',
     'cut-invalid': '更新が届く部分だけでは確認を通らないため（dagon topo check で理由を見られます）',
   } as Record<string, string>,
   notYetName: (why: string) => `まだ更新できない、${why}`,

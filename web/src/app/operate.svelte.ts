@@ -213,12 +213,13 @@ export class Operate {
   }
 
   /**
-   * The nodes updating reaches, in 構成 order: the compiled topology's
-   * nodes, so a node's topology index is its position here. The others
-   * (V-23) are drawn but never watched, updated or recovered.
+   * The nodes updating reaches, as the checked cut lists them (config.reach):
+   * the compiled topology's nodes, so a node's topology index is its place
+   * here. The others (V-23) are drawn but never watched, updated or recovered.
    */
   get reach(): Node[] {
-    return this.config?.nodes.filter((n) => !n.notYet) ?? [];
+    const c = this.config;
+    return c ? c.reach.flatMap((id) => c.nodes.filter((n) => n.id === id)) : [];
   }
 
   /** Answering nodes not yet on the chosen release's version (all answering ones before an update ran). */

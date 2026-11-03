@@ -173,4 +173,33 @@ describe('define document', () => {
     const ps = problems(setUplink(doc, 'hub', { kind: 'ble', host: 'browser' }));
     expect(ps.some((p) => p.rule === 'V-24')).toBe(true);
   });
+
+  test('for generated 構成 made by placing and connecting, reach is the cut in 構成 order and every other node says why', () => {
+    // ponytail: a small LCG over the editor's own operations; 60 shapes.
+    let seed = 0x7090;
+    const next = (n: number) => {
+      seed = (seed * 1103515245 + 12345) % 2 ** 31;
+      return seed % n;
+    };
+    const boards = ['waveshare-rp2040-touch-lcd-1.28', 'nucleo-f401re', 'm5stopwatch'];
+    let compiled = 0;
+    for (let k = 0; k < 60; k++) {
+      let doc = place(emptyDoc(), boards[0]).doc;
+      for (let i = 0, count = 1 + next(9); i < count; i++) {
+        const r = place(doc, boards[next(boards.length)]);
+        const ids = r.doc.topo.nodes.map((n) => n.id).filter((id) => id !== r.id);
+        doc = r.doc.topo.nodes.find((n) => n.id === r.id)!.role === 'coordinator' && next(2) ? r.doc : connect(r.doc, r.id, ids[next(ids.length)]);
+      }
+      const c = toConfig(doc, supportedBoards());
+      if (!check(toYaml(doc.topo)).ok) continue;
+      // Total and disjoint: each node is either reached or told why.
+      for (const n of c.nodes) expect(c.reach.includes(n.id), `${n.id} ${n.notYet}`).toBe(!n.notYet);
+      // The cut keeps 構成 order, so it is the nodes' order with the skipped ones left out.
+      expect(c.reach).toEqual(c.nodes.filter((n) => !n.notYet).map((n) => n.id));
+      expect(c.reach).toContain('hub');
+      expect(() => topo_compile(c.yaml)).not.toThrow();
+      compiled++;
+    }
+    expect(compiled).toBeGreaterThan(10);
+  });
 });

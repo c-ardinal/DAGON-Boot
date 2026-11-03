@@ -206,6 +206,7 @@ dependencies = [
  "dagon-mcu-stm32f401re",
  "embassy-executor",
  "embassy-stm32",
+ "embassy-time",
 ]
 
 [[package]]

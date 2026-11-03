@@ -6,7 +6,7 @@ version = "0.0.0"
 publish = false
 
 # DAGON board package for the NUCLEO-F401RE (topology board id
-# `nucleo-f401re`). Built for thumbv7em; host tests of the display text:
+# `nucleo-f401re`). Built for thumbv7em; host tests of the display text and expander writes:
 #   cargo test --no-default-features --target <host triple>
 [workspace]
 
@@ -15,7 +15,7 @@ board = "nucleo-f401re"
 
 [features]
 default = ["hal"]
-hal = ["dep:dagon-mcu-stm32f401re", "dep:embassy-stm32", "dep:embassy-executor"]
+hal = ["dep:dagon-mcu-stm32f401re", "dep:embassy-stm32", "dep:embassy-executor", "dep:embassy-time"]
 # Forwarded to the MCU package: link the app for APP slot B.
 slot-b = ["dagon-mcu-stm32f401re/slot-b"]
 # Forwarded to the MCU package: the conformance build.
@@ -26,3 +26,4 @@ dagon-format = { path = "../../../crates/dagon-format" }
 embassy-executor = { version = "0.10", optional = true }
 dagon-mcu-stm32f401re = { path = "../../mcu/stm32f401re", features = ["node"], optional = true }
 embassy-stm32 = { version = "0.6.0", features = ["stm32f401re"], optional = true }
+embassy-time = { version = "0.5", optional = true }

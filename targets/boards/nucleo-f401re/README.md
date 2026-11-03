@@ -1,22 +1,46 @@
 # dagon-board-nucleo-f401re
 
 DAGON board package for the NUCLEO-F401RE (topology board id
-`nucleo-f401re`). It implements the STM32F401RE MCU package's `BoardDef`.
+`nucleo-f401re`) with an X-NUCLEO-53L0A1 stacked on its Arduino headers. It
+implements the STM32F401RE MCU package's `BoardDef`.
 
 | Use | Pins |
 |---|---|
-| DAGON link: I2C3 target (SCL, SDA), address 0x42 | PA8 (D7), PB4 (D5) |
+| DAGON link: I2C3 target (SCL, SDA), address 0x42 (NC on the shield) | PA8 (D7), PB4 (D5) |
 | User LED LD2 | PA5 |
-| 7-segment a..g, dp (direct drive, high = on) | PA10, PB5, PA9, PC7, PB6, PA7, PA6, PA0 |
-| 7-segment digit selects (low = on) | PA1, PA4, PB0 |
+| Shield I2C1 (SCL, SDA), the display's bus | PB8 (D15), PB9 (D14) |
+| Shield centre VL53L0X GPIO1 (fitted; input only, not handed out) | PA4 (A2) |
+
+The shield's 4-digit display (common anode, static drive, a segment lights
+while its expander pin is low; no digit points wired) and the VL53L0X XSHUT
+lines hang off two STMPE1600 on I2C1 (ST UM2047 Figure 4):
+
+| Expander (7-bit) | GPIO 0..6 | GPIO 7..13 | GPIO 14 | GPIO 15 |
+|---|---|---|---|---|
+| U21 at 0x43 | digit 1 (left) | digit 2 | XSHUT left | XSHUT right |
+| U19 at 0x42 | digit 3 | digit 4 (right) | unused (input) | XSHUT centre |
+
+Within a digit, GPIO n+0..n+6 = segments e, f, g, a, d, b, c. Start-up
+writes (`shield::INIT`, levels before directions so nothing flashes):
+U19 GPSR (0x12) = 0x3FFF, GPDR (0x14) = 0xBFFF; U21 GPSR = 0x3FFF,
+GPDR = 0xFFFF: all segments off, all three sensors held in XSHUT. Each
+`show` then writes both GPSRs (U21, then U19). U19's 0x42 is on I2C1, not
+on DAGON's I2C3 bus.
 
 - `Board::split` gives DAGON the flash, the IWDG and the I2C3 link (with
   DMA1 streams 4 and 2; this package binds their interrupts), and the app
-  `Io`: LD2 and the 7-segment display pins.
-- `seg`: text for the 3-digit 7-segment display (host-testable:
-  `cargo test --no-default-features --target <host triple>`).
-- The 7-segment board's pin map is not confirmed yet (Arduino header pins
-  clear of I2C3, I2C2, LD2 and the ST-LINK UART).
+  `Io`: LD2, the display (`Display`: I2C1 with DMA1 streams 6 and 0) and
+  `Spare` (USART2 on PA2/PA3, B1 on PC13, ADC1 with PC0/PC1). I2C1 and
+  PA4 are not in `Spare`.
+- `Display::open` gives a `SegDisplay`; `show(codes).await` sets the
+  expanders up on first use and writes the digits, asynchronously in the
+  calling app task (its interrupts at P7, below DAGON's executor), each
+  write bounded by a 20 ms timeout. `running_version()` reads the running
+  image's version from its header.
+- `seg`: text for the 4 digits (host-testable with `shield`'s register
+  writes: `cargo test --no-default-features --target <host triple>`).
+  `seg::version` shows `major.minor.patch` (1.2.0 as `120`, no points),
+  `major.minor.` when that does not fit.
 - Flash: 512 KiB (`FLASH_SIZE`, checked against the MCU layout).
 
 Features: `slot-b`, `conform` (forwarded to the MCU package). See

@@ -14,7 +14,7 @@ from PIL import Image, ImageDraw, ImageFont
 
 CELL = 11
 # Every Japanese character of the state and phase words in src/screen.rs.
-CHARS = "確定試行中無応答巻戻し検証再起動拒否失敗署名不正鍵不一致非互換破損"
+CHARS = "確定試行中無応答巻き戻し検証再起動拒否失敗署名不正鍵不一致非互換破損"
 THRESHOLD = 110
 
 out = pathlib.Path(__file__).resolve().parent.parent / "src" / "glyphs.rs"

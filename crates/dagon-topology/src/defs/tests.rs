@@ -812,12 +812,14 @@ fn addresses_near_u32_max_are_errors_not_overflows() {
 
 #[test]
 fn the_json_form_round_trips_and_is_validated_again() {
-    // Doctor commands stay on this machine; everything else comes back.
+    // Doctor commands and package folders stay on this machine; everything
+    // else comes back.
     let without_doctor = |r: &Registry| -> Vec<McuDef> {
         r.mcus()
             .iter()
             .map(|m| McuDef {
                 doctor: Vec::new(),
+                package: None,
                 ..m.clone()
             })
             .collect()

@@ -390,6 +390,11 @@ pub struct McuDef {
     /// Filled on load from `slot_defs`.
     #[serde(skip)]
     pub slots: Vec<Slot>,
+    /// The folder of a project's own MCU package (its parts are built
+    /// there); `None` for builtin and source-tree definitions, found in the
+    /// DAGON source by id.
+    #[serde(skip)]
+    pub package: Option<std::path::PathBuf>,
 }
 
 impl McuDef {
@@ -442,6 +447,9 @@ pub struct BoardDef {
     /// Parts built from the board package itself.
     #[serde(default, rename = "part")]
     pub parts: Vec<Part>,
+    /// As [`McuDef::package`] (inline project boards have none).
+    #[serde(skip)]
+    pub package: Option<std::path::PathBuf>,
 }
 
 /// What a project-written string becomes wherever it would leave this

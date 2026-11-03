@@ -227,6 +227,9 @@ impl Registry {
         if own {
             let at = format!("{} (MCU '{}')", pkg.label(), m.id);
             super::project_text::mcu(&mut m).or_else(|e| err(&at, e))?;
+            if let Pkg::Dir(dir) = pkg {
+                m.package = Some(dir.clone());
+            }
         }
         let files = match &m.partitions {
             Some(rel) => vec![(rel.clone(), pkg.text(rel)?)],
@@ -253,6 +256,9 @@ impl Registry {
         if own {
             let at = format!("{} (board '{}')", pkg.label(), b.id);
             super::project_text::board(&mut b).or_else(|e| err(&at, e))?;
+            if let Pkg::Dir(dir) = pkg {
+                b.package = Some(dir.clone());
+            }
         }
         self.boards.push(b);
         self.board_origins.push(origin);

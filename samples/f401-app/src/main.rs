@@ -107,7 +107,8 @@ fn main() -> ! {
     );
 
     let high = dagon_mcu_stm32f401re::exec::start();
-    high.spawn(node::serve(agent, target, regs, &GUARD, task::SERVE).unwrap());
+    let link = dagon_mcu_stm32f401re::links::I2c::new(target, regs);
+    high.spawn(node::serve(agent, link, &GUARD, task::SERVE).unwrap());
 
     low.run(|s| {
         s.spawn(display(io.display, splash, seg::version(version)).unwrap());

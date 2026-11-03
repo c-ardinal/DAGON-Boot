@@ -14,7 +14,6 @@ use dagon_proto::{flags, max_payload, Cmd, Frame, Status, HEADER_LEN, MAX_FRAME}
 use embassy_executor::Spawner;
 use embassy_rp::peripherals::USB;
 use embassy_rp::Peri;
-use embassy_time::Timer;
 use heapless::Vec;
 
 use super::nodes::{self, SubNode};
@@ -25,8 +24,9 @@ use crate::arm::step;
 use crate::cmd;
 use crate::node::AppAgent;
 use crate::sub::SubLines;
-use crate::usb::{self, CdcLink, REBOOT_DELAY};
+use crate::usb;
 use crate::watchdog::Watch;
+use dagon_mcu_common::link::Link;
 
 /// I2C_RAW target: the STM32 ROM bootloader.
 const ROM_ADDR: u8 = 0x39;
@@ -62,16 +62,22 @@ pub async fn task(
     serve(pc, link).await
 }
 
-async fn serve(mut pc: Pc, mut link: CdcLink) -> ! {
+/// Serves the PC over the uplink, whatever its kind.
+async fn serve<L: Link>(mut pc: Pc, mut up: L) -> ! {
     pc.publish(true);
+    let max = up.max_payload();
     loop {
         pc.watch.idle(task::PC);
-        let request = link.read_frame().await;
+        let read = up.read_frame().await;
         pc.watch.busy(task::PC);
-        let (out, reboot) = pc.handle(request).await;
-        let _ = link.write_frame(&pc.resp[..out]).await;
+        let Ok(request) = read else {
+            continue;
+        };
+        let (out, reboot) = pc.handle(request, max).await;
+        let _ = up.write_frame(&pc.resp[..out]).await;
         if reboot {
-            Timer::after(REBOOT_DELAY).await;
+            // The reply leaves before the reset drops the link.
+            let _ = up.flush().await;
             pc.watch.reboot();
         }
     }
@@ -90,9 +96,9 @@ impl Pc {
 
     /// Answers one request into `self.resp`; returns its length (0: no
     /// answer) and whether to reboot after sending it.
-    async fn handle(&mut self, request: &[u8]) -> (usize, bool) {
+    async fn handle(&mut self, request: &[u8], max: usize) -> (usize, bool) {
         step(14);
-        let Ok((f, _)) = Frame::decode(request, max_payload::USB) else {
+        let Ok((f, _)) = Frame::decode(request, max) else {
             return (0, false);
         };
         let is_request = f.flags & (flags::RESP | flags::EVENT) == 0;

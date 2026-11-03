@@ -205,6 +205,8 @@ export const CANVAS = {
   layerL1: 'L1 親機',
   layerL2: 'L2 子機',
   pc: 'このパソコン（ブラウザ）',
+  /** L0 by the 親機's declared uplink host (案). */
+  pcBy: { 'pc-cli': 'パソコン（dagon）', browser: 'ブラウザ（パソコン・スマホ）', embedded: '自作の機器' } as Record<string, string>,
   /** S01 */
   hubSlot: '親機を置く場所',
   nodeSlot: '子機を置く場所',
@@ -231,8 +233,10 @@ export const NODE = {
   roleHub: '親機',
   roleNode: '子機',
   mcu: 'MCU',
-  /** The hub's own connection line. */
+  /** The hub's own connection line: its uplink kind and what drives it (案 beyond USB（パソコン）). */
   usb: 'USB（パソコン）',
+  uplinkVia: (kind: string, host: string) =>
+    `${kind}（${({ 'pc-cli': 'パソコン', browser: 'ブラウザ', embedded: '自作の機器' } as Record<string, string>)[host] ?? 'パソコン'}）`,
   /** S03 pin headings and the no-wire value. */
   reset: 'リセット',
   boot: '起動',
@@ -475,6 +479,7 @@ export const RULE_SHORT: Record<string, string> = {
   'V-21': 'I2C でつなげないノード',
   'V-22': 'リセット・起動の配線 未設定',
   'V-23': 'まだ更新できない構成',
+  'V-24': 'まだ使えないつながり',
   /** Checked by the page (dagon.toml's [board.<id>]), not by dagon-topology. */
   'B-01': 'ボード 未設定',
   'B-02': '容量が足りない',
@@ -514,6 +519,7 @@ export const RULE_FIX: Record<string, (w: FixWords) => string> = {
   'V-21': (w) => `${w.to}は UART でつないでください。`,
   'V-22': (w) => `最後の手段で復旧するには、『直す』で ${w.to}のリセット・起動の配線を設定してください（このままでも親機へ送れます）。`,
   'V-23': () => '更新するには、親機を 1 つにして子機を親機へ直接つないでください（このままでも書き出せます）。',
+  'V-24': (w) => `${w.to ? `${w.to}の` : ''}つながりは、まだ使えない種類です。プロジェクトを作るには、使える種類を選んでください（このままでも保存できます）。`,
   'B-01': (w) => `『直す』で ${w.to}のボードの容量を入れてください。`,
   'B-02': (w) => `${w.to}は容量が ${w.size ?? ''} 以上のボードにしてください。`,
 };
@@ -623,7 +629,19 @@ export const INSPECT = {
   flashSize: 'フラッシュ容量',
   flashHelp: 'ボードの資料にある大きさ',
   boardUnset: '▲ ボード 未設定',
-  kindsMore: { can: 'CAN（親機どうし）', ethernet: 'Ethernet（親機どうし）' } as Record<string, string>,
+  kindsMore: {
+    can: 'CAN（親機どうし）',
+    ethernet: 'Ethernet（親機どうし）',
+    'usb-cdc': 'USB',
+    ble: 'BLE',
+    'wifi-tcp': 'Wi-Fi（TCP）',
+  } as Record<string, string>,
+  /** The 親機's hop towards the PC (案). */
+  uplink: 'パソコン側のつながり',
+  uplinkHost: 'つなぐ先',
+  hosts: { 'pc-cli': 'パソコンの dagon', browser: 'ブラウザ（パソコン・スマートフォン）', embedded: '自作の機器' } as Record<string, string>,
+  /** On a kind the firmware does not implement yet (案). */
+  notYet: 'まだ使えない',
 } as const;
 
 /** SC-T: the table view (S03 words in its cells). */
@@ -766,6 +784,11 @@ export const SAVE = {
   unsaved: '● 未保存',
   /** 422: the CLI's own check refused the 構成. */
   invalid: { chip: '× 保存できない', sentence: '問題を直してから、もう一度保存してください。' },
+  /** 422 in dagon demo: an uplink the demo cannot simulate (案). */
+  demoLink: {
+    chip: '× デモでは使えないつながり',
+    sentence: 'デモで試せる親機のつながりは USB・UART・Wi-Fi（つなぐ先はパソコンかブラウザ）です。そのどれかを選んでください。',
+  },
   /** 409: a job holds the project. */
   busy: { chip: '× 作業中', sentence: '作業が終わってから、もう一度保存してください。' },
   failed: { chip: '× 保存できない', sentence: 'ターミナルで dagon serve が動いているか確かめてから、もう一度保存してください。' },
@@ -807,6 +830,14 @@ export const START = {
   exists: { chip: '× 作れない', sentence: 'まだ無いフォルダの名前を入れてください。' },
   /** S46: a folder with a 構成 but no dagon.toml. */
   initAsk: 'このフォルダに dagon.toml を作りますか。',
+} as const;
+
+/** `dagon demo`: the simulated desk, marked wherever the page is (案). */
+export const SIM = {
+  badge: '模擬',
+  label: '模擬の親機と子機（実機ではありません）',
+  /** Before connecting: no device list appears for the simulated 親機. */
+  connect: { sentence: '模擬の親機につなぎます。機器を選ぶ一覧は出ません。' },
 } as const;
 
 /** SC-M メニュー and its one confirmation (M53). */

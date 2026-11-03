@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { CLI_NONE, HELP, HUB, HUB_NAME, HUB_TOGGLE, MENU, MODE, ORDER, PRODUCT, STEP } from '../app/copy.ts';
+  import { CLI_NONE, HELP, HUB, HUB_NAME, HUB_TOGGLE, MENU, MODE, ORDER, PRODUCT, SIM, STEP } from '../app/copy.ts';
   import type { HubState, Step } from '../app/machine.ts';
 
   interface Props {
@@ -29,6 +29,8 @@
     onhub?: () => void;
     /** Why the toggle cannot be used now (it stays focusable; pressing it shows this in the band). */
     hubLocked?: string | null;
+    /** `dagon demo`: the hub is simulated (模擬, always shown). */
+    sim?: boolean;
   }
 
   let {
@@ -49,6 +51,7 @@
     done = false,
     onhub,
     hubLocked = null,
+    sim = false,
   }: Props = $props();
   const now = $derived(step === null ? null : STEP.of3(step));
   /** Position of the current step; recovery happens in the third (更新). */
@@ -66,6 +69,7 @@
 
 <header>
   <span class="product" translate="no"><img class="mark" src="./icons/favicon-48.png" alt="" width="24" height="24" />{PRODUCT}</span>
+  {#if sim}<span class="sim" role="note" aria-label={SIM.label} title={SIM.label}>{SIM.badge}</span>{/if}
   {#if onmode}
     <div class="modes" role="radiogroup" aria-label={MODE.label}>
       {#each [['operate', MODE.operate], ['define', MODE.define]] as const as [m, label] (m)}
@@ -225,6 +229,17 @@
   }
   .cli {
     color: var(--c-muted);
+  }
+  /* 模擬: on the paper, not the signal colour (it is no fault), and never
+     animated: it is on screen the whole demo. */
+  .sim {
+    padding: var(--s-1) var(--s-3);
+    border: 1px dashed var(--c-ink);
+    border-radius: var(--r-full);
+    background: var(--c-paper);
+    color: var(--c-ink);
+    font: 700 var(--t-small-size) / 1 var(--f-ja);
+    letter-spacing: 0.08em;
   }
   .help {
     grid-area: help;

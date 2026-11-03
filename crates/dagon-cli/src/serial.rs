@@ -78,6 +78,14 @@ impl Serial {
 
 impl Transport for Serial {
     type Error = io::Error;
+    /// The hub's USB CDC port (a UART adapter would carry less and stay
+    /// across a reboot).
+    fn max_payload(&self) -> usize {
+        dagon_proto::max_payload::USB
+    }
+    fn reconnect_kind(&self) -> dagon_host::Reconnect {
+        dagon_host::Reconnect::Reopen
+    }
 
     async fn write(&mut self, bytes: &[u8]) -> io::Result<()> {
         let r = self.port().and_then(|p| p.write_all(bytes));

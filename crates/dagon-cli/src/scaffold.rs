@@ -371,7 +371,68 @@ mod templates {
 }
 
 /// Fills `{{node}}`, `{{tag}}` and `{{dep:<package>}}` in a template file.
-fn render(text: &str, n: &Node, src: &DagonSource, base: &Path) -> Result<String, String> {
+/// The variant of `dagon_mcu_<mcu>::links::Kind` for a link kind (the MCU
+/// packages' generator contract, "Links").
+fn kind_variant(k: LinkKind) -> &'static str {
+    match k {
+        LinkKind::UsbCdc => "UsbCdc",
+        LinkKind::Uart => "Uart",
+        LinkKind::I2c => "I2c",
+        LinkKind::Ble => "Ble",
+        LinkKind::WifiTcp => "WifiTcp",
+        LinkKind::Ethernet => "Ethernet",
+        LinkKind::Can => "Can",
+    }
+}
+
+/// `{{uplink}}` and `{{downlinks}}` of node `n`: its uplink kind (a 親機's
+/// declared one, else USB CDC; a 子機's link from its 親機) and its
+/// downlink kinds, as Rust paths into its MCU package. A hop its firmware
+/// does not implement yet is refused here, by name.
+pub fn hop_placeholders(t: &Topology, n: &Node) -> Result<(String, String), String> {
+    use dagon_topology::links::{available, known, Dir};
+    let krate = format!("dagon_mcu_{}", n.mcu.replace('-', "_"));
+    let path = |k: LinkKind| format!("{krate}::links::Kind::{}", kind_variant(k));
+    let refuse = |hop: String, k: LinkKind| {
+        format!(
+            "{hop} over {}: not available yet on {} (choose another kind in the 構成)",
+            k.name(),
+            n.mcu
+        )
+    };
+    let can = |k: LinkKind, d: Dir| !known(&n.mcu) || available(&n.mcu, d).contains(&k);
+    let (up, hop) = match n.role {
+        Role::Coordinator => (Topology::uplink(n).kind, format!("uplink of {}", n.id)),
+        Role::Node => {
+            let l = t
+                .link_to(&n.id)
+                .ok_or_else(|| format!("no link reaches {} from its 親機", n.id))?;
+            (l.kind, format!("link {} -> {}", l.from, l.to))
+        }
+    };
+    if !can(up, Dir::Up) {
+        return Err(refuse(hop, up));
+    }
+    let mut down: Vec<LinkKind> = Vec::new();
+    for l in t.links.iter().filter(|l| l.from == n.id) {
+        if !can(l.kind, Dir::Down) {
+            return Err(refuse(format!("link {} -> {}", l.from, l.to), l.kind));
+        }
+        if !down.contains(&l.kind) {
+            down.push(l.kind);
+        }
+    }
+    let downs: Vec<String> = down.into_iter().map(path).collect();
+    Ok((path(up), downs.join(", ")))
+}
+
+fn render(
+    text: &str,
+    n: &Node,
+    hops: &(String, String),
+    src: &DagonSource,
+    base: &Path,
+) -> Result<String, String> {
     // Package lines first, so a tag cannot add placeholders; the tag goes
     // into string literals and comments, escaped as in a Rust string.
     let mut out = text.to_string();
@@ -385,7 +446,11 @@ fn render(text: &str, n: &Node, src: &DagonSource, base: &Path) -> Result<String
         out.replace_range(at..end + 2, &line);
     }
     let tag = n.tag.escape_debug().to_string();
-    Ok(out.replace("{{node}}", &n.id).replace("{{tag}}", &tag))
+    Ok(out
+        .replace("{{node}}", &n.id)
+        .replace("{{tag}}", &tag)
+        .replace("{{uplink}}", &hops.0)
+        .replace("{{downlinks}}", &hops.1))
 }
 
 /// Whether a dependency is a DAGON board or MCU package, by its effective
@@ -566,7 +631,12 @@ fn refresh_manifest(
 }
 
 /// The template files of node `n` (rendered), or why there are none.
-fn node_files(n: &Node, src: &DagonSource, base: &Path) -> Result<Vec<(String, String)>, String> {
+fn node_files(
+    t: &Topology,
+    n: &Node,
+    src: &DagonSource,
+    base: &Path,
+) -> Result<Vec<(String, String)>, String> {
     let want = want_of(n);
     // The release's checkout (fetched by cargo) or the local clone: the
     // templates come from the same version the crates depend on.
@@ -580,11 +650,12 @@ fn node_files(n: &Node, src: &DagonSource, base: &Path) -> Result<Vec<(String, S
         )
     })?;
     let name = f.name;
+    let hops = hop_placeholders(t, n)?;
     let files = template_for(&name, Some(&f.dir))
         .ok_or_else(|| format!("{name} has no project template yet"))?;
     files
         .into_iter()
-        .map(|(rel, text)| Ok((rel, render(&text, n, src, base)?)))
+        .map(|(rel, text)| Ok((rel, render(&text, n, &hops, src, base)?)))
         .collect()
 }
 
@@ -611,7 +682,9 @@ pub fn gen(
         if !only.is_empty() && !only.contains(&n.id) {
             continue;
         }
-        let files = match node_files(n, src, base) {
+        // A hop its firmware cannot do yet stops gen, by name.
+        hop_placeholders(t, n)?;
+        let files = match node_files(t, n, src, base) {
             Ok(f) => f,
             Err(e) => {
                 r.skipped.push((n.id.clone(), e));

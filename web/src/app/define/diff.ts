@@ -2,7 +2,7 @@
 // page — nodes only on one side, a different MCU, board or role, and links of
 // another kind, address or pins. Rows for the SC-O4 table and the graph chips.
 import { DIFF, INSPECT } from '../copy.ts';
-import type { TLink, TNode, Topo } from './model.ts';
+import { KIND_LABEL, type TLink, type TNode, type Topo } from './model.ts';
 
 export interface DiffRow {
   /** The node (呼び名) or link ("メイン → 7セグ") the row is about. */
@@ -28,7 +28,7 @@ function linkText(l: TLink | undefined): string {
       ? ['I2C', hex(l.addr)]
       : l.kind === 'uart'
         ? ['UART', String(l.baud ?? ''), pins(l.pins?.tx, l.pins?.rx)]
-        : [l.kind === 'can' ? 'CAN' : 'Ethernet'];
+        : [KIND_LABEL[l.kind]];
   const control = pins(l.control?.nrst, l.control?.boot);
   return [...parts, control && `${INSPECT.reset}/${INSPECT.boot} ${control}`].filter(Boolean).join(' · ');
 }

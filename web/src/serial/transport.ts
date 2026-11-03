@@ -22,7 +22,14 @@ export type ReconnectNote =
  * The page owns choosing and opening the device; protocol steps live in
  * dagon-host.
  */
+/** What the link to the hub does while the hub reboots: goes away and is opened again, or stays. */
+export type ReconnectKind = 'reopen' | 'stays';
+
 export interface Transport {
+  /** Largest frame payload of this link (USB CDC when absent). */
+  maxPayload?(): number;
+  /** What the link does while the hub reboots (reopen when absent). */
+  reconnectKind?(): ReconnectKind;
   open(): Promise<void>;
   close(): Promise<void>;
   /** Sends one complete frame. */
@@ -133,6 +140,15 @@ export class FrameQueue {
 const CDC_BAUD = 115200;
 
 export class WebSerialTransport implements Transport {
+  /** Web Serial reaches the hub's USB CDC port, which goes away on its reboot. */
+  maxPayload(): number {
+    return MAX_PAYLOAD_USB;
+  }
+
+  reconnectKind(): ReconnectKind {
+    return 'reopen';
+  }
+
   private readonly queue = new FrameQueue();
   private reader: ReadableStreamDefaultReader<Uint8Array> | null = null;
   private pump: Promise<void> | null = null;

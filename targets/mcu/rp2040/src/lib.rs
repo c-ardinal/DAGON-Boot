@@ -29,6 +29,7 @@ pub use dagon_mcu_common::{frames, liveness, mapped, tag, uart};
 pub mod bl;
 pub mod cmd;
 pub mod image;
+pub mod kinds;
 pub mod layout;
 pub mod nodes;
 pub mod status;

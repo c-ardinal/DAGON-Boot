@@ -5,7 +5,7 @@
   </picture>
 </p>
 
-# DAGON Boot (Dual-bank Atomic Gateway for On-device Nodes)
+# DAGON Boot (DIY Assured-update Gateway for Own Nodes)
 
 [English: README.md](README.md)
 

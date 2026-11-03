@@ -548,6 +548,53 @@ slot-b = []
 }
 
 #[test]
+fn a_projects_own_words_reach_the_page_only_as_plain_names() {
+    let a = start("plain");
+    let toml = std::fs::read_to_string(a.dir.join("dagon.toml")).unwrap();
+    let secret = "C:/Users/me/sk-ant-FAKE:TOKEN";
+    std::fs::write(
+        a.dir.join("dagon.toml"),
+        format!(
+            "{toml}\n[board.desk-pico]\nproduct = \"{secret}\"\nmcu = \"rp2040\"\n\
+             flash_bytes = 0x40_0000\ndrawing = \"pico\"\n\
+             header = [{{ pin = \"GPIO4\", label = \"{secret}\" }}]\n\
+             default_link = {{ kind = \"i2c\", addr = 0x44, control = \"full\" }}\n\
+             [board.desk-two]\nproduct = \"Desk Two\"\nmcu = \"rp2040\"\n\
+             flash_bytes = 0x40_0000\ndrawing = \"pico\"\n\
+             default_link = {{ kind = \"i2c\", addr = 0x45, control = \"full\" }}\n"
+        ),
+    )
+    .unwrap();
+    let ok = [("Authorization", auth(&a))];
+    let ok: Vec<(&str, &str)> = ok.iter().map(|(k, v)| (*k, v.as_str())).collect();
+    for route in ["/v1/targets", "/v1/definitions", "/v1/hello"] {
+        let (st, body) = http(&a, "GET", route, &ok, b"");
+        assert_eq!(st, 200, "{route}: {body}");
+        assert!(
+            !body.contains("sk-ant") && !body.contains("Users"),
+            "{route}: {body}"
+        );
+    }
+    let (_, body) = http(&a, "GET", "/v1/targets", &ok, b"");
+    let v: serde_json::Value = serde_json::from_str(&body).unwrap();
+    let product = |id: &str| {
+        v["boards"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|b| b["id"] == id)
+            .map(|b| b["product"].clone())
+    };
+    assert_eq!(product("desk-pico"), Some("project-text".into()));
+    assert_eq!(product("desk-two"), Some("Desk Two".into()));
+    // Builtin boards keep their own product names.
+    assert_eq!(
+        product("waveshare-rp2040-touch-lcd-1.28"),
+        Some("Waveshare RP2040-Touch-LCD-1.28".into())
+    );
+}
+
+#[test]
 fn the_page_built_into_dagon_is_served_with_the_release_key() {
     assert!(
         super::api::page_embedded(),

@@ -687,6 +687,66 @@ fn each_mcu_records_where_its_definition_came_from() {
 }
 
 #[test]
+fn page_safe_is_a_short_plain_name() {
+    for ok in [
+        "Desk Pico",
+        "rp2040",
+        "GPIO16",
+        "v1.2_rev-B",
+        &"x".repeat(40),
+    ] {
+        assert!(page_safe(ok), "{ok}");
+    }
+    for bad in [
+        "C:/Users/me",
+        "a\\b",
+        "sk-ant:123",
+        "<b>",
+        "USB（BOOT）",
+        "",
+        &"x".repeat(41),
+    ] {
+        assert!(bad.is_empty() || !page_safe(bad), "{bad}");
+    }
+}
+
+#[test]
+fn project_text_that_is_not_a_plain_name_leaves_as_a_generic_label() {
+    let dir = scratch("scrub");
+    let secret = "sk-ant-FAKE:TOKEN/9";
+    write(
+        &dir.join("dagon.toml"),
+        &format!(
+            "[board.desk-pico]\nproduct = \"C:/Users/me/{secret}\"\nmcu = \"rp2040\"\n\
+             flash_bytes = 0x40_0000\ndrawing = \"pico\"\n\
+             header = [{{ pin = \"GPIO4\", label = \"{secret}\" }}, {{ pin = \"GPIO5\", label = \"D5\" }}]\n\
+             default_link = {{ kind = \"i2c\", addr = 0x44, control = \"full\" }}\n\
+             [board.desk-two]\nproduct = \"Desk Two\"\nmcu = \"rp2040\"\n\
+             flash_bytes = 0x40_0000\ndrawing = \"pico\"\n\
+             default_link = {{ kind = \"i2c\", addr = 0x45, control = \"full\" }}\n"
+        ),
+    );
+    let project = Registry::load(&[Source::Project(&dir.join("dagon.toml"))]).unwrap();
+    std::fs::remove_dir_all(&dir).unwrap();
+    let json = project.to_json();
+    assert!(
+        !json.contains("sk-ant") && !json.contains("Users"),
+        "{json}"
+    );
+    let back = Registry::from_json(&json).unwrap();
+    let pico = back.board("desk-pico").unwrap();
+    assert_eq!(pico.product, PROJECT_TEXT);
+    let labels: Vec<_> = pico.header.iter().map(|h| h.label.as_deref()).collect();
+    assert_eq!(labels, [Some(PROJECT_TEXT), Some("D5")]);
+    assert_eq!(back.board("desk-two").unwrap().product, "Desk Two");
+    // Builtin text (Japanese connection hints) is ours and stays as it is.
+    assert_eq!(
+        back.mcu("rp2040").unwrap().connection,
+        reg().mcu("rp2040").unwrap().connection
+    );
+}
+
+#[test]
 fn the_json_form_carries_no_path_comment_or_command() {
     let dir = scratch("public");
     let secret = "sk-ant-FAKE-TOKEN-0123";

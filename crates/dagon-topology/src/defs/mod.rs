@@ -413,6 +413,22 @@ pub struct BoardDef {
     pub parts: Vec<Part>,
 }
 
+/// What a project-written string becomes wherever it would leave this
+/// process unchecked (the page, a serve response).
+pub const PROJECT_TEXT: &str = "project-text";
+
+/// The most a project-written string may be to reach the page as it is.
+const PAGE_SAFE_MAX: usize = 40;
+
+/// Whether a project-written string may reach the page as it is: at most
+/// 40 characters of `A-Z a-z 0-9`, space, `.`, `_`, `-` (no path, no
+/// markup, nothing a token or an address hides in comfortably).
+pub fn page_safe(s: &str) -> bool {
+    s.len() <= PAGE_SAFE_MAX
+        && s.bytes()
+            .all(|b| b.is_ascii_alphanumeric() || matches!(b, b' ' | b'.' | b'_' | b'-'))
+}
+
 /// Where an MCU definition was read from. Commands a [`Origin::Project`]
 /// definition names (doctor probes and fixes) never run without the user's
 /// explicit confirmation.

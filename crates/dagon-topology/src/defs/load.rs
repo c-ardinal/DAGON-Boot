@@ -4,7 +4,10 @@
 use std::fmt;
 use std::path::{Component, Path, PathBuf};
 
-use super::{BoardDef, McuDef, Origin, Part, Partition, Placement, Registry, Slot, Writer, HEADER};
+use super::{
+    page_safe, BoardDef, McuDef, Origin, Part, Partition, Placement, Registry, Slot, Writer,
+    HEADER, PROJECT_TEXT,
+};
 
 pub const MCU_FILE: &str = "dagon-mcu.toml";
 pub const BOARD_FILE: &str = "dagon-board.toml";
@@ -252,14 +255,22 @@ fn file_refs(files: &[(String, String)]) -> Vec<(&str, &str)> {
 /// comments and without `[[doctor]]` (commands stay on this machine), and
 /// referenced text files lose their comment lines.
 pub(super) fn public_json(reg: &Registry) -> String {
-    let public = |kind: &str, id: &str, origin: Origin, s: &DefSource| DefSource {
-        label: format!("{} {kind} {id}", origin.as_str()),
-        toml: public_toml(&s.toml),
-        files: s
-            .files
-            .iter()
-            .map(|(n, t)| (n.clone(), uncommented(t)))
-            .collect(),
+    let public = |kind: &str, id: &str, origin: Origin, s: &DefSource| {
+        let scrub = origin == Origin::Project;
+        let id = if !scrub || page_safe(id) {
+            id
+        } else {
+            PROJECT_TEXT
+        };
+        DefSource {
+            label: format!("{} {kind} {id}", origin.as_str()),
+            toml: public_toml(&s.toml, scrub),
+            files: s
+                .files
+                .iter()
+                .map(|(n, t)| (n.clone(), public_text_file(t, scrub)))
+                .collect(),
+        }
     };
     let all = JsonForm {
         mcus: (reg.mcus.iter().zip(&reg.mcu_origins).zip(&reg.mcu_sources))
@@ -277,17 +288,43 @@ pub(super) fn public_json(reg: &Registry) -> String {
 }
 
 /// A loaded definition's TOML, re-written: values only, no `doctor`.
-fn public_toml(text: &str) -> String {
+/// With `scrub` (a project's definition), every string that is not
+/// [`page_safe`] becomes [`PROJECT_TEXT`].
+fn public_toml(text: &str, scrub: bool) -> String {
     let mut t: toml::Table = toml::from_str(text).expect("a loaded definition parses");
     t.remove("doctor");
-    toml::to_string(&t).expect("a table serialises")
+    let mut v = toml::Value::Table(t);
+    if scrub {
+        scrub_value(&mut v);
+    }
+    toml::to_string(&v).expect("a table serialises")
 }
 
-/// `text` without its `#` comment lines.
-fn uncommented(text: &str) -> String {
+fn scrub_value(v: &mut toml::Value) {
+    match v {
+        toml::Value::String(s) if !page_safe(s) => *s = PROJECT_TEXT.into(),
+        toml::Value::Array(a) => a.iter_mut().for_each(scrub_value),
+        toml::Value::Table(t) => t.iter_mut().for_each(|(_, v)| scrub_value(v)),
+        _ => {}
+    }
+}
+
+/// `text` without its `#` comment lines; with `scrub`, each comma-separated
+/// field that is not [`page_safe`] becomes [`PROJECT_TEXT`] (the same
+/// replacement as in the TOML, so references still meet).
+fn public_text_file(text: &str, scrub: bool) -> String {
     text.lines()
         .filter(|l| !l.trim_start().starts_with('#'))
-        .map(|l| format!("{l}\n"))
+        .map(|l| {
+            if !scrub {
+                return format!("{l}\n");
+            }
+            let fields: Vec<&str> = l
+                .split(',')
+                .map(|f| if page_safe(f.trim()) { f } else { PROJECT_TEXT })
+                .collect();
+            format!("{}\n", fields.join(","))
+        })
         .collect()
 }
 

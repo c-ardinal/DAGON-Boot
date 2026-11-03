@@ -7,7 +7,7 @@
 
 use std::process::Command;
 
-use dagon_topology::defs::{DoctorCheck, Expect, Origin, Registry};
+use dagon_topology::defs::{page_safe, DoctorCheck, Expect, Origin, Registry, PROJECT_TEXT};
 
 use crate::config::{read_topology, Config, Opts};
 
@@ -22,6 +22,8 @@ struct Check {
     for_mcu: Vec<String>,
     /// Defined by the project: its commands run only once the user agrees.
     ask: bool,
+    /// Its place (from 1) among its first MCU's `[[doctor]]` entries.
+    index: usize,
 }
 
 fn rust(what: &str) -> Check {
@@ -35,6 +37,7 @@ fn rust(what: &str) -> Check {
         },
         for_mcu: Vec::new(),
         ask: false,
+        index: 0,
     }
 }
 
@@ -47,7 +50,7 @@ fn checks(reg: &Registry, mcus: &[String]) -> Vec<Check> {
     wanted.sort_by_key(|m| m.wire_id);
     for m in wanted {
         let ask = reg.mcu_origin(&m.id) == Some(Origin::Project);
-        for d in &m.doctor {
+        for (i, d) in m.doctor.iter().enumerate() {
             match out.iter_mut().find(|c| c.def == *d) {
                 Some(c) => {
                     c.for_mcu.push(m.id.clone());
@@ -57,6 +60,7 @@ fn checks(reg: &Registry, mcus: &[String]) -> Vec<Check> {
                     def: d.clone(),
                     for_mcu: vec![m.id.clone()],
                     ask,
+                    index: i + 1,
                 }),
             }
         }
@@ -123,6 +127,23 @@ fn gate(c: &Check, cmd: &[String], consent: &mut Option<&mut Consent<'_>>) -> Ga
     }
 }
 
+/// A project check's name where nobody can confirm it (the page): never
+/// the project's own words, only its place and MCU ids that are plain.
+fn unattended_name(c: &Check) -> String {
+    let ids: Vec<&str> = c
+        .for_mcu
+        .iter()
+        .map(|id| {
+            if page_safe(id) {
+                id.as_str()
+            } else {
+                PROJECT_TEXT
+            }
+        })
+        .collect();
+    format!("project check {} for {}", c.index, ids.join(", "))
+}
+
 /// Everything [`doctor`] does outside: run probes and installs, ask, print.
 /// `consent: None` asks nobody: project-defined commands do not run.
 pub(crate) struct Io<'a> {
@@ -163,8 +184,8 @@ fn one(c: &Check, fix: bool, io: &mut Io<'_>) -> bool {
         }
         Gate::Unattended => {
             (io.out)(&format!(
-                "SKIP  {}{used_by}  needs confirmation in the terminal (dagon doctor)",
-                d.what
+                "SKIP  {}  needs confirmation in the terminal (dagon doctor)",
+                unattended_name(c)
             ));
             return false;
         }
@@ -341,7 +362,7 @@ mod tests {
 
     /// The builtin definitions plus a project's `rp2040b`: an RP2040 copy
     /// under another id, registered from its dagon.toml.
-    fn project_registry(name: &str) -> Registry {
+    fn project_registry(name: &str, extra: &str) -> Registry {
         let dir = std::env::temp_dir().join(format!("dagon-doctor-{name}-{}", std::process::id()));
         for sub in ["m/stage0", "m/bootcore"] {
             std::fs::create_dir_all(dir.join(sub)).unwrap();
@@ -350,7 +371,7 @@ mod tests {
             .replace("id = \"rp2040\"", "id = \"rp2040b\"")
             .replace("wire_id = 0x0001", "wire_id = 0x00F1")
             .replace("name = \"rp2040-4m\"", "name = \"rp2040b-4m\"");
-        std::fs::write(dir.join("m/dagon-mcu.toml"), toml).unwrap();
+        std::fs::write(dir.join("m/dagon-mcu.toml"), format!("{toml}{extra}")).unwrap();
         std::fs::write(
             dir.join("dagon.toml"),
             "mcu_files = [\"m/dagon-mcu.toml\"]
@@ -366,7 +387,19 @@ mod tests {
 
     #[test]
     fn with_nobody_to_ask_project_checks_point_to_the_terminal() {
-        let reg = project_registry("unattended");
+        let secret = "C:/Users/me/sk-ant-FAKE-TOKEN";
+        let reg = project_registry(
+            "unattended",
+            &format!(
+                "
+[[doctor]]
+what = \"{secret}\"
+probe = [\"{secret}\"]
+expect = \"runs\"
+hint = \"{secret}\"
+"
+            ),
+        );
         let fake = Fake::new(&[RUST[0], RUST[1]]);
         let probed = RefCell::new(Vec::new());
         let mut lines = Vec::new();
@@ -388,9 +421,15 @@ mod tests {
         assert_eq!(*probed.borrow(), ["rustup --version", "cargo --version"]);
         assert!(fake.installed.borrow().is_empty());
         assert_eq!(
-            lines[2],
-            "SKIP  target thumbv6m-none-eabi (rp2040b)  needs confirmation in the terminal (dagon doctor)"
+            lines[2..],
+            [
+                "SKIP  project check 1 for rp2040b  needs confirmation in the terminal (dagon doctor)",
+                "SKIP  project check 2 for rp2040b  needs confirmation in the terminal (dagon doctor)",
+            ]
         );
+        assert!(lines
+            .iter()
+            .all(|l| !l.contains("sk-ant") && !l.contains("thumbv6m")));
     }
 
     #[test]
@@ -407,7 +446,7 @@ mod tests {
 
     #[test]
     fn project_commands_run_only_after_the_user_agrees() {
-        let reg = project_registry("consent");
+        let reg = project_registry("consent", "");
         let fake = Fake::new(&[RUST[0], RUST[1]]);
         let adds = [(
             "rustup target add thumbv6m-none-eabi",
@@ -443,7 +482,7 @@ mod tests {
             ("rustup target list --installed", "thumbv6m-none-eabi\n"),
         ]);
         let (ok, lines, _) = run_in(
-            &project_registry("merge"),
+            &project_registry("merge", ""),
             &fake,
             &["rp2040", "rp2040b"],
             false,

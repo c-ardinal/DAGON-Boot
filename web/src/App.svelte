@@ -137,7 +137,7 @@
     d.reset();
     if (yaml) {
       try {
-        d.load(fromYaml(yaml, projectLayout.names ?? {}));
+        d.load(fromYaml(yaml, projectLayout.names ?? {}), yaml);
       } catch {
         d.unreadable = true;
       }
@@ -176,7 +176,7 @@
     local = true;
     op.reset();
     d.reset();
-    if (c === 'sample') d.load(fromYaml(DESK_DEMO_YAML, Object.fromEntries(DESK_DEMO.nodes.map((n) => [n.id, n.name]))));
+    if (c === 'sample') d.load(fromYaml(DESK_DEMO_YAML, Object.fromEntries(DESK_DEMO.nodes.map((n) => [n.id, n.name]))), DESK_DEMO_YAML);
     enterWork('define');
   }
 

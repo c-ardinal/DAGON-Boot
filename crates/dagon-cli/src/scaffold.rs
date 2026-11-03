@@ -393,6 +393,59 @@ fn dagon_package(k: &str) -> bool {
     k.starts_with("dagon-board-") || k.starts_with("dagon-mcu-")
 }
 
+/// Why the node crate at `manifest` (relative to `base`) does not take its
+/// DAGON packages from `src` (`[dagon]`), or `None` when every DAGON
+/// dependency matches: release mode wants that git and tag, path mode a
+/// path inside the clone.
+pub fn source_mismatch(
+    base: &Path,
+    manifest: &Path,
+    src: &DagonSource,
+) -> Result<Option<String>, String> {
+    let path = contained(base, manifest)?;
+    let text =
+        std::fs::read_to_string(&path).map_err(|e| format!("{}: {e}", manifest.display()))?;
+    let mut doc: toml_edit::DocumentMut = text
+        .parse()
+        .map_err(|_| format!("{} does not parse", manifest.display()))?;
+    let clone =
+        crate::dagonsrc::clone_root(src, base).map(|r| std::fs::canonicalize(&r).unwrap_or(r));
+    for (_, t) in dep_tables(&mut doc) {
+        for (name, item) in t.iter().filter(|(k, _)| dagon_package(k)) {
+            let field = |k: &str| item.get(k).and_then(|v| v.as_str()).map(String::from);
+            let (git, tag, dep_path) = (field("git"), field("tag"), field("path"));
+            let ok = match &clone {
+                None => git.is_some() && git == src.git && tag == src.tag,
+                Some(root) => dep_path.as_deref().is_some_and(|p| {
+                    let p = Path::new(&p);
+                    let abs = if p.is_absolute() {
+                        p.to_path_buf()
+                    } else {
+                        path.parent().unwrap_or(base).join(p)
+                    };
+                    std::fs::canonicalize(&abs).is_ok_and(|a| a.starts_with(root))
+                }),
+            };
+            if !ok {
+                let has = match (&git, &tag, &dep_path) {
+                    (Some(g), t, _) => format!("{g} {}", t.as_deref().unwrap_or("(no tag)")),
+                    (None, _, Some(p)) => format!("path {p}"),
+                    _ => "an unknown source".into(),
+                };
+                let want = match (&clone, &src.git, &src.tag) {
+                    (Some(r), _, _) => format!("the clone {}", r.display()),
+                    (None, Some(g), Some(t)) => format!("{g} {t}"),
+                    _ => "?".into(),
+                };
+                return Ok(Some(format!(
+                    "{name} comes from {has}, [dagon] says {want}"
+                )));
+            }
+        }
+    }
+    Ok(None)
+}
+
 /// Every dependency table of a manifest (`dependencies` and
 /// `target.<cfg>.dependencies`), with its key path.
 fn dep_tables(doc: &mut toml_edit::DocumentMut) -> Vec<(Vec<String>, &mut toml_edit::Table)> {
@@ -491,6 +544,17 @@ fn refresh_manifest(
     let changed = new != text;
     if changed {
         write_atomic(&path, new.as_bytes())?;
+        // The lock file pins the old source; the next build writes a new
+        // one (a crate without Cargo.lock is resolved once).
+        let lock = path.with_file_name("Cargo.lock");
+        match std::fs::remove_file(&lock) {
+            Ok(()) => out.push(Written {
+                path: rel.replace("Cargo.toml", "Cargo.lock"),
+                action: "removed",
+            }),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+            Err(e) => return Err(format!("cannot remove {}: {e}", lock.display())),
+        }
     }
     out.push(Written {
         path: rel.into(),
@@ -636,8 +700,13 @@ pub fn gen_command(args: &[&str]) -> Result<(), String> {
     let o = Opts::parse(&args, &["config"])?;
     let config = PathBuf::from(o.get("config").unwrap_or(crate::config::CONFIG_FILE));
     let only: Vec<String> = o.pos.iter().map(|s| s.to_string()).collect();
-    for line in gen_project(&config, &only, force)? {
+    let lines = gen_project(&config, &only, force)?;
+    for line in &lines {
         println!("{line}");
+    }
+    let skipped = lines.iter().filter(|l| l.starts_with("skipped")).count();
+    if skipped > 0 {
+        return Err(format!("{skipped} node(s) not generated; see above"));
     }
     Ok(())
 }

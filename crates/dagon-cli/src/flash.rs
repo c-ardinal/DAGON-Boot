@@ -87,6 +87,25 @@ pub(crate) fn part_dir(root: &Path, part: &Part) -> Result<PathBuf, String> {
     })
 }
 
+/// Refuses a node crate whose DAGON packages come from another source than
+/// `[dagon]`: its app and the boot images built here would be of different
+/// DAGON versions.
+pub(crate) fn same_source(cfg: &Config, node: &str) -> Result<(), String> {
+    let b = cfg
+        .build
+        .get(node)
+        .ok_or_else(|| format!("no [build.{node}] in dagon.toml"))?;
+    let manifest = b.package.join("Cargo.toml");
+    match crate::scaffold::source_mismatch(&cfg.base, &manifest, &cfg.dagon)? {
+        None => Ok(()),
+        Some(why) => Err(format!(
+            "{}: {why}; run `dagon gen {node}` so the app and the boot images come from the \
+             same DAGON. Nothing was built.",
+            manifest.display()
+        )),
+    }
+}
+
 /// How the plan names where `part` comes from.
 fn part_origin(cfg: &Config, part: &Part) -> String {
     let rel = if part.sub.is_empty() {
@@ -189,6 +208,7 @@ fn inputs(
     cancel: &AtomicBool,
 ) -> Result<ProvisionInputs, String> {
     let n = t.node(node).ok_or("checked in plan")?;
+    same_source(cfg, node)?;
     let fw_key = firmware_key(cfg, key)?;
     let hex = dagon_sign::to_hex(&fw_key);
     let root = source_root(cfg)?;
@@ -812,6 +832,56 @@ mod tests {
             e.contains("cannot get the DAGON source v0.0.0-missing"),
             "{e}"
         );
+        let _ = std::fs::remove_dir_all(&cfg.base);
+    }
+
+    #[test]
+    fn a_node_crate_on_another_dagon_source_is_refused_before_building() {
+        let (mut cfg, _) = area("mix");
+        cfg.build.get_mut("seg").unwrap().package = PathBuf::from("nodes/seg");
+        let manifest = cfg.base.join("nodes/seg/Cargo.toml");
+        std::fs::create_dir_all(manifest.parent().unwrap()).unwrap();
+        let write = |dep: &str| {
+            std::fs::write(
+                &manifest,
+                format!("[package]\nname = \"seg\"\n\n[dependencies]\n{dep}\nheapless = \"0.8\"\n"),
+            )
+            .unwrap()
+        };
+        cfg.dagon = crate::scaffold::DagonSource {
+            git: Some("file:///dagon".into()),
+            tag: Some("v1.1.0".into()),
+            path: None,
+        };
+
+        write(r#"dagon-board-nucleo-f401re = { git = "file:///dagon", tag = "v1.1.0" }"#);
+        assert!(same_source(&cfg, "seg").is_ok());
+
+        // gen ran for v1.0.0; dagon.toml now says v1.1.0.
+        write(r#"dagon-board-nucleo-f401re = { git = "file:///dagon", tag = "v1.0.0" }"#);
+        let e = same_source(&cfg, "seg").unwrap_err();
+        assert!(e.contains("v1.0.0") && e.contains("v1.1.0"), "{e}");
+        assert!(e.contains("run `dagon gen seg`"), "{e}");
+
+        // A crate still on a local clone while dagon.toml pins a release.
+        write(r#"dagon-board-nucleo-f401re = { path = "C:/somewhere/else" }"#);
+        assert!(same_source(&cfg, "seg").is_err());
+
+        // Path mode: a path inside the clone matches, a release does not.
+        let clone = cfg.base.join("clone");
+        std::fs::create_dir_all(clone.join("boards/nucleo")).unwrap();
+        cfg.dagon = crate::scaffold::DagonSource {
+            git: None,
+            tag: None,
+            path: Some(PathBuf::from("clone")),
+        };
+        let inside = crate::config::forward_path(&clone.join("boards/nucleo"));
+        write(&format!(
+            "dagon-board-nucleo-f401re = {{ path = {inside:?} }}"
+        ));
+        assert!(same_source(&cfg, "seg").is_ok());
+        write(r#"dagon-board-nucleo-f401re = { git = "file:///dagon", tag = "v1.1.0" }"#);
+        assert!(same_source(&cfg, "seg").is_err());
         let _ = std::fs::remove_dir_all(&cfg.base);
     }
 

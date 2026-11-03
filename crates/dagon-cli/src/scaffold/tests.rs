@@ -407,7 +407,9 @@ fn regen_adds_a_dagon_package_the_template_newly_needs() {
         "[package]\nname = \"{{node}}\"\nversion = \"0.1.0\"\n\n[dependencies]\n{{dep:dagon-board-nucleo-f401re}}\n\n[target.'cfg(target_os = \"none\")'.dependencies]\n{{dep:dagon-mcu-stm32f401re}}\n",
     )
     .unwrap();
-    gen(
+    // The lock of the old dependencies goes with them.
+    std::fs::write(base.join("nodes/seg/Cargo.lock"), "# old\n").unwrap();
+    let r = gen(
         &base,
         &desk(),
         &src,
@@ -416,6 +418,11 @@ fn regen_adds_a_dagon_package_the_template_newly_needs() {
         false,
     )
     .unwrap();
+    assert!(!base.join("nodes/seg/Cargo.lock").exists());
+    assert!(r
+        .written
+        .iter()
+        .any(|w| w.path == "nodes/seg/Cargo.lock" && w.action == "removed"));
     let m = read(&base, "nodes/seg/Cargo.toml");
     let doc: toml_edit::DocumentMut = m.parse().unwrap();
     assert!(

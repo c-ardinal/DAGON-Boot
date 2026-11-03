@@ -3,6 +3,18 @@ name = "dagon-cli"
 edition.workspace = true
 license.workspace = true
 version.workspace = true
+description = "DAGON Boot command line tool"
+repository = "https://github.com/c-ardinal/DAGON-Boot"
+
+# cargo binstall dagon-cli: the archives scripts/release.py makes, attached
+# to the GitHub release of the tag v<version>.
+[package.metadata.binstall]
+pkg-url = "{ repo }/releases/download/v{ version }/dagon-{ target }{ archive-suffix }"
+bin-dir = "{ bin }{ binary-ext }"
+pkg-fmt = "tgz"
+
+[package.metadata.binstall.overrides.x86_64-pc-windows-msvc]
+pkg-fmt = "zip"
 
 [[bin]]
 name = "dagon"

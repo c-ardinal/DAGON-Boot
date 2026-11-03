@@ -64,8 +64,9 @@ cargo build --release --bin factory
 ## Project template
 
 `template/` is what `dagon gen` writes for a node on this board (the package
-is found by `[package.metadata.dagon] board = "m5stopwatch"`): `Cargo.toml`
-with the `{{node}}` / `{{dep:<package>}}` placeholders, `.cargo/config.toml`,
+is found by `[package.metadata.dagon] board = "m5stopwatch"`): `Cargo.toml.tpl`
+(written as `Cargo.toml`; the suffix keeps cargo from reading it as a
+package) with the `{{node}}` / `{{dep:<package>}}` placeholders, `.cargo/config.toml`,
 `rust-toolchain.toml`, `src/main.rs` (the start-up above) and `src/app.rs`
 (the developer's file). `src/wiring.rs` comes from the topology.
 

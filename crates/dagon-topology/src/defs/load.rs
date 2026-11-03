@@ -262,13 +262,26 @@ pub(super) fn public_json(reg: &Registry) -> String {
         } else {
             PROJECT_TEXT
         };
+        // A project's file names are its own words too: each becomes
+        // `file-<n>`, in the files and wherever the TOML names it.
+        let renames: Vec<(String, String)> = s
+            .files
+            .iter()
+            .enumerate()
+            .map(|(i, (n, _))| {
+                let to = if scrub {
+                    format!("file-{}", i + 1)
+                } else {
+                    n.clone()
+                };
+                (n.clone(), to)
+            })
+            .collect();
         DefSource {
             label: format!("{} {kind} {id}", origin.as_str()),
-            toml: public_toml(&s.toml, scrub),
-            files: s
-                .files
-                .iter()
-                .map(|(n, t)| (n.clone(), public_text_file(t, scrub)))
+            toml: public_toml(&s.toml, scrub, &renames),
+            files: (s.files.iter().zip(&renames))
+                .map(|((_, t), (_, to))| (to.clone(), public_text_file(t, scrub)))
                 .collect(),
         }
     };
@@ -288,30 +301,38 @@ pub(super) fn public_json(reg: &Registry) -> String {
 }
 
 /// A loaded definition's TOML, re-written: values only, no `doctor`.
-/// With `scrub` (a project's definition), every string that is not
-/// [`page_safe`] becomes [`PROJECT_TEXT`].
-fn public_toml(text: &str, scrub: bool) -> String {
+/// With `scrub` (a project's definition), a string naming a referenced
+/// file takes its new name from `renames`, and every other string that is
+/// not [`page_safe`] becomes [`PROJECT_TEXT`].
+fn public_toml(text: &str, scrub: bool, renames: &[(String, String)]) -> String {
     let mut t: toml::Table = toml::from_str(text).expect("a loaded definition parses");
     t.remove("doctor");
     let mut v = toml::Value::Table(t);
     if scrub {
-        scrub_value(&mut v);
+        scrub_value(&mut v, renames);
     }
     toml::to_string(&v).expect("a table serialises")
 }
 
-fn scrub_value(v: &mut toml::Value) {
+fn scrub_value(v: &mut toml::Value, renames: &[(String, String)]) {
     match v {
-        toml::Value::String(s) if !page_safe(s) => *s = PROJECT_TEXT.into(),
-        toml::Value::Array(a) => a.iter_mut().for_each(scrub_value),
-        toml::Value::Table(t) => t.iter_mut().for_each(|(_, v)| scrub_value(v)),
+        toml::Value::String(s) => {
+            if let Some((_, to)) = renames.iter().find(|(from, _)| from == s) {
+                *s = to.clone();
+            } else if !page_safe(s) {
+                *s = PROJECT_TEXT.into();
+            }
+        }
+        toml::Value::Array(a) => a.iter_mut().for_each(|v| scrub_value(v, renames)),
+        toml::Value::Table(t) => t.iter_mut().for_each(|(_, v)| scrub_value(v, renames)),
         _ => {}
     }
 }
 
 /// `text` without its `#` comment lines; with `scrub`, each comma-separated
-/// field that is not [`page_safe`] becomes [`PROJECT_TEXT`] (the same
-/// replacement as in the TOML, so references still meet).
+/// field is sent trimmed when it is [`page_safe`] and as [`PROJECT_TEXT`]
+/// otherwise (the same replacement as in the TOML, so references still
+/// meet); nothing of the raw field (padding included) goes out.
 fn public_text_file(text: &str, scrub: bool) -> String {
     text.lines()
         .filter(|l| !l.trim_start().starts_with('#'))
@@ -321,7 +342,8 @@ fn public_text_file(text: &str, scrub: bool) -> String {
             }
             let fields: Vec<&str> = l
                 .split(',')
-                .map(|f| if page_safe(f.trim()) { f } else { PROJECT_TEXT })
+                .map(str::trim)
+                .map(|f| if page_safe(f) { f } else { PROJECT_TEXT })
                 .collect();
             format!("{}\n", fields.join(","))
         })

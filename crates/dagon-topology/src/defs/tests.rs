@@ -747,6 +747,80 @@ fn project_text_that_is_not_a_plain_name_leaves_as_a_generic_label() {
 }
 
 #[test]
+fn a_projects_file_names_and_csv_fields_are_scrubbed_and_still_load() {
+    let dir = scratch("files");
+    let pkg = dir.join("m");
+    write(&pkg.join("vendor/bootloader.bin"), "x");
+    write(&pkg.join("vendor/SHA256SUMS"), "x");
+    let long = "y".repeat(41);
+    // Padded fields (tabs and spaces), an over-long padded one, a token.
+    let csv = format!(
+        "# private-token comment\n\
+         otadata,\tdata, ota,  0x00D000, 0x2000\n\
+         factory,  app,  factory, 0x010000, 1M,  {long}  \n\
+         \tota_0\t,app,ota_0,0x110000,3M, sk-ant:TOKEN \n\
+         ota_1,    app,  ota_1,   0x410000, 3M\n\
+         dagon,    0x40, 0x00,    0x710000, 64K\n"
+    );
+    write(&pkg.join("private-token/partitions.csv"), &csv);
+    let mcu = include_str!("../../../../targets/mcu/esp32s3/dagon-mcu.toml")
+        .replace("id = \"esp32s3\"", "id = \"desk-s3\"")
+        .replace("wire_id = 0x0003", "wire_id = 0x00F3")
+        .replace("name = \"esp32s3-16m\"", "name = \"desk-s3-16m\"")
+        .replace(
+            "partitions = \"partitions.csv\"",
+            "partitions = \"private-token/partitions.csv\"",
+        );
+    write(&pkg.join("dagon-mcu.toml"), &mcu);
+    write(
+        &dir.join("dagon.toml"),
+        "mcu_files = [\"m/dagon-mcu.toml\"]\n",
+    );
+    let project = Registry::load(&[Source::Project(&dir.join("dagon.toml"))]).unwrap();
+    std::fs::remove_dir_all(&dir).unwrap();
+
+    let json = project.to_json();
+    for never in ["private-token", "sk-ant", "TOKEN", &long, "\\t"] {
+        assert!(!json.contains(never), "{never} in {json}");
+    }
+    let form: serde_json::Value = serde_json::from_str(&json).unwrap();
+    let s3 = form["mcus"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|m| m["label"] == "project MCU desk-s3")
+        .unwrap();
+    assert_eq!(s3["files"][0][0], "file-1");
+    let sent = s3["files"][0][1].as_str().unwrap();
+    assert_eq!(
+        sent.lines().nth(1).unwrap(),
+        "factory,app,factory,0x010000,1M,project-text"
+    );
+    assert_eq!(
+        sent.lines().nth(2).unwrap(),
+        "ota_0,app,ota_0,0x110000,3M,project-text"
+    );
+    // What the browser does (dagon-wasm's load_definitions): the scrubbed
+    // form loads, with the same slots as on this machine.
+    let back = Registry::from_json(&json).unwrap();
+    let m = back.mcu("desk-s3").unwrap();
+    assert_eq!(m.partitions.as_deref(), Some("file-1"));
+    assert_eq!(m.slots, project.mcu("desk-s3").unwrap().slots);
+    assert_eq!(
+        m.partition_table,
+        project.mcu("desk-s3").unwrap().partition_table
+    );
+    // Builtin and source-tree definitions go out as before.
+    let builtin = Registry::from_json(&reg().to_json()).unwrap();
+    assert_eq!(
+        builtin.mcu("esp32s3").unwrap().partitions.as_deref(),
+        Some("partitions.csv")
+    );
+    let tree = Registry::load(&[Source::Tree(&source_root())]).unwrap();
+    assert!(tree.to_json().contains("\"partitions.csv\""));
+}
+
+#[test]
 fn the_json_form_carries_no_path_comment_or_command() {
     let dir = scratch("public");
     let secret = "sk-ant-FAKE-TOKEN-0123";

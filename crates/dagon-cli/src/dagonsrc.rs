@@ -251,6 +251,75 @@ pub(crate) mod tests {
         let _ = std::fs::remove_dir_all(&d);
     }
 
+    /// stderr of `cargo metadata` on the probe crate a resolve left in `base`.
+    fn probe_stderr(base: &Path) -> String {
+        let o = Command::new("cargo")
+            .args(["metadata", "--format-version", "1", "--manifest-path"])
+            .arg(base.join(PROBE_DIR).join("Cargo.toml"))
+            .output()
+            .unwrap();
+        assert!(o.status.success());
+        String::from_utf8_lossy(&o.stderr).into_owned()
+    }
+
+    #[test]
+    fn template_manifests_do_not_trouble_cargo_in_a_release_checkout() {
+        let d = std::env::temp_dir().join(format!("dagon-src-tpl-{}", std::process::id()));
+        // A board template as the packages ship it: placeholders in the
+        // manifest, which is not TOML until gen renders it.
+        let tpl = "[package]\nname = \"{{node}}\"\n\n[dependencies]\n{{dep:dagon-mcu-rp2040}}\n";
+        let format = package("dagon-format");
+        for (name, manifest, noisy) in [
+            ("tpl", "targets/boards/x/template/Cargo.toml.tpl", false),
+            ("raw", "targets/boards/x/template/Cargo.toml", true),
+        ] {
+            let files = [
+                ("crates/dagon-format/Cargo.toml", format.as_str()),
+                ("crates/dagon-format/lib.rs", ""),
+                (manifest, tpl),
+            ];
+            let url = repo(&d.join(name), "v1.0.0", &files);
+            let base = d.join(format!("proj-{name}"));
+            std::fs::create_dir_all(&base).unwrap();
+            let src = DagonSource {
+                git: Some(url),
+                tag: Some("v1.0.0".into()),
+                path: None,
+            };
+            root(&src, &base).unwrap();
+            let err = probe_stderr(&base);
+            assert_eq!(
+                err.contains("invalid key-value pair"),
+                noisy,
+                "{manifest}: {err}"
+            );
+        }
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
+    #[test]
+    fn this_repository_ships_no_template_manifest_cargo_would_read() {
+        let here = Path::new(BUILT_FROM);
+        let mut stack = vec![
+            here.join("targets"),
+            here.join("crates/dagon-cli/templates"),
+        ];
+        while let Some(dir) = stack.pop() {
+            for e in std::fs::read_dir(&dir).into_iter().flatten().flatten() {
+                let p = e.path();
+                let name = e.file_name();
+                if p.is_dir() && name != "target" {
+                    stack.push(p);
+                } else if name == "Cargo.toml" {
+                    let in_template = p
+                        .components()
+                        .any(|c| matches!(c.as_os_str().to_str(), Some("template" | "templates")));
+                    assert!(!in_template, "{} must be Cargo.toml.tpl", p.display());
+                }
+            }
+        }
+    }
+
     #[test]
     fn path_mode_is_the_clone() {
         let src = DagonSource {

@@ -39,9 +39,10 @@ fn package(clone: &Path, name: &str, meta: &str, template: &[(&str, &str)]) {
     }
 }
 
+// The manifest under its template name, as the board packages ship it.
 const F401_TEMPLATE: &[(&str, &str)] = &[
     (
-        "Cargo.toml",
+        "Cargo.toml.tpl",
         "[package]\nname = \"{{node}}\"\nversion = \"0.1.0\"\n\n[dependencies]\n{{dep:dagon-board-nucleo-f401re}}\n",
     ),
     ("src/main.rs", "// start-up of {{node}} ({{tag}})\n"),
@@ -402,7 +403,7 @@ fn regen_adds_a_dagon_package_the_template_newly_needs() {
     let c = d.join("dagon");
     package(&c, "dagon-mcu-stm32f401re", "", &[]);
     std::fs::write(
-        c.join("packages/dagon-board-nucleo-f401re/template/Cargo.toml"),
+        c.join("packages/dagon-board-nucleo-f401re/template/Cargo.toml.tpl"),
         "[package]\nname = \"{{node}}\"\nversion = \"0.1.0\"\n\n[dependencies]\n{{dep:dagon-board-nucleo-f401re}}\n\n[target.'cfg(target_os = \"none\")'.dependencies]\n{{dep:dagon-mcu-stm32f401re}}\n",
     )
     .unwrap();

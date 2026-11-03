@@ -316,7 +316,7 @@ fn template_for(name: &str, dir: Option<&Path>) -> Option<Vec<(String, String)>>
         let mut files = Vec::new();
         collect(&t, "", &mut files);
         if !files.is_empty() {
-            return Some(files);
+            return Some(real_names(files));
         }
     }
     let built_in: Vec<(String, String)> = templates::TEMPLATES
@@ -324,7 +324,25 @@ fn template_for(name: &str, dir: Option<&Path>) -> Option<Vec<(String, String)>>
         .filter(|(p, _, _)| *p == name)
         .map(|(_, rel, text)| (rel.to_string(), text.to_string()))
         .collect();
-    (!built_in.is_empty()).then_some(built_in)
+    (!built_in.is_empty()).then(|| real_names(built_in))
+}
+
+/// Suffix of template files kept under another name: a template manifest
+/// is `Cargo.toml.tpl`, so cargo (scanning a checkout of the DAGON
+/// repository, or packaging a crate) never reads its placeholders as a
+/// package.
+const TEMPLATE_SUFFIX: &str = ".tpl";
+
+/// The project file names of template files (`Cargo.toml.tpl` becomes
+/// `Cargo.toml`).
+fn real_names(files: Vec<(String, String)>) -> Vec<(String, String)> {
+    files
+        .into_iter()
+        .map(|(rel, text)| match rel.strip_suffix(TEMPLATE_SUFFIX) {
+            Some(real) => (real.to_string(), text),
+            None => (rel, text),
+        })
+        .collect()
 }
 
 fn collect(dir: &Path, rel: &str, out: &mut Vec<(String, String)>) {

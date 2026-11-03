@@ -9,8 +9,12 @@ dagon-format = { path = "../dagon-format" }
 serde = { version = "1", features = ["derive"] }
 yaml_serde = "0.10"
 # The definition format (dagon-mcu.toml, dagon-board.toml); already in the
-# lock file through dagon-cli. Parse only: no writer needed.
-toml = { version = "0.8", default-features = false, features = ["parse"] }
+# lock file through dagon-cli. display: an inline [board.<id>] keeps its
+# TOML text for the JSON form.
+toml = { version = "0.8", default-features = false, features = ["parse", "display"] }
+# The definitions' JSON form for the browser (Registry::to_json); already in
+# the lock file through dagon-cli.
+serde_json = "1"
 
 [dev-dependencies]
 # Parity tests: the definitions match today's tables (these crates depend

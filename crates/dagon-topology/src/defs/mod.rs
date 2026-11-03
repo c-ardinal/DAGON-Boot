@@ -17,7 +17,7 @@ use serde::Deserialize;
 
 use crate::schema::{ControlKind, LinkKind, RomEntry, UartIface};
 
-pub use load::{DefError, Source};
+pub use load::{DefError, DefSource, Source};
 
 use requirements::HEADER;
 
@@ -274,6 +274,16 @@ pub struct RomI2c {
     pub pairs: Vec<I2cPair>,
 }
 
+/// Link kinds by direction: `up` towards the PC or the 親機, `down` to 子機.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Links {
+    #[serde(default)]
+    pub up: Vec<LinkKind>,
+    #[serde(default)]
+    pub down: Vec<LinkKind>,
+}
+
 /// How the user connects the MCU for a write (UI copy).
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -334,6 +344,9 @@ pub struct McuDef {
     pub parts: Vec<Part>,
     pub coordinator: Option<Coordinator>,
     pub rom_i2c: Option<RomI2c>,
+    /// Link kinds the MCU package's firmware implements (its `LINK_KINDS`).
+    #[serde(default)]
+    pub links: Links,
     pub connection: Connection,
     #[serde(default)]
     pub doctor: Vec<DoctorCheck>,
@@ -402,6 +415,10 @@ pub struct BoardDef {
 pub struct Registry {
     mcus: Vec<McuDef>,
     boards: Vec<BoardDef>,
+    /// What each definition was read from, in `mcus` / `boards` order: the
+    /// JSON form the browser loads ([`Registry::to_json`]).
+    mcu_sources: Vec<DefSource>,
+    board_sources: Vec<DefSource>,
 }
 
 impl Registry {
@@ -415,6 +432,22 @@ impl Registry {
     /// given, plus project definitions (which may not redefine an id).
     pub fn load(sources: &[Source<'_>]) -> Result<Registry, DefError> {
         load::load(sources)
+    }
+
+    /// The definitions as JSON (their TOML text and the text files they
+    /// reference), for a loader without a filesystem.
+    pub fn to_json(&self) -> String {
+        let all = load::JsonForm {
+            mcus: self.mcu_sources.clone(),
+            boards: self.board_sources.clone(),
+        };
+        serde_json::to_string(&all).expect("definitions serialise")
+    }
+
+    /// A registry from [`Registry::to_json`]'s form, validated as on load
+    /// (referenced binary files are shape-checked only).
+    pub fn from_json(json: &str) -> Result<Registry, DefError> {
+        load::from_json(json)
     }
 
     pub fn mcus(&self) -> &[McuDef] {

@@ -164,7 +164,10 @@ impl<'a> Ctx<'a> {
                 );
                 continue;
             }
-            if links::known(&n.mcu) && !links::available(&n.mcu, Dir::Up).contains(&up.kind) {
+            let reg = self.reg;
+            if links::known_in(reg, &n.mcu)
+                && !links::available_in(reg, &n.mcu, Dir::Up).contains(&up.kind)
+            {
                 self.warn(
                     "V-24",
                     format!("nodes[{i}].uplink.kind"),
@@ -184,7 +187,8 @@ impl<'a> Ctx<'a> {
             let missing: Vec<&str> = [(from, Dir::Down), (to, Dir::Up)]
                 .into_iter()
                 .filter(|(n, d)| {
-                    links::known(&n.mcu) && !links::available(&n.mcu, *d).contains(&l.kind)
+                    links::known_in(self.reg, &n.mcu)
+                        && !links::available_in(self.reg, &n.mcu, *d).contains(&l.kind)
                 })
                 .map(|(n, _)| n.mcu.as_str())
                 .collect();

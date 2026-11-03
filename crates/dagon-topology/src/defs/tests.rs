@@ -641,3 +641,20 @@ fn addresses_near_u32_max_are_errors_not_overflows() {
         .to_string();
     assert!(e.contains("32-bit address space"), "{e}");
 }
+
+#[test]
+fn the_json_form_round_trips_and_is_validated_again() {
+    let back = Registry::from_json(&reg().to_json()).unwrap();
+    assert_eq!(back.mcus(), reg().mcus());
+    assert_eq!(back.boards(), reg().boards());
+    // A project registry (MCU file + inline board) survives too.
+    let project = fake_registry("json", 400_000);
+    let back = Registry::from_json(&project.to_json()).unwrap();
+    assert_eq!(back.mcus(), project.mcus());
+    assert_eq!(back.boards(), project.boards());
+    // Every definition is checked again: a bad sector in transit fails.
+    let bad = reg().to_json().replace("sector = 0x1000", "sector = 0x80");
+    let e = Registry::from_json(&bad).unwrap_err();
+    assert!(e.msg.contains("UF2 builder"), "{e}");
+    assert!(Registry::from_json("{\"mcus\": []}").is_err());
+}

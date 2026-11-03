@@ -230,6 +230,7 @@ dependencies = [
  "dagon-romlink",
  "dagon-sign",
  "serde",
+ "serde_json",
  "toml",
  "yaml_serde",
 ]

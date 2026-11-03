@@ -42,6 +42,10 @@ bootloader = "vendor/bootloader.bin"
 checksums = "vendor/SHA256SUMS"
 usb_hint = { vid = 0x303A, pid = 0x1001 }
 
+# Link kinds the firmware implements (src/links.rs LINK_KINDS).
+[links]
+up = ["uart", "usb-cdc"]
+
 [connection]
 label = "USB-C"
 hint = "USB-C でつないでから、書き込んでください（つながらないときは BOOT を押しながら）。"

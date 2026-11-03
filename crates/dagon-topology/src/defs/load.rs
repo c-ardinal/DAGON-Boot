@@ -180,18 +180,103 @@ const BUILTIN_BOARDS: [(&str, &str); 3] = [
     ),
 ];
 
-pub(super) fn builtin() -> Result<Registry, DefError> {
-    let mut reg = Registry {
+/// What a definition was read from: its TOML and the text files it
+/// references (by package-relative name).
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct DefSource {
+    pub label: String,
+    pub toml: String,
+    #[serde(default)]
+    pub files: Vec<(String, String)>,
+}
+
+/// [`Registry::to_json`]'s form.
+#[derive(serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(super) struct JsonForm {
+    pub mcus: Vec<DefSource>,
+    pub boards: Vec<DefSource>,
+}
+
+fn empty() -> Registry {
+    Registry {
         mcus: Vec::new(),
         boards: Vec::new(),
-    };
+        mcu_sources: Vec::new(),
+        board_sources: Vec::new(),
+    }
+}
+
+impl Registry {
+    fn push_mcu(&mut self, text: &str, pkg: &Pkg<'_>) -> Result<(), DefError> {
+        let m = parse_mcu(text, pkg)?;
+        let files = match &m.partitions {
+            Some(rel) => vec![(rel.clone(), pkg.text(rel)?)],
+            None => Vec::new(),
+        };
+        self.mcu_sources.push(DefSource {
+            label: pkg.label(),
+            toml: text.to_string(),
+            files,
+        });
+        self.mcus.push(m);
+        Ok(())
+    }
+
+    fn push_board(&mut self, text: &str, pkg: &Pkg<'_>) -> Result<(), DefError> {
+        self.boards.push(parse_board(text, pkg)?);
+        self.board_sources.push(DefSource {
+            label: pkg.label(),
+            toml: text.to_string(),
+            files: Vec::new(),
+        });
+        Ok(())
+    }
+}
+
+/// Embedded-file view of a source's owned files.
+fn file_refs(files: &[(String, String)]) -> Vec<(&str, &str)> {
+    files
+        .iter()
+        .map(|(n, t)| (n.as_str(), t.as_str()))
+        .collect()
+}
+
+pub(super) fn from_json(json: &str) -> Result<Registry, DefError> {
+    let form: JsonForm =
+        serde_json::from_str(json).or_else(|e| err("definitions JSON", e.to_string()))?;
+    let mut reg = empty();
+    for s in &form.mcus {
+        let files = file_refs(&s.files);
+        reg.push_mcu(
+            &s.toml,
+            &Pkg::Embedded {
+                label: &s.label,
+                files: &files,
+            },
+        )?;
+    }
+    for s in &form.boards {
+        reg.push_board(
+            &s.toml,
+            &Pkg::Embedded {
+                label: &s.label,
+                files: &[],
+            },
+        )?;
+    }
+    validate(&reg)?;
+    Ok(reg)
+}
+
+pub(super) fn builtin() -> Result<Registry, DefError> {
+    let mut reg = empty();
     for (label, text, files) in BUILTIN_MCUS {
-        reg.mcus
-            .push(parse_mcu(text, &Pkg::Embedded { label, files })?);
+        reg.push_mcu(text, &Pkg::Embedded { label, files })?;
     }
     for (label, text) in BUILTIN_BOARDS {
-        reg.boards
-            .push(parse_board(text, &Pkg::Embedded { label, files: &[] })?);
+        reg.push_board(text, &Pkg::Embedded { label, files: &[] })?;
     }
     validate(&reg)?;
     Ok(reg)
@@ -237,17 +322,14 @@ fn read(path: &Path) -> Result<String, DefError> {
 
 fn tree(root: &Path) -> Result<Registry, DefError> {
     let targets = root.join("targets");
-    let mut reg = Registry {
-        mcus: Vec::new(),
-        boards: Vec::new(),
-    };
+    let mut reg = empty();
     for dir in packages(&targets.join("mcu"), MCU_FILE)? {
         let text = read(&dir.join(MCU_FILE))?;
-        reg.mcus.push(parse_mcu(&text, &Pkg::Dir(dir))?);
+        reg.push_mcu(&text, &Pkg::Dir(dir))?;
     }
     for dir in packages(&targets.join("boards"), BOARD_FILE)? {
         let text = read(&dir.join(BOARD_FILE))?;
-        reg.boards.push(parse_board(&text, &Pkg::Dir(dir))?);
+        reg.push_board(&text, &Pkg::Dir(dir))?;
     }
     Ok(reg)
 }
@@ -271,11 +353,12 @@ fn project(reg: &mut Registry, dagon_toml: &Path) -> Result<(), DefError> {
         let Pkg::Dir(dir) = &base else { unreachable!() };
         let path = dir.join(rel);
         let pkg = Pkg::Dir(path.parent().unwrap_or(dir).to_path_buf());
-        let m = parse_mcu(&read(&path)?, &pkg)?;
-        if reg.mcu(&m.id).is_some() {
-            return err(path.display(), format!("MCU '{}' is already defined", m.id));
+        let text = read(&path)?;
+        let id = parse_mcu(&text, &pkg)?.id;
+        if reg.mcu(&id).is_some() {
+            return err(path.display(), format!("MCU '{id}' is already defined"));
         }
-        reg.mcus.push(m);
+        reg.push_mcu(&text, &pkg)?;
     }
     for (id, table) in defs.board {
         let toml::Value::Table(mut t) = table else {
@@ -288,9 +371,9 @@ fn project(reg: &mut Registry, dagon_toml: &Path) -> Result<(), DefError> {
             );
         }
         t.insert("id".into(), toml::Value::String(id.clone()));
-        let b: BoardDef = t
-            .try_into()
-            .or_else(|e| err(format!("{at} [board.{id}]"), e.to_string()))?;
+        let text = toml::to_string(&t).or_else(|e| err(&at, e.to_string()))?;
+        let label = format!("{at} [board.{id}]");
+        let b: BoardDef = toml::from_str(&text).or_else(|e| err(&label, e.to_string()))?;
         if !b.parts.is_empty() {
             return err(
                 &at,
@@ -300,7 +383,13 @@ fn project(reg: &mut Registry, dagon_toml: &Path) -> Result<(), DefError> {
         if reg.board(&b.id).is_some() {
             return err(&at, format!("board '{id}' is already defined"));
         }
-        reg.boards.push(b);
+        reg.push_board(
+            &text,
+            &Pkg::Embedded {
+                label: &label,
+                files: &[],
+            },
+        )?;
     }
     Ok(())
 }

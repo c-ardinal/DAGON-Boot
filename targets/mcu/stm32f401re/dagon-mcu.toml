@@ -59,6 +59,10 @@ pairs = [
     { controller = "i2c2", sda = "PB3", scl = "PB10" },
 ]
 
+# Link kinds the firmware implements (src/links.rs LINK_KINDS).
+[links]
+up = ["i2c"]
+
 [connection]
 label = "ST-LINK"
 hint = "ST-LINK を USB でつないでから、書き込んでください。"

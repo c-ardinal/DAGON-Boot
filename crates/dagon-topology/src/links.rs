@@ -1,9 +1,10 @@
 //! Which link kinds each MCU's firmware implements, up (towards the PC or
-//! the 親機) and down (to its 子機). The same table as the MCU packages'
-//! `LINK_KINDS` (targets/mcu/<mcu>, "Links"): a kind missing here is
-//! accepted in a 構成 but reported as not available yet (V-24), and
-//! `dagon gen` refuses to generate it.
+//! the 親機) and down (to its 子機), from the MCU definitions' `[links]`
+//! (kept equal to the MCU packages' `LINK_KINDS` by a test): a kind missing
+//! there is accepted in a 構成 but reported as not available yet (V-24),
+//! and `dagon gen` refuses to generate it.
 
+use crate::defs::Registry;
 use crate::schema::LinkKind;
 
 /// Direction of a hop as seen from one MCU.
@@ -15,22 +16,28 @@ pub enum Dir {
     Down,
 }
 
-/// Link kinds `mcu`'s firmware implements in direction `dir`; empty for an
-/// MCU it does not know.
+/// Link kinds `mcu`'s firmware implements in direction `dir` (builtin
+/// definitions); empty for an MCU it does not know.
 pub fn available(mcu: &str, dir: Dir) -> &'static [LinkKind] {
-    use LinkKind::*;
-    match (mcu, dir) {
-        ("rp2040", Dir::Up) => &[UsbCdc],
-        ("rp2040", Dir::Down) => &[I2c, Uart],
-        ("stm32f401re", Dir::Up) => &[I2c],
-        ("esp32s3", Dir::Up) => &[Uart, UsbCdc],
-        _ => &[],
-    }
+    available_in(Registry::builtin(), mcu, dir)
+}
+
+/// [`available`] from the definitions of `reg`.
+pub fn available_in<'r>(reg: &'r Registry, mcu: &str, dir: Dir) -> &'r [LinkKind] {
+    reg.mcu(mcu).map_or(&[], |m| match dir {
+        Dir::Up => &m.links.up,
+        Dir::Down => &m.links.down,
+    })
 }
 
 /// Whether `mcu` knows of any link at all (else other rules report it).
 pub fn known(mcu: &str) -> bool {
-    !available(mcu, Dir::Up).is_empty() || !available(mcu, Dir::Down).is_empty()
+    known_in(Registry::builtin(), mcu)
+}
+
+/// [`known`] from the definitions of `reg`.
+pub fn known_in(reg: &Registry, mcu: &str) -> bool {
+    !available_in(reg, mcu, Dir::Up).is_empty() || !available_in(reg, mcu, Dir::Down).is_empty()
 }
 
 #[cfg(test)]
@@ -56,5 +63,56 @@ mod tests {
             }
         }
         assert!(!known("unknown-mcu"));
+    }
+
+    /// `[links]` of each MCU definition is the firmware's `LINK_KINDS`
+    /// (the rows marked `Support::Yes`), as sets.
+    #[test]
+    fn definitions_match_the_firmware_link_kinds() {
+        const FW: [(&str, &str); 3] = [
+            (
+                "rp2040",
+                include_str!("../../../targets/mcu/rp2040/src/kinds.rs"),
+            ),
+            (
+                "stm32f401re",
+                include_str!("../../../targets/mcu/stm32f401re/src/links.rs"),
+            ),
+            (
+                "esp32s3",
+                include_str!("../../../targets/mcu/esp32s3/src/links.rs"),
+            ),
+        ];
+        for (mcu, src) in FW {
+            let (mut up, mut down) = (Vec::new(), Vec::new());
+            for row in src.split("KindInfo {").skip(1) {
+                let field = |name: &str| {
+                    let at = row.find(&format!("{name}: ")).unwrap() + name.len() + 2;
+                    row[at..].split(',').next().unwrap().trim().to_string()
+                };
+                let variant = field("kind");
+                let kind = LinkKind::ALL
+                    .into_iter()
+                    .find(|k| format!("Kind::{k:?}") == variant)
+                    .unwrap_or_else(|| panic!("{mcu}: {variant}"));
+                if field("up") == "Support::Yes" {
+                    up.push(kind);
+                }
+                if field("down") == "Support::Yes" {
+                    down.push(kind);
+                }
+            }
+            let sorted = |v: &[LinkKind]| {
+                let mut v = v.to_vec();
+                v.sort();
+                v
+            };
+            assert_eq!(sorted(available(mcu, Dir::Up)), sorted(&up), "{mcu} up");
+            assert_eq!(
+                sorted(available(mcu, Dir::Down)),
+                sorted(&down),
+                "{mcu} down"
+            );
+        }
     }
 }

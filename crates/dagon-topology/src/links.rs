@@ -23,7 +23,7 @@ pub fn available(mcu: &str, dir: Dir) -> &'static [LinkKind] {
         ("rp2040", Dir::Up) => &[UsbCdc],
         ("rp2040", Dir::Down) => &[I2c, Uart],
         ("stm32f401re", Dir::Up) => &[I2c],
-        ("esp32s3", Dir::Up) => &[Uart],
+        ("esp32s3", Dir::Up) => &[Uart, UsbCdc],
         _ => &[],
     }
 }

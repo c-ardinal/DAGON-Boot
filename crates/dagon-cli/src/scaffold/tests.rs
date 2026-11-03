@@ -560,3 +560,81 @@ fn gen_refresh_replaces_a_renamed_dagon_dependency() {
     assert!(!m.contains("v0.0.1") && !m.contains("board = {"), "{m}");
     assert!(m.contains("dagon-board-nucleo-f401re = { path = "), "{m}");
 }
+
+#[test]
+fn hop_placeholders_name_each_nodes_link_kinds() {
+    let t = desk();
+    let hub = t.node("hub").unwrap();
+    let (up, down) = hop_placeholders(&t, hub).unwrap();
+    assert_eq!(up, "dagon_mcu_rp2040::links::Kind::UsbCdc");
+    assert_eq!(
+        down,
+        "dagon_mcu_rp2040::links::Kind::I2c, dagon_mcu_rp2040::links::Kind::Uart"
+    );
+    let (up, down) = hop_placeholders(&t, t.node("seg").unwrap()).unwrap();
+    assert_eq!(
+        (up.as_str(), down.as_str()),
+        ("dagon_mcu_stm32f401re::links::Kind::I2c", "")
+    );
+    let (up, _) = hop_placeholders(&t, t.node("watch").unwrap()).unwrap();
+    assert_eq!(up, "dagon_mcu_esp32s3::links::Kind::Uart");
+}
+
+#[test]
+fn templates_get_the_hops_and_gen_refuses_one_not_available_yet() {
+    let d = tmp("hops");
+    let c = d.join("dagon");
+    let tpl: &[(&str, &str)] = &[
+        (
+            "Cargo.toml.tpl",
+            "[package]\nname = \"{{node}}\"\n[dependencies]\n{{dep:dagon-board-nucleo-f401re}}\n",
+        ),
+        (
+            "src/main.rs",
+            "const UPLINK: Kind = {{uplink}};\nconst DOWNLINKS: &[Kind] = &[{{downlinks}}];\n",
+        ),
+    ];
+    package(&c, "dagon-board-nucleo-f401re", "", tpl);
+    let src = DagonSource {
+        path: Some(c),
+        ..DagonSource::default()
+    };
+    let base = project(&d);
+    gen(
+        &base,
+        &desk(),
+        &src,
+        &BTreeMap::new(),
+        &["seg".into()],
+        false,
+    )
+    .unwrap();
+    assert_eq!(
+        read(&base, "nodes/seg/src/main.rs"),
+        "const UPLINK: Kind = dagon_mcu_stm32f401re::links::Kind::I2c;\nconst DOWNLINKS: &[Kind] = &[];\n"
+    );
+    // The 親機 over BLE: gen stops, naming the hop.
+    let ble = dagon_topology::parse_str(&DESK.replacen(
+        "    tag: hub-rp2040-lcd\n",
+        "    tag: hub-rp2040-lcd\n    uplink: { kind: ble, host: browser }\n",
+        1,
+    ))
+    .unwrap();
+    let e = gen(&base, &ble, &src, &BTreeMap::new(), &["hub".into()], false).unwrap_err();
+    assert!(
+        e.contains("uplink of hub over ble: not available yet on rp2040"),
+        "{e}"
+    );
+    // A link a 子機 cannot do: named by its two ends.
+    let wifi = dagon_topology::parse_str(&DESK.replacen(
+        "    kind: i2c\n    bus: ",
+        "    kind: wifi-tcp\n    bus: ",
+        1,
+    ))
+    .unwrap();
+    let e = gen(&base, &wifi, &src, &BTreeMap::new(), &["seg".into()], false).unwrap_err();
+    assert!(
+        e.contains("link hub -> seg over wifi-tcp: not available yet"),
+        "{e}"
+    );
+}

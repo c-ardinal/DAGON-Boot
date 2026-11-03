@@ -1,7 +1,7 @@
 //! Request/response over a byte stream (the hub's PIO UART to the watch),
 //! independent of the board so the framing runs in host tests:
-//! - every wait is bounded by the request's deadline (the port bounds its
-//!   own writes);
+//! - every wait and the whole request write are bounded by the request's
+//!   deadline (the port bounds each written byte);
 //! - a partial frame is dropped after a 20 ms pause ([`GAP_MS`]);
 //! - garbage (boot logs, broken frames) is skipped by SOF search and CRC;
 //! - only a response (RESP flag) with the request's seq is taken.
@@ -62,7 +62,14 @@ impl<S: StreamPort, C: Fn() -> u64> UartLink<S, C> {
     ) -> Result<usize, Status> {
         let deadline = (self.now)() + timeout_ms as u64;
         self.reader.clear();
-        self.port.write(inner).await.map_err(|_| Status::Timeout)?;
+        // The whole write counts against the deadline: byte by byte, each
+        // bounded by the port, so a slow line cannot outlast the request.
+        for b in inner.chunks(1) {
+            if (self.now)() >= deadline {
+                return Err(Status::Timeout);
+            }
+            self.port.write(b).await.map_err(|_| Status::Timeout)?;
+        }
         // A request too short to carry a seq gets no answer (times out).
         let seq = inner.get(4).copied();
         loop {
@@ -126,6 +133,8 @@ mod tests {
         bytes: Vec<(u64, u8)>,
         next: usize,
         written: Vec<u8>,
+        /// Time one written byte takes on the line.
+        write_ms: u64,
     }
 
     impl StreamPort for Script {
@@ -150,6 +159,8 @@ mod tests {
             }
         }
         async fn write(&mut self, data: &[u8]) -> Result<(), BusError> {
+            self.clock
+                .set(self.clock.get() + self.write_ms * data.len() as u64);
             self.written.extend_from_slice(data);
             Ok(())
         }
@@ -187,6 +198,7 @@ mod tests {
             bytes,
             next: 0,
             written: Vec::new(),
+            write_ms: 0,
         };
         (UartLink::new(port, move || c.get()), clock)
     }
@@ -249,5 +261,19 @@ mod tests {
             (HELLO_TIMEOUT_MS as u64..HELLO_TIMEOUT_MS as u64 + GAP_MS).contains(&t),
             "{t}"
         );
+    }
+
+    #[test]
+    fn slow_write_stops_at_the_deadline() {
+        // 2 ms per byte: a 200-byte request needs 400 ms, the request
+        // allows 100 ms. The write stops there instead of running on.
+        let (mut l, clock) = link(Vec::new());
+        l.port.write_ms = 2;
+        let req = [0u8; 200];
+        let mut out = [0u8; 64];
+        let r = block_on(l.exchange(&req, 100, &mut out));
+        assert_eq!(r, Err(Status::Timeout));
+        assert_eq!(l.port.written.len(), 50);
+        assert_eq!(clock.get(), 100);
     }
 }

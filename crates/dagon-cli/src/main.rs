@@ -245,6 +245,11 @@ fn topo_check(args: &[&str]) -> ExitCode {
             report.errors().count(),
             report.warnings().count()
         );
+        if let Ok(t) = dagon_topology::parse_str(&yaml) {
+            for line in crate::config::skipped_lines(&t) {
+                println!("{line}");
+            }
+        }
     }
     if report.is_pushable() {
         ExitCode::SUCCESS

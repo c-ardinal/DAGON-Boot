@@ -789,7 +789,7 @@ pub fn gen_project(config: &Path, only: &[String], force: bool) -> Result<Vec<St
     let t = read_topology(&cfg, &contained(&cfg.base, &cfg.topology_path(None)?)?)?;
     let tables = project_tables(config)?;
     if let Some(bad) = only.iter().find(|id| t.node(id).is_none()) {
-        return Err(format!("no node '{bad}' in the topology"));
+        return Err(format!("no updatable node '{bad}' in the topology"));
     }
     let reg = crate::defs::registry(&cfg)?;
     let report = gen(

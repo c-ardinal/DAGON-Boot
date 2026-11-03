@@ -185,7 +185,7 @@ pub(crate) fn node_target(
         .nodes
         .iter()
         .position(|n| n.id == node)
-        .ok_or_else(|| format!("no node '{node}' in the topology"))?;
+        .ok_or_else(|| format!("no updatable node '{node}' in the topology"))?;
     match Target::of_node(&view, i as u8) {
         Some(Target::Hub) => Err(format!("'{node}' is the hub; use --usb")),
         Some(to) => Ok(to),

@@ -264,7 +264,9 @@ impl<'a> Opts<'a> {
     }
 }
 
-/// The topology at `path`, checked against `cfg`'s project definitions.
+/// The topology at `path`, checked against `cfg`'s project definitions:
+/// its updatable part, the one every update, deploy, flash and project
+/// command works on. The nodes it leaves out are named on stderr with why.
 pub fn read_topology(cfg: &Config, path: &Path) -> Result<dagon_topology::Topology, String> {
     let yaml = std::fs::read_to_string(path)
         .map_err(|e| format!("cannot read {}: {e}", path.display()))?;
@@ -275,7 +277,25 @@ pub fn read_topology(cfg: &Config, path: &Path) -> Result<dagon_topology::Topolo
             path.display()
         ));
     }
-    Ok(t)
+    for line in skipped_lines(&t) {
+        eprintln!("{line}");
+    }
+    Ok(dagon_topology::updatable(&t).0)
+}
+
+/// One line per node updating skips for now, with why (none for a 構成
+/// updating reaches whole).
+pub fn skipped_lines(t: &dagon_topology::Topology) -> Vec<String> {
+    dagon_topology::updatable(t)
+        .1
+        .into_iter()
+        .map(|(id, why)| {
+            format!(
+                "note: '{id}' is not updatable yet and is skipped: {}",
+                why.reason()
+            )
+        })
+        .collect()
 }
 
 /// Loads the signing key from `--key` or `DAGON_SIGNING_KEY`. Refuses key

@@ -103,6 +103,10 @@ pub struct Config {
     /// `dagon build` settings per node id; `package` stays relative here.
     #[serde(default)]
     pub build: BTreeMap<String, BuildInputs>,
+    /// Where DAGON comes from (`[dagon]`: git + tag, or path relative to
+    /// the work area); flash builds the boot images from it.
+    #[serde(default)]
+    pub dagon: crate::scaffold::DagonSource,
 }
 
 impl Config {

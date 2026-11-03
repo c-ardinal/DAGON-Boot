@@ -66,12 +66,29 @@ wired to the hub (see [Your own board](#your-own-board-chosen-by-mcu)).
 | A C compiler | building the `dagon` CLI from source (the `ring` crate) | MSVC Build Tools on Windows, `cc` elsewhere |
 | Chrome or Edge 89+ | DAGON Console (Web Serial) | — |
 
-Install the `dagon` CLI from a clone of this repository:
+Install the `dagon` CLI, one of:
+
+- Download the archive for your system (`dagon-<target>.zip` for Windows,
+  `dagon-<target>.tar.gz` otherwise) from the GitHub release of the version
+  you want, check it against its `.sha256` file, and put `dagon` on your
+  `PATH`.
+- `cargo binstall dagon-cli --git https://github.com/c-ardinal/DAGON-Boot`
+  (fetches that same archive; needs `cargo-binstall`).
+- Build it: `cargo install --git https://github.com/c-ardinal/DAGON-Boot --tag v<version> dagon-cli`.
+
+No clone of this repository and no git submodule is needed:
 
 ```sh
-cargo install --path crates/dagon-cli
 dagon --help
 ```
+
+A project made by `dagon new` takes DAGON from the same release as your
+`dagon` (`[dagon] git` and `tag = "v<version>"` in `dagon.toml`). cargo
+fetches it when you build, and `dagon flash` builds the boot core, stage0
+and factory agent from cargo's copy of that tag, so it needs the network
+the first time. Working on DAGON itself, keep a clone instead:
+`dagon new my-fleet --dagon-path <clone>` (or set `DAGON_HOME`) writes
+`[dagon] path`.
 
 Then let `dagon` check the tools your topology needs (run it in a project
 folder; elsewhere it checks every MCU family):
@@ -397,6 +414,14 @@ For firmware that is not a `dagon new` project:
   `targets/mcu/esp32s3/vendor/bootloader.bin`, unmodified ESP-IDF v6.1;
   only needed to rebuild it, see `vendor/PROVENANCE.md`)
 - `elf2uf2-rs` for the RP2040 bring-up image
+- `cargo install --path crates/dagon-cli` installs the CLI from your clone;
+  projects then use the clone with `dagon new --dagon-path <clone>` (or
+  `DAGON_HOME`)
+- Release archives: `python scripts/release.py [--target <triple>]` builds
+  `out/release/dagon-<target>.*` with the page built in;
+  `.github/workflows/release.yml` does the same for each platform when a
+  `v*` tag is pushed and keeps them as workflow artifacts (it publishes
+  nothing)
 
 ## License (MIT / Apache-2.0 dual)
 

@@ -4,6 +4,7 @@ mod ai;
 mod commands;
 mod config;
 mod conform;
+mod dagonsrc;
 mod demo;
 mod deploy;
 mod device;
@@ -64,10 +65,14 @@ Usage:
   dagon rollback --node <id> [--port <name>] [--topology <yaml>]
                                      back to the node's previously confirmed version
                                      (its other slot), then confirm it there
-  dagon new <dir> [--from <yaml>] [--keys <dir>]
+  dagon new <dir> [--from <yaml>] [--keys <dir>] [--dagon-path <clone>]
+        [--dagon-git <url>] [--dagon-tag <tag>]
                                      a project folder: dagon.toml, topology.yaml (the desk
                                      sample unless --from), and a signing key pair in
-                                     --keys (default ~/.dagon/keys/<name>) if none is there
+                                     --keys (default ~/.dagon/keys/<name>) if none is there.
+                                     DAGON comes from this CLI's release (git + tag
+                                     v<version>) unless --dagon-path or DAGON_HOME names a
+                                     local clone
   dagon gen [<id>...] [--force-main]
                                      one Rust crate per node in nodes/<id> on the board
                                      support packages; rewrites only wiring.rs and the

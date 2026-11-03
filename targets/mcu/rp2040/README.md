@@ -16,7 +16,8 @@ A board without a package needs only its own `BoardDef` and links (see
 ## A 親機 with your own task
 
 This is what `dagon new` generates for the Waveshare board
-(`../../boards/waveshare-rp2040-touch-lcd-1.28/template`). `Cargo.toml`
+(`../../boards/waveshare-rp2040-touch-lcd-1.28/template`, its manifest kept
+as `Cargo.toml.tpl` so cargo does not read it as a package). `Cargo.toml`
 names the two packages without features (paths, or git dependencies on a
 release tag); `.cargo/config.toml` sets the target, the link arguments and
 the node's tag:

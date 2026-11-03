@@ -66,6 +66,23 @@ fn link_kind(k: LinkKind) -> &'static str {
     k.name()
 }
 
+/// Link kinds `mcu`'s firmware implements: `{up: [kind], down: [kind]}`
+/// (dagon-topology's links table; the rest are "not available yet").
+#[wasm_bindgen]
+pub fn link_kinds(mcu: &str) -> JsValue {
+    use dagon_topology::links::{available, Dir};
+    let names = |d: Dir| -> Array {
+        available(mcu, d)
+            .iter()
+            .map(|k| JsValue::from(k.name()))
+            .collect()
+    };
+    let o = Object::new();
+    set(&o, "up", names(Dir::Up).into());
+    set(&o, "down", names(Dir::Down).into());
+    o.into()
+}
+
 /// The MCU table for choosing a node by MCU: `[{id, port, flashMap,
 /// flashBytes, gpioCount, boards: [board id]}]`. `flashBytes` is what the
 /// flash map needs, so a board without that much flash cannot hold it.

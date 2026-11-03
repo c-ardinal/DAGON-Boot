@@ -56,6 +56,8 @@ export interface Config {
   links: Link[];
   /** Node ids, children first and the hub last. */
   order: string[];
+  /** The 親機's declared uplink (none: USB to this PC). */
+  uplink?: { kind: string; host: 'pc-cli' | 'browser' | 'embedded' };
 }
 
 const NRST_HEADER = 'NRST（ヘッダの位置: 未設定）';

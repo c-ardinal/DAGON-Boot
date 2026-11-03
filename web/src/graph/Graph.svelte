@@ -248,7 +248,7 @@
       </div>
     {/if}
 
-    <div class="pc" style:left="{W / 2 - PC.w / 2}px" style:top="{PC.y}px">{CANVAS.pc}</div>
+    <div class="pc" style:left="{W / 2 - PC.w / 2}px" style:top="{PC.y}px">{config?.uplink ? (CANVAS.pcBy[config.uplink.host] ?? CANVAS.pc) : CANVAS.pc}</div>
 
     {#if !config}
       <div class="receptacle" style:left="{hubX}px" style:top="{hubY}px" style:height="{EMPTY_H}px">{CANVAS.hubSlot}</div>

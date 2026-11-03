@@ -1,7 +1,8 @@
 import { describe, expect, test } from 'vitest';
 import { supportedBoards, topo_check, topo_compile } from '../../wasm/dagon.ts';
 import { DESK_DEMO, DESK_DEMO_YAML } from '../sample.ts';
-import { boardMissing, canPlace, connect, emptyDoc, freeAddrs, fromYaml, place, placeMcu, removeNode, ROM_ADDR, setBoard, setLink, setLinkKind, setNode, toConfig, toYaml } from './model.ts';
+import { boardMissing, canPlace, connect, emptyDoc, freeAddrs, fromYaml, hopAvailable, linkKinds, place, placeMcu, removeNode, ROM_ADDR, setBoard, setLink, setLinkKind, setNode, setUplink, toConfig, toYaml } from './model.ts';
+import { problemChip } from './problems.ts';
 import { problems } from './problems.ts';
 
 const check = (yaml: string) => JSON.parse(topo_check(yaml)) as { ok: boolean; errors: number; warnings: number; issues: { rule: string; path: string }[] };
@@ -104,5 +105,32 @@ describe('define document', () => {
     expect(cfg.nodes.map((n) => [n.id, n.depth])).toEqual([['hub', 0], ['seg', 1], ['m5stopwatch', 2]]);
     expect(problems(deep).map((p) => p.rule)).toContain('V-23');
     expect(topo_check(toYaml(deep.topo))).toContain('V-23');
+  });
+
+  test('the 親機 uplink: set, written to the YAML (same compiled topology), and drawn as its L0', () => {
+    const doc = setUplink(fromYaml(DESK_DEMO_YAML), 'hub', { kind: 'wifi-tcp', host: 'browser' });
+    const yaml = toYaml(doc.topo);
+    expect(yaml).toContain('uplink');
+    expect(fromYaml(yaml).topo.nodes.find((n) => n.id === 'hub')?.uplink).toEqual({ kind: 'wifi-tcp', host: 'browser' });
+    expect(topo_compile(yaml)).toEqual(topo_compile(DESK_DEMO_YAML));
+    expect(toConfig(doc, supportedBoards()).uplink).toEqual({ kind: 'wifi-tcp', host: 'browser' });
+    expect(toConfig(fromYaml(DESK_DEMO_YAML), supportedBoards()).uplink).toBeUndefined();
+    expect(setUplink(doc, 'hub', null).topo.nodes.find((n) => n.id === 'hub')?.uplink).toBeUndefined();
+  });
+
+  test('hops the firmware cannot do yet are known, and reported as まだ使えないつながり (◇)', () => {
+    expect(linkKinds('rp2040')).toEqual({ up: ['usb-cdc'], down: ['i2c', 'uart'] });
+    const doc = fromYaml(DESK_DEMO_YAML);
+    const [hub, seg] = ['hub', 'seg'].map((id) => doc.topo.nodes.find((n) => n.id === id));
+    expect(hopAvailable('i2c', hub, seg)).toBe(true);
+    expect(hopAvailable('ble', hub, seg)).toBe(false);
+    expect(hopAvailable('usb-cdc', undefined, hub)).toBe(true);
+    expect(hopAvailable('wifi-tcp', undefined, hub)).toBe(false);
+    const yaml = toYaml(setUplink(doc, 'hub', { kind: 'ble', host: 'browser' }).topo);
+    const r = check(yaml);
+    expect(r.issues.map((i) => i.rule)).toEqual(['V-24']);
+    expect(problemChip({ rule: 'V-24', severity: 'warning' })).toEqual({ mark: '◇', kind: 'unsupported' });
+    const ps = problems(setUplink(doc, 'hub', { kind: 'ble', host: 'browser' }));
+    expect(ps.some((p) => p.rule === 'V-24')).toBe(true);
   });
 });

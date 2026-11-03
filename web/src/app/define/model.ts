@@ -2,7 +2,7 @@
 // shapes of dagon-topology's schema) plus the page-side display names. Every
 // edit is a pure function returning a new document, so undo keeps snapshots.
 // Validity is never decided here: topo_check (dagon-topology in WASM) does it.
-import { board_template, supported_mcus, topo_parse } from '../../wasm/pkg/dagon_wasm.js';
+import { board_template, link_kinds, supported_mcus, topo_parse } from '../../wasm/pkg/dagon_wasm.js';
 import { supportedBoards, type Board } from '../../wasm/dagon.ts';
 import { INSPECT } from '../copy.ts';
 import type { Config, Link as GLink, Node as GNode, Wire } from '../sample.ts';
@@ -17,7 +17,12 @@ export interface TNode {
   max_attempts?: number;
   listen_window_ms?: number;
   tag: string;
+  /** A 親機's hop towards the PC (or what drives it); none: USB CDC to dagon. */
+  uplink?: { kind: LinkKind; host?: UplinkHost };
 }
+
+/** What drives a 親機 through its uplink. */
+export type UplinkHost = 'pc-cli' | 'browser' | 'embedded';
 
 export interface TBus {
   id: string;
@@ -50,7 +55,30 @@ export interface TLink {
 }
 
 /** I2C and UART: 親機 to 子機, updatable. CAN and Ethernet: between 親機 and deeper, described only (V-23). */
-export type LinkKind = 'i2c' | 'uart' | 'can' | 'ethernet';
+export type LinkKind = 'usb-cdc' | 'uart' | 'i2c' | 'ble' | 'wifi-tcp' | 'ethernet' | 'can';
+
+/** Every hop kind a 構成 may name, in the order the define screen offers them. */
+export const LINK_KINDS: LinkKind[] = ['usb-cdc', 'uart', 'i2c', 'ble', 'wifi-tcp', 'ethernet', 'can'];
+
+/** Kinds `mcu`'s firmware implements up (to the PC or the 親機) and down (to 子機); the rest are not available yet. */
+export function linkKinds(mcu: string): { up: LinkKind[]; down: LinkKind[] } {
+  return link_kinds(mcu) as { up: LinkKind[]; down: LinkKind[] };
+}
+
+/** Whether a hop of `kind` from `from` to `to` is one both firmwares implement. */
+export function hopAvailable(kind: LinkKind, from: TNode | undefined, to: TNode | undefined): boolean {
+  return (!from || linkKinds(from.mcu).down.includes(kind)) && (!to || linkKinds(to.mcu).up.includes(kind));
+}
+
+/** Sets (or, with null, removes) 親機 `id`'s uplink. */
+export function setUplink(doc: Doc, id: string, uplink: TNode['uplink'] | null): Doc {
+  const nodes = doc.topo.nodes.map((n) => {
+    if (n.id !== id) return n;
+    const { uplink: _old, ...rest } = n;
+    return uplink ? { ...rest, uplink } : rest;
+  });
+  return { ...doc, topo: { ...doc.topo, nodes } };
+}
 
 /** The MCU table (dagon-wasm's supported_mcus): what choosing a node by MCU starts from. */
 export interface McuInfo {
@@ -328,7 +356,7 @@ export function setLink(doc: Doc, index: number, path: string, value: unknown): 
 export function setLinkKind(doc: Doc, index: number, kind: LinkKind): Doc {
   const l = (doc.topo.links ?? [])[index];
   if (!l || l.kind === kind) return doc;
-  if (kind === 'can' || kind === 'ethernet') {
+  if (kind !== 'i2c' && kind !== 'uart') {
     const links = (doc.topo.links ?? []).map((x, i) => (i === index ? { from: x.from, to: x.to, kind } : x));
     const buses = (doc.topo.buses ?? []).filter((b) => links.some((y) => y.bus === b.id));
     return { ...doc, topo: { ...doc.topo, links, buses } };
@@ -418,6 +446,17 @@ const gpio = (n: number | undefined) => (n === undefined ? null : `GPIO${n}`);
 const hex = (a: number | undefined) => (a === undefined ? '' : `0x${a.toString(16).padStart(2, '0')}`);
 
 /** The document in the shape the graph and the operate session draw. */
+/** How a hop's kind reads on the canvas. */
+const KIND_LABEL: Record<LinkKind, string> = {
+  'usb-cdc': 'USB',
+  uart: 'UART',
+  i2c: 'I2C',
+  ble: 'BLE',
+  'wifi-tcp': 'Wi-Fi',
+  ethernet: 'Ethernet',
+  can: 'CAN',
+};
+
 export function toConfig(doc: Doc, boards: Board[]): Config {
   const t = doc.topo;
   const links = t.links ?? [];
@@ -439,7 +478,7 @@ export function toConfig(doc: Doc, boards: Board[]): Config {
     // A node chosen by MCU (no board): 「自作 · RP2040」, the MCU's name and not its id.
     const mcuName = b?.mcuName ?? mcuTable.find((m) => m.id === n.mcu)?.name ?? n.mcu;
     const l = links.find((x) => x.to === n.id);
-    const via = !l ? '' : l.kind === 'i2c' ? `I2C ${hex(l.addr)}` : l.kind === 'uart' ? `UART ${l.baud ?? ''}`.trim() : l.kind === 'can' ? 'CAN' : 'Ethernet';
+    const via = !l ? '' : l.kind === 'i2c' ? `I2C ${hex(l.addr)}` : l.kind === 'uart' ? `UART ${l.baud ?? ''}`.trim() : KIND_LABEL[l.kind];
     return {
       id: n.id,
       no: i + 1,
@@ -456,7 +495,7 @@ export function toConfig(doc: Doc, boards: Board[]): Config {
   });
   const glinks: GLink[] = links.map((l) => {
     const wires: Wire[] =
-      l.kind === 'can' || l.kind === 'ethernet'
+      l.kind !== 'i2c' && l.kind !== 'uart'
         ? []
         : l.kind === 'i2c'
         ? [
@@ -471,7 +510,15 @@ export function toConfig(doc: Doc, boards: Board[]): Config {
             { signal: 'RX ← TX', hubPin: gpio(l.pins?.rx) ?? '', nodePin: '', shared: false },
             { signal: 'GND', hubPin: 'GND', nodePin: 'GND', shared: true },
           ];
-    return { from: l.from, to: l.to, kind: l.kind === 'i2c' ? 'I2C' : l.kind === 'uart' ? 'UART' : l.kind === 'can' ? 'CAN' : 'Ethernet', addr: hex(l.addr), wires };
+    return { from: l.from, to: l.to, kind: KIND_LABEL[l.kind], addr: hex(l.addr), wires };
   });
-  return { name: t.name, yaml: toYaml(t), nodes, links: glinks, order: t.update.order.filter((id) => t.nodes.some((n) => n.id === id)) };
+  const up = t.nodes.find((n) => n.role === 'coordinator')?.uplink;
+  return {
+    name: t.name,
+    yaml: toYaml(t),
+    nodes,
+    links: glinks,
+    order: t.update.order.filter((id) => t.nodes.some((n) => n.id === id)),
+    ...(up ? { uplink: { kind: up.kind, host: up.host ?? 'pc-cli' } } : {}),
+  };
 }

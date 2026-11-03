@@ -63,12 +63,7 @@ pub fn release_topology(bundle: &[u8], current: &str) -> Result<JsValue, JsError
 }
 
 fn link_kind(k: LinkKind) -> &'static str {
-    match k {
-        LinkKind::I2c => "i2c",
-        LinkKind::Uart => "uart",
-        LinkKind::Can => "can",
-        LinkKind::Ethernet => "ethernet",
-    }
+    k.name()
 }
 
 /// The MCU table for choosing a node by MCU: `[{id, port, flashMap,

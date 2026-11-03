@@ -139,19 +139,45 @@ fn every_word_has_its_glyphs() {
 }
 
 #[test]
-fn words_fit_inside_the_rings() {
+fn words_fit_inside_the_rings_and_clear_of_the_arc() {
     for (at, d, font) in [(HUB_AT, HUB_D, &FONT_10X20), (BOTTOM, SUB_D, &FONT_6X10)] {
-        let inner = (d / 2 - RING / 2 - 1) as i32;
         for w in all_words().into_iter().filter(|w| !w.is_ascii()) {
-            for p in word_pixels(w, word_top(at, font)) {
-                let (dx, dy) = (p.x - at.x, p.y - at.y);
-                assert!(
-                    dx * dx + dy * dy <= inner * inner,
-                    "{w} leaves the ring at {p:?}"
-                );
-            }
+            // Plain ring: below the version, inside the ring stroke.
+            let (top, over) = word_place(at, d, font, w, false);
+            assert!(
+                !over && fits(w, top, at, inside(d, RING)),
+                "{w} in a ring of {d}"
+            );
+            // Progress shown: clear of the wider arc stroke.
+            let (top, _) = word_place(at, d, font, w, true);
+            assert!(
+                fits(w, top, at, clear_of_arc(d)),
+                "{w} under the arc of {d}"
+            );
         }
     }
+}
+
+/// Each refusal and failure reason the PC sends in SHOW, as the 子機
+/// ring shows it.
+#[test]
+fn reasons_map_to_their_words() {
+    let cases = [
+        (phase::REJECTED, "E_SIGNATURE", "署名不正"),
+        (phase::REJECTED, "E_KEY", "鍵不一致"),
+        (phase::REJECTED, "E_COMPAT", "非互換"),
+        (phase::REJECTED, "E_DIGEST", "破損"),
+        (phase::REJECTED, "E_FLASH", "拒否"),
+        (phase::REJECTED, "", "拒否"),
+        (phase::FAILED, "ROLLED BACK", "巻き戻し"),
+        (phase::FAILED, "NO ANSWER", "無応答"),
+        (phase::FAILED, "NO IMAGE", "失敗"),
+        (phase::FAILED, "", "失敗"),
+    ];
+    for (ph, text, word) in cases {
+        assert_eq!(phase_word(ph, text), word, "{ph} {text}");
+    }
+    assert_eq!(state_word(Shade::RolledBack), "巻き戻し");
 }
 
 /// The area "TEST KEY" covers.
@@ -221,7 +247,7 @@ fn renders_of_every_state_and_phase_word() {
         draw(&mut c, &h, false).unwrap();
         // The word is drawn in the phase colour under the node.
         let word = phase_word(ph, text);
-        let top = word_top(BOTTOM, &FONT_6X10);
+        let (top, _) = word_place(BOTTOM, SUB_D, &FONT_6X10, word, true);
         if !word.is_ascii() {
             assert!(
                 word_pixels(word, top).all(|q| c.at(q) == phase_colour(ph)),

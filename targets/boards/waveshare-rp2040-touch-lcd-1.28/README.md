@@ -42,8 +42,8 @@ Some of those pins are wired on the board itself:
 | GPIO29 | battery voltage (ADC3, through a divider) |
 
 The home screen (`screen`, host-tested without `hal`) shows the state
-words in Japanese (確定, 試行中, 無応答, 巻戻し; 検証, 再起動, 署名不正, 鍵不一致,
-非互換, 破損, 拒否, 失敗) with an 11x11 bitmap of only those characters
+words in Japanese (確定, 試行中, 無応答, 巻き戻し; 検証, 再起動, 署名不正,
+鍵不一致, 非互換, 破損, 拒否, 失敗) with an 11x11 bitmap of only those characters
 (`src/glyphs.rs`), rasterised from Noto Sans JP Regular by
 `tools/gen_glyphs.py`; SIL Open Font License 1.1, see
 `fonts/OFL-NotoSansJP.txt`. A rolled-back node's ring is yellow. "TEST KEY"

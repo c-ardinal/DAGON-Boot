@@ -150,15 +150,56 @@ fn node<D: DrawTarget<Color = Rgb565>>(
             let _ = v.push_str("--");
         }
     }
-    let version_at = at + Point::new(0, line / 2 - 2);
-    Text::with_alignment(&v, version_at, style, Alignment::Center).draw(d)?;
     let (word, c) = word_of(n, shown);
-    word_draw(d, &word, word_top(at, font), c)
+    let (top, over_version) = word_place(at, diameter, font, &word, shown.is_some());
+    if !over_version {
+        let version_at = at + Point::new(0, line / 2 - 2);
+        Text::with_alignment(&v, version_at, style, Alignment::Center).draw(d)?;
+    }
+    word_draw(d, &word, top, c)
 }
 
-/// Top of the state word's row in a node ring at `at`.
-pub fn word_top(at: Point, font: &MonoFont<'_>) -> Point {
-    at + Point::new(0, font.character_size.height as i32 / 2 + 1)
+/// Where the state word goes in a node ring of `diameter` at `at`: its top
+/// row, and whether it takes the version's row. Normally it sits below the
+/// version, inside the ring. While a progress arc (wider than the ring) is
+/// shown, a word that would touch the arc there moves up to the version's
+/// row instead (the top line names the version being installed).
+pub fn word_place(
+    at: Point,
+    diameter: u32,
+    font: &MonoFont<'_>,
+    word: &str,
+    progress: bool,
+) -> (Point, bool) {
+    let line = font.character_size.height as i32;
+    let below = at + Point::new(0, line / 2 + 1);
+    if !progress || word.is_ascii() || fits(word, below, at, clear_of_arc(diameter)) {
+        return (below, false);
+    }
+    (at + Point::new(0, line / 2 - 9), true)
+}
+
+/// Radius a word stays within under a progress arc: inside the arc's
+/// stroke with a visible gap.
+pub fn clear_of_arc(diameter: u32) -> i32 {
+    inside(diameter, ARC) - ARC_GAP
+}
+
+/// Pixels between a word and the progress arc.
+const ARC_GAP: i32 = 2;
+
+/// Radius inside a stroke of `width` on a circle of `diameter`, with a
+/// pixel to spare.
+pub fn inside(diameter: u32, width: u32) -> i32 {
+    (diameter / 2 - width / 2 - 1) as i32
+}
+
+/// Whether every pixel of `word` at `top` lies within `radius` of `at`.
+pub fn fits(word: &str, top: Point, at: Point, radius: i32) -> bool {
+    word_pixels(word, top).all(|p| {
+        let (dx, dy) = (p.x - at.x, p.y - at.y);
+        dx * dx + dy * dy <= radius * radius
+    })
 }
 
 /// The state word under a node and its colour.
@@ -199,7 +240,7 @@ pub fn phase_word(ph: u8, text: &str) -> &'static str {
             _ => "拒否",
         },
         phase::FAILED => match text {
-            "ROLLED BACK" => "巻戻し",
+            "ROLLED BACK" => "巻き戻し",
             "NO ANSWER" => "無応答",
             _ => "失敗",
         },
@@ -215,7 +256,7 @@ pub fn state_word(s: Shade) -> &'static str {
         Shade::Confirmed => "確定",
         Shade::Trial => "試行中",
         Shade::NoAnswer => "無応答",
-        Shade::RolledBack => "巻戻し",
+        Shade::RolledBack => "巻き戻し",
     }
 }
 

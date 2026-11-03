@@ -702,7 +702,7 @@ fn gen_is_a_job_and_listed_in_hello() {
     let v: serde_json::Value = serde_json::from_str(&hello).unwrap();
     assert_eq!(
         v["flash_mcus"],
-        serde_json::json!(["rp2040", "stm32f401re"])
+        serde_json::json!(["rp2040", "stm32f401re", "esp32s3"])
     );
     assert_eq!(
         post(&a, "/v1/project/new", serde_json::json!({ "path": "g" })).0,

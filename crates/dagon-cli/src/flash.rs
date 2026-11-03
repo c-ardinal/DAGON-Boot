@@ -1,7 +1,9 @@
 //! `dagon flash <id>`: the first write of a board. Builds the boot core (and
 //! the RP2040's stage0) and the app with the developer's key, makes the
 //! first-install files as `provision` / `rescue hub` do, then writes them:
-//! RP2040 by copying `rescue.uf2` to the RPI-RP2 drive, F401 with probe-rs.
+//! RP2040 by copying `rescue.uf2` to the RPI-RP2 drive, F401 with probe-rs,
+//! ESP32-S3 with espflash (the bundled 2nd stage, the partition table, the
+//! factory agent, slot A and otadata) to the one ESP32-S3 on USB.
 //! The plan is printed before anything is built, and nothing touches a
 //! device until the user confirms (`--yes`) or ever with `--dry-run`.
 
@@ -29,33 +31,42 @@ const UF2_BOARD: &str = "RPI-RP2";
 const FIRST_VERSION: &str = "1.0.0";
 
 /// A DAGON firmware part built from the DAGON checkout.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct Part {
     pub name: &'static str,
     /// Cargo package directory, relative to the DAGON checkout.
-    pub package: &'static str,
+    pub package: String,
+    /// Binary target; `None`: the package's own name.
+    pub bin: Option<&'static str>,
 }
 
-/// The parts each MCU family's first install needs besides the app. The
-/// one place that knows where they live: the board packages move them.
-pub(crate) fn parts(mcu: &str) -> Option<&'static [Part]> {
-    const RP2040: &[Part] = &[
-        Part {
-            name: "stage0",
-            package: "targets/mcu/rp2040/stage0",
-        },
-        Part {
-            name: "bootcore",
-            package: "targets/mcu/rp2040/bootcore",
-        },
-    ];
-    const F401: &[Part] = &[Part {
-        name: "bootcore",
-        package: "targets/mcu/stm32f401re/bootcore",
-    }];
+/// The parts each MCU family's first install needs besides the app, for a
+/// node on `board`. The one place that knows where they live.
+pub(crate) fn parts(mcu: &str, board: Option<&str>) -> Option<Vec<Part>> {
+    let part = |name, package: &str, bin| Part {
+        name,
+        package: package.into(),
+        bin,
+    };
     match mcu {
-        "rp2040" => Some(RP2040),
-        "stm32f401re" => Some(F401),
+        "rp2040" => Some(vec![
+            part("stage0", "targets/mcu/rp2040/stage0", None),
+            part("bootcore", "targets/mcu/rp2040/bootcore", None),
+        ]),
+        "stm32f401re" => Some(vec![part(
+            "bootcore",
+            "targets/mcu/stm32f401re/bootcore",
+            None,
+        )]),
+        // The recovery agent for the factory partition ships with the
+        // board package: a node without one has none to write.
+        "esp32s3" => board.map(|b| {
+            vec![part(
+                "factory",
+                &format!("targets/boards/{b}"),
+                Some("factory"),
+            )]
+        }),
         _ => None,
     }
 }
@@ -79,11 +90,13 @@ pub(crate) fn plan(
     let n = t
         .node(node)
         .ok_or_else(|| format!("no node '{node}' in the topology"))?;
-    let parts = parts(&n.mcu).ok_or_else(|| {
-        format!(
-            "flash supports rp2040 and stm32f401re nodes, not {} ('{node}')",
-            n.mcu
-        )
+    let parts = parts(&n.mcu, n.board.as_deref()).ok_or_else(|| match n.mcu.as_str() {
+        "esp32s3" => {
+            format!("'{node}' names no board: its factory agent comes from the board package")
+        }
+        mcu => {
+            format!("flash supports rp2040, stm32f401re and esp32s3 nodes, not {mcu} ('{node}')")
+        }
     })?;
     let mut lines = vec![format!("flash {node} ({}):", n.mcu)];
     if cfg.provision.contains_key(node) {
@@ -92,11 +105,11 @@ pub(crate) fn plan(
         ));
     }
     let home = dagon_home();
-    for part in parts {
+    for part in &parts {
         lines.push(format!(
             "  build    {:<8} {} (tag {})",
             part.name,
-            home.join(part.package).display(),
+            home.join(&part.package).display(),
             n.tag
         ));
     }
@@ -114,6 +127,26 @@ pub(crate) fn plan(
                 DRIVE_WAIT.as_secs()
             ),
         ],
+        "esp32s3" => {
+            let mut l = vec![format!(
+                "  check    {} against SHA256SUMS (the unmodified ESP-IDF 2nd stage)",
+                home.join(crate::esp::VENDOR_DIR)
+                    .join("bootloader.bin")
+                    .display()
+            )];
+            l.push(format!("  make     in {}:", out.display()));
+            l.extend(
+                esp_files_plan()
+                    .into_iter()
+                    .map(|f| format!("             {f}")),
+            );
+            l.push(format!(
+                "  write    espflash over USB-C to the one ESP32-S3 connected (USB {:04x}:{:04x})",
+                crate::esp::USB_JTAG.0,
+                crate::esp::USB_JTAG.1
+            ));
+            l
+        }
         _ => vec![
             format!("  make     {}", out.join("flash.bin").display()),
             "  write    probe-rs erase, download, reset through the ST-LINK".into(),
@@ -138,9 +171,12 @@ fn inputs(
     let fw_key = firmware_key(cfg, key)?;
     let hex = dagon_sign::to_hex(&fw_key);
     let mut built = Vec::new();
-    for part in parts(&n.mcu).ok_or("checked in plan")? {
-        let dir = dagon_home().join(part.package);
-        let bin = nodebuild::package_name(&dir)?;
+    for part in parts(&n.mcu, n.board.as_deref()).ok_or("checked in plan")? {
+        let dir = dagon_home().join(&part.package);
+        let bin = match part.bin {
+            Some(b) => b.to_string(),
+            None => nodebuild::package_name(&dir)?,
+        };
         let target = cfg.base.join("out/flash/target").join(part.name);
         log(&format!(
             "{node}: building {} in {}",
@@ -167,7 +203,10 @@ fn inputs(
     let version = cfg.build.get(node).and_then(|b| b.version.clone());
     Ok(ProvisionInputs {
         stage0: take("stage0"),
-        bootcore: take("bootcore").ok_or("no boot core part")?,
+        // ESP32-S3: the factory agent stands where the boot core is.
+        bootcore: take("bootcore")
+            .or_else(|| take("factory"))
+            .ok_or("no boot core part")?,
         app: nodebuild::elf_path(cfg, node, 'a'),
         version: Some(version.unwrap_or_else(|| FIRST_VERSION.into())),
         bootcore_version: None,
@@ -188,7 +227,125 @@ pub(crate) fn prepare(
     cancel: &AtomicBool,
 ) -> Result<FirstWrite, String> {
     let i = inputs(cfg, t, node, key, log, cancel)?;
-    provision_files(t, node, &i, out, key)
+    match t.node(node).map(|n| n.mcu.as_str()) {
+        Some("esp32s3") => {
+            let app = crate::esp::save_image(&i.app, &out.join("app.bin"))?;
+            esp_files(t, node, &i, &app, &dagon_home(), out, key)
+        }
+        _ => provision_files(t, node, &i, out, key),
+    }
+}
+
+/// The ESP32-S3 first-install files, as the plan names them.
+fn esp_files_plan() -> Vec<String> {
+    [
+        "bootloader.bin  at 0x0       (2nd stage)",
+        "partitions.csv  at 0x8000    (partition table)",
+        "factory.elf     in factory   (recovery agent)",
+        "body.bin        in ota_0     (app, slot A)",
+        "header.bin      in dagon     (its signed header)",
+        "otadata.bin     in otadata   (ota_0 selected, confirmed)",
+    ]
+    .map(String::from)
+    .to_vec()
+}
+
+/// Writes the ESP32-S3 first-install files into `out` and returns the
+/// espflash commands (without the port, chosen when writing): the checked
+/// 2nd stage, the partition table and the factory agent, then slot A's body
+/// and header and the otadata entry that selects it.
+fn esp_files(
+    t: &Topology,
+    node: &str,
+    i: &ProvisionInputs,
+    app_image: &[u8],
+    home: &Path,
+    out: &Path,
+    key: &KeyPair,
+) -> Result<FirstWrite, String> {
+    use crate::esp;
+    use dagon_format::header::{image_kind, slot_binding, HEADER_SIZE};
+    let (vendor, csv_path) = esp::vendor_files(home);
+    let boot = esp::checked_bootloader(&vendor)?;
+    let csv =
+        std::fs::read_to_string(&csv_path).map_err(|e| format!("{}: {e}", csv_path.display()))?;
+    let l = esp::layout(&csv)?;
+    let version = crate::commands::version(i.version.as_deref().unwrap_or(FIRST_VERSION))?;
+    let opts = crate::commands::SignOpts {
+        version,
+        release_seq: i.release_seq.unwrap_or(1),
+        min_bootcore: dagon_format::Version::default(),
+        proto: i.proto_version.unwrap_or(1),
+        bits: None,
+    };
+    let img = crate::commands::image_for_node(
+        t,
+        node,
+        image_kind::APP,
+        slot_binding::A,
+        app_image,
+        Some(&opts),
+        key,
+    )?;
+    let (header, body) = img.split_at(HEADER_SIZE);
+    let file = |name: &str, bytes: &[u8]| -> Result<PathBuf, String> {
+        let p = out.join(name);
+        crate::config::write_file(&p, bytes)?;
+        Ok(p)
+    };
+    let bootloader = file("bootloader.bin", &boot)?;
+    let table = file("partitions.csv", csv.as_bytes())?;
+    let factory = file("factory.elf", &crate::config::read_file(&i.bootcore)?)?;
+    file("app-a.img", &img)?;
+    let body = file("body.bin", body)?;
+    let header = file("header.bin", header)?;
+    let otadata = file("otadata.bin", &esp::otadata_slot_a())?;
+
+    let s = |v: &str| v.to_string();
+    let p = |p: &PathBuf| p.display().to_string();
+    let common = [s("--chip"), s(esp::CHIP)];
+    let mut first = vec![s("flash")];
+    first.extend(common.clone());
+    first.extend([
+        s("--flash-size"),
+        s(esp::FLASH_SIZE),
+        s("--partition-table-offset"),
+        format!("{:#x}", esp::TABLE_AT),
+        s("--bootloader"),
+        p(&bootloader),
+        s("--partition-table"),
+        p(&table),
+        s("--erase-parts"),
+        s("otadata,dagon"),
+        s("--target-app-partition"),
+        s("factory"),
+        p(&factory),
+    ]);
+    let write_bin = |at: u32, f: &PathBuf| {
+        let mut c = vec![s("write-bin")];
+        c.extend(common.clone());
+        c.extend([format!("{at:#x}"), p(f)]);
+        c
+    };
+    let commands = vec![
+        first,
+        write_bin(l.ota_0, &body),
+        write_bin(l.dagon, &header),
+        write_bin(l.otadata, &otadata),
+    ];
+    let files = vec![
+        (0, bootloader),
+        (esp::TABLE_AT, table),
+        (l.factory, factory),
+        (l.ota_0, body),
+        (l.dagon, header),
+        (l.otadata, otadata),
+    ];
+    crate::config::write_file(
+        &out.join("commands.txt"),
+        command_lines("espflash", &commands).as_bytes(),
+    )?;
+    Ok(FirstWrite::Espflash { files, commands })
 }
 
 /// The RP2040 boot ROM drive among `roots` (its INFO_UF2.TXT names
@@ -229,7 +386,7 @@ fn is_rp2040_rom(info: &str) -> bool {
 
 /// The MCU families `flash` can write (the page offers it for these).
 pub(crate) fn flashable(mcu: &str) -> bool {
-    parts(mcu).is_some()
+    parts(mcu, Some("any")).is_some()
 }
 
 /// Where a removable drive shows up on this system.
@@ -274,7 +431,54 @@ pub(crate) fn write(
     match w {
         FirstWrite::ProbeRs { commands, .. } => run_probe_rs(commands, log),
         FirstWrite::Uf2 { file, .. } => copy_uf2(file, log, cancel),
+        FirstWrite::Espflash { commands, .. } => {
+            let port = crate::esp::pick_port(&crate::esp::usb_ports()?)?;
+            run_espflash(&with_port(commands, &port), log, cancel)
+        }
     }
+}
+
+/// `commands` aimed at `port`, never asking which port to use.
+fn with_port(commands: &[Vec<String>], port: &str) -> Vec<Vec<String>> {
+    commands
+        .iter()
+        .map(|c| {
+            let mut a = vec![c[0].clone()];
+            a.extend(["--port".into(), port.into(), "--non-interactive".into()]);
+            a.extend(c[1..].iter().cloned());
+            a
+        })
+        .collect()
+}
+
+fn run_espflash(
+    commands: &[Vec<String>],
+    log: &mut dyn FnMut(&str),
+    cancel: &AtomicBool,
+) -> Result<(), String> {
+    for args in commands {
+        if cancel.load(Ordering::Relaxed) {
+            return Err(format!(
+                "cancelled before espflash {}; the rest was not written",
+                args[0]
+            ));
+        }
+        log(&format!("+ espflash {}", args.join(" ")));
+        let o = Command::new("espflash")
+            .args(args)
+            .output()
+            .map_err(|e| format!("cannot run espflash ({e}); see `dagon doctor`"))?;
+        for l in String::from_utf8_lossy(&o.stdout)
+            .lines()
+            .chain(String::from_utf8_lossy(&o.stderr).lines())
+        {
+            log(l);
+        }
+        if !o.status.success() {
+            return Err(format!("espflash {} failed", args[0]));
+        }
+    }
+    Ok(())
 }
 
 fn copy_uf2(file: &Path, log: &mut dyn FnMut(&str), cancel: &AtomicBool) -> Result<(), String> {
@@ -360,6 +564,16 @@ pub fn command(args: &[&str]) -> Result<(), String> {
                 "dry run; would copy {} to the {UF2_BOARD} drive",
                 file.display()
             ),
+            FirstWrite::Espflash { files, commands } => {
+                println!("dry run; the flash would hold:");
+                for (at, f) in files {
+                    println!("  {at:#09x}  {}", f.display());
+                }
+                print!(
+                    "and would run, on the one ESP32-S3 connected:\n{}",
+                    command_lines("espflash", &with_port(commands, "<port>"))
+                )
+            }
         }
         return Ok(());
     }
@@ -502,9 +716,10 @@ mod tests {
     fn other_families_and_unknown_nodes_are_refused_before_anything_runs() {
         let (mut cfg, t) = area("esp");
         let out = cfg.base.join("out");
-        assert!(plan(&cfg, &t, "watch", &out)
-            .unwrap_err()
-            .contains("esp32s3"));
+        assert!(
+            parts("esp32s3", None).is_none(),
+            "no board, no factory agent"
+        );
         assert!(plan(&cfg, &t, "nope", &out).is_err());
         cfg.build.clear();
         assert!(plan(&cfg, &t, "seg", &out)
@@ -515,14 +730,87 @@ mod tests {
 
     #[test]
     fn the_parts_are_in_this_checkout() {
-        for mcu in ["rp2040", "stm32f401re"] {
-            for p in parts(mcu).unwrap() {
+        for mcu in ["rp2040", "stm32f401re", "esp32s3"] {
+            for p in parts(mcu, Some("m5stopwatch")).unwrap() {
                 let toml = dagon_home().join(p.package).join("Cargo.toml");
                 assert!(toml.is_file(), "{} is not in the checkout", toml.display());
             }
         }
-        let names: Vec<&str> = parts("rp2040").unwrap().iter().map(|p| p.name).collect();
+        let names: Vec<&str> = parts("rp2040", None)
+            .unwrap()
+            .iter()
+            .map(|p| p.name)
+            .collect();
         assert_eq!(names, ["stage0", "bootcore"]);
+    }
+
+    #[test]
+    fn esp32s3_dry_run_makes_the_full_file_set_at_the_table_offsets() {
+        let (mut cfg, t) = area("watch");
+        cfg.build.insert(
+            "watch".into(),
+            BuildInputs {
+                package: PathBuf::from("nodes/watch"),
+                bin: None,
+                features: vec![],
+                slot_b_feature: None,
+                version: Some("1.0.0".into()),
+            },
+        );
+        let out = cfg.base.join("out/watch");
+        let plan = plan(&cfg, &t, "watch", &out).unwrap().join("\n");
+        for want in [
+            "targets/boards/m5stopwatch (tag watch-s3)",
+            "SHA256SUMS",
+            "bootloader.bin  at 0x0",
+            "otadata.bin     in otadata",
+            "USB 303a:1001",
+        ] {
+            assert!(plan.contains(want), "{want}: {plan}");
+        }
+
+        let i = built(&cfg, false);
+        let app = vec![0xE9; 7000];
+        let w = esp_files(&t, "watch", &i, &app, &dagon_home(), &out, &key()).unwrap();
+        let FirstWrite::Espflash { files, commands } = w else {
+            panic!("{w:?}")
+        };
+        let at: Vec<u32> = files.iter().map(|f| f.0).collect();
+        assert_eq!(at, [0, 0x8000, 0x1_0000, 0x11_0000, 0x71_0000, 0xD000]);
+        let read = |n: &str| std::fs::read(out.join(n)).unwrap();
+        assert_eq!(
+            dagon_sign::to_hex(&dagon_format::sha256(&read("bootloader.bin"))),
+            "75e529456be566edb74e7e1436a45b614133d8d41896e747e9d6204329e8968f"
+        );
+        let (header, body) = (read("header.bin"), read("body.bin"));
+        assert_eq!(header.len(), 512);
+        assert_eq!(body, app, "the ESP image itself, after its header");
+        assert_eq!([header, body].concat(), read("app-a.img"));
+        assert_eq!(read("otadata.bin"), crate::esp::otadata_slot_a());
+        assert_eq!(read("factory.elf"), std::fs::read(&i.bootcore).unwrap());
+
+        let verbs: Vec<&str> = commands.iter().map(|c| c[0].as_str()).collect();
+        assert_eq!(verbs, ["flash", "write-bin", "write-bin", "write-bin"]);
+        let first = commands[0].join(" ");
+        for want in [
+            "--chip esp32s3",
+            "--flash-size 16mb",
+            "--partition-table-offset 0x8000",
+            "--erase-parts otadata,dagon",
+            "--target-app-partition factory",
+        ] {
+            assert!(first.contains(want), "{want}: {first}");
+        }
+        assert_eq!(commands[1][3], "0x110000");
+        assert_eq!(commands[2][3], "0x710000");
+        assert_eq!(commands[3][3], "0xd000");
+        assert!(commands.iter().all(|c| !c.contains(&"--port".to_string())));
+        let aimed = with_port(&commands, "COM7");
+        assert!(aimed
+            .iter()
+            .all(|c| c[1..4] == ["--port", "COM7", "--non-interactive"]));
+        assert!(out.join("commands.txt").exists());
+        let _ = std::fs::remove_dir_all(&cfg.base);
     }
 
     #[test]

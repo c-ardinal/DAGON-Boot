@@ -7,6 +7,7 @@ mod conform;
 mod deploy;
 mod device;
 mod doctor;
+mod esp;
 mod flash;
 mod nodebuild;
 mod paths;
@@ -79,8 +80,10 @@ Usage:
                                      release; lists node -> version and asks first
   dagon flash <id> [--dry-run] [--yes] [--out <dir>] [--topology <yaml>] [--key <file>]
                                      first write of the hub (RP2040: UF2 to the RPI-RP2
-                                     drive) or an F401 (probe-rs); builds the boot core
-                                     (and stage0) with the key; prints the plan first
+                                     drive), an F401 (probe-rs) or an ESP32-S3 (espflash
+                                     over USB-C, exactly one connected); builds the boot
+                                     core, stage0 or factory agent with the key; prints
+                                     the plan first
   dagon doctor [--fix]               tools each MCU family of the topology needs; --fix
                                      installs what needs no administrator rights
   dagon serve [--port <n>] [--web <dir>] [--pubkey <file>] [--no-open]

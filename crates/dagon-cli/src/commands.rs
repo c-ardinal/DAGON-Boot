@@ -304,6 +304,9 @@ fn provision_node(o: &Opts<'_>, node: &str) -> Res {
             "{}: {blocks} blocks\nhold BOOT while plugging in USB, then copy the file to the RPI-RP2 drive",
             file.display()
         ),
+        FirstWrite::Espflash { .. } => {
+            return Err("provision does not make ESP32-S3 files; use `dagon flash`".into())
+        }
     }
     Ok(())
 }
@@ -320,6 +323,13 @@ pub(crate) enum FirstWrite {
     },
     /// RP2040: `rescue.uf2` copied to the RPI-RP2 drive (BOOT held at power-up).
     Uf2 { file: PathBuf, blocks: usize },
+    /// ESP32-S3: espflash over USB-C; `files` are (flash offset, file) and
+    /// `commands` the espflash argument lists without the port, which is
+    /// chosen when writing (exactly one ESP32-S3 connected).
+    Espflash {
+        files: Vec<(u32, PathBuf)>,
+        commands: Vec<Vec<String>>,
+    },
 }
 
 /// One line per command, `program` then its arguments.

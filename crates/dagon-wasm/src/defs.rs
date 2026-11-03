@@ -30,6 +30,13 @@ pub fn load_definitions(json: &str) -> Result<(), JsError> {
     Ok(())
 }
 
+/// Back to the builtin definitions (a project without its own, or whose
+/// definitions do not load: nothing of the previous project stays).
+#[wasm_bindgen]
+pub fn use_builtin_definitions() {
+    LOADED.with(|r| *r.borrow_mut() = None);
+}
+
 /// How the user connects `mcu` for a write: `{label, hint}`, or null for an
 /// unknown MCU.
 #[wasm_bindgen]

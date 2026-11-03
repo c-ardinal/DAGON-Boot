@@ -4,7 +4,10 @@
 use std::fmt;
 use std::path::{Component, Path, PathBuf};
 
-use super::{BoardDef, McuDef, Part, Partition, Placement, Registry, Slot, Writer, HEADER};
+use super::{
+    page_safe, BoardDef, McuDef, Origin, Part, Partition, Placement, Registry, Slot, Writer,
+    HEADER, PROJECT_TEXT,
+};
 
 pub const MCU_FILE: &str = "dagon-mcu.toml";
 pub const BOARD_FILE: &str = "dagon-board.toml";
@@ -205,11 +208,13 @@ fn empty() -> Registry {
         boards: Vec::new(),
         mcu_sources: Vec::new(),
         board_sources: Vec::new(),
+        mcu_origins: Vec::new(),
+        board_origins: Vec::new(),
     }
 }
 
 impl Registry {
-    fn push_mcu(&mut self, text: &str, pkg: &Pkg<'_>) -> Result<(), DefError> {
+    fn push_mcu(&mut self, text: &str, pkg: &Pkg<'_>, origin: Origin) -> Result<(), DefError> {
         let m = parse_mcu(text, pkg)?;
         let files = match &m.partitions {
             Some(rel) => vec![(rel.clone(), pkg.text(rel)?)],
@@ -221,11 +226,13 @@ impl Registry {
             files,
         });
         self.mcus.push(m);
+        self.mcu_origins.push(origin);
         Ok(())
     }
 
-    fn push_board(&mut self, text: &str, pkg: &Pkg<'_>) -> Result<(), DefError> {
+    fn push_board(&mut self, text: &str, pkg: &Pkg<'_>, origin: Origin) -> Result<(), DefError> {
         self.boards.push(parse_board(text, pkg)?);
+        self.board_origins.push(origin);
         self.board_sources.push(DefSource {
             label: pkg.label(),
             toml: text.to_string(),
@@ -243,6 +250,106 @@ fn file_refs(files: &[(String, String)]) -> Vec<(&str, &str)> {
         .collect()
 }
 
+/// The JSON form with nothing local in it: each definition is labelled by
+/// its origin, kind and id (no path), its TOML is re-written without
+/// comments and without `[[doctor]]` (commands stay on this machine), and
+/// referenced text files lose their comment lines.
+pub(super) fn public_json(reg: &Registry) -> String {
+    let public = |kind: &str, id: &str, origin: Origin, s: &DefSource| {
+        let scrub = origin == Origin::Project;
+        let id = if !scrub || page_safe(id) {
+            id
+        } else {
+            PROJECT_TEXT
+        };
+        // A project's file names are its own words too: each becomes
+        // `file-<n>`, in the files and wherever the TOML names it.
+        let renames: Vec<(String, String)> = s
+            .files
+            .iter()
+            .enumerate()
+            .map(|(i, (n, _))| {
+                let to = if scrub {
+                    format!("file-{}", i + 1)
+                } else {
+                    n.clone()
+                };
+                (n.clone(), to)
+            })
+            .collect();
+        DefSource {
+            label: format!("{} {kind} {id}", origin.as_str()),
+            toml: public_toml(&s.toml, scrub, &renames),
+            files: (s.files.iter().zip(&renames))
+                .map(|((_, t), (_, to))| (to.clone(), public_text_file(t, scrub)))
+                .collect(),
+        }
+    };
+    let all = JsonForm {
+        mcus: (reg.mcus.iter().zip(&reg.mcu_origins).zip(&reg.mcu_sources))
+            .map(|((m, o), s)| public("MCU", &m.id, *o, s))
+            .collect(),
+        boards: (reg
+            .boards
+            .iter()
+            .zip(&reg.board_origins)
+            .zip(&reg.board_sources))
+        .map(|((b, o), s)| public("board", &b.id, *o, s))
+        .collect(),
+    };
+    serde_json::to_string(&all).expect("definitions serialise")
+}
+
+/// A loaded definition's TOML, re-written: values only, no `doctor`.
+/// With `scrub` (a project's definition), a string naming a referenced
+/// file takes its new name from `renames`, and every other string that is
+/// not [`page_safe`] becomes [`PROJECT_TEXT`].
+fn public_toml(text: &str, scrub: bool, renames: &[(String, String)]) -> String {
+    let mut t: toml::Table = toml::from_str(text).expect("a loaded definition parses");
+    t.remove("doctor");
+    let mut v = toml::Value::Table(t);
+    if scrub {
+        scrub_value(&mut v, renames);
+    }
+    toml::to_string(&v).expect("a table serialises")
+}
+
+fn scrub_value(v: &mut toml::Value, renames: &[(String, String)]) {
+    match v {
+        toml::Value::String(s) => {
+            if let Some((_, to)) = renames.iter().find(|(from, _)| from == s) {
+                *s = to.clone();
+            } else if !page_safe(s) {
+                *s = PROJECT_TEXT.into();
+            }
+        }
+        toml::Value::Array(a) => a.iter_mut().for_each(|v| scrub_value(v, renames)),
+        toml::Value::Table(t) => t.iter_mut().for_each(|(_, v)| scrub_value(v, renames)),
+        _ => {}
+    }
+}
+
+/// `text` without its `#` comment lines; with `scrub`, each comma-separated
+/// field is sent trimmed when it is [`page_safe`] and as [`PROJECT_TEXT`]
+/// otherwise (the same replacement as in the TOML, so references still
+/// meet); nothing of the raw field (padding included) goes out.
+fn public_text_file(text: &str, scrub: bool) -> String {
+    text.lines()
+        .filter(|l| !l.trim_start().starts_with('#'))
+        .map(|l| {
+            if !scrub {
+                return format!("{l}\n");
+            }
+            let fields: Vec<&str> = l
+                .split(',')
+                .map(str::trim)
+                .map(|f| if page_safe(f) { f } else { PROJECT_TEXT })
+                .collect();
+            format!("{}\n", fields.join(","))
+        })
+        .collect()
+}
+
 pub(super) fn from_json(json: &str) -> Result<Registry, DefError> {
     let form: JsonForm =
         serde_json::from_str(json).or_else(|e| err("definitions JSON", e.to_string()))?;
@@ -255,6 +362,8 @@ pub(super) fn from_json(json: &str) -> Result<Registry, DefError> {
                 label: &s.label,
                 files: &files,
             },
+            // JSON comes from outside: never trusted to run anything.
+            Origin::Project,
         )?;
     }
     for s in &form.boards {
@@ -264,6 +373,7 @@ pub(super) fn from_json(json: &str) -> Result<Registry, DefError> {
                 label: &s.label,
                 files: &[],
             },
+            Origin::Project,
         )?;
     }
     validate(&reg)?;
@@ -273,10 +383,10 @@ pub(super) fn from_json(json: &str) -> Result<Registry, DefError> {
 pub(super) fn builtin() -> Result<Registry, DefError> {
     let mut reg = empty();
     for (label, text, files) in BUILTIN_MCUS {
-        reg.push_mcu(text, &Pkg::Embedded { label, files })?;
+        reg.push_mcu(text, &Pkg::Embedded { label, files }, Origin::Builtin)?;
     }
     for (label, text) in BUILTIN_BOARDS {
-        reg.push_board(text, &Pkg::Embedded { label, files: &[] })?;
+        reg.push_board(text, &Pkg::Embedded { label, files: &[] }, Origin::Builtin)?;
     }
     validate(&reg)?;
     Ok(reg)
@@ -325,11 +435,11 @@ fn tree(root: &Path) -> Result<Registry, DefError> {
     let mut reg = empty();
     for dir in packages(&targets.join("mcu"), MCU_FILE)? {
         let text = read(&dir.join(MCU_FILE))?;
-        reg.push_mcu(&text, &Pkg::Dir(dir))?;
+        reg.push_mcu(&text, &Pkg::Dir(dir), Origin::Tree)?;
     }
     for dir in packages(&targets.join("boards"), BOARD_FILE)? {
         let text = read(&dir.join(BOARD_FILE))?;
-        reg.push_board(&text, &Pkg::Dir(dir))?;
+        reg.push_board(&text, &Pkg::Dir(dir), Origin::Tree)?;
     }
     Ok(reg)
 }
@@ -358,7 +468,7 @@ fn project(reg: &mut Registry, dagon_toml: &Path) -> Result<(), DefError> {
         if reg.mcu(&id).is_some() {
             return err(path.display(), format!("MCU '{id}' is already defined"));
         }
-        reg.push_mcu(&text, &pkg)?;
+        reg.push_mcu(&text, &pkg, Origin::Project)?;
     }
     for (id, table) in defs.board {
         let toml::Value::Table(mut t) = table else {
@@ -389,6 +499,7 @@ fn project(reg: &mut Registry, dagon_toml: &Path) -> Result<(), DefError> {
                 label: &label,
                 files: &[],
             },
+            Origin::Project,
         )?;
     }
     Ok(())

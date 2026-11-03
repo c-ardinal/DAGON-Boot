@@ -7,6 +7,7 @@ use std::sync::Arc;
 
 use dagon_format::header::{image_kind, slot_binding, ImageHeader, HEADER_SIZE};
 use dagon_sign::to_hex;
+use dagon_topology::defs::{page_safe as plain_name, Origin, Registry, PROJECT_TEXT};
 use dagon_topology::schema::{Uplink, UplinkHost};
 use serde_json::{json, Value};
 
@@ -161,6 +162,7 @@ pub fn handle(server: &Arc<Server>, req: &Request) -> Response {
     let r = match (req.method.as_str(), parts.as_slice()) {
         ("GET", ["hello"]) => Ok(hello(server)),
         ("GET", ["targets"]) => targets(server),
+        ("GET", ["definitions"]) => definitions(server),
         ("GET", ["topology"]) => topology_get(server),
         ("PUT", ["topology"]) => topology_put(server, req),
         ("GET", ["nodes", id, "build"]) => build_get(server, id),
@@ -357,9 +359,12 @@ fn hello(server: &Server) -> Response {
         .as_ref()
         .and_then(|c| project_key(c).ok())
         .map(|k| to_hex(&dagon_format::key_id(&k.pk)));
-    let flash_mcus: Vec<&str> = ["rp2040", "stm32f401re", "esp32s3"]
+    let mut defined: Vec<_> = registry_of(cfg.as_ref()).mcus().to_vec();
+    defined.sort_by_key(|m| m.wire_id);
+    let flash_mcus: Vec<String> = defined
         .into_iter()
-        .filter(|m| crate::flash::flashable(m))
+        .map(|m| m.id)
+        .filter(|m| plain_name(m) && crate::flash::flashable(m))
         .collect();
     let sim = server.sim.get();
     let mut features = FEATURES.to_vec();
@@ -424,11 +429,50 @@ fn targets(server: &Server) -> Res {
             "features": features,
         }));
     }
-    let boards: Vec<Value> = dagon_topology::boards::BOARDS
+    let reg = registry_of(Some(&cfg));
+    let boards: Vec<Value> = reg
+        .boards()
         .iter()
-        .map(|b| json!({"id": b.id, "product": b.product, "mcu": b.mcu}))
+        .map(|b| {
+            // A project's own words reach the page only as plain names.
+            let own = reg.board_origin(&b.id) == Some(Origin::Project);
+            let text = |s: &str| {
+                if own && !plain_name(s) {
+                    PROJECT_TEXT.to_string()
+                } else {
+                    s.to_string()
+                }
+            };
+            json!({"id": text(&b.id), "product": text(&b.product), "mcu": text(&b.mcu)})
+        })
         .collect();
     Ok(json_ok(json!({ "targets": out, "boards": boards })))
+}
+
+/// The MCU and board definitions of the open project (its DAGON source and
+/// its own), the builtin set without one or when they do not load.
+fn registry_of(cfg: Option<&Config>) -> Registry {
+    cfg.and_then(|c| crate::defs::registry(c).ok())
+        .unwrap_or_else(|| Registry::builtin().clone())
+}
+
+/// GET /v1/definitions: the definitions in use as `Registry::to_json`
+/// gives them, for the page's dagon-wasm (`load_definitions`).
+fn definitions(server: &Server) -> Res {
+    let reg = match config(server) {
+        Ok(cfg) => crate::defs::registry(&cfg).map_err(|e| {
+            eprintln!("dagon serve: {e}");
+            Response::error(
+                500,
+                "the project's definitions do not load; see the dagon serve terminal",
+            )
+        })?,
+        Err(_) => Registry::builtin().clone(),
+    };
+    Ok(Response::bytes(
+        "application/json",
+        reg.to_json().into_bytes(),
+    ))
 }
 
 /// Package directories relative to `base`, `/`-separated and sorted:
@@ -1050,7 +1094,7 @@ fn conform_get(server: &Server, node: &str) -> Res {
 }
 
 /// Topology from a description; the model's questions go to the page.
-fn job_ai_topology(job: &mut Job, _cfg: Config, v: Value) -> Result<Value, String> {
+fn job_ai_topology(job: &mut Job, cfg: Config, v: Value) -> Result<Value, String> {
     let description = v["description"]
         .as_str()
         .ok_or("description is required")?
@@ -1059,7 +1103,8 @@ fn job_ai_topology(job: &mut Job, _cfg: Config, v: Value) -> Result<Value, Strin
     let mut ask = |qs: &[String]| -> Result<Vec<String>, String> {
         qs.iter().enumerate().map(|(i, q)| job.ask(i, q)).collect()
     };
-    let (yaml, report) = crate::ai::topology_for(&description, &mut ask, &cancel)?;
+    let reg = registry_of(Some(&cfg));
+    let (yaml, report) = crate::ai::topology_for(&description, &reg, &mut ask, &cancel)?;
     let report: Value = serde_json::from_str(&report).unwrap_or(Value::Null);
     Ok(json!({ "yaml": yaml, "report": report }))
 }

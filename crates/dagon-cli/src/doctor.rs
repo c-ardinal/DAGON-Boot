@@ -1,180 +1,238 @@
-//! `dagon doctor [--fix]`: the tools each MCU family of the topology needs
-//! (all families without a topology). `--fix` runs the installs that need
-//! no administrator rights (`rustup target add`, `cargo install`, `espup
-//! install`); drivers and the like are left to the developer.
+//! `dagon doctor [--fix]`: the tools each MCU of the topology needs (every
+//! MCU defined without a topology). Rust itself is checked here; the rest
+//! are the MCU definitions' `[[doctor]]` entries. `--fix` runs their install
+//! commands (no administrator rights: `rustup target add`, `cargo install`,
+//! ...); drivers and the like are left to the developer. Commands from the
+//! project's own definitions run only after the user agrees to each one.
 
 use std::process::Command;
+
+use dagon_topology::defs::{page_safe, DoctorCheck, Expect, Origin, Registry, PROJECT_TEXT};
 
 use crate::config::{read_topology, Config, Opts};
 
 const FIX: &str = "--fix";
-pub(crate) const FAMILIES: [&str; 3] = ["rp2040", "stm32f401re", "esp32s3"];
 
-/// What a check finds in a command's output.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum Expect {
-    /// The command runs and succeeds.
-    Runs,
-    /// Its output has this line (trimmed), e.g. an installed target.
-    Line(&'static str),
-    /// Its output has a line starting with this.
-    Prefix(&'static str),
-}
+const RUST_HINT: &str = "install Rust from https://rustup.rs";
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+/// A check and the MCUs that need it (none: every MCU).
+#[derive(Debug, Clone, PartialEq, Eq)]
 struct Check {
-    what: &'static str,
-    /// Families that need it; empty: every family.
-    for_mcu: &'static [&'static str],
-    probe: &'static [&'static str],
-    expect: Expect,
-    /// Install command; `None`: the developer installs it.
-    fix: Option<&'static [&'static str]>,
-    /// Shown when it is missing.
-    hint: &'static str,
+    def: DoctorCheck,
+    for_mcu: Vec<String>,
+    /// Defined by the project: its commands run only once the user agrees.
+    ask: bool,
+    /// Its place (from 1) among its first MCU's `[[doctor]]` entries.
+    index: usize,
 }
 
-const CHECKS: &[Check] = &[
+fn rust(what: &str) -> Check {
     Check {
-        what: "rustup",
-        for_mcu: &[],
-        probe: &["rustup", "--version"],
-        expect: Expect::Runs,
-        fix: None,
-        hint: "install Rust from https://rustup.rs",
-    },
-    Check {
-        what: "cargo",
-        for_mcu: &[],
-        probe: &["cargo", "--version"],
-        expect: Expect::Runs,
-        fix: None,
-        hint: "install Rust from https://rustup.rs",
-    },
-    Check {
-        what: "target thumbv6m-none-eabi",
-        for_mcu: &["rp2040"],
-        probe: &["rustup", "target", "list", "--installed"],
-        expect: Expect::Line("thumbv6m-none-eabi"),
-        fix: Some(&["rustup", "target", "add", "thumbv6m-none-eabi"]),
-        hint: "",
-    },
-    Check {
-        what: "target thumbv7em-none-eabihf",
-        for_mcu: &["stm32f401re"],
-        probe: &["rustup", "target", "list", "--installed"],
-        expect: Expect::Line("thumbv7em-none-eabihf"),
-        fix: Some(&["rustup", "target", "add", "thumbv7em-none-eabihf"]),
-        hint: "",
-    },
-    Check {
-        what: "probe-rs",
-        for_mcu: &["stm32f401re"],
-        probe: &["probe-rs", "--version"],
-        expect: Expect::Runs,
-        fix: Some(&["cargo", "install", "probe-rs-tools", "--locked"]),
-        hint: "",
-    },
-    Check {
-        what: "ST-LINK probe connected",
-        for_mcu: &["stm32f401re"],
-        probe: &["probe-rs", "list"],
-        expect: Expect::Prefix("["),
-        fix: None,
-        hint: "plug in the ST-LINK; on Windows install the ST-LINK USB driver from st.com",
-    },
-    Check {
-        what: "espup",
-        for_mcu: &["esp32s3"],
-        probe: &["espup", "--version"],
-        expect: Expect::Runs,
-        fix: Some(&["cargo", "install", "espup", "--locked"]),
-        hint: "",
-    },
-    Check {
-        what: "esp toolchain",
-        for_mcu: &["esp32s3"],
-        probe: &["rustup", "toolchain", "list"],
-        expect: Expect::Prefix("esp"),
-        fix: Some(&["espup", "install"]),
-        hint: "",
-    },
-    Check {
-        what: "espflash",
-        for_mcu: &["esp32s3"],
-        probe: &["espflash", "--version"],
-        expect: Expect::Runs,
-        fix: Some(&["cargo", "install", "espflash", "--locked"]),
-        hint: "",
-    },
-];
+        def: DoctorCheck {
+            what: what.into(),
+            probe: vec![what.into(), "--version".into()],
+            expect: Expect::Runs,
+            fix: None,
+            hint: RUST_HINT.into(),
+        },
+        for_mcu: Vec::new(),
+        ask: false,
+        index: 0,
+    }
+}
+
+/// Rust, then each MCU's `[[doctor]]` entries; an entry several MCUs define
+/// alike is one check naming them all. MCUs go by image header id, so the
+/// order is the same whether the definitions are builtin or a source tree's.
+fn checks(reg: &Registry, mcus: &[String]) -> Vec<Check> {
+    let mut out = vec![rust("rustup"), rust("cargo")];
+    let mut wanted: Vec<_> = reg.mcus().iter().filter(|m| mcus.contains(&m.id)).collect();
+    wanted.sort_by_key(|m| m.wire_id);
+    for m in wanted {
+        let ask = reg.mcu_origin(&m.id) == Some(Origin::Project);
+        for (i, d) in m.doctor.iter().enumerate() {
+            match out.iter_mut().find(|c| c.def == *d) {
+                Some(c) => {
+                    c.for_mcu.push(m.id.clone());
+                    c.ask |= ask;
+                }
+                None => out.push(Check {
+                    def: d.clone(),
+                    for_mcu: vec![m.id.clone()],
+                    ask,
+                    index: i + 1,
+                }),
+            }
+        }
+    }
+    out
+}
+
+/// Every MCU `reg` defines.
+pub(crate) fn all_mcus(reg: &Registry) -> Vec<String> {
+    reg.mcus().iter().map(|m| m.id.clone()).collect()
+}
 
 /// Runs a program: its stdout when it ran and succeeded.
 pub(crate) type Runner<'a> = dyn FnMut(&[&str]) -> Option<String> + 'a;
 
-fn passes(c: &Check, run: &mut Runner<'_>) -> bool {
-    let Some(out) = run(c.probe) else {
+/// Asks whether a project-defined command may run (shown in the question).
+pub(crate) type Consent<'a> = dyn FnMut(&str) -> bool + 'a;
+
+fn args(cmd: &[String]) -> Vec<&str> {
+    cmd.iter().map(String::as_str).collect()
+}
+
+fn passes(c: &DoctorCheck, run: &mut Runner<'_>) -> bool {
+    let Some(out) = run(&args(&c.probe)) else {
         return false;
     };
     let mut lines = out.lines().map(str::trim);
-    match c.expect {
+    match &c.expect {
         Expect::Runs => true,
         Expect::Line(l) => lines.any(|x| x == l),
-        Expect::Prefix(p) => lines.any(|x| x.starts_with(p)),
+        Expect::Prefix(p) => lines.any(|x| x.starts_with(p.as_str())),
     }
 }
 
-/// One line per check for `mcus`; `false` when something is still missing.
-/// With `fix`, missing tools that have an install command are installed
-/// (through `install`) and checked again.
-pub(crate) fn doctor(
-    mcus: &[String],
-    fix: bool,
-    probe: &mut Runner<'_>,
-    install: &mut Runner<'_>,
-    out: &mut dyn FnMut(&str),
-) -> bool {
-    let mut ok = true;
-    let wanted = CHECKS
+/// Whether a command of a check may run.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Gate {
+    Run,
+    /// The user said no.
+    Declined,
+    /// Nobody to ask (`dagon serve`): only the terminal's `dagon doctor` may.
+    Unattended,
+}
+
+/// Whether `cmd` of check `c` may run: always for builtin and DAGON source
+/// definitions, after the user agrees for the project's.
+fn gate(c: &Check, cmd: &[String], consent: &mut Option<&mut Consent<'_>>) -> Gate {
+    if !c.ask {
+        return Gate::Run;
+    }
+    let Some(ask) = consent else {
+        return Gate::Unattended;
+    };
+    let question = format!(
+        "the project's definition of {} ({}) runs: {}\n",
+        c.def.what,
+        c.for_mcu.join(", "),
+        cmd.join(" ")
+    );
+    if ask(&question) {
+        Gate::Run
+    } else {
+        Gate::Declined
+    }
+}
+
+/// A project check's name where nobody can confirm it (the page): never
+/// the project's own words, only its place and MCU ids that are plain.
+fn unattended_name(c: &Check) -> String {
+    let ids: Vec<&str> = c
+        .for_mcu
         .iter()
-        .filter(|c| c.for_mcu.is_empty() || c.for_mcu.iter().any(|m| mcus.iter().any(|x| x == m)));
-    for c in wanted {
-        let mut good = passes(c, probe);
-        if !good && fix {
-            if let Some(cmd) = c.fix {
-                if cmd[0] == "espup" {
-                    out("installing the esp toolchain; this takes a while");
-                }
-                out(&format!("fix   {}", cmd.join(" ")));
-                good = install(cmd).is_some() && passes(c, probe);
+        .map(|id| {
+            if page_safe(id) {
+                id.as_str()
+            } else {
+                PROJECT_TEXT
             }
-        }
-        let used_by = if c.for_mcu.is_empty() {
-            String::new()
-        } else {
-            format!(" ({})", c.for_mcu.join(", "))
-        };
-        let advice = match (good, c.fix, c.hint) {
-            (true, ..) => String::new(),
-            (false, Some(cmd), _) if !fix => {
-                format!("  fix: {} (or dagon doctor --fix)", cmd.join(" "))
-            }
-            (false, Some(_), _) => "  the install did not help; see its output".into(),
-            (false, None, hint) => format!("  {hint}"),
-        };
-        out(&format!(
-            "{}  {}{used_by}{advice}",
-            if good { "ok  " } else { "MISS" },
-            c.what
-        ));
-        ok &= good;
+        })
+        .collect();
+    format!("project check {} for {}", c.index, ids.join(", "))
+}
+
+/// Everything [`doctor`] does outside: run probes and installs, ask, print.
+/// `consent: None` asks nobody: project-defined commands do not run.
+pub(crate) struct Io<'a> {
+    pub probe: &'a mut Runner<'a>,
+    pub install: &'a mut Runner<'a>,
+    pub consent: Option<&'a mut Consent<'a>>,
+    pub out: &'a mut dyn FnMut(&str),
+}
+
+/// One line per check for `mcus`; `false` when something is still missing
+/// or was not checked. With `fix`, missing tools that have an install
+/// command are installed (through `install`) and checked again.
+pub(crate) fn doctor(reg: &Registry, mcus: &[String], fix: bool, io: &mut Io<'_>) -> bool {
+    let mut ok = true;
+    for c in checks(reg, mcus) {
+        ok &= one(&c, fix, io);
     }
     ok
 }
 
-/// The checks for `mcus` (no installs), one line each to `out`.
-pub(crate) fn check(mcus: &[String], out: &mut dyn FnMut(&str)) -> bool {
-    doctor(mcus, false, &mut probe_cmd, &mut |_| None, out)
+/// Runs check `c`, and its fix when asked to; prints its line.
+fn one(c: &Check, fix: bool, io: &mut Io<'_>) -> bool {
+    let d = &c.def;
+    let used_by = if c.for_mcu.is_empty() {
+        String::new()
+    } else {
+        format!(" ({})", c.for_mcu.join(", "))
+    };
+    match gate(c, &d.probe, &mut io.consent) {
+        Gate::Run => {}
+        Gate::Declined => {
+            (io.out)(&format!(
+                "SKIP  {}{used_by}  not run; to check it yourself: {}",
+                d.what,
+                d.probe.join(" ")
+            ));
+            return false;
+        }
+        Gate::Unattended => {
+            (io.out)(&format!(
+                "SKIP  {}  needs confirmation in the terminal (dagon doctor)",
+                unattended_name(c)
+            ));
+            return false;
+        }
+    }
+    let mut good = passes(d, io.probe);
+    let mut fixed = false;
+    if !good && fix {
+        let fix_cmd = d.fix.as_deref();
+        if let Some(cmd) = fix_cmd.filter(|cmd| gate(c, cmd, &mut io.consent) == Gate::Run) {
+            // ponytail: the one slow install is named by its tool; a
+            // definition field would carry it once a second one appears.
+            if cmd[0] == "espup" {
+                (io.out)("installing the esp toolchain; this takes a while");
+            }
+            (io.out)(&format!("fix   {}", cmd.join(" ")));
+            good = (io.install)(&args(cmd)).is_some() && passes(d, io.probe);
+            fixed = true;
+        }
+    }
+    let advice = match (good, &d.fix) {
+        (true, _) => String::new(),
+        (false, Some(_)) if fixed => "  the install did not help; see its output".into(),
+        (false, Some(cmd)) if !fix => {
+            format!("  fix: {} (or dagon doctor --fix)", cmd.join(" "))
+        }
+        (false, Some(cmd)) => format!("  fix: {}", cmd.join(" ")),
+        (false, None) => format!("  {}", d.hint),
+    };
+    (io.out)(&format!(
+        "{}  {}{used_by}{advice}",
+        if good { "ok  " } else { "MISS" },
+        d.what
+    ));
+    good
+}
+
+/// `reg`'s checks for `mcus` (no installs, nobody to ask), one line each to
+/// `out`: a project-defined check is reported as needing the terminal's
+/// `dagon doctor`, never run.
+pub(crate) fn check(reg: &Registry, mcus: &[String], out: &mut dyn FnMut(&str)) -> bool {
+    let mut io = Io {
+        probe: &mut probe_cmd,
+        install: &mut |_| None,
+        consent: None,
+        out,
+    };
+    doctor(reg, mcus, false, &mut io)
 }
 
 fn probe_cmd(args: &[&str]) -> Option<String> {
@@ -196,6 +254,7 @@ pub fn command(args: &[&str]) -> Result<(), String> {
     let args: Vec<&str> = args.iter().copied().filter(|a| *a != FIX).collect();
     let o = Opts::parse(&args, &["topology", "config"])?;
     let cfg = Config::load(o.get("config"))?;
+    let reg = crate::defs::registry(&cfg)?;
     let mcus: Vec<String> = match o.get("topology").map(Into::into).or(cfg.topology.clone()) {
         Some(p) => {
             let t = read_topology(&p)?;
@@ -204,13 +263,16 @@ pub fn command(args: &[&str]) -> Result<(), String> {
         }
         None => {
             println!("no topology: checking every family");
-            FAMILIES.map(String::from).to_vec()
+            all_mcus(&reg)
         }
     };
-    let ok = doctor(&mcus, fix, &mut probe_cmd, &mut install_cmd, &mut |l| {
-        println!("{l}")
-    });
-    if ok {
+    let mut io = Io {
+        probe: &mut probe_cmd,
+        install: &mut install_cmd,
+        consent: Some(&mut |q| crate::deploy::confirm(q, &mut std::io::stdin().lock())),
+        out: &mut |l| println!("{l}"),
+    };
+    if doctor(&reg, &mcus, fix, &mut io) {
         Ok(())
     } else {
         Err("some prerequisites are missing; see above".into())
@@ -263,16 +325,179 @@ mod tests {
     type Adds = (&'static str, &'static str, &'static str);
 
     fn run(fake: &Fake, mcus: &[&str], fix: bool, adds: &[Adds]) -> (bool, Vec<String>) {
+        let (ok, lines, asked) = run_in(Registry::builtin(), fake, mcus, fix, adds, true);
+        assert!(asked.is_empty(), "builtin checks never ask: {asked:?}");
+        (ok, lines)
+    }
+
+    /// [`doctor`] over `reg`, answering every question with `agree`; the
+    /// questions asked come back too.
+    fn run_in(
+        reg: &Registry,
+        fake: &Fake,
+        mcus: &[&str],
+        fix: bool,
+        adds: &[Adds],
+        agree: bool,
+    ) -> (bool, Vec<String>, Vec<String>) {
         let mcus: Vec<String> = mcus.iter().map(|s| s.to_string()).collect();
         let mut lines = Vec::new();
+        let mut asked = Vec::new();
         let ok = doctor(
+            reg,
             &mcus,
             fix,
-            &mut |a| fake.probe(a),
-            &mut |a| fake.install(a, adds),
-            &mut |l| lines.push(l.to_string()),
+            &mut Io {
+                probe: &mut |a| fake.probe(a),
+                install: &mut |a| fake.install(a, adds),
+                consent: Some(&mut |q| {
+                    asked.push(q.to_string());
+                    agree
+                }),
+                out: &mut |l| lines.push(l.to_string()),
+            },
         );
-        (ok, lines)
+        (ok, lines, asked)
+    }
+
+    /// The builtin definitions plus a project's `rp2040b`: an RP2040 copy
+    /// under another id, registered from its dagon.toml.
+    fn project_registry(name: &str, extra: &str) -> Registry {
+        let dir = std::env::temp_dir().join(format!("dagon-doctor-{name}-{}", std::process::id()));
+        for sub in ["m/stage0", "m/bootcore"] {
+            std::fs::create_dir_all(dir.join(sub)).unwrap();
+        }
+        let toml = include_str!("../../../targets/mcu/rp2040/dagon-mcu.toml")
+            .replace("id = \"rp2040\"", "id = \"rp2040b\"")
+            .replace("wire_id = 0x0001", "wire_id = 0x00F1")
+            .replace("name = \"rp2040-4m\"", "name = \"rp2040b-4m\"");
+        std::fs::write(dir.join("m/dagon-mcu.toml"), format!("{toml}{extra}")).unwrap();
+        std::fs::write(
+            dir.join("dagon.toml"),
+            "mcu_files = [\"m/dagon-mcu.toml\"]
+",
+        )
+        .unwrap();
+        let reg = Registry::load(&[dagon_topology::defs::Source::Project(
+            &dir.join("dagon.toml"),
+        )]);
+        std::fs::remove_dir_all(&dir).unwrap();
+        reg.unwrap()
+    }
+
+    #[test]
+    fn with_nobody_to_ask_project_checks_point_to_the_terminal() {
+        let secret = "C:/Users/me/sk-ant-FAKE-TOKEN";
+        let reg = project_registry(
+            "unattended",
+            &format!(
+                "
+[[doctor]]
+what = \"{secret}\"
+probe = [\"{secret}\"]
+expect = \"runs\"
+hint = \"{secret}\"
+"
+            ),
+        );
+        let fake = Fake::new(&[RUST[0], RUST[1]]);
+        let probed = RefCell::new(Vec::new());
+        let mut lines = Vec::new();
+        let ok = doctor(
+            &reg,
+            &["rp2040b".to_string()],
+            true,
+            &mut Io {
+                probe: &mut |a| {
+                    probed.borrow_mut().push(a.join(" "));
+                    fake.probe(a)
+                },
+                install: &mut |a| fake.install(a, &[]),
+                consent: None,
+                out: &mut |l| lines.push(l.to_string()),
+            },
+        );
+        assert!(!ok);
+        assert_eq!(*probed.borrow(), ["rustup --version", "cargo --version"]);
+        assert!(fake.installed.borrow().is_empty());
+        assert_eq!(
+            lines[2..],
+            [
+                "SKIP  project check 1 for rp2040b  needs confirmation in the terminal (dagon doctor)",
+                "SKIP  project check 2 for rp2040b  needs confirmation in the terminal (dagon doctor)",
+            ]
+        );
+        assert!(lines
+            .iter()
+            .all(|l| !l.contains("sk-ant") && !l.contains("thumbv6m")));
+    }
+
+    #[test]
+    fn a_source_tree_gives_the_builtin_order() {
+        use dagon_topology::defs::Source;
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+        let tree = Registry::load(&[Source::Tree(&root)]).unwrap();
+        let all = all_mcus(&tree);
+        let what = |r: &Registry| -> Vec<String> {
+            checks(r, &all).into_iter().map(|c| c.def.what).collect()
+        };
+        assert_eq!(what(&tree), what(Registry::builtin()));
+    }
+
+    #[test]
+    fn project_commands_run_only_after_the_user_agrees() {
+        let reg = project_registry("consent", "");
+        let fake = Fake::new(&[RUST[0], RUST[1]]);
+        let adds = [(
+            "rustup target add thumbv6m-none-eabi",
+            "rustup target list --installed",
+            "thumbv6m-none-eabi\n",
+        )];
+        let (ok, lines, asked) = run_in(&reg, &fake, &["rp2040b"], true, &adds, false);
+        assert!(!ok, "a check not run is not a pass: {lines:?}");
+        assert_eq!(asked.len(), 1, "{asked:?}");
+        assert!(asked[0].contains("rustup target list --installed"));
+        let skip = lines.iter().find(|l| l.starts_with("SKIP")).unwrap();
+        assert!(
+            skip.contains("target thumbv6m-none-eabi (rp2040b)"),
+            "{skip}"
+        );
+        assert!(fake.installed.borrow().is_empty());
+
+        let (ok, lines, asked) = run_in(&reg, &fake, &["rp2040b"], true, &adds, true);
+        assert!(ok, "{lines:?}");
+        assert_eq!(asked.len(), 2, "the probe, then the fix: {asked:?}");
+        assert!(asked[1].contains("rustup target add thumbv6m-none-eabi"));
+        assert_eq!(
+            *fake.installed.borrow(),
+            ["rustup target add thumbv6m-none-eabi"]
+        );
+    }
+
+    #[test]
+    fn a_check_several_mcus_define_alike_is_one_line_naming_them() {
+        let fake = Fake::new(&[
+            RUST[0],
+            RUST[1],
+            ("rustup target list --installed", "thumbv6m-none-eabi\n"),
+        ]);
+        let (ok, lines, _) = run_in(
+            &project_registry("merge", ""),
+            &fake,
+            &["rp2040", "rp2040b"],
+            false,
+            &[],
+            true,
+        );
+        assert!(ok, "{lines:?}");
+        assert_eq!(
+            lines,
+            [
+                "ok    rustup",
+                "ok    cargo",
+                "ok    target thumbv6m-none-eabi (rp2040, rp2040b)"
+            ]
+        );
     }
 
     const RUST: [(&str, &str); 2] = [

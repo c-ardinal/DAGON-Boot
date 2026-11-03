@@ -1,7 +1,8 @@
 import { describe, expect, test } from 'vitest';
 import { supportedBoards, topo_check, topo_compile } from '../../wasm/dagon.ts';
+import { rom_i2c_addrs } from '../../wasm/pkg/dagon_wasm.js';
 import { DESK_DEMO, DESK_DEMO_YAML } from '../sample.ts';
-import { boardMissing, canPlace, connect, emptyDoc, freeAddrs, fromYaml, hopAvailable, linkKinds, place, placeMcu, removeNode, ROM_ADDR, setBoard, setLink, setLinkKind, setNode, setUplink, toConfig, toYaml } from './model.ts';
+import { boardMissing, canPlace, connect, emptyDoc, freeAddrs, fromYaml, hopAvailable, linkKinds, place, placeMcu, removeNode, setBoard, setLink, setLinkKind, setNode, setUplink, toConfig, toYaml } from './model.ts';
 import { problemChip } from './problems.ts';
 import { problems } from './problems.ts';
 
@@ -57,7 +58,9 @@ describe('define document', () => {
     doc = setLinkKind(doc, 1, 'i2c');
     doc = setLink(doc, 1, 'addr', 0x42);
     expect(check(toYaml(doc.topo)).issues.map((i) => i.rule)).toContain('V-18');
-    expect(freeAddrs(doc.topo)).not.toContain(ROM_ADDR);
+    // The F401's ROM loader (its definition's [rom_i2c]) is the only one defined.
+    expect([...rom_i2c_addrs()]).toEqual([0x39]);
+    expect(freeAddrs(doc.topo)).not.toContain(0x39);
   });
 
   test('removing a node removes its links, recovery and order entries', () => {

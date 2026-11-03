@@ -63,6 +63,17 @@ Writer kinds:
 | `[default_link]` | How a node board is wired unless the topology says otherwise: `kind` (`i2c`, `uart`, `can`, `ethernet`), `iface` (`hw-uart0`, `pio-uart`), `addr`, `baud`, `control` (`full`, `cooperative`), `rom_entry` (`force-download-boot`, `m5pm1`, `stm32-i2c-rom`). Left out for the coordinator |
 | `[[part]]` | Parts built from the board package itself (`name`, `sub`, `bin`) |
 
+## What leaves this machine
+
+Definitions are not a place for secrets. Names in them (ids, product
+names, pin labels, partition names) appear in DAGON Console and are sent
+to Claude when you ask it; commands, hints, comments and file paths are
+never sent. A project's own names reach the page and Claude only when they are
+plain (at most 40 of `A-Z a-z 0-9`, space, `.`, `_`, `-`); anything else is
+shown as `project-text`.
+
+定義ファイルは秘密を書く場所ではありません。定義の中の名前（id、製品名、ピンのラベル、パーティション名）は DAGON Console に表示され、Claude に頼んだときは Claude にも送られます。コマンド、ヒント、コメント、ファイルのパスは送りません。プロジェクト自身の名前は、40 文字以内の `A-Z a-z 0-9`・空白・`.`・`_`・`-` だけのときにそのまま出し、それ以外は `project-text` と表示します。
+
 ## Project definitions
 
 A project's `dagon.toml` may define boards inline as `[board.<id>]` tables

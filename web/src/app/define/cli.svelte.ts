@@ -411,6 +411,12 @@ export class Cli {
     return making && !/job/.test(msg) ? 'exists' : 'busy';
   }
 
+  /** GET /v1/definitions: the project's MCU and board definitions (JSON), or null without them. */
+  async definitions(): Promise<string | null> {
+    const r = await this.call('GET', 'definitions').catch(() => null);
+    return r?.ok ? await r.text() : null;
+  }
+
   /** GET /v1/hello again (after switching projects). */
   async refreshHello(): Promise<void> {
     const r = await this.call('GET', 'hello').catch(() => null);

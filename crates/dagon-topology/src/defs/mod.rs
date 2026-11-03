@@ -413,6 +413,45 @@ pub struct BoardDef {
     pub parts: Vec<Part>,
 }
 
+/// What a project-written string becomes wherever it would leave this
+/// process unchecked (the page, a serve response).
+pub const PROJECT_TEXT: &str = "project-text";
+
+/// The most a project-written string may be to reach the page as it is.
+const PAGE_SAFE_MAX: usize = 40;
+
+/// Whether a project-written string may reach the page as it is: at most
+/// 40 characters of `A-Z a-z 0-9`, space, `.`, `_`, `-` (no path, no
+/// markup, nothing a token or an address hides in comfortably).
+pub fn page_safe(s: &str) -> bool {
+    s.len() <= PAGE_SAFE_MAX
+        && s.bytes()
+            .all(|b| b.is_ascii_alphanumeric() || matches!(b, b' ' | b'.' | b'_' | b'-'))
+}
+
+/// Where an MCU definition was read from. Commands a [`Origin::Project`]
+/// definition names (doctor probes and fixes) never run without the user's
+/// explicit confirmation.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Origin {
+    /// Embedded in this dagon.
+    Builtin,
+    /// The project's DAGON source tree.
+    Tree,
+    /// The project's own files (or definitions received as JSON).
+    Project,
+}
+
+impl Origin {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Builtin => "builtin",
+            Self::Tree => "source-tree",
+            Self::Project => "project",
+        }
+    }
+}
+
 /// Every MCU and board known: builtin, a DAGON source tree, project
 /// definitions. Order is definition order; the first board of an MCU is
 /// its default.
@@ -424,6 +463,9 @@ pub struct Registry {
     /// JSON form the browser loads ([`Registry::to_json`]).
     mcu_sources: Vec<DefSource>,
     board_sources: Vec<DefSource>,
+    /// Where each definition came from, in `mcus` / `boards` order.
+    mcu_origins: Vec<Origin>,
+    board_origins: Vec<Origin>,
 }
 
 impl Registry {
@@ -439,14 +481,11 @@ impl Registry {
         load::load(sources)
     }
 
-    /// The definitions as JSON (their TOML text and the text files they
-    /// reference), for a loader without a filesystem.
+    /// The definitions as JSON for a loader without a filesystem (the
+    /// browser): their TOML and the text files they reference, with no
+    /// local path, comment or doctor command in it.
     pub fn to_json(&self) -> String {
-        let all = load::JsonForm {
-            mcus: self.mcu_sources.clone(),
-            boards: self.board_sources.clone(),
-        };
-        serde_json::to_string(&all).expect("definitions serialise")
+        load::public_json(self)
     }
 
     /// A registry from [`Registry::to_json`]'s form, validated as on load
@@ -465,6 +504,18 @@ impl Registry {
 
     pub fn mcu(&self, id: &str) -> Option<&McuDef> {
         self.mcus.iter().find(|m| m.id == id)
+    }
+
+    /// Where MCU `id`'s definition was read from.
+    pub fn mcu_origin(&self, id: &str) -> Option<Origin> {
+        let i = self.mcus.iter().position(|m| m.id == id)?;
+        self.mcu_origins.get(i).copied()
+    }
+
+    /// Where board `id`'s definition was read from.
+    pub fn board_origin(&self, id: &str) -> Option<Origin> {
+        let i = self.boards.iter().position(|b| b.id == id)?;
+        self.board_origins.get(i).copied()
     }
 
     pub fn board(&self, id: &str) -> Option<&BoardDef> {

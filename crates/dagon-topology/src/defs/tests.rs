@@ -644,17 +644,243 @@ fn addresses_near_u32_max_are_errors_not_overflows() {
 
 #[test]
 fn the_json_form_round_trips_and_is_validated_again() {
+    // Doctor commands stay on this machine; everything else comes back.
+    let without_doctor = |r: &Registry| -> Vec<McuDef> {
+        r.mcus()
+            .iter()
+            .map(|m| McuDef {
+                doctor: Vec::new(),
+                ..m.clone()
+            })
+            .collect()
+    };
     let back = Registry::from_json(&reg().to_json()).unwrap();
-    assert_eq!(back.mcus(), reg().mcus());
+    assert_eq!(back.mcus(), without_doctor(reg()));
     assert_eq!(back.boards(), reg().boards());
     // A project registry (MCU file + inline board) survives too.
     let project = fake_registry("json", 400_000);
     let back = Registry::from_json(&project.to_json()).unwrap();
-    assert_eq!(back.mcus(), project.mcus());
+    assert_eq!(back.mcus(), without_doctor(&project));
     assert_eq!(back.boards(), project.boards());
     // Every definition is checked again: a bad sector in transit fails.
-    let bad = reg().to_json().replace("sector = 0x1000", "sector = 0x80");
+    let bad = reg().to_json().replace("sector = 4096", "sector = 128");
     let e = Registry::from_json(&bad).unwrap_err();
     assert!(e.msg.contains("UF2 builder"), "{e}");
     assert!(Registry::from_json("{\"mcus\": []}").is_err());
+}
+
+#[test]
+fn each_mcu_records_where_its_definition_came_from() {
+    assert_eq!(reg().mcu_origin("rp2040"), Some(Origin::Builtin));
+    let project = fake_registry("origin", 400_000);
+    assert_eq!(project.mcu_origin("rp2040"), Some(Origin::Builtin));
+    assert_eq!(project.mcu_origin("fake-m0"), Some(Origin::Project));
+    assert_eq!(project.mcu_origin("nope"), None);
+    let tree = Registry::load(&[Source::Tree(&source_root())]).unwrap();
+    assert_eq!(tree.mcu_origin("esp32s3"), Some(Origin::Tree));
+    // Definitions received as JSON are never trusted to run commands.
+    let back = Registry::from_json(&reg().to_json()).unwrap();
+    assert_eq!(back.mcu_origin("rp2040"), Some(Origin::Project));
+    assert_eq!(project.board_origin("fake-board"), Some(Origin::Project));
+    assert_eq!(tree.board_origin("m5stopwatch"), Some(Origin::Tree));
+    assert_eq!(reg().board_origin("nucleo-f401re"), Some(Origin::Builtin));
+}
+
+#[test]
+fn page_safe_is_a_short_plain_name() {
+    for ok in [
+        "Desk Pico",
+        "rp2040",
+        "GPIO16",
+        "v1.2_rev-B",
+        &"x".repeat(40),
+    ] {
+        assert!(page_safe(ok), "{ok}");
+    }
+    for bad in [
+        "C:/Users/me",
+        "a\\b",
+        "sk-ant:123",
+        "<b>",
+        "USB（BOOT）",
+        "",
+        &"x".repeat(41),
+    ] {
+        assert!(bad.is_empty() || !page_safe(bad), "{bad}");
+    }
+}
+
+#[test]
+fn project_text_that_is_not_a_plain_name_leaves_as_a_generic_label() {
+    let dir = scratch("scrub");
+    let secret = "sk-ant-FAKE:TOKEN/9";
+    write(
+        &dir.join("dagon.toml"),
+        &format!(
+            "[board.desk-pico]\nproduct = \"C:/Users/me/{secret}\"\nmcu = \"rp2040\"\n\
+             flash_bytes = 0x40_0000\ndrawing = \"pico\"\n\
+             header = [{{ pin = \"GPIO4\", label = \"{secret}\" }}, {{ pin = \"GPIO5\", label = \"D5\" }}]\n\
+             default_link = {{ kind = \"i2c\", addr = 0x44, control = \"full\" }}\n\
+             [board.desk-two]\nproduct = \"Desk Two\"\nmcu = \"rp2040\"\n\
+             flash_bytes = 0x40_0000\ndrawing = \"pico\"\n\
+             default_link = {{ kind = \"i2c\", addr = 0x45, control = \"full\" }}\n"
+        ),
+    );
+    let project = Registry::load(&[Source::Project(&dir.join("dagon.toml"))]).unwrap();
+    std::fs::remove_dir_all(&dir).unwrap();
+    let json = project.to_json();
+    assert!(
+        !json.contains("sk-ant") && !json.contains("Users"),
+        "{json}"
+    );
+    let back = Registry::from_json(&json).unwrap();
+    let pico = back.board("desk-pico").unwrap();
+    assert_eq!(pico.product, PROJECT_TEXT);
+    let labels: Vec<_> = pico.header.iter().map(|h| h.label.as_deref()).collect();
+    assert_eq!(labels, [Some(PROJECT_TEXT), Some("D5")]);
+    assert_eq!(back.board("desk-two").unwrap().product, "Desk Two");
+    // Builtin text (Japanese connection hints) is ours and stays as it is.
+    assert_eq!(
+        back.mcu("rp2040").unwrap().connection,
+        reg().mcu("rp2040").unwrap().connection
+    );
+}
+
+#[test]
+fn a_projects_file_names_and_csv_fields_are_scrubbed_and_still_load() {
+    let dir = scratch("files");
+    let pkg = dir.join("m");
+    write(&pkg.join("vendor/bootloader.bin"), "x");
+    write(&pkg.join("vendor/SHA256SUMS"), "x");
+    let long = "y".repeat(41);
+    // Padded fields (tabs and spaces), an over-long padded one, a token.
+    let csv = format!(
+        "# private-token comment\n\
+         otadata,\tdata, ota,  0x00D000, 0x2000\n\
+         factory,  app,  factory, 0x010000, 1M,  {long}  \n\
+         \tota_0\t,app,ota_0,0x110000,3M, sk-ant:TOKEN \n\
+         ota_1,    app,  ota_1,   0x410000, 3M\n\
+         dagon,    0x40, 0x00,    0x710000, 64K\n"
+    );
+    write(&pkg.join("private-token/partitions.csv"), &csv);
+    let mcu = include_str!("../../../../targets/mcu/esp32s3/dagon-mcu.toml")
+        .replace("id = \"esp32s3\"", "id = \"desk-s3\"")
+        .replace("wire_id = 0x0003", "wire_id = 0x00F3")
+        .replace("name = \"esp32s3-16m\"", "name = \"desk-s3-16m\"")
+        .replace(
+            "partitions = \"partitions.csv\"",
+            "partitions = \"private-token/partitions.csv\"",
+        );
+    write(&pkg.join("dagon-mcu.toml"), &mcu);
+    write(
+        &dir.join("dagon.toml"),
+        "mcu_files = [\"m/dagon-mcu.toml\"]\n",
+    );
+    let project = Registry::load(&[Source::Project(&dir.join("dagon.toml"))]).unwrap();
+    std::fs::remove_dir_all(&dir).unwrap();
+
+    let json = project.to_json();
+    for never in ["private-token", "sk-ant", "TOKEN", &long, "\\t"] {
+        assert!(!json.contains(never), "{never} in {json}");
+    }
+    let form: serde_json::Value = serde_json::from_str(&json).unwrap();
+    let s3 = form["mcus"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|m| m["label"] == "project MCU desk-s3")
+        .unwrap();
+    assert_eq!(s3["files"][0][0], "file-1");
+    let sent = s3["files"][0][1].as_str().unwrap();
+    assert_eq!(
+        sent.lines().nth(1).unwrap(),
+        "factory,app,factory,0x010000,1M,project-text"
+    );
+    assert_eq!(
+        sent.lines().nth(2).unwrap(),
+        "ota_0,app,ota_0,0x110000,3M,project-text"
+    );
+    // What the browser does (dagon-wasm's load_definitions): the scrubbed
+    // form loads, with the same slots as on this machine.
+    let back = Registry::from_json(&json).unwrap();
+    let m = back.mcu("desk-s3").unwrap();
+    assert_eq!(m.partitions.as_deref(), Some("file-1"));
+    assert_eq!(m.slots, project.mcu("desk-s3").unwrap().slots);
+    assert_eq!(
+        m.partition_table,
+        project.mcu("desk-s3").unwrap().partition_table
+    );
+    // Builtin and source-tree definitions go out as before.
+    let builtin = Registry::from_json(&reg().to_json()).unwrap();
+    assert_eq!(
+        builtin.mcu("esp32s3").unwrap().partitions.as_deref(),
+        Some("partitions.csv")
+    );
+    let tree = Registry::load(&[Source::Tree(&source_root())]).unwrap();
+    assert!(tree.to_json().contains("\"partitions.csv\""));
+}
+
+#[test]
+fn the_json_form_carries_no_path_comment_or_command() {
+    let dir = scratch("public");
+    let secret = "sk-ant-FAKE-TOKEN-0123";
+    let mcu = FAKE_MCU.replace(
+        "id = \"fake-m0\"",
+        &format!(
+            "# kept at {} with {secret}\nid = \"fake-m0\"",
+            dir.display()
+        ),
+    );
+    let doctor = format!(
+        "\n[[doctor]]\nwhat = \"tool\"\nprobe = [\"{}\", \"{secret}\"]\nexpect = \"runs\"\nhint = \"{secret}\"\n",
+        dir.join("tool.exe").display().to_string().replace('\\', "/")
+    );
+    write(&dir.join("m/dagon-mcu.toml"), &format!("{mcu}{doctor}"));
+    std::fs::create_dir_all(dir.join("m/bootcore")).unwrap();
+    let board = FAKE_BOARD.replace("product", "[board.fake-board]\nproduct");
+    write(
+        &dir.join("dagon.toml"),
+        &format!("mcu_files = [\"m/dagon-mcu.toml\"]\n{board}"),
+    );
+    let project = Registry::load(&[
+        Source::Tree(&source_root()),
+        Source::Project(&dir.join("dagon.toml")),
+    ])
+    .unwrap();
+    assert!(!project.mcu("fake-m0").unwrap().doctor.is_empty());
+    let home = std::env::var("USERPROFILE")
+        .or_else(|_| std::env::var("HOME"))
+        .unwrap_or_default();
+    for (what, json) in [("builtin", reg().to_json()), ("loaded", project.to_json())] {
+        let plain = json.replace("\\\\", "\\");
+        for local in [
+            dir.display().to_string(),
+            source_root().canonicalize().unwrap().display().to_string(),
+            source_root().display().to_string(),
+            home.clone(),
+            "targets/mcu".into(),
+            "dagon.toml".into(),
+        ] {
+            assert!(
+                local.is_empty() || !plain.contains(&local),
+                "{what} JSON has {local}"
+            );
+        }
+        for word in [secret, "doctor", "rustup", "tool.exe", "# "] {
+            assert!(!json.contains(word), "{what} JSON has {word}");
+        }
+    }
+    // Labels say where a definition came from without saying where it is.
+    let form: serde_json::Value = serde_json::from_str(&project.to_json()).unwrap();
+    let labels: Vec<&str> = form["mcus"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .chain(form["boards"].as_array().unwrap())
+        .map(|d| d["label"].as_str().unwrap())
+        .collect();
+    assert!(labels.contains(&"source-tree MCU rp2040"), "{labels:?}");
+    assert!(labels.contains(&"project MCU fake-m0"), "{labels:?}");
+    assert!(labels.contains(&"project board fake-board"), "{labels:?}");
+    std::fs::remove_dir_all(dir).unwrap();
 }

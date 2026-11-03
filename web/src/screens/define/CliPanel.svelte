@@ -4,6 +4,7 @@
   import type { Autosave } from '../../app/define/autosave.svelte.ts';
   import type { Define } from '../../app/define/define.svelte.ts';
   import { boardMissing } from '../../app/define/model.ts';
+  import { mcuConnection } from '../../wasm/dagon.ts';
 
   interface Props {
     cli: Cli;
@@ -114,12 +115,12 @@
     <p>{FLASH.hubFirst}</p>
     <ul class="rows">
       {#each flashOrder as n (n.id)}
-        {@const fam = FLASH.families[mcuOf(n.id)]}
+        {@const fam = mcuConnection(mcuOf(n.id))}
         {@const fj = flashJob(n.id)}
         {@const flashing = starting.includes(n.id) || fj?.state === 'queued' || fj?.state === 'running' || fj?.state === 'question'}
         <li>
           <span class="who"><strong>{n.name}</strong><span translate="no">{n.product} · {n.mcu}</span></span>
-          {#if fam}<span class="pair"><span class="label">{FLASH.via}</span> {fam[0]}</span>{#if cli.canFlash(mcuOf(n.id))}<p>{fam[1]}</p>{/if}{/if}
+          {#if fam}<span class="pair"><span class="label">{FLASH.via}</span> {fam.label}</span>{#if cli.canFlash(mcuOf(n.id))}<p>{fam.hint}</p>{/if}{/if}
           {#if fj?.question}
             <p>{FLASH.confirm(n.name)}</p>
             <button class="secondary" onclick={() => void cli.answer(fj, FLASH.no)}>{FLASH.no}</button>

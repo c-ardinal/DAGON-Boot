@@ -122,6 +122,75 @@ fn host_origin_and_passphrase_are_enforced() {
 }
 
 #[test]
+fn definitions_are_served_behind_the_same_guards_with_the_projects_boards() {
+    let a = start("defs");
+    let toml = std::fs::read_to_string(a.dir.join("dagon.toml")).unwrap();
+    std::fs::write(
+        a.dir.join("dagon.toml"),
+        format!(
+            "{toml}\n[board.desk-pico]\nproduct = \"Desk Pico\"\nmcu = \"rp2040\"\n\
+             flash_bytes = 0x40_0000\ndrawing = \"pico\"\n\
+             default_link = {{ kind = \"i2c\", addr = 0x44, control = \"full\" }}\n"
+        ),
+    )
+    .unwrap();
+    let bearer = auth(&a);
+    assert_eq!(http(&a, "GET", "/v1/definitions", &[], b"").0, 401);
+    let rebind = [("Host", "attacker.example:80"), ("Authorization", &bearer)];
+    assert_eq!(http(&a, "GET", "/v1/definitions", &rebind, b"").0, 403);
+    let cross = [
+        ("Origin", "https://example.com"),
+        ("Authorization", &bearer),
+    ];
+    assert_eq!(http(&a, "GET", "/v1/definitions", &cross, b"").0, 403);
+    let (st, body) = http(
+        &a,
+        "GET",
+        "/v1/definitions",
+        &[("Authorization", &bearer)],
+        b"",
+    );
+    assert_eq!(st, 200, "{body}");
+    let reg = dagon_topology::defs::Registry::from_json(&body).unwrap();
+    assert_eq!(reg.board("desk-pico").unwrap().product, "Desk Pico");
+    assert!(reg.mcu("esp32s3").is_some());
+    // Nothing local leaves: no project or DAGON source path, no command.
+    let plain = body.replace("\\\\", "\\");
+    let src = std::path::Path::new(crate::dagonsrc::BUILT_FROM);
+    for local in [
+        a.dir.display().to_string(),
+        src.display().to_string(),
+        src.canonicalize().unwrap().display().to_string(),
+        "dagon.toml".into(),
+        "targets/".into(),
+        "rustup".into(),
+    ] {
+        assert!(!plain.contains(&local), "{local} in {body}");
+    }
+
+    // A broken project definition is a 500 without its path.
+    std::fs::write(
+        a.dir.join("dagon.toml"),
+        format!("{toml}\n[board.bad]\nmcu = \"nope\"\n"),
+    )
+    .unwrap();
+    let (st, body) = http(
+        &a,
+        "GET",
+        "/v1/definitions",
+        &[("Authorization", &bearer)],
+        b"",
+    );
+    assert_eq!(st, 500);
+    assert!(!body.contains(&*a.dir.to_string_lossy()), "{body}");
+    // hello still answers, from the builtin set.
+    assert_eq!(
+        http(&a, "GET", "/v1/hello", &[("Authorization", &bearer)], b"").0,
+        200
+    );
+}
+
+#[test]
 fn hello_reports_keys_without_their_values() {
     let a = start("hello");
     let (st, body) = http(&a, "GET", "/v1/hello", &[("Authorization", &auth(&a))], b"");
@@ -476,6 +545,53 @@ slot-b = []
         (Some("nodes/seg"), Some("seg"))
     );
     assert_eq!(t["features"][0], "slot-b");
+}
+
+#[test]
+fn a_projects_own_words_reach_the_page_only_as_plain_names() {
+    let a = start("plain");
+    let toml = std::fs::read_to_string(a.dir.join("dagon.toml")).unwrap();
+    let secret = "C:/Users/me/sk-ant-FAKE:TOKEN";
+    std::fs::write(
+        a.dir.join("dagon.toml"),
+        format!(
+            "{toml}\n[board.desk-pico]\nproduct = \"{secret}\"\nmcu = \"rp2040\"\n\
+             flash_bytes = 0x40_0000\ndrawing = \"pico\"\n\
+             header = [{{ pin = \"GPIO4\", label = \"{secret}\" }}]\n\
+             default_link = {{ kind = \"i2c\", addr = 0x44, control = \"full\" }}\n\
+             [board.desk-two]\nproduct = \"Desk Two\"\nmcu = \"rp2040\"\n\
+             flash_bytes = 0x40_0000\ndrawing = \"pico\"\n\
+             default_link = {{ kind = \"i2c\", addr = 0x45, control = \"full\" }}\n"
+        ),
+    )
+    .unwrap();
+    let ok = [("Authorization", auth(&a))];
+    let ok: Vec<(&str, &str)> = ok.iter().map(|(k, v)| (*k, v.as_str())).collect();
+    for route in ["/v1/targets", "/v1/definitions", "/v1/hello"] {
+        let (st, body) = http(&a, "GET", route, &ok, b"");
+        assert_eq!(st, 200, "{route}: {body}");
+        assert!(
+            !body.contains("sk-ant") && !body.contains("Users"),
+            "{route}: {body}"
+        );
+    }
+    let (_, body) = http(&a, "GET", "/v1/targets", &ok, b"");
+    let v: serde_json::Value = serde_json::from_str(&body).unwrap();
+    let product = |id: &str| {
+        v["boards"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|b| b["id"] == id)
+            .map(|b| b["product"].clone())
+    };
+    assert_eq!(product("desk-pico"), Some("project-text".into()));
+    assert_eq!(product("desk-two"), Some("Desk Two".into()));
+    // Builtin boards keep their own product names.
+    assert_eq!(
+        product("waveshare-rp2040-touch-lcd-1.28"),
+        Some("Waveshare RP2040-Touch-LCD-1.28".into())
+    );
 }
 
 #[test]

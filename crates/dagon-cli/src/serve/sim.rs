@@ -34,6 +34,9 @@ pub struct SimDevice {
     pub speed: f64,
     /// The node set to fail its update (for the page and the log).
     pub fail: Option<String>,
+    /// Lines for serve's log, under its banner (what is simulated, the
+    /// demo key).
+    pub notes: Vec<String>,
 }
 
 struct State {
@@ -57,6 +60,7 @@ impl SimDevice {
             answered: Condvar::new(),
             speed,
             fail,
+            notes: Vec::new(),
         }
     }
 

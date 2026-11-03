@@ -127,6 +127,9 @@ pub fn run(args: &[&str], sim: Option<Arc<SimDevice>>) -> Result<(), String> {
         server.set_release_key(k);
     }
     if let Some(s) = sim {
+        for line in &s.notes {
+            println!("{line}");
+        }
         let _ = server.sim.set(s);
     }
     if web.as_os_str().is_empty() {

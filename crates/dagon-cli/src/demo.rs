@@ -193,20 +193,19 @@ pub fn command(args: &[&str]) -> Result<(), String> {
     let dir = std::env::temp_dir().join(DEMO_DIR);
     let (config, key) = project(&dir)?;
     let hub = desk(&key, fail, 1)?;
-    println!(
-        "demo: a SIMULATED desk (親機 + 2 子機, desk-demo), speed x{speed}{}",
-        fail.map_or(String::new(), |f| format!(", {f}'s update set to fail"))
-    );
-    println!(
-        "demo: DEMO key {} in {} (made for this demo; not your key)",
-        crate::config::key_id_text(&key.pk),
-        dir.join("demo-key").display()
-    );
-    let sim = Arc::new(crate::serve::SimDevice::new(
-        hub,
-        speed,
-        fail.map(String::from),
-    ));
+    let mut sim = crate::serve::SimDevice::new(hub, speed, fail.map(String::from));
+    sim.notes = vec![
+        format!(
+            "demo: a SIMULATED desk (親機 + 2 子機, desk-demo), speed x{speed}{}",
+            fail.map_or(String::new(), |f| format!(", {f}'s update set to fail"))
+        ),
+        format!(
+            "demo: DEMO key {} in {} (made for this demo; not your key)",
+            crate::config::key_id_text(&key.pk),
+            dir.join("demo-key").display()
+        ),
+    ];
+    let sim = Arc::new(sim);
     let config = config.to_string_lossy().into_owned();
     let mut serve_args = vec!["--config", config.as_str()];
     if let Some(p) = o.get("port") {

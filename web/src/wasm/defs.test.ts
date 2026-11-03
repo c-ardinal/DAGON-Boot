@@ -25,26 +25,41 @@ describe('definitions from dagon serve', () => {
     expect(mcuConnection('nope')).toBeNull();
   });
 
-  test('none, or ones that do not load, keep the builtin set', () => {
-    expect(useDefinitions(null)).toBe(false);
-    expect(useDefinitions('{"mcus": []}')).toBe(false);
-    expect(useDefinitions(served.replace('sector = 0x1000', 'sector = 0x80'))).toBe(false);
-    expect(supportedBoards().map((b) => b.id)).not.toContain('desk-pico');
+  test('none (no serve, an older serve) is the builtin set', () => {
+    expect(useDefinitions(null)).toBe('builtin');
+    expect(supportedBoards().map((b) => b.id)).toEqual(['waveshare-rp2040-touch-lcd-1.28', 'nucleo-f401re', 'm5stopwatch']);
+    expect(mcuConnection('rp2040')).not.toBeNull();
+  });
+
+  test("a project's definitions that fail block the page: no MCU or board, never the builtin set", () => {
+    const blocked = () => {
+      expect(supportedBoards()).toEqual([]);
+      expect(mcuConnection('rp2040')).toBeNull();
+    };
+    // serve said 500 (DEFS_ERROR)
+    expect(useDefinitions(null, true)).toBe('blocked');
+    blocked();
+    // what serve sent does not load
+    expect(useDefinitions('{"mcus": []}')).toBe('blocked');
+    blocked();
+    expect(useDefinitions(served.replace('sector = 0x1000', 'sector = 0x80'))).toBe('blocked');
+    blocked();
   });
 
   test("the project's own board joins the table once they load", () => {
-    expect(useDefinitions(served)).toBe(true);
+    expect(useDefinitions(served)).toBe('loaded');
     expect(supportedBoards().find((b) => b.id === 'desk-pico')).toMatchObject({ product: 'Desk Pico', mcu: 'rp2040', mcuName: 'RP2040' });
   });
 
-  test('the next project without definitions, or with ones that do not load, is back on the builtin set', () => {
+  test('the next project without definitions is back on the builtin set; one whose definitions fail on none', () => {
     const ids = () => supportedBoards().map((b) => b.id);
-    expect(useDefinitions(served)).toBe(true);
-    expect(useDefinitions(null)).toBe(false);
-    expect(ids()).not.toContain('desk-pico');
-    expect(useDefinitions(served)).toBe(true);
-    expect(useDefinitions('{"mcus": []}')).toBe(false);
-    expect(ids()).not.toContain('desk-pico');
+    expect(useDefinitions(served)).toBe('loaded');
+    expect(useDefinitions(null)).toBe('builtin');
+    expect(ids()).toEqual(['waveshare-rp2040-touch-lcd-1.28', 'nucleo-f401re', 'm5stopwatch']);
+    expect(useDefinitions(served)).toBe('loaded');
+    expect(useDefinitions('{"mcus": []}')).toBe('blocked');
+    expect(ids()).toEqual([]);
+    expect(useDefinitions(null)).toBe('builtin');
     expect(ids()).toEqual(['waveshare-rp2040-touch-lcd-1.28', 'nucleo-f401re', 'm5stopwatch']);
   });
 });

@@ -102,7 +102,7 @@
     // serve switched to the project's keys (Cli refreshed hello): the page verifies with that key from now on.
     opened: async () => {
       useReleaseKey();
-      useDefinitions(await cli.definitions());
+      useServedDefinitions(await cli.definitions());
       await openWork();
     },
     // Development stand-ins (?mock, ?sim) have no serve: an unsaved 構成 on the page.
@@ -124,7 +124,7 @@
       useReleaseKey(document.querySelector<HTMLMetaElement>('meta[name="dagon-release-key"]')?.content);
       if (cli.state !== 'ready') return;
       // The project's MCU and board definitions; the builtin set when serve has none (or no serve).
-      useDefinitions(await cli.definitions());
+      useServedDefinitions(await cli.definitions());
       // A project open in serve opens at once; without one the page stays on SC-S0.
       if (cli.has('project')) {
         const p = await cli.project();
@@ -316,7 +316,14 @@
 
   /** "保存": the 構成 into the project's YAML now. */
   async function save() {
+    // Blocked: serve refuses the 構成 too (its definitions do not load).
+    if (cli.defsFailed) return;
     await autosave.now();
+  }
+
+  /** The project's definitions, or none at all with × 定義を読めない when they fail (never the builtin set instead). */
+  function useServedDefinitions(json: string | null) {
+    if (useDefinitions(json, cli.defsFailed) === 'blocked') cli.defsFailed = true;
   }
 
   /** "ファイルの構成を取り込む" (§7.6): the release's 構成 replaces this one (undoable) and goes to the YAML. */
@@ -763,7 +770,7 @@
       <button class="primary" onclick={() => void op.connect()}>{BUTTON.connectDiscover}<span class="arrow" aria-hidden="true">→</span></button>
     {:else}
       {#if d.unsaved && !local}<span class="unsaved">{SAVE.unsaved}</span>{/if}
-      <button class="secondary" aria-disabled={cli.state !== 'ready'} onclick={() => void save()}>{DEFINE.save}</button>
+      <button class="secondary" aria-disabled={cli.state !== 'ready' || cli.defsFailed} onclick={() => void save()}>{DEFINE.save}</button>
       {#if firstError}
         <button class="primary" onclick={() => d.fix(firstError)}>{DEFINE.fix}<span class="arrow" aria-hidden="true">→</span></button>
       {:else if d.operable === 'ok'}

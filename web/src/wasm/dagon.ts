@@ -176,22 +176,32 @@ export function dagonReady(): Promise<unknown> {
   return (loading ??= init());
 }
 
+/** No MCU and no board: what the page works with while a project's definitions do not load. */
+const NO_DEFINITIONS = '{"mcus":[],"boards":[]}';
+
 /**
- * Uses the MCU and board definitions `dagon serve` sends (GET /v1/definitions);
- * the builtin set when there are none or they do not load, so nothing of a
- * previous project stays. True when they loaded.
+ * Uses the MCU and board definitions `dagon serve` sends (GET /v1/definitions):
+ * - 'loaded': they loaded;
+ * - 'builtin': serve sent none (no serve, ?mock, an older serve): the builtin set;
+ * - 'blocked': the open project's definitions failed (`failed`: serve said 500) or what serve
+ *   sent does not load: no MCU or board at all, never the builtin set in their place.
+ * Nothing of a previous project stays in any case.
  */
-export function useDefinitions(json: string | null): boolean {
+export function useDefinitions(json: string | null, failed = false): 'loaded' | 'builtin' | 'blocked' {
+  if (!failed && json === null) {
+    use_builtin_definitions();
+    return 'builtin';
+  }
   try {
-    if (json) {
+    if (json !== null && !failed) {
       load_definitions(json);
-      return true;
+      return 'loaded';
     }
   } catch {
-    // Falls through to the builtin set.
+    // Falls through to the blocked state.
   }
-  use_builtin_definitions();
-  return false;
+  load_definitions(NO_DEFINITIONS);
+  return 'blocked';
 }
 
 /** How the user connects `mcu` for a write (its definition's [connection]); null for an unknown MCU. */

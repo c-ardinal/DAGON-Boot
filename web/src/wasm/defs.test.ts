@@ -36,4 +36,15 @@ describe('definitions from dagon serve', () => {
     expect(useDefinitions(served)).toBe(true);
     expect(supportedBoards().find((b) => b.id === 'desk-pico')).toMatchObject({ product: 'Desk Pico', mcu: 'rp2040', mcuName: 'RP2040' });
   });
+
+  test('the next project without definitions, or with ones that do not load, is back on the builtin set', () => {
+    const ids = () => supportedBoards().map((b) => b.id);
+    expect(useDefinitions(served)).toBe(true);
+    expect(useDefinitions(null)).toBe(false);
+    expect(ids()).not.toContain('desk-pico');
+    expect(useDefinitions(served)).toBe(true);
+    expect(useDefinitions('{"mcus": []}')).toBe(false);
+    expect(ids()).not.toContain('desk-pico');
+    expect(ids()).toEqual(['waveshare-rp2040-touch-lcd-1.28', 'nucleo-f401re', 'm5stopwatch']);
+  });
 });

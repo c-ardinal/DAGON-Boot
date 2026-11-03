@@ -78,9 +78,9 @@ pub fn topology(args: &[&str]) -> Result<(), String> {
             Err(unanswered(qs))
         }
     };
-    let reg = crate::config::Config::load(None)
-        .and_then(|c| crate::defs::registry(&c))
-        .unwrap_or_else(|_| Registry::builtin().clone());
+    // The dagon.toml here, if any (else the builtin set); definitions that
+    // do not load stop here with the reason.
+    let reg = crate::defs::registry(&crate::config::Config::load(None)?)?;
     let done = generate(&description, &a.model, &reg, &mut api, &mut ask)?;
     std::fs::write(&a.out, &done.yaml).map_err(|e| format!("cannot write {}: {e}", a.out))?;
     for i in done.report.warnings() {

@@ -594,6 +594,9 @@ export const DEFINE = {
   connectSend: 'つないで、親機へ送る',
   unreadableChip: '× 読めない形式',
   unreadableSentence: 'dagon で書き出した .yaml ファイルを選んでください。',
+  /** GET /v1/definitions 500: the open project's MCU/board definitions do not load (serve's terminal says why). */
+  defsChip: '× 定義を読めない',
+  defsSentence: 'このプロジェクトの MCU・ボード定義を読み込めません。理由は dagon serve の端末に出ています。',
 } as const;
 
 /** SC-D2 inspector labels; 詳しい設定 shows the schema names as they are (§11.4, 2 段目). */

@@ -84,6 +84,12 @@ describe('dagon serve link', () => {
     expect(f.calls[f.calls.length - 1]).toMatchObject({ url: '/v1/definitions', method: 'GET', auth: `Bearer ${PASS}` });
     const old = new Cli(fake({ status: 404 }).deps);
     expect(await old.definitions()).toBeNull();
+    expect(old.defsFailed).toBe(false);
+    // The open project's definitions do not load: said, not replaced by the builtin set silently.
+    const broken = new Cli(fake({ status: 500 }).deps);
+    expect(await broken.definitions()).toBeNull();
+    expect(broken.defsFailed).toBe(true);
+    expect(cli.defsFailed).toBe(false);
   });
 
   test('a public page (no passphrase) stays K0; a wrong passphrase is K0 with its notice; a dead CLI is K3', async () => {

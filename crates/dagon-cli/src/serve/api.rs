@@ -359,7 +359,9 @@ fn hello(server: &Server) -> Response {
         .as_ref()
         .and_then(|c| project_key(c).ok())
         .map(|k| to_hex(&dagon_format::key_id(&k.pk)));
-    let mut defined: Vec<_> = registry_of(cfg.as_ref()).mcus().to_vec();
+    // Definitions that do not load offer nothing to flash (GET
+    // /v1/definitions says why).
+    let mut defined: Vec<_> = registry_of(server).map_or(Vec::new(), |r| r.mcus().to_vec());
     defined.sort_by_key(|m| m.wire_id);
     let flash_mcus: Vec<String> = defined
         .into_iter()
@@ -429,7 +431,7 @@ fn targets(server: &Server) -> Res {
             "features": features,
         }));
     }
-    let reg = registry_of(Some(&cfg));
+    let reg = project_registry(&cfg).map_err(|e| Response::error(500, &e))?;
     let boards: Vec<Value> = reg
         .boards()
         .iter()
@@ -449,26 +451,35 @@ fn targets(server: &Server) -> Res {
     Ok(json_ok(json!({ "targets": out, "boards": boards })))
 }
 
-/// The MCU and board definitions of the open project (its DAGON source and
-/// its own), the builtin set without one or when they do not load.
-fn registry_of(cfg: Option<&Config>) -> Registry {
-    cfg.and_then(|c| crate::defs::registry(c).ok())
-        .unwrap_or_else(|| Registry::builtin().clone())
+/// What the page is told when the open project's definitions do not load
+/// (the reason, which may name its files, goes to the terminal only).
+pub(super) const DEFS_ERROR: &str =
+    "the project's definitions do not load; see the dagon serve terminal";
+
+/// The definitions of project `cfg` (its DAGON source and its own); when
+/// they do not load, the reason goes to the terminal and [`DEFS_ERROR`] to
+/// the caller. Never the builtin set instead: a project MCU must not just
+/// vanish.
+pub(super) fn project_registry(cfg: &Config) -> Result<Registry, String> {
+    crate::defs::registry(cfg).map_err(|e| {
+        eprintln!("dagon serve: {e}");
+        DEFS_ERROR.to_string()
+    })
+}
+
+/// The open project's definitions; the builtin set only while no project
+/// is open.
+fn registry_of(server: &Server) -> Result<Registry, String> {
+    if server.config_path().is_none() {
+        return Ok(Registry::builtin().clone());
+    }
+    project_registry(&config(server)?)
 }
 
 /// GET /v1/definitions: the definitions in use as `Registry::to_json`
 /// gives them, for the page's dagon-wasm (`load_definitions`).
 fn definitions(server: &Server) -> Res {
-    let reg = match config(server) {
-        Ok(cfg) => crate::defs::registry(&cfg).map_err(|e| {
-            eprintln!("dagon serve: {e}");
-            Response::error(
-                500,
-                "the project's definitions do not load; see the dagon serve terminal",
-            )
-        })?,
-        Err(_) => Registry::builtin().clone(),
-    };
+    let reg = registry_of(server).map_err(|e| Response::error(500, &e))?;
     Ok(Response::bytes(
         "application/json",
         reg.to_json().into_bytes(),
@@ -544,7 +555,8 @@ fn topology_put(server: &Server, req: &Request) -> Res {
     let p = topology_path(server)?;
     let yaml =
         std::str::from_utf8(&req.body).map_err(|_| Response::error(400, "YAML must be UTF-8"))?;
-    let report = dagon_topology::check_str_with(&registry_of(config(server).ok().as_ref()), yaml);
+    let reg = registry_of(server).map_err(|e| Response::error(500, &e))?;
+    let report = dagon_topology::check_str_with(&reg, yaml);
     let report_json: Value = serde_json::from_str(&report.to_json()).unwrap_or(Value::Null);
     // A 構成 whose only errors are V-23 (a shape updating does not cover
     // yet) is saved; compile, send, release and apply still refuse it.
@@ -1114,7 +1126,7 @@ fn job_ai_topology(job: &mut Job, cfg: Config, v: Value) -> Result<Value, String
     let mut ask = |qs: &[String]| -> Result<Vec<String>, String> {
         qs.iter().enumerate().map(|(i, q)| job.ask(i, q)).collect()
     };
-    let reg = registry_of(Some(&cfg));
+    let reg = project_registry(&cfg)?;
     let (yaml, report) = crate::ai::topology_for(&description, &reg, &mut ask, &cancel)?;
     let report: Value = serde_json::from_str(&report).unwrap_or(Value::Null);
     Ok(json!({ "yaml": yaml, "report": report }))

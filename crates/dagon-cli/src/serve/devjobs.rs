@@ -11,7 +11,6 @@
 
 use std::path::Path;
 
-use dagon_topology::defs::Registry;
 use dagon_topology::Topology;
 use ed25519_compact::KeyPair;
 use serde_json::{json, Value};
@@ -121,11 +120,7 @@ fn flash_with(
 /// definitions. Nobody can confirm a command here, so a check the project
 /// itself defines is reported as one for the terminal's `dagon doctor`.
 pub fn job_doctor(job: &mut Job, cfg: Config, _v: Value) -> Result<Value, String> {
-    let reg = crate::defs::registry(&cfg).unwrap_or_else(|e| {
-        eprintln!("dagon serve: {e}");
-        job.log("the project's definitions do not load; see the dagon serve terminal");
-        Registry::builtin().clone()
-    });
+    let reg = super::api::project_registry(&cfg)?;
     let mcus: Vec<String> = cfg
         .topology_path(None)
         .and_then(|p| inside(&cfg, &p))

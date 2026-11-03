@@ -183,11 +183,24 @@ fn definitions_are_served_behind_the_same_guards_with_the_projects_boards() {
     );
     assert_eq!(st, 500);
     assert!(!body.contains(&*a.dir.to_string_lossy()), "{body}");
-    // hello still answers, from the builtin set.
-    assert_eq!(
-        http(&a, "GET", "/v1/hello", &[("Authorization", &bearer)], b"").0,
-        200
+    assert!(body.contains(super::api::DEFS_ERROR), "{body}");
+    // hello still answers, but offers nothing to flash: the builtin set
+    // never stands in for a project's definitions.
+    let (st, hello) = http(&a, "GET", "/v1/hello", &[("Authorization", &bearer)], b"");
+    assert_eq!(st, 200);
+    let v: serde_json::Value = serde_json::from_str(&hello).unwrap();
+    assert_eq!(v["flash_mcus"], serde_json::json!([]));
+    // A 構成 is not checked against the builtin set instead either.
+    let yaml = std::fs::read(a.dir.join("topology/t.yaml")).unwrap();
+    let (st, body) = http(
+        &a,
+        "PUT",
+        "/v1/topology",
+        &[("Authorization", &bearer)],
+        &yaml,
     );
+    assert_eq!(st, 500);
+    assert!(body.contains(super::api::DEFS_ERROR), "{body}");
 }
 
 #[test]

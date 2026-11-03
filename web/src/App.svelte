@@ -743,6 +743,9 @@
         <p>{MODE.lockedProblems.sentence}</p>
       {:else if cli.state !== 'ready'}
         <p>{CLI_LINK.needCli}</p>
+      {:else if cli.defsFailed}
+        <span class="cause">{DEFINE.defsChip}</span>
+        <p role="alert">{DEFINE.defsSentence}</p>
       {:else if d.unreadable}
         <span class="cause">{DEFINE.unreadableChip}</span>
         <p>{DEFINE.unreadableSentence}</p>

@@ -12,6 +12,7 @@ mod device;
 mod doctor;
 mod esp;
 mod flash;
+mod flashdev;
 mod nodebuild;
 mod paths;
 mod scaffold;
@@ -85,12 +86,13 @@ Usage:
         [--key <file>]               build, sign both slots, release build and apply in one
                                      go; version defaults to one patch above the last
                                      release; lists node -> version and asks first
-  dagon flash <id> [--dry-run] [--yes] [--out <dir>] [--topology <yaml>] [--key <file>]
-                                     first write of the hub (RP2040: UF2 to the RPI-RP2
-                                     drive), an F401 (probe-rs) or an ESP32-S3 (espflash
-                                     over USB-C, exactly one connected); builds the boot
-                                     core, stage0 or factory agent with the key; prints
-                                     the plan first
+  dagon flash <id> [--dry-run] [--yes] [--probe <vid:pid[:serial]> | --port <port> |
+        --drive <path>] [--out <dir>] [--topology <yaml>] [--key <file>]
+                                     first write as the node's MCU definition says (UF2
+                                     drive, probe-rs or espflash); builds its parts
+                                     (boot core, stage0, factory agent) with the key;
+                                     prints the plan first; writes to the one device
+                                     the writer reports, or the one you choose or name
   dagon doctor [--fix]               tools each MCU family of the topology needs; --fix
                                      installs what needs no administrator rights
   dagon serve [--port <n>] [--web <dir>] [--pubkey <file>] [--no-open]

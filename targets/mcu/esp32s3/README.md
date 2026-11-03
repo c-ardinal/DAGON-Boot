@@ -10,7 +10,8 @@ and not on the board. Kind V: the stock ESP-IDF 2nd stage with app rollback
 | `node` | `arm_watchdog`, `start` (the link task), `running_version`, `display_ready`, `now_ms` |
 | `liveness`, `trial` | watchdog policy: no feed before CONFIRM, then deadline-based |
 | `rom`, `serve` | ENTER_ROM and what follows a reply |
-| `link` | link UART settings (`uart_config`, 115200 8N1), a polling `UartLink` |
+| `link` | link UART settings (`uart_config`, 115200 8N1) |
+| `links` | the node's uplinks as `Link`s (`Uart`, `UsbCdc`) and `LINK_KINDS` |
 | `flash`, `boot`, `sys` | `Flash`, `BootSelectV` over otadata, `Clock` / `Watchdog` / `Reset` |
 | `layout`, `partitions.csv`, `otadata`, `framer` | partition table (needs 8 MB flash or more), otadata, frame cutter |
 | `board` | the `BoardDef` trait a board crate implements |

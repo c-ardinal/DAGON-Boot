@@ -74,7 +74,13 @@ pub fn start<const N: usize>(
     };
     // The only uplink this board offers (`require_uplink` checks it at
     // compile time): the USB CDC device, built by the relay.
-    debug_assert!(uplink == Kind::UsbCdc);
+    assert!(uplink == Kind::UsbCdc, "uplink: only usb-cdc on this board");
+    assert!(
+        downlinks
+            .iter()
+            .all(|k| matches!(k, Kind::I2c | Kind::Uart)),
+        "downlinks: only i2c and uart on this board"
+    );
     let wants = |k: Kind| downlinks.contains(&k);
     // The STM32 recovery lines belong to the I2C downlink (ROM path).
     let links = dagon_mcu_rp2040::relay::Links {

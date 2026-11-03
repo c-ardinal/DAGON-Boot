@@ -164,7 +164,7 @@ pub fn start<B: BoardDef, const N: usize>(
 ) -> Result<(), LogError> {
     // The only uplink this MCU offers (`require_uplink` checks it at
     // compile time): the board's I2C target.
-    debug_assert!(uplink == links::Kind::I2c);
+    assert!(uplink == links::Kind::I2c, "uplink: only i2c on this MCU");
     let task = DAGON_TASK;
     const {
         assert!(

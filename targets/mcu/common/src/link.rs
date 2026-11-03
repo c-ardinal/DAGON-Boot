@@ -52,6 +52,14 @@ pub trait Link {
     /// Sends one frame.
     async fn write_frame(&mut self, frame: &[u8]) -> Result<(), LinkError>;
 
+    /// Done with the request just read without answering it (not a valid
+    /// request, or not for this node): the link must be ready for the next
+    /// request (an I2C target stops NACKing; the request stays unanswered
+    /// and the peer resends). Default: nothing to do.
+    async fn no_reply(&mut self) -> Result<(), LinkError> {
+        Ok(())
+    }
+
     /// Returns once everything written has left this end (the peer has
     /// read it, or it is on the wire), so a reset right after loses
     /// nothing. Default: at once.

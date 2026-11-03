@@ -72,7 +72,11 @@ impl BoardDef for Board {
 /// device, built by the relay; no STM32 recovery lines on this wiring),
 /// and what is left for the app.
 pub fn links(io: Io, uplink: Kind, downlinks: &[Kind]) -> (Links, Spare) {
-    debug_assert!(uplink == Kind::UsbCdc);
+    assert!(uplink == Kind::UsbCdc, "uplink: only usb-cdc on this board");
+    assert!(
+        downlinks.iter().all(|k| matches!(k, Kind::I2c | Kind::Uart)),
+        "downlinks: only i2c and uart on this wiring"
+    );
     let i2c = downlinks.contains(&Kind::I2c).then(|| {
         let mut cfg = i2c::Config::default();
         cfg.frequency = I2C_HZ;

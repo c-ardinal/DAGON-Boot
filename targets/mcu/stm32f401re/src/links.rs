@@ -172,6 +172,14 @@ mod target {
             Ok(())
         }
 
+        /// No answer: reads stay BUSY (the hub times out and resends) and
+        /// the own address is ACKed again for the next request.
+        async fn no_reply(&mut self) -> Result<(), LinkError> {
+            self.mailbox.respond(None, false);
+            self.acknowledge(true);
+            Ok(())
+        }
+
         /// Serves the hub's reads until it has the whole response. A new
         /// request first: kept for the next read, and this fails (the
         /// caller then does not reset).

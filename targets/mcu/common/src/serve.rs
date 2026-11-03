@@ -83,8 +83,9 @@ where
                     reboot = reply.reboot;
                     link.write_frame(reply.frame).await
                 }
-                // Not for this node, or not a request: no answer.
-                None => Ok(()),
+                // Not a valid request, or not for this node: no answer, but
+                // the link must take the next request.
+                None => link.no_reply().await,
             },
         };
         host.after(agent, cmd);
@@ -121,12 +122,16 @@ mod tests {
 
     /// A link fed from a queue: `None` entries are read timeouts; when the
     /// queue is empty the link is closed.
+    /// Like an I2C target: a request is handed out with the link closed
+    /// for new ones (NACK) until it is answered or dropped.
     #[derive(Default)]
     struct Mock {
         incoming: VecDeque<Option<Vec<u8>>>,
         current: Vec<u8>,
         written: Vec<Vec<u8>>,
         flushed: usize,
+        dropped: usize,
+        closed_for_requests: bool,
     }
 
     impl Link for Mock {
@@ -137,9 +142,14 @@ mod tests {
             Reconnect::Persistent
         }
         async fn read_frame(&mut self) -> Result<&[u8], LinkError> {
+            assert!(
+                !self.closed_for_requests,
+                "the last request was neither answered nor dropped"
+            );
             match self.incoming.pop_front() {
                 Some(Some(f)) => {
                     self.current = f;
+                    self.closed_for_requests = true;
                     Ok(&self.current)
                 }
                 Some(None) => Err(LinkError::Timeout),
@@ -148,6 +158,12 @@ mod tests {
         }
         async fn write_frame(&mut self, frame: &[u8]) -> Result<(), LinkError> {
             self.written.push(frame.to_vec());
+            self.closed_for_requests = false;
+            Ok(())
+        }
+        async fn no_reply(&mut self) -> Result<(), LinkError> {
+            self.dropped += 1;
+            self.closed_for_requests = false;
             Ok(())
         }
         async fn flush(&mut self) -> Result<(), LinkError> {
@@ -235,6 +251,32 @@ mod tests {
         assert_eq!(exit, Exit::Reboot);
         assert_eq!(link.written.len(), 1, "the reply, then nothing more");
         assert_eq!(link.flushed, 1);
+    }
+
+    /// A corrupt frame, a response (not a request) and a request too short
+    /// for the agent get no answer, and the link still takes the next
+    /// request, which is answered.
+    #[test]
+    fn unanswered_frames_leave_the_link_ready() {
+        let mut corrupt = hello(6);
+        let last = corrupt.len() - 1;
+        corrupt[last] ^= 0xFF;
+        let mut response = hello(7);
+        response[3] |= dagon_proto::flags::RESP;
+        let mut link = Mock::default();
+        link.incoming.extend([
+            Some(corrupt),
+            Some(response),
+            Some(std::vec![0xDA, 0x6F]),
+            Some(hello(8)),
+        ]);
+        let (mut a, mut h) = (agent(), Host::default());
+        let exit = dagon_sim::block_on(serve(&mut link, &mut a, &mut h));
+        assert_eq!(exit, Exit::Closed);
+        assert_eq!(link.dropped, 3);
+        assert_eq!(link.written.len(), 1);
+        let (f, _) = Frame::decode(&link.written[0], max_payload::UART).unwrap();
+        assert_eq!(f.seq, 8);
     }
 
     #[test]

@@ -299,7 +299,11 @@
   /** Development stand-ins (?mock, ?sim without serve): an unsaved 構成 on the page, nothing to save to. */
   let local = $state(false);
   /** Edits go to the project's YAML by themselves (UC-D04); 保存 saves at once. */
-  const autosave = new Autosave(d, { put: (yaml) => cli.saveTopology(yaml), enabled: () => screen === 'work' && !local });
+  const autosave = new Autosave(d, {
+    put: (yaml) => cli.saveTopology(yaml),
+    enabled: () => screen === 'work' && !local,
+    blocked: () => cli.defsFailed,
+  });
   $effect(() => {
     void d.revision;
     autosave.edited();
@@ -316,14 +320,14 @@
 
   /** "保存": the 構成 into the project's YAML now. */
   async function save() {
-    // Blocked: serve refuses the 構成 too (its definitions do not load).
-    if (cli.defsFailed) return;
     await autosave.now();
   }
 
   /** The project's definitions, or none at all with × 定義を読めない when they fail (never the builtin set instead). */
   function useServedDefinitions(json: string | null) {
     if (useDefinitions(json, cli.defsFailed) === 'blocked') cli.defsFailed = true;
+    // Blocked: a save waiting for its quiet time is dropped (none is sent while blocked).
+    if (cli.defsFailed) autosave.cancel();
   }
 
   /** "ファイルの構成を取り込む" (§7.6): the release's 構成 replaces this one (undoable) and goes to the YAML. */

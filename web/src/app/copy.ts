@@ -206,7 +206,7 @@ export const CANVAS = {
   layerL2: 'L2 子機',
   pc: 'このパソコン（ブラウザ）',
   /** L0 by the 親機's declared uplink host (案). */
-  pcBy: { 'pc-cli': 'パソコン（dagon）', browser: 'パソコン・スマートフォン（ブラウザ）', embedded: '自作の機器' } as Record<string, string>,
+  pcBy: { 'pc-cli': 'パソコン（dagon）', browser: 'ブラウザ（パソコン・スマホ）', embedded: '自作の機器' } as Record<string, string>,
   /** S01 */
   hubSlot: '親機を置く場所',
   nodeSlot: '子機を置く場所',
@@ -233,8 +233,10 @@ export const NODE = {
   roleHub: '親機',
   roleNode: '子機',
   mcu: 'MCU',
-  /** The hub's own connection line. */
+  /** The hub's own connection line: its uplink kind and what drives it (案 beyond USB（パソコン）). */
   usb: 'USB（パソコン）',
+  uplinkVia: (kind: string, host: string) =>
+    `${kind}（${({ 'pc-cli': 'パソコン', browser: 'ブラウザ', embedded: '自作の機器' } as Record<string, string>)[host] ?? 'パソコン'}）`,
   /** S03 pin headings and the no-wire value. */
   reset: 'リセット',
   boot: '起動',

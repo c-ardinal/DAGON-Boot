@@ -57,6 +57,24 @@ pub fn coordinator_capable(mcu: &str) -> bool {
     with_registry(|reg| reg.mcu(mcu).is_some_and(|m| m.coordinator.is_some()))
 }
 
+/// `mcu`'s first UART0 pin pair as the coordinator (`[coordinator]`
+/// `uart0_tx[0]`, `uart0_rx[0]`): `{tx, rx}`, or null without one.
+#[wasm_bindgen]
+pub fn coordinator_uart0(mcu: &str) -> JsValue {
+    with_registry(|reg| {
+        let c = reg.mcu(mcu).and_then(|m| m.coordinator.as_ref());
+        match c.and_then(|c| Some((*c.uart0_tx.first()?, *c.uart0_rx.first()?))) {
+            Some((tx, rx)) => {
+                let o = Object::new();
+                crate::define::set(&o, "tx", tx.into());
+                crate::define::set(&o, "rx", rx.into());
+                o.into()
+            }
+            None => JsValue::NULL,
+        }
+    })
+}
+
 /// The I2C addresses of the ROM loaders defined (never probed with DAGON
 /// frames, reserved on a bus with a node reached through its ROM).
 #[wasm_bindgen]

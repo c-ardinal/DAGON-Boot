@@ -115,6 +115,8 @@ describe('define document', () => {
     let deep = removeNode(fromYaml(DESK_DEMO_YAML), 'watch');
     deep = place(deep, 'm5stopwatch').doc;
     deep = connect(deep, 'm5stopwatch', 'seg');
+    // No [coordinator] on the F401: UART0 pins of the 親機 MCU's definition (the former fixed 0/1).
+    expect(deep.topo.links!.find((l) => l.from === 'seg')).toMatchObject({ iface: 'hw-uart0', pins: { tx: 0, rx: 1 } });
     const cfg = toConfig(deep, supportedBoards());
     expect(cfg.nodes.map((n) => [n.id, n.depth])).toEqual([['hub', 0], ['seg', 1], ['m5stopwatch', 2]]);
     expect(problems(deep).map((p) => p.rule)).toContain('V-23');

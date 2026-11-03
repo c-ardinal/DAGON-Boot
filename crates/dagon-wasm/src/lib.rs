@@ -15,7 +15,9 @@ mod sim;
 mod watch;
 
 pub use define::{board_template, release_topology, supported_mcus, topo_parse};
-pub use defs::{coordinator_capable, load_definitions, mcu_connection, rom_i2c_addrs};
+pub use defs::{
+    coordinator_capable, coordinator_uart0, load_definitions, mcu_connection, rom_i2c_addrs,
+};
 pub use frame::{frame_encode, FrameCutter};
 pub use host::{
     check_bootcore_for, check_release_for, require_release_key, set_release_key, watch_interval_ms,

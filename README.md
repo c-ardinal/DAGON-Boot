@@ -149,6 +149,11 @@ export ANTHROPIC_API_KEY=...        # read by the CLI only, never shown or saved
 dagon ai topology --in boards.txt --out topology.yaml
 ```
 
+Definitions are not a place for secrets. Names in them (ids, product
+names, pin labels, partition names) appear in DAGON Console and are sent
+to Claude when you ask it; commands, hints, comments and file paths are
+never sent. See `targets/README.md`.
+
 ### 3. Generate the node crates
 
 ```sh

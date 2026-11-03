@@ -104,6 +104,8 @@ export ANTHROPIC_API_KEY=...        # 読むのは CLI だけ。表示も保存�
 dagon ai topology --in boards.txt --out topology.yaml
 ```
 
+定義ファイルは秘密を書く場所ではありません。定義の中の名前（id、製品名、ピンのラベル、パーティション名）は DAGON Console に表示され、Claude に頼んだときは Claude にも送られます。コマンド、ヒント、コメント、ファイルのパスは送りません。詳しくは `targets/README.md` を見てください。
+
 ### 3. ノードの crate を作る
 
 ```sh

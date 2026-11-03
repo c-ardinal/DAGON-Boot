@@ -13,11 +13,6 @@ use crate::config::{read_topology, Config, Opts};
 
 const FIX: &str = "--fix";
 
-/// The MCU ids `dagon serve`'s doctor job checks without a topology.
-// ponytail: serve/devjobs.rs still names this list; once it passes the
-// project's registry ([`all_mcus`]) this goes (a test pins it to builtin).
-pub(crate) const FAMILIES: [&str; 3] = ["rp2040", "stm32f401re", "esp32s3"];
-
 const RUST_HINT: &str = "install Rust from https://rustup.rs";
 
 /// A check and the MCUs that need it (none: every MCU).
@@ -96,23 +91,44 @@ fn passes(c: &DoctorCheck, run: &mut Runner<'_>) -> bool {
     }
 }
 
+/// Whether a command of a check may run.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Gate {
+    Run,
+    /// The user said no.
+    Declined,
+    /// Nobody to ask (`dagon serve`): only the terminal's `dagon doctor` may.
+    Unattended,
+}
+
 /// Whether `cmd` of check `c` may run: always for builtin and DAGON source
 /// definitions, after the user agrees for the project's.
-fn allowed(c: &Check, cmd: &[String], consent: &mut Consent<'_>) -> bool {
-    !c.ask
-        || consent(&format!(
-            "the project's definition of {} ({}) runs: {}\n",
-            c.def.what,
-            c.for_mcu.join(", "),
-            cmd.join(" ")
-        ))
+fn gate(c: &Check, cmd: &[String], consent: &mut Option<&mut Consent<'_>>) -> Gate {
+    if !c.ask {
+        return Gate::Run;
+    }
+    let Some(ask) = consent else {
+        return Gate::Unattended;
+    };
+    let question = format!(
+        "the project's definition of {} ({}) runs: {}\n",
+        c.def.what,
+        c.for_mcu.join(", "),
+        cmd.join(" ")
+    );
+    if ask(&question) {
+        Gate::Run
+    } else {
+        Gate::Declined
+    }
 }
 
 /// Everything [`doctor`] does outside: run probes and installs, ask, print.
+/// `consent: None` asks nobody: project-defined commands do not run.
 pub(crate) struct Io<'a> {
     pub probe: &'a mut Runner<'a>,
     pub install: &'a mut Runner<'a>,
-    pub consent: &'a mut Consent<'a>,
+    pub consent: Option<&'a mut Consent<'a>>,
     pub out: &'a mut dyn FnMut(&str),
 }
 
@@ -135,18 +151,29 @@ fn one(c: &Check, fix: bool, io: &mut Io<'_>) -> bool {
     } else {
         format!(" ({})", c.for_mcu.join(", "))
     };
-    if !allowed(c, &d.probe, io.consent) {
-        (io.out)(&format!(
-            "SKIP  {}{used_by}  not run; to check it yourself: {}",
-            d.what,
-            d.probe.join(" ")
-        ));
-        return false;
+    match gate(c, &d.probe, &mut io.consent) {
+        Gate::Run => {}
+        Gate::Declined => {
+            (io.out)(&format!(
+                "SKIP  {}{used_by}  not run; to check it yourself: {}",
+                d.what,
+                d.probe.join(" ")
+            ));
+            return false;
+        }
+        Gate::Unattended => {
+            (io.out)(&format!(
+                "SKIP  {}{used_by}  needs confirmation in the terminal (dagon doctor)",
+                d.what
+            ));
+            return false;
+        }
     }
     let mut good = passes(d, io.probe);
     let mut fixed = false;
     if !good && fix {
-        if let Some(cmd) = d.fix.as_deref().filter(|cmd| allowed(c, cmd, io.consent)) {
+        let fix_cmd = d.fix.as_deref();
+        if let Some(cmd) = fix_cmd.filter(|cmd| gate(c, cmd, &mut io.consent) == Gate::Run) {
             // ponytail: the one slow install is named by its tool; a
             // definition field would carry it once a second one appears.
             if cmd[0] == "espup" {
@@ -174,16 +201,17 @@ fn one(c: &Check, fix: bool, io: &mut Io<'_>) -> bool {
     good
 }
 
-/// The builtin MCUs' checks for `mcus` (no installs), one line each to
-/// `out`; nothing asks, so no project-defined command runs.
-pub(crate) fn check(mcus: &[String], out: &mut dyn FnMut(&str)) -> bool {
+/// `reg`'s checks for `mcus` (no installs, nobody to ask), one line each to
+/// `out`: a project-defined check is reported as needing the terminal's
+/// `dagon doctor`, never run.
+pub(crate) fn check(reg: &Registry, mcus: &[String], out: &mut dyn FnMut(&str)) -> bool {
     let mut io = Io {
         probe: &mut probe_cmd,
         install: &mut |_| None,
-        consent: &mut |_| false,
+        consent: None,
         out,
     };
-    doctor(Registry::builtin(), mcus, false, &mut io)
+    doctor(reg, mcus, false, &mut io)
 }
 
 fn probe_cmd(args: &[&str]) -> Option<String> {
@@ -220,7 +248,7 @@ pub fn command(args: &[&str]) -> Result<(), String> {
     let mut io = Io {
         probe: &mut probe_cmd,
         install: &mut install_cmd,
-        consent: &mut |q| crate::deploy::confirm(q, &mut std::io::stdin().lock()),
+        consent: Some(&mut |q| crate::deploy::confirm(q, &mut std::io::stdin().lock())),
         out: &mut |l| println!("{l}"),
     };
     if doctor(&reg, &mcus, fix, &mut io) {
@@ -301,10 +329,10 @@ mod tests {
             &mut Io {
                 probe: &mut |a| fake.probe(a),
                 install: &mut |a| fake.install(a, adds),
-                consent: &mut |q| {
+                consent: Some(&mut |q| {
                     asked.push(q.to_string());
                     agree
-                },
+                }),
                 out: &mut |l| lines.push(l.to_string()),
             },
         );
@@ -337,8 +365,32 @@ mod tests {
     }
 
     #[test]
-    fn every_builtin_mcu_is_checked_without_a_topology() {
-        assert_eq!(all_mcus(Registry::builtin()), FAMILIES.map(String::from));
+    fn with_nobody_to_ask_project_checks_point_to_the_terminal() {
+        let reg = project_registry("unattended");
+        let fake = Fake::new(&[RUST[0], RUST[1]]);
+        let probed = RefCell::new(Vec::new());
+        let mut lines = Vec::new();
+        let ok = doctor(
+            &reg,
+            &["rp2040b".to_string()],
+            true,
+            &mut Io {
+                probe: &mut |a| {
+                    probed.borrow_mut().push(a.join(" "));
+                    fake.probe(a)
+                },
+                install: &mut |a| fake.install(a, &[]),
+                consent: None,
+                out: &mut |l| lines.push(l.to_string()),
+            },
+        );
+        assert!(!ok);
+        assert_eq!(*probed.borrow(), ["rustup --version", "cargo --version"]);
+        assert!(fake.installed.borrow().is_empty());
+        assert_eq!(
+            lines[2],
+            "SKIP  target thumbv6m-none-eabi (rp2040b)  needs confirmation in the terminal (dagon doctor)"
+        );
     }
 
     #[test]

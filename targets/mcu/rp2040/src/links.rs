@@ -3,6 +3,9 @@
 //! state every 2 ms, read the response, every access bounded by the
 //! request's deadline. The UART link is [`crate::uart`].
 
+pub use crate::kinds::*;
+pub use dagon_mcu_common::link::{Link, LinkError};
+
 use crate::uart::{hello_answer, hello_request};
 use dagon_port::{BusError, I2cBus, StreamPort};
 use dagon_proto::mailbox::{self, STATE_LEN};

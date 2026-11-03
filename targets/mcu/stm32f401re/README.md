@@ -91,6 +91,55 @@ instead of splitting. Build with `DAGON_PUBKEY` set (below);
 (`../../../samples/f401-app`) uses the same pieces (`open_store`,
 `install_watchdog`, `exec`, `serve`) with its own display task.
 
+## Links
+
+Every hop carries whole DAGON frames through one interface,
+`dagon_mcu_common::link::Link` (`read_frame`, `write_frame`, `flush`,
+`max_payload`, `reconnect`); the serve loops are generic over it. The
+kinds this package offers (`links::LINK_KINDS`):
+
+| Kind | Up | Down |
+|---|---|---|
+| `usb-cdc` | NotYet | No |
+| `uart` | NotYet | No |
+| `i2c` | Yes | No |
+| `ble` | NotYet | No |
+| `wifi-tcp` | NotYet | No |
+| `ethernet` | NotYet | No |
+| `can` | NotYet | No |
+
+- Up `i2c`: the I2C target with the DAGON mailbox (`links::I2c`); the board
+  package names the peripheral, pins and address (`uplink_i2c()`).
+
+### Generator contract
+
+The kind names are exactly the 構成's: `usb-cdc`, `uart`, `i2c`, `ble`,
+`wifi-tcp`, `ethernet`, `can`. In a project template:
+
+- `{{uplink}}` renders to one Rust path naming the node's uplink kind:
+  `dagon_mcu_stm32f401re::links::Kind::<Variant>`;
+- `{{downlinks}}` renders to the downlink kinds, comma-separated (empty
+  for a 子機): `dagon_mcu_stm32f401re::links::Kind::<Variant>, ...`.
+
+Variants by name: `usb-cdc` `UsbCdc`, `uart` `Uart`, `i2c` `I2c`, `ble`
+`Ble`, `wifi-tcp` `WifiTcp`, `ethernet` `Ethernet`, `can` `Can`. The
+template checks them at compile time; a kind this package does not offer
+in that direction stops the build with a message naming the hop, e.g.
+`uplink ble: not available yet on stm32f401re`:
+
+```rust
+use dagon_mcu_stm32f401re::links::{self, Kind};
+
+const UPLINK: Kind = {{uplink}};
+const DOWNLINKS: &[Kind] = &[{{downlinks}}];
+const _: () = links::require_uplink(UPLINK);
+const _: () = links::require_downlinks(DOWNLINKS);
+```
+
+The board package's `start` takes `UPLINK` and `DOWNLINKS` and builds each
+link on the board's pins; link types are constructed as
+`dagon_mcu_stm32f401re::links::<Kind>::new(..)`.
+
 ## Features
 
 | Feature | Adds |

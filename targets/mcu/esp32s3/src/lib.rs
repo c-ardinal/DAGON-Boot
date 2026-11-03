@@ -24,6 +24,7 @@
 pub mod board;
 pub mod framer;
 pub mod layout;
+pub mod links;
 pub mod liveness;
 pub mod otadata;
 pub mod rom;

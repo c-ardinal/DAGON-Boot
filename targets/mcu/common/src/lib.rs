@@ -2,6 +2,7 @@
 //! - [`guard`]: the liveness-gated watchdog guard apps declare;
 //! - [`hooks`]: the app's CONFIRM self-check as agent hooks;
 //! - [`tag`]: the node's image target tag, checked;
+//! - [`link`]: the one frame-link interface of every hop, link kinds;
 //! - [`liveness`]: deadline bookkeeping that gates watchdog feeding, with
 //!   preemption accounting for two-level task layouts;
 //! - [`frames`]: DAGON frames cut out of a byte stream (USB CDC, UART);
@@ -12,6 +13,7 @@
 pub mod frames;
 pub mod guard;
 pub mod hooks;
+pub mod link;
 pub mod liveness;
 pub mod mapped;
 pub mod tag;

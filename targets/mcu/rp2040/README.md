@@ -102,6 +102,58 @@ DAGON's own hub firmware (`../../rp2040-hub`) is this with the demo's
 fallback node list and its tag `hub-rp2040-lcd`. Without the relay,
 `node::start` serves a plain USB node the same way.
 
+## Links
+
+Every hop carries whole DAGON frames through one interface,
+`dagon_mcu_common::link::Link` (`read_frame`, `write_frame`, `flush`,
+`max_payload`, `reconnect`); the serve loops are generic over it. The
+kinds this package offers (`links::LINK_KINDS`):
+
+| Kind | Up | Down |
+|---|---|---|
+| `usb-cdc` | Yes | NotYet |
+| `uart` | NotYet | Yes |
+| `i2c` | NotYet | Yes |
+| `ble` | NotYet | NotYet |
+| `wifi-tcp` | NotYet | NotYet |
+| `ethernet` | NotYet | NotYet |
+| `can` | NotYet | NotYet |
+
+- Up `usb-cdc`: the PC link of the 親機 (`links::UsbCdc`, the USB CDC
+  device; `Reconnect::Reenumerates`).
+- Down `i2c`: I2C0 controller with the DAGON mailbox (`links::I2c`), and
+  down `uart`: a PIO UART (`links::Uart`); the board package names the
+  pins (`downlink_i2c()`, `downlink_uart()`).
+
+### Generator contract
+
+The kind names are exactly the 構成's: `usb-cdc`, `uart`, `i2c`, `ble`,
+`wifi-tcp`, `ethernet`, `can`. In a project template:
+
+- `{{uplink}}` renders to one Rust path naming the node's uplink kind:
+  `dagon_mcu_rp2040::links::Kind::<Variant>`;
+- `{{downlinks}}` renders to the downlink kinds, comma-separated (empty
+  for a 子機): `dagon_mcu_rp2040::links::Kind::<Variant>, ...`.
+
+Variants by name: `usb-cdc` `UsbCdc`, `uart` `Uart`, `i2c` `I2c`, `ble`
+`Ble`, `wifi-tcp` `WifiTcp`, `ethernet` `Ethernet`, `can` `Can`. The
+template checks them at compile time; a kind this package does not offer
+in that direction stops the build with a message naming the hop, e.g.
+`uplink ble: not available yet on rp2040`:
+
+```rust
+use dagon_mcu_rp2040::links::{self, Kind};
+
+const UPLINK: Kind = {{uplink}};
+const DOWNLINKS: &[Kind] = &[{{downlinks}}];
+const _: () = links::require_uplink(UPLINK);
+const _: () = links::require_downlinks(DOWNLINKS);
+```
+
+The board package's `start` takes `UPLINK` and `DOWNLINKS` and builds each
+link on the board's pins; link types are constructed as
+`dagon_mcu_rp2040::links::<Kind>::new(..)`.
+
 ## Features
 
 | Feature | Adds |

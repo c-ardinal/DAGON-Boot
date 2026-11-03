@@ -118,49 +118,17 @@ pub(crate) fn has_slot_b_link(mcu: &str) -> bool {
     dagon_sign::image::slot(mcu, image_kind::APP, slot_binding::B).is_some()
 }
 
-/// MCUs whose builds deploy cannot turn into images yet: an ESP32-S3 app
-/// ELF needs the ESP image conversion first.
-const NOT_DEPLOYABLE: [&str; 1] = ["esp32s3"];
-
-/// The nodes a deploy takes, and a note per node it leaves out.
-#[derive(Debug, PartialEq, Eq)]
-pub(crate) struct Picked {
-    pub nodes: Vec<String>,
-    pub skipped: Vec<String>,
-}
-
 /// `pos`, else every `[build.<id>]` node, ordered as the topology updates
-/// them; each must be in the topology and build both slots. Without `pos`,
-/// nodes deploy cannot release yet are left out with a note; named, they
-/// stop the deploy.
-pub(crate) fn pick_nodes(cfg: &Config, t: &Topology, pos: &[&str]) -> Result<Picked, String> {
-    let mut wanted: Vec<String> = if pos.is_empty() {
+/// them; each must be in the topology and build both slots (one build for an
+/// MCU whose image runs from either slot).
+pub(crate) fn pick_nodes(cfg: &Config, t: &Topology, pos: &[&str]) -> Result<Vec<String>, String> {
+    let wanted: Vec<String> = if pos.is_empty() {
         cfg.build.keys().cloned().collect()
     } else {
         pos.iter().map(|s| s.to_string()).collect()
     };
     if wanted.is_empty() {
         return Err("no [build.<id>] tables in dagon.toml".into());
-    }
-    let mut skipped = Vec::new();
-    let mcu_of = |id: &str| t.node(id).map(|n| n.mcu.clone());
-    let unsupported = |mcu: &str| NOT_DEPLOYABLE.contains(&mcu);
-    for id in &wanted {
-        let Some(mcu) = mcu_of(id).filter(|m| unsupported(m)) else {
-            continue;
-        };
-        let note = format!(
-            "{id} ({mcu}): deploy cannot turn its build into an image yet; update it with \
-             the ESP tools"
-        );
-        if !pos.is_empty() {
-            return Err(note);
-        }
-        skipped.push(note);
-    }
-    wanted.retain(|id| !mcu_of(id).is_some_and(|m| unsupported(&m)));
-    if wanted.is_empty() {
-        return Err(format!("nothing to deploy: {}", skipped.join("; ")));
     }
     for id in &wanted {
         let n = t
@@ -188,7 +156,34 @@ pub(crate) fn pick_nodes(cfg: &Config, t: &Topology, pos: &[&str]) -> Result<Pic
     let mut nodes = wanted;
     nodes.sort_by_key(|id| rank(id));
     nodes.dedup();
-    Ok(Picked { nodes, skipped })
+    Ok(nodes)
+}
+
+/// What each node's build turns into before signing: an ESP32-S3 app ELF
+/// becomes the ESP image its OTA partitions hold (espflash save-image, kept
+/// as `out/deploy/<version>/<node>.bin`); other builds are signed as built.
+pub(crate) fn release_inputs(
+    cfg: &Config,
+    t: &Topology,
+    version: Version,
+    built: Vec<(String, SlotElfs)>,
+) -> Result<Vec<(String, SlotElfs)>, String> {
+    built
+        .into_iter()
+        .map(|(node, slots)| {
+            let esp = t.node(&node).is_some_and(|n| n.mcu == crate::esp::CHIP);
+            if !esp {
+                return Ok((node, slots));
+            }
+            let out = cfg
+                .base
+                .join(DEPLOY_DIR)
+                .join(version.to_string())
+                .join(format!("{node}.bin"));
+            let image = crate::esp::save_image(&nodebuild::elf_path(cfg, &node, 'a'), &out)?;
+            Ok((node, vec![('a', image)]))
+        })
+        .collect()
 }
 
 /// Signs every built slot of `elfs` as `version` and writes the release.
@@ -275,10 +270,7 @@ pub fn command(args: &[&str]) -> Result<(), String> {
     let o = Opts::parse(&args, &["version", "port", "topology", "key", "config"])?;
     let cfg = Config::load(o.get("config"))?;
     let t = read_topology(&cfg.topology_path(o.get("topology"))?)?;
-    let Picked { nodes, skipped } = pick_nodes(&cfg, &t, &o.pos)?;
-    for note in &skipped {
-        eprintln!("note: skipped {note}");
-    }
+    let nodes = pick_nodes(&cfg, &t, &o.pos)?;
     let key = load_key(o.get("key"))?;
     let latest = release_path(&cfg);
     let previous = release_versions(&t, &latest, &key.pk).unwrap_or_else(|e| {
@@ -310,6 +302,7 @@ pub fn command(args: &[&str]) -> Result<(), String> {
         .iter()
         .map(|n| nodebuild::last_build(&cfg, n).map(|(_, e)| (n.clone(), e)))
         .collect::<Result<Vec<_>, _>>()?;
+    let elfs = release_inputs(&cfg, &t, version, elfs)?;
     let p = prepare(&cfg, &t, &key, version, &previous, &elfs)?;
 
     if yes {

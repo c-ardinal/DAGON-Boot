@@ -41,6 +41,15 @@ Use these words with the developer, and count in ノード ("3 ノード").
   `out/build/<id>/`)
 - `dagon serve`: DAGON Console, the browser page for the 構成, builds and
   updates
+- `dagon flash <id> [--dry-run]`: the first write of one node over its own
+  cable (RP2040: UF2 to the RPI-RP2 drive; STM32F401RE: probe-rs through
+  the ST-LINK; ESP32-S3: espflash over USB-C, the bundled ESP-IDF 2nd
+  stage at 0x0, the partition table, the factory agent, slot A and
+  otadata, with exactly one ESP32-S3 connected). `--dry-run` makes the
+  files and prints the commands only.
+- `dagon deploy [<id>...]`: build, sign, release and apply in one go, every
+  family included (an ESP32-S3 build becomes one ESP image via
+  `espflash save-image`).
 - `dagon status`, `dagon apply <dgb>`, `dagon rollback --node <id>`,
   `dagon recover <node>`
 - `dagon --help` lists every command and option.

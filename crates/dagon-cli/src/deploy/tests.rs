@@ -89,7 +89,7 @@ fn desk(t: &Topology, key: &KeyPair) -> Sim {
 fn deploys_every_built_node_one_patch_up_through_the_simulated_hub() {
     let (cfg, t) = work_area("sim");
     let key = key();
-    let nodes = pick_nodes(&cfg, &t, &[]).unwrap().nodes;
+    let nodes = pick_nodes(&cfg, &t, &[]).unwrap();
     assert_eq!(nodes, ["seg", "hub"], "the topology's update order");
 
     let previous = release_versions(&t, &release_path(&cfg), &key.pk).unwrap();
@@ -140,7 +140,7 @@ fn deploys_every_built_node_one_patch_up_through_the_simulated_hub() {
 fn a_release_signed_with_another_key_is_not_applied() {
     let (cfg, t) = work_area("key");
     let key = key();
-    let nodes = pick_nodes(&cfg, &t, &["seg"]).unwrap().nodes;
+    let nodes = pick_nodes(&cfg, &t, &["seg"]).unwrap();
     let p = prepare(
         &cfg,
         &t,
@@ -160,7 +160,7 @@ fn a_release_signed_with_another_key_is_not_applied() {
 #[test]
 fn picks_only_nodes_that_build_both_slots() {
     let (mut cfg, t) = work_area("pick");
-    assert_eq!(pick_nodes(&cfg, &t, &["hub"]).unwrap().nodes, ["hub"]);
+    assert_eq!(pick_nodes(&cfg, &t, &["hub"]).unwrap(), ["hub"]);
     assert!(pick_nodes(&cfg, &t, &["nope"]).is_err());
     cfg.build.get_mut("seg").unwrap().slot_b_feature = None;
     assert!(pick_nodes(&cfg, &t, &[])
@@ -186,7 +186,7 @@ fn firmware_embeds_the_signing_key_and_refuses_another_build_key() {
 }
 
 #[test]
-fn a_generated_desk_project_deploys_and_leaves_the_esp32s3_out_with_a_note() {
+fn a_generated_desk_project_deploys_every_node_including_the_esp32s3() {
     let (mut cfg, _) = work_area("desk");
     cfg.build.clear();
     let desk = include_str!("../../../../topology/desk-demo.yaml");
@@ -198,22 +198,11 @@ fn a_generated_desk_project_deploys_and_leaves_the_esp32s3_out_with_a_note() {
     assert!(gen.build["watch"].slot_b_feature.is_none(), "one ESP build");
     assert!(gen.build["seg"].slot_b_feature.is_some());
 
-    let picked = pick_nodes(&gen, &t, &[]).unwrap();
-    assert_eq!(picked.nodes, ["seg", "hub"]);
-    assert_eq!(picked.skipped.len(), 1);
-    assert!(
-        picked.skipped[0].starts_with("watch (esp32s3)"),
-        "{:?}",
-        picked.skipped
-    );
-    let named = pick_nodes(&gen, &t, &["watch"]).unwrap_err();
-    assert!(
-        named.contains("cannot turn its build into an image"),
-        "{named}"
-    );
+    assert_eq!(pick_nodes(&gen, &t, &[]).unwrap(), ["seg", "watch", "hub"]);
+    assert_eq!(pick_nodes(&gen, &t, &["watch"]).unwrap(), ["watch"]);
 
-    // The release format already takes the one ESP32-S3 image (either
-    // slot) once a build can be turned into one.
+    // The ESP32-S3 node's one image (either slot) goes into the release
+    // next to the others' A and B images.
     let mut elfs = built(&["seg".into(), "hub".into()]);
     elfs.insert(1, ("watch".into(), vec![('a', vec![0x5a; 5000])]));
     let p = prepare(

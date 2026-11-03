@@ -53,7 +53,7 @@ pub fn job_flash(job: &mut Job, cfg: Config, v: Value) -> Result<Value, String> 
                 // The hub itself restarts into its boot ROM: the page lets
                 // go of its port first.
                 FirstWrite::Uf2 { .. } => job.with_device(write),
-                FirstWrite::ProbeRs { .. } => write(job),
+                FirstWrite::ProbeRs { .. } | FirstWrite::Espflash { .. } => write(job),
             }
         },
     )

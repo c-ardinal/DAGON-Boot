@@ -15,6 +15,9 @@ use dagon_topology::defs::{McuDef, UsbHint, Writer};
 /// How long a UF2 drive is waited for (the user holds BOOT and plugs in).
 pub(crate) const DRIVE_WAIT: Duration = Duration::from_secs(60);
 const DRIVE_POLL: Duration = Duration::from_millis(500);
+/// How long one volume may take to show its UF2 info file (network
+/// drives, empty card readers).
+const VOLUME_WAIT: Duration = Duration::from_secs(2);
 
 /// A device the writer can write to: `id` is what the writer command and
 /// the selector take, `label` what the user reads.
@@ -249,11 +252,26 @@ fn wait_drives(
         DRIVE_WAIT.as_secs()
     ));
     let until = Instant::now() + DRIVE_WAIT;
+    // Volumes that did not answer in time are not asked again (a hung
+    // network drive would hold one more thread on every poll).
+    let mut slow: Vec<PathBuf> = Vec::new();
     loop {
         if cancel.load(Ordering::Relaxed) {
             return Err("cancelled; nothing was copied".into());
         }
-        let found = uf2_drives(&drive_roots(), want);
+        let roots: Vec<PathBuf> = mounted_volumes()
+            .into_iter()
+            .filter(|r| !slow.contains(r))
+            .collect();
+        let (found, late) = uf2_drives(&roots, want, VOLUME_WAIT, read_info);
+        for r in late {
+            log(&format!(
+                "skipped {}: no answer within {} s",
+                r.display(),
+                VOLUME_WAIT.as_secs()
+            ));
+            slow.push(r);
+        }
         if !found.is_empty() || Instant::now() >= until {
             return Ok(found);
         }
@@ -261,63 +279,125 @@ fn wait_drives(
     }
 }
 
+/// `file` on a volume.
+fn read_info(file: &Path) -> Option<String> {
+    std::fs::read_to_string(file).ok()
+}
+
+type Reader = fn(&Path) -> Option<String>;
+
 /// The UF2 boot drives among `roots`: `info_file` there starts with the
 /// `info_header` line. A `Board-ID: <board_id>` line (exactly) labels the
-/// drive as the definition's MCU.
-pub(crate) fn uf2_drives(roots: &[PathBuf], want: &Uf2Want<'_>) -> Vec<Candidate> {
-    roots
-        .iter()
-        .filter_map(|r| {
-            let info = std::fs::read_to_string(r.join(want.info_file)).ok()?;
-            let mut lines = info.lines();
-            if !lines.next()?.starts_with(want.info_header) {
-                return None;
-            }
-            let board = lines.find_map(|l| l.strip_prefix("Board-ID: "));
-            let label = match board {
-                Some(b) if b == want.board_id => format!("UF2 drive, Board-ID {b} ({})", want.mcu),
-                Some(b) => format!("UF2 drive, Board-ID {b}"),
-                None => "UF2 drive".into(),
-            };
-            Some(Candidate {
-                id: r.display().to_string(),
-                label,
-            })
-        })
-        .collect()
-}
-
-/// Where a removable drive shows up on this system.
-fn drive_roots() -> Vec<PathBuf> {
-    if cfg!(windows) {
-        return (b'D'..=b'Z')
-            .map(|c| PathBuf::from(format!("{}:\\", c as char)))
-            .collect();
+/// drive as the definition's MCU. Each volume is read on its own thread;
+/// those that have not answered within `wait` are returned second.
+pub(crate) fn uf2_drives(
+    roots: &[PathBuf],
+    want: &Uf2Want<'_>,
+    wait: Duration,
+    read: Reader,
+) -> (Vec<Candidate>, Vec<PathBuf>) {
+    let (tx, rx) = std::sync::mpsc::channel();
+    for (i, r) in roots.iter().enumerate() {
+        let (tx, file) = (tx.clone(), r.join(want.info_file));
+        std::thread::spawn(move || {
+            let _ = tx.send((i, read(&file)));
+        });
     }
-    let user = std::env::var("USER").unwrap_or_default();
-    let parents = [
-        PathBuf::from("/Volumes"),
-        Path::new("/media").join(&user),
-        Path::new("/run/media").join(&user),
-        PathBuf::from("/media"),
-        PathBuf::from("/mnt"),
-    ];
-    mounts_under(&parents)
+    drop(tx);
+    let mut infos: Vec<Option<Option<String>>> = vec![None; roots.len()];
+    let until = Instant::now() + wait;
+    while let Ok((i, info)) = rx.recv_timeout(until.saturating_duration_since(Instant::now())) {
+        infos[i] = Some(info);
+    }
+    let late = roots
+        .iter()
+        .zip(&infos)
+        .filter(|(_, i)| i.is_none())
+        .map(|(r, _)| r.clone())
+        .collect();
+    let found = roots
+        .iter()
+        .zip(infos)
+        .filter_map(|(r, info)| uf2_candidate(r, info.flatten()?.as_str(), want))
+        .collect();
+    (found, late)
 }
 
-/// Every directory directly under `parents`: a second board mounts under
-/// another name ("RPI-RP2 1"), so names are not guessed.
-pub(crate) fn mounts_under(parents: &[PathBuf]) -> Vec<PathBuf> {
-    let mut out: Vec<PathBuf> = parents
-        .iter()
-        .filter_map(|p| std::fs::read_dir(p).ok())
-        .flatten()
-        .filter_map(|e| e.ok().map(|e| e.path()))
-        .filter(|p| p.is_dir())
-        .collect();
+fn uf2_candidate(root: &Path, info: &str, want: &Uf2Want<'_>) -> Option<Candidate> {
+    let mut lines = info.lines();
+    if !lines.next()?.starts_with(want.info_header) {
+        return None;
+    }
+    let board = lines.find_map(|l| l.strip_prefix("Board-ID: "));
+    let label = match board {
+        Some(b) if b == want.board_id => format!("UF2 drive, Board-ID {b} ({})", want.mcu),
+        Some(b) => format!("UF2 drive, Board-ID {b}"),
+        None => "UF2 drive".into(),
+    };
+    Some(Candidate {
+        id: root.display().to_string(),
+        label,
+    })
+}
+
+/// Every mounted volume: on Windows every drive letter A: to Z: (a letter
+/// with nothing mounted fails its read at once; reads are time-limited),
+/// elsewhere every mount point in /proc/self/mountinfo and every folder in
+/// /Volumes (macOS).
+// ponytail: all 26 letters rather than GetLogicalDrives, which needs an
+// unsafe FFI call the crate forbids (`#![forbid(unsafe_code)]`).
+fn mounted_volumes() -> Vec<PathBuf> {
+    if cfg!(windows) {
+        return drive_letters();
+    }
+    let mut out = std::fs::read_to_string("/proc/self/mountinfo")
+        .map(|t| mount_points(&t))
+        .unwrap_or_default();
+    if let Ok(dir) = std::fs::read_dir("/Volumes") {
+        out.extend(dir.filter_map(|e| e.ok().map(|e| e.path())));
+    }
     out.sort();
     out.dedup();
     out
+}
+
+/// `A:\` .. `Z:\`.
+pub(crate) fn drive_letters() -> Vec<PathBuf> {
+    (b'A'..=b'Z')
+        .map(|c| PathBuf::from(format!("{}:\\", c as char)))
+        .collect()
+}
+
+/// The mount points (field 5) of /proc/self/mountinfo, with its octal
+/// escapes (`\040` for a space) decoded.
+pub(crate) fn mount_points(mountinfo: &str) -> Vec<PathBuf> {
+    mountinfo
+        .lines()
+        .filter_map(|l| l.split(' ').nth(4))
+        .map(|p| PathBuf::from(unescape(p)))
+        .collect()
+}
+
+fn unescape(s: &str) -> String {
+    let b = s.as_bytes();
+    let mut out = Vec::with_capacity(b.len());
+    let mut i = 0;
+    while i < b.len() {
+        let oct = b
+            .get(i + 1..i + 4)
+            .filter(|d| d.iter().all(|c| (b'0'..=b'7').contains(c)));
+        match (b[i], oct) {
+            (b'\\', Some(d)) => {
+                out.push(d.iter().fold(0u8, |v, c| v.wrapping_mul(8) + (c - b'0')));
+                i += 4;
+            }
+            (c, _) => {
+                out.push(c);
+                i += 1;
+            }
+        }
+    }
+    String::from_utf8_lossy(&out).into_owned()
 }
 
 #[cfg(test)]
@@ -428,6 +508,12 @@ mod tests {
         assert_eq!(other.label, "USB c0de:cafe X");
     }
 
+    fn drives(roots: &[PathBuf]) -> Vec<Candidate> {
+        let (found, late) = uf2_drives(roots, &RP, Duration::from_secs(5), read_info);
+        assert!(late.is_empty());
+        found
+    }
+
     const RP: Uf2Want<'static> = Uf2Want {
         info_file: "INFO_UF2.TXT",
         info_header: "UF2 Bootloader",
@@ -454,7 +540,7 @@ mod tests {
             "UF2 Bootloader v1.0\nBoard-ID: RP2350\n",
         )
         .unwrap();
-        let found = uf2_drives(&dirs, &RP);
+        let found = drives(&dirs);
         let labels: Vec<&str> = found.iter().map(|c| c.label.as_str()).collect();
         assert_eq!(
             labels,
@@ -479,31 +565,58 @@ mod tests {
             "UF2 Bootloader v3.0\nModel: RPI-RP2\n",
         ] {
             std::fs::write(base.join("INFO_UF2.TXT"), not).unwrap();
-            let f = uf2_drives(std::slice::from_ref(&base), &RP);
+            let f = drives(std::slice::from_ref(&base));
             assert!(!f[0].label.contains("RP2040"), "{not:?}: {f:?}");
         }
         for not_uf2 in ["My stick\nUF2 Bootloader v3.0\n", "\nUF2 Bootloader\n", ""] {
             std::fs::write(base.join("INFO_UF2.TXT"), not_uf2).unwrap();
-            assert!(uf2_drives(std::slice::from_ref(&base), &RP).is_empty());
+            assert!(drives(std::slice::from_ref(&base)).is_empty());
         }
         let _ = std::fs::remove_dir_all(&base);
     }
 
     #[test]
-    fn a_second_board_under_another_mount_name_is_seen() {
-        let base = std::env::temp_dir().join(format!("dagon-mnt-{}", std::process::id()));
-        let (volumes, media) = (base.join("Volumes"), base.join("media/user"));
-        let info = "UF2 Bootloader v3.0\nModel: Raspberry Pi RP2\nBoard-ID: RPI-RP2\n";
-        for d in [volumes.join("RPI-RP2"), volumes.join("RPI-RP2 1")] {
-            std::fs::create_dir_all(&d).unwrap();
-            std::fs::write(d.join("INFO_UF2.TXT"), info).unwrap();
+    fn every_drive_letter_and_mount_point_is_a_volume() {
+        let letters = drive_letters();
+        assert_eq!(letters.len(), 26);
+        assert_eq!(
+            (letters[0].clone(), letters[25].clone()),
+            ("A:\\".into(), "Z:\\".into())
+        );
+        let info = [
+            r"22 1 0:21 / /proc rw - proc proc rw",
+            r"36 25 8:17 / /mnt rw,nosuid - vfat /dev/sdb1 rw",
+            r"37 25 8:33 / /media/u/RPI-RP2\0401 rw - vfat /dev/sdc1 rw",
+            r"38 25 8:49 / /run/media/u/back\134slash rw - vfat /dev/sdd1 rw",
+        ]
+        .join("\n");
+        let info = info.as_str();
+        assert_eq!(
+            mount_points(info),
+            [
+                "/proc",
+                "/mnt",
+                "/media/u/RPI-RP2 1",
+                "/run/media/u/back\\slash"
+            ]
+            .map(PathBuf::from)
+        );
+    }
+
+    #[test]
+    fn a_volume_that_does_not_answer_is_skipped_not_waited_for() {
+        fn read(file: &Path) -> Option<String> {
+            if file.starts_with("/hung") {
+                std::thread::sleep(Duration::from_secs(5));
+            }
+            Some("UF2 Bootloader v3.0\nBoard-ID: RPI-RP2\n".into())
         }
-        std::fs::create_dir_all(media.join("USB STICK")).unwrap();
-        std::fs::write(volumes.join("not-a-dir"), "x").unwrap();
-        let parents = [volumes.clone(), media.clone(), base.join("missing")];
-        let roots = mounts_under(&parents);
-        assert_eq!(roots.len(), 3, "{roots:?}");
-        assert_eq!(uf2_drives(&roots, &RP).len(), 2);
-        let _ = std::fs::remove_dir_all(&base);
+        let roots = ["/hung", "/rp"].map(PathBuf::from);
+        let t = Instant::now();
+        let (found, late) = uf2_drives(&roots, &RP, Duration::from_millis(300), read);
+        assert!(t.elapsed() < Duration::from_secs(2), "{:?}", t.elapsed());
+        assert_eq!(late, [PathBuf::from("/hung")]);
+        assert_eq!(found.len(), 1);
+        assert_eq!(found[0].id, PathBuf::from("/rp").display().to_string());
     }
 }

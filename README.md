@@ -190,7 +190,8 @@ dagon flash watch      # ESP32-S3: over USB-C with espflash
 every probe-rs probe, every serial port, every UF2 drive (USB IDs and
 the UF2 Board-ID only label them). One device is taken and shown before
 the question; with several it asks which, or takes `--probe
-<vid:pid[:serial]>`, `--port <port>` or `--drive <path>`; with several
+<vid:pid[:serial]>`, `--port <port>` or `--drive <path>` (on Windows
+compared without regard to case, so `--drive e:` names `E:\`); with several
 and no terminal (or `--yes`) and no option, or with none, it stops
 before writing. `--dry-run` still does everything up to
 the write: it builds the parts and the app and makes the first-install

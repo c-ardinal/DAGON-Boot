@@ -264,11 +264,12 @@ impl<'a> Opts<'a> {
     }
 }
 
-pub fn read_topology(path: &Path) -> Result<dagon_topology::Topology, String> {
+/// The topology at `path`, checked against `cfg`'s project definitions.
+pub fn read_topology(cfg: &Config, path: &Path) -> Result<dagon_topology::Topology, String> {
     let yaml = std::fs::read_to_string(path)
         .map_err(|e| format!("cannot read {}: {e}", path.display()))?;
     let t = dagon_topology::parse_str(&yaml).map_err(|e| format!("{}: {e}", path.display()))?;
-    if !dagon_topology::check(&t).is_pushable() {
+    if !dagon_topology::check_with(&crate::defs::registry(cfg)?, &t).is_pushable() {
         return Err(format!(
             "{}: topology has errors; run `dagon topo check`",
             path.display()

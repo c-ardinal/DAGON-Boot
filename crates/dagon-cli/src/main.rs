@@ -220,7 +220,15 @@ fn topo_check(args: &[&str]) -> ExitCode {
             return ExitCode::FAILURE;
         }
     };
-    let report = dagon_topology::check_str(&yaml);
+    // The definitions of the dagon.toml here, if any, else the builtin set.
+    let reg = match crate::config::Config::load(None).and_then(|c| crate::defs::registry(&c)) {
+        Ok(r) => r,
+        Err(e) => {
+            eprintln!("error: {e}");
+            return ExitCode::FAILURE;
+        }
+    };
+    let report = dagon_topology::check_str_with(&reg, &yaml);
     if json {
         println!("{}", report.to_json());
     } else {

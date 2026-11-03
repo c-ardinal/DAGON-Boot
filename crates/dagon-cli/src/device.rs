@@ -8,6 +8,7 @@ use dagon_host::{Clock, Event, Host, NodeState, Outcome, Target, Transport};
 use dagon_proto::payload::phase;
 use dagon_sign::to_hex;
 use dagon_sim::block_on;
+use dagon_topology::defs::Registry;
 use dagon_topology::Topology;
 
 use crate::config::{load_key, read_file, read_topology, Config, Opts};
@@ -15,8 +16,8 @@ use crate::serial;
 
 type Res = Result<(), String>;
 
-fn topology_bin(t: &Topology) -> Result<Vec<u8>, String> {
-    dagon_topology::compile(t).map_err(|e| e.to_string())
+fn topology_bin(reg: &Registry, t: &Topology) -> Result<Vec<u8>, String> {
+    dagon_topology::compile_with(reg, t).map_err(|e| e.to_string())
 }
 
 fn show_state(name: &str, s: &NodeState) {
@@ -47,7 +48,7 @@ fn optional_topology(o: &Opts<'_>, cfg: &Config) -> Result<Option<Topology>, Str
         .map(PathBuf::from)
         .or(cfg.topology.clone())
     {
-        Some(p) => read_topology(&p).map(Some),
+        Some(p) => read_topology(cfg, &p).map(Some),
         None => Ok(None),
     }
 }
@@ -62,7 +63,7 @@ pub fn status(args: &[&str]) -> Res {
     let Some(t) = t else {
         return Ok(());
     };
-    let bin = topology_bin(&t)?;
+    let bin = topology_bin(&crate::defs::registry(&cfg)?, &t)?;
     let view = dagon_format::TopologyView::parse(&bin).map_err(|e| format!("{e:?}"))?;
     for (i, n) in t.nodes.iter().enumerate() {
         match Target::of_node(&view, i as u8) {
@@ -81,6 +82,7 @@ pub fn status(args: &[&str]) -> Res {
 /// confirms it there; returns that version.
 pub fn rollback_node<T: Transport, C: Clock>(
     host: &mut Host<T, C>,
+    reg: &Registry,
     t: &Topology,
     node: &str,
     on_event: &mut dyn FnMut(Event),
@@ -90,7 +92,7 @@ pub fn rollback_node<T: Transport, C: Clock>(
         .iter()
         .position(|n| n.id == node)
         .ok_or_else(|| format!("no node '{node}' in the topology"))?;
-    let bin = topology_bin(t)?;
+    let bin = topology_bin(reg, t)?;
     let view = dagon_format::TopologyView::parse(&bin).map_err(|e| format!("{e:?}"))?;
     let to = Target::of_node(&view, i as u8)
         .ok_or_else(|| format!("'{node}' is not reachable through the hub"))?;
@@ -109,10 +111,16 @@ pub fn rollback(args: &[&str]) -> Res {
     }
     let node = o.need("node")?;
     let cfg = Config::load(o.get("config"))?;
-    let t = read_topology(&cfg.topology_path(o.get("topology"))?)?;
+    let t = read_topology(&cfg, &cfg.topology_path(o.get("topology"))?)?;
     let mut host = serial::host(o.get("port"))?;
     let mut print = |e: Event| println!("{node}: {} ({})", phase_name(e.phase), e.version);
-    let v = rollback_node(&mut host, &t, node, &mut print)?;
+    let v = rollback_node(
+        &mut host,
+        &crate::defs::registry(&cfg)?,
+        &t,
+        node,
+        &mut print,
+    )?;
     println!("{node}: back on {v}, confirmed");
     Ok(())
 }
@@ -125,7 +133,7 @@ pub fn topo_push(args: &[&str]) -> Res {
         [] => cfg.topology_path(None)?,
         _ => return Err("topo push takes at most one <yaml>".into()),
     };
-    let bin = topology_bin(&read_topology(&path)?)?;
+    let bin = topology_bin(&crate::defs::registry(&cfg)?, &read_topology(&cfg, &path)?)?;
     let mut host = serial::host(o.get("port"))?;
     block_on(host.push_topology(&bin)).map_err(|e| format!("topo push: {e:?}"))?;
     println!(
@@ -174,8 +182,8 @@ pub fn recover(args: &[&str]) -> Res {
         return Err("recover needs <node>".into());
     };
     let cfg = Config::load(o.get("config"))?;
-    let t = read_topology(&cfg.topology_path(o.get("topology"))?)?;
-    let bin = topology_bin(&t)?;
+    let t = read_topology(&cfg, &cfg.topology_path(o.get("topology"))?)?;
+    let bin = topology_bin(&crate::defs::registry(&cfg)?, &t)?;
     let index = t
         .nodes
         .iter()
@@ -260,7 +268,7 @@ pub fn apply(args: &[&str]) -> Res {
             .ok_or("no release: pass <dgb> or set release in dagon.toml")?,
         _ => return Err("apply takes at most one <dgb>".into()),
     };
-    let t = read_topology(&cfg.topology_path(o.get("topology"))?)?;
+    let t = read_topology(&cfg, &cfg.topology_path(o.get("topology"))?)?;
     let ids: Vec<String> = t.nodes.iter().map(|n| n.id.clone()).collect();
     let picked = o
         .all("node")
@@ -284,7 +292,8 @@ pub fn apply(args: &[&str]) -> Res {
     let bundle = read_file(Path::new(&dgb))?;
 
     let mut host = serial::host(o.get("port"))?;
-    apply_bundle(&mut host, &bundle, &t, key.as_ref(), only)
+    let reg = crate::defs::registry(&cfg)?;
+    apply_bundle(&mut host, &reg, &bundle, &t, key.as_ref(), only)
 }
 
 /// Applies `bundle` (verified under `key`, or unverified when `None`) to
@@ -292,6 +301,7 @@ pub fn apply(args: &[&str]) -> Res {
 /// per node.
 pub fn apply_bundle<T: Transport, C: Clock>(
     host: &mut Host<T, C>,
+    reg: &Registry,
     bundle: &[u8],
     t: &Topology,
     key: Option<&[u8; 32]>,
@@ -300,7 +310,7 @@ pub fn apply_bundle<T: Transport, C: Clock>(
 where
     T::Error: std::fmt::Debug,
 {
-    let bin = topology_bin(t)?;
+    let bin = topology_bin(reg, t)?;
     let ids: Vec<String> = t.nodes.iter().map(|n| n.id.clone()).collect();
     let name = |n: u8| ids.get(n as usize).map_or("?", String::as_str);
     let mut print = |e: Event| {

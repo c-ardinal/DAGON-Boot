@@ -116,7 +116,15 @@ fn deploys_every_built_node_one_patch_up_through_the_simulated_hub() {
 
     let sim = desk(&t, &key);
     let mut host = Host::new(sim.clone(), sim.clone());
-    crate::device::apply_bundle(&mut host, &p.bundle, &t, Some(&key.pk), None).unwrap();
+    crate::device::apply_bundle(
+        &mut host,
+        dagon_topology::defs::Registry::builtin(),
+        &p.bundle,
+        &t,
+        Some(&key.pk),
+        None,
+    )
+    .unwrap();
     for to in [Target::Hub, Target::I2c(NODE_I2C_ADDR)] {
         let h = block_on(host.hello(to)).unwrap();
         assert_eq!((h.active_version, h.trial), (v, false), "{to:?}");
@@ -154,7 +162,15 @@ fn a_release_signed_with_another_key_is_not_applied() {
     let other = KeyPair::from_seed(Seed::new([8; 32]));
     let sim = desk(&t, &other);
     let mut host = Host::new(sim.clone(), sim);
-    assert!(crate::device::apply_bundle(&mut host, &p.bundle, &t, Some(&other.pk), None).is_err());
+    assert!(crate::device::apply_bundle(
+        &mut host,
+        dagon_topology::defs::Registry::builtin(),
+        &p.bundle,
+        &t,
+        Some(&other.pk),
+        None
+    )
+    .is_err());
     let _ = std::fs::remove_dir_all(&cfg.base);
 }
 
@@ -194,7 +210,8 @@ fn a_generated_desk_project_deploys_every_node_including_the_esp32s3() {
     let t = dagon_topology::parse_str(desk).unwrap();
     let toml = cfg.base.join("dagon.toml");
     std::fs::write(&toml, "").unwrap();
-    crate::scaffold::add_build_tables(&toml, &t).unwrap();
+    crate::scaffold::add_build_tables(dagon_topology::defs::Registry::builtin(), &toml, &t)
+        .unwrap();
     let gen = Config::load(Some(&toml.to_string_lossy())).unwrap();
     assert!(gen.build["watch"].slot_b_feature.is_none(), "one ESP build");
     assert!(gen.build["seg"].slot_b_feature.is_some());

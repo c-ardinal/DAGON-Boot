@@ -131,7 +131,7 @@ pub fn image_sign(args: &[&str]) -> Res {
         return Err("image sign needs exactly one input file".into());
     };
     let cfg = Config::load(o.get("config"))?;
-    let t = read_topology(&cfg.topology_path(o.get("topology"))?)?;
+    let t = read_topology(&cfg, &cfg.topology_path(o.get("topology"))?)?;
     let kind_name = o.get("kind").unwrap_or("app");
     let kind = image::image_kind_of(kind_name).ok_or("--kind must be app, bootcore or agent")?;
     let slot = slot_arg(o.get("slot").unwrap_or("a"))?;
@@ -201,10 +201,11 @@ pub fn release_build(args: &[&str]) -> Res {
         return Err("release build needs image files or directories".into());
     }
     let cfg = Config::load(o.get("config"))?;
-    let t = read_topology(&cfg.topology_path(o.get("topology"))?)?;
+    let t = read_topology(&cfg, &cfg.topology_path(o.get("topology"))?)?;
+    let reg = crate::defs::registry(&cfg)?;
     let topo_bin = match o.get("topology-bin") {
         Some(p) => read_file(Path::new(p))?,
-        None => dagon_topology::compile(&t).map_err(|e| e.to_string())?,
+        None => dagon_topology::compile_with(&reg, &t).map_err(|e| e.to_string())?,
     };
     let out = o
         .get("out")
@@ -217,7 +218,7 @@ pub fn release_build(args: &[&str]) -> Res {
         .map(|p| read_file(p))
         .collect::<Result<Vec<_>, _>>()?;
     let key = load_key(o.get("key"))?;
-    let r = release::build(&t, &topo_bin, &images, name, &key).map_err(|e| e.to_string())?;
+    let r = release::build(&reg, &t, &topo_bin, &images, name, &key).map_err(|e| e.to_string())?;
     write_file(&out, &r.bundle)?;
     println!(
         "{}: {} images, {} bytes, topology sha256 {}",
@@ -234,8 +235,11 @@ pub fn topo_compile(args: &[&str]) -> Res {
     let [path] = o.pos[..] else {
         return Err("topo compile needs <yaml>".into());
     };
-    let t = read_topology(Path::new(path))?;
-    let bin = dagon_topology::compile(&t).map_err(|e| e.to_string())?;
+    // Without --config: the dagon.toml here, if any, else the builtin set.
+    let cfg = Config::load(o.get("config"))?;
+    let t = read_topology(&cfg, Path::new(path))?;
+    let bin = dagon_topology::compile_with(&crate::defs::registry(&cfg)?, &t)
+        .map_err(|e| e.to_string())?;
     let out = o
         .get("out")
         .map_or_else(|| Path::new(path).with_extension("bin"), PathBuf::from);
@@ -263,7 +267,7 @@ pub fn rescue(args: &[&str]) -> Res {
         return Err("usage: rescue hub".into());
     }
     let cfg = Config::load(o.get("config"))?;
-    let t = read_topology(&cfg.topology_path(o.get("topology"))?)?;
+    let t = read_topology(&cfg, &cfg.topology_path(o.get("topology"))?)?;
     let hub = t
         .nodes
         .iter()
@@ -275,7 +279,7 @@ pub fn rescue(args: &[&str]) -> Res {
 
 fn provision_node(o: &Opts<'_>, node: &str) -> Res {
     let cfg = Config::load(o.get("config"))?;
-    let t = read_topology(&cfg.topology_path(o.get("topology"))?)?;
+    let t = read_topology(&cfg, &cfg.topology_path(o.get("topology"))?)?;
     if t.node(node).is_none() {
         return Err(format!("no node '{node}' in the topology"));
     }

@@ -80,9 +80,16 @@ fn release() -> Vec<u8> {
     let t = dagon_topology::parse_str(&yaml()).unwrap();
     let v = Version::new(1, 1, 0);
     let images = [seg_img(0, v), seg_img(1, v), hub_img(0, v), hub_img(1, v)];
-    dagon_sign::release::build(&t, &topology(&yaml()), &images, "r1.1", &key())
-        .unwrap()
-        .bundle
+    dagon_sign::release::build(
+        dagon_topology::defs::Registry::builtin(),
+        &t,
+        &topology(&yaml()),
+        &images,
+        "r1.1",
+        &key(),
+    )
+    .unwrap()
+    .bundle
 }
 
 /// Hub and seg both running 1.0.0 from slot A, confirmed.

@@ -33,7 +33,8 @@ pub struct Slot {
 }
 
 /// Slot for an image of `kind` in slot `slot` (`slot_binding::A` / `B`) on
-/// `mcu` (topology MCU id), from the builtin MCU definitions. Single-slot
+/// `mcu` (topology MCU id), from the builtin MCU definitions (the simulated
+/// desk and tests; a project uses [`slot_with`] with its own). Single-slot
 /// images (a trailer boot core, images bound to `any` slot) answer for
 /// slot A only.
 pub fn slot(mcu: &str, kind: u8, slot: u8) -> Option<Slot> {
@@ -55,13 +56,13 @@ pub fn slot_with(reg: &Registry, mcu: &str, kind: u8, slot: u8) -> Option<Slot> 
 }
 
 /// Slot of an already-signed header (`slot_binding::ANY` maps to slot A).
-pub fn slot_of(mcu: &str, h: &ImageHeader) -> Option<Slot> {
+pub fn slot_of(reg: &Registry, mcu: &str, h: &ImageHeader) -> Option<Slot> {
     let s = if h.slot_binding == slot_binding::ANY {
         slot_binding::A
     } else {
         h.slot_binding
     };
-    slot(mcu, h.image_kind, s)
+    slot_with(reg, mcu, h.image_kind, s)
 }
 
 pub fn image_kind_of(name: &str) -> Option<u8> {

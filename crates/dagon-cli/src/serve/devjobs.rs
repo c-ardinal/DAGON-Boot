@@ -77,7 +77,7 @@ fn flash_with(
         .ok_or("node is required")?;
     // Only ever compared with the candidates, never passed on as given.
     let device = v["device"].as_str();
-    let t = read_topology(&inside(cfg, &cfg.topology_path(None)?)?)?;
+    let t = read_topology(cfg, &inside(cfg, &cfg.topology_path(None)?)?)?;
     let out = inside(cfg, &cfg.provision_dir().join(node))?;
     let steps = crate::flash::plan(cfg, &t, node, &out)?;
     for l in &steps {
@@ -129,7 +129,7 @@ pub fn job_doctor(job: &mut Job, cfg: Config, _v: Value) -> Result<Value, String
     let mcus: Vec<String> = cfg
         .topology_path(None)
         .and_then(|p| inside(&cfg, &p))
-        .and_then(|p| read_topology(&p))
+        .and_then(|p| read_topology(&cfg, &p))
         .map(|t| t.nodes.iter().map(|n| n.mcu.clone()).collect())
         .unwrap_or_else(|_| crate::doctor::all_mcus(&reg));
     let mut lines = Vec::new();

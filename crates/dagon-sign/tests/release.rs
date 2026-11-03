@@ -150,7 +150,15 @@ fn release_build_with_desk_demo() {
     let t = desk_demo();
     // Hub images first on purpose: the build orders entries by update.order.
     let images = vec![hub_app(1), hub_app(0), f401_app(1), f401_app(0)];
-    let r = release::build(&t, &topology_bin(), &images, "release-1.1", &key()).unwrap();
+    let r = release::build(
+        dagon_topology::defs::Registry::builtin(),
+        &t,
+        &topology_bin(),
+        &images,
+        "release-1.1",
+        &key(),
+    )
+    .unwrap();
     let b = BundleView::parse(&r.bundle).unwrap();
     b.verify(&TEST_PUBLIC_KEY).unwrap();
     let m = b.manifest();
@@ -194,9 +202,16 @@ fn release_build_rejects_bad_sets() {
     let t = desk_demo();
     let topo = topology_bin();
     let check = |images: Vec<Vec<u8>>| {
-        release::build(&t, &topo, &images, "r", &key())
-            .unwrap_err()
-            .check
+        release::build(
+            dagon_topology::defs::Registry::builtin(),
+            &t,
+            &topo,
+            &images,
+            "r",
+            &key(),
+        )
+        .unwrap_err()
+        .check
     };
 
     assert_eq!(check(vec![f401_app(0)]), "RB-02", "slot B missing");
@@ -241,11 +256,27 @@ fn release_build_rejects_bad_sets() {
     s.proto_version = 2;
     let skewed = sign_image(&s, &body(1), &key()).unwrap();
     let images = vec![f401_app(0), skewed];
-    assert!(release::build(&t, &topo, &images, "r", &key()).is_ok());
+    assert!(release::build(
+        dagon_topology::defs::Registry::builtin(),
+        &t,
+        &topo,
+        &images,
+        "r",
+        &key()
+    )
+    .is_ok());
     let yaml = format!("{DESK_DEMO}\nconstraints:\n  - lockstep: [hub, seg]\n");
     let locked = dagon_topology::parse_str(&yaml).unwrap();
     let topo = dagon_topology::compile(&locked).unwrap();
-    let err = release::build(&locked, &topo, &images, "r", &key()).unwrap_err();
+    let err = release::build(
+        dagon_topology::defs::Registry::builtin(),
+        &locked,
+        &topo,
+        &images,
+        "r",
+        &key(),
+    )
+    .unwrap_err();
     assert_eq!(err.check, "RB-05", "lockstep proto");
 }
 

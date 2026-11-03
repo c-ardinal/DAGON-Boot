@@ -364,7 +364,7 @@ fn hello(server: &Server) -> Response {
     let flash_mcus: Vec<String> = defined
         .into_iter()
         .map(|m| m.id)
-        .filter(|m| plain_name(m) && crate::flash::flashable(m))
+        .filter(|m| plain_name(m))
         .collect();
     let sim = server.sim.get();
     let mut features = FEATURES.to_vec();
@@ -544,7 +544,7 @@ fn topology_put(server: &Server, req: &Request) -> Res {
     let p = topology_path(server)?;
     let yaml =
         std::str::from_utf8(&req.body).map_err(|_| Response::error(400, "YAML must be UTF-8"))?;
-    let report = dagon_topology::check_str(yaml);
+    let report = dagon_topology::check_str_with(&registry_of(config(server).ok().as_ref()), yaml);
     let report_json: Value = serde_json::from_str(&report.to_json()).unwrap_or(Value::Null);
     // A 構成 whose only errors are V-23 (a shape updating does not cover
     // yet) is saved; compile, send, release and apply still refuse it.
@@ -668,7 +668,7 @@ fn sha_hex(b: &[u8]) -> String {
 /// Signs the built applications of `nodes` with the CLI's key.
 fn job_sign(job: &mut Job, cfg: Config, v: Value) -> Result<Value, String> {
     let nodes = nodes_of(&v).map_err(|_| "nodes must be node ids".to_string())?;
-    let t = read_topology(&inside(&cfg, &cfg.topology_path(None)?)?)?;
+    let t = read_topology(&cfg, &inside(&cfg, &cfg.topology_path(None)?)?)?;
     let key = serve_key(&cfg)?;
     let cancel = job.cancel_flag();
     sign_nodes(&cfg, &t, &nodes, &key, &mut |l| job.log(l), &cancel)
@@ -884,7 +884,7 @@ fn job_release(job: &mut Job, cfg: Config, v: Value) -> Result<Value, String> {
     let name = v["name"].as_str().filter(|n| plain(n) && n.len() <= 16);
     let name = name.ok_or("name must be up to 16 plain characters")?;
     let want = version(v["version"].as_str().ok_or("version is required")?)?;
-    let t = read_topology(&inside(&cfg, &cfg.topology_path(None)?)?)?;
+    let t = read_topology(&cfg, &inside(&cfg, &cfg.topology_path(None)?)?)?;
     let key = serve_key(&cfg)?;
     let cancel = job.cancel_flag();
     release_from(&cfg, &t, want, name, &key, &mut |l| job.log(l), &cancel)
@@ -940,11 +940,12 @@ fn release_from(
     cancel: &AtomicBool,
 ) -> Result<Value, String> {
     stop_if(cancel)?;
-    let topo_bin = dagon_topology::compile(t).map_err(|e| e.to_string())?;
+    let reg = crate::defs::registry(cfg)?;
+    let topo_bin = dagon_topology::compile_with(&reg, t).map_err(|e| e.to_string())?;
     let images = signed_images(cfg, want)?;
     stop_if(cancel)?;
-    let r =
-        dagon_sign::release::build(t, &topo_bin, &images, name, key).map_err(|e| e.to_string())?;
+    let r = dagon_sign::release::build(&reg, t, &topo_bin, &images, name, key)
+        .map_err(|e| e.to_string())?;
     stop_if(cancel)?;
     let out = inside(cfg, &cfg.base.join(RELEASE_DIR).join(format!("{name}.dgb")))?;
     write_file(&out, &r.bundle)?;
@@ -1075,8 +1076,8 @@ fn job_conform(job: &mut Job, cfg: Config, v: Value) -> Result<Value, String> {
         .as_str()
         .filter(|n| plain(n))
         .ok_or("node is required")?;
-    let t = read_topology(&inside(&cfg, &cfg.topology_path(None)?)?)?;
-    let to = crate::conform::node_target(&t, node)?;
+    let t = read_topology(&cfg, &inside(&cfg, &cfg.topology_path(None)?)?)?;
+    let to = crate::conform::node_target(&crate::defs::registry(&cfg)?, &t, node)?;
     let dir = inside(&cfg, &cfg.base.join(CONFORM_DIR).join(node))?;
     let key = serve_key(&cfg)?;
     job.progress("waiting for the hub", None);

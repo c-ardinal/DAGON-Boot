@@ -256,7 +256,7 @@ pub fn command(args: &[&str]) -> Result<(), String> {
     let reg = crate::defs::registry(&cfg)?;
     let mcus: Vec<String> = match o.get("topology").map(Into::into).or(cfg.topology.clone()) {
         Some(p) => {
-            let t = read_topology(&p)?;
+            let t = read_topology(&cfg, &p)?;
             println!("checking for {}", p.display());
             t.nodes.iter().map(|n| n.mcu.clone()).collect()
         }

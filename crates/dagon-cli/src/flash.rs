@@ -482,11 +482,6 @@ fn esp_files(
     Ok(FirstWrite::Espflash { files, commands })
 }
 
-/// The MCU families `flash` can write (the page offers it for these).
-pub(crate) fn flashable(mcu: &str) -> bool {
-    Registry::builtin().mcu(mcu).is_some()
-}
-
 /// Every device `node`'s writer reports now (a UF2 writer waits for its
 /// drive), with the writer.
 pub(crate) fn devices(
@@ -641,7 +636,7 @@ pub fn command(args: &[&str]) -> Result<(), String> {
         return Err("flash needs <id>".into());
     };
     let cfg = Config::load(o.get("config"))?;
-    let t = read_topology(&cfg.topology_path(o.get("topology"))?)?;
+    let t = read_topology(&cfg, &cfg.topology_path(o.get("topology"))?)?;
     let out = o
         .get("out")
         .map_or_else(|| cfg.provision_dir().join(node), PathBuf::from);

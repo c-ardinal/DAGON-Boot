@@ -502,8 +502,10 @@ fn job_sign(job: &mut Job, cfg: Config, v: Value) -> Result<Value, String> {
 }
 
 /// Signs exactly what each node's last successful build recorded, with the
-/// version recorded there. A node's previous images and record are removed
-/// first, so a failure leaves nothing of that node to release.
+/// version recorded there. All or nothing: every node's inputs are checked
+/// and every image signed before a file changes, and the new images and
+/// records replace the old ones together (see [`commit_files`]); any
+/// failure or cancel leaves the old images and records as they were.
 fn sign_nodes(
     cfg: &Config,
     t: &dagon_topology::Topology,
@@ -560,73 +562,121 @@ fn sign_nodes(
         signed.push((node, ver, images));
     }
     stop_if(cancel)?;
-    for (node, ver, images) in signed {
-        replace_signed(cfg, node, &ver, &images)?;
+    let mut files = Vec::new();
+    for (node, ver, images) in &signed {
+        files.extend(sign_swaps(cfg, node, ver, images)?);
     }
+    commit_files(&files, &mut |from, to| std::fs::rename(from, to))?;
     Ok(json!({ "images": out }))
 }
 
-/// Puts a node's newly signed images and their record in place: each is
-/// written beside its final name first (a failure there removes those and
-/// changes nothing), then renamed over the old one, the record last. Old
-/// images of slots no longer signed go before the record.
-fn replace_signed(
+/// One file of a sign: its final path and new bytes (None: the old file
+/// goes, a slot no longer signed).
+type FileSwap = (PathBuf, Option<Vec<u8>>);
+
+/// A node's new images and record, and its old images of slots no longer
+/// signed (to remove); the record last.
+fn sign_swaps(
     cfg: &Config,
     node: &str,
     ver: &str,
     images: &[(char, Vec<u8>)],
-) -> Result<(), String> {
-    let rec_path = inside(cfg, &sign_record_path(cfg, node))?;
+) -> Result<Vec<FileSwap>, String> {
     let mut record = SignRecord {
         version: ver.to_string(),
         images: Vec::new(),
     };
     let mut files = Vec::new();
-    for (slot, img) in images {
-        let path = inside(cfg, &sign_path(cfg, node, *slot))?;
+    for slot in ['a', 'b'] {
+        let path = inside(cfg, &sign_path(cfg, node, slot))?;
+        let Some((_, img)) = images.iter().find(|(s, _)| *s == slot) else {
+            files.push((path, None));
+            continue;
+        };
         let name = path
             .file_name()
             .unwrap_or_default()
             .to_string_lossy()
             .into_owned();
         record.images.push((name, sha_hex(img)));
-        files.push((path, img.clone()));
+        files.push((path, Some(img.clone())));
     }
     let text = serde_json::to_string_pretty(&record).map_err(|e| e.to_string())?;
-    files.push((rec_path, text.into_bytes()));
-    let staged: Vec<(PathBuf, PathBuf)> =
-        files.iter().map(|(p, _)| (p.clone(), staging(p))).collect();
-    for ((_, bytes), (_, tmp)) in files.iter().zip(&staged) {
-        if let Err(e) = write_file(tmp, bytes) {
-            for (_, t) in &staged {
-                let _ = std::fs::remove_file(t);
-            }
-            return Err(e);
-        }
-    }
-    let (record_file, image_files) = staged.split_last().expect("the record is last");
-    for (path, tmp) in image_files {
-        std::fs::rename(tmp, path)
-            .map_err(|e| format!("cannot replace {}: {e}", path.display()))?;
-    }
-    for slot in ['a', 'b'] {
-        if images.iter().all(|(s, _)| *s != slot) {
-            let old = inside(cfg, &sign_path(cfg, node, slot))?;
-            match std::fs::remove_file(&old) {
-                Ok(()) => {}
-                Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
-                Err(e) => return Err(format!("cannot remove {}: {e}", old.display())),
-            }
-        }
-    }
-    let (path, tmp) = record_file;
-    std::fs::rename(tmp, path).map_err(|e| format!("cannot replace {}: {e}", path.display()))
+    files.push((
+        inside(cfg, &sign_record_path(cfg, node))?,
+        Some(text.into_bytes()),
+    ));
+    Ok(files)
 }
 
-/// Where a file is written before it replaces `path` (same folder).
-fn staging(path: &Path) -> PathBuf {
+/// Replaces `files` all together. Every new file is written as `<name>.new`
+/// first (a failure removes them all; nothing changed). Then each old file
+/// becomes `<name>.old` and its `.new` takes its name; if a `rename` fails,
+/// every step so far is undone (the `.old` files back, no `.new` left) and
+/// the error returned. Only when all are in place do the `.old` files go.
+fn commit_files(
+    files: &[FileSwap],
+    rename: &mut dyn FnMut(&Path, &Path) -> std::io::Result<()>,
+) -> Result<(), String> {
+    let new_of = |p: &Path| with_suffix(p, ".new");
+    let old_of = |p: &Path| with_suffix(p, ".old");
+    let remove_new = || {
+        for (p, _) in files {
+            let _ = std::fs::remove_file(new_of(p));
+        }
+    };
+    for (path, bytes) in files {
+        if let Some(b) = bytes {
+            if let Err(e) = write_file(&new_of(path), b) {
+                remove_new();
+                return Err(e);
+            }
+        }
+    }
+    // (path, moved to .old, new in place) for every step taken.
+    let mut done: Vec<(&Path, bool, bool)> = Vec::new();
+    let mut failed = None;
+    for (path, bytes) in files {
+        let moved = path.exists();
+        if moved {
+            if let Err(e) = rename(path, &old_of(path)) {
+                failed = Some(format!("cannot replace {}: {e}", path.display()));
+                break;
+            }
+        }
+        done.push((path, moved, false));
+        if bytes.is_some() {
+            if let Err(e) = rename(&new_of(path), path) {
+                failed = Some(format!("cannot replace {}: {e}", path.display()));
+                break;
+            }
+            done.last_mut().expect("pushed").2 = true;
+        }
+    }
+    if let Some(e) = failed {
+        for (path, moved, placed) in done.into_iter().rev() {
+            if placed {
+                let _ = std::fs::remove_file(path);
+            }
+            if moved {
+                let _ = std::fs::rename(old_of(path), path);
+            }
+        }
+        remove_new();
+        return Err(e);
+    }
+    for (path, moved, _) in done {
+        if moved {
+            let _ = std::fs::remove_file(old_of(path));
+        }
+    }
+    Ok(())
+}
+
+/// `path` with `suffix` added to its file name (same folder).
+fn with_suffix(path: &Path, suffix: &str) -> PathBuf {
     let mut name = path.file_name().unwrap_or_default().to_os_string();
-    name.push(".new");
+    name.push(suffix);
     path.with_file_name(name)
 }
 
@@ -1143,6 +1193,109 @@ mod tests {
         std::fs::write(dir.join("build.json"), serde_json::to_string(&rec).unwrap()).unwrap();
     }
 
+    /// hub gets a recorded build too (raw payloads, like seg's).
+    fn build_hub(cfg: &Config) {
+        let dir = cfg.base.join("out/build/hub");
+        std::fs::create_dir_all(&dir).unwrap();
+        let mut slots = Vec::new();
+        for slot in ['a', 'b'] {
+            let body = vec![slot as u8 ^ 0x30; 1500];
+            std::fs::write(dir.join(format!("app-{slot}.elf")), &body).unwrap();
+            slots.push((slot, sha_hex(&body)));
+        }
+        let rec = nodebuild::BuildRecord {
+            version: Some("1.1.0".into()),
+            slots,
+        };
+        std::fs::write(dir.join("build.json"), serde_json::to_string(&rec).unwrap()).unwrap();
+    }
+
+    /// Every file in the sign folder, by name.
+    fn sign_folder(cfg: &Config) -> std::collections::BTreeMap<String, Vec<u8>> {
+        std::fs::read_dir(cfg.base.join(SIGN_DIR))
+            .unwrap()
+            .flatten()
+            .map(|e| {
+                let name = e.file_name().to_string_lossy().into_owned();
+                (name, std::fs::read(e.path()).unwrap_or_default())
+            })
+            .collect()
+    }
+
+    #[test]
+    fn signing_several_nodes_is_all_or_nothing() {
+        let (cfg, t) = built_area("allornothing");
+        build_hub(&cfg);
+        let key = test_key();
+        let both = ["seg".to_string(), "hub".to_string()];
+        let go = AtomicBool::new(false);
+        sign_nodes(&cfg, &t, &both, &key, &mut |_| {}, &go).unwrap();
+        let old = sign_folder(&cfg);
+        assert_eq!(old.len(), 6, "{:?}", old.keys());
+        rebuild_slot_a(&cfg, &[0x42; 1500]);
+
+        // The second node's file cannot be staged: nothing changes.
+        let blocked = with_suffix(&sign_path(&cfg, "hub", 'a'), ".new");
+        std::fs::create_dir_all(&blocked).unwrap();
+        assert!(sign_nodes(&cfg, &t, &both, &key, &mut |_| {}, &go).is_err());
+        std::fs::remove_dir_all(&blocked).unwrap();
+        assert_eq!(sign_folder(&cfg), old, "staging failure on node 2");
+
+        // A rename fails in the middle of the commit (after seg is in place):
+        // every step is undone.
+        let mut images = Vec::new();
+        let opts = SignOpts {
+            version: version("1.1.0").unwrap(),
+            release_seq: 1,
+            min_bootcore: Default::default(),
+            proto: 1,
+            bits: None,
+        };
+        for node in ["seg", "hub"] {
+            let (_, elfs) = nodebuild::last_build(&cfg, node).unwrap();
+            let mut imgs = Vec::new();
+            for (slot, elf) in elfs {
+                let b = if slot == 'a' {
+                    slot_binding::A
+                } else {
+                    slot_binding::B
+                };
+                imgs.push((
+                    slot,
+                    image_for_node(&t, node, image_kind::APP, b, &elf, Some(&opts), &key).unwrap(),
+                ));
+            }
+            images.push((node, imgs));
+        }
+        let mut files = Vec::new();
+        for (node, imgs) in &images {
+            files.extend(sign_swaps(&cfg, node, "1.1.0", imgs).unwrap());
+        }
+        for fail_at in [1usize, 4, 7, 9] {
+            let mut n = 0;
+            let r = commit_files(&files, &mut |from, to| {
+                n += 1;
+                if n == fail_at {
+                    return Err(std::io::Error::other("injected"));
+                }
+                std::fs::rename(from, to)
+            });
+            assert!(r.is_err(), "rename {fail_at}");
+            assert_eq!(
+                sign_folder(&cfg),
+                old,
+                "rename {fail_at} failed: all undone"
+            );
+        }
+
+        // With nothing failing, both nodes change together.
+        sign_nodes(&cfg, &t, &both, &key, &mut |_| {}, &go).unwrap();
+        let new = sign_folder(&cfg);
+        assert_eq!(new.len(), 6, "no .new or .old left: {:?}", new.keys());
+        assert_ne!(new, old);
+        let _ = std::fs::remove_dir_all(&cfg.base);
+    }
+
     #[test]
     fn a_failed_sign_leaves_the_old_images_and_record() {
         let (cfg, t) = built_area("keep");
@@ -1172,14 +1325,14 @@ mod tests {
         assert_eq!(signed_files(&cfg), old, "cancelled");
 
         // A file that cannot be written.
-        std::fs::create_dir_all(staging(&sign_path(&cfg, "seg", 'b'))).unwrap();
+        std::fs::create_dir_all(with_suffix(&sign_path(&cfg, "seg", 'b'), ".new")).unwrap();
         assert!(sign_nodes(&cfg, &t, &seg, &key, &mut |_| {}, &go).is_err());
         assert_eq!(signed_files(&cfg), old, "write failure");
         assert!(
-            !staging(&sign_path(&cfg, "seg", 'a')).exists(),
+            !with_suffix(&sign_path(&cfg, "seg", 'a'), ".new").exists(),
             "no staged file left"
         );
-        std::fs::remove_dir_all(staging(&sign_path(&cfg, "seg", 'b'))).unwrap();
+        std::fs::remove_dir_all(with_suffix(&sign_path(&cfg, "seg", 'b'), ".new")).unwrap();
 
         // Then it goes through, and the release takes the new images.
         sign_nodes(&cfg, &t, &seg, &key, &mut |_| {}, &go).unwrap();

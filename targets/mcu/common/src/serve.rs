@@ -1,0 +1,252 @@
+//! The serving loop of a node's agent over any [`Link`]: wait for a request
+//! frame, answer it, and after the reply to REBOOT let the reply leave and
+//! hand the reset to the caller. What differs between MCUs (watchdog
+//! reports, a conformance build answering first, logging) comes through
+//! [`ServeHost`].
+
+use dagon_agent::{Agent, Hooks, SlotStore, IDLE_TIMEOUT_MS};
+
+use crate::link::{Link, LinkError};
+
+/// What the serving loop asks of its MCU.
+pub trait ServeHost<S: SlotStore, H: Hooks> {
+    /// Milliseconds on a monotonic clock.
+    fn now_ms(&self) -> u64;
+    /// Waiting for a request (no deadline of its own).
+    fn idle(&mut self);
+    /// A request is being handled.
+    fn busy(&mut self);
+    /// A request arrived, before it is handled (e.g. a gated feed so an
+    /// erase starts with a full watchdog period).
+    fn on_request(&mut self) {}
+    /// Answers `request` before the agent does (a conformance build);
+    /// `None` leaves it to the agent.
+    fn intercept(&mut self, _agent: &mut Agent<S, H>, _request: &[u8]) -> Option<&[u8]> {
+        None
+    }
+    /// The request (command `cmd`) was answered (e.g. trial state re-read,
+    /// timing log).
+    fn after(&mut self, _agent: &mut Agent<S, H>, _cmd: u8) {}
+    /// A read failed (logging); the loop goes on.
+    fn on_error(&mut self, _e: LinkError) {}
+}
+
+/// Why [`serve`] returned.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Exit {
+    /// The reply to REBOOT has left: reset now.
+    Reboot,
+    /// The link is gone.
+    Closed,
+}
+
+/// Serves `agent` over `link` until a reboot is due or the link closes.
+/// A transfer the PC abandoned is dropped after `IDLE_TIMEOUT_MS` without
+/// requests, checked whenever the link's read times out.
+pub async fn serve<L, S, H, X>(link: &mut L, agent: &mut Agent<S, H>, host: &mut X) -> Exit
+where
+    L: Link,
+    S: SlotStore,
+    H: Hooks,
+    X: ServeHost<S, H>,
+{
+    let mut last_request: Option<u64> = None;
+    loop {
+        host.idle();
+        let read = link.read_frame().await;
+        host.busy();
+        let request = match read {
+            Ok(r) => r,
+            Err(LinkError::Timeout) => {
+                let idle = IDLE_TIMEOUT_MS as u64;
+                if last_request.is_some_and(|t| host.now_ms().saturating_sub(t) >= idle) {
+                    agent.abort();
+                    last_request = None;
+                }
+                continue;
+            }
+            Err(LinkError::Closed) => return Exit::Closed,
+            Err(e) => {
+                host.on_error(e);
+                continue;
+            }
+        };
+        last_request = Some(host.now_ms());
+        // Byte 5 of a frame is the command.
+        let cmd = request.get(5).copied().unwrap_or(0);
+        host.on_request();
+        let mut reboot = false;
+        let wrote = match host.intercept(agent, request) {
+            Some(answer) => link.write_frame(answer).await,
+            None => match agent.handle(request) {
+                Some(reply) => {
+                    reboot = reply.reboot;
+                    link.write_frame(reply.frame).await
+                }
+                // Not for this node, or not a request: no answer.
+                None => Ok(()),
+            },
+        };
+        host.after(agent, cmd);
+        if let Err(e) = wrote {
+            host.on_error(e);
+        }
+        // Reset only once the reply has left (or could not be sent); a
+        // link that cannot tell (a new request came first) keeps serving
+        // instead.
+        if reboot {
+            agent.hooks().before_reboot();
+            if link.flush().await.is_ok() {
+                return Exit::Reboot;
+            }
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    extern crate std;
+
+    use std::collections::VecDeque;
+    use std::vec::Vec;
+
+    use dagon_agent::DefaultHooks;
+    use dagon_proto::payload::{reboot_mode, HelloResp};
+    use dagon_proto::{max_payload, split_status, Cmd, Frame, Status};
+    use dagon_sim::store::SimStore;
+
+    use super::*;
+    use crate::link::Reconnect;
+    use crate::uart::hello_request;
+
+    /// A link fed from a queue: `None` entries are read timeouts; when the
+    /// queue is empty the link is closed.
+    #[derive(Default)]
+    struct Mock {
+        incoming: VecDeque<Option<Vec<u8>>>,
+        current: Vec<u8>,
+        written: Vec<Vec<u8>>,
+        flushed: usize,
+    }
+
+    impl Link for Mock {
+        fn max_payload(&self) -> usize {
+            max_payload::UART
+        }
+        fn reconnect(&self) -> Reconnect {
+            Reconnect::Persistent
+        }
+        async fn read_frame(&mut self) -> Result<&[u8], LinkError> {
+            match self.incoming.pop_front() {
+                Some(Some(f)) => {
+                    self.current = f;
+                    Ok(&self.current)
+                }
+                Some(None) => Err(LinkError::Timeout),
+                None => Err(LinkError::Closed),
+            }
+        }
+        async fn write_frame(&mut self, frame: &[u8]) -> Result<(), LinkError> {
+            self.written.push(frame.to_vec());
+            Ok(())
+        }
+        async fn flush(&mut self) -> Result<(), LinkError> {
+            self.flushed += 1;
+            Ok(())
+        }
+    }
+
+    #[derive(Default)]
+    struct Host {
+        busy: usize,
+        requests: usize,
+        cmds: Vec<u8>,
+        answer: Option<Vec<u8>>,
+    }
+
+    impl<S: SlotStore, H: Hooks> ServeHost<S, H> for Host {
+        fn now_ms(&self) -> u64 {
+            0
+        }
+        fn idle(&mut self) {}
+        fn busy(&mut self) {
+            self.busy += 1;
+        }
+        fn on_request(&mut self) {
+            self.requests += 1;
+        }
+        fn intercept(&mut self, _: &mut Agent<S, H>, request: &[u8]) -> Option<&[u8]> {
+            (request.get(5) == Some(&0x7F)).then_some(())?;
+            self.answer.as_deref()
+        }
+        fn after(&mut self, _: &mut Agent<S, H>, cmd: u8) {
+            self.cmds.push(cmd);
+        }
+    }
+
+    fn agent() -> Agent<SimStore, DefaultHooks> {
+        Agent::new(
+            dagon_sim::f401_config([0; 32]),
+            SimStore::default(),
+            DefaultHooks,
+        )
+    }
+
+    fn hello(seq: u8) -> Vec<u8> {
+        let mut b = [0u8; 32];
+        let n = hello_request(max_payload::UART, seq, &mut b).unwrap();
+        b[..n].to_vec()
+    }
+
+    fn request(seq: u8, cmd: u8, payload: &[u8]) -> Vec<u8> {
+        let mut b = [0u8; 64];
+        b[8..8 + payload.len()].copy_from_slice(payload);
+        let n = dagon_proto::finish(&mut b, 0, seq, cmd, payload.len()).unwrap();
+        b[..n].to_vec()
+    }
+
+    #[test]
+    fn answers_requests_and_skips_timeouts_until_closed() {
+        let mut link = Mock::default();
+        link.incoming.extend([Some(hello(1)), None, Some(hello(2))]);
+        let (mut a, mut h) = (agent(), Host::default());
+        let exit = dagon_sim::block_on(serve(&mut link, &mut a, &mut h));
+        assert_eq!(exit, Exit::Closed);
+        assert_eq!(link.written.len(), 2);
+        for (w, seq) in link.written.iter().zip([1u8, 2]) {
+            let (f, _) = Frame::decode(w, max_payload::UART).unwrap();
+            assert_eq!(f.seq, seq);
+            let (st, body) = split_status(f.payload).unwrap();
+            assert_eq!(st, Status::Ok);
+            assert!(HelloResp::parse(body).is_ok());
+        }
+        assert_eq!(h.requests, 2);
+        assert_eq!(h.cmds, [Cmd::Hello as u8, Cmd::Hello as u8]);
+        assert_eq!(link.flushed, 0);
+    }
+
+    #[test]
+    fn reboot_reply_is_flushed_before_the_exit() {
+        let mut link = Mock::default();
+        let reboot = request(3, Cmd::Reboot as u8, &[reboot_mode::NORMAL]);
+        link.incoming.extend([Some(reboot), Some(hello(4))]);
+        let (mut a, mut h) = (agent(), Host::default());
+        let exit = dagon_sim::block_on(serve(&mut link, &mut a, &mut h));
+        assert_eq!(exit, Exit::Reboot);
+        assert_eq!(link.written.len(), 1, "the reply, then nothing more");
+        assert_eq!(link.flushed, 1);
+    }
+
+    #[test]
+    fn the_host_may_answer_first() {
+        let mut link = Mock::default();
+        link.incoming.push_back(Some(request(5, 0x7F, &[])));
+        let mut h = Host {
+            answer: Some(std::vec![1, 2, 3]),
+            ..Host::default()
+        };
+        let mut a = agent();
+        dagon_sim::block_on(serve(&mut link, &mut a, &mut h));
+        assert_eq!(link.written, [std::vec![1u8, 2, 3]]);
+    }
+}

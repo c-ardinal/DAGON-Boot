@@ -6,13 +6,23 @@
 pub use crate::kinds::*;
 pub use dagon_mcu_common::link::{Link, LinkError};
 
+/// Up `usb-cdc`: the USB CDC device (`UsbCdc::new(usb, product, serial)`).
+#[cfg(feature = "usb")]
+pub use crate::usb::CdcLink as UsbCdc;
+/// Down `i2c`: an I2C controller with the DAGON mailbox
+/// (`I2c::new(RpI2c(bus))`).
+pub type I2c<'d, T> = I2cLink<RpI2c<'d, T>>;
+/// Down `uart`: a PIO UART (`Uart::new(PioStream { tx, rx }, now_ms)`).
+pub type Uart<'d, P, const TX: usize, const RX: usize> =
+    crate::uart::UartLink<PioStream<'d, P, TX, RX>, fn() -> u64>;
+
 use crate::uart::{hello_answer, hello_request};
 use dagon_port::{BusError, I2cBus, StreamPort};
 use dagon_proto::mailbox::{self, STATE_LEN};
 use dagon_proto::payload::HelloResp;
 use dagon_proto::{frame_len, max_payload, Frame, Status};
 use embassy_rp::i2c::Instance as I2cInstance;
-use embassy_rp::i2c::{self, AbortReason, Async, I2c};
+use embassy_rp::i2c::{self, AbortReason, Async};
 use embassy_rp::pio::Instance as PioInstance;
 use embassy_rp::pio_programs::uart::{PioUartRx, PioUartTx};
 use embassy_time::{with_deadline, with_timeout, Duration, Instant, Timer};
@@ -27,7 +37,7 @@ const POLL_TIMEOUT_I2C_MS: u16 = 50;
 const ROM_TIMEOUT: Duration = Duration::from_millis(500);
 
 /// An I2C controller (the board package names the bus and pins).
-pub struct RpI2c<'d, T: I2cInstance>(pub I2c<'d, T, Async>);
+pub struct RpI2c<'d, T: I2cInstance>(pub i2c::I2c<'d, T, Async>);
 
 fn bus(e: i2c::Error) -> BusError {
     match e {
@@ -88,14 +98,36 @@ fn deadline(timeout_ms: u16) -> Instant {
     Instant::now() + Duration::from_millis(timeout_ms as u64)
 }
 
-/// I2C0 master: mailbox exchanges and raw ROM transactions.
+/// I2C controller link to child nodes: mailbox exchanges and raw ROM
+/// transactions. As a [`Link`], it talks to the node at the address set
+/// by [`I2cLink::target`]: `write_frame` writes the request (a NACK, an
+/// absent or busy node, is retried until the deadline, which starts
+/// there) and `read_frame` polls the 3-byte state every 2 ms until the
+/// response is ready, then reads it.
 pub struct I2cLink<I> {
     bus: I,
+    addr: u8,
+    timeout_ms: u16,
+    deadline: Instant,
+    buf: [u8; I2C_FRAME],
 }
 
 impl<I: I2cBus> I2cLink<I> {
     pub fn new(bus: I) -> Self {
-        I2cLink { bus }
+        I2cLink {
+            bus,
+            addr: 0,
+            timeout_ms: 0,
+            deadline: Instant::from_ticks(0),
+            buf: [0; I2C_FRAME],
+        }
+    }
+
+    /// The node the next request goes to, and its deadline from the start
+    /// of the write.
+    pub fn target(&mut self, addr: u8, timeout_ms: u16) {
+        self.addr = addr;
+        self.timeout_ms = timeout_ms;
     }
 
     /// Sends the request frame `inner` to `addr` and stores the node's
@@ -107,42 +139,15 @@ impl<I: I2cBus> I2cLink<I> {
         timeout_ms: u16,
         out: &mut [u8],
     ) -> Result<usize, Status> {
-        let deadline = deadline(timeout_ms);
-        let timeout = |_| Status::Timeout;
-        // A NACK (absent or busy node) is retried until the deadline.
-        while with_deadline(deadline, self.bus.write(addr, inner))
-            .await
-            .map_err(timeout)?
-            .is_err()
-        {
-            Timer::after(MAILBOX_POLL).await;
+        self.target(addr, timeout_ms);
+        self.write_frame(inner).await.map_err(status)?;
+        let f = self.read_frame().await.map_err(status)?;
+        let n = f.len();
+        if n > out.len() {
+            return Err(Status::Frame);
         }
-        loop {
-            Timer::after(MAILBOX_POLL).await;
-            let mut st = [0u8; STATE_LEN];
-            if with_deadline(deadline, self.bus.read(addr, &mut st))
-                .await
-                .map_err(timeout)?
-                .is_err()
-            {
-                continue;
-            }
-            let Some(mailbox::State::Ready(n)) = mailbox::State::parse(st) else {
-                continue;
-            };
-            let n = n as usize;
-            if n > out.len().min(I2C_FRAME) {
-                return Err(Status::Frame);
-            }
-            with_deadline(deadline, self.bus.read(addr, &mut out[..n]))
-                .await
-                .map_err(timeout)?
-                .map_err(|_| Status::Frame)?;
-            return match Frame::decode(&out[..n], max_payload::I2C) {
-                Ok((_, len)) if len == n => Ok(n),
-                _ => Err(Status::Frame),
-            };
-        }
+        out[..n].copy_from_slice(f);
+        Ok(n)
     }
 
     /// I2C_RAW: one write transaction (if `data` is not empty, closed by
@@ -173,5 +178,66 @@ impl<I: I2cBus> I2cLink<I> {
             .await
             .ok()?;
         hello_answer(&resp[..len], max_payload::I2C)
+    }
+}
+
+/// The Status a relayed request answers for a link failure.
+fn status(e: LinkError) -> Status {
+    match e {
+        LinkError::Timeout | LinkError::Closed => Status::Timeout,
+        LinkError::Overflow | LinkError::Corrupt => Status::Frame,
+    }
+}
+
+impl<I: I2cBus> Link for I2cLink<I> {
+    fn max_payload(&self) -> usize {
+        max_payload::I2C
+    }
+
+    fn reconnect(&self) -> Reconnect {
+        Reconnect::Persistent
+    }
+
+    async fn read_frame(&mut self) -> Result<&[u8], LinkError> {
+        let timeout = |_| LinkError::Timeout;
+        loop {
+            Timer::after(MAILBOX_POLL).await;
+            let mut st = [0u8; STATE_LEN];
+            if with_deadline(self.deadline, self.bus.read(self.addr, &mut st))
+                .await
+                .map_err(timeout)?
+                .is_err()
+            {
+                continue;
+            }
+            let Some(mailbox::State::Ready(n)) = mailbox::State::parse(st) else {
+                continue;
+            };
+            let n = n as usize;
+            if n > I2C_FRAME {
+                return Err(LinkError::Corrupt);
+            }
+            with_deadline(self.deadline, self.bus.read(self.addr, &mut self.buf[..n]))
+                .await
+                .map_err(timeout)?
+                .map_err(|_| LinkError::Corrupt)?;
+            return match Frame::decode(&self.buf[..n], max_payload::I2C) {
+                Ok((_, len)) if len == n => Ok(&self.buf[..n]),
+                _ => Err(LinkError::Corrupt),
+            };
+        }
+    }
+
+    async fn write_frame(&mut self, frame: &[u8]) -> Result<(), LinkError> {
+        self.deadline = deadline(self.timeout_ms);
+        // A NACK (absent or busy node) is retried until the deadline.
+        while with_deadline(self.deadline, self.bus.write(self.addr, frame))
+            .await
+            .map_err(|_| LinkError::Timeout)?
+            .is_err()
+        {
+            Timer::after(MAILBOX_POLL).await;
+        }
+        Ok(())
     }
 }

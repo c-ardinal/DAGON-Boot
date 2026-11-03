@@ -7,17 +7,18 @@
 //! Flash size is check-only: the layout is fixed (`layout`, the topology's
 //! `f401-default` flash map) and needs [`MIN_FLASH_SIZE`] bytes.
 
-use dagon_agent::{Agent, Config, Hooks, SlotStore, IDLE_TIMEOUT_MS};
+use dagon_agent::{Agent, Config, SlotStore};
 pub use dagon_core::log::LogError;
 use dagon_format::header::{port_kind, target_tag, ImageHeader, HEADER_SIZE};
 use dagon_format::Version;
 pub use dagon_mcu_common::hooks::{always, SelfCheck};
+use dagon_mcu_common::link::LinkError;
+use dagon_mcu_common::serve::{serve as dagon_serve, Exit, ServeHost};
+use dagon_proto::max_payload;
 use dagon_proto::payload::{mode, role};
-use dagon_proto::{frame_len, max_payload};
 use defmt::{info, warn};
 use embassy_executor::Spawner;
-use embassy_futures::select::{select, Either};
-use embassy_stm32::i2c::{I2c, MultiMaster, SlaveCommandKind};
+use embassy_stm32::i2c::{I2c, MultiMaster};
 use embassy_stm32::peripherals::{FLASH, IWDG};
 use embassy_stm32::wdg::IndependentWatchdog;
 use embassy_stm32::{mode::Async, pac, Peri, Peripherals};
@@ -25,7 +26,7 @@ use embassy_time::{Duration, Instant, Timer};
 
 use crate::flash::F401Flash;
 use crate::layout::{self, MIN_FLASH_SIZE};
-use crate::mailbox::Mailbox;
+use crate::links;
 use crate::store::KindSStore;
 use crate::watchdog::{Guard, Iwdg, Watch};
 
@@ -50,8 +51,6 @@ pub const fn levels<const N: usize>() -> [crate::watchdog::Level; N] {
 /// Slot this build is linked for (`slot-b`).
 pub const ACTIVE: u8 = if cfg!(feature = "slot-b") { 1 } else { 0 };
 
-/// How often the serving task wakes to drop an abandoned transfer.
-const TICK: Duration = Duration::from_millis(500);
 /// Requests taking longer are timed on RTT (sizes the hub's wait windows).
 const SLOW_REQUEST_MS: u64 = 20;
 /// Feeding interval of [`start`]'s feeder.
@@ -161,7 +160,11 @@ pub fn start<B: BoardDef, const N: usize>(
     guard: &'static Guard<N>,
     tag: &str,
     self_check: fn() -> bool,
+    uplink: links::Kind,
 ) -> Result<(), LogError> {
+    // The only uplink this MCU offers (`require_uplink` checks it at
+    // compile time): the board's I2C target.
+    debug_assert!(uplink == links::Kind::I2c);
     let task = DAGON_TASK;
     const {
         assert!(
@@ -173,9 +176,10 @@ pub fn start<B: BoardDef, const N: usize>(
     let period = watchdog_period_ms(on_trial(&store));
     install_watchdog(parts.iwdg, guard, period, &store);
     let (target, regs) = B::open_link(parts.link);
+    let link = links::I2c::new(target, regs);
     let agent = Agent::new(config(tag), store, SelfCheck(self_check));
     let high = crate::exec::start();
-    high.spawn(serve(agent, target, regs, guard, task).expect("task pool"));
+    high.spawn(serve(agent, link, guard, task).expect("task pool"));
     spawner.spawn(feed(guard).expect("task pool"));
     Ok(())
 }
@@ -188,89 +192,68 @@ async fn feed(watch: &'static dyn Watch) -> ! {
     }
 }
 
-/// The mailbox loop. Requests are handled synchronously with the own
-/// address NACKed, so a hub poll during an erase or write never meets a
-/// stretched clock (instruction fetch from flash stalls while it is busy).
-/// Run it on an executor that preempts the app's (guard task `task` at
-/// preempting level) when the app has long-running work.
+/// The serving loop over the I2C target link (the generic loop of
+/// `dagon_mcu_common::serve`). Requests are handled synchronously with the
+/// own address NACKed, so a hub poll during an erase or write never meets
+/// a stretched clock (instruction fetch from flash stalls while it is
+/// busy). Run it on an executor that preempts the app's (guard task
+/// `task` at preempting level) when the app has long-running work.
 #[embassy_executor::task]
 pub async fn serve(
     mut agent: AppAgent,
-    mut target: I2cTarget,
-    regs: pac::i2c::I2c,
+    mut link: links::I2c,
     watch: &'static dyn Watch,
     task: usize,
 ) -> ! {
-    let mut mailbox = Mailbox::default();
-    let mut rx = [0u8; frame_len(max_payload::I2C)];
-    let mut last_request: Option<Instant> = None;
-    // ACK (true) or NACK (false) the own address and data.
-    let acknowledge = |on: bool| regs.cr1().modify(|w| w.set_ack(on));
+    let mut host = Host {
+        watch,
+        task,
+        started: Instant::now(),
+        out: [0; conform::OUT_MAX],
+    };
     loop {
-        watch.idle(task);
-        let event = select(target.listen(), Timer::after(TICK)).await;
-        watch.busy(task);
-        let cmd = match event {
-            Either::First(Ok(cmd)) => cmd,
-            Either::First(Err(e)) => {
-                warn!("i2c: {}", e);
-                continue;
-            }
-            Either::Second(()) => {
-                let idle_ms = IDLE_TIMEOUT_MS as u64;
-                if last_request.is_some_and(|t| t.elapsed().as_millis() >= idle_ms) {
-                    agent.abort();
-                    last_request = None;
-                }
-                continue;
-            }
-        };
-        match cmd.kind {
-            SlaveCommandKind::Write => {
-                let n = match target.respond_to_write(&mut rx).await {
-                    Ok(n) => n,
-                    Err(e) => {
-                        warn!("i2c write: {}", e);
-                        continue;
-                    }
-                };
-                // Zero bytes: an address probe.
-                if n == 0 {
-                    continue;
-                }
-                last_request = Some(Instant::now());
-                mailbox.request();
-                // An erase starts with a full watchdog period.
-                watch.feed();
-                acknowledge(false);
-                let t0 = Instant::now();
-                if !conform::serve(&mut agent, &rx[..n], &mut mailbox, watch, task) {
-                    let reply = agent.handle(&rx[..n]);
-                    let reboot = reply.as_ref().is_some_and(|r| r.reboot);
-                    mailbox.respond(reply.map(|r| r.frame), reboot);
-                }
-                acknowledge(true);
-                watch.set_trial(on_trial(agent.store()));
-                let ms = t0.elapsed().as_millis();
-                if ms >= SLOW_REQUEST_MS {
-                    // Byte 5 of a frame is the command.
-                    info!("cmd {=u8:#04x}: {} ms", rx[5], ms);
-                }
-            }
-            SlaveCommandKind::Read => {
-                let sent = match target.respond_to_read(mailbox.read_data()).await {
-                    Ok(n) => n,
-                    Err(e) => {
-                        warn!("i2c read: {}", e);
-                        continue;
-                    }
-                };
-                if mailbox.read_done(sent) {
-                    agent.hooks().before_reboot();
-                    cortex_m::peripheral::SCB::sys_reset();
-                }
-            }
+        if dagon_serve(&mut link, &mut agent, &mut host).await == Exit::Reboot {
+            cortex_m::peripheral::SCB::sys_reset();
         }
+    }
+}
+
+/// The serving loop's view of this node.
+struct Host {
+    watch: &'static dyn Watch,
+    task: usize,
+    started: Instant,
+    out: [u8; conform::OUT_MAX],
+}
+
+impl ServeHost<Store, SelfCheck> for Host {
+    fn now_ms(&self) -> u64 {
+        Instant::now().as_millis()
+    }
+    fn idle(&mut self) {
+        self.watch.idle(self.task);
+    }
+    fn busy(&mut self) {
+        self.watch.busy(self.task);
+    }
+    fn on_request(&mut self) {
+        // An erase starts with a full watchdog period.
+        self.watch.feed();
+        self.started = Instant::now();
+    }
+    fn intercept(&mut self, agent: &mut AppAgent, request: &[u8]) -> Option<&[u8]> {
+        let n = conform::serve(agent, request, &mut self.out, self.watch, self.task)?;
+        Some(&self.out[..n])
+    }
+    fn after(&mut self, agent: &mut AppAgent, cmd: u8) {
+        self.watch.set_trial(on_trial(agent.store()));
+        let ms = self.started.elapsed().as_millis();
+        if ms >= SLOW_REQUEST_MS {
+            info!("cmd {=u8:#04x}: {} ms", cmd, ms);
+        }
+    }
+    fn on_error(&mut self, e: LinkError) {
+        warn!("i2c: {}", defmt::Debug2Format(&e));
     }
 }
 
@@ -285,32 +268,26 @@ mod conform {
     /// LSI may run at up to 47 kHz, which shortens this to about 8.2 s, still
     /// above the 4 s a 128 KiB sector erase may take between two feeds.
     pub const WDT_MS: u32 = 12_000;
+    pub const OUT_MAX: usize = RESPONSE_MAX;
 
-    /// Answers a CONF_RUN request; false for any other frame.
+    /// Answers a CONF_RUN request into `out`; `None` for any other frame.
     pub fn serve(
         agent: &mut AppAgent,
         request: &[u8],
-        mailbox: &mut Mailbox,
+        out: &mut [u8; OUT_MAX],
         watch: &dyn Watch,
         task: usize,
-    ) -> bool {
+    ) -> Option<usize> {
         let state = agent.store().log_state();
         let setup = NodeSetup {
             declared: &layout::FLASH_REGIONS,
             scratch: crate::scratch_addr(&state, ACTIVE, &layout::SLOTS),
         };
-        let mut out = [0u8; RESPONSE_MAX];
         let flash = agent.store().flash();
         let max = max_payload::I2C;
         // Long tests feed through this hook and count as progress.
         let mut feed = || watch.progress(task);
-        match handle_frame(request, max, flash, &setup, &mut out, &mut feed) {
-            Some(n) => {
-                mailbox.respond(Some(&out[..n]), false);
-                true
-            }
-            None => false,
-        }
+        handle_frame(request, max, flash, &setup, out, &mut feed)
     }
 }
 
@@ -319,8 +296,15 @@ mod conform {
     use super::*;
 
     pub const WDT_MS: u32 = 0;
+    pub const OUT_MAX: usize = 0;
 
-    pub fn serve(_: &mut AppAgent, _: &[u8], _: &mut Mailbox, _: &dyn Watch, _: usize) -> bool {
-        false
+    pub fn serve(
+        _: &mut AppAgent,
+        _: &[u8],
+        _: &mut [u8; OUT_MAX],
+        _: &dyn Watch,
+        _: usize,
+    ) -> Option<usize> {
+        None
     }
 }

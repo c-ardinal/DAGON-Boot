@@ -1,7 +1,7 @@
 //! The HAL side of the board: peripheral split, interrupts, the 親機 start
 //! and the link and display set-up.
 
-use dagon_mcu_rp2040::links::{I2cLink, PioStream, RpI2c};
+use dagon_mcu_rp2040::links::{I2cLink, Kind, PioStream, RpI2c};
 pub use dagon_mcu_rp2040::node::DagonParts;
 use dagon_mcu_rp2040::sub::SubLines;
 pub use dagon_mcu_rp2040::BoardDef;
@@ -63,6 +63,8 @@ pub fn start<const N: usize>(
     io: Io,
     guard: &'static dagon_mcu_rp2040::watchdog::Guard<N>,
     cfg: dagon_mcu_rp2040::relay::RelayConfig,
+    uplink: Kind,
+    downlinks: &[Kind],
 ) -> Spare {
     const {
         assert!(
@@ -70,10 +72,15 @@ pub fn start<const N: usize>(
             "the 親機 needs guard tasks 0..=DISPLAY_TASK"
         )
     };
+    // The only uplink this board offers (`require_uplink` checks it at
+    // compile time): the USB CDC device, built by the relay.
+    debug_assert!(uplink == Kind::UsbCdc);
+    let wants = |k: Kind| downlinks.contains(&k);
+    // The STM32 recovery lines belong to the I2C downlink (ROM path).
     let links = dagon_mcu_rp2040::relay::Links {
-        sub: Some(io.sub_ctl.lines()),
-        uart: Some(io.sub_uart.stream(Irqs)),
-        i2c: Some(io.sub_i2c.link(Irqs)),
+        sub: wants(Kind::I2c).then(|| io.sub_ctl.lines()),
+        uart: wants(Kind::Uart).then(|| downlink_uart(io.sub_uart)),
+        i2c: wants(Kind::I2c).then(|| downlink_i2c(io.sub_i2c)),
     };
     // The touch controller stays out of reset for the life of the app.
     core::mem::forget(hold_touch(io.touch_rst));
@@ -90,6 +97,18 @@ pub fn start<const N: usize>(
     spawner
         .spawn(display::task(display, FRAME.take(), guard.lease(DISPLAY_TASK)).expect("task pool"));
     spare
+}
+
+/// Down `i2c` on this board: I2C0 on GPIO16/17 at [`I2C_HZ`] with the
+/// DAGON mailbox.
+pub fn downlink_i2c(p: SubI2c) -> I2cLink<RpI2c<'static, I2C0>> {
+    p.link(Irqs)
+}
+
+/// Down `uart` on this board: the PIO0 UART on GPIO26/27 at [`UART_BAUD`]
+/// (the relay wraps it in `links::Uart` with its clock).
+pub fn downlink_uart(p: SubUart) -> PioStream<'static, PIO0, 0, 1> {
+    p.stream(Irqs)
 }
 
 impl BoardDef for Board {

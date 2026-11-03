@@ -13,10 +13,18 @@ mod app;
 mod wiring;
 
 use dagon_board_nucleo_f401re::{self as board, Board, BoardDef};
+use dagon_mcu_stm32f401re::links::{self, Kind};
 use dagon_mcu_stm32f401re::watchdog::{now_ms, Guard, Trial};
 use dagon_mcu_stm32f401re::{clocks, node};
 use embassy_executor::Spawner;
 use {defmt_rtt as _, panic_probe as _};
+
+/// The hops of this node, from the 構成 (dagon gen writes them): the
+/// build stops here, naming the hop, if a kind is not available yet.
+const UPLINK: Kind = {{uplink}};
+const DOWNLINKS: &[Kind] = &[{{downlinks}}];
+const _: () = links::require_uplink(UPLINK);
+const _: () = links::require_downlinks(DOWNLINKS);
 
 /// Watchdog guard tasks: DAGON's link, then app.rs's.
 const TASKS: usize = node::APP_TASKS + app::TASKS;
@@ -32,6 +40,6 @@ async fn main(spawner: Spawner) {
     // DAGON_TARGET_TAG in .cargo/config.toml (the boot core uses it too).
     let tag = dagon_mcu_stm32f401re::target_tag!();
     // An unreadable state log: nothing starts and the watchdog resets.
-    board::start(spawner, dagon, &GUARD, tag, app::self_check).ok();
+    board::start(spawner, dagon, &GUARD, tag, app::self_check, UPLINK).ok();
     app::start(spawner, io, &GUARD, node::APP_TASKS);
 }

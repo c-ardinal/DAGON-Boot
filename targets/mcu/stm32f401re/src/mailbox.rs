@@ -63,6 +63,11 @@ impl Mailbox {
         self.phase = Phase::Ready;
     }
 
+    /// Reset once the held response has been read in full.
+    pub fn reboot_after_read(&mut self) {
+        self.reboot = true;
+    }
+
     /// Bytes to send for the read transaction starting now (the driver pads
     /// with 0x00 if the hub reads more).
     pub fn read_data(&self) -> &[u8] {

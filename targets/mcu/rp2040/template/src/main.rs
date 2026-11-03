@@ -13,11 +13,19 @@ mod board;
 mod wiring;
 
 use board::Board;
+use dagon_mcu_rp2040::links::{self, Kind};
 use dagon_mcu_rp2040::relay::{self, RelayConfig};
 use dagon_mcu_rp2040::watchdog::{now_ms, Guard, Trial};
 use dagon_mcu_rp2040::BoardDef;
 use embassy_executor::Spawner;
 use panic_halt as _;
+
+/// The hops of this node, from the 構成 (dagon gen writes them): the
+/// build stops here, naming the hop, if a kind is not available yet.
+const UPLINK: Kind = {{uplink}};
+const DOWNLINKS: &[Kind] = &[{{downlinks}}];
+const _: () = links::require_uplink(UPLINK);
+const _: () = links::require_downlinks(DOWNLINKS);
 
 /// Watchdog guard tasks: the relay's, then app.rs's.
 const TASKS: usize = relay::TASKS + app::TASKS;
@@ -38,7 +46,7 @@ async fn main(spawner: Spawner) {
         fallback: &[],
         self_check: app::self_check,
     };
-    let (links, spare) = board::links(io);
+    let (links, spare) = board::links(io, UPLINK, DOWNLINKS);
     relay::start::<Board, TASKS>(spawner, dagon, links, &GUARD, cfg);
     app::start(spawner, spare, &GUARD, relay::TASKS);
 }

@@ -7,6 +7,7 @@
 //!   preemption accounting for two-level task layouts;
 //! - [`frames`]: DAGON frames cut out of a byte stream (USB CDC, UART);
 //! - [`uart`]: request/response over a byte stream (bounded, resyncing);
+//! - [`serve`]: the agent's serving loop over any link;
 //! - [`mapped`]: read-only `Flash` over memory-mapped flash.
 #![no_std]
 
@@ -16,5 +17,6 @@ pub mod hooks;
 pub mod link;
 pub mod liveness;
 pub mod mapped;
+pub mod serve;
 pub mod tag;
 pub mod uart;

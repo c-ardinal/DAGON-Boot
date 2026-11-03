@@ -17,6 +17,8 @@ pub enum LinkError {
     Timeout,
     /// A frame longer than the link carries.
     Overflow,
+    /// What arrived is not a valid frame (checked by the link).
+    Corrupt,
     /// The peer went away or the medium failed.
     Closed,
 }

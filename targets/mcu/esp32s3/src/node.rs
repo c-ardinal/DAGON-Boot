@@ -34,18 +34,19 @@ use crate::{
     board::{BoardDef, PlainBoard},
     boot::EspBootSelect,
     flash::EspFlash,
-    framer::{FrameCutter, INTER_BYTE_TIMEOUT_MS},
+    framer::{INTER_BYTE_TIMEOUT_MS, MAX_UART_FRAME},
+    links,
     otadata::ENTRY_LEN,
     sys::{EspClock, EspReset, RtcWatchdog},
     TRIAL_WDT_MS,
 };
 use dagon_agent::{Agent, Hooks, SlotStore, StoreError, IDLE_TIMEOUT_MS};
+use dagon_mcu_common::link::Link as DagonLink;
 use dagon_port::{BootSelectV, Reset, Watchdog};
 use dagon_proto::payload::SlotState;
 use embassy_executor::{SendSpawner, Spawner};
 use embassy_futures::select::{select3, Either3};
-use embassy_time::{with_timeout, Duration, Instant, Timer};
-use embedded_io_async::{Read, Write};
+use embassy_time::{Duration, Instant, Timer};
 use esp_bootloader_esp_idf::partitions::FlashStorage;
 use esp_hal::{
     interrupt::Priority,
@@ -53,7 +54,7 @@ use esp_hal::{
     rtc_cntl::{Rtc, Swd},
     uart::Uart,
     usb::usb_serial_jtag::UsbSerialJtag,
-    Async, Blocking,
+    Blocking,
 };
 use esp_rtos::embassy::InterruptExecutor;
 use static_cell::StaticCell;
@@ -71,9 +72,6 @@ pub const LINK_PRIORITY: Priority = Priority::Priority2;
 const FEED_PERIOD: Duration = Duration::from_millis(500);
 /// Time one request may take, a full slot erase included.
 const REQUEST_BUDGET_MS: u32 = 120_000;
-/// Give up on a reply after this long (USB: host stopped reading; the largest
-/// UART frame takes about 90 ms).
-const SEND_TIMEOUT: Duration = Duration::from_millis(500);
 
 /// Everything DAGON owns on the chip, handed over by the board crate.
 pub struct NodePeripherals<'d> {
@@ -260,10 +258,11 @@ enum Via {
     Usb,
 }
 
+/// The link task: both uplinks (common [`DagonLink`]s) and the agent.
 struct Link {
     agent: Node,
-    uart: Uart<'static, Async>,
-    usb: UsbSerialJtag<'static, Async>,
+    uart: links::Uart,
+    usb: links::UsbCdc,
     board: RomBoard,
     lease: Lease,
 }
@@ -292,8 +291,8 @@ impl Link {
             swd: rtc.swd,
             board: p.board,
         };
-        let uart = p.uart.into_async();
-        let usb = UsbSerialJtag::new(p.usb_device).into_async();
+        let uart = links::Uart::new(p.uart.into_async());
+        let usb = links::UsbCdc::new(UsbSerialJtag::new(p.usb_device).into_async());
 
         let storage = STORAGE.init(RefCell::new(FlashStorage::new(p.flash)));
         let boot = EspBootSelect::new(storage).ok()?;
@@ -322,10 +321,9 @@ impl Link {
     }
 
     async fn run(mut self) {
-        let (mut uart_cut, mut usb_cut) = (FrameCutter::new(), FrameCutter::new());
-        let (mut ub, mut vb) = ([0u8; 64], [0u8; 64]);
         let idle = Duration::from_millis(IDLE_TIMEOUT_MS.into());
         let mut last = Instant::now();
+        let mut req = [0u8; MAX_UART_FRAME];
         loop {
             self.agent.store().wdt.feed();
             if last.elapsed() >= idle {
@@ -333,46 +331,23 @@ impl Link {
                 last = Instant::now();
             }
             let ev = select3(
-                self.uart.read_async(&mut ub),
-                self.usb.read(&mut vb),
+                self.uart.read_frame(),
+                self.usb.read_frame(),
                 Timer::after(FEED_PERIOD),
             )
             .await;
-            match ev {
-                Either3::First(Ok(n)) => {
-                    let t = now_ms();
-                    for &b in &ub[..n] {
-                        if let Some(f) = uart_cut.push_at(b, t) {
-                            last = Instant::now();
-                            if self.serve(f, Via::Uart).await >= INTER_BYTE_TIMEOUT_MS {
-                                // Bytes that came in meanwhile wait in the FIFO
-                                // and read as one batch with one time: no
-                                // partial frame may run across that section.
-                                uart_cut.drop_partial();
-                                usb_cut.drop_partial();
-                            }
-                        }
-                    }
-                }
-                // FIFO overflow or line error: the partial frame is lost.
-                Either3::First(Err(_)) => uart_cut.clear(),
-                Either3::Second(Ok(n)) => {
-                    let t = now_ms();
-                    for &b in &vb[..n] {
-                        if let Some(f) = usb_cut.push_at(b, t) {
-                            last = Instant::now();
-                            if self.serve(f, Via::Usb).await >= INTER_BYTE_TIMEOUT_MS {
-                                // Bytes that came in meanwhile wait in the FIFO
-                                // and read as one batch with one time: no
-                                // partial frame may run across that section.
-                                uart_cut.drop_partial();
-                                usb_cut.drop_partial();
-                            }
-                        }
-                    }
-                }
-                Either3::Second(Err(_)) => usb_cut.clear(),
-                Either3::Third(()) => {}
+            let (n, via) = match ev {
+                Either3::First(Ok(f)) => (copy(&mut req, f), Via::Uart),
+                Either3::Second(Ok(f)) => (copy(&mut req, f), Via::Usb),
+                _ => continue,
+            };
+            last = Instant::now();
+            if self.serve(&req[..n], via).await >= INTER_BYTE_TIMEOUT_MS {
+                // Bytes that came in meanwhile wait in the FIFO and read as
+                // one batch with one time: no partial frame may run across
+                // that section.
+                self.uart.drop_partial();
+                self.usb.drop_partial();
             }
         }
     }
@@ -388,7 +363,11 @@ impl Link {
         let decided = self.decide(frame, &mut out);
         let mut held = self.lease.release_cpu(now_ms());
         if let Some((n, then)) = decided {
-            let sent = send(&mut self.uart, &mut self.usb, via, &out[..n]).await;
+            let sent = match via {
+                Via::Uart => self.uart.write_frame(&out[..n]).await,
+                Via::Usb => self.usb.write_frame(&out[..n]).await,
+            }
+            .is_ok();
             held = held.max(self.after_reply(serve::next(then, sent)));
         }
         self.lease.idle();
@@ -456,35 +435,11 @@ pub static ROM_REPLY_LOST: AtomicU32 = AtomicU32::new(0);
 /// Room for the largest reply frame (agent STATUS 84 B, CONF_RUN 82 B).
 const REPLY_MAX: usize = 128;
 
-/// Sends a reply and waits until it has left the node (UART: transmitter
-/// idle; USB: written and flushed), within [`SEND_TIMEOUT`]. `false` when it
-/// did not. A lost reply is recovered by the sender's retry (same seq).
-async fn send(
-    uart: &mut Uart<'static, Async>,
-    usb: &mut UsbSerialJtag<'static, Async>,
-    via: Via,
-    frame: &[u8],
-) -> bool {
-    let done = match via {
-        Via::Uart => {
-            with_timeout(SEND_TIMEOUT, async {
-                let mut sent = 0;
-                while sent < frame.len() {
-                    sent += uart.write_async(&frame[sent..]).await.map_err(|_| ())?;
-                }
-                uart.flush_async().await.map_err(|_| ())
-            })
-            .await
-        }
-        Via::Usb => {
-            with_timeout(SEND_TIMEOUT, async {
-                usb.write_all(frame).await.map_err(|_| ())?;
-                usb.flush().await.map_err(|_| ())
-            })
-            .await
-        }
-    };
-    matches!(done, Ok(Ok(())))
+/// Copies a received frame out of its link (the link task answers on it).
+fn copy(req: &mut [u8; MAX_UART_FRAME], f: &[u8]) -> usize {
+    let n = f.len().min(MAX_UART_FRAME);
+    req[..n].copy_from_slice(&f[..n]);
+    n
 }
 
 /// CONF_RUN in a conformance build. The scratch unit is the first erase unit

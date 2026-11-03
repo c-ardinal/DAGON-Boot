@@ -49,7 +49,16 @@ pub fn job_flash(job: &mut Job, cfg: Config, v: Value) -> Result<Value, String> 
         &v,
         &mut |cfg, t, node, key, out, job| {
             let cancel = job.cancel_flag();
-            crate::flash::prepare(cfg, t, node, key, out, &mut |l| job.log(l), &cancel)
+            crate::flash::prepare(
+                cfg,
+                t,
+                node,
+                key,
+                out,
+                crate::flash::Paths::Relative,
+                &mut |l| job.log(l),
+                &cancel,
+            )
         },
         &mut |cfg, t, node, job| {
             let cancel = job.cancel_flag();
@@ -78,7 +87,8 @@ fn flash_with(
     let device = v["device"].as_str();
     let t = read_topology(cfg, &inside(cfg, &cfg.topology_path(None)?)?)?;
     let out = inside(cfg, &cfg.provision_dir().join(node))?;
-    let steps = crate::flash::plan(cfg, &t, node, &out)?;
+    // The page gets paths relative to the project or the DAGON source.
+    let steps = crate::flash::plan(cfg, &t, node, &out, crate::flash::Paths::Relative)?;
     for l in &steps {
         job.log(l);
     }

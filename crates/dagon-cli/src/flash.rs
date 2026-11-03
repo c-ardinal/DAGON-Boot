@@ -43,26 +43,31 @@ pub(crate) struct Part {
     pub sub: String,
     /// Binary target; `None`: the part package's own name.
     pub bin: Option<String>,
+    /// The owner's package folder when a project defines it (else found
+    /// in the DAGON source).
+    pub package: Option<PathBuf>,
 }
 
 /// The parts `mcu`'s first install needs besides the app, for a node on
 /// `board`: the MCU definition's, then the board definition's.
 pub(crate) fn parts(reg: &Registry, mcu: &str, board: Option<&str>) -> Vec<Part> {
-    let of = |owner: Want, p: &dagon_topology::defs::Part| Part {
+    let of = |owner: Want, package: &Option<PathBuf>, p: &dagon_topology::defs::Part| Part {
         name: p.name.clone(),
         owner,
         sub: p.sub.clone(),
         bin: p.bin.clone(),
+        package: package.clone(),
     };
-    let from_mcu = reg
-        .mcu(mcu)
-        .into_iter()
-        .flat_map(|m| &m.parts)
-        .map(|p| of(Want::Mcu(mcu.into()), p));
-    let from_board = board
-        .and_then(|b| reg.board(b))
-        .into_iter()
-        .flat_map(|b| b.parts.iter().map(|p| of(Want::Board(b.id.clone()), p)));
+    let from_mcu = reg.mcu(mcu).into_iter().flat_map(|m| {
+        m.parts
+            .iter()
+            .map(|p| of(Want::Mcu(mcu.into()), &m.package, p))
+    });
+    let from_board = board.and_then(|b| reg.board(b)).into_iter().flat_map(|b| {
+        b.parts
+            .iter()
+            .map(|p| of(Want::Board(b.id.clone()), &b.package, p))
+    });
     from_mcu.chain(from_board).collect()
 }
 
@@ -88,7 +93,10 @@ fn package_dir(root: &Path, owner: &Want) -> Result<PathBuf, String> {
 
 /// Package folder of `part` under `root`.
 pub(crate) fn part_dir(root: &Path, part: &Part) -> Result<PathBuf, String> {
-    let at = package_dir(root, &part.owner)?;
+    let at = match &part.package {
+        Some(p) => p.clone(),
+        None => package_dir(root, &part.owner)?,
+    };
     Ok(if part.sub.is_empty() {
         at
     } else {
@@ -121,6 +129,55 @@ fn package_in_source(cfg: &Config, node: &str, root: &Path) -> bool {
     cfg.build
         .get(node)
         .is_some_and(|b| crate::paths::contained(root, &cfg.base.join(&b.package)).is_ok())
+}
+
+/// How plan lines name local folders and files: in full (the terminal),
+/// or relative to the project or the DAGON source (the page: no path of
+/// this machine leaves it).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Paths {
+    Full,
+    Relative,
+}
+
+/// `p` as plan lines show it: in full, or relative to the project (its
+/// file name when outside it).
+fn shown(cfg: &Config, p: &Path, paths: Paths) -> String {
+    if paths == Paths::Full {
+        return p.display().to_string();
+    }
+    let base = std::fs::canonicalize(&cfg.base).map_or(cfg.base.clone(), crate::config::plain_path);
+    [&cfg.base, &base]
+        .iter()
+        .find_map(|b| p.strip_prefix(b).ok())
+        .map(crate::config::forward_path)
+        .or_else(|| p.file_name().map(|n| n.to_string_lossy().into_owned()))
+        .unwrap_or_default()
+}
+
+/// How the plan names a part's folder: in its project package, or in the
+/// DAGON source.
+fn part_origin(cfg: &Config, part: &Part, paths: Paths) -> String {
+    match (&part.package, paths) {
+        (Some(p), _) => {
+            let dir = if part.sub.is_empty() {
+                p.clone()
+            } else {
+                p.join(&part.sub)
+            };
+            shown(cfg, &dir, paths)
+        }
+        (None, Paths::Full) => origin(cfg, &part.owner, &part.sub),
+        (None, Paths::Relative) => {
+            let rel = source_relative(cfg, &part.owner);
+            let rel = if part.sub.is_empty() {
+                rel
+            } else {
+                format!("{rel}/{}", part.sub)
+            };
+            format!("{rel} of the DAGON source")
+        }
+    }
 }
 
 /// How the plan names a package or a part folder of the DAGON source.
@@ -165,6 +222,7 @@ pub(crate) fn plan(
     t: &Topology,
     node: &str,
     out: &Path,
+    paths: Paths,
 ) -> Result<Vec<String>, String> {
     let n = t
         .node(node)
@@ -195,7 +253,7 @@ pub(crate) fn plan(
         lines.push(format!(
             "  build    {:<8} {} (tag {})",
             part.name,
-            origin(cfg, &part.owner, &part.sub),
+            part_origin(cfg, part, paths),
             n.tag
         ));
     }
@@ -203,17 +261,20 @@ pub(crate) fn plan(
         .build
         .get(node)
         .ok_or_else(|| format!("no [build.{node}] in dagon.toml"))?;
-    lines.push(format!("  build    app      {}", b.package.display()));
-    lines.extend(write_plan(cfg, mcu, out)?);
+    lines.push(format!(
+        "  build    app      {}",
+        shown(cfg, &b.package, paths)
+    ));
+    lines.extend(write_plan(cfg, mcu, out, paths)?);
     Ok(lines)
 }
 
 /// The plan's lines for the files made and the write, by writer kind.
-fn write_plan(cfg: &Config, mcu: &McuDef, out: &Path) -> Result<Vec<String>, String> {
+fn write_plan(cfg: &Config, mcu: &McuDef, out: &Path, paths: Paths) -> Result<Vec<String>, String> {
     let via = &mcu.connection.label;
     Ok(match &mcu.writer {
         Writer::Uf2Drive { board_id, .. } => vec![
-            format!("  make     {}", out.join("rescue.uf2").display()),
+            format!("  make     {}", shown(cfg, &out.join("rescue.uf2"), paths)),
             format!(
                 "  write    copy it to the UF2 drive chosen after the build (Board-ID {board_id} \
                  is the {}; waits {} s for one)",
@@ -222,7 +283,7 @@ fn write_plan(cfg: &Config, mcu: &McuDef, out: &Path) -> Result<Vec<String>, Str
             ),
         ],
         Writer::ProbeRs { .. } => vec![
-            format!("  make     {}", out.join("flash.bin").display()),
+            format!("  make     {}", shown(cfg, &out.join("flash.bin"), paths)),
             format!("  write    probe-rs erase, download, reset through the {via} chosen after the build"),
         ],
         Writer::Espflash { usb_hint, .. } => {
@@ -235,7 +296,7 @@ fn write_plan(cfg: &Config, mcu: &McuDef, out: &Path) -> Result<Vec<String>, Str
                 source_relative(cfg, &Want::Mcu(mcu.id.clone())),
                 esp.bootloader
             )];
-            l.push(format!("  make     in {}:", out.display()));
+            l.push(format!("  make     in {}:", shown(cfg, out, paths)));
             l.extend(
                 esp_files_plan(mcu, &esp)?
                     .into_iter()
@@ -255,12 +316,14 @@ fn write_plan(cfg: &Config, mcu: &McuDef, out: &Path) -> Result<Vec<String>, Str
 /// The first-install inputs, all built now with the signing key's public
 /// half embedded. Prebuilt `[provision.<id>]` files are never used: a boot
 /// core with another key would refuse every image signed later.
+#[allow(clippy::too_many_arguments)]
 fn inputs(
     cfg: &Config,
     reg: &Registry,
     t: &Topology,
     node: &str,
     key: &KeyPair,
+    paths: Paths,
     log: &mut dyn FnMut(&str),
     cancel: &AtomicBool,
 ) -> Result<ProvisionInputs, String> {
@@ -272,35 +335,11 @@ fn inputs(
     }
     let fw_key = firmware_key(cfg, key)?;
     let hex = dagon_sign::to_hex(&fw_key);
-    log(&format!("{node}: DAGON source {}", root.display()));
-    let mut built = Vec::new();
-    for part in parts(reg, &n.mcu, n.board.as_deref()) {
-        let dir = part_dir(&root, &part)?;
-        let bin = match &part.bin {
-            Some(b) => b.clone(),
-            None => nodebuild::package_name(&dir)?,
-        };
-        let target = cfg.base.join("out/flash/target").join(&part.name);
-        log(&format!(
-            "{node}: building {} in {}",
-            part.name,
-            dir.display()
-        ));
-        let exe = nodebuild::cargo_build(
-            &dir,
-            &bin,
-            &[],
-            Some(&target),
-            nodebuild::FirmwareEnv {
-                pubkey_hex: Some(&hex),
-                // The boot core accepts only images carrying this tag.
-                target_tag: Some(&n.tag),
-            },
-            log,
-            cancel,
-        )?;
-        built.push((part.name, exe));
-    }
+    log(&match paths {
+        Paths::Full => format!("{node}: DAGON source {}", root.display()),
+        Paths::Relative => format!("{node}: building with the project's DAGON source"),
+    });
+    let built = build_parts(cfg, reg, n, &root, &hex, paths, log, cancel)?;
     let source = in_source.then_some(root.as_path());
     nodebuild::build_nodes_keyed(cfg, &[node.to_string()], Some(fw_key), source, log, cancel)?;
     let stage0 = built.iter().find(|p| p.0 == STAGE0).map(|p| p.1.clone());
@@ -321,19 +360,70 @@ fn inputs(
     })
 }
 
+/// Builds the first-write parts of node `n` with the firmware key `hex`:
+/// a project-defined package's in that package, the others found in the
+/// DAGON source at `root`. Returns (part name, built executable).
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn build_parts(
+    cfg: &Config,
+    reg: &Registry,
+    n: &dagon_topology::schema::Node,
+    root: &Path,
+    hex: &str,
+    paths: Paths,
+    log: &mut dyn FnMut(&str),
+    cancel: &AtomicBool,
+) -> Result<Vec<(String, PathBuf)>, String> {
+    let node = &n.id;
+    let mut built = Vec::new();
+    for part in parts(reg, &n.mcu, n.board.as_deref()) {
+        let dir = part_dir(root, &part)?;
+        let bin = match &part.bin {
+            Some(b) => b.clone(),
+            None => nodebuild::package_name(&dir)?,
+        };
+        let target = cfg.base.join("out/flash/target").join(&part.name);
+        log(&format!(
+            "{node}: building {} in {}",
+            part.name,
+            match paths {
+                Paths::Full => dir.display().to_string(),
+                Paths::Relative => part_origin(cfg, &part, paths),
+            }
+        ));
+        let exe = nodebuild::cargo_build(
+            &dir,
+            &bin,
+            &[],
+            Some(&target),
+            nodebuild::FirmwareEnv {
+                pubkey_hex: Some(hex),
+                // The boot core accepts only images carrying this tag.
+                target_tag: Some(&n.tag),
+            },
+            log,
+            cancel,
+        )?;
+        built.push((part.name, exe));
+    }
+    Ok(built)
+}
+
 /// Builds the parts and the app and writes the first-install files into
 /// `out`.
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn prepare(
     cfg: &Config,
     t: &Topology,
     node: &str,
     key: &KeyPair,
     out: &Path,
+    paths: Paths,
     log: &mut dyn FnMut(&str),
     cancel: &AtomicBool,
 ) -> Result<FirstWrite, String> {
     let reg = crate::defs::registry(cfg)?;
-    let i = inputs(cfg, &reg, t, node, key, log, cancel)?;
+    let i = inputs(cfg, &reg, t, node, key, paths, log, cancel)?;
     let mcu = node_mcu(&reg, t, node)?;
     match Esp::of(mcu) {
         Some(esp) => {
@@ -397,7 +487,10 @@ fn esp_files(
     use dagon_format::header::{image_kind, slot_binding, HEADER_SIZE};
     let mcu = node_mcu(reg, t, node)?;
     let e = Esp::of(mcu).ok_or("not an espflash MCU")?;
-    let pkg = package_dir(home, &Want::Mcu(mcu.id.clone()))?;
+    let pkg = match &mcu.package {
+        Some(p) => p.clone(),
+        None => package_dir(home, &Want::Mcu(mcu.id.clone()))?,
+    };
     let (bl_path, sums, csv_path) = esp::vendor_files(mcu, &e, &pkg)?;
     let boot = esp::checked_bootloader(&bl_path, &sums)?;
     let csv =
@@ -640,13 +733,13 @@ pub fn command(args: &[&str]) -> Result<(), String> {
     let out = o
         .get("out")
         .map_or_else(|| cfg.provision_dir().join(node), PathBuf::from);
-    let steps = plan(&cfg, &t, node, &out)?.join("\n");
+    let steps = plan(&cfg, &t, node, &out, Paths::Full)?.join("\n");
     println!("{steps}");
     let selector = selector(&o, &cfg, &t, node)?;
     let key = load_key(o.get("key"))?;
     let mut log = |l: &str| println!("{l}");
     let cancel = AtomicBool::new(false);
-    let w = prepare(&cfg, &t, node, &key, &out, &mut log, &cancel)?;
+    let w = prepare(&cfg, &t, node, &key, &out, Paths::Full, &mut log, &cancel)?;
     if dry {
         dry_run(&w);
         return Ok(());
@@ -763,7 +856,7 @@ mod tests {
     fn rp2040_dry_run_makes_the_uf2_and_plans_the_drive_copy() {
         let (cfg, t) = area("hub");
         let out = cfg.base.join("out/hub");
-        let plan = plan(&cfg, &t, "hub", &out).unwrap().join("\n");
+        let plan = plan(&cfg, &t, "hub", &out, Paths::Full).unwrap().join("\n");
         assert!(
             plan.contains("rescue.uf2") && plan.contains("RPI-RP2"),
             "{plan}"
@@ -773,6 +866,19 @@ mod tests {
             "{plan}"
         );
         assert!(plan.contains("(tag hub-rp2040-lcd)"), "{plan}");
+        // The page's plan: the same steps with no path of this machine.
+        let page = super::plan(&cfg, &t, "hub", &out, Paths::Relative)
+            .unwrap()
+            .join(
+                "
+",
+            );
+        assert_eq!(page.lines().count(), plan.lines().count());
+        assert!(page.contains("  make     out/hub/rescue.uf2"), "{page}");
+        assert!(page.contains("/stage0 of the DAGON source"), "{page}");
+        for local in [cfg.base.display().to_string(), here().display().to_string()] {
+            assert!(!page.contains(&local), "{local} in {page}");
+        }
         match provision_files(
             Registry::builtin(),
             &t,
@@ -798,7 +904,7 @@ mod tests {
     fn f401_dry_run_makes_the_image_and_the_probe_rs_commands() {
         let (cfg, t) = area("seg");
         let out = cfg.base.join("out/seg");
-        let plan = plan(&cfg, &t, "seg", &out).unwrap().join("\n");
+        let plan = plan(&cfg, &t, "seg", &out, Paths::Full).unwrap().join("\n");
         assert!(
             plan.contains("flash.bin") && plan.contains("probe-rs"),
             "{plan}"
@@ -840,7 +946,7 @@ mod tests {
         let (mut cfg, t) = area("prov");
         let prebuilt = built(&cfg, false);
         cfg.provision.insert("seg".into(), prebuilt.clone());
-        let plan = plan(&cfg, &t, "seg", &cfg.base.join("out"))
+        let plan = plan(&cfg, &t, "seg", &cfg.base.join("out"), Paths::Full)
             .unwrap()
             .join("\n");
         assert!(plan.contains("ignore   [provision.seg]"), "{plan}");
@@ -860,9 +966,9 @@ mod tests {
             parts(Registry::builtin(), "esp32s3", None).is_empty(),
             "no board, no factory agent"
         );
-        assert!(plan(&cfg, &t, "nope", &out).is_err());
+        assert!(plan(&cfg, &t, "nope", &out, Paths::Full).is_err());
         cfg.build.clear();
-        assert!(plan(&cfg, &t, "seg", &out)
+        assert!(plan(&cfg, &t, "seg", &out, Paths::Full)
             .unwrap_err()
             .contains("[build.seg]"));
         let _ = std::fs::remove_dir_all(&cfg.base);
@@ -897,7 +1003,7 @@ mod tests {
             tag: Some("v3.1.4".into()),
             path: None,
         };
-        let plan = plan(&cfg, &t, "hub", &cfg.base.join("out"))
+        let plan = plan(&cfg, &t, "hub", &cfg.base.join("out"), Paths::Full)
             .unwrap()
             .join("\n");
         assert!(
@@ -1006,7 +1112,9 @@ mod tests {
             },
         );
         let out = cfg.base.join("out/watch");
-        let plan = plan(&cfg, &t, "watch", &out).unwrap().join("\n");
+        let plan = plan(&cfg, &t, "watch", &out, Paths::Full)
+            .unwrap()
+            .join("\n");
         for want in [
             "m5stopwatch (tag watch-s3)",
             "SHA256SUMS",
@@ -1093,10 +1201,14 @@ mod tests {
         cfg.build.get_mut("seg").unwrap().package = PathBuf::from("nodes/seg");
 
         let out = cfg.base.join("out/seg");
-        let plan = plan(&cfg, &t, "seg", &out).unwrap().join("\n");
+        let plan = plan(&cfg, &t, "seg", &out, Paths::Full).unwrap().join("\n");
         assert!(plan.contains("flash seg (fake-m0):"), "{plan}");
+        // The part is in the project's MCU package, not in a DAGON source.
         assert!(
-            plan.contains("build    bootcore dagon-mcu-fake-m0/bootcore"),
+            plan.contains(&format!(
+                "build    bootcore {} (tag",
+                pkg.join("bootcore").display()
+            )),
             "{plan}"
         );
         assert!(plan.contains("through the SWD"), "{plan}");

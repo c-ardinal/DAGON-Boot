@@ -447,7 +447,7 @@ const hex = (a: number | undefined) => (a === undefined ? '' : `0x${a.toString(1
 
 /** The document in the shape the graph and the operate session draw. */
 /** How a hop's kind reads on the canvas. */
-const KIND_LABEL: Record<LinkKind, string> = {
+export const KIND_LABEL: Record<LinkKind, GLink['kind']> = {
   'usb-cdc': 'USB',
   uart: 'UART',
   i2c: 'I2C',

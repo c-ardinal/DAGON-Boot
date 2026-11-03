@@ -697,7 +697,7 @@
 {#snippet defineRight()}
   <aside class="right">
     {#if cliPanel}
-      <CliPanel {cli} {d} panel={cliPanel} onuse={useRelease} />
+      <CliPanel {cli} {d} {autosave} panel={cliPanel} onuse={useRelease} />
     {:else if d.selected}
       <Inspector {d} />
     {:else}

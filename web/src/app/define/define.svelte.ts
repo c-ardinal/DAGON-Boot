@@ -61,7 +61,8 @@ export class Define {
   /** The answer to saving revision `at`: the document stays as it is either way. */
   saved(at: number, r: SaveResult): void {
     if (r === 'saved') {
-      this.savedAt = at;
+      // Saves can answer out of order: an older one never marks newer edits saved again.
+      this.savedAt = Math.max(this.savedAt, at);
       this.saveFailure = null;
     } else {
       this.saveFailure = r;

@@ -832,6 +832,20 @@ fn the_json_form_round_trips_and_is_validated_again() {
     let back = Registry::from_json(&project.to_json()).unwrap();
     assert_eq!(back.mcus(), without_doctor(&project));
     assert_eq!(back.boards(), project.boards());
+    // A project's entry is made safe again on receipt, whatever was sent.
+    let board = "id = 'x'\nproduct = '<b>C:/Users/me</b>'\nmcu = 'rp2040'\n\
+                 flash_bytes = 0x400000\ndrawing = 'pico'\n";
+    let sent = serde_json::json!({
+        "mcus": [{
+            "label": "builtin MCU rp2040",
+            "toml": include_str!("../../../../targets/mcu/rp2040/dagon-mcu.toml"),
+        }],
+        "boards": [{ "label": "project board x", "toml": board }],
+    });
+    let got = Registry::from_json(&sent.to_string()).unwrap();
+    assert_eq!(got.board("x").unwrap().product, PROJECT_TEXT);
+    // The builtin entry keeps its own words.
+    assert!(!page_safe(&got.mcu("rp2040").unwrap().connection.hint));
     // Every definition is checked again: a bad sector in transit fails.
     let bad = reg().to_json().replace("sector = 4096", "sector = 128");
     let e = Registry::from_json(&bad).unwrap_err();

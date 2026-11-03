@@ -214,8 +214,8 @@ fn empty() -> Registry {
 }
 
 impl Registry {
-    /// `own`: a project's own definition, made safe here (project_text);
-    /// definitions received as JSON were made safe where they were sent.
+    /// `own`: a project's own definition (read from its files, or labelled
+    /// as the project's in JSON), made safe here (project_text).
     fn push_mcu(
         &mut self,
         text: &str,
@@ -382,6 +382,9 @@ fn public_text_file(text: &str, scrub: bool) -> String {
 pub(super) fn from_json(json: &str) -> Result<Registry, DefError> {
     let form: JsonForm =
         serde_json::from_str(json).or_else(|e| err("definitions JSON", e.to_string()))?;
+    // A project's own entries are made safe again here, whatever the
+    // sender did (public_json labels each by its origin).
+    let from_project = |label: &str| label.starts_with(&format!("{} ", Origin::Project.as_str()));
     let mut reg = empty();
     for s in &form.mcus {
         let files = file_refs(&s.files);
@@ -393,7 +396,7 @@ pub(super) fn from_json(json: &str) -> Result<Registry, DefError> {
             },
             // JSON comes from outside: never trusted to run anything.
             Origin::Project,
-            false,
+            from_project(&s.label),
         )?;
     }
     for s in &form.boards {
@@ -404,7 +407,7 @@ pub(super) fn from_json(json: &str) -> Result<Registry, DefError> {
                 files: &[],
             },
             Origin::Project,
-            false,
+            from_project(&s.label),
         )?;
     }
     validate(&reg)?;

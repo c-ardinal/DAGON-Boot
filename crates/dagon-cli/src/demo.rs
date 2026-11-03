@@ -179,6 +179,18 @@ pub fn project(dir: &Path, uplink: Medium) -> Result<(PathBuf, KeyPair), String>
     Ok((dir.join(crate::config::CONFIG_FILE), key))
 }
 
+/// The demo's folder name, one per user: a temporary folder may be shared
+/// (Linux /tmp), and user names that differ only in punctuation or
+/// non-ASCII letters must not share one, so it carries a hash of the name.
+fn demo_dir_name(user: &str) -> String {
+    use sha1::{Digest, Sha1};
+    let hex: String = Sha1::digest(user.as_bytes())[..8]
+        .iter()
+        .map(|b| format!("{b:02x}"))
+        .collect();
+    format!("{DEMO_DIR}-{hex}")
+}
+
 /// `dagon demo [--sim-speed <x>] [--sim-fail seg|watch]
 /// [--uplink usb-cdc|uart|wifi-tcp] [--port <n>] [--no-open]`
 pub fn command(args: &[&str]) -> Result<(), String> {
@@ -212,16 +224,10 @@ pub fn command(args: &[&str]) -> Result<(), String> {
             .find(|m| m.kind().name() == u)
             .ok_or_else(|| format!("--uplink takes usb-cdc, uart or wifi-tcp (not {u})"))?,
     };
-    // Per user: a temporary folder may be shared (Linux /tmp).
     let user = std::env::var("USERNAME")
         .or_else(|_| std::env::var("USER"))
         .unwrap_or_default();
-    let user: String = user.chars().filter(|c| c.is_ascii_alphanumeric()).collect();
-    let dir = std::env::temp_dir().join(if user.is_empty() {
-        DEMO_DIR.to_string()
-    } else {
-        format!("{DEMO_DIR}-{user}")
-    });
+    let dir = std::env::temp_dir().join(demo_dir_name(&user));
     let (config, key) = project(&dir, uplink)?;
     let hub = desk(&key, fail, 1)?;
     let mut sim = crate::serve::SimDevice::new(hub, speed, fail.map(String::from));
@@ -253,6 +259,17 @@ pub fn command(args: &[&str]) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn each_user_name_has_its_own_demo_folder() {
+        let names = ["ab", "a.b", "a b", "山田", "田中", ""].map(demo_dir_name);
+        let distinct: std::collections::HashSet<_> = names.iter().collect();
+        assert_eq!(distinct.len(), names.len());
+        assert_eq!(demo_dir_name("ab"), demo_dir_name("ab"));
+        assert!(names
+            .iter()
+            .all(|n| n.starts_with("dagon-demo-") && n.is_ascii()));
+    }
 
     #[test]
     fn the_demo_project_is_made_afresh_with_its_own_key() {

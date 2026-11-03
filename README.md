@@ -311,7 +311,7 @@ live progress; with `--sim-fail seg` or `--sim-fail watch` that 子機's new
 version crashes at boot and it goes back to 1.0.0. The links and flash take
 about their real time (`--sim-speed` from 0.1 to 20 scales it). The header
 shows 模擬 the whole time. The demo makes its own project in the temporary
-folder (`dagon-demo-<user>`, made afresh at each start) with a DEMO key made for it;
+folder (`dagon-demo-<hash of your user name>`, made afresh at each start) with a DEMO key made for it;
 your keys are not used, and nothing it signs runs on real boards.
 
 ```sh

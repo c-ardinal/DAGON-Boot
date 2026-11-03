@@ -106,6 +106,15 @@ fn fake_project(dir: &Path) -> PathBuf {
         &dir.join("m/sk-ant-FAKE-TOKEN-4242/bootcore/src/main.rs"),
         b"fn main() {}\n",
     );
+    // The node's app: a stub crate in a folder whose names are private.
+    write(
+        &dir.join("private/token/app/Cargo.toml"),
+        b"[package]\nname = \"fake-app\"\nversion = \"0.0.0\"\nedition = \"2021\"\n[workspace]\n",
+    );
+    write(
+        &dir.join("private/token/app/src/main.rs"),
+        b"fn main() {}\n",
+    );
     write(&dir.join("boot.bin"), &[0xB0; 1024]);
     write(&dir.join("app.bin"), &[0xA0; 2048]);
     let toml = dir.join("dagon.toml");
@@ -113,7 +122,7 @@ fn fake_project(dir: &Path) -> PathBuf {
         &toml,
         format!(
             "topology = \"t.yaml\"\nmcu_files = [\"m/dagon-mcu.toml\"]\n\
-             [build.seg]\npackage = \"nodes/seg\"\n\
+             [build.seg]\npackage = \"private/token/app\"\n\
              [provision.seg]\nbootcore = \"boot.bin\"\napp = \"app.bin\"\nversion = \"1.0.0\"\n\
              {FAKE_BOARD}"
         )
@@ -259,6 +268,42 @@ fn a_project_defined_mcu_and_board_go_through_every_command() {
         log.iter()
             .any(|l| l
                 == "seg: building bootcore in dagon-mcu-fake-m0 (the project's own package)"),
+        "{log:?}"
+    );
+
+    // The app: the page names its package, never its folder (the terminal does).
+    assert!(
+        page.contains("build    app      fake-app (the seg app)"),
+        "{page}"
+    );
+    let private = |l: &str| l.contains("private") || l.contains("token");
+    assert!(!private(&page), "{page}");
+    let full = crate::flash::plan(&cfg, &t, "seg", &out, crate::flash::Paths::Full)
+        .unwrap()
+        .join("\n");
+    assert!(
+        full.contains("build    app      private/token/app"),
+        "{full}"
+    );
+    let mut log = Vec::new();
+    crate::flash::build_app(
+        &cfg,
+        "seg",
+        [0; 32],
+        None,
+        crate::flash::Paths::Relative,
+        &mut |l| log.push(l.to_string()),
+        &std::sync::atomic::AtomicBool::new(false),
+    )
+    .unwrap();
+    assert!(!log.iter().any(|l| private(l)), "{log:?}");
+    assert!(
+        !log.iter().any(|l| l.contains(&*dir.to_string_lossy())),
+        "{log:?}"
+    );
+    assert!(
+        log.iter()
+            .any(|l| l.contains("Compiling fake-app") && l.contains("(the seg app)")),
         "{log:?}"
     );
     std::fs::remove_dir_all(&dir).unwrap();

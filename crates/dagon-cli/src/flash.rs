@@ -155,6 +155,37 @@ fn shown(cfg: &Config, p: &Path, paths: Paths) -> String {
         .unwrap_or_default()
 }
 
+/// Every spelling of `dir` a line may carry: as given and canonical.
+fn spellings(dir: &Path) -> Vec<String> {
+    let canon = std::fs::canonicalize(dir).map(crate::config::plain_path);
+    let mut v: Vec<String> = [Some(dir.to_path_buf()), canon.ok()]
+        .into_iter()
+        .flatten()
+        .map(|d| d.display().to_string())
+        .collect();
+    v.dedup();
+    v
+}
+
+/// `line` with each folder of `swaps` replaced by its name.
+fn hidden(line: &str, swaps: &[(String, String)]) -> String {
+    swaps
+        .iter()
+        .filter(|(f, _)| !f.is_empty())
+        .fold(line.to_string(), |l, (f, to)| l.replace(f.as_str(), to))
+}
+
+/// How the page names `node`'s app: its Cargo package name, never its folder.
+fn app_label(cfg: &Config, node: &str) -> String {
+    cfg.build
+        .get(node)
+        .and_then(|b| nodebuild::package_name(&cfg.base.join(&b.package)).ok())
+        .map_or_else(
+            || format!("the {node} app"),
+            |n| format!("{n} (the {node} app)"),
+        )
+}
+
 /// How the page's plan names a project's own package (no folder of it).
 fn project_package(owner: &Want) -> String {
     format!(
@@ -273,7 +304,10 @@ pub(crate) fn plan(
         .ok_or_else(|| format!("no [build.{node}] in dagon.toml"))?;
     lines.push(format!(
         "  build    app      {}",
-        shown(cfg, &b.package, paths)
+        match paths {
+            Paths::Full => shown(cfg, &b.package, paths),
+            Paths::Relative => app_label(cfg, node),
+        }
     ));
     lines.extend(write_plan(cfg, mcu, out, paths)?);
     Ok(lines)
@@ -365,7 +399,7 @@ fn inputs(
     });
     let built = build_parts(cfg, reg, n, &root, &hex, paths, log, cancel)?;
     let source = in_source.then_some(root.as_path());
-    nodebuild::build_nodes_keyed(cfg, &[node.to_string()], Some(fw_key), source, log, cancel)?;
+    build_app(cfg, node, fw_key, source, paths, log, cancel)?;
     let stage0 = built.iter().find(|p| p.0 == STAGE0).map(|p| p.1.clone());
     let version = cfg.build.get(node).and_then(|b| b.version.clone());
     Ok(ProvisionInputs {
@@ -382,6 +416,45 @@ fn inputs(
         release_seq: None,
         proto_version: None,
     })
+}
+
+/// Builds `node`'s app with the firmware key (`source`: the DAGON source
+/// when the app is one of its samples). For the page, the app's folder is
+/// its package name and the project's folder is <project>, in DAGON's
+/// lines and cargo's alike (errors included).
+pub(crate) fn build_app(
+    cfg: &Config,
+    node: &str,
+    fw_key: [u8; 32],
+    source: Option<&Path>,
+    paths: Paths,
+    log: &mut dyn FnMut(&str),
+    cancel: &AtomicBool,
+) -> Result<(), String> {
+    let mut swaps = Vec::new();
+    if paths == Paths::Relative {
+        if let Some(b) = cfg.build.get(node) {
+            let label = app_label(cfg, node);
+            for f in spellings(&cfg.base.join(&b.package)) {
+                swaps.push((f, label.clone()));
+            }
+            swaps.push((b.package.display().to_string(), label));
+        }
+        for f in spellings(&cfg.base) {
+            swaps.push((f, "<project>".to_string()));
+        }
+    }
+    let hide = |l: &str| hidden(l, &swaps);
+    nodebuild::build_nodes_keyed(
+        cfg,
+        &[node.to_string()],
+        Some(fw_key),
+        source,
+        &mut |l| log(&hide(l)),
+        cancel,
+    )
+    .map_err(|e| hide(&e))?;
+    Ok(())
 }
 
 /// Builds the first-write parts of node `n` with the firmware key `hex`:
@@ -417,23 +490,17 @@ pub(crate) fn build_parts(
         ));
         // cargo's own lines and errors name the folder: for the page, a
         // project package's folder becomes its package name.
-        let folders: Vec<String> = match (&part.package, paths) {
+        let swaps: Vec<(String, String)> = match (&part.package, paths) {
             (Some(_), Paths::Relative) => {
-                let canon = std::fs::canonicalize(&dir).map(crate::config::plain_path);
-                [Some(dir.clone()), canon.ok()]
+                let label = project_package(&part.owner);
+                spellings(&dir)
                     .into_iter()
-                    .flatten()
-                    .map(|d| d.display().to_string())
+                    .map(|f| (f, label.clone()))
                     .collect()
             }
             _ => Vec::new(),
         };
-        let label = project_package(&part.owner);
-        let hide = |l: &str| {
-            folders
-                .iter()
-                .fold(l.to_string(), |l, f| l.replace(f.as_str(), &label))
-        };
+        let hide = |l: &str| hidden(l, &swaps);
         let exe = nodebuild::cargo_build(
             &dir,
             &bin,

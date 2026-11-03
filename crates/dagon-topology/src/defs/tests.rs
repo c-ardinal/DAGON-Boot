@@ -4,9 +4,10 @@
 
 use std::path::{Path, PathBuf};
 
+use super::former as boards;
 use super::load::{parse_board_dir, parse_mcu_dir, parse_mcu_text};
 use super::*;
-use crate::{boards, mcu_id_of, port_kind_of};
+use crate::{mcu_id_of, port_kind_of};
 
 fn reg() -> &'static Registry {
     Registry::builtin()

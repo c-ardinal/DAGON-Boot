@@ -2,7 +2,6 @@
 //! Topology YAML: schema, validation rules and the supported-board table.
 //! Shared by the CLI and the browser build so both apply the same rules.
 
-pub mod boards;
 mod check;
 mod compile;
 pub mod defs;

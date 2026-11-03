@@ -1,9 +1,8 @@
 //! The builtin definitions carry what signing, provisioning, the host's ROM
-//! path and the CLI know today. Public values are compared directly;
-//! private CLI constants are checked against their source text, so a
-//! change on either side fails here until both agree.
+//! path and the CLI knew before they read them; the CLI's first-write code
+//! is checked to hold no MCU or board knowledge of its own.
 
-use dagon_sign::{image, provision};
+use dagon_sign::image;
 use dagon_topology::defs::{Registry, Writer};
 
 fn reg() -> &'static Registry {
@@ -13,10 +12,6 @@ fn reg() -> &'static Registry {
 const CLI_FLASH: &str = include_str!("../../dagon-cli/src/flash.rs");
 const CLI_COMMANDS: &str = include_str!("../../dagon-cli/src/commands.rs");
 const CLI_ESP: &str = include_str!("../../dagon-cli/src/esp.rs");
-
-fn has(src: &str, needle: &str) {
-    assert!(src.contains(needle), "source no longer has: {needle}");
-}
 
 #[test]
 fn every_slot_matches_dagon_sign() {
@@ -47,18 +42,14 @@ fn provision_layouts_match() {
     let Writer::Uf2Drive { family, sector, .. } = &rp.writer else {
         panic!("rp2040 writes a UF2 drive")
     };
-    // dagon-sign builds the first-install files from these definitions
-    // (its first_write_golden test pins the bytes); dagon-cli reads them
-    // too (the_cli_holds_no_mcu_knowledge).
-    assert_eq!(*family, provision::UF2_FAMILY_RP2040);
+    // The values dagon-sign's provision.rs held before it read the
+    // definitions; its first_write_golden test pins the bytes built from them.
+    assert_eq!(*family, 0xE48B_FF56);
     assert_eq!(*sector, 0x1000);
     let stage0 = rp.layout.stage0.unwrap();
-    assert_eq!(
-        (stage0.at, stage0.size),
-        (base, provision::RP2040_STAGE0_MAX)
-    );
+    assert_eq!((stage0.at, stage0.size), (base, 0x4000));
     let f4 = reg().mcu("stm32f401re").unwrap();
-    assert_eq!(f4.default_flash_map().base, provision::F401_FLASH_BASE);
+    assert_eq!(f4.default_flash_map().base, 0x0800_0000);
     assert!(matches!(f4.writer, Writer::ProbeRs { .. }));
 }
 

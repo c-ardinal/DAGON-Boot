@@ -1,6 +1,6 @@
 use std::collections::BTreeSet;
 
-use dagon_topology::{boards, check_str, Severity};
+use dagon_topology::{check_str, defs::Registry, Severity};
 
 const DEMO: &str = include_str!("../../../topology/desk-demo.yaml");
 
@@ -343,7 +343,8 @@ fn json_report_shape() {
 
 #[test]
 fn board_table_starts_with_demo_boards() {
-    let ids: Vec<_> = boards::BOARDS.iter().map(|b| b.id).collect();
+    let reg = Registry::builtin();
+    let ids: Vec<_> = reg.boards().iter().map(|b| b.id.as_str()).collect();
     assert_eq!(
         ids,
         [
@@ -352,10 +353,10 @@ fn board_table_starts_with_demo_boards() {
             "m5stopwatch"
         ]
     );
-    let f401 = boards::board("nucleo-f401re").unwrap();
+    let f401 = reg.board("nucleo-f401re").unwrap();
     for pin in ["NRST", "BOOT0"] {
         let h = f401.header.iter().find(|h| h.pin == pin).unwrap();
-        assert_eq!(h.position, None, "{pin} position is not confirmed yet");
+        assert_eq!(h.label, None, "{pin} position is not confirmed yet");
     }
 }
 

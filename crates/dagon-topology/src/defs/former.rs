@@ -1,4 +1,6 @@
-//! Port registry, flash maps and the supported-board table.
+//! The port registry, flash maps and board table the topology checks held
+//! before they read the definitions; kept only so the parity tests pin the
+//! builtin definitions to these values.
 
 use crate::schema::{ControlKind, LinkKind, RomEntry, UartIface};
 
@@ -202,21 +204,9 @@ pub const BOARDS: &[Board] = &[
     },
 ];
 
-pub fn mcu(id: &str) -> Option<&'static Mcu> {
-    MCUS.iter().find(|m| m.id == id)
-}
-
-pub fn board(id: &str) -> Option<&'static Board> {
-    BOARDS.iter().find(|b| b.id == id)
-}
-
 /// First board in the table for an MCU, used when `nodes[].board` is omitted.
 pub fn default_board(mcu: &str) -> Option<&'static Board> {
     BOARDS.iter().find(|b| b.mcu == mcu)
-}
-
-pub fn flash_map(name: &str) -> Option<&'static FlashMap> {
-    FLASH_MAPS.iter().find(|m| m.name == name)
 }
 
 pub fn default_flash_map(mcu: &str) -> Option<&'static FlashMap> {

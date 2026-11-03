@@ -192,6 +192,14 @@ I2C の子機では、リンクにノード側のピン（`node_pins`）を書�
 ## ハードウェアなしで試す
 
 ```sh
+dagon demo                         # 模擬の机で DAGON Console を開く
+dagon demo --sim-fail watch        # 同じで、watch の更新が失敗して元に戻る
+dagon demo --sim-speed 4           # 4 倍の速さ（録画用）
+```
+
+`dagon demo` は、模擬の親機と 2 台の子機（デスクのデモの構成: hub、seg、watch、すべて 1.0.0）を相手に DAGON Console を開きます。`dagon sim run` と同じシミュレータを、実機と同じ dagon-host のコードで動かします。つないで、最新のリリース（demo-1.1.0）を選び、3 台すべてを進み具合を見ながら更新できます。`--sim-fail seg` か `--sim-fail watch` を付けると、その子機の新しいバージョンが起動時に落ち、1.0.0 に戻ります。リンクとフラッシュは実機に近い時間がかかります（`--sim-speed` で 0.1〜20 倍）。ヘッダには常に「模擬」が出ます。デモは一時フォルダに自分のプロジェクト（`dagon-demo`、起動のたびに作り直す）と、そのためだけの DEMO の鍵を作ります。あなたの鍵は使わず、デモで署名したものは実機では動きません。
+
+```sh
 dagon sim run
 ```
 

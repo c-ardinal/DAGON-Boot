@@ -281,6 +281,23 @@ check and `dagon gen` tell you what is still missing; the
 ## Try it without hardware
 
 ```sh
+dagon demo                         # DAGON Console with a simulated desk
+dagon demo --sim-fail watch        # the same, and watch's update fails and falls back
+dagon demo --sim-speed 4           # four times faster (for recordings)
+```
+
+`dagon demo` opens DAGON Console against a simulated 親機 with its two
+子機 (the desk-demo 構成: hub, seg, watch, all on 1.0.0), the simulator
+`dagon sim run` uses, driven by the same dagon-host code as real boards.
+Connect, choose the latest release (demo-1.1.0) and update all three with
+live progress; with `--sim-fail seg` or `--sim-fail watch` that 子機's new
+version crashes at boot and it goes back to 1.0.0. The links and flash take
+about their real time (`--sim-speed` from 0.1 to 20 scales it). The header
+shows 模擬 the whole time. The demo makes its own project in the temporary
+folder (`dagon-demo`, made afresh at each start) with a DEMO key made for it;
+your keys are not used, and nothing it signs runs on real boards.
+
+```sh
 dagon sim run
 ```
 

@@ -578,6 +578,7 @@
       unwritten,
       rest: op.rest && op.state === 'L18',
       finish: op.finished,
+      refused: op.returnRefused?.kind,
     });
     if (dialogOpen) return { ...b, primary: null };
     if (op.latestMissing) return { ...b, ...BAND.M58 };

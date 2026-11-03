@@ -6,7 +6,8 @@
 use std::io::{BufRead, Read, Write};
 use std::time::Duration;
 
-use dagon_topology::defs::Registry;
+use dagon_topology::defs::{BoardDef, I2cPair, McuDef, Registry, Writer};
+use dagon_topology::schema::{ControlKind, LinkKind, RomEntry, UartIface};
 use serde_json::{json, Value};
 
 /// The API key is read from here only; it is never printed, logged or written.
@@ -241,21 +242,86 @@ fn generate(
     ))
 }
 
-/// Every MCU and board definition in use, as its TOML (format:
-/// targets/README.md). Only the text goes out: where a project keeps its
-/// files stays on this machine.
+/// What the model needs of every MCU and board in use, as JSON built field
+/// by field from an allow-list: ids, names, pins and their labels, flash
+/// sizes, link kinds, the writer kind. Nothing else a definition holds
+/// (doctor commands and hints, file names, comments) is ever sent.
 fn board_table(reg: &Registry) -> String {
-    let all: Value = serde_json::from_str(&reg.to_json()).unwrap_or(Value::Null);
-    let mut out = String::new();
-    for (key, file) in [("mcus", "dagon-mcu.toml"), ("boards", "dagon-board.toml")] {
-        for d in all[key].as_array().into_iter().flatten() {
-            let toml = d["toml"].as_str().unwrap_or("");
-            out.push_str(&format!(
-                "<definition file=\"{file}\">\n{toml}</definition>\n"
-            ));
-        }
-    }
-    out
+    let mcus: Vec<Value> = reg.mcus().iter().map(mcu_facts).collect();
+    let boards: Vec<Value> = reg.boards().iter().map(board_facts).collect();
+    serde_json::to_string_pretty(&json!({ "mcus": mcus, "boards": boards }))
+        .expect("facts serialise")
+}
+
+fn names(kinds: &[LinkKind]) -> Vec<&'static str> {
+    kinds.iter().map(|k| k.name()).collect()
+}
+
+fn pairs(p: &[I2cPair]) -> Vec<Value> {
+    p.iter()
+        .map(|p| json!({ "controller": p.controller, "sda": p.sda, "scl": p.scl }))
+        .collect()
+}
+
+fn mcu_facts(m: &McuDef) -> Value {
+    let writer = match m.writer {
+        Writer::Uf2Drive { .. } => "uf2-drive",
+        Writer::ProbeRs { .. } => "probe-rs",
+        Writer::Espflash { .. } => "espflash",
+    };
+    json!({
+        "id": m.id,
+        "name": m.name,
+        "port": m.port.as_str(),
+        "gpio_count": m.gpio_count,
+        "flash_maps": m.flash_maps.iter().map(|f| json!({ "name": f.name, "bytes": f.bytes })).collect::<Vec<_>>(),
+        "writer": writer,
+        "links": { "up": names(&m.links.up), "down": names(&m.links.down) },
+        "coordinator": m.coordinator.as_ref().map(|c| json!({
+            "pio_state_machines": c.pio_state_machines,
+            "pio_uart_state_machines": c.pio_uart_state_machines,
+            "uart0_tx": c.uart0_tx,
+            "uart0_rx": c.uart0_rx,
+        })),
+        "rom_i2c": m.rom_i2c.as_ref().map(|r| json!({
+            "addr": r.addr,
+            "max_hz": r.max_hz,
+            "pairs": pairs(&r.pairs),
+        })),
+    })
+}
+
+fn board_facts(b: &BoardDef) -> Value {
+    let link = b.default_link.map(|l| {
+        json!({
+            "kind": l.kind.name(),
+            "iface": l.iface.map(|i| match i {
+                UartIface::HwUart0 => "hw-uart0",
+                UartIface::PioUart => "pio-uart",
+            }),
+            "addr": l.addr,
+            "baud": l.baud,
+            "control": match l.control {
+                ControlKind::Full => "full",
+                ControlKind::Cooperative => "cooperative",
+            },
+            "rom_entry": l.rom_entry.map(|r| match r {
+                RomEntry::ForceDownloadBoot => "force-download-boot",
+                RomEntry::M5pm1 => "m5pm1",
+                RomEntry::Stm32I2cRom => "stm32-i2c-rom",
+            }),
+        })
+    });
+    json!({
+        "id": b.id,
+        "product": b.product,
+        "mcu": b.mcu,
+        "flash_bytes": b.flash_bytes,
+        "i2c_target": b.i2c_target,
+        "header": b.header.iter().map(|h| json!({ "pin": h.pin, "label": h.label })).collect::<Vec<_>>(),
+        "i2c": pairs(&b.i2c_pairs),
+        "default_link": link,
+    })
 }
 
 fn request(model: &str, reg: &Registry, messages: &[Value]) -> Value {
@@ -270,7 +336,7 @@ fn request(model: &str, reg: &Registry, messages: &[Value]) -> Value {
     }
     let system = format!(
         "{INSTRUCTIONS}\n\n<schema file=\"schema.rs\">\n{SCHEMA_RS}</schema>\n\n\
-         <board_table>\n{}</board_table>\n\n\
+         <board_table format=\"json\">\n{}\n</board_table>\n\n\
          <checks file=\"check.rs\">\n{CHECK_RS}</checks>\n\n\
          <example file=\"desk-demo.yaml\">\n{EXAMPLE_YAML}</example>",
         board_table(reg)
@@ -583,31 +649,98 @@ mod tests {
     }
 
     #[test]
-    fn the_board_table_is_the_definitions_in_use_without_their_paths() {
+    fn the_board_table_sends_facts_only_never_a_projects_commands_or_paths() {
         let dir = std::env::temp_dir().join(format!("dagon-ai-defs-{}", std::process::id()));
-        std::fs::create_dir_all(&dir).unwrap();
+        for sub in ["m/stage0", "m/bootcore"] {
+            std::fs::create_dir_all(dir.join(sub)).unwrap();
+        }
+        let secret = "sk-ant-FAKE-TOKEN-4242";
+        let tool = dir
+            .join("bin/tool.exe")
+            .display()
+            .to_string()
+            .replace('\\', "/");
+        let mcu = include_str!("../../../targets/mcu/rp2040/dagon-mcu.toml")
+            .replace(
+                "id = \"rp2040\"",
+                &format!("# {secret} at {tool}\nid = \"desk-m0\""),
+            )
+            .replace("wire_id = 0x0001", "wire_id = 0x00F2")
+            .replace("name = \"rp2040-4m\"", "name = \"desk-m0-4m\"");
+        let doctor = format!(
+            "\n[[doctor]]\nwhat = \"desk tool\"\nprobe = [\"{tool}\", \"--token\", \"{secret}\"]\n\
+             expect = \"runs\"\nfix = [\"{tool}\", \"install\"]\nhint = \"ask {secret}\"\n"
+        );
+        std::fs::write(dir.join("m/dagon-mcu.toml"), format!("{mcu}{doctor}")).unwrap();
         let toml = dir.join("dagon.toml");
         std::fs::write(
             &toml,
-            "[board.desk-pico]\nproduct = \"Desk Pico\"\nmcu = \"rp2040\"\n\
+            "mcu_files = [\"m/dagon-mcu.toml\"]\n\
+             [board.desk-pico]\nproduct = \"Desk Pico\"\nmcu = \"desk-m0\"\n\
              flash_bytes = 0x40_0000\ndrawing = \"pico\"\n\
+             header = [{ pin = \"GPIO4\", label = \"D4\" }]\n\
              default_link = { kind = \"i2c\", addr = 0x44, control = \"full\" }\n",
         )
         .unwrap();
         let reg = Registry::load(&[dagon_topology::defs::Source::Project(&toml)]).unwrap();
         std::fs::remove_dir_all(&dir).unwrap();
+        assert!(!reg.mcu("desk-m0").unwrap().doctor.is_empty());
+
         let system = request("m", &reg, &[])["system"][0]["text"]
             .as_str()
             .unwrap()
             .to_string();
-        for m in reg.mcus() {
-            assert!(system.contains(&format!("id = \"{}\"", m.id)), "{}", m.id);
+        let table: Value = serde_json::from_str(&board_table(&reg)).unwrap();
+        let ids = |k: &str| -> Vec<String> {
+            table[k]
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|d| d["id"].as_str().unwrap().into())
+                .collect()
+        };
+        assert_eq!(
+            ids("mcus"),
+            reg.mcus().iter().map(|m| m.id.clone()).collect::<Vec<_>>()
+        );
+        assert_eq!(
+            ids("boards"),
+            reg.boards()
+                .iter()
+                .map(|b| b.id.clone())
+                .collect::<Vec<_>>()
+        );
+        let pico = &table["boards"].as_array().unwrap().last().unwrap().clone();
+        assert_eq!(pico["header"][0], json!({ "pin": "GPIO4", "label": "D4" }));
+        assert_eq!(pico["default_link"]["addr"], 0x44);
+        let m0 = table["mcus"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|m| m["id"] == "desk-m0")
+            .unwrap();
+        assert_eq!(m0["writer"], "uf2-drive");
+        assert_eq!(m0["links"]["up"], json!(["usb-cdc"]));
+
+        let plain = system.replace("\\\\", "\\");
+        let home = std::env::var("USERPROFILE")
+            .or_else(|_| std::env::var("HOME"))
+            .unwrap_or_default();
+        for never in [
+            secret,
+            "tool.exe",
+            "desk tool",
+            "rustup",
+            "INFO_UF2",
+            "boards.rs",
+            &dir.display().to_string(),
+            &home,
+        ] {
+            assert!(
+                never.is_empty() || !plain.contains(never),
+                "{never} reached the prompt"
+            );
         }
-        for b in reg.boards() {
-            assert!(system.contains(&format!("id = \"{}\"", b.id)), "{}", b.id);
-        }
-        assert!(!system.contains(&*dir.to_string_lossy()));
-        assert!(!system.contains("boards.rs"));
     }
 
     #[test]

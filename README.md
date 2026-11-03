@@ -353,8 +353,12 @@ and, on the 親機, for its uplink. Kinds the firmware of either end does not
 implement yet are marked ◇ まだ使えない; the 構成 may still name them
 (problem まだ使えないつながり), and `dagon gen` refuses them with the hop's
 name (`uplink of hub over ble: not available yet on rp2040`). Today the
-firmware offers the hub's USB CDC uplink, I2C and UART to its 子機, and
-the ESP32-S3's UART or USB CDC towards its 親機.
+firmware offers, as each MCU's definition lists it (`[links]`; up: towards
+the PC or the 親機, down: to 子機):
+
+- RP2040: up usb-cdc; down i2c, uart
+- STM32F401RE: up i2c
+- ESP32-S3: up uart, usb-cdc
 
 The demo shows the swap without new radios:
 

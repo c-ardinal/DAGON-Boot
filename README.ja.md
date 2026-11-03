@@ -224,7 +224,11 @@ dagon sim run
     uplink: { kind: uart, host: browser }   # pc-cli | browser | embedded
 ```
 
-`uplink` を書かなければ、これまでどおりパソコンの dagon への `usb-cdc` です。上りのつながりはコンパイルした構成に入らないので、今ある構成とそのリリースは変わりません。DAGON Console の定義では、インスペクタでリンクごとの種類と、親機の上りのつながりを選べます。どちらかの端のファームウェアがまだ実装していない種類には ◇ まだ使えない が付きます。構成には書けます（問題「まだ使えないつながり」）が、`dagon gen` はそのホップの名前を挙げて断ります（`uplink of hub over ble: not available yet on rp2040`）。今ファームウェアにあるのは、親機の USB CDC の上り、子機への I2C と UART、ESP32-S3 の親機への UART と USB CDC です。
+`uplink` を書かなければ、これまでどおりパソコンの dagon への `usb-cdc` です。上りのつながりはコンパイルした構成に入らないので、今ある構成とそのリリースは変わりません。DAGON Console の定義では、インスペクタでリンクごとの種類と、親機の上りのつながりを選べます。どちらかの端のファームウェアがまだ実装していない種類には ◇ まだ使えない が付きます。構成には書けます（問題「まだ使えないつながり」）が、`dagon gen` はそのホップの名前を挙げて断ります（`uplink of hub over ble: not available yet on rp2040`）。今ファームウェアにあるのは、各 MCU の定義（`[links]`）にあるとおり次のものです（上り: パソコンや親機へ、下り: 子機へ）:
+
+- RP2040: 上り usb-cdc、下り i2c, uart
+- STM32F401RE: 上り i2c
+- ESP32-S3: 上り uart, usb-cdc
 
 デモでは、新しい無線なしで差し替えを見られます:
 

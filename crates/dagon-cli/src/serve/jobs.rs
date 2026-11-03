@@ -317,8 +317,9 @@ impl Job {
         crate::flash::hidden(text, &self.swaps)
     }
 
-    /// Adds a log line (folders hidden, see [`Job::hide_folders`]); lines
-    /// go out in batches.
+    /// Adds a log line, folders hidden as [`Job::page_text`] does (home and
+    /// the project from the start, its apps, packages and DAGON source once
+    /// [`Job::project`] loads it); lines go out in batches.
     pub fn log(&mut self, line: &str) {
         let line = &self.page_text(line);
         self.sent += 1;

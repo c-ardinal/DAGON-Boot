@@ -96,7 +96,13 @@ fn fake_project(dir: &Path) -> PathBuf {
         .replace("{ sda: PB4, scl: PA8 }", "{ sda: GPIO2, scl: GPIO3 }");
     write(&dir.join("t.yaml"), yaml.as_bytes());
     write(&dir.join("m/dagon-mcu.toml"), FAKE_MCU.as_bytes());
-    std::fs::create_dir_all(dir.join("m/bootcore")).unwrap();
+    // The MCU package's boot core part: a stub crate, built where the
+    // package is (not looked up in a DAGON source).
+    write(
+        &dir.join("m/bootcore/Cargo.toml"),
+        b"[package]\nname = \"fake-bootcore\"\nversion = \"0.0.0\"\nedition = \"2021\"\n[workspace]\n",
+    );
+    write(&dir.join("m/bootcore/src/main.rs"), b"fn main() {}\n");
     write(&dir.join("boot.bin"), &[0xB0; 1024]);
     write(&dir.join("app.bin"), &[0xA0; 2048]);
     let toml = dir.join("dagon.toml");
@@ -104,6 +110,7 @@ fn fake_project(dir: &Path) -> PathBuf {
         &toml,
         format!(
             "topology = \"t.yaml\"\nmcu_files = [\"m/dagon-mcu.toml\"]\n\
+             [build.seg]\npackage = \"nodes/seg\"\n\
              [provision.seg]\nbootcore = \"boot.bin\"\napp = \"app.bin\"\nversion = \"1.0.0\"\n\
              {FAKE_BOARD}"
         )
@@ -207,5 +214,35 @@ fn a_project_defined_mcu_and_board_go_through_every_command() {
     assert!(commands.contains("--base-address 0x00100000"), "{commands}");
     let boot = dagon_sign::image::slot_with(&reg, "fake-m0", image_kind::BOOTCORE, slot_binding::A);
     assert_eq!(boot.unwrap().header_addr, 0x0010_7E00);
+
+    // flash: the plan names the part in the project package (relative for
+    // the page), and the part builds there, with no DAGON source at all.
+    let t = read_topology(&cfg, &topo).unwrap();
+    let page = crate::flash::plan(&cfg, &t, "seg", &out, crate::flash::Paths::Relative)
+        .unwrap()
+        .join("\n");
+    assert!(page.contains("build    bootcore m/bootcore (tag"), "{page}");
+    assert!(page.contains("through the SWD chosen"), "{page}");
+    assert!(!page.contains(&*dir.to_string_lossy()), "{page}");
+    let mut log = Vec::new();
+    let built = crate::flash::build_parts(
+        &cfg,
+        &reg,
+        t.node("seg").unwrap(),
+        Path::new("no-dagon-source"),
+        "00",
+        crate::flash::Paths::Relative,
+        &mut |l| log.push(l.to_string()),
+        &std::sync::atomic::AtomicBool::new(false),
+    )
+    .unwrap();
+    assert_eq!(built.len(), 1);
+    assert_eq!(built[0].0, "bootcore");
+    assert!(built[0].1.is_file(), "{:?}", built[0].1);
+    assert!(
+        log.iter()
+            .any(|l| l == "seg: building bootcore in m/bootcore"),
+        "{log:?}"
+    );
     std::fs::remove_dir_all(&dir).unwrap();
 }

@@ -1,7 +1,8 @@
 //! NUCLEO-F401RE demo app with DAGON: an I2C target at
 //! [`board::I2C_ADDR`] on I2C3 (PA8 SCL, PB4 SDA) serving dagon-agent
-//! through the mailbox, and its own version on the 3-digit 7-segment
-//! display (`1.1.` for 1.1.x). Built for slot A or B (`slot-b`); the boot
+//! through the mailbox, and its own version on the X-NUCLEO-53L0A1's
+//! 4-digit 7-segment display (`110` for 1.1.0: the shield has no points;
+//! I2C1, the board's display bus). Built for slot A or B (`slot-b`); the boot
 //! core picks which one runs. DAGON comes from the MCU package
 //! (dagon-mcu-stm32f401re) and the board package (dagon-board-nucleo-f401re).
 //!
@@ -9,8 +10,8 @@
 //! - DAGON's interrupt executor (`exec`, on the unused USART6 interrupt;
 //!   preempts thread mode): mailbox serving (`node::serve`), owning I2C3 (target) and the
 //!   agent with the flash, so the hub is answered whatever the display does;
-//! - thread executor: display multiplexing (segment and digit pins) and the
-//!   watchdog task (IWDG, LED heartbeat).
+//! - thread executor: the display (I2C1, async: it never holds up the
+//!   link) and the watchdog task (IWDG, LED heartbeat).
 //!
 //! Watchdog: fed by its task only while no task is past the deadline of its
 //! current work, and never while on trial: an image that does not get
@@ -31,16 +32,14 @@ use defmt::{error, info, Display2Format};
 use defmt_rtt as _;
 use embassy_executor::Executor;
 use embassy_stm32::gpio::{Level as Pin, Output, Speed};
-use embassy_time::{Duration, Instant, Timer};
+use embassy_time::{Duration, Timer};
 use panic_probe as _;
 use static_cell::StaticCell;
 
 const SELF_CONFIRM: bool = cfg!(feature = "confirm");
 
-/// How long "TEST KEY" (`tSt`) shows before the version.
+/// How long "TEST KEY" (`tESt`) shows before the version.
 const TEST_KEY_SPLASH: Duration = Duration::from_millis(1500);
-/// On time of one digit of the multiplexed display.
-const DIGIT_PERIOD: Duration = Duration::from_millis(2);
 
 /// Watchdog guard tasks: mailbox serving (preempting), display.
 mod task {
@@ -60,7 +59,6 @@ static EXECUTOR_LOW: StaticCell<Executor> = StaticCell::new();
 fn main() -> ! {
     let (dagon, io) = Board::split(embassy_stm32::init(dagon_mcu_stm32f401re::clocks()));
     let led = Output::new(io.led, Pin::Low, Speed::Low);
-    let (segments, digits) = io.display.outputs();
     let low = EXECUTOR_LOW.init(Executor::new());
 
     let mut store = match node::open_store(dagon.flash) {
@@ -68,7 +66,7 @@ fn main() -> ! {
         Err(e) => {
             error!("state log unreadable: {}", defmt::Debug2Format(&e));
             low.run(|s| {
-                s.spawn(display(segments, digits, seg::DASHES, seg::DASHES).unwrap());
+                s.spawn(display(io.display, seg::DASHES, seg::DASHES).unwrap());
                 s.spawn(blink(led).unwrap());
             })
         }
@@ -112,7 +110,7 @@ fn main() -> ! {
     high.spawn(node::serve(agent, target, regs, &GUARD, task::SERVE).unwrap());
 
     low.run(|s| {
-        s.spawn(display(segments, digits, splash, seg::version(version)).unwrap());
+        s.spawn(display(io.display, splash, seg::version(version)).unwrap());
         s.spawn(watchdog(led).unwrap());
     })
 }
@@ -136,33 +134,22 @@ async fn watchdog(mut led: Output<'static>) -> ! {
     }
 }
 
-/// Multiplexes the display: `first` for the splash time, then `then`.
+/// Shows `first`, then `then` after the splash time (sensors kept in
+/// XSHUT).
 #[embassy_executor::task]
-async fn display(
-    mut segments: [Output<'static>; 8],
-    mut digits: [Output<'static>; seg::DIGITS],
-    first: [u8; seg::DIGITS],
-    then: [u8; seg::DIGITS],
-) {
-    let started = Instant::now();
-    loop {
-        GUARD.busy(task::DISPLAY);
-        let codes = if started.elapsed() < TEST_KEY_SPLASH {
-            first
-        } else {
-            then
-        };
-        for (i, code) in codes.iter().enumerate() {
-            for (bit, s) in segments.iter_mut().enumerate() {
-                s.set_level(if code & (1 << bit) != 0 {
-                    board::SEG_ON
-                } else {
-                    board::SEG_OFF
-                });
-            }
-            digits[i].set_level(board::DIGIT_ON);
-            Timer::after(DIGIT_PERIOD).await;
-            digits[i].set_level(board::DIGIT_OFF);
-        }
+async fn display(display: board::Display, first: [u8; seg::DIGITS], then: [u8; seg::DIGITS]) {
+    let mut display = display.open();
+    show(&mut display, first).await;
+    if then != first {
+        Timer::after(TEST_KEY_SPLASH).await;
+        show(&mut display, then).await;
     }
+}
+
+async fn show(display: &mut board::SegDisplay, codes: [u8; seg::DIGITS]) {
+    GUARD.busy(task::DISPLAY);
+    if let Err(e) = display.show(codes).await {
+        error!("display: {}", defmt::Debug2Format(&e));
+    }
+    GUARD.idle(task::DISPLAY);
 }

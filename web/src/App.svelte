@@ -2,7 +2,7 @@
   import { tick, untrack } from 'svelte';
   import { bandOf } from './app/band.ts';
   import { ANNOUNCE, BAND, BUTTON, CANVAS, DEFINE, DIFF, HUB_TOGGLE, MODE, NODE, ORDER, PLAN, PRODUCT, RECONNECT, SAVE, SKIP, STEP, TIME } from './app/copy.ts';
-  import { chooseAndOpen } from './app/connect.ts';
+  import { webSerial } from './app/connect.ts';
   import { HUB_LOCKED, hubOf, view, type Action } from './app/machine.ts';
   import { Operate, waterOf, type Progress } from './app/operate.svelte.ts';
   import Graph, { type Chip, type Dot } from './graph/Graph.svelte';
@@ -58,7 +58,7 @@
     open: async () => {
       const t = stand?.transport ?? simHub()?.transport ?? null;
       if (t) await t.open();
-      opened = t ?? (await chooseAndOpen(serial!));
+      opened = t ?? (await ports.chooseAndOpen());
       return opened;
     },
     // The stand-in hub comes back by itself; a real one is chosen again in the browser.
@@ -69,7 +69,7 @@
         return opened;
       }
       // `opened` follows only once Operate took it as this hub (reconnectChosen).
-      return chooseAndOpen(serial!);
+      return ports.chooseAndOpen();
     },
     timer: true,
     // The simulated desk's clock runs at the demo's speed; a real hub keeps the default.
@@ -91,6 +91,8 @@
   const cli = new Cli();
   /** The 定義 document: the project's 構成 as edited (§5.2: its YAML is the one source of truth). */
   const d = new Define();
+  /** Web Serial, which the page never uses while it drives the simulated desk. */
+  const ports = webSerial(serial, () => cli.sim !== null);
   cli.onDevice = (need) => (need ? op.handOver() : op.cliReturned());
 
   /** SC-S0 until a project is open (§7.2b); then 定義 and 運用. */
@@ -363,7 +365,7 @@
 
   /** Chrome's SerialConnectionEvent names the port; the spec's event targets it. */
   const portOf = (e: Event) => ((e as Event & { port?: SerialPort }).port ?? e.target) as SerialPort;
-  serial?.addEventListener('disconnect', (e) => {
+  ports.on('disconnect', (e) => {
     if (opened instanceof WebSerialTransport && portOf(e) === opened.port) op.lose();
   });
   /**
@@ -371,7 +373,7 @@
    * (L20) it is a candidate; once that is over (L21) the page takes it by
    * itself when it is the hub on trial with the version just sent.
    */
-  serial?.addEventListener('connect', (e) => {
+  ports.on('connect', (e) => {
     const port = portOf(e);
     // One device at a time: candidates reported together are judged in turn.
     connecting = connecting.then(() => hubConnected(port)).catch(() => undefined);

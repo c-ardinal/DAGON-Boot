@@ -47,5 +47,8 @@ fn f401_bootcore_fixture_is_current() {
         want,
         "regenerate: see the file comment"
     );
-    dagon_host::rom::check_bootcore(&want, &TEST_PUBLIC_KEY).unwrap();
+    let roms = dagon_host::rom::rom_maps(dagon_topology::defs::Registry::builtin());
+    let f401 = image::mcu_id_of("stm32f401re").unwrap();
+    let map = roms.iter().find(|m| m.wire_id == f401).unwrap();
+    dagon_host::rom::check_bootcore(&want, &TEST_PUBLIC_KEY, map).unwrap();
 }

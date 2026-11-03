@@ -1,15 +1,15 @@
 //! Define mode: reading a topology YAML into a plain object the page edits,
-//! and the board table's defaults for placing a node. The page writes the
+//! and the board definitions' defaults for placing a node. The page writes the
 //! object back as YAML (or as JSON, which the YAML parser reads too) and
 //! checks it with `topo_check`, so every rule stays in dagon-topology.
 
-use dagon_topology::boards::{self, BOARDS};
+use crate::defs::with_registry;
 use dagon_topology::schema::{ControlKind, LinkKind, RomEntry, UartIface};
 use js_sys::{Array, Object, Reflect};
 use wasm_bindgen::prelude::*;
 use yaml_serde::Value;
 
-fn set(o: &Object, k: &str, v: JsValue) {
+pub(crate) fn set(o: &Object, k: &str, v: JsValue) {
     Reflect::set(o, &k.into(), &v).expect("plain object");
 }
 
@@ -67,15 +67,17 @@ fn link_kind(k: LinkKind) -> &'static str {
 }
 
 /// Link kinds `mcu`'s firmware implements: `{up: [kind], down: [kind]}`
-/// (dagon-topology's links table; the rest are "not available yet").
+/// (the MCU definition's `[links]`; the rest are "not available yet").
 #[wasm_bindgen]
 pub fn link_kinds(mcu: &str) -> JsValue {
-    use dagon_topology::links::{available, Dir};
+    use dagon_topology::links::{available_in, Dir};
     let names = |d: Dir| -> Array {
-        available(mcu, d)
-            .iter()
-            .map(|k| JsValue::from(k.name()))
-            .collect()
+        with_registry(|reg| {
+            available_in(reg, mcu, d)
+                .iter()
+                .map(|k| JsValue::from(k.name()))
+                .collect()
+        })
     };
     let o = Object::new();
     set(&o, "up", names(Dir::Up).into());
@@ -88,31 +90,24 @@ pub fn link_kinds(mcu: &str) -> JsValue {
 /// flash map needs, so a board without that much flash cannot hold it.
 #[wasm_bindgen]
 pub fn supported_mcus() -> JsValue {
-    boards::MCUS
-        .iter()
-        .map(|m| {
-            let o = Object::new();
-            set(&o, "id", m.id.into());
-            set(&o, "port", m.port.into());
-            let fm = boards::default_flash_map(m.id);
-            set(&o, "flashMap", fm.map_or(JsValue::NULL, |f| f.name.into()));
-            set(
-                &o,
-                "flashBytes",
-                fm.map_or(JsValue::NULL, |f| f.bytes.into()),
-            );
-            set(&o, "gpioCount", m.gpio_count.into());
-            let names: Array = BOARDS
-                .iter()
-                .filter(|b| b.mcu == m.id)
-                .map(|b| JsValue::from(b.mcu_name))
-                .take(1)
-                .collect();
-            set(&o, "name", names.get(0));
-            JsValue::from(o)
-        })
-        .collect::<Array>()
-        .into()
+    with_registry(|reg| {
+        reg.mcus()
+            .iter()
+            .map(|m| {
+                let o = Object::new();
+                set(&o, "id", m.id.as_str().into());
+                set(&o, "port", m.port.as_str().into());
+                let fm = m.default_flash_map();
+                set(&o, "flashMap", fm.name.as_str().into());
+                set(&o, "flashBytes", fm.bytes.into());
+                set(&o, "gpioCount", m.gpio_count.into());
+                set(&o, "name", m.name.as_str().into());
+                set(&o, "coordinator", m.coordinator.is_some().into());
+                JsValue::from(o)
+            })
+            .collect::<Array>()
+            .into()
+    })
 }
 
 fn control_kind(k: ControlKind) -> &'static str {
@@ -143,28 +138,37 @@ fn iface(i: UartIface) -> &'static str {
 /// unknown board.
 #[wasm_bindgen]
 pub fn board_template(id: &str) -> JsValue {
-    let Some(b) = BOARDS.iter().find(|b| b.id == id) else {
+    with_registry(|reg| board_template_in(reg, id))
+}
+
+fn board_template_in(reg: &dagon_topology::defs::Registry, id: &str) -> JsValue {
+    let Some(b) = reg.board(id) else {
         return JsValue::NULL;
     };
+    let m = reg.mcu(&b.mcu);
     let o = Object::new();
-    set(&o, "mcu", b.mcu.into());
-    let port = boards::MCUS.iter().find(|m| m.id == b.mcu).map(|m| m.port);
-    set(&o, "port", port.map_or(JsValue::NULL, JsValue::from));
-    let flash = boards::FLASH_MAPS
-        .iter()
-        .find(|f| f.mcu == b.mcu)
-        .map(|f| f.name);
+    set(&o, "mcu", b.mcu.as_str().into());
+    set(
+        &o,
+        "port",
+        m.map_or(JsValue::NULL, |m| m.port.as_str().into()),
+    );
+    let flash = m.map(|m| m.default_flash_map().name.as_str());
     set(&o, "flashMap", flash.map_or(JsValue::NULL, JsValue::from));
     set(&o, "i2cTarget", b.i2c_target.into());
-    let header: Array = b.header.iter().map(|h| JsValue::from(h.pin)).collect();
+    let header: Array = b
+        .header
+        .iter()
+        .map(|h| JsValue::from(h.pin.as_str()))
+        .collect();
     set(&o, "header", header.into());
     let pairs: Array = b
         .i2c_pairs
         .iter()
         .map(|p| {
             let x = Object::new();
-            set(&x, "sda", p.sda.into());
-            set(&x, "scl", p.scl.into());
+            set(&x, "sda", p.sda.as_str().into());
+            set(&x, "scl", p.scl.as_str().into());
             JsValue::from(x)
         })
         .collect();

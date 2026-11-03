@@ -1,11 +1,12 @@
 #![forbid(unsafe_code)]
-//! Browser build of the shared Rust rules: board table, topology check and
+//! Browser build of the shared Rust rules: MCU and board definitions, topology check and
 //! compile, release verification, HELLO payloads and version text. Each
 //! export is a thin wrapper so the page and the CLI apply the same code.
 
 extern crate alloc;
 
 mod define;
+mod defs;
 mod frame;
 mod host;
 mod release_topo;
@@ -14,6 +15,7 @@ mod sim;
 mod watch;
 
 pub use define::{board_template, release_topology, supported_mcus, topo_parse};
+pub use defs::{coordinator_capable, load_definitions, mcu_connection, rom_i2c_addrs};
 pub use frame::{frame_encode, FrameCutter};
 pub use host::{
     check_bootcore_for, check_release_for, require_release_key, set_release_key, watch_interval_ms,
@@ -24,10 +26,10 @@ pub use sim::SimDesk;
 
 use dagon_format::{BundleView, Version};
 use dagon_proto::payload::{HelloReq, HelloResp};
-use dagon_topology::boards::BOARDS;
+use defs::with_registry;
 use wasm_bindgen::prelude::*;
 
-/// One entry of the supported-board table.
+/// One board definition.
 #[wasm_bindgen(getter_with_clone)]
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct BoardInfo {
@@ -45,30 +47,34 @@ pub struct BoardInfo {
 
 #[wasm_bindgen]
 pub fn supported_boards() -> Vec<BoardInfo> {
-    BOARDS
-        .iter()
-        .map(|b| BoardInfo {
-            id: b.id.into(),
-            product: b.product.into(),
-            mcu_name: b.mcu_name.into(),
-            mcu: b.mcu.into(),
-            flash_bytes: b.flash_bytes,
-            i2c_target: b.i2c_target,
-            drawing: b.drawing.into(),
-        })
-        .collect()
+    with_registry(|reg| {
+        reg.boards()
+            .iter()
+            .map(|b| BoardInfo {
+                id: b.id.clone(),
+                product: b.product.clone(),
+                mcu_name: reg.mcu(&b.mcu).map_or_else(String::new, |m| m.name.clone()),
+                mcu: b.mcu.clone(),
+                flash_bytes: b.flash_bytes,
+                i2c_target: b.i2c_target,
+                drawing: b.drawing.clone(),
+            })
+            .collect()
+    })
 }
 
 /// `topo check` report as JSON: `{ok, errors, warnings, issues: [{rule, severity, path, message}]}`.
 #[wasm_bindgen]
 pub fn topo_check(yaml: &str) -> String {
-    dagon_topology::check_str(yaml).to_json()
+    with_registry(|reg| dagon_topology::check_str_with(reg, yaml).to_json())
 }
 
 /// Canonical topology binary; throws when the YAML does not parse or check.
 #[wasm_bindgen]
 pub fn topo_compile(yaml: &str) -> Result<Vec<u8>, JsError> {
-    dagon_topology::compile_str(yaml).map_err(|e| JsError::new(&e.to_string()))
+    let t = dagon_topology::parse_str(yaml).map_err(|e| JsError::new(&e.to_string()))?;
+    with_registry(|reg| dagon_topology::compile_with(reg, &t))
+        .map_err(|e| JsError::new(&e.to_string()))
 }
 
 /// Full host-side check of a `.dgb` file under a 32-byte Ed25519 public
@@ -206,9 +212,12 @@ mod tests {
     }
 
     #[test]
-    fn boards_mirror_the_table() {
+    fn boards_mirror_the_definitions() {
         let b = supported_boards();
-        assert_eq!(b.len(), BOARDS.len());
+        assert_eq!(
+            b.len(),
+            dagon_topology::defs::Registry::builtin().boards().len()
+        );
         assert!(b.iter().any(|x| x.mcu == "stm32f401re"));
     }
 

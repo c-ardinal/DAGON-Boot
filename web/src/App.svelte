@@ -137,7 +137,7 @@
     d.reset();
     if (yaml) {
       try {
-        d.load(fromYaml(yaml, projectLayout.names ?? {}));
+        d.load(fromYaml(yaml, projectLayout.names ?? {}), yaml);
       } catch {
         d.unreadable = true;
       }
@@ -176,7 +176,7 @@
     local = true;
     op.reset();
     d.reset();
-    if (c === 'sample') d.load(fromYaml(DESK_DEMO_YAML, Object.fromEntries(DESK_DEMO.nodes.map((n) => [n.id, n.name]))));
+    if (c === 'sample') d.load(fromYaml(DESK_DEMO_YAML, Object.fromEntries(DESK_DEMO.nodes.map((n) => [n.id, n.name]))), DESK_DEMO_YAML);
     enterWork('define');
   }
 
@@ -578,6 +578,7 @@
       unwritten,
       rest: op.rest && op.state === 'L18',
       finish: op.finished,
+      refused: op.returnRefused?.kind,
     });
     if (dialogOpen) return { ...b, primary: null };
     if (op.latestMissing) return { ...b, ...BAND.M58 };
@@ -697,7 +698,7 @@
 {#snippet defineRight()}
   <aside class="right">
     {#if cliPanel}
-      <CliPanel {cli} {d} panel={cliPanel} onuse={useRelease} />
+      <CliPanel {cli} {d} {autosave} panel={cliPanel} onuse={useRelease} />
     {:else if d.selected}
       <Inspector {d} />
     {:else}

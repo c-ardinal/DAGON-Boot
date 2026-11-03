@@ -1,18 +1,21 @@
 <script lang="ts">
   import { CLI_LINK, CLI_NAV, FLASH, JOBS, PROJECT, RELEASE_STEPS } from '../../app/copy.ts';
   import type { Cli, Job } from '../../app/define/cli.svelte.ts';
+  import type { Autosave } from '../../app/define/autosave.svelte.ts';
   import type { Define } from '../../app/define/define.svelte.ts';
-  import { boardMissing, toYaml } from '../../app/define/model.ts';
+  import { boardMissing } from '../../app/define/model.ts';
 
   interface Props {
     cli: Cli;
     d: Define;
+    /** The one way the 構成 goes to the project's YAML (C-377). */
+    autosave: Autosave;
     panel: 'link' | 'jobs' | 'release' | 'project' | 'flash';
     /** "このリリースを運用で使う": hand the .dgb to the operate mode. */
     onuse: (name: string, bytes: Uint8Array) => void;
   }
 
-  let { cli, d, panel, onuse }: Props = $props();
+  let { cli, d, autosave, panel, onuse }: Props = $props();
 
   const ready = $derived(cli.state === 'ready');
   const nodes = $derived(d.config.nodes);
@@ -49,12 +52,8 @@
   const mcuOf = (id: string) => d.doc.topo.nodes.find((n) => n.id === id)?.mcu ?? '';
 
   async function makeProject() {
-    // The project is made from the YAML: a 構成 serve did not take is not made into one.
-    const at = d.revision;
-    const r = await cli.saveTopology(toYaml(d.doc.topo));
-    d.saved(at, r);
-    if (r !== 'saved') return;
-    await cli.gen(ids);
+    // The project is made from the YAML: after the saves queued before it, and not from a 構成 serve did not take.
+    await autosave.whenSaved(() => cli.gen(ids));
   }
 
   async function use() {

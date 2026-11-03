@@ -5,6 +5,7 @@ import { ANNOUNCE } from '../copy.ts';
 import { DESK_DEMO, DESK_DEMO_YAML, type Config } from '../sample.ts';
 import { emptyDoc, fromYaml, place, placeMcu, removeLink, removeNode, toConfig, toYaml, type Doc, type Topo } from './model.ts';
 import type { SaveResult } from './cli.svelte.ts';
+import { keepComments } from './comments.ts';
 import { problems, type Problem } from './problems.ts';
 
 /** Undo depth; older steps fall off. */
@@ -34,8 +35,10 @@ export class Define {
   private future: Doc[] = [];
   /** Bumped by every change, so the derived check and view follow. */
   revision = $state(0);
-  /** The revision last in the project's YAML (opened or saved). */
+  /** The revision last in the project's YAML (opened or saved); it never goes back (C-377). */
   savedAt = $state(0);
+  /** The YAML as opened or read (its hand-written comments are kept on save, C-383), and the page's layout of it. */
+  private source: { text: string; as: string } | null = null;
   /** Why the last save did not go through; the edits stay on the page (null after a save). */
   saveFailure = $state<Exclude<SaveResult, 'saved'> | null>(null);
 
@@ -61,7 +64,8 @@ export class Define {
   /** The answer to saving revision `at`: the document stays as it is either way. */
   saved(at: number, r: SaveResult): void {
     if (r === 'saved') {
-      this.savedAt = at;
+      // Saves can answer out of order: an older one never marks newer edits saved again.
+      this.savedAt = Math.max(this.savedAt, at);
       this.saveFailure = null;
     } else {
       this.saveFailure = r;
@@ -151,13 +155,19 @@ export class Define {
 
   /** "書き出す": the YAML text and a file name. */
   exportYaml(): { name: string; text: string } {
-    return { name: `${this.doc.topo.name || 'topology'}.yaml`, text: toYaml(this.doc.topo) };
+    const text = toYaml(this.doc.topo);
+    const s = this.source;
+    // Unchanged: the text as written; changed: the page's layout with the comments of the lines that did not change.
+    const kept = !s ? text : text === s.as ? s.text : keepComments(s.text, text);
+    return { name: `${this.doc.topo.name || 'topology'}.yaml`, text: kept };
   }
 
   /** "読み込む": a YAML file; C09 when it does not parse. */
   importYaml(text: string): boolean {
     try {
-      this.apply(fromYaml(text));
+      const doc = fromYaml(text);
+      this.apply(doc);
+      this.source = { text, as: toYaml(doc.topo) };
     } catch {
       this.unreadable = true;
       return false;
@@ -167,8 +177,9 @@ export class Define {
     return true;
   }
 
-  /** A project's 構成 as opened (no undo back past it). */
-  load(doc: Doc): void {
+  /** A project's 構成 as opened (no undo back past it); `text` is its YAML as written. */
+  load(doc: Doc, text?: string): void {
+    this.source = text === undefined ? null : { text, as: toYaml(doc.topo) };
     this.past = [];
     this.future = [];
     this.doc = doc;

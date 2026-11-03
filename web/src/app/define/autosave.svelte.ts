@@ -79,6 +79,17 @@ export class Autosave {
     return this.pending ? this.now() : Promise.resolve(true);
   }
 
+  /**
+   * Runs `then` once the project's YAML has every edit, after the saves
+   * already queued (「プロジェクトを作る」: gen reads that YAML, C-377);
+   * false, without running it, when the save does not go through.
+   */
+  async whenSaved(then: () => Promise<unknown>): Promise<boolean> {
+    if (!(await this.ready())) return false;
+    await then();
+    return true;
+  }
+
   /** Goes on with `go` once nothing is unsaved; when the save fails the dialog asks first. */
   async leave(go: () => void): Promise<void> {
     if (await this.ready()) return go();

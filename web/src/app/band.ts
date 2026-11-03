@@ -1,8 +1,9 @@
 // What the bottom band shows in each state: cause chip, one sentence, and the
 // named buttons the machine allows there.
-import { BAND, BAND_FOR, BUTTON, BUTTON_FOR, type BandCopy } from './copy.ts';
+import { BAND, BAND_CHIP, BAND_FOR, BUTTON, BUTTON_FOR, type BandCopy } from './copy.ts';
 import { view, type Action, type Ctx, type L } from './machine.ts';
 import type { Finish } from './operate.svelte.ts';
+import type { ReconnectNote } from '../serial/transport.ts';
 
 export interface Button {
   action: Action;
@@ -16,6 +17,8 @@ export interface Band extends BandCopy {
 
 /** Names a button needs beyond its action: the node to recover, how many still answer. */
 export interface Names {
+  /** L26 after the CLI gave back a device that is not this 親機 (C-389): why. */
+  refused?: ReconnectNote['kind'] | null;
   stuck?: string;
   responding?: number;
   /** Nodes after the stopped one that were not written (L22). */
@@ -25,6 +28,13 @@ export interface Names {
   /** What the last run left (L23): the band says only that. */
   finish?: Finish | null;
 }
+
+/** 案: the cause chip on L26 when the device the CLI gave back was not taken. */
+const REFUSED_CHIP: Partial<Record<ReconnectNote['kind'], string>> = {
+  otherHub: BAND_CHIP.otherHub,
+  notHub: BAND_CHIP.notHub,
+  silent: BAND_CHIP.silent,
+};
 
 const REFUSAL_BAND = { source: BAND.M18, key: BAND.M18b, format: BAND.M19, topology: BAND.M20 } as const;
 
@@ -84,7 +94,7 @@ function words(s: L, c: Ctx, n: Names): BandCopy {
     case 'L25':
       return BAND.M33;
     case 'L26':
-      return BAND.M34;
+      return n.refused ? { chip: REFUSED_CHIP[n.refused] ?? REFUSED_CHIP.otherHub, sentence: BAND.M34.sentence } : BAND.M34;
     case 'L27':
       return BAND.M35;
     default:

@@ -33,6 +33,58 @@ function setup(answers: SaveResult[], enabled = true) {
 const settle = () => new Promise((r) => setTimeout(r, 0));
 const edit = (d: Define, addr: number) => d.apply(setLink(d.doc, 0, 'addr', addr));
 
+describe('「プロジェクトを作る」 through the autosave queue (C-377)', () => {
+  test('gen runs after the save already running and the one for the newest edit, never on an older YAML', async () => {
+    const d = new Define();
+    d.placeSample();
+    const order: string[] = [];
+    let release = null as (() => void) | null;
+    const a = new Autosave(d, {
+      put: async (yaml) => {
+        order.push(`put ${/addr: (0x\w+)/.exec(yaml)?.[1]}`);
+        if (!release) await new Promise<void>((r) => (release = r));
+        return 'saved';
+      },
+      enabled: () => true,
+      timers: manualTimers().timers,
+    });
+    edit(d, 0x43);
+    const first = a.now();
+    await settle();
+    edit(d, 0x44);
+    const made = a.whenSaved(async () => void order.push('gen'));
+    await settle();
+    release!();
+    await first;
+    expect(await made).toBe(true);
+    expect(order).toEqual(['put 0x43', 'put 0x44', 'gen']);
+    expect(d.unsaved).toBe(false);
+  });
+
+  test('a save that does not go through makes nothing', async () => {
+    const { d, a } = setup(['invalid']);
+    edit(d, 0x43);
+    let made = false;
+    expect(await a.whenSaved(async () => void (made = true))).toBe(false);
+    expect([made, d.saveFailure]).toEqual([false, 'invalid']);
+  });
+
+  test('savedAt never moves back: an older save answering last does not mark newer edits saved', () => {
+    const d = new Define();
+    d.placeSample();
+    edit(d, 0x43);
+    const older = d.revision;
+    edit(d, 0x44);
+    d.saved(d.revision, 'saved');
+    d.saved(older, 'saved');
+    expect(d.savedAt).toBe(d.revision);
+    edit(d, 0x45);
+    expect(d.unsaved).toBe(true);
+    d.saved(older, 'saved');
+    expect(d.unsaved).toBe(true);
+  });
+});
+
 describe('autosave of the 構成 (UC-D04)', () => {
   test('edits are saved once, AUTOSAVE_MS after the last one; a refused save keeps them and the next edit tries again', async () => {
     const { d, a, puts, t } = setup(['invalid', 'saved']);

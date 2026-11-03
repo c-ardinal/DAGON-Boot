@@ -807,19 +807,35 @@ mod tests {
     #[test]
     fn a_read_that_finishes_after_its_scan_is_used_by_the_next() {
         let _alone = timing_tests_alone();
+        use std::sync::{Condvar, Mutex};
         static READS_DONE: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
-        // 2.1 s against a 2 s limit, scaled down: 300 ms against 200 ms.
+        // The volume answers only once the test opens the gate: the first
+        // scan has given up by then, whatever the machine's load.
+        static GATE: (Mutex<bool>, Condvar) = (Mutex::new(false), Condvar::new());
         fn read(_: &Path) -> Option<String> {
             READS_DONE.fetch_add(1, Ordering::SeqCst);
-            slow_rp(300)
+            let mut open = GATE.0.lock().unwrap();
+            while !*open {
+                open = GATE.1.wait(open).unwrap();
+            }
+            drop(open);
+            slow_rp(0)
         }
         let roots = [PathBuf::from("/just-late-rp")];
-        let (found, late) = uf2_drives(&roots, &RP, Duration::from_millis(200), read);
+        let (found, late) = uf2_drives(&roots, &RP, Duration::from_millis(50), read);
         assert!(found.is_empty());
         assert_eq!(late, roots);
-        std::thread::sleep(Duration::from_millis(250));
+        *GATE.0.lock().unwrap() = true;
+        GATE.1.notify_all();
+        // The read finishes after its scan gave up and is kept.
+        let key = (roots[0].clone(), RP.info_file.to_string());
+        let until = Instant::now() + Duration::from_secs(30);
+        while !matches!(reads().get(&key), Some(Read::Finished(..))) {
+            assert!(Instant::now() < until, "the released read never finished");
+            std::thread::yield_now();
+        }
         // The next poll takes the kept result instead of reading again.
-        let (found, late) = uf2_drives(&roots, &RP, Duration::from_millis(200), read);
+        let (found, late) = uf2_drives(&roots, &RP, Duration::from_millis(50), read);
         assert!(late.is_empty());
         assert_eq!(found.len(), 1);
         assert_eq!(READS_DONE.load(Ordering::SeqCst), 1);

@@ -6,7 +6,9 @@
 use std::io::{BufRead, Read, Write};
 use std::time::Duration;
 
-use dagon_topology::defs::{BoardDef, I2cPair, McuDef, Registry, Writer};
+use dagon_topology::defs::{
+    page_safe, BoardDef, I2cPair, McuDef, Origin, Registry, Writer, PROJECT_TEXT,
+};
 use dagon_topology::schema::{ControlKind, LinkKind, RomEntry, UartIface};
 use serde_json::{json, Value};
 
@@ -246,11 +248,36 @@ fn generate(
 /// by field from an allow-list: ids, names, pins and their labels, flash
 /// sizes, link kinds, the writer kind. Nothing else a definition holds
 /// (doctor commands and hints, file names, comments) is ever sent.
+/// A project's own strings go under the page's rule (`page_safe`, else
+/// `project-text`); builtin and source-tree facts go as they are.
 fn board_table(reg: &Registry) -> String {
-    let mcus: Vec<Value> = reg.mcus().iter().map(mcu_facts).collect();
-    let boards: Vec<Value> = reg.boards().iter().map(board_facts).collect();
+    let own = |o: Option<Origin>, mut v: Value| {
+        if o == Some(Origin::Project) {
+            plain_names(&mut v);
+        }
+        v
+    };
+    let mcus: Vec<Value> = reg
+        .mcus()
+        .iter()
+        .map(|m| own(reg.mcu_origin(&m.id), mcu_facts(m)))
+        .collect();
+    let boards: Vec<Value> = reg
+        .boards()
+        .iter()
+        .map(|b| own(reg.board_origin(&b.id), board_facts(b)))
+        .collect();
     serde_json::to_string_pretty(&json!({ "mcus": mcus, "boards": boards }))
         .expect("facts serialise")
+}
+
+fn plain_names(v: &mut Value) {
+    match v {
+        Value::String(s) if !page_safe(s) => *s = PROJECT_TEXT.into(),
+        Value::Array(a) => a.iter_mut().for_each(plain_names),
+        Value::Object(o) => o.values_mut().for_each(plain_names),
+        _ => {}
+    }
 }
 
 fn names(kinds: &[LinkKind]) -> Vec<&'static str> {
@@ -679,7 +706,11 @@ mod tests {
              [board.desk-pico]\nproduct = \"Desk Pico\"\nmcu = \"desk-m0\"\n\
              flash_bytes = 0x40_0000\ndrawing = \"pico\"\n\
              header = [{ pin = \"GPIO4\", label = \"D4\" }]\n\
-             default_link = { kind = \"i2c\", addr = 0x44, control = \"full\" }\n",
+             default_link = { kind = \"i2c\", addr = 0x44, control = \"full\" }\n\
+             [board.desk-path]\nproduct = \"C:/Users/me/desk\"\nmcu = \"desk-m0\"\n\
+             flash_bytes = 0x40_0000\ndrawing = \"pico\"\n\
+             header = [{ pin = \"GPIO4\", label = \"see C:/Users/me/notes\" }]\n\
+             default_link = { kind = \"i2c\", addr = 0x45, control = \"full\" }\n",
         )
         .unwrap();
         let reg = Registry::load(&[dagon_topology::defs::Source::Project(&toml)]).unwrap();
@@ -710,7 +741,29 @@ mod tests {
                 .map(|b| b.id.clone())
                 .collect::<Vec<_>>()
         );
-        let pico = &table["boards"].as_array().unwrap().last().unwrap().clone();
+        let board = |id: &str| -> Value {
+            table["boards"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .find(|b| b["id"] == id)
+                .unwrap()
+                .clone()
+        };
+        let pico = &board("desk-pico");
+        // A project's words that are not plain names go as project-text.
+        let path = board("desk-path");
+        assert_eq!(path["product"], PROJECT_TEXT);
+        assert_eq!(
+            path["header"][0],
+            json!({ "pin": "GPIO4", "label": PROJECT_TEXT })
+        );
+        assert_eq!(pico["product"], "Desk Pico");
+        // Builtin facts go as they are.
+        assert_eq!(
+            board("waveshare-rp2040-touch-lcd-1.28")["product"],
+            "Waveshare RP2040-Touch-LCD-1.28"
+        );
         assert_eq!(pico["header"][0], json!({ "pin": "GPIO4", "label": "D4" }));
         assert_eq!(pico["default_link"]["addr"], 0x44);
         let m0 = table["mcus"]
@@ -733,6 +786,7 @@ mod tests {
             "rustup",
             "INFO_UF2",
             "boards.rs",
+            "Users",
             &dir.display().to_string(),
             &home,
         ] {

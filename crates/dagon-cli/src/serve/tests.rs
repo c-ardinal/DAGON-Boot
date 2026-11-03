@@ -1281,3 +1281,148 @@ fn a_page_that_stops_reading_events_is_dropped() {
     );
     drop(s);
 }
+
+/// A serve with dagon demo's simulated desk.
+fn demo_area(name: &str) -> Area {
+    let a = start(name);
+    let key = ed25519_compact::KeyPair::from_seed(ed25519_compact::Seed::new([5; 32]));
+    let hub = crate::demo::desk(&key, None, 1).unwrap();
+    let _ = a
+        .server
+        .sim
+        .set(Arc::new(super::SimDevice::new(hub, 10.0, None)));
+    a
+}
+
+#[test]
+fn the_sim_link_exists_only_in_a_demo_and_keeps_the_guards() {
+    let a = start("nosim");
+    let b = auth(&a);
+    let ok = [("Authorization", b.as_str())];
+    assert_eq!(http(&a, "GET", "/v1/sim/read?wait=1", &ok, b"").0, 404);
+    assert_eq!(http(&a, "POST", "/v1/sim/write", &ok, b"x").0, 404);
+
+    let d = demo_area("sim-guard");
+    let b = auth(&d);
+    let ok = [("Authorization", b.as_str())];
+    assert_eq!(http(&d, "GET", "/v1/sim/read?wait=1", &ok, b"").0, 200);
+    assert_eq!(http(&d, "GET", "/v1/sim/read?wait=1", &[], b"").0, 401);
+    assert_eq!(http(&d, "POST", "/v1/sim/write", &[], b"x").0, 401);
+    let rebind = [
+        ("Host", "attacker.example:80"),
+        ("Authorization", b.as_str()),
+    ];
+    assert_eq!(http(&d, "POST", "/v1/sim/write", &rebind, b"x").0, 403);
+    let cross = [
+        ("Origin", "https://example.com"),
+        ("Authorization", b.as_str()),
+    ];
+    assert_eq!(http(&d, "GET", "/v1/sim/read?wait=1", &cross, b"").0, 403);
+}
+
+#[test]
+fn a_demo_refuses_other_projects_and_real_hardware() {
+    let d = demo_area("demo-locks");
+    let b = auth(&d);
+    let ok = [("Authorization", b.as_str())];
+    for (m, path) in [
+        ("POST", "/v1/project/open"),
+        ("POST", "/v1/project/new"),
+        ("POST", "/v1/project/init"),
+        ("GET", "/v1/fs"),
+        ("GET", "/v1/fs?path=x"),
+        ("POST", "/v1/flash"),
+        ("POST", "/v1/doctor"),
+        ("POST", "/v1/conform"),
+        ("GET", "/v1/conform/seg"),
+        ("POST", "/v1/device"),
+    ] {
+        let (st, _) = http(&d, m, path, &ok, br#"{"path":"x","node":"seg"}"#);
+        assert_eq!(st, 403, "{m} {path}");
+    }
+    let (_, hello) = http(&d, "GET", "/v1/hello", &ok, b"");
+    let v: serde_json::Value = serde_json::from_str(&hello).unwrap();
+    let features: Vec<&str> = v["features"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|f| f.as_str().unwrap())
+        .collect();
+    for hidden in ["project", "flash", "doctor", "conform"] {
+        assert!(!features.contains(&hidden), "{hidden} in {features:?}");
+    }
+    assert!(
+        features.contains(&"sim") && features.contains(&"build"),
+        "{features:?}"
+    );
+    // The demo's own project stays readable.
+    assert_eq!(http(&d, "GET", "/v1/project", &ok, b"").0, 200);
+    assert_eq!(http(&d, "GET", "/v1/topology", &ok, b"").0, 200);
+}
+
+#[test]
+fn the_demo_uplink_follows_the_saved_topology() {
+    let d = demo_area("demo-uplink");
+    let b = auth(&d);
+    let h = [("Authorization", b.as_str())];
+    let sim = |d: &Area| {
+        let (_, hello) = http(d, "GET", "/v1/hello", &h, b"");
+        serde_json::from_str::<serde_json::Value>(&hello).unwrap()["sim"].clone()
+    };
+    assert_eq!(sim(&d)["uplink"], "usb-cdc");
+    for (kind, max, reconnect) in [("uart", 1024, "stays"), ("wifi-tcp", 1088, "reopen")] {
+        let y = YAML.replacen(
+            "    tag: hub-rp2040-lcd
+",
+            &format!(
+                "    tag: hub-rp2040-lcd
+    uplink: {{ kind: {kind}, host: browser }}
+"
+            ),
+            1,
+        );
+        assert_eq!(
+            http(&d, "PUT", "/v1/topology", &h, y.as_bytes()).0,
+            200,
+            "{kind}"
+        );
+        let s = sim(&d);
+        assert_eq!(
+            (
+                s["uplink"].as_str(),
+                s["max_payload"].as_u64(),
+                s["reconnect"].as_str()
+            ),
+            (Some(kind), Some(max), Some(reconnect))
+        );
+    }
+    // An uplink the demo cannot simulate (a kind other than USB, UART or
+    // Wi-Fi, or a custom device driving the 親機) is refused: the saved
+    // 構成 and the simulated medium both stay on Wi-Fi.
+    for (uplink, kind, host) in [
+        ("{ kind: ble, host: browser }", "ble", "browser"),
+        ("{ kind: uart, host: embedded }", "uart", "embedded"),
+    ] {
+        let y = YAML.replacen(
+            "    tag: hub-rp2040-lcd
+",
+            &format!(
+                "    tag: hub-rp2040-lcd
+    uplink: {uplink}
+"
+            ),
+            1,
+        );
+        let (status, body) = http(&d, "PUT", "/v1/topology", &h, y.as_bytes());
+        assert_eq!(status, 422, "{uplink}");
+        let v: serde_json::Value = serde_json::from_str(&body).unwrap();
+        assert_eq!(v["demo_uplink"]["kind"], kind, "{body}");
+        assert_eq!(v["demo_uplink"]["host"], host, "{body}");
+        assert_eq!(sim(&d)["uplink"], "wifi-tcp");
+        let (_, saved) = http(&d, "GET", "/v1/topology", &h, b"");
+        assert!(saved.contains("kind: wifi-tcp"), "{saved}");
+    }
+    // Without an uplink the 親機 is on USB again.
+    assert_eq!(http(&d, "PUT", "/v1/topology", &h, YAML.as_bytes()).0, 200);
+    assert_eq!(sim(&d)["uplink"], "usb-cdc");
+}

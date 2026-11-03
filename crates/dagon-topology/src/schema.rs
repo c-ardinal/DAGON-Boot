@@ -35,6 +35,41 @@ pub struct Node {
     pub max_attempts: Option<u8>,
     pub listen_window_ms: Option<u16>,
     pub tag: String,
+    /// A 親機's hop towards the PC (or whatever drives it); omitted: USB CDC
+    /// to dagon on a PC, as before. Not part of the compiled topology.
+    #[serde(default)]
+    pub uplink: Option<Uplink>,
+}
+
+/// A 親機's uplink: the kind of hop, and what is at its other end.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Uplink {
+    pub kind: LinkKind,
+    #[serde(default)]
+    pub host: UplinkHost,
+}
+
+impl Default for Uplink {
+    fn default() -> Self {
+        Uplink {
+            kind: LinkKind::UsbCdc,
+            host: UplinkHost::PcCli,
+        }
+    }
+}
+
+/// What drives a 親機 through its uplink.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum UplinkHost {
+    /// dagon on a PC.
+    #[default]
+    PcCli,
+    /// DAGON Console in a browser (a PC or a phone).
+    Browser,
+    /// A custom device of the developer's own.
+    Embedded,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
@@ -80,14 +115,49 @@ pub struct Link {
     pub control: Control,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+/// The kind of one hop. A 構成 may name any; which ones an MCU's firmware
+/// implements is in [`crate::links`] (the rest are "not available yet").
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum LinkKind {
-    I2c,
+    UsbCdc,
     Uart,
+    I2c,
+    Ble,
+    WifiTcp,
     /// Between 親機 (or deeper): written in a 構成, not updatable yet (V-23).
-    Can,
     Ethernet,
+    Can,
+}
+
+impl LinkKind {
+    pub const ALL: [LinkKind; 7] = [
+        LinkKind::UsbCdc,
+        LinkKind::Uart,
+        LinkKind::I2c,
+        LinkKind::Ble,
+        LinkKind::WifiTcp,
+        LinkKind::Ethernet,
+        LinkKind::Can,
+    ];
+
+    /// The name a 構成 uses.
+    pub fn name(self) -> &'static str {
+        match self {
+            LinkKind::UsbCdc => "usb-cdc",
+            LinkKind::Uart => "uart",
+            LinkKind::I2c => "i2c",
+            LinkKind::Ble => "ble",
+            LinkKind::WifiTcp => "wifi-tcp",
+            LinkKind::Ethernet => "ethernet",
+            LinkKind::Can => "can",
+        }
+    }
+
+    /// Kinds the compiled topology can carry between a 親機 and a 子機.
+    pub fn compiles(self) -> bool {
+        matches!(self, LinkKind::I2c | LinkKind::Uart)
+    }
 }
 
 /// Node-side I2C pin names (MCU pin names such as `PB4`).
@@ -232,6 +302,11 @@ impl Constraint {
 impl Topology {
     pub fn node(&self, id: &str) -> Option<&Node> {
         self.nodes.iter().find(|n| n.id == id)
+    }
+
+    /// A 親機's uplink as used (the default when it names none).
+    pub fn uplink(n: &Node) -> Uplink {
+        n.uplink.unwrap_or_default()
     }
 
     /// The link that reaches node `id`, if any.

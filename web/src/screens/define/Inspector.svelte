@@ -2,7 +2,26 @@
   import { tick } from 'svelte';
   import { INSPECT } from '../../app/copy.ts';
   import type { Define } from '../../app/define/define.svelte.ts';
-  import { boardMissing, connect, freeAddrs, removeLink, removeNode, setBoard, setBus, setLink, setLinkKind, setName, setNode, template, type TLink } from '../../app/define/model.ts';
+  import {
+    boardMissing,
+    connect,
+    freeAddrs,
+    hopAvailable,
+    LINK_KINDS,
+    removeLink,
+    removeNode,
+    setBoard,
+    setBus,
+    setLink,
+    setLinkKind,
+    setName,
+    setNode,
+    setUplink,
+    template,
+    type LinkKind,
+    type TLink,
+    type UplinkHost,
+  } from '../../app/define/model.ts';
   import { problemChip, type Problem } from '../../app/define/problems.ts';
 
   interface Props {
@@ -22,6 +41,11 @@
   const hubPins = $derived((hub?.board ? template(hub.board)?.header : null) ?? []);
   const nodeLink = $derived(node ? (t.links ?? []).findIndex((l) => l.to === node.id) : -1);
   const name = (id: string) => d.doc.names[id] ?? id;
+  const byId = (id: string) => t.nodes.find((n) => n.id === id);
+  /** Kinds a 親機's uplink may be (not I2C or CAN towards a PC). */
+  const UPLINK_KINDS: LinkKind[] = ['usb-cdc', 'uart', 'ble', 'wifi-tcp', 'ethernet'];
+  const HOSTS: UplinkHost[] = ['pc-cli', 'browser', 'embedded'];
+  const kindLabel = (k: string) => INSPECT.kinds[k] ?? INSPECT.kindsMore[k] ?? k;
   const hex = (a: number) => `0x${a.toString(16).padStart(2, '0')}`;
   const gpioNo = (pin: string) => Number(pin.replace(/^GPIO/, ''));
 
@@ -98,6 +122,24 @@
         </select></label
       >
     </div>
+    {#if node.role === 'coordinator'}
+      {@const up = node.uplink ?? { kind: 'usb-cdc' as LinkKind, host: 'pc-cli' as UplinkHost }}
+      <fieldset class="seg kinds">
+        <legend>{INSPECT.uplink}</legend>
+        {#each UPLINK_KINDS as k (k)}
+          {@const ok = hopAvailable(k, undefined, node)}
+          <label class:not-yet={!ok}
+            ><input type="radio" name="uplink" value={k} checked={up.kind === k} onchange={() => d.apply(setUplink(d.doc, node.id, { kind: k, host: up.host ?? 'pc-cli' }))} />{kindLabel(k)}{#if !ok}<span class="not-yet-mark">◇ {INSPECT.notYet}</span>{/if}</label
+          >
+        {/each}
+      </fieldset>
+      <label class="host"
+        >{INSPECT.uplinkHost}<select value={up.host ?? 'pc-cli'} onchange={(e) => d.apply(setUplink(d.doc, node.id, { kind: up.kind, host: e.currentTarget.value as UplinkHost }))}>
+          {#each HOSTS as h (h)}<option value={h}>{INSPECT.hosts[h]}</option>{/each}
+        </select></label
+      >
+      {@render bad('uplink')}
+    {/if}
     {#if !node.board}
       <h3>{INSPECT.board}{#if boardMissing(d.doc, node.id)}&ensp;<span class="warn">{INSPECT.boardUnset}</span>{/if}</h3>
       <div class="grid">
@@ -131,11 +173,12 @@
     <button class="secondary" onclick={() => { d.apply(removeNode(d.doc, node.id)); d.selected = null; }}>{INSPECT.removeNode}</button>
   {:else if link}
     <h2 id="inspector-h" tabindex="-1">{name(link.from)} → {name(link.to)}</h2>
-    <fieldset class="seg">
+    <fieldset class="seg kinds">
       <legend>{INSPECT.kind}</legend>
-      {#each ['i2c', 'uart', 'can', 'ethernet'] as k (k)}
-        <label
-          ><input type="radio" name="kind" value={k} checked={link.kind === k} onchange={() => d.apply(setLinkKind(d.doc, linkIndex, k as TLink['kind']))} />{INSPECT.kinds[k] ?? INSPECT.kindsMore[k]}</label
+      {#each LINK_KINDS as k (k)}
+        {@const ok = hopAvailable(k, byId(link.from), byId(link.to))}
+        <label class:not-yet={!ok}
+          ><input type="radio" name="kind" value={k} checked={link.kind === k} onchange={() => d.apply(setLinkKind(d.doc, linkIndex, k as TLink['kind']))} />{kindLabel(k)}{#if !ok}<span class="not-yet-mark">◇ {INSPECT.notYet}</span>{/if}</label
         >
       {/each}
     </fieldset>
@@ -332,6 +375,25 @@
   .seg label:has(input:checked) {
     background: var(--c-paper);
     color: var(--c-ink);
+  }
+  /* A kind the firmware does not implement yet: still choosable (the 構成
+     may describe it), marked like a shape not updatable yet (◇, dashed). */
+  .seg label.not-yet {
+    border-style: dashed;
+  }
+  .not-yet-mark {
+    display: block;
+    margin-top: var(--s-1);
+    font: 400 var(--t-small-size) / 1 var(--f-ja);
+    color: var(--c-muted);
+  }
+  .seg label.not-yet:has(input:checked) .not-yet-mark {
+    color: var(--c-ink);
+  }
+  .host {
+    display: grid;
+    gap: var(--s-1);
+    margin: 0 0 var(--s-4);
   }
   .seg input {
     position: absolute;

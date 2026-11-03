@@ -27,10 +27,26 @@ use dagon_format::{FormatError, Version};
 use dagon_proto::payload::{link, HelloReq, HelloResp, Relay};
 use dagon_proto::{find_sof, flags, max_payload, split_status, Cmd, Frame, FrameError, Status};
 
-/// Byte stream to the hub (USB CDC).
+/// What becomes of the link to the hub while the hub reboots.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Reconnect {
+    /// The link goes away with the hub (USB CDC, a TCP connection) and is
+    /// opened again ([`Transport::reopen`]) until the hub answers.
+    Reopen,
+    /// The link stays (a UART adapter): the hub is polled until it answers.
+    Stays,
+}
+
+/// Byte stream to the hub over its uplink (USB CDC, a UART adapter, a TCP
+/// connection, ...). The link's own properties come from here, not from
+/// USB constants.
 #[allow(async_fn_in_trait)]
 pub trait Transport {
     type Error: core::fmt::Debug;
+    /// Largest frame payload this link carries to and from the hub.
+    fn max_payload(&self) -> usize;
+    /// What the link does while the hub reboots.
+    fn reconnect_kind(&self) -> Reconnect;
     /// Sends all of `bytes`.
     async fn write(&mut self, bytes: &[u8]) -> core::result::Result<(), Self::Error>;
     /// Bytes received so far, up to `buf.len()`; may wait briefly. `Ok(0)`
@@ -80,11 +96,12 @@ impl Target {
         }
     }
 
-    fn link_max(self) -> usize {
+    /// Largest payload of the hub's link to this node; None for the hub.
+    fn node_link_max(self) -> Option<usize> {
         match self {
-            Target::Hub => max_payload::USB,
-            Target::I2c(_) => max_payload::I2C,
-            Target::Uart => max_payload::UART,
+            Target::Hub => None,
+            Target::I2c(_) => Some(max_payload::I2C),
+            Target::Uart => Some(max_payload::UART),
         }
     }
 }
@@ -208,6 +225,16 @@ impl<T: Transport, C: Clock> Host<T, C> {
         Ok(())
     }
 
+    /// Largest payload a request to `to` may carry: the uplink's, and for a
+    /// node also its link's and what fits inside a RELAY on the uplink.
+    pub(crate) fn link_max(&self, to: Target) -> usize {
+        let up = self.transport.max_payload();
+        match to.node_link_max() {
+            None => up,
+            Some(node) => node.min(up.saturating_sub(Relay::HEAD_LEN + dagon_proto::frame_len(0))),
+        }
+    }
+
     /// Version this session last applied to `to`.
     pub fn applied(&self, to: Target) -> Option<Version> {
         self.applied.iter().find(|a| a.0 == to).map(|a| a.1)
@@ -232,7 +259,7 @@ impl<T: Transport, C: Clock> Host<T, C> {
                 return None;
             };
             self.rx.drain(..start);
-            match Frame::decode(&self.rx, max_payload::USB) {
+            match Frame::decode(&self.rx, self.transport.max_payload()) {
                 Ok((f, n)) => {
                     let hit = f.flags & flags::RESP != 0 && f.seq == seq && f.cmd == cmd as u8;
                     let payload = hit.then(|| f.payload.to_vec());
@@ -349,7 +376,7 @@ impl<T: Transport, C: Clock> Host<T, C> {
             self.drain().await?;
         }
         if !self.opened.contains(&to) {
-            let hello = hello_request(to);
+            let hello = hello_request(self.link_max(to));
             self.attempts(to, Cmd::Hello, &hello, timeout_ms.min(REQUEST_MS), retries)
                 .await
                 .or_else(|e| match e {
@@ -414,7 +441,7 @@ impl<T: Transport, C: Clock> Host<T, C> {
         timeout_ms: u32,
         retry: bool,
     ) -> Result<HelloResp, T::Error> {
-        let b = hello_request(to);
+        let b = hello_request(self.link_max(to));
         let body = if retry {
             self.call(to, Cmd::Hello, &b, timeout_ms).await?
         } else {
@@ -433,11 +460,11 @@ impl<T: Transport, C: Clock> Host<T, C> {
     }
 }
 
-fn hello_request(to: Target) -> [u8; 6] {
+fn hello_request(max: usize) -> [u8; 6] {
     let mut b = [0u8; 6];
     HelloReq {
         proto_ver: dagon_proto::PROTO_VERSION as u32,
-        max_payload: to.link_max() as u16,
+        max_payload: max.min(u16::MAX as usize) as u16,
     }
     .encode(&mut b)
     .expect("6 bytes");
@@ -484,7 +511,8 @@ fn relayed<E>(resp: &[u8], to: Target, seq: u8, cmd: Cmd) -> Result<Vec<u8>, E> 
     if status != Status::Ok {
         return Err(Error::Relay(status));
     }
-    let (f, _) = Frame::decode(body, to.link_max()).map_err(|_| Error::BadResponse)?;
+    let max = to.node_link_max().unwrap_or(max_payload::USB);
+    let (f, _) = Frame::decode(body, max).map_err(|_| Error::BadResponse)?;
     if f.flags & flags::RESP == 0 || f.seq != seq || f.cmd != cmd as u8 {
         return Err(Error::BadResponse);
     }

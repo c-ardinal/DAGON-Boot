@@ -54,6 +54,8 @@ pub struct Server {
     /// The folder projects may be opened or created under; unset: the
     /// user's home.
     pub home: std::sync::OnceLock<PathBuf>,
+    /// The simulated desk of `dagon demo`; none for a real hub.
+    pub sim: std::sync::OnceLock<Arc<super::SimDevice>>,
     /// Public key the page verifies releases with: given at start, then
     /// the open project's.
     release_key: std::sync::RwLock<Option<[u8; 32]>>,
@@ -78,6 +80,7 @@ impl Server {
             config: std::sync::RwLock::new(config),
             web,
             home: std::sync::OnceLock::new(),
+            sim: std::sync::OnceLock::new(),
             release_key: std::sync::RwLock::new(None),
             pages: AtomicUsize::new(0),
             events: Mutex::default(),

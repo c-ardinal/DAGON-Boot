@@ -102,6 +102,9 @@ fn sim() -> Sim {
         held: None,
         faults: Rc::default(),
         inject: Rc::default(),
+        max: dagon_proto::max_payload::USB,
+        reconnect: dagon_host::Reconnect::Reopen,
+        largest: Rc::default(),
     }
 }
 
@@ -143,10 +146,21 @@ struct Sim {
     /// Bytes that arrive just before the hub's reply to the next request
     /// (a previous session's replies still on the link).
     inject: Rc<RefCell<Vec<u8>>>,
+    /// The uplink's largest payload and what it does on a hub reboot.
+    max: usize,
+    reconnect: dagon_host::Reconnect,
+    /// Largest frame payload written.
+    largest: Rc<RefCell<usize>>,
 }
 
 impl Transport for Sim {
     type Error = ();
+    fn max_payload(&self) -> usize {
+        self.max
+    }
+    fn reconnect_kind(&self) -> dagon_host::Reconnect {
+        self.reconnect
+    }
     async fn write(&mut self, bytes: &[u8]) -> Result<(), ()> {
         let is_reboot = bytes.len() > 5 && bytes[3] == 0 && bytes[5] == Cmd::Reboot as u8;
         if is_reboot && self.late_reboot > 0 {
@@ -157,6 +171,10 @@ impl Transport for Sim {
             return Ok(());
         }
         self.pending.extend(self.inject.borrow_mut().drain(..));
+        let payload = bytes.len().saturating_sub(dagon_proto::frame_len(0));
+        let mut big = self.largest.borrow_mut();
+        *big = (*big).max(payload);
+        drop(big);
         let (cmd, retry) = effective(bytes);
         let mut f = self.faults.borrow_mut();
         f.seen.push((cmd, retry));
@@ -906,4 +924,30 @@ fn f401_confirm_lands_inside_a_4_s_trial() {
         (1, 1),
         "confirmed, not rolled back"
     );
+}
+
+#[test]
+fn the_uplink_sets_the_frame_size_and_what_a_hub_reboot_does() {
+    // A UART adapter: smaller frames, and the link stays while the hub
+    // reboots (polled, never reopened). The same update completes.
+    let mut s = sim();
+    s.max = 512;
+    s.reconnect = dagon_host::Reconnect::Stays;
+    let mut h = host(&s);
+    let out =
+        block_on(h.apply(&release(), &topology(&yaml()), &key().pk, None, &mut |_| {})).unwrap();
+    let v = Version::new(1, 1, 0);
+    assert!(
+        out.iter()
+            .all(|o| matches!(o.outcome, Outcome::Done(x) if x == v)),
+        "{out:?}"
+    );
+    assert!(*s.largest.borrow() <= 512, "{} > 512", s.largest.borrow());
+    assert_eq!(*s.reopens.borrow(), 0, "a link that stays is not reopened");
+    // USB CDC: full-size frames, reopened after the hub's REBOOT.
+    let s = sim();
+    let mut h = host(&s);
+    block_on(h.apply(&release(), &topology(&yaml()), &key().pk, None, &mut |_| {})).unwrap();
+    assert!(*s.largest.borrow() > 512);
+    assert!(*s.reopens.borrow() >= 1);
 }

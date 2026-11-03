@@ -6,7 +6,7 @@ import deskDemoYaml from '../../../topology/desk-demo.yaml?raw';
 
 export const DESK_DEMO_YAML: string = deskDemoYaml;
 
-export type LinkKind = 'I2C' | 'UART' | 'CAN' | 'Ethernet';
+export type LinkKind = 'USB' | 'UART' | 'I2C' | 'BLE' | 'Wi-Fi' | 'Ethernet' | 'CAN';
 
 /** How dagon-host reaches a node: the hub itself, or RELAY on I2C / UART. */
 export interface Target {
@@ -56,6 +56,8 @@ export interface Config {
   links: Link[];
   /** Node ids, children first and the hub last. */
   order: string[];
+  /** The 親機's declared uplink (none: USB to this PC). */
+  uplink?: { kind: string; host: 'pc-cli' | 'browser' | 'embedded' };
 }
 
 const NRST_HEADER = 'NRST（ヘッダの位置: 未設定）';

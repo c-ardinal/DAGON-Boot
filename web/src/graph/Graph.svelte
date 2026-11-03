@@ -25,6 +25,7 @@
 
 <script lang="ts">
   import { CANVAS, LINK, NODE } from '../app/copy.ts';
+  import { KIND_LABEL, type LinkKind } from '../app/define/model.ts';
   import type { Live } from '../app/operate.svelte.ts';
   import type { Config, Link, Node } from '../app/sample.ts';
   import { versionText } from '../wasm/dagon.ts';
@@ -189,13 +190,17 @@
     return product.split(/(?<=-|RP2040)/);
   }
 
+  const hubVia = $derived(
+    config?.uplink ? NODE.uplinkVia(KIND_LABEL[config.uplink.kind as LinkKind] ?? config.uplink.kind, config.uplink.host) : NODE.usb,
+  );
+
   function spokenName(n: Node, m: Mark, version: string): string {
     return NODE.name({
       name: n.name,
       product: n.product,
       mcu: n.mcu,
       role: n.role === 'hub' ? NODE.roleHub : NODE.roleNode,
-      via: n.role === 'hub' ? NODE.usb : NODE.viaName(n.via),
+      via: n.role === 'hub' ? hubVia : NODE.viaName(n.via),
       state: m && m !== 'skeleton' ? m.spoken : '',
       version,
     });
@@ -248,7 +253,7 @@
       </div>
     {/if}
 
-    <div class="pc" style:left="{W / 2 - PC.w / 2}px" style:top="{PC.y}px">{CANVAS.pc}</div>
+    <div class="pc" style:left="{W / 2 - PC.w / 2}px" style:top="{PC.y}px">{config?.uplink ? (CANVAS.pcBy[config.uplink.host] ?? CANVAS.pc) : CANVAS.pc}</div>
 
     {#if !config}
       <div class="receptacle" style:left="{hubX}px" style:top="{hubY}px" style:height="{EMPTY_H}px">{CANVAS.hubSlot}</div>
@@ -291,7 +296,7 @@
           <span class="product" translate="no">{#each breaks(n.product) as part, i (i)}{#if i}<wbr />{/if}{part}{/each}</span>
           <span class="mono"><span class="label">{NODE.mcu}</span> <span translate="no">{n.mcu}</span></span>
           {#if n.role === 'hub'}
-            <span class="mono">{NODE.usb}</span>
+            <span class="mono">{hubVia}</span>
           {:else}
             <span class="mono" translate="no">{n.via}</span>
             <span class="mono"><span class="label">{NODE.reset}</span> <span translate="no">{n.reset ?? NODE.noWire}</span></span>

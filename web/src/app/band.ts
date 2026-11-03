@@ -1,6 +1,6 @@
 // What the bottom band shows in each state: cause chip, one sentence, and the
 // named buttons the machine allows there.
-import { BAND, BAND_CHIP, BAND_FOR, BUTTON, BUTTON_FOR, type BandCopy } from './copy.ts';
+import { BAND, BAND_CHIP, BAND_FOR, BUTTON, BUTTON_FOR, SIM, type BandCopy } from './copy.ts';
 import { view, type Action, type Ctx, type L } from './machine.ts';
 import type { Finish } from './operate.svelte.ts';
 import type { ReconnectNote } from '../serial/transport.ts';
@@ -25,6 +25,8 @@ export interface Names {
   unwritten?: number;
   /** The update covers the nodes left after a recovery (M50). */
   rest?: boolean;
+  /** dagon demo: the 親機 is simulated, so no device list appears. */
+  sim?: boolean;
   /** What the last run left (L23): the band says only that. */
   finish?: Finish | null;
 }
@@ -51,11 +53,11 @@ function words(s: L, c: Ctx, n: Names): BandCopy {
   switch (s) {
     case 'L02':
     case 'L03':
-      return BAND.M03;
+      return n.sim ? SIM.connect : BAND.M03;
     case 'L04':
     case 'L05':
     case 'L07':
-      return c.failure ? FAILURE_BAND[c.failure] : BAND.M03;
+      return c.failure ? FAILURE_BAND[c.failure] : n.sim ? SIM.connect : BAND.M03;
     case 'L06':
       return BAND.M59;
     case 'L08':

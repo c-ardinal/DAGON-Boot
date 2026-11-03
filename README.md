@@ -299,12 +299,62 @@ check and `dagon gen` tell you what is still missing; the
 ## Try it without hardware
 
 ```sh
+dagon demo                         # DAGON Console with a simulated desk
+dagon demo --sim-fail watch        # the same, and watch's update fails and falls back
+dagon demo --sim-speed 4           # four times faster (for recordings)
+```
+
+`dagon demo` opens DAGON Console against a simulated 親機 with its two
+子機 (the desk-demo 構成: hub, seg, watch, all on 1.0.0), the simulator
+`dagon sim run` uses, driven by the same dagon-host code as real boards.
+Connect, choose the latest release (demo-1.1.0) and update all three with
+live progress; with `--sim-fail seg` or `--sim-fail watch` that 子機's new
+version crashes at boot and it goes back to 1.0.0. The links and flash take
+about their real time (`--sim-speed` from 0.1 to 20 scales it). The header
+shows 模擬 the whole time. The demo makes its own project in the temporary
+folder (`dagon-demo-<hash of your user name>`, made afresh at each start) with a DEMO key made for it;
+your keys are not used, and nothing it signs runs on real boards.
+
+```sh
 dagon sim run
 ```
 
 Four end-to-end scenarios in the simulator: an update with a power cut
 during the transfer, an image that never confirms, tampered releases, and
 an erased F401 brought back through its ROM boot loader.
+
+### Swapping a link (つながりを差し替える)
+
+Every hop in a 構成 has a kind: `usb-cdc`, `uart`, `i2c`, `ble`,
+`wifi-tcp`, `ethernet` or `can`. A 親機 can also declare its uplink, the
+hop towards whatever drives it, and what is at the other end:
+
+```yaml
+  - id: hub
+    ...
+    uplink: { kind: uart, host: browser }   # pc-cli | browser | embedded
+```
+
+Without `uplink` it is `usb-cdc` to dagon on a PC, as before; the uplink is
+not part of the compiled topology, so existing 構成 and their releases stay
+the same. In DAGON Console's 定義 the inspector offers each kind for a link
+and, on the 親機, for its uplink. Kinds the firmware of either end does not
+implement yet are marked ◇ まだ使えない; the 構成 may still name them
+(problem まだ使えないつながり), and `dagon gen` refuses them with the hop's
+name (`uplink of hub over ble: not available yet on rp2040`). Today the
+firmware offers the hub's USB CDC uplink, I2C and UART to its 子機, and
+the ESP32-S3's UART or USB CDC towards its 親機.
+
+The demo shows the swap without new radios:
+
+```sh
+dagon demo --uplink uart          # or usb-cdc (default), wifi-tcp
+```
+
+The simulated uplink follows the demo 構成: change the 親機's uplink in
+定義 (USB, UART, Wi-Fi) and the same update runs over the other medium, with
+its own frame size, speed and behaviour while the 親機 reboots (USB CDC
+and Wi-Fi reconnect; a UART adapter stays).
 
 ## What works today
 

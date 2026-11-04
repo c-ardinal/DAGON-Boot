@@ -8,6 +8,8 @@ description = "DAGON lifecycle events: state machines whose transitions emit eve
 [dependencies]
 dagon-format = { path = "../dagon-format" }
 embassy-sync = "0.8"
+# The bus port speaks to any I2C driver through its traits.
+embedded-hal = "1"
 
 [dev-dependencies]
 critical-section = { version = "1.1", features = ["std"] }

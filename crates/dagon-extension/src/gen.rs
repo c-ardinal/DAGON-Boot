@@ -310,7 +310,7 @@ fn isolation(out: &mut String, def: &McuDef) {
     );
 }
 
-fn chain(out: &mut String, exts: &[Ext<'_>]) {
+fn chain(out: &mut String, exts: &[Ext<'_>], known: &Known) {
     out.push_str("pub const EXTENSIONS: &[Extension] = &[\n");
     for e in exts {
         let m = e.manifest;
@@ -326,16 +326,35 @@ fn chain(out: &mut String, exts: &[Ext<'_>]) {
         );
     }
     out.push_str("];\n\n");
-    let budgets: Vec<String> = exts
+    let limits: Vec<String> = exts
         .iter()
-        .map(|e| e.manifest.limits.max_run_us.to_string())
+        .map(|e| {
+            let mut codes: Vec<u8> = e
+                .manifest
+                .observes
+                .iter()
+                .flat_map(|o| known.matching(o))
+                .filter(|k| k.layer == Layer::Boot && k.live)
+                .map(|k| k.code)
+                .collect();
+            codes.sort_unstable();
+            codes.dedup();
+            let codes: Vec<String> = codes.iter().map(|c| format!("{c:#04x}")).collect();
+            format!(
+                "    dagon_events::BootExtension::new({}, &[{}]), // {}",
+                e.manifest.limits.max_run_us,
+                codes.join(", "),
+                e.manifest.observes.join(", ")
+            )
+        })
         .collect();
     let _ = writeln!(
         out,
-        "/// Each extension's time limit per call, us, in chain order\n\
-         /// (`dagon_events::compose_boot`).\n\
-         pub const BOOT_BUDGETS_US: &[u32] = &[{}];\n",
-        budgets.join(", ")
+        "/// Each extension's time limit per call (us) and the events it is\n\
+         /// called for, in chain order (`dagon_events::compose_boot`).\n\
+         pub const BOOT_EXTENSIONS: &[dagon_events::BootExtension] = &[\n{}{}];\n",
+        limits.join("\n"),
+        if limits.is_empty() { "" } else { "\n" }
     );
     let mut ty = String::from("dagon_events::Nop");
     let mut value = String::from("dagon_events::Nop");
@@ -424,7 +443,7 @@ pub fn boot_wiring(
     }
     record(&mut out, def);
     isolation(&mut out, def);
-    chain(&mut out, &plan.exts);
+    chain(&mut out, &plan.exts, known);
     maps(&mut out, &plan.maps);
     Ok(out)
 }

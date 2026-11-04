@@ -20,7 +20,7 @@
 
 use dagon_boot::BootRun;
 use dagon_core::boot::{BootConfig, Decision};
-use dagon_events::{compose_boot, Extension};
+use dagon_events::{compose_boot, BootExtension, Extension};
 use dagon_format::header::mcu_id;
 use dagon_mcu_rp2040::arm::{jump, led, step};
 use dagon_mcu_rp2040::flash::RpFlash;
@@ -43,7 +43,7 @@ macro_rules! boot {
     ($wiring:ident) => {
         #[$crate::__entry]
         fn main() -> ! {
-            $crate::run($wiring::BOOT_CHAIN, $wiring::BOOT_BUDGETS_US)
+            $crate::run($wiring::BOOT_CHAIN, $wiring::BOOT_EXTENSIONS)
         }
     };
 }
@@ -117,8 +117,8 @@ const CONFIG: BootConfig = BootConfig {
 };
 
 /// One boot with `chain` (the node's boot extensions, in order; their
-/// time limits per call in `budgets_us`).
-pub fn run<E: Extension>(chain: E, budgets_us: &'static [u32]) -> ! {
+/// time limits and observed events in `limits`).
+pub fn run<E: Extension>(chain: E, limits: &'static [BootExtension]) -> ! {
     // The diag panic handler blinks the selected LED.
     if let Some(gpio) = board_def::BOOT_LED_GPIO {
         led::select(gpio, board_def::BOOT_LED_ACTIVE_HIGH);
@@ -130,7 +130,7 @@ pub fn run<E: Extension>(chain: E, budgets_us: &'static [u32]) -> ! {
     let mut wdt = Watchdog::new(p.WATCHDOG);
     wdt.start(Duration::from_millis(WDT_MS as u64));
     step(8);
-    let mut chain = compose_boot(chain, now_us, budgets_us);
+    let mut chain = compose_boot(chain, now_us, limits);
     let mut boot = BootRun::start(
         &mut chain,
         &mut flash,

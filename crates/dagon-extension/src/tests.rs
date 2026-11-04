@@ -15,20 +15,21 @@ const PARTITIONS: &str = include_str!("../../../targets/mcu/esp32s3/partitions.c
 
 /// A catalog with the boot and app kinds the examples observe.
 fn known() -> Known {
-    let k = |layer, kind, action| EventKind {
+    let k = |layer, kind, code, action| EventKind {
         layer,
         kind,
+        code,
         live: true,
         action,
     };
     Known {
         kinds: vec![
-            k(Layer::Boot, "watchdog_armed", true),
-            k(Layer::Boot, "before_jump", true),
-            k(Layer::Boot, "entry", false),
-            k(Layer::App, "update_offered", false),
-            k(Layer::App, "transfer_started", false),
-            k(Layer::App, "transfer_done", false),
+            k(Layer::Boot, "watchdog_armed", 0x03, true),
+            k(Layer::Boot, "before_jump", 0x06, true),
+            k(Layer::Boot, "entry", 0x01, false),
+            k(Layer::App, "update_offered", 0x10, false),
+            k(Layer::App, "transfer_started", 0x20, false),
+            k(Layer::App, "transfer_done", 0x21, false),
         ],
         ports: dagon_catalog::PORTS,
         decisions: dagon_catalog::DECISIONS,
@@ -684,6 +685,60 @@ on = "watchdog_armed"
 ops = [{ op = "gpio", pin = "GPIO5", level = "high" }, { op = "delay", ms = 2 }, { op = "led", state = "on" }]
 "#;
 
+/// The boot budget counts the calls the boot core makes: one per boot
+/// event an extension observes, and for an extension observing
+/// `boot.extension_overran` one per call any boot extension can overrun.
+#[test]
+fn the_boot_budget_counts_every_call_the_boot_core_makes() {
+    let reg = registry(STM32, &[], &board_for("stm32f401re", "t", &[]));
+    let (def, board) = parts(&reg);
+    let k = Known::dagon();
+    let m = |id: &str, observes: &str| {
+        Manifest::parse(
+            &format!(
+                "format = 1\nid = {id:?}\nlayers = [\"boot\"]\nobserves = [{observes}]\ntrusted = true\n\
+                 [limits]\nmax_run_us = 1000\n"
+            ),
+            "test",
+            &k,
+        )
+        .unwrap()
+    };
+    let seq = k
+        .kinds
+        .iter()
+        .filter(|x| x.layer == Layer::Boot && x.live && x.kind != dagon_catalog::BOOT_OVERRAN_KIND)
+        .count() as u64;
+    let all = m("all", "\"boot.*\"");
+    let watch = m("watch", "\"boot.extension_overran\"");
+    let one = m("one", "\"boot.before_decision\"");
+    let trusted = |m| Ext {
+        sha256: Some("ab".repeat(32)),
+        ..ext(m)
+    };
+    fn need(
+        def: &McuDef,
+        board: &BoardDef,
+        exts: Vec<Ext<'_>>,
+        trial_ms: u32,
+    ) -> Result<(), String> {
+        let mut d = def.clone();
+        d.watchdog.as_mut().unwrap().trial_ms = trial_ms;
+        node::plan(&d, Some(board), Image::Bootcore, exts, &Known::dagon()).map(|_| ())
+    }
+    // `all`: every sequence event, plus a notice for each call that can
+    // overrun (its own; `watch` observes no sequence event); `watch`:
+    // those notices only.
+    let calls = seq;
+    let want = 1000 * (seq + calls) + 1000 * calls;
+    let e = need(def, board, vec![trusted(&all), trusted(&watch)], 4).unwrap_err();
+    assert!(e.contains(&format!("may take {want} us per boot")), "{e}");
+    // One observed event is one call.
+    let e = need(def, board, vec![trusted(&one)], 3).unwrap_err();
+    assert!(e.contains("may take 1000 us per boot"), "{e}");
+    need(def, board, vec![trusted(&one)], 4).unwrap();
+}
+
 fn golden_wiring() -> String {
     let board = board_for("rp2040", "t", &[("serial", "uart1")]) + BOOT_BOARD;
     let reg = registry(RP2040, &[], &board);
@@ -718,6 +773,12 @@ fn boot_wiring_is_the_golden_copy_and_compiles() {
     assert!(regions.iter().all(|r| r.device == (r.number >= 3)));
     assert!(!golden::LED.unwrap().active_high);
     let _chain: golden::BootChain = golden::BOOT_CHAIN;
+    // One limit per chained extension, from the same list.
+    assert_eq!(golden::BOOT_EXTENSIONS.len(), golden::EXTENSIONS.len());
+    assert_eq!(
+        golden::BOOT_EXTENSIONS[0].budget_us(),
+        golden::EXTENSIONS[0].max_run_us
+    );
 }
 
 #[test]

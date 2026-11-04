@@ -1157,12 +1157,14 @@ the safety rules are made of. It is accepted only when:
    little-endian u64 and its bytes with CRLF read as LF, leaving out
    `target/`, `Cargo.lock` and hidden entries. `dagon gen` checks the
    hash (and names the one it found when they differ), and the boot
-   core's build checks it again and refuses any linked crate that is
-   neither DAGON's nor a declared trusted extension, so only the declared
-   source is linked. The hash is of the source because the linked bytes
-   do not exist when `dagon gen` runs. It does not cover the crates the
-   extension itself depends on: those are pinned by the boot crate's
-   `Cargo.lock`;
+   core's build checks it again and walks the boot crate's whole
+   resolved dependency graph for its target: every crate built into the
+   image is DAGON's, inside a declared trusted extension's folder (and so
+   in its hash), or a registry crate with a checksum in the boot crate's
+   `Cargo.lock`; any other refuses the build. The hash is of the source
+   because the linked bytes do not exist when `dagon gen` runs. It does
+   not cover the registry crates the extension depends on: those are
+   pinned by the boot crate's `Cargo.lock`;
 3. the image that contains it is signed with the project key, the
    signature covering the extension's bytes, and the device verifies
    that signature before the image runs (below);
@@ -1170,6 +1172,18 @@ the safety rules are made of. It is accepted only when:
    trusted extensions of each node by id, and VERSION reports their ids
    and the first bytes of their source hashes for display (0x08) and
    the full hashes for identity (0x09).
+
+A plug-in may also be trusted without providing any port: an observer
+whose manifest says `trusted = true` and observes events only. It is
+accepted under items 2 to 4 above, answers no decision point, and each
+of its handler calls is timed against its manifest's `max_run_us` like
+any extension's (a call over it is reported as
+`<layer>.extension_overran`, not stopped). The reason: a project's own
+code at boot (showing the boot on a display, driving its own hardware)
+often needs exactly what the sandbox denies an extension, such as a bus
+or a peripheral DAGON's map does not open; declaring it trusted makes it
+part of DAGON for that project instead of weakening the sandbox for
+every project.
 
 A trusted extension runs privileged, in DAGON's own regions: it is that
 part of DAGON for that project. Nothing in 4.1–4.6 holds against it, and

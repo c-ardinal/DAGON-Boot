@@ -118,11 +118,18 @@ left alone. Build it in that folder with `cargo build --release`
 The boot core runs its extensions privileged, so it runs only trusted
 ones (manifest `trusted = true`, listed with their source hash under
 `[extensions.nodes.<id>] trusted`). From `boot.watchdog_armed` to
-`boot.before_jump` or `boot.halt` every boot event (docs/events.md, layer
-`boot`) reaches them in chain order, each call timed against its
-`max_run_us`: a call that takes longer is not stopped, but the boot core
-then delivers `boot.extension_overran` (the extension, its budget, the
-time taken) and goes on. There is no decision point at boot: the slot
+`boot.before_jump` or `boot.halt`, each boot event (docs/events.md, layer
+`boot`) reaches, in chain order, the extensions whose `observes` names
+it, each call timed against its `max_run_us`: a call that takes longer
+is not stopped, but the boot core then delivers `boot.extension_overran`
+(the extension, its budget, the time taken) to the extensions observing
+that kind, and goes on. `dagon gen` refuses a set whose calls could take
+more than a quarter of the trial watchdog period: one call per observed
+boot event, and for an extension observing `boot.extension_overran` one
+more per call of any boot extension. The boot core's build checks the
+whole resolved dependency graph of the boot crate: every crate is
+DAGON's, inside a declared trusted extension's folder, or a registry
+crate with a checksum in the boot crate's `Cargo.lock`. There is no decision point at boot: the slot
 the boot core starts is decided by DAGON alone, so an extension cannot
 change it. The calls share the boot core's flash budget (the
 STM32F401RE's is 32,256 bytes) and its watchdog: one that does not

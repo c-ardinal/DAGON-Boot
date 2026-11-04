@@ -604,7 +604,12 @@ mod tests {
             wiring.contains("dagon_events::Chain<boot_show::DagonExtension, dagon_events::Nop>"),
             "{wiring}"
         );
-        assert!(wiring.contains("pub const BOOT_BUDGETS_US: &[u32] = &[2000];"));
+        assert!(
+            wiring.contains(
+                "dagon_events::BootExtension::new(2000, &[0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0xf0]), // boot.*"
+            ),
+            "{wiring}"
+        );
         // The trusted extension runs in DAGON's regions: no map at boot; the
         // app's sandboxed logger has its regions.
         let x = std::fs::read_to_string(base.join("nodes/seg/dagon/memory-boot-a.x")).unwrap();
@@ -635,7 +640,7 @@ mod tests {
         );
         assert_eq!(f.meta.trusted.len(), 1);
         assert!(f.project().unwrap().ends_with("dagon.toml"));
-        f.check_linked(&dagon_src().path.unwrap()).unwrap();
+        f.check_hashes().unwrap();
         let config = std::fs::read_to_string(base.join("boot/seg/.cargo/config.toml")).unwrap();
         assert!(config.contains("DAGON_TARGET_TAG = \"seg\""), "{config}");
         assert!(config.contains("DAGON_BOOT_CRATE"), "{config}");
@@ -702,7 +707,7 @@ mod tests {
         let f =
             dagon_topology::defs::boot_folder::BootFolder::read(&base.join("boot/seg")).unwrap();
         assert!(f.meta.trusted.is_empty());
-        f.check_linked(&dagon_src().path.unwrap()).unwrap();
+        f.check_hashes().unwrap();
         let _ = std::fs::remove_dir_all(&base);
     }
 

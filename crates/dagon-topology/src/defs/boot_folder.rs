@@ -102,43 +102,29 @@ impl BootFolder {
         self.meta.project.as_ref().map(|p| self.dir.join(p))
     }
 
-    /// Checks that the boot crate links only DAGON's packages (from the
-    /// DAGON source at `dagon_root`, or from a git source) and the trusted
-    /// extensions, and that each trusted extension's source still hashes
-    /// to what dagon.toml declares. Returns the files the hashes read.
-    pub fn check_linked(&self, dagon_root: &Path) -> Result<Vec<PathBuf>, String> {
-        let canon = |p: &Path| std::fs::canonicalize(p).unwrap_or_else(|_| p.to_path_buf());
-        let root = canon(dagon_root);
-        let trusted: Vec<(PathBuf, &TrustedSource)> = self
-            .meta
+    fn trusted_dirs(&self) -> Vec<(PathBuf, &TrustedSource)> {
+        self.meta
             .trusted
             .iter()
             .map(|t| (canon(&self.dir.join(&t.path)), t))
-            .collect();
-        for (name, dep) in &self.deps {
-            match dep.get("path").and_then(|p| p.as_str()) {
-                Some(p) => {
-                    let p = canon(&self.dir.join(p));
-                    if !p.starts_with(&root) && !trusted.iter().any(|(t, _)| *t == p) {
-                        return Err(format!(
-                            "the boot crate of node {} links {name} ({}), which dagon.toml does not declare trusted for it",
-                            self.meta.node,
-                            p.display()
-                        ));
-                    }
-                }
-                None if name.starts_with("dagon-") => {}
-                None => {
-                    return Err(format!(
-                        "the boot crate of node {} links {name}, which is no DAGON package and no declared trusted extension",
-                        self.meta.node
-                    ))
-                }
-            }
-        }
+            .collect()
+    }
+
+    /// Whether the boot crate depends on package `name` (the boot core
+    /// library whose build reads this folder; a build of that library on
+    /// its own, such as the firmware lint's, links nothing from here).
+    pub fn depends_on(&self, name: &str) -> bool {
+        self.deps
+            .iter()
+            .any(|(k, v)| v.get("package").and_then(|p| p.as_str()).unwrap_or(k) == name)
+    }
+
+    /// Checks that each trusted extension's source still hashes to what
+    /// dagon.toml declares. Returns the files the hashes read.
+    pub fn check_hashes(&self) -> Result<Vec<PathBuf>, String> {
         let mut files = Vec::new();
-        for (dir, t) in &trusted {
-            let (got, read) = source_files_sha256(dir)?;
+        for (dir, t) in self.trusted_dirs() {
+            let (got, read) = source_files_sha256(&dir)?;
             if !got.eq_ignore_ascii_case(&t.sha256) {
                 return Err(format!(
                     "trusted extension {} ({}): its source hashes to {got}; dagon.toml declares {}",
@@ -151,6 +137,131 @@ impl BootFolder {
         }
         Ok(files)
     }
+
+    /// Checks the boot crate's resolved dependency graph (`metadata`:
+    /// `cargo metadata --filter-platform <target>` of the boot crate;
+    /// `lock`: its Cargo.lock): every package built for it (normal and
+    /// build dependencies, from the boot crate down; dev-dependencies are
+    /// never built into it) is one of
+    ///
+    /// - DAGON's: a path package inside the DAGON source at `dagon_root`,
+    ///   or a package from the same source as the boot core library
+    ///   `own` (DAGON from git);
+    /// - a declared trusted extension, or a path package inside one (its
+    ///   files are in the source hash);
+    /// - a registry crate whose Cargo.lock entry carries a checksum.
+    ///
+    /// Anything else (a path crate elsewhere, a git crate of another
+    /// source, a registry crate without a checksum) is refused by name.
+    pub fn check_graph(
+        &self,
+        metadata: &serde_json::Value,
+        lock: &str,
+        own: &str,
+        dagon_root: &Path,
+    ) -> Result<(), String> {
+        let root = canon(dagon_root);
+        let trusted: Vec<PathBuf> = self.trusted_dirs().into_iter().map(|(d, _)| d).collect();
+        let lock: toml::Table = if lock.is_empty() {
+            toml::Table::new()
+        } else {
+            lock.parse().map_err(|e| format!("Cargo.lock: {e}"))?
+        };
+        let pinned = |name: &str, version: &str, source: &str| {
+            lock.get("package")
+                .and_then(|p| p.as_array())
+                .into_iter()
+                .flatten()
+                .any(|p| {
+                    let s = |k: &str| p.get(k).and_then(|v| v.as_str());
+                    s("name") == Some(name)
+                        && s("version") == Some(version)
+                        && s("source") == Some(source)
+                        && s("checksum").is_some()
+                })
+        };
+        let packages = metadata["packages"].as_array().cloned().unwrap_or_default();
+        let pkg = |id: &str| packages.iter().find(|p| p["id"] == id);
+        let own_source = packages
+            .iter()
+            .find(|p| p["name"] == own)
+            .map(|p| p["source"].clone())
+            .ok_or_else(|| {
+                format!(
+                    "the boot crate of node {} does not link {own}",
+                    self.meta.node
+                )
+            })?;
+        let nodes = metadata["resolve"]["nodes"]
+            .as_array()
+            .cloned()
+            .unwrap_or_default();
+        let root_id = metadata["resolve"]["root"]
+            .as_str()
+            .unwrap_or_default()
+            .to_string();
+        let mut todo = vec![root_id.clone()];
+        let mut seen = std::collections::BTreeSet::new();
+        while let Some(id) = todo.pop() {
+            if !seen.insert(id.clone()) {
+                continue;
+            }
+            let Some(n) = nodes.iter().find(|n| n["id"] == id.as_str()) else {
+                continue;
+            };
+            for d in n["deps"].as_array().into_iter().flatten() {
+                let built = d["dep_kinds"]
+                    .as_array()
+                    .into_iter()
+                    .flatten()
+                    .any(|k| k["kind"].as_str() != Some("dev"));
+                if built {
+                    todo.push(d["pkg"].as_str().unwrap_or_default().to_string());
+                }
+            }
+            if id == root_id {
+                continue;
+            }
+            let p = pkg(&id).ok_or_else(|| format!("cargo metadata: no package {id}"))?;
+            let name = p["name"].as_str().unwrap_or_default();
+            let version = p["version"].as_str().unwrap_or_default();
+            let refuse = |why: &str| {
+                Err(format!(
+                    "the boot crate of node {} links {name} {version}, {why}",
+                    self.meta.node
+                ))
+            };
+            match p["source"].as_str() {
+                None => {
+                    let dir = Path::new(p["manifest_path"].as_str().unwrap_or_default())
+                        .parent()
+                        .map(canon)
+                        .unwrap_or_default();
+                    let ours = own_source.is_null() && dir.starts_with(&root);
+                    if !ours && !trusted.iter().any(|t| dir.starts_with(t)) {
+                        return refuse(&format!(
+                            "a path crate ({}) in neither DAGON nor an extension dagon.toml declares trusted: not declared",
+                            dir.display()
+                        ));
+                    }
+                }
+                Some(_) if p["source"] == own_source => {}
+                Some(s) if s.starts_with("registry+") || s.starts_with("sparse+") => {
+                    if !pinned(name, version, s) {
+                        return refuse(
+                            "a registry crate without a checksum in the boot crate's Cargo.lock",
+                        );
+                    }
+                }
+                Some(s) => return refuse(&format!("from {s}, which is not DAGON's source")),
+            }
+        }
+        Ok(())
+    }
+}
+
+fn canon(p: &Path) -> PathBuf {
+    std::fs::canonicalize(p).unwrap_or_else(|_| p.to_path_buf())
 }
 
 /// Whether a folder entry is left out of the source hash: what cargo
@@ -294,34 +405,153 @@ mod tests {
         assert_eq!(f.meta.node, "n");
         assert_eq!(f.meta.board, None);
         assert!(f.project().unwrap().ends_with("dagon.toml"));
-        let read = f.check_linked(&dagon).unwrap();
+        let read = f.check_hashes().unwrap();
         assert!(read.iter().any(|p| p.ends_with("lib.rs")));
         std::fs::remove_dir_all(&d).unwrap();
 
         // The source changed after dagon.toml declared its hash.
         let (d, f) = project("changed", &"0".repeat(64), "");
-        let e = f.check_linked(&dagon).unwrap_err();
+        let e = f.check_hashes().unwrap_err();
         assert!(
             e.contains("trusted extension show") && e.contains("hashes to"),
             "{e}"
         );
         std::fs::remove_dir_all(&d).unwrap();
+        std::fs::remove_dir_all(&dagon).unwrap();
+    }
 
-        // A crate dagon.toml does not declare trusted for the node.
-        let (d, f) = project(
-            "undeclared",
-            "",
-            "other = { path = \"../../../extensions/other\" }\n",
-        );
-        let e = f.check_linked(&dagon).unwrap_err();
+    const CRATES_IO: &str = "registry+https://github.com/rust-lang/crates.io-index";
+    const DAGON_GIT: &str = "git+https://example.invalid/dagon?tag=v1#0123abcd";
+
+    /// A resolved graph as `cargo metadata` gives it: the boot crate `n-boot`
+    /// at the root, `edges` as (from, to, kind) by package name.
+    fn graph(
+        pkgs: &[(&str, Option<&str>, &Path)],
+        edges: &[(&str, &str, &str)],
+    ) -> serde_json::Value {
+        let id = |n: &str| format!("{n} 0.1.0");
+        let packages: Vec<_> = pkgs
+            .iter()
+            .map(|(name, source, dir)| {
+                serde_json::json!({
+                    "name": name, "version": "0.1.0", "id": id(name), "source": source,
+                    "manifest_path": dir.join("Cargo.toml"),
+                })
+            })
+            .collect();
+        let nodes: Vec<_> = pkgs
+            .iter()
+            .map(|(name, _, _)| {
+                let deps: Vec<_> = edges
+                    .iter()
+                    .filter(|(from, _, _)| from == name)
+                    .map(|(_, to, kind)| {
+                        let kind = if *kind == "normal" { serde_json::Value::Null } else { (*kind).into() };
+                        serde_json::json!({ "pkg": id(to), "dep_kinds": [{ "kind": kind, "target": null }] })
+                    })
+                    .collect();
+                serde_json::json!({ "id": id(name), "deps": deps })
+            })
+            .collect();
+        serde_json::json!({ "packages": packages, "resolve": { "root": id("n-boot"), "nodes": nodes } })
+    }
+
+    fn lock(entries: &[(&str, &str, bool)]) -> String {
+        entries
+            .iter()
+            .map(|(name, source, sum)| {
+                format!(
+                    "[[package]]\nname = {name:?}\nversion = \"0.1.0\"\nsource = {source:?}\n{}\n",
+                    if *sum { "checksum = \"00\"" } else { "" }
+                )
+            })
+            .collect()
+    }
+
+    #[test]
+    fn the_whole_resolved_graph_is_dagons_declared_or_pinned() {
+        let dagon = scratch("graph-dagon");
+        let (d, f) = project("graph", "", "");
+        let boot = f.dir.clone();
+        let ext = d.join("extensions/show");
+        let inner = ext.join("vendor/helper");
+        let outside = d.join("elsewhere/helper");
+        let core = dagon.join("targets/mcu/x/bootcore");
+        for p in [&inner, &outside, &core] {
+            std::fs::create_dir_all(p).unwrap();
+        }
+        let own = "dagon-x-bootcore";
+        let base = [
+            ("n-boot", None, boot.as_path()),
+            (own, None, core.as_path()),
+            ("boot-show", None, ext.as_path()),
+            ("heapless", Some(CRATES_IO), dagon.as_path()),
+            ("inner", None, inner.as_path()),
+            ("outside", None, outside.as_path()),
+            (
+                "gitdep",
+                Some("git+https://example.invalid/other#ff"),
+                dagon.as_path(),
+            ),
+            ("dagon-fake", Some(CRATES_IO), dagon.as_path()),
+        ];
+        let pinned = lock(&[
+            ("heapless", CRATES_IO, true),
+            ("dagon-fake", CRATES_IO, false),
+        ]);
+        let ok_edges = [
+            ("n-boot", own, "normal"),
+            ("n-boot", "boot-show", "normal"),
+            (own, "heapless", "normal"),
+            ("boot-show", "inner", "normal"),
+            // Dev-dependencies are never built into the image.
+            ("boot-show", "outside", "dev"),
+        ];
+        f.check_graph(&graph(&base, &ok_edges), &pinned, own, &dagon)
+            .unwrap();
+        // A path crate outside DAGON and outside the declared extension,
+        // even two steps down.
+        let mut e = ok_edges.to_vec();
+        e.push(("inner", "outside", "normal"));
+        let err = f
+            .check_graph(&graph(&base, &e), &pinned, own, &dagon)
+            .unwrap_err();
         assert!(
-            e.contains("links other") && e.contains("does not declare"),
-            "{e}"
+            err.contains("outside") && err.contains("not declared"),
+            "{err}"
         );
-        std::fs::remove_dir_all(&d).unwrap();
-        let (d, f) = project("registry", "", "heapless = \"0.9\"\n");
-        let e = f.check_linked(&dagon).unwrap_err();
-        assert!(e.contains("links heapless"), "{e}");
+        // A build-dependency runs code in the build: checked too.
+        let mut e = ok_edges.to_vec();
+        e.push(("boot-show", "outside", "build"));
+        assert!(f
+            .check_graph(&graph(&base, &e), &pinned, own, &dagon)
+            .is_err());
+        // A registry crate without a checksum in Cargo.lock, whatever its
+        // name says.
+        let mut e = ok_edges.to_vec();
+        e.push(("boot-show", "dagon-fake", "normal"));
+        let err = f
+            .check_graph(&graph(&base, &e), &pinned, own, &dagon)
+            .unwrap_err();
+        assert!(
+            err.contains("dagon-fake") && err.contains("checksum"),
+            "{err}"
+        );
+        // A git crate from another source than DAGON's.
+        let mut e = ok_edges.to_vec();
+        e.push(("boot-show", "gitdep", "normal"));
+        let err = f
+            .check_graph(&graph(&base, &e), &pinned, own, &dagon)
+            .unwrap_err();
+        assert!(err.contains("gitdep"), "{err}");
+        // DAGON from git: its packages share the boot core library's source.
+        let git = [
+            ("n-boot", None, boot.as_path()),
+            (own, Some(DAGON_GIT), dagon.as_path()),
+            ("dagon-events", Some(DAGON_GIT), dagon.as_path()),
+        ];
+        let e = [("n-boot", own, "normal"), (own, "dagon-events", "normal")];
+        f.check_graph(&graph(&git, &e), "", own, &dagon).unwrap();
         std::fs::remove_dir_all(&d).unwrap();
         std::fs::remove_dir_all(&dagon).unwrap();
     }

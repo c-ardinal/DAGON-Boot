@@ -29,8 +29,8 @@ pub use board::{BoardBringUp, BusError, Device, Shared};
 pub use catalog::{Catalog, Entry, Field, Flags, Layer, Machines, Observe};
 pub use compact::Compact;
 pub use compose::{
-    compose, compose_boot, compose_unpublished, BootComposed, Bounds, Clock, Composed, Head,
-    NoPublisher, Sink, Unreadable, Watchdog,
+    compose, compose_boot, compose_unpublished, BootComposed, BootExtension, Bounds, Clock,
+    Composed, Head, NoPublisher, Sink, Unreadable, Watchdog,
 };
 pub use event::{Event, EventRecord, Payload, Refused};
 pub use extension::{

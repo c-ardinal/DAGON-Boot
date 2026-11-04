@@ -19,6 +19,10 @@ use std::fmt::Write;
 
 use dagon_events::Machines;
 pub use dagon_events::EVENT_FORMAT;
+
+/// The boot kind that reports an extension call over its time limit: the
+/// boot core delivers it to its observers once per such call.
+pub const BOOT_OVERRAN_KIND: &str = dagon_events::boot_extensions::ExtensionOverran::ENTRY.kind;
 /// What host tools validate against: the catalog types, the ports and the
 /// decision points.
 pub use dagon_events::{

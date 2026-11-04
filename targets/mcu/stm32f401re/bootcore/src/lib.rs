@@ -22,7 +22,7 @@ use core::panic::PanicInfo;
 use cortex_m::peripheral::{DWT, NVIC, SCB};
 use dagon_boot::BootRun;
 use dagon_core::boot::{BootConfig, Decision};
-use dagon_events::{compose_boot, Clock, Extension};
+use dagon_events::{compose_boot, BootExtension, Clock, Extension};
 use dagon_mcu_stm32f401re::flash::F401Flash;
 use dagon_mcu_stm32f401re::layout as board;
 use dagon_mcu_stm32f401re::tag::checked_tag;
@@ -42,7 +42,7 @@ macro_rules! boot {
     ($wiring:ident) => {
         #[$crate::__entry]
         fn main() -> ! {
-            $crate::run($wiring::BOOT_CHAIN, $wiring::BOOT_BUDGETS_US)
+            $crate::run($wiring::BOOT_CHAIN, $wiring::BOOT_EXTENSIONS)
         }
     };
 }
@@ -97,8 +97,8 @@ impl Clock for Cycles {
 }
 
 /// One boot with `chain` (the node's boot extensions, in order; their
-/// time limits per call in `budgets_us`).
-pub fn run<E: Extension>(chain: E, budgets_us: &'static [u32]) -> ! {
+/// time limits and observed events in `limits`).
+pub fn run<E: Extension>(chain: E, limits: &'static [BootExtension]) -> ! {
     let p = embassy_stm32::init(clocks());
     // Before the log is read and before any extension runs.
     IndependentWatchdog::new(p.IWDG, board::TRIAL_WDT_MS * 1000).unleash();
@@ -113,7 +113,7 @@ pub fn run<E: Extension>(chain: E, budgets_us: &'static [u32]) -> ! {
         us: 0,
     };
     let mut flash = F401Flash::new(p.FLASH);
-    let mut chain = compose_boot(chain, clock, budgets_us);
+    let mut chain = compose_boot(chain, clock, limits);
     let mut boot = BootRun::start(
         &mut chain,
         &mut flash,

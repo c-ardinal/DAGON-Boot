@@ -160,9 +160,11 @@ pub const EXTENSIONS: &[Extension] = &[
     Extension { id: "display", trusted: false, max_run_us: 1000, sha256: None },
 ];
 
-/// Each extension's time limit per call, us, in chain order
-/// (`dagon_events::compose_boot`).
-pub const BOOT_BUDGETS_US: &[u32] = &[1000];
+/// Each extension's time limit per call (us) and the events it is
+/// called for, in chain order (`dagon_events::compose_boot`).
+pub const BOOT_EXTENSIONS: &[dagon_events::BootExtension] = &[
+    dagon_events::BootExtension::new(1000, &[0x01, 0x03, 0x06]), // boot.*
+];
 
 /// The boot core's extensions in chain order (each crate exports
 /// `DagonExtension` and `DAGON_EXTENSION`).

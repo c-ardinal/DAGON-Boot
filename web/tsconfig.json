@@ -10,7 +10,8 @@
     "isolatedModules": true,
     "verbatimModuleSyntax": true,
     "skipLibCheck": true,
-    "allowImportingTsExtensions": true
+    "allowImportingTsExtensions": true,
+    "resolveJsonModule": true
   },
   "include": ["src/**/*.ts", "src/**/*.svelte", "vite.config.ts"]
 }

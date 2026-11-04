@@ -2,14 +2,14 @@
 name = "dagon-cli"
 edition.workspace = true
 license.workspace = true
-version.workspace = true
+version = "0.1.0"
 description = "DAGON Boot command line tool"
 repository = "https://github.com/c-ardinal/DAGON-Boot"
 
 # cargo binstall dagon-cli: the archives scripts/release.py makes, attached
-# to the GitHub release of the tag v<version>.
+# to the GitHub release of the tag cli-v<version>.
 [package.metadata.binstall]
-pkg-url = "{ repo }/releases/download/v{ version }/dagon-{ target }{ archive-suffix }"
+pkg-url = "{ repo }/releases/download/cli-v{ version }/dagon-cli-{ version }-{ target }{ archive-suffix }"
 bin-dir = "{ bin }{ binary-ext }"
 pkg-fmt = "tgz"
 

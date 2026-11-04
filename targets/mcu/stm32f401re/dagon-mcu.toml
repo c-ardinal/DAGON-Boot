@@ -1,5 +1,6 @@
 # DAGON MCU definition (format: targets/README.md). Addresses match
 # src/layout.rs (sectors 16K x4, 64K, 128K x3); never move them.
+format = 1
 id = "stm32f401re"
 name = "STM32F401RE"
 wire_id = 0x0002

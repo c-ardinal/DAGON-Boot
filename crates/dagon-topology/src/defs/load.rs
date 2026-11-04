@@ -6,7 +6,7 @@ use std::path::{Component, Path, PathBuf};
 
 use super::{
     page_safe, BoardDef, McuDef, Origin, Part, Partition, Placement, Registry, Slot, Writer,
-    HEADER, PROJECT_TEXT,
+    FORMAT, HEADER, PROJECT_TEXT,
 };
 
 pub const MCU_FILE: &str = "dagon-mcu.toml";
@@ -527,6 +527,7 @@ fn project(reg: &mut Registry, dagon_toml: &Path) -> Result<(), DefError> {
         t.insert("id".into(), toml::Value::String(id.clone()));
         let text = toml::to_string(&t).or_else(|e| err(&at, e.to_string()))?;
         let label = format!("{at} [board.{id}]");
+        check_format(&text, &label)?;
         let b: BoardDef = toml::from_str(&text).or_else(|e| err(&label, e.to_string()))?;
         if !b.parts.is_empty() {
             return err(
@@ -550,13 +551,33 @@ fn project(reg: &mut Registry, dagon_toml: &Path) -> Result<(), DefError> {
     Ok(())
 }
 
+/// Refuses a definition in a format this reader does not know, before its
+/// fields are read (a newer format may have fields this one rejects).
+fn check_format(text: &str, at: impl fmt::Display) -> Result<(), DefError> {
+    let n = toml::from_str::<toml::Table>(text)
+        .ok()
+        .and_then(|t| t.get("format").cloned());
+    match n {
+        None => Ok(()),
+        Some(toml::Value::Integer(n)) if n == i64::from(FORMAT) => Ok(()),
+        Some(v) => err(
+            at,
+            format!(
+                "definition format {v}; this dagon reads definition format {FORMAT}                  (use a dagon release that reads it; docs/versioning.md)"
+            ),
+        ),
+    }
+}
+
 fn parse_board(text: &str, pkg: &Pkg<'_>) -> Result<BoardDef, DefError> {
+    check_format(text, pkg.label())?;
     let b: BoardDef = toml::from_str(text).or_else(|e| err(pkg.label(), e.to_string()))?;
     pkg.check_parts(&b.parts)?;
     Ok(b)
 }
 
 fn parse_mcu(text: &str, pkg: &Pkg<'_>) -> Result<McuDef, DefError> {
+    check_format(text, pkg.label())?;
     let mut m: McuDef = toml::from_str(text).or_else(|e| err(pkg.label(), e.to_string()))?;
     let at = format!("{} (MCU '{}')", pkg.label(), m.id);
     if let Some(rel) = &m.partitions {

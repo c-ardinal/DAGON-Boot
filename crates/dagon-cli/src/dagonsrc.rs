@@ -27,9 +27,10 @@ const PROBE_DEP: &str = "dagon-format";
 /// Where the probe crate lives in a project.
 const PROBE_DIR: &str = "out/dagon-source";
 
-/// The release tag of this CLI's own version.
+/// The release tag of this CLI's own version (`cli-v<version>`,
+/// docs/versioning.md).
 pub fn release_tag() -> String {
-    format!("v{}", env!("CARGO_PKG_VERSION"))
+    format!("cli-v{}", env!("CARGO_PKG_VERSION"))
 }
 
 /// The `[dagon]` source a new project is written with.

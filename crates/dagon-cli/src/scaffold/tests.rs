@@ -328,7 +328,10 @@ fn new_pins_this_clis_release_unless_a_clone_is_asked_for() {
     new_project(&d.join("a"), "a", DESK, &keys, &release).unwrap();
     let c = Config::load(Some(&d.join("a/dagon.toml").to_string_lossy())).unwrap();
     assert_eq!(c.dagon.git.as_deref(), Some(crate::dagonsrc::REPO_URL));
-    assert_eq!(c.dagon.tag, Some(format!("v{}", env!("CARGO_PKG_VERSION"))));
+    assert_eq!(
+        c.dagon.tag,
+        Some(format!("cli-v{}", env!("CARGO_PKG_VERSION")))
+    );
     assert_eq!(c.dagon.path, None);
 
     let clone =

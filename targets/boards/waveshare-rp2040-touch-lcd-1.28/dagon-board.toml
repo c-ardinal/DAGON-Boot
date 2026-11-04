@@ -1,5 +1,6 @@
 # DAGON board definition (format: targets/README.md).
 # No default_link: this board is the coordinator.
+format = 1
 id = "waveshare-rp2040-touch-lcd-1.28"
 product = "Waveshare RP2040-Touch-LCD-1.28"
 mcu = "rp2040"

@@ -1,5 +1,6 @@
 # DAGON MCU definition (format: targets/README.md). Addresses match
 # src/layout.rs; never move them.
+format = 1
 id = "rp2040"
 name = "RP2040"
 wire_id = 0x0001

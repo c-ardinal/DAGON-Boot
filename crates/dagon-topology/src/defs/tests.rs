@@ -545,6 +545,25 @@ fn project_may_not_redefine_an_id() {
 }
 
 #[test]
+fn definitions_state_their_format_and_unknown_formats_are_refused() {
+    for m in reg().mcus() {
+        assert_eq!(m.format, Some(super::FORMAT), "{}", m.id);
+    }
+    for b in reg().boards() {
+        assert_eq!(b.format, Some(super::FORMAT), "{}", b.id);
+    }
+    // Absent means the current format; a newer one is refused by number,
+    // even when it carries fields this reader does not know.
+    project_registry("format-absent", FAKE_MCU, FAKE_BOARD).unwrap();
+    let mcu = format!("format = 2\nnew_key = 1\n{FAKE_MCU}");
+    let e = project_registry("format-mcu", &mcu, FAKE_BOARD).unwrap_err();
+    assert!(e.msg.contains("definition format 2"), "{e}");
+    let board = FAKE_BOARD.replace("mcu = ", "format = 9\nmcu = ");
+    let e = project_registry("format-board", FAKE_MCU, &board).unwrap_err();
+    assert!(e.msg.contains("definition format 9"), "{e}");
+}
+
+#[test]
 fn board_with_an_unknown_mcu_is_rejected() {
     let dir = scratch("nomcu");
     let board = FAKE_BOARD.replace("product", "[board.lone]\nproduct");

@@ -49,9 +49,9 @@ DAGON Boot は、いくつかのマイコンを組み合わせて何かを作り
 
 `dagon` CLI は、次のどれかで入れます:
 
-- 使うバージョンの GitHub のリリースから、自分のシステム用のアーカイブ（Windows は `dagon-<target>.zip`、それ以外は `dagon-<target>.tar.gz`）を取り、`.sha256` のファイルで確かめてから、`dagon` を `PATH` の通った場所に置く。
+- 使うバージョンの GitHub のリリース（`cli-v<version>`）から、自分のシステム用のアーカイブ（Windows は `dagon-cli-<version>-<target>.zip`、それ以外は `dagon-cli-<version>-<target>.tar.gz`）を取り、`.sha256` のファイルで確かめてから、`dagon` を `PATH` の通った場所に置く。
 - `cargo binstall dagon-cli --git https://github.com/c-ardinal/DAGON-Boot`（同じアーカイブを取ります。`cargo-binstall` が要ります）。
-- ビルドする: `cargo install --git https://github.com/c-ardinal/DAGON-Boot --tag v<version> dagon-cli`。
+- ビルドする: `cargo install --git https://github.com/c-ardinal/DAGON-Boot --tag cli-v<version> dagon-cli`。
 
 このリポジトリのクローンも git の submodule も要りません:
 
@@ -59,7 +59,7 @@ DAGON Boot は、いくつかのマイコンを組み合わせて何かを作り
 dagon --help
 ```
 
-`dagon new` で作るプロジェクトは、DAGON を手元の `dagon` と同じリリースから取ります（`dagon.toml` の `[dagon] git` と `tag = "v<version>"`）。ビルドのときに cargo が取得し、`dagon flash` もブートコア・stage0・factory エージェントをそのタグの cargo の写しからビルドするので、最初の 1 回はネットワークが要ります。DAGON そのものを開発するときはクローンを使います: `dagon new my-fleet --dagon-path <クローン>`（または `DAGON_HOME` を設定）で `[dagon] path` を書きます。
+`dagon new` で作るプロジェクトは、DAGON を手元の `dagon` と同じリリースから取ります（`dagon.toml` の `[dagon] git` と `tag = "cli-v<version>"`）。ビルドのときに cargo が取得し、`dagon flash` もブートコア・stage0・factory エージェントをそのタグの cargo の写しからビルドするので、最初の 1 回はネットワークが要ります。DAGON そのものを開発するときはクローンを使います: `dagon new my-fleet --dagon-path <クローン>`（または `DAGON_HOME` を設定）で `[dagon] path` を書きます。
 
 続けて、構成に要るツールを `dagon` に確かめさせます（プロジェクトのフォルダで実行します。それ以外では全部のマイコンの家族を確かめます）:
 
@@ -299,7 +299,7 @@ dagon demo --uplink uart          # または usb-cdc（既定）、wifi-tcp
 - ESP32-S3 の 2nd stage を `targets/esp32s3-2ndstage` からビルドし直すときは ESP-IDF v6.1（ビルド済みのものを `targets/mcu/esp32s3/vendor/bootloader.bin` として同梱している。無改変の ESP-IDF v6.1。`vendor/PROVENANCE.md` を参照）
 - RP2040 の立ち上げ用イメージに使う `elf2uf2-rs`
 - `cargo install --path crates/dagon-cli` でクローンから CLI を入れます。プロジェクトは `dagon new --dagon-path <クローン>`（または `DAGON_HOME`）でそのクローンを使います
-- リリースのアーカイブ: `python scripts/release.py [--target <triple>]` が、ページを組み込んだ `out/release/dagon-<target>.*` を作ります。`.github/workflows/release.yml` は `v*` のタグが push されたときに各プラットフォームで同じことをし、ワークフローの成果物として残します（公開はしません）
+- リリースのアーカイブ: `python scripts/release.py [--target <triple>]` が、ページを組み込んだ `out/release/dagon-cli-<version>-<target>.*` を作ります。`.github/workflows/release.yml` は `cli-v*` のタグが push されたときに、コミットが求める上げ幅に版が足りているかを `scripts/bump_check.py` で確かめてから各プラットフォームで同じことをし、ワークフローの成果物として残します（公開はしません）
 
 ## ライセンス (MIT / Apache-2.0 デュアル)
 

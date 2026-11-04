@@ -2,7 +2,7 @@
 name = "dagon-format"
 edition.workspace = true
 license.workspace = true
-version.workspace = true
+version = "0.1.0"
 
 [dependencies]
 ed25519-compact = { version = "2.6", default-features = false }

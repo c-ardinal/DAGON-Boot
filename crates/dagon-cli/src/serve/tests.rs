@@ -248,6 +248,12 @@ fn hello_reports_keys_without_their_values() {
         .iter()
         .any(|f| f == "build"));
     assert!(v["api_key"].is_boolean() && v["key"].is_boolean());
+    // The CLI version, the API number the page checks, every format number.
+    assert_eq!(v["cli"], env!("CARGO_PKG_VERSION"));
+    assert_eq!(v["api"], crate::versions::SERVE_API);
+    for (c, n) in crate::versions::formats() {
+        assert_eq!(v["formats"][c], n, "{c}");
+    }
     let lower = body.to_ascii_lowercase();
     assert!(!lower.contains("sk-") && !lower.contains("secret"));
 }

@@ -1,4 +1,5 @@
 # DAGON board definition (format: targets/README.md).
+format = 1
 id = "m5stopwatch"
 product = "M5StopWatch"
 mcu = "esp32s3"

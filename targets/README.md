@@ -19,6 +19,7 @@ errors; kind fields accept only the values listed below.
 
 | Key | Meaning |
 |---|---|
+| `format` | Definition format number (`1`; left out means 1). A dagon that does not read the number refuses the file (docs/versioning.md) |
 | `id` | MCU id used in topologies (`stm32f401re`) |
 | `name` | Display name (`STM32F401RE`) |
 | `wire_id` | Image header `mcu_id`; unique |
@@ -56,6 +57,7 @@ Writer kinds:
 
 | Key | Meaning |
 |---|---|
+| `format` | As in `dagon-mcu.toml` |
 | `id` | Board id used in `nodes[].board`; the first board of an MCU is its default |
 | `product`, `mcu`, `flash_bytes`, `drawing` | Product name, MCU id (must be defined), flash size (must hold one of the MCU's flash maps), UI drawing |
 | `i2c_target` | Whether the board can be an I2C target |

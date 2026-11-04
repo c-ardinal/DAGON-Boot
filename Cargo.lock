@@ -99,7 +99,7 @@ dependencies = [
 
 [[package]]
 name = "dagon-agent"
-version = "0.0.0"
+version = "0.1.0"
 dependencies = [
  "dagon-core",
  "dagon-format",
@@ -110,7 +110,7 @@ dependencies = [
 
 [[package]]
 name = "dagon-cli"
-version = "0.0.0"
+version = "0.1.0"
 dependencies = [
  "base64",
  "dagon-conform",
@@ -135,7 +135,7 @@ dependencies = [
 
 [[package]]
 name = "dagon-conform"
-version = "0.0.0"
+version = "0.1.0"
 dependencies = [
  "dagon-agent",
  "dagon-core",
@@ -147,7 +147,7 @@ dependencies = [
 
 [[package]]
 name = "dagon-core"
-version = "0.0.0"
+version = "0.1.0"
 dependencies = [
  "dagon-format",
  "dagon-port",
@@ -157,7 +157,7 @@ dependencies = [
 
 [[package]]
 name = "dagon-format"
-version = "0.0.0"
+version = "0.1.0"
 dependencies = [
  "ed25519-compact",
  "sha2",
@@ -165,7 +165,7 @@ dependencies = [
 
 [[package]]
 name = "dagon-host"
-version = "0.0.0"
+version = "0.1.0"
 dependencies = [
  "dagon-conform",
  "dagon-format",
@@ -181,25 +181,25 @@ dependencies = [
 
 [[package]]
 name = "dagon-port"
-version = "0.0.0"
+version = "0.1.0"
 
 [[package]]
 name = "dagon-proto"
-version = "0.0.0"
+version = "0.1.0"
 dependencies = [
  "dagon-format",
 ]
 
 [[package]]
 name = "dagon-romlink"
-version = "0.0.0"
+version = "0.1.0"
 dependencies = [
  "dagon-port",
 ]
 
 [[package]]
 name = "dagon-sign"
-version = "0.0.0"
+version = "0.1.0"
 dependencies = [
  "dagon-format",
  "dagon-topology",
@@ -209,7 +209,7 @@ dependencies = [
 
 [[package]]
 name = "dagon-sim"
-version = "0.0.0"
+version = "0.1.0"
 dependencies = [
  "dagon-agent",
  "dagon-format",
@@ -222,7 +222,7 @@ dependencies = [
 
 [[package]]
 name = "dagon-topology"
-version = "0.0.0"
+version = "0.1.0"
 dependencies = [
  "dagon-core",
  "dagon-format",

@@ -60,6 +60,12 @@ fn end(at: u32, size: u32) -> Option<u32> {
 
 pub const MCU: &[Requirement<McuCheck>] = &[
     Requirement {
+        engine: "definition reader",
+        fields: &["format"],
+        rule: "left out or FORMAT; checked before the other fields are read",
+        check: any,
+    },
+    Requirement {
         engine: "image header",
         fields: &["wire_id"],
         rule: "not 0 (unique across MCUs: registry)",
@@ -150,6 +156,12 @@ pub const MCU: &[Requirement<McuCheck>] = &[
 ];
 
 pub const BOARD: &[Requirement<BoardCheck>] = &[
+    Requirement {
+        engine: "definition reader",
+        fields: &["format"],
+        rule: "left out or FORMAT; checked before the other fields are read",
+        check: |_, _| Ok(()),
+    },
     Requirement {
         engine: "topology check V-16",
         fields: &["flash_bytes"],

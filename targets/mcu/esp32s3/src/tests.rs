@@ -6,13 +6,18 @@ use crate::layout::{
 };
 use crate::otadata::{raw, seq_crc, trial_entry, Counted, ENTRY_LEN};
 use crate::store::{header_addr, EspStore, Otadata, HEADER_SECTOR};
-use dagon_agent::{SlotStore, StoreError};
+use dagon_agent::{SlotStore, StoreError, Transition};
 use dagon_format::header::{self, image_kind, mcu_id, placement, port_kind, slot_binding};
 use dagon_format::header::{ImageHeader, HEADER_SIZE};
 use dagon_format::statelog::reason;
 use dagon_format::Version;
 use dagon_port::{Flash, FlashError, FlashRegion, Watchdog};
 use dagon_proto::payload::{target::APP, SlotState};
+
+/// What the agent's image machine hands the store's mutators.
+fn t() -> Transition {
+    Transition::for_store_tests()
+}
 
 /// NOR flash: erase sets 0xFF, a write needs aligned, erased bytes.
 pub(crate) struct FakeFlash(pub(crate) Vec<u8>);
@@ -172,11 +177,11 @@ fn body(len: u32, seed: u8) -> Vec<u8> {
 fn receive(s: &mut Store, slot: u8, minor: u8) -> [u8; HEADER_SIZE] {
     let len = 5003;
     let b = body(len, minor);
-    s.erase(APP, slot, len).unwrap();
+    s.erase(APP, slot, len, &t()).unwrap();
     let mut off = 0usize;
     for n in [1usize, 3, 5, 1024, 7, 1024, 2, 1024].iter().cycle() {
         let end = (off + n).min(b.len());
-        s.write(APP, slot, off as u32, &b[off..end]).unwrap();
+        s.write(APP, slot, off as u32, &b[off..end], &t()).unwrap();
         off = end;
         if off == b.len() {
             break;
@@ -188,7 +193,7 @@ fn receive(s: &mut Store, slot: u8, minor: u8) -> [u8; HEADER_SIZE] {
     }
     assert_eq!(back, b);
     let h = header(minor, len);
-    s.write_header(slot, &h).unwrap();
+    s.write_header(slot, &h, &t()).unwrap();
     h
 }
 
@@ -199,7 +204,7 @@ fn digest(h: &[u8; HEADER_SIZE]) -> [u8; 16] {
 #[test]
 fn receive_pads_the_last_unit_and_erases_the_header_sector_first() {
     let mut s = store();
-    s.write_header(SLOT_B, &header(0, 1)).unwrap();
+    s.write_header(SLOT_B, &header(0, 1), &t()).unwrap();
     let h = receive(&mut s, SLOT_B, 1);
     let tail = (OTA_1.offset + 5003) as usize;
     assert_eq!(s.flash.0[tail], 0xFF, "pad byte");
@@ -214,7 +219,7 @@ fn receive_pads_the_last_unit_and_erases_the_header_sector_first() {
         .all(|&b| b == 0xFF));
     assert!(s.wdt.0 > 0, "fed while erasing and writing");
 
-    s.erase(APP, SLOT_B, 10).unwrap();
+    s.erase(APP, SLOT_B, 10, &t()).unwrap();
     s.read_header(SLOT_B, &mut back).unwrap();
     assert_eq!(back, [0xFF; HEADER_SIZE], "no image after erase");
     assert_eq!(s.status().slots[1].state, SlotState::Empty);
@@ -227,13 +232,22 @@ fn refuses_running_slot_gaps_and_other_targets() {
     assert_eq!(s.capacity(APP, SLOT_FACTORY), 0);
     assert_eq!(s.capacity(3, 0), 0);
     s.ota.running = SLOT_A;
-    assert_eq!(s.erase(APP, SLOT_A, 16), Err(StoreError::Unsupported));
-    assert_eq!(s.erase(APP, SLOT_B, OTA_1.size + 1), Err(StoreError::Range));
-    assert_eq!(s.write(APP, SLOT_B, 0, &[1]), Err(StoreError::Range));
-    s.erase(APP, SLOT_B, 16).unwrap();
-    assert_eq!(s.write(APP, SLOT_B, 4, &[1; 4]), Err(StoreError::Range));
-    assert_eq!(s.write(APP, SLOT_B, 0, &[1; 17]), Err(StoreError::Range));
-    assert_eq!(s.erase(3, 0, 16), Err(StoreError::Unsupported));
+    assert_eq!(s.erase(APP, SLOT_A, 16, &t()), Err(StoreError::Unsupported));
+    assert_eq!(
+        s.erase(APP, SLOT_B, OTA_1.size + 1, &t()),
+        Err(StoreError::Range)
+    );
+    assert_eq!(s.write(APP, SLOT_B, 0, &[1], &t()), Err(StoreError::Range));
+    s.erase(APP, SLOT_B, 16, &t()).unwrap();
+    assert_eq!(
+        s.write(APP, SLOT_B, 4, &[1; 4], &t()),
+        Err(StoreError::Range)
+    );
+    assert_eq!(
+        s.write(APP, SLOT_B, 0, &[1; 17], &t()),
+        Err(StoreError::Range)
+    );
+    assert_eq!(s.erase(3, 0, 16, &t()), Err(StoreError::Unsupported));
 }
 
 #[test]
@@ -245,13 +259,13 @@ fn trial_confirm_and_rollback_map_to_status() {
 
     let ha = receive(&mut s, SLOT_A, 0);
     assert_eq!(s.status().slots[0].state, SlotState::Written);
-    s.set_pending(SLOT_A, &ha).unwrap();
+    s.set_pending(SLOT_A, &ha, &t()).unwrap();
     assert_eq!(s.status().slots[0].state, SlotState::Pending);
     s.ota.boot();
     let st = s.status();
     assert_eq!(st.slots[0].state, SlotState::Trying);
     assert_eq!((st.active, st.confirmed, st.attempts), (0, SLOT_FACTORY, 1));
-    s.confirm(SLOT_A, &ha).unwrap();
+    s.confirm(SLOT_A, &ha, &t()).unwrap();
     s.ota.boot();
     let st = s.status();
     assert_eq!(st.slots[0].state, SlotState::Confirmed);
@@ -259,12 +273,12 @@ fn trial_confirm_and_rollback_map_to_status() {
 
     // Update to B, confirm: A stays Written as the previous version.
     let hb = receive(&mut s, SLOT_B, 1);
-    s.set_pending(SLOT_B, &hb).unwrap();
+    s.set_pending(SLOT_B, &hb, &t()).unwrap();
     s.ota.boot();
     let st = s.status();
     assert_eq!((st.active, st.confirmed), (1, 0), "falls back to A");
     assert_eq!(st.slots[1].state, SlotState::Trying);
-    s.confirm(SLOT_B, &hb).unwrap();
+    s.confirm(SLOT_B, &hb, &t()).unwrap();
     s.ota.boot();
     let st = s.status();
     assert_eq!((st.active, st.confirmed), (1, 1));
@@ -276,7 +290,7 @@ fn trial_confirm_and_rollback_map_to_status() {
 
     // An image that never confirms: one trial, then back to B.
     let hn = receive(&mut s, SLOT_A, 2);
-    s.set_pending(SLOT_A, &hn).unwrap();
+    s.set_pending(SLOT_A, &hn, &t()).unwrap();
     s.ota.boot();
     assert_eq!(s.status().slots[0].state, SlotState::Trying);
     s.ota.boot();
@@ -297,21 +311,21 @@ fn set_pending_back_to_the_previously_confirmed_slot() {
     let mut s = store();
     for (slot, minor) in [(SLOT_A, 0), (SLOT_B, 1)] {
         let h = receive(&mut s, slot, minor);
-        s.set_pending(slot, &h).unwrap();
+        s.set_pending(slot, &h, &t()).unwrap();
         s.ota.boot();
-        s.confirm(slot, &h).unwrap();
+        s.confirm(slot, &h, &t()).unwrap();
     }
     assert_eq!(s.status().active, SLOT_B);
     // Back to the 1.0.0 still in A: no transfer, only the trial entry.
     let mut ha = [0u8; HEADER_SIZE];
     s.read_header(SLOT_A, &mut ha).unwrap();
-    s.set_pending(SLOT_A, &ha).unwrap();
+    s.set_pending(SLOT_A, &ha, &t()).unwrap();
     assert_eq!(s.status().slots[0].state, SlotState::Pending);
     s.ota.boot();
     let st = s.status();
     assert_eq!((st.active, st.confirmed), (0, 1), "B is the fallback");
     assert_eq!(st.slots[0].state, SlotState::Trying);
-    s.confirm(SLOT_A, &ha).unwrap();
+    s.confirm(SLOT_A, &ha, &t()).unwrap();
     s.ota.boot();
     let st = s.status();
     assert_eq!((st.active, st.confirmed), (0, 0));
@@ -337,16 +351,16 @@ fn set_pending_is_refused_while_on_trial() {
     let mut s = store();
     let mut out = [0u8; REFUSAL_LEN];
     let ha = receive(&mut s, SLOT_A, 0);
-    s.set_pending(SLOT_A, &ha).unwrap();
+    s.set_pending(SLOT_A, &ha, &t()).unwrap();
     s.ota.boot();
-    s.confirm(SLOT_A, &ha).unwrap();
+    s.confirm(SLOT_A, &ha, &t()).unwrap();
     // Confirmed: SET_PENDING goes through to the agent.
     assert_eq!(
         refuse_set_pending_on_trial(&mut s, &set_pending_frame(1), &mut out),
         None
     );
     let hb = receive(&mut s, SLOT_B, 1);
-    s.set_pending(SLOT_B, &hb).unwrap();
+    s.set_pending(SLOT_B, &hb, &t()).unwrap();
     s.ota.boot();
     let before = s.ota.entries;
     // On trial in B: refused with E_STATE, otadata untouched.
@@ -367,7 +381,7 @@ fn set_pending_is_refused_while_on_trial() {
 fn trial_from_blank_otadata_rolls_back_to_factory() {
     let mut s = store();
     let hb = receive(&mut s, SLOT_B, 3);
-    s.set_pending(SLOT_B, &hb).unwrap();
+    s.set_pending(SLOT_B, &hb, &t()).unwrap();
     s.ota.boot();
     assert_eq!(s.status().confirmed, SLOT_FACTORY);
     s.ota.boot();

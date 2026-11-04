@@ -192,7 +192,8 @@ dependencies = [
 name = "dagon-agent"
 version = "0.1.0"
 dependencies = [
- "dagon-core",
+ "critical-section",
+ "dagon-events",
  "dagon-format",
  "dagon-port",
  "dagon-proto",
@@ -213,7 +214,6 @@ dependencies = [
 name = "dagon-conform"
 version = "0.1.0"
 dependencies = [
- "dagon-agent",
  "dagon-core",
  "dagon-format",
  "dagon-port",
@@ -227,6 +227,14 @@ dependencies = [
  "dagon-format",
  "dagon-port",
  "dagon-proto",
+]
+
+[[package]]
+name = "dagon-events"
+version = "0.1.0"
+dependencies = [
+ "dagon-format",
+ "embassy-sync",
 ]
 
 [[package]]
@@ -247,6 +255,7 @@ version = "0.1.0"
 dependencies = [
  "critical-section",
  "dagon-agent",
+ "dagon-events",
  "dagon-format",
  "dagon-port",
  "dagon-proto",
@@ -260,6 +269,7 @@ dependencies = [
  "dagon-agent",
  "dagon-conform",
  "dagon-core",
+ "dagon-events",
  "dagon-format",
  "dagon-mcu-build",
  "dagon-mcu-common",
@@ -271,6 +281,7 @@ dependencies = [
  "embassy-futures",
  "embassy-stm32",
  "embassy-time",
+ "static_cell",
 ]
 
 [[package]]

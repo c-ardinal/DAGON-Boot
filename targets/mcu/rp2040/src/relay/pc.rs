@@ -78,6 +78,7 @@ async fn serve<L: Link>(mut pc: Pc, mut up: L) -> ! {
         if reboot {
             // The reply leaves before the reset drops the link.
             let _ = up.flush().await;
+            pc.agent.before_reboot();
             pc.watch.reboot();
         }
     }

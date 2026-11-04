@@ -777,10 +777,51 @@ fn mcu_templates_wire_the_links_the_topology_names() {
     let mut no_uart = t.clone();
     no_uart.links.retain(|l| l.kind != LinkKind::Uart);
     let n = no_uart.node("hub").unwrap();
-    let w = wiring_placeholders(reg, &no_uart, n);
+    let w = wiring_placeholders(reg, &no_uart, n).unwrap();
     let get = |k: &str| w.iter().find(|(p, _)| p == k).unwrap().1.clone();
     assert_eq!(get("{{if_down_uart}}"), "any()");
     assert_eq!(get("{{down_uart_tx}}"), "none");
+    // Two I2C buses and two UART links: refused by name, never one picked.
+    let mut many = t.clone();
+    let mut bus2 = many.buses[0].clone();
+    bus2.id = "bus-2".into();
+    many.buses.push(bus2);
+    let i2c = many
+        .links
+        .iter()
+        .find(|l| l.kind == LinkKind::I2c)
+        .unwrap()
+        .clone();
+    let uart = many
+        .links
+        .iter()
+        .find(|l| l.kind == LinkKind::Uart)
+        .unwrap()
+        .clone();
+    let mut i2c2 = i2c.clone();
+    i2c2.to = "second".into();
+    i2c2.bus = Some("bus-2".into());
+    let mut uart2 = uart.clone();
+    uart2.to = "third".into();
+    many.links.extend([i2c2, uart2.clone()]);
+    let hub = many.node("hub").unwrap().clone();
+    let e = wiring_placeholders(reg, &many, &hub).unwrap_err();
+    assert!(
+        e.contains("one I2C bus") && e.contains("bus-2") && e.contains("hub -> second"),
+        "{e}"
+    );
+    many.links.retain(|l| l.to != "second");
+    let n = &hub;
+    let e = wiring_placeholders(reg, &many, n).unwrap_err();
+    assert!(
+        e.contains("one UART link") && e.contains("hub -> third"),
+        "{e}"
+    );
+    // A template that does not use the wiring is rendered all the same.
+    let hops = hop_placeholders(reg, &many, n).unwrap();
+    let w = wiring_placeholders(reg, &many, n);
+    assert!(render("plain {{node}}", n, &hops, &w, &src, Path::new(".")).is_ok());
+    assert!(render("{{down_i2c}}", n, &hops, &w, &src, Path::new(".")).is_err());
     // No template of an MCU package names a board fact of its own.
     for mcu in ["rp2040", "stm32f401re"] {
         for fact in [

@@ -49,7 +49,8 @@ Writer kinds:
 - `probe-rs`: `chip`.
 - `espflash`: `chip`, `flash_size`, `table_at`, `bootloader`, `checksums`,
   `usb_hint = { vid, pid }`. The hint only labels candidates the writer
-  tool reports; it never filters them.
+  tool reports; it never filters them. Matching candidates are listed first and
+  pre-selected.
 
 ## dagon-board.toml
 

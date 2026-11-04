@@ -204,6 +204,8 @@ mod tests {
             .map(|id| Candidate {
                 id: id.to_string(),
                 label: "probe".into(),
+                // Ids ending in ":M" stand for hint-matched devices.
+                matched: id.ends_with(":M"),
                 path: None,
             })
             .collect();
@@ -276,6 +278,17 @@ mod tests {
         assert_eq!(j["state"], "succeeded", "{j}");
         assert_eq!(j["result"]["written"], false, "{j}");
         assert_eq!(j["result"]["candidates"][1]["device"], "0483:374b:B", "{j}");
+
+        // A matched device is listed first and flagged, nothing is dropped.
+        let three = ["0483:374b:A", "0483:374b:B", "0483:374b:M"];
+        let (j, w) = run("matched", &three, None, None);
+        assert!(w.is_empty(), "{j}");
+        let c = &j["result"]["candidates"];
+        assert_eq!(c[0]["device"], "0483:374b:M", "{j}");
+        assert_eq!(c[0]["matched"], true, "{j}");
+        assert_eq!(c[1]["device"], "0483:374b:A", "{j}");
+        assert_eq!(c[1]["matched"], false, "{j}");
+        assert_eq!(c.as_array().unwrap().len(), 3, "{j}");
 
         let (j, w) = run("named", &two, Some("0483:374b:B"), Some("yes"));
         assert_eq!(w, ["0483:374b:B"], "{j}");

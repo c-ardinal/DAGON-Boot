@@ -253,14 +253,24 @@ fn run_in(
     String::from_utf8(out).map_err(|_| "the agent's answer is not UTF-8 text".into())
 }
 
-/// The agent program and everything it starts: a Windows job object
-/// (also killed when closed, so when dagon itself ends) or a Unix process
-/// group the program leads. Dropping it stops the group.
+/// The agent program and everything it starts.
+///
+/// Windows: a job object, killed when closed, so also when dagon itself
+/// ends. Unix: a process group led by a small keeper process (`cat` reading
+/// a pipe only dagon holds) that the program joins. The keeper stays
+/// unreaped until the group has been signalled, so the group id can never
+/// belong to anyone else when dagon signals it, even after the program has
+/// ended and been reaped. When dagon itself is killed on Unix, the keeper
+/// ends (its pipe closes) but the program and what it started keep running
+/// until they end on their own: Unix has no kill-on-close for groups.
 struct Group {
     #[cfg(windows)]
     inner: command_group::GroupChild,
     #[cfg(not(windows))]
     inner: std::process::Child,
+    #[cfg(not(windows))]
+    keeper: std::process::Child,
+    stopped: bool,
 }
 
 impl Group {
@@ -272,22 +282,28 @@ impl Group {
     }
 
     /// Stops every process of the group, also after the program itself
-    /// has ended (no PID of a live parent is needed).
+    /// has ended (no PID of a live parent is needed). Once only.
     fn stop(&mut self) {
+        if std::mem::replace(&mut self.stopped, true) {
+            return;
+        }
         #[cfg(windows)]
         let _ = self.inner.kill();
-        // ponytail: after the leader is reaped its PID could in theory be
-        // reused by a new group leader if the group is empty; only signal
-        // through a pidfd/waitid(WNOWAIT) primitive if that ever matters.
         #[cfg(not(windows))]
         let _ = std::process::Command::new("kill")
-            .args(["-s", "KILL", "--", &format!("-{}", self.inner.id())])
+            .args(["-s", "KILL", "--", &format!("-{}", self.keeper.id())])
             .stdout(Stdio::null())
             .stderr(Stdio::null())
             .status();
         let child = self.child();
         let _ = child.kill();
         let _ = child.wait();
+        // Reaped last: until here the group id is the keeper's.
+        #[cfg(not(windows))]
+        {
+            let _ = self.keeper.kill();
+            let _ = self.keeper.wait();
+        }
     }
 }
 
@@ -316,16 +332,42 @@ fn spawn(
         .stderr(Stdio::null());
     let failed = |_| "the agent program could not be started".to_string();
     #[cfg(windows)]
-    let inner = {
+    let group = {
         use command_group::CommandGroup;
-        c.group().kill_on_drop(true).spawn().map_err(failed)?
+        Group {
+            inner: c.group().kill_on_drop(true).spawn().map_err(failed)?,
+            stopped: false,
+        }
     };
     #[cfg(not(windows))]
-    let inner = {
-        std::os::unix::process::CommandExt::process_group(&mut c, 0);
-        c.spawn().map_err(failed)?
+    let group = {
+        use std::os::unix::process::CommandExt;
+        let keeper = std::process::Command::new("cat")
+            .current_dir(dir)
+            .env_clear()
+            .stdin(Stdio::piped())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .process_group(0)
+            .spawn()
+            .map_err(failed)?;
+        let pgid = i32::try_from(keeper.id()).expect("PIDs fit in i32");
+        c.process_group(pgid);
+        match c.spawn() {
+            Ok(inner) => Group {
+                inner,
+                keeper,
+                stopped: false,
+            },
+            Err(e) => {
+                let mut keeper = keeper;
+                let _ = keeper.kill();
+                let _ = keeper.wait();
+                return Err(failed(e));
+            }
+        }
     };
-    Ok(Group { inner })
+    Ok(group)
 }
 
 #[cfg(test)]
@@ -514,5 +556,71 @@ mod tests {
         };
         std::thread::sleep(Duration::from_millis(300));
         assert!(!alive(&marker), "the grandchild outlived the call");
+    }
+
+    /// Set for the helper below when a test starts it as its own process.
+    #[cfg(windows)]
+    const OWNER_ENV: &str = "DAGON_TEST_AGENT_OWNER";
+    #[cfg(windows)]
+    const OWNER_MARKER: &str = "127.0.0.38";
+
+    /// Not a test on its own: the owner process of the next test. It starts
+    /// a group whose program leaves a 30 s grandchild, says "ready", and
+    /// waits to be killed.
+    #[cfg(windows)]
+    #[test]
+    #[ignore]
+    fn owner_of_a_group() {
+        if std::env::var_os(OWNER_ENV).is_none() {
+            return;
+        }
+        let exe = Command {
+            program: "cmd".into(),
+            args: Vec::new(),
+            system: SystemVia::Stdin,
+            pass_env: Vec::new(),
+        };
+        let dir = super::super::temp_dir().unwrap();
+        let args = vec!["/C".to_string(), format!("ping -n 30 {OWNER_MARKER}")];
+        let _group = spawn(&exe.program_path().unwrap(), &args, &dir, &[], &[]).unwrap();
+        println!("ready");
+        std::thread::sleep(Duration::from_secs(60));
+    }
+
+    /// dagon itself is killed while an agent call runs: on Windows the job
+    /// closes with the process and takes every process in it along
+    /// (kill-on-close). Unix has no such guarantee for process groups (see
+    /// [`Group`]), so this runs on Windows only.
+    #[cfg(windows)]
+    #[test]
+    fn killing_the_owning_process_stops_the_agent_tree() {
+        use std::io::BufRead;
+        let mut owner = std::process::Command::new(std::env::current_exe().unwrap())
+            .args([
+                "--exact",
+                "agents::command::tests::owner_of_a_group",
+                "--ignored",
+                "--nocapture",
+            ])
+            .env(OWNER_ENV, "1")
+            .stdout(Stdio::piped())
+            .stderr(Stdio::null())
+            .spawn()
+            .unwrap();
+        let out = std::io::BufReader::new(owner.stdout.take().unwrap());
+        let ready = out
+            .lines()
+            .map_while(Result::ok)
+            .any(|l| l.contains("ready"));
+        assert!(ready, "the owner never started its group");
+        std::thread::sleep(Duration::from_millis(500));
+        assert!(alive(OWNER_MARKER), "the grandchild never started");
+        owner.kill().unwrap();
+        let _ = owner.wait();
+        let t0 = Instant::now();
+        while alive(OWNER_MARKER) && t0.elapsed() < Duration::from_secs(10) {
+            std::thread::sleep(Duration::from_millis(200));
+        }
+        assert!(!alive(OWNER_MARKER), "the grandchild outlived its owner");
     }
 }

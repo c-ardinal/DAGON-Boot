@@ -128,16 +128,28 @@ mod target {
                     if n == 0 {
                         return Ok(None);
                     }
+                    defmt::debug!("i2c write: {} bytes", n);
                     self.mailbox.request();
                     self.acknowledge(false);
                     Ok(Some(n))
                 }
                 SlaveCommandKind::Read => {
+                    let phase = self.mailbox.phase_name();
+                    let offered = self.mailbox.read_data().len();
                     let sent = self
                         .target
                         .respond_to_read(self.mailbox.read_data())
                         .await
-                        .map_err(|_| LinkError::Corrupt)?;
+                        .map_err(|e| {
+                            defmt::debug!("i2c read: phase {} offered {}: {}", phase, offered, e);
+                            LinkError::Corrupt
+                        })?;
+                    defmt::debug!(
+                        "i2c read: phase {} offered {} sent {}",
+                        phase,
+                        offered,
+                        sent
+                    );
                     *done = self.mailbox.read_done(sent);
                     Ok(None)
                 }

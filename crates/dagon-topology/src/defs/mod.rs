@@ -4,6 +4,7 @@
 //! entry) are closed sets in code; everything else is data.
 
 pub mod board_boot;
+pub mod boot_folder;
 pub mod codegen;
 pub mod execution;
 pub mod isolation;
@@ -170,6 +171,12 @@ pub struct LogFaces {
 pub struct Layout {
     /// boot2 + stage0 from the start of flash.
     pub stage0: Option<Region>,
+    /// Stage0 also checks a boot core header's signature under the
+    /// project key built into it (the one authentication rule), not only
+    /// the digest the log records; left out: digest only (a stage0 region
+    /// too small for the verifier).
+    #[serde(default)]
+    pub stage0_verifies: bool,
     pub bootcore_log: Option<LogFaces>,
     pub app_log: Option<LogFaces>,
 }

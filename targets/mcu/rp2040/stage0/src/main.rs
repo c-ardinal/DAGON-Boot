@@ -83,7 +83,7 @@ fn main() -> ! {
         Ok(start) => {
             trial::write(start.cell);
             if start.trial {
-                trial::arm_watchdog();
+                trial::arm_watchdog(dagon_mcu_rp2040::TRIAL_WDT_MS);
             }
             if cfg!(feature = "diag") {
                 led::set(false);

@@ -1,0 +1,10 @@
+format = 1
+id = "boot-count"
+layers = ["boot"]
+observes = ["boot.*"]
+# Runs privileged in the boot core: list it in dagon.toml under
+# [extensions.nodes.<id>] trusted with the source SHA-256 `dagon gen` names.
+trusted = true
+[limits]
+# Per handler call; a longer call is reported as boot.extension_overran.
+max_run_us = 1000

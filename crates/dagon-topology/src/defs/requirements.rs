@@ -192,7 +192,7 @@ pub const MCU: &[Requirement<McuCheck>] = &[
             "execution.erase_unit_max_ms",
             "execution.erase_unit_max_ms.unverified",
         ],
-        rule: "each fact a number (checked against its source), { unverified = N } or \"unmeasured\" (erase_unit_max_ms needs a number either way); masked_max_us 1..=MASKED_MAX_US_LIMIT; erase_unit a power of two; erase_unit_max_ms >= 1 and below watchdog.confirmed_ms",
+        rule: "each fact a number (checked against its source), { unverified = N } or \"unmeasured\" (erase_unit_max_ms needs a number either way); masked_max_us 1..=MASKED_MAX_US_LIMIT; erase_unit a power of two; erase_unit_max_ms >= 1, and 2 x erase_unit_max_ms <= watchdog.trial_ms and watchdog.confirmed_ms",
         check: execution::execution,
     },
     Requirement {

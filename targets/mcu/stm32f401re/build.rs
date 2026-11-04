@@ -21,7 +21,7 @@ fn feature(name: &str) -> bool {
 fn main() {
     println!("cargo:rerun-if-env-changed=DAGON_TARGET_TAG");
     dagon_mcu_build::definition();
-    if feature("HAL") {
+    if feature("HAL") || feature("IMAGE_STAGE0") {
         dagon_mcu_build::embed_pubkey();
     }
     if env::var("CARGO_CFG_TARGET_OS").as_deref() != Ok("none") {

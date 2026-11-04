@@ -10,6 +10,7 @@ use std::fmt::Write as _;
 use std::path::{Path, PathBuf};
 
 use super::board_boot::{code_ident, code_names, type_name as camel, Active, HaltPattern};
+use super::boot_folder::{BootFolder, BOOT_FOLDER_ENV};
 use super::load::{self, BOARD_FILE, MCU_FILE};
 use super::{BoardDef, DefError, McuDef, Registry, Source};
 
@@ -112,10 +113,7 @@ pub fn boot_board(
             let ids: Vec<&str> = of_mcu.iter().map(|b| b.id.as_str()).collect();
             return Err(def_err(
                 &at,
-                format!(
-                    "name the node's board with DAGON_BOARD=<board id> ({})",
-                    ids.join(", ")
-                ),
+                format!("name the node's board ({})", ids.join(", ")),
             ));
         }
     };
@@ -296,29 +294,99 @@ pub fn package_build(hal: &Hal<'_>) {
     write(&out_dir().join("devices.rs"), &devices_rs(&l.board));
 }
 
-/// A boot stage's build script (in a folder of the MCU package): writes
-/// `board.rs` ([`board_rs`]) and, with a HAL, `pins.rs` into `OUT_DIR` for
-/// the board `DAGON_BOARD` names (with `DAGON_PROJECT`, the path of a
-/// project's dagon.toml, its inline boards too; see [`boot_board`]), and
-/// returns that board.
-pub fn boot_build(hal: Option<&Hal<'_>>) -> BoardDef {
+/// What a boot stage's build reads: its MCU package folder and the node's
+/// boot folder ([`BOOT_FOLDER_ENV`], required).
+fn boot_inputs() -> (PathBuf, BootFolder) {
     let dir = manifest_dir();
     let mcu = dir
         .ancestors()
         .find(|a| a.join(MCU_FILE).is_file())
-        .unwrap_or_else(|| panic!("{}: not inside an MCU package", dir.display()));
-    println!("cargo:rerun-if-env-changed=DAGON_BOARD");
-    println!("cargo:rerun-if-env-changed=DAGON_PROJECT");
-    let board = std::env::var("DAGON_BOARD").ok();
-    let project = std::env::var_os("DAGON_PROJECT").map(PathBuf::from);
-    let l = boot_board(mcu, board.as_deref(), project.as_deref()).unwrap_or_else(|e| panic!("{e}"));
+        .unwrap_or_else(|| panic!("{}: not inside an MCU package", dir.display()))
+        .to_path_buf();
+    println!("cargo:rerun-if-env-changed={BOOT_FOLDER_ENV}");
+    let folder = std::env::var_os(BOOT_FOLDER_ENV).map(PathBuf::from).unwrap_or_else(|| {
+        panic!(
+            "{BOOT_FOLDER_ENV} is unset: a boot stage is built for one node. Run `dagon gen`, then build \
+             the node's boot crate in boot/<id> (it sets {BOOT_FOLDER_ENV}), or set \
+             {BOOT_FOLDER_ENV}=<project>/boot/<id> for stage0"
+        )
+    });
+    let f = BootFolder::read(&folder).unwrap_or_else(|e| panic!("{BOOT_FOLDER_ENV}: {e}"));
+    println!(
+        "cargo:rerun-if-changed={}",
+        folder.join("Cargo.toml").display()
+    );
+    let own = id_in(&mcu, MCU_FILE).unwrap_or_else(|e| panic!("{e}"));
+    assert!(
+        f.meta.mcu == own,
+        "{BOOT_FOLDER_ENV}: node {} is on MCU {}; this boot stage is for {own}",
+        f.meta.node,
+        f.meta.mcu
+    );
+    (mcu, f)
+}
+
+/// A boot stage's build script (in a folder of the MCU package): writes
+/// `board.rs` ([`board_rs`]) and, with a HAL, `pins.rs` into `OUT_DIR` for
+/// the board of the node whose boot folder [`BOOT_FOLDER_ENV`] names (a
+/// board of the source tree or of the node's project), and returns that
+/// board; a node without a board gets no LED and no halt pattern
+/// ([`no_board_rs`]). A build without the boot folder, or with one of a
+/// node on another MCU, fails.
+pub fn boot_build(hal: Option<&Hal<'_>>) -> Option<BoardDef> {
+    let (mcu, f) = boot_inputs();
+    let Some(board) = f.meta.board.as_deref() else {
+        write(&out_dir().join("board.rs"), &no_board_rs(&f.meta.node));
+        if hal.is_some() {
+            write(&out_dir().join("pins.rs"), NO_PINS_RS);
+        }
+        return None;
+    };
+    let l = boot_board(&mcu, Some(board), f.project().as_deref()).unwrap_or_else(|e| panic!("{e}"));
     watch(&l.files);
     write(&out_dir().join("board.rs"), &board_rs(&l.board));
     if let Some(hal) = hal {
         write(&out_dir().join("pins.rs"), &pins_rs(&l.board, hal));
     }
-    l.board
+    Some(l.board)
 }
+
+/// A boot core library's build script: [`BootFolder::verify_stamp`] for
+/// the node's boot folder, so the build refuses a boot crate whose
+/// dependency graph the host check (`dagon gen`) did not pass for exactly
+/// its current `Cargo.toml`, `Cargo.lock` and trusted extension sources.
+/// The graph itself is checked on the host, where cargo can resolve it
+/// (all features, every target); a build script cannot reproduce the
+/// outer build's features or resolve offline reliably.
+pub fn boot_verify_stamp() {
+    let (_, f) = boot_inputs();
+    println!(
+        "cargo:rerun-if-changed={}",
+        f.dir.join(super::boot_folder::STAMP_FILE).display()
+    );
+    println!(
+        "cargo:rerun-if-changed={}",
+        f.dir.join("Cargo.lock").display()
+    );
+    // A whole folder, so a file added to an extension reruns the check.
+    watch(&f.trusted_folders());
+    f.verify_stamp().unwrap_or_else(|e| panic!("{e}"));
+}
+
+/// `board.rs` of a node without a board: no boot LED, no halt pattern.
+pub fn no_board_rs(node: &str) -> String {
+    format!(
+        "// Written by the package's build script: node `{node}` names no board.\n\n\
+         /// `[boot] led` as a GPIO number: none.\npub const BOOT_LED_GPIO: Option<u8> = None;\n\
+         /// `[boot] led_active`.\npub const BOOT_LED_ACTIVE_HIGH: bool = true;\n\
+         /// `[boot] halt` when it blinks: none.\npub const HALT_BLINK_PERIOD_MS: Option<u32> = None;\n"
+    )
+}
+
+/// `pins.rs` of a node without a board: nothing to take.
+const NO_PINS_RS: &str = "// Written by the package's build script: the node names no board.\n\n\
+                          #[macro_export]\nmacro_rules! take {\n    ($p:ident . $name:ident) => {\n        \
+                          compile_error!(\"the node names no board: no pin to take\")\n    };\n}\n";
 
 #[cfg(test)]
 mod tests {
@@ -414,7 +482,7 @@ mod tests {
         let (dir, mcu) = tree("two", &[("a-board", "default = true\n"), ("b-board", "")]);
         let e = boot_board(&mcu, None, None).unwrap_err();
         assert!(
-            e.msg.contains("DAGON_BOARD") && e.msg.contains("a-board, b-board"),
+            e.msg.contains("name the node's board") && e.msg.contains("a-board, b-board"),
             "{e}"
         );
         assert_eq!(
@@ -430,7 +498,7 @@ mod tests {
         )
         .unwrap();
         let e = boot_board(&mcu, None, Some(&project)).unwrap_err();
-        assert!(e.msg.contains("DAGON_BOARD"), "{e}");
+        assert!(e.msg.contains("name the node's board"), "{e}");
         let l = boot_board(&mcu, Some("mine"), Some(&project)).unwrap();
         assert_eq!(l.board.boot.unwrap().led.as_deref(), Some("GPIO2"));
         assert!(l.files.contains(&project));

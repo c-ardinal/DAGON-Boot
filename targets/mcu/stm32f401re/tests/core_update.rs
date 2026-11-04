@@ -9,7 +9,7 @@
 
 use dagon_agent::{SlotStore, Transition};
 use dagon_core::bootcore::{self, MustReset, Settled, CLEARED};
-use dagon_core::log::{Log, SlotRef};
+use dagon_core::log::{trial_room, Log, SlotRef};
 use dagon_format::header::*;
 use dagon_format::statelog::{kind, FaceHeader};
 use dagon_format::{key_id, sha256, Version};
@@ -172,12 +172,57 @@ fn installed() -> Cut {
     f
 }
 
+/// [`installed`] with the shared log's face so full (APP records) that
+/// the store's reservation compacts it during the update: erase of the
+/// other face, both targets' records carried, the face header last.
+fn installed_full() -> Cut {
+    let mut f = installed();
+    let app = signed(image_kind::APP, 0, SLOTS.slots[0], 0, 2000);
+    let mut log = Log::load(&mut f, &LOG).unwrap();
+    while log.room() >= trial_room(TRIAL_ATTEMPTS) {
+        log.append(&mut f, kind::CONFIRMED, head(&app, 0), 0)
+            .unwrap();
+    }
+    *f.ops.borrow_mut() = 0;
+    f
+}
+
+/// What the app's agent does at start (`KindSStore::keep_room`).
+fn app_start(f: &Cut) {
+    if let Ok(s) = KindSStore::load(f.clone(), &LOG, SLOTS) {
+        let _ = s.with_cores(CORE_SLOTS, true).keep_room();
+    }
+}
+
+fn pending(f: &mut Cut) -> bool {
+    bootcore::read_state(f, &LOG).is_some_and(|c| c.pending.is_some())
+}
+
+/// Boots, starts the app (which restores the log's room) and reboots
+/// until the boot core trial is settled (0xFF: the power went).
+fn until_settled(f: &mut Cut, cell: &mut [u32; 2]) -> u8 {
+    for _ in 0..4 {
+        let s = boot(f, cell);
+        if s == 0xFF {
+            return s;
+        }
+        app_start(f);
+        if !f.powered() {
+            return 0xFF;
+        }
+        if !pending(f) {
+            return s;
+        }
+    }
+    panic!("the boot core trial stays open");
+}
+
 /// The agent's XFER and SET_PENDING with target BOOTCORE through the store.
 fn agent_writes(f: &Cut, img: &[u8]) -> Option<()> {
     let t = Transition::for_store_tests();
     let mut s = KindSStore::load(f.clone(), &LOG, SLOTS)
         .ok()?
-        .with_cores(CORE_SLOTS);
+        .with_cores(CORE_SLOTS, true);
     let st = s.target_status(target::BOOTCORE)?;
     assert_eq!((st.active, st.confirmed), (0, 0));
     let body = &img[HEADER_SIZE..];
@@ -205,14 +250,29 @@ fn boot(f: &mut Cut, cell: &mut [u32; 2]) -> u8 {
             return 0xFF;
         }
         let st = bootcore::read_state(f, &LOG).unwrap_or_default();
-        let start = bootcore::choose(&st, *cell, TRIAL_ATTEMPTS, |r| {
-            let s = r.map_or(0, |r| r.slot);
-            bootcore::check_inline(&mut f.clone(), CORE_SLOTS[usize::from(s)], s, r, MCU_ID)
+        let start = bootcore::choose(&st, *cell, TRIAL_ATTEMPTS, |s, r| {
+            bootcore::check_inline(
+                &mut f.clone(),
+                CORE_SLOTS[usize::from(s)],
+                s,
+                (r, None),
+                MCU_ID,
+            )
         })
         .expect("a boot core starts");
         *cell = start.cell;
         let ok = healthy(f, start.slot);
-        match bootcore::settle_log(f, &LOG, start.slot, (*cell, TRIAL_ATTEMPTS), ok) {
+        match bootcore::settle_log(
+            f,
+            &LOG,
+            start.slot,
+            bootcore::Cell {
+                value: *cell,
+                max: TRIAL_ATTEMPTS,
+                holds: true,
+            },
+            ok,
+        ) {
             Ok(s) => {
                 if s != Settled::Nothing {
                     *cell = CLEARED;
@@ -226,17 +286,20 @@ fn boot(f: &mut Cut, cell: &mut [u32; 2]) -> u8 {
 }
 
 fn update(minor: u8, cut: Option<(usize, bool)>) -> (Cut, u8) {
-    let mut f = installed();
+    update_from(installed(), minor, cut)
+}
+
+fn update_from(mut f: Cut, minor: u8, cut: Option<(usize, bool)>) -> (Cut, u8) {
     f.cut = cut;
     let img = signed(image_kind::BOOTCORE, 1, CORE_SLOTS[1].0, minor, 3000);
     let mut cell = CLEARED;
     if agent_writes(&f, &img).is_some() && f.powered() {
-        boot(&mut f, &mut cell);
+        until_settled(&mut f, &mut cell);
     }
     f.cut = None;
     *f.ops.borrow_mut() = 0;
     let mut cell = CLEARED;
-    let running = boot(&mut f, &mut cell);
+    let running = until_settled(&mut f, &mut cell);
     (f, running)
 }
 
@@ -246,7 +309,7 @@ fn a_new_core_is_tried_confirms_itself_and_the_app_records_stay() {
     assert_eq!(running, 1);
     let mut s = KindSStore::load(f.clone(), &LOG, SLOTS)
         .unwrap()
-        .with_cores(CORE_SLOTS);
+        .with_cores(CORE_SLOTS, true);
     let c = s.target_status(target::BOOTCORE).unwrap();
     assert_eq!((c.active, c.confirmed), (1, 1));
     assert_eq!(
@@ -257,13 +320,29 @@ fn a_new_core_is_tried_confirms_itself_and_the_app_records_stay() {
     assert_eq!((a.active, a.confirmed), (0, 0), "the app is untouched");
 }
 
+/// A node whose trial cell does not hold takes no boot core: stage0 could
+/// not count its starts.
+#[test]
+fn without_a_holding_trial_cell_no_boot_core_is_taken() {
+    let f = installed();
+    let s = KindSStore::load(f.clone(), &LOG, SLOTS)
+        .unwrap()
+        .with_cores(CORE_SLOTS, false);
+    assert_eq!(s.capacity(target::BOOTCORE, 1), 0);
+    assert!(s.capacity(target::APP, 1) > 0);
+    let s = KindSStore::load(f, &LOG, SLOTS)
+        .unwrap()
+        .with_cores(CORE_SLOTS, true);
+    assert!(s.capacity(target::BOOTCORE, 1) > 0);
+}
+
 #[test]
 fn a_core_that_fails_its_check_falls_back_to_the_old_one() {
     let (f, running) = update(BROKEN, None);
     assert_eq!(running, 0);
     let mut s = KindSStore::load(f, &LOG, SLOTS)
         .unwrap()
-        .with_cores(CORE_SLOTS);
+        .with_cores(CORE_SLOTS, true);
     let c = s.target_status(target::BOOTCORE).unwrap();
     assert_eq!((c.confirmed, c.slots[1].state), (0, SlotState::Reverted));
     assert_eq!(
@@ -274,22 +353,26 @@ fn a_core_that_fails_its_check_falls_back_to_the_old_one() {
 
 #[test]
 fn a_power_cut_at_every_flash_step_leaves_a_bootable_core() {
-    for minor in [1, BROKEN] {
-        let (done, _) = {
-            let mut f = installed();
+    for (minor, full) in [(1, false), (BROKEN, false), (1, true), (BROKEN, true)] {
+        let start = || if full { installed_full() } else { installed() };
+        let ops = {
+            let f = start();
             let img = signed(image_kind::BOOTCORE, 1, CORE_SLOTS[1].0, minor, 3000);
             agent_writes(&f, &img).unwrap();
-            boot(&mut f, &mut CLEARED.clone());
-            (f, 0)
+            let gen = Log::load(&mut f.clone(), &LOG).unwrap().generation;
+            assert_eq!(gen > 1, full, "the full log compacts during the update");
+            let mut g = f.clone();
+            until_settled(&mut g, &mut CLEARED.clone());
+            let n = *g.ops.borrow();
+            n
         };
-        let ops = *done.ops.borrow();
         assert!(ops > 10, "{ops}");
         for n in 0..ops {
             for half in [false, true] {
-                let (f, running) = update(minor, Some((n, half)));
+                let (f, running) = update_from(start(), minor, Some((n, half)));
                 let mut s = KindSStore::load(f, &LOG, SLOTS)
                     .unwrap()
-                    .with_cores(CORE_SLOTS);
+                    .with_cores(CORE_SLOTS, true);
                 let c = s.target_status(target::BOOTCORE).unwrap();
                 let open = c
                     .slots

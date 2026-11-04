@@ -1,0 +1,20 @@
+[package]
+name = "dagon-boot-extension-template"
+version = "0.0.0"
+edition = "2021"
+license = "MIT OR Apache-2.0"
+publish = false
+description = "A trusted boot extension to copy: it observes the boot core's events (docs/extension-manifest.md)"
+
+# Standalone: a node's boot crate links it by path; its host tests run on
+# their own (`cargo test`).
+[workspace]
+
+[dependencies]
+# In a copy, take these from the DAGON source the project uses ([dagon] in
+# dagon.toml), as the node crates do. dagon-boot: the boot events' types.
+dagon-boot = { path = "../../crates/dagon-boot" }
+dagon-events = { path = "../../crates/dagon-events" }
+
+[dev-dependencies]
+critical-section = { version = "1.1", features = ["std"] }

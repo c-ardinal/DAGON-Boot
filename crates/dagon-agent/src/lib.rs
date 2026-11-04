@@ -410,6 +410,14 @@ pub trait SlotStore {
         t: &Transition,
     ) -> Result<(), StoreError>;
 
+    /// Restores the room the state logs keep for trials (a record torn by
+    /// a power cut leaves none), compacting now, while the app runs and no
+    /// trial watchdog is waiting on the boot stage: the boot stage itself
+    /// never erases. Called when the agent starts.
+    fn keep_room(&mut self) -> Result<(), StoreError> {
+        Ok(())
+    }
+
     /// STATUS of `target`'s slots: `target::APP` is [`SlotStore::status`];
     /// `target::BOOTCORE` the boot core slots (`active` the core that
     /// started this app), folded from the boot core records. `None`: this
@@ -622,6 +630,9 @@ impl<S: SlotStore + ?Sized> SlotStore for &core::cell::RefCell<S> {
     }
     fn target_status(&mut self, target: u8) -> Option<StatusResp> {
         self.borrow_mut().target_status(target)
+    }
+    fn keep_room(&mut self) -> Result<(), StoreError> {
+        self.borrow_mut().keep_room()
     }
     fn write_target_header(
         &mut self,

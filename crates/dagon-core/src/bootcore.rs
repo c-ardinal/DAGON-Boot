@@ -16,9 +16,9 @@
 //! starts over, which always ends at a core that runs.
 
 use crate::log::{Log, LogError, LogLayout, LogState, SlotRef};
-use dagon_format::header::{header_digest16, image_kind, ImageHeader, HEADER_SIZE};
+use dagon_format::header::{header_digest16, image_kind, verify_header, ImageHeader, HEADER_SIZE};
 use dagon_format::statelog::{
-    kind, reason, slot, FaceHeader, Record, FACE_HEADER_SIZE, RECORD_SIZE,
+    kind, reason, slot, target, FaceHeader, Record, FACE_HEADER_SIZE, RECORD_SIZE,
 };
 use dagon_format::Sha256;
 use dagon_port::Flash;
@@ -41,6 +41,7 @@ pub enum Plan {
 /// Stage0's plan from the boot core fold `st` and the starts `tried` the
 /// trial cell counts for the pending core.
 pub fn plan(st: &LogState, tried: u8, max: u8) -> Plan {
+    let max = max.min(MAX_COUNT);
     match st.pending {
         Some(p) if tried < max => Plan::Try {
             pending: p,
@@ -70,7 +71,7 @@ pub fn settle(st: &LogState, running: u8, tried: u8, max: u8) -> Settle {
         Some(p) if p.slot == running => Settle::Confirm(p),
         Some(p) => Settle::Rollback {
             back: SlotRef { slot: running, ..p },
-            reason: if tried >= max {
+            reason: if tried >= max.min(MAX_COUNT) {
                 reason::TRIAL_EXHAUSTED
             } else {
                 reason::HASH_MISMATCH
@@ -83,27 +84,60 @@ pub fn settle(st: &LogState, running: u8, tried: u8, max: u8) -> Settle {
 /// Marks a trial cell word.
 const CELL_TAG: u32 = 0xB7 << 24;
 
-/// The trial cell for start `attempt` of image `p`: a word holding a tag,
-/// the first two bytes of the image's header digest and the count, then its
-/// complement. Retained memory reads as anything after power-up; only the
-/// pair written for `p` reads as a count for it.
-pub const fn trial_cell(p: &SlotRef, attempt: u8) -> [u32; 2] {
-    let w = CELL_TAG | (p.digest16[0] as u32) << 16 | (p.digest16[1] as u32) << 8 | attempt as u32;
-    [w, !w]
+/// Largest count a cell word holds; stage0 gives a pending core at most
+/// this many starts whatever the definition asks.
+pub const MAX_COUNT: u8 = 0xF;
+
+/// One cell word for start `n` of image `p`: the tag, the first two bytes
+/// of the image's header digest, the count and its complement in the low
+/// byte (`n << 4 | !n & 0xF`).
+const fn word(p: &SlotRef, n: u8) -> u32 {
+    let n = (if n > MAX_COUNT { MAX_COUNT } else { n }) as u32;
+    CELL_TAG | (p.digest16[0] as u32) << 16 | (p.digest16[1] as u32) << 8 | n << 4 | (!n & 0xF)
 }
 
-/// Starts the cell counts for image `p` (0 for anything else).
+/// The trial cell for start `attempt` of image `p`: the same self-checking
+/// word twice. Each word is one store, so a reset between the two leaves
+/// one new and one old word; the cell counts the larger, so an update cut
+/// half-way never lowers the count. Retained memory reads as anything
+/// after power-up; a word reads as a count for `p` only when its tag,
+/// digest bytes and count check all hold.
+pub const fn trial_cell(p: &SlotRef, attempt: u8) -> [u32; 2] {
+    let w = word(p, attempt);
+    [w, w]
+}
+
+/// Starts the cell counts for image `p` (0 for anything else): the larger
+/// of its two words' counts.
 pub fn tried(cell: [u32; 2], p: &SlotRef) -> u8 {
-    let [w, check] = cell;
-    let ours = trial_cell(p, 0)[0];
-    if check != !w || w & !0xFF != ours {
-        return 0;
-    }
-    w as u8
+    let ours = word(p, 0) & !0xFF;
+    cell.into_iter()
+        .filter(|w| w & !0xFF == ours && w & 0xF == !(w >> 4) & 0xF)
+        .map(|w| ((w >> 4) & 0xF) as u8)
+        .max()
+        .unwrap_or(0)
 }
 
 /// The cell value that counts nothing (written once a trial is settled).
 pub const CLEARED: [u32; 2] = [0, 0];
+
+/// A value no trial cell word takes (its tag is not the cell's), written
+/// and read back to see the cell hold values.
+const PROBE: [u32; 2] = [0x5AA5_C33C, 0x0FF0_A55A];
+
+/// Whether the cell holds what is written to it: a probe value, then the
+/// value it had, each read back. A cell that does not (no such register,
+/// a stuck or write-protected one) cannot count a trial's starts, so the
+/// MCU package refuses boot core updates and a pending core rolls itself
+/// back ([`settle_log`]). Keeping the value across a reset is the vendor's
+/// documented behaviour and is checked on the board, not here.
+pub fn cell_holds(read: impl Fn() -> [u32; 2], mut write: impl FnMut([u32; 2])) -> bool {
+    let was = read();
+    write(PROBE);
+    let probe_held = read() == PROBE;
+    write(was);
+    probe_held && read() == was
+}
 
 /// The boot core records of the log at `layout`, folded as [`Log::load`]
 /// folds them (newest valid face, records up to the first erased or
@@ -148,24 +182,30 @@ pub enum CoreFail {
     LoadAddr,
     /// Body digest differs from the header's.
     Body,
+    /// The header's signature does not verify under stage0's key.
+    Signature,
 }
 
 /// Stage0's check of the boot core in the slot at `base` (`size` bytes,
 /// header inline at the start) as slot `slot`: its header is the one
-/// `expect` names (when a record names one), it is a boot core for MCU
-/// `mcu_id` bound to this slot, linked for the slot's body, fitting, and
-/// its body hashes to the header's digest. No signature: the agent checked
-/// it before the record was written. Returns the body address.
+/// `expect` names (when a record names one), its signature verifies under
+/// `key` (when stage0 carries one: the definition's `stage0_verifies`), it
+/// is a boot core for MCU `mcu_id` bound to this slot, linked for the
+/// slot's body, fitting, and its body hashes to the header's digest.
+/// Returns the body address.
 pub fn check_inline<F: Flash>(
     flash: &mut F,
     (base, size): (u32, u32),
     slot: u8,
-    expect: Option<&SlotRef>,
+    (expect, key): (Option<&SlotRef>, Option<&[u8; 32]>),
     mcu_id: u16,
 ) -> Result<u32, CoreFail> {
     let mut raw = [0u8; HEADER_SIZE];
     flash.read(base, &mut raw).map_err(|_| CoreFail::Header)?;
-    let h = ImageHeader::parse(&raw).map_err(|_| CoreFail::Header)?;
+    let h = match key {
+        Some(k) => verify_header(&raw, k).map_err(|_| CoreFail::Signature)?,
+        None => ImageHeader::parse(&raw).map_err(|_| CoreFail::Header)?,
+    };
     if expect.is_some_and(|r| r.digest16 != header_digest16(&raw)) {
         return Err(CoreFail::Digest);
     }
@@ -219,48 +259,110 @@ pub struct NoCore<E> {
 /// Stage0's choice from the boot core fold `st` and the trial cell `cell`
 /// read at reset: the pending core while its starts last and `check`
 /// accepts its image, else the confirmed one (slot A, checked against no
-/// record, while the log names none). `check` is the MCU's image check of
-/// the core a record names (`None`: slot A on its own).
+/// record, while the log names none). When that one does not check out
+/// either (a corrupt slot, or a log naming a slot that holds no core), the
+/// other slots are tried on their own (checked against no record), A
+/// before B: a core whose image checks out is always preferred to halting.
+/// Only when no slot checks out is there nothing to start. `check(slot,
+/// record)` is the MCU's image check of the core in `slot`, against the
+/// record when one names it.
 pub fn choose<B, E>(
     st: &LogState,
     cell: [u32; 2],
     max: u8,
-    mut check: impl FnMut(Option<&SlotRef>) -> Result<B, E>,
+    mut check: impl FnMut(u8, Option<&SlotRef>) -> Result<B, E>,
 ) -> Result<Start<B>, NoCore<E>> {
     let n = st.pending.map_or(0, |p| tried(cell, &p));
+    let mut tried_slot = [false; SLOTS];
     let run = match plan(st, n, max) {
         Plan::Try {
             pending,
             attempt,
             fallback,
-        } => match check(Some(&pending)) {
-            Ok(body) => {
-                return Ok(Start {
-                    slot: pending.slot,
-                    body,
-                    trial: true,
-                    cell: trial_cell(&pending, attempt),
-                })
+        } => {
+            mark(&mut tried_slot, pending.slot);
+            match check(pending.slot, Some(&pending)) {
+                Ok(body) => {
+                    return Ok(Start {
+                        slot: pending.slot,
+                        body,
+                        trial: true,
+                        cell: trial_cell(&pending, attempt),
+                    })
+                }
+                Err(_) => fallback,
             }
-            Err(_) => fallback,
-        },
+        }
         Plan::Run(c) => c,
     };
-    let body = check(run.as_ref()).map_err(|why| NoCore {
+    // The count stays while a core is pending, so the core that runs can
+    // tell why stage0 gave the pending one up.
+    let kept = if st.pending.is_some() { cell } else { CLEARED };
+    let first = run.map_or(slot::A, |c| c.slot);
+    mark(&mut tried_slot, first);
+    let why = match check(first, run.as_ref()) {
+        Ok(body) => {
+            return Ok(Start {
+                slot: first,
+                body,
+                trial: false,
+                cell: kept,
+            })
+        }
+        Err(why) => why,
+    };
+    for s in 0..SLOTS as u8 {
+        if tried_slot[usize::from(s)] {
+            continue;
+        }
+        if let Ok(body) = check(s, None) {
+            return Ok(Start {
+                slot: s,
+                body,
+                trial: false,
+                cell: kept,
+            });
+        }
+    }
+    // The pending core that ran out of starts, as the very last resort.
+    if let Some(p) = st.pending.filter(|p| p.slot != first) {
+        if let Ok(body) = check(p.slot, Some(&p)) {
+            return Ok(Start {
+                slot: p.slot,
+                body,
+                trial: false,
+                cell: kept,
+            });
+        }
+    }
+    Err(NoCore {
         named: run.is_some(),
         why,
-    })?;
-    Ok(Start {
-        slot: run.map_or(slot::A, |c| c.slot),
-        body,
-        trial: false,
-        // The count stays while a core is pending, so the core that runs
-        // can tell why stage0 gave the pending one up.
-        cell: if st.pending.is_some() { cell } else { CLEARED },
     })
 }
 
+/// Boot core slots stage0 chooses among.
+const SLOTS: usize = 2;
+
+fn mark(tried: &mut [bool; SLOTS], s: u8) {
+    if let Some(t) = tried.get_mut(usize::from(s)) {
+        *t = true;
+    }
+}
+
+/// The trial cell as the boot core sees it at start.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Cell {
+    /// Its value.
+    pub value: [u32; 2],
+    /// Starts a pending core gets (`trial_attempts`).
+    pub max: u8,
+    /// It holds what is written to it ([`cell_holds`]).
+    pub holds: bool,
+}
+
 /// What the boot core recorded about the boot core trial.
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Settled {
     Nothing,
@@ -281,14 +383,26 @@ pub struct MustReset;
 /// confirms itself only when `healthy` (its own check passed) and the
 /// record reads back; the old core records the rollback, and runs the app
 /// even when that record does not land (its next start writes it again).
-/// Clear the trial cell after `Confirmed` or `RolledBack`.
+/// Clear the trial cell after `Confirmed` or `RolledBack`. It never erases
+/// flash: the record goes into the room the agent reserved when it set the
+/// core pending ([`Log::reserve`]); a log with no room (a torn tail) takes
+/// no record, which ends as a reset (confirm) or a retry at the next start
+/// (rollback), never as an erase under the trial watchdog. A pending core
+/// whose trial cell does not hold (`cell.holds` false: stage0 could not
+/// count its starts, so a broken core would be retried for ever) records
+/// its own ROLLBACK to the confirmed core and resets.
 pub fn settle_log<F: Flash>(
     flash: &mut F,
     layout: &LogLayout,
     running: u8,
-    (cell, max): ([u32; 2], u8),
+    cell: Cell,
     healthy: bool,
 ) -> Result<Settled, MustReset> {
+    let Cell {
+        value: cell,
+        max,
+        holds,
+    } = cell;
     let mut log = match Log::load(flash, layout) {
         Ok(l) => l,
         // No boot core record at all: stage0 started slot A unchecked.
@@ -299,10 +413,18 @@ pub fn settle_log<F: Flash>(
     match settle(&log.core, running, n, max) {
         Settle::Nothing => Ok(Settled::Nothing),
         Settle::Confirm(p) => {
+            if !holds {
+                if let Some(c) = log.core.confirmed {
+                    let back = SlotRef { slot: c.slot, ..p };
+                    let why = reason::TRIAL_EXHAUSTED;
+                    let _ = log.append_in_place(flash, target::BOOTCORE, kind::ROLLBACK, back, why);
+                }
+                return Err(MustReset);
+            }
             if !healthy {
                 return Err(MustReset);
             }
-            log.append_core(flash, kind::CONFIRMED, p, reason::NONE)
+            log.append_in_place(flash, target::BOOTCORE, kind::CONFIRMED, p, reason::NONE)
                 .map_err(|_| MustReset)?;
             let back = Log::load(flash, layout).map_err(|_| MustReset)?;
             if back.core.confirmed != Some(p) || back.core.pending.is_some() {
@@ -311,7 +433,7 @@ pub fn settle_log<F: Flash>(
             Ok(Settled::Confirmed)
         }
         Settle::Rollback { back, reason } => {
-            match log.append_core(flash, kind::ROLLBACK, back, reason) {
+            match log.append_in_place(flash, target::BOOTCORE, kind::ROLLBACK, back, reason) {
                 Ok(()) => Ok(Settled::RolledBack),
                 Err(_) => Ok(Settled::Nothing),
             }

@@ -30,7 +30,7 @@ errors; kind fields accept only the values listed below.
 | `gpio_count` | GPIO0..n-1 checked for nodes without a board; 0 when pins are named by port |
 | `[[flash_map]]` | `name` (unique), `base` (address of flash byte 0), `bytes`, `xip` (required; `true`: the CPU reads flash at `base`, so flash shares the address space with RAM and register blocks; `false`: `base` and the slots are flash offsets an MMU maps elsewhere). The first is the default |
 | `partitions` | ESP-IDF partition table CSV in the package (rows need explicit offset and size) |
-| `[layout]` | Optional fixed regions: `stage0 = { at, size }`, `bootcore_log` / `app_log = { faces = [a, b], face_size }`; a `bootcore_log` equal to `app_log` is one log holding both the boot core and the APP records |
+| `[layout]` | Optional fixed regions: `stage0 = { at, size }`, `bootcore_log` / `app_log = { faces = [a, b], face_size }`; a `bootcore_log` equal to `app_log` is one log holding both the boot core and the APP records; `stage0_verifies = true`: stage0 also checks a boot core's signature (left out: digests only) |
 | `[[slot]]` | `image` (`app`, `bootcore`, `agent`, `stage0`), `binding` (`a`, `b`, `any`), `header` (`inline`, `trailer`, `detached`); the region is `at` + `size` or `partition`; a detached header is at `header_at` or `header_partition` + `header_offset` |
 | `[writer]` | First-write tool: `kind` and its parameters (below) |
 | `[[part]]` | DAGON parts built from this package for a first write: `name`, `sub` (folder in the package), `bin` |
@@ -119,10 +119,13 @@ bus pin as a HAL type with a `take!(p.<name>)` macro (`pins.rs`), and each
 device as a `dagon_events::Device` bus port capability (`devices.rs`, the
 only way one is made). The build reruns when any definition the validation
 read changes. The MCU packages' boot images read the board's `[boot]` the
-same way (`boot_build`): the board `DAGON_BOARD=<board id>` names, with
-`DAGON_PROJECT=<path of dagon.toml>` a project's inline `[board.<id>]` too;
-the name may be left out only while the MCU has a single board definition,
-never guessed. The code holds no pin, address or pattern of its own.
+same way (`boot_build`), for the board of the node they are built for:
+`DAGON_BOOT_CRATE` names the node's boot crate (`boot/<id>/` of the project,
+written by `dagon gen`), whose `Cargo.toml` names the node, its MCU, its
+board (a board of this tree or an inline `[board.<id>]` of the project)
+and its trusted boot extensions. A build without it fails; a node
+without a board gets no boot LED and no halt pattern. The code holds no
+pin, address or pattern of its own.
 
 ## What leaves this machine
 

@@ -44,7 +44,7 @@ pub const RAM: u32 = 0x2000_0000;
 pub const RAM_LEN: u32 = 96 * 1024;
 pub const HEADER_LEN: u32 = 512;
 
-pub const TRIAL_WDT_MS: u32 = 4_000;
+pub const TRIAL_WDT_MS: u32 = 8_000;
 pub const CONFIRMED_WDT_MS: u32 = 8_000;
 
 /// Sector 3: the conformance build's scratch (`[conformance] scratch` of

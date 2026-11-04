@@ -27,17 +27,21 @@ pub const HUB_RECONNECT_MS: u32 = 45_000;
 /// version's HELLO is polled this often so CONFIRM lands well inside one
 /// attempt (one poll costs at most two [`REQUEST_MS`] round trips).
 pub const NODE_POLL_MS: u32 = 300;
-/// Trial watchdog of a node's boot attempt.
+/// Trial watchdog of a node's boot attempt: the shortest of the builtin MCU
+/// definitions' `[watchdog] trial_ms` (CONFIRM must land inside it).
 pub const NODE_TRIAL_MS: u32 = 4_000;
+/// The longest of them (a node's full local rollback takes up to its
+/// attempts of it). A test keeps both equal to the definitions.
+pub const NODE_TRIAL_MAX_MS: u32 = 8_000;
 /// Boot attempts before a node rolls back (F401; the watch tries once).
 pub const NODE_MAX_ATTEMPTS: u32 = 3;
 const _: () = {
     // Poll pause plus a missed poll (RELAY wait + node wait) fits a trial.
     assert!(NODE_POLL_MS + 2 * REQUEST_MS < NODE_TRIAL_MS);
-    // Waiting for the new HELLO covers the F401's full local rollback
-    // (3 attempts of about 4 s plus start-up), so silence there is not
+    // Waiting for the new HELLO covers a node's full local rollback
+    // (its attempts of the longest trial period plus start-up), so silence there is not
     // taken for a lost node.
-    assert!(REBOOT_WAIT_MS >= NODE_MAX_ATTEMPTS * (NODE_TRIAL_MS + 1_000) + 2_000);
+    assert!(REBOOT_WAIT_MS >= NODE_MAX_ATTEMPTS * (NODE_TRIAL_MAX_MS + 1_000) + 2_000);
 };
 /// Pauses before CONFIRM is sent again after E_STATE: the image runs but its
 /// self-check does not pass yet (its tasks are still starting, e.g. the
@@ -376,7 +380,13 @@ impl<T: Transport, C: Clock> Host<T, C> {
             body,
             show: Some((node, v)),
         };
-        self.transfer(to, &hello, xfer, on_event).await?;
+        match self.transfer(to, &hello, xfer, on_event).await {
+            Err(Error::Rejected {
+                cmd: Cmd::XferBegin,
+                status: Status::Unsupported,
+            }) => return Err(Error::BootCoreRefused),
+            r => r?,
+        }
         self.emit(on_event, node, phase::VERIFY, 100, v).await;
         let mut p = [0u8; 2];
         SetPending {
@@ -877,6 +887,7 @@ pub fn reason<E>(e: &Error<E>) -> &'static str {
         Error::Timeout | Error::Relay(_) | Error::Transport(_) => "NO ANSWER",
         Error::WrongVersion { .. } => "ROLLED BACK",
         Error::BootCoreRolledBack { .. } => "BOOT CORE ROLLED BACK",
+        Error::BootCoreRefused => "NO BOOT CORE TRIAL",
         Error::DigestMismatch => "E_DIGEST",
         Error::NoImage { .. } => "NO IMAGE",
         _ => "FAILED",

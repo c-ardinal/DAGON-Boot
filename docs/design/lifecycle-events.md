@@ -1175,16 +1175,53 @@ the safety rules are made of. It is accepted only when:
 
 1. its manifest says `trusted = true` and names the trusted ports it
    provides;
-2. the project's `dagon.toml` lists it under `[boot] trusted_extensions`
-   or `[app] trusted_extensions` by id and by the SHA-256 of its built
-   artifact (the linked `.ext.*` bytes, computed by `dagon gen`);
+2. the project's `dagon.toml` lists it for the node under
+   `[extensions.nodes.<id>] trusted` by id and by the source hash of its
+   package: SHA-256 over every file of the package folder, sorted by path
+   (`/`-separated), each as its path, a zero byte, its length as a
+   little-endian u64 and its bytes with CRLF read as LF. No file is left
+   out, `target/` and hidden folders included, because `include!` and
+   `#[path]` let the compiler read any of them; running cargo inside the
+   extension's own folder therefore changes its hash. The hash is of the
+   source because the linked bytes do not exist when `dagon gen` runs.
+   `dagon gen` checks the hash (and names the one it found when they
+   differ), then checks the boot crate's dependency graph on the host:
+   cargo resolves it with every feature for every target (`--locked` once
+   its `Cargo.lock` exists), a superset of any one build of it, and every
+   package built into it (normal and build dependencies) must be DAGON's,
+   inside a declared trusted extension's folder (and so in its hash), or
+   a registry crate with a checksum in the boot crate's `Cargo.lock`. The
+   check passed, gen writes `graph.stamp`: the SHA-256 of the boot
+   crate's `Cargo.toml`, its `Cargo.lock` and each trusted extension's
+   source hash. The boot core's build recomputes that stamp and refuses
+   to build when it is missing or differs, so a boot crate whose graph
+   was not checked for exactly its current inputs is never built. The
+   graph is checked on the host and not in the build script because a
+   build script sees neither the outer build's features nor, offline,
+   every crate cargo would resolve. Not covered: the registry crates the
+   extension depends on (pinned by checksum, not reviewed), and source
+   an extension includes from outside its own folder (`include!` or
+   `#[path]` with a path leaving it), which trusted code is reviewed for
+   like any code that runs privileged;
 3. the image that contains it is signed with the project key, the
    signature covering the extension's bytes, and the device verifies
    that signature before the image runs (below);
 4. `dagon gen`, `dagon status`, `dagon doctor` and the page show the
    trusted extensions of each node by id, and VERSION reports their ids
-   and the first bytes of their artifact hashes for display (0x08) and
+   and the first bytes of their source hashes for display (0x08) and
    the full hashes for identity (0x09).
+
+A plug-in may also be trusted without providing any port: an observer
+whose manifest says `trusted = true` and observes events only. It is
+accepted under items 2 to 4 above, answers no decision point, and each
+of its handler calls is timed against its manifest's `max_run_us` like
+any extension's (a call over it is reported as
+`<layer>.extension_overran`, not stopped). The reason: a project's own
+code at boot (showing the boot on a display, driving its own hardware)
+often needs exactly what the sandbox denies an extension, such as a bus
+or a peripheral DAGON's map does not open; declaring it trusted makes it
+part of DAGON for that project instead of weakening the sandbox for
+every project.
 
 A trusted extension runs privileged, in DAGON's own regions: it is that
 part of DAGON for that project. Nothing in 4.1–4.6 holds against it, and
@@ -1210,28 +1247,52 @@ The one authentication rule, applied by every verifier in the chain
   digest on every boot). A boot core image is verified under the rule
   by the agent before `written` and again before `pending_set` (the
   SLOT_PENDING record names its header digest). On a self-boot MCU with
-  a stage0, stage0 starts a boot core only when its header's digest is
+  a stage0 whose definition sets `[layout] stage0_verifies`, stage0
+  checks the boot core header's signature under the project key built
+  into it as well as the digests. Where it is left out, stage0 checks
+  digests only: it starts a boot core only when its header's digest is
   the one a boot core record names and its body matches that header's
-  digest: the record exists only for a core whose signature the agent
-  verified, so the chain holds as long as the state log is written only
-  by DAGON's agent and boot core, which the sandbox (4) keeps
-  extensions from. Stage0 carries no signature verifier: the RP2040's
-  stage0 with the digest check alone is 15,812 of its 16,384 bytes
-  (boot2 included), so the verifier does not fit the 16 KiB region, and
-  every byte of stage0 is code that can never be corrected in the
-  field. On a self-boot MCU without a stage0, the boot core is the root
+  digest; the record exists only for a core whose signature the agent
+  verified, so this chain holds only as long as the state log is written
+  by DAGON's agent and boot core alone (the sandbox, 4, keeps extensions
+  from it), and code that can write flash without the signing key (a
+  trusted-code bug, or an attacker with flash access) can make stage0
+  start an unsigned core. **This trade-off is an open owner decision.**
+  The measured cost of the verifier: the RP2040 stage0 with digests only
+  is 16,248 of its 16,384 bytes (boot2 included), so the verifier needs a
+  larger stage0 region there; the STM32F401RE stage0 is 8,192 bytes with
+  digests only and about 23,960 with the Ed25519 verifier (ed25519-compact
+  `opt_size`), past its 16 KiB sector. When the log's choice does not
+  check out (a corrupt slot, or a record naming a slot without a core),
+  stage0 tries the other slots on their own before it has nothing to
+  start. On a self-boot MCU without a stage0, the boot core is the root
   and is verified by the host before it is written and by the agent when
   it is written through the update path.
 - **Stage0 budget.** The MCU definition's `[layout] stage0.size` is the
-  whole of stage0 (vector table, the log reader, the digest check, the
-  trial cell); the image's memory.x gives it exactly that region, so the
-  link fails when stage0 outgrows it. RP2040: 16 KiB with boot2 (the
-  boot ROM's 256-byte second stage), stage0 15,812 bytes. STM32F401RE:
-  16 KiB, all of sector 0 where the core fetches its reset vector (the
-  smallest erase unit holding it, so no update ever erases stage0);
-  stage0 7,672 bytes. A stage0 that needs more takes a larger region
-  before the first public release; formats before that release carry no
-  compatibility promise (6).
+  whole of stage0 (vector table, the log reader, the checks, the trial
+  cell); the image's memory.x gives it exactly that region, so the link
+  fails when stage0 outgrows it. RP2040: 16 KiB with boot2 (the boot
+  ROM's 256-byte second stage). STM32F401RE: 16 KiB, all of sector 0
+  where the core fetches its reset vector (the smallest erase unit
+  holding it, so no update ever erases stage0). A stage0 that needs more
+  takes a larger region before the first public release; formats before
+  that release carry no compatibility promise (6).
+- **No erase under a trial watchdog.** Stage0 never writes flash, and the
+  boot core writes its records (BOOT_ATTEMPT, ROLLBACK, the boot core's
+  CONFIRMED or ROLLBACK) only into room the log already has
+  (`Log::append_in_place`): the agent reserves room for the trials an
+  image starts when it sets it pending (`Log::reserve`, `trial_room`),
+  and the app's agent restores it at start (`SlotStore::keep_room`)
+  after a power cut tore a record. Erases run only in the app, under a
+  watchdog period the definition check proves long enough: both
+  `[watchdog]` periods are at least twice `[execution]
+  erase_unit_max_ms`.
+- **Trial cell.** A node whose trial cell does not hold what is written
+  to it (`bootcore::cell_holds`, checked by the app's store and by the
+  boot core) takes no boot core (XFER refused as unsupported), and a
+  pending core that finds it broken records its own rollback, so a
+  broken core is never retried without a count.
+
 - **The root image** (stage0 where it exists, else the boot core) is
   written through the MCU's ROM loader at provisioning. ROM loaders
   verify nothing of DAGON's: whoever can drive the ROM loader can
@@ -1464,8 +1525,8 @@ smallest link payload (10).
 | 0x05 | board package version |
 | 0x06 | MCU identity (5.5): the value the image header and the compiled topology carry |
 | 0x07 | isolation (4.5): `level u8`, `kind u8`, `boot_extensions u8`, `root_protection` (kind and exact level as the definition enumerates them, e.g. `rdp1`/`rdp2`, the write-protected sectors, and whether the level is reversible), `fuse` (Clear, or Tripped with the disabled extension's identity as the model encodes it, 5.5) |
-| 0x08 | extensions, for display: per linked extension `id` (up to 32 bytes), `trusted u8`, first 8 bytes of its artifact hash; repeated TLVs, one per extension |
-| 0x09 | extensions, for identity: per trusted extension the full 32-byte SHA-256 of its linked artifact; repeated TLVs |
+| 0x08 | extensions, for display: per linked extension `id` (up to 32 bytes), `trusted u8`, first 8 bytes of its source hash (4.7); repeated TLVs, one per extension |
+| 0x09 | extensions, for identity: per trusted extension its full 32-byte source hash (4.7); repeated TLVs |
 | 0x10 | formats: pairs `(format id u8, number u8)`: wire, image-header, state-log, event, definitions, boot-program, boot-record, extension-manifest |
 | 0x20 | boot record summary (5.5): which boots the record holds and the decision and reason of the newest; layout by the model |
 | 0x21 | one page of the raw boot record region: `offset u16`, then `len` bytes (`len ≤ RECORD_PAGE`, 10); the host reads the region page by page and decodes it with the model's reader |

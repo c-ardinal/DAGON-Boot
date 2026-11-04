@@ -10,8 +10,8 @@ use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 
 use crate::flash::SimFlash;
 use dagon_agent::{SlotStore, StoreError, Transition};
-use dagon_core::bootcore::{choose, read_state, settle_log, MustReset, Settled, CLEARED};
-use dagon_core::log::{Log, LogLayout, LogState, SlotRef};
+use dagon_core::bootcore::{choose, read_state, settle_log, Cell, MustReset, Settled, CLEARED};
+use dagon_core::log::{trial_room, Log, LogLayout, LogState, SlotRef};
 use dagon_format::header::{
     self, build_flags, capabilities, image_kind, placement, port_kind, slot_binding, ImageHeader,
     HEADER_SIZE,
@@ -414,12 +414,11 @@ impl SimStore {
         })
     }
 
-    /// Stage0's check of the core a record names (slot A alone for
-    /// `None`): its header is the recorded one, a boot core for that slot,
+    /// Stage0's check of the core in slot `s`, against the record `r`
+    /// when one names it: a boot core for that slot,
     /// and its body hashes to the header's digest. No signature, as on the
     /// hub.
-    fn core_check(&mut self, r: Option<&SlotRef>) -> Result<(), ()> {
-        let s = r.map_or(slot_binding::A, |r| r.slot);
+    fn core_check(&mut self, s: u8, r: Option<&SlotRef>) -> Result<(), ()> {
         let head = self.core_head(s).ok_or(())?;
         if r.is_some_and(|r| *r != head) {
             return Err(());
@@ -450,14 +449,18 @@ impl SimStore {
         for _ in 0..=max + 1 {
             let st = read_state(&mut Paged(self.flash()), &c.log).unwrap_or_default();
             let cell = *self.cell();
-            let start = choose(&st, cell, max, |r| self.core_check(r)).ok()?;
+            let start = choose(&st, cell, max, |s, r| self.core_check(s, r)).ok()?;
             *self.cell() = start.cell;
             let healthy = self.core_head(start.slot).map(|h| h.version) != self.broken_core;
             let settled = settle_log(
                 &mut Paged(self.flash()),
                 &c.log,
                 start.slot,
-                (start.cell, max),
+                Cell {
+                    value: start.cell,
+                    max,
+                    holds: true,
+                },
                 healthy,
             );
             if !self.flash().is_powered() {
@@ -678,6 +681,28 @@ impl SlotStore for SimStore {
         self.append(Self::log_record(kind::CONFIRMED, slot, reason::NONE, hdr))
     }
 
+    /// The boot core log keeps room for the trials it starts (the boot
+    /// stage never erases).
+    fn keep_room(&mut self) -> Result<(), StoreError> {
+        let Some(c) = self.layout.cores else {
+            return Ok(());
+        };
+        // This model's APP log reads one face only; where the boot core
+        // records share it, it does not compact (the MCU package's own
+        // tests sweep the shared log's compaction).
+        if c.log.faces[0] == self.layout.log.0 {
+            return Ok(());
+        }
+        let max = self.layout.trial_attempts();
+        let mut f = Paged(self.flash());
+        match Log::load(&mut f, &c.log) {
+            Ok(mut log) => log
+                .reserve(&mut f, trial_room(max))
+                .map_err(|_| StoreError::Flash),
+            Err(_) => Ok(()),
+        }
+    }
+
     /// The boot core slots, folded from their log as the hub's store does
     /// (the confirmed core is the one running: a core settles its trial
     /// before the app starts).
@@ -747,6 +772,8 @@ impl SlotStore for SimStore {
                 };
                 let mut f = Paged(self.flash());
                 let mut log = Log::load(&mut f, &c.log).map_err(|_| StoreError::Flash)?;
+                log.reserve(&mut f, trial_room(self.layout.trial_attempts()))
+                    .map_err(|_| StoreError::Flash)?;
                 log.append_core(&mut f, kind::SLOT_PENDING, at, reason::NONE)
                     .map_err(|_| StoreError::Flash)
             }

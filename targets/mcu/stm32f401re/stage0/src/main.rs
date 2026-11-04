@@ -16,10 +16,8 @@ use cortex_m::peripheral::{NVIC, SCB};
 use cortex_m_rt::entry;
 use dagon_core::bootcore;
 use dagon_mcu_common::mapped::Mapped;
-use dagon_mcu_stm32f401re::layout::{
-    CORE_SLOTS, LOG, MCU_ID, MIN_FLASH_SIZE, STAGE0, TRIAL_WDT_MS,
-};
-use dagon_mcu_stm32f401re::{trial, TRIAL_ATTEMPTS};
+use dagon_mcu_stm32f401re::layout::{CORE_SLOTS, LOG, MCU_ID, MIN_FLASH_SIZE, STAGE0};
+use dagon_mcu_stm32f401re::{trial, PUBKEY, STAGE0_VERIFIES, TRIAL_ATTEMPTS, TRIAL_WDT_MS};
 use panic_halt as _;
 
 #[entry]
@@ -28,12 +26,12 @@ fn main() -> ! {
     // MIN_FLASH_SIZE bytes, and nothing writes it while stage0 runs.
     let mut flash = unsafe { Mapped::new(STAGE0 as *const u8, STAGE0, MIN_FLASH_SIZE) };
     let st = bootcore::read_state(&mut flash, &LOG).unwrap_or_default();
-    let chosen = bootcore::choose(&st, trial::read(), TRIAL_ATTEMPTS, |r| {
-        let s = r.map_or(0, |r| r.slot);
+    let chosen = bootcore::choose(&st, trial::read(), TRIAL_ATTEMPTS, |s, r| {
         let slot = *CORE_SLOTS
             .get(usize::from(s))
             .ok_or(bootcore::CoreFail::Kind)?;
-        bootcore::check_inline(&mut flash, slot, s, r, MCU_ID)
+        let key = STAGE0_VERIFIES.then_some(&PUBKEY);
+        bootcore::check_inline(&mut flash, slot, s, (r, key), MCU_ID)
     });
     match chosen {
         Ok(start) => {

@@ -80,7 +80,7 @@ macro_rules! target_tag {
 pub const TOPOLOGY_MCU: &str = "stm32f401re";
 pub const FLASH_MAP: &str = "f401-default";
 
-#[cfg(feature = "hal")]
+#[cfg(any(feature = "hal", feature = "image-stage0"))]
 include!(concat!(env!("OUT_DIR"), "/pubkey.rs"));
 
 /// Scratch address when the definition names none: outside the flash, so

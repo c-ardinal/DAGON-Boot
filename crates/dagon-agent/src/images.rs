@@ -137,6 +137,9 @@ impl<S: SlotStore> ImageStore<S> {
 
     /// Fresh machines in the states the store reports, as at start.
     pub(crate) fn reopen(&mut self) {
+        // A store that cannot make room refuses SET_PENDING later (its
+        // reservation fails); nothing else depends on it here.
+        let _ = self.store.keep_room();
         let status = self.store.status();
         let mut app = [image::Machine::new(), image::Machine::new()];
         // The transitions that led here were observed when they happened;

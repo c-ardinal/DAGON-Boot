@@ -113,8 +113,8 @@ pub fn open_store(flash: Peri<'static, FLASH>) -> Result<(Store, SharedFlash), L
     static FLASH_DRIVER: StaticCell<FlashDriver<F401Flash<'static>>> = StaticCell::new();
     let driver = FLASH_DRIVER.init(driver(F401Flash::new(flash)));
     let flash = SharedFlash::new(driver, &layout::FLASH_REGIONS);
-    let store =
-        KindSStore::load(flash, &layout::LOG, layout::SLOTS)?.with_cores(layout::CORE_SLOTS);
+    let store = KindSStore::load(flash, &layout::LOG, layout::SLOTS)?
+        .with_cores(layout::CORE_SLOTS, crate::trial::holds());
     Ok((store, flash))
 }
 

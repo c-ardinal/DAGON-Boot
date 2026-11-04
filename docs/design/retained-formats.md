@@ -507,19 +507,40 @@ its tests are the proof.
 | RP2040 | watchdog SCRATCH0, SCRATCH1 (the boot ROM uses SCRATCH4-7) | every reset but power-on and the RUN pin | power |
 | STM32F401RE | RTC backup registers BKP0R, BKP1R | every system reset, the watchdog's included | the backup domain's supply (VDD where VBAT is tied to it) |
 
-Value for start `n` of the pending image `p`: word 0 =
-`0xB7 << 24 | p.digest16[0] << 16 | p.digest16[1] << 8 | n`, word 1 = its
-complement. A pair whose second word is not the complement of the first,
-or whose tag and digest bytes are not the pending image's, counts 0; `[0,
-0]` is the cleared cell. The words are written whole by single stores, so
-no torn value exists; a reset between the two stores leaves a pair that
-counts 0.
+Value for start `n` (at most 15) of the pending image `p`: one word,
+`0xB7 << 24 | p.digest16[0] << 16 | p.digest16[1] << 8 | n << 4 | (!n &
+0xF)`, stored in both places. A word counts for `p` only when its tag,
+its digest bytes and its count check (the low nibble is the count's
+complement) hold; the cell counts the larger of its two words' counts,
+and `[0, 0]` is the cleared cell. Each word is one store, so a reset can
+land between the two: one new word and one old word then still count the
+new start, never fewer (the model found that the previous shape, a word
+and its complement, read such a pair as 0 and lost the start). A random
+word matches with probability 2^-28, and a match only makes stage0 give
+the core up sooner.
+
+The executable model is `dagon-retained-model`'s `world_trial`: the
+production codec and stage0's and the boot core's rules
+(`bootcore::choose`, `settle`) over the two words, new cores set pending
+good or broken (a broken core passes stage0's check and fails its own),
+a reset or a power loss (the cell then cleared or random) after any store
+to the cell, 10,000 seeded scenarios in `cargo test` and 1,000,000 in the
+full profile. Its properties, checked after every operation:
 
 | Id | Property |
 |---|---|
-| C1 | Only the pair written for image `p` counts starts of `p`; a million random pairs count 0 (`random_retained_words_never_read_as_a_count`). |
-| C2 | A cell that counts 0 by mistake (power loss, a stale or random value) only lets the pending core be tried again; at most `max` starts are tried between two power losses, then the confirmed core runs (`a_power_cut_at_every_flash_step_leaves_a_bootable_core`, per MCU package). |
-| C3 | A cell that counts too many (a stale count of an image whose first two digest bytes collide) only makes stage0 fall back sooner; the old core records the rollback and the update is reported as not taken. |
+| C1 | Between two power losses a pending core is started on trial at most `max` times. |
+| C2 | With no further fault, at most `max + 1` boots end the trial: no core is pending and a core runs. |
+| C3 | A broken core is never confirmed. |
 
-Limit of the claims: the retention of each place across the resets named
-is the vendor's documented behaviour, to be confirmed on each board.
+The MCU packages' sweeps (`a_power_cut_at_every_flash_step_leaves_a_bootable_core`)
+add the flash side: a cut at every flash operation of an update,
+compaction of the state log included. A cell that does not hold what is
+written to it at all is found by `bootcore::cell_holds` (a probe value
+written and read back): such a node takes no boot core, and a pending
+core that finds it so rolls itself back.
+
+Limit of the claims: that each place keeps its value across the resets
+named is the vendor's documented behaviour, to be confirmed on each
+board.
+

@@ -345,7 +345,7 @@ fn the_record_lies_inside_ram_within_its_limit() {
     assert!(e.contains("trial_attempts must be above 0"), "{e}");
 }
 
-/// `[execution]`: one erase fits between two feeds; `[conformance]`: the
+/// `[execution]`: two erases fit every watchdog period; `[conformance]`: the
 /// scratch never touches an image slot.
 #[test]
 fn execution_budgets_and_conformance_scratch_are_checked() {
@@ -364,8 +364,13 @@ scratch = {conformance}
     };
     let free = "{ at = 0x0010_A000, size = 0x1000 }";
     parse_mcu_text(&with("1_000", free), &[]).unwrap();
-    let e = mcu_err(&with("8_000", free));
-    assert!(e.contains("below watchdog.confirmed_ms 8000"), "{e}");
+    // The fake's trial period is 4000 ms: two erases of 2001 ms do not fit.
+    parse_mcu_text(&with("2_000", free), &[]).unwrap();
+    let e = mcu_err(&with("2_001", free));
+    assert!(
+        e.contains("watchdog.trial_ms 4000 must be at least 2 x"),
+        "{e}"
+    );
     let slot = parse_mcu_text(&with("1_000", free), &[]).unwrap().slots[0].start;
     let e = mcu_err(&with(
         "1_000",
@@ -379,7 +384,7 @@ scratch = {conformance}
     let m = parse_mcu_text(&with("{ unverified = 1_000 }", free), &[]).unwrap();
     assert!(!m.execution.unwrap().erase_unit_max_ms.is_known());
     let e = mcu_err(&with("{ unverified = 9_000 }", free));
-    assert!(e.contains("below watchdog.confirmed_ms"), "{e}");
+    assert!(e.contains("must be at least 2 x"), "{e}");
     let e = mcu_err(&with("\"unmeasured\"", free));
     assert!(e.contains("needs a value"), "{e}");
     let unmeasured = isolated("masked_max_us = 50", "masked_max_us = \"unmeasured\"");

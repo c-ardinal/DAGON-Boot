@@ -591,10 +591,10 @@ pub(crate) fn build_parts(
     Ok(built)
 }
 
-/// The boot core part of node `n`, built once per boot core slot its MCU
-/// definition declares (slot B links with the `slot-b` feature), for a
-/// release: `(slot, ELF bytes)`. Empty when the MCU keeps no boot core
-/// slots. The part is the definition's part named `bootcore`.
+/// Node `n`'s boot core (its boot crate `dagon gen` writes into
+/// `boot/<id>/`), built once per boot core slot its MCU definition
+/// declares (slot B links with the `slot-b` feature), for a release:
+/// `(slot, ELF bytes)`. Empty when the MCU keeps no boot core slots.
 pub(crate) fn build_core_slots(
     cfg: &Config,
     reg: &Registry,
@@ -610,39 +610,35 @@ pub(crate) fn build_core_slots(
             dagon_sign::image::slot_with(reg, &n.mcu, image_kind::BOOTCORE, *b).is_some()
         })
         .map(|(b, c)| {
-            (
-                c,
-                if b == slot_binding::B {
-                    vec!["slot-b".to_string()]
-                } else {
-                    Vec::new()
-                },
-            )
+            let features = if b == slot_binding::B {
+                vec![SLOT_B_FEATURE.to_string()]
+            } else {
+                Vec::new()
+            };
+            (c, features)
         })
         .collect();
     if slots.is_empty() {
         return Ok(Vec::new());
     }
-    let root = source_root(cfg)?;
-    let part = parts(reg, &n.mcu, n.board.as_deref())
-        .into_iter()
-        .find(|p| p.name == BOOTCORE_PART)
-        .ok_or_else(|| format!("{}: no '{BOOTCORE_PART}' part in its definitions", n.id))?;
-    let dir = part_dir(&root, &part)?;
-    let bin = match &part.bin {
-        Some(b) => b.clone(),
-        None => nodebuild::package_name(&dir)?,
-    };
+    let dir = cfg.base.join(crate::extgen::BOOT_CRATES).join(&n.id);
+    if !dir.join("Cargo.toml").is_file() {
+        return Err(format!(
+            "{}: no boot crate in {}; run `dagon gen` first",
+            n.id,
+            dir.display()
+        ));
+    }
     let mut out = Vec::new();
     for (slot, features) in slots {
-        log(&format!("{}: building {} for slot {slot}", n.id, part.name));
+        log(&format!("{}: building the boot core for slot {slot}", n.id));
         let target = cfg
             .base
             .join("out/deploy/target")
-            .join(format!("{}-{slot}", part.name));
+            .join(format!("{}-boot-{slot}", n.id));
         let exe = nodebuild::cargo_build(
             &dir,
-            &bin,
+            BOOT_BIN,
             &features,
             Some(&target),
             nodebuild::FirmwareEnv {
@@ -658,8 +654,10 @@ pub(crate) fn build_core_slots(
     Ok(out)
 }
 
-/// The boot core part's name in MCU definitions (`[[part]] name`).
-const BOOTCORE_PART: &str = "bootcore";
+/// The binary a node's boot crate builds (its template's `[[bin]]`).
+const BOOT_BIN: &str = "boot";
+/// The feature that links a boot crate for boot core slot B.
+const SLOT_B_FEATURE: &str = "slot-b";
 
 /// Builds the parts and the app and writes the first-install files into
 /// `out`.

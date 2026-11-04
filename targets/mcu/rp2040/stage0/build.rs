@@ -1,12 +1,14 @@
-//! The boot LED and halt pattern come from the board definition:
-//! `DAGON_BOARD` names the board, else the MCU's default board
-//! (`board.rs`).
+//! The boot LED and halt pattern come from the board of the node whose
+//! boot folder `DAGON_BOOT_CRATE` names (`board.rs`, written by `dagon
+//! gen` in `boot/<id>/`); the build fails without it.
 
 use dagon_topology::defs::board_boot::HaltPattern;
 use dagon_topology::defs::codegen::boot_build;
 
 fn main() {
-    let b = boot_build(None);
+    let Some(b) = boot_build(None) else {
+        return;
+    };
     let boot = b.boot.unwrap_or_default();
     assert!(
         boot.halt.map(|h| h.pattern) != Some(HaltPattern::Code),

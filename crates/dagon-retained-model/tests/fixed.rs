@@ -16,6 +16,7 @@ use dagon_retained_model::world_record::{
     self as wr, Config, End::*, Op, RecordWorld, Stage, Ver::*,
 };
 use dagon_retained_model::world_topology::{self as wt, TopologyWorld};
+use dagon_retained_model::world_trial::{self as wtr, TrialWorld};
 
 const SEED: u64 = 0x5EED_F1C5;
 
@@ -937,4 +938,20 @@ fn regression_run_order_before_numbers() {
         b(V2, 2, 1, Next),
     ];
     assert!(check::<RecordWorld>(&c, &ops, 0x61bb_21c6_ccfb_6d86).is_ok());
+}
+
+/// Found by the trial world: a reset between the two stores of a trial
+/// cell update left a pair that counted 0, so the start went uncounted and
+/// a broken core could be tried for ever (C1). The cell now repeats one
+/// self-checking word and counts the larger of the two.
+#[test]
+fn regression_trial_cell_update_cut_between_its_words() {
+    let c = wtr::Config { max: 5 };
+    let ops = [
+        wtr::Op::SetPending { good: false },
+        wtr::Op::Boot {
+            fault: Some(wtr::Fault::Reset { at: 0 }),
+        },
+    ];
+    ok::<TrialWorld>(&c, &ops);
 }

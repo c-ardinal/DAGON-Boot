@@ -206,6 +206,11 @@ pub mod trial {
         }
     }
 
+    /// The cell holds what is written to it (`dagon_core::bootcore::cell_holds`).
+    pub fn holds() -> bool {
+        dagon_core::bootcore::cell_holds(read, write)
+    }
+
     const CTRL: *mut u32 = 0x4005_8000 as *mut u32;
     const LOAD: *mut u32 = 0x4005_8004 as *mut u32;
     const TICK: *mut u32 = 0x4005_802C as *mut u32;
@@ -215,18 +220,20 @@ pub mod trial {
     /// reset, so a tick is about 1 µs (it varies with the chip).
     const TICK_CYCLES: u32 = 6;
     const LOAD_MAX: u32 = 0x00FF_FFFF;
+    /// The counter runs down twice per tick (erratum RP2040-E1).
+    const COUNTS_PER_US: u32 = 2;
 
-    /// Starts the watchdog at its longest period (about 8 s on a nominal
-    /// ring oscillator: the counter runs down twice per tick, erratum
-    /// RP2040-E1) before stage0 jumps to a core on trial, so a core that
-    /// hangs before it takes the watchdog over is reset and its start
-    /// counted.
-    pub fn arm_watchdog() {
+    /// Starts the watchdog for `ms` (the definition's trial period; about,
+    /// as the ring oscillator varies) before stage0 jumps to a core on
+    /// trial, so a core that hangs before it takes the watchdog over is
+    /// reset and its start counted.
+    pub fn arm_watchdog(ms: u32) {
+        let load = ms.saturating_mul(1000 * COUNTS_PER_US).min(LOAD_MAX);
         // SAFETY: fixed RP2040 watchdog registers; the started core takes
         // the watchdog over (embassy-rp `Watchdog::start`).
         unsafe {
             TICK.write_volatile(TICK_ENABLE | TICK_CYCLES);
-            LOAD.write_volatile(LOAD_MAX);
+            LOAD.write_volatile(load);
             CTRL.write_volatile(CTRL_ENABLE);
         }
     }

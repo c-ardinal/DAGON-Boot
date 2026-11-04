@@ -4,7 +4,7 @@
 
 use dagon_agent::{SlotStore, StoreError, Transition};
 use dagon_core::boot::SlotLayout;
-use dagon_core::log::{Log, LogError, LogLayout, LogState, SlotRef};
+use dagon_core::log::{trial_room, Log, LogError, LogLayout, LogState, SlotRef};
 use dagon_format::header::{header_digest16, ImageHeader, HEADER_SIZE};
 use dagon_format::statelog::{kind, reason, slot};
 
@@ -33,6 +33,9 @@ pub struct KindSStore<F> {
     /// Boot core slots A/B (start, length), header inline; `None`: the
     /// MCU keeps none.
     cores: Option<[(u32, u32); 2]>,
+    /// The trial cell holds what is written to it; without it no boot core
+    /// is taken (stage0 could not count its starts).
+    cell_holds: bool,
     tail: Tail,
 }
 
@@ -45,15 +48,19 @@ impl<F: Flash> KindSStore<F> {
             log,
             slots,
             cores: None,
+            cell_holds: false,
             tail: Tail::default(),
         })
     }
 
     /// The boot core slots A/B (start, length) this store also receives
-    /// into; their records go to the same log.
-    pub fn with_cores(self, cores: [(u32, u32); 2]) -> Self {
+    /// into; their records go to the same log. `cell_holds`: the trial
+    /// cell holds what is written to it (`trial::holds`); without it the
+    /// slots report no capacity, so the agent refuses BOOTCORE.
+    pub fn with_cores(self, cores: [(u32, u32); 2], cell_holds: bool) -> Self {
         KindSStore {
             cores: Some(cores),
+            cell_holds,
             ..self
         }
     }
@@ -118,6 +125,12 @@ impl<F: Flash> KindSStore<F> {
             version,
             digest16: header_digest16(hdr),
         };
+        if k == kind::SLOT_PENDING {
+            // The trials then write into this room, never erasing.
+            self.log
+                .reserve(&mut self.flash, trial_room(crate::TRIAL_ATTEMPTS))
+                .map_err(|_| StoreError::Flash)?;
+        }
         let r = match t {
             target::BOOTCORE => self.log.append_core(&mut self.flash, k, at, reason::NONE),
             _ => self.log.append(&mut self.flash, k, at, reason::NONE),
@@ -149,6 +162,9 @@ impl<F: Flash> SlotStore for KindSStore<F> {
     }
 
     fn capacity(&self, t: u8, s: u8) -> u32 {
+        if t == target::BOOTCORE && !self.cell_holds {
+            return 0;
+        }
         self.slot(t, s).map_or(0, |(_, size)| size - HDR)
     }
 
@@ -252,6 +268,14 @@ impl<F: Flash> SlotStore for KindSStore<F> {
         _: &Transition,
     ) -> Result<(), StoreError> {
         self.append(target::APP, kind::CONFIRMED, s, header)
+    }
+
+    /// The log keeps room for the trials it starts (the boot stage never
+    /// erases).
+    fn keep_room(&mut self) -> Result<(), StoreError> {
+        self.log
+            .reserve(&mut self.flash, trial_room(crate::TRIAL_ATTEMPTS))
+            .map_err(|_| StoreError::Flash)
     }
 
     /// The boot core slots: the core settles its trial before it starts

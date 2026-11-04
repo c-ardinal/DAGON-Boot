@@ -16,7 +16,7 @@ pub mod rom;
 pub use dagon_romlink::{RomError, Stats as RomStats};
 pub use ops::{
     check_release, reason, ConfirmOutcome, Discovery, Event, NodeOutcome, NodeState, Outcome,
-    RecoverAssets, RecoverPath, CONFIRM_RETRY_MS, NODE_POLL_MS, NODE_TRIAL_MS,
+    RecoverAssets, RecoverPath, CONFIRM_RETRY_MS, NODE_POLL_MS, NODE_TRIAL_MAX_MS, NODE_TRIAL_MS,
 };
 
 use alloc::boxed::Box;
@@ -152,6 +152,10 @@ pub enum Error<E> {
     /// The new boot core did not take over: stage0 fell back to the core
     /// running `running` (the new one failed its own check or its image
     /// check; `reason` is the boot core log's state log reason code).
+    /// The node takes no boot core: it refused XFER_BEGIN with target
+    /// BOOTCORE as unsupported (its trial cell does not hold, so stage0
+    /// could not count a new core's starts).
+    BootCoreRefused,
     BootCoreRolledBack {
         expected: Version,
         running: Version,

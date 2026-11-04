@@ -25,6 +25,9 @@ bytes = 0x8_0000
 # stage0, two log faces and the conformance scratch.
 [layout]
 stage0 = { at = 0x0800_0000, size = 0x4000 }
+# stage0_verifies is left out (digest only): with the Ed25519 verifier
+# (ed25519-compact opt_size) stage0 links to about 23,960 bytes, past the
+# 16 KiB sector; without it, 7,672.
 app_log = { faces = [0x0800_4000, 0x0800_8000], face_size = 0x4000 }
 bootcore_log = { faces = [0x0800_4000, 0x0800_8000], face_size = 0x4000 }
 
@@ -89,9 +92,11 @@ pairs = [
 [links]
 up = ["i2c"]
 
+# Both periods cover two of the slowest erase (a 128 KiB sector), as the
+# definition check requires: the watchdog is fed between flash operations.
 [watchdog]
 kind = "iwdg"
-trial_ms = 4_000
+trial_ms = 8_000
 confirmed_ms = 8_000
 # The boot core starts a pending image this many times before it rolls back.
 trial_attempts = 3

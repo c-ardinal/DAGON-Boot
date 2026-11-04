@@ -39,6 +39,34 @@ extension abstains, the default applies.
 | `self_check` | app | `TrialInfo` -> `Health` | board package, libraries, user (first answer wins) | each call within `DECISION_BOUND_MS` (a later answer is ignored); `Pending` keeps the "state" status and the host retries | healthy | confirming a slot not on trial; confirming outside the `confirmed` transition |
 | `confirm_plan` | host | the deploy listing -> yes or no | the interactive user (terminal, page) or `--yes`; never actions or host extensions | until the user answers | ask | skipping the key check and image verification, done before the listing is shown |
 
+## Layer `boot`
+
+### Machine `boot_extensions`
+
+Boot-stage extension calls and their time limits.
+
+States: `Ready` (initial).
+
+| Kind | Code | Transition | Payload | Observed | Notes | Description |
+|---|---|---|---|---|---|---|
+| `boot.extension_overran` | 0xf0 | `overran`: Ready → Ready | `id: ExtId` (8 B), `budget_us: u32` (4 B), `us: u32` (4 B) | live |  | An extension's handler ran longer than its `budget_us` (the manifest's `max_run_us`); the boot went on with the same decision. |
+
+### Machine `sequence`
+
+The boot core's sequence from the armed watchdog to the jump or the halt. Its events reach the boot core's extensions as they happen; nothing an extension does changes the decision.
+
+States: `Started` (initial), `WatchdogArmed`, `LogRead`, `BeforeDecision`, `Chosen`, `NoImage`, `Jumping`, `Halted`.
+
+| Kind | Code | Transition | Payload | Observed | Notes | Description |
+|---|---|---|---|---|---|---|
+| `boot.watchdog_armed` | 0x01 | `watchdog_armed`: Started → WatchdogArmed | `period_ms: u32` (4 B) | live |  | The watchdog runs with the trial period; from here extensions run. |
+| `boot.log_read` | 0x02 | `log_read`: WatchdogArmed → LogRead | `ok: bool` (1 B), `pending: bool` (1 B), `confirmed: bool` (1 B), `attempts: u8` (1 B) | live |  | The state log was read (`ok: false`: no valid face). |
+| `boot.before_decision` | 0x03 | `before_decision`: LogRead → BeforeDecision | `pending: bool` (1 B), `confirmed: bool` (1 B), `attempts: u8` (1 B) | live |  | The last event before the decision is made. |
+| `boot.slot_chosen` | 0x04 | `slot_chosen`: BeforeDecision → Chosen | `slot: u8` (1 B), `trial: bool` (1 B) | live |  | The slot to start is final (`trial`: the pending slot on a counted attempt). |
+| `boot.no_image` | 0x05 | `no_image`: BeforeDecision → NoImage | – | live |  | No slot can be started. |
+| `boot.before_jump` | 0x06 | `before_jump`: Chosen → Jumping | `slot: u8` (1 B), `trial: bool` (1 B) | live |  | The last event before control leaves DAGON. |
+| `boot.halt` | 0x07 | `halt`: NoImage → Halted | – | live |  | The boot core stays here for good. |
+
 ## Layer `app`
 
 ### Machine `decisions`

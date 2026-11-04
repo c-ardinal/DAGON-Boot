@@ -8,7 +8,6 @@ use dagon_core::bootcore::{self, NoCore, Start};
 pub use dagon_core::bootcore::{MustReset, Settled};
 use dagon_core::log::SlotRef;
 use dagon_format::header::image_kind;
-use dagon_format::statelog::slot;
 use dagon_port::Flash;
 
 use crate::image::{self, Fail};
@@ -19,32 +18,30 @@ use crate::TRIAL_ATTEMPTS;
 /// at reset (`dagon_core::bootcore::choose`). Reads flash only.
 pub fn choose<F: Flash>(flash: &mut F, cell: [u32; 2]) -> Result<Start<u32>, NoCore<Fail>> {
     let st = bootcore::read_state(flash, &BL_LOG_LAYOUT).unwrap_or_default();
-    bootcore::choose(&st, cell, TRIAL_ATTEMPTS, |r| check(flash, r))
+    bootcore::choose(&st, cell, TRIAL_ATTEMPTS, |s, r| check(flash, s, r))
 }
 
-/// The core image `r` names (slot A, unchecked against a record, for
-/// `None`).
-fn check<F: Flash>(flash: &mut F, r: Option<&SlotRef>) -> Result<u32, Fail> {
-    let s = r.map_or(slot::A, |r| r.slot);
+/// The core image in slot `s`, against the record `r` when one names it.
+fn check<F: Flash>(flash: &mut F, s: u8, r: Option<&SlotRef>) -> Result<u32, Fail> {
     let base = *BL_SLOT.get(usize::from(s)).ok_or(Fail::Kind)?;
     image::check(flash, base, BL_SLOT_SIZE, s, r, image_kind::BOOTCORE)
 }
 
 /// The boot core running from slot `running` settles the boot core trial
-/// before it starts the app (`dagon_core::bootcore::settle_log`).
+/// before it starts the app (`dagon_core::bootcore::settle_log`); `cell`
+/// the trial cell's value and whether it holds.
 pub fn settle_core<F: Flash>(
     flash: &mut F,
     running: u8,
-    cell: [u32; 2],
+    (cell, holds): ([u32; 2], bool),
     healthy: bool,
 ) -> Result<Settled, MustReset> {
-    bootcore::settle_log(
-        flash,
-        &BL_LOG_LAYOUT,
-        running,
-        (cell, TRIAL_ATTEMPTS),
-        healthy,
-    )
+    let cell = bootcore::Cell {
+        value: cell,
+        max: TRIAL_ATTEMPTS,
+        holds,
+    };
+    bootcore::settle_log(flash, &BL_LOG_LAYOUT, running, cell, healthy)
 }
 
 #[cfg(test)]

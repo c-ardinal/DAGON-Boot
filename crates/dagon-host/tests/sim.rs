@@ -1061,6 +1061,20 @@ fn a_self_check_that_never_passes_fails_after_the_bounded_retries() {
     assert_eq!((st.active, st.slots[1].state), (0, SlotState::Reverted));
 }
 
+/// The host's trial periods are the builtin definitions' shortest and
+/// longest `[watchdog] trial_ms` of the nodes (MCUs without a coordinator).
+#[test]
+fn the_host_trial_periods_follow_the_definitions() {
+    let reg = dagon_topology::defs::Registry::builtin();
+    let trials: Vec<u32> = reg
+        .mcus()
+        .iter()
+        .filter_map(|m| m.watchdog.map(|w| w.trial_ms))
+        .collect();
+    assert_eq!(trials.iter().min(), Some(&dagon_host::NODE_TRIAL_MS));
+    assert_eq!(trials.iter().max(), Some(&dagon_host::NODE_TRIAL_MAX_MS));
+}
+
 // Boot core A/B of the hub through a release.
 
 fn hub_core(slot: u8, v: Version) -> Vec<u8> {

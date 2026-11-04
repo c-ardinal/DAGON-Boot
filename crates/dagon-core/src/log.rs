@@ -170,6 +170,16 @@ impl LogState {
     }
 }
 
+/// Records a log must have room for when an image is set pending, so the
+/// trials it starts complete without compacting (`max`: the boot attempts
+/// a trial gets). An APP trial writes up to `max` BOOT_ATTEMPT, one
+/// ROLLBACK and one CONFIRMED; a boot core trial one CONFIRMED or ROLLBACK;
+/// with both trials open in one log and the SLOT_PENDING itself, twice
+/// that bounds them.
+pub const fn trial_room(max: u8) -> u32 {
+    2 * (max as u32 + 3)
+}
+
 /// Where the two log faces live.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct LogLayout {
@@ -273,6 +283,47 @@ impl Log {
         reason: u8,
     ) -> Result<(), LogError> {
         self.append_for(flash, target::BOOTCORE, kind, at, reason)
+    }
+
+    /// Appends one record of target `t` into the room the active face has,
+    /// never compacting (never erasing): `LogError::Full` when it has none.
+    /// The boot path writes this way, so no erase runs under a trial
+    /// watchdog; [`Log::reserve`] made the room before the trial began.
+    pub fn append_in_place<F: Flash>(
+        &mut self,
+        flash: &mut F,
+        t: u8,
+        kind: u8,
+        at: SlotRef,
+        reason: u8,
+    ) -> Result<(), LogError> {
+        let addr = self.next.ok_or(LogError::Full)?;
+        let r = self.record(t, kind, at, reason);
+        flash.write(addr, &r.to_bytes())?;
+        self.fold(&r);
+        self.advance(addr);
+        Ok(())
+    }
+
+    /// Records the active face still takes.
+    pub fn room(&self) -> u32 {
+        self.next
+            .map_or(0, |a| (self.face_end() - a) / RECORD_SIZE as u32)
+    }
+
+    /// Makes the active face take `records` more records without
+    /// compacting, compacting now (outside any trial) when it would not.
+    /// The agent calls it before it sets an image pending.
+    pub fn reserve<F: Flash>(&mut self, flash: &mut F, records: u32) -> Result<(), LogError> {
+        if self.room() >= records {
+            return Ok(());
+        }
+        self.compact(flash)?;
+        if self.room() >= records {
+            Ok(())
+        } else {
+            Err(LogError::Full)
+        }
     }
 
     fn append_for<F: Flash>(

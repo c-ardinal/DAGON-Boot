@@ -9,8 +9,9 @@ use crate::layout::{
 };
 use crate::node::SharedFlash;
 use crate::watchdog::Watch;
+use crate::TRIAL_ATTEMPTS;
 use dagon_agent::{SlotStore, StoreError, Transition};
-use dagon_core::log::Log;
+use dagon_core::log::{trial_room, Log};
 use dagon_format::header::HEADER_SIZE;
 use dagon_format::statelog::{kind, slot};
 use dagon_port::Flash;
@@ -60,6 +61,11 @@ impl AppStore {
     fn append(&mut self, k: u8, slot: u8, header: &[u8; HEADER_SIZE]) -> Result<(), StoreError> {
         let at = image::ref_of(header, slot).ok_or(StoreError::Flash)?;
         let mut log = Log::load(&mut self.flash, &APP_LOG_LAYOUT).map_err(|_| StoreError::Flash)?;
+        if k == kind::SLOT_PENDING {
+            // The trial then writes into this room, never erasing.
+            log.reserve(&mut self.flash, trial_room(TRIAL_ATTEMPTS))
+                .map_err(|_| StoreError::Flash)?;
+        }
         log.append(&mut self.flash, k, at, 0)
             .map_err(|_| StoreError::Flash)
     }
@@ -73,7 +79,13 @@ impl SlotStore for AppStore {
         state.status(heads, ACTIVE, generation)
     }
 
+    /// No boot core capacity while the trial cell does not hold: stage0
+    /// could not count a new core's starts (the agent then refuses
+    /// BOOTCORE as unsupported).
     fn capacity(&self, t: u8, slot: u8) -> u32 {
+        if t == target::BOOTCORE && !crate::arm::trial::holds() {
+            return 0;
+        }
         region(t, slot).map_or(0, |(_, _, cap)| cap)
     }
 
@@ -146,6 +158,17 @@ impl SlotStore for AppStore {
         Ok(())
     }
 
+    /// Both logs keep room for the trials they start (the boot stage
+    /// never erases).
+    fn keep_room(&mut self) -> Result<(), StoreError> {
+        for layout in [&APP_LOG_LAYOUT, &BL_LOG_LAYOUT] {
+            let mut log = Log::load(&mut self.flash, layout).map_err(|_| StoreError::Flash)?;
+            log.reserve(&mut self.flash, trial_room(TRIAL_ATTEMPTS))
+                .map_err(|_| StoreError::Flash)?;
+        }
+        Ok(())
+    }
+
     /// The boot core slots: the boot core settles its trial before it
     /// starts the app, so the confirmed core is the one running (slot A,
     /// as stage0 starts it, while the log names none).
@@ -198,6 +221,8 @@ impl SlotStore for AppStore {
                 let at = image::ref_of(header, slot).ok_or(StoreError::Flash)?;
                 let mut log =
                     Log::load(&mut self.flash, &BL_LOG_LAYOUT).map_err(|_| StoreError::Flash)?;
+                log.reserve(&mut self.flash, trial_room(TRIAL_ATTEMPTS))
+                    .map_err(|_| StoreError::Flash)?;
                 log.append_core(&mut self.flash, kind::SLOT_PENDING, at, 0)
                     .map_err(|_| StoreError::Flash)
             }

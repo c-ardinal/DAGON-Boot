@@ -29,6 +29,9 @@ from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
 PROMPT = "continue? [y/N] "
+# dagon commands that can write to a board; cli() marks the run as written
+# before starting one, so no call site can forget.
+MUTATING = {"deploy", "apply", "rollback", "recover", "flash", "provision", "rescue"}
 
 LINE = re.compile(
     r"^(?P<id>[\w-]+): version (?P<version>\S+)(?P<trial> \(on trial\))?, mcu (?P<mcu>\S+), "
@@ -160,7 +163,7 @@ class Run:
         self.start = None
         self.good = None  # (release copy, version, sha256) last applied to every node
         self.start_state = None  # every node's status when the run began
-        self.wrote = False  # a write command has been started
+        self.wrote = False  # a MUTATING command has been started (set only by cli())
 
     # -- running the CLI ----------------------------------------------------
 
@@ -178,6 +181,8 @@ class Run:
         if config is not False:  # key gen, release build of a test key: no project config
             cmd += ["--config", str(config or self.project / "dagon.toml")]
         shown = " ".join(cmd)
+        if args[0] in MUTATING or args[:2] == ["topo", "push"]:
+            self.wrote = True
         t0 = now()
         p = subprocess.Popen(cmd, cwd=self.project, stdin=subprocess.PIPE,
                              stdout=subprocess.PIPE, stderr=subprocess.STDOUT, bufsize=0)
@@ -296,7 +301,6 @@ class Run:
             node, v = s["node"], s["of"]
             dgb = self.project / "out" / "deploy" / f"v{v}.dgb"
             expect(dgb.is_file(), f"no release {dgb}")
-            self.wrote = True
             rc, _, cmd, log = self.cli(["recover", node, "--release", str(dgb)], name)
             expect(rc == 0, f"recover rc={rc}")
             st = self.wait_settled({node: v}, f"{name}-after")
@@ -308,7 +312,6 @@ class Run:
         (rollback_target). Checks the node is on that version, confirmed, slot
         flipped, others unchanged."""
         want = rollback_target(before[node])
-        self.wrote = True
         rc, _, cmd, log = self.cli(["rollback", "--node", node], name)
         st = self.status(f"{name}-after")
         expect(rc == 0, f"rollback rc={rc}")
@@ -324,7 +327,6 @@ class Run:
         inter = (nodes[0], s["interrupt_at"]) if "interrupt_at" in s else None
         release = self.project / "out" / "deploy" / f"v{v}.dgb"
         args = ["deploy", *s.get("nodes", []), "--version", v, "--key", self.key]
-        self.wrote = True
         rc, text, cmd, log = self.cli(args, name, config=cfg, plan=(v, nodes, release),
                                       interrupt=inter)
         if mode == "ok":
@@ -405,10 +407,11 @@ class Run:
         to every node (only the recorded copy, unaltered), else each node's
         version at the start of the run (dagon rollback where the other slot
         holds it). Verifies every version. Returns the restore record."""
-        rec = {"time": now(), "release": self.good and str(self.good[0])}
-        if not self.wrote:
-            return rec | {"result": "ok", "note": "nothing written; nothing to restore",
-                          "status": self.last_status()}
+        rec = {"time": now(), "release": self.good and str(self.good[0]), "wrote": self.wrote}
+        if self.start_state is None:  # the start check failed: nothing ran
+            ok = not self.wrote
+            return rec | {"result": "ok" if ok else "FAILED: wrote without a start state",
+                          "note": "no start state", "status": self.last_status()}
         try:
             st = self.wait_settled({k: None for k in self.nodes}, "restore-wait")
             self.check_identity("restore")
@@ -442,6 +445,8 @@ class Run:
         rec["rollbacks"] = plan
         for k in plan:  # every node checked before the first write
             before = self.status(f"restore-{k}-before")
+            expect(rollback_target(before[k]) == start[k],
+                   f"{k}: other slot no longer holds the start version {start[k]}")
             self.rollback(k, before, f"restore-rollback-{k}")
         st = self.status("restore-after")
         bad = {k: core(st[k]) for k in self.nodes
@@ -713,8 +718,9 @@ def fake_dagon(argv):
         n["slots"]["AB"[other]][0] = "Confirmed"
         n["active"], n["version"] = other, n["slots"]["AB"[other]][1]
     elif args[0] == "apply":
-        v = json.loads(Path(args[1]).read_text(encoding="utf-8"))["version"]
-        for n in nodes.values():
+        rel = json.loads(Path(args[1]).read_text(encoding="utf-8"))
+        v = rel["version"]
+        for n in (nodes[k] for k in rel.get("nodes", nodes)):
             free = 1 - n["active"]
             n["slots"]["AB"[n["active"]]][0] = "Written"
             n["slots"]["AB"[free]] = ["Confirmed", v]
@@ -747,7 +753,6 @@ def selftest_restore():
                                    port_identity=lambda port: ident["pnp"])
             r = Run(a, desk)
             r.start_state = r.check_identity("start")
-            r.wrote = True
             return r
 
         def edit(f):
@@ -798,9 +803,25 @@ def selftest_restore():
         assert rec["result"] == "ok" and writes() == ["apply"], rec
         assert all(n["version"] == "6.6.6" for n in rec["status"].values())
 
-        r = fresh()
-        r.wrote = False
-        assert r.restore()["note"].startswith("nothing written") and writes() == []
+        r = fresh()  # nothing written, nothing changed: a read-only check
+        rec = r.restore()
+        assert rec["result"] == "ok" and not rec["wrote"] and writes() == [], rec
+
+        r = fresh()  # changed without a write by the harness: still restored
+        edit(partial)
+        rec = r.restore()
+        assert rec["result"] == "ok" and rec["rollbacks"] == ["seg"] and not rec["wrote"], rec
+
+        r = fresh()  # a refused-path apply that wrote seg after all
+        bad = tmp / "bad.dgb"
+        bad.write_text(json.dumps({"version": "2.0.66", "nodes": ["seg"]}))
+        edit(lambda st: None)
+        r.cli(["apply", str(bad)], "refused-but-wrote")
+        assert r.wrote and r.status("x")["seg"]["version"] == "2.0.66"
+        edit(lambda st: None)
+        rec = r.restore()
+        assert rec["result"] == "ok" and rec["rollbacks"] == ["seg"], rec
+        assert rec["status"]["seg"]["version"] == "2.0.1"
 
 
 def main():

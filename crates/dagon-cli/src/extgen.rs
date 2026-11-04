@@ -530,6 +530,12 @@ text_bytes = 2048
             let lines = write_nodes(reg, &base, &seg, &[], failed, &cfg(&["logger"])).unwrap();
             assert_eq!(lines.len(), 1, "{lines:?}");
             assert!(lines[0].contains("nodes/seg/dagon is a link"), "{lines:?}");
+            // dagon gen ends non-zero, naming the node and the reason.
+            let e = crate::scaffold::outcome(&lines).unwrap_err();
+            assert!(
+                e.contains("nodes/seg/dagon") && e.contains("is a link"),
+                "{e}"
+            );
             assert_eq!(std::fs::read_dir(base.join("src")).unwrap().count(), 1);
             assert!(base.join("src/user.rs").is_file());
         }

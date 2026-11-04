@@ -235,7 +235,7 @@ fn three_trials_then_rollback() {
     );
     let s = state(&mut m);
     assert_eq!(s.pending, None);
-    assert_eq!(s.reverted, Some(B));
+    assert_eq!(s.reverted.map(|r| r.slot), Some(B));
     assert_eq!(s.last_reason, reason::TRIAL_EXHAUSTED);
     let writes = m.writes;
     assert_eq!(

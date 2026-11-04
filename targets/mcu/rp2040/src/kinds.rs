@@ -1,14 +1,7 @@
 //! The link kinds this package offers, by direction, for RP2040 (always a 親機):
 //!
-//! | Kind | Up | Down |
-//! |---|---|---|
-//! | `usb-cdc` | Yes | NotYet |
-//! | `uart` | NotYet | Yes |
-//! | `i2c` | NotYet | Yes |
-//! | `ble` | NotYet | NotYet |
-//! | `wifi-tcp` | NotYet | NotYet |
-//! | `ethernet` | NotYet | NotYet |
-//! | `can` | NotYet | NotYet |
+//! README.md, "Links", shows the matrix (generated from `LINK_KINDS`;
+//! a kind the table leaves out is `No`).
 //!
 //! `NotYet`: the 構成 may name it, but a project asking for it does not
 //! build yet (`require_uplink` / `require_downlinks` say which hop).

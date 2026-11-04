@@ -3,6 +3,9 @@
 //! inactive slot, trial, CONFIRM, then SET_PENDING back to the previously
 //! confirmed slot.
 
+use std::cell::RefCell;
+use std::rc::Rc;
+
 use dagon_agent::{Agent, Config, SlotStore, Transition};
 use dagon_core::boot::{decide, BootConfig, Decision, SlotLayout};
 use dagon_core::log::{Log, LogLayout, SlotRef};
@@ -99,6 +102,26 @@ impl Flash for Mem {
     }
 }
 
+/// The flash as the node and the test bench both see it (the bench plays
+/// the boot core and inspects the bytes).
+#[derive(Clone)]
+struct Shared(Rc<RefCell<Mem>>);
+
+impl Flash for Shared {
+    fn geometry(&self) -> &[FlashRegion] {
+        &GEOMETRY
+    }
+    fn read(&mut self, addr: u32, buf: &mut [u8]) -> Result<(), FlashError> {
+        self.0.borrow_mut().read(addr, buf)
+    }
+    fn erase(&mut self, addr: u32, len: u32) -> Result<(), FlashError> {
+        self.0.borrow_mut().erase(addr, len)
+    }
+    fn write(&mut self, addr: u32, data: &[u8]) -> Result<(), FlashError> {
+        self.0.borrow_mut().write(addr, data)
+    }
+}
+
 fn keypair() -> KeyPair {
     KeyPair::from_seed(Seed::new(SEED))
 }
@@ -161,6 +184,7 @@ fn config() -> Config {
         role: role::NODE,
         mode: mode::APP,
         max_payload: max_payload::I2C as u16,
+        trial_attempts: 3,
     }
 }
 
@@ -180,24 +204,33 @@ fn chain() -> Chain {
 }
 
 struct Node {
-    agent: Agent<KindSStore<Mem>, Chain>,
+    agent: Agent<KindSStore<Shared>, Chain>,
+    flash: Shared,
     seq: u8,
 }
 
 impl Node {
     /// Reset: the boot core decides, then the app starts its agent.
-    fn boot(mut m: Mem) -> (Node, Decision) {
+    fn boot(m: Mem) -> (Node, Decision) {
+        Node::boot_shared(Shared(Rc::new(RefCell::new(m))))
+    }
+
+    fn boot_shared(flash: Shared) -> (Node, Decision) {
         let cfg = BootConfig {
             pubkey: *keypair().pk,
             mcu_id: mcu_id::STM32F401XE,
             target_tag: TAG,
             max_attempts: 3,
         };
-        let mut log = Log::load(&mut m, &LOG).unwrap();
-        let d = decide(&mut m, &mut log, &SLOTS, &cfg);
-        let store = KindSStore::load(m, &LOG, SLOTS).unwrap();
+        let d = {
+            let m = &mut *flash.0.borrow_mut();
+            let mut log = Log::load(m, &LOG).unwrap();
+            decide(m, &mut log, &SLOTS, &cfg)
+        };
+        let store = KindSStore::load(flash.clone(), &LOG, SLOTS).unwrap();
         let node = Node {
             agent: Agent::new(config(), store, chain()),
+            flash,
             seq: 0,
         };
         (node, d)
@@ -206,8 +239,7 @@ impl Node {
     fn reboot(mut self) -> (Node, Decision) {
         let (st, _, reboot) = self.call(Cmd::Reboot, &[reboot_mode::NORMAL]);
         assert_eq!((st, reboot), (Status::Ok, true));
-        let m = std::mem::take(self.agent.store().flash());
-        Node::boot(m)
+        Node::boot_shared(self.flash)
     }
 
     fn call(&mut self, cmd: Cmd, payload: &[u8]) -> (Status, Vec<u8>, bool) {
@@ -268,8 +300,14 @@ impl Node {
         self.call(Cmd::SetPending, &p[..n]).0
     }
 
+    /// STATUS as a fresh store reads it from the flash; the agent's view
+    /// agrees.
     fn status(&mut self) -> StatusResp {
-        self.agent.store().status()
+        let st = KindSStore::load(self.flash.clone(), &LOG, SLOTS)
+            .unwrap()
+            .status();
+        assert_eq!(*self.agent.images().status(), st);
+        st
     }
 
     fn hello(&mut self) -> HelloResp {
@@ -337,8 +375,7 @@ fn update_confirm_then_back_to_previous_version() {
 fn erase_covers_header_and_body_units_only() {
     let (mut n, _) = Node::boot(provisioned());
     assert_eq!(n.transfer(B, &image(B, 1)), Status::Ok);
-    let m = n.agent.store().flash();
-    assert_eq!(m.erases, [(SLOTS.slots[1], 0x2_0000)]);
+    assert_eq!(n.flash.0.borrow().erases, [(SLOTS.slots[1], 0x2_0000)]);
 }
 
 #[test]
@@ -350,8 +387,7 @@ fn unconfirmed_trial_rolls_back_to_confirmed_slot() {
     assert_eq!(booted(d), (B, true));
     // Trial watchdog resets without CONFIRM, three times.
     for _ in 0..3 {
-        let m = std::mem::take(n.agent.store().flash());
-        let (next, d) = Node::boot(m);
+        let (next, d) = Node::boot_shared(n.flash);
         n = next;
         if booted(d) == (A, false) {
             let st = n.status();
@@ -363,11 +399,28 @@ fn unconfirmed_trial_rolls_back_to_confirmed_slot() {
     panic!("no rollback");
 }
 
+/// A new image received into the rolled-back slot is written, not
+/// reverted: the rolled-back marker names the image it rolled back.
+#[test]
+fn new_image_in_the_rolled_back_slot_is_written() {
+    let (mut n, _) = Node::boot(provisioned());
+    assert_eq!(n.transfer(B, &image(B, 1)), Status::Ok);
+    assert_eq!(n.set_pending(B), Status::Ok);
+    let (mut n, _) = n.reboot();
+    while n.status().slots[B as usize].state != SlotState::Reverted {
+        n = Node::boot_shared(n.flash).0;
+    }
+    assert_eq!(n.transfer(B, &image(B, 2)), Status::Ok);
+    let st = n.status();
+    assert_eq!(st.slots[B as usize].state, SlotState::Written);
+    assert_eq!(st.slots[B as usize].version, Version::new(1, 2, 0));
+}
+
 #[test]
 fn topology_target_is_unsupported() {
-    let (mut n, _) = Node::boot(provisioned());
-    assert_eq!(n.agent.store().capacity(target::TOPOLOGY, 0), 0);
-    assert_eq!(n.agent.store().capacity(target::APP, 2), 0);
+    let s = KindSStore::load(provisioned(), &LOG, SLOTS).unwrap();
+    assert_eq!(s.capacity(target::TOPOLOGY, 0), 0);
+    assert_eq!(s.capacity(target::APP, 2), 0);
 }
 
 #[test]

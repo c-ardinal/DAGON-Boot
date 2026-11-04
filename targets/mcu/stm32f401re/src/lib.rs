@@ -2,7 +2,7 @@
 //!
 //! - Always (host-testable): the flash [`layout`], the kind S slot store
 //!   behind dagon-agent ([`KindSStore`]), the I2C target [`mailbox`], and
-//!   the conformance scratch slot rule.
+//!   the conformance scratch.
 //! - `hal` (embassy-stm32): clocks ([`clocks`]), the flash port
 //!   ([`flash`]), the liveness-gated IWDG ([`watchdog`]); the verifying key
 //!   embedded at build time ([`PUBKEY`], [`TEST_KEY`]).
@@ -40,6 +40,12 @@ pub use node::BoardDef;
 
 pub use dagon_mcu_common::{liveness, tag};
 
+// The constants this package's MCU definition states (`dagon-mcu.toml`):
+// `TRIAL_ATTEMPTS`, `MASKED_MAX_US` (`None` while unmeasured), `ERASE_UNIT`,
+// `ERASE_UNIT_MAX_MS`, the `_KNOWN` flags (checked against their source),
+// `CONFORM_SCRATCH`. The boot stage and the app layer read these.
+include!(concat!(env!("OUT_DIR"), "/definition.rs"));
+
 /// This node's image target tag, from `DAGON_TARGET_TAG` at build time
 /// (empty if unset). The boot core accepts only images with this tag, and
 /// the node's agent announces it; a generated project sets it in its
@@ -68,66 +74,16 @@ pub const FLASH_MAP: &str = "f401-default";
 #[cfg(feature = "hal")]
 include!(concat!(env!("OUT_DIR"), "/pubkey.rs"));
 
-use dagon_core::boot::SlotLayout;
-use dagon_core::log::LogState;
-
-/// Scratch address when no slot may be destroyed: outside the flash, so the
-/// conformance erase/write tests fail ("outside flash") without erasing.
+/// Scratch address when the definition names none: outside the flash, so
+/// the conformance erase/write tests fail ("outside flash") without erasing.
 pub const NO_SCRATCH: u32 = 0xFFFF_FFFF;
 
-/// The APP slot a conformance build may destroy as scratch: neither running,
-/// nor confirmed, nor holding the pending (staged or on trial) image. `None`
-/// on trial and while an update waits for its first boot.
-pub fn scratch_slot(state: &LogState, running: u8) -> Option<u8> {
-    let held = [state.confirmed, state.pending].map(|r| r.map(|r| r.slot));
-    (0..2u8).find(|&s| s != running && !held.contains(&Some(s)))
-}
-
-/// Start of the scratch slot, or [`NO_SCRATCH`].
-pub fn scratch_addr(state: &LogState, running: u8, slots: &SlotLayout) -> u32 {
-    scratch_slot(state, running).map_or(NO_SCRATCH, |s| slots.slots[s as usize])
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use dagon_core::log::SlotRef;
-    use dagon_format::Version;
-
-    fn at(slot: u8) -> Option<SlotRef> {
-        Some(SlotRef {
-            slot,
-            version: Version::default(),
-            digest16: [0; 16],
-        })
-    }
-
-    #[test]
-    fn scratch_is_never_running_or_confirmed() {
-        let confirmed_a = LogState {
-            confirmed: at(0),
-            ..LogState::default()
-        };
-        assert_eq!(scratch_slot(&confirmed_a, 0), Some(1));
-        let confirmed_b = LogState {
-            confirmed: at(1),
-            ..LogState::default()
-        };
-        assert_eq!(scratch_slot(&confirmed_b, 1), Some(0));
-        // Trial of B with A confirmed: no slot to spare.
-        let trial = LogState {
-            confirmed: at(0),
-            pending: at(1),
-            attempts: 1,
-            ..LogState::default()
-        };
-        assert_eq!(scratch_slot(&trial, 1), None);
-        // B staged as pending, not started yet: it must survive too.
-        let staged = LogState {
-            confirmed: at(0),
-            pending: at(1),
-            ..LogState::default()
-        };
-        assert_eq!(scratch_slot(&staged, 0), None);
+/// Start of the flash a conformance build erases and writes: the
+/// definition's `[conformance] scratch` (no image, header or log is there),
+/// or [`NO_SCRATCH`].
+pub const fn conform_scratch() -> u32 {
+    match CONFORM_SCRATCH {
+        Some((at, _)) => at,
+        None => NO_SCRATCH,
     }
 }

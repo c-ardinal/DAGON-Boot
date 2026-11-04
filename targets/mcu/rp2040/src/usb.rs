@@ -20,7 +20,7 @@ use static_cell::StaticCell;
 
 use crate::frames::FrameReader;
 use crate::watchdog::Watch;
-use dagon_mcu_common::link::{Link, LinkError, Reconnect};
+use dagon_mcu_common::link::{Kind, Link, LinkError, Reconnect};
 use dagon_mcu_common::serve::{serve, Exit, ServeHost};
 
 // This package owns the USB interrupt: apps must not bind USBCTRL_IRQ.
@@ -114,6 +114,10 @@ impl Link for CdcLink {
         Reconnect::Reenumerates
     }
 
+    fn kind(&self) -> Kind {
+        Kind::UsbCdc
+    }
+
     /// Waits for the next complete frame from the host (never times out).
     async fn read_frame(&mut self) -> Result<&[u8], LinkError> {
         if self.last > 0 {
@@ -186,10 +190,17 @@ impl<S: SlotStore, X: AppChain> ServeHost<S, X> for GuardHost<'_> {
     fn busy(&mut self) {
         self.watch.busy(self.task);
     }
+    fn feed(&mut self) {
+        self.watch.feed();
+    }
+    async fn wait_ms(&mut self, ms: u32) {
+        Timer::after_millis(ms.into()).await;
+    }
 }
 
 /// Serves `agent` over `link` (any [`Link`]) forever; REBOOT resets the
-/// chip after the reply has left.
+/// chip after the reply has left and the delay `allow_reboot_now` asked
+/// for.
 pub async fn serve_agent<L: Link, S: SlotStore, X: AppChain>(
     mut link: L,
     mut agent: Agent<S, X>,

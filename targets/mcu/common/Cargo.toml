@@ -16,6 +16,8 @@ dagon-format = { path = "../../../crates/dagon-format" }
 dagon-port = { path = "../../../crates/dagon-port" }
 dagon-proto = { path = "../../../crates/dagon-proto" }
 critical-section = "1"
+# SharedFlash: a lock taken without masking interrupts for the operation.
+embassy-sync = "0.8"
 
 [dev-dependencies]
 critical-section = { version = "1", features = ["std"] }

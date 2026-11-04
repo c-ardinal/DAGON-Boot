@@ -70,6 +70,13 @@ pub(super) fn isolated_mcu() -> String {
 kind = "iwdg"
 trial_ms = 4_000
 confirmed_ms = 8_000
+trial_attempts = 3
+
+[execution]
+masked_max_us = 50
+flash_op = "fetch-stall"
+erase_unit = 0x4000
+erase_unit_max_ms = 1_000
 
 [isolation]
 level = "mpu"
@@ -331,6 +338,50 @@ fn the_record_lies_inside_ram_within_its_limit() {
     }
     let e = mcu_err(&isolated("trial_ms = 4_000", "trial_ms = 0"));
     assert!(e.contains("[watchdog driver"), "{e}");
+    let e = mcu_err(&isolated("trial_attempts = 3", "trial_attempts = 0"));
+    assert!(e.contains("trial_attempts must be above 0"), "{e}");
+}
+
+/// `[execution]`: one erase fits between two feeds; `[conformance]`: the
+/// scratch never touches an image slot.
+#[test]
+fn execution_budgets_and_conformance_scratch_are_checked() {
+    let with = |execution: &str, conformance: &str| {
+        isolated(
+            "erase_unit_max_ms = 1_000
+",
+            &format!(
+                "erase_unit_max_ms = {execution}
+
+[conformance]
+scratch = {conformance}
+"
+            ),
+        )
+    };
+    let free = "{ at = 0x0010_A000, size = 0x1000 }";
+    parse_mcu_text(&with("1_000", free), &[]).unwrap();
+    let e = mcu_err(&with("8_000", free));
+    assert!(e.contains("below watchdog.confirmed_ms 8000"), "{e}");
+    let slot = parse_mcu_text(&with("1_000", free), &[]).unwrap().slots[0].start;
+    let e = mcu_err(&with(
+        "1_000",
+        &format!("{{ at = {slot:#x}, size = 0x100 }}"),
+    ));
+    assert!(e.contains("overlaps a slot"), "{e}");
+    let e = mcu_err(&with("1_000", "{ at = 0x7000_0000, size = 0x100 }"));
+    assert!(e.contains("outside the default flash map"), "{e}");
+    // Facts not yet established: an unverified value is still checked, an
+    // unmeasured erase time is refused (the watchdog check needs one).
+    let m = parse_mcu_text(&with("{ unverified = 1_000 }", free), &[]).unwrap();
+    assert!(!m.execution.unwrap().erase_unit_max_ms.is_known());
+    let e = mcu_err(&with("{ unverified = 9_000 }", free));
+    assert!(e.contains("below watchdog.confirmed_ms"), "{e}");
+    let e = mcu_err(&with("\"unmeasured\"", free));
+    assert!(e.contains("needs a value"), "{e}");
+    let unmeasured = isolated("masked_max_us = 50", "masked_max_us = \"unmeasured\"");
+    let m = parse_mcu_text(&unmeasured, &[]).unwrap();
+    assert_eq!(m.execution.unwrap().masked_max_us.value(), None);
 }
 
 fn board(text: &str) -> BoardDef {

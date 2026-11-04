@@ -5,6 +5,13 @@ license = "MIT OR Apache-2.0"
 version = "0.1.0"
 publish = false
 
+# Firmware clippy runs in CI (scripts/ci_crates.py --firmware-lint): the
+# masking rule of the execution model applies to the boot images too.
+# DAGON_TARGET_TAG names which images this boot stage accepts; its value
+# does not change the code, so the lint uses a neutral one.
+[package.metadata.dagon]
+lint = { features = [""], env = { DAGON_TARGET_TAG = "lint" } }
+
 # Standalone: built for thumbv7em only, so it stays out of the host workspace.
 # Its memory.x and verifying key come from dagon-mcu-stm32f401re.
 [workspace]

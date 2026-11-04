@@ -71,6 +71,8 @@ impl ImageView {
 /// The slot store behind the image lifecycle machines.
 pub(crate) struct ImageStore<S> {
     store: S,
+    /// Boots the boot core gives a trial (`trial_started`'s `max`).
+    max: u8,
     app: [image::Machine; 2],
     topology: image::Machine,
     view: ImageView,
@@ -101,10 +103,11 @@ pub(crate) fn store_status(e: StoreError) -> Status {
 
 impl<S: SlotStore> ImageStore<S> {
     /// Takes the store and brings each slot's machine to the state the
-    /// store reports.
-    pub(crate) fn open(store: S) -> Self {
+    /// store reports; `max` is the boot core's trial attempt limit.
+    pub(crate) fn open(store: S, max: u8) -> Self {
         let mut images = ImageStore {
             store,
+            max,
             view: ImageView {
                 status: StatusResp::default(),
                 slots: [image::State::Empty; 2],
@@ -125,7 +128,14 @@ impl<S: SlotStore> ImageStore<S> {
         let mut silent = compose_unpublished(Layer::App, Nop, Nop);
         for (s, m) in (0u8..).zip(app.iter_mut()) {
             let info = status.slots[usize::from(s)];
-            reach(m, &mut silent, s, info.state, info.version, &status);
+            reach(
+                m,
+                &mut silent,
+                (s, self.max),
+                info.state,
+                info.version,
+                &status,
+            );
         }
         self.app = app;
         self.topology = image::Machine::new();
@@ -144,6 +154,7 @@ impl<S: SlotStore> ImageStore<S> {
                     slot: s,
                     version: info.version,
                     attempt: st.attempts,
+                    max: self.max,
                 }),
                 image::State::Reverted => Some(&image::RolledBack {
                     from: s,
@@ -170,9 +181,8 @@ impl<S: SlotStore> ImageStore<S> {
         &self.view
     }
 
-    /// The store, for the board's other resources. Its `SlotStore`
-    /// mutators need a [`Transition`], which this crate makes only inside
-    /// a transition.
+    /// The store, for the fold test's boot core.
+    #[cfg(test)]
     pub(crate) fn store(&mut self) -> &mut S {
         &mut self.store
     }
@@ -380,7 +390,7 @@ impl<S: SlotStore> ImageStore<S> {
 fn reach(
     m: &mut image::Machine,
     out: &mut impl Sink,
-    slot: u8,
+    (slot, max): (u8, u8),
     state: SlotState,
     version: Version,
     st: &StatusResp,
@@ -398,7 +408,7 @@ fn reach(
         let r = match step {
             I::Written => m.written(out, target::APP, slot, version),
             I::Pending => m.pending_set(out, slot, version),
-            I::Trial => m.trial_started(out, slot, version, st.attempts),
+            I::Trial => m.trial_started(out, slot, version, st.attempts, max),
             I::Confirmed => m.confirmed(out, slot, version),
             I::Reverted => m.rolled_back(out, slot, st.active, st.last_reason),
             I::Empty => Ok(()),

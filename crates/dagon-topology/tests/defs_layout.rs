@@ -100,10 +100,16 @@ fn stm32f401re_matches_its_layout_and_memory_x() {
         (w.trial_ms, w.confirmed_ms),
         (TRIAL_WDT_MS, CONFIRMED_WDT_MS)
     );
-    // The port's writable regions are exactly the log faces and APP slots.
+    // The port's writable regions are exactly the log faces, the
+    // conformance scratch and the APP slots.
     assert_eq!(FLASH_REGIONS[0].start, log.faces[0]);
     assert_eq!(FLASH_REGIONS[0].len, 2 * log.face_size);
-    assert_eq!(FLASH_REGIONS[1].start, SLOTS.slots[0]);
+    let scratch = m.conformance.unwrap().scratch;
+    assert_eq!(
+        (FLASH_REGIONS[1].start, FLASH_REGIONS[1].len),
+        (scratch.at, scratch.size)
+    );
+    assert_eq!(FLASH_REGIONS[2].start, SLOTS.slots[0]);
 }
 
 #[test]

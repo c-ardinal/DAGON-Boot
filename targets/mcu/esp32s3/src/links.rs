@@ -1,14 +1,7 @@
 //! The link kinds this package offers, by direction, for ESP32-S3 (a 子機: no downlinks):
 //!
-//! | Kind | Up | Down |
-//! |---|---|---|
-//! | `usb-cdc` | Yes | No |
-//! | `uart` | Yes | No |
-//! | `i2c` | NotYet | No |
-//! | `ble` | NotYet | No |
-//! | `wifi-tcp` | NotYet | No |
-//! | `ethernet` | NotYet | No |
-//! | `can` | NotYet | No |
+//! README.md, "Links", shows the matrix (generated from `LINK_KINDS`;
+//! a kind the table leaves out is `No`).
 //!
 //! `NotYet`: the 構成 may name it, but a project asking for it does not
 //! build yet (`require_uplink` / `require_downlinks` say which hop).
@@ -70,7 +63,7 @@ mod node_links {
     use esp_hal::usb::usb_serial_jtag::UsbSerialJtag;
     use esp_hal::Async;
 
-    use super::{Link, LinkError, Reconnect};
+    use super::{Kind, Link, LinkError, Reconnect};
     use crate::framer::{FrameCutter, MAX_UART_FRAME};
     use crate::node::now_ms;
 
@@ -161,6 +154,10 @@ mod node_links {
             Reconnect::Persistent
         }
 
+        fn kind(&self) -> Kind {
+            Kind::Uart
+        }
+
         async fn read_frame(&mut self) -> Result<&[u8], LinkError> {
             loop {
                 if let Some(n) = self.rx.next() {
@@ -218,6 +215,10 @@ mod node_links {
 
         fn reconnect(&self) -> Reconnect {
             Reconnect::Reenumerates
+        }
+
+        fn kind(&self) -> Kind {
+            Kind::UsbCdc
         }
 
         async fn read_frame(&mut self) -> Result<&[u8], LinkError> {

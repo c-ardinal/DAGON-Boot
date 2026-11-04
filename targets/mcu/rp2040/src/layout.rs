@@ -34,8 +34,6 @@ pub const HEADER_LEN: u32 = 512;
 
 pub const LOG_FACE_SIZE: u32 = SECTOR;
 
-/// Trial boots before the boot core rolls back.
-pub const MAX_ATTEMPTS: u8 = 3;
 /// Watchdog period for every boot (below the RP2040 limit of 8.388 s).
 pub const WDT_MS: u32 = 8_000;
 

@@ -2,6 +2,8 @@
 //! in-memory slot store and flash, and a simulated boot core (trial,
 //! watchdog, rollback after 3 attempts).
 
+use std::cell::RefCell;
+
 use dagon_agent::{Agent, Config, SlotStore, StoreError, Transition};
 use dagon_conform::node::{self, NodeSetup, RESPONSE_MAX};
 use dagon_conform::pc::{link_max_payload, Channel, Images, NoAnswer, Runner, SetupError};
@@ -295,7 +297,9 @@ fn chain() -> Chain {
 
 struct FakeNode {
     cfg: Config,
-    agent: Agent<Mem, Chain>,
+    /// The slot store, shared with the bench's boot core.
+    mem: &'static RefCell<Mem>,
+    agent: Agent<&'static RefCell<Mem>, Chain>,
     flash: MemFlash,
     max_payload: usize,
     faults: Faults,
@@ -318,11 +322,14 @@ impl FakeNode {
             role: role::NODE,
             mode: mode::APP,
             max_payload: max_payload as u16,
+            trial_attempts: MAX_ATTEMPTS,
         };
         let mut flash = MemFlash::new();
         flash.erase_works = !faults.erase_does_nothing;
+        let mem: &'static RefCell<Mem> = Box::leak(Box::new(RefCell::new(Mem::new())));
         FakeNode {
-            agent: Agent::new(cfg.clone(), Mem::new(), chain()),
+            agent: Agent::new(cfg.clone(), mem, chain()),
+            mem,
             cfg,
             flash,
             max_payload,
@@ -339,7 +346,7 @@ impl FakeNode {
     /// Boot core decision on every reset.
     fn boot(&mut self) {
         self.reboots += 1;
-        let mut mem = std::mem::replace(self.agent.store(), Mem::new());
+        let mut mem = self.mem.borrow_mut();
         let lost = mem.last_confirm.take();
         let st = &mut mem.status;
         if let (true, Some((slot, old))) = (self.faults.confirm_not_persisted, lost) {
@@ -375,13 +382,14 @@ impl FakeNode {
         } else {
             self.now + BOOT_MS
         };
-        self.agent = Agent::new(self.cfg.clone(), mem, chain());
+        drop(mem);
+        self.agent = Agent::new(self.cfg.clone(), self.mem, chain());
     }
 
     /// Rewrites the agent's answer for the injected faults.
     fn misbehave(&mut self, cmd: Cmd, req: &[u8], body: &mut Vec<u8>) {
         let f = self.faults;
-        let active = self.agent.store().status.active;
+        let active = self.mem.borrow().status.active;
         match (cmd, body[0]) {
             (Cmd::XferBegin, s)
                 if f.begin_active_accepted
@@ -407,7 +415,7 @@ impl FakeNode {
     /// Trial watchdog of an app that never confirms.
     fn tick(&mut self) {
         loop {
-            let st = self.agent.store().status;
+            let st = self.mem.borrow().status;
             let a = st.slots[st.active as usize];
             let fires = a.state == SlotState::Trying
                 && a.version == V_NOCONF
@@ -533,13 +541,13 @@ fn twelve_of_twelve_over_uart_and_again_from_the_new_slot() {
     let mut n = FakeNode::new(LinkKind::Uart, Faults::default());
     let r = run(&mut n, LinkKind::Uart);
     assert_all_pass(&r);
-    let st = n.agent.store().status;
+    let st = n.mem.borrow().status;
     assert_eq!((st.active, st.confirmed), (1, 1));
     assert!(n.reboots >= 4 + MAX_ATTEMPTS as u32);
     // A second iteration starts from slot B and must pass too.
     let r2 = run(&mut n, LinkKind::Uart);
     assert_all_pass(&r2);
-    assert_eq!(n.agent.store().status.active, 0);
+    assert_eq!(n.mem.borrow().status.active, 0);
 }
 
 #[test]

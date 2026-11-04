@@ -321,13 +321,17 @@ impl WatchdogKind {
     }
 }
 
-/// `[watchdog]`: the periods DAGON arms on trial and once confirmed.
+/// `[watchdog]`: the periods DAGON arms on trial and once confirmed, and
+/// how many boots an image on trial gets.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Watchdog {
     pub kind: WatchdogKind,
     pub trial_ms: u32,
     pub confirmed_ms: u32,
+    /// Boots the boot stage gives a pending image before it rolls back
+    /// (the boot core's limit, or the vendor second stage's).
+    pub trial_attempts: u8,
 }
 
 impl Watchdog {
@@ -1020,6 +1024,9 @@ pub(super) fn watchdog(m: &McuDef) -> Result<(), String> {
     let Some(w) = &m.watchdog else { return Ok(()) };
     fail(w.trial_ms == 0 || w.confirmed_ms == 0, || {
         "watchdog.trial_ms and confirmed_ms must be above 0".into()
+    })?;
+    fail(w.trial_attempts == 0, || {
+        "watchdog.trial_attempts must be above 0".into()
     })
 }
 

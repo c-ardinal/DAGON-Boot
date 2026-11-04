@@ -14,18 +14,22 @@
 //!   the DAGON wire protocol ([`Agent::handle`]) maps its requests onto them.
 //! - [`requests`]: what the agent answered or refused, and the decision
 //!   points it asked.
+//! - [`node`]: the node's start and its links, reported by the MCU
+//!   package's start and serving loop.
 //!
 //! Applications read the slots through [`Agent::images`] and confirm their
 //! own trial with [`Agent::confirm_own`]; extensions answer the decision
 //! points (`accept_update`, `allow_reboot_now`, `self_check`) through the
-//! chain.
+//! chain. The slot store stays the agent's: the MCU package keeps the
+//! board's other resources (a flash reader, the watchdog) in handles of
+//! its own.
 #![no_std]
 #![forbid(unsafe_code)]
 
 mod agent;
 mod images;
 
-pub use agent::{Agent, AppChain, Reply, IDLE_TIMEOUT_MS};
+pub use agent::{reply_status, Agent, AppChain, Reply, IDLE_TIMEOUT_MS};
 pub use images::{ImageView, Transition};
 
 use dagon_events::Compact;
@@ -68,9 +72,9 @@ dagon_events::state_machine! {
                 emits PendingMoved = 0x23 { from: u8, to: u8 }
                 observe(live, host);
             /// The boot core started the pending slot on trial (`attempt`
-            /// boots so far).
-            trial_started(slot: u8, version: Version, attempt: u8): Pending | Trial => Trial
-                emits TrialStarted = 0x24 { slot: u8, version: Version, attempt: u8 }
+            /// boots so far, of the `max` its boot core allows).
+            trial_started(slot: u8, version: Version, attempt: u8, max: u8): Pending | Trial => Trial
+                emits TrialStarted = 0x24 { slot: u8, version: Version, attempt: u8, max: u8 }
                 observe(replay, host);
             /// The slot on trial was confirmed after its self-check.
             confirmed(slot: u8, version: Version): Trial => Confirmed
@@ -133,6 +137,54 @@ dagon_events::state_machine! {
             aborted(cause: AbortCause): Header | Body => Idle
                 emits TransferAborted = 0x15 { cause: AbortCause }
                 observe(live, host);
+        }
+    }
+
+    /// The node's start and its DAGON links: what the MCU package's start
+    /// and serving loop report through the agent.
+    pub machine node in App {
+        initial Off;
+        states { Off, Up }
+        transitions {
+            /// DAGON's start began (the agent was made, or restarted); the
+            /// slot store is read next. `tag`: the node's image target tag
+            /// as a name digest (`NameDigest`: the compact form "digest
+            /// prefix", made as MCU identities are); a host resolves it
+            /// from the topology's node tags.
+            starting(tag: NameDigest, role: u8, mode: u8): * => Up
+                emits Starting = 0x01 { tag: NameDigest, role: u8, mode: u8 }
+                observe(live);
+            /// The start took over the boot core's watchdog: its period, and
+            /// what the guard does with it while the image is on trial.
+            watchdog_taken(period_ms: u32, trial_policy: TrialPolicy): Up => Up
+                emits WatchdogTaken = 0x02 { period_ms: u32, trial_policy: TrialPolicy }
+                observe(live);
+            /// The board's bring-up ran. `board`: the board definition's id
+            /// as a name digest (`NameDigest`); a host resolves it from the
+            /// board definitions it knows.
+            bring_up(board: NameDigest): Up => Up
+                emits BringUp = 0x07 { board: NameDigest }
+                observe(live);
+            /// A DAGON link carries frames: the first one arrived, at
+            /// start or after the link went down. `link`: its kind's code
+            /// (`dagon_format::with_link_kinds!`); `addr`: the node's own
+            /// address on it (`NO_ADDR` where a link has none).
+            link_up(link: u8, addr: u8): Up => Up
+                emits LinkUp = 0x03 { link: u8, addr: u8 }
+                observe(live);
+            /// A DAGON link stopped carrying frames: a reply could not be
+            /// sent, or the link closed.
+            link_down(link: u8, addr: u8): Up => Up
+                emits LinkDown = 0x04 { link: u8, addr: u8 }
+                observe(live);
+            /// A request arrived on link `via`.
+            request(protocol: u8, cmd: u8, seq: u8, via: u8): Up => Up
+                emits Request = 0x05 { protocol: u8, cmd: u8, seq: u8, via: u8 }
+                observe(live);
+            /// The reply to the last request left, `ms` after it arrived.
+            replied(status: u8, ms: u32): Up => Up
+                emits Replied = 0x06 { status: u8, ms: u32 }
+                observe(live);
         }
     }
 
@@ -335,4 +387,145 @@ pub struct Config {
     pub mode: u8,
     /// Max payload of the link the agent serves (`dagon_proto::max_payload`).
     pub max_payload: u16,
+    /// Boots the boot core gives an image on trial before it rolls back
+    /// (the MCU package's boot settings; `TrialInfo::max`).
+    pub trial_attempts: u8,
+}
+
+/// `app.link_up` / `app.link_down` `addr` of a link without an address.
+pub const NO_ADDR: u8 = 0xFF;
+
+/// A name in an event's owned form: the first 8 bytes of the SHA-256 of a
+/// domain prefix and the name (as MCU identities are formed). A host maps
+/// it back through the names it knows (topology tags, board definitions).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct NameDigest(pub [u8; 8]);
+
+impl NameDigest {
+    /// Domain of a node's image target tag.
+    pub const TAG: &'static str = "dagon-tag/";
+    /// Domain of a board definition id.
+    pub const BOARD: &'static str = "dagon-board/";
+
+    /// The digest of `name` (trailing NULs left out) in `domain`.
+    pub fn of(domain: &str, name: &[u8]) -> Self {
+        let end = name.iter().rposition(|&b| b != 0).map_or(0, |i| i + 1);
+        let mut h = dagon_format::Sha256::new();
+        h.update(domain.as_bytes());
+        h.update(&name[..end]);
+        let d = h.finalize();
+        let mut out = [0u8; 8];
+        out.copy_from_slice(&d[..8]);
+        NameDigest(out)
+    }
+}
+
+impl Compact for NameDigest {
+    const SIZE: usize = 8;
+    fn put(&self, out: &mut [u8]) {
+        out.copy_from_slice(&self.0);
+    }
+    fn get(b: &[u8]) -> Option<Self> {
+        Some(NameDigest(b.try_into().ok()?))
+    }
+}
+
+/// What a watchdog guard does while the running image is on trial.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum TrialPolicy {
+    /// Never feeds: an image not confirmed in time is reset and rolled back.
+    #[default]
+    NeverFeed,
+    /// Feeds (gated by liveness) until this many ms after boot, then stops.
+    FeedUntilMs(u32),
+}
+
+impl Compact for TrialPolicy {
+    /// A tag byte (0 never, 1 until), then the ms (0 for never).
+    const SIZE: usize = 5;
+    fn put(&self, out: &mut [u8]) {
+        let (tag, ms) = match *self {
+            TrialPolicy::NeverFeed => (0u8, 0u32),
+            TrialPolicy::FeedUntilMs(ms) => (1, ms),
+        };
+        out[0] = tag;
+        out[1..].copy_from_slice(&ms.to_le_bytes());
+    }
+    fn get(b: &[u8]) -> Option<Self> {
+        let ms = u32::from_le_bytes(b.get(1..5)?.try_into().ok()?);
+        match b.first()? {
+            0 => Some(TrialPolicy::NeverFeed),
+            1 => Some(TrialPolicy::FeedUntilMs(ms)),
+            _ => None,
+        }
+    }
+}
+
+/// `app.request` `protocol` codes.
+pub mod protocol {
+    /// The DAGON wire protocol (`dagon_proto` frames).
+    pub const DAGON: u8 = 1;
+}
+
+/// A test bench's slot store, shared with the bench code that plays the
+/// boot core or inspects the flash. Host test builds only (feature
+/// `store-tests`).
+#[cfg(feature = "store-tests")]
+impl<S: SlotStore + ?Sized> SlotStore for &core::cell::RefCell<S> {
+    fn status(&mut self) -> StatusResp {
+        self.borrow_mut().status()
+    }
+    fn capacity(&self, target: u8, slot: u8) -> u32 {
+        self.borrow().capacity(target, slot)
+    }
+    fn erase(&mut self, target: u8, slot: u8, len: u32, t: &Transition) -> Result<(), StoreError> {
+        self.borrow_mut().erase(target, slot, len, t)
+    }
+    fn write(
+        &mut self,
+        target: u8,
+        slot: u8,
+        offset: u32,
+        data: &[u8],
+        t: &Transition,
+    ) -> Result<(), StoreError> {
+        self.borrow_mut().write(target, slot, offset, data, t)
+    }
+    fn read(
+        &mut self,
+        target: u8,
+        slot: u8,
+        offset: u32,
+        buf: &mut [u8],
+    ) -> Result<(), StoreError> {
+        self.borrow_mut().read(target, slot, offset, buf)
+    }
+    fn write_header(
+        &mut self,
+        slot: u8,
+        header: &[u8; HEADER_SIZE],
+        t: &Transition,
+    ) -> Result<(), StoreError> {
+        self.borrow_mut().write_header(slot, header, t)
+    }
+    fn read_header(&mut self, slot: u8, out: &mut [u8; HEADER_SIZE]) -> Result<(), StoreError> {
+        self.borrow_mut().read_header(slot, out)
+    }
+    fn set_pending(
+        &mut self,
+        slot: u8,
+        header: &[u8; HEADER_SIZE],
+        t: &Transition,
+    ) -> Result<(), StoreError> {
+        self.borrow_mut().set_pending(slot, header, t)
+    }
+    fn confirm(
+        &mut self,
+        slot: u8,
+        header: &[u8; HEADER_SIZE],
+        t: &Transition,
+    ) -> Result<(), StoreError> {
+        self.borrow_mut().confirm(slot, header, t)
+    }
 }

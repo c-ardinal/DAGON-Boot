@@ -23,6 +23,7 @@ fn feature(name: &str) -> bool {
 fn main() {
     println!("cargo:rerun-if-env-changed=DAGON_DIAG_LED");
     println!("cargo:rerun-if-env-changed=DAGON_TARGET_TAG");
+    dagon_mcu_build::definition();
     if feature("HAL") {
         dagon_mcu_build::embed_pubkey();
     }

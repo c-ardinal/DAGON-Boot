@@ -113,8 +113,7 @@ fallback node list and its tag `hub-rp2040-lcd`. Without the relay,
 ## Links
 
 Every hop carries whole DAGON frames through one interface,
-`dagon_mcu_common::link::Link` (`read_frame`, `write_frame`, `flush`,
-`max_payload`, `reconnect`); the serve loops are generic over it. The
+`dagon_mcu_common::link::Link`; the serve loops are generic over it. The
 kinds this package offers (`links::LINK_KINDS`):
 
 | Kind | Up | Down |
@@ -168,7 +167,7 @@ link on the board's pins; link types are constructed as
 
 | Feature | Adds |
 |---|---|
-| (none) | layout, image checks, STATUS mapping, frames, liveness, tag check (host-testable) |
+| (none) | layout, image checks, frames, liveness, tag check (host-testable) |
 | `hal` | `node`, `flash`, `watchdog`, `store`, `links`, `sub`; `PUBKEY` / `TEST_KEY` |
 | `usb` | `usb`, `exec` and `node::start` (this package binds `USBCTRL_IRQ` and `SWI_IRQ_0`) |
 | `relay` (default) | `relay`: the 親機 relay |

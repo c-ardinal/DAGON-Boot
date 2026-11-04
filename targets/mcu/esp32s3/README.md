@@ -22,8 +22,7 @@ that panics rolls back.
 ## Links
 
 Every hop carries whole DAGON frames through one interface,
-`dagon_mcu_common::link::Link` (`read_frame`, `write_frame`, `flush`,
-`max_payload`, `reconnect`); the serve loops are generic over it. The
+`dagon_mcu_common::link::Link`; the serve loops are generic over it. The
 kinds this package offers (`links::LINK_KINDS`):
 
 | Kind | Up | Down |

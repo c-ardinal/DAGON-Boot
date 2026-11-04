@@ -181,6 +181,14 @@ pub fn selects_trial(current: &[[u8; ENTRY_LEN]; 2], sector: usize, ota_index: u
     c.slot == ota_index && c.state == raw::NEW && other.is_none_or(|o| o.seq < c.seq)
 }
 
+/// The sectors whose counted entry selects OTA slot `ota_index`. Erasing
+/// them makes otadata select what it would without them: the running
+/// slot's entry, or nothing (factory). An entry that does not count is
+/// left alone, as the 2nd stage ignores it.
+pub fn selecting(current: &[[u8; ENTRY_LEN]; 2], ota_index: u8) -> [bool; 2] {
+    [0, 1].map(|i| Counted::of(&current[i]).is_some_and(|c| c.slot == ota_index))
+}
+
 /// What CONFIRM has to do to otadata.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ConfirmStep {
@@ -448,6 +456,19 @@ mod tests {
             confirm_entry(&[BLANK, aborted], SLOT_B),
             ConfirmStep::Refused
         );
+    }
+
+    #[test]
+    fn selecting_names_every_counted_entry_for_the_slot() {
+        let valid_a = entry(1, raw::VALID, seq_crc(1).to_le_bytes());
+        let new_b = entry(2, raw::NEW, seq_crc(2).to_le_bytes());
+        let corrupt_b = entry(4, raw::NEW, [0; 4]);
+        assert_eq!(selecting(&[valid_a, new_b], SLOT_B), [false, true]);
+        assert_eq!(selecting(&[valid_a, new_b], SLOT_A), [true, false]);
+        assert_eq!(selecting(&[valid_a, corrupt_b], SLOT_B), [false, false]);
+        let new_a = entry(3, raw::NEW, seq_crc(3).to_le_bytes());
+        assert_eq!(selecting(&[valid_a, new_a], SLOT_A), [true, true]);
+        assert_eq!(selecting(&[BLANK, BLANK], SLOT_A), [false, false]);
     }
 
     #[test]

@@ -4,6 +4,7 @@
 //! entry) are closed sets in code; everything else is data.
 
 pub mod board_boot;
+pub mod execution;
 pub mod isolation;
 mod load;
 mod project_text;
@@ -23,6 +24,7 @@ use serde::Deserialize;
 use crate::schema::{ControlKind, LinkKind, RomEntry, UartIface};
 
 pub use board_boot::{BoardBoot, BoardBus, BoardDevice, BoardPeripheral, BoardPin};
+pub use execution::{Conformance, Execution, Fact, FlashOp};
 pub use isolation::{Core, Isolation, McuBoot, Peripheral, RecordPlacement, Watchdog};
 pub use load::{DefError, DefSource, Source, BUILTIN_FILES};
 
@@ -413,6 +415,10 @@ pub struct McuDef {
     #[serde(default, rename = "core")]
     pub cores: Vec<Core>,
     pub watchdog: Option<Watchdog>,
+    /// What a flash operation stops and DAGON's masking budget.
+    pub execution: Option<Execution>,
+    /// Flash a conformance build may destroy.
+    pub conformance: Option<Conformance>,
     #[serde(default)]
     pub boot: McuBoot,
     /// What a boot action program may use besides pins.

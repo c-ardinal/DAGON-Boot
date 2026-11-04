@@ -9,6 +9,12 @@
 /// Board extras the link task drives. Every method has a default, so a
 /// plain board implements nothing: `impl BoardDef for MyBoard {}`.
 pub trait BoardDef: Send {
+    /// The board definition's id (`dagon-board.toml` `id`), for
+    /// `app.bring_up`; `None` for a board without one (no event).
+    fn id(&self) -> Option<&'static str> {
+        None
+    }
+
     /// Runs once in the link task, before it serves anything: pin routing
     /// through an IO expander for the link. Keep it short (milliseconds).
     fn bring_up(&mut self) {}

@@ -362,15 +362,7 @@ fn collect(dir: &Path, rel: &str, out: &mut Vec<(String, String)>) {
 /// The variant of `dagon_mcu_<mcu>::links::Kind` for a link kind (the MCU
 /// packages' generator contract, "Links").
 fn kind_variant(k: LinkKind) -> &'static str {
-    match k {
-        LinkKind::UsbCdc => "UsbCdc",
-        LinkKind::Uart => "Uart",
-        LinkKind::I2c => "I2c",
-        LinkKind::Ble => "Ble",
-        LinkKind::WifiTcp => "WifiTcp",
-        LinkKind::Ethernet => "Ethernet",
-        LinkKind::Can => "Can",
-    }
+    k.variant()
 }
 
 /// `{{uplink}}` and `{{downlinks}}` of node `n`: its uplink kind (a 親機's

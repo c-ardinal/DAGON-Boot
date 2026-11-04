@@ -1,8 +1,8 @@
 //! DAGON MCU package for the RP2040.
 //!
 //! - Always (host-testable): the flash [`layout`], inline [`image`] checks,
-//!   the stage0 view of the boot core log ([`bl`]), STATUS mapping
-//!   ([`status`]), hub command rules ([`cmd`]), and the MCU-independent
+//!   the stage0 view of the boot core log ([`bl`]), hub command rules
+//!   ([`cmd`]), and the MCU-independent
 //!   parts re-exported from `dagon-mcu-common` ([`liveness`], [`frames`],
 //!   [`uart`], [`mapped`]).
 //! - Target only: XIP reader, image start and raw backlight blink ([`arm`]).
@@ -26,13 +26,18 @@
 
 pub use dagon_mcu_common::{frames, liveness, mapped, tag, uart};
 
+// The constants this package's MCU definition states (`dagon-mcu.toml`):
+// `TRIAL_ATTEMPTS`, `MASKED_MAX_US` (`None` while unmeasured), `ERASE_UNIT`,
+// `ERASE_UNIT_MAX_MS`, the `_KNOWN` flags (checked against their source),
+// `CONFORM_SCRATCH`. The boot stage and the app layer read these.
+include!(concat!(env!("OUT_DIR"), "/definition.rs"));
+
 pub mod bl;
 pub mod cmd;
 pub mod image;
 pub mod kinds;
 pub mod layout;
 pub mod nodes;
-pub mod status;
 pub mod view;
 
 #[cfg(target_os = "none")]

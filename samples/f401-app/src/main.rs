@@ -67,8 +67,8 @@ fn main() -> ! {
     let led = Output::new(io.led, Pin::Low, Speed::Low);
     let low = EXECUTOR_LOW.init(Executor::new());
 
-    let mut store = match node::open_store(dagon.flash) {
-        Ok(s) => s,
+    let (mut store, flash) = match node::open_store(dagon.flash) {
+        Ok(opened) => opened,
         Err(e) => {
             error!("state log unreadable: {}", defmt::Debug2Format(&e));
             low.run(|s| {
@@ -98,18 +98,23 @@ fn main() -> ! {
     let period = node::watchdog_period_ms(on_trial);
     node::install_watchdog(dagon.iwdg, &GUARD, period, &store);
     let (target, regs) = Board::open_link(dagon.link);
-    let mut agent = node::agent(dagon_mcu_stm32f401re::target_tag!(), store, self_check);
+    let mut agent = node::agent(
+        dagon_mcu_stm32f401re::target_tag!(),
+        store,
+        self_check,
+        &GUARD,
+    );
     if on_trial && SELF_CONFIRM {
         match agent.confirm_own() {
             Ok(()) => info!("confirmed slot {}", ACTIVE),
             Err(_) => error!("self-confirm failed"),
         }
-        GUARD.set_trial(node::on_trial(agent.store()));
+        GUARD.set_trial(agent.images().on_trial());
     }
 
     let high = dagon_mcu_stm32f401re::exec::start();
     let link = dagon_mcu_stm32f401re::links::I2c::new(target, regs);
-    high.spawn(node::serve(agent, link, &GUARD, task::SERVE).unwrap());
+    high.spawn(node::serve(agent, flash, link, &GUARD, task::SERVE).unwrap());
 
     low.run(|s| {
         s.spawn(display(io.display, splash, seg::version(version)).unwrap());

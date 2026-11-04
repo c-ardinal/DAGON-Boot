@@ -6,9 +6,9 @@ use dagon_core::log::{Log, SlotRef};
 use dagon_format::header::*;
 use dagon_format::statelog::{kind, reason, target, FaceHeader, Record};
 use dagon_format::{key_id, sha256, Version};
+use dagon_mcu_rp2040::image;
 use dagon_mcu_rp2040::layout::*;
 use dagon_mcu_rp2040::tag::checked_tag;
-use dagon_mcu_rp2040::{image, status};
 use dagon_port::{Flash, FlashError, FlashRegion};
 use dagon_proto::payload::SlotState;
 use ed25519_compact::{KeyPair, Seed};
@@ -79,7 +79,7 @@ fn put_app(m: &mut Mem, kp: &KeyPair, slot: u8, minor: u8) -> SlotRef {
 fn status_now(m: &mut Mem, active: u8) -> dagon_proto::payload::StatusResp {
     let log = Log::load(m, &APP_LOG_LAYOUT).unwrap();
     let heads = [0u8, 1].map(|s| image::head_ref(m, APP_SLOT[s as usize], s));
-    status::status(&log.state, heads, active, log.generation)
+    log.state.status(heads, active, log.generation)
 }
 
 /// Flash with app A installed and the install log as `dagon rescue hub`
@@ -113,7 +113,7 @@ fn config(kp: &KeyPair) -> BootConfig {
         pubkey: *kp.pk,
         mcu_id: mcu_id::RP2040,
         target_tag: target_tag(HUB_TAG),
-        max_attempts: MAX_ATTEMPTS,
+        max_attempts: dagon_mcu_rp2040::TRIAL_ATTEMPTS,
     }
 }
 
@@ -169,7 +169,7 @@ fn trial_without_confirm_rolls_back_to_a() {
     log.append(&mut m, kind::SLOT_PENDING, b, 0).unwrap();
     assert_eq!(status_now(&mut m, 0).slots[1].state, SlotState::Pending);
 
-    for _ in 0..MAX_ATTEMPTS {
+    for _ in 0..dagon_mcu_rp2040::TRIAL_ATTEMPTS {
         let mut log = Log::load(&mut m, &APP_LOG_LAYOUT).unwrap();
         let d = boot::decide(&mut m, &mut log, &APP_SLOTS, &cfg);
         assert!(
@@ -200,7 +200,7 @@ fn trial_without_confirm_rolls_back_to_a() {
     );
 
     // The ROLLBACK record names the destination slot (A).
-    let last = APP_LOG[0] + 32 * (1 + 2 + 1 + MAX_ATTEMPTS as u32);
+    let last = APP_LOG[0] + 32 * (1 + 2 + 1 + dagon_mcu_rp2040::TRIAL_ATTEMPTS as u32);
     let mut raw = [0u8; 32];
     m.read(last, &mut raw).unwrap();
     let r = Record::parse(&raw).unwrap();

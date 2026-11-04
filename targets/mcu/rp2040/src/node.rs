@@ -18,7 +18,7 @@ use embassy_rp::peripherals::{FLASH, USB, WATCHDOG};
 use embassy_rp::{Peri, Peripherals};
 use static_cell::StaticCell;
 
-use crate::flash::RpFlash;
+use crate::flash::{RpFlash, REGIONS};
 use crate::layout::MIN_FLASH_SIZE;
 use crate::store::AppStore;
 use crate::watchdog::{Guard, Wdt};
@@ -50,6 +50,25 @@ pub trait BoardDef {
 /// The agent of an RP2040 node; its chain runs the app's CONFIRM check.
 pub type AppAgent = Agent<AppStore, NodeChain>;
 
+/// A handle on the one flash driver: the slot store holds one, the start
+/// hands out another for the package's own reads (the topology copy), both
+/// used by the serving task only. Flash operations run from RAM with XIP
+/// off and interrupts masked by the driver, one 4 KiB sector (or page) per
+/// operation (`ERASE_UNIT`, worst case `ERASE_UNIT_MAX_MS`); DAGON masks
+/// nothing around them.
+pub type SharedFlash = dagon_mcu_common::shared::SharedFlash<RpFlash>;
+
+/// What [`open`] made.
+pub struct Opened {
+    pub agent: AppAgent,
+    /// The flash chip's [`serial`].
+    pub serial: &'static str,
+    /// Another handle on the slot store's flash driver.
+    pub flash: SharedFlash,
+}
+
+const _: () = assert!(crate::layout::SECTOR == crate::ERASE_UNIT);
+
 /// The guard task [`start`] gives DAGON's serving task; the app's tasks
 /// take the others.
 pub const DAGON_TASK: usize = 0;
@@ -73,6 +92,7 @@ pub fn config(tag: &str, role: u8) -> Config {
         role,
         mode: mode::APP,
         max_payload: max_payload::USB as u16,
+        trial_attempts: crate::TRIAL_ATTEMPTS,
     }
 }
 
@@ -82,10 +102,11 @@ pub fn on_trial(st: &StatusResp) -> bool {
 }
 
 /// Opens the slot store, takes over the watchdog the boot core started
-/// (fed once right away) and builds the agent. `task` is the guard task
-/// that serves the agent; `tag` and `role` are the node's image target
-/// tag and topology role; `self_check` decides whether a version on trial
-/// may be confirmed.
+/// (fed once right away) and builds the agent; returns it with the flash
+/// chip's [`serial`] and a handle on the flash driver. `task` is the guard task that serves the agent;
+/// `tag` and `role` are the node's image target tag and topology role;
+/// `self_check` decides whether a version on trial may be confirmed. Call
+/// once.
 pub fn open<B: BoardDef, const N: usize>(
     flash: Peri<'static, FLASH>,
     watchdog: Peri<'static, WATCHDOG>,
@@ -94,7 +115,7 @@ pub fn open<B: BoardDef, const N: usize>(
     tag: &str,
     role: u8,
     self_check: fn() -> bool,
-) -> AppAgent {
+) -> Opened {
     const {
         assert!(
             B::FLASH_SIZE >= MIN_FLASH_SIZE,
@@ -105,25 +126,37 @@ pub fn open<B: BoardDef, const N: usize>(
     if let Some(gpio) = B::DIAG_LED {
         crate::arm::led::select(gpio);
     }
+    use dagon_mcu_common::shared::{driver, FlashDriver};
+    static FLASH_DRIVER: StaticCell<FlashDriver<RpFlash>> = StaticCell::new();
+    let mut chip = RpFlash::new(flash);
+    let serial = serial(&mut chip);
+    let flash = SharedFlash::new(FLASH_DRIVER.init(driver(chip)), &REGIONS);
     let mut store = AppStore {
-        flash: RpFlash::new(flash),
+        flash,
         watch: guard,
         task,
     };
-    guard.install(Wdt::new(watchdog), on_trial(&store.status()));
+    let trial = on_trial(&store.status());
+    guard.install(Wdt::new(watchdog), trial);
     guard.feed();
     static EVENTS: StaticCell<Events> = StaticCell::new();
     let periods = Periods::new(crate::layout::WDT_MS, crate::layout::WDT_MS);
     let now_us: fn() -> u64 = || embassy_time::Instant::now().as_micros();
     let chain = node_chain(EVENTS.init(Published::new()), self_check, now_us, periods);
-    Agent::new(config(tag, role), store, chain)
+    let mut agent = Agent::new(config(tag, role), store, chain);
+    agent.watchdog_taken(crate::layout::WDT_MS, guard.trial_policy());
+    Opened {
+        agent,
+        serial,
+        flash,
+    }
 }
 
 static SERIAL: StaticCell<[u8; 16]> = StaticCell::new();
 
 /// The flash chip's 64-bit unique ID in hex: a per-board USB serial
 /// number. Call once.
-pub fn serial(flash: &mut RpFlash) -> &'static str {
+fn serial(flash: &mut RpFlash) -> &'static str {
     let s = SERIAL.init(hex(&flash.unique_id()));
     core::str::from_utf8(s).unwrap_or("0")
 }
@@ -167,7 +200,7 @@ mod usb_node {
         self_check: fn() -> bool,
     ) {
         let task = DAGON_TASK;
-        let mut agent = open::<B, N>(
+        let Opened { agent, serial, .. } = open::<B, N>(
             parts.flash,
             parts.watchdog,
             guard,
@@ -176,7 +209,6 @@ mod usb_node {
             role::NODE,
             self_check,
         );
-        let serial = serial(&mut agent.store().flash);
         let high = crate::exec::start();
         high.spawn(serve(parts.usb, tag, serial, agent, guard, task).expect("task pool"));
         spawner.spawn(feed(guard).expect("task pool"));

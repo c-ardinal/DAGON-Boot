@@ -256,11 +256,14 @@ fn config() -> Config {
         role: role::NODE,
         mode: mode::APP,
         max_payload: max_payload::I2C as u16,
+        trial_attempts: 3,
     }
 }
 
 struct Node {
-    agent: Agent<Mem, Chain>,
+    /// The slot store, shared with the bench (it plays the boot core).
+    mem: &'static RefCell<Mem>,
+    agent: Agent<&'static RefCell<Mem>, Chain>,
     probe: Probe,
     seq: u8,
 }
@@ -271,7 +274,9 @@ impl Node {
     }
 
     fn with(mem: Mem, probe: Probe) -> Self {
+        let mem: &'static RefCell<Mem> = Box::leak(Box::new(RefCell::new(mem)));
         Node {
+            mem,
             agent: Agent::new(config(), mem, chain(probe.clone())),
             probe,
             seq: 0,
@@ -280,10 +285,9 @@ impl Node {
 
     /// A reset: the store as `boot` leaves it, a fresh agent over it.
     fn reset(&mut self, boot: impl FnOnce(&mut Mem)) {
-        let mut mem = std::mem::replace(self.agent.store(), Mem::new());
-        boot(&mut mem);
+        boot(&mut self.mem.borrow_mut());
         self.probe.seen.borrow_mut().events.clear();
-        self.agent = Agent::new(config(), mem, chain(self.probe.clone()));
+        self.agent = Agent::new(config(), self.mem, chain(self.probe.clone()));
     }
 
     fn events(&self) -> Vec<String> {
@@ -361,8 +365,8 @@ impl Node {
         st
     }
 
-    fn store(&mut self) -> &mut Mem {
-        self.agent.store()
+    fn store(&mut self) -> std::cell::RefMut<'static, Mem> {
+        self.mem.borrow_mut()
     }
 }
 
@@ -394,7 +398,7 @@ fn dedup(events: Vec<String>) -> Vec<String> {
 #[test]
 fn update_set_pending_reboot_confirm() {
     let mut n = Node::new(Probe::default());
-    assert_eq!(n.events(), ["store_opened"]);
+    assert_eq!(n.events(), ["starting", "store_opened"]);
     let img = image(1, &body());
     assert_eq!(n.transfer(1, &img), Status::Ok);
     assert_eq!(
@@ -425,7 +429,10 @@ fn update_set_pending_reboot_confirm() {
     assert_eq!(n.events(), ["pending_set", "reboot_requested"]);
 
     n.reset(b_on_trial);
-    assert_eq!(n.events(), ["store_opened", "replay:trial_started"]);
+    assert_eq!(
+        n.events(),
+        ["starting", "store_opened", "replay:trial_started"]
+    );
     assert!(n.agent.images().on_trial());
     let hello = Node::enc(
         HelloReq {
@@ -455,8 +462,9 @@ fn update_set_pending_reboot_confirm() {
     );
     let t = n.probe.seen.borrow().trials[0];
     assert_eq!(
-        (t.slot, t.version, t.attempt),
-        (1, Version::new(1, 1, 0), 1)
+        (t.slot, t.version, t.attempt, t.max),
+        (1, Version::new(1, 1, 0), 1, config().trial_attempts),
+        "the boot core's attempt limit comes from the configuration"
     );
     let (_, body, _) = n.call(Cmd::Status, &[]);
     assert_eq!(StatusResp::parse(&body).unwrap().confirmed, 1);
@@ -471,7 +479,10 @@ fn a_rollback_the_boot_core_made_is_replayed() {
         m.status.slots[1].state = SlotState::Reverted;
         m.status.last_reason = 3;
     });
-    assert_eq!(n.events(), ["store_opened", "replay:rolled_back"]);
+    assert_eq!(
+        n.events(),
+        ["starting", "store_opened", "replay:rolled_back"]
+    );
     assert_eq!(n.agent.images().state(1), Some(image::State::Reverted));
 }
 
@@ -518,7 +529,7 @@ fn wrong_board_or_key_is_rejected() {
             target_tag: target_tag("other"),
             ..config()
         },
-        Mem::new(),
+        n.mem,
         chain(Probe::default()),
     );
     assert_eq!(n.transfer(1, &image(1, &body())), Status::Compat);
@@ -553,6 +564,7 @@ fn running_and_confirmed_slots_are_protected() {
     assert_eq!(
         ev,
         [
+            "starting",
             "store_opened",
             "update_refused",
             "update_refused",
@@ -574,6 +586,7 @@ fn extensions_answer_the_decision_points() {
     assert_eq!(
         n.events(),
         [
+            "starting",
             "store_opened",
             "update_offered",
             "transfer_aborted",
@@ -660,7 +673,12 @@ fn an_idle_transfer_is_aborted() {
     n.agent.abort();
     assert_eq!(
         n.events(),
-        ["store_opened", "update_offered", "transfer_aborted"]
+        [
+            "starting",
+            "store_opened",
+            "update_offered",
+            "transfer_aborted"
+        ]
     );
     n.agent.before_reboot();
     assert_eq!(n.events(), ["before_reboot"]);
@@ -734,7 +752,7 @@ fn the_agent_declares_its_machines() {
         .iter()
         .map(|c| c.machine)
         .collect();
-    assert_eq!(names, ["image", "session", "requests"]);
+    assert_eq!(names, ["image", "session", "node", "requests"]);
     assert_eq!(session::CATALOG.initial, "Idle");
     assert_eq!(requests::CATALOG.states, ["Ready"]);
 }
@@ -792,8 +810,11 @@ fn a_restart_reads_the_slots_again() {
     assert_eq!(n.transfer(1, &image(1, &body())), Status::Ok);
     assert_eq!(n.call(Cmd::SetPending, &[target::APP, 1]).0, Status::Ok);
     n.events();
-    b_on_trial(n.store());
+    b_on_trial(&mut n.store());
     n.agent.restart();
-    assert_eq!(n.events(), ["store_opened", "replay:trial_started"]);
+    assert_eq!(
+        n.events(),
+        ["starting", "store_opened", "replay:trial_started"]
+    );
     assert!(n.agent.images().on_trial());
 }

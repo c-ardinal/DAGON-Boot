@@ -63,7 +63,7 @@ States: `Empty` (initial), `Written`, `Pending`, `Trial`, `Confirmed`, `Reverted
 | `app.written` | 0x21 | `written`: Empty → Written | `target: u8` (1 B), `slot: u8` (1 B), `version: Version` (4 B) | live, host |  | The body verified and the header written and read back: the slot holds an image. |
 | `app.pending_set` | 0x22 | `pending_set`: Written \| Pending \| Confirmed \| Reverted → Pending | `slot: u8` (1 B), `version: Version` (4 B) | live, host |  | The slot is the one tried on the next boot. |
 | `app.pending_moved` | 0x23 | `pending_moved`: Pending \| Trial → Written | `from: u8` (1 B), `to: u8` (1 B) | live, host |  | Another slot was set pending; this one no longer is. |
-| `app.trial_started` | 0x24 | `trial_started`: Pending \| Trial → Trial | `slot: u8` (1 B), `version: Version` (4 B), `attempt: u8` (1 B) | replay, host |  | The boot core started the pending slot on trial (`attempt` boots so far). |
+| `app.trial_started` | 0x24 | `trial_started`: Pending \| Trial → Trial | `slot: u8` (1 B), `version: Version` (4 B), `attempt: u8` (1 B), `max: u8` (1 B) | replay, host |  | The boot core started the pending slot on trial (`attempt` boots so far, of the `max` its boot core allows). |
 | `app.confirmed` | 0x25 | `confirmed`: Trial → Confirmed | `slot: u8` (1 B), `version: Version` (4 B) | live, host |  | The slot on trial was confirmed after its self-check. |
 | `app.demoted` | 0x26 | `demoted`: Confirmed → Written | `slot: u8` (1 B), `version: Version` (4 B) | live, host |  | The other slot was confirmed; this one is no longer. |
 | `app.rolled_back` | 0x27 | `rolled_back`: Pending \| Trial → Reverted | `from: u8` (1 B), `to: u8` (1 B), `reason: u8` (1 B) | replay, host |  | The boot core rolled the slot back (attempts exhausted, or the pending image failed its check) and started `to`. |
@@ -83,6 +83,22 @@ States: `Idle` (initial), `Header`, `Body`.
 | `app.transfer_progress` | 0x13 | `data_written`: Body → Body | `done: u32` (4 B), `total: u32` (4 B) | live, host |  | A body chunk was written. |
 | `app.verify_started` | 0x14 | `verify_started`: Body → Idle | `target: u8` (1 B), `slot: u8` (1 B), `len: u32` (4 B) | live |  | The whole body arrived; it is hashed and read back next. |
 | `app.transfer_aborted` | 0x15 | `aborted`: Header \| Body → Idle | `cause: AbortCause` (1 B) | live, host |  | The transfer was dropped. |
+
+### Machine `node`
+
+The node's start and its DAGON links: what the MCU package's start and serving loop report through the agent.
+
+States: `Off` (initial), `Up`.
+
+| Kind | Code | Transition | Payload | Observed | Notes | Description |
+|---|---|---|---|---|---|---|
+| `app.starting` | 0x01 | `starting`: * → Up | `tag: NameDigest` (8 B), `role: u8` (1 B), `mode: u8` (1 B) | live |  | DAGON's start began (the agent was made, or restarted); the slot store is read next. `tag`: the node's image target tag as a name digest (`NameDigest`: the compact form "digest prefix", made as MCU identities are); a host resolves it from the topology's node tags. |
+| `app.watchdog_taken` | 0x02 | `watchdog_taken`: Up → Up | `period_ms: u32` (4 B), `trial_policy: TrialPolicy` (5 B) | live |  | The start took over the boot core's watchdog: its period, and what the guard does with it while the image is on trial. |
+| `app.bring_up` | 0x07 | `bring_up`: Up → Up | `board: NameDigest` (8 B) | live |  | The board's bring-up ran. `board`: the board definition's id as a name digest (`NameDigest`); a host resolves it from the board definitions it knows. |
+| `app.link_up` | 0x03 | `link_up`: Up → Up | `link: u8` (1 B), `addr: u8` (1 B) | live |  | A DAGON link carries frames: the first one arrived, at start or after the link went down. `link`: its kind's code (`dagon_format::with_link_kinds!`); `addr`: the node's own address on it (`NO_ADDR` where a link has none). |
+| `app.link_down` | 0x04 | `link_down`: Up → Up | `link: u8` (1 B), `addr: u8` (1 B) | live |  | A DAGON link stopped carrying frames: a reply could not be sent, or the link closed. |
+| `app.request` | 0x05 | `request`: Up → Up | `protocol: u8` (1 B), `cmd: u8` (1 B), `seq: u8` (1 B), `via: u8` (1 B) | live |  | A request arrived on link `via`. |
+| `app.replied` | 0x06 | `replied`: Up → Up | `status: u8` (1 B), `ms: u32` (4 B) | live |  | The reply to the last request left, `ms` after it arrived. |
 
 ### Machine `requests`
 

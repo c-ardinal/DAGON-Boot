@@ -117,6 +117,9 @@ pub struct BoardBoot {
 #[serde(deny_unknown_fields)]
 pub struct BoardPin {
     pub pin: String,
+    /// What the board package's code takes the pin by (`lcd_cs`):
+    /// `a-z`, `0-9`, `_`, starting with a letter.
+    pub name: Option<String>,
     /// A boot action program may drive it.
     #[serde(default)]
     pub boot: bool,
@@ -142,6 +145,58 @@ pub struct BoardBus {
     pub kind: BusKind,
     /// The MCU `[[peripheral]]` that drives it.
     pub controller: String,
+    /// DAGON's own link runs on it: never an extension's bus, and its
+    /// controller never an extension's window.
+    #[serde(default)]
+    pub dagon: bool,
+    /// Its pins, by the kind's signals ([`BusKind::signals`]).
+    pub sda: Option<String>,
+    pub scl: Option<String>,
+    pub tx: Option<String>,
+    pub rx: Option<String>,
+    pub sck: Option<String>,
+    pub mosi: Option<String>,
+    pub miso: Option<String>,
+    /// Clock of an I2C or SPI bus.
+    pub hz: Option<u32>,
+    /// Bit rate of a UART or CAN bus.
+    pub baud: Option<u32>,
+}
+
+impl BoardBus {
+    /// Its pins as (signal, pin), in the kind's signal order.
+    pub fn pins(&self) -> Vec<(&'static str, &str)> {
+        [
+            ("sda", &self.sda),
+            ("scl", &self.scl),
+            ("tx", &self.tx),
+            ("rx", &self.rx),
+            ("sck", &self.sck),
+            ("mosi", &self.mosi),
+            ("miso", &self.miso),
+        ]
+        .into_iter()
+        .filter_map(|(s, p)| p.as_deref().map(|p| (s, p)))
+        .collect()
+    }
+}
+
+impl BusKind {
+    /// The signals a bus of this kind names: (required, optional); a UART
+    /// and an SPI bus need at least one of their data signals.
+    pub fn signals(self) -> (&'static [&'static str], &'static [&'static str]) {
+        match self {
+            BusKind::I2c => (&["sda", "scl"], &[]),
+            BusKind::Spi => (&["sck"], &["mosi", "miso"]),
+            BusKind::Uart => (&[], &["tx", "rx"]),
+            BusKind::Can => (&["tx", "rx"], &[]),
+        }
+    }
+
+    /// Whether the bus has a clock (`hz`) rather than a bit rate (`baud`).
+    pub fn clocked(self) -> bool {
+        matches!(self, BusKind::I2c | BusKind::Spi)
+    }
 }
 
 /// `[[peripheral]]`: a board name for one of the MCU's register blocks.
@@ -223,6 +278,12 @@ pub(super) fn tables(b: &BoardDef, m: &McuDef) -> Result<(), String> {
                 x.id, x.mcu, m.id
             )
         })?;
+        if let Some(link) = b.buses.iter().find(|l| l.dagon && l.controller == x.mcu) {
+            return Err(format!(
+                "peripheral '{}': '{}' drives DAGON's link (bus '{}'), so it is never an extension's",
+                x.id, x.mcu, link.id
+            ));
+        }
     }
     for d in &b.devices {
         let bus = b
@@ -239,6 +300,101 @@ pub(super) fn tables(b: &BoardDef, m: &McuDef) -> Result<(), String> {
         )?;
     }
     Ok(())
+}
+
+/// A name board package code is generated with: `a-z`, `0-9`, `_` (or
+/// `-` in ids, `extra`), starting with a letter.
+fn code_name(s: &str, extra: u8) -> bool {
+    s.bytes().next().is_some_and(|c| c.is_ascii_lowercase())
+        && s.bytes()
+            .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == b'_' || c == extra)
+}
+
+/// What board package code is generated from: pin names, each bus's pins
+/// and speed by its kind, no pin used twice, and the 親機 pins of
+/// `[coordinator]` the ones of DAGON's links.
+pub(super) fn wiring(b: &BoardDef, _: &McuDef) -> Result<(), String> {
+    let mut used = std::collections::BTreeMap::new();
+    let mut take = |pin: &str, by: String| match used.insert(pin.to_string(), by.clone()) {
+        Some(first) => Err(format!("pin '{pin}' is both {first} and {by}")),
+        None => Ok(()),
+    };
+    for p in &b.pins {
+        if let Some(n) = &p.name {
+            fail(!code_name(n, b'_'), || {
+                format!(
+                    "pin '{}': name '{n}' must be a-z, 0-9, _ from a letter",
+                    p.pin
+                )
+            })?;
+        }
+        take(&p.pin, format!("[[pin]] '{}'", p.pin))?;
+    }
+    unique("pin name", b.pins.iter().filter_map(|p| p.name.as_deref()))?;
+    for x in &b.buses {
+        fail(!code_name(&x.id, b'-'), || {
+            format!("bus '{}': ids are a-z, 0-9, -, _ from a letter", x.id)
+        })?;
+        let (need, may) = x.kind.signals();
+        let pins = x.pins();
+        for s in need {
+            fail(!pins.iter().any(|(t, _)| t == s), || {
+                format!("bus '{}': a {:?} bus names its {s} pin", x.id, x.kind)
+            })?;
+        }
+        if !may.is_empty() {
+            fail(!pins.iter().any(|(t, _)| may.contains(t)), || {
+                format!("bus '{}': names at least one of {may:?}", x.id)
+            })?;
+        }
+        for (s, pin) in pins {
+            fail(!need.contains(&s) && !may.contains(&s), || {
+                format!("bus '{}': a {:?} bus has no {s} pin", x.id, x.kind)
+            })?;
+            take(pin, format!("{s} of bus '{}'", x.id))?;
+        }
+        let (speed, other) = if x.kind.clocked() {
+            (x.hz, x.baud.map(|_| "baud"))
+        } else {
+            (x.baud, x.hz.map(|_| "hz"))
+        };
+        if let Some(o) = other {
+            return Err(format!("bus '{}': a {:?} bus has no {o}", x.id, x.kind));
+        }
+        fail(speed == Some(0), || format!("bus '{}': speed 0", x.id))?;
+    }
+    coordinator_links(b)
+}
+
+/// A board with buses names the 親機 pins of `[coordinator]` (numbers the
+/// page wires new links to) as DAGON's links on those pins.
+fn coordinator_links(b: &BoardDef) -> Result<(), String> {
+    let Some(h) = &b.coordinator else {
+        return Ok(());
+    };
+    if b.buses.is_empty() {
+        return Ok(());
+    }
+    let gpio = |n: u8| format!("GPIO{n}");
+    let i2c = b.buses.iter().any(|x| {
+        x.dagon
+            && x.kind == BusKind::I2c
+            && x.controller == h.i2c.controller
+            && x.sda.as_deref() == Some(&gpio(h.i2c.sda))
+            && x.scl.as_deref() == Some(&gpio(h.i2c.scl))
+    });
+    fail(!i2c, || {
+        "coordinator.i2c is no dagon = true i2c [[bus]] on the same controller and pins".into()
+    })?;
+    let uart = b.buses.iter().any(|x| {
+        x.dagon
+            && x.kind == BusKind::Uart
+            && x.tx.as_deref() == Some(&gpio(h.pio_uart.tx))
+            && x.rx.as_deref() == Some(&gpio(h.pio_uart.rx))
+    });
+    fail(!uart, || {
+        "coordinator.pio_uart is no dagon = true uart [[bus]] on the same pins".into()
+    })
 }
 
 /// `[boot]`: pins it names are declared, the program within its limits

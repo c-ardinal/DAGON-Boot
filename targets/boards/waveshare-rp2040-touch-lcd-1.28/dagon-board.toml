@@ -24,7 +24,71 @@ header = [
 i2c = [{ controller = "i2c0", sda = "GPIO16", scl = "GPIO17" }]
 
 # As the 親機: a new I2C bus is i2c0 on GPIO16/17 and a new PIO UART link
-# GPIO26 (TX) / GPIO27 (RX), the pins the board crate drives (src/lib.rs).
+# GPIO26 (TX) / GPIO27 (RX), DAGON's link buses below.
 [coordinator]
 i2c = { controller = "i2c0", sda = 16, scl = 17 }
 pio_uart = { tx = 26, rx = 27 }
+
+# The boot stage's LED is the display backlight, blinking at 1 Hz when
+# nothing can start.
+[boot]
+led = "GPIO25"
+halt = { pattern = "blink", period_ms = 1000 }
+
+[[pin]]
+pin = "GPIO25"
+name = "backlight"
+boot = true
+
+[[pin]]
+pin = "GPIO9"
+name = "lcd_cs"
+
+[[pin]]
+pin = "GPIO8"
+name = "lcd_dc"
+
+[[pin]]
+pin = "GPIO13"
+name = "lcd_rst"
+
+# Touch controller reset, held high.
+[[pin]]
+pin = "GPIO22"
+name = "touch_rst"
+
+# Reset (open drain) and BOOT0 of an STM32 子機: its ROM recovery path.
+[[pin]]
+pin = "GPIO18"
+name = "child_nrst"
+
+[[pin]]
+pin = "GPIO28"
+name = "child_boot0"
+
+[[bus]]
+id = "lcd"
+kind = "spi"
+controller = "spi1"
+sck = "GPIO10"
+mosi = "GPIO11"
+hz = 20_000_000
+
+# DAGON's links to 子機.
+[[bus]]
+id = "child-i2c"
+kind = "i2c"
+controller = "i2c0"
+sda = "GPIO16"
+scl = "GPIO17"
+hz = 400_000
+dagon = true
+
+[[bus]]
+id = "child-uart"
+kind = "uart"
+controller = "pio0"
+tx = "GPIO26"
+rx = "GPIO27"
+baud = 115_200
+dagon = true

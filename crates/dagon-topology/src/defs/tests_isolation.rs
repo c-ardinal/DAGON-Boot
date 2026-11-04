@@ -135,6 +135,8 @@ levels = ["high"]
 id = "sys"
 kind = "i2c"
 controller = "uart3"
+sda = "GPIO6"
+scl = "GPIO7"
 
 [[peripheral]]
 id = "can0"
@@ -382,6 +384,69 @@ fn board_boot_tables_are_checked_against_board_and_mcu() {
     );
     let e = requirements::check_board(&board(&long), &m).unwrap_err();
     assert!(e.contains("over the 50 ms"), "{e}");
+}
+
+#[test]
+fn board_wiring_is_checked_for_the_code_generated_from_it() {
+    let mut m = parse_mcu_text(&isolated_mcu(), &[]).unwrap();
+    m.boot_capabilities = vec![super::isolation::BootCapability::I2c];
+    let text = boot_board();
+    let named = text.replace("pin = \"GPIO2\"\n", "pin = \"GPIO2\"\nname = \"led\"\n");
+    requirements::check_board(&board(&named), &m).unwrap();
+    for (from, to, want) in [
+        ("sda = \"GPIO6\"", "sda = \"GPIO2\"", "pin 'GPIO2' is both"),
+        ("sda = \"GPIO6\"\n", "", "names its sda pin"),
+        (
+            "scl = \"GPIO7\"\n",
+            "scl = \"GPIO7\"\ntx = \"GPIO8\"\n",
+            "has no tx pin",
+        ),
+        (
+            "scl = \"GPIO7\"\n",
+            "scl = \"GPIO7\"\nbaud = 9600\n",
+            "has no baud",
+        ),
+        ("scl = \"GPIO7\"\n", "scl = \"GPIO7\"\nhz = 0\n", "speed 0"),
+        ("name = \"led\"", "name = \"Led\"", "must be a-z"),
+        ("id = \"sys\"", "id = \"9sys\"", "ids are a-z"),
+        (
+            "mcu = \"can1\"",
+            "mcu = \"uart3\"",
+            "drives DAGON's link (bus 'sys')",
+        ),
+    ] {
+        let t = named
+            .replace("scl = \"GPIO7\"\n", "scl = \"GPIO7\"\ndagon = true\n")
+            .replace(from, to);
+        // The device follows its bus's new id.
+        let t = match to.strip_prefix("id = ") {
+            Some(id) => t.replace("bus = \"sys\"", &format!("bus = {id}")),
+            None => t,
+        };
+        let e = requirements::check_board(&board(&t), &m).unwrap_err();
+        assert!(e.contains(want), "{to}: {e}");
+    }
+}
+
+#[test]
+fn coordinator_pins_are_dagons_link_buses() {
+    let reg = Registry::builtin();
+    let hub = reg.board("waveshare-rp2040-touch-lcd-1.28").unwrap();
+    let m = reg.mcu(&hub.mcu).unwrap();
+    let mut moved = hub.clone();
+    moved.buses.iter_mut().for_each(|b| {
+        if b.id == "child-i2c" {
+            b.sda = Some("GPIO20".into());
+        }
+    });
+    let e = requirements::check_board(&moved, m).unwrap_err();
+    assert!(e.contains("coordinator.i2c is no dagon = true"), "{e}");
+    let mut uart = hub.clone();
+    uart.buses
+        .iter_mut()
+        .for_each(|b| b.dagon &= b.kind != super::board_boot::BusKind::Uart);
+    let e = requirements::check_board(&uart, m).unwrap_err();
+    assert!(e.contains("coordinator.pio_uart"), "{e}");
 }
 
 #[test]

@@ -248,8 +248,14 @@ pub const BOARD: &[Requirement<BoardCheck>] = &[
     Requirement {
         engine: "extension capability validator",
         fields: &["device[].addr", "device[].writable[]"],
-        rule: "names unique; buses and peripherals name MCU blocks; devices on a declared bus, I2C addresses in 0x08..=0x77",
+        rule: "names unique; buses and peripherals name MCU blocks, a peripheral never one that drives DAGON's link; devices on a declared bus, I2C addresses in 0x08..=0x77",
         check: board_boot::tables,
+    },
+    Requirement {
+        engine: "board package code generation (defs::codegen)",
+        fields: &["bus[].hz", "bus[].baud"],
+        rule: "pin names and bus ids usable as code names; each bus names its kind's pins; hz on i2c/spi, baud on uart/can, above 0; no pin used twice; [coordinator] pins are DAGON's link buses where buses are declared",
+        check: board_boot::wiring,
     },
     Requirement {
         engine: "boot action interpreter (boot-program 1)",

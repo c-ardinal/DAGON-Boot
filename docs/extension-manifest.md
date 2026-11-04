@@ -20,7 +20,7 @@ trusted = false
 [capabilities]
 peripherals = ["can0"]               # the board's [[peripheral]] ids
 pins = []                            # the board's [[pin]] names
-buses = []                           # the board's [[bus]] ids
+buses = []                           # the board's [[bus]] ids, never a dagon = true one
 timer = true
 [limits]
 max_run_us = 2000                    # per handler call

@@ -22,6 +22,38 @@ baud = 115_200
 control = "cooperative"
 rom_entry = "force-download-boot"
 
+# DAGON's link: UART0 on the rear pins MUX_IO_1/2 (the expander's PYG1
+# low routes them to UART0), at default_link.baud.
+[[bus]]
+id = "link"
+kind = "uart"
+controller = "uart0"
+tx = "GPIO43"
+rx = "GPIO44"
+dagon = true
+
+# The internal bus: DAGON's bring-up and the app share it (SYS_I2C).
+[[bus]]
+id = "sys"
+kind = "i2c"
+controller = "i2c0"
+sda = "GPIO47"
+scl = "GPIO48"
+
+# M5IOE1 I/O expander: MODE_L, OUT_L and DRV_L route the rear pins.
+[[device]]
+id = "ioe"
+bus = "sys"
+addr = 0x4F
+writable = [0x03, 0x05, 0x13]
+
+# M5PM1 power manager: SYS_CMD.
+[[device]]
+id = "pmic"
+bus = "sys"
+addr = 0x6E
+writable = [0x0C]
+
 # The recovery agent for the factory partition ships with this package.
 [[part]]
 name = "factory"

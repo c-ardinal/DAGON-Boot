@@ -256,7 +256,11 @@ pub fn panel_power_on(
             snap[start + i] = b.unwrap_or(0xFF);
         }
     }
-    let kept = keep(&mut bus, &snap);
+    // The M5PM1 stays at 100 kHz (its I2C_CFG speed bit is left at 0).
+    let kept = bus
+        .apply_config(&I2cConfig::default().with_frequency(Rate::from_khz(100)))
+        .is_ok()
+        && keep(&mut bus, &snap);
     con.line(format_args!("snapshot {snap:02X?}: kept={kept}"));
     con.line(format_args!("=== panel powered={powered}"));
     delay.delay_millis(PANEL_SETTLE_MS);

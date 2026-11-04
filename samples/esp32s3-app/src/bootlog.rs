@@ -19,7 +19,7 @@ use esp_hal::{
 };
 
 /// Longest wait for room in the USB FIFO before the console gives up.
-const BYTE_WAIT_US: u32 = 2_000;
+const BYTE_WAIT_US: u32 = 20_000;
 const POLL_US: u32 = 10;
 
 /// M5PM1 RTC RAM (0xA0..0xBF): kept while the M5PM1 has power.

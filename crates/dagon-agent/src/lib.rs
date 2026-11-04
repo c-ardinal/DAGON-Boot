@@ -17,6 +17,9 @@
 //! - [`node`]: the node's start and its links, reported by the MCU
 //!   package's start and serving loop.
 //!
+//! The layer's publisher folds the events into [`snapshot::AppSnapshot`]
+//! (phase, version, progress, trial) for display and log tasks.
+//!
 //! Applications read the slots through [`Agent::images`] and confirm their
 //! own trial with [`Agent::confirm_own`]; extensions answer the decision
 //! points (`accept_update`, `allow_reboot_now`, `self_check`) through the
@@ -28,6 +31,7 @@
 
 mod agent;
 mod images;
+pub mod snapshot;
 
 pub use agent::{reply_status, Agent, AppChain, Reply, IDLE_TIMEOUT_MS};
 pub use images::{ImageView, Transition};

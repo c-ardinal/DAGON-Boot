@@ -368,6 +368,64 @@ impl<T: Extension + ?Sized> Extension for &mut T {
     }
 }
 
+/// An extension that may be absent: `None` has no parts, like [`Nop`], so
+/// a layer start can take the user's extensions as an `Option`.
+impl<T: Extension> Extension for Option<T> {
+    fn id(&self) -> &'static str {
+        self.as_ref().map_or("nop", T::id)
+    }
+
+    fn on_event(&mut self, e: &Event<'_>, ctx: &Ctx<'_>) {
+        if let Some(x) = self {
+            x.on_event(e, ctx);
+        }
+    }
+
+    fn accept_update(&mut self, o: &UpdateOffer, ctx: &Ctx<'_>) -> Option<Accept> {
+        self.as_mut()?.accept_update(o, ctx)
+    }
+
+    fn allow_reboot_now(&mut self, r: &RebootRequest, ctx: &Ctx<'_>) -> Option<Delay> {
+        self.as_mut()?.allow_reboot_now(r, ctx)
+    }
+
+    fn self_check(&mut self, t: &TrialInfo, ctx: &Ctx<'_>) -> Option<Health> {
+        self.as_mut()?.self_check(t, ctx)
+    }
+
+    fn __leaves(&self, k: Token) -> usize {
+        self.as_ref().map_or(0, |x| x.__leaves(k))
+    }
+
+    fn __id_at(&self, i: usize, k: Token) -> &'static str {
+        self.as_ref().map_or("nop", |x| x.__id_at(i, k))
+    }
+
+    fn __accept_at(
+        &mut self,
+        i: usize,
+        o: &UpdateOffer,
+        ctx: &Ctx<'_>,
+        k: Token,
+    ) -> Option<Accept> {
+        self.as_mut()?.__accept_at(i, o, ctx, k)
+    }
+
+    fn __reboot_at(
+        &mut self,
+        i: usize,
+        r: &RebootRequest,
+        ctx: &Ctx<'_>,
+        k: Token,
+    ) -> Option<Delay> {
+        self.as_mut()?.__reboot_at(i, r, ctx, k)
+    }
+
+    fn __check_at(&mut self, i: usize, t: &TrialInfo, ctx: &Ctx<'_>, k: Token) -> Option<Health> {
+        self.as_mut()?.__check_at(i, t, ctx, k)
+    }
+}
+
 /// The user's extensions, in order (libraries first, then the app's own):
 /// `extensions![a, b, c]` is `Chain::new(a, Chain::new(b, c))`;
 /// `extensions![]` is [`Nop`]. The layer's start puts DAGON's publisher

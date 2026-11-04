@@ -22,3 +22,5 @@ embassy-sync = "0.8"
 [dev-dependencies]
 critical-section = { version = "1", features = ["std"] }
 dagon-sim = { path = "../../../crates/dagon-sim" }
+# tests/start.rs signs the update it sends.
+ed25519-compact = { version = "2.6", default-features = false }

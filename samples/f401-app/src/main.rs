@@ -13,6 +13,8 @@
 //! display stuck past it stops the feeding, and an image on trial is then
 //! rolled back.
 //!
+//! `confirm`: the start confirms a version on trial itself (bench use
+//! without a 親機), through the public start's `Confirm::Own`.
 //! `no-confirm`: the self-check always fails, so CONFIRM is refused and the
 //! trial rolls back (hardware tests).
 #![no_std]
@@ -21,7 +23,7 @@
 use board::{Board, BoardDef};
 use dagon_board_nucleo_f401re as board;
 use dagon_mcu_stm32f401re::links::Kind;
-use dagon_mcu_stm32f401re::node;
+use dagon_mcu_stm32f401re::node::{self, App, Confirm};
 use dagon_mcu_stm32f401re::watchdog::{now_ms, Guard, Lease, Trial};
 use defmt::{error, info, Display2Format};
 use defmt_rtt as _;
@@ -50,6 +52,14 @@ fn self_check() -> bool {
     !cfg!(feature = "no-confirm")
 }
 
+/// Who confirms a version on trial: the 親機, or this app at start with
+/// `confirm`.
+const CONFIRM: Confirm = if cfg!(feature = "confirm") {
+    Confirm::Own
+} else {
+    Confirm::ByHost
+};
+
 #[embassy_executor::main]
 async fn main(spawner: Spawner) {
     let (dagon, io) = Board::split(embassy_stm32::init(dagon_mcu_stm32f401re::clocks()));
@@ -57,12 +67,16 @@ async fn main(spawner: Spawner) {
     let version = display::running_version();
     info!("app {} slot {}", Display2Format(&version), node::ACTIVE);
     let tag = dagon_mcu_stm32f401re::target_tag!();
-    let (first, then) = match board::start(spawner, dagon, &GUARD, tag, self_check, Kind::I2c) {
-        Ok(()) if dagon_mcu_stm32f401re::TEST_KEY => {
+    let app = App {
+        confirm: CONFIRM,
+        ..App::new(self_check)
+    };
+    let (first, then) = match board::start(spawner, dagon, &GUARD, tag, app, Kind::I2c) {
+        Ok(_) if dagon_mcu_stm32f401re::TEST_KEY => {
             info!("TEST KEY: built with the public test verifying key");
             (seg::TEST_KEY, seg::version(version))
         }
-        Ok(()) => (seg::version(version), seg::version(version)),
+        Ok(_) => (seg::version(version), seg::version(version)),
         // DAGON does not serve: the display shows dashes.
         Err(e) => {
             error!("state log unreadable: {}", defmt::Debug2Format(&e));

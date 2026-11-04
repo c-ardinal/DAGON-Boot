@@ -36,15 +36,16 @@ impl FlashOp {
     }
 }
 
-/// A hardware fact and how far it is established: a plain number is
+/// A hardware fact and how far it is established: a plain value is
 /// checked against its source (the definition's comment cites it);
-/// `{ unverified = N }` is a value not yet checked against its source;
-/// `"unmeasured"` has no value yet (to be measured on the hardware).
+/// `{ unverified = V }` is a value not yet checked against its source;
+/// `"unmeasured"` has no value yet (to be measured on the hardware). Most
+/// facts are numbers; some are a word of a closed set (`[watchdog] flag`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
 #[serde(untagged)]
-pub enum Fact {
-    Known(u32),
-    Unverified { unverified: u32 },
+pub enum Fact<T = u32> {
+    Known(T),
+    Unverified { unverified: T },
     Unmeasured(Unmeasured),
 }
 
@@ -55,9 +56,9 @@ pub enum Unmeasured {
     Unmeasured,
 }
 
-impl Fact {
+impl<T: Copy> Fact<T> {
     /// The value, checked or not; `None` when unmeasured.
-    pub fn value(self) -> Option<u32> {
+    pub fn value(self) -> Option<T> {
         match self {
             Fact::Known(v) | Fact::Unverified { unverified: v } => Some(v),
             Fact::Unmeasured(_) => None,

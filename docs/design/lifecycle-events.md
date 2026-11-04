@@ -103,7 +103,8 @@ erased again, so a fault leaves no image the machine has not recorded.
 The agent exposes `images() -> &ImageView`
 (read-only: status, each slot's lifecycle state, own version, on
 trial). An app that confirms itself at start
-(bench use) calls `confirm_own()`, which is the `confirmed` transition:
+(bench use) asks its start for it (`App { confirm: Confirm::Own, .. }`), which
+calls `confirm_own()` after the board's bring-up; that is the `confirmed` transition:
 the `self_check` decision first, the port's confirm, the events always.
 The boot-layer transitions are replayed by the app at start (1.2, 5.5)
 so app-stage observers see them too (`app.trial_started`,
@@ -531,8 +532,17 @@ Registration per layer:
   image contains the extensions, so an update of an extension is an
   update of the boot core through the ROM path like any boot core
   change.
-- **App (embassy).** `node::start` / `board::start` take `exts: impl
-  Extension + 'static`. The MCU package creates and keeps the layer's
+- **App (embassy).** `node::start` / `board::start` take an `App`:
+  the self-check function, `exts: Option<&'static mut (dyn Extension +
+  Send)>` (the app's `extensions![..]` in a `static`; a reference, not a
+  generic, because an embassy task cannot be generic and the serving
+  task owns the chain) and `confirm` (`ByHost`, or `Own`: the start
+  confirms the app's trial). The start runs the board's `BoardBringUp`
+  port (`app.bring_up`; a board without one emits nothing) and then the
+  own confirm before the link serves. The board package's extension
+  (the board definition's `extension()`; on ESP32-S3 `NodePeripherals::
+  board_extension`) takes the chain's board place. The agent stays the
+  start's and its serving task's: no public function hands it out. The MCU package creates and keeps the layer's
   `Published`, composes it, and returns a `Reader` to the app. The
   agent's machines deliver every event into the chain, and the chain
   asks the decision methods at the three points. Where the MCU's isolation
@@ -556,7 +566,8 @@ There is no separate hooks trait; observing events and answering
 `accept_update`, `allow_reboot_now` and `self_check` are `Extension`
 methods. The MCU packages' `start` still accepts the app's
 `fn() -> bool` self-check and wraps it as a one-method extension
-(`SelfCheck`) in the user part of the chain.
+(`SelfCheck`) in the user part of the chain, after the app's extensions:
+it never abstains, so placed first it would hide their answers.
 
 ### 2.4 Waitable published state
 
@@ -1774,21 +1785,26 @@ to (4.7).
 
 ```rust
 #[embassy_executor::task]
-async fn display_task(mut lcd: Lcd, events: Reader<AppSnapshot, 16>) {
+async fn display_task(mut lcd: Lcd, events: AppEvents) {
+    // AppEvents = Reader<dagon_agent::snapshot::AppSnapshot, RECENT>
     let mut rx = events.receiver().unwrap();
     loop {
         let s = rx.changed().await.state;
         match s.phase {
-            Phase::Starting | Phase::Serving => lcd.splash(s.version, s.trial),
-            Phase::Transferring => lcd.bar(s.progress),
+            Phase::Starting | Phase::Idle | Phase::Trial => lcd.splash(s.version, s.trial),
+            Phase::Transferring => lcd.bar(s.progress), // Some((done, total))
             Phase::Verifying => lcd.text("verify"),
+            Phase::Written | Phase::Pending => lcd.text("written"),
             Phase::RebootPending => lcd.text("reboot"),
             Phase::Confirmed => lcd.text("ok"),
+            Phase::RolledBack | Phase::Failed => lcd.text("back"),
             _ => {}
         }
     }
 }
-// main: let events = node::start::<Board, N>(spawner, dagon, &GUARD, tag, extensions![MyApp], UPLINK);
+// main: static EXTS: StaticCell<MyApp> = StaticCell::new();
+//       let app = App { exts: Some(EXTS.init(MyApp)), ..App::new(self_check) };
+//       let events = node::start::<Board, N>(spawner, dagon, &GUARD, tag, app, UPLINK)?;
 //       spawner.spawn(display_task(lcd, events))
 ```
 
@@ -1920,7 +1936,9 @@ impl Extension for Bench {
     fn id(&self) -> &'static str { "bench" }
     fn self_check(&mut self, _: &TrialInfo, _: &Ctx) -> Option<Health> { Some(Health::Healthy) }
 }
-// after start: if agent.images().on_trial() { agent.confirm_own(); }   // emits app.self_check, app.confirmed (and app.demoted for the other slot)
+// main: let app = App { exts: Some(EXTS.init(Bench)), confirm: Confirm::Own, ..App::new(always) };
+// The start, after the board's bring-up and while the image is on trial, calls
+// agent.confirm_own(): app.self_check, app.confirmed (and app.demoted for the other slot).
 ```
 
 ## 9. Alternatives rejected

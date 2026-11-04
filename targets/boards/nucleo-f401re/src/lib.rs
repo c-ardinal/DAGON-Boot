@@ -18,7 +18,9 @@
 //! peripherals (what is stacked on the headers is the app's: its driver
 //! binds the bus's interrupts). An app that keeps the chip's peripherals
 //! itself moves out only DAGON's with `dagon_pins!` and calls `start`.
-//! This package binds the I2C3 and DMA1 stream 2/4 interrupts itself.
+//! This package binds the I2C3 interrupts and those of the link's DMA
+//! streams itself; the streams come from the MCU definition's request
+//! mapping ([`def::dma`]).
 #![no_std]
 
 /// The board's facts from `dagon-board.toml`.
@@ -31,6 +33,14 @@ pub mod def {
     #[macro_use]
     pub mod pins {
         include!(concat!(env!("OUT_DIR"), "/pins.rs"));
+    }
+
+    /// The DMA streams of the buses this package opens or hands out with
+    /// DMA, `take_dma!` and `bind_<bus>_dma!`.
+    #[cfg(feature = "hal")]
+    #[macro_use]
+    pub mod dma {
+        include!(concat!(env!("OUT_DIR"), "/dma.rs"));
     }
 }
 
@@ -59,8 +69,8 @@ macro_rules! dagon_pins {
                 i2c: $crate::take!($p.link),
                 scl: $crate::take!($p.link_scl),
                 sda: $crate::take!($p.link_sda),
-                tx_dma: $p.DMA1_CH4,
-                rx_dma: $p.DMA1_CH2,
+                tx_dma: $crate::take_dma!($p.link_tx),
+                rx_dma: $crate::take_dma!($p.link_rx),
             },
         }
     };
@@ -70,42 +80,41 @@ macro_rules! dagon_pins {
 mod hal {
     use dagon_mcu_stm32f401re::links::Kind;
     pub use dagon_mcu_stm32f401re::node::DagonParts;
-    use dagon_mcu_stm32f401re::node::{I2cTarget, LogError};
+    use dagon_mcu_stm32f401re::node::{App, AppEvents, I2cTarget, LogError};
     use dagon_mcu_stm32f401re::watchdog::Guard;
     pub use dagon_mcu_stm32f401re::BoardDef;
     use embassy_stm32::i2c::{self, I2c, SlaveAddrConfig};
-    use embassy_stm32::peripherals::{ADC1, DMA1_CH0, DMA1_CH2, DMA1_CH4, DMA1_CH6};
-    use embassy_stm32::{bind_interrupts, dma, pac, peripherals, Peri, Peripherals};
+    use embassy_stm32::peripherals::ADC1;
+    use embassy_stm32::{pac, peripherals, Peri, Peripherals};
 
+    use super::def::dma::{ArduinoI2cRxDma, ArduinoI2cTxDma, LinkRxDma, LinkTxDma};
     use super::def::pins::{
         ArduinoI2c as ArduinoI2cBus, ArduinoI2cScl, ArduinoI2cSda, Button, Led, Link as LinkBus,
         LinkScl, LinkSda, Vcp, VcpRx, VcpTx, A4, A5,
     };
     use super::{BOARD_ID, FLASH_SIZE, I2C_ADDR};
 
-    bind_interrupts!(pub(crate) struct Irqs {
+    bind_link_dma!(pub(crate) struct Irqs {
         I2C3_EV => i2c::EventInterruptHandler<peripherals::I2C3>;
         I2C3_ER => i2c::ErrorInterruptHandler<peripherals::I2C3>;
-        DMA1_STREAM2 => dma::InterruptHandler<peripherals::DMA1_CH2>;
-        DMA1_STREAM4 => dma::InterruptHandler<peripherals::DMA1_CH4>;
     });
 
     pub struct Board;
 
     /// Starts DAGON on this board (I2C target link; guard task
-    /// `dagon_mcu_stm32f401re::node::DAGON_TASK` serves it): see
+    /// `dagon_mcu_stm32f401re::node::DAGON_TASK` serves it) with the app's
+    /// self-check, extensions and confirm choice; returns the node's events.
+    /// The board has no bring-up, so no `app.bring_up` is emitted. See
     /// `dagon_mcu_stm32f401re::node::start`.
     pub fn start<const N: usize>(
         spawner: embassy_executor::Spawner,
         parts: DagonParts<Link>,
         guard: &'static Guard<N>,
         tag: &'static str,
-        self_check: fn() -> bool,
+        app: App,
         uplink: Kind,
-    ) -> Result<(), LogError> {
-        dagon_mcu_stm32f401re::node::start::<Board, N>(
-            spawner, parts, guard, tag, self_check, uplink,
-        )
+    ) -> Result<AppEvents, LogError> {
+        dagon_mcu_stm32f401re::node::start::<Board, N>(spawner, parts, guard, tag, app, uplink)
     }
 
     /// Up `i2c` on this board: I2C3 as a target at
@@ -120,8 +129,8 @@ mod hal {
         pub i2c: Peri<'static, LinkBus>,
         pub scl: Peri<'static, LinkScl>,
         pub sda: Peri<'static, LinkSda>,
-        pub tx_dma: Peri<'static, DMA1_CH4>,
-        pub rx_dma: Peri<'static, DMA1_CH2>,
+        pub tx_dma: Peri<'static, LinkTxDma>,
+        pub rx_dma: Peri<'static, LinkRxDma>,
     }
 
     /// The Arduino I2C1 (bus `arduino-i2c`) with the DMA streams that
@@ -131,8 +140,8 @@ mod hal {
         pub i2c: Peri<'static, ArduinoI2cBus>,
         pub scl: Peri<'static, ArduinoI2cScl>,
         pub sda: Peri<'static, ArduinoI2cSda>,
-        pub tx_dma: Peri<'static, DMA1_CH6>,
-        pub rx_dma: Peri<'static, DMA1_CH0>,
+        pub tx_dma: Peri<'static, ArduinoI2cTxDma>,
+        pub rx_dma: Peri<'static, ArduinoI2cRxDma>,
     }
 
     /// What the app gets on this board.
@@ -165,8 +174,8 @@ mod hal {
                 i2c: take!(p.link),
                 scl: take!(p.link_scl),
                 sda: take!(p.link_sda),
-                tx_dma: p.DMA1_CH4,
-                rx_dma: p.DMA1_CH2,
+                tx_dma: take_dma!(p.link_tx),
+                rx_dma: take_dma!(p.link_rx),
             };
             let io = Io {
                 led: take!(p.led),
@@ -174,8 +183,8 @@ mod hal {
                     i2c: take!(p.arduino_i2c),
                     scl: take!(p.arduino_i2c_scl),
                     sda: take!(p.arduino_i2c_sda),
-                    tx_dma: p.DMA1_CH6,
-                    rx_dma: p.DMA1_CH0,
+                    tx_dma: take_dma!(p.arduino_i2c_tx),
+                    rx_dma: take_dma!(p.arduino_i2c_rx),
                 },
                 spare: Spare {
                     usart2: take!(p.vcp),

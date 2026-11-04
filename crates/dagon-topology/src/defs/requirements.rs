@@ -10,7 +10,7 @@ use std::ops::RangeInclusive;
 use dagon_format::header::HEADER_SIZE;
 use dagon_format::statelog::{FACE_HEADER_SIZE, RECORD_SIZE};
 
-use super::{board_boot, execution, isolation, Binding, BoardDef, McuDef, Placement, Writer};
+use super::{board_boot, dma, execution, isolation, Binding, BoardDef, McuDef, Placement, Writer};
 
 /// Slot/header placement: an image header.
 pub const HEADER: u32 = HEADER_SIZE as u32;
@@ -175,13 +175,24 @@ pub const MCU: &[Requirement<McuCheck>] = &[
         check: isolation::peripherals,
     },
     Requirement {
+        engine: "DMA stream assignment (board packages, MCU templates)",
+        fields: &[
+            "peripheral[].dma.streams",
+            "peripheral[].dma.channels",
+            "peripheral[].dma_requests[].stream",
+            "peripheral[].dma_requests[].channel",
+        ],
+        rule: "controllers are bus masters with streams and channels >= 1; each request names a controller, a stream and a channel it has; one cell serves one block; no request twice",
+        check: dma::check,
+    },
+    Requirement {
         engine: "watchdog driver, reboot delay cap",
         fields: &[
             "watchdog.trial_ms",
             "watchdog.confirmed_ms",
             "watchdog.trial_attempts",
         ],
-        rule: ">= 1",
+        rule: ">= 1; flag a fact of none | register | package (lockup fuse only with a source)",
         check: isolation::watchdog,
     },
     Requirement {
@@ -208,12 +219,13 @@ pub const MCU: &[Requirement<McuCheck>] = &[
             "ram.size",
             "boot.record.at",
             "boot.record.size",
+            "boot.record.entropy.min_bits",
             "boot.record.rings[].at",
             "boot.record.rings[].size",
             "boot.record.fuse.cells[].at",
             "boot.record.fuse.cells[].size",
         ],
-        rule: "record 1..=RECORD_MAX bytes inside RAM (noinit-ram) or a declared block (retained-registers); 1..=16 rings inside it, apart, one per boot stage the MCU has; fuse cells apart, outside the record, one per image kind",
+        rule: "entropy min_bits a fact, at least ENTROPY_MIN_BITS (16) when it has a value; record 1..=RECORD_MAX bytes inside RAM (noinit-ram) or a declared block (retained-registers); 1..=16 rings inside it, apart, one per boot stage the MCU has; fuse cells apart, outside the record, one per image kind",
         check: isolation::record,
     },
 ];
@@ -282,6 +294,12 @@ pub const BOARD: &[Requirement<BoardCheck>] = &[
         fields: &["bus[].hz", "bus[].baud"],
         rule: "pin names and bus ids usable as code names, each generated name once after - becomes _ (device ids too); each bus names its kind's pins; hz on i2c/spi, baud on uart/can, above 0; no pin used twice; [coordinator] pins are DAGON's link buses where buses are declared",
         check: board_boot::wiring,
+    },
+    Requirement {
+        engine: "DMA stream assignment (defs::dma::board_streams)",
+        fields: &[],
+        rule: "dma only on i2c, spi and uart buses; every such bus gets a tx and an rx stream from the MCU's request mapping, no stream twice",
+        check: |b, m| dma::board_streams(b, m).map(|_| ()),
     },
     Requirement {
         engine: "boot action interpreter (boot-program 1)",

@@ -1,17 +1,19 @@
 //! Starting DAGON on an RP2040 node: the board definition ([`BoardDef`]),
-//! opening the slot store and agent with the watchdog taken over
+//! opening the slot store and agent with the watchdog taken over, the
+//! board's bring-up run and, if the app asks, its trial confirmed
 //! ([`open`]), and, for a node whose DAGON link is USB, starting it all in
-//! one call ([`start`]).
+//! one call ([`start`]). The app hands over an [`App`] (self-check,
+//! extensions, who confirms) and gets the node's events back.
 //!
 //! Flash size is check-only: the layout is fixed (`layout`, the topology's
 //! `rp2040-4m` flash map) and needs [`MIN_FLASH_SIZE`] bytes; a board with
 //! less fails to build, a larger one keeps the rest for the app.
 
 use dagon_agent::{Agent, Config, SlotStore};
-use dagon_events::{Published, Watchdog as Periods};
+use dagon_events::{BoardBringUp, Published, Watchdog as Periods};
 use dagon_format::header::{mcu_id, port_kind, target_tag};
-pub use dagon_mcu_common::hooks::{always, NodeChain, SelfCheck};
-use dagon_mcu_common::hooks::{node_chain, Events};
+pub use dagon_mcu_common::hooks::{always, App, AppEvents, Confirm, NodeChain, SelfCheck};
+use dagon_mcu_common::hooks::{finish_start, node_chain, BoardExtension, Events};
 use dagon_proto::max_payload;
 use dagon_proto::payload::{mode, SlotState, StatusResp};
 use embassy_rp::peripherals::{FLASH, USB, WATCHDOG};
@@ -47,9 +49,23 @@ pub trait BoardDef {
     type UserIo;
     /// Splits the chip's peripherals.
     fn split(p: Peripherals) -> (DagonParts, Self::UserIo);
+    /// The board's `BoardBringUp` port, which [`open`] runs before the
+    /// links serve (`app.bring_up`). Default: none, so no bring-up runs and
+    /// no `app.bring_up` is emitted. Called once.
+    fn bring_up_port() -> Option<&'static mut dyn BoardBringUp> {
+        None
+    }
+    /// The board package's extension, which the start puts in the node's
+    /// chain after the publisher and before the app's: it observes every
+    /// event and answers the decision points before the app. Default:
+    /// none. Called once.
+    fn extension() -> Option<BoardExtension> {
+        None
+    }
 }
 
-/// The agent of an RP2040 node; its chain runs the app's CONFIRM check.
+/// The agent of an RP2040 node; its chain holds the app's extensions and
+/// CONFIRM check.
 pub type AppAgent = Agent<AppStore, NodeChain>;
 
 /// A handle on the one flash driver: the slot store holds one, the start
@@ -61,12 +77,14 @@ pub type AppAgent = Agent<AppStore, NodeChain>;
 pub type SharedFlash = dagon_mcu_common::shared::SharedFlash<RpFlash>;
 
 /// What [`open`] made.
-pub struct Opened {
-    pub agent: AppAgent,
+pub(crate) struct Opened {
+    pub(crate) agent: AppAgent,
     /// The flash chip's [`serial`].
-    pub serial: &'static str,
+    pub(crate) serial: &'static str,
     /// Another handle on the slot store's flash driver.
-    pub flash: SharedFlash,
+    pub(crate) flash: SharedFlash,
+    /// The app's read access to the node's events.
+    pub(crate) events: AppEvents,
 }
 
 const _: () = assert!(crate::layout::SECTOR == crate::ERASE_UNIT);
@@ -104,19 +122,22 @@ pub fn on_trial(st: &StatusResp) -> bool {
 }
 
 /// Opens the slot store, takes over the watchdog the boot core started
-/// (fed once right away) and builds the agent; returns it with the flash
-/// chip's [`serial`] and a handle on the flash driver. `task` is the guard task that serves the agent;
-/// `tag` and `role` are the node's image target tag and topology role;
-/// `self_check` decides whether a version on trial may be confirmed. Call
-/// once.
-pub fn open<B: BoardDef, const N: usize>(
+/// (fed once right away), builds the agent with the app's chain, runs the
+/// board's bring-up and, with [`Confirm::Own`], confirms the app's trial
+/// ([`finish_start`]); returns the agent with the flash chip's [`serial`],
+/// a handle on the flash driver and the node's events. `task` is the guard
+/// task that serves the agent; `tag` and `role` are the node's image
+/// target tag and topology role; `app` holds the self-check, the app's
+/// extensions and who confirms. Only the starts in this package hold the
+/// agent. Call once.
+pub(crate) fn open<B: BoardDef, const N: usize>(
     flash: Peri<'static, FLASH>,
     watchdog: Peri<'static, WATCHDOG>,
     guard: &'static Guard<N>,
     task: usize,
     tag: &str,
     role: u8,
-    self_check: fn() -> bool,
+    app: App,
 ) -> Opened {
     const {
         assert!(
@@ -144,13 +165,24 @@ pub fn open<B: BoardDef, const N: usize>(
     static EVENTS: StaticCell<Events> = StaticCell::new();
     let periods = Periods::new(crate::layout::WDT_MS, crate::layout::WDT_MS);
     let now_us: fn() -> u64 = || embassy_time::Instant::now().as_micros();
-    let chain = node_chain(EVENTS.init(Published::new()), self_check, now_us, periods);
+    let events = EVENTS.init(Published::new());
+    let (chain, events) = node_chain(
+        events,
+        B::extension(),
+        app.exts,
+        app.self_check,
+        now_us,
+        periods,
+    );
     let mut agent = Agent::new(config(tag, role), store, chain);
     agent.watchdog_taken(crate::layout::WDT_MS, guard.trial_policy());
+    let board = B::bring_up_port().map(|p| (B::BOARD_ID, p));
+    guard.set_trial(finish_start(&mut agent, board, app.confirm));
     Opened {
         agent,
         serial,
         flash,
+        events,
     }
 }
 
@@ -191,29 +223,36 @@ mod usb_node {
     /// the agent serving task (guard task [`DAGON_TASK`]; declare it
     /// `Preempting`) on DAGON's high-priority executor (`crate::exec`), the
     /// watchdog feeder on `spawner` (the app's executor). `tag` is the
-    /// node's image target tag (also the USB product name); `self_check`
-    /// decides whether a version on trial may be confirmed. A 親機 uses
-    /// `crate::relay::start` instead.
+    /// node's image target tag (also the USB product name); `app` holds
+    /// the self-check, the app's extensions and who confirms ([`open`]).
+    /// Returns the node's events. A 親機 uses `crate::relay::start`
+    /// instead.
     pub fn start<B: BoardDef, const N: usize>(
         spawner: Spawner,
         parts: DagonParts,
         guard: &'static Guard<N>,
         tag: &'static str,
-        self_check: fn() -> bool,
-    ) {
+        app: App,
+    ) -> AppEvents {
         let task = DAGON_TASK;
-        let Opened { agent, serial, .. } = open::<B, N>(
+        let Opened {
+            agent,
+            serial,
+            events,
+            ..
+        } = open::<B, N>(
             parts.flash,
             parts.watchdog,
             guard,
             task,
             tag,
             role::NODE,
-            self_check,
+            app,
         );
         let high = crate::exec::start();
         high.spawn(serve(parts.usb, tag, serial, agent, guard, task).expect("task pool"));
         spawner.spawn(feed(guard).expect("task pool"));
+        events
     }
 
     /// Builds the USB device inside the high-priority executor (its types

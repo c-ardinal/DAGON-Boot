@@ -2,6 +2,7 @@
 //! updates this board too, runs a new version on trial and confirms it;
 //! dagon gen never rewrites this file.
 
+use dagon_mcu_rp2040::node::App;
 use dagon_board_waveshare_rp2040_touch_lcd_1_28::Spare;
 use dagon_mcu_rp2040::watchdog::{Guard, Lease};
 use embassy_executor::Spawner;
@@ -16,6 +17,17 @@ const WORK_BUDGET_MS: u64 = 500;
 /// Whether a version on trial may be confirmed (your health check).
 pub fn self_check() -> bool {
     true
+}
+
+/// What your application hands DAGON's start: the self-check above. Add
+/// your extensions (`exts: Some(EXTS.init(extensions![..]))`, with a
+/// `static EXTS: StaticCell<..>`) to observe every update event (transfer,
+/// written, trial, confirmed, rolled back) and answer the decision points;
+/// `confirm: Confirm::Own` confirms a version on trial at start, without
+/// the 親機. The start returns the node's events for your display or log
+/// tasks.
+pub fn dagon() -> App {
+    App::new(self_check)
 }
 
 /// Starts your tasks; each takes one guard task from `first` on. `spare`

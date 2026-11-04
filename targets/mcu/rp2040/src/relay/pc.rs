@@ -37,7 +37,7 @@ const RAW_TIMEOUT_MS: u16 = 1_000;
 static NEXT_ID: AtomicU32 = AtomicU32::new(1);
 
 pub struct Pc {
-    pub agent: AppAgent,
+    pub(crate) agent: AppAgent,
     /// A handle on the flash the agent's store writes: the topology
     /// display copy is read through the same driver, after its write.
     pub flash: crate::node::SharedFlash,

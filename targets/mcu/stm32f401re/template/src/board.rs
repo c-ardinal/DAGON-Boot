@@ -8,7 +8,8 @@
 use dagon_mcu_stm32f401re::layout::MIN_FLASH_SIZE;
 use dagon_mcu_stm32f401re::node::{BoardDef, DagonParts, I2cTarget};
 use embassy_stm32::i2c::{self, I2c, SlaveAddrConfig};
-use embassy_stm32::peripherals::{DMA1_CH2, DMA1_CH4, {{link_i2c}}, {{link_scl}}, {{link_sda}}};
+use embassy_stm32::peripherals::{{{link_i2c}}, {{link_scl}}, {{link_sda}}};
+use embassy_stm32::peripherals::{{{link_tx_dma_ctl}}_CH{{link_tx_dma_stream}}, {{link_rx_dma_ctl}}_CH{{link_rx_dma_stream}}};
 use embassy_stm32::{bind_interrupts, dma, pac, peripherals, Peri, Peripherals};
 
 use crate::wiring;
@@ -22,21 +23,21 @@ const I2C_ADDR: u8 = match wiring::NODE.link {
 bind_interrupts!(struct Irqs {
     {{link_i2c}}_EV => i2c::EventInterruptHandler<peripherals::{{link_i2c}}>;
     {{link_i2c}}_ER => i2c::ErrorInterruptHandler<peripherals::{{link_i2c}}>;
-    DMA1_STREAM2 => dma::InterruptHandler<peripherals::DMA1_CH2>;
-    DMA1_STREAM4 => dma::InterruptHandler<peripherals::DMA1_CH4>;
+    {{link_tx_dma_ctl}}_STREAM{{link_tx_dma_stream}} => dma::InterruptHandler<peripherals::{{link_tx_dma_ctl}}_CH{{link_tx_dma_stream}}>;
+    {{link_rx_dma_ctl}}_STREAM{{link_rx_dma_stream}} => dma::InterruptHandler<peripherals::{{link_rx_dma_ctl}}_CH{{link_rx_dma_stream}}>;
 });
 
 pub struct Board;
 
 /// The link to the 親機: {{link_i2c}} on {{link_scl}} (SCL) and {{link_sda}} (SDA) with DMA
-/// (DMA1 streams 4 and 2 serve I2C3; another controller takes its own
-/// streams, see the reference manual).
+/// (the streams `dagon new` took from the MCU definition's DMA request
+/// mapping for this controller).
 pub struct Link {
     i2c: Peri<'static, {{link_i2c}}>,
     scl: Peri<'static, {{link_scl}}>,
     sda: Peri<'static, {{link_sda}}>,
-    tx_dma: Peri<'static, DMA1_CH4>,
-    rx_dma: Peri<'static, DMA1_CH2>,
+    tx_dma: Peri<'static, {{link_tx_dma_ctl}}_CH{{link_tx_dma_stream}}>,
+    rx_dma: Peri<'static, {{link_rx_dma_ctl}}_CH{{link_rx_dma_stream}}>,
 }
 
 /// What the app gets. Add the pins and peripherals your app uses (move
@@ -57,8 +58,8 @@ impl BoardDef for Board {
             i2c: p.{{link_i2c}},
             scl: p.{{link_scl}},
             sda: p.{{link_sda}},
-            tx_dma: p.DMA1_CH4,
-            rx_dma: p.DMA1_CH2,
+            tx_dma: p.{{link_tx_dma_ctl}}_CH{{link_tx_dma_stream}},
+            rx_dma: p.{{link_rx_dma_ctl}}_CH{{link_rx_dma_stream}},
         };
         let dagon = DagonParts {
             flash: p.FLASH,

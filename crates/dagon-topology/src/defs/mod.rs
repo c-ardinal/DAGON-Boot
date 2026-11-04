@@ -6,6 +6,7 @@
 pub mod board_boot;
 pub mod boot_folder;
 pub mod codegen;
+pub mod dma;
 pub mod execution;
 pub mod isolation;
 mod load;

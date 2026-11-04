@@ -60,10 +60,11 @@ path changes persistent image state outside this machine.
 
 | Transition | Layer | Guard (status on refusal) | Persisted as | Event |
 |---|---|---|---|---|
-| `erase` | app | XFER_BEGIN passed every guard and `accept_update`; from `Empty`, `Written` or `Reverted` (never from the active or the confirmed slot) | slot body and header place erased | `app.transfer_started` |
+| `erase` | app | XFER_BEGIN passed every guard and `accept_update`; from `Empty`, `Written`, `Pending` or `Reverted` (never from the active or the confirmed slot). From `Pending` because the protocol lets a new image replace one set pending but not yet started; the erased header no longer matches the SLOT_PENDING record, so the slot reads empty | slot body and header place erased | `app.transfer_started` |
 | `written` | app | XFER_END: body digest equals the header's, header written and re-verified | header in place | `app.written { slot, version }` |
-| `pending_set` | app | SET_PENDING: header present, signature and compatibility, body digest; from `Written` | SLOT_PENDING record / vendor selection | `app.pending_set { slot, version }` |
-| `pending_moved` | app | SET_PENDING on the other slot while this one is `Pending` | the same SLOT_PENDING record (the log names one pending slot) | `app.pending_moved { from, to }` |
+| `pending_set` | app | SET_PENDING: header present, signature and compatibility, body digest; never the running slot; from `Written`, `Reverted`, `Pending` (a repeated SET_PENDING appends again) or `Confirmed` (the confirmed slot set pending again while the other slot is on trial, which switches back to it) | SLOT_PENDING record / vendor selection | `app.pending_set { slot, version }` |
+| `pending_moved` | app | SET_PENDING on the other slot while this one is `Pending` or `Trial`, and this slot is not the confirmed one | the same SLOT_PENDING record (the log names one pending slot) | `app.pending_moved { from, to }` |
+| `pending_withdrawn` | app | this slot is the confirmed one, set pending again, and another slot is set pending or its trial is rolled back: it reads `Confirmed` again, as the log's `confirmed` still names it | the same SLOT_PENDING or ROLLBACK record | `app.pending_withdrawn { slot, version }` |
 | `attempt` | boot | pending slot checked (signature, digest), `attempts < max` | BOOT_ATTEMPT record / vendor "new" → "pending verify" | `boot.attempt_recorded { slot, attempt, max }` |
 | `confirmed` | app | CONFIRM while on trial, `self_check` healthy | CONFIRMED record / vendor "valid" | `app.confirmed { slot, version }` |
 | `demoted` | app | the other slot's `confirmed` (the log's `confirmed` now names the other slot) | the same CONFIRMED record | `app.demoted { slot, version }` |
@@ -71,20 +72,29 @@ path changes persistent image state outside this machine.
 | `chosen` | boot | the slot to start is final (confirmed, or trial) | none | `boot.slot_chosen { slot, trial, version }` |
 | `no_image` | boot | no startable slot | none | `boot.no_image { reason }` |
 
-One persisted record can move two slots (`confirmed` and `demoted`,
-`pending_set` and `pending_moved`): the machine is declared per slot
-pair, so both transitions are generated from one trigger and both
-events are emitted, in that order. A generated test folds every record
-sequence the state log can hold and checks that the machine's state
-equals the log's fold (`LogState`), so no fold outcome exists without
-its transition.
+The extra source states of `erase` and `pending_set`, and
+`pending_withdrawn`, exist because the protocol already allows those
+requests; the machine follows the wire behaviour rather than narrowing
+it.
 
-The machine wraps the slot store port: `ImageStore<S: SlotStore>` is the
-only holder of the store, its generated transition methods call the
-port's mutators and return the events; the `SlotStore` trait remains the
-port a board implements, and nothing outside the machine holds `&mut S`.
-The agent exposes `images() -> &ImageView` (read-only: status, own
-header, own version, on trial). An app that confirms itself at start
+One persisted record can move two slots (`confirmed` and `demoted`,
+`pending_set` and `pending_moved` or `pending_withdrawn`): the machine
+holds one state per slot, one trigger runs both transitions and both
+events are emitted, in that order. A test folds every sequence of what
+the agent and the boot core write (transfers, switches, confirms, boot
+attempts, rollbacks) from a provisioned device and checks after each
+step that every slot's machine state equals STATUS as folded from the
+log (`LogState`), so no fold outcome exists without its transition.
+
+The machine wraps the slot store port: `ImageStore<S: SlotStore>` holds
+the store, and the port's mutators (`erase`, `write`, `write_header`,
+`set_pending`, `confirm`) take a `Transition` that only the machine
+makes, inside the transition that emits the change's event. The
+`SlotStore` trait remains the port a board implements. Code that holds
+the store for the board's other resources (`Agent::store()`) cannot
+change image state with it. The agent exposes `images() -> &ImageView`
+(read-only: status, each slot's lifecycle state, own version, on
+trial). An app that confirms itself at start
 (bench use) calls `confirm_own()`, which is the `confirmed` transition:
 the `self_check` decision first, the port's confirm, the events always.
 The boot-layer transitions are replayed by the app at start (1.2, 5.5)
@@ -507,10 +517,13 @@ Registration per layer:
   CLI build. The host runs with the user's permissions; its sandbox is
   the operating system's.
 
-`dagon_agent::Hooks` is a deprecated facade (`Legacy<H>`) under the
-deprecation rule of 6; the MCU packages' `fn() -> bool` self-check is
-`FnSelfCheck`, a one-method extension, so `start` accepts a plain
-function.
+The app's agent takes the composed chain and nothing else:
+`Agent::new(config, store, chain)`, where `chain` is `compose`'s result.
+There is no separate hooks trait; observing events and answering
+`accept_update`, `allow_reboot_now` and `self_check` are `Extension`
+methods. The MCU packages' `start` still accepts the app's
+`fn() -> bool` self-check and wraps it as a one-method extension
+(`SelfCheck`) in the user part of the chain.
 
 ### 2.4 Waitable published state
 
@@ -1605,8 +1618,8 @@ definition key with a default is a feature; everything else follows the
 general rules. A port trait gains methods only with defaults; removing
 or changing a port method is breaking for the layer's component.
 
-Deprecation: a public trait or function this model replaces (`Hooks`,
-the `fn() -> bool` self-check, a store accessor) stays available for one
+Deprecation: a public trait or function this model replaces (a store
+accessor, a start parameter) stays available for one
 minor release of its component, marked `#[deprecated]` with the
 replacement named, and is removed in the next breaking release. A
 `CATALOG` entry is never removed within a format number; a kind that is

@@ -13,7 +13,9 @@ provider = "Anthropic"
 # none); no user customisations such as hooks, skills, CLAUDE.md or MCP
 # servers (--safe-mode, --strict-mcp-config, --disable-slash-commands);
 # DAGON's instructions replace Claude Code's own (--system-prompt-file).
-# DAGON runs it in an empty temporary folder.
+# DAGON starts it in a fresh temporary working folder with a short
+# environment allow-list; Claude Code's own flags above are what keep it
+# from acting (DAGON does not sandbox it).
 [[ways]]
 id = "claude-code"
 name = "Claude Code"

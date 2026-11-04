@@ -40,6 +40,7 @@ fn echo() -> command::Command {
         program: program.into(),
         args,
         system: command::SystemVia::Stdin,
+        pass_env: Vec::new(),
     }
 }
 
@@ -161,7 +162,7 @@ fn every_call_is_checked_for_consent_and_size_first() {
 }
 
 #[test]
-fn a_command_gets_the_prompt_on_stdin_in_an_empty_folder() {
+fn a_command_gets_the_prompt_on_stdin_and_a_fresh_working_folder() {
     let out = command::run_unchecked(&echo(), &prompt("SYSTEM-TEXT", "USER-TEXT"), T).unwrap();
     let (s, u) = (
         out.find("SYSTEM-TEXT").unwrap(),
@@ -182,11 +183,13 @@ fn a_command_gets_the_prompt_on_stdin_in_an_empty_folder() {
         program,
         args,
         system: command::SystemVia::File,
+        pass_env: Vec::new(),
     };
     let out = command::run_unchecked(&file, &prompt("ONLY-SYSTEM", "USER"), T).unwrap();
     assert_eq!(out.trim(), "ONLY-SYSTEM");
 
-    // The folder it ran in was empty and is gone.
+    // Its working folder is a fresh temporary one, removed afterwards
+    // (not the project's; this is hygiene, not a sandbox).
     let (program, args) = if cfg!(windows) {
         ("cmd", vec!["/C".to_string(), "cd".to_string()])
     } else {
@@ -196,6 +199,7 @@ fn a_command_gets_the_prompt_on_stdin_in_an_empty_folder() {
         program: program.into(),
         args,
         system: command::SystemVia::Stdin,
+        pass_env: Vec::new(),
     };
     let dir = command::run_unchecked(&pwd, &prompt("", ""), T).unwrap();
     let dir = PathBuf::from(dir.trim());
@@ -203,6 +207,28 @@ fn a_command_gets_the_prompt_on_stdin_in_an_empty_folder() {
         dir.starts_with(std::env::temp_dir()) || dir.to_string_lossy().contains("dagon-agent-")
     );
     assert!(!dir.exists(), "{}", dir.display());
+
+    // Only the allow-listed environment reaches it (cargo sets
+    // CARGO_MANIFEST_DIR for this test process).
+    let (program, args) = if cfg!(windows) {
+        ("cmd", vec!["/C".to_string(), "set".to_string()])
+    } else {
+        ("env", Vec::new())
+    };
+    let env = command::Command {
+        program: program.into(),
+        args,
+        system: command::SystemVia::Stdin,
+        pass_env: Vec::new(),
+    };
+    let seen = command::run_unchecked(&env, &prompt("", ""), T)
+        .unwrap()
+        .to_ascii_uppercase();
+    assert!(std::env::var_os("CARGO_MANIFEST_DIR").is_some());
+    assert!(
+        !seen.contains("CARGO_MANIFEST_DIR") && seen.contains("PATH="),
+        "{seen}"
+    );
 }
 
 #[test]
@@ -219,6 +245,7 @@ fn a_command_that_hangs_fails_or_is_missing_gives_a_plain_error() {
         program: program.into(),
         args,
         system: command::SystemVia::Stdin,
+        pass_env: Vec::new(),
     };
     let t0 = std::time::Instant::now();
     let e = command::run_unchecked(&slow, &prompt("", ""), Duration::from_millis(300)).unwrap_err();
@@ -234,6 +261,7 @@ fn a_command_that_hangs_fails_or_is_missing_gives_a_plain_error() {
         program: program.into(),
         args,
         system: command::SystemVia::Stdin,
+        pass_env: Vec::new(),
     };
     let e = command::run_unchecked(&fails, &prompt("", ""), T).unwrap_err();
     assert_eq!(e, "the agent program ended with exit code 3");
@@ -242,6 +270,7 @@ fn a_command_that_hangs_fails_or_is_missing_gives_a_plain_error() {
         program: "dagon-no-such-agent-program".into(),
         args: Vec::new(),
         system: command::SystemVia::Stdin,
+        pass_env: Vec::new(),
     };
     assert!(missing.program_path().is_none());
 }
@@ -290,4 +319,24 @@ fn an_agent_defined_only_in_a_toml_file_answers_through_command() {
         crate::consent::NOT_LINKED
     );
     std::fs::remove_dir_all(&h).unwrap();
+}
+
+/// Manual (network, the user's Claude Code login): the builtin claude-code
+/// way through DAGON's own spawn path (allow-listed environment, fresh
+/// folder, system file). One line in, no project data.
+/// `cargo test -p dagon-cli claude_code_answers -- --ignored`
+#[test]
+#[ignore]
+fn claude_code_answers_through_the_command_path() {
+    let a = Agents::load(None);
+    let (_, way) = a.way("claude", "claude-code").unwrap();
+    let Transport::Command(c) = &way.transport else {
+        panic!("command")
+    };
+    let p = prompt(
+        "Reply with one JSON object and nothing else.",
+        "Reply with exactly {\"answer\":\"ok\"}.",
+    );
+    let out = command::run_unchecked(c, &p, Duration::from_secs(180)).unwrap();
+    assert_eq!(reply_json(&out).unwrap()["answer"], "ok", "{out}");
 }

@@ -29,7 +29,8 @@ use dagon_topology::schema::{LinkKind, Node, Role, Topology};
 use serde::Deserialize;
 
 use crate::config::{read_topology, Config, Opts};
-use crate::paths::{contained, write_atomic};
+use crate::genfs;
+use crate::paths::contained;
 
 pub const SAMPLE: &str = include_str!("../../../topology/desk-demo.yaml");
 const FIRST_VERSION: &str = "0.1.0";
@@ -170,7 +171,8 @@ pub(crate) fn write(
     overwrite: bool,
     out: &mut Vec<Written>,
 ) -> Result<(), String> {
-    let path = contained(base, Path::new(rel))?;
+    // A link on the way is refused, never followed or replaced (genfs).
+    let path = genfs::checked(base, rel)?;
     let exists = path.exists();
     if exists && !overwrite {
         out.push(Written {
@@ -181,7 +183,7 @@ pub(crate) fn write(
     }
     let same = exists && std::fs::read_to_string(&path).is_ok_and(|t| t == text);
     if !same {
-        write_atomic(&path, text.as_bytes())?;
+        genfs::write(base, rel, text.as_bytes())?;
     }
     out.push(Written {
         path: rel.into(),
@@ -548,7 +550,7 @@ fn refresh_manifest(
     rendered: &str,
     out: &mut Vec<Written>,
 ) -> Result<(), String> {
-    let path = contained(base, Path::new(rel))?;
+    let path = genfs::checked(base, rel)?;
     let text = std::fs::read_to_string(&path).map_err(|e| format!("{rel}: {e}"))?;
     let mut doc: toml_edit::DocumentMut =
         text.parse().map_err(|_| format!("{rel} does not parse"))?;
@@ -600,17 +602,15 @@ fn refresh_manifest(
     let new = doc.to_string();
     let changed = new != text;
     if changed {
-        write_atomic(&path, new.as_bytes())?;
+        genfs::write(base, rel, new.as_bytes())?;
         // The lock file pins the old source; the next build writes a new
         // one (a crate without Cargo.lock is resolved once).
-        let lock = path.with_file_name("Cargo.lock");
-        match std::fs::remove_file(&lock) {
-            Ok(()) => out.push(Written {
-                path: rel.replace("Cargo.toml", "Cargo.lock"),
+        let lock = rel.replace("Cargo.toml", "Cargo.lock");
+        if genfs::remove(base, &lock)? {
+            out.push(Written {
+                path: lock,
                 action: "removed",
-            }),
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
-            Err(e) => return Err(format!("cannot remove {}: {e}", lock.display())),
+            });
         }
     }
     out.push(Written {
@@ -676,6 +676,12 @@ pub fn gen(
         }
         // A hop its firmware cannot do yet stops gen, by name.
         hop_placeholders(reg, t, n)?;
+        // A node folder reached through a link is the user's: refused, as
+        // for the generated protection files (the node is reported skipped).
+        if let Some(link) = genfs::link_in(base, &format!("nodes/{}", n.id))? {
+            r.skipped.push((n.id.clone(), genfs::link_reason(&link)));
+            continue;
+        }
         let files = match node_files(reg, t, n, src, base) {
             Ok(f) => f,
             Err(e) => {
@@ -741,7 +747,8 @@ pub fn add_build_tables(
         added.push(n.id.clone());
     }
     if !added.is_empty() {
-        write_atomic(config, doc.to_string().as_bytes())?;
+        let (dir, name) = split(config)?;
+        genfs::write(dir, &name, doc.to_string().as_bytes())?;
     }
     Ok(added)
 }
@@ -777,11 +784,25 @@ pub fn gen_command(args: &[&str]) -> Result<(), String> {
     for line in &lines {
         println!("{line}");
     }
-    let skipped = lines.iter().filter(|l| l.starts_with("skipped")).count();
-    if skipped > 0 {
-        return Err(format!("{skipped} node(s) not generated; see above"));
+    outcome(&lines)
+}
+
+/// How `dagon gen` ends: an error naming every node (or generated folder)
+/// it did not generate, with the reason, so the exit status is non-zero.
+pub(crate) fn outcome(lines: &[String]) -> Result<(), String> {
+    let skipped: Vec<&str> = lines
+        .iter()
+        .filter_map(|l| l.strip_prefix("skipped"))
+        .map(str::trim)
+        .collect();
+    if skipped.is_empty() {
+        return Ok(());
     }
-    Ok(())
+    Err(format!(
+        "{} not generated: {}",
+        skipped.len(),
+        skipped.join("; ")
+    ))
 }
 
 /// `dagon gen` for the project whose dagon.toml is `config`: the lines it
@@ -925,6 +946,20 @@ const CLAUDE_FILES: [(&str, &str); 4] = [
     ),
 ];
 
+/// `path` as its folder and its last name, for the genfs calls.
+fn split(path: &Path) -> Result<(&Path, String), String> {
+    let name = path
+        .file_name()
+        .ok_or_else(|| format!("{} has no file name", path.display()))?
+        .to_string_lossy()
+        .to_string();
+    let dir = path
+        .parent()
+        .filter(|d| !d.as_os_str().is_empty())
+        .unwrap_or(Path::new("."));
+    Ok((dir, name))
+}
+
 /// Creates the project folder: dagon.toml, topology.yaml, .gitignore, the
 /// Claude Code files and,
 /// when `keys` holds none, a signing key pair there (outside any git work
@@ -946,7 +981,7 @@ pub fn new_project(
     let written = files
         .into_iter()
         .chain(CLAUDE_FILES)
-        .try_for_each(|(f, text)| write_atomic(&dir.join(f), text.as_bytes()));
+        .try_for_each(|(f, text)| genfs::write(dir, f, text.as_bytes()));
     let made = written.and_then(|_| init_project(dir, name, "topology.yaml", keys, src));
     let mut made = match made {
         Ok(m) => m,
@@ -974,19 +1009,20 @@ fn undo_new(dir: &Path, existed: bool) {
     .into_iter()
     .chain(CLAUDE_FILES)
     {
-        let p = dir.join(f);
-        let _ = std::fs::remove_file(&p);
+        let _ = genfs::remove(dir, f);
         // Folders the file needed, innermost first; only while empty.
-        let mut up = p.parent();
-        while let Some(d) = up.filter(|d| *d != dir) {
-            if std::fs::remove_dir(d).is_err() {
+        let mut up = Path::new(f).parent();
+        while let Some(d) = up.filter(|d| !d.as_os_str().is_empty()) {
+            if !genfs::remove_empty_dir(dir, &d.to_string_lossy()) {
                 break;
             }
             up = d.parent();
         }
     }
     if !existed {
-        let _ = std::fs::remove_dir(dir);
+        if let Ok((parent, name)) = split(dir) {
+            genfs::remove_empty_dir(parent, &name);
+        }
     }
 }
 
@@ -1027,7 +1063,7 @@ pub fn init_project(
          [dagon]\n{}",
         src.toml()
     );
-    write_atomic(&config, toml.as_bytes())?;
+    genfs::write(dir, crate::config::CONFIG_FILE, toml.as_bytes())?;
     made.push("created    dagon.toml".into());
     Ok(made)
 }

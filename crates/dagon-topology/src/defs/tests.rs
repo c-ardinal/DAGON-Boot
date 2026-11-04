@@ -301,6 +301,7 @@ gpio_count = 16
 name = "fake-1m"
 base = 0x0010_0000
 bytes = 0x10_0000
+xip = true
 
 [layout]
 app_log = { faces = [0x0010_8000, 0x0010_9000], face_size = 0x1000 }
@@ -1214,4 +1215,21 @@ fn a_board_added_in_an_earlier_folder_changes_no_default_and_no_check() {
     let none = Registry::load(&[Source::Tree(&root)]).unwrap();
     assert!(none.default_board("stm32f401re").is_none());
     let _ = std::fs::remove_dir_all(&root);
+}
+
+/// `builtin-files.txt` lists exactly the files the builtin definitions
+/// embed; scripts/page.py hashes them, so a definition change makes the
+/// page stale. Regenerate with `DAGON_BLESS=1 cargo test -p dagon-topology`.
+#[test]
+fn the_list_of_embedded_files_is_what_the_build_embeds() {
+    let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("builtin-files.txt");
+    let want: String = BUILTIN_FILES.iter().map(|f| format!("{f}\n")).collect();
+    if std::env::var_os("DAGON_BLESS").is_some() {
+        std::fs::write(&path, &want).unwrap();
+    }
+    let have = std::fs::read_to_string(&path)
+        .unwrap_or_default()
+        .replace("\r\n", "\n");
+    assert_eq!(have, want, "rerun with DAGON_BLESS=1 to accept");
+    assert!(BUILTIN_FILES.contains(&"targets/mcu/esp32s3/partitions.csv"));
 }

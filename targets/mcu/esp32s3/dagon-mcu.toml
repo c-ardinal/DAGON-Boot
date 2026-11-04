@@ -10,6 +10,8 @@ partitions = "partitions.csv"
 
 [[flash_map]]
 name = "esp32s3-16m"
+# Addresses are flash offsets; images run MMU-mapped.
+xip = false
 base = 0x0
 bytes = 0x100_0000
 

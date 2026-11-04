@@ -100,7 +100,7 @@ export const BAND = {
   M18b: { sentence: '何も書いていないので、別のファイルを選んでください。' },
   M19: { sentence: '何も書いていないので、別のファイルを選んでください。' },
   M20: { sentence: '何も書いていないので、この構成向けのファイルを選んでください。' },
-  M22: { sentence: '終わるまで電源と USB を抜かず、このページを開いたままにしてください（止まっても前のバージョンのまま動きます）。' },
+  M22: { sentence: '終わるまで電源と USB を抜かず、このページを開いたままにしてください。途中で止まっても、ノードは前のバージョンのまま動きます。' },
   M33: { sentence: '基板どうしの配線が抜けていないか確かめてから、もう一度直してください。' },
   M34: { sentence: 'USB ケーブルを挿し直してから、もう一度つないでください。' },
   M35: { chip: '× 作れない', sentence: 'そのフォルダに書き込めるか確かめてから、もう一度選んでください。' },
@@ -412,6 +412,9 @@ export const AGENT = {
 } as const;
 
 /** The bottom drawer (DES-UX3-015) and its tabs. */
+/** The floating sheet's spoken name (round8d #66). */
+export const SHEET = '選んだものの詳細';
+
 export const DRAWER = {
   label: '下の引き出し',
   problems: '問題',
@@ -428,16 +431,18 @@ export const CANVAS = {
   pcBy: { 'pc-cli': 'パソコン（dagon）', browser: 'ブラウザ（パソコン・スマホ）', embedded: '自作の機器' } as Record<string, string>,
   /** C02 */
   empty: '親機を USB でパソコンにつないでから、『つないで、自動で見つける』を押してください。',
+  /** After the uplink card of a 親機 this page is not connected to (round8d #18). */
+  notThisPc: '（このパソコンとはつながっていない）',
   /** S17: canvas description for screen readers. */
   describe: '矢印でノードを移り、Enter で選びます。ほかのキーは「困ったとき」の「キー操作」にあります。',
   /** M49 dot-number labels. */
   dotResponding: '応答',
   dotFound: '発見',
   /** M49 during an update, and after it stopped. */
-  dotProgress: '進捗',
+  dotProgress: '更新の進み具合',
   dotPercent: '%',
   dotStopped: '% 停止',
-  dotProgressName: (n: number, stopped: boolean) => `進捗 ${n}%${stopped ? '、停止' : ''}`,
+  dotProgressName: (n: number, stopped: boolean) => `更新の進み具合 ${n}%${stopped ? '、停止' : ''}`,
   dotRespondingName: (n: number, of: number) => `応答 ${n}/${of}、${of} つのノードのうち ${n} つが応答`,
   dotFoundName: (n: number) => `発見 ${n}`,
   /** S19 */
@@ -665,7 +670,7 @@ export const ANNOUNCE = {
   A10topology: '構成 不一致',
   A10format: '更新ファイルではない',
   A11: (name: string) => `${name} 書き込み`,
-  A11percent: (n: number) => `進捗 ${n}%`,
+  A11percent: (n: number) => `更新の進み具合 ${n}%`,
   A12: '親機 再起動中、自動で再接続',
   A13: (name: string) => `更新 停止、${name}`,
   A13previous: (name: string) => `${name} 前のバージョン`,
@@ -839,7 +844,7 @@ export const INSPECT = {
   role: '役割',
   roles: { coordinator: '親機', node: '子機' } as Record<string, string>,
   product: '製品名 · MCU',
-  connectTo: 'つなぐ先',
+  connectTo: 'つながる親',
   none: 'なし',
   reset: 'リセット',
   boot: '起動',
@@ -875,8 +880,8 @@ export const INSPECT = {
     'wifi-tcp': 'Wi-Fi（TCP）',
   } as Record<string, string>,
   /** The 親機's hop towards the PC (案). */
-  uplink: '上流へのつながり',
-  uplinkHost: 'つなぐ先',
+  uplink: '接続元',
+  uplinkHost: '接続元の機器',
   hosts: { 'pc-cli': 'パソコンの dagon', browser: 'ブラウザ（パソコン・スマートフォン）', embedded: '自作の機器' } as Record<string, string>,
   /** On a kind the firmware does not implement yet (案). */
   notYet: 'まだ使えない',
@@ -986,7 +991,7 @@ export const FLASH = {
   write: '書き込む',
   /** How each MCU is connected comes from its definition ([connection], dagon-wasm's mcu_connection). */
   via: 'つなぎ方',
-  hubFirst: '親機から書き込んでください（親機が無いと子機を確かめられません）。',
+  hubFirst: '親機がないと子機を確かめられないので、親機から順に書き込みます。',
   /** 案: the confirmation before serve writes the board (its job question). */
   confirm: (name: string) => `${name} に書き込みます。よろしいですか。`,
   /** 案: a family serve's flash does not write yet (ESP32-S3). */
@@ -1021,7 +1026,7 @@ export const SAVE = {
   /** 422 in dagon demo: an uplink the demo cannot simulate (案). */
   demoLink: {
     chip: '× デモでは使えないつながり',
-    sentence: 'デモで試せる親機のつながりは USB・UART・Wi-Fi（つなぐ先はパソコンかブラウザ）です。そのどれかを選んでください。',
+    sentence: 'デモで試せる親機の接続元は、パソコンかブラウザから USB・UART・Wi-Fi でつないだものです。そのどれかを選んでください。',
   },
   /** 409: a job holds the project. */
   busy: { chip: '× 作業中', sentence: '作業が終わってから、もう一度保存してください。' },

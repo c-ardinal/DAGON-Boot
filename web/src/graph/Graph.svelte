@@ -238,7 +238,8 @@
 
   function l0Of(n: Node): string {
     if (connected && n.id === firstHub) return CANVAS.pc;
-    return n.uplink ? (CANVAS.pcBy[n.uplink.host] ?? CANVAS.pc) : CANVAS.pc;
+    const by = n.uplink ? (CANVAS.pcBy[n.uplink.host] ?? CANVAS.pc) : CANVAS.pc;
+    return n.id === firstHub ? by : `${by}${CANVAS.notThisPc}`;
   }
 
   function spokenName(n: Node, m: Mark, version: string): string {

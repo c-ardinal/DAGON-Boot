@@ -6,6 +6,12 @@ const text = (rel: string) => new TextDecoder().decode(readFileSync(new URL(`../
 const mcu = (id: string, files: [string, string][] = []) => ({ label: id, toml: text(`targets/mcu/${id}/dagon-mcu.toml`), files });
 const board = (id: string) => ({ label: id, toml: text(`targets/boards/${id}/dagon-board.toml`) });
 
+/** The builtin set: every board package of the tree, in folder-name order (so it holds the fixtures below). */
+const expectBuiltin = (ids: string[]) => {
+  expect(ids).toEqual([...ids].sort());
+  for (const id of ['waveshare-rp2040-touch-lcd-1.28', 'nucleo-f401re', 'm5stopwatch']) expect(ids).toContain(id);
+};
+
 /** What GET /v1/definitions sends for the builtin set plus a project's own board. */
 const served = JSON.stringify({
   mcus: [mcu('rp2040'), mcu('stm32f401re'), mcu('esp32s3', [['partitions.csv', text('targets/mcu/esp32s3/partitions.csv')]])],
@@ -27,8 +33,7 @@ describe('definitions from dagon serve', () => {
 
   test('none (no serve, an older serve) is the builtin set', () => {
     expect(useDefinitions(null)).toBe('builtin');
-    // The builtin set is every package folder of the tree, in folder-name order.
-    expect(supportedBoards().map((b) => b.id)).toEqual(['m5stopwatch', 'nucleo-f401re', 'waveshare-rp2040-touch-lcd-1.28']);
+    expectBuiltin(supportedBoards().map((b) => b.id));
     expect(mcuConnection('rp2040')).not.toBeNull();
   });
 
@@ -56,11 +61,11 @@ describe('definitions from dagon serve', () => {
     const ids = () => supportedBoards().map((b) => b.id);
     expect(useDefinitions(served)).toBe('loaded');
     expect(useDefinitions(null)).toBe('builtin');
-    expect(ids()).toEqual(['m5stopwatch', 'nucleo-f401re', 'waveshare-rp2040-touch-lcd-1.28']);
+    expectBuiltin(ids());
     expect(useDefinitions(served)).toBe('loaded');
     expect(useDefinitions('{"mcus": []}')).toBe('blocked');
     expect(ids()).toEqual([]);
     expect(useDefinitions(null)).toBe('builtin');
-    expect(ids()).toEqual(['m5stopwatch', 'nucleo-f401re', 'waveshare-rp2040-touch-lcd-1.28']);
+    expectBuiltin(ids());
   });
 });

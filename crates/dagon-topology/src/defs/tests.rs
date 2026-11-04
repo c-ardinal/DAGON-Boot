@@ -19,10 +19,62 @@ fn source_root() -> PathBuf {
 // The values below are the port registry, flash maps and board table
 // the topology checks held (boards.rs) before they read the definitions.
 
+/// The ids of the definitions in the package folders under
+/// `targets/<dir>`, in folder-name order: the builtin set as the tree has it.
+pub(super) fn tree_ids(dir: &str, file: &str) -> Vec<String> {
+    let mut folders: Vec<PathBuf> = std::fs::read_dir(source_root().join("targets").join(dir))
+        .unwrap()
+        .flatten()
+        .map(|e| e.path())
+        .filter(|p| p.join(file).is_file())
+        .collect();
+    folders.sort();
+    folders
+        .iter()
+        .map(|f| {
+            let t: toml::Table = std::fs::read_to_string(f.join(file))
+                .unwrap()
+                .parse()
+                .unwrap();
+            t["id"].as_str().unwrap().to_string()
+        })
+        .collect()
+}
+
+/// Folders under the builtin roots that are not definition packages.
+const NOT_PACKAGES: &[(&str, &str)] = &[("mcu", "build"), ("mcu", "common")];
+
+#[test]
+fn every_folder_under_the_builtin_roots_is_a_package_or_listed_as_not_one() {
+    for (dir, file) in [("mcu", "dagon-mcu.toml"), ("boards", "dagon-board.toml")] {
+        for e in std::fs::read_dir(source_root().join("targets").join(dir))
+            .unwrap()
+            .flatten()
+        {
+            let name = e.file_name().to_string_lossy().to_string();
+            if !e.path().is_dir() {
+                continue;
+            }
+            let listed = NOT_PACKAGES.contains(&(dir, name.as_str()));
+            assert_ne!(
+                e.path().join(file).is_file(),
+                listed,
+                "targets/{dir}/{name}: a package needs {file}; a folder without one is listed in NOT_PACKAGES"
+            );
+        }
+    }
+}
+
+#[test]
+fn the_builtin_set_is_every_package_folder() {
+    let mcus: Vec<&str> = reg().mcus().iter().map(|m| m.id.as_str()).collect();
+    assert_eq!(mcus, tree_ids("mcu", "dagon-mcu.toml"));
+    let boards: Vec<&str> = reg().boards().iter().map(|b| b.id.as_str()).collect();
+    assert_eq!(boards, tree_ids("boards", "dagon-board.toml"));
+}
+
 #[test]
 fn mcus_match_the_port_registry() {
-    let ids: Vec<&str> = reg().mcus().iter().map(|m| m.id.as_str()).collect();
-    assert_eq!(ids, ["esp32s3", "rp2040", "stm32f401re"]);
     for (id, port, gpio_count) in [
         ("rp2040", "self-boot", 30),
         ("stm32f401re", "self-boot", 0),
@@ -53,8 +105,8 @@ fn flash_maps_match_the_table() {
         ("rp2040-4m", "rp2040", 4 << 20),
         ("f401-default", "stm32f401re", 512 << 10),
     ];
-    assert_eq!(all, table);
     for (name, mcu, bytes) in table {
+        assert!(all.contains(&(name, mcu, bytes)), "{name}");
         let (m, f) = reg().flash_map(name).unwrap();
         assert_eq!((m.id.as_str(), f.bytes), (mcu, bytes));
         // The first map of an MCU is its default (one each here).
@@ -175,10 +227,9 @@ const FORMER_BOARDS: [Former; 3] = [
 #[test]
 fn boards_match_the_table_field_for_field() {
     let ids: Vec<&str> = reg().boards().iter().map(|b| b.id.as_str()).collect();
-    // Builtin definitions load in folder-name order.
-    let mut former: Vec<&str> = FORMER_BOARDS.iter().map(|b| b.id).collect();
-    former.sort();
-    assert_eq!(ids, former);
+    for t in &FORMER_BOARDS {
+        assert!(ids.contains(&t.id), "{}", t.id);
+    }
     for t in &FORMER_BOARDS {
         let b = reg().board(t.id).unwrap();
         let m = reg().mcu(&b.mcu).unwrap();

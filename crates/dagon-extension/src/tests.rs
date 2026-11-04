@@ -4,7 +4,7 @@
 use dagon_catalog::Layer;
 use dagon_topology::defs::{Binding, BoardDef, McuDef, Registry};
 
-use crate::kind::{self, Access, Purpose, Space};
+use crate::kind::{self, Access, Memory, Purpose, Space};
 use crate::node::{self, Ext, Image};
 use crate::{gen, EventKind, Known, Manifest};
 
@@ -678,6 +678,8 @@ fn boot_wiring_is_the_golden_copy_and_compiles() {
     assert_eq!(golden::MAPS.len(), 2);
     assert_eq!(golden::MAPS[0].maps[0].0, "display");
     assert_eq!(golden::READ_BACK[0].expect, 8);
+    let regions = golden::MAPS[0].maps[0].1;
+    assert!(regions.iter().all(|r| r.device == (r.number >= 3)));
     assert!(!golden::LED.unwrap().active_high);
     let _chain: golden::BootChain = golden::BOOT_CHAIN;
 }
@@ -745,4 +747,76 @@ fn linker_fragments_and_the_readable_map_follow_the_plan() {
     let v: toml::Table = t.parse().unwrap();
     assert_eq!(v["kind"].as_str(), Some("armv7m-mpu"));
     assert_eq!(v["image"].as_array().unwrap().len(), 2);
+}
+
+/// A synthetic cached Cortex-M7 (16-region ARMv7-M MPU) with `isolation`
+/// lines added, planned with one window.
+fn cortex_m7(isolation: &str) -> Result<node::ImagePlan<'static>, String> {
+    let text = synthetic("armv7m-mpu", 16, 32, 1, "").replace(
+        "ext_ram_max = 65_536\n",
+        &format!("ext_ram_max = 65_536\n{isolation}"),
+    );
+    let reg = Box::leak(Box::new(registry(
+        &text,
+        &[],
+        &board_for("synth", "t", &[("b0", "w0")]),
+    )));
+    let (def, board) = parts(reg);
+    let m = Box::leak(Box::new(ext_manifest("cached", &["b0"])));
+    node::plan(def, Some(board), Image::Bootcore, vec![ext(m)], &known())
+}
+
+#[test]
+fn caches_and_tcm_are_honoured_or_refused_by_field() {
+    // An instruction cache: windows are device memory, the rest normal.
+    let plan = cortex_m7("cache = \"i-cache\"\n").unwrap();
+    let regions = &plan.maps[0].1.exts[0].regions;
+    for r in regions {
+        let want = if matches!(r.purpose, Purpose::Window(_)) {
+            Memory::Device
+        } else {
+            Memory::Normal
+        };
+        assert_eq!(r.memory, want, "{}", r.purpose);
+    }
+    // A data cache needs non-cacheable bounce buffers; TCM needs placement.
+    let e = cortex_m7("cache = \"id-cache\"\n").unwrap_err();
+    assert!(e.contains("isolation.cache = \"id-cache\""), "{e}");
+    let e = cortex_m7("tcm = [{ at = 0x2000_0000, size = 0x1_0000 }]\n").unwrap_err();
+    assert!(e.contains("isolation.tcm"), "{e}");
+}
+
+#[test]
+fn check_holds_windows_to_device_memory_away_from_memory() {
+    let plan = cortex_m7("").unwrap();
+    let reg = registry(
+        &synthetic("armv7m-mpu", 16, 32, 1, ""),
+        &[],
+        &board_for("synth", "t", &[("b0", "w0")]),
+    );
+    let (def, _) = parts(&reg);
+    let k = kind::for_kind(def.isolation().kind).unwrap();
+    let good = plan.maps[0].1.clone();
+    assert_eq!(k.check(def, &good), []);
+    let broken = |f: &dyn Fn(&mut kind::Region)| {
+        let mut m = good.clone();
+        f(m.exts[0].regions.last_mut().unwrap());
+        k.check(def, &m)
+            .into_iter()
+            .map(|v| v.0)
+            .collect::<Vec<_>>()
+            .join("; ")
+    };
+    let e = broken(&|r| r.memory = Memory::Normal);
+    assert!(e.contains("must be device memory"), "{e}");
+    let e = broken(&|r| {
+        r.base = 0x2000_0000;
+        r.size = 0x400;
+    });
+    assert!(e.contains("window reaches RAM"), "{e}");
+    let e = broken(&|r| {
+        r.base = 0x0802_0000;
+        r.size = 0x400;
+    });
+    assert!(e.contains("window reaches flash"), "{e}");
 }

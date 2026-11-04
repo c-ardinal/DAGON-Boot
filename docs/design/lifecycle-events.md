@@ -983,10 +983,12 @@ kind behind one trait, used by `dagon gen` and by the test:
 
 ```rust
 pub trait ProtectionKind {
-    fn plan(&self, def: &McuDef, exts: &[ExtLayout]) -> Result<Map, Refusal>;   // regions / entries / worlds
-    fn check(&self, def: &McuDef, map: &Map) -> Vec<Violation>;                  // alignment, overlap, attributes, privileged blocks outside every allowed range, fixed regions present
-    fn unwind(&self) -> UnwindKind;
+    fn kind(&self) -> Kind;                                                      // the definition's `kind` it serves
+    fn plan(&self, def: &McuDef, space: &Space, exts: &[ExtLayout]) -> Result<Map, Refusal>;   // regions / entries / worlds inside the image's flash body and RAM (`space`)
+    fn check(&self, def: &McuDef, map: &Map) -> Vec<Violation>;                  // alignment, overlap, attributes and memory type, privileged blocks and memory outside every window, fixed regions present
+    fn unwind(&self) -> Unwind;                                                  // the definition's `unwind` value for the kind
     fn guarantees(&self) -> Guarantees;                                          // what 4.5 prints for the level
+    fn read_back(&self, def: &McuDef) -> Vec<ReadBack>;                          // registers the MCU package reads at boot and in conformance, with the values the record states
 }
 ```
 
@@ -1276,11 +1278,14 @@ Kinds that are not among the first three MCUs but fit the same schema:
 - **Cortex-M7 and other cached cores**: the `armv7m-mpu` row of the kind
   table; the definition states `cache = "id-cache"` and the TCM
   ranges. The generator marks capability windows Device (non-cacheable)
-  and places the DMA bounce buffers in a non-cacheable region (a DTCM
-  range, or an MPU region with the non-cacheable attribute); the DMA
-  services clean before a transmit and invalidate after a receive when
-  the buffer is cacheable; `.ext.text` may live in flash or ITCM, and
-  the unwinding is unchanged.
+  and code, data and stacks Normal, and places the DMA bounce buffers in
+  a non-cacheable region (a DTCM range, or an MPU region with the
+  non-cacheable attribute); the DMA services clean before a transmit and
+  invalidate after a receive when the buffer is cacheable; `.ext.text`
+  may live in flash or ITCM, and the unwinding is unchanged. A generator
+  that does not place bounce buffers or TCM regions refuses a definition
+  with a data cache or TCM at `plan`, naming the field, rather than
+  ignoring it.
 - **A dual-core MCU where DAGON uses one core**: the other core is
   listed under `[[core]]`, its launch and inter-core blocks are
   `core-control`, and the map is applied on every core where the kind

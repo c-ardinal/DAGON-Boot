@@ -59,8 +59,11 @@ capabilities the board does not declare, a peripheral that is not
 window-eligible, stack and RAM over the MCU's `ext_ram_max`, boot calls
 over a quarter of the trial watchdog period, more windows than the
 protection unit has regions after code, data and stack, regions that do
-not fit the image, and a window that would also open a block the
-extension did not declare.
+not fit the image, a window that would also open a block the
+extension did not declare, and an MCU whose data cache (`cache =
+"id-cache"`) or tightly coupled memory (`tcm`) the kind's generator does
+not place bounce buffers or regions for. Windows are device memory (never
+cached); code, data and stacks are normal memory.
 
 ## Generated files (`nodes/<id>/dagon/`)
 

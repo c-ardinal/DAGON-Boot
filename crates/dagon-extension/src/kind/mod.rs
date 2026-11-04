@@ -52,6 +52,24 @@ impl Access {
     }
 }
 
+/// The memory type a region gives its accesses.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Memory {
+    /// Code and data: normal memory (cacheable where the core caches).
+    Normal,
+    /// A register block: device memory, never cached, accesses in order.
+    Device,
+}
+
+impl Memory {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Normal => "normal",
+            Self::Device => "device",
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Purpose {
     /// `.ext.text`, `.ext.rodata` and the data load image.
@@ -62,6 +80,16 @@ pub enum Purpose {
     Stack,
     /// A declared peripheral.
     Window(String),
+}
+
+impl Purpose {
+    /// The memory type a region of this purpose must have.
+    pub fn memory(&self) -> Memory {
+        match self {
+            Self::Window(_) => Memory::Device,
+            _ => Memory::Normal,
+        }
+    }
 }
 
 impl fmt::Display for Purpose {
@@ -85,6 +113,7 @@ pub struct Region {
     pub disabled: u8,
     pub access: Access,
     pub execute: bool,
+    pub memory: Memory,
     pub purpose: Purpose,
 }
 

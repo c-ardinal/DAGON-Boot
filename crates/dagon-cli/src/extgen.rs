@@ -219,6 +219,33 @@ fn plan_files(
     Ok((files, notes))
 }
 
+/// Removes the files an earlier gen wrote for node `id`, so a refused set
+/// never leaves a build reading the previous set's map; returns the lines
+/// reporting each removal.
+fn remove_stale(base: &Path, id: &str) -> Result<Vec<String>, String> {
+    let rel = format!("nodes/{id}/dagon");
+    let dir = contained(base, Path::new(&rel))?;
+    let Ok(entries) = std::fs::read_dir(&dir) else {
+        return Ok(Vec::new());
+    };
+    let mut names: Vec<String> = entries
+        .flatten()
+        .map(|e| e.file_name().to_string_lossy().to_string())
+        .filter(|n| {
+            n == "boot_wiring.rs"
+                || n == "protection.toml"
+                || (n.starts_with("memory-") && n.ends_with(".x"))
+        })
+        .collect();
+    names.sort();
+    let mut out = Vec::new();
+    for name in names {
+        std::fs::remove_file(dir.join(&name)).map_err(|e| format!("{rel}/{name}: {e}"))?;
+        out.push(format!("{:<10} {rel}/{name}", "removed"));
+    }
+    Ok(out)
+}
+
 /// Writes the extension files of the nodes `only` names (all when
 /// empty); returns gen's report lines (written, skipped with the refusal,
 /// notes).
@@ -260,7 +287,10 @@ pub fn write_nodes(
                 );
                 lines.extend(notes);
             }
-            Err(why) => lines.push(format!("skipped    nodes/{}/dagon: {why}", n.id)),
+            Err(why) => {
+                lines.push(format!("skipped    nodes/{}/dagon: {why}", n.id));
+                lines.extend(remove_stale(base, &n.id)?);
+            }
         }
     }
     Ok(lines)
@@ -375,11 +405,23 @@ text_bytes = 2048
         let base = scratch("refused");
         let reg = Registry::builtin();
         let seg = [node("seg", "stm32f401re", "nucleo-f401re", "node")];
+        write_nodes(reg, &base, &seg, &[], &cfg(&["logger"])).unwrap();
+        assert!(base.join("nodes/seg/dagon/boot_wiring.rs").is_file());
+        // A refused set removes what the previous gen wrote for the node.
         let lines = write_nodes(reg, &base, &seg, &[], &cfg(&["nope"])).unwrap();
         assert_eq!(
-            lines,
-            ["skipped    nodes/seg/dagon: extension nope is in no folder of [extensions] packages"]
+            lines[0],
+            "skipped    nodes/seg/dagon: extension nope is in no folder of [extensions] packages"
         );
+        assert!(
+            lines[1..].iter().all(|l| l.starts_with("removed")),
+            "{lines:?}"
+        );
+        assert!(lines
+            .iter()
+            .any(|l| l.ends_with("nodes/seg/dagon/memory-boot-a.x")));
+        assert!(!base.join("nodes/seg/dagon/boot_wiring.rs").exists());
+        assert!(!base.join("nodes/seg/dagon/protection.toml").exists());
         let watch = [node("seg", "esp32s3", "m5stopwatch", "node")];
         let lines = write_nodes(reg, &base, &watch, &[], &cfg(&["logger"])).unwrap();
         assert!(

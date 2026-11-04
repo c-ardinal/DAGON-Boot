@@ -266,6 +266,12 @@ fn missing_classes_and_bus_master_windows_are_refused() {
             "say why",
         ),
         ("base = 0x4000_4800", "base = 0x4000_6600", "overlaps"),
+        ("base = 0x4000_4800", "base = 0x2000_0000", "overlaps ram"),
+        (
+            "base = 0x4000_4800",
+            "base = 0x0010_0000",
+            "overlaps a flash map",
+        ),
         ("[[core]]\nid = \"cpu0\"\n", "", "[[core]]"),
     ] {
         let e = mcu_err(&isolated(from, to));
@@ -374,4 +380,17 @@ fn board_boot_tables_are_checked_against_board_and_mcu() {
     );
     let e = requirements::check_board(&board(&long), &m).unwrap_err();
     assert!(e.contains("over the 50 ms"), "{e}");
+}
+
+#[test]
+fn kind_names_round_trip_through_the_definition_format() {
+    #[derive(serde::Deserialize)]
+    struct K {
+        kind: Kind,
+    }
+    for r in super::isolation::KIND_RULES {
+        let k: K = toml::from_str(&format!("kind = {:?}", r.name)).unwrap();
+        assert_eq!(k.kind, r.kind, "{}", r.name);
+        assert_eq!(r.kind.as_str(), r.name);
+    }
 }

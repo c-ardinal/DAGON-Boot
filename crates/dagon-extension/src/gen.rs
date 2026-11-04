@@ -151,6 +151,9 @@ pub struct Region {
     pub disabled: u8,
     pub writable: bool,
     pub execute: bool,
+    /// Device memory (a register block: never cached, accesses in order);
+    /// else normal memory.
+    pub device: bool,
 }
 
 /// One extension of the chain, in chain order.
@@ -342,13 +345,14 @@ fn chain(out: &mut String, exts: &[Ext<'_>]) {
 
 fn region_lit(r: &kind::Region) -> String {
     format!(
-        "Region {{ number: {}, base: {:#010x}, size: {:#x}, disabled: {:#04x}, writable: {}, execute: {} }}",
+        "Region {{ number: {}, base: {:#010x}, size: {:#x}, disabled: {:#04x}, writable: {}, execute: {}, device: {} }}",
         r.number,
         r.base,
         r.size,
         r.disabled,
         r.access == kind::Access::ReadWrite,
-        r.execute
+        r.execute,
+        r.memory == kind::Memory::Device
     )
 }
 
@@ -558,8 +562,8 @@ pub fn protection_map(node: &str, def: &McuDef, plans: &[ImagePlan<'_>]) -> Stri
                 for r in &e.regions {
                     let _ = writeln!(
                         out,
-                        "  {{ number = {}, base = \"{:#010x}\", size = \"{:#x}\", disabled = \"{:#04x}\", access = {:?}, execute = {}, purpose = {:?} }},",
-                        r.number, r.base, r.size, r.disabled, r.access.as_str(), r.execute, r.purpose.to_string()
+                        "  {{ number = {}, base = \"{:#010x}\", size = \"{:#x}\", disabled = \"{:#04x}\", access = {:?}, execute = {}, memory = {:?}, purpose = {:?} }},",
+                        r.number, r.base, r.size, r.disabled, r.access.as_str(), r.execute, r.memory.as_str(), r.purpose.to_string()
                     );
                 }
                 out.push_str("]\n");

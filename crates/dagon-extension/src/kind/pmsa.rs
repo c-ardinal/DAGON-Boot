@@ -4,10 +4,12 @@
 //! `PRIVDEFENA` giving DAGON the background map. The two kinds differ in
 //! the numbers their capability records allow and in fault reporting.
 
-use dagon_topology::defs::isolation::Kind;
+use dagon_topology::defs::isolation::{Cache, Kind};
 use dagon_topology::defs::{McuDef, Peripheral};
 
-use super::{Access, ExtLayout, ExtMap, Map, Purpose, ReadBack, Refusal, Region, Space, Violation};
+use super::{
+    Access, ExtLayout, ExtMap, Map, Memory, Purpose, ReadBack, Refusal, Region, Space, Violation,
+};
 
 /// Regions every extension has: code, data, stack.
 const FIXED: usize = 3;
@@ -103,6 +105,7 @@ fn window(def: &McuDef, p: &Peripheral, mine: &[String], prm: &Params) -> Result
         disabled,
         access: Access::ReadWrite,
         execute: false,
+        memory: Memory::Device,
         purpose: Purpose::Window(p.id.clone()),
     };
     let ranges = r.enabled();
@@ -145,6 +148,27 @@ fn place(top: u32, bottom: u32, sizes: &[u32], what: &str) -> Result<(Vec<u32>, 
     Ok((bases, cursor as u32))
 }
 
+/// What this generator does about caches: capability windows are device
+/// memory (never cached) and code, data and stacks normal memory. It
+/// places no DMA bounce buffer and nothing in tightly coupled memory, so a
+/// definition that needs either is refused here, by field.
+fn caches(def: &McuDef) -> Result<(), Refusal> {
+    let i = def.isolation();
+    if i.cache == Cache::IdCache {
+        return Err(Refusal(format!(
+            "isolation.cache = \"id-cache\" on {}: this generator places no non-cacheable DMA bounce buffer for a data cache",
+            def.id
+        )));
+    }
+    if !i.tcm.is_empty() {
+        return Err(Refusal(format!(
+            "isolation.tcm on {}: this generator places no extension region or bounce buffer in tightly coupled memory",
+            def.id
+        )));
+    }
+    Ok(())
+}
+
 /// `plan` for the PMSA kinds.
 pub(super) fn plan(
     kind: Kind,
@@ -154,6 +178,7 @@ pub(super) fn plan(
 ) -> Result<Map, Refusal> {
     let prm = params(def);
     let name = kind.as_str();
+    caches(def)?;
     let mut maps = Vec::new();
     let (mut texts, mut rams) = (Vec::new(), Vec::new());
     for e in exts {
@@ -222,6 +247,7 @@ pub(super) fn plan(
                 disabled,
                 access,
                 execute,
+                memory: Memory::Normal,
                 purpose,
             };
             let mut regions = vec![
@@ -333,6 +359,13 @@ fn check_region(def: &McuDef, prm: &Params, e: &ExtMap, r: &Region, out: &mut Ve
         Purpose::Text => (Access::ReadOnly, true),
         _ => (Access::ReadWrite, false),
     };
+    if r.memory != r.purpose.memory() {
+        v(format!(
+            "{} must be {} memory",
+            r.purpose,
+            r.purpose.memory().as_str()
+        ));
+    }
     if (r.access, r.execute) != (access, execute) {
         v(format!(
             "{} must be {} with execute {execute}",
@@ -377,10 +410,36 @@ fn check_region(def: &McuDef, prm: &Params, e: &ExtMap, r: &Region, out: &mut Ve
                 }
             }
         }
-        Purpose::Window(p) => match def.peripheral(p) {
-            Some(q) if ranges.iter().any(|&x| inside(span(q), x)) || inside(span(q), whole) => {}
-            _ => v(format!("does not hold peripheral {p}")),
-        },
+        Purpose::Window(p) => {
+            match def.peripheral(p) {
+                Some(q) if ranges.iter().any(|&x| inside(span(q), x)) || inside(span(q), whole) => {
+                }
+                _ => v(format!("does not hold peripheral {p}")),
+            }
+            // A window never reaches memory: RAM, flash, the image slots,
+            // the boot record or the fuse cells.
+            let flash = def.flash_maps.iter().map(|f| {
+                (
+                    "flash",
+                    (u64::from(f.base), u64::from(f.base) + u64::from(f.bytes)),
+                )
+            });
+            let mems = ram
+                .map(|m| ("RAM", m))
+                .into_iter()
+                .chain(flash)
+                .chain(bodies.iter().map(|b| ("an image slot", *b)));
+            for (what, m) in mems {
+                if ranges.iter().any(|&x| overlaps(x, m)) {
+                    v(format!("window reaches {what}"));
+                }
+            }
+            for (what, k) in kept(def) {
+                if ranges.iter().any(|&x| overlaps(x, k)) {
+                    v(format!("window reaches {what}"));
+                }
+            }
+        }
     }
 }
 

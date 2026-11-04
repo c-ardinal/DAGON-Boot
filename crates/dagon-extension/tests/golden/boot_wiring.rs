@@ -99,6 +99,9 @@ pub struct Region {
     pub disabled: u8,
     pub writable: bool,
     pub execute: bool,
+    /// Device memory (a register block: never cached, accesses in order);
+    /// else normal memory.
+    pub device: bool,
 }
 
 /// One extension of the chain, in chain order.
@@ -167,10 +170,10 @@ pub const MAPS: &[SlotMap] = &[
         slot: "a",
         maps: &[
             ("display", &[
-                Region { number: 0, base: 0x10027000, size: 0x1000, disabled: 0x00, writable: false, execute: true },
-                Region { number: 1, base: 0x2003f800, size: 0x800, disabled: 0x00, writable: true, execute: false },
-                Region { number: 2, base: 0x2003f000, size: 0x800, disabled: 0x01, writable: true, execute: false },
-                Region { number: 3, base: 0x40038000, size: 0x4000, disabled: 0x00, writable: true, execute: false },
+                Region { number: 0, base: 0x10027000, size: 0x1000, disabled: 0x00, writable: false, execute: true, device: false },
+                Region { number: 1, base: 0x2003f800, size: 0x800, disabled: 0x00, writable: true, execute: false, device: false },
+                Region { number: 2, base: 0x2003f000, size: 0x800, disabled: 0x01, writable: true, execute: false, device: false },
+                Region { number: 3, base: 0x40038000, size: 0x4000, disabled: 0x00, writable: true, execute: false, device: true },
             ]),
         ],
     },
@@ -178,10 +181,10 @@ pub const MAPS: &[SlotMap] = &[
         slot: "b",
         maps: &[
             ("display", &[
-                Region { number: 0, base: 0x10047000, size: 0x1000, disabled: 0x00, writable: false, execute: true },
-                Region { number: 1, base: 0x2003f800, size: 0x800, disabled: 0x00, writable: true, execute: false },
-                Region { number: 2, base: 0x2003f000, size: 0x800, disabled: 0x01, writable: true, execute: false },
-                Region { number: 3, base: 0x40038000, size: 0x4000, disabled: 0x00, writable: true, execute: false },
+                Region { number: 0, base: 0x10047000, size: 0x1000, disabled: 0x00, writable: false, execute: true, device: false },
+                Region { number: 1, base: 0x2003f800, size: 0x800, disabled: 0x00, writable: true, execute: false, device: false },
+                Region { number: 2, base: 0x2003f000, size: 0x800, disabled: 0x01, writable: true, execute: false, device: false },
+                Region { number: 3, base: 0x40038000, size: 0x4000, disabled: 0x00, writable: true, execute: false, device: true },
             ]),
         ],
     },

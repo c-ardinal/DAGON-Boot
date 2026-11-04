@@ -940,6 +940,21 @@ pub(super) fn peripherals(m: &McuDef) -> Result<(), String> {
         {
             return Err(format!("{at} overlaps peripheral '{}'", o.id));
         }
+        let memories = m
+            .ram
+            .map(|r| ("ram", (r.at, r.size)))
+            .into_iter()
+            .chain(
+                m.flash_maps
+                    .iter()
+                    .map(|f| ("a flash map", (f.base, f.bytes))),
+            )
+            .chain(m.slots.iter().map(|s| ("an image slot", (s.start, s.size))));
+        for (what, range) in memories {
+            fail(overlaps((p.base, p.size), range), || {
+                format!("{at} overlaps {what}: register blocks and memory never share addresses")
+            })?;
+        }
         fail(p.bus_master && p.window_eligible, || {
             format!("{at} is a bus master and can never be window-eligible")
         })?;

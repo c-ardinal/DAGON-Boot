@@ -189,6 +189,29 @@
 /// # fn main() {}
 /// ```
 ///
+/// A copy of a registered machine that differs in any catalog field (here
+/// one observer path) is not listed either:
+///
+/// ```compile_fail,E0080
+/// dagon_events::state_machine! {
+///     machine m in App {
+///         initial A;
+///         states { A }
+///         transitions { go(): A => A emits Went = 1 {} observe(live, replay); }
+///     }
+/// }
+/// mod copy {
+///     dagon_events::__machine! {
+///         machine m in App {
+///             initial A;
+///             states { A }
+///             transitions { go(): A => A emits Went = 1 {} observe(live); }
+///         }
+///     }
+/// }
+/// # fn main() {}
+/// ```
+///
 /// A `from` that filters on a value:
 ///
 /// ```compile_fail
@@ -638,17 +661,69 @@ pub const fn listed(m: &crate::Machines, c: &crate::Catalog) -> bool {
     false
 }
 
+/// `a` and `b` agree in every catalog field: what the docs, the registry
+/// and replay read.
 const fn same(a: &crate::Catalog, b: &crate::Catalog) -> bool {
-    if !str_eq(a.machine, b.machine)
-        || a.layer.code() != b.layer.code()
-        || a.entries.len() != b.entries.len()
-    {
+    str_eq(a.machine, b.machine)
+        && a.layer.code() == b.layer.code()
+        && str_eq(a.doc, b.doc)
+        && str_eq(a.initial, b.initial)
+        && strs_eq(a.states, b.states)
+        && entries_eq(a.entries, b.entries)
+}
+
+const fn strs_eq(a: &[&str], b: &[&str]) -> bool {
+    if a.len() != b.len() {
         return false;
     }
     let mut i = 0;
-    while i < a.entries.len() {
-        let (x, y) = (&a.entries[i], &b.entries[i]);
-        if x.code != y.code || !str_eq(x.kind, y.kind) || !str_eq(x.to, y.to) {
+    while i < a.len() {
+        if !str_eq(a[i], b[i]) {
+            return false;
+        }
+        i += 1;
+    }
+    true
+}
+
+const fn entries_eq(a: &[crate::Entry], b: &[crate::Entry]) -> bool {
+    if a.len() != b.len() {
+        return false;
+    }
+    let mut i = 0;
+    while i < a.len() {
+        if !entry_eq(&a[i], &b[i]) {
+            return false;
+        }
+        i += 1;
+    }
+    true
+}
+
+const fn entry_eq(x: &crate::Entry, y: &crate::Entry) -> bool {
+    x.layer.code() == y.layer.code()
+        && str_eq(x.machine, y.machine)
+        && str_eq(x.kind, y.kind)
+        && x.code == y.code
+        && str_eq(x.trigger, y.trigger)
+        && strs_eq(x.from, y.from)
+        && str_eq(x.to, y.to)
+        && fields_eq(x.payload, y.payload)
+        && x.observe.live == y.observe.live
+        && x.observe.replay == y.observe.replay
+        && x.observe.host == y.observe.host
+        && x.flags.action == y.flags.action
+        && x.flags.retired == y.flags.retired
+        && str_eq(x.doc, y.doc)
+}
+
+const fn fields_eq(a: &[crate::Field], b: &[crate::Field]) -> bool {
+    if a.len() != b.len() {
+        return false;
+    }
+    let mut i = 0;
+    while i < a.len() {
+        if !str_eq(a[i].name, b[i].name) || !str_eq(a[i].ty, b[i].ty) || a[i].bytes != b[i].bytes {
             return false;
         }
         i += 1;

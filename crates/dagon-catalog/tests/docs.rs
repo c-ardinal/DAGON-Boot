@@ -140,6 +140,63 @@ fn every_machine_crate_is_registered_once() {
     assert!(!machines().is_empty());
 }
 
+/// dagon-events' hidden items (its double-underscore macros, module,
+/// methods and fields) are reached only through its own macro
+/// expansions: no source file outside dagon-events' `src` names them.
+#[test]
+fn hidden_items_are_used_only_by_dagon_events() {
+    // Spelled in two parts so this file does not name them itself.
+    const HIDDEN: &[&str] = &[
+        concat!("_", "_machine"),
+        concat!("_", "_sm_from"),
+        concat!("_", "_dagon_events_state_machine_once_per_crate"),
+        concat!("_", "_private"),
+        concat!("_", "_new"),
+        concat!("_", "_replay"),
+        concat!("_", "_leaves"),
+        concat!("_", "_id_at"),
+        concat!("_", "_accept_at"),
+        concat!("_", "_reboot_at"),
+        concat!("_", "_check_at"),
+    ];
+    fn walk(dir: &std::path::Path, out: &mut Vec<PathBuf>) {
+        for e in std::fs::read_dir(dir).unwrap().flatten() {
+            let p = e.path();
+            let skip = matches!(
+                e.file_name().to_str(),
+                Some("target" | "node_modules" | ".git" | "vendor" | "pkg")
+            );
+            if p.is_dir() && !skip {
+                walk(&p, out);
+            } else if p.extension().is_some_and(|x| x == "rs") {
+                out.push(p);
+            }
+        }
+    }
+    let own = root()
+        .join("crates/dagon-events/src")
+        .canonicalize()
+        .unwrap();
+    let mut files = Vec::new();
+    walk(&root(), &mut files);
+    let mut found = Vec::new();
+    for f in files {
+        if f.canonicalize().unwrap().starts_with(&own) {
+            continue;
+        }
+        let text = std::fs::read_to_string(&f).unwrap_or_default();
+        for name in HIDDEN {
+            if text.contains(name) {
+                found.push(format!("{}: {name}", f.display()));
+            }
+        }
+    }
+    assert!(
+        found.is_empty(),
+        "hidden dagon-events items used outside it: {found:?}"
+    );
+}
+
 state_machine! {
     /// First.
     machine one in Boot {

@@ -164,8 +164,17 @@ pub fn handle(server: &Arc<Server>, req: &Request) -> Response {
             "not in dagon demo (a simulated desk with its own project)",
         );
     }
+    if parts.first() == Some(&"ai") && !agent_linked(server) {
+        return Response::json(
+            409,
+            &json!({ "error": crate::agent::NOT_LINKED, "code": crate::agent::NOT_LINKED_CODE }),
+        );
+    }
     let r = match (req.method.as_str(), parts.as_slice()) {
         ("GET", ["hello"]) => Ok(hello(server)),
+        ("GET", ["agent"]) => Ok(agent_get(server)),
+        ("POST", ["agent", "link"]) => agent_link(server, req),
+        ("DELETE", ["agent", "link"]) => agent_unlink(server),
         ("GET", ["targets"]) => targets(server),
         ("GET", ["definitions"]) => definitions(server),
         ("GET", ["topology"]) => topology_get(server),
@@ -205,7 +214,8 @@ pub fn handle(server: &Arc<Server>, req: &Request) -> Response {
 
 /// What dagon demo refuses: other projects (opening one would load its
 /// signing key) and everything that touches real hardware or the machine.
-const DEMO_REFUSED: [&str; 8] = [
+const DEMO_REFUSED: [&str; 9] = [
+    "agent/link",
     "project/open",
     "project/new",
     "project/init",
@@ -354,6 +364,42 @@ fn start(server: &Arc<Server>, req: &Request, kind: &str, work: Work) -> Res {
         Some(id) => Ok(accepted(id)),
         None => Err(Response::error(429, "too many jobs running")),
     }
+}
+
+fn agent_linked(server: &Server) -> bool {
+    super::project::home(server).is_ok_and(|h| crate::agent::is_linked(&h))
+}
+
+/// GET /v1/agent: whether DAGON can talk (this CLI has the key; never the
+/// key) and is linked, with what linking sends.
+fn agent_get(server: &Server) -> Response {
+    let home = super::project::home(server).ok();
+    json_ok(crate::agent::status(
+        home.as_deref(),
+        crate::ai::api_key_present(),
+    ))
+}
+
+/// POST /v1/agent/link {provider:"anthropic", consent:true}: records the
+/// user's consent; anything short of an explicit yes records nothing.
+fn agent_link(server: &Server, req: &Request) -> Res {
+    let v = body_json(req)?;
+    if v["provider"] != crate::agent::PROVIDER_ID {
+        return Err(Response::error(400, "provider must be anthropic"));
+    }
+    if v["consent"] != true {
+        return Err(Response::error(400, "consent must be true"));
+    }
+    let home = super::project::home(server)?;
+    crate::agent::link(&home).map_err(|e| Response::error(500, &e))?;
+    Ok(agent_get(server))
+}
+
+/// DELETE /v1/agent/link: withdraws the consent (done also when none was).
+fn agent_unlink(server: &Server) -> Res {
+    let home = super::project::home(server)?;
+    crate::agent::unlink(&home).map_err(|e| Response::error(500, &e))?;
+    Ok(agent_get(server))
 }
 
 /// Versions, work area, abilities; whether keys exist (never the keys).

@@ -300,7 +300,6 @@ fn release_and_conform_reads_reject_paths() {
     assert_eq!(http(&a, "GET", "/v1/release/..%2Fdagon", &h, b"").0, 400);
     assert_eq!(http(&a, "GET", "/v1/release/none", &h, b"").0, 404);
     assert_eq!(http(&a, "GET", "/v1/conform/seg", &h, b"").0, 404);
-    assert_eq!(http(&a, "POST", "/v1/ai/port", &h, b"{}").0, 501);
 }
 
 /// Opens the event stream and sends `first` as the first message.
@@ -1729,4 +1728,71 @@ fn build_output_reaches_the_page_without_local_folders() {
     {
         assert!(!all.contains(&local), "{local} reached the page: {all}");
     }
+}
+
+#[test]
+fn dagon_links_with_consent_once_and_ai_routes_wait_for_it() {
+    let (a, home) = with_home("agent-link");
+    let b = auth(&a);
+    let ok = [("Authorization", b.as_str())];
+    let agent =
+        |a: &Area| -> serde_json::Value { serde_json::from_str(&get(a, "/v1/agent").1).unwrap() };
+    let v = agent(&a);
+    assert_eq!(v["linked"], false);
+    assert_eq!(v["consent"], serde_json::Value::Null);
+    assert_eq!(v["provider"]["id"], "anthropic");
+    assert!(v["available"].is_boolean());
+    assert_eq!(v["sends"].as_array().unwrap().len(), 3);
+    assert_eq!(v["never_sends"].as_array().unwrap().len(), 3);
+
+    for path in ["/v1/ai/topology", "/v1/ai/port"] {
+        let (st, body) = post(&a, path, serde_json::json!({ "description": "a hub" }));
+        assert_eq!(st, 409, "{path}");
+        assert!(body.contains("\"code\":\"AGENT_NOT_LINKED\""), "{body}");
+    }
+    // Anything but an explicit yes for the one provider records nothing.
+    for body in [
+        serde_json::json!({ "provider": "anthropic" }),
+        serde_json::json!({ "provider": "anthropic", "consent": "true" }),
+        serde_json::json!({ "provider": "other", "consent": true }),
+    ] {
+        assert_eq!(post(&a, "/v1/agent/link", body).0, 400);
+    }
+    assert!(!home.join(".dagon/agent.json").exists());
+    let yes = br#"{"provider":"anthropic","consent":true}"#;
+    assert_eq!(http(&a, "POST", "/v1/agent/link", &[], yes).0, 401);
+    let cross = [
+        ("Origin", "https://example.com"),
+        ("Authorization", b.as_str()),
+    ];
+    assert_eq!(http(&a, "POST", "/v1/agent/link", &cross, yes).0, 403);
+
+    let (st, body) = http(&a, "POST", "/v1/agent/link", &ok, yes);
+    assert_eq!(st, 200, "{body}");
+    let v = agent(&a);
+    assert_eq!(v["linked"], true);
+    assert_eq!(v["consent"]["provider"], "anthropic");
+    assert!(v["consent"]["at"].as_str().unwrap().ends_with('Z'));
+    let shown = home.to_string_lossy().replace('\\', "/");
+    assert!(!body.replace("\\\\", "/").contains(&shown) && !body.contains("agent.json"));
+    // Linked: the AI route starts its job (no description: it stops before
+    // any model call, so no request leaves even with a key set).
+    let (st, _) = post(&a, "/v1/ai/topology", serde_json::json!({}));
+    assert_eq!(st, 202);
+    assert_eq!(post(&a, "/v1/ai/port", serde_json::json!({})).0, 501);
+
+    assert_eq!(http(&a, "DELETE", "/v1/agent/link", &ok, b"").0, 200);
+    assert_eq!(agent(&a)["linked"], false);
+    assert!(!home.join(".dagon/agent.json").exists());
+    assert_eq!(post(&a, "/v1/ai/topology", serde_json::json!({})).0, 409);
+}
+
+#[test]
+fn a_demo_does_not_link_or_unlink() {
+    let d = demo_area("demo-agent");
+    let b = auth(&d);
+    let ok = [("Authorization", b.as_str())];
+    let yes = br#"{"provider":"anthropic","consent":true}"#;
+    assert_eq!(http(&d, "POST", "/v1/agent/link", &ok, yes).0, 403);
+    assert_eq!(http(&d, "DELETE", "/v1/agent/link", &ok, b"").0, 403);
 }

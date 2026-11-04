@@ -727,7 +727,7 @@
     if (!sheetShown || layout === 'narrow') sheetW = 0;
   });
   $effect(() => {
-    if (layout === 'narrow' || (layout === 'drawer' && !drawerOpen)) partsW = 0;
+    if (layout === 'narrow' || !(mode === 'define' ? partsOpen : orderOpen)) partsW = 0;
   });
   /** Node actions in the detail: while watching, with nothing running. */
   const nodeActions = $derived(['L12', 'L13', 'L23'].includes(op.state));
@@ -1163,7 +1163,7 @@
       sim={cli.sim !== null}
       step={screen === 'start' ? null : step}
       {hub}
-      drawer={layout === 'drawer' && screen === 'work'}
+      drawer={false}
       {drawerOpen}
       ondrawer={() => (drawerOpen ? closeDrawer() : openDrawer())}
       bind:drawerButton
@@ -1200,14 +1200,10 @@
       <!-- The graph fills the stage; the parts window (top-left) and the sheet (right) float over it only when they hold something. -->
       <div class="stage">
         {@render canvas()}
-        {#if (layout === 'wide' || layout === 'narrow') && (mode === 'define' ? partsOpen : orderOpen)}
+        {#if mode === 'define' ? partsOpen : orderOpen}
           <aside class="float parts" data-avoid="" aria-label={mode === 'define' ? PARTS.heading : ORDER.heading} bind:offsetWidth={partsW}>{@render left()}</aside>
-        {:else if layout !== 'drawer'}
+        {:else}
           <button class="secondary tray-open" onclick={() => (mode === 'define' ? (partsOpen = true) : (orderOpen = true))}>{mode === 'define' ? PARTS.open : ORDER.heading}</button>
-        {:else if drawerOpen}
-          <div class="float parts" data-avoid="" id="drawer" role="dialog" aria-modal="true" aria-label={ORDER.heading} tabindex="-1" bind:this={drawerEl} bind:offsetWidth={partsW} onkeydown={drawerKeys}>
-            {@render left()}
-          </div>
         {/if}
         {#if agent.linked}
           <Dagon {agent} place={cli.hello?.workspace ?? d.doc.topo.name ?? 'local'} onask={askDagon} onapply={applyProposal} ontalk={() => (drawerTab = 'talk')} openRequest={dagonOpen} />
@@ -1292,10 +1288,12 @@
   .toolbar {
     display: flex;
     flex: 1;
+    flex-wrap: wrap;
     align-items: center;
     justify-content: center;
-    gap: var(--s-2);
+    gap: 0.25rem var(--s-2);
     min-width: 0;
+    padding: 0.25rem 0;
   }
   .flow {
     display: flex;
@@ -1559,9 +1557,6 @@
     right: 0.75rem;
     width: var(--w-right);
     max-height: calc(100% - 1.5rem);
-  }
-  #drawer:focus {
-    outline: none;
   }
   .log-none,
   .log {

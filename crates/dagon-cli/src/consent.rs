@@ -8,7 +8,6 @@
 
 use std::io::BufRead;
 use std::path::{Path, PathBuf};
-use std::sync::{PoisonError, RwLock, RwLockReadGuard};
 
 use serde_json::{json, Value};
 
@@ -85,29 +84,59 @@ pub fn link(home: &Path, agent: &str, way: &str) -> Result<Consent, String> {
 
 /// Removes the consent; Ok(false) when there was none.
 ///
-/// Waits until no model call is in flight in any dagon process (they hold
-/// the consent through [`hold`]); no call passes the check afterwards.
+/// The consent goes first, so no call passes the check from then on (a
+/// call reads it again under the lock); then this waits until no call that
+/// passed before is still in flight in any dagon process (they hold the
+/// lock through [`hold`]), so on return nothing is being sent.
 pub fn unlink(home: &Path) -> Result<bool, String> {
-    if !file(home).exists() {
-        return Ok(false);
+    let removed = match std::fs::remove_file(file(home)) {
+        Ok(()) => true,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => false,
+        Err(_) => return Err("the consent could not be removed".into()),
+    };
+    if !home.join(".dagon").is_dir() {
+        return Ok(removed);
     }
-    let _calls = CONSENT.write().unwrap_or_else(PoisonError::into_inner);
     let lock = lock_file(home)?;
-    lock.lock().map_err(|_| LOCK_UNAVAILABLE.to_string())?;
-    match std::fs::remove_file(file(home)) {
-        Ok(()) => Ok(true),
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(false),
-        Err(_) => Err("the consent could not be removed".into()),
+    if !wait_lock(&lock, false, UNLINK_WAIT) {
+        return Err(LOCK_UNAVAILABLE.into());
     }
+    // Released explicitly: Windows may release a closed handle's lock late.
+    let _ = lock.unlock();
+    Ok(removed)
 }
 
-/// One consent lock: model calls of this process share the read side,
-/// unlink takes the write side; ~/.dagon/agent.lock does the same between
-/// processes (`dagon ai unlink` while `dagon serve` runs). The OS drops a
-/// file lock when its process ends, so no lock is ever left stale.
-static CONSENT: RwLock<()> = RwLock::new(());
+/// The one consent lock, ~/.dagon/agent.lock: every call holds it shared
+/// from its check to its end, unlink takes it exclusive. Each call opens its
+/// own handle, so threads of one process exclude each other as processes do
+/// (`dagon ai unlink` while `dagon serve` runs); it is per home, so homes
+/// never wait for each other. The OS drops a file lock when its process
+/// ends, so no lock is ever left stale; waits are bounded.
 const LOCK_FILE: &str = "agent.lock";
 const LOCK_UNAVAILABLE: &str = "the consent lock is not available";
+/// How long a call waits for another process's unlink to finish, and an
+/// unlink for another process's call (the longest call is 600 s).
+const CALL_WAIT: std::time::Duration = std::time::Duration::from_secs(30);
+const UNLINK_WAIT: std::time::Duration = std::time::Duration::from_secs(15 * 60);
+
+/// Takes the file lock (shared or exclusive), giving up after `max`.
+fn wait_lock(f: &std::fs::File, shared: bool, max: std::time::Duration) -> bool {
+    let until = std::time::Instant::now() + max;
+    loop {
+        let r = if shared {
+            f.try_lock_shared()
+        } else {
+            f.try_lock()
+        };
+        match r {
+            Ok(()) => return true,
+            Err(std::fs::TryLockError::WouldBlock) if std::time::Instant::now() < until => {
+                std::thread::sleep(std::time::Duration::from_millis(20));
+            }
+            Err(_) => return false,
+        }
+    }
+}
 
 fn lock_file(home: &Path) -> Result<std::fs::File, String> {
     std::fs::OpenOptions::new()
@@ -124,7 +153,13 @@ fn lock_file(home: &Path) -> Result<std::fs::File, String> {
 pub struct Held {
     consent: Consent,
     _file: std::fs::File,
-    _calls: RwLockReadGuard<'static, ()>,
+}
+
+impl Drop for Held {
+    fn drop(&mut self) {
+        // Released explicitly: Windows may release a closed handle's lock late.
+        let _ = self._file.unlock();
+    }
 }
 
 impl Held {
@@ -139,16 +174,15 @@ pub fn hold(home: &Path) -> Result<Held, String> {
     if !is_linked(home) {
         return Err(NOT_LINKED.into());
     }
-    let calls = CONSENT.read().unwrap_or_else(PoisonError::into_inner);
     let file = lock_file(home)?;
-    file.lock_shared()
-        .map_err(|_| LOCK_UNAVAILABLE.to_string())?;
+    if !wait_lock(&file, true, CALL_WAIT) {
+        return Err(LOCK_UNAVAILABLE.into());
+    }
     // Read again under the lock: an unlink may have just finished.
     let consent = consent(home).ok_or(NOT_LINKED)?;
     Ok(Held {
         consent,
         _file: file,
-        _calls: calls,
     })
 }
 
@@ -514,12 +548,19 @@ mod tests {
             done_tx.send(()).unwrap();
             r
         });
+        // The consent goes at once: no new call passes the check...
+        let t0 = std::time::Instant::now();
+        while is_linked(&h) && t0.elapsed() < std::time::Duration::from_secs(10) {
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+        assert!(!is_linked(&h));
+        assert_eq!(hold(&h).err().as_deref(), Some(NOT_LINKED));
+        // ...but unlink returns only once the call in flight has ended.
         let waited = done.recv_timeout(std::time::Duration::from_millis(300));
         assert!(
             waited.is_err(),
             "unlink returned while a call was in flight"
         );
-        assert!(is_linked(&h));
         drop(held);
         done.recv_timeout(std::time::Duration::from_secs(10))
             .unwrap();

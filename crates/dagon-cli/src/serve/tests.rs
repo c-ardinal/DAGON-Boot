@@ -2073,9 +2073,15 @@ name: broken
             r
         })
     };
+    // The consent is gone at once; DELETE answers when the call has ended.
+    let consent = home.join(".dagon/agent.json");
+    let t0 = std::time::Instant::now();
+    while consent.exists() && t0.elapsed() < std::time::Duration::from_secs(10) {
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
+    assert!(!consent.exists());
     let early = done.recv_timeout(std::time::Duration::from_millis(400));
     assert!(early.is_err(), "DELETE answered while a call was in flight");
-    assert!(home.join(".dagon/agent.json").exists());
     go.send(()).unwrap();
     assert_eq!(unlinking.join().unwrap().0, 200);
     let (st, body) = asking.join().unwrap();

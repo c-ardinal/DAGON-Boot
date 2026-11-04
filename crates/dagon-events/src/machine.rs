@@ -1,11 +1,24 @@
 //! `state_machine!`: one declaration per machine, from which its state,
 //! its transition methods, its event payloads and its catalog are made.
 
-/// Declares a state machine whose transitions are the only way to change
-/// its state, each delivering its event.
+/// Declares a crate's state machines, whose transitions are the only way
+/// to change their state, each delivering its event.
+///
+/// A crate invokes it once, at its root, with all its machines (none is
+/// allowed); it defines `MACHINES`, the crate's [`crate::Machines`], which
+/// the catalog registry lists. A second invocation in the same crate does
+/// not compile, so no machine is left out of `MACHINES`; a machine under
+/// `#[cfg]` that is not compiled is not in it either.
+///
+/// ```compile_fail,E0428
+/// dagon_events::state_machine! {}
+/// mod more {
+///     dagon_events::state_machine! {}
+/// }
+/// ```
 ///
 /// ```
-/// use dagon_events::{compose_unpublished, state_machine, Bounds, Layer, Nop, Watchdog};
+/// use dagon_events::{compose_unpublished, state_machine, Layer, Nop};
 ///
 /// state_machine! {
 ///     /// A transfer into one slot.
@@ -32,8 +45,7 @@
 ///     }
 /// }
 ///
-/// let bounds = Bounds::new(|| 0u64, Watchdog::new(8_000, 30_000));
-/// let mut chain = compose_unpublished(Layer::App, Nop, Nop, bounds);
+/// let mut chain = compose_unpublished(Layer::App, Nop, Nop);
 /// let mut m = transfer::Machine::new();
 /// m.offered(&mut chain, 1, 4096).unwrap();
 /// assert_eq!(m.state(), transfer::State::Body { slot: 1, len: 4096 });
@@ -41,7 +53,7 @@
 /// assert!(m.offered(&mut chain, 1, 1).is_err()); // not from Body
 /// ```
 ///
-/// What it generates, in the module `name`:
+/// What it generates for each machine, in the module `name`:
 ///
 /// - `State`, the states, and `Machine`, which holds one in a private
 ///   field. `Machine::new()` (initial state) is visible only in the crate
@@ -58,6 +70,9 @@
 ///   forms in order.
 /// - `CATALOG`, the machine's [`crate::Catalog`], and `ENTRY` on each
 ///   payload type.
+/// - Decoding of the machine's [`crate::EventRecord`]s back into its
+///   payloads, which the layer's replay ([`crate::Composed::replay`])
+///   uses.
 /// - A test, `every_transition`, that calls every transition from every
 ///   state (fields and arguments at their `Default`) and checks it moves
 ///   exactly from its `from` states to its `to` state and delivers exactly
@@ -65,9 +80,7 @@
 ///
 /// A `from` state is a state name, optionally with the names of fields it
 /// binds (`Body { len }`); it never filters on values. `*` is any state.
-/// The event kind is the payload type's name in snake case. The crate's
-/// `dagon-catalog` registry must list the machine's `CATALOG` (a test
-/// finds every declaration in the repository).
+/// The event kind is the payload type's name in snake case.
 ///
 /// Rules, each a compile error when broken:
 ///
@@ -197,6 +210,38 @@
 #[macro_export]
 macro_rules! state_machine {
     (
+        $(
+            $(#[doc = $d:literal])*
+            $vis:vis machine $name:ident in $layer:ident { $($body:tt)* }
+        )*
+    ) => {
+        $(
+            $crate::__machine! {
+                $(#[doc = $d])*
+                $vis machine $name in $layer { $($body)* }
+            }
+        )*
+
+        /// The machines this crate declares, for the catalog registry.
+        pub const MACHINES: $crate::Machines = $crate::Machines {
+            krate: env!("CARGO_PKG_NAME"),
+            catalogs: &[$($name::CATALOG),*],
+        };
+
+        // A second `state_machine!` in the crate defines this again.
+        #[doc(hidden)]
+        #[macro_export]
+        macro_rules! __dagon_events_state_machine_once_per_crate {
+            () => {};
+        }
+    };
+}
+
+/// One machine of [`state_machine!`].
+#[doc(hidden)]
+#[macro_export]
+macro_rules! __machine {
+    (
         $(#[doc = $mdoc:literal])*
         $vis:vis machine $name:ident in $layer:ident {
             initial $initial:ident;
@@ -289,7 +334,29 @@ macro_rules! state_machine {
                 initial: stringify!($initial),
                 states: &[$(stringify!($S)),+],
                 entries: &[$($ev::ENTRY),+],
+                __replay,
             };
+
+            fn __replay(
+                rec: &$crate::EventRecord,
+                deliver: &mut dyn FnMut(&dyn $crate::Payload),
+            ) -> bool {
+                if rec.layer != $crate::Layer::$layer.code() {
+                    return false;
+                }
+                $(
+                    if rec.kind == $code {
+                        return match $ev::__decode(&rec.payload) {
+                            ::core::option::Option::Some(p) => {
+                                deliver(&p);
+                                true
+                            }
+                            ::core::option::Option::None => false,
+                        };
+                    }
+                )+
+                false
+            }
 
             $(
                 $(#[doc = $tdoc])*
@@ -329,7 +396,20 @@ macro_rules! state_machine {
                     };
                 }
 
-                impl $crate::__private::Sealed for $ev {}
+                impl $crate::__private::Generated for $ev {}
+
+                impl $ev {
+                    #[allow(unused_mut, unused_variables, unused_assignments)]
+                    fn __decode(b: &[u8; $crate::PAYLOAD_BYTES]) -> ::core::option::Option<Self> {
+                        let mut at = 0usize;
+                        $(
+                            let n = <$pt as $crate::Compact>::SIZE;
+                            let $pf = <$pt as $crate::Compact>::get(&b[at..at + n])?;
+                            at += n;
+                        )*
+                        ::core::option::Option::Some($ev { $($pf),* })
+                    }
+                }
 
                 impl $crate::Payload for $ev {
                     fn entry(&self) -> &'static $crate::Entry {
@@ -376,10 +456,16 @@ macro_rules! state_machine {
             #[cfg(test)]
             #[test]
             fn every_transition() {
-                struct Count(usize);
+                /// Events seen, the last one's record, and how many were replays.
+                struct Count(usize, $crate::EventRecord, usize);
                 impl $crate::Extension for Count {
-                    fn on_event(&mut self, _: &$crate::Event<'_>, _: &$crate::Ctx<'_>) {
+                    fn id(&self) -> &'static str {
+                        "count"
+                    }
+                    fn on_event(&mut self, e: &$crate::Event<'_>, _: &$crate::Ctx<'_>) {
                         self.0 += 1;
+                        self.1 = e.record(0);
+                        self.2 += usize::from(e.is_replayed());
                     }
                 }
                 let all: &[State] = &[
@@ -387,14 +473,13 @@ macro_rules! state_machine {
                 ];
                 $(
                     for s in all {
-                        let mut seen = Count(0);
+                        let mut seen = Count(0, ::core::default::Default::default(), 0);
                         let mut m = Machine { state: *s };
                         let from: &[&str] = &[$(stringify!($from)),+];
                         let leaves = from.contains(&"*") || from.contains(&s.name());
                         let r = {
-                            let bounds = $crate::Bounds::new(|| 0u64, $crate::Watchdog::new(1, 1));
                             let mut out = $crate::compose_unpublished(
-                                $crate::Layer::$layer, $crate::Nop, &mut seen, bounds,
+                                $crate::Layer::$layer, $crate::Nop, &mut seen,
                             );
                             m.$trig(&mut out, $(<$argty as ::core::default::Default>::default()),*)
                         };
@@ -402,6 +487,17 @@ macro_rules! state_machine {
                             r.unwrap_or_else(|e| panic!("{e}"));
                             assert_eq!(m.state().name(), stringify!($to), "{}", stringify!($trig));
                             assert_eq!(seen.0, 1, "{} delivers one event", stringify!($trig));
+                            let rec = seen.1;
+                            assert_eq!(rec.kind, $code);
+                            let replayed = {
+                                let mut out = $crate::compose_unpublished(
+                                    $crate::Layer::$layer, $crate::Nop, &mut seen,
+                                );
+                                out.replay(&[CATALOG], &rec)
+                            };
+                            assert!(replayed.is_ok(), "{} replays", stringify!($trig));
+                            assert_eq!((seen.0, seen.2), (2, 1), "{} replays once", stringify!($trig));
+                            assert_eq!(seen.1.payload, rec.payload, "{} decodes", stringify!($trig));
                         } else {
                             assert!(r.is_err(), "{} from {}", stringify!($trig), s.name());
                             assert_eq!(m.state(), *s, "a refused {} changed the state", stringify!($trig));

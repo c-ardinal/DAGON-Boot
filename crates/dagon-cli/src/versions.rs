@@ -24,7 +24,7 @@ pub fn formats() -> [(&'static str, u32); 10] {
         ("topology-yaml", dagon_topology::SCHEMA_VERSION),
         ("definitions", dagon_topology::defs::FORMAT),
         ("serve-api", SERVE_API),
-        ("event", u32::from(dagon_events::EVENT_FORMAT)),
+        ("event", u32::from(dagon_catalog::EVENT_FORMAT)),
     ]
 }
 

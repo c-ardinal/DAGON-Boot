@@ -1,12 +1,12 @@
-//! The committed catalogs equal what the code generates; every machine
-//! declared in the repository is registered; the registry has no
-//! conflicts.
+//! The committed catalogs equal what the code generates; every crate
+//! that declares machines is registered; the registry has no conflicts.
 //!
 //! `DAGON_BLESS=1` writes the generated documents instead of comparing.
 
-use std::path::{Path, PathBuf};
+use std::collections::BTreeSet;
+use std::path::PathBuf;
 
-use dagon_catalog::{conflicts, design_ports_table, events_md, ports_md, MACHINES};
+use dagon_catalog::{conflicts, design_ports_table, events_md, machines, ports_md, REGISTRY};
 use dagon_events::{state_machine, Layer, PORTS};
 
 const BLESS: &str = "`DAGON_BLESS=1 cargo test -p dagon-catalog --test docs`";
@@ -34,7 +34,7 @@ fn check(rel: &str, generated: &str) {
 
 #[test]
 fn events_md_is_generated() {
-    check("docs/events.md", &events_md(MACHINES));
+    check("docs/events.md", &events_md(&machines()));
 }
 
 #[test]
@@ -58,70 +58,55 @@ fn the_design_port_table_is_generated() {
 
 #[test]
 fn the_registry_has_no_conflicts() {
-    assert_eq!(conflicts(MACHINES), Vec::<String>::new());
+    assert_eq!(conflicts(&machines()), Vec::<String>::new());
 }
 
-/// Every `state_machine!` declaration outside `tests/` folders, as
-/// (file, machine, layer).
-fn declarations() -> Vec<(String, String, String)> {
-    fn walk(dir: &Path, out: &mut Vec<PathBuf>) {
-        for e in std::fs::read_dir(dir).unwrap().flatten() {
-            let p = e.path();
-            let name = e.file_name();
-            let skip = matches!(
-                name.to_str(),
-                Some("target" | "node_modules" | ".git" | "vendor" | "tests" | "pkg")
-            );
-            if p.is_dir() && !skip {
-                walk(&p, out);
-            } else if p.extension().is_some_and(|x| x == "rs") {
-                out.push(p);
-            }
-        }
-    }
-    let mut files = Vec::new();
-    walk(&root(), &mut files);
-    let mut found = Vec::new();
-    for f in files {
-        let text = std::fs::read_to_string(&f).unwrap_or_default();
-        let code: String = text
-            .lines()
-            .filter(|l| !l.trim_start().starts_with("//"))
-            .collect::<Vec<_>>()
-            .join("\n");
-        for (at, _) in code.match_indices("state_machine!") {
-            let words: Vec<_> = code[at..].split_whitespace().take(12).collect();
-            let i = words
-                .iter()
-                .position(|w| *w == "machine")
-                .unwrap_or_else(|| panic!("{}: a state_machine! without `machine`", f.display()));
-            assert_eq!(words.get(i + 2), Some(&"in"), "{}", f.display());
-            found.push((
-                f.strip_prefix(root()).unwrap_or(&f).display().to_string(),
-                words[i + 1].to_string(),
-                words[i + 3].trim_end_matches('{').to_string(),
-            ));
-        }
-    }
-    found
-}
-
+/// Every workspace package that depends on `dagon-events` (other than
+/// this registry) declares machines and must be in REGISTRY; each crate
+/// once.
 #[test]
-fn every_declared_machine_is_registered() {
-    let found = declarations();
+fn every_machine_crate_is_registered_once() {
+    let out = std::process::Command::new(env!("CARGO"))
+        .args([
+            "metadata",
+            "--no-deps",
+            "--format-version",
+            "1",
+            "--offline",
+        ])
+        .current_dir(root())
+        .output()
+        .expect("cargo metadata");
     assert!(
-        found.iter().any(|(_, m, _)| m == "decisions"),
-        "the scan finds dagon-events' own machine: {found:?}"
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
     );
-    for (file, machine, layer) in &found {
-        assert!(
-            MACHINES
-                .iter()
-                .any(|c| c.machine == *machine && format!("{:?}", c.layer) == *layer),
-            "{file}: machine {machine} in {layer} is not in dagon_catalog::MACHINES"
-        );
+    let meta: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+    let mut machine_crates = BTreeSet::from(["dagon-events".to_string()]);
+    for pkg in meta["packages"].as_array().unwrap() {
+        let name = pkg["name"].as_str().unwrap();
+        let uses_events = pkg["dependencies"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|d| d["name"] == "dagon-events" && d["kind"].is_null());
+        if uses_events && name != "dagon-catalog" {
+            machine_crates.insert(name.to_string());
+        }
     }
-    assert_eq!(found.len(), MACHINES.len(), "{found:?}");
+    let listed: Vec<_> = REGISTRY.iter().map(|m| m.krate.to_string()).collect();
+    let unique: BTreeSet<_> = listed.iter().cloned().collect();
+    assert_eq!(
+        unique.len(),
+        listed.len(),
+        "a crate is listed twice: {listed:?}"
+    );
+    assert_eq!(
+        unique, machine_crates,
+        "dagon_catalog::REGISTRY must list the MACHINES of every crate that depends on dagon-events"
+    );
+    assert!(!machines().is_empty());
 }
 
 state_machine! {
@@ -135,9 +120,7 @@ state_machine! {
             back(): * => A emits Back = 0x02 {} observe(host) retired;
         }
     }
-}
 
-state_machine! {
     machine two in Boot {
         initial X;
         states { X }

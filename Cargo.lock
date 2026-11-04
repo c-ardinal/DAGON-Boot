@@ -125,6 +125,7 @@ name = "dagon-catalog"
 version = "0.0.0"
 dependencies = [
  "dagon-events",
+ "serde_json",
 ]
 
 [[package]]
@@ -132,8 +133,8 @@ name = "dagon-cli"
 version = "0.1.0"
 dependencies = [
  "base64",
+ "dagon-catalog",
  "dagon-conform",
- "dagon-events",
  "dagon-format",
  "dagon-host",
  "dagon-port",

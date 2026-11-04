@@ -119,7 +119,7 @@ impl Entry {
 }
 
 /// One machine: its states and its transitions.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug)]
 pub struct Catalog {
     pub machine: &'static str,
     pub layer: Layer,
@@ -127,7 +127,25 @@ pub struct Catalog {
     pub initial: &'static str,
     pub states: &'static [&'static str],
     pub entries: &'static [Entry],
+    /// Decodes a record of this machine into its payload and hands it to
+    /// the callback; `false` when the record is not this machine's or does
+    /// not decode. Used by [`crate::Composed::replay`].
+    #[doc(hidden)]
+    pub __replay: Replay,
 }
+
+/// The machines one crate declares: the `MACHINES` constant
+/// [`crate::state_machine!`] defines at the crate's root.
+#[derive(Clone, Copy, Debug)]
+pub struct Machines {
+    /// The Cargo package that declares them.
+    pub krate: &'static str,
+    pub catalogs: &'static [Catalog],
+}
+
+/// See [`Catalog::__replay`].
+#[doc(hidden)]
+pub type Replay = fn(&crate::EventRecord, &mut dyn FnMut(&dyn crate::Payload)) -> bool;
 
 impl Catalog {
     pub fn entry(&self, code: u8) -> Option<&'static Entry> {

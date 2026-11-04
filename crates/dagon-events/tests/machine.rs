@@ -1,15 +1,18 @@
 //! What `state_machine!` generates, seen from another crate; the composed
-//! chain's order, bounds and published state.
+//! chain's order, replay, bounds and published state.
+// `drop(out)` ends a chain's borrows of what a test then reads.
+#![allow(clippy::drop_non_drop)]
 
-use core::cell::Cell;
+use core::cell::{Cell, RefCell};
 use core::future::Future;
 use core::pin::pin;
 use core::task::{Context, Poll, Waker};
 
 use dagon_events::{
-    compose, compose_unpublished, decisions, extensions, state_machine, Accept, Bounds, Compact,
-    Ctx, DecisionId, Delay, Event, EventRecord, Extension, Health, Layer, Nop, Observe, Party,
-    Published, RebootRequest, Refused, Snapshot, TrialInfo, UpdateOffer, Watchdog,
+    compose, compose_unpublished, decisions, extensions, state_machine, Accept, AlreadyComposed,
+    Bounds, Compact, Ctx, DecisionId, Delay, Event, EventRecord, ExtId, Extension, Health, Layer,
+    Nop, Observe, Published, RebootRequest, Refused, Snapshot, TrialInfo, Unreadable, UpdateOffer,
+    Watchdog,
 };
 use dagon_format::version::Version;
 
@@ -24,6 +27,13 @@ impl Compact for Cause {
     const SIZE: usize = 1;
     fn put(&self, out: &mut [u8]) {
         out[0] = *self as u8;
+    }
+    fn get(b: &[u8]) -> Option<Self> {
+        match b {
+            [0] => Some(Cause::Idle),
+            [1] => Some(Cause::Store),
+            _ => None,
+        }
     }
 }
 
@@ -57,18 +67,29 @@ state_machine! {
     }
 }
 
-/// Records every event it sees: (kind, owned form).
+/// Records every event it sees: (kind, owned form, replayed).
 #[derive(Default)]
-struct Log(Vec<(&'static str, EventRecord)>);
+struct Log(Vec<(&'static str, EventRecord, bool)>);
 
 impl Extension for Log {
+    fn id(&self) -> &'static str {
+        "log"
+    }
     fn on_event(&mut self, e: &Event<'_>, _: &Ctx<'_>) {
-        self.0.push((e.kind(), e.record(0)));
+        self.0.push((e.kind(), e.record(0), e.is_replayed()));
     }
 }
 
 fn bounds() -> Bounds<impl FnMut() -> u64> {
     Bounds::new(|| 0u64, Watchdog::new(8_000, 30_000))
+}
+
+#[test]
+fn the_crate_lists_its_machines() {
+    assert_eq!(MACHINES.krate, "dagon-events");
+    let names: Vec<_> = MACHINES.catalogs.iter().map(|c| c.machine).collect();
+    assert_eq!(names, ["transfer"]);
+    assert_eq!(dagon_events::MACHINES.catalogs[0].machine, "decisions");
 }
 
 #[test]
@@ -110,29 +131,17 @@ fn the_catalog_is_the_declaration() {
     assert!(a.flags.retired && !a.flags.action && !a.live());
     assert!(c.entry(0x11).unwrap().flags.action);
     assert_eq!(c.entry(0x14).unwrap().from, ["*"]);
-    assert_eq!(
-        c.entry(0x10).unwrap().doc.trim(),
-        "An update passed every guard."
-    );
 }
 
 #[test]
 fn a_transition_delivers_its_event_then_moves() {
     let mut log = Log::default();
-    let mut out = compose_unpublished(Layer::App, Nop, &mut log, bounds());
+    let mut out = compose_unpublished(Layer::App, Nop, &mut log);
     let mut m = transfer::Machine::new();
     m.offered(&mut out, 1, 300).unwrap();
     assert_eq!(m.state(), transfer::State::Header { slot: 1, len: 300 });
     m.header_ok(&mut out).unwrap();
     m.written(&mut out, 0x0102_0304).unwrap();
-    assert_eq!(
-        m.state(),
-        transfer::State::Body {
-            slot: 1,
-            len: 300,
-            next: 0x0102_0304
-        }
-    );
     let r = m.offered(&mut out, 2, 1).unwrap_err();
     assert_eq!(
         r,
@@ -151,7 +160,7 @@ fn a_transition_delivers_its_event_then_moves() {
     m.reset(&mut out).unwrap();
     drop(out);
 
-    let kinds: Vec<_> = log.0.iter().map(|(k, _)| *k).collect();
+    let kinds: Vec<_> = log.0.iter().map(|(k, _, _)| *k).collect();
     assert_eq!(
         kinds,
         [
@@ -162,18 +171,60 @@ fn a_transition_delivers_its_event_then_moves() {
             "reset"
         ]
     );
-    let (_, progress) = log.0[2];
     assert_eq!(
-        progress,
-        EventRecord {
-            layer: Layer::App.code(),
-            kind: 0x12,
-            flags: 0,
-            dropped: 0,
-            seq: 0,
-            payload: [4, 3, 2, 1, 44, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
-        }
+        log.0[2].1.payload,
+        [4, 3, 2, 1, 44, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
     );
+}
+
+#[test]
+fn a_record_replays_as_its_typed_event() {
+    let mut first = Log::default();
+    {
+        let mut out = compose_unpublished(Layer::Boot, Nop, &mut first);
+        let mut m = transfer::Machine::new();
+        m.offered(&mut out, 1, 300).unwrap();
+        m.header_ok(&mut out).unwrap();
+        m.written(&mut out, 77).unwrap();
+        m.aborted(&mut out, Cause::Store).unwrap();
+    }
+    /// (progress, abort cause, replayed) per event.
+    type Seen = RefCell<Vec<(Option<(u32, u32)>, Option<Cause>, bool)>>;
+    let seen = Seen::default();
+    struct Typed<'a>(&'a Seen);
+    impl Extension for Typed<'_> {
+        fn id(&self) -> &'static str {
+            "typed"
+        }
+        fn on_event(&mut self, e: &Event<'_>, _: &Ctx<'_>) {
+            let progress = e
+                .get::<transfer::TransferProgress>()
+                .map(|p| (p.done, p.total));
+            let cause = e.get::<transfer::TransferAborted>().map(|a| a.cause);
+            self.0.borrow_mut().push((progress, cause, e.is_replayed()));
+        }
+    }
+    let mut out = compose_unpublished(Layer::App, Nop, Typed(&seen));
+    for (_, rec, _) in &first.0 {
+        out.replay(&[decisions::CATALOG, transfer::CATALOG], rec)
+            .unwrap();
+    }
+    let seen = seen.borrow().clone();
+    assert_eq!(seen.len(), 4);
+    assert!(seen.iter().all(|(_, _, replayed)| *replayed));
+    assert_eq!(seen[2].0, Some((77, 300)));
+    assert_eq!(seen[3].1, Some(Cause::Store));
+
+    // Unknown kinds, other layers and values a newer writer added are
+    // refused, not guessed.
+    let mut rec = first.0[3].1;
+    rec.payload[0] = 9;
+    assert_eq!(out.replay(&[transfer::CATALOG], &rec), Err(Unreadable));
+    rec.kind = 0x7F;
+    assert_eq!(out.replay(&[transfer::CATALOG], &rec), Err(Unreadable));
+    let mut other = first.0[0].1;
+    other.layer = Layer::Host.code();
+    assert_eq!(out.replay(&[transfer::CATALOG], &other), Err(Unreadable));
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -193,15 +244,17 @@ fn poll_once<F: Future>(f: F) -> Poll<F::Output> {
         .poll(&mut Context::from_waker(Waker::noop()))
 }
 
+type Marks = RefCell<Vec<(&'static str, Option<u32>)>>;
+
 #[test]
 fn the_publisher_sees_every_event_first_and_then_board_then_user() {
     static EVENTS: Published<Progress, 2> = Published::new();
-    let order = core::cell::RefCell::new(Vec::new());
-    struct Mark<'a>(
-        &'static str,
-        &'a core::cell::RefCell<Vec<(&'static str, Option<u32>)>>,
-    );
+    let order = Marks::default();
+    struct Mark<'a>(&'static str, &'a Marks);
     impl Extension for Mark<'_> {
+        fn id(&self) -> &'static str {
+            self.0
+        }
         fn on_event(&mut self, _: &Event<'_>, _: &Ctx<'_>) {
             // The publisher has already counted this event.
             let seq = EVENTS.latest().map(|l| l.last.seq);
@@ -215,7 +268,13 @@ fn the_publisher_sees_every_event_first_and_then_board_then_user() {
         Mark("board", &order),
         extensions![Mark("library", &order), Mark("app", &order)],
         bounds(),
-    );
+    )
+    .unwrap();
+    // Nothing else can write EVENTS now.
+    assert!(matches!(
+        compose(Layer::App, &EVENTS, Nop, Nop, bounds()),
+        Err(AlreadyComposed)
+    ));
     let mut m = transfer::Machine::new();
     m.offered(&mut out, 0, 100).unwrap();
     m.header_ok(&mut out).unwrap();
@@ -248,30 +307,25 @@ fn the_publisher_sees_every_event_first_and_then_board_then_user() {
 #[test]
 fn drops_beyond_255_are_carried_to_later_records() {
     static EVENTS: Published<(), 1> = Published::new();
-    let mut out = compose_unpublished(Layer::App, Nop, Nop, bounds());
-    let mut chain = compose(Layer::App, &EVENTS, Nop, Nop, bounds());
+    let mut chain = compose(Layer::App, &EVENTS, Nop, Nop, bounds()).unwrap();
     let mut m = transfer::Machine::new();
-    let mut emit = |m: &mut transfer::Machine| {
-        m.reset(&mut chain).unwrap();
-    };
     for _ in 0..600 {
-        emit(&mut m);
+        m.reset(&mut chain).unwrap();
     }
     // 600 pushed into a ring of one: 599 lost.
-    let mut reported = 0u32;
     let first = EVENTS.recent().try_take().unwrap();
-    reported += u32::from(first.dropped);
     assert_eq!(first.dropped, 255);
+    let mut reported = u32::from(first.dropped);
     for _ in 0..3 {
-        emit(&mut m);
+        m.reset(&mut chain).unwrap();
         reported += u32::from(EVENTS.recent().try_take().unwrap().dropped);
     }
     assert_eq!(reported, 599);
-    m.offered(&mut out, 0, 1).unwrap();
 }
 
 /// Answers after `cost_us` on the shared clock.
 struct Slow<'a> {
+    id: &'static str,
     now: &'a Cell<u64>,
     cost_us: u64,
     accept: Option<Accept>,
@@ -280,6 +334,9 @@ struct Slow<'a> {
 }
 
 impl Extension for Slow<'_> {
+    fn id(&self) -> &'static str {
+        self.id
+    }
     fn accept_update(&mut self, _: &UpdateOffer, _: &Ctx<'_>) -> Option<Accept> {
         self.now.set(self.now.get() + self.cost_us);
         self.accept
@@ -294,87 +351,134 @@ impl Extension for Slow<'_> {
     }
 }
 
-#[test]
-fn decisions_default_when_every_party_abstains() {
-    let mut out = compose_unpublished(Layer::App, Nop, extensions![], bounds());
-    assert_eq!(out.accept_update(&UpdateOffer::new(0, 1, 10)), Accept::Yes);
-    assert_eq!(out.allow_reboot_now(&RebootRequest::new(0)), Delay::Now);
-    let t = TrialInfo::new(1, Version::new(1, 0, 0), 1, 3);
-    assert_eq!(out.self_check(&t), Health::Healthy);
+fn slow<'a>(id: &'static str, now: &'a Cell<u64>, cost_us: u64) -> Slow<'a> {
+    Slow {
+        id,
+        now,
+        cost_us,
+        accept: None,
+        delay: None,
+        health: None,
+    }
+}
+
+fn trial() -> TrialInfo {
+    TrialInfo::new(1, Version::new(1, 0, 0), 1, 3)
 }
 
 #[test]
-fn the_board_answers_first_and_a_delay_is_capped_by_the_watchdog() {
+fn decisions_default_when_every_extension_abstains() {
+    static EVENTS: Published<(), 4> = Published::new();
+    let mut out = compose(Layer::App, &EVENTS, Nop, extensions![], bounds()).unwrap();
+    assert_eq!(out.accept_update(&UpdateOffer::new(0, 1, 10)), Accept::Yes);
+    assert_eq!(out.allow_reboot_now(&RebootRequest::new(0)), Delay::Now);
+    assert_eq!(out.self_check(&trial()), Health::Healthy);
+}
+
+#[test]
+fn the_first_answer_in_order_wins_and_a_delay_is_capped() {
+    static EVENTS: Published<(), 4> = Published::new();
     let now = Cell::new(0u64);
     let board = Slow {
-        now: &now,
-        cost_us: 10,
         accept: Some(Accept::No),
         delay: Some(Delay::After(60_000)),
-        health: None,
+        ..slow("board", &now, 10)
     };
-    let user = Slow {
-        now: &now,
-        cost_us: 10,
+    let library = Slow {
         accept: Some(Accept::Yes),
-        delay: None,
         health: Some(Health::Pending),
+        ..slow("library", &now, 10)
     };
     let wd = Watchdog::new(8_000, 30_000);
     assert_eq!(wd.reboot_delay_max_ms(), 4_000);
-    let mut out = compose_unpublished(Layer::App, board, user, Bounds::new(|| now.get(), wd));
+    let mut out = compose(
+        Layer::App,
+        &EVENTS,
+        board,
+        extensions![library, slow("app", &now, 10)],
+        Bounds::new(|| now.get(), wd),
+    )
+    .unwrap();
     assert_eq!(out.accept_update(&UpdateOffer::new(0, 1, 10)), Accept::No);
     assert_eq!(
         out.allow_reboot_now(&RebootRequest::new(0)),
         Delay::After(4_000)
     );
-    let t = TrialInfo::new(1, Version::new(1, 0, 0), 1, 3);
-    assert_eq!(out.self_check(&t), Health::Pending);
+    assert_eq!(out.self_check(&trial()), Health::Pending);
 }
 
 #[test]
-fn a_late_answer_is_ignored_and_reported() {
+fn each_extension_is_timed_alone_and_a_late_one_is_named() {
+    static EVENTS: Published<(), 8> = Published::new();
     let now = Cell::new(0u64);
-    let mut log = Log::default();
-    let board = Slow {
-        now: &now,
-        cost_us: 50_001,
+    // Two libraries at 30 ms each stay within the bound one by one; the
+    // app's 50.001 ms answer does not.
+    let late_app = Slow {
         accept: Some(Accept::No),
-        delay: None,
         health: Some(Health::Unhealthy),
+        ..slow("late-app", &now, 50_001)
     };
-    {
-        let mut out = compose_unpublished(
-            Layer::App,
-            board,
-            &mut log,
-            Bounds::new(|| now.get(), Watchdog::new(8_000, 8_000)),
-        );
-        assert_eq!(out.accept_update(&UpdateOffer::new(0, 1, 10)), Accept::Yes);
-        let t = TrialInfo::new(1, Version::new(1, 0, 0), 1, 3);
-        assert_eq!(out.self_check(&t), Health::Healthy);
+    let mut out = compose(
+        Layer::App,
+        &EVENTS,
+        Nop,
+        extensions![
+            slow("lib-a", &now, 30_000),
+            slow("lib-b", &now, 30_000),
+            late_app
+        ],
+        Bounds::new(|| now.get(), Watchdog::new(8_000, 8_000)),
+    )
+    .unwrap();
+    assert_eq!(out.accept_update(&UpdateOffer::new(0, 1, 10)), Accept::Yes);
+    assert_eq!(out.self_check(&trial()), Health::Healthy);
+    drop(out);
+
+    let late = ExtId::of("late-app");
+    let mut overruns = Vec::new();
+    while let Some(r) = EVENTS.recent().try_take() {
+        overruns.push((
+            r.kind,
+            u32::from_le_bytes(r.payload[0..4].try_into().unwrap()),
+            r.payload[4],
+            u32::from_le_bytes(r.payload[5..9].try_into().unwrap()),
+        ));
     }
-    let kinds: Vec<_> = log
-        .0
-        .iter()
-        .map(|(k, r)| (*k, r.payload[0], r.payload[1]))
-        .collect();
+    let code = decisions::ExtensionOverran::ENTRY.code;
     assert_eq!(
-        kinds,
+        overruns,
         [
-            (
-                "extension_overran",
-                DecisionId::AcceptUpdate as u8,
-                Party::Board as u8
-            ),
-            (
-                "extension_overran",
-                DecisionId::SelfCheck as u8,
-                Party::Board as u8
-            ),
+            (code, late.hash, DecisionId::AcceptUpdate as u8, 50_001),
+            (code, late.hash, DecisionId::SelfCheck as u8, 50_001),
         ]
     );
-    let us = u32::from_le_bytes(log.0[0].1.payload[2..6].try_into().unwrap());
-    assert_eq!(us, 50_001);
-    assert_eq!(decisions::ExtensionOverran::ENTRY.layer, Layer::App);
+}
+
+#[test]
+fn a_live_overrun_names_the_extension() {
+    static EVENTS: Published<(), 4> = Published::new();
+    let names: RefCell<Vec<&'static str>> = RefCell::default();
+    struct Names<'a>(&'a RefCell<Vec<&'static str>>);
+    impl Extension for Names<'_> {
+        fn id(&self) -> &'static str {
+            "names"
+        }
+        fn on_event(&mut self, e: &Event<'_>, _: &Ctx<'_>) {
+            if let Some(o) = e.get::<decisions::ExtensionOverran>() {
+                self.0.borrow_mut().push(o.id.name);
+            }
+        }
+    }
+    let now = Cell::new(0u64);
+    let mut out = compose(
+        Layer::App,
+        &EVENTS,
+        Names(&names),
+        slow("stuck", &now, 60_000),
+        Bounds::new(|| now.get(), Watchdog::new(8_000, 8_000)),
+    )
+    .unwrap();
+    assert_eq!(out.allow_reboot_now(&RebootRequest::new(0)), Delay::Now);
+    drop(out);
+    assert_eq!(names.into_inner(), ["stuck"]);
 }

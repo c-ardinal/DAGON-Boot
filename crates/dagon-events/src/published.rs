@@ -115,6 +115,8 @@ pub struct Published<S: Snapshot, const N: usize> {
     latest: Watch<Cs, Latest<S>, WATCHERS>,
     recent: Recent<N>,
     seq: Mutex<Cs, Cell<u32>>,
+    /// Taken by the one chain composed with it.
+    claimed: Mutex<Cs, Cell<bool>>,
 }
 
 impl<S: Snapshot, const N: usize> Published<S, N> {
@@ -123,6 +125,7 @@ impl<S: Snapshot, const N: usize> Published<S, N> {
             latest: Watch::new(),
             recent: Recent::new(),
             seq: Mutex::new(Cell::new(0)),
+            claimed: Mutex::new(Cell::new(false)),
         }
     }
 
@@ -139,6 +142,11 @@ impl<S: Snapshot, const N: usize> Published<S, N> {
 
     pub fn recent(&self) -> &Recent<N> {
         &self.recent
+    }
+
+    /// `true` for the first caller only.
+    pub(crate) fn claim(&self) -> bool {
+        self.claimed.lock(|c| !c.replace(true))
     }
 
     pub(crate) fn publish(&self, e: &Event<'_>) {

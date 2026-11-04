@@ -7,6 +7,7 @@ use dagon_format::version::Version;
 use crate::catalog::Layer;
 use crate::compact::Compact;
 use crate::event::Event;
+use crate::sealed::Token;
 
 /// What DAGON hands an extension's handler: the layer it runs in and the
 /// capabilities its manifest declared, nothing else.
@@ -17,7 +18,7 @@ pub struct Ctx<'a> {
 }
 
 impl Ctx<'_> {
-    pub fn new(layer: Layer) -> Self {
+    pub(crate) fn new(layer: Layer) -> Self {
         Ctx {
             layer,
             _caps: PhantomData,
@@ -109,10 +110,26 @@ pub enum Health {
 }
 
 /// The one extension shape, in every layer: observe events, answer
-/// decision points. Every method has a default (observe nothing, abstain),
-/// and every method added to it has one. A port is a separate trait on the
-/// same type.
+/// decision points. Every method but [`Extension::id`] has a default
+/// (observe nothing, abstain), and every method added to it has one. A
+/// port is a separate trait on the same type.
+///
+/// The composed chain calls and times each extension on its own; the
+/// methods that do that are DAGON's and cannot be overridden or called
+/// outside this crate.
+///
+/// ```compile_fail,E0603
+/// struct Sneaky;
+/// impl dagon_events::Extension for Sneaky {
+///     fn id(&self) -> &'static str { "sneaky" }
+///     fn __leaves(&self, _: dagon_events::sealed::Token) -> usize { 0 }
+/// }
+/// ```
 pub trait Extension {
+    /// The extension's identity in events (`app.extension_overran`): its
+    /// manifest id where it has one; otherwise a name unique in the image.
+    fn id(&self) -> &'static str;
+
     /// Every event, in order.
     fn on_event(&mut self, _e: &Event<'_>, _ctx: &Ctx<'_>) {}
 
@@ -130,16 +147,62 @@ pub trait Extension {
     fn self_check(&mut self, _t: &TrialInfo, _ctx: &Ctx<'_>) -> Option<Health> {
         None
     }
+
+    #[doc(hidden)]
+    fn __leaves(&self, _: Token) -> usize {
+        1
+    }
+
+    #[doc(hidden)]
+    fn __id_at(&self, _i: usize, _: Token) -> &'static str {
+        self.id()
+    }
+
+    #[doc(hidden)]
+    fn __accept_at(
+        &mut self,
+        _i: usize,
+        o: &UpdateOffer,
+        ctx: &Ctx<'_>,
+        _: Token,
+    ) -> Option<Accept> {
+        self.accept_update(o, ctx)
+    }
+
+    #[doc(hidden)]
+    fn __reboot_at(
+        &mut self,
+        _i: usize,
+        r: &RebootRequest,
+        ctx: &Ctx<'_>,
+        _: Token,
+    ) -> Option<Delay> {
+        self.allow_reboot_now(r, ctx)
+    }
+
+    #[doc(hidden)]
+    fn __check_at(&mut self, _i: usize, t: &TrialInfo, ctx: &Ctx<'_>, _: Token) -> Option<Health> {
+        self.self_check(t, ctx)
+    }
 }
 
-/// No extension.
+/// No extension. It has no parts, so the chain asks it nothing.
 #[derive(Clone, Copy, Debug, Default)]
 pub struct Nop;
 
-impl Extension for Nop {}
+impl Extension for Nop {
+    fn id(&self) -> &'static str {
+        "nop"
+    }
 
-/// `A`, then `B`: notifications reach both, decisions stop at the first
-/// answer. Built by [`crate::extensions!`]; its parts stay inside.
+    fn __leaves(&self, _: Token) -> usize {
+        0
+    }
+}
+
+/// `A`, then `B`: notifications reach both; each part is asked a decision
+/// on its own, in order, and the first answer stands. Built by
+/// [`crate::extensions!`]; its parts stay inside.
 #[derive(Clone, Copy, Debug, Default)]
 pub struct Chain<A, B> {
     first: A,
@@ -153,6 +216,10 @@ impl<A: Extension, B: Extension> Chain<A, B> {
 }
 
 impl<A: Extension, B: Extension> Extension for Chain<A, B> {
+    fn id(&self) -> &'static str {
+        "chain"
+    }
+
     fn on_event(&mut self, e: &Event<'_>, ctx: &Ctx<'_>) {
         self.first.on_event(e, ctx);
         self.then.on_event(e, ctx);
@@ -175,9 +242,65 @@ impl<A: Extension, B: Extension> Extension for Chain<A, B> {
             .self_check(t, ctx)
             .or_else(|| self.then.self_check(t, ctx))
     }
+
+    fn __leaves(&self, k: Token) -> usize {
+        self.first.__leaves(k) + self.then.__leaves(k)
+    }
+
+    fn __id_at(&self, i: usize, k: Token) -> &'static str {
+        let n = self.first.__leaves(k);
+        if i < n {
+            self.first.__id_at(i, k)
+        } else {
+            self.then.__id_at(i - n, k)
+        }
+    }
+
+    fn __accept_at(
+        &mut self,
+        i: usize,
+        o: &UpdateOffer,
+        ctx: &Ctx<'_>,
+        k: Token,
+    ) -> Option<Accept> {
+        let n = self.first.__leaves(k);
+        if i < n {
+            self.first.__accept_at(i, o, ctx, k)
+        } else {
+            self.then.__accept_at(i - n, o, ctx, k)
+        }
+    }
+
+    fn __reboot_at(
+        &mut self,
+        i: usize,
+        r: &RebootRequest,
+        ctx: &Ctx<'_>,
+        k: Token,
+    ) -> Option<Delay> {
+        let n = self.first.__leaves(k);
+        if i < n {
+            self.first.__reboot_at(i, r, ctx, k)
+        } else {
+            self.then.__reboot_at(i - n, r, ctx, k)
+        }
+    }
+
+    fn __check_at(&mut self, i: usize, t: &TrialInfo, ctx: &Ctx<'_>, k: Token) -> Option<Health> {
+        let n = self.first.__leaves(k);
+        if i < n {
+            self.first.__check_at(i, t, ctx, k)
+        } else {
+            self.then.__check_at(i - n, t, ctx, k)
+        }
+    }
 }
 
 impl<T: Extension + ?Sized> Extension for &mut T {
+    fn id(&self) -> &'static str {
+        (**self).id()
+    }
+
     fn on_event(&mut self, e: &Event<'_>, ctx: &Ctx<'_>) {
         (**self).on_event(e, ctx)
     }
@@ -193,6 +316,38 @@ impl<T: Extension + ?Sized> Extension for &mut T {
     fn self_check(&mut self, t: &TrialInfo, ctx: &Ctx<'_>) -> Option<Health> {
         (**self).self_check(t, ctx)
     }
+
+    fn __leaves(&self, k: Token) -> usize {
+        (**self).__leaves(k)
+    }
+
+    fn __id_at(&self, i: usize, k: Token) -> &'static str {
+        (**self).__id_at(i, k)
+    }
+
+    fn __accept_at(
+        &mut self,
+        i: usize,
+        o: &UpdateOffer,
+        ctx: &Ctx<'_>,
+        k: Token,
+    ) -> Option<Accept> {
+        (**self).__accept_at(i, o, ctx, k)
+    }
+
+    fn __reboot_at(
+        &mut self,
+        i: usize,
+        r: &RebootRequest,
+        ctx: &Ctx<'_>,
+        k: Token,
+    ) -> Option<Delay> {
+        (**self).__reboot_at(i, r, ctx, k)
+    }
+
+    fn __check_at(&mut self, i: usize, t: &TrialInfo, ctx: &Ctx<'_>, k: Token) -> Option<Health> {
+        (**self).__check_at(i, t, ctx, k)
+    }
 }
 
 /// The user's extensions, in order (libraries first, then the app's own):
@@ -202,8 +357,8 @@ impl<T: Extension + ?Sized> Extension for &mut T {
 /// chain is not an extension, so it cannot be nested in another.
 ///
 /// ```compile_fail,E0277
-/// use dagon_events::{compose_unpublished, extensions, Bounds, Layer, Nop, Watchdog};
-/// let inner = compose_unpublished(Layer::App, Nop, Nop, Bounds::new(|| 0u64, Watchdog::new(8, 8)));
+/// use dagon_events::{compose_unpublished, extensions, Layer, Nop};
+/// let inner = compose_unpublished(Layer::App, Nop, Nop);
 /// let outer = extensions![inner, Nop];
 /// ```
 ///
@@ -217,12 +372,12 @@ macro_rules! extensions {
     ($a:expr, $($rest:expr),+ $(,)?) => { $crate::Chain::new($a, $crate::extensions!($($rest),+)) };
 }
 
-/// The bound on every decision call. The composed chain measures each
-/// party's call with the layer's clock; an answer that took longer is
-/// ignored (the party abstains) and `app.extension_overran` is emitted.
-/// Where the MCU's isolation level allows it, the sandbox's timer also
-/// preempts the call at this bound; elsewhere the call runs to its end
-/// and only its answer is dropped.
+/// The bound on every decision call. The composed chain times each
+/// extension's call on its own with the layer's clock; an answer that
+/// took longer is ignored (that extension abstains) and
+/// `app.extension_overran` names it. Where the MCU's isolation level
+/// allows it, the sandbox's timer also preempts the call at this bound;
+/// elsewhere the call runs to its end and only its answer is dropped.
 pub const DECISION_BOUND_MS: u32 = 50;
 
 /// A decision point, as named in `app.extension_overran`.
@@ -235,41 +390,54 @@ pub enum DecisionId {
     SelfCheck,
 }
 
-/// Who answered late, in the chain's order.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-#[non_exhaustive]
-pub enum Party {
-    #[default]
-    Board,
-    User,
-}
-
 impl Compact for DecisionId {
     const SIZE: usize = 1;
     fn put(&self, out: &mut [u8]) {
         out[0] = *self as u8;
     }
-}
-
-impl Compact for Party {
-    const SIZE: usize = 1;
-    fn put(&self, out: &mut [u8]) {
-        out[0] = *self as u8;
+    fn get(b: &[u8]) -> Option<Self> {
+        match b {
+            [0] => Some(DecisionId::AcceptUpdate),
+            [1] => Some(DecisionId::AllowRebootNow),
+            [2] => Some(DecisionId::SelfCheck),
+            _ => None,
+        }
     }
 }
 
-crate::state_machine! {
-    /// Decision calls to extensions and their bound.
-    pub machine decisions in App {
-        initial Ready;
-        states { Ready }
-        transitions {
-            /// A party answered a decision point after `DECISION_BOUND_MS`;
-            /// its answer was ignored.
-            overran(point: DecisionId, party: Party, us: u32): Ready => Ready
-                emits ExtensionOverran = 0xF0 { point: DecisionId, party: Party, us: u32 }
-                observe(live);
+/// An extension's identity in an event: its id, and in the owned record
+/// the id's 32-bit FNV-1a hash (a replayed event carries the hash only;
+/// its `name` is empty).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct ExtId {
+    pub name: &'static str,
+    pub hash: u32,
+}
+
+impl ExtId {
+    pub const fn of(name: &'static str) -> Self {
+        let b = name.as_bytes();
+        let mut h: u32 = 0x811c_9dc5;
+        let mut i = 0;
+        while i < b.len() {
+            h ^= b[i] as u32;
+            h = h.wrapping_mul(0x0100_0193);
+            i += 1;
         }
+        ExtId { name, hash: h }
+    }
+}
+
+impl Compact for ExtId {
+    const SIZE: usize = 4;
+    fn put(&self, out: &mut [u8]) {
+        self.hash.put(out);
+    }
+    fn get(b: &[u8]) -> Option<Self> {
+        Some(ExtId {
+            name: "",
+            hash: u32::get(b)?,
+        })
     }
 }
 

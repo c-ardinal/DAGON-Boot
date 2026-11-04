@@ -6,11 +6,25 @@ use core::fmt;
 use crate::catalog::{Entry, Layer};
 use crate::PAYLOAD_BYTES;
 
-/// An event payload. Implemented only by the payload types
-/// [`crate::state_machine!`] generates (the trait is sealed); they are
-/// built only in the crate that declares the machine, and only its
-/// transitions deliver them, so only DAGON emits events.
-pub trait Payload: crate::__private::Sealed + Any + fmt::Debug {
+/// An event payload: one of the payload types [`crate::state_machine!`]
+/// generates. The trait is sealed (its supertrait cannot be named outside
+/// this crate); a payload is built only in the crate that declares its
+/// machine, and only that machine's transitions and the layer's replay
+/// deliver it.
+///
+/// ```compile_fail,E0277
+/// #[derive(Debug)]
+/// struct Forged;
+/// impl dagon_events::Payload for Forged {
+///     fn entry(&self) -> &'static dagon_events::Entry {
+///         &dagon_events::decisions::ExtensionOverran::ENTRY
+///     }
+///     fn compact(&self) -> [u8; 16] {
+///         [0; 16]
+///     }
+/// }
+/// ```
+pub trait Payload: crate::sealed::SealedPayload + Any + fmt::Debug {
     /// The catalog entry of the transition that emits it.
     fn entry(&self) -> &'static Entry;
     /// The owned form ([`EventRecord::payload`]): the fields in order.
@@ -32,6 +46,14 @@ impl<'a> Event<'a> {
         Event {
             payload,
             replayed: false,
+        }
+    }
+
+    /// An event re-emitted from what an earlier stage recorded.
+    pub(crate) fn replayed(payload: &'a dyn Payload) -> Self {
+        Event {
+            payload,
+            replayed: true,
         }
     }
 

@@ -1,23 +1,33 @@
 //! The registry of every DAGON state machine's catalog, and the documents
-//! generated from it and from the port catalog.
+//! generated from it and from the port catalog. Code that reads events
+//! (the CLI, host tools) depends on this crate, not on `dagon-events`.
 //!
-//! A crate that declares a machine with `dagon_events::state_machine!`
-//! adds its `CATALOG` to [`MACHINES`] (a test fails until it does); the
-//! tests then check the layer's event codes and regenerate
-//! `docs/events.md`. `docs/ports.md` and the port table of
-//! `docs/design/lifecycle-events.md` come from `dagon_events::PORTS`.
-//! Regenerate them with
+//! Every workspace crate that depends on `dagon-events` declares its
+//! machines in one `dagon_events::state_machine!` (none is allowed),
+//! which defines its `MACHINES`; [`REGISTRY`] lists each crate's
+//! `MACHINES`, and a test fails while a crate that depends on
+//! `dagon-events` is missing from it. The tests also check the layers'
+//! event codes and regenerate `docs/events.md`; `docs/ports.md` and the
+//! port table of `docs/design/lifecycle-events.md` come from
+//! `dagon_events::PORTS`. Regenerate them with
 //! `DAGON_BLESS=1 cargo test -p dagon-catalog --test docs`.
 #![forbid(unsafe_code)]
 
 use std::fmt::Write;
 
-use dagon_events::{Catalog, Entry, Layer, Port, Trust, DECISIONS, EVENT_FORMAT};
+pub use dagon_events::EVENT_FORMAT;
+use dagon_events::{Catalog, Entry, Layer, Machines, Port, Trust, DECISIONS};
 
-/// Every machine of every layer. A test finds every `state_machine!`
-/// declaration in the repository (outside `tests/` folders) and fails
-/// while one is missing here.
-pub const MACHINES: &[Catalog] = &[dagon_events::decisions::CATALOG];
+/// Each machine-declaring crate's `MACHINES`, one entry per crate.
+pub const REGISTRY: &[Machines] = &[dagon_events::MACHINES];
+
+/// Every machine of every layer.
+pub fn machines() -> Vec<Catalog> {
+    REGISTRY
+        .iter()
+        .flat_map(|m| m.catalogs.iter().copied())
+        .collect()
+}
 
 /// Faults across machines that one machine's declaration cannot see: two
 /// kinds of a layer with one code or one name, two machines of a layer
@@ -247,19 +257,30 @@ fn defaults(p: &Port) -> String {
         .join("; ")
 }
 
+fn services(p: &Port) -> String {
+    if p.services.is_empty() {
+        return "–".into();
+    }
+    let names: Vec<_> = p.services.iter().map(|x| x.name()).collect();
+    names.join(", ")
+}
+
 /// The port table of the design document (section 2.1), between its
 /// generated-table markers.
 pub fn design_ports_table(ports: &[Port]) -> String {
-    let mut s = String::from("| Port | Layers | Default | Trust policy |\n|---|---|---|---|\n");
+    let mut s = String::from(
+        "| Port | Layers | Default | Trust policy | Services |\n|---|---|---|---|---|\n",
+    );
     for p in ports.iter().filter(|p| p.trust.is_port()) {
         let _ = writeln!(
             s,
-            "| `{}` ({}) | {} | {} | {} |",
+            "| `{}` ({}) | {} | {} | {} | {} |",
             p.id,
             cell(p.what),
             layer_names(p),
             defaults(p),
-            trust(p)
+            trust(p),
+            services(p)
         );
     }
     s
@@ -287,7 +308,6 @@ pub fn ports_md(ports: &[Port]) -> String {
          |---|---|---|---|---|---|\n",
     );
     for p in ports.iter().filter(|p| p.trust.is_port()) {
-        let services: Vec<_> = p.services.iter().map(|x| x.name()).collect();
         let _ = writeln!(
             s,
             "| `{}` | {} | {} | {} | {} | {} |",
@@ -296,11 +316,7 @@ pub fn ports_md(ports: &[Port]) -> String {
             layer_names(p),
             defaults(p),
             trust(p),
-            if services.is_empty() {
-                "–".into()
-            } else {
-                services.join(", ")
-            }
+            services(p)
         );
     }
     s.push_str(

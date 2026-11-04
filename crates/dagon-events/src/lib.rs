@@ -22,14 +22,15 @@ mod machine;
 mod ports;
 mod published;
 
-pub use catalog::{Catalog, Entry, Field, Flags, Layer, Observe};
+pub use catalog::{Catalog, Entry, Field, Flags, Layer, Machines, Observe};
 pub use compact::Compact;
 pub use compose::{
-    compose, compose_unpublished, Bounds, Clock, Composed, Head, NoPublisher, Sink, Watchdog,
+    compose, compose_unpublished, AlreadyComposed, Bounds, Clock, Composed, Head, NoPublisher,
+    Sink, Unreadable, Watchdog,
 };
 pub use event::{Event, EventRecord, Payload, Refused};
 pub use extension::{
-    decisions, Accept, Chain, Ctx, DecisionId, DecisionPoint, Delay, Extension, Health, Nop, Party,
+    Accept, Chain, Ctx, DecisionId, DecisionPoint, Delay, ExtId, Extension, Health, Nop,
     RebootRequest, TrialInfo, UpdateOffer, DECISIONS, DECISION_BOUND_MS,
 };
 pub use ports::{Port, PortDefault, Service, Trust, PORTS};
@@ -45,11 +46,48 @@ pub const EVENT_FORMAT: u16 = 1;
 /// Bytes of an event payload's owned form ([`EventRecord::payload`]).
 pub const PAYLOAD_BYTES: usize = 16;
 
+state_machine! {
+    /// Decision calls to extensions and their bound.
+    pub machine decisions in App {
+        initial Ready;
+        states { Ready }
+        transitions {
+            /// An extension answered a decision point after
+            /// `DECISION_BOUND_MS`; its answer was ignored.
+            overran(id: ExtId, point: DecisionId, us: u32): Ready => Ready
+                emits ExtensionOverran = 0xF0 { id: ExtId, point: DecisionId, us: u32 }
+                observe(live);
+        }
+    }
+}
+
+/// Traits and types that cannot be named outside this crate: they seal
+/// [`Payload`], [`Sink`] and [`Head`], and keep the composed chain's
+/// per-extension calls ([`Extension`]'s hidden methods) DAGON's.
+mod sealed {
+    /// Only payloads [`crate::state_machine!`] generates.
+    pub trait SealedPayload {}
+    impl<T: crate::__private::Generated> SealedPayload for T {}
+
+    pub trait SealedSink {}
+    pub trait SealedHead {}
+
+    /// Proof that the caller is this crate.
+    #[derive(Clone, Copy, Debug)]
+    pub struct Token(());
+
+    impl Token {
+        pub(crate) fn new() -> Self {
+            Token(())
+        }
+    }
+}
+
 #[doc(hidden)]
 pub mod __private {
     pub use crate::machine::{contains, snake, snake_len, unique_codes};
 
-    /// Implemented by [`crate::state_machine!`] for its payload types
-    /// only; seals [`crate::Payload`].
-    pub trait Sealed {}
+    /// Implemented by [`crate::state_machine!`] for the payload types it
+    /// generates.
+    pub trait Generated {}
 }

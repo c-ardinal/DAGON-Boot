@@ -186,14 +186,6 @@ pub const PORTS: &[Port] = &[
         &[],
     ),
     port(
-        "Clock",
-        "the monotonic time that bounds decision calls",
-        &[on(App, "the MCU's timer"), on(Relay, "the MCU's timer")],
-        TrustedOnly,
-        "a clock that runs slow would hide an overrun",
-        &[],
-    ),
-    port(
         "SlotStore",
         "where images live",
         &[on(Boot, FLASH), on(App, FLASH)],

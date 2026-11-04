@@ -27,7 +27,6 @@ Trust:
 | `CryptoProvider` | the primitives the verifier and digest use; hardware acceleration, HSM | boot, app, host | software | trusted only | – |
 | `DecisionPolicy` | attempt limit, which slot wins | boot | `max_attempts` from the definition, pending before confirmed | trusted only | – |
 | `WatchdogDriver` | the watchdog that guards boot and trial | boot, app | the MCU's | trusted only | – |
-| `Clock` | the monotonic time that bounds decision calls | app, relay | the MCU's timer | trusted only (a clock that runs slow would hide an overrun) | – |
 | `SlotStore` | where images live | boot, app | the MCU package's flash layout | trusted only | – |
 | `LogStorage` | where the state log lives | boot, app | the MCU package's flash layout | trusted only | – |
 | `Recovery` | an additional recovery path: a service window for a transport, a vendor download mode | boot, app | BOOTSEL/UF2, factory, ROM entry as the MCU and board define | untrusted, additive (a plug-in adds a path, never removes DAGON's) | return, transport, time, memory |

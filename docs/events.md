@@ -49,4 +49,4 @@ States: `Ready` (initial).
 
 | Kind | Code | Transition | Payload | Observed | Notes | Description |
 |---|---|---|---|---|---|---|
-| `app.extension_overran` | 0xf0 | `overran`: Ready → Ready | `point: DecisionId` (1 B), `party: Party` (1 B), `us: u32` (4 B) | live |  | A party answered a decision point after `DECISION_BOUND_MS`; its answer was ignored. |
+| `app.extension_overran` | 0xf0 | `overran`: Ready → Ready | `id: ExtId` (4 B), `point: DecisionId` (1 B), `us: u32` (4 B) | live |  | An extension answered a decision point after `DECISION_BOUND_MS`; its answer was ignored. |

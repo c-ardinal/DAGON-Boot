@@ -6,6 +6,7 @@ version = "0.1.0"
 
 [dependencies]
 dagon-agent = { path = "../dagon-agent" }
+dagon-events = { path = "../dagon-events" }
 dagon-format = { path = "../dagon-format" }
 dagon-port = { path = "../dagon-port" }
 dagon-proto = { path = "../dagon-proto" }

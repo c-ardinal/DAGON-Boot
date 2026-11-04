@@ -7,7 +7,8 @@
 //! machines in one `dagon_events::state_machine!` at its root (none is
 //! allowed), which defines its `MACHINES` static; [`REGISTRY`] lists each
 //! crate's `MACHINES` by path, and a test fails while such a crate is
-//! missing from it. The tests also check the layers'
+//! missing from it. A crate that depends on this one (the CLI) reads the
+//! catalogs and declares no machine. The tests also check the layers'
 //! event codes and regenerate `docs/events.md`; `docs/ports.md` and the
 //! port table of `docs/design/lifecycle-events.md` come from
 //! `dagon_events::PORTS`. Regenerate them with
@@ -28,7 +29,7 @@ macro_rules! registry {
 }
 
 /// Each machine-declaring crate's `MACHINES`, one entry per crate.
-pub static REGISTRY: &[&Machines] = registry![dagon_events];
+pub static REGISTRY: &[&Machines] = registry![dagon_events, dagon_agent, dagon_sim];
 
 /// Every machine of every layer.
 pub fn machines() -> Vec<Catalog> {

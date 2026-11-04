@@ -32,6 +32,27 @@ fn check(rel: &str, generated: &str) {
     );
 }
 
+/// Every `.rs` file under `dir`, build output and vendored trees left out.
+fn rust_files(dir: &std::path::Path) -> Vec<PathBuf> {
+    fn walk(dir: &std::path::Path, out: &mut Vec<PathBuf>) {
+        for e in std::fs::read_dir(dir).unwrap().flatten() {
+            let p = e.path();
+            let skip = matches!(
+                e.file_name().to_str(),
+                Some("target" | "node_modules" | ".git" | "vendor" | "pkg")
+            );
+            if p.is_dir() && !skip {
+                walk(&p, out);
+            } else if p.extension().is_some_and(|x| x == "rs") {
+                out.push(p);
+            }
+        }
+    }
+    let mut files = Vec::new();
+    walk(dir, &mut files);
+    files
+}
+
 #[test]
 fn events_md_is_generated() {
     check("docs/events.md", &events_md(&machines()));
@@ -114,9 +135,33 @@ fn every_machine_crate_is_registered_once() {
         }
         false
     };
+    // A crate that depends on this registry reads the catalogs; it cannot
+    // be listed here (that would be a dependency cycle), so it declares no
+    // machine: its sources never invoke `state_machine!`.
+    let reads_registry = |name: &str| deps.get(name).is_some_and(|d| d.contains(&"dagon-catalog"));
     let mut machine_crates = BTreeSet::new();
     for id in meta["workspace_members"].as_array().unwrap() {
         let name = name_of[id.as_str().unwrap()];
+        if reads_registry(name) {
+            let manifest = meta["packages"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .find(|p| p["id"] == *id)
+                .and_then(|p| p["manifest_path"].as_str())
+                .unwrap();
+            let src = PathBuf::from(manifest).with_file_name("src");
+            let declares = rust_files(&src).into_iter().find(|f| {
+                std::fs::read_to_string(f)
+                    .unwrap_or_default()
+                    .contains(concat!("state_machine", "!"))
+            });
+            assert_eq!(
+                declares, None,
+                "{name} reads the registry and cannot declare machines"
+            );
+            continue;
+        }
         if name == "dagon-events" || (name != "dagon-catalog" && reaches_events(name)) {
             machine_crates.insert(name.to_string());
         }
@@ -159,26 +204,11 @@ fn hidden_items_are_used_only_by_dagon_events() {
         concat!("_", "_reboot_at"),
         concat!("_", "_check_at"),
     ];
-    fn walk(dir: &std::path::Path, out: &mut Vec<PathBuf>) {
-        for e in std::fs::read_dir(dir).unwrap().flatten() {
-            let p = e.path();
-            let skip = matches!(
-                e.file_name().to_str(),
-                Some("target" | "node_modules" | ".git" | "vendor" | "pkg")
-            );
-            if p.is_dir() && !skip {
-                walk(&p, out);
-            } else if p.extension().is_some_and(|x| x == "rs") {
-                out.push(p);
-            }
-        }
-    }
     let own = root()
         .join("crates/dagon-events/src")
         .canonicalize()
         .unwrap();
-    let mut files = Vec::new();
-    walk(&root(), &mut files);
+    let files = rust_files(&root());
     let mut found = Vec::new();
     for f in files {
         if f.canonicalize().unwrap().starts_with(&own) {

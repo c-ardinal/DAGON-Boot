@@ -11,10 +11,12 @@ use dagon_proto::payload::{
     self, reboot_mode, target, HelloReq, HelloResp, SetPending, SlotState, StatusResp, XferBegin,
     XferChunk, IMAGE_HDR_LEN,
 };
-use dagon_proto::{flags, frame_len, Cmd, Frame, Status, HEADER_LEN, MAX_FRAME};
+use dagon_proto::{
+    flags, frame_len, max_payload, split_status, Cmd, Frame, Status, HEADER_LEN, MAX_FRAME,
+};
 
 use crate::images::{ImageStore, ImageView};
-use crate::{requests, session, AbortCause, Config, SlotStore};
+use crate::{node, protocol, requests, session, AbortCause, Config, SlotStore};
 
 /// A transfer with no request for this long returns to idle.
 pub const IDLE_TIMEOUT_MS: u32 = 10_000;
@@ -70,6 +72,7 @@ pub struct Agent<S, X> {
     chain: X,
     session: session::Machine,
     requests: requests::Machine,
+    node: node::Machine,
     hdr: [u8; HEADER_SIZE],
     last: Option<(u8, u8)>,
     resp: [u8; RESP_BUF],
@@ -85,16 +88,20 @@ fn noted(r: Result<(), Refused>) {
 }
 
 impl<S: SlotStore, X: AppChain> Agent<S, X> {
-    /// Opens the slot store: `app.store_opened`, then the boot core's
-    /// changes it shows replayed (`app.trial_started`, `app.rolled_back`).
-    pub fn new(cfg: Config, store: S, chain: X) -> Self {
+    /// DAGON's start: `app.starting`, then the slot store is opened
+    /// (`app.store_opened`) and the boot core's changes it shows are
+    /// replayed (`app.trial_started`, `app.rolled_back`).
+    pub fn new(cfg: Config, store: S, mut chain: X) -> Self {
+        let mut node = node::Machine::new();
+        noted(node.starting(&mut chain, cfg.role, cfg.mode));
         let mut agent = Agent {
             key_id: dagon_format::key_id(&cfg.pubkey),
+            images: ImageStore::open(store, cfg.trial_attempts),
             cfg,
-            images: ImageStore::open(store),
             chain,
             session: session::Machine::new(),
             requests: requests::Machine::new(),
+            node,
             hdr: [0; HEADER_SIZE],
             last: None,
             resp: [0; RESP_BUF],
@@ -107,9 +114,14 @@ impl<S: SlotStore, X: AppChain> Agent<S, X> {
 
     /// The app started again over the same store and chain, as after a
     /// reset (a simulator, a test bench): what the agent held in RAM is
-    /// gone, the slots are read again, and `app.store_opened` and the boot
-    /// replay follow as in [`Agent::new`].
+    /// gone, the slots are read again, and `app.starting`,
+    /// `app.store_opened` and the boot replay follow as in [`Agent::new`].
     pub fn restart(&mut self) {
+        self.node = node::Machine::new();
+        noted(
+            self.node
+                .starting(&mut self.chain, self.cfg.role, self.cfg.mode),
+        );
         self.images.reopen();
         self.session = session::Machine::new();
         self.requests = requests::Machine::new();
@@ -137,15 +149,39 @@ impl<S: SlotStore, X: AppChain> Agent<S, X> {
         self.images.view()
     }
 
-    /// The board's slot store, for its other resources (flash reads, a
-    /// watchdog it holds). Its [`SlotStore`] mutators need a
-    /// [`crate::Transition`], so they cannot be called through it. What a
-    /// store type offers beyond the port (a raw flash handle, a
-    /// provisioning helper of a simulator) is outside that guarantee: it
-    /// is trusted code of the board or bench, as anything with flash
-    /// access in the same image.
-    pub fn store(&mut self) -> &mut S {
-        self.images.store()
+    /// The start took over the boot core's watchdog with `period_ms`
+    /// (`app.watchdog_taken`); `trial`: the running image is on trial.
+    pub fn watchdog_taken(&mut self, period_ms: u32, trial: bool) {
+        noted(self.node.watchdog_taken(&mut self.chain, period_ms, trial));
+    }
+
+    /// The serving loop serves a DAGON link of kind `link`
+    /// (`app.link_up`).
+    pub fn link_up(&mut self, link: u8) {
+        noted(self.node.link_up(&mut self.chain, link));
+    }
+
+    /// A DAGON link closed (`app.link_down`).
+    pub fn link_down(&mut self, link: u8) {
+        noted(self.node.link_down(&mut self.chain, link));
+    }
+
+    /// A frame arrived on link `via` (`app.request` when it is a DAGON
+    /// request, whoever answers it).
+    pub fn request(&mut self, frame: &[u8], via: u8) {
+        let Ok((f, _)) = Frame::decode(frame, max_payload::USB) else {
+            return;
+        };
+        if f.flags & (flags::RESP | flags::EVENT) == 0 {
+            let p = protocol::DAGON;
+            noted(self.node.request(&mut self.chain, p, f.cmd, f.seq, via));
+        }
+    }
+
+    /// A reply with `status` left, `ms` after its request arrived
+    /// (`app.replied`; [`reply_status`] reads it from the frame).
+    pub fn replied(&mut self, status: u8, ms: u32) {
+        noted(self.node.replied(&mut self.chain, status, ms));
     }
 
     /// Confirms the running image while it is on trial (an app that
@@ -560,7 +596,7 @@ impl<S: SlotStore, X: AppChain> Agent<S, X> {
         let slot = st.active;
         let version = st.slots[usize::from(slot)].version;
         noted(self.requests.self_check(&mut self.chain, slot, version));
-        let trial = TrialInfo::new(slot, version, st.attempts, 0);
+        let trial = TrialInfo::new(slot, version, st.attempts, self.cfg.trial_attempts);
         if self.chain.self_check(&trial) != Health::Healthy {
             return Err(Status::State);
         }
@@ -568,6 +604,15 @@ impl<S: SlotStore, X: AppChain> Agent<S, X> {
         self.images.read_header(slot, &mut hdr)?;
         self.images.confirm(slot, &hdr, version, &mut self.chain)
     }
+}
+
+/// The status a DAGON reply frame carries; `None` for anything else.
+pub fn reply_status(frame: &[u8]) -> Option<u8> {
+    let (f, _) = Frame::decode(frame, max_payload::USB).ok()?;
+    if f.flags & flags::RESP == 0 {
+        return None;
+    }
+    split_status(f.payload).map(|(s, _)| s as u8)
 }
 
 /// Signature, key and compatibility of `hdr` for `slot`.

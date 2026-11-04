@@ -4,7 +4,6 @@
 //! dagon-host through the same `HostLink` as Web Serial, on the simulator's
 //! clock. Built with the `sim` feature only.
 
-use dagon_port::Flash;
 use dagon_sim::{demo_hub_desk, SimHub};
 use wasm_bindgen::prelude::*;
 
@@ -44,12 +43,8 @@ impl SimDesk {
         let Some(node) = self.0.i2c_node(addr) else {
             return false;
         };
-        let mut i = 0;
-        while let Some((a, l)) = node.flash().sector_addr(i) {
-            if Flash::erase(node.flash(), a, l).is_err() {
-                return false;
-            }
-            i += 1;
+        if node.flash().erase_all().is_err() {
+            return false;
         }
         node.reset(now);
         true

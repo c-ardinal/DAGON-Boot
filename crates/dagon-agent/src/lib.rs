@@ -14,18 +14,22 @@
 //!   the DAGON wire protocol ([`Agent::handle`]) maps its requests onto them.
 //! - [`requests`]: what the agent answered or refused, and the decision
 //!   points it asked.
+//! - [`node`]: the node's start and its links, reported by the MCU
+//!   package's start and serving loop.
 //!
 //! Applications read the slots through [`Agent::images`] and confirm their
 //! own trial with [`Agent::confirm_own`]; extensions answer the decision
 //! points (`accept_update`, `allow_reboot_now`, `self_check`) through the
-//! chain.
+//! chain. The slot store stays the agent's: the MCU package keeps the
+//! board's other resources (a flash reader, the watchdog) in handles of
+//! its own.
 #![no_std]
 #![forbid(unsafe_code)]
 
 mod agent;
 mod images;
 
-pub use agent::{Agent, AppChain, Reply, IDLE_TIMEOUT_MS};
+pub use agent::{reply_status, Agent, AppChain, Reply, IDLE_TIMEOUT_MS};
 pub use images::{ImageView, Transition};
 
 use dagon_events::Compact;
@@ -68,9 +72,9 @@ dagon_events::state_machine! {
                 emits PendingMoved = 0x23 { from: u8, to: u8 }
                 observe(live, host);
             /// The boot core started the pending slot on trial (`attempt`
-            /// boots so far).
-            trial_started(slot: u8, version: Version, attempt: u8): Pending | Trial => Trial
-                emits TrialStarted = 0x24 { slot: u8, version: Version, attempt: u8 }
+            /// boots so far, of the `max` its boot core allows).
+            trial_started(slot: u8, version: Version, attempt: u8, max: u8): Pending | Trial => Trial
+                emits TrialStarted = 0x24 { slot: u8, version: Version, attempt: u8, max: u8 }
                 observe(replay, host);
             /// The slot on trial was confirmed after its self-check.
             confirmed(slot: u8, version: Version): Trial => Confirmed
@@ -133,6 +137,38 @@ dagon_events::state_machine! {
             aborted(cause: AbortCause): Header | Body => Idle
                 emits TransferAborted = 0x15 { cause: AbortCause }
                 observe(live, host);
+        }
+    }
+
+    /// The node's start and its DAGON links: what the MCU package's start
+    /// and serving loop report through the agent.
+    pub machine node in App {
+        initial Off;
+        states { Off, Up }
+        transitions {
+            /// DAGON's start began (the agent was made, or restarted); the
+            /// slot store is read next.
+            starting(role: u8, mode: u8): * => Up
+                emits Starting = 0x01 { role: u8, mode: u8 }
+                observe(live);
+            /// The start took over the boot core's watchdog (`trial`: the
+            /// running image is on trial).
+            watchdog_taken(period_ms: u32, trial: bool): Up => Up
+                emits WatchdogTaken = 0x02 { period_ms: u32, trial: bool }
+                observe(live);
+            /// A DAGON link (its kind's code, `dagon_mcu_common::link::Kind`)
+            /// is served.
+            link_up(link: u8): Up => Up emits LinkUp = 0x03 { link: u8 } observe(live);
+            /// A DAGON link closed.
+            link_down(link: u8): Up => Up emits LinkDown = 0x04 { link: u8 } observe(live);
+            /// A request arrived on link `via`.
+            request(protocol: u8, cmd: u8, seq: u8, via: u8): Up => Up
+                emits Request = 0x05 { protocol: u8, cmd: u8, seq: u8, via: u8 }
+                observe(live);
+            /// The reply to the last request left, `ms` after it arrived.
+            replied(status: u8, ms: u32): Up => Up
+                emits Replied = 0x06 { status: u8, ms: u32 }
+                observe(live);
         }
     }
 
@@ -335,4 +371,75 @@ pub struct Config {
     pub mode: u8,
     /// Max payload of the link the agent serves (`dagon_proto::max_payload`).
     pub max_payload: u16,
+    /// Boots the boot core gives an image on trial before it rolls back
+    /// (the MCU package's boot settings; `TrialInfo::max`).
+    pub trial_attempts: u8,
+}
+
+/// `app.request` `protocol` codes.
+pub mod protocol {
+    /// The DAGON wire protocol (`dagon_proto` frames).
+    pub const DAGON: u8 = 1;
+}
+
+/// A test bench's slot store, shared with the bench code that plays the
+/// boot core or inspects the flash. Host test builds only (feature
+/// `store-tests`).
+#[cfg(feature = "store-tests")]
+impl<S: SlotStore + ?Sized> SlotStore for &core::cell::RefCell<S> {
+    fn status(&mut self) -> StatusResp {
+        self.borrow_mut().status()
+    }
+    fn capacity(&self, target: u8, slot: u8) -> u32 {
+        self.borrow().capacity(target, slot)
+    }
+    fn erase(&mut self, target: u8, slot: u8, len: u32, t: &Transition) -> Result<(), StoreError> {
+        self.borrow_mut().erase(target, slot, len, t)
+    }
+    fn write(
+        &mut self,
+        target: u8,
+        slot: u8,
+        offset: u32,
+        data: &[u8],
+        t: &Transition,
+    ) -> Result<(), StoreError> {
+        self.borrow_mut().write(target, slot, offset, data, t)
+    }
+    fn read(
+        &mut self,
+        target: u8,
+        slot: u8,
+        offset: u32,
+        buf: &mut [u8],
+    ) -> Result<(), StoreError> {
+        self.borrow_mut().read(target, slot, offset, buf)
+    }
+    fn write_header(
+        &mut self,
+        slot: u8,
+        header: &[u8; HEADER_SIZE],
+        t: &Transition,
+    ) -> Result<(), StoreError> {
+        self.borrow_mut().write_header(slot, header, t)
+    }
+    fn read_header(&mut self, slot: u8, out: &mut [u8; HEADER_SIZE]) -> Result<(), StoreError> {
+        self.borrow_mut().read_header(slot, out)
+    }
+    fn set_pending(
+        &mut self,
+        slot: u8,
+        header: &[u8; HEADER_SIZE],
+        t: &Transition,
+    ) -> Result<(), StoreError> {
+        self.borrow_mut().set_pending(slot, header, t)
+    }
+    fn confirm(
+        &mut self,
+        slot: u8,
+        header: &[u8; HEADER_SIZE],
+        t: &Transition,
+    ) -> Result<(), StoreError> {
+        self.borrow_mut().confirm(slot, header, t)
+    }
 }

@@ -68,7 +68,7 @@ fn conf_run(node: &mut SimNode, frame: &[u8], max: usize) -> Option<Vec<u8>> {
         scratch: Layout::STM32F401XE.slots[1 - active].0,
     };
     let mut out = vec![0u8; RESPONSE_MAX];
-    let n = node::handle_frame(frame, max, node.flash(), &setup, &mut out, &mut || {})?;
+    let n = node::handle_frame(frame, max, &mut *node.flash(), &setup, &mut out, &mut || {})?;
     out.truncate(n);
     Some(out)
 }

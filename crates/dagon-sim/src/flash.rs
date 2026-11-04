@@ -138,6 +138,16 @@ impl SimFlash {
         None
     }
 
+    /// Erases every unit, as a chip erase does (each one an erase op).
+    pub fn erase_all(&mut self) -> Result<(), FlashError> {
+        let mut i = 0;
+        while let Some((a, l)) = self.sector_addr(i) {
+            self.erase(a, l)?;
+            i += 1;
+        }
+        Ok(())
+    }
+
     /// Erase unit containing `addr`.
     pub fn unit_at(&self, addr: u32) -> Option<FlashRegion> {
         self.locate(addr, 1).ok().map(|(i, _)| self.regions[i])

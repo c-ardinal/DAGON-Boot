@@ -13,7 +13,6 @@ use dagon_host::{
     rom, Clock, ConfirmOutcome, Error, Event, Host, NodeOutcome, Outcome, RecoverAssets,
     RecoverPath, Target, Transport, CONFIRM_RETRY_MS,
 };
-use dagon_port::Flash;
 use dagon_proto::payload::{phase, SlotState};
 use dagon_proto::{flags, Cmd, Status};
 use dagon_sign::image::{self, sign_image, ImageSpec};
@@ -503,11 +502,7 @@ fn wipe_seg(s: &Sim) {
     let mut hub = s.hub.borrow_mut();
     let now = hub.now_ms();
     let node = hub.i2c_node(NODE_I2C_ADDR).unwrap();
-    let mut i = 0;
-    while let Some((a, l)) = node.flash().sector_addr(i) {
-        Flash::erase(node.flash(), a, l).unwrap();
-        i += 1;
-    }
+    node.flash().erase_all().unwrap();
     node.reset(now);
 }
 

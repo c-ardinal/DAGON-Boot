@@ -92,13 +92,13 @@ The machine wraps the slot store port: `ImageStore<S: SlotStore>` holds
 the store, and the port's mutators (`erase`, `write`, `write_header`,
 `set_pending`, `confirm`) take a `Transition` that only the machine
 makes, inside the transition that emits the change's event. The
-`SlotStore` trait remains the port a board implements. Code that holds
-the store for the board's other resources (`Agent::store()`) cannot call
-the port's mutators with it. What a store type offers beyond the port (a
-raw flash handle, a simulator's provisioning helpers) is outside this
-guarantee: it is trusted code of the board or bench, like anything with
-flash access in the same image, and the sandbox (4) is what keeps
-extensions from it. When a header write does not read back, the slot is
+`SlotStore` trait remains the port a board implements. The agent owns the
+store and hands it to no one; the board's other resources (a flash
+reader, the watchdog) are handles the MCU package keeps for itself. What
+those handles reach (a raw flash driver, a simulator's provisioning
+helpers) is outside this guarantee: it is trusted code of the board or
+bench, like anything with flash access in the same image, and the
+sandbox (4) is what keeps extensions from it. When a header write does not read back, the slot is
 erased again, so a fault leaves no image the machine has not recorded.
 The agent exposes `images() -> &ImageView`
 (read-only: status, each slot's lifecycle state, own version, on

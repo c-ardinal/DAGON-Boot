@@ -1,5 +1,9 @@
 //! SimStore: the agent's receiver over a SimFlash with a kind S layout
 //! (inline headers, one state log face), plus the boot decision made at reset.
+//! A clone is another handle on the same flash: the agent holds one, the
+//! simulated board (its boot core, ROM loader, power) another.
+
+use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 
 use crate::flash::SimFlash;
 use dagon_agent::{SlotStore, StoreError, Transition};
@@ -68,8 +72,9 @@ pub enum Boot {
     Nothing,
 }
 
+#[derive(Clone)]
 pub struct SimStore {
-    pub flash: SimFlash,
+    flash: Arc<Mutex<SimFlash>>,
     pub layout: Layout,
     pubkey: [u8; 32],
 }
@@ -83,10 +88,15 @@ impl Default for SimStore {
 impl SimStore {
     pub fn new(flash: SimFlash, layout: Layout, pubkey: [u8; 32]) -> Self {
         SimStore {
-            flash,
+            flash: Arc::new(Mutex::new(flash)),
             layout,
             pubkey,
         }
+    }
+
+    /// The flash, shared with every clone of this store.
+    pub fn flash(&self) -> MutexGuard<'_, SimFlash> {
+        self.flash.lock().unwrap_or_else(PoisonError::into_inner)
     }
 
     fn region(&self, t: u8, slot: u8) -> Result<(u32, u32), StoreError> {
@@ -111,7 +121,7 @@ impl SimStore {
 
     fn header_at(&mut self, slot: u8) -> Option<[u8; HEADER_SIZE]> {
         let mut h = [0u8; HEADER_SIZE];
-        self.flash.read(self.slot_base(slot)?, &mut h).ok()?;
+        self.flash().read(self.slot_base(slot)?, &mut h).ok()?;
         ImageHeader::parse(&h).ok().map(|_| h)
     }
 
@@ -120,7 +130,7 @@ impl SimStore {
     fn records(&mut self) -> (u32, usize, Vec<Record>) {
         let (base, len) = self.layout.log;
         let mut buf = vec![0u8; len as usize];
-        if self.flash.read(base, &mut buf).is_err() {
+        if self.flash().read(base, &mut buf).is_err() {
             return (0, 0, Vec::new());
         }
         let face: [u8; 32] = buf[..32].try_into().expect("32");
@@ -141,7 +151,9 @@ impl SimStore {
         let (base, len) = self.layout.log;
         let (gen, used, recs) = self.records();
         if gen == 0 {
-            self.flash.erase(base, len).map_err(|_| StoreError::Flash)?;
+            self.flash()
+                .erase(base, len)
+                .map_err(|_| StoreError::Flash)?;
             let fh = FaceHeader { generation: 1 }.to_bytes();
             self.program(base, &fh)?;
         }
@@ -160,19 +172,19 @@ impl SimStore {
             return Ok(());
         }
         let ws = self
-            .flash
+            .flash()
             .unit_at(addr)
             .ok_or(StoreError::Range)?
             .write_size as usize;
         let start = addr as usize / ws * ws;
         let mut buf = vec![0xFF; (addr as usize + data.len()).div_ceil(ws) * ws - start];
-        self.flash
+        self.flash()
             .read(start as u32, &mut buf)
             .map_err(|_| StoreError::Flash)?;
         // Bytes around `data` keep their current value, so already programmed
         // neighbours in the same write unit are rewritten with themselves.
         buf[addr as usize - start..][..data.len()].copy_from_slice(data);
-        self.flash
+        self.flash()
             .write(start as u32, &buf)
             .map_err(|_| StoreError::Flash)
     }
@@ -195,7 +207,7 @@ impl SimStore {
     pub fn provision(&mut self, slot: u8, image: &[u8]) -> Result<(), StoreError> {
         let (b, _) = self.layout.bootcore;
         let mut marker = [0u8; 4];
-        self.flash
+        self.flash()
             .read(b, &mut marker)
             .map_err(|_| StoreError::Flash)?;
         if marker == [0xFF; 4] {
@@ -217,9 +229,9 @@ impl SimStore {
     fn erase_range(&mut self, start: u32, end: u32) -> Result<(), StoreError> {
         let mut a = start;
         while a < end {
-            let unit = self.flash.unit_at(a).ok_or(StoreError::Range)?;
+            let unit = self.flash().unit_at(a).ok_or(StoreError::Range)?;
             let unit_start = a - (a - unit.start) % unit.erase_size;
-            self.flash
+            self.flash()
                 .erase(unit_start, unit.erase_size)
                 .map_err(|_| StoreError::Flash)?;
             a = unit_start + unit.erase_size;
@@ -241,7 +253,7 @@ impl SimStore {
     fn bootcore_present(&mut self) -> bool {
         let (b, l) = self.layout.bootcore;
         let mut buf = vec![0u8; l as usize];
-        self.flash.read(b, &mut buf).is_ok() && buf.iter().any(|&x| x != 0xFF)
+        self.flash().read(b, &mut buf).is_ok() && buf.iter().any(|&x| x != 0xFF)
     }
 
     fn verified(&mut self, slot: u8) -> Option<[u8; HEADER_SIZE]> {
@@ -402,7 +414,7 @@ impl SlotStore for SimStore {
         if offset as u64 + buf.len() as u64 > cap as u64 {
             return Err(StoreError::Range);
         }
-        self.flash
+        self.flash()
             .read(body + offset, buf)
             .map_err(|_| StoreError::Flash)
     }
@@ -423,7 +435,7 @@ impl SlotStore for SimStore {
             .get(slot as usize)
             .ok_or(StoreError::Range)?
             .0;
-        self.flash.read(a, out).map_err(|_| StoreError::Flash)
+        self.flash().read(a, out).map_err(|_| StoreError::Flash)
     }
 
     fn set_pending(

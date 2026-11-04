@@ -7,13 +7,14 @@
 //! SNAPSHOT carrying the confirmed slot and the attempts) and writes that
 //! face's header with `generation + 1` last. Until that header is written the
 //! old face stays the valid one, so a cut compaction is simply redone. The
-//! "reverted" marker of STATUS is not carried over.
+//! rolled-back marker of STATUS is not carried over.
 
 use dagon_format::statelog::{
     kind, reason, slot, target, FaceHeader, Record, FACE_HEADER_SIZE, RECORD_SIZE,
 };
 use dagon_format::Version;
 use dagon_port::{Flash, FlashError};
+use dagon_proto::payload::{SlotInfo, SlotState, StatusResp};
 
 /// The image a record refers to.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -42,8 +43,9 @@ pub struct LogState {
     pub pending: Option<SlotRef>,
     /// BOOT_ATTEMPT records written for `pending`.
     pub attempts: u8,
-    /// Slot whose image was last rolled back.
-    pub reverted: Option<u8>,
+    /// The image last rolled back (never the confirmed one: a re-tried
+    /// confirmed image that is rolled back stays the confirmed one).
+    pub reverted: Option<SlotRef>,
     /// Reason of the last rollback (0 none).
     pub last_reason: u8,
 }
@@ -56,7 +58,7 @@ impl LogState {
             return self;
         }
         let this = SlotRef::of(r);
-        let reverted = self.reverted.filter(|&s| s != r.slot);
+        let reverted = self.reverted.filter(|s| s.slot != r.slot);
         match r.kind {
             kind::PROVISION => LogState {
                 confirmed: Some(this),
@@ -80,11 +82,14 @@ impl LogState {
                 ..self
             },
             // ROLLBACK: `slot` is where the boot goes back to; the pending
-            // image is the one reverted.
+            // image is the one reverted, unless it is the confirmed one.
             kind::ROLLBACK => LogState {
                 pending: None,
                 attempts: 0,
-                reverted: self.pending.map(|p| p.slot),
+                reverted: self
+                    .pending
+                    .filter(|p| Some(*p) != self.confirmed)
+                    .or(reverted),
                 last_reason: r.reason,
                 ..self
             },
@@ -112,6 +117,42 @@ impl LogState {
             (_, _, Some(c)) => c.slot,
             _ => slot::NONE,
         }
+    }
+
+    /// STATUS of the APP slots. `heads[s]`: the image header now in slot
+    /// `s` as a reference (`slot = s`), `None` when it has none. A log
+    /// reference counts for a slot only while that same header is there.
+    pub fn status(&self, heads: [Option<SlotRef>; 2], active: u8, generation: u32) -> StatusResp {
+        let mut st = StatusResp {
+            active,
+            confirmed: self.confirmed.map_or(slot::NONE, |c| c.slot),
+            attempts: self.attempts,
+            last_reason: self.last_reason,
+            log_generation: generation,
+            ..Default::default()
+        };
+        for (info, head) in st.slots.iter_mut().zip(heads) {
+            let Some(h) = head else { continue };
+            let state = if self.pending == Some(h) {
+                if self.attempts > 0 {
+                    SlotState::Trying
+                } else {
+                    SlotState::Pending
+                }
+            } else if self.confirmed == Some(h) {
+                SlotState::Confirmed
+            } else if self.reverted == Some(h) {
+                SlotState::Reverted
+            } else {
+                SlotState::Written
+            };
+            *info = SlotInfo {
+                state,
+                version: h.version,
+                digest16: h.digest16,
+            };
+        }
+        st
     }
 }
 
@@ -297,6 +338,77 @@ mod tests {
         rs.iter().fold(LogState::default(), |s, r| s.apply(r))
     }
 
+    fn head(slot: u8) -> Option<SlotRef> {
+        Some(SlotRef::of(&rec(kind::PROVISION, slot)))
+    }
+
+    fn states(s: &LogState, heads: [Option<SlotRef>; 2]) -> [SlotState; 2] {
+        let st = s.status(heads, s.active(), 1);
+        [st.slots[0].state, st.slots[1].state]
+    }
+
+    #[test]
+    fn status_follows_log_and_headers() {
+        let (a, b) = (head(0), head(1));
+        let s = fold(&[rec(kind::PROVISION, 0)]);
+        assert_eq!(
+            states(&s, [a, None]),
+            [SlotState::Confirmed, SlotState::Empty]
+        );
+        assert_eq!(s.status([a, None], 0, 1).confirmed, 0);
+        let s = s.apply(&rec(kind::SLOT_PENDING, 1));
+        assert_eq!(
+            states(&s, [a, b]),
+            [SlotState::Confirmed, SlotState::Pending]
+        );
+        let s = s.apply(&rec(kind::BOOT_ATTEMPT, 1));
+        assert_eq!(
+            states(&s, [a, b]),
+            [SlotState::Confirmed, SlotState::Trying]
+        );
+        assert_eq!(s.status([a, b], 1, 1).active, 1);
+        let s = s.apply(&rec(kind::ROLLBACK, 0));
+        assert_eq!(
+            states(&s, [a, b]),
+            [SlotState::Confirmed, SlotState::Reverted]
+        );
+    }
+
+    /// The rolled-back marker names the image, not the slot: a new image
+    /// in that slot is only written, and a confirmed image re-tried and
+    /// rolled back stays confirmed, then plain written once demoted.
+    #[test]
+    fn rolled_back_marker_names_one_image() {
+        let s = fold(&[
+            rec(kind::PROVISION, 0),
+            rec(kind::SLOT_PENDING, 1),
+            rec(kind::BOOT_ATTEMPT, 1),
+            rec(kind::ROLLBACK, 0),
+        ]);
+        let new_b = Some(SlotRef {
+            digest16: [9; 16],
+            ..head(1).unwrap()
+        });
+        assert_eq!(
+            states(&s, [head(0), new_b]),
+            [SlotState::Confirmed, SlotState::Written]
+        );
+
+        let s = fold(&[
+            rec(kind::PROVISION, 0),
+            rec(kind::SLOT_PENDING, 1),
+            rec(kind::BOOT_ATTEMPT, 1),
+            rec(kind::SLOT_PENDING, 0),
+            rec(kind::ROLLBACK, 0),
+        ]);
+        assert_eq!(s.reverted, None);
+        let s = s.apply(&rec(kind::CONFIRMED, 1));
+        assert_eq!(
+            states(&s, [head(0), head(1)]),
+            [SlotState::Written, SlotState::Confirmed]
+        );
+    }
+
     /// Two 96-byte faces at 0 and 96, erased.
     struct Tiny(std::vec::Vec<u8>);
 
@@ -373,7 +485,7 @@ mod tests {
         });
         assert_eq!(s.pending, None);
         assert_eq!(s.active(), 0);
-        assert_eq!(s.reverted, Some(1));
+        assert_eq!(s.reverted.map(|r| r.slot), Some(1));
         assert_eq!(s.last_reason, reason::TRIAL_EXHAUSTED);
     }
 

@@ -79,13 +79,15 @@ Withdraws the consent (also fine when none was recorded).
 - 200: the same body as GET /v1/agent (now `linked: false`).
 - 403 in `dagon demo`.
 - **Unlinking waits for an agent call in flight.** Every call holds the
-  consent from its check until the call ends (one lock in the process, and
-  `~/.dagon/agent.lock` between `dagon serve` and `dagon ai unlink`); DELETE
-  takes that lock, removes the consent and only then answers 200. The wait is
-  at most one call: up to about 120 s for a question, up to 600 s for a round
-  of a topology draft. The page should show a waiting state until DELETE
-  answers.
-- After that no call passes the check: running `ai_topology` jobs are
+  consent from its check until the call ends (a shared lock on
+  `~/.dagon/agent.lock`, one handle per call, so threads and processes such as
+  `dagon serve` and `dagon ai unlink` exclude each other alike). DELETE
+  removes the consent at once (a call reads it again under the lock, so no
+  new call passes from then on), then takes the lock exclusively, so it
+  answers 200 only when no call is in flight. The wait is at most one call:
+  up to about 120 s for a question, up to 600 s for a round of a topology
+  draft. The page should show a waiting state until DELETE answers.
+- No call passes the check after that: running `ai_topology` jobs are
   cancelled, a question being answered makes no further call and answers 409
   `AGENT_NOT_LINKED` instead of its answer (`dagon ai ask` does not print it
   either).
@@ -200,6 +202,14 @@ Builtin: `crates/dagon-cli/agents/claude.toml`. The user may add files in
 Each file is one agent; unknown keys, a kind DAGON does not implement, bad ids
 or an agent id that exists already make the file not load (`errors` above).
 
+**A command agent runs with your permissions; only add programs you trust.**
+DAGON does not sandbox the program a way names and does not claim to. What
+DAGON controls is what it sends (the prompt below) and what the program
+inherits (the environment allow-list, a fresh working folder, the time and
+output limits). Everything else the program does is up to the program: the
+builtin Claude Code way relies on Claude Code's own flags to turn off its
+tools, MCP servers, customisations and saved sessions.
+
 ```toml
 id = "my-agent"          # a-z 0-9 -, up to 32
 name = "My agent"
@@ -213,14 +223,23 @@ kind = "command"         # or "messages-http"
 program = "my-agent"     # on PATH, or a path
 args = ["--answer-only", "--system", "{system_file}"]
 system = "file"          # "stdin" (default): system text, a blank line, then the user text on stdin
+pass_env = ["MY_AGENT_HOME"]  # optional: more variables the program needs
 ```
 
-- `command`: runs `program` with `args` in a new empty temporary folder
-  (removed afterwards), with the keys' environment variables removed; the user
-  text goes to stdin (after the system text when `system = "stdin"`; with
-  `system = "file"` the system text is in a file whose path replaces the arg
-  `{system_file}`). Stdout is the answer (at most 1 MiB, UTF-8); stderr is never
-  read. A program that runs past the call's time is stopped.
+- `command`: runs `program` with `args`; the user text goes to stdin (after
+  the system text when `system = "stdin"`; with `system = "file"` the system
+  text is in a file whose path replaces the arg `{system_file}`). Stdout is the
+  answer (at most 1 MiB, UTF-8); stderr is never read.
+  - Environment: only `PATH`, `PATHEXT`, `HOME`, `USERPROFILE`, `APPDATA`,
+    `LOCALAPPDATA`, `TEMP`, `TMP`, `TMPDIR`, `SYSTEMROOT`, `WINDIR`, `COMSPEC`,
+    `LANG`, `LC_*`, `TERM` (those that are set), plus the names in `pass_env`.
+    Never `DAGON_*` or a key variable any way names, even when listed.
+  - Working folder: a fresh temporary folder, removed afterwards, so the
+    program does not start in the project. This is hygiene, not a sandbox:
+    the program can still reach whatever your account can.
+  - Time: past the call's time the whole process tree is stopped (Windows
+    `taskkill /F /T`; Unix: the program runs in its own process group, which
+    is killed).
 - `messages-http`: `url` (https only), `version` (the `anthropic-version`
   header), `key_env` (the variable holding the key), `model`, optional
   `model_env` (a variable that overrides `model`).
@@ -261,4 +280,8 @@ CLAUDE.md, skills, plugins, hooks, MCP servers, custom agents),
 `--strict-mcp-config`, `--disable-slash-commands`, `--output-format text`,
 `--system-prompt-file`. `--bare` is not used: it reads only `ANTHROPIC_API_KEY`,
 not the user's login. The set was run once by hand with a one-line prompt
-(answer printed on stdout).
+(answer printed on stdout), and once through DAGON's own spawn path (the
+environment allow-list, a fresh working folder, the system file):
+`cargo test -p dagon-cli claude_code_answers -- --ignored` (ignored by default:
+it uses the network and the user's login; no project data is sent). Claude
+Code finds its login with the allow-listed variables.

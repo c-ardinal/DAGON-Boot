@@ -407,9 +407,9 @@ fn agent_api(
 fn agent_failure(e: &str) -> Response {
     match e {
         crate::consent::NOT_LINKED => not_linked(),
-        crate::agents::TOO_LARGE => coded(413, e, "AGENT_CONTEXT_TOO_LARGE"),
-        crate::agents::TIMED_OUT => coded(504, e, "AGENT_TIMEOUT"),
-        _ => coded(502, e, "AGENT_FAILED"),
+        crate::agents::TOO_LARGE => coded(413, e, crate::agents::codes::CONTEXT_TOO_LARGE),
+        crate::agents::TIMED_OUT => coded(504, e, crate::agents::codes::TIMEOUT),
+        _ => coded(502, e, crate::agents::codes::FAILED),
     }
 }
 
@@ -419,14 +419,18 @@ fn agent_ask(server: &Server, req: &Request) -> Res {
         return Err(not_linked());
     }
     let q = crate::ask::parse(&body_json(req)?).map_err(|e| Response::error(400, &e))?;
-    let _turn = server
-        .ask_turn()
-        .ok_or_else(|| coded(429, "DAGON is answering another question", "AGENT_BUSY"))?;
+    let _turn = server.ask_turn().ok_or_else(|| {
+        coded(
+            429,
+            "DAGON is answering another question",
+            crate::agents::codes::BUSY,
+        )
+    })?;
     let mut api = agent_api(server, crate::ask::ASK_TIMEOUT).map_err(|e| {
         if e == crate::consent::NOT_LINKED {
             not_linked()
         } else {
-            coded(409, &e, "AGENT_UNAVAILABLE")
+            coded(409, &e, crate::agents::codes::UNAVAILABLE)
         }
     })?;
     let reg = registry_of(server).map_err(|e| Response::error(500, &e))?;

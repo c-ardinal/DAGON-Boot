@@ -30,9 +30,35 @@ pub(crate) const TOO_LARGE: &str = "the question and its context are too large t
 pub(crate) const TIMED_OUT: &str = "DAGON did not answer in time";
 pub(crate) const UNEXPECTED: &str = "DAGON's agent did not answer in the expected form";
 
+/// The `code` of every agent error the page tells apart (the serve API
+/// contract; docs/agent-api.md lists exactly these, a test checks it).
+pub mod codes {
+    pub const NOT_LINKED: &str = "AGENT_NOT_LINKED";
+    pub const UNAVAILABLE: &str = "AGENT_UNAVAILABLE";
+    pub const BUSY: &str = "AGENT_BUSY";
+    pub const CONTEXT_TOO_LARGE: &str = "AGENT_CONTEXT_TOO_LARGE";
+    pub const TIMEOUT: &str = "AGENT_TIMEOUT";
+    pub const FAILED: &str = "AGENT_FAILED";
+    #[cfg(test)]
+    pub const ALL: [&str; 6] = [
+        NOT_LINKED,
+        UNAVAILABLE,
+        BUSY,
+        CONTEXT_TOO_LARGE,
+        TIMEOUT,
+        FAILED,
+    ];
+}
+
+/// The agent definition format this dagon reads (`dagon_agent = 1`);
+/// another number is refused with a clear reason.
+pub const FORMAT: u32 = 1;
+
 #[derive(Debug, Clone, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct AgentDef {
+    /// The definition format, [`FORMAT`].
+    pub dagon_agent: u32,
     pub id: String,
     pub name: String,
     pub provider: String,
@@ -101,6 +127,9 @@ fn plain_name(s: &str) -> bool {
 }
 
 fn check(def: &AgentDef) -> Result<(), String> {
+    if def.dagon_agent != FORMAT {
+        return Err(format!("dagon_agent must be {FORMAT}"));
+    }
     if !plain_id(&def.id) {
         return Err("id must be 1 to 32 of a-z 0-9 -".into());
     }
@@ -128,6 +157,17 @@ fn check(def: &AgentDef) -> Result<(), String> {
 }
 
 fn parse(text: &str) -> Result<AgentDef, String> {
+    // The number first, so a newer file says why instead of failing on a key.
+    let n = toml::from_str::<toml::Table>(text)
+        .map_err(|e| e.message().to_string())?
+        .get("dagon_agent")
+        .and_then(toml::Value::as_integer);
+    if n != Some(i64::from(FORMAT)) {
+        return Err(format!(
+            "dagon_agent = {} is not a format this dagon reads (it reads {FORMAT})",
+            n.map_or("(missing)".to_string(), |n| n.to_string())
+        ));
+    }
     let def: AgentDef = toml::from_str(text).map_err(|e| e.message().to_string())?;
     check(&def)?;
     Ok(def)

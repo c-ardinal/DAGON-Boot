@@ -46,7 +46,7 @@ pub struct Command {
 /// What every command child inherits, if set (names compared without
 /// case; `LC_*` too): enough to find programs, the user's profile and
 /// temporary folders, and the locale.
-const BASE_ENV: [&str; 14] = [
+pub(super) const BASE_ENV: [&str; 14] = [
     "PATH",
     "PATHEXT",
     "HOME",

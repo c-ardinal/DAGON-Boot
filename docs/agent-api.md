@@ -1,4 +1,4 @@
-# DAGON agents: serve API contract (UX3C)
+# DAGON agents: serve API contract
 
 DAGON talks to an agent through one interface. Agents are data: an agent
 (id, name, provider) and the ways to reach it, each of a transport kind DAGON
@@ -39,7 +39,8 @@ route: Host and Origin checks (403), `Authorization: Bearer <passphrase>` (401).
 ```
 
 - `agents`: builtin first, then the user's own (`~/.dagon/agents/*.toml`).
-  Each way has `kind` (`command` | `messages-http`) and `available`: whether it
+  Each way has `kind` (`command` | `messages-http`; more kinds may come, so
+  treat an unknown one as opaque) and `available`: whether it
   can be used on this machine now (a `command` way: its program is on PATH; a
   `messages-http` way: its key variable is set). No program, argument, URL,
   key variable or key is ever in this body.
@@ -53,8 +54,8 @@ route: Host and Origin checks (403), `Authorization: Bearer <passphrase>` (401).
   `available` are both true.
 - `errors`: user definition files that did not load, as
   `"<file name>: <why>"` (never a folder).
-- `sends` / `never_sends`: the lists the linking dialog shows (from the round8c
-  string table). The terminal (`dagon ai link`) shows the same lists.
+- `sends` / `never_sends`: the lists the linking dialog shows. The terminal
+  (`dagon ai link`) shows the same lists (one source: `consent.rs`).
 
 ## POST /v1/agent/link
 
@@ -65,7 +66,7 @@ the way asks for consent again).
 - 200: the same body as GET /v1/agent (now `linked: true`).
 - 400 `agent and way must name a defined agent and way` /
   `consent must be true` (only the JSON boolean `true` counts); nothing is
-  recorded. The round 1 body `{provider: "anthropic", ...}` is a 400.
+  recorded.
 - 403 in `dagon demo` (linking is refused there; GET still works).
 - 500 `the consent could not be saved`.
 
@@ -94,8 +95,7 @@ Withdraws the consent (also fine when none was recorded).
 
 ## AI routes before linking
 
-Every `/v1/ai/...` route (today `POST /v1/ai/topology`, `POST /v1/ai/port`)
-answers, until linked:
+Every `/v1/ai/...` route answers, until linked:
 
 ```json
 HTTP 409
@@ -173,7 +173,7 @@ Errors (all `{ "error": "...", "code": "..." }` except the 400s):
 | 401 | (none) | no passphrase |
 | 409 | `AGENT_NOT_LINKED` | not linked, or the linked agent/way is no longer defined |
 | 409 | `AGENT_NOT_LINKED` | also: unlinked while the question was being answered (no further call is made) |
-| 409 | `AGENT_UNAVAILABLE` | linked, but the way cannot be used here: its program is not on PATH, or its key variable is not set (`error` names the program or the variable; restart `dagon serve` after setting a key). Replaces round 3's `AGENT_NO_KEY` |
+| 409 | `AGENT_UNAVAILABLE` | linked, but the way cannot be used here: its program is not on PATH, or its key variable is not set (`error` names the program or the variable; restart `dagon serve` after setting a key). |
 | 429 | `AGENT_BUSY` | another question is being answered (one at a time per serve) |
 | 413 | `AGENT_CONTEXT_TOO_LARGE` | the topology file is over 64 KiB (not read), or one prompt would be over 192 KiB (not sent) |
 | 504 | `AGENT_TIMEOUT` | one agent call took longer than 120 s (a `command` way's program is stopped) |
@@ -211,6 +211,7 @@ builtin Claude Code way relies on Claude Code's own flags to turn off its
 tools, MCP servers, customisations and saved sessions.
 
 ```toml
+dagon_agent = 1          # the definition format; another number is refused with the reason
 id = "my-agent"          # a-z 0-9 -, up to 32
 name = "My agent"
 provider = "Me"
@@ -253,21 +254,20 @@ text); DAGON reads the object from its text.
 
 ## Where the consent lives
 
-`~/.dagon/agent.json` (`{"agent":"claude","way":"claude-code","at":"..."}`), one
+`~/.dagon/agent.json` (`{"version":1,"agent":"claude","way":"claude-code","at":"..."}`), one
 per user, shared by `dagon serve` and `dagon ai link` / `dagon ai unlink`. Per
 user and not per project: the agent's login or key belongs to the user's
 environment, a per-project consent would ask again in every project, and
 nothing lands in a project folder that may be committed. A file that does not
-parse, holds any other field, has an id that is not plain or an `at` that is
-not `YYYY-MM-DDTHH:MM:SSZ` on a real calendar date counts as not linked. A
-round 1–4 file (`{"provider":"anthropic",...}`) counts as not linked: the user
-links again and chooses the way.
+parse, has another `version`, holds any other field, has an id that is not
+plain or an `at` that is not `YYYY-MM-DDTHH:MM:SSZ` on a real calendar date
+counts as not linked: the user links again.
 
 ## CLI
 
 - `dagon ai link [--agent <id>] [--way <id>]`: shows the consent text (agent
   and way, where the login or key stays, sends, never sends, how to unlink) and
-  records consent on `y`. Default: the first agent's first way (Claude Code).
+  records consent on `y`. Default: the first agent's first way.
 - `dagon ai unlink`: removes the consent; logins and keys are removed by the
   user on the agent's side.
 - `dagon ai topology` refuses until linked.
@@ -275,17 +275,11 @@ links again and chooses the way.
   topology (no selection, history or job outcomes); prints the answer and, for
   a proposal, its diff. The file is never changed. Refuses until linked.
 
-## Sources for the claude-code way
+## Checking a command way against the installed program
 
-The flags are those `claude --help` lists in Claude Code 2.1.316 (checked on
-2026-11-04): `-p`, `--tools ""` (no built-in tools), `--no-session-persistence`,
-`--permission-mode dontAsk`, `--permission-prompts none`, `--safe-mode` (no
-CLAUDE.md, skills, plugins, hooks, MCP servers, custom agents),
-`--strict-mcp-config`, `--disable-slash-commands`, `--output-format text`,
-`--system-prompt-file`. `--bare` is not used: it reads only `ANTHROPIC_API_KEY`,
-not the user's login. The set was run once by hand with a one-line prompt
-(answer printed on stdout), and once through DAGON's own spawn path (the
-environment allow-list, a fresh working folder, the system file):
+Each builtin way's flags, and why each is there, are in its definition
+(`crates/dagon-cli/agents/*.toml`), not repeated here. The claude-code way can
+be run through DAGON's own spawn path (the environment allow-list, a fresh
+working folder, the system file) with
 `cargo test -p dagon-cli claude_code_answers -- --ignored` (ignored by default:
-it uses the network and the user's login; no project data is sent). Claude
-Code finds its login with the allow-listed variables.
+it uses the network and the user's login; one line is sent, no project data).

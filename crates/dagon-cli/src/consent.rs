@@ -23,12 +23,14 @@ pub const SENDS: [&str; 3] = [
 pub const NEVER_SENDS: [&str; 3] = ["鍵", "コマンドとその出力の全文", "ファイルのパス"];
 
 /// Code of the refusal every AI route gives until DAGON is linked.
-pub const NOT_LINKED_CODE: &str = "AGENT_NOT_LINKED";
+pub const NOT_LINKED_CODE: &str = crate::agents::codes::NOT_LINKED;
 pub const NOT_LINKED: &str =
     "DAGON is not linked to an agent; link it first (consent is asked once)";
 
 const FILE: &str = "agent.json";
-/// agent.json holds three short fields; a larger file is not a consent.
+/// The agent.json format this dagon reads and writes.
+const FILE_VERSION: u32 = 1;
+/// agent.json holds four short fields; a larger file is not a consent.
 const MAX_FILE: usize = 4 * 1024;
 
 #[derive(Debug, Clone, PartialEq)]
@@ -49,7 +51,8 @@ fn file(home: &Path) -> PathBuf {
 pub fn consent(home: &Path) -> Option<Consent> {
     let bytes = crate::paths::read_capped(&file(home), MAX_FILE).ok()??;
     let v: Value = serde_json::from_slice(&bytes).ok()?;
-    if v.as_object()?.len() != 3 {
+    // A file of another version is no consent (link again to write this one).
+    if v.as_object()?.len() != 4 || v["version"] != FILE_VERSION {
         return None;
     }
     let id = |k: &str| {
@@ -76,7 +79,8 @@ pub fn link(home: &Path, agent: &str, way: &str) -> Result<Consent, String> {
         way: way.into(),
         at: utc_now(),
     };
-    let text = json!({ "agent": c.agent, "way": c.way, "at": c.at }).to_string();
+    let text =
+        json!({ "version": FILE_VERSION, "agent": c.agent, "way": c.way, "at": c.at }).to_string();
     crate::paths::write_atomic(&file(home), text.as_bytes())
         .map_err(|_| "the consent could not be saved".to_string())?;
     Ok(c)
@@ -599,13 +603,15 @@ mod tests {
         for text in [
             "",
             "{",
-            // The round 1 form (one provider) asks for consent again.
+            // An older form (one provider, no agent or way, no version).
             r#"{"provider":"anthropic","at":"2026-11-04T04:14:35Z"}"#,
             r#"{"agent":"claude","way":"api"}"#,
             r#"{"agent":"claude","way":"api","at":"yesterday"}"#,
             r#"{"agent":"claude","way":"api","at":"2026-13-04T04:14:35Z"}"#,
             r#"{"agent":"Claude!","way":"api","at":"2026-11-04T04:14:35Z"}"#,
-            r#"{"agent":"claude","way":"api","at":"2026-11-04T04:14:35Z","scope":"all"}"#,
+            r#"{"version":1,"agent":"claude","way":"api","at":"2026-11-04T04:14:35Z","scope":"all"}"#,
+            r#"{"version":2,"agent":"claude","way":"api","at":"2026-11-04T04:14:35Z"}"#,
+            r#"{"agent":"claude","way":"api","at":"2026-11-04T04:14:35Z"}"#,
         ] {
             std::fs::write(file(&h), text).unwrap();
             assert!(!is_linked(&h), "{text}");

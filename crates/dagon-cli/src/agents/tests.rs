@@ -91,7 +91,7 @@ fn the_builtin_agent_is_claude_with_two_ways_claude_code_first() {
 fn user_definitions_are_checked_and_reported_by_file_name_only() {
     let h = tmp_home("defs");
     let dir = h.join(".dagon").join(USER_DIR);
-    let ok = "id = \"local\"\nname = \"Local\"\nprovider = \"Me\"\n\
+    let ok = "dagon_agent = 1\nid = \"local\"\nname = \"Local\"\nprovider = \"Me\"\n\
               [[ways]]\nid = \"run\"\nname = \"Run\"\n\
               [ways.transport]\nkind = \"command\"\nprogram = \"local-agent\"\n";
     std::fs::write(dir.join("a-local.toml"), ok).unwrap();
@@ -103,7 +103,9 @@ fn user_definitions_are_checked_and_reported_by_file_name_only() {
         ("f-claude.toml", ok.replace("id = \"local\"", "id = \"claude\"")),
         ("g-http.toml", ok.replace("kind = \"command\"\nprogram = \"local-agent\"", "kind = \"messages-http\"\nurl = \"http://x\"\nversion = \"1\"\nkey_env = \"K\"\nmodel = \"m\"")),
         ("h-placeholder.toml", ok.replace("program = \"local-agent\"", "program = \"x\"\nargs = [\"--in={user}\"]")),
-        ("i-no-ways.toml", "id = \"x\"\nname = \"X\"\nprovider = \"P\"\nways = []\n".into()),
+        ("i-no-ways.toml", "dagon_agent = 1\nid = \"x\"\nname = \"X\"\nprovider = \"P\"\nways = []\n".into()),
+        ("k-newer-format.toml", ok.replace("dagon_agent = 1", "dagon_agent = 2")),
+        ("l-no-format.toml", ok.replace("dagon_agent = 1\n", "")),
         ("j-transport-field.toml", ok.replace("program = \"local-agent\"", "program = \"x\"\nenv = \"A=1\"")),
     ] {
         std::fs::write(dir.join(name), text).unwrap();
@@ -112,7 +114,16 @@ fn user_definitions_are_checked_and_reported_by_file_name_only() {
     let a = Agents::load(Some(&h));
     assert_eq!(a.list.len(), 2, "{:?}", a.errors);
     assert!(a.way("local", "run").is_some());
-    assert_eq!(a.errors.len(), 9, "{:?}", a.errors);
+    assert_eq!(a.errors.len(), 11, "{:?}", a.errors);
+    let newer = a
+        .errors
+        .iter()
+        .find(|e| e.starts_with("k-newer-format.toml"))
+        .unwrap();
+    assert!(
+        newer.contains("dagon_agent = 2 is not a format this dagon reads (it reads 1)"),
+        "{newer}"
+    );
     for e in &a.errors {
         assert!(
             !e.contains(&*h.to_string_lossy()) && !e.contains("Users"),
@@ -285,7 +296,7 @@ fn an_agent_defined_only_in_a_toml_file_answers_through_command() {
     std::fs::write(&answer, r#"{"answer":"偽のエージェントです。"}"#).unwrap();
     let (program, args) = printer(&answer);
     let def = format!(
-        "id = \"fake\"\nname = \"Fake\"\nprovider = \"Test\"\n\
+        "dagon_agent = 1\nid = \"fake\"\nname = \"Fake\"\nprovider = \"Test\"\n\
          [[ways]]\nid = \"print\"\nname = \"Print\"\n\
          [ways.transport]\nkind = \"command\"\nprogram = {program:?}\nargs = {}\n",
         toml_list(&args)
@@ -339,4 +350,84 @@ fn claude_code_answers_through_the_command_path() {
     );
     let out = command::run_unchecked(c, &p, Duration::from_secs(180)).unwrap();
     assert_eq!(reply_json(&out).unwrap()["answer"], "ok", "{out}");
+}
+
+fn doc() -> String {
+    std::fs::read_to_string(Path::new(env!("CARGO_MANIFEST_DIR")).join("../../docs/agent-api.md"))
+        .unwrap()
+}
+
+/// Every file in agents/ is builtin, and nothing else is: adding a builtin
+/// agent is a new file plus its line in BUILTIN, which this test demands.
+#[test]
+fn the_builtin_list_is_the_agents_folder() {
+    let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("agents");
+    let mut files: Vec<String> = std::fs::read_dir(dir)
+        .unwrap()
+        .flatten()
+        .map(|e| e.file_name().to_string_lossy().into_owned())
+        .filter(|n| n.ends_with(".toml"))
+        .collect();
+    files.sort();
+    let mut listed: Vec<String> = BUILTIN.iter().map(|(n, _)| n.to_string()).collect();
+    listed.sort();
+    assert_eq!(files, listed);
+}
+
+/// A transport kind's name in a definition and the name GET /v1/agent
+/// reports are the same word.
+#[test]
+fn transport_kind_names_match_the_definitions() {
+    for (_, text) in BUILTIN {
+        let def = parse(text).unwrap();
+        let written: Vec<&str> = text
+            .lines()
+            .filter_map(|l| l.trim().strip_prefix("kind = \""))
+            .map(|l| l.trim_end_matches('"'))
+            .collect();
+        let reported: Vec<&str> = def.ways.iter().map(|w| w.transport.kind()).collect();
+        assert_eq!(written, reported);
+    }
+}
+
+/// The contract document lists exactly the error codes the code returns,
+/// the sends lists, the command environment allow-list and the builtin ids.
+#[test]
+fn the_contract_document_follows_the_code() {
+    let d = doc();
+    let mut in_doc: Vec<&str> = d
+        .split(|c: char| !(c.is_ascii_uppercase() || c == '_'))
+        .filter(|w| w.starts_with("AGENT_") && w.len() > 6)
+        .collect();
+    in_doc.sort();
+    in_doc.dedup();
+    let mut codes = codes::ALL.to_vec();
+    codes.sort();
+    assert_eq!(in_doc, codes);
+    for s in crate::consent::SENDS
+        .iter()
+        .chain(&crate::consent::NEVER_SENDS)
+    {
+        assert!(d.contains(s), "{s}");
+    }
+    let env = d.split("Environment: only").nth(1).unwrap();
+    let env = env.split("plus the names").next().unwrap();
+    let mut listed: Vec<&str> = env
+        .split('`')
+        .skip(1)
+        .step_by(2)
+        .filter(|w| *w != "LC_*")
+        .collect();
+    listed.sort();
+    let mut base = command::BASE_ENV.to_vec();
+    base.sort();
+    assert_eq!(listed, base);
+    assert!(env.contains("`LC_*`"));
+    for a in Agents::load(None).list {
+        assert!(d.contains(&format!("\"{}\"", a.id)), "{}", a.id);
+        for w in &a.ways {
+            assert!(d.contains(&format!("\"{}\"", w.id)), "{}", w.id);
+        }
+    }
+    assert!(d.contains(&format!("dagon_agent = {FORMAT}")));
 }

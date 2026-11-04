@@ -1,13 +1,14 @@
-# Claude, the agent shipped with DAGON (it is a Claude hackathon). Agents are
-# data: another agent, or another way to reach one, of a kind DAGON
-# implements (command, messages-http) is a file like this one in
-# ~/.dagon/agents/ (never in a project). The first way is the default.
+# Claude, an agent shipped with DAGON. Agents are data: another agent, or
+# another way to reach one, of a kind DAGON implements (command,
+# messages-http) is a file like this one in ~/.dagon/agents/ (never in a
+# project). The first way of the first agent is the default.
+dagon_agent = 1
 id = "claude"
 name = "Claude"
 provider = "Anthropic"
 
-# Claude Code headless, with the user's own login. Flags as `claude --help`
-# lists them (Claude Code 2.1.316): -p prints one answer and exits; no
+# Claude Code headless, with the user's own login (needs Claude Code 2.1.316
+# or later for these flags): -p prints one answer and exits; no
 # built-in tools (--tools ""); nothing saved (--no-session-persistence);
 # nothing may act or ask (--permission-mode dontAsk, --permission-prompts
 # none); no user customisations such as hooks, skills, CLAUDE.md or MCP

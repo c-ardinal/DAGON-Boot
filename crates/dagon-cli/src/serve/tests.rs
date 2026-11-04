@@ -1756,7 +1756,7 @@ fn dagon_links_with_consent_once_and_ai_routes_wait_for_it() {
         assert!(body.contains("\"code\":\"AGENT_NOT_LINKED\""), "{body}");
     }
     // Anything but an explicit yes for a defined agent and way records
-    // nothing (the round 1 body, with a provider only, included).
+    // nothing (an older body, with a provider only, included).
     for body in [
         serde_json::json!({ "agent": "claude", "way": "api" }),
         serde_json::json!({ "agent": "claude", "way": "api", "consent": "true" }),
@@ -1965,7 +1965,7 @@ fn an_agent_defined_only_as_data_answers_the_page() {
     std::fs::write(
         home.join(".dagon/agents/fake.toml"),
         format!(
-            "id = \"fake\"\nname = \"Fake\"\nprovider = \"Test\"\n\
+            "dagon_agent = 1\nid = \"fake\"\nname = \"Fake\"\nprovider = \"Test\"\n\
              [[ways]]\nid = \"print\"\nname = \"Print\"\n\
              [ways.transport]\nkind = \"command\"\nprogram = \"{program}\"\nargs = {args}\n"
         ),

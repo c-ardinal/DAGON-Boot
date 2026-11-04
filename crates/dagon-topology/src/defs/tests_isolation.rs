@@ -515,6 +515,36 @@ fn definition_names_become_code_names_or_are_refused() {
         // Keywords, in the code form (`fn`) and in the type form (`self`
         // becomes `Self`).
         (pin_named(&named, "fn"), "is a Rust keyword"),
+        // Not code names: a leading underscore, a raw identifier, upper case.
+        (pin_named(&named, "_led"), "must be a-z"),
+        (pin_named(&named, "r#led"), "must be a-z"),
+        (pin_named(&named, "Led"), "must be a-z"),
+        // Mixed separators meet after `-` becomes `_`: `sys-2` and `sys_2`
+        // above; `a-b_c` and `a_b-c` here.
+        (
+            named.clone()
+                + &second_bus.replace("sys-2", "a-b_c")
+                + &second_bus
+                    .replace("sys-2", "a_b-c")
+                    .replace("GPIO8", "GPIO10")
+                    .replace("GPIO9", "GPIO11"),
+            "generated name",
+        ),
+        // A digit boundary in the type form: `led_2` and `led2` are both `Led2`.
+        (
+            pin_named(&named, "led_2") + "\n[[pin]]\npin = \"GPIO12\"\nname = \"led2\"\n",
+            "generated type name",
+        ),
+        // Upper-case constants: devices `io-x` and `io_x` would both be
+        // `DEVICE_IO_X_*`.
+        (
+            named.clone()
+                + &second_device.replace("pmic-2", "io-x")
+                + &second_device
+                    .replace("pmic-2", "io_x")
+                    .replace("0x35", "0x36"),
+            "device id after - becomes _",
+        ),
         (pin_named(&named, "self"), "is a Rust keyword"),
         (
             named.clone() + &second_bus.replace("sys-2", "type"),
@@ -533,7 +563,7 @@ fn definition_names_become_code_names_or_are_refused() {
             "is a Rust keyword",
         ),
     ] {
-        let e = requirements::check_board(&board(&t), &m).unwrap_err();
+        let e = requirements::check_board(&board(&t), &m).expect_err(want);
         assert!(e.contains(want), "{want}: {e}");
     }
 }

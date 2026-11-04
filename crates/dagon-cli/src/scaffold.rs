@@ -424,7 +424,8 @@ pub fn hop_placeholders(
 ///
 /// - `{{link_i2c}}`, `{{link_sda}}`, `{{link_scl}}`: a node reached over
 ///   I2C: the pins its link names (`node_pins`) and the controller the
-///   MCU's ROM loader pairs give them (upper case);
+///   MCU's ROM loader pair of those pins names (upper case; the loader
+///   refuses a pin pair listed for two controllers);
 /// - `{{down_i2c}}`, `{{down_i2c_sda}}`, `{{down_i2c_scl}}`,
 ///   `{{down_i2c_hz}}` and `{{down_uart_tx}}`, `{{down_uart_rx}}`,
 ///   `{{down_uart_baud}}`: a 親機's I2C bus and UART link to its 子機

@@ -150,7 +150,7 @@ pub const MCU: &[Requirement<McuCheck>] = &[
     Requirement {
         engine: "topology check V-18/V-20, host ROM path",
         fields: &["rom_i2c.addr", "rom_i2c.max_hz", "rom_i2c.erase_sectors[]"],
-        rule: "addr in 0x08..=0x77; max_hz >= 1; erase_sectors unique",
+        rule: "addr in 0x08..=0x77; max_hz >= 1; erase_sectors unique; each pin pair (sda, scl) once, so a pair names one controller",
         check: rom_i2c,
     },
     Requirement {
@@ -538,5 +538,17 @@ fn rom_i2c(m: &McuDef) -> Result<(), String> {
     let mut seen = std::collections::BTreeSet::new();
     fail(!r.erase_sectors.iter().all(|s| seen.insert(s)), || {
         "rom_i2c.erase_sectors repeats a sector".into()
-    })
+    })?;
+    for (i, p) in r.pairs.iter().enumerate() {
+        if let Some(q) = r.pairs[..i]
+            .iter()
+            .find(|q| q.sda == p.sda && q.scl == p.scl)
+        {
+            return Err(format!(
+                "rom_i2c.pairs: {}/{} is listed for {} and {}; a pin pair names one controller",
+                p.sda, p.scl, q.controller, p.controller
+            ));
+        }
+    }
+    Ok(())
 }

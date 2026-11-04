@@ -194,6 +194,12 @@ fn coordinator_and_rom_numbers_are_usable() {
         ("addr = 0x39", "addr = 0x78"),
         ("max_hz = 400_000", "max_hz = 0"),
         ("[0, 1, 2, 3, 5]", "[0, 1, 2, 3, 3]"),
+        // One pin pair under two controllers: which one a node uses would
+        // depend on the order of the list.
+        (
+            "{ controller = \"i2c1\", sda = \"PB7\", scl = \"PB6\" },",
+            "{ controller = \"i2c1\", sda = \"PB4\", scl = \"PA8\" },",
+        ),
     ] {
         let e = parse_mcu_text(&f4.replace(from, to), &[]).unwrap_err();
         assert!(e.msg.contains("V-18/V-20"), "{to}: {e}");

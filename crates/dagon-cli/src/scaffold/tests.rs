@@ -704,18 +704,9 @@ fn hop_placeholders_name_each_nodes_link_kinds() {
 }
 
 /// The firmware's generator contract (targets/mcu/<mcu>/README.md, "Links"):
-/// `{{uplink}}` / `{{downlinks}}` are `dagon_mcu_<mcu>::links::Kind::<Variant>`,
-/// with these variants by kind name, and the kinds each MCU offers up and
-/// down (its table's "Yes" cells).
-const FW_VARIANTS: [(&str, &str); 7] = [
-    ("usb-cdc", "UsbCdc"),
-    ("uart", "Uart"),
-    ("i2c", "I2c"),
-    ("ble", "Ble"),
-    ("wifi-tcp", "WifiTcp"),
-    ("ethernet", "Ethernet"),
-    ("can", "Can"),
-];
+/// `{{uplink}}` / `{{downlinks}}` are `dagon_mcu_<mcu>::links::Kind::<Variant>`
+/// (both enums come from `dagon_format::with_link_kinds!`), and the kinds
+/// each MCU offers up and down (its table's "Yes" cells).
 const FW_OFFERS: [(&str, &[&str], &[&str]); 3] = [
     ("rp2040", &["usb-cdc"], &["uart", "i2c"]),
     ("stm32f401re", &["i2c"], &[]),
@@ -725,12 +716,7 @@ const FW_OFFERS: [(&str, &[&str], &[&str]); 3] = [
 #[test]
 fn the_hop_paths_are_exactly_the_firmware_links_contract() {
     use dagon_topology::links::{available, Dir};
-    let names: Vec<&str> = LinkKind::ALL.iter().map(|k| k.name()).collect();
-    assert_eq!(names, FW_VARIANTS.map(|(n, _)| n));
-    for k in LinkKind::ALL {
-        let want = FW_VARIANTS.iter().find(|(n, _)| *n == k.name()).unwrap().1;
-        assert_eq!(kind_variant(k), want, "{}", k.name());
-    }
+    assert_eq!(kind_variant(LinkKind::WifiTcp), "WifiTcp");
     for (mcu, up, down) in FW_OFFERS {
         let names = |d: Dir| -> Vec<&'static str> {
             let mut v: Vec<&'static str> = available(mcu, d).iter().map(|k| k.name()).collect();

@@ -1954,10 +1954,17 @@ below keep code and data to it.
    inside one. A flash driver with several users is shared through a
    lock that is *taken* without masking for the operation
    (`dagon_mcu_common::shared::SharedFlash`, a `try_lock`; a handle that
-   finds it taken answers an error at once, it never waits). Checked on
-   the host: a test reads every MCU package's sources and refuses a
-   masking call whose body holds a flash operation, and any masking call
-   in a source that implements the `Flash` port.
+   finds it taken answers an error at once, it never waits). Enforced by
+   clippy: `targets/mcu/clippy.toml` refuses every masking primitive
+   (`critical_section::with` and `acquire`, `cortex_m::interrupt::free`
+   and `disable`, a critical-section `blocking_mutex::Mutex::lock`) in the
+   MCU packages, by resolved path, so an alias or a wrapper does not hide
+   one. The functions that mask (the watchdog guard's state update, the
+   relay's shared display state) carry `#[allow(clippy::disallowed_methods)]`
+   with their reason, and a test keeps the list and the exemptions as they
+   are reviewed. Every request starts with a gated feed through the
+   serving loop's `ServeHost::feed` (the RP2040 relay's PC loop through
+   the guard's `progress`).
 3. **Flash operations are hardware facts.** What an erase or program
    stops is the definition's `[execution] flash_op`:
    - `fetch-stall`: single-bank flash the code runs from; instruction

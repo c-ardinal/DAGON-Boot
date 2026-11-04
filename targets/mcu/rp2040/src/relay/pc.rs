@@ -80,6 +80,9 @@ async fn serve<L: Link>(mut pc: Pc, mut up: L) -> ! {
         let Ok(request) = read else {
             continue;
         };
+        // Every request starts with a gated feed, so a flash erase it runs
+        // has a full watchdog period (execution model, section 12, rule 4).
+        pc.watch.progress(task::PC);
         if !link_up {
             link_up = true;
             pc.agent.link_up(via, addr);

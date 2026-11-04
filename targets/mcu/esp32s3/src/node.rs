@@ -399,6 +399,9 @@ impl Link {
     /// ROM loader after the reply to ENTER_ROM if that reply left the node.
     /// Returns the longest synchronous section (ms) it ran.
     async fn serve(&mut self, frame: &[u8], via: Via) -> u32 {
+        // Every request starts with a gated feed (execution model, section
+        // 12, rule 4); on trial the trial watchdog feeds nothing.
+        self.wdt.borrow_mut().feed();
         let start = now_ms();
         let up = &mut self.up[via as usize];
         if !*up {

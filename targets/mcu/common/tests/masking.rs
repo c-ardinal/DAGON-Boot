@@ -1,24 +1,40 @@
 //! The execution model's rule for DAGON's own code (docs/design/
-//! lifecycle-events.md, "Execution model"): no flash operation runs inside
-//! a critical section of DAGON's. Every MCU package's sources are read, and
-//! the body of every `critical_section::with` / `interrupt::free` /
-//! `cortex_m::interrupt::free` call is checked for a flash operation; a
-//! source that implements the `Flash` port masks nothing at all (a closure
-//! it masks around could be the flash operation itself).
+//! lifecycle-events.md, section 12, rule 2) is enforced by clippy:
+//! `targets/mcu/clippy.toml` refuses every way to mask interrupts in the MCU
+//! packages (clippy resolves the path, so an alias or a wrapper does not
+//! hide it). This test keeps that list in place and keeps the exemptions to
+//! the one reviewed function that masks.
 
 use std::path::{Path, PathBuf};
 
-/// Calls that mask interrupts for their closure.
-const MASKING: &[&str] = &["critical_section::with(", "interrupt::free("];
-/// What a flash operation looks like in a closure body.
-const FLASH_OPS: &[&str] = &[
-    ".erase(",
-    ".write(",
-    "blocking_erase",
-    "blocking_write",
-    "erase_sector",
-    "flash",
+/// Every masking primitive the MCU packages may reach.
+const MASKING: &[&str] = &[
+    "critical_section::with",
+    "critical_section::acquire",
+    "cortex_m::interrupt::free",
+    "cortex_m::interrupt::disable",
+    "embassy_sync::blocking_mutex::Mutex::lock",
 ];
+
+/// Attributes that would lift the lint (itself, or a group holding it).
+const LIFTS: &[&str] = &[
+    "allow(clippy::disallowed_methods",
+    "expect(clippy::disallowed_methods",
+    "allow(clippy::style",
+    "expect(clippy::style",
+    "allow(clippy::all",
+    "expect(clippy::all",
+];
+
+/// The functions allowed to mask, by file: each says why on itself.
+const EXEMPT: &[(&str, &str)] = &[
+    ("common/src/guard.rs", "fn with_state"),
+    ("rp2040/src/relay/state.rs", "fn locked"),
+];
+
+fn mcu_dir() -> PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR")).join("..")
+}
 
 fn rust_files(dir: &Path, out: &mut Vec<PathBuf>) {
     let Ok(entries) = std::fs::read_dir(dir) else {
@@ -26,8 +42,7 @@ fn rust_files(dir: &Path, out: &mut Vec<PathBuf>) {
     };
     for e in entries.flatten() {
         let p = e.path();
-        let name = e.file_name();
-        if p.is_dir() && !matches!(name.to_str(), Some("target" | "vendor")) {
+        if p.is_dir() && !matches!(e.file_name().to_str(), Some("target" | "vendor")) {
             rust_files(&p, out);
         } else if p.extension().is_some_and(|x| x == "rs") {
             out.push(p);
@@ -35,78 +50,68 @@ fn rust_files(dir: &Path, out: &mut Vec<PathBuf>) {
     }
 }
 
-/// The text from `open` (an index just past a `(`) to its matching `)`.
-fn call_body(text: &str, open: usize) -> &str {
-    let mut depth = 1;
-    for (i, c) in text[open..].char_indices() {
-        match c {
-            '(' => depth += 1,
-            ')' => {
-                depth -= 1;
-                if depth == 0 {
-                    return &text[open..open + i];
-                }
-            }
-            _ => {}
-        }
-    }
-    &text[open..]
-}
-
-/// Every masking call in `text` whose body names a flash operation, and
-/// every masking call at all when `text` implements the `Flash` port.
-fn violations(text: &str) -> Vec<String> {
-    let mut out = Vec::new();
-    let implements_flash = text.contains("Flash for ");
+#[test]
+fn clippy_refuses_every_masking_primitive() {
+    let conf = std::fs::read_to_string(mcu_dir().join("clippy.toml")).unwrap();
+    let table: toml_like::Paths = toml_like::paths(&conf);
     for m in MASKING {
-        let mut from = 0;
-        while let Some(at) = text[from..].find(m) {
-            let open = from + at + m.len();
-            let body = call_body(text, open);
-            if let Some(op) = FLASH_OPS.iter().find(|op| body.contains(*op)) {
-                out.push(format!("{m}..) holds `{op}`"));
-            } else if implements_flash {
-                out.push(format!("{m}..) in a source implementing Flash"));
-            }
-            from = open;
-        }
+        assert!(
+            table.iter().any(|p| p == m),
+            "targets/mcu/clippy.toml must refuse {m}"
+        );
     }
-    out
 }
 
 #[test]
-fn no_flash_operation_runs_in_a_critical_section_of_dagon() {
-    let mcu = Path::new(env!("CARGO_MANIFEST_DIR")).join("..");
+fn only_the_reviewed_function_may_mask() {
+    let root = mcu_dir();
     let mut files = Vec::new();
-    rust_files(&mcu, &mut files);
-    assert!(
-        files.len() > 20,
-        "{} sources under {}",
-        files.len(),
-        mcu.display()
-    );
-    let found: Vec<String> = files
+    rust_files(&root, &mut files);
+    let mut found = Vec::new();
+    for f in &files {
+        let text = std::fs::read_to_string(f).unwrap_or_default();
+        let rel = f
+            .strip_prefix(&root)
+            .unwrap()
+            .to_string_lossy()
+            .replace('\\', "/");
+        let lines: Vec<&str> = text.lines().collect();
+        for (i, l) in lines.iter().enumerate() {
+            let lifts = LIFTS.iter().any(|x| l.contains(x));
+            if lifts && !rel.ends_with("tests/masking.rs") {
+                let next = lines.get(i + 1).copied().unwrap_or("").trim().to_string();
+                found.push((rel.clone(), next));
+            }
+        }
+    }
+    let exempt: Vec<(String, String)> = EXEMPT
         .iter()
-        .filter(|f| !f.ends_with("masking.rs"))
-        .flat_map(|f| {
-            let text = std::fs::read_to_string(f).unwrap_or_default();
-            violations(&text)
-                .into_iter()
-                .map(move |v| format!("{}: {v}", f.display()))
+        .map(|(f, n)| (f.to_string(), n.to_string()))
+        .collect();
+    let unexpected: Vec<_> = found
+        .iter()
+        .filter(|(f, next)| {
+            !exempt
+                .iter()
+                .any(|(ef, en)| f == ef && next.contains(en.as_str()))
         })
         .collect();
-    assert!(found.is_empty(), "{found:#?}");
+    assert!(
+        unexpected.is_empty(),
+        "masking allowed outside the reviewed function: {unexpected:?}"
+    );
+    assert_eq!(found.len(), EXEMPT.len(), "{found:?}");
 }
 
-#[test]
-fn the_check_sees_a_flash_operation_in_a_critical_section() {
-    let bad = "fn f() { critical_section::with(|cs| { self.0.borrow_ref_mut(cs).erase(a, b) }) }";
-    assert_eq!(violations(bad).len(), 1);
-    let good =
-        "fn f() { critical_section::with(|cs| self.state.borrow_ref_mut(cs).on_trial = t); }";
-    assert!(violations(good).is_empty());
-    // A Flash adapter that masks around whatever it is given.
-    let adapter = "impl Flash for Shared { fn erase(&mut self) { self.with(|f| f.go()) } }
-                   fn with(&self) { critical_section::with(|cs| g(cs)) }";
-    assert_eq!(violations(adapter).len(), 1);
+/// The `path = "…"` entries of a clippy.toml, without a TOML parser.
+mod toml_like {
+    pub type Paths = Vec<String>;
+
+    pub fn paths(text: &str) -> Paths {
+        text.split("path = \"")
+            .skip(1)
+            .filter_map(|s| s.split('"').next())
+            .map(str::to_string)
+            .collect()
+    }
 }

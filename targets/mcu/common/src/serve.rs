@@ -19,6 +19,10 @@ pub trait ServeHost<S: SlotStore, X: AppChain> {
     fn idle(&mut self);
     /// A request is being handled.
     fn busy(&mut self);
+    /// A gated feed of the watchdog: every request starts with one, so a
+    /// flash erase it runs has a full period (execution model, section 12,
+    /// rule 4).
+    fn feed(&mut self);
     /// A request arrived, before it is handled (e.g. a gated feed so an
     /// erase starts with a full watchdog period).
     fn on_request(&mut self) {}
@@ -90,6 +94,7 @@ where
                 continue;
             }
         };
+        host.feed();
         if !up {
             up = true;
             agent.link_up(via, addr);
@@ -252,6 +257,9 @@ mod tests {
             self.busy += 1;
             self.calls.push("busy".into());
         }
+        fn feed(&mut self) {
+            self.calls.push("feed".into());
+        }
         fn on_request(&mut self) {
             self.requests += 1;
         }
@@ -261,6 +269,7 @@ mod tests {
         }
         fn after(&mut self, _: &mut Agent<S, X>, cmd: u8) {
             self.cmds.push(cmd);
+            self.calls.push("answered".into());
         }
         async fn wait_ms(&mut self, ms: u32) {
             self.calls.push(std::format!("wait {ms}"));
@@ -377,6 +386,23 @@ mod tests {
             seen[at..],
             ["request", "reboot_requested", "replied", "before_reboot"]
         );
+    }
+
+    /// Every request starts with a gated feed, before it is handled; a
+    /// read timeout feeds nothing.
+    #[test]
+    fn every_request_starts_with_a_gated_feed() {
+        let mut link = Mock::default();
+        link.incoming.extend([Some(hello(1)), None, Some(hello(2))]);
+        let (mut a, mut h) = (agent(), Host::default());
+        dagon_sim::block_on(serve(&mut link, &mut a, &mut h));
+        let order: Vec<&str> = h
+            .calls
+            .iter()
+            .map(std::string::String::as_str)
+            .filter(|c| matches!(*c, "feed" | "answered"))
+            .collect();
+        assert_eq!(order, ["feed", "answered", "feed", "answered"]);
     }
 
     /// The link is up from its first frame and down once it closes; each

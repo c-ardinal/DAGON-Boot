@@ -289,9 +289,10 @@ impl ServeHost<Store, NodeChain> for Host {
     fn busy(&mut self) {
         self.watch.busy(self.task);
     }
-    fn on_request(&mut self) {
-        // An erase starts with a full watchdog period.
+    fn feed(&mut self) {
         self.watch.feed();
+    }
+    fn on_request(&mut self) {
         self.started = Instant::now();
     }
     fn intercept(&mut self, _: &mut AppAgent, request: &[u8]) -> Option<&[u8]> {

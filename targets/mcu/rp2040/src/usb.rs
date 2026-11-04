@@ -190,6 +190,9 @@ impl<S: SlotStore, X: AppChain> ServeHost<S, X> for GuardHost<'_> {
     fn busy(&mut self) {
         self.watch.busy(self.task);
     }
+    fn feed(&mut self) {
+        self.watch.feed();
+    }
     async fn wait_ms(&mut self, ms: u32) {
         Timer::after_millis(ms.into()).await;
     }

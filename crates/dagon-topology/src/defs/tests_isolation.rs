@@ -427,6 +427,60 @@ fn board_wiring_is_checked_for_the_code_generated_from_it() {
 }
 
 #[test]
+fn definition_names_become_code_names_or_are_refused() {
+    let mut m = parse_mcu_text(&isolated_mcu(), &[]).unwrap();
+    m.boot_capabilities = vec![super::isolation::BootCapability::I2c];
+    let text = boot_board();
+    let named = text.replace(
+        "writable = [0x10]",
+        "regs = [{ name = \"ctl\", reg = 0x10 }]\nwritable = [\"ctl\"]",
+    );
+    let b = board(&named);
+    requirements::check_board(&b, &m).unwrap();
+    assert_eq!(b.devices[0].writable_regs(), [0x10]);
+    let second_bus = "\n[[bus]]\nid = \"sys-2\"\nkind = \"i2c\"\ncontroller = \"uart3\"\nsda = \"GPIO8\"\nscl = \"GPIO9\"\n";
+    let second_device = "\n[[device]]\nid = \"pmic-2\"\nbus = \"sys\"\naddr = 0x35\n";
+    for (t, want) in [
+        (
+            named
+                .replace("id = \"pmic\"", "id = \"pmic.v2\"")
+                .replace("device = \"pmic\"", "device = \"pmic.v2\""),
+            "ids are a-z",
+        ),
+        (
+            named.replace("writable = [\"ctl\"]", "writable = [\"nope\"]"),
+            "writable 'nope' is not in its regs",
+        ),
+        (
+            named
+                .replace("name = \"ctl\"", "name = \"Ctl\"")
+                .replace("[\"ctl\"]", "[\"Ctl\"]"),
+            "register name 'Ctl'",
+        ),
+        (
+            named.clone()
+                + second_bus
+                + &second_bus
+                    .replace("sys-2", "sys_2")
+                    .replace("GPIO8", "GPIO10")
+                    .replace("GPIO9", "GPIO11"),
+            "generated name",
+        ),
+        (
+            named.clone()
+                + second_device
+                + &second_device
+                    .replace("pmic-2", "pmic_2")
+                    .replace("0x35", "0x36"),
+            "device id after - becomes _",
+        ),
+    ] {
+        let e = requirements::check_board(&board(&t), &m).unwrap_err();
+        assert!(e.contains(want), "{want}: {e}");
+    }
+}
+
+#[test]
 fn coordinator_pins_are_dagons_link_buses() {
     let reg = Registry::builtin();
     let hub = reg.board("waveshare-rp2040-touch-lcd-1.28").unwrap();

@@ -40,19 +40,26 @@ controller = "i2c0"
 sda = "GPIO47"
 scl = "GPIO48"
 
-# M5IOE1 I/O expander: MODE_L, OUT_L and DRV_L route the rear pins.
+# M5IOE1 I/O expander (low byte IO1-IO8): mode, output level and drive
+# route the rear pins.
 [[device]]
 id = "ioe"
 bus = "sys"
 addr = 0x4F
-writable = [0x03, 0x05, 0x13]
+regs = [
+    { name = "mode_l", reg = 0x03 },
+    { name = "out_l", reg = 0x05 },
+    { name = "drv_l", reg = 0x13 },
+]
+writable = ["mode_l", "out_l", "drv_l"]
 
-# M5PM1 power manager: SYS_CMD.
+# M5PM1 power manager: its system command register.
 [[device]]
 id = "pmic"
 bus = "sys"
 addr = 0x6E
-writable = [0x0C]
+regs = [{ name = "sys_cmd", reg = 0x0C }]
+writable = ["sys_cmd"]
 
 # The recovery agent for the factory partition ships with this package.
 [[part]]

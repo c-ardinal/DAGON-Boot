@@ -208,8 +208,24 @@ pub struct BoardPeripheral {
     pub mcu: String,
 }
 
-/// `[[device]]`: a device on a board bus and the registers anyone outside
-/// DAGON may write.
+/// A device register by its name: what board package code writes it by.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct DeviceReg {
+    pub name: String,
+    pub reg: u8,
+}
+
+/// A register of `writable`: a number, or the name of one of `regs`.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(untagged)]
+pub enum RegRef {
+    Reg(u8),
+    Name(String),
+}
+
+/// `[[device]]`: a device on a board bus, its named registers and the
+/// registers anyone outside DAGON may write.
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct BoardDevice {
@@ -217,7 +233,27 @@ pub struct BoardDevice {
     pub bus: String,
     pub addr: u8,
     #[serde(default)]
-    pub writable: Vec<u8>,
+    pub regs: Vec<DeviceReg>,
+    #[serde(default)]
+    pub writable: Vec<RegRef>,
+}
+
+impl BoardDevice {
+    /// The register named `name` in `regs`.
+    pub fn reg(&self, name: &str) -> Option<u8> {
+        self.regs.iter().find(|r| r.name == name).map(|r| r.reg)
+    }
+
+    /// `writable` as register numbers (names resolved; checked on load).
+    pub fn writable_regs(&self) -> Vec<u8> {
+        self.writable
+            .iter()
+            .filter_map(|w| match w {
+                RegRef::Reg(r) => Some(*r),
+                RegRef::Name(n) => self.reg(n),
+            })
+            .collect()
+    }
 }
 
 fn fail(cond: bool, msg: impl FnOnce() -> String) -> Result<(), String> {
@@ -286,6 +322,28 @@ pub(super) fn tables(b: &BoardDef, m: &McuDef) -> Result<(), String> {
         }
     }
     for d in &b.devices {
+        fail(!code_name(&d.id, b'-'), || {
+            format!("device '{}': ids are a-z, 0-9, -, _ from a letter", d.id)
+        })?;
+        for r in &d.regs {
+            fail(!code_name(&r.name, b'_'), || {
+                format!(
+                    "device '{}': register name '{}' must be a-z, 0-9, _ from a letter",
+                    d.id, r.name
+                )
+            })?;
+        }
+        unique(
+            &format!("register of device '{}'", d.id),
+            d.regs.iter().map(|r| r.name.as_str()),
+        )?;
+        for w in &d.writable {
+            if let RegRef::Name(n) = w {
+                fail(d.reg(n).is_none(), || {
+                    format!("device '{}': writable '{n}' is not in its regs", d.id)
+                })?;
+            }
+        }
         let bus = b
             .bus(&d.bus)
             .ok_or_else(|| format!("device '{}': bus '{}' is not in [[bus]]", d.id, d.bus))?;
@@ -300,6 +358,32 @@ pub(super) fn tables(b: &BoardDef, m: &McuDef) -> Result<(), String> {
         )?;
     }
     Ok(())
+}
+
+/// The identifier generated code uses for a definition name (`child-uart`
+/// → `child_uart`).
+pub fn code_ident(name: &str) -> String {
+    name.replace('-', "_")
+}
+
+/// Every name board package code is generated with, once each after
+/// [`code_ident`]: the boot LED, pin names, buses and their signals.
+pub fn code_names(b: &BoardDef) -> Vec<(String, String)> {
+    let led = b.boot.as_ref().and_then(|x| x.led.clone());
+    let mut out: Vec<(String, String)> = led.map(|p| ("boot_led".into(), p)).into_iter().collect();
+    for p in &b.pins {
+        if let Some(n) = &p.name {
+            out.push((n.clone(), p.pin.clone()));
+        }
+    }
+    for x in &b.buses {
+        let bus = code_ident(&x.id);
+        out.push((bus.clone(), x.controller.clone()));
+        for (s, pin) in x.pins() {
+            out.push((format!("{bus}_{s}"), pin.to_string()));
+        }
+    }
+    out
 }
 
 /// A name board package code is generated with: `a-z`, `0-9`, `_` (or
@@ -363,6 +447,19 @@ pub(super) fn wiring(b: &BoardDef, _: &McuDef) -> Result<(), String> {
         }
         fail(speed == Some(0), || format!("bus '{}': speed 0", x.id))?;
     }
+    unique(
+        "generated name (pin, bus, bus signal, boot_led)",
+        code_names(b).iter().map(|(n, _)| n.as_str()),
+    )?;
+    unique(
+        "device id after - becomes _",
+        b.devices
+            .iter()
+            .map(|d| code_ident(&d.id))
+            .collect::<Vec<_>>()
+            .iter()
+            .map(String::as_str),
+    )?;
     coordinator_links(b)
 }
 
@@ -461,7 +558,7 @@ fn program(b: &BoardDef, m: &McuDef, boot: &BoardBoot, a: &Action) -> Result<(),
                 let d = b
                     .device(device)
                     .ok_or_else(|| format!("{at}: device '{device}' is not in [[device]]"))?;
-                fail(!d.writable.contains(reg), || {
+                fail(!d.writable_regs().contains(reg), || {
                     format!("{at}: register {reg:#04x} of '{device}' is not writable")
                 })?;
                 fail(

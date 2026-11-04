@@ -3,7 +3,7 @@
 // edit is a pure function returning a new document, so undo keeps snapshots.
 // Validity is never decided here: topo_check (dagon-topology in WASM) does it.
 import { board_template, coordinator_capable, coordinator_uart0, link_kinds, rom_i2c_addrs, supported_mcus, topo_cut, topo_parse } from '../../wasm/pkg/dagon_wasm.js';
-import { supportedBoards, type Board } from '../../wasm/dagon.ts';
+import { defaultBoard, type Board } from '../../wasm/dagon.ts';
 import { INSPECT } from '../copy.ts';
 import type { Config, Link as GLink, Node as GNode, Skip, UplinkHost, Wire } from '../sample.ts';
 
@@ -141,9 +141,9 @@ export function template(board: string): BoardTemplate | null {
   return board_template(board) as BoardTemplate | null;
 }
 
-/** 親機 `h`'s board's [coordinator] pins (a node placed by MCU: the first listed board with that MCU). */
+/** 親機 `h`'s board's [coordinator] pins (a node placed by MCU: its MCU's default board, if any). */
 function hubPins(h: TNode): BoardTemplate['coordinator'] {
-  const board = h.board ?? supportedBoards().find((b) => b.mcu === h.mcu)?.id;
+  const board = h.board ?? defaultBoard(h.mcu);
   return (board ? template(board)?.coordinator : null) ?? null;
 }
 
@@ -293,8 +293,8 @@ export function connect(doc: Doc, id: string, parent?: string): Doc {
   const h = parent ? t.nodes.find((x) => x.id === parent) : hub(t);
   const n = t.nodes.find((x) => x.id === id);
   if (!h || !n || n === h || (t.links ?? []).some((l) => l.to === id)) return doc;
-  // A node chosen by MCU links like the first listed board with that MCU (its pins are the developer's).
-  const stand = n.board ?? supportedBoards().find((b) => b.mcu === n.mcu)?.id;
+  // A node chosen by MCU links like its MCU's default board, if any (its pins are the developer's).
+  const stand = n.board ?? defaultBoard(n.mcu);
   const tpl = stand ? template(stand) : null;
   const d = tpl?.link ?? { kind: 'uart' as const, iface: 'pio-uart', addr: null, baud: 115200, control: 'cooperative' as const, romEntry: null };
   if (h.role !== 'coordinator' || n.role === 'coordinator') {

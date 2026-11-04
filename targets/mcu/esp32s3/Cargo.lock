@@ -176,7 +176,8 @@ dependencies = [
 name = "dagon-agent"
 version = "0.1.0"
 dependencies = [
- "dagon-core",
+ "critical-section",
+ "dagon-events",
  "dagon-format",
  "dagon-port",
  "dagon-proto",
@@ -186,7 +187,6 @@ dependencies = [
 name = "dagon-conform"
 version = "0.1.0"
 dependencies = [
- "dagon-agent",
  "dagon-core",
  "dagon-format",
  "dagon-port",
@@ -203,6 +203,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "dagon-events"
+version = "0.1.0"
+dependencies = [
+ "dagon-format",
+ "embassy-sync 0.8.0",
+]
+
+[[package]]
 name = "dagon-format"
 version = "0.1.0"
 dependencies = [
@@ -216,6 +224,7 @@ version = "0.1.0"
 dependencies = [
  "critical-section",
  "dagon-agent",
+ "dagon-events",
  "dagon-format",
  "dagon-port",
  "dagon-proto",
@@ -227,6 +236,7 @@ version = "0.1.0"
 dependencies = [
  "dagon-agent",
  "dagon-conform",
+ "dagon-events",
  "dagon-format",
  "dagon-mcu-common",
  "dagon-port",

@@ -9,9 +9,11 @@
 
 use dagon_agent::{Agent, Config, SlotStore};
 pub use dagon_core::log::LogError;
+use dagon_events::{Published, Watchdog as Periods};
 use dagon_format::header::{port_kind, target_tag, ImageHeader, HEADER_SIZE};
 use dagon_format::Version;
-pub use dagon_mcu_common::hooks::{always, SelfCheck};
+pub use dagon_mcu_common::hooks::{always, NodeChain, SelfCheck};
+use dagon_mcu_common::hooks::{node_chain, Events};
 use dagon_mcu_common::link::LinkError;
 use dagon_mcu_common::serve::{serve as dagon_serve, Exit, ServeHost};
 use dagon_proto::max_payload;
@@ -23,6 +25,7 @@ use embassy_stm32::peripherals::{FLASH, IWDG};
 use embassy_stm32::wdg::IndependentWatchdog;
 use embassy_stm32::{mode::Async, pac, Peri, Peripherals};
 use embassy_time::{Duration, Instant, Timer};
+use static_cell::StaticCell;
 
 use crate::flash::F401Flash;
 use crate::layout::{self, MIN_FLASH_SIZE};
@@ -33,8 +36,8 @@ use crate::watchdog::{Guard, Iwdg, Watch};
 /// The DAGON link: an I2C target (listening at the node's address).
 pub type I2cTarget = I2c<'static, Async, MultiMaster>;
 pub type Store = KindSStore<F401Flash<'static>>;
-/// The agent of a node on this MCU; its hooks run the app's CONFIRM check.
-pub type AppAgent = Agent<Store, SelfCheck>;
+/// The agent of a node on this MCU; its chain runs the app's CONFIRM check.
+pub type AppAgent = Agent<Store, NodeChain>;
 
 /// The guard task [`start`] gives DAGON's serving task; the app's tasks
 /// take the others.
@@ -147,6 +150,16 @@ pub fn config(tag: &str) -> Config {
     }
 }
 
+/// The agent over `store`, with the app layer's chain: the published
+/// events and `self_check` as the CONFIRM decision. Call once.
+pub fn agent(tag: &str, store: Store, self_check: fn() -> bool) -> AppAgent {
+    static EVENTS: StaticCell<Events> = StaticCell::new();
+    let periods = Periods::new(layout::TRIAL_WDT_MS, layout::CONFIRMED_WDT_MS);
+    let now_us: fn() -> u64 = || Instant::now().as_micros();
+    let chain = node_chain(EVENTS.init(Published::new()), self_check, now_us, periods);
+    Agent::new(config(tag), store, chain)
+}
+
 /// Starts DAGON: opens the store, takes over the watchdog, opens the link,
 /// spawns the serving task (guard task [`DAGON_TASK`]; declare it
 /// `Preempting`) on DAGON's high-priority executor (`crate::exec`) and the
@@ -177,7 +190,7 @@ pub fn start<B: BoardDef, const N: usize>(
     install_watchdog(parts.iwdg, guard, period, &store);
     let (target, regs) = B::open_link(parts.link);
     let link = links::I2c::new(target, regs);
-    let agent = Agent::new(config(tag), store, SelfCheck(self_check));
+    let agent = agent(tag, store, self_check);
     let high = crate::exec::start();
     high.spawn(serve(agent, link, guard, task).expect("task pool"));
     spawner.spawn(feed(guard).expect("task pool"));
@@ -226,7 +239,7 @@ struct Host {
     out: [u8; conform::OUT_MAX],
 }
 
-impl ServeHost<Store, SelfCheck> for Host {
+impl ServeHost<Store, NodeChain> for Host {
     fn now_ms(&self) -> u64 {
         Instant::now().as_millis()
     }

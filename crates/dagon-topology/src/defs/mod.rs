@@ -3,11 +3,15 @@
 //! `targets/README.md`. Kinds (port, image, placement, writer, link, ROM
 //! entry) are closed sets in code; everything else is data.
 
+pub mod board_boot;
+pub mod isolation;
 mod load;
 mod project_text;
 pub mod requirements;
 #[cfg(test)]
 mod tests;
+#[cfg(test)]
+mod tests_isolation;
 #[cfg(test)]
 mod tests_requirements;
 
@@ -18,7 +22,9 @@ use serde::Deserialize;
 
 use crate::schema::{ControlKind, LinkKind, RomEntry, UartIface};
 
-pub use load::{DefError, DefSource, Source};
+pub use board_boot::{BoardBoot, BoardBus, BoardDevice, BoardPeripheral, BoardPin};
+pub use isolation::{Core, Isolation, McuBoot, Peripheral, RecordPlacement, Watchdog};
+pub use load::{DefError, DefSource, Source, BUILTIN_FILES};
 
 /// The `dagon-mcu.toml` / `dagon-board.toml` format number this reader
 /// reads (their `format` key; absent means this one).
@@ -133,6 +139,11 @@ pub struct FlashMapDef {
     /// Address of the first flash byte as images see it.
     pub base: u32,
     pub bytes: u32,
+    /// `true`: the CPU reads (and executes) flash at `base`, so flash
+    /// shares the address space with RAM and register blocks. `false`:
+    /// `base` and the slots are flash offsets an MMU maps elsewhere.
+    /// Required: no default.
+    pub xip: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
@@ -391,6 +402,22 @@ pub struct McuDef {
     pub connection: Connection,
     #[serde(default)]
     pub doctor: Vec<DoctorCheck>,
+    /// The MCU's RAM (all of it, as the address map has it).
+    pub ram: Option<Region>,
+    /// Left out: no protection hardware DAGON uses ([`McuDef::isolation`]).
+    pub isolation: Option<Isolation>,
+    /// Every register block of the MCU.
+    #[serde(default, rename = "peripheral")]
+    pub peripherals: Vec<Peripheral>,
+    /// Every processor core; DAGON runs on the first.
+    #[serde(default, rename = "core")]
+    pub cores: Vec<Core>,
+    pub watchdog: Option<Watchdog>,
+    #[serde(default)]
+    pub boot: McuBoot,
+    /// What a boot action program may use besides pins.
+    #[serde(default)]
+    pub boot_capabilities: Vec<isolation::BootCapability>,
     /// Filled on load from `partitions`.
     #[serde(skip)]
     pub partition_table: Vec<Partition>,
@@ -407,6 +434,13 @@ pub struct McuDef {
 impl McuDef {
     pub fn default_flash_map(&self) -> &FlashMapDef {
         &self.flash_maps[0]
+    }
+
+    /// Whether flash map and slot addresses are CPU addresses (every flash
+    /// map says `xip = true`); otherwise they are flash offsets and share
+    /// no address space with RAM or register blocks.
+    pub fn flash_is_cpu_mapped(&self) -> bool {
+        self.flash_maps.iter().all(|f| f.xip)
     }
 }
 
@@ -445,6 +479,11 @@ pub struct BoardDef {
     pub i2c_target: bool,
     /// Which line drawing the UI uses.
     pub drawing: String,
+    /// The board a node naming only its MCU is checked against. At most
+    /// one board of an MCU says so; an MCU's only board is its default
+    /// without it.
+    #[serde(default)]
+    pub default: bool,
     #[serde(default)]
     pub header: Vec<HeaderPin>,
     /// I2C pin pairs usable from the header.
@@ -457,6 +496,18 @@ pub struct BoardDef {
     /// Parts built from the board package itself.
     #[serde(default, rename = "part")]
     pub parts: Vec<Part>,
+    /// The boot stage's LED, halt pattern, power hold and action program.
+    pub boot: Option<BoardBoot>,
+    /// Pins extensions and boot actions may name.
+    #[serde(default, rename = "pin")]
+    pub pins: Vec<BoardPin>,
+    #[serde(default, rename = "bus")]
+    pub buses: Vec<BoardBus>,
+    /// Board names for MCU register blocks extensions may declare.
+    #[serde(default, rename = "peripheral")]
+    pub peripherals: Vec<BoardPeripheral>,
+    #[serde(default, rename = "device")]
+    pub devices: Vec<BoardDevice>,
     /// As [`McuDef::package`] (inline project boards have none).
     #[serde(skip)]
     pub package: Option<std::path::PathBuf>,
@@ -502,8 +553,8 @@ impl Origin {
 }
 
 /// Every MCU and board known: builtin, a DAGON source tree, project
-/// definitions. Order is definition order; the first board of an MCU is
-/// its default.
+/// definitions, in definition order, which carries no meaning: an MCU's
+/// default board is data ([`Registry::default_board`]).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Registry {
     mcus: Vec<McuDef>,
@@ -571,9 +622,17 @@ impl Registry {
         self.boards.iter().find(|b| b.id == id)
     }
 
-    /// First board defined for an MCU.
+    /// The board a node naming only `mcu` is checked against: its board
+    /// marked `default = true`, else its only board; none when it has
+    /// several and none is marked (load refuses two marked). Definition
+    /// order never decides it.
     pub fn default_board(&self, mcu: &str) -> Option<&BoardDef> {
-        self.boards.iter().find(|b| b.mcu == mcu)
+        let mut boards = self.boards.iter().filter(|b| b.mcu == mcu);
+        let first = boards.next()?;
+        match boards.next() {
+            None => Some(first),
+            Some(_) => self.boards.iter().find(|b| b.mcu == mcu && b.default),
+        }
     }
 
     /// Flash map by name, with its MCU.

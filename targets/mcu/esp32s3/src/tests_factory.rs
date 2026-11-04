@@ -4,7 +4,8 @@
 
 use crate::layout::{OTA_0, SLOT_A, SLOT_B, SLOT_FACTORY};
 use crate::tests::{store, Store};
-use dagon_agent::{Agent, DefaultHooks};
+use dagon_agent::Agent;
+use dagon_events::{compose, Bounds, Composed, Layer, Nop, Published, Watchdog};
 use dagon_format::header::*;
 use dagon_format::{key_id, sha256, Version};
 use dagon_proto::payload::*;
@@ -43,19 +44,45 @@ fn image(minor: u8, body: &[u8], kp: &KeyPair) -> Vec<u8> {
     [&h.to_bytes()[..], body].concat()
 }
 
+type Chain = Composed<&'static Published<(), 4>, Nop, Nop, fn() -> u64>;
+
+/// The app layer's chain of one start (no extensions).
+fn chain() -> Chain {
+    let events: &'static mut Published<(), 4> = Box::leak(Box::new(Published::new()));
+    let now: fn() -> u64 = || 0;
+    compose(
+        Layer::App,
+        events,
+        Nop,
+        Nop,
+        Bounds::new(now, Watchdog::new(4000, 4000)),
+    )
+}
+
 struct Pc {
-    agent: Agent<Store, DefaultHooks>,
+    agent: Agent<Store, Chain>,
     seq: u8,
 }
 
 impl Pc {
-    fn factory() -> Self {
+    fn config() -> dagon_agent::Config {
         let mut cfg = crate::config(mode::AGENT, crate::target_tag(TAG));
         cfg.pubkey = *keypair().pk;
+        cfg
+    }
+
+    fn factory() -> Self {
         Pc {
-            agent: Agent::new(cfg, store(), DefaultHooks),
+            agent: Agent::new(Self::config(), store(), chain()),
             seq: 0,
         }
+    }
+
+    /// A reset: the 2nd stage boots, the app starts its agent again.
+    fn reboot(&mut self) {
+        let mut s = std::mem::replace(self.agent.store(), store());
+        s.ota.boot();
+        self.agent = Agent::new(Self::config(), s, chain());
     }
 
     fn call(&mut self, cmd: Cmd, payload: &[u8]) -> (Status, Vec<u8>) {
@@ -167,12 +194,12 @@ fn factory_receives_a_signed_app_and_hands_over_to_it() {
     assert_eq!(pc.status().slots[0].state, SlotState::Pending);
 
     // Reboot: the 2nd stage tries ota_0, the app (same agent) confirms.
-    pc.store().ota.boot();
+    pc.reboot();
     let st = pc.status();
     assert_eq!((st.active, st.confirmed), (SLOT_A, SLOT_FACTORY));
     assert!(pc.hello().trial);
     assert_eq!(pc.call(Cmd::Confirm, &[target::APP]).0, Status::Ok);
-    pc.store().ota.boot();
+    pc.reboot();
     let st = pc.status();
     assert_eq!((st.active, st.confirmed), (SLOT_A, SLOT_A));
     assert_eq!(st.slots[0].state, SlotState::Confirmed);

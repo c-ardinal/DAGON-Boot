@@ -7,9 +7,13 @@ wire_id = 0x0002
 port = "self-boot"
 # Pins are named by port (PB4), not numbered.
 gpio_count = 0
+# SRAM1 (ST RM0368 section 2.3).
+ram = { at = 0x2000_0000, size = 0x1_8000 }
 
 [[flash_map]]
 name = "f401-default"
+# Images run from flash in place at base.
+xip = true
 base = 0x0800_0000
 bytes = 0x8_0000
 
@@ -63,6 +67,285 @@ pairs = [
 # Link kinds the firmware implements (src/links.rs LINK_KINDS).
 [links]
 up = ["i2c"]
+
+[watchdog]
+kind = "iwdg"
+trial_ms = 4_000
+confirmed_ms = 8_000
+
+# Protection hardware: ARMv7-M PMSAv7 MPU, 8 regions (ST PM0214 section 4.2),
+# read back from MPU_TYPE at boot.
+[isolation]
+level = "mpu"
+kind = "armv7m-mpu"
+boot_extensions = true
+ext_ram_max = 24_576
+root_protection = ["rdp1", "rdp2", "wrp"]
+
+[isolation.capabilities]
+mpu_regions = 8
+min_region = 32
+subregions_from = 256
+critical_section = "basepri"
+reset_cleanup = "peripheral-reset"
+background_privileged = true
+unwind = "cortex-m-exception"
+timer = "systick"
+fault_address = true
+
+# Boot record and lockup fuse: the last 4 KiB of SRAM, outside every
+# image's RAM (the memory.x fragments `dagon gen` writes leave it out).
+[boot.record]
+kind = "noinit-ram"
+at = 0x2001_7000
+size = 0x800
+survives = "reset-random"
+rings = [{ writer = "bootcore", at = 0x2001_7000, size = 0x800 }]
+fuse = { cells = [
+    { image = "bootcore", at = 0x2001_7800, size = 0x100 },
+    { image = "app", at = 0x2001_7900, size = 0x100 },
+] }
+
+[[core]]
+id = "cpu0"
+
+# Every register block (ST RM0368 section 2.3, memory map). The GPIO ports
+# hold DAGON's own pins, so pins are reached through the pin service.
+[[peripheral]]
+id = "tim2"
+base = 0x4000_0000
+size = 0x400
+window_eligible = true
+
+[[peripheral]]
+id = "tim3"
+base = 0x4000_0400
+size = 0x400
+window_eligible = true
+
+[[peripheral]]
+id = "tim4"
+base = 0x4000_0800
+size = 0x400
+window_eligible = true
+
+[[peripheral]]
+id = "tim5"
+base = 0x4000_0C00
+size = 0x400
+window_eligible = true
+
+[[peripheral]]
+id = "rtc-bkp"
+base = 0x4000_2800
+size = 0x400
+privileged_why = "power"
+
+[[peripheral]]
+id = "wwdg"
+base = 0x4000_2C00
+size = 0x400
+privileged_why = "watchdog"
+
+[[peripheral]]
+id = "iwdg"
+base = 0x4000_3000
+size = 0x400
+privileged_why = "watchdog"
+
+[[peripheral]]
+id = "i2s2ext"
+base = 0x4000_3400
+size = 0x400
+window_eligible = true
+
+[[peripheral]]
+id = "spi2"
+base = 0x4000_3800
+size = 0x400
+window_eligible = true
+
+[[peripheral]]
+id = "spi3"
+base = 0x4000_3C00
+size = 0x400
+window_eligible = true
+
+[[peripheral]]
+id = "i2s3ext"
+base = 0x4000_4000
+size = 0x400
+window_eligible = true
+
+[[peripheral]]
+id = "usart2"
+base = 0x4000_4400
+size = 0x400
+window_eligible = true
+
+[[peripheral]]
+id = "i2c1"
+base = 0x4000_5400
+size = 0x400
+window_eligible = true
+
+[[peripheral]]
+id = "i2c2"
+base = 0x4000_5800
+size = 0x400
+window_eligible = true
+
+[[peripheral]]
+id = "i2c3"
+base = 0x4000_5C00
+size = 0x400
+window_eligible = true
+
+[[peripheral]]
+id = "pwr"
+base = 0x4000_7000
+size = 0x400
+privileged_why = "power"
+
+[[peripheral]]
+id = "tim1"
+base = 0x4001_0000
+size = 0x400
+window_eligible = true
+
+[[peripheral]]
+id = "usart1"
+base = 0x4001_1000
+size = 0x400
+window_eligible = true
+
+[[peripheral]]
+id = "usart6"
+base = 0x4001_1400
+size = 0x400
+window_eligible = true
+
+[[peripheral]]
+id = "adc1"
+base = 0x4001_2000
+size = 0x400
+window_eligible = true
+
+[[peripheral]]
+id = "sdio"
+base = 0x4001_2C00
+size = 0x400
+window_eligible = true
+
+[[peripheral]]
+id = "spi1"
+base = 0x4001_3000
+size = 0x400
+window_eligible = true
+
+[[peripheral]]
+id = "spi4"
+base = 0x4001_3400
+size = 0x400
+window_eligible = true
+
+[[peripheral]]
+id = "syscfg"
+base = 0x4001_3800
+size = 0x400
+privileged_why = ["irq-routing", "pinmux"]
+
+[[peripheral]]
+id = "exti"
+base = 0x4001_3C00
+size = 0x400
+privileged_why = "irq-routing"
+
+[[peripheral]]
+id = "tim9"
+base = 0x4001_4000
+size = 0x400
+window_eligible = true
+
+[[peripheral]]
+id = "tim10"
+base = 0x4001_4400
+size = 0x400
+window_eligible = true
+
+[[peripheral]]
+id = "tim11"
+base = 0x4001_4800
+size = 0x400
+window_eligible = true
+
+[[peripheral]]
+id = "gpio"
+base = 0x4002_0000
+size = 0x2000
+privileged_why = ["pinmux", "shared"]
+
+[[peripheral]]
+id = "crc"
+base = 0x4002_3000
+size = 0x400
+privileged_why = "shared"
+
+[[peripheral]]
+id = "rcc"
+base = 0x4002_3800
+size = 0x400
+privileged_why = ["clock", "reset"]
+
+[[peripheral]]
+id = "flash"
+base = 0x4002_3C00
+size = 0x400
+privileged_why = "flash"
+
+[[peripheral]]
+id = "dma1"
+base = 0x4002_6000
+size = 0x400
+bus_master = true
+privileged_why = "dma"
+
+[[peripheral]]
+id = "dma2"
+base = 0x4002_6400
+size = 0x400
+bus_master = true
+privileged_why = "dma"
+
+[[peripheral]]
+id = "usb-otg-fs"
+base = 0x5000_0000
+size = 0x4_0000
+privileged_why = "shared"
+
+[[peripheral]]
+id = "system-memory"
+base = 0x1FFF_0000
+size = 0x7800
+privileged_why = "rom"
+
+[[peripheral]]
+id = "otp"
+base = 0x1FFF_7800
+size = 0x210
+privileged_why = "flash"
+
+[[peripheral]]
+id = "option-bytes"
+base = 0x1FFF_C000
+size = 0x10
+privileged_why = ["flash", "protection"]
+
+[[peripheral]]
+id = "ppb"
+base = 0xE000_0000
+size = 0x10_0000
+privileged_why = ["irq-routing", "core-control", "protection"]
 
 [connection]
 label = "ST-LINK"

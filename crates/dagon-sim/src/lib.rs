@@ -30,6 +30,9 @@ pub use rng::SimRng;
 pub use rom::SimRom;
 pub use store::{Layout, SimStore};
 
+// The simulator declares no machine of its own: its nodes run the agent's.
+dagon_events::state_machine! {}
+
 use dagon_agent::Config;
 use dagon_format::header::{mcu_id, port_kind, target_tag};
 use dagon_proto::max_payload;

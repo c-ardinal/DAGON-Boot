@@ -147,41 +147,19 @@ type Embedded = (
     &'static [(&'static str, &'static str)],
 );
 
-const BUILTIN_MCUS: [Embedded; 3] = [
-    (
-        "targets/mcu/rp2040",
-        include_str!("../../../../targets/mcu/rp2040/dagon-mcu.toml"),
-        &[],
-    ),
-    (
-        "targets/mcu/stm32f401re",
-        include_str!("../../../../targets/mcu/stm32f401re/dagon-mcu.toml"),
-        &[],
-    ),
-    (
-        "targets/mcu/esp32s3",
-        include_str!("../../../../targets/mcu/esp32s3/dagon-mcu.toml"),
-        &[(
-            "partitions.csv",
-            include_str!("../../../../targets/mcu/esp32s3/partitions.csv"),
-        )],
-    ),
-];
+// BUILTIN_MCUS and BUILTIN_BOARDS: every package folder of the source tree
+// (build.rs), in the order a source tree loads; BUILTIN_FILES: the files
+// they embed.
+include!(concat!(env!("OUT_DIR"), "/builtin_defs.rs"));
 
-const BUILTIN_BOARDS: [(&str, &str); 3] = [
+/// The builtin definitions' TOML: MCUs, then boards.
+#[cfg(test)]
+pub(super) fn builtin_texts() -> (Vec<&'static str>, Vec<&'static str>) {
     (
-        "targets/boards/waveshare-rp2040-touch-lcd-1.28",
-        include_str!("../../../../targets/boards/waveshare-rp2040-touch-lcd-1.28/dagon-board.toml"),
-    ),
-    (
-        "targets/boards/nucleo-f401re",
-        include_str!("../../../../targets/boards/nucleo-f401re/dagon-board.toml"),
-    ),
-    (
-        "targets/boards/m5stopwatch",
-        include_str!("../../../../targets/boards/m5stopwatch/dagon-board.toml"),
-    ),
-];
+        BUILTIN_MCUS.iter().map(|(_, t, _)| *t).collect(),
+        BUILTIN_BOARDS.iter().map(|(_, t)| *t).collect(),
+    )
+}
 
 /// What a definition was read from: its TOML and the text files it
 /// references (by package-relative name).
@@ -416,7 +394,7 @@ pub(super) fn from_json(json: &str) -> Result<Registry, DefError> {
 
 pub(super) fn builtin() -> Result<Registry, DefError> {
     let mut reg = empty();
-    for (label, text, files) in BUILTIN_MCUS {
+    for &(label, text, files) in BUILTIN_MCUS {
         reg.push_mcu(
             text,
             &Pkg::Embedded { label, files },
@@ -424,7 +402,7 @@ pub(super) fn builtin() -> Result<Registry, DefError> {
             false,
         )?;
     }
-    for (label, text) in BUILTIN_BOARDS {
+    for &(label, text) in BUILTIN_BOARDS {
         reg.push_board(
             text,
             &Pkg::Embedded { label, files: &[] },
@@ -735,6 +713,24 @@ fn validate(reg: &Registry) -> Result<(), DefError> {
             return err(at, format!("MCU '{}' is not defined", b.mcu));
         };
         super::requirements::check_board(b, m).or_else(|e| err(&at, e))?;
+    }
+    for m in &reg.mcus {
+        let at = format!("MCU '{}'", m.id);
+        let defaults: Vec<&str> = reg
+            .boards
+            .iter()
+            .filter(|b| b.mcu == m.id && b.default)
+            .map(|b| b.id.as_str())
+            .collect();
+        if defaults.len() > 1 {
+            return err(
+                at,
+                format!(
+                    "boards {} are all marked default = true: at most one is the default",
+                    defaults.join(", ")
+                ),
+            );
+        }
     }
     Ok(())
 }

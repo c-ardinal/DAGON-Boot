@@ -62,6 +62,12 @@ pub(super) fn mcu(m: &mut McuDef) -> Result<(), String> {
             plain("writer.flash_size", flash_size)?;
         }
     }
+    for p in &m.peripherals {
+        plain("peripheral.id", &p.id)?;
+    }
+    for c in &m.cores {
+        plain("core.id", &c.id)?;
+    }
     if let Some(r) = &mut m.rom_i2c {
         plain_pairs("rom_i2c.pairs", &r.pairs)?;
         scrub(&mut r.name);
@@ -89,6 +95,24 @@ pub(super) fn board(b: &mut BoardDef) -> Result<(), String> {
         if let Some(l) = &mut h.label {
             scrub(l);
         }
+    }
+    for p in &b.pins {
+        plain("pin.pin", &p.pin)?;
+    }
+    for x in &b.buses {
+        plain("bus.id", &x.id)?;
+        plain("bus.controller", &x.controller)?;
+    }
+    for x in &b.peripherals {
+        plain("peripheral.id", &x.id)?;
+        plain("peripheral.mcu", &x.mcu)?;
+    }
+    for x in &b.devices {
+        plain("device.id", &x.id)?;
+        plain("device.bus", &x.bus)?;
+    }
+    for a in b.boot.iter().flat_map(|boot| &boot.actions) {
+        plain("boot.action.on", &a.on)?;
     }
     scrub(&mut b.product);
     scrub(&mut b.drawing);

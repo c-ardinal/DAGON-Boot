@@ -166,7 +166,10 @@ says whether a version on trial may be confirmed. `dagon gen` can run
 again any time the topology changes: it rewrites `src/wiring.rs` and the
 DAGON package lines of `Cargo.toml`, and never touches `app.rs` (nor
 `main.rs`, unless `--force-main`). DAGON Console does the same with
-"プロジェクトを作る".
+"プロジェクトを作る". `dagon new`, `dagon init` and `dagon gen` never write
+or remove anything through a symbolic link or a junction: a node whose
+`nodes/<id>` (or `nodes`, or any file gen writes) is one is skipped with
+the reason, and `dagon gen` then exits with an error.
 
 ### 4. Build
 
@@ -416,11 +419,14 @@ For firmware that is not a `dagon new` project:
    signed image header and the body at slot start + 0x200.
 3. Implement the `dagon-port` traits for your board (`Flash`, `Link`,
    `Reset`, `Watchdog`, and `BootSelectS` or `BootSelectV`) and a
-   `dagon_agent::SlotStore`, then start the agent with your link and hooks:
+   `dagon_agent::SlotStore`, compose the app layer's chain (your
+   extensions answer the decision points and observe the events, see
+   `docs/events.md`), then start the agent with your link:
 
    ```rust
+   let chain = dagon_events::compose(Layer::App, events, board_exts, user_exts, bounds);
    let cfg = dagon_agent::Config { pubkey, mcu_id, port_kind, target_tag, role, mode, max_payload };
-   let mut agent = dagon_agent::Agent::new(cfg, store, hooks); // hooks: dagon_agent::Hooks
+   let mut agent = dagon_agent::Agent::new(cfg, store, chain);
    agent.run(&mut link, &mut reset).await;                    // serves requests forever
    ```
 

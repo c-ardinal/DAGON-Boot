@@ -11,6 +11,7 @@ publish = false
 
 [dependencies]
 dagon-agent = { path = "../../../crates/dagon-agent" }
+dagon-events = { path = "../../../crates/dagon-events" }
 dagon-format = { path = "../../../crates/dagon-format" }
 dagon-port = { path = "../../../crates/dagon-port" }
 dagon-proto = { path = "../../../crates/dagon-proto" }

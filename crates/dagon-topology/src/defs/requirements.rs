@@ -10,7 +10,7 @@ use std::ops::RangeInclusive;
 use dagon_format::header::HEADER_SIZE;
 use dagon_format::statelog::{FACE_HEADER_SIZE, RECORD_SIZE};
 
-use super::{Binding, BoardDef, McuDef, Placement, Writer};
+use super::{board_boot, isolation, Binding, BoardDef, McuDef, Placement, Writer};
 
 /// Slot/header placement: an image header.
 pub const HEADER: u32 = HEADER_SIZE as u32;
@@ -153,6 +153,48 @@ pub const MCU: &[Requirement<McuCheck>] = &[
         rule: "addr in 0x08..=0x77; max_hz >= 1; erase_sectors unique",
         check: rom_i2c,
     },
+    Requirement {
+        engine: "protection map generator (kind record)",
+        fields: &[
+            "isolation.ext_ram_max",
+            "isolation.capabilities.mpu_regions",
+            "isolation.capabilities.min_region",
+            "isolation.capabilities.subregions_from",
+            "isolation.capabilities.np_max_us",
+            "isolation.capabilities.dma_stop_max_us",
+            "isolation.capabilities.worlds",
+            "isolation.capabilities.gdma_channels",
+        ],
+        rule: "the kind's own fields only, in the sets its architecture allows; level one the kind gives; np_max_us / dma_stop_max_us only lower the catalog's; ext_ram_max >= 1",
+        check: isolation::capabilities,
+    },
+    Requirement {
+        engine: "isolation checker",
+        fields: &["peripheral[].base", "peripheral[].size"],
+        rule: "blocks unique, non-empty, apart; bus masters never window-eligible; every other block names privileged_why; a kind other than none lists every core and a block of each required class",
+        check: isolation::peripherals,
+    },
+    Requirement {
+        engine: "watchdog driver, reboot delay cap",
+        fields: &["watchdog.trial_ms", "watchdog.confirmed_ms"],
+        rule: ">= 1",
+        check: isolation::watchdog,
+    },
+    Requirement {
+        engine: "boot record and lockup fuse placement (memory.x fragments)",
+        fields: &[
+            "ram.at",
+            "ram.size",
+            "boot.record.at",
+            "boot.record.size",
+            "boot.record.rings[].at",
+            "boot.record.rings[].size",
+            "boot.record.fuse.cells[].at",
+            "boot.record.fuse.cells[].size",
+        ],
+        rule: "record 1..=RECORD_MAX bytes inside RAM (noinit-ram) or a declared block (retained-registers); 1..=16 rings inside it, apart, one per boot stage the MCU has; fuse cells apart, outside the record, one per image kind",
+        check: isolation::record,
+    },
 ];
 
 pub const BOARD: &[Requirement<BoardCheck>] = &[
@@ -202,6 +244,23 @@ pub const BOARD: &[Requirement<BoardCheck>] = &[
         ],
         rule: "the MCU has [coordinator]; four distinct pins below its gpio_count (numbered pins only); i2c.controller one of the board's i2c controllers",
         check: hub_pins,
+    },
+    Requirement {
+        engine: "extension capability validator",
+        fields: &["device[].addr", "device[].writable[]"],
+        rule: "names unique; buses and peripherals name MCU blocks; devices on a declared bus, I2C addresses in 0x08..=0x77",
+        check: board_boot::tables,
+    },
+    Requirement {
+        engine: "boot action interpreter (boot-program 1)",
+        fields: &[
+            "boot.halt.period_ms",
+            "boot.action[].ops[].ms",
+            "boot.action[].ops[].reg",
+            "boot.action[].ops[].bytes[]",
+        ],
+        rule: "pins declared (gpio: boot = true, allowed level, the hold level on the power hold pin); 1..=32 ops; delay 1..=20 ms; bus_write only with the MCU's i2c boot capability, to a writable register, 1..=8 bytes; <= 50 ms per event",
+        check: board_boot::boot,
     },
 ];
 

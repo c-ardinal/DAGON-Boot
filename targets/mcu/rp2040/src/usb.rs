@@ -6,7 +6,7 @@
 //! device with [`run`], then serve. Call [`new`] once. This module binds
 //! the USB interrupt itself.
 
-use dagon_agent::{Agent, Hooks, SlotStore};
+use dagon_agent::{Agent, AppChain, SlotStore};
 use dagon_proto::{max_payload, MAX_FRAME};
 use embassy_rp::bind_interrupts;
 use embassy_rp::peripherals::USB;
@@ -176,7 +176,7 @@ pub struct GuardHost<'a> {
     pub task: usize,
 }
 
-impl<S: SlotStore, H: Hooks> ServeHost<S, H> for GuardHost<'_> {
+impl<S: SlotStore, X: AppChain> ServeHost<S, X> for GuardHost<'_> {
     fn now_ms(&self) -> u64 {
         embassy_time::Instant::now().as_millis()
     }
@@ -190,9 +190,9 @@ impl<S: SlotStore, H: Hooks> ServeHost<S, H> for GuardHost<'_> {
 
 /// Serves `agent` over `link` (any [`Link`]) forever; REBOOT resets the
 /// chip after the reply has left.
-pub async fn serve_agent<L: Link, S: SlotStore, H: Hooks>(
+pub async fn serve_agent<L: Link, S: SlotStore, X: AppChain>(
     mut link: L,
-    mut agent: Agent<S, H>,
+    mut agent: Agent<S, X>,
     guard: &dyn Watch,
     task: usize,
 ) -> ! {

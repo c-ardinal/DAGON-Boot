@@ -192,7 +192,8 @@ dependencies = [
 name = "dagon-agent"
 version = "0.1.0"
 dependencies = [
- "dagon-core",
+ "critical-section",
+ "dagon-events",
  "dagon-format",
  "dagon-port",
  "dagon-proto",
@@ -202,7 +203,6 @@ dependencies = [
 name = "dagon-conform"
 version = "0.1.0"
 dependencies = [
- "dagon-agent",
  "dagon-core",
  "dagon-format",
  "dagon-port",
@@ -216,6 +216,14 @@ dependencies = [
  "dagon-format",
  "dagon-port",
  "dagon-proto",
+]
+
+[[package]]
+name = "dagon-events"
+version = "0.1.0"
+dependencies = [
+ "dagon-format",
+ "embassy-sync",
 ]
 
 [[package]]
@@ -236,6 +244,7 @@ version = "0.1.0"
 dependencies = [
  "critical-section",
  "dagon-agent",
+ "dagon-events",
  "dagon-format",
  "dagon-port",
  "dagon-proto",
@@ -249,6 +258,7 @@ dependencies = [
  "dagon-agent",
  "dagon-conform",
  "dagon-core",
+ "dagon-events",
  "dagon-format",
  "dagon-mcu-build",
  "dagon-mcu-common",
@@ -260,6 +270,7 @@ dependencies = [
  "embassy-futures",
  "embassy-stm32",
  "embassy-time",
+ "static_cell",
 ]
 
 [[package]]
@@ -1005,6 +1016,15 @@ name = "static_assertions"
 version = "1.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a2eb9349b6444b326872e140eb1cf5e7c522154d69e7a0ffb0fb81c06b37543f"
+
+[[package]]
+name = "static_cell"
+version = "2.1.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0530892bb4fa575ee0da4b86f86c667132a94b74bb72160f58ee5a4afec74c23"
+dependencies = [
+ "portable-atomic",
+]
 
 [[package]]
 name = "stm32-fmc"

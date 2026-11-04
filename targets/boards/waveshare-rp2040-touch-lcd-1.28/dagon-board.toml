@@ -7,6 +7,8 @@ mcu = "rp2040"
 flash_bytes = 0x40_0000
 i2c_target = true
 drawing = "round-lcd"
+# The board a node naming only its MCU is checked against.
+default = true
 
 # label: the printed header name, left out until confirmed on the board.
 header = [

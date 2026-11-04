@@ -11,7 +11,7 @@ use crate::layout::{
     app_partition, Partition, DAGON, ERASE_UNIT, SLOT_A, SLOT_B, SLOT_FACTORY, WRITE_UNIT,
 };
 use crate::otadata::{selected_view, Counted, ENTRY_LEN};
-use dagon_agent::{SlotStore, StoreError};
+use dagon_agent::{SlotStore, StoreError, Transition};
 use dagon_format::header::{self, ImageHeader, HEADER_SIZE};
 use dagon_port::{Flash, Watchdog};
 use dagon_proto::payload::{target, SlotState, StatusResp};
@@ -48,7 +48,9 @@ struct Rx {
 
 pub struct EspStore<F, O, W> {
     pub flash: F,
-    pub ota: O,
+    /// The boot selection; changed only through the image machine's
+    /// transitions (the `SlotStore` mutators).
+    pub(crate) ota: O,
     pub wdt: W,
     rx: Option<Rx>,
 }
@@ -146,7 +148,7 @@ impl<F: Flash, O: Otadata, W: Watchdog> SlotStore for EspStore<F, O, W> {
         let mut trying = false;
         if let Some(v) = view {
             trying = v.slot == running && v.state == SlotState::Trying;
-            // ponytail: otadata keeps no digest, so a slot re-received after a
+            // Otadata keeps no digest, so a slot re-received after a
             // rollback still shows Reverted until its next SET_PENDING.
             if v.slot != running && present[v.slot as usize] {
                 st.slots[v.slot as usize].state = v.state;
@@ -182,7 +184,7 @@ impl<F: Flash, O: Otadata, W: Watchdog> SlotStore for EspStore<F, O, W> {
 
     /// Erases the header sector first (the slot then has no image), then
     /// the body's erase units.
-    fn erase(&mut self, t: u8, slot: u8, len: u32) -> Result<(), StoreError> {
+    fn erase(&mut self, t: u8, slot: u8, len: u32, _: &Transition) -> Result<(), StoreError> {
         let p = ota_slot(t, slot)?;
         // Never wipe what is running, whatever the caller thinks.
         if slot == self.ota.running() {
@@ -204,7 +206,14 @@ impl<F: Flash, O: Otadata, W: Watchdog> SlotStore for EspStore<F, O, W> {
         Ok(())
     }
 
-    fn write(&mut self, t: u8, slot: u8, offset: u32, data: &[u8]) -> Result<(), StoreError> {
+    fn write(
+        &mut self,
+        t: u8,
+        slot: u8,
+        offset: u32,
+        data: &[u8],
+        _: &Transition,
+    ) -> Result<(), StoreError> {
         let p = ota_slot(t, slot)?;
         let mut rx = self
             .rx
@@ -255,7 +264,12 @@ impl<F: Flash, O: Otadata, W: Watchdog> SlotStore for EspStore<F, O, W> {
         flash_err(self.flash.read(p.offset + offset, buf))
     }
 
-    fn write_header(&mut self, slot: u8, hdr: &[u8; HEADER_SIZE]) -> Result<(), StoreError> {
+    fn write_header(
+        &mut self,
+        slot: u8,
+        hdr: &[u8; HEADER_SIZE],
+        _: &Transition,
+    ) -> Result<(), StoreError> {
         ota_slot(target::APP, slot)?;
         self.rx = None;
         self.program(header_addr(slot)?, hdr)
@@ -265,12 +279,22 @@ impl<F: Flash, O: Otadata, W: Watchdog> SlotStore for EspStore<F, O, W> {
         flash_err(self.flash.read(header_addr(slot)?, out))
     }
 
-    fn set_pending(&mut self, slot: u8, _header: &[u8; HEADER_SIZE]) -> Result<(), StoreError> {
+    fn set_pending(
+        &mut self,
+        slot: u8,
+        _header: &[u8; HEADER_SIZE],
+        _: &Transition,
+    ) -> Result<(), StoreError> {
         ota_slot(target::APP, slot)?;
         self.ota.set_next(slot)
     }
 
-    fn confirm(&mut self, _slot: u8, _header: &[u8; HEADER_SIZE]) -> Result<(), StoreError> {
+    fn confirm(
+        &mut self,
+        _slot: u8,
+        _header: &[u8; HEADER_SIZE],
+        _: &Transition,
+    ) -> Result<(), StoreError> {
         self.ota.confirm()
     }
 }

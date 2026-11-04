@@ -1,7 +1,7 @@
 //! Kind S receiver: APP slots with the header inline at the slot start, boot
 //! target switches and confirms appended to the state log.
 
-use dagon_agent::{SlotStore, StoreError};
+use dagon_agent::{SlotStore, StoreError, Transition};
 use dagon_core::boot::SlotLayout;
 use dagon_core::log::{Log, LogError, LogLayout, LogState, SlotRef};
 use dagon_format::header::{header_digest16, ImageHeader, HEADER_SIZE};
@@ -158,7 +158,7 @@ impl<F: Flash> SlotStore for KindSStore<F> {
 
     /// Erases from the slot start (header included) through the erase unit
     /// holding the last body byte.
-    fn erase(&mut self, t: u8, s: u8, len: u32) -> Result<(), StoreError> {
+    fn erase(&mut self, t: u8, s: u8, len: u32, _: &Transition) -> Result<(), StoreError> {
         self.body(t, s, 0, len as usize)?;
         let base = self.base(s)?;
         let unit = self.erase_size(base)?;
@@ -171,7 +171,14 @@ impl<F: Flash> SlotStore for KindSStore<F> {
         Ok(())
     }
 
-    fn write(&mut self, t: u8, s: u8, offset: u32, data: &[u8]) -> Result<(), StoreError> {
+    fn write(
+        &mut self,
+        t: u8,
+        s: u8,
+        offset: u32,
+        data: &[u8],
+        _: &Transition,
+    ) -> Result<(), StoreError> {
         let body = self.body(t, s, offset, data.len())?;
         let mut tail = self.tail;
         if offset != tail.at + tail.len as u32 {
@@ -218,7 +225,12 @@ impl<F: Flash> SlotStore for KindSStore<F> {
         self.flash.read(body + offset, buf).map_err(flash_err)
     }
 
-    fn write_header(&mut self, s: u8, header: &[u8; HEADER_SIZE]) -> Result<(), StoreError> {
+    fn write_header(
+        &mut self,
+        s: u8,
+        header: &[u8; HEADER_SIZE],
+        _: &Transition,
+    ) -> Result<(), StoreError> {
         let base = self.base(s)?;
         self.flash.write(base, header).map_err(flash_err)
     }
@@ -228,11 +240,21 @@ impl<F: Flash> SlotStore for KindSStore<F> {
         self.flash.read(base, out).map_err(flash_err)
     }
 
-    fn set_pending(&mut self, s: u8, header: &[u8; HEADER_SIZE]) -> Result<(), StoreError> {
+    fn set_pending(
+        &mut self,
+        s: u8,
+        header: &[u8; HEADER_SIZE],
+        _: &Transition,
+    ) -> Result<(), StoreError> {
         self.append(kind::SLOT_PENDING, s, header)
     }
 
-    fn confirm(&mut self, s: u8, header: &[u8; HEADER_SIZE]) -> Result<(), StoreError> {
+    fn confirm(
+        &mut self,
+        s: u8,
+        header: &[u8; HEADER_SIZE],
+        _: &Transition,
+    ) -> Result<(), StoreError> {
         self.append(kind::CONFIRMED, s, header)
     }
 }

@@ -8,8 +8,10 @@
 //! less fails to build, a larger one keeps the rest for the app.
 
 use dagon_agent::{Agent, Config, SlotStore};
+use dagon_events::{Published, Watchdog as Periods};
 use dagon_format::header::{mcu_id, port_kind, target_tag};
-pub use dagon_mcu_common::hooks::{always, SelfCheck};
+pub use dagon_mcu_common::hooks::{always, NodeChain, SelfCheck};
+use dagon_mcu_common::hooks::{node_chain, Events};
 use dagon_proto::max_payload;
 use dagon_proto::payload::{mode, SlotState, StatusResp};
 use embassy_rp::peripherals::{FLASH, USB, WATCHDOG};
@@ -45,8 +47,8 @@ pub trait BoardDef {
     fn split(p: Peripherals) -> (DagonParts, Self::UserIo);
 }
 
-/// The agent of an RP2040 node; its hooks run the app's CONFIRM check.
-pub type AppAgent = Agent<AppStore, SelfCheck>;
+/// The agent of an RP2040 node; its chain runs the app's CONFIRM check.
+pub type AppAgent = Agent<AppStore, NodeChain>;
 
 /// The guard task [`start`] gives DAGON's serving task; the app's tasks
 /// take the others.
@@ -110,7 +112,11 @@ pub fn open<B: BoardDef, const N: usize>(
     };
     guard.install(Wdt::new(watchdog), on_trial(&store.status()));
     guard.feed();
-    Agent::new(config(tag, role), store, SelfCheck(self_check))
+    static EVENTS: StaticCell<Events> = StaticCell::new();
+    let periods = Periods::new(crate::layout::WDT_MS, crate::layout::WDT_MS);
+    let now_us: fn() -> u64 = || embassy_time::Instant::now().as_micros();
+    let chain = node_chain(EVENTS.init(Published::new()), self_check, now_us, periods);
+    Agent::new(config(tag, role), store, chain)
 }
 
 static SERIAL: StaticCell<[u8; 16]> = StaticCell::new();

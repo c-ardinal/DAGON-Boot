@@ -1,0 +1,18 @@
+# File writes and removals in dagon-cli go through genfs, which refuses a
+# path reached through a symbolic link or a junction. A module that writes
+# elsewhere says why with `#[allow(clippy::disallowed_methods)]` on its
+# declaration in main.rs.
+disallowed-methods = [
+    { path = "std::fs::write", reason = "write through genfs" },
+    { path = "std::fs::remove_file", reason = "remove through genfs" },
+    { path = "std::fs::remove_dir", reason = "remove through genfs" },
+    { path = "std::fs::remove_dir_all", reason = "remove through genfs" },
+    { path = "std::fs::rename", reason = "write through genfs" },
+    { path = "std::fs::copy", reason = "write through genfs" },
+    { path = "std::fs::hard_link", reason = "write through genfs" },
+    { path = "std::fs::File::create", reason = "write through genfs" },
+    { path = "std::fs::File::create_new", reason = "write through genfs" },
+    { path = "std::fs::File::options", reason = "write through genfs" },
+    { path = "std::fs::OpenOptions::open", reason = "write through genfs" },
+    { path = "dagon::paths::write_atomic", reason = "write through genfs" },
+]

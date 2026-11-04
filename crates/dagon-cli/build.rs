@@ -6,6 +6,8 @@
 //! sorted order, and never runs npm. Without it the table is empty and
 //! `dagon serve` falls back to a page folder on disk. `DAGON_WEB_DIST`
 //! points at another built page.
+// Writes only into OUT_DIR.
+#![allow(clippy::disallowed_methods)]
 
 use std::env;
 use std::fs;

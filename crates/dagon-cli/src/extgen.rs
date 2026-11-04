@@ -298,6 +298,10 @@ pub fn write_nodes(
     {
         let mine = cfg.nodes.get(&n.id).unwrap_or(&none);
         if let Some(link) = crate::genfs::link_in(base, &format!("nodes/{}/{GENERATED}", n.id))? {
+            // A node whose crate gen skipped is already reported.
+            if failed.contains(&n.id) {
+                continue;
+            }
             lines.push(format!(
                 "skipped    nodes/{}/{GENERATED}: {}",
                 n.id,
@@ -329,6 +333,8 @@ pub fn write_nodes(
 }
 
 #[cfg(test)]
+// Tests set up and inspect project folders directly.
+#[allow(clippy::disallowed_methods)]
 mod tests {
     use super::*;
 
@@ -512,19 +518,21 @@ text_bytes = 2048
         }
         let reg = Registry::builtin();
         let seg = [node("seg", "stm32f401re", "nucleo-f401re", "node")];
-        for failed in [&[][..], &["seg".to_string()][..]] {
-            let lines = write_nodes(reg, &base, &seg, &[], failed, &cfg(&["logger"])).unwrap();
-            assert_eq!(lines.len(), 1, "{lines:?}");
-            assert!(lines[0].contains("nodes/seg/dagon is a link"), "{lines:?}");
-            // dagon gen ends non-zero, naming the node and the reason.
-            let e = crate::scaffold::outcome(&lines).unwrap_err();
-            assert!(
-                e.contains("nodes/seg/dagon") && e.contains("is a link"),
-                "{e}"
-            );
-            assert_eq!(std::fs::read_dir(base.join("src")).unwrap().count(), 1);
-            assert!(base.join("src/user.rs").is_file());
-        }
+        let lines = write_nodes(reg, &base, &seg, &[], &[], &cfg(&["logger"])).unwrap();
+        assert_eq!(lines.len(), 1, "{lines:?}");
+        assert!(lines[0].contains("nodes/seg/dagon is a link"), "{lines:?}");
+        // dagon gen ends non-zero, naming the node and the reason.
+        let e = crate::scaffold::outcome(&lines).unwrap_err();
+        assert!(
+            e.contains("nodes/seg/dagon") && e.contains("is a link"),
+            "{e}"
+        );
+        // A node the crate step already reported skipped is not reported
+        // again, and nothing goes through the link either.
+        let again = write_nodes(reg, &base, &seg, &[], &["seg".into()], &cfg(&["logger"])).unwrap();
+        assert!(again.is_empty(), "{again:?}");
+        assert_eq!(std::fs::read_dir(base.join("src")).unwrap().count(), 1);
+        assert!(base.join("src/user.rs").is_file());
         let _ = std::fs::remove_dir_all(&base);
     }
 

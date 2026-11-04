@@ -2,8 +2,9 @@
 //! files in a work area. A path whose final part or any folder between the
 //! work area and it is a symbolic link or a junction is refused with the
 //! reason: its target is the user's, so nothing is written or removed
-//! through it. A test keeps every other write and remove out of the
-//! generators' sources.
+//! through it. Clippy's `disallowed-methods` (crates/dagon-cli/clippy.toml)
+//! refuses every other file write or removal in dagon-cli outside the
+//! modules main.rs exempts with a reason.
 
 use std::path::{Component, Path, PathBuf};
 
@@ -68,34 +69,6 @@ pub fn remove_empty_dir(base: &Path, rel: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    /// The generators' sources (tests excluded) write and remove only
-    /// through this module.
-    #[test]
-    fn generators_write_and_remove_only_through_genfs() {
-        let src = Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
-        for file in ["scaffold.rs", "extgen.rs"] {
-            let text = std::fs::read_to_string(src.join(file)).unwrap();
-            // Calls into genfs are the allowed ones.
-            let code = text
-                .split("#[cfg(test)]\nmod tests")
-                .next()
-                .unwrap()
-                .replace("genfs::", "");
-            for call in [
-                "write_atomic",
-                "fs::write",
-                "remove_file",
-                "remove_dir",
-                "fs::rename",
-                "fs::copy",
-                "File::create",
-                "OpenOptions",
-            ] {
-                assert!(!code.contains(call), "{file} calls {call} outside genfs");
-            }
-        }
-    }
 
     fn scratch(name: &str) -> PathBuf {
         let d = std::env::temp_dir().join(format!("dagon-genfs-{name}-{}", std::process::id()));

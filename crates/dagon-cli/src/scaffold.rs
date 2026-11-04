@@ -1069,4 +1069,6 @@ pub fn init_project(
 }
 
 #[cfg(test)]
+// Tests set up and inspect project folders directly.
+#[allow(clippy::disallowed_methods)]
 mod tests;

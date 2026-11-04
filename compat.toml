@@ -39,13 +39,15 @@ topology-yaml = 1   # topology source: its `dagon:` key (dagon-topology SCHEMA_V
 definitions = 1     # dagon-mcu.toml / dagon-board.toml / [board.<id>]: `format` key, left out = 1 (dagon-topology defs::FORMAT)
 serve-api = 1       # dagon serve HTTP API: GET /v1/hello `api` (dagon-cli versions::SERVE_API)
 event = 1           # lifecycle event kinds, codes, payloads and EventRecord (dagon-events EVENT_FORMAT)
+extension-manifest = 1  # dagon-extension.toml: its `format` key (dagon-extension MANIFEST_FORMAT)
+boot-program = 1    # boot action program ops in a board's [boot]: the generated BOOT_PROGRAM_FORMAT (dagon-topology defs::board_boot::BOOT_PROGRAM_FORMAT)
 
 [[component]]
 name = "cli"
 version = "0.1.0"
 packages = ["dagon-cli"]
 paths = ["crates/dagon-cli", "crates/dagon-wasm", "web"]
-formats = { wire = [1], image-header = [1], state-log = [1], manifest = [1], bundle = [1], topology-bin = [1], topology-yaml = [1], definitions = [1], serve-api = [1], event = [1] }
+formats = { wire = [1], image-header = [1], state-log = [1], manifest = [1], bundle = [1], topology-bin = [1], topology-yaml = [1], definitions = [1], serve-api = [1], event = [1], extension-manifest = [1], boot-program = [1] }
 
 [[component]]
 name = "boot-rp2040"
@@ -167,11 +169,18 @@ paths = ["crates/dagon-host"]
 formats = { wire = [1], image-header = [1], state-log = [1], bundle = [1], topology-bin = [1] }
 
 [[component]]
+name = "extension"
+version = "0.1.0"
+packages = ["dagon-extension"]
+paths = ["crates/dagon-extension"]
+formats = { extension-manifest = [1], definitions = [1], boot-program = [1] }
+
+[[component]]
 name = "topology"
 version = "0.1.0"
 packages = ["dagon-topology"]
 paths = ["crates/dagon-topology"]
-formats = { topology-bin = [1], topology-yaml = [1], definitions = [1] }
+formats = { topology-bin = [1], topology-yaml = [1], definitions = [1], boot-program = [1] }
 
 [[component]]
 name = "sign"

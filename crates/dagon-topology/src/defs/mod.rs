@@ -3,11 +3,15 @@
 //! `targets/README.md`. Kinds (port, image, placement, writer, link, ROM
 //! entry) are closed sets in code; everything else is data.
 
+pub mod board_boot;
+pub mod isolation;
 mod load;
 mod project_text;
 pub mod requirements;
 #[cfg(test)]
 mod tests;
+#[cfg(test)]
+mod tests_isolation;
 #[cfg(test)]
 mod tests_requirements;
 
@@ -18,6 +22,8 @@ use serde::Deserialize;
 
 use crate::schema::{ControlKind, LinkKind, RomEntry, UartIface};
 
+pub use board_boot::{BoardBoot, BoardBus, BoardDevice, BoardPeripheral, BoardPin};
+pub use isolation::{Core, Isolation, McuBoot, Peripheral, RecordPlacement, Watchdog};
 pub use load::{DefError, DefSource, Source};
 
 /// The `dagon-mcu.toml` / `dagon-board.toml` format number this reader
@@ -391,6 +397,22 @@ pub struct McuDef {
     pub connection: Connection,
     #[serde(default)]
     pub doctor: Vec<DoctorCheck>,
+    /// The MCU's RAM (all of it, as the address map has it).
+    pub ram: Option<Region>,
+    /// Left out: no protection hardware DAGON uses ([`McuDef::isolation`]).
+    pub isolation: Option<Isolation>,
+    /// Every register block of the MCU.
+    #[serde(default, rename = "peripheral")]
+    pub peripherals: Vec<Peripheral>,
+    /// Every processor core; DAGON runs on the first.
+    #[serde(default, rename = "core")]
+    pub cores: Vec<Core>,
+    pub watchdog: Option<Watchdog>,
+    #[serde(default)]
+    pub boot: McuBoot,
+    /// What a boot action program may use besides pins.
+    #[serde(default)]
+    pub boot_capabilities: Vec<isolation::BootCapability>,
     /// Filled on load from `partitions`.
     #[serde(skip)]
     pub partition_table: Vec<Partition>,
@@ -457,6 +479,18 @@ pub struct BoardDef {
     /// Parts built from the board package itself.
     #[serde(default, rename = "part")]
     pub parts: Vec<Part>,
+    /// The boot stage's LED, halt pattern, power hold and action program.
+    pub boot: Option<BoardBoot>,
+    /// Pins extensions and boot actions may name.
+    #[serde(default, rename = "pin")]
+    pub pins: Vec<BoardPin>,
+    #[serde(default, rename = "bus")]
+    pub buses: Vec<BoardBus>,
+    /// Board names for MCU register blocks extensions may declare.
+    #[serde(default, rename = "peripheral")]
+    pub peripherals: Vec<BoardPeripheral>,
+    #[serde(default, rename = "device")]
+    pub devices: Vec<BoardDevice>,
     /// As [`McuDef::package`] (inline project boards have none).
     #[serde(skip)]
     pub package: Option<std::path::PathBuf>,

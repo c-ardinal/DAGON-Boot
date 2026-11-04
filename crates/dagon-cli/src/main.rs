@@ -11,6 +11,7 @@ mod deploy;
 mod device;
 mod doctor;
 mod esp;
+mod extgen;
 mod flash;
 mod flashdev;
 mod nodebuild;

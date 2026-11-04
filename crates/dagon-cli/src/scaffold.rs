@@ -163,7 +163,7 @@ pub fn wiring_rs(t: &Topology, n: &Node, board: Option<&BoardFacts>) -> String {
     )
 }
 
-fn write(
+pub(crate) fn write(
     base: &Path,
     rel: &str,
     text: &str,
@@ -753,6 +753,8 @@ struct ProjectTables {
     dagon: DagonSource,
     #[serde(default)]
     board: std::collections::BTreeMap<String, BoardFacts>,
+    #[serde(default)]
+    extensions: crate::extgen::Extensions,
 }
 
 fn project_tables(config: &Path) -> Result<ProjectTables, String> {
@@ -808,6 +810,22 @@ pub fn gen_project(config: &Path, only: &[String], force: bool) -> Result<Vec<St
         .collect();
     for (id, why) in &report.skipped {
         out.push(format!("skipped    nodes/{id}: {why}"));
+    }
+    let generated: Vec<String> = t
+        .nodes
+        .iter()
+        .filter(|n| only.is_empty() || only.contains(&n.id))
+        .filter(|n| report.skipped.iter().all(|(id, _)| id != &n.id))
+        .map(|n| n.id.clone())
+        .collect();
+    if !generated.is_empty() {
+        out.extend(crate::extgen::write_nodes(
+            &reg,
+            &cfg.base,
+            &t.nodes,
+            &generated,
+            &tables.extensions,
+        )?);
     }
     for id in add_build_tables(&reg, config, &t)? {
         out.push(format!("added      [build.{id}] to dagon.toml"));

@@ -57,6 +57,13 @@ fn rp2040_matches_its_layout_and_memory_x() {
             (APP_SLOT[i] + HEADER_LEN, body_capacity(APP_SLOT_SIZE))
         );
     }
+    // The images' RAM is the RAM below the boot record (SRAM4 and SRAM5
+    // stay outside it); one watchdog period for trial and confirmed.
+    let ram = m.ram.unwrap();
+    assert_eq!(ram.at, RAM);
+    assert_eq!(m.record().unwrap().at - ram.at, RAM_LEN);
+    let w = m.watchdog.unwrap();
+    assert_eq!((w.trial_ms, w.confirmed_ms), (WDT_MS, WDT_MS));
     // The topology store lies outside every region the definition claims.
     for s in &m.slots {
         assert!(TOPOLOGY >= s.start + s.size || TOPOLOGY + TOPOLOGY_SIZE <= s.start);
@@ -86,6 +93,13 @@ fn stm32f401re_matches_its_layout_and_memory_x() {
             (SLOTS.slots[i] + HEADER_LEN, SLOTS.slot_len - HEADER_LEN)
         );
     }
+    let ram = m.ram.unwrap();
+    assert_eq!((ram.at, ram.size), (RAM, RAM_LEN));
+    let w = m.watchdog.unwrap();
+    assert_eq!(
+        (w.trial_ms, w.confirmed_ms),
+        (TRIAL_WDT_MS, CONFIRMED_WDT_MS)
+    );
     // The port's writable regions are exactly the log faces and APP slots.
     assert_eq!(FLASH_REGIONS[0].start, log.faces[0]);
     assert_eq!(FLASH_REGIONS[0].len, 2 * log.face_size);

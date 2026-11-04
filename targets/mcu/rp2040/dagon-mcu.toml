@@ -6,6 +6,9 @@ name = "RP2040"
 wire_id = 0x0001
 port = "self-boot"
 gpio_count = 30
+# SRAM0-5 (RP2040 datasheet section 2.6.2): 256 KiB striped, then the 4 KiB
+# SRAM4 and SRAM5 banks.
+ram = { at = 0x2000_0000, size = 0x4_2000 }
 
 # The first flash map is the MCU's default.
 [[flash_map]]
@@ -75,6 +78,286 @@ uart0_rx = [1, 13, 17, 29]
 [links]
 up = ["usb-cdc"]
 down = ["i2c", "uart"]
+
+[watchdog]
+kind = "rp-watchdog"
+trial_ms = 8_000
+confirmed_ms = 8_000
+
+# Protection hardware: the Cortex-M0+ ARMv6-M MPU, 8 regions of at least
+# 256 bytes (RP2040 datasheet section 2.4), read back from MPU_TYPE at boot.
+# No fault status or address registers: faults are HardFaults attributed by
+# the open call.
+[isolation]
+level = "mpu"
+kind = "armv6m-mpu"
+boot_extensions = true
+ext_ram_max = 32_768
+
+[isolation.capabilities]
+mpu_regions = 8
+min_region = 256
+subregions_from = 256
+critical_section = "primask"
+reset_cleanup = "peripheral-reset"
+background_privileged = true
+unwind = "cortex-m-exception"
+timer = "systick"
+fault_address = false
+
+# Boot record and lockup fuse: SRAM4, outside every image's RAM (the
+# memory.x fragments `dagon gen` writes end at SRAM4). The boot ROM uses
+# SRAM5 for boot2 and its stack.
+[boot.record]
+kind = "noinit-ram"
+at = 0x2004_0000
+size = 0x800
+survives = "reset-random"
+rings = [
+    { writer = "stage0", at = 0x2004_0000, size = 0x200 },
+    { writer = "bootcore", at = 0x2004_0200, size = 0x600 },
+]
+fuse = { cells = [
+    { image = "bootcore", at = 0x2004_0800, size = 0x100 },
+    { image = "app", at = 0x2004_0900, size = 0x100 },
+] }
+
+[[core]]
+id = "core0"
+
+[[core]]
+id = "core1"
+
+# Every register block (RP2040 datasheet section 2.2, address map). APB
+# blocks are 16 KiB with their atomic set/clear/xor aliases.
+[[peripheral]]
+id = "rom"
+base = 0x0000_0000
+size = 0x4000
+privileged_why = "rom"
+
+[[peripheral]]
+id = "xip-ctrl"
+base = 0x1400_0000
+size = 0x4000
+privileged_why = "flash"
+
+[[peripheral]]
+id = "xip-ssi"
+base = 0x1800_0000
+size = 0x4000
+privileged_why = "flash"
+
+[[peripheral]]
+id = "sysinfo"
+base = 0x4000_0000
+size = 0x4000
+privileged_why = "shared"
+
+[[peripheral]]
+id = "syscfg"
+base = 0x4000_4000
+size = 0x4000
+privileged_why = ["irq-routing", "core-control"]
+
+[[peripheral]]
+id = "clocks"
+base = 0x4000_8000
+size = 0x4000
+privileged_why = "clock"
+
+[[peripheral]]
+id = "resets"
+base = 0x4000_C000
+size = 0x4000
+privileged_why = "reset"
+
+[[peripheral]]
+id = "psm"
+base = 0x4001_0000
+size = 0x4000
+privileged_why = ["core-control", "reset"]
+
+[[peripheral]]
+id = "io-bank0"
+base = 0x4001_4000
+size = 0x4000
+privileged_why = ["pinmux", "irq-routing"]
+
+[[peripheral]]
+id = "io-qspi"
+base = 0x4001_8000
+size = 0x4000
+privileged_why = ["pinmux", "flash"]
+
+[[peripheral]]
+id = "pads-bank0"
+base = 0x4001_C000
+size = 0x4000
+privileged_why = "pinmux"
+
+[[peripheral]]
+id = "pads-qspi"
+base = 0x4002_0000
+size = 0x4000
+privileged_why = ["pinmux", "flash"]
+
+[[peripheral]]
+id = "xosc"
+base = 0x4002_4000
+size = 0x4000
+privileged_why = "clock"
+
+[[peripheral]]
+id = "pll-sys"
+base = 0x4002_8000
+size = 0x4000
+privileged_why = "clock"
+
+[[peripheral]]
+id = "pll-usb"
+base = 0x4002_C000
+size = 0x4000
+privileged_why = "clock"
+
+[[peripheral]]
+id = "busctrl"
+base = 0x4003_0000
+size = 0x4000
+privileged_why = "core-control"
+
+[[peripheral]]
+id = "uart0"
+base = 0x4003_4000
+size = 0x4000
+window_eligible = true
+
+[[peripheral]]
+id = "uart1"
+base = 0x4003_8000
+size = 0x4000
+window_eligible = true
+
+[[peripheral]]
+id = "spi0"
+base = 0x4003_C000
+size = 0x4000
+window_eligible = true
+
+[[peripheral]]
+id = "spi1"
+base = 0x4004_0000
+size = 0x4000
+window_eligible = true
+
+[[peripheral]]
+id = "i2c0"
+base = 0x4004_4000
+size = 0x4000
+window_eligible = true
+
+[[peripheral]]
+id = "i2c1"
+base = 0x4004_8000
+size = 0x4000
+window_eligible = true
+
+[[peripheral]]
+id = "adc"
+base = 0x4004_C000
+size = 0x4000
+window_eligible = true
+
+[[peripheral]]
+id = "pwm"
+base = 0x4005_0000
+size = 0x4000
+window_eligible = true
+
+[[peripheral]]
+id = "timer"
+base = 0x4005_4000
+size = 0x4000
+privileged_why = "shared"
+
+[[peripheral]]
+id = "watchdog"
+base = 0x4005_8000
+size = 0x4000
+privileged_why = "watchdog"
+
+[[peripheral]]
+id = "rtc"
+base = 0x4005_C000
+size = 0x4000
+privileged_why = "shared"
+
+[[peripheral]]
+id = "rosc"
+base = 0x4006_0000
+size = 0x4000
+privileged_why = "clock"
+
+[[peripheral]]
+id = "vreg-and-chip-reset"
+base = 0x4006_4000
+size = 0x4000
+privileged_why = ["power", "reset"]
+
+[[peripheral]]
+id = "tbman"
+base = 0x4006_C000
+size = 0x4000
+privileged_why = "shared"
+
+[[peripheral]]
+id = "dma"
+base = 0x5000_0000
+size = 0x4000
+bus_master = true
+privileged_why = "dma"
+
+[[peripheral]]
+id = "usbctrl-dpram"
+base = 0x5010_0000
+size = 0x1000
+privileged_why = "shared"
+
+[[peripheral]]
+id = "usbctrl-regs"
+base = 0x5011_0000
+size = 0x4000
+privileged_why = "shared"
+
+[[peripheral]]
+id = "pio0"
+base = 0x5020_0000
+size = 0x4000
+window_eligible = true
+
+[[peripheral]]
+id = "pio1"
+base = 0x5030_0000
+size = 0x4000
+window_eligible = true
+
+[[peripheral]]
+id = "xip-aux"
+base = 0x5040_0000
+size = 0x4000
+privileged_why = "flash"
+
+[[peripheral]]
+id = "sio"
+base = 0xD000_0000
+size = 0x1000
+privileged_why = ["core-control", "shared"]
+
+[[peripheral]]
+id = "ppb"
+base = 0xE000_0000
+size = 0x10_0000
+privileged_why = ["irq-routing", "core-control", "protection"]
 
 [connection]
 label = "USB（BOOT を押しながら）"

@@ -22,7 +22,7 @@ fn source_root() -> PathBuf {
 #[test]
 fn mcus_match_the_port_registry() {
     let ids: Vec<&str> = reg().mcus().iter().map(|m| m.id.as_str()).collect();
-    assert_eq!(ids, ["rp2040", "stm32f401re", "esp32s3"]);
+    assert_eq!(ids, ["esp32s3", "rp2040", "stm32f401re"]);
     for (id, port, gpio_count) in [
         ("rp2040", "self-boot", 30),
         ("stm32f401re", "self-boot", 0),
@@ -49,9 +49,9 @@ fn flash_maps_match_the_table() {
         })
         .collect();
     let table = [
+        ("esp32s3-16m", "esp32s3", 16 << 20),
         ("rp2040-4m", "rp2040", 4 << 20),
         ("f401-default", "stm32f401re", 512 << 10),
-        ("esp32s3-16m", "esp32s3", 16 << 20),
     ];
     assert_eq!(all, table);
     for (name, mcu, bytes) in table {
@@ -175,7 +175,10 @@ const FORMER_BOARDS: [Former; 3] = [
 #[test]
 fn boards_match_the_table_field_for_field() {
     let ids: Vec<&str> = reg().boards().iter().map(|b| b.id.as_str()).collect();
-    assert_eq!(ids, FORMER_BOARDS.iter().map(|b| b.id).collect::<Vec<_>>());
+    // Builtin definitions load in folder-name order.
+    let mut former: Vec<&str> = FORMER_BOARDS.iter().map(|b| b.id).collect();
+    former.sort();
+    assert_eq!(ids, former);
     for t in &FORMER_BOARDS {
         let b = reg().board(t.id).unwrap();
         let m = reg().mcu(&b.mcu).unwrap();

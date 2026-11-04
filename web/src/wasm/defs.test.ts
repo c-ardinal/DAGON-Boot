@@ -27,7 +27,8 @@ describe('definitions from dagon serve', () => {
 
   test('none (no serve, an older serve) is the builtin set', () => {
     expect(useDefinitions(null)).toBe('builtin');
-    expect(supportedBoards().map((b) => b.id)).toEqual(['waveshare-rp2040-touch-lcd-1.28', 'nucleo-f401re', 'm5stopwatch']);
+    // The builtin set is every package folder of the tree, in folder-name order.
+    expect(supportedBoards().map((b) => b.id)).toEqual(['m5stopwatch', 'nucleo-f401re', 'waveshare-rp2040-touch-lcd-1.28']);
     expect(mcuConnection('rp2040')).not.toBeNull();
   });
 
@@ -55,11 +56,11 @@ describe('definitions from dagon serve', () => {
     const ids = () => supportedBoards().map((b) => b.id);
     expect(useDefinitions(served)).toBe('loaded');
     expect(useDefinitions(null)).toBe('builtin');
-    expect(ids()).toEqual(['waveshare-rp2040-touch-lcd-1.28', 'nucleo-f401re', 'm5stopwatch']);
+    expect(ids()).toEqual(['m5stopwatch', 'nucleo-f401re', 'waveshare-rp2040-touch-lcd-1.28']);
     expect(useDefinitions(served)).toBe('loaded');
     expect(useDefinitions('{"mcus": []}')).toBe('blocked');
     expect(ids()).toEqual([]);
     expect(useDefinitions(null)).toBe('builtin');
-    expect(ids()).toEqual(['waveshare-rp2040-touch-lcd-1.28', 'nucleo-f401re', 'm5stopwatch']);
+    expect(ids()).toEqual(['m5stopwatch', 'nucleo-f401re', 'waveshare-rp2040-touch-lcd-1.28']);
   });
 });

@@ -369,15 +369,15 @@ fn json_report_shape() {
 }
 
 #[test]
-fn board_table_starts_with_demo_boards() {
+fn builtin_boards_load_in_folder_order() {
     let reg = Registry::builtin();
     let ids: Vec<_> = reg.boards().iter().map(|b| b.id.as_str()).collect();
     assert_eq!(
         ids,
         [
-            "waveshare-rp2040-touch-lcd-1.28",
+            "m5stopwatch",
             "nucleo-f401re",
-            "m5stopwatch"
+            "waveshare-rp2040-touch-lcd-1.28"
         ]
     );
     let f401 = reg.board("nucleo-f401re").unwrap();

@@ -199,18 +199,12 @@ export const UNSUPPORTED = {
   button: 'この URL をコピー',
 } as const;
 
-/** Canvas: layers, empty receptacles, dot numbers. */
+/** Canvas: uplink cards, the empty canvas, dot numbers. */
 export const CANVAS = {
-  layerL0: 'L0 つなぐ先',
-  layerL1: 'L1 親機',
-  layerL2: 'L2 子機',
-  /** L0 of the 親機 this page is connected to now. */
+  /** Uplink card of the 親機 this page is connected to now. */
   pc: 'このパソコン（ブラウザ）',
-  /** L0 by each 親機's uplink host as the 構成 writes it (none written: dagon on a PC). */
+  /** Uplink card by each 親機's uplink host as the 構成 writes it (none written: dagon on a PC). */
   pcBy: { 'pc-cli': 'パソコン（dagon）', browser: 'ブラウザ（パソコン・スマホ）', embedded: '自作の機器' } as Record<string, string>,
-  /** S01 */
-  hubSlot: '親機を置く場所',
-  nodeSlot: '子機を置く場所',
   /** C02 */
   empty: '親機を USB でパソコンにつないでから、『つないで、自動で見つける』を押してください。',
   /** S17: canvas description for screen readers. */
@@ -233,6 +227,9 @@ export const CANVAS = {
 export const NODE = {
   roleHub: '親機',
   roleNode: '子機',
+  /** A node under a 子機 (TOPO2), and the rows below that. */
+  roleGrandchild: '孫機',
+  roleDeeper: (d: number) => `孫機の下（${d} 段目）`,
   mcu: 'MCU',
   /** The hub's own connection line: its uplink kind and what drives it (案 beyond USB（パソコン）). */
   usb: 'USB（パソコン）',

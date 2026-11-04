@@ -29,7 +29,8 @@
   import type { Live } from '../app/operate.svelte.ts';
   import type { Config, Link, Node } from '../app/sample.ts';
   import { versionText } from '../wasm/dagon.ts';
-  import { lengthTable, neighbour, pathD, pointAt, shifted, tAtLength, tangentAt, tieLengths, verticalLink, wireOffsets, type Pt } from './geometry.ts';
+  import { lengthTable, neighbour, pathD, pointAt, shifted, tAtLength, tangentAt, tieLengths, verticalLink, wireOffsets } from './geometry.ts';
+  import { treeLayout } from './layout.ts';
 
   interface Props {
     config: Config | null;
@@ -50,59 +51,54 @@
 
   let { config, live, connected, sending, selected, onselect, dot, chips = {}, zoom = 1, fill = {} }: Props = $props();
 
-  const NODE_W = 240;
-  const MIN_W = 600;
-  const PC = { y: 24, w: 240, h: 44 };
-  const L1_TOP = 96;
-  const NODE_TOP_GAP = 16;
-  const LINK_ROOM = 96;
-  const L2_GAP = 64;
-  const BOTTOM = 24;
-  const ARC_SAG = 8;
-  const EMPTY_H = 208;
+  /**
+   * Sizes in rem (DES-UX3-181): the root font follows the window, so cards,
+   * gaps and text grow together. `rem` is the root font in px, read again on resize.
+   */
+  let rem = $state(16);
+  const readRem = () => {
+    rem = parseFloat(getComputedStyle(document.documentElement).fontSize) || 16;
+  };
+  $effect(readRem);
+  const NODE_W = $derived(15 * rem);
+  const PC = $derived({ y: 1.5 * rem, w: 15 * rem, h: 2.75 * rem });
+  /** Top of the 親機 row: under each 親機's uplink card and its line. */
+  const TOP = $derived(PC.y + PC.h + 3 * rem);
+  const LINK_ROOM = $derived(6 * rem);
+  const GAP = $derived(3 * rem);
+  const SIDE = $derived(1.5 * rem);
+  const BOTTOM = $derived(1.5 * rem);
 
   // Content box, so a scrollbar appearing narrows the canvas instead of adding a sideways scroll.
   let box = $state<DOMRectReadOnly>();
   const boxW = $derived(box?.width ?? 800);
   const boxH = $derived(box?.height ?? 800);
   let heights = $state<Record<string, number>>({});
+  /** Height of the focal number in the bottom-left: the graph keeps that much room below itself. */
+  let dotH = $state(0);
   let focusKey = $state('node:hub');
   let canvas: HTMLDivElement;
 
-  const W = $derived(Math.max(MIN_W, boxW));
-  const hubY = L1_TOP + NODE_TOP_GAP;
-  /** Row of a node: 0 the 親機 (L1), 1 its 子機, 2 and on deeper (L2 and below). */
-  const depthOf = (n: Node) => n.depth ?? (n.role === 'hub' ? 0 : 1);
-  const rows = $derived.by(() => {
-    const out: Node[][] = [[], []];
-    for (const n of config?.nodes ?? []) (out[depthOf(n)] ??= []).push(n);
-    return out.map((r) => r ?? []);
-  });
-  const children = $derived(rows[1]);
-  const rowCount = (d: number) => (config ? rows[d]?.length ?? 0 : d === 0 ? 1 : 2);
-  const rowH = (d: number) => (config ? Math.max(0, ...(rows[d] ?? []).map((n) => heights[n.id] ?? (d === 0 ? 200 : 240))) : EMPTY_H);
-  const hubH = $derived(config ? Math.max(200, rowH(0)) : EMPTY_H);
-  const L2_TOP = $derived(hubY + hubH + LINK_ROOM);
-  const childY = $derived(L2_TOP + 64);
-  const childH = $derived(rowH(1));
-  /** Top of row `d` (rows 2 and on stack below the 子機, a link's room apart). */
-  const rowY = (d: number) => (d === 0 ? hubY : childY + (d - 1) * (childH + LINK_ROOM));
-  const H = $derived(Math.max(boxH, rowY(Math.max(1, rows.length - 1)) + rowH(Math.max(1, rows.length - 1)) + BOTTOM));
-  const hubX = $derived(rowX(0, 0));
-
-  function rowX(d: number, i: number): number {
-    const count = rowCount(d);
-    const total = count * NODE_W + (count - 1) * L2_GAP;
-    return W / 2 - total / 2 + i * (NODE_W + L2_GAP);
-  }
-
-  function childX(i: number): number {
-    return rowX(1, i);
-  }
-
-  const pos = $derived(
-    Object.fromEntries((config?.nodes ?? []).map((n) => [n.id, { x: rowX(depthOf(n), rows[depthOf(n)].indexOf(n)), y: rowY(depthOf(n)) }])),
+  const tree = $derived(
+    treeLayout(
+      (config?.nodes ?? []).map((n) => ({ id: n.id, hub: n.role === 'hub' })),
+      config?.links ?? [],
+      { w: NODE_W, h: (id) => heights[id] ?? 12 * rem, gapX: GAP, gapY: LINK_ROOM },
+    ),
   );
+  /** Smallest scale the whole 構成 is fitted at; past it the canvas scrolls (names stay readable). */
+  const MIN_FIT = 0.6;
+  const contentW = $derived(tree.width + 2 * SIDE);
+  const bare = $derived(TOP + tree.height + BOTTOM);
+  /** The whole 構成 in view when it opens (DES-UX3-160), with room under it for the focal number. */
+  const fit = $derived(Math.max(MIN_FIT, Math.min(1, boxW / contentW, (boxH - dotH) / bare)));
+  const scale = $derived(zoom * fit);
+  const W = $derived(Math.max(boxW / scale, contentW));
+  /** Trees centred when they fit; from the left edge when they scroll. */
+  const left = $derived((W - tree.width) / 2);
+  const H = $derived(Math.max(boxH / scale, bare + dotH / scale));
+  const pos = $derived(Object.fromEntries(Object.entries(tree.at).map(([id, p]) => [id, { x: left + p.x, y: TOP + p.y }])));
+  const depthOf = (n: Node) => tree.at[n.id]?.depth ?? 0;
 
   const nameOf = (id: string) => config?.nodes.find((n) => n.id === id)?.name ?? id;
 
@@ -113,7 +109,7 @@
       const from = pos[l.from];
       const to = pos[l.to];
       const slot = (i + 1) / (all.length + 1);
-      const base = verticalLink({ x: from.x + NODE_W * slot, y: from.y + (heights[l.from] ?? 200) }, { x: to.x + NODE_W / 2, y: to.y });
+      const base = verticalLink({ x: from.x + NODE_W * slot, y: from.y + (heights[l.from] ?? 12 * rem) }, { x: to.x + NODE_W / 2, y: to.y });
       const table = lengthTable(base);
       const total = table[table.length - 1];
       const gap = open ? 8 : 4;
@@ -164,10 +160,6 @@
   /** Four sine periods across twice the node's width: sliding it by half loops without a seam. */
   const WAVE = 'M0 7Q25 0 50 7T100 7T150 7T200 7T250 7T300 7T350 7T400 7V14H0Z';
 
-  function layerPath(top: number, bottom: number): string {
-    return `M0 ${top}Q${W / 2} ${top + 2 * ARC_SAG} ${W} ${top}V${bottom}H0Z`;
-  }
-
   type Mark = Chip | 'skeleton' | null;
 
   function markOf(n: Node): Mark {
@@ -202,10 +194,28 @@
     return NODE.uplinkVia(KIND_LABEL[n.uplink.kind as LinkKind] ?? n.uplink.kind, n.uplink.host);
   }
 
-  /** 親機 nobody links to, each with its L0 (what drives it) above it. */
-  const tops = $derived((config?.nodes ?? []).filter((n) => n.role === 'hub' && depthOf(n) === 0));
-  /** The 親機 this page is connected to: the first one the 構成 names (the one updating reaches). */
-  const firstHub = $derived(config?.nodes.find((n) => n.role === 'hub')?.id);
+  /** 親機 nobody links to, each with its uplink (what drives it, as the 構成 writes it) above it. */
+  const tops = $derived((config?.nodes ?? []).filter((n) => n.role === 'hub' && tree.roots.includes(n.id)));
+  /** The 親機 this page connects to: the one updating reaches (the cut's), else the first one the 構成 names. */
+  const firstHub = $derived(
+    config?.nodes.find((n) => n.role === 'hub' && config.reach.includes(n.id))?.id ?? config?.nodes.find((n) => n.role === 'hub')?.id,
+  );
+
+  /** The role on the card (DES-UX3-180): 親機, 子機, 孫機, and below that its row. */
+  function roleOf(n: Node): string {
+    if (n.role === 'hub') return NODE.roleHub;
+    const d = belowHub(n.id);
+    return d <= 1 ? NODE.roleNode : d === 2 ? NODE.roleGrandchild : NODE.roleDeeper(d);
+  }
+
+  /** Links from the nearest 親機 above node `id` (1 for a 子機; a node no 親機 reaches counts as a 子機). */
+  function belowHub(id: string, seen = new Set<string>()): number {
+    const up = config?.links.find((l) => l.to === id)?.from;
+    const p = config?.nodes.find((x) => x.id === up);
+    if (!p || p.role === 'hub' || seen.has(id)) return 1;
+    seen.add(id);
+    return belowHub(p.id, seen) + 1;
+  }
 
   function l0Of(n: Node): string {
     if (connected && n.id === firstHub) return CANVAS.pc;
@@ -217,7 +227,7 @@
       name: n.name,
       product: n.product,
       mcu: n.mcu,
-      role: n.role === 'hub' ? NODE.roleHub : NODE.roleNode,
+      role: roleOf(n),
       via: n.role === 'hub' ? hubVia(n) : NODE.viaName(n.via),
       state: m && m !== 'skeleton' ? m.spoken : '',
       version,
@@ -225,30 +235,26 @@
   }
 </script>
 
+<svelte:window onresize={readRem} />
+
+<div class="graph">
 <div class="box" bind:contentRect={box}>
   <!-- svelte-ignore a11y_no_static_element_interactions -->
-  <div class="canvas" bind:this={canvas} style:width="{W}px" style:height="{H}px" style:zoom={zoom === 1 ? undefined : zoom} onkeydown={onKey}>
+  <div class="canvas" bind:this={canvas} style:width="{W}px" style:height="{H}px" style:zoom={scale === 1 ? undefined : scale} onkeydown={onKey}>
     <svg class="links" width={W} height={H} viewBox="0 0 {W} {H}" aria-hidden="true">
-      <path d="M0 0H{W}V{H}H0Z" fill="var(--c-layer-0)" />
-      <path d={layerPath(L1_TOP, H)} fill="var(--c-layer-1)" />
-      <path d={layerPath(L2_TOP, H)} fill="var(--c-layer-2)" />
-
-      {#if config}
-        {#each tops as h (h.id)}
-          {@const x = pos[h.id].x + NODE_W / 2}
-          <line x1={x} y1={PC.y + PC.h} x2={x} y2={hubY} class="pc-link" class:dashed={!connected || h.id !== firstHub} class:ink={sending && h.id === firstHub} />
-          <circle cx={x} cy={PC.y + PC.h} r="5" class="port" />
-          <circle cx={x} cy={hubY} r="5" class="port" />
-        {/each}
-      {:else}
-        <circle cx={W / 2} cy={PC.y + PC.h} r="5" class="port" />
-      {/if}
+      {#each tops as h (h.id)}
+        {@const x = pos[h.id].x + NODE_W / 2}
+        <line x1={x} y1={PC.y + PC.h} x2={x} y2={pos[h.id].y} class="pc-link" class:dashed={!connected || h.id !== firstHub} class:ink={sending && h.id === firstHub} />
+        <circle cx={x} cy={PC.y + PC.h} r="5" class="port" />
+        <circle cx={x} cy={pos[h.id].y} r="5" class="port" />
+      {/each}
 
       {#each drawn as d (d.key)}
         <g class="bundle" class:open={d.open}>
           {#each d.l.wires as w, i (w.signal)}
             <path d={pathD(shifted(d.base, d.offsets[i]))} class="wire" class:shared={w.shared} />
           {/each}
+          {#if d.l.wires.length === 0}<path d={pathD(d.base)} class="wire" />{/if}
           {#each d.ties as tie, i (i)}
             <rect class="tie" x={-tie.len / 2} y={-3} width={tie.len} height={6} rx="3" transform="translate({tie.p.x} {tie.p.y}) rotate({tie.deg})" />
           {/each}
@@ -260,34 +266,12 @@
       {/each}
     </svg>
 
-    <span class="layer-label" style:top="16px">{CANVAS.layerL0}</span>
-    <span class="layer-label" style:top="{L1_TOP + 16}px">{CANVAS.layerL1}</span>
-    <span class="layer-label" style:top="{L2_TOP + 16}px">{CANVAS.layerL2}</span>
-
-    {#if dot}
-      <div class="dot" style:top="{L1_TOP + 48}px" role="img" aria-label={dot.name}>
-        <span class="dot-label">{dot.label}</span>
-        <span class="dot-num">{dot.value}</span>{#if dot.of !== undefined}<span class="dot-of">/{dot.of}</span>{/if}{#if dot.unit}<span class="dot-of">{dot.unit}</span>{/if}
-        {#if dot.sub}<span class="dot-sub"
-            ><span class="dot-label">{dot.sub[0]}</span> {dot.sub[1]}{#each dot.more ?? [] as [label, value] (label)}&emsp;<span class="dot-label">{label}</span> {value}{/each}</span
-          >{/if}
-      </div>
-    {/if}
-
-    {#if config}
-      {#each tops as h (h.id)}
-        <div class="pc" style:left="{pos[h.id].x + NODE_W / 2 - PC.w / 2}px" style:top="{PC.y}px">{l0Of(h)}</div>
-      {/each}
-    {:else}
-      <div class="pc" style:left="{W / 2 - PC.w / 2}px" style:top="{PC.y}px">{CANVAS.pc}</div>
-    {/if}
+    {#each tops as h (h.id)}
+      <div class="pc" style:left="{pos[h.id].x + NODE_W / 2 - PC.w / 2}px" style:top="{PC.y}px">{l0Of(h)}</div>
+    {/each}
 
     {#if !config}
-      <div class="receptacle" style:left="{hubX}px" style:top="{hubY}px" style:height="{EMPTY_H}px">{CANVAS.hubSlot}</div>
-      {#each [0, 1] as i (i)}
-        <div class="receptacle" style:left="{childX(i)}px" style:top="{childY}px" style:height="{EMPTY_H}px">{CANVAS.nodeSlot}</div>
-      {/each}
-      <p class="empty" style:top="{L1_TOP + 96}px" style:width="{hubX - 48}px">{CANVAS.empty}</p>
+      <p class="empty" style:top="{TOP}px">{CANVAS.empty}</p>
     {/if}
 
     {#each config?.nodes ?? [] as n (n.id)}
@@ -316,7 +300,7 @@
           </span>
         {/if}
         <span class="node-band">
-          <span>[{n.no}] {n.name}</span>
+          <span>[{n.no}] {n.name} <span class="role">{roleOf(n)}</span></span>
           {#if v}<span class="version" translate="no">{v}</span>{:else if m === 'skeleton'}<span class="skeleton version-sk"></span>{/if}
         </span>
         <span class="node-body">
@@ -356,8 +340,25 @@
     {/each}
   </div>
 </div>
+  {#if dot}
+    <!-- The focal number (DES-UX3-187): bottom-left, just above what is under the canvas; it never scrolls away. -->
+    <div class="dot" role="img" aria-label={dot.name} bind:offsetHeight={dotH}>
+      <span class="dot-label">{dot.label}</span>
+      <span class="dot-num">{dot.value}</span>{#if dot.of !== undefined}<span class="dot-of">/{dot.of}</span>{/if}{#if dot.unit}<span class="dot-of">{dot.unit}</span>{/if}
+      {#if dot.sub}<span class="dot-sub"
+          ><span class="dot-label">{dot.sub[0]}</span> {dot.sub[1]}{#each dot.more ?? [] as [label, value] (label)}&emsp;<span class="dot-label">{label}</span> {value}{/each}</span
+        >{/if}
+    </div>
+  {/if}
+</div>
 
 <style>
+  .graph {
+    position: relative;
+    display: grid;
+    min-width: 0;
+    min-height: 0;
+  }
   .box {
     position: relative;
     min-width: 0;
@@ -380,7 +381,7 @@
     stroke-dasharray: 4 3;
   }
   .pc-link.ink {
-    stroke: var(--c-signal);
+    stroke: var(--c-accent);
   }
   .wire {
     fill: none;
@@ -405,16 +406,12 @@
     stroke: var(--c-line);
     stroke-width: 2;
   }
-  .layer-label {
-    position: absolute;
-    left: var(--s-5);
-    font: 500 var(--t-caption-size) / var(--t-caption-lh) var(--f-ja);
-    letter-spacing: 0.04em;
-    color: var(--c-muted);
-  }
   .dot {
     position: absolute;
     left: var(--s-5);
+    bottom: var(--s-4);
+    z-index: var(--z-chip);
+    pointer-events: none;
     display: grid;
     grid-template-columns: auto auto;
     align-items: baseline;
@@ -451,19 +448,10 @@
     background: var(--c-ink);
     font: 400 var(--t-small-size) / 1 var(--f-ja);
   }
-  .receptacle {
-    position: absolute;
-    width: var(--w-node);
-    display: grid;
-    place-items: center;
-    border: 2px dashed var(--c-line);
-    border-radius: var(--r-l);
-    color: var(--c-muted);
-    font: 400 var(--t-small-size) / var(--t-small-lh) var(--f-ja);
-  }
   .empty {
     position: absolute;
-    left: var(--s-5);
+    left: 50%;
+    transform: translateX(-50%);
     max-width: 40em;
     margin: 0;
     font: 400 var(--t-body-size) / var(--t-body-lh) var(--f-ja);
@@ -507,9 +495,8 @@
     position: relative;
   }
   /*
-   * Water fill (SC-O5): one layer moved with transform only. Ink-red tints of
-   * the one signal colour keep paper text near 12:1 and the muted labels above 4.5:1 (§9.1 never puts paper
-   * on full signal red). The level follows each progress value in 250 ms
+   * Water fill (SC-O5): one layer moved with transform only. Ink tints of the
+   * blue accent (red is for failures only, Q14) keep paper text at AA (9.6:1 on the water). The level follows each progress value in 250 ms
    * linear (§10 Interpolation); the waves drift on the compositor.
    */
   .water {
@@ -518,8 +505,8 @@
     overflow: hidden;
     border-radius: inherit;
     pointer-events: none;
-    --wave-front: color-mix(in srgb, var(--c-signal) 30%, var(--c-ink));
-    --wave-back: color-mix(in srgb, var(--c-signal) 18%, var(--c-ink));
+    --wave-front: color-mix(in srgb, var(--c-accent) 32%, var(--c-ink));
+    --wave-back: color-mix(in srgb, var(--c-accent) 18%, var(--c-ink));
   }
   .surface {
     position: absolute;
@@ -575,6 +562,11 @@
     padding: 0 var(--s-3);
     border-bottom: 1px solid var(--c-line);
     font: 700 var(--t-small-size) / 1 var(--f-ja);
+  }
+  .role {
+    margin-left: var(--s-1);
+    color: var(--c-muted);
+    font-weight: 400;
   }
   .version {
     font: 400 var(--t-version-small-size) / 1 var(--f-version);

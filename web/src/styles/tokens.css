@@ -10,7 +10,10 @@
   --c-paper: #f1efe8;
   --c-muted: #9a9892;
   --c-line: #7a7873;
+  /* red: failures and danger only (Q14) */
   --c-signal: #ff4b3a;
+  /* blue (water): the next step, progress, information (Q14) */
+  --c-accent: #3cb4f0;
   --c-hover: #141413;
   --c-scrim: rgb(10 10 10 / 0.8);
 
@@ -22,7 +25,7 @@
   --f-mono: 'JetBrains Mono', Consolas, 'Courier New', monospace;
 
   /* type steps: size / line-height (rem, 1rem = 16px) */
-  --t-display-size: 10rem; /* 160 */
+  --t-display-size: 7rem; /* 112, the focal number (DES-UX3-150) */
   --t-display-lh: 1;
   --t-version-size: 2.75rem; /* 44 */
   --t-version-lh: 1.1;
@@ -94,7 +97,7 @@
 
 @media (max-width: 1279px) {
   :root {
-    --t-display-size: 6rem;
+    --t-display-size: 5rem;
   }
 }
 

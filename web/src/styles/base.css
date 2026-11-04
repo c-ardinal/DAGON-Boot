@@ -46,6 +46,8 @@ html {
   background: var(--c-ink);
   color: var(--c-paper);
   font: 400 var(--t-body-size) / var(--t-body-lh) var(--f-ja);
+  /* DES-UX3-181: the root follows the window's width and height; every size is in rem. 16 px at 1440×900. */
+  font-size: clamp(14px, calc(6.64px + 0.4vw + 0.4vh), 22px);
   font-variant-numeric: tabular-nums;
 }
 

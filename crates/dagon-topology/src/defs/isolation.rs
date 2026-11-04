@@ -940,6 +940,9 @@ pub(super) fn peripherals(m: &McuDef) -> Result<(), String> {
         {
             return Err(format!("{at} overlaps peripheral '{}'", o.id));
         }
+        // Flash shares the register blocks' address space only where
+        // images run from it in place; elsewhere its addresses are offsets.
+        let xip = m.flash_is_cpu_mapped();
         let memories = m
             .ram
             .map(|r| ("ram", (r.at, r.size)))
@@ -947,9 +950,15 @@ pub(super) fn peripherals(m: &McuDef) -> Result<(), String> {
             .chain(
                 m.flash_maps
                     .iter()
+                    .filter(|_| xip)
                     .map(|f| ("a flash map", (f.base, f.bytes))),
             )
-            .chain(m.slots.iter().map(|s| ("an image slot", (s.start, s.size))));
+            .chain(
+                m.slots
+                    .iter()
+                    .filter(|_| xip)
+                    .map(|s| ("an image slot", (s.start, s.size))),
+            );
         for (what, range) in memories {
             fail(overlaps((p.base, p.size), range), || {
                 format!("{at} overlaps {what}: register blocks and memory never share addresses")

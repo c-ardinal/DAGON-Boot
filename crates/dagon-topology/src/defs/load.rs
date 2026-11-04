@@ -713,6 +713,24 @@ fn validate(reg: &Registry) -> Result<(), DefError> {
         };
         super::requirements::check_board(b, m).or_else(|e| err(&at, e))?;
     }
+    for m in &reg.mcus {
+        let at = format!("MCU '{}'", m.id);
+        let defaults: Vec<&str> = reg
+            .boards
+            .iter()
+            .filter(|b| b.mcu == m.id && b.default)
+            .map(|b| b.id.as_str())
+            .collect();
+        if defaults.len() > 1 {
+            return err(
+                at,
+                format!(
+                    "boards {} are all marked default = true: at most one is the default",
+                    defaults.join(", ")
+                ),
+            );
+        }
+    }
     Ok(())
 }
 

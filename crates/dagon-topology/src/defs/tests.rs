@@ -1141,3 +1141,77 @@ fn the_json_form_carries_no_path_comment_or_command() {
     assert!(labels.contains(&"project board fake-board"), "{labels:?}");
     std::fs::remove_dir_all(dir).unwrap();
 }
+
+/// `targets/` of this tree copied under `to` (no build output).
+fn copy_targets(to: &Path) {
+    fn copy(from: &Path, to: &Path) {
+        std::fs::create_dir_all(to).unwrap();
+        for e in std::fs::read_dir(from).unwrap().flatten() {
+            let name = e.file_name();
+            if name == "target" || name == "node_modules" {
+                continue;
+            }
+            if e.path().is_dir() {
+                copy(&e.path(), &to.join(&name));
+            } else {
+                std::fs::copy(e.path(), to.join(&name)).unwrap();
+            }
+        }
+    }
+    for dir in ["mcu", "boards"] {
+        copy(
+            &source_root().join("targets").join(dir),
+            &to.join("targets").join(dir),
+        );
+    }
+}
+
+#[test]
+fn a_board_added_in_an_earlier_folder_changes_no_default_and_no_check() {
+    let root = scratch("new-board");
+    copy_targets(&root);
+    // A second STM32F401 board whose folder sorts before every other.
+    let nucleo = include_str!("../../../../targets/boards/nucleo-f401re/dagon-board.toml")
+        .replace("id = \"nucleo-f401re\"", "id = \"zz-new\"")
+        .replace("default = true\n", "");
+    write(&root.join("targets/boards/a-new/dagon-board.toml"), &nucleo);
+    let tree = Registry::load(&[Source::Tree(&root)]).unwrap();
+    assert_eq!(tree.boards()[0].id, "zz-new");
+    for m in reg().mcus() {
+        assert_eq!(
+            tree.default_board(&m.id).map(|b| &b.id),
+            reg().default_board(&m.id).map(|b| &b.id),
+            "{}",
+            m.id
+        );
+    }
+    // Nodes that name only their MCU are checked exactly as before.
+    let desk: String = include_str!("../../../../topology/desk-demo.yaml")
+        .lines()
+        .filter(|l| !l.trim_start().starts_with("board:"))
+        .map(|l| format!("{l}\n"))
+        .collect();
+    assert_eq!(
+        crate::check_str_with(&tree, &desk).to_json(),
+        crate::check_str(&desk).to_json()
+    );
+    // Two defaults do not load.
+    let marked = nucleo.replace(
+        "drawing = \"nucleo-64\"\n",
+        "drawing = \"nucleo-64\"\ndefault = true\n",
+    );
+    write(&root.join("targets/boards/a-new/dagon-board.toml"), &marked);
+    let e = Registry::load(&[Source::Tree(&root)]).unwrap_err();
+    assert!(e.msg.contains("at most one is the default"), "{e}");
+    let plain = include_str!("../../../../targets/boards/nucleo-f401re/dagon-board.toml")
+        .replace("default = true\n", "");
+    write(
+        &root.join("targets/boards/nucleo-f401re/dagon-board.toml"),
+        &plain,
+    );
+    write(&root.join("targets/boards/a-new/dagon-board.toml"), &nucleo);
+    // Several boards and none marked: no default, never the first folder.
+    let none = Registry::load(&[Source::Tree(&root)]).unwrap();
+    assert!(none.default_board("stm32f401re").is_none());
+    let _ = std::fs::remove_dir_all(&root);
+}

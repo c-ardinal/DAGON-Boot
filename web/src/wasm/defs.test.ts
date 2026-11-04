@@ -1,4 +1,4 @@
-import { readFileSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { describe, expect, test } from 'vitest';
 import { mcuConnection, supportedBoards, useDefinitions } from './dagon.ts';
 
@@ -6,10 +6,12 @@ const text = (rel: string) => new TextDecoder().decode(readFileSync(new URL(`../
 const mcu = (id: string, files: [string, string][] = []) => ({ label: id, toml: text(`targets/mcu/${id}/dagon-mcu.toml`), files });
 const board = (id: string) => ({ label: id, toml: text(`targets/boards/${id}/dagon-board.toml`) });
 
-/** The builtin set: every board package of the tree, in folder-name order (so it holds the fixtures below). */
+/** The builtin set: the id of every board package of the tree (as a set; order carries no meaning). */
 const expectBuiltin = (ids: string[]) => {
-  expect(ids).toEqual([...ids].sort());
-  for (const id of ['waveshare-rp2040-touch-lcd-1.28', 'nucleo-f401re', 'm5stopwatch']) expect(ids).toContain(id);
+  const want = readdirSync(new URL('../../../targets/boards/', import.meta.url), { withFileTypes: true })
+    .filter((d) => d.isDirectory() && existsSync(new URL(`../../../targets/boards/${d.name}/dagon-board.toml`, import.meta.url)))
+    .map((d) => /^id = "([^"]+)"/m.exec(text(`targets/boards/${d.name}/dagon-board.toml`))?.[1] ?? d.name);
+  expect([...ids].sort()).toEqual(want.sort());
 };
 
 /** What GET /v1/definitions sends for the builtin set plus a project's own board. */

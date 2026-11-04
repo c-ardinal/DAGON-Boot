@@ -24,6 +24,9 @@ use dagon_topology::schema::{Node, Role};
 use serde::Deserialize;
 
 use crate::paths::contained;
+
+/// The folder of a node holding only what `dagon gen` writes here.
+const GENERATED: &str = "dagon";
 use crate::scaffold::{write, Written};
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize)]
@@ -193,7 +196,7 @@ fn plan_files(
         chain(found, &mine.app, &mine.trusted)?,
         known,
     )?);
-    let dir = format!("nodes/{}/dagon", n.id);
+    let dir = format!("nodes/{}/{GENERATED}", n.id);
     let mut files = Vec::new();
     let mut notes = Vec::new();
     for p in &plans {
@@ -219,23 +222,21 @@ fn plan_files(
     Ok((files, notes))
 }
 
-/// Removes the files an earlier gen wrote for node `id`, so a refused set
-/// never leaves a build reading the previous set's map; returns the lines
-/// reporting each removal.
-fn remove_stale(base: &Path, id: &str) -> Result<Vec<String>, String> {
-    let rel = format!("nodes/{id}/dagon");
+/// Removes every file in node `id`'s generated folder that this run did
+/// not write (`keep`, project-relative paths), so no build reads a map,
+/// fragment or wiring an earlier run left; returns the lines reporting
+/// each removal. Nothing outside `nodes/<id>/dagon/` is touched.
+fn prune(base: &Path, id: &str, keep: &[String]) -> Result<Vec<String>, String> {
+    let rel = format!("nodes/{id}/{GENERATED}");
     let dir = contained(base, Path::new(&rel))?;
     let Ok(entries) = std::fs::read_dir(&dir) else {
         return Ok(Vec::new());
     };
     let mut names: Vec<String> = entries
         .flatten()
+        .filter(|e| e.path().is_file())
         .map(|e| e.file_name().to_string_lossy().to_string())
-        .filter(|n| {
-            n == "boot_wiring.rs"
-                || n == "protection.toml"
-                || (n.starts_with("memory-") && n.ends_with(".x"))
-        })
+        .filter(|n| !keep.contains(&format!("{rel}/{n}")))
         .collect();
     names.sort();
     let mut out = Vec::new();
@@ -247,13 +248,16 @@ fn remove_stale(base: &Path, id: &str) -> Result<Vec<String>, String> {
 }
 
 /// Writes the extension files of the nodes `only` names (all when
-/// empty); returns gen's report lines (written, skipped with the refusal,
+/// empty) and removes whatever else their generated folders hold; nodes
+/// in `failed` (their crates were not generated) keep no generated files.
+/// Returns gen's report lines (written, skipped with the refusal, removed,
 /// notes).
 pub fn write_nodes(
     reg: &Registry,
     base: &Path,
     nodes: &[Node],
     only: &[String],
+    failed: &[String],
     cfg: &Extensions,
 ) -> Result<Vec<String>, String> {
     if let Some(id) = cfg
@@ -274,24 +278,25 @@ pub fn write_nodes(
         .filter(|n| only.is_empty() || only.contains(&n.id))
     {
         let mine = cfg.nodes.get(&n.id).unwrap_or(&none);
-        match plan_files(reg, n, mine, &found, &known) {
-            Ok((files, notes)) => {
-                let mut written: Vec<Written> = Vec::new();
-                for (rel, text) in files {
-                    write(base, &rel, &text, true, &mut written)?;
+        let mut written: Vec<Written> = Vec::new();
+        if !failed.contains(&n.id) {
+            match plan_files(reg, n, mine, &found, &known) {
+                Ok((files, notes)) => {
+                    for (rel, text) in files {
+                        write(base, &rel, &text, true, &mut written)?;
+                    }
+                    lines.extend(
+                        written
+                            .iter()
+                            .map(|w| format!("{:<10} {}", w.action, w.path)),
+                    );
+                    lines.extend(notes);
                 }
-                lines.extend(
-                    written
-                        .iter()
-                        .map(|w| format!("{:<10} {}", w.action, w.path)),
-                );
-                lines.extend(notes);
-            }
-            Err(why) => {
-                lines.push(format!("skipped    nodes/{}/dagon: {why}", n.id));
-                lines.extend(remove_stale(base, &n.id)?);
+                Err(why) => lines.push(format!("skipped    nodes/{}/{GENERATED}: {why}", n.id)),
             }
         }
+        let keep: Vec<String> = written.into_iter().map(|w| w.path).collect();
+        lines.extend(prune(base, &n.id, &keep)?);
     }
     Ok(lines)
 }
@@ -365,7 +370,7 @@ text_bytes = 2048
             ),
             node("watch", "esp32s3", "m5stopwatch", "node"),
         ];
-        let lines = write_nodes(reg, &base, &nodes, &[], &cfg(&["logger"])).unwrap();
+        let lines = write_nodes(reg, &base, &nodes, &[], &[], &cfg(&["logger"])).unwrap();
         let has = |p: &str| lines.iter().any(|l| l.ends_with(p));
         for p in [
             "nodes/seg/dagon/boot_wiring.rs",
@@ -391,8 +396,37 @@ text_bytes = 2048
         assert!(wiring.contains("(\"logger\", &["));
         let x = std::fs::read_to_string(base.join("nodes/seg/dagon/memory-boot-a.x")).unwrap();
         assert!(x.contains("EXT0_TEXT"), "{x}");
+        // A file of an earlier run this run does not write (a slot the MCU
+        // no longer has) is removed; the rest stay as written.
+        std::fs::write(base.join("nodes/seg/dagon/memory-app-c.x"), "stale").unwrap();
+        let again =
+            write_nodes(reg, &base, &nodes, &["seg".into()], &[], &cfg(&["logger"])).unwrap();
+        assert!(
+            again.contains(&"removed    nodes/seg/dagon/memory-app-c.x".to_string()),
+            "{again:?}"
+        );
+        assert!(!base.join("nodes/seg/dagon/memory-app-c.x").exists());
+        // A node whose crate gen skipped keeps no generated file.
+        let gone = write_nodes(
+            reg,
+            &base,
+            &nodes,
+            &["hub".into()],
+            &["hub".into()],
+            &cfg(&[]),
+        )
+        .unwrap();
+        assert!(
+            gone.iter()
+                .all(|l| l.starts_with("removed    nodes/hub/dagon/")),
+            "{gone:?}"
+        );
+        assert!(gone.iter().any(|l| l.ends_with("boot_wiring.rs")));
+        assert!(!base.join("nodes/hub/dagon/protection.toml").exists());
+        assert!(base.join("nodes/seg/dagon/protection.toml").exists());
         // Unchanged on a second run.
-        let again = write_nodes(reg, &base, &nodes, &["seg".into()], &cfg(&["logger"])).unwrap();
+        let again =
+            write_nodes(reg, &base, &nodes, &["seg".into()], &[], &cfg(&["logger"])).unwrap();
         assert!(
             again.iter().all(|l| l.starts_with("unchanged")),
             "{again:?}"
@@ -405,10 +439,10 @@ text_bytes = 2048
         let base = scratch("refused");
         let reg = Registry::builtin();
         let seg = [node("seg", "stm32f401re", "nucleo-f401re", "node")];
-        write_nodes(reg, &base, &seg, &[], &cfg(&["logger"])).unwrap();
+        write_nodes(reg, &base, &seg, &[], &[], &cfg(&["logger"])).unwrap();
         assert!(base.join("nodes/seg/dagon/boot_wiring.rs").is_file());
         // A refused set removes what the previous gen wrote for the node.
-        let lines = write_nodes(reg, &base, &seg, &[], &cfg(&["nope"])).unwrap();
+        let lines = write_nodes(reg, &base, &seg, &[], &[], &cfg(&["nope"])).unwrap();
         assert_eq!(
             lines[0],
             "skipped    nodes/seg/dagon: extension nope is in no folder of [extensions] packages"
@@ -423,12 +457,12 @@ text_bytes = 2048
         assert!(!base.join("nodes/seg/dagon/boot_wiring.rs").exists());
         assert!(!base.join("nodes/seg/dagon/protection.toml").exists());
         let watch = [node("seg", "esp32s3", "m5stopwatch", "node")];
-        let lines = write_nodes(reg, &base, &watch, &[], &cfg(&["logger"])).unwrap();
+        let lines = write_nodes(reg, &base, &watch, &[], &[], &cfg(&["logger"])).unwrap();
         assert!(
             lines[0].contains("esp32s3 has no DAGON boot stage"),
             "{lines:?}"
         );
-        let e = write_nodes(reg, &base, &[], &[], &cfg(&[])).unwrap_err();
+        let e = write_nodes(reg, &base, &[], &[], &[], &cfg(&[])).unwrap_err();
         assert!(e.contains("[extensions.nodes.seg]"), "{e}");
         let _ = std::fs::remove_dir_all(&base);
     }

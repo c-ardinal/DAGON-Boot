@@ -8,8 +8,9 @@ validates them into a `Registry`:
 
 - `Registry::builtin()`: every `targets/mcu/*/dagon-mcu.toml` and
   `targets/boards/*/dagon-board.toml` of this tree, found by folder and
-  embedded at build time in folder-name order (no filesystem; the browser
-  build uses this). Adding a package folder adds its definition.
+  embedded at build time (no filesystem; the browser build uses this).
+  Adding a package folder adds its definition; the order of folders carries
+  no meaning.
 - `Registry::load(&[Source::Tree(root), Source::Project(dagon_toml)])`: a
   DAGON source tree's definitions replace the builtin set; a project adds its
   own. A project definition may not reuse an existing MCU or board id.
@@ -87,7 +88,8 @@ definition that leaves a class out is refused with the class named.
 | Key | Meaning |
 |---|---|
 | `format` | As in `dagon-mcu.toml` |
-| `id` | Board id used in `nodes[].board`; the first board of an MCU is its default |
+| `id` | Board id used in `nodes[].board` |
+| `default` | `true`: the board a node naming only its MCU is checked against. At most one board of an MCU says so; an MCU's only board is its default without it; an MCU with several boards and none marked has no default (its nodes are checked without board facts). Definition order never decides it |
 | `product`, `mcu`, `flash_bytes`, `drawing` | Product name, MCU id (must be defined), flash size (must hold one of the MCU's flash maps), UI drawing |
 | `i2c_target` | Whether the board can be an I2C target |
 | `header` | `[{ pin, label }]`; `label` left out until confirmed on the board |

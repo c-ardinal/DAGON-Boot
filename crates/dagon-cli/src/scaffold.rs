@@ -811,22 +811,17 @@ pub fn gen_project(config: &Path, only: &[String], force: bool) -> Result<Vec<St
     for (id, why) in &report.skipped {
         out.push(format!("skipped    nodes/{id}: {why}"));
     }
-    let generated: Vec<String> = t
-        .nodes
-        .iter()
-        .filter(|n| only.is_empty() || only.contains(&n.id))
-        .filter(|n| report.skipped.iter().all(|(id, _)| id != &n.id))
-        .map(|n| n.id.clone())
-        .collect();
-    if !generated.is_empty() {
-        out.extend(crate::extgen::write_nodes(
-            &reg,
-            &cfg.base,
-            &t.nodes,
-            &generated,
-            &tables.extensions,
-        )?);
-    }
+    // Every selected node's generated folder holds exactly this run's
+    // files; a node whose crate was skipped keeps none.
+    let failed: Vec<String> = report.skipped.iter().map(|(id, _)| id.clone()).collect();
+    out.extend(crate::extgen::write_nodes(
+        &reg,
+        &cfg.base,
+        &t.nodes,
+        only,
+        &failed,
+        &tables.extensions,
+    )?);
     for id in add_build_tables(&reg, config, &t)? {
         out.push(format!("added      [build.{id}] to dagon.toml"));
     }

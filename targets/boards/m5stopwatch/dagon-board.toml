@@ -7,6 +7,8 @@ flash_bytes = 0x100_0000
 # esp-hal has no I2C target mode for the ESP32-S3.
 i2c_target = false
 drawing = "stopwatch"
+# The board a node naming only its MCU is checked against.
+default = true
 
 header = [
     { pin = "GPIO43", label = "G43" },

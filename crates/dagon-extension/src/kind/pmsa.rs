@@ -418,7 +418,9 @@ fn check_region(def: &McuDef, prm: &Params, e: &ExtMap, r: &Region, out: &mut Ve
             }
             // A window never reaches memory: RAM, flash, the image slots,
             // the boot record or the fuse cells.
-            let flash = def.flash_maps.iter().map(|f| {
+            // Flash and slots are CPU addresses only where images run in place.
+            let xip = def.flash_is_cpu_mapped();
+            let flash = def.flash_maps.iter().filter(|_| xip).map(|f| {
                 (
                     "flash",
                     (u64::from(f.base), u64::from(f.base) + u64::from(f.bytes)),
@@ -428,7 +430,7 @@ fn check_region(def: &McuDef, prm: &Params, e: &ExtMap, r: &Region, out: &mut Ve
                 .map(|m| ("RAM", m))
                 .into_iter()
                 .chain(flash)
-                .chain(bodies.iter().map(|b| ("an image slot", *b)));
+                .chain(bodies.iter().filter(|_| xip).map(|b| ("an image slot", *b)));
             for (what, m) in mems {
                 if ranges.iter().any(|&x| overlaps(x, m)) {
                     v(format!("window reaches {what}"));

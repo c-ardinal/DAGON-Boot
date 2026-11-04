@@ -369,13 +369,24 @@ fn json_report_shape() {
 }
 
 #[test]
-fn builtin_boards_load_in_folder_order() {
+fn builtin_boards_are_the_board_packages() {
     let reg = Registry::builtin();
-    let ids: Vec<_> = reg.boards().iter().map(|b| b.id.as_str()).collect();
-    let mut sorted = ids.clone();
-    sorted.sort();
-    assert_eq!(ids, sorted);
-    assert!(ids.contains(&"nucleo-f401re"));
+    let mut ids: Vec<String> = reg.boards().iter().map(|b| b.id.clone()).collect();
+    ids.sort();
+    // Each package folder's definition id (the set; order carries no meaning).
+    let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../targets/boards");
+    let mut want: Vec<String> = std::fs::read_dir(dir)
+        .unwrap()
+        .flatten()
+        .map(|e| e.path().join("dagon-board.toml"))
+        .filter(|p| p.is_file())
+        .map(|p| {
+            let t: toml::Table = std::fs::read_to_string(p).unwrap().parse().unwrap();
+            t["id"].as_str().unwrap().to_string()
+        })
+        .collect();
+    want.sort();
+    assert_eq!(ids, want);
     let f401 = reg.board("nucleo-f401re").unwrap();
     for pin in ["NRST", "BOOT0"] {
         let h = f401.header.iter().find(|h| h.pin == pin).unwrap();

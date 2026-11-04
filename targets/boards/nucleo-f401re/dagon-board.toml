@@ -6,6 +6,8 @@ mcu = "stm32f401re"
 flash_bytes = 0x8_0000
 i2c_target = true
 drawing = "nucleo-64"
+# The board a node naming only its MCU is checked against.
+default = true
 
 header = [
     { pin = "PB4", label = "D5" },

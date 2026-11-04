@@ -430,6 +430,14 @@ impl McuDef {
     pub fn default_flash_map(&self) -> &FlashMapDef {
         &self.flash_maps[0]
     }
+
+    /// Whether images run from flash at the flash maps' addresses
+    /// (self-boot, execute in place). Otherwise flash map and slot
+    /// addresses are flash offsets the MMU maps elsewhere, and share no
+    /// address space with RAM or register blocks.
+    pub fn flash_is_cpu_mapped(&self) -> bool {
+        self.port == PortKind::SelfBoot
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
@@ -467,6 +475,11 @@ pub struct BoardDef {
     pub i2c_target: bool,
     /// Which line drawing the UI uses.
     pub drawing: String,
+    /// The board a node naming only its MCU is checked against. At most
+    /// one board of an MCU says so; an MCU's only board is its default
+    /// without it.
+    #[serde(default)]
+    pub default: bool,
     #[serde(default)]
     pub header: Vec<HeaderPin>,
     /// I2C pin pairs usable from the header.
@@ -536,8 +549,8 @@ impl Origin {
 }
 
 /// Every MCU and board known: builtin, a DAGON source tree, project
-/// definitions. Order is definition order; the first board of an MCU is
-/// its default.
+/// definitions, in definition order, which carries no meaning: an MCU's
+/// default board is data ([`Registry::default_board`]).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Registry {
     mcus: Vec<McuDef>,
@@ -605,9 +618,17 @@ impl Registry {
         self.boards.iter().find(|b| b.id == id)
     }
 
-    /// First board defined for an MCU.
+    /// The board a node naming only `mcu` is checked against: its board
+    /// marked `default = true`, else its only board; none when it has
+    /// several and none is marked (load refuses two marked). Definition
+    /// order never decides it.
     pub fn default_board(&self, mcu: &str) -> Option<&BoardDef> {
-        self.boards.iter().find(|b| b.mcu == mcu)
+        let mut boards = self.boards.iter().filter(|b| b.mcu == mcu);
+        let first = boards.next()?;
+        match boards.next() {
+            None => Some(first),
+            Some(_) => self.boards.iter().find(|b| b.mcu == mcu && b.default),
+        }
     }
 
     /// Flash map by name, with its MCU.

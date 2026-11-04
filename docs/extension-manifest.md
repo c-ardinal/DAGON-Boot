@@ -73,5 +73,9 @@ cached); code, data and stacks are normal memory.
 | `memory-<image>-<slot>.x` | MCUs that define their RAM: the image's FLASH and RAM after the extension regions, each extension's regions and sections, the boot record and fuse cells |
 | `protection.toml` | Every image's extensions, memory and protection map, readable |
 
+`nodes/<id>/dagon/` holds only what the last `dagon gen` wrote: every
+other file in it is removed, and a node gen refused or could not generate
+keeps none.
+
 At level `none` no map is made and `dagon gen` notes that the node's
 extensions run unguarded.

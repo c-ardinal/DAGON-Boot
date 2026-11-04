@@ -394,3 +394,20 @@ fn kind_names_round_trip_through_the_definition_format() {
         assert_eq!(r.kind.as_str(), r.name);
     }
 }
+
+#[test]
+fn flash_offsets_of_an_mmu_mapped_mcu_share_no_space_with_register_blocks() {
+    // The same blocks at addresses that are flash offsets of the fake
+    // MCU's flash map: refused where images run from flash in place,
+    // accepted where flash is MMU-mapped (its addresses are offsets).
+    let low = isolated("base = 0x4000_4800", "base = 0x0010_0000");
+    assert!(mcu_err(&low).contains("overlaps a flash map"));
+    let mapped = low
+        .replace("port = \"self-boot\"", "port = \"vendor-stage2\"")
+        .replace("[boot.record]", "[unused]")
+        .replace("boot_extensions = true", "boot_extensions = false");
+    let mapped = mapped[..mapped.find("[unused]").unwrap()].to_string()
+        + &mapped[mapped.find("[[core]]").unwrap()..];
+    let m = parse_mcu_text(&mapped, &[]).unwrap();
+    assert!(!m.flash_is_cpu_mapped());
+}

@@ -2,7 +2,10 @@
 //! package's public `start` (the I2C target link to the 親機, update
 //! receiver, trial and confirm), and the app shows its own version on the
 //! X-NUCLEO-53L0A1's 4-digit 7-segment display (`110` for 1.1.0: the
-//! shield has no points), stacked on the board's Arduino I2C. Built for
+//! shield has no points), stacked on the board's Arduino I2C. While DAGON
+//! updates the node, the display follows the node's published events (the
+//! `AppEvents` the start returns): the pattern of each update phase
+//! (`f401_app::update`), then the version again. Built for
 //! slot A or B (`slot-b`); the boot core picks which one runs.
 //!
 //! Tasks: DAGON's link runs on its own high-priority executor (`start`);
@@ -21,22 +24,27 @@
 #![no_main]
 
 use board::{Board, BoardDef};
+use dagon_agent::snapshot::AppSnapshot;
 use dagon_board_nucleo_f401re as board;
 use dagon_mcu_stm32f401re::links::Kind;
-use dagon_mcu_stm32f401re::node::{self, App, Confirm};
+use dagon_mcu_stm32f401re::node::{self, App, AppEvents, Confirm};
 use dagon_mcu_stm32f401re::watchdog::{now_ms, Guard, Lease, Trial};
 use defmt::{error, info, Display2Format};
 use defmt_rtt as _;
 use embassy_executor::Spawner;
 use embassy_stm32::gpio::{Level, Output, Speed};
-use embassy_time::{Duration, Timer};
-use f401_app::seg;
+use embassy_time::{with_timeout, Duration, Instant, Timer};
+use f401_app::{seg, update};
 use panic_probe as _;
 
 mod display;
 
 /// How long "TEST KEY" (`tESt`) shows before the version.
 const TEST_KEY_SPLASH: Duration = Duration::from_millis(1500);
+/// How often the update pattern is redrawn without a new event: the
+/// trial blink and the results' hold time step at this rate.
+/// Demo readability value, pending owner confirmation.
+const TICK: Duration = Duration::from_millis(250);
 
 /// Watchdog guard tasks: DAGON's link, then the display.
 const DISPLAY_TASK: usize = node::APP_TASKS;
@@ -71,19 +79,20 @@ async fn main(spawner: Spawner) {
         confirm: CONFIRM,
         ..App::new(self_check)
     };
-    let (first, then) = match board::start(spawner, dagon, &GUARD, tag, app, Kind::I2c) {
-        Ok(_) if dagon_mcu_stm32f401re::TEST_KEY => {
+    let (first, then, events) = match board::start(spawner, dagon, &GUARD, tag, app, Kind::I2c) {
+        Ok(events) if dagon_mcu_stm32f401re::TEST_KEY => {
             info!("TEST KEY: built with the public test verifying key");
-            (seg::TEST_KEY, seg::version(version))
+            (seg::TEST_KEY, seg::version(version), Some(events))
         }
-        Ok(_) => (seg::version(version), seg::version(version)),
+        Ok(events) => (seg::version(version), seg::version(version), Some(events)),
         // DAGON does not serve: the display shows dashes.
         Err(e) => {
             error!("state log unreadable: {}", defmt::Debug2Format(&e));
-            (seg::DASHES, seg::DASHES)
+            (seg::DASHES, seg::DASHES, None)
         }
     };
-    spawner.spawn(display(io.arduino_i2c, first, then, GUARD.lease(DISPLAY_TASK)).unwrap());
+    let lease = GUARD.lease(DISPLAY_TASK);
+    spawner.spawn(display(io.arduino_i2c, first, then, events, lease).unwrap());
     spawner.spawn(heartbeat(led).unwrap());
 }
 
@@ -97,12 +106,14 @@ async fn heartbeat(mut led: Output<'static>) -> ! {
 }
 
 /// Shows `first`, then `then` after the splash time (sensors kept in
-/// XSHUT).
+/// XSHUT); then, with DAGON's `events`, each update phase's pattern
+/// instead of `then` while it lasts.
 #[embassy_executor::task]
 async fn display(
     bus: board::ArduinoI2c,
     first: [u8; seg::DIGITS],
     then: [u8; seg::DIGITS],
+    events: Option<AppEvents>,
     lease: Lease,
 ) {
     let mut display = display::SegDisplay::open(bus);
@@ -110,6 +121,27 @@ async fn display(
     if then != first {
         Timer::after(TEST_KEY_SPLASH).await;
         show(&mut display, then, &lease).await;
+    }
+    let Some(mut rx) = events.and_then(|e| e.receiver()) else {
+        return;
+    };
+    let (mut shown, mut since) = (then, Instant::now());
+    let mut state: Option<AppSnapshot> = None;
+    loop {
+        if let Ok(latest) = with_timeout(TICK, rx.changed()).await {
+            let s = latest.state;
+            if state.map(|old| old.phase) != Some(s.phase) {
+                since = Instant::now();
+            }
+            state = Some(s);
+        }
+        let codes = state
+            .and_then(|s| update::pattern(s.phase, s.progress, since.elapsed().as_millis() as u32))
+            .unwrap_or(then);
+        if codes != shown {
+            show(&mut display, codes, &lease).await;
+            shown = codes;
+        }
     }
 }
 

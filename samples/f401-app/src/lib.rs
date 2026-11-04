@@ -6,3 +6,4 @@
 
 pub mod seg;
 pub mod shield;
+pub mod update;

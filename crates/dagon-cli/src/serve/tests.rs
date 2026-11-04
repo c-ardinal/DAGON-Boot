@@ -1796,3 +1796,160 @@ fn a_demo_does_not_link_or_unlink() {
     assert_eq!(http(&d, "POST", "/v1/agent/link", &ok, yes).0, 403);
     assert_eq!(http(&d, "DELETE", "/v1/agent/link", &ok, b"").0, 403);
 }
+
+/// A linked server whose agent is `fake` (no network).
+fn linked_with(name: &str, fake: Arc<super::jobs::AgentApi>) -> (Area, PathBuf) {
+    let (a, home) = with_home(name);
+    let yes = serde_json::json!({ "provider": "anthropic", "consent": true });
+    assert_eq!(post(&a, "/v1/agent/link", yes).0, 200);
+    let _ = a.server.agent_api.set(fake);
+    (a, home)
+}
+
+fn said(answer: &str, topology: Option<&str>) -> serde_json::Value {
+    serde_json::json!({
+        "content": [{ "type": "tool_use", "id": "t", "name": "answer",
+                      "input": { "answer": answer, "topology": topology } }],
+        "stop_reason": "tool_use",
+    })
+}
+
+#[test]
+fn dagon_answers_with_the_projects_facts_and_a_checked_proposal() {
+    let sent = Arc::new(std::sync::Mutex::new(Vec::new()));
+    let log = sent.clone();
+    let better = YAML.replace("max_attempts: 3", "max_attempts: 2");
+    let reply = better.clone();
+    let fake: Arc<super::jobs::AgentApi> = Arc::new(move |b: &serde_json::Value| {
+        log.lock().unwrap().push(b.to_string());
+        Ok(said("試す回数を 2 回に減らす案です。", Some(&reply)))
+    });
+    let (a, home) = linked_with("agent-ask", fake);
+    let q = serde_json::json!({
+        "question": "変更を提案", "kind": "propose", "selection": { "node": "seg" },
+        "history": [{ "role": "user", "text": "次は？" }, { "role": "dagon", "text": "ビルドします。" }],
+    });
+    let (st, body) = post(&a, "/v1/agent/ask", q);
+    assert_eq!(st, 200, "{body}");
+    let v: serde_json::Value = serde_json::from_str(&body).unwrap();
+    assert_eq!(v["answer"], "試す回数を 2 回に減らす案です。");
+    assert_eq!(v["proposal"]["topology"], better.as_str());
+    assert!(v["proposal"]["yaml_diff"]
+        .as_str()
+        .unwrap()
+        .contains("-    max_attempts: 3\n+    max_attempts: 2"));
+    let sent = sent.lock().unwrap().join("\n");
+    assert!(sent.contains("i2c-main") && sent.contains("ビルドします。") && sent.contains("seg"));
+    let shown = home.to_string_lossy().replace('\\', "/");
+    for never in [
+        shown.as_str(),
+        &a.dir.to_string_lossy(),
+        "Users",
+        "# work area",
+    ] {
+        assert!(
+            !sent.replace("\\\\", "/").contains(never),
+            "{never} reached the agent"
+        );
+    }
+    // Bad questions are refused before the agent is called.
+    let (st, _) = post(&a, "/v1/agent/ask", serde_json::json!({ "question": "" }));
+    assert_eq!(st, 400);
+    let (st, _) = post(
+        &a,
+        "/v1/agent/ask",
+        serde_json::json!({ "question": "x", "kind": "other" }),
+    );
+    assert_eq!(st, 400);
+}
+
+#[test]
+fn questions_wait_for_linking_and_go_one_at_a_time() {
+    let (a, _) = with_home("ask-unlinked");
+    let (st, body) = post(&a, "/v1/agent/ask", serde_json::json!({ "question": "x" }));
+    assert!(st == 409 && body.contains("AGENT_NOT_LINKED"), "{body}");
+    let b = auth(&a);
+    assert_eq!(http(&a, "POST", "/v1/agent/ask", &[], b"{}").0, 401);
+    let cross = [
+        ("Origin", "https://example.com"),
+        ("Authorization", b.as_str()),
+    ];
+    assert_eq!(http(&a, "POST", "/v1/agent/ask", &cross, b"{}").0, 403);
+
+    let (go, wait) = std::sync::mpsc::channel::<()>();
+    let wait = std::sync::Mutex::new(wait);
+    let (entered, inside) = std::sync::mpsc::channel::<()>();
+    let entered = std::sync::Mutex::new(entered);
+    let fake: Arc<super::jobs::AgentApi> = Arc::new(move |_: &serde_json::Value| {
+        let _ = entered.lock().unwrap().send(());
+        let _ = wait.lock().unwrap().recv();
+        Ok(said("はい。", None))
+    });
+    let (a, _) = linked_with("ask-busy", fake);
+    let a = Arc::new(a);
+    let first = {
+        let a = a.clone();
+        std::thread::spawn(move || {
+            post(&a, "/v1/agent/ask", serde_json::json!({ "question": "1" }))
+        })
+    };
+    inside.recv().unwrap();
+    let (st, body) = post(&a, "/v1/agent/ask", serde_json::json!({ "question": "2" }));
+    assert!(st == 429 && body.contains("AGENT_BUSY"), "{body}");
+    go.send(()).unwrap();
+    assert_eq!(first.join().unwrap().0, 200);
+    // The turn is free again.
+    go.send(()).unwrap();
+    assert_eq!(
+        post(&a, "/v1/agent/ask", serde_json::json!({ "question": "3" })).0,
+        200
+    );
+}
+
+#[test]
+fn an_agent_that_times_out_or_fails_gives_a_page_safe_error() {
+    let fake: Arc<super::jobs::AgentApi> =
+        Arc::new(|_: &serde_json::Value| Err(crate::ai::TIMED_OUT.to_string()));
+    let (a, _) = linked_with("ask-timeout", fake);
+    let (st, body) = post(&a, "/v1/agent/ask", serde_json::json!({ "question": "x" }));
+    assert!(st == 504 && body.contains("AGENT_TIMEOUT"), "{body}");
+
+    let fake: Arc<super::jobs::AgentApi> =
+        Arc::new(|_: &serde_json::Value| Ok(serde_json::json!({ "content": [] })));
+    let (a, _) = linked_with("ask-odd", fake);
+    let (st, body) = post(&a, "/v1/agent/ask", serde_json::json!({ "question": "x" }));
+    assert!(st == 502 && body.contains("AGENT_FAILED"), "{body}");
+}
+
+#[test]
+fn without_a_key_a_question_is_refused_before_any_call() {
+    // With a key set this would reach the real agent: not here.
+    if std::env::var_os(crate::ai::KEY_ENV).is_some() {
+        return;
+    }
+    let (a, _) = with_home("ask-nokey");
+    let yes = serde_json::json!({ "provider": "anthropic", "consent": true });
+    assert_eq!(post(&a, "/v1/agent/link", yes).0, 200);
+    let (st, body) = post(&a, "/v1/agent/ask", serde_json::json!({ "question": "x" }));
+    assert!(st == 409 && body.contains("AGENT_NO_KEY"), "{body}");
+}
+
+#[test]
+fn a_demo_never_calls_an_agent() {
+    let d = demo_area("demo-ask");
+    let b = auth(&d);
+    let ok = [("Authorization", b.as_str())];
+    for path in ["/v1/agent/ask", "/v1/ai/topology", "/v1/ai/port"] {
+        let (st, _) = http(
+            &d,
+            "POST",
+            path,
+            &ok,
+            br#"{"question":"x","description":"x"}"#,
+        );
+        assert_eq!(st, 403, "{path}");
+    }
+    assert_eq!(http(&d, "GET", "/v1/agent", &ok, b"").0, 200);
+    let (_, hello) = http(&d, "GET", "/v1/hello", &ok, b"");
+    assert!(!hello.contains("ai_topology"), "{hello}");
+}

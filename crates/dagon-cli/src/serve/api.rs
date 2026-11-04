@@ -165,16 +165,14 @@ pub fn handle(server: &Arc<Server>, req: &Request) -> Response {
         );
     }
     if parts.first() == Some(&"ai") && !agent_linked(server) {
-        return Response::json(
-            409,
-            &json!({ "error": crate::agent::NOT_LINKED, "code": crate::agent::NOT_LINKED_CODE }),
-        );
+        return not_linked();
     }
     let r = match (req.method.as_str(), parts.as_slice()) {
         ("GET", ["hello"]) => Ok(hello(server)),
         ("GET", ["agent"]) => Ok(agent_get(server)),
         ("POST", ["agent", "link"]) => agent_link(server, req),
         ("DELETE", ["agent", "link"]) => agent_unlink(server),
+        ("POST", ["agent", "ask"]) => agent_ask(server, req),
         ("GET", ["targets"]) => targets(server),
         ("GET", ["definitions"]) => definitions(server),
         ("GET", ["topology"]) => topology_get(server),
@@ -214,8 +212,11 @@ pub fn handle(server: &Arc<Server>, req: &Request) -> Response {
 
 /// What dagon demo refuses: other projects (opening one would load its
 /// signing key) and everything that touches real hardware or the machine.
-const DEMO_REFUSED: [&str; 9] = [
+/// Never a real agent in a demo either: linking, questions, AI routes.
+const DEMO_REFUSED: [&str; 11] = [
     "agent/link",
+    "agent/ask",
+    "ai",
     "project/open",
     "project/new",
     "project/init",
@@ -234,7 +235,7 @@ fn demo_refuses(parts: &[&str]) -> bool {
 }
 
 /// Features dagon demo leaves out of hello (the page hides them).
-const DEMO_HIDDEN: [&str; 4] = ["project", "flash", "doctor", "conform"];
+const DEMO_HIDDEN: [&str; 5] = ["project", "flash", "doctor", "conform", "ai_topology"];
 
 /// The simulated medium a 構成's 親機 uplink names (None: not one the
 /// demo simulates, or no 親機).
@@ -363,6 +364,57 @@ fn start(server: &Arc<Server>, req: &Request, kind: &str, work: Work) -> Res {
     }) {
         Some(id) => Ok(accepted(id)),
         None => Err(Response::error(429, "too many jobs running")),
+    }
+}
+
+/// An error the page tells apart by `code`.
+fn coded(status: u16, msg: &str, code: &str) -> Response {
+    Response::json(status, &json!({ "error": msg, "code": code }))
+}
+
+fn not_linked() -> Response {
+    coded(409, crate::agent::NOT_LINKED, crate::agent::NOT_LINKED_CODE)
+}
+
+/// The agent a question goes to: the stand-in when set, else the Messages
+/// API with this CLI's key (409 AGENT_NO_KEY without one).
+fn agent_api(server: &Server) -> Result<Box<crate::ai::Api<'static>>, Response> {
+    if let Some(f) = server.agent_api.get() {
+        let f = Arc::clone(f);
+        return Ok(Box::new(move |b: &Value| f(b)));
+    }
+    let key = crate::ai::api_key(std::env::var(crate::ai::KEY_ENV))
+        .map_err(|e| coded(409, &e, "AGENT_NO_KEY"))?;
+    Ok(Box::new(move |b: &Value| {
+        crate::ai::post_messages_within(crate::ai::API_URL, &key, b, crate::ask::ASK_TIMEOUT)
+    }))
+}
+
+/// POST /v1/agent/ask: one question to DAGON, answered in this request.
+fn agent_ask(server: &Server, req: &Request) -> Res {
+    if !agent_linked(server) {
+        return Err(not_linked());
+    }
+    let q = crate::ask::parse(&body_json(req)?).map_err(|e| Response::error(400, &e))?;
+    let _turn = server
+        .ask_turn()
+        .ok_or_else(|| coded(429, "DAGON is answering another question", "AGENT_BUSY"))?;
+    let mut api = agent_api(server)?;
+    let reg = registry_of(server).map_err(|e| Response::error(500, &e))?;
+    let yaml = topology_path(server)
+        .ok()
+        .and_then(|p| std::fs::read_to_string(p).ok());
+    let facts = crate::ask::Facts {
+        reg: &reg,
+        topology: yaml.as_deref(),
+        jobs: server.recent_outcomes(crate::ask::MAX_JOBS),
+    };
+    let model =
+        std::env::var(crate::ai::MODEL_ENV).unwrap_or_else(|_| crate::ai::DEFAULT_MODEL.into());
+    match crate::ask::ask(&q, &facts, &model, &mut *api) {
+        Ok(r) => Ok(json_ok(r.to_json())),
+        Err(e) if e == crate::ai::TIMED_OUT => Err(coded(504, &e, "AGENT_TIMEOUT")),
+        Err(e) => Err(coded(502, &e, "AGENT_FAILED")),
     }
 }
 

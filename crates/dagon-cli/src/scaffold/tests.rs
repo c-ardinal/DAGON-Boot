@@ -556,14 +556,34 @@ fn topology_names_and_tags_cannot_break_out_of_generated_code() {
 /// against this DAGON clone's board support packages (real firmware
 /// builds: run with --ignored).
 fn new_gen_build(node: &str) {
-    let d = tmp(&format!("e2e-{node}"));
+    new_gen_build_from(SAMPLE, node, &format!("e2e-{node}"));
+}
+
+/// As [`new_gen_build`] for the sample with no board named: the node is
+/// generated from its MCU package's template.
+fn new_gen_build_by_mcu(node: &str) {
+    let text: String = SAMPLE
+        .lines()
+        .filter(|l| !l.trim_start().starts_with("board:"))
+        .map(|l| {
+            format!(
+                "{l}
+"
+            )
+        })
+        .collect();
+    new_gen_build_from(&text, node, &format!("e2e-mcu-{node}"));
+}
+
+fn new_gen_build_from(topology: &str, node: &str, name: &str) {
+    let d = tmp(name);
     // As deep as a project in a beginner's documents folder can be: slot B
     // (in its own target folder) must still link the host build scripts.
     let dir = d
         .join("documents-of-a-beginner")
         .join("projects-in-a-rather-deep-folder")
         .join("proj");
-    new_project(&dir, "proj", SAMPLE, &d.join("keys"), &dev()).unwrap();
+    new_project(&dir, "proj", topology, &d.join("keys"), &dev()).unwrap();
     let config = dir.join(crate::config::CONFIG_FILE);
     let lines = gen_project(&config, &[node.to_string()], false).unwrap();
     assert!(!lines.iter().any(|l| l.starts_with("skipped")), "{lines:?}");
@@ -592,6 +612,18 @@ fn new_gen_build(node: &str) {
 #[ignore = "builds firmware with the ESP toolchain"]
 fn new_gen_build_esp32s3_node() {
     new_gen_build("watch");
+}
+
+#[test]
+#[ignore = "builds firmware for the RP2040"]
+fn new_gen_build_rp2040_hub_by_mcu() {
+    new_gen_build_by_mcu("hub");
+}
+
+#[test]
+#[ignore = "builds firmware for the STM32F401RE"]
+fn new_gen_build_f401_node_by_mcu() {
+    new_gen_build_by_mcu("seg");
 }
 
 #[test]
@@ -701,6 +733,67 @@ fn hop_placeholders_name_each_nodes_link_kinds() {
     )
     .unwrap();
     assert_eq!(up, "dagon_mcu_esp32s3::links::Kind::Uart");
+}
+
+/// An MCU package's template (a node without a board package) takes its
+/// link wiring from the 構成 and the MCU definition, never a board's.
+#[test]
+fn mcu_templates_wire_the_links_the_topology_names() {
+    let reg = dagon_topology::defs::Registry::builtin();
+    let t = desk();
+    let src = DagonSource::default();
+    let tpl = |mcu: &str| {
+        std::fs::read_to_string(
+            Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("../../targets/mcu")
+                .join(mcu)
+                .join("template/src/board.rs"),
+        )
+        .unwrap()
+    };
+    let render_for = |id: &str, text: &str| {
+        let n = t.node(id).unwrap();
+        let hops = hop_placeholders(reg, &t, n).unwrap();
+        render(
+            text,
+            n,
+            &hops,
+            &wiring_placeholders(reg, &t, n),
+            &src,
+            Path::new("."),
+        )
+        .unwrap()
+    };
+    let hub = render_for("hub", &tpl("rp2040"));
+    assert!(!hub.contains("{{"), "{hub}");
+    let bus = t.buses.first().unwrap();
+    assert!(hub.contains(&format!("p.PIN_{}", bus.sda)), "{hub}");
+    assert!(hub.contains("#[cfg(all())]"), "{hub}");
+    let seg = render_for("seg", &tpl("stm32f401re"));
+    assert!(!seg.contains("{{"), "{seg}");
+    let pins = t.link_to("seg").and_then(|l| l.node_pins.clone()).unwrap();
+    assert!(seg.contains(&format!("sda: p.{}", pins.sda)), "{seg}");
+    // Without a UART downlink its code is left out and still parses.
+    let mut no_uart = t.clone();
+    no_uart.links.retain(|l| l.kind != LinkKind::Uart);
+    let n = no_uart.node("hub").unwrap();
+    let w = wiring_placeholders(reg, &no_uart, n);
+    let get = |k: &str| w.iter().find(|(p, _)| p == k).unwrap().1.clone();
+    assert_eq!(get("{{if_down_uart}}"), "any()");
+    assert_eq!(get("{{down_uart_tx}}"), "none");
+    // No template of an MCU package names a board fact of its own.
+    for mcu in ["rp2040", "stm32f401re"] {
+        for fact in [
+            "PA5",
+            "PIN_25",
+            "512 * 1024",
+            "4 * 1024 * 1024",
+            "PB4",
+            "PIN_16",
+        ] {
+            assert!(!tpl(mcu).contains(fact), "{mcu}: {fact}");
+        }
+    }
 }
 
 /// The firmware's generator contract (targets/mcu/<mcu>/README.md, "Links"):

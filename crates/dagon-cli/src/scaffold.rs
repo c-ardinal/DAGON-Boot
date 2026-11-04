@@ -418,10 +418,105 @@ pub fn hop_placeholders(
     Ok((path(up), downs.join(", ")))
 }
 
+/// The link wiring of node `n` for an MCU package's template (a node
+/// without a board package), from the 構成 and the MCU definition, so the
+/// template names no board's pins:
+///
+/// - `{{link_i2c}}`, `{{link_sda}}`, `{{link_scl}}`: a node reached over
+///   I2C: the controller (upper case) and pins of its link (`node_pins`),
+///   else the first pair the MCU's ROM loader listens on;
+/// - `{{down_i2c}}`, `{{down_i2c_sda}}`, `{{down_i2c_scl}}`,
+///   `{{down_i2c_hz}}` and `{{down_uart_tx}}`, `{{down_uart_rx}}`,
+///   `{{down_uart_baud}}`: a 親機's first I2C bus and UART link to its
+///   子機 (GPIO numbers), with `{{if_down_i2c}}` / `{{if_down_uart}}`
+///   `all()` when it has one, `any()` (the code is left out; its names
+///   then render as placeholders that still parse) when not.
+pub fn wiring_placeholders(reg: &Registry, t: &Topology, n: &Node) -> Vec<(String, String)> {
+    let mut out: Vec<(String, String)> = Vec::new();
+    let mut put = |k: &str, v: String| out.push((format!("{{{{{k}}}}}"), v));
+    let mcu = reg.mcu(&n.mcu);
+    let pairs = mcu
+        .and_then(|m| m.rom_i2c.as_ref())
+        .map_or(&[][..], |r| &r.pairs[..]);
+    let up = t.link_to(&n.id).filter(|l| l.kind == LinkKind::I2c);
+    let pins = up.and_then(|l| l.node_pins.as_ref());
+    let pair = match pins {
+        Some(p) => pairs.iter().find(|q| q.sda == p.sda && q.scl == p.scl),
+        None => pairs.first(),
+    };
+    put(
+        "link_i2c",
+        pair.map_or(String::new(), |q| q.controller.to_uppercase()),
+    );
+    put(
+        "link_sda",
+        pins.map(|p| p.sda.clone())
+            .or(pair.map(|q| q.sda.clone()))
+            .unwrap_or_default(),
+    );
+    put(
+        "link_scl",
+        pins.map(|p| p.scl.clone())
+            .or(pair.map(|q| q.scl.clone()))
+            .unwrap_or_default(),
+    );
+    let downs: Vec<_> = t.links.iter().filter(|l| l.from == n.id).collect();
+    let bus = downs
+        .iter()
+        .filter(|l| l.kind == LinkKind::I2c)
+        .find_map(|l| {
+            l.bus
+                .as_ref()
+                .and_then(|b| t.buses.iter().find(|x| &x.id == b))
+        });
+    put(
+        "if_down_i2c",
+        if bus.is_some() { "all()" } else { "any()" }.into(),
+    );
+    put(
+        "down_i2c",
+        bus.map_or("NoI2c".into(), |b| b.controller.to_uppercase()),
+    );
+    put(
+        "down_i2c_sda",
+        bus.map_or("none".into(), |b| b.sda.to_string()),
+    );
+    put(
+        "down_i2c_scl",
+        bus.map_or("none".into(), |b| b.scl.to_string()),
+    );
+    put(
+        "down_i2c_hz",
+        bus.map_or("0".into(), |b| b.speed_hz.unwrap_or(100_000).to_string()),
+    );
+    let uart = downs
+        .iter()
+        .find(|l| l.kind == LinkKind::Uart && l.pins.is_some());
+    let up_pins = uart.and_then(|l| l.pins.as_ref());
+    put(
+        "if_down_uart",
+        if uart.is_some() { "all()" } else { "any()" }.into(),
+    );
+    put(
+        "down_uart_tx",
+        up_pins.map_or("none".into(), |p| p.tx.to_string()),
+    );
+    put(
+        "down_uart_rx",
+        up_pins.map_or("none".into(), |p| p.rx.to_string()),
+    );
+    put(
+        "down_uart_baud",
+        uart.map_or("0".into(), |l| l.baud.unwrap_or(115_200).to_string()),
+    );
+    out
+}
+
 fn render(
     text: &str,
     n: &Node,
     hops: &(String, String),
+    wiring: &[(String, String)],
     src: &DagonSource,
     base: &Path,
 ) -> Result<String, String> {
@@ -438,6 +533,9 @@ fn render(
         out.replace_range(at..end + 2, &line);
     }
     let tag = n.tag.escape_debug().to_string();
+    let out = wiring
+        .iter()
+        .fold(out, |o, (k, v)| o.replace(k.as_str(), v));
     Ok(out
         .replace("{{node}}", &n.id)
         .replace("{{tag}}", &tag)
@@ -642,11 +740,12 @@ fn node_files(
     })?;
     let name = f.name;
     let hops = hop_placeholders(reg, t, n)?;
+    let wiring = wiring_placeholders(reg, t, n);
     let files =
         template_for(&f.dir).ok_or_else(|| format!("{name} has no project template yet"))?;
     files
         .into_iter()
-        .map(|(rel, text)| Ok((rel, render(&text, n, &hops, src, base)?)))
+        .map(|(rel, text)| Ok((rel, render(&text, n, &hops, &wiring, src, base)?)))
         .collect()
 }
 

@@ -14,7 +14,7 @@
 
   interface Props {
     d: Define;
-    /** A drag from a row started (DES-UX3-030): the page follows the pointer and places it on release. */
+    /** A drag from a row started: the page follows the pointer and places it on release. */
     ondrag?: (part: Part, e: PointerEvent) => void;
     /** × : the window closes ("＋ 部品" opens it again). */
     onclose?: () => void;

@@ -33,7 +33,7 @@
   const STAGES = ['writing', 'rebooting', 'done', 'waiting'];
 </script>
 
-<!-- DES-UX3-131: where the update spends its time, node by node, in time order. -->
+<!-- where the update spends its time, node by node, in time order. -->
 {#if events.length === 0}
   <p class="none">{TIMELINE.none}</p>
 {:else}

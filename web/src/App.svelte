@@ -361,7 +361,7 @@
   /** Define mode's drawing scale: up to 32 ノード fit by zooming out; the canvas scrolls to pan. */
   let zoom = $state(1);
 
-  /** The linking dialog (DES-UX3-188), and requests to open DAGON's bubble. */
+  /** The linking dialog, and requests to open DAGON's bubble. */
   let linkOpen = $state(false);
   let dagonOpen = $state(0);
   async function openLink(at?: Element | null) {
@@ -415,7 +415,7 @@
     note(AGENT.applied);
   }
 
-  /** The bottom drawer's open tab (DES-UX3-015), null while closed. */
+  /** The bottom drawer's open tab, null while closed. */
   let drawerTab = $state<string | null>(null);
   const pickTab = (id: string) => (drawerTab = drawerTab === id ? null : id);
   /** 記録: what the page did and why something was stopped, newest last (the drawer's log). */
@@ -460,7 +460,7 @@
   /** The node a dragged part would go under (highlighted on the canvas). */
   let dropOn = $state<string | null>(null);
 
-  /** A part dragged from the parts window to the canvas (DES-UX3-030): a ghost follows the pointer. */
+  /** A part dragged from the parts window to the canvas: a ghost follows the pointer. */
   let ghost = $state<{ part: Part; x: number; y: number; shown: boolean } | null>(null);
   const DRAG_PX = 4;
   function startPart(part: Part, e: PointerEvent) {
@@ -487,7 +487,7 @@
     addEventListener('pointermove', move);
     addEventListener('pointerup', up);
   }
-  /** A refused port drag: the reason in red (it is a refusal, round8d). */
+  /** A refused port drag: the reason in red (it is a refusal). */
   let refuseAt = 0;
   function refuse(text: string, x: number, y: number) {
     const now = Date.now();
@@ -540,7 +540,7 @@
         .map((p) => [p.select!.slice(5), { chip: `${problemChip(p).mark} ${p.short}`, spoken: p.short, silent: problemChip(p).kind === 'error' }]),
     ),
   );
-  /** 定義's focal number (Q12 A+C): 問題 n, red only above 0; ノード, リンク and ◇ under it. */
+  /** 定義's focal number: 問題 n, red only above 0; ノード, リンク and ◇ under it. */
   const defineDot = $derived<Dot>({
     label: DEFINE.dotProblems,
     value: problemCount,
@@ -672,7 +672,7 @@
   };
   const updating = $derived(UPDATING.has(op.state));
   const diffChips = $derived(Object.fromEntries(fileDiff.flatMap((r) => r.nodes).map((id) => [id, { chip: DIFF.chip, spoken: DIFF.spoken, silent: true }])));
-  /** 案 (owner 11/2): ponytail: a flat minute per node, the copy's 目安; measure per link and image size if it misleads. */
+  /** 案: ponytail: a flat minute per node, the copy's 目安; measure per link and image size if it misleads. */
   const MINUTES_PER_NODE = 1;
   /** L18: what each target node gets ("↑ 1.0.0 → 1.1.0") and about how long it takes. */
   const planChips = $derived(
@@ -728,7 +728,7 @@
       fileInput?.click();
     }
   }
-  /** The sheet shows only when it holds something (DES-UX3-014). */
+  /** The sheet shows only when it holds something. */
   const sheetShown = $derived(
     mode === 'define'
       ? cliPanel !== null || d.selected !== null
@@ -762,7 +762,7 @@
     const t = setInterval(tick, 1000);
     return () => clearInterval(t);
   });
-  /** The timeline (DES-UX3-131): each node's stage changes since the update began; it opens with the update. */
+  /** The timeline: each node's stage changes since the update began; it opens with the update. */
   let tlEvents = $state<StageEvent[]>([]);
   let tlStart = 0;
   let tlLast: Record<string, string> = {};
@@ -808,7 +808,7 @@
   const thinking = $derived(agent.thinking);
   const BUILD_KINDS = new Set(['build', 'sign', 'release', 'gen', 'conform']);
   const running = (kinds: (k: string) => boolean) => cli.jobs.some((j) => (j.state === 'running' || j.state === 'queued') && kinds(j.kind));
-  /** The lock table's states now (DES-UX3-182), leftmost first. */
+  /** The lock table's states now, leftmost first. */
   const lockStates = $derived(
     activeStates({
       // ponytail: the page has no demo playback of its own yet; `dagon demo`'s desk is driven by the user like a real one.
@@ -885,7 +885,7 @@
   /** The locked toggle was pressed: its reason stands in the band until the state changes. */
   let hubNotice = $state<{ at: string; why: string } | null>(null);
   const hubNoticeShown = $derived(hubNotice && hubNotice.at === op.state ? hubNotice.why : null);
-  /** The header's つなぐ / 切断 (owner 11/2): 切断 closes the port and keeps its permission. */
+  /** The header's つなぐ / 切断: 切断 closes the port and keeps its permission. */
   function toggleHub() {
     if (stopped('connect')) return;
     if (hubLocked) {
@@ -1081,7 +1081,7 @@
       {:else if firstError}
         <button class="tb primary" data-control="edit" bind:this={primaryEl} onclick={() => d.fix(firstError)}>{DEFINE.fix}</button>
       {:else if d.operable === 'ok'}
-        <!-- Optional: updating sends the 構成 before it updates (owner 11/3). -->
+        <!-- Optional: updating sends the 構成 before it updates. -->
         <button class="tb side" data-control="connect" onclick={() => void sendDefined()}>{connected ? DEFINE.send : DEFINE.connectSend}</button>
         <button class="tb primary" bind:this={primaryEl} onclick={() => switchMode('operate')}>{DEFINE.toOperate}</button>
       {/if}
@@ -1318,7 +1318,7 @@
     <div class="ghost" aria-hidden="true" style:left="{ghost.x + 8}px" style:top="{ghost.y + 8}px">{ghost.part.name}</div>
   {/if}
   {#if why}
-    <!-- Round8d: a stopped operation's reason is information (blue edge), never red. -->
+    <!-- a stopped operation's reason is information (blue edge), never red. -->
     <div class="why" class:failed={why.failed} role={why.failed ? 'alert' : 'status'} style:left="{Math.max(8, Math.min(why.x, innerWidth - 336))}px" style:top="{Math.min(why.y, innerHeight - 96)}px">{why.text}</div>
   {/if}
   {#if linkOpen && agent.status}
@@ -1346,7 +1346,7 @@
   main.define {
     position: relative;
   }
-  /* The flow (DES-UX3-020): 構成 › プロジェクト › ビルド › 書き込み › 更新, the next action, and the 親機. */
+  /* The flow: 構成 › プロジェクト › ビルド › 書き込み › 更新, the next action, and the 親機. */
   .toolbar {
     display: flex;
     flex: 1;
@@ -1567,7 +1567,7 @@
     grid-template-columns: var(--w-left) minmax(0, 1fr) var(--w-right);
     height: 100vh;
   }
-  /* The start page (DES-UX3-012): one centred column under the bar, its status line at the bottom. */
+  /* The start page: one centred column under the bar, its status line at the bottom. */
   .frame:not(.work) {
     grid-template-areas: 'header' 'help' 'menu' 'canvas' 'right' 'band';
     grid-template-rows: auto auto auto auto minmax(0, 1fr) auto;
@@ -1607,7 +1607,7 @@
   main:focus {
     outline: none;
   }
-  /* Floating windows (DES-UX3-014): over the graph, apart from its edges, never under the focal number. */
+  /* Floating windows: over the graph, apart from its edges, never under the focal number. */
   .float {
     position: absolute;
     z-index: var(--z-chrome);

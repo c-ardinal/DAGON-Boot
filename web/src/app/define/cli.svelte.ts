@@ -119,7 +119,7 @@ export class Cli {
   private ws: WebSocket | null = null;
   private readonly d: Required<CliDeps>;
   /**
-   * The lock table's check (DES-UX3-182), set by the page: true when the operation is stopped now
+   * The lock table's check, set by the page: true when the operation is stopped now
    * (the page has shown why). Every job asks it in `start`.
    */
   guard: (kind: 'gen' | 'build' | 'release' | 'flash') => boolean = () => false;

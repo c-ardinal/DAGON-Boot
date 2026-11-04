@@ -19,7 +19,7 @@
 
   let { agent, place, onask, onapply, ontalk, openRequest }: Props = $props();
 
-  /** DES-UX3-186: 72 px at 1440×900 (the root's 4.5 rem), never under 66 px. */
+  /** 72 px at 1440×900 (the root's 4.5 rem), never under 66 px. */
   const MIN_MARK = 66;
   const MARGIN = 12;
   const DRAG_PX = 4;
@@ -165,7 +165,7 @@
     void tick().then(() => field?.focus());
   });
 
-  /** A reply came: a 1.2 s blue edge (DES-UX3-170), then calm again. */
+  /** A reply came: a 1.2 s blue edge, then calm again. */
   const REPLIED_MS = 1200;
   let seen = 0;
   $effect(() => {

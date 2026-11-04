@@ -10,7 +10,7 @@
     /** Held while an update or recovery runs. */
     locked: boolean;
     restartButton?: HTMLButtonElement;
-    /** DAGON (DES-UX3-188): not linked, "DAGON と連携する…"; linked, "DAGON と話す" and "DAGON との連携を外す…". */
+    /** DAGON: not linked, "DAGON と連携する…"; linked, "DAGON と話す" and "DAGON との連携を外す…". */
     agentLinked: boolean;
     onlink: (at: Element) => void;
     ontalk: () => void;

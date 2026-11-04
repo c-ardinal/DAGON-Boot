@@ -11,7 +11,7 @@ export const SKIP = {
 } as const;
 
 /**
- * Header step indicator in three steps (owner 11/3): ① つなぐ ② ファイル ③ 更新.
+ * Header step indicator in three steps: ① つなぐ ② ファイル ③ 更新.
  * The operate machine's six steps fold into them (STEP.of3); recovery shows its name only.
  */
 export const STEP = {
@@ -200,7 +200,7 @@ export const UNSUPPORTED = {
 } as const;
 
 /**
- * The state-lock table (DES-UX3-182, round8d string table): each state's
+ * The state-lock table: each state's
  * short name for the status line and, per operation it stops, the reason
  * shown when that operation is pressed (information style, never red).
  */
@@ -354,7 +354,7 @@ export const LOCK = {
 } as const;
 
 /**
- * DAGON (DES-UX3-170, 185–188; round8c strings, yomiyasu). The character and
+ * DAGON, the page's agent. The character and
  * every UI word say DAGON; the provider's name comes from serve and is shown
  * only in the linking step.
  */
@@ -416,15 +416,15 @@ export const AGENT = {
   },
 } as const;
 
-/** The bottom drawer (DES-UX3-015) and its tabs. */
-/** The drawer's timeline of an update (DES-UX3-131). */
+/** The bottom drawer and its tabs. */
+/** The drawer's timeline of an update. */
 export const TIMELINE = {
   label: '更新のタイムライン',
   time: '時間',
   none: '更新を始めると、ノードごとの段階がここに時間の順で並びます。',
 } as const;
 
-/** The status row (DES-UX3-016). */
+/** The status row. */
 export const STATUS = {
   label: '状態',
   key: '鍵',
@@ -434,7 +434,7 @@ export const STATUS = {
   saved: '保存済み',
 } as const;
 
-/** The bar's flow (DES-UX3-020): the steps from 構成 to 更新, each its own place to work. */
+/** The bar's flow: the steps from 構成 to 更新, each its own place to work. */
 export const FLOW = {
   label: '作業の手順（構成から更新まで）',
   steps: { define: '構成', project: 'プロジェクト', build: 'ビルド', flash: '書き込み', update: '更新' },
@@ -443,7 +443,7 @@ export const FLOW = {
   responding: (n: number, of: number) => `親機 応答 ${n}/${of}`,
 } as const;
 
-/** The canvas controls bottom-right (DES-UX3-033). */
+/** The canvas controls bottom-right. */
 export const ZOOM = {
   label: '表示の操作',
   out: '小さく',
@@ -451,7 +451,7 @@ export const ZOOM = {
   in: '大きく',
 } as const;
 
-/** The parts window (DES-UX3-030). */
+/** The parts window. */
 export const PARTS = {
   heading: '部品',
   hint: 'ドラッグで置く',
@@ -460,7 +460,7 @@ export const PARTS = {
   open: '＋ 部品',
 } as const;
 
-/** The floating sheet's spoken name (round8d #66). */
+/** The floating sheet's spoken name. */
 export const SHEET = '選んだものの詳細';
 
 export const DRAWER = {
@@ -484,7 +484,7 @@ export const CANVAS = {
   pcBy: { 'pc-cli': 'パソコン（dagon）', browser: 'ブラウザ（パソコン・スマホ）', embedded: '自作の機器' } as Record<string, string>,
   /** C02 */
   empty: '親機を USB でパソコンにつないでから、『つないで、自動で見つける』を押してください。',
-  /** After the uplink card of a 親機 this page is not connected to (round8d #18). */
+  /** After the uplink card of a 親機 this page is not connected to. */
   notThisPc: '（このパソコンとはつながっていない）',
   /** S17: canvas description for screen readers. */
   describe: '矢印でノードを移り、Enter で選びます。ほかのキーは「困ったとき」の「キー操作」にあります。',
@@ -574,17 +574,17 @@ export const NODE = {
 /** Link chip (S18) and its spoken name. */
 export const LINK = {
   /** CAN and Ethernet carry no wires the page draws: the kind alone. */
-  /** The bus, the value it needs (address or speed: DES-UX3-100), its wires. */
+  /** The bus, the value it needs (address or speed: ), its wires. */
   bundle: (kind: string, n: number, shared: number, value = '') => {
     const head = value ? `${kind} ${value}` : kind;
     return n ? `${head} · ${n} 本${shared ? `（うち共有 ${shared}）` : ''}` : head;
   },
-  /** The lower port of a card (round8d #70). */
+  /** The lower port of a card. */
   portOut: (name: string) => `${name} の下のポート（ここから子のノードへドラッグ）`,
   name: (label: string, from: string, to: string, addr: string) => `${label}、${from}から ${to}へのリンク${addr ? `、${addr}` : ''}`,
 } as const;
 
-/** Why a port drag is refused (a failure: red, round8d). */
+/** Why a port drag is refused (a failure: red). */
 export const LINK_WHY = {
   taken: 'このノードはもう親機とつながっています',
   under: (name: string) => `このノードはもう ${name} の下です`,
@@ -853,7 +853,7 @@ export const DEFINE = {
   chooseBy: '選び方',
   listHelp: '選んで Enter で置けます。',
   place: '置く',
-  /** The parts window (DES-UX3-030). */
+  /** The parts window. */
   search: '製品・マイコンを探す',
   byMcuOwn: 'マイコン（自作ボード）',
   ownBoard: (mcu: string) => `${mcu}（自作ボード）`,

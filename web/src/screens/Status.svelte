@@ -29,7 +29,7 @@
     ontoggle: (id: string) => void;
     /** Update progress 0–100, or null when no update runs. */
     progress: number | null;
-    /** What to do next, in one sentence (the band's sentence, DES-UX3-016). */
+    /** What to do next, in one sentence (the band's sentence). */
     sentence: string;
     /** A failure cause before the sentence (× …), red. */
     cause?: string;
@@ -43,7 +43,7 @@
   let { hub, onhub, state, cli, oncli, key, toggles, open, ontoggle, progress, sentence, cause, mode, saved, status, alert, nextEl = $bindable() }: Props = $props();
 </script>
 
-<!-- DES-UX3-016: one 24 px line under everything: 親機, the state, CLI, key, the drawer's toggles, progress and the next step. -->
+<!-- one 24 px line under everything: 親機, the state, CLI, key, the drawer's toggles, progress and the next step. -->
 <footer id="band" class="status" tabindex="-1" aria-label={STATUS.label}>
   {#if onhub}
     <button class="hub" class:on={hub.on} data-control="connect" onclick={onhub}><span class="dot" class:full={hub.on}></span>{hub.text}</button>

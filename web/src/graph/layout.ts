@@ -1,4 +1,4 @@
-// Tree layout of the 構成 (DES-UX3-180): no layer bands. Every node nobody
+// Tree layout of the 構成: no layer bands. Every node nobody
 // links to starts a tree; each node sits centred over its subtree, at any
 // depth, and the trees stand side by side. Rows take the tallest card at
 // that depth, so rows line up across trees.

@@ -9,7 +9,7 @@ const none: LockInput = {
 const states = (p: Partial<LockInput>) => activeStates({ ...none, ...p });
 const all = Object.keys(LOCK.controls) as Control[];
 
-describe('lock table (DES-UX3-182)', () => {
+describe('lock table', () => {
   test('待機: every operation can be used', () => {
     expect(all.filter((c) => lockOf(c, states({})))).toEqual([]);
     expect(stateName(states({}))).toBe('待機');

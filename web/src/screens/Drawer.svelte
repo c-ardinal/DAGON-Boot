@@ -24,7 +24,7 @@
   let { tabs, open, onpick, onclose, body }: Props = $props();
 </script>
 
-<!-- DES-UX3-015: closed by default; while open the canvas above shrinks by its height (no overlap). -->
+<!-- closed by default; while open the canvas above shrinks by its height (no overlap). -->
 <section class="drawer" aria-label={DRAWER.label}>
   <div class="tabs" role="tablist" aria-label={DRAWER.label}>
     {#each tabs as t (t.id)}

@@ -12,9 +12,9 @@
   --c-line: #7a7873;
   --c-hair: #2c2b29;
   --c-layer-3: #282725;
-  /* red: failures and danger only (Q14) */
+  /* red: failures and danger only */
   --c-signal: #ff4b3a;
-  /* blue (water): the next step, progress, information (Q14) */
+  /* blue (water): the next step, progress, information */
   --c-accent: #3cb4f0;
   --c-hover: #141413;
   --c-scrim: rgb(10 10 10 / 0.8);
@@ -27,7 +27,7 @@
   --f-mono: 'JetBrains Mono', Consolas, 'Courier New', monospace;
 
   /* type steps: size / line-height (rem, 1rem = 16px) */
-  --t-display-size: 7rem; /* 112, the focal number (DES-UX3-150) */
+  --t-display-size: 7rem; /* 112, the focal number */
   --t-display-lh: 1;
   --t-version-size: 1.5rem; /* 24, the card's version (A+C) */
   --t-version-lh: 1.1;
@@ -37,7 +37,7 @@
   --t-title-lh: 1.3;
   --t-heading-size: 0.875rem; /* 14, headings of sheets and windows */
   --t-heading-lh: 1.3;
-  --t-body-size: 0.8125rem; /* 13, UI text (DES-UX3-040) */
+  --t-body-size: 0.8125rem; /* 13, UI text */
   --t-body-lh: 1.45;
   --t-small-size: 0.75rem; /* 12, labels and values */
   --t-small-lh: 1.45;
@@ -47,7 +47,7 @@
   --t-mono-lh: 1.5;
   --t-mono-log-lh: 1.54;
 
-  /* the mock's dense steps (DES-UX3-040): 11 chips, 12 values, 13 UI text, 14 version */
+  /* the mock's dense steps: 11 chips, 12 values, 13 UI text, 14 version */
   --t-11: 0.6875rem;
   --t-12: 0.75rem;
   --t-13: 0.8125rem;
@@ -65,7 +65,7 @@
   --s-9: 6rem;
 
   /* component sizes */
-  --h-header: 2.75rem; /* 44, the one bar (DES-UX3-041) */
+  --h-header: 2.75rem; /* 44, the one bar */
   --h-band: 1.5rem; /* 24, the status row */
   --h-primary: 1.75rem; /* 28 */
   --h-secondary: 1.75rem; /* 28 */

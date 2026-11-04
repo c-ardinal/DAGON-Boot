@@ -48,7 +48,7 @@
 
 <main id="canvas" class="start" tabindex="-1" aria-labelledby="start-h">
   <h1 id="start-h" class="visually-hidden">{START.heading}</h1>
-  <!-- DES-UX3-012: the mock's start page, one centred column of 36 px rows. -->
+  <!-- the mock's start page, one centred column of 36 px rows. -->
   <div class="intro" aria-hidden="true"><p class="title" translate="no">{PRODUCT}</p><p class="sub">{START.sub}</p></div>
   <div class="choices">
     {#each CHOICES as [c, no, label], i (c)}

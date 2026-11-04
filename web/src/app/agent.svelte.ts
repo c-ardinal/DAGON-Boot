@@ -75,7 +75,7 @@ export type AgentApi = (method: string, path: string, body?: unknown) => Promise
 
 /** Questions sent with the conversation's last turns, at most this many. */
 const HISTORY = 10;
-/** The bubble shows the first sentence only, cut to this many characters (DES-UX3-170). */
+/** The bubble shows the first sentence only, cut to this many characters. */
 export const BUBBLE_MAX = 110;
 
 export function problemOf(status: number, code: string | undefined): AgentProblem {
@@ -101,7 +101,7 @@ export class Agent {
   thinking = $state(false);
   messages = $state<Message[]>([]);
 
-  /** The lock table's check (DES-UX3-182), set by the page: true when it is stopped now (the page has shown why). */
+  /** The lock table's check, set by the page: true when it is stopped now (the page has shown why). */
   guard: (kind: 'ask' | 'link') => boolean = () => false;
 
   constructor(private readonly api: AgentApi) {}

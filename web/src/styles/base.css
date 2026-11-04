@@ -46,7 +46,7 @@ html {
   background: var(--c-ink);
   color: var(--c-paper);
   font: 400 var(--t-body-size) / var(--t-body-lh) var(--f-ja);
-  /* DES-UX3-181: the root follows the window's width and height; every size is in rem. 16 px at 1440×900. */
+  /* the root follows the window's width and height; every size is in rem. 16 px at 1440×900. */
   font-size: clamp(14px, calc(6.64px + 0.4vw + 0.4vh), 22px);
   font-variant-numeric: tabular-nums;
 }
@@ -111,7 +111,7 @@ button {
   }
 }
 
-/* DES-UX3-182: an operation the state stops stays in place, dimmed, and still says why when pressed. */
+/* an operation the state stops stays in place, dimmed, and still says why when pressed. */
 [data-locks~='edit'] [data-control='edit'],
 [data-locks~='gen'] [data-control='gen'],
 [data-locks~='build'] [data-control='build'],
@@ -137,7 +137,7 @@ button {
   padding: 0 0.875rem;
   border: 0;
   border-radius: var(--r-full);
-  /* Q14: the main action is blue; red is for failures only. */
+  /* the main action is blue; red is for failures only. */
   background: var(--c-accent);
   color: var(--c-ink);
   font: 700 var(--t-body-size) / 1 var(--f-ja);

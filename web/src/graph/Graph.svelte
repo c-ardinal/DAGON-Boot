@@ -89,7 +89,7 @@
   }: Props = $props();
 
   /**
-   * Sizes in rem (DES-UX3-181): the root font follows the window, so cards,
+   * Sizes in rem: the root font follows the window, so cards,
    * gaps and text grow together. `rem` is the root font in px, read again on resize.
    */
   let rem = $state(16);
@@ -103,7 +103,7 @@
 
   /** Names on the cards never get smaller than this on screen (px): past it the cards turn compact, then the canvas scrolls. */
   const NAME_MIN_PX = 13;
-  /** From this many ノード the cards are compact whatever the window (DES-UX3-160: name, version and state only). */
+  /** From this many ノード the cards are compact whatever the window (name, version and state only). */
   const COMPACT_FROM = 9;
   /** Card heights before they are measured (rem): to decide the card class without a measuring loop. */
   const EST_H = { normal: 7.5, compact: 3.5 };
@@ -128,7 +128,7 @@
   const UPLINK_ROOM = $derived(5.25 * rem);
   const SIDE = $derived(1.5 * rem);
   let zoomH = $state(0);
-  /** Room under the graph for the focal number and the controls (the mock keeps it free: DES-UX3-187). */
+  /** Room under the graph for the focal number and the controls (the mock keeps it free: ). */
   /** Phones put the controls at the top (CSS): only the focal number needs the room below there. */
   const below = $derived(Math.max(dotH, phone ? 0 : zoomH) + rem + (inset.bottom ?? 0));
   const availW = $derived(Math.max(1, boxW - inset.left - inset.right));
@@ -260,7 +260,7 @@
     return st.slots.slice(0, 2).map((s, i) => ({ row: SLOT.rows[i], text: s.state === 0 ? SLOT.states[0] : versionText(s.version), on: st.active === i }));
   }
 
-  /** Marks of the boot state (DES-UX3-130): ✓ settled, ◐ waiting for the check, ↺ went back. */
+  /** Marks of the boot state: ✓ settled, ◐ waiting for the check, ↺ went back. */
   const BOOT_MARK: Record<number, string> = { 1: '…', 2: '…', 3: '◐', 4: '✓', 5: '↺' };
   /** The boot-state chip: the running slot's state from STATUS, else what HELLO says (on trial or not). */
   function bootOf(n: Node): { text: string; trial: boolean } | null {
@@ -292,7 +292,7 @@
     config?.nodes.find((n) => n.role === 'hub' && config.reach.includes(n.id))?.id ?? config?.nodes.find((n) => n.role === 'hub')?.id,
   );
 
-  /** The role on the card (DES-UX3-180): 親機, 子機, 孫機, and below that its row. */
+  /** The role on the card: 親機, 子機, 孫機, and below that its row. */
   function roleOf(n: Node): string {
     if (n.role === 'hub') return NODE.roleHub;
     const d = belowHub(n.id);
@@ -347,7 +347,7 @@
     return { parent: near?.n.id ?? null };
   }
 
-  /** Port drag (DES-UX3-031): from a card's lower port to another card's upper port. */
+  /** Port drag: from a card's lower port to another card's upper port. */
   let wire = $state<{ from: string; a: Pt; b: Pt; target: string | null; bad: boolean } | null>(null);
   const SNAP_PX = 28;
   function portDown(e: PointerEvent, from: string) {
@@ -530,7 +530,7 @@
     </div>
   </div>
   {#if dot}
-    <!-- The focal number (DES-UX3-187): bottom-left, just above what is under the canvas; it never scrolls away. -->
+    <!-- The focal number: bottom-left, just above what is under the canvas; it never scrolls away. -->
     <div class="hero" class:small={compact} style:bottom={inset.bottom ? `${inset.bottom + 0.75 * rem}px` : undefined} data-avoid="" role="img" aria-label={dot.name} bind:offsetHeight={dotH} bind:offsetWidth={dotW}>
       <span class="lbl">{dot.label}</span>
       <span class="row"><span class="num" class:err={dot.alarm && dot.value > 0}>{dot.value}</span>{#if dot.of !== undefined}<span class="of">/{dot.of}</span>{/if}{#if dot.unit}<span class="of">{dot.unit}</span>{/if}</span>
@@ -572,7 +572,7 @@
   .pc-link.dashed {
     stroke-dasharray: 4 3;
   }
-  /* The link that carries the update right now marches from 親機 to 子機 (DES-UX3-102). */
+  /* The link that carries the update right now marches from 親機 to 子機. */
   .pc-link.busy {
     stroke: var(--c-paper);
     stroke-dasharray: 6 6;
@@ -832,7 +832,7 @@
     margin-top: 2px;
   }
 
-  /* Water gauge (DES-UX3-110): the level moves by transform; the edge is a CSS mask (no drawn illustration). */
+  /* Water gauge: the level moves by transform; the edge is a CSS mask (no drawn illustration). */
   .water {
     position: absolute;
     inset: 0;
@@ -873,7 +873,7 @@
     }
   }
 
-  /* Ports (DES-UX3-031): the lower one starts a drag, the upper one takes it. */
+  /* Ports: the lower one starts a drag, the upper one takes it. */
   .port {
     position: absolute;
     z-index: calc(var(--z-node) + 1);
@@ -929,7 +929,7 @@
     outline: 2px solid var(--c-paper);
   }
 
-  /* The focal number (DES-UX3-150/187): today's dot numerals, bottom-left. */
+  /* The focal number: today's dot numerals, bottom-left. */
   .hero {
     position: absolute;
     z-index: var(--z-chip);

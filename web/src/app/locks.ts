@@ -1,4 +1,4 @@
-// The state-lock table (DES-UX3-182, round8d): one place that says which
+// The state-lock table: one place that says which
 // operation each state stops and why. Buttons, menus, keys and commands all
 // ask lockOf(); a stopped operation stays visible (dimmed) and pressing it
 // shows the reason in the information style. Red is never used for these.

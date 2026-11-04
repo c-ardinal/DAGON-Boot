@@ -32,7 +32,7 @@
     hubLocked?: string | null;
     /** `dagon demo`: the hub is simulated (模擬, always shown). */
     sim?: boolean;
-    /** The work screen's bar (DES-UX3-010/020): the project's name and the 01–05 flow with the next action, instead of the three steps. */
+    /** The work screen's bar: the project's name and the 01–05 flow with the next action, instead of the three steps. */
     flow?: Snippet;
     title?: string;
     /** 困ったとき is open (the menu opens it too, where the bar has no room for its button). */
@@ -97,7 +97,7 @@
   {#if flow}
     {@render flow()}
   {:else}
-  <!-- 定義 has no steps; the 構成 file is the source of truth (owner 11/3). In 運用 all three always show. -->
+  <!-- 定義 has no steps; the 構成 file is the source of truth. In 運用 all three always show. -->
   <ol class="steps" aria-label={STEP.label}>
     {#if mode !== 'define' && at !== null}
       {#each [1, 2, 3] as const as n (n)}

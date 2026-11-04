@@ -7,16 +7,14 @@
 //! generated from that table. Everyone takes the bus through
 //! [`Shared::with`]: a lease, not a critical section, so a driver that
 //! waits for its interrupts works inside it. A device's registers are
-//! reached through [`Device::write`] and [`Device::read`], at most
-//! [`BUS_MAX`] bytes a transfer; `write` refuses a register the definition
-//! does not list as writable.
+//! reached through [`Device::write`] and [`Device::read`], each transfer
+//! bounded by the device's own maximum (its datasheet's, declared in the
+//! definition); `write` refuses a register the definition does not list
+//! as writable.
 
 use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
 use embassy_sync::mutex::Mutex;
 use embedded_hal::i2c::{I2c, Operation};
-
-/// Most bytes one bus port transfer moves, either way.
-pub const BUS_MAX: usize = 32;
 
 /// A board resource shared, not owned: put in once by the board package,
 /// then used by anyone through [`Shared::with`].
@@ -53,19 +51,28 @@ impl<T> Default for Shared<T> {
 
 /// A device on a board bus, as the board definition's `[[device]]`
 /// declares it. Its fields are private: a `Device` comes only from the
-/// constants a board package generates from its definition.
+/// constants a board package generates from its definition, through the
+/// `unsafe` [`Device::from_definition`].
+///
+/// Why `unsafe` is the seal: code built into the image outside the
+/// extension interface (DAGON's crates, the board package, the
+/// application's start-up) is the trusted base of one address space;
+/// extension code is the boundary (design 2.2 and 4), and `dagon gen`
+/// requires `#![forbid(unsafe_code)]` of extension crates, so no extension
+/// can call it.
 ///
 /// ```compile_fail,E0451
-/// let forged = dagon_events::Device { addr: 0x6E, writable: &[0x0C] };
+/// let forged = dagon_events::Device { addr: 0x6E, writable: &[0x0C], max: 1 };
 /// ```
 ///
 /// ```compile_fail,E0133
-/// let forged = dagon_events::Device::from_definition(0x6E, &[0x0C]);
+/// let forged = dagon_events::Device::from_definition(0x6E, &[0x0C], 1);
 /// ```
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Device {
     addr: u8,
     writable: &'static [u8],
+    max: usize,
 }
 
 /// Why the bus port refused or failed.
@@ -75,7 +82,7 @@ pub enum BusError<E> {
     Busy,
     /// The definition does not list the register as writable.
     NotWritable(u8),
-    /// More than [`BUS_MAX`] bytes.
+    /// More bytes than the device takes in one transfer.
     TooLong(usize),
     /// The driver's error.
     Bus(E),
@@ -86,15 +93,20 @@ impl Device {
     ///
     /// # Safety
     ///
-    /// Only the definition code generator calls this, with the address and
-    /// writable registers of a `[[device]]` the definition loader
-    /// accepted: the writable list is what the port enforces, so any other
-    /// caller could widen it.
+    /// Only the definition code generator calls this, with the address,
+    /// writable registers and maximum transfer (data bytes) of a
+    /// `[[device]]` the definition loader accepted: these are what the
+    /// port enforces, so any other caller could widen them.
     #[doc(hidden)]
     #[allow(unsafe_code)]
-    pub const unsafe fn from_definition(addr: u8, writable: &'static [u8]) -> Self {
+    pub const unsafe fn from_definition(addr: u8, writable: &'static [u8], max: usize) -> Self {
         assert!(addr >= 0x08 && addr <= 0x77, "a 7-bit I2C device address");
-        Device { addr, writable }
+        assert!(max > 0, "a device takes at least one byte a transfer");
+        Device {
+            addr,
+            writable,
+            max,
+        }
     }
 
     /// 7-bit address.
@@ -107,8 +119,13 @@ impl Device {
         self.writable
     }
 
-    /// Writes `bytes` (at most [`BUS_MAX`]) to register `reg` in one
-    /// transfer (register address, then the bytes).
+    /// Most data bytes the device takes in one transfer.
+    pub const fn max_transfer(&self) -> usize {
+        self.max
+    }
+
+    /// Writes `bytes` (at most [`Device::max_transfer`]) to register `reg`
+    /// in one transfer (register address, then the bytes).
     pub fn write<B: I2c>(
         &self,
         bus: &Shared<B>,
@@ -118,7 +135,7 @@ impl Device {
         if !self.writable.contains(&reg) {
             return Err(BusError::NotWritable(reg));
         }
-        if bytes.len() > BUS_MAX {
+        if bytes.len() > self.max {
             return Err(BusError::TooLong(bytes.len()));
         }
         bus.with(|b| {
@@ -131,14 +148,15 @@ impl Device {
         .map_err(BusError::Bus)
     }
 
-    /// Reads `buf.len()` bytes (at most [`BUS_MAX`]) from register `reg`.
+    /// Reads `buf.len()` bytes (at most [`Device::max_transfer`]) from
+    /// register `reg`.
     pub fn read<B: I2c>(
         &self,
         bus: &Shared<B>,
         reg: u8,
         buf: &mut [u8],
     ) -> Result<(), BusError<B::Error>> {
-        if buf.len() > BUS_MAX {
+        if buf.len() > self.max {
             return Err(BusError::TooLong(buf.len()));
         }
         bus.with(|b| b.write_read(self.addr, &[reg], buf))
@@ -188,7 +206,7 @@ mod tests {
 
     // SAFETY: a test device standing in for a generated one.
     #[allow(unsafe_code)]
-    const IOE: Device = unsafe { Device::from_definition(0x4F, &[0x05]) };
+    const IOE: Device = unsafe { Device::from_definition(0x4F, &[0x05], 2) };
 
     #[test]
     fn the_bus_port_writes_only_writable_registers() {
@@ -203,14 +221,9 @@ mod tests {
         let mut b = [0u8; 2];
         IOE.read(&bus, 0x03, &mut b).unwrap();
         assert_eq!(b, [0x4F; 2]);
-        assert_eq!(
-            IOE.write(&bus, 0x05, &[0; BUS_MAX + 1]),
-            Err(BusError::TooLong(BUS_MAX + 1))
-        );
-        assert_eq!(
-            IOE.read(&bus, 0x03, &mut [0; BUS_MAX + 1]),
-            Err(BusError::TooLong(BUS_MAX + 1))
-        );
+        // The device's own bound, both ways.
+        assert_eq!(IOE.write(&bus, 0x05, &[0; 3]), Err(BusError::TooLong(3)));
+        assert_eq!(IOE.read(&bus, 0x03, &mut [0; 3]), Err(BusError::TooLong(3)));
         let log = bus.with(|l| core::mem::take(&mut l.0)).unwrap();
         assert_eq!(
             log,

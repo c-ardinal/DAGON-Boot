@@ -233,11 +233,12 @@ pub fn devices_rs(b: &BoardDef) -> String {
              // definition loader accepted.\n\
              #[allow(unsafe_code)]\n\
              pub const {dev}: ::dagon_events::Device = unsafe {{\n    \
-             ::dagon_events::Device::from_definition({:#04x}, &{:?})\n}};",
+             ::dagon_events::Device::from_definition({:#04x}, &{:?}, {})\n}};",
             d.id,
             d.bus,
             d.addr,
-            d.writable_regs()
+            d.writable_regs(),
+            d.max_transfer
         );
     }
     o
@@ -364,7 +365,7 @@ mod tests {
         for want in [
             "pub const DEVICE_IOE_REG_OUT_L: u8 = 0x05;",
             "pub const DEVICE_IOE_WRITABLE: &[u8] = &[3, 5, 19];",
-            "::dagon_events::Device::from_definition(0x4f, &[3, 5, 19])",
+            "::dagon_events::Device::from_definition(0x4f, &[3, 5, 19], 2)",
         ] {
             assert!(rs.contains(want), "{want} in\n{rs}");
         }

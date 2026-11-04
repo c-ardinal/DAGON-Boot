@@ -144,6 +144,7 @@ mcu = "can1"
 id = "pmic"
 bus = "sys"
 addr = 0x34
+max_transfer = 1
 writable = [0x10]
 "#
     )
@@ -439,7 +440,19 @@ fn definition_names_become_code_names_or_are_refused() {
     requirements::check_board(&b, &m).unwrap();
     assert_eq!(b.devices[0].writable_regs(), [0x10]);
     let second_bus = "\n[[bus]]\nid = \"sys-2\"\nkind = \"i2c\"\ncontroller = \"uart3\"\nsda = \"GPIO8\"\nscl = \"GPIO9\"\n";
-    let second_device = "\n[[device]]\nid = \"pmic-2\"\nbus = \"sys\"\naddr = 0x35\n";
+    // Every device states its maximum transfer, and the bus port and boot
+    // programs keep to it.
+    let missing = named.replace("max_transfer = 1\n", "");
+    let e = toml::from_str::<BoardDef>(&missing).unwrap_err();
+    assert!(e.to_string().contains("max_transfer"), "{e}");
+    let zero = named.replace("max_transfer = 1\n", "max_transfer = 0\n");
+    let e = requirements::check_board(&board(&zero), &m).unwrap_err();
+    assert!(e.contains("max_transfer is at least 1"), "{e}");
+    let long = named.replace("bytes = [0x01]", "bytes = [0x01, 0x02]");
+    let e = requirements::check_board(&board(&long), &m).unwrap_err();
+    assert!(e.contains("takes at most 1 bytes"), "{e}");
+    let second_device =
+        "\n[[device]]\nid = \"pmic-2\"\nbus = \"sys\"\naddr = 0x35\nmax_transfer = 1\n";
     for (t, want) in [
         (
             named

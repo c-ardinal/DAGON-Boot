@@ -232,6 +232,9 @@ pub struct BoardDevice {
     pub id: String,
     pub bus: String,
     pub addr: u8,
+    /// Most data bytes the device takes in one transfer (its datasheet's;
+    /// the bus port bounds every read and write by it).
+    pub max_transfer: u32,
     #[serde(default)]
     pub regs: Vec<DeviceReg>,
     #[serde(default)]
@@ -344,6 +347,9 @@ pub(super) fn tables(b: &BoardDef, m: &McuDef) -> Result<(), String> {
                 })?;
             }
         }
+        fail(d.max_transfer == 0, || {
+            format!("device '{}': max_transfer is at least 1 byte", d.id)
+        })?;
         let bus = b
             .bus(&d.bus)
             .ok_or_else(|| format!("device '{}': bus '{}' is not in [[bus]]", d.id, d.bus))?;
@@ -565,6 +571,12 @@ fn program(b: &BoardDef, m: &McuDef, boot: &BoardBoot, a: &Action) -> Result<(),
                     bytes.is_empty() || bytes.len() > PROGRAM_BUS_BYTES_MAX,
                     || format!("{at}: bus_write sends 1..={PROGRAM_BUS_BYTES_MAX} bytes"),
                 )?;
+                fail(bytes.len() as u64 > u64::from(d.max_transfer), || {
+                    format!(
+                        "{at}: '{device}' takes at most {} bytes a transfer",
+                        d.max_transfer
+                    )
+                })?;
                 total += PROGRAM_BUS_TIMEOUT_MS;
             }
         }

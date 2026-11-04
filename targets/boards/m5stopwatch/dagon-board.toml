@@ -46,6 +46,9 @@ scl = "GPIO48"
 id = "ioe"
 bus = "sys"
 addr = 0x4F
+# Not from the M5IOE1 datasheet (not at hand): the largest transfer the
+# board's code makes, a 16-bit register pair (low and high byte).
+max_transfer = 2
 regs = [
     { name = "mode_l", reg = 0x03 },
     { name = "out_l", reg = 0x05 },
@@ -58,6 +61,9 @@ writable = ["mode_l", "out_l", "drv_l"]
 id = "pmic"
 bus = "sys"
 addr = 0x6E
+# Not from the M5PM1 datasheet (not at hand): 32 bytes of its RTC RAM are
+# written and read back in one transfer on the watch.
+max_transfer = 32
 regs = [{ name = "sys_cmd", reg = 0x0C }]
 writable = ["sys_cmd"]
 

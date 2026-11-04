@@ -247,8 +247,13 @@ pub const BOARD: &[Requirement<BoardCheck>] = &[
     },
     Requirement {
         engine: "extension capability validator",
-        fields: &["device[].addr", "device[].writable[]", "device[].regs[].reg"],
-        rule: "names unique; buses and peripherals name MCU blocks, a peripheral never one that drives DAGON's link; device ids and register names usable as code names, writable names among the regs; devices on a declared bus, I2C addresses in 0x08..=0x77",
+        fields: &[
+            "device[].addr",
+            "device[].max_transfer",
+            "device[].writable[]",
+            "device[].regs[].reg",
+        ],
+        rule: "names unique; buses and peripherals name MCU blocks, a peripheral never one that drives DAGON's link; device ids and register names usable as code names, writable names among the regs, max_transfer at least 1; devices on a declared bus, I2C addresses in 0x08..=0x77",
         check: board_boot::tables,
     },
     Requirement {

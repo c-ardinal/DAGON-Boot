@@ -841,3 +841,77 @@ fn templates_get_the_hops_and_gen_refuses_one_not_available_yet() {
         "{e}"
     );
 }
+
+#[test]
+fn write_refuses_a_symlink_at_the_final_path() {
+    let base = std::env::temp_dir().join(format!("dagon-write-link-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&base);
+    std::fs::create_dir_all(base.join("nodes/n")).unwrap();
+    std::fs::write(
+        base.join("user.rs"),
+        "mine
+",
+    )
+    .unwrap();
+    #[cfg(unix)]
+    let made =
+        std::os::unix::fs::symlink(base.join("user.rs"), base.join("nodes/n/wiring.rs")).is_ok();
+    // Windows creates file symlinks only with the privilege (or developer mode).
+    #[cfg(windows)]
+    let made =
+        std::os::windows::fs::symlink_file(base.join("user.rs"), base.join("nodes/n/wiring.rs"))
+            .is_ok();
+    if made {
+        let mut out = Vec::new();
+        let e = super::write(
+            &base,
+            "nodes/n/wiring.rs",
+            "generated
+",
+            true,
+            &mut out,
+        )
+        .unwrap_err();
+        assert!(e.contains("is a link"), "{e}");
+        assert!(out.is_empty());
+        assert_eq!(
+            std::fs::read_to_string(base.join("user.rs")).unwrap(),
+            "mine
+"
+        );
+        assert!(std::fs::symlink_metadata(base.join("nodes/n/wiring.rs"))
+            .unwrap()
+            .file_type()
+            .is_symlink());
+    } else {
+        eprintln!("symlinks are not allowed here: the symlink case did not run");
+    }
+    // A junction (Windows: no privilege needed) at the final path is a link too.
+    #[cfg(windows)]
+    {
+        std::fs::create_dir_all(base.join("src")).unwrap();
+        let p = |r: &str| base.join(r).components().collect::<std::path::PathBuf>();
+        let ok = std::process::Command::new("cmd")
+            .args(["/C", "mklink", "/J"])
+            .arg(p("nodes/n/main.rs"))
+            .arg(p("src"))
+            .output()
+            .unwrap()
+            .status
+            .success();
+        assert!(ok, "mklink /J");
+        let mut out = Vec::new();
+        let e = super::write(
+            &base,
+            "nodes/n/main.rs",
+            "generated
+",
+            true,
+            &mut out,
+        )
+        .unwrap_err();
+        assert!(e.contains("is a link"), "{e}");
+        assert_eq!(std::fs::read_dir(base.join("src")).unwrap().count(), 0);
+    }
+    let _ = std::fs::remove_dir_all(&base);
+}

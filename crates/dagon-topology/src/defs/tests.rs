@@ -301,6 +301,7 @@ gpio_count = 16
 name = "fake-1m"
 base = 0x0010_0000
 bytes = 0x10_0000
+xip = true
 
 [layout]
 app_log = { faces = [0x0010_8000, 0x0010_9000], face_size = 0x1000 }

@@ -170,6 +170,14 @@ pub(crate) fn write(
     overwrite: bool,
     out: &mut Vec<Written>,
 ) -> Result<(), String> {
+    // A link at the final path is refused, never followed or replaced: its
+    // target is the user's.
+    let link = std::fs::symlink_metadata(base.join(rel)).is_ok_and(|m| m.file_type().is_symlink());
+    if link {
+        return Err(format!(
+            "{rel} is a link (symbolic link or junction); dagon gen does not write through it"
+        ));
+    }
     let path = contained(base, Path::new(rel))?;
     let exists = path.exists();
     if exists && !overwrite {
@@ -777,11 +785,25 @@ pub fn gen_command(args: &[&str]) -> Result<(), String> {
     for line in &lines {
         println!("{line}");
     }
-    let skipped = lines.iter().filter(|l| l.starts_with("skipped")).count();
-    if skipped > 0 {
-        return Err(format!("{skipped} node(s) not generated; see above"));
+    outcome(&lines)
+}
+
+/// How `dagon gen` ends: an error naming every node (or generated folder)
+/// it did not generate, with the reason, so the exit status is non-zero.
+pub(crate) fn outcome(lines: &[String]) -> Result<(), String> {
+    let skipped: Vec<&str> = lines
+        .iter()
+        .filter_map(|l| l.strip_prefix("skipped"))
+        .map(str::trim)
+        .collect();
+    if skipped.is_empty() {
+        return Ok(());
     }
-    Ok(())
+    Err(format!(
+        "{} not generated: {}",
+        skipped.len(),
+        skipped.join("; ")
+    ))
 }
 
 /// `dagon gen` for the project whose dagon.toml is `config`: the lines it

@@ -353,6 +353,64 @@ export const LOCK = {
   },
 } as const;
 
+/**
+ * DAGON (DES-UX3-170, 185–188; round8c strings, yomiyasu). The character and
+ * every UI word say DAGON; the provider's name comes from serve and is shown
+ * only in the linking step.
+ */
+export const AGENT = {
+  name: 'DAGON',
+  menuLink: 'DAGON と連携する…',
+  menuTalk: 'DAGON と話す',
+  menuUnlink: 'DAGON との連携を外す…',
+  link: {
+    heading: 'DAGON と連携する',
+    intro: 'DAGON は連携したエージェントに構成について問い合わせて答えます。送ることへの同意は、この連携のときに一度だけいただきます。連携したあとの質問は確かめずに送ります。',
+    provider: '送り先',
+    providerNote: '今使えるのはこの 1 つです。手元の dagon serve を通して送ります',
+    key: '鍵',
+    keyNote: 'ターミナルで ANTHROPIC_API_KEY を設定し、dagon serve を起動し直してください。鍵はこのページにも送る文にも入りません',
+    keyMissing: 'この CLI にはまだ鍵がありません。連携は先に済ませておけます。',
+    sends: '送るもの',
+    neverSends: '送らないもの',
+    undo: '連携は、メニューの「DAGON との連携を外す…」でいつでも外せます。外すと同意も取り消します。',
+    agree: '同意して連携',
+    cancel: 'やめる',
+  },
+  linked: (provider: string, at: string) => `DAGON と連携した。送り先（${provider}）と送る中身への同意を記録した（${at}）`,
+  unlinked: 'DAGON との連携を外し、同意を取り消した。CLI の鍵は CLI 側で消す',
+  demoLink: 'デモでは DAGON と連携できません',
+  hello: '選んだノードやリンクについて聞けます。/ を押すと入力欄に移ります。',
+  thinking: '返事を待っています…',
+  placeholder: '質問を入力（/ キーでここに移ります）',
+  send: '送る',
+  questions: [
+    ['problem', 'これは何が問題？'],
+    ['next', '次は？'],
+    ['propose', '変更を提案'],
+    ['failure', '失敗の理由は？'],
+  ] as const,
+  showDiff: '差分を見る',
+  apply: '反映する',
+  applied: '反映した。「元に戻す」（Ctrl+Z）で戻せる',
+  allTalk: '会話をすべて見る（下の「会話」タブ）',
+  diffCaption: '変更の案（反映したあとも「元に戻す」で戻せます）',
+  talkNone: 'まだ会話はありません。DAGON の吹き出しか / キーで質問してください。',
+  you: 'あなた',
+  markOpen: 'ドラッグで移動。クリックで開く',
+  markClose: 'ドラッグで移動。クリックで畳む',
+  question: 'DAGON への質問',
+  errors: {
+    AGENT_NOT_LINKED: { text: 'DAGON はまだ連携していません。メニューの「DAGON と連携する…」から連携してください', failed: false },
+    AGENT_NO_KEY: { text: 'CLI に鍵がありません。ターミナルで ANTHROPIC_API_KEY を設定し、dagon serve を起動し直してください', failed: false },
+    AGENT_BUSY: { text: 'DAGON はほかの質問に答えています。少し待ってから聞いてください', failed: false },
+    AGENT_TIMEOUT: { text: '× 返事が時間内に届きませんでした。もう一度聞いてください', failed: true },
+    AGENT_FAILED: { text: '× 返事を受け取れませんでした。もう一度聞いてください', failed: true },
+    DEMO: { text: 'デモでは DAGON と連携できません', failed: false },
+    OLD_CLI: { text: 'この CLI は DAGON に対応していません。新しい dagon で dagon serve を起動し直してください', failed: false },
+  },
+} as const;
+
 /** The bottom drawer (DES-UX3-015) and its tabs. */
 export const DRAWER = {
   label: '下の引き出し',

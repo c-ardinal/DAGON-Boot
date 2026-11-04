@@ -1,0 +1,44 @@
+// Development stand-in for serve's agent routes (docs/agent-api.md), until
+// the CLI side is merged: `?agent` links on the page only, `?agent=linked`
+// starts linked, `&agentdemo` refuses linking as `dagon demo` does. The
+// answers are fixed sentences, never an agent's.
+import type { AgentApi, AgentStatus } from './agent.svelte.ts';
+
+const SENDS = ['構成と定義の事実（ノード・リンク・部品・設定値）', '選んだノードやリンク', '確かめた結果（問題・◇ 未対応・更新の記録）'];
+const NEVER = ['鍵', 'コマンドとその出力の全文', 'ファイルのパス'];
+const ANSWERS: Record<string, string> = {
+  problem: 'このノードに問題はありません。\n\n確かめた結果と更新の記録のどちらにも、このノードの問題は出ていません。',
+  next: '親機とつないで、更新ファイルを選んでください。\n\n構成に問題はなく、このパソコンにつながる親機とその直下の子機を更新できます。',
+  propose: 'ウォッチの UART の速さを 921600 にする案です。\n\n速さを上げると、更新の時間が短くなります。',
+  failure: '失敗した記録はありません。',
+};
+
+/** `yaml`: the page's 構成 now, which the proposal changes. */
+export function agentMock(q: URLSearchParams, yaml: () => string, wait = (ms: number) => new Promise((r) => setTimeout(r, ms))): AgentApi {
+  let consent: AgentStatus['consent'] = q.get('agent') === 'linked' ? { at: new Date().toISOString().slice(0, 19) + 'Z', provider: 'anthropic' } : null;
+  const status = (): AgentStatus => ({
+    available: true,
+    linked: consent !== null,
+    provider: { id: 'anthropic', name: 'Claude (Anthropic)' },
+    consent,
+    sends: SENDS,
+    never_sends: NEVER,
+  });
+  const json = (body: unknown, code = 200) => new Response(JSON.stringify(body), { status: code, headers: { 'Content-Type': 'application/json' } });
+  return async (method, path, body) => {
+    if (path === 'agent') return json(status());
+    if (path === 'agent/link') {
+      if (q.has('agentdemo')) return json({ error: 'demo', code: 'DEMO' }, 403);
+      consent = method === 'POST' ? { at: new Date().toISOString().slice(0, 19) + 'Z', provider: 'anthropic' } : null;
+      return json(status());
+    }
+    if (path === 'agent/ask') {
+      if (!consent) return json({ error: 'not linked', code: 'AGENT_NOT_LINKED' }, 409);
+      await wait(1200);
+      const kind = String((body as { kind?: string }).kind ?? 'free');
+      const proposal = kind === 'propose' ? { yaml_diff: '   - from: hub\n     to: watch\n     kind: uart\n-    baud: 115200\n+    baud: 921600', topology: yaml().replace('baud: 115200', 'baud: 921600') } : null;
+      return json({ answer: ANSWERS[kind] ?? 'その質問には、構成の事実からは答えられません。', proposal });
+    }
+    return json({ error: 'not found' }, 404);
+  };
+}

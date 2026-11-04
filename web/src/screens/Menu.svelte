@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { MENU, START } from '../app/copy.ts';
+  import { AGENT, MENU, START } from '../app/copy.ts';
   import type { StartChoice } from '../app/start.svelte.ts';
 
   interface Props {
@@ -10,9 +10,14 @@
     /** Held while an update or recovery runs. */
     locked: boolean;
     restartButton?: HTMLButtonElement;
+    /** DAGON (DES-UX3-188): not linked, "DAGON と連携する…"; linked, "DAGON と話す" and "DAGON との連携を外す…". */
+    agentLinked: boolean;
+    onlink: (at: Element) => void;
+    ontalk: () => void;
+    onunlink: () => void;
   }
 
-  let { onstart, onrestart, locked, restartButton = $bindable() }: Props = $props();
+  let { onstart, onrestart, locked, restartButton = $bindable(), agentLinked, onlink, ontalk, onunlink }: Props = $props();
   const ITEMS: [StartChoice, string][] = [
     ['new', START.new],
     ['sample', START.sample],
@@ -27,6 +32,12 @@
       <li><button class="secondary" data-control="project" aria-disabled={locked} onclick={() => !locked && onstart(c)}>{label}</button></li>
     {/each}
     <li><button class="secondary" data-control="project" aria-disabled={locked} bind:this={restartButton} onclick={() => !locked && onrestart()}>{MENU.restart}</button></li>
+    {#if agentLinked}
+      <li class="agent"><button class="secondary" data-control="ask" onclick={ontalk}>{AGENT.menuTalk}</button></li>
+      <li><button class="secondary" onclick={onunlink}>{AGENT.menuUnlink}</button></li>
+    {:else}
+      <li class="agent"><button class="secondary" data-control="link" onclick={(e) => onlink(e.currentTarget)}>{AGENT.menuLink}</button></li>
+    {/if}
   </ul>
 </nav>
 
@@ -44,5 +55,8 @@
     margin: 0;
     padding: 0;
     list-style: none;
+  }
+  .agent {
+    margin-left: auto;
   }
 </style>

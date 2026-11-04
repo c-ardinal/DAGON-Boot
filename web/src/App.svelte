@@ -1,7 +1,7 @@
 <script lang="ts">
   import { tick, untrack } from 'svelte';
   import { bandOf } from './app/band.ts';
-  import { ANNOUNCE, BAND, BUTTON, CANVAS, DEFINE, DIFF, DRAWER, LOCK, HUB_TOGGLE, MODE, NODE, ORDER, PLAN, PRODUCT, RECONNECT, SAVE, SKIP, STEP, TIME } from './app/copy.ts';
+  import { AGENT, ANNOUNCE, BAND, BUTTON, CANVAS, DEFINE, DIFF, DRAWER, LOCK, HUB_TOGGLE, MODE, NODE, ORDER, PLAN, PRODUCT, RECONNECT, SAVE, SKIP, STEP, TIME } from './app/copy.ts';
   import { webSerial } from './app/connect.ts';
   import { HUB_LOCKED, hubOf, view, type Action } from './app/machine.ts';
   import { Operate, waterOf, type Progress } from './app/operate.svelte.ts';
@@ -9,6 +9,10 @@
   import Band from './screens/Band.svelte';
   import Drawer, { type DrawerTab } from './screens/Drawer.svelte';
   import { activeStates, lockOf, stateName, type Control } from './app/locks.ts';
+  import { Agent, type AskKind, type Selection } from './app/agent.svelte.ts';
+  import { agentMock } from './app/agentMock.ts';
+  import Dagon from './screens/Dagon.svelte';
+  import LinkDialog from './screens/LinkDialog.svelte';
   import Detail from './screens/Detail.svelte';
   import { Define, type Operable } from './app/define/define.svelte.ts';
   import { topoDiff } from './app/define/diff.ts';
@@ -93,6 +97,10 @@
   const cli = new Cli();
   /** The 定義 document: the project's 構成 as edited (§5.2: its YAML is the one source of truth). */
   const d = new Define();
+  /** DAGON's link to its agent through serve (development: `?agent` stands in for serve's routes). */
+  const agentStandIn = dev && params.has('agent');
+  const agent = new Agent(agentStandIn ? agentMock(params, () => d.config.yaml) : (m, p, b) => cli.api(m, p, b));
+  if (agentStandIn) void agent.refresh();
   /** Web Serial, which the page never uses while it drives the simulated desk. */
   const ports = webSerial(serial, () => cli.sim !== null);
   cli.onDevice = (need) => (need ? op.handOver() : op.cliReturned());
@@ -125,6 +133,7 @@
       require_release_key();
       useReleaseKey(document.querySelector<HTMLMetaElement>('meta[name="dagon-release-key"]')?.content);
       if (cli.state !== 'ready') return;
+      void agent.refresh();
       // The project's MCU and board definitions; the builtin set when serve has none (or no serve).
       useServedDefinitions(await cli.definitions());
       // A project open in serve opens at once; without one the page stays on SC-S0.
@@ -345,6 +354,59 @@
   /** Define mode's drawing scale: up to 32 ノード fit by zooming out; the canvas scrolls to pan. */
   let zoom = $state(1);
 
+  /** The linking dialog (DES-UX3-188), and requests to open DAGON's bubble. */
+  let linkOpen = $state(false);
+  let dagonOpen = $state(0);
+  async function openLink(at?: Element | null) {
+    if (cli.sim) return showWhy(AGENT.demoLink, at);
+    if (stopped('link', at)) return;
+    if (!agent.status) await agent.refresh();
+    if (!agent.status) return showWhy(AGENT.errors.OLD_CLI.text, at);
+    menuOpen = false;
+    linkOpen = true;
+  }
+  async function agree() {
+    linkOpen = false;
+    const p = await agent.setLink(true);
+    if (p) return showWhy(p.text, null, p.failed);
+    const c = agent.status?.consent;
+    note(AGENT.linked(agent.status?.provider.name ?? '', c?.at ?? ''));
+    dagonOpen++;
+  }
+  async function unlink() {
+    menuOpen = false;
+    const p = await agent.setLink(false);
+    if (p) return showWhy(p.text, null, p.failed);
+    note(AGENT.unlinked);
+    if (drawerTab === 'talk') drawerTab = null;
+  }
+  /** What is selected, as the agent's question names it. */
+  function selection(): Selection | undefined {
+    const k = mode === 'define' ? d.selected : op.selected;
+    if (!k) return undefined;
+    if (k.startsWith('node:')) return { node: k.slice(5) };
+    const to = k.slice(5);
+    const from = d.config.links.find((l) => l.to === to)?.from;
+    return from ? { link: { from, to } } : undefined;
+  }
+  function askDagon(text: string, kind: AskKind, at: Element) {
+    if (stopped('ask', at)) return;
+    void agent.ask(text, kind, selection());
+  }
+  /** 『反映する』: the proposal goes in as one 構成 edit (undoable) and is saved like any edit. */
+  function applyProposal(i: number, at: Element) {
+    if (stopped('apply', at)) return;
+    const p = agent.messages[i]?.proposal;
+    if (!p) return;
+    try {
+      d.importRelease(fromYaml(p.topology, d.doc.names).topo);
+    } catch {
+      return showWhy(AGENT.errors.AGENT_FAILED.text, at, true);
+    }
+    agent.applied(i);
+    note(AGENT.applied);
+  }
+
   /** The bottom drawer's open tab (DES-UX3-015), null while closed. */
   let drawerTab = $state<string | null>(null);
   const pickTab = (id: string) => (drawerTab = drawerTab === id ? null : id);
@@ -357,6 +419,7 @@
   const drawerTabs = $derived<DrawerTab[]>([
     { id: 'problems', label: DRAWER.problems, count: problemCount, alarm: true },
     { id: 'log', label: DRAWER.log },
+    ...(agent.linked ? [{ id: 'talk', label: DRAWER.talk }] : []),
   ]);
   /** Widths of the floating windows, so the trees centre between them. */
   let partsW = $state(0);
@@ -368,6 +431,11 @@
     if (screen === 'work' && e.key.toLowerCase() === 'j' && (e.ctrlKey || e.metaKey)) {
       e.preventDefault();
       return pickTab(drawerTab ?? 'problems');
+    }
+    const t = e.target as HTMLElement;
+    if (screen === 'work' && agent.linked && e.key === '/' && !/^(INPUT|SELECT|TEXTAREA)$/.test(t.tagName)) {
+      e.preventDefault();
+      return void dagonOpen++;
     }
     if (mode !== 'define') return;
     const el = e.target as HTMLElement;
@@ -619,7 +687,7 @@
   const hub = $derived(hubOf(op.state));
   const connected = $derived(!['idle', 'lost'].includes(hub));
   /** DAGON waits for its agent's answer (the lock table's 返事待ち). */
-  let thinking = $state(false);
+  const thinking = $derived(agent.thinking);
   const BUILD_KINDS = new Set(['build', 'sign', 'release', 'gen', 'conform']);
   const running = (kinds: (k: string) => boolean) => cli.jobs.some((j) => (j.state === 'running' || j.state === 'queued') && kinds(j.kind));
   /** The lock table's states now (DES-UX3-182), leftmost first. */
@@ -635,19 +703,21 @@
       connecting: ['L03', 'L06', 'L08'].includes(op.state),
       disconnected: !connected,
       thinking,
-      cliNone: cli.state !== 'ready',
+      // The development stand-in answers for serve's agent routes, so DAGON is not stopped by its absence.
+      cliNone: cli.state !== 'ready' && !agentStandIn,
     }),
   );
   const lockedBy = (c: Control) => lockOf(c, lockStates);
   /** Operations stopped now: dimmed through `data-locks` on the frame (base.css). */
   const locksNow = $derived((Object.keys(LOCK.controls) as Control[]).filter((c) => lockedBy(c) !== null).join(' '));
   /** The reason of a stopped operation, shown where it was pressed (information style, role=status). */
-  let why = $state<{ text: string; x: number; y: number } | null>(null);
+  let why = $state<{ text: string; x: number; y: number; failed: boolean } | null>(null);
   let whyTimer: ReturnType<typeof setTimeout> | undefined;
   const WHY_MS = 4000;
-  function showWhy(text: string, at?: Element | null) {
+  /** `failed`: a refused operation (red, role=alert); otherwise information. */
+  function showWhy(text: string, at?: Element | null, failed = false) {
     const r = at?.getBoundingClientRect();
-    why = { text, x: r ? r.left : innerWidth / 2, y: r ? r.bottom + 6 : innerHeight / 2 };
+    why = { text, x: r ? r.left : innerWidth / 2, y: r ? r.bottom + 6 : innerHeight / 2, failed };
     note(text);
     clearTimeout(whyTimer);
     whyTimer = setTimeout(() => (why = null), WHY_MS);
@@ -796,7 +866,7 @@
 {#snippet defineCanvas()}
   <main id="canvas" tabindex="-1" aria-describedby="canvas-help" class="define">
     <p id="canvas-help" class="visually-hidden">{CANVAS.describe}</p>
-    <div class="toolbar" bind:offsetHeight={toolbarH}>
+    <div class="toolbar" data-avoid="" bind:offsetHeight={toolbarH}>
       <button class="secondary" data-control="edit" aria-disabled={!d.canUndo} onclick={() => d.undo()}>{DEFINE.undo}</button>
       <button class="secondary" data-control="edit" aria-disabled={!d.canRedo} onclick={() => d.redo()}>{DEFINE.redo}</button>
       <div class="seg" role="radiogroup" aria-label="{DEFINE.graph}・{DEFINE.table}">
@@ -885,6 +955,27 @@
 {#snippet drawerBody(tab: string)}
   {#if tab === 'problems'}
     <Problems {d} />
+  {:else if tab === 'talk'}
+    {#if agent.messages.length === 0}
+      <p class="log-none">{AGENT.talkNone}</p>
+    {:else}
+      <ol class="talk">
+        {#each agent.messages as m, i (i)}
+          <li class={m.role}>
+            <span class="who">{m.role === 'dagon' ? AGENT.name : AGENT.you}</span>
+            <p class:failed={m.failed}>{m.text}</p>
+            {#if m.more}<p class="more">{m.more}</p>{/if}
+            {#if m.proposal}
+              <figure>
+                <figcaption>{AGENT.diffCaption}</figcaption>
+                <pre>{#each m.proposal.yaml_diff.split('\n') as line, k (k)}<span class:add={line.startsWith('+')} class:del={line.startsWith('-')}>{line}</span>{'\n'}{/each}</pre>
+                {#if !m.applied}<button class="primary" data-control="apply" onclick={(e) => applyProposal(i, e.currentTarget)}>{AGENT.apply}</button>{/if}
+              </figure>
+            {/if}
+          </li>
+        {/each}
+      </ol>
+    {/if}
   {:else if tab === 'log'}
     {#if notes.length === 0}
       <p class="log-none">{DRAWER.logNone}</p>
@@ -984,7 +1075,16 @@
       {hubLocked}
     />
     {#if menuOpen}
-      <Menu onstart={toStart} onrestart={() => (restartOpen = true)} locked={modeLocked} bind:restartButton />
+      <Menu
+        onstart={toStart}
+        onrestart={() => (restartOpen = true)}
+        locked={modeLocked}
+        bind:restartButton
+        agentLinked={agent.linked}
+        onlink={openLink}
+        ontalk={() => ((menuOpen = false), dagonOpen++)}
+        onunlink={() => void unlink()}
+      />
     {/if}
     {#if screen === 'start'}
       <aside class="left"></aside>
@@ -995,14 +1095,17 @@
       <div class="stage">
         {@render canvas()}
         {#if layout === 'wide' || layout === 'narrow'}
-          <aside class="float parts" bind:offsetWidth={partsW}>{@render left()}</aside>
+          <aside class="float parts" data-avoid="" bind:offsetWidth={partsW}>{@render left()}</aside>
         {:else if drawerOpen}
-          <div class="float parts" id="drawer" role="dialog" aria-modal="true" aria-label={ORDER.heading} tabindex="-1" bind:this={drawerEl} bind:offsetWidth={partsW} onkeydown={drawerKeys}>
+          <div class="float parts" data-avoid="" id="drawer" role="dialog" aria-modal="true" aria-label={ORDER.heading} tabindex="-1" bind:this={drawerEl} bind:offsetWidth={partsW} onkeydown={drawerKeys}>
             {@render left()}
           </div>
         {/if}
+        {#if agent.linked}
+          <Dagon {agent} place={cli.hello?.workspace ?? d.doc.topo.name ?? 'local'} onask={askDagon} onapply={applyProposal} ontalk={() => (drawerTab = 'talk')} openRequest={dagonOpen} />
+        {/if}
         {#if sheetShown}
-          <aside class="float sheet right" bind:offsetWidth={sheetW}>{@render right()}</aside>
+          <aside class="float sheet right" data-avoid="" bind:offsetWidth={sheetW}>{@render right()}</aside>
         {/if}
       </div>
       <Drawer tabs={drawerTabs} open={drawerTab} onpick={pickTab} body={drawerBody} state={stateName(lockStates)} />
@@ -1021,7 +1124,10 @@
   />
   {#if why}
     <!-- Round8d: a stopped operation's reason is information (blue edge), never red. -->
-    <div class="why" role="status" style:left="{Math.max(8, Math.min(why.x, innerWidth - 336))}px" style:top="{Math.min(why.y, innerHeight - 96)}px">{why.text}</div>
+    <div class="why" class:failed={why.failed} role={why.failed ? 'alert' : 'status'} style:left="{Math.max(8, Math.min(why.x, innerWidth - 336))}px" style:top="{Math.min(why.y, innerHeight - 96)}px">{why.text}</div>
+  {/if}
+  {#if linkOpen && agent.status}
+    <LinkDialog status={agent.status} onagree={() => void agree()} oncancel={() => (linkOpen = false)} />
   {/if}
   {#if restartOpen}
     <Restart onconfirm={restart} oncancel={cancelRestart} />
@@ -1202,6 +1308,49 @@
   .log {
     list-style: none;
   }
+  .talk {
+    display: grid;
+    gap: var(--s-3);
+    margin: 0;
+    padding: var(--s-3) var(--s-5);
+    list-style: none;
+    font: 400 var(--t-small-size) / var(--t-small-lh) var(--f-ja);
+  }
+  .talk p {
+    margin: 0;
+  }
+  .talk .who {
+    color: var(--c-muted);
+    font-size: var(--t-caption-size);
+  }
+  .talk .user p {
+    color: var(--c-muted);
+  }
+  .talk .failed {
+    color: var(--c-signal);
+  }
+  .talk .more {
+    white-space: pre-wrap;
+  }
+  .talk figure {
+    margin: var(--s-2) 0 0;
+  }
+  .talk pre {
+    margin: var(--s-1) 0 var(--s-2);
+    padding: var(--s-2) var(--s-3);
+    border: 1px solid var(--c-line);
+    border-radius: var(--r-s);
+    font: 400 var(--t-mono-size) / var(--t-mono-lh) var(--f-mono);
+    overflow-x: auto;
+  }
+  /* A proposal's diff: added lines in blue, removed ones muted and struck (not red: nothing failed). */
+  .talk .add {
+    color: var(--c-accent);
+  }
+  .talk .del {
+    color: var(--c-muted);
+    text-decoration: line-through;
+  }
   .log time {
     color: var(--c-muted);
     font-family: var(--f-mono);
@@ -1244,6 +1393,9 @@
     box-shadow: 0 0.25rem 1rem rgb(0 0 0 / 0.5);
     pointer-events: none;
     animation: why-in 120ms var(--ease-out);
+  }
+  .why.failed {
+    border-color: var(--c-signal);
   }
   @keyframes why-in {
     from {

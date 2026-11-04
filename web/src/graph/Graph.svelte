@@ -303,6 +303,7 @@
         style:left="{pos[n.id].x}px"
         style:top="{pos[n.id].y}px"
         data-key={key}
+        data-avoid={selected === key ? '' : undefined}
         tabindex={focusKey === key ? 0 : -1}
         aria-pressed={selected === key}
         aria-label={spokenName(n, m, v)}
@@ -361,7 +362,7 @@
 </div>
   {#if dot}
     <!-- The focal number (DES-UX3-187): bottom-left, just above what is under the canvas; it never scrolls away. -->
-    <div class="dot" role="img" aria-label={dot.name} bind:offsetHeight={dotH} bind:offsetWidth={dotW}>
+    <div class="dot" data-avoid="" role="img" aria-label={dot.name} bind:offsetHeight={dotH} bind:offsetWidth={dotW}>
       <span class="dot-label">{dot.label}</span>
       <span class="dot-num">{dot.value}</span>{#if dot.of !== undefined}<span class="dot-of">/{dot.of}</span>{/if}{#if dot.unit}<span class="dot-of">{dot.unit}</span>{/if}
       {#if dot.sub}<span class="dot-sub"

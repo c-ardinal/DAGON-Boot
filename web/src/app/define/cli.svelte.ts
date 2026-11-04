@@ -198,6 +198,11 @@ export class Cli {
     return new Uint8Array(await r.arrayBuffer());
   }
 
+  /** A /v1/ call with the passphrase (the DAGON agent routes: /v1/agent, /v1/agent/link, /v1/agent/ask). */
+  api(method: string, path: string, body?: unknown): Promise<Response> {
+    return this.call(method, path, body);
+  }
+
   private call(method: string, path: string, body?: unknown): Promise<Response> {
     const headers: Record<string, string> = { Authorization: `Bearer ${this.pass}` };
     if (body !== undefined) headers['Content-Type'] = 'application/json';

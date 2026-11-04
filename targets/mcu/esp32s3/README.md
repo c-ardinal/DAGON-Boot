@@ -10,7 +10,7 @@ and not on the board. Kind V: the stock ESP-IDF 2nd stage with app rollback
 | `node` | `arm_watchdog`, `start` (the link task), `running_version`, `now_ms` |
 | `liveness`, `trial` | watchdog policy: no feed before CONFIRM, then deadline-based |
 | `rom`, `serve` | ENTER_ROM and what follows a reply |
-| `link` | link UART settings (`uart_config`, 115200 8N1) |
+| `link` | link UART settings (`uart_config(baud)`: 8N1 at the bit rate the board's definition gives) |
 | `links` | the node's uplinks as `Link`s (`Uart`, `UsbCdc`) and `LINK_KINDS` |
 | `flash`, `boot`, `sys` | `Flash`, `BootSelectV` over otadata, `Clock` / `Watchdog` / `Reset` |
 | `layout`, `partitions.csv`, `otadata`, `framer` | partition table (needs 8 MB flash or more), otadata, frame cutter |
@@ -35,7 +35,7 @@ kinds this package offers (`links::LINK_KINDS`):
 | `ethernet` | NotYet | No |
 | `can` | NotYet | No |
 
-- Up `uart`: UART0 at 115200 8N1 (`links::Uart`), and up `usb-cdc`: the
+- Up `uart`: UART0, 8N1 at the board's link bit rate (`links::Uart`), and up `usb-cdc`: the
   chip's USB Serial/JTAG (`links::UsbCdc`, `Reconnect::Reenumerates`);
   the node serves both at once.
 
@@ -75,7 +75,7 @@ constructed as
 
 Pins and wiring are not here. A board crate (`targets/boards/*`, e.g.
 `dagon-board-m5stopwatch`) hands `node::start` a `NodePeripherals`: the link
-UART already set up on its pins with `link::uart_config()`, USB Serial/JTAG,
+UART already set up on its pins with `link::uart_config(baud)`, USB Serial/JTAG,
 the flash, the RTC timer, and a `&'static mut dyn BoardDef`:
 
 - `bring_up()`: runs once in the link task before it serves (IO expander pin
@@ -219,5 +219,5 @@ Features: `conform` answers CONF_RUN (CT-01/02/03/07/08) in front of the
 agent, using the first erase unit of the OTA slot that is neither running
 nor the fallback as scratch; `panic-reset` (default) resets on panic.
 
-The M5StopWatch build, first install and conformance runs are in
-`targets/boards/m5stopwatch/README.md` and `samples/esp32s3-app/README.md`.
+A board package's README covers its build, first install and
+conformance runs (`targets/boards/m5stopwatch/README.md`).

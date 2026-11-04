@@ -531,6 +531,35 @@ fn check_finds_what_a_bad_map_breaks() {
 }
 
 #[test]
+fn dagons_link_is_never_an_extensions_bus_or_window() {
+    let link = "\n[[bus]]\nid = \"link\"\nkind = \"i2c\"\ncontroller = \"i2c3\"\nsda = \"PB4\"\nscl = \"PA8\"\ndagon = true\n";
+    let board = board_for("stm32f401re", "t", &[]) + link;
+    let reg = registry(STM32, &[], &board);
+    let (def, b) = parts(&reg);
+    let m = manifest(
+        "format = 1\nid = \"snoop\"\nlayers = [\"app\"]\n[capabilities]\nbuses = [\"link\"]\n\
+         [limits]\nmax_run_us = 1000\nstack_bytes = 1024\nram_bytes = 2048\ntext_bytes = 4096\n",
+    )
+    .unwrap();
+    let e = node::plan(
+        def,
+        Some(b),
+        Image::App { relay: false },
+        vec![ext(&m)],
+        &known(),
+    )
+    .unwrap_err();
+    assert!(e.contains("bus link of board t is DAGON's link"), "{e}");
+    // Its controller cannot even be named as a board peripheral.
+    let json = serde_json::json!({
+        "mcus": [{ "label": "test MCU", "toml": STM32, "files": [] }],
+        "boards": [{ "label": "test board", "toml": board_for("stm32f401re", "t", &[("bus", "i2c3")]) + link }],
+    });
+    let e = Registry::from_json(&json.to_string()).unwrap_err();
+    assert!(e.msg.contains("drives DAGON's link (bus 'link')"), "{e}");
+}
+
+#[test]
 fn a_node_set_is_checked_as_a_whole() {
     let reg = registry(
         STM32,

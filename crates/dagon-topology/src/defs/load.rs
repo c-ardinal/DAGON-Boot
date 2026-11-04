@@ -466,6 +466,44 @@ fn tree(root: &Path) -> Result<Registry, DefError> {
     Ok(reg)
 }
 
+/// Every file [`load`] reads from disk for `sources`, found the way it
+/// finds them: a tree's MCU and board definitions and the text files the
+/// MCU definitions name, a project's dagon.toml and its MCU files with
+/// theirs. A build script that validates with `load` watches these.
+pub(super) fn files(sources: &[Source<'_>]) -> Result<Vec<PathBuf>, DefError> {
+    let mut out = Vec::new();
+    let mcu = |path: PathBuf, out: &mut Vec<PathBuf>| -> Result<(), DefError> {
+        let dir = path.parent().unwrap_or(Path::new(".")).to_path_buf();
+        let m = parse_mcu(&read(&path)?, &Pkg::Dir(dir.clone()))?;
+        out.extend(m.partitions.iter().map(|rel| dir.join(rel)));
+        out.push(path);
+        Ok(())
+    };
+    for s in sources {
+        match s {
+            Source::Tree(root) => {
+                let targets = root.join("targets");
+                for dir in packages(&targets.join("mcu"), MCU_FILE)? {
+                    mcu(dir.join(MCU_FILE), &mut out)?;
+                }
+                for dir in packages(&targets.join("boards"), BOARD_FILE)? {
+                    out.push(dir.join(BOARD_FILE));
+                }
+            }
+            Source::Project(toml) => {
+                let defs: ProjectDefs =
+                    toml::from_str(&read(toml)?).or_else(|e| err(toml.display(), e.to_string()))?;
+                let base = toml.parent().unwrap_or(Path::new("."));
+                for rel in &defs.mcu_files {
+                    mcu(base.join(rel), &mut out)?;
+                }
+                out.push(toml.to_path_buf());
+            }
+        }
+    }
+    Ok(out)
+}
+
 #[derive(serde::Deserialize)]
 struct ProjectDefs {
     #[serde(default)]

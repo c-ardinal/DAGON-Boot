@@ -41,6 +41,8 @@ pub trait BoardDef {
     const FLASH_SIZE: usize;
     /// GPIO of an LED the diagnostic panic handler may blink.
     const DIAG_LED: Option<u8>;
+    /// That LED lights at a high level (else at low).
+    const DIAG_LED_ACTIVE_HIGH: bool = true;
     /// Everything the app gets (pins and peripherals DAGON does not use).
     type UserIo;
     /// Splits the chip's peripherals.
@@ -124,7 +126,7 @@ pub fn open<B: BoardDef, const N: usize>(
     };
     #[cfg(target_os = "none")]
     if let Some(gpio) = B::DIAG_LED {
-        crate::arm::led::select(gpio);
+        crate::arm::led::select(gpio, B::DIAG_LED_ACTIVE_HIGH);
     }
     use dagon_mcu_common::shared::{driver, FlashDriver};
     static FLASH_DRIVER: StaticCell<FlashDriver<RpFlash>> = StaticCell::new();

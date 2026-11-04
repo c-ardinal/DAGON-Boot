@@ -101,10 +101,28 @@ definition that leaves a class out is refused with the class named.
 | `[[part]]` | Parts built from the board package itself (`name`, `sub`, `bin`) |
 | `[boot]` | The boot stage's board values: `led` (a `[[pin]]`), `led_active` (`high`, `low`), `halt = { pattern, period_ms }` (`blink`, `code`, `off`), `power_hold = { pin, level }` |
 | `[[boot.action]]` | A boot action program (`boot-program` format 1): `on` (a boot event the event catalog marks action-capable) and `ops`: `{ op = "led", state }` (`on`, `off`, `toggle`), `{ op = "gpio", pin, level }` (a `[[pin]]` with `boot = true`; the power hold pin takes only its hold level), `{ op = "delay", ms }` (1 to 20), `{ op = "bus_write", device, reg, bytes }` (a `[[device]]` register in its `writable` list, 1 to 8 bytes, only on an MCU with `boot_capabilities = ["i2c"]`). At most 32 ops and 50 ms per event, a bus write counting 5 ms |
-| `[[pin]]` | Pins extensions and boot programs may name: `pin`, `boot` (a boot program may drive it), `levels` (allowed levels; all when left out) |
-| `[[bus]]` | Buses extensions reach through the bus service: `id`, `kind` (`i2c`, `spi`, `uart`, `can`), `controller` (an MCU `[[peripheral]]`) |
-| `[[peripheral]]` | Board names for MCU blocks extensions may declare: `id`, `mcu` (the MCU `[[peripheral]]` id) |
-| `[[device]]` | A device on a board bus: `id`, `bus`, `addr`, `writable` (registers anything outside DAGON may write) |
+| `[[pin]]` | The board's pins: `pin`, `name` (what the board package's code takes it by, `a-z 0-9 _`), `boot` (a boot program may drive it), `levels` (allowed levels; all when left out) |
+| `[[bus]]` | The board's buses: `id` (`a-z 0-9 - _`), `kind` (`i2c`, `spi`, `uart`, `can`), `controller` (an MCU `[[peripheral]]`), its pins by signal (`sda`, `scl` for i2c; `tx` and/or `rx` for uart; `tx`, `rx` for can; `sck` and `mosi` and/or `miso` for spi), `hz` (i2c, spi) or `baud` (uart, can), `dagon` (`true`: DAGON's own link runs on it, so neither the bus nor its controller is ever an extension's) |
+| `[[peripheral]]` | Board names for MCU blocks extensions may declare: `id`, `mcu` (the MCU `[[peripheral]]` id; never the controller of a `dagon = true` bus) |
+| `[[device]]` | A device on a board bus: `id` (`a-z 0-9 - _`), `bus`, `addr`, `max_transfer` (required: the most data bytes it takes in one transfer, from its datasheet; the bus port and boot programs keep to it), `regs = [{ name, reg }]` (its registers by name, `a-z 0-9 _`), `writable` (registers anything outside DAGON may write: numbers or names of `regs`) |
+
+No pin appears twice across `[[pin]]` and the buses, and every name code is
+generated from (pin names, bus ids and their signals, device ids, with `-`
+read as `_`) appears once. On a board that declares buses, the
+`[coordinator]` pins are those of its `dagon = true` I2C and UART buses.
+
+A board package's build script reads its own definition
+(`dagon_topology::defs::codegen::package_build`) and includes the result:
+the board id, flash size, default link, boot LED and halt pattern, bus
+speeds and devices as constants (`def.rs`), and every named pin, bus and
+bus pin as a HAL type with a `take!(p.<name>)` macro (`pins.rs`), and each
+device as a `dagon_events::Device` bus port capability (`devices.rs`, the
+only way one is made). The build reruns when any definition the validation
+read changes. The MCU packages' boot images read the board's `[boot]` the
+same way (`boot_build`): the board `DAGON_BOARD=<board id>` names, with
+`DAGON_PROJECT=<path of dagon.toml>` a project's inline `[board.<id>]` too;
+the name may be left out only while the MCU has a single board definition,
+never guessed. The code holds no pin, address or pattern of its own.
 
 ## What leaves this machine
 

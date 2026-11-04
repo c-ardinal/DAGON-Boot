@@ -3,16 +3,19 @@
 DAGON board package for the Waveshare RP2040-Touch-LCD-1.28 (topology board
 id `waveshare-rp2040-touch-lcd-1.28`; Cargo package names cannot hold the
 `.`, so it reads `-1-28` there). It implements the RP2040 MCU package's
-`BoardDef` and adds the board's extras.
+`BoardDef` and adds the board's extras. Every board fact is read from
+`dagon-board.toml` when the package builds (`build.rs`): `def` holds the
+constants (bus speeds, the boot LED), `def::pins` the pin and block types
+and `take!`.
 
-| Use | Pins |
-|---|---|
-| Display SPI1 (CLK, MOSI), CS, DC, RST, backlight | GPIO10, 11, 9, 8, 13, 25 |
-| Touch controller reset (held high) | GPIO22 |
-| Sub-node I2C0 (SDA, SCL), 400 kHz | GPIO16, 17 |
-| Sub-node PIO0 UART (TX, RX), 115200 8N1 | GPIO26, 27 |
-| Sub-node NRST (open drain), BOOT0 | GPIO18, 28 |
-| Diagnostic blink codes | GPIO25 (backlight) |
+| Use | Definition | Pins |
+|---|---|---|
+| Display SPI1 (CLK, MOSI) at 20 MHz; CS, DC, RST, backlight | bus `lcd`; pins `lcd_cs`, `lcd_dc`, `lcd_rst`, `backlight` | GPIO10, 11; 9, 8, 13, 25 |
+| Touch controller reset (held high) | pin `touch_rst` | GPIO22 |
+| DAGON's I2C0 to sub nodes (SDA, SCL), 400 kHz | bus `child-i2c` (`dagon = true`) | GPIO16, 17 |
+| DAGON's PIO0 UART to sub nodes (TX, RX), 115200 8N1 | bus `child-uart` (`dagon = true`) | GPIO26, 27 |
+| Sub-node NRST (open drain), BOOT0 | pins `child_nrst`, `child_boot0` | GPIO18, 28 |
+| Boot LED and diagnostic blink codes (1 Hz halt) | `[boot] led`, `halt` | GPIO25 (backlight) |
 
 - `Board::split` gives DAGON the flash, the watchdog and USB, and the app
   `Io`: the display, the touch reset, and the sub-node I2C, UART and

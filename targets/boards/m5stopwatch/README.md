@@ -1,25 +1,32 @@
 # dagon-board-m5stopwatch
 
 Board layer for the M5StopWatch (ESP32-S3R8, 16 MB flash): the pins and
-extras on top of `dagon-mcu-esp32s3` (`targets/mcu/esp32s3`).
+extras on top of `dagon-mcu-esp32s3` (`targets/mcu/esp32s3`). Every board
+fact is read from `dagon-board.toml` when the package builds (`build.rs`):
+`def` holds the constants (devices, flash size), `def::pins` the pin and
+block types and `take!`.
 
 | What | Where |
 |---|---|
-| DAGON link | rear bus MUX_IO_1/2 = UART0 TX G43 / RX G44 (`rear_uart`), plus USB Serial/JTAG on USB-C |
-| Rear pins UART/USB switch | M5IOE1 IO expander (I2C 0x4F) PYG1 on the internal I2C (SDA G47, SCL G48), driven low at bring-up |
-| Power manager | M5PM1 on the internal I2C; ENTER_ROM method 2 only with the `pmic-download` feature (address 0x6E and command 0xA3 are unconfirmed assumptions) |
+| DAGON link | bus `link` (`dagon = true`): rear MUX_IO_1/2 = UART0 TX G43 / RX G44 (`rear_uart`), plus USB Serial/JTAG on USB-C |
+| Internal bus | bus `sys` (I2C0, SDA G47, SCL G48), shared as `SYS_I2C` |
+| Rear pins UART/USB switch | device `ioe`, M5IOE1 IO expander (`IOE`), PYG1 driven low at bring-up (`route_rear_uart`) |
+| Power manager | device `pmic`, M5PM1 (`PMIC`); ENTER_ROM method 2 only with the `pmic-download` feature (the command byte 0xA3 is an unconfirmed assumption) |
 | Flash | 16 MB (`FLASH_SIZE`, espflash `--flash-size 16mb`); partition table from the MCU crate |
-| Node tag | `watch-s3` (`TARGET_TAG`, the `DAGON_TARGET_TAG` default) |
+| Node tag | `TARGET_TAG`: `DAGON_TARGET_TAG` at build time (the node's tag in the 構成; the build fails without it) |
 
-`M5StopWatch` implements the MCU crate's `BoardDef`. It owns the internal I2C
-bus and is moved into the DAGON link task by `start`, so nothing else on the
-watch may use that bus afterwards. An app that needs it (the display power,
-for example) uses it before `start`, through `p.I2C0.reborrow()`.
+`start` opens the internal bus and puts it into `SYS_I2C`
+(`dagon_events::Shared`); DAGON's bring-up (`M5StopWatch`, the
+`BoardBringUp` port and the MCU crate's `BoardDef`) and the app both take it
+through `SYS_I2C.with(|bus| ..)`, bounded and synchronous. A device's
+registers go through the bus port: `IOE.write(&SYS_I2C, reg, &bytes)`
+writes only registers the definition lists as `writable`, `IOE.read(..)`
+reads any. An app that needs the bus before `start` opens it itself
+through `p.I2C0.reborrow()`.
 
 ## Adding DAGON to an app
 
-The DAGON-specific lines of an app (see `samples/esp32s3-app` for a complete
-one):
+The DAGON-specific lines of an app:
 
 ```rust
 use dagon_board_m5stopwatch::{self as board, dagon_pins};
@@ -44,9 +51,9 @@ The app is built with `DAGON_PUBKEY` (release key) and linked with
 `esp_bootloader_esp_idf::esp_app_desc!()`. Without CONFIRM within about 4 s
 of starting, a new image is rolled back.
 
-For another ESP32-S3 board: copy this crate and change the pins in
-`rear_uart` / `dagon_pins!`, the `BoardDef` extras (or use the MCU crate's
-`PlainBoard`), `FLASH_SIZE` and `TARGET_TAG`.
+For another ESP32-S3 board: copy this crate, write the board's
+`dagon-board.toml` (its buses, pins and devices), and change the `BoardDef`
+extras (or use the MCU crate's `PlainBoard`) and `TARGET_TAG`.
 
 ## Factory firmware
 
@@ -56,7 +63,8 @@ selects nothing bootable; it receives an image into ota_0 or ota_1 and hands
 over with SET_PENDING, REBOOT and CONFIRM.
 
 ```sh
-# from this directory (espup toolchain; DAGON_PUBKEY set to the release key)
+# from this directory (espup toolchain; DAGON_PUBKEY set to the release key,
+# DAGON_TARGET_TAG to the node's tag)
 cargo build --release --bin factory
 ```
 
@@ -78,7 +86,8 @@ package) with the `{{node}}` / `{{dep:<package>}}` placeholders, `.cargo/config.
   the 2nd stage rolls back to the previous slot.
 
 ```sh
-# from this directory (espup toolchain; DAGON_PUBKEY or DAGON_ALLOW_TEST_KEY=1)
+# from this directory (espup toolchain; DAGON_PUBKEY or DAGON_ALLOW_TEST_KEY=1,
+# DAGON_TARGET_TAG to the node's tag)
 cargo build --release
 ```
 

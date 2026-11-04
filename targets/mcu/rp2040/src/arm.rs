@@ -17,37 +17,17 @@ pub fn xip_flash() -> Mapped {
     }
 }
 
-/// A diagnostic LED (the board package names the GPIO, e.g. a display
-/// backlight) driven straight through the registers, so every stage can
-/// show where it is, whatever the clocks and HAL state.
+/// A diagnostic LED (the board names the GPIO: the boot images take its
+/// definition's `[boot] led`, an app its board package's) driven straight
+/// through the registers, so every stage can show where it is, whatever
+/// the clocks and HAL state.
 pub mod led {
-    use core::sync::atomic::{AtomicU8, Ordering};
+    use core::sync::atomic::{AtomicBool, AtomicU8, Ordering};
 
     const NONE: u8 = u8::MAX;
     static GPIO: AtomicU8 = AtomicU8::new(NONE);
-
-    /// The boot images' (stage0, boot core) LED: `DAGON_DIAG_LED` at build
-    /// time (a decimal GPIO number), else GPIO25, the backlight of the hub
-    /// board (Waveshare RP2040-Touch-LCD-1.28).
-    pub const BOOT_GPIO: u8 = match option_env!("DAGON_DIAG_LED") {
-        Some(v) => parse_gpio(v.as_bytes()),
-        None => 25,
-    };
-
-    const fn parse_gpio(v: &[u8]) -> u8 {
-        let mut n: u32 = 0;
-        let mut i = 0;
-        while i < v.len() {
-            assert!(
-                v[i].is_ascii_digit(),
-                "DAGON_DIAG_LED: a decimal GPIO number"
-            );
-            n = n * 10 + (v[i] - b'0') as u32;
-            i += 1;
-        }
-        assert!(!v.is_empty() && n < 30, "DAGON_DIAG_LED: GPIO 0..=29");
-        n as u8
-    }
+    /// The LED lights at a high level (else at low).
+    static ACTIVE_HIGH: AtomicBool = AtomicBool::new(true);
 
     const RESETS_CLR: *mut u32 = (0x4000_C000 + 0x3000) as *mut u32;
     const RESET_DONE: *const u32 = (0x4000_C000 + 0x8) as *const u32;
@@ -66,12 +46,18 @@ pub mod led {
         }
     }
 
-    /// Names the LED's GPIO (0..=29) without touching it, for the panic
-    /// handler of the `diag-panic` feature.
-    pub fn select(gpio: u8) {
+    /// Names the LED's GPIO (0..=29) and the level that lights it, without
+    /// touching it, for the panic handler of the `diag-panic` feature.
+    pub fn select(gpio: u8, active_high: bool) {
         if gpio < 30 {
             GPIO.store(gpio, Ordering::Relaxed);
+            ACTIVE_HIGH.store(active_high, Ordering::Relaxed);
         }
+    }
+
+    /// The level that lights the selected LED is high.
+    pub fn active_high() -> bool {
+        ACTIVE_HIGH.load(Ordering::Relaxed)
     }
 
     /// The selected GPIO, if any.
@@ -84,9 +70,10 @@ pub mod led {
     pub const ROSC_MS: u32 = 6_500;
     pub const PLL_MS: u32 = 125_000;
 
-    /// Selects `gpio` (0..=29) as the LED and takes it: output, on.
-    pub fn init(gpio: u8) {
-        select(gpio);
+    /// Selects `gpio` (0..=29) as the LED lit at `active_high`'s level and
+    /// takes it: output, on.
+    pub fn init(gpio: u8, active_high: bool) {
+        select(gpio, active_high);
         let Some(g) = selected() else { return };
         let ctrl = (IO_BANK0 + g as u32 * 8 + 4) as *mut u32;
         // SAFETY: fixed RP2040 register addresses; releasing IO/PADS bank 0
@@ -96,13 +83,16 @@ pub mod led {
             let done = IO_BANK0_RESET | PADS_BANK0_RESET;
             while RESET_DONE.read_volatile() & done != done {}
             ctrl.write_volatile(FUNCSEL_SIO);
-            SIO_OE_SET.write_volatile(mask());
-            SIO_OUT_SET.write_volatile(mask());
         }
+        set(true);
+        // SAFETY: as above; output enable of the selected GPIO only.
+        unsafe { SIO_OE_SET.write_volatile(mask()) };
     }
 
+    /// Lights (`on`) or darkens the LED, at its polarity.
     pub fn set(on: bool) {
-        let reg = if on { SIO_OUT_SET } else { SIO_OUT_CLR };
+        let high = on == ACTIVE_HIGH.load(Ordering::Relaxed);
+        let reg = if high { SIO_OUT_SET } else { SIO_OUT_CLR };
         // SAFETY: SIO set/clear registers only affect the selected GPIO
         // (none if no LED was selected).
         unsafe { reg.write_volatile(mask()) };
@@ -187,7 +177,7 @@ pub fn step(n: u8) {
 fn panic(_: &core::panic::PanicInfo) -> ! {
     match led::selected() {
         Some(gpio) => {
-            led::init(gpio);
+            led::init(gpio, led::active_high());
             led::code(STEP.load(core::sync::atomic::Ordering::Relaxed))
         }
         None => loop {

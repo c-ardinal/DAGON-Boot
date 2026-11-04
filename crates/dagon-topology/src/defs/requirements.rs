@@ -150,7 +150,7 @@ pub const MCU: &[Requirement<McuCheck>] = &[
     Requirement {
         engine: "topology check V-18/V-20, host ROM path",
         fields: &["rom_i2c.addr", "rom_i2c.max_hz", "rom_i2c.erase_sectors[]"],
-        rule: "addr in 0x08..=0x77; max_hz >= 1; erase_sectors unique",
+        rule: "addr in 0x08..=0x77; max_hz >= 1; erase_sectors unique; each pin pair (sda, scl) once, so a pair names one controller",
         check: rom_i2c,
     },
     Requirement {
@@ -268,9 +268,20 @@ pub const BOARD: &[Requirement<BoardCheck>] = &[
     },
     Requirement {
         engine: "extension capability validator",
-        fields: &["device[].addr", "device[].writable[]"],
-        rule: "names unique; buses and peripherals name MCU blocks; devices on a declared bus, I2C addresses in 0x08..=0x77",
+        fields: &[
+            "device[].addr",
+            "device[].max_transfer",
+            "device[].writable[]",
+            "device[].regs[].reg",
+        ],
+        rule: "names unique; buses and peripherals name MCU blocks, a peripheral never one that drives DAGON's link; device ids and register names usable as code names, writable names among the regs, max_transfer at least 1; devices on a declared bus, I2C addresses in 0x08..=0x77",
         check: board_boot::tables,
+    },
+    Requirement {
+        engine: "board package code generation (defs::codegen)",
+        fields: &["bus[].hz", "bus[].baud"],
+        rule: "pin names and bus ids usable as code names, each generated name once after - becomes _ (device ids too); each bus names its kind's pins; hz on i2c/spi, baud on uart/can, above 0; no pin used twice; [coordinator] pins are DAGON's link buses where buses are declared",
+        check: board_boot::wiring,
     },
     Requirement {
         engine: "boot action interpreter (boot-program 1)",
@@ -548,5 +559,17 @@ fn rom_i2c(m: &McuDef) -> Result<(), String> {
     let mut seen = std::collections::BTreeSet::new();
     fail(!r.erase_sectors.iter().all(|s| seen.insert(s)), || {
         "rom_i2c.erase_sectors repeats a sector".into()
-    })
+    })?;
+    for (i, p) in r.pairs.iter().enumerate() {
+        if let Some(q) = r.pairs[..i]
+            .iter()
+            .find(|q| q.sda == p.sda && q.scl == p.scl)
+        {
+            return Err(format!(
+                "rom_i2c.pairs: {}/{} is listed for {} and {}; a pin pair names one controller",
+                p.sda, p.scl, q.controller, p.controller
+            ));
+        }
+    }
+    Ok(())
 }

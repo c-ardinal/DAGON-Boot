@@ -38,12 +38,17 @@ test = false
 [dependencies]
 dagon-mcu-esp32s3 = { path = "../../mcu/esp32s3" }
 dagon-port = { path = "../../../crates/dagon-port" }
+dagon-events = { path = "../../../crates/dagon-events" }
 dagon-proto = { path = "../../../crates/dagon-proto" }
 esp-hal = { version = "1.2.2", features = ["esp32s3", "unstable"] }
 esp-bootloader-esp-idf = { version = "0.6.0", features = ["esp32s3"] }
 esp-rtos = { version = "0.4.0", features = ["esp32s3", "embassy"] }
 embassy-executor = "0.10"
 static_cell = "2"
+
+[build-dependencies]
+# Reads and checks dagon-board.toml with the rest of the source tree.
+dagon-topology = { path = "../../../crates/dagon-topology" }
 
 [profile.release]
 opt-level = "s"

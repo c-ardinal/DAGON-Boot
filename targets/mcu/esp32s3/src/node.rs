@@ -84,7 +84,7 @@ const REQUEST_BUDGET_MS: u32 = 120_000;
 pub struct NodePeripherals<'d> {
     pub rtc_timer: RTC_TIMER<'d>,
     /// The link UART on the board's pins, configured with
-    /// `link::uart_config()` (115200 8N1).
+    /// `link::uart_config(baud)` (8N1 at the board's link bit rate).
     pub uart: Uart<'d, Blocking>,
     pub usb_device: USB_DEVICE<'d>,
     pub flash: FLASH<'d>,

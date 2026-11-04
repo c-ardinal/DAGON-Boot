@@ -10,9 +10,12 @@
 //! fixed order ([`compose`]). Async display and log tasks read
 //! [`Published`] state.
 #![no_std]
-#![forbid(unsafe_code)]
+// One `unsafe fn`: `Device::from_definition`, whose contract is that only
+// generated definition data calls it.
+#![deny(unsafe_code)]
 #![deny(unused_must_use)]
 
+mod board;
 mod catalog;
 mod compact;
 mod compose;
@@ -22,6 +25,7 @@ mod machine;
 mod ports;
 mod published;
 
+pub use board::{BoardBringUp, BusError, Device, Shared};
 pub use catalog::{Catalog, Entry, Field, Flags, Layer, Machines, Observe};
 pub use compact::Compact;
 pub use compose::{

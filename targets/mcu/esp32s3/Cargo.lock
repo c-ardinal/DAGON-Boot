@@ -208,6 +208,7 @@ version = "0.1.0"
 dependencies = [
  "dagon-format",
  "embassy-sync 0.8.0",
+ "embedded-hal 1.0.0",
 ]
 
 [[package]]

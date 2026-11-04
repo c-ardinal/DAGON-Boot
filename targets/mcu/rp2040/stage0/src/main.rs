@@ -3,8 +3,10 @@
 //! it. Holds boot2 for the whole flash. No signature check here: boot core
 //! images are verified before they are ever selected.
 //!
-//! Nothing to start: the backlight blinks fast (100 ms) forever. The `diag`
-//! build lights it at entry; a panic blinks the code of the last step
+//! Nothing to start: the board's boot LED (`[boot] led`) blinks five times
+//! faster than the board's halt pattern, so a stage0 halt is told from the
+//! boot core's; with the pattern off it stays dark. The `diag` build lights
+//! it at entry; a panic blinks the code of the last step
 //! (1 entry, 2 reading the log, 3 checking the boot core). A failed check
 //! blinks five groups, then a long pause: 4 (5 if the log named no slot);
 //! which test failed (`image::Fail`, 7 if SHA-256 itself is wrong); then
@@ -27,9 +29,27 @@ use panic_halt as _;
 #[used]
 static BOOT2: [u8; 256] = rp2040_boot2::BOOT_LOADER_GENERIC_03H;
 
-const HALT_MS: u32 = 100;
+/// Half period of stage0's halt blink: five times faster than the
+/// board's.
+const HALT_MS: Option<u32> = match board_def::HALT_BLINK_PERIOD_MS {
+    Some(ms) => Some(ms / 2 / 5),
+    None => None,
+};
 /// Initial stack pointer in stage0's vector table (top of RAM in memory.x).
 const STACK_TOP: u32 = RAM + RAM_LEN;
+
+/// The board's `[boot]` values (build.rs).
+#[allow(dead_code)]
+mod board_def {
+    include!(concat!(env!("OUT_DIR"), "/board.rs"));
+}
+
+/// Takes the board's boot LED, if it has one (output, on).
+fn led_init() {
+    if let Some(gpio) = board_def::BOOT_LED_GPIO {
+        led::init(gpio, board_def::BOOT_LED_ACTIVE_HIGH);
+    }
+}
 
 /// What the first 4 bytes at `addr` read as: 1 erased (FF), 2 zero, 3 the
 /// `expected` bytes, 4 something else, 5 unreadable.
@@ -50,7 +70,7 @@ fn probe(flash: &mut impl Flash, addr: u32, expected: &[u8; 4]) -> u8 {
 fn main() -> ! {
     step(1);
     if cfg!(feature = "diag") {
-        led::init(led::BOOT_GPIO);
+        led_init();
     }
     let mut flash = xip_flash();
     step(2);
@@ -74,7 +94,7 @@ fn main() -> ! {
         }
         // Nothing to start: recover with BOOTSEL and the install UF2.
         Err(why) => {
-            led::init(led::BOOT_GPIO);
+            led_init();
             if cfg!(feature = "diag") {
                 let k = if image::sha_ok() { why as u8 } else { 7 };
                 led::codes(&[
@@ -85,7 +105,15 @@ fn main() -> ! {
                     probe(&mut flash, STAGE0 + 0x100, &STACK_TOP.to_le_bytes()),
                 ])
             }
-            led::halt(HALT_MS, led::ROSC_MS)
+            match HALT_MS {
+                Some(ms) => led::halt(ms, led::ROSC_MS),
+                None => {
+                    led::set(false);
+                    loop {
+                        cortex_m::asm::wfi();
+                    }
+                }
+            }
         }
     }
 }

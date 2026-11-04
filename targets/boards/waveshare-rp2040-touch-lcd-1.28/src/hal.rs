@@ -20,6 +20,10 @@ bind_interrupts!(pub struct Irqs {
     DMA_IRQ_0 => dma::InterruptHandler<DMA_CH0>;
 });
 
+use crate::def::pins::{
+    Backlight, ChildBoot0, ChildI2c, ChildI2cScl, ChildI2cSda, ChildNrst, ChildUart, ChildUartRx,
+    ChildUartTx, Lcd, LcdCs, LcdDc, LcdMosi, LcdRst, LcdSck, TouchRst,
+};
 #[cfg(feature = "display")]
 use crate::{display, gc9a01};
 use crate::{BOARD_ID, DIAG_LED, FLASH_SIZE, I2C_HZ, LCD_SPI_HZ, UART_BAUD};
@@ -105,13 +109,13 @@ pub fn start<const N: usize>(
     spare
 }
 
-/// Down `i2c` on this board: I2C0 on GPIO16/17 at [`I2C_HZ`] with the
+/// Down `i2c` on this board: bus `child-i2c` at [`I2C_HZ`] with the
 /// DAGON mailbox.
 pub fn downlink_i2c(p: SubI2c) -> I2cLink<RpI2c<'static, I2C0>> {
     p.link(Irqs)
 }
 
-/// Down `uart` on this board: the PIO0 UART on GPIO26/27 at [`UART_BAUD`]
+/// Down `uart` on this board: the PIO UART of bus `child-uart` at [`UART_BAUD`]
 /// (the relay wraps it in `links::Uart` with its clock).
 pub fn downlink_uart(p: SubUart) -> PioStream<'static, PIO0, 0, 1> {
     p.stream(Irqs)
@@ -121,6 +125,7 @@ impl BoardDef for Board {
     const BOARD_ID: &'static str = BOARD_ID;
     const FLASH_SIZE: usize = FLASH_SIZE;
     const DIAG_LED: Option<u8> = Some(DIAG_LED);
+    const DIAG_LED_ACTIVE_HIGH: bool = crate::DIAG_LED_ACTIVE_HIGH;
     type UserIo = Io;
 
     fn split(p: Peripherals) -> (DagonParts, Io) {
@@ -131,29 +136,29 @@ impl BoardDef for Board {
         };
         let io = Io {
             display: Display {
-                spi: p.SPI1,
-                clk: p.PIN_10,
-                mosi: p.PIN_11,
+                spi: take!(p.lcd),
+                clk: take!(p.lcd_sck),
+                mosi: take!(p.lcd_mosi),
                 dma: p.DMA_CH0,
-                cs: p.PIN_9,
-                dc: p.PIN_8,
-                rst: p.PIN_13,
-                backlight: p.PIN_25,
+                cs: take!(p.lcd_cs),
+                dc: take!(p.lcd_dc),
+                rst: take!(p.lcd_rst),
+                backlight: take!(p.backlight),
             },
-            touch_rst: p.PIN_22,
+            touch_rst: take!(p.touch_rst),
             sub_i2c: SubI2c {
-                bus: p.I2C0,
-                sda: p.PIN_16,
-                scl: p.PIN_17,
+                bus: take!(p.child_i2c),
+                sda: take!(p.child_i2c_sda),
+                scl: take!(p.child_i2c_scl),
             },
             sub_uart: SubUart {
-                pio: p.PIO0,
-                tx: p.PIN_26,
-                rx: p.PIN_27,
+                pio: take!(p.child_uart),
+                tx: take!(p.child_uart_tx),
+                rx: take!(p.child_uart_rx),
             },
             sub_ctl: SubCtl {
-                nrst: p.PIN_18,
-                boot0: p.PIN_28,
+                nrst: take!(p.child_nrst),
+                boot0: take!(p.child_boot0),
             },
             spare: Spare {
                 pin_0: p.PIN_0,
@@ -210,7 +215,7 @@ impl BoardDef for Board {
 pub struct Io {
     pub display: Display,
     /// Touch controller reset; see [`hold_touch`].
-    pub touch_rst: Peri<'static, PIN_22>,
+    pub touch_rst: Peri<'static, TouchRst>,
     pub sub_i2c: SubI2c,
     pub sub_uart: SubUart,
     pub sub_ctl: SubCtl,
@@ -283,24 +288,24 @@ pub struct Spare {
 }
 
 /// Holds the touch controller out of reset and otherwise leaves it alone.
-pub fn hold_touch(pin: Peri<'static, PIN_22>) -> Output<'static> {
+pub fn hold_touch(pin: Peri<'static, TouchRst>) -> Output<'static> {
     Output::new(pin, Level::High)
 }
 
 pub struct Display {
-    pub spi: Peri<'static, SPI1>,
-    pub clk: Peri<'static, PIN_10>,
-    pub mosi: Peri<'static, PIN_11>,
+    pub spi: Peri<'static, Lcd>,
+    pub clk: Peri<'static, LcdSck>,
+    pub mosi: Peri<'static, LcdMosi>,
     pub dma: Peri<'static, DMA_CH0>,
-    pub cs: Peri<'static, PIN_9>,
-    pub dc: Peri<'static, PIN_8>,
-    pub rst: Peri<'static, PIN_13>,
-    pub backlight: Peri<'static, PIN_25>,
+    pub cs: Peri<'static, LcdCs>,
+    pub dc: Peri<'static, LcdDc>,
+    pub rst: Peri<'static, LcdRst>,
+    pub backlight: Peri<'static, Backlight>,
 }
 
 /// The display's bus and lines, ready for [`gc9a01::Panel::new`].
 pub struct DisplayPins {
-    pub spi: Spi<'static, SPI1, Async>,
+    pub spi: Spi<'static, Lcd, Async>,
     pub cs: Output<'static>,
     pub dc: Output<'static>,
     pub rst: Output<'static>,
@@ -325,15 +330,15 @@ impl Display {
     }
 }
 
-/// I2C0 to sub nodes.
+/// DAGON's I2C to sub nodes (bus `child-i2c`).
 pub struct SubI2c {
-    pub bus: Peri<'static, I2C0>,
-    pub sda: Peri<'static, PIN_16>,
-    pub scl: Peri<'static, PIN_17>,
+    pub bus: Peri<'static, ChildI2c>,
+    pub sda: Peri<'static, ChildI2cSda>,
+    pub scl: Peri<'static, ChildI2cScl>,
 }
 
 impl SubI2c {
-    /// I2C0 as controller at [`I2C_HZ`], with the DAGON mailbox link.
+    /// The controller at [`I2C_HZ`], with the DAGON mailbox link.
     pub fn link(
         self,
         irqs: impl Binding<I2C0_IRQ, i2c::InterruptHandler<I2C0>>,
@@ -346,11 +351,12 @@ impl SubI2c {
     }
 }
 
-/// A UART to sub nodes, on PIO0 (state machines 0 and 1).
+/// DAGON's UART to sub nodes (bus `child-uart`), on a PIO (state machines
+/// 0 and 1).
 pub struct SubUart {
-    pub pio: Peri<'static, PIO0>,
-    pub tx: Peri<'static, PIN_26>,
-    pub rx: Peri<'static, PIN_27>,
+    pub pio: Peri<'static, ChildUart>,
+    pub tx: Peri<'static, ChildUartTx>,
+    pub rx: Peri<'static, ChildUartRx>,
 }
 
 impl SubUart {
@@ -377,8 +383,8 @@ impl SubUart {
 
 /// Reset and boot-mode lines of an STM32 sub node (ROM recovery path).
 pub struct SubCtl {
-    pub nrst: Peri<'static, PIN_18>,
-    pub boot0: Peri<'static, PIN_28>,
+    pub nrst: Peri<'static, ChildNrst>,
+    pub boot0: Peri<'static, ChildBoot0>,
 }
 
 impl SubCtl {

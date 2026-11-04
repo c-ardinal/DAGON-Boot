@@ -33,9 +33,8 @@ pub fn start<const N: usize>(
 /// board, and a version on trial then goes back to the previous one.
 #[embassy_executor::task]
 async fn work(spare: Spare, lease: Lease) {
-    // For example, a GPIO as an output:
-    //   let mut out = embassy_rp::gpio::Output::new(spare.pin_25, embassy_rp::gpio::Level::Low);
-    let _ = spare.pin_25;
+    // The pins and peripherals board.rs leaves for the app are in `spare`.
+    let _ = spare;
     loop {
         lease.busy(WORK_BUDGET_MS);
         // Your work here.

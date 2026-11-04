@@ -182,9 +182,15 @@ fn capabilities(def: &McuDef, board: Option<&BoardDef>, m: &Manifest) -> Result<
         })?;
     }
     for x in &c.buses {
-        fail(b.bus(x).is_none(), || {
+        let bus = b.bus(x).ok_or_else(|| {
             format!(
                 "extension {}: bus {x} is not in board {}'s [[bus]]",
+                m.id, b.id
+            )
+        })?;
+        fail(bus.dagon, || {
+            format!(
+                "extension {}: bus {x} of board {} is DAGON's link, never an extension's",
                 m.id, b.id
             )
         })?;

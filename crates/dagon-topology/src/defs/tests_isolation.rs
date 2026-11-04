@@ -140,6 +140,8 @@ levels = ["high"]
 id = "sys"
 kind = "i2c"
 controller = "uart3"
+sda = "GPIO6"
+scl = "GPIO7"
 
 [[peripheral]]
 id = "can0"
@@ -149,6 +151,7 @@ mcu = "can1"
 id = "pmic"
 bus = "sys"
 addr = 0x34
+max_transfer = 1
 writable = [0x10]
 "#
     )
@@ -431,6 +434,210 @@ fn board_boot_tables_are_checked_against_board_and_mcu() {
     );
     let e = requirements::check_board(&board(&long), &m).unwrap_err();
     assert!(e.contains("over the 50 ms"), "{e}");
+}
+
+#[test]
+fn board_wiring_is_checked_for_the_code_generated_from_it() {
+    let mut m = parse_mcu_text(&isolated_mcu(), &[]).unwrap();
+    m.boot_capabilities = vec![super::isolation::BootCapability::I2c];
+    let text = boot_board();
+    let named = text.replace("pin = \"GPIO2\"\n", "pin = \"GPIO2\"\nname = \"led\"\n");
+    requirements::check_board(&board(&named), &m).unwrap();
+    for (from, to, want) in [
+        ("sda = \"GPIO6\"", "sda = \"GPIO2\"", "pin 'GPIO2' is both"),
+        ("sda = \"GPIO6\"\n", "", "names its sda pin"),
+        (
+            "scl = \"GPIO7\"\n",
+            "scl = \"GPIO7\"\ntx = \"GPIO8\"\n",
+            "has no tx pin",
+        ),
+        (
+            "scl = \"GPIO7\"\n",
+            "scl = \"GPIO7\"\nbaud = 9600\n",
+            "has no baud",
+        ),
+        ("scl = \"GPIO7\"\n", "scl = \"GPIO7\"\nhz = 0\n", "speed 0"),
+        ("name = \"led\"", "name = \"Led\"", "must be a-z"),
+        ("id = \"sys\"", "id = \"9sys\"", "ids are a-z"),
+        (
+            "mcu = \"can1\"",
+            "mcu = \"uart3\"",
+            "drives DAGON's link (bus 'sys')",
+        ),
+    ] {
+        let t = named
+            .replace("scl = \"GPIO7\"\n", "scl = \"GPIO7\"\ndagon = true\n")
+            .replace(from, to);
+        // The device follows its bus's new id.
+        let t = match to.strip_prefix("id = ") {
+            Some(id) => t.replace("bus = \"sys\"", &format!("bus = {id}")),
+            None => t,
+        };
+        let e = requirements::check_board(&board(&t), &m).unwrap_err();
+        assert!(e.contains(want), "{to}: {e}");
+    }
+}
+
+/// `text` with its `GPIO2` pin named `name`.
+fn pin_named(text: &str, name: &str) -> String {
+    let named = text.replace(
+        "pin = \"GPIO2\"\n",
+        &format!("pin = \"GPIO2\"\nname = {name:?}\n"),
+    );
+    assert_ne!(named, text);
+    named
+}
+
+#[test]
+fn definition_names_become_code_names_or_are_refused() {
+    let mut m = parse_mcu_text(&isolated_mcu(), &[]).unwrap();
+    m.boot_capabilities = vec![super::isolation::BootCapability::I2c];
+    let text = boot_board();
+    let named = text.replace(
+        "writable = [0x10]",
+        "regs = [{ name = \"ctl\", reg = 0x10 }]\nwritable = [\"ctl\"]",
+    );
+    let b = board(&named);
+    requirements::check_board(&b, &m).unwrap();
+    assert_eq!(b.devices[0].writable_regs(), [0x10]);
+    let second_bus = "\n[[bus]]\nid = \"sys-2\"\nkind = \"i2c\"\ncontroller = \"uart3\"\nsda = \"GPIO8\"\nscl = \"GPIO9\"\n";
+    // Every device states its maximum transfer, and the bus port and boot
+    // programs keep to it.
+    let missing = named.replace("max_transfer = 1\n", "");
+    let e = toml::from_str::<BoardDef>(&missing).unwrap_err();
+    assert!(e.to_string().contains("max_transfer"), "{e}");
+    let zero = named.replace("max_transfer = 1\n", "max_transfer = 0\n");
+    let e = requirements::check_board(&board(&zero), &m).unwrap_err();
+    assert!(e.contains("max_transfer is at least 1"), "{e}");
+    let long = named.replace("bytes = [0x01]", "bytes = [0x01, 0x02]");
+    let e = requirements::check_board(&board(&long), &m).unwrap_err();
+    assert!(e.contains("takes at most 1 bytes"), "{e}");
+    let second_device =
+        "\n[[device]]\nid = \"pmic-2\"\nbus = \"sys\"\naddr = 0x35\nmax_transfer = 1\n";
+    for (t, want) in [
+        (
+            named
+                .replace("id = \"pmic\"", "id = \"pmic.v2\"")
+                .replace("device = \"pmic\"", "device = \"pmic.v2\""),
+            "ids are a-z",
+        ),
+        (
+            named.replace("writable = [\"ctl\"]", "writable = [\"nope\"]"),
+            "writable 'nope' is not in its regs",
+        ),
+        (
+            named
+                .replace("name = \"ctl\"", "name = \"Ctl\"")
+                .replace("[\"ctl\"]", "[\"Ctl\"]"),
+            "register name 'Ctl'",
+        ),
+        (
+            named.clone()
+                + second_bus
+                + &second_bus
+                    .replace("sys-2", "sys_2")
+                    .replace("GPIO8", "GPIO10")
+                    .replace("GPIO9", "GPIO11"),
+            "generated name",
+        ),
+        (
+            named.clone()
+                + second_device
+                + &second_device
+                    .replace("pmic-2", "pmic_2")
+                    .replace("0x35", "0x36"),
+            "device id after - becomes _",
+        ),
+        // One type name from two code names: `foo_bar` and `foo__bar`.
+        (
+            named.clone()
+                + &second_bus.replace("sys-2", "foo_bar")
+                + &second_bus
+                    .replace("sys-2", "foo__bar")
+                    .replace("GPIO8", "GPIO10")
+                    .replace("GPIO9", "GPIO11"),
+            "generated type name",
+        ),
+        // ... and `a_1` and `a1`.
+        (
+            pin_named(&named, "a_1") + "\n[[pin]]\npin = \"GPIO12\"\nname = \"a1\"\n",
+            "generated type name",
+        ),
+        // Keywords, in the code form (`fn`) and in the type form (`self`
+        // becomes `Self`).
+        (pin_named(&named, "fn"), "is a Rust keyword"),
+        // Not code names: a leading underscore, a raw identifier, upper case.
+        (pin_named(&named, "_led"), "must be a-z"),
+        (pin_named(&named, "r#led"), "must be a-z"),
+        (pin_named(&named, "Led"), "must be a-z"),
+        // Mixed separators meet after `-` becomes `_`: `sys-2` and `sys_2`
+        // above; `a-b_c` and `a_b-c` here.
+        (
+            named.clone()
+                + &second_bus.replace("sys-2", "a-b_c")
+                + &second_bus
+                    .replace("sys-2", "a_b-c")
+                    .replace("GPIO8", "GPIO10")
+                    .replace("GPIO9", "GPIO11"),
+            "generated name",
+        ),
+        // A digit boundary in the type form: `led_2` and `led2` are both `Led2`.
+        (
+            pin_named(&named, "led_2") + "\n[[pin]]\npin = \"GPIO12\"\nname = \"led2\"\n",
+            "generated type name",
+        ),
+        // Upper-case constants: devices `io-x` and `io_x` would both be
+        // `DEVICE_IO_X_*`.
+        (
+            named.clone()
+                + &second_device.replace("pmic-2", "io-x")
+                + &second_device
+                    .replace("pmic-2", "io_x")
+                    .replace("0x35", "0x36"),
+            "device id after - becomes _",
+        ),
+        (pin_named(&named, "self"), "is a Rust keyword"),
+        (
+            named.clone() + &second_bus.replace("sys-2", "type"),
+            "is a Rust keyword",
+        ),
+        (
+            named
+                .replace("id = \"pmic\"", "id = \"match\"")
+                .replace("device = \"pmic\"", "device = \"match\""),
+            "device id 'match' is a Rust keyword",
+        ),
+        (
+            named
+                .replace("name = \"ctl\"", "name = \"loop\"")
+                .replace("[\"ctl\"]", "[\"loop\"]"),
+            "is a Rust keyword",
+        ),
+    ] {
+        let e = requirements::check_board(&board(&t), &m).expect_err(want);
+        assert!(e.contains(want), "{want}: {e}");
+    }
+}
+
+#[test]
+fn coordinator_pins_are_dagons_link_buses() {
+    let reg = Registry::builtin();
+    let hub = reg.board("waveshare-rp2040-touch-lcd-1.28").unwrap();
+    let m = reg.mcu(&hub.mcu).unwrap();
+    let mut moved = hub.clone();
+    moved.buses.iter_mut().for_each(|b| {
+        if b.id == "child-i2c" {
+            b.sda = Some("GPIO20".into());
+        }
+    });
+    let e = requirements::check_board(&moved, m).unwrap_err();
+    assert!(e.contains("coordinator.i2c is no dagon = true"), "{e}");
+    let mut uart = hub.clone();
+    uart.buses
+        .iter_mut()
+        .for_each(|b| b.dagon &= b.kind != super::board_boot::BusKind::Uart);
+    let e = requirements::check_board(&uart, m).unwrap_err();
+    assert!(e.contains("coordinator.pio_uart"), "{e}");
 }
 
 #[test]

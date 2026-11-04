@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'vitest';
 import { RULE_FIX } from '../copy.ts';
 import { Define } from './define.svelte.ts';
-import { connect, emptyDoc, placeMcu, setLink, setLinkKind, setNode } from './model.ts';
+import { connect, emptyDoc, fromYaml, placeMcu, setLink, setLinkKind, setNode } from './model.ts';
 import { DESK_DEMO_YAML } from '../sample.ts';
 import { problemChip } from './problems.ts';
 import { LINK, LINK_WHY } from '../copy.ts';
@@ -16,6 +16,22 @@ describe('define session', () => {
     expect(d.doc.topo.nodes.map((n) => n.id)).toEqual(['hub']);
     d.placeAt({ mcu: 'stm32f401re' }, 'STM32F401RE（自作ボード）', null);
     expect(d.doc.topo.links ?? []).toEqual([]);
+  });
+
+  test('importing a topology identical to the 構成 is no change: no revision, nothing to save, no undo step', () => {
+    const d = new Define();
+    d.load(fromYaml(DESK_DEMO_YAML));
+    const rev = d.revision;
+    // A fresh object with the same content (a release made for this very 構成).
+    expect(d.importRelease(JSON.parse(JSON.stringify(d.doc.topo)))).toBe(false);
+    expect([d.revision, d.unsaved, d.canUndo]).toEqual([rev, false, false]);
+    // The same through apply from any caller (table, proposal, import of the YAML).
+    expect(d.apply(JSON.parse(JSON.stringify(d.doc)))).toBe(false);
+    expect(d.importYaml(DESK_DEMO_YAML)).toBe(true);
+    expect([d.revision, d.unsaved]).toEqual([rev, false]);
+    // A real difference is still an edit.
+    expect(d.importRelease({ ...d.doc.topo, name: 'other' })).toBe(true);
+    expect(d.unsaved).toBe(true);
   });
 
   test('editing stopped by the lock table: no path changes the 構成 (keys, double-click, drag, import, undo)', () => {

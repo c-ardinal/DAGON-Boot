@@ -8,6 +8,26 @@ import type { SaveResult } from './cli.svelte.ts';
 import { keepComments } from './comments.ts';
 import { problems, type Problem } from './problems.ts';
 
+/**
+ * A document's content as one string: keys sorted, and absent, empty-list and empty-map
+ * values dropped (a default filled in is not a change). Two documents with the same string
+ * are the same edit state, however they were built.
+ */
+export function canonical(doc: Doc): string {
+  const norm = (v: unknown): unknown => {
+    if (Array.isArray(v)) return v.map(norm);
+    if (v === null || typeof v !== 'object') return v;
+    const out: Record<string, unknown> = {};
+    for (const k of Object.keys(v).sort()) {
+      const x = norm((v as Record<string, unknown>)[k]);
+      const empty = x === undefined || (Array.isArray(x) && x.length === 0) || (x !== null && typeof x === 'object' && !Array.isArray(x) && Object.keys(x).length === 0);
+      if (!empty) out[k] = x;
+    }
+    return out;
+  };
+  return JSON.stringify(norm(doc));
+}
+
 /** Undo depth; older steps fall off. */
 const HISTORY = 100;
 
@@ -81,15 +101,15 @@ export class Define {
   }
 
   /**
-   * The lock table's check for editing (DES-UX3-182), set by the page: true when editing is
+   * The lock table's check for editing, set by the page: true when editing is
    * stopped now (the page has shown why). Every edit goes through apply, undo or redo, so a
    * key, a double-click, a drag or any later path is stopped the same way.
    */
   guard: (kind: 'edit') => boolean = () => false;
 
-  /** One edit, undoable; false when nothing changed or editing is stopped now. */
+  /** One edit, undoable; false when nothing changed (by content, not by object) or editing is stopped now. */
   apply(next: Doc): boolean {
-    if (next === this.doc) return false;
+    if (next === this.doc || canonical(next) === canonical(this.doc)) return false;
     if (this.guard('edit')) return false;
     this.past = [...this.past.slice(-(HISTORY - 1)), $state.snapshot(this.doc) as Doc];
     this.future = [];
@@ -133,7 +153,7 @@ export class Define {
   }
 
   /**
-   * A part dropped on the canvas (DES-UX3-030): placed as "置く" places it (DEFS: the board decides
+   * A part dropped on the canvas: placed as "置く" places it (DEFS: the board decides
    * 親機 or 子機), then, when dropped just under a card, linked under it in the same one edit.
    */
   placeAt(part: { board: string } | { mcu: string }, name: string, parent: string | null): void {
@@ -145,7 +165,7 @@ export class Define {
     this.status = ANNOUNCE.A01(name, next.topo.nodes.find((n) => n.id === r.id)!.role === 'coordinator');
   }
 
-  /** A port drag (DES-UX3-031): node `id` under `parent`, with the link "つなぐ先" would make. */
+  /** A port drag: node `id` under `parent`, with the link "つなぐ先" would make. */
   link(id: string, parent: string): void {
     this.apply(connect(this.doc, id, parent));
   }
@@ -209,7 +229,8 @@ export class Define {
   importYaml(text: string): boolean {
     try {
       const doc = fromYaml(text);
-      if (!this.apply(doc)) return false;
+      // The same content is read fine and changes nothing; a different one is an edit (which the lock may stop).
+      if (canonical(doc) !== canonical(this.doc) && !this.apply(doc)) return false;
       this.source = { text, as: toYaml(doc.topo) };
     } catch {
       this.unreadable = true;

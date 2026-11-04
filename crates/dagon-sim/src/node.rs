@@ -19,6 +19,9 @@ pub enum TrialApp {
     Confirms,
     /// Answers, but its self-check refuses CONFIRM.
     NeverConfirms,
+    /// Answers; its self-check passes only this many ms after boot (an app
+    /// whose tasks are still starting).
+    ConfirmsAfter(u64),
     /// Resets right after start.
     CrashesAtBoot,
     /// Runs but never answers on the link.
@@ -171,8 +174,11 @@ impl SimNode {
                 self.boots += 1;
                 continue;
             }
-            self.agent.hooks().self_check =
-                !(self.on_trial && self.trial_app == TrialApp::NeverConfirms);
+            self.agent.hooks().self_check = !(self.on_trial
+                && matches!(
+                    self.trial_app,
+                    TrialApp::NeverConfirms | TrialApp::ConfirmsAfter(_)
+                ));
             return Run::App(s);
         }
         self.idle_firmware()
@@ -245,6 +251,9 @@ impl SimNode {
         self.tick(now_ms);
         if !self.responsive() {
             return None;
+        }
+        if let (true, TrialApp::ConfirmsAfter(ms)) = (self.on_trial, self.trial_app) {
+            self.agent.hooks().self_check = now_ms.saturating_sub(self.booted_ms) >= ms;
         }
         let reply = self
             .agent

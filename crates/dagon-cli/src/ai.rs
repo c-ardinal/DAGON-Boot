@@ -53,6 +53,7 @@ struct Args {
 /// `dagon ai topology [--in <file>] [--out <yaml>] [--model <id>]`
 pub fn topology(args: &[&str]) -> Result<(), String> {
     let a = parse_args(args, std::env::var(MODEL_ENV).ok())?;
+    crate::agent::require_linked(&crate::agent::home()?)?;
     let key = api_key(std::env::var(KEY_ENV))?;
     let description = match &a.input {
         Some(p) => std::fs::read_to_string(p).map_err(|e| format!("cannot read {p}: {e}"))?,
@@ -96,7 +97,7 @@ pub fn topology(args: &[&str]) -> Result<(), String> {
     Ok(())
 }
 
-/// Whether a Claude API key is set (its value is never shown).
+/// Whether the agent's API key is set (its value is never shown).
 pub(crate) fn api_key_present() -> bool {
     api_key(std::env::var(KEY_ENV)).is_ok()
 }
@@ -414,28 +415,30 @@ fn post_messages(base: &str, key: &str, body: &Value) -> Result<Value, String> {
         .header("anthropic-version", API_VERSION)
         .header("content-type", "application/json")
         .send(body.to_string())
-        .map_err(|e| format!("Claude API request failed: {e}"))?;
+        .map_err(|e| format!("DAGON could not reach its agent: {e}"))?;
     let status = resp.status();
     if status.is_redirection() {
         return Err(format!(
-            "Claude API answered with a redirect (HTTP {status}); not followed"
+            "the agent answered with a redirect (HTTP {status}); not followed"
         ));
     }
     let text = resp
         .body_mut()
         .read_to_string()
-        .map_err(|e| format!("cannot read the Claude API response: {e}"))?;
+        .map_err(|e| format!("cannot read the agent's answer: {e}"))?;
     let v: Value = serde_json::from_str(&text)
-        .map_err(|e| format!("Claude API returned non-JSON (HTTP {status}): {e}"))?;
+        .map_err(|e| format!("the agent answered with non-JSON (HTTP {status}): {e}"))?;
     if !status.is_success() {
         let msg = v["error"]["message"].as_str().unwrap_or("no message");
-        return Err(format!("Claude API error (HTTP {status}): {msg}"));
+        return Err(format!(
+            "the agent refused the request (HTTP {status}): {msg}"
+        ));
     }
     Ok(v)
 }
 
 fn prompt(qs: &[String]) -> Result<Vec<String>, String> {
-    eprintln!("The model needs these values (it does not guess them):");
+    eprintln!("DAGON needs these values (it does not guess them):");
     let stdin = std::io::stdin();
     let mut lines = stdin.lock().lines();
     qs.iter()
@@ -453,7 +456,7 @@ fn prompt(qs: &[String]) -> Result<Vec<String>, String> {
 fn unanswered(qs: &[String]) -> String {
     let list: String = qs.iter().map(|q| format!("\n  - {q}")).collect();
     format!(
-        "the model needs values it cannot derive; add them to the description and run again \
+        "DAGON needs values it cannot derive; add them to the description and run again \
          with --in <file>:{list}"
     )
 }

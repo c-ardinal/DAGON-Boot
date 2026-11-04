@@ -1,5 +1,6 @@
 #![forbid(unsafe_code)]
 
+mod agent;
 mod ai;
 mod commands;
 mod config;
@@ -106,9 +107,13 @@ Usage:
                                      DAGON Console against a SIMULATED desk (親機 + 2 子機)
                                      with a demo key made for it: try updates without
                                      boards; --sim-fail makes that 子機's update fall back
+  dagon ai link                      link DAGON to its agent, Claude (Anthropic): shows
+                                     what is sent and asks your consent once; the key
+                                     stays in $ANTHROPIC_API_KEY
+  dagon ai unlink                    unlink DAGON and withdraw the consent
   dagon ai topology [--in <text>] [--out <yaml>] [--model <id>]
                                      board description (file or stdin) to topology YAML
-                                     via the Claude API, checked to 0 errors ($ANTHROPIC_API_KEY)
+                                     by DAGON, checked to 0 errors (needs dagon ai link)
   dagon --help
   dagon --version
 
@@ -157,6 +162,8 @@ fn main() -> ExitCode {
         ["conform", rest @ ..] => run(conform::command(rest)),
         ["sim", "run", rest @ ..] => run(simrun::run(rest)),
         ["ai", "topology", rest @ ..] => run(ai::topology(rest)),
+        ["ai", "link", rest @ ..] => run(agent::link_command(rest)),
+        ["ai", "unlink", rest @ ..] => run(agent::unlink_command(rest)),
         _ => usage_error("unknown command"),
     }
 }

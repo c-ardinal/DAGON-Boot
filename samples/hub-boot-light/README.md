@@ -20,8 +20,9 @@ on trial (after an update) ends lit instead of dark. Without the extension
 the backlight stays dark until the app's display turns it on.
 
 Each call keeps within the manifest's `max_run_us` (45 ms; an observer's
-handler is bounded by 50 ms), so the show adds at most about 80 ms to a
-boot. The extension changes nothing the boot core decides.
+handler is bounded by 50 ms). The show adds about 80 ms to a boot (two
+40 ms flashes) and about 110 ms to a boot on trial (30 ms more of
+flicker). The extension changes nothing the boot core decides.
 
 ## Enable it for the hub
 
@@ -58,7 +59,9 @@ target directory outside it, or `dagon gen` names a new hash:
 CARGO_TARGET_DIR=/tmp/hub-boot-light cargo test --target <host triple>
 ```
 
-To build the boot core without it, remove the `[extensions]` lines and run
+To build the boot core without it, remove `"boot-light"` from the hub's
+`boot` list and its entry from the hub's `trusted` list (and the
+`extensions/*` package glob only if no other extension uses it), then run
 `dagon gen hub` again.
 
 Size: the hub boot core grows by 4,648 bytes (100,176 to 104,824 bytes of

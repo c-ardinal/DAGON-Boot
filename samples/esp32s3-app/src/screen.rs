@@ -134,6 +134,13 @@ mod tests {
         assert_eq!((s.chars(), s.percent), (&b"d100"[..], Some(100)));
         let s = screen(Phase::Transferring, None, 0, None);
         assert_eq!((s.chars(), s.percent), (&b"d  0"[..], Some(0)));
+        // Nothing received yet, nothing known of the size, more than expected.
+        let s = screen(Phase::Transferring, Some((0, 1000)), 0, None);
+        assert_eq!((s.chars(), s.percent), (&b"d  0"[..], Some(0)));
+        let s = screen(Phase::Transferring, Some((5, 0)), 0, None);
+        assert_eq!((s.chars(), s.percent), (&b"d  0"[..], Some(0)));
+        let s = screen(Phase::Transferring, Some((2000, 1000)), 0, None);
+        assert_eq!((s.chars(), s.percent), (&b"d100"[..], Some(100)));
         // The bar only while transferring.
         assert_eq!(screen(Phase::Verifying, None, 0, None).percent, None);
     }

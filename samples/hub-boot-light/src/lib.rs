@@ -8,8 +8,9 @@
 //! core's own halt blink takes over.
 //!
 //! Each call stays within the manifest's `max_run_us` (45 ms; a handler of
-//! an observer is bounded by 50 ms), so the whole show adds at most about
-//! 80 ms to a boot. It changes nothing the boot core decides.
+//! an observer is bounded by 50 ms). The show adds about 80 ms to a boot
+//! (two 40 ms flashes) and about 110 ms to a boot on trial (30 ms more of
+//! flicker). It changes nothing the boot core decides.
 #![no_std]
 
 use dagon_boot::sequence;

@@ -623,19 +623,27 @@ def sync(a, desk):
 def set_bin(config, node, manifest):
     """`dagon build` builds the binary named like the package unless
     [build.<node>] names `bin`; a sample whose one binary has another name
-    (esp32s3-app: `app`) gets `bin` written into its node's table."""
+    (esp32s3-app: `app`) gets that `bin` in its node's table, and any other
+    `bin` there is replaced; one named like its package needs none, so a
+    `bin` left there is removed. With several binaries the table is left
+    as it is (the choice is the user's)."""
     m = tomllib.loads(manifest.read_text(encoding="utf-8"))
     bins = [b["name"] for b in m.get("bin", [])]
-    if len(bins) != 1 or bins[0] == m["package"]["name"]:
+    if len(bins) > 1:
         return
+    want = bins[0] if bins and bins[0] != m["package"]["name"] else None
     text = config.read_text(encoding="utf-8")
     head = f"[build.{node}]\n"
-    table = text.split(head, 1)[1].split("\n[", 1)[0] if head in text else None
-    if table is None:
+    if head not in text:
         sys.exit(f"{config}: no [build.{node}]")
-    if not re.search(r"^bin\s*=", table, re.M):
-        config.write_text(text.replace(head, f'{head}bin = "{bins[0]}"\n', 1),
-                          encoding="utf-8", newline="\n")
+    before, after = text.split(head, 1)
+    table, sep, rest = after.partition("\n[")
+    lines = [l for l in table.split("\n") if not re.match(r"bin\s*=", l)]
+    if want:
+        lines.insert(0, f'bin = "{want}"')
+    new = before + head + "\n".join(lines) + sep + rest
+    if new != text:
+        config.write_text(new, encoding="utf-8", newline="\n")
 
 
 def selftest():
@@ -659,6 +667,7 @@ def selftest():
     selftest_plan()
     selftest_select()
     selftest_restore()
+    selftest_set_bin()
     with throwaway_dir() as d:
         (d / "k").mkdir()
         (d / "k" / "dagon-signing.key").write_text("x")
@@ -670,6 +679,31 @@ def selftest():
         assert not d.exists()
     print("selftest ok")
     return 0
+
+
+def selftest_set_bin():
+    """[build.<node>] bin converges to the sample's manifest: added when
+    absent, corrected when wrong, kept when right, removed when the binary
+    is named like its package again; other tables are left alone."""
+    other = '[build.seg]\npackage = "nodes/seg"\nbin = "keep"\n'
+    renamed = '[package]\nname = "dagon-esp32s3-app"\n[[bin]]\nname = "app"\n'
+    plain = '[package]\nname = "dagon-esp32s3-app"\n[[bin]]\nname = "dagon-esp32s3-app"\n'
+    with throwaway_dir() as d:
+        config, manifest = d / "dagon.toml", d / "Cargo.toml"
+        for table, sample, want in [
+            ('package = "nodes/watch"\n', renamed, "app"),
+            ('package = "nodes/watch"\nbin = "old"\n', renamed, "app"),
+            ('bin = "app"\npackage = "nodes/watch"\n', renamed, "app"),
+            ('package = "nodes/watch"\nbin = "app"\n', plain, None),
+            ('package = "nodes/watch"\n', plain, None),
+        ]:
+            config.write_text(f"{other}\n[build.watch]\n{table}", encoding="utf-8")
+            manifest.write_text(sample, encoding="utf-8")
+            set_bin(config, "watch", manifest)
+            cfg = tomllib.loads(config.read_text(encoding="utf-8"))
+            assert cfg["build"]["watch"].get("bin") == want, (table, cfg)
+            assert cfg["build"]["watch"]["package"] == "nodes/watch"
+            assert cfg["build"]["seg"] == {"package": "nodes/seg", "bin": "keep"}
 
 
 def selftest_tamper():

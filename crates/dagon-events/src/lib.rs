@@ -29,8 +29,8 @@ pub use board::{BoardBringUp, BusError, Device, Shared};
 pub use catalog::{Catalog, Entry, Field, Flags, Layer, Machines, Observe};
 pub use compact::Compact;
 pub use compose::{
-    compose, compose_unpublished, Bounds, Clock, Composed, Head, NoPublisher, Sink, Unreadable,
-    Watchdog,
+    compose, compose_boot, compose_unpublished, BootComposed, BootExtension, Bounds, Clock,
+    Composed, Head, NoPublisher, Sink, Unreadable, Watchdog,
 };
 pub use event::{Event, EventRecord, Payload, Refused};
 pub use extension::{
@@ -60,6 +60,20 @@ state_machine! {
             /// `DECISION_BOUND_MS`; its answer was ignored.
             overran(id: ExtId, point: DecisionId, us: u32): Ready => Ready
                 emits ExtensionOverran = 0xF0 { id: ExtId, point: DecisionId, us: u32 }
+                observe(live);
+        }
+    }
+
+    /// Boot-stage extension calls and their time limits.
+    pub machine boot_extensions in Boot {
+        initial Ready;
+        states { Ready }
+        transitions {
+            /// An extension's handler ran longer than its `budget_us`
+            /// (the manifest's `max_run_us`); the boot went on with the
+            /// same decision.
+            overran(id: ExtId, budget_us: u32, us: u32): Ready => Ready
+                emits ExtensionOverran = 0xF0 { id: ExtId, budget_us: u32, us: u32 }
                 observe(live);
         }
     }

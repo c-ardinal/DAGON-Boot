@@ -1,0 +1,21 @@
+[package]
+name = "dagon-boot"
+edition.workspace = true
+license.workspace = true
+version = "0.1.0"
+description = "The boot core's sequence as a state machine: every step from the armed watchdog to the jump or the halt is an event the boot core's extensions observe"
+
+[dependencies]
+dagon-core = { path = "../dagon-core" }
+dagon-events = { path = "../dagon-events" }
+dagon-port = { path = "../dagon-port" }
+
+# Hosted builds (tests) take the standard library's critical section for
+# dagon-events; bare-metal builds take the MCU's.
+[target.'cfg(not(target_os = "none"))'.dependencies]
+critical-section = { version = "1.1", features = ["std"] }
+
+[dev-dependencies]
+# The boot tests' flash and images (dagon-core/tests/bench).
+dagon-format = { path = "../dagon-format" }
+ed25519-compact = { version = "2.6", default-features = false }

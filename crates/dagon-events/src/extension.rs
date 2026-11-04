@@ -159,6 +159,11 @@ pub trait Extension {
     }
 
     #[doc(hidden)]
+    fn __event_at(&mut self, _i: usize, e: &Event<'_>, ctx: &Ctx<'_>, _: Token) {
+        self.on_event(e, ctx)
+    }
+
+    #[doc(hidden)]
     fn __accept_at(
         &mut self,
         _i: usize,
@@ -256,6 +261,15 @@ impl<A: Extension, B: Extension> Extension for Chain<A, B> {
         }
     }
 
+    fn __event_at(&mut self, i: usize, e: &Event<'_>, ctx: &Ctx<'_>, k: Token) {
+        let n = self.first.__leaves(k);
+        if i < n {
+            self.first.__event_at(i, e, ctx, k)
+        } else {
+            self.then.__event_at(i - n, e, ctx, k)
+        }
+    }
+
     fn __accept_at(
         &mut self,
         i: usize,
@@ -323,6 +337,10 @@ impl<T: Extension + ?Sized> Extension for &mut T {
 
     fn __id_at(&self, i: usize, k: Token) -> &'static str {
         (**self).__id_at(i, k)
+    }
+
+    fn __event_at(&mut self, i: usize, e: &Event<'_>, ctx: &Ctx<'_>, k: Token) {
+        (**self).__event_at(i, e, ctx, k)
     }
 
     fn __accept_at(

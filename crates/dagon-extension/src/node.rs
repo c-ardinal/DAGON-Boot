@@ -14,7 +14,7 @@ pub struct Ext<'a> {
     pub manifest: &'a Manifest,
     /// The Rust crate (library name) that provides it.
     pub krate: String,
-    /// The SHA-256 of its built artifact the project accepts (trusted
+    /// The source SHA-256 of its package the project accepts (trusted
     /// extensions only), 64 hex digits.
     pub sha256: Option<String>,
 }
@@ -140,7 +140,7 @@ fn check_set(
                 .as_deref()
                 .is_some_and(|h| h.len() == 64 && h.bytes().all(|b| b.is_ascii_hexdigit()));
             fail(!ok, || {
-                format!("trusted extension {} needs its artifact SHA-256 (64 hex digits) in the project's trusted list", m.id)
+                format!("trusted extension {} needs its source SHA-256 (64 hex digits) in the project's trusted list", m.id)
             })?;
         }
         capabilities(def, board, m)?;
@@ -198,21 +198,54 @@ fn capabilities(def: &McuDef, board: Option<&BoardDef>, m: &Manifest) -> Result<
     Ok(())
 }
 
-/// Boot calls of `m`: its live boot events, one per provided port, at least 1.
-fn boot_calls(m: &Manifest, known: &Known) -> u64 {
-    let events = m
+/// Which boot events `m` is called for: the live boot kinds its
+/// `observes` names, each once, and whether it observes the overrun
+/// report (`dagon_events::compose_boot` calls an extension for these
+/// only).
+fn boot_observes(m: &Manifest, known: &Known) -> (u64, bool) {
+    let mut kinds: Vec<&str> = m
         .observes
         .iter()
         .flat_map(|o| known.matching(o))
         .filter(|k| k.layer == Layer::Boot && k.live)
-        .count();
-    (events + m.provides.len()).max(1) as u64
+        .map(|k| k.kind)
+        .collect();
+    kinds.sort_unstable();
+    kinds.dedup();
+    let overran = kinds.contains(&dagon_catalog::BOOT_OVERRAN_KIND);
+    let events = kinds.len() - usize::from(overran);
+    (events as u64, overran)
 }
 
+/// The most time the boot extensions' calls take in one boot, each call
+/// at its `max_run_us`: one call per observed boot event and per provided
+/// port, and for an extension observing the overrun report one more per
+/// call of any boot extension (each can overrun once).
+fn boot_need_us(all: &[&Manifest], known: &Known) -> u64 {
+    let per: Vec<(u64, u64, bool)> = all
+        .iter()
+        .map(|m| {
+            let (events, overran) = boot_observes(m, known);
+            (
+                u64::from(m.limits.max_run_us),
+                events + m.provides.len() as u64,
+                overran,
+            )
+        })
+        .collect();
+    let calls: u64 = per.iter().map(|(_, c, _)| c).sum();
+    per.iter()
+        .map(|(us, c, overran)| us * (c + if *overran { calls } else { 0 }))
+        .sum()
+}
+
+/// Memory of the sandboxed extensions; time of every boot extension
+/// (a trusted one's calls are timed too).
 fn budgets(
     def: &McuDef,
     image: Image,
     sandboxed: &[&Manifest],
+    all: &[&Manifest],
     known: &Known,
 ) -> Result<(), String> {
     let i = def.isolation();
@@ -229,7 +262,7 @@ fn budgets(
             )
         })?;
     }
-    if image != Image::Bootcore || sandboxed.is_empty() {
+    if image != Image::Bootcore || all.is_empty() {
         return Ok(());
     }
     let w = def.watchdog.ok_or_else(|| {
@@ -239,10 +272,7 @@ fn budgets(
         )
     })?;
     let budget = u64::from(w.trial_ms) * 1000 / u64::from(BOOT_SHARE);
-    let need: u64 = sandboxed
-        .iter()
-        .map(|m| u64::from(m.limits.max_run_us) * boot_calls(m, known))
-        .sum();
+    let need = boot_need_us(all, known);
     fail(need > budget, || {
         format!(
             "boot extensions may take {need} us per boot; 1/{BOOT_SHARE} of {}'s {} ms trial watchdog is {budget} us",
@@ -288,7 +318,8 @@ pub fn plan<'a>(
         .map(|e| e.manifest)
         .filter(|m| m.sandboxed())
         .collect();
-    budgets(def, image, &sandboxed, known)?;
+    let all: Vec<&Manifest> = exts.iter().map(|e| e.manifest).collect();
+    budgets(def, image, &sandboxed, &all, known)?;
     let level = def.isolation().level;
     let mut notes = Vec::new();
     let mut memory = spaces(def, image);

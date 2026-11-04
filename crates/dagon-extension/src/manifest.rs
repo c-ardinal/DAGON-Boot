@@ -43,6 +43,9 @@ pub struct Capabilities {
 pub struct Limits {
     /// Per handler call.
     pub max_run_us: u32,
+    /// Required (at least [`STACK_MIN`]) for a sandboxed extension; a
+    /// trusted one runs on DAGON's stack.
+    #[serde(default)]
     pub stack_bytes: u32,
     /// `.ext.data` + `.ext.bss`.
     #[serde(default)]
@@ -178,14 +181,6 @@ impl Manifest {
                 format!("provides '{p}' twice")
             })?;
         }
-        fail(
-            raw.trusted
-                && !raw
-                    .provides
-                    .iter()
-                    .any(|p| known.port(p).is_some_and(|x| x.trust == Trust::TrustedOnly)),
-            || "trusted = true names no trusted-only port in provides".into(),
-        )?;
         for o in &raw.observes {
             known.observable(o)?;
         }
@@ -206,7 +201,9 @@ impl Manifest {
             })?;
         }
         let l = raw.limits;
-        if device && !raw.trusted {
+        // Every handler call on a device is timed against `max_run_us`, a
+        // trusted observer's too; a trusted port is DAGON's own code path.
+        if device && (!raw.trusted || !raw.observes.is_empty()) {
             fail(
                 l.max_run_us == 0 || l.max_run_us > crate::EXT_CALL_MAX_US,
                 || {
@@ -217,6 +214,8 @@ impl Manifest {
                     )
                 },
             )?;
+        }
+        if device && !raw.trusted {
             fail(l.stack_bytes < STACK_MIN, || {
                 format!("limits.stack_bytes {} is below {STACK_MIN}", l.stack_bytes)
             })?;

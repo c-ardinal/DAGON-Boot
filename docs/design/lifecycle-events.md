@@ -1150,16 +1150,53 @@ the safety rules are made of. It is accepted only when:
 
 1. its manifest says `trusted = true` and names the trusted ports it
    provides;
-2. the project's `dagon.toml` lists it under `[boot] trusted_extensions`
-   or `[app] trusted_extensions` by id and by the SHA-256 of its built
-   artifact (the linked `.ext.*` bytes, computed by `dagon gen`);
+2. the project's `dagon.toml` lists it for the node under
+   `[extensions.nodes.<id>] trusted` by id and by the source hash of its
+   package: SHA-256 over every file of the package folder, sorted by path
+   (`/`-separated), each as its path, a zero byte, its length as a
+   little-endian u64 and its bytes with CRLF read as LF. No file is left
+   out, `target/` and hidden folders included, because `include!` and
+   `#[path]` let the compiler read any of them; running cargo inside the
+   extension's own folder therefore changes its hash. The hash is of the
+   source because the linked bytes do not exist when `dagon gen` runs.
+   `dagon gen` checks the hash (and names the one it found when they
+   differ), then checks the boot crate's dependency graph on the host:
+   cargo resolves it with every feature for every target (`--locked` once
+   its `Cargo.lock` exists), a superset of any one build of it, and every
+   package built into it (normal and build dependencies) must be DAGON's,
+   inside a declared trusted extension's folder (and so in its hash), or
+   a registry crate with a checksum in the boot crate's `Cargo.lock`. The
+   check passed, gen writes `graph.stamp`: the SHA-256 of the boot
+   crate's `Cargo.toml`, its `Cargo.lock` and each trusted extension's
+   source hash. The boot core's build recomputes that stamp and refuses
+   to build when it is missing or differs, so a boot crate whose graph
+   was not checked for exactly its current inputs is never built. The
+   graph is checked on the host and not in the build script because a
+   build script sees neither the outer build's features nor, offline,
+   every crate cargo would resolve. Not covered: the registry crates the
+   extension depends on (pinned by checksum, not reviewed), and source
+   an extension includes from outside its own folder (`include!` or
+   `#[path]` with a path leaving it), which trusted code is reviewed for
+   like any code that runs privileged;
 3. the image that contains it is signed with the project key, the
    signature covering the extension's bytes, and the device verifies
    that signature before the image runs (below);
 4. `dagon gen`, `dagon status`, `dagon doctor` and the page show the
    trusted extensions of each node by id, and VERSION reports their ids
-   and the first bytes of their artifact hashes for display (0x08) and
+   and the first bytes of their source hashes for display (0x08) and
    the full hashes for identity (0x09).
+
+A plug-in may also be trusted without providing any port: an observer
+whose manifest says `trusted = true` and observes events only. It is
+accepted under items 2 to 4 above, answers no decision point, and each
+of its handler calls is timed against its manifest's `max_run_us` like
+any extension's (a call over it is reported as
+`<layer>.extension_overran`, not stopped). The reason: a project's own
+code at boot (showing the boot on a display, driving its own hardware)
+often needs exactly what the sandbox denies an extension, such as a bus
+or a peripheral DAGON's map does not open; declaring it trusted makes it
+part of DAGON for that project instead of weakening the sandbox for
+every project.
 
 A trusted extension runs privileged, in DAGON's own regions: it is that
 part of DAGON for that project. Nothing in 4.1–4.6 holds against it, and
@@ -1434,8 +1471,8 @@ smallest link payload (10).
 | 0x05 | board package version |
 | 0x06 | MCU identity (5.5): the value the image header and the compiled topology carry |
 | 0x07 | isolation (4.5): `level u8`, `kind u8`, `boot_extensions u8`, `root_protection` (kind and exact level as the definition enumerates them, e.g. `rdp1`/`rdp2`, the write-protected sectors, and whether the level is reversible), `fuse` (Clear, or Tripped with the disabled extension's identity as the model encodes it, 5.5) |
-| 0x08 | extensions, for display: per linked extension `id` (up to 32 bytes), `trusted u8`, first 8 bytes of its artifact hash; repeated TLVs, one per extension |
-| 0x09 | extensions, for identity: per trusted extension the full 32-byte SHA-256 of its linked artifact; repeated TLVs |
+| 0x08 | extensions, for display: per linked extension `id` (up to 32 bytes), `trusted u8`, first 8 bytes of its source hash (4.7); repeated TLVs, one per extension |
+| 0x09 | extensions, for identity: per trusted extension its full 32-byte source hash (4.7); repeated TLVs |
 | 0x10 | formats: pairs `(format id u8, number u8)`: wire, image-header, state-log, event, definitions, boot-program, boot-record, extension-manifest |
 | 0x20 | boot record summary (5.5): which boots the record holds and the decision and reason of the newest; layout by the model |
 | 0x21 | one page of the raw boot record region: `offset u16`, then `len` bytes (`len ≤ RECORD_PAGE`, 10); the host reads the region page by page and decodes it with the model's reader |

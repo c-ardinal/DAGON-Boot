@@ -16,8 +16,8 @@
 use crate::harness::{Violation, World};
 use crate::mem::{Cut, Mem, Survives};
 use crate::record::{
-    self, paged_read, record_page, BootId, Entry, Geometry, Loss, RecordCodec, Replay, Ring,
-    Writer, RECORD_MAX, V1 as RecV1,
+    self, paged_read, record_page, BootId, Entry, Geometry, HandOff, Loss, RecordCodec, Replay,
+    Ring, Writer, RECORD_MAX, V1 as RecV1,
 };
 use crate::skew::{Weak, V2 as RecV2};
 use dagon_proto::max_payload;
@@ -61,9 +61,11 @@ pub enum Op {
     /// One boot. `cut`: the run stops after that many byte stores.
     /// `app`: the reader layout of the app's agent (`Old`/`Absent`: none).
     /// `power`: the boot ends in power loss instead of a reset.
+    /// `more`: the stages after the boot core, one per further writer.
     Boot {
         s0: Stage,
         bc: Stage,
+        more: Vec<Stage>,
         app: Ver,
         cut: Option<u32>,
         power: bool,
@@ -83,6 +85,8 @@ pub struct Config {
     pub stage0: bool,
     pub s0_bytes: usize,
     pub bc_bytes: usize,
+    /// Rings of the writers after the boot core, in boot order.
+    pub more: Vec<usize>,
     /// Reserved bytes between the rings and around the region.
     pub gap: usize,
     /// Negative control: `V1` stages and readers use [`Weak`] instead.
@@ -98,6 +102,11 @@ impl Config {
             at += self.s0_bytes + self.gap;
         }
         v.push(at..at + self.bc_bytes);
+        at += self.bc_bytes + self.gap;
+        for &m in &self.more {
+            v.push(at..at + m);
+            at += m + self.gap;
+        }
         v
     }
 
@@ -123,10 +132,6 @@ impl Config {
                 .collect(),
         }
     }
-
-    fn bc_index(&self) -> u8 {
-        self.stage0 as u8
-    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -150,6 +155,10 @@ struct Rec {
     ordinal: u64,
     /// Appends of the boot's opener (same layout) when this was appended.
     opener_count: u64,
+    /// The opener's sequence (restarts from an empty ring) at that time.
+    opener_epoch: u64,
+    /// The writer's appends when this was found destroyed by other bytes.
+    lost_at_count: u64,
 }
 
 /// Who wrote during a phase, for the cause of a lost append.
@@ -166,12 +175,20 @@ struct Sim<'a> {
     rng: SimRng,
     recs: Vec<Rec>,
     true_boot: u64,
-    consumer: HashMap<(u8, u8, u32), Entry>,
+    consumer: HashMap<(u8, u8, u32, u32), Entry>,
     step: usize,
     appended: HashMap<(u8, u8), u64>,
-    /// Writers whose sequence went back after foreign bytes destroyed their
-    /// newest entries, with the oracle's append count at that point.
-    regressed: HashMap<(u8, u8), u64>,
+    /// Restarts from an empty ring per writer and layout.
+    epochs: HashMap<(u8, u8), u64>,
+    /// Opens per writer and layout.
+    opens: HashMap<(u8, u8), u64>,
+    /// Boots whose hand-off chain an old stage in the middle cut.
+    broken: Vec<u64>,
+    /// Append count at each writer's last jump.
+    skips: HashMap<(u8, u8), u64>,
+    /// Numbers a writer may reuse: its newest entries were destroyed again
+    /// within one lap of its ring (writer, layout, from, to).
+    excused: Vec<(u8, u8, u32, u32)>,
 }
 
 fn committed<C: RecordCodec>(c: &C, w: u8, e: &Entry) -> Vec<u8> {
@@ -197,7 +214,11 @@ impl<'a> Sim<'a> {
             consumer: HashMap::new(),
             step: 0,
             appended: HashMap::new(),
-            regressed: HashMap::new(),
+            epochs: HashMap::new(),
+            opens: HashMap::new(),
+            skips: HashMap::new(),
+            broken: Vec::new(),
+            excused: Vec::new(),
         }
     }
 
@@ -218,7 +239,13 @@ impl<'a> Sim<'a> {
                     Phase::Writer(..) | Phase::Foreign => Cause::Foreign,
                     Phase::Power => Cause::Power,
                 };
+                let opens = self
+                    .appended
+                    .get(&(r.writer, r.layout))
+                    .copied()
+                    .unwrap_or(0);
                 self.recs[i].dropped = Some(cause);
+                self.recs[i].lost_at_count = opens;
             }
         }
     }
@@ -243,11 +270,11 @@ impl<'a> Sim<'a> {
         *c - n
     }
 
+    /// The MCU package's start-up word: different at every start (the
+    /// region alone can return to an earlier state, e.g. after another
+    /// layout's writer cleared a ring).
     fn entropy(&mut self) -> u32 {
-        match self.cfg.survives {
-            Survives::ResetCleared => self.rng.next_u64() as u32,
-            _ => 0,
-        }
+        self.rng.next_u64() as u32
     }
 
     /// Runs one recording stage; `Ok(Some(_))` is the hand-off to the next.
@@ -256,13 +283,13 @@ impl<'a> Sim<'a> {
         c: &C,
         w: u8,
         st: Stage,
-        handoff: Option<[u32; 3]>,
-    ) -> Result<Result<Option<[u32; 3]>, Cut>, Violation> {
+        handoff: Option<HandOff>,
+    ) -> Result<Result<Option<HandOff>, Cut>, Violation> {
         let geo = self.cfg.geometry(c.entry_size());
         self.mem.allow(geo.ring_bytes(w as usize, c.entry_size()));
         let ent = self.entropy();
         let mut wr = Writer::open(c, &self.mem, &geo, w, handoff, ent);
-        self.check_continuation(w, c.layout(), &wr)?;
+        self.opened(w, c.layout(), geo.rings[w as usize].slots, &wr)?;
         if wr.fresh() {
             let own_held = self
                 .recs
@@ -280,6 +307,7 @@ impl<'a> Sim<'a> {
                     self.check_unique(w, c.layout(), e.eseq)?;
                     let ordinal = self.count(w, c.layout(), 1);
                     let opener_count = self.count(e.boot.opener, c.layout(), 0);
+                    let opener_epoch = self.epoch(e.boot.opener, c.layout());
                     self.supersede(addr, w, c.layout());
                     self.recs.push(Rec {
                         true_boot: self.true_boot,
@@ -292,6 +320,8 @@ impl<'a> Sim<'a> {
                         accounted: false,
                         ordinal,
                         opener_count,
+                        opener_epoch,
+                        lost_at_count: 0,
                     });
                 }
                 Err(cut) => {
@@ -304,33 +334,55 @@ impl<'a> Sim<'a> {
         Ok(Ok((st.end == Next).then(|| wr.handoff())))
     }
 
-    /// A writer continues right after its last append unless foreign bytes
-    /// destroyed that append (then its numbers may go back: recorded).
-    fn check_continuation<C: RecordCodec>(
+    fn is_excused(&self, w: u8, l: u8, eseq: u32) -> bool {
+        self.excused.iter().any(|&(ew, el, from, to)| {
+            ew == w && el == l && eseq.wrapping_sub(from) <= to.wrapping_sub(from)
+        })
+    }
+
+    fn epoch(&self, w: u8, l: u8) -> u64 {
+        self.epochs.get(&(w, l)).copied().unwrap_or(0)
+    }
+
+    /// P4: a writer that held anything continues ahead of every number it
+    /// ever appended in its sequence (after destroyed entries too); one that
+    /// held nothing starts a new sequence. Stated limit: when its newest
+    /// entries are destroyed again within one lap of its ring, the jump may
+    /// fall short; those numbers are recorded as excused.
+    fn opened<C: RecordCodec>(
         &mut self,
         w: u8,
         l: u8,
+        slots: usize,
         wr: &Writer<C>,
     ) -> Result<(), Violation> {
+        *self.opens.entry((w, l)).or_insert(0) += 1;
+        let now = self.count(w, l, 0);
+        let mut repeated = false;
+        if wr.skipped() {
+            repeated = self
+                .skips
+                .insert((w, l), now)
+                .is_some_and(|prev| now - prev < slots as u64);
+        }
+        if wr.fresh() {
+            *self.epochs.entry((w, l)).or_insert(0) += 1;
+            return Ok(());
+        }
         let last = self
             .recs
             .iter()
             .filter(|x| x.writer == w && x.layout == l)
             .max_by_key(|x| x.ordinal);
-        let Some(last) = last else {
-            return Ok(());
-        };
-        if wr.fresh() || wr.next_eseq() == last.entry.eseq.wrapping_add(1) {
-            return Ok(());
+        if let Some(last) = last {
+            let d = wr.next_eseq().wrapping_sub(last.entry.eseq);
+            if (d == 0 || d >= record::SPAN) && repeated {
+                let to = last.entry.eseq;
+                self.excused.push((w, l, wr.next_eseq(), to));
+            } else if d == 0 || d >= record::SPAN {
+                return Err(self.fail("P4", format!("writer {w} did not continue its sequence")));
+            }
         }
-        let foreign = self
-            .recs
-            .iter()
-            .any(|x| x.writer == w && x.layout == l && x.dropped == Some(Cause::Foreign));
-        if !foreign {
-            return Err(self.fail("P4", format!("writer {w} did not continue its sequence")));
-        }
-        self.regressed.insert((w, l), self.recs.len() as u64);
         Ok(())
     }
 
@@ -349,8 +401,8 @@ impl<'a> Sim<'a> {
         &mut self,
         w: u8,
         st: Stage,
-        handoff: Option<[u32; 3]>,
-    ) -> Result<Result<Option<[u32; 3]>, Cut>, Violation> {
+        handoff: Option<HandOff>,
+    ) -> Result<Result<Option<HandOff>, Cut>, Violation> {
         match st.ver {
             V1 if self.cfg.weak => self.stage(&Weak, w, st, handoff),
             V1 => self.stage(&RecV1, w, st, handoff),
@@ -361,10 +413,11 @@ impl<'a> Sim<'a> {
                     r.next_u64() as u32,
                     r.next_u64() as u32,
                     r.next_u64() as u32,
+                    r.next_u64() as u32,
                 ];
                 Ok(Ok((st.end == Next).then_some(words)))
             }
-            Absent => Ok(Ok((st.end == Next).then_some([0; 3]))),
+            Absent => Ok(Ok((st.end == Next).then_some([0; 4]))),
         }
     }
 
@@ -372,28 +425,46 @@ impl<'a> Sim<'a> {
         let Op::Boot {
             s0,
             bc,
+            more,
             app,
             cut,
             power,
-        } = *op
+        } = op
         else {
             unreachable!()
         };
         self.true_boot += 1;
         self.mem.cut_after(cut.map(u64::from));
+        let mut stages = Vec::new();
+        if self.cfg.stage0 {
+            stages.push(*s0);
+        }
+        stages.push(*bc);
+        stages.extend(more.iter().take(self.cfg.more.len()).copied());
         let mut handoff = None;
         let mut alive = true;
-        if self.cfg.stage0 {
-            match self.run_stage(0, s0, None)? {
-                Ok(Some(h)) => handoff = (s0.ver != Absent).then_some(h),
-                Ok(None) | Err(_) => alive = false,
+        for (w, st) in stages.iter().enumerate() {
+            // A stage that predates the record in the middle, or stages of
+            // two record layouts, can cut the hand-off chain: a later stage
+            // then opens the boot again (stated: the boot may be split).
+            let layouts: Vec<Ver> = stages
+                .iter()
+                .map(|s| s.ver)
+                .filter(|v| matches!(v, V1 | V2))
+                .collect();
+            let mixed = layouts.windows(2).any(|p| p[0] != p[1]);
+            if (st.ver == Old && w > 0) || mixed {
+                self.broken.push(self.true_boot);
             }
-        }
-        if alive {
-            alive = matches!(
-                self.run_stage(self.cfg.bc_index(), bc, handoff)?,
-                Ok(Some(_))
-            );
+            match self.run_stage(w as u8, *st, handoff)? {
+                // No such stage: the previous one jumps to the next directly.
+                Ok(Some(_)) if st.ver == Absent => {}
+                Ok(Some(h)) => handoff = Some(h),
+                Ok(None) | Err(_) => {
+                    alive = false;
+                    break;
+                }
+            }
         }
         self.mem.cut_after(None);
         self.mem.allow(0..0);
@@ -405,7 +476,7 @@ impl<'a> Sim<'a> {
                 Old | Absent => {}
             }
         }
-        if power {
+        if *power {
             self.mem.power_loss(self.cfg.survives);
             self.refresh(Phase::Power);
         }
@@ -452,15 +523,30 @@ impl<'a> Sim<'a> {
         Ok(())
     }
 
-    /// P7: a capacity loss (the writer's own overwrite) not yet replayed is
-    /// covered by a loss statement of this replay.
+    /// P7: an append lost before it was replayed is covered by a loss
+    /// statement: at once for the writer's own overwrite; for a loss to
+    /// other bytes, once an entry the writer appended later is held.
     fn check_losses(&mut self, r: &Replay, l: u8) -> Result<(), Violation> {
         for i in 0..self.recs.len() {
             let rec = &self.recs[i];
             if rec.layout != l || rec.accounted || rec.dropped.is_none() {
                 continue;
             }
-            if rec.dropped == Some(Cause::Own) && !self.covered(r, rec) {
+            // Other bytes' losses are stated once an entry the writer
+            // appended after the loss is held (its jump makes the gap).
+            let later_held = self.recs.iter().any(|x| {
+                x.writer == rec.writer
+                    && x.layout == l
+                    && x.dropped.is_none()
+                    && x.ordinal >= rec.lost_at_count
+            });
+            let due = match rec.dropped {
+                Some(Cause::Own) => true,
+                Some(Cause::Foreign) => later_held,
+                _ => false,
+            };
+            let excused = self.is_excused(rec.writer, l, rec.entry.eseq);
+            if due && !excused && !self.covered(r, rec) {
                 return Err(self.fail("P7", format!("lost without a marker: {rec:?}")));
             }
             self.recs[i].accounted = true;
@@ -492,9 +578,8 @@ impl<'a> Sim<'a> {
         })
     }
 
-    /// A boot number used twice by its opener: only after bytes the opener
-    /// did not write destroyed its newest entries (its first use).
-    fn reused(&self, id: BootId, l: u8) -> Result<bool, Violation> {
+    /// P4: a boot number is held for one boot only.
+    fn reused(&self, id: BootId, l: u8) -> Result<(), Violation> {
         let mut boots: Vec<u64> = self
             .recs
             .iter()
@@ -504,33 +589,16 @@ impl<'a> Sim<'a> {
         boots.sort_unstable();
         boots.dedup();
         if boots.len() < 2 {
-            return Ok(false);
-        }
-        let destroyed = self.recs.iter().any(|x| {
-            x.writer == id.opener
-                && x.layout == l
-                && x.entry.boot == id
-                && x.dropped == Some(Cause::Foreign)
-        });
-        if destroyed {
-            return Ok(true);
+            return Ok(());
         }
         Err(self.fail("P4", format!("boot number {id:?} held for two boots")))
     }
 
-    /// P5 and P6.
+    /// P5 and P6. P5 per pair: a misordered pair is a pair the record does
+    /// not order; a pair the record does not order has different openers,
+    /// or one opener in two of its sequences, or numbers of one opener at
+    /// least 2^30 apart.
     fn check_order(&self, r: &Replay, l: u8) -> Result<(), Violation> {
-        // Entries from before a regression, of the writer or naming its
-        // boots, can collide with its new numbers: order is not checked
-        // while any is held.
-        let regressed = self.regressed.iter().any(|(&(w, rl), &at)| {
-            rl == l
-                && self.recs[..at as usize].iter().any(|x| {
-                    x.layout == l
-                        && (x.writer == w || x.entry.boot.opener == w)
-                        && x.dropped.is_none()
-                })
-        });
         // A boot number comes back after 2^32 appends of its opener: a
         // later stage's link from that long ago may alias a new boot.
         let aliased = self.recs.iter().any(|x| {
@@ -545,41 +613,71 @@ impl<'a> Sim<'a> {
                     - x.opener_count
                     >= (1 << 32) - 512
         });
-        if regressed || aliased {
+        let excused = r
+            .boots
+            .iter()
+            .any(|b| self.is_excused(b.id.opener, l, b.id.boot));
+        // Serial order cannot tell two numbers 2^31 or more apart: a link
+        // that old into a sequence the opener no longer holds is not ordered
+        // by numbers (stated limit).
+        let stale_far = self.recs.iter().any(|x| {
+            let o = x.entry.boot.opener;
+            x.layout == l
+                && x.dropped.is_none()
+                && self.appended.get(&(o, l)).copied().unwrap_or(0) - x.opener_count >= 1 << 31
+                && !self.recs.iter().any(|y| {
+                    y.writer == o
+                        && y.layout == l
+                        && y.dropped.is_none()
+                        && y.entry.tag == x.entry.boot.tag
+                })
+        });
+        if aliased || excused || stale_far {
             return Ok(());
         }
         for b in &r.boots {
-            if self.reused(b.id, l)? {
-                return Ok(());
-            }
+            self.reused(b.id, l)?;
         }
         let mut truth = Vec::new();
         for b in &r.boots {
-            let tb: Vec<u64> = b
+            let recs: Vec<&Rec> = b
                 .events
                 .iter()
-                .map(|e| self.recs[self.rec_of(l, e.writer, &e.entry).unwrap()].true_boot)
+                .map(|e| &self.recs[self.rec_of(l, e.writer, &e.entry).unwrap()])
                 .collect();
-            if tb.windows(2).any(|p| p[0] != p[1]) {
+            if recs.windows(2).any(|p| p[0].true_boot != p[1].true_boot) {
+                let tb: Vec<u64> = recs.iter().map(|x| x.true_boot).collect();
                 return Err(self.fail("P6", format!("boot {:?} mixes boots {tb:?}", b.id)));
             }
-            truth.push(tb[0]);
+            truth.push((recs[0].true_boot, recs[0].opener_epoch));
         }
-        let mut sorted = truth.clone();
+        let mut sorted: Vec<u64> = truth.iter().map(|t| t.0).collect();
         sorted.sort_unstable();
-        if sorted.windows(2).any(|p| p[0] == p[1]) {
+        let split = sorted.windows(2).find(|p| p[0] == p[1]).map(|p| p[0]);
+        if split.is_some_and(|b| !self.broken.contains(&b)) {
             return Err(self.fail("P6", "one boot split into two"));
         }
-        let openers: std::collections::HashSet<u8> = r.boots.iter().map(|b| b.id.opener).collect();
         for (i, a) in r.boots.iter().enumerate() {
-            if a.uncertain && openers.len() < 2 {
-                return Err(self.fail("P5", "uncertain order with a single opener"));
-            }
             for (j, b) in r.boots.iter().enumerate().skip(i + 1) {
-                if truth[i] > truth[j] && !(a.uncertain && b.uncertain) {
+                let known = r.ordered[i][j];
+                if truth[i].0 > truth[j].0 && known {
                     return Err(self.fail(
                         "P5",
                         format!("boot {:?} replayed before older {:?}", a.id, b.id),
+                    ));
+                }
+                // Numbers of one opener 2^30 or more apart in a sequence that
+                // is no longer its current one are not ordered.
+                let gap = a.id.boot.wrapping_sub(b.id.boot);
+                let far = gap.min(gap.wrapping_neg()) >= 1 << 30;
+                let same = a.id.opener == b.id.opener && truth[i].1 == truth[j].1 && !far;
+                if !known && same {
+                    return Err(self.fail(
+                        "P5",
+                        format!(
+                            "boots {:?} and {:?} of one sequence not ordered",
+                            a.id, b.id
+                        ),
                     ));
                 }
             }
@@ -607,13 +705,13 @@ impl<'a> Sim<'a> {
 
     /// P11: a consumer that de-duplicates on (layout, writer, eseq) against
     /// the previous replay it read never meets one identity with two
-    /// contents, unless the first was destroyed by foreign bytes or power
-    /// loss. An identity absent from a replay is never replayed again, so
-    /// the previous replay is all a consumer keeps.
+    /// contents (short of 2^32 appends between the two replays). An identity
+    /// absent from a replay is never replayed again, so the previous replay
+    /// is all a consumer keeps.
     fn consume(&mut self, r: &Replay, l: u8) -> Result<(), Violation> {
-        let now: HashMap<(u8, u8, u32), Entry> = r
+        let now: HashMap<(u8, u8, u32, u32), Entry> = r
             .events()
-            .map(|ev| ((l, ev.writer, ev.entry.eseq), ev.entry))
+            .map(|ev| ((l, ev.writer, ev.entry.tag, ev.entry.eseq), ev.entry))
             .collect();
         for (key, entry) in &now {
             let Some(seen) = self.consumer.get(key) else {
@@ -629,10 +727,9 @@ impl<'a> Sim<'a> {
                 x.layout == l
                     && x.writer == key.1
                     && x.entry == *seen
-                    && (matches!(x.dropped, Some(Cause::Foreign | Cause::Power))
-                        || new.is_some_and(|n| n - x.ordinal >= (1 << 32) - 256))
+                    && new.is_some_and(|n| n - x.ordinal >= (1 << 32) - 256)
             });
-            if !excused {
+            if !excused && !self.is_excused(key.1, l, key.3) {
                 return Err(self.fail("P11", format!("identity {key:?} changed")));
             }
         }
@@ -664,16 +761,21 @@ impl<'a> Sim<'a> {
         w: u8,
         boots: u64,
         per: u64,
-        link: Option<u32>,
-    ) -> Result<u32, Violation> {
-        let wr = Writer::open(&RecV1, &self.mem, geo, w, None, 0);
-        self.check_continuation(w, 1, &wr)?;
+        link: Option<(u32, u32)>,
+    ) -> Result<(u32, u32), Violation> {
+        let ent = self.entropy();
+        let wr = Writer::open(&RecV1, &self.mem, geo, w, None, ent);
+        self.opened(w, 1, geo.rings[w as usize].slots, &wr)?;
         let ring = geo.rings[w as usize];
         let cursor = (wr.next_slot() - ring.base) / V1_SIZE;
-        let (next, fresh) = (wr.next_eseq(), wr.fresh());
+        let (next, fresh, tag) = (wr.next_eseq(), wr.fresh(), wr.boot().tag);
+        if fresh {
+            self.mem.poke(ring.base, &vec![0; ring.slots * V1_SIZE]);
+        }
         let total = boots * per;
         let base = self.count(w, 1, total);
         let opener_count = self.count(0, 1, 0);
+        let opener_epoch = self.epoch(0, 1);
         let keep = total.min(ring.slots as u64);
         for i in total - keep..total {
             let boot_start = (i / per) as u32;
@@ -684,15 +786,18 @@ impl<'a> Sim<'a> {
                     None => BootId {
                         opener: w,
                         boot: next.wrapping_add(boot_start.wrapping_mul(per as u32)),
+                        tag,
                     },
-                    Some(b0) => BootId {
+                    Some((b0, t0)) => BootId {
                         opener: 0,
                         boot: b0.wrapping_add(boot_start.wrapping_mul(2)),
+                        tag: t0,
                     },
                 },
                 fmt: 1,
                 kind: 0xFF,
                 eseq: next.wrapping_add(i as u32),
+                tag,
                 payload: [0; 3],
             };
             let addr = ring.base + ((cursor as u64 + i) % ring.slots as u64) as usize * V1_SIZE;
@@ -710,9 +815,11 @@ impl<'a> Sim<'a> {
                 accounted: false,
                 ordinal: base + i,
                 opener_count,
+                opener_epoch,
+                lost_at_count: 0,
             });
         }
-        Ok(next)
+        Ok((next, tag))
     }
 
     fn fuzz(&mut self, w: u8, at: u16, len: u8) {
@@ -746,9 +853,17 @@ impl World for RecordWorld {
             stage0: rng.chance(0.85),
             s0_bytes: pick(rng, &[3, 4, 8]) * V1_SIZE,
             bc_bytes: pick(rng, &[4, 8, 16]) * V1_SIZE + pick(rng, &[0, 4]),
+            more: (0..match rng.below(10) {
+                0..=4 => 0,
+                5..=8 => 1 + rng.below(2),
+                _ => 1 + rng.below(14),
+            })
+                .map(|_| pick(rng, &[3, 4]) * V1_SIZE)
+                .collect(),
             gap: pick(rng, &[0, 4, 12]),
             weak: false,
         };
+        let writers = cfg.stage0 as u64 + 1 + cfg.more.len() as u64;
         let vers = [V1, V1, V1, V1, V2, Old, Absent];
         let ver = |rng: &mut SimRng| vers[rng.below(vers.len() as u64) as usize];
         let end = |rng: &mut SimRng| [Next, Next, Next, Next, Halt, Hang][rng.below(6) as usize];
@@ -773,7 +888,7 @@ impl World for RecordWorld {
             }
             if roll < 7 {
                 ops.push(Op::Fuzz {
-                    writer: rng.below(2) as u8,
+                    writer: rng.below(writers) as u8,
                     at: rng.below(400) as u16,
                     len: 1 + rng.below(30) as u8,
                 });
@@ -799,10 +914,21 @@ impl World for RecordWorld {
                 events: 1 + rng.below(most) as u8,
                 end: end(rng),
             };
-            let est = (s0.events as u64 + bc.events as u64) * 26;
+            let more: Vec<Stage> = cfg
+                .more
+                .iter()
+                .map(|_| Stage {
+                    ver: [V1, V1, V1, V1, V1, V2, Old][rng.below(7) as usize],
+                    events: 1 + rng.below(3) as u8,
+                    end: end(rng),
+                })
+                .collect();
+            let all = s0.events as u64 + bc.events as u64;
+            let est = (all + more.iter().map(|m| m.events as u64).sum::<u64>()) * 26;
             ops.push(Op::Boot {
                 s0,
                 bc,
+                more,
                 app: va,
                 cut: rng.chance(0.3).then(|| rng.below(est) as u32),
                 power: rng.chance(0.04),
@@ -812,7 +938,7 @@ impl World for RecordWorld {
     }
 
     fn run(cfg: &Config, ops: &[Op], seed: u64) -> Result<(), Violation> {
-        for size in [V1_SIZE, 24] {
+        for size in [V1_SIZE, 32] {
             cfg.geometry(size)
                 .validate(size)
                 .map_err(|e| Violation::new("P10", 0, e))?;
@@ -833,21 +959,32 @@ impl World for RecordWorld {
     }
 
     fn simpler(op: &Op) -> Vec<Op> {
-        match *op {
+        match op {
             Op::Boot {
                 s0,
                 bc,
+                more,
                 app,
                 cut,
                 power,
             } => {
+                let (s0, bc, app, cut, power) = (*s0, *bc, *app, *cut, *power);
                 let mk = |s0, bc, app, cut, power| Op::Boot {
                     s0,
                     bc,
+                    more: more.clone(),
                     app,
                     cut,
                     power,
                 };
+                let fewer = (!more.is_empty()).then(|| Op::Boot {
+                    s0,
+                    bc,
+                    more: more[..more.len() - 1].to_vec(),
+                    app,
+                    cut,
+                    power,
+                });
                 let one = |s: Stage| Stage { events: 1, ..s };
                 let next = |s: Stage| Stage { end: Next, ..s };
                 let v1 = |s: Stage| Stage { ver: V1, ..s };
@@ -863,17 +1000,18 @@ impl World for RecordWorld {
                     mk(s0, bc, V1, cut, power),
                 ]
                 .into_iter()
+                .chain(fewer)
                 .filter(|o| o != op)
                 .collect()
             }
-            Op::FastForward { boots, linked } if boots > 1 => vec![
+            &Op::FastForward { boots, linked } if boots > 1 => vec![
                 Op::FastForward { boots: 1, linked },
                 Op::FastForward {
                     boots: boots / 2,
                     linked,
                 },
             ],
-            Op::Fuzz { writer, at, len } if len > 1 => vec![Op::Fuzz { writer, at, len: 1 }],
+            &Op::Fuzz { writer, at, len } if len > 1 => vec![Op::Fuzz { writer, at, len: 1 }],
             _ => Vec::new(),
         }
     }

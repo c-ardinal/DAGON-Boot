@@ -31,6 +31,7 @@ fn cfg(survives: Survives, stage0: bool, s0: usize, bc: usize) -> Config {
         stage0,
         s0_bytes: s0 * V1_SIZE,
         bc_bytes: bc * V1_SIZE,
+        more: vec![],
         gap: 4,
         weak: false,
     }
@@ -44,6 +45,7 @@ fn boot_op(s0: Stage, bc: Stage) -> Op {
     Op::Boot {
         s0,
         bc,
+        more: vec![],
         app: V1,
         cut: None,
         power: false,
@@ -56,7 +58,7 @@ fn plain() -> Op {
 
 // --- Boot record ---------------------------------------------------------
 
-/// P2 (r5 torn header, r6-1 torn overwrite): a boot cut after every byte,
+/// P2 (torn writes, also over a valid entry): a boot cut after every byte,
 /// on a ring already wrapped so every append overwrites a valid entry.
 #[test]
 fn record_cut_after_every_byte() {
@@ -66,6 +68,7 @@ fn record_cut_after_every_byte() {
         ops.push(Op::Boot {
             s0: stage(V1, 2, Next),
             bc: stage(V1, 3, Next),
+            more: vec![],
             app: V1,
             cut: Some(k),
             power: false,
@@ -76,7 +79,7 @@ fn record_cut_after_every_byte() {
     }
 }
 
-/// r6-1 negative control: the payload-first/CRC-last shape without a
+/// Negative control: the payload-first/CRC-last shape without a
 /// commit byte is caught (P2), and the shrunk case passes with layout 1.
 #[test]
 fn weak_layout_is_caught() {
@@ -109,10 +112,12 @@ fn weak_layout_is_caught() {
         weak: false,
         ..f.config.clone()
     };
-    assert!(check::<RecordWorld>(&v1, &f.ops, f.seed).is_ok());
+    if let Err(v) = check::<RecordWorld>(&v1, &f.ops, f.seed) {
+        panic!("layout 1 fails the shrunk case: {v:?}\n{f:?}");
+    }
 }
 
-/// r6-2: an old stage0 that wrote nothing, then its upgrade starting on an
+/// An old stage0 that wrote nothing, then its upgrade starting on an
 /// empty ring (P4: identities stay unique, the boot core's own boots stay
 /// apart from stage0's).
 #[test]
@@ -127,7 +132,7 @@ fn old_stage0_then_upgrade() {
     ok::<RecordWorld>(&c, &ops);
 }
 
-/// r6-3 and r5 u16 wrap: stage0-only boots past 2^15, 2^31 and up to a
+/// Sequence wrap and long silence: stage0-only boots past 2^15, 2^31 and up to a
 /// full 2^32 wrap while the boot core is silent, then both run (P5).
 #[test]
 fn silent_boot_core_across_wrap() {
@@ -153,7 +158,7 @@ fn silent_boot_core_across_wrap() {
     }
 }
 
-/// r6-5: a layout change with surviving bytes, both directions, readers of
+/// A layout change with surviving bytes, both directions, readers of
 /// both layouts (P9).
 #[test]
 fn layout_skew_both_ways() {
@@ -166,6 +171,7 @@ fn layout_skew_both_ways() {
             Op::Boot {
                 s0: stage(a, 1, Next),
                 bc: stage(b, 1, Next),
+                more: vec![],
                 app: V2,
                 cut: None,
                 power: false,
@@ -176,7 +182,7 @@ fn layout_skew_both_ways() {
     }
 }
 
-/// r6-6: a boot that overflows its ring and halts; the next app accounts
+/// A boot that overflows its ring and halts; the next app accounts
 /// the loss (P7) and still sees the halt (P1).
 #[test]
 fn overflow_then_halt() {
@@ -186,6 +192,7 @@ fn overflow_then_halt() {
         Op::Boot {
             s0: stage(V1, 2, Next),
             bc: stage(V1, 30, Halt),
+            more: vec![],
             app: V1,
             cut: None,
             power: false,
@@ -195,7 +202,7 @@ fn overflow_then_halt() {
     ok::<RecordWorld>(&c, &ops);
 }
 
-/// r5 hang ambiguity: stage0 hangs, then a boot whose boot core must not
+/// A hung boot is not the current one: stage0 hangs, then a boot whose boot core must not
 /// join the hung boot (P6).
 #[test]
 fn hang_is_not_the_current_boot() {
@@ -227,16 +234,16 @@ fn fuzzed_rings_keep_writes_inside() {
     ok::<RecordWorld>(&c, &ops);
 }
 
-/// Found by the shrinker: a foreign write destroying stage0's newest entry
-/// (stage0 reuses its number; order is not claimed while the old link is
-/// held, identities stay unique).
+/// Found by the shrinker: a foreign write destroying stage0's newest entry;
+/// stage0 continues past it, so no boot number or identity is used twice.
 #[test]
 fn regression_destroyed_newest_entry() {
     let c = Config {
         survives: Survives::ResetCleared,
         stage0: true,
-        s0_bytes: 60,
-        bc_bytes: 84,
+        s0_bytes: 3 * V1_SIZE,
+        bc_bytes: 4 * V1_SIZE,
+        more: vec![],
         gap: 12,
         weak: false,
     };
@@ -256,14 +263,15 @@ fn regression_destroyed_newest_entry() {
 }
 
 /// Found by the shrinker: a later stage's link to a boot whose opener entry
-/// was destroyed by another layout's writer sits after the held boots.
+/// was destroyed by another layout's writer is ordered by its number.
 #[test]
 fn regression_stale_link_after_skew() {
     let c = Config {
         survives: Survives::ResetCleared,
         stage0: true,
-        s0_bytes: 160,
-        bc_bytes: 324,
+        s0_bytes: 8 * V1_SIZE,
+        bc_bytes: 16 * V1_SIZE,
+        more: vec![],
         gap: 4,
         weak: false,
     };
@@ -286,8 +294,9 @@ fn regression_window_after_half_space() {
     let c = Config {
         survives: Survives::Power,
         stage0: true,
-        s0_bytes: 160,
-        bc_bytes: 160,
+        s0_bytes: 8 * V1_SIZE,
+        bc_bytes: 8 * V1_SIZE,
+        more: vec![],
         gap: 12,
         weak: false,
     };
@@ -311,14 +320,16 @@ fn regression_fresh_start_differs() {
     let c = Config {
         survives: Survives::ResetRandom,
         stage0: true,
-        s0_bytes: 60,
-        bc_bytes: 160,
+        s0_bytes: 3 * V1_SIZE,
+        bc_bytes: 8 * V1_SIZE,
+        more: vec![],
         gap: 0,
         weak: false,
     };
     let b = |s0v, s0e, bce, app| Op::Boot {
         s0: stage(s0v, s0e, Next),
         bc: stage(V1, bce, Next),
+        more: vec![],
         app,
         cut: None,
         power: false,
@@ -409,7 +420,7 @@ fn call(ext: u8, step: u8, b: Behaviour) -> wf::Call {
     wf::Call { ext, step, b }
 }
 
-/// P22 (r10 "reset after return before clear"): a reset after every fuse
+/// P22 (a reset between a call's return and its disarm): a reset after every fuse
 /// store of a run, including between a call's return and its disarm.
 #[test]
 fn fuse_cut_after_every_byte() {
@@ -428,7 +439,7 @@ fn fuse_cut_after_every_byte() {
     }
 }
 
-/// r10: an app lockup, then the boot core's start (which must neither clear
+/// P23: an app lockup, then the boot core's start (which must neither clear
 /// nor act on the app's fuse), then the app's start (extension disabled,
 /// serving). P23.
 #[test]
@@ -524,7 +535,7 @@ fn verifier_replacement_needs_all_three() {
     }
 }
 
-/// P21 (r10 near-collision identities, more than 16 extensions and more
+/// P21 (near-collision identities, more than 16 extensions and more
 /// than 4 slots): every field change gives a new fuse id.
 #[test]
 fn fuse_ids_distinct_over_large_sets() {
@@ -598,7 +609,7 @@ fn identity_load_and_match() {
     }
 }
 
-/// r6-7: a replacement interrupted after every byte of erase and program,
+/// P13: a replacement interrupted after every byte of erase and program,
 /// on top of a previous copy; then a completed one.
 #[test]
 fn topology_cut_after_every_byte() {
@@ -749,8 +760,9 @@ fn regression_regression_in_fast_forward() {
     let c = Config {
         survives: Survives::ResetRandom,
         stage0: true,
-        s0_bytes: 160,
-        bc_bytes: 160,
+        s0_bytes: 8 * V1_SIZE,
+        bc_bytes: 8 * V1_SIZE,
+        more: vec![],
         gap: 12,
         weak: false,
     };
@@ -769,4 +781,160 @@ fn regression_regression_in_fast_forward() {
         b(V1, 1, Next),
     ];
     assert!(check::<RecordWorld>(&c, &ops, 0xaf34_6dd5_6cb7_46ae).is_ok());
+}
+
+/// A writer whose newest entries another layout of the same stage destroyed
+/// (layout 1, then 2, then 1) continues past them: no identity a consumer
+/// saw comes back with other content, and the jump is stated as a gap.
+#[test]
+fn layout_switch_never_reuses_identities() {
+    let geo = Geometry {
+        region: 0..112,
+        rings: vec![Ring { base: 0, slots: 4 }],
+    };
+    let geo2 = Geometry {
+        region: 0..112,
+        rings: vec![Ring { base: 0, slots: 3 }],
+    };
+    let mut m = Mem::new(112, 0, 3);
+    let mut w = Writer::open(&RecV1, &m, &geo, 0, None, 0);
+    for k in 0..6 {
+        w.append(&mut m, 1, k, [0; 3]).unwrap();
+    }
+    let seen: Vec<(u32, u8)> = record::read(&RecV1, m.bytes(), &geo)
+        .events()
+        .map(|e| (e.entry.eseq, e.entry.kind))
+        .collect();
+    let mut w2 = Writer::open(&dagon_retained_model::skew::V2, &m, &geo2, 0, None, 0);
+    w2.append(&mut m, 2, 0x20, [0; 3]).unwrap();
+    let mut w = Writer::open(&RecV1, &m, &geo, 0, None, 0);
+    w.append(&mut m, 1, 0x30, [0; 3]).unwrap();
+    let r = record::read(&RecV1, m.bytes(), &geo);
+    for e in r.events() {
+        let clash = seen
+            .iter()
+            .any(|&(q, k)| q == e.entry.eseq && k != e.entry.kind);
+        assert!(!clash, "identity {} reused", e.entry.eseq);
+    }
+    // Stated: a gap over the destroyed numbers, or a new sequence (the
+    // other layout's fresh start cleared the whole ring).
+    let newest_seen = seen.iter().map(|x| x.0).max().unwrap();
+    let stated = r.losses.iter().any(|l| match *l {
+        record::Loss::Gap { from, to, .. } => from <= newest_seen && newest_seen <= to,
+        record::Loss::Window { epoch_start, .. } => epoch_start,
+        _ => false,
+    });
+    assert!(stated, "{:?}", r.losses);
+}
+
+/// Three writers: boots of one opener that two different later writers
+/// recorded, after the opener's ring wrapped, are still ordered (by the
+/// opener's numbers), never reported newest first.
+#[test]
+fn three_writers_order_by_opener_numbers() {
+    let g = Geometry {
+        region: 0..504,
+        rings: vec![
+            Ring { base: 0, slots: 2 },
+            Ring { base: 56, slots: 8 },
+            Ring {
+                base: 280,
+                slots: 8,
+            },
+        ],
+    };
+    let mut m = Mem::new(504, 0, 7);
+    let mut s = Writer::open(&RecV1, &m, &g, 0, None, 0);
+    s.append(&mut m, 1, 0xA, [0; 3]).unwrap();
+    let w1 = Writer::open(&RecV1, &m, &g, 1, Some(s.handoff()), 0);
+    let mut w2 = Writer::open(&RecV1, &m, &g, 2, Some(w1.handoff()), 0);
+    w2.append(&mut m, 1, 0xA, [0; 3]).unwrap();
+    let mut s = Writer::open(&RecV1, &m, &g, 0, None, 0);
+    s.append(&mut m, 1, 0xB, [0; 3]).unwrap();
+    let mut w1 = Writer::open(&RecV1, &m, &g, 1, Some(s.handoff()), 0);
+    w1.append(&mut m, 1, 0xB, [0; 3]).unwrap();
+    for t in 0xC..=0xE {
+        let mut s = Writer::open(&RecV1, &m, &g, 0, None, 0);
+        s.append(&mut m, 1, t, [0; 3]).unwrap();
+    }
+    let r = record::read(&RecV1, m.bytes(), &g);
+    let kinds: Vec<u8> = r.boots.iter().map(|b| b.events[0].entry.kind).collect();
+    // 0xC's only entry was stage0's, overwritten by its two newer boots.
+    assert_eq!(kinds, vec![0xA, 0xB, 0xD, 0xE]);
+    assert!(r.boots.iter().all(|b| !b.uncertain));
+}
+
+/// Up to the writer limit: sixteen rings, every stage recording.
+#[test]
+fn sixteen_writers() {
+    let c = Config {
+        more: vec![3 * V1_SIZE; 14],
+        ..cfg(Survives::Power, true, 3, 4)
+    };
+    let all = |end| Op::Boot {
+        s0: stage(V1, 1, Next),
+        bc: stage(V1, 2, Next),
+        more: (0..14).map(|i| stage(V1, (i % 3) as u8, end)).collect(),
+        app: V1,
+        cut: None,
+        power: false,
+    };
+    let ops: Vec<Op> = (0..12)
+        .map(|k| all(if k % 4 == 3 { Halt } else { Next }))
+        .collect();
+    ok::<RecordWorld>(&c, &ops);
+}
+
+/// One carrier list: the specification's carrier line names exactly the
+/// model's `identity::CARRIERS`.
+#[test]
+fn carrier_list_matches_the_spec() {
+    let doc = std::fs::read_to_string(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../docs/design/retained-formats.md"
+    ))
+    .unwrap();
+    let text = doc.split_whitespace().collect::<Vec<_>>().join(" ");
+    let line = text
+        .split("Carriers: ")
+        .nth(1)
+        .and_then(|t| t.split(" (the model").next())
+        .expect("carrier line");
+    let named: Vec<&str> = line.split(", ").map(|c| c.trim_matches('`')).collect();
+    let model: Vec<&str> = identity::CARRIERS.iter().map(|c| c.0).collect();
+    assert_eq!(named, model);
+}
+
+/// Found by the shrinker: run order takes precedence over numbers; two
+/// boots of one opener more than 2^31 of its appends apart, whose entries
+/// the opener no longer holds, are still ordered by a later writer's runs.
+#[test]
+fn regression_run_order_before_numbers() {
+    let c = Config {
+        survives: Survives::ResetRandom,
+        stage0: false,
+        s0_bytes: 8 * V1_SIZE,
+        bc_bytes: 8 * V1_SIZE,
+        more: vec![4 * V1_SIZE, 3 * V1_SIZE],
+        gap: 0,
+        weak: false,
+    };
+    let b = |w1, w1e, w2e, w2end| Op::Boot {
+        s0: stage(V1, 1, Next),
+        bc: stage(Old, 1, Next),
+        more: vec![stage(w1, w1e, Next), stage(V1, w2e, w2end)],
+        app: V1,
+        cut: None,
+        power: false,
+    };
+    let ops = vec![
+        b(V1, 2, 3, Hang),
+        Op::FastForward {
+            boots: 1_073_741_832,
+            linked: true,
+        },
+        b(V1, 3, 1, Next),
+        b(V2, 2, 1, Next),
+    ];
+    assert!(check::<RecordWorld>(&c, &ops, 0x61bb_21c6_ccfb_6d86).is_ok());
 }

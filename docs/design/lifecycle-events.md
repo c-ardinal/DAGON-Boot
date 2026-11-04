@@ -1206,7 +1206,7 @@ small closed set of mechanisms behind a trait:
 | Unwinding | `[isolation] unwind` | `cortex-m-exception`, `riscv-trap`, `xtensa-world`, `armv8m-tz` |
 | Sandbox timer | `[isolation] timer` | `systick`, `riscv-mtime`, `timer-group` |
 | Watchdog | `[watchdog] kind, trial_ms, confirmed_ms` | the `WatchdogDriver` port's defaults per kind (`iwdg`, `rp-watchdog`, `rtc-wdt`, …) |
-| Boot record placement | `[boot.record] kind, at, survives, rings` | `noinit-ram`, `retained-registers` (5.5) |
+| Boot record placement | `[boot.record] kind, at, survives, rings, entropy` (entropy: the source of a start-up word that differs between starts; required for a boot record) | `noinit-ram`, `retained-registers` (5.5) |
 | Lockup fuse | `[boot.record] fuse`, `[watchdog] flag` (none, or the register or package source of a reset-surviving, start-acknowledged watchdog-reset flag) | fuse available only with a flag; the loader reports it unavailable otherwise (5.5) |
 | Root protection | `[isolation] root_protection` | per MCU family, applied by `dagon provision` |
 | Caches and TCM | `[isolation] cache, tcm` | window attributes and bounce-buffer placement (below) |

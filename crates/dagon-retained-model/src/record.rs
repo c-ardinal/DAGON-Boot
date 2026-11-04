@@ -13,8 +13,13 @@ use std::ops::Range;
 pub const RECORD_MAX: usize = 4096;
 /// Writers per record (the opener field is 4 bits).
 pub const WRITERS_MAX: usize = 16;
+/// Slots per ring.
+pub const MAX_SLOTS: usize = 256;
 /// First byte of a committed entry is `COMMIT_BASE | layout`.
 pub const COMMIT_BASE: u8 = 0xB0;
+
+/// The registers one stage passes to the next at the jump.
+pub type HandOff = [u32; 4];
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct BootId {
@@ -22,6 +27,8 @@ pub struct BootId {
     pub opener: u8,
     /// The opener's sequence number of its first entry in that boot.
     pub boot: u32,
+    /// The opener's sequence tag (which of its sequences `boot` counts in).
+    pub tag: u32,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -36,6 +43,9 @@ pub struct Entry {
     pub kind: u8,
     /// Writer sequence: +1 per entry, continued from the newest held entry.
     pub eseq: u32,
+    /// The writer's sequence tag: chosen when it starts a sequence on an
+    /// empty ring, carried by every entry of that sequence.
+    pub tag: u32,
     pub payload: [u8; 3],
 }
 
@@ -48,7 +58,7 @@ pub trait RecordCodec {
     fn decode(&self, writer: u8, slot: &[u8]) -> Option<Entry>;
 }
 
-/// Layout 1: 20-byte entries.
+/// Layout 1: 28-byte entries.
 ///
 /// | off | field |
 /// |---|---|
@@ -58,15 +68,18 @@ pub trait RecordCodec {
 /// | 3 | kind |
 /// | 4 | eseq u32 LE |
 /// | 8 | boot u32 LE (opener's eseq of its first entry in the boot) |
-/// | 12 | payload, 3 bytes |
-/// | 15 | zero |
-/// | 16 | CRC-32 (ISO-HDLC) over `[layout, writer]` then bytes 1..16 |
+/// | 12 | boot tag u32 LE (the opener's sequence tag) |
+/// | 16 | tag u32 LE (this writer's sequence tag) |
+/// | 20 | payload, 3 bytes |
+/// | 23 | zero |
+/// | 24 | CRC-32 (ISO-HDLC) over `[layout, writer]` then bytes 1 to 23 |
 ///
-/// Append: store byte 0 = `0x00`, then bytes 1..20 in order, then byte 0 =
-/// commit. Only the commit byte is stored twice, and only by its own append.
+/// Append: store byte 0 = `0x00`, then bytes 1 to 27 in order, then byte 0
+/// = commit. Only the commit byte is stored twice, and only by its own
+/// append.
 pub struct V1;
 
-pub const V1_SIZE: usize = 20;
+pub const V1_SIZE: usize = 28;
 
 fn entry_crc(layout: u8, writer: u8, body: &[u8]) -> u32 {
     let mut b = Vec::with_capacity(body.len() + 2);
@@ -77,6 +90,10 @@ fn entry_crc(layout: u8, writer: u8, body: &[u8]) -> u32 {
 
 fn flags(e: &Entry) -> u8 {
     (e.start as u8) | ((e.epoch as u8) << 1) | (e.boot.opener << 4)
+}
+
+fn le(b: &[u8], at: usize) -> u32 {
+    u32::from_le_bytes(b[at..at + 4].try_into().unwrap())
 }
 
 impl RecordCodec for V1 {
@@ -95,9 +112,11 @@ impl RecordCodec for V1 {
         b[3] = e.kind;
         b[4..8].copy_from_slice(&e.eseq.to_le_bytes());
         b[8..12].copy_from_slice(&e.boot.boot.to_le_bytes());
-        b[12..15].copy_from_slice(&e.payload);
-        let crc = entry_crc(1, writer, &b[1..16]);
-        b[16..20].copy_from_slice(&crc.to_le_bytes());
+        b[12..16].copy_from_slice(&e.boot.tag.to_le_bytes());
+        b[16..20].copy_from_slice(&e.tag.to_le_bytes());
+        b[20..23].copy_from_slice(&e.payload);
+        let crc = entry_crc(1, writer, &b[1..24]);
+        b[24..28].copy_from_slice(&crc.to_le_bytes());
         let mut s = vec![(0, 0)];
         s.extend((1..V1_SIZE).map(|i| (i, b[i])));
         s.push((0, COMMIT_BASE | 1));
@@ -105,64 +124,71 @@ impl RecordCodec for V1 {
     }
 
     fn decode(&self, writer: u8, b: &[u8]) -> Option<Entry> {
-        let crc = u32::from_le_bytes(b[16..20].try_into().ok()?);
         let ok = b[0] == COMMIT_BASE | 1
             && b[1] & 0x0C == 0
-            && b[15] == 0
-            && crc == entry_crc(1, writer, &b[1..16]);
+            && b[23] == 0
+            && le(b, 24) == entry_crc(1, writer, &b[1..24]);
         ok.then(|| Entry {
             start: b[1] & 1 != 0,
             epoch: b[1] & 2 != 0,
             boot: BootId {
                 opener: b[1] >> 4,
-                boot: u32::from_le_bytes(b[8..12].try_into().unwrap()),
+                boot: le(b, 8),
+                tag: le(b, 12),
             },
             fmt: b[2],
             kind: b[3],
-            eseq: u32::from_le_bytes(b[4..8].try_into().unwrap()),
-            payload: [b[12], b[13], b[14]],
+            eseq: le(b, 4),
+            tag: le(b, 16),
+            payload: [b[20], b[21], b[22]],
         })
     }
 }
 
-/// Boot identity passed from one stage to the next in three registers at
+/// Boot identity passed from one stage to the next in four registers at
 /// the jump (never through retained memory, so a hung earlier boot cannot
 /// leave a stale value).
 pub mod handoff {
-    use super::BootId;
+    use super::{BootId, HandOff};
     use dagon_format::crc32;
 
     pub const MAGIC: u32 = u32::from_le_bytes(*b"DGBR");
 
-    fn check(w0: u32, w1: u32, lo: u16) -> u16 {
-        let mut b = [0u8; 10];
-        b[0..4].copy_from_slice(&w0.to_le_bytes());
-        b[4..8].copy_from_slice(&w1.to_le_bytes());
-        b[8..10].copy_from_slice(&lo.to_le_bytes());
+    fn check(w: &[u32; 3], lo: u16) -> u16 {
+        let mut b = Vec::with_capacity(14);
+        w.iter().for_each(|x| b.extend_from_slice(&x.to_le_bytes()));
+        b.extend_from_slice(&lo.to_le_bytes());
         crc32(&b) as u16
     }
 
-    /// `[MAGIC, boot, opener | layout << 8 | check << 16]`.
-    pub fn encode(id: BootId, layout: u8) -> [u32; 3] {
+    /// `[MAGIC, boot, tag, opener | layout << 8 | check << 16]`.
+    pub fn encode(id: BootId, layout: u8) -> HandOff {
         let lo = id.opener as u16 | (layout as u16) << 8;
+        let head = [MAGIC, id.boot, id.tag];
         [
             MAGIC,
             id.boot,
-            lo as u32 | (check(MAGIC, id.boot, lo) as u32) << 16,
+            id.tag,
+            lo as u32 | (check(&head, lo) as u32) << 16,
         ]
+    }
+
+    /// The record layout of a well-formed hand-off (magic and check).
+    pub fn layout_of(w: HandOff) -> Option<u8> {
+        let lo = w[3] as u16;
+        let ok = w[0] == MAGIC && (w[3] >> 16) as u16 == check(&[w[0], w[1], w[2]], lo);
+        ok.then_some((lo >> 8) as u8)
     }
 
     /// Accepted only with the magic, the check, the reader's own layout and
     /// an opener that runs before `me`.
-    pub fn decode(w: [u32; 3], layout: u8, me: u8) -> Option<BootId> {
-        let lo = w[2] as u16;
-        let ok = w[0] == MAGIC
-            && (w[2] >> 16) as u16 == check(w[0], w[1], lo)
-            && (lo >> 8) as u8 == layout
-            && (lo as u8) < me;
+    pub fn decode(w: HandOff, layout: u8, me: u8) -> Option<BootId> {
+        let lo = w[3] as u16;
+        let ok = layout_of(w) == Some(layout) && (lo as u8) < me;
         ok.then_some(BootId {
             opener: lo as u8,
             boot: w[1],
+            tag: w[2],
         })
     }
 }
@@ -198,8 +224,11 @@ impl Geometry {
         }
         for (i, r) in self.rings.iter().enumerate() {
             let b = self.ring_bytes(i, size);
-            if r.slots < 2 || b.start < self.region.start || b.end > self.region.end {
-                return Err("ring outside the region or under 2 slots");
+            if !(2..=MAX_SLOTS).contains(&r.slots)
+                || b.start < self.region.start
+                || b.end > self.region.end
+            {
+                return Err("ring outside the region, or not 2..=256 slots");
             }
             let overlap = (0..i).any(|j| {
                 let o = self.ring_bytes(j, size);
@@ -228,22 +257,66 @@ pub fn scan<C: RecordCodec>(c: &C, mem: &[u8], ring: Ring, w: u8) -> Vec<(usize,
 /// `slots` sequence numbers behind it (ties: higher slot). For a ring the
 /// writer filled this is the entry with the largest sequence number, also
 /// across wrap; foreign bytes can only pick another slot of the same ring.
-fn newest(es: &[(usize, Entry)], slots: usize) -> Option<usize> {
-    let score = |x: &Entry| {
-        es.iter()
-            .filter(|(_, y)| (x.eseq.wrapping_sub(y.eseq) as usize) < slots)
-            .count()
-    };
+fn newest(es: &[(usize, Entry)]) -> Option<usize> {
+    let score = |x: &Entry| es.iter().filter(|(_, y)| behind(x.eseq, y.eseq)).count();
     (0..es.len()).max_by_key(|&i| (score(&es[i].1), es[i].0))
 }
 
-/// FNV-1a, 32 bits: the start of a fresh sequence from the region's raw
-/// bytes. Not a CRC: the region is made of CRC-32-protected entries, and
-/// CRC-32 over such a region is nearly independent of their contents.
-pub fn fnv1a(b: &[u8]) -> u32 {
-    b.iter().fold(0x811C_9DC5, |h: u32, &x| {
-        (h ^ x as u32).wrapping_mul(0x0100_0193)
-    })
+/// Sequence numbers one ring can hold apart: a ring of up to 2^8 slots
+/// that skipped at every append spans less than 2^16. Entries further
+/// from the newest are not this writer's current sequence.
+pub const SPAN: u32 = 1 << 24;
+
+/// `b` is at most [`SPAN`] behind `a` (or equal).
+fn behind(a: u32, b: u32) -> bool {
+    a.wrapping_sub(b) < SPAN
+}
+
+/// True when the ring shows exactly what this writer's own appends leave:
+/// either every slot valid, numbers falling slot by slot backwards from the
+/// newest; or, before the first wrap, slots 0..=newest valid and falling
+/// back to an `epoch` entry at slot 0, every later slot all zeros (a new
+/// sequence zeroes its ring first). Anything else means bytes the writer
+/// did not write destroyed some entries, which may have been newer than
+/// the newest it still holds.
+fn intact(
+    es: &[(usize, Entry)],
+    slots: usize,
+    newest: usize,
+    zero: impl Fn(usize) -> bool,
+) -> bool {
+    let mut at = vec![None; slots];
+    for (s, e) in es {
+        at[*s] = Some(*e);
+    }
+    let p = es[newest].0;
+    let falls = |len: usize| {
+        (0..len).all(|i| {
+            let s = (p + slots - i) % slots;
+            let t = (s + slots - 1) % slots;
+            match (at[s], at[t]) {
+                (Some(a), Some(b)) => a.eseq != b.eseq && behind(a.eseq, b.eseq),
+                _ => false,
+            }
+        })
+    };
+    let full = at.iter().all(Option::is_some) && falls(slots - 1);
+    let first_lap =
+        at[0].is_some_and(|e| e.epoch && e.start) && falls(p) && (p + 1..slots).all(zero);
+    full || first_lap
+}
+
+/// FNV-1a offset bases for a fresh sequence's first number and its tag.
+pub const FNV_START: u32 = 0x811C_9DC5;
+pub const FNV_TAG: u32 = 0x050C_5D1F;
+
+/// FNV-1a, 32 bits, from `basis`: a fresh sequence's first number and tag
+/// from the region's raw bytes. Not a CRC: the region is made of
+/// CRC-32-protected entries, and CRC-32 over such a region is nearly
+/// independent of their contents.
+pub fn fnv1a(basis: u32, b: &[u8]) -> u32 {
+    b.iter()
+        .fold(basis, |h: u32, &x| (h ^ x as u32).wrapping_mul(0x0100_0193))
 }
 
 /// One stage's appender for one run.
@@ -253,51 +326,87 @@ pub struct Writer<'c, C: RecordCodec> {
     me: u8,
     cursor: usize,
     next: u32,
+    tag: u32,
     boot: BootId,
     fresh: bool,
+    skipped: bool,
     started: bool,
+    forward: Option<HandOff>,
 }
 
 impl<'c, C: RecordCodec> Writer<'c, C> {
     /// Reads only the writer's own ring. `handoff` is the register triple
     /// the previous stage passed (`None` when nothing ran before);
-    /// `entropy` is the MCU package's start-up word (0 where none).
+    /// `entropy` is the MCU package's start-up word (differs between starts).
     pub fn open(
         codec: &'c C,
         mem: &Mem,
         geo: &Geometry,
         me: u8,
-        handoff: Option<[u32; 3]>,
+        handoff: Option<HandOff>,
         entropy: u32,
     ) -> Self {
         let ring = geo.rings[me as usize];
         let es = scan(codec, mem.bytes(), ring, me);
-        let (cursor, next, fresh) = match newest(&es, ring.slots) {
-            Some(i) => (
-                (es[i].0 + 1) % ring.slots,
-                es[i].1.eseq.wrapping_add(1),
-                false,
+        // A ring that is not intact continues `slots` past its newest held
+        // entry: past any newer entry that was destroyed, so no number is
+        // used twice, and the jump is stated as a gap.
+        let mut skipped = false;
+        let region = &mem.bytes()[geo.region.clone()];
+        let (cursor, next, tag, fresh) = match newest(&es) {
+            Some(i) => {
+                let size = codec.entry_size();
+                let zero = |s: usize| {
+                    let a = ring.base + s * size;
+                    mem.bytes()[a..a + size].iter().all(|&b| b == 0)
+                };
+                skipped = !intact(&es, ring.slots, i, zero);
+                let step = if skipped { ring.slots as u32 } else { 1 };
+                (
+                    (es[i].0 + 1) % ring.slots,
+                    es[i].1.eseq.wrapping_add(step),
+                    es[i].1.tag,
+                    false,
+                )
+            }
+            None => (
+                0,
+                fnv1a(FNV_START, region) ^ entropy,
+                fnv1a(FNV_TAG, region) ^ entropy.rotate_left(16),
+                true,
             ),
-            None => (0, fnv1a(&mem.bytes()[geo.region.clone()]) ^ entropy, true),
         };
         let linked = handoff.and_then(|h| handoff::decode(h, codec.layout(), me));
+        // A hand-off of another record layout is passed on unchanged, so a
+        // stage of another layout in the middle does not cut the chain.
+        let forward =
+            handoff.filter(|&h| handoff::layout_of(h).is_some_and(|l| l != codec.layout()));
         Writer {
             codec,
             ring,
             me,
             cursor,
             next,
+            tag,
             boot: linked.unwrap_or(BootId {
                 opener: me,
                 boot: next,
+                tag,
             }),
             fresh,
+            skipped,
             started: false,
+            forward,
         }
     }
 
     pub fn boot(&self) -> BootId {
         self.boot
+    }
+
+    /// True when the ring was not intact and the sequence jumped.
+    pub fn skipped(&self) -> bool {
+        self.skipped
     }
 
     /// True when the ring held no valid entry of this layout at open.
@@ -314,8 +423,11 @@ impl<'c, C: RecordCodec> Writer<'c, C> {
         self.next
     }
 
-    pub fn handoff(&self) -> [u32; 3] {
-        handoff::encode(self.boot, self.codec.layout())
+    /// What this stage passes to the next one: a hand-off of another
+    /// layout as received, else its own boot.
+    pub fn handoff(&self) -> HandOff {
+        self.forward
+            .unwrap_or_else(|| handoff::encode(self.boot, self.codec.layout()))
     }
 
     pub fn append(
@@ -332,8 +444,15 @@ impl<'c, C: RecordCodec> Writer<'c, C> {
             fmt,
             kind,
             eseq: self.next,
+            tag: self.tag,
             payload,
         };
+        if self.fresh && !self.started {
+            let n = self.ring.slots * self.codec.entry_size();
+            for a in self.ring.base..self.ring.base + n {
+                mem.store(a, 0)?;
+            }
+        }
         let at = self.next_slot();
         for (off, v) in self.codec.append_stores(self.me, &e) {
             mem.store(at + off, v)?;
@@ -384,6 +503,8 @@ pub struct Replay {
     pub invalid: usize,
     /// Slots whose first byte is the commit of another layout.
     pub foreign: usize,
+    /// `ordered[i][j]`: the record orders `boots[i]` and `boots[j]`.
+    pub ordered: Vec<Vec<bool>>,
 }
 
 impl Replay {
@@ -400,12 +521,12 @@ struct Run {
 /// One writer's held entries oldest first, its runs and its loss statements.
 fn writer_runs<C: RecordCodec>(c: &C, mem: &[u8], ring: Ring, w: u8, out: &mut Replay) -> Vec<Run> {
     let mut es = scan(c, mem, ring, w);
-    let Some(top) = newest(&es, ring.slots).map(|i| es[i].1.eseq) else {
+    let Some(top) = newest(&es).map(|i| es[i].1.eseq) else {
         out.losses.push(Loss::Empty { writer: w });
         return Vec::new();
     };
     let before = es.len();
-    es.retain(|(_, e)| (top.wrapping_sub(e.eseq) as usize) < ring.slots);
+    es.retain(|(_, e)| behind(top, e.eseq));
     es.sort_by_key(|(_, e)| std::cmp::Reverse(top.wrapping_sub(e.eseq)));
     es.dedup_by_key(|(_, e)| e.eseq);
     out.invalid += before - es.len();
@@ -457,7 +578,7 @@ pub fn read<C: RecordCodec>(c: &C, mem: &[u8], geo: &Geometry) -> Replay {
         let top = runs
             .last()
             .and_then(|r| r.events.last())
-            .map(|e| e.entry.eseq);
+            .map(|e| (e.entry.eseq, e.entry.tag));
         let mut by_boot: HashMap<BootId, Vec<Replayed>> = HashMap::new();
         for r in runs {
             by_boot.entry(r.boot).or_default().extend(r.events);
@@ -466,10 +587,9 @@ pub fn read<C: RecordCodec>(c: &C, mem: &[u8], geo: &Geometry) -> Replay {
             chain,
             by_boot,
             top,
-            slots: ring.slots as u32,
         });
     }
-    out.boots = merge(per_writer);
+    (out.boots, out.ordered) = merge(per_writer);
     out
 }
 
@@ -477,43 +597,53 @@ struct View {
     /// Boots of the writer's runs, oldest first.
     chain: Vec<BootId>,
     by_boot: HashMap<BootId, Vec<Replayed>>,
-    /// Newest held sequence number.
-    top: Option<u32>,
-    slots: u32,
+    /// Newest held sequence number and its tag.
+    top: Option<(u32, u32)>,
 }
 
-/// Where a boot its opener's ring no longer holds sits among the boots the
-/// ring holds, from its number: up to `slots` above the newest held entry
-/// it is newer (newest entries destroyed by foreign bytes), inside the held
-/// range it sits by number, anywhere else it is older (overwritten).
-fn place_stale(b: BootId, own: &View, nodes: &[BootId], edge: &mut [Vec<bool>]) {
-    let ix = |x: &BootId| nodes.iter().position(|y| y == x).unwrap();
-    let Some(top) = own.top else {
-        return;
-    };
-    let ahead = b.boot.wrapping_sub(top);
-    let back = top.wrapping_sub(b.boot);
-    for h in own.chain.iter().filter(|h| h.opener == b.opener) {
-        let h_back = top.wrapping_sub(h.boot);
-        let newer = if ahead != 0 && ahead <= own.slots {
-            true
-        } else if back < own.slots {
-            h_back > back
-        } else {
-            false
-        };
-        if newer {
-            edge[ix(h)][ix(&b)] = true;
-        } else {
-            edge[ix(&b)][ix(h)] = true;
+/// Order of two boots of the same opener: `Some(true)` when `x` is older.
+/// A boot of the opener's current sequence (the tag of its newest held
+/// entry) is newer than one of any other sequence. Within the current
+/// sequence numbers count back from the newest held entry (up to `SPAN`
+/// ahead of it: newest entries destroyed); within another sequence by
+/// serial order when less than 2^30 apart. Boots of two other sequences,
+/// or far apart in one other sequence, are not ordered.
+fn same_opener(x: BootId, y: BootId, top: Option<(u32, u32)>) -> Option<bool> {
+    let current = |b: BootId| top.is_some_and(|(_, tag)| tag == b.tag);
+    match (current(x), current(y)) {
+        (true, true) => {
+            let t = top.unwrap().0;
+            let rank = |n: u32| {
+                let ahead = n.wrapping_sub(t);
+                if ahead < SPAN {
+                    (1, ahead)
+                } else {
+                    (0, u32::MAX - t.wrapping_sub(n))
+                }
+            };
+            (x.boot != y.boot).then(|| rank(x.boot) < rank(y.boot))
         }
+        (true, false) => Some(false),
+        (false, true) => Some(true),
+        (false, false) if x.tag == y.tag => {
+            let d = y.boot.wrapping_sub(x.boot);
+            let back = x.boot.wrapping_sub(y.boot);
+            if d != 0 && d < 1 << 30 {
+                Some(true)
+            } else if back != 0 && back < 1 << 30 {
+                Some(false)
+            } else {
+                None
+            }
+        }
+        (false, false) => None,
     }
 }
 
-/// Orders boots by every writer's own sequence order, a boot its opener no
-/// longer holds by [`place_stale`]. Boots no chain orders against each
-/// other are marked uncertain.
-fn merge(per: Vec<View>) -> Vec<BootReplay> {
+/// Orders boots by every writer's own run order and boots of one opener
+/// by [`same_opener`]. Boots nothing orders against each other are marked
+/// uncertain; `ordered` says which pairs the record orders.
+fn merge(per: Vec<View>) -> (Vec<BootReplay>, Vec<Vec<bool>>) {
     let mut nodes: Vec<BootId> = Vec::new();
     for View { chain, .. } in &per {
         for b in chain {
@@ -532,10 +662,17 @@ fn merge(per: Vec<View>) -> Vec<BootReplay> {
             }
         }
     }
-    for b in &nodes {
-        if let Some(own) = per.get(b.opener as usize) {
-            if !own.chain.contains(b) {
-                place_stale(*b, own, &nodes, &mut edge);
+    // Run order first; numbers order only what no run order relates.
+    let by_runs = closure(&edge);
+    for i in 0..k {
+        for j in 0..k {
+            let (x, y) = (nodes[i], nodes[j]);
+            if i == j || x.opener != y.opener || by_runs[i][j] || by_runs[j][i] {
+                continue;
+            }
+            let top = per.get(x.opener as usize).and_then(|v| v.top);
+            if same_opener(x, y, top) == Some(true) {
+                edge[i][j] = true;
             }
         }
     }
@@ -544,7 +681,11 @@ fn merge(per: Vec<View>) -> Vec<BootReplay> {
         .map(|i| (0..k).any(|j| i != j && reach[i][j] == reach[j][i]))
         .collect();
     let order = topo(&edge, &nodes);
-    order
+    let ordered = order
+        .iter()
+        .map(|&a| order.iter().map(|&b| reach[a][b] || reach[b][a]).collect())
+        .collect();
+    let boots = order
         .into_iter()
         .map(|i| {
             let id = nodes[i];
@@ -561,7 +702,8 @@ fn merge(per: Vec<View>) -> Vec<BootReplay> {
                 events,
             }
         })
-        .collect()
+        .collect();
+    (boots, ordered)
 }
 
 fn closure(edge: &[Vec<bool>]) -> Vec<Vec<bool>> {
@@ -600,7 +742,7 @@ fn topo(edge: &[Vec<bool>], nodes: &[BootId]) -> Vec<usize> {
 }
 
 /// VERSION 0x20: `layout, boots, flags (bit 0 uncertain, bit 1 loss),
-/// newest boot opener u8, boot u32 LE, count u8`, then per writer of the
+/// newest boot opener u8, boot u32 LE, tag u32 LE, count u8`, then per writer of the
 /// newest boot its last entry: `writer, fmt, kind, payload[3]`.
 pub fn summary(layout: u8, r: &Replay) -> Vec<u8> {
     let lossy = r.losses.iter().any(|l| match l {
@@ -617,6 +759,7 @@ pub fn summary(layout: u8, r: &Replay) -> Vec<u8> {
     if let Some(b) = r.boots.last() {
         s.push(b.id.opener);
         s.extend_from_slice(&b.id.boot.to_le_bytes());
+        s.extend_from_slice(&b.id.tag.to_le_bytes());
         let mut last: Vec<&Replayed> = Vec::new();
         for e in &b.events {
             match last.last_mut() {
@@ -685,10 +828,12 @@ mod tests {
             boot: BootId {
                 opener: 3,
                 boot: 77,
+                tag: 9,
             },
             fmt: 1,
             kind: 9,
             eseq: 0xFFFF_FFFF,
+            tag: 0xABCD,
             payload: [1, 2, 3],
         };
         let mut b = [0u8; V1_SIZE];
@@ -701,7 +846,11 @@ mod tests {
 
     #[test]
     fn handoff_refuses_other_layouts_and_later_openers() {
-        let id = BootId { opener: 0, boot: 5 };
+        let id = BootId {
+            opener: 0,
+            boot: 5,
+            tag: 6,
+        };
         let w = handoff::encode(id, 1);
         assert_eq!(handoff::decode(w, 1, 1), Some(id));
         assert_eq!(handoff::decode(w, 2, 1), None);

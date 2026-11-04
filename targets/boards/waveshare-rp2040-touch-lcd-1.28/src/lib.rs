@@ -57,6 +57,8 @@ pub const DIAG_LED: u8 = match def::BOOT_LED_GPIO {
     Some(g) => g,
     None => panic!("dagon-board.toml: [boot] led"),
 };
+/// The level that lights it (`[boot] led_active`).
+pub const DIAG_LED_ACTIVE_HIGH: bool = def::BOOT_LED_ACTIVE_HIGH;
 
 pub const I2C_HZ: u32 = def::BUS_CHILD_I2C_HZ;
 pub const UART_BAUD: u32 = def::BUS_CHILD_UART_BAUD;

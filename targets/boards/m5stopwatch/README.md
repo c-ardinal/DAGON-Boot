@@ -13,7 +13,7 @@ block types and `take!`.
 | Rear pins UART/USB switch | device `ioe`, M5IOE1 IO expander (`IOE`), PYG1 driven low at bring-up (`route_rear_uart`) |
 | Power manager | device `pmic`, M5PM1 (`PMIC`); ENTER_ROM method 2 only with the `pmic-download` feature (the command byte 0xA3 is an unconfirmed assumption) |
 | Flash | 16 MB (`FLASH_SIZE`, espflash `--flash-size 16mb`); partition table from the MCU crate |
-| Node tag | `watch-s3` (`TARGET_TAG`, the `DAGON_TARGET_TAG` default) |
+| Node tag | `TARGET_TAG`: `DAGON_TARGET_TAG` at build time (the node's tag in the 構成; the build fails without it) |
 
 `start` opens the internal bus and puts it into `SYS_I2C`
 (`dagon_events::Shared`); DAGON's bring-up (`M5StopWatch`, the
@@ -26,8 +26,7 @@ through `p.I2C0.reborrow()`.
 
 ## Adding DAGON to an app
 
-The DAGON-specific lines of an app (see `samples/esp32s3-app` for a complete
-one):
+The DAGON-specific lines of an app:
 
 ```rust
 use dagon_board_m5stopwatch::{self as board, dagon_pins};
@@ -64,7 +63,8 @@ selects nothing bootable; it receives an image into ota_0 or ota_1 and hands
 over with SET_PENDING, REBOOT and CONFIRM.
 
 ```sh
-# from this directory (espup toolchain; DAGON_PUBKEY set to the release key)
+# from this directory (espup toolchain; DAGON_PUBKEY set to the release key,
+# DAGON_TARGET_TAG to the node's tag)
 cargo build --release --bin factory
 ```
 
@@ -86,7 +86,8 @@ package) with the `{{node}}` / `{{dep:<package>}}` placeholders, `.cargo/config.
   the 2nd stage rolls back to the previous slot.
 
 ```sh
-# from this directory (espup toolchain; DAGON_PUBKEY or DAGON_ALLOW_TEST_KEY=1)
+# from this directory (espup toolchain; DAGON_PUBKEY or DAGON_ALLOW_TEST_KEY=1,
+# DAGON_TARGET_TAG to the node's tag)
 cargo build --release
 ```
 

@@ -25,6 +25,11 @@ pub mod def {
     pub mod pins {
         include!(concat!(env!("OUT_DIR"), "/pins.rs"));
     }
+
+    /// The `[[device]]`s as bus port capabilities.
+    pub mod devices {
+        include!(concat!(env!("OUT_DIR"), "/devices.rs"));
+    }
 }
 
 use core::fmt;
@@ -33,6 +38,7 @@ use dagon_events::{BoardBringUp, BusError, Device, Shared};
 use dagon_mcu_esp32s3::board::BoardDef;
 use dagon_mcu_esp32s3::liveness::Liveness;
 use dagon_mcu_esp32s3::node::{self, NodeConfig, NodePeripherals, WatchdogArmed};
+use def::devices;
 use def::pins::{Link, LinkRx, LinkTx, Sys, SysScl, SysSda};
 use esp_hal::{
     i2c::master::{Config as I2cConfig, ConfigError, Error as I2cError, I2c},
@@ -46,37 +52,31 @@ use static_cell::StaticCell;
 
 /// Flash size of the board (espflash `--flash-size 16mb`).
 pub const FLASH_SIZE: u32 = def::FLASH_BYTES;
-/// Image `target_tag` of this board's node (the topology's `watch` node);
-/// `DAGON_TARGET_TAG` at build time overrides it.
-pub const TARGET_TAG: &str = "watch-s3";
+/// Image `target_tag` of the node: `DAGON_TARGET_TAG` at build time (the
+/// node's tag in the topology; the build fails without it).
+pub const TARGET_TAG: &str = match dagon_mcu_esp32s3::TARGET_TAG_OVERRIDE {
+    Some(t) => t,
+    None => panic!("DAGON_TARGET_TAG is unset: set it to the node's image target tag"),
+};
 
 /// The internal bus (`sys`), shared: [`start`] (or [`open_sys_i2c`]) puts
 /// it in; DAGON's bring-up and the app use it through `SYS_I2C.with(..)`.
 pub static SYS_I2C: Shared<I2c<'static, Blocking>> = Shared::new();
 
-/// M5IOE1 I/O expander on [`SYS_I2C`] (`[[device]] ioe`).
-pub const IOE: Device = Device {
-    addr: def::DEVICE_IOE_ADDR,
-    writable: def::DEVICE_IOE_WRITABLE,
-};
-/// M5IOE1 registers (low byte IO1-IO8): mode, output level, drive.
-pub const IOE_REG_MODE_L: u8 = 0x03;
-pub const IOE_REG_OUT_L: u8 = 0x05;
-pub const IOE_REG_DRV_L: u8 = 0x13;
+/// M5IOE1 I/O expander on [`SYS_I2C`] (`[[device]] ioe`; its registers
+/// are `def::DEVICE_IOE_REG_*`).
+pub const IOE: Device = devices::IOE;
 /// PYG1 (PYB_MUX_CTR): low = rear MUX_IO_1/2 carry UART0, high = USB.
 pub const PYG1_BIT: u8 = 1 << 0;
 
-/// M5PM1 power manager on [`SYS_I2C`] (`[[device]] pmic`).
-pub const PMIC: Device = Device {
-    addr: def::DEVICE_PMIC_ADDR,
-    writable: def::DEVICE_PMIC_WRITABLE,
-};
-/// M5PM1 SYS_CMD.
-// Unverified: the datasheet gives SYS_CMD 0x0C = KEY 0xA + CMD 0b11
+/// M5PM1 power manager on [`SYS_I2C`] (`[[device]] pmic`; its registers
+/// are `def::DEVICE_PMIC_REG_*`).
+pub const PMIC: Device = devices::PMIC;
+/// The SYS_CMD value that restarts the chip in download mode.
+// Unverified: the datasheet gives SYS_CMD = KEY 0xA + CMD 0b11
 // (Download); KEY in the high nibble is an assumption, hence the
 // `pmic-download` feature gate until M5Stack documents or the hardware
 // confirm it.
-pub const PMIC_REG_SYS_CMD: u8 = 0x0C;
 #[cfg(feature = "pmic-download")]
 const PMIC_DOWNLOAD: u8 = 0xA3;
 /// Time the M5PM1 gets to reset the chip into download mode.
@@ -95,7 +95,8 @@ pub fn open_sys_i2c(
     let bus = I2c::new(i2c0, I2cConfig::default())?
         .with_sda(sda)
         .with_scl(scl);
-    SYS_I2C.put(bus);
+    // Only `start` and a test app put it in, before anyone leases it.
+    let _ = SYS_I2C.put(bus);
     Ok(())
 }
 
@@ -108,15 +109,21 @@ fn ioe_update(reg: u8, set: u8, clear: u8) -> Result<(), BusError<I2cError>> {
 /// Drives PYG1 low (output latch first, then push-pull output) so the rear
 /// pins carry UART0, through [`SYS_I2C`].
 pub fn route_rear_uart() -> Result<(), BusError<I2cError>> {
-    ioe_update(IOE_REG_OUT_L, 0, PYG1_BIT)?;
-    ioe_update(IOE_REG_DRV_L, 0, PYG1_BIT)?;
-    ioe_update(IOE_REG_MODE_L, PYG1_BIT, 0)
+    ioe_update(def::DEVICE_IOE_REG_OUT_L, 0, PYG1_BIT)?;
+    ioe_update(def::DEVICE_IOE_REG_DRV_L, 0, PYG1_BIT)?;
+    ioe_update(def::DEVICE_IOE_REG_MODE_L, PYG1_BIT, 0)
 }
 
-/// The DAGON link UART (bus `link`), `link::uart_config()`.
+/// The link's bit rate (`[default_link] baud`).
+pub const LINK_BAUD: u32 = match def::DEFAULT_LINK_BAUD {
+    Some(b) => b,
+    None => panic!("dagon-board.toml: default_link.baud"),
+};
+
+/// The DAGON link UART (bus `link`) at [`LINK_BAUD`] 8N1.
 pub fn rear_uart<'d>(uart0: Link<'d>, tx: LinkTx<'d>, rx: LinkRx<'d>) -> Uart<'d, Blocking> {
-    // The link settings (115200 8N1) are always valid.
-    Uart::new(uart0, dagon_mcu_esp32s3::link::uart_config())
+    // A definition-checked bit rate, 8N1: always valid.
+    Uart::new(uart0, dagon_mcu_esp32s3::link::uart_config(LINK_BAUD))
         .unwrap_or_else(|_| esp_hal::system::software_reset())
         .with_tx(tx)
         .with_rx(rx)
@@ -146,7 +153,7 @@ impl BoardDef for M5StopWatch {
     #[cfg(feature = "pmic-download")]
     fn pmic_download(&mut self) {
         if PMIC
-            .write(&SYS_I2C, PMIC_REG_SYS_CMD, &[PMIC_DOWNLOAD])
+            .write(&SYS_I2C, def::DEVICE_PMIC_REG_SYS_CMD, &[PMIC_DOWNLOAD])
             .is_ok()
         {
             esp_hal::delay::Delay::new().delay_millis(PMIC_WAIT_MS);

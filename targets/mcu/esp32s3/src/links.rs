@@ -131,7 +131,8 @@ mod node_links {
         }
     }
 
-    /// Up `uart`: UART0 at 115200 8N1 (`link::uart_config`).
+    /// Up `uart`: UART0, 8N1 at the board's link bit rate
+    /// (`link::uart_config`).
     pub struct Uart {
         uart: HalUart<'static, Async>,
         rx: Rx,

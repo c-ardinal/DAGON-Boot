@@ -125,6 +125,7 @@ impl BoardDef for Board {
     const BOARD_ID: &'static str = BOARD_ID;
     const FLASH_SIZE: usize = FLASH_SIZE;
     const DIAG_LED: Option<u8> = Some(DIAG_LED);
+    const DIAG_LED_ACTIVE_HIGH: bool = crate::DIAG_LED_ACTIVE_HIGH;
     type UserIo = Io;
 
     fn split(p: Peripherals) -> (DagonParts, Io) {

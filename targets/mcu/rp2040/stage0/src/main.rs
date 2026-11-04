@@ -47,7 +47,7 @@ mod board_def {
 /// Takes the board's boot LED, if it has one (output, on).
 fn led_init() {
     if let Some(gpio) = board_def::BOOT_LED_GPIO {
-        led::init(gpio);
+        led::init(gpio, board_def::BOOT_LED_ACTIVE_HIGH);
     }
 }
 
@@ -88,7 +88,7 @@ fn main() -> ! {
     ) {
         Ok(body) => {
             if cfg!(feature = "diag") {
-                led::set(!board_def::BOOT_LED_ACTIVE_HIGH);
+                led::set(false);
             }
             jump(body)
         }
@@ -108,7 +108,7 @@ fn main() -> ! {
             match HALT_MS {
                 Some(ms) => led::halt(ms, led::ROSC_MS),
                 None => {
-                    led::set(!board_def::BOOT_LED_ACTIVE_HIGH);
+                    led::set(false);
                     loop {
                         cortex_m::asm::wfi();
                     }

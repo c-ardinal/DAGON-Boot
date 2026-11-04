@@ -43,7 +43,7 @@ mod board_def {
 /// Takes the board's boot LED, if it has one (output, on).
 fn led_init() {
     if let Some(gpio) = board_def::BOOT_LED_GPIO {
-        led::init(gpio);
+        led::init(gpio, board_def::BOOT_LED_ACTIVE_HIGH);
     }
 }
 
@@ -86,7 +86,7 @@ const CONFIG: BootConfig = BootConfig {
 fn main() -> ! {
     // The diag panic handler blinks the selected LED.
     if let Some(gpio) = board_def::BOOT_LED_GPIO {
-        led::select(gpio);
+        led::select(gpio, board_def::BOOT_LED_ACTIVE_HIGH);
     }
     step(6);
     let p = embassy_rp::init(Default::default());
@@ -112,7 +112,7 @@ fn main() -> ! {
     match HALT_MS {
         Some(ms) => led::halt(ms, led::PLL_MS),
         None => {
-            led::set(!board_def::BOOT_LED_ACTIVE_HIGH);
+            led::set(false);
             loop {
                 cortex_m::asm::wfi();
             }

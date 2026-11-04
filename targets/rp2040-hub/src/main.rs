@@ -53,7 +53,7 @@ static DESK_DEMO: [SubNode; 2] = [
 fn main() -> ! {
     // Panic blink codes: 10 before HAL init, 11 after it, 12 at USB setup,
     // 13 polling nodes, 14 answering the PC, 15 drawing.
-    led::select(board::DIAG_LED);
+    led::select(board::DIAG_LED, board::DIAG_LED_ACTIVE_HIGH);
     step(10);
     let (dagon, io) = Board::split(embassy_rp::init(Default::default()));
     step(11);

@@ -106,9 +106,7 @@ delay it; a stuck one stops the feeding and the chip resets (a version on
 trial then rolls back). Build with `DAGON_PUBKEY` set (below);
 `--features slot-b` links the same app for slot B.
 
-DAGON's own hub firmware (`../../rp2040-hub`) is this with the demo's
-fallback node list and its tag `hub-rp2040-lcd`. Without the relay,
-`node::start` serves a plain USB node the same way.
+Without the relay, `node::start` serves a plain USB node the same way.
 
 ## Links
 
@@ -207,12 +205,13 @@ export DAGON_PUBKEY=/path/outside/the/repo/dagon-signing.pub
 ```
 
 The boot core is built per node: it accepts only app images tagged with
-`DAGON_TARGET_TAG` (the node's tag, as in the app's `.cargo/config.toml`;
-`hub-rp2040-lcd` for DAGON's hub firmware), and its build fails without
-it. A host test (`tests/hub_boot.rs`) shows another node's image refused.
-Their status LED and halt pattern are the board definition's `[boot]
-led` and `halt` (the MCU's default board; `DAGON_BOARD=<board id>` at
-build time picks another). Both builds take
+`DAGON_TARGET_TAG` (the node's tag, as in the app's `.cargo/config.toml`),
+and its build fails without it. A host test (`tests/hub_boot.rs`) shows another node's image refused.
+Their status LED, its polarity and the halt pattern are the board
+definition's `[boot] led`, `led_active` and `halt`: the build reads the
+board `DAGON_BOARD=<board id>` names (with `DAGON_PROJECT=<path of
+dagon.toml>`, a project's inline `[board.<id>]` too); it may be left out
+only while the MCU has a single board definition. Both builds take
 `--features diag` for step blink codes (see the hub README).
 
 ## Keys

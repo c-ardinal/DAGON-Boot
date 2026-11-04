@@ -122,6 +122,44 @@ describe('update from the page with dagon-host apply against the mock hub', () =
     expect(d.doc.topo.links?.[0].addr).toBe(0x43);
   }, 20_000);
 
+  test('a second 親機, a 孫機 and a loop of 子機 are skipped with why: the reachable part updates as before', async () => {
+    const { t, op } = await sentTo();
+    const d = new Define();
+    // hub2 and a loop x <-> y sit between hub and seg in nodes[], so a node's topology index is not its 構成 position.
+    const extra = (id: string, role: string) => `  - id: ${id}\n    mcu: rp2040\n    role: ${role}\n    port: self-boot\n    tag: ${id}\n`;
+    d.load(
+      fromYaml(
+        DESK_DEMO_YAML.replace('  - id: seg\n', `${extra('hub2', 'coordinator')}${extra('x', 'node')}${extra('y', 'node')}  - id: seg\n`)
+          .replace('\nbuses:', `${extra('deep', 'node')}\nbuses:`)
+          .replace('links:\n', 'links:\n  - from: hub\n    to: hub2\n    kind: can\n  - from: seg\n    to: deep\n    kind: uart\n    iface: hw-uart0\n    pins: { tx: 0, rx: 1 }\n    control:\n      kind: cooperative\n      rom_entry: force-download-boot\n  - from: x\n    to: y\n    kind: uart\n    iface: hw-uart0\n    pins: { tx: 0, rx: 1 }\n    control:\n      kind: cooperative\n      rom_entry: force-download-boot\n  - from: y\n    to: x\n    kind: uart\n    iface: hw-uart0\n    pins: { tx: 0, rx: 1 }\n    control:\n      kind: cooperative\n      rom_entry: force-download-boot\n')
+          .replace('order: [seg, watch, hub]', 'order: [seg, watch, deep, x, y, hub2, hub]'),
+      ),
+    );
+    expect(d.errors).toBe(0);
+    expect(d.config.nodes.filter((n) => n.notYet).map((n) => [n.id, n.notYet])).toEqual([
+      ['hub2', 'second-hub'],
+      ['x', 'unreachable'],
+      ['y', 'unreachable'],
+      ['deep', 'deep'],
+    ]);
+    // One source: the page's reach is the cut's list, and every other node says why.
+    expect(d.config.reach).toEqual(['hub', 'seg', 'watch']);
+    expect(d.config.nodes.every((n) => d.config.reach.includes(n.id) !== Boolean(n.notYet))).toBe(true);
+    op.useConfig(d.config);
+    await op.round();
+    expect([op.live.hub2.responding, op.live.deep.responding, op.live.x.responding]).toEqual([null, null, null]);
+    expect(op.stuck).toBeUndefined();
+    op.takeFile('desk-1.1.0.dgb', RELEASE);
+    expect([op.state, op.file?.verdict, op.targets]).toEqual(['L18', 'pass', ['hub', 'seg', 'watch']]);
+    expect(op.status).toBe(ANNOUNCE.A10ok(3, 4));
+
+    await op.update();
+    expect(t.reboots).toEqual(['i2c:66', 'uart', 'hub']);
+    expect(op.state).toBe('L23');
+    expect(Object.keys(op.progress).sort()).toEqual(['hub', 'seg', 'watch']);
+    expect(op.finished).toEqual({ kind: 'updated', left: 0 });
+  }, 60_000);
+
   test('not a release at all', async () => {
     const { op } = await sentTo();
     op.takeFile('notes.txt', new TextEncoder().encode('hello'));

@@ -8,7 +8,10 @@
   }
 
   let { d }: Props = $props();
-  const unsupported = $derived(d.problems.filter((p) => problemChip(p).kind === 'unsupported').length);
+  const count = (kind: string) => d.problems.filter((p) => problemChip(p).kind === kind).length;
+  const unsupported = $derived(count('unsupported'));
+  const errors = $derived(count('error'));
+  const cautions = $derived(count('warning'));
 </script>
 
 <section class="problems" aria-labelledby="problems-h">
@@ -16,14 +19,15 @@
     <p class="lead">{DEFINE.nothingSelected}</p>
     {#if d.doc.topo.nodes.length}<h2 id="problems-h">{DEFINE.problemsNone}</h2>{/if}
   {:else}
-    <h2 id="problems-h" tabindex="-1">{DEFINE.problems(d.errors - unsupported)}{#if d.warnings}&ensp;{DEFINE.cautions(d.warnings)}{/if}{#if unsupported}&ensp;{DEFINE.unsupported(unsupported)}{/if}</h2>
+    <h2 id="problems-h" tabindex="-1">{DEFINE.problems(errors)}{#if cautions}&ensp;{DEFINE.cautions(cautions)}{/if}{#if unsupported}&ensp;{DEFINE.unsupported(unsupported)}{/if}</h2>
     <ul>
       {#each d.problems as p, i (i)}
         {@const c = problemChip(p)}
         <li class:warn={c.kind !== 'error'} aria-label={DEFINE.problemName(p.short, p.rule, p.sentence)}>
           <p class="head"><span>{c.mark} {p.short}</span><span class="rule" translate="no">{p.rule}</span></p>
           <p class="fix-s">{p.sentence}</p>
-          {#if p.select}<button class="secondary" onclick={() => d.fix(p)}>{DEFINE.fix}</button>{/if}
+          <!-- A part not updatable yet (info) is valid: nothing to fix. -->
+          {#if p.select && p.severity !== 'info'}<button class="secondary" onclick={() => d.fix(p)}>{DEFINE.fix}</button>{/if}
         </li>
       {/each}
     </ul>

@@ -12,10 +12,11 @@ import { problems, type Problem } from './problems.ts';
 const HISTORY = 100;
 
 /**
- * Whether 運用 can be entered (§5.2): a 構成 with no problems in a shape
- * updating covers. `empty` and `problems` say M69, `unsupported` M68.
+ * Whether 運用 can be entered (§5.2): a 構成 with no problems. Parts
+ * updating does not reach yet (V-23) are valid and do not stop it; they
+ * are skipped there. `empty` and `problems` say M69.
  */
-export type Operable = 'ok' | 'empty' | 'problems' | 'unsupported';
+export type Operable = 'ok' | 'empty' | 'problems';
 
 export class Define {
   doc = $state<Doc>(emptyDoc());
@@ -45,16 +46,16 @@ export class Define {
   /** Nothing placed yet (E1) is not a problem to list. */
   readonly problems: Problem[] = $derived(this.revision >= 0 && this.doc.topo.nodes.length ? problems(this.doc) : []);
   readonly errors = $derived(this.problems.filter((p) => p.severity === 'error').length);
-  readonly warnings = $derived(this.problems.length - this.errors);
+  readonly warnings = $derived(this.problems.filter((p) => p.severity === 'warning').length);
   readonly config: Config = $derived(toConfig(this.doc, supportedBoards()));
+  /** Nodes updating skips for now (V-23): shown as まだ更新できない, never a problem. */
+  readonly notYet = $derived(this.config.nodes.filter((n) => n.notYet).length);
   readonly operable: Operable = $derived(
     this.doc.topo.nodes.length === 0
       ? 'empty'
-      : this.problems.some((p) => p.severity === 'error' && p.rule !== 'V-23')
+      : this.errors > 0
         ? 'problems'
-        : this.problems.some((p) => p.rule === 'V-23')
-          ? 'unsupported'
-          : 'ok',
+        : 'ok',
   );
   /** Edits on the page that the project's YAML does not have yet. */
   get unsaved(): boolean {

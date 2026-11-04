@@ -338,7 +338,7 @@ pub(crate) fn plan(
 ) -> Result<Vec<String>, String> {
     let n = t
         .node(node)
-        .ok_or_else(|| format!("no node '{node}' in the topology"))?;
+        .ok_or_else(|| format!("no updatable node '{node}' in the topology"))?;
     let reg = crate::defs::registry(cfg)?;
     let mcu = node_mcu(&reg, t, node)?;
     let parts = parts(&reg, &mcu.id, n.board.as_deref());

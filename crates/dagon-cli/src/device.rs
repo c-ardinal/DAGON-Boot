@@ -91,7 +91,7 @@ pub fn rollback_node<T: Transport, C: Clock>(
         .nodes
         .iter()
         .position(|n| n.id == node)
-        .ok_or_else(|| format!("no node '{node}' in the topology"))?;
+        .ok_or_else(|| format!("no updatable node '{node}' in the topology"))?;
     let bin = topology_bin(reg, t)?;
     let view = dagon_format::TopologyView::parse(&bin).map_err(|e| format!("{e:?}"))?;
     let to = Target::of_node(&view, i as u8)
@@ -184,11 +184,11 @@ pub fn recover(args: &[&str]) -> Res {
     let cfg = Config::load(o.get("config"))?;
     let t = read_topology(&cfg, &cfg.topology_path(o.get("topology"))?)?;
     let bin = topology_bin(&crate::defs::registry(&cfg)?, &t)?;
-    let index = t
-        .nodes
-        .iter()
-        .position(|n| n.id == node)
-        .ok_or_else(|| format!("no node '{node}' in the topology"))? as u8;
+    let index =
+        t.nodes
+            .iter()
+            .position(|n| n.id == node)
+            .ok_or_else(|| format!("no updatable node '{node}' in the topology"))? as u8;
     let dgb = o
         .get("release")
         .map(PathBuf::from)
@@ -276,7 +276,7 @@ pub fn apply(args: &[&str]) -> Res {
             ids.iter()
                 .position(|x| x == id)
                 .map(|i| i as u8)
-                .ok_or_else(|| format!("no node '{id}' in the topology"))
+                .ok_or_else(|| format!("no updatable node '{id}' in the topology"))
         })
         .collect::<Result<Vec<u8>, String>>()?;
     let only = (!picked.is_empty()).then_some(picked.as_slice());

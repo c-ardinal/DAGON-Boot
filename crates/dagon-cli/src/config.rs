@@ -264,18 +264,47 @@ impl<'a> Opts<'a> {
     }
 }
 
-/// The topology at `path`, checked against `cfg`'s project definitions.
+/// The topology at `path`, checked against `cfg`'s project definitions:
+/// its updatable part, the one every update, deploy, flash and project
+/// command works on. The nodes it leaves out are named on stderr with why.
 pub fn read_topology(cfg: &Config, path: &Path) -> Result<dagon_topology::Topology, String> {
     let yaml = std::fs::read_to_string(path)
         .map_err(|e| format!("cannot read {}: {e}", path.display()))?;
     let t = dagon_topology::parse_str(&yaml).map_err(|e| format!("{}: {e}", path.display()))?;
-    if !dagon_topology::check_with(&crate::defs::registry(cfg)?, &t).is_pushable() {
+    let reg = crate::defs::registry(cfg)?;
+    if !dagon_topology::check_with(&reg, &t).is_pushable() {
         return Err(format!(
             "{}: topology has errors; run `dagon topo check`",
             path.display()
         ));
     }
-    Ok(t)
+    let cut = dagon_topology::cut_with(&reg, &t);
+    for line in skipped_lines(&cut) {
+        eprintln!("{line}");
+    }
+    cut.topology.ok_or_else(|| {
+        let first = cut.report.errors().next().map_or(String::new(), |i| {
+            format!(": {} {}: {}", i.rule, i.path, i.message)
+        });
+        format!(
+            "{}: no part of this topology can be updated yet; the part updating would reach does not pass the checks on its own{first}",
+            path.display()
+        )
+    })
+}
+
+/// One line per node updating skips for now, with why (none for a 構成
+/// updating reaches whole).
+pub fn skipped_lines(cut: &dagon_topology::Cut) -> Vec<String> {
+    cut.skipped
+        .iter()
+        .map(|(id, why)| {
+            format!(
+                "note: '{id}' is not updatable yet and is skipped: {}",
+                why.reason()
+            )
+        })
+        .collect()
 }
 
 /// Loads the signing key from `--key` or `DAGON_SIGNING_KEY`. Refuses key

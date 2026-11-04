@@ -62,6 +62,41 @@ pub fn release_topology(bundle: &[u8], current: &str) -> Result<JsValue, JsError
         .map_err(|e| JsError::new(&e))
 }
 
+/// The part updating reaches (dagon_topology::cut_with): `{reach: [id],
+/// skipped: {id: why}}`. `reach` is in the compiled topology's node order
+/// (the indices dagon-host uses); every other node is in `skipped` with
+/// `second-hub`, `deep`, `link-kind`, `too-many`, `unreachable`, or
+/// `cut-invalid` for all when the part does not pass the checks on its
+/// own. `null` when the YAML does not parse or has errors (its problems
+/// say what to fix first).
+#[wasm_bindgen]
+pub fn topo_cut(yaml: &str) -> JsValue {
+    let Ok(t) = dagon_topology::parse_str(yaml) else {
+        return JsValue::NULL;
+    };
+    let cut = with_registry(|reg| {
+        dagon_topology::check_with(reg, &t)
+            .is_pushable()
+            .then(|| dagon_topology::cut_with(reg, &t))
+    });
+    let Some(cut) = cut else {
+        return JsValue::NULL;
+    };
+    let reach: Array = cut
+        .reach
+        .iter()
+        .map(|id| JsValue::from(id.as_str()))
+        .collect();
+    let skipped = Object::new();
+    for (id, why) in &cut.skipped {
+        set(&skipped, id, why.code().into());
+    }
+    let o = Object::new();
+    set(&o, "reach", reach.into());
+    set(&o, "skipped", skipped.into());
+    o.into()
+}
+
 fn link_kind(k: LinkKind) -> &'static str {
     k.name()
 }

@@ -57,7 +57,7 @@ pub(crate) fn image_for_node(
 ) -> Result<Vec<u8>, String> {
     let n = t
         .node(node)
-        .ok_or_else(|| format!("no node '{node}' in the topology"))?;
+        .ok_or_else(|| format!("no updatable node '{node}' in the topology"))?;
     let geometry = image::slot_with(reg, &n.mcu, kind, slot).ok_or_else(|| {
         format!(
             "node '{node}' ({}) has no such slot for this image kind",
@@ -281,7 +281,7 @@ fn provision_node(o: &Opts<'_>, node: &str) -> Res {
     let cfg = Config::load(o.get("config"))?;
     let t = read_topology(&cfg, &cfg.topology_path(o.get("topology"))?)?;
     if t.node(node).is_none() {
-        return Err(format!("no node '{node}' in the topology"));
+        return Err(format!("no updatable node '{node}' in the topology"));
     }
     let inputs = cfg
         .provision
@@ -376,7 +376,7 @@ pub(crate) fn node_mcu<'r>(
 ) -> Result<&'r McuDef, String> {
     let n = t
         .node(node)
-        .ok_or_else(|| format!("no node '{node}' in the topology"))?;
+        .ok_or_else(|| format!("no updatable node '{node}' in the topology"))?;
     reg.mcu(&n.mcu)
         .ok_or_else(|| format!("no MCU definition '{}' ('{node}')", n.mcu))
 }

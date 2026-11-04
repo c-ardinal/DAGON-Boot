@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { ORDER } from '../app/copy.ts';
+  import { NODE, ORDER } from '../app/copy.ts';
   import type { Config } from '../app/sample.ts';
 
   interface Props {
@@ -26,6 +26,8 @@
         <li>
           <button aria-pressed={selected === key} onclick={() => onselect(key)}>
             <span class="row"><span>[{n.no}] {n.name}</span>{#if p !== undefined}<span class="pct">{p}%</span>{/if}</span>
+            <!-- Updating skips it for now (V-23): said under its name, never as a fault. -->
+            {#if n.notYet}<span class="not-yet">{NODE.notYet}</span>{/if}
             {#if p !== undefined}<progress max="100" value={p} aria-label="{n.name} {p}%"></progress>{/if}
           </button>
         </li>
@@ -108,6 +110,11 @@
   .pct {
     font: 400 var(--t-mono-size) / var(--t-body-lh) var(--f-mono);
     font-variant-numeric: tabular-nums;
+  }
+  .not-yet {
+    display: block;
+    color: var(--c-muted);
+    font: 400 var(--t-small-size) / var(--t-small-lh) var(--f-ja);
   }
   progress {
     display: block;

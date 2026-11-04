@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { CLI_LINK, CLI_NAV, FLASH, JOBS, PROJECT, RELEASE_STEPS } from '../../app/copy.ts';
+  import { CLI_LINK, CLI_NAV, FLASH, JOBS, NODE, PROJECT, RELEASE_STEPS } from '../../app/copy.ts';
   import type { Cli, Job } from '../../app/define/cli.svelte.ts';
   import type { Autosave } from '../../app/define/autosave.svelte.ts';
   import type { Define } from '../../app/define/define.svelte.ts';
@@ -20,9 +20,10 @@
 
   const ready = $derived(cli.state === 'ready');
   const nodes = $derived(d.config.nodes);
-  const ids = $derived(nodes.map((n) => n.id));
-  /** Making and building the project: every check passes but V-23 (a shape not updatable yet still builds). */
-  const clean = $derived(!d.problems.some((p) => (p.severity === 'error' && p.rule !== 'V-23') || p.rule === 'B-01'));
+  /** The nodes the project, build, sign and write work on: those updating reaches (the rest are skipped, V-23). */
+  const ids = $derived(d.config.reach);
+  /** Making and building the project: no errors (a part not updatable yet is information) and every board filled. */
+  const clean = $derived(!d.problems.some((p) => p.severity === 'error' || p.rule === 'B-01'));
   const latest = (kind: string) => cli.jobs.find((j) => j.kind === kind);
   const ok = (kind: string) => latest(kind)?.state === 'succeeded';
   let selectedJob = $state<number | null>(null);
@@ -63,6 +64,11 @@
   }
 </script>
 
+{#snippet notYet(why: string)}
+  <span class="chip">{NODE.notYet}</span>
+  <p>{NODE.notYetWhy[why] ?? ''}</p>
+{/snippet}
+
 {#snippet stateChip(j: Job | undefined)}
   {#if j}<span class="chip" class:bad={j.state === 'failed'}>{JOBS.states[j.state] ?? j.state}</span>{/if}
 {/snippet}
@@ -102,8 +108,12 @@
       {#each nodes as n (n.id)}
         <li>
           <span class="who"><strong>{n.name}</strong><span translate="no">{n.product} · {n.mcu}</span></span>
-          <span class="chip">{boardMissing(d.doc, n.id) ? PROJECT.boardUnset : generated(n.id) ? PROJECT.made : PROJECT.notMade}</span>
-          <span class="here"><span class="label">{PROJECT.writeHere}</span> <code translate="no">nodes/{n.id}/src/app.rs</code></span>
+          {#if n.notYet}
+            {@render notYet(n.notYet)}
+          {:else}
+            <span class="chip">{boardMissing(d.doc, n.id) ? PROJECT.boardUnset : generated(n.id) ? PROJECT.made : PROJECT.notMade}</span>
+            <span class="here"><span class="label">{PROJECT.writeHere}</span> <code translate="no">nodes/{n.id}/src/app.rs</code></span>
+          {/if}
         </li>
       {/each}
     </ul>
@@ -120,6 +130,9 @@
         {@const flashing = starting.includes(n.id) || fj?.state === 'queued' || fj?.state === 'running' || fj?.state === 'question'}
         <li>
           <span class="who"><strong>{n.name}</strong><span translate="no">{n.product} · {n.mcu}</span></span>
+          {#if n.notYet}
+            {@render notYet(n.notYet)}
+          {:else}
           {#if fam}<span class="pair"><span class="label">{FLASH.via}</span> {fam.label}</span>{#if cli.canFlash(mcuOf(n.id))}<p>{fam.hint}</p>{/if}{/if}
           {#if fj?.question}
             <p>{FLASH.confirm(n.name)}</p>
@@ -131,6 +144,7 @@
             <button class="primary" disabled={flashing} onclick={() => void flashNode(n.id)}>{FLASH.write}</button>
           {:else}
             <p>{FLASH.otherTools}</p>
+          {/if}
           {/if}
         </li>
       {/each}

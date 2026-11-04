@@ -245,6 +245,15 @@ fn topo_check(args: &[&str]) -> ExitCode {
             report.errors().count(),
             report.warnings().count()
         );
+        // What updating skips is only said of a 構成 without errors.
+        if let Some(t) = dagon_topology::parse_str(&yaml)
+            .ok()
+            .filter(|_| report.is_pushable())
+        {
+            for line in crate::config::skipped_lines(&dagon_topology::cut_with(&reg, &t)) {
+                println!("{line}");
+            }
+        }
     }
     if report.is_pushable() {
         ExitCode::SUCCESS

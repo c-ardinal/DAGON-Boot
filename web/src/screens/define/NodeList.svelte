@@ -53,12 +53,9 @@
     {#each boards as b (b.id)}
       {@const ok = canPlace(d.doc, b.id)}
       <li>
-        <span class="what"><span translate="no">{b.product}</span><span class="mcu" translate="no">{b.mcuName}</span></span>
-        {#if placed(b.id)}
-          <span class="placed">{DEFINE.placed}</span>
-        {:else}
-          <button class="small" aria-disabled={!ok} aria-label="{b.product} {DEFINE.place}" onclick={() => ok && d.place(b.id, b.product)}>{DEFINE.place}</button>
-        {/if}
+        <!-- The same board again is a second one of it (a second 親機, another 子機); 配置済み is said under its name. -->
+        <span class="what"><span translate="no">{b.product}</span><span class="mcu" translate="no">{b.mcuName}</span>{#if placed(b.id)}<span class="placed">{DEFINE.placed}</span>{/if}</span>
+        <button class="small" aria-disabled={!ok} aria-label="{b.product} {DEFINE.place}" onclick={() => ok && d.place(b.id, b.product)}>{DEFINE.place}</button>
       </li>
     {/each}
   </ul>
@@ -129,7 +126,8 @@
     font: 400 var(--t-mono-size) / var(--t-mono-lh) var(--f-mono);
   }
   .placed {
-    flex: none;
+    justify-self: start;
+    margin-top: var(--s-1);
     padding: var(--s-1) var(--s-3);
     border-radius: var(--r-s);
     background: var(--c-layer-2);

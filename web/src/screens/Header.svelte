@@ -16,9 +16,9 @@
     modeLocked?: boolean;
     /** The CLI link (K0–K3). */
     cliLabel?: string;
-    /** 運用 cannot be entered: no 構成, problems, or a shape not updatable yet (§5.2). */
+    /** 運用 cannot be entered: no 構成 or problems (§5.2). */
     operateLocked?: boolean;
-    /** 運用 was pressed while locked: the band says why (M68, M69). */
+    /** 運用 was pressed while locked: the band says why (M69). */
     onlocked?: () => void;
     /** SC-M: the menu under the header. */
     menuOpen?: boolean;

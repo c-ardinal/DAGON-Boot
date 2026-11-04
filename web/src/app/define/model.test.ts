@@ -40,7 +40,12 @@ describe('define document', () => {
     const r = check(toYaml(doc.topo));
     expect([r.ok, r.errors]).toEqual([true, 0]);
     expect(doc.topo.update.order).toEqual(['nucleo', 'm5stopwatch', 'hub']);
-    expect(canPlace(doc, 'nucleo-f401re')).toBe(false);
+    // The same board again: a second one of it; a board with no link of its own is a second 親機.
+    expect(canPlace(doc, 'nucleo-f401re')).toBe(true);
+    const two = place(doc, 'waveshare-rp2040-touch-lcd-1.28');
+    expect(two.doc.topo.nodes.find((n) => n.id === two.id)?.role).toBe('coordinator');
+    expect(two.doc.topo.update.order[two.doc.topo.update.order.length - 1]).toBe('hub');
+    expect(check(toYaml(two.doc.topo)).errors).toBe(0);
   });
 
   test("the hub's new I2C bus and PIO UART link take its board's [coordinator] pins", () => {
@@ -108,9 +113,20 @@ describe('define document', () => {
     expect(doc.topo.links![doc.topo.links!.length - 1]).toMatchObject({ from: 'hub', to: hub2, kind: 'can' });
     const v23 = problems(doc).filter((p) => p.rule === 'V-23');
     expect(v23.length).toBeGreaterThan(0);
-    expect(v23[0].sentence).toContain('更新するには');
+    // Information, never an error: nothing tells the 構成 is wrong.
+    expect(v23.every((p) => p.severity === 'info')).toBe(true);
+    expect(problems(doc).filter((p) => p.severity === 'error')).toEqual([]);
+    expect(v23[0].sentence).toContain('飛ばします');
+    expect(v23[0].sentence).not.toContain('してください');
+    // The CAN hop to it is not available yet either (V-24), told as skipped, not as a thing to fix.
+    const v24 = problems(doc).find((p) => p.rule === 'V-24' && p.select === `link:${hub2}`)!;
+    expect(v24.sentence).toContain('飛ばす');
+    expect(v24.sentence).not.toContain('してください');
     const c = toConfig(doc, supportedBoards());
-    expect(c.nodes.find((n) => n.id === hub2)!.depth).toBe(0);
+    // Linked from the first 親機, the second one sits below it, skipped as a second 親機's tree.
+    expect(c.nodes.find((n) => n.id === hub2)).toMatchObject({ depth: 1, notYet: 'second-hub' });
+    expect(c.nodes.filter((n) => n.notYet).map((n) => n.id)).toEqual([hub2]);
+    expect(topo_compile(toYaml(doc.topo))).toEqual(topo_compile(DESK_DEMO_YAML));
 
     let deep = removeNode(fromYaml(DESK_DEMO_YAML), 'watch');
     deep = place(deep, 'm5stopwatch').doc;
@@ -118,8 +134,15 @@ describe('define document', () => {
     // No [coordinator] on the F401: UART0 pins of the 親機 MCU's definition (the former fixed 0/1).
     expect(deep.topo.links!.find((l) => l.from === 'seg')).toMatchObject({ iface: 'hw-uart0', pins: { tx: 0, rx: 1 } });
     const cfg = toConfig(deep, supportedBoards());
-    expect(cfg.nodes.map((n) => [n.id, n.depth])).toEqual([['hub', 0], ['seg', 1], ['m5stopwatch', 2]]);
+    expect(cfg.nodes.map((n) => [n.id, n.depth, n.notYet])).toEqual([['hub', 0, undefined], ['seg', 1, undefined], ['m5stopwatch', 2, 'deep']]);
+    // Any depth: a node below the 孫機 is placed and connected too.
+    const deeper = connect(place(deep, 'nucleo-f401re').doc, 'nucleo', 'm5stopwatch');
+    expect(problems(deeper).filter((p) => p.severity === 'error')).toEqual([]);
+    const dc = toConfig(deeper, supportedBoards());
+    expect(dc.nodes.find((n) => n.id === 'nucleo')).toMatchObject({ depth: 3, notYet: 'deep' });
     expect(problems(deep).map((p) => p.rule)).toContain('V-23');
+    // Valid as placed: the 孫機's link carries its board's way into its loader, so nothing is an error.
+    expect(problems(deep).filter((p) => p.severity === 'error')).toEqual([]);
     expect(topo_check(toYaml(deep.topo))).toContain('V-23');
   });
 
@@ -129,8 +152,9 @@ describe('define document', () => {
     expect(yaml).toContain('uplink');
     expect(fromYaml(yaml).topo.nodes.find((n) => n.id === 'hub')?.uplink).toEqual({ kind: 'wifi-tcp', host: 'browser' });
     expect(topo_compile(yaml)).toEqual(topo_compile(DESK_DEMO_YAML));
-    expect(toConfig(doc, supportedBoards()).uplink).toEqual({ kind: 'wifi-tcp', host: 'browser' });
-    expect(toConfig(fromYaml(DESK_DEMO_YAML), supportedBoards()).uplink).toBeUndefined();
+    const hubOf = (c: ReturnType<typeof toConfig>) => c.nodes.find((n) => n.id === 'hub')!;
+    expect(hubOf(toConfig(doc, supportedBoards())).uplink).toEqual({ kind: 'wifi-tcp', host: 'browser' });
+    expect(hubOf(toConfig(fromYaml(DESK_DEMO_YAML), supportedBoards())).uplink).toBeUndefined();
     expect(setUplink(doc, 'hub', null).topo.nodes.find((n) => n.id === 'hub')?.uplink).toBeUndefined();
   });
 
@@ -148,5 +172,40 @@ describe('define document', () => {
     expect(problemChip({ rule: 'V-24', severity: 'warning' })).toEqual({ mark: '◇', kind: 'unsupported' });
     const ps = problems(setUplink(doc, 'hub', { kind: 'ble', host: 'browser' }));
     expect(ps.some((p) => p.rule === 'V-24')).toBe(true);
+  });
+
+  test('for generated 構成 made by placing and connecting, reach is the cut in 構成 order and every other node says why', () => {
+    // ponytail: a small LCG over the editor's own operations; 60 shapes.
+    let seed = 0x7090;
+    const next = (n: number) => {
+      seed = (seed * 1103515245 + 12345) % 2 ** 31;
+      return seed % n;
+    };
+    const boards = ['waveshare-rp2040-touch-lcd-1.28', 'nucleo-f401re', 'm5stopwatch'];
+    let compiled = 0;
+    for (let k = 0; k < 60; k++) {
+      let doc = place(emptyDoc(), boards[0]).doc;
+      for (let i = 0, count = 1 + next(9); i < count; i++) {
+        const r = place(doc, boards[next(boards.length)]);
+        const ids = r.doc.topo.nodes.map((n) => n.id).filter((id) => id !== r.id);
+        doc = r.doc.topo.nodes.find((n) => n.id === r.id)!.role === 'coordinator' && next(2) ? r.doc : connect(r.doc, r.id, ids[next(ids.length)]);
+      }
+      const c = toConfig(doc, supportedBoards());
+      if (!check(toYaml(doc.topo)).ok) continue;
+      // Total and disjoint: each node is either reached or told why.
+      for (const n of c.nodes) expect(c.reach.includes(n.id), `${n.id} ${n.notYet}`).toBe(!n.notYet);
+      // The cut keeps 構成 order, so it is the nodes' order with the skipped ones left out.
+      expect(c.reach).toEqual(c.nodes.filter((n) => !n.notYet).map((n) => n.id));
+      expect(c.reach).toContain('hub');
+      // The compiled table (dagon-wasm's topo_compile) lists its nodes in reach's order. Layout
+      // (dagon-format topology): node_count at byte 6, nodes of 32 bytes from 0x20, target_tag at +16.
+      const bin = topo_compile(c.yaml);
+      const tags = Array.from({ length: bin[6] }, (_, i) =>
+        new TextDecoder().decode(bin.slice(0x20 + 32 * i + 16, 0x20 + 32 * i + 32)).replace(/\0+$/, ''),
+      );
+      expect(tags).toEqual(c.reach.map((id) => doc.topo.nodes.find((n) => n.id === id)!.tag));
+      compiled++;
+    }
+    expect(compiled).toBeGreaterThan(10);
   });
 });

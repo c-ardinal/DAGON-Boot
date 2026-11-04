@@ -135,7 +135,7 @@ pub(crate) fn pick_nodes(cfg: &Config, t: &Topology, pos: &[&str]) -> Result<Vec
     for id in &wanted {
         let n = t
             .node(id)
-            .ok_or_else(|| format!("no node '{id}' in the topology"))?;
+            .ok_or_else(|| format!("no updatable node '{id}' in the topology"))?;
         let b = cfg
             .build
             .get(id)

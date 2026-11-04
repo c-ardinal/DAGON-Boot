@@ -2,10 +2,12 @@
 // shapes of dagon-topology's schema) plus the page-side display names. Every
 // edit is a pure function returning a new document, so undo keeps snapshots.
 // Validity is never decided here: topo_check (dagon-topology in WASM) does it.
-import { board_template, coordinator_capable, coordinator_uart0, link_kinds, rom_i2c_addrs, supported_mcus, topo_parse } from '../../wasm/pkg/dagon_wasm.js';
+import { board_template, coordinator_capable, coordinator_uart0, link_kinds, rom_i2c_addrs, supported_mcus, topo_cut, topo_parse } from '../../wasm/pkg/dagon_wasm.js';
 import { supportedBoards, type Board } from '../../wasm/dagon.ts';
 import { INSPECT } from '../copy.ts';
-import type { Config, Link as GLink, Node as GNode, Wire } from '../sample.ts';
+import type { Config, Link as GLink, Node as GNode, Skip, UplinkHost, Wire } from '../sample.ts';
+
+export type { UplinkHost } from '../sample.ts';
 
 export interface TNode {
   id: string;
@@ -20,9 +22,6 @@ export interface TNode {
   /** A 親機's hop towards the PC (or what drives it); none: USB CDC to dagon. */
   uplink?: { kind: LinkKind; host?: UplinkHost };
 }
-
-/** What drives a 親機 through its uplink. */
-export type UplinkHost = 'pc-cli' | 'browser' | 'embedded';
 
 export interface TBus {
   id: string;
@@ -132,7 +131,7 @@ export interface BoardTemplate {
   coordinator: { i2c: { controller: string; sda: number; scl: number }; pioUart: { tx: number; rx: number } } | null;
 }
 
-/** Nodes the editor places and draws; updating reaches 8 (V-23 says when more). */
+/** Nodes the editor places and draws; updating reaches 8 and skips the rest (V-23). */
 export const MAX_NODES = 32;
 const I2C_FIRST = 0x08;
 const I2C_LAST = 0x77;
@@ -193,19 +192,17 @@ function freeId(t: Topo, base: string): string {
   return id;
 }
 
-/** Whether a board can be placed now: room left and not a second hub-only board. */
+/** Whether a board can be placed now: a known board and room left (the same board again is a second one of it). */
 export function canPlace(doc: Doc, board: string): boolean {
-  const tpl = template(board);
-  if (!tpl || doc.topo.nodes.length >= MAX_NODES) return false;
-  return !doc.topo.nodes.some((n) => n.board === board);
+  return template(board) !== null && doc.topo.nodes.length < MAX_NODES;
 }
 
-/** "置く": the hub when there is none and the board can be one (no link of its own), else a child. */
+/** "置く": a board with no link of its own (it cannot be a 子機) is a 親機, the second and on too; else a 子機. */
 export function place(doc: Doc, board: string, name?: string): { doc: Doc; id: string } {
   const tpl = template(board);
   if (!tpl) return { doc, id: '' };
   const t = doc.topo;
-  const asHub = !hub(t) && tpl.link === null;
+  const asHub = tpl.link === null;
   const id = asHub ? freeId(t, 'hub') : freeId(t, board.split('-')[0]);
   const node: TNode = {
     id,
@@ -282,15 +279,17 @@ export function connect(doc: Doc, id: string, parent?: string): Doc {
   const h = parent ? t.nodes.find((x) => x.id === parent) : hub(t);
   const n = t.nodes.find((x) => x.id === id);
   if (!h || !n || n === h || (t.links ?? []).some((l) => l.to === id)) return doc;
-  if (h.role !== 'coordinator' || n.role === 'coordinator') {
-    const kind: LinkKind = n.role === 'coordinator' ? 'can' : 'uart';
-    const link: TLink = kind === 'can' ? { from: h.id, to: id, kind } : { from: h.id, to: id, kind, iface: 'hw-uart0', ...uart0Pins(t, h), baud: 115200 };
-    return { ...doc, topo: { ...t, links: [...(t.links ?? []), link] } };
-  }
   // A node chosen by MCU links like the first listed board with that MCU (its pins are the developer's).
   const stand = n.board ?? supportedBoards().find((b) => b.mcu === n.mcu)?.id;
   const tpl = stand ? template(stand) : null;
   const d = tpl?.link ?? { kind: 'uart' as const, iface: 'pio-uart', addr: null, baud: 115200, control: 'cooperative' as const, romEntry: null };
+  if (h.role !== 'coordinator' || n.role === 'coordinator') {
+    // Below a 子機 the board's own way into its loader, as under the 親機 (V-11 asks for it on every UART link).
+    const control: TControl = { kind: d.control, ...(d.romEntry ? { rom_entry: d.romEntry } : {}) };
+    const link: TLink =
+      n.role === 'coordinator' ? { from: h.id, to: id, kind: 'can' } : { from: h.id, to: id, kind: 'uart', iface: 'hw-uart0', ...uart0Pins(t, h), baud: 115200, control };
+    return { ...doc, topo: { ...t, links: [...(t.links ?? []), link] } };
+  }
   let buses = t.buses ?? [];
   let link: TLink;
   if (d.kind === 'i2c') {
@@ -480,17 +479,20 @@ export function toConfig(doc: Doc, boards: Board[]): Config {
   const t = doc.topo;
   const links = t.links ?? [];
   const bus = (id?: string) => (t.buses ?? []).find((b) => b.id === id);
-  // Depth by parent links from the 親機 (0); nodes with no parent sit in the 子機 row.
+  // Depth by parent links from a 親機 nobody links to (0), at any depth; a 親機 linked from
+  // another node sits below it, and a 子機 with no parent in the 子機 row.
   const parent = (id: string) => links.find((l) => l.to === id)?.from;
   const depth = (id: string, seen = new Set<string>()): number => {
     const n = t.nodes.find((x) => x.id === id);
-    if (!n || n.role === 'coordinator') return 0;
     const p = parent(id);
-    if (!p || seen.has(p)) return 1;
+    if (!n || !p || seen.has(id)) return n?.role === 'coordinator' ? 0 : 1;
     seen.add(id);
-    const pn = t.nodes.find((x) => x.id === p);
-    return pn?.role === 'coordinator' ? 1 : depth(p, seen) + 1;
+    return depth(p, seen) + 1;
   };
+  const yaml = toYaml(t);
+  // One source for reach: the checked cut (none while the 構成 has errors, which 運用 waits for).
+  const cut = topo_cut(yaml) as { reach: string[]; skipped: Record<string, Skip> } | null;
+  const skipped = cut?.skipped ?? {};
   const mcuTable = mcus();
   const nodes: GNode[] = t.nodes.map((n, i) => {
     const b = boards.find((x) => x.id === n.board);
@@ -510,6 +512,8 @@ export function toConfig(doc: Doc, boards: Board[]): Config {
       boot: gpio(l?.control?.boot),
       target: n.role === 'coordinator' ? { kind: 'hub', addr: 0 } : l?.kind === 'i2c' ? { kind: 'i2c', addr: l.addr ?? 0 } : { kind: 'uart', addr: 0 },
       depth: depth(n.id),
+      ...(n.role === 'coordinator' && n.uplink && !l ? { uplink: { kind: n.uplink.kind, host: n.uplink.host ?? 'pc-cli' } } : {}),
+      ...(skipped[n.id] ? { notYet: skipped[n.id] } : {}),
     };
   });
   const glinks: GLink[] = links.map((l) => {
@@ -531,13 +535,12 @@ export function toConfig(doc: Doc, boards: Board[]): Config {
           ];
     return { from: l.from, to: l.to, kind: KIND_LABEL[l.kind], addr: hex(l.addr), wires };
   });
-  const up = t.nodes.find((n) => n.role === 'coordinator')?.uplink;
   return {
     name: t.name,
-    yaml: toYaml(t),
+    yaml,
+    reach: cut?.reach ?? [],
     nodes,
     links: glinks,
     order: t.update.order.filter((id) => t.nodes.some((n) => n.id === id)),
-    ...(up ? { uplink: { kind: up.kind, host: up.host ?? 'pc-cli' } } : {}),
   };
 }

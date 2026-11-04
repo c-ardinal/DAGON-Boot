@@ -556,11 +556,14 @@ fn topology_put(server: &Server, req: &Request) -> Res {
     let reg = registry_of(server).map_err(|e| Response::error(500, &e))?;
     let report = dagon_topology::check_str_with(&reg, yaml);
     let report_json: Value = serde_json::from_str(&report.to_json()).unwrap_or(Value::Null);
-    // A 構成 whose only errors are V-23 (a shape updating does not cover
-    // yet) is saved; compile, send, release and apply still refuse it.
-    if report.errors().any(|i| i.rule != "V-23") {
+    // A part updating does not reach yet (V-23) is information, not an
+    // error: the 構成 is saved and its updatable part compiled.
+    if !report.is_pushable() {
         return Err(Response::json(422, &json!({ "report": report_json })));
     }
+    let cut = dagon_topology::parse_str(yaml)
+        .ok()
+        .map(|t| dagon_topology::cut_with(&reg, &t));
     // dagon demo: the 構成's uplink picks the simulated medium; one the
     // demo cannot simulate is not saved, so the 構成 and the medium agree.
     let medium = match server.sim.get().map(|_| demo_uplink(yaml)) {
@@ -585,8 +588,20 @@ fn topology_put(server: &Server, req: &Request) -> Res {
         sim.set_medium(m);
     }
     Ok(json_ok(
-        json!({ "report": report_json, "updatable": report.is_pushable() }),
+        json!({ "report": report_json, "updatable": cut.as_ref().is_some_and(|c| c.topology.is_some()), "reach": cut.as_ref().map(|c| c.reach.clone()).unwrap_or_default(), "skipped": skipped_of(cut.as_ref()) }),
     ))
+}
+
+/// `{id: why}` of the nodes updating skips for now (`Skip::code`); every
+/// node (`cut-invalid` where nothing else applies) when no part is updatable.
+fn skipped_of(cut: Option<&dagon_topology::Cut>) -> Value {
+    Value::Object(
+        cut.map(|c| c.skipped.as_slice())
+            .unwrap_or_default()
+            .iter()
+            .map(|(id, why)| (id.clone(), Value::from(why.code())))
+            .collect(),
+    )
 }
 
 fn build_get(server: &Server, id: &str) -> Res {
@@ -707,7 +722,7 @@ fn sign_nodes(
             return Err(format!("node '{node}' is listed twice"));
         }
         if t.node(node).is_none() {
-            return Err(format!("no node '{node}' in the topology"));
+            return Err(format!("no updatable node '{node}' in the topology"));
         }
         let (built, elfs) = nodebuild::last_build(cfg, node)?;
         let ver = built

@@ -60,7 +60,7 @@ describe('define session', () => {
     expect(e.unreadable).toBe(true);
   });
 
-  test('運用 can be entered only with a 構成 that has no problems and is updatable (M68 / M69)', () => {
+  test('運用 can be entered with a 構成 that has no problems, parts not updatable yet included (M69)', () => {
     const d = new Define();
     expect(d.operable).toBe('empty');
     d.placeSample();
@@ -68,11 +68,12 @@ describe('define session', () => {
     d.apply(setLink(d.doc, 0, 'addr', 0x39));
     expect(d.operable).toBe('problems');
     d.undo();
-    // A second 親機 over CAN: a shape updating does not reach yet (V-23 only).
+    // A second 親機 over CAN: valid, a part updating skips for now (V-23, information).
     const r = placeMcu(d.doc, 'rp2040');
     d.apply(connect(setNode(r.doc, r.id, 'role', 'coordinator'), r.id, 'hub'));
-    expect(new Set(d.problems.filter((p) => p.severity === 'error').map((p) => p.rule))).toEqual(new Set(['V-23']));
-    expect(d.operable).toBe('unsupported');
+    expect(d.errors).toBe(0);
+    expect(d.operable).toBe('ok');
+    expect(d.notYet).toBe(1);
     expect(problemChip(d.problems.find((p) => p.rule === 'V-23')!)).toEqual({ mark: '◇', kind: 'unsupported' });
   });
 

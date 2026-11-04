@@ -31,7 +31,17 @@ export interface Node {
   target: Target;
   /** Row on the graph: 0 親機, 1 子機, 2 and on deeper. Absent: by role. */
   depth?: number;
+  /** A 親機's uplink as the 構成 writes it; absent when none is written (USB to the PC) or the 親機 is linked from another node. */
+  uplink?: { kind: string; host: UplinkHost };
+  /** Why updating skips this node for now (V-23); absent when updating reaches it. */
+  notYet?: Skip;
 }
+
+/** What drives a 親機 through its uplink. */
+export type UplinkHost = 'pc-cli' | 'browser' | 'embedded';
+
+/** dagon_topology::Skip codes: why updating does not reach a node yet. */
+export type Skip = 'second-hub' | 'deep' | 'link-kind' | 'too-many' | 'unreachable' | 'cut-invalid';
 
 export interface Wire {
   signal: string;
@@ -56,8 +66,12 @@ export interface Config {
   links: Link[];
   /** Node ids, children first and the hub last. */
   order: string[];
-  /** The 親機's declared uplink (none: USB to this PC). */
-  uplink?: { kind: string; host: 'pc-cli' | 'browser' | 'embedded' };
+  /**
+   * Ids of the nodes updating reaches, in the compiled topology's order
+   * (dagon_topology::cut_with through dagon-wasm): dagon-host's node index
+   * is the place here. Every other node carries `notYet`.
+   */
+  reach: string[];
 }
 
 const NRST_HEADER = 'NRST（ヘッダの位置: 未設定）';
@@ -98,6 +112,7 @@ export const DESK_DEMO: Config = {
     },
   ],
   order: ['seg', 'watch', 'hub'],
+  reach: ['hub', 'seg', 'watch'],
 };
 
 /** dagon-host target key of a node, as the mock and discovery name it. */

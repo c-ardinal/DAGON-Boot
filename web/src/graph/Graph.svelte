@@ -171,6 +171,10 @@
   type Mark = Chip | 'skeleton' | null;
 
   function markOf(n: Node): Mark {
+    if (n.notYet) {
+      const why = NODE.notYetWhy[n.notYet] ?? '';
+      return { chip: NODE.notYet, spoken: NODE.notYetName(why), silent: false, note: why };
+    }
     if (chips[n.id]) return chips[n.id];
     if (!connected) return null;
     const l = live[n.id];
@@ -192,9 +196,21 @@
     return cut.filter(Boolean).flatMap((p) => p.split(/(?<=-)/));
   }
 
-  const hubVia = $derived(
-    config?.uplink ? NODE.uplinkVia(KIND_LABEL[config.uplink.kind as LinkKind] ?? config.uplink.kind, config.uplink.host) : NODE.usb,
-  );
+  /** A 親機's own connection line: its uplink as the 構成 writes it, or the link from the node above it. */
+  function hubVia(n: Node): string {
+    if (!n.uplink) return n.via || NODE.usb;
+    return NODE.uplinkVia(KIND_LABEL[n.uplink.kind as LinkKind] ?? n.uplink.kind, n.uplink.host);
+  }
+
+  /** 親機 nobody links to, each with its L0 (what drives it) above it. */
+  const tops = $derived((config?.nodes ?? []).filter((n) => n.role === 'hub' && depthOf(n) === 0));
+  /** The 親機 this page is connected to: the first one the 構成 names (the one updating reaches). */
+  const firstHub = $derived(config?.nodes.find((n) => n.role === 'hub')?.id);
+
+  function l0Of(n: Node): string {
+    if (connected && n.id === firstHub) return CANVAS.pc;
+    return n.uplink ? (CANVAS.pcBy[n.uplink.host] ?? CANVAS.pc) : CANVAS.pc;
+  }
 
   function spokenName(n: Node, m: Mark, version: string): string {
     return NODE.name({
@@ -202,7 +218,7 @@
       product: n.product,
       mcu: n.mcu,
       role: n.role === 'hub' ? NODE.roleHub : NODE.roleNode,
-      via: n.role === 'hub' ? hubVia : NODE.viaName(n.via),
+      via: n.role === 'hub' ? hubVia(n) : NODE.viaName(n.via),
       state: m && m !== 'skeleton' ? m.spoken : '',
       version,
     });
@@ -218,9 +234,12 @@
       <path d={layerPath(L2_TOP, H)} fill="var(--c-layer-2)" />
 
       {#if config}
-        <line x1={W / 2} y1={PC.y + PC.h} x2={W / 2} y2={hubY} class="pc-link" class:dashed={!connected} class:ink={sending} />
-        <circle cx={W / 2} cy={PC.y + PC.h} r="5" class="port" />
-        <circle cx={W / 2} cy={hubY} r="5" class="port" />
+        {#each tops as h (h.id)}
+          {@const x = pos[h.id].x + NODE_W / 2}
+          <line x1={x} y1={PC.y + PC.h} x2={x} y2={hubY} class="pc-link" class:dashed={!connected || h.id !== firstHub} class:ink={sending && h.id === firstHub} />
+          <circle cx={x} cy={PC.y + PC.h} r="5" class="port" />
+          <circle cx={x} cy={hubY} r="5" class="port" />
+        {/each}
       {:else}
         <circle cx={W / 2} cy={PC.y + PC.h} r="5" class="port" />
       {/if}
@@ -255,7 +274,13 @@
       </div>
     {/if}
 
-    <div class="pc" style:left="{W / 2 - PC.w / 2}px" style:top="{PC.y}px">{config?.uplink ? (CANVAS.pcBy[config.uplink.host] ?? CANVAS.pc) : CANVAS.pc}</div>
+    {#if config}
+      {#each tops as h (h.id)}
+        <div class="pc" style:left="{pos[h.id].x + NODE_W / 2 - PC.w / 2}px" style:top="{PC.y}px">{l0Of(h)}</div>
+      {/each}
+    {:else}
+      <div class="pc" style:left="{W / 2 - PC.w / 2}px" style:top="{PC.y}px">{CANVAS.pc}</div>
+    {/if}
 
     {#if !config}
       <div class="receptacle" style:left="{hubX}px" style:top="{hubY}px" style:height="{EMPTY_H}px">{CANVAS.hubSlot}</div>
@@ -298,7 +323,7 @@
           <span class="product" translate="no">{#each breaks(n.product, n.mcu) as part, i (i)}{#if i}<wbr />{/if}{part}{/each}</span>
           <span class="mono"><span class="label">{NODE.mcu}</span> <span translate="no">{n.mcu}</span></span>
           {#if n.role === 'hub'}
-            <span class="mono">{hubVia}</span>
+            <span class="mono">{hubVia(n)}</span>
           {:else}
             <span class="mono" translate="no">{n.via}</span>
             <span class="mono"><span class="label">{NODE.reset}</span> <span translate="no">{n.reset ?? NODE.noWire}</span></span>

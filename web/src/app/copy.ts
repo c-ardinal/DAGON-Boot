@@ -201,11 +201,12 @@ export const UNSUPPORTED = {
 
 /** Canvas: layers, empty receptacles, dot numbers. */
 export const CANVAS = {
-  layerL0: 'L0 パソコン',
+  layerL0: 'L0 つなぐ先',
   layerL1: 'L1 親機',
   layerL2: 'L2 子機',
+  /** L0 of the 親機 this page is connected to now. */
   pc: 'このパソコン（ブラウザ）',
-  /** L0 by the 親機's declared uplink host (案). */
+  /** L0 by each 親機's uplink host as the 構成 writes it (none written: dagon on a PC). */
   pcBy: { 'pc-cli': 'パソコン（dagon）', browser: 'ブラウザ（パソコン・スマホ）', embedded: '自作の機器' } as Record<string, string>,
   /** S01 */
   hubSlot: '親機を置く場所',
@@ -281,6 +282,17 @@ export const NODE = {
   name: (p: { name: string; product: string; mcu: string; role: string; via: string; state: string; version: string }) =>
     [p.name, `${p.product} · ${p.mcu}`, p.role, p.via, p.state, p.version && `バージョン ${p.version}`].filter(Boolean).join('、'),
   viaName: (via: string) => `親機と ${via}`,
+  /** A node updating does not reach yet (V-23): a calm note, not a fault. */
+  notYet: '◇ まだ更新できない',
+  notYetWhy: {
+    'second-hub': '2 つ目の親機の側にあるため',
+    deep: '子機の先にあるため',
+    'link-kind': 'このつながりの種類では、まだ届かないため',
+    'too-many': '更新は親機とその子機 7 つまでのため',
+    unreachable: 'どの親機からもリンクがたどれないため',
+    'cut-invalid': '更新が届く部分だけでは確認を通らないため（dagon topo check で理由を見られます）',
+  } as Record<string, string>,
+  notYetName: (why: string) => `まだ更新できない、${why}`,
 } as const;
 
 /** Link chip (S18) and its spoken name. */
@@ -430,7 +442,7 @@ export const ANNOUNCE = {
   A04: (errors: number, warnings: number) => `問題 ${errors}、注意 ${warnings}`,
   A22: (define: boolean) => (define ? '定義モード' : '運用モード'),
   A09: (name: string, size: string) => `${name} ${size}、確認中`,
-  A10ok: (n: number) => `配布元 確認済み、構成 一致、対象 ${n}`,
+  A10ok: (n: number, skipped = 0) => `配布元 確認済み、構成 一致、対象 ${n}${skipped ? `、まだ更新できない ${skipped} つは飛ばす` : ''}`,
   A10source: '配布元 確認できない',
   A10topology: '構成 不一致',
   A10format: '更新ファイルではない',
@@ -478,7 +490,7 @@ export const RULE_SHORT: Record<string, string> = {
   'V-20': 'I2C の速さ',
   'V-21': 'I2C でつなげないノード',
   'V-22': 'リセット・起動の配線 未設定',
-  'V-23': 'まだ更新できない構成',
+  'V-23': 'まだ更新できない部分',
   'V-24': 'まだ使えないつながり',
   'V-25': '親機にできないマイコン',
   /** Checked by the page (dagon.toml's [board.<id>]), not by dagon-topology. */
@@ -494,6 +506,8 @@ export interface FixWords {
   many: boolean;
   /** A size such as "512 KiB" (B-02). */
   size?: string;
+  /** The node is one updating skips for now (V-23): its link is not a thing to fix. */
+  skipped?: boolean;
 }
 
 /** §11.2: how to fix each rule, one sentence. */
@@ -519,8 +533,11 @@ export const RULE_FIX: Record<string, (w: FixWords) => string> = {
   'V-20': () => '共有の 2 本線（I2C）の速さを 400 kHz 以下にしてください。',
   'V-21': (w) => `${w.to}は UART でつないでください。`,
   'V-22': (w) => `最後の手段で復旧するには、『直す』で ${w.to}のリセット・起動の配線を設定してください（このままでも親機へ送れます）。`,
-  'V-23': () => '更新するには、親機を 1 つにして子機を親機へ直接つないでください（このままでも書き出せます）。',
-  'V-24': (w) => `${w.to ? `${w.to}の` : ''}つながりは、まだ使えない種類です。プロジェクトを作るには、使える種類を選んでください（このままでも保存できます）。`,
+  'V-23': () => 'この構成のままで正しく使えます。いまの更新はこの部分にまだ届かないため、更新と書き込みではこの部分を飛ばします。',
+  'V-24': (w) =>
+    w.skipped
+      ? `${w.to}のつながりは、まだ使えない種類です。${w.to}は更新と書き込みで飛ばすので、このままで使えます。`
+      : `${w.to ? `${w.to}の` : ''}つながりは、まだ使えない種類です。プロジェクトを作るには、使える種類を選んでください（このままでも保存できます）。`,
   'V-25': (w) => `${w.to}の代わりに、親機にできるマイコンのノードを親機にしてください。`,
   'B-01': (w) => `『直す』で ${w.to}のボードの容量を入れてください。`,
   'B-02': (w) => `${w.to}は容量が ${w.size ?? ''} 以上のボードにしてください。`,
@@ -531,8 +548,6 @@ export const MODE = {
   operate: '運用',
   define: '定義',
   label: 'モード',
-  /** M68: 運用 pressed while the 構成 is a shape not updatable yet (§5.2). */
-  lockedUnsupported: { chip: '◇ まだ更新できない構成', sentence: '親機 1 つとその子機の、8 ノードまでの形にすると、運用を使えます。' },
   /** 案: 運用 or 親機へ送る pressed while the 構成 is not in the project's YAML. */
   lockedUnsaved: { sentence: '構成を保存すると、運用と親機へ送るを使えます。' },
   /** M69: 運用 pressed with no 構成 or one with problems. */
@@ -571,8 +586,8 @@ export const DEFINE = {
   problems: (n: number) => `! 問題 ${n}`,
   problemsNone: '問題 0',
   cautions: (m: number) => `▲ 注意 ${m}`,
-  /** S45: shapes not updatable yet, after the cautions. */
-  unsupported: (k: number) => `◇ 未対応 ${k}`,
+  /** S45: parts not updatable yet or links not usable yet, after the cautions. */
+  unsupported: (k: number) => `◇ まだ ${k}`,
   fix: '直す',
   ruleId: '規則 ID',
   yamlPath: 'YAML の場所',
@@ -585,8 +600,8 @@ export const DEFINE = {
   /** Writes the 構成 back to the project's YAML through dagon serve. */
   save: '保存',
   fixSentence: '直すと、親機へ送れます。',
-  /** C19: E6, only shapes not updatable yet. */
-  unsupportedSentence: '更新するには、親機を 1 つにし、子機をその親機に直接つないでください（このままでも保存と書き出しはできます）。',
+  /** C19: E6, nodes updating skips for now (V-23); the 構成 is valid as it is. */
+  notYetSentence: (k: number) => `まだ更新できないノードが ${k} つあります。構成はこのままで使え、更新と書き込みではそのノードを飛ばします。`,
   /** §7.6: the 構成 of the release file chosen in 運用 replaces this one (undoable, saved to the YAML). */
   importFileTopology: 'ファイルの構成を取り込む',
   sendSentence: '親機へ送ると、更新できるようになります。',
@@ -642,7 +657,7 @@ export const INSPECT = {
     'wifi-tcp': 'Wi-Fi（TCP）',
   } as Record<string, string>,
   /** The 親機's hop towards the PC (案). */
-  uplink: 'パソコン側のつながり',
+  uplink: '上流へのつながり',
   uplinkHost: 'つなぐ先',
   hosts: { 'pc-cli': 'パソコンの dagon', browser: 'ブラウザ（パソコン・スマートフォン）', embedded: '自作の機器' } as Record<string, string>,
   /** On a kind the firmware does not implement yet (案). */

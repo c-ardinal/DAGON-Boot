@@ -8,6 +8,9 @@ pub enum Severity {
     Error,
     /// Reported only; does not block `topo push`.
     Warning,
+    /// A valid shape told as it is (V-23: a part updating skips for now);
+    /// never blocks.
+    Info,
 }
 
 impl Severity {
@@ -15,6 +18,7 @@ impl Severity {
         match self {
             Self::Error => "error",
             Self::Warning => "warning",
+            Self::Info => "info",
         }
     }
 }

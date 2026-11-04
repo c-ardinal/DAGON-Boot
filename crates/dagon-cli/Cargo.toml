@@ -48,3 +48,10 @@ sha1 = "0.11"
 base64 = "0.23"
 getrandom = "0.4"
 toml_edit = "0.22"
+
+[target.'cfg(windows)'.dependencies]
+# MIT OR Apache-2.0 (watchexec). A command agent runs in a Windows job
+# object through a safe API: the program and everything it starts stop
+# together, by PID-free job termination, and also when dagon itself ends
+# (kill-on-close). Unix uses std's process groups instead.
+command-group = "5.0.1"

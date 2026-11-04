@@ -7,8 +7,10 @@
 //! sends (the prompt) and what the child inherits: a short environment
 //! allow-list plus the variables the way lists in `pass_env` (never DAGON's
 //! or an agent key's), a fresh empty working folder (not the project's;
-//! hygiene, not confinement), the call's time (the whole process tree is
-//! stopped) and 1 MiB of stdout; stderr is never read.
+//! hygiene, not confinement), the call's time and 1 MiB of stdout; stderr
+//! is never read. The program runs in an OS group (a Windows job object, a
+//! Unix process group) that is stopped when the deadline passes and as soon
+//! as the program itself ends, so nothing it started outlives the call.
 
 use std::io::{Read, Write};
 use std::path::PathBuf;
@@ -194,7 +196,8 @@ fn run_in(
         }
     }
     let secrets = super::secret_env(crate::consent::home().ok().as_deref());
-    let mut child = spawn(exe, &args, dir, &cmd.pass_env, &secrets)?;
+    let mut group = spawn(exe, &args, dir, &cmd.pass_env, &secrets)?;
+    let child = group.child();
     let mut stdin = child.stdin.take().expect("piped");
     // A program that never reads stdin only loses this write. Neither
     // thread is waited for beyond the deadline: a process the program
@@ -219,18 +222,22 @@ fn run_in(
     });
     let deadline = Instant::now() + timeout;
     let status = loop {
-        if let Some(s) = child
+        if let Some(s) = group
+            .child()
             .try_wait()
             .map_err(|_| "the agent program could not be watched".to_string())?
         {
             break s;
         }
         if Instant::now() >= deadline {
-            kill_tree(&mut child);
+            group.stop();
             return Err(TIMED_OUT.into());
         }
         std::thread::sleep(POLL);
     };
+    // The program has ended: whatever it left running is stopped now, so
+    // its stdout closes and nothing outlives the call.
+    group.stop();
     let out = rx
         .recv_timeout(deadline.saturating_duration_since(Instant::now()))
         .map_err(|_| TIMED_OUT.to_string())?;
@@ -246,16 +253,59 @@ fn run_in(
     String::from_utf8(out).map_err(|_| "the agent's answer is not UTF-8 text".into())
 }
 
-/// Starts the program with piped stdin/stdout, the allow-listed
-/// environment, in `dir`; on Unix in a process group of its own (so the
-/// whole tree can be stopped).
+/// The agent program and everything it starts: a Windows job object
+/// (also killed when closed, so when dagon itself ends) or a Unix process
+/// group the program leads. Dropping it stops the group.
+struct Group {
+    #[cfg(windows)]
+    inner: command_group::GroupChild,
+    #[cfg(not(windows))]
+    inner: std::process::Child,
+}
+
+impl Group {
+    fn child(&mut self) -> &mut std::process::Child {
+        #[cfg(windows)]
+        return self.inner.inner();
+        #[cfg(not(windows))]
+        return &mut self.inner;
+    }
+
+    /// Stops every process of the group, also after the program itself
+    /// has ended (no PID of a live parent is needed).
+    fn stop(&mut self) {
+        #[cfg(windows)]
+        let _ = self.inner.kill();
+        // ponytail: after the leader is reaped its PID could in theory be
+        // reused by a new group leader if the group is empty; only signal
+        // through a pidfd/waitid(WNOWAIT) primitive if that ever matters.
+        #[cfg(not(windows))]
+        let _ = std::process::Command::new("kill")
+            .args(["-s", "KILL", "--", &format!("-{}", self.inner.id())])
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .status();
+        let child = self.child();
+        let _ = child.kill();
+        let _ = child.wait();
+    }
+}
+
+impl Drop for Group {
+    fn drop(&mut self) {
+        self.stop();
+    }
+}
+
+/// Starts the program in its group with piped stdin/stdout, the
+/// allow-listed environment, in `dir`.
 fn spawn(
     exe: &std::path::Path,
     args: &[String],
     dir: &std::path::Path,
     pass_env: &[String],
     secrets: &[String],
-) -> Result<std::process::Child, String> {
+) -> Result<Group, String> {
     let mut c = std::process::Command::new(exe);
     c.args(args)
         .current_dir(dir)
@@ -264,37 +314,18 @@ fn spawn(
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::null());
-    #[cfg(unix)]
-    std::os::unix::process::CommandExt::process_group(&mut c, 0);
-    c.spawn()
-        .map_err(|_| "the agent program could not be started".to_string())
-}
-
-/// Stops the program and every process it started.
-fn kill_tree(child: &mut std::process::Child) {
-    let pid = child.id().to_string();
+    let failed = |_| "the agent program could not be started".to_string();
     #[cfg(windows)]
-    let tree = {
-        let root = std::env::var_os("SystemRoot").unwrap_or_else(|| "C:\\Windows".into());
-        std::process::Command::new(
-            std::path::Path::new(&root)
-                .join("System32")
-                .join("taskkill.exe"),
-        )
-        .args(["/F", "/T", "/PID", &pid])
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .status()
+    let inner = {
+        use command_group::CommandGroup;
+        c.group().kill_on_drop(true).spawn().map_err(failed)?
     };
-    #[cfg(unix)]
-    let tree = std::process::Command::new("kill")
-        .args(["-s", "KILL", "--", &format!("-{pid}")])
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .status();
-    let _ = tree;
-    let _ = child.kill();
-    let _ = child.wait();
+    #[cfg(not(windows))]
+    let inner = {
+        std::os::unix::process::CommandExt::process_group(&mut c, 0);
+        c.spawn().map_err(failed)?
+    };
+    Ok(Group { inner })
 }
 
 #[cfg(test)]
@@ -401,11 +432,11 @@ mod tests {
     }
 
     #[test]
-    fn a_timeout_stops_the_whole_process_tree() {
+    fn stopping_the_group_stops_the_whole_tree() {
         let (exe, args) = parent_of_a_sleeper();
         let dir = super::super::temp_dir().unwrap();
-        let mut child = spawn(&exe, &args, &dir, &[], &[]).unwrap();
-        let mut out = child.stdout.take().unwrap();
+        let mut group = spawn(&exe, &args, &dir, &[], &[]).unwrap();
+        let mut out = group.child().stdout.take().unwrap();
         let (tx, rx) = std::sync::mpsc::channel();
         std::thread::spawn(move || {
             let mut sink = Vec::new();
@@ -413,11 +444,75 @@ mod tests {
             let _ = tx.send(());
         });
         std::thread::sleep(Duration::from_millis(500));
-        kill_tree(&mut child);
+        group.stop();
         // The grandchild holds the same stdout: it closes only once the
         // grandchild is gone too (it would live 30 s otherwise).
         rx.recv_timeout(Duration::from_secs(10))
             .expect("a process of the tree outlived the stop");
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Whether a process whose command line holds `marker` is running
+    /// (Windows), or whether `pid` is (Unix).
+    fn alive(marker: &str) -> bool {
+        if cfg!(windows) {
+            let q = format!(
+                "@(Get-CimInstance Win32_Process | Where-Object {{ $_.Name -eq 'PING.EXE' -and $_.CommandLine -like '*{marker}*' }}).Count"
+            );
+            let o = std::process::Command::new("powershell")
+                .args(["-NoProfile", "-NonInteractive", "-Command", &q])
+                .output()
+                .unwrap();
+            String::from_utf8_lossy(&o.stdout).trim() != "0"
+        } else {
+            std::process::Command::new("kill")
+                .args(["-0", marker])
+                .stderr(Stdio::null())
+                .status()
+                .unwrap()
+                .success()
+        }
+    }
+
+    /// The program exits at once after starting a grandchild that keeps its
+    /// stdout open for 30 s: the call returns long before its deadline and
+    /// the grandchild is gone.
+    #[test]
+    fn a_grandchild_left_holding_stdout_is_stopped_when_the_program_ends() {
+        let marker = "127.0.0.37";
+        let (program, args) = if cfg!(windows) {
+            (
+                "cmd",
+                vec!["/C".to_string(), format!("start /B ping -n 30 {marker}")],
+            )
+        } else {
+            (
+                "sh",
+                vec!["-c".to_string(), "sleep 30 & echo $!".to_string()],
+            )
+        };
+        let cmd = Command {
+            program: program.into(),
+            args,
+            system: SystemVia::Stdin,
+            pass_env: Vec::new(),
+        };
+        let t0 = Instant::now();
+        let quiet = Prompt {
+            system: String::new(),
+            user: String::new(),
+            model: None,
+        };
+        // Whatever the grandchild printed before it was stopped (ping's
+        // output may not be UTF-8) does not matter here; the time does.
+        let out = super::run_unchecked(&cmd, &quiet, Duration::from_secs(25));
+        assert!(t0.elapsed() < Duration::from_secs(10), "{:?}", t0.elapsed());
+        let marker = if cfg!(windows) {
+            marker.to_string()
+        } else {
+            out.expect("the program's own output").trim().to_string()
+        };
+        std::thread::sleep(Duration::from_millis(300));
+        assert!(!alive(&marker), "the grandchild outlived the call");
     }
 }

@@ -93,8 +93,11 @@
    * gaps and text grow together. `rem` is the root font in px, read again on resize.
    */
   let rem = $state(16);
+  /** A phone-wide window (the CSS breakpoint 767 px): the controls sit top-right. */
+  let phone = $state(false);
   const readRem = () => {
     rem = parseFloat(getComputedStyle(document.documentElement).fontSize) || 16;
+    phone = innerWidth < 768;
   };
   $effect(readRem);
 
@@ -126,7 +129,8 @@
   const SIDE = $derived(1.5 * rem);
   let zoomH = $state(0);
   /** Room under the graph for the focal number and the controls (the mock keeps it free: DES-UX3-187). */
-  const below = $derived(Math.max(dotH, zoomH) + rem + (inset.bottom ?? 0));
+  /** Phones put the controls at the top (CSS): only the focal number needs the room below there. */
+  const below = $derived(Math.max(dotH, phone ? 0 : zoomH) + rem + (inset.bottom ?? 0));
   const availW = $derived(Math.max(1, boxW - inset.left - inset.right));
   const availH = $derived(Math.max(1, boxH - below));
   const fitOf = (w: number, h: number) => Math.min(1.25, availW / (w + 2 * SIDE), availH / (h + UPLINK_ROOM + SIDE));
@@ -993,6 +997,14 @@
     border: 1px solid var(--c-hair);
     border-radius: var(--r-full);
     background: var(--c-layer-1);
+  }
+  /* Phones: the focal number takes the bottom-left; the controls move to the top-right corner. */
+  @media (max-width: 767px) {
+    .zoom {
+      top: 0.5rem;
+      bottom: auto;
+      right: 0.5rem;
+    }
   }
   @media (prefers-reduced-motion: reduce) {
     .crest,

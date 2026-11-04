@@ -2,9 +2,7 @@
 
 DAGON talks to an agent through one interface. Agents are data: an agent
 (id, name, provider) and the ways to reach it, each of a transport kind DAGON
-implements. The builtin set is Claude (Anthropic) with two ways: `claude-code`
-(Claude Code headless with the user's own login, the default) and `api` (the
-Messages API with `ANTHROPIC_API_KEY`). The user consents once, when linking,
+implements (see Builtin agents and Transport kinds below). The user consents once, when linking,
 to one agent and one way; after that questions are sent without asking again.
 Logins and keys stay with the agent or in the CLI's environment and never reach
 the page.
@@ -29,12 +27,9 @@ route: Host and Origin checks (403), `Authorization: Bearer <passphrase>` (401).
   "available": true,
   "provider": { "id": "claude", "name": "Claude (Anthropic)" },
   "errors": [],
-  "sends": [
-    "構成と定義の事実（ノード・リンク・部品・設定値）",
-    "選んだノードやリンク",
-    "確かめた結果（問題・◇ 未対応・更新の記録）"
-  ],
-  "never_sends": ["鍵", "コマンドとその出力の全文", "ファイルのパス"]
+  "consent_error": null,
+  "sends": ["…"],
+  "never_sends": ["…"]
 }
 ```
 
@@ -54,8 +49,10 @@ route: Host and Origin checks (403), `Authorization: Bearer <passphrase>` (401).
   `available` are both true.
 - `errors`: user definition files that did not load, as
   `"<file name>: <why>"` (never a folder).
-- `sends` / `never_sends`: the lists the linking dialog shows. The terminal
-  (`dagon ai link`) shows the same lists (one source: `consent.rs`).
+- `consent_error`: when ~/.dagon/agent.json is of a version this dagon does
+  not read, why (link again to record one it reads); else `null`.
+- `sends` / `never_sends`: the lists under What linking sends, which the
+  linking dialog shows. The terminal (`dagon ai link`) shows the same lists.
 
 ## POST /v1/agent/link
 
@@ -103,7 +100,8 @@ HTTP 409
   "code": "AGENT_NOT_LINKED" }
 ```
 
-Match on `code`, not on the text. Once linked the routes behave as before
+Match on `code`, not on the text. A consent file of a version this dagon does
+not read answers 409 `AGENT_CONSENT_VERSION` instead, on every route above. Once linked the routes behave as before
 (`/v1/ai/topology` starts a job; a way that cannot be used here fails inside
 the job with its reason, e.g. `ANTHROPIC_API_KEY is not set`).
 
@@ -173,6 +171,7 @@ Errors (all `{ "error": "...", "code": "..." }` except the 400s):
 | 401 | (none) | no passphrase |
 | 409 | `AGENT_NOT_LINKED` | not linked, or the linked agent/way is no longer defined |
 | 409 | `AGENT_NOT_LINKED` | also: unlinked while the question was being answered (no further call is made) |
+| 409 | `AGENT_CONSENT_VERSION` | ~/.dagon/agent.json is of a version this dagon does not read; `error` says which and to link again |
 | 409 | `AGENT_UNAVAILABLE` | linked, but the way cannot be used here: its program is not on PATH, or its key variable is not set (`error` names the program or the variable; restart `dagon serve` after setting a key). |
 | 429 | `AGENT_BUSY` | another question is being answered (one at a time per serve) |
 | 413 | `AGENT_CONTEXT_TOO_LARGE` | the topology file is over 64 KiB (not read), or one prompt would be over 192 KiB (not sent) |
@@ -227,6 +226,13 @@ system = "file"          # "stdin" (default): system text, a blank line, then th
 pass_env = ["MY_AGENT_HOME"]  # optional: more variables the program needs
 ```
 
+Each `kind` is one of the Transport kinds below.
+
+The agent replies with one JSON object (the reply format is in the system
+text); DAGON reads the object from its text.
+
+## Transport kinds
+
 - `command`: runs `program` with `args`; the user text goes to stdin (after
   the system text when `system = "stdin"`; with `system = "file"` the system
   text is in a file whose path replaces the arg `{system_file}`). Stdout is the
@@ -249,9 +255,6 @@ pass_env = ["MY_AGENT_HOME"]  # optional: more variables the program needs
   header), `key_env` (the variable holding the key), `model`, optional
   `model_env` (a variable that overrides `model`).
 
-The agent replies with one JSON object (the reply format is in the system
-text); DAGON reads the object from its text.
-
 ## Where the consent lives
 
 `~/.dagon/agent.json` (`{"version":1,"agent":"claude","way":"claude-code","at":"..."}`), one
@@ -262,6 +265,35 @@ nothing lands in a project folder that may be committed. A file that does not
 parse, has another `version`, holds any other field, has an id that is not
 plain or an `at` that is not `YYYY-MM-DDTHH:MM:SSZ` on a real calendar date
 counts as not linked: the user links again.
+
+## Builtin agents
+
+Agents shipped with dagon (`crates/dagon-cli/agents/*.toml`), each with its
+ways in order; the first way of the first agent is the default.
+
+- `claude` (Claude, Anthropic): `claude-code` (Claude Code headless with the user's own login), `api` (the Messages API, key in the ANTHROPIC_API_KEY variable)
+
+## What linking sends
+
+### Sends
+
+- 構成と定義の事実（ノード・リンク・部品・設定値）
+- 選んだノードやリンク
+- 確かめた結果（問題・◇ 未対応・更新の記録）
+
+### Never sends
+
+- 鍵
+- コマンドとその出力の全文
+- ファイルのパス
+
+## Format numbers
+
+Each file format has a number; a reader refuses one it does not know and
+says which number it reads.
+
+- `dagon_agent = 1`: an agent definition file
+- `"version": 1`: the consent file, ~/.dagon/agent.json
 
 ## CLI
 

@@ -33,21 +33,24 @@ pub(crate) const UNEXPECTED: &str = "DAGON's agent did not answer in the expecte
 /// The `code` of every agent error the page tells apart (the serve API
 /// contract; docs/agent-api.md lists exactly these, a test checks it).
 pub mod codes {
-    pub const NOT_LINKED: &str = "AGENT_NOT_LINKED";
-    pub const UNAVAILABLE: &str = "AGENT_UNAVAILABLE";
-    pub const BUSY: &str = "AGENT_BUSY";
-    pub const CONTEXT_TOO_LARGE: &str = "AGENT_CONTEXT_TOO_LARGE";
-    pub const TIMEOUT: &str = "AGENT_TIMEOUT";
-    pub const FAILED: &str = "AGENT_FAILED";
-    #[cfg(test)]
-    pub const ALL: [&str; 6] = [
-        NOT_LINKED,
-        UNAVAILABLE,
-        BUSY,
-        CONTEXT_TOO_LARGE,
-        TIMEOUT,
-        FAILED,
-    ];
+    /// Declares each code once: its constant, and its place in [`ALL`].
+    macro_rules! codes {
+        ($($name:ident = $code:literal),* $(,)?) => {
+            $(pub const $name: &str = $code;)*
+            /// Every code, in declaration order.
+            #[cfg(test)]
+            pub const ALL: &[&str] = &[$($code),*];
+        };
+    }
+    codes! {
+        NOT_LINKED = "AGENT_NOT_LINKED",
+        CONSENT_VERSION = "AGENT_CONSENT_VERSION",
+        UNAVAILABLE = "AGENT_UNAVAILABLE",
+        BUSY = "AGENT_BUSY",
+        CONTEXT_TOO_LARGE = "AGENT_CONTEXT_TOO_LARGE",
+        TIMEOUT = "AGENT_TIMEOUT",
+        FAILED = "AGENT_FAILED",
+    }
 }
 
 /// The agent definition format this dagon reads (`dagon_agent = 1`);
@@ -81,11 +84,15 @@ pub enum Transport {
     MessagesHttp(http::MessagesHttp),
 }
 
+/// The name of every transport kind, as definitions write it; a new kind
+/// needs its name here before [`Transport::kind`] compiles.
+pub const KINDS: [&str; 2] = ["command", "messages-http"];
+
 impl Transport {
     pub fn kind(&self) -> &'static str {
         match self {
-            Transport::Command(_) => "command",
-            Transport::MessagesHttp(_) => "messages-http",
+            Transport::Command(_) => KINDS[0],
+            Transport::MessagesHttp(_) => KINDS[1],
         }
     }
 

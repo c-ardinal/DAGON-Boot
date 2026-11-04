@@ -1929,6 +1929,32 @@ fn an_agent_that_times_out_or_fails_gives_a_page_safe_error() {
 }
 
 #[test]
+fn a_consent_file_of_another_version_answers_its_own_code() {
+    let (a, home) = with_home("consent-version");
+    std::fs::write(
+        home.join(".dagon/agent.json"),
+        r#"{"version":9,"agent":"claude","way":"api","at":"2026-11-04T04:14:35Z"}"#,
+    )
+    .unwrap();
+    for path in ["/v1/agent/ask", "/v1/ai/topology"] {
+        let (st, body) = post(&a, path, serde_json::json!({ "question": "x" }));
+        assert!(
+            st == 409 && body.contains("AGENT_CONSENT_VERSION"),
+            "{path}: {body}"
+        );
+        assert!(body.contains("version 9"), "{body}");
+    }
+    let v: serde_json::Value = serde_json::from_str(&get(&a, "/v1/agent").1).unwrap();
+    assert_eq!(v["linked"], false);
+    assert!(v["consent_error"].as_str().unwrap().contains("version 9"));
+    // Linking again records a consent this dagon reads.
+    let yes = serde_json::json!({ "agent": "claude", "way": "api", "consent": true });
+    assert_eq!(post(&a, "/v1/agent/link", yes).0, 200);
+    let v: serde_json::Value = serde_json::from_str(&get(&a, "/v1/agent").1).unwrap();
+    assert_eq!(v["consent_error"], serde_json::Value::Null);
+}
+
+#[test]
 fn a_way_that_cannot_be_used_here_is_refused_before_any_call() {
     // With the key set this would reach the real agent: not here.
     if std::env::var_os("ANTHROPIC_API_KEY").is_some() {

@@ -29,7 +29,7 @@ pub const NOT_LINKED: &str =
 
 const FILE: &str = "agent.json";
 /// The agent.json format this dagon reads and writes.
-const FILE_VERSION: u32 = 1;
+pub(crate) const FILE_VERSION: u32 = 1;
 /// agent.json holds four short fields; a larger file is not a consent.
 const MAX_FILE: usize = 4 * 1024;
 
@@ -69,6 +69,32 @@ pub fn consent(home: &Path) -> Option<Consent> {
 
 pub fn is_linked(home: &Path) -> bool {
     consent(home).is_some()
+}
+
+/// How every unknown-version refusal starts (serve tells it apart by this).
+pub const VERSION_REFUSAL: &str = "~/.dagon/agent.json is";
+
+/// Why the consent file there is refused, when it is one of a version this
+/// dagon does not read (a JSON object whose `version` is not this one's).
+/// None for no file, this version, or a file that is no consent at all.
+pub fn unknown_version(home: &Path) -> Option<String> {
+    let bytes = crate::paths::read_capped(&file(home), MAX_FILE).ok()??;
+    let v: Value = serde_json::from_slice(&bytes).ok()?;
+    v.as_object()?;
+    let shown = match &v["version"] {
+        Value::Null => "of no version".to_string(),
+        n if *n == FILE_VERSION => return None,
+        n => format!("version {n}"),
+    };
+    Some(format!(
+        "{VERSION_REFUSAL} {shown}, which this dagon does not read (it reads version {FILE_VERSION}); link again with dagon ai link to record a consent it reads"
+    ))
+}
+
+/// The refusal before a call: the unknown-version reason when that is the
+/// cause, else not linked.
+fn refusal(home: &Path) -> String {
+    unknown_version(home).unwrap_or_else(|| NOT_LINKED.into())
 }
 
 /// Records consent now to send to `agent` by `way` (ids the caller checked
@@ -176,14 +202,14 @@ impl Held {
 /// Holds the consent; Err(NOT_LINKED) when there is none.
 pub fn hold(home: &Path) -> Result<Held, String> {
     if !is_linked(home) {
-        return Err(NOT_LINKED.into());
+        return Err(refusal(home));
     }
     let file = lock_file(home)?;
     if !wait_lock(&file, true, CALL_WAIT) {
         return Err(LOCK_UNAVAILABLE.into());
     }
     // Read again under the lock: an unlink may have just finished.
-    let consent = consent(home).ok_or(NOT_LINKED)?;
+    let consent = consent(home).ok_or_else(|| refusal(home))?;
     Ok(Held {
         consent,
         _file: file,
@@ -237,6 +263,8 @@ pub fn status(home: Option<&Path>, agents: &Agents) -> Value {
         "agents": list,
         "default": { "agent": da.id, "way": dw.id },
         "errors": agents.errors,
+        // A consent file this dagon does not read: why (link again).
+        "consent_error": home.and_then(unknown_version),
         "sends": SENDS,
         "never_sends": NEVER_SENDS,
     })
@@ -254,6 +282,8 @@ pub fn home() -> Result<PathBuf, String> {
 pub fn require_linked(home: &Path) -> Result<(), String> {
     if linked(home, &Agents::load(Some(home))).is_some() {
         Ok(())
+    } else if let Some(e) = unknown_version(home) {
+        Err(e)
     } else {
         Err(
             "DAGON is not linked to an agent; run dagon ai link first (consent is asked once)"
@@ -616,6 +646,44 @@ mod tests {
             std::fs::write(file(&h), text).unwrap();
             assert!(!is_linked(&h), "{text}");
         }
+        std::fs::remove_dir_all(&h).unwrap();
+    }
+
+    #[test]
+    fn a_consent_file_of_another_version_is_refused_with_its_reason() {
+        let h = tmp_home("version");
+        std::fs::create_dir_all(h.join(".dagon")).unwrap();
+        assert_eq!(unknown_version(&h), None, "no file");
+        std::fs::write(file(&h), "{").unwrap();
+        assert_eq!(unknown_version(&h), None, "no consent at all");
+        assert_eq!(hold(&h).err().as_deref(), Some(NOT_LINKED));
+        for (text, shown) in [
+            (
+                r#"{"version":2,"agent":"claude","way":"api","at":"2026-11-04T04:14:35Z"}"#,
+                "version 2",
+            ),
+            (
+                r#"{"provider":"anthropic","at":"2026-11-04T04:14:35Z"}"#,
+                "of no version",
+            ),
+        ] {
+            std::fs::write(file(&h), text).unwrap();
+            let e = unknown_version(&h).unwrap();
+            assert!(e.starts_with(VERSION_REFUSAL) && e.contains(shown), "{e}");
+            assert!(e.contains(&format!("reads version {FILE_VERSION}")), "{e}");
+            assert_eq!(hold(&h).err(), Some(e.clone()));
+            assert_eq!(require_linked(&h).err(), Some(e.clone()));
+            assert_eq!(
+                status(Some(&h), &Agents::load(None))["consent_error"],
+                e.as_str()
+            );
+        }
+        link(&h, "claude", "api").unwrap();
+        assert_eq!(unknown_version(&h), None);
+        assert_eq!(
+            status(Some(&h), &Agents::load(None))["consent_error"],
+            Value::Null
+        );
         std::fs::remove_dir_all(&h).unwrap();
     }
 

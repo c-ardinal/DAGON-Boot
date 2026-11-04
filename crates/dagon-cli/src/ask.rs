@@ -393,8 +393,8 @@ const MAX_DIFF_CELLS: usize = 4_000_000;
 
 /// Every line of both files, each prefixed with ' ' (kept), '-' (removed)
 /// or '+' (added).
-// ponytail: whole-file LCS table, O(lines²) memory; topology files are a
-// few hundred lines (MAX_DIFF_CELLS caps it); hunks if files grow large.
+// A whole-file LCS table: O(lines²) memory, fine for topology files of a
+// few hundred lines (MAX_DIFF_CELLS caps it); larger files would need hunks.
 fn line_diff(old: &str, new: &str) -> String {
     let a: Vec<&str> = old.lines().collect();
     let b: Vec<&str> = new.lines().collect();

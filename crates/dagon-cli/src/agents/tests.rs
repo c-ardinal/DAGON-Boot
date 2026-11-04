@@ -374,60 +374,107 @@ fn the_builtin_list_is_the_agents_folder() {
     assert_eq!(files, listed);
 }
 
-/// A transport kind's name in a definition and the name GET /v1/agent
-/// reports are the same word.
+/// The top-level bullets of the section under `heading` (up to the next
+/// heading of the same or a higher level).
+fn bullets(doc: &str, heading: &str) -> Vec<String> {
+    let level = heading.chars().take_while(|c| *c == '#').count();
+    let mut lines = doc.lines().skip_while(|l| *l != heading);
+    assert!(lines.next().is_some(), "no section {heading}");
+    lines
+        .take_while(|l| {
+            let h = l.chars().take_while(|c| *c == '#').count();
+            h == 0 || h > level
+        })
+        .filter_map(|l| l.strip_prefix("- "))
+        .map(str::to_string)
+        .collect()
+}
+
+/// The backticked words of a bullet, in order.
+fn ticked(line: &str) -> Vec<String> {
+    line.split('`')
+        .skip(1)
+        .step_by(2)
+        .map(str::to_string)
+        .collect()
+}
+
+/// Every transport kind in KINDS parses as itself; the builtin
+/// definitions use only these kinds.
 #[test]
-fn transport_kind_names_match_the_definitions() {
-    for (_, text) in BUILTIN {
-        let def = parse(text).unwrap();
-        let written: Vec<&str> = text
-            .lines()
-            .filter_map(|l| l.trim().strip_prefix("kind = \""))
-            .map(|l| l.trim_end_matches('"'))
-            .collect();
-        let reported: Vec<&str> = def.ways.iter().map(|w| w.transport.kind()).collect();
-        assert_eq!(written, reported);
+fn transport_kind_names_round_trip() {
+    for kind in KINDS {
+        let text = match kind {
+            "command" => "kind = \"command\"\nprogram = \"x\"\n".to_string(),
+            "messages-http" => "kind = \"messages-http\"\nurl = \"https://x\"\nversion = \"1\"\nkey_env = \"K\"\nmodel = \"m\"\n".to_string(),
+            other => panic!("give the test a minimal {other} transport"),
+        };
+        let t: Transport = toml::from_str(&text).unwrap();
+        assert_eq!(t.kind(), kind);
     }
 }
 
-/// The contract document lists exactly the error codes the code returns,
-/// the sends lists, the command environment allow-list and the builtin ids.
+/// The authoritative sections of docs/agent-api.md say exactly what the code
+/// has: an extra, missing or stale entry fails.
 #[test]
 fn the_contract_document_follows_the_code() {
     let d = doc();
+    // Error codes: every AGENT_* word in the document, against the one list.
     let mut in_doc: Vec<&str> = d
         .split(|c: char| !(c.is_ascii_uppercase() || c == '_'))
         .filter(|w| w.starts_with("AGENT_") && w.len() > 6)
         .collect();
     in_doc.sort();
     in_doc.dedup();
-    let mut codes = codes::ALL.to_vec();
-    codes.sort();
-    assert_eq!(in_doc, codes);
-    for s in crate::consent::SENDS
+    let mut all = codes::ALL.to_vec();
+    all.sort();
+    assert_eq!(in_doc, all, "error codes");
+
+    let kinds: Vec<String> = bullets(&d, "## Transport kinds")
         .iter()
-        .chain(&crate::consent::NEVER_SENDS)
-    {
-        assert!(d.contains(s), "{s}");
-    }
+        .map(|b| ticked(b)[0].clone())
+        .collect();
+    assert_eq!(kinds, KINDS, "transport kinds");
+
+    let sends = bullets(&d, "### Sends");
+    assert_eq!(sends, crate::consent::SENDS, "sends");
+    let never = bullets(&d, "### Never sends");
+    assert_eq!(never, crate::consent::NEVER_SENDS, "never sends");
+
+    let builtin: Vec<Vec<String>> = bullets(&d, "## Builtin agents")
+        .iter()
+        .map(|b| ticked(b))
+        .collect();
+    let code: Vec<Vec<String>> = BUILTIN
+        .iter()
+        .map(|(_, t)| {
+            let a = parse(t).unwrap();
+            std::iter::once(a.id.clone())
+                .chain(a.ways.iter().map(|w| w.id.clone()))
+                .collect()
+        })
+        .collect();
+    assert_eq!(builtin, code, "builtin agents and their ways, in order");
+
+    let formats: Vec<String> = bullets(&d, "## Format numbers")
+        .iter()
+        .map(|b| ticked(b)[0].clone())
+        .collect();
+    assert_eq!(
+        formats,
+        [
+            format!("dagon_agent = {FORMAT}"),
+            format!("\"version\": {}", crate::consent::FILE_VERSION),
+        ],
+        "format numbers"
+    );
+
     let env = d.split("Environment: only").nth(1).unwrap();
     let env = env.split("plus the names").next().unwrap();
-    let mut listed: Vec<&str> = env
-        .split('`')
-        .skip(1)
-        .step_by(2)
-        .filter(|w| *w != "LC_*")
-        .collect();
+    let mut listed: Vec<String> = ticked(env).into_iter().filter(|w| w != "LC_*").collect();
     listed.sort();
-    let mut base = command::BASE_ENV.to_vec();
+    let mut base: Vec<String> = command::BASE_ENV.iter().map(|s| s.to_string()).collect();
     base.sort();
-    assert_eq!(listed, base);
+    assert_eq!(listed, base, "environment allow-list");
     assert!(env.contains("`LC_*`"));
-    for a in Agents::load(None).list {
-        assert!(d.contains(&format!("\"{}\"", a.id)), "{}", a.id);
-        for w in &a.ways {
-            assert!(d.contains(&format!("\"{}\"", w.id)), "{}", w.id);
-        }
-    }
-    assert!(d.contains(&format!("dagon_agent = {FORMAT}")));
 }

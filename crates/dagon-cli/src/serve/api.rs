@@ -165,7 +165,7 @@ pub fn handle(server: &Arc<Server>, req: &Request) -> Response {
         );
     }
     if parts.first() == Some(&"ai") && !agent_linked(server) {
-        return not_linked();
+        return consent_refusal(server);
     }
     let r = match (req.method.as_str(), parts.as_slice()) {
         ("GET", ["hello"]) => Ok(hello(server)),
@@ -372,6 +372,18 @@ fn coded(status: u16, msg: &str, code: &str) -> Response {
     Response::json(status, &json!({ "error": msg, "code": code }))
 }
 
+/// Why no call may start: a consent file of a version this dagon does not
+/// read (AGENT_CONSENT_VERSION), else not linked.
+fn consent_refusal(server: &Server) -> Response {
+    let unknown = super::project::home(server)
+        .ok()
+        .and_then(|h| crate::consent::unknown_version(&h));
+    match unknown {
+        Some(e) => coded(409, &e, crate::agents::codes::CONSENT_VERSION),
+        None => not_linked(),
+    }
+}
+
 fn not_linked() -> Response {
     coded(
         409,
@@ -407,6 +419,9 @@ fn agent_api(
 fn agent_failure(e: &str) -> Response {
     match e {
         crate::consent::NOT_LINKED => not_linked(),
+        e if e.starts_with(crate::consent::VERSION_REFUSAL) => {
+            coded(409, e, crate::agents::codes::CONSENT_VERSION)
+        }
         crate::agents::TOO_LARGE => coded(413, e, crate::agents::codes::CONTEXT_TOO_LARGE),
         crate::agents::TIMED_OUT => coded(504, e, crate::agents::codes::TIMEOUT),
         _ => coded(502, e, crate::agents::codes::FAILED),
@@ -416,7 +431,7 @@ fn agent_failure(e: &str) -> Response {
 /// POST /v1/agent/ask: one question to DAGON, answered in this request.
 fn agent_ask(server: &Server, req: &Request) -> Res {
     if !agent_linked(server) {
-        return Err(not_linked());
+        return Err(consent_refusal(server));
     }
     let q = crate::ask::parse(&body_json(req)?).map_err(|e| Response::error(400, &e))?;
     let _turn = server.ask_turn().ok_or_else(|| {
@@ -427,8 +442,8 @@ fn agent_ask(server: &Server, req: &Request) -> Res {
         )
     })?;
     let mut api = agent_api(server, crate::ask::ASK_TIMEOUT).map_err(|e| {
-        if e == crate::consent::NOT_LINKED {
-            not_linked()
+        if e == crate::consent::NOT_LINKED || e.starts_with(crate::consent::VERSION_REFUSAL) {
+            consent_refusal(server)
         } else {
             coded(409, &e, crate::agents::codes::UNAVAILABLE)
         }
@@ -446,7 +461,7 @@ fn agent_ask(server: &Server, req: &Request) -> Res {
     let r = crate::ask::ask(&q, &facts, &mut *api).map_err(|e| agent_failure(&e))?;
     // Unlinked while the answer was on its way: it is not shown either.
     if !agent_linked(server) {
-        return Err(not_linked());
+        return Err(consent_refusal(server));
     }
     Ok(json_ok(r.to_json()))
 }

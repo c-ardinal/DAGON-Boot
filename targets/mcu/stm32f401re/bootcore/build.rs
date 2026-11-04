@@ -1,13 +1,13 @@
 //! The halt LED and pattern come from the board of the node whose boot
 //! folder `DAGON_BOOT_CRATE` names (`board.rs`, `pins.rs`); the build
-//! fails without it, and when the node's boot crate links anything but
-//! DAGON's packages and the trusted extensions dagon.toml declares with
-//! their current source hash.
+//! fails without it, and without the stamp `dagon gen` writes there once
+//! the boot crate's dependency graph passed its check for the current
+//! inputs.
 
-use dagon_topology::defs::codegen::{boot_build, boot_check_linked, Hal};
+use dagon_topology::defs::codegen::{boot_build, boot_verify_stamp, Hal};
 
 fn main() {
-    boot_check_linked();
+    boot_verify_stamp();
     let name = |s: &str| s.to_uppercase();
     let b = boot_build(Some(&Hal {
         peripherals: "embassy_stm32::peripherals",

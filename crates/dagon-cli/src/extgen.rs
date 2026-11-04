@@ -260,6 +260,56 @@ pub struct ProjectRef<'a> {
     /// dagon.toml's file name in `base`.
     pub config: &'a str,
     pub src: &'a crate::scaffold::DagonSource,
+    /// Check each boot crate's dependency graph with cargo and write its
+    /// stamp ([`boot_graph_stamp`]); off only in tests that do not run
+    /// cargo.
+    pub check_boot_graph: bool,
+}
+
+/// The host check of node `id`'s boot crate (`boot/<id>/`): cargo
+/// resolves its whole graph (every feature, every target; `--locked` once
+/// its Cargo.lock exists, else cargo writes it), every package built into
+/// it must pass [`BootFolder::check_graph`], and the stamp of its inputs
+/// is returned for `boot/<id>/graph.stamp`, which the boot core's build
+/// requires. All features and all targets make the checked graph a
+/// superset of any one build of it.
+fn boot_graph_stamp(p: &ProjectRef<'_>, id: &str, mcu: &str) -> Result<(String, String), String> {
+    use dagon_topology::defs::boot_folder::{stamp_text, BootFolder, STAMP_FILE};
+    let rel = format!("{BOOT_CRATES}/{id}");
+    let dir = contained(p.base, Path::new(&rel))?;
+    let f = BootFolder::read(&dir)?;
+    let mut cmd = std::process::Command::new("cargo");
+    for k in crate::nodebuild::SECRET_ENV {
+        cmd.env_remove(k);
+    }
+    cmd.args(["metadata", "--format-version", "1", "--all-features"])
+        .arg("--manifest-path")
+        .arg(dir.join("Cargo.toml"))
+        .current_dir(&dir);
+    if dir.join("Cargo.lock").is_file() {
+        cmd.arg("--locked");
+    }
+    let out = cmd.output().map_err(|e| format!("cannot run cargo: {e}"))?;
+    if !out.status.success() {
+        return Err(format!(
+            "cargo metadata: {}",
+            String::from_utf8_lossy(&out.stderr).trim()
+        ));
+    }
+    let metadata: serde_json::Value =
+        serde_json::from_slice(&out.stdout).map_err(|e| format!("cargo metadata: {e}"))?;
+    let own = metadata["packages"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .find(|x| x["metadata"]["dagon"]["bootcore"] == mcu)
+        .and_then(|x| x["name"].as_str())
+        .ok_or_else(|| format!("the boot crate links no boot core library for {mcu}"))?
+        .to_string();
+    let lock = std::fs::read_to_string(dir.join("Cargo.lock")).unwrap_or_default();
+    let root = crate::dagonsrc::root(p.src, p.base)?;
+    f.check_graph(&metadata, &lock, &own, &root)?;
+    Ok((format!("{rel}/{STAMP_FILE}"), stamp_text(&f.stamp()?)))
 }
 
 fn has_boot_stage(def: &McuDef) -> bool {
@@ -445,8 +495,20 @@ pub fn write_nodes(
         if !failed.contains(&n.id) {
             match plan_files(reg, n, mine, &found, &known, p) {
                 Ok((files, notes)) => {
+                    let boot = files
+                        .iter()
+                        .any(|(rel, _)| rel.starts_with(&format!("{BOOT_CRATES}/")));
                     for (rel, text) in files {
                         write(base, &rel, &text, true, &mut written)?;
+                    }
+                    if boot && p.check_boot_graph {
+                        match boot_graph_stamp(p, &n.id, &n.mcu) {
+                            Ok((rel, text)) => write(base, &rel, &text, true, &mut written)?,
+                            Err(why) => lines.push(format!(
+                                "skipped    {BOOT_CRATES}/{}/graph.stamp: {why}",
+                                n.id
+                            )),
+                        }
                     }
                     lines.extend(
                         written
@@ -530,6 +592,7 @@ mod tests {
             base,
             config: "dagon.toml",
             src: &src,
+            check_boot_graph: false,
         };
         write_nodes(Registry::builtin(), &p, nodes, only, failed, cfg)
     }
@@ -686,6 +749,41 @@ mod tests {
             again.iter().all(|l| l.starts_with("unchanged")),
             "{again:?}"
         );
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    /// gen checks the boot crate's resolved graph with cargo and writes
+    /// the stamp the boot core's build requires; a later change to a
+    /// trusted extension makes it stale until gen runs again.
+    #[test]
+    fn gen_checks_the_boot_graph_and_stamps_it() {
+        use dagon_topology::defs::boot_folder::BootFolder;
+        let base = scratch("stamp");
+        let hub = [node(
+            "hub",
+            "rp2040",
+            "waveshare-rp2040-touch-lcd-1.28",
+            "coordinator",
+        )];
+        let mut cfg = cfg_with(&base, &["show"], &[]);
+        let mine = cfg.nodes.remove("seg").unwrap();
+        cfg.nodes.insert("hub".into(), mine);
+        let src = dagon_src();
+        let p = ProjectRef {
+            base: &base,
+            config: "dagon.toml",
+            src: &src,
+            check_boot_graph: true,
+        };
+        let lines = write_nodes(Registry::builtin(), &p, &hub, &[], &[], &cfg).unwrap();
+        assert!(
+            lines.iter().any(|l| l.ends_with("boot/hub/graph.stamp")),
+            "{lines:?}"
+        );
+        let f = BootFolder::read(&base.join("boot/hub")).unwrap();
+        f.verify_stamp().unwrap();
+        std::fs::write(base.join("extensions/show/src/extra.rs"), "").unwrap();
+        assert!(f.verify_stamp().is_err());
         let _ = std::fs::remove_dir_all(&base);
     }
 

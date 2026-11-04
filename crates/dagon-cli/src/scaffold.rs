@@ -1008,6 +1008,7 @@ pub fn gen_project(config: &Path, only: &[String], force: bool) -> Result<Vec<St
         base: &cfg.base,
         config: &config_name,
         src: &tables.dagon,
+        check_boot_graph: true,
     };
     out.extend(crate::extgen::write_nodes(
         &reg,

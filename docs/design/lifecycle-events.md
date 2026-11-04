@@ -1154,17 +1154,30 @@ the safety rules are made of. It is accepted only when:
    `[extensions.nodes.<id>] trusted` by id and by the source hash of its
    package: SHA-256 over every file of the package folder, sorted by path
    (`/`-separated), each as its path, a zero byte, its length as a
-   little-endian u64 and its bytes with CRLF read as LF, leaving out
-   `target/`, `Cargo.lock` and hidden entries. `dagon gen` checks the
-   hash (and names the one it found when they differ), and the boot
-   core's build checks it again and walks the boot crate's whole
-   resolved dependency graph for its target: every crate built into the
-   image is DAGON's, inside a declared trusted extension's folder (and so
-   in its hash), or a registry crate with a checksum in the boot crate's
-   `Cargo.lock`; any other refuses the build. The hash is of the source
-   because the linked bytes do not exist when `dagon gen` runs. It does
-   not cover the registry crates the extension depends on: those are
-   pinned by the boot crate's `Cargo.lock`;
+   little-endian u64 and its bytes with CRLF read as LF. No file is left
+   out, `target/` and hidden folders included, because `include!` and
+   `#[path]` let the compiler read any of them; running cargo inside the
+   extension's own folder therefore changes its hash. The hash is of the
+   source because the linked bytes do not exist when `dagon gen` runs.
+   `dagon gen` checks the hash (and names the one it found when they
+   differ), then checks the boot crate's dependency graph on the host:
+   cargo resolves it with every feature for every target (`--locked` once
+   its `Cargo.lock` exists), a superset of any one build of it, and every
+   package built into it (normal and build dependencies) must be DAGON's,
+   inside a declared trusted extension's folder (and so in its hash), or
+   a registry crate with a checksum in the boot crate's `Cargo.lock`. The
+   check passed, gen writes `graph.stamp`: the SHA-256 of the boot
+   crate's `Cargo.toml`, its `Cargo.lock` and each trusted extension's
+   source hash. The boot core's build recomputes that stamp and refuses
+   to build when it is missing or differs, so a boot crate whose graph
+   was not checked for exactly its current inputs is never built. The
+   graph is checked on the host and not in the build script because a
+   build script sees neither the outer build's features nor, offline,
+   every crate cargo would resolve. Not covered: the registry crates the
+   extension depends on (pinned by checksum, not reviewed), and source
+   an extension includes from outside its own folder (`include!` or
+   `#[path]` with a path leaving it), which trusted code is reviewed for
+   like any code that runs privileged;
 3. the image that contains it is signed with the project key, the
    signature covering the extension's bytes, and the device verifies
    that signature before the image runs (below);

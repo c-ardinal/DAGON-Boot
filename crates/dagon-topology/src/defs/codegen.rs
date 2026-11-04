@@ -351,45 +351,26 @@ pub fn boot_build(hal: Option<&Hal<'_>>) -> Option<BoardDef> {
     Some(l.board)
 }
 
-/// A boot core library's build script, when the node's boot crate is what
-/// is built: [`BootFolder::check_hashes`] and [`BootFolder::check_graph`]
-/// over the boot crate's resolved graph for the build's target (`cargo
-/// metadata --locked --offline --filter-platform`), so the image links
-/// only DAGON's packages, the trusted extensions whose source still hashes
-/// to what dagon.toml declares and checksum-pinned registry crates; any
-/// other fails the build. A build of the library on its own (the firmware
-/// lint) links nothing from the boot folder and is not checked.
-pub fn boot_check_linked() {
-    let (mcu, f) = boot_inputs();
-    let own = std::env::var("CARGO_PKG_NAME").expect("run from a build script");
-    if !f.depends_on(&own) {
-        return;
-    }
-    let files = f.check_hashes().unwrap_or_else(|e| panic!("{e}"));
-    watch(&files);
-    let manifest = f.dir.join("Cargo.toml");
-    let lock_path = f.dir.join("Cargo.lock");
-    println!("cargo:rerun-if-changed={}", lock_path.display());
-    let cargo = std::env::var_os("CARGO").unwrap_or_else(|| "cargo".into());
-    let target = std::env::var("TARGET").expect("run from a build script");
-    let out = std::process::Command::new(cargo)
-        .args(["metadata", "--format-version", "1", "--locked", "--offline"])
-        .args(["--filter-platform", &target, "--manifest-path"])
-        .arg(&manifest)
-        .output()
-        .unwrap_or_else(|e| panic!("cannot run cargo metadata: {e}"));
-    assert!(
-        out.status.success(),
-        "cargo metadata of {}: {}",
-        manifest.display(),
-        String::from_utf8_lossy(&out.stderr)
+/// A boot core library's build script: [`BootFolder::verify_stamp`] for
+/// the node's boot folder, so the build refuses a boot crate whose
+/// dependency graph the host check (`dagon gen`) did not pass for exactly
+/// its current `Cargo.toml`, `Cargo.lock` and trusted extension sources.
+/// The graph itself is checked on the host, where cargo can resolve it
+/// (all features, every target); a build script cannot reproduce the
+/// outer build's features or resolve offline reliably.
+pub fn boot_verify_stamp() {
+    let (_, f) = boot_inputs();
+    println!(
+        "cargo:rerun-if-changed={}",
+        f.dir.join(super::boot_folder::STAMP_FILE).display()
     );
-    let metadata: serde_json::Value =
-        serde_json::from_slice(&out.stdout).unwrap_or_else(|e| panic!("cargo metadata: {e}"));
-    let lock = std::fs::read_to_string(&lock_path).unwrap_or_default();
-    let root = tree_root(&mcu).unwrap_or_else(|e| panic!("{e}"));
-    f.check_graph(&metadata, &lock, &own, root)
-        .unwrap_or_else(|e| panic!("{e}"));
+    println!(
+        "cargo:rerun-if-changed={}",
+        f.dir.join("Cargo.lock").display()
+    );
+    // A whole folder, so a file added to an extension reruns the check.
+    watch(&f.trusted_folders());
+    f.verify_stamp().unwrap_or_else(|e| panic!("{e}"));
 }
 
 /// `board.rs` of a node without a board: no boot LED, no halt pattern.

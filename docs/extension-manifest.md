@@ -55,11 +55,12 @@ trusted = [{ id = "hsm-verify", sha256 = "<source SHA-256, 64 hex digits>" }]
 `sha256` is the source hash of the extension's package folder: SHA-256
 over every file in it, sorted by path (`/`-separated), each as its path, a
 zero byte, its length as a little-endian u64 and its bytes with CRLF read
-as LF; `target/`, `Cargo.lock` and hidden entries are left out. `dagon
-gen` checks it and names the hash it found when the two differ; the boot
-core's build checks it again, so only the source dagon.toml declares is
-linked. The crates the extension itself depends on are pinned by the
-boot crate's `Cargo.lock`, not by this hash.
+as LF. Nothing in the folder is left out (the compiler can read any of
+it through `include!` or `#[path]`), so running cargo inside the
+extension's own folder, which writes `target/` and `Cargo.lock` there,
+changes the hash. `dagon gen` checks it and names the hash it found when
+the two differ. The registry crates the extension itself depends on are
+pinned by the boot crate's `Cargo.lock`, not by this hash.
 
 For each node `dagon gen` refuses, naming the extension and the reason: an
 extension listed for an image whose layers it does not have, a port
@@ -106,7 +107,7 @@ boot core template its MCU package ships (`bootcore/template/`, found by
 core library, `dagon-events` and each boot extension's package, and the
 node, its MCU, its board and its trusted extensions under
 `[package.metadata.dagon.boot]`), `boot.rs` (the boot core's `main`, from
-`nodes/<id>/dagon/boot_wiring.rs`) and `.cargo/config.toml` (the target,
+`nodes/<id>/dagon/boot_wiring.rs`), `graph.stamp` (below) and `.cargo/config.toml` (the target,
 `DAGON_BOOT_CRATE` and the node's `DAGON_TARGET_TAG`). It is a folder of
 its own because cargo merges the `.cargo/config.toml` of every folder
 above a crate, and the node's app crate has one made for the app.
@@ -126,10 +127,16 @@ is not stopped, but the boot core then delivers `boot.extension_overran`
 that kind, and goes on. `dagon gen` refuses a set whose calls could take
 more than a quarter of the trial watchdog period: one call per observed
 boot event, and for an extension observing `boot.extension_overran` one
-more per call of any boot extension. The boot core's build checks the
-whole resolved dependency graph of the boot crate: every crate is
+more per call of any boot extension.
+
+`dagon gen` also checks the boot crate's resolved dependency graph with
+cargo (every feature, every target): every crate built into it must be
 DAGON's, inside a declared trusted extension's folder, or a registry
-crate with a checksum in the boot crate's `Cargo.lock`. There is no decision point at boot: the slot
+crate with a checksum in the boot crate's `Cargo.lock`. It then writes
+`boot/<id>/graph.stamp` for the boot crate's `Cargo.toml`, `Cargo.lock`
+and trusted sources as they are; the boot core's build refuses to build
+without that stamp or when any of them changed since (run `dagon gen`
+again). There is no decision point at boot: the slot
 the boot core starts is decided by DAGON alone, so an extension cannot
 change it. The calls share the boot core's flash budget (the
 STM32F401RE's is 32,256 bytes) and its watchdog: one that does not

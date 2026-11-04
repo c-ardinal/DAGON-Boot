@@ -14,27 +14,54 @@ use std::rc::Rc;
 
 const WDT_MS: u32 = 4_000;
 
-/// Codes of the boot kinds (`dagon gen` resolves `observes` to them).
+/// Codes of single boot kinds the tests name (`dagon gen` resolves
+/// `observes` to codes).
 const ARMED: u8 = sequence::WatchdogArmed::ENTRY.code;
-const LOG_READ: u8 = sequence::LogRead::ENTRY.code;
 const BEFORE: u8 = sequence::BeforeDecision::ENTRY.code;
-const CHOSEN: u8 = sequence::SlotChosen::ENTRY.code;
-const NO_IMAGE: u8 = sequence::NoImage::ENTRY.code;
 const JUMP: u8 = sequence::BeforeJump::ENTRY.code;
-const HALT: u8 = sequence::Halt::ENTRY.code;
 const OVERRAN: u8 = dagon_events::boot_extensions::ExtensionOverran::ENTRY.code;
-/// `boot.*`.
-const EVERY: &[u8] = &[
-    ARMED, LOG_READ, BEFORE, CHOSEN, NO_IMAGE, JUMP, HALT, OVERRAN,
-];
+/// The boot-layer entries of the catalogs the boot core delivers from
+/// (its sequence, and the extension-call reports): a transition added to
+/// either machine is in every list below.
+fn boot_entries() -> Vec<&'static dagon_events::Entry> {
+    [&dagon_boot::MACHINES, &dagon_events::MACHINES]
+        .iter()
+        .flat_map(|m| m.catalogs())
+        .filter(|c| c.layer == dagon_events::Layer::Boot)
+        .flat_map(|c| c.entries)
+        .filter(|e| e.observe.live && !e.flags.retired)
+        .collect()
+}
 
-/// One extension observing every boot event, 1 ms per call.
-const ALL_1MS: &[BootExtension] = &[BootExtension::new(1_000, EVERY)];
-/// Two extensions observing every boot event, 1 ms per call each.
-const TWO_1MS: &[BootExtension] = &[
-    BootExtension::new(1_000, EVERY),
-    BootExtension::new(1_000, EVERY),
-];
+/// `boot.*`: every live boot code, as `dagon gen` resolves it.
+fn every() -> &'static [u8] {
+    Box::leak(boot_entries().iter().map(|e| e.code).collect())
+}
+
+/// The sequence's kinds: every transition an extension can be slow on.
+fn sequence_kinds() -> Vec<&'static str> {
+    dagon_boot::MACHINES
+        .catalogs()
+        .iter()
+        .flat_map(|c| c.entries)
+        .map(|e| e.kind)
+        .collect()
+}
+
+/// `n` extensions observing every boot event, 1 ms per call each.
+fn all_1ms(n: usize) -> &'static [BootExtension] {
+    Box::leak(vec![BootExtension::new(1_000, every()); n].into_boxed_slice())
+}
+
+#[test]
+fn the_derived_lists_hold_every_boot_kind() {
+    let kinds: Vec<_> = boot_entries().iter().map(|e| e.kind).collect();
+    for k in sequence_kinds() {
+        assert!(kinds.contains(&k), "{k}");
+    }
+    assert!(kinds.contains(&"extension_overran"));
+    assert_eq!(every().len(), kinds.len());
+}
 
 /// Records every event it sees; on `slow_on` it takes `cost_us` of the
 /// boot core's clock.
@@ -109,7 +136,7 @@ fn boot_all(m: &mut Mem, chain: &mut impl dagon_events::Sink) -> Decision {
 #[test]
 fn a_trusted_extension_observes_the_boot_in_order() {
     let b = Bench::new();
-    let mut chain = compose_boot(b.probe("show", "", 0), b.clock(), ALL_1MS);
+    let mut chain = compose_boot(b.probe("show", "", 0), b.clock(), all_1ms(1));
     let mut m = with_pending_b();
     let mut run = start(&mut m, &mut chain);
     run.before_jump(&mut chain);
@@ -172,7 +199,7 @@ fn the_payloads_say_what_the_boot_core_saw() {
         }
     }
     let seen = Rc::new(RefCell::new(Vec::new()));
-    let mut chain = compose_boot(Fields(seen.clone()), || 0u64, ALL_1MS);
+    let mut chain = compose_boot(Fields(seen.clone()), || 0u64, all_1ms(1));
     let mut m = with_pending_b();
     start(&mut m, &mut chain);
     assert_eq!(
@@ -183,11 +210,11 @@ fn the_payloads_say_what_the_boot_core_saw() {
 
 #[test]
 fn an_overrun_is_reported_to_its_observers_and_the_decision_stays_the_same() {
-    const SLOW_AND_DEAF: &[BootExtension] = &[
-        BootExtension::new(1_000, EVERY),
+    let slow_and_deaf: &'static [BootExtension] = Box::leak(Box::new([
+        BootExtension::new(1_000, every()),
         BootExtension::new(1_000, &[ARMED, JUMP]),
         BootExtension::new(1_000, &[OVERRAN]),
-    ];
+    ]));
     let mut plain = with_pending_b();
     let want = boot_all(&mut plain, &mut compose_boot(Nop, || 0u64, &[]));
     let b = Bench::new();
@@ -198,7 +225,7 @@ fn an_overrun_is_reported_to_its_observers_and_the_decision_stays_the_same() {
             b.probe("watch", "", 0)
         ],
         b.clock(),
-        SLOW_AND_DEAF,
+        slow_and_deaf,
     );
     let mut m = with_pending_b();
     assert_eq!(boot_all(&mut m, &mut chain), want);
@@ -226,16 +253,16 @@ fn the_overrun_names_the_extension_and_its_budget() {
             }
         }
     }
-    const TWO_2MS: &[BootExtension] = &[
-        BootExtension::new(2_000, EVERY),
-        BootExtension::new(2_000, EVERY),
-    ];
+    let two_2ms: &'static [BootExtension] = Box::leak(Box::new([
+        BootExtension::new(2_000, every()),
+        BootExtension::new(2_000, every()),
+    ]));
     let b = Bench::new();
     let got = Rc::new(RefCell::new(Vec::new()));
     let mut chain = compose_boot(
         dagon_events::extensions![b.probe("slow", "log_read", 2_500), Watch(got.clone())],
         b.clock(),
-        TWO_2MS,
+        two_2ms,
     );
     let mut m = with_pending_b();
     start(&mut m, &mut chain);
@@ -248,7 +275,11 @@ fn the_overrun_names_the_extension_and_its_budget() {
 #[test]
 fn a_call_within_its_budget_is_not_reported() {
     let b = Bench::new();
-    let mut chain = compose_boot(b.probe("ok", "before_decision", 1_000), b.clock(), ALL_1MS);
+    let mut chain = compose_boot(
+        b.probe("ok", "before_decision", 1_000),
+        b.clock(),
+        all_1ms(1),
+    );
     let mut m = with_pending_b();
     start(&mut m, &mut chain);
     assert!(!b
@@ -263,14 +294,14 @@ fn a_limit_list_that_does_not_match_the_chain_is_refused() {
     compose_boot(
         dagon_events::extensions![b.probe("a", "", 0), b.probe("b", "", 0)],
         b.clock(),
-        ALL_1MS,
+        all_1ms(1),
     );
 }
 
 #[test]
 fn no_startable_slot_ends_in_the_halt() {
     let b = Bench::new();
-    let mut chain = compose_boot(b.probe("show", "", 0), b.clock(), ALL_1MS);
+    let mut chain = compose_boot(b.probe("show", "", 0), b.clock(), all_1ms(1));
     let mut m = Mem::new();
     assert_eq!(boot_all(&mut m, &mut chain), Decision::NoImage);
     assert_eq!(
@@ -365,20 +396,11 @@ const STATES: &[State] = &[
     ("erased", Mem::new),
 ];
 
-/// Every boot event an extension can be slow on.
-const SLOW_ON: &[&str] = &[
-    "",
-    "watchdog_armed",
-    "log_read",
-    "before_decision",
-    "slot_chosen",
-    "no_image",
-    "before_jump",
-    "halt",
-];
-
 #[test]
 fn extensions_change_no_decision_and_no_write_in_any_state() {
+    // None slow, then slow on each transition of the sequence.
+    let slow_on: Vec<&str> = std::iter::once("").chain(sequence_kinds()).collect();
+    let mut overran_at = std::collections::BTreeSet::new();
     for (name, make) in STATES {
         // dagon-core alone.
         let mut core = make();
@@ -394,12 +416,12 @@ fn extensions_change_no_decision_and_no_write_in_any_state() {
             "{name}"
         );
         assert_eq!(plain.bytes, core.bytes, "{name}");
-        for slow in SLOW_ON {
+        for slow in &slow_on {
             let b = Bench::new();
             let mut chain = compose_boot(
                 dagon_events::extensions![b.probe("slow", slow, 5_000), b.probe("next", "", 0)],
                 b.clock(),
-                TWO_1MS,
+                all_1ms(2),
             );
             let mut m = make();
             assert_eq!(boot_all(&mut m, &mut chain), want, "{name}, slow on {slow}");
@@ -407,6 +429,14 @@ fn extensions_change_no_decision_and_no_write_in_any_state() {
             let overran = b.kinds("next").contains(&"boot.extension_overran".into());
             let reached = b.kinds("slow").iter().any(|k| k == &format!("boot.{slow}"));
             assert_eq!(overran, reached, "{name}, slow on {slow}");
+            if overran {
+                overran_at.insert(*slow);
+            }
         }
+    }
+    // Every transition was overrun in some state: a new one the states
+    // never reach fails here until a state reaching it is added.
+    for k in sequence_kinds() {
+        assert!(overran_at.contains(k), "no state reaches boot.{k}");
     }
 }

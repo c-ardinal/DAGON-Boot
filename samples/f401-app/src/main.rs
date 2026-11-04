@@ -19,6 +19,8 @@
 //! counts the attempt (rolling back after the third).
 //!
 //! `confirm`: confirms its own trial at start-up (bench use without a hub).
+//! `no-confirm`: the self-check always fails, so CONFIRM is refused and the
+//! trial rolls back (hardware tests).
 #![no_std]
 #![no_main]
 
@@ -52,6 +54,11 @@ static GUARD: Guard<2> = Guard::new(
     Trial::NeverFeed,
     now_ms,
 );
+
+/// Healthy unless built with `no-confirm`.
+fn self_check() -> bool {
+    !cfg!(feature = "no-confirm")
+}
 
 static EXECUTOR_LOW: StaticCell<Executor> = StaticCell::new();
 
@@ -103,7 +110,7 @@ fn main() -> ! {
     let agent = Agent::new(
         node::config(dagon_mcu_stm32f401re::target_tag!()),
         store,
-        node::SelfCheck(node::always),
+        node::SelfCheck(self_check),
     );
 
     let high = dagon_mcu_stm32f401re::exec::start();

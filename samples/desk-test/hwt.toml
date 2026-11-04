@@ -1,0 +1,161 @@
+# Desk sample hardware test: the desk's data and its scenarios, run in this
+# order by hwt.py (see README.md).
+
+[desk]
+# The [build.<id>] nodes of the desk project, in update order.
+nodes = ["seg", "watch", "hub"]
+# The coordinator's node id (dagon status prints it as "hub").
+coordinator = "hub"
+# The hub's USB VID/PID as Windows shows it in the port's PnP device id;
+# the pinned --port must be this device for the whole run.
+hub_usb = "VID_C0DE&PID_CAFE"
+# Cargo feature of each node app that makes its self-check fail (in
+# samples/f401-app, samples/esp32s3-app; `sync` adds it to the hub app).
+fail_feature = "no-confirm"
+# Longest wait for nodes to settle on a confirmed version: the hub's trial
+# lasts about 68 s per attempt, 3 attempts before it reverts (~3.5 min).
+settle_timeout_s = 360
+poll_s = 5
+# dagon status attempts while the hub is away (re-enumerating after reset).
+status_tries = 6
+# `sync`: the sample each node's package is refreshed from.
+sync = { seg = "f401-app", watch = "esp32s3-app" }
+
+# Versions: the version format is major.minor.patch (u8.u8.u16, no
+# pre-release tags), so tests use major 2 (2.0.N) as their range; the desk's
+# own releases stay below 2.0.0 or move on above the test range.
+# A re-run may reuse the same versions: nothing refuses a lower or equal one.
+#
+# Step kinds (`do`):
+#   status                                   record only; every node answers, confirmed
+#   deploy   version [nodes] [expect]        dagon deploy; its confirmation is answered y only
+#                                             when the plan lists exactly this version, these
+#                                             nodes and out/deploy/v<version>.dgb (else n: FAIL)
+#            expect = "ok"          (default) deployed nodes on `version`, confirmed,
+#                                             active slot flipped; others unchanged
+#            expect = "rolled-back"           built with feature no-confirm (self-check
+#                                             fails); the CLI fails, then every deployed
+#                                             node returns to its previous version, confirmed
+#            interrupt_at = <percent>         the CLI is killed when the (only) node's
+#                                             transfer reaches this percent; expect
+#                                             "unchanged" (old version still running)
+#   tamper   of [fix_crc]                    flips 4 payload bytes of the first image of
+#                                             release `of` (fix_crc: and recomputes the item
+#                                             CRC, so the digest/signature chain must catch
+#                                             it); dagon apply must refuse it and nothing
+#                                             changes on any node
+#   foreign  version node                    the node's ELFs signed with a throwaway key;
+#                                             dagon apply must refuse it, nothing changes
+#   rollback node                            dagon rollback; the node is on the version its
+#                                             other slot held, confirmed, slot flipped
+#   recover  node of                         dagon recover with the release of `of`
+#   skip     reason                          recorded as SKIPPED
+
+[[scenario]]
+id = "status"
+title = "status of all nodes"
+steps = [{ do = "status" }]
+
+[[scenario]]
+id = "batch"
+title = "one release updates hub, seg and watch together"
+steps = [{ do = "deploy", version = "2.0.1" }]
+
+[[scenario]]
+id = "seg-alone"
+title = "seg updated alone"
+steps = [{ do = "deploy", version = "2.0.2", nodes = ["seg"] }]
+
+[[scenario]]
+id = "watch-alone"
+title = "watch updated alone"
+steps = [{ do = "deploy", version = "2.0.3", nodes = ["watch"] }]
+
+[[scenario]]
+id = "manual-rollback"
+title = "manual rollback of each node to its previous confirmed version"
+steps = [
+  { do = "rollback", node = "seg" },
+  { do = "rollback", node = "watch" },
+  { do = "rollback", node = "hub" },
+  { do = "deploy", version = "2.0.4" },
+]
+
+[[scenario]]
+id = "selfcheck-seg"
+title = "seg image failing its self-check rolls back by itself"
+steps = [{ do = "deploy", version = "2.0.5", nodes = ["seg"], expect = "rolled-back" }]
+
+[[scenario]]
+id = "selfcheck-watch"
+title = "watch image failing its self-check rolls back by itself"
+steps = [{ do = "deploy", version = "2.0.6", nodes = ["watch"], expect = "rolled-back" }]
+
+[[scenario]]
+id = "selfcheck-hub"
+title = "hub image failing its self-check rolls back by itself"
+steps = [{ do = "deploy", version = "2.0.7", nodes = ["hub"], expect = "rolled-back" }]
+
+[[scenario]]
+id = "interrupt-seg"
+title = "seg transfer interrupted (CLI killed); old version runs; retry succeeds"
+steps = [
+  { do = "deploy", version = "2.0.8", nodes = ["seg"], interrupt_at = 30 },
+  { do = "deploy", version = "2.0.8", nodes = ["seg"] },
+]
+
+[[scenario]]
+id = "interrupt-watch"
+title = "watch transfer interrupted (CLI killed); old version runs; retry succeeds"
+steps = [
+  { do = "deploy", version = "2.0.9", nodes = ["watch"], interrupt_at = 30 },
+  { do = "deploy", version = "2.0.9", nodes = ["watch"] },
+]
+
+[[scenario]]
+id = "interrupt-hub"
+title = "hub transfer interrupted (CLI killed); old version runs; retry succeeds"
+steps = [
+  { do = "deploy", version = "2.0.10", nodes = ["hub"], interrupt_at = 30 },
+  { do = "deploy", version = "2.0.10", nodes = ["hub"] },
+]
+
+[[scenario]]
+id = "tampered"
+title = "tampered release refused before any write"
+steps = [
+  { do = "tamper", of = "2.0.4" },
+  { do = "tamper", of = "2.0.4", fix_crc = true },
+]
+
+[[scenario]]
+id = "foreign-key"
+title = "release signed with a throwaway key refused before any write"
+steps = [{ do = "foreign", version = "2.0.90", node = "seg" }]
+
+[[scenario]]
+id = "ab-x3"
+title = "A/B back and forth three times (all nodes)"
+steps = [
+  { do = "deploy", version = "2.0.11" },
+  { do = "deploy", version = "2.0.12" },
+  { do = "deploy", version = "2.0.13" },
+  { do = "deploy", version = "2.0.14" },
+  { do = "deploy", version = "2.0.15" },
+  { do = "deploy", version = "2.0.16" },
+]
+
+[[scenario]]
+id = "recover-seg"
+title = "dagon recover seg while it answers (normal transfer path)"
+steps = [{ do = "recover", node = "seg", of = "2.0.16" }]
+
+[[scenario]]
+id = "rom-recovery"
+title = "F401 recovery through the hub's ROM path"
+steps = [{ do = "skip", reason = "dagon recover takes the ROM path only when the F401 does not answer HELLO; no CLI step makes a healthy F401 silent without a write the normal confirmation does not allow (erasing it), and the owner asked for this path only if it can be undone safely" }]
+
+[[scenario]]
+id = "final"
+title = "every node on a confirmed known-good version"
+steps = [{ do = "deploy", version = "2.0.17" }]

@@ -2,11 +2,12 @@
 //! generated from it and from the port catalog. Code that reads events
 //! (the CLI, host tools) depends on this crate, not on `dagon-events`.
 //!
-//! Every workspace crate that depends on `dagon-events` declares its
-//! machines in one `dagon_events::state_machine!` (none is allowed),
-//! which defines its `MACHINES`; [`REGISTRY`] lists each crate's
-//! `MACHINES`, and a test fails while a crate that depends on
-//! `dagon-events` is missing from it. The tests also check the layers'
+//! Every workspace crate that depends on `dagon-events` (directly or
+//! through another crate, other than through this one) declares its
+//! machines in one `dagon_events::state_machine!` at its root (none is
+//! allowed), which defines its `MACHINES` static; [`REGISTRY`] lists each
+//! crate's `MACHINES` by path, and a test fails while such a crate is
+//! missing from it. The tests also check the layers'
 //! event codes and regenerate `docs/events.md`; `docs/ports.md` and the
 //! port table of `docs/design/lifecycle-events.md` come from
 //! `dagon_events::PORTS`. Regenerate them with
@@ -18,14 +19,22 @@ use std::fmt::Write;
 pub use dagon_events::EVENT_FORMAT;
 use dagon_events::{Catalog, Entry, Layer, Machines, Port, Trust, DECISIONS};
 
+/// `registry![a, b]` is `&[&a::MACHINES, &b::MACHINES]`: each entry is a
+/// crate's own `MACHINES` static, never a value built here.
+macro_rules! registry {
+    ($($krate:ident),* $(,)?) => {
+        &[$(&$krate::MACHINES),*]
+    };
+}
+
 /// Each machine-declaring crate's `MACHINES`, one entry per crate.
-pub const REGISTRY: &[Machines] = &[dagon_events::MACHINES];
+pub static REGISTRY: &[&Machines] = registry![dagon_events];
 
 /// Every machine of every layer.
 pub fn machines() -> Vec<Catalog> {
     REGISTRY
         .iter()
-        .flat_map(|m| m.catalogs.iter().copied())
+        .flat_map(|m| m.catalogs().iter().copied())
         .collect()
 }
 

@@ -406,22 +406,22 @@ impl Compact for DecisionId {
 }
 
 /// An extension's identity in an event: its id, and in the owned record
-/// the id's 32-bit FNV-1a hash (a replayed event carries the hash only;
+/// the id's 64-bit FNV-1a hash (a replayed event carries the hash only;
 /// its `name` is empty).
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct ExtId {
     pub name: &'static str,
-    pub hash: u32,
+    pub hash: u64,
 }
 
 impl ExtId {
     pub const fn of(name: &'static str) -> Self {
         let b = name.as_bytes();
-        let mut h: u32 = 0x811c_9dc5;
+        let mut h: u64 = 0xcbf2_9ce4_8422_2325;
         let mut i = 0;
         while i < b.len() {
-            h ^= b[i] as u32;
-            h = h.wrapping_mul(0x0100_0193);
+            h ^= b[i] as u64;
+            h = h.wrapping_mul(0x0000_0100_0000_01b3);
             i += 1;
         }
         ExtId { name, hash: h }
@@ -429,14 +429,14 @@ impl ExtId {
 }
 
 impl Compact for ExtId {
-    const SIZE: usize = 4;
+    const SIZE: usize = 8;
     fn put(&self, out: &mut [u8]) {
         self.hash.put(out);
     }
     fn get(b: &[u8]) -> Option<Self> {
         Some(ExtId {
             name: "",
-            hash: u32::get(b)?,
+            hash: u64::get(b)?,
         })
     }
 }

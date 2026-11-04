@@ -8,9 +8,13 @@ use crate::PAYLOAD_BYTES;
 
 /// An event payload: one of the payload types [`crate::state_machine!`]
 /// generates. The trait is sealed (its supertrait cannot be named outside
-/// this crate); a payload is built only in the crate that declares its
-/// machine, and only that machine's transitions and the layer's replay
-/// deliver it.
+/// this crate) and a payload is built only in the crate that declares its
+/// machine. What reaches a layer's extensions and published state is
+/// what that layer's chain delivers: its machines' transitions and its
+/// replay, both held by the layer start ([`crate::Composed`]). The macro
+/// marks its payloads through a hidden path that any crate invoking the
+/// macro can also name; such code is in the trusted base, and an
+/// extension that did so would still hold no chain to deliver into.
 ///
 /// ```compile_fail,E0277
 /// #[derive(Debug)]

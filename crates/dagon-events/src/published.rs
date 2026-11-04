@@ -91,10 +91,14 @@ impl<const N: usize> Default for Recent<N> {
 }
 
 /// A layer's published events: the latest state, waitable by several
-/// tasks, and the ring of recent records. One `static` per image, handed
-/// to the layer's start; tasks only read it. It is not an extension (only
-/// [`crate::compose`] puts it in a chain, first), and nothing outside this
-/// crate writes it.
+/// tasks, and the ring of recent records.
+///
+/// The layer package (the MCU package's start, the host) creates it,
+/// keeps it private and hands it to [`crate::compose`] by exclusive
+/// reference, so the composed chain is its only writer. Everyone else,
+/// application tasks included, gets a [`Reader`] from the chain
+/// ([`crate::Composed::reader`]), which only reads. It is not an
+/// extension.
 ///
 /// ```compile_fail,E0277
 /// use dagon_events::{extensions, Nop, Published};
@@ -102,10 +106,10 @@ impl<const N: usize> Default for Recent<N> {
 /// let user = extensions![Nop, &EVENTS];
 /// ```
 ///
-/// ```compile_fail,E0624
-/// use dagon_events::{EventRecord, Published};
+/// ```compile_fail,E0599
+/// use dagon_events::Published;
 /// static EVENTS: Published<(), 4> = Published::new();
-/// EVENTS.recent().push(EventRecord::default());
+/// let rx = EVENTS.receiver();
 /// ```
 ///
 /// ```compile_fail,E0080
@@ -115,8 +119,6 @@ pub struct Published<S: Snapshot, const N: usize> {
     latest: Watch<Cs, Latest<S>, WATCHERS>,
     recent: Recent<N>,
     seq: Mutex<Cs, Cell<u32>>,
-    /// Taken by the one chain composed with it.
-    claimed: Mutex<Cs, Cell<bool>>,
 }
 
 impl<S: Snapshot, const N: usize> Published<S, N> {
@@ -125,28 +127,7 @@ impl<S: Snapshot, const N: usize> Published<S, N> {
             latest: Watch::new(),
             recent: Recent::new(),
             seq: Mutex::new(Cell::new(0)),
-            claimed: Mutex::new(Cell::new(false)),
         }
-    }
-
-    /// A receiver that waits for the next latest state (`changed()`);
-    /// `None` once [`WATCHERS`] receivers exist.
-    pub fn receiver(&self) -> Option<Receiver<'_, Cs, Latest<S>, WATCHERS>> {
-        self.latest.receiver()
-    }
-
-    /// The latest state, if any event was published.
-    pub fn latest(&self) -> Option<Latest<S>> {
-        self.latest.try_get()
-    }
-
-    pub fn recent(&self) -> &Recent<N> {
-        &self.recent
-    }
-
-    /// `true` for the first caller only.
-    pub(crate) fn claim(&self) -> bool {
-        self.claimed.lock(|c| !c.replace(true))
     }
 
     pub(crate) fn publish(&self, e: &Event<'_>) {
@@ -168,5 +149,45 @@ impl<S: Snapshot, const N: usize> Published<S, N> {
 impl<S: Snapshot, const N: usize> Default for Published<S, N> {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+/// Read access to a layer's [`Published`] events: what display, log and
+/// application tasks get. It cannot write, compose or replay.
+///
+/// ```compile_fail,E0624
+/// fn forge(r: dagon_events::Reader<(), 4>) {
+///     r.recent().push(dagon_events::EventRecord::default());
+/// }
+/// ```
+pub struct Reader<S: Snapshot + 'static, const N: usize>(&'static Published<S, N>);
+
+impl<S: Snapshot + 'static, const N: usize> Clone for Reader<S, N> {
+    fn clone(&self) -> Self {
+        *self
+    }
+}
+
+impl<S: Snapshot + 'static, const N: usize> Copy for Reader<S, N> {}
+
+impl<S: Snapshot + 'static, const N: usize> Reader<S, N> {
+    pub(crate) fn new(p: &'static Published<S, N>) -> Self {
+        Reader(p)
+    }
+
+    /// A receiver that waits for the next latest state (`changed()`);
+    /// `None` once [`WATCHERS`] receivers exist.
+    pub fn receiver(&self) -> Option<Receiver<'static, Cs, Latest<S>, WATCHERS>> {
+        self.0.latest.receiver()
+    }
+
+    /// The latest state, if any event was published.
+    pub fn latest(&self) -> Option<Latest<S>> {
+        self.0.latest.try_get()
+    }
+
+    /// The ring of recent records, to take from.
+    pub fn recent(&self) -> &'static Recent<N> {
+        &self.0.recent
     }
 }

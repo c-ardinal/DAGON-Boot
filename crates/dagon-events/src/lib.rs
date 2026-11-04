@@ -25,8 +25,8 @@ mod published;
 pub use catalog::{Catalog, Entry, Field, Flags, Layer, Machines, Observe};
 pub use compact::Compact;
 pub use compose::{
-    compose, compose_unpublished, AlreadyComposed, Bounds, Clock, Composed, Head, NoPublisher,
-    Sink, Unreadable, Watchdog,
+    compose, compose_unpublished, Bounds, Clock, Composed, Head, NoPublisher, Sink, Unreadable,
+    Watchdog,
 };
 pub use event::{Event, EventRecord, Payload, Refused};
 pub use extension::{
@@ -34,7 +34,7 @@ pub use extension::{
     RebootRequest, TrialInfo, UpdateOffer, DECISIONS, DECISION_BOUND_MS,
 };
 pub use ports::{Port, PortDefault, Service, Trust, PORTS};
-pub use published::{Latest, Published, Recent, Snapshot, WATCHERS};
+pub use published::{Latest, Published, Reader, Recent, Snapshot, WATCHERS};
 
 /// The `event` contract's number: the catalog kinds, their codes and the
 /// meaning of their payloads and of [`EventRecord`]. Adding a kind or a
@@ -85,9 +85,9 @@ mod sealed {
 
 #[doc(hidden)]
 pub mod __private {
-    pub use crate::machine::{contains, snake, snake_len, unique_codes};
+    pub use crate::machine::{contains, listed, snake, snake_len, unique_codes};
 
     /// Implemented by [`crate::state_machine!`] for the payload types it
-    /// generates.
+    /// generates; not for use outside the macro (see [`crate::Payload`]).
     pub trait Generated {}
 }

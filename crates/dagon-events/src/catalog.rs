@@ -134,13 +134,29 @@ pub struct Catalog {
     pub __replay: Replay,
 }
 
-/// The machines one crate declares: the `MACHINES` constant
-/// [`crate::state_machine!`] defines at the crate's root.
-#[derive(Clone, Copy, Debug)]
+/// The machines one crate declares: the `MACHINES` static
+/// [`crate::state_machine!`] defines at the crate's root, and only there.
+#[derive(Debug)]
 pub struct Machines {
+    krate: &'static str,
+    catalogs: &'static [Catalog],
+}
+
+impl Machines {
+    /// Used by [`crate::state_machine!`] only.
+    #[doc(hidden)]
+    pub const fn __new(krate: &'static str, catalogs: &'static [Catalog]) -> Self {
+        Machines { krate, catalogs }
+    }
+
     /// The Cargo package that declares them.
-    pub krate: &'static str,
-    pub catalogs: &'static [Catalog],
+    pub const fn krate(&self) -> &'static str {
+        self.krate
+    }
+
+    pub const fn catalogs(&self) -> &'static [Catalog] {
+        self.catalogs
+    }
 }
 
 /// See [`Catalog::__replay`].

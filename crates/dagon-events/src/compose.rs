@@ -9,7 +9,7 @@ use crate::extension::{
     Accept, Ctx, DecisionId, Delay, ExtId, Extension, Health, RebootRequest, TrialInfo,
     UpdateOffer, DECISION_BOUND_MS,
 };
-use crate::published::{Published, Snapshot};
+use crate::published::{Published, Reader, Snapshot};
 use crate::sealed::{SealedHead, SealedSink, Token};
 
 /// The layer's monotonic clock in microseconds. DAGON's own: the MCU
@@ -152,9 +152,18 @@ impl<H: Head, B: Extension, U: Extension> Sink for Parts<H, B, U> {
 
 /// A layer's chain in the one order every layer uses: the publisher (if
 /// the layer has one), the board package, then the user's extensions
-/// (libraries, then the app's own). Made only by [`compose`] (once per
-/// [`Published`]) and [`compose_unpublished`], which the layer's start
-/// calls; holding it is what lets DAGON's code deliver and replay events.
+/// (libraries, then the app's own).
+///
+/// The trust boundary is the extension interface. Extensions receive only
+/// `&Event`, `&Ctx` and the decision calls ([`Extension`]); nothing they
+/// receive leads to a chain, a [`Sink`], a [`Published`] or replay.
+/// Composing a chain, delivering into it and replaying are the layer
+/// start's: the MCU package's start or the host, which make the chain and
+/// keep it. Code built into the same image outside the extension
+/// interface (DAGON's crates and the application's own start-up code) is
+/// in the trusted base, as for everything else in one address space;
+/// isolating untrusted extensions in hardware is the sandbox's part.
+///
 /// Its parts cannot be reached, reordered or reused, and it is not itself
 /// an extension.
 ///
@@ -162,6 +171,34 @@ impl<H: Head, B: Extension, U: Extension> Sink for Parts<H, B, U> {
 /// use dagon_events::{compose_unpublished, Layer, Nop};
 /// let c = compose_unpublished(Layer::App, Nop, Nop);
 /// let board = c.parts;
+/// ```
+///
+/// An extension cannot turn what it receives into a sink:
+///
+/// ```compile_fail,E0277
+/// use dagon_events::{Ctx, Event, Extension, Sink};
+/// fn sink(_: &mut impl Sink) {}
+/// struct Probe;
+/// impl Extension for Probe {
+///     fn id(&self) -> &'static str { "probe" }
+///     fn on_event(&mut self, e: &Event<'_>, ctx: &Ctx<'_>) {
+///         let mut e = *e;
+///         sink(&mut e);
+///     }
+/// }
+/// ```
+///
+/// ```compile_fail,E0277
+/// use dagon_events::{Ctx, Event, Extension, Sink};
+/// fn sink(_: &mut impl Sink) {}
+/// struct Probe;
+/// impl Extension for Probe {
+///     fn id(&self) -> &'static str { "probe" }
+///     fn on_event(&mut self, _: &Event<'_>, ctx: &Ctx<'_>) {
+///         let mut c = ctx;
+///         sink(&mut c);
+///     }
+/// }
 /// ```
 pub struct Composed<H: Head, B: Extension, U: Extension, C> {
     parts: Parts<H, B, U>,
@@ -177,25 +214,25 @@ impl<H: Head, B: Extension, U: Extension, C> Sink for Composed<H, B, U, C> {
     }
 }
 
-/// A [`Published`] is composed into one chain only.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct AlreadyComposed;
-
-/// The chain of a layer that publishes its events (`events`) for display
-/// and log tasks and answers decision points (the app, the relay). The
-/// first call for `events` wins; any later one is refused, so whoever
-/// holds the chain is the only writer of `events`.
+/// The chain of a layer that publishes its events for display and log
+/// tasks and answers decision points (the app, the relay). A layer-start
+/// API: the layer package creates `events`, keeps it private and hands it
+/// over here by exclusive reference, so the chain is its only writer;
+/// tasks read it through [`Composed::reader`].
+///
+/// ```compile_fail,E0308
+/// use dagon_events::{compose, Bounds, Layer, Nop, Published, Watchdog};
+/// static EVENTS: Published<(), 4> = Published::new();
+/// let c = compose(Layer::App, &EVENTS, Nop, Nop, Bounds::new(|| 0u64, Watchdog::new(8, 8)));
+/// ```
 pub fn compose<S: Snapshot, const N: usize, B: Extension, U: Extension, C: Clock>(
     layer: Layer,
-    events: &'static Published<S, N>,
+    events: &'static mut Published<S, N>,
     board: B,
     user: U,
     bounds: Bounds<C>,
-) -> Result<Composed<&'static Published<S, N>, B, U, C>, AlreadyComposed> {
-    if !events.claim() {
-        return Err(AlreadyComposed);
-    }
-    Ok(Composed {
+) -> Composed<&'static Published<S, N>, B, U, C> {
+    Composed {
         parts: Parts {
             layer,
             head: events,
@@ -205,11 +242,11 @@ pub fn compose<S: Snapshot, const N: usize, B: Extension, U: Extension, C: Clock
         clock: bounds.clock,
         watchdog: bounds.watchdog,
         decisions: decisions::Machine::new(),
-    })
+    }
 }
 
 /// The chain of a layer without published state or decision points (the
-/// boot core, the host).
+/// boot core, the host). A layer-start API, like [`compose`].
 pub fn compose_unpublished<B: Extension, U: Extension>(
     layer: Layer,
     board: B,
@@ -235,9 +272,11 @@ pub struct Unreadable;
 impl<H: Head, B: Extension, U: Extension, C> Composed<H, B, U, C> {
     /// Re-emits a record an earlier stage kept (the boot record, the state
     /// log) as its typed event with `replayed: true`, decoded through the
-    /// catalog of the machine that declared it. `Unreadable` when no
-    /// catalog in `machines` reads it (another layer, an unknown kind or
-    /// value from a newer writer).
+    /// catalog of the machine that declared it. Only kinds the catalog
+    /// marks `replay` and not `retired` are replayed. `Unreadable` when no
+    /// catalog in `machines` reads it (another layer, an unknown or
+    /// non-replayable kind, a value from a newer writer). A layer-start
+    /// API.
     pub fn replay(&mut self, machines: &[Catalog], rec: &EventRecord) -> Result<(), Unreadable> {
         let parts = &mut self.parts;
         let mut deliver = |p: &dyn Payload| parts.send(&Event::replayed(p));
@@ -254,6 +293,12 @@ const BOUND_US: u64 = DECISION_BOUND_MS as u64 * 1000;
 impl<S: Snapshot, const N: usize, B: Extension, U: Extension, C: Clock>
     Composed<&'static Published<S, N>, B, U, C>
 {
+    /// Read access to the published events, for the layer start to hand
+    /// to display, log and application tasks.
+    pub fn reader(&self) -> Reader<S, N> {
+        Reader::new(self.parts.head)
+    }
+
     /// Decision 3.1: asked after every DAGON guard passed. Default: accept.
     pub fn accept_update(&mut self, o: &UpdateOffer) -> Accept {
         self.decide(DecisionId::AcceptUpdate, |p, i, c, k| match p.split(i) {

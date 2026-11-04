@@ -3,7 +3,7 @@
 //!
 //! `DAGON_BLESS=1` writes the generated documents instead of comparing.
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::PathBuf;
 
 use dagon_catalog::{conflicts, design_ports_table, events_md, machines, ports_md, REGISTRY};
@@ -61,19 +61,13 @@ fn the_registry_has_no_conflicts() {
     assert_eq!(conflicts(&machines()), Vec::<String>::new());
 }
 
-/// Every workspace package that depends on `dagon-events` (other than
-/// this registry) declares machines and must be in REGISTRY; each crate
-/// once.
+/// Workspace packages whose resolved normal dependencies reach
+/// `dagon-events` other than through this registry: each declares
+/// machines and must be in REGISTRY, once, by its own `MACHINES`.
 #[test]
 fn every_machine_crate_is_registered_once() {
     let out = std::process::Command::new(env!("CARGO"))
-        .args([
-            "metadata",
-            "--no-deps",
-            "--format-version",
-            "1",
-            "--offline",
-        ])
+        .args(["metadata", "--format-version", "1", "--offline"])
         .current_dir(root())
         .output()
         .expect("cargo metadata");
@@ -83,19 +77,51 @@ fn every_machine_crate_is_registered_once() {
         String::from_utf8_lossy(&out.stderr)
     );
     let meta: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
-    let mut machine_crates = BTreeSet::from(["dagon-events".to_string()]);
-    for pkg in meta["packages"].as_array().unwrap() {
-        let name = pkg["name"].as_str().unwrap();
-        let uses_events = pkg["dependencies"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .any(|d| d["name"] == "dagon-events" && d["kind"].is_null());
-        if uses_events && name != "dagon-catalog" {
+    let name_of: BTreeMap<&str, &str> = meta["packages"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|p| (p["id"].as_str().unwrap(), p["name"].as_str().unwrap()))
+        .collect();
+    // Normal (shipped) dependency edges, by package name.
+    let mut deps: BTreeMap<&str, Vec<&str>> = BTreeMap::new();
+    for node in meta["resolve"]["nodes"].as_array().unwrap() {
+        let from = name_of[node["id"].as_str().unwrap()];
+        for d in node["deps"].as_array().unwrap() {
+            let normal = d["dep_kinds"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|k| k["kind"].is_null() || k["kind"] == "build");
+            if normal {
+                deps.entry(from)
+                    .or_default()
+                    .push(name_of[d["pkg"].as_str().unwrap()]);
+            }
+        }
+    }
+    let reaches_events = |start: &str| {
+        let mut todo = vec![start];
+        let mut seen = BTreeSet::new();
+        while let Some(n) = todo.pop() {
+            if n == "dagon-events" {
+                return true;
+            }
+            if n == "dagon-catalog" || !seen.insert(n) {
+                continue;
+            }
+            todo.extend(deps.get(n).into_iter().flatten().copied());
+        }
+        false
+    };
+    let mut machine_crates = BTreeSet::new();
+    for id in meta["workspace_members"].as_array().unwrap() {
+        let name = name_of[id.as_str().unwrap()];
+        if name == "dagon-events" || (name != "dagon-catalog" && reaches_events(name)) {
             machine_crates.insert(name.to_string());
         }
     }
-    let listed: Vec<_> = REGISTRY.iter().map(|m| m.krate.to_string()).collect();
+    let listed: Vec<_> = REGISTRY.iter().map(|m| m.krate().to_string()).collect();
     let unique: BTreeSet<_> = listed.iter().cloned().collect();
     assert_eq!(
         unique.len(),
@@ -104,8 +130,13 @@ fn every_machine_crate_is_registered_once() {
     );
     assert_eq!(
         unique, machine_crates,
-        "dagon_catalog::REGISTRY must list the MACHINES of every crate that depends on dagon-events"
+        "dagon_catalog::REGISTRY must list the MACHINES of every crate that reaches dagon-events"
     );
+    // Each entry is that crate's own static, not a copy.
+    assert!(std::ptr::eq(REGISTRY[0], &dagon_events::MACHINES));
+    for (i, a) in REGISTRY.iter().enumerate() {
+        assert!(REGISTRY[i + 1..].iter().all(|b| !std::ptr::eq(*a, *b)));
+    }
     assert!(!machines().is_empty());
 }
 

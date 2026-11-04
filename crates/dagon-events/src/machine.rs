@@ -15,6 +15,7 @@
 /// mod more {
 ///     dagon_events::state_machine! {}
 /// }
+/// # fn main() {}
 /// ```
 ///
 /// ```
@@ -45,12 +46,14 @@
 ///     }
 /// }
 ///
+/// fn main() {
 /// let mut chain = compose_unpublished(Layer::App, Nop, Nop);
 /// let mut m = transfer::Machine::new();
 /// m.offered(&mut chain, 1, 4096).unwrap();
 /// assert_eq!(m.state(), transfer::State::Body { slot: 1, len: 4096 });
 /// assert_eq!(transfer::UpdateOffered::ENTRY.kind, "update_offered");
 /// assert!(m.offered(&mut chain, 1, 1).is_err()); // not from Body
+/// }
 /// ```
 ///
 /// What it generates for each machine, in the module `name`:
@@ -101,6 +104,7 @@
 ///         transitions { go(): A => B; }
 ///     }
 /// }
+/// # fn main() {}
 /// ```
 ///
 /// A state no transition reaches:
@@ -113,6 +117,7 @@
 ///         transitions { go(): A => B emits Went = 1 {} observe(live); }
 ///     }
 /// }
+/// # fn main() {}
 /// ```
 ///
 /// Two transitions with one code:
@@ -128,6 +133,7 @@
 ///         }
 ///     }
 /// }
+/// # fn main() {}
 /// ```
 ///
 /// A payload larger than its record:
@@ -140,6 +146,7 @@
 ///         transitions { go(d: [u8; 17]): A => B emits Went = 1 { d: [u8; 17] } observe(live); }
 ///     }
 /// }
+/// # fn main() {}
 /// ```
 ///
 /// An event with no observer path, or an unknown one:
@@ -152,6 +159,7 @@
 ///         transitions { go(): A => B emits Went = 1 {} observe(); }
 ///     }
 /// }
+/// # fn main() {}
 /// ```
 ///
 /// ```compile_fail,E0560
@@ -162,6 +170,23 @@
 ///         transitions { go(): A => B emits Went = 1 {} observe(radio); }
 ///     }
 /// }
+/// # fn main() {}
+/// ```
+///
+/// A machine declared outside the crate's one `state_machine!`:
+///
+/// ```compile_fail,E0080
+/// dagon_events::state_machine! {}
+/// mod hidden {
+///     dagon_events::__machine! {
+///         machine m in App {
+///             initial A;
+///             states { A }
+///             transitions { go(): A => A emits Went = 1 {} observe(live); }
+///         }
+///     }
+/// }
+/// # fn main() {}
 /// ```
 ///
 /// A `from` that filters on a value:
@@ -174,6 +199,7 @@
 ///         transitions { go(): A { n: 0 } => B emits Went = 1 {} observe(live); }
 ///     }
 /// }
+/// # fn main() {}
 /// ```
 ///
 /// A state set outside the transitions, from another crate: a machine
@@ -204,8 +230,8 @@
 ///
 /// ```compile_fail,E0639
 /// use dagon_events::decisions::ExtensionOverran;
-/// use dagon_events::{DecisionId, Party};
-/// let forged = ExtensionOverran { point: DecisionId::SelfCheck, party: Party::User, us: 1 };
+/// use dagon_events::{DecisionId, ExtId};
+/// let forged = ExtensionOverran { id: ExtId::of("x"), point: DecisionId::SelfCheck, us: 1 };
 /// ```
 #[macro_export]
 macro_rules! state_machine {
@@ -223,10 +249,8 @@ macro_rules! state_machine {
         )*
 
         /// The machines this crate declares, for the catalog registry.
-        pub const MACHINES: $crate::Machines = $crate::Machines {
-            krate: env!("CARGO_PKG_NAME"),
-            catalogs: &[$($name::CATALOG),*],
-        };
+        pub static MACHINES: $crate::Machines =
+            $crate::Machines::__new(env!("CARGO_PKG_NAME"), &[$($name::CATALOG),*]);
 
         // A second `state_machine!` in the crate defines this again.
         #[doc(hidden)]
@@ -237,9 +261,11 @@ macro_rules! state_machine {
     };
 }
 
-/// One machine of [`state_machine!`].
+/// One machine of [`state_machine!`]. It checks that the invoking
+/// crate's root `MACHINES` lists it, hence `crate::` on purpose.
 #[doc(hidden)]
 #[macro_export]
+#[allow(clippy::crate_in_macro_def)]
 macro_rules! __machine {
     (
         $(#[doc = $mdoc:literal])*
@@ -346,6 +372,10 @@ macro_rules! __machine {
                 }
                 $(
                     if rec.kind == $code {
+                        let entry = &$ev::ENTRY;
+                        if !entry.observe.replay || entry.flags.retired {
+                            return false;
+                        }
                         return match $ev::__decode(&rec.payload) {
                             ::core::option::Option::Some(p) => {
                                 deliver(&p);
@@ -438,6 +468,14 @@ macro_rules! __machine {
             )+
 
             const _: () = assert!(
+                $crate::__private::listed(&crate::MACHINES, &CATALOG),
+                concat!(
+                    stringify!($name),
+                    ": declare machines in the crate's one `state_machine!`, at the crate root"
+                )
+            );
+
+            const _: () = assert!(
                 $crate::__private::unique_codes(&[$($code),+]),
                 concat!(stringify!($name), ": two transitions share an event code")
             );
@@ -495,9 +533,15 @@ macro_rules! __machine {
                                 );
                                 out.replay(&[CATALOG], &rec)
                             };
-                            assert!(replayed.is_ok(), "{} replays", stringify!($trig));
-                            assert_eq!((seen.0, seen.2), (2, 1), "{} replays once", stringify!($trig));
-                            assert_eq!(seen.1.payload, rec.payload, "{} decodes", stringify!($trig));
+                            let entry = &$ev::ENTRY;
+                            if entry.observe.replay && !entry.flags.retired {
+                                assert!(replayed.is_ok(), "{} replays", stringify!($trig));
+                                assert_eq!((seen.0, seen.2), (2, 1), "{} replays once", stringify!($trig));
+                                assert_eq!(seen.1.payload, rec.payload, "{} decodes", stringify!($trig));
+                            } else {
+                                assert!(replayed.is_err(), "{} is not replayable", stringify!($trig));
+                                assert_eq!(seen.0, 1, "{} was replayed", stringify!($trig));
+                            }
                         } else {
                             assert!(r.is_err(), "{} from {}", stringify!($trig), s.name());
                             assert_eq!(m.state(), *s, "a refused {} changed the state", stringify!($trig));
@@ -579,6 +623,37 @@ pub const fn contains(set: &[&str], s: &str) -> bool {
         i += 1;
     }
     false
+}
+
+/// `c` is one of `m`'s catalogs (same machine, layer and transitions).
+pub const fn listed(m: &crate::Machines, c: &crate::Catalog) -> bool {
+    let all = m.catalogs();
+    let mut i = 0;
+    while i < all.len() {
+        if same(&all[i], c) {
+            return true;
+        }
+        i += 1;
+    }
+    false
+}
+
+const fn same(a: &crate::Catalog, b: &crate::Catalog) -> bool {
+    if !str_eq(a.machine, b.machine)
+        || a.layer.code() != b.layer.code()
+        || a.entries.len() != b.entries.len()
+    {
+        return false;
+    }
+    let mut i = 0;
+    while i < a.entries.len() {
+        let (x, y) = (&a.entries[i], &b.entries[i]);
+        if x.code != y.code || !str_eq(x.kind, y.kind) || !str_eq(x.to, y.to) {
+            return false;
+        }
+        i += 1;
+    }
+    true
 }
 
 pub const fn unique_codes(codes: &[u8]) -> bool {

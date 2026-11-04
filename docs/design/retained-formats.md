@@ -151,9 +151,10 @@ Boots are ordered by every writer's own run order, merged. A boot whose
 opener's ring no longer holds it is placed by its number against the
 opener's newest held entry: up to `slots` ahead, it is newer than every
 boot the opener holds (the opener's newest entries were destroyed by
-foreign bytes); within the held range, by number; otherwise older. Two
-boots that no writer's order relates are both marked `uncertain`; this
-happens only between boots opened by different writers.
+foreign bytes); within the held range, by number; otherwise older. The
+reader never reports a newer boot before an older one; pairs it cannot
+order are marked uncertain (`uncertain` on both boots). This happens
+only between boots opened by different writers.
 
 Replay: boots oldest first; within a boot, writer order, then sequence.
 Each event is replayed as its catalog event with `replayed: true` and the
@@ -251,10 +252,15 @@ the watchdog period (lifecycle-events.md §10), so a watchdog reset with a call 
 call locked up. A layer whose start reports `can_arm = false` arms
 nothing in that run.
 
-The MCU package reports a **watchdog flag**: set by a watchdog reset,
-kept across any later reset other than power-on, cleared only when a
-start acknowledges it. A start acknowledges it when it stored everything
-it had to (`complete`).
+The fuse needs a **watchdog flag**: set by a watchdog reset, kept
+across any later reset other than power-on, cleared only when a start
+acknowledges it. A start acknowledges it when it stored everything it
+had to (`complete`). The MCU definition declares whether the MCU has
+such a flag and its source (`[watchdog] flag`: a hardware register whose
+reset flags persist until cleared, or a flag the MCU package provides,
+e.g. in a retained register it sets on a watchdog reset). An MCU without
+one has no fuse: the definition loader reports the fuse as unavailable,
+and its layers run sandboxed calls without a lockup fuse.
 
 ### 3.5 Start
 
@@ -390,7 +396,7 @@ fixed cases in `tests/fixed.rs` name the property they guard.
 | P2 | Every replayed event is a held append of the reader's layout; no torn write is accepted. |
 | P3 | Every store of a writer lies in its own ring, whatever bytes the region holds. |
 | P4 | No identity is appended twice while held; a writer continues its own sequence; a boot number held for two boots only after foreign bytes destroyed its first use. |
-| P5 | Boots replay oldest first; a misordered pair is marked uncertain on both sides; uncertainty only between different openers. |
+| P5 | The reader never reports a newer boot before an older one; pairs it cannot order are marked uncertain (on both boots), and only boots of different openers are. |
 | P6 | Every replayed boot holds the events of one boot, and one boot is one replayed boot. |
 | P7 | An append overwritten by its own writer before any replay is covered by a window or gap. |
 | P8 | `plan`, `commit` and `confirm` take only the state log (compile-time). |

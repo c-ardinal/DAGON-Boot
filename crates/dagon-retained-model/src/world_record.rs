@@ -5,7 +5,9 @@
 //! The oracle keeps every committed append with the bytes it left in
 //! memory; an append is held while those bytes are intact. Properties:
 //! P1 observability, P2 torn-write safety, P3 writer independence,
-//! P4 identity uniqueness, P5 ordering, P6 current-boot attribution,
+//! P4 identity uniqueness, P5 ordering (never a newer boot before an
+//! older one; pairs the reader cannot order are marked uncertain),
+//! P6 current-boot attribution,
 //! P7 loss accounting, P9 versioning, P10 size and paging,
 //! P11 at-least-once replay with consumer de-duplication.
 //!

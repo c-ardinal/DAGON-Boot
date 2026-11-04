@@ -1958,7 +1958,8 @@ below keep code and data to it.
    clippy: `targets/mcu/clippy.toml` refuses every masking primitive
    (`critical_section::with` and `acquire`, `cortex_m::interrupt::free`
    and `disable`, a critical-section `blocking_mutex::Mutex::lock`) in the
-   MCU packages, by resolved path, so an alias or a wrapper does not hide
+   MCU packages and their boot images (stage0, boot cores), by resolved
+   path, so an alias or a wrapper does not hide
    one. The functions that mask (the watchdog guard's state update, the
    relay's shared display state) carry `#[allow(clippy::disallowed_methods)]`
    with their reason, and a test keeps the list and the exemptions as they

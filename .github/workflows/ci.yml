@@ -136,9 +136,11 @@ jobs:
           DIR: ${{ matrix.lint.dir }}
           TARGET: ${{ matrix.lint.target }}
           FEATURES: ${{ matrix.lint.features }}
+          LINT_ENV: ${{ toJSON(matrix.lint.env) }}
         # In the package's folder: its rust-toolchain.toml and
         # .cargo/config.toml (the repository's, or its own) apply.
         run: |
+          eval "$(jq -r 'to_entries[] | "export \(.key)=\(.value | @sh)"' <<< "$LINT_ENV")"
           cd "$DIR"
           args=(clippy --release)
           if [ -n "$TARGET" ]; then

@@ -65,9 +65,10 @@ def test_dirs():
 def firmware_lints():
     """One clippy run per firmware build a package declares in
     `[package.metadata.dagon.lint]`: `features` (one feature set per run,
-    "" for the defaults) and `target` (left out: the package's own
-    `.cargo/config.toml` names it). `toolchain` is the package's own
-    `rust-toolchain.toml` channel, else "stable"."""
+    "" for the defaults), `target` (left out: the package's own
+    `.cargo/config.toml` names it) and `env` (variables the build needs).
+    `toolchain` is the package's own `rust-toolchain.toml` channel, else
+    "stable"."""
     runs = []
     for p in package_dirs():
         manifest = tomllib.loads((p / "Cargo.toml").read_text(encoding="utf-8"))
@@ -83,6 +84,7 @@ def firmware_lints():
                 "dir": p.relative_to(ROOT).as_posix(),
                 "target": lint.get("target", ""),
                 "features": features,
+                "env": lint.get("env", {}),
                 "toolchain": toolchain,
             })
     return runs

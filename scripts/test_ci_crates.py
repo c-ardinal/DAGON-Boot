@@ -40,11 +40,16 @@ class CiCrates(unittest.TestCase):
             self.assertFalse(ci_crates.has_host_tests(parent, [child]))
 
 
-    def test_firmware_lints_cover_every_mcu_package(self):
+    def test_firmware_lints_cover_every_mcu_package_and_boot_image(self):
         runs = ci_crates.firmware_lints()
-        mcus = {p.parent.relative_to(ROOT).as_posix()
-                for p in (ROOT / "targets" / "mcu").glob("*/dagon-mcu.toml")}
-        self.assertEqual({r["dir"] for r in runs}, mcus)
+        mcu = ROOT / "targets" / "mcu"
+        packages = {p.parent for p in mcu.glob("*/dagon-mcu.toml")}
+        # Boot images: the binaries inside an MCU package's folder (its
+        # `template` is the starting point of a user's app, not DAGON's).
+        packages |= {m.parent.parent for m in mcu.glob("*/*/src/main.rs")
+                     if m.parent.parent.name != "template"}
+        want = {p.relative_to(ROOT).as_posix() for p in packages}
+        self.assertEqual({r["dir"] for r in runs}, want)
         for r in runs:
             self.assertIn(r["toolchain"], ("stable", "esp"), r)
             if not r["target"]:

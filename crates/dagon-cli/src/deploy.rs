@@ -73,6 +73,7 @@ pub(crate) fn release_versions(
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(BTreeMap::new()),
         Err(e) => return Err(format!("cannot read {}: {e}", path.display())),
     };
+    crate::versions::check_number("bundle", &path.display().to_string(), &bytes)?;
     let b = BundleView::parse(&bytes).map_err(|e| format!("{}: {e:?}", path.display()))?;
     b.verify(pubkey).map_err(|e| {
         format!(

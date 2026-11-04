@@ -2,7 +2,7 @@
 name = "dagon-agent"
 edition.workspace = true
 license.workspace = true
-version.workspace = true
+version = "0.1.0"
 
 [dependencies]
 dagon-core = { path = "../dagon-core" }

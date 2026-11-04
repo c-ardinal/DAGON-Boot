@@ -20,6 +20,10 @@ use crate::schema::{ControlKind, LinkKind, RomEntry, UartIface};
 
 pub use load::{DefError, DefSource, Source};
 
+/// The `dagon-mcu.toml` / `dagon-board.toml` format number this reader
+/// reads (their `format` key; absent means this one).
+pub const FORMAT: u32 = 1;
+
 use requirements::HEADER;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
@@ -354,6 +358,9 @@ pub struct DoctorCheck {
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct McuDef {
+    /// Definition format number; absent means [`FORMAT`] (see
+    /// docs/versioning.md). Other numbers are refused on load.
+    pub format: Option<u32>,
     pub id: String,
     /// Display name (`RP2040`).
     pub name: String,
@@ -427,6 +434,9 @@ pub struct DefaultLink {
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct BoardDef {
+    /// Definition format number; absent means [`FORMAT`] (see
+    /// docs/versioning.md). Other numbers are refused on load.
+    pub format: Option<u32>,
     pub id: String,
     pub product: String,
     pub mcu: String,

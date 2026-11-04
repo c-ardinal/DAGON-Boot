@@ -19,6 +19,7 @@ mod scaffold;
 mod serial;
 mod serve;
 mod simrun;
+mod versions;
 
 use std::path::Path;
 use std::process::ExitCode;
@@ -73,7 +74,7 @@ Usage:
                                      sample unless --from), and a signing key pair in
                                      --keys (default ~/.dagon/keys/<name>) if none is there.
                                      DAGON comes from this CLI's release (git + tag
-                                     v<version>) unless --dagon-path or DAGON_HOME names a
+                                     cli-v<version>) unless --dagon-path or DAGON_HOME names a
                                      local clone
   dagon gen [<id>...] [--force-main]
                                      one Rust crate per node in nodes/<id> on the board
@@ -277,7 +278,7 @@ fn banner_text() -> String {
 }
 
 fn version_text(banner: Option<String>) -> String {
-    let line = format!("dagon {}", env!("CARGO_PKG_VERSION"));
+    let line = versions::version_lines();
     match banner {
         Some(b) => format!("{b}\n\n{line}"),
         None => line,
@@ -289,17 +290,18 @@ mod tests {
     use super::*;
 
     #[test]
-    fn version_without_terminal_is_one_clean_line() {
+    fn version_without_terminal_starts_with_one_clean_version_line() {
         let v = version_text(None);
-        assert_eq!(v, format!("dagon {}", env!("CARGO_PKG_VERSION")));
-        assert!(!v.contains('\n'));
+        assert_eq!(v, versions::version_lines());
+        let first = format!("dagon {}", env!("CARGO_PKG_VERSION"));
+        assert_eq!(v.lines().next(), Some(first.as_str()));
     }
 
     #[test]
     fn version_at_terminal_starts_with_the_banner() {
         let v = version_text(Some(banner_text()));
         assert!(v.starts_with(banner_text().as_str()));
-        assert!(v.ends_with(&format!("\n\ndagon {}", env!("CARGO_PKG_VERSION"))));
+        assert!(v.ends_with(&format!("\n\n{}", versions::version_lines())));
         assert!(!banner_text().contains('\r'));
     }
 }

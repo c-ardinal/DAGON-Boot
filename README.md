@@ -68,13 +68,13 @@ wired to the hub (see [Your own board](#your-own-board-chosen-by-mcu)).
 
 Install the `dagon` CLI, one of:
 
-- Download the archive for your system (`dagon-<target>.zip` for Windows,
-  `dagon-<target>.tar.gz` otherwise) from the GitHub release of the version
+- Download the archive for your system (`dagon-cli-<version>-<target>.zip` for Windows,
+  `dagon-cli-<version>-<target>.tar.gz` otherwise) from the GitHub release `cli-v<version>`
   you want, check it against its `.sha256` file, and put `dagon` on your
   `PATH`.
 - `cargo binstall dagon-cli --git https://github.com/c-ardinal/DAGON-Boot`
   (fetches that same archive; needs `cargo-binstall`).
-- Build it: `cargo install --git https://github.com/c-ardinal/DAGON-Boot --tag v<version> dagon-cli`.
+- Build it: `cargo install --git https://github.com/c-ardinal/DAGON-Boot --tag cli-v<version> dagon-cli`.
 
 No clone of this repository and no git submodule is needed:
 
@@ -83,7 +83,7 @@ dagon --help
 ```
 
 A project made by `dagon new` takes DAGON from the same release as your
-`dagon` (`[dagon] git` and `tag = "v<version>"` in `dagon.toml`). cargo
+`dagon` (`[dagon] git` and `tag = "cli-v<version>"` in `dagon.toml`). cargo
 fetches it when you build, and `dagon flash` builds the boot core, stage0
 and factory agent from cargo's copy of that tag, so it needs the network
 the first time. Working on DAGON itself, keep a clone instead:
@@ -193,8 +193,8 @@ dagon flash watch      # ESP32-S3: over USB-C with espflash
 `dagon flash` prints its plan first and asks before it touches the board
 (`--yes` skips the question). It writes to a device the writer reports:
 every probe-rs probe, every serial port, every UF2 drive (USB IDs and
-the UF2 Board-ID only label them). One device is taken and shown before
-the question; with several it asks which, or takes `--probe
+the UF2 Board-ID only label them and put the matching ones first). One device is taken and shown before
+the question; with several it asks which (Enter takes the first match, if any), or takes `--probe
 <vid:pid[:serial]>`, `--port <port>` or `--drive <path>` (on Windows
 compared without regard to case, so `--drive e:` names `E:\`); with several
 and no terminal (or `--yes`) and no option, or with none, it stops
@@ -467,10 +467,11 @@ For firmware that is not a `dagon new` project:
   projects then use the clone with `dagon new --dagon-path <clone>` (or
   `DAGON_HOME`)
 - Release archives: `python scripts/release.py [--target <triple>]` builds
-  `out/release/dagon-<target>.*` with the page built in;
+  `out/release/dagon-cli-<version>-<target>.*` with the page built in;
   `.github/workflows/release.yml` does the same for each platform when a
-  `v*` tag is pushed and keeps them as workflow artifacts (it publishes
-  nothing)
+  `cli-v*` tag is pushed, after `scripts/bump_check.py` confirms the
+  version is at least what the commits require, and keeps them as workflow
+  artifacts (it publishes nothing). Versioning rules: docs/versioning.md
 
 ## License (MIT / Apache-2.0 dual)
 

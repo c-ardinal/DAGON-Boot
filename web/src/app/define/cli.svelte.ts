@@ -6,10 +6,21 @@
 // dagon.toml) except where to open or make a project, chosen from serve's own
 // GET /v1/fs list (§8.2).
 
+import pkg from '../../../package.json';
+
 export type CliState = 'none' | 'connecting' | 'ready' | 'stopped' | 'denied';
+
+/** The `dagon serve` API number this Console speaks (GET /v1/hello `api`; docs/versioning.md). */
+export const SERVE_API = 1;
+/** This Console's own version: the cli component's (web/package.json). */
+export const CONSOLE_VERSION: string = pkg.version;
 
 export interface Hello {
   cli: string;
+  /** Serve API number; missing from a dagon older than numbered APIs. */
+  api?: number;
+  /** Every format number the dagon reads and writes (`wire`, `image-header`, ...). */
+  formats?: Record<string, number>;
   workspace: string | null;
   features: string[];
   api_key: boolean;
@@ -141,6 +152,11 @@ export class Cli {
   /** Whether serve's flash can write a node of MCU family `mcu`. */
   canFlash(mcu: string): boolean {
     return this.has('flash') && (this.hello?.flash_mcus ?? []).includes(mcu);
+  }
+
+  /** Whether the connected dagon serves the API this Console speaks. */
+  get apiMatches(): boolean {
+    return this.hello?.api === SERVE_API;
   }
 
   /** Whether a feature of /v1/hello is there (gen, flash, build, ...). */

@@ -164,7 +164,7 @@ dependencies = [
 
 [[package]]
 name = "dagon-agent"
-version = "0.0.0"
+version = "0.1.0"
 dependencies = [
  "dagon-core",
  "dagon-format",
@@ -174,7 +174,7 @@ dependencies = [
 
 [[package]]
 name = "dagon-core"
-version = "0.0.0"
+version = "0.1.0"
 dependencies = [
  "dagon-format",
  "dagon-port",
@@ -183,7 +183,7 @@ dependencies = [
 
 [[package]]
 name = "dagon-format"
-version = "0.0.0"
+version = "0.1.0"
 dependencies = [
  "ed25519-compact",
  "sha2",
@@ -191,11 +191,11 @@ dependencies = [
 
 [[package]]
 name = "dagon-mcu-build"
-version = "0.0.0"
+version = "0.1.0"
 
 [[package]]
 name = "dagon-mcu-common"
-version = "0.0.0"
+version = "0.1.0"
 dependencies = [
  "critical-section",
  "dagon-agent",
@@ -206,7 +206,7 @@ dependencies = [
 
 [[package]]
 name = "dagon-mcu-stm32f401re"
-version = "0.0.0"
+version = "0.1.0"
 dependencies = [
  "cortex-m",
  "dagon-agent",
@@ -223,18 +223,18 @@ dependencies = [
 
 [[package]]
 name = "dagon-port"
-version = "0.0.0"
+version = "0.1.0"
 
 [[package]]
 name = "dagon-proto"
-version = "0.0.0"
+version = "0.1.0"
 dependencies = [
  "dagon-format",
 ]
 
 [[package]]
 name = "dagon-stm32f401re-bootcore"
-version = "0.0.0"
+version = "0.1.0"
 dependencies = [
  "cortex-m",
  "cortex-m-rt",

@@ -38,12 +38,16 @@ M5StopWatch-UserDemo V0.5 (`hal_pmic.cpp`, `hal_ioe.cpp`, M5GFX
 and after a chip reset:
 
 1. M5PM1 (0x6E), 100 kHz: I2C sleep off (0x09 bits 3:0 = 0), LDO hold
-   (0x07 bit 5), watchdog off (0x0A = 0). The official demo's charging and
-   power-button settings are left out.
-2. M5IOE1 (0x4F): a wake access, then I2C_CFG 0x23 = 0x10 (400 kHz); the
-   ESP side switches to 400 kHz, waits 50 ms and wakes it again. At 400 kHz
-   the expander now and then answers garbage, so every write is read back
-   and retried.
+   (0x07 bit 5), PMG2 (the charger's CHG_STAT) a plain input (0x16 bits 5:4,
+   0x10 bit 2 and 0x14 bits 5:4 cleared), watchdog off (0x0A = 0). The
+   official demo's charging and power-button settings are left out, and so
+   is PMG3 (the charger's CHG_PROG, which the demo drives low).
+2. M5IOE1 (0x4F): a wake access, then I2C_CFG 0x23 = 0x10 (400 kHz). Right
+   after power-on (power button, battery) the expander does not answer yet:
+   as the official `M5IOE1::begin`, the app then waits 800 ms, wakes it
+   again and tries once more. The ESP side switches to 400 kHz, waits 50 ms
+   and wakes it again. At 400 kHz the expander now and then answers garbage,
+   so every write is read back and retried.
 3. M5IOE1 IO1, IO3, IO4, IO5, IO8, IO9, IO10 as push-pull outputs (pull-ups
    and pull-downs off); IO3, IO4, IO5 (AMOLED reset, released without a
    pulse), IO8 (L3B_EN, the panel's LDO) high; IO1 (rear pins to UART) and
@@ -61,6 +65,15 @@ After an update the chip only resets: the power manager and the expander
 keep their state and nothing turns the panel off, so the app runs this whole
 sequence again on every start rather than relying on what the previous image
 left behind.
+
+Each start logs this sequence on the USB console before DAGON takes it (ESP
+reset reason, the M5PM1 and M5IOE1 register reads, every write result, the
+check at which IO8 read high; `src/bootlog.rs`) and keeps a 32-byte snapshot
+of it in the M5PM1's RTC RAM (0xA0), which the next start prints first. A
+start from the power button enumerates USB anew, so its own lines are
+usually lost; the snapshot printed by the next start (a reset from the PC)
+shows how it went. The console never blocks: with no PC reading, the lines
+are dropped.
 
 ## Build
 

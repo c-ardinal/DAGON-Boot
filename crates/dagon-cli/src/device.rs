@@ -29,16 +29,20 @@ fn show_state(name: &str, s: &NodeState) {
         .map(|(x, n)| format!("{n}:{:?} {}", x.state, x.version))
         .collect();
     println!(
-        "{name}: version {}{}, mcu {:#06x}, active {}, confirmed {}, attempts {}, last reason {}, [{}]",
+        "{name}: version {}{}, mcu {:#06x}, wire {}, active {}, confirmed {}, attempts {}, last reason {}, [{}]",
         s.hello.active_version,
         if s.hello.trial { " (on trial)" } else { "" },
         s.hello.mcu_id,
+        s.hello.proto_ver,
         st.active,
         st.confirmed,
         st.attempts,
         st.last_reason,
         slots.join(", ")
     );
+    if let Some(w) = crate::versions::wire_warning(name, s.hello.proto_ver) {
+        println!("{w}");
+    }
 }
 
 /// The topology from `--topology` or `dagon.toml`, if any.
@@ -57,6 +61,7 @@ pub fn status(args: &[&str]) -> Res {
     let o = Opts::parse(args, &["port", "topology", "config"])?;
     let cfg = Config::load(o.get("config"))?;
     let t = optional_topology(&o, &cfg)?;
+    println!("{}", crate::versions::known_text());
     let mut host = serial::host(o.get("port"))?;
     let hub = block_on(host.status(Target::Hub)).map_err(|e| format!("hub: {e:?}"))?;
     show_state("hub", &hub);
@@ -195,6 +200,7 @@ pub fn recover(args: &[&str]) -> Res {
         .or(cfg.release.clone())
         .ok_or("no release: pass --release <dgb> or set release in dagon.toml")?;
     let release = read_file(&dgb)?;
+    crate::versions::check_number("bundle", &dgb.display().to_string(), &release)?;
     let boot_path = o.get("bootcore").map_or_else(
         || cfg.provision_dir().join(node).join("bootcore.img"),
         PathBuf::from,
@@ -290,6 +296,7 @@ pub fn apply(args: &[&str]) -> Res {
         Some(pubkey(&o, &cfg)?)
     };
     let bundle = read_file(Path::new(&dgb))?;
+    crate::versions::check_number("bundle", &dgb.display().to_string(), &bundle)?;
 
     let mut host = serial::host(o.get("port"))?;
     let reg = crate::defs::registry(&cfg)?;

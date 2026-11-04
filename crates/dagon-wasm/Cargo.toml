@@ -2,7 +2,7 @@
 name = "dagon-wasm"
 edition.workspace = true
 license.workspace = true
-version.workspace = true
+version = "0.0.0"
 publish = false
 
 [lib]

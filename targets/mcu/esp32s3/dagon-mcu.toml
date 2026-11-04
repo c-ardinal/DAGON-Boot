@@ -1,5 +1,6 @@
 # DAGON MCU definition (format: targets/README.md). Slots come from
 # partitions.csv; addresses are flash offsets (images are MMU-mapped).
+format = 1
 id = "esp32s3"
 name = "ESP32-S3"
 wire_id = 0x0003

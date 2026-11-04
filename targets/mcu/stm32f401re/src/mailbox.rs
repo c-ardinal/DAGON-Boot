@@ -7,11 +7,22 @@
 //! the next one the frame. A read cut short of the whole frame (for example
 //! the hub polling the state again) returns to sending the state, so the hub
 //! recovers by polling once more.
+//!
+//! Every read offers one guard byte beyond what the hub takes. embassy-stm32
+//! 0.6.0's I2C v1 target, once its DMA has drained the slice it was given,
+//! writes 0x00 padding into DR before the hub's NACK/STOP ends the read
+//! (`execute_slave_transmit_transfer` then `handle_padding_bytes`); that
+//! stale byte can lead the next read (the frame then starts
+//! `00 DA 6F`, which the hub rejects). With a guard byte the DMA is never
+//! drained by a read of the advertised length. The advertised lengths
+//! (READY's length, the 3-byte state) and the `sent` counting stay logical.
 
 use dagon_proto::mailbox::{State, STATE_LEN};
 
 /// Largest response the agent produces over I2C fits in this.
 pub const RESP_MAX: usize = dagon_proto::frame_len(dagon_proto::max_payload::I2C);
+/// Bytes offered beyond each logical read (see the module docs).
+const GUARD: usize = 1;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Phase {
@@ -25,20 +36,27 @@ enum Phase {
 
 pub struct Mailbox {
     phase: Phase,
-    resp: [u8; RESP_MAX],
+    resp: [u8; RESP_MAX + GUARD],
     len: usize,
     reboot: bool,
-    state: [u8; STATE_LEN],
+    state: [u8; STATE_LEN + GUARD],
+}
+
+/// `bytes` followed by the zero guard.
+fn guarded(bytes: [u8; STATE_LEN]) -> [u8; STATE_LEN + GUARD] {
+    let mut out = [0; STATE_LEN + GUARD];
+    out[..STATE_LEN].copy_from_slice(&bytes);
+    out
 }
 
 impl Default for Mailbox {
     fn default() -> Self {
         Mailbox {
             phase: Phase::Empty,
-            resp: [0; RESP_MAX],
+            resp: [0; RESP_MAX + GUARD],
             len: 0,
             reboot: false,
-            state: State::Busy.to_bytes(),
+            state: guarded(State::Busy.to_bytes()),
         }
     }
 }
@@ -57,9 +75,10 @@ impl Mailbox {
             return;
         };
         self.resp[..frame.len()].copy_from_slice(frame);
+        self.resp[frame.len()] = 0;
         self.len = frame.len();
         self.reboot = reboot;
-        self.state = State::Ready(frame.len() as u16).to_bytes();
+        self.state = guarded(State::Ready(frame.len() as u16).to_bytes());
         self.phase = Phase::Ready;
     }
 
@@ -68,12 +87,22 @@ impl Mailbox {
         self.reboot = true;
     }
 
-    /// Bytes to send for the read transaction starting now (the driver pads
-    /// with 0x00 if the hub reads more).
+    /// Bytes to hand the driver for the read transaction starting now: the
+    /// logical bytes and the guard byte (the driver pads with 0x00 if the
+    /// hub reads more).
     pub fn read_data(&self) -> &[u8] {
         match self.phase {
-            Phase::Frame => &self.resp[..self.len],
+            Phase::Frame => &self.resp[..self.len + GUARD],
             Phase::Empty | Phase::Ready => &self.state,
+        }
+    }
+
+    /// The phase, for the per-request debug line.
+    pub fn phase_name(&self) -> &'static str {
+        match self.phase {
+            Phase::Empty => "busy",
+            Phase::Ready => "ready",
+            Phase::Frame => "frame",
         }
     }
 
@@ -106,7 +135,8 @@ impl Mailbox {
 mod tests {
     use super::*;
 
-    const BUSY: [u8; 3] = [0, 0, 0];
+    /// BUSY state and the guard byte.
+    const BUSY: [u8; 4] = [0, 0, 0, 0];
 
     #[test]
     fn busy_until_reply_then_state_then_frame() {
@@ -116,11 +146,50 @@ mod tests {
         m.request();
         assert_eq!(m.read_data(), BUSY);
         m.respond(Some(&[0xDA, 0x6F, 1, 2, 3]), false);
-        assert_eq!(m.read_data(), [1, 5, 0]);
+        assert_eq!(m.read_data(), [1, 5, 0, 0]);
         assert!(!m.read_done(3));
-        assert_eq!(m.read_data(), [0xDA, 0x6F, 1, 2, 3]);
+        assert_eq!(m.read_data(), [0xDA, 0x6F, 1, 2, 3, 0]);
         assert!(!m.read_done(5));
         assert_eq!(m.read_data(), BUSY);
+    }
+
+    #[test]
+    fn every_phase_offers_one_guard_byte_beyond_the_logical_read() {
+        let mut m = Mailbox::default();
+        assert_eq!(
+            (m.phase_name(), m.read_data().len()),
+            ("busy", STATE_LEN + 1)
+        );
+        // A longer reply first, so a stale tail would show behind a shorter one.
+        m.respond(Some(&[0xEE; 9]), false);
+        m.read_done(3);
+        m.read_done(9);
+        m.respond(Some(&[0xDA, 0x6F, 7]), false);
+        assert_eq!(
+            (m.phase_name(), m.read_data()),
+            ("ready", &[1, 3, 0, 0][..])
+        );
+        m.read_done(3);
+        assert_eq!(
+            (m.phase_name(), m.read_data()),
+            ("frame", &[0xDA, 0x6F, 7, 0][..])
+        );
+    }
+
+    #[test]
+    fn sent_counts_logical_bytes_with_or_without_the_guard() {
+        let mut m = Mailbox::default();
+        m.respond(Some(&[9; 10]), false);
+        // The hub took the guard byte too (the driver reports 4).
+        assert!(!m.read_done(4));
+        assert_eq!(m.phase_name(), "frame");
+        assert!(!m.read_done(11));
+        assert_eq!(m.phase_name(), "busy");
+        m.respond(Some(&[9; 10]), false);
+        m.read_done(3);
+        // One byte short of the frame: back to the state.
+        m.read_done(9);
+        assert_eq!(m.phase_name(), "ready");
     }
 
     #[test]
@@ -138,9 +207,9 @@ mod tests {
         m.read_done(3);
         // The hub polled the state again instead of reading the frame.
         assert!(!m.read_done(3));
-        assert_eq!(m.read_data(), [1, 10, 0]);
+        assert_eq!(m.read_data(), [1, 10, 0, 0]);
         m.read_done(3);
-        assert_eq!(m.read_data(), [9; 10]);
+        assert_eq!(m.read_data()[..10], [9; 10]);
     }
 
     #[test]
@@ -148,7 +217,7 @@ mod tests {
         let mut m = Mailbox::default();
         m.respond(Some(&[9; 10]), false);
         m.read_done(1);
-        assert_eq!(m.read_data(), [1, 10, 0]);
+        assert_eq!(m.read_data(), [1, 10, 0, 0]);
     }
 
     #[test]
@@ -159,6 +228,15 @@ mod tests {
         assert!(!m.read_done(12));
         assert!(!m.read_done(3));
         assert!(m.read_done(16));
+    }
+
+    #[test]
+    fn largest_reply_still_has_its_guard() {
+        let mut m = Mailbox::default();
+        m.respond(Some(&[5; RESP_MAX]), false);
+        m.read_done(3);
+        assert_eq!(m.read_data().len(), RESP_MAX + 1);
+        assert_eq!(m.read_data()[RESP_MAX], 0);
     }
 
     #[test]

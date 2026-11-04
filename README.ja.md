@@ -49,9 +49,9 @@ DAGON Boot は、いくつかのマイコンを組み合わせて何かを作り
 
 `dagon` CLI は、次のどれかで入れます:
 
-- 使うバージョンの GitHub のリリースから、自分のシステム用のアーカイブ（Windows は `dagon-<target>.zip`、それ以外は `dagon-<target>.tar.gz`）を取り、`.sha256` のファイルで確かめてから、`dagon` を `PATH` の通った場所に置く。
+- 使うバージョンの GitHub のリリース（`cli-v<version>`）から、自分のシステム用のアーカイブ（Windows は `dagon-cli-<version>-<target>.zip`、それ以外は `dagon-cli-<version>-<target>.tar.gz`）を取り、`.sha256` のファイルで確かめてから、`dagon` を `PATH` の通った場所に置く。
 - `cargo binstall dagon-cli --git https://github.com/c-ardinal/DAGON-Boot`（同じアーカイブを取ります。`cargo-binstall` が要ります）。
-- ビルドする: `cargo install --git https://github.com/c-ardinal/DAGON-Boot --tag v<version> dagon-cli`。
+- ビルドする: `cargo install --git https://github.com/c-ardinal/DAGON-Boot --tag cli-v<version> dagon-cli`。
 
 このリポジトリのクローンも git の submodule も要りません:
 
@@ -59,7 +59,7 @@ DAGON Boot は、いくつかのマイコンを組み合わせて何かを作り
 dagon --help
 ```
 
-`dagon new` で作るプロジェクトは、DAGON を手元の `dagon` と同じリリースから取ります（`dagon.toml` の `[dagon] git` と `tag = "v<version>"`）。ビルドのときに cargo が取得し、`dagon flash` もブートコア・stage0・factory エージェントをそのタグの cargo の写しからビルドするので、最初の 1 回はネットワークが要ります。DAGON そのものを開発するときはクローンを使います: `dagon new my-fleet --dagon-path <クローン>`（または `DAGON_HOME` を設定）で `[dagon] path` を書きます。
+`dagon new` で作るプロジェクトは、DAGON を手元の `dagon` と同じリリースから取ります（`dagon.toml` の `[dagon] git` と `tag = "cli-v<version>"`）。ビルドのときに cargo が取得し、`dagon flash` もブートコア・stage0・factory エージェントをそのタグの cargo の写しからビルドするので、最初の 1 回はネットワークが要ります。DAGON そのものを開発するときはクローンを使います: `dagon new my-fleet --dagon-path <クローン>`（または `DAGON_HOME` を設定）で `[dagon] path` を書きます。
 
 続けて、構成に要るツールを `dagon` に確かめさせます（プロジェクトのフォルダで実行します。それ以外では全部のマイコンの家族を確かめます）:
 
@@ -132,7 +132,7 @@ dagon flash seg        # STM32F401RE: ST-LINK 経由で probe-rs が書き込む
 dagon flash watch      # ESP32-S3: USB-C 経由で espflash が書き込む
 ```
 
-`dagon flash` は先に手順を表示し、ボードに触れる前に確認を求めます（`--yes` で確認を省きます）。書き込み先は書き込みツールが見つけたデバイス（probe-rs のすべてのプローブ、すべてのシリアルポート、すべての UF2 ドライブ）から選びます。USB の ID や UF2 の Board-ID は表示に使うだけで、候補を絞りません。1 つならそれを選んで確認のときに示し、2 つ以上なら番号で選ぶか `--probe <vid:pid[:serial]>`・`--port <port>`・`--drive <path>` で指定します（Windows では大文字と小文字を区別せず、`--drive e:` は `E:\` を指します）。2 つ以上で端末がない（または `--yes`）のに指定がないとき、または 1 つもないときは書く前に止まります。`--dry-run` も書き込みの手前まではすべて行います: 部品とアプリをビルドし、初回書込みのファイルを provision のフォルダ（`dagon.toml` の横の `out/provision/<id>/`、`dagon.toml` に `provision_dir` があればその下、`--out <dir>` で別の場所）に作り、ボードにだけ触れません。ブートコア（親機は `stage0` も）を CLI をビルドした DAGON のクローン（または `DAGON_HOME`）から、ノードのアプリと一緒に、署名の鍵の公開側でビルドします。ブートコアはデスクのデモの tag（`hub-rp2040-lcd`、`seg-f401-7seg`）を受け付けるので、これらのボードでは `topology.yaml` の tag をそのままにします。
+`dagon flash` は先に手順を表示し、ボードに触れる前に確認を求めます（`--yes` で確認を省きます）。書き込み先は書き込みツールが見つけたデバイス（probe-rs のすべてのプローブ、すべてのシリアルポート、すべての UF2 ドライブ）から選びます。USB の ID や UF2 の Board-ID は表示に使うだけで、候補を絞らず、一致した候補を先頭に並べます。1 つならそれを選んで確認のときに示し、2 つ以上なら番号で選ぶ（一致した候補があれば Enter でそれを選べる）か `--probe <vid:pid[:serial]>`・`--port <port>`・`--drive <path>` で指定します（Windows では大文字と小文字を区別せず、`--drive e:` は `E:\` を指します）。2 つ以上で端末がない（または `--yes`）のに指定がないとき、または 1 つもないときは書く前に止まります。`--dry-run` も書き込みの手前まではすべて行います: 部品とアプリをビルドし、初回書込みのファイルを provision のフォルダ（`dagon.toml` の横の `out/provision/<id>/`、`dagon.toml` に `provision_dir` があればその下、`--out <dir>` で別の場所）に作り、ボードにだけ触れません。ブートコア（親機は `stage0` も）を CLI をビルドした DAGON のクローン（または `DAGON_HOME`）から、ノードのアプリと一緒に、署名の鍵の公開側でビルドします。ブートコアはデスクのデモの tag（`hub-rp2040-lcd`、`seg-f401-7seg`）を受け付けるので、これらのボードでは `topology.yaml` の tag をそのままにします。
 
 ESP32-S3 のノードでは、`dagon flash` がボードの factory エージェントとアプリをビルドし、アプリを ESP のイメージにして（`espflash save-image --chip esp32s3 --flash-size 16mb`）署名し、`espflash` で書き込みます: 同梱の無改変の ESP-IDF 2nd stage を 0x0 に（SHA-256 が `targets/mcu/esp32s3/vendor/SHA256SUMS` と一致しなければ書きません）、パーティション表（`targets/mcu/esp32s3/partitions.csv`、0x8000）、factory エージェント、ota_0（0x110000）にアプリ、`dagon` パーティション（0x710000）にその署名済みヘッダ、確定済みとして起動させる otadata の項目（0xD000）。`--dry-run` はファイルとそのオフセット、`espflash` のコマンドを示します（同じ provision のフォルダの `commands.txt`）。
 
@@ -299,7 +299,7 @@ dagon demo --uplink uart          # または usb-cdc（既定）、wifi-tcp
 - ESP32-S3 の 2nd stage を `targets/esp32s3-2ndstage` からビルドし直すときは ESP-IDF v6.1（ビルド済みのものを `targets/mcu/esp32s3/vendor/bootloader.bin` として同梱している。無改変の ESP-IDF v6.1。`vendor/PROVENANCE.md` を参照）
 - RP2040 の立ち上げ用イメージに使う `elf2uf2-rs`
 - `cargo install --path crates/dagon-cli` でクローンから CLI を入れます。プロジェクトは `dagon new --dagon-path <クローン>`（または `DAGON_HOME`）でそのクローンを使います
-- リリースのアーカイブ: `python scripts/release.py [--target <triple>]` が、ページを組み込んだ `out/release/dagon-<target>.*` を作ります。`.github/workflows/release.yml` は `v*` のタグが push されたときに各プラットフォームで同じことをし、ワークフローの成果物として残します（公開はしません）
+- リリースのアーカイブ: `python scripts/release.py [--target <triple>]` が、ページを組み込んだ `out/release/dagon-cli-<version>-<target>.*` を作ります。`.github/workflows/release.yml` は `cli-v*` のタグが push されたときに、コミットが求める上げ幅に版が足りているかを `scripts/bump_check.py` で確かめてから各プラットフォームで同じことをし、ワークフローの成果物として残します（公開はしません）
 
 ## ライセンス (MIT / Apache-2.0 デュアル)
 

@@ -6,14 +6,20 @@ use std::process::Command;
 const EXE: &str = env!("CARGO_BIN_EXE_dagon");
 
 #[test]
-fn piped_version_is_one_clean_line() {
+fn piped_version_is_the_version_line_then_the_formats_without_banner() {
     let out = Command::new(EXE)
         .arg("--version")
         .output()
         .expect("run dagon");
     assert!(out.status.success());
     let text = String::from_utf8(out.stdout).expect("utf-8");
-    assert_eq!(text, format!("dagon {}\n", env!("CARGO_PKG_VERSION")));
+    let lines: Vec<&str> = text.lines().collect();
+    assert_eq!(lines[0], format!("dagon {}", env!("CARGO_PKG_VERSION")));
+    assert!(
+        lines[1].starts_with("formats (read and written): wire "),
+        "{text}"
+    );
+    assert_eq!(lines.len(), 2, "{text}");
 }
 
 #[test]

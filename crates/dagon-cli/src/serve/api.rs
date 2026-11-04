@@ -384,6 +384,10 @@ fn hello(server: &Server) -> Response {
     }
     json_ok(json!({
         "cli": env!("CARGO_PKG_VERSION"),
+        // The serve API number (the page refuses one it does not expect)
+        // and every format number this dagon reads and writes.
+        "api": crate::versions::SERVE_API,
+        "formats": crate::versions::formats().into_iter().collect::<std::collections::BTreeMap<_, _>>(),
         "workspace": workspace,
         "features": features,
         "api_key": crate::ai::api_key_present(),
@@ -942,6 +946,7 @@ fn signed_images(cfg: &Config, want: dagon_format::Version) -> Result<Vec<Vec<u8
                 .get(..HEADER_SIZE)
                 .and_then(|h| h.try_into().ok())
                 .ok_or_else(|| format!("{file}: not an image"))?;
+            crate::versions::check_number("image-header", file, raw)?;
             let h = ImageHeader::parse(raw).map_err(|e| format!("{file}: {e:?}"))?;
             if h.version != want {
                 return Err(format!("{file} is {}, not {want}", h.version));

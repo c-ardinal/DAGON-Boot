@@ -3,17 +3,19 @@
 
 use std::cell::RefCell;
 use std::rc::Rc;
+use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::Arc;
 
 use dagon_conform::timeout::REQUEST_MS;
 use dagon_format::header::{image_kind, target_tag};
 use dagon_format::Version;
 use dagon_host::{
     rom, Clock, ConfirmOutcome, Error, Event, Host, NodeOutcome, Outcome, RecoverAssets,
-    RecoverPath, Target, Transport,
+    RecoverPath, Target, Transport, CONFIRM_RETRY_MS,
 };
 use dagon_port::Flash;
 use dagon_proto::payload::{phase, SlotState};
-use dagon_proto::{flags, Cmd};
+use dagon_proto::{flags, Cmd, Status};
 use dagon_sign::image::{self, sign_image, ImageSpec};
 use dagon_sim::{block_on, demo_hub, SimHub, TrialApp, NODE_I2C_ADDR};
 use ed25519_compact::{KeyPair, Seed};
@@ -980,4 +982,74 @@ fn rom_addrs() -> Vec<u8> {
 fn f401_rom() -> rom::RomMap {
     let wire = image::mcu_id_of("stm32f401re").unwrap();
     roms().into_iter().find(|m| m.wire_id == wire).unwrap()
+}
+
+/// A host whose retry notes are counted.
+fn noting_host(s: &Sim) -> (Host<Sim, Sim>, Arc<AtomicUsize>) {
+    let notes = Arc::new(AtomicUsize::new(0));
+    let mut h = host(s);
+    let n = notes.clone();
+    h.note = Some(Box::new(move |_| {
+        n.fetch_add(1, Ordering::Relaxed);
+    }));
+    (h, notes)
+}
+
+/// Applies the release to the F401 only, its trial image behaving as `app`.
+fn apply_seg_as(app: TrialApp) -> (Sim, Host<Sim, Sim>, Arc<AtomicUsize>, Vec<NodeOutcome<()>>) {
+    let s = sim();
+    s.hub
+        .borrow_mut()
+        .i2c_node(NODE_I2C_ADDR)
+        .unwrap()
+        .trial_app = app;
+    let (mut h, notes) = noting_host(&s);
+    let out = block_on(h.apply(
+        &release(),
+        &topology(&yaml()),
+        &key().pk,
+        Some(&[SEG]),
+        &mut |_| {},
+    ))
+    .unwrap();
+    (s, h, notes, out)
+}
+
+#[test]
+fn confirm_is_sent_again_while_the_self_check_is_not_ready() {
+    let (_s, mut h, notes, out) = apply_seg_as(TrialApp::ConfirmsAfter(600));
+    assert!(
+        matches!(out[0].outcome, Outcome::Done(_)),
+        "{:?}",
+        out[0].outcome
+    );
+    assert!(notes.load(Ordering::Relaxed) >= 1, "a retry is noted");
+    let st = block_on(h.status(SEG_AT)).unwrap().status;
+    assert_eq!((st.active, st.confirmed), (1, 1));
+}
+
+#[test]
+fn a_target_that_confirms_at_once_is_not_retried() {
+    let (_s, _h, notes, out) = apply_seg_as(TrialApp::Confirms);
+    assert!(matches!(out[0].outcome, Outcome::Done(_)));
+    assert_eq!(notes.load(Ordering::Relaxed), 0);
+}
+
+#[test]
+fn a_self_check_that_never_passes_fails_after_the_bounded_retries() {
+    let (s, mut h, notes, out) = apply_seg_as(TrialApp::NeverConfirms);
+    assert!(matches!(
+        out[0].outcome,
+        Outcome::Failed(Error::Rejected {
+            cmd: Cmd::Confirm,
+            status: Status::State
+        })
+    ));
+    assert_eq!(notes.load(Ordering::Relaxed), CONFIRM_RETRY_MS.len());
+    // Still rolled back by the trial watchdog.
+    for _ in 0..4 {
+        s.hub.borrow_mut().advance_ms(10_000);
+    }
+    let st = block_on(h.status(SEG_AT)).unwrap().status;
+    assert_eq!((st.active, st.slots[1].state), (0, SlotState::Reverted));
 }

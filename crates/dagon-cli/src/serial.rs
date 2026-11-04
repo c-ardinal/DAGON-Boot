@@ -120,5 +120,7 @@ impl Clock for Wall {
 pub type SerialHost = Host<Serial, Wall>;
 
 pub fn host(port: Option<&str>) -> Result<SerialHost, String> {
-    Ok(Host::new(Serial::open(port)?, Wall(Instant::now())))
+    let mut h = Host::new(Serial::open(port)?, Wall(Instant::now()));
+    h.note = Some(Box::new(|line| println!("{line}")));
+    Ok(h)
 }

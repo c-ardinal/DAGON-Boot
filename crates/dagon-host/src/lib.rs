@@ -16,9 +16,10 @@ pub mod rom;
 pub use dagon_romlink::{RomError, Stats as RomStats};
 pub use ops::{
     check_release, reason, ConfirmOutcome, Discovery, Event, NodeOutcome, NodeState, Outcome,
-    RecoverAssets, RecoverPath, NODE_POLL_MS, NODE_TRIAL_MS,
+    RecoverAssets, RecoverPath, CONFIRM_RETRY_MS, NODE_POLL_MS, NODE_TRIAL_MS,
 };
 
+use alloc::boxed::Box;
 use alloc::vec;
 use alloc::vec::Vec;
 use dagon_conform::timeout::REQUEST_MS;
@@ -166,6 +167,9 @@ const READ_CHUNK: usize = 1024;
 /// returns at once or after the transport's short read wait).
 const DRAIN_READS: usize = 64;
 
+/// Receives [`Host::note`] lines.
+pub type Note = Box<dyn FnMut(&str) + Send>;
+
 /// A session with one hub. Remembers the versions it applied, for the
 /// confirm rule after a manual reconnect.
 pub struct Host<T: Transport, C: Clock> {
@@ -182,6 +186,9 @@ pub struct Host<T: Transport, C: Clock> {
     /// Pause between a node's HELLO polls after REBOOT
     /// ([`NODE_POLL_MS`]; tests show a longer one misses the trial).
     pub node_poll_ms: u32,
+    /// Lines about steps that are retried (a CONFIRM sent again), for the
+    /// caller's log; `None`: not shown.
+    pub note: Option<Note>,
 }
 
 impl<T: Transport, C: Clock> Host<T, C> {
@@ -195,6 +202,13 @@ impl<T: Transport, C: Clock> Host<T, C> {
             opened: Vec::new(),
             stale: true,
             node_poll_ms: ops::NODE_POLL_MS,
+            note: None,
+        }
+    }
+
+    fn note(&mut self, line: &str) {
+        if let Some(f) = self.note.as_mut() {
+            f(line);
         }
     }
 

@@ -1,6 +1,7 @@
 //! The procedures: discover, status, push_topology, apply, confirm,
 //! rollback, recover.
 
+use alloc::format;
 use alloc::vec;
 use alloc::vec::Vec;
 use dagon_conform::timeout::{erase_ms, REBOOT_WAIT_MS, REQUEST_MS, VERIFY_MS};
@@ -37,6 +38,23 @@ const _: () = {
     // (3 attempts of about 4 s plus start-up), so silence there is not
     // taken for a lost node.
     assert!(REBOOT_WAIT_MS >= NODE_MAX_ATTEMPTS * (NODE_TRIAL_MS + 1_000) + 2_000);
+};
+/// Pauses before CONFIRM is sent again after E_STATE: the image runs but its
+/// self-check does not pass yet (its tasks are still starting, e.g. the
+/// watch sample's first heartbeat behind the display start-up). Together
+/// (2.1 s) they stay inside one boot attempt ([`NODE_TRIAL_MS`]), part of
+/// which the reboot and the HELLO poll have already used; an image whose
+/// self-check never passes is still reset by its trial watchdog and rolls
+/// back. A target that confirms at once never waits.
+pub const CONFIRM_RETRY_MS: [u32; 5] = [100, 200, 400, 600, 800];
+const _: () = {
+    let mut total = 0;
+    let mut i = 0;
+    while i < CONFIRM_RETRY_MS.len() {
+        total += CONFIRM_RETRY_MS[i];
+        i += 1;
+    }
+    assert!(total + NODE_POLL_MS + 2 * REQUEST_MS < NODE_TRIAL_MS);
 };
 /// Pause between reopen attempts while the hub is away.
 pub const REOPEN_MS: u32 = 1_000;
@@ -298,11 +316,35 @@ impl<T: Transport, C: Clock> Host<T, C> {
         self.set_applied(to, v);
         let h = self.await_version(to, v).await?;
         if h.trial {
-            self.call(to, Cmd::Confirm, &[target::APP], VERIFY_MS)
-                .await?;
+            self.confirm_trial(to, v).await?;
         }
         self.emit(on_event, node, phase::CONFIRM, 100, v).await;
         Ok(())
+    }
+
+    /// CONFIRM, sent again after each [`CONFIRM_RETRY_MS`] pause while the
+    /// target answers E_STATE; then E_STATE fails it as before.
+    async fn confirm_trial(&mut self, to: Target, v: Version) -> Result<(), T::Error> {
+        let mut pauses = CONFIRM_RETRY_MS.iter();
+        loop {
+            let r = self.call(to, Cmd::Confirm, &[target::APP], VERIFY_MS).await;
+            let not_ready = matches!(
+                r,
+                Err(Error::Rejected {
+                    cmd: Cmd::Confirm,
+                    status: Status::State
+                })
+            );
+            match pauses.next() {
+                Some(&ms) if not_ready => {
+                    self.note(&format!(
+                        "{to:?}: {v} not ready to confirm (E_STATE); again in {ms} ms"
+                    ));
+                    self.clock.sleep_ms(ms).await;
+                }
+                _ => return r.map(|_| ()),
+            }
+        }
     }
 
     /// Polls HELLO after REBOOT until `v` answers (hub: reopening the port).

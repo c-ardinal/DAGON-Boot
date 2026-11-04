@@ -3,9 +3,10 @@
 //! inactive slot, trial, CONFIRM, then SET_PENDING back to the previously
 //! confirmed slot.
 
-use dagon_agent::{Agent, Config, DefaultHooks, SlotStore};
+use dagon_agent::{Agent, Config, SlotStore, Transition};
 use dagon_core::boot::{decide, BootConfig, Decision, SlotLayout};
 use dagon_core::log::{Log, LogLayout, SlotRef};
+use dagon_events::{compose, Bounds, Composed, Layer, Nop, Published, Watchdog};
 use dagon_format::header::*;
 use dagon_format::statelog::{kind, reason, FaceHeader};
 use dagon_format::{key_id, sha256, Version};
@@ -163,8 +164,23 @@ fn config() -> Config {
     }
 }
 
+type Chain = Composed<&'static Published<(), 4>, Nop, Nop, fn() -> u64>;
+
+/// The app layer's chain of one start (no extensions).
+fn chain() -> Chain {
+    let events: &'static mut Published<(), 4> = Box::leak(Box::new(Published::new()));
+    let now: fn() -> u64 = || 0;
+    compose(
+        Layer::App,
+        events,
+        Nop,
+        Nop,
+        Bounds::new(now, Watchdog::new(4000, 8000)),
+    )
+}
+
 struct Node {
-    agent: Agent<KindSStore<Mem>, DefaultHooks>,
+    agent: Agent<KindSStore<Mem>, Chain>,
     seq: u8,
 }
 
@@ -181,7 +197,7 @@ impl Node {
         let d = decide(&mut m, &mut log, &SLOTS, &cfg);
         let store = KindSStore::load(m, &LOG, SLOTS).unwrap();
         let node = Node {
-            agent: Agent::new(config(), store, DefaultHooks),
+            agent: Agent::new(config(), store, chain()),
             seq: 0,
         };
         (node, d)
@@ -357,11 +373,12 @@ fn topology_target_is_unsupported() {
 #[test]
 fn unaligned_chunks_are_buffered_and_flushed_padded() {
     let mut s = KindSStore::load(provisioned(), &LOG, SLOTS).unwrap();
+    let t = Transition::for_store_tests();
     let data: Vec<u8> = (1..=10).collect();
-    s.erase(target::APP, B, 10).unwrap();
+    s.erase(target::APP, B, 10, &t).unwrap();
     let mut off = 0;
     for n in [3, 1, 5, 1] {
-        s.write(target::APP, B, off, &data[off as usize..][..n])
+        s.write(target::APP, B, off, &data[off as usize..][..n], &t)
             .unwrap();
         off += n as u32;
     }
@@ -370,6 +387,6 @@ fn unaligned_chunks_are_buffered_and_flushed_padded() {
     assert_eq!(&back[..10], &data[..]);
     assert_eq!(&back[10..], [0xFF, 0xFF]);
     // Offsets must continue where the last write ended.
-    s.erase(target::APP, B, 10).unwrap();
-    assert!(s.write(target::APP, B, 4, &data[..4]).is_err());
+    s.erase(target::APP, B, 10, &t).unwrap();
+    assert!(s.write(target::APP, B, 4, &data[..4], &t).is_err());
 }

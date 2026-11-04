@@ -113,7 +113,9 @@ dependencies = [
 name = "dagon-agent"
 version = "0.1.0"
 dependencies = [
+ "critical-section",
  "dagon-core",
+ "dagon-events",
  "dagon-format",
  "dagon-port",
  "dagon-proto",
@@ -124,7 +126,9 @@ dependencies = [
 name = "dagon-catalog"
 version = "0.0.0"
 dependencies = [
+ "dagon-agent",
  "dagon-events",
+ "dagon-sim",
  "serde_json",
 ]
 
@@ -160,6 +164,7 @@ version = "0.1.0"
 dependencies = [
  "dagon-agent",
  "dagon-core",
+ "dagon-events",
  "dagon-format",
  "dagon-port",
  "dagon-proto",
@@ -242,6 +247,7 @@ name = "dagon-sim"
 version = "0.1.0"
 dependencies = [
  "dagon-agent",
+ "dagon-events",
  "dagon-format",
  "dagon-port",
  "dagon-proto",

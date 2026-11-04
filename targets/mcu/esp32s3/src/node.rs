@@ -40,7 +40,9 @@ use crate::{
     sys::{EspClock, EspReset, RtcWatchdog},
     TRIAL_WDT_MS,
 };
-use dagon_agent::{Agent, Hooks, SlotStore, StoreError, IDLE_TIMEOUT_MS};
+use dagon_agent::{Agent, SlotStore, StoreError, IDLE_TIMEOUT_MS};
+use dagon_events::{Published, Watchdog as Periods};
+use dagon_mcu_common::hooks::{node_chain, Events, NodeChain};
 use dagon_mcu_common::link::Link as DagonLink;
 use dagon_port::{BootSelectV, Reset, Watchdog};
 use dagon_proto::payload::SlotState;
@@ -210,7 +212,7 @@ type Store = EspStore<
     EspBootSelect<'static, 'static>,
     TrialWatchdog<RtcWatchdog, EspClock>,
 >;
-type Node = Agent<Store, NodeHooks>;
+type Node = Agent<Store, NodeChain>;
 
 impl Otadata for EspBootSelect<'_, '_> {
     fn running(&self) -> u8 {
@@ -224,16 +226,6 @@ impl Otadata for EspBootSelect<'_, '_> {
     }
     fn confirm(&mut self) -> Result<(), StoreError> {
         EspBootSelect::confirm(self).map_err(|_| StoreError::Flash)
-    }
-}
-
-pub struct NodeHooks {
-    self_check: fn() -> bool,
-}
-
-impl Hooks for NodeHooks {
-    fn self_check(&mut self) -> bool {
-        (self.self_check)()
     }
 }
 
@@ -296,14 +288,23 @@ impl Link {
             store.wdt.end_trial();
         }
         publish_startup(&mut store);
-        let hooks = NodeHooks {
-            self_check: cfg.self_check,
+        static EVENTS: StaticCell<Events> = StaticCell::new();
+        let now_us: fn() -> u64 = || {
+            use dagon_port::Clock;
+            EspClock.now_us()
         };
+        let periods = Periods::new(TRIAL_WDT_MS, TRIAL_WDT_MS);
+        let chain = node_chain(
+            EVENTS.init(Published::new()),
+            cfg.self_check,
+            now_us,
+            periods,
+        );
         Some(Self {
             agent: Agent::new(
                 crate::config(cfg.mode, crate::target_tag(p.target_tag)),
                 store,
-                hooks,
+                chain,
             ),
             uart,
             usb,
@@ -406,7 +407,7 @@ impl Link {
                 0
             }
             Next::Reset => {
-                self.agent.hooks().before_reboot();
+                self.agent.before_reboot();
                 EspReset.reset()
             }
             Next::CheckTrial => {

@@ -6,10 +6,11 @@ version = "0.1.0"
 
 [dependencies]
 dagon-core = { path = "../dagon-core" }
-dagon-agent = { path = "../dagon-agent" }
 dagon-format = { path = "../dagon-format" }
 dagon-port = { path = "../dagon-port" }
 dagon-proto = { path = "../dagon-proto" }
 
 [dev-dependencies]
+dagon-agent = { path = "../dagon-agent" }
+dagon-events = { path = "../dagon-events" }
 ed25519-compact = { version = "2.6", default-features = false }

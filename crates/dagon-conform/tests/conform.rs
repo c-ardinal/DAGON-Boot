@@ -2,11 +2,12 @@
 //! in-memory slot store and flash, and a simulated boot core (trial,
 //! watchdog, rollback after 3 attempts).
 
-use dagon_agent::{Agent, Config, DefaultHooks, SlotStore, StoreError};
+use dagon_agent::{Agent, Config, SlotStore, StoreError, Transition};
 use dagon_conform::node::{self, NodeSetup, RESPONSE_MAX};
 use dagon_conform::pc::{link_max_payload, Channel, Images, NoAnswer, Runner, SetupError};
 use dagon_conform::report::{Progress, Report, Verdict};
 use dagon_conform::CTS;
+use dagon_events::{compose, Bounds, Composed, Layer, Nop, Published, Watchdog};
 use dagon_format::header::*;
 use dagon_format::statelog::reason;
 use dagon_format::{key_id, sha256, Version};
@@ -193,13 +194,20 @@ impl SlotStore for Mem {
             0
         }
     }
-    fn erase(&mut self, _t: u8, slot: u8, len: u32) -> Result<(), StoreError> {
+    fn erase(&mut self, _t: u8, slot: u8, len: u32, _: &Transition) -> Result<(), StoreError> {
         self.bodies[slot as usize][..len as usize].fill(0xFF);
         self.headers[slot as usize] = [0xFF; HEADER_SIZE];
         self.status.slots[slot as usize] = SlotInfo::default();
         Ok(())
     }
-    fn write(&mut self, _t: u8, slot: u8, off: u32, data: &[u8]) -> Result<(), StoreError> {
+    fn write(
+        &mut self,
+        _t: u8,
+        slot: u8,
+        off: u32,
+        data: &[u8],
+        _: &Transition,
+    ) -> Result<(), StoreError> {
         self.bodies[slot as usize][off as usize..][..data.len()].copy_from_slice(data);
         Ok(())
     }
@@ -208,7 +216,12 @@ impl SlotStore for Mem {
         buf.copy_from_slice(src.ok_or(StoreError::Range)?);
         Ok(())
     }
-    fn write_header(&mut self, slot: u8, h: &[u8; HEADER_SIZE]) -> Result<(), StoreError> {
+    fn write_header(
+        &mut self,
+        slot: u8,
+        h: &[u8; HEADER_SIZE],
+        _: &Transition,
+    ) -> Result<(), StoreError> {
         self.headers[slot as usize] = *h;
         self.status.slots[slot as usize] = SlotInfo {
             state: SlotState::Written,
@@ -221,11 +234,21 @@ impl SlotStore for Mem {
         *out = self.headers[slot as usize];
         Ok(())
     }
-    fn set_pending(&mut self, slot: u8, _h: &[u8; HEADER_SIZE]) -> Result<(), StoreError> {
+    fn set_pending(
+        &mut self,
+        slot: u8,
+        _h: &[u8; HEADER_SIZE],
+        _: &Transition,
+    ) -> Result<(), StoreError> {
         self.status.slots[slot as usize].state = SlotState::Pending;
         Ok(())
     }
-    fn confirm(&mut self, slot: u8, _h: &[u8; HEADER_SIZE]) -> Result<(), StoreError> {
+    fn confirm(
+        &mut self,
+        slot: u8,
+        _h: &[u8; HEADER_SIZE],
+        _: &Transition,
+    ) -> Result<(), StoreError> {
         let old = self.status.confirmed;
         self.last_confirm = Some((slot, old));
         if old != slot && (old as usize) < 2 {
@@ -255,8 +278,24 @@ struct Faults {
     hello_max_payload: Option<u16>,
 }
 
+type Chain = Composed<&'static Published<(), 4>, Nop, Nop, fn() -> u64>;
+
+/// The app layer's chain of a fresh start (no extensions).
+fn chain() -> Chain {
+    let events: &'static mut Published<(), 4> = Box::leak(Box::new(Published::new()));
+    let now: fn() -> u64 = || 0;
+    compose(
+        Layer::App,
+        events,
+        Nop,
+        Nop,
+        Bounds::new(now, Watchdog::new(4000, 4000)),
+    )
+}
+
 struct FakeNode {
-    agent: Agent<Mem, DefaultHooks>,
+    cfg: Config,
+    agent: Agent<Mem, Chain>,
     flash: MemFlash,
     max_payload: usize,
     faults: Faults,
@@ -283,7 +322,8 @@ impl FakeNode {
         let mut flash = MemFlash::new();
         flash.erase_works = !faults.erase_does_nothing;
         FakeNode {
-            agent: Agent::new(cfg, Mem::new(), DefaultHooks),
+            agent: Agent::new(cfg.clone(), Mem::new(), chain()),
+            cfg,
             flash,
             max_payload,
             faults,
@@ -299,8 +339,9 @@ impl FakeNode {
     /// Boot core decision on every reset.
     fn boot(&mut self) {
         self.reboots += 1;
-        let lost = self.agent.store().last_confirm.take();
-        let st = &mut self.agent.store().status;
+        let mut mem = std::mem::replace(self.agent.store(), Mem::new());
+        let lost = mem.last_confirm.take();
+        let st = &mut mem.status;
         if let (true, Some((slot, old))) = (self.faults.confirm_not_persisted, lost) {
             st.slots[slot as usize].state = SlotState::Trying;
             st.confirmed = old;
@@ -334,6 +375,7 @@ impl FakeNode {
         } else {
             self.now + BOOT_MS
         };
+        self.agent = Agent::new(self.cfg.clone(), mem, chain());
     }
 
     /// Rewrites the agent's answer for the injected faults.

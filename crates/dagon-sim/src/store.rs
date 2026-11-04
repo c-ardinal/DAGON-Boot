@@ -2,7 +2,7 @@
 //! (inline headers, one state log face), plus the boot decision made at reset.
 
 use crate::flash::SimFlash;
-use dagon_agent::{SlotStore, StoreError};
+use dagon_agent::{SlotStore, StoreError, Transition};
 use dagon_format::header::{self, ImageHeader, HEADER_SIZE};
 use dagon_format::statelog::{self, kind, reason, FaceHeader, Record, RECORD_SIZE};
 use dagon_format::{sha256, Version};
@@ -146,7 +146,7 @@ impl SimStore {
             self.program(base, &fh)?;
         }
         let at = base as usize + statelog::FACE_HEADER_SIZE + used * RECORD_SIZE;
-        // ponytail: one face, no compaction; a full face fails the append.
+        // One face, no compaction: a full face fails the append.
         if at + RECORD_SIZE > (base + len) as usize {
             return Err(StoreError::Flash);
         }
@@ -206,9 +206,9 @@ impl SimStore {
             .and_then(|h| h.try_into().ok())
             .ok_or(StoreError::Range)?;
         let body = &image[HEADER_SIZE..];
-        self.erase(target::APP, slot, body.len() as u32)?;
-        self.write(target::APP, slot, 0, body)?;
-        self.write_header(slot, &hdr)?;
+        self.erase_body(target::APP, slot, body.len() as u32)?;
+        self.write_body(target::APP, slot, 0, body)?;
+        self.place_header(slot, &hdr)?;
         self.append(Self::log_record(kind::PROVISION, slot, reason::NONE, &hdr))?;
         self.append(Self::log_record(kind::CONFIRMED, slot, reason::NONE, &hdr))
     }
@@ -293,6 +293,39 @@ impl SimStore {
     }
 }
 
+impl SimStore {
+    fn erase_body(&mut self, t: u8, slot: u8, len: u32) -> Result<(), StoreError> {
+        let (body, cap) = self.region(t, slot)?;
+        if len > cap {
+            return Err(StoreError::Range);
+        }
+        let start = if t == target::APP {
+            body - HEADER_SIZE as u32
+        } else {
+            body
+        };
+        self.erase_range(start, body + len.max(1))
+    }
+
+    fn write_body(&mut self, t: u8, slot: u8, offset: u32, data: &[u8]) -> Result<(), StoreError> {
+        let (body, cap) = self.region(t, slot)?;
+        if offset as u64 + data.len() as u64 > cap as u64 {
+            return Err(StoreError::Range);
+        }
+        self.program(body + offset, data)
+    }
+
+    fn place_header(&mut self, slot: u8, hdr: &[u8; HEADER_SIZE]) -> Result<(), StoreError> {
+        let a = self
+            .layout
+            .slots
+            .get(slot as usize)
+            .ok_or(StoreError::Range)?
+            .0;
+        self.program(a, hdr)
+    }
+}
+
 impl SlotStore for SimStore {
     /// Folds the log; a record only counts while its slot still holds the
     /// header it names.
@@ -349,25 +382,19 @@ impl SlotStore for SimStore {
         self.region(t, slot).map_or(0, |(_, l)| l)
     }
 
-    fn erase(&mut self, t: u8, slot: u8, len: u32) -> Result<(), StoreError> {
-        let (body, cap) = self.region(t, slot)?;
-        if len > cap {
-            return Err(StoreError::Range);
-        }
-        let start = if t == target::APP {
-            body - HEADER_SIZE as u32
-        } else {
-            body
-        };
-        self.erase_range(start, body + len.max(1))
+    fn erase(&mut self, t: u8, slot: u8, len: u32, _: &Transition) -> Result<(), StoreError> {
+        self.erase_body(t, slot, len)
     }
 
-    fn write(&mut self, t: u8, slot: u8, offset: u32, data: &[u8]) -> Result<(), StoreError> {
-        let (body, cap) = self.region(t, slot)?;
-        if offset as u64 + data.len() as u64 > cap as u64 {
-            return Err(StoreError::Range);
-        }
-        self.program(body + offset, data)
+    fn write(
+        &mut self,
+        t: u8,
+        slot: u8,
+        offset: u32,
+        data: &[u8],
+        _: &Transition,
+    ) -> Result<(), StoreError> {
+        self.write_body(t, slot, offset, data)
     }
 
     fn read(&mut self, t: u8, slot: u8, offset: u32, buf: &mut [u8]) -> Result<(), StoreError> {
@@ -380,14 +407,13 @@ impl SlotStore for SimStore {
             .map_err(|_| StoreError::Flash)
     }
 
-    fn write_header(&mut self, slot: u8, hdr: &[u8; HEADER_SIZE]) -> Result<(), StoreError> {
-        let a = self
-            .layout
-            .slots
-            .get(slot as usize)
-            .ok_or(StoreError::Range)?
-            .0;
-        self.program(a, hdr)
+    fn write_header(
+        &mut self,
+        slot: u8,
+        hdr: &[u8; HEADER_SIZE],
+        _: &Transition,
+    ) -> Result<(), StoreError> {
+        self.place_header(slot, hdr)
     }
 
     fn read_header(&mut self, slot: u8, out: &mut [u8; HEADER_SIZE]) -> Result<(), StoreError> {
@@ -400,7 +426,12 @@ impl SlotStore for SimStore {
         self.flash.read(a, out).map_err(|_| StoreError::Flash)
     }
 
-    fn set_pending(&mut self, slot: u8, hdr: &[u8; HEADER_SIZE]) -> Result<(), StoreError> {
+    fn set_pending(
+        &mut self,
+        slot: u8,
+        hdr: &[u8; HEADER_SIZE],
+        _: &Transition,
+    ) -> Result<(), StoreError> {
         self.append(Self::log_record(
             kind::SLOT_PENDING,
             slot,
@@ -409,7 +440,12 @@ impl SlotStore for SimStore {
         ))
     }
 
-    fn confirm(&mut self, slot: u8, hdr: &[u8; HEADER_SIZE]) -> Result<(), StoreError> {
+    fn confirm(
+        &mut self,
+        slot: u8,
+        hdr: &[u8; HEADER_SIZE],
+        _: &Transition,
+    ) -> Result<(), StoreError> {
         self.append(Self::log_record(kind::CONFIRMED, slot, reason::NONE, hdr))
     }
 }

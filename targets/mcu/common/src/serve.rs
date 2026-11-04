@@ -4,12 +4,12 @@
 //! reports, a conformance build answering first, logging) comes through
 //! [`ServeHost`].
 
-use dagon_agent::{Agent, Hooks, SlotStore, IDLE_TIMEOUT_MS};
+use dagon_agent::{Agent, AppChain, SlotStore, IDLE_TIMEOUT_MS};
 
 use crate::link::{Link, LinkError};
 
 /// What the serving loop asks of its MCU.
-pub trait ServeHost<S: SlotStore, H: Hooks> {
+pub trait ServeHost<S: SlotStore, X: AppChain> {
     /// Milliseconds on a monotonic clock.
     fn now_ms(&self) -> u64;
     /// Waiting for a request (no deadline of its own).
@@ -21,12 +21,12 @@ pub trait ServeHost<S: SlotStore, H: Hooks> {
     fn on_request(&mut self) {}
     /// Answers `request` before the agent does (a conformance build);
     /// `None` leaves it to the agent.
-    fn intercept(&mut self, _agent: &mut Agent<S, H>, _request: &[u8]) -> Option<&[u8]> {
+    fn intercept(&mut self, _agent: &mut Agent<S, X>, _request: &[u8]) -> Option<&[u8]> {
         None
     }
     /// The request (command `cmd`) was answered (e.g. trial state re-read,
     /// timing log).
-    fn after(&mut self, _agent: &mut Agent<S, H>, _cmd: u8) {}
+    fn after(&mut self, _agent: &mut Agent<S, X>, _cmd: u8) {}
     /// A read failed (logging); the loop goes on.
     fn on_error(&mut self, _e: LinkError) {}
 }
@@ -43,12 +43,12 @@ pub enum Exit {
 /// Serves `agent` over `link` until a reboot is due or the link closes.
 /// A transfer the PC abandoned is dropped after `IDLE_TIMEOUT_MS` without
 /// requests, checked whenever the link's read times out.
-pub async fn serve<L, S, H, X>(link: &mut L, agent: &mut Agent<S, H>, host: &mut X) -> Exit
+pub async fn serve<L, S, X, H>(link: &mut L, agent: &mut Agent<S, X>, host: &mut H) -> Exit
 where
     L: Link,
     S: SlotStore,
-    H: Hooks,
-    X: ServeHost<S, H>,
+    X: AppChain,
+    H: ServeHost<S, X>,
 {
     let mut last_request: Option<u64> = None;
     loop {
@@ -96,7 +96,7 @@ where
         // link that cannot tell (a new request came first) keeps serving
         // instead.
         if reboot {
-            agent.hooks().before_reboot();
+            agent.before_reboot();
             if link.flush().await.is_ok() {
                 return Exit::Reboot;
             }
@@ -111,7 +111,8 @@ mod tests {
     use std::collections::VecDeque;
     use std::vec::Vec;
 
-    use dagon_agent::DefaultHooks;
+    use crate::hooks::{always, node_chain, NodeChain};
+    use dagon_events::{Published, Watchdog};
     use dagon_proto::payload::{reboot_mode, HelloResp};
     use dagon_proto::{max_payload, split_status, Cmd, Frame, Status};
     use dagon_sim::store::SimStore;
@@ -180,7 +181,7 @@ mod tests {
         answer: Option<Vec<u8>>,
     }
 
-    impl<S: SlotStore, H: Hooks> ServeHost<S, H> for Host {
+    impl<S: SlotStore, X: AppChain> ServeHost<S, X> for Host {
         fn now_ms(&self) -> u64 {
             0
         }
@@ -191,21 +192,19 @@ mod tests {
         fn on_request(&mut self) {
             self.requests += 1;
         }
-        fn intercept(&mut self, _: &mut Agent<S, H>, request: &[u8]) -> Option<&[u8]> {
+        fn intercept(&mut self, _: &mut Agent<S, X>, request: &[u8]) -> Option<&[u8]> {
             (request.get(5) == Some(&0x7F)).then_some(())?;
             self.answer.as_deref()
         }
-        fn after(&mut self, _: &mut Agent<S, H>, cmd: u8) {
+        fn after(&mut self, _: &mut Agent<S, X>, cmd: u8) {
             self.cmds.push(cmd);
         }
     }
 
-    fn agent() -> Agent<SimStore, DefaultHooks> {
-        Agent::new(
-            dagon_sim::f401_config([0; 32]),
-            SimStore::default(),
-            DefaultHooks,
-        )
+    fn agent() -> Agent<SimStore, NodeChain> {
+        let events = std::boxed::Box::leak(std::boxed::Box::new(Published::new()));
+        let chain = node_chain(events, always, || 0, Watchdog::new(4000, 4000));
+        Agent::new(dagon_sim::f401_config([0; 32]), SimStore::default(), chain)
     }
 
     fn hello(seq: u8) -> Vec<u8> {

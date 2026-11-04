@@ -416,11 +416,14 @@ For firmware that is not a `dagon new` project:
    signed image header and the body at slot start + 0x200.
 3. Implement the `dagon-port` traits for your board (`Flash`, `Link`,
    `Reset`, `Watchdog`, and `BootSelectS` or `BootSelectV`) and a
-   `dagon_agent::SlotStore`, then start the agent with your link and hooks:
+   `dagon_agent::SlotStore`, compose the app layer's chain (your
+   extensions answer the decision points and observe the events, see
+   `docs/events.md`), then start the agent with your link:
 
    ```rust
+   let chain = dagon_events::compose(Layer::App, events, board_exts, user_exts, bounds);
    let cfg = dagon_agent::Config { pubkey, mcu_id, port_kind, target_tag, role, mode, max_payload };
-   let mut agent = dagon_agent::Agent::new(cfg, store, hooks); // hooks: dagon_agent::Hooks
+   let mut agent = dagon_agent::Agent::new(cfg, store, chain);
    agent.run(&mut link, &mut reset).await;                    // serves requests forever
    ```
 

@@ -25,7 +25,6 @@
 #![no_main]
 
 use board::{Board, BoardDef};
-use dagon_agent::{Agent, SlotStore};
 use dagon_board_nucleo_f401re as board;
 use dagon_board_nucleo_f401re::seg;
 use dagon_mcu_stm32f401re::node::{self, ACTIVE};
@@ -78,7 +77,6 @@ fn main() -> ! {
             })
         }
     };
-    let own = node::own_header(&mut store);
     let version = node::own_version(&mut store);
     let splash = if dagon_mcu_stm32f401re::TEST_KEY {
         info!("TEST KEY: built with the public test verifying key");
@@ -97,21 +95,17 @@ fn main() -> ! {
         s.attempts,
         s.last_reason
     );
-    if on_trial && SELF_CONFIRM {
-        match own.map(|h| store.confirm(ACTIVE, &h)) {
-            Some(Ok(())) => info!("confirmed slot {}", ACTIVE),
-            _ => error!("self-confirm failed"),
-        }
-    }
-
     let period = node::watchdog_period_ms(on_trial);
     node::install_watchdog(dagon.iwdg, &GUARD, period, &store);
     let (target, regs) = Board::open_link(dagon.link);
-    let agent = Agent::new(
-        node::config(dagon_mcu_stm32f401re::target_tag!()),
-        store,
-        node::SelfCheck(self_check),
-    );
+    let mut agent = node::agent(dagon_mcu_stm32f401re::target_tag!(), store, self_check);
+    if on_trial && SELF_CONFIRM {
+        match agent.confirm_own() {
+            Ok(()) => info!("confirmed slot {}", ACTIVE),
+            Err(_) => error!("self-confirm failed"),
+        }
+        GUARD.set_trial(node::on_trial(agent.store()));
+    }
 
     let high = dagon_mcu_stm32f401re::exec::start();
     let link = dagon_mcu_stm32f401re::links::I2c::new(target, regs);

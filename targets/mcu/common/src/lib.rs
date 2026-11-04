@@ -1,6 +1,6 @@
 //! MCU-independent building blocks of the DAGON MCU packages:
 //! - [`guard`]: the liveness-gated watchdog guard apps declare;
-//! - [`hooks`]: the app's CONFIRM self-check as agent hooks;
+//! - [`hooks`]: the app layer's chain, with the app's CONFIRM self-check;
 //! - [`tag`]: the node's image target tag, checked;
 //! - [`link`]: the one frame-link interface of every hop, link kinds;
 //! - [`liveness`]: deadline bookkeeping that gates watchdog feeding, with

@@ -268,7 +268,8 @@ dependencies = [
 name = "dagon-agent"
 version = "0.1.0"
 dependencies = [
- "dagon-core",
+ "critical-section",
+ "dagon-events",
  "dagon-format",
  "dagon-port",
  "dagon-proto",
@@ -281,6 +282,14 @@ dependencies = [
  "dagon-format",
  "dagon-port",
  "dagon-proto",
+]
+
+[[package]]
+name = "dagon-events"
+version = "0.1.0"
+dependencies = [
+ "dagon-format",
+ "embassy-sync",
 ]
 
 [[package]]
@@ -301,6 +310,7 @@ version = "0.1.0"
 dependencies = [
  "critical-section",
  "dagon-agent",
+ "dagon-events",
  "dagon-format",
  "dagon-port",
  "dagon-proto",
@@ -313,6 +323,7 @@ dependencies = [
  "cortex-m",
  "dagon-agent",
  "dagon-core",
+ "dagon-events",
  "dagon-format",
  "dagon-mcu-build",
  "dagon-mcu-common",
@@ -347,6 +358,7 @@ name = "dagon-sim"
 version = "0.1.0"
 dependencies = [
  "dagon-agent",
+ "dagon-events",
  "dagon-format",
  "dagon-port",
  "dagon-proto",

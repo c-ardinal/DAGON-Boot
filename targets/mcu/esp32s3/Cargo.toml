@@ -27,6 +27,7 @@ conform = ["dep:dagon-conform"]
 
 [dependencies]
 dagon-agent = { path = "../../../crates/dagon-agent" }
+dagon-events = { path = "../../../crates/dagon-events" }
 dagon-conform = { path = "../../../crates/dagon-conform", optional = true }
 dagon-format = { path = "../../../crates/dagon-format" }
 dagon-mcu-common = { path = "../common" }
@@ -34,6 +35,7 @@ dagon-port = { path = "../../../crates/dagon-port" }
 dagon-proto = { path = "../../../crates/dagon-proto" }
 
 [dev-dependencies]
+dagon-agent = { path = "../../../crates/dagon-agent", features = ["store-tests"] }
 ed25519-compact = { version = "2.6", default-features = false }
 
 [target.'cfg(target_arch = "xtensa")'.dependencies]

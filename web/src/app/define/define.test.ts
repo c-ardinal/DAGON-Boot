@@ -34,6 +34,26 @@ describe('define session', () => {
     expect(d.unsaved).toBe(true);
   });
 
+  test('an empty entry the file writes is content: recovery for a node that is not there is a change, and the check reports it', () => {
+    const d = new Define();
+    d.load(fromYaml(DESK_DEMO_YAML));
+    expect(d.problems.filter((p) => p.path.includes('ghost'))).toEqual([]);
+    const t = d.doc.topo;
+    expect(d.importRelease({ ...t, recovery: { ...t.recovery, ghost: [] } })).toBe(true);
+    expect(d.unsaved).toBe(true);
+    expect(d.problems.some((p) => p.path.includes('ghost'))).toBe(true);
+  });
+
+  test('an identical import while editing is stopped: no change, so nothing is asked and nothing moves', () => {
+    const d = new Define();
+    d.load(fromYaml(DESK_DEMO_YAML));
+    const rev = d.revision;
+    let asked = 0;
+    d.guard = () => (asked++, true);
+    expect(d.importRelease(JSON.parse(JSON.stringify(d.doc.topo)))).toBe(false);
+    expect([asked, d.revision, d.unsaved]).toEqual([0, rev, false]);
+  });
+
   test('editing stopped by the lock table: no path changes the 構成 (keys, double-click, drag, import, undo)', () => {
     const d = new Define();
     d.placeSample();

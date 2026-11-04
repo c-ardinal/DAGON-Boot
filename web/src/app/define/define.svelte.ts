@@ -3,15 +3,16 @@
 import { supportedBoards } from '../../wasm/dagon.ts';
 import { ANNOUNCE, LINK_WHY } from '../copy.ts';
 import { DESK_DEMO, DESK_DEMO_YAML, type Config } from '../sample.ts';
-import { connect, emptyDoc, fromYaml, place, placeMcu, removeLink, removeNode, toConfig, toYaml, type Doc, type Topo } from './model.ts';
+import { connect, docWithDefaults, emptyDoc, fromYaml, place, placeMcu, removeLink, withDefaults, removeNode, toConfig, toYaml, type Doc, type Topo } from './model.ts';
 import type { SaveResult } from './cli.svelte.ts';
 import { keepComments } from './comments.ts';
 import { problems, type Problem } from './problems.ts';
 
 /**
- * A document's content as one string: keys sorted, and absent, empty-list and empty-map
- * values dropped (a default filled in is not a change). Two documents with the same string
- * are the same edit state, however they were built.
+ * A document's content as one string: its defaults filled in (by the same code that fills
+ * them when a file is read, so a filled-in default is not a change) and keys sorted. Every
+ * other value counts, an empty one included. Two documents with the same string are the
+ * same edit state, however they were built.
  */
 export function canonical(doc: Doc): string {
   const norm = (v: unknown): unknown => {
@@ -20,12 +21,11 @@ export function canonical(doc: Doc): string {
     const out: Record<string, unknown> = {};
     for (const k of Object.keys(v).sort()) {
       const x = norm((v as Record<string, unknown>)[k]);
-      const empty = x === undefined || (Array.isArray(x) && x.length === 0) || (x !== null && typeof x === 'object' && !Array.isArray(x) && Object.keys(x).length === 0);
-      if (!empty) out[k] = x;
+      if (x !== undefined) out[k] = x;
     }
     return out;
   };
-  return JSON.stringify(norm(doc));
+  return JSON.stringify(norm(docWithDefaults(doc)));
 }
 
 /** Undo depth; older steps fall off. */
@@ -268,7 +268,7 @@ export class Define {
    * shares; undoable.
    */
   importRelease(topo: Topo): boolean {
-    const t = { buses: [], links: [], recovery: {}, ...topo };
+    const t = withDefaults(topo);
     const ids = new Set(t.nodes.map((n) => n.id));
     const keep = <T>(r: Record<string, T> | undefined) => Object.fromEntries(Object.entries(r ?? {}).filter(([id]) => ids.has(id)));
     if (!this.apply({ topo: t, names: keep(this.doc.names), boards: keep(this.doc.boards) })) return false;

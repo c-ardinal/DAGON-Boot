@@ -2,15 +2,19 @@
 //! STM32F401 slot store: its extensions observe every `app.*` event of an
 //! update and its trial and answer the decision points; the board's
 //! bring-up runs before `app.bring_up`; the application confirms its own
-//! trial with `Confirm::Own`.
+//! trial with `Confirm::Own`; the board package's extension sits between
+//! the publisher and the app's; the published snapshot follows an update.
 
 use std::sync::{Arc, Mutex};
 
+use dagon_agent::snapshot::{AppSnapshot, Phase};
 use dagon_agent::{Agent, SlotStore};
 use dagon_events::{BoardBringUp, Ctx, Event, Extension, Health, Published, TrialInfo, Watchdog};
 use dagon_format::header::*;
 use dagon_format::{key_id, sha256, Version};
-use dagon_mcu_common::hooks::{finish_start, node_chain, App, Confirm, NodeChain};
+use dagon_mcu_common::hooks::{
+    finish_start, node_chain, App, AppEvents, BoardExtension, Confirm, NodeChain,
+};
 use dagon_proto::payload::*;
 use dagon_proto::{split_status, Cmd, Frame, Status};
 use dagon_sim::store::Boot;
@@ -25,10 +29,12 @@ const SEED: [u8; 32] = [
 
 type Log = Arc<Mutex<Vec<String>>>;
 
-/// An application extension: logs every event and answers `self_check`.
+/// An application (or, with a `prefix`, a board package) extension: logs
+/// every event and answers `self_check`.
 struct AppExt {
     log: Log,
     health: Option<Health>,
+    prefix: &'static str,
 }
 
 impl Extension for AppExt {
@@ -38,9 +44,9 @@ impl Extension for AppExt {
     fn on_event(&mut self, e: &Event<'_>, _: &Ctx<'_>) {
         let k = e.kind();
         let k = if e.is_replayed() {
-            format!("replay:{k}")
+            format!("{}replay:{k}", self.prefix)
         } else {
-            k.to_string()
+            format!("{}{k}", self.prefix)
         };
         self.log.lock().unwrap().push(k);
     }
@@ -66,6 +72,7 @@ fn app(log: &Log, health: Option<Health>, confirm: Confirm) -> App {
     let ext: &'static mut AppExt = Box::leak(Box::new(AppExt {
         log: log.clone(),
         health,
+        prefix: "",
     }));
     App {
         self_check: dagon_mcu_common::hooks::always,
@@ -74,17 +81,32 @@ fn app(log: &Log, health: Option<Health>, confirm: Confirm) -> App {
     }
 }
 
-/// A node's agent the way the MCU packages' starts build it.
-fn start(store: &SimStore, app: App) -> Agent<SimStore, NodeChain> {
+/// A node's agent the way the MCU packages' starts build it, with the
+/// board package's extension `board`, and the app's events.
+fn start_with(
+    store: &SimStore,
+    board: Option<BoardExtension>,
+    app: App,
+) -> (Agent<SimStore, NodeChain>, AppEvents) {
     let events = Box::leak(Box::new(Published::new()));
-    let (chain, _reader) = node_chain(
+    let (chain, reader) = node_chain(
         events,
+        board,
         app.exts,
         app.self_check,
         || 0,
         Watchdog::new(4_000, 8_000),
     );
-    Agent::new(f401_config(desk::PUBKEY), store.clone(), chain)
+    let agent = Agent::new(f401_config(desk::PUBKEY), store.clone(), chain);
+    (agent, reader)
+}
+
+fn start(store: &SimStore, app: App) -> Agent<SimStore, NodeChain> {
+    start_with(store, None, app).0
+}
+
+fn snapshot(events: &AppEvents) -> AppSnapshot {
+    events.latest().expect("events were published").state
 }
 
 fn take(log: &Log) -> Vec<String> {
@@ -140,7 +162,21 @@ impl Wire {
         split_status(f.payload).unwrap().0
     }
 
-    fn transfer(&mut self, a: &mut Agent<SimStore, NodeChain>, slot: u8, img: &[u8]) {
+    /// Sends `part` from chunk `from` on, 200 bytes a chunk.
+    fn chunks(&mut self, a: &mut Agent<SimStore, NodeChain>, cmd: Cmd, part: &[u8], from: usize) {
+        let mut b = vec![0u8; 300];
+        for (i, chunk) in part.chunks(200).enumerate().skip(from) {
+            let c = XferChunk {
+                offset: (i * 200) as u32,
+                data: chunk,
+            };
+            let n = c.encode(&mut b).unwrap();
+            assert_eq!(self.call(a, cmd, &b[..n]), Status::Ok);
+        }
+    }
+
+    /// The transfer up to its first body chunk.
+    fn begin(&mut self, a: &mut Agent<SimStore, NodeChain>, slot: u8, img: &[u8]) {
         let mut b = vec![0u8; 300];
         let begin = XferBegin {
             target: target::APP,
@@ -151,17 +187,19 @@ impl Wire {
         let n = begin.encode(&mut b).unwrap();
         assert_eq!(self.call(a, Cmd::XferBegin, &b[..n]), Status::Ok);
         let (hdr, body) = img.split_at(HEADER_SIZE);
-        for (cmd, part) in [(Cmd::XferHdr, hdr), (Cmd::XferData, body)] {
-            for (i, chunk) in part.chunks(200).enumerate() {
-                let c = XferChunk {
-                    offset: (i * 200) as u32,
-                    data: chunk,
-                };
-                let n = c.encode(&mut b).unwrap();
-                assert_eq!(self.call(a, cmd, &b[..n]), Status::Ok);
-            }
-        }
+        self.chunks(a, Cmd::XferHdr, hdr, 0);
+        self.chunks(a, Cmd::XferData, &body[..200], 0);
+    }
+
+    /// The rest of a transfer [`Wire::begin`] started.
+    fn rest(&mut self, a: &mut Agent<SimStore, NodeChain>, img: &[u8]) {
+        self.chunks(a, Cmd::XferData, &img[HEADER_SIZE..], 1);
         assert_eq!(self.call(a, Cmd::XferEnd, &[]), Status::Ok);
+    }
+
+    fn transfer(&mut self, a: &mut Agent<SimStore, NodeChain>, slot: u8, img: &[u8]) {
+        self.begin(a, slot, img);
+        self.rest(a, img);
     }
 }
 
@@ -290,4 +328,102 @@ fn an_app_without_extensions_is_its_self_check() {
     update(&mut store, &log, Confirm::ByHost, None);
     let mut agent = start(&store, App::new(unhealthy));
     assert!(finish_start(&mut agent, None, Confirm::Own));
+}
+
+/// The board package's extension is in the chain at its place: after the
+/// publisher, before the app's extensions. It observes every event first
+/// and its decision answer stands over the app's.
+#[test]
+fn the_board_extension_observes_and_decides_before_the_app() {
+    let log: Log = Arc::default();
+    let mut store = provisioned();
+    update(&mut store, &log, Confirm::ByHost, None);
+    take(&log);
+    let board: &'static mut AppExt = Box::leak(Box::new(AppExt {
+        log: log.clone(),
+        health: Some(Health::Unhealthy),
+        prefix: "board:",
+    }));
+    let healthy_app = app(&log, Some(Health::Healthy), Confirm::Own);
+    let (mut a, _) = start_with(&store, Some(board), healthy_app);
+    assert!(
+        finish_start(&mut a, None, Confirm::Own),
+        "the board said no"
+    );
+    let seen = std::mem::take(&mut *log.lock().unwrap());
+    let at = seen.iter().position(|k| k == "board:starting").unwrap();
+    assert_eq!(seen[at + 1], "starting", "{seen:?}");
+    assert!(
+        seen.ends_with(&[
+            "board:self_check".into(),
+            "self_check".into(),
+            "board:confirm_refused".into(),
+            "confirm_refused".into(),
+        ]),
+        "{seen:?}"
+    );
+}
+
+/// The app's events fold into a snapshot (phase, version, progress,
+/// trial) that a display task waits on.
+#[test]
+fn the_published_snapshot_follows_an_update_and_its_trial() {
+    let log: Log = Arc::default();
+    let mut store = provisioned();
+    let (mut a, events) = start_with(&store, None, app(&log, None, Confirm::ByHost));
+    let s = snapshot(&events);
+    assert_eq!(
+        (s.phase, s.version, s.trial),
+        (Phase::Idle, Version::new(1, 0, 0), false)
+    );
+
+    let body: Vec<u8> = (0..900u32).map(|i| (i * 7) as u8).collect();
+    let img = image(1, Version::new(1, 1, 0), &body);
+    let mut w = Wire { seq: 0 };
+    w.begin(&mut a, 1, &img);
+    let s = snapshot(&events);
+    assert_eq!(s.phase, Phase::Transferring);
+    assert_eq!(s.progress, Some((200, 900)), "the first body chunk");
+    w.rest(&mut a, &img);
+    let s = snapshot(&events);
+    assert_eq!((s.phase, s.progress), (Phase::Written, None));
+    assert_eq!(
+        w.call(&mut a, Cmd::SetPending, &[target::APP, 1]),
+        Status::Ok
+    );
+    assert_eq!(snapshot(&events).phase, Phase::Pending);
+    assert_eq!(
+        w.call(&mut a, Cmd::Reboot, &[reboot_mode::NORMAL]),
+        Status::Ok
+    );
+    assert_eq!(snapshot(&events).phase, Phase::RebootPending);
+
+    assert_eq!(store.boot(), Boot::Run(1));
+    let (mut a, events) = start_with(&store, None, app(&log, None, Confirm::Own));
+    let s = snapshot(&events);
+    assert_eq!(
+        (s.phase, s.version, s.trial),
+        (Phase::Trial, Version::new(1, 1, 0), true)
+    );
+    finish_start(&mut a, None, Confirm::Own);
+    let s = snapshot(&events);
+    assert_eq!(
+        (s.phase, s.version, s.trial),
+        (Phase::Confirmed, Version::new(1, 1, 0), false)
+    );
+}
+
+/// A trial that runs out is shown as rolled back to the version that runs.
+#[test]
+fn the_snapshot_shows_a_rollback() {
+    let log: Log = Arc::default();
+    let mut store = provisioned();
+    update(&mut store, &log, Confirm::ByHost, None);
+    while store.boot() == Boot::Run(1) {}
+    let (_a, events) = start_with(&store, None, app(&log, None, Confirm::ByHost));
+    let s = snapshot(&events);
+    assert_eq!(
+        (s.phase, s.version, s.trial),
+        (Phase::RolledBack, Version::new(1, 0, 0), false)
+    );
 }

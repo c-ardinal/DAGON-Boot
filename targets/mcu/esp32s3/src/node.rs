@@ -49,6 +49,7 @@ use dagon_agent::{
     reply_status, Agent, SlotStore, StoreError, TrialPolicy, IDLE_TIMEOUT_MS, NO_ADDR,
 };
 use dagon_events::{Published, Watchdog as Periods};
+pub use dagon_mcu_common::hooks::BoardExtension;
 pub use dagon_mcu_common::hooks::{always, App, AppEvents, Confirm, NodeChain, SelfCheck};
 use dagon_mcu_common::hooks::{finish_start, node_chain, Events};
 use dagon_mcu_common::link::Link as DagonLink;
@@ -95,6 +96,10 @@ pub struct NodePeripherals<'d> {
     pub target_tag: &'static str,
     /// Board extras (bring-up, optional PMIC ROM entry).
     pub board: &'d mut dyn BoardDef,
+    /// The board package's extension, which the start puts in the node's
+    /// chain after the publisher and before the app's: it observes every
+    /// event and answers the decision points before the app.
+    pub board_extension: Option<BoardExtension>,
 }
 
 /// How the node identifies itself, and what the app hands DAGON (its
@@ -193,7 +198,7 @@ struct Start {
 /// the chip.
 pub fn start(
     _armed: WatchdogArmed,
-    p: NodePeripherals<'static>,
+    mut p: NodePeripherals<'static>,
     link_irq: FROM_CPU_INTR1<'static>,
     cfg: NodeConfig,
     liveness: &'static Liveness,
@@ -206,7 +211,15 @@ pub fn start(
     };
     let periods = Periods::new(TRIAL_WDT_MS, TRIAL_WDT_MS);
     let events = EVENTS.init(Published::new());
-    let (chain, events) = node_chain(events, cfg.app.exts, cfg.app.self_check, now_us, periods);
+    let board = p.board_extension.take();
+    let (chain, events) = node_chain(
+        events,
+        board,
+        cfg.app.exts,
+        cfg.app.self_check,
+        now_us,
+        periods,
+    );
     let start = Start {
         mode: cfg.mode,
         confirm: cfg.app.confirm,

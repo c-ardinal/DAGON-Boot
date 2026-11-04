@@ -58,6 +58,7 @@ async fn main(spawner: Spawner) {
         flash: p.FLASH,
         target_tag: wiring::NODE.tag,
         board: node::plain_board(),
+        board_extension: None,
     };
     node::start(
         armed,

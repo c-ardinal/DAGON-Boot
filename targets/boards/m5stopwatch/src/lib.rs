@@ -222,6 +222,7 @@ pub fn start(
         flash: pins.flash,
         target_tag: TARGET_TAG,
         board: BOARD.init(M5StopWatch),
+        board_extension: None,
     };
     node::start(armed, p, pins.link_irq, cfg, liveness)
 }

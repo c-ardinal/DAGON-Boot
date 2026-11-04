@@ -2,8 +2,8 @@
 //! ([`BoardDef`]), the slot store, taking over the watchdog, and the
 //! serving loop of the DAGON link (an I2C target with the mailbox). A node
 //! calls [`start`] with its [`App`] (self-check, extensions, who confirms)
-//! and gets its published events back; the pieces are public for an app
-//! that lays out its own executors.
+//! and gets its published events back. The agent is the start's and its
+//! serving task's only: no public function hands it out.
 //!
 //! The flash has one driver: the slot store holds one [`SharedFlash`]
 //! handle on it, the serving loop another (a conformance build runs its
@@ -25,7 +25,7 @@ use dagon_events::{BoardBringUp, Published, Watchdog as Periods};
 use dagon_format::header::{port_kind, target_tag, ImageHeader, HEADER_SIZE};
 use dagon_format::Version;
 pub use dagon_mcu_common::hooks::{always, App, AppEvents, Confirm, NodeChain, SelfCheck};
-use dagon_mcu_common::hooks::{finish_start, node_chain, Events, UserExtensions};
+use dagon_mcu_common::hooks::{finish_start, node_chain, BoardExtension, Events, UserExtensions};
 use dagon_mcu_common::link::LinkError;
 use dagon_mcu_common::serve::{serve as dagon_serve, Exit, ServeHost};
 use dagon_proto::max_payload;
@@ -103,6 +103,13 @@ pub trait BoardDef {
     fn bring_up_port() -> Option<&'static mut dyn BoardBringUp> {
         None
     }
+    /// The board package's extension, which the start puts in the node's
+    /// chain after the publisher and before the app's: it observes every
+    /// event and answers the decision points before the app. Default:
+    /// none. Called once.
+    fn extension() -> Option<BoardExtension> {
+        None
+    }
 }
 
 /// A handle on the one flash driver (see the module docs).
@@ -114,7 +121,7 @@ const _: () = assert!(layout::SLOTS.slot_len <= crate::ERASE_UNIT);
 
 /// Opens the slot store over the state log; returns it with the serving
 /// loop's handle on the flash. Call once.
-pub fn open_store(flash: Peri<'static, FLASH>) -> Result<(Store, SharedFlash), LogError> {
+pub(crate) fn open_store(flash: Peri<'static, FLASH>) -> Result<(Store, SharedFlash), LogError> {
     use dagon_mcu_common::shared::{driver, FlashDriver};
     static FLASH_DRIVER: StaticCell<FlashDriver<F401Flash<'static>>> = StaticCell::new();
     let driver = FLASH_DRIVER.init(driver(F401Flash::new(flash)));
@@ -184,13 +191,15 @@ pub fn config(tag: &str) -> Config {
 }
 
 /// The agent over `store`, with the app layer's chain: the published
-/// events, the app's extensions `exts` and `self_check` as the CONFIRM
-/// decision; returns it with the app's read access to the events. Call
+/// events, the board's extension `board`, the app's extensions `exts` and
+/// `self_check` as the CONFIRM decision; returns it with the app's read
+/// access to the events. Only [`start`] holds the agent. Call
 /// once, after [`install_watchdog`] gave `guard` the watchdog
 /// (`app.watchdog_taken` names its period and the guard's trial policy).
-pub fn agent<const N: usize>(
+fn agent<const N: usize>(
     tag: &str,
     store: Store,
+    board: Option<BoardExtension>,
     exts: Option<UserExtensions>,
     self_check: fn() -> bool,
     guard: &Guard<N>,
@@ -199,7 +208,7 @@ pub fn agent<const N: usize>(
     let periods = Periods::new(layout::TRIAL_WDT_MS, layout::CONFIRMED_WDT_MS);
     let now_us: fn() -> u64 = || Instant::now().as_micros();
     let events = EVENTS.init(Published::new());
-    let (chain, reader) = node_chain(events, exts, self_check, now_us, periods);
+    let (chain, reader) = node_chain(events, board, exts, self_check, now_us, periods);
     let on_trial = on_trial(&store);
     let mut agent = Agent::new(config(tag), store, chain);
     agent.watchdog_taken(watchdog_period_ms(on_trial), guard.trial_policy());
@@ -237,7 +246,7 @@ pub fn start<B: BoardDef, const N: usize>(
     let (store, flash) = open_store(parts.flash)?;
     let period = watchdog_period_ms(on_trial(&store));
     install_watchdog(parts.iwdg, guard, period, &store);
-    let (mut agent, events) = agent(tag, store, app.exts, app.self_check, guard);
+    let (mut agent, events) = agent(tag, store, B::extension(), app.exts, app.self_check, guard);
     let board = B::bring_up_port().map(|p| (B::BOARD_ID, p));
     guard.set_trial(finish_start(&mut agent, board, app.confirm));
     let (target, regs) = B::open_link(parts.link);
@@ -265,7 +274,7 @@ async fn feed(watch: &'static dyn Watch) -> ! {
 /// reboot waits the delay `allow_reboot_now` asked for, idle under the
 /// guard, then resets.
 #[embassy_executor::task]
-pub async fn serve(
+async fn serve(
     mut agent: AppAgent,
     flash: SharedFlash,
     mut link: links::I2c,

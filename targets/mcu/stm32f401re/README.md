@@ -102,11 +102,12 @@ serves (`app.bring_up`); a board without one emits nothing. `start`
 returns the node's events (`AppEvents`) for display and log tasks. An app
 that keeps `embassy_stm32::Peripherals` itself passes `dagon_pins!(p)`
 instead of splitting. Build with `DAGON_PUBKEY` set (below);
-`--features slot-b` links the same app for slot B. An app that runs
-the pieces itself uses `open_store`, `install_watchdog`, `agent`, `exec`
-and `serve`. `open_store` returns the slot store and the serving loop's
-handle on the same flash driver (`SharedFlash`; a conformance build runs
-CONF_RUN through it): the agent keeps its store to itself. A REBOOT reply
+`--features slot-b` links the same app for slot B. The agent is the
+start's and its serving task's only: no public function hands it out, so
+application code reaches DAGON through `AppEvents`, its extensions and
+`Confirm`. The board definition's `BoardDef::extension` is the board
+package's place in the chain (after the publisher, before the app's
+extensions). A REBOOT reply
 is followed by the delay the app's `allow_reboot_now` asked for, the
 serving task idle under the guard, then the reset.
 

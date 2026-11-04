@@ -13,7 +13,7 @@ use dagon_agent::{Agent, Config, SlotStore};
 use dagon_events::{BoardBringUp, Published, Watchdog as Periods};
 use dagon_format::header::{mcu_id, port_kind, target_tag};
 pub use dagon_mcu_common::hooks::{always, App, AppEvents, Confirm, NodeChain, SelfCheck};
-use dagon_mcu_common::hooks::{finish_start, node_chain, Events};
+use dagon_mcu_common::hooks::{finish_start, node_chain, BoardExtension, Events};
 use dagon_proto::max_payload;
 use dagon_proto::payload::{mode, SlotState, StatusResp};
 use embassy_rp::peripherals::{FLASH, USB, WATCHDOG};
@@ -55,6 +55,13 @@ pub trait BoardDef {
     fn bring_up_port() -> Option<&'static mut dyn BoardBringUp> {
         None
     }
+    /// The board package's extension, which the start puts in the node's
+    /// chain after the publisher and before the app's: it observes every
+    /// event and answers the decision points before the app. Default:
+    /// none. Called once.
+    fn extension() -> Option<BoardExtension> {
+        None
+    }
 }
 
 /// The agent of an RP2040 node; its chain holds the app's extensions and
@@ -70,14 +77,14 @@ pub type AppAgent = Agent<AppStore, NodeChain>;
 pub type SharedFlash = dagon_mcu_common::shared::SharedFlash<RpFlash>;
 
 /// What [`open`] made.
-pub struct Opened {
-    pub agent: AppAgent,
+pub(crate) struct Opened {
+    pub(crate) agent: AppAgent,
     /// The flash chip's [`serial`].
-    pub serial: &'static str,
+    pub(crate) serial: &'static str,
     /// Another handle on the slot store's flash driver.
-    pub flash: SharedFlash,
+    pub(crate) flash: SharedFlash,
     /// The app's read access to the node's events.
-    pub events: AppEvents,
+    pub(crate) events: AppEvents,
 }
 
 const _: () = assert!(crate::layout::SECTOR == crate::ERASE_UNIT);
@@ -121,8 +128,9 @@ pub fn on_trial(st: &StatusResp) -> bool {
 /// a handle on the flash driver and the node's events. `task` is the guard
 /// task that serves the agent; `tag` and `role` are the node's image
 /// target tag and topology role; `app` holds the self-check, the app's
-/// extensions and who confirms. Call once.
-pub fn open<B: BoardDef, const N: usize>(
+/// extensions and who confirms. Only the starts in this package hold the
+/// agent. Call once.
+pub(crate) fn open<B: BoardDef, const N: usize>(
     flash: Peri<'static, FLASH>,
     watchdog: Peri<'static, WATCHDOG>,
     guard: &'static Guard<N>,
@@ -158,7 +166,14 @@ pub fn open<B: BoardDef, const N: usize>(
     let periods = Periods::new(crate::layout::WDT_MS, crate::layout::WDT_MS);
     let now_us: fn() -> u64 = || embassy_time::Instant::now().as_micros();
     let events = EVENTS.init(Published::new());
-    let (chain, events) = node_chain(events, app.exts, app.self_check, now_us, periods);
+    let (chain, events) = node_chain(
+        events,
+        B::extension(),
+        app.exts,
+        app.self_check,
+        now_us,
+        periods,
+    );
     let mut agent = Agent::new(config(tag, role), store, chain);
     agent.watchdog_taken(crate::layout::WDT_MS, guard.trial_policy());
     let board = B::bring_up_port().map(|p| (B::BOARD_ID, p));

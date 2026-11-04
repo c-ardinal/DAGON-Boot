@@ -514,7 +514,10 @@ Registration per layer:
   task owns the chain) and `confirm` (`ByHost`, or `Own`: the start
   confirms the app's trial). The start runs the board's `BoardBringUp`
   port (`app.bring_up`; a board without one emits nothing) and then the
-  own confirm before the link serves. The MCU package creates and keeps the layer's
+  own confirm before the link serves. The board package's extension
+  (the board definition's `extension()`; on ESP32-S3 `NodePeripherals::
+  board_extension`) takes the chain's board place. The agent stays the
+  start's and its serving task's: no public function hands it out. The MCU package creates and keeps the layer's
   `Published`, composes it, and returns a `Reader` to the app. The
   agent's machines deliver every event into the chain, and the chain
   asks the decision methods at the three points. Where the MCU's isolation
@@ -1691,16 +1694,19 @@ to (4.7).
 
 ```rust
 #[embassy_executor::task]
-async fn display_task(mut lcd: Lcd, events: Reader<AppSnapshot, 16>) {
+async fn display_task(mut lcd: Lcd, events: AppEvents) {
+    // AppEvents = Reader<dagon_agent::snapshot::AppSnapshot, RECENT>
     let mut rx = events.receiver().unwrap();
     loop {
         let s = rx.changed().await.state;
         match s.phase {
-            Phase::Starting | Phase::Serving => lcd.splash(s.version, s.trial),
-            Phase::Transferring => lcd.bar(s.progress),
+            Phase::Starting | Phase::Idle | Phase::Trial => lcd.splash(s.version, s.trial),
+            Phase::Transferring => lcd.bar(s.progress), // Some((done, total))
             Phase::Verifying => lcd.text("verify"),
+            Phase::Written | Phase::Pending => lcd.text("written"),
             Phase::RebootPending => lcd.text("reboot"),
             Phase::Confirmed => lcd.text("ok"),
+            Phase::RolledBack | Phase::Failed => lcd.text("back"),
             _ => {}
         }
     }

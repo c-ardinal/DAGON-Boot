@@ -199,6 +199,15 @@ export const UNSUPPORTED = {
   button: 'この URL をコピー',
 } as const;
 
+/** The bottom drawer (DES-UX3-015) and its tabs. */
+export const DRAWER = {
+  label: '下の引き出し',
+  problems: '問題',
+  log: '記録',
+  talk: '会話',
+  logNone: 'まだ記録はありません。',
+} as const;
+
 /** Canvas: uplink cards, the empty canvas, dot numbers. */
 export const CANVAS = {
   /** Uplink card of the 親機 this page is connected to now. */

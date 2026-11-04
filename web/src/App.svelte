@@ -1,12 +1,13 @@
 <script lang="ts">
   import { tick, untrack } from 'svelte';
   import { bandOf } from './app/band.ts';
-  import { ANNOUNCE, BAND, BUTTON, CANVAS, DEFINE, DIFF, HUB_TOGGLE, MODE, NODE, ORDER, PLAN, PRODUCT, RECONNECT, SAVE, SKIP, STEP, TIME } from './app/copy.ts';
+  import { ANNOUNCE, BAND, BUTTON, CANVAS, DEFINE, DIFF, DRAWER, HUB_TOGGLE, MODE, NODE, ORDER, PLAN, PRODUCT, RECONNECT, SAVE, SKIP, STEP, TIME } from './app/copy.ts';
   import { webSerial } from './app/connect.ts';
   import { HUB_LOCKED, hubOf, view, type Action } from './app/machine.ts';
   import { Operate, waterOf, type Progress } from './app/operate.svelte.ts';
   import Graph, { type Chip, type Dot } from './graph/Graph.svelte';
   import Band from './screens/Band.svelte';
+  import Drawer, { type DrawerTab } from './screens/Drawer.svelte';
   import Detail from './screens/Detail.svelte';
   import { Define, type Operable } from './app/define/define.svelte.ts';
   import { topoDiff } from './app/define/diff.ts';
@@ -343,8 +344,30 @@
   /** Define mode's drawing scale: up to 32 ノード fit by zooming out; the canvas scrolls to pan. */
   let zoom = $state(1);
 
-  /** Ctrl+Z / Ctrl+Shift+Z anywhere but in a field; Delete and L on the canvas (§12.2). */
+  /** The bottom drawer's open tab (DES-UX3-015), null while closed. */
+  let drawerTab = $state<string | null>(null);
+  const pickTab = (id: string) => (drawerTab = drawerTab === id ? null : id);
+  /** 記録: what the page did and why something was stopped, newest last (the drawer's log). */
+  let notes = $state<{ at: string; text: string }[]>([]);
+  function note(text: string) {
+    notes = [...notes, { at: new Date().toTimeString().slice(0, 8), text }].slice(-200);
+  }
+  const problemCount = $derived(d.problems.filter((p) => p.severity === 'error').length);
+  const drawerTabs = $derived<DrawerTab[]>([
+    { id: 'problems', label: DRAWER.problems, count: problemCount, alarm: true },
+    { id: 'log', label: DRAWER.log },
+  ]);
+  /** Widths of the floating windows, so the trees centre between them. */
+  let partsW = $state(0);
+  let sheetW = $state(0);
+  let toolbarH = $state(0);
+
+  /** Ctrl+Z / Ctrl+Shift+Z anywhere but in a field; Delete and L on the canvas (§12.2); Ctrl+J the drawer. */
   function defineKeys(e: KeyboardEvent) {
+    if (screen === 'work' && e.key.toLowerCase() === 'j' && (e.ctrlKey || e.metaKey)) {
+      e.preventDefault();
+      return pickTab(drawerTab ?? 'problems');
+    }
     if (mode !== 'define') return;
     const el = e.target as HTMLElement;
     const field = /^(INPUT|SELECT|TEXTAREA)$/.test(el.tagName);
@@ -548,6 +571,18 @@
       fileInput?.click();
     }
   }
+  /** The sheet shows only when it holds something (DES-UX3-014). */
+  const sheetShown = $derived(
+    mode === 'define'
+      ? cliPanel !== null || d.selected !== null
+      : !op.config || op.selected !== null || (showFile && op.file !== null) || (!!op.recovering && !!op.recovered),
+  );
+  $effect(() => {
+    if (!sheetShown || layout === 'narrow') sheetW = 0;
+  });
+  $effect(() => {
+    if (layout === 'narrow' || (layout === 'drawer' && !drawerOpen)) partsW = 0;
+  });
   /** Node actions in the detail: while watching, with nothing running. */
   const nodeActions = $derived(['L12', 'L13', 'L23'].includes(op.state));
 
@@ -697,7 +732,7 @@
 {#snippet defineCanvas()}
   <main id="canvas" tabindex="-1" aria-describedby="canvas-help" class="define">
     <p id="canvas-help" class="visually-hidden">{CANVAS.describe}</p>
-    <div class="toolbar">
+    <div class="toolbar" bind:offsetHeight={toolbarH}>
       <button class="secondary" aria-disabled={!d.canUndo} onclick={() => d.undo()}>{DEFINE.undo}</button>
       <button class="secondary" aria-disabled={!d.canRedo} onclick={() => d.redo()}>{DEFINE.redo}</button>
       <div class="seg" role="radiogroup" aria-label="{DEFINE.graph}・{DEFINE.table}">
@@ -718,6 +753,7 @@
         dot={defineDot}
         chips={defineChips}
         {zoom}
+        inset={{ left: partsW, right: sheetW, bottom: toolbarH }}
       />
     {:else}
       <Table {d} onaddnode={() => document.querySelector<HTMLElement>('#list-h')?.focus()} />
@@ -726,15 +762,11 @@
 {/snippet}
 
 {#snippet defineRight()}
-  <aside class="right">
-    {#if cliPanel}
-      <CliPanel {cli} {d} {autosave} panel={cliPanel} onuse={useRelease} />
-    {:else if d.selected}
-      <Inspector {d} />
-    {:else}
-      <Problems {d} />
-    {/if}
-  </aside>
+  {#if cliPanel}
+    <CliPanel {cli} {d} {autosave} panel={cliPanel} onuse={useRelease} />
+  {:else if d.selected}
+    <Inspector {d} />
+  {/if}
 {/snippet}
 
 {#snippet defineBottom()}
@@ -786,6 +818,20 @@
   </footer>
 {/snippet}
 
+{#snippet drawerBody(tab: string)}
+  {#if tab === 'problems'}
+    <Problems {d} />
+  {:else if tab === 'log'}
+    {#if notes.length === 0}
+      <p class="log-none">{DRAWER.logNone}</p>
+    {:else}
+      <ol class="log">
+        {#each notes as n, i (i)}<li><time>{n.at}</time> {n.text}</li>{/each}
+      </ol>
+    {/if}
+  {/if}
+{/snippet}
+
 {#snippet left()}
   {#if mode === 'define'}{@render defineLeft()}{:else}{@render operateLeft()}{/if}
 {/snippet}
@@ -811,6 +857,7 @@
       {dot}
       {chips}
       {fill}
+      inset={{ left: partsW, right: sheetW }}
     />
   </main>
 {/snippet}
@@ -820,8 +867,7 @@
 {/snippet}
 
 {#snippet operateRight()}
-  <aside class="right">
-    {#if showFile && op.file}
+  {#if showFile && op.file}
       <FilePanel file={op.file} targets={op.targets.length} minutes={op.targets.length * MINUTES_PER_NODE} diff={fileDiff} />
     {:else}
       <Detail
@@ -834,8 +880,7 @@
         onback={(id) => void op.rollback(id)}
         recovery={op.recovering && op.recovered ? { id: op.recovering, result: op.recovered } : null}
       />
-    {/if}
-  </aside>
+  {/if}
 {/snippet}
 
 {#snippet bottom()}
@@ -852,7 +897,7 @@
   <a class="skip" href="#canvas">{SKIP.canvas}</a>
   <a class="skip" href="#band">{SKIP.next}</a>
   <!-- The DOM follows the visual order of each layout, so Tab order matches what is seen. -->
-  <div class="frame {layout}" class:open={drawerOpen} class:modal={restartOpen || autosave.asking !== null}>
+  <div class="frame {layout}" class:work={screen === 'work'} class:open={drawerOpen} class:modal={restartOpen || autosave.asking !== null}>
     <Header
       sim={cli.sim !== null}
       step={screen === 'start' ? null : step}
@@ -879,22 +924,24 @@
     {#if screen === 'start'}
       <aside class="left"></aside>
       <StartScreen s={start} served={cli.state === 'ready'} />
-    {:else if layout === 'narrow'}
-      {@render bottom()}
-      {@render canvas()}
-      {@render right()}
-      <aside class="left">{@render left()}</aside>
     {:else}
-      {#if layout === 'wide'}
-        <aside class="left">{@render left()}</aside>
-      {:else if drawerOpen}
-        <div class="left" id="drawer" role="dialog" aria-modal="true" aria-label={ORDER.heading} tabindex="-1" bind:this={drawerEl} onkeydown={drawerKeys}>
-          {@render left()}
-        </div>
-      {/if}
-      {@render canvas()}
-      {@render right()}
-      {@render bottom()}
+      {#if layout === 'narrow'}{@render bottom()}{/if}
+      <!-- The graph fills the stage; the parts window (top-left) and the sheet (right) float over it only when they hold something. -->
+      <div class="stage">
+        {@render canvas()}
+        {#if layout === 'wide' || layout === 'narrow'}
+          <aside class="float parts" bind:offsetWidth={partsW}>{@render left()}</aside>
+        {:else if drawerOpen}
+          <div class="float parts" id="drawer" role="dialog" aria-modal="true" aria-label={ORDER.heading} tabindex="-1" bind:this={drawerEl} bind:offsetWidth={partsW} onkeydown={drawerKeys}>
+            {@render left()}
+          </div>
+        {/if}
+        {#if sheetShown}
+          <aside class="float sheet right" bind:offsetWidth={sheetW}>{@render right()}</aside>
+        {/if}
+      </div>
+      <Drawer tabs={drawerTabs} open={drawerTab} onpick={pickTab} body={drawerBody} />
+      {#if layout !== 'narrow'}{@render bottom()}{/if}
     {/if}
   </div>
   <input
@@ -927,14 +974,23 @@
 
 <style>
   main.define {
-    grid-template-rows: auto minmax(0, 1fr);
+    position: relative;
   }
+  /* Undo, view and zoom: a small floating bar bottom-right of the canvas (DES-UX3-033). */
   .toolbar {
+    position: absolute;
+    right: var(--s-3);
+    bottom: var(--s-3);
+    z-index: var(--z-chrome);
     display: flex;
     flex-wrap: wrap;
-    gap: var(--s-3);
-    padding: var(--s-3) var(--s-5);
-    border-bottom: 1px solid var(--c-line);
+    justify-content: flex-end;
+    gap: var(--s-2);
+    max-width: calc(100% - 2 * var(--s-3));
+    padding: var(--s-2);
+    border: 1px solid var(--c-line);
+    border-radius: var(--r-m);
+    background: var(--c-ink);
   }
   .seg {
     display: flex;
@@ -971,6 +1027,15 @@
   .dband .next p {
     margin: 0;
   }
+  @media (max-width: 767px) {
+    .dband {
+      flex-wrap: wrap;
+      padding: var(--s-4);
+    }
+    .dband .next {
+      flex: 1 1 100%;
+    }
+  }
   .dband .unsaved {
     color: var(--c-muted);
     font: 700 var(--t-small-size) / var(--t-small-lh) var(--f-ja);
@@ -1003,19 +1068,24 @@
     grid-template-columns: var(--w-left) minmax(0, 1fr) var(--w-right);
     height: 100vh;
   }
-  .left,
-  .right {
-    min-height: 0;
-    overflow: auto;
-    background: var(--c-ink);
+  /* Work: the graph is the whole stage; a drawer under it, the band at the bottom. */
+  .frame.work {
+    grid-template-areas: 'header' 'help' 'menu' 'canvas' 'drawer' 'band';
+    grid-template-rows: auto auto auto minmax(0, 1fr) auto auto;
+    grid-template-columns: minmax(0, 1fr);
   }
   .left {
     grid-area: left;
+    min-height: 0;
+    overflow: auto;
+    background: var(--c-ink);
     border-right: 1px solid var(--c-line);
   }
-  .right {
-    grid-area: right;
-    border-left: 1px solid var(--c-line);
+  .stage {
+    grid-area: canvas;
+    position: relative;
+    display: grid;
+    min-height: 0;
   }
   main {
     grid-area: canvas;
@@ -1023,36 +1093,74 @@
     min-height: 0;
     background: var(--c-layer-0);
   }
+  .stage > main {
+    grid-area: auto;
+  }
   main:focus {
     outline: none;
   }
-  @media (max-width: 1439px) {
-    .frame {
-      grid-template-columns: 17.5rem minmax(0, 1fr) 20rem;
-    }
+  /* Floating windows (DES-UX3-014): over the graph, apart from its edges, never under the focal number. */
+  .float {
+    position: absolute;
+    z-index: var(--z-chrome);
+    top: var(--s-3);
+    overflow: auto;
+    border: 1px solid var(--c-line);
+    border-radius: var(--r-m);
+    background: var(--c-ink);
+    box-shadow: 0 0.5rem 1.5rem rgb(0 0 0 / 0.45);
   }
-  /* 768–1279 px: the update order is a 300 px drawer that pushes the canvas aside. */
-  .frame.drawer {
-    grid-template-columns: 0 minmax(0, 1fr) 20rem;
+  .float.parts {
+    left: var(--s-3);
+    width: var(--w-left);
+    /* The focal number keeps the bottom-left: the window stops above it. */
+    max-height: calc(100% - var(--t-display-size) - 6rem);
   }
-  .frame.drawer.open {
-    grid-template-columns: var(--w-left) minmax(0, 1fr) 20rem;
+  .float.sheet {
+    right: var(--s-3);
+    width: var(--w-right);
+    max-height: calc(100% - 2 * var(--s-3) - 4.5rem);
   }
-  /* One column, top to bottom: next step, canvas, detail, the folded update order. */
+  #drawer:focus {
+    outline: none;
+  }
+  .log-none,
+  .log {
+    margin: 0;
+    padding: var(--s-3) var(--s-5);
+    font: 400 var(--t-mono-size) / var(--t-mono-log-lh) var(--f-ja);
+  }
+  .log {
+    list-style: none;
+  }
+  .log time {
+    color: var(--c-muted);
+    font-family: var(--f-mono);
+  }
+  /* One column, top to bottom: next step, canvas, detail, the parts, the drawer. */
   .frame.narrow {
-    grid-template-areas: 'header' 'help' 'menu' 'band' 'canvas' 'right' 'left';
+    grid-template-areas: 'header' 'help' 'menu' 'band' 'canvas' 'right' 'left' 'drawer';
     grid-template-rows: auto;
     grid-template-columns: minmax(0, 1fr);
     height: auto;
   }
-  .narrow .left,
-  .narrow .right {
-    overflow: visible;
-    border: 0;
-    border-top: 1px solid var(--c-line);
+  .narrow .stage {
+    display: flex;
+    flex-direction: column;
   }
-  #drawer:focus {
-    outline: none;
+  .narrow main {
+    min-height: 60vh;
+  }
+  .narrow .float {
+    position: static;
+    width: auto;
+    max-height: none;
+    border-width: 1px 0 0;
+    border-radius: 0;
+    box-shadow: none;
+  }
+  .narrow .float.parts {
+    order: 1;
   }
   /* Q2: while a dialog is open its own button is the one main action. */
   .frame.modal :global(footer .primary) {

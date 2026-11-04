@@ -47,9 +47,11 @@
     zoom?: number;
     /** Nodes being written: how full their water is, 0–100 (SC-O5, owner 11/2 and 11/3). */
     fill?: Record<string, number>;
+    /** Room the floating windows take on the left, right and bottom (px): trees centre in what is left. */
+    inset?: { left: number; right: number; bottom?: number };
   }
 
-  let { config, live, connected, sending, selected, onselect, dot, chips = {}, zoom = 1, fill = {} }: Props = $props();
+  let { config, live, connected, sending, selected, onselect, dot, chips = {}, zoom = 1, fill = {}, inset = { left: 0, right: 0 } }: Props = $props();
 
   /**
    * Sizes in rem (DES-UX3-181): the root font follows the window, so cards,
@@ -76,6 +78,9 @@
   let heights = $state<Record<string, number>>({});
   /** Height of the focal number in the bottom-left: the graph keeps that much room below itself. */
   let dotH = $state(0);
+  let dotW = $state(0);
+  /** Room kept under the trees: the focal number's when it stands out from under the left window, else the bottom inset. */
+  const below = $derived(Math.max(inset.bottom ?? 0, dotW > inset.left ? dotH : 0));
   let focusKey = $state('node:hub');
   let canvas: HTMLDivElement;
 
@@ -88,15 +93,15 @@
   );
   /** Smallest scale the whole 構成 is fitted at; past it the canvas scrolls (names stay readable). */
   const MIN_FIT = 0.6;
-  const contentW = $derived(tree.width + 2 * SIDE);
+  const contentW = $derived(tree.width + 2 * SIDE + inset.left + inset.right);
   const bare = $derived(TOP + tree.height + BOTTOM);
   /** The whole 構成 in view when it opens (DES-UX3-160), with room under it for the focal number. */
-  const fit = $derived(Math.max(MIN_FIT, Math.min(1, boxW / contentW, (boxH - dotH) / bare)));
+  const fit = $derived(Math.max(MIN_FIT, Math.min(1, boxW / contentW, (boxH - below) / bare)));
   const scale = $derived(zoom * fit);
   const W = $derived(Math.max(boxW / scale, contentW));
   /** Trees centred when they fit; from the left edge when they scroll. */
-  const left = $derived((W - tree.width) / 2);
-  const H = $derived(Math.max(boxH / scale, bare + dotH / scale));
+  const left = $derived(inset.left / scale + (W - (inset.left + inset.right) / scale - tree.width) / 2);
+  const H = $derived(Math.max(boxH / scale, bare + below / scale));
   const pos = $derived(Object.fromEntries(Object.entries(tree.at).map(([id, p]) => [id, { x: left + p.x, y: TOP + p.y }])));
   const depthOf = (n: Node) => tree.at[n.id]?.depth ?? 0;
 
@@ -342,7 +347,7 @@
 </div>
   {#if dot}
     <!-- The focal number (DES-UX3-187): bottom-left, just above what is under the canvas; it never scrolls away. -->
-    <div class="dot" role="img" aria-label={dot.name} bind:offsetHeight={dotH}>
+    <div class="dot" role="img" aria-label={dot.name} bind:offsetHeight={dotH} bind:offsetWidth={dotW}>
       <span class="dot-label">{dot.label}</span>
       <span class="dot-num">{dot.value}</span>{#if dot.of !== undefined}<span class="dot-of">/{dot.of}</span>{/if}{#if dot.unit}<span class="dot-of">{dot.unit}</span>{/if}
       {#if dot.sub}<span class="dot-sub"

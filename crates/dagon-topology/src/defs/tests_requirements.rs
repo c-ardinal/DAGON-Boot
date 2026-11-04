@@ -3,21 +3,11 @@
 
 use std::collections::BTreeSet;
 
-use super::load::parse_mcu_text;
+use super::load::{builtin_texts, parse_mcu_text};
 use super::requirements::{self, LOG_FACE_MIN, MCU};
 use super::tests::{mcu_err, FAKE_BOARD, FAKE_MCU};
+use super::tests_isolation::{boot_board, isolated_mcu};
 use super::{BoardDef, Registry};
-
-const BUILTIN_MCUS: [&str; 3] = [
-    include_str!("../../../../targets/mcu/rp2040/dagon-mcu.toml"),
-    include_str!("../../../../targets/mcu/stm32f401re/dagon-mcu.toml"),
-    include_str!("../../../../targets/mcu/esp32s3/dagon-mcu.toml"),
-];
-const BUILTIN_BOARDS: [&str; 3] = [
-    include_str!("../../../../targets/boards/waveshare-rp2040-touch-lcd-1.28/dagon-board.toml"),
-    include_str!("../../../../targets/boards/nucleo-f401re/dagon-board.toml"),
-    include_str!("../../../../targets/boards/m5stopwatch/dagon-board.toml"),
-];
 
 /// The fake MCU written to a UF2 drive.
 fn uf2_mcu(sector: &str) -> String {
@@ -72,11 +62,12 @@ fn every_numeric_field_has_a_declared_requirement_and_back() {
     let (mcu, board) = requirements::declared_fields();
     let uf2 = uf2_mcu("0x1000");
     let detached = detached_mcu();
-    let mut mcu_texts = BUILTIN_MCUS.to_vec();
-    mcu_texts.extend([FAKE_MCU, uf2.as_str(), detached.as_str()]);
+    let isolated = isolated_mcu();
+    let (mut mcu_texts, mut board_texts) = builtin_texts();
+    mcu_texts.extend([FAKE_MCU, uf2.as_str(), detached.as_str(), isolated.as_str()]);
     let board_fake = format!("id = \"x\"\n{FAKE_BOARD}");
-    let mut board_texts = BUILTIN_BOARDS.to_vec();
-    board_texts.push(&board_fake);
+    let boot_fake = boot_board();
+    board_texts.extend([board_fake.as_str(), boot_fake.as_str()]);
     for (texts, declared) in [(mcu_texts, mcu), (board_texts, board)] {
         let found = paths(&texts);
         let declared: BTreeSet<String> = declared

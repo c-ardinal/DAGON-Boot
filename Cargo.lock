@@ -139,6 +139,7 @@ dependencies = [
  "base64",
  "dagon-catalog",
  "dagon-conform",
+ "dagon-extension",
  "dagon-format",
  "dagon-host",
  "dagon-port",
@@ -188,6 +189,19 @@ dependencies = [
  "critical-section",
  "dagon-format",
  "embassy-sync",
+]
+
+[[package]]
+name = "dagon-extension"
+version = "0.1.0"
+dependencies = [
+ "critical-section",
+ "dagon-catalog",
+ "dagon-events",
+ "dagon-topology",
+ "serde",
+ "serde_json",
+ "toml",
 ]
 
 [[package]]

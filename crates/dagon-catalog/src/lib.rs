@@ -17,8 +17,14 @@
 
 use std::fmt::Write;
 
+use dagon_events::Machines;
 pub use dagon_events::EVENT_FORMAT;
-use dagon_events::{Catalog, Entry, Layer, Machines, Port, Trust, DECISIONS};
+/// What host tools validate against: the catalog types, the ports and the
+/// decision points.
+pub use dagon_events::{
+    Catalog, DecisionPoint, Entry, Layer, Port, PortDefault, Service, Trust, DECISIONS,
+    DECISION_BOUND_MS, PORTS,
+};
 
 /// `registry![a, b]` is `&[&a::MACHINES, &b::MACHINES]`: each entry is a
 /// crate's own `MACHINES` static, never a value built here.

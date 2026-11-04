@@ -113,7 +113,7 @@ fn named_board<'r>(reg: &'r Registry, n: &Node) -> Option<&'r BoardDef> {
 }
 
 /// Board for a node's capabilities (I2C target, ROM loader pins): the named
-/// one, else the first board defined for its MCU.
+/// one, else its MCU's default board (`Registry::default_board`).
 fn board_for<'r>(reg: &'r Registry, n: &Node) -> Option<&'r BoardDef> {
     match &n.board {
         Some(id) => reg.board(id),

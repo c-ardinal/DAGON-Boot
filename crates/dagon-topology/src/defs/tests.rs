@@ -19,10 +19,62 @@ fn source_root() -> PathBuf {
 // The values below are the port registry, flash maps and board table
 // the topology checks held (boards.rs) before they read the definitions.
 
+/// The ids of the definitions in the package folders under
+/// `targets/<dir>`, in folder-name order: the builtin set as the tree has it.
+pub(super) fn tree_ids(dir: &str, file: &str) -> Vec<String> {
+    let mut folders: Vec<PathBuf> = std::fs::read_dir(source_root().join("targets").join(dir))
+        .unwrap()
+        .flatten()
+        .map(|e| e.path())
+        .filter(|p| p.join(file).is_file())
+        .collect();
+    folders.sort();
+    folders
+        .iter()
+        .map(|f| {
+            let t: toml::Table = std::fs::read_to_string(f.join(file))
+                .unwrap()
+                .parse()
+                .unwrap();
+            t["id"].as_str().unwrap().to_string()
+        })
+        .collect()
+}
+
+/// Folders under the builtin roots that are not definition packages.
+const NOT_PACKAGES: &[(&str, &str)] = &[("mcu", "build"), ("mcu", "common")];
+
+#[test]
+fn every_folder_under_the_builtin_roots_is_a_package_or_listed_as_not_one() {
+    for (dir, file) in [("mcu", "dagon-mcu.toml"), ("boards", "dagon-board.toml")] {
+        for e in std::fs::read_dir(source_root().join("targets").join(dir))
+            .unwrap()
+            .flatten()
+        {
+            let name = e.file_name().to_string_lossy().to_string();
+            if !e.path().is_dir() {
+                continue;
+            }
+            let listed = NOT_PACKAGES.contains(&(dir, name.as_str()));
+            assert_ne!(
+                e.path().join(file).is_file(),
+                listed,
+                "targets/{dir}/{name}: a package needs {file}; a folder without one is listed in NOT_PACKAGES"
+            );
+        }
+    }
+}
+
+#[test]
+fn the_builtin_set_is_every_package_folder() {
+    let mcus: Vec<&str> = reg().mcus().iter().map(|m| m.id.as_str()).collect();
+    assert_eq!(mcus, tree_ids("mcu", "dagon-mcu.toml"));
+    let boards: Vec<&str> = reg().boards().iter().map(|b| b.id.as_str()).collect();
+    assert_eq!(boards, tree_ids("boards", "dagon-board.toml"));
+}
+
 #[test]
 fn mcus_match_the_port_registry() {
-    let ids: Vec<&str> = reg().mcus().iter().map(|m| m.id.as_str()).collect();
-    assert_eq!(ids, ["rp2040", "stm32f401re", "esp32s3"]);
     for (id, port, gpio_count) in [
         ("rp2040", "self-boot", 30),
         ("stm32f401re", "self-boot", 0),
@@ -49,12 +101,12 @@ fn flash_maps_match_the_table() {
         })
         .collect();
     let table = [
+        ("esp32s3-16m", "esp32s3", 16 << 20),
         ("rp2040-4m", "rp2040", 4 << 20),
         ("f401-default", "stm32f401re", 512 << 10),
-        ("esp32s3-16m", "esp32s3", 16 << 20),
     ];
-    assert_eq!(all, table);
     for (name, mcu, bytes) in table {
+        assert!(all.contains(&(name, mcu, bytes)), "{name}");
         let (m, f) = reg().flash_map(name).unwrap();
         assert_eq!((m.id.as_str(), f.bytes), (mcu, bytes));
         // The first map of an MCU is its default (one each here).
@@ -175,7 +227,9 @@ const FORMER_BOARDS: [Former; 3] = [
 #[test]
 fn boards_match_the_table_field_for_field() {
     let ids: Vec<&str> = reg().boards().iter().map(|b| b.id.as_str()).collect();
-    assert_eq!(ids, FORMER_BOARDS.iter().map(|b| b.id).collect::<Vec<_>>());
+    for t in &FORMER_BOARDS {
+        assert!(ids.contains(&t.id), "{}", t.id);
+    }
     for t in &FORMER_BOARDS {
         let b = reg().board(t.id).unwrap();
         let m = reg().mcu(&b.mcu).unwrap();
@@ -1086,4 +1140,78 @@ fn the_json_form_carries_no_path_comment_or_command() {
     assert!(labels.contains(&"project MCU fake-m0"), "{labels:?}");
     assert!(labels.contains(&"project board fake-board"), "{labels:?}");
     std::fs::remove_dir_all(dir).unwrap();
+}
+
+/// `targets/` of this tree copied under `to` (no build output).
+fn copy_targets(to: &Path) {
+    fn copy(from: &Path, to: &Path) {
+        std::fs::create_dir_all(to).unwrap();
+        for e in std::fs::read_dir(from).unwrap().flatten() {
+            let name = e.file_name();
+            if name == "target" || name == "node_modules" {
+                continue;
+            }
+            if e.path().is_dir() {
+                copy(&e.path(), &to.join(&name));
+            } else {
+                std::fs::copy(e.path(), to.join(&name)).unwrap();
+            }
+        }
+    }
+    for dir in ["mcu", "boards"] {
+        copy(
+            &source_root().join("targets").join(dir),
+            &to.join("targets").join(dir),
+        );
+    }
+}
+
+#[test]
+fn a_board_added_in_an_earlier_folder_changes_no_default_and_no_check() {
+    let root = scratch("new-board");
+    copy_targets(&root);
+    // A second STM32F401 board whose folder sorts before every other.
+    let nucleo = include_str!("../../../../targets/boards/nucleo-f401re/dagon-board.toml")
+        .replace("id = \"nucleo-f401re\"", "id = \"zz-new\"")
+        .replace("default = true\n", "");
+    write(&root.join("targets/boards/a-new/dagon-board.toml"), &nucleo);
+    let tree = Registry::load(&[Source::Tree(&root)]).unwrap();
+    assert_eq!(tree.boards()[0].id, "zz-new");
+    for m in reg().mcus() {
+        assert_eq!(
+            tree.default_board(&m.id).map(|b| &b.id),
+            reg().default_board(&m.id).map(|b| &b.id),
+            "{}",
+            m.id
+        );
+    }
+    // Nodes that name only their MCU are checked exactly as before.
+    let desk: String = include_str!("../../../../topology/desk-demo.yaml")
+        .lines()
+        .filter(|l| !l.trim_start().starts_with("board:"))
+        .map(|l| format!("{l}\n"))
+        .collect();
+    assert_eq!(
+        crate::check_str_with(&tree, &desk).to_json(),
+        crate::check_str(&desk).to_json()
+    );
+    // Two defaults do not load.
+    let marked = nucleo.replace(
+        "drawing = \"nucleo-64\"\n",
+        "drawing = \"nucleo-64\"\ndefault = true\n",
+    );
+    write(&root.join("targets/boards/a-new/dagon-board.toml"), &marked);
+    let e = Registry::load(&[Source::Tree(&root)]).unwrap_err();
+    assert!(e.msg.contains("at most one is the default"), "{e}");
+    let plain = include_str!("../../../../targets/boards/nucleo-f401re/dagon-board.toml")
+        .replace("default = true\n", "");
+    write(
+        &root.join("targets/boards/nucleo-f401re/dagon-board.toml"),
+        &plain,
+    );
+    write(&root.join("targets/boards/a-new/dagon-board.toml"), &nucleo);
+    // Several boards and none marked: no default, never the first folder.
+    let none = Registry::load(&[Source::Tree(&root)]).unwrap();
+    assert!(none.default_board("stm32f401re").is_none());
+    let _ = std::fs::remove_dir_all(&root);
 }

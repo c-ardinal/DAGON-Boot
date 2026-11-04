@@ -1,0 +1,20 @@
+[package]
+name = "dagon-extension"
+edition.workspace = true
+license.workspace = true
+version = "0.1.0"
+description = "DAGON extension manifests (dagon-extension.toml), their validation against the port and event catalogs and the node's definitions, the protection-kind map generators, and the files dagon gen writes from them"
+
+[dependencies]
+dagon-catalog = { path = "../dagon-catalog" }
+dagon-topology = { path = "../dagon-topology" }
+serde = { version = "1", features = ["derive"] }
+toml = "0.8"
+# The catalogs' machines link dagon-events' published state, which needs a
+# critical-section implementation on the host.
+critical-section = { version = "1.1", features = ["std"] }
+
+[dev-dependencies]
+# The generated boot_wiring.rs is compiled in a test; it names dagon-events' chain types.
+dagon-events = { path = "../dagon-events" }
+serde_json = "1"

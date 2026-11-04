@@ -163,7 +163,7 @@ pub fn wiring_rs(t: &Topology, n: &Node, board: Option<&BoardFacts>) -> String {
     )
 }
 
-fn write(
+pub(crate) fn write(
     base: &Path,
     rel: &str,
     text: &str,
@@ -753,6 +753,8 @@ struct ProjectTables {
     dagon: DagonSource,
     #[serde(default)]
     board: std::collections::BTreeMap<String, BoardFacts>,
+    #[serde(default)]
+    extensions: crate::extgen::Extensions,
 }
 
 fn project_tables(config: &Path) -> Result<ProjectTables, String> {
@@ -809,6 +811,17 @@ pub fn gen_project(config: &Path, only: &[String], force: bool) -> Result<Vec<St
     for (id, why) in &report.skipped {
         out.push(format!("skipped    nodes/{id}: {why}"));
     }
+    // Every selected node's generated folder holds exactly this run's
+    // files; a node whose crate was skipped keeps none.
+    let failed: Vec<String> = report.skipped.iter().map(|(id, _)| id.clone()).collect();
+    out.extend(crate::extgen::write_nodes(
+        &reg,
+        &cfg.base,
+        &t.nodes,
+        only,
+        &failed,
+        &tables.extensions,
+    )?);
     for id in add_build_tables(&reg, config, &t)? {
         out.push(format!("added      [build.{id}] to dagon.toml"));
     }

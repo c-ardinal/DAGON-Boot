@@ -16,6 +16,10 @@ toml = { version = "0.8", default-features = false, features = ["parse", "displa
 # the lock file through dagon-cli.
 serde_json = "1"
 
+[build-dependencies]
+# Reads which text files a builtin MCU definition names (build.rs).
+toml = { version = "0.8", default-features = false, features = ["parse"] }
+
 [dev-dependencies]
 # Parity tests: the definitions match today's tables (these crates depend
 # on this one; the cycle is through dev-dependencies only).

@@ -43,9 +43,10 @@ async fn main(spawner: Spawner) {
     let mut p = esp_hal::init(esp_hal::Config::default());
     let armed = node::arm_watchdog(p.RTC_TIMER.reborrow());
     esp_rtos::start(TimerGroup::new(p.TIMG0).timer0, p.FROM_CPU_INTR0);
-    // The DAGON link: UART0 on its own pins (U0TXD, U0RXD), at the bit
-    // rate of this node's link in the 構成. A board that wires the hub to
-    // other pins moves them here.
+    // The DAGON link: UART0 on its IO MUX pins, U0TXD = GPIO43 and
+    // U0RXD = GPIO44 (function 0; Espressif's esp-metadata for the
+    // ESP32-S3), at the bit rate of this node's link in the 構成. A board
+    // that wires the hub to other pins moves them here.
     let uart = Uart::new(p.UART0, link::uart_config(LINK_BAUD))
         .unwrap_or_else(|_| esp_hal::system::software_reset())
         .with_tx(p.GPIO43)

@@ -800,7 +800,7 @@ The complete list is generated from the port catalog; the kinds are:
 | Return | `RETURN(result)` | none | none | none |
 | Events | `LOG(ptr, len)` | copy ≤ `COPY_MAX` into the sink's buffer | none | none |
 | Pins | `GPIO_SET(cap, level)`, `GPIO_GET(cap)` | one register write or read | none | none |
-| Buses | `BUS_WRITE(cap, reg, ptr, len)`, `BUS_READ(cap, reg, ptr, len)` | take the mutex, start the transfer; copy ≤ `BUS_MAX` out of or into the extension's buffer **in this call** | mutex held, transfer in flight | steps 2, 3, 5 |
+| Buses | `BUS_WRITE(cap, reg, ptr, len)`, `BUS_READ(cap, reg, ptr, len)` | take the mutex, start the transfer; copy ≤ the device's `max_transfer` out of or into the extension's buffer **in this call** | mutex held, transfer in flight | steps 2, 3, 5 |
 | Transport | `IO_TX(cap, ptr, len)`, `IO_RX(cap, ptr, len) -> n`, `IO_POLL(cap) -> flags` | copy between the extension's buffer and the privileged queue; enable or disable the source | none beyond the queue | step 2 |
 | DMA | `DMA_TX_START(cap, ptr, len) -> op`, `DMA_RX_START(cap, len) -> op`, `DMA_STATUS(op) -> Pending \| Done(n) \| Failed`, `DMA_COLLECT(op, ptr, len) -> n`, `DMA_CANCEL(op)` | `START`: copy the extension's buffer into the bounce buffer (TX) and program the channel; `COLLECT`: copy ≤ `n` bytes from the bounce buffer into the **revalidated** extension buffer passed to this call; `CANCEL`: steps 1–4 | channel, bounce buffer, bytes done | steps 1–4; an uncollected RX is discarded |
 | Time | `NOW_US()`, `BUDGET_LEFT_US()` | none | none | none |
@@ -1391,14 +1391,20 @@ A board resource several parties need is shared, not owned.
 
 - A bus the board package needs for bring-up and recovery and the app
   needs for its own devices is exported as `pub static SYS_I2C:
-  Shared<I2c<'static, Blocking>>` (`Shared<T> = embassy_sync::
-  blocking_mutex::Mutex<CriticalSectionRawMutex, RefCell<Option<T>>>`,
-  used through `with(|bus| ..)`). DAGON's bring-up and recovery take it
-  through `with` (bounded, synchronous, inside the lease); the app does
-  the same at any time; a sandboxed extension reaches it through the
-  bus port call with its declared device. The package exports its
-  device constants and register-level functions, so an app copies
-  nothing.
+  Shared<I2c<'static, Blocking>>` (`dagon_events::Shared<T>`, an
+  `embassy_sync::mutex::Mutex` taken with `try_lock`), used through
+  `with(|bus| ..)`: a lease, not a critical section. Interrupts stay
+  enabled while the lease is held, because no operation of unbounded
+  length runs with interrupts masked (the execution model), and a bus
+  driver may wait for its own interrupts; a nested or concurrent `with`
+  answers busy instead of waiting. DAGON's bring-up and recovery take it
+  through `with`; the app does the same at any time; a sandboxed
+  extension reaches it through the bus port call with its declared
+  device. Each device is a `[[device]]` of the board definition with its
+  writable registers and its `max_transfer` (from the device's
+  datasheet); the port refuses other registers and longer transfers. The
+  package exports its device constants and register-level functions, so
+  an app copies nothing.
 - Board bring-up is the board package's extension on `app.bring_up`
   (the `BoardBringUp` port); a user step is an extension later in the
   chain on the same event, or a task waiting for `Latest.phase ==
@@ -1861,7 +1867,7 @@ listed, and a test asserts each pair.
 | VERSION 0x21 fixed overhead | `VERSION_PAGE_OVERHEAD = 6` = status (1) + TLV count (1) + id (1) + len (1) + offset (2) | `dagon-proto` constant with a `const` assertion that it equals the sum of the field widths | `RECORD_PAGE` |
 | `RECORD_PAGE` per link | `RECORD_PAGE(link) = min(255 − 2, max_payload(link) − VERSION_PAGE_OVERHEAD)`: I2C 250, UART 253, USB 253; `RECORD_PAGE_MIN = 250` | `dagon-proto` `const fn` with one `const` assertion per link kind | VERSION 0x21; the host's paged reader asks at most `RECORD_PAGE_MIN` |
 | Boot record region | `bytes ≤ RECORD_MAX = 4096` (so `offset u16` of 0x21 addresses all of it); internal bounds are the model's constants (5.5) | `dagon_format::bootrecord::RECORD_MAX`; the MCU definition's `[boot.record]` | the definition validator; every image's `memory.x`; the agent's reader |
-| Service non-preemptible part | `np_max_us` per service and kind, `COPY_MAX`, `BUS_MAX`, `dma_stop_max_us` | the port catalog and the kind capability records (4.4), asserted against the implementation's measured worst case | the service implementations; the timer mask; validation 5 of 4.2 |
+| Service non-preemptible part | `np_max_us` per service and kind, `COPY_MAX`, each `[[device]]`'s `max_transfer`, `dma_stop_max_us` | the port catalog and the kind capability records (4.4), asserted against the implementation's measured worst case | the service implementations; the timer mask; validation 5 of 4.2 |
 | Extension time budget | `max_run_us ≤ BOOT_EXT_MAX_US`, `≤ APP_EXT_MAX_US`; `Σ (calls × budget)` over a boot ≤ `trial_ms / 4` | `dagon-events` `const fn` from the MCU definition's `[watchdog]`; `boot_wiring.rs` | `dagon gen` validator; the sandbox timer; the manifest |
 | Extension memory | `stack_bytes + ram_bytes ≤` the MCU definition's `[isolation] ext_ram_max`; entries ≤ the kind's budget after code, data and stack | the MCU definition; `boot_wiring.rs` protection map | `dagon gen` validator; `memory.x` |
 | Extension count and ids | ids ≤ 32 bytes; 0x08 repeats per extension and the whole VERSION reply must still fit the smallest link | the manifest format; `max_payload::MIN` | `dagon gen` refuses a project whose VERSION reply would not fit |

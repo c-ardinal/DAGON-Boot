@@ -408,10 +408,10 @@ class Run:
         version at the start of the run (dagon rollback where the other slot
         holds it). Verifies every version. Returns the restore record."""
         rec = {"time": now(), "release": self.good and str(self.good[0]), "wrote": self.wrote}
-        if self.start_state is None:  # the start check failed: nothing ran
-            ok = not self.wrote
-            return rec | {"result": "ok" if ok else "FAILED: wrote without a start state",
-                          "note": "no start state", "status": self.last_status()}
+        if self.start_state is None:  # the start check failed: nothing to compare with
+            result = ("FAILED: wrote without a start state" if self.wrote else
+                      "unverified: start state not acquired; nothing written by this run")
+            return rec | {"result": result, "status": self.last_status()}
         try:
             st = self.wait_settled({k: None for k in self.nodes}, "restore-wait")
             self.check_identity("restore")
@@ -504,9 +504,9 @@ class Run:
         print("\n".join(f"{r['id']:<16} {r['result']}" for r in self.results))
         if restore:
             print(f"restore: {restore['result']}")
-            if restore["result"] != "ok":
-                print("!!! RESTORE FAILED: nodes are NOT all on a known-good confirmed "
-                      f"release. Exact state:\n{json.dumps(final, indent=2)}")
+            if restore["result"] != "ok":  # failed or unverified: not known good
+                print(f"!!! RESTORE NOT OK ({restore['result']}): nodes are not verified on a "
+                      f"known-good confirmed release. Exact state:\n{json.dumps(final, indent=2)}")
                 return 2
         return 0 if ok else 1
 
@@ -802,6 +802,13 @@ def selftest_restore():
         rec = r.restore()
         assert rec["result"] == "ok" and writes() == ["apply"], rec
         assert all(n["version"] == "6.6.6" for n in rec["status"].values())
+
+        r = fresh()  # the start state was never acquired: unverified, exit 2
+        r.start_state = None
+        rec = r.restore()
+        assert rec["result"].startswith("unverified") and writes() == [], rec
+        r.results = []
+        assert r.finish(False) == 2
 
         r = fresh()  # nothing written, nothing changed: a read-only check
         rec = r.restore()

@@ -67,7 +67,8 @@ python samples/desk-test/hwt.py selftest
     version with `dagon rollback` (only when its other slot holds that
     version, all checked before the first write) and checks every node is
     on its start version, confirmed.
-  A failed restore exits with code 2 and prints the exact state.
+  A failed or unverified restore (no start state could be read) exits
+  with code 2 and prints the exact state.
 
 ## Output
 
@@ -82,7 +83,7 @@ python samples/desk-test/hwt.py selftest
   scenario, the restore record and the final status.
 
 Exit code: 0 all passed, 1 a scenario failed and the restore succeeded,
-2 the restore failed.
+2 the restore failed or could not be verified.
 
 ## Scenarios
 

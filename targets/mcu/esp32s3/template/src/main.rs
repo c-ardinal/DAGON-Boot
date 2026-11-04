@@ -63,7 +63,7 @@ async fn main(spawner: Spawner) {
         armed,
         dagon,
         p.FROM_CPU_INTR1,
-        NodeConfig::app(app::self_check),
+        NodeConfig::app(app::dagon()),
         &LIVENESS,
     );
     app::start(spawner, &LIVENESS);

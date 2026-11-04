@@ -1,8 +1,9 @@
 //! Starting DAGON on an STM32F401RE node: the board definition
 //! ([`BoardDef`]), the slot store, taking over the watchdog, and the
 //! serving loop of the DAGON link (an I2C target with the mailbox). A node
-//! that needs nothing special calls [`start`]; the pieces are public for an
-//! app that lays out its own executors.
+//! calls [`start`] with its [`App`] (self-check, extensions, who confirms)
+//! and gets its published events back; the pieces are public for an app
+//! that lays out its own executors.
 //!
 //! The flash has one driver: the slot store holds one [`SharedFlash`]
 //! handle on it, the serving loop another (a conformance build runs its
@@ -20,11 +21,11 @@
 
 use dagon_agent::{Agent, Config, SlotStore};
 pub use dagon_core::log::LogError;
-use dagon_events::{Published, Watchdog as Periods};
+use dagon_events::{BoardBringUp, Published, Watchdog as Periods};
 use dagon_format::header::{port_kind, target_tag, ImageHeader, HEADER_SIZE};
 use dagon_format::Version;
-pub use dagon_mcu_common::hooks::{always, NodeChain, SelfCheck};
-use dagon_mcu_common::hooks::{node_chain, Events};
+pub use dagon_mcu_common::hooks::{always, App, AppEvents, Confirm, NodeChain, SelfCheck};
+use dagon_mcu_common::hooks::{finish_start, node_chain, Events, UserExtensions};
 use dagon_mcu_common::link::LinkError;
 use dagon_mcu_common::serve::{serve as dagon_serve, Exit, ServeHost};
 use dagon_proto::max_payload;
@@ -47,7 +48,8 @@ use crate::watchdog::{Guard, Iwdg, Watch};
 /// The DAGON link: an I2C target (listening at the node's address).
 pub type I2cTarget = I2c<'static, Async, MultiMaster>;
 pub type Store = KindSStore<SharedFlash>;
-/// The agent of a node on this MCU; its chain runs the app's CONFIRM check.
+/// The agent of a node on this MCU; its chain holds the app's extensions
+/// and CONFIRM check.
 pub type AppAgent = Agent<Store, NodeChain>;
 
 /// The guard task [`start`] gives DAGON's serving task; the app's tasks
@@ -95,6 +97,12 @@ pub trait BoardDef {
     /// Opens the DAGON link: the I2C target at the node's address, and its
     /// registers (the address is NACKed while a request runs).
     fn open_link(link: Self::Link) -> (I2cTarget, pac::i2c::I2c);
+    /// The board's `BoardBringUp` port, which [`start`] runs before the
+    /// link serves (`app.bring_up`). Default: none, so no bring-up runs and
+    /// no `app.bring_up` is emitted. Called once.
+    fn bring_up_port() -> Option<&'static mut dyn BoardBringUp> {
+        None
+    }
 }
 
 /// A handle on the one flash driver (see the module docs).
@@ -176,40 +184,46 @@ pub fn config(tag: &str) -> Config {
 }
 
 /// The agent over `store`, with the app layer's chain: the published
-/// events and `self_check` as the CONFIRM decision. Call once, after
-/// [`install_watchdog`] gave `guard` the watchdog (`app.watchdog_taken`
-/// names its period and the guard's trial policy).
+/// events, the app's extensions `exts` and `self_check` as the CONFIRM
+/// decision; returns it with the app's read access to the events. Call
+/// once, after [`install_watchdog`] gave `guard` the watchdog
+/// (`app.watchdog_taken` names its period and the guard's trial policy).
 pub fn agent<const N: usize>(
     tag: &str,
     store: Store,
+    exts: Option<UserExtensions>,
     self_check: fn() -> bool,
     guard: &Guard<N>,
-) -> AppAgent {
+) -> (AppAgent, AppEvents) {
     static EVENTS: StaticCell<Events> = StaticCell::new();
     let periods = Periods::new(layout::TRIAL_WDT_MS, layout::CONFIRMED_WDT_MS);
     let now_us: fn() -> u64 = || Instant::now().as_micros();
-    let chain = node_chain(EVENTS.init(Published::new()), self_check, now_us, periods);
+    let events = EVENTS.init(Published::new());
+    let (chain, reader) = node_chain(events, exts, self_check, now_us, periods);
     let on_trial = on_trial(&store);
     let mut agent = Agent::new(config(tag), store, chain);
     agent.watchdog_taken(watchdog_period_ms(on_trial), guard.trial_policy());
-    agent
+    (agent, reader)
 }
 
 /// Starts DAGON: opens the store, takes over the watchdog, opens the link,
 /// spawns the serving task (guard task [`DAGON_TASK`]; declare it
 /// `Preempting`) on DAGON's high-priority executor (`crate::exec`) and the
-/// feeder on `spawner` (the app's executor). `tag` is the
-/// node's image target tag; `self_check` decides whether a version on
-/// trial may be confirmed. Fails if the state log is unreadable (nothing is
-/// started then; the watchdog resets the chip).
+/// feeder on `spawner` (the app's executor). Before the link serves, the
+/// board's bring-up runs and, with [`Confirm::Own`], the app's trial is
+/// confirmed ([`finish_start`]). `tag` is the node's image target tag;
+/// `app` holds the self-check, the app's extensions and who confirms.
+/// Returns the app's read access to the node's events. Fails if the state
+/// log is unreadable (nothing is started then; the watchdog resets the
+/// chip).
 pub fn start<B: BoardDef, const N: usize>(
     spawner: Spawner,
     parts: DagonParts<B::Link>,
     guard: &'static Guard<N>,
     tag: &str,
-    self_check: fn() -> bool,
+    app: App,
     uplink: links::Kind,
-) -> Result<(), LogError> {
+) -> Result<AppEvents, LogError> {
     // The only uplink this MCU offers (`require_uplink` checks it at
     // compile time): the board's I2C target.
     assert!(uplink == links::Kind::I2c, "uplink: only i2c on this MCU");
@@ -223,13 +237,15 @@ pub fn start<B: BoardDef, const N: usize>(
     let (store, flash) = open_store(parts.flash)?;
     let period = watchdog_period_ms(on_trial(&store));
     install_watchdog(parts.iwdg, guard, period, &store);
+    let (mut agent, events) = agent(tag, store, app.exts, app.self_check, guard);
+    let board = B::bring_up_port().map(|p| (B::BOARD_ID, p));
+    guard.set_trial(finish_start(&mut agent, board, app.confirm));
     let (target, regs) = B::open_link(parts.link);
     let link = links::I2c::new(target, regs);
-    let agent = agent(tag, store, self_check, guard);
     let high = crate::exec::start();
     high.spawn(serve(agent, flash, link, guard, task).expect("task pool"));
     spawner.spawn(feed(guard).expect("task pool"));
-    Ok(())
+    Ok(events)
 }
 
 #[embassy_executor::task]

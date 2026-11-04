@@ -161,6 +161,11 @@ pub struct BoardBus {
     pub hz: Option<u32>,
     /// Bit rate of a UART or CAN bus.
     pub baud: Option<u32>,
+    /// The board package opens its driver with DMA (an i2c, spi or uart
+    /// bus): its tx and rx streams come from the MCU's request mapping
+    /// ([`super::dma::board_streams`]).
+    #[serde(default)]
+    pub dma: bool,
 }
 
 impl BoardBus {

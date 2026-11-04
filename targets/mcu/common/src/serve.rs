@@ -313,7 +313,7 @@ mod tests {
 
     fn agent() -> Agent<SimStore, NodeChain> {
         let events = std::boxed::Box::leak(std::boxed::Box::new(Published::new()));
-        let chain = node_chain(events, always, || 0, Watchdog::new(4000, 4000));
+        let (chain, _) = node_chain(events, None, always, || 0, Watchdog::new(4000, 4000));
         Agent::new(dagon_sim::f401_config([0; 32]), SimStore::default(), chain)
     }
 

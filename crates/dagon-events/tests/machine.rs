@@ -383,6 +383,53 @@ fn decisions_default_when_every_extension_abstains() {
     assert_eq!(out.self_check(&trial()), Health::Healthy);
 }
 
+/// A layer start takes the user's extensions as an `Option<&mut dyn
+/// Extension>`: absent, it is asked nothing; present, each of its parts
+/// is asked and timed on its own, before what follows it.
+#[test]
+fn an_optional_user_part_is_absent_or_each_of_its_parts() {
+    let now = Cell::new(0u64);
+    let none: Option<&mut dyn Extension> = None;
+    let mut out = compose(
+        Layer::App,
+        events::<(), 8>(),
+        Nop,
+        extensions![none, slow("after", &now, 10)],
+        Bounds::new(|| now.get(), Watchdog::new(8_000, 8_000)),
+    );
+    assert_eq!(out.self_check(&trial()), Health::Healthy);
+
+    let mut user = extensions![
+        slow("lib", &now, 10),
+        Slow {
+            health: Some(Health::Unhealthy),
+            ..slow("late-app", &now, 50_001)
+        }
+    ];
+    let some: Option<&mut dyn Extension> = Some(&mut user);
+    let fallback = Slow {
+        health: Some(Health::Pending),
+        ..slow("fallback", &now, 10)
+    };
+    let mut out = compose(
+        Layer::App,
+        events::<(), 8>(),
+        Nop,
+        extensions![some, fallback],
+        Bounds::new(|| now.get(), Watchdog::new(8_000, 8_000)),
+    );
+    // The late part's answer is dropped and it is named; the next part
+    // answers.
+    assert_eq!(out.self_check(&trial()), Health::Pending);
+    let reader = out.reader();
+    drop(out);
+    let r = reader.recent().try_take().unwrap();
+    assert_eq!(
+        u64::from_le_bytes(r.payload[0..8].try_into().unwrap()),
+        ExtId::of("late-app").hash
+    );
+}
+
 #[test]
 fn the_first_answer_in_order_wins_and_a_delay_is_capped() {
     let events = events::<(), 4>();

@@ -78,8 +78,10 @@ Pins and wiring are not here. A board crate (`targets/boards/*`, e.g.
 UART already set up on its pins with `link::uart_config(baud)`, USB Serial/JTAG,
 the flash, the RTC timer, and a `&'static mut dyn BoardDef`:
 
-- `bring_up()`: runs once in the link task before it serves (IO expander pin
-  routing for the link). Displays and other peripherals are the app's.
+- `bring_up_port()`: the board's `BoardBringUp`, run once in the link task
+  before it serves (IO expander pin routing for the link), then
+  `app.bring_up` naming `id()`; a board without one emits nothing. Displays
+  and other peripherals are the app's.
 - `pmic_download_supported()` / `pmic_download()`: ENTER_ROM method 2
   through the board's power manager, if it has one.
 

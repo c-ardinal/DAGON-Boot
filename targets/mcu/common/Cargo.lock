@@ -95,6 +95,7 @@ dependencies = [
  "dagon-port",
  "dagon-proto",
  "dagon-sim",
+ "ed25519-compact",
  "embassy-sync",
 ]
 

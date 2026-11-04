@@ -73,12 +73,14 @@ static GUARD: Guard<TASKS> = Guard::new(node::levels::<TASKS>(), Trial::NeverFee
 async fn main(spawner: Spawner) {
     let (dagon, io) = Board::split(embassy_stm32::init(clocks()));
     let tag = dagon_mcu_stm32f401re::target_tag!();
-    board::start(spawner, dagon, &GUARD, tag, app::self_check, UPLINK).ok();
+    board::start(spawner, dagon, &GUARD, tag, app::dagon(), UPLINK).ok();
     app::start(spawner, io, &GUARD, node::APP_TASKS);
 }
 ```
 
-`src/app.rs` holds `TASKS`, `self_check()` and `start()`, which spawns the
+`src/app.rs` holds `TASKS`, `self_check()`, `dagon()` (the `node::App` the
+start takes: the self-check, the app's extensions, who confirms) and
+`start()`, which spawns the
 app's tasks, each with a `Lease` (`lease.busy(budget_ms)` before a piece of
 work, `lease.idle()` when waiting).
 
@@ -91,7 +93,13 @@ feeder on `spawner`. The app's tasks run in thread mode below it, so the
 親機 is answered whatever they do. The node's tag comes from
 `DAGON_TARGET_TAG` in `.cargo/config.toml`
 (`DAGON_TARGET_TAG = { value = "my-node", force = true }` under `[env]`);
-`self_check` decides whether a version on trial may be confirmed. An app
+the `App` gives the self-check (whether a version on trial may be
+confirmed), the app's extensions (`exts`: they observe every `app.*` event
+and answer the decision points, after the board package in the chain) and
+`confirm` (`Confirm::Own`: the start confirms a trial itself before the
+link serves). The board's `BoardDef::bring_up_port` runs before the link
+serves (`app.bring_up`); a board without one emits nothing. `start`
+returns the node's events (`AppEvents`) for display and log tasks. An app
 that keeps `embassy_stm32::Peripherals` itself passes `dagon_pins!(p)`
 instead of splitting. Build with `DAGON_PUBKEY` set (below);
 `--features slot-b` links the same app for slot B. An app that runs

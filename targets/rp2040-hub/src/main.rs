@@ -23,7 +23,7 @@ use board::{Board, BoardDef};
 use dagon_board_waveshare_rp2040_touch_lcd_1_28 as board;
 use dagon_mcu_rp2040::arm::{led, step};
 use dagon_mcu_rp2040::links::Kind;
-use dagon_mcu_rp2040::node::always;
+use dagon_mcu_rp2040::node::{always, App};
 use dagon_mcu_rp2040::relay::{self, named, RelayConfig, SubNode};
 use dagon_mcu_rp2040::watchdog::{now_ms, Guard, Trial};
 use dagon_proto::payload::link;
@@ -61,7 +61,7 @@ fn main() -> ! {
         tag: dagon_mcu_rp2040::target_tag!(),
         name: "DAGON hub",
         fallback: &DESK_DEMO,
-        self_check: always,
+        app: App::new(always),
     };
     EXECUTOR_LOW.init(Executor::new()).run(|low| {
         step(12);

@@ -130,7 +130,7 @@ fn desk_demo_uses_each_packages_template_and_skips_what_is_missing() {
     assert!(watch.contains("dagon-board-m5stopwatch = { path = "));
     assert!(watch.contains("dagon-mcu-esp32s3 = { path = "));
     let main = read(&base, "nodes/watch/src/main.rs");
-    assert!(main.contains("board::start(") && main.contains("NodeConfig::app(app::self_check)"));
+    assert!(main.contains("board::start(") && main.contains("NodeConfig::app(app::dagon())"));
     assert!(read(&base, "nodes/watch/src/app.rs").contains("lease.busy(node::now_ms()"));
     assert!(read(&base, "nodes/watch/rust-toolchain.toml").contains("esp"));
     assert!(read(&base, "nodes/watch/.cargo/config.toml").contains("xtensa-esp32s3-none-elf"));
@@ -773,6 +773,22 @@ fn mcu_templates_wire_the_links_the_topology_names() {
     assert!(!seg.contains("{{"), "{seg}");
     let pins = t.link_to("seg").and_then(|l| l.node_pins.clone()).unwrap();
     assert!(seg.contains(&format!("sda: p.{}", pins.sda)), "{seg}");
+    // Its DMA streams come from the MCU definition's request mapping
+    // (I2C3: tx stream 4, rx stream 1), not from the template.
+    assert!(
+        seg.contains("use embassy_stm32::peripherals::{DMA1_CH4, DMA1_CH1};"),
+        "{seg}"
+    );
+    assert!(
+        seg.contains("DMA1_STREAM1 => dma::InterruptHandler<peripherals::DMA1_CH1>;"),
+        "{seg}"
+    );
+    assert!(seg.contains("rx_dma: p.DMA1_CH1,"), "{seg}");
+    let tpl_text = tpl("stm32f401re");
+    assert!(
+        !tpl_text.contains("DMA1_CH"),
+        "the template names no stream"
+    );
     // Without a UART downlink its code is left out and still parses.
     let mut no_uart = t.clone();
     no_uart.links.retain(|l| l.kind != LinkKind::Uart);

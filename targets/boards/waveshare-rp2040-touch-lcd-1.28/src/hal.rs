@@ -59,7 +59,8 @@ static FRAME: static_cell::ConstStaticCell<gc9a01::Frame> =
 /// reset, and with `display` the home screen on `spawner` (guard task
 /// [`DISPLAY_TASK`]). Declare the guard with
 /// `dagon_mcu_rp2040::relay::levels()`. Returns what DAGON does not use,
-/// for the app's own tasks.
+/// for the app's own tasks, and the 親機's events. The board has no
+/// bring-up, so no `app.bring_up` is emitted.
 #[cfg(feature = "relay")]
 pub fn start<const N: usize>(
     spawner: embassy_executor::Spawner,
@@ -69,7 +70,7 @@ pub fn start<const N: usize>(
     cfg: dagon_mcu_rp2040::relay::RelayConfig,
     uplink: Kind,
     downlinks: &[Kind],
-) -> Spare {
+) -> (Spare, dagon_mcu_rp2040::node::AppEvents) {
     const {
         assert!(
             N > APP_TASKS - 1,
@@ -102,11 +103,11 @@ pub fn start<const N: usize>(
     {
         spare.display = Some(io.display);
     }
-    dagon_mcu_rp2040::relay::start::<Board, N>(spawner, dagon, links, guard, cfg);
+    let events = dagon_mcu_rp2040::relay::start::<Board, N>(spawner, dagon, links, guard, cfg);
     #[cfg(feature = "display")]
     spawner
         .spawn(display::task(display, FRAME.take(), guard.lease(DISPLAY_TASK)).expect("task pool"));
-    spare
+    (spare, events)
 }
 
 /// Down `i2c` on this board: bus `child-i2c` at [`I2C_HZ`] with the

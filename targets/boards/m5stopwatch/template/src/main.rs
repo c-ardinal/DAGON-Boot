@@ -38,7 +38,7 @@ async fn main(spawner: Spawner) {
     board::start(
         armed,
         dagon_pins!(p),
-        NodeConfig::app(app::self_check),
+        NodeConfig::app(app::dagon()),
         &LIVENESS,
     );
     app::start(spawner, &LIVENESS);

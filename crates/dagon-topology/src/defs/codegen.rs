@@ -261,6 +261,87 @@ pub fn pins_rs(b: &BoardDef, hal: &Hal<'_>) -> String {
     o
 }
 
+/// How a HAL names DMA streams, their interrupts and its binding macro
+/// (embassy-stm32: `DMA1_CH4`, `DMA1_STREAM4`).
+pub struct DmaHal<'a> {
+    /// Path of the HAL's peripheral singletons.
+    pub peripherals: &'a str,
+    /// The singleton of stream `n` of controller `ctl` (a definition id).
+    pub stream: &'a dyn Fn(&str, u8) -> String,
+    /// The interrupt of that stream.
+    pub interrupt: &'a dyn Fn(&str, u8) -> String,
+    /// The interrupt handler type, generic over the stream singleton.
+    pub handler: &'a str,
+    /// The HAL's interrupt binding macro.
+    pub bind: &'a str,
+}
+
+/// The DMA streams of board `b`'s `dma = true` buses
+/// ([`super::dma::board_streams`]): per bus `<Bus>TxDma` and `<Bus>RxDma`
+/// types, `take_dma!(p.<bus>_tx)` arms, and `bind_<bus>_dma!`, which is
+/// the HAL's binding macro with that bus's stream interrupts added (the
+/// package that opens the bus binds them; another bus is its user's).
+pub fn dma_rs(b: &BoardDef, m: &McuDef, hal: &DmaHal<'_>) -> Result<String, DefError> {
+    let buses = super::dma::board_streams(b, m).map_err(|e| def_err(&b.id, e))?;
+    let mut o = format!(
+        "// Written by the package's build script from board `{}`'s definition and\n\
+         // MCU `{}`'s DMA request mapping.\n\n",
+        b.id, m.id
+    );
+    let mut take = String::new();
+    for x in &buses {
+        let bus = code_ident(&x.bus.id);
+        let mut arms = String::new();
+        for (dir, s) in [("tx", &x.tx), ("rx", &x.rx)] {
+            let one = (hal.stream)(&s.controller, s.stream);
+            let _ = writeln!(
+                o,
+                "/// Bus `{}` {dir}: {} stream {}, request channel {}.\npub type {}{}Dma = {}::{one};",
+                x.bus.id,
+                s.controller,
+                s.stream,
+                s.channel,
+                camel(&bus),
+                camel(dir),
+                hal.peripherals
+            );
+            let _ = writeln!(take, "    ($p:ident . {bus}_{dir}) => {{ $p.{one} }};");
+            let _ = writeln!(
+                arms,
+                "            {} => {}<{}::{one}>;",
+                (hal.interrupt)(&s.controller, s.stream),
+                hal.handler,
+                hal.peripherals
+            );
+        }
+        let _ = writeln!(
+            o,
+            "\n/// `{bind}!` with bus `{id}`'s DMA stream interrupts added:\n\
+             /// `bind_{bus}_dma!(pub struct Irqs {{ .. }});`.\n#[macro_export]\n\
+             macro_rules! bind_{bus}_dma {{\n    ($vis:vis struct $name:ident {{ $($body:tt)* }}) => {{\n        \
+             {bind}!($vis struct $name {{\n            $($body)*\n{arms}        }});\n    }};\n}}",
+            bind = hal.bind,
+            id = x.bus.id,
+        );
+    }
+    o.push_str(
+        "\n/// Takes a DMA stream of the definition out of the HAL's peripherals:\n\
+         /// `take_dma!(p.link_tx)`.\n#[macro_export]\nmacro_rules! take_dma {\n",
+    );
+    o.push_str(&take);
+    o.push_str("}\n");
+    Ok(o)
+}
+
+/// A board package's build script, for a board with `dma = true` buses:
+/// writes `dma.rs` ([`dma_rs`]) into `OUT_DIR` from the package's own
+/// definition. Call it beside [`package_build`].
+pub fn dma_build(hal: &DmaHal<'_>) {
+    let l = package_board(&manifest_dir()).unwrap_or_else(|e| panic!("{e}"));
+    let rs = dma_rs(&l.board, &l.mcu, hal).unwrap_or_else(|e| panic!("{e}"));
+    write(&out_dir().join("dma.rs"), &rs);
+}
+
 fn write(path: &Path, text: &str) {
     std::fs::write(path, text).unwrap_or_else(|e| panic!("{}: {e}", path.display()));
 }
@@ -356,6 +437,39 @@ mod tests {
         ] {
             assert!(rs.contains(want), "{want} in\n{rs}");
         }
+    }
+
+    #[test]
+    fn dma_streams_come_from_the_mcu_definition() {
+        let reg = Registry::builtin();
+        let b = reg.board("nucleo-f401re").unwrap();
+        let m = reg.mcu(&b.mcu).unwrap();
+        let stream = |c: &str, n: u8| format!("{}_CH{n}", c.to_uppercase());
+        let irq = |c: &str, n: u8| format!("{}_STREAM{n}", c.to_uppercase());
+        let hal = DmaHal {
+            peripherals: "hal::peripherals",
+            stream: &stream,
+            interrupt: &irq,
+            handler: "hal::dma::InterruptHandler",
+            bind: "hal::bind_interrupts",
+        };
+        let rs = dma_rs(b, m, &hal).unwrap();
+        for want in [
+            // I2C3: tx stream 4 (channel 3), rx stream 1 (channel 1), the
+            // first of each in RM0368's table.
+            "pub type LinkTxDma = hal::peripherals::DMA1_CH4;",
+            "pub type LinkRxDma = hal::peripherals::DMA1_CH1;",
+            "pub type ArduinoI2cTxDma = hal::peripherals::DMA1_CH6;",
+            "pub type ArduinoI2cRxDma = hal::peripherals::DMA1_CH0;",
+            "($p:ident . link_rx) => { $p.DMA1_CH1 };",
+            "macro_rules! bind_link_dma",
+            "DMA1_STREAM4 => hal::dma::InterruptHandler<hal::peripherals::DMA1_CH4>;",
+            "macro_rules! bind_arduino_i2c_dma",
+        ] {
+            assert!(rs.contains(want), "{want} in\n{rs}");
+        }
+        // The VCP is handed out without DMA.
+        assert!(!rs.contains("Vcp"), "{rs}");
     }
 
     fn tree(name: &str, boards: &[(&str, &str)]) -> (PathBuf, PathBuf) {

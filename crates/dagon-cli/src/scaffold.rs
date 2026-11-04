@@ -419,6 +419,10 @@ pub fn hop_placeholders(
 ///   I2C: the pins its link names (`node_pins`) and the controller the
 ///   MCU's ROM loader pair of those pins names (upper case; the loader
 ///   refuses a pin pair listed for two controllers);
+/// - `{{link_tx_dma_ctl}}`, `{{link_tx_dma_stream}}` and the `rx` pair:
+///   the DMA controller (upper case) and stream of that I2C controller's
+///   tx and rx, from the MCU definition's request mapping
+///   (`defs::dma::assign`), empty when the MCU lists none for it;
 /// - `{{down_i2c}}`, `{{down_i2c_sda}}`, `{{down_i2c_scl}}`,
 ///   `{{down_i2c_hz}}` and `{{down_uart_tx}}`, `{{down_uart_rx}}`,
 ///   `{{down_uart_baud}}`: a 親機's I2C bus and UART link to its 子機
@@ -456,11 +460,31 @@ pub fn wiring_placeholders(
                         p.sda, p.scl, n.mcu
                     )
                 })?;
-            (q.controller.to_uppercase(), p.sda.clone(), p.scl.clone())
+            (q.controller.clone(), p.sda.clone(), p.scl.clone())
         }
         None => Default::default(),
     };
-    put("link_i2c", ctl);
+    let mcu = reg.mcu(&n.mcu);
+    let has_dma = mcu
+        .and_then(|m| m.peripheral(&ctl))
+        .is_some_and(|p| !p.dma_requests.is_empty());
+    let streams = match mcu.filter(|_| has_dma) {
+        Some(m) => dagon_topology::defs::dma::assign(m, &[(&ctl, "tx"), (&ctl, "rx")])
+            .map_err(|e| format!("{}: {e}", n.id))?,
+        None => Vec::new(),
+    };
+    for (i, dir) in ["tx", "rx"].into_iter().enumerate() {
+        let s = streams.get(i);
+        put(
+            &format!("link_{dir}_dma_ctl"),
+            s.map_or(String::new(), |s| s.controller.to_uppercase()),
+        );
+        put(
+            &format!("link_{dir}_dma_stream"),
+            s.map_or(String::new(), |s| s.stream.to_string()),
+        );
+    }
+    put("link_i2c", ctl.to_uppercase());
     put("link_sda", sda);
     put("link_scl", scl);
     let downs: Vec<_> = t.links.iter().filter(|l| l.from == n.id).collect();

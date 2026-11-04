@@ -237,9 +237,13 @@ pass_env = ["MY_AGENT_HOME"]  # optional: more variables the program needs
   - Working folder: a fresh temporary folder, removed afterwards, so the
     program does not start in the project. This is hygiene, not a sandbox:
     the program can still reach whatever your account can.
-  - Time: past the call's time the whole process tree is stopped (Windows
-    `taskkill /F /T`; Unix: the program runs in its own process group, which
-    is killed).
+  - Lifetime: the program runs in an OS group: a Windows job object (through
+    the `command-group` crate; closing it kills every process in it, also
+    when dagon itself ends) or a Unix process group it leads. The group is
+    stopped when the call's time runs out and as soon as the program itself
+    ends, so a process it started and left behind (holding its stdout or
+    not) never outlives the call. The answer is what the program printed
+    before it ended.
 - `messages-http`: `url` (https only), `version` (the `anthropic-version`
   header), `key_env` (the variable holding the key), `model`, optional
   `model_env` (a variable that overrides `model`).

@@ -24,7 +24,7 @@ use crate::schema::{ControlKind, LinkKind, RomEntry, UartIface};
 
 pub use board_boot::{BoardBoot, BoardBus, BoardDevice, BoardPeripheral, BoardPin};
 pub use isolation::{Core, Isolation, McuBoot, Peripheral, RecordPlacement, Watchdog};
-pub use load::{DefError, DefSource, Source};
+pub use load::{DefError, DefSource, Source, BUILTIN_FILES};
 
 /// The `dagon-mcu.toml` / `dagon-board.toml` format number this reader
 /// reads (their `format` key; absent means this one).
@@ -139,10 +139,10 @@ pub struct FlashMapDef {
     /// Address of the first flash byte as images see it.
     pub base: u32,
     pub bytes: u32,
-    /// The CPU reads (and executes) flash at `base`: flash shares the
-    /// address space with RAM and register blocks. Left out: `base` and
-    /// the slots are flash offsets an MMU maps elsewhere.
-    #[serde(default)]
+    /// `true`: the CPU reads (and executes) flash at `base`, so flash
+    /// shares the address space with RAM and register blocks. `false`:
+    /// `base` and the slots are flash offsets an MMU maps elsewhere.
+    /// Required: no default.
     pub xip: bool,
 }
 

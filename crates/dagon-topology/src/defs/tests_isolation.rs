@@ -60,12 +60,10 @@ window_eligible = true
 /// The fake MCU with an armv7m-mpu record, its blocks, a watchdog and a
 /// boot record (every numeric isolation field appears).
 pub(super) fn isolated_mcu() -> String {
-    let top = FAKE_MCU
-        .replace(
-            "gpio_count = 16\n",
-            "gpio_count = 16\nram = { at = 0x2000_0000, size = 0x1_0000 }\n",
-        )
-        .replace("bytes = 0x10_0000\n", "bytes = 0x10_0000\nxip = true\n");
+    let top = FAKE_MCU.replace(
+        "gpio_count = 16\n",
+        "gpio_count = 16\nram = { at = 0x2000_0000, size = 0x1_0000 }\n",
+    );
     format!(
         r#"{top}
 [watchdog]
@@ -401,11 +399,14 @@ fn kind_names_round_trip_through_the_definition_format() {
 fn flash_offsets_of_an_mmu_mapped_mcu_share_no_space_with_register_blocks() {
     // The same block at an address inside the fake MCU's flash map:
     // refused when the definition says the CPU reads flash there (xip),
-    // accepted when its flash addresses are offsets (no xip), whatever
+    // accepted when its flash addresses are offsets (xip = false), whatever
     // the port kind.
     let low = isolated("base = 0x4000_4800", "base = 0x0010_0000");
     assert!(mcu_err(&low).contains("overlaps a flash map"));
-    let offsets = low.replace("xip = true\n", "");
+    let offsets = low.replace("xip = true\n", "xip = false\n");
+    // Every flash map says which: no silent default.
+    let e = mcu_err(&low.replace("xip = true\n", ""));
+    assert!(e.contains("missing field `xip`"), "{e}");
     let m = parse_mcu_text(&offsets, &[]).unwrap();
     assert!(!m.flash_is_cpu_mapped());
     // The shipped MCUs: the two that run from flash in place, and not the

@@ -23,6 +23,22 @@ fn glyph(c: char) -> Option<u8> {
         't' => Some(0x78),
         'S' => Some(0x6D),
         'E' => Some(0x79),
+        // The update words (crate::update).
+        'A' => Some(0x77),
+        'b' => Some(0x7C),
+        'C' => Some(0x39),
+        'c' => Some(0x58),
+        'd' => Some(0x5E),
+        'F' => Some(0x71),
+        'h' => Some(0x74),
+        // `I` on the left verticals, `i` the lower left one: neither looks like 1.
+        'I' => Some(0x30),
+        'i' => Some(0x10),
+        'L' => Some(0x38),
+        'n' => Some(0x54),
+        'o' => Some(0x5C),
+        'P' => Some(0x73),
+        'r' => Some(0x50),
         _ => None,
     }
 }
@@ -65,13 +81,13 @@ pub fn version(v: Version) -> [u8; DIGITS] {
 pub const TEST_KEY: [u8; DIGITS] = [0x78, 0x79, 0x6D, 0x78];
 
 #[derive(Default)]
-struct Buf {
+pub(crate) struct Buf {
     b: [u8; 12],
     n: usize,
 }
 
 impl Buf {
-    fn as_str(&self) -> Option<&str> {
+    pub(crate) fn as_str(&self) -> Option<&str> {
         core::str::from_utf8(&self.b[..self.n]).ok()
     }
 }

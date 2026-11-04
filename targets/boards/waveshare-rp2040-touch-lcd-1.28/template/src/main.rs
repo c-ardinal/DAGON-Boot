@@ -43,8 +43,8 @@ async fn main(spawner: Spawner) {
         tag: dagon_mcu_rp2040::target_tag!(),
         name: "{{node}}",
         fallback: &[],
-        self_check: app::self_check,
+        app: app::dagon(),
     };
-    let spare = board::start(spawner, dagon, io, &GUARD, cfg, UPLINK, DOWNLINKS);
+    let (spare, _events) = board::start(spawner, dagon, io, &GUARD, cfg, UPLINK, DOWNLINKS);
     app::start(spawner, spare, &GUARD, board::APP_TASKS);
 }

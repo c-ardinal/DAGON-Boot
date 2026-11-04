@@ -9,7 +9,7 @@
 
 use serde::Deserialize;
 
-use super::{ImageKind, McuDef, PortKind, Region};
+use super::{Fact, ImageKind, McuDef, PortKind, Region};
 
 /// The level of protection DAGON enforces on an MCU.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Deserialize)]
@@ -287,6 +287,13 @@ pub struct Peripheral {
     /// Why it stays privileged (one class or a list).
     #[serde(default, deserialize_with = "one_or_many")]
     pub privileged_why: Vec<Why>,
+    /// A DMA controller whose streams each select one request
+    /// ([`super::dma`]).
+    pub dma: Option<super::dma::Controller>,
+    /// The DMA requests of this block, as the MCU's request mapping table
+    /// lists them ([`super::dma`]).
+    #[serde(default)]
+    pub dma_requests: Vec<super::dma::Request>,
 }
 
 impl Peripheral {
@@ -332,7 +339,75 @@ pub struct Watchdog {
     /// Boots the boot stage gives a pending image before it rolls back
     /// (the boot core's limit, or the vendor second stage's).
     pub trial_attempts: u8,
+    /// The watchdog-reset flag the lockup fuse needs (retained-formats.md
+    /// 3.4), as a fact: where it comes from, or `none`.
+    pub flag: Fact<WatchdogFlag>,
 }
+
+/// Where a watchdog-reset flag comes from: set by a watchdog reset, kept
+/// over every later reset but power-on, cleared only when a start
+/// acknowledges it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum WatchdogFlag {
+    /// The MCU has no such flag: no lockup fuse.
+    None,
+    /// A reset-flag register that keeps its flags until software clears
+    /// them (the definition's comment names the register and its source).
+    Register,
+    /// The MCU package keeps one itself (e.g. in memory a watchdog reset
+    /// leaves alone, set when the reset reason says watchdog).
+    Package,
+}
+
+impl WatchdogFlag {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::None => "none",
+            Self::Register => "register",
+            Self::Package => "package",
+        }
+    }
+}
+
+/// How an MCU package draws the boot record's entropy word: the
+/// mechanisms retained-formats.md 2.3 accepts.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum EntropySource {
+    /// A hardware random number generator.
+    Rng,
+    /// A ring oscillator's random bit, sampled repeatedly.
+    RingOsc,
+    /// A low-speed oscillator's period captured against a high-speed one.
+    OscCapture,
+    /// The low bits of repeated ADC conversions of an internal sensor.
+    AdcNoise,
+}
+
+impl EntropySource {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Rng => "rng",
+            Self::RingOsc => "ring-osc",
+            Self::OscCapture => "osc-capture",
+            Self::AdcNoise => "adc-noise",
+        }
+    }
+}
+
+/// `[boot.record] entropy`: the source of the start-up word a new record
+/// sequence mixes in, and its min-entropy per word in bits (a fact).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Entropy {
+    pub source: EntropySource,
+    pub min_bits: Fact,
+}
+
+/// Least min-entropy a new record sequence needs (retained-formats.md
+/// 2.3).
+pub const ENTROPY_MIN_BITS: u32 = 16;
 
 impl Watchdog {
     /// The longest an app may delay a requested reboot: half the shorter
@@ -416,6 +491,8 @@ pub struct RecordPlacement {
     pub at: u32,
     pub size: u32,
     pub survives: Survives,
+    /// Required: an MCU without an entropy source has no boot record.
+    pub entropy: Entropy,
     pub rings: Vec<Ring>,
     pub fuse: Fuse,
     /// Addresses inside the region the record never stores to (registers
@@ -760,6 +837,23 @@ impl McuDef {
     pub fn record(&self) -> Option<&RecordPlacement> {
         self.boot.record.as_ref()
     }
+
+    /// Why this MCU has no lockup fuse, or `None` when it has one: fuse
+    /// cells and a watchdog-reset flag with a source (an unverified source
+    /// counts; tools report it as not established).
+    pub fn fuse_unavailable(&self) -> Option<&'static str> {
+        if self.record().is_none_or(|r| r.fuse.cells.is_empty()) {
+            return Some("no [boot.record] fuse cells");
+        }
+        match self.watchdog.map(|w| w.flag) {
+            None => Some("no [watchdog]"),
+            Some(Fact::Unmeasured(_)) => Some("watchdog.flag is unmeasured"),
+            Some(f) if f.value() == Some(WatchdogFlag::None) => {
+                Some("watchdog.flag is none: the MCU has no watchdog-reset flag")
+            }
+            Some(_) => None,
+        }
+    }
 }
 
 fn fail(cond: bool, msg: impl FnOnce() -> String) -> Result<(), String> {
@@ -1073,6 +1167,13 @@ pub(super) fn record(m: &McuDef) -> Result<(), String> {
             rec.at, rec.size
         )
     })?;
+    fail(
+        rec.entropy
+            .min_bits
+            .value()
+            .is_some_and(|b| b < ENTROPY_MIN_BITS),
+        || format!("boot.record.entropy.min_bits must be at least {ENTROPY_MIN_BITS}"),
+    )?;
     fail(
         rec.rings.is_empty() || rec.rings.len() > RECORD_WRITERS_MAX,
         || format!("boot.record needs 1..={RECORD_WRITERS_MAX} rings"),

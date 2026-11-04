@@ -87,6 +87,10 @@ trial_ms = 8_000
 confirmed_ms = 8_000
 # The boot core starts a pending image this many times before it rolls back.
 trial_attempts = 3
+# The lockup fuse's watchdog-reset flag: WATCHDOG REASON is cleared by a
+# RUN-pin reset, so the MCU package keeps the flag itself. To be verified
+# on the hardware.
+flag = { unverified = "package" }
 
 # Flash operations run from RAM with XIP off; the flash driver masks
 # interrupts and pauses core 1 for each. DAGON erases one 4 KiB sector per
@@ -129,6 +133,9 @@ kind = "noinit-ram"
 at = 0x2004_0000
 size = 0x800
 survives = "reset-random"
+# The ring oscillator's RANDOMBIT (RP2040 datasheet section 2.17), sampled
+# repeatedly; its min-entropy is to be measured on the board.
+entropy = { source = "ring-osc", min_bits = "unmeasured" }
 rings = [
     { writer = "stage0", at = 0x2004_0000, size = 0x200 },
     { writer = "bootcore", at = 0x2004_0200, size = 0x600 },

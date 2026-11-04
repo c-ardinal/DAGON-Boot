@@ -276,6 +276,8 @@ dependencies = [
  "embassy-stm32",
  "embassy-time",
  "static_cell",
+ "stm32-metapac",
+ "toml",
 ]
 
 [[package]]

@@ -61,7 +61,7 @@ async fn main(spawner: Spawner) {
     board::start(
         armed,
         dagon_pins!(p),
-        NodeConfig::app(self_check),
+        NodeConfig::app(node::App::new(self_check)),
         &LIVENESS,
     );
     // Without a lease or a task the demo shows no progress: CONFIRM is

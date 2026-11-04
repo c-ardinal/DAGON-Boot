@@ -56,6 +56,10 @@ confirmed_ms = 4_000
 # The ESP-IDF 2nd stage with app rollback (vendor/sdkconfig.defaults) aborts
 # an image left on trial at its next boot: one boot.
 trial_attempts = 1
+# Whether the ESP32-S3 has a watchdog-reset flag that survives a later
+# reset (the RTC reset cause names only the last reset) is not established.
+# No [boot.record] here, so no lockup fuse either way.
+flag = "unmeasured"
 
 # The flash cache is off during an operation; the flash driver masks
 # interrupts for each (handlers outside IRAM cannot run). DAGON erases at

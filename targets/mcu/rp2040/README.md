@@ -61,9 +61,9 @@ async fn main(spawner: embassy_executor::Spawner) {
         tag: dagon_mcu_rp2040::target_tag!(),
         name: "my-hub",
         fallback: &[],
-        self_check: app::self_check,
+        app: app::dagon(),
     };
-    let spare = board::start(spawner, dagon, io, &GUARD, cfg, UPLINK, DOWNLINKS);
+    let (spare, _events) = board::start(spawner, dagon, io, &GUARD, cfg, UPLINK, DOWNLINKS);
     app::start(spawner, spare, &GUARD, board::APP_TASKS);
 }
 ```
@@ -75,6 +75,12 @@ pub const TASKS: usize = 1;
 
 pub fn self_check() -> bool {
     true
+}
+
+/// What the app hands the start: the self-check, its extensions
+/// (`exts`) and who confirms (`confirm`).
+pub fn dagon() -> App {
+    App::new(self_check)
 }
 
 /// `spare`: the pins and peripherals DAGON does not use.

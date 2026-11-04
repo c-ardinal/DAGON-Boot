@@ -41,7 +41,9 @@ async fn main(spawner: embassy_executor::Spawner) {
     let mut p = esp_hal::init(esp_hal::Config::default());
     let armed = node::arm_watchdog(p.RTC_TIMER.reborrow());
     esp_rtos::start(esp_hal::timer::timg::TimerGroup::new(p.TIMG0).timer0, p.FROM_CPU_INTR0);
-    board::start(armed, dagon_pins!(p), NodeConfig::app(self_check), &LIVENESS);
+    // The node's events; `node::App` also takes the app's extensions and
+    // `Confirm::Own`.
+    let _events = board::start(armed, dagon_pins!(p), NodeConfig::app(node::App::new(self_check)), &LIVENESS);
     // your tasks: take a lease with LIVENESS.register(), then
     // lease.busy(node::now_ms(), budget_ms) before work, lease.idle() after
 }

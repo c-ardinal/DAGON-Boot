@@ -6,18 +6,24 @@
 //! an implementation of [`BoardDef`] for the rest. A new ESP32-S3 board needs a
 //! board crate (or just these two things in the app), nothing else.
 
+use dagon_events::BoardBringUp;
+
 /// Board extras the link task drives. Every method has a default, so a
 /// plain board implements nothing: `impl BoardDef for MyBoard {}`.
 pub trait BoardDef: Send {
     /// The board definition's id (`dagon-board.toml` `id`), for
-    /// `app.bring_up`; `None` for a board without one (no event).
+    /// `app.bring_up`; `None` for a board without one (no bring-up runs).
     fn id(&self) -> Option<&'static str> {
         None
     }
 
-    /// Runs once in the link task, before it serves anything: pin routing
-    /// through an IO expander for the link. Keep it short (milliseconds).
-    fn bring_up(&mut self) {}
+    /// The board's `BoardBringUp` port, run once in the link task before
+    /// it serves anything (`app.bring_up`), e.g. pin routing through an IO
+    /// expander for the link. Keep it short (milliseconds). Default: none,
+    /// so no bring-up runs and no `app.bring_up` is emitted.
+    fn bring_up_port(&mut self) -> Option<&mut dyn BoardBringUp> {
+        None
+    }
 
     /// ENTER_ROM method 2 is available: the board's power manager can
     /// restart the chip in download mode. Default: no (method 2 answers

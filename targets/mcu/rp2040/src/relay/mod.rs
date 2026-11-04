@@ -23,7 +23,7 @@ use embassy_executor::Spawner;
 use embassy_rp::peripherals::{I2C0, PIO0};
 
 use crate::links::{I2cLink, PioStream, RpI2c};
-use crate::node::{self, BoardDef, DagonParts};
+use crate::node::{self, App, AppEvents, BoardDef, DagonParts};
 use crate::sub::SubLines;
 use crate::uart::UartLink;
 use crate::watchdog::{feed_forever, now_ms, Guard, Level, Watch};
@@ -61,25 +61,27 @@ pub struct RelayConfig {
     pub name: &'static str,
     /// Sub nodes to poll while no topology display copy is stored.
     pub fallback: &'static [SubNode],
-    /// Whether a version on trial may be confirmed.
-    pub self_check: fn() -> bool,
+    /// The 親機 app's self-check, extensions and who confirms.
+    pub app: App,
 }
 
 /// Starts the relay: opens the store and the agent (taking over the
-/// watchdog), spawns the PC and link tasks on DAGON's high-priority
-/// executor and the watchdog feeder on `spawner` (the app's executor).
+/// watchdog, running the board's bring-up, see `node::open`), spawns the
+/// PC and link tasks on DAGON's high-priority executor and the watchdog
+/// feeder on `spawner` (the app's executor). Returns the 親機's events.
 pub fn start<B: BoardDef, const N: usize>(
     spawner: Spawner,
     parts: DagonParts,
     links: Links,
     guard: &'static Guard<N>,
     cfg: RelayConfig,
-) {
+) -> AppEvents {
     const { assert!(N >= TASKS, "the relay needs guard tasks 0..3") };
     let node::Opened {
         agent,
         serial,
         flash,
+        events,
     } = node::open::<B, N>(
         parts.flash,
         parts.watchdog,
@@ -87,7 +89,7 @@ pub fn start<B: BoardDef, const N: usize>(
         task::PC,
         cfg.tag,
         role::HUB,
-        cfg.self_check,
+        cfg.app,
     );
     let watch: &'static dyn Watch = guard;
     let pc = pc::Pc {
@@ -110,6 +112,7 @@ pub fn start<B: BoardDef, const N: usize>(
         high.spawn(ports::uart_task(uart, watch).expect("task pool"));
     }
     spawner.spawn(feed(watch).expect("task pool"));
+    events
 }
 
 #[embassy_executor::task]

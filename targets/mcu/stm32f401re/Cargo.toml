@@ -61,6 +61,10 @@ dagon-format = { path = "../../../crates/dagon-format" }
 dagon-port = { path = "../../../crates/dagon-port" }
 
 [dev-dependencies]
+# tests/dma_map.rs: the definition's DMA request mapping against ST's chip
+# data (the stm32-metapac embassy-stm32 builds on).
+stm32-metapac = { version = "21", default-features = false, features = ["stm32f401re", "metadata"] }
+toml = { version = "0.8", default-features = false, features = ["parse"] }
 dagon-agent = { path = "../../../crates/dagon-agent", features = ["store-tests"] }
 dagon-conform = { path = "../../../crates/dagon-conform" }
 ed25519-compact = { version = "2.6", default-features = false }

@@ -8,10 +8,10 @@ use dagon_retained_model::world_topology::TopologyWorld;
 
 const DEFAULT: u64 = 10_000;
 const FULL: u64 = 1_000_000;
-const BASE: u64 = 0xD460_B10C;
+const DEFAULT_SEED: u64 = 0x5EED_D460;
 
 fn go<W: World>(name: &str, default_count: u64) {
-    let (count, base) = run_params(default_count, BASE);
+    let (count, base) = run_params(default_count, DEFAULT_SEED);
     match run_many::<W>(base, count) {
         Ok(n) => println!("{name}: {n} scenarios from base seed {base:#x}, no violation"),
         Err(f) => panic!("{name}: {f:#?}"),

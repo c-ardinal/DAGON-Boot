@@ -48,10 +48,14 @@ What the proofs assume of the hardware and what they inject:
   not the format's writer: a writer of another layout of the same stage,
   or a fault. The model injects random bytes into every region.
 
-Random bytes are accepted as a valid entry or record only by coincidence
-of an 8-bit commit value and a CRC-32 (at most 2^-40 per slot); the
-topology store also requires a SHA-256 match. Every other guarantee below
-is structural: it holds for every interruption point, not with a
+Two guarantees are probabilistic. Random bytes are accepted as a valid
+entry or record only by coincidence of an 8-bit commit value and a CRC-32
+(at most 2^-40 per slot); the topology store also requires a SHA-256
+match. A new boot-record sequence repeats an earlier one's numbers and
+tag only with probability about 2^-k for k bits of min-entropy in the
+entropy word (2.3), and this matters only against the identities a
+consumer saw in its previous replay. Every other guarantee below is
+structural: it holds for every interruption point, not with a
 probability.
 
 ## 2. Boot record (`boot-record` 1)
@@ -107,10 +111,10 @@ A writer's numbers form **sequences**: a sequence starts on an empty ring
 and carries one tag in every entry. A stage opens its writer once per run
 and reads **only its own ring**:
 
-1. Decode every slot. The newest entry is the valid one with the most
-   valid entries at most 2^24 sequence numbers behind it (ties: the
-   higher slot); in a ring the writer filled this is the largest `eseq`,
-   across wrap.
+1. Decode every slot once (one CRC per slot). The newest entry is the
+   valid one with the most valid entries at most 2^24 sequence numbers
+   behind it (ties: the higher slot); in a ring the writer filled this is
+   the largest `eseq`, across wrap.
 2. **Intact ring.** The ring is intact when it shows exactly what the
    writer's own appends leave: every slot valid with numbers falling slot
    by slot backwards from the newest; or, before the first wrap, slots 0
@@ -140,13 +144,20 @@ outside the ring. The start values are not a CRC on purpose: CRC-32 over
 a region of CRC-32-protected entries barely depends on their contents.
 
 **Entropy word.** The MCU definition declares where the entropy word
-comes from (`[boot.record] entropy`: a hardware random source, or a
-package-provided one such as oscillator jitter). It must differ between
-starts: the region alone can return to an earlier state (all zeros after
-power-on where `survives = reset-cleared`, or after another layout's
-writer of the same stage cleared the ring), and a new sequence must not
-repeat an earlier one's numbers and tag. An MCU without a source has no
-boot record.
+comes from (`[boot.record] entropy`). The region alone can return to an
+earlier state (all zeros after power-on where `survives = reset-cleared`,
+or after another layout's writer of the same stage cleared the ring), so
+the word must carry at least 16 bits of min-entropy per new sequence.
+Any source that meets this is valid: a hardware random generator, a ring
+oscillator's random bit sampled repeatedly, low-speed against high-speed
+oscillator period captures, or the low bits of repeated ADC conversions
+of an internal sensor. An MCU without a source has no boot record.
+
+**Stage0 budget.** The writer runs in every stage that records, stage0
+included, so its time counts in that stage's time limit
+(`stage0.max_ms` for stage0): one CRC per slot at open, a clear of the
+ring on a new sequence, one append per event. Stage0 records only a few
+events per boot; a stage0 ring of 2 to 4 slots is enough.
 
 ### 2.4 Hand-off
 
@@ -224,8 +235,9 @@ is a loss of the entries in between.
   an old one with the same number. A later stage's link to a boot more
   than 2^32 − `slots` of the opener's appends old may likewise be placed
   as a recent boot, and two boots of a sequence the opener no longer holds
-  that are 2^31 or more of its appends apart may be misordered when no
-  writer's run order relates them.
+  that are about 3·2^30 or more of its appends apart may be misordered
+  when no writer's run order relates them (serial order across 2^32 makes
+  such a pair look less than 2^30 apart the other way, 2.5).
 - **Repeated destruction.** When bytes the writer did not write destroy
   its newest entries again before it has appended `slots` entries since
   the previous time, the jump of 2.3 may fall short and the writer may

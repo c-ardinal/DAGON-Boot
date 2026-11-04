@@ -299,7 +299,15 @@ impl<'a> Sim<'a> {
                 return Err(self.fail("P4", "writer restarted its sequence over held entries"));
             }
         }
-        for _ in 0..st.events {
+        // A stage that opens a boot appends its first entry before it hands
+        // off; one linked to an earlier stage's boot may append nothing.
+        let opens_boot = wr.boot().opener == w;
+        let events = if opens_boot {
+            st.events.max(1)
+        } else {
+            st.events
+        };
+        for _ in 0..events {
             let addr = wr.next_slot();
             let (kind, p) = (self.rng.byte(), self.rng.next_u64().to_le_bytes());
             match wr.append(&mut self.mem, 1, kind, [p[0], p[1], p[2]]) {
@@ -919,12 +927,17 @@ impl World for RecordWorld {
                 .iter()
                 .map(|_| Stage {
                     ver: [V1, V1, V1, V1, V1, V2, Old][rng.below(7) as usize],
-                    events: 1 + rng.below(3) as u8,
+                    events: rng.below(4) as u8,
                     end: end(rng),
                 })
                 .collect();
-            let all = s0.events as u64 + bc.events as u64;
-            let est = (all + more.iter().map(|m| m.events as u64).sum::<u64>()) * 26;
+            // Stores of the boot: one entry is size + 1 stores; a new
+            // sequence first clears its ring.
+            let events = s0.events as u64
+                + bc.events as u64
+                + more.iter().map(|m| m.events as u64).sum::<u64>();
+            let rings = (cfg.s0_bytes + cfg.bc_bytes + cfg.more.iter().sum::<usize>()) as u64;
+            let est = events * (V1_SIZE as u64 + 1) + rings;
             ops.push(Op::Boot {
                 s0,
                 bc,

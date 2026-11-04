@@ -1275,7 +1275,8 @@ small closed set of mechanisms behind a trait:
 | Unwinding | `[isolation.capabilities] unwind` | `cortex-m-exception`, `riscv-trap`, `xtensa-world`, `armv8m-tz` |
 | Sandbox timer | `[isolation.capabilities] timer` | `systick`, `riscv-mtime`, `timer-group` |
 | Watchdog | `[watchdog] kind, trial_ms, confirmed_ms` | the `WatchdogDriver` port's defaults per kind (`iwdg`, `rp-watchdog`, `rtc-wdt`, …) |
-| Boot record placement | `[boot.record] kind, at, survives, rings` | `noinit-ram`, `retained-registers` (5.5) |
+| Boot record placement | `[boot.record] kind, at, survives, rings, entropy` (entropy: the source of a start-up word that differs between starts; required for a boot record) | `noinit-ram`, `retained-registers` (5.5) |
+| Lockup fuse | `[boot.record] fuse`, `[watchdog] flag` (none, or the register or package source of a reset-surviving, start-acknowledged watchdog-reset flag) | fuse available only with a flag; the loader reports it unavailable otherwise (5.5) |
 | Root protection | `[isolation] root_protection` | per MCU family, applied by `dagon provision` |
 | Caches and TCM | `[isolation] cache, tcm` | window attributes and bounce-buffer placement (below) |
 
@@ -1474,6 +1475,9 @@ capability at every boot step) against the boot machine's continuation.
 
 This section states what those formats must satisfy; the model is
 accepted only when every property below holds under its fault injection.
+The formats that pass are specified in
+[retained-formats.md](retained-formats.md), with the model's property list
+and the limits of each claim.
 
 #### Boot record
 
@@ -1498,9 +1502,9 @@ accepted only when every property below holds under its fault injection.
   wrote nothing before its upgrade.
 - **Ordering.** Boots are replayed oldest first across sequence wrap,
   including when one writer has been silent for more than half the
-  sequence space; the reader never orders a newer boot before an older
-  one it still holds, and an identity never repeats while both its
-  events are still held.
+  sequence space; the reader never reports a newer boot before an older
+  one; pairs it cannot order are marked uncertain. An identity never
+  repeats while both its events are still held.
 - **No decision input.** The record is never read by `plan`, `commit`,
   `self_check` or `confirm` (4.1): the model's API gives the boot stages
   only `append` and the agent only `events`. Extensions cannot reach it
@@ -1555,6 +1559,12 @@ accepted only when every property below holds under its fault injection.
 - **Size and placement.** Declared in the MCU definition next to the
   boot record (`[boot.record] fuse`), reaching every image through the
   same linker path (one test that the images agree).
+- **Watchdog flag.** The fuse needs a watchdog-reset flag that survives
+  every reset other than power-on and is cleared only when a start
+  acknowledges it. The MCU definition declares whether the MCU has one
+  and where it comes from (a hardware register, or one the MCU package
+  provides); without it the fuse is unavailable on that MCU and the
+  definition loader says so.
 
 #### MCU identity
 

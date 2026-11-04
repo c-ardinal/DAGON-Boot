@@ -6,8 +6,6 @@
 //! sorted order, and never runs npm. Without it the table is empty and
 //! `dagon serve` falls back to a page folder on disk. `DAGON_WEB_DIST`
 //! points at another built page.
-// Writes only into OUT_DIR.
-#![allow(clippy::disallowed_methods)]
 
 use std::env;
 use std::fs;
@@ -35,6 +33,8 @@ fn files(dir: &Path, rel: &str, out: &mut Vec<(String, PathBuf)>) {
     }
 }
 
+// Writes web_assets.rs into OUT_DIR, nowhere else.
+#[allow(clippy::disallowed_methods)]
 fn main() {
     println!("cargo:rerun-if-env-changed=DAGON_WEB_DIST");
     let manifest = PathBuf::from(env::var_os("CARGO_MANIFEST_DIR").expect("cargo sets it"));

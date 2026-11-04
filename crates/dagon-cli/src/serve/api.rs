@@ -553,6 +553,8 @@ fn topology_get(server: &Server) -> Res {
 }
 
 /// Writes the topology YAML after the same check `dagon topo check` runs.
+// Writes the project's topology file, the user's file the page edits.
+#[allow(clippy::disallowed_methods)]
 fn topology_put(server: &Server, req: &Request) -> Res {
     let p = topology_path(server)?;
     let yaml =
@@ -618,6 +620,8 @@ fn build_get(server: &Server, id: &str) -> Res {
 }
 
 /// Replaces `[build.<id>]` in dagon.toml, keeping the rest of the file.
+// Updates the project's dagon.toml ([build.<id>]), the user's file.
+#[allow(clippy::disallowed_methods)]
 fn build_put(server: &Server, id: &str, req: &Request) -> Res {
     if !plain(id) {
         return Err(Response::error(400, "bad node id"));
@@ -783,8 +787,26 @@ fn sign_nodes(
     for (node, ver, images) in &signed {
         files.extend(sign_swaps(cfg, node, ver, images)?);
     }
-    commit_files(&files, &mut |from, to| std::fs::rename(from, to))?;
+    // The signed images are DAGON's outputs: no link on the way to any of
+    // them, their .new or their .old.
+    for (path, _) in &files {
+        for p in [
+            path.clone(),
+            with_suffix(path, ".new"),
+            with_suffix(path, ".old"),
+        ] {
+            crate::genfs::guard(&cfg.base, &p)?;
+        }
+    }
+    commit_files(&files, &mut rename_output)?;
     Ok(json!({ "images": out }))
+}
+
+/// Renames a signed output; `sign_nodes` checked the path with genfs.
+// The sign's swap of DAGON's own outputs, every path checked by genfs::guard.
+#[allow(clippy::disallowed_methods)]
+fn rename_output(from: &Path, to: &Path) -> std::io::Result<()> {
+    std::fs::rename(from, to)
 }
 
 /// Held for a whole sign (stage and commit).
@@ -834,6 +856,8 @@ fn sign_swaps(
 /// becomes `<name>.old` and its `.new` takes its name; if a `rename` fails,
 /// every step so far is undone (the `.old` files back, no `.new` left) and
 /// the error returned. Only when all are in place do the `.old` files go.
+// The sign's swap of DAGON's own outputs (.new, .old, undo); sign_nodes checks every path with genfs::guard first.
+#[allow(clippy::disallowed_methods)]
 fn commit_files(
     files: &[FileSwap],
     rename: &mut dyn FnMut(&Path, &Path) -> std::io::Result<()>,
@@ -1080,6 +1104,8 @@ fn layout_get(server: &Server) -> Res {
 }
 
 /// PUT /v1/layout: a JSON object, written whole.
+// Writes the project's layout file, the user's file the page edits.
+#[allow(clippy::disallowed_methods)]
 fn layout_put(server: &Server, req: &Request) -> Res {
     if req.body.len() > MAX_LAYOUT {
         return Err(Response::error(413, "layout too large"));
@@ -1279,6 +1305,8 @@ pub fn static_file(web: &Path, path: &str) -> Option<(Vec<u8>, &'static str)> {
 }
 
 #[cfg(test)]
+// Tests set up and inspect their own scratch folders directly.
+#[allow(clippy::disallowed_methods)]
 mod tests {
     use super::*;
 

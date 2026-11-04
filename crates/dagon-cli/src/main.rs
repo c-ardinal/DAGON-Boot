@@ -1,52 +1,28 @@
 #![forbid(unsafe_code)]
 
-// Writes outside genfs: writes the topology file the user names (--out); tests write fixtures.
-#[allow(clippy::disallowed_methods)]
 mod ai;
 mod commands;
-// Writes outside genfs: writes the key files the user names; tests write fixtures.
-#[allow(clippy::disallowed_methods)]
 mod config;
 mod conform;
-// Writes outside genfs: tests write fixtures.
-#[allow(clippy::disallowed_methods)]
 mod dagonsrc;
-// Writes outside genfs: tests write fixtures.
-#[allow(clippy::disallowed_methods)]
 mod defs;
-// Writes outside genfs: clears and fills its own scratch folder of the try-out desk.
-#[allow(clippy::disallowed_methods)]
 mod demo;
-// Writes outside genfs: tests write fixtures.
-#[allow(clippy::disallowed_methods)]
 mod deploy;
 mod device;
-// Writes outside genfs: tests write fixtures.
-#[allow(clippy::disallowed_methods)]
 mod doctor;
-// Writes outside genfs: tests write fixtures.
-#[allow(clippy::disallowed_methods)]
 mod esp;
 mod extgen;
-// Writes outside genfs: writes images to the device drive and the provision folder the user names.
-#[allow(clippy::disallowed_methods)]
 mod flash;
-// Writes outside genfs: tests write fixtures.
-#[allow(clippy::disallowed_methods)]
 mod flashdev;
 // Writes outside genfs: the one guarded path for generated files.
 #[allow(clippy::disallowed_methods)]
 mod genfs;
-// Writes outside genfs: replaces the build output folder and copies built images into it.
-#[allow(clippy::disallowed_methods)]
 mod nodebuild;
 // Writes outside genfs: implements the atomic write genfs and the commands use.
 #[allow(clippy::disallowed_methods)]
 mod paths;
 mod scaffold;
 mod serial;
-// Writes outside genfs: writes the files the page asks for inside the work area and key folders.
-#[allow(clippy::disallowed_methods)]
 mod serve;
 mod simrun;
 mod versions;

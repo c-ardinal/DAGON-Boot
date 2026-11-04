@@ -16,7 +16,7 @@ use dagon_topology::Topology;
 use ed25519_compact::KeyPair;
 
 use crate::commands::{image_for_node, version, SignOpts};
-use crate::config::{load_key, read_topology, write_file, Config, Opts};
+use crate::config::{load_key, read_topology, Config, Opts};
 use crate::nodebuild::{self, SlotElfs};
 
 /// Release `apply` takes by default when dagon.toml names none.
@@ -229,7 +229,7 @@ pub(crate) fn prepare(
                 Some(&opts),
                 key,
             )?;
-            write_file(&dir.join(format!("{node}-{slot}.img")), &img)?;
+            crate::genfs::write_out(&cfg.base, &dir.join(format!("{node}-{slot}.img")), &img)?;
             images.push(img);
         }
     }
@@ -238,7 +238,7 @@ pub(crate) fn prepare(
     let r = dagon_sign::release::build(&reg, t, &topo_bin, &images, &name, key)
         .map_err(|e| e.to_string())?;
     let release = cfg.base.join(DEPLOY_DIR).join(format!("{name}.dgb"));
-    write_file(&release, &r.bundle)?;
+    crate::genfs::write_out(&cfg.base, &release, &r.bundle)?;
     Ok(Prepared {
         version,
         release,
@@ -341,8 +341,10 @@ pub fn command(args: &[&str]) -> Result<(), String> {
         None,
     )?;
     // Only an applied release is the one the next deploy counts from.
-    write_file(&latest, &p.bundle)
+    crate::genfs::write_out(&cfg.base, &latest, &p.bundle)
 }
 
 #[cfg(test)]
+// Tests set up and inspect their own scratch folders directly.
+#[allow(clippy::disallowed_methods)]
 mod tests;

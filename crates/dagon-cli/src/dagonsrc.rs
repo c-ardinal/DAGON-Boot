@@ -126,8 +126,8 @@ fn checkout(git: &str, tag: &str, base: &Path) -> Result<PathBuf, String> {
          publish = false\n\n[workspace]\n\n[lib]\npath = \"lib.rs\"\n\n\
          [dependencies]\n{PROBE_DEP} = {{ git = {git:?}, tag = {tag:?} }}\n"
     );
-    crate::config::write_file(&dir.join("Cargo.toml"), manifest.as_bytes())?;
-    crate::config::write_file(&dir.join("lib.rs"), b"")?;
+    crate::genfs::write_out(base, &dir.join("Cargo.toml"), manifest.as_bytes())?;
+    crate::genfs::write_out(base, &dir.join("lib.rs"), b"")?;
     let mut cmd = Command::new("cargo");
     for k in crate::nodebuild::SECRET_ENV {
         cmd.env_remove(k);
@@ -162,6 +162,8 @@ fn checkout(git: &str, tag: &str, base: &Path) -> Result<PathBuf, String> {
 }
 
 #[cfg(test)]
+// Tests set up and inspect their own scratch folders directly.
+#[allow(clippy::disallowed_methods)]
 pub(crate) mod tests {
     use super::*;
 

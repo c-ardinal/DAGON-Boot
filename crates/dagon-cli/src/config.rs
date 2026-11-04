@@ -455,6 +455,8 @@ pub fn allow_key(public: &[u8; 32], allowed: bool) -> Result<(), String> {
     Ok(())
 }
 
+// Writes a path the user names (a command's output, a provision folder, a report folder); outputs dagon keeps below the work area go through genfs.
+#[allow(clippy::disallowed_methods)]
 pub fn write_file(path: &Path, bytes: &[u8]) -> Result<(), String> {
     if let Some(dir) = path.parent().filter(|d| !d.as_os_str().is_empty()) {
         std::fs::create_dir_all(dir)
@@ -468,6 +470,8 @@ pub fn read_file(path: &Path) -> Result<Vec<u8>, String> {
 }
 
 #[cfg(test)]
+// Tests set up and inspect their own scratch folders directly.
+#[allow(clippy::disallowed_methods)]
 mod tests {
     use super::*;
 

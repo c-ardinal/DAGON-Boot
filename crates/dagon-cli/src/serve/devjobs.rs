@@ -146,6 +146,8 @@ pub fn job_doctor(job: &mut Job, cfg: Config, _v: Value) -> Result<Value, String
 }
 
 #[cfg(test)]
+// Tests set up and inspect their own scratch folders directly.
+#[allow(clippy::disallowed_methods)]
 mod tests {
     use super::*;
 

@@ -609,10 +609,22 @@ pub(crate) fn prepare(
     let mcu = node_mcu(&reg, t, node)?;
     match Esp::of(mcu) {
         Some(esp) => {
-            let app = crate::esp::save_image(&esp, &i.app, &out.join("app.bin"))?;
-            esp_files(&reg, t, node, &i, &app, &source_root(cfg)?, out, key)
+            let app_bin = out.join("app.bin");
+            crate::genfs::check_out(&cfg.base, &app_bin)?;
+            let app = crate::esp::save_image(&esp, &i.app, &app_bin)?;
+            esp_files(
+                &reg,
+                t,
+                node,
+                &i,
+                &app,
+                &source_root(cfg)?,
+                out,
+                key,
+                &cfg.base,
+            )
         }
-        None => provision_files(&reg, t, node, &i, out, key),
+        None => provision_files(&reg, t, node, &i, out, key, &cfg.base),
     }
 }
 
@@ -664,6 +676,7 @@ fn esp_files(
     home: &Path,
     out: &Path,
     key: &KeyPair,
+    base: &Path,
 ) -> Result<FirstWrite, String> {
     use crate::esp;
     use dagon_format::header::{image_kind, slot_binding, HEADER_SIZE};
@@ -699,7 +712,7 @@ fn esp_files(
     let (header, body) = img.split_at(HEADER_SIZE);
     let file = |name: &str, bytes: &[u8]| -> Result<PathBuf, String> {
         let p = out.join(name);
-        crate::config::write_file(&p, bytes)?;
+        crate::genfs::write_out(base, &p, bytes)?;
         Ok(p)
     };
     let bootloader = file("bootloader.bin", &boot)?;
@@ -750,7 +763,8 @@ fn esp_files(
         (l.dagon.1, header),
         (l.otadata, otadata),
     ];
-    crate::config::write_file(
+    crate::genfs::write_out(
+        base,
         &out.join("commands.txt"),
         command_lines("espflash", &commands).as_bytes(),
     )?;
@@ -843,6 +857,8 @@ fn run_espflash(
     Ok(())
 }
 
+// Copies the UF2 onto the device's boot drive.
+#[allow(clippy::disallowed_methods)]
 fn copy_uf2(file: &Path, drive: &Path, log: &mut dyn FnMut(&str)) -> Result<(), String> {
     let dest = drive.join("rescue.uf2");
     std::fs::copy(file, &dest).map_err(|e| format!("cannot copy to {}: {e}", dest.display()))?;
@@ -974,6 +990,8 @@ fn selector<'a>(
 }
 
 #[cfg(test)]
+// Tests set up and inspect their own scratch folders directly.
+#[allow(clippy::disallowed_methods)]
 mod tests {
     use super::*;
     use crate::config::BuildInputs;
@@ -1068,6 +1086,7 @@ mod tests {
             &built(&cfg, true),
             &out,
             &key(),
+            &cfg.base,
         )
         .unwrap()
         {
@@ -1103,6 +1122,7 @@ mod tests {
             &built(&cfg, false),
             &out,
             &key(),
+            &cfg.base,
         )
         .unwrap()
         {
@@ -1310,7 +1330,7 @@ mod tests {
         let i = built(&cfg, false);
         let app = vec![0xE9; 7000];
         let reg = Registry::builtin();
-        let w = esp_files(reg, &t, "watch", &i, &app, &here(), &out, &key()).unwrap();
+        let w = esp_files(reg, &t, "watch", &i, &app, &here(), &out, &key(), &here()).unwrap();
         let FirstWrite::Espflash { files, commands } = w else {
             panic!("{w:?}")
         };
@@ -1396,9 +1416,16 @@ mod tests {
         assert!(plan.contains("through the SWD"), "{plan}");
 
         let reg = crate::defs::registry(&cfg).unwrap();
-        let FirstWrite::ProbeRs { bin, commands, .. } =
-            provision_files(&reg, &t, "seg", &built(&cfg, false), &out, &key()).unwrap()
-        else {
+        let FirstWrite::ProbeRs { bin, commands, .. } = provision_files(
+            &reg,
+            &t,
+            "seg",
+            &built(&cfg, false),
+            &out,
+            &key(),
+            &cfg.base,
+        )
+        .unwrap() else {
             panic!("a probe-rs writer")
         };
         assert_eq!(

@@ -51,6 +51,8 @@ struct Args {
 }
 
 /// `dagon ai topology [--in <file>] [--out <yaml>] [--model <id>]`
+// Writes the topology file the user names with --out.
+#[allow(clippy::disallowed_methods)]
 pub fn topology(args: &[&str]) -> Result<(), String> {
     let a = parse_args(args, std::env::var(MODEL_ENV).ok())?;
     let key = api_key(std::env::var(KEY_ENV))?;
@@ -459,6 +461,8 @@ fn unanswered(qs: &[String]) -> String {
 }
 
 #[cfg(test)]
+// Tests set up and inspect their own scratch folders directly.
+#[allow(clippy::disallowed_methods)]
 mod tests {
     use super::*;
 

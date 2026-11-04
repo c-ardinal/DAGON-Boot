@@ -158,6 +158,8 @@ pub fn yaml(uplink: Medium) -> String {
     )
 }
 
+// Clears its own try-out folder, only after finding the folder's mark.
+#[allow(clippy::disallowed_methods)]
 pub fn project(dir: &Path, uplink: Medium) -> Result<(PathBuf, KeyPair), String> {
     if dir.exists() {
         if !dir.join(MARK).is_file() {
@@ -264,6 +266,8 @@ pub fn command(args: &[&str]) -> Result<(), String> {
 }
 
 #[cfg(test)]
+// Tests set up and inspect their own scratch folders directly.
+#[allow(clippy::disallowed_methods)]
 mod tests {
     use super::*;
 

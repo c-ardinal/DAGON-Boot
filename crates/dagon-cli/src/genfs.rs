@@ -66,7 +66,74 @@ pub fn remove_empty_dir(base: &Path, rel: &str) -> bool {
     checked(base, rel).is_ok_and(|p| std::fs::remove_dir(p).is_ok())
 }
 
+/// Removes the folder `rel` and everything in it; `Ok(false)` when there is
+/// none. Links inside it are removed as links, never followed.
+pub fn remove_tree(base: &Path, rel: &str) -> Result<bool, String> {
+    let path = checked(base, rel)?;
+    match std::fs::remove_dir_all(&path) {
+        Ok(()) => Ok(true),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(false),
+        Err(e) => Err(format!("cannot clear {rel}: {e}")),
+    }
+}
+
+/// Copies the file `from` (anywhere) to `rel`, folders made as needed.
+pub fn copy(base: &Path, from: &Path, rel: &str) -> Result<(), String> {
+    let to = checked(base, rel)?;
+    if let Some(dir) = to.parent() {
+        std::fs::create_dir_all(dir)
+            .map_err(|e| format!("cannot create {}: {e}", dir.display()))?;
+    }
+    std::fs::copy(from, &to)
+        .map(|_| ())
+        .map_err(|e| format!("cannot copy {} to {rel}: {e}", from.display()))
+}
+
+/// `path`, which lies in `base`, as the relative path the calls here take.
+/// Either may be written in its canonical form (the Windows verbatim
+/// prefix included).
+pub fn rel(base: &Path, path: &Path) -> Result<String, String> {
+    let plain = |p: &Path| crate::config::plain_path(p.to_path_buf());
+    let bases = [
+        base.to_path_buf(),
+        plain(base),
+        std::fs::canonicalize(base).map_or_else(|_| plain(base), |b| plain(&b)),
+    ];
+    let path = plain(path);
+    let r = bases
+        .iter()
+        .find_map(|b| path.strip_prefix(b).ok())
+        .ok_or_else(|| format!("{} is outside the work area", path.display()))?;
+    Ok(r.to_string_lossy().replace('\\', "/"))
+}
+
+/// `path` in `base`, refused when a link is on the way: for a caller that
+/// must run its own file operations on it (a multi-file swap).
+pub fn guard(base: &Path, path: &Path) -> Result<PathBuf, String> {
+    checked(base, &rel(base, path)?)
+}
+
+/// Checks an output path before a tool writes it: below `base` no link on
+/// the way; elsewhere (a path the user named) not a link itself.
+pub fn check_out(base: &Path, path: &Path) -> Result<PathBuf, String> {
+    if rel(base, path).is_ok() {
+        return guard(base, path);
+    }
+    let link = std::fs::symlink_metadata(path).is_ok_and(|m| m.file_type().is_symlink());
+    if link {
+        return Err(link_reason(&path.display().to_string()));
+    }
+    Ok(path.to_path_buf())
+}
+
+/// Writes an output, checked as [`check_out`] does.
+pub fn write_out(base: &Path, path: &Path, bytes: &[u8]) -> Result<(), String> {
+    write_atomic(&check_out(base, path)?, bytes)
+}
+
 #[cfg(test)]
+// Tests set up and inspect their own scratch folders directly.
+#[allow(clippy::disallowed_methods)]
 mod tests {
     use super::*;
 

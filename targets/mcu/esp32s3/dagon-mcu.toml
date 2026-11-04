@@ -53,6 +53,24 @@ up = ["uart", "usb-cdc"]
 kind = "rtc-wdt"
 trial_ms = 4_000
 confirmed_ms = 4_000
+# The ESP-IDF 2nd stage with app rollback (vendor/sdkconfig.defaults) aborts
+# an image left on trial at its next boot: one boot.
+trial_attempts = 1
+
+# The flash cache is off during an operation; the flash driver masks
+# interrupts for each (handlers outside IRAM cannot run). DAGON erases at
+# most one 64 KiB block per operation; 2 s is the SPI flash's 64 KiB block
+# erase maximum (tBE2 of the quad SPI NOR parts the module carries).
+[execution]
+masked_max_us = 50
+flash_op = "cache-off-masked"
+erase_unit = 0x1_0000
+erase_unit_max_ms = 2_000
+
+# The last 4 KiB of the dagon partition: after the three header sectors,
+# used by nothing.
+[conformance]
+scratch = { at = 0x71_F000, size = 0x1000 }
 
 # Protection hardware: the Permission Control and World Controller (ESP32-S3
 # TRM, "Permission Control" and "World Controller" chapters). DAGON does not

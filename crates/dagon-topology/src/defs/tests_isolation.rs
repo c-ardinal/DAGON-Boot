@@ -70,6 +70,7 @@ pub(super) fn isolated_mcu() -> String {
 kind = "iwdg"
 trial_ms = 4_000
 confirmed_ms = 8_000
+trial_attempts = 3
 
 [isolation]
 level = "mpu"
@@ -331,6 +332,36 @@ fn the_record_lies_inside_ram_within_its_limit() {
     }
     let e = mcu_err(&isolated("trial_ms = 4_000", "trial_ms = 0"));
     assert!(e.contains("[watchdog driver"), "{e}");
+    let e = mcu_err(&isolated("trial_attempts = 3", "trial_attempts = 0"));
+    assert!(e.contains("trial_attempts must be above 0"), "{e}");
+}
+
+/// `[execution]`: one erase fits between two feeds; `[conformance]`: the
+/// scratch never touches an image slot.
+#[test]
+fn execution_budgets_and_conformance_scratch_are_checked() {
+    let with = |execution: &str, conformance: &str| {
+        isolated(
+            "trial_attempts = 3\n",
+            &format!(
+                "trial_attempts = 3\n\n[execution]\nmasked_max_us = 50\nflash_op = \"fetch-stall\"\n\
+                 erase_unit = 0x4000\nerase_unit_max_ms = {execution}\n\n[conformance]\n\
+                 scratch = {conformance}\n"
+            ),
+        )
+    };
+    let free = "{ at = 0x0010_A000, size = 0x1000 }";
+    parse_mcu_text(&with("1_000", free), &[]).unwrap();
+    let e = mcu_err(&with("8_000", free));
+    assert!(e.contains("below watchdog.confirmed_ms 8000"), "{e}");
+    let slot = parse_mcu_text(&with("1_000", free), &[]).unwrap().slots[0].start;
+    let e = mcu_err(&with(
+        "1_000",
+        &format!("{{ at = {slot:#x}, size = 0x100 }}"),
+    ));
+    assert!(e.contains("overlaps a slot"), "{e}");
+    let e = mcu_err(&with("1_000", "{ at = 0x7000_0000, size = 0x100 }"));
+    assert!(e.contains("outside the default flash map"), "{e}");
 }
 
 fn board(text: &str) -> BoardDef {

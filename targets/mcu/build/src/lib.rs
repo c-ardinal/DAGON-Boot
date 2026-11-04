@@ -1,5 +1,6 @@
 //! Build-script helpers shared by the DAGON MCU packages: the verifying key
-//! embedded at build time, and the linker memory map of an APP slot.
+//! embedded at build time, the constants the package's MCU definition
+//! states, and the linker memory map of an APP slot.
 
 use std::{env, fs, path::PathBuf};
 
@@ -92,4 +93,106 @@ pub fn write_memory_x(text: &str) {
     let out = out_dir();
     fs::write(out.join("memory.x"), text).unwrap();
     println!("cargo:rustc-link-search={}", out.display());
+}
+
+/// Writes `$OUT_DIR/definition.rs`: the constants the package's own MCU
+/// definition (`dagon-mcu.toml` next to its Cargo.toml) states, so the boot
+/// stage and the app layer read one value. Include it with
+/// `include!(concat!(env!("OUT_DIR"), "/definition.rs"))`.
+pub fn definition() {
+    let dir = PathBuf::from(env::var_os("CARGO_MANIFEST_DIR").expect("CARGO_MANIFEST_DIR"));
+    let path = dir.join("dagon-mcu.toml");
+    println!("cargo:rerun-if-changed={}", path.display());
+    let text = fs::read_to_string(&path).unwrap_or_else(|e| panic!("{}: {e}", path.display()));
+    fs::write(out_dir().join("definition.rs"), definition_rs(&text)).unwrap();
+}
+
+fn int(t: &toml::Table, table: &str, key: &str) -> Option<i64> {
+    t.get(table)?.as_table()?.get(key)?.as_integer()
+}
+
+fn required(t: &toml::Table, table: &str, key: &str) -> i64 {
+    int(t, table, key).unwrap_or_else(|| panic!("dagon-mcu.toml: [{table}] {key} is missing"))
+}
+
+/// The generated source for a definition's text.
+pub fn definition_rs(text: &str) -> String {
+    let t: toml::Table = text.parse().expect("dagon-mcu.toml");
+    let attempts = u8::try_from(required(&t, "watchdog", "trial_attempts"))
+        .expect("[watchdog] trial_attempts fits a u8");
+    let mut out = format!(
+        "/// Boots the boot stage gives a pending image before it rolls back
+         /// (`[watchdog] trial_attempts`).
+         pub const TRIAL_ATTEMPTS: u8 = {attempts};
+"
+    );
+    for (key, name, doc) in [
+        (
+            "masked_max_us",
+            "MASKED_MAX_US",
+            "Longest DAGON's own code masks interrupts (us)",
+        ),
+        (
+            "erase_unit",
+            "ERASE_UNIT",
+            "Largest unit one flash erase covers (bytes)",
+        ),
+        (
+            "erase_unit_max_ms",
+            "ERASE_UNIT_MAX_MS",
+            "Worst-case time of that erase (ms)",
+        ),
+    ] {
+        let v = u32::try_from(required(&t, "execution", key)).expect("fits a u32");
+        out += &format!(
+            "/// {doc} (`[execution] {key}`).
+pub const {name}: u32 = {v:#x};
+"
+        );
+    }
+    let scratch = t
+        .get("conformance")
+        .and_then(|c| c.get("scratch"))
+        .and_then(|s| Some((s.get("at")?.as_integer()?, s.get("size")?.as_integer()?)));
+    out += "/// Flash a conformance build may destroy (`[conformance] scratch`).
+";
+    out += &match scratch {
+        Some((at, size)) => {
+            format!(
+                "pub const CONFORM_SCRATCH: Option<(u32, u32)> = Some(({at:#x}, {size:#x}));
+"
+            )
+        }
+        None => "pub const CONFORM_SCRATCH: Option<(u32, u32)> = None;
+"
+        .into(),
+    };
+    out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn constants_come_from_the_definition() {
+        let rs = definition_rs(
+            "[watchdog]
+trial_attempts = 3
+[execution]
+masked_max_us = 50
+             erase_unit = 0x1000
+erase_unit_max_ms = 400
+             [conformance]
+scratch = { at = 0x100, size = 0x10 }
+",
+        );
+        assert!(rs.contains("pub const TRIAL_ATTEMPTS: u8 = 3;"), "{rs}");
+        assert!(rs.contains("pub const ERASE_UNIT: u32 = 0x1000;"), "{rs}");
+        assert!(
+            rs.contains("pub const ERASE_UNIT_MAX_MS: u32 = 0x190;"),
+            "{rs}"
+        );
+        assert!(rs.contains("Some((0x100, 0x10))"), "{rs}");
+    }
 }

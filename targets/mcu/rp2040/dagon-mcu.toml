@@ -85,6 +85,18 @@ down = ["i2c", "uart"]
 kind = "rp-watchdog"
 trial_ms = 8_000
 confirmed_ms = 8_000
+# The boot core starts a pending image this many times before it rolls back.
+trial_attempts = 3
+
+# Flash operations run from RAM with XIP off; the flash driver masks
+# interrupts and pauses core 1 for each. DAGON erases one 4 KiB sector per
+# operation; 400 ms is the QSPI flash's 4 KiB sector erase maximum
+# (W25Q-class parts, tSE).
+[execution]
+masked_max_us = 50
+flash_op = "xip-off-masked"
+erase_unit = 0x1000
+erase_unit_max_ms = 400
 
 # Protection hardware: the Cortex-M0+ ARMv6-M MPU, 8 regions of at least
 # 256 bytes (RP2040 datasheet section 2.4), read back from MPU_TYPE at boot.

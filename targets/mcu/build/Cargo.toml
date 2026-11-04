@@ -9,3 +9,5 @@ publish = false
 [workspace]
 
 [dependencies]
+# Reads the package's dagon-mcu.toml (`definition`).
+toml = { version = "0.8", default-features = false, features = ["parse"] }

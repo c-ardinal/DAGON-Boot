@@ -72,6 +72,22 @@ up = ["i2c"]
 kind = "iwdg"
 trial_ms = 4_000
 confirmed_ms = 8_000
+# The boot core starts a pending image this many times before it rolls back.
+trial_attempts = 3
+
+# Single-bank flash: an erase or program stalls instruction fetch (nothing
+# runs; interrupts stay enabled and wait). DAGON erases one 128 KiB sector
+# per operation; 4 s is the datasheet maximum (DS10086, 128 KiB sector,
+# x8 parallelism, the slowest).
+[execution]
+masked_max_us = 50
+flash_op = "fetch-stall"
+erase_unit = 0x2_0000
+erase_unit_max_ms = 4_000
+
+# Sector 4 (64 KiB), used by no image or log.
+[conformance]
+scratch = { at = 0x0801_0000, size = 0x1_0000 }
 
 # Protection hardware: ARMv7-M PMSAv7 MPU, 8 regions (ST PM0214 section 4.2),
 # read back from MPU_TYPE at boot.

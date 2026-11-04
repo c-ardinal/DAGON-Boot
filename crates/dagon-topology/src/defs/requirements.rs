@@ -10,7 +10,7 @@ use std::ops::RangeInclusive;
 use dagon_format::header::HEADER_SIZE;
 use dagon_format::statelog::{FACE_HEADER_SIZE, RECORD_SIZE};
 
-use super::{board_boot, isolation, Binding, BoardDef, McuDef, Placement, Writer};
+use super::{board_boot, execution, isolation, Binding, BoardDef, McuDef, Placement, Writer};
 
 /// Slot/header placement: an image header.
 pub const HEADER: u32 = HEADER_SIZE as u32;
@@ -176,9 +176,29 @@ pub const MCU: &[Requirement<McuCheck>] = &[
     },
     Requirement {
         engine: "watchdog driver, reboot delay cap",
-        fields: &["watchdog.trial_ms", "watchdog.confirmed_ms"],
+        fields: &[
+            "watchdog.trial_ms",
+            "watchdog.confirmed_ms",
+            "watchdog.trial_attempts",
+        ],
         rule: ">= 1",
         check: isolation::watchdog,
+    },
+    Requirement {
+        engine: "execution model (flash operations, masking budget)",
+        fields: &[
+            "execution.masked_max_us",
+            "execution.erase_unit",
+            "execution.erase_unit_max_ms",
+        ],
+        rule: "masked_max_us 1..=MASKED_MAX_US_LIMIT; erase_unit a power of two; erase_unit_max_ms >= 1 and below watchdog.confirmed_ms",
+        check: execution::execution,
+    },
+    Requirement {
+        engine: "conformance build (CONF_RUN scratch)",
+        fields: &["conformance.scratch.at", "conformance.scratch.size"],
+        rule: "size >= 1; inside the default flash map; apart from every slot, header, log face and stage0",
+        check: execution::conformance,
     },
     Requirement {
         engine: "boot record and lockup fuse placement (memory.x fragments)",

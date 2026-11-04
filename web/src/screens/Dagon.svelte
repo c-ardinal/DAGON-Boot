@@ -31,6 +31,11 @@
   let open = $state(true);
   let text = $state('');
   let answered = $state(false);
+  let bubbleEl = $state<HTMLElement>();
+  /** Where the bubble opens: left or right of the character, and up from its bottom or down from its top. */
+  let side = $state({ left: true, up: true });
+  /** The user dragged it: it stays there (stepping aside only when covered); else it picks a free spot itself. */
+  let auto = true;
 
   const key = $derived(`dagon-pos:${place}`);
   const last = $derived(agent.messages.map((m) => m.role).lastIndexOf('dagon'));
@@ -67,6 +72,49 @@
     return q;
   }
 
+  type Box = { x: number; y: number; w: number; h: number };
+  const free = (b: Box, st: DOMRect, obs: DOMRect[]) =>
+    b.x >= MARGIN && b.y >= MARGIN && b.x + b.w <= st.width - MARGIN && b.y + b.h <= st.height - MARGIN && !obs.some((r) => b.x + st.left < r.right && b.x + st.left + b.w > r.left && b.y + st.top < r.bottom && b.y + st.top + b.h > r.top);
+  /** The bubble's box for a side, beside a character at (x, y). */
+  function bubbleBox(x: number, y: number, s: { left: boolean; up: boolean }): Box {
+    const rem = mark / 4.5;
+    const w = bubbleEl?.offsetWidth ?? 19 * rem;
+    const h = bubbleEl?.offsetHeight ?? 11 * rem;
+    const gap = 0.75 * rem;
+    return { x: s.left ? x - gap - w : x + mark + gap, y: s.up ? y + mark - h : y, w, h };
+  }
+  const SIDES = [
+    { left: true, up: true },
+    { left: true, up: false },
+    { left: false, up: true },
+    { left: false, up: false },
+  ];
+  /** A spot where neither the character nor its open bubble covers a card, a window or the focal number (the mock's freeSpot). */
+  function freeSpot(): { x: number; y: number } | null {
+    const st = stageRect();
+    if (!st) return null;
+    const obs = obstacles();
+    const step = mark / 4;
+    for (let y = st.height - mark - 3 * MARGIN; y >= MARGIN; y -= step) {
+      for (let x = st.width - mark - 3 * MARGIN; x >= MARGIN; x -= step) {
+        if (!free({ x, y, w: mark, h: mark }, st, obs)) continue;
+        const s = SIDES.find((v) => !open || free(bubbleBox(x, y, v), st, obs));
+        if (s) {
+          side = s;
+          return { x, y };
+        }
+      }
+    }
+    return null;
+  }
+  /** For a place the user chose: the side where the bubble covers the least. */
+  function chooseSide(p: { x: number; y: number }) {
+    const st = stageRect();
+    if (!st) return;
+    const obs = obstacles();
+    side = SIDES.find((v) => free(bubbleBox(p.x, p.y, v), st, obs)) ?? { left: p.x > st.width / 2, up: p.y > st.height / 2 };
+  }
+
   function measure() {
     mark = Math.max(MIN_MARK, 4.5 * (parseFloat(getComputedStyle(document.documentElement).fontSize) || 16));
   }
@@ -81,22 +129,34 @@
       // Storage may be off: the place then lasts for this page only.
     }
     const st = stageRect();
+    auto = !(kept && Number.isFinite(kept.x));
     const start = kept && Number.isFinite(kept.x) ? kept : { x: (st?.width ?? 800) - mark - 3 * MARGIN, y: (st?.height ?? 600) * 0.55 };
-    void tick().then(() => (pos = settle(start)));
+    void tick().then(place);
+    function place() {
+      pos = (auto && freeSpot()) || settle(start);
+      if (!auto) chooseSide(pos);
+    }
   });
 
   /** Windows open and close, the selection moves: step aside again. */
   $effect(() => {
     const st = root?.parentElement;
     if (!st) return;
-    const again = () => pos && (pos = settle(pos));
-    const ro = new ResizeObserver(again);
+    const again = () => {
+      if (!pos) return;
+      pos = (auto && freeSpot()) || settle(pos);
+      if (!auto) chooseSide(pos);
+    };
+    // Next frame: moving inside the observer's callback would report a resize loop.
+    let frame = 0;
+    const later = () => (cancelAnimationFrame(frame), (frame = requestAnimationFrame(again)));
+    const ro = new ResizeObserver(later);
     ro.observe(st);
-    const mo = new MutationObserver(again);
+    const mo = new MutationObserver(later);
     mo.observe(st, { subtree: true, childList: true, attributeFilter: ['data-avoid'] });
     const resize = () => (measure(), again());
     addEventListener('resize', resize);
-    return () => (ro.disconnect(), mo.disconnect(), removeEventListener('resize', resize));
+    return () => (cancelAnimationFrame(frame), ro.disconnect(), mo.disconnect(), removeEventListener('resize', resize));
   });
 
   $effect(() => {
@@ -134,7 +194,9 @@
     const moved = drag.moved;
     drag = null;
     if (!moved) return void (open = !open);
+    auto = false;
     pos = settle(pos!);
+    chooseSide(pos);
     try {
       localStorage.setItem(key, JSON.stringify(pos));
     } catch {
@@ -150,11 +212,6 @@
     text = '';
   }
 
-  /** The bubble opens towards the wider side of the stage, and above the character when it sits low. */
-  const side = $derived.by(() => {
-    const st = stageRect();
-    return { left: !!st && !!pos && pos.x > st.width / 2, up: !!st && !!pos && pos.y > st.height / 2 };
-  });
 </script>
 
 <div
@@ -182,7 +239,7 @@
   </button>
 
   {#if open}
-    <section class="bubble" class:left={side.left} class:up={side.up} aria-label={AGENT.name} aria-live="polite">
+    <section class="bubble" class:left={side.left} class:up={side.up} aria-label={AGENT.name} aria-live="polite" bind:this={bubbleEl}>
       {#if agent.thinking}
         <p class="muted">{AGENT.thinking}</p>
       {:else if reply}

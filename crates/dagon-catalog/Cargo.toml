@@ -1,0 +1,13 @@
+[package]
+name = "dagon-catalog"
+edition.workspace = true
+license.workspace = true
+version = "0.0.0"
+publish = false
+description = "Every DAGON state machine's catalog in one registry, and the generated docs/events.md and docs/ports.md"
+
+[dependencies]
+dagon-events = { path = "../dagon-events" }
+
+[dev-dependencies]
+serde_json = "1"

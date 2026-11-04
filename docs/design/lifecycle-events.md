@@ -161,7 +161,7 @@ Generated order at start: `app.starting` → `app.store_opened` (or
 | `app.trial_started` / `app.rolled_back` | replayed from the state log | `slot`, `version`, `attempt`, `max` / `from`, `to`, `reason` |
 | `app.watchdog_taken` | the boot core's watchdog taken over | `period_ms`, `trial_policy` |
 | `app.bring_up` | board bring-up runs | `board_id` |
-| `app.extension_started` / `app.extension_faulted` / `app.extension_overran` | an extension's handler ran / faulted / overran (4.2) | `id`, `point` |
+| `app.extension_started` / `app.extension_faulted` / `app.extension_overran` | an extension's handler ran / faulted / overran (4.2) | `id`, `point` / `id`, `point` / `id`, `point`, `us` |
 | `app.link_up` / `app.link_down` | a DAGON link opened / closed | `link`, `addr` |
 | `app.request` / `app.replied` | a request arrived (any protocol) / its reply left | `protocol`, `cmd`, `seq`, `via` / `status`, `ms` |
 | `app.hello` / `app.status_asked` / `app.version_asked` | identity / status / VERSION answered | `via` |
@@ -256,37 +256,48 @@ injection, and the format that passes is the specification (5.5).
 ### 1.7 The transition primitive
 
 A transition cannot exist without its event, because the only way to
-change a machine's state is the generated transition method that emits
-it. Each machine is one declaration:
+change a machine's state is the generated transition method that
+delivers it. A crate declares all its machines in one
+`state_machine!`, invoked once, at the crate root:
 
 ```rust
 dagon_events::state_machine! {
-    machine Session, layer app, format 1;
-    states { Idle, Header { slot: u8, body_len: u32, got: u16 }, Body { target: u8, slot: u8, len: u32, next: u32 } }
-    transitions {
-        Idle   -> Header on update_offered(o: &UpdateOffer)        emits UpdateOffered { target, slot, body_len };
-        Header -> Body   on header_verified(v: Version, k: KeyId)  emits HeaderVerified { slot, version: v, key_id: k };
-        Body   -> Body   on data_written(end: u32)                 emits TransferProgress { done: end, total: len };
-        Body   -> Idle   on verify_ok(v: Version)                  emits VerifyOk { slot, version: v };
-        *      -> Idle   on aborted(cause: AbortCause)             emits TransferAborted { cause };
-        // …
+    /// The update session.
+    pub machine session in App {
+        initial Idle;
+        states { Idle, Header { slot: u8, body_len: u32 }, Body { target: u8, slot: u8, len: u32, next: u32 } }
+        transitions {
+            update_offered(target: u8, slot: u8, body_len: u32): Idle => Header { slot, body_len }
+                emits UpdateOffered = 0x10 { target: u8, slot: u8, body_len: u32 } observe(live, host);
+            data_written(end: u32): Body { target, slot, len } => Body { target, slot, len, next: end }
+                emits TransferProgress = 0x12 { done: u32 = end, total: u32 = len } observe(live, host);
+            aborted(cause: AbortCause): * => Idle
+                emits TransferAborted = 0x13 { cause: AbortCause } observe(live, host);
+            // …
+        }
     }
 }
 ```
 
-The macro generates: the state enum behind a private field of a
-generated `Machine` type whose only mutators are the transition methods
-(each sets the new state and returns the event, `#[must_use]`; DAGON's
-crates build with `#![deny(unused_must_use)]`, and the serving loop's
-signature takes the returned event, so dropping one is a compile error);
-the layer's event variants and payload structs, `#[non_exhaustive]` with
-private constructors; the owned compact form of every payload (2.4);
-`const CATALOG: &[Entry]` (machine, from, to, trigger, kind, payload
-fields, and attributes: `live` for boot events extensions may observe,
-`action` for boot events a boot action may run on, `observe` for the
-observer paths, `compact` for the owned encoding); and a test per
-machine that drives every transition. A state no transition reaches, a
-transition without `emits`, or an event no transition emits are macro
+The macro generates, per machine: the state enum behind a private field
+of a generated `Machine` type, built only in the declaring crate, with no
+`Default` or `Clone`, whose only mutators are the transition methods;
+each takes the layer's composed chain (2.3), builds the event and the
+next state, delivers the event, then sets the state, and from a state it
+does not leave from changes and delivers nothing. A `from` state is a
+name, optionally binding fields, never a value pattern. It also
+generates one payload struct per transition, `#[non_exhaustive]` and
+neither `Copy` nor `Clone`, so only the declaring crate builds one; the
+owned compact form of every payload and its decoding (2.4); `CATALOG`
+(machine, states, and per transition: from, to, trigger, kind, code,
+payload fields with their bytes, the `observe` paths, the `action` and
+`retired` flags); and a test per machine that drives every transition
+from every state and replays its record. Per crate it defines the
+`MACHINES` static, which the catalog registry (`dagon-catalog`) lists;
+a test there fails while a crate that depends on `dagon-events` is
+missing. A state no transition reaches, a transition without `emits` or
+an `observe` path, a duplicate code, an oversized payload, a second
+`state_machine!` in a crate, or a machine outside it are compile
 errors. `dagon events catalog` prints the catalogs; `docs/events.md` is
 generated from them and a test keeps the two equal.
 
@@ -305,7 +316,9 @@ table per event; a generated test fails on a kind with no path. *Live*
 is an extension in the same image (2); *replay* is the app's agent
 re-emitting it at start from the boot record (5.5) or the state log;
 *host* is the CLI, the serve stream and actions (2.5), which also see
-every device-side event that a reply or VERSION carries.
+every device-side event that a reply or VERSION carries. Replay
+delivers only kinds the catalog marks `replay` and not `retired`; any
+other record is refused, not guessed.
 
 | Events | Layer | Live | Replay | Host |
 |---|---|---|---|---|
@@ -344,26 +357,31 @@ test keeps this excerpt equal to the catalog. The parts of DAGON that
 are *not* ports are listed in the same catalog with `port = false` and
 a reason, so one source answers "can this be replaced".
 
-| Port | Layers | Default | Trust policy |
-|---|---|---|---|
-| `UpdateTransport` (bytes in and out of a link) | boot, app, relay, host | USB CDC, UART, I2C target, PIO UART on devices; serial on the host | untrusted |
-| `UpdateProtocol` (messages ↔ session triggers: identity, status, transfer, switch, reboot, confirm) | boot, app, relay, host | the DAGON wire | untrusted (it cannot skip a guard: the session machine runs the guards, not the protocol) |
-| `ImageVerifier` (header signature, key lookup) | boot, app | Ed25519 over the project key | trusted only |
-| `Digest` (body hash) | boot, app | SHA-256 | trusted only |
-| `CryptoProvider` (the primitives the verifier and digest use; hardware acceleration, HSM) | boot, app, host | software | trusted only |
-| `DecisionPolicy` (attempt limit, which slot wins) | boot | `max_attempts` from the definition, pending before confirmed | trusted only |
-| `WatchdogDriver` | boot, app | the MCU's | trusted only |
-| `SlotStore` / `LogStorage` (where images and the state log live) | boot, app | the MCU package's flash layout | trusted only |
-| `Recovery` (an additional recovery path: a service window for a transport, a vendor download mode) | boot, app | BOOTSEL/UF2, factory, ROM entry as the MCU and board define | untrusted, additive: a plug-in adds a path, never removes DAGON's |
-| `Diagnostics` (extra VERSION TLVs, extra status, a UDS DID table) | boot, app, relay | none | untrusted |
-| `Display` (what a phase or a boot outcome looks like) | boot, app, relay | boot: the `[boot] led` and `halt` of the board definition through the action program; app and relay: none | untrusted; at boot it runs in the sandbox with the declared pins and buses |
-| `LogSink` (where `Recent` overflow and extension logs go) | app, relay, host | none | untrusted |
-| `SelfCheck` | app | healthy | untrusted (a decision point, 3) |
-| `BoardBringUp` | app, relay | the board package's | untrusted |
-| `ChildLink` (how a hub reaches a child) | relay | I2C controller, PIO UART | untrusted |
-| `Signer` / `KeyStore` | host | file key pair | untrusted (the host is trusted by definition; the device verifies) |
-| `BuildRunner` | host | cargo | untrusted |
-| `Agent`, `Action` | host | data-defined (agent and action definitions) | untrusted |
+<!-- generated from dagon_events::PORTS -->
+| Port | Layers | Default | Trust policy | Services |
+|---|---|---|---|---|
+| `UpdateTransport` (bytes in and out of a link) | boot, app, relay, host | boot, app, relay: USB CDC, UART, I2C target, PIO UART; host: serial | untrusted | return, transport, dma, time, memory |
+| `UpdateProtocol` (messages ↔ session triggers: identity, status, transfer, switch, reboot, confirm) | boot, app, relay, host | the DAGON wire | untrusted (it cannot skip a guard: the session machine runs the guards, not the protocol) | return, time, memory |
+| `ImageVerifier` (header signature, key lookup) | boot, app | Ed25519 over the project key | trusted only | – |
+| `Digest` (body hash) | boot, app | SHA-256 | trusted only | – |
+| `CryptoProvider` (the primitives the verifier and digest use; hardware acceleration, HSM) | boot, app, host | software | trusted only | – |
+| `DecisionPolicy` (attempt limit, which slot wins) | boot | `max_attempts` from the definition, pending before confirmed | trusted only | – |
+| `WatchdogDriver` (the watchdog that guards boot and trial) | boot, app | the MCU's | trusted only | – |
+| `SlotStore` (where images live) | boot, app | the MCU package's flash layout | trusted only | – |
+| `LogStorage` (where the state log lives) | boot, app | the MCU package's flash layout | trusted only | – |
+| `Recovery` (an additional recovery path: a service window for a transport, a vendor download mode) | boot, app | BOOTSEL/UF2, factory, ROM entry as the MCU and board define | untrusted, additive (a plug-in adds a path, never removes DAGON's) | return, transport, time, memory |
+| `Diagnostics` (extra VERSION TLVs, extra status, a UDS DID table) | boot, app, relay | none | untrusted | return, time, memory |
+| `Display` (what a phase or a boot outcome looks like) | boot, app, relay | boot: the `[boot] led` and `halt` of the board definition through the action program; app, relay: none | untrusted (at boot it runs in the sandbox with the declared pins and buses) | return, pins, buses, time, memory |
+| `LogSink` (where `Recent` overflow and extension logs go) | app, relay, host | none | untrusted | return, events, time, memory |
+| `SelfCheck` (the health answer when a slot on trial is confirmed) | app | healthy | untrusted (a decision point, 3) | return, time, memory |
+| `BoardBringUp` (the board's power, pins and buses at app start) | app, relay | the board package's | untrusted | return, pins, buses, time, memory |
+| `ChildLink` (how a hub reaches a child) | relay | I2C controller, PIO UART | untrusted | return, buses, transport, dma, time, memory |
+| `Signer` (signing images and releases) | host | file key pair | untrusted (the host is trusted by definition; the device verifies) | – |
+| `KeyStore` (where the signing key is kept) | host | file key pair | untrusted (the host is trusted by definition; the device verifies) | – |
+| `BuildRunner` (building node images) | host | cargo | untrusted | – |
+| `Agent` (an external agent the CLI and the page hand requests to) | host | data-defined (agent definitions) | untrusted | – |
+| `Action` (a program or request run after a host event) | host | data-defined (action definitions) | untrusted | – |
+<!-- end of generated table -->
 
 A port's default is DAGON code; a trusted-only port's replacement runs
 privileged and is accepted only under 4.7. A manifest's `provides` must
@@ -402,6 +420,9 @@ Code shape, the same in every layer:
 
 ```rust
 pub trait Extension {
+    /// Its identity in events: the manifest id.
+    fn id(&self) -> &'static str;
+
     /// Every event this extension observes, in order. Default: nothing.
     fn on_event(&mut self, _e: &Event<'_>, _ctx: &Ctx) {}
 
@@ -419,25 +440,37 @@ no handle to the flash, the state log, the watchdog, the slot store or
 DAGON's memory in `Ctx`, and in the sandboxed layers the hardware denies
 them whatever the code does (4).
 
+The extension interface is the trust boundary: an extension receives
+only `&Event`, `&Ctx` and the decision arguments, none of which leads to
+a chain, to published state or to replay. Composing a chain, delivering
+into it and replaying are layer-start APIs. Code built into the same
+image outside the extension interface (DAGON's crates, the application's
+own start-up code) is in the trusted base, as for anything in one
+address space; isolating untrusted extensions is the sandbox's part (4).
+
 ### 2.3 Composition
 
 A typed chain, order fixed at the type level and therefore at build
 time:
 
 ```rust
-pub struct Chain<A, B>(pub A, pub B);
-impl<A: Extension, B: Extension> Extension for Chain<A, B> { /* on_event: both; decisions: first Some wins */ }
-pub struct Nop;  impl Extension for Nop {}
-#[macro_export] macro_rules! extensions { ($a:expr $(, $b:expr)*) => { … nested Chain … } }
+pub struct Chain<A, B> { /* private */ }   // Chain::new(a, b)
+impl<A: Extension, B: Extension> Extension for Chain<A, B> { /* on_event: both; decisions: each in turn, first Some wins */ }
+pub struct Nop;  // no extension
+#[macro_export] macro_rules! extensions { ($a:expr $(, $b:expr)*) => { … nested Chain::new … } }
 ```
 
 Order: **publisher → board package → libraries → user**, always, in
 every layer. The layer's start (the boot core's generated `main`, the
-MCU package's `start`, the host's `Host::new`) builds the chain itself:
-the publisher for the `Published` state (2.4), then the board package's
-chain, then the user's `extensions![..]` (libraries first, then the
-app's own). User code cannot put itself first, and `extensions![..]`
-never contains the publisher. Notifications reach every extension;
+MCU package's `start`, the host's `Host::new`) builds the chain itself
+with `compose` (layers with published state and decision points: app,
+relay) or `compose_unpublished` (boot core, host): the publisher for the
+`Published` state (2.4), then the board package's chain, then the
+user's `extensions![..]` (libraries first, then the app's own). The
+result is an opaque `Composed`: its parts cannot be reached or
+reordered, it is not an extension, and only the layer start holds it.
+User code cannot put itself first, and `extensions![..]` never contains
+the publisher. Notifications reach every extension;
 decisions stop at the first non-abstaining answer. A port can be
 provided by at most one plug-in per image: `dagon gen` refuses a project
 whose chain provides a port twice (a library and the user both bringing
@@ -455,10 +488,11 @@ Registration per layer:
   image contains the extensions, so an update of an extension is an
   update of the boot core through the ROM path like any boot core
   change.
-- **App (embassy).** `node::start` / `board::start` take `events:
-  &'static Published<N>` and `exts: impl Extension + 'static`. The
-  agent hands every event its machines return to the chain and calls
-  the decision methods at the three points. Where the MCU's isolation
+- **App (embassy).** `node::start` / `board::start` take `exts: impl
+  Extension + 'static`. The MCU package creates and keeps the layer's
+  `Published`, composes it, and returns a `Reader` to the app. The
+  agent's machines deliver every event into the chain, and the chain
+  asks the decision methods at the three points. Where the MCU's isolation
   level allows it (4.5), the serving task runs the chain's handlers
   unprivileged under the same sandbox as at boot; otherwise they run as
   ordinary code with the time limit measured and reported.
@@ -483,22 +517,27 @@ function.
 Async display and log tasks never run inside a handler. The publisher at
 the head of the chain copies each event into:
 
-- `Latest`: an `embassy_sync::watch::Watch<Cs, Snapshot, N>`
-  (multi-receiver, last value) holding `Snapshot { phase, progress:
-  Option<(u32, u32)>, version, trial, last: EventId, seq }`.
+- `Latest`: an `embassy_sync::watch::Watch` (multi-receiver, last
+  value) holding `Latest { state, last }`: the layer's snapshot, folded
+  from every event (the app's `{ phase, progress, version, trial }`, the
+  relay's children), and the last event's record.
 - `Recent<N>`: a fixed ring of the last N events as `EventRecord`, an
-  owned, bounded form generated per event by `state_machine!`
-  (`compact` attribute): `{ layer: u8, kind: u8, seq: u32, payload: [u8;
-  16] }`. Fields that fit are copied; a borrowed or larger field is
-  replaced by its compact form the catalog states (a length, an id, a
-  digest prefix). No reference is retained after the producer returns.
-  Overflow drops the oldest and counts `dropped` in the next record,
-  never blocks the producer.
+  owned, bounded form generated per event by `state_machine!`:
+  `{ layer: u8, kind: u8, flags: u8, dropped: u8, seq: u32, payload:
+  [u8; 16] }`. Fields are copied in their compact form the catalog
+  states (a length, an id, a digest prefix). No reference is retained
+  after the producer returns. Overflow drops the oldest; the records
+  after it report the loss in `dropped`, up to 255 each, carrying the
+  rest, and the producer never waits. `seq` wraps and compares by serial
+  arithmetic.
 
-Both live in one `static EVENTS: Published<N> = Published::new();` the
-app declares and hands to `start`. The relay's display state is the same
-type with the relay's snapshot. The boot core has no publisher: its
-events go to the boot record and to its extensions' handlers.
+Both live in one `Published<S, N>` that the layer package (the MCU
+package, the host) creates, keeps and hands to `compose` by exclusive
+reference, so the chain is its only writer. Display, log and app tasks
+get a `Reader` (receivers, the latest state, the recent ring), which
+only reads. The relay's display state is the same type with the relay's
+snapshot. The boot core has no publisher: its events go to the boot
+record and to its extensions' handlers.
 
 ### 2.5 Host: event stream, actions, package discovery
 
@@ -562,9 +601,12 @@ core starts, except a trusted plug-in that provides `DecisionPolicy`
 | 3.3 | `self_check(&TrialInfo) -> Health` | app | board, libraries, user | 50 ms; `Pending` keeps the "state" status and lets the host retry | healthy | cannot confirm a slot not on trial, cannot bypass the `confirmed` transition |
 | 3.4 | `confirm_plan(&Prepared) -> bool` | host | the interactive user (TTY, page) or `--yes`; actions and host extensions cannot | until the user answers | ask | key check and image verification happen before the plan is shown |
 
-Bounds are measured: the serving task times each decision call and emits
-`app.extension_overran { id, point, us }`; in a sandboxed layer the
-timer preempts the call at the bound (4.3).
+Bounds are measured: the composed chain times each extension's call on
+its own with the layer's clock (DAGON's, from the MCU package; not a
+port); a late answer is ignored, as an abstention, and the chain emits
+`app.extension_overran { id, point, us }` (`id` is the extension's id,
+its 64-bit FNV-1a hash in the record); in a sandboxed layer the timer
+preempts the call at the bound (4.3).
 
 ## 4. Isolation and safety contract
 
@@ -1580,9 +1622,9 @@ boot core armed (on trial: confirm within the trial period or be rolled
 back). An app that does not link DAGON can still be installed through
 the ROM path and runs after signing; it never confirms, so it rolls back
 after `max_attempts` unless installed as confirmed by `dagon provision`.
-To attach DAGON: add the MCU and board packages, declare a `Published`
-static, call `start` with it and an extension chain (`Nop` is valid),
-keep the guard fed. To detach: stop calling `start`; the boot core still
+To attach DAGON: add the MCU and board packages, call `start` with an
+extension chain (`Nop` is valid), read the published events through the
+`Reader` it returns, keep the guard fed. To detach: stop calling `start`; the boot core still
 verifies and counts attempts, still runs its own extensions and still
 writes the boot record; the host sees no identity reply and `dagon
 status` says so. No extension, event, definition or boot action changes
@@ -1594,13 +1636,11 @@ to (4.7).
 ### 8.1 Splash and update progress on a display (app)
 
 ```rust
-static EVENTS: Published<16> = Published::new();
-
 #[embassy_executor::task]
-async fn display_task(mut lcd: Lcd) {
-    let mut rx = EVENTS.latest().receiver().unwrap();
+async fn display_task(mut lcd: Lcd, events: Reader<AppSnapshot, 16>) {
+    let mut rx = events.receiver().unwrap();
     loop {
-        let s = rx.changed().await;
+        let s = rx.changed().await.state;
         match s.phase {
             Phase::Starting | Phase::Serving => lcd.splash(s.version, s.trial),
             Phase::Transferring => lcd.bar(s.progress),
@@ -1611,7 +1651,8 @@ async fn display_task(mut lcd: Lcd) {
         }
     }
 }
-// main: node::start::<Board, N>(spawner, dagon, &GUARD, tag, &EVENTS, extensions![MyApp], UPLINK)
+// main: let events = node::start::<Board, N>(spawner, dagon, &GUARD, tag, extensions![MyApp], UPLINK);
+//       spawner.spawn(display_task(lcd, events))
 ```
 
 ### 8.2 Power hold at boot (board definition, no code)
@@ -1652,6 +1693,7 @@ ops = [{ op = "bus_write", device = "pmic", reg = 0x07, bytes = [0x20] }]
 ```rust
 pub struct DefmtLog;
 impl Extension for DefmtLog {
+    fn id(&self) -> &'static str { "defmt-log" }
     fn on_event(&mut self, e: &Event<'_>, _: &Ctx) { defmt::info!("{}", defmt::Debug2Format(e)); }
 }
 // … extensions![DefmtLog, MyApp]
@@ -1661,7 +1703,7 @@ impl Extension for DefmtLog {
 ```
 
 Or asynchronously, without touching the serving task's time: a task that
-drains `EVENTS.recent()` (owned `EventRecord`s, 2.4).
+drains `events.recent()` from the `Reader` (owned `EventRecord`s, 2.4).
 
 ### 8.4 A replaced update transport and protocol: UDS over CAN
 
@@ -1738,6 +1780,7 @@ finished. The same event appears on `/v1/events` and on stdout with
 ```rust
 struct Bench;
 impl Extension for Bench {
+    fn id(&self) -> &'static str { "bench" }
     fn self_check(&mut self, _: &TrialInfo, _: &Ctx) -> Option<Health> { Some(Health::Healthy) }
 }
 // after start: if agent.images().on_trial() { agent.confirm_own(); }   // emits app.self_check, app.confirmed (and app.demoted for the other slot)
@@ -1784,9 +1827,9 @@ listed, and a test asserts each pair.
 | Extension count and ids | ids ≤ 32 bytes; 0x08 repeats per extension and the whole VERSION reply must still fit the smallest link | the manifest format; `max_payload::MIN` | `dagon gen` refuses a project whose VERSION reply would not fit |
 | Boot action program | `ops ≤ 32` per event, `delay total ≤ 50 ms`, `bytes ≤ 8` per `bus_write`, `delay ≤ 20 ms` | `dagon_format::bootprogram` constants | `dagon gen` validator; the boot core interpreter; the `boot_wiring.rs` table type |
 | Live event payload | ≤ 16 bytes for boot events (by value); larger app/host payloads by reference | `dagon-events` size assertions | `Published` snapshot; the compact form |
-| `EventRecord` | 24 bytes: `layer`, `kind`, `seq u32`, `payload [u8; 16]`, padding | `state_machine!` `compact` attribute (a generated test asserts every kind has one) | `Recent<N>`; the boot record's compact form reuses the first 3 payload bytes |
+| `EventRecord` | 24 bytes: `layer`, `kind`, `flags`, `dropped`, `seq u32`, `payload [u8; 16]` | `state_machine!` `compact` attribute (a generated test asserts every kind has one) | `Recent<N>`; the boot record's compact form reuses the first 3 payload bytes |
 | Catalog | no numeric cap; `kind` is `u8` per layer | `state_machine!` | the record `kind u8` (a generated test fails at 256 kinds in a layer); serve stream |
-| Recent ring | `N` chosen by the app | `Published<N>` | the app's static; overflow counts `dropped` |
+| Recent ring | `N` chosen by the layer package | `Published<S, N>` | the layer package's `Published`; overflow counts `dropped` |
 | Decision bounds | 50 ms; `REBOOT_DELAY_MAX = min(trial_ms, confirmed_ms) / 2` | `dagon-events` constants; the MCU definition's `[watchdog]` | the serving task's timer; `boot_wiring.rs` |
 
 ## 11. Bus masters and privileged control blocks: the definition schema

@@ -40,5 +40,18 @@ class CiCrates(unittest.TestCase):
             self.assertFalse(ci_crates.has_host_tests(parent, [child]))
 
 
+    def test_firmware_lints_cover_every_mcu_package(self):
+        runs = ci_crates.firmware_lints()
+        mcus = {p.parent.relative_to(ROOT).as_posix()
+                for p in (ROOT / "targets" / "mcu").glob("*/dagon-mcu.toml")}
+        self.assertEqual({r["dir"] for r in runs}, mcus)
+        for r in runs:
+            self.assertIn(r["toolchain"], ("stable", "esp"), r)
+            if not r["target"]:
+                # The package names its target in its own cargo config.
+                config = ROOT / r["dir"] / ".cargo" / "config.toml"
+                self.assertIn("target", config.read_text(encoding="utf-8"), r)
+
+
 if __name__ == "__main__":
     unittest.main()

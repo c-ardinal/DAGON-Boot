@@ -49,6 +49,11 @@ Withdraws the consent (also fine when none was recorded).
 
 - 200: the same body as GET /v1/agent (now `linked: false`).
 - 403 in `dagon demo`.
+- Work already running stops: running `ai_topology` jobs are cancelled, and
+  every model call (each round of a topology draft, each call of a question)
+  reads the consent again just before it is sent, so no call follows an
+  unlink. A question whose answer arrives after the unlink answers 409
+  `AGENT_NOT_LINKED` instead of the answer.
 
 ## AI routes before linking
 
@@ -131,6 +136,8 @@ Errors (all `{ "error": "...", "code": "..." }` except the 400s):
 | 409 | `AGENT_NOT_LINKED` | not linked |
 | 409 | `AGENT_NO_KEY` | linked, but this CLI has no `ANTHROPIC_API_KEY` (restart `dagon serve` after setting it) |
 | 429 | `AGENT_BUSY` | another question is being answered (one at a time per serve) |
+| 409 | `AGENT_NOT_LINKED` | also: unlinked while the question was being answered (no further call is made) |
+| 413 | `AGENT_CONTEXT_TOO_LARGE` | the topology file is over 64 KiB (not read), or one request to the agent would be over 192 KiB (not sent) |
 | 504 | `AGENT_TIMEOUT` | one model call took longer than 120 s |
 | 502 | `AGENT_FAILED` | the agent refused or answered in an unexpected form; `error` says which |
 
@@ -140,9 +147,18 @@ topology as plain data (comments dropped; every string or key that is not a
 plain name becomes `project-text`), its check results with those words hidden
 (a file that does not parse is sent only as "does not parse"), the selection,
 the kind and outcome (`build` / `failed` ...) of the last 5 finished jobs, the
-history and the question. Never: keys, file paths, commands, logs, job errors.
-A proposal that contains `project-text` is refused (DAGON then describes the
-change in words), so a topology with hidden values gets no file proposals.
+history and the question, all as one JSON document (the user's words are
+data in it, not text between delimiters). Never: keys, file paths, commands,
+logs, job errors. A topology with any hidden value gets no file proposal: the
+answer then ends with 「この構成には DAGON に送らなかった値があるため、変更の案は出していません。」
+and no repair call is made; a proposal that contains `project-text` is refused too.
+
+The 192 KiB cap is measured on the whole request body (instructions,
+definition facts, topology, check, history, question, and the repair rounds)
+before every call. The longest question and history with the builtin
+definitions and a desk-sized topology stay under it (tested); a topology near
+64 KiB or large project definitions can go over it and get
+`AGENT_CONTEXT_TOO_LARGE` without any call.
 
 ## Where the consent lives
 
@@ -150,8 +166,9 @@ change in words), so a topology with hidden values gets no file proposals.
 shared by `dagon serve` and `dagon ai link` / `dagon ai unlink`. Per user and
 not per project: the key it goes with belongs to the user's environment, a
 per-project consent would ask again in every project, and nothing lands in a
-project folder that may be committed. A file that does not parse or names
-another provider counts as not linked.
+project folder that may be committed. A file that does not parse, holds any
+field besides those two, names another provider or has an `at` that is not
+`YYYY-MM-DDTHH:MM:SSZ` counts as not linked.
 
 ## CLI
 

@@ -222,6 +222,7 @@ dependencies = [
 name = "dagon-esp32s3-app"
 version = "0.0.0"
 dependencies = [
+ "dagon-agent",
  "dagon-board-m5stopwatch",
  "dagon-mcu-esp32s3",
  "embassy-executor",

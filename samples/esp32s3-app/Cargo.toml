@@ -29,6 +29,8 @@ test = false
 
 [dependencies]
 dagon-mcu-esp32s3 = { path = "../../targets/mcu/esp32s3" }
+# The published AppSnapshot the screen follows.
+dagon-agent = { path = "../../crates/dagon-agent" }
 
 # The firmware; the library (`digits`) also builds and tests on the host.
 [target.'cfg(target_arch = "xtensa")'.dependencies]

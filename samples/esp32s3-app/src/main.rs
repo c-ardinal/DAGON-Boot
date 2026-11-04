@@ -58,7 +58,7 @@ async fn main(spawner: Spawner) {
         p.GPIO48.reborrow(),
         p.USB_DEVICE.reborrow(),
     );
-    board::start(
+    let events = board::start(
         armed,
         dagon_pins!(p),
         NodeConfig::app(node::App::new(self_check)),
@@ -81,9 +81,10 @@ async fn main(spawner: Spawner) {
         d3: p.GPIO45,
         te: p.GPIO38,
     };
-    // The version display is optional: without a lease it is not started.
+    // The display (version, update phases) is optional: without a lease it
+    // is not started.
     if let Some(lease) = LIVENESS.register() {
-        if let Ok(task) = display::display_task(screen, lease, powered) {
+        if let Ok(task) = display::display_task(screen, lease, powered, events) {
             spawner.spawn(task);
         }
     }

@@ -182,11 +182,11 @@
         <p class="choice">{TRIAL_CHOICE.sentence}</p>
         <div class="actions">
           <button class="secondary" onclick={() => onkeep?.(n.id)}>{TRIAL_CHOICE.keep}</button>
-          {#if back}<button class="secondary" onclick={() => onback?.(n.id)}>{TRIAL_CHOICE.back}</button>{/if}
+          {#if back}<button class="secondary" data-control="rollback" onclick={() => onback?.(n.id)}>{TRIAL_CHOICE.back}</button>{/if}
         </div>
       {:else if act && l?.responding && back}
         <div class="actions">
-          <button class="secondary" onclick={() => onback?.(n.id)}>{NODE_ACTION.back(back)}</button>
+          <button class="secondary" data-control="rollback" onclick={() => onback?.(n.id)}>{NODE_ACTION.back(back)}</button>
         </div>
       {/if}
       {@const rec = recoveryRows(n.id)}

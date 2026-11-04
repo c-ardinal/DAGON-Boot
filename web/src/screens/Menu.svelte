@@ -24,9 +24,9 @@
 <nav id="menu" class="menu" aria-label={MENU.button}>
   <ul>
     {#each ITEMS as [c, label] (c)}
-      <li><button class="secondary" aria-disabled={locked} onclick={() => !locked && onstart(c)}>{label}</button></li>
+      <li><button class="secondary" data-control="project" aria-disabled={locked} onclick={() => !locked && onstart(c)}>{label}</button></li>
     {/each}
-    <li><button class="secondary" aria-disabled={locked} bind:this={restartButton} onclick={() => !locked && onrestart()}>{MENU.restart}</button></li>
+    <li><button class="secondary" data-control="project" aria-disabled={locked} bind:this={restartButton} onclick={() => !locked && onrestart()}>{MENU.restart}</button></li>
   </ul>
 </nav>
 

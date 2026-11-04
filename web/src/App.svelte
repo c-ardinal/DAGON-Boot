@@ -1,13 +1,14 @@
 <script lang="ts">
   import { tick, untrack } from 'svelte';
   import { bandOf } from './app/band.ts';
-  import { ANNOUNCE, BAND, BUTTON, CANVAS, DEFINE, DIFF, DRAWER, HUB_TOGGLE, MODE, NODE, ORDER, PLAN, PRODUCT, RECONNECT, SAVE, SKIP, STEP, TIME } from './app/copy.ts';
+  import { ANNOUNCE, BAND, BUTTON, CANVAS, DEFINE, DIFF, DRAWER, LOCK, HUB_TOGGLE, MODE, NODE, ORDER, PLAN, PRODUCT, RECONNECT, SAVE, SKIP, STEP, TIME } from './app/copy.ts';
   import { webSerial } from './app/connect.ts';
   import { HUB_LOCKED, hubOf, view, type Action } from './app/machine.ts';
   import { Operate, waterOf, type Progress } from './app/operate.svelte.ts';
   import Graph, { type Chip, type Dot } from './graph/Graph.svelte';
   import Band from './screens/Band.svelte';
   import Drawer, { type DrawerTab } from './screens/Drawer.svelte';
+  import { activeStates, lockOf, stateName, type Control } from './app/locks.ts';
   import Detail from './screens/Detail.svelte';
   import { Define, type Operable } from './app/define/define.svelte.ts';
   import { topoDiff } from './app/define/diff.ts';
@@ -374,11 +375,13 @@
     const z = e.key.toLowerCase() === 'z' && (e.ctrlKey || e.metaKey);
     if (z && !field) {
       e.preventDefault();
+      if (stopped('edit')) return;
       return e.shiftKey ? d.redo() : d.undo();
     }
     if (field || !el.closest('#canvas')) return;
     if (e.key === 'Delete') {
       e.preventDefault();
+      if (stopped('edit')) return;
       d.removeSelected();
     } else if (e.key === 'l' || e.key === 'L') {
       d.focusField = 'connect';
@@ -615,6 +618,67 @@
 
   const hub = $derived(hubOf(op.state));
   const connected = $derived(!['idle', 'lost'].includes(hub));
+  /** DAGON waits for its agent's answer (the lock table's 返事待ち). */
+  let thinking = $state(false);
+  const BUILD_KINDS = new Set(['build', 'sign', 'release', 'gen', 'conform']);
+  const running = (kinds: (k: string) => boolean) => cli.jobs.some((j) => (j.state === 'running' || j.state === 'queued') && kinds(j.kind));
+  /** The lock table's states now (DES-UX3-182), leftmost first. */
+  const lockStates = $derived(
+    activeStates({
+      // ponytail: the page has no demo playback of its own yet; `dagon demo`'s desk is driven by the user like a real one.
+      demo: false,
+      updating: ['L19', 'L20', 'L21'].includes(op.state),
+      recovering: op.state === 'L24',
+      flashing: running((k) => k === 'flash'),
+      building: running((k) => BUILD_KINDS.has(k)),
+      unsaved: autosave.pending && !local,
+      connecting: ['L03', 'L06', 'L08'].includes(op.state),
+      disconnected: !connected,
+      thinking,
+      cliNone: cli.state !== 'ready',
+    }),
+  );
+  const lockedBy = (c: Control) => lockOf(c, lockStates);
+  /** Operations stopped now: dimmed through `data-locks` on the frame (base.css). */
+  const locksNow = $derived((Object.keys(LOCK.controls) as Control[]).filter((c) => lockedBy(c) !== null).join(' '));
+  /** The reason of a stopped operation, shown where it was pressed (information style, role=status). */
+  let why = $state<{ text: string; x: number; y: number } | null>(null);
+  let whyTimer: ReturnType<typeof setTimeout> | undefined;
+  const WHY_MS = 4000;
+  function showWhy(text: string, at?: Element | null) {
+    const r = at?.getBoundingClientRect();
+    why = { text, x: r ? r.left : innerWidth / 2, y: r ? r.bottom + 6 : innerHeight / 2 };
+    note(text);
+    clearTimeout(whyTimer);
+    whyTimer = setTimeout(() => (why = null), WHY_MS);
+  }
+  /** True (and the reason shown) when `c` is stopped now: the one check buttons, menus, keys and commands go through. */
+  function stopped(c: Control, at?: Element | null): boolean {
+    const r = lockedBy(c);
+    if (r) showWhy(r, at);
+    return r !== null;
+  }
+  /** Every control marked data-control: pressing a stopped one shows why and does nothing else. */
+  function lockClick(e: MouseEvent) {
+    const el = (e.target as HTMLElement).closest<HTMLElement>('[data-control]');
+    if (!el || !stopped(el.dataset.control as Control, el)) return;
+    e.preventDefault();
+    e.stopPropagation();
+  }
+  /** Typing into a field of a stopped part (the inspector, the table) is stopped the same way. */
+  function lockKeys(e: KeyboardEvent) {
+    const t = e.target as HTMLElement;
+    if (!/^(INPUT|SELECT|TEXTAREA)$/.test(t.tagName) || ['Tab', 'Escape', 'Shift'].includes(e.key)) return;
+    const el = t.closest<HTMLElement>('[data-control]');
+    if (!el || !stopped(el.dataset.control as Control, t)) return;
+    e.preventDefault();
+    e.stopPropagation();
+  }
+  /** Band actions as lock-table operations. */
+  const CONTROL_OF: Partial<Record<Action, Control>> = {
+    chooseFile: 'file', updateResponding: 'file', otherFile: 'file', useLatest: 'update', update: 'update',
+    recover: 'recover', recoverAgain: 'recover', connect: 'connect', connectDiscover: 'connect', reselect: 'connect', reconnect: 'connect',
+  };
   /** Why the header's つなぐ / 切断 cannot be used now. */
   const hubLocked = $derived(HUB_LOCKED.has(op.state) ? (HUB_TOGGLE.locked[op.state] ?? null) : null);
   /** The locked toggle was pressed: its reason stands in the band until the state changes. */
@@ -733,8 +797,8 @@
   <main id="canvas" tabindex="-1" aria-describedby="canvas-help" class="define">
     <p id="canvas-help" class="visually-hidden">{CANVAS.describe}</p>
     <div class="toolbar" bind:offsetHeight={toolbarH}>
-      <button class="secondary" aria-disabled={!d.canUndo} onclick={() => d.undo()}>{DEFINE.undo}</button>
-      <button class="secondary" aria-disabled={!d.canRedo} onclick={() => d.redo()}>{DEFINE.redo}</button>
+      <button class="secondary" data-control="edit" aria-disabled={!d.canUndo} onclick={() => d.undo()}>{DEFINE.undo}</button>
+      <button class="secondary" data-control="edit" aria-disabled={!d.canRedo} onclick={() => d.redo()}>{DEFINE.redo}</button>
       <div class="seg" role="radiogroup" aria-label="{DEFINE.graph}・{DEFINE.table}">
         <button role="radio" aria-checked={d.view === 'graph'} onclick={() => (d.view = 'graph')}>{DEFINE.graph}</button>
         <button role="radio" aria-checked={d.view === 'table'} onclick={() => (d.view = 'table')}>{DEFINE.table}</button>
@@ -756,7 +820,7 @@
         inset={{ left: partsW, right: sheetW, bottom: toolbarH }}
       />
     {:else}
-      <Table {d} onaddnode={() => document.querySelector<HTMLElement>('#list-h')?.focus()} />
+      <div class="edit-area" data-control="edit"><Table {d} onaddnode={() => document.querySelector<HTMLElement>('#list-h')?.focus()} /></div>
     {/if}
   </main>
 {/snippet}
@@ -765,7 +829,7 @@
   {#if cliPanel}
     <CliPanel {cli} {d} {autosave} panel={cliPanel} onuse={useRelease} />
   {:else if d.selected}
-    <Inspector {d} />
+    <div class="edit-area" data-control="edit"><Inspector {d} /></div>
   {/if}
 {/snippet}
 
@@ -888,7 +952,7 @@
 {/snippet}
 
 {#snippet operateBottom()}
-  <Band {band} busy={op.state === 'L03'} available={(a) => RUNS.has(a)} status={op.status} alert={op.alert} onaction={act} bind:primaryEl bind:nextEl />
+  <Band {band} control={(a) => CONTROL_OF[a]} busy={op.state === 'L03'} available={(a) => RUNS.has(a)} status={op.status} alert={op.alert} onaction={act} bind:primaryEl bind:nextEl />
 {/snippet}
 
 {#if !serial && !dev && !cli.sim}
@@ -897,7 +961,8 @@
   <a class="skip" href="#canvas">{SKIP.canvas}</a>
   <a class="skip" href="#band">{SKIP.next}</a>
   <!-- The DOM follows the visual order of each layout, so Tab order matches what is seen. -->
-  <div class="frame {layout}" class:work={screen === 'work'} class:open={drawerOpen} class:modal={restartOpen || autosave.asking !== null}>
+  <!-- svelte-ignore a11y_no_static_element_interactions -->
+  <div class="frame {layout}" data-locks={locksNow} onclickcapture={lockClick} onkeydowncapture={lockKeys} class:work={screen === 'work'} class:open={drawerOpen} class:modal={restartOpen || autosave.asking !== null}>
     <Header
       sim={cli.sim !== null}
       step={screen === 'start' ? null : step}
@@ -940,7 +1005,7 @@
           <aside class="float sheet right" bind:offsetWidth={sheetW}>{@render right()}</aside>
         {/if}
       </div>
-      <Drawer tabs={drawerTabs} open={drawerTab} onpick={pickTab} body={drawerBody} />
+      <Drawer tabs={drawerTabs} open={drawerTab} onpick={pickTab} body={drawerBody} state={stateName(lockStates)} />
       {#if layout !== 'narrow'}{@render bottom()}{/if}
     {/if}
   </div>
@@ -954,6 +1019,10 @@
     onchange={picked}
     oncancel={() => (pickForRecovery = false)}
   />
+  {#if why}
+    <!-- Round8d: a stopped operation's reason is information (blue edge), never red. -->
+    <div class="why" role="status" style:left="{Math.max(8, Math.min(why.x, innerWidth - 336))}px" style:top="{Math.min(why.y, innerHeight - 96)}px">{why.text}</div>
+  {/if}
   {#if restartOpen}
     <Restart onconfirm={restart} oncancel={cancelRestart} />
   {/if}
@@ -1161,6 +1230,31 @@
   }
   .narrow .float.parts {
     order: 1;
+  }
+  .why {
+    position: fixed;
+    z-index: var(--z-announce);
+    max-width: min(20rem, calc(100vw - 2 * var(--s-3)));
+    padding: var(--s-2) var(--s-3);
+    border: 1px solid var(--c-accent);
+    border-radius: var(--r-s);
+    background: var(--c-layer-2);
+    color: var(--c-paper);
+    font: 400 var(--t-small-size) / var(--t-small-lh) var(--f-ja);
+    box-shadow: 0 0.25rem 1rem rgb(0 0 0 / 0.5);
+    pointer-events: none;
+    animation: why-in 120ms var(--ease-out);
+  }
+  @keyframes why-in {
+    from {
+      opacity: 0;
+      transform: translateY(-2px) scale(0.97);
+    }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .why {
+      animation: none;
+    }
   }
   /* Q2: while a dialog is open its own button is the one main action. */
   .frame.modal :global(footer .primary) {

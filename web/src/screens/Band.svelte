@@ -10,11 +10,13 @@
     status: string;
     alert: string;
     onaction: (a: Action) => void;
+    /** The lock-table operation an action is (DES-UX3-182), so a stopped one says why when pressed. */
+    control?: (a: Action) => string | undefined;
     primaryEl?: HTMLButtonElement;
     nextEl?: HTMLDivElement;
   }
 
-  let { band, busy, available, status, alert, onaction, primaryEl = $bindable(), nextEl = $bindable() }: Props = $props();
+  let { band, busy, available, status, alert, onaction, control = () => undefined, primaryEl = $bindable(), nextEl = $bindable() }: Props = $props();
 </script>
 
 <footer id="band" tabindex="-1">
@@ -27,7 +29,7 @@
     <div class="side">
       {#each band.secondary as b (b.action)}
         {@const off = !available(b.action)}
-        <button class="secondary" aria-disabled={off} onclick={() => !off && onaction(b.action)}>{b.label}</button>
+        <button class="secondary" data-control={control(b.action)} aria-disabled={off} onclick={() => !off && onaction(b.action)}>{b.label}</button>
       {/each}
     </div>
   {/if}
@@ -35,7 +37,7 @@
     {@const p = band.primary}
     {@const off = busy || !available(p.action)}
     <!-- Busy and unavailable stay focusable (aria-disabled) so focus never drops to the page. -->
-    <button class="primary" bind:this={primaryEl} aria-disabled={off} onclick={() => !off && onaction(p.action)}>
+    <button class="primary" data-control={control(p.action)} bind:this={primaryEl} aria-disabled={off} onclick={() => !off && onaction(p.action)}>
       {busy ? `${p.label}…` : p.label}<span class="arrow" aria-hidden="true">→</span>
     </button>
   {/if}

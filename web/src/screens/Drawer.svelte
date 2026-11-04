@@ -10,7 +10,7 @@
 
 <script lang="ts">
   import type { Snippet } from 'svelte';
-  import { DRAWER } from '../app/copy.ts';
+  import { DRAWER, LOCK } from '../app/copy.ts';
 
   interface Props {
     tabs: DrawerTab[];
@@ -19,9 +19,11 @@
     /** The same tab again closes the drawer (DES-UX3-015). */
     onpick: (id: string) => void;
     body: Snippet<[string]>;
+    /** The state now (待機, 更新中 …), always shown (DES-UX3-182). */
+    state: string;
   }
 
-  let { tabs, open, onpick, body }: Props = $props();
+  let { tabs, open, onpick, body, state }: Props = $props();
 </script>
 
 <!-- DES-UX3-015: closed by default; while open the canvas above shrinks by its height (no overlap). -->
@@ -39,6 +41,7 @@
         {t.label}{#if t.count !== undefined}&ensp;<span class="count" class:alarm={t.alarm && t.count > 0}>{t.count}</span>{/if}
       </button>
     {/each}
+    <span class="state" title={LOCK.stateTitle}><span class="visually-hidden">{LOCK.stateLabel} </span>{state}</span>
     <span class="key" aria-hidden="true">Ctrl+J</span>
   </div>
   {#if open}
@@ -90,8 +93,14 @@
   .count.alarm {
     color: var(--c-signal);
   }
-  .key {
+  .state {
     margin-left: auto;
+    align-self: center;
+    color: var(--c-paper);
+    font: 500 var(--t-small-size) / 1 var(--f-ja);
+  }
+  .key {
+    margin-left: var(--s-4);
     align-self: center;
     color: var(--c-muted);
     font: 400 var(--t-caption-size) / 1 var(--f-mono);

@@ -99,7 +99,7 @@
   </ol>
   <span class="hub" aria-label={HUB_NAME[hub]}>{HUB[hub]}</span>
   {#if onhub}
-    <button class="secondary toggle" aria-disabled={hubLocked !== null} aria-describedby={hubLocked ? 'hub-why' : undefined} onclick={onhub}
+    <button class="secondary toggle" data-control="connect" aria-disabled={hubLocked !== null} aria-describedby={hubLocked ? 'hub-why' : undefined} onclick={onhub}
       >{linked ? HUB_TOGGLE.disconnect : HUB_TOGGLE.connect}</button
     >
     {#if hubLocked}<span id="hub-why" class="visually-hidden">{hubLocked}</span>{/if}

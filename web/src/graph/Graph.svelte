@@ -31,6 +31,7 @@
   import { versionText } from '../wasm/dagon.ts';
   import { lengthTable, neighbour, pathD, pointAt, shifted, tAtLength, tangentAt, tieLengths, verticalLink, wireOffsets } from './geometry.ts';
   import { treeLayout } from './layout.ts';
+  import { untrack } from 'svelte';
 
   interface Props {
     config: Config | null;
@@ -96,12 +97,25 @@
   const contentW = $derived(tree.width + 2 * SIDE + inset.left + inset.right);
   const bare = $derived(TOP + tree.height + BOTTOM);
   /** The whole 構成 in view when it opens (DES-UX3-160), with room under it for the focal number. */
-  const fit = $derived(Math.max(MIN_FIT, Math.min(1, boxW / contentW, (boxH - below) / bare)));
+  const wanted = $derived(Math.max(MIN_FIT, Math.min(1, boxW / contentW, (boxH - below) / bare)));
+  /**
+   * The fit in use: it shrinks at once and grows only by more than GROW. Text wraps a
+   * little differently at each scale, so card heights follow the fit; without the
+   * margin two scales could take turns forever.
+   */
+  const GROW = 1.04;
+  let fit = $state(1);
+  $effect(() => {
+    const w = wanted;
+    const kept = untrack(() => fit);
+    if (w < kept || w > kept * GROW) fit = w;
+  });
   const scale = $derived(zoom * fit);
-  const W = $derived(Math.max(boxW / scale, contentW));
+  // Floored, so a fitted canvas never brings up a scrollbar (which would change the box and the fit again).
+  const W = $derived(Math.floor(Math.max(boxW / scale, contentW)));
   /** Trees centred when they fit; from the left edge when they scroll. */
   const left = $derived(inset.left / scale + (W - (inset.left + inset.right) / scale - tree.width) / 2);
-  const H = $derived(Math.max(boxH / scale, bare + below / scale));
+  const H = $derived(Math.floor(Math.max(boxH / scale, bare + below / scale)));
   const pos = $derived(Object.fromEntries(Object.entries(tree.at).map(([id, p]) => [id, { x: left + p.x, y: TOP + p.y }])));
   const depthOf = (n: Node) => tree.at[n.id]?.depth ?? 0;
 
@@ -369,6 +383,7 @@
     min-width: 0;
     min-height: 0;
     overflow: auto;
+    scrollbar-gutter: stable;
   }
   .canvas {
     position: relative;

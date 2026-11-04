@@ -44,7 +44,7 @@
       {#each mcuList as m (m.id)}
         <li>
           <span class="what"><span translate="no">{m.name}</span><span class="mcu"><span class="k">{INSPECT.board}</span> {INSPECT.boardOwn}</span></span>
-          <button class="small" aria-disabled={full} aria-label="{m.name} {DEFINE.place}" onclick={() => !full && d.placeMcu(m.id, m.name)}>{DEFINE.place}</button>
+          <button class="small" data-control="edit" aria-disabled={full} aria-label="{m.name} {DEFINE.place}" onclick={() => !full && d.placeMcu(m.id, m.name)}>{DEFINE.place}</button>
         </li>
       {/each}
     </ul>
@@ -55,14 +55,14 @@
       <li>
         <!-- The same board again is a second one of it (a second 親機, another 子機); 配置済み is said under its name. -->
         <span class="what"><span translate="no">{b.product}</span><span class="mcu" translate="no">{b.mcuName}</span>{#if placed(b.id)}<span class="placed">{DEFINE.placed}</span>{/if}</span>
-        <button class="small" aria-disabled={!ok} aria-label="{b.product} {DEFINE.place}" onclick={() => ok && d.place(b.id, b.product)}>{DEFINE.place}</button>
+        <button class="small" data-control="edit" aria-disabled={!ok} aria-label="{b.product} {DEFINE.place}" onclick={() => ok && d.place(b.id, b.product)}>{DEFINE.place}</button>
       </li>
     {/each}
   </ul>
   {/if}
   <h3>{DEFINE.firstHeading}</h3>
   <div class="first">
-    <button class="secondary" onclick={onconnect}>{DEFINE.connectDiscover}</button>
+    <button class="secondary" data-control="connect" onclick={onconnect}>{DEFINE.connectDiscover}</button>
   </div>
   {#if onpanel}
     <nav aria-labelledby="dn-h">
@@ -205,7 +205,7 @@
     margin-left: auto;
     padding: 0 var(--s-2);
     border-radius: var(--r-s);
-    background: var(--c-signal);
+    background: var(--c-accent);
     color: var(--c-ink);
     font-weight: 700;
   }

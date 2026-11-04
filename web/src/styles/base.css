@@ -111,6 +111,24 @@ button {
   }
 }
 
+/* DES-UX3-182: an operation the state stops stays in place, dimmed, and still says why when pressed. */
+[data-locks~='edit'] [data-control='edit'],
+[data-locks~='gen'] [data-control='gen'],
+[data-locks~='build'] [data-control='build'],
+[data-locks~='flash'] [data-control='flash'],
+[data-locks~='release'] [data-control='release'],
+[data-locks~='update'] [data-control='update'],
+[data-locks~='recover'] [data-control='recover'],
+[data-locks~='rollback'] [data-control='rollback'],
+[data-locks~='connect'] [data-control='connect'],
+[data-locks~='project'] [data-control='project'],
+[data-locks~='ask'] [data-control='ask'],
+[data-locks~='apply'] [data-control='apply'],
+[data-locks~='link'] [data-control='link'],
+[data-locks~='file'] [data-control='file'] {
+  opacity: 0.45;
+}
+
 .primary {
   display: inline-flex;
   align-items: center;
@@ -119,7 +137,8 @@ button {
   padding: 0 var(--s-6);
   border: 0;
   border-radius: var(--r-full);
-  background: var(--c-signal);
+  /* Q14: the main action is blue; red is for failures only. */
+  background: var(--c-accent);
   color: var(--c-ink);
   font: 700 var(--t-body-size) / 1 var(--f-ja);
   white-space: nowrap;

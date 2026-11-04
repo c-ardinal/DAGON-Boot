@@ -199,6 +199,160 @@ export const UNSUPPORTED = {
   button: 'この URL をコピー',
 } as const;
 
+/**
+ * The state-lock table (DES-UX3-182, round8d string table): each state's
+ * short name for the status line and, per operation it stops, the reason
+ * shown when that operation is pressed (information style, never red).
+ */
+export const LOCK = {
+  controls: {
+    edit: '構成の編集',
+    gen: 'プロジェクトを作る',
+    build: 'ビルド',
+    flash: '書き込み',
+    release: 'リリース',
+    update: '更新',
+    recover: '復旧',
+    rollback: '前のバージョンに戻す',
+    connect: 'つなぐ・切断',
+    project: 'プロジェクトの切替',
+    ask: 'DAGON に聞く',
+    apply: 'DAGON の案を反映',
+    link: 'DAGON と連携',
+    file: '更新ファイルを置く',
+  },
+  idle: '待機',
+  stateLabel: '今の状態',
+  stateTitle: '今の状態。使えない操作は押すと理由を表示します',
+  states: {
+    demo: {
+      name: 'デモの再生中',
+      why: {
+        link: 'デモを再生しています',
+        edit: 'デモを再生しています。「■ 止める」を押すと操作できます',
+        gen: 'デモを再生しています',
+        build: 'デモを再生しています',
+        flash: 'デモを再生しています',
+        release: 'デモを再生しています',
+        update: 'デモを再生しています',
+        recover: 'デモを再生しています',
+        rollback: 'デモを再生しています',
+        connect: 'デモを再生しています',
+        project: 'デモを再生しています',
+        apply: 'デモを再生しています',
+        file: 'デモを再生しています',
+      },
+    },
+    updating: {
+      name: '更新中',
+      why: {
+        edit: '送った構成と食い違うので、更新中は構成を変えられません',
+        gen: '更新が終わるまで使えません',
+        build: '更新が終わるまで使えません',
+        flash: '更新で親機を使っているので、書き込めません',
+        release: '更新が終わるまで使えません',
+        update: '更新しています。終わるまでお待ちください',
+        recover: '更新が終わってから使えます',
+        rollback: '更新が終わってから使えます',
+        connect: '更新中に切断すると、書いている途中のノードは前のバージョンのまま残ります。終わるまでお待ちください',
+        project: '更新が終わるまで使えません',
+        apply: '更新中は構成を変えられません',
+        file: '更新が終わるまで使えません',
+      },
+    },
+    recovering: {
+      name: '復旧中',
+      why: {
+        edit: '復旧中は構成を変えられません',
+        flash: '復旧で親機を使っているので、書き込めません',
+        update: '復旧が終わってから使えます',
+        recover: '復旧しています',
+        rollback: '復旧が終わってから使えます',
+        connect: '復旧中に切断すると、復旧が止まります',
+        project: '復旧が終わるまで使えません',
+        apply: '復旧中は構成を変えられません',
+        file: '復旧が終わるまで使えません',
+      },
+    },
+    flashing: {
+      name: '書き込み中',
+      why: {
+        edit: '書いている構成と食い違うので、書き込み中は構成を変えられません',
+        gen: '書き込みが終わるまで使えません',
+        build: '書き込みが終わるまで使えません',
+        flash: '書き込んでいます',
+        release: '書き込みが終わるまで使えません',
+        update: '書き込みが終わってから使えます',
+        recover: '書き込みが終わってから使えます',
+        rollback: '書き込みが終わってから使えます',
+        connect: '書き込みで USB を使っているので、切断できません',
+        project: '書き込みが終わるまで使えません',
+        apply: '書き込みが終わるまで使えません',
+      },
+    },
+    building: {
+      name: 'ビルド中',
+      why: {
+        edit: 'ビルドで構成を使っているので、ビルド中は構成を変えられません',
+        gen: 'ビルドが終わってから使えます',
+        build: 'ビルドしています',
+        flash: 'ビルドが終わってから使えます',
+        release: 'ビルドが終わってから使えます',
+        update: 'ビルドが終わってから使えます',
+        project: 'ビルドが終わるまで使えません',
+        apply: 'ビルド中は構成を変えられません',
+      },
+    },
+    unsaved: {
+      name: '保存中',
+      why: {
+        gen: '構成を保存しています。0.5 秒ほどで終わります',
+        build: '構成を保存しています。0.5 秒ほどで終わります',
+        flash: '構成を保存しています',
+        release: '構成を保存しています',
+        update: '保存した構成で更新するので、保存が終わるまでお待ちください',
+        project: '保存が終わってから切り替えられます',
+      },
+    },
+    connecting: {
+      name: '接続の途中',
+      why: {
+        connect: '親機とつないでいる途中です',
+        update: '親機とつないでいる途中です',
+        recover: '親機とつないでいる途中です',
+        rollback: '親機とつないでいる途中です',
+        file: '親機とつないでいる途中です',
+      },
+    },
+    disconnected: {
+      name: '未接続',
+      why: {
+        update: '親機とつないでいません。「親機とつなぐ」を押してください',
+        recover: '親機とつないでいません',
+        rollback: '親機とつないでいません',
+      },
+    },
+    thinking: {
+      name: 'DAGON の返事待ち',
+      why: {
+        ask: 'DAGON の返事を待っています',
+        apply: 'DAGON の返事を待っています',
+      },
+    },
+    cliNone: {
+      name: 'CLI 未接続',
+      why: {
+        link: '鍵は CLI に置くので、先にターミナルで dagon serve を起動してください',
+        gen: 'CLI とつながっていません。ターミナルで dagon serve を起動してください',
+        build: 'CLI とつながっていません',
+        flash: 'CLI とつながっていません',
+        release: 'CLI とつながっていません',
+        ask: 'DAGON は CLI を通して話すので、CLI とつながっていないと使えません',
+      },
+    },
+  },
+} as const;
+
 /** The bottom drawer (DES-UX3-015) and its tabs. */
 export const DRAWER = {
   label: '下の引き出し',

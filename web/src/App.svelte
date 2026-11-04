@@ -730,10 +730,10 @@
   }
   /** Every control marked data-control: pressing a stopped one shows why and does nothing else. */
   function lockClick(e: MouseEvent) {
-    const el = (e.target as HTMLElement).closest<HTMLElement>('[data-control]');
+    const el = (e.target as Element | null)?.closest?.<HTMLElement>('[data-control]');
     if (!el || !stopped(el.dataset.control as Control, el)) return;
     e.preventDefault();
-    e.stopPropagation();
+    e.stopImmediatePropagation();
   }
   /** Typing into a field of a stopped part (the inspector, the table) is stopped the same way. */
   function lockKeys(e: KeyboardEvent) {
@@ -742,8 +742,17 @@
     const el = t.closest<HTMLElement>('[data-control]');
     if (!el || !stopped(el.dataset.control as Control, t)) return;
     e.preventDefault();
-    e.stopPropagation();
+    e.stopImmediatePropagation();
   }
+  // On the window in the capture phase: ahead of every handler on the page (Svelte delegates clicks to its root).
+  $effect(() => {
+    addEventListener('click', lockClick, true);
+    addEventListener('keydown', lockKeys, true);
+    return () => {
+      removeEventListener('click', lockClick, true);
+      removeEventListener('keydown', lockKeys, true);
+    };
+  });
   /** Band actions as lock-table operations. */
   const CONTROL_OF: Partial<Record<Action, Control>> = {
     chooseFile: 'file', updateResponding: 'file', otherFile: 'file', useLatest: 'update', update: 'update',
@@ -1052,8 +1061,7 @@
   <a class="skip" href="#canvas">{SKIP.canvas}</a>
   <a class="skip" href="#band">{SKIP.next}</a>
   <!-- The DOM follows the visual order of each layout, so Tab order matches what is seen. -->
-  <!-- svelte-ignore a11y_no_static_element_interactions -->
-  <div class="frame {layout}" data-locks={locksNow} onclickcapture={lockClick} onkeydowncapture={lockKeys} class:work={screen === 'work'} class:open={drawerOpen} class:modal={restartOpen || autosave.asking !== null}>
+  <div class="frame {layout}" data-locks={locksNow} class:work={screen === 'work'} class:open={drawerOpen} class:modal={restartOpen || autosave.asking !== null}>
     <Header
       sim={cli.sim !== null}
       step={screen === 'start' ? null : step}

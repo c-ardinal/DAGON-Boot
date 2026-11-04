@@ -89,7 +89,7 @@
     { left: false, up: true },
     { left: false, up: false },
   ];
-  /** A spot where neither the character nor its open bubble covers a card, a window or the focal number (the mock's freeSpot). */
+  /** A spot where neither the character nor its open bubble covers a card, a window or the focal number. */
   function freeSpot(): { x: number; y: number } | null {
     const st = stageRect();
     if (!st) return null;

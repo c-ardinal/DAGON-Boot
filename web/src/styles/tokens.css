@@ -29,7 +29,7 @@
   /* type steps: size / line-height (rem, 1rem = 16px) */
   --t-display-size: 7rem; /* 112, the focal number */
   --t-display-lh: 1;
-  --t-version-size: 1.5rem; /* 24, the card's version (A+C) */
+  --t-version-size: 1.5rem; /* 24, the card's version */
   --t-version-lh: 1.1;
   --t-version-small-size: 0.875rem; /* 14, in lists and tables */
   --t-version-small-lh: 1.2;
@@ -47,7 +47,7 @@
   --t-mono-lh: 1.5;
   --t-mono-log-lh: 1.54;
 
-  /* the mock's dense steps: 11 chips, 12 values, 13 UI text, 14 version */
+  /* dense steps: 11 chips, 12 values, 13 UI text, 14 version */
   --t-11: 0.6875rem;
   --t-12: 0.75rem;
   --t-13: 0.8125rem;
@@ -70,7 +70,7 @@
   --h-primary: 1.75rem; /* 28 */
   --h-secondary: 1.75rem; /* 28 */
   --h-chip: 1.25rem; /* 20 */
-  --w-node: 16.25rem; /* 260, the A+C card */
+  --w-node: 16.25rem; /* 260, a normal card */
   --w-left: 14.5rem; /* the parts window */
   --w-right: 18rem; /* the sheet */
 

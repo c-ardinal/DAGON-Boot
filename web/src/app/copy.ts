@@ -1121,7 +1121,7 @@ export const START = {
   heading: '始め',
   new: '新しく作る',
   sample: '見本から新しく作る',
-  /** Under the product's name on the start page (the mock's line). */
+  /** Under the product's name on the start page. */
   sub: '構成を描くと、ビルドできるプロジェクトと、書き込み・更新の手順ができます。',
   open: '開く',
   recent: '最近のプロジェクト',

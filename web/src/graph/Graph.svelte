@@ -118,7 +118,7 @@
   let canvas: HTMLDivElement;
   let boxEl: HTMLDivElement;
 
-  /** Card geometry of each class (the mock's A+C sizes): width, gaps, the uplink card above each top 親機. */
+  /** Card geometry of each class (normal, compact): width, gaps, the uplink card above each top 親機. */
   const sizes = (compact: boolean) => ({
     w: (compact ? 11 : 16.25) * rem,
     gapX: (compact ? 1.25 : 2.5) * rem,
@@ -128,7 +128,7 @@
   const UPLINK_ROOM = $derived(5.25 * rem);
   const SIDE = $derived(1.5 * rem);
   let zoomH = $state(0);
-  /** Room under the graph for the focal number and the controls (the mock keeps it free: ). */
+  /** Room under the graph kept free for the focal number and the controls. */
   /** Phones put the controls at the top (CSS): only the focal number needs the room below there. */
   const below = $derived(Math.max(dotH, phone ? 0 : zoomH) + rem + (inset.bottom ?? 0));
   const availW = $derived(Math.max(1, boxW - inset.left - inset.right));
@@ -282,7 +282,7 @@
     return NODE.uplinkVia(KIND_LABEL[n.uplink.kind as LinkKind] ?? n.uplink.kind, n.uplink.host);
   }
 
-  /** The card's one mono line (the mock's meta): MCU and how it is reached. */
+  /** The card's one mono line: MCU and how it is reached. */
   const metaOf = (n: Node) => [n.mcu, n.role === 'hub' ? hubVia(n) : n.via].filter(Boolean).join(' · ');
 
   /** 親機 nobody links to, each with its uplink (what drives it, as the 構成 writes it) above it. */
@@ -333,7 +333,7 @@
   }
 
   /**
-   * Where a part dropped at (cx, cy) goes (the mock's dropParent): under the nearest card just above
+   * Where a part dropped at (cx, cy) goes: under the nearest card just above
    * the point, at any depth; else on its own. Null when the point is off the canvas.
    */
   export function dropTarget(cx: number, cy: number): DropTarget | null {
@@ -656,7 +656,7 @@
     text-align: center;
   }
 
-  /* Node cards (the mock's A+C): band with [n] name, role and version; product; one mono line; chips. */
+  /* Node cards: band with [n] name, role and version; product; one mono line; chips. */
   .node {
     position: absolute;
     z-index: var(--z-node);

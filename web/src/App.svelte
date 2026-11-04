@@ -582,9 +582,9 @@
   }
 
   let primaryEl = $state<HTMLButtonElement>();
-  // Phones start with the canvas: the parts window opens from "＋ 部品" (the mock's narrow tray).
+  // Phones start with the canvas: the parts window opens from "＋ 部品".
   let partsOpen = $state(globalThis.innerWidth === undefined || innerWidth >= 768);
-  /** 運用's update order: the mock keeps the top-left clear there; it opens from its button. */
+  /** 運用's update order: the top-left stays clear there; it opens from its button. */
   let orderOpen = $state(false);
   let nextEl = $state<HTMLElement>();
   /** wide ≥ 1280 px: three columns; drawer 768–1279 px: the update order opens from the header; narrow ≤ 767 px: one column. */
@@ -1699,7 +1699,7 @@
     grid-template-columns: minmax(0, 1fr);
     height: auto;
   }
-  /* Phones (the mock's narrow window): the same one window; the parts drop from the bar, the sheet rises from the status row. */
+  /* Phones: the same one window; the parts drop from the bar, the sheet rises from the status row. */
   .narrow .float.parts {
     top: 0.5rem;
     left: 0.5rem;

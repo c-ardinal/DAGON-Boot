@@ -11,11 +11,11 @@ use crate::seg::{render, Buf, DIGITS};
 
 /// How long a result (confirmed, rolled back, failed) stays before the
 /// normal display returns.
-/// Demo readability value, pending owner confirmation.
+/// Chosen so the display stays readable; change it to suit your device.
 pub const RESULT_MS: u32 = 5_000;
 /// On trial the display alternates the trial mark and the version, each
 /// this long.
-/// Demo readability value, pending owner confirmation.
+/// Chosen so the display stays readable; change it to suit your device.
 pub const TRIAL_BLINK_MS: u32 = 1_000;
 
 /// The pattern for `phase` (`progress`: bytes received and expected while

@@ -43,7 +43,7 @@ mod display;
 const TEST_KEY_SPLASH: Duration = Duration::from_millis(1500);
 /// How often the update pattern is redrawn without a new event: the
 /// trial blink and the results' hold time step at this rate.
-/// Demo readability value, pending owner confirmation.
+/// Chosen so the display stays readable; change it to suit your device.
 const TICK: Duration = Duration::from_millis(250);
 
 /// Watchdog guard tasks: DAGON's link, then the display.

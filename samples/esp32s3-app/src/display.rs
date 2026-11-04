@@ -85,7 +85,7 @@ const VERSION_POLL: Duration = Duration::from_millis(20);
 const YIELD: Duration = Duration::from_millis(1);
 /// How often the screen is recomputed without a new event: the trial
 /// blink and the results' hold time step at this rate.
-/// Demo readability value, pending owner confirmation.
+/// Chosen so the display stays readable; change it to suit your device.
 const TICK: Duration = Duration::from_millis(250);
 
 struct Panel {

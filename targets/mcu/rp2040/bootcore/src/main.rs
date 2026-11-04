@@ -4,8 +4,9 @@
 //! confirmed slot starts after a SHA-256 check. dagon-core also requires
 //! each header's `load_addr` to be its slot body (the hub's `Flash` speaks
 //! XIP addresses). Every start arms the watchdog for 8 s; the app keeps
-//! feeding it. With nothing startable the watchdog stops and the backlight
-//! blinks at 1 Hz (reinstall with BOOTSEL + UF2). In the `diag` build a
+//! feeding it. With nothing startable the watchdog stops and the board's
+//! boot LED shows its halt pattern (`[boot] led`, `halt`; reinstall with
+//! BOOTSEL + UF2). In the `diag` build a
 //! panic blinks the code of the last step (6 before HAL init, 7 after it,
 //! 8 deciding) and nothing startable blinks code 9.
 //!
@@ -27,7 +28,24 @@ use embassy_time::Duration;
 #[cfg(not(feature = "diag"))]
 use panic_halt as _;
 
-const HALT_MS: u32 = 500;
+/// Half period of the halt blink (the board's `[boot] halt`).
+const HALT_MS: Option<u32> = match board_def::HALT_BLINK_PERIOD_MS {
+    Some(ms) => Some(ms / 2),
+    None => None,
+};
+
+/// The board's `[boot]` values (build.rs).
+#[allow(dead_code)]
+mod board_def {
+    include!(concat!(env!("OUT_DIR"), "/board.rs"));
+}
+
+/// Takes the board's boot LED, if it has one (output, on).
+fn led_init() {
+    if let Some(gpio) = board_def::BOOT_LED_GPIO {
+        led::init(gpio);
+    }
+}
 
 /// Puts the clocks back the way the chip starts: clk_sys and clk_ref on the
 /// ring oscillator, the PLL-fed clocks off, both PLLs powered down. The app
@@ -67,7 +85,9 @@ const CONFIG: BootConfig = BootConfig {
 #[cortex_m_rt::entry]
 fn main() -> ! {
     // The diag panic handler blinks the selected LED.
-    led::select(led::BOOT_GPIO);
+    if let Some(gpio) = board_def::BOOT_LED_GPIO {
+        led::select(gpio);
+    }
     step(6);
     let p = embassy_rp::init(Default::default());
     step(7);
@@ -85,9 +105,17 @@ fn main() -> ! {
         jump(entry);
     }
     wdt.stop();
-    led::init(led::BOOT_GPIO);
+    led_init();
     if cfg!(feature = "diag") {
         led::code(9)
     }
-    led::halt(HALT_MS, led::PLL_MS)
+    match HALT_MS {
+        Some(ms) => led::halt(ms, led::PLL_MS),
+        None => {
+            led::set(!board_def::BOOT_LED_ACTIVE_HIGH);
+            loop {
+                cortex_m::asm::wfi();
+            }
+        }
+    }
 }

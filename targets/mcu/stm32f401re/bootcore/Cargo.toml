@@ -19,6 +19,10 @@ cortex-m-rt = "0.7"
 # Smaller verifier code: the boot core must fit 32,256 bytes.
 ed25519-compact = { version = "2.6", default-features = false, features = ["opt_size"] }
 
+[build-dependencies]
+# The halt LED and pattern from the board definition.
+dagon-topology = { path = "../../../../crates/dagon-topology" }
+
 [profile.release]
 opt-level = "z"
 lto = "fat"

@@ -17,37 +17,15 @@ pub fn xip_flash() -> Mapped {
     }
 }
 
-/// A diagnostic LED (the board package names the GPIO, e.g. a display
-/// backlight) driven straight through the registers, so every stage can
-/// show where it is, whatever the clocks and HAL state.
+/// A diagnostic LED (the board names the GPIO: the boot images take its
+/// definition's `[boot] led`, an app its board package's) driven straight
+/// through the registers, so every stage can show where it is, whatever
+/// the clocks and HAL state.
 pub mod led {
     use core::sync::atomic::{AtomicU8, Ordering};
 
     const NONE: u8 = u8::MAX;
     static GPIO: AtomicU8 = AtomicU8::new(NONE);
-
-    /// The boot images' (stage0, boot core) LED: `DAGON_DIAG_LED` at build
-    /// time (a decimal GPIO number), else GPIO25, the backlight of the hub
-    /// board (Waveshare RP2040-Touch-LCD-1.28).
-    pub const BOOT_GPIO: u8 = match option_env!("DAGON_DIAG_LED") {
-        Some(v) => parse_gpio(v.as_bytes()),
-        None => 25,
-    };
-
-    const fn parse_gpio(v: &[u8]) -> u8 {
-        let mut n: u32 = 0;
-        let mut i = 0;
-        while i < v.len() {
-            assert!(
-                v[i].is_ascii_digit(),
-                "DAGON_DIAG_LED: a decimal GPIO number"
-            );
-            n = n * 10 + (v[i] - b'0') as u32;
-            i += 1;
-        }
-        assert!(!v.is_empty() && n < 30, "DAGON_DIAG_LED: GPIO 0..=29");
-        n as u8
-    }
 
     const RESETS_CLR: *mut u32 = (0x4000_C000 + 0x3000) as *mut u32;
     const RESET_DONE: *const u32 = (0x4000_C000 + 0x8) as *const u32;

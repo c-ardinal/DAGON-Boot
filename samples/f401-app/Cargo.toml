@@ -5,7 +5,10 @@ license = "MIT OR Apache-2.0"
 version = "0.0.0"
 publish = false
 
-# Standalone: built for thumbv7em only, so it stays out of the host workspace.
+# Standalone: built for thumbv7em, so it stays out of the host workspace.
+# The library (the stacked shield's 7-segment text and expander writes)
+# also builds and tests on the host:
+#   cargo test --no-default-features --target <host triple>
 [workspace]
 
 [features]
@@ -19,7 +22,19 @@ no-confirm = []
 # Conformance build: serves CONF_RUN (dagon-conform node-side tests).
 conform = ["dagon-board-nucleo-f401re/conform"]
 
+[lib]
+path = "src/lib.rs"
+
+[[bin]]
+name = "f401-app"
+path = "src/main.rs"
+test = false
+
 [dependencies]
+dagon-format = { path = "../../crates/dagon-format" }
+
+# The firmware.
+[target.'cfg(target_os = "none")'.dependencies]
 dagon-board-nucleo-f401re = { path = "../../targets/boards/nucleo-f401re" }
 dagon-mcu-stm32f401re = { path = "../../targets/mcu/stm32f401re", features = ["node"] }
 dagon-agent = { path = "../../crates/dagon-agent" }

@@ -1,8 +1,8 @@
 //! NUCLEO-F401RE demo app with DAGON: an I2C target at
 //! [`board::I2C_ADDR`] on I2C3 (PA8 SCL, PB4 SDA) serving dagon-agent
 //! through the mailbox, and its own version on the X-NUCLEO-53L0A1's
-//! 4-digit 7-segment display (`110` for 1.1.0: the shield has no points;
-//! I2C1, the board's display bus). Built for slot A or B (`slot-b`); the boot
+//! 4-digit 7-segment display (`110` for 1.1.0: the shield has no points),
+//! stacked on the board's Arduino I2C. Built for slot A or B (`slot-b`); the boot
 //! core picks which one runs. DAGON comes from the MCU package
 //! (dagon-mcu-stm32f401re) and the board package (dagon-board-nucleo-f401re).
 //!
@@ -10,8 +10,8 @@
 //! - DAGON's interrupt executor (`exec`, on the unused USART6 interrupt;
 //!   preempts thread mode): mailbox serving (`node::serve`), owning I2C3 (target) and the
 //!   agent with the flash, so the hub is answered whatever the display does;
-//! - thread executor: the display (I2C1, async: it never holds up the
-//!   link) and the watchdog task (IWDG, LED heartbeat).
+//! - thread executor: the display (the Arduino I2C, async: it never holds
+//!   up the link) and the watchdog task (IWDG, LED heartbeat).
 //!
 //! Watchdog: fed by its task only while no task is past the deadline of its
 //! current work, and never while on trial: an image that does not get
@@ -26,7 +26,6 @@
 
 use board::{Board, BoardDef};
 use dagon_board_nucleo_f401re as board;
-use dagon_board_nucleo_f401re::seg;
 use dagon_mcu_stm32f401re::node::{self, ACTIVE};
 use dagon_mcu_stm32f401re::watchdog::{now_ms, Guard, Level, Trial};
 use defmt::{error, info, Display2Format};
@@ -34,8 +33,11 @@ use defmt_rtt as _;
 use embassy_executor::Executor;
 use embassy_stm32::gpio::{Level as Pin, Output, Speed};
 use embassy_time::{Duration, Timer};
+use f401_app::seg;
 use panic_probe as _;
 use static_cell::StaticCell;
+
+mod display;
 
 const SELF_CONFIRM: bool = cfg!(feature = "confirm");
 
@@ -72,7 +74,7 @@ fn main() -> ! {
         Err(e) => {
             error!("state log unreadable: {}", defmt::Debug2Format(&e));
             low.run(|s| {
-                s.spawn(display(io.display, seg::DASHES, seg::DASHES).unwrap());
+                s.spawn(display(io.arduino_i2c, seg::DASHES, seg::DASHES).unwrap());
                 s.spawn(blink(led).unwrap());
             })
         }
@@ -112,7 +114,7 @@ fn main() -> ! {
     high.spawn(node::serve(agent, link, &GUARD, task::SERVE).unwrap());
 
     low.run(|s| {
-        s.spawn(display(io.display, splash, seg::version(version)).unwrap());
+        s.spawn(display(io.arduino_i2c, splash, seg::version(version)).unwrap());
         s.spawn(watchdog(led).unwrap());
     })
 }
@@ -139,8 +141,8 @@ async fn watchdog(mut led: Output<'static>) -> ! {
 /// Shows `first`, then `then` after the splash time (sensors kept in
 /// XSHUT).
 #[embassy_executor::task]
-async fn display(display: board::Display, first: [u8; seg::DIGITS], then: [u8; seg::DIGITS]) {
-    let mut display = display.open();
+async fn display(bus: board::ArduinoI2c, first: [u8; seg::DIGITS], then: [u8; seg::DIGITS]) {
+    let mut display = display::SegDisplay::open(bus);
     show(&mut display, first).await;
     if then != first {
         Timer::after(TEST_KEY_SPLASH).await;
@@ -148,7 +150,7 @@ async fn display(display: board::Display, first: [u8; seg::DIGITS], then: [u8; s
     }
 }
 
-async fn show(display: &mut board::SegDisplay, codes: [u8; seg::DIGITS]) {
+async fn show(display: &mut display::SegDisplay, codes: [u8; seg::DIGITS]) {
     GUARD.busy(task::DISPLAY);
     if let Err(e) = display.show(codes).await {
         error!("display: {}", defmt::Debug2Format(&e));

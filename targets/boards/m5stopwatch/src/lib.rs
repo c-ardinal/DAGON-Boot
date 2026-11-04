@@ -1,28 +1,42 @@
 //! M5StopWatch (ESP32-S3R8, 16 MB flash) board layer for DAGON.
 //!
-//! What this board adds to `dagon-mcu-esp32s3`:
+//! What this board adds to `dagon-mcu-esp32s3`, every board fact read from
+//! `dagon-board.toml` when the package builds ([`def`]):
 //!
 //! | What | Where |
 //! |---|---|
-//! | DAGON link | rear bus MUX_IO_1/2 = UART0 TX G43 / RX G44 ([`rear_uart`]), plus USB Serial/JTAG on USB-C |
-//! | Rear pins UART/USB switch | M5IOE1 IO expander PYG1 on the internal I2C (SDA G47, SCL G48), driven low at bring-up |
-//! | Power manager | M5PM1 on the internal I2C; ENTER_ROM method 2 only with the `pmic-download` feature (unconfirmed values) |
-//! | Flash | 16 MB ([`FLASH_SIZE`]); DAGON's partition table from the MCU crate |
+//! | DAGON link | bus `link`: the rear MUX_IO_1/2 as UART0 ([`rear_uart`]), plus USB Serial/JTAG on USB-C |
+//! | Internal bus | bus `sys`, shared as [`SYS_I2C`]: DAGON's bring-up and the app take it through `SYS_I2C.with(..)` |
+//! | Rear pins UART/USB switch | [`IOE`] (M5IOE1) PYG1, driven low at bring-up ([`route_rear_uart`]) |
+//! | Power manager | [`PMIC`] (M5PM1); ENTER_ROM method 2 only with the `pmic-download` feature (unconfirmed command) |
+//! | Flash | [`FLASH_SIZE`]; DAGON's partition table from the MCU crate |
 //!
 //! An app starts DAGON with [`start`] (see the README for the few lines).
 //! The display and the other peripherals are the app's, not DAGON's.
 #![no_std]
 
+/// The board's facts from `dagon-board.toml`.
+#[macro_use]
+pub mod def {
+    include!(concat!(env!("OUT_DIR"), "/def.rs"));
+
+    /// Pins and blocks by their definition names, and `take!`.
+    #[macro_use]
+    pub mod pins {
+        include!(concat!(env!("OUT_DIR"), "/pins.rs"));
+    }
+}
+
 use core::fmt;
 
+use dagon_events::{BoardBringUp, BusError, Device, Shared};
 use dagon_mcu_esp32s3::board::BoardDef;
 use dagon_mcu_esp32s3::liveness::Liveness;
 use dagon_mcu_esp32s3::node::{self, NodeConfig, NodePeripherals, WatchdogArmed};
+use def::pins::{Link, LinkRx, LinkTx, Sys, SysScl, SysSda};
 use esp_hal::{
-    i2c::master::{Config as I2cConfig, Error as I2cError, I2c},
-    peripherals::{
-        FLASH, FROM_CPU_INTR1, GPIO43, GPIO44, GPIO47, GPIO48, I2C0, RTC_TIMER, UART0, USB_DEVICE,
-    },
+    i2c::master::{Config as I2cConfig, ConfigError, Error as I2cError, I2c},
+    peripherals::{FLASH, FROM_CPU_INTR1, RTC_TIMER, USB_DEVICE},
     time::{Duration, Instant},
     uart::Uart,
     usb::usb_serial_jtag::UsbSerialJtag,
@@ -31,69 +45,76 @@ use esp_hal::{
 use static_cell::StaticCell;
 
 /// Flash size of the board (espflash `--flash-size 16mb`).
-pub const FLASH_SIZE: u32 = 16 * 1024 * 1024;
+pub const FLASH_SIZE: u32 = def::FLASH_BYTES;
 /// Image `target_tag` of this board's node (the topology's `watch` node);
 /// `DAGON_TARGET_TAG` at build time overrides it.
 pub const TARGET_TAG: &str = "watch-s3";
 
-/// M5IOE1 I/O expander on the internal SYS I2C bus (SDA G47, SCL G48).
-const IOE_ADDR: u8 = 0x4F;
-const IOE_REG_MODE_L: u8 = 0x03;
-const IOE_REG_OUT_L: u8 = 0x05;
-const IOE_REG_DRV_L: u8 = 0x13;
-/// PYG1 (PYB_MUX_CTR): low = rear MUX_IO_1/2 carry UART0, high = USB.
-const PYG1_BIT: u8 = 1 << 0;
+/// The internal bus (`sys`), shared: [`start`] (or [`open_sys_i2c`]) puts
+/// it in; DAGON's bring-up and the app use it through `SYS_I2C.with(..)`.
+pub static SYS_I2C: Shared<I2c<'static, Blocking>> = Shared::new();
 
-/// M5PM1 power manager on the internal SYS I2C.
+/// M5IOE1 I/O expander on [`SYS_I2C`] (`[[device]] ioe`).
+pub const IOE: Device = Device {
+    addr: def::DEVICE_IOE_ADDR,
+    writable: def::DEVICE_IOE_WRITABLE,
+};
+/// M5IOE1 registers (low byte IO1-IO8): mode, output level, drive.
+pub const IOE_REG_MODE_L: u8 = 0x03;
+pub const IOE_REG_OUT_L: u8 = 0x05;
+pub const IOE_REG_DRV_L: u8 = 0x13;
+/// PYG1 (PYB_MUX_CTR): low = rear MUX_IO_1/2 carry UART0, high = USB.
+pub const PYG1_BIT: u8 = 1 << 0;
+
+/// M5PM1 power manager on [`SYS_I2C`] (`[[device]] pmic`).
+pub const PMIC: Device = Device {
+    addr: def::DEVICE_PMIC_ADDR,
+    writable: def::DEVICE_PMIC_WRITABLE,
+};
+/// M5PM1 SYS_CMD.
 // Unverified: the datasheet gives SYS_CMD 0x0C = KEY 0xA + CMD 0b11
-// (Download); KEY in the high nibble and the 7-bit address 0x6E are
-// assumptions, hence the `pmic-download` feature gate until M5Stack
-// documents or the hardware confirm them.
+// (Download); KEY in the high nibble is an assumption, hence the
+// `pmic-download` feature gate until M5Stack documents or the hardware
+// confirm it.
+pub const PMIC_REG_SYS_CMD: u8 = 0x0C;
 #[cfg(feature = "pmic-download")]
-const M5PM1_ADDR: u8 = 0x6E;
-#[cfg(feature = "pmic-download")]
-const M5PM1_SYS_CMD: u8 = 0x0C;
-#[cfg(feature = "pmic-download")]
-const M5PM1_DOWNLOAD: u8 = 0xA3;
+const PMIC_DOWNLOAD: u8 = 0xA3;
 /// Time the M5PM1 gets to reset the chip into download mode.
 #[cfg(feature = "pmic-download")]
-const M5PM1_WAIT_MS: u32 = 1000;
+const PMIC_WAIT_MS: u32 = 1000;
 
 /// Give up on a USB console write after this long (no host reading).
 const USB_WRITE_TIMEOUT: Duration = Duration::from_millis(5);
 
-fn ioe_update(i2c: &mut I2c<'_, Blocking>, reg: u8, set: u8, clear: u8) -> Result<(), I2cError> {
-    let mut cur = [0u8];
-    i2c.write_read(IOE_ADDR, &[reg], &mut cur)?;
-    i2c.write(IOE_ADDR, &[reg, (cur[0] & !clear) | set])
+/// Puts the internal bus into [`SYS_I2C`] (default configuration).
+pub fn open_sys_i2c(
+    i2c0: Sys<'static>,
+    sda: SysSda<'static>,
+    scl: SysScl<'static>,
+) -> Result<(), ConfigError> {
+    let bus = I2c::new(i2c0, I2cConfig::default())?
+        .with_sda(sda)
+        .with_scl(scl);
+    SYS_I2C.put(bus);
+    Ok(())
 }
 
-/// The internal SYS I2C bus, opened for one job and released afterwards.
-fn sys_i2c<'a>(
-    i2c0: &'a mut I2C0<'static>,
-    sda: &'a mut GPIO47<'static>,
-    scl: &'a mut GPIO48<'static>,
-) -> Result<I2c<'a, Blocking>, I2cError> {
-    Ok(I2c::new(i2c0.reborrow(), I2cConfig::default())
-        .map_err(|_| I2cError::Timeout)?
-        .with_sda(sda.reborrow())
-        .with_scl(scl.reborrow()))
+fn ioe_update(reg: u8, set: u8, clear: u8) -> Result<(), BusError<I2cError>> {
+    let mut cur = [0u8];
+    IOE.read(&SYS_I2C, reg, &mut cur)?;
+    IOE.write(&SYS_I2C, reg, &[(cur[0] & !clear) | set])
 }
 
 /// Drives PYG1 low (output latch first, then push-pull output) so the rear
-/// pins carry UART0. The I2C bus is released afterwards.
-pub fn route_rear_uart(i2c0: I2C0<'_>, sda: GPIO47<'_>, scl: GPIO48<'_>) -> Result<(), I2cError> {
-    let mut i2c = I2c::new(i2c0, I2cConfig::default())
-        .map_err(|_| I2cError::Timeout)?
-        .with_sda(sda)
-        .with_scl(scl);
-    ioe_update(&mut i2c, IOE_REG_OUT_L, 0, PYG1_BIT)?;
-    ioe_update(&mut i2c, IOE_REG_DRV_L, 0, PYG1_BIT)?;
-    ioe_update(&mut i2c, IOE_REG_MODE_L, PYG1_BIT, 0)
+/// pins carry UART0, through [`SYS_I2C`].
+pub fn route_rear_uart() -> Result<(), BusError<I2cError>> {
+    ioe_update(IOE_REG_OUT_L, 0, PYG1_BIT)?;
+    ioe_update(IOE_REG_DRV_L, 0, PYG1_BIT)?;
+    ioe_update(IOE_REG_MODE_L, PYG1_BIT, 0)
 }
 
-/// The DAGON link UART: UART0 on the rear pins, `link::uart_config()`.
-pub fn rear_uart<'d>(uart0: UART0<'d>, tx: GPIO43<'d>, rx: GPIO44<'d>) -> Uart<'d, Blocking> {
+/// The DAGON link UART (bus `link`), `link::uart_config()`.
+pub fn rear_uart<'d>(uart0: Link<'d>, tx: LinkTx<'d>, rx: LinkRx<'d>) -> Uart<'d, Blocking> {
     // The link settings (115200 8N1) are always valid.
     Uart::new(uart0, dagon_mcu_esp32s3::link::uart_config())
         .unwrap_or_else(|_| esp_hal::system::software_reset())
@@ -101,24 +122,21 @@ pub fn rear_uart<'d>(uart0: UART0<'d>, tx: GPIO43<'d>, rx: GPIO44<'d>) -> Uart<'
         .with_rx(rx)
 }
 
-/// The board's [`BoardDef`]: holds the internal I2C bus for the expander (and
-/// the power manager). Owned by the DAGON link task once started.
-pub struct M5StopWatch {
-    i2c0: I2C0<'static>,
-    sda: GPIO47<'static>,
-    scl: GPIO48<'static>,
+/// The board's [`BoardDef`] and [`BoardBringUp`]: both reach the internal
+/// bus through [`SYS_I2C`].
+pub struct M5StopWatch;
+
+impl BoardBringUp for M5StopWatch {
+    /// Rear pins to UART0. Without the expander they stay at their default
+    /// (UART).
+    fn bring_up(&mut self) {
+        let _ = route_rear_uart();
+    }
 }
 
 impl BoardDef for M5StopWatch {
-    /// Rear pins to UART0.
     fn bring_up(&mut self) {
-        let Ok(mut i2c) = sys_i2c(&mut self.i2c0, &mut self.sda, &mut self.scl) else {
-            return;
-        };
-        // Without the expander the rear pins stay at their default (UART).
-        let _ = ioe_update(&mut i2c, IOE_REG_OUT_L, 0, PYG1_BIT)
-            .and_then(|_| ioe_update(&mut i2c, IOE_REG_DRV_L, 0, PYG1_BIT))
-            .and_then(|_| ioe_update(&mut i2c, IOE_REG_MODE_L, PYG1_BIT, 0));
+        BoardBringUp::bring_up(self);
     }
 
     fn pmic_download_supported(&self) -> bool {
@@ -127,14 +145,11 @@ impl BoardDef for M5StopWatch {
 
     #[cfg(feature = "pmic-download")]
     fn pmic_download(&mut self) {
-        let Ok(mut i2c) = sys_i2c(&mut self.i2c0, &mut self.sda, &mut self.scl) else {
-            return;
-        };
-        if i2c
-            .write(M5PM1_ADDR, &[M5PM1_SYS_CMD, M5PM1_DOWNLOAD])
+        if PMIC
+            .write(&SYS_I2C, PMIC_REG_SYS_CMD, &[PMIC_DOWNLOAD])
             .is_ok()
         {
-            esp_hal::delay::Delay::new().delay_millis(M5PM1_WAIT_MS);
+            esp_hal::delay::Delay::new().delay_millis(PMIC_WAIT_MS);
         }
     }
 }
@@ -142,14 +157,14 @@ impl BoardDef for M5StopWatch {
 /// The peripherals DAGON takes on this board; fill it with [`dagon_pins!`].
 pub struct DagonPins {
     pub rtc_timer: RTC_TIMER<'static>,
-    pub uart0: UART0<'static>,
-    pub gpio43: GPIO43<'static>,
-    pub gpio44: GPIO44<'static>,
+    pub link: Link<'static>,
+    pub link_tx: LinkTx<'static>,
+    pub link_rx: LinkRx<'static>,
     pub usb_device: USB_DEVICE<'static>,
     pub flash: FLASH<'static>,
-    pub i2c0: I2C0<'static>,
-    pub gpio47: GPIO47<'static>,
-    pub gpio48: GPIO48<'static>,
+    pub sys: Sys<'static>,
+    pub sys_sda: SysSda<'static>,
+    pub sys_scl: SysScl<'static>,
     pub link_irq: FROM_CPU_INTR1<'static>,
 }
 
@@ -160,36 +175,34 @@ macro_rules! dagon_pins {
     ($p:ident) => {
         $crate::DagonPins {
             rtc_timer: $p.RTC_TIMER,
-            uart0: $p.UART0,
-            gpio43: $p.GPIO43,
-            gpio44: $p.GPIO44,
+            link: $crate::take!($p.link),
+            link_tx: $crate::take!($p.link_tx),
+            link_rx: $crate::take!($p.link_rx),
             usb_device: $p.USB_DEVICE,
             flash: $p.FLASH,
-            i2c0: $p.I2C0,
-            gpio47: $p.GPIO47,
-            gpio48: $p.GPIO48,
+            sys: $crate::take!($p.sys),
+            sys_sda: $crate::take!($p.sys_sda),
+            sys_scl: $crate::take!($p.sys_scl),
             link_irq: $p.FROM_CPU_INTR1,
         }
     };
 }
 
-/// Starts DAGON on this board: the link task on the rear UART and USB-C,
-/// at high priority. Call once, after `node::arm_watchdog` and
-/// `esp_rtos::start`.
+/// Starts DAGON on this board: puts the internal bus into [`SYS_I2C`], then
+/// the link task on the rear UART and USB-C, at high priority. Call once,
+/// after `node::arm_watchdog` and `esp_rtos::start`.
 pub fn start(armed: WatchdogArmed, pins: DagonPins, cfg: NodeConfig, liveness: &'static Liveness) {
     static BOARD: StaticCell<M5StopWatch> = StaticCell::new();
-    let board = BOARD.init(M5StopWatch {
-        i2c0: pins.i2c0,
-        sda: pins.gpio47,
-        scl: pins.gpio48,
-    });
+    // Without the bus the bring-up finds nothing to drive: the rear pins
+    // keep their default (UART).
+    let _ = open_sys_i2c(pins.sys, pins.sys_sda, pins.sys_scl);
     let p = NodePeripherals {
         rtc_timer: pins.rtc_timer,
-        uart: rear_uart(pins.uart0, pins.gpio43, pins.gpio44),
+        uart: rear_uart(pins.link, pins.link_tx, pins.link_rx),
         usb_device: pins.usb_device,
         flash: pins.flash,
         target_tag: TARGET_TAG,
-        board,
+        board: BOARD.init(M5StopWatch),
     };
     node::start(armed, p, pins.link_irq, cfg, liveness);
 }

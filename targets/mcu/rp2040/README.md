@@ -210,8 +210,9 @@ The boot core is built per node: it accepts only app images tagged with
 `DAGON_TARGET_TAG` (the node's tag, as in the app's `.cargo/config.toml`;
 `hub-rp2040-lcd` for DAGON's hub firmware), and its build fails without
 it. A host test (`tests/hub_boot.rs`) shows another node's image refused.
-Their status LED is GPIO25 (the hub board's backlight);
-`DAGON_DIAG_LED=<gpio>` at build time picks another one. Both builds take
+Their status LED and halt pattern are the board definition's `[boot]
+led` and `halt` (the MCU's default board; `DAGON_BOARD=<board id>` at
+build time picks another). Both builds take
 `--features diag` for step blink codes (see the hub README).
 
 ## Keys

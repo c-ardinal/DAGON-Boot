@@ -188,7 +188,9 @@ export DAGON_PUBKEY=/path/outside/the/repo/dagon-signing.pub
 It is built per node: it accepts only app images tagged with
 `DAGON_TARGET_TAG` (the node's tag, as in the app's `.cargo/config.toml`;
 `seg-f401-7seg` for the demo node), and its build fails without it. With
-nothing startable it blinks PA5 (LD2 on NUCLEO boards).
+nothing startable it shows the board's halt pattern on the board's boot LED
+(`[boot] led` and `halt` of the MCU's default board; `DAGON_BOARD=<board
+id>` at build time picks another).
 
 ## Keys
 

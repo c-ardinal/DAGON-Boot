@@ -33,8 +33,18 @@ fn main() -> ! {
     let mut wdt = RtcWatchdog::new(Rtc::new(p.RTC_TIMER).rwdt);
     wdt.start(TRIAL_WDT_MS);
 
-    let routed = board::route_rear_uart(p.I2C0, p.GPIO47, p.GPIO48).is_ok();
-    let uart = board::rear_uart(p.UART0, p.GPIO43, p.GPIO44);
+    let routed = board::open_sys_i2c(
+        board::take!(p.sys),
+        board::take!(p.sys_sda),
+        board::take!(p.sys_scl),
+    )
+    .is_ok()
+        && board::route_rear_uart().is_ok();
+    let uart = board::rear_uart(
+        board::take!(p.link),
+        board::take!(p.link_tx),
+        board::take!(p.link_rx),
+    );
     let mut con = Console::new(uart, UsbSerialJtag::new(p.USB_DEVICE));
     if !routed {
         let _ = con.write_str("M5IOE1 not reachable, rear pins left at default\r\n");

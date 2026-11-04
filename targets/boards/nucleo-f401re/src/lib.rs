@@ -1,37 +1,50 @@
 //! DAGON board package for the NUCLEO-F401RE (topology board id
-//! `nucleo-f401re`) with an X-NUCLEO-53L0A1 stacked on its Arduino headers:
-//! 512 KiB flash, LD2 on PA5, DAGON's link to the hub as an I2C target on
-//! I2C3, and the shield's 4-digit 7-segment display ([`seg`] text,
-//! [`shield`] expanders) on I2C1, which belongs to the display.
+//! `nucleo-f401re`): 512 KiB flash, LD2, DAGON's link to the 親機 as an I2C
+//! target on I2C3. Every board fact (pins, buses, the link address, the
+//! boot LED) is read from `dagon-board.toml` when the package builds
+//! ([`def`]); nothing here repeats one.
 //!
 //! | Use | Pins |
 //! |---|---|
-//! | DAGON link: I2C3 target (SCL, SDA), address [`I2C_ADDR`] (NC on the shield) | PA8 (D7), PB4 (D5) |
+//! | DAGON link: I2C3 target (SCL, SDA), address [`I2C_ADDR`] | PA8 (D7), PB4 (D5) |
 //! | User LED LD2 | PA5 |
-//! | Shield I2C1 (SCL, SDA): STMPE1600 U19 at 0x42 and U21 at 0x43, VL53L0X at 0x29 | PB8 (D15), PB9 (D14) |
-//! | Shield centre VL53L0X GPIO1 (input only, not handed out) | PA4 (A2) |
-//!
-//! The I2C1 bus is the board's display bus, not DAGON's: I2C3's address
-//! 0x42 is a different bus from U19's. PA4 is driven by the centre sensor,
-//! so the package never makes it an output.
+//! | Arduino I2C1 (SDA, SCL), for what is stacked on the headers | PB9 (D14), PB8 (D15) |
+//! | ST-LINK virtual COM port, USART2 (TX, RX) | PA2, PA3 |
+//! | User button B1 | PC13 |
+//! | A4, A5 (ADC1) | PC1, PC0 |
 //!
 //! [`Board`] implements `BoardDef`: DAGON takes the flash, the IWDG and the
-//! I2C3 target; the app gets [`Io`]. An app that keeps the chip's
-//! peripherals itself moves out only DAGON's with `dagon_pins!` and calls
-//! `start`. This package binds the I2C1/I2C3 and DMA1 stream 0/2/4/6
-//! interrupts itself.
+//! I2C3 target; the app gets [`Io`], with the Arduino I2C as plain
+//! peripherals (what is stacked on the headers is the app's: its driver
+//! binds the bus's interrupts). An app that keeps the chip's peripherals
+//! itself moves out only DAGON's with `dagon_pins!` and calls `start`.
+//! This package binds the I2C3 and DMA1 stream 2/4 interrupts itself.
 #![no_std]
 
-pub mod seg;
-pub mod shield;
+/// The board's facts from `dagon-board.toml`.
+#[macro_use]
+pub mod def {
+    include!(concat!(env!("OUT_DIR"), "/def.rs"));
 
-#[cfg(feature = "hal")]
-mod display;
-#[cfg(feature = "hal")]
-pub use display::{running_version, Display, SegDisplay};
+    /// Pins and blocks by their definition names, and `take!`.
+    #[cfg(feature = "hal")]
+    #[macro_use]
+    pub mod pins {
+        include!(concat!(env!("OUT_DIR"), "/pins.rs"));
+    }
+}
 
 #[cfg(feature = "hal")]
 pub use hal::*;
+
+/// The node's 7-bit I2C target address (`[default_link] addr`; the STM32
+/// ROM loader keeps 0x39).
+pub const I2C_ADDR: u8 = match def::DEFAULT_LINK_ADDR {
+    Some(a) => a,
+    None => panic!("dagon-board.toml: default_link.addr"),
+};
+pub const BOARD_ID: &str = def::BOARD_ID;
+pub const FLASH_SIZE: usize = def::FLASH_BYTES as usize;
 
 /// Moves DAGON's peripherals (flash, IWDG, the I2C3 link with its DMA
 /// streams) out of `embassy_stm32::Peripherals`; the rest stays the app's.
@@ -43,20 +56,15 @@ macro_rules! dagon_pins {
             flash: $p.FLASH,
             iwdg: $p.IWDG,
             link: $crate::Link {
-                i2c: $p.I2C3,
-                scl: $p.PA8,
-                sda: $p.PB4,
+                i2c: $crate::take!($p.link),
+                scl: $crate::take!($p.link_scl),
+                sda: $crate::take!($p.link_sda),
                 tx_dma: $p.DMA1_CH4,
                 rx_dma: $p.DMA1_CH2,
             },
         }
     };
 }
-
-/// The node's 7-bit I2C target address (the STM32 ROM loader keeps 0x39).
-pub const I2C_ADDR: u8 = 0x42;
-pub const BOARD_ID: &str = "nucleo-f401re";
-pub const FLASH_SIZE: usize = 512 * 1024;
 
 #[cfg(feature = "hal")]
 mod hal {
@@ -66,22 +74,20 @@ mod hal {
     use dagon_mcu_stm32f401re::watchdog::Guard;
     pub use dagon_mcu_stm32f401re::BoardDef;
     use embassy_stm32::i2c::{self, I2c, SlaveAddrConfig};
-    use embassy_stm32::peripherals::{
-        ADC1, DMA1_CH2, DMA1_CH4, I2C3, PA2, PA3, PA5, PA8, PB4, PC0, PC1, PC13, USART2,
-    };
+    use embassy_stm32::peripherals::{ADC1, DMA1_CH0, DMA1_CH2, DMA1_CH4, DMA1_CH6};
     use embassy_stm32::{bind_interrupts, dma, pac, peripherals, Peri, Peripherals};
 
-    use super::{Display, BOARD_ID, FLASH_SIZE, I2C_ADDR};
+    use super::def::pins::{
+        ArduinoI2c as ArduinoI2cBus, ArduinoI2cScl, ArduinoI2cSda, Button, Led, Link as LinkBus,
+        LinkScl, LinkSda, Vcp, VcpRx, VcpTx, A4, A5,
+    };
+    use super::{BOARD_ID, FLASH_SIZE, I2C_ADDR};
 
     bind_interrupts!(pub(crate) struct Irqs {
         I2C3_EV => i2c::EventInterruptHandler<peripherals::I2C3>;
         I2C3_ER => i2c::ErrorInterruptHandler<peripherals::I2C3>;
         DMA1_STREAM2 => dma::InterruptHandler<peripherals::DMA1_CH2>;
         DMA1_STREAM4 => dma::InterruptHandler<peripherals::DMA1_CH4>;
-        I2C1_EV => i2c::EventInterruptHandler<peripherals::I2C1>;
-        I2C1_ER => i2c::ErrorInterruptHandler<peripherals::I2C1>;
-        DMA1_STREAM0 => dma::InterruptHandler<peripherals::DMA1_CH0>;
-        DMA1_STREAM6 => dma::InterruptHandler<peripherals::DMA1_CH6>;
     });
 
     pub struct Board;
@@ -102,44 +108,50 @@ mod hal {
         )
     }
 
-    /// Up `i2c` on this board: I2C3 on PA8/PB4 as a target at
+    /// Up `i2c` on this board: I2C3 as a target at
     /// [`I2C_ADDR`](super::I2C_ADDR) with the DAGON mailbox.
     pub fn uplink_i2c(link: Link) -> dagon_mcu_stm32f401re::links::I2c {
         let (target, regs) = Board::open_link(link);
         dagon_mcu_stm32f401re::links::I2c::new(target, regs)
     }
 
-    /// The DAGON link's peripherals and pins.
+    /// The DAGON link's peripherals and pins (bus `link`).
     pub struct Link {
-        pub i2c: Peri<'static, I2C3>,
-        pub scl: Peri<'static, PA8>,
-        pub sda: Peri<'static, PB4>,
+        pub i2c: Peri<'static, LinkBus>,
+        pub scl: Peri<'static, LinkScl>,
+        pub sda: Peri<'static, LinkSda>,
         pub tx_dma: Peri<'static, DMA1_CH4>,
         pub rx_dma: Peri<'static, DMA1_CH2>,
     }
 
+    /// The Arduino I2C1 (bus `arduino-i2c`) with the DMA streams that
+    /// serve it, as plain peripherals: what is stacked on the headers is
+    /// the app's, and its driver binds the interrupts.
+    pub struct ArduinoI2c {
+        pub i2c: Peri<'static, ArduinoI2cBus>,
+        pub scl: Peri<'static, ArduinoI2cScl>,
+        pub sda: Peri<'static, ArduinoI2cSda>,
+        pub tx_dma: Peri<'static, DMA1_CH6>,
+        pub rx_dma: Peri<'static, DMA1_CH0>,
+    }
+
     /// What the app gets on this board.
     pub struct Io {
-        pub led: Peri<'static, PA5>,
-        /// The shield's 7-segment display (I2C1): [`Display::open`].
-        pub display: Display,
+        pub led: Peri<'static, Led>,
+        pub arduino_i2c: ArduinoI2c,
         pub spare: Spare,
     }
 
-    /// A few common peripherals DAGON and the display do not use: the
-    /// ST-LINK virtual COM port (USART2 on PA2/PA3), the user button B1
-    /// (PC13), ADC1 with A4/A5 (PC1/PC0; NC on the shield unless its U17
-    /// is fitted, which routes the centre GPIO1 to PC1). Not here: I2C1
-    /// with PB8/PB9 (the display's) and PA4 (A2, wired to the shield's
-    /// centre VL53L0X GPIO1 output; left an input).
+    /// A few common peripherals DAGON does not use: the ST-LINK virtual
+    /// COM port (USART2), the user button B1, ADC1 with A4/A5.
     pub struct Spare {
-        pub usart2: Peri<'static, USART2>,
-        pub pa2: Peri<'static, PA2>,
-        pub pa3: Peri<'static, PA3>,
-        pub pc13: Peri<'static, PC13>,
+        pub usart2: Peri<'static, Vcp>,
+        pub pa2: Peri<'static, VcpTx>,
+        pub pa3: Peri<'static, VcpRx>,
+        pub pc13: Peri<'static, Button>,
         pub adc1: Peri<'static, ADC1>,
-        pub pc0: Peri<'static, PC0>,
-        pub pc1: Peri<'static, PC1>,
+        pub pc0: Peri<'static, A5>,
+        pub pc1: Peri<'static, A4>,
     }
 
     impl BoardDef for Board {
@@ -150,29 +162,29 @@ mod hal {
 
         fn split(p: Peripherals) -> (DagonParts<Link>, Io) {
             let link = Link {
-                i2c: p.I2C3,
-                scl: p.PA8,
-                sda: p.PB4,
+                i2c: take!(p.link),
+                scl: take!(p.link_scl),
+                sda: take!(p.link_sda),
                 tx_dma: p.DMA1_CH4,
                 rx_dma: p.DMA1_CH2,
             };
             let io = Io {
-                led: p.PA5,
-                display: Display {
-                    i2c: p.I2C1,
-                    scl: p.PB8,
-                    sda: p.PB9,
+                led: take!(p.led),
+                arduino_i2c: ArduinoI2c {
+                    i2c: take!(p.arduino_i2c),
+                    scl: take!(p.arduino_i2c_scl),
+                    sda: take!(p.arduino_i2c_sda),
                     tx_dma: p.DMA1_CH6,
                     rx_dma: p.DMA1_CH0,
                 },
                 spare: Spare {
-                    usart2: p.USART2,
-                    pa2: p.PA2,
-                    pa3: p.PA3,
-                    pc13: p.PC13,
+                    usart2: take!(p.vcp),
+                    pa2: take!(p.vcp_tx),
+                    pa3: take!(p.vcp_rx),
+                    pc13: take!(p.button),
                     adc1: p.ADC1,
-                    pc0: p.PC0,
-                    pc1: p.PC1,
+                    pc0: take!(p.a5),
+                    pc1: take!(p.a4),
                 },
             };
             let dagon = DagonParts {

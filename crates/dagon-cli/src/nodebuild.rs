@@ -129,6 +129,16 @@ pub fn build_nodes_keyed(
     Ok(out)
 }
 
+/// Empties node `id`'s output folder; its path relative to the work area.
+/// The folder is DAGON's: cleared (and filled) through genfs, so a link on
+/// the way (out, out/build or the node's folder) is refused, not followed.
+fn clear_output(cfg: &Config, id: &str) -> Result<crate::genfs::Rel, String> {
+    let out_rel = crate::genfs::Rel::new(format!("{OUT_DIR}/{id}"))?;
+    crate::genfs::remove_tree(&cfg.base, &out_rel)
+        .map_err(|e| format!("[build.{id}] output: {e}"))?;
+    Ok(out_rel)
+}
+
 fn build_node(
     cfg: &Config,
     id: &str,
@@ -153,13 +163,7 @@ fn build_node(
         let feats = b.features.iter().cloned().chain([f.clone()]).collect();
         slots.push(('b', feats, Some(dir.join("target").join("slot-b"))));
     }
-    let out_dir = crate::paths::contained(&cfg.base, &node_dir(cfg, id))
-        .map_err(|e| format!("[build.{id}] output: {e}"))?;
-    match std::fs::remove_dir_all(&out_dir) {
-        Ok(()) => {}
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
-        Err(e) => return Err(format!("cannot clear {}: {e}", out_dir.display())),
-    }
+    let out_rel = clear_output(cfg, id)?;
     let mut built = Vec::new();
     let mut record = BuildRecord {
         version: b.version.clone(),
@@ -183,12 +187,8 @@ fn build_node(
             cancel,
         )?;
         let dest = elf_path(cfg, id, slot);
-        if let Some(parent) = dest.parent() {
-            std::fs::create_dir_all(parent)
-                .map_err(|e| format!("cannot create {}: {e}", parent.display()))?;
-        }
-        std::fs::copy(&exe, &dest)
-            .map_err(|e| format!("cannot copy {} to {}: {e}", exe.display(), dest.display()))?;
+        crate::genfs::copy(&cfg.base, &exe, &out_rel.join(format!("app-{slot}.elf"))?)
+            .map_err(|e| format!("[build.{id}] output: {e}"))?;
         let size = std::fs::metadata(&dest).map(|m| m.len()).unwrap_or(0);
         log(&format!(
             "{id}: slot {slot} -> {} ({size} bytes)",
@@ -199,7 +199,7 @@ fn build_node(
         built.push((slot, dest, size));
     }
     let text = serde_json::to_string_pretty(&record).map_err(|e| e.to_string())?;
-    crate::config::write_file(&out_dir.join(RECORD), text.as_bytes())?;
+    crate::genfs::write(&cfg.base, &out_rel.join(RECORD)?, text.as_bytes())?;
     Ok(Built {
         node: id.into(),
         slots: built,
@@ -383,7 +383,48 @@ pub fn command(args: &[&str]) -> Result<(), String> {
 }
 
 #[cfg(test)]
+// Tests set up and inspect their own scratch folders directly.
+#[allow(clippy::disallowed_methods)]
 mod tests {
+
+    #[test]
+    fn the_output_folder_is_never_cleared_through_a_junction() {
+        if !cfg!(windows) {
+            return; // the link cases themselves are in genfs
+        }
+        let base = std::env::temp_dir().join(format!("dagon-nb-junction-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&base);
+        std::fs::create_dir_all(base.join("nodes/seg/src")).unwrap();
+        std::fs::write(
+            base.join("nodes/seg/src/app.rs"),
+            "// mine
+",
+        )
+        .unwrap();
+        let cfg = Config {
+            base: crate::config::base_of(&base.join("dagon.toml")),
+            ..Config::default()
+        };
+        let out = node_dir(&cfg, "seg");
+        std::fs::create_dir_all(out.parent().unwrap()).unwrap();
+        let p = |x: &Path| x.components().collect::<PathBuf>();
+        let ok = std::process::Command::new("cmd")
+            .args(["/C", "mklink", "/J"])
+            .arg(p(&out))
+            .arg(p(&cfg.base.join("nodes/seg")))
+            .output()
+            .unwrap()
+            .status
+            .success();
+        assert!(ok, "mklink /J");
+        let e = clear_output(&cfg, "seg").unwrap_err();
+        assert!(
+            e.contains("[build.seg] output") && e.contains("is a link"),
+            "{e}"
+        );
+        assert!(base.join("nodes/seg/src/app.rs").is_file());
+        let _ = std::fs::remove_dir_all(&base);
+    }
     use super::*;
 
     #[test]

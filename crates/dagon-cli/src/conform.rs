@@ -13,7 +13,10 @@ use dagon_host::{Clock, Error, Host, Target, Transport};
 use dagon_port::LinkKind;
 use dagon_sim::block_on;
 
-use crate::config::{load_key, read_file, read_topology, write_file, Config, Opts};
+use crate::config::{load_key, read_file, read_topology, Config, Opts};
+
+/// Where conformance results go in the work area, per node.
+pub(crate) const CONFORM_DIR: &str = "out/conform";
 use crate::serial;
 
 pub const RESULT_FILE: &str = "result.json";
@@ -199,7 +202,8 @@ pub(crate) fn conform_files(
     node: &str,
     to: Target,
     images_dir: &std::path::Path,
-    out: &std::path::Path,
+    out: &crate::genfs::Out,
+    base: &std::path::Path,
     key: &ed25519_compact::KeyPair,
     port: Option<&str>,
 ) -> Result<Report, String> {
@@ -209,8 +213,16 @@ pub(crate) fn conform_files(
     let mut sign = |m: &[u8]| *key.sk.sign([SIGN_DOMAIN, m].concat(), None);
     let mut host = serial::host(port)?;
     let report = run(&mut host, to, link_of(to), &images, &mut sign);
-    write_file(&out.join(RESULT_FILE), json(&report, node).as_bytes())?;
-    write_file(&out.join(REPORT_FILE), html(&report, node).as_bytes())?;
+    crate::genfs::write_out(
+        base,
+        &out.join(RESULT_FILE)?,
+        json(&report, node).as_bytes(),
+    )?;
+    crate::genfs::write_out(
+        base,
+        &out.join(REPORT_FILE)?,
+        html(&report, node).as_bytes(),
+    )?;
     Ok(report)
 }
 
@@ -237,10 +249,18 @@ pub fn command(args: &[&str]) -> Result<(), String> {
     };
     let dir = o
         .get("images")
-        .map_or_else(|| PathBuf::from("out/conform").join(node), PathBuf::from);
+        .map_or_else(|| cfg.base.join(CONFORM_DIR).join(node), PathBuf::from);
     let key = load_key(o.get("key"))?;
-    let out = o.get("out").map_or_else(|| dir.clone(), PathBuf::from);
-    let report = conform_files(node, to, &dir, &out, &key, o.get("port"))?;
+    // Results go to --out, else next to the images (--images), else to
+    // out/conform/<node> in the work area.
+    let out = match (o.get("out"), o.get("images")) {
+        (Some(p), _) => crate::genfs::Out::User(PathBuf::from(p)),
+        (None, Some(_)) => crate::genfs::Out::of(&cfg.base, &dir)?,
+        (None, None) => {
+            crate::genfs::Out::Work(crate::genfs::Rel::new(format!("{CONFORM_DIR}/{node}"))?)
+        }
+    };
+    let report = conform_files(node, to, &dir, &out, &cfg.base, &key, o.get("port"))?;
     for c in CTS {
         if let Some(r) = report.results.iter().find(|r| r.id == c.id) {
             println!("{} {:<24} {}", Label(c.id), c.name, r.verdict.as_str());
@@ -252,7 +272,7 @@ pub fn command(args: &[&str]) -> Result<(), String> {
         CTS.len(),
         RESULT_FILE,
         REPORT_FILE,
-        out.display()
+        out.path(&cfg.base).display()
     );
     if report.passed() == CTS.len() {
         Ok(())

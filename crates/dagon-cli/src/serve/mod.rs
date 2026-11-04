@@ -178,6 +178,8 @@ fn open_command(file: &Path) -> (&'static str, Vec<std::ffi::OsString>) {
 
 /// Creates `path` (never over an existing file or link), readable by the
 /// owner only on Unix; the per-user temporary folder covers Windows.
+// Creates the one-off browser start page in the system temp folder (create_new).
+#[allow(clippy::disallowed_methods)]
 fn write_private(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
     let mut o = std::fs::OpenOptions::new();
     o.write(true).create_new(true);
@@ -186,6 +188,8 @@ fn write_private(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
     o.open(path)?.write_all(bytes)
 }
 
+// Removes the one-off browser start page it wrote in the system temp folder.
+#[allow(clippy::disallowed_methods)]
 fn open_browser(url: &str) {
     let name = passphrase().map(|r| format!("dagon-open-{}.html", &r[..12]));
     let file = name.map(|n| std::env::temp_dir().join(n));
@@ -358,4 +362,6 @@ fn spawn_reader(mut r: TcpStream, w: Arc<Mutex<TcpStream>>, closed: Arc<AtomicBo
 }
 
 #[cfg(test)]
+// Tests set up and inspect their own scratch folders directly.
+#[allow(clippy::disallowed_methods)]
 mod tests;

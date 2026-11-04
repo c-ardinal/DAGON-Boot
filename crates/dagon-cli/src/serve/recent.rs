@@ -53,6 +53,8 @@ pub fn read(home: &Path) -> Vec<PathBuf> {
 
 /// Puts `dir` first. A list that cannot be written is only reported: the
 /// project is open either way.
+// Writes the recent-projects file in the user's home folder.
+#[allow(clippy::disallowed_methods)]
 pub fn add(home: &Path, dir: &Path) {
     let Some(d) = listable(home, dir) else { return };
     let mut list = read(home);

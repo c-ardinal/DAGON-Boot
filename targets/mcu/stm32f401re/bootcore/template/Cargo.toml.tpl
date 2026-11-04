@@ -15,6 +15,10 @@ name = "boot"
 path = "boot.rs"
 test = false
 
+[features]
+# Linked for boot core slot B (a release carries a core for each slot).
+slot-b = ["dagon-stm32f401re-bootcore/slot-b"]
+
 [dependencies]
 {{dep:dagon-stm32f401re-bootcore}}
 {{dep:dagon-events}}

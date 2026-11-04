@@ -1,4 +1,5 @@
-//! Kind S boot decision: try the pending slot (signature and SHA-256, a
+//! Kind S boot decision (it never erases: records go into the room the
+//! agent reserved, `Log::reserve`): try the pending slot (signature and SHA-256, a
 //! BOOT_ATTEMPT before every start, rollback once the attempts run out),
 //! otherwise start the confirmed slot after checking its SHA-256 and that its
 //! header is the one the log confirmed.
@@ -7,7 +8,7 @@ use crate::log::{Log, SlotRef};
 use dagon_format::header::{
     header_digest16, image_kind, placement, verify_header, ImageHeader, HEADER_SIZE,
 };
-use dagon_format::statelog::{kind, reason};
+use dagon_format::statelog::{kind, reason, target};
 use dagon_format::Sha256;
 use dagon_port::Flash;
 
@@ -77,7 +78,7 @@ fn try_pending<F: Flash>(
             // If the log cannot take the record, no trial starts.
             Ok(entry) => {
                 return log
-                    .append(flash, kind::BOOT_ATTEMPT, p, reason::NONE)
+                    .append_in_place(flash, target::APP, kind::BOOT_ATTEMPT, p, reason::NONE)
                     .ok()
                     .map(|_| Decision::Boot {
                         slot: p.slot,
@@ -93,7 +94,7 @@ fn try_pending<F: Flash>(
     // the log cannot take is retried on the next boot.
     if let Some(c) = log.state.confirmed {
         let back = SlotRef { slot: c.slot, ..p };
-        let _ = log.append(flash, kind::ROLLBACK, back, why);
+        let _ = log.append_in_place(flash, target::APP, kind::ROLLBACK, back, why);
     }
     None
 }

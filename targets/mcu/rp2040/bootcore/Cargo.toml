@@ -14,7 +14,7 @@ publish = false
 # the lint uses a neutral tag and the boot folder in lint/.
 [package.metadata.dagon]
 bootcore = "rp2040"
-lint = { features = [""], env = { DAGON_TARGET_TAG = "lint", DAGON_BOOT_CRATE = "lint" } }
+lint = { features = ["", "slot-b"], env = { DAGON_TARGET_TAG = "lint", DAGON_BOOT_CRATE = "lint" } }
 
 # Standalone: built for thumbv6m only, so it stays out of the host workspace.
 # Its memory.x and verifying key come from dagon-mcu-rp2040.
@@ -23,6 +23,8 @@ lint = { features = [""], env = { DAGON_TARGET_TAG = "lint", DAGON_BOOT_CRATE = 
 [features]
 # Backlight patterns at each step and on panic (bring-up diagnostics).
 diag = ["dagon-mcu-rp2040/diag-panic"]
+# Linked for boot core slot B (a release carries a core for each slot).
+slot-b = ["dagon-mcu-rp2040/slot-b"]
 
 [dependencies]
 dagon-mcu-rp2040 = { path = "..", default-features = false, features = ["hal", "image-bootcore"] }
@@ -30,6 +32,7 @@ dagon-boot = { path = "../../../../crates/dagon-boot" }
 dagon-core = { path = "../../../../crates/dagon-core" }
 dagon-events = { path = "../../../../crates/dagon-events" }
 dagon-format = { path = "../../../../crates/dagon-format" }
+dagon-port = { path = "../../../../crates/dagon-port" }
 embassy-rp = { version = "0.10.0", features = ["rp2040", "critical-section-impl", "boot2-none", "unstable-pac"] }
 embassy-time = "0.5"
 cortex-m = "0.7"

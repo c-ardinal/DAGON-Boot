@@ -241,9 +241,9 @@ impl Model {
                 self.next_digest += 1;
                 let r = self.images.erase(target::APP, s, 1, &mut out);
                 assert_eq!(r, Ok(()), "erase {s}");
-                let r = self
-                    .images
-                    .write_header(s, &hdr, (v, 1), |_| true, &mut out);
+                let r =
+                    self.images
+                        .write_header((target::APP, s), &hdr, (v, 1), |_| true, &mut out);
                 assert_eq!(r, Ok(()), "written {s}");
             }
             Op::SetPending(s) => {

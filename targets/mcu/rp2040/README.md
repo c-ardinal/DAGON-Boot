@@ -191,12 +191,18 @@ the rest for the app.
 | 0x10004000 | 2 x 4 KiB | boot core state log faces (read by stage0) |
 | 0x10006000 | 2 x 4 KiB | APP state log faces A/B |
 | 0x10008000 | 128 KiB | boot core slot A (`bootcore/`), body at +0x200 |
-| 0x10028000 | 128 KiB | boot core slot B (reserved) |
+| 0x10028000 | 128 KiB | boot core slot B, as slot A |
 | 0x10048000 | 1 MiB | APP-A: 512-byte header, body at 0x10048200 |
 | 0x10148000 | 1 MiB | APP-B: same, body at 0x10148200 |
 | 0x10248000 | 4 KiB | topology display copy |
 
-The boot core starts the watchdog for 8 s before every jump.
+The boot core starts the watchdog for 8 s before every jump. Stage0 starts
+the pending boot core (written by the running app's agent from a release)
+on trial, up to 3 starts counted in the watchdog's SCRATCH0/SCRATCH1, with
+the watchdog started before the jump; else the confirmed one. The new core
+confirms itself once it can start a verified app; one that cannot is reset
+and, after its starts run out, the old core runs again and records the
+rollback.
 
 ## Boot images
 
@@ -209,6 +215,9 @@ export DAGON_PUBKEY=/path/outside/the/repo/dagon-signing.pub
 (cd <project>/boot/<node> && cargo build --release)    # the boot core
 (cd targets/mcu/rp2040/stage0 && DAGON_BOOT_CRATE=<project>/boot/<node> cargo build --release)
 ```
+
+`--features slot-b` links the boot core for boot core slot B; a release
+carries one for each slot.
 
 `dagon gen` writes the node's boot crate into `boot/<node>/` of the
 project from `bootcore/template/`: it links `bootcore` (a library) with
@@ -224,6 +233,7 @@ boot crate that links anything else than DAGON's packages and its
 trusted extensions with the source hash dagon.toml declares does not
 build. Both builds take `--features diag` for step blink codes (see the
 hub README).
+
 
 ## Keys
 

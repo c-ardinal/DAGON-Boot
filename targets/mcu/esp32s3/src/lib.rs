@@ -44,12 +44,10 @@ pub mod node;
 #[cfg(target_arch = "xtensa")]
 pub mod sys;
 
-/// Trial watchdog: an unconfirmed app is reset after this long without a
-/// feed, and the 2nd stage then rolls back to the previous slot.
-pub const TRIAL_WDT_MS: u32 = 4000;
-
 // The constants this package's MCU definition states (`dagon-mcu.toml`):
-// `TRIAL_ATTEMPTS`, `MASKED_MAX_US` (`None` while unmeasured), `ERASE_UNIT`,
+// `TRIAL_ATTEMPTS`, `TRIAL_WDT_MS` (an unconfirmed app is reset after this
+// long without a feed, and the 2nd stage then rolls back to the previous
+// slot), `CONFIRMED_WDT_MS`, `MASKED_MAX_US` (`None` while unmeasured), `ERASE_UNIT`,
 // `ERASE_UNIT_MAX_MS`, the `_KNOWN` flags (checked against their source),
 // `CONFORM_SCRATCH`. The boot stage and the app layer read these.
 include!(concat!(env!("OUT_DIR"), "/definition.rs"));

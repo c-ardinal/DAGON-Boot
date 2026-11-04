@@ -33,7 +33,7 @@ use crate::paths::contained;
 const GENERATED: &str = "dagon";
 /// The project folder holding each node's boot crate (`boot/<id>/`), only
 /// what `dagon gen` writes there.
-const BOOT_CRATES: &str = "boot";
+pub(crate) const BOOT_CRATES: &str = "boot";
 use crate::scaffold::{write, Written};
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize)]

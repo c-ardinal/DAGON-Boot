@@ -16,11 +16,29 @@ pub mod mode {
     pub const AGENT: u8 = 3;
 }
 
-/// XFER_BEGIN / SET_PENDING / CONFIRM `target`.
+/// XFER_BEGIN / SET_PENDING / CONFIRM / STATUS `target`.
 pub mod target {
     pub const APP: u8 = 0;
+    /// A boot core slot (A/B) of a self-boot MCU with a stage0; the new
+    /// boot core confirms itself, so CONFIRM never names it.
+    pub const BOOTCORE: u8 = 1;
+    /// The recovery agent's slot (`slot = 2`, factory) of a vendor-stage2
+    /// MCU; written with its header last, never set pending or confirmed.
+    pub const AGENT: u8 = 2;
     /// Hub display copy of the topology; `hdr_len = 0`, unsigned.
     pub const TOPOLOGY: u8 = 3;
+}
+
+/// STATUS request: empty for the APP slots, or one `target` byte
+/// (`target::BOOTCORE`: the boot core slots, in the same response shape).
+/// A device that keeps no such slots answers `Status::Unsupported`; one
+/// that predates the byte answers `Status::Arg`.
+pub fn parse_status_req(b: &[u8]) -> Result<u8, Status> {
+    match b {
+        [] => Ok(target::APP),
+        [t] => Ok(*t),
+        _ => Err(Status::Arg),
+    }
 }
 
 /// Image header length announced in XFER_BEGIN for `target::APP`.

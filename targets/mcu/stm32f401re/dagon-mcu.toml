@@ -1,5 +1,7 @@
 # DAGON MCU definition (format: targets/README.md). Addresses match
-# src/layout.rs (sectors 16K x4, 64K, 128K x3); never move them.
+# src/layout.rs (sectors 16K x4, 64K, 128K x3); never move them. Sector 0
+# stage0, 1-2 the state log, 3 conformance scratch, 4 boot core A, 5-6 APP
+# A/B, 7 boot core B.
 format = 1
 id = "stm32f401re"
 name = "STM32F401RE"
@@ -17,16 +19,33 @@ xip = true
 base = 0x0800_0000
 bytes = 0x8_0000
 
+# Stage0 is all of sector 0, where the core fetches its reset vector, so no
+# update ever erases it (RM0368 section 3.3, sector 0 is 16 KiB). The
+# boot core and the app records share one log: the four small sectors hold
+# stage0, two log faces and the conformance scratch.
 [layout]
-app_log = { faces = [0x0800_8000, 0x0800_C000], face_size = 0x4000 }
+stage0 = { at = 0x0800_0000, size = 0x4000 }
+# stage0_verifies is left out (digest only): with the Ed25519 verifier
+# (ed25519-compact opt_size) stage0 links to about 23,960 bytes, past the
+# 16 KiB sector; without it, 7,672.
+app_log = { faces = [0x0800_4000, 0x0800_8000], face_size = 0x4000 }
+bootcore_log = { faces = [0x0800_4000, 0x0800_8000], face_size = 0x4000 }
 
-# Boot core: sectors 0-1, its header in the trailer.
+# Boot core A/B: the only erase units of at least 32 KiB besides the APP
+# slots (sector 4, 64 KiB; sector 7, 128 KiB).
 [[slot]]
 image = "bootcore"
 binding = "a"
-header = "trailer"
-at = 0x0800_0000
-size = 0x8000
+header = "inline"
+at = 0x0801_0000
+size = 0x1_0000
+
+[[slot]]
+image = "bootcore"
+binding = "b"
+header = "inline"
+at = 0x0806_0000
+size = 0x2_0000
 
 [[slot]]
 image = "app"
@@ -48,6 +67,10 @@ kind = "probe-rs"
 chip = "STM32F401RETx"
 
 [[part]]
+name = "stage0"
+sub = "stage0"
+
+[[part]]
 name = "bootcore"
 sub = "bootcore"
 
@@ -56,8 +79,9 @@ sub = "bootcore"
 name = "STM32 ROM bootloader"
 addr = 0x39
 max_hz = 400_000
-# Boot core (0-1), state logs A/B (2-3), APP-A (5).
-erase_sectors = [0, 1, 2, 3, 5]
+# The last resort writes the whole first install: stage0 (0), the state
+# log faces (1-2), boot core A (4) and APP-A (5).
+erase_sectors = [0, 1, 2, 4, 5]
 pairs = [
     { controller = "i2c3", sda = "PB4", scl = "PA8" },
     { controller = "i2c1", sda = "PB7", scl = "PB6" },
@@ -68,9 +92,11 @@ pairs = [
 [links]
 up = ["i2c"]
 
+# Both periods cover two of the slowest erase (a 128 KiB sector), as the
+# definition check requires: the watchdog is fed between flash operations.
 [watchdog]
 kind = "iwdg"
-trial_ms = 4_000
+trial_ms = 8_000
 confirmed_ms = 8_000
 # The boot core starts a pending image this many times before it rolls back.
 trial_attempts = 3
@@ -92,9 +118,10 @@ flash_op = "fetch-stall"
 erase_unit = 0x2_0000
 erase_unit_max_ms = { unverified = 4_000 }
 
-# Sector 4 (64 KiB), used by no image or log.
+# Sector 3 (16 KiB), used by no image or log.
 [conformance]
-scratch = { at = 0x0801_0000, size = 0x1_0000 }
+scratch = { at = 0x0800_C000, size = 0x4000 }
+
 
 # Protection hardware: ARMv7-M PMSAv7 MPU, 8 regions (ST PM0214 section 4.2),
 # read back from MPU_TYPE at boot.

@@ -10,6 +10,15 @@
 //! blinks the code of the last step (6 before HAL init, 7 after it, 8
 //! deciding) and nothing startable blinks code 9.
 //!
+//! Boot core A/B (`dagon_mcu_rp2040::bl::settle_core`): before it starts
+//! the app, the core settles the boot core trial. Started as the pending
+//! core, it confirms itself (CONFIRMED in the boot core log) only after its
+//! own check: an app is startable and that app's header verifies under
+//! this core's key. Otherwise it resets through the watchdog, so stage0
+//! counts the start and falls back once the starts run out. Started while
+//! another core is pending, it records the rollback. Built for slot A, or
+//! B with `slot-b`.
+//!
 //! A node's boot core is the boot crate `dagon gen` writes into
 //! `boot/<id>/` ([`boot!`]): it runs the extensions its
 //! `boot_wiring.rs` lists (each declared trusted in dagon.toml) on every
@@ -20,14 +29,16 @@
 
 use dagon_boot::BootRun;
 use dagon_core::boot::{BootConfig, Decision};
+use dagon_core::bootcore::CLEARED;
 use dagon_events::{compose_boot, BootExtension, Extension};
-use dagon_format::header::mcu_id;
-use dagon_mcu_rp2040::arm::{jump, led, step};
+use dagon_format::header::{self, mcu_id, HEADER_SIZE};
+use dagon_mcu_rp2040::arm::{jump, led, step, trial};
+use dagon_mcu_rp2040::bl::{self, Settled};
 use dagon_mcu_rp2040::flash::RpFlash;
 use dagon_mcu_rp2040::layout::{APP_LOG_LAYOUT, APP_SLOTS, WDT_MS};
 use dagon_mcu_rp2040::tag::checked_tag;
-use dagon_mcu_rp2040::TRIAL_ATTEMPTS;
-use dagon_mcu_rp2040::{PUBKEY, TARGET_TAG};
+use dagon_mcu_rp2040::{LINKED_SLOT, PUBKEY, TARGET_TAG, TRIAL_ATTEMPTS};
+use dagon_port::Flash;
 use embassy_rp::watchdog::Watchdog;
 use embassy_time::Duration;
 #[cfg(not(feature = "diag"))]
@@ -95,6 +106,18 @@ fn hand_back_clocks() {
     }
 }
 
+/// The header of the app in APP slot `slot` verifies under this core's
+/// key: the part of a new core's own check that proves its verifier and
+/// key accept the project's images.
+fn app_verifies(flash: &mut RpFlash, slot: u8) -> bool {
+    let mut raw = [0u8; HEADER_SIZE];
+    APP_SLOTS
+        .slots
+        .get(usize::from(slot))
+        .is_some_and(|&base| flash.read(base, &mut raw).is_ok())
+        && header::verify_header(&raw, &PUBKEY).is_ok()
+}
+
 /// Microseconds since reset: the TIMER, which counts the watchdog's 1 MHz
 /// tick that HAL init starts (RP2040 datasheet §4.6). The high word is read
 /// around the low one so a carry between the two reads is not lost.
@@ -139,8 +162,30 @@ pub fn run<E: Extension>(chain: E, limits: &'static [BootExtension]) -> ! {
         &CONFIG,
         WDT_MS,
     );
-    if let Decision::Boot { entry, .. } = boot.decision() {
+    let decision = boot.decision();
+    let healthy = match decision {
+        Decision::Boot { slot, .. } => app_verifies(&mut flash, slot),
+        Decision::NoImage => false,
+    };
+    match bl::settle_core(
+        &mut flash,
+        LINKED_SLOT,
+        (trial::read(), trial::holds()),
+        healthy,
+    ) {
+        Ok(Settled::Nothing) => {}
+        Ok(Settled::Confirmed | Settled::RolledBack) => trial::write(CLEARED),
+        // On trial and not fit to run the app: stage0 counts this start.
+        Err(bl::MustReset) => {
+            wdt.trigger_reset();
+            loop {
+                cortex_m::asm::nop();
+            }
+        }
+    }
+    if let Decision::Boot { entry, .. } = decision {
         boot.before_jump(&mut chain);
+
         wdt.feed(Duration::from_millis(WDT_MS as u64));
         hand_back_clocks();
         jump(entry);

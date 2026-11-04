@@ -12,11 +12,10 @@ use std::{env, fs};
 
 use dagon_core::boot::{self, BootConfig, Decision};
 use dagon_core::log::Log;
-use dagon_format::header::{image_kind, mcu_id, target_tag};
-use dagon_format::statelog::slot;
+use dagon_format::header::{mcu_id, target_tag};
+use dagon_mcu_rp2040::bl;
 use dagon_mcu_rp2040::layout::*;
 use dagon_mcu_rp2040::mapped::Mapped;
-use dagon_mcu_rp2040::{bl, image};
 
 const UF2_MAGIC0: u32 = 0x0A32_4655;
 const UF2_MAGIC1: u32 = 0x9E5D_5157;
@@ -46,17 +45,10 @@ fn run() -> Result<String, String> {
     let mut flash = load_uf2(uf2)?;
     let pubkey = load_pubkey(pubkey)?;
 
-    let named = bl::confirmed(&mut flash, BL_LOG).filter(|m| m.slot <= slot::B);
-    let s = named.map_or(slot::A, |m| m.slot);
-    image::check(
-        &mut flash,
-        BL_SLOT[s as usize],
-        BL_SLOT_SIZE,
-        s,
-        named.as_ref(),
-        image_kind::BOOTCORE,
-    )
-    .map_err(|r| format!("stage0 would not start boot core slot {s} ({r:?})"))?;
+    // Stage0's own choice, as after power-up (an empty trial cell).
+    let start = bl::choose(&mut flash, dagon_core::bootcore::CLEARED)
+        .map_err(|r| format!("stage0 would not start a boot core ({r:?})"))?;
+    let s = start.slot;
 
     let mut log = Log::load(&mut flash, &APP_LOG_LAYOUT).map_err(|e| format!("app log: {e:?}"))?;
     let cfg = BootConfig {

@@ -333,6 +333,7 @@ dependencies = [
  "dagon-events",
  "dagon-format",
  "dagon-mcu-rp2040",
+ "dagon-port",
  "dagon-topology",
  "embassy-rp",
  "embassy-time",

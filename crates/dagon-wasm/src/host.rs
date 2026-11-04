@@ -173,6 +173,19 @@ impl WasmHost {
         })
     }
 
+    /// STATUS of one target's boot core slots (a STATUS object); rejects
+    /// with the reason when the target keeps none.
+    pub fn boot_core_status(&self, kind: &str, addr: u8) -> Promise {
+        let to = target(kind, addr);
+        self.run(|h, _| async move {
+            let mut h = h.try_borrow_mut().map_err(|_| busy())?;
+            h.boot_core_status(to?)
+                .await
+                .map(|s| status_js(&s))
+                .map_err(|e| fail(&e))
+        })
+    }
+
     /// Hub HELLO and every node that answers: `{hub, nodes: [{kind, addr, hello}]}`.
     pub fn discover(&self) -> Promise {
         self.run(|h, _| async move {
@@ -443,6 +456,7 @@ impl WasmHost {
         release: Vec<u8>,
         topology: Vec<u8>,
         bootcore: Option<Vec<u8>>,
+        stage0: Option<Vec<u8>>,
         on_event: js_sys::Function,
     ) -> Promise {
         self.run(|h, _| async move {
@@ -457,6 +471,7 @@ impl WasmHost {
                 topology: &topology,
                 pubkey: &key,
                 bootcore: bootcore.as_deref(),
+                stage0: stage0.as_deref(),
                 roms: &roms,
             };
             let (path, v) = h

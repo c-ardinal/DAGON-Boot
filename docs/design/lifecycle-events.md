@@ -118,10 +118,34 @@ Jumping | Halted`. `plan` is pure (reads flash, computes the decision
 and the records to append); `commit` performs the image-lifecycle
 transitions `attempt`, `rolled_back`, `chosen` or `no_image`. Stage0
 has only `Entry`, `CoreChosen` and `Halted`: it picks the boot core slot
-from the boot core log and verifies that image under the one
-authentication rule of 4.7 (header signature with the project key, body
-digest) before `core_slot_chosen`; it runs no extension.
-The watchdog rule is in 4.1.
+from the boot core records of the state log and the trial cell
+(`dagon_core::bootcore::choose`; retained-formats.md 7): the pending core
+while fewer than `trial_attempts` starts are counted for it, else the
+confirmed one. It checks that the core's header is the one the record
+names and that its body matches the header's digest (4.7) before
+`core_slot_chosen`, starts the watchdog before a core on trial, and runs
+no extension. Stage0 never writes flash. The started boot core settles
+the boot core trial before its own boot decision is acted on
+(`settle_log`): the pending core appends CONFIRMED (target BOOTCORE) only
+after its own check (an app is startable and that app's header verifies
+under the core's key) and resets otherwise; the old core, started while
+another core is pending, appends the ROLLBACK. The watchdog rule is in
+4.1.
+
+The boot core image lifecycle (the agent's `core_image` machine) follows
+the app image lifecycle of 1.1 with the transitions the boot core path
+has: `erase`, `written` and `pending_set` by the agent (XFER and
+SET_PENDING with target BOOTCORE into the idle boot core slot, never the
+running or the confirmed core's), `confirmed` and `demoted` by the new
+core's own CONFIRMED, `rolled_back` by the old core's ROLLBACK (replayed
+at the app's start). There is no `Trial` state the app can see: a core
+settles its trial before any app runs. STATUS with the target byte
+`BOOTCORE` reports the boot core slots (version, header digest, running
+and confirmed core); a board whose MCU definition declares no boot core
+slots answers `Unsupported`. The number and placement of the boot core
+slots come from the MCU definition's `[[slot]] image = "bootcore"`
+entries (two for every MCU that has them; a single-slot MCU would keep
+one, and the agent then refuses BOOTCORE as it does for none).
 
 Boot-stage extensions (2) and the boot action program (5.2) run only
 from `WatchdogArmed` on: every event before it is recorded and replayed
@@ -255,7 +279,8 @@ never a half-written one that a reader accepts.
 |---|---|---|---|---|
 | App image slots (headers, bodies) and their selection (state log kind S) | node flash | image lifecycle (1.1) | `erase`, `written`, `pending_set`, `pending_moved`, `attempt`, `confirmed`, `demoted`, `rolled_back` | body first, header last (a slot has an image only once its header reads back and verifies); the state log is append-only records, each with its own CRC, on two faces that alternate: a torn record fails its CRC and is ignored, the previous record stands |
 | Vendor selection (kind V) | node flash | image lifecycle (1.1) | `pending_set`, `attempt`, `confirmed`, `rolled_back` | the vendor's two-sector scheme: a whole entry with sequence and CRC written to the other sector, the newest valid sequence wins |
-| Boot core slots and the boot core log | node flash (self-boot) | boot core image lifecycle: `Provisioned → Chosen` | host `provision` (`host.provision.recorded`), stage0 `chosen` (`boot.core_slot_chosen`) | same as the app slots and state log |
+| Boot core slots and their records (the boot core log, or the state log shared with the APP records where the MCU definition gives both logs the same faces) | node flash (self-boot with a stage0) | boot core image lifecycle (`core_image`, 1.2) | agent `erase`, `written`, `pending_set`; the new core's `confirmed` / `demoted`; the old core's `rolled_back`; host `provision` (`host.provision.recorded`); stage0 `chosen` (`boot.core_slot_chosen`, no write) | same as the app slots and state log; stage0's start count lives in the trial cell (retained-formats.md 7), not in flash |
+| Factory recovery agent (vendor-stage2 MCUs) | node flash, factory partition, header detached | image lifecycle (1.1), `erase` and `written` with target AGENT | agent, only while a confirmed app runs from an OTA slot | body first, header last; while it is written the running app (with its agent) stays the way back |
 | Installed boot image identity (vendor-stage2 MCUs) | provisioning record in the project | host `provision` | `host.provision.recorded` | written to a temporary file and renamed over the old one |
 | Boot record (retained memory, 5.5) | node RAM or retained registers | boot record: append-only, no state beyond the recorded events | every `boot.*` transition appends one event | required property: a write interrupted at any byte loses at most that event and never makes another one readable as valid; the format that meets it is defined by the executable model (5.5) |
 | Lockup fuse (retained memory, 5.5) | node RAM or retained registers | fuse: `Clear → Armed → Clear` (a call), `Armed → Tripped → Clear` (a lockup, then a clear) | armed and cleared around every sandboxed call; tripped by the next start | required property: no reset at any point forges a fuse for a call that returned or loses one for a call that locked up; the format that meets it is defined by the executable model (5.5) |
@@ -1230,26 +1255,55 @@ The one authentication rule, applied by every verifier in the chain
   fallback key.
 - **Who verifies what.** The agent verifies an image before `written`
   and the boot core before `chosen` on a trial boot (and checks the
-  digest on every boot). On a self-boot MCU with a stage0, **stage0
-  verifies the boot core image under the same rule before
-  `core_slot_chosen`**, not its digest alone; the boot core log's
-  confirmed record names the slot and the header digest, and stage0
-  checks both the record's digest and the signature. On a self-boot MCU
-  without a stage0, the boot core is the root and is verified by the
-  host before it is written and by the agent when it is written through
-  the update path.
+  digest on every boot). A boot core image is verified under the rule
+  by the agent before `written` and again before `pending_set` (the
+  SLOT_PENDING record names its header digest). On a self-boot MCU with
+  a stage0 whose definition sets `[layout] stage0_verifies`, stage0
+  checks the boot core header's signature under the project key built
+  into it as well as the digests. Where it is left out, stage0 checks
+  digests only: it starts a boot core only when its header's digest is
+  the one a boot core record names and its body matches that header's
+  digest; the record exists only for a core whose signature the agent
+  verified, so this chain holds only as long as the state log is written
+  by DAGON's agent and boot core alone (the sandbox, 4, keeps extensions
+  from it), and code that can write flash without the signing key (a
+  trusted-code bug, or an attacker with flash access) can make stage0
+  start an unsigned core. **This trade-off is an open owner decision.**
+  The measured cost of the verifier: the RP2040 stage0 with digests only
+  is 16,248 of its 16,384 bytes (boot2 included), so the verifier needs a
+  larger stage0 region there; the STM32F401RE stage0 is 8,192 bytes with
+  digests only and about 23,960 with the Ed25519 verifier (ed25519-compact
+  `opt_size`), past its 16 KiB sector. When the log's choice does not
+  check out (a corrupt slot, or a record naming a slot without a core),
+  stage0 tries the other slots on their own before it has nothing to
+  start. On a self-boot MCU without a stage0, the boot core is the root
+  and is verified by the host before it is written and by the agent when
+  it is written through the update path.
 - **Stage0 budget.** The MCU definition's `[layout] stage0.size` is the
-  whole of stage0 (vector table, the verifier, the flash reader, the
-  recovery path, the record writer); `dagon gen` emits a link-time
-  assertion (`ASSERT(SIZEOF(.text) + SIZEOF(.rodata) + SIZEOF(.data)
-  <= stage0.size - trailer)`) and a `#[cfg]`-checked constant so the
-  build fails when the verifier does not fit, and a worst-case
-  verification time (`[layout] stage0.max_ms`, the signature check plus
-  the digest of the largest boot core slot at the reset clock) that the
-  conformance build measures with the cycle counter and compares. When
-  a definition's stage0 does not fit the verifier, the layout is
-  changed (a larger stage0 region) before the first public release;
-  formats before that release carry no compatibility promise (6).
+  whole of stage0 (vector table, the log reader, the checks, the trial
+  cell); the image's memory.x gives it exactly that region, so the link
+  fails when stage0 outgrows it. RP2040: 16 KiB with boot2 (the boot
+  ROM's 256-byte second stage). STM32F401RE: 16 KiB, all of sector 0
+  where the core fetches its reset vector (the smallest erase unit
+  holding it, so no update ever erases stage0). A stage0 that needs more
+  takes a larger region before the first public release; formats before
+  that release carry no compatibility promise (6).
+- **No erase under a trial watchdog.** Stage0 never writes flash, and the
+  boot core writes its records (BOOT_ATTEMPT, ROLLBACK, the boot core's
+  CONFIRMED or ROLLBACK) only into room the log already has
+  (`Log::append_in_place`): the agent reserves room for the trials an
+  image starts when it sets it pending (`Log::reserve`, `trial_room`),
+  and the app's agent restores it at start (`SlotStore::keep_room`)
+  after a power cut tore a record. Erases run only in the app, under a
+  watchdog period the definition check proves long enough: both
+  `[watchdog]` periods are at least twice `[execution]
+  erase_unit_max_ms`.
+- **Trial cell.** A node whose trial cell does not hold what is written
+  to it (`bootcore::cell_holds`, checked by the app's store and by the
+  boot core) takes no boot core (XFER refused as unsupported), and a
+  pending core that finds it broken records its own rollback, so a
+  broken core is never retried without a count.
+
 - **The root image** (stage0 where it exists, else the boot core) is
   written through the MCU's ROM loader at provisioning. ROM loaders
   verify nothing of DAGON's: whoever can drive the ROM loader can

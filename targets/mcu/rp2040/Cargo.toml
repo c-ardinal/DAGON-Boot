@@ -29,7 +29,8 @@ usb = ["hal", "embassy-rp?/rt", "dep:embassy-usb", "dep:embassy-executor"]
 # The 親機 relay (PC link, sub-node links, ROM recovery path).
 relay = ["usb", "dep:embassy-sync", "dep:embassy-futures"]
 # The final binary's memory.x comes from this package: an APP slot body
-# (slot A, or B with `slot-b`) unless it is a boot image.
+# (slot A, or B with `slot-b`) unless it is a boot image; the boot core
+# links for boot core slot A, or B with `slot-b`.
 slot-b = []
 image-stage0 = []
 image-bootcore = []

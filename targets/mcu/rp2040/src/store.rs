@@ -1,17 +1,19 @@
-//! Receiver side of an RP2040 app: APP-A/B slots, the app state log and the
-//! topology display copy, behind dagon-agent's `SlotStore`.
+//! Receiver side of an RP2040 app: APP-A/B slots, the app state log, the
+//! boot core slots A/B with the boot core log, and the topology display
+//! copy, behind dagon-agent's `SlotStore`.
 
 use crate::image;
 use crate::layout::{
-    body_capacity, sectors, APP_LOG_LAYOUT, APP_SLOT, APP_SLOT_SIZE, HEADER_LEN, SECTOR, TOPOLOGY,
-    TOPOLOGY_SIZE,
+    body_capacity, sectors, APP_LOG_LAYOUT, APP_SLOT, APP_SLOT_SIZE, BL_LOG_LAYOUT, BL_SLOT,
+    BL_SLOT_SIZE, HEADER_LEN, SECTOR, TOPOLOGY, TOPOLOGY_SIZE,
 };
 use crate::node::SharedFlash;
 use crate::watchdog::Watch;
+use crate::TRIAL_ATTEMPTS;
 use dagon_agent::{SlotStore, StoreError, Transition};
-use dagon_core::log::Log;
+use dagon_core::log::{trial_room, Log};
 use dagon_format::header::HEADER_SIZE;
-use dagon_format::statelog::kind;
+use dagon_format::statelog::{kind, slot};
 use dagon_port::Flash;
 use dagon_proto::payload::{target, StatusResp};
 
@@ -34,6 +36,10 @@ fn region(t: u8, slot: u8) -> Result<(u32, u32, u32), StoreError> {
             let base = APP_SLOT[slot as usize];
             Ok((base, base + HEADER_LEN, body_capacity(APP_SLOT_SIZE)))
         }
+        (target::BOOTCORE, 0 | 1) => {
+            let base = BL_SLOT[slot as usize];
+            Ok((base, base + HEADER_LEN, body_capacity(BL_SLOT_SIZE)))
+        }
         (target::TOPOLOGY, 0) => Ok((TOPOLOGY, TOPOLOGY, TOPOLOGY_SIZE)),
         _ => Err(StoreError::Unsupported),
     }
@@ -55,6 +61,11 @@ impl AppStore {
     fn append(&mut self, k: u8, slot: u8, header: &[u8; HEADER_SIZE]) -> Result<(), StoreError> {
         let at = image::ref_of(header, slot).ok_or(StoreError::Flash)?;
         let mut log = Log::load(&mut self.flash, &APP_LOG_LAYOUT).map_err(|_| StoreError::Flash)?;
+        if k == kind::SLOT_PENDING {
+            // The trial then writes into this room, never erasing.
+            log.reserve(&mut self.flash, trial_room(TRIAL_ATTEMPTS))
+                .map_err(|_| StoreError::Flash)?;
+        }
         log.append(&mut self.flash, k, at, 0)
             .map_err(|_| StoreError::Flash)
     }
@@ -68,7 +79,13 @@ impl SlotStore for AppStore {
         state.status(heads, ACTIVE, generation)
     }
 
+    /// No boot core capacity while the trial cell does not hold: stage0
+    /// could not count a new core's starts (the agent then refuses
+    /// BOOTCORE as unsupported).
     fn capacity(&self, t: u8, slot: u8) -> u32 {
+        if t == target::BOOTCORE && !crate::arm::trial::holds() {
+            return 0;
+        }
         region(t, slot).map_or(0, |(_, _, cap)| cap)
     }
 
@@ -139,5 +156,77 @@ impl SlotStore for AppStore {
         self.append(kind::CONFIRMED, slot, header)?;
         self.watch.set_trial(false);
         Ok(())
+    }
+
+    /// Both logs keep room for the trials they start (the boot stage
+    /// never erases).
+    fn keep_room(&mut self) -> Result<(), StoreError> {
+        for layout in [&APP_LOG_LAYOUT, &BL_LOG_LAYOUT] {
+            let mut log = Log::load(&mut self.flash, layout).map_err(|_| StoreError::Flash)?;
+            log.reserve(&mut self.flash, trial_room(TRIAL_ATTEMPTS))
+                .map_err(|_| StoreError::Flash)?;
+        }
+        Ok(())
+    }
+
+    /// The boot core slots: the boot core settles its trial before it
+    /// starts the app, so the confirmed core is the one running (slot A,
+    /// as stage0 starts it, while the log names none).
+    fn target_status(&mut self, t: u8) -> Option<StatusResp> {
+        match t {
+            target::APP => Some(self.status()),
+            target::BOOTCORE => {
+                let (core, generation) = Log::load(&mut self.flash, &BL_LOG_LAYOUT)
+                    .map_or((Default::default(), 0), |l| (l.core, l.generation));
+                let heads =
+                    [0u8, 1].map(|s| image::head_ref(&mut self.flash, BL_SLOT[s as usize], s));
+                let running = core.confirmed.map_or(slot::A, |c| c.slot);
+                Some(core.status(heads, running, generation))
+            }
+            _ => None,
+        }
+    }
+
+    fn write_target_header(
+        &mut self,
+        t: u8,
+        slot: u8,
+        header: &[u8; HEADER_SIZE],
+        _: &Transition,
+    ) -> Result<(), StoreError> {
+        let (base, _, _) = region(t, slot)?;
+        self.flash.write(base, header).map_err(flash_err)
+    }
+
+    fn read_target_header(
+        &mut self,
+        t: u8,
+        slot: u8,
+        out: &mut [u8; HEADER_SIZE],
+    ) -> Result<(), StoreError> {
+        let (base, _, _) = region(t, slot)?;
+        self.flash.read(base, out).map_err(flash_err)
+    }
+
+    fn set_target_pending(
+        &mut self,
+        t: u8,
+        slot: u8,
+        header: &[u8; HEADER_SIZE],
+        _: &Transition,
+    ) -> Result<(), StoreError> {
+        match t {
+            target::APP => self.append(kind::SLOT_PENDING, slot, header),
+            target::BOOTCORE => {
+                let at = image::ref_of(header, slot).ok_or(StoreError::Flash)?;
+                let mut log =
+                    Log::load(&mut self.flash, &BL_LOG_LAYOUT).map_err(|_| StoreError::Flash)?;
+                log.reserve(&mut self.flash, trial_room(TRIAL_ATTEMPTS))
+                    .map_err(|_| StoreError::Flash)?;
+                log.append_core(&mut self.flash, kind::SLOT_PENDING, at, 0)
+                    .map_err(|_| StoreError::Flash)
+            }
+            _ => Err(StoreError::Unsupported),
+        }
     }
 }

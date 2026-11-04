@@ -60,6 +60,21 @@ pub mod capabilities {
     pub const SIG_VERIFIER: u32 = 1 << 3;
 }
 
+/// A verifying image (boot core, agent) must enforce verification, carry a
+/// signature verifier and not be a simulator-only build; other kinds pass.
+/// The signer, the release checks and the receiving agent apply this one
+/// rule.
+pub fn capabilities_ok(kind: u8, flags: u32, caps: u32) -> bool {
+    match kind {
+        image_kind::BOOTCORE | image_kind::AGENT => {
+            flags & build_flags::VERIFY_ENFORCED != 0
+                && caps & capabilities::SIG_VERIFIER != 0
+                && flags & build_flags::SIM_ONLY == 0
+        }
+        _ => true,
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ImageHeader {
     pub image_kind: u8,

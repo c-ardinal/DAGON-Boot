@@ -110,18 +110,7 @@ pub fn default_bits(kind: u8) -> (u32, u32) {
     }
 }
 
-/// A verifying image (boot core, agent) must enforce verification, carry a
-/// signature verifier and not be a simulator-only build.
-pub fn capabilities_ok(kind: u8, flags: u32, caps: u32) -> bool {
-    match kind {
-        image_kind::BOOTCORE | image_kind::AGENT => {
-            flags & build_flags::VERIFY_ENFORCED != 0
-                && caps & capabilities::SIG_VERIFIER != 0
-                && flags & build_flags::SIM_ONLY == 0
-        }
-        _ => true,
-    }
-}
+pub use dagon_format::header::capabilities_ok;
 
 /// Everything in the header except what is derived from the payload and key.
 #[derive(Debug, Clone, PartialEq, Eq)]

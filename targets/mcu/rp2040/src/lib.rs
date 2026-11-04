@@ -86,6 +86,10 @@ macro_rules! target_tag {
     }};
 }
 
+/// The slot this image is linked for (A, or B with `slot-b`): an app's
+/// APP slot, or the boot core's boot core slot.
+pub const LINKED_SLOT: u8 = if cfg!(feature = "slot-b") { 1 } else { 0 };
+
 /// The topology's MCU id and flash map this package implements.
 pub const TOPOLOGY_MCU: &str = "rp2040";
 pub const FLASH_MAP: &str = "rp2040-4m";

@@ -338,6 +338,7 @@ fn s4() -> R {
         topology: &w.topology,
         pubkey: &w.key.pk,
         bootcore: Some(&boot),
+        stage0: Some(&[0x5A; 0x100]),
         roms: &dagon_host::rom::rom_maps(dagon_topology::defs::Registry::builtin()),
     };
     let (path, v) =

@@ -835,7 +835,10 @@ fn the_agent_declares_its_machines() {
         .iter()
         .map(|c| c.machine)
         .collect();
-    assert_eq!(names, ["image", "session", "node", "requests"]);
+    assert_eq!(
+        names,
+        ["image", "core_image", "session", "node", "requests"]
+    );
     assert_eq!(session::CATALOG.initial, "Idle");
     assert_eq!(requests::CATALOG.states, ["Ready"]);
 }

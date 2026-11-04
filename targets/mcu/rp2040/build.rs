@@ -2,7 +2,8 @@
 //! writes the final binary's memory.x from the flash layout (src/layout.rs,
 //! shared):
 //! - `image-stage0`: boot2 (256 B) + stage0 in the first 16 KiB;
-//! - `image-bootcore`: body of boot core slot A, after the 512-byte header;
+//! - `image-bootcore`: body of boot core slot A (B with `slot-b`), after the
+//!   512-byte header;
 //! - otherwise an app: body of APP slot A (B with `slot-b`), after the
 //!   header.
 
@@ -42,7 +43,7 @@ fn main() {
             STAGE0_SIZE - BOOT2_LEN
         ));
     } else if feature("IMAGE_BOOTCORE") {
-        let body = BL_SLOT[0] + HEADER_LEN;
+        let body = BL_SLOT[usize::from(feature("SLOT_B"))] + HEADER_LEN;
         dagon_mcu_build::memory_x(body, BL_SLOT_SIZE - HEADER_LEN, RAM, RAM_LEN);
     } else {
         let slot = usize::from(feature("SLOT_B"));

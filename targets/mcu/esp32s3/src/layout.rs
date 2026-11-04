@@ -91,9 +91,11 @@ const fn region(p: Partition) -> FlashRegion {
     }
 }
 
-/// What DAGON may erase and write: both OTA slots and the dagon partition.
-/// The 2nd stage, partition table, otadata and factory stay out of reach.
-pub const REGIONS: [FlashRegion; 3] = [region(OTA_0), region(OTA_1), region(DAGON)];
+/// What DAGON may erase and write: both OTA slots, the dagon partition and
+/// factory (the recovery agent's partition, written only under a confirmed
+/// OTA app). The 2nd stage, partition table and otadata stay out of reach.
+pub const REGIONS: [FlashRegion; 4] =
+    [region(OTA_0), region(OTA_1), region(DAGON), region(FACTORY)];
 
 /// The region that wholly contains `addr..addr + len`.
 pub fn region_for(addr: u32, len: u32) -> Option<&'static FlashRegion> {
@@ -195,7 +197,8 @@ mod tests {
         assert_eq!(region_for(DAGON.offset + 0x1000, 512), Some(&REGIONS[2]));
         // ota_0 and ota_1 are adjacent: a range across both is still refused.
         assert_eq!(region_for(OTA_1.offset - 4, 8), None);
-        assert_eq!(region_for(FACTORY.offset, 4), None);
+        assert_eq!(region_for(FACTORY.offset, 4), Some(&REGIONS[3]));
+
         assert_eq!(region_for(OTADATA.offset, 32), None);
         assert_eq!(region_for(DAGON.offset + DAGON.size, 4), None);
         assert_eq!(region_for(u32::MAX - 1, 4), None);

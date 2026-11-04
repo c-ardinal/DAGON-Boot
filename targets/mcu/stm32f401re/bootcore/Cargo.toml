@@ -14,22 +14,28 @@ publish = false
 # the lint uses a neutral tag and the boot folder in lint/.
 [package.metadata.dagon]
 bootcore = "stm32f401re"
-lint = { features = [""], env = { DAGON_TARGET_TAG = "lint", DAGON_BOOT_CRATE = "lint" } }
+lint = { features = ["", "slot-b"], env = { DAGON_TARGET_TAG = "lint", DAGON_BOOT_CRATE = "lint" } }
 
 # Standalone: built for thumbv7em only, so it stays out of the host workspace.
 # Its memory.x and verifying key come from dagon-mcu-stm32f401re.
 [workspace]
+
+[features]
+# Linked for boot core slot B (a release carries a core for each slot).
+slot-b = ["dagon-mcu-stm32f401re/slot-b"]
 
 [dependencies]
 dagon-mcu-stm32f401re = { path = "..", default-features = false, features = ["hal", "image-bootcore"] }
 dagon-boot = { path = "../../../../crates/dagon-boot" }
 dagon-core = { path = "../../../../crates/dagon-core" }
 dagon-events = { path = "../../../../crates/dagon-events" }
+dagon-format = { path = "../../../../crates/dagon-format" }
 dagon-port = { path = "../../../../crates/dagon-port" }
 embassy-stm32 = { version = "0.6.0", features = ["stm32f401re"] }
 cortex-m = { version = "0.7", features = ["critical-section-single-core"] }
 cortex-m-rt = "0.7"
-# Smaller verifier code: the boot core must fit 32,256 bytes.
+# Smaller verifier code, so the boot extensions keep room in slot A.
+
 ed25519-compact = { version = "2.6", default-features = false, features = ["opt_size"] }
 
 [build-dependencies]

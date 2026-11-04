@@ -267,6 +267,7 @@ dependencies = [
  "dagon-boot",
  "dagon-core",
  "dagon-events",
+ "dagon-format",
  "dagon-mcu-stm32f401re",
  "dagon-port",
  "dagon-topology",

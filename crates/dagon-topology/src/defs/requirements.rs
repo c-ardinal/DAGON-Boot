@@ -203,7 +203,7 @@ pub const MCU: &[Requirement<McuCheck>] = &[
             "execution.erase_unit_max_ms",
             "execution.erase_unit_max_ms.unverified",
         ],
-        rule: "each fact a number (checked against its source), { unverified = N } or \"unmeasured\" (erase_unit_max_ms needs a number either way); masked_max_us 1..=MASKED_MAX_US_LIMIT; erase_unit a power of two; erase_unit_max_ms >= 1 and below watchdog.confirmed_ms",
+        rule: "each fact a number (checked against its source), { unverified = N } or \"unmeasured\" (erase_unit_max_ms needs a number either way); masked_max_us 1..=MASKED_MAX_US_LIMIT; erase_unit a power of two; erase_unit_max_ms >= 1, and 2 x erase_unit_max_ms <= watchdog.trial_ms and watchdog.confirmed_ms",
         check: execution::execution,
     },
     Requirement {
@@ -428,10 +428,13 @@ fn regions(m: &McuDef) -> Vec<(String, u32, u32)> {
     if let Some(r) = m.layout.stage0 {
         out.push(("stage0".into(), r.at, r.size));
     }
-    for (name, log) in [
-        ("bootcore_log", m.layout.bootcore_log),
-        ("app_log", m.layout.app_log),
-    ] {
+    // A `bootcore_log` equal to `app_log` is one log holding both targets'
+    // records: its faces are one region each.
+    let core_log = m
+        .layout
+        .bootcore_log
+        .filter(|l| Some(*l) != m.layout.app_log);
+    for (name, log) in [("bootcore_log", core_log), ("app_log", m.layout.app_log)] {
         for (i, face) in log
             .iter()
             .flat_map(|l| l.faces.map(|f| (f, l.face_size)))

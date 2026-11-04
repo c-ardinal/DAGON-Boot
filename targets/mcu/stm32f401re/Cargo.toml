@@ -28,8 +28,10 @@ node = ["hal", "embassy-stm32?/defmt", "dep:embassy-futures", "dep:embassy-execu
 # Conformance build: CONF_RUN runs dagon-conform's node-side tests.
 conform = ["node", "dep:dagon-conform"]
 # The final binary's memory.x comes from this package: an APP slot body
-# (slot A, or B with `slot-b`) unless it is the boot core.
+# (slot A, or B with `slot-b`) unless it is a boot image; the boot core
+# links for boot core slot A, or B with `slot-b`.
 slot-b = []
+image-stage0 = []
 image-bootcore = []
 
 [dependencies]

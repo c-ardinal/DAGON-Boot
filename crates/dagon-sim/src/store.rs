@@ -10,11 +10,15 @@ use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 
 use crate::flash::SimFlash;
 use dagon_agent::{SlotStore, StoreError, Transition};
-use dagon_core::log::{LogState, SlotRef};
-use dagon_format::header::{self, ImageHeader, HEADER_SIZE};
+use dagon_core::bootcore::{choose, read_state, settle_log, Cell, MustReset, Settled, CLEARED};
+use dagon_core::log::{trial_room, Log, LogLayout, LogState, SlotRef};
+use dagon_format::header::{
+    self, build_flags, capabilities, image_kind, placement, port_kind, slot_binding, ImageHeader,
+    HEADER_SIZE,
+};
 use dagon_format::statelog::{self, kind, reason, FaceHeader, Record, RECORD_SIZE};
 use dagon_format::{sha256, Version};
-use dagon_port::Flash;
+use dagon_port::{Flash, FlashError, FlashRegion};
 use dagon_proto::payload::{target, SlotInfo, SlotState, StatusResp};
 
 /// Where things live in a node's flash.
@@ -30,24 +34,46 @@ pub struct Layout {
     pub slots: [(u32, u32); 2],
     /// Hub display copy of the topology (body only), if this board keeps one.
     pub topology: Option<(u32, u32)>,
-    /// Factory (spare) slot, reported as STATUS slot 2; written only by
-    /// [`SimStore::provision_factory`], never a boot or transfer target.
+    /// Factory (spare) slot, reported as STATUS slot 2: the recovery
+    /// agent's slot (transfer target AGENT, header inline in this model),
+    /// first written by [`SimStore::provision_factory`]; never a boot
+    /// target here.
     pub factory: Option<(u32, u32)>,
+    /// Boot core slots A/B behind a stage0, as the MCU definition's
+    /// `bootcore` slots declare them; `None`: the boot core is the
+    /// `bootcore` region alone.
+    pub cores: Option<Cores>,
+}
+
+/// Boot core slots (header inline at the slot start) and their log.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Cores {
+    pub slots: [(u32, u32); 2],
+    pub log: LogLayout,
 }
 
 impl Layout {
-    /// STM32F401xE: boot core sectors 0-1, log A sector 2, APP-A sector 5,
-    /// APP-B sector 6.
+    /// STM32F401xE: stage0 sector 0, the state log (APP and boot core
+    /// records in one face pair) sectors 1-2, boot core A sector 4, APP-A
+    /// sector 5, APP-B sector 6, boot core B sector 7.
     pub const STM32F401XE: Layout = Layout {
         mcu: "stm32f401re",
-        bootcore: (0x0800_0000, 0x8000),
-        log: (0x0800_8000, 0x4000),
+        bootcore: (0x0800_0000, 0x4000),
+        log: (0x0800_4000, 0x4000),
         slots: [(0x0802_0000, 0x2_0000), (0x0804_0000, 0x2_0000)],
         topology: None,
         factory: None,
+        cores: Some(Cores {
+            slots: [(0x0801_0000, 0x1_0000), (0x0806_0000, 0x2_0000)],
+            log: LogLayout {
+                faces: [0x0800_4000, 0x0800_8000],
+                face_len: 0x4000,
+            },
+        }),
     };
 
-    /// Hub on RP2040 with 2 MiB flash.
+    /// Hub on RP2040 with 2 MiB flash: stage0 (the `bootcore` region),
+    /// boot core slots A/B with their log.
     pub const RP2040_HUB: Layout = Layout {
         mcu: "rp2040",
         bootcore: (0x1000_0000, 0x1_0000),
@@ -55,6 +81,13 @@ impl Layout {
         slots: [(0x1002_0000, 0x8_0000), (0x100A_0000, 0x8_0000)],
         topology: Some((0x1012_0000, 0x1_0000)),
         factory: None,
+        cores: Some(Cores {
+            slots: [(0x1013_0000, 0x1_0000), (0x1014_0000, 0x1_0000)],
+            log: LogLayout {
+                faces: [0x1015_0000, 0x1015_1000],
+                face_len: 0x1000,
+            },
+        }),
     };
 
     /// ESP32-S3 watch (4 MiB modelled): loader, selection data, two OTA
@@ -66,6 +99,7 @@ impl Layout {
         slots: [(0x0011_0000, 0x10_0000), (0x0021_0000, 0x10_0000)],
         topology: None,
         factory: Some((0x0031_0000, 0x0F_0000)),
+        cores: None,
     };
 }
 
@@ -86,6 +120,34 @@ pub fn trial_attempts(mcu: &str) -> u8 {
         .unwrap_or_else(|| panic!("MCU definition {mcu} has no [watchdog] trial_attempts"))
 }
 
+/// The flash as a driver that programs any length at any address shows it
+/// (the RP2040's does, by pages): writes are padded to whole write units,
+/// the bytes around them rewritten with their current value.
+struct Paged<'a>(MutexGuard<'a, SimFlash>);
+
+impl Flash for Paged<'_> {
+    fn geometry(&self) -> &[FlashRegion] {
+        self.0.geometry()
+    }
+    fn read(&mut self, addr: u32, buf: &mut [u8]) -> Result<(), FlashError> {
+        self.0.read(addr, buf)
+    }
+    fn erase(&mut self, addr: u32, len: u32) -> Result<(), FlashError> {
+        self.0.erase(addr, len)
+    }
+    fn write(&mut self, addr: u32, data: &[u8]) -> Result<(), FlashError> {
+        if data.is_empty() {
+            return Ok(());
+        }
+        let ws = self.0.unit_at(addr).ok_or(FlashError::Range)?.write_size as usize;
+        let start = addr as usize / ws * ws;
+        let mut buf = vec![0xFF; (addr as usize + data.len()).div_ceil(ws) * ws - start];
+        self.0.read(start as u32, &mut buf)?;
+        buf[addr as usize - start..][..data.len()].copy_from_slice(data);
+        self.0.write(start as u32, &buf)
+    }
+}
+
 /// What the boot core decided at reset.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Boot {
@@ -100,6 +162,12 @@ pub struct SimStore {
     flash: Arc<Mutex<SimFlash>>,
     pub layout: Layout,
     pubkey: [u8; 32],
+    /// The boot core trial cell (retained memory: kept through resets,
+    /// cleared by a power loss, [`SimStore::power_lost`]).
+    cell: Arc<Mutex<[u32; 2]>>,
+    /// A boot core of this version fails its own check (cannot start the
+    /// app), as a broken new core does.
+    pub broken_core: Option<Version>,
 }
 
 impl Default for SimStore {
@@ -114,7 +182,18 @@ impl SimStore {
             flash: Arc::new(Mutex::new(flash)),
             layout,
             pubkey,
+            cell: Arc::new(Mutex::new(CLEARED)),
+            broken_core: None,
         }
+    }
+
+    /// Power was lost: retained memory (the trial cell) is gone.
+    pub fn power_lost(&mut self) {
+        *self.cell.lock().unwrap_or_else(PoisonError::into_inner) = CLEARED;
+    }
+
+    fn cell(&self) -> MutexGuard<'_, [u32; 2]> {
+        self.cell.lock().unwrap_or_else(PoisonError::into_inner)
     }
 
     /// A store over a copy of this one's flash (a second, independent
@@ -132,6 +211,15 @@ impl SimStore {
         match t {
             target::APP if slot < 2 => {
                 let (a, l) = self.layout.slots[slot as usize];
+                Ok((a + HEADER_SIZE as u32, l - HEADER_SIZE as u32))
+            }
+            target::BOOTCORE if slot < 2 => {
+                let c = self.layout.cores.ok_or(StoreError::Unsupported)?;
+                let (a, l) = c.slots[slot as usize];
+                Ok((a + HEADER_SIZE as u32, l - HEADER_SIZE as u32))
+            }
+            target::AGENT if slot == 2 => {
+                let (a, l) = self.layout.factory.ok_or(StoreError::Unsupported)?;
                 Ok((a + HEADER_SIZE as u32, l - HEADER_SIZE as u32))
             }
             target::TOPOLOGY if slot == 0 => self.layout.topology.ok_or(StoreError::Unsupported),
@@ -197,25 +285,10 @@ impl SimStore {
 
     /// Writes bytes at any alignment into erased flash (pads the last unit).
     fn program(&mut self, addr: u32, data: &[u8]) -> Result<(), StoreError> {
-        if data.is_empty() {
-            return Ok(());
-        }
-        let ws = self
-            .flash()
-            .unit_at(addr)
-            .ok_or(StoreError::Range)?
-            .write_size as usize;
-        let start = addr as usize / ws * ws;
-        let mut buf = vec![0xFF; (addr as usize + data.len()).div_ceil(ws) * ws - start];
-        self.flash()
-            .read(start as u32, &mut buf)
-            .map_err(|_| StoreError::Flash)?;
-        // Bytes around `data` keep their current value, so already programmed
-        // neighbours in the same write unit are rewritten with themselves.
-        buf[addr as usize - start..][..data.len()].copy_from_slice(data);
-        self.flash()
-            .write(start as u32, &buf)
-            .map_err(|_| StoreError::Flash)
+        Paged(self.flash()).write(addr, data).map_err(|e| match e {
+            FlashError::Range => StoreError::Range,
+            _ => StoreError::Flash,
+        })
     }
 
     fn log_record(k: u8, slot: u8, why: u8, hdr: &[u8; HEADER_SIZE]) -> Record {
@@ -242,6 +315,7 @@ impl SimStore {
         if marker == [0xFF; 4] {
             self.program(b, b"DGBC")?;
         }
+        self.provision_core()?;
         let hdr: [u8; HEADER_SIZE] = image
             .get(..HEADER_SIZE)
             .and_then(|h| h.try_into().ok())
@@ -277,6 +351,131 @@ impl SimStore {
         self.erase_range(base, base + image.len() as u32)?;
         self.program(base + HEADER_SIZE as u32, &image[HEADER_SIZE..])?;
         self.program(base, &image[..HEADER_SIZE])
+    }
+
+    /// The first install's boot core in slot A (version 1.0.0; stage0
+    /// checks no signature, so the stand-in is unsigned) and the boot core
+    /// log naming it, unless the log already holds one.
+    fn provision_core(&mut self) -> Result<(), StoreError> {
+        let Some(c) = self.layout.cores else {
+            return Ok(());
+        };
+        if read_state(&mut Paged(self.flash()), &c.log).is_some() {
+            return Ok(());
+        }
+        let body = b"DGBC".repeat(64);
+        let h = ImageHeader {
+            image_kind: image_kind::BOOTCORE,
+            port_kind: port_kind::SELF_BOOT,
+            mcu_id: 0,
+            slot_binding: slot_binding::A,
+            placement: placement::INLINE,
+            load_addr: c.slots[0].0 + HEADER_SIZE as u32,
+            payload_size: body.len() as u32,
+            version: Version::new(1, 0, 0),
+            build_flags: build_flags::VERIFY_ENFORCED,
+            release_seq: 0,
+            min_bootcore_version: Version::default(),
+            payload_sha256: sha256(&body),
+            key_id: [0; 8],
+            target_tag: [0; 16],
+            proto_version: 1,
+            capabilities: capabilities::SIG_VERIFIER,
+            signature: [0; 64],
+        }
+        .to_bytes();
+        self.erase_range(c.slots[0].0, c.slots[0].0 + c.slots[0].1)?;
+        self.program(c.slots[0].0 + HEADER_SIZE as u32, &body)?;
+        self.program(c.slots[0].0, &h)?;
+        for face in c.log.faces {
+            self.erase_range(face, face + c.log.face_len)?;
+        }
+        let fh = FaceHeader { generation: 1 }.to_bytes();
+        self.program(c.log.faces[0], &fh)?;
+        let at = self.core_head(0).ok_or(StoreError::Flash)?;
+        let mut f = Paged(self.flash());
+        let mut log = Log::load(&mut f, &c.log).map_err(|_| StoreError::Flash)?;
+        for k in [kind::PROVISION, kind::CONFIRMED] {
+            log.append_core(&mut f, k, at, reason::NONE)
+                .map_err(|_| StoreError::Flash)?;
+        }
+        Ok(())
+    }
+
+    /// The header in boot core slot `slot` as a log reference.
+    fn core_head(&mut self, slot: u8) -> Option<SlotRef> {
+        let (base, _) = self.layout.cores?.slots[usize::from(slot)];
+        let mut h = [0u8; HEADER_SIZE];
+        self.flash().read(base, &mut h).ok()?;
+        Some(SlotRef {
+            slot,
+            version: ImageHeader::parse(&h).ok()?.version,
+            digest16: header::header_digest16(&h),
+        })
+    }
+
+    /// Stage0's check of the core in slot `s`, against the record `r`
+    /// when one names it: a boot core for that slot,
+    /// and its body hashes to the header's digest. No signature, as on the
+    /// hub.
+    fn core_check(&mut self, s: u8, r: Option<&SlotRef>) -> Result<(), ()> {
+        let head = self.core_head(s).ok_or(())?;
+        if r.is_some_and(|r| *r != head) {
+            return Err(());
+        }
+        let (base, len) = self.layout.cores.ok_or(())?.slots[usize::from(s)];
+        let mut raw = [0u8; HEADER_SIZE];
+        self.flash().read(base, &mut raw).map_err(|_| ())?;
+        let h = ImageHeader::parse(&raw).map_err(|_| ())?;
+        if h.image_kind != image_kind::BOOTCORE
+            || h.slot_binding != s
+            || h.payload_size > len - HEADER_SIZE as u32
+        {
+            return Err(());
+        }
+        let mut body = vec![0u8; h.payload_size as usize];
+        self.flash()
+            .read(base + HEADER_SIZE as u32, &mut body)
+            .map_err(|_| ())?;
+        (sha256(&body) == h.payload_sha256).then_some(()).ok_or(())
+    }
+
+    /// Stage0 and the boot core over the boot core slots
+    /// (`dagon_core::bootcore`), through the resets a core that fails its
+    /// own check causes: the slot of the core that starts the app, `None`
+    /// when no core can start (or the power went).
+    fn boot_core(&mut self, c: Cores) -> Option<u8> {
+        let max = self.layout.trial_attempts();
+        for _ in 0..=max + 1 {
+            let st = read_state(&mut Paged(self.flash()), &c.log).unwrap_or_default();
+            let cell = *self.cell();
+            let start = choose(&st, cell, max, |s, r| self.core_check(s, r)).ok()?;
+            *self.cell() = start.cell;
+            let healthy = self.core_head(start.slot).map(|h| h.version) != self.broken_core;
+            let settled = settle_log(
+                &mut Paged(self.flash()),
+                &c.log,
+                start.slot,
+                Cell {
+                    value: start.cell,
+                    max,
+                    holds: true,
+                },
+                healthy,
+            );
+            if !self.flash().is_powered() {
+                return None;
+            }
+            match settled {
+                Ok(Settled::Nothing) => return Some(start.slot),
+                Ok(_) => {
+                    *self.cell() = CLEARED;
+                    return Some(start.slot);
+                }
+                Err(MustReset) => continue,
+            }
+        }
+        None
     }
 
     fn bootcore_present(&mut self) -> bool {
@@ -331,6 +530,11 @@ impl SimStore {
         if !self.bootcore_present() {
             return Boot::Nothing;
         }
+        if let Some(c) = self.layout.cores {
+            if self.boot_core(c).is_none() {
+                return Boot::Nothing;
+            }
+        }
         let (ls, _) = self.log_state();
         if let Some(p) = ls.pending {
             let why = if ls.attempts >= self.layout.trial_attempts() {
@@ -361,7 +565,7 @@ impl SimStore {
         if len > cap {
             return Err(StoreError::Range);
         }
-        let start = if t == target::APP {
+        let start = if matches!(t, target::APP | target::BOOTCORE | target::AGENT) {
             body - HEADER_SIZE as u32
         } else {
             body
@@ -475,5 +679,105 @@ impl SlotStore for SimStore {
         _: &Transition,
     ) -> Result<(), StoreError> {
         self.append(Self::log_record(kind::CONFIRMED, slot, reason::NONE, hdr))
+    }
+
+    /// The boot core log keeps room for the trials it starts (the boot
+    /// stage never erases).
+    fn keep_room(&mut self) -> Result<(), StoreError> {
+        let Some(c) = self.layout.cores else {
+            return Ok(());
+        };
+        // This model's APP log reads one face only; where the boot core
+        // records share it, it does not compact (the MCU package's own
+        // tests sweep the shared log's compaction).
+        if c.log.faces[0] == self.layout.log.0 {
+            return Ok(());
+        }
+        let max = self.layout.trial_attempts();
+        let mut f = Paged(self.flash());
+        match Log::load(&mut f, &c.log) {
+            Ok(mut log) => log
+                .reserve(&mut f, trial_room(max))
+                .map_err(|_| StoreError::Flash),
+            Err(_) => Ok(()),
+        }
+    }
+
+    /// The boot core slots, folded from their log as the hub's store does
+    /// (the confirmed core is the one running: a core settles its trial
+    /// before the app starts).
+    fn target_status(&mut self, t: u8) -> Option<StatusResp> {
+        match t {
+            target::APP => Some(self.status()),
+            target::BOOTCORE => {
+                let c = self.layout.cores?;
+                let log = Log::load(&mut Paged(self.flash()), &c.log).ok();
+                let (st, gen) = log.map_or((LogState::default(), 0), |l| (l.core, l.generation));
+                let heads = [self.core_head(0), self.core_head(1)];
+                let running = st.confirmed.map_or(slot_binding::A, |c| c.slot);
+                Some(st.status(heads, running, gen))
+            }
+            _ => None,
+        }
+    }
+
+    fn write_target_header(
+        &mut self,
+        t: u8,
+        slot: u8,
+        hdr: &[u8; HEADER_SIZE],
+        tr: &Transition,
+    ) -> Result<(), StoreError> {
+        match t {
+            target::BOOTCORE | target::AGENT => {
+                let (body, _) = self.region(t, slot)?;
+                self.program(body - HEADER_SIZE as u32, hdr)
+            }
+            _ => self.write_header(slot, hdr, tr),
+        }
+    }
+
+    fn read_target_header(
+        &mut self,
+        t: u8,
+        slot: u8,
+        out: &mut [u8; HEADER_SIZE],
+    ) -> Result<(), StoreError> {
+        match t {
+            target::BOOTCORE | target::AGENT => {
+                let (body, _) = self.region(t, slot)?;
+                self.flash()
+                    .read(body - HEADER_SIZE as u32, out)
+                    .map_err(|_| StoreError::Flash)
+            }
+            _ => self.read_header(slot, out),
+        }
+    }
+
+    fn set_target_pending(
+        &mut self,
+        t: u8,
+        slot: u8,
+        hdr: &[u8; HEADER_SIZE],
+        tr: &Transition,
+    ) -> Result<(), StoreError> {
+        match t {
+            target::BOOTCORE => {
+                let c = self.layout.cores.ok_or(StoreError::Unsupported)?;
+                let r = Self::log_record(kind::SLOT_PENDING, slot, reason::NONE, hdr);
+                let at = SlotRef {
+                    slot,
+                    version: r.version,
+                    digest16: r.digest16,
+                };
+                let mut f = Paged(self.flash());
+                let mut log = Log::load(&mut f, &c.log).map_err(|_| StoreError::Flash)?;
+                log.reserve(&mut f, trial_room(self.layout.trial_attempts()))
+                    .map_err(|_| StoreError::Flash)?;
+                log.append_core(&mut f, kind::SLOT_PENDING, at, reason::NONE)
+                    .map_err(|_| StoreError::Flash)
+            }
+            _ => self.set_pending(slot, hdr, tr),
+        }
     }
 }

@@ -380,6 +380,13 @@ export class Cli {
     return r.ok ? new Uint8Array(await r.arrayBuffer()) : null;
   }
 
+  /** GET /v1/stage0/{node}: stage0's bytes for the ROM path's full rewrite of an MCU with a stage0 (feature `bootcore`); null when there are none. */
+  async stage0(node: string): Promise<Uint8Array | null> {
+    if (!this.has('bootcore')) return null;
+    const r = await this.call('GET', `stage0/${encodeURIComponent(node)}`);
+    return r.ok ? new Uint8Array(await r.arrayBuffer()) : null;
+  }
+
   /** GET /v1/project (feature `project`): the open project, if any (SC-S0). */
   project(): Promise<ProjectInfo> {
     return this.json<ProjectInfo>('GET', 'project');

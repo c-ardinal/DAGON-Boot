@@ -1,7 +1,12 @@
 //! Hub stage0 (never updated): picks the boot core slot from the boot core
-//! state log (slot A while the log is empty), checks its SHA-256 and starts
-//! it. Holds boot2 for the whole flash. No signature check here: boot core
-//! images are verified before they are ever selected.
+//! log and the trial cell (`dagon_mcu_rp2040::bl::choose`): the pending core
+//! on trial while its starts last, else the confirmed one (slot A while the
+//! log is empty). It checks the core's header against the log record and
+//! its body's SHA-256, leaves the trial cell for the next reset, starts the
+//! watchdog before a trial core and jumps. It never writes flash and has no
+//! signature check: a core is recorded only after the agent verified its
+//! signature, and stage0 starts only the bytes that record names. Holds
+//! boot2 for the whole flash.
 //!
 //! Nothing to start: the board's boot LED (`[boot] led`) blinks five times
 //! faster than the board's halt pattern, so a stage0 halt is told from the
@@ -10,16 +15,14 @@
 //! (1 entry, 2 reading the log, 3 checking the boot core). A failed check
 //! blinks five groups, then a long pause: 4 (5 if the log named no slot);
 //! which test failed (`image::Fail`, 7 if SHA-256 itself is wrong); then
-//! what the boot core log, the boot core header and stage0's own vector
+//! what the boot core log, slot A's header and stage0's own vector
 //! table read as (1 erased, 2 zero, 3 as expected, 4 other, 5 unreadable).
 #![no_std]
 #![no_main]
 
 use cortex_m_rt::entry;
-use dagon_format::header::image_kind;
-use dagon_format::statelog::slot;
-use dagon_mcu_rp2040::arm::{jump, led, step, xip_flash};
-use dagon_mcu_rp2040::layout::{BL_LOG, BL_SLOT, BL_SLOT_SIZE, RAM, RAM_LEN, STAGE0};
+use dagon_mcu_rp2040::arm::{jump, led, step, trial, xip_flash};
+use dagon_mcu_rp2040::layout::{BL_LOG, BL_SLOT, RAM, RAM_LEN, STAGE0};
 use dagon_mcu_rp2040::{bl, image};
 use dagon_port::Flash;
 #[cfg(not(feature = "diag"))]
@@ -74,34 +77,29 @@ fn main() -> ! {
     }
     let mut flash = xip_flash();
     step(2);
-    let named = bl::confirmed(&mut flash, BL_LOG).filter(|m| m.slot <= slot::B);
-    let s = named.map_or(slot::A, |m| m.slot);
-    let base = BL_SLOT[s as usize];
+    let chosen = bl::choose(&mut flash, trial::read());
     step(3);
-    match image::check(
-        &mut flash,
-        base,
-        BL_SLOT_SIZE,
-        s,
-        named.as_ref(),
-        image_kind::BOOTCORE,
-    ) {
-        Ok(body) => {
+    match chosen {
+        Ok(start) => {
+            trial::write(start.cell);
+            if start.trial {
+                trial::arm_watchdog(dagon_mcu_rp2040::TRIAL_WDT_MS);
+            }
             if cfg!(feature = "diag") {
                 led::set(false);
             }
-            jump(body)
+            jump(start.body)
         }
         // Nothing to start: recover with BOOTSEL and the install UF2.
-        Err(why) => {
+        Err(no) => {
             led_init();
             if cfg!(feature = "diag") {
-                let k = if image::sha_ok() { why as u8 } else { 7 };
+                let k = if image::sha_ok() { no.why as u8 } else { 7 };
                 led::codes(&[
-                    if named.is_some() { 4 } else { 5 },
+                    if no.named { 4 } else { 5 },
                     k,
                     probe(&mut flash, BL_LOG[0], b"DGSL"),
-                    probe(&mut flash, base, b"DGIM"),
+                    probe(&mut flash, BL_SLOT[0], b"DGIM"),
                     probe(&mut flash, STAGE0 + 0x100, &STACK_TOP.to_le_bytes()),
                 ])
             }

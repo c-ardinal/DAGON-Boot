@@ -372,6 +372,41 @@ pub fn code_ident(name: &str) -> String {
     name.replace('-', "_")
 }
 
+/// The type name generated code uses for a code name (`child_uart_tx` →
+/// `ChildUartTx`).
+pub fn type_name(snake: &str) -> String {
+    snake
+        .split('_')
+        .map(|w| {
+            let mut c = w.chars();
+            c.next()
+                .map(|f| f.to_ascii_uppercase().to_string() + c.as_str())
+                .unwrap_or_default()
+        })
+        .collect()
+}
+
+/// Rust's keywords, strict and reserved (The Rust Reference, "Keywords",
+/// up to edition 2024): a definition name that is one of them, in the
+/// form generated code uses, would not compile.
+const KEYWORDS: &[&str] = &[
+    "as", "async", "await", "break", "const", "continue", "crate", "dyn", "else", "enum", "extern",
+    "false", "fn", "for", "if", "impl", "in", "let", "loop", "match", "mod", "move", "mut", "pub",
+    "ref", "return", "self", "Self", "static", "struct", "super", "trait", "true", "type",
+    "unsafe", "use", "where", "while", "abstract", "become", "box", "do", "final", "gen", "macro",
+    "override", "priv", "try", "typeof", "unsized", "virtual", "yield",
+];
+
+/// `name` is no keyword in its code form nor in its type form.
+fn not_keyword(what: &str, name: &str) -> Result<(), String> {
+    let ident = code_ident(name);
+    let ty = type_name(&ident);
+    fail(
+        KEYWORDS.contains(&ident.as_str()) || KEYWORDS.contains(&ty.as_str()),
+        || format!("{what} '{name}' is a Rust keyword in generated code ('{ident}' / '{ty}')"),
+    )
+}
+
 /// Every name board package code is generated with, once each after
 /// [`code_ident`]: the boot LED, pin names, buses and their signals.
 pub fn code_names(b: &BoardDef) -> Vec<(String, String)> {
@@ -453,10 +488,25 @@ pub(super) fn wiring(b: &BoardDef, _: &McuDef) -> Result<(), String> {
         }
         fail(speed == Some(0), || format!("bus '{}': speed 0", x.id))?;
     }
+    let names = code_names(b);
     unique(
         "generated name (pin, bus, bus signal, boot_led)",
-        code_names(b).iter().map(|(n, _)| n.as_str()),
+        names.iter().map(|(n, _)| n.as_str()),
     )?;
+    let types: Vec<String> = names.iter().map(|(n, _)| type_name(n)).collect();
+    unique(
+        "generated type name (pin, bus, bus signal, boot_led)",
+        types.iter().map(String::as_str),
+    )?;
+    for (n, _) in &names {
+        not_keyword("generated name", n)?;
+    }
+    for d in &b.devices {
+        not_keyword("device id", &d.id)?;
+        for r in &d.regs {
+            not_keyword(&format!("register of device '{}'", d.id), &r.name)?;
+        }
+    }
     unique(
         "device id after - becomes _",
         b.devices

@@ -9,7 +9,7 @@
 use std::fmt::Write as _;
 use std::path::{Path, PathBuf};
 
-use super::board_boot::{code_ident, code_names, Active, HaltPattern};
+use super::board_boot::{code_ident, code_names, type_name as camel, Active, HaltPattern};
 use super::load::{self, BOARD_FILE, MCU_FILE};
 use super::{BoardDef, DefError, McuDef, Registry, Source};
 
@@ -125,19 +125,6 @@ pub fn boot_board(
 /// `GPIO25` → 25 for MCUs that number their pins.
 fn gpio_number(pin: &str) -> Option<u8> {
     pin.strip_prefix("GPIO")?.parse().ok()
-}
-
-/// `child_uart_tx` → `ChildUartTx`.
-fn camel(snake: &str) -> String {
-    snake
-        .split('_')
-        .map(|w| {
-            let mut c = w.chars();
-            c.next()
-                .map(|f| f.to_ascii_uppercase().to_string() + c.as_str())
-                .unwrap_or_default()
-        })
-        .collect()
 }
 
 fn opt<T: std::fmt::Display>(v: Option<T>) -> String {

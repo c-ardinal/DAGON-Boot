@@ -427,6 +427,16 @@ fn board_wiring_is_checked_for_the_code_generated_from_it() {
     }
 }
 
+/// `text` with its `GPIO2` pin named `name`.
+fn pin_named(text: &str, name: &str) -> String {
+    let named = text.replace(
+        "pin = \"GPIO2\"\n",
+        &format!("pin = \"GPIO2\"\nname = {name:?}\n"),
+    );
+    assert_ne!(named, text);
+    named
+}
+
 #[test]
 fn definition_names_become_code_names_or_are_refused() {
     let mut m = parse_mcu_text(&isolated_mcu(), &[]).unwrap();
@@ -486,6 +496,41 @@ fn definition_names_become_code_names_or_are_refused() {
                     .replace("pmic-2", "pmic_2")
                     .replace("0x35", "0x36"),
             "device id after - becomes _",
+        ),
+        // One type name from two code names: `foo_bar` and `foo__bar`.
+        (
+            named.clone()
+                + &second_bus.replace("sys-2", "foo_bar")
+                + &second_bus
+                    .replace("sys-2", "foo__bar")
+                    .replace("GPIO8", "GPIO10")
+                    .replace("GPIO9", "GPIO11"),
+            "generated type name",
+        ),
+        // ... and `a_1` and `a1`.
+        (
+            pin_named(&named, "a_1") + "\n[[pin]]\npin = \"GPIO12\"\nname = \"a1\"\n",
+            "generated type name",
+        ),
+        // Keywords, in the code form (`fn`) and in the type form (`self`
+        // becomes `Self`).
+        (pin_named(&named, "fn"), "is a Rust keyword"),
+        (pin_named(&named, "self"), "is a Rust keyword"),
+        (
+            named.clone() + &second_bus.replace("sys-2", "type"),
+            "is a Rust keyword",
+        ),
+        (
+            named
+                .replace("id = \"pmic\"", "id = \"match\"")
+                .replace("device = \"pmic\"", "device = \"match\""),
+            "device id 'match' is a Rust keyword",
+        ),
+        (
+            named
+                .replace("name = \"ctl\"", "name = \"loop\"")
+                .replace("[\"ctl\"]", "[\"loop\"]"),
+            "is a Rust keyword",
         ),
     ] {
         let e = requirements::check_board(&board(&t), &m).unwrap_err();

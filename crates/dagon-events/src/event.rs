@@ -7,9 +7,10 @@ use crate::catalog::{Entry, Layer};
 use crate::PAYLOAD_BYTES;
 
 /// An event payload. Implemented only by the payload types
-/// [`crate::state_machine!`] generates; their constructors are private to
-/// the crate that declares the machine, so only DAGON emits events.
-pub trait Payload: Any + fmt::Debug {
+/// [`crate::state_machine!`] generates (the trait is sealed); they are
+/// built only in the crate that declares the machine, and only its
+/// transitions deliver them, so only DAGON emits events.
+pub trait Payload: crate::__private::Sealed + Any + fmt::Debug {
     /// The catalog entry of the transition that emits it.
     fn entry(&self) -> &'static Entry;
     /// The owned form ([`EventRecord::payload`]): the fields in order.
@@ -18,6 +19,7 @@ pub trait Payload: Any + fmt::Debug {
 
 /// An event as extensions observe it: a borrowed payload and whether it
 /// happened now or is replayed from the boot record or the state log.
+/// Only the layer's composed chain makes one, from a delivered payload.
 #[derive(Clone, Copy, Debug)]
 pub struct Event<'a> {
     payload: &'a dyn Payload,
@@ -26,18 +28,10 @@ pub struct Event<'a> {
 
 impl<'a> Event<'a> {
     /// An event that happened now.
-    pub fn live(payload: &'a dyn Payload) -> Self {
+    pub(crate) fn live(payload: &'a dyn Payload) -> Self {
         Event {
             payload,
             replayed: false,
-        }
-    }
-
-    /// An event re-emitted from what an earlier stage recorded.
-    pub fn replayed(payload: &'a dyn Payload) -> Self {
-        Event {
-            payload,
-            replayed: true,
         }
     }
 
@@ -64,7 +58,8 @@ impl<'a> Event<'a> {
         any.downcast_ref()
     }
 
-    /// The owned form, numbered `seq` by whoever keeps it.
+    /// The owned form, numbered `seq` by whoever keeps it (see
+    /// [`EventRecord::seq`]).
     pub fn record(&self, seq: u32) -> EventRecord {
         let e = self.entry();
         EventRecord {
@@ -95,6 +90,9 @@ pub struct EventRecord {
     /// Records dropped (oldest first) since the one before this,
     /// saturating.
     pub dropped: u8,
+    /// One more than the previous record's, per publisher; wraps from
+    /// `u32::MAX` to 0. Compare two with `b.seq.wrapping_sub(a.seq)`
+    /// (serial number arithmetic): below 2^31 means `b` is newer.
     pub seq: u32,
     /// The payload fields in catalog order ([`crate::Field::bytes`]),
     /// zero-padded.

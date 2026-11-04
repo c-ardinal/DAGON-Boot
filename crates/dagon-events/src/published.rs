@@ -1,15 +1,14 @@
-//! Waitable published state for async display and log tasks, and the
-//! fixed composition order that puts its publisher first.
+//! Waitable published state for async display and log tasks. The
+//! layer's composed chain ([`crate::compose`]) is its only writer.
 
 use core::cell::Cell;
 
 use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex as Cs;
 use embassy_sync::blocking_mutex::Mutex;
 use embassy_sync::channel::Channel;
-use embassy_sync::watch::Watch;
+use embassy_sync::watch::{Receiver, Watch};
 
 use crate::event::{Event, EventRecord};
-use crate::extension::{Chain, Ctx, Extension};
 
 /// What a layer folds events into for its display tasks (the app's phase
 /// and progress, the relay's children). `()` keeps nothing beyond
@@ -31,37 +30,46 @@ pub struct Latest<S> {
 /// Receivers [`Published::latest`] can hand out.
 pub const WATCHERS: usize = 4;
 
-/// The last `N` events as owned records, oldest first. A full ring drops
-/// its oldest record and the next record pushed counts it in `dropped`;
-/// the producer never waits.
+/// The last `N` events as owned records, oldest first (`N` > 0). A full
+/// ring drops its oldest record; the records pushed after it report the
+/// loss in `dropped`, up to 255 each, carrying the rest to the next ones,
+/// so the `dropped` values a reader sees add up to every record lost.
+/// The producer never waits.
 pub struct Recent<const N: usize> {
     ring: Channel<Cs, EventRecord, N>,
-    /// Records dropped since the last one pushed.
-    dropped: Mutex<Cs, Cell<u32>>,
+    /// Records lost and not yet reported.
+    unreported: Mutex<Cs, Cell<u64>>,
 }
 
 impl<const N: usize> Recent<N> {
+    const NOT_EMPTY: () = assert!(N > 0, "a Recent ring holds at least one record");
+
     pub const fn new() -> Self {
+        #[allow(clippy::let_unit_value)]
+        let () = Self::NOT_EMPTY;
         Recent {
             ring: Channel::new(),
-            dropped: Mutex::new(Cell::new(0)),
+            unreported: Mutex::new(Cell::new(0)),
         }
     }
 
-    pub fn push(&self, mut rec: EventRecord) {
-        self.dropped.lock(|d| {
+    pub(crate) fn push(&self, mut rec: EventRecord) {
+        self.unreported.lock(|u| {
+            let mut lost = u.get();
             if self.ring.is_full() {
                 if let Ok(oldest) = self.ring.try_receive() {
-                    // What the dropped record reported is lost with it.
-                    d.set(d.get().saturating_add(1 + u32::from(oldest.dropped)));
+                    // The dropped record's own report is lost with it.
+                    lost = lost.saturating_add(1 + u64::from(oldest.dropped));
                 }
             }
-            rec.dropped = u8::try_from(d.get()).unwrap_or(u8::MAX);
+            let report = lost.min(u64::from(u8::MAX));
+            rec.dropped = report as u8;
             if self.ring.try_send(rec).is_ok() {
-                d.set(0);
+                lost -= report;
             } else {
-                d.set(d.get().saturating_add(1));
+                lost = lost.saturating_add(1);
             }
+            u.set(lost);
         });
     }
 
@@ -84,7 +92,25 @@ impl<const N: usize> Default for Recent<N> {
 
 /// A layer's published events: the latest state, waitable by several
 /// tasks, and the ring of recent records. One `static` per image, handed
-/// to the layer's start.
+/// to the layer's start; tasks only read it. It is not an extension (only
+/// [`crate::compose`] puts it in a chain, first), and nothing outside this
+/// crate writes it.
+///
+/// ```compile_fail,E0277
+/// use dagon_events::{extensions, Nop, Published};
+/// static EVENTS: Published<(), 4> = Published::new();
+/// let user = extensions![Nop, &EVENTS];
+/// ```
+///
+/// ```compile_fail,E0624
+/// use dagon_events::{EventRecord, Published};
+/// static EVENTS: Published<(), 4> = Published::new();
+/// EVENTS.recent().push(EventRecord::default());
+/// ```
+///
+/// ```compile_fail,E0080
+/// static EMPTY: dagon_events::Recent<0> = dagon_events::Recent::new();
+/// ```
 pub struct Published<S: Snapshot, const N: usize> {
     latest: Watch<Cs, Latest<S>, WATCHERS>,
     recent: Recent<N>,
@@ -100,17 +126,22 @@ impl<S: Snapshot, const N: usize> Published<S, N> {
         }
     }
 
-    /// The latest state: `receiver()` to wait for changes,
-    /// `try_get()` to read it.
-    pub fn latest(&self) -> &Watch<Cs, Latest<S>, WATCHERS> {
-        &self.latest
+    /// A receiver that waits for the next latest state (`changed()`);
+    /// `None` once [`WATCHERS`] receivers exist.
+    pub fn receiver(&self) -> Option<Receiver<'_, Cs, Latest<S>, WATCHERS>> {
+        self.latest.receiver()
+    }
+
+    /// The latest state, if any event was published.
+    pub fn latest(&self) -> Option<Latest<S>> {
+        self.latest.try_get()
     }
 
     pub fn recent(&self) -> &Recent<N> {
         &self.recent
     }
 
-    fn publish(&self, e: &Event<'_>) {
+    pub(crate) fn publish(&self, e: &Event<'_>) {
         let seq = self.seq.lock(|s| {
             let n = s.get().wrapping_add(1);
             s.set(n);
@@ -130,26 +161,4 @@ impl<S: Snapshot, const N: usize> Default for Published<S, N> {
     fn default() -> Self {
         Self::new()
     }
-}
-
-/// The extension that publishes every event. Made only by [`compose`],
-/// so it is always first and appears once.
-pub struct Publisher<S: Snapshot + 'static, const N: usize>(&'static Published<S, N>);
-
-impl<S: Snapshot + 'static, const N: usize> Extension for Publisher<S, N> {
-    fn on_event(&mut self, e: &Event<'_>, _ctx: &Ctx<'_>) {
-        self.0.publish(e);
-    }
-}
-
-/// The layer's chain in the one order every layer uses: the publisher,
-/// then the board package, then the user's extensions (libraries, then
-/// the app's own; [`crate::extensions!`]). Layers call this in their
-/// start; users never order the chain themselves.
-pub fn compose<S: Snapshot + 'static, const N: usize, B: Extension, U: Extension>(
-    events: &'static Published<S, N>,
-    board: B,
-    user: U,
-) -> Chain<Publisher<S, N>, Chain<B, U>> {
-    Chain(Publisher(events), Chain(board, user))
 }

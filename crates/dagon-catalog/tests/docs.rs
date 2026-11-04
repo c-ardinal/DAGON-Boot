@@ -1,30 +1,34 @@
-//! The committed catalogs equal what the code generates; the registry has
-//! no conflicts; the design's port table agrees with the port catalog.
+//! The committed catalogs equal what the code generates; every machine
+//! declared in the repository is registered; the registry has no
+//! conflicts.
 //!
 //! `DAGON_BLESS=1` writes the generated documents instead of comparing.
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
-use dagon_catalog::{conflicts, events_md, ports_md, MACHINES};
-use dagon_events::{state_machine, Layer, Port, Trust, PORTS};
+use dagon_catalog::{conflicts, design_ports_table, events_md, ports_md, MACHINES};
+use dagon_events::{state_machine, Layer, PORTS};
+
+const BLESS: &str = "`DAGON_BLESS=1 cargo test -p dagon-catalog --test docs`";
 
 fn root() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..")
 }
 
+fn read(rel: &str) -> String {
+    std::fs::read_to_string(root().join(rel))
+        .unwrap_or_default()
+        .replace("\r\n", "\n")
+}
+
 fn check(rel: &str, generated: &str) {
-    let path = root().join(rel);
     if std::env::var_os("DAGON_BLESS").is_some() {
-        std::fs::write(&path, generated).unwrap();
+        std::fs::write(root().join(rel), generated).unwrap();
         return;
     }
-    let committed = std::fs::read_to_string(&path)
-        .unwrap_or_default()
-        .replace("\r\n", "\n");
     assert!(
-        committed == generated,
-        "{rel} is not what the catalogs generate; run \
-         `DAGON_BLESS=1 cargo test -p dagon-catalog --test docs` and commit the result"
+        read(rel) == generated,
+        "{rel} is not what the catalogs generate; run {BLESS} and commit the result"
     );
 }
 
@@ -38,9 +42,86 @@ fn ports_md_is_generated() {
     check("docs/ports.md", &ports_md(PORTS));
 }
 
+/// Section 2.1 of the design holds the port table generated from PORTS.
+#[test]
+fn the_design_port_table_is_generated() {
+    const DESIGN: &str = "docs/design/lifecycle-events.md";
+    const BEGIN: &str = "<!-- generated from dagon_events::PORTS -->\n";
+    const END: &str = "<!-- end of generated table -->\n";
+    let text = read(DESIGN);
+    let a = text.find(BEGIN).expect("the design's table markers") + BEGIN.len();
+    let b = a + text[a..].find(END).expect("the design's end marker");
+    let mut whole = text.clone();
+    whole.replace_range(a..b, &design_ports_table(PORTS));
+    check(DESIGN, &whole);
+}
+
 #[test]
 fn the_registry_has_no_conflicts() {
     assert_eq!(conflicts(MACHINES), Vec::<String>::new());
+}
+
+/// Every `state_machine!` declaration outside `tests/` folders, as
+/// (file, machine, layer).
+fn declarations() -> Vec<(String, String, String)> {
+    fn walk(dir: &Path, out: &mut Vec<PathBuf>) {
+        for e in std::fs::read_dir(dir).unwrap().flatten() {
+            let p = e.path();
+            let name = e.file_name();
+            let skip = matches!(
+                name.to_str(),
+                Some("target" | "node_modules" | ".git" | "vendor" | "tests" | "pkg")
+            );
+            if p.is_dir() && !skip {
+                walk(&p, out);
+            } else if p.extension().is_some_and(|x| x == "rs") {
+                out.push(p);
+            }
+        }
+    }
+    let mut files = Vec::new();
+    walk(&root(), &mut files);
+    let mut found = Vec::new();
+    for f in files {
+        let text = std::fs::read_to_string(&f).unwrap_or_default();
+        let code: String = text
+            .lines()
+            .filter(|l| !l.trim_start().starts_with("//"))
+            .collect::<Vec<_>>()
+            .join("\n");
+        for (at, _) in code.match_indices("state_machine!") {
+            let words: Vec<_> = code[at..].split_whitespace().take(12).collect();
+            let i = words
+                .iter()
+                .position(|w| *w == "machine")
+                .unwrap_or_else(|| panic!("{}: a state_machine! without `machine`", f.display()));
+            assert_eq!(words.get(i + 2), Some(&"in"), "{}", f.display());
+            found.push((
+                f.strip_prefix(root()).unwrap_or(&f).display().to_string(),
+                words[i + 1].to_string(),
+                words[i + 3].trim_end_matches('{').to_string(),
+            ));
+        }
+    }
+    found
+}
+
+#[test]
+fn every_declared_machine_is_registered() {
+    let found = declarations();
+    assert!(
+        found.iter().any(|(_, m, _)| m == "decisions"),
+        "the scan finds dagon-events' own machine: {found:?}"
+    );
+    for (file, machine, layer) in &found {
+        assert!(
+            MACHINES
+                .iter()
+                .any(|c| c.machine == *machine && format!("{:?}", c.layer) == *layer),
+            "{file}: machine {machine} in {layer} is not in dagon_catalog::MACHINES"
+        );
+    }
+    assert_eq!(found.len(), MACHINES.len(), "{found:?}");
 }
 
 state_machine! {
@@ -96,48 +177,8 @@ fn a_machine_renders_every_transition() {
     assert!(!md.contains("## Layer `app`"));
 }
 
-/// Section 2.1 of the design shows the port table; every row there must
-/// be a port of the catalog with the same layers and trust, and every port
-/// must appear in it.
 #[test]
-fn the_design_port_table_agrees_with_the_catalog() {
-    let design = std::fs::read_to_string(root().join("docs/design/lifecycle-events.md")).unwrap();
-    let start = design
-        .find("| Port | Layers | Default | Trust policy |")
-        .expect("the design's port table");
-    let mut seen = Vec::new();
-    for row in design[start..].lines().skip(2) {
-        if !row.starts_with('|') {
-            break;
-        }
-        let cols: Vec<_> = row.trim_matches('|').split(" | ").map(str::trim).collect();
-        let layers: Vec<_> = cols[1].split(", ").collect();
-        let trust = cols[3];
-        // The names come before the parenthesised description.
-        let names = cols[0].split(" (").next().unwrap();
-        for id in names.split('`').skip(1).step_by(2) {
-            let p = Port::find(id).unwrap_or_else(|| panic!("design port {id} is not in PORTS"));
-            let names: Vec<_> = p.layers.iter().map(|d| d.layer.name()).collect();
-            assert_eq!(names, layers, "{id}");
-            let want = if trust.starts_with("trusted only") {
-                Trust::TrustedOnly
-            } else if trust.starts_with("untrusted, additive") {
-                Trust::Additive
-            } else {
-                assert!(trust.starts_with("untrusted"), "{id}: {trust}");
-                Trust::Untrusted
-            };
-            assert_eq!(p.trust, want, "{id}");
-            seen.push(id);
-        }
-    }
-    for p in PORTS.iter().filter(|p| p.trust.is_port()) {
-        assert!(
-            seen.contains(&p.id),
-            "{} is not in the design's port table",
-            p.id
-        );
-    }
+fn every_layer_has_a_port() {
     assert!(Layer::ALL
         .iter()
         .all(|l| PORTS.iter().any(|p| p.in_layer(*l))));

@@ -2,9 +2,11 @@
 //! generated from it and from the port catalog.
 //!
 //! A crate that declares a machine with `dagon_events::state_machine!`
-//! adds its `CATALOG` to [`MACHINES`]; the tests then check the layer's
-//! event codes and regenerate `docs/events.md`. `docs/ports.md` comes from
-//! `dagon_events::PORTS`. Regenerate both with
+//! adds its `CATALOG` to [`MACHINES`] (a test fails until it does); the
+//! tests then check the layer's event codes and regenerate
+//! `docs/events.md`. `docs/ports.md` and the port table of
+//! `docs/design/lifecycle-events.md` come from `dagon_events::PORTS`.
+//! Regenerate them with
 //! `DAGON_BLESS=1 cargo test -p dagon-catalog --test docs`.
 #![forbid(unsafe_code)]
 
@@ -12,8 +14,10 @@ use std::fmt::Write;
 
 use dagon_events::{Catalog, Entry, Layer, Port, Trust, DECISIONS, EVENT_FORMAT};
 
-/// Every machine of every layer.
-pub const MACHINES: &[Catalog] = &[];
+/// Every machine of every layer. A test finds every `state_machine!`
+/// declaration in the repository (outside `tests/` folders) and fails
+/// while one is missing here.
+pub const MACHINES: &[Catalog] = &[dagon_events::decisions::CATALOG];
 
 /// Faults across machines that one machine's declaration cannot see: two
 /// kinds of a layer with one code or one name, two machines of a layer
@@ -203,13 +207,62 @@ fn machine_md(s: &mut String, m: &Catalog) {
     }
 }
 
-fn trust(t: Trust) -> &'static str {
-    match t {
+fn trust(p: &Port) -> String {
+    let t = match p.trust {
         Trust::Untrusted => "untrusted",
         Trust::Additive => "untrusted, additive",
         Trust::TrustedOnly => "trusted only",
         Trust::Never(_) => "not a port",
+    };
+    if p.note.is_empty() {
+        t.into()
+    } else {
+        format!("{t} ({})", cell(p.note))
     }
+}
+
+/// The port's layers, in catalog order.
+fn layer_names(p: &Port) -> String {
+    let names: Vec<_> = p.layers.iter().map(|d| d.layer.name()).collect();
+    names.join(", ")
+}
+
+/// The default per layer; layers with one default share an entry
+/// (`boot, app: X; host: Y`), and a single default stands alone.
+fn defaults(p: &Port) -> String {
+    let mut groups: Vec<(Vec<&str>, &str)> = Vec::new();
+    for d in p.layers {
+        match groups.iter_mut().find(|(_, v)| *v == d.default) {
+            Some((names, _)) => names.push(d.layer.name()),
+            None => groups.push((vec![d.layer.name()], d.default)),
+        }
+    }
+    if let [(_, only)] = groups.as_slice() {
+        return cell(only);
+    }
+    groups
+        .iter()
+        .map(|(names, v)| format!("{}: {}", names.join(", "), cell(v)))
+        .collect::<Vec<_>>()
+        .join("; ")
+}
+
+/// The port table of the design document (section 2.1), between its
+/// generated-table markers.
+pub fn design_ports_table(ports: &[Port]) -> String {
+    let mut s = String::from("| Port | Layers | Default | Trust policy |\n|---|---|---|---|\n");
+    for p in ports.iter().filter(|p| p.trust.is_port()) {
+        let _ = writeln!(
+            s,
+            "| `{}` ({}) | {} | {} | {} |",
+            p.id,
+            cell(p.what),
+            layer_names(p),
+            defaults(p),
+            trust(p)
+        );
+    }
+    s
 }
 
 /// `docs/ports.md`.
@@ -230,18 +283,19 @@ pub fn ports_md(ports: &[Port]) -> String {
          \x20 implementation stays.\n\
          - *trusted only*: only a trusted extension, declared and signed; it runs\n\
          \x20 privileged and calls no services.\n\n\
-         | Port | What it does | Layers and default | Trust | Services |\n\
-         |---|---|---|---|---|\n",
+         | Port | What it does | Layers | Default | Trust | Services |\n\
+         |---|---|---|---|---|---|\n",
     );
     for p in ports.iter().filter(|p| p.trust.is_port()) {
         let services: Vec<_> = p.services.iter().map(|x| x.name()).collect();
         let _ = writeln!(
             s,
-            "| `{}` | {} | {} | {} | {} |",
+            "| `{}` | {} | {} | {} | {} | {} |",
             p.id,
             cell(p.what),
-            layers(p),
-            trust(p.trust),
+            layer_names(p),
+            defaults(p),
+            trust(p),
             if services.is_empty() {
                 "–".into()
             } else {
@@ -257,24 +311,15 @@ pub fn ports_md(ports: &[Port]) -> String {
     );
     for p in ports {
         if let Trust::Never(why) = p.trust {
-            let names: Vec<_> = p.layers.iter().map(|d| d.layer.name()).collect();
             let _ = writeln!(
                 s,
                 "| `{}` | {} | {} | {} |",
                 p.id,
                 cell(p.what),
-                names.join(", "),
+                layer_names(p),
                 cell(why)
             );
         }
     }
     s
-}
-
-fn layers(p: &Port) -> String {
-    p.layers
-        .iter()
-        .map(|d| format!("{}: {}", d.layer.name(), cell(d.default)))
-        .collect::<Vec<_>>()
-        .join("; ")
 }

@@ -34,7 +34,19 @@ extension abstains, the default applies.
 
 | Decision | Layer | Question | Answered by | Bound | Default | Never |
 |---|---|---|---|---|---|---|
-| `accept_update` | app | `UpdateOffer` -> `Accept` | board package, libraries, user (first answer wins) | `DECISION_BOUND_MS`; asked after every DAGON guard passed, before erase | accept | accepting what DAGON refused (not asked then) |
-| `allow_reboot_now` | app | `RebootRequest` -> `Delay` | board package, libraries, user (first answer wins) | `Now` or `After(ms)`, ms capped at `reboot_delay_max_ms` of the MCU definition's watchdog periods; DAGON replies first and keeps feeding while it waits | now | refusing a reboot; a delay beyond the cap |
-| `self_check` | app | `TrialInfo` -> `Health` | board package, libraries, user (first answer wins) | `DECISION_BOUND_MS`; `Pending` keeps the "state" status and the host retries | healthy | confirming a slot not on trial; confirming outside the `confirmed` transition |
+| `accept_update` | app | `UpdateOffer` -> `Accept` | board package, libraries, user (first answer wins) | each call within `DECISION_BOUND_MS` (a later answer is ignored); asked after every DAGON guard passed, before erase | accept | accepting what DAGON refused (not asked then) |
+| `allow_reboot_now` | app | `RebootRequest` -> `Delay` | board package, libraries, user (first answer wins) | each call within `DECISION_BOUND_MS`; `Now` or `After(ms)`, ms capped at half the shorter watchdog period of the MCU definition; DAGON replies first and keeps feeding while it waits | now | refusing a reboot; a delay beyond the cap |
+| `self_check` | app | `TrialInfo` -> `Health` | board package, libraries, user (first answer wins) | each call within `DECISION_BOUND_MS` (a later answer is ignored); `Pending` keeps the "state" status and the host retries | healthy | confirming a slot not on trial; confirming outside the `confirmed` transition |
 | `confirm_plan` | host | the deploy listing -> yes or no | the interactive user (terminal, page) or `--yes`; never actions or host extensions | until the user answers | ask | skipping the key check and image verification, done before the listing is shown |
+
+## Layer `app`
+
+### Machine `decisions`
+
+Decision calls to extensions and their bound.
+
+States: `Ready` (initial).
+
+| Kind | Code | Transition | Payload | Observed | Notes | Description |
+|---|---|---|---|---|---|---|
+| `app.extension_overran` | 0xf0 | `overran`: Ready → Ready | `point: DecisionId` (1 B), `party: Party` (1 B), `us: u32` (4 B) | live |  | A party answered a decision point after `DECISION_BOUND_MS`; its answer was ignored. |

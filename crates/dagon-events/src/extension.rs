@@ -5,6 +5,7 @@ use core::marker::PhantomData;
 use dagon_format::version::Version;
 
 use crate::catalog::Layer;
+use crate::compact::Compact;
 use crate::event::Event;
 
 /// What DAGON hands an extension's handler: the layer it runs in and the
@@ -138,32 +139,41 @@ pub struct Nop;
 impl Extension for Nop {}
 
 /// `A`, then `B`: notifications reach both, decisions stop at the first
-/// answer.
+/// answer. Built by [`crate::extensions!`]; its parts stay inside.
 #[derive(Clone, Copy, Debug, Default)]
-pub struct Chain<A, B>(pub A, pub B);
+pub struct Chain<A, B> {
+    first: A,
+    then: B,
+}
+
+impl<A: Extension, B: Extension> Chain<A, B> {
+    pub const fn new(first: A, then: B) -> Self {
+        Chain { first, then }
+    }
+}
 
 impl<A: Extension, B: Extension> Extension for Chain<A, B> {
     fn on_event(&mut self, e: &Event<'_>, ctx: &Ctx<'_>) {
-        self.0.on_event(e, ctx);
-        self.1.on_event(e, ctx);
+        self.first.on_event(e, ctx);
+        self.then.on_event(e, ctx);
     }
 
     fn accept_update(&mut self, o: &UpdateOffer, ctx: &Ctx<'_>) -> Option<Accept> {
-        self.0
+        self.first
             .accept_update(o, ctx)
-            .or_else(|| self.1.accept_update(o, ctx))
+            .or_else(|| self.then.accept_update(o, ctx))
     }
 
     fn allow_reboot_now(&mut self, r: &RebootRequest, ctx: &Ctx<'_>) -> Option<Delay> {
-        self.0
+        self.first
             .allow_reboot_now(r, ctx)
-            .or_else(|| self.1.allow_reboot_now(r, ctx))
+            .or_else(|| self.then.allow_reboot_now(r, ctx))
     }
 
     fn self_check(&mut self, t: &TrialInfo, ctx: &Ctx<'_>) -> Option<Health> {
-        self.0
+        self.first
             .self_check(t, ctx)
-            .or_else(|| self.1.self_check(t, ctx))
+            .or_else(|| self.then.self_check(t, ctx))
     }
 }
 
@@ -186,56 +196,79 @@ impl<T: Extension + ?Sized> Extension for &mut T {
 }
 
 /// The user's extensions, in order (libraries first, then the app's own):
-/// `extensions![a, b, c]` is `Chain(a, Chain(b, c))`; `extensions![]` is
-/// [`Nop`]. The layer's start puts DAGON's publisher and the board
-/// package before them ([`crate::compose`]).
+/// `extensions![a, b, c]` is `Chain::new(a, Chain::new(b, c))`;
+/// `extensions![]` is [`Nop`]. The layer's start puts DAGON's publisher
+/// and the board package before them ([`crate::compose`]); a composed
+/// chain is not an extension, so it cannot be nested in another.
+///
+/// ```compile_fail,E0277
+/// use dagon_events::{compose_unpublished, extensions, Bounds, Layer, Nop, Watchdog};
+/// let inner = compose_unpublished(Layer::App, Nop, Nop, Bounds::new(|| 0u64, Watchdog::new(8, 8)));
+/// let outer = extensions![inner, Nop];
+/// ```
+///
+/// ```compile_fail,E0423
+/// let c = dagon_events::Chain(dagon_events::Nop, dagon_events::Nop);
+/// ```
 #[macro_export]
 macro_rules! extensions {
     () => { $crate::Nop };
-    ($a:expr $(,)?) => { $a };
-    ($a:expr, $($rest:expr),+ $(,)?) => { $crate::Chain($a, $crate::extensions!($($rest),+)) };
+    ($a:expr $(,)?) => { $crate::Chain::new($a, $crate::Nop) };
+    ($a:expr, $($rest:expr),+ $(,)?) => { $crate::Chain::new($a, $crate::extensions!($($rest),+)) };
 }
 
-/// Every decision call is answered within this bound; the serving task
-/// measures it and reports an overrun.
+/// The bound on every decision call. The composed chain measures each
+/// party's call with the layer's clock; an answer that took longer is
+/// ignored (the party abstains) and `app.extension_overran` is emitted.
+/// Where the MCU's isolation level allows it, the sandbox's timer also
+/// preempts the call at this bound; elsewhere the call runs to its end
+/// and only its answer is dropped.
 pub const DECISION_BOUND_MS: u32 = 50;
 
-/// The decision points with their defaults and bounds applied. The layer
-/// calls these, never the trait methods directly.
-pub mod decide {
-    use super::*;
+/// A decision point, as named in `app.extension_overran`.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum DecisionId {
+    #[default]
+    AcceptUpdate,
+    AllowRebootNow,
+    SelfCheck,
+}
 
-    /// Decision 3.1. Default: accept.
-    pub fn accept_update(ext: &mut impl Extension, o: &UpdateOffer, ctx: &Ctx<'_>) -> Accept {
-        ext.accept_update(o, ctx).unwrap_or(Accept::Yes)
+/// Who answered late, in the chain's order.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum Party {
+    #[default]
+    Board,
+    User,
+}
+
+impl Compact for DecisionId {
+    const SIZE: usize = 1;
+    fn put(&self, out: &mut [u8]) {
+        out[0] = *self as u8;
     }
+}
 
-    /// Decision 3.2. Default: now. A delay is capped at `max_ms`
-    /// ([`reboot_delay_max_ms`]).
-    pub fn allow_reboot_now(
-        ext: &mut impl Extension,
-        r: &RebootRequest,
-        ctx: &Ctx<'_>,
-        max_ms: u32,
-    ) -> Delay {
-        match ext.allow_reboot_now(r, ctx) {
-            None | Some(Delay::Now) | Some(Delay::After(0)) => Delay::Now,
-            Some(Delay::After(ms)) => Delay::After(ms.min(max_ms)),
-        }
+impl Compact for Party {
+    const SIZE: usize = 1;
+    fn put(&self, out: &mut [u8]) {
+        out[0] = *self as u8;
     }
+}
 
-    /// Decision 3.3. Default: healthy.
-    pub fn self_check(ext: &mut impl Extension, t: &TrialInfo, ctx: &Ctx<'_>) -> Health {
-        ext.self_check(t, ctx).unwrap_or(Health::Healthy)
-    }
-
-    /// The reboot delay cap: half the shorter of the MCU definition's
-    /// trial and confirmed watchdog periods.
-    pub const fn reboot_delay_max_ms(trial_ms: u32, confirmed_ms: u32) -> u32 {
-        if trial_ms < confirmed_ms {
-            trial_ms / 2
-        } else {
-            confirmed_ms / 2
+crate::state_machine! {
+    /// Decision calls to extensions and their bound.
+    pub machine decisions in App {
+        initial Ready;
+        states { Ready }
+        transitions {
+            /// A party answered a decision point after `DECISION_BOUND_MS`;
+            /// its answer was ignored.
+            overran(point: DecisionId, party: Party, us: u32): Ready => Ready
+                emits ExtensionOverran = 0xF0 { point: DecisionId, party: Party, us: u32 }
+                observe(live);
         }
     }
 }
@@ -261,7 +294,7 @@ pub const DECISIONS: &[DecisionPoint] = &[
         layer: Layer::App,
         answers: "`UpdateOffer` -> `Accept`",
         answered_by: "board package, libraries, user (first answer wins)",
-        bound: "`DECISION_BOUND_MS`; asked after every DAGON guard passed, before erase",
+        bound: "each call within `DECISION_BOUND_MS` (a later answer is ignored); asked after every DAGON guard passed, before erase",
         default: "accept",
         never: "accepting what DAGON refused (not asked then)",
     },
@@ -270,7 +303,7 @@ pub const DECISIONS: &[DecisionPoint] = &[
         layer: Layer::App,
         answers: "`RebootRequest` -> `Delay`",
         answered_by: "board package, libraries, user (first answer wins)",
-        bound: "`Now` or `After(ms)`, ms capped at `reboot_delay_max_ms` of the MCU definition's watchdog periods; DAGON replies first and keeps feeding while it waits",
+        bound: "each call within `DECISION_BOUND_MS`; `Now` or `After(ms)`, ms capped at half the shorter watchdog period of the MCU definition; DAGON replies first and keeps feeding while it waits",
         default: "now",
         never: "refusing a reboot; a delay beyond the cap",
     },
@@ -279,7 +312,7 @@ pub const DECISIONS: &[DecisionPoint] = &[
         layer: Layer::App,
         answers: "`TrialInfo` -> `Health`",
         answered_by: "board package, libraries, user (first answer wins)",
-        bound: "`DECISION_BOUND_MS`; `Pending` keeps the \"state\" status and the host retries",
+        bound: "each call within `DECISION_BOUND_MS` (a later answer is ignored); `Pending` keeps the \"state\" status and the host retries",
         default: "healthy",
         never: "confirming a slot not on trial; confirming outside the `confirmed` transition",
     },
@@ -293,64 +326,3 @@ pub const DECISIONS: &[DecisionPoint] = &[
         never: "skipping the key check and image verification, done before the listing is shown",
     },
 ];
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    struct Refuse;
-    impl Extension for Refuse {
-        fn accept_update(&mut self, _: &UpdateOffer, _: &Ctx<'_>) -> Option<Accept> {
-            Some(Accept::No)
-        }
-    }
-
-    struct Wait(u32);
-    impl Extension for Wait {
-        fn allow_reboot_now(&mut self, _: &RebootRequest, _: &Ctx<'_>) -> Option<Delay> {
-            Some(Delay::After(self.0))
-        }
-        fn accept_update(&mut self, _: &UpdateOffer, _: &Ctx<'_>) -> Option<Accept> {
-            Some(Accept::Yes)
-        }
-    }
-
-    #[test]
-    fn decisions_default_when_every_extension_abstains() {
-        let ctx = Ctx::new(Layer::App);
-        let mut none = extensions![];
-        let o = UpdateOffer::new(0, 1, 10);
-        assert_eq!(decide::accept_update(&mut none, &o, &ctx), Accept::Yes);
-        let r = RebootRequest::new(0);
-        assert_eq!(
-            decide::allow_reboot_now(&mut none, &r, &ctx, 100),
-            Delay::Now
-        );
-        let t = TrialInfo::new(1, Version::new(1, 0, 0), 1, 3);
-        assert_eq!(decide::self_check(&mut none, &t, &ctx), Health::Healthy);
-    }
-
-    #[test]
-    fn the_first_answer_wins_and_delays_are_capped() {
-        let ctx = Ctx::new(Layer::App);
-        let o = UpdateOffer::new(0, 1, 10);
-        let mut a = extensions![Nop, Refuse, Wait(10_000)];
-        assert_eq!(decide::accept_update(&mut a, &o, &ctx), Accept::No);
-        let mut b = extensions![Wait(10_000), Refuse];
-        assert_eq!(decide::accept_update(&mut b, &o, &ctx), Accept::Yes);
-        let r = RebootRequest::new(0);
-        let cap = decide::reboot_delay_max_ms(8_000, 30_000);
-        assert_eq!(cap, 4_000);
-        assert_eq!(
-            decide::allow_reboot_now(&mut b, &r, &ctx, cap),
-            Delay::After(4_000)
-        );
-    }
-
-    #[test]
-    fn decision_ids_are_unique() {
-        for (i, a) in DECISIONS.iter().enumerate() {
-            assert!(DECISIONS[i + 1..].iter().all(|b| b.id != a.id), "{}", a.id);
-        }
-    }
-}

@@ -2,10 +2,10 @@
 //! its transition methods, its event payloads and its catalog are made.
 
 /// Declares a state machine whose transitions are the only way to change
-/// its state, each emitting its event.
+/// its state, each delivering its event.
 ///
 /// ```
-/// use dagon_events::state_machine;
+/// use dagon_events::{compose_unpublished, state_machine, Bounds, Layer, Nop, Watchdog};
 ///
 /// state_machine! {
 ///     /// A transfer into one slot.
@@ -32,36 +32,49 @@
 ///     }
 /// }
 ///
+/// let bounds = Bounds::new(|| 0u64, Watchdog::new(8_000, 30_000));
+/// let mut chain = compose_unpublished(Layer::App, Nop, Nop, bounds);
 /// let mut m = transfer::Machine::new();
-/// let ev = m.offered(1, 4096).unwrap();
-/// assert_eq!(ev.body_len, 4096);
+/// m.offered(&mut chain, 1, 4096).unwrap();
+/// assert_eq!(m.state(), transfer::State::Body { slot: 1, len: 4096 });
 /// assert_eq!(transfer::UpdateOffered::ENTRY.kind, "update_offered");
-/// assert!(m.offered(1, 1).is_err()); // not from Body
+/// assert!(m.offered(&mut chain, 1, 1).is_err()); // not from Body
 /// ```
 ///
 /// What it generates, in the module `name`:
 ///
-/// - `State`, the states; `Machine`, which holds one in a private field
-///   and changes it only in the transition methods. A transition called
-///   from a state it does not leave from returns [`crate::Refused`] and
-///   changes nothing. Guards beyond the state (a digest, a signature) are
-///   the caller's, before it calls the transition.
-/// - One payload struct per transition, `#[non_exhaustive]` (only the
-///   declaring crate constructs it) and `#[must_use]`; the transition
-///   method returns it. It implements [`crate::Payload`], and its owned
-///   form is its fields' [`crate::Compact`] forms in order.
+/// - `State`, the states, and `Machine`, which holds one in a private
+///   field. `Machine::new()` (initial state) is visible only in the crate
+///   that declares the machine; `Machine` has no `Default` and no `Clone`.
+/// - One transition method per transition. It takes the layer's composed
+///   chain ([`crate::Sink`]); from a state it leaves from it builds the
+///   event and the next state, delivers the event to the chain, then sets
+///   the state. From any other state it returns [`crate::Refused`] and
+///   changes and delivers nothing. Guards beyond the state (a digest, a
+///   signature) are the caller's, before it calls the transition.
+/// - One payload struct per transition: `#[non_exhaustive]` (only the
+///   declaring crate builds one), neither `Copy` nor `Clone`, implementing
+///   [`crate::Payload`]; its owned form is its fields' [`crate::Compact`]
+///   forms in order.
 /// - `CATALOG`, the machine's [`crate::Catalog`], and `ENTRY` on each
 ///   payload type.
 /// - A test, `every_transition`, that calls every transition from every
 ///   state (fields and arguments at their `Default`) and checks it moves
-///   exactly from its `from` states to its `to` state.
+///   exactly from its `from` states to its `to` state and delivers exactly
+///   one event when it does.
+///
+/// A `from` state is a state name, optionally with the names of fields it
+/// binds (`Body { len }`); it never filters on values. `*` is any state.
+/// The event kind is the payload type's name in snake case. The crate's
+/// `dagon-catalog` registry must list the machine's `CATALOG` (a test
+/// finds every declaration in the repository).
 ///
 /// Rules, each a compile error when broken:
 ///
 /// - Every transition `emits` one event with a code (`u8`, unique within
-///   the machine; the layer's codes are kept unique by the catalog's
-///   registry) and at least one `observe` path (`live`, `replay`, `host`).
-///   Further flags after it: `action`, `retired`.
+///   the machine; across a layer the registry's test keeps codes unique)
+///   and at least one `observe` path (`live`, `replay`, `host`). Further
+///   flags after it: `action`, `retired`.
 /// - Every state other than `initial` is reached by some transition.
 /// - A payload's owned form fits [`crate::PAYLOAD_BYTES`].
 ///
@@ -138,22 +151,49 @@
 /// }
 /// ```
 ///
-/// A state set outside the transitions:
+/// A `from` that filters on a value:
 ///
-/// ```compile_fail,E0451
+/// ```compile_fail
 /// dagon_events::state_machine! {
-///     pub machine m in App {
+///     machine m in App {
 ///         initial A;
-///         states { A, B }
-///         transitions { go(): A => B emits Went = 1 {} observe(live); }
+///         states { A { n: u8 }, B }
+///         transitions { go(): A { n: 0 } => B emits Went = 1 {} observe(live); }
 ///     }
 /// }
-/// let forged = m::Machine { state: m::State::B };
 /// ```
 ///
-/// State fields and payload fields are `Copy`; `from` patterns bind state
-/// fields (`Body { len, .. }`) and do not filter on their values. The
-/// event kind is the payload type's name in snake case.
+/// A state set outside the transitions, from another crate: a machine
+/// cannot be built, rebuilt, reset or cloned there.
+///
+/// ```compile_fail,E0451
+/// use dagon_events::decisions::{Machine, State};
+/// let forged = Machine { state: State::Ready };
+/// ```
+///
+/// ```compile_fail,E0624
+/// let fresh = dagon_events::decisions::Machine::new();
+/// ```
+///
+/// ```compile_fail,E0277
+/// fn reset(m: &mut dagon_events::decisions::Machine) {
+///     let _old = core::mem::take(m);
+/// }
+/// ```
+///
+/// ```compile_fail,E0308
+/// fn copy(m: &dagon_events::decisions::Machine) -> dagon_events::decisions::Machine {
+///     m.clone()
+/// }
+/// ```
+///
+/// An event built outside the crate that declares it:
+///
+/// ```compile_fail,E0639
+/// use dagon_events::decisions::ExtensionOverran;
+/// use dagon_events::{DecisionId, Party};
+/// let forged = ExtensionOverran { point: DecisionId::SelfCheck, party: Party::User, us: 1 };
+/// ```
 #[macro_export]
 macro_rules! state_machine {
     (
@@ -167,7 +207,7 @@ macro_rules! state_machine {
                 $(
                     $(#[doc = $tdoc:literal])*
                     $trig:ident ( $($arg:ident : $argty:ty),* $(,)? ) :
-                    $( $from:tt $({ $($fb:tt)* })? )|+
+                    $( $from:tt $({ $($fb:ident),* $(,)? })? )|+
                     => $to:ident $({ $($tf:ident $(: $te:expr)?),* $(,)? })?
                     emits $ev:ident = $code:literal { $($pf:ident : $pt:ty $(= $pe:expr)?),* $(,)? }
                     observe ( $($obs:ident),+ $(,)? ) $($flag:ident)* ;
@@ -195,20 +235,17 @@ macro_rules! state_machine {
             }
 
             /// The machine. Its state changes only through the transition
-            /// methods, each of which returns its event.
+            /// methods, each of which delivers its event first.
             #[derive(Debug)]
             pub struct Machine {
                 state: State,
             }
 
-            impl Default for Machine {
-                fn default() -> Self {
-                    Self::new()
-                }
-            }
-
             impl Machine {
-                pub const fn new() -> Self {
+                /// A machine in its initial state; only the declaring
+                /// crate makes one.
+                #[allow(dead_code)]
+                pub(crate) const fn new() -> Self {
                     Machine { state: State::$initial }
                 }
 
@@ -218,20 +255,28 @@ macro_rules! state_machine {
 
                 $(
                     $(#[doc = $tdoc])*
-                    #[must_use = "a transition's event must be handed on"]
-                    pub fn $trig(&mut self, $($arg: $argty),*) -> ::core::result::Result<$ev, $crate::Refused> {
-                        match self.state {
-                            $( $crate::__sm_from!($from $({ $($fb)* })?) )|+ => {
-                                self.state = State::$to $({ $($tf $(: $te)?),* })?;
-                                ::core::result::Result::Ok($ev { $($pf $(: $pe)?),* })
-                            }
+                    pub fn $trig(
+                        &mut self,
+                        out: &mut impl $crate::Sink,
+                        $($arg: $argty),*
+                    ) -> ::core::result::Result<(), $crate::Refused> {
+                        let (next, event) = match self.state {
+                            $( $crate::__sm_from!($from $({ $($fb),* })?) )|+ => (
+                                State::$to $({ $($tf $(: $te)?),* })?,
+                                $ev { $($pf $(: $pe)?),* },
+                            ),
                             #[allow(unreachable_patterns)]
-                            _ => ::core::result::Result::Err($crate::Refused {
-                                machine: stringify!($name),
-                                trigger: stringify!($trig),
-                                state: self.state.name(),
-                            }),
-                        }
+                            _ => {
+                                return ::core::result::Result::Err($crate::Refused {
+                                    machine: stringify!($name),
+                                    trigger: stringify!($trig),
+                                    state: self.state.name(),
+                                })
+                            }
+                        };
+                        $crate::Sink::deliver(out, event);
+                        self.state = next;
+                        ::core::result::Result::Ok(())
                     }
                 )+
             }
@@ -248,9 +293,8 @@ macro_rules! state_machine {
 
             $(
                 $(#[doc = $tdoc])*
-                #[derive(Clone, Copy, Debug, PartialEq)]
+                #[derive(Debug, PartialEq)]
                 #[non_exhaustive]
-                #[must_use = "an event must be handed on"]
                 pub struct $ev {
                     $(pub $pf: $pt),*
                 }
@@ -284,6 +328,8 @@ macro_rules! state_machine {
                         doc: concat!("" $(, $tdoc, "\n")*),
                     };
                 }
+
+                impl $crate::__private::Sealed for $ev {}
 
                 impl $crate::Payload for $ev {
                     fn entry(&self) -> &'static $crate::Entry {
@@ -330,22 +376,36 @@ macro_rules! state_machine {
             #[cfg(test)]
             #[test]
             fn every_transition() {
+                struct Count(usize);
+                impl $crate::Extension for Count {
+                    fn on_event(&mut self, _: &$crate::Event<'_>, _: &$crate::Ctx<'_>) {
+                        self.0 += 1;
+                    }
+                }
                 let all: &[State] = &[
                     $( State::$S $({ $($sf: ::core::default::Default::default()),* })? ),+
                 ];
                 $(
                     for s in all {
+                        let mut seen = Count(0);
                         let mut m = Machine { state: *s };
                         let from: &[&str] = &[$(stringify!($from)),+];
                         let leaves = from.contains(&"*") || from.contains(&s.name());
-                        let r = m.$trig($(<$argty as ::core::default::Default>::default()),*);
+                        let r = {
+                            let bounds = $crate::Bounds::new(|| 0u64, $crate::Watchdog::new(1, 1));
+                            let mut out = $crate::compose_unpublished(
+                                $crate::Layer::$layer, $crate::Nop, &mut seen, bounds,
+                            );
+                            m.$trig(&mut out, $(<$argty as ::core::default::Default>::default()),*)
+                        };
                         if leaves {
-                            let ev = r.unwrap_or_else(|e| panic!("{e}"));
+                            r.unwrap_or_else(|e| panic!("{e}"));
                             assert_eq!(m.state().name(), stringify!($to), "{}", stringify!($trig));
-                            assert_eq!($crate::Payload::entry(&ev).trigger, stringify!($trig));
+                            assert_eq!(seen.0, 1, "{} delivers one event", stringify!($trig));
                         } else {
                             assert!(r.is_err(), "{} from {}", stringify!($trig), s.name());
                             assert_eq!(m.state(), *s, "a refused {} changed the state", stringify!($trig));
+                            assert_eq!(seen.0, 0, "a refused {} delivered an event", stringify!($trig));
                         }
                     }
                 )+
@@ -359,7 +419,7 @@ macro_rules! state_machine {
 #[macro_export]
 macro_rules! __sm_from {
     (*) => { _ };
-    ($s:ident { $($b:tt)* }) => { State::$s { $($b)* } };
+    ($s:ident { $($b:ident),* }) => { State::$s { $($b,)* .. } };
     ($s:ident) => { State::$s { .. } };
 }
 

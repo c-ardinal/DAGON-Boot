@@ -86,7 +86,11 @@ fn flash_with(
     // Only ever compared with the candidates, never passed on as given.
     let device = v["device"].as_str();
     let t = read_topology(cfg, &inside(cfg, &cfg.topology_path(None)?)?)?;
-    let out = inside(cfg, &cfg.provision_dir().join(node))?;
+    // As written, never resolved: the writes check every part for links.
+    let out = cfg.provision_dir().join(node);
+    if let crate::genfs::Out::User(p) = crate::genfs::Out::of(&cfg.base, &out)? {
+        inside(cfg, &p)?;
+    }
     // The page gets paths relative to the project or the DAGON source.
     let steps = crate::flash::plan(cfg, &t, node, &out, crate::flash::Paths::Relative)?;
     for l in &steps {

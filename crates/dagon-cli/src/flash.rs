@@ -609,8 +609,8 @@ pub(crate) fn prepare(
     let mcu = node_mcu(&reg, t, node)?;
     match Esp::of(mcu) {
         Some(esp) => {
-            let app_bin = out.join("app.bin");
-            crate::genfs::check_out(&cfg.base, &app_bin)?;
+            let app_out = crate::genfs::Out::of(&cfg.base, out)?.join("app.bin")?;
+            let app_bin = crate::genfs::check_out(&cfg.base, &app_out)?;
             let app = crate::esp::save_image(&esp, &i.app, &app_bin)?;
             esp_files(
                 &reg,
@@ -710,10 +710,10 @@ fn esp_files(
         key,
     )?;
     let (header, body) = img.split_at(HEADER_SIZE);
+    let dest = crate::genfs::Out::of(base, out)?;
     let file = |name: &str, bytes: &[u8]| -> Result<PathBuf, String> {
-        let p = out.join(name);
-        crate::genfs::write_out(base, &p, bytes)?;
-        Ok(p)
+        crate::genfs::write_out(base, &dest.join(name)?, bytes)?;
+        Ok(out.join(name))
     };
     let bootloader = file("bootloader.bin", &boot)?;
     let table = file("partitions.csv", csv.as_bytes())?;
@@ -765,7 +765,7 @@ fn esp_files(
     ];
     crate::genfs::write_out(
         base,
-        &out.join("commands.txt"),
+        &dest.join("commands.txt")?,
         command_lines("espflash", &commands).as_bytes(),
     )?;
     Ok(FirstWrite::Espflash { files, commands })

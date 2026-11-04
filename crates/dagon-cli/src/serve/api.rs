@@ -14,12 +14,11 @@ use serde_json::{json, Value};
 use super::http::{Request, Response};
 use super::jobs::{Job, Server};
 use crate::commands::{image_for_node, version, SignOpts};
-use crate::config::{load_key, read_file, read_topology, write_file, BuildInputs, Config};
+use crate::config::{load_key, read_file, read_topology, BuildInputs, Config};
 use crate::nodebuild;
 
 const SIGN_DIR: &str = "out/sign";
 const RELEASE_DIR: &str = "out/release";
-const CONFORM_DIR: &str = "out/conform";
 
 /// Node ids, release names: what may become a file name.
 pub(super) fn plain(s: &str) -> bool {
@@ -678,10 +677,12 @@ fn job_build(job: &mut Job, cfg: Config, v: Value) -> Result<Value, String> {
     Ok(json!({ "nodes": list }))
 }
 
+#[cfg(test)]
 fn sign_path(cfg: &Config, node: &str, slot: char) -> PathBuf {
     cfg.base.join(SIGN_DIR).join(format!("{node}-{slot}.img"))
 }
 
+#[cfg(test)]
 fn sign_record_path(cfg: &Config, node: &str) -> PathBuf {
     cfg.base.join(SIGN_DIR).join(format!("{node}.json"))
 }
@@ -785,113 +786,99 @@ fn sign_nodes(
     stop_if(cancel)?;
     let mut files = Vec::new();
     for (node, ver, images) in &signed {
-        files.extend(sign_swaps(cfg, node, ver, images)?);
+        files.extend(sign_swaps(node, ver, images)?);
     }
-    // The signed images are DAGON's outputs: no link on the way to any of
-    // them, their .new or their .old.
-    for (path, _) in &files {
-        for p in [
-            path.clone(),
-            with_suffix(path, ".new"),
-            with_suffix(path, ".old"),
-        ] {
-            crate::genfs::guard(&cfg.base, &p)?;
-        }
-    }
-    commit_files(&files, &mut rename_output)?;
+    let base = cfg.base.clone();
+    commit_files(&base, &files, &mut |from, to| {
+        crate::genfs::rename(&base, from, to)
+    })?;
     Ok(json!({ "images": out }))
-}
-
-/// Renames a signed output; `sign_nodes` checked the path with genfs.
-// The sign's swap of DAGON's own outputs, every path checked by genfs::guard.
-#[allow(clippy::disallowed_methods)]
-fn rename_output(from: &Path, to: &Path) -> std::io::Result<()> {
-    std::fs::rename(from, to)
 }
 
 /// Held for a whole sign (stage and commit).
 static SIGN_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
-/// One file of a sign: its final path and new bytes (None: the old file
-/// goes, a slot no longer signed).
-type FileSwap = (PathBuf, Option<Vec<u8>>);
+/// One file of a sign: its path in the work area and new bytes (None:
+/// the old file goes, a slot no longer signed).
+type FileSwap = (crate::genfs::Rel, Option<Vec<u8>>);
 
 /// A node's new images and record, and its old images of slots no longer
-/// signed (to remove); the record last.
-fn sign_swaps(
-    cfg: &Config,
-    node: &str,
-    ver: &str,
-    images: &[(char, Vec<u8>)],
-) -> Result<Vec<FileSwap>, String> {
+/// signed (to remove); the record last. Paths stay as written (never
+/// resolved): every file operation of the swap checks them for links.
+fn sign_swaps(node: &str, ver: &str, images: &[(char, Vec<u8>)]) -> Result<Vec<FileSwap>, String> {
     let mut record = SignRecord {
         version: ver.to_string(),
         images: Vec::new(),
     };
     let mut files = Vec::new();
     for slot in ['a', 'b'] {
-        let path = inside(cfg, &sign_path(cfg, node, slot))?;
+        let rel = crate::genfs::Rel::new(format!("{SIGN_DIR}/{node}-{slot}.img"))?;
         let Some((_, img)) = images.iter().find(|(s, _)| *s == slot) else {
-            files.push((path, None));
+            files.push((rel, None));
             continue;
         };
-        let name = path
-            .file_name()
-            .unwrap_or_default()
-            .to_string_lossy()
-            .into_owned();
-        record.images.push((name, sha_hex(img)));
-        files.push((path, Some(img.clone())));
+        record
+            .images
+            .push((rel.file_name().to_string(), sha_hex(img)));
+        files.push((rel, Some(img.clone())));
     }
     let text = serde_json::to_string_pretty(&record).map_err(|e| e.to_string())?;
     files.push((
-        inside(cfg, &sign_record_path(cfg, node))?,
+        crate::genfs::Rel::new(format!("{SIGN_DIR}/{node}.json"))?,
         Some(text.into_bytes()),
     ));
     Ok(files)
 }
 
-/// Replaces `files` all together. Every new file is written as `<name>.new`
-/// first (a failure removes them all; nothing changed). Then each old file
-/// becomes `<name>.old` and its `.new` takes its name; if a `rename` fails,
-/// every step so far is undone (the `.old` files back, no `.new` left) and
-/// the error returned. Only when all are in place do the `.old` files go.
-// The sign's swap of DAGON's own outputs (.new, .old, undo); sign_nodes checks every path with genfs::guard first.
-#[allow(clippy::disallowed_methods)]
+/// Replaces `files` all together, every write, rename and removal through
+/// genfs (a link on the way refuses it). Every new file is written as
+/// `<name>.new` first (a failure removes them all; nothing changed). Then
+/// each old file becomes `<name>.old` and its `.new` takes its name; if a
+/// `rename` fails, every step so far is undone (the `.old` files back, no
+/// `.new` left) and the error returned. Only when all are in place do the
+/// `.old` files go.
 fn commit_files(
+    base: &Path,
     files: &[FileSwap],
-    rename: &mut dyn FnMut(&Path, &Path) -> std::io::Result<()>,
+    rename: &mut dyn FnMut(&crate::genfs::Rel, &crate::genfs::Rel) -> Result<(), String>,
 ) -> Result<(), String> {
-    let new_of = |p: &Path| with_suffix(p, ".new");
-    let old_of = |p: &Path| with_suffix(p, ".old");
+    use crate::genfs;
+    let new_of = |p: &genfs::Rel| p.with_suffix(".new");
+    let old_of = |p: &genfs::Rel| p.with_suffix(".old");
     let remove_new = || {
         for (p, _) in files {
-            let _ = std::fs::remove_file(new_of(p));
+            let _ = genfs::remove(base, &new_of(p));
         }
     };
     for (path, bytes) in files {
         if let Some(b) = bytes {
-            if let Err(e) = write_file(&new_of(path), b) {
+            if let Err(e) = genfs::write(base, &new_of(path), b) {
                 remove_new();
                 return Err(e);
             }
         }
     }
     // (path, moved to .old, new in place) for every step taken.
-    let mut done: Vec<(&Path, bool, bool)> = Vec::new();
+    let mut done: Vec<(&genfs::Rel, bool, bool)> = Vec::new();
     let mut failed = None;
     for (path, bytes) in files {
-        let moved = path.exists();
+        let moved = match genfs::checked(base, path) {
+            Ok(p) => p.exists(),
+            Err(e) => {
+                failed = Some(e);
+                break;
+            }
+        };
         if moved {
             if let Err(e) = rename(path, &old_of(path)) {
-                failed = Some(format!("cannot replace {}: {e}", path.display()));
+                failed = Some(format!("cannot replace {path}: {e}"));
                 break;
             }
         }
         done.push((path, moved, false));
         if bytes.is_some() {
             if let Err(e) = rename(&new_of(path), path) {
-                failed = Some(format!("cannot replace {}: {e}", path.display()));
+                failed = Some(format!("cannot replace {path}: {e}"));
                 break;
             }
             done.last_mut().expect("pushed").2 = true;
@@ -901,13 +888,13 @@ fn commit_files(
         let mut undo = Vec::new();
         for (path, moved, placed) in done.into_iter().rev() {
             if placed {
-                if let Err(x) = std::fs::remove_file(path) {
-                    undo.push(format!("{}: {x}", path.display()));
+                if let Err(x) = genfs::remove(base, path) {
+                    undo.push(format!("{path}: {x}"));
                 }
             }
             if moved {
-                if let Err(x) = std::fs::rename(old_of(path), path) {
-                    undo.push(format!("{} not restored: {x}", path.display()));
+                if let Err(x) = genfs::rename(base, &old_of(path), path) {
+                    undo.push(format!("{path} not restored: {x}"));
                 }
             }
         }
@@ -919,13 +906,14 @@ fn commit_files(
     }
     for (path, moved, _) in done {
         if moved {
-            let _ = std::fs::remove_file(old_of(path));
+            let _ = genfs::remove(base, &old_of(path));
         }
     }
     Ok(())
 }
 
 /// `path` with `suffix` added to its file name (same folder).
+#[cfg(test)]
 fn with_suffix(path: &Path, suffix: &str) -> PathBuf {
     let mut name = path.file_name().unwrap_or_default().to_os_string();
     name.push(suffix);
@@ -1001,8 +989,8 @@ fn release_from(
     let r = dagon_sign::release::build(&reg, t, &topo_bin, &images, name, key)
         .map_err(|e| e.to_string())?;
     stop_if(cancel)?;
-    let out = inside(cfg, &cfg.base.join(RELEASE_DIR).join(format!("{name}.dgb")))?;
-    write_file(&out, &r.bundle)?;
+    let rel = crate::genfs::Rel::new(format!("{RELEASE_DIR}/{name}.dgb"))?;
+    crate::genfs::write(&cfg.base, &rel, &r.bundle)?;
     let sha = to_hex(&dagon_format::sha256(&topo_bin));
     log(&format!(
         "release {name}: {} images, {} bytes",
@@ -1134,12 +1122,18 @@ fn job_conform(job: &mut Job, cfg: Config, v: Value) -> Result<Value, String> {
         .ok_or("node is required")?;
     let t = read_topology(&cfg, &inside(&cfg, &cfg.topology_path(None)?)?)?;
     let to = crate::conform::node_target(&crate::defs::registry(&cfg)?, &t, node)?;
-    let dir = inside(&cfg, &cfg.base.join(CONFORM_DIR).join(node))?;
+    // Read and written as written (never resolved); the writes go through
+    // genfs, which refuses a link on the way.
+    let dir = cfg.base.join(crate::conform::CONFORM_DIR).join(node);
+    let out = crate::genfs::Out::Work(crate::genfs::Rel::new(format!(
+        "{}/{node}",
+        crate::conform::CONFORM_DIR
+    ))?);
     let key = serve_key(&cfg)?;
     job.progress("waiting for the hub", None);
     let report = job.with_device(|job| {
         job.progress("running", None);
-        crate::conform::conform_files(node, to, &dir, &dir, &key, None)
+        crate::conform::conform_files(node, to, &dir, &out, &cfg.base, &key, None)
     })?;
     let file = crate::conform::json(&report, node);
     Ok(serde_json::from_str(&file).unwrap_or(Value::Null))
@@ -1152,7 +1146,7 @@ fn conform_get(server: &Server, node: &str) -> Res {
     let cfg = config(server).map_err(|e| Response::error(500, &e))?;
     let p = cfg
         .base
-        .join(CONFORM_DIR)
+        .join(crate::conform::CONFORM_DIR)
         .join(node)
         .join(crate::conform::RESULT_FILE);
     let p = inside(&cfg, &p).map_err(|e| Response::error(403, &e))?;
@@ -1538,16 +1532,16 @@ mod tests {
         }
         let mut files = Vec::new();
         for (node, imgs) in &images {
-            files.extend(sign_swaps(&cfg, node, "1.1.0", imgs).unwrap());
+            files.extend(sign_swaps(node, "1.1.0", imgs).unwrap());
         }
         for fail_at in [1usize, 4, 7, 9] {
             let mut n = 0;
-            let r = commit_files(&files, &mut |from, to| {
+            let r = commit_files(&cfg.base, &files, &mut |from, to| {
                 n += 1;
                 if n == fail_at {
-                    return Err(std::io::Error::other("injected"));
+                    return Err("injected".into());
                 }
-                std::fs::rename(from, to)
+                crate::genfs::rename(&cfg.base, from, to)
             });
             assert!(r.is_err(), "rename {fail_at}");
             assert_eq!(
@@ -1865,5 +1859,46 @@ mod tests {
             assert!(static_file(&dir, bad).is_none(), "{bad}");
         }
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_sign_never_writes_or_removes_through_a_junction() {
+        if !cfg!(windows) {
+            return; // the link cases themselves are in genfs
+        }
+        let base = std::env::temp_dir().join(format!("dagon-sign-junction-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&base);
+        std::fs::create_dir_all(base.join("user")).unwrap();
+        std::fs::create_dir_all(base.join("out")).unwrap();
+        for f in ["seg-a.img", "seg-b.img", "seg.json"] {
+            std::fs::write(base.join("user").join(f), "mine").unwrap();
+        }
+        let p = |r: &str| base.join(r).components().collect::<PathBuf>();
+        let ok = std::process::Command::new("cmd")
+            .args(["/C", "mklink", "/J"])
+            .arg(p(SIGN_DIR))
+            .arg(p("user"))
+            .output()
+            .unwrap()
+            .status
+            .success();
+        assert!(ok, "mklink /J");
+        // Slot a signed, slot b no longer: without the guard this would
+        // replace user/seg-a.img and seg.json and delete user/seg-b.img.
+        let files = sign_swaps("seg", "1.1.0", &[('a', b"NEW A".to_vec())]).unwrap();
+        let e = commit_files(&base, &files, &mut |from, to| {
+            crate::genfs::rename(&base, from, to)
+        })
+        .unwrap_err();
+        assert!(e.contains("out/sign is a link"), "{e}");
+        for f in ["seg-a.img", "seg-b.img", "seg.json"] {
+            assert_eq!(
+                std::fs::read_to_string(base.join("user").join(f)).unwrap(),
+                "mine",
+                "{f}"
+            );
+        }
+        assert_eq!(std::fs::read_dir(base.join("user")).unwrap().count(), 3);
+        let _ = std::fs::remove_dir_all(&base);
     }
 }

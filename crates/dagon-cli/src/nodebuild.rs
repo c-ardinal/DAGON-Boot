@@ -132,8 +132,8 @@ pub fn build_nodes_keyed(
 /// Empties node `id`'s output folder; its path relative to the work area.
 /// The folder is DAGON's: cleared (and filled) through genfs, so a link on
 /// the way (out, out/build or the node's folder) is refused, not followed.
-fn clear_output(cfg: &Config, id: &str) -> Result<String, String> {
-    let out_rel = crate::genfs::rel(&cfg.base, &node_dir(cfg, id))?;
+fn clear_output(cfg: &Config, id: &str) -> Result<crate::genfs::Rel, String> {
+    let out_rel = crate::genfs::Rel::new(format!("{OUT_DIR}/{id}"))?;
     crate::genfs::remove_tree(&cfg.base, &out_rel)
         .map_err(|e| format!("[build.{id}] output: {e}"))?;
     Ok(out_rel)
@@ -187,7 +187,7 @@ fn build_node(
             cancel,
         )?;
         let dest = elf_path(cfg, id, slot);
-        crate::genfs::copy(&cfg.base, &exe, &crate::genfs::rel(&cfg.base, &dest)?)
+        crate::genfs::copy(&cfg.base, &exe, &out_rel.join(format!("app-{slot}.elf"))?)
             .map_err(|e| format!("[build.{id}] output: {e}"))?;
         let size = std::fs::metadata(&dest).map(|m| m.len()).unwrap_or(0);
         log(&format!(
@@ -199,7 +199,7 @@ fn build_node(
         built.push((slot, dest, size));
     }
     let text = serde_json::to_string_pretty(&record).map_err(|e| e.to_string())?;
-    crate::genfs::write(&cfg.base, &format!("{out_rel}/{RECORD}"), text.as_bytes())?;
+    crate::genfs::write(&cfg.base, &out_rel.join(RECORD)?, text.as_bytes())?;
     Ok(Built {
         node: id.into(),
         slots: built,

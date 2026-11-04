@@ -126,8 +126,9 @@ fn checkout(git: &str, tag: &str, base: &Path) -> Result<PathBuf, String> {
          publish = false\n\n[workspace]\n\n[lib]\npath = \"lib.rs\"\n\n\
          [dependencies]\n{PROBE_DEP} = {{ git = {git:?}, tag = {tag:?} }}\n"
     );
-    crate::genfs::write_out(base, &dir.join("Cargo.toml"), manifest.as_bytes())?;
-    crate::genfs::write_out(base, &dir.join("lib.rs"), b"")?;
+    let probe = crate::genfs::Rel::new(PROBE_DIR)?;
+    crate::genfs::write(base, &probe.join("Cargo.toml")?, manifest.as_bytes())?;
+    crate::genfs::write(base, &probe.join("lib.rs")?, b"")?;
     let mut cmd = Command::new("cargo");
     for k in crate::nodebuild::SECRET_ENV {
         cmd.env_remove(k);

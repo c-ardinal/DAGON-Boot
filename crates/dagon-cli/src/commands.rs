@@ -395,7 +395,11 @@ pub(crate) fn provision_files(
     // Below the work area (the default provision folder) the files are
     // DAGON's outputs and go through genfs; elsewhere the user named the
     // folder (--out, provision_dir).
-    let write_file = |p: &Path, b: &[u8]| crate::genfs::write_out(base, p, b);
+    let out = crate::genfs::Out::of(base, dir)?;
+    let write_file = |p: &Path, b: &[u8]| {
+        let name = p.file_name().ok_or("no file name")?.to_string_lossy();
+        crate::genfs::write_out(base, &out.join(&name)?, b)
+    };
     let mcu = node_mcu(reg, t, node)?;
     if let Writer::Espflash { .. } = mcu.writer {
         return Err(format!(

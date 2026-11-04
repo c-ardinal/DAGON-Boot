@@ -260,7 +260,7 @@ fn prune(base: &Path, id: &str, keep: &[String]) -> Result<Vec<String>, String> 
             ));
             continue;
         }
-        crate::genfs::remove(base, &format!("{rel}/{name}"))?;
+        crate::genfs::remove(base, &crate::genfs::Rel::new(format!("{rel}/{name}"))?)?;
         out.push(format!("{:<10} {rel}/{name}", "removed"));
     }
     Ok(out)
@@ -297,7 +297,8 @@ pub fn write_nodes(
         .filter(|n| only.is_empty() || only.contains(&n.id))
     {
         let mine = cfg.nodes.get(&n.id).unwrap_or(&none);
-        if let Some(link) = crate::genfs::link_in(base, &format!("nodes/{}/{GENERATED}", n.id))? {
+        let generated = crate::genfs::Rel::new(format!("nodes/{}/{GENERATED}", n.id))?;
+        if let Some(link) = crate::genfs::link_in(base, &generated) {
             // A node whose crate gen skipped is already reported.
             if failed.contains(&n.id) {
                 continue;

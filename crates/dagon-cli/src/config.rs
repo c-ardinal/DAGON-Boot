@@ -455,14 +455,11 @@ pub fn allow_key(public: &[u8; 32], allowed: bool) -> Result<(), String> {
     Ok(())
 }
 
-// Writes a path the user names (a command's output, a provision folder, a report folder); outputs dagon keeps below the work area go through genfs.
-#[allow(clippy::disallowed_methods)]
+/// Writes a file the user named (a command's `--out`, the file next to an
+/// input it names); never through a link at that path. Outputs dagon keeps
+/// in the work area use genfs with a work-area path instead.
 pub fn write_file(path: &Path, bytes: &[u8]) -> Result<(), String> {
-    if let Some(dir) = path.parent().filter(|d| !d.as_os_str().is_empty()) {
-        std::fs::create_dir_all(dir)
-            .map_err(|e| format!("cannot create {}: {e}", dir.display()))?;
-    }
-    std::fs::write(path, bytes).map_err(|e| format!("cannot write {}: {e}", path.display()))
+    crate::genfs::write_user(path, bytes)
 }
 
 pub fn read_file(path: &Path) -> Result<Vec<u8>, String> {

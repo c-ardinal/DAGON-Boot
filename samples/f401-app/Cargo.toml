@@ -32,6 +32,8 @@ test = false
 
 [dependencies]
 dagon-format = { path = "../../crates/dagon-format" }
+# The published AppSnapshot the display follows.
+dagon-agent = { path = "../../crates/dagon-agent" }
 
 # The firmware.
 [target.'cfg(target_os = "none")'.dependencies]

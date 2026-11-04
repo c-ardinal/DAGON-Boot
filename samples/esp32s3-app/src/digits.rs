@@ -78,6 +78,25 @@ fn segments(c: u8) -> Option<u8> {
     match c {
         b'0'..=b'9' => Some(DIGITS[usize::from(c - b'0')]),
         b'-' => Some(0b100_0000),
+        b' ' => Some(0),
+        // The update words (crate::screen).
+        b'A' => Some(0b111_0111),
+        b'b' => Some(0b111_1100),
+        b'C' => Some(0b011_1001),
+        b'c' => Some(0b101_1000),
+        b'd' => Some(0b101_1110),
+        b'E' => Some(0b111_1001),
+        b'F' => Some(0b111_0001),
+        b'h' => Some(0b111_0100),
+        // `I` on the left verticals, `i` the lower left one: neither looks like 1.
+        b'I' => Some(0b011_0000),
+        b'i' => Some(0b001_0000),
+        b'L' => Some(0b011_1000),
+        b'n' => Some(0b101_0100),
+        b'o' => Some(0b101_1100),
+        b'P' => Some(0b111_0011),
+        b'r' => Some(0b101_0000),
+        b't' => Some(0b111_1000),
         _ => None,
     }
 }

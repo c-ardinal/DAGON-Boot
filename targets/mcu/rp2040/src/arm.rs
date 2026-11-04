@@ -199,16 +199,21 @@ pub mod trial {
         SCRATCH.map(|r| unsafe { r.read_volatile() })
     }
 
+    /// Stores the cell, word 0 then word 1 (one store each).
     pub fn write(cell: [u32; 2]) {
-        for (r, v) in SCRATCH.into_iter().zip(cell) {
-            // SAFETY: as above; nothing else in DAGON uses SCRATCH0-1.
-            unsafe { r.write_volatile(v) };
-        }
+        cell.into_iter()
+            .enumerate()
+            .for_each(|(i, w)| write_word(i, w));
+    }
+
+    fn write_word(i: usize, w: u32) {
+        // SAFETY: as above; nothing else in DAGON uses SCRATCH0-1.
+        unsafe { SCRATCH[i].write_volatile(w) };
     }
 
     /// The cell holds what is written to it (`dagon_core::bootcore::cell_holds`).
     pub fn holds() -> bool {
-        dagon_core::bootcore::cell_holds(read, write)
+        dagon_core::bootcore::cell_holds(read, write_word)
     }
 
     const CTRL: *mut u32 = 0x4005_8000 as *mut u32;

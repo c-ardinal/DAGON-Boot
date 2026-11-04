@@ -112,10 +112,16 @@ pub const fn trial_cell(p: &SlotRef, attempt: u8) -> [u32; 2] {
 pub fn tried(cell: [u32; 2], p: &SlotRef) -> u8 {
     let ours = word(p, 0) & !0xFF;
     cell.into_iter()
-        .filter(|w| w & !0xFF == ours && w & 0xF == !(w >> 4) & 0xF)
+        .filter(|&w| w & !0xFF == ours && counts(w))
         .map(|w| ((w >> 4) & 0xF) as u8)
         .max()
         .unwrap_or(0)
+}
+
+/// `w` is a cell word holding a count (for some image): its tag and its
+/// count check hold.
+const fn counts(w: u32) -> bool {
+    w & 0xFF00_0000 == CELL_TAG && w & 0xF == !(w >> 4) & 0xF
 }
 
 /// The cell value that counts nothing (written once a trial is settled).
@@ -125,17 +131,29 @@ pub const CLEARED: [u32; 2] = [0, 0];
 /// and read back to see the cell hold values.
 const PROBE: [u32; 2] = [0x5AA5_C33C, 0x0FF0_A55A];
 
-/// Whether the cell holds what is written to it: a probe value, then the
-/// value it had, each read back. A cell that does not (no such register,
-/// a stuck or write-protected one) cannot count a trial's starts, so the
-/// MCU package refuses boot core updates and a pending core rolls itself
-/// back ([`settle_log`]). Keeping the value across a reset is the vendor's
-/// documented behaviour and is checked on the board, not here.
-pub fn cell_holds(read: impl Fn() -> [u32; 2], mut write: impl FnMut([u32; 2])) -> bool {
+/// Whether the cell holds what is written to it. A cell that does not (no
+/// such register, a stuck or write-protected one) cannot count a trial's
+/// starts, so the MCU package refuses boot core updates and a pending core
+/// rolls itself back ([`settle_log`]). Keeping the value across a reset is
+/// the vendor's documented behaviour and is checked on the board, not here.
+///
+/// A cell with a word that holds a count was written by stage0, so it
+/// holds, and the check writes nothing: a probe over a count, cut by a
+/// reset before the count is back, would leave the cell counting 0 and
+/// let stage0 start a failing core again and again. Only a cell that
+/// counts nothing gets the probe (a value no cell word takes), then the
+/// value it had, each read back, one word per `write(index, word)` as the
+/// MCUs store them; a reset in between leaves it counting nothing, as
+/// before.
+pub fn cell_holds(read: impl Fn() -> [u32; 2], mut write: impl FnMut(usize, u32)) -> bool {
     let was = read();
-    write(PROBE);
+    if was.into_iter().any(counts) {
+        return true;
+    }
+    let mut put = |v: [u32; 2]| v.into_iter().enumerate().for_each(|(i, w)| write(i, w));
+    put(PROBE);
     let probe_held = read() == PROBE;
-    write(was);
+    put(was);
     probe_held && read() == was
 }
 

@@ -183,12 +183,59 @@ fn check_inline_verifies_the_signature_when_stage0_has_a_key() {
 fn the_cell_check_tells_a_holding_cell_from_a_stuck_one() {
     use std::cell::Cell as C;
     let b = r(1, 1);
-    let reg = C::new(trial_cell(&b, 2));
-    assert!(cell_holds(|| reg.get(), |v| reg.set(v)));
-    assert_eq!(tried(reg.get(), &b), 2, "the value it had is back");
+    let set = |reg: &C<[u32; 2]>, i: usize, w: u32| {
+        let mut v = reg.get();
+        v[i] = w;
+        reg.set(v);
+    };
+    for start in [trial_cell(&b, 2), CLEARED, [0x1234_5678, 0x9ABC_DEF0]] {
+        let reg = C::new(start);
+        assert!(cell_holds(|| reg.get(), |i, w| set(&reg, i, w)));
+        assert_eq!(reg.get(), start, "the value it had is back");
+    }
     let stuck = C::new([0u32, 0]);
-    assert!(!cell_holds(|| stuck.get(), |_| {}));
-    assert!(!cell_holds(|| [u32::MAX; 2], |_| {}));
+    assert!(!cell_holds(|| stuck.get(), |_, _| {}));
+    assert!(!cell_holds(|| [u32::MAX; 2], |_, _| {}));
+}
+
+/// The cell check stores one word at a time, as both MCUs do. A reset
+/// after any of its stores leaves a cell that counts no fewer starts for
+/// the pending image than before (else stage0 would start a broken core
+/// again and again).
+#[test]
+fn a_reset_inside_the_cell_check_never_lowers_the_count() {
+    use std::cell::RefCell;
+    let b = r(1, 1);
+    let [w1, _] = trial_cell(&b, 1);
+    let [w3, _] = trial_cell(&b, 3);
+    let starts = [
+        trial_cell(&b, 2),
+        [w3, w1],
+        [w1, 0],
+        [0, w3],
+        trial_cell(&r(1, 2), 4),
+        CLEARED,
+        [0x1234_5678, 0x9ABC_DEF0],
+    ];
+    for start in starts {
+        let reg = RefCell::new(start);
+        let stores = RefCell::new(Vec::new());
+        cell_holds(
+            || *reg.borrow(),
+            |i, w| {
+                reg.borrow_mut()[i] = w;
+                stores.borrow_mut().push((i, w));
+            },
+        );
+        let mut cut = start;
+        for &(i, w) in stores.borrow().iter() {
+            cut[i] = w;
+            assert!(
+                tried(cut, &b) >= tried(start, &b),
+                "{start:08x?}: a reset here leaves {cut:08x?}"
+            );
+        }
+    }
 }
 
 /// A pending core on a node whose cell does not hold rolls itself back

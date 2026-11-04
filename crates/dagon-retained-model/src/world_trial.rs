@@ -2,7 +2,10 @@
 //! boot core rules (`dagon_core::bootcore`) over a two-word retained cell,
 //! with a reset or a power loss injectable after every store to the cell
 //! (each word is one store, so a fault may land between the two), and
-//! after power loss the cell either cleared or random. New cores are set
+//! after power loss the cell either cleared or random. The stores include
+//! those of the production cell check (`bootcore::cell_holds`), run as the
+//! MCUs run it: by the started boot core and again by the app. Both MCUs
+//! store word 0, then word 1. New cores are set
 //! pending, good or broken (a broken core passes stage0's image check but
 //! fails its own). Properties C1..C3 of retained-formats.md 7, after every
 //! operation:
@@ -15,10 +18,11 @@
 
 use crate::harness::{Violation, World};
 use crate::rng::Rng;
-use dagon_core::bootcore::{choose, settle, tried, Settle, CLEARED};
+use dagon_core::bootcore::{cell_holds, choose, settle, tried, Settle, CLEARED};
 use dagon_core::log::{LogState, SlotRef};
 use dagon_format::statelog::{kind, reason, target, Record};
 use dagon_format::Version;
+use std::cell::RefCell;
 
 /// A fault after the cell store number `at` (0-based) of one boot.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -84,18 +88,45 @@ impl Device {
     fn store(&mut self, value: [u32; 2], n: &mut u8, fault: Option<Fault>) -> Result<(), Cut> {
         for (i, w) in value.into_iter().enumerate() {
             self.cell[i] = w;
-            let at = *n;
-            *n += 1;
-            match fault {
-                Some(Fault::Reset { at: f }) if f == at => return Err(Cut),
-                Some(Fault::PowerLoss { at: f, random }) if f == at => {
-                    self.power_loss(random);
-                    return Err(Cut);
-                }
-                _ => {}
-            }
+            self.after_store(n, fault)?;
         }
         Ok(())
+    }
+
+    /// Counts a store and applies the fault that lands after it.
+    fn after_store(&mut self, n: &mut u8, fault: Option<Fault>) -> Result<(), Cut> {
+        let at = *n;
+        *n += 1;
+        match fault {
+            Some(Fault::Reset { at: f }) if f == at => Err(Cut),
+            Some(Fault::PowerLoss { at: f, random }) if f == at => {
+                self.power_loss(random);
+                Err(Cut)
+            }
+            _ => Ok(()),
+        }
+    }
+
+    /// The production cell check over the device's cell; a fault after one
+    /// of its stores cuts the boot there (no later store runs).
+    fn check_cell(&mut self, n: &mut u8, fault: Option<Fault>) -> Result<bool, Cut> {
+        let me = RefCell::new((&mut *self, *n, false));
+        let held = cell_holds(
+            || me.borrow().0.cell,
+            |i, w| {
+                let (d, n, cut) = &mut *me.borrow_mut();
+                if !*cut {
+                    d.cell[i] = w;
+                    *cut = d.after_store(n, fault).is_err();
+                }
+            },
+        );
+        let (_, at, cut) = me.into_inner();
+        *n = at;
+        if cut {
+            return Err(Cut);
+        }
+        Ok(held)
     }
 
     fn power_loss(&mut self, random: bool) {
@@ -136,7 +167,9 @@ impl Device {
         }
         self.store(start.cell, &mut n, fault)?;
         let core = cores[usize::from(start.slot)].expect("started");
+        // The boot core reads the cell, then checks it holds.
         let p = self.log.pending.map_or(0, |p| tried(self.cell, &p));
+        assert!(self.check_cell(&mut n, fault)?, "the modelled cell holds");
         match settle(&self.log, start.slot, p, max) {
             Settle::Nothing => {}
             Settle::Confirm(p) => {
@@ -152,6 +185,8 @@ impl Device {
                 self.store(CLEARED, &mut n, fault)?;
             }
         }
+        // The app's store checks the cell before it takes a boot core.
+        self.check_cell(&mut n, fault)?;
         Ok(start.slot)
     }
 
@@ -192,7 +227,7 @@ impl World for TrialWorld {
                         good: rng.chance(0.5),
                     }
                 } else {
-                    let at = rng.below(4) as u8;
+                    let at = rng.below(12) as u8;
                     let fault = match rng.below(4) {
                         0 => Some(Fault::Reset { at }),
                         1 => Some(Fault::PowerLoss {

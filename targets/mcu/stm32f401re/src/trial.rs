@@ -19,22 +19,27 @@ pub fn read() -> [u32; 2] {
     BKP.map(|r| unsafe { r.read_volatile() })
 }
 
+/// Stores the cell, word 0 then word 1 (one store each).
 pub fn write(cell: [u32; 2]) {
+    cell.into_iter()
+        .enumerate()
+        .for_each(|(i, w)| write_word(i, w));
+}
+
+fn write_word(i: usize, w: u32) {
     // SAFETY: fixed RCC, PWR and RTC backup registers: the PWR clock on
-    // and the backup domain open for writing, then the two cell words;
-    // nothing else in DAGON uses BKP0R-BKP1R.
+    // and the backup domain open for writing, then the cell word; nothing
+    // else in DAGON uses BKP0R-BKP1R.
     unsafe {
         RCC_APB1ENR.write_volatile(RCC_APB1ENR.read_volatile() | RCC_APB1ENR_PWREN);
         PWR_CR.write_volatile(PWR_CR.read_volatile() | PWR_CR_DBP);
-        for (r, v) in BKP.into_iter().zip(cell) {
-            r.write_volatile(v);
-        }
+        BKP[i].write_volatile(w);
     }
 }
 
 /// The cell holds what is written to it (`dagon_core::bootcore::cell_holds`).
 pub fn holds() -> bool {
-    dagon_core::bootcore::cell_holds(read, write)
+    dagon_core::bootcore::cell_holds(read, write_word)
 }
 
 const IWDG_KR: *mut u32 = 0x4000_3000 as *mut u32;

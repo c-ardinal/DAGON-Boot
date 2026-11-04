@@ -955,3 +955,19 @@ fn regression_trial_cell_update_cut_between_its_words() {
     ];
     ok::<TrialWorld>(&c, &ops);
 }
+
+/// Found by the trial world once it ran the cell check: the check wrote a
+/// probe over both words of a running count, and a reset before the count
+/// was back left a cell that counted 0 (C1). The check now writes nothing
+/// while a word holds a count.
+#[test]
+fn regression_trial_cell_check_cut_after_its_probe() {
+    let c = wtr::Config { max: 5 };
+    let ops = [
+        wtr::Op::SetPending { good: false },
+        wtr::Op::Boot {
+            fault: Some(wtr::Fault::Reset { at: 3 }),
+        },
+    ];
+    ok::<TrialWorld>(&c, &ops);
+}

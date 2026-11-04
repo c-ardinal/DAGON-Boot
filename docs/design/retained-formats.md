@@ -524,7 +524,8 @@ production codec and stage0's and the boot core's rules
 (`bootcore::choose`, `settle`) over the two words, new cores set pending
 good or broken (a broken core passes stage0's check and fails its own),
 a reset or a power loss (the cell then cleared or random) after any store
-to the cell, 10,000 seeded scenarios in `cargo test` and 1,000,000 in the
+to the cell (the cell check's included, in the MCUs' order: word 0, then
+word 1), 10,000 seeded scenarios in `cargo test` and 1,000,000 in the
 full profile. Its properties, checked after every operation:
 
 | Id | Property |
@@ -536,9 +537,15 @@ full profile. Its properties, checked after every operation:
 The MCU packages' sweeps (`a_power_cut_at_every_flash_step_leaves_a_bootable_core`)
 add the flash side: a cut at every flash operation of an update,
 compaction of the state log included. A cell that does not hold what is
-written to it at all is found by `bootcore::cell_holds` (a probe value
-written and read back): such a node takes no boot core, and a pending
-core that finds it so rolls itself back.
+written to it at all is found by `bootcore::cell_holds`, run by the
+started boot core and by the app: such a node takes no boot core, and a
+pending core that finds it so rolls itself back. A cell with a word that
+holds a count was written by stage0, so it holds, and the check writes
+nothing over it; only a cell counting nothing gets a probe (a value no
+cell word takes) and its old value back, word by word, each read back, so
+a reset inside the check never leaves the cell counting fewer starts (the
+model found the earlier check, which probed over a running count, letting
+a failing core start without end).
 
 Limit of the claims: that each place keeps its value across the resets
 named is the vendor's documented behaviour, to be confirmed on each

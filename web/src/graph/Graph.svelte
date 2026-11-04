@@ -10,6 +10,8 @@
     sub?: readonly [string, string | number];
     /** Pairs after `sub` on the same line ("残り 約 2 分"). */
     more?: readonly (readonly [string, string])[];
+    /** The number is a failure count (問題 n > 0): red. */
+    alarm?: boolean;
     name: string;
   }
 
@@ -21,6 +23,11 @@
     /** A label-value line under the chip ("目安 約 1 分", "自動の再接続 あと 30 s"). */
     note?: string;
   }
+
+  /** Where a part dropped on the canvas goes: under `parent`, or on its own (a new tree). */
+  export interface DropTarget {
+    parent: string | null;
+  }
 </script>
 
 <script lang="ts">
@@ -29,9 +36,9 @@
   import type { Live } from '../app/operate.svelte.ts';
   import type { Config, Link, Node } from '../app/sample.ts';
   import { versionText } from '../wasm/dagon.ts';
-  import { lengthTable, neighbour, pathD, pointAt, shifted, tAtLength, tangentAt, tieLengths, verticalLink, wireOffsets } from './geometry.ts';
+  import { lengthTable, neighbour, pathD, pointAt, shifted, tAtLength, tangentAt, tieLengths, verticalLink, wireOffsets, type Pt } from './geometry.ts';
   import { treeLayout } from './layout.ts';
-  import { untrack } from 'svelte';
+  import { untrack, type Snippet } from 'svelte';
 
   interface Props {
     config: Config | null;
@@ -44,15 +51,42 @@
     onselect: (key: string) => void;
     dot: Dot | null;
     chips?: Record<string, Chip>;
-    /** Drawing scale (define mode's zoom; scrolling pans). */
+    /** The user's zoom on top of the fit (1 = fitted). */
     zoom?: number;
     /** Nodes being written: how full their water is, 0–100 (SC-O5, owner 11/2 and 11/3). */
     fill?: Record<string, number>;
-    /** Room the floating windows take on the left, right and bottom (px): trees centre in what is left. */
+    /** Room the floating windows take on the left and right (px): the graph centres in what is left. */
     inset?: { left: number; right: number; bottom?: number };
+    /** Port drag (定義 only): why `from` cannot take `to` under it, or null when it can. */
+    canLink?: (from: string, to: string) => string | null;
+    /** A port drag ended on a node that can be linked. */
+    onlink?: (from: string, to: string) => void;
+    /** A refused port drag: the reason (a failure, shown in red by the page). */
+    onrefuse?: (why: string, x: number, y: number) => void;
+    /** Small controls bottom-right of the canvas (zoom, view, undo). */
+    controls?: Snippet<[number]>;
+    /** The id of the node a dragged part would go under (highlighted). */
+    dropOn?: string | null;
   }
 
-  let { config, live, connected, sending, selected, onselect, dot, chips = {}, zoom = 1, fill = {}, inset = { left: 0, right: 0 } }: Props = $props();
+  let {
+    config,
+    live,
+    connected,
+    sending,
+    selected,
+    onselect,
+    dot,
+    chips = {},
+    zoom = 1,
+    fill = {},
+    inset = { left: 0, right: 0 },
+    canLink,
+    onlink,
+    onrefuse,
+    controls,
+    dropOn = null,
+  }: Props = $props();
 
   /**
    * Sizes in rem (DES-UX3-181): the root font follows the window, so cards,
@@ -63,41 +97,50 @@
     rem = parseFloat(getComputedStyle(document.documentElement).fontSize) || 16;
   };
   $effect(readRem);
-  const NODE_W = $derived(15 * rem);
-  const PC = $derived({ y: 1.5 * rem, w: 15 * rem, h: 2.75 * rem });
-  /** Top of the 親機 row: under each 親機's uplink card and its line. */
-  const TOP = $derived(PC.y + PC.h + 3 * rem);
-  const LINK_ROOM = $derived(6 * rem);
-  const GAP = $derived(3 * rem);
-  const SIDE = $derived(1.5 * rem);
-  const BOTTOM = $derived(1.5 * rem);
 
-  // Content box, so a scrollbar appearing narrows the canvas instead of adding a sideways scroll.
+  /** Names on the cards never get smaller than this on screen (px): past it the cards turn compact, then the canvas scrolls. */
+  const NAME_MIN_PX = 13;
+  /** From this many ノード the cards are compact whatever the window (DES-UX3-160: name, version and state only). */
+  const COMPACT_FROM = 9;
+  /** Card heights before they are measured (rem): to decide the card class without a measuring loop. */
+  const EST_H = { normal: 7.5, compact: 3.5 };
+
   let box = $state<DOMRectReadOnly>();
   const boxW = $derived(box?.width ?? 800);
-  const boxH = $derived(box?.height ?? 800);
+  const boxH = $derived(box?.height ?? 600);
   let heights = $state<Record<string, number>>({});
-  /** Height of the focal number in the bottom-left: the graph keeps that much room below itself. */
   let dotH = $state(0);
   let dotW = $state(0);
-  /** Room kept under the trees: the focal number's when it stands out from under the left window, else the bottom inset. */
-  const below = $derived(Math.max(inset.bottom ?? 0, dotW > inset.left ? dotH : 0));
   let focusKey = $state('node:hub');
   let canvas: HTMLDivElement;
+  let boxEl: HTMLDivElement;
 
-  const tree = $derived(
-    treeLayout(
-      (config?.nodes ?? []).map((n) => ({ id: n.id, hub: n.role === 'hub' })),
-      config?.links ?? [],
-      { w: NODE_W, h: (id) => heights[id] ?? 12 * rem, gapX: GAP, gapY: LINK_ROOM },
-    ),
-  );
-  /** Smallest scale the whole 構成 is fitted at; past it the canvas scrolls (names stay readable). */
-  const MIN_FIT = 0.6;
-  const contentW = $derived(tree.width + 2 * SIDE + inset.left + inset.right);
-  const bare = $derived(TOP + tree.height + BOTTOM);
-  /** The whole 構成 in view when it opens (DES-UX3-160), with room under it for the focal number. */
-  const wanted = $derived(Math.max(MIN_FIT, Math.min(1, boxW / contentW, (boxH - below) / bare)));
+  /** Card geometry of each class (the mock's A+C sizes): width, gaps, the uplink card above each top 親機. */
+  const sizes = (compact: boolean) => ({
+    w: (compact ? 11 : 16.25) * rem,
+    gapX: (compact ? 1.25 : 2.5) * rem,
+    gapY: (compact ? 3 : 4.5) * rem,
+  });
+  const nodesOf = $derived((config?.nodes ?? []).map((n) => ({ id: n.id, hub: n.role === 'hub' })));
+  const UPLINK_ROOM = $derived(5.25 * rem);
+  const SIDE = $derived(1.5 * rem);
+  let zoomH = $state(0);
+  /** Room under the graph for the focal number and the controls (the mock keeps it free: DES-UX3-187). */
+  const below = $derived(Math.max(dotH, zoomH) + rem + (inset.bottom ?? 0));
+  const availW = $derived(Math.max(1, boxW - inset.left - inset.right));
+  const availH = $derived(Math.max(1, boxH - below));
+  const fitOf = (w: number, h: number) => Math.min(1.25, availW / (w + 2 * SIDE), availH / (h + UPLINK_ROOM + SIDE));
+  /** Compact when there are many ノード, or when normal cards would have to shrink names under 13 px to fit. */
+  const compact = $derived.by(() => {
+    if (nodesOf.length >= COMPACT_FROM) return true;
+    const est = treeLayout(nodesOf, config?.links ?? [], { ...sizes(false), h: () => EST_H.normal * rem });
+    return fitOf(est.width, est.height) * rem < NAME_MIN_PX;
+  });
+  const S = $derived(sizes(compact));
+  const NODE_W = $derived(S.w);
+  const tree = $derived(treeLayout(nodesOf, config?.links ?? [], { ...S, h: (id) => heights[id] ?? (compact ? EST_H.compact : EST_H.normal) * rem }));
+  /** Never under the scale where names reach 13 px; past that the canvas scrolls. */
+  const wanted = $derived(Math.max(NAME_MIN_PX / rem, fitOf(tree.width, tree.height)));
   /**
    * The fit in use: it shrinks at once and grows only by more than GROW. Text wraps a
    * little differently at each scale, so card heights follow the fit; without the
@@ -111,29 +154,34 @@
     if (w < kept || w > kept * GROW) fit = w;
   });
   const scale = $derived(zoom * fit);
+  const contentW = $derived(tree.width + 2 * SIDE);
+  const contentH = $derived(UPLINK_ROOM + tree.height + SIDE);
   // Floored, so a fitted canvas never brings up a scrollbar (which would change the box and the fit again).
-  const W = $derived(Math.floor(Math.max(boxW / scale, contentW)));
-  /** Trees centred when they fit; from the left edge when they scroll. */
-  const left = $derived(inset.left / scale + (W - (inset.left + inset.right) / scale - tree.width) / 2);
-  const H = $derived(Math.floor(Math.max(boxH / scale, bare + below / scale)));
-  const pos = $derived(Object.fromEntries(Object.entries(tree.at).map(([id, p]) => [id, { x: left + p.x, y: TOP + p.y }])));
-  const depthOf = (n: Node) => tree.at[n.id]?.depth ?? 0;
+  const W = $derived(Math.floor(Math.max(boxW / scale, contentW + (inset.left + inset.right) / scale)));
+  const H = $derived(Math.floor(Math.max(boxH / scale, contentH + below / scale)));
+  /** The graph centred between the windows, and vertically in the room above the focal number. */
+  const left = $derived(inset.left / scale + Math.max(SIDE, (availW / scale - tree.width) / 2));
+  const top = $derived(UPLINK_ROOM + Math.max(0, (availH / scale - contentH) / 2));
+  const pos = $derived(Object.fromEntries(Object.entries(tree.at).map(([id, p]) => [id, { x: left + p.x, y: top + p.y }])));
+  const hOf = (id: string) => heights[id] ?? (compact ? EST_H.compact : EST_H.normal) * rem;
 
   const nameOf = (id: string) => config?.nodes.find((n) => n.id === id)?.name ?? id;
 
   const drawn = $derived(
-    (config?.links ?? []).map((l, i, all) => {
+    (config?.links ?? []).map((l) => {
       const key = `link:${l.to}`;
       const open = selected === key;
       const from = pos[l.from];
       const to = pos[l.to];
-      const slot = (i + 1) / (all.length + 1);
-      const base = verticalLink({ x: from.x + NODE_W * slot, y: from.y + (heights[l.from] ?? 12 * rem) }, { x: to.x + NODE_W / 2, y: to.y });
+      const siblings = (config?.links ?? []).filter((x) => x.from === l.from);
+      const slot = (siblings.indexOf(l) + 1) / (siblings.length + 1);
+      const base = verticalLink({ x: from.x + NODE_W * slot, y: from.y + hOf(l.from) }, { x: to.x + NODE_W / 2, y: to.y });
       const table = lengthTable(base);
       const total = table[table.length - 1];
       const gap = open ? 8 : 4;
-      const offsets = wireOffsets(l.wires.length, gap);
-      const width = (l.wires.length - 1) * gap;
+      const count = Math.max(1, l.wires.length);
+      const offsets = wireOffsets(count, gap);
+      const width = (count - 1) * gap;
       const ties = open
         ? []
         : tieLengths(total).map((s) => {
@@ -141,14 +189,18 @@
             const d = tangentAt(base, t);
             return { p: pointAt(base, t), deg: (Math.atan2(d.y, d.x) * 180) / Math.PI - 90, len: width + 4 };
           });
-      const mid = pointAt(base, tAtLength(table, total / 2));
+      // Compact cards: the chip sits lower on the link, clear of the card above.
+      const mid = pointAt(base, tAtLength(table, total * (compact ? 0.7 : 0.5)));
       const label = bundleLabel(l);
-      return { l, key, open, base, offsets, ties, mid, label, name: LINK.name(label, nameOf(l.from), nameOf(l.to), l.addr) };
+      return { l, key, open, base, offsets, ties, mid, label, name: LINK.name(label, nameOf(l.from), nameOf(l.to), l.addr), skipped: !!config?.nodes.find((n) => n.id === l.to)?.notYet };
     }),
   );
 
   function bundleLabel(l: Link): string {
-    return LINK.bundle(l.kind, l.wires.length, l.wires.filter((w) => w.shared).length);
+    // Compact level of detail keeps the bus and its value; the wire count stays in the sheet.
+    const value = l.addr || config?.nodes.find((n) => n.id === l.to)?.via.split(' ')[1] || '';
+    if (compact) return [l.kind, value].filter(Boolean).join(' ');
+    return LINK.bundle(l.kind, l.wires.length, l.wires.filter((w) => w.shared).length, value);
   }
 
   /** Focus stops in screen order: nodes, then link chips. */
@@ -176,15 +228,12 @@
     onselect(key);
   }
 
-  /** Four sine periods across twice the node's width: sliding it by half loops without a seam. */
-  const WAVE = 'M0 7Q25 0 50 7T100 7T150 7T200 7T250 7T300 7T350 7T400 7V14H0Z';
-
   type Mark = Chip | 'skeleton' | null;
 
   function markOf(n: Node): Mark {
     if (n.notYet) {
       const why = NODE.notYetWhy[n.notYet] ?? '';
-      return { chip: NODE.notYet, spoken: NODE.notYetName(why), silent: false, note: why };
+      return { chip: NODE.notYet, spoken: NODE.notYetName(why), silent: false, note: compact ? undefined : why };
     }
     if (chips[n.id]) return chips[n.id];
     if (!connected) return null;
@@ -200,18 +249,14 @@
     return h ? versionText(h.activeVersion) : '';
   }
 
-  /** Product names wrap after hyphens and after the MCU's name in them ("Waveshare RP2040" / "-Touch-…"). */
-  function breaks(product: string, mcu: string): string[] {
-    const at = mcu ? product.indexOf(mcu) : -1;
-    const cut = at < 0 ? [product] : [product.slice(0, at + mcu.length), product.slice(at + mcu.length)];
-    return cut.filter(Boolean).flatMap((p) => p.split(/(?<=-)/));
-  }
-
   /** A 親機's own connection line: its uplink as the 構成 writes it, or the link from the node above it. */
   function hubVia(n: Node): string {
     if (!n.uplink) return n.via || NODE.usb;
     return NODE.uplinkVia(KIND_LABEL[n.uplink.kind as LinkKind] ?? n.uplink.kind, n.uplink.host);
   }
+
+  /** The card's one mono line (the mock's meta): MCU and how it is reached. */
+  const metaOf = (n: Node) => [n.mcu, n.role === 'hub' ? hubVia(n) : n.via].filter(Boolean).join(' · ');
 
   /** 親機 nobody links to, each with its uplink (what drives it, as the 構成 writes it) above it. */
   const tops = $derived((config?.nodes ?? []).filter((n) => n.role === 'hub' && tree.roots.includes(n.id)));
@@ -253,124 +298,211 @@
       version,
     });
   }
+
+  /** Client point to canvas coordinates. */
+  function toCanvas(cx: number, cy: number): Pt {
+    const r = canvas.getBoundingClientRect();
+    return { x: (cx - r.left) / scale, y: (cy - r.top) / scale };
+  }
+
+  /**
+   * Where a part dropped at (cx, cy) goes (the mock's dropParent): under the nearest card just above
+   * the point, at any depth; else on its own. Null when the point is off the canvas.
+   */
+  export function dropTarget(cx: number, cy: number): DropTarget | null {
+    const r = boxEl?.getBoundingClientRect();
+    if (!r || cx < r.left || cx > r.right || cy < r.top || cy > r.bottom) return null;
+    const p = toCanvas(cx, cy);
+    const near = (config?.nodes ?? [])
+      .map((n) => ({ n, bottom: pos[n.id].y + hOf(n.id), cx: pos[n.id].x + NODE_W / 2 }))
+      .filter((c) => p.y > c.bottom && p.y - c.bottom < 1.6 * (hOf(c.n.id) + S.gapY) && Math.abs(p.x - c.cx) < 1.25 * NODE_W)
+      .sort((a, b) => p.y - a.bottom - (p.y - b.bottom) || Math.abs(p.x - a.cx) - Math.abs(p.x - b.cx))[0];
+    return { parent: near?.n.id ?? null };
+  }
+
+  /** Port drag (DES-UX3-031): from a card's lower port to another card's upper port. */
+  let wire = $state<{ from: string; a: Pt; b: Pt; target: string | null; bad: boolean } | null>(null);
+  const SNAP_PX = 28;
+  function portDown(e: PointerEvent, from: string) {
+    if (!onlink || e.button !== 0) return;
+    e.preventDefault();
+    e.stopPropagation();
+    (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
+    const a = { x: pos[from].x + NODE_W / 2, y: pos[from].y + hOf(from) };
+    wire = { from, a, b: a, target: null, bad: false };
+  }
+  /** Why each node cannot take the dragged link (null: it can), while dragging. */
+  const reasons = $derived(
+    wire ? Object.fromEntries((config?.nodes ?? []).filter((n) => n.id !== wire!.from).map((n) => [n.id, canLink?.(wire!.from, n.id) ?? null])) : {},
+  );
+  function portMove(e: PointerEvent) {
+    if (!wire) return;
+    const p = toCanvas(e.clientX, e.clientY);
+    let best = SNAP_PX / scale;
+    let target: string | null = null;
+    let b = p;
+    let over: string | null = null;
+    for (const n of config?.nodes ?? []) {
+      if (n.id === wire.from) continue;
+      const q = { x: pos[n.id].x + NODE_W / 2, y: pos[n.id].y };
+      const d = Math.hypot(q.x - p.x, q.y - p.y);
+      const inCard = p.x > pos[n.id].x && p.x < pos[n.id].x + NODE_W && p.y > pos[n.id].y - 10 && p.y < pos[n.id].y + hOf(n.id);
+      if (reasons[n.id] === null && (d < best || inCard)) {
+        best = Math.min(best, d);
+        target = n.id;
+        b = q;
+      } else if (inCard || d < SNAP_PX / scale) over = n.id;
+    }
+    wire = { ...wire, b, target, bad: !target && over !== null };
+    if (!target && over !== null && reasons[over]) onrefuse?.(reasons[over]!, e.clientX + 12, e.clientY + 12);
+  }
+  function portUp() {
+    if (!wire) return;
+    const w = wire;
+    wire = null;
+    if (w.target) onlink?.(w.from, w.target);
+  }
 </script>
 
 <svelte:window onresize={readRem} />
 
 <div class="graph">
-<div class="box" bind:contentRect={box}>
-  <!-- svelte-ignore a11y_no_static_element_interactions -->
-  <div class="canvas" bind:this={canvas} style:width="{W}px" style:height="{H}px" style:zoom={scale === 1 ? undefined : scale} onkeydown={onKey}>
-    <svg class="links" width={W} height={H} viewBox="0 0 {W} {H}" aria-hidden="true">
+  <div class="box" bind:this={boxEl} bind:contentRect={box}>
+    <!-- svelte-ignore a11y_no_static_element_interactions -->
+    <div
+      class="canvas"
+      class:compact
+      bind:this={canvas}
+      style:width="{W}px"
+      style:height="{H}px"
+      style:zoom={scale === 1 ? undefined : scale}
+      onkeydown={onKey}
+      onpointermove={portMove}
+      onpointerup={portUp}
+      onpointercancel={() => (wire = null)}
+    >
+      <svg class="links" width={W} height={H} viewBox="0 0 {W} {H}" aria-hidden="true">
+        {#each tops as h (h.id)}
+          {@const x = pos[h.id].x + NODE_W / 2}
+          {@const y0 = pos[h.id].y - UPLINK_ROOM + 2.5 * rem}
+          <line x1={x} y1={y0} x2={x} y2={pos[h.id].y} class="pc-link" class:dashed={!connected || h.id !== firstHub} class:busy={sending && h.id === firstHub} />
+          <circle cx={x} cy={y0} r="5" class="end" />
+        {/each}
+
+        {#each drawn as d (d.key)}
+          <g class="bundle" class:open={d.open} class:uns={d.skipped}>
+            {#each d.offsets as o, i (i)}
+              <path d={pathD(shifted(d.base, o))} class="wire" class:shared={d.l.wires[i]?.shared} />
+            {/each}
+            {#each d.ties as tie, i (i)}
+              <rect class="tie" x={-tie.len / 2} y={-3} width={tie.len} height={6} rx="3" transform="translate({tie.p.x} {tie.p.y}) rotate({tie.deg})" />
+            {/each}
+          </g>
+          <circle cx={d.base[0].x} cy={d.base[0].y} r="6" class="end" />
+          {#if d.l.kind === 'I2C'}<circle cx={d.base[0].x} cy={d.base[0].y} r="3" class="end" />{/if}
+        {/each}
+        {#if wire}<path d={pathD(verticalLink(wire.a, wire.b))} class="temp" class:bad={wire.bad} />{/if}
+      </svg>
+
       {#each tops as h (h.id)}
-        {@const x = pos[h.id].x + NODE_W / 2}
-        <line x1={x} y1={PC.y + PC.h} x2={x} y2={pos[h.id].y} class="pc-link" class:dashed={!connected || h.id !== firstHub} class:ink={sending && h.id === firstHub} />
-        <circle cx={x} cy={PC.y + PC.h} r="5" class="port" />
-        <circle cx={x} cy={pos[h.id].y} r="5" class="port" />
+        <div class="uplink" class:off={!connected || h.id !== firstHub} title={l0Of(h)} style:left="{pos[h.id].x + NODE_W / 2}px" style:top="{pos[h.id].y - UPLINK_ROOM + 0.75 * rem}px" style:max-width="{NODE_W + S.gapX}px">{l0Of(h)}</div>
+      {/each}
+
+      {#if !config}
+        <p class="empty" style:top="{UPLINK_ROOM + 2 * rem}px">{CANVAS.empty}</p>
+      {/if}
+
+      {#each config?.nodes ?? [] as n (n.id)}
+        {@const key = `node:${n.id}`}
+        {@const m = markOf(n)}
+        {@const v = versionOf(n)}
+        {@const level = fill[n.id]}
+        {@const linked = (config?.links ?? []).some((l) => l.to === n.id)}
+        <button
+          class="node"
+          class:uns={!!n.notYet}
+          class:err={m !== null && m !== 'skeleton' && m.silent}
+          class:drop={dropOn === n.id}
+          style:left="{pos[n.id].x}px"
+          style:top="{pos[n.id].y}px"
+          style:width="{NODE_W}px"
+          data-key={key}
+          data-avoid=""
+          tabindex={focusKey === key ? 0 : -1}
+          aria-pressed={selected === key}
+          aria-label={spokenName(n, m, v)}
+          bind:offsetHeight={heights[n.id]}
+          onclick={() => pick(key)}
+        >
+          {#if level !== undefined}
+            <!-- The water rises with the node's progress; its edge is two CSS-masked strips drifting at different speeds. -->
+            <span class="water" aria-hidden="true">
+              <span class="level" style:transform="translateY({100 - Math.min(100, Math.max(0, level))}%)">
+                <span class="crest back"></span><span class="crest front"></span>
+              </span>
+            </span>
+          {/if}
+          <span class="hd">
+            <b>[{n.no}] {n.name}</b><span class="role">{roleOf(n)}</span>
+            {#if v}<span class="ver" translate="no">{v}</span>{:else if m === 'skeleton'}<span class="skeleton ver-sk"></span>{/if}
+          </span>
+          <span class="bd">
+            <span class="prod" translate="no" title={n.product}>{n.product}</span>
+            <span class="meta" translate="no">{metaOf(n)}</span>
+            {#if m === 'skeleton'}
+              <span class="chips"><span class="skeleton chip-sk"></span></span>
+            {:else if m}
+              <span class="chips"><span class="chip" class:silent={m.silent} class:uns={!!n.notYet && m.chip === NODE.notYet}>{m.chip}</span></span>
+              {#if m.note}<span class="note">{m.note}</span>{/if}
+            {/if}
+          </span>
+          {#if level !== undefined}<span class="pct" aria-hidden="true">{Math.round(level)}%</span>{/if}
+        </button>
+        {#if n.role !== 'hub' || linked}
+          <span class="port in" class:linked aria-hidden="true" style:left="{pos[n.id].x + NODE_W / 2}px" style:top="{pos[n.id].y}px" class:ok={wire !== null && wire.from !== n.id && reasons[n.id] === null}></span>
+        {/if}
+        {#if onlink}
+          <!-- svelte-ignore a11y_no_static_element_interactions -->
+          <span
+            class="port out"
+            aria-hidden="true"
+            title={LINK.portOut(n.name)}
+            style:left="{pos[n.id].x + NODE_W / 2}px"
+            style:top="{pos[n.id].y + hOf(n.id)}px"
+            onpointerdown={(e) => portDown(e, n.id)}
+          ></span>
+        {/if}
       {/each}
 
       {#each drawn as d (d.key)}
-        <g class="bundle" class:open={d.open}>
-          {#each d.l.wires as w, i (w.signal)}
-            <path d={pathD(shifted(d.base, d.offsets[i]))} class="wire" class:shared={w.shared} />
-          {/each}
-          {#if d.l.wires.length === 0}<path d={pathD(d.base)} class="wire" />{/if}
-          {#each d.ties as tie, i (i)}
-            <rect class="tie" x={-tie.len / 2} y={-3} width={tie.len} height={6} rx="3" transform="translate({tie.p.x} {tie.p.y}) rotate({tie.deg})" />
-          {/each}
-        </g>
-        {#each [d.base[0], d.base[3]] as p, i (i)}
-          <circle cx={p.x} cy={p.y} r="6" class="port" />
-          {#if d.l.kind === 'I2C'}<circle cx={p.x} cy={p.y} r="3" class="port" />{/if}
-        {/each}
+        <button
+          class="link-chip"
+          class:selected={d.open}
+          class:uns={d.skipped}
+          style:left="{d.mid.x}px"
+          style:top="{d.mid.y}px"
+          data-key={d.key}
+          tabindex={focusKey === d.key ? 0 : -1}
+          aria-pressed={d.open}
+          aria-label={d.name}
+          onclick={() => pick(d.key)}
+        >
+          {d.label}
+        </button>
       {/each}
-    </svg>
-
-    {#each tops as h (h.id)}
-      <div class="pc" style:left="{pos[h.id].x + NODE_W / 2 - PC.w / 2}px" style:top="{PC.y}px">{l0Of(h)}</div>
-    {/each}
-
-    {#if !config}
-      <p class="empty" style:top="{TOP}px">{CANVAS.empty}</p>
-    {/if}
-
-    {#each config?.nodes ?? [] as n (n.id)}
-      {@const key = `node:${n.id}`}
-      {@const m = markOf(n)}
-      {@const v = versionOf(n)}
-      {@const level = fill[n.id]}
-      <button
-        class="node"
-        style:left="{pos[n.id].x}px"
-        style:top="{pos[n.id].y}px"
-        data-key={key}
-        data-avoid={selected === key ? '' : undefined}
-        tabindex={focusKey === key ? 0 : -1}
-        aria-pressed={selected === key}
-        aria-label={spokenName(n, m, v)}
-        bind:offsetHeight={heights[n.id]}
-        onclick={() => pick(key)}
-      >
-        {#if level !== undefined}
-          <!-- The water rises with the node's progress; two wave layers drift at different speeds for depth. -->
-          <span class="water" aria-hidden="true">
-            <span class="surface" style:transform="translateY({100 - Math.min(100, Math.max(0, level))}%)">
-              <svg class="wave back" viewBox="0 0 400 14" preserveAspectRatio="none"><path d={WAVE} /></svg>
-              <svg class="wave front" viewBox="0 0 400 14" preserveAspectRatio="none"><path d={WAVE} /></svg>
-            </span>
-          </span>
-        {/if}
-        <span class="node-band">
-          <span>[{n.no}] {n.name} <span class="role">{roleOf(n)}</span></span>
-          {#if v}<span class="version" translate="no">{v}</span>{:else if m === 'skeleton'}<span class="skeleton version-sk"></span>{/if}
-        </span>
-        <span class="node-body">
-          <span class="product" translate="no">{#each breaks(n.product, n.mcu) as part, i (i)}{#if i}<wbr />{/if}{part}{/each}</span>
-          <span class="mono"><span class="label">{NODE.mcu}</span> <span translate="no">{n.mcu}</span></span>
-          {#if n.role === 'hub'}
-            <span class="mono">{hubVia(n)}</span>
-          {:else}
-            <span class="mono" translate="no">{n.via}</span>
-            <span class="mono"><span class="label">{NODE.reset}</span> <span translate="no">{n.reset ?? NODE.noWire}</span></span>
-            <span class="mono"><span class="label">{NODE.boot}</span> <span translate="no">{n.boot ?? NODE.noWire}</span></span>
-          {/if}
-          {#if m === 'skeleton'}
-            <span class="skeleton chip-sk"></span>
-          {:else if m}
-            <span class="chip" class:silent={m.silent}>{m.chip}</span>
-            {#if m.note}<span class="note">{m.note}</span>{/if}
-          {/if}
-        </span>
-      </button>
-    {/each}
-
-    {#each drawn as d (d.key)}
-      <button
-        class="chip link-chip"
-        class:selected={d.open}
-        style:left="{d.mid.x}px"
-        style:top="{d.mid.y}px"
-        data-key={d.key}
-        tabindex={focusKey === d.key ? 0 : -1}
-        aria-pressed={d.open}
-        aria-label={d.name}
-        onclick={() => pick(d.key)}
-      >
-        {d.label}
-      </button>
-    {/each}
+    </div>
   </div>
-</div>
   {#if dot}
     <!-- The focal number (DES-UX3-187): bottom-left, just above what is under the canvas; it never scrolls away. -->
-    <div class="dot" data-avoid="" role="img" aria-label={dot.name} bind:offsetHeight={dotH} bind:offsetWidth={dotW}>
-      <span class="dot-label">{dot.label}</span>
-      <span class="dot-num">{dot.value}</span>{#if dot.of !== undefined}<span class="dot-of">/{dot.of}</span>{/if}{#if dot.unit}<span class="dot-of">{dot.unit}</span>{/if}
-      {#if dot.sub}<span class="dot-sub"
-          ><span class="dot-label">{dot.sub[0]}</span> {dot.sub[1]}{#each dot.more ?? [] as [label, value] (label)}&emsp;<span class="dot-label">{label}</span> {value}{/each}</span
+    <div class="hero" class:small={compact} style:bottom={inset.bottom ? `${inset.bottom + 0.75 * rem}px` : undefined} data-avoid="" role="img" aria-label={dot.name} bind:offsetHeight={dotH} bind:offsetWidth={dotW}>
+      <span class="lbl">{dot.label}</span>
+      <span class="row"><span class="num" class:err={dot.alarm && dot.value > 0}>{dot.value}</span>{#if dot.of !== undefined}<span class="of">/{dot.of}</span>{/if}{#if dot.unit}<span class="of">{dot.unit}</span>{/if}</span>
+      {#if dot.sub}<span class="sub"
+          ><span class="k">{dot.sub[0]}</span>{dot.sub[1]}{#each dot.more ?? [] as [label, value] (label)}&emsp;<span class="k">{label}</span>{value}{/each}</span
         >{/if}
     </div>
   {/if}
+  {#if controls}<div class="zoom" data-avoid="" bind:offsetHeight={zoomH}>{@render controls(scale)}</div>{/if}
 </div>
 
 <style>
@@ -386,6 +518,7 @@
     min-height: 0;
     overflow: auto;
     scrollbar-gutter: stable;
+    scrollbar-width: thin;
   }
   .canvas {
     position: relative;
@@ -402,8 +535,16 @@
   .pc-link.dashed {
     stroke-dasharray: 4 3;
   }
-  .pc-link.ink {
-    stroke: var(--c-accent);
+  /* The link that carries the update right now marches from 親機 to 子機 (DES-UX3-102). */
+  .pc-link.busy {
+    stroke: var(--c-paper);
+    stroke-dasharray: 6 6;
+    animation: march 600ms linear infinite;
+  }
+  @keyframes march {
+    to {
+      stroke-dashoffset: -12;
+    }
   }
   .wire {
     fill: none;
@@ -420,237 +561,397 @@
   .bundle.open .wire.shared {
     stroke-dasharray: 6 4;
   }
+  /* ◇ not updatable yet: paper, dashed, never red (V-23). */
+  .bundle.uns .wire {
+    stroke: var(--c-paper);
+    stroke-dasharray: 2 4;
+    opacity: 0.8;
+  }
   .tie {
     fill: var(--c-line);
   }
-  .port {
+  .end {
     fill: var(--c-ink);
     stroke: var(--c-line);
     stroke-width: 2;
   }
-  .dot {
+  .temp {
+    fill: none;
+    stroke: var(--c-paper);
+    stroke-width: 2;
+    stroke-dasharray: 4 4;
+  }
+  .temp.bad {
+    stroke: var(--c-signal);
+  }
+  .uplink {
     position: absolute;
-    left: var(--s-5);
-    bottom: var(--s-4);
-    z-index: var(--z-chip);
-    pointer-events: none;
-    display: grid;
-    grid-template-columns: auto auto;
-    align-items: baseline;
-    color: var(--c-paper);
-  }
-  .dot-label {
-    grid-column: 1 / -1;
-    font: 400 var(--t-small-size) / var(--t-small-lh) var(--f-ja);
-    color: var(--c-muted);
-  }
-  .dot-num {
-    font: 700 var(--t-display-size) / var(--t-display-lh) var(--f-dot);
-    font-variant-numeric: tabular-nums;
-  }
-  .dot-of {
-    font: 700 var(--t-version-size) / 1 var(--f-dot);
-  }
-  .dot-sub {
-    grid-column: 1 / -1;
-    margin-top: var(--s-3);
-    font: 400 var(--t-body-size) / var(--t-body-lh) var(--f-ja);
-  }
-  .dot-sub .dot-label {
-    display: inline;
-  }
-  .pc {
-    position: absolute;
-    width: var(--w-node);
-    height: var(--h-secondary);
-    display: grid;
-    place-items: center;
-    padding: 0 var(--s-2);
+    z-index: 1;
+    display: block;
     text-align: center;
-    overflow: hidden;
+    min-width: 10.5rem;
+    height: 1.75rem;
+    padding: 0 0.75rem;
     border: 1px solid var(--c-line);
     border-radius: var(--r-m);
     background: var(--c-ink);
-    font: 400 var(--t-caption-size) / 1.25 var(--f-ja);
+    color: var(--c-muted);
+    font: 400 var(--t-12) / calc(1.75rem - 2px) var(--f-ja);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    transform: translateX(-50%);
+  }
+  .uplink.off {
+    border-style: dashed;
   }
   .empty {
     position: absolute;
     left: 50%;
-    transform: translateX(-50%);
-    max-width: 40em;
+    width: 22rem;
     margin: 0;
-    font: 400 var(--t-body-size) / var(--t-body-lh) var(--f-ja);
-    color: var(--c-paper);
-    text-wrap: pretty;
+    padding: 0.75rem 1rem;
+    transform: translateX(-50%);
+    border: 1px dashed var(--c-line);
+    border-radius: var(--r-m);
+    color: var(--c-muted);
+    font: 400 var(--t-13) / 1.45 var(--f-ja);
+    text-align: center;
   }
+
+  /* Node cards (the mock's A+C): band with [n] name, role and version; product; one mono line; chips. */
   .node {
     position: absolute;
     z-index: var(--z-node);
-    width: var(--w-node);
     display: grid;
-    padding: 2px; /* keeps 3 px of border room: 1 px line + 2 px */
-    border: 1px solid var(--c-line);
+    padding: 0;
+    border: 1.5px solid #b9b6ae;
     border-radius: var(--r-m);
     background: var(--c-ink);
     color: var(--c-paper);
     text-align: left;
-    font: inherit;
+    font: 400 var(--t-13) / 1.45 var(--f-ja);
     cursor: pointer;
     overflow: hidden;
-    outline: 3px solid transparent;
-    outline-offset: -3px;
+    transition: box-shadow 160ms var(--ease-out);
   }
   .node[aria-pressed='true'] {
-    background: var(--c-layer-2);
     border-color: var(--c-paper);
-    box-shadow: inset 4px 0 0 var(--c-paper);
+    box-shadow: 0 0 0 2px var(--c-paper);
+  }
+  .node.drop {
+    box-shadow: 0 0 0 2px var(--c-accent);
+  }
+  .node.err {
+    border-color: var(--c-signal);
+  }
+  .node.uns {
+    border-style: dashed;
+    border-color: var(--c-paper);
   }
   .node:focus-visible {
-    border: 3px solid var(--c-paper);
-    padding: 0;
+    outline: 2px solid var(--c-paper);
+    outline-offset: 2px;
   }
   @media (hover: hover) and (pointer: fine) {
     .node:not([aria-pressed='true']):hover {
-      background: var(--c-hover);
+      background: var(--c-layer-1);
     }
   }
-  /* 32 px band; the one line of name and version sits centred, on one baseline. */
-  .node-band,
-  .node-body {
+  .hd,
+  .bd,
+  .pct {
     position: relative;
+    z-index: 1;
   }
-  /*
-   * Water fill (SC-O5): one layer moved with transform only. Ink tints of the
-   * blue accent (red is for failures only, Q14) keep paper text at AA (9.6:1 on the water). The level follows each progress value in 250 ms
-   * linear (§10 Interpolation); the waves drift on the compositor.
-   */
-  .water {
-    position: absolute;
-    inset: 0;
-    overflow: hidden;
-    border-radius: inherit;
-    pointer-events: none;
-    --wave-front: color-mix(in srgb, var(--c-accent) 32%, var(--c-ink));
-    --wave-back: color-mix(in srgb, var(--c-accent) 18%, var(--c-ink));
-  }
-  .surface {
-    position: absolute;
-    inset: 0;
-    background: var(--wave-front);
-    transition: transform 250ms linear;
-  }
-  .wave {
-    position: absolute;
-    left: 0;
-    top: -14px;
-    width: 200%;
-    height: 14px;
-  }
-  .wave.back {
-    top: -18px;
-    height: 18px;
-    fill: var(--wave-back);
-    animation: drift 7s linear infinite reverse;
-  }
-  .wave.front {
-    fill: var(--wave-front);
-    animation: drift 4.2s linear infinite;
-  }
-  @keyframes drift {
-    from {
-      translate: 0 0;
-    }
-    to {
-      translate: -50% 0;
-    }
-  }
-  @media (prefers-reduced-motion: reduce) {
-    /* A static fill: no waves, the level jumps to each value. */
-    .wave {
-      display: none;
-    }
-    .surface {
-      transition: none;
-    }
-  }
-  .note {
-    font: 400 var(--t-small-size) / var(--t-small-lh) var(--f-ja);
-    font-variant-numeric: tabular-nums;
-  }
-  .node-band {
+  .hd {
     display: flex;
-    flex-wrap: wrap;
-    justify-content: space-between;
     align-items: baseline;
-    align-content: center;
-    height: 2rem;
-    padding: 0 var(--s-3);
-    border-bottom: 1px solid var(--c-line);
-    font: 700 var(--t-small-size) / 1 var(--f-ja);
+    gap: 0.375rem;
+    min-width: 0;
+    padding: 0.5rem 0.75rem 0.375rem;
+    border-bottom: 1px solid var(--c-hair);
+    background: var(--c-layer-2);
+  }
+  .hd b {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font: 700 1rem / 1.3 var(--f-ja);
   }
   .role {
-    margin-left: var(--s-1);
+    font-size: var(--t-11);
     color: var(--c-muted);
-    font-weight: 400;
+    white-space: nowrap;
   }
-  .version {
-    font: 400 var(--t-version-small-size) / 1 var(--f-version);
-    letter-spacing: 0.02em;
+  .ver {
+    margin-left: auto;
+    font: 400 1.5rem / 1 var(--f-version);
     font-variant-numeric: tabular-nums;
   }
-  .node-body {
+  .ver-sk {
+    width: 2.5rem;
+    height: 1rem;
+    margin-left: auto;
+  }
+  .bd {
     display: grid;
-    gap: var(--s-2);
-    justify-items: start;
-    padding: var(--s-3) var(--s-4);
+    gap: 1px;
+    min-width: 0;
+    padding: 0.375rem 0.75rem 0.625rem;
   }
-  .product {
-    display: -webkit-box;
-    -webkit-box-orient: vertical;
-    -webkit-line-clamp: 2;
-    line-clamp: 2;
+  .prod {
     overflow: hidden;
-    font: 700 var(--t-heading-size) / var(--t-heading-lh) var(--f-ja);
-    letter-spacing: 0.02em;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font: 700 1rem / 1.4 var(--f-ja);
   }
-  .mono {
-    font: 500 var(--t-mono-size) / var(--t-mono-lh) var(--f-mono);
-    letter-spacing: 0.02em;
-  }
-  .label {
+  .meta {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
     color: var(--c-muted);
+    font: 500 var(--t-12) / 1.5 var(--f-mono);
   }
-  .version-sk {
-    width: var(--s-8);
-    height: var(--s-4);
+  .chips {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.25rem;
+    margin-top: 0.25rem;
   }
-  .chip-sk {
-    width: var(--s-9);
-    height: var(--h-chip);
+  .chip {
+    display: inline-flex;
+    align-items: center;
+    height: 1.25rem;
+    padding: 0 0.5rem;
+    border: 1px solid var(--c-line);
     border-radius: var(--r-full);
+    background: var(--c-ink);
+    font: 700 var(--t-11) / 1 var(--f-ja);
+    white-space: nowrap;
   }
   .chip.silent {
     border-color: var(--c-signal);
     background: var(--c-signal);
     color: var(--c-ink);
   }
+  .chip.uns {
+    border-style: dashed;
+    border-color: var(--c-paper);
+  }
+  .chip-sk {
+    width: 4.5rem;
+    height: 1.25rem;
+    border-radius: var(--r-full);
+  }
+  .note {
+    color: var(--c-muted);
+    font: 400 var(--t-11) / 1.4 var(--f-ja);
+  }
+  .pct {
+    position: absolute;
+    right: 0.75rem;
+    bottom: 0.625rem;
+    font: 400 1.5rem / 1 var(--f-version);
+  }
+  /* Compact (9 ノード and on, or when normal cards would shrink names under 13 px): name, version, state. */
+  .compact .prod,
+  .compact .meta,
+  .compact .role,
+  .compact .note {
+    display: none;
+  }
+  .compact .hd {
+    border-bottom: 0;
+  }
+  .compact .hd b {
+    flex: 1;
+    min-width: 0;
+  }
+  .compact .bd {
+    padding-top: 0;
+  }
+  .compact .chips {
+    margin-top: 2px;
+  }
+
+  /* Water gauge (DES-UX3-110): the level moves by transform; the edge is a CSS mask (no drawn illustration). */
+  .water {
+    position: absolute;
+    inset: 0;
+    z-index: 0;
+    overflow: hidden;
+    border-radius: inherit;
+    pointer-events: none;
+    --wave-front: color-mix(in srgb, var(--c-accent) 32%, var(--c-ink));
+    --wave-back: color-mix(in srgb, var(--c-accent) 18%, var(--c-ink));
+  }
+  .level {
+    position: absolute;
+    inset: 0;
+    background: var(--wave-front);
+    transition: transform 250ms linear;
+  }
+  .crest {
+    position: absolute;
+    left: 0;
+    width: 200%;
+    height: 0.75rem;
+    -webkit-mask: radial-gradient(2.25rem 0.5625rem at 50% 100%, #000 96%, transparent 100%) 0 0 / 4rem 0.75rem repeat-x;
+    mask: radial-gradient(2.25rem 0.5625rem at 50% 100%, #000 96%, transparent 100%) 0 0 / 4rem 0.75rem repeat-x;
+  }
+  .crest.front {
+    top: -10px;
+    background: var(--wave-front);
+    animation: drift 4.2s linear infinite;
+  }
+  .crest.back {
+    top: -0.875rem;
+    background: var(--wave-back);
+    animation: drift 7s linear infinite reverse;
+  }
+  @keyframes drift {
+    to {
+      transform: translateX(-50%);
+    }
+  }
+
+  /* Ports (DES-UX3-031): the lower one starts a drag, the upper one takes it. */
+  .port {
+    position: absolute;
+    z-index: calc(var(--z-node) + 1);
+    width: 0.875rem;
+    height: 0.875rem;
+    margin: -0.4375rem 0 0 -0.4375rem;
+    border: 2px solid var(--c-line);
+    border-radius: 50%;
+    background: var(--c-ink);
+    pointer-events: none;
+    transition: transform 160ms var(--ease-out), border-color 160ms ease, background-color 160ms ease;
+  }
+  .port.out {
+    pointer-events: auto;
+    cursor: crosshair;
+    touch-action: none;
+  }
+  @media (hover: hover) and (pointer: fine) {
+    .port.out:hover {
+      border-color: var(--c-paper);
+      transform: scale(1.3);
+    }
+  }
+  .port.ok {
+    border-color: var(--c-paper);
+    background: var(--c-paper);
+    transform: scale(1.3);
+  }
+
   .link-chip {
     position: absolute;
     z-index: var(--z-chip);
+    height: 1.375rem;
+    padding: 0 0.625rem;
     transform: translate(-50%, -50%);
+    border: 1px solid var(--c-line);
+    border-radius: var(--r-full);
+    background: var(--c-ink);
+    color: var(--c-paper);
+    font: 700 var(--t-11) / 1.25rem var(--f-ja);
+    white-space: nowrap;
     cursor: pointer;
-    outline: 3px solid transparent;
   }
-  @media (hover: hover) and (pointer: fine) {
-    .link-chip:not(.selected):hover {
-      background: var(--c-hover);
-    }
+  .link-chip.uns {
+    border-style: dashed;
+    border-color: var(--c-paper);
   }
   .link-chip.selected {
-    background: var(--c-paper);
-    color: var(--c-ink);
+    border-color: var(--c-paper);
+    box-shadow: 0 0 0 1px var(--c-paper);
   }
   .link-chip:focus-visible {
-    outline-color: var(--c-paper);
+    outline: 2px solid var(--c-paper);
+  }
+
+  /* The focal number (DES-UX3-150/187): today's dot numerals, bottom-left. */
+  .hero {
+    position: absolute;
+    z-index: var(--z-chip);
+    left: 0.75rem;
+    bottom: 0.75rem;
+    display: grid;
+    gap: 2px;
+    pointer-events: none;
+  }
+  .lbl {
+    color: var(--c-muted);
+    font: 400 var(--t-13) / 1.3 var(--f-ja);
+  }
+  .row {
+    display: flex;
+    align-items: baseline;
+    gap: 0.375rem;
+  }
+  .num {
+    color: var(--c-paper);
+    font: 700 7rem / 0.9 var(--f-dot);
+    letter-spacing: 0.02em;
+    font-variant-numeric: tabular-nums;
+  }
+  .num.err {
+    color: var(--c-signal);
+  }
+  .of {
+    color: var(--c-muted);
+    font: 700 2.75rem / 1 var(--f-dot);
+  }
+  .small .num {
+    font-size: 4rem;
+  }
+  .small .of {
+    font-size: 1.75rem;
+  }
+  .sub {
+    color: var(--c-paper);
+    font: 400 var(--t-13) / 1.45 var(--f-ja);
+  }
+  .sub .k {
+    margin-right: 0.25rem;
+    color: var(--c-muted);
+  }
+  @media (max-width: 767px) {
+    .num {
+      font-size: 3.5rem;
+    }
+    .of {
+      font-size: 1.5rem;
+    }
+  }
+  .zoom {
+    position: absolute;
+    right: 0.75rem;
+    bottom: 0.75rem;
+    z-index: var(--z-chrome);
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: flex-end;
+    gap: 2px;
+    max-width: calc(100% - 1.5rem);
+    padding: 2px;
+    border: 1px solid var(--c-hair);
+    border-radius: var(--r-full);
+    background: var(--c-layer-1);
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .crest,
+    .pc-link.busy {
+      animation: none;
+    }
+    .level {
+      transition: none;
+    }
+    .port,
+    .node {
+      transition: none;
+    }
   }
 </style>

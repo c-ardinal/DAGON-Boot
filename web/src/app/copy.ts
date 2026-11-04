@@ -412,6 +412,42 @@ export const AGENT = {
 } as const;
 
 /** The bottom drawer (DES-UX3-015) and its tabs. */
+/** The status row (DES-UX3-016). */
+export const STATUS = {
+  label: '状態',
+  key: '鍵',
+  keyTitle: 'リリースを確かめる鍵の ID',
+  progress: '更新の進み具合',
+  saving: '保存中…',
+  saved: '保存済み',
+} as const;
+
+/** The bar's flow (DES-UX3-020): the steps from 構成 to 更新, each its own place to work. */
+export const FLOW = {
+  label: '作業の手順（構成から更新まで）',
+  steps: { define: '構成', project: 'プロジェクト', build: 'ビルド', flash: '書き込み', update: '更新' },
+  problems: (n: number) => `問題 ${n}`,
+  unsupported: (n: number) => `◇ 未対応 ${n}`,
+  responding: (n: number, of: number) => `親機 応答 ${n}/${of}`,
+} as const;
+
+/** The canvas controls bottom-right (DES-UX3-033). */
+export const ZOOM = {
+  label: '表示の操作',
+  out: '小さく',
+  fit: '全体',
+  in: '大きく',
+} as const;
+
+/** The parts window (DES-UX3-030). */
+export const PARTS = {
+  heading: '部品',
+  hint: 'ドラッグで置く',
+  close: '部品を閉じる',
+  closeOrder: '更新の順を閉じる',
+  open: '＋ 部品',
+} as const;
+
 /** The floating sheet's spoken name (round8d #66). */
 export const SHEET = '選んだものの詳細';
 
@@ -421,6 +457,8 @@ export const DRAWER = {
   log: '記録',
   talk: '会話',
   logNone: 'まだ記録はありません。',
+  close: 'パネルを閉じる',
+  jobs: '作業',
 } as const;
 
 /** Canvas: uplink cards, the empty canvas, dot numbers. */
@@ -521,8 +559,21 @@ export const NODE = {
 /** Link chip (S18) and its spoken name. */
 export const LINK = {
   /** CAN and Ethernet carry no wires the page draws: the kind alone. */
-  bundle: (kind: string, n: number, shared: number) => (n ? `${kind} · ${n} 本${shared ? `（うち共有 ${shared}）` : ''}` : kind),
+  /** The bus, the value it needs (address or speed: DES-UX3-100), its wires. */
+  bundle: (kind: string, n: number, shared: number, value = '') => {
+    const head = value ? `${kind} ${value}` : kind;
+    return n ? `${head} · ${n} 本${shared ? `（うち共有 ${shared}）` : ''}` : head;
+  },
+  /** The lower port of a card (round8d #70). */
+  portOut: (name: string) => `${name} の下のポート（ここから子のノードへドラッグ）`,
   name: (label: string, from: string, to: string, addr: string) => `${label}、${from}から ${to}へのリンク${addr ? `、${addr}` : ''}`,
+} as const;
+
+/** Why a port drag is refused (a failure: red, round8d). */
+export const LINK_WHY = {
+  taken: 'このノードはもう親機とつながっています',
+  under: (name: string) => `このノードはもう ${name} の下です`,
+  loop: 'このノードの下にあるノードにはつなげません',
 } as const;
 
 /** Left column (S02, M43). */
@@ -787,6 +838,11 @@ export const DEFINE = {
   chooseBy: '選び方',
   listHelp: '選んで Enter で置けます。',
   place: '置く',
+  /** The parts window (DES-UX3-030). */
+  search: '製品・マイコンを探す',
+  byMcuOwn: 'マイコン（自作ボード）',
+  ownBoard: (mcu: string) => `${mcu}（自作ボード）`,
+  count: (n: number) => `${n} 個`,
   placed: '配置済み',
   firstHeading: 'はじめての方へ',
   connectDiscover: 'つないで、自動で見つける',
@@ -803,6 +859,9 @@ export const DEFINE = {
   dotNodes: 'ノード',
   dotLinks: 'リンク',
   dotNodesName: (n: number, l: number) => `ノード ${n}、リンク ${l}`,
+  dotProblems: '問題',
+  dotNotYet: '◇ 未対応',
+  dotProblemsName: (p: number, n: number, l: number) => `問題 ${p}、ノード ${n}、リンク ${l}`,
   /** S25: nothing selected and nothing to fix. */
   nothingSelected: 'ノードかリンクを選ぶと、ここで直せます。',
   /** SC-D3 (S23, S15). */

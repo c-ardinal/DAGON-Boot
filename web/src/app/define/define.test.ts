@@ -4,9 +4,34 @@ import { Define } from './define.svelte.ts';
 import { connect, emptyDoc, placeMcu, setLink, setLinkKind, setNode } from './model.ts';
 import { DESK_DEMO_YAML } from '../sample.ts';
 import { problemChip } from './problems.ts';
-import { LINK } from '../copy.ts';
+import { LINK, LINK_WHY } from '../copy.ts';
 
 describe('define session', () => {
+  test('a part dropped under a card is placed and linked under it in one edit; elsewhere it stands alone', () => {
+    const d = new Define();
+    d.placeAt({ board: 'waveshare-rp2040-touch-lcd-1.28' }, 'Waveshare RP2040-Touch-LCD-1.28', null);
+    d.placeAt({ board: 'nucleo-f401re' }, 'NUCLEO-F401RE', 'hub');
+    expect(d.doc.topo.links?.map((l) => [l.from, l.to])).toEqual([['hub', 'nucleo']]);
+    d.undo();
+    expect(d.doc.topo.nodes.map((n) => n.id)).toEqual(['hub']);
+    d.placeAt({ mcu: 'stm32f401re' }, 'STM32F401RE（自作ボード）', null);
+    expect(d.doc.topo.links ?? []).toEqual([]);
+  });
+
+  test('a port drag links a node under another; a taken node and a loop are refused with why', () => {
+    const d = new Define();
+    d.placeSample();
+    expect(d.linkRefusal('hub', 'seg')).toBe(LINK_WHY.taken);
+    d.placeAt({ mcu: 'stm32f401re' }, 'STM32F401RE（自作ボード）', null);
+    const id = d.doc.topo.nodes[d.doc.topo.nodes.length - 1].id;
+    expect(d.linkRefusal('seg', id)).toBeNull();
+    d.link(id, 'seg');
+    expect(d.doc.topo.links?.some((l) => l.from === 'seg' && l.to === id)).toBe(true);
+    expect(d.linkRefusal(id, 'watch')).toBe(LINK_WHY.taken);
+    expect(d.linkRefusal(id, 'seg')).toBe(LINK_WHY.taken);
+    expect(d.linkRefusal(id, 'hub')).toBe(LINK_WHY.loop);
+  });
+
   test('the sample checks clean; placing, undo and redo walk the history', () => {
     const d = new Define();
     expect(d.problems).toEqual([]);

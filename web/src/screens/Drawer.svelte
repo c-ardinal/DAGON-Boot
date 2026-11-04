@@ -10,115 +10,106 @@
 
 <script lang="ts">
   import type { Snippet } from 'svelte';
-  import { DRAWER, LOCK } from '../app/copy.ts';
+  import { DRAWER } from '../app/copy.ts';
 
   interface Props {
     tabs: DrawerTab[];
-    /** The open tab, or null when the drawer is closed. */
-    open: string | null;
-    /** The same tab again closes the drawer (DES-UX3-015). */
+    /** The open tab; the drawer shows only while one is open (its toggles are on the status row). */
+    open: string;
     onpick: (id: string) => void;
+    onclose: () => void;
     body: Snippet<[string]>;
-    /** The state now (待機, 更新中 …), always shown (DES-UX3-182). */
-    state: string;
   }
 
-  let { tabs, open, onpick, body, state }: Props = $props();
+  let { tabs, open, onpick, onclose, body }: Props = $props();
 </script>
 
 <!-- DES-UX3-015: closed by default; while open the canvas above shrinks by its height (no overlap). -->
 <section class="drawer" aria-label={DRAWER.label}>
   <div class="tabs" role="tablist" aria-label={DRAWER.label}>
     {#each tabs as t (t.id)}
-      <button
-        role="tab"
-        id="drawer-tab-{t.id}"
-        aria-selected={open === t.id}
-        aria-controls="drawer-body"
-        aria-expanded={open === t.id}
-        onclick={() => onpick(t.id)}
-      >
-        {t.label}{#if t.count !== undefined}&ensp;<span class="count" class:alarm={t.alarm && t.count > 0}>{t.count}</span>{/if}
+      <button role="tab" id="drawer-tab-{t.id}" aria-selected={open === t.id} aria-controls="drawer-body" onclick={() => onpick(t.id)}>
+        {t.label}{#if t.count !== undefined}<span class="count" class:alarm={t.alarm && t.count > 0}>{t.count}</span>{/if}
       </button>
     {/each}
-    <span class="state" title={LOCK.stateTitle}><span class="visually-hidden">{LOCK.stateLabel} </span>{state}</span>
-    <span class="key" aria-hidden="true">Ctrl+J</span>
+    <span class="grow"></span>
+    <button class="x" title="{DRAWER.close} (Ctrl+J)" aria-label={DRAWER.close} onclick={onclose}>×</button>
   </div>
-  {#if open}
-    <div class="body" id="drawer-body" role="tabpanel" aria-labelledby="drawer-tab-{open}" tabindex="-1">
-      {@render body(open)}
-    </div>
-  {/if}
+  <div class="body" id="drawer-body" role="tabpanel" aria-labelledby="drawer-tab-{open}" tabindex="-1">
+    {@render body(open)}
+  </div>
 </section>
 
 <style>
   .drawer {
     grid-area: drawer;
-    display: grid;
-    min-height: 0;
+    display: flex;
+    flex-direction: column;
+    height: 10.5rem;
     border-top: 1px solid var(--c-line);
     background: var(--c-ink);
   }
+  @media (max-height: 520px) {
+    .drawer {
+      height: min(10.5rem, 22vh);
+    }
+  }
   .tabs {
     display: flex;
+    flex: none;
     align-items: stretch;
-    gap: var(--s-1);
-    padding: 0 var(--s-4);
+    height: 1.75rem;
+    padding: 0 var(--s-1);
+    border-bottom: 1px solid var(--c-hair);
   }
   .tabs button {
-    min-height: 2rem;
     padding: 0 var(--s-3);
     border: 0;
-    border-bottom: 2px solid transparent;
     background: none;
     color: var(--c-muted);
-    font: 500 var(--t-small-size) / 1 var(--f-ja);
+    font: 400 var(--t-12) / 1 var(--f-ja);
     cursor: pointer;
-    transition: transform var(--dur-press) var(--ease-out);
-  }
-  .tabs button:active {
-    transform: scale(0.97);
   }
   .tabs button[aria-selected='true'] {
-    border-bottom-color: var(--c-accent);
     color: var(--c-paper);
+    box-shadow: inset 0 -2px 0 var(--c-paper);
   }
   .tabs button:focus-visible {
     outline: 2px solid var(--c-paper);
     outline-offset: -2px;
   }
   .count {
-    font-variant-numeric: tabular-nums;
+    margin-left: 0.25rem;
+    padding: 0 0.375rem;
+    border-radius: var(--r-full);
+    background: var(--c-layer-3);
+    font: 500 var(--t-11) / 1rem var(--f-mono);
   }
   .count.alarm {
-    color: var(--c-signal);
+    background: var(--c-signal);
+    color: var(--c-ink);
   }
-  .state {
-    margin-left: auto;
-    align-self: center;
-    color: var(--c-paper);
-    font: 500 var(--t-small-size) / 1 var(--f-ja);
+  .grow {
+    flex: 1;
   }
-  .key {
-    margin-left: var(--s-4);
-    align-self: center;
-    color: var(--c-muted);
-    font: 400 var(--t-caption-size) / 1 var(--f-mono);
+  .x {
+    width: 1.75rem;
   }
   .body {
-    height: clamp(9rem, 28vh, 18rem);
+    flex: 1;
+    min-height: 0;
     overflow: auto;
-    border-top: 1px solid var(--c-line);
   }
   .body:focus {
     outline: none;
   }
-  @media (max-width: 767px) {
-    .tabs button {
-      min-height: 2.75rem;
+  @media (max-width: 767px), (pointer: coarse) {
+    .tabs {
+      height: auto;
     }
-    .key {
-      display: none;
+    .tabs button {
+      min-height: 44px;
+      min-width: 44px;
     }
   }
 </style>

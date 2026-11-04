@@ -1,6 +1,7 @@
 <script lang="ts">
   import { CLI_NONE, HELP, HUB, HUB_NAME, HUB_TOGGLE, MENU, MODE, ORDER, PRODUCT, SIM, STEP } from '../app/copy.ts';
   import type { HubState, Step } from '../app/machine.ts';
+  import type { Snippet } from 'svelte';
 
   interface Props {
     step: Step | null;
@@ -31,6 +32,9 @@
     hubLocked?: string | null;
     /** `dagon demo`: the hub is simulated (模擬, always shown). */
     sim?: boolean;
+    /** The work screen's bar (DES-UX3-010/020): the project's name and the 01–05 flow with the next action, instead of the three steps. */
+    flow?: Snippet;
+    title?: string;
   }
 
   let {
@@ -52,6 +56,8 @@
     onhub,
     hubLocked = null,
     sim = false,
+    flow,
+    title = '',
   }: Props = $props();
   const now = $derived(step === null ? null : STEP.of3(step));
   /** Position of the current step; recovery happens in the third (更新). */
@@ -67,8 +73,9 @@
   let helpOpen = $state(false);
 </script>
 
-<header>
-  <span class="product" translate="no"><img class="mark" src="./icons/favicon-48.png" alt="" width="24" height="24" />{PRODUCT}</span>
+<header class:bar={!!flow}>
+  <span class="product" translate="no"><img class="mark" src="./icons/favicon-48.png" alt="" width="16" height="16" /><span class="word">{PRODUCT}</span></span>
+  {#if title}<span class="title" translate="no">{title}</span>{/if}
   {#if sim}<span class="sim" role="note" aria-label={SIM.label} title={SIM.label}>{SIM.badge}</span>{/if}
   {#if onmode}
     <div class="modes" role="radiogroup" aria-label={MODE.label}>
@@ -85,6 +92,9 @@
   {#if drawer}
     <button class="secondary" aria-expanded={drawerOpen} aria-controls="drawer" bind:this={drawerButton} onclick={ondrawer}>{ORDER.heading}</button>
   {/if}
+  {#if flow}
+    {@render flow()}
+  {:else}
   <!-- 定義 has no steps; the 構成 file is the source of truth (owner 11/3). In 運用 all three always show. -->
   <ol class="steps" aria-label={STEP.label}>
     {#if mode !== 'define' && at !== null}
@@ -98,14 +108,15 @@
     {/if}
   </ol>
   <span class="hub" aria-label={HUB_NAME[hub]}>{HUB[hub]}</span>
-  {#if onhub}
+  {/if}
+  {#if onhub && !flow}
     <button class="secondary toggle" data-control="connect" aria-disabled={hubLocked !== null} aria-describedby={hubLocked ? 'hub-why' : undefined} onclick={onhub}
       >{linked ? HUB_TOGGLE.disconnect : HUB_TOGGLE.connect}</button
     >
     {#if hubLocked}<span id="hub-why" class="visually-hidden">{hubLocked}</span>{/if}
   {/if}
-  <span class="cli">{cliLabel}</span>
-  <button class="secondary" aria-expanded={helpOpen} aria-controls="help" onclick={() => (helpOpen = !helpOpen)}>{HELP.heading}</button>
+  {#if !flow}<span class="cli">{cliLabel}</span>{/if}
+  <button class="secondary help-btn" aria-expanded={helpOpen} aria-controls="help" onclick={() => (helpOpen = !helpOpen)}>{HELP.heading}</button>
   {#if onmenu}
     <button class="secondary" aria-expanded={menuOpen} aria-controls="menu" onclick={onmenu}>{MENU.button}</button>
   {/if}
@@ -132,17 +143,19 @@
 <style>
   .modes {
     display: flex;
-    padding: 3px;
+    flex: none;
+    padding: 2px;
     border: 1px solid var(--c-line);
     border-radius: var(--r-full);
   }
   .modes button {
-    padding: var(--s-1) var(--s-4);
+    height: 1.625rem;
+    padding: 0 0.75rem;
     border: 0;
     border-radius: var(--r-full);
     background: none;
-    color: var(--c-paper);
-    font: 700 var(--t-body-size) / var(--t-body-lh) var(--f-ja);
+    color: var(--c-muted);
+    font: 700 var(--t-13) / 1 var(--f-ja);
     cursor: pointer;
   }
   .modes button[aria-checked='true'] {
@@ -161,12 +174,26 @@
     grid-area: header;
     display: flex;
     align-items: center;
-    gap: var(--s-5);
+    gap: var(--s-2);
+    min-width: 0;
     min-height: var(--h-header);
-    padding: 0 var(--s-5);
-    border-bottom: 1px solid var(--c-line);
+    padding: 0 var(--s-3);
+    border-bottom: 1px solid var(--c-hair);
+    background: var(--c-ink);
     z-index: var(--z-chrome);
     font: 400 var(--t-small-size) / 1 var(--f-ja);
+  }
+  @media (max-width: 1599px) {
+    .bar .word {
+      display: none;
+    }
+  }
+  .title {
+    max-width: 13.75rem;
+    overflow: hidden;
+    color: var(--c-paper);
+    font: 500 var(--t-12) / 1 var(--f-ja);
+    text-overflow: ellipsis;
   }
   header > * {
     white-space: nowrap;
@@ -174,9 +201,9 @@
   .product {
     display: flex;
     align-items: center;
-    gap: var(--s-2);
-    font: 500 var(--t-mono-size) / 1 var(--f-mono);
-    letter-spacing: 0.12em;
+    gap: 0.375rem;
+    font: 700 var(--t-12) / 1 var(--f-mono);
+    letter-spacing: 0.04em;
   }
   .mark {
     border-radius: 5px;
@@ -289,7 +316,16 @@
    * toggle and the CLI state; then 困ったとき and メニュー side by side.
    */
   @media (max-width: 767px) {
-    header {
+    header.bar {
+      flex-wrap: nowrap;
+      padding: 0 0.375rem;
+      gap: 0.25rem;
+    }
+    header.bar .help-btn,
+    header.bar .title {
+      display: none;
+    }
+    header:not(.bar) {
       display: grid;
       grid-template-columns: auto 1fr 1fr;
       align-items: center;

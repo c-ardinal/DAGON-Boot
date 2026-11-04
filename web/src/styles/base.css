@@ -78,9 +78,9 @@ button {
   justify-content: center;
   gap: var(--s-2);
   height: var(--h-secondary);
-  padding: 0 var(--s-5);
+  padding: 0 0.75rem;
   border: 1px solid var(--c-line);
-  border-radius: var(--r-m);
+  border-radius: var(--r-full);
   background: var(--c-ink);
   font: 700 var(--t-body-size) / 1 var(--f-ja);
   white-space: nowrap;
@@ -134,7 +134,7 @@ button {
   align-items: center;
   gap: var(--s-2);
   height: var(--h-primary);
-  padding: 0 var(--s-6);
+  padding: 0 0.875rem;
   border: 0;
   border-radius: var(--r-full);
   /* Q14: the main action is blue; red is for failures only. */
@@ -146,6 +146,9 @@ button {
   outline: 3px solid transparent;
   outline-offset: 0;
   transition: transform var(--dur-press) var(--ease-out);
+}
+.secondary:active {
+  transform: scale(0.97);
 }
 .primary:focus-visible {
   outline-color: var(--c-paper);

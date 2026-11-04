@@ -1,9 +1,9 @@
 // Define-mode session: the document being edited, its history, the selected
 // item and the check result. Edits go through `apply`, which keeps undo.
 import { supportedBoards } from '../../wasm/dagon.ts';
-import { ANNOUNCE } from '../copy.ts';
+import { ANNOUNCE, LINK_WHY } from '../copy.ts';
 import { DESK_DEMO, DESK_DEMO_YAML, type Config } from '../sample.ts';
-import { emptyDoc, fromYaml, place, placeMcu, removeLink, removeNode, toConfig, toYaml, type Doc, type Topo } from './model.ts';
+import { connect, emptyDoc, fromYaml, place, placeMcu, removeLink, removeNode, toConfig, toYaml, type Doc, type Topo } from './model.ts';
 import type { SaveResult } from './cli.svelte.ts';
 import { keepComments } from './comments.ts';
 import { problems, type Problem } from './problems.ts';
@@ -120,6 +120,39 @@ export class Define {
     this.apply(r.doc);
     this.selected = `node:${r.id}`;
     this.status = ANNOUNCE.A01(product, r.doc.topo.nodes.find((n) => n.id === r.id)!.role === 'coordinator');
+  }
+
+  /**
+   * A part dropped on the canvas (DES-UX3-030): placed as "置く" places it (DEFS: the board decides
+   * 親機 or 子機), then, when dropped just under a card, linked under it in the same one edit.
+   */
+  placeAt(part: { board: string } | { mcu: string }, name: string, parent: string | null): void {
+    const r = 'board' in part ? place(this.doc, part.board) : placeMcu(this.doc, part.mcu);
+    if (!r.id) return;
+    const next = parent ? connect(r.doc, r.id, parent) : r.doc;
+    this.apply(next);
+    this.selected = `node:${r.id}`;
+    this.status = ANNOUNCE.A01(name, next.topo.nodes.find((n) => n.id === r.id)!.role === 'coordinator');
+  }
+
+  /** A port drag (DES-UX3-031): node `id` under `parent`, with the link "つなぐ先" would make. */
+  link(id: string, parent: string): void {
+    this.apply(connect(this.doc, id, parent));
+  }
+
+  /** Why `id` cannot go under `parent` by a port drag, or null when it can. */
+  linkRefusal(parent: string, id: string): string | null {
+    const links = this.doc.topo.links ?? [];
+    const up = links.find((l) => l.to === id)?.from;
+    if (up !== undefined) {
+      const p = this.doc.topo.nodes.find((n) => n.id === up);
+      return p?.role === 'coordinator' ? LINK_WHY.taken : LINK_WHY.under(this.doc.names[up] ?? up);
+    }
+    // Under its own descendant: the link would close a loop.
+    for (let at: string | undefined = parent, i = 0; at !== undefined && i < 64; at = links.find((l) => l.to === at)?.from, i++) {
+      if (at === id) return LINK_WHY.loop;
+    }
+    return null;
   }
 
   /** "置く" by MCU (§4): a node without a board; its flash size is the developer's to fill. */

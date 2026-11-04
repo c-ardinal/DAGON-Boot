@@ -13,7 +13,6 @@ use dagon_mcu_esp32s3::liveness::Lease;
 use dagon_mcu_esp32s3::{node, Version};
 use embassy_time::{Duration, Instant, Timer};
 use esp_hal::{
-    delay::Delay,
     gpio::{Input, InputConfig, Pull},
     peripherals::{GPIO38, GPIO39, GPIO40, GPIO41, GPIO42, GPIO45, GPIO46, SPI2},
     spi::{
@@ -78,6 +77,9 @@ const DRAW_BUDGET_MS: u32 = 1_000;
 /// How long to wait for DAGON to publish the running version.
 const VERSION_WAIT: Duration = Duration::from_secs(1);
 const VERSION_POLL: Duration = Duration::from_millis(20);
+/// A pause that hands the thread executor to the other demo tasks between
+/// blocking panel steps (the SPI writes do not yield by themselves).
+const YIELD: Duration = Duration::from_millis(1);
 
 struct Panel {
     spi: Spi<'static, Blocking>,
@@ -113,9 +115,9 @@ impl Panel {
         )
     }
 
-    fn init(&mut self) -> Result<(), SpiError> {
+    async fn init(&mut self) -> Result<(), SpiError> {
         self.command(SLPOUT, &[])?;
-        Delay::new().delay_millis(SLPOUT_WAIT_MS);
+        Timer::after(Duration::from_millis(SLPOUT_WAIT_MS.into())).await;
         INIT.iter()
             .try_for_each(|&(reg, data)| self.command(reg, data))
     }
@@ -150,7 +152,7 @@ impl Panel {
         Ok(())
     }
 
-    fn draw(&mut self, rects: &[Rect]) -> Result<(), SpiError> {
+    async fn draw(&mut self, rects: &[Rect]) -> Result<(), SpiError> {
         // The clear starts at column 0 of the CO5300 memory: 468 wide.
         let clear = Rect {
             x: 0,
@@ -159,7 +161,11 @@ impl Panel {
             h: digits::SIZE,
         };
         self.fill(clear, digits::BLACK)?;
-        rects.iter().try_for_each(|&r| self.fill(r, digits::INK))
+        for &r in rects {
+            Timer::after(YIELD).await;
+            self.fill(r, digits::INK)?;
+        }
+        Ok(())
     }
 }
 
@@ -183,11 +189,14 @@ pub async fn display_task(p: DisplayPins, lease: Lease, powered: bool) {
     if !powered {
         return;
     }
+    // The heartbeat runs first: CONFIRM waits for its first beat, and the
+    // executor may poll this task before it.
+    Timer::after(YIELD).await;
     let Some(mut panel) = Panel::open(p) else {
         return;
     };
     lease.busy(node::now_ms(), INIT_BUDGET_MS);
-    let ready = panel.init().is_ok();
+    let ready = panel.init().await.is_ok();
     lease.idle();
     if !ready {
         return;
@@ -197,7 +206,7 @@ pub async fn display_task(p: DisplayPins, lease: Lease, powered: bool) {
     let mut rects = [Rect::default(); MAX_RECTS];
     let k = digits::layout(&text[..n], &mut rects);
     lease.busy(node::now_ms(), DRAW_BUDGET_MS);
-    let _ = panel.draw(&rects[..k]);
+    let _ = panel.draw(&rects[..k]).await;
     lease.idle();
     // Nothing changes while this image runs: keep the panel (and its pins).
     core::future::pending::<()>().await;

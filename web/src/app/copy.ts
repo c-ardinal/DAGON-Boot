@@ -366,11 +366,16 @@ export const AGENT = {
   link: {
     heading: 'DAGON と連携する',
     intro: 'DAGON は連携したエージェントに構成について問い合わせて答えます。送ることへの同意は、この連携のときに一度だけいただきます。連携したあとの質問は確かめずに送ります。',
-    provider: '送り先',
-    providerNote: '今使えるのはこの 1 つです。手元の dagon serve を通して送ります',
-    key: '鍵',
-    keyNote: 'ターミナルで ANTHROPIC_API_KEY を設定し、dagon serve を起動し直してください。鍵はこのページにも送る文にも入りません',
-    keyMissing: 'この CLI にはまだ鍵がありません。連携は先に済ませておけます。',
+    agent: '送り先',
+    agentNote: '手元の dagon serve を通して送ります',
+    way: 'つなぎ方',
+    /** What each kind of way needs on this machine (the provider is named only here, at linking). */
+    ready: '準備',
+    wayNote: {
+      command: 'このパソコンでログインしたエージェントのプログラムを使います。ログインの情報はこのページにも送る文にも入りません',
+      'messages-http': 'ターミナルで ANTHROPIC_API_KEY を設定し、dagon serve を起動し直してください。鍵はこのページにも送る文にも入りません',
+    } as Record<string, string>,
+    wayMissing: 'このつなぎ方はまだこのパソコンで使えません。連携は先に済ませておけます。',
     sends: '送るもの',
     neverSends: '送らないもの',
     undo: '連携は、メニューの「DAGON との連携を外す…」でいつでも外せます。外すと同意も取り消します。',
@@ -402,7 +407,7 @@ export const AGENT = {
   question: 'DAGON への質問',
   errors: {
     AGENT_NOT_LINKED: { text: 'DAGON はまだ連携していません。メニューの「DAGON と連携する…」から連携してください', failed: false },
-    AGENT_NO_KEY: { text: 'CLI に鍵がありません。ターミナルで ANTHROPIC_API_KEY を設定し、dagon serve を起動し直してください', failed: false },
+    AGENT_UNAVAILABLE: { text: '連携した方法がこのパソコンで使えません。連携の手順に書いた準備をしてから、dagon serve を起動し直してください', failed: false },
     AGENT_BUSY: { text: 'DAGON はほかの質問に答えています。少し待ってから聞いてください', failed: false },
     AGENT_TIMEOUT: { text: '× 返事が時間内に届きませんでした。もう一度聞いてください', failed: true },
     AGENT_FAILED: { text: '× 返事を受け取れませんでした。もう一度聞いてください', failed: true },

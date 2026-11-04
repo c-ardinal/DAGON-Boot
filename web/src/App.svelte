@@ -10,7 +10,7 @@
   import Drawer, { type DrawerTab } from './screens/Drawer.svelte';
   import { PARTS } from './app/copy.ts';
   import { activeStates, lockOf, stateName, type Control } from './app/locks.ts';
-  import { Agent, type AskKind, type Selection } from './app/agent.svelte.ts';
+  import { Agent, type AgentChoice, type AskKind, type Selection } from './app/agent.svelte.ts';
   import { agentMock } from './app/agentMock.ts';
   import Dagon from './screens/Dagon.svelte';
   import LinkDialog from './screens/LinkDialog.svelte';
@@ -366,9 +366,9 @@
     menuOpen = false;
     linkOpen = true;
   }
-  async function agree() {
+  async function agree(choice: AgentChoice) {
     linkOpen = false;
-    const p = await agent.setLink(true);
+    const p = await agent.setLink(choice);
     if (p) return showWhy(p.text, null, p.failed);
     const c = agent.status?.consent;
     note(AGENT.linked(agent.status?.provider.name ?? '', c?.at ?? ''));
@@ -376,7 +376,7 @@
   }
   async function unlink() {
     menuOpen = false;
-    const p = await agent.setLink(false);
+    const p = await agent.setLink(null);
     if (p) return showWhy(p.text, null, p.failed);
     note(AGENT.unlinked);
     if (drawerTab === 'talk') drawerTab = null;
@@ -1264,7 +1264,7 @@
     <div class="why" class:failed={why.failed} role={why.failed ? 'alert' : 'status'} style:left="{Math.max(8, Math.min(why.x, innerWidth - 336))}px" style:top="{Math.min(why.y, innerHeight - 96)}px">{why.text}</div>
   {/if}
   {#if linkOpen && agent.status}
-    <LinkDialog status={agent.status} onagree={() => void agree()} oncancel={() => (linkOpen = false)} />
+    <LinkDialog status={agent.status} onagree={(c) => void agree(c)} oncancel={() => (linkOpen = false)} />
   {/if}
   {#if restartOpen}
     <Restart onconfirm={restart} oncancel={cancelRestart} />

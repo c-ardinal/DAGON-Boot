@@ -4,12 +4,40 @@
 // comes here; the provider's name is shown only in the linking step.
 import { AGENT } from './copy.ts';
 
-export interface AgentStatus {
-  /** This CLI has the key. */
+/** One way to reach an agent: its own login through a program, or an HTTP API with a key. */
+export interface AgentWay {
+  id: string;
+  name: string;
+  kind: 'command' | 'messages-http' | string;
+  /** It can be used on this machine now (program on PATH, key set). */
   available: boolean;
+}
+
+export interface AgentDef {
+  id: string;
+  name: string;
+  provider: string;
+  ways: AgentWay[];
+}
+
+/** The agent and the way DAGON talks through. */
+export interface AgentChoice {
+  agent: string;
+  way: string;
+}
+
+export interface AgentStatus {
+  agents: AgentDef[];
+  /** The way the linking step preselects. */
+  default: AgentChoice;
   linked: boolean;
+  consent: (AgentChoice & { at: string }) | null;
+  /** The linked (or default) way can be used here. */
+  available: boolean;
+  /** The agent's name for the linking texts ("Claude (Anthropic)"). */
   provider: { id: string; name: string };
-  consent: { at: string; provider: string } | null;
+  /** User definition files that did not load. */
+  errors: string[];
   sends: string[];
   never_sends: string[];
 }
@@ -89,13 +117,13 @@ export class Agent {
     }
   }
 
-  /** POST or DELETE /v1/agent/link; null when it went through, else why not. */
-  async setLink(on: boolean): Promise<AgentProblem | null> {
+  /** POST (with the chosen agent and way) or DELETE /v1/agent/link; null when it went through, else why not. */
+  async setLink(choice: AgentChoice | null): Promise<AgentProblem | null> {
     try {
-      const r = on ? await this.api('POST', 'agent/link', { provider: 'anthropic', consent: true }) : await this.api('DELETE', 'agent/link');
+      const r = choice ? await this.api('POST', 'agent/link', { ...choice, consent: true }) : await this.api('DELETE', 'agent/link');
       if (!r.ok) return problemOf(r.status, await codeOf(r));
       this.status = (await r.json()) as AgentStatus;
-      if (!on) this.messages = [];
+      if (!choice) this.messages = [];
       return null;
     } catch {
       return AGENT.errors.AGENT_FAILED;

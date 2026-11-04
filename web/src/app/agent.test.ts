@@ -11,12 +11,12 @@ describe('DAGON and its agent (docs/agent-api.md)', () => {
     const a = new Agent(agentMock(new URLSearchParams('agent'), () => '', now));
     await a.refresh();
     expect(a.linked).toBe(false);
-    expect(await a.setLink(true)).toBeNull();
+    expect(await a.setLink({ agent: 'claude', way: 'claude-code' })).toBeNull();
     expect(a.linked).toBe(true);
-    expect(a.status?.consent?.provider).toBe('anthropic');
+    expect(a.status?.consent).toMatchObject({ agent: 'claude', way: 'claude-code' });
     await a.ask('次は？', 'next');
     expect(a.messages.map((m) => m.role)).toEqual(['user', 'dagon']);
-    expect(await a.setLink(false)).toBeNull();
+    expect(await a.setLink(null)).toBeNull();
     expect([a.linked, a.messages]).toEqual([false, []]);
   });
 
@@ -36,7 +36,7 @@ describe('DAGON and its agent (docs/agent-api.md)', () => {
   });
 
   test('refusals by code: not linked, no key and busy are information; timeout and failure are failures', async () => {
-    for (const [status, code, failed] of [[409, 'AGENT_NOT_LINKED', false], [409, 'AGENT_NO_KEY', false], [429, 'AGENT_BUSY', false], [504, 'AGENT_TIMEOUT', true], [502, 'AGENT_FAILED', true]] as const) {
+    for (const [status, code, failed] of [[409, 'AGENT_NOT_LINKED', false], [409, 'AGENT_UNAVAILABLE', false], [429, 'AGENT_BUSY', false], [504, 'AGENT_TIMEOUT', true], [502, 'AGENT_FAILED', true]] as const) {
       const a = new Agent(async () => json({ error: 'x', code }, status));
       await a.ask('次は？', 'next');
       expect(a.messages[a.messages.length - 1], code).toEqual({ role: 'dagon', text: AGENT.errors[code].text, failed });
@@ -45,7 +45,14 @@ describe('DAGON and its agent (docs/agent-api.md)', () => {
 
   test('dagon demo refuses linking: said calmly', async () => {
     const a = new Agent(async () => json({ error: 'demo' }, 403));
-    expect(await a.setLink(true)).toEqual(AGENT.errors.DEMO);
+    expect(await a.setLink({ agent: 'claude', way: 'api' })).toEqual(AGENT.errors.DEMO);
+  });
+
+  test('linking sends the chosen agent and way with consent true (changing the way links again)', async () => {
+    const sent: unknown[] = [];
+    const a = new Agent(async (m, path, body) => (sent.push({ m, path, body }), json({ linked: true })));
+    await a.setLink({ agent: 'claude', way: 'api' });
+    expect(sent).toEqual([{ m: 'POST', path: 'agent/link', body: { agent: 'claude', way: 'api', consent: true } }]);
   });
 
   test('the bubble holds the first part of an answer, at most 110 characters', () => {

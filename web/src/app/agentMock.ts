@@ -15,12 +15,26 @@ const ANSWERS: Record<string, string> = {
 
 /** `yaml`: the page's 構成 now, which the proposal changes. */
 export function agentMock(q: URLSearchParams, yaml: () => string, wait = (ms: number) => new Promise((r) => setTimeout(r, ms))): AgentApi {
-  let consent: AgentStatus['consent'] = q.get('agent') === 'linked' ? { at: new Date().toISOString().slice(0, 19) + 'Z', provider: 'anthropic' } : null;
+  const now = () => new Date().toISOString().slice(0, 19) + 'Z';
+  let consent: AgentStatus['consent'] = q.get('agent') === 'linked' ? { agent: 'claude', way: 'claude-code', at: now() } : null;
   const status = (): AgentStatus => ({
-    available: true,
+    agents: [
+      {
+        id: 'claude',
+        name: 'Claude',
+        provider: 'Anthropic',
+        ways: [
+          { id: 'claude-code', name: 'Claude Code', kind: 'command', available: true },
+          { id: 'api', name: 'API キー', kind: 'messages-http', available: false },
+        ],
+      },
+    ],
+    default: { agent: 'claude', way: 'claude-code' },
     linked: consent !== null,
-    provider: { id: 'anthropic', name: 'Claude (Anthropic)' },
     consent,
+    available: consent?.way !== 'api',
+    provider: { id: 'claude', name: 'Claude (Anthropic)' },
+    errors: [],
     sends: SENDS,
     never_sends: NEVER,
   });
@@ -29,7 +43,9 @@ export function agentMock(q: URLSearchParams, yaml: () => string, wait = (ms: nu
     if (path === 'agent') return json(status());
     if (path === 'agent/link') {
       if (q.has('agentdemo')) return json({ error: 'demo', code: 'DEMO' }, 403);
-      consent = method === 'POST' ? { at: new Date().toISOString().slice(0, 19) + 'Z', provider: 'anthropic' } : null;
+      const b = (body ?? {}) as { agent?: string; way?: string; consent?: unknown };
+      if (method === 'POST' && (b.consent !== true || !b.agent || !b.way)) return json({ error: 'agent and way must name a defined agent and way' }, 400);
+      consent = method === 'POST' ? { agent: b.agent!, way: b.way!, at: now() } : null;
       return json(status());
     }
     if (path === 'agent/ask') {

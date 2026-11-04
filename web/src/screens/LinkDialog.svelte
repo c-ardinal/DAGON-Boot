@@ -1,11 +1,12 @@
 <script lang="ts">
-  import type { AgentStatus } from '../app/agent.svelte.ts';
+  import type { AgentChoice, AgentStatus } from '../app/agent.svelte.ts';
   import { AGENT } from '../app/copy.ts';
+  import { untrack } from 'svelte';
 
   interface Props {
     status: AgentStatus;
-    /** 『同意して連携』: records the consent through serve. */
-    onagree: () => void;
+    /** 『同意して連携』: records the consent for the chosen agent and way through serve. */
+    onagree: (choice: AgentChoice) => void;
     /** 『やめる』 or Escape: nothing is recorded. */
     oncancel: () => void;
   }
@@ -20,6 +21,14 @@
     cancel.focus();
   });
   const L = AGENT.link;
+  // The linked choice when there is one, else serve's default (Claude, Claude Code).
+  let agentId = $state(untrack(() => status.consent?.agent ?? status.default.agent));
+  const agentDef = $derived(status.agents.find((a) => a.id === agentId) ?? status.agents[0]);
+  let wayId = $state(untrack(() => status.consent?.way ?? status.default.way));
+  const way = $derived(agentDef?.ways.find((w) => w.id === wayId) ?? agentDef?.ways[0]);
+  $effect(() => {
+    if (agentDef && !agentDef.ways.some((w) => w.id === wayId)) wayId = agentDef.ways[0]?.id ?? '';
+  });
 </script>
 
 <!-- DES-UX3-188: the one consent, when linking. The provider's name appears here and nowhere else in the page. -->
@@ -28,10 +37,25 @@
   <h2 id="link-h">{L.heading}</h2>
   <p id="link-s">{L.intro}</p>
   <dl>
-    <dt>{L.provider}</dt>
-    <dd><strong>{status.provider.name}</strong><span class="note">{L.providerNote}</span></dd>
-    <dt>{L.key}</dt>
-    <dd><span>{L.keyNote}</span>{#if !status.available}<span class="note">{L.keyMissing}</span>{/if}</dd>
+    <dt><label for="link-agent">{L.agent}</label></dt>
+    <dd>
+      {#if status.agents.length > 1}
+        <select id="link-agent" bind:value={agentId}>{#each status.agents as a (a.id)}<option value={a.id}>{a.name}（{a.provider}）</option>{/each}</select>
+      {:else}
+        <strong id="link-agent">{agentDef?.name}（{agentDef?.provider}）</strong>
+      {/if}
+      <span class="note">{L.agentNote}</span>
+    </dd>
+    <dt>{L.way}</dt>
+    <dd>
+      <div class="ways" role="radiogroup" aria-label={L.way}>
+        {#each agentDef?.ways ?? [] as w (w.id)}
+          <label class="way"><input type="radio" name="link-way" value={w.id} bind:group={wayId} />{w.name}</label>
+        {/each}
+      </div>
+    </dd>
+    <dt>{L.ready}</dt>
+    <dd><span>{L.wayNote[way?.kind ?? ''] ?? ''}</span>{#if way && !way.available}<span class="note">{L.wayMissing}</span>{/if}</dd>
     <dt>{L.sends}</dt>
     <dd><ul>{#each status.sends as s (s)}<li>{s}</li>{/each}</ul></dd>
     <dt>{L.neverSends}</dt>
@@ -40,7 +64,7 @@
   <p class="undo">{L.undo}</p>
   <div class="actions">
     <button class="secondary" bind:this={cancel} onclick={oncancel}>{L.cancel}</button>
-    <button class="primary" onclick={onagree}>{L.agree}</button>
+    <button class="primary" disabled={!agentDef || !way} onclick={() => agentDef && way && onagree({ agent: agentDef.id, way: way.id })}>{L.agree}</button>
   </div>
 </dialog>
 
@@ -90,6 +114,24 @@
   }
   .note {
     color: var(--c-muted);
+  }
+  .ways {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--s-1) var(--s-4);
+  }
+  .way {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--s-1);
+    cursor: pointer;
+  }
+  select {
+    height: 1.5rem;
+    border: 1px solid var(--c-hair);
+    border-radius: var(--r-s);
+    background: var(--c-layer-1);
+    color: var(--c-paper);
   }
   ul {
     margin: 0;

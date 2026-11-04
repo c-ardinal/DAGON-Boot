@@ -8,12 +8,12 @@
 use crate::harness::{Violation, World};
 use crate::identity::identity;
 use crate::mem::{Cut, Mem};
+use crate::rng::Rng;
 use crate::topology::{
     self, host_plan, BodyCodec, BodyV1, Node, Refused, Source, Store, Topology, Written,
 };
 use dagon_format::manifest::Constraint;
 use dagon_format::topology::TopoLink;
-use dagon_sim::SimRng;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Op {
@@ -33,7 +33,7 @@ pub struct Config {
 }
 
 pub fn topology(seed: u64) -> Topology {
-    let mut r = SimRng::new(seed);
+    let mut r = Rng::new(seed);
     let n = 1 + r.below(8) as usize;
     let nodes = (0..n)
         .map(|i| Node {
@@ -187,7 +187,7 @@ impl World for TopologyWorld {
     type Config = Config;
     type Op = Op;
 
-    fn generate(rng: &mut SimRng) -> (Config, Vec<Op>) {
+    fn generate(rng: &mut Rng) -> (Config, Vec<Op>) {
         let cfg = Config {
             bank: [512, 1024][rng.below(2) as usize],
             random_start: rng.chance(0.3),

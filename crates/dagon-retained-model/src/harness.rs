@@ -6,7 +6,7 @@
 //! same property; its `Debug` form is a Rust expression to paste into
 //! `tests/regressions.rs`.
 
-use dagon_sim::SimRng;
+use crate::rng::Rng;
 use std::fmt::Debug;
 use std::panic::{catch_unwind, AssertUnwindSafe};
 
@@ -33,7 +33,7 @@ pub trait World {
     type Config: Clone + Debug;
     type Op: Clone + Debug;
 
-    fn generate(rng: &mut SimRng) -> (Self::Config, Vec<Self::Op>);
+    fn generate(rng: &mut Rng) -> (Self::Config, Vec<Self::Op>);
     /// `seed` drives the faults' own randomness (random bytes after power
     /// loss or an interrupted erase).
     fn run(cfg: &Self::Config, ops: &[Self::Op], seed: u64) -> Result<(), Violation>;
@@ -61,7 +61,7 @@ impl<W: World> Debug for Failure<W> {
 
 /// Seed of scenario `i` of a run started from `base` (SplitMix64 step).
 pub fn seed_of(base: u64, i: u64) -> u64 {
-    SimRng::new(base ^ i.wrapping_mul(0x9E37_79B9_7F4A_7C15)).next_u64()
+    Rng::new(base ^ i.wrapping_mul(0x9E37_79B9_7F4A_7C15)).next_u64()
 }
 
 pub fn check<W: World>(cfg: &W::Config, ops: &[W::Op], seed: u64) -> Result<(), Violation> {
@@ -79,7 +79,7 @@ pub fn check<W: World>(cfg: &W::Config, ops: &[W::Op], seed: u64) -> Result<(), 
 pub fn run_many<W: World>(base: u64, count: u64) -> Result<u64, Box<Failure<W>>> {
     for i in 0..count {
         let seed = seed_of(base, i);
-        let (cfg, ops) = W::generate(&mut SimRng::new(seed));
+        let (cfg, ops) = W::generate(&mut Rng::new(seed));
         if let Err(v) = check::<W>(&cfg, &ops, seed) {
             let ops = shrink::<W>(&cfg, ops, seed, v.property);
             let violation = check::<W>(&cfg, &ops, seed).expect_err("shrunk case still fails");

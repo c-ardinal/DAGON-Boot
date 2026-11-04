@@ -88,7 +88,7 @@ fn weak_layout_is_caught() {
     impl World for WeakWorld {
         type Config = Config;
         type Op = Op;
-        fn generate(rng: &mut dagon_sim::SimRng) -> (Config, Vec<Op>) {
+        fn generate(rng: &mut dagon_retained_model::rng::Rng) -> (Config, Vec<Op>) {
             let (c, ops) = RecordWorld::generate(rng);
             (Config { weak: true, ..c }, ops)
         }
@@ -659,7 +659,7 @@ fn shrinker_minimises() {
     impl World for Toy {
         type Config = ();
         type Op = u8;
-        fn generate(_: &mut dagon_sim::SimRng) -> ((), Vec<u8>) {
+        fn generate(_: &mut dagon_retained_model::rng::Rng) -> ((), Vec<u8>) {
             ((), vec![])
         }
         fn run(_: &(), ops: &[u8], _: u64) -> Result<(), dagon_retained_model::harness::Violation> {

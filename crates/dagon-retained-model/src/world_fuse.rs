@@ -19,7 +19,7 @@ use crate::fuse::{
 };
 use crate::harness::{Violation, World};
 use crate::mem::{Cut, Mem, Survives};
-use dagon_sim::SimRng;
+use crate::rng::Rng;
 use std::collections::BTreeSet;
 
 const BOOT: usize = 0;
@@ -109,7 +109,7 @@ struct Images {
 struct Sim<'a> {
     cfg: &'a Config,
     mem: Mem,
-    rng: SimRng,
+    rng: Rng,
     img: Images,
     log: LogState,
     /// Call sites that locked up since their last host clear.
@@ -550,7 +550,7 @@ impl<'a> Sim<'a> {
 
 pub struct FuseWorld;
 
-fn behaviour(rng: &mut SimRng) -> Behaviour {
+fn behaviour(rng: &mut Rng) -> Behaviour {
     let targets = [
         Target::FlashController,
         Target::StateLog,
@@ -580,7 +580,7 @@ impl World for FuseWorld {
     type Config = Config;
     type Op = Op;
 
-    fn generate(rng: &mut SimRng) -> (Config, Vec<Op>) {
+    fn generate(rng: &mut Rng) -> (Config, Vec<Op>) {
         let verifier = rng.chance(0.3).then(|| VerifierReplacement {
             declared: rng.chance(0.7),
             hash_matches: rng.chance(0.7),
@@ -650,8 +650,8 @@ impl World for FuseWorld {
     }
 
     fn run(cfg: &Config, ops: &[Op], seed: u64) -> Result<(), Violation> {
-        let mut rng = SimRng::new(seed ^ 0xF05E);
-        let h = |rng: &mut SimRng| {
+        let mut rng = Rng::new(seed ^ 0xF05E);
+        let h = |rng: &mut Rng| {
             let mut a = [0u8; 32];
             a.iter_mut().for_each(|b| *b = rng.byte());
             a

@@ -9,4 +9,3 @@ description = "Executable model of DAGON's retained and persistent formats under
 [dependencies]
 dagon-format = { path = "../dagon-format" }
 dagon-proto = { path = "../dagon-proto" }
-dagon-sim = { path = "../dagon-sim" }

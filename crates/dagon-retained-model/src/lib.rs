@@ -19,6 +19,7 @@ pub mod harness;
 pub mod identity;
 pub mod mem;
 pub mod record;
+pub mod rng;
 pub mod skew;
 pub mod topology;
 pub mod world_fuse;

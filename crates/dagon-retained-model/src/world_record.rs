@@ -19,9 +19,9 @@ use crate::record::{
     self, paged_read, record_page, BootId, Entry, Geometry, HandOff, Loss, RecordCodec, Replay,
     Ring, Writer, RECORD_MAX, V1 as RecV1,
 };
+use crate::rng::Rng;
 use crate::skew::{Weak, V2 as RecV2};
 use dagon_proto::max_payload;
-use dagon_sim::SimRng;
 use std::collections::HashMap;
 use std::ops::Range;
 
@@ -172,7 +172,7 @@ enum Phase {
 struct Sim<'a> {
     cfg: &'a Config,
     mem: Mem,
-    rng: SimRng,
+    rng: Rng,
     recs: Vec<Rec>,
     true_boot: u64,
     consumer: HashMap<(u8, u8, u32, u32), Entry>,
@@ -208,7 +208,7 @@ impl<'a> Sim<'a> {
         Sim {
             cfg,
             mem,
-            rng: SimRng::new(seed ^ 0x5EED),
+            rng: Rng::new(seed ^ 0x5EED),
             recs: Vec::new(),
             true_boot: 0,
             consumer: HashMap::new(),
@@ -850,8 +850,8 @@ impl World for RecordWorld {
     type Config = Config;
     type Op = Op;
 
-    fn generate(rng: &mut SimRng) -> (Config, Vec<Op>) {
-        let pick = |rng: &mut SimRng, xs: &[usize]| xs[rng.below(xs.len() as u64) as usize];
+    fn generate(rng: &mut Rng) -> (Config, Vec<Op>) {
+        let pick = |rng: &mut Rng, xs: &[usize]| xs[rng.below(xs.len() as u64) as usize];
         let cfg = Config {
             survives: [
                 Survives::ResetRandom,
@@ -873,8 +873,8 @@ impl World for RecordWorld {
         };
         let writers = cfg.stage0 as u64 + 1 + cfg.more.len() as u64;
         let vers = [V1, V1, V1, V1, V2, Old, Absent];
-        let ver = |rng: &mut SimRng| vers[rng.below(vers.len() as u64) as usize];
-        let end = |rng: &mut SimRng| [Next, Next, Next, Next, Halt, Hang][rng.below(6) as usize];
+        let ver = |rng: &mut Rng| vers[rng.below(vers.len() as u64) as usize];
+        let end = |rng: &mut Rng| [Next, Next, Next, Next, Halt, Hang][rng.below(6) as usize];
         let (mut v0, mut vb, mut va) = (V1, V1, V1);
         let n = 1 + rng.below(40);
         let mut ops = Vec::new();

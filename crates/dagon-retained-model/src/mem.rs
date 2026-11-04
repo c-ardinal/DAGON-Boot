@@ -6,7 +6,7 @@
 //! A store outside the range the running code may write is applied (a real
 //! bug would corrupt memory) and logged in [`Mem::stray`] as evidence.
 
-use dagon_sim::SimRng;
+use crate::rng::Rng;
 use std::ops::Range;
 
 /// What a power loss does to the region (`[boot.record] survives`).
@@ -30,7 +30,7 @@ pub struct Mem {
     steps: u64,
     allowed: Range<usize>,
     stray: Vec<usize>,
-    rng: SimRng,
+    rng: Rng,
 }
 
 impl Mem {
@@ -41,7 +41,7 @@ impl Mem {
             steps: 0,
             allowed: 0..len,
             stray: Vec::new(),
-            rng: SimRng::new(seed),
+            rng: Rng::new(seed),
         }
     }
 

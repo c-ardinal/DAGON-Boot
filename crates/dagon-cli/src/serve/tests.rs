@@ -1953,3 +1953,103 @@ fn a_demo_never_calls_an_agent() {
     let (_, hello) = http(&d, "GET", "/v1/hello", &ok, b"");
     assert!(!hello.contains("ai_topology"), "{hello}");
 }
+
+fn counting(
+    reply: serde_json::Value,
+    on_call: impl Fn() + Send + Sync + 'static,
+) -> (
+    Arc<super::jobs::AgentApi>,
+    Arc<std::sync::atomic::AtomicUsize>,
+) {
+    let calls = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let n = calls.clone();
+    let fake: Arc<super::jobs::AgentApi> = Arc::new(move |_: &serde_json::Value| {
+        n.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        on_call();
+        Ok(reply.clone())
+    });
+    (fake, calls)
+}
+
+#[test]
+fn an_unlink_while_dagon_answers_stops_further_calls_and_the_answer() {
+    let home_slot = Arc::new(std::sync::OnceLock::<PathBuf>::new());
+    let h = home_slot.clone();
+    let (fake, calls) = counting(
+        said("案です。", Some("dagon: 1\nname: broken\n")),
+        move || {
+            crate::agent::unlink(h.get().unwrap()).unwrap();
+        },
+    );
+    let (a, home) = linked_with("ask-unlink", fake);
+    home_slot.set(home).unwrap();
+    let q = serde_json::json!({ "question": "変更を提案", "kind": "propose" });
+    let (st, body) = post(&a, "/v1/agent/ask", q);
+    assert!(st == 409 && body.contains("AGENT_NOT_LINKED"), "{body}");
+    assert_eq!(
+        calls.load(std::sync::atomic::Ordering::SeqCst),
+        1,
+        "no repair call"
+    );
+}
+
+fn job_state(a: &Area, id: u64, want: &str) {
+    for _ in 0..500 {
+        let (_, body) = get(a, &format!("/v1/jobs/{id}"));
+        let v: serde_json::Value = serde_json::from_str(&body).unwrap();
+        if v["state"] == want {
+            return;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
+    panic!("job {id} never reached {want}");
+}
+
+#[test]
+fn unlinking_cancels_a_running_topology_draft() {
+    let question = serde_json::json!({
+        "content": [{ "type": "tool_use", "id": "t", "name": "submit_topology",
+                      "input": { "yaml": "", "questions": ["baud rate of seg?"] } }],
+        "stop_reason": "tool_use",
+    });
+    let (fake, calls) = counting(question, || {});
+    let (a, _) = linked_with("topo-unlink", fake);
+    let (st, body) = post(
+        &a,
+        "/v1/ai/topology",
+        serde_json::json!({ "description": "a hub" }),
+    );
+    assert_eq!(st, 202, "{body}");
+    let id = serde_json::from_str::<serde_json::Value>(&body).unwrap()["job"]
+        .as_u64()
+        .unwrap();
+    job_state(&a, id, "question");
+    let b = auth(&a);
+    assert_eq!(
+        http(
+            &a,
+            "DELETE",
+            "/v1/agent/link",
+            &[("Authorization", b.as_str())],
+            b""
+        )
+        .0,
+        200
+    );
+    job_state(&a, id, "cancelled");
+    assert_eq!(calls.load(std::sync::atomic::Ordering::SeqCst), 1);
+}
+
+#[test]
+fn a_topology_file_too_large_to_send_is_refused_without_a_call() {
+    let (fake, calls) = counting(said("はい。", None), || {});
+    let (a, _) = linked_with("ask-large", fake);
+    let big = format!("{YAML}{}", "# padding\n".repeat(7_000));
+    std::fs::write(a.dir.join("topology/t.yaml"), big).unwrap();
+    let (st, body) = post(&a, "/v1/agent/ask", serde_json::json!({ "question": "x" }));
+    assert!(
+        st == 413 && body.contains("AGENT_CONTEXT_TOO_LARGE"),
+        "{body}"
+    );
+    assert_eq!(calls.load(std::sync::atomic::Ordering::SeqCst), 0);
+}

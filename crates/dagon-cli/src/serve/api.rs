@@ -189,7 +189,7 @@ pub fn handle(server: &Arc<Server>, req: &Request) -> Response {
         ("PUT", ["layout"]) => layout_put(server, req),
         ("POST", ["conform"]) => start(server, req, "conform", job_conform),
         ("GET", ["conform", node]) => conform_get(server, node),
-        ("POST", ["ai", "topology"]) => start(server, req, "ai_topology", job_ai_topology),
+        ("POST", ["ai", "topology"]) => ai_topology_start(server, req),
         ("POST", ["ai", "port"]) => Ok(Response::error(501, "porting is not available here")),
         ("GET", ["jobs", id]) => job_get(server, id),
         ("POST", ["jobs", id, "answer"]) => answer(server, id, req),
@@ -378,16 +378,34 @@ fn not_linked() -> Response {
 
 /// The agent a question goes to: the stand-in when set, else the Messages
 /// API with this CLI's key (409 AGENT_NO_KEY without one).
-fn agent_api(server: &Server) -> Result<Box<crate::ai::Api<'static>>, Response> {
+/// Every call, the stand-in's too, passes [`crate::ai::before_call`] first:
+/// the consent read again and the size of the request. Err: no key.
+fn agent_api(
+    server: &Server,
+    timeout: std::time::Duration,
+) -> Result<Box<crate::ai::Api<'static>>, String> {
+    let home = super::project::home(server).map_err(|_| crate::agent::NOT_LINKED.to_string())?;
     if let Some(f) = server.agent_api.get() {
         let f = Arc::clone(f);
-        return Ok(Box::new(move |b: &Value| f(b)));
+        return Ok(Box::new(move |b: &Value| {
+            crate::ai::before_call(&home, b)?;
+            f(b)
+        }));
     }
-    let key = crate::ai::api_key(std::env::var(crate::ai::KEY_ENV))
-        .map_err(|e| coded(409, &e, "AGENT_NO_KEY"))?;
+    let key = crate::ai::api_key(std::env::var(crate::ai::KEY_ENV))?;
     Ok(Box::new(move |b: &Value| {
-        crate::ai::post_messages_within(crate::ai::API_URL, &key, b, crate::ask::ASK_TIMEOUT)
+        crate::ai::send(&home, &key, b, timeout)
     }))
+}
+
+/// A model call's error as the page tells it apart.
+fn agent_failure(e: &str) -> Response {
+    match e {
+        crate::agent::NOT_LINKED => not_linked(),
+        crate::ai::TOO_LARGE => coded(413, e, "AGENT_CONTEXT_TOO_LARGE"),
+        crate::ai::TIMED_OUT => coded(504, e, "AGENT_TIMEOUT"),
+        _ => coded(502, e, "AGENT_FAILED"),
+    }
 }
 
 /// POST /v1/agent/ask: one question to DAGON, answered in this request.
@@ -399,11 +417,13 @@ fn agent_ask(server: &Server, req: &Request) -> Res {
     let _turn = server
         .ask_turn()
         .ok_or_else(|| coded(429, "DAGON is answering another question", "AGENT_BUSY"))?;
-    let mut api = agent_api(server)?;
+    let mut api =
+        agent_api(server, crate::ask::ASK_TIMEOUT).map_err(|e| coded(409, &e, "AGENT_NO_KEY"))?;
     let reg = registry_of(server).map_err(|e| Response::error(500, &e))?;
-    let yaml = topology_path(server)
-        .ok()
-        .and_then(|p| std::fs::read_to_string(p).ok());
+    let yaml = match topology_path(server) {
+        Ok(p) => crate::ask::read_topology(&p).map_err(|e| agent_failure(&e))?,
+        Err(_) => None,
+    };
     let facts = crate::ask::Facts {
         reg: &reg,
         topology: yaml.as_deref(),
@@ -411,11 +431,12 @@ fn agent_ask(server: &Server, req: &Request) -> Res {
     };
     let model =
         std::env::var(crate::ai::MODEL_ENV).unwrap_or_else(|_| crate::ai::DEFAULT_MODEL.into());
-    match crate::ask::ask(&q, &facts, &model, &mut *api) {
-        Ok(r) => Ok(json_ok(r.to_json())),
-        Err(e) if e == crate::ai::TIMED_OUT => Err(coded(504, &e, "AGENT_TIMEOUT")),
-        Err(e) => Err(coded(502, &e, "AGENT_FAILED")),
+    let r = crate::ask::ask(&q, &facts, &model, &mut *api).map_err(|e| agent_failure(&e))?;
+    // Unlinked while the answer was on its way: it is not shown either.
+    if !agent_linked(server) {
+        return Err(not_linked());
     }
+    Ok(json_ok(r.to_json()))
 }
 
 fn agent_linked(server: &Server) -> bool {
@@ -451,6 +472,8 @@ fn agent_link(server: &Server, req: &Request) -> Res {
 fn agent_unlink(server: &Server) -> Res {
     let home = super::project::home(server)?;
     crate::agent::unlink(&home).map_err(|e| Response::error(500, &e))?;
+    // Running topology drafts stop too; every call checks the consent anyway.
+    server.cancel_kind("ai_topology");
     Ok(agent_get(server))
 }
 
@@ -1227,18 +1250,31 @@ fn conform_get(server: &Server, node: &str) -> Res {
     Ok(Response::bytes("application/json", bytes))
 }
 
-/// Topology from a description; the model's questions go to the page.
-fn job_ai_topology(job: &mut Job, cfg: Config, v: Value) -> Result<Value, String> {
+/// POST /v1/ai/topology {description}: a job; the model's questions go to
+/// the page.
+fn ai_topology_start(server: &Arc<Server>, req: &Request) -> Res {
+    let v = body_json(req)?;
+    let s = Arc::clone(server);
+    match server.spawn("ai_topology", move |job| {
+        let (_, _, reg) = job.project()?;
+        job_ai_topology(job, &s, &reg, &v)
+    }) {
+        Some(id) => Ok(accepted(id)),
+        None => Err(Response::error(429, "too many jobs running")),
+    }
+}
+
+fn job_ai_topology(job: &mut Job, s: &Server, reg: &Registry, v: &Value) -> Result<Value, String> {
     let description = v["description"]
         .as_str()
         .ok_or("description is required")?
         .to_string();
+    let mut post = agent_api(s, crate::ai::HTTP_TIMEOUT)?;
     let cancel = job.cancel_flag();
     let mut ask = |qs: &[String]| -> Result<Vec<String>, String> {
         qs.iter().enumerate().map(|(i, q)| job.ask(i, q)).collect()
     };
-    let reg = project_registry(&cfg)?;
-    let (yaml, report) = crate::ai::topology_for(&description, &reg, &mut ask, &cancel)?;
+    let (yaml, report) = crate::ai::topology_for(&description, reg, &mut ask, &cancel, &mut *post)?;
     let report: Value = serde_json::from_str(&report).unwrap_or(Value::Null);
     Ok(json!({ "yaml": yaml, "report": report }))
 }

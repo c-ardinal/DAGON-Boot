@@ -43,13 +43,17 @@ fn file(home: &Path) -> PathBuf {
     home.join(".dagon").join(FILE)
 }
 
-/// The recorded consent; None when there is none, it is unreadable or it
-/// names another provider.
+/// The recorded consent; None when there is none, it is unreadable, holds
+/// any other field, names another provider or a time not as [`link`]
+/// writes it.
 pub fn consent(home: &Path) -> Option<Consent> {
     let bytes = crate::paths::read_capped(&file(home), MAX_FILE).ok()??;
     let v: Value = serde_json::from_slice(&bytes).ok()?;
+    if v.as_object()?.len() != 2 {
+        return None;
+    }
     let provider = v["provider"].as_str().filter(|p| *p == PROVIDER_ID)?;
-    let at = v["at"].as_str()?;
+    let at = v["at"].as_str().filter(|a| is_utc_time(a))?;
     Some(Consent {
         provider: provider.into(),
         at: at.into(),
@@ -188,6 +192,31 @@ fn no_args(args: &[&str], cmd: &str) -> Result<(), String> {
     }
 }
 
+/// `YYYY-MM-DDTHH:MM:SSZ` with a real month, day and time of day.
+fn is_utc_time(s: &str) -> bool {
+    let b = s.as_bytes();
+    let num = |r: std::ops::Range<usize>| -> Option<u32> {
+        let t = s.get(r)?;
+        t.bytes()
+            .all(|c| c.is_ascii_digit())
+            .then(|| t.parse().ok())?
+    };
+    let shape = b.len() == 20
+        && b[4] == b'-'
+        && b[7] == b'-'
+        && b[10] == b'T'
+        && b[13] == b':'
+        && b[16] == b':'
+        && b[19] == b'Z';
+    shape
+        && num(0..4).is_some()
+        && num(5..7).is_some_and(|m| (1..=12).contains(&m))
+        && num(8..10).is_some_and(|d| (1..=31).contains(&d))
+        && num(11..13).is_some_and(|h| h < 24)
+        && num(14..16).is_some_and(|m| m < 60)
+        && num(17..19).is_some_and(|x| x < 60)
+}
+
 fn utc_now() -> String {
     let secs = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -231,6 +260,15 @@ mod tests {
         assert_eq!(rfc3339(0), "1970-01-01T00:00:00Z");
         assert_eq!(rfc3339(951_782_400), "2000-02-29T00:00:00Z");
         assert_eq!(rfc3339(1_793_793_599), "2026-11-04T11:59:59Z");
+        assert!(is_utc_time(&rfc3339(1_793_793_599)) && is_utc_time(&utc_now()));
+        for bad in [
+            "2026-11-04 11:59:59Z",
+            "2026-11-04T24:00:00Z",
+            "2026-11-04T11:59:59",
+            "２026-11-04T11:59:59Z",
+        ] {
+            assert!(!is_utc_time(bad), "{bad}");
+        }
     }
 
     #[test]
@@ -257,8 +295,11 @@ mod tests {
         for text in [
             "",
             "{",
-            r#"{"provider":"other","at":"x"}"#,
+            r#"{"provider":"other","at":"2026-11-04T04:14:35Z"}"#,
             r#"{"provider":"anthropic"}"#,
+            r#"{"provider":"anthropic","at":"yesterday"}"#,
+            r#"{"provider":"anthropic","at":"2026-13-04T04:14:35Z"}"#,
+            r#"{"provider":"anthropic","at":"2026-11-04T04:14:35Z","scope":"all"}"#,
         ] {
             std::fs::write(file(&h), text).unwrap();
             assert!(!is_linked(&h), "{text}");

@@ -19,7 +19,7 @@ const API_VERSION: &str = "2023-06-01";
 const MAX_TOKENS: u32 = 16_000;
 /// Model calls per run, counting question rounds and fix rounds.
 const MAX_ROUNDS: usize = 8;
-const HTTP_TIMEOUT: Duration = Duration::from_secs(600);
+pub(crate) const HTTP_TIMEOUT: Duration = Duration::from_secs(600);
 const TOOL: &str = "submit_topology";
 const DEFAULT_OUT: &str = "topology.yaml";
 
@@ -53,7 +53,8 @@ struct Args {
 /// `dagon ai topology [--in <file>] [--out <yaml>] [--model <id>]`
 pub fn topology(args: &[&str]) -> Result<(), String> {
     let a = parse_args(args, std::env::var(MODEL_ENV).ok())?;
-    crate::agent::require_linked(&crate::agent::home()?)?;
+    let home = crate::agent::home()?;
+    crate::agent::require_linked(&home)?;
     let key = api_key(std::env::var(KEY_ENV))?;
     let description = match &a.input {
         Some(p) => std::fs::read_to_string(p).map_err(|e| format!("cannot read {p}: {e}"))?,
@@ -69,7 +70,7 @@ pub fn topology(args: &[&str]) -> Result<(), String> {
         return Err("the board description is empty".into());
     }
     let interactive = a.input.is_some();
-    let mut api = |body: &Value| post_messages(API_URL, &key, body);
+    let mut api = |body: &Value| send(&home, &key, body, HTTP_TIMEOUT);
     let mut ask = |qs: &[String]| {
         if interactive {
             prompt(qs)
@@ -103,20 +104,20 @@ pub(crate) fn api_key_present() -> bool {
 }
 
 /// For `dagon serve`: the topology YAML for `description` and its check
-/// report (JSON), with the model's questions answered through `ask`.
+/// report (JSON), with the model's questions answered through `ask` and
+/// every model call made through `post` (see [`before_call`]).
 pub(crate) fn topology_for(
     description: &str,
     reg: &Registry,
     ask: &mut Ask,
     cancel: &std::sync::atomic::AtomicBool,
+    post: &mut Api,
 ) -> Result<(String, String), String> {
     if description.trim().is_empty() {
         return Err("the board description is empty".into());
     }
-    let key = api_key(std::env::var(KEY_ENV))?;
     let model = std::env::var(MODEL_ENV).unwrap_or_else(|_| DEFAULT_MODEL.into());
-    let mut post = |body: &Value| post_messages(API_URL, &key, body);
-    let mut api = |body: &Value| unless_cancelled(cancel, &mut post, body);
+    let mut api = |body: &Value| unless_cancelled(cancel, post, body);
     let done = generate(description, &model, reg, &mut api, ask)?;
     Ok((done.yaml, done.report.to_json()))
 }
@@ -400,8 +401,37 @@ fn tool_call(resp: &Value) -> Result<(String, String, Vec<String>), String> {
     Ok((id, yaml, questions))
 }
 
-fn post_messages(base: &str, key: &str, body: &Value) -> Result<Value, String> {
-    post_messages_within(base, key, body, HTTP_TIMEOUT)
+/// Largest request body sent to the agent (instructions, facts, topology,
+/// checks, history and question together); a larger one is not sent.
+pub(crate) const MAX_REQUEST: usize = 192 * 1024;
+pub(crate) const TOO_LARGE: &str = "the question and its context are too large to send to DAGON";
+
+/// Proof that [`before_call`] passed for one request; the only way to make
+/// a model call ([`post_messages_within`] takes it).
+pub(crate) struct Cleared(());
+
+/// What every model call passes just before it leaves: the consent, read
+/// again from agent.json (an unlink stops the next call, however the work
+/// started), and the size of the body.
+pub(crate) fn before_call(home: &std::path::Path, body: &Value) -> Result<Cleared, String> {
+    if !crate::agent::is_linked(home) {
+        return Err(crate::agent::NOT_LINKED.into());
+    }
+    if body.to_string().len() > MAX_REQUEST {
+        return Err(TOO_LARGE.into());
+    }
+    Ok(Cleared(()))
+}
+
+/// One model call with this CLI's key, after [`before_call`].
+pub(crate) fn send(
+    home: &std::path::Path,
+    key: &str,
+    body: &Value,
+    timeout: Duration,
+) -> Result<Value, String> {
+    let cleared = before_call(home, body)?;
+    post_messages_within(&cleared, API_URL, key, body, timeout)
 }
 
 /// The error of a model call that did not finish within its time.
@@ -415,7 +445,8 @@ fn agent_error(e: ureq::Error, what: &str) -> String {
 }
 
 /// One Messages API call that gives up after `timeout`.
-pub(crate) fn post_messages_within(
+fn post_messages_within(
+    _cleared: &Cleared,
     base: &str,
     key: &str,
     body: &Value,
@@ -575,6 +606,35 @@ mod tests {
     }
 
     #[test]
+    fn every_call_needs_the_consent_now_and_a_bounded_body() {
+        let home = std::env::temp_dir().join(format!("dagon-ai-gate-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&home);
+        std::fs::create_dir_all(&home).unwrap();
+        let small = json!({ "x": 1 });
+        let e = before_call(&home, &small).err().unwrap();
+        assert_eq!(e, crate::agent::NOT_LINKED);
+        crate::agent::link(&home).unwrap();
+        assert!(before_call(&home, &small).is_ok());
+        let big = json!({ "x": "y".repeat(MAX_REQUEST) });
+        assert_eq!(before_call(&home, &big).err().unwrap(), TOO_LARGE);
+        // A topology draft stops at the call after an unlink.
+        let mut calls = 0;
+        let mut api = |b: &Value| {
+            before_call(&home, b)?;
+            calls += 1;
+            crate::agent::unlink(&home).unwrap();
+            Ok(reply("t", "not: [valid", &[]))
+        };
+        let mut ask = |_: &[String]| -> Result<Vec<String>, String> { unreachable!() };
+        let e = generate("x", "m", Registry::builtin(), &mut api, &mut ask).unwrap_err();
+        assert_eq!((e.as_str(), calls), (crate::agent::NOT_LINKED, 1));
+        // The largest fixed request fits.
+        let size = request("m", Registry::builtin(), &[]).to_string().len();
+        assert!(size < MAX_REQUEST / 2, "{size}");
+        std::fs::remove_dir_all(&home).unwrap();
+    }
+
+    #[test]
     fn missing_key_is_a_clear_error() {
         let e = api_key(Err(std::env::VarError::NotPresent)).unwrap_err();
         assert!(e.contains(KEY_ENV));
@@ -636,7 +696,14 @@ mod tests {
     fn http_request_shape() {
         let ok = reply("t1", "y", &[]).to_string();
         let (base, h) = mock_server("200 OK", &ok);
-        let v = post_messages(&base, "sk-test", &json!({ "model": "m" })).unwrap();
+        let v = post_messages_within(
+            &Cleared(()),
+            &base,
+            "sk-test",
+            &json!({ "model": "m" }),
+            HTTP_TIMEOUT,
+        )
+        .unwrap();
         assert_eq!(v["content"][0]["id"], "t1");
         let req = h.join().unwrap().to_ascii_lowercase();
         assert!(req.starts_with("post /v1/messages "), "{req}");
@@ -651,7 +718,8 @@ mod tests {
         never.set_nonblocking(true).unwrap();
         let target = format!("http://{}/v1/messages", never.local_addr().unwrap());
         let (base, h) = mock_server(&format!("302 Found\r\nlocation: {target}"), "");
-        let e = post_messages(&base, "sk-secret", &json!({})).unwrap_err();
+        let e = post_messages_within(&Cleared(()), &base, "sk-secret", &json!({}), HTTP_TIMEOUT)
+            .unwrap_err();
         h.join().unwrap();
         assert!(e.contains("302") && e.contains("not followed"), "{e}");
         assert!(!e.contains("sk-secret"));
@@ -799,7 +867,8 @@ mod tests {
     fn http_error_message_without_key() {
         let body = r#"{"type":"error","error":{"type":"authentication_error","message":"invalid x-api-key"}}"#;
         let (base, h) = mock_server("401 Unauthorized", body);
-        let e = post_messages(&base, "sk-secret", &json!({})).unwrap_err();
+        let e = post_messages_within(&Cleared(()), &base, "sk-secret", &json!({}), HTTP_TIMEOUT)
+            .unwrap_err();
         h.join().unwrap();
         assert!(e.contains("401") && e.contains("invalid x-api-key"), "{e}");
         assert!(!e.contains("sk-secret"));

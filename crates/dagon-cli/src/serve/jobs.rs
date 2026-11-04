@@ -281,6 +281,16 @@ impl Server {
         true
     }
 
+    /// Asks every unfinished job of `kind` to stop.
+    pub fn cancel_kind(&self, kind: &str) {
+        let jobs = self.jobs.lock().expect("jobs");
+        for j in jobs.values().filter(|j| j.kind == kind && !finished(j)) {
+            j.cancel.store(true, Ordering::Relaxed);
+        }
+        drop(jobs);
+        self.device_cv.notify_all();
+    }
+
     /// Hands `text` to job `id`'s open question. `false`: none open.
     pub fn answer(&self, id: u64, text: String) -> bool {
         let jobs = self.jobs.lock().expect("jobs");

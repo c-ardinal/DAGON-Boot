@@ -80,19 +80,27 @@ it.
 One persisted record can move two slots (`confirmed` and `demoted`,
 `pending_set` and `pending_moved` or `pending_withdrawn`): the machine
 holds one state per slot, one trigger runs both transitions and both
-events are emitted, in that order. A test folds every sequence of what
-the agent and the boot core write (transfers, switches, confirms, boot
-attempts, rollbacks) from a provisioned device and checks after each
-step that every slot's machine state equals STATUS as folded from the
-log (`LogState`), so no fold outcome exists without its transition.
+events are emitted, in that order. A test drives the agent's
+`ImageStore` over a store folded from the log (`LogState`) through every
+sequence of what the agent and the boot core write (transfers,
+switches, confirms, boot attempts, rollbacks) from a provisioned device
+and checks after each step that every slot's machine state equals
+STATUS, so no fold outcome exists without its transition and the agent
+takes them, the second slot's included.
 
 The machine wraps the slot store port: `ImageStore<S: SlotStore>` holds
 the store, and the port's mutators (`erase`, `write`, `write_header`,
 `set_pending`, `confirm`) take a `Transition` that only the machine
 makes, inside the transition that emits the change's event. The
 `SlotStore` trait remains the port a board implements. Code that holds
-the store for the board's other resources (`Agent::store()`) cannot
-change image state with it. The agent exposes `images() -> &ImageView`
+the store for the board's other resources (`Agent::store()`) cannot call
+the port's mutators with it. What a store type offers beyond the port (a
+raw flash handle, a simulator's provisioning helpers) is outside this
+guarantee: it is trusted code of the board or bench, like anything with
+flash access in the same image, and the sandbox (4) is what keeps
+extensions from it. When a header write does not read back, the slot is
+erased again, so a fault leaves no image the machine has not recorded.
+The agent exposes `images() -> &ImageView`
 (read-only: status, each slot's lifecycle state, own version, on
 trial). An app that confirms itself at start
 (bench use) calls `confirm_own()`, which is the `confirmed` transition:

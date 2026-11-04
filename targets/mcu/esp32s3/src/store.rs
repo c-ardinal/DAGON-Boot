@@ -148,7 +148,7 @@ impl<F: Flash, O: Otadata, W: Watchdog> SlotStore for EspStore<F, O, W> {
         let mut trying = false;
         if let Some(v) = view {
             trying = v.slot == running && v.state == SlotState::Trying;
-            // ponytail: otadata keeps no digest, so a slot re-received after a
+            // Otadata keeps no digest, so a slot re-received after a
             // rollback still shows Reverted until its next SET_PENDING.
             if v.slot != running && present[v.slot as usize] {
                 st.slots[v.slot as usize].state = v.state;

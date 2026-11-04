@@ -63,6 +63,8 @@ struct Mem {
     writes: usize,
     pending: Option<u8>,
     confirms: usize,
+    /// Header bytes flipped on read-back (a flash fault).
+    bad_readback: bool,
 }
 
 impl Mem {
@@ -84,6 +86,7 @@ impl Mem {
             writes: 0,
             pending: None,
             confirms: 0,
+            bad_readback: false,
         }
     }
 }
@@ -137,6 +140,9 @@ impl SlotStore for Mem {
     }
     fn read_header(&mut self, slot: u8, out: &mut [u8; HEADER_SIZE]) -> Result<(), StoreError> {
         *out = self.headers[slot as usize];
+        if self.bad_readback {
+            out[100] ^= 1;
+        }
         Ok(())
     }
     fn set_pending(
@@ -145,8 +151,23 @@ impl SlotStore for Mem {
         _h: &[u8; HEADER_SIZE],
         _: &Transition,
     ) -> Result<(), StoreError> {
+        // The log names one pending slot: the one before is an image again,
+        // or the confirmed one again.
+        let st = &mut self.status;
+        for (i, info) in st.slots[..2].iter_mut().enumerate() {
+            if i != slot as usize && matches!(info.state, SlotState::Pending | SlotState::Trying) {
+                info.state = if i == st.confirmed as usize {
+                    SlotState::Confirmed
+                } else {
+                    SlotState::Written
+                };
+                if i == st.active as usize {
+                    st.active = st.confirmed;
+                }
+            }
+        }
         self.pending = Some(slot);
-        self.status.slots[slot as usize].state = SlotState::Pending;
+        st.slots[slot as usize].state = SlotState::Pending;
         Ok(())
     }
     fn confirm(
@@ -716,4 +737,63 @@ fn the_agent_declares_its_machines() {
     assert_eq!(names, ["image", "session", "requests"]);
     assert_eq!(session::CATALOG.initial, "Idle");
     assert_eq!(requests::CATALOG.states, ["Ready"]);
+}
+
+#[test]
+fn switching_away_from_a_pending_or_trial_slot_moves_or_withdraws_it() {
+    let mut n = Node::new(Probe::default());
+    assert_eq!(n.transfer(1, &image(1, &body())), Status::Ok);
+    assert_eq!(n.call(Cmd::SetPending, &[target::APP, 1]).0, Status::Ok);
+    n.reset(|m| {
+        // The confirmed image in A, then B started on trial.
+        let a = image(0, &body());
+        m.headers[0].copy_from_slice(&a[..HEADER_SIZE]);
+        m.bodies[0][..a.len() - HEADER_SIZE].copy_from_slice(&a[HEADER_SIZE..]);
+        b_on_trial(m);
+    });
+    n.events();
+
+    // Back to the confirmed slot A while B is on trial: B is an image again.
+    assert_eq!(n.call(Cmd::SetPending, &[target::APP, 0]).0, Status::Ok);
+    assert_eq!(n.events(), ["pending_set", "pending_moved"]);
+    assert_eq!(n.agent.images().state(0), Some(image::State::Pending));
+    assert_eq!(n.agent.images().state(1), Some(image::State::Written));
+
+    // Then B again: A, still the confirmed slot, is the confirmed one again.
+    assert_eq!(n.call(Cmd::SetPending, &[target::APP, 1]).0, Status::Ok);
+    assert_eq!(n.events(), ["pending_set", "pending_withdrawn"]);
+    assert_eq!(n.agent.images().state(0), Some(image::State::Confirmed));
+    assert_eq!(n.agent.images().state(1), Some(image::State::Pending));
+}
+
+#[test]
+fn a_header_that_does_not_read_back_leaves_no_image() {
+    let mut n = Node::new(Probe::default());
+    n.store().bad_readback = true;
+    assert_eq!(n.transfer(1, &image(1, &body())), Status::Flash);
+    assert_eq!(n.store().headers[1], [0xFF; HEADER_SIZE], "erased again");
+    assert_eq!(n.store().status.slots[1].state, SlotState::Empty);
+    assert_eq!(n.agent.images().state(1), Some(image::State::Empty));
+    let ev = n.events();
+    assert!(!ev.contains(&"written".to_string()), "{ev:?}");
+    assert_eq!(ev.last().map(String::as_str), Some("verify_failed"));
+
+    n.store().bad_readback = false;
+    assert_eq!(
+        n.transfer(1, &image(1, &body())),
+        Status::Ok,
+        "the slot takes the next one"
+    );
+}
+
+#[test]
+fn a_restart_reads_the_slots_again() {
+    let mut n = Node::new(Probe::default());
+    assert_eq!(n.transfer(1, &image(1, &body())), Status::Ok);
+    assert_eq!(n.call(Cmd::SetPending, &[target::APP, 1]).0, Status::Ok);
+    n.events();
+    b_on_trial(n.store());
+    n.agent.restart();
+    assert_eq!(n.events(), ["store_opened", "replay:trial_started"]);
+    assert!(n.agent.images().on_trial());
 }

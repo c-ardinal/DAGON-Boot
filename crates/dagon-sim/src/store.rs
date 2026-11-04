@@ -146,7 +146,7 @@ impl SimStore {
             self.program(base, &fh)?;
         }
         let at = base as usize + statelog::FACE_HEADER_SIZE + used * RECORD_SIZE;
-        // ponytail: one face, no compaction; a full face fails the append.
+        // One face, no compaction: a full face fails the append.
         if at + RECORD_SIZE > (base + len) as usize {
             return Err(StoreError::Flash);
         }

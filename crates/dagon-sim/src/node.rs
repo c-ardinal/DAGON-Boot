@@ -77,10 +77,10 @@ impl Extension for SimCheck {
 /// The app layer's chain of a simulated node.
 pub type SimChain = Composed<&'static Published<(), 8>, Nop, SimCheck, fn() -> u64>;
 
-/// A fresh chain for each start of the simulated app.
+/// The chain of a simulated node, made once with the node: its resets
+/// restart the agent over the same chain, as the publisher outlives the
+/// simulated app.
 fn chain(check: SimCheck) -> SimChain {
-    // ponytail: one small leak per simulated reset; a reusable publisher
-    // if long sim runs ever reset often enough to matter.
     let events: &'static mut Published<(), 8> = Box::leak(Box::new(Published::new()));
     let now: fn() -> u64 = || 0;
     compose(
@@ -204,8 +204,7 @@ impl SimNode {
             self.boot_app()
         };
         // The app starts over the store as the boot core left it.
-        let store = std::mem::take(self.agent.store());
-        self.agent = Agent::new(self.cfg.clone(), store, chain(self.check.clone()));
+        self.agent.restart();
     }
 
     fn boot_app(&mut self) -> Run {

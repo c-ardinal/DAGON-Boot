@@ -102,8 +102,23 @@ pub(crate) fn store_status(e: StoreError) -> Status {
 impl<S: SlotStore> ImageStore<S> {
     /// Takes the store and brings each slot's machine to the state the
     /// store reports.
-    pub(crate) fn open(mut store: S) -> Self {
-        let status = store.status();
+    pub(crate) fn open(store: S) -> Self {
+        let mut images = ImageStore {
+            store,
+            view: ImageView {
+                status: StatusResp::default(),
+                slots: [image::State::Empty; 2],
+            },
+            app: [image::Machine::new(), image::Machine::new()],
+            topology: image::Machine::new(),
+        };
+        images.reopen();
+        images
+    }
+
+    /// Fresh machines in the states the store reports, as at start.
+    pub(crate) fn reopen(&mut self) {
+        let status = self.store.status();
         let mut app = [image::Machine::new(), image::Machine::new()];
         // The transitions that led here were observed when they happened;
         // reaching their state again delivers to no one.
@@ -112,15 +127,9 @@ impl<S: SlotStore> ImageStore<S> {
             let info = status.slots[usize::from(s)];
             reach(m, &mut silent, s, info.state, info.version, &status);
         }
-        ImageStore {
-            store,
-            view: ImageView {
-                status,
-                slots: [app[0].state(), app[1].state()],
-            },
-            app,
-            topology: image::Machine::new(),
-        }
+        self.app = app;
+        self.topology = image::Machine::new();
+        self.refresh_view(status);
     }
 
     /// The boot core's changes the store shows (a slot on trial, a
@@ -161,8 +170,9 @@ impl<S: SlotStore> ImageStore<S> {
         &self.view
     }
 
-    /// The store, for the board's other resources. Its mutators need a
-    /// [`Transition`], which this crate makes only inside a transition.
+    /// The store, for the board's other resources. Its `SlotStore`
+    /// mutators need a [`Transition`], which this crate makes only inside
+    /// a transition.
     pub(crate) fn store(&mut self) -> &mut S {
         &mut self.store
     }
@@ -239,19 +249,37 @@ impl<S: SlotStore> ImageStore<S> {
             .map_err(store_status)
     }
 
-    /// `written` for an APP slot: the verified header goes in last and must
-    /// read back equal and pass `verify`.
+    /// `written` for an APP slot of `len` body bytes: the verified header
+    /// goes in last and must read back equal and pass `verify`. When it
+    /// does not, the slot is erased again, so flash holds no image the
+    /// machine (still `Empty`) has not recorded.
     pub(crate) fn write_header(
         &mut self,
         slot: u8,
         hdr: &[u8; HEADER_SIZE],
-        version: Version,
+        (version, len): (Version, u32),
         verify: impl FnOnce(&[u8; HEADER_SIZE]) -> bool,
         out: &mut impl Sink,
     ) -> Result<(), Status> {
         if !allows("written", self.machine(target::APP, slot)?.state()) {
             return Err(Status::State);
         }
+        if let Err(s) = self.place_header(slot, hdr, verify) {
+            let undone = self.store.erase(target::APP, slot, len, &Transition(()));
+            self.status();
+            return Err(if undone.is_ok() { s } else { Status::Flash });
+        }
+        done(self.app[usize::from(slot)].written(out, target::APP, slot, version));
+        self.status();
+        Ok(())
+    }
+
+    fn place_header(
+        &mut self,
+        slot: u8,
+        hdr: &[u8; HEADER_SIZE],
+        verify: impl FnOnce(&[u8; HEADER_SIZE]) -> bool,
+    ) -> Result<(), Status> {
         self.store
             .write_header(slot, hdr, &Transition(()))
             .map_err(store_status)?;
@@ -262,8 +290,6 @@ impl<S: SlotStore> ImageStore<S> {
         if back != *hdr || !verify(&back) {
             return Err(Status::Flash);
         }
-        done(self.app[usize::from(slot)].written(out, target::APP, slot, version));
-        self.status();
         Ok(())
     }
 

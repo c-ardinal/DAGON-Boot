@@ -87,33 +87,49 @@ fn noted(r: Result<(), Refused>) {
 impl<S: SlotStore, X: AppChain> Agent<S, X> {
     /// Opens the slot store: `app.store_opened`, then the boot core's
     /// changes it shows replayed (`app.trial_started`, `app.rolled_back`).
-    pub fn new(cfg: Config, store: S, mut chain: X) -> Self {
-        let mut requests = requests::Machine::new();
-        let images = ImageStore::open(store);
-        let view = images.view();
+    pub fn new(cfg: Config, store: S, chain: X) -> Self {
+        let mut agent = Agent {
+            key_id: dagon_format::key_id(&cfg.pubkey),
+            cfg,
+            images: ImageStore::open(store),
+            chain,
+            session: session::Machine::new(),
+            requests: requests::Machine::new(),
+            hdr: [0; HEADER_SIZE],
+            last: None,
+            resp: [0; RESP_BUF],
+            resp_len: 0,
+            resp_reboot: None,
+        };
+        agent.opened();
+        agent
+    }
+
+    /// The app started again over the same store and chain, as after a
+    /// reset (a simulator, a test bench): what the agent held in RAM is
+    /// gone, the slots are read again, and `app.store_opened` and the boot
+    /// replay follow as in [`Agent::new`].
+    pub fn restart(&mut self) {
+        self.images.reopen();
+        self.session = session::Machine::new();
+        self.requests = requests::Machine::new();
+        self.last = None;
+        self.resp_reboot = None;
+        self.opened();
+    }
+
+    fn opened(&mut self) {
+        let view = self.images.view();
         let st = view.status();
-        noted(requests.store_opened(
-            &mut chain,
+        noted(self.requests.store_opened(
+            &mut self.chain,
             st.active,
             view.on_trial(),
             view.own_version().unwrap_or_default(),
             st.attempts,
             st.last_reason,
         ));
-        images.replay_boot(&mut chain);
-        Agent {
-            key_id: dagon_format::key_id(&cfg.pubkey),
-            cfg,
-            images,
-            chain,
-            session: session::Machine::new(),
-            requests,
-            hdr: [0; HEADER_SIZE],
-            last: None,
-            resp: [0; RESP_BUF],
-            resp_len: 0,
-            resp_reboot: None,
-        }
+        self.images.replay_boot(&mut self.chain);
     }
 
     /// The slots, read-only.
@@ -122,8 +138,12 @@ impl<S: SlotStore, X: AppChain> Agent<S, X> {
     }
 
     /// The board's slot store, for its other resources (flash reads, a
-    /// watchdog it holds). Image state cannot change through it: the
-    /// store's mutators need a [`crate::Transition`].
+    /// watchdog it holds). Its [`SlotStore`] mutators need a
+    /// [`crate::Transition`], so they cannot be called through it. What a
+    /// store type offers beyond the port (a raw flash handle, a
+    /// provisioning helper of a simulator) is outside that guarantee: it
+    /// is trusted code of the board or bench, as anything with flash
+    /// access in the same image.
     pub fn store(&mut self) -> &mut S {
         self.images.store()
     }
@@ -452,7 +472,7 @@ impl<S: SlotStore, X: AppChain> Agent<S, X> {
         self.images.write_header(
             slot,
             &hdr,
-            h.version,
+            (h.version, h.payload_size),
             |back| check_header(cfg, back, slot).is_ok(),
             &mut self.chain,
         )?;

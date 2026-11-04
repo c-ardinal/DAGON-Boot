@@ -200,24 +200,30 @@ The boot core starts the watchdog for 8 s before every jump.
 
 ## Boot images
 
-`stage0/` and `bootcore/` are DAGON's boot images for this MCU, built from
-this package (their memory maps and the boot core's key come from here):
+`stage0/` and `bootcore/` are DAGON's boot images for this MCU (their
+memory maps and the boot core's key come from this package). Both are
+built for one node of a project, after `dagon gen`:
 
 ```sh
 export DAGON_PUBKEY=/path/outside/the/repo/dagon-signing.pub
-(cd targets/mcu/rp2040/stage0 && cargo build --release)
-(cd targets/mcu/rp2040/bootcore && DAGON_TARGET_TAG=my-hub cargo build --release)
+(cd <project>/boot/<node> && cargo build --release)    # the boot core
+(cd targets/mcu/rp2040/stage0 && DAGON_BOOT_CRATE=<project>/boot/<node> cargo build --release)
 ```
 
-The boot core is built per node: it accepts only app images tagged with
-`DAGON_TARGET_TAG` (the node's tag, as in the app's `.cargo/config.toml`),
-and its build fails without it. A host test (`tests/hub_boot.rs`) shows another node's image refused.
-Their status LED, its polarity and the halt pattern are the board
-definition's `[boot] led`, `led_active` and `halt`: the build reads the
-board `DAGON_BOARD=<board id>` names (with `DAGON_PROJECT=<path of
-dagon.toml>`, a project's inline `[board.<id>]` too); it may be left out
-only while the MCU has a single board definition. Both builds take
-`--features diag` for step blink codes (see the hub README).
+`dagon gen` writes the node's boot crate into `boot/<node>/` of the
+project from `bootcore/template/`: it links `bootcore` (a library) with
+the node's boot extensions (`nodes/<node>/dagon/boot_wiring.rs`, each
+declared trusted in dagon.toml, see docs/extension-manifest.md) and sets
+`DAGON_BOOT_CRATE` (that folder) and `DAGON_TARGET_TAG` (the node's tag)
+for its build. The boot core accepts only app images tagged with the
+node's tag (a host test, `tests/hub_boot.rs`, shows another node's image
+refused); its status LED, the LED's polarity and the halt pattern are the
+node's board definition's `[boot] led`, `led_active` and `halt` (a node
+without a board has none). Builds without `DAGON_BOOT_CRATE` fail, and a
+boot crate that links anything else than DAGON's packages and its
+trusted extensions with the source hash dagon.toml declares does not
+build. Both builds take `--features diag` for step blink codes (see the
+hub README).
 
 ## Keys
 

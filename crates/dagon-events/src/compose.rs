@@ -6,7 +6,7 @@ use crate::catalog::{Catalog, Layer};
 use crate::decisions;
 use crate::event::{Event, EventRecord, Payload};
 use crate::extension::{
-    Accept, Ctx, DecisionId, Delay, ExtId, Extension, Health, RebootRequest, TrialInfo,
+    Accept, Ctx, DecisionId, Delay, ExtId, Extension, Health, Nop, RebootRequest, TrialInfo,
     UpdateOffer, DECISION_BOUND_MS,
 };
 use crate::published::{Published, Reader, Snapshot};
@@ -262,6 +262,129 @@ pub fn compose_unpublished<B: Extension, U: Extension>(
         clock: (),
         watchdog: Watchdog::new(0, 0),
         decisions: decisions::Machine::new(),
+    }
+}
+
+/// One boot extension's limits, in chain order, as the node's
+/// `boot_wiring.rs` states them from its manifest: the time limit per call
+/// (`max_run_us`) and the codes of the boot event kinds its `observes`
+/// names (resolved against the catalog by `dagon gen`, so the boot core
+/// compares one byte per event).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct BootExtension {
+    budget_us: u32,
+    codes: &'static [u8],
+}
+
+impl BootExtension {
+    pub const fn new(budget_us: u32, codes: &'static [u8]) -> Self {
+        BootExtension { budget_us, codes }
+    }
+
+    pub const fn budget_us(&self) -> u32 {
+        self.budget_us
+    }
+
+    /// Whether it observes `e`: a boot event whose code it lists.
+    pub fn observes(&self, e: &Event<'_>) -> bool {
+        let entry = e.entry();
+        entry.layer == Layer::Boot && self.codes.contains(&entry.code)
+    }
+}
+
+/// The boot core's chain: no publisher and no decision point (what the
+/// boot core starts is not an extension's to change), the extensions the
+/// node's `boot_wiring.rs` lists in its order, each with its
+/// [`BootExtension`] limits. An extension is called only for the events
+/// its manifest observes, and each call is timed on its own with the boot
+/// core's clock against its `max_run_us`. A call over it is not preempted
+/// (the boot core runs trusted extensions privileged); it is reported
+/// right after it returns as `boot.extension_overran`, delivered to the
+/// extensions that observe that kind (those calls are not timed, so a
+/// report never causes another), and the boot goes on with the same
+/// decision. A layer-start API.
+pub struct BootComposed<U: Extension, C: Clock> {
+    parts: Parts<NoPublisher, Nop, U>,
+    clock: C,
+    limits: &'static [BootExtension],
+    exts: crate::boot_extensions::Machine,
+}
+
+/// See [`BootComposed`]. `limits` has one entry per extension of `user`,
+/// in its order (`boot_wiring.rs` generates both from one list); anything
+/// else is a generator fault and panics.
+pub fn compose_boot<U: Extension, C: Clock>(
+    user: U,
+    clock: C,
+    limits: &'static [BootExtension],
+) -> BootComposed<U, C> {
+    assert!(
+        user.__leaves(Token::new()) == limits.len(),
+        "compose_boot takes one BootExtension per extension of the chain"
+    );
+    BootComposed {
+        parts: Parts {
+            layer: Layer::Boot,
+            head: NoPublisher,
+            board: Nop,
+            user,
+        },
+        clock,
+        limits,
+        exts: crate::boot_extensions::Machine::new(),
+    }
+}
+
+/// Delivers to the boot extensions that observe the event, untimed: the
+/// `boot.extension_overran` reports.
+struct Observers<'a, U> {
+    user: &'a mut U,
+    limits: &'static [BootExtension],
+}
+
+impl<U: Extension> SealedSink for Observers<'_, U> {}
+impl<U: Extension> Sink for Observers<'_, U> {
+    fn deliver<P: Payload>(&mut self, p: P) {
+        let e = Event::live(&p);
+        let ctx = Ctx::new(Layer::Boot);
+        let k = Token::new();
+        // Bounded by the chain's own (constant) length, so a boot core
+        // without extensions compiles to no delivery at all.
+        for i in 0..self.user.__leaves(k) {
+            if self.limits.get(i).is_some_and(|l| l.observes(&e)) {
+                self.user.__event_at(i, &e, &ctx, k);
+            }
+        }
+    }
+}
+
+impl<U: Extension, C: Clock> SealedSink for BootComposed<U, C> {}
+impl<U: Extension, C: Clock> Sink for BootComposed<U, C> {
+    fn deliver<P: Payload>(&mut self, p: P) {
+        let e = Event::live(&p);
+        let ctx = Ctx::new(Layer::Boot);
+        let k = Token::new();
+        // Bounded by the chain's own (constant) length, so a boot core
+        // without extensions compiles to no delivery at all.
+        for i in 0..self.parts.user.__leaves(k) {
+            let Some(l) = self.limits.get(i).filter(|l| l.observes(&e)) else {
+                continue;
+            };
+            let t0 = self.clock.now_us();
+            self.parts.user.__event_at(i, &e, &ctx, k);
+            let us = self.clock.now_us().saturating_sub(t0);
+            if us > u64::from(l.budget_us) {
+                let id = ExtId::of(self.parts.user.__id_at(i, k));
+                let us = u32::try_from(us).unwrap_or(u32::MAX);
+                let mut to = Observers {
+                    user: &mut self.parts.user,
+                    limits: self.limits,
+                };
+                // `overran` leaves from every state of its machine.
+                let delivered = self.exts.overran(&mut to, id, l.budget_us, us);
+                debug_assert!(delivered.is_ok());
+            }
+        }
     }
 }
 

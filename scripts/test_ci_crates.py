@@ -44,10 +44,11 @@ class CiCrates(unittest.TestCase):
         runs = ci_crates.firmware_lints()
         mcu = ROOT / "targets" / "mcu"
         packages = {p.parent for p in mcu.glob("*/dagon-mcu.toml")}
-        # Boot images: the binaries inside an MCU package's folder (its
-        # `template` is the starting point of a user's app, not DAGON's).
-        packages |= {m.parent.parent for m in mcu.glob("*/*/src/main.rs")
-                     if m.parent.parent.name != "template"}
+        # Boot images: the packages inside an MCU package's folder (stage0,
+        # the boot core library); its `template` is the starting point of a
+        # user's app, not DAGON's.
+        packages |= {c.parent for c in mcu.glob("*/*/Cargo.toml")
+                     if (c.parent / "src").is_dir() and c.parent.name != "template"}
         want = {p.relative_to(ROOT).as_posix() for p in packages}
         self.assertEqual({r["dir"] for r in runs}, want)
         for r in runs:

@@ -16,6 +16,11 @@ use crate::PAYLOAD_BYTES;
 /// macro can also name; such code is in the trusted base, and an
 /// extension that did so would still hold no chain to deliver into.
 ///
+/// It has no `Debug` supertrait: an `&dyn Payload` would carry the
+/// formatter in its vtable into every image that delivers events, the boot
+/// cores included, whose flash budget has no room for it. Each generated
+/// payload type is `Debug` on its own.
+///
 /// ```compile_fail,E0277
 /// #[derive(Debug)]
 /// struct Forged;
@@ -28,7 +33,7 @@ use crate::PAYLOAD_BYTES;
 ///     }
 /// }
 /// ```
-pub trait Payload: crate::sealed::SealedPayload + Any + fmt::Debug {
+pub trait Payload: crate::sealed::SealedPayload + Any {
     /// The catalog entry of the transition that emits it.
     fn entry(&self) -> &'static Entry;
     /// The owned form ([`EventRecord::payload`]): the fields in order.
@@ -38,10 +43,22 @@ pub trait Payload: crate::sealed::SealedPayload + Any + fmt::Debug {
 /// An event as extensions observe it: a borrowed payload and whether it
 /// happened now or is replayed from the boot record or the state log.
 /// Only the layer's composed chain makes one, from a delivered payload.
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy)]
 pub struct Event<'a> {
     payload: &'a dyn Payload,
     replayed: bool,
+}
+
+impl fmt::Debug for Event<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let e = self.entry();
+        f.debug_struct("Event")
+            .field("layer", &e.layer)
+            .field("kind", &e.kind)
+            .field("payload", &self.payload.compact())
+            .field("replayed", &self.replayed)
+            .finish()
+    }
 }
 
 impl<'a> Event<'a> {

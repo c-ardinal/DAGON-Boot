@@ -584,16 +584,7 @@ fn render(
 ) -> Result<String, String> {
     // Package lines first, so a tag cannot add placeholders; the tag goes
     // into string literals and comments, escaped as in a Rust string.
-    let mut out = text.to_string();
-    while let Some(at) = out.find("{{dep:") {
-        let end = out[at..]
-            .find("}}")
-            .map(|e| at + e)
-            .ok_or("unclosed {{dep: in a template")?;
-        let name = out[at + 6..end].trim().to_string();
-        let line = dependency(&name, src, base)?;
-        out.replace_range(at..end + 2, &line);
-    }
+    let out = render_deps(text, src, base)?;
     let tag = n.tag.escape_debug().to_string();
     let out = if wires(text) {
         wiring
@@ -608,6 +599,37 @@ fn render(
         .replace("{{tag}}", &tag)
         .replace("{{uplink}}", &hops.0)
         .replace("{{downlinks}}", &hops.1))
+}
+
+/// Fills every `{{dep:<package>}}` of a template file with the dependency
+/// line for that DAGON package (from the project's `[dagon]` source).
+pub(crate) fn render_deps(text: &str, src: &DagonSource, base: &Path) -> Result<String, String> {
+    let mut out = text.to_string();
+    while let Some(at) = out.find("{{dep:") {
+        let end = out[at..]
+            .find("}}")
+            .map(|e| at + e)
+            .ok_or("unclosed {{dep: in a template")?;
+        let name = out[at + 6..end].trim().to_string();
+        let line = dependency(&name, src, base)?;
+        out.replace_range(at..end + 2, &line);
+    }
+    Ok(out)
+}
+
+/// The project template of the boot core of `mcu`: the `template/` of the
+/// package declaring `[package.metadata.dagon] bootcore = "<mcu>"` in the
+/// DAGON source at `root`, as (file, text) with `.tpl` names restored.
+pub(crate) fn boot_template(root: &Path, mcu: &str) -> Option<Vec<(String, String)>> {
+    let (dir, _) = manifests(root).into_iter().find(|(_, v)| {
+        v.get("package")
+            .and_then(|p| p.get("metadata"))
+            .and_then(|m| m.get("dagon"))
+            .and_then(|d| d.get("bootcore"))
+            .and_then(|x| x.as_str())
+            == Some(mcu)
+    })?;
+    template_for(&dir)
 }
 
 /// Whether a dependency is a DAGON board or MCU package, by its effective
@@ -1002,9 +1024,19 @@ pub fn gen_project(config: &Path, only: &[String], force: bool) -> Result<Vec<St
     // Every selected node's generated folder holds exactly this run's
     // files; a node whose crate was skipped keeps none.
     let failed: Vec<String> = report.skipped.iter().map(|(id, _)| id.clone()).collect();
+    let config_name = config
+        .file_name()
+        .map(|n| n.to_string_lossy().into_owned())
+        .unwrap_or_else(|| crate::config::CONFIG_FILE.to_string());
+    let project = crate::extgen::ProjectRef {
+        base: &cfg.base,
+        config: &config_name,
+        src: &tables.dagon,
+        check_boot_graph: true,
+    };
     out.extend(crate::extgen::write_nodes(
         &reg,
-        &cfg.base,
+        &project,
         &t.nodes,
         only,
         &failed,

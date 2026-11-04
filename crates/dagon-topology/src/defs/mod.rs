@@ -4,6 +4,7 @@
 //! entry) are closed sets in code; everything else is data.
 
 pub mod board_boot;
+pub mod boot_folder;
 pub mod codegen;
 pub mod dma;
 pub mod execution;

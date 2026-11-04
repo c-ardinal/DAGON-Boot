@@ -6,9 +6,11 @@ version = "0.1.0"
 publish = false
 
 # Firmware clippy runs in CI (scripts/ci_crates.py --firmware-lint): the
-# masking rule of the execution model applies to the boot images too.
+# masking rule of the execution model applies to the boot images too. The
+# boot folder (DAGON_BOOT_CRATE) only names the board, so the lint uses
+# the boot core's lint folder (a node without a board).
 [package.metadata.dagon]
-lint = { features = [""] }
+lint = { features = [""], env = { DAGON_BOOT_CRATE = "../bootcore/lint" } }
 
 # Standalone: built for thumbv6m only, so it stays out of the host workspace.
 # Its memory.x comes from dagon-mcu-rp2040 (`image-stage0`).

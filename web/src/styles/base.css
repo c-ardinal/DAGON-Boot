@@ -46,6 +46,8 @@ html {
   background: var(--c-ink);
   color: var(--c-paper);
   font: 400 var(--t-body-size) / var(--t-body-lh) var(--f-ja);
+  /* the root follows the window's width and height; every size is in rem. 16 px at 1440×900. */
+  font-size: clamp(14px, calc(6.64px + 0.4vw + 0.4vh), 22px);
   font-variant-numeric: tabular-nums;
 }
 
@@ -76,9 +78,9 @@ button {
   justify-content: center;
   gap: var(--s-2);
   height: var(--h-secondary);
-  padding: 0 var(--s-5);
+  padding: 0 0.75rem;
   border: 1px solid var(--c-line);
-  border-radius: var(--r-m);
+  border-radius: var(--r-full);
   background: var(--c-ink);
   font: 700 var(--t-body-size) / 1 var(--f-ja);
   white-space: nowrap;
@@ -109,15 +111,34 @@ button {
   }
 }
 
+/* an operation the state stops stays in place, dimmed, and still says why when pressed. */
+[data-locks~='edit'] [data-control='edit'],
+[data-locks~='gen'] [data-control='gen'],
+[data-locks~='build'] [data-control='build'],
+[data-locks~='flash'] [data-control='flash'],
+[data-locks~='release'] [data-control='release'],
+[data-locks~='update'] [data-control='update'],
+[data-locks~='recover'] [data-control='recover'],
+[data-locks~='rollback'] [data-control='rollback'],
+[data-locks~='connect'] [data-control='connect'],
+[data-locks~='project'] [data-control='project'],
+[data-locks~='ask'] [data-control='ask'],
+[data-locks~='apply'] [data-control='apply'],
+[data-locks~='link'] [data-control='link'],
+[data-locks~='file'] [data-control='file'] {
+  opacity: 0.45;
+}
+
 .primary {
   display: inline-flex;
   align-items: center;
   gap: var(--s-2);
   height: var(--h-primary);
-  padding: 0 var(--s-6);
+  padding: 0 0.875rem;
   border: 0;
   border-radius: var(--r-full);
-  background: var(--c-signal);
+  /* the main action is blue; red is for failures only. */
+  background: var(--c-accent);
   color: var(--c-ink);
   font: 700 var(--t-body-size) / 1 var(--f-ja);
   white-space: nowrap;
@@ -125,6 +146,9 @@ button {
   outline: 3px solid transparent;
   outline-offset: 0;
   transition: transform var(--dur-press) var(--ease-out);
+}
+.secondary:active {
+  transform: scale(0.97);
 }
 .primary:focus-visible {
   outline-color: var(--c-paper);

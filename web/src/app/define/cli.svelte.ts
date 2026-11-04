@@ -129,6 +129,11 @@ export class Cli {
   private pass: string | null = null;
   private ws: WebSocket | null = null;
   private readonly d: Required<CliDeps>;
+  /**
+   * The lock table's check, set by the page: true when the operation is stopped now
+   * (the page has shown why). Every job asks it in `start`.
+   */
+  guard: (kind: 'gen' | 'build' | 'release' | 'flash') => boolean = () => false;
   /** Called when the CLI needs the hub (the page closes Web Serial first) and when it returns it. */
   onDevice: (need: boolean) => void | Promise<void> = () => undefined;
 
@@ -214,6 +219,11 @@ export class Cli {
     return new Uint8Array(await r.arrayBuffer());
   }
 
+  /** A /v1/ call with the passphrase (the DAGON agent routes: /v1/agent, /v1/agent/link, /v1/agent/ask). */
+  api(method: string, path: string, body?: unknown): Promise<Response> {
+    return this.call(method, path, body);
+  }
+
   private call(method: string, path: string, body?: unknown): Promise<Response> {
     const headers: Record<string, string> = { Authorization: `Bearer ${this.pass}` };
     if (body !== undefined) headers['Content-Type'] = 'application/json';
@@ -277,6 +287,8 @@ export class Cli {
   }
 
   private async start(kind: JobKind, path: string, body: unknown, target: string): Promise<Job | null> {
+    const lock = ({ gen: 'gen', build: 'build', sign: 'build', release: 'release', flash: 'flash' } as const)[kind as 'gen'];
+    if (lock && this.guard(lock)) return null;
     const r = await this.json<{ job: number }>('POST', path, body);
     const job: Job = { id: r.job, kind, state: 'queued', target, stage: '', percent: null, lines: [], result: null, question: null, started: this.d.now(), ended: null };
     this.jobs = [job, ...this.jobs];

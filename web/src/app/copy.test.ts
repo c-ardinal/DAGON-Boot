@@ -88,8 +88,8 @@ describe('copy', () => {
       copy.DETAIL.nothingSelected,
       ...copy.HELP.rows.map(([, s]) => s),
     ];
-    // M57's two sentences are the copy table's own: the cause, then the step.
-    const twoSentences: string[] = [copy.BAND.M57.sentence];
+    // M57's two sentences are the copy table's own: the cause, then the step. M22's reason left its brackets.
+    const twoSentences: string[] = [copy.BAND.M57.sentence, copy.BAND.M22.sentence];
     for (const s of sentences) {
       expect(s.match(/。/g)?.length, s).toBe(twoSentences.includes(s) ? 2 : 1);
       expect(s.endsWith('。'), s).toBe(true);

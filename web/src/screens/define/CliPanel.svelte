@@ -118,7 +118,7 @@
       {/each}
     </ul>
     {#if !clean}<p>{PROJECT.fixFirst}</p>{/if}
-    <button class="primary" aria-disabled={!clean || !cli.has('gen')} onclick={() => clean && cli.has('gen') && void makeProject()}>{PROJECT.make}</button>
+    <button class="primary" data-control="gen" aria-disabled={!clean || !cli.has('gen')} onclick={() => clean && cli.has('gen') && void makeProject()}>{PROJECT.make}</button>
     {@render stateChip(latest('gen'))}
   {:else if panel === 'flash'}
     <h2 id="panel-h" tabindex="-1">{FLASH.heading}</h2>
@@ -141,7 +141,7 @@
           {/if}
           <span class="chip">{fj?.state === 'succeeded' ? FLASH.done : fj?.state === 'running' || fj?.state === 'question' ? FLASH.running : fj?.state === 'failed' ? FLASH.notFound : ''}</span>
           {#if cli.canFlash(mcuOf(n.id))}
-            <button class="primary" disabled={flashing} onclick={() => void flashNode(n.id)}>{FLASH.write}</button>
+            <button class="primary" data-control="flash" disabled={flashing} onclick={() => void flashNode(n.id)}>{FLASH.write}</button>
           {:else}
             <p>{FLASH.otherTools}</p>
           {/if}
@@ -154,13 +154,13 @@
     <ol class="stages">
       <li>
         <h3><span class="n">01</span>{RELEASE_STEPS.steps[0]} {@render stateChip(latest('build'))}</h3>
-        <button class="secondary" aria-disabled={!cli.has('build')} onclick={() => cli.has('build') && void cli.build(ids)}>{RELEASE_STEPS.build}</button>
+        <button class="secondary" data-control="build" aria-disabled={!cli.has('build')} onclick={() => cli.has('build') && void cli.build(ids)}>{RELEASE_STEPS.build}</button>
       </li>
       <li>
         <h3><span class="n">02</span>{RELEASE_STEPS.steps[1]} {@render stateChip(latest('sign'))}</h3>
         {#if !cli.hello?.key}<p>{RELEASE_STEPS.noKey}</p>{:else}<p class="pair"><span class="label">{RELEASE_STEPS.keyLabel}</span> <span translate="no">{(cli.hello.key_id ?? '').slice(0, 8)}…</span></p>{/if}
         {#if !ok('build')}<p>{RELEASE_STEPS.buildFirst}</p>{/if}
-        <button class="secondary" aria-disabled={!ok('build') || !cli.hello?.key} onclick={() => ok('build') && cli.hello?.key && void cli.sign(ids)}>{RELEASE_STEPS.sign}</button>
+        <button class="secondary" data-control="build" aria-disabled={!ok('build') || !cli.hello?.key} onclick={() => ok('build') && cli.hello?.key && void cli.sign(ids)}>{RELEASE_STEPS.sign}</button>
       </li>
       <li>
         <h3><span class="n">03</span>{RELEASE_STEPS.steps[2]} {@render stateChip(latest('release'))}</h3>
@@ -171,7 +171,7 @@
           <label>{RELEASE_STEPS.name}<input bind:value={releaseName} translate="no" /></label>
         </div>
         {#if !versionOk}<p id="version-help" class="bad">{RELEASE_STEPS.versionHelp}</p>{/if}
-        <button class="secondary" aria-disabled={!ok('sign') || !!d.errors || !versionOk} onclick={() => ok('sign') && !d.errors && versionOk && void cli.release(version, releaseName)}>{RELEASE_STEPS.makeRelease}</button>
+        <button class="secondary" data-control="release" aria-disabled={!ok('sign') || !!d.errors || !versionOk} onclick={() => ok('sign') && !d.errors && versionOk && void cli.release(version, releaseName)}>{RELEASE_STEPS.makeRelease}</button>
         {#if release?.release}
           <p class="pair" translate="no"><span class="label">{release.release}.dgb</span> {Math.ceil((release.bytes ?? 0) / 1024)} KB</p>
         {/if}

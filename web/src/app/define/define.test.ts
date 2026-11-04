@@ -1,12 +1,94 @@
 import { describe, expect, test } from 'vitest';
 import { RULE_FIX } from '../copy.ts';
 import { Define } from './define.svelte.ts';
-import { connect, emptyDoc, placeMcu, setLink, setLinkKind, setNode } from './model.ts';
+import { connect, emptyDoc, fromYaml, placeMcu, setLink, setLinkKind, setNode } from './model.ts';
 import { DESK_DEMO_YAML } from '../sample.ts';
 import { problemChip } from './problems.ts';
-import { LINK } from '../copy.ts';
+import { LINK, LINK_WHY } from '../copy.ts';
 
 describe('define session', () => {
+  test('a part dropped under a card is placed and linked under it in one edit; elsewhere it stands alone', () => {
+    const d = new Define();
+    d.placeAt({ board: 'waveshare-rp2040-touch-lcd-1.28' }, 'Waveshare RP2040-Touch-LCD-1.28', null);
+    d.placeAt({ board: 'nucleo-f401re' }, 'NUCLEO-F401RE', 'hub');
+    expect(d.doc.topo.links?.map((l) => [l.from, l.to])).toEqual([['hub', 'nucleo']]);
+    d.undo();
+    expect(d.doc.topo.nodes.map((n) => n.id)).toEqual(['hub']);
+    d.placeAt({ mcu: 'stm32f401re' }, 'STM32F401RE（自作ボード）', null);
+    expect(d.doc.topo.links ?? []).toEqual([]);
+  });
+
+  test('importing a topology identical to the 構成 is no change: no revision, nothing to save, no undo step', () => {
+    const d = new Define();
+    d.load(fromYaml(DESK_DEMO_YAML));
+    const rev = d.revision;
+    // A fresh object with the same content (a release made for this very 構成).
+    expect(d.importRelease(JSON.parse(JSON.stringify(d.doc.topo)))).toBe(false);
+    expect([d.revision, d.unsaved, d.canUndo]).toEqual([rev, false, false]);
+    // The same through apply from any caller (table, proposal, import of the YAML).
+    expect(d.apply(JSON.parse(JSON.stringify(d.doc)))).toBe(false);
+    expect(d.importYaml(DESK_DEMO_YAML)).toBe(true);
+    expect([d.revision, d.unsaved]).toEqual([rev, false]);
+    // A real difference is still an edit.
+    expect(d.importRelease({ ...d.doc.topo, name: 'other' })).toBe(true);
+    expect(d.unsaved).toBe(true);
+  });
+
+  test('an empty entry the file writes is content: recovery for a node that is not there is a change, and the check reports it', () => {
+    const d = new Define();
+    d.load(fromYaml(DESK_DEMO_YAML));
+    expect(d.problems.filter((p) => p.path.includes('ghost'))).toEqual([]);
+    const t = d.doc.topo;
+    expect(d.importRelease({ ...t, recovery: { ...t.recovery, ghost: [] } })).toBe(true);
+    expect(d.unsaved).toBe(true);
+    expect(d.problems.some((p) => p.path.includes('ghost'))).toBe(true);
+  });
+
+  test('an identical import while editing is stopped: no change, so nothing is asked and nothing moves', () => {
+    const d = new Define();
+    d.load(fromYaml(DESK_DEMO_YAML));
+    const rev = d.revision;
+    let asked = 0;
+    d.guard = () => (asked++, true);
+    expect(d.importRelease(JSON.parse(JSON.stringify(d.doc.topo)))).toBe(false);
+    expect([asked, d.revision, d.unsaved]).toEqual([0, rev, false]);
+  });
+
+  test('editing stopped by the lock table: no path changes the 構成 (keys, double-click, drag, import, undo)', () => {
+    const d = new Define();
+    d.placeSample();
+    const before = JSON.stringify(d.doc);
+    let asked = 0;
+    d.guard = () => (asked++, true);
+    // Enter / double-click in the parts window, the table's 置く, a drop, a port drag, Delete, import, undo.
+    d.place('nucleo-f401re', 'NUCLEO-F401RE');
+    d.placeMcu('stm32f401re', 'STM32F401RE（自作ボード）');
+    d.placeAt({ board: 'nucleo-f401re' }, 'NUCLEO-F401RE', 'hub');
+    d.link('seg', 'watch');
+    d.selected = 'node:seg';
+    d.removeSelected();
+    expect(d.importRelease({ ...d.doc.topo, nodes: d.doc.topo.nodes.slice(0, 1) })).toBe(false);
+    expect(d.importYaml(DESK_DEMO_YAML)).toBe(false);
+    d.undo();
+    expect(JSON.stringify(d.doc)).toBe(before);
+    // Seven edits asked (linking an already linked node changes nothing and needs no asking).
+    expect(asked).toBe(7);
+  });
+
+  test('a port drag links a node under another; a taken node and a loop are refused with why', () => {
+    const d = new Define();
+    d.placeSample();
+    expect(d.linkRefusal('hub', 'seg')).toBe(LINK_WHY.taken);
+    d.placeAt({ mcu: 'stm32f401re' }, 'STM32F401RE（自作ボード）', null);
+    const id = d.doc.topo.nodes[d.doc.topo.nodes.length - 1].id;
+    expect(d.linkRefusal('seg', id)).toBeNull();
+    d.link(id, 'seg');
+    expect(d.doc.topo.links?.some((l) => l.from === 'seg' && l.to === id)).toBe(true);
+    expect(d.linkRefusal(id, 'watch')).toBe(LINK_WHY.taken);
+    expect(d.linkRefusal(id, 'seg')).toBe(LINK_WHY.taken);
+    expect(d.linkRefusal(id, 'hub')).toBe(LINK_WHY.loop);
+  });
+
   test('the sample checks clean; placing, undo and redo walk the history', () => {
     const d = new Define();
     expect(d.problems).toEqual([]);

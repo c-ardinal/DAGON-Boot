@@ -806,7 +806,7 @@ executable model (5.5) runs the same boundaries in its boot scenarios.
 
 ### 4.3 Preemption, faults and unwinding
 
-The sandbox timer (`[isolation] timer`: SysTick on Cortex-M, `mtimecmp`
+The sandbox timer (`[isolation.capabilities] timer`: SysTick on Cortex-M, `mtimecmp`
 or a platform timer on RISC-V, a timer-group alarm on Xtensa) is armed
 before each call with the call's budget at the highest configurable
 priority (above every capability interrupt and every DAGON handler that
@@ -814,7 +814,7 @@ is not a fault); a non-preemptible part of a service masks it for at
 most `np_max_us` with the kind's critical-section primitive (4.2). The timer handler, the fault handlers and the
 `RETURN` service all end a call the same way; the steps are the same
 for every architecture and the registers involved come from the kind's
-unwinding module (`[isolation] unwind`: `cortex-m-exception`,
+unwinding module (`[isolation.capabilities] unwind`: `cortex-m-exception`,
 `riscv-trap`, `xtensa-world`, `armv8m-tz`):
 
 1. **Decide whether the stacked frame is usable.** Cortex-M ARMv7-M and
@@ -913,29 +913,29 @@ code.
 The MCU definition declares the protection hardware as data:
 
 ```toml
-[isolation]
+[isolation]                   # what the MCU and its package give DAGON
 level = "mpu"                 # the level DAGON enforces: none | mpu | pms | tz (4.5)
 kind = "armv7m-mpu"           # armv6m-mpu | armv7m-mpu | armv8m-mpu | armv8m-tz | riscv-pmp | riscv-epmp | esp-pms | none
-[isolation.capabilities]     # the kind's capability record, read back from the hardware and checked (below)
+boot_extensions = true        # the MCU has a DAGON boot stage
+ext_ram_max = 24576
+root_protection = ["rdp1", "rdp2", "wrp"]   # the MCU's root-image protection levels (4.7): rdp1, wrp reversible; rdp2, esp-secure-boot, esp-flash-encryption permanent
+cache = "none"                # none | i-cache | id-cache (instruction and data) (4.10)
+tcm = []                      # tightly coupled memories, each { at, size } (4.10)
+
+[isolation.capabilities]      # the kind's capability record: what the unit implements, read back from the hardware and checked (below)
 mpu_regions = 8               # armv6m/armv7m/armv8m-mpu: the unit's region count (MPU_TYPE.DREGION)
 min_region = 32               # bytes (256 on armv6m-mpu implementations such as the RP2040)
 subregions_from = 256         # 0 if none
-# armv8m-tz adds: sau_regions, s_mpu_regions, ns_mpu_regions, idau = [{ base, size, attribution }]
-# riscv-pmp adds: pmp_entries (0 | 16 | 64), grain (the smallest NAPOT size the implementation honours), na4 = true|false, tor = true|false
-# esp-pms adds: worlds, memory_regions, peripheral_slots, gdma_channels
+# armv8m-tz instead: sau_regions, s_mpu_regions, ns_mpu_regions, idau = [{ base, size, attribution }]
+# riscv-pmp instead: pmp_entries (0 | 16 | 64), grain (the smallest NAPOT size the implementation honours), na4 = true|false, tor = true|false
+# esp-pms instead: worlds, gdma_channels, and optionally memory_regions, peripheral_slots
 critical_section = "basepri"  # primask | basepri | mstatus-mie | xtensa-level: how the non-preemptible part masks the sandbox timer (4.2)
-np_max_us = 50                # bound of a non-preemptible part on this MCU (asserted against the measured worst case)
-dma_stop_max_us = 20          # how long a channel may take to report idle after a stop
 reset_cleanup = "peripheral-reset"   # peripheral-reset | reinit: how the reset-time contract of 4.2 is met
 background_privileged = true  # the unit can give privileged code a default map
 unwind = "cortex-m-exception" # cortex-m-exception | riscv-trap | xtensa-world | armv8m-tz
 timer = "systick"             # the sandbox timer
 fault_address = true          # the unit reports the faulting data address
-boot_extensions = true        # the MCU has a DAGON boot stage
-ext_ram_max = 24576
-root_protection = { kinds = ["rdp", "wrp"], rdp_levels = ["rdp1", "rdp2"] }   # the MCU's root-image protection and its levels (4.7)
-cache = "none"                # none | i-cache | i+d-cache (4.10)
-tcm = []                      # tightly coupled memories, each { base, size } (4.10)
+# np_max_us, dma_stop_max_us: left out = the catalog's bounds (50, 20); a definition may only lower them
 
 [[peripheral]]                # every register block the MCU has
 id = "can1"
@@ -954,6 +954,10 @@ privileged_why = "dma"        # dma | flash | watchdog | clock | reset | irq-rou
 [[core]]                      # every processor core; DAGON runs on the first
 id = "cpu0"
 ```
+
+Spelling: definition values are kebab-case words of `a-z 0-9 -` (hence
+`id-cache`), because a project definition's strings that are not plain
+names are replaced before they leave the machine (`targets/README.md`).
 
 The capability record is checked twice: `dagon gen` plans against the
 definition's numbers and refuses a definition whose numbers are outside
@@ -1245,8 +1249,8 @@ small closed set of mechanisms behind a trait:
 | Part | Definition data | Mechanisms (one module each) |
 |---|---|---|
 | Protection map | `[isolation] kind` and parameters, `[[peripheral]]`, `[[core]]` | `ProtectionKind` (4.4) |
-| Unwinding | `[isolation] unwind` | `cortex-m-exception`, `riscv-trap`, `xtensa-world`, `armv8m-tz` |
-| Sandbox timer | `[isolation] timer` | `systick`, `riscv-mtime`, `timer-group` |
+| Unwinding | `[isolation.capabilities] unwind` | `cortex-m-exception`, `riscv-trap`, `xtensa-world`, `armv8m-tz` |
+| Sandbox timer | `[isolation.capabilities] timer` | `systick`, `riscv-mtime`, `timer-group` |
 | Watchdog | `[watchdog] kind, trial_ms, confirmed_ms` | the `WatchdogDriver` port's defaults per kind (`iwdg`, `rp-watchdog`, `rtc-wdt`, …) |
 | Boot record placement | `[boot.record] kind, at, survives, rings` | `noinit-ram`, `retained-registers` (5.5) |
 | Root protection | `[isolation] root_protection` | per MCU family, applied by `dagon provision` |
@@ -1270,7 +1274,7 @@ Kinds that are not among the first three MCUs but fit the same schema:
   `riscv-pmp` for memory with the `esp-pms` peripheral and DMA controls
   (a kind `riscv-pmp+esp-pms` whose module composes the two).
 - **Cortex-M7 and other cached cores**: the `armv7m-mpu` row of the kind
-  table; the definition states `cache = "i+d-cache"` and the TCM
+  table; the definition states `cache = "id-cache"` and the TCM
   ranges. The generator marks capability windows Device (non-cacheable)
   and places the DMA bounce buffers in a non-cacheable region (a DTCM
   range, or an MPU region with the non-cacheable attribute); the DMA

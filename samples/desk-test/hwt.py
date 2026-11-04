@@ -35,7 +35,7 @@ MUTATING = {"deploy", "apply", "rollback", "recover", "flash", "provision", "res
 
 LINE = re.compile(
     r"^(?P<id>[\w-]+): version (?P<version>\S+)(?P<trial> \(on trial\))?, mcu (?P<mcu>\S+), "
-    r"active (?P<active>\d+), confirmed (?P<confirmed>\d+), attempts (?P<attempts>\d+), "
+    r"(?:wire (?P<wire>\d+), )?active (?P<active>\d+), confirmed (?P<confirmed>\d+), attempts (?P<attempts>\d+), "
     r"last reason (?P<reason>\d+), \[(?P<slots>.*)\]$"
 )
 SLOT = re.compile(r"([ABF]):(\w+) ([^,\s]+)")
@@ -600,6 +600,7 @@ def sync(a, desk):
                                encoding="utf-8", newline="\n")
             else:
                 shutil.copy2(p, out)
+        set_bin(project / "dagon.toml", node, src / "Cargo.toml")
     hub = project / cfg["build"][desk["coordinator"]]["package"]
     new = f'pub fn self_check() -> bool {{\n    !cfg!(feature = "{feat}")\n}}'
     app = hub / "src" / "app.rs"
@@ -619,8 +620,26 @@ def sync(a, desk):
     return rc
 
 
+def set_bin(config, node, manifest):
+    """`dagon build` builds the binary named like the package unless
+    [build.<node>] names `bin`; a sample whose one binary has another name
+    (esp32s3-app: `app`) gets `bin` written into its node's table."""
+    m = tomllib.loads(manifest.read_text(encoding="utf-8"))
+    bins = [b["name"] for b in m.get("bin", [])]
+    if len(bins) != 1 or bins[0] == m["package"]["name"]:
+        return
+    text = config.read_text(encoding="utf-8")
+    head = f"[build.{node}]\n"
+    table = text.split(head, 1)[1].split("\n[", 1)[0] if head in text else None
+    if table is None:
+        sys.exit(f"{config}: no [build.{node}]")
+    if not re.search(r"^bin\s*=", table, re.M):
+        config.write_text(text.replace(head, f'{head}bin = "{bins[0]}"\n', 1),
+                          encoding="utf-8", newline="\n")
+
+
 def selftest():
-    text = ("hub: version 1.4.0, mcu 0x0001, active 1, confirmed 1, attempts 0, last reason 3, "
+    text = ("hub: version 1.4.0, mcu 0x0001, wire 1, active 1, confirmed 1, attempts 0, last reason 3, "
             "[A:Written 1.3.0, B:Confirmed 1.4.0, F:Empty 0.0.0]\n"
             "seg: version 2.0.5 (on trial), mcu 0x0002, active 0, confirmed 1, attempts 1, "
             "last reason 0, [A:Pending 2.0.5, B:Confirmed 1.4.1, F:Empty 0.0.0]\n"
@@ -709,7 +728,7 @@ def fake_dagon(argv):
         for k, n in nodes.items():
             slots = ", ".join(f"{s}:{n['slots'][s][0]} {n['slots'][s][1]}" for s in "AB")
             print(f"{'hub' if k == st['coordinator'] else k}: version {n['version']}, "
-                  f"mcu {st['mcu']}, active {n['active']}, confirmed {n['active']}, "
+                  f"mcu {st['mcu']}, wire 1, active {n['active']}, confirmed {n['active']}, "
                   f"attempts 0, last reason 0, [{slots}, F:Empty 0.0.0]")
     elif args[0] == "rollback":
         n = nodes[args[args.index("--node") + 1]]

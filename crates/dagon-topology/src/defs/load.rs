@@ -148,7 +148,8 @@ type Embedded = (
 );
 
 // BUILTIN_MCUS and BUILTIN_BOARDS: every package folder of the source tree
-// (build.rs), in the order a source tree loads.
+// (build.rs), in the order a source tree loads; BUILTIN_FILES: the files
+// they embed.
 include!(concat!(env!("OUT_DIR"), "/builtin_defs.rs"));
 
 /// The builtin definitions' TOML: MCUs, then boards.

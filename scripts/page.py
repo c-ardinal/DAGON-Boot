@@ -29,6 +29,9 @@ CRATES = ["dagon-wasm", "dagon-host", "dagon-format", "dagon-proto", "dagon-topo
           "dagon-sign", "dagon-romlink", "dagon-conform", "dagon-port", "dagon-core",
           "dagon-agent"]
 WEB_SKIP = {"node_modules", "dist", "pkg"}
+# The definition files dagon-topology embeds (its build.rs discovers them; a
+# test keeps this list equal to what it embeds).
+EMBEDDED = ROOT / "crates" / "dagon-topology" / "builtin-files.txt"
 PLACEHOLDER_KEY = "0" * 64
 
 
@@ -41,8 +44,15 @@ def source_files():
     for c in CRATES:
         files += sorted(p for p in (ROOT / "crates" / c).rglob("*")
                         if p.is_file() and "target" not in p.relative_to(ROOT).parts)
+    files += embedded_files()
     files.append(ROOT / "Cargo.lock")
     return files
+
+
+def embedded_files():
+    """The targets/ files the page's WebAssembly embeds."""
+    lines = EMBEDDED.read_text(encoding="utf-8").splitlines()
+    return [ROOT / line for line in lines if line.strip()]
 
 
 def source_hash():

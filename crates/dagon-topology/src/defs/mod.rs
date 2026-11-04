@@ -24,7 +24,7 @@ use crate::schema::{ControlKind, LinkKind, RomEntry, UartIface};
 
 pub use board_boot::{BoardBoot, BoardBus, BoardDevice, BoardPeripheral, BoardPin};
 pub use isolation::{Core, Isolation, McuBoot, Peripheral, RecordPlacement, Watchdog};
-pub use load::{DefError, DefSource, Source};
+pub use load::{DefError, DefSource, Source, BUILTIN_FILES};
 
 /// The `dagon-mcu.toml` / `dagon-board.toml` format number this reader
 /// reads (their `format` key; absent means this one).

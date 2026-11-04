@@ -14,6 +14,7 @@ mod esp;
 mod extgen;
 mod flash;
 mod flashdev;
+mod genfs;
 mod nodebuild;
 mod paths;
 mod scaffold;

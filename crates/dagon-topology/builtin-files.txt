@@ -1,0 +1,7 @@
+targets/mcu/esp32s3/dagon-mcu.toml
+targets/mcu/esp32s3/partitions.csv
+targets/mcu/rp2040/dagon-mcu.toml
+targets/mcu/stm32f401re/dagon-mcu.toml
+targets/boards/m5stopwatch/dagon-board.toml
+targets/boards/nucleo-f401re/dagon-board.toml
+targets/boards/waveshare-rp2040-touch-lcd-1.28/dagon-board.toml

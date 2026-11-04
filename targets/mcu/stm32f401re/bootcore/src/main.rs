@@ -10,6 +10,14 @@
 //! accepts only images
 //! tagged with its node's tag: `DAGON_TARGET_TAG` at build time (the build
 //! fails without it).
+//!
+//! Boot core A/B (`dagon_core::bootcore::settle_log` over the shared state
+//! log): started by stage0 as the pending core, it confirms itself only
+//! after its own check (an app is startable and that app's header verifies
+//! under this core's key); otherwise it resets, so stage0 counts the start
+//! and falls back once the starts run out. Started while another core is
+//! pending, it records the rollback. Built for boot core slot A, or B with
+//! `slot-b`.
 #![no_std]
 #![no_main]
 
@@ -18,6 +26,11 @@ use core::panic::PanicInfo;
 use cortex_m::peripheral::{NVIC, SCB};
 use cortex_m_rt::entry;
 use dagon_core::boot::{decide, BootConfig, Decision};
+use dagon_core::bootcore::{settle_log, MustReset, Settled, CLEARED};
+use dagon_format::header::{verify_header, HEADER_SIZE};
+use dagon_mcu_stm32f401re::{trial, LINKED_SLOT, TRIAL_ATTEMPTS};
+use dagon_port::Flash;
+
 use dagon_core::log::Log;
 use dagon_mcu_stm32f401re::flash::F401Flash;
 use dagon_mcu_stm32f401re::layout as board;
@@ -59,6 +72,24 @@ fn main() -> ! {
         Ok(mut log) => decide(&mut flash, &mut log, &board::SLOTS, &CONFIG),
         Err(_) => Decision::NoImage,
     };
+    let healthy = match decision {
+        Decision::Boot { slot, .. } => app_verifies(&mut flash, slot),
+        Decision::NoImage => false,
+    };
+    let settled = settle_log(
+        &mut flash,
+        &board::LOG,
+        LINKED_SLOT,
+        (trial::read(), TRIAL_ATTEMPTS),
+        healthy,
+    );
+    match settled {
+        Ok(Settled::Nothing) => {}
+        Ok(Settled::Confirmed | Settled::RolledBack) => trial::write(CLEARED),
+        // On trial and not fit to run the app: stage0 counts this start
+        // (a system reset keeps the trial cell).
+        Err(MustReset) => SCB::sys_reset(),
+    }
     match decision {
         Decision::Boot { entry, trial, .. } => {
             let ms = if trial {
@@ -90,6 +121,18 @@ fn main() -> ! {
             }
         }
     }
+}
+
+/// The header of the app in APP slot `slot` verifies under this core's
+/// key: the part of a new core's own check that proves its verifier and
+/// key accept the project's images.
+fn app_verifies(flash: &mut F401Flash, slot: u8) -> bool {
+    let mut raw = [0u8; HEADER_SIZE];
+    board::SLOTS
+        .slots
+        .get(usize::from(slot))
+        .is_some_and(|&base| flash.read(base, &mut raw).is_ok())
+        && verify_header(&raw, &PUBKEY).is_ok()
 }
 
 struct Jump;

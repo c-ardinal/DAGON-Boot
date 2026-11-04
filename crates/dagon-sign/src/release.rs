@@ -236,11 +236,17 @@ fn place<'a>(
         ));
     }
     let slot = image::slot_of(reg, &n.mcu, &h).ok_or_else(|| {
-        fail(
-            "RB-02",
-            "R-NODE",
-            format!("image {i}: no such slot on node '{}'", n.id),
-        )
+        let none_of_kind = image::slot_with(reg, &n.mcu, h.image_kind, 0).is_none()
+            && image::slot_with(reg, &n.mcu, h.image_kind, header::slot_binding::ANY).is_none();
+        let why = if h.image_kind == image_kind::BOOTCORE && none_of_kind {
+            format!(
+                "image {i}: node '{}' ({}) keeps no boot core slots: its MCU definition declares none, so its boot stage is not written through releases",
+                n.id, n.mcu
+            )
+        } else {
+            format!("image {i}: no such slot on node '{}'", n.id)
+        };
+        fail("RB-02", "R-NODE", why)
     })?;
     if h.payload_size > slot.max_payload {
         return Err(fail(

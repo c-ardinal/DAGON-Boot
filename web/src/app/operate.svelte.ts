@@ -36,6 +36,8 @@ export interface Live {
   lastSeen: number | null;
   hello: HelloResp | null;
   status: StatusResp | null;
+  /** STATUS of the boot core slots; null when the node keeps none or it is not read yet. */
+  core?: StatusResp | null;
 }
 
 const UNKNOWN: Live = { responding: null, rttMs: null, lastSeen: null, hello: null, status: null };
@@ -111,6 +113,8 @@ export interface Deps {
   latest?: () => Promise<Uint8Array | null>;
   /** The signed boot core of node `id` the ROM path writes, through dagon serve; null when there is none. */
   bootcore?: (id: string) => Promise<Uint8Array | null>;
+  /** stage0's bytes for the ROM path of an MCU with a stage0. */
+  stage0?: (id: string) => Promise<Uint8Array | null>;
   /** Opens the device the page had again, without the chooser (the CLI gave it back). Throws when it cannot. */
   again?: () => Promise<Transport>;
 }
@@ -472,7 +476,9 @@ export class Operate {
     if (!n || this.live[id]?.responding === false) return;
     try {
       const s = await this.call((h) => h.status(n.target.kind, n.target.addr));
-      this.live[id] = { ...(this.live[id] ?? UNKNOWN), hello: s.hello, status: s.status };
+      // A node without boot core slots refuses this STATUS: no row then.
+      const core = await this.call((h) => h.bootCoreStatus(n.target.kind, n.target.addr)).catch(() => null);
+      this.live[id] = { ...(this.live[id] ?? UNKNOWN), hello: s.hello, status: s.status, core };
     } catch {
       // A missed STATUS shows the last values; the next watch round decides answering or not.
     }
@@ -776,7 +782,8 @@ export class Operate {
     const bytes = release;
     const bootcore = (await this.deps.bootcore?.(n.id).catch(() => null)) ?? null;
     const index = this.reach.indexOf(n);
-    await this.runRecovery(n, 'recover', (h, on) => h.recover(index, bytes, topo, bootcore, on));
+    const stage0 = (await this.deps.stage0?.(n.id).catch(() => null)) ?? null;
+    await this.runRecovery(n, 'recover', (h, on) => h.recover(index, bytes, topo, bootcore, stage0, on));
   }
 
   /** "もう一度直す" (L25): the operation that failed, again (a rollback stays a rollback). */

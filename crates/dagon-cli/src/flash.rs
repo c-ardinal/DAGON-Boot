@@ -591,6 +591,76 @@ pub(crate) fn build_parts(
     Ok(built)
 }
 
+/// The boot core part of node `n`, built once per boot core slot its MCU
+/// definition declares (slot B links with the `slot-b` feature), for a
+/// release: `(slot, ELF bytes)`. Empty when the MCU keeps no boot core
+/// slots. The part is the definition's part named `bootcore`.
+pub(crate) fn build_core_slots(
+    cfg: &Config,
+    reg: &Registry,
+    n: &dagon_topology::schema::Node,
+    hex: &str,
+    log: &mut dyn FnMut(&str),
+    cancel: &AtomicBool,
+) -> Result<nodebuild::SlotElfs, String> {
+    use dagon_format::header::{image_kind, slot_binding};
+    let slots: Vec<(char, Vec<String>)> = [(slot_binding::A, 'a'), (slot_binding::B, 'b')]
+        .into_iter()
+        .filter(|(b, _)| {
+            dagon_sign::image::slot_with(reg, &n.mcu, image_kind::BOOTCORE, *b).is_some()
+        })
+        .map(|(b, c)| {
+            (
+                c,
+                if b == slot_binding::B {
+                    vec!["slot-b".to_string()]
+                } else {
+                    Vec::new()
+                },
+            )
+        })
+        .collect();
+    if slots.is_empty() {
+        return Ok(Vec::new());
+    }
+    let root = source_root(cfg)?;
+    let part = parts(reg, &n.mcu, n.board.as_deref())
+        .into_iter()
+        .find(|p| p.name == BOOTCORE_PART)
+        .ok_or_else(|| format!("{}: no '{BOOTCORE_PART}' part in its definitions", n.id))?;
+    let dir = part_dir(&root, &part)?;
+    let bin = match &part.bin {
+        Some(b) => b.clone(),
+        None => nodebuild::package_name(&dir)?,
+    };
+    let mut out = Vec::new();
+    for (slot, features) in slots {
+        log(&format!("{}: building {} for slot {slot}", n.id, part.name));
+        let target = cfg
+            .base
+            .join("out/deploy/target")
+            .join(format!("{}-{slot}", part.name));
+        let exe = nodebuild::cargo_build(
+            &dir,
+            &bin,
+            &features,
+            Some(&target),
+            nodebuild::FirmwareEnv {
+                pubkey_hex: Some(hex),
+                target_tag: Some(&n.tag),
+            },
+            log,
+            cancel,
+        )?;
+        let elf = std::fs::read(&exe).map_err(|e| format!("{}: {e}", exe.display()))?;
+        out.push((slot, elf));
+    }
+    Ok(out)
+}
+
+/// The boot core part's name in MCU definitions (`[[part]] name`).
+const BOOTCORE_PART: &str = "bootcore";
+
 /// Builds the parts and the app and writes the first-install files into
 /// `out`.
 #[allow(clippy::too_many_arguments)]
@@ -1119,7 +1189,7 @@ mod tests {
             Registry::builtin(),
             &t,
             "seg",
-            &built(&cfg, false),
+            &built(&cfg, true),
             &out,
             &key(),
             &cfg.base,
@@ -1159,7 +1229,7 @@ mod tests {
             Registry::builtin(),
             &t,
             "seg",
-            &built(&cfg, false),
+            &built(&cfg, true),
             &out,
             &key(),
             &cfg.base,

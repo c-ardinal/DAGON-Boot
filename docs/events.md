@@ -69,6 +69,21 @@ States: `Empty` (initial), `Written`, `Pending`, `Trial`, `Confirmed`, `Reverted
 | `app.rolled_back` | 0x27 | `rolled_back`: Pending \| Trial → Reverted | `from: u8` (1 B), `to: u8` (1 B), `reason: u8` (1 B) | replay, host |  | The boot core rolled the slot back (attempts exhausted, or the pending image failed its check) and started `to`. |
 | `app.pending_withdrawn` | 0x28 | `pending_withdrawn`: Pending \| Trial → Confirmed | `slot: u8` (1 B), `version: Version` (4 B) | live, replay, host |  | The confirmed slot had been set pending again; another slot was set pending, or the boot core ended its trial: it is the confirmed slot again. |
 
+### Machine `core_image`
+
+The lifecycle of one boot core slot of a self-boot MCU with a stage0 (its definition's `bootcore` slots), kept in the boot core records of the state log. The agent writes a new core into the idle slot and sets it pending; stage0 tries it and the core settles the trial itself: `confirmed` by the new core after its own check, `rolled_back` by the old one when stage0 gave the new one up. The app sees those at its next start.
+
+States: `Empty` (initial), `Written`, `Pending`, `Confirmed`, `Reverted`.
+
+| Kind | Code | Transition | Payload | Observed | Notes | Description |
+|---|---|---|---|---|---|---|
+| `app.core_transfer_started` | 0x40 | `erase`: Empty \| Written \| Pending \| Reverted → Empty | `slot: u8` (1 B), `len: u32` (4 B) | live, host |  | The idle boot core slot was erased for a new core (never the running or the confirmed core's slot). |
+| `app.core_written` | 0x41 | `written`: Empty → Written | `slot: u8` (1 B), `version: Version` (4 B) | live, host |  | The core's body verified and its header written and read back. |
+| `app.core_pending_set` | 0x42 | `pending_set`: Written \| Pending \| Reverted → Pending | `slot: u8` (1 B), `version: Version` (4 B) | live, host |  | The core is the one stage0 tries at the next reset. |
+| `app.core_confirmed` | 0x43 | `confirmed`: Pending → Confirmed | `slot: u8` (1 B), `version: Version` (4 B) | host |  | The new core passed its own check and confirmed itself. |
+| `app.core_demoted` | 0x44 | `demoted`: Confirmed → Written | `slot: u8` (1 B), `version: Version` (4 B) | host |  | Another core confirmed itself; this one is no longer. |
+| `app.core_rolled_back` | 0x45 | `rolled_back`: Pending → Reverted | `from: u8` (1 B), `to: u8` (1 B), `reason: u8` (1 B) | replay, host |  | Stage0 gave the pending core up (its starts ran out, or its image failed the check) and the core in `to` recorded it. |
+
 ### Machine `session`
 
 The update session: an offer, the header, the body, the end.

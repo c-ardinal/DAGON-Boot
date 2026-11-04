@@ -265,6 +265,7 @@ impl SimNode {
     /// Restores power after a cut and boots.
     pub fn power_on(&mut self, now_ms: u64) {
         self.flash().power_on();
+        self.store.power_lost();
         self.reset(now_ms);
     }
 

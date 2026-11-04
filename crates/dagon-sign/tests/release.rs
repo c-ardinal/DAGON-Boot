@@ -197,6 +197,49 @@ fn release_build_with_desk_demo() {
     );
 }
 
+/// The ESP32-S3 boots through the vendor's 2nd stage: its definition
+/// declares no boot core slots, so a boot core image for it is refused,
+/// saying why. The hub and the F401 take boot core A/B pairs.
+#[test]
+fn boot_cores_go_only_to_nodes_whose_mcu_keeps_boot_core_slots() {
+    let t = desk_demo();
+    let reg = dagon_topology::defs::Registry::builtin();
+    let core = |mcu: &str, tag: &str, port: &str, slot: u8| {
+        let mut s = spec(mcu, image_kind::BOOTCORE, slot, tag, Version::new(1, 1, 0));
+        s.port_kind = image::port_kind_of(port).unwrap();
+        sign_image(&s, &body(slot), &key()).unwrap()
+    };
+    // Placed like the watch's app (the ESP32-S3 has no boot core slot).
+    let (flags, caps) = image::default_bits(image_kind::BOOTCORE);
+    let watch_core = ImageSpec {
+        image_kind: image_kind::BOOTCORE,
+        port_kind: image::port_kind_of("vendor-stage2").unwrap(),
+        build_flags: flags,
+        capabilities: caps,
+        ..spec(
+            "esp32s3",
+            image_kind::APP,
+            0,
+            "watch-s3",
+            Version::new(1, 1, 0),
+        )
+    };
+    let watch_core = sign_image(&watch_core, &body(0), &key()).unwrap();
+    let e = release::build(reg, &t, &topology_bin(), &[watch_core], "r", &key()).unwrap_err();
+    assert!(
+        e.message.contains("keeps no boot core slots"),
+        "{}",
+        e.message
+    );
+    let images = vec![
+        core("rp2040", "hub-rp2040-lcd", "self-boot", 0),
+        core("rp2040", "hub-rp2040-lcd", "self-boot", 1),
+        core("stm32f401re", "seg-f401-7seg", "self-boot", 0),
+        core("stm32f401re", "seg-f401-7seg", "self-boot", 1),
+    ];
+    release::build(reg, &t, &topology_bin(), &images, "r", &key()).unwrap();
+}
+
 #[test]
 fn release_build_rejects_bad_sets() {
     let t = desk_demo();
@@ -297,7 +340,7 @@ fn sign_rejects_unverified_bootcore() {
 }
 
 #[test]
-fn f401_flash_places_bootcore_log_and_app() {
+fn f401_flash_places_stage0_log_bootcore_and_app() {
     let boot_spec = spec(
         "stm32f401re",
         image_kind::BOOTCORE,
@@ -308,25 +351,46 @@ fn f401_flash_places_bootcore_log_and_app() {
     let boot = sign_image(&boot_spec, &body(2), &key()).unwrap();
     let app = f401_app(0);
     let app_slot = image::slot("stm32f401re", image_kind::APP, 0).unwrap();
+    let stage0 = vec![0x5A; 0x2400];
     let bin = first_file(
         "stm32f401re",
-        None,
+        Some(&stage0),
         (&boot_spec.slot, &boot),
         (&app_slot, &app),
     );
-    assert_eq!(&bin[..1024], &boot[HEADER_SIZE..]);
-    assert_eq!(&bin[0x7E00..0x8000], &boot[..HEADER_SIZE]);
     assert_eq!(
-        &bin[0x8000..0x8020],
+        &bin[..stage0.len()],
+        &stage0[..],
+        "stage0 at the reset vector"
+    );
+    assert!(bin[stage0.len()..0x4000].iter().all(|&b| b == 0xFF));
+    // One log for both targets: face A holds the boot core's and the
+    // app's PROVISION and CONFIRMED, face B is erased.
+    assert_eq!(
+        &bin[0x4000..0x4020],
         &golden("statelog_face.bin")[..32],
         "face header gen 1"
     );
+    let rec = |i: usize| {
+        let at = 0x4020 + i * 32;
+        dagon_format::statelog::Record::parse(bin[at..at + 32].try_into().unwrap()).unwrap()
+    };
+    use dagon_format::statelog::{kind, target};
+    let got: Vec<_> = (0..4)
+        .map(|i| (rec(i).target, rec(i).kind, rec(i).slot))
+        .collect();
     assert_eq!(
-        &bin[0x8020..0x8040],
-        &golden("statelog_face.bin")[32..64],
-        "PROVISION A"
+        got,
+        [
+            (target::BOOTCORE, kind::PROVISION, 0),
+            (target::BOOTCORE, kind::CONFIRMED, 0),
+            (target::APP, kind::PROVISION, 0),
+            (target::APP, kind::CONFIRMED, 0),
+        ]
     );
-    assert!(bin[0xC000..0x2_0000].iter().all(|&b| b == 0xFF));
+    assert!(bin[0x40A0..0x1_0000].iter().all(|&b| b == 0xFF));
+    assert_eq!(&bin[0x1_0000..0x1_0200], &boot[..HEADER_SIZE]);
+    assert_eq!(&bin[0x1_0200..0x1_0200 + 1024], &boot[HEADER_SIZE..]);
     assert_eq!(&bin[0x2_0000..], &app[..]);
 }
 

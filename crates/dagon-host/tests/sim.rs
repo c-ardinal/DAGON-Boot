@@ -450,6 +450,9 @@ fn old_hub_firmware_answering_after_reboot_is_waited_out() {
     assert_eq!((hub.status.active, hub.status.confirmed), (1, 1));
 }
 
+/// Stage0's bytes for the F401's ROM path (the simulator runs no code).
+const STAGE0: [u8; 0x400] = [0x5A; 0x400];
+
 fn bootcore() -> Vec<u8> {
     let (flags, caps) = image::default_bits(image_kind::BOOTCORE);
     let mcu = "stm32f401re";
@@ -472,12 +475,18 @@ fn bootcore() -> Vec<u8> {
 #[test]
 fn rom_plan_matches_the_provision_binary() {
     let (boot, app) = (bootcore(), seg_img(0, Version::new(1, 1, 0)));
-    let log = rom::initial_log(app[..512].try_into().unwrap()).unwrap();
+    let map = f401_rom();
+    let log = rom::first_log(
+        boot[..512].try_into().unwrap(),
+        app[..512].try_into().unwrap(),
+        &map,
+    )
+    .unwrap();
     let want = dagon_sign::provision::first_install_file(
         dagon_topology::defs::Registry::builtin()
             .mcu("stm32f401re")
             .unwrap(),
-        None,
+        Some(&STAGE0),
         (
             &image::slot("stm32f401re", image_kind::BOOTCORE, 0).unwrap(),
             &boot,
@@ -489,9 +498,9 @@ fn rom_plan_matches_the_provision_binary() {
     )
     .unwrap();
     let mut got = vec![0xFF; want.len()];
-    let map = f401_rom();
-    for r in rom::regions(&boot, &app, &log, &map) {
-        let off = (r.addr - map.bootcore.load) as usize;
+    let base = map.stage0.unwrap().0;
+    for r in rom::regions(&boot, &app, &log, Some(&STAGE0), &map) {
+        let off = (r.addr - base) as usize;
         got[off..off + r.data.len()].copy_from_slice(r.data);
     }
     assert!(got == want, "ROM regions and provision binary differ");
@@ -513,6 +522,7 @@ fn recover_seg(s: &Sim) -> (RecoverPath, Version) {
         topology: &topo,
         pubkey: &key().pk,
         bootcore: Some(&boot),
+        stage0: Some(&STAGE0),
         roms: &roms(),
     };
     block_on(host(s).recover(SEG, &assets, &mut |_| {})).unwrap()
@@ -578,6 +588,7 @@ fn rom_session_gives_up_after_three_attempts() {
         topology: &topo,
         pubkey: &key().pk,
         bootcore: Some(&boot),
+        stage0: Some(&STAGE0),
         roms: &roms(),
     };
     let r = block_on(host(&s).recover(SEG, &assets, &mut |_| {}));
@@ -614,6 +625,7 @@ fn rom_path_needs_a_valid_boot_core() {
         topology: &topo,
         pubkey: &key().pk,
         bootcore: Some(&boot),
+        stage0: Some(&STAGE0),
         roms: &roms(),
     };
     let r = block_on(host(&s).recover(SEG, &assets, &mut |_| {}));
@@ -1047,4 +1059,237 @@ fn a_self_check_that_never_passes_fails_after_the_bounded_retries() {
     }
     let st = block_on(h.status(SEG_AT)).unwrap().status;
     assert_eq!((st.active, st.slots[1].state), (0, SlotState::Reverted));
+}
+
+// Boot core A/B of the hub through a release.
+
+fn hub_core(slot: u8, v: Version) -> Vec<u8> {
+    let (flags, caps) = image::default_bits(image_kind::BOOTCORE);
+    let spec = ImageSpec {
+        image_kind: image_kind::BOOTCORE,
+        port_kind: image::port_kind_of("self-boot").unwrap(),
+        mcu_id: image::mcu_id_of("rp2040").unwrap(),
+        slot: image::slot("rp2040", image_kind::BOOTCORE, slot).unwrap(),
+        version: v,
+        build_flags: flags,
+        release_seq: 1,
+        min_bootcore_version: Version::new(0, 0, 0),
+        target_tag: target_tag(&hub_tag()),
+        proto_version: 1,
+        capabilities: caps,
+    };
+    sign_image(&spec, &[0xC0 + slot; 2000], &key()).unwrap()
+}
+
+/// Release 1.1.0 for the hub: app A/B and boot core A/B.
+fn hub_core_release() -> Vec<u8> {
+    let t = dagon_topology::parse_str(&yaml()).unwrap();
+    let v = Version::new(1, 1, 0);
+    let images = [hub_img(0, v), hub_img(1, v), hub_core(0, v), hub_core(1, v)];
+    dagon_sign::release::build(
+        dagon_topology::defs::Registry::builtin(),
+        &t,
+        &topology(&yaml()),
+        &images,
+        "r1.1",
+        &key(),
+    )
+    .unwrap()
+    .bundle
+}
+
+fn apply_hub(s: &Sim) -> Vec<NodeOutcome<()>> {
+    let mut h = host(s);
+    block_on(h.apply(
+        &hub_core_release(),
+        &topology(&yaml()),
+        &key().pk,
+        Some(&[0]),
+        &mut |_| {},
+    ))
+    .unwrap()
+}
+
+fn core_status(s: &Sim) -> dagon_proto::payload::StatusResp {
+    block_on(host(s).boot_core_status(Target::Hub)).unwrap()
+}
+
+#[test]
+fn a_release_with_hub_boot_cores_writes_the_idle_core_slot_and_the_new_core_takes_over() {
+    let s = sim();
+    let before = core_status(&s);
+    assert_eq!((before.active, before.confirmed), (0, 0));
+    assert_eq!(before.slots[0].version, Version::new(1, 0, 0));
+    let out = apply_hub(&s);
+    let v = Version::new(1, 1, 0);
+    assert!(
+        matches!(out[0].outcome, Outcome::Done(x) if x == v),
+        "{:?}",
+        out[0].outcome
+    );
+    let after = core_status(&s);
+    assert_eq!((after.active, after.confirmed), (1, 1));
+    assert_eq!(after.slots[1].version, v);
+    assert_eq!(after.slots[1].state, SlotState::Confirmed);
+    assert_eq!(after.slots[0].state, SlotState::Written);
+    let st = block_on(host(&s).status(Target::Hub)).unwrap();
+    assert_eq!(st.hello.active_version, v, "the app updated after the core");
+
+    // The same release again: the running core is the release's; nothing
+    // is written to the boot core slots.
+    let again = apply_hub(&s);
+    assert!(matches!(again[0].outcome, Outcome::Done(_)));
+    let same = core_status(&s);
+    assert_eq!(
+        (same.confirmed, same.log_generation, same.slots),
+        (1, after.log_generation, after.slots)
+    );
+}
+
+#[test]
+fn a_core_that_fails_its_own_check_is_rolled_back_and_the_run_stops() {
+    let s = sim();
+    s.hub.borrow_mut().node.store().broken_core = Some(Version::new(1, 1, 0));
+    let out = apply_hub(&s);
+    assert!(
+        matches!(
+            out[0].outcome,
+            Outcome::Failed(Error::BootCoreRolledBack { running, .. })
+                if running == Version::new(1, 0, 0)
+        ),
+        "{:?}",
+        out[0].outcome
+    );
+    let st = core_status(&s);
+    assert_eq!((st.active, st.confirmed), (0, 0));
+    assert_eq!(st.slots[1].state, SlotState::Reverted);
+    assert_eq!(
+        st.last_reason,
+        dagon_format::statelog::reason::TRIAL_EXHAUSTED
+    );
+    let hello = block_on(host(&s).status(Target::Hub)).unwrap().hello;
+    assert_eq!(hello.active_version, Version::new(1, 0, 0), "app untouched");
+}
+
+fn seg_core(slot: u8, v: Version) -> Vec<u8> {
+    let (flags, caps) = image::default_bits(image_kind::BOOTCORE);
+    let mcu = "stm32f401re";
+    let spec = ImageSpec {
+        image_kind: image_kind::BOOTCORE,
+        port_kind: image::port_kind_of("self-boot").unwrap(),
+        mcu_id: image::mcu_id_of(mcu).unwrap(),
+        slot: image::slot(mcu, image_kind::BOOTCORE, slot).unwrap(),
+        version: v,
+        build_flags: flags,
+        release_seq: 1,
+        min_bootcore_version: Version::new(0, 0, 0),
+        target_tag: target_tag("seg-f401-7seg"),
+        proto_version: 1,
+        capabilities: caps,
+    };
+    sign_image(&spec, &[0xD0 + slot; 2000], &key()).unwrap()
+}
+
+/// The F401 (stage0, boot core A/B) takes a new boot core through a
+/// release over the hub's relay, as the hub does.
+#[test]
+fn the_f401_takes_a_new_boot_core_through_the_release() {
+    let s = sim();
+    let st = block_on(host(&s).boot_core_status(SEG_AT)).unwrap();
+    assert_eq!((st.active, st.confirmed), (0, 0));
+    let t = dagon_topology::parse_str(&yaml()).unwrap();
+    let v = Version::new(1, 1, 0);
+    let images = [seg_img(0, v), seg_img(1, v), seg_core(0, v), seg_core(1, v)];
+    let rel = dagon_sign::release::build(
+        dagon_topology::defs::Registry::builtin(),
+        &t,
+        &topology(&yaml()),
+        &images,
+        "r1.1",
+        &key(),
+    )
+    .unwrap()
+    .bundle;
+    let out = block_on(host(&s).apply(
+        &rel,
+        &topology(&yaml()),
+        &key().pk,
+        Some(&[SEG]),
+        &mut |_| {},
+    ))
+    .unwrap();
+    assert!(
+        matches!(out[0].outcome, Outcome::Done(x) if x == v),
+        "{:?}",
+        out[0].outcome
+    );
+    let st = block_on(host(&s).boot_core_status(SEG_AT)).unwrap();
+    assert_eq!((st.active, st.confirmed, st.slots[1].version), (1, 1, v));
+    assert_eq!(st.slots[0].state, SlotState::Written);
+}
+
+/// After the ROM loader's full rewrite the F401 runs boot core A, recorded.
+#[test]
+fn the_rom_path_leaves_boot_core_a_recorded() {
+    let s = sim();
+    wipe_seg(&s);
+    recover_seg(&s);
+    let st = block_on(host(&s).boot_core_status(SEG_AT)).unwrap();
+    assert_eq!((st.active, st.confirmed), (0, 0));
+    assert_eq!(st.slots[0].state, SlotState::Confirmed);
+}
+
+/// A power cut at every flash operation of the hub's boot core and app
+/// update: after power returns the hub starts a boot core and an app, and
+/// the boot core log holds one confirmed core and no open trial.
+#[test]
+fn a_power_cut_at_every_hub_flash_step_leaves_a_bootable_hub() {
+    let ops = {
+        let s = sim();
+        s.hub.borrow().node.flash().clear_ops();
+        apply_hub(&s);
+        let n = s.hub.borrow().node.flash().ops().len();
+        n
+    };
+    assert!(ops > 8, "{ops}");
+    for i in 0..ops {
+        for cut in [
+            dagon_sim::CutPoint::During(i),
+            dagon_sim::CutPoint::After(i),
+        ] {
+            let s = sim();
+            {
+                let hub = s.hub.borrow();
+                let mut f = hub.node.flash();
+                f.clear_ops();
+                f.arm_cut(cut);
+            }
+            let _ = block_on(host(&s).apply(
+                &hub_core_release(),
+                &topology(&yaml()),
+                &key().pk,
+                Some(&[0]),
+                &mut |_| {},
+            ));
+            {
+                let mut hub = s.hub.borrow_mut();
+                let now = hub.now_ms();
+                let off = !hub.node.flash().is_powered();
+                if off {
+                    hub.node.power_on(now);
+                }
+            }
+            let st = core_status(&s);
+            assert!(st.confirmed < 2, "{cut:?}: no confirmed core");
+            assert_eq!(st.active, st.confirmed, "{cut:?}");
+            assert!(
+                !st.slots
+                    .iter()
+                    .any(|x| matches!(x.state, SlotState::Pending | SlotState::Trying)),
+                "{cut:?}: open trial {st:?}"
+            );
+            block_on(host(&s).status(Target::Hub))
+                .unwrap_or_else(|e| panic!("{cut:?}: hub silent: {e:?}"));
+        }
+    }
 }

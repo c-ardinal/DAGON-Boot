@@ -28,6 +28,8 @@ const BODY_AT: usize = HEADER_LEN + 1;
 const READ_CHUNK: usize = 256;
 const SLOT_A: u8 = 0;
 const SLOT_B: u8 = 1;
+/// The recovery agent's slot (STATUS slot 2).
+const FACTORY: u8 = 2;
 
 /// The app layer's composed chain, as the agent uses it: where its
 /// transitions deliver, the decision points, and replay. Implemented only
@@ -149,6 +151,12 @@ impl<S: SlotStore, X: AppChain> Agent<S, X> {
     /// The slots, read-only.
     pub fn images(&self) -> &ImageView {
         self.images.view()
+    }
+
+    /// A boot core slot's lifecycle state (`Empty` on a board that keeps
+    /// no boot core slots; `None` for a slot number past B).
+    pub fn core_state(&self, slot: u8) -> Option<crate::core_image::State> {
+        self.images.core_state(slot)
     }
 
     /// The start took over the boot core's watchdog with `period_ms` and
@@ -328,11 +336,9 @@ impl<S: SlotStore, X: AppChain> Agent<S, X> {
     }
 
     fn status(&mut self, p: &[u8]) -> Handled {
-        if !p.is_empty() {
-            return Err(Status::Arg);
-        }
+        let t = payload::parse_status_req(p)?;
+        let st = self.images.target_status(t).ok_or(Status::Unsupported)?;
         noted(self.requests.status_asked(&mut self.chain));
-        let st = self.images.status();
         Ok((st.encode(self.body()).expect("fits"), None))
     }
 
@@ -361,7 +367,7 @@ impl<S: SlotStore, X: AppChain> Agent<S, X> {
             );
             return Err(Status::State);
         }
-        if req.target != target::APP {
+        if !signed(req.target) {
             self.open_body(req.target, req.slot, body_len)?;
         }
         Ok((0, None))
@@ -370,8 +376,11 @@ impl<S: SlotStore, X: AppChain> Agent<S, X> {
     /// DAGON's guards on an update offer; the body length when it passes.
     fn offer_guards(&mut self, req: &XferBegin) -> Result<u32, Status> {
         let body_len = req.body_len().ok_or(Status::Arg)?;
+        let ab = matches!(req.slot, SLOT_A | SLOT_B);
+        let factory = req.slot == FACTORY;
         match req.target {
-            target::APP if req.hdr_len == IMAGE_HDR_LEN && matches!(req.slot, SLOT_A | SLOT_B) => {}
+            target::APP | target::BOOTCORE if req.hdr_len == IMAGE_HDR_LEN && ab => {}
+            target::AGENT if req.hdr_len == IMAGE_HDR_LEN && factory => {}
             target::TOPOLOGY if req.hdr_len == 0 && req.slot == 0 => {}
             _ => return Err(Status::Arg),
         }
@@ -382,8 +391,22 @@ impl<S: SlotStore, X: AppChain> Agent<S, X> {
         if body_len > cap {
             return Err(Status::Range);
         }
-        if req.target == target::APP {
+        if req.target == target::AGENT {
+            // The recovery agent's slot is rewritten only while a confirmed
+            // app runs from another slot: that app's agent is the way back
+            // if the write is cut, and the factory is then neither running
+            // nor the fallback.
             let st = self.images.status();
+            let running = st.slots.get(usize::from(st.active)).map(|s| s.state);
+            let fallback = req.slot == st.active || req.slot == st.confirmed;
+            if fallback || running != Some(SlotState::Confirmed) {
+                return Err(Status::State);
+            }
+        } else if signed(req.target) {
+            let st = self
+                .images
+                .target_status(req.target)
+                .ok_or(Status::Unsupported)?;
             if req.slot == st.active || req.slot == st.confirmed {
                 return Err(Status::State);
             }
@@ -404,10 +427,10 @@ impl<S: SlotStore, X: AppChain> Agent<S, X> {
 
     fn xfer_hdr(&mut self, chunk: XferChunk<'_>) -> Handled {
         let session::State::Header {
+            target,
             slot,
             body_len,
             got,
-            ..
         } = self.session.state()
         else {
             return Err(Status::State);
@@ -420,7 +443,7 @@ impl<S: SlotStore, X: AppChain> Agent<S, X> {
         noted(self.session.header_received(&mut self.chain, end as u16));
         if end == HEADER_SIZE {
             let checked = self
-                .check_header(slot)
+                .check_header(target, slot)
                 .and_then(|h| (h.payload_size == body_len).then_some(h).ok_or(Status::Arg));
             let h = match checked {
                 Ok(h) => h,
@@ -434,14 +457,15 @@ impl<S: SlotStore, X: AppChain> Agent<S, X> {
                 self.requests
                     .header_verified(&mut self.chain, slot, h.version),
             );
-            self.open_body(target::APP, slot, body_len)?;
+            self.open_body(target, slot, body_len)?;
         }
         Ok((put_u32(self.body(), end as u32), None))
     }
 
-    /// Signature, key and compatibility of the header in `self.hdr` for `slot`.
-    fn check_header(&self, slot: u8) -> Result<ImageHeader, Status> {
-        check_header(&self.cfg, &self.hdr, slot)
+    /// Signature, key and compatibility of the header in `self.hdr` for a
+    /// slot of `target`.
+    fn check_header(&self, target: u8, slot: u8) -> Result<ImageHeader, Status> {
+        check_header(&self.cfg, &self.hdr, target, slot)
     }
 
     fn xfer_data(&mut self, chunk: XferChunk<'_>) -> Handled {
@@ -496,11 +520,11 @@ impl<S: SlotStore, X: AppChain> Agent<S, X> {
         }
     }
 
-    /// Hashes the body read back; for APP checks it against the held header
-    /// and writes the header last (image `written`).
+    /// Hashes the body read back; for a signed image checks it against the
+    /// held header and writes the header last (`written`).
     fn verify_and_commit(&mut self, target: u8, slot: u8, len: u32) -> Result<[u8; 32], Status> {
         let digest = self.hash_body(target, slot, len)?;
-        if target != target::APP {
+        if !signed(target) {
             noted(self.requests.verify_ok(&mut self.chain, target, slot, len));
             self.images.body_written(target, slot, &mut self.chain)?;
             return Ok(digest);
@@ -513,10 +537,10 @@ impl<S: SlotStore, X: AppChain> Agent<S, X> {
         let hdr = self.hdr;
         let cfg = &self.cfg;
         self.images.write_header(
-            slot,
+            (target, slot),
             &hdr,
             (h.version, h.payload_size),
-            |back| check_header(cfg, back, slot).is_ok(),
+            |back| check_header(cfg, back, target, slot).is_ok(),
             &mut self.chain,
         )?;
         Ok(digest)
@@ -544,23 +568,30 @@ impl<S: SlotStore, X: AppChain> Agent<S, X> {
     }
 
     fn switch(&mut self, req: SetPending) -> Handled {
-        if req.target != target::APP || !matches!(req.slot, SLOT_A | SLOT_B) {
+        let t = req.target;
+        if !matches!(t, target::APP | target::BOOTCORE) || !matches!(req.slot, SLOT_A | SLOT_B) {
             return Err(Status::Arg);
         }
         self.end_session(AbortCause::NewRequest);
-        if req.slot == self.images.status().active {
+        let st = self.images.target_status(t).ok_or(Status::Unsupported)?;
+        if req.slot == st.active {
             return Err(Status::State);
         }
-        self.images.read_header(req.slot, &mut self.hdr)?;
+        self.images.read_header(t, req.slot, &mut self.hdr)?;
         // An erased or partial header means "no image here".
         ImageHeader::parse(&self.hdr).map_err(|_| Status::State)?;
-        let h = self.check_header(req.slot)?;
-        if self.hash_body(target::APP, req.slot, h.payload_size)? != h.payload_sha256 {
+        let h = self.check_header(t, req.slot)?;
+        if self.hash_body(t, req.slot, h.payload_size)? != h.payload_sha256 {
             return Err(Status::Digest);
         }
         let hdr = self.hdr;
-        self.images
-            .set_pending(req.slot, &hdr, h.version, &mut self.chain)?;
+        if t == target::BOOTCORE {
+            self.images
+                .set_core_pending(req.slot, &hdr, h.version, &mut self.chain)?;
+        } else {
+            self.images
+                .set_pending(req.slot, &hdr, h.version, &mut self.chain)?;
+        }
         Ok((0, None))
     }
 
@@ -608,7 +639,7 @@ impl<S: SlotStore, X: AppChain> Agent<S, X> {
             return Err(Status::State);
         }
         let mut hdr = [0u8; HEADER_SIZE];
-        self.images.read_header(slot, &mut hdr)?;
+        self.images.read_header(target::APP, slot, &mut hdr)?;
         self.images.confirm(slot, &hdr, version, &mut self.chain)
     }
 }
@@ -622,10 +653,34 @@ pub fn reply_status(frame: &[u8]) -> Option<u8> {
     split_status(f.payload).map(|(s, _)| s as u8)
 }
 
-/// Signature, key and compatibility of `hdr` for `slot`.
-fn check_header(cfg: &Config, hdr: &[u8; HEADER_SIZE], slot: u8) -> Result<ImageHeader, Status> {
+/// Whether `target`'s images carry a signed header (the topology copy
+/// does not).
+fn signed(target: u8) -> bool {
+    target != target::TOPOLOGY
+}
+
+/// The image kind a slot of `target` holds.
+fn kind_of(target: u8) -> Option<u8> {
+    match target {
+        target::APP => Some(image_kind::APP),
+        target::BOOTCORE => Some(image_kind::BOOTCORE),
+        target::AGENT => Some(image_kind::AGENT),
+        _ => None,
+    }
+}
+
+/// Signature, key and compatibility of `hdr` for `slot` of `target`: the
+/// kind that target holds, this node's MCU, port and tag, and for a
+/// verifying image (boot core, agent) the capability rule.
+fn check_header(
+    cfg: &Config,
+    hdr: &[u8; HEADER_SIZE],
+    target: u8,
+    slot: u8,
+) -> Result<ImageHeader, Status> {
     let h = header::verify_header(hdr, &cfg.pubkey).map_err(format_status)?;
-    let compatible = h.image_kind == image_kind::APP
+    let compatible = Some(h.image_kind) == kind_of(target)
+        && header::capabilities_ok(h.image_kind, h.build_flags, h.capabilities)
         && h.mcu_id == cfg.mcu_id
         && h.port_kind == cfg.port_kind
         && h.target_tag == cfg.target_tag

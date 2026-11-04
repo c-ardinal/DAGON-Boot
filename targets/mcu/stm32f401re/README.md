@@ -160,8 +160,8 @@ builds the link on the board's pins; link types are constructed as
 | `hal` | `clocks`, `flash`, `watchdog`; `PUBKEY` / `TEST_KEY` (the boot core stops here) |
 | `node` (default) | `node` (board definition, start-up, serving loop) and `exec` (binds USART6's vector); logs through defmt |
 | `conform` | the conformance build's CONF_RUN in front of the agent |
-| `slot-b` | link the app for APP slot B |
-| `image-bootcore` | link the boot core instead of an app |
+| `slot-b` | link the app for APP slot B (the boot core for boot core slot B) |
+| `image-stage0`, `image-bootcore` | link the boot images instead of an app |
 
 ## Flash layout (fixed; needs 512 KiB)
 
@@ -169,24 +169,36 @@ The board's flash size is check-only: a board with less fails to build.
 
 | Address | Size | Content |
 |---|---|---|
-| 0x08000000 | 32 KiB | boot core (`bootcore/`), signed header in the last 512 B |
-| 0x08008000 | 2 x 16 KiB | APP state log faces A/B |
-| 0x08010000 | 64 KiB | reserved |
+| 0x08000000 | 16 KiB | stage0 (`stage0/`, never updated: the reset vector) |
+| 0x08004000 | 2 x 16 KiB | state log faces A/B (APP and boot core records) |
+| 0x0800C000 | 16 KiB | conformance scratch |
+| 0x08010000 | 64 KiB | boot core slot A (`bootcore/`): 512-byte header, body at 0x08010200 |
 | 0x08020000 | 128 KiB | APP-A: 512-byte header, body at 0x08020200 |
 | 0x08040000 | 128 KiB | APP-B: same, body at 0x08040200 |
-| 0x08060000 | 128 KiB | reserved |
+| 0x08060000 | 128 KiB | boot core slot B: same, body at 0x08060200 |
 
-The boot core tries a pending slot up to 3 times (signature + SHA-256,
-BOOT_ATTEMPT before each start, 4 s watchdog) and then rolls back;
-otherwise it starts the confirmed slot (8 s watchdog). Both run at 84 MHz
-from the HSI (`clocks()`).
+Stage0 starts the boot core: the pending one (written by the running app's
+agent from a release) on trial, up to 3 starts counted in the RTC backup
+registers BKP0R/BKP1R, else the confirmed one. The new core confirms
+itself once it can start a verified app; one that cannot is reset and,
+after its starts run out, the old core runs again and records the
+rollback. The boot core tries a pending APP slot up to 3 times (signature
++ SHA-256, BOOT_ATTEMPT before each start, 4 s watchdog) and then rolls
+back; otherwise it starts the confirmed slot (8 s watchdog). Both run at
+84 MHz from the HSI (`clocks()`). The ROM loader's full rewrite (the last
+resort) writes stage0, boot core A, the state log and APP-A.
 
-## Boot core
+## Boot images
 
 ```sh
 export DAGON_PUBKEY=/path/outside/the/repo/dagon-signing.pub
+(cd targets/mcu/stm32f401re/stage0 && cargo build --release)
 (cd targets/mcu/stm32f401re/bootcore && DAGON_TARGET_TAG=my-node cargo build --release)
 ```
+
+`--features slot-b` links the boot core for boot core slot B; a release
+carries one for each slot.
+
 
 It is built per node: it accepts only app images tagged with
 `DAGON_TARGET_TAG` (the node's tag, as in the app's `.cargo/config.toml`),

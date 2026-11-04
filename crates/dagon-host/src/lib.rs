@@ -149,6 +149,14 @@ pub enum Error<E> {
     },
     /// The ROM loader session failed (after its retries).
     Rom(dagon_romlink::RomError),
+    /// The new boot core did not take over: stage0 fell back to the core
+    /// running `running` (the new one failed its own check or its image
+    /// check; `reason` is the boot core log's state log reason code).
+    BootCoreRolledBack {
+        expected: Version,
+        running: Version,
+        reason: u8,
+    },
     Unsupported,
 }
 

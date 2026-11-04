@@ -125,6 +125,17 @@ impl<T: Transport, C: Clock> Host<T, C> {
         Ok(NodeState { hello, status })
     }
 
+    /// STATUS of the target's boot core slots (version and header digest of
+    /// each, the running and the confirmed core). A target whose MCU keeps
+    /// no boot core slots answers `Unsupported` (`Error::Rejected`); one
+    /// that predates the request answers `Arg`.
+    pub async fn boot_core_status(&mut self, to: Target) -> Result<StatusResp, T::Error> {
+        let body = self
+            .call(to, Cmd::Status, &[target::BOOTCORE], REQUEST_MS)
+            .await?;
+        StatusResp::parse(&body).map_err(|_| Error::BadResponse)
+    }
+
     /// Hub HELLO, then a short RELAY HELLO to every I2C address but the ROM
     /// loaders' (`rom_addrs`, from the MCU definitions: never probed with
     /// DAGON frames) and one on the UART.
@@ -263,6 +274,152 @@ impl<T: Transport, C: Clock> Host<T, C> {
         st: &NodeState,
         on_event: &mut dyn FnMut(Event),
     ) -> Result<Version, T::Error> {
+        let running = st.hello.active_version;
+        let core = self.update_core(b, node, to, running, on_event).await?;
+        let agent = self.update_agent(b, node, to, on_event).await?;
+        if core || agent {
+            let st = self.status(to).await?;
+            return self.update_app(b, node, to, &st, on_event).await;
+        }
+        self.update_app(b, node, to, st, on_event).await
+    }
+
+    /// The node's recovery agent (the factory slot of a vendor-stage2 MCU)
+    /// from the release, before its app: written while the confirmed app
+    /// runs (the node refuses otherwise), nothing selected or rebooted.
+    /// `true` when it was written.
+    async fn update_agent(
+        &mut self,
+        b: &BundleView<'_>,
+        node: u8,
+        to: Target,
+        on_event: &mut dyn FnMut(Event),
+    ) -> Result<bool, T::Error> {
+        const FACTORY: u8 = 2;
+        let Some(img) = image_of(b, node, image_kind::AGENT, FACTORY) else {
+            return Ok(false);
+        };
+        let raw: &[u8; HEADER_SIZE] = img
+            .get(..HEADER_SIZE)
+            .and_then(|h| h.try_into().ok())
+            .ok_or(Error::Format(dagon_format::FormatError::Truncated))?;
+        let want = dagon_format::header::header_digest16(raw);
+        let st = self.status(to).await?;
+        if st.status.slots[usize::from(FACTORY)].digest16 == want {
+            return Ok(false);
+        }
+        let v = ImageHeader::parse(raw)?.version;
+        let (hdr, body) = img.split_at(HEADER_SIZE);
+        self.emit(on_event, node, phase::TRANSFER, 0, v).await;
+        let xfer = Xfer {
+            tgt: target::AGENT,
+            slot: FACTORY,
+            hdr,
+            body,
+            show: Some((node, v)),
+        };
+        self.transfer(to, &st.hello, xfer, on_event).await?;
+        let after = self.status(to).await?;
+        if after.status.slots[usize::from(FACTORY)].digest16 != want {
+            return Err(Error::DigestMismatch);
+        }
+        self.emit(on_event, node, phase::VERIFY, 100, v).await;
+        Ok(true)
+    }
+
+    /// The node's boot core from the release, before its app (an app may
+    /// need the newer core): when the release has boot core images for the
+    /// node and the running core is none of them, the image for the idle
+    /// core slot goes in, is set pending, the node reboots, and the new
+    /// core must be the confirmed one when the app (`app`, unchanged)
+    /// answers again. `true` when a core was written.
+    async fn update_core(
+        &mut self,
+        b: &BundleView<'_>,
+        node: u8,
+        to: Target,
+        app: Version,
+        on_event: &mut dyn FnMut(Event),
+    ) -> Result<bool, T::Error> {
+        let cores: Vec<&[u8]> = [slot_binding::A, slot_binding::B]
+            .into_iter()
+            .filter_map(|s| image_of(b, node, image_kind::BOOTCORE, s))
+            .collect();
+        if cores.is_empty() {
+            return Ok(false);
+        }
+        let cs = self.boot_core_status(to).await?;
+        let running = cs.slots.get(usize::from(cs.active)).copied();
+        let installed = cores.iter().any(|img| {
+            img.get(..HEADER_SIZE)
+                .and_then(|h| <&[u8; HEADER_SIZE]>::try_from(h).ok())
+                .map(dagon_format::header::header_digest16)
+                .is_some_and(|d| running.is_some_and(|r| r.digest16 == d))
+        });
+        if installed {
+            return Ok(false);
+        }
+        let slot = free_slot(&cs).ok_or(Error::NoImage { node })?;
+        let img = image_of(b, node, image_kind::BOOTCORE, slot).ok_or(Error::NoImage { node })?;
+        let raw: &[u8; HEADER_SIZE] = img
+            .get(..HEADER_SIZE)
+            .and_then(|h| h.try_into().ok())
+            .ok_or(Error::Format(dagon_format::FormatError::Truncated))?;
+        let v = ImageHeader::parse(raw)?.version;
+        let (hdr, body) = img.split_at(HEADER_SIZE);
+        self.emit(on_event, node, phase::TRANSFER, 0, v).await;
+        let hello = self.hello(to).await?;
+        let xfer = Xfer {
+            tgt: target::BOOTCORE,
+            slot,
+            hdr,
+            body,
+            show: Some((node, v)),
+        };
+        self.transfer(to, &hello, xfer, on_event).await?;
+        self.emit(on_event, node, phase::VERIFY, 100, v).await;
+        let mut p = [0u8; 2];
+        SetPending {
+            target: target::BOOTCORE,
+            slot,
+        }
+        .encode(&mut p)
+        .expect("2 bytes");
+        self.call(to, Cmd::SetPending, &p, VERIFY_MS).await?;
+        self.emit(on_event, node, phase::REBOOT, 0, v).await;
+        match self
+            .call(to, Cmd::Reboot, &[reboot_mode::NORMAL], REQUEST_MS)
+            .await
+        {
+            Ok(_) | Err(Error::Timeout | Error::Relay(Status::Timeout)) => {}
+            Err(e) => return Err(e),
+        }
+        self.await_version(to, app).await?;
+        let after = self.boot_core_status(to).await?;
+        if after.confirmed != slot {
+            let back = after.slots.get(usize::from(after.active)).copied();
+            return Err(Error::BootCoreRolledBack {
+                expected: v,
+                running: back.map(|s| s.version).unwrap_or_default(),
+                reason: after.last_reason,
+            });
+        }
+        self.emit(on_event, node, phase::CONFIRM, 100, v).await;
+        Ok(true)
+    }
+
+    /// The node's app from the release into its free APP slot.
+    async fn update_app(
+        &mut self,
+        b: &BundleView<'_>,
+        node: u8,
+        to: Target,
+        st: &NodeState,
+        on_event: &mut dyn FnMut(Event),
+    ) -> Result<Version, T::Error> {
+        if !has_kind(b, node, image_kind::APP) {
+            return Ok(st.hello.active_version);
+        }
         let slot = free_slot(&st.status).ok_or(Error::NoImage { node })?;
         let img = image_for(b, node, slot).ok_or(Error::NoImage { node })?;
         // Unverified releases reach here too: check the length, not assume.
@@ -425,7 +582,8 @@ impl<T: Transport, C: Clock> Host<T, C> {
     /// HELLO (its app, or the factory agent: HELLO mode = agent) gets its
     /// image through the normal transfer. An STM32F401 that does not answer
     /// and whose link has the I2C ROM entry is rewritten through the ROM
-    /// loader: boot core, APP-A and a fresh state log, then its HELLO.
+    /// loader: boot core, APP-A, a fresh state log and stage0 (where the
+    /// MCU has one), then its HELLO.
     pub async fn recover(
         &mut self,
         node: u8,
@@ -459,8 +617,22 @@ impl<T: Transport, C: Clock> Host<T, C> {
             .and_then(|h| h.try_into().ok())
             .ok_or(Error::Format(dagon_format::FormatError::Truncated))?;
         let v = ImageHeader::parse(app_hdr)?.version;
-        let log = crate::rom::initial_log(app_hdr)?;
-        let regions = crate::rom::regions(boot, app, &log, map);
+        let boot_hdr: &[u8; HEADER_SIZE] = boot
+            .get(..HEADER_SIZE)
+            .and_then(|h| h.try_into().ok())
+            .ok_or(Error::Format(dagon_format::FormatError::Truncated))?;
+        let stage0 = match map.stage0 {
+            Some((_, size)) => {
+                let s = a.stage0.ok_or(Error::NoImage { node })?;
+                if s.is_empty() || s.len() > size as usize {
+                    return Err(Error::Format(dagon_format::FormatError::BadField));
+                }
+                Some(s)
+            }
+            None => None,
+        };
+        let log = crate::rom::first_log(boot_hdr, app_hdr, map)?;
+        let regions = crate::rom::regions(boot, app, &log, stage0, map);
         let plan = dagon_romlink::Plan {
             erase: &map.erase,
             regions: &regions,
@@ -666,13 +838,15 @@ fn rom_map<'m>(topo: &TopologyView<'_>, node: u8, roms: &'m [RomMap]) -> Option<
 }
 
 /// What [`Host::recover`] needs: the release, the current topology binary,
-/// the verifying key and, for the ROM path, the signed boot core.
+/// the verifying key and, for the ROM path, the signed boot core and, on an
+/// MCU with a stage0, stage0's bytes.
 #[derive(Clone, Copy, Debug)]
 pub struct RecoverAssets<'a> {
     pub release: &'a [u8],
     pub topology: &'a [u8],
     pub pubkey: &'a [u8; 32],
     pub bootcore: Option<&'a [u8]>,
+    pub stage0: Option<&'a [u8]>,
     /// ROM maps of the MCUs that have a ROM I2C loader (from the Registry).
     pub roms: &'a [RomMap],
 }
@@ -702,6 +876,7 @@ pub fn reason<E>(e: &Error<E>) -> &'static str {
         },
         Error::Timeout | Error::Relay(_) | Error::Transport(_) => "NO ANSWER",
         Error::WrongVersion { .. } => "ROLLED BACK",
+        Error::BootCoreRolledBack { .. } => "BOOT CORE ROLLED BACK",
         Error::DigestMismatch => "E_DIGEST",
         Error::NoImage { .. } => "NO IMAGE",
         _ => "FAILED",
@@ -717,13 +892,18 @@ struct Xfer<'a> {
     show: Option<(u8, Version)>,
 }
 
-/// Nodes with an APP image in the release, filtered by `only`: children by
-/// update order, then the coordinator.
+/// Nodes with an APP or boot core image in the release, filtered by
+/// `only`: children by update order, then the coordinator.
 fn plan(b: &BundleView<'_>, topo: &TopologyView<'_>, only: Option<&[u8]>) -> Vec<u8> {
     let m = b.manifest();
     let mut nodes: Vec<u8> = (0..m.entry_count())
         .map(|i| m.entry(i))
-        .filter(|e| e.image_kind == image_kind::APP)
+        .filter(|e| {
+            matches!(
+                e.image_kind,
+                image_kind::APP | image_kind::BOOTCORE | image_kind::AGENT
+            )
+        })
         .map(|e| e.node_index)
         .filter(|&n| (n as usize) < topo.node_count())
         .filter(|n| only.is_none_or(|o| o.contains(n)))
@@ -745,16 +925,29 @@ fn free_slot(st: &StatusResp) -> Option<u8> {
 
 /// APP image of `node` bound to `slot` (or to any slot).
 fn image_for<'a>(b: &BundleView<'a>, node: u8, slot: u8) -> Option<&'a [u8]> {
+    image_of(b, node, image_kind::APP, slot)
+}
+
+/// Image of `kind` for `node` bound to `slot` (or to any slot).
+fn image_of<'a>(b: &BundleView<'a>, node: u8, kind: u8, slot: u8) -> Option<&'a [u8]> {
     let m = b.manifest();
     (0..b.item_count()).find_map(|i| {
         let it = b.item(i);
         let e = (it.entry_index as usize) < m.entry_count();
         let e = e.then(|| m.entry(it.entry_index as usize))?;
         let fits = e.node_index == node
-            && e.image_kind == image_kind::APP
+            && e.image_kind == kind
             && (e.slot_binding == slot || e.slot_binding == slot_binding::ANY);
         fits.then(|| b.item_bytes(i))
     })
+}
+
+/// The release has an image of `kind` for `node`.
+fn has_kind(b: &BundleView<'_>, node: u8, kind: u8) -> bool {
+    let m = b.manifest();
+    (0..m.entry_count())
+        .map(|i| m.entry(i))
+        .any(|e| e.node_index == node && e.image_kind == kind)
 }
 
 #[cfg(test)]

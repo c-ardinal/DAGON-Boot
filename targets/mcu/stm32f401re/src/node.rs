@@ -103,6 +103,8 @@ pub type SharedFlash = dagon_mcu_common::shared::SharedFlash<F401Flash<'static>>
 // One slot is one erase unit: a store erase is one flash operation, whose
 // worst case the watchdog period covers (checked on the definition).
 const _: () = assert!(layout::SLOTS.slot_len <= crate::ERASE_UNIT);
+const _: () = assert!(layout::CORE_SLOTS[0].1 <= crate::ERASE_UNIT);
+const _: () = assert!(layout::CORE_SLOTS[1].1 <= crate::ERASE_UNIT);
 
 /// Opens the slot store over the state log; returns it with the serving
 /// loop's handle on the flash. Call once.
@@ -111,7 +113,8 @@ pub fn open_store(flash: Peri<'static, FLASH>) -> Result<(Store, SharedFlash), L
     static FLASH_DRIVER: StaticCell<FlashDriver<F401Flash<'static>>> = StaticCell::new();
     let driver = FLASH_DRIVER.init(driver(F401Flash::new(flash)));
     let flash = SharedFlash::new(driver, &layout::FLASH_REGIONS);
-    let store = KindSStore::load(flash, &layout::LOG, layout::SLOTS)?;
+    let store =
+        KindSStore::load(flash, &layout::LOG, layout::SLOTS)?.with_cores(layout::CORE_SLOTS);
     Ok((store, flash))
 }
 

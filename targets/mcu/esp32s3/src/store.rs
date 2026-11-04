@@ -9,6 +9,10 @@
 //! - Otadata keeps no digest, so an erase first takes the slot out of the
 //!   selection: a new image there is only written (not pending, not
 //!   reverted) until its own SET_PENDING.
+//! - The recovery agent (target AGENT, slot factory) goes to the factory
+//!   partition the same way, header last; otadata never names it (the 2nd
+//!   stage starts factory when no OTA slot is valid), so there is nothing
+//!   to withdraw or select.
 
 use crate::layout::{
     app_partition, Partition, DAGON, ERASE_UNIT, SLOT_A, SLOT_B, SLOT_FACTORY, WRITE_UNIT,
@@ -63,9 +67,13 @@ pub struct EspStore<F, O, W> {
     rx: Option<Rx>,
 }
 
+/// The partition a slot of `t` writes: an OTA slot for APP, factory for
+/// AGENT.
 fn ota_slot(t: u8, slot: u8) -> Result<Partition, StoreError> {
     match (t, slot) {
-        (target::APP, SLOT_A | SLOT_B) => app_partition(slot).ok_or(StoreError::Unsupported),
+        (target::APP, SLOT_A | SLOT_B) | (target::AGENT, SLOT_FACTORY) => {
+            app_partition(slot).ok_or(StoreError::Unsupported)
+        }
         _ => Err(StoreError::Unsupported),
     }
 }
@@ -203,7 +211,9 @@ impl<F: Flash, O: Otadata, W: Watchdog> SlotStore for EspStore<F, O, W> {
             return Err(StoreError::Range);
         }
         self.rx = None;
-        self.ota.withdraw(slot)?;
+        if t == target::APP {
+            self.ota.withdraw(slot)?;
+        }
         self.erase_range(header_addr(slot)?, HEADER_SECTOR)?;
         self.erase_range(p.offset, len.div_ceil(ERASE_UNIT) * ERASE_UNIT)?;
         self.rx = Some(Rx {
@@ -306,5 +316,27 @@ impl<F: Flash, O: Otadata, W: Watchdog> SlotStore for EspStore<F, O, W> {
         _: &Transition,
     ) -> Result<(), StoreError> {
         self.ota.confirm()
+    }
+
+    fn write_target_header(
+        &mut self,
+        t: u8,
+        slot: u8,
+        hdr: &[u8; HEADER_SIZE],
+        _: &Transition,
+    ) -> Result<(), StoreError> {
+        ota_slot(t, slot)?;
+        self.rx = None;
+        self.program(header_addr(slot)?, hdr)
+    }
+
+    fn read_target_header(
+        &mut self,
+        t: u8,
+        slot: u8,
+        out: &mut [u8; HEADER_SIZE],
+    ) -> Result<(), StoreError> {
+        ota_slot(t, slot)?;
+        self.read_header(slot, out)
     }
 }

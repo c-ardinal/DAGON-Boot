@@ -37,6 +37,11 @@ pub struct RomMap {
     pub app_a: RomSlot,
     /// APP state log face A.
     pub log_a: u32,
+    /// Where stage0 goes and its region's size, when the MCU has one (it
+    /// is then written too).
+    pub stage0: Option<(u32, u32)>,
+    /// The boot core records share the APP log (face A gets both).
+    pub shared_log: bool,
     /// Flash sectors erased first.
     pub erase: Vec<u16>,
 }
@@ -67,6 +72,9 @@ pub fn rom_maps(reg: &dagon_topology::defs::Registry) -> Vec<RomMap> {
                 bootcore: slot(m, ImageKind::Bootcore)?,
                 app_a: slot(m, ImageKind::App)?,
                 log_a: m.layout.app_log?.faces[0],
+                stage0: m.layout.stage0.map(|r| (r.at, r.size)),
+                shared_log: m.layout.bootcore_log.is_some()
+                    && m.layout.bootcore_log == m.layout.app_log,
                 erase: rom.erase_sectors.clone(),
             })
         })
@@ -79,22 +87,50 @@ pub const INITIAL_LOG_LEN: usize = statelog::FACE_HEADER_SIZE + 2 * statelog::RE
 /// State log face for a fresh install: slot A of the APP provisioned and
 /// confirmed with `app`'s header.
 pub fn initial_log(app_header: &[u8; HEADER_SIZE]) -> Result<[u8; INITIAL_LOG_LEN], FormatError> {
-    let h = ImageHeader::parse(app_header)?;
-    let rec = |k, seq| Record {
-        kind: k,
-        target: statelog::target::APP,
-        slot: slot::A,
-        reason: reason::NONE,
-        seq,
-        version: h.version,
-        digest16: header::header_digest16(app_header),
-    };
+    let face = initial_log_for(&[(statelog::target::APP, app_header)])?;
     let mut out = [0u8; INITIAL_LOG_LEN];
-    let (f, r) = out.split_at_mut(statelog::FACE_HEADER_SIZE);
-    f.copy_from_slice(&FaceHeader { generation: 1 }.to_bytes());
-    r[..statelog::RECORD_SIZE].copy_from_slice(&rec(kind::PROVISION, 1).to_bytes());
-    r[statelog::RECORD_SIZE..].copy_from_slice(&rec(kind::CONFIRMED, 2).to_bytes());
+    out.copy_from_slice(&face);
     Ok(out)
+}
+
+/// State log face for a fresh install holding PROVISION and CONFIRMED for
+/// slot A of each `(target, header)`, in order (one log for several
+/// targets).
+pub fn initial_log_for(images: &[(u8, &[u8; HEADER_SIZE])]) -> Result<Vec<u8>, FormatError> {
+    let mut out = FaceHeader { generation: 1 }.to_bytes().to_vec();
+    let mut seq = 0;
+    for &(target, hdr) in images {
+        let h = ImageHeader::parse(hdr)?;
+        for k in [kind::PROVISION, kind::CONFIRMED] {
+            seq += 1;
+            let r = Record {
+                kind: k,
+                target,
+                slot: slot::A,
+                reason: reason::NONE,
+                seq,
+                version: h.version,
+                digest16: header::header_digest16(hdr),
+            };
+            out.extend_from_slice(&r.to_bytes());
+        }
+    }
+    Ok(out)
+}
+
+/// The state log face `map`'s MCU starts with: the APP records, and the
+/// boot core's first when they share the log.
+pub fn first_log(
+    boot_header: &[u8; HEADER_SIZE],
+    app_header: &[u8; HEADER_SIZE],
+    map: &RomMap,
+) -> Result<Vec<u8>, FormatError> {
+    let app = (statelog::target::APP, app_header);
+    if map.shared_log {
+        initial_log_for(&[(statelog::target::BOOTCORE, boot_header), app])
+    } else {
+        initial_log_for(&[app])
+    }
 }
 
 /// Checks a signed boot core image for `map`'s MCU: signature under
@@ -132,18 +168,30 @@ pub fn check_app_a(img: &[u8], map: &RomMap) -> Result<(), FormatError> {
     Ok(())
 }
 
-/// Bodies first, then headers, then the state log.
-pub fn regions<'a>(boot: &'a [u8], app: &'a [u8], log: &'a [u8], map: &RomMap) -> [Region<'a>; 5] {
+/// Bodies first, then headers, then the state log, then stage0 (where the
+/// MCU has one) last: the reset vector is written only once everything it
+/// starts is in place.
+pub fn regions<'a>(
+    boot: &'a [u8],
+    app: &'a [u8],
+    log: &'a [u8],
+    stage0: Option<&'a [u8]>,
+    map: &RomMap,
+) -> Vec<Region<'a>> {
     let (bh, bb) = boot.split_at(HEADER_SIZE);
     let (ah, ab) = app.split_at(HEADER_SIZE);
     let r = |addr, data| Region { addr, data };
-    [
+    let mut out = vec![
         r(map.bootcore.load, bb),
         r(map.app_a.load, ab),
         r(map.bootcore.header, bh),
         r(map.app_a.header, ah),
         r(map.log_a, log),
-    ]
+    ];
+    if let (Some((at, _)), Some(s)) = (map.stage0, stage0) {
+        out.push(r(at, s));
+    }
+    out
 }
 
 /// The hub's NRST/BOOT0 and raw I2C, with progress mirrored as events and
@@ -282,6 +330,8 @@ mod tests {
             bootcore: slot,
             app_a: slot,
             log_a: 0,
+            stage0: None,
+            shared_log: false,
             erase: alloc::vec![],
         };
         // Header + payload: the whole 128 KiB slot and no more.

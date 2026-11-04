@@ -59,8 +59,8 @@ formats = { image-header = [1], state-log = [1] }
 [[component]]
 name = "boot-stm32f401re"
 version = "0.1.0"
-packages = ["dagon-stm32f401re-bootcore"]
-paths = ["targets/mcu/stm32f401re/bootcore"]
+packages = ["dagon-stm32f401re-stage0", "dagon-stm32f401re-bootcore"]
+paths = ["targets/mcu/stm32f401re/stage0", "targets/mcu/stm32f401re/bootcore"]
 formats = { image-header = [1], state-log = [1] }
 
 [[component]]

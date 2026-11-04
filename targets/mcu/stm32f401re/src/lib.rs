@@ -10,9 +10,12 @@
 //!   [`BoardDef`]) with DAGON's high-priority executor ([`exec`]); logs
 //!   through defmt.
 //! - `conform`: the conformance build's CONF_RUN serving.
+//! - Target only: the boot core trial cell and stage0's watchdog start
+//!   ([`trial`]).
 //! - Linker memory map: an APP slot body by default (slot B with
-//!   `slot-b`), so apps need no build.rs; `image-bootcore` for the boot
-//!   core in `bootcore/`.
+//!   `slot-b`), so apps need no build.rs; `image-stage0` / `image-bootcore`
+//!   for the boot images in `stage0/` and `bootcore/` (the boot core in
+//!   slot B with `slot-b`).
 //!
 //! Board pins, the link's address and extras live in a board package.
 #![no_std]
@@ -22,6 +25,12 @@ pub mod links;
 pub mod mailbox;
 mod store;
 pub use store::KindSStore;
+#[cfg(target_os = "none")]
+pub mod trial;
+
+/// The slot this image is linked for (A, or B with `slot-b`): an app's
+/// APP slot, or the boot core's boot core slot.
+pub const LINKED_SLOT: u8 = if cfg!(feature = "slot-b") { 1 } else { 0 };
 
 #[cfg(feature = "hal")]
 mod clocks;

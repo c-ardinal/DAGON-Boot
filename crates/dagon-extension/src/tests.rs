@@ -206,14 +206,14 @@ fn stm32f401re_boot_map_holds_one_extension_with_two_windows() {
             )
         })
         .collect();
-    // Code at the top of the boot core body (below the trailer), data and
-    // stack below the boot record, windows exactly the 1 KiB blocks.
+    // Code at the top of boot core slot A's body, data and stack below the
+    // boot record, windows exactly the 1 KiB blocks.
     assert_eq!(
         shape,
         [
             (
                 0,
-                0x0800_6000,
+                0x0801_F000,
                 0x1000,
                 0,
                 Access::ReadOnly,
@@ -258,7 +258,7 @@ fn stm32f401re_boot_map_holds_one_extension_with_two_windows() {
             ),
         ]
     );
-    assert_eq!(map.image_flash, (0x0800_0000, 0x6000));
+    assert_eq!(map.image_flash, (0x0801_0200, 0xEE00));
     assert_eq!(map.image_ram, (0x2000_0000, 0x1_6000));
     // The app image gets its own map per slot.
     let app = node::plan(
@@ -647,7 +647,7 @@ fn a_node_set_is_checked_as_a_whole() {
     // Code that would take the whole boot core body is refused.
     let big = manifest(
         &UDS.replace("peripherals = [\"can0\"]", "peripherals = []")
-            .replace("text_bytes = 16384", "text_bytes = 32768"),
+            .replace("text_bytes = 16384", "text_bytes = 65536"),
     )
     .unwrap();
     let e = node::plan(def, Some(board), Image::Bootcore, vec![ext(&big)], &known()).unwrap_err();
@@ -738,7 +738,7 @@ fn linker_fragments_and_the_readable_map_follow_the_plan() {
     let (b, space) = plan.memory[0];
     let x = gen::linker_fragment("n1", def, &plan, b, &space);
     assert!(
-        x.contains("FLASH : ORIGIN = 0x08000000, LENGTH = 0x6000"),
+        x.contains("FLASH : ORIGIN = 0x08010200, LENGTH = 0xee00"),
         "{x}"
     );
     assert!(
@@ -746,7 +746,7 @@ fn linker_fragments_and_the_readable_map_follow_the_plan() {
         "{x}"
     );
     assert!(
-        x.contains("EXT0_TEXT : ORIGIN = 0x08006000, LENGTH = 0x1000"),
+        x.contains("EXT0_TEXT : ORIGIN = 0x0801f000, LENGTH = 0x1000"),
         "{x}"
     );
     assert!(

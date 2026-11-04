@@ -114,6 +114,8 @@ export type Refusal = 'source' | 'key' | 'topology' | 'format';
 export interface Host {
   hello(kind: TargetKind, addr: number): Promise<HelloResp>;
   status(kind: TargetKind, addr: number): Promise<NodeState>;
+  /** STATUS of the boot core slots; rejects when the node keeps none. */
+  bootCoreStatus(kind: TargetKind, addr: number): Promise<StatusResp>;
   discover(): Promise<Discovery>;
   pushTopology(bin: Uint8Array): Promise<void>;
   watch(kind: TargetKind, addr: number): Promise<WatchRound>;
@@ -121,7 +123,7 @@ export interface Host {
   apply(bundle: Uint8Array, topology: Uint8Array, nodes: number[] | null, onEvent: (e: UpdateEvent) => void): Promise<NodeResult[]>;
   confirm(kind: TargetKind, addr: number, force: boolean): Promise<ConfirmResult>;
   /** `dagon recover` of topology node `node`; rejects with a Refusal or dagon-host's reason. */
-  recover(node: number, release: Uint8Array, topology: Uint8Array, bootcore: Uint8Array | null, onEvent: (e: UpdateEvent) => void): Promise<RecoverResult>;
+  recover(node: number, release: Uint8Array, topology: Uint8Array, bootcore: Uint8Array | null, stage0: Uint8Array | null, onEvent: (e: UpdateEvent) => void): Promise<RecoverResult>;
   /** Back to the version in the other slot; resolves to it. */
   rollback(kind: TargetKind, addr: number, node: number, onEvent: (e: UpdateEvent) => void): Promise<number>;
   /** Releases the WASM side; calls still running finish on their own. */
@@ -133,12 +135,13 @@ export function newHost(link: HostLink): Host {
   return {
     hello: (k, a) => h.hello(k, a),
     status: (k, a) => h.status(k, a),
+    bootCoreStatus: (k, a) => h.boot_core_status(k, a),
     discover: () => h.discover(),
     pushTopology: (bin) => h.push_topology(bin),
     watch: (k, a) => h.watch(k, a),
     apply: (b, t, n, on) => h.apply(b, t, n ? Uint8Array.from(n) : undefined, on),
     confirm: (k, a, f) => h.confirm(k, a, f),
-    recover: (n, r, t, b, on) => h.recover(n, r, t, b ?? undefined, on),
+    recover: (n, r, t, b, s, on) => h.recover(n, r, t, b ?? undefined, s ?? undefined, on),
     rollback: (k, a, n, on) => h.rollback(k, a, n, on),
     free: () => h.free(),
   };

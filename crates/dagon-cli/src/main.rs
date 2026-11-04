@@ -91,10 +91,13 @@ Usage:
                                      --force-main)
   dagon build [<id>...]              cargo build each node in [build.<id>] of dagon.toml
                                      into out/build/<id>/app-a.elf (and app-b.elf)
-  dagon deploy [<id>...] [--version <x.y.z>] [--yes] [--port <name>] [--topology <yaml>]
-        [--key <file>]               build, sign both slots, release build and apply in one
+  dagon deploy [<id>...] [--version <x.y.z>] [--yes] [--bootcore] [--port <name>]
+        [--topology <yaml>] [--key <file>]
+                                     build, sign both slots, release build and apply in one
                                      go; version defaults to one patch above the last
-                                     release; lists node -> version and asks first
+                                     release; lists node -> version and asks first;
+                                     --bootcore also builds each node's boot core for its
+                                     boot core slots (the node takes it before its app)
   dagon flash <id> [--dry-run] [--yes] [--probe <vid:pid[:serial]> | --port <port> |
         --drive <path>] [--out <dir>] [--topology <yaml>] [--key <file>]
                                      first write as the node's MCU definition says (UF2

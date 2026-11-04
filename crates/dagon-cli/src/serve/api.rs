@@ -177,6 +177,7 @@ pub fn handle(server: &Arc<Server>, req: &Request) -> Response {
         ("GET", ["release", "latest"]) => release_latest(server),
         ("GET", ["release", id]) => release_get(server, id),
         ("GET", ["bootcore", node]) => bootcore_get(server, node),
+        ("GET", ["stage0", node]) => stage0_get(server, node),
         ("GET", ["layout"]) => layout_get(server),
         ("PUT", ["layout"]) => layout_put(server, req),
         ("POST", ["conform"]) => start(server, req, "conform", job_conform),
@@ -1069,6 +1070,24 @@ fn bootcore_get(server: &Server, node: &str) -> Res {
         let kind = dagon_sign::image::verify_image(b, k).map(|h| h.image_kind);
         kind.is_ok_and(|k| k == image_kind::BOOTCORE)
     })
+}
+
+/// GET /v1/stage0/{node}: stage0's bytes for the ROM path's full rewrite of
+/// an MCU with a stage0, as provision wrote them:
+/// <provision_dir>/<node>/stage0.bin. Stage0 carries no signature; the
+/// host checks it fits the MCU's stage0 region before writing it.
+fn stage0_get(server: &Server, node: &str) -> Res {
+    if !plain(node) {
+        return Err(Response::error(400, "bad node id"));
+    }
+    let cfg = config(server).map_err(|e| Response::error(500, &e))?;
+    let p = cfg
+        .provision_dir()
+        .join(node)
+        .join(crate::commands::STAGE0_FILE);
+    let p = inside(&cfg, &p).map_err(|e| Response::error(403, &e))?;
+    let bytes = std::fs::read(p).map_err(|_| Response::error(404, "no stage0 for this node"))?;
+    Ok(Response::bytes("application/octet-stream", bytes))
 }
 
 /// The layout file beside the 構成: `<topology>.layout.json`.

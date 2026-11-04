@@ -20,7 +20,8 @@ pub const STAGE0_SIZE: u32 = 16 * 1024;
 pub const BOOT2_LEN: u32 = 0x100;
 pub const BL_LOG: [u32; 2] = [xip(0x00_4000), xip(0x00_5000)];
 pub const APP_LOG: [u32; 2] = [xip(0x00_6000), xip(0x00_7000)];
-/// Boot core slots. B is reserved (no boot core self-update).
+/// Boot core slots A and B (the MCU definition's `bootcore` slots): stage0
+/// starts one, the agent writes a new core into the other.
 pub const BL_SLOT: [u32; 2] = [xip(0x00_8000), xip(0x02_8000)];
 pub const BL_SLOT_SIZE: u32 = 128 * 1024;
 pub const APP_SLOT: [u32; 2] = [xip(0x04_8000), xip(0x14_8000)];
@@ -40,6 +41,12 @@ pub const WDT_MS: u32 = 8_000;
 /// RAM every image links against.
 pub const RAM: u32 = 0x2000_0000;
 pub const RAM_LEN: u32 = 256 * 1024;
+
+/// The boot core log for dagon-core (boot core records only).
+pub const BL_LOG_LAYOUT: LogLayout = LogLayout {
+    faces: BL_LOG,
+    face_len: LOG_FACE_SIZE,
+};
 
 /// The app log and slots for dagon-core.
 pub const APP_LOG_LAYOUT: LogLayout = LogLayout {

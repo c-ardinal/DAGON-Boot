@@ -10,15 +10,20 @@ publish = false
 # DAGON_TARGET_TAG names which images this boot stage accepts; its value
 # does not change the code, so the lint uses a neutral one.
 [package.metadata.dagon]
-lint = { features = [""], env = { DAGON_TARGET_TAG = "lint" } }
+lint = { features = ["", "slot-b"], env = { DAGON_TARGET_TAG = "lint" } }
 
 # Standalone: built for thumbv7em only, so it stays out of the host workspace.
 # Its memory.x and verifying key come from dagon-mcu-stm32f401re.
 [workspace]
 
+[features]
+# Linked for boot core slot B (a release carries a core for each slot).
+slot-b = ["dagon-mcu-stm32f401re/slot-b"]
+
 [dependencies]
 dagon-mcu-stm32f401re = { path = "..", default-features = false, features = ["hal", "image-bootcore"] }
 dagon-core = { path = "../../../../crates/dagon-core" }
+dagon-format = { path = "../../../../crates/dagon-format" }
 dagon-port = { path = "../../../../crates/dagon-port" }
 embassy-stm32 = { version = "0.6.0", features = ["stm32f401re"] }
 cortex-m = { version = "0.7", features = ["critical-section-single-core"] }

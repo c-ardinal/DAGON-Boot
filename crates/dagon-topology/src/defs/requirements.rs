@@ -410,10 +410,13 @@ fn regions(m: &McuDef) -> Vec<(String, u32, u32)> {
     if let Some(r) = m.layout.stage0 {
         out.push(("stage0".into(), r.at, r.size));
     }
-    for (name, log) in [
-        ("bootcore_log", m.layout.bootcore_log),
-        ("app_log", m.layout.app_log),
-    ] {
+    // A `bootcore_log` equal to `app_log` is one log holding both targets'
+    // records: its faces are one region each.
+    let core_log = m
+        .layout
+        .bootcore_log
+        .filter(|l| Some(*l) != m.layout.app_log);
+    for (name, log) in [("bootcore_log", core_log), ("app_log", m.layout.app_log)] {
         for (i, face) in log
             .iter()
             .flat_map(|l| l.faces.map(|f| (f, l.face_size)))

@@ -186,6 +186,52 @@ fn panic(_: &core::panic::PanicInfo) -> ! {
     }
 }
 
+/// The boot core trial cell (`dagon_core::bootcore::trial_cell`) in the
+/// watchdog's SCRATCH0 and SCRATCH1: they keep their value through every
+/// reset except power-on and the RUN pin (RP2040 datasheet section 4.7,
+/// "Scratch registers"). The boot ROM uses SCRATCH4-7 only.
+pub mod trial {
+    const SCRATCH: [*mut u32; 2] = [0x4005_800C as *mut u32, 0x4005_8010 as *mut u32];
+
+    pub fn read() -> [u32; 2] {
+        // SAFETY: fixed RP2040 watchdog scratch registers; reading has no
+        // side effect.
+        SCRATCH.map(|r| unsafe { r.read_volatile() })
+    }
+
+    pub fn write(cell: [u32; 2]) {
+        for (r, v) in SCRATCH.into_iter().zip(cell) {
+            // SAFETY: as above; nothing else in DAGON uses SCRATCH0-1.
+            unsafe { r.write_volatile(v) };
+        }
+    }
+
+    const CTRL: *mut u32 = 0x4005_8000 as *mut u32;
+    const LOAD: *mut u32 = 0x4005_8004 as *mut u32;
+    const TICK: *mut u32 = 0x4005_802C as *mut u32;
+    const CTRL_ENABLE: u32 = 1 << 30;
+    const TICK_ENABLE: u32 = 1 << 9;
+    /// clk_ref cycles per tick: the ring oscillator's nominal 6.5 MHz at
+    /// reset, so a tick is about 1 µs (it varies with the chip).
+    const TICK_CYCLES: u32 = 6;
+    const LOAD_MAX: u32 = 0x00FF_FFFF;
+
+    /// Starts the watchdog at its longest period (about 8 s on a nominal
+    /// ring oscillator: the counter runs down twice per tick, erratum
+    /// RP2040-E1) before stage0 jumps to a core on trial, so a core that
+    /// hangs before it takes the watchdog over is reset and its start
+    /// counted.
+    pub fn arm_watchdog() {
+        // SAFETY: fixed RP2040 watchdog registers; the started core takes
+        // the watchdog over (embassy-rp `Watchdog::start`).
+        unsafe {
+            TICK.write_volatile(TICK_ENABLE | TICK_CYCLES);
+            LOAD.write_volatile(LOAD_MAX);
+            CTRL.write_volatile(CTRL_ENABLE);
+        }
+    }
+}
+
 /// Starts the image whose vector table is at XIP address `body`.
 /// Interrupts must not be in use (NVIC enables and pendings are cleared).
 pub fn jump(body: u32) -> ! {

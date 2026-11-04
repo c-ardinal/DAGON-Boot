@@ -1,11 +1,14 @@
-//! APP state log: a pure fold of records into [`LogState`], plus loading the
-//! newest valid face from flash and appending records to it.
+//! State log: a pure fold of records into [`LogState`], plus loading the
+//! newest valid face from flash and appending records to it. A log holds
+//! the records of the APP slots and of the boot core slots; each target is
+//! folded on its own ([`Log::state`], [`Log::core`]), so an MCU keeps both
+//! in one face pair or in two.
 //!
 //! When the face is full or ends in a record failing its CRC (a write cut by
 //! power loss), the next append first compacts: it erases the other face,
 //! copies the folded state there (ROLLBACK for the last reason, SLOT_PENDING,
 //! SNAPSHOT carrying the confirmed slot and the attempts) and writes that
-//! face's header with `generation + 1` last. Until that header is written the
+//! face's header with `generation + 1` last, for each target. Until that header is written the
 //! old face stays the valid one, so a cut compaction is simply redone. The
 //! rolled-back marker of STATUS is not carried over.
 
@@ -35,7 +38,8 @@ impl SlotRef {
     }
 }
 
-/// APP boot state folded from the log, oldest record first.
+/// The boot state of one target's slots folded from the log, oldest record
+/// first.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct LogState {
     pub confirmed: Option<SlotRef>,
@@ -51,10 +55,20 @@ pub struct LogState {
 }
 
 impl LogState {
-    /// Applies one record. Records for other targets and kinds this release
-    /// does not write are ignored.
+    /// Applies one APP record. Records for other targets and kinds this
+    /// release does not write are ignored.
     pub fn apply(self, r: &Record) -> Self {
-        if r.target != target::APP {
+        self.apply_for(target::APP, r)
+    }
+
+    /// Applies one boot core record (`target::BOOTCORE`), as
+    /// [`LogState::apply`].
+    pub fn apply_core(self, r: &Record) -> Self {
+        self.apply_for(target::BOOTCORE, r)
+    }
+
+    fn apply_for(self, t: u8, r: &Record) -> Self {
+        if r.target != t {
             return self;
         }
         let this = SlotRef::of(r);
@@ -181,7 +195,10 @@ impl From<FlashError> for LogError {
 /// The active log face and its folded state.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Log {
+    /// The APP slots.
     pub state: LogState,
+    /// The boot core slots (empty in a log that holds no boot core records).
+    pub core: LogState,
     pub generation: u32,
     layout: LogLayout,
     /// Index of the active face in `layout.faces`.
@@ -210,6 +227,7 @@ impl Log {
         let (face, generation) = best.ok_or(LogError::NoValidFace)?;
         let mut log = Log {
             state: LogState::default(),
+            core: LogState::default(),
             generation,
             layout: *layout,
             face,
@@ -226,7 +244,7 @@ impl Log {
                 break;
             }
             let Ok(r) = Record::parse(&b) else { break };
-            log.state = log.state.apply(&r);
+            log.fold(&r);
             log.next_seq = log.next_seq.max(r.seq.wrapping_add(1));
             addr += RECORD_SIZE as u32;
         }
@@ -242,25 +260,53 @@ impl Log {
         at: SlotRef,
         reason: u8,
     ) -> Result<(), LogError> {
+        self.append_for(flash, target::APP, kind, at, reason)
+    }
+
+    /// Appends one boot core record and folds it into `core`, as
+    /// [`Log::append`].
+    pub fn append_core<F: Flash>(
+        &mut self,
+        flash: &mut F,
+        kind: u8,
+        at: SlotRef,
+        reason: u8,
+    ) -> Result<(), LogError> {
+        self.append_for(flash, target::BOOTCORE, kind, at, reason)
+    }
+
+    fn append_for<F: Flash>(
+        &mut self,
+        flash: &mut F,
+        t: u8,
+        kind: u8,
+        at: SlotRef,
+        reason: u8,
+    ) -> Result<(), LogError> {
         if self.next.is_none() {
             self.compact(flash)?;
         }
         let addr = self.next.ok_or(LogError::Full)?;
-        let r = self.record(kind, at, reason);
+        let r = self.record(t, kind, at, reason);
         flash.write(addr, &r.to_bytes())?;
-        self.state = self.state.apply(&r);
+        self.fold(&r);
         self.advance(addr);
         Ok(())
+    }
+
+    fn fold(&mut self, r: &Record) {
+        self.state = self.state.apply(r);
+        self.core = self.core.apply_core(r);
     }
 
     fn face_end(&self) -> u32 {
         self.layout.faces[self.face] + self.layout.face_len
     }
 
-    fn record(&self, kind: u8, at: SlotRef, reason: u8) -> Record {
+    fn record(&self, t: u8, kind: u8, at: SlotRef, reason: u8) -> Record {
         Record {
             kind,
-            target: target::APP,
+            target: t,
             slot: at.slot,
             reason,
             seq: self.next_seq,
@@ -289,26 +335,29 @@ impl Log {
     }
 
     fn copy_to_other_face<F: Flash>(&mut self, flash: &mut F) -> Result<(), LogError> {
-        let s = self.state;
-        let carry = [
-            s.confirmed
-                .filter(|_| s.last_reason != reason::NONE)
-                .map(|c| (kind::ROLLBACK, c, s.last_reason)),
-            s.pending.map(|p| (kind::SLOT_PENDING, p, reason::NONE)),
-            s.confirmed.map(|c| (kind::SNAPSHOT, c, s.attempts)),
-        ];
+        let carried = [(target::BOOTCORE, self.core), (target::APP, self.state)];
         let generation = self.generation.wrapping_add(1);
         self.face ^= 1;
         let face = self.layout.faces[self.face];
         flash.erase(face, self.layout.face_len)?;
         self.next = Some(face + FACE_HEADER_SIZE as u32);
         self.state = LogState::default();
-        for (kind, at, why) in carry.into_iter().flatten() {
-            let addr = self.next.ok_or(LogError::Full)?;
-            let r = self.record(kind, at, why);
-            flash.write(addr, &r.to_bytes())?;
-            self.state = self.state.apply(&r);
-            self.advance(addr);
+        self.core = LogState::default();
+        for (t, s) in carried {
+            let carry = [
+                s.confirmed
+                    .filter(|_| s.last_reason != reason::NONE)
+                    .map(|c| (kind::ROLLBACK, c, s.last_reason)),
+                s.pending.map(|p| (kind::SLOT_PENDING, p, reason::NONE)),
+                s.confirmed.map(|c| (kind::SNAPSHOT, c, s.attempts)),
+            ];
+            for (kind, at, why) in carry.into_iter().flatten() {
+                let addr = self.next.ok_or(LogError::Full)?;
+                let r = self.record(t, kind, at, why);
+                flash.write(addr, &r.to_bytes())?;
+                self.fold(&r);
+                self.advance(addr);
+            }
         }
         flash.write(face, &FaceHeader { generation }.to_bytes())?;
         self.generation = generation;
@@ -445,6 +494,7 @@ mod tests {
         // Three records to carry (ROLLBACK, SLOT_PENDING, SNAPSHOT), room
         // for two: the copy runs out of space.
         let mut log = Log {
+            core: LogState::default(),
             state: LogState {
                 confirmed: Some(a),
                 pending: Some(b),

@@ -127,44 +127,53 @@ impl Pc {
         StatusResp::parse(&body).unwrap()
     }
 
-    fn chunks(&mut self, cmd: Cmd, data: &[u8], size: usize) -> Status {
-        let mut p = vec![0u8; size + 4];
-        for (i, c) in data.chunks(size).enumerate() {
-            let n = XferChunk {
-                offset: (i * size) as u32,
-                data: c,
-            }
-            .encode(&mut p)
-            .unwrap();
-            let (st, _) = self.call(cmd, &p[..n]);
-            if st != Status::Ok {
-                return st;
-            }
-        }
-        Status::Ok
-    }
-
     /// XFER_BEGIN, header in 128-byte pieces, body in full-size pieces,
     /// XFER_END: the status of the first step that is not OK.
     fn transfer(&mut self, slot: u8, img: &[u8]) -> Status {
+        self.transfer_to(target::APP, slot, img, usize::MAX)
+    }
+
+    /// [`Pc::transfer`] to a slot of `t`, stopping after `requests`
+    /// requests (a power cut between two of them): `Status::Timeout` then.
+    fn transfer_to(&mut self, t: u8, slot: u8, img: &[u8], requests: usize) -> Status {
+        let mut left = requests;
         let mut p = [0u8; 8];
         let n = XferBegin {
-            target: target::APP,
+            target: t,
             slot,
             total_len: img.len() as u32,
             hdr_len: IMAGE_HDR_LEN,
         }
         .encode(&mut p)
         .unwrap();
-        let steps = [
-            self.call(Cmd::XferBegin, &p[..n]).0,
-            self.chunks(Cmd::XferHdr, &img[..HEADER_SIZE], 128),
-            self.chunks(Cmd::XferData, &img[HEADER_SIZE..], MAX - 4),
-        ];
-        if let Some(s) = steps.into_iter().find(|&s| s != Status::Ok) {
-            return s;
+        let mut steps: Vec<(Cmd, Vec<u8>)> = vec![(Cmd::XferBegin, p[..n].to_vec())];
+        for (cmd, part, size) in [
+            (Cmd::XferHdr, &img[..HEADER_SIZE], 128),
+            (Cmd::XferData, &img[HEADER_SIZE..], MAX - 4),
+        ] {
+            for (i, c) in part.chunks(size).enumerate() {
+                let mut b = vec![0u8; c.len() + 4];
+                XferChunk {
+                    offset: (i * size) as u32,
+                    data: c,
+                }
+                .encode(&mut b)
+                .unwrap();
+                steps.push((cmd, b));
+            }
         }
-        self.call(Cmd::XferEnd, &[]).0
+        steps.push((Cmd::XferEnd, Vec::new()));
+        for (cmd, b) in steps {
+            if left == 0 {
+                return Status::Timeout;
+            }
+            left -= 1;
+            let (st, _) = self.call(cmd, &b);
+            if st != Status::Ok {
+                return st;
+            }
+        }
+        Status::Ok
     }
 
     fn set_pending(&mut self, slot: u8) -> Status {
@@ -173,6 +182,123 @@ impl Pc {
 
     fn store(&mut self) -> RefMut<'static, Store> {
         self.store.borrow_mut()
+    }
+}
+
+/// A signed factory recovery agent (kind AGENT, detached header, any slot).
+fn agent_image(minor: u8, body: &[u8], kp: &KeyPair) -> Vec<u8> {
+    let app = image(minor, body, kp);
+    let mut h = ImageHeader::parse(app[..HEADER_SIZE].try_into().unwrap()).unwrap();
+    h.image_kind = image_kind::AGENT;
+    h.load_addr = crate::layout::FACTORY.offset;
+    h.build_flags = build_flags::VERIFY_ENFORCED;
+    h.capabilities = capabilities::SIG_VERIFIER;
+    let msg = [SIGN_DOMAIN, &h.to_bytes()[..SIGNED_LEN]].concat();
+    h.signature = *kp.sk.sign(msg, None);
+    [&h.to_bytes()[..], body].concat()
+}
+
+/// From the factory agent: app 1.0 in A, confirmed and running.
+fn app_confirmed_in_a(kp: &KeyPair) -> Pc {
+    let mut pc = Pc::factory();
+    assert_eq!(
+        pc.transfer(SLOT_A, &image(0, &body(3000, 1), kp)),
+        Status::Ok
+    );
+    assert_eq!(pc.set_pending(SLOT_A), Status::Ok);
+    pc.reboot();
+    assert_eq!(pc.call(Cmd::Confirm, &[target::APP]).0, Status::Ok);
+    pc.reboot();
+    let st = pc.status();
+    assert_eq!((st.active, st.confirmed), (SLOT_A, SLOT_A));
+    pc
+}
+
+/// The recovery agent in the factory partition is written through the
+/// release like the app, by the running app's agent: body first, the
+/// detached header last; it is not selected or confirmed (the 2nd stage
+/// starts factory only when no OTA slot is valid).
+#[test]
+fn the_running_app_writes_a_new_factory_agent() {
+    let kp = keypair();
+    let mut pc = app_confirmed_in_a(&kp);
+    let ag = agent_image(3, &body(5000, 9), &kp);
+    assert_eq!(
+        pc.transfer_to(target::AGENT, SLOT_FACTORY, &ag, usize::MAX),
+        Status::Ok
+    );
+    let st = pc.status();
+    assert_eq!(st.slots[2].state, SlotState::Written);
+    assert_eq!(st.slots[2].version, Version::new(1, 3, 0));
+    assert_eq!((st.active, st.confirmed), (SLOT_A, SLOT_A));
+    let at = crate::layout::FACTORY.offset as usize;
+    assert_eq!(&pc.store().flash.0[at..at + 5000], &ag[HEADER_SIZE..]);
+    let h = crate::store::header_addr(SLOT_FACTORY).unwrap() as usize;
+    assert_eq!(&pc.store().flash.0[h..h + HEADER_SIZE], &ag[..HEADER_SIZE]);
+    assert_eq!(
+        pc.call(Cmd::SetPending, &[target::AGENT, SLOT_FACTORY]).0,
+        Status::Arg,
+        "the factory is never selected through DAGON"
+    );
+    // An app image is not taken as the agent.
+    let app = image(4, &body(5000, 9), &kp);
+    assert_eq!(
+        pc.transfer_to(target::AGENT, SLOT_FACTORY, &app, usize::MAX),
+        Status::Compat
+    );
+}
+
+/// Never without a bootable recovery image: the factory is written only
+/// while a confirmed app runs from an OTA slot (that app's agent is the
+/// way back if the write is cut), never while factory itself runs or is
+/// the trial's fallback.
+#[test]
+fn the_factory_is_written_only_under_a_confirmed_app() {
+    let kp = keypair();
+    let ag = agent_image(3, &body(2000, 9), &kp);
+    let mut pc = Pc::factory();
+    assert_eq!(
+        pc.transfer_to(target::AGENT, SLOT_FACTORY, &ag, usize::MAX),
+        Status::State,
+        "factory runs"
+    );
+    assert_eq!(
+        pc.transfer(SLOT_A, &image(0, &body(3000, 1), &kp)),
+        Status::Ok
+    );
+    assert_eq!(pc.set_pending(SLOT_A), Status::Ok);
+    pc.reboot();
+    assert_eq!(pc.status().confirmed, SLOT_FACTORY);
+    assert_eq!(
+        pc.transfer_to(target::AGENT, SLOT_FACTORY, &ag, usize::MAX),
+        Status::State,
+        "on trial, factory is the fallback"
+    );
+    assert_eq!(pc.status().slots[2].state, SlotState::Empty);
+}
+
+/// A power cut between any two requests of the factory write: the app
+/// still starts (its agent answers), the factory holds no image a reader
+/// takes as complete, and the write goes through when repeated.
+#[test]
+fn a_cut_factory_write_keeps_the_app_and_can_be_repeated() {
+    let kp = keypair();
+    let ag = agent_image(3, &body(5000, 9), &kp);
+    let steps = 1 + HEADER_SIZE.div_ceil(128) + 5000usize.div_ceil(MAX - 4) + 1;
+    for cut in 0..steps {
+        let mut pc = app_confirmed_in_a(&kp);
+        let first = pc.transfer_to(target::AGENT, SLOT_FACTORY, &ag, cut);
+        assert_eq!(first, Status::Timeout, "cut {cut}");
+        pc.reboot();
+        let st = pc.status();
+        assert_eq!((st.active, st.confirmed), (SLOT_A, SLOT_A), "cut {cut}");
+        assert_eq!(st.slots[2].state, SlotState::Empty, "cut {cut}");
+        assert_eq!(
+            pc.transfer_to(target::AGENT, SLOT_FACTORY, &ag, usize::MAX),
+            Status::Ok,
+            "cut {cut}: repeat"
+        );
+        assert_eq!(pc.status().slots[2].version, Version::new(1, 3, 0));
     }
 }
 

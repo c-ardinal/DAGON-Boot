@@ -381,8 +381,12 @@ pub(crate) fn node_mcu<'r>(
         .ok_or_else(|| format!("no MCU definition '{}' ('{node}')", n.mcu))
 }
 
+/// stage0's bytes in a node's provision folder (an MCU with a stage0).
+pub(crate) const STAGE0_FILE: &str = "stage0.bin";
+
 /// Signs `inputs` for `node` and writes the first-install files into `dir`
-/// (bootcore.img, app-a.img, then flash.bin and commands.txt or rescue.uf2).
+/// (bootcore.img, app-a.img, stage0.bin where the MCU has a stage0, then
+/// flash.bin and commands.txt or rescue.uf2).
 pub(crate) fn provision_files(
     reg: &Registry,
     t: &Topology,
@@ -455,6 +459,12 @@ pub(crate) fn provision_files(
     describe(&app_path, &app);
 
     let stage0 = stage0_payload(mcu, node, inputs)?;
+    if let Some(s) = &stage0 {
+        // The ROM path's full rewrite (`dagon recover`) writes it again.
+        let p = dir.join(STAGE0_FILE);
+        write_file(&p, s)?;
+        println!("{}: {} bytes", p.display(), s.len());
+    }
     let file = provision::first_install_file(
         mcu,
         stage0.as_deref(),

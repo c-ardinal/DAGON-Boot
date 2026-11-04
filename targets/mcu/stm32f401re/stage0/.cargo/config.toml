@@ -1,0 +1,6 @@
+[build]
+target = "thumbv7em-none-eabihf"
+
+[target.thumbv7em-none-eabihf]
+# Compact SHA-256 rounds, as in the boot core.
+rustflags = ["-C", "link-arg=-Tlink.x", "--cfg", 'sha2_backend_soft="compact"']

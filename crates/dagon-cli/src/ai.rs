@@ -12,9 +12,9 @@ use serde_json::{json, Value};
 
 /// The API key is read from here only; it is never printed, logged or written.
 pub(crate) const KEY_ENV: &str = "ANTHROPIC_API_KEY";
-const MODEL_ENV: &str = "DAGON_AI_MODEL";
-const DEFAULT_MODEL: &str = "claude-opus-5-5";
-const API_URL: &str = "https://api.anthropic.com";
+pub(crate) const MODEL_ENV: &str = "DAGON_AI_MODEL";
+pub(crate) const DEFAULT_MODEL: &str = "claude-opus-5-5";
+pub(crate) const API_URL: &str = "https://api.anthropic.com";
 const API_VERSION: &str = "2023-06-01";
 const MAX_TOKENS: u32 = 16_000;
 /// Model calls per run, counting question rounds and fix rounds.
@@ -40,8 +40,8 @@ checker report (JSON) of your YAML. Fix every reported error and submit the whol
 
 Always reply by calling `submit_topology`.";
 
-const SCHEMA_RS: &str = include_str!("../../dagon-topology/src/schema.rs");
-const CHECK_RS: &str = include_str!("../../dagon-topology/src/check.rs");
+pub(crate) const SCHEMA_RS: &str = include_str!("../../dagon-topology/src/schema.rs");
+pub(crate) const CHECK_RS: &str = include_str!("../../dagon-topology/src/check.rs");
 const EXAMPLE_YAML: &str = include_str!("../../../topology/desk-demo.yaml");
 
 struct Args {
@@ -161,7 +161,7 @@ fn parse_args(args: &[&str], env_model: Option<String>) -> Result<Args, String> 
     Ok(a)
 }
 
-fn api_key(v: Result<String, std::env::VarError>) -> Result<String, String> {
+pub(crate) fn api_key(v: Result<String, std::env::VarError>) -> Result<String, String> {
     match v {
         Ok(k) if !k.trim().is_empty() => Ok(k.trim().to_string()),
         _ => Err(format!(
@@ -179,7 +179,7 @@ struct Outcome {
     rounds: usize,
 }
 
-type Api<'a> = dyn FnMut(&Value) -> Result<Value, String> + 'a;
+pub(crate) type Api<'a> = dyn FnMut(&Value) -> Result<Value, String> + 'a;
 pub(crate) type Ask<'a> = dyn FnMut(&[String]) -> Result<Vec<String>, String> + 'a;
 
 /// Model loop: draft, ask for unknowns, check, feed errors back, until the
@@ -249,7 +249,7 @@ fn generate(
 /// (doctor commands and hints, file names, comments) is ever sent.
 /// A project's own words were made safe when its definitions loaded
 /// (`page_safe`, else `project-text`; identifiers must be plain).
-fn board_table(reg: &Registry) -> String {
+pub(crate) fn board_table(reg: &Registry) -> String {
     let mcus: Vec<Value> = reg.mcus().iter().map(mcu_facts).collect();
     let boards: Vec<Value> = reg.boards().iter().map(board_facts).collect();
     serde_json::to_string_pretty(&json!({ "mcus": mcus, "boards": boards }))
@@ -401,8 +401,28 @@ fn tool_call(resp: &Value) -> Result<(String, String, Vec<String>), String> {
 }
 
 fn post_messages(base: &str, key: &str, body: &Value) -> Result<Value, String> {
+    post_messages_within(base, key, body, HTTP_TIMEOUT)
+}
+
+/// The error of a model call that did not finish within its time.
+pub(crate) const TIMED_OUT: &str = "DAGON did not answer in time";
+
+fn agent_error(e: ureq::Error, what: &str) -> String {
+    match e {
+        ureq::Error::Timeout(_) => TIMED_OUT.into(),
+        e => format!("{what}: {e}"),
+    }
+}
+
+/// One Messages API call that gives up after `timeout`.
+pub(crate) fn post_messages_within(
+    base: &str,
+    key: &str,
+    body: &Value,
+    timeout: Duration,
+) -> Result<Value, String> {
     let agent: ureq::Agent = ureq::Agent::config_builder()
-        .timeout_global(Some(HTTP_TIMEOUT))
+        .timeout_global(Some(timeout))
         .http_status_as_error(false)
         // A redirect would carry x-api-key to another host: never follow one.
         .max_redirects(0)
@@ -415,7 +435,7 @@ fn post_messages(base: &str, key: &str, body: &Value) -> Result<Value, String> {
         .header("anthropic-version", API_VERSION)
         .header("content-type", "application/json")
         .send(body.to_string())
-        .map_err(|e| format!("DAGON could not reach its agent: {e}"))?;
+        .map_err(|e| agent_error(e, "DAGON could not reach its agent"))?;
     let status = resp.status();
     if status.is_redirection() {
         return Err(format!(
@@ -425,7 +445,7 @@ fn post_messages(base: &str, key: &str, body: &Value) -> Result<Value, String> {
     let text = resp
         .body_mut()
         .read_to_string()
-        .map_err(|e| format!("cannot read the agent's answer: {e}"))?;
+        .map_err(|e| agent_error(e, "cannot read the agent's answer"))?;
     let v: Value = serde_json::from_str(&text)
         .map_err(|e| format!("the agent answered with non-JSON (HTTP {status}): {e}"))?;
     if !status.is_success() {

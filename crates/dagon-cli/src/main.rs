@@ -2,6 +2,7 @@
 
 mod agent;
 mod ai;
+mod ask;
 mod commands;
 mod config;
 mod conform;
@@ -111,6 +112,8 @@ Usage:
                                      what is sent and asks your consent once; the key
                                      stays in $ANTHROPIC_API_KEY
   dagon ai unlink                    unlink DAGON and withdraw the consent
+  dagon ai ask <question>            ask DAGON about the topology of ./dagon.toml; a
+                                     proposed change is shown as a diff, never applied
   dagon ai topology [--in <text>] [--out <yaml>] [--model <id>]
                                      board description (file or stdin) to topology YAML
                                      by DAGON, checked to 0 errors (needs dagon ai link)
@@ -162,6 +165,7 @@ fn main() -> ExitCode {
         ["conform", rest @ ..] => run(conform::command(rest)),
         ["sim", "run", rest @ ..] => run(simrun::run(rest)),
         ["ai", "topology", rest @ ..] => run(ai::topology(rest)),
+        ["ai", "ask", rest @ ..] => run(ask::command(rest)),
         ["ai", "link", rest @ ..] => run(agent::link_command(rest)),
         ["ai", "unlink", rest @ ..] => run(agent::unlink_command(rest)),
         _ => usage_error("unknown command"),

@@ -15,6 +15,7 @@ import argparse
 import codecs
 import contextlib
 import datetime as dt
+import hashlib
 import json
 import re
 import shutil
@@ -144,7 +145,9 @@ class Run:
         self.nodes = desk["nodes"]
         self.coord = desk["coordinator"]
         self.project = Path(a.project).resolve()
-        self.dagon = str(Path(a.dagon).resolve())
+        # The CLI as an argv prefix (the selftest puts a fake one here).
+        self.dagon = getattr(a, "dagon_argv", None) or [str(Path(a.dagon).resolve())]
+        self.port_identity = getattr(a, "port_identity", port_identity)
         self.key = a.key  # path only; never opened here
         self.port = a.port
         stamp = dt.datetime.now().strftime("%Y%m%d-%H%M%S")
@@ -155,7 +158,9 @@ class Run:
         self.results = []
         self.identity = None
         self.start = None
-        self.good = None  # (release copy, version) last applied to every node
+        self.good = None  # (release copy, version, sha256) last applied to every node
+        self.start_state = None  # every node's status when the run began
+        self.wrote = False  # a write command has been started
 
     # -- running the CLI ----------------------------------------------------
 
@@ -167,7 +172,7 @@ class Run:
         reaches pct. Returns (rc, text, cmd, log)."""
         self.n += 1
         log = self.out / f"{self.n:03d}-{name}.log"
-        cmd = [self.dagon, *args]
+        cmd = [*self.dagon, *args]
         if port:
             cmd += ["--port", self.port]
         if config is not False:  # key gen, release build of a test key: no project config
@@ -219,7 +224,7 @@ class Run:
     def check_identity(self, label):
         """The pinned port is still the same hub: PnP id (USB VID/PID, position)
         and the coordinator's MCU id as at the start."""
-        pnp = port_identity(self.port)
+        pnp = self.port_identity(self.port)
         st = self.status(f"{label}-identity")
         ident = {"pnp": pnp, "mcu": st[self.coord] and st[self.coord]["mcu"]}
         if self.identity is None:
@@ -282,25 +287,34 @@ class Run:
             return self.refused(name, s, before)
         if kind == "rollback":
             node = s["node"]
-            other = before[node]["slots"]["AB"[1 - before[node]["active"]]]
-            # dagon rollback asks nothing: check what it will go back to first.
-            if other["state"] not in ("Confirmed", "Written"):
-                raise Fail(f"{node}: other slot is {other}; nothing to roll back to")
-            rc, _, cmd, log = self.cli(["rollback", "--node", node], name)
-            st = self.status(f"{name}-after")
-            expect(rc == 0, f"rollback rc={rc}")
-            check_on(st, node, other["version"], flipped_from=before[node]["active"])
-            unchanged(before, st, [k for k in self.nodes if k != node])
-            return cmd, rc, log, st, f"{node} back on {other['version']}"
+            want = rollback_target(before[node])
+            if want is None:
+                raise Fail(f"{node}: other slot holds no confirmed version; nothing to roll back to")
+            rc, cmd, log, st = self.rollback(node, before, name)
+            return cmd, rc, log, st, f"{node} back on {want}"
         if kind == "recover":
             node, v = s["node"], s["of"]
             dgb = self.project / "out" / "deploy" / f"v{v}.dgb"
             expect(dgb.is_file(), f"no release {dgb}")
+            self.wrote = True
             rc, _, cmd, log = self.cli(["recover", node, "--release", str(dgb)], name)
             expect(rc == 0, f"recover rc={rc}")
             st = self.wait_settled({node: v}, f"{name}-after")
             return cmd, rc, log, st, ""
         raise Fail(f"unknown step kind {kind}")
+
+    def rollback(self, node, before, name):
+        """dagon rollback asks nothing: the caller has checked the other slot
+        (rollback_target). Checks the node is on that version, confirmed, slot
+        flipped, others unchanged."""
+        want = rollback_target(before[node])
+        self.wrote = True
+        rc, _, cmd, log = self.cli(["rollback", "--node", node], name)
+        st = self.status(f"{name}-after")
+        expect(rc == 0, f"rollback rc={rc}")
+        check_on(st, node, want, flipped_from=before[node]["active"])
+        unchanged(before, st, [k for k in self.nodes if k != node])
+        return rc, cmd, log, st
 
     def deploy(self, name, s, before):
         nodes = s.get("nodes", self.nodes)
@@ -310,6 +324,7 @@ class Run:
         inter = (nodes[0], s["interrupt_at"]) if "interrupt_at" in s else None
         release = self.project / "out" / "deploy" / f"v{v}.dgb"
         args = ["deploy", *s.get("nodes", []), "--version", v, "--key", self.key]
+        self.wrote = True
         rc, text, cmd, log = self.cli(args, name, config=cfg, plan=(v, nodes, release),
                                       interrupt=inter)
         if mode == "ok":
@@ -321,7 +336,7 @@ class Run:
             if sorted(nodes) == sorted(self.nodes):
                 good = self.out / f"known-good-v{v}.dgb"
                 shutil.copyfile(release, good)
-                self.good = (good, v)
+                self.good = (good, v, sha256(good))
             return cmd, rc, log, st, ""
         if mode == "rolled-back":
             expect(rc != 0, "deploy of a failing self-check image succeeded")
@@ -384,22 +399,55 @@ class Run:
     # -- restore after a failure ---------------------------------------------
 
     def restore(self):
-        """Waits out trials, then applies the last release that reached every
-        node (none yet: every node must be back on a confirmed version by
-        itself), and checks all are confirmed. Returns the restore record."""
+        """After a failure: wait out trials (reads only), check the port is
+        still the same hub (else write nothing), then bring every node back
+        to a known-good confirmed version: the last release this run applied
+        to every node (only the recorded copy, unaltered), else each node's
+        version at the start of the run (dagon rollback where the other slot
+        holds it). Verifies every version. Returns the restore record."""
         rec = {"time": now(), "release": self.good and str(self.good[0])}
+        if not self.wrote:
+            return rec | {"result": "ok", "note": "nothing written; nothing to restore",
+                          "status": self.last_status()}
         try:
             st = self.wait_settled({k: None for k in self.nodes}, "restore-wait")
+            self.check_identity("restore")
             if self.good:
-                dgb, v = self.good
-                rc, _, cmd, log = self.cli(["apply", str(dgb)], "restore-apply")
-                rec |= {"command": cmd, "rc": rc, "log": log.name}
-                expect(rc == 0, f"restore apply rc={rc}")
-                st = self.wait_settled({k: v for k in self.nodes}, "restore-after")
+                st = self.restore_release(rec)
+            else:
+                st = self.restore_start(rec, st)
             rec |= {"result": "ok", "status": st}
         except Exception as e:  # noqa: BLE001 - every failure is reported
             rec |= {"result": f"FAILED: {e}", "status": self.last_status()}
         return rec
+
+    def restore_release(self, rec):
+        dgb, v, digest = self.good
+        expect(sha256(dgb) == digest, f"{dgb} changed since it was applied; not applied")
+        rc, _, cmd, log = self.cli(["apply", str(dgb)], "restore-apply")
+        rec |= {"command": cmd, "rc": rc, "log": log.name}
+        expect(rc == 0, f"restore apply rc={rc}")
+        return self.wait_settled({k: v for k in self.nodes}, "restore-after")
+
+    def restore_start(self, rec, st):
+        start = {k: self.start_state[k]["version"] for k in self.nodes}
+        plan = []
+        for k in self.nodes:
+            if st[k]["version"] == start[k]:
+                continue
+            if rollback_target(st[k]) != start[k]:
+                raise Fail(f"{k}: on {st[k]['version']}, start version {start[k]} is not in "
+                           "its other confirmed slot; cannot restore")
+            plan.append(k)
+        rec["rollbacks"] = plan
+        for k in plan:  # every node checked before the first write
+            before = self.status(f"restore-{k}-before")
+            self.rollback(k, before, f"restore-rollback-{k}")
+        st = self.status("restore-after")
+        bad = {k: core(st[k]) for k in self.nodes
+               if not settled(st[k]) or st[k]["version"] != start[k]}
+        expect(not bad, f"not back on the start versions {start}: {bad}")
+        return st
 
     def last_status(self):
         try:
@@ -414,6 +462,7 @@ class Run:
         print(f"logs: {self.out}")
         ok = True
         try:
+            self.start_state = self.check_identity("run-start")
             for sc in scenarios:
                 verdict, i = "PASS", None
                 try:
@@ -430,12 +479,10 @@ class Run:
                 self.results.append({"id": sc["id"], "title": sc["title"], "result": verdict})
                 if not ok:
                     break
-        except BaseException:
+        except BaseException as e:  # noqa: BLE001 - Ctrl-C too ends in a restore
             ok = False
-            raise
-        finally:
-            self.exit = self.finish(ok)
-        return self.exit
+            self.results.append({"id": "-", "title": "run", "result": f"STOPPED: {e!r}"})
+        return self.finish(ok)
 
     def finish(self, ok):
         """Restores after a failure, writes results.json; the exit code."""
@@ -445,7 +492,8 @@ class Run:
             restore = self.restore()
         final = restore["status"] if restore else self.status("final")
         (self.out / "results.json").write_text(json.dumps(
-            {"port": self.port, "hub_identity": self.identity, "results": self.results,
+            {"port": self.port, "hub_identity": self.identity, "start_state": self.start_state,
+             "results": self.results,
              "restore": restore, "final_status": final}, indent=2, ensure_ascii=False),
             encoding="utf-8")
         print("\n".join(f"{r['id']:<16} {r['result']}" for r in self.results))
@@ -456,6 +504,17 @@ class Run:
                       f"release. Exact state:\n{json.dumps(final, indent=2)}")
                 return 2
         return 0 if ok else 1
+
+
+def rollback_target(n):
+    """Version `dagon rollback` returns `n` to: its other slot when that holds
+    a confirmed version (Confirmed or Written), else None."""
+    other = n["slots"]["AB"[1 - n["active"]]]
+    return other["version"] if other["state"] in ("Confirmed", "Written") else None
+
+
+def sha256(path):
+    return hashlib.sha256(Path(path).read_bytes()).hexdigest()
 
 
 def show(n):
@@ -575,6 +634,7 @@ def selftest():
     selftest_tamper()
     selftest_plan()
     selftest_select()
+    selftest_restore()
     with throwaway_dir() as d:
         (d / "k").mkdir()
         (d / "k" / "dagon-signing.key").write_text("x")
@@ -630,7 +690,122 @@ def selftest_select():
             pass
 
 
+# -- a fake dagon for the restore selftests ------------------------------------
+
+
+def fake_dagon(argv):
+    """`hwt.py _fake-dagon <state.json> <dagon args>`: status, rollback and
+    apply over a JSON desk; every call is logged in the state's `calls`."""
+    path, args = Path(argv[0]), [a for a in argv[1:]]
+    st = json.loads(path.read_text(encoding="utf-8"))
+    st["calls"].append(args[0])
+    nodes = st["nodes"]
+    if args[0] == "status":
+        for k, n in nodes.items():
+            slots = ", ".join(f"{s}:{n['slots'][s][0]} {n['slots'][s][1]}" for s in "AB")
+            print(f"{'hub' if k == st['coordinator'] else k}: version {n['version']}, "
+                  f"mcu {st['mcu']}, active {n['active']}, confirmed {n['active']}, "
+                  f"attempts 0, last reason 0, [{slots}, F:Empty 0.0.0]")
+    elif args[0] == "rollback":
+        n = nodes[args[args.index("--node") + 1]]
+        other = 1 - n["active"]
+        n["slots"]["AB"[n["active"]]][0] = "Written"
+        n["slots"]["AB"[other]][0] = "Confirmed"
+        n["active"], n["version"] = other, n["slots"]["AB"[other]][1]
+    elif args[0] == "apply":
+        v = json.loads(Path(args[1]).read_text(encoding="utf-8"))["version"]
+        for n in nodes.values():
+            free = 1 - n["active"]
+            n["slots"]["AB"[n["active"]]][0] = "Written"
+            n["slots"]["AB"[free]] = ["Confirmed", v]
+            n["active"], n["version"] = free, v
+    path.write_text(json.dumps(st), encoding="utf-8")
+    return 0
+
+
+def selftest_restore():
+    """Both restore holes against the fake CLI: back to the start versions
+    by rollback when no release reached every node; nothing written when the
+    hub's identity changed, the known-good copy changed, or the start
+    version is out of reach."""
+    desk = {"nodes": ["seg", "hub"], "coordinator": "hub", "hub_usb": "VID_C0DE",
+            "status_tries": 1, "poll_s": 0, "settle_timeout_s": 0}
+
+    def node(v, other=("Written", "1.0.0")):
+        return {"version": v, "active": 0, "slots": {"A": ["Confirmed", v], "B": list(other)}}
+
+    with tempfile.TemporaryDirectory() as tmp:
+        tmp = Path(tmp)
+        state = tmp / "state.json"
+        ident = {"pnp": "USB\\VID_C0DE&PID_CAFE\\1"}
+
+        def fresh():
+            state.write_text(json.dumps({"coordinator": "hub", "mcu": "0x0001", "calls": [],
+                                         "nodes": {"seg": node("2.0.1"), "hub": node("2.0.1")}}))
+            a = argparse.Namespace(project=tmp, dagon=None, key="k", port="COMX", out=tmp / "o",
+                                   dagon_argv=[sys.executable, __file__, "_fake-dagon", str(state)],
+                                   port_identity=lambda port: ident["pnp"])
+            r = Run(a, desk)
+            r.start_state = r.check_identity("start")
+            r.wrote = True
+            return r
+
+        def edit(f):
+            st = json.loads(state.read_text())
+            f(st)
+            st["calls"] = []
+            state.write_text(json.dumps(st))
+
+        def writes():
+            return [c for c in json.loads(state.read_text())["calls"] if c != "status"]
+
+        def partial(st):  # seg took 2.0.5 before the run failed
+            st["nodes"]["seg"] = {"version": "2.0.5", "active": 1,
+                                  "slots": {"A": ["Written", "2.0.1"], "B": ["Confirmed", "2.0.5"]}}
+
+        r = fresh()
+        edit(partial)
+        rec = r.restore()
+        assert rec["result"] == "ok" and rec["rollbacks"] == ["seg"], rec
+        assert writes() == ["rollback"] and rec["status"]["seg"]["version"] == "2.0.1"
+
+        r = fresh()
+        edit(lambda st: (partial(st), st["nodes"]["seg"]["slots"]["A"].__setitem__(0, "Reverted")))
+        rec = r.restore()
+        assert rec["result"].startswith("FAILED") and writes() == [], rec
+        r.results = []
+        assert r.finish(False) == 2
+
+        r = fresh()
+        good = tmp / "good.dgb"
+        good.write_text(json.dumps({"version": "2.0.9"}))
+        r.good = (good, "2.0.9", sha256(good))
+        edit(partial)
+        ident["pnp"] = "USB\\VID_C0DE&PID_CAFE\\2"
+        rec = r.restore()
+        assert "identity" in rec["result"] and writes() == [], rec
+        ident["pnp"] = "USB\\VID_C0DE&PID_CAFE\\1"
+
+        r = fresh()
+        r.good = (good, "2.0.9", sha256(good))
+        good.write_text(json.dumps({"version": "6.6.6"}))
+        rec = r.restore()
+        assert "changed" in rec["result"] and writes() == [], rec
+
+        r = fresh()
+        r.good = (good, "6.6.6", sha256(good))
+        rec = r.restore()
+        assert rec["result"] == "ok" and writes() == ["apply"], rec
+        assert all(n["version"] == "6.6.6" for n in rec["status"].values())
+
+        r = fresh()
+        r.wrote = False
+        assert r.restore()["note"].startswith("nothing written") and writes() == []
+
+
 def main():
+    if sys.argv[1:2] == ["_fake-dagon"]:
+        return fake_dagon(sys.argv[2:])
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawTextHelpFormatter)
     sub = ap.add_subparsers(dest="cmd", required=True)
     s = sub.add_parser("sync")

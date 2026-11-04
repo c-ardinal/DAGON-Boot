@@ -55,11 +55,19 @@ python samples/desk-test/hwt.py selftest
 - The throwaway key of the foreign-key scenario is made in a temporary
   folder and deleted as soon as its release is built; only its key_id is
   recorded.
-- On any failure the run stops and restores: it waits out trials, applies
-  the last release that reached every node in this run (kept as
-  `known-good-v<version>.dgb`), and checks every node is confirmed on it
-  (with none yet, every node must be back on a confirmed version by
-  itself). A failed restore exits with code 2 and prints the exact state.
+- The status of every node at the start of the run is recorded
+  (`start_state` in results.json).
+- On any failure (Ctrl-C included) the run stops and restores: it waits
+  out trials (reads only), checks the port is still the same hub (if not,
+  it writes nothing), then
+  - applies the last release that reached every node in this run (only
+    the recorded copy `known-good-v<version>.dgb`, unchanged since: its
+    SHA-256 is checked) and checks every node is confirmed on it; or,
+  - with no such release yet, rolls each changed node back to its start
+    version with `dagon rollback` (only when its other slot holds that
+    version, all checked before the first write) and checks every node is
+    on its start version, confirmed.
+  A failed restore exits with code 2 and prints the exact state.
 
 ## Output
 

@@ -251,9 +251,14 @@ pub fn command(args: &[&str]) -> Result<(), String> {
         .get("images")
         .map_or_else(|| cfg.base.join(CONFORM_DIR).join(node), PathBuf::from);
     let key = load_key(o.get("key"))?;
-    let out = match o.get("out") {
-        Some(p) => crate::genfs::Out::User(PathBuf::from(p)),
-        None => crate::genfs::Out::Work(crate::genfs::Rel::new(format!("{CONFORM_DIR}/{node}"))?),
+    // Results go to --out, else next to the images (--images), else to
+    // out/conform/<node> in the work area.
+    let out = match (o.get("out"), o.get("images")) {
+        (Some(p), _) => crate::genfs::Out::User(PathBuf::from(p)),
+        (None, Some(_)) => crate::genfs::Out::of(&cfg.base, &dir)?,
+        (None, None) => {
+            crate::genfs::Out::Work(crate::genfs::Rel::new(format!("{CONFORM_DIR}/{node}"))?)
+        }
     };
     let report = conform_files(node, to, &dir, &out, &cfg.base, &key, o.get("port"))?;
     for c in CTS {

@@ -61,9 +61,11 @@ Usage:
         [--topology <yaml>] [--key <file>]
                                      the 12 conformance tests through the hub (or with
                                      --usb on a node plugged in directly); writes
-                                     result.json and report.html. <dir> holds good-a.img,
+                                     result.json and report.html into --out, else the
+                                     --images folder. The images folder holds good-a.img,
                                      good-b.img, no-confirm-a.img, no-confirm-b.img
-                                     (default out/conform/<id>)
+                                     (default for both: out/conform/<id> next to
+                                     dagon.toml)
   dagon topo push [<yaml>] [--port <name>]
                                      send the topology canonical binary to the hub
   dagon recover <node> [--release <dgb>] [--bootcore <img>] [--port <name>]

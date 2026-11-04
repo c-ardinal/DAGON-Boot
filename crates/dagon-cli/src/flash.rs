@@ -1144,6 +1144,34 @@ mod tests {
     }
 
     #[test]
+    fn provision_files_go_to_a_provision_folder_outside_the_work_area() {
+        let (mut cfg, t) = area("outside");
+        let shared = cfg
+            .base
+            .with_file_name(format!("dagon-flash-shared-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&shared);
+        // As Config::load leaves `provision_dir = "../dagon-flash-shared-<pid>"`.
+        cfg.provision_dir = Some(crate::config::lexical(
+            &cfg.base.join("..").join(shared.file_name().unwrap()),
+        ));
+        let out = cfg.provision_dir().join("seg");
+        provision_files(
+            Registry::builtin(),
+            &t,
+            "seg",
+            &built(&cfg, false),
+            &out,
+            &key(),
+            &cfg.base,
+        )
+        .unwrap();
+        assert!(shared.join("seg/flash.bin").is_file());
+        assert!(shared.join("seg/commands.txt").is_file());
+        let _ = std::fs::remove_dir_all(&shared);
+        let _ = std::fs::remove_dir_all(&cfg.base);
+    }
+
+    #[test]
     fn prebuilt_provision_files_are_never_used() {
         let (mut cfg, t) = area("prov");
         let prebuilt = built(&cfg, false);

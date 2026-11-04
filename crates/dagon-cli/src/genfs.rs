@@ -48,8 +48,17 @@ impl Rel {
         Rel::new(format!("{}/{}", self.0, name.as_ref()))
     }
 
-    /// The same path with `suffix` added to its last name.
-    pub fn with_suffix(&self, suffix: &str) -> Rel {
+    /// The same path with `suffix` (letters, digits, `.`, `-`, `_`) added
+    /// to its last name.
+    pub(crate) fn with_suffix(&self, suffix: &str) -> Rel {
+        assert!(
+            suffix
+                .bytes()
+                .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'.' | b'-' | b'_'))
+                && suffix != "."
+                && suffix != "..",
+            "suffix {suffix:?}"
+        );
         Rel(format!("{}{suffix}", self.0))
     }
 
@@ -85,10 +94,21 @@ impl Out {
     /// passing a resolved path here would skip the link checks, so callers
     /// never resolve first.
     pub fn of(base: &Path, path: &Path) -> Result<Out, String> {
-        match path.strip_prefix(base) {
-            Ok(r) => Ok(Out::Work(Rel::new(r.to_string_lossy())?)),
-            Err(_) => Ok(Out::User(path.to_path_buf())),
+        let at = crate::config::lexical(path);
+        if let Ok(r) = at.strip_prefix(crate::config::lexical(base)) {
+            return Ok(Out::Work(Rel::new(r.to_string_lossy())?));
         }
+        // Outside the work area as written, yet under it once resolved:
+        // a resolved path, which would skip the link checks. Refused.
+        let plain = |p: &Path| crate::config::plain_path(p.to_path_buf());
+        let resolved = std::fs::canonicalize(base).is_ok_and(|b| plain(&at).starts_with(plain(&b)));
+        if resolved {
+            return Err(format!(
+                "{} is a resolved path inside the work area; dagon writes there only by the path as written",
+                path.display()
+            ));
+        }
+        Ok(Out::User(at))
     }
 
     pub fn join(&self, name: &str) -> Result<Out, String> {
@@ -311,5 +331,22 @@ mod tests {
         }
         assert_eq!(r("a/b").join("c.img").unwrap().as_str(), "a/b/c.img");
         assert_eq!(r("a/b.img").with_suffix(".new").file_name(), "b.img.new");
+    }
+
+    #[test]
+    fn out_of_classifies_as_written_and_refuses_a_resolved_path() {
+        let base = scratch("out-of");
+        let inside = Out::of(&base, &base.join("out/provision/seg")).unwrap();
+        assert_eq!(inside, Out::Work(r("out/provision/seg")));
+        let outside = Out::of(&base, &base.join("../shared/seg")).unwrap();
+        assert!(matches!(outside, Out::User(_)), "{outside:?}");
+        // The same folder in its resolved form (the Windows verbatim prefix):
+        // under the work area once resolved, outside it as written.
+        let canon = std::fs::canonicalize(&base).unwrap();
+        if canon.strip_prefix(&base).is_err() {
+            let e = Out::of(&base, &canon.join("out/sign/x.img")).unwrap_err();
+            assert!(e.contains("resolved path"), "{e}");
+        }
+        let _ = std::fs::remove_dir_all(&base);
     }
 }

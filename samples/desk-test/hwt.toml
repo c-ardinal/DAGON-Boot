@@ -1,5 +1,26 @@
-# Desk hardware test scenarios, run in this order by hwt.py.
-#
+# Desk sample hardware test: the desk's data and its scenarios, run in this
+# order by hwt.py (see README.md).
+
+[desk]
+# The [build.<id>] nodes of the desk project, in update order.
+nodes = ["seg", "watch", "hub"]
+# The coordinator's node id (dagon status prints it as "hub").
+coordinator = "hub"
+# The hub's USB VID/PID as Windows shows it in the port's PnP device id;
+# the pinned --port must be this device for the whole run.
+hub_usb = "VID_C0DE&PID_CAFE"
+# Cargo feature of each node app that makes its self-check fail (in
+# samples/f401-app, samples/esp32s3-app; `sync` adds it to the hub app).
+fail_feature = "no-confirm"
+# Longest wait for nodes to settle on a confirmed version: the hub's trial
+# lasts about 68 s per attempt, 3 attempts before it reverts (~3.5 min).
+settle_timeout_s = 360
+poll_s = 5
+# dagon status attempts while the hub is away (re-enumerating after reset).
+status_tries = 6
+# `sync`: the sample each node's package is refreshed from.
+sync = { seg = "f401-app", watch = "esp32s3-app" }
+
 # Versions: the version format is major.minor.patch (u8.u8.u16, no
 # pre-release tags), so tests use major 2 (2.0.N) as their range; the desk's
 # own releases stay below 2.0.0 or move on above the test range.
@@ -7,7 +28,9 @@
 #
 # Step kinds (`do`):
 #   status                                   record only; every node answers, confirmed
-#   deploy   version [nodes] [expect]        dagon deploy, answering y to its confirmation
+#   deploy   version [nodes] [expect]        dagon deploy; its confirmation is answered y only
+#                                             when the plan lists exactly this version, these
+#                                             nodes and out/deploy/v<version>.dgb (else n: FAIL)
 #            expect = "ok"          (default) deployed nodes on `version`, confirmed,
 #                                             active slot flipped; others unchanged
 #            expect = "rolled-back"           built with feature no-confirm (self-check

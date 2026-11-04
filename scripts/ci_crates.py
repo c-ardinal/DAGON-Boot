@@ -12,6 +12,7 @@ a #[test] or it has a tests/ directory.
 import json
 import pathlib
 import re
+import subprocess
 import sys
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
@@ -19,10 +20,21 @@ SKIP_DIRS = {"target", "vendor", "node_modules", ".git"}
 TEST_MARK = re.compile(r"#\[(?:\w+::)*test\]")
 
 
+def root_member_dirs():
+    """Directories of the root workspace's packages, as cargo sees them."""
+    meta = json.loads(subprocess.run(
+        ["cargo", "metadata", "--no-deps", "--format-version", "1",
+         "--manifest-path", str(ROOT / "Cargo.toml")],
+        check=True, capture_output=True, text=True).stdout)
+    return sorted(pathlib.Path(p["manifest_path"]).parent.resolve() for p in meta["packages"])
+
+
 def package_dirs():
+    members = set(root_member_dirs())
     return sorted(
         p.parent for p in ROOT.rglob("Cargo.toml")
-        if p.parent != ROOT and not SKIP_DIRS.intersection(p.relative_to(ROOT).parts)
+        if p.parent.resolve() not in members | {ROOT.resolve()}
+        and not SKIP_DIRS.intersection(p.relative_to(ROOT).parts)
         and re.search(r"^\[workspace\]", p.read_text(encoding="utf-8"), re.M)
     )
 

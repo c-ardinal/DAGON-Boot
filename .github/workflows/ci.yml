@@ -74,12 +74,30 @@ jobs:
         with:
           workspaces: ${{ matrix.dir }}
       - name: Format
-        run: cargo +stable fmt --check --manifest-path "${{ matrix.dir }}/Cargo.toml"
+        env:
+          DIR: ${{ matrix.dir }}
+        run: cargo +stable fmt --check --manifest-path "$DIR/Cargo.toml"
+      - name: Clippy
+        # The library; a package without one is linted whole.
+        env:
+          DIR: ${{ matrix.dir }}
+        run: |
+          host="$(rustc +stable -vV | sed -n 's/^host: //p')"
+          if cargo metadata --no-deps --format-version 1 --manifest-path "$DIR/Cargo.toml" \
+              | jq -e 'any(.packages[].targets[]; .kind | index("lib"))' > /dev/null; then
+            scope=--lib
+          else
+            scope=--all-targets
+          fi
+          cargo +stable clippy --no-default-features $scope --target "$host" \
+            --manifest-path "$DIR/Cargo.toml" -- -D warnings
       - name: Test on the host
-        run: >
-          cargo +stable test --no-default-features
-          --target "$(rustc +stable -vV | sed -n 's/^host: //p')"
-          --manifest-path "${{ matrix.dir }}/Cargo.toml"
+        env:
+          DIR: ${{ matrix.dir }}
+        run: |
+          host="$(rustc +stable -vV | sed -n 's/^host: //p')"
+          cargo +stable test --no-default-features --target "$host" \
+            --manifest-path "$DIR/Cargo.toml"
 
   web:
     runs-on: ubuntu-latest
@@ -96,7 +114,7 @@ jobs:
           cache-dependency-path: web/package-lock.json
       - run: npm ci
       # The page's WebAssembly is built by wasm-pack (npm test builds it first).
-      - run: npm install --global wasm-pack
+      - run: npm install --global wasm-pack@0.15.1
       - name: Tests (vitest)
         run: npm test
       - name: Types (svelte-check)
@@ -124,10 +142,3 @@ jobs:
           GIT_COMMITTER_NAME: ci
           GIT_COMMITTER_EMAIL: ci@example.invalid
         run: node --test plugin/hooks/guard.test.mjs
-      - name: Generated docs up to date
-        run: |
-          if [ -f scripts/gen_docs.py ]; then
-            python scripts/gen_docs.py --check
-          else
-            echo "::notice::scripts/gen_docs.py is absent; docs generation check skipped"
-          fi

@@ -266,6 +266,7 @@ name = "dagon-mcu-stm32f401re"
 version = "0.1.0"
 dependencies = [
  "cortex-m",
+ "critical-section",
  "dagon-agent",
  "dagon-conform",
  "dagon-core",

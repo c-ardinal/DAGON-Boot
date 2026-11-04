@@ -4,9 +4,17 @@
 //! that needs nothing special calls [`start`]; the pieces are public for an
 //! app that lays out its own executors.
 //!
+//! The flash has one driver: the slot store holds one [`SharedFlash`]
+//! handle on it, the serving loop another (a conformance build runs its
+//! flash tests through it). Each flash operation runs in a critical
+//! section, as the driver's erase and program do anyway.
+//!
 //! Flash size is check-only: the layout is fixed (`layout`, the topology's
 //! `f401-default` flash map) and needs [`MIN_FLASH_SIZE`] bytes.
 
+use core::cell::RefCell;
+
+use critical_section::Mutex;
 use dagon_agent::{Agent, Config, SlotStore};
 pub use dagon_core::log::LogError;
 use dagon_events::{Published, Watchdog as Periods};
@@ -16,6 +24,7 @@ pub use dagon_mcu_common::hooks::{always, NodeChain, SelfCheck};
 use dagon_mcu_common::hooks::{node_chain, Events};
 use dagon_mcu_common::link::LinkError;
 use dagon_mcu_common::serve::{serve as dagon_serve, Exit, ServeHost};
+use dagon_port::{Flash, FlashError, FlashRegion};
 use dagon_proto::max_payload;
 use dagon_proto::payload::{mode, role};
 use defmt::{info, warn};
@@ -35,7 +44,7 @@ use crate::watchdog::{Guard, Iwdg, Watch};
 
 /// The DAGON link: an I2C target (listening at the node's address).
 pub type I2cTarget = I2c<'static, Async, MultiMaster>;
-pub type Store = KindSStore<F401Flash<'static>>;
+pub type Store = KindSStore<SharedFlash>;
 /// The agent of a node on this MCU; its chain runs the app's CONFIRM check.
 pub type AppAgent = Agent<Store, NodeChain>;
 
@@ -86,9 +95,39 @@ pub trait BoardDef {
     fn open_link(link: Self::Link) -> (I2cTarget, pac::i2c::I2c);
 }
 
-/// Opens the slot store over the state log.
-pub fn open_store(flash: Peri<'static, FLASH>) -> Result<Store, LogError> {
-    KindSStore::load(F401Flash::new(flash), &layout::LOG, layout::SLOTS)
+/// A handle on the one flash driver (see the module docs).
+#[derive(Clone, Copy)]
+pub struct SharedFlash(&'static Mutex<RefCell<F401Flash<'static>>>);
+
+impl SharedFlash {
+    fn with<T>(&self, f: impl FnOnce(&mut F401Flash<'static>) -> T) -> T {
+        critical_section::with(|cs| f(&mut self.0.borrow_ref_mut(cs)))
+    }
+}
+
+impl Flash for SharedFlash {
+    fn geometry(&self) -> &[FlashRegion] {
+        &layout::FLASH_REGIONS
+    }
+    fn read(&mut self, addr: u32, buf: &mut [u8]) -> Result<(), FlashError> {
+        self.with(|f| f.read(addr, buf))
+    }
+    fn erase(&mut self, addr: u32, len: u32) -> Result<(), FlashError> {
+        self.with(|f| f.erase(addr, len))
+    }
+    fn write(&mut self, addr: u32, data: &[u8]) -> Result<(), FlashError> {
+        self.with(|f| f.write(addr, data))
+    }
+}
+
+/// Opens the slot store over the state log; returns it with the serving
+/// loop's handle on the flash. Call once.
+pub fn open_store(flash: Peri<'static, FLASH>) -> Result<(Store, SharedFlash), LogError> {
+    static FLASH_DRIVER: StaticCell<Mutex<RefCell<F401Flash<'static>>>> = StaticCell::new();
+    let driver = Mutex::new(RefCell::new(F401Flash::new(flash)));
+    let flash = SharedFlash(FLASH_DRIVER.init(driver));
+    let store = KindSStore::load(flash, &layout::LOG, layout::SLOTS)?;
+    Ok((store, flash))
 }
 
 /// The running image's own header.
@@ -147,17 +186,22 @@ pub fn config(tag: &str) -> Config {
         role: role::NODE,
         mode: mode::APP,
         max_payload: max_payload::I2C as u16,
+        trial_attempts: layout::MAX_ATTEMPTS,
     }
 }
 
 /// The agent over `store`, with the app layer's chain: the published
-/// events and `self_check` as the CONFIRM decision. Call once.
+/// events and `self_check` as the CONFIRM decision. Call once, after
+/// [`install_watchdog`] (`app.watchdog_taken` names its period).
 pub fn agent(tag: &str, store: Store, self_check: fn() -> bool) -> AppAgent {
     static EVENTS: StaticCell<Events> = StaticCell::new();
     let periods = Periods::new(layout::TRIAL_WDT_MS, layout::CONFIRMED_WDT_MS);
     let now_us: fn() -> u64 = || Instant::now().as_micros();
     let chain = node_chain(EVENTS.init(Published::new()), self_check, now_us, periods);
-    Agent::new(config(tag), store, chain)
+    let on_trial = on_trial(&store);
+    let mut agent = Agent::new(config(tag), store, chain);
+    agent.watchdog_taken(watchdog_period_ms(on_trial), on_trial);
+    agent
 }
 
 /// Starts DAGON: opens the store, takes over the watchdog, opens the link,
@@ -185,14 +229,14 @@ pub fn start<B: BoardDef, const N: usize>(
             "the DAGON F401 layout needs 512 KiB of flash"
         )
     };
-    let store = open_store(parts.flash)?;
+    let (store, flash) = open_store(parts.flash)?;
     let period = watchdog_period_ms(on_trial(&store));
     install_watchdog(parts.iwdg, guard, period, &store);
     let (target, regs) = B::open_link(parts.link);
     let link = links::I2c::new(target, regs);
     let agent = agent(tag, store, self_check);
     let high = crate::exec::start();
-    high.spawn(serve(agent, link, guard, task).expect("task pool"));
+    high.spawn(serve(agent, flash, link, guard, task).expect("task pool"));
     spawner.spawn(feed(guard).expect("task pool"));
     Ok(())
 }
@@ -210,10 +254,13 @@ async fn feed(watch: &'static dyn Watch) -> ! {
 /// own address NACKed, so a hub poll during an erase or write never meets
 /// a stretched clock (instruction fetch from flash stalls while it is
 /// busy). Run it on an executor that preempts the app's (guard task
-/// `task` at preempting level) when the app has long-running work.
+/// `task` at preempting level) when the app has long-running work. A
+/// reboot waits the delay `allow_reboot_now` asked for, idle under the
+/// guard, then resets.
 #[embassy_executor::task]
 pub async fn serve(
     mut agent: AppAgent,
+    flash: SharedFlash,
     mut link: links::I2c,
     watch: &'static dyn Watch,
     task: usize,
@@ -221,6 +268,7 @@ pub async fn serve(
     let mut host = Host {
         watch,
         task,
+        flash,
         started: Instant::now(),
         out: [0; conform::OUT_MAX],
     };
@@ -235,6 +283,7 @@ pub async fn serve(
 struct Host {
     watch: &'static dyn Watch,
     task: usize,
+    flash: SharedFlash,
     started: Instant,
     out: [u8; conform::OUT_MAX],
 }
@@ -254,12 +303,18 @@ impl ServeHost<Store, NodeChain> for Host {
         self.watch.feed();
         self.started = Instant::now();
     }
-    fn intercept(&mut self, agent: &mut AppAgent, request: &[u8]) -> Option<&[u8]> {
-        let n = conform::serve(agent, request, &mut self.out, self.watch, self.task)?;
+    fn intercept(&mut self, _: &mut AppAgent, request: &[u8]) -> Option<&[u8]> {
+        let n = conform::serve(
+            &mut self.flash,
+            request,
+            &mut self.out,
+            self.watch,
+            self.task,
+        )?;
         Some(&self.out[..n])
     }
     fn after(&mut self, agent: &mut AppAgent, cmd: u8) {
-        self.watch.set_trial(on_trial(agent.store()));
+        self.watch.set_trial(agent.images().on_trial());
         let ms = self.started.elapsed().as_millis();
         if ms >= SLOW_REQUEST_MS {
             info!("cmd {=u8:#04x}: {} ms", cmd, ms);
@@ -267,6 +322,9 @@ impl ServeHost<Store, NodeChain> for Host {
     }
     fn on_error(&mut self, e: LinkError) {
         warn!("i2c: {}", defmt::Debug2Format(&e));
+    }
+    async fn wait_ms(&mut self, ms: u32) {
+        Timer::after_millis(ms.into()).await;
     }
 }
 
@@ -276,6 +334,7 @@ impl ServeHost<Store, NodeChain> for Host {
 mod conform {
     use super::*;
     use dagon_conform::node::{handle_frame, NodeSetup, RESPONSE_MAX};
+    use dagon_core::log::Log;
 
     /// IWDG timeout for this build. The HAL assumes a 32 kHz LSI; the F401's
     /// LSI may run at up to 47 kHz, which shortens this to about 8.2 s, still
@@ -285,18 +344,17 @@ mod conform {
 
     /// Answers a CONF_RUN request into `out`; `None` for any other frame.
     pub fn serve(
-        agent: &mut AppAgent,
+        flash: &mut SharedFlash,
         request: &[u8],
         out: &mut [u8; OUT_MAX],
         watch: &dyn Watch,
         task: usize,
     ) -> Option<usize> {
-        let state = agent.store().log_state();
+        let state = Log::load(flash, &layout::LOG).ok()?.state;
         let setup = NodeSetup {
             declared: &layout::FLASH_REGIONS,
             scratch: crate::scratch_addr(&state, ACTIVE, &layout::SLOTS),
         };
-        let flash = agent.store().flash();
         let max = max_payload::I2C;
         // Long tests feed through this hook and count as progress.
         let mut feed = || watch.progress(task);
@@ -312,7 +370,7 @@ mod conform {
     pub const OUT_MAX: usize = 0;
 
     pub fn serve(
-        _: &mut AppAgent,
+        _: &mut SharedFlash,
         _: &[u8],
         _: &mut [u8; OUT_MAX],
         _: &dyn Watch,

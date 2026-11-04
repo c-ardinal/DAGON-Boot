@@ -96,13 +96,17 @@ that keeps `embassy_stm32::Peripherals` itself passes `dagon_pins!(p)`
 instead of splitting. Build with `DAGON_PUBKEY` set (below);
 `--features slot-b` links the same app for slot B. The demo node
 (`../../../samples/f401-app`) uses the same pieces (`open_store`,
-`install_watchdog`, `exec`, `serve`).
+`install_watchdog`, `agent`, `exec`, `serve`). `open_store` returns the
+slot store and the serving loop's handle on the same flash driver
+(`SharedFlash`; a conformance build runs CONF_RUN through it): the agent
+keeps its store to itself. A REBOOT reply is followed by the delay the
+app's `allow_reboot_now` asked for, the serving task idle under the guard,
+then the reset.
 
 ## Links
 
 Every hop carries whole DAGON frames through one interface,
-`dagon_mcu_common::link::Link` (`read_frame`, `write_frame`, `flush`,
-`max_payload`, `reconnect`); the serve loops are generic over it. The
+`dagon_mcu_common::link::Link`; the serve loops are generic over it. The
 kinds this package offers (`links::LINK_KINDS`):
 
 | Kind | Up | Down |

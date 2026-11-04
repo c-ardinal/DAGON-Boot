@@ -46,6 +46,9 @@ pub trait Link {
     /// What the peer sees when this end restarts.
     fn reconnect(&self) -> Reconnect;
 
+    /// The link's kind (its code goes into `app.link_up`, `app.request`).
+    fn kind(&self) -> Kind;
+
     /// Waits for the next complete frame; the slice stays valid until the
     /// next call. [`LinkError::Timeout`] after the link's own tick with
     /// nothing complete.
@@ -70,16 +73,18 @@ pub trait Link {
     }
 }
 
-/// A hop's medium, as the 構成 names it.
+/// A hop's medium, as the 構成 names it. The discriminant is the kind's
+/// code in events; a new kind takes the next number.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[repr(u8)]
 pub enum Kind {
-    UsbCdc,
-    Uart,
-    I2c,
-    Ble,
-    WifiTcp,
-    Ethernet,
-    Can,
+    UsbCdc = 1,
+    Uart = 2,
+    I2c = 3,
+    Ble = 4,
+    WifiTcp = 5,
+    Ethernet = 6,
+    Can = 7,
 }
 
 impl Kind {
@@ -92,6 +97,12 @@ impl Kind {
         Kind::Ethernet,
         Kind::Can,
     ];
+
+    /// The kind's code in events (`app.link_up` `link`, `app.request`
+    /// `via`).
+    pub const fn code(self) -> u8 {
+        self as u8
+    }
 
     /// The 構成's name of the kind.
     pub const fn name(self) -> &'static str {
@@ -225,6 +236,14 @@ mod tests {
             assert_eq!(Kind::from_name(k.name()), Some(k));
         }
         assert_eq!(Kind::from_name("usb"), None);
+    }
+
+    #[test]
+    fn codes_are_distinct_and_never_zero() {
+        for (i, k) in Kind::ALL.iter().enumerate() {
+            assert_ne!(k.code(), 0);
+            assert!(Kind::ALL[i + 1..].iter().all(|o| o.code() != k.code()));
+        }
     }
 
     #[test]

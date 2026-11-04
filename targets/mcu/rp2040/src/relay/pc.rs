@@ -7,13 +7,15 @@
 
 use portable_atomic::{AtomicU32, Ordering};
 
-use dagon_agent::SlotStore;
+use dagon_agent::reply_status;
+use dagon_mcu_common::mapped::Mapped;
 use dagon_port::{Nrst, SubControl};
 use dagon_proto::payload::{boot0, link, nrst, HelloResp, Relay, Show, StatusResp, SubCtl};
 use dagon_proto::{flags, max_payload, Cmd, Frame, Status, HEADER_LEN, MAX_FRAME};
 use embassy_executor::Spawner;
 use embassy_rp::peripherals::USB;
 use embassy_rp::Peri;
+use embassy_time::{Instant, Timer};
 use heapless::Vec;
 
 use super::nodes::{self, SubNode};
@@ -37,6 +39,8 @@ static NEXT_ID: AtomicU32 = AtomicU32::new(1);
 
 pub struct Pc {
     pub agent: AppAgent,
+    /// The topology display copy, read-only ([`nodes::stored`]).
+    pub topology: Mapped,
     pub sub: Option<SubLines<'static>>,
     pub has_i2c: bool,
     pub has_uart: bool,
@@ -62,10 +66,13 @@ pub async fn task(
     serve(pc, link).await
 }
 
-/// Serves the PC over the uplink, whatever its kind.
+/// Serves the PC over the uplink, whatever its kind. A reboot waits the
+/// delay `allow_reboot_now` asked for, idle under the guard, then resets.
 async fn serve<L: Link>(mut pc: Pc, mut up: L) -> ! {
     pc.publish(true);
     let max = up.max_payload();
+    let via = up.kind().code();
+    pc.agent.link_up(via);
     loop {
         pc.watch.idle(task::PC);
         let read = up.read_frame().await;
@@ -73,11 +80,20 @@ async fn serve<L: Link>(mut pc: Pc, mut up: L) -> ! {
         let Ok(request) = read else {
             continue;
         };
+        let arrived = Instant::now();
+        pc.agent.request(request, via);
         let (out, reboot) = pc.handle(request, max).await;
-        let _ = up.write_frame(&pc.resp[..out]).await;
-        if reboot {
+        let sent = up.write_frame(&pc.resp[..out]).await.is_ok();
+        if let Some(status) = reply_status(&pc.resp[..out]).filter(|_| sent) {
+            let ms = arrived.elapsed().as_millis();
+            pc.agent
+                .replied(status, u32::try_from(ms).unwrap_or(u32::MAX));
+        }
+        if let Some(delay_ms) = reboot {
             // The reply leaves before the reset drops the link.
             let _ = up.flush().await;
+            pc.watch.idle(task::PC);
+            Timer::after_millis(delay_ms.into()).await;
             pc.agent.before_reboot();
             pc.watch.reboot();
         }
@@ -88,19 +104,18 @@ impl Pc {
     /// Shares the hub's own state and, if `subs`, the node list (topology
     /// display copy) with the other tasks.
     fn publish(&mut self, subs: bool) {
-        let st = self.agent.store().status();
-        state::set_hub(Seen::from_status(&st));
+        state::set_hub(Seen::from_status(self.agent.images().status()));
         if subs {
-            state::set_subs(nodes::load(&mut self.agent.store().flash, self.fallback));
+            state::set_subs(nodes::load(&mut self.topology, self.fallback));
         }
     }
 
     /// Answers one request into `self.resp`; returns its length (0: no
-    /// answer) and whether to reboot after sending it.
-    async fn handle(&mut self, request: &[u8], max: usize) -> (usize, bool) {
+    /// answer) and, when a reboot follows the reply, its delay in ms.
+    async fn handle(&mut self, request: &[u8], max: usize) -> (usize, Option<u32>) {
         step(14);
         let Ok((f, _)) = Frame::decode(request, max) else {
-            return (0, false);
+            return (0, None);
         };
         let is_request = f.flags & (flags::RESP | flags::EVENT) == 0;
         let (status, body) = match Cmd::from_u8(f.cmd) {
@@ -123,9 +138,9 @@ impl Pc {
                     Some(reply) => {
                         let n = reply.frame.len();
                         self.resp[..n].copy_from_slice(reply.frame);
-                        (n, reply.reboot)
+                        (n, reply.reboot.then_some(reply.reboot_delay_ms))
                     }
-                    None => (0, false),
+                    None => (0, None),
                 };
                 let changes_self = [Cmd::SetPending, Cmd::Confirm, Cmd::XferEnd]
                     .iter()
@@ -139,7 +154,7 @@ impl Pc {
         self.resp[HEADER_LEN] = status as u8;
         let n =
             dagon_proto::finish(&mut self.resp, flags::RESP, f.seq, f.cmd, 1 + body).unwrap_or(0);
-        (n, false)
+        (n, None)
     }
 
     /// Passes a request to the link task that owns the bus; its answer

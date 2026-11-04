@@ -6,9 +6,9 @@ use dagon_core::log::{Log, SlotRef};
 use dagon_format::header::*;
 use dagon_format::statelog::{kind, reason, target, FaceHeader, Record};
 use dagon_format::{key_id, sha256, Version};
+use dagon_mcu_rp2040::image;
 use dagon_mcu_rp2040::layout::*;
 use dagon_mcu_rp2040::tag::checked_tag;
-use dagon_mcu_rp2040::{image, status};
 use dagon_port::{Flash, FlashError, FlashRegion};
 use dagon_proto::payload::SlotState;
 use ed25519_compact::{KeyPair, Seed};
@@ -79,7 +79,7 @@ fn put_app(m: &mut Mem, kp: &KeyPair, slot: u8, minor: u8) -> SlotRef {
 fn status_now(m: &mut Mem, active: u8) -> dagon_proto::payload::StatusResp {
     let log = Log::load(m, &APP_LOG_LAYOUT).unwrap();
     let heads = [0u8, 1].map(|s| image::head_ref(m, APP_SLOT[s as usize], s));
-    status::status(&log.state, heads, active, log.generation)
+    log.state.status(heads, active, log.generation)
 }
 
 /// Flash with app A installed and the install log as `dagon rescue hub`

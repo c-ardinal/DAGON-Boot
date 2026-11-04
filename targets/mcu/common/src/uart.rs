@@ -11,7 +11,7 @@ use dagon_proto::payload::{HelloReq, HelloResp};
 use dagon_proto::{flags, frame_len, max_payload, split_status, Cmd, Frame, Status, PROTO_VERSION};
 
 use crate::frames::{FrameReader, GAP_MS};
-use crate::link::{Link, LinkError, Reconnect};
+use crate::link::{Kind, Link, LinkError, Reconnect};
 
 pub const UART_FRAME: usize = frame_len(max_payload::UART);
 /// Timeout of the hub's own display HELLO on the UART.
@@ -109,6 +109,10 @@ impl<S: StreamPort, C: Fn() -> u64> Link for UartLink<S, C> {
 
     fn reconnect(&self) -> Reconnect {
         Reconnect::Persistent
+    }
+
+    fn kind(&self) -> Kind {
+        Kind::Uart
     }
 
     /// The next complete frame before the request's deadline. Waits are

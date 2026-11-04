@@ -6,6 +6,9 @@
 //!   of the dagon partition (+0x0000 A, +0x1000 B, +0x2000 factory).
 //! - SET_PENDING writes an otadata trial entry; CONFIRM marks the running
 //!   entry Valid. No DAGON state log is kept: STATUS maps otadata.
+//! - Otadata keeps no digest, so an erase first takes the slot out of the
+//!   selection: a new image there is only written (not pending, not
+//!   reverted) until its own SET_PENDING.
 
 use crate::layout::{
     app_partition, Partition, DAGON, ERASE_UNIT, SLOT_A, SLOT_B, SLOT_FACTORY, WRITE_UNIT,
@@ -33,6 +36,9 @@ pub trait Otadata {
     fn set_next(&mut self, slot: u8) -> Result<(), StoreError>;
     /// Marks the running OTA slot Valid and reads it back.
     fn confirm(&mut self) -> Result<(), StoreError>;
+    /// Takes OTA `slot` (never the running one) out of the selection:
+    /// erases every counted entry selecting it ([`crate::otadata::selecting`]).
+    fn withdraw(&mut self, slot: u8) -> Result<(), StoreError>;
 }
 
 /// Receive in progress: body bytes are programmed one write unit at a time,
@@ -47,11 +53,13 @@ struct Rx {
 }
 
 pub struct EspStore<F, O, W> {
-    pub flash: F,
+    pub(crate) flash: F,
     /// The boot selection; changed only through the image machine's
     /// transitions (the `SlotStore` mutators).
     pub(crate) ota: O,
-    pub wdt: W,
+    /// Fed while erasing and writing (a handle; the MCU package's link
+    /// task holds the watchdog).
+    pub(crate) wdt: W,
     rx: Option<Rx>,
 }
 
@@ -148,8 +156,9 @@ impl<F: Flash, O: Otadata, W: Watchdog> SlotStore for EspStore<F, O, W> {
         let mut trying = false;
         if let Some(v) = view {
             trying = v.slot == running && v.state == SlotState::Trying;
-            // Otadata keeps no digest, so a slot re-received after a
-            // rollback still shows Reverted until its next SET_PENDING.
+            // An erase withdraws the selection (otadata keeps no digest),
+            // so a selected slot still holds the image it was selected
+            // with.
             if v.slot != running && present[v.slot as usize] {
                 st.slots[v.slot as usize].state = v.state;
             }
@@ -182,8 +191,8 @@ impl<F: Flash, O: Otadata, W: Watchdog> SlotStore for EspStore<F, O, W> {
         ota_slot(t, slot).map_or(0, |p| p.size)
     }
 
-    /// Erases the header sector first (the slot then has no image), then
-    /// the body's erase units.
+    /// Takes the slot out of the otadata selection, erases the header
+    /// sector (the slot then has no image), then the body's erase units.
     fn erase(&mut self, t: u8, slot: u8, len: u32, _: &Transition) -> Result<(), StoreError> {
         let p = ota_slot(t, slot)?;
         // Never wipe what is running, whatever the caller thinks.
@@ -194,6 +203,7 @@ impl<F: Flash, O: Otadata, W: Watchdog> SlotStore for EspStore<F, O, W> {
             return Err(StoreError::Range);
         }
         self.rx = None;
+        self.ota.withdraw(slot)?;
         self.erase_range(header_addr(slot)?, HEADER_SECTOR)?;
         self.erase_range(p.offset, len.div_ceil(ERASE_UNIT) * ERASE_UNIT)?;
         self.rx = Some(Rx {

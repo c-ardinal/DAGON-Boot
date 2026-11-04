@@ -5,9 +5,9 @@ use dagon_agent::{SlotStore, StoreError, Transition};
 use dagon_core::boot::SlotLayout;
 use dagon_core::log::{Log, LogError, LogLayout, LogState, SlotRef};
 use dagon_format::header::{header_digest16, ImageHeader, HEADER_SIZE};
-use dagon_format::statelog::{kind, reason, slot};
+use dagon_format::statelog::{kind, reason};
 use dagon_port::{Flash, FlashError};
-use dagon_proto::payload::{target, SlotState, StatusResp};
+use dagon_proto::payload::{target, StatusResp};
 
 const HDR: u32 = HEADER_SIZE as u32;
 /// Flash write unit this store pads to (STM32F4: 32-bit programming).
@@ -45,10 +45,6 @@ impl<F: Flash> KindSStore<F> {
 
     pub fn log_state(&self) -> LogState {
         self.log.state
-    }
-
-    pub fn flash(&mut self) -> &mut F {
-        &mut self.flash
     }
 
     fn base(&self, s: u8) -> Result<u32, StoreError> {
@@ -109,44 +105,18 @@ fn flash_err(_: FlashError) -> StoreError {
 
 impl<F: Flash> SlotStore for KindSStore<F> {
     /// Slots with a parsing header are Written; the log upgrades the slot
-    /// whose header digest it names.
+    /// whose header it names (`LogState::status`).
     fn status(&mut self) -> StatusResp {
-        let mut st = StatusResp::default();
-        for s in 0..2u8 {
-            if let Some(h) = self.header(s) {
-                let info = &mut st.slots[s as usize];
-                info.state = SlotState::Written;
-                info.version = ImageHeader::parse(&h)
-                    .map(|h| h.version)
-                    .unwrap_or_default();
-                info.digest16 = header_digest16(&h);
-            }
-        }
+        let heads = [0u8, 1].map(|s| {
+            let h = self.header(s)?;
+            Some(SlotRef {
+                slot: s,
+                version: ImageHeader::parse(&h).ok()?.version,
+                digest16: header_digest16(&h),
+            })
+        });
         let ls = self.log.state;
-        let trial = if ls.on_trial() {
-            SlotState::Trying
-        } else {
-            SlotState::Pending
-        };
-        for (r, state) in [(ls.confirmed, SlotState::Confirmed), (ls.pending, trial)] {
-            let Some(r) = r else { continue };
-            if let Some(info) = st.slots.get_mut(r.slot as usize) {
-                if info.state != SlotState::Empty && info.digest16 == r.digest16 {
-                    info.state = state;
-                }
-            }
-        }
-        if let Some(info) = ls.reverted.and_then(|s| st.slots.get_mut(s as usize)) {
-            if info.state == SlotState::Written {
-                info.state = SlotState::Reverted;
-            }
-        }
-        st.active = ls.active();
-        st.confirmed = ls.confirmed.map_or(slot::NONE, |c| c.slot);
-        st.attempts = ls.attempts;
-        st.last_reason = ls.last_reason;
-        st.log_generation = self.log.generation;
-        st
+        ls.status(heads, ls.active(), self.log.generation)
     }
 
     fn capacity(&self, t: u8, s: u8) -> u32 {

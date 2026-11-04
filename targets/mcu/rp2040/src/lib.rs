@@ -1,8 +1,8 @@
 //! DAGON MCU package for the RP2040.
 //!
 //! - Always (host-testable): the flash [`layout`], inline [`image`] checks,
-//!   the stage0 view of the boot core log ([`bl`]), STATUS mapping
-//!   ([`status`]), hub command rules ([`cmd`]), and the MCU-independent
+//!   the stage0 view of the boot core log ([`bl`]), hub command rules
+//!   ([`cmd`]), and the MCU-independent
 //!   parts re-exported from `dagon-mcu-common` ([`liveness`], [`frames`],
 //!   [`uart`], [`mapped`]).
 //! - Target only: XIP reader, image start and raw backlight blink ([`arm`]).
@@ -32,7 +32,6 @@ pub mod image;
 pub mod kinds;
 pub mod layout;
 pub mod nodes;
-pub mod status;
 pub mod view;
 
 #[cfg(target_os = "none")]

@@ -22,7 +22,7 @@ default = ["node"]
 hal = ["dep:embassy-stm32", "dep:embassy-time", "dep:cortex-m", "dep:ed25519-compact"]
 # Node start-up and the I2C target serving loop (logs through defmt: the
 # app links a defmt logger, e.g. defmt-rtt).
-node = ["hal", "embassy-stm32?/defmt", "dep:embassy-futures", "dep:embassy-executor", "dep:defmt", "dep:static_cell"]
+node = ["hal", "embassy-stm32?/defmt", "dep:embassy-futures", "dep:embassy-executor", "dep:defmt", "dep:static_cell", "dep:critical-section"]
 # Conformance build: CONF_RUN runs dagon-conform's node-side tests.
 conform = ["node", "dep:dagon-conform"]
 # The final binary's memory.x comes from this package: an APP slot body
@@ -46,8 +46,9 @@ embassy-futures = { version = "0.1", optional = true }
 embassy-executor = { version = "0.10", features = ["platform-cortex-m", "executor-interrupt"], optional = true }
 cortex-m = { version = "0.7", optional = true }
 defmt = { version = "1", optional = true }
-# The node's published events (`node::agent`).
+# The node's published events (`node::agent`), the shared flash driver.
 static_cell = { version = "2", optional = true }
+critical-section = { version = "1", optional = true }
 # Smaller verifier code for every image (the boot core must fit 32,256 bytes).
 ed25519-compact = { version = "2.6", default-features = false, features = ["opt_size"], optional = true }
 

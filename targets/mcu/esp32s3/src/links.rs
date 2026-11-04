@@ -70,7 +70,7 @@ mod node_links {
     use esp_hal::usb::usb_serial_jtag::UsbSerialJtag;
     use esp_hal::Async;
 
-    use super::{Link, LinkError, Reconnect};
+    use super::{Kind, Link, LinkError, Reconnect};
     use crate::framer::{FrameCutter, MAX_UART_FRAME};
     use crate::node::now_ms;
 
@@ -161,6 +161,10 @@ mod node_links {
             Reconnect::Persistent
         }
 
+        fn kind(&self) -> Kind {
+            Kind::Uart
+        }
+
         async fn read_frame(&mut self) -> Result<&[u8], LinkError> {
             loop {
                 if let Some(n) = self.rx.next() {
@@ -218,6 +222,10 @@ mod node_links {
 
         fn reconnect(&self) -> Reconnect {
             Reconnect::Reenumerates
+        }
+
+        fn kind(&self) -> Kind {
+            Kind::UsbCdc
         }
 
         async fn read_frame(&mut self) -> Result<&[u8], LinkError> {

@@ -76,7 +76,7 @@ pub fn start<B: BoardDef, const N: usize>(
     cfg: RelayConfig,
 ) {
     const { assert!(N >= TASKS, "the relay needs guard tasks 0..3") };
-    let mut agent = node::open::<B, N>(
+    let (agent, serial) = node::open::<B, N>(
         parts.flash,
         parts.watchdog,
         guard,
@@ -85,10 +85,10 @@ pub fn start<B: BoardDef, const N: usize>(
         role::HUB,
         cfg.self_check,
     );
-    let serial = node::serial(&mut agent.store().flash);
     let watch: &'static dyn Watch = guard;
     let pc = pc::Pc {
         agent,
+        topology: nodes::stored(),
         sub: links.sub,
         has_i2c: links.i2c.is_some(),
         has_uart: links.uart.is_some(),

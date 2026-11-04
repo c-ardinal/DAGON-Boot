@@ -1,14 +1,17 @@
 //! The serving loop of a node's agent over any [`Link`]: wait for a request
-//! frame, answer it, and after the reply to REBOOT let the reply leave and
-//! hand the reset to the caller. What differs between MCUs (watchdog
-//! reports, a conformance build answering first, logging) comes through
-//! [`ServeHost`].
+//! frame, answer it, and after the reply to REBOOT let the reply leave,
+//! wait the delay `allow_reboot_now` asked for and hand the reset to the
+//! caller. What differs between MCUs (watchdog reports, a conformance build
+//! answering first, logging, the timer) comes through [`ServeHost`]. The
+//! loop reports the link and every request to the agent's chain
+//! (`app.link_up`, `app.link_down`, `app.request`, `app.replied`).
 
-use dagon_agent::{Agent, AppChain, SlotStore, IDLE_TIMEOUT_MS};
+use dagon_agent::{reply_status, Agent, AppChain, SlotStore, IDLE_TIMEOUT_MS};
 
 use crate::link::{Link, LinkError};
 
 /// What the serving loop asks of its MCU.
+#[allow(async_fn_in_trait)]
 pub trait ServeHost<S: SlotStore, X: AppChain> {
     /// Milliseconds on a monotonic clock.
     fn now_ms(&self) -> u64;
@@ -29,6 +32,10 @@ pub trait ServeHost<S: SlotStore, X: AppChain> {
     fn after(&mut self, _agent: &mut Agent<S, X>, _cmd: u8) {}
     /// A read failed (logging); the loop goes on.
     fn on_error(&mut self, _e: LinkError) {}
+    /// Waits `ms` before a reset. The loop has reported itself idle, so
+    /// the watchdog guard keeps feeding meanwhile (the delay is capped
+    /// below the watchdog's period).
+    async fn wait_ms(&mut self, ms: u32);
 }
 
 /// Why [`serve`] returned.
@@ -50,6 +57,8 @@ where
     X: AppChain,
     H: ServeHost<S, X>,
 {
+    let via = link.kind().code();
+    agent.link_up(via);
     let mut last_request: Option<u64> = None;
     loop {
         host.idle();
@@ -65,22 +74,32 @@ where
                 }
                 continue;
             }
-            Err(LinkError::Closed) => return Exit::Closed,
+            Err(LinkError::Closed) => {
+                agent.link_down(via);
+                return Exit::Closed;
+            }
             Err(e) => {
                 host.on_error(e);
                 continue;
             }
         };
-        last_request = Some(host.now_ms());
+        let arrived = host.now_ms();
+        last_request = Some(arrived);
         // Byte 5 of a frame is the command.
         let cmd = request.get(5).copied().unwrap_or(0);
+        agent.request(request, via);
         host.on_request();
-        let mut reboot = false;
+        let mut reboot = None;
+        let mut status = None;
         let wrote = match host.intercept(agent, request) {
-            Some(answer) => link.write_frame(answer).await,
+            Some(answer) => {
+                status = reply_status(answer);
+                link.write_frame(answer).await
+            }
             None => match agent.handle(request) {
                 Some(reply) => {
-                    reboot = reply.reboot;
+                    reboot = reply.reboot.then_some(reply.reboot_delay_ms);
+                    status = reply_status(reply.frame);
                     link.write_frame(reply.frame).await
                 }
                 // Not a valid request, or not for this node: no answer, but
@@ -89,15 +108,22 @@ where
             },
         };
         host.after(agent, cmd);
-        if let Err(e) = wrote {
-            host.on_error(e);
+        match (wrote, status) {
+            (Err(e), _) => host.on_error(e),
+            (Ok(()), Some(s)) => {
+                let ms = host.now_ms().saturating_sub(arrived);
+                agent.replied(s, u32::try_from(ms).unwrap_or(u32::MAX));
+            }
+            (Ok(()), None) => {}
         }
         // Reset only once the reply has left (or could not be sent); a
         // link that cannot tell (a new request came first) keeps serving
         // instead.
-        if reboot {
-            agent.before_reboot();
+        if let Some(delay_ms) = reboot {
             if link.flush().await.is_ok() {
+                host.idle();
+                host.wait_ms(delay_ms).await;
+                agent.before_reboot();
                 return Exit::Reboot;
             }
         }
@@ -108,17 +134,22 @@ where
 mod tests {
     extern crate std;
 
+    use std::cell::RefCell;
     use std::collections::VecDeque;
+    use std::rc::Rc;
     use std::vec::Vec;
 
     use crate::hooks::{always, node_chain, NodeChain};
-    use dagon_events::{Published, Watchdog};
+    use dagon_events::{
+        compose, Bounds, Composed, Ctx, Delay, Event, Extension, Layer, Nop, Published,
+        RebootRequest, Watchdog,
+    };
     use dagon_proto::payload::{reboot_mode, HelloResp};
     use dagon_proto::{max_payload, split_status, Cmd, Frame, Status};
     use dagon_sim::store::SimStore;
 
     use super::*;
-    use crate::link::Reconnect;
+    use crate::link::{Kind, Reconnect};
     use crate::uart::hello_request;
 
     /// A link fed from a queue: `None` entries are read timeouts; when the
@@ -141,6 +172,9 @@ mod tests {
         }
         fn reconnect(&self) -> Reconnect {
             Reconnect::Persistent
+        }
+        fn kind(&self) -> Kind {
+            Kind::Uart
         }
         async fn read_frame(&mut self) -> Result<&[u8], LinkError> {
             assert!(
@@ -179,15 +213,20 @@ mod tests {
         requests: usize,
         cmds: Vec<u8>,
         answer: Option<Vec<u8>>,
+        /// `idle`, `busy` and `wait <ms>`, in order.
+        calls: Vec<std::string::String>,
     }
 
     impl<S: SlotStore, X: AppChain> ServeHost<S, X> for Host {
         fn now_ms(&self) -> u64 {
             0
         }
-        fn idle(&mut self) {}
+        fn idle(&mut self) {
+            self.calls.push("idle".into());
+        }
         fn busy(&mut self) {
             self.busy += 1;
+            self.calls.push("busy".into());
         }
         fn on_request(&mut self) {
             self.requests += 1;
@@ -199,6 +238,44 @@ mod tests {
         fn after(&mut self, _: &mut Agent<S, X>, cmd: u8) {
             self.cmds.push(cmd);
         }
+        async fn wait_ms(&mut self, ms: u32) {
+            self.calls.push(std::format!("wait {ms}"));
+        }
+    }
+
+    /// An app extension that records the events it sees and asks for a
+    /// reboot delay.
+    #[derive(Clone, Default)]
+    struct Probe {
+        seen: Rc<RefCell<Vec<&'static str>>>,
+        delay_ms: u32,
+    }
+
+    impl Extension for Probe {
+        fn id(&self) -> &'static str {
+            "probe"
+        }
+        fn on_event(&mut self, e: &Event<'_>, _: &Ctx<'_>) {
+            self.seen.borrow_mut().push(e.kind());
+        }
+        fn allow_reboot_now(&mut self, _: &RebootRequest, _: &Ctx<'_>) -> Option<Delay> {
+            Some(Delay::After(self.delay_ms))
+        }
+    }
+
+    type ProbeChain = Composed<&'static Published<(), 8>, Nop, Probe, fn() -> u64>;
+
+    fn probed(probe: Probe) -> Agent<SimStore, ProbeChain> {
+        let events = std::boxed::Box::leak(std::boxed::Box::new(Published::new()));
+        let now: fn() -> u64 = || 0;
+        let chain = compose(
+            Layer::App,
+            events,
+            Nop,
+            probe,
+            Bounds::new(now, Watchdog::new(4000, 4000)),
+        );
+        Agent::new(dagon_sim::f401_config([0; 32]), SimStore::default(), chain)
     }
 
     fn agent() -> Agent<SimStore, NodeChain> {
@@ -250,6 +327,49 @@ mod tests {
         assert_eq!(exit, Exit::Reboot);
         assert_eq!(link.written.len(), 1, "the reply, then nothing more");
         assert_eq!(link.flushed, 1);
+        assert_eq!(h.calls.last().unwrap(), "wait 0");
+    }
+
+    /// The delay `allow_reboot_now` asked for is waited after the reply
+    /// left, with the loop idle (the guard keeps feeding); the reset
+    /// follows `app.before_reboot`.
+    #[test]
+    fn reboot_waits_the_asked_delay_while_idle() {
+        let probe = Probe {
+            delay_ms: 300,
+            ..Probe::default()
+        };
+        let mut a = probed(probe.clone());
+        let mut link = Mock::default();
+        let reboot = request(3, Cmd::Reboot as u8, &[reboot_mode::NORMAL]);
+        link.incoming.extend([Some(reboot), Some(hello(4))]);
+        let mut h = Host::default();
+        let exit = dagon_sim::block_on(serve(&mut link, &mut a, &mut h));
+        assert_eq!(exit, Exit::Reboot);
+        assert_eq!(h.calls[h.calls.len() - 2..], ["idle", "wait 300"]);
+        let seen = probe.seen.borrow();
+        let at = seen.iter().position(|k| *k == "request").unwrap();
+        assert_eq!(
+            seen[at..],
+            ["request", "reboot_requested", "replied", "before_reboot"]
+        );
+    }
+
+    /// The loop reports its link and each request with its reply.
+    #[test]
+    fn link_and_requests_are_reported() {
+        let probe = Probe::default();
+        let mut a = probed(probe.clone());
+        let mut link = Mock::default();
+        link.incoming.extend([Some(hello(1))]);
+        dagon_sim::block_on(serve(&mut link, &mut a, &mut Host::default()));
+        let seen = probe.seen.borrow();
+        let start = seen.iter().position(|k| *k == "link_up").unwrap();
+        assert_eq!(
+            seen[start..],
+            ["link_up", "request", "hello", "replied", "link_down"]
+        );
+        assert_eq!(seen[0], "starting");
     }
 
     /// A corrupt frame, a response (not a request) and a request too short

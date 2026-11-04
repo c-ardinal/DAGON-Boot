@@ -67,7 +67,7 @@ mod target {
     use embassy_stm32::pac;
     use embassy_time::{Duration, Timer};
 
-    use super::{Link, LinkError, Reconnect};
+    use super::{Kind, Link, LinkError, Reconnect};
     use crate::mailbox::Mailbox;
     use crate::node::I2cTarget;
 
@@ -164,6 +164,10 @@ mod target {
 
         fn reconnect(&self) -> Reconnect {
             Reconnect::Persistent
+        }
+
+        fn kind(&self) -> Kind {
+            Kind::I2c
         }
 
         async fn read_frame(&mut self) -> Result<&[u8], LinkError> {

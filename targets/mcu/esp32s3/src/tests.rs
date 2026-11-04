@@ -111,6 +111,15 @@ impl Otadata for FakeOta {
         self.entries[sector] = e;
         Ok(())
     }
+    fn withdraw(&mut self, slot: u8) -> Result<(), StoreError> {
+        let hit = crate::otadata::selecting(&self.entries, slot);
+        for (e, erase) in self.entries.iter_mut().zip(hit) {
+            if erase {
+                *e = [0xFF; ENTRY_LEN];
+            }
+        }
+        Ok(())
+    }
     fn confirm(&mut self) -> Result<(), StoreError> {
         let i = (0..2)
             .filter_map(|i| Counted::of(&self.entries[i]).map(|c| (i, c)))
@@ -356,7 +365,7 @@ fn set_pending_is_refused_while_on_trial() {
     s.confirm(SLOT_A, &ha, &t()).unwrap();
     // Confirmed: SET_PENDING goes through to the agent.
     assert_eq!(
-        refuse_set_pending_on_trial(&mut s, &set_pending_frame(1), &mut out),
+        refuse_set_pending_on_trial(&s.status(), &set_pending_frame(1), &mut out),
         None
     );
     let hb = receive(&mut s, SLOT_B, 1);
@@ -364,7 +373,7 @@ fn set_pending_is_refused_while_on_trial() {
     s.ota.boot();
     let before = s.ota.entries;
     // On trial in B: refused with E_STATE, otadata untouched.
-    let n = refuse_set_pending_on_trial(&mut s, &set_pending_frame(0), &mut out).unwrap();
+    let n = refuse_set_pending_on_trial(&s.status(), &set_pending_frame(0), &mut out).unwrap();
     let (f, _) = Frame::decode(&out[..n], 1024).unwrap();
     assert_eq!((f.seq, f.cmd), (7, dagon_proto::Cmd::SetPending as u8));
     assert_eq!(split_status(f.payload).unwrap().0, Status::State);
@@ -374,7 +383,43 @@ fn set_pending_is_refused_while_on_trial() {
     let mut hello = set_pending_frame(0);
     dagon_proto::finish(&mut hello, 0, 7, dagon_proto::Cmd::Hello as u8, 2).unwrap();
     assert!(Frame::decode(&hello, 1024).is_ok());
-    assert_eq!(refuse_set_pending_on_trial(&mut s, &hello, &mut out), None);
+    assert_eq!(
+        refuse_set_pending_on_trial(&s.status(), &hello, &mut out),
+        None
+    );
+}
+
+/// A re-transfer into a pending slot, or into a rolled-back one, takes
+/// the slot out of the selection: STATUS shows it written, and the next
+/// reset starts what ran before, not the new image.
+#[test]
+fn erase_takes_the_slot_out_of_the_selection() {
+    let mut s = store();
+    let ha = receive(&mut s, SLOT_A, 0);
+    s.set_pending(SLOT_A, &ha, &t()).unwrap();
+    s.ota.boot();
+    s.confirm(SLOT_A, &ha, &t()).unwrap();
+    let hb = receive(&mut s, SLOT_B, 1);
+    s.set_pending(SLOT_B, &hb, &t()).unwrap();
+    assert_eq!(s.status().slots[1].state, SlotState::Pending);
+
+    receive(&mut s, SLOT_B, 2);
+    let st = s.status();
+    assert_eq!(st.slots[1].state, SlotState::Written);
+    assert_eq!(st.slots[1].version, Version::new(1, 2, 0));
+    s.ota.boot();
+    assert_eq!(s.status().active, SLOT_A, "no trial without SET_PENDING");
+
+    // Rolled back, then received again.
+    let hb = receive(&mut s, SLOT_B, 3);
+    s.set_pending(SLOT_B, &hb, &t()).unwrap();
+    s.ota.boot();
+    s.ota.boot();
+    assert_eq!(s.status().slots[1].state, SlotState::Reverted);
+    receive(&mut s, SLOT_B, 4);
+    let st = s.status();
+    assert_eq!((st.slots[1].state, st.active), (SlotState::Written, SLOT_A));
+    assert_eq!(st.slots[0].state, SlotState::Confirmed);
 }
 
 #[test]

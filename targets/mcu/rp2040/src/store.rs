@@ -2,12 +2,12 @@
 //! topology display copy, behind dagon-agent's `SlotStore`.
 
 use crate::flash::RpFlash;
+use crate::image;
 use crate::layout::{
     body_capacity, sectors, APP_LOG_LAYOUT, APP_SLOT, APP_SLOT_SIZE, HEADER_LEN, SECTOR, TOPOLOGY,
     TOPOLOGY_SIZE,
 };
 use crate::watchdog::Watch;
-use crate::{image, status};
 use dagon_agent::{SlotStore, StoreError, Transition};
 use dagon_core::log::Log;
 use dagon_format::header::HEADER_SIZE;
@@ -22,9 +22,9 @@ pub const ACTIVE: u8 = if cfg!(feature = "slot-b") { 1 } else { 0 };
 /// task that serves the agent: long erases report progress for it, and
 /// CONFIRM ends the trial.
 pub struct AppStore {
-    pub flash: RpFlash,
-    pub watch: &'static dyn Watch,
-    pub task: usize,
+    pub(crate) flash: RpFlash,
+    pub(crate) watch: &'static dyn Watch,
+    pub(crate) task: usize,
 }
 
 /// Where a target's region starts, where its body starts, body capacity.
@@ -65,7 +65,7 @@ impl SlotStore for AppStore {
         let (state, generation) = Log::load(&mut self.flash, &APP_LOG_LAYOUT)
             .map_or((Default::default(), 0), |l| (l.state, l.generation));
         let heads = [0u8, 1].map(|s| image::head_ref(&mut self.flash, APP_SLOT[s as usize], s));
-        status::status(&state, heads, ACTIVE, generation)
+        state.status(heads, ACTIVE, generation)
     }
 
     fn capacity(&self, t: u8, slot: u8) -> u32 {

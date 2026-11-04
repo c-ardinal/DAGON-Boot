@@ -12,6 +12,9 @@ build = "build.rs"
 
 [package.metadata.dagon]
 mcu = "rp2040"
+# Firmware clippy runs in CI (scripts/ci_crates.py --firmware-lint); the
+# defaults are the relay.
+lint = { target = "thumbv6m-none-eabi", features = [""] }
 
 [features]
 # The 親機 relay by default: a generated node names this package without

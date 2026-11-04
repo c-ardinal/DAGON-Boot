@@ -2,9 +2,11 @@
 //! `EspStore`, running factory with blank otadata, receiving signed images
 //! into the OTA slots, like `dagon recover watch` through the hub.
 
+use std::cell::{RefCell, RefMut};
+
 use crate::layout::{OTA_0, SLOT_A, SLOT_B, SLOT_FACTORY};
 use crate::tests::{store, Store};
-use dagon_agent::Agent;
+use dagon_agent::{image::State as Image, Agent};
 use dagon_events::{compose, Bounds, Composed, Layer, Nop, Published, Watchdog};
 use dagon_format::header::*;
 use dagon_format::{key_id, sha256, Version};
@@ -60,7 +62,9 @@ fn chain() -> Chain {
 }
 
 struct Pc {
-    agent: Agent<Store, Chain>,
+    /// The slot store, shared with the bench (it plays the 2nd stage).
+    store: &'static RefCell<Store>,
+    agent: Agent<&'static RefCell<Store>, Chain>,
     seq: u8,
 }
 
@@ -72,17 +76,18 @@ impl Pc {
     }
 
     fn factory() -> Self {
+        let store: &'static RefCell<Store> = Box::leak(Box::new(RefCell::new(store())));
         Pc {
-            agent: Agent::new(Self::config(), store(), chain()),
+            store,
+            agent: Agent::new(Self::config(), store, chain()),
             seq: 0,
         }
     }
 
     /// A reset: the 2nd stage boots, the app starts its agent again.
     fn reboot(&mut self) {
-        let mut s = std::mem::replace(self.agent.store(), store());
-        s.ota.boot();
-        self.agent = Agent::new(Self::config(), s, chain());
+        self.store.borrow_mut().ota.boot();
+        self.agent = Agent::new(Self::config(), self.store, chain());
     }
 
     fn call(&mut self, cmd: Cmd, payload: &[u8]) -> (Status, Vec<u8>) {
@@ -166,8 +171,8 @@ impl Pc {
         self.call(Cmd::SetPending, &[target::APP, slot]).0
     }
 
-    fn store(&mut self) -> &mut Store {
-        self.agent.store()
+    fn store(&mut self) -> RefMut<'static, Store> {
+        self.store.borrow_mut()
     }
 }
 
@@ -234,4 +239,34 @@ fn factory_rejects_tampered_and_foreign_images_without_writing() {
     // The good one still goes through.
     assert_eq!(pc.transfer(SLOT_B, &good), Status::Ok);
     assert_eq!(pc.set_pending(SLOT_B), Status::Ok);
+}
+
+/// A re-transfer into the pending slot leaves it written, in STATUS and in
+/// the agent's image machine alike, and the next reset does not try it.
+#[test]
+fn a_re_transfer_into_the_pending_slot_is_only_written() {
+    let kp = keypair();
+    let mut pc = Pc::factory();
+    assert_eq!(
+        pc.transfer(SLOT_A, &image(0, &body(3000, 1), &kp)),
+        Status::Ok
+    );
+    assert_eq!(pc.set_pending(SLOT_A), Status::Ok);
+    assert_eq!(pc.agent.images().state(SLOT_A), Some(Image::Pending));
+
+    assert_eq!(
+        pc.transfer(SLOT_A, &image(1, &body(2000, 2), &kp)),
+        Status::Ok
+    );
+    let st = pc.status();
+    assert_eq!(st.slots[0].state, SlotState::Written);
+    assert_eq!(st.slots[0].version, Version::new(1, 1, 0));
+    assert_eq!(pc.agent.images().state(SLOT_A), Some(Image::Written));
+    pc.reboot();
+    assert_eq!(
+        pc.status().active,
+        SLOT_FACTORY,
+        "no trial without SET_PENDING"
+    );
+    assert_eq!(pc.agent.images().state(SLOT_A), Some(Image::Written));
 }

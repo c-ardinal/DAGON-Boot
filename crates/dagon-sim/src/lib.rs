@@ -51,6 +51,7 @@ pub fn hub_config(pubkey: [u8; 32]) -> Config {
         role: role::HUB,
         mode: mode::APP,
         max_payload: max_payload::USB as u16,
+        trial_attempts: store::trial_attempts("rp2040"),
     }
 }
 
@@ -64,6 +65,7 @@ pub fn f401_config(pubkey: [u8; 32]) -> Config {
         role: role::NODE,
         mode: mode::APP,
         max_payload: max_payload::I2C as u16,
+        trial_attempts: store::trial_attempts("stm32f401re"),
     }
 }
 
@@ -98,6 +100,7 @@ pub fn watch_config(pubkey: [u8; 32]) -> Config {
         role: role::NODE,
         mode: mode::APP,
         max_payload: max_payload::UART as u16,
+        trial_attempts: store::trial_attempts("esp32s3"),
     }
 }
 

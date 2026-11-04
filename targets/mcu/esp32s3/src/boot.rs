@@ -148,6 +148,29 @@ impl<'a, 'd> EspBootSelect<'a, 'd> {
         }
     }
 
+    /// Takes OTA `slot` (not the running one) out of the selection: erases
+    /// every counted entry selecting it ([`otadata::selecting`]) and reads
+    /// the sector back erased. A cut erase leaves an entry that does not
+    /// count, as the 2nd stage reads it.
+    pub fn withdraw(&mut self, slot: u8) -> Result<(), BootSelectError> {
+        if slot == self.running {
+            return Err(BootSelectError::Slot);
+        }
+        let hit = otadata::selecting(&self.entries()?, slot);
+        for sector in (0..hit.len()).filter(|&i| hit[i]) {
+            let at = OTADATA.offset + sector as u32 * otadata::SECTOR_LEN;
+            let mut fs = self.storage.borrow_mut();
+            fs.erase(at, at + otadata::SECTOR_LEN)
+                .map_err(|_| BootSelectError::Write)?;
+            let mut back = [0u8; otadata::ENTRY_LEN];
+            fs.read(at, &mut back).map_err(|_| BootSelectError::Write)?;
+            if back != [0xFF; otadata::ENTRY_LEN] {
+                return Err(BootSelectError::Write);
+            }
+        }
+        Ok(())
+    }
+
     /// Erases otadata sector `sector`, programs `entry` at its start in one
     /// write and reads it back.
     fn write_entry(

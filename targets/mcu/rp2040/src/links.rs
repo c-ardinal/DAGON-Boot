@@ -198,6 +198,10 @@ impl<I: I2cBus> Link for I2cLink<I> {
         Reconnect::Persistent
     }
 
+    fn kind(&self) -> Kind {
+        Kind::I2c
+    }
+
     async fn read_frame(&mut self) -> Result<&[u8], LinkError> {
         let timeout = |_| LinkError::Timeout;
         loop {

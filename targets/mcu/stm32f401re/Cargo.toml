@@ -13,6 +13,8 @@ build = "build.rs"
 
 [package.metadata.dagon]
 mcu = "stm32f401re"
+# Firmware clippy runs in CI (scripts/ci_crates.py --firmware-lint).
+lint = { target = "thumbv7em-none-eabihf", features = ["", "conform"] }
 
 [features]
 # node by default: a generated node names this package without features.
@@ -46,7 +48,7 @@ embassy-futures = { version = "0.1", optional = true }
 embassy-executor = { version = "0.10", features = ["platform-cortex-m", "executor-interrupt"], optional = true }
 cortex-m = { version = "0.7", optional = true }
 defmt = { version = "1", optional = true }
-# The node's published events (`node::agent`).
+# The node's published events (`node::agent`), the shared flash driver.
 static_cell = { version = "2", optional = true }
 # Smaller verifier code for every image (the boot core must fit 32,256 bytes).
 ed25519-compact = { version = "2.6", default-features = false, features = ["opt_size"], optional = true }

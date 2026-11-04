@@ -86,7 +86,7 @@ fn flash_with(
     // Only ever compared with the candidates, never passed on as given.
     let device = v["device"].as_str();
     let t = read_topology(cfg, &inside(cfg, &cfg.topology_path(None)?)?)?;
-    let out = inside(cfg, &cfg.provision_dir().join(node))?;
+    let out = provision_out(cfg, node)?;
     // The page gets paths relative to the project or the DAGON source.
     let steps = crate::flash::plan(cfg, &t, node, &out, crate::flash::Paths::Relative)?;
     for l in &steps {
@@ -145,7 +145,20 @@ pub fn job_doctor(job: &mut Job, cfg: Config, _v: Value) -> Result<Value, String
     Ok(json!({ "ok": ok, "lines": lines }))
 }
 
+/// Node `node`'s provision folder as written (never resolved: the writes
+/// check every part of it for links). The page writes only inside the
+/// work area, so a provision_dir outside it is refused here.
+fn provision_out(cfg: &Config, node: &str) -> Result<std::path::PathBuf, String> {
+    let out = cfg.provision_dir().join(node);
+    if let crate::genfs::Out::User(p) = crate::genfs::Out::of(&cfg.base, &out)? {
+        inside(cfg, &p)?;
+    }
+    Ok(out)
+}
+
 #[cfg(test)]
+// Tests set up and inspect their own scratch folders directly.
+#[allow(clippy::disallowed_methods)]
 mod tests {
     use super::*;
 
@@ -300,5 +313,21 @@ mod tests {
         let (j, w) = run("none", &[], None, Some("yes"));
         assert!(w.is_empty(), "{j}");
         assert_eq!(j["state"], "failed", "{j}");
+    }
+
+    #[test]
+    fn a_provision_folder_outside_the_work_area_is_refused_by_the_page() {
+        let base = std::env::temp_dir().join(format!("dagon-devjobs-out-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&base);
+        std::fs::create_dir_all(&base).unwrap();
+        let mut cfg = Config {
+            base: crate::config::base_of(&base.join("dagon.toml")),
+            ..Config::default()
+        };
+        assert!(provision_out(&cfg, "seg").unwrap().starts_with(&cfg.base));
+        cfg.provision_dir = Some(crate::config::lexical(&cfg.base.join("../elsewhere")));
+        let e = provision_out(&cfg, "seg").unwrap_err();
+        assert!(e.contains("leaves the work area"), "{e}");
+        let _ = std::fs::remove_dir_all(&base);
     }
 }

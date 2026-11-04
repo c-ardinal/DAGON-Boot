@@ -23,6 +23,8 @@ fn piped_version_is_the_version_line_then_the_formats_without_banner() {
 }
 
 #[test]
+// Writes and removes its own scratch folder.
+#[allow(clippy::disallowed_methods)]
 fn json_output_carries_no_banner() {
     let dir = std::env::temp_dir().join(format!("dagon-banner-{}", std::process::id()));
     std::fs::create_dir_all(&dir).expect("temp dir");

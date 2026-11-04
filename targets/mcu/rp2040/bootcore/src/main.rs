@@ -20,7 +20,8 @@ use dagon_core::log::Log;
 use dagon_format::header::mcu_id;
 use dagon_mcu_rp2040::arm::{jump, led, step};
 use dagon_mcu_rp2040::flash::RpFlash;
-use dagon_mcu_rp2040::layout::{APP_LOG_LAYOUT, APP_SLOTS, MAX_ATTEMPTS, WDT_MS};
+use dagon_mcu_rp2040::layout::{APP_LOG_LAYOUT, APP_SLOTS, WDT_MS};
+use dagon_mcu_rp2040::TRIAL_ATTEMPTS;
 use dagon_mcu_rp2040::tag::checked_tag;
 use dagon_mcu_rp2040::{PUBKEY, TARGET_TAG};
 use embassy_rp::watchdog::Watchdog;
@@ -79,7 +80,7 @@ const CONFIG: BootConfig = BootConfig {
     pubkey: PUBKEY,
     mcu_id: mcu_id::RP2040,
     target_tag: checked_tag(TARGET_TAG),
-    max_attempts: MAX_ATTEMPTS,
+    max_attempts: TRIAL_ATTEMPTS,
 };
 
 #[cortex_m_rt::entry]

@@ -52,6 +52,8 @@ use static_cell::StaticCell;
 
 /// Flash size of the board (espflash `--flash-size 16mb`).
 pub const FLASH_SIZE: u32 = def::FLASH_BYTES;
+/// This board's definition id (`dagon-board.toml`).
+pub const BOARD_ID: &str = def::BOARD_ID;
 /// Image `target_tag` of the node: `DAGON_TARGET_TAG` at build time (the
 /// node's tag in the topology; the build fails without it).
 pub const TARGET_TAG: &str = match dagon_mcu_esp32s3::TARGET_TAG_OVERRIDE {
@@ -142,6 +144,10 @@ impl BoardBringUp for M5StopWatch {
 }
 
 impl BoardDef for M5StopWatch {
+    fn id(&self) -> Option<&'static str> {
+        Some(BOARD_ID)
+    }
+
     fn bring_up(&mut self) {
         BoardBringUp::bring_up(self);
     }

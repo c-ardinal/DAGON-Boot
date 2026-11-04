@@ -424,7 +424,7 @@ fn every_link_kind_and_uplink_round_trips_through_the_schema() {
         let up = dagon_topology::Topology::uplink(hub);
         assert_eq!(
             (up.kind, up.host),
-            (k, dagon_topology::schema::UplinkHost::Browser)
+            (*k, dagon_topology::schema::UplinkHost::Browser)
         );
     }
     let t = dagon_topology::parse_str(DEMO).unwrap();

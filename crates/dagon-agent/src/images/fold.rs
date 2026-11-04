@@ -4,14 +4,17 @@
 //! (boot attempts, rollbacks, followed by a restart), from a provisioned
 //! device, leaves each slot's machine in the state STATUS shows. So no
 //! state the fold reaches exists without the transitions that lead there,
-//! and the agent takes them, the second slot's included.
+//! and the agent takes them, the second slot's included. STATUS is the
+//! kind S stores' own mapping ([`LogState::status`]), so a rolled-back
+//! marker that outlives its image (a new image written into the slot, a
+//! confirmed image demoted after its re-trial was rolled back) fails here.
 
 extern crate std;
 
 use std::collections::BTreeSet;
 use std::vec::Vec;
 
-use dagon_core::log::LogState;
+use dagon_core::log::{LogState, SlotRef};
 use dagon_events::{compose_unpublished, Layer, Nop};
 use dagon_format::header::HEADER_SIZE;
 use dagon_format::statelog::{kind, reason, slot as log_slot, target as log_target, Record};
@@ -57,8 +60,6 @@ const OPS: [Op; 7] = [
 struct FoldStore {
     log: LogState,
     header: [u8; 2],
-    /// The rolled-back slot and the header it held then.
-    reverted: Option<(u8, u8)>,
 }
 
 const ERASED: u8 = 0xFF;
@@ -80,19 +81,12 @@ impl FoldStore {
         FoldStore {
             log: LogState::default().apply(&record(kind::PROVISION, 0, 1, reason::NONE)),
             header: [1, ERASED],
-            reverted: None,
         }
     }
 
     fn append(&mut self, k: u8, slot: u8, why: u8) {
         let d = self.header[usize::from(slot)];
         self.log = self.log.apply(&record(k, slot, d, why));
-    }
-
-    fn is_confirmed(&self, slot: u8) -> bool {
-        self.log
-            .confirmed
-            .is_some_and(|c| c.slot == slot && c.digest16 == [self.header[usize::from(slot)]; 16])
     }
 
     /// The boot core at a reset: start the pending slot (when its image is
@@ -105,9 +99,6 @@ impl FoldStore {
         if start && intact && self.log.attempts < MAX {
             self.append(kind::BOOT_ATTEMPT, p.slot, reason::NONE);
         } else {
-            // A re-tried confirmed image is not rolled back: it stays the
-            // confirmed one.
-            self.reverted = (!self.is_confirmed(p.slot)).then_some((p.slot, p.digest16[0]));
             let back = self.log.confirmed.map_or(log_slot::NONE, |c| c.slot);
             self.log = self
                 .log
@@ -126,51 +117,16 @@ fn digest_of(hdr: &[u8; HEADER_SIZE]) -> u8 {
 }
 
 impl SlotStore for FoldStore {
-    /// A header makes a slot Written, the log upgrades the slot whose
-    /// header it names. The rolled-back marker names an image: it holds
-    /// while the slot keeps the header that was rolled back (the log's
-    /// `reverted` names only a slot, so the store pairs it with the header
-    /// it held then).
     fn status(&mut self) -> StatusResp {
-        let mut st = StatusResp {
-            active: self.log.active(),
-            confirmed: self.log.confirmed.map_or(log_slot::NONE, |c| c.slot),
-            attempts: self.log.attempts,
-            last_reason: self.log.last_reason,
-            ..Default::default()
-        };
-        for (info, d) in st.slots.iter_mut().zip(self.header) {
-            if d != ERASED {
-                info.state = SlotState::Written;
-                info.version = Version::new(1, 0, d.into());
-            }
-        }
-        let trial = if self.log.on_trial() {
-            SlotState::Trying
-        } else {
-            SlotState::Pending
-        };
-        for (r, state) in [
-            (self.log.confirmed, SlotState::Confirmed),
-            (self.log.pending, trial),
-        ] {
-            let Some(r) = r else { continue };
-            let s = usize::from(r.slot);
-            if st.slots[s].state != SlotState::Empty && r.digest16 == [self.header[s]; 16] {
-                st.slots[s].state = state;
-            }
-        }
-        if let Some((s, d)) = self.reverted {
-            let i = usize::from(s);
-            let info = &mut st.slots[i];
-            if self.log.reverted == Some(s)
-                && info.state == SlotState::Written
-                && self.header[i] == d
-            {
-                info.state = SlotState::Reverted;
-            }
-        }
-        st
+        let heads = [0u8, 1].map(|s| {
+            let d = self.header[usize::from(s)];
+            (d != ERASED).then(|| SlotRef {
+                slot: s,
+                version: Version::new(1, 0, d.into()),
+                digest16: [d; 16],
+            })
+        });
+        self.log.status(heads, self.log.active(), 0)
     }
 
     fn capacity(&self, t: u8, slot: u8) -> u32 {
@@ -255,7 +211,7 @@ struct Model {
 impl Model {
     fn new() -> Self {
         Model {
-            images: ImageStore::open(FoldStore::provisioned()),
+            images: ImageStore::open(FoldStore::provisioned(), MAX),
             next_digest: 2,
         }
     }
@@ -264,7 +220,7 @@ impl Model {
     /// agree with ([`Model::agrees`] held before).
     fn copy(&mut self) -> Self {
         Model {
-            images: ImageStore::open(*self.images.store()),
+            images: ImageStore::open(*self.images.store(), MAX),
             next_digest: self.next_digest,
         }
     }
@@ -358,4 +314,38 @@ fn the_machines_agree_with_the_state_log_fold() {
     let checked = explore(&mut Model::new(), &mut Vec::new(), &mut seen);
     assert!(checked > 300_000, "{checked} sequences");
     assert_eq!(seen.len(), image::CATALOG.states.len(), "{seen:?}");
+}
+
+/// The two ways a rolled-back marker could outlive its image: a new image
+/// written into the rolled-back slot, and a confirmed image whose re-trial
+/// was rolled back, demoted later. Neither slot shows Reverted then.
+#[test]
+fn a_rolled_back_marker_names_one_image() {
+    use Op::*;
+    let cases: [&[Op]; 2] = [
+        &[Transfer(1), SetPending(1), Revert, Transfer(1)],
+        &[
+            Transfer(1),
+            SetPending(1),
+            Boot,
+            SetPending(0),
+            Revert,
+            Transfer(1),
+            SetPending(1),
+            Boot,
+            Confirm,
+        ],
+    ];
+    for path in cases {
+        let mut m = Model::new();
+        for (i, op) in path.iter().enumerate() {
+            assert!(m.step(*op), "{op:?} refused after {:?}", &path[..i]);
+            m.agrees(&path[..=i]);
+        }
+        let st = m.images.status();
+        assert!(
+            st.slots[..2].iter().all(|s| s.state != SlotState::Reverted),
+            "{path:?}: {st:?}"
+        );
+    }
 }

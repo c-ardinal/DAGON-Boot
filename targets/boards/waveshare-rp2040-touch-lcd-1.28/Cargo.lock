@@ -321,6 +321,9 @@ dependencies = [
 [[package]]
 name = "dagon-mcu-build"
 version = "0.1.0"
+dependencies = [
+ "toml",
+]
 
 [[package]]
 name = "dagon-mcu-common"
@@ -332,6 +335,7 @@ dependencies = [
  "dagon-format",
  "dagon-port",
  "dagon-proto",
+ "embassy-sync",
 ]
 
 [[package]]

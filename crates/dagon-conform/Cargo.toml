@@ -11,6 +11,6 @@ dagon-port = { path = "../dagon-port" }
 dagon-proto = { path = "../dagon-proto" }
 
 [dev-dependencies]
-dagon-agent = { path = "../dagon-agent" }
+dagon-agent = { path = "../dagon-agent", features = ["store-tests"] }
 dagon-events = { path = "../dagon-events" }
 ed25519-compact = { version = "2.6", default-features = false }

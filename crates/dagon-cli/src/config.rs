@@ -136,8 +136,12 @@ impl Config {
         c.base = dir.clone();
         let rel = |p: &mut PathBuf| *p = dir.join(&*p);
         c.topology.as_mut().map(rel);
-        c.release.as_mut().map(rel);
-        c.provision_dir.as_mut().map(rel);
+        // Output folders and files: `..` taken lexically, so a path outside
+        // the work area reads as outside (genfs::Out::of), never as a
+        // work-area path with `..` in it.
+        let out = |p: &mut PathBuf| *p = lexical(&dir.join(&*p));
+        c.release.as_mut().map(out);
+        c.provision_dir.as_mut().map(out);
         c.pubkey.as_mut().map(rel);
         c.signing_key.as_mut().map(rel);
         for inputs in c.provision.values_mut() {
@@ -163,6 +167,24 @@ impl Config {
             .clone()
             .unwrap_or_else(|| self.base.join(DEFAULT_PROVISION_DIR))
     }
+}
+
+/// `p` with `.` dropped and each `..` taking away the name before it,
+/// without looking at the file system (links are not followed).
+pub(crate) fn lexical(p: &Path) -> PathBuf {
+    let mut out = PathBuf::new();
+    for c in p.components() {
+        match c {
+            std::path::Component::CurDir => {}
+            std::path::Component::ParentDir => {
+                if !out.pop() {
+                    out.push("..");
+                }
+            }
+            other => out.push(other.as_os_str()),
+        }
+    }
+    out
 }
 
 /// The work area of config file `path`: its directory as an absolute path,
@@ -455,12 +477,11 @@ pub fn allow_key(public: &[u8; 32], allowed: bool) -> Result<(), String> {
     Ok(())
 }
 
+/// Writes a file the user named (a command's `--out`, the file next to an
+/// input it names); never through a link at that path. Outputs dagon keeps
+/// in the work area use genfs with a work-area path instead.
 pub fn write_file(path: &Path, bytes: &[u8]) -> Result<(), String> {
-    if let Some(dir) = path.parent().filter(|d| !d.as_os_str().is_empty()) {
-        std::fs::create_dir_all(dir)
-            .map_err(|e| format!("cannot create {}: {e}", dir.display()))?;
-    }
-    std::fs::write(path, bytes).map_err(|e| format!("cannot write {}: {e}", path.display()))
+    crate::genfs::write_user(path, bytes)
 }
 
 pub fn read_file(path: &Path) -> Result<Vec<u8>, String> {
@@ -468,8 +489,36 @@ pub fn read_file(path: &Path) -> Result<Vec<u8>, String> {
 }
 
 #[cfg(test)]
+// Tests set up and inspect their own scratch folders directly.
+#[allow(clippy::disallowed_methods)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn output_folders_outside_the_work_area_read_as_outside() {
+        let root = std::env::temp_dir().join(format!("dagon-cfg-outside-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(root.join("proj")).unwrap();
+        std::fs::write(
+            root.join("proj/dagon.toml"),
+            "provision_dir = \"../shared/provision\"\nrelease = \"./out/../rel.dgb\"\n",
+        )
+        .unwrap();
+        let c = Config::load(Some(&root.join("proj/dagon.toml").to_string_lossy())).unwrap();
+        let p = c.provision_dir();
+        assert!(
+            !p.components().any(|x| x == std::path::Component::ParentDir),
+            "{}",
+            p.display()
+        );
+        assert_eq!(p, lexical(&c.base.join("..").join("shared/provision")));
+        assert!(matches!(
+            crate::genfs::Out::of(&c.base, &p.join("seg")).unwrap(),
+            crate::genfs::Out::User(_)
+        ));
+        assert_eq!(c.release.unwrap(), c.base.join("rel.dgb"));
+        let _ = std::fs::remove_dir_all(&root);
+    }
 
     #[test]
     fn the_test_key_is_marked_wherever_its_id_is_printed() {

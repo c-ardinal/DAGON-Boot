@@ -10,7 +10,6 @@ use dagon_format::header::{image_kind, target_tag, HEADER_SIZE, SIGNED_LEN};
 use dagon_format::statelog::reason;
 use dagon_format::Version;
 use dagon_host::{Clock, Error, Host, Outcome, RecoverAssets, RecoverPath, Target, Transport};
-use dagon_port::Flash;
 use dagon_proto::payload::SlotState;
 use dagon_proto::Status;
 use dagon_sign::image::{self, sign_image, ImageSpec};
@@ -231,7 +230,7 @@ fn s1() -> R {
     let w = world()?;
     {
         let mut hub = w.sim.hub.borrow_mut();
-        let f = seg(&mut hub).flash();
+        let mut f = seg(&mut hub).flash();
         let at = f.ops().len() + 4;
         f.arm_cut(CutPoint::During(at));
     }
@@ -322,11 +321,7 @@ fn s4() -> R {
         let mut hub = w.sim.hub.borrow_mut();
         let now = hub.now_ms();
         let node = seg(&mut hub);
-        let mut i = 0;
-        while let Some((a, l)) = node.flash().sector_addr(i) {
-            Flash::erase(node.flash(), a, l).map_err(|e| format!("{e:?}"))?;
-            i += 1;
-        }
+        node.flash().erase_all().map_err(|e| format!("{e:?}"))?;
         node.reset(now);
     }
     let boot = sign(

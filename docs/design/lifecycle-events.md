@@ -92,13 +92,13 @@ The machine wraps the slot store port: `ImageStore<S: SlotStore>` holds
 the store, and the port's mutators (`erase`, `write`, `write_header`,
 `set_pending`, `confirm`) take a `Transition` that only the machine
 makes, inside the transition that emits the change's event. The
-`SlotStore` trait remains the port a board implements. Code that holds
-the store for the board's other resources (`Agent::store()`) cannot call
-the port's mutators with it. What a store type offers beyond the port (a
-raw flash handle, a simulator's provisioning helpers) is outside this
-guarantee: it is trusted code of the board or bench, like anything with
-flash access in the same image, and the sandbox (4) is what keeps
-extensions from it. When a header write does not read back, the slot is
+`SlotStore` trait remains the port a board implements. The agent owns the
+store and hands it to no one; the board's other resources (a flash
+reader, the watchdog) are handles the MCU package keeps for itself. What
+those handles reach (a raw flash driver, a simulator's provisioning
+helpers) is outside this guarantee: it is trusted code of the board or
+bench, like anything with flash access in the same image, and the
+sandbox (4) is what keeps extensions from it. When a header write does not read back, the slot is
 erased again, so a fault leaves no image the machine has not recorded.
 The agent exposes `images() -> &ImageView`
 (read-only: status, each slot's lifecycle state, own version, on
@@ -173,14 +173,14 @@ Generated order at start: `app.starting` → `app.store_opened` (or
 
 | Event | When | Payload |
 |---|---|---|
-| `app.starting` | DAGON's start function entered | `tag`, `role`, `mode` |
+| `app.starting` | DAGON's start function entered | `tag` (as a name digest, 2.4), `role`, `mode` |
 | `app.store_opened` / `app.store_failed` | state log or selection data read / unreadable | `active`, `trial`, `version`, `attempts`, `last_reason` / `error` |
 | `app.boot_replayed` / `app.boot_record_missing` | the boot record's valid events replayed (one summary per boot found, oldest first) / no valid event at all (5.5) | boot identity, `writers`, `entries`, `invalid_entries` / `why` |
 | `app.trial_started` / `app.rolled_back` | replayed from the state log | `slot`, `version`, `attempt`, `max` / `from`, `to`, `reason` |
 | `app.watchdog_taken` | the boot core's watchdog taken over | `period_ms`, `trial_policy` |
-| `app.bring_up` | board bring-up runs | `board_id` |
+| `app.bring_up` | board bring-up ran | `board_id` (as a name digest, 2.4) |
 | `app.extension_started` / `app.extension_faulted` / `app.extension_overran` | an extension's handler ran / faulted / overran (4.2) | `id`, `point` / `id`, `point` / `id`, `point`, `us` |
-| `app.link_up` / `app.link_down` | a DAGON link opened / closed | `link`, `addr` |
+| `app.link_up` / `app.link_down` | a DAGON link carries frames (its first frame, at start or after it went down) / stopped (a reply could not be sent, or the link closed) | `link`, `addr` |
 | `app.request` / `app.replied` | a request arrived (any protocol) / its reply left | `protocol`, `cmd`, `seq`, `via` / `status`, `ms` |
 | `app.hello` / `app.status_asked` / `app.version_asked` | identity / status / VERSION answered | `via` |
 | `app.update_offered` | an update request passed every DAGON guard; **decision** `accept_update` | `target`, `slot`, `body_len` |
@@ -546,7 +546,7 @@ the head of the chain copies each event into:
   owned, bounded form generated per event by `state_machine!`:
   `{ layer: u8, kind: u8, flags: u8, dropped: u8, seq: u32, payload:
   [u8; 16] }`. Fields are copied in their compact form the catalog
-  states (a length, an id, a digest prefix). No reference is retained
+  states (a length, an id, a digest prefix: a name such as a node's tag or a board id is recorded as the first 8 bytes of the SHA-256 of a domain prefix and the name, which a host maps back through the names it knows). No reference is retained
   after the producer returns. Overflow drops the oldest; the records
   after it report the loss in `dropped`, up to 255 each, carrying the
   rest, and the producer never waits. `seq` wraps and compares by serial
@@ -1937,3 +1937,143 @@ block write memory, and how does the design keep it privileged.
 | Wi-Fi and Bluetooth MACs | yes (bus masters) | bus masters; never enabled by DAGON; privileged |
 | Core 1 | a second CPU | `[[core]]`; the map is applied on both cores |
 | UART1/2, SPI2/3 without DMA, I2C, TWAI, PWM, RMT, PCNT not used by DAGON | no | eligible where self-contained; TWAI (CAN) is the natural window for a UDS transport |
+
+## 12. Execution model
+
+What runs where in DAGON's own code, how long DAGON's code may mask
+interrupts, and what a flash operation stops, per MCU. This section is
+normative: the MCU packages are written to it, the MCU definitions carry
+its hardware facts (`[execution]`, `[watchdog]`), and the checks named
+below keep code and data to it.
+
+### 12.1 Rules
+
+1. **Work in tasks, not handlers.** DAGON's serving loops, its relay and
+   its watchdog feeding run as tasks on executors; interrupt handlers of
+   DAGON's own only wake tasks or move bytes (link drivers, an
+   executor's own interrupt). Nothing that waits, erases or writes flash
+   runs in a handler.
+2. **Masking budget.** A critical section in DAGON's own code (the
+   watchdog guard's state, a lock's state) masks interrupts for at most
+   the MCU definition's `[execution] masked_max_us`. No flash erase or
+   program, and no other operation without a bound in microseconds, runs
+   inside one. A flash driver with several users is shared through a
+   lock that is *taken* without masking for the operation
+   (`dagon_mcu_common::shared::SharedFlash`, a `try_lock`; a handle that
+   finds it taken answers an error at once, it never waits). Enforced by
+   clippy: `targets/mcu/clippy.toml` refuses every masking primitive
+   (`critical_section::with` and `acquire`, `cortex_m::interrupt::free`
+   and `disable`, a critical-section `blocking_mutex::Mutex::lock`) in the
+   MCU packages and their boot images (stage0, boot cores), by resolved
+   path, so an alias or a wrapper does not hide
+   one. The functions that mask (the watchdog guard's state update, the
+   relay's shared display state) carry `#[allow(clippy::disallowed_methods)]`
+   with their reason, and a test keeps the list and the exemptions as they
+   are reviewed. Every request starts with a gated feed through the
+   serving loop's `ServeHost::feed` (the RP2040 relay's PC loop through
+   the guard's `progress`).
+3. **Flash operations are hardware facts.** What an erase or program
+   stops is the definition's `[execution] flash_op`:
+   - `fetch-stall`: single-bank flash the code runs from; instruction
+     fetch and flash reads stall until the operation ends. Interrupts
+     stay enabled and wait; nothing runs (DAGON keeps no handler in RAM).
+   - `xip-off-masked`: the operation runs from RAM with execute-in-place
+     off; the flash driver masks interrupts (and stops the other core)
+     for that one operation, as the hardware requires.
+   - `cache-off-masked`: the flash cache is off during the operation;
+     the flash driver masks interrupts for that one operation (handlers
+     outside internal RAM cannot run).
+
+   Either way DAGON issues at most one erase unit (`[execution]
+   erase_unit`) per operation, and the time it may take is the
+   datasheet maximum `erase_unit_max_ms`.
+4. **The watchdog outlasts one erase.** `erase_unit_max_ms` is below
+   `[watchdog] confirmed_ms` (checked when a definition is loaded); every
+   request starts with a gated feed, and a longer erase is split into
+   erase units with a gated feed between them. A pending image's trial
+   is a window of its own: the guard's trial policy decides whether
+   anything is fed while it lasts (`app.watchdog_taken` reports it).
+5. **Links during a stall.** A request is handled with the link closed
+   for new ones (an I2C target NACKs its own address; a stream link's
+   peer waits for the reply). What arrives while the CPU is stalled is
+   lost or held by hardware; the requester retries with the same
+   sequence number, and the node answers a repeated request with the
+   reply it already made.
+6. **A reset only after the reply left.** A reboot waits until its reply
+   was written and flushed, then for the delay `allow_reboot_now` asked
+   for with the serving task idle (so the guard keeps feeding); a reply
+   that was not sent resets nothing, and the requester's retry gets the
+   same reply.
+7. **Facts say how far they are established.** A definition's hardware
+   fact is a number checked against its source (the definition's comment
+   cites the document and table), `{ unverified = N }` (a value not yet
+   checked against its source) or `"unmeasured"` (no value yet). Tools and
+   documents report the last two as not established; a check that needs a
+   value uses an unverified one; none is relied on in a release.
+
+### 12.2 Per MCU
+
+The tables are what the MCU packages do; the budgets are each MCU
+definition's.
+
+**STM32F401RE** (`flash_op = "fetch-stall"`, `erase_unit` one 128 KiB
+sector, `erase_unit_max_ms` 4000 unverified (DS10086, 128 KiB sector
+erase), `masked_max_us` unmeasured, IWDG `confirmed_ms = 8000`)
+
+| Work | Runs in | Priority |
+|---|---|---|
+| Serving the I2C target link (the agent, CONF_RUN), flash erase and program | DAGON's interrupt executor (the USART6 vector) | P6, above thread mode |
+| The link's I2C and DMA transfers | the I2C driver's interrupts | the HAL's default |
+| Timers (`embassy-time`) | its timer interrupt | the HAL's default |
+| Watchdog feeding | the app's feeder task, gated by the guard | thread mode |
+| The sandbox timer (4.3) | SysTick | above every capability interrupt |
+
+During an erase nothing executes until the sector is done (4 s by the
+unverified value); the IWDG counts from the request's feed (8 s
+confirmed). The own
+I2C address is NACKed for the whole request, so the parent's polls are
+NACKed by the peripheral without the CPU, and the parent retries until
+its own deadline.
+
+**RP2040** (`flash_op = "xip-off-masked"`, `erase_unit` one 4 KiB
+sector, `erase_unit_max_ms` 400 unverified (the board's QSPI flash part
+decides it), `masked_max_us` unmeasured, watchdog 8000 ms)
+
+| Work | Runs in | Priority |
+|---|---|---|
+| The PC link and the agent; the sub-node links (relay) | DAGON's interrupt executor (SWI_IRQ_0) | P1 |
+| The USB device | the USB interrupt | the HAL's default |
+| Flash erase and program | the PC task, through the slot store's `SharedFlash` handle | one sector or page per operation, masked by the driver |
+| Watchdog feeding | the feeder task, gated by the guard | thread mode |
+
+Each flash operation masks interrupts for one sector erase (400 ms by the
+unverified value) or one page program; the slot store reports progress to the
+guard between sectors. The USB controller NAKs the host meanwhile and
+the host retries. The topology copy is read through the same flash
+driver it is written with.
+
+**ESP32-S3** (`flash_op = "cache-off-masked"`, `erase_unit` one 64 KiB
+block, `erase_unit_max_ms` 2000 unverified (the board's SPI flash part
+decides it), `masked_max_us` unmeasured, RTC WDT 4000 ms)
+
+| Work | Runs in | Priority |
+|---|---|---|
+| The UART and USB Serial/JTAG uplinks, the agent, flash erase and program | DAGON's interrupt executor (FROM_CPU_INTR1) | Priority2, above thread mode |
+| Watchdog feeding (once confirmed, gated by liveness) | the link task | Priority2 |
+| The app's tasks | thread mode | lowest |
+
+Each flash operation masks interrupts for one block erase (2 s by the
+unverified value); the slot store feeds the watchdog between blocks. The UART receive
+FIFO keeps what fits; a frame cut by the stall is dropped by the 20 ms
+gap rule and the requester retries. USB Serial/JTAG NAKs the host
+meanwhile.
+
+### 12.3 Measured on hardware
+
+None of the budgets above is established yet. For each MCU, measured on
+the boards before a release relies on them: the longest critical section
+of DAGON's own code (`masked_max_us`: the worst measured plus a margin),
+the worst-case erase time of the board's flash part (and its datasheet
+value, cited in the definition), the watchdog margin left at the end of
+one erase, and the link's recovery after it (the parent's retry
+answered).

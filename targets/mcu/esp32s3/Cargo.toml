@@ -8,6 +8,9 @@ publish = false
 # Id in the topology board table; `dagon gen` finds this package by it.
 [package.metadata.dagon]
 mcu = "esp32s3"
+# Firmware clippy runs in CI (scripts/ci_crates.py --firmware-lint); the
+# target is .cargo/config.toml's, the toolchain rust-toolchain.toml's.
+lint = { features = ["", "conform"] }
 
 # DAGON on the ESP32-S3 (kind V, behind the ESP-IDF 2nd stage with rollback):
 # flash and otadata slot store, watchdog and liveness, boot selection, link
@@ -33,6 +36,10 @@ dagon-format = { path = "../../../crates/dagon-format" }
 dagon-mcu-common = { path = "../common" }
 dagon-port = { path = "../../../crates/dagon-port" }
 dagon-proto = { path = "../../../crates/dagon-proto" }
+
+[build-dependencies]
+# The constants of dagon-mcu.toml (build.rs).
+dagon-mcu-build = { path = "../build" }
 
 [dev-dependencies]
 dagon-agent = { path = "../../../crates/dagon-agent", features = ["store-tests"] }

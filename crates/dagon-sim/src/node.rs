@@ -4,9 +4,9 @@
 
 use crate::flash::SimFlash;
 use crate::rom::{SimRom, ROM_ADDR};
-use crate::store::{Boot, Layout, SimStore, MAX_ATTEMPTS};
+use crate::store::{Boot, Layout, SimStore};
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::Arc;
+use std::sync::{Arc, MutexGuard};
 
 use dagon_agent::{Agent, Config, SlotStore, StoreError};
 use dagon_events::{
@@ -98,6 +98,9 @@ const TRIAL_WDT_MS: u32 = 10_000;
 
 pub struct SimNode {
     agent: Agent<SimStore, SimChain>,
+    /// The board's own handle on the flash the agent's store uses: its
+    /// boot core, ROM loader and power.
+    store: SimStore,
     check: SimCheck,
     cfg: Config,
     pub i2c_addr: Option<u8>,
@@ -122,14 +125,11 @@ pub struct SimNode {
 impl SimNode {
     /// Powers up and boots whatever the flash holds.
     pub fn new(cfg: Config, flash: SimFlash, layout: Layout) -> Self {
-        let pubkey = cfg.pubkey;
+        let store = SimStore::new(flash, layout, cfg.pubkey);
         let check = SimCheck::default();
         let mut n = SimNode {
-            agent: Agent::new(
-                cfg.clone(),
-                SimStore::new(flash, layout, pubkey),
-                chain(check.clone()),
-            ),
+            agent: Agent::new(cfg.clone(), store.clone(), chain(check.clone())),
+            store,
             check,
             cfg,
             i2c_addr: None,
@@ -164,22 +164,24 @@ impl SimNode {
         self.boots
     }
 
+    /// The board's handle on the slot store's flash (provisioning, the
+    /// boot core's view).
     pub fn store(&mut self) -> &mut SimStore {
-        self.agent.store()
+        &mut self.store
     }
 
-    pub fn flash(&mut self) -> &mut SimFlash {
-        &mut self.agent.store().flash
+    pub fn flash(&self) -> MutexGuard<'_, SimFlash> {
+        self.store.flash()
     }
 
     pub fn status(&mut self) -> StatusResp {
-        self.agent.store().status()
+        self.store.status()
     }
 
     /// Writes a factory image into slot A as provisioned and confirmed, then
     /// resets.
     pub fn provision(&mut self, image: &[u8], now_ms: u64) -> Result<(), StoreError> {
-        self.agent.store().provision(slot::A, image)?;
+        self.store.provision(slot::A, image)?;
         self.reset(now_ms);
         Ok(())
     }
@@ -208,8 +210,8 @@ impl SimNode {
     }
 
     fn boot_app(&mut self) -> Run {
-        for _ in 0..=MAX_ATTEMPTS + 1 {
-            let boot = self.agent.store().boot();
+        for _ in 0..=self.store.layout.trial_attempts() + 1 {
+            let boot = self.store.boot();
             if !self.flash().is_powered() {
                 return Run::Off;
             }
@@ -343,8 +345,7 @@ impl SimNode {
             return Ok(());
         }
         if self.run == Run::Rom {
-            let flash = &mut self.agent.store().flash;
-            self.rom.write(flash, data, now_ms);
+            self.rom.write(&mut self.store.flash(), data, now_ms);
             return Ok(());
         }
         let served = self.serve(data, *now_ms);

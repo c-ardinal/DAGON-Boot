@@ -16,7 +16,7 @@ use dagon_topology::Topology;
 use ed25519_compact::KeyPair;
 
 use crate::commands::{image_for_node, version, SignOpts};
-use crate::config::{load_key, read_topology, write_file, Config, Opts};
+use crate::config::{load_key, read_topology, Config, Opts};
 use crate::nodebuild::{self, SlotElfs};
 
 /// Release `apply` takes by default when dagon.toml names none.
@@ -52,6 +52,17 @@ impl Prepared {
             s += &format!("  {id:<width$}  {old} -> {}\n", self.version);
         }
         s
+    }
+}
+
+/// Where the applied release is kept: the project's `release` (the user's
+/// path) or dagon's own default in the work area.
+fn release_out(cfg: &Config) -> Result<crate::genfs::Out, String> {
+    match &cfg.release {
+        Some(p) => Ok(crate::genfs::Out::User(p.clone())),
+        None => Ok(crate::genfs::Out::Work(crate::genfs::Rel::new(
+            DEFAULT_RELEASE,
+        )?)),
     }
 }
 
@@ -202,7 +213,6 @@ pub(crate) fn prepare(
     previous: &BTreeMap<String, Version>,
     elfs: &[(String, SlotElfs)],
 ) -> Result<Prepared, String> {
-    let dir = cfg.base.join(DEPLOY_DIR).join(version.to_string());
     let opts = SignOpts {
         version,
         release_seq: 1,
@@ -229,7 +239,8 @@ pub(crate) fn prepare(
                 Some(&opts),
                 key,
             )?;
-            write_file(&dir.join(format!("{node}-{slot}.img")), &img)?;
+            let rel = crate::genfs::Rel::new(format!("{DEPLOY_DIR}/{version}/{node}-{slot}.img"))?;
+            crate::genfs::write(&cfg.base, &rel, &img)?;
             images.push(img);
         }
     }
@@ -238,7 +249,8 @@ pub(crate) fn prepare(
     let r = dagon_sign::release::build(&reg, t, &topo_bin, &images, &name, key)
         .map_err(|e| e.to_string())?;
     let release = cfg.base.join(DEPLOY_DIR).join(format!("{name}.dgb"));
-    write_file(&release, &r.bundle)?;
+    let rel = crate::genfs::Rel::new(format!("{DEPLOY_DIR}/{name}.dgb"))?;
+    crate::genfs::write(&cfg.base, &rel, &r.bundle)?;
     Ok(Prepared {
         version,
         release,
@@ -341,8 +353,10 @@ pub fn command(args: &[&str]) -> Result<(), String> {
         None,
     )?;
     // Only an applied release is the one the next deploy counts from.
-    write_file(&latest, &p.bundle)
+    crate::genfs::write_out(&cfg.base, &release_out(&cfg)?, &p.bundle)
 }
 
 #[cfg(test)]
+// Tests set up and inspect their own scratch folders directly.
+#[allow(clippy::disallowed_methods)]
 mod tests;

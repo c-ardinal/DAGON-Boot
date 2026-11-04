@@ -292,7 +292,7 @@ fn provision_node(o: &Opts<'_>, node: &str) -> Res {
         .map_or_else(|| cfg.provision_dir().join(node), PathBuf::from);
     let key = load_key(o.get("key"))?;
     let reg = crate::defs::registry(&cfg)?;
-    let w = provision_files(&reg, &t, node, inputs, &dir, &key)?;
+    let w = provision_files(&reg, &t, node, inputs, &dir, &key, &cfg.base)?;
     let mcu = node_mcu(&reg, &t, node)?;
     let via = &mcu.connection.label;
     match (w, &mcu.writer) {
@@ -390,7 +390,16 @@ pub(crate) fn provision_files(
     inputs: &crate::config::ProvisionInputs,
     dir: &Path,
     key: &KeyPair,
+    base: &Path,
 ) -> Result<FirstWrite, String> {
+    // Below the work area (the default provision folder) the files are
+    // DAGON's outputs and go through genfs; elsewhere the user named the
+    // folder (--out, provision_dir).
+    let out = crate::genfs::Out::of(base, dir)?;
+    let write_file = |p: &Path, b: &[u8]| {
+        let name = p.file_name().ok_or("no file name")?.to_string_lossy();
+        crate::genfs::write_out(base, &out.join(&name)?, b)
+    };
     let mcu = node_mcu(reg, t, node)?;
     if let Writer::Espflash { .. } = mcu.writer {
         return Err(format!(

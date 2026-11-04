@@ -12,6 +12,7 @@ fn is_key_hex(s: &str) -> bool {
 }
 
 fn main() {
+    dagon_mcu_build::definition();
     println!("cargo:rerun-if-env-changed=DAGON_PUBKEY");
     println!("cargo:rerun-if-env-changed=DAGON_ALLOW_TEST_KEY");
     let hex = match env::var("DAGON_PUBKEY") {

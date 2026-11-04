@@ -8,8 +8,8 @@
 //!   rebinding), and an Origin, when present, must be this server's own; the
 //!   event stream requires it. No CORS headers are ever sent.
 //! - Endpoints run fixed CLI functions; file paths come from dagon.toml.
-//! - The signing key and the Claude API key stay in this process: the API
-//!   reports only whether they exist and the key id.
+//! - The signing key and an agent's key stay in this process: the API
+//!   reports only whether they exist (and the signing key's id).
 
 mod api;
 mod devjobs;

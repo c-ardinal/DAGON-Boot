@@ -77,8 +77,8 @@ pub struct Server {
     pub agent_api: std::sync::OnceLock<Arc<AgentApi>>,
 }
 
-/// One model call: the request body in, the response body out.
-pub type AgentApi = dyn Fn(&Value) -> Result<Value, String> + Send + Sync;
+/// One agent call: the prompt in, the agent's text out.
+pub type AgentApi = dyn Fn(&crate::agents::Prompt) -> Result<String, String> + Send + Sync;
 
 /// The question being answered; dropping it lets the next one in.
 pub struct AskTurn<'a>(&'a AtomicBool);

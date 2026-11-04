@@ -1,0 +1,293 @@
+use std::time::Duration;
+
+use super::*;
+
+const T: Duration = Duration::from_secs(30);
+
+fn tmp_home(name: &str) -> PathBuf {
+    let d = std::env::temp_dir().join(format!("dagon-agents-{name}-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&d);
+    std::fs::create_dir_all(d.join(".dagon").join(USER_DIR)).unwrap();
+    d
+}
+
+fn prompt(system: &str, user: &str) -> Prompt {
+    Prompt {
+        system: system.into(),
+        user: user.into(),
+        model: None,
+    }
+}
+
+/// A program that prints a file, and one that copies stdin to stdout.
+fn printer(file: &Path) -> (String, Vec<String>) {
+    let f = file.display().to_string();
+    if cfg!(windows) {
+        ("cmd".into(), vec!["/C".into(), "type".into(), f])
+    } else {
+        ("cat".into(), vec![f])
+    }
+}
+
+fn echo() -> command::Command {
+    let (program, args) = if cfg!(windows) {
+        // sort copies stdin to stdout (in line order; the test text sorts as sent).
+        ("sort", Vec::new())
+    } else {
+        ("cat", Vec::new())
+    };
+    command::Command {
+        program: program.into(),
+        args,
+        system: command::SystemVia::Stdin,
+    }
+}
+
+fn toml_list(args: &[String]) -> String {
+    // TOML literal strings: a Windows path keeps its backslashes.
+    let quoted: Vec<String> = args.iter().map(|a| format!("'{a}'")).collect();
+    format!("[{}]", quoted.join(", "))
+}
+
+#[test]
+fn the_builtin_agent_is_claude_with_two_ways_claude_code_first() {
+    let a = Agents::load(None);
+    assert!(a.errors.is_empty(), "{:?}", a.errors);
+    let (agent, way) = a.default_way();
+    assert_eq!(
+        (agent.id.as_str(), way.id.as_str()),
+        ("claude", "claude-code")
+    );
+    assert_eq!(agent.label(), "Claude (Anthropic)");
+    let Transport::Command(c) = &way.transport else {
+        panic!("claude-code is a command")
+    };
+    assert_eq!(c.program, "claude");
+    for flag in [
+        "-p",
+        "--no-session-persistence",
+        "--safe-mode",
+        "--strict-mcp-config",
+        "--disable-slash-commands",
+    ] {
+        assert!(c.args.iter().any(|x| x == flag), "{flag}");
+    }
+    let after = |f: &str| c.args[c.args.iter().position(|x| x == f).unwrap() + 1].clone();
+    assert_eq!(after("--tools"), "", "every tool disabled");
+    assert_eq!(after("--permission-mode"), "dontAsk");
+    assert_eq!(after("--permission-prompts"), "none");
+    assert_eq!(after("--system-prompt-file"), "{system_file}");
+    let (_, api) = a.way("claude", "api").unwrap();
+    let Transport::MessagesHttp(h) = &api.transport else {
+        panic!("api is messages-http")
+    };
+    assert_eq!(h.key_env, "ANTHROPIC_API_KEY");
+    assert!(secret_env(None).contains(&"ANTHROPIC_API_KEY".to_string()));
+    assert!(secret_env(None).contains(&crate::config::KEY_ENV.to_string()));
+}
+
+#[test]
+fn user_definitions_are_checked_and_reported_by_file_name_only() {
+    let h = tmp_home("defs");
+    let dir = h.join(".dagon").join(USER_DIR);
+    let ok = "id = \"local\"\nname = \"Local\"\nprovider = \"Me\"\n\
+              [[ways]]\nid = \"run\"\nname = \"Run\"\n\
+              [ways.transport]\nkind = \"command\"\nprogram = \"local-agent\"\n";
+    std::fs::write(dir.join("a-local.toml"), ok).unwrap();
+    for (name, text) in [
+        ("b-unknown-field.toml", ok.replace("provider = \"Me\"", "provider = \"Me\"\nshell = true")),
+        ("c-unknown-kind.toml", ok.replace("\"command\"", "\"shell\"")),
+        ("d-bad-id.toml", ok.replace("id = \"local\"", "id = \"Local Agent\"")),
+        ("e-again.toml", ok.to_string()),
+        ("f-claude.toml", ok.replace("id = \"local\"", "id = \"claude\"")),
+        ("g-http.toml", ok.replace("kind = \"command\"\nprogram = \"local-agent\"", "kind = \"messages-http\"\nurl = \"http://x\"\nversion = \"1\"\nkey_env = \"K\"\nmodel = \"m\"")),
+        ("h-placeholder.toml", ok.replace("program = \"local-agent\"", "program = \"x\"\nargs = [\"--in={user}\"]")),
+        ("i-no-ways.toml", "id = \"x\"\nname = \"X\"\nprovider = \"P\"\nways = []\n".into()),
+        ("j-transport-field.toml", ok.replace("program = \"local-agent\"", "program = \"x\"\nenv = \"A=1\"")),
+    ] {
+        std::fs::write(dir.join(name), text).unwrap();
+    }
+    std::fs::write(dir.join("notes.txt"), "ignored").unwrap();
+    let a = Agents::load(Some(&h));
+    assert_eq!(a.list.len(), 2, "{:?}", a.errors);
+    assert!(a.way("local", "run").is_some());
+    assert_eq!(a.errors.len(), 9, "{:?}", a.errors);
+    for e in &a.errors {
+        assert!(
+            !e.contains(&*h.to_string_lossy()) && !e.contains("Users"),
+            "{e}"
+        );
+    }
+    assert!(a.errors[3].starts_with("e-again.toml: agent local is defined already"));
+    std::fs::remove_dir_all(&h).unwrap();
+}
+
+#[test]
+fn replies_and_conversations() {
+    assert_eq!(
+        reply_json("{\"a\":1}").unwrap(),
+        serde_json::json!({ "a": 1 })
+    );
+    assert_eq!(
+        reply_json("Here:\n```json\n{\"a\":{\"b\":2}}\n```").unwrap()["a"]["b"],
+        2
+    );
+    for bad in ["", "no", "[1]", "{not json}", "} {"] {
+        assert_eq!(reply_json(bad).unwrap_err(), UNEXPECTED, "{bad}");
+    }
+    assert_eq!(conversation(&["one".into()]), "one");
+    let c = conversation(&["q".into(), "r".into(), "fix".into()]);
+    assert_eq!(
+        c,
+        "<turn from=\"dagon\">\nq\n</turn>\n<turn from=\"you\">\nr\n</turn>\n<turn from=\"dagon\">\nfix\n</turn>"
+    );
+}
+
+#[test]
+fn every_call_is_checked_for_consent_and_size_first() {
+    let h = tmp_home("gate");
+    let small = prompt("s", "u");
+    assert_eq!(
+        before_call(&h, &small).err().unwrap(),
+        crate::consent::NOT_LINKED
+    );
+    assert_eq!(call(&h, &small, T).unwrap_err(), crate::consent::NOT_LINKED);
+    crate::consent::link(&h, "claude", "api").unwrap();
+    assert!(before_call(&h, &small).is_ok());
+    let big = prompt(&"s".repeat(MAX_REQUEST), "u");
+    assert_eq!(before_call(&h, &big).err().unwrap(), TOO_LARGE);
+    assert_eq!(call(&h, &big, T).unwrap_err(), TOO_LARGE);
+    std::fs::remove_dir_all(&h).unwrap();
+}
+
+#[test]
+fn a_command_gets_the_prompt_on_stdin_in_an_empty_folder() {
+    let out = command::run_unchecked(&echo(), &prompt("SYSTEM-TEXT", "USER-TEXT"), T).unwrap();
+    let (s, u) = (
+        out.find("SYSTEM-TEXT").unwrap(),
+        out.find("USER-TEXT").unwrap(),
+    );
+    assert!(s < u, "{out}");
+
+    let (program, mut args) = if cfg!(windows) {
+        (
+            "cmd".to_string(),
+            vec!["/C".to_string(), "type".to_string()],
+        )
+    } else {
+        ("cat".to_string(), Vec::new())
+    };
+    args.push("{system_file}".into());
+    let file = command::Command {
+        program,
+        args,
+        system: command::SystemVia::File,
+    };
+    let out = command::run_unchecked(&file, &prompt("ONLY-SYSTEM", "USER"), T).unwrap();
+    assert_eq!(out.trim(), "ONLY-SYSTEM");
+
+    // The folder it ran in was empty and is gone.
+    let (program, args) = if cfg!(windows) {
+        ("cmd", vec!["/C".to_string(), "cd".to_string()])
+    } else {
+        ("pwd", Vec::new())
+    };
+    let pwd = command::Command {
+        program: program.into(),
+        args,
+        system: command::SystemVia::Stdin,
+    };
+    let dir = command::run_unchecked(&pwd, &prompt("", ""), T).unwrap();
+    let dir = PathBuf::from(dir.trim());
+    assert!(
+        dir.starts_with(std::env::temp_dir()) || dir.to_string_lossy().contains("dagon-agent-")
+    );
+    assert!(!dir.exists(), "{}", dir.display());
+}
+
+#[test]
+fn a_command_that_hangs_fails_or_is_missing_gives_a_plain_error() {
+    let (program, args) = if cfg!(windows) {
+        (
+            "ping",
+            vec!["-n".to_string(), "20".to_string(), "127.0.0.1".to_string()],
+        )
+    } else {
+        ("sleep", vec!["20".to_string()])
+    };
+    let slow = command::Command {
+        program: program.into(),
+        args,
+        system: command::SystemVia::Stdin,
+    };
+    let t0 = std::time::Instant::now();
+    let e = command::run_unchecked(&slow, &prompt("", ""), Duration::from_millis(300)).unwrap_err();
+    assert_eq!(e, TIMED_OUT);
+    assert!(t0.elapsed() < Duration::from_secs(10));
+
+    let (program, args) = if cfg!(windows) {
+        ("cmd", vec!["/C".to_string(), "exit 3".to_string()])
+    } else {
+        ("sh", vec!["-c".to_string(), "exit 3".to_string()])
+    };
+    let fails = command::Command {
+        program: program.into(),
+        args,
+        system: command::SystemVia::Stdin,
+    };
+    let e = command::run_unchecked(&fails, &prompt("", ""), T).unwrap_err();
+    assert_eq!(e, "the agent program ended with exit code 3");
+
+    let missing = command::Command {
+        program: "dagon-no-such-agent-program".into(),
+        args: Vec::new(),
+        system: command::SystemVia::Stdin,
+    };
+    assert!(missing.program_path().is_none());
+}
+
+/// An agent added as data only: one TOML file in ~/.dagon/agents naming a
+/// program of kind `command`, linked, then asked through [`call`] and the
+/// whole question path.
+#[test]
+fn an_agent_defined_only_in_a_toml_file_answers_through_command() {
+    let h = tmp_home("fake");
+    let answer = h.join("answer.json");
+    std::fs::write(&answer, r#"{"answer":"偽のエージェントです。"}"#).unwrap();
+    let (program, args) = printer(&answer);
+    let def = format!(
+        "id = \"fake\"\nname = \"Fake\"\nprovider = \"Test\"\n\
+         [[ways]]\nid = \"print\"\nname = \"Print\"\n\
+         [ways.transport]\nkind = \"command\"\nprogram = {program:?}\nargs = {}\n",
+        toml_list(&args)
+    );
+    std::fs::write(h.join(".dagon").join(USER_DIR).join("fake.toml"), def).unwrap();
+    let agents = Agents::load(Some(&h));
+    assert!(agents.errors.is_empty(), "{:?}", agents.errors);
+    let (_, way) = agents.way("fake", "print").unwrap();
+    assert!(way.available());
+    crate::consent::link(&h, "fake", "print").unwrap();
+    assert!(ready(&h).is_ok());
+    let text = call(&h, &prompt("s", "u"), T).unwrap();
+    assert_eq!(
+        reply_json(&text).unwrap()["answer"],
+        "偽のエージェントです。"
+    );
+
+    let q = crate::ask::parse(&serde_json::json!({ "question": "次は？" })).unwrap();
+    let facts = crate::ask::Facts {
+        reg: dagon_topology::defs::Registry::builtin(),
+        topology: None,
+        jobs: Vec::new(),
+    };
+    let mut api = |p: &Prompt| call(&h, p, T);
+    let r = crate::ask::ask(&q, &facts, &mut api).unwrap();
+    assert_eq!(r.answer, "偽のエージェントです。");
+    // Unlinked: the same agent is not called again.
+    crate::consent::unlink(&h).unwrap();
+    assert_eq!(
+        call(&h, &prompt("s", "u"), T).unwrap_err(),
+        crate::consent::NOT_LINKED
+    );
+    std::fs::remove_dir_all(&h).unwrap();
+}

@@ -1,9 +1,10 @@
-//! Linking DAGON to an agent: the user's consent to send, asked once and
-//! kept in ~/.dagon/agent.json until unlinked. One consent per user, not per
-//! project: the key it goes with (ANTHROPIC_API_KEY) belongs to the user's
-//! environment, "once" would otherwise mean once per project, and nothing
-//! about it lands in a project folder that may be committed.
-//! `dagon ai link` / `dagon ai unlink` and serve's /v1/agent share this.
+//! Linking DAGON to an agent: the user's consent to send to one agent one
+//! way (see [`crate::agents`]), asked once and kept in ~/.dagon/agent.json
+//! until unlinked. One consent per user, not per project: the agent's login
+//! or key belongs to the user's environment, "once" would otherwise mean
+//! once per project, and nothing about it lands in a project folder that
+//! may be committed. `dagon ai link` / `dagon ai unlink` and serve's
+//! /v1/agent share this.
 
 use std::io::BufRead;
 use std::path::{Path, PathBuf};
@@ -11,9 +12,7 @@ use std::sync::{PoisonError, RwLock, RwLockReadGuard};
 
 use serde_json::{json, Value};
 
-/// The one agent DAGON talks to (no other implementation exists).
-pub const PROVIDER_ID: &str = "anthropic";
-pub const PROVIDER_NAME: &str = "Claude (Anthropic)";
+use crate::agents::{AgentDef, Agents, Transport, WayDef};
 
 /// What a linked DAGON sends and never sends; the page and the terminal
 /// show these same words when asking for consent.
@@ -30,12 +29,13 @@ pub const NOT_LINKED: &str =
     "DAGON is not linked to an agent; link it first (consent is asked once)";
 
 const FILE: &str = "agent.json";
-/// agent.json holds two short fields; a larger file is not a consent.
+/// agent.json holds three short fields; a larger file is not a consent.
 const MAX_FILE: usize = 4 * 1024;
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct Consent {
-    pub provider: String,
+    pub agent: String,
+    pub way: String,
     /// UTC, RFC 3339 (seconds).
     pub at: String,
 }
@@ -45,19 +45,23 @@ fn file(home: &Path) -> PathBuf {
 }
 
 /// The recorded consent; None when there is none, it is unreadable, holds
-/// any other field, names another provider or a time not as [`link`]
-/// writes it.
+/// any other field, or an id or time not as [`link`] writes them. Whether
+/// the agent and way still exist is [`linked`]'s question.
 pub fn consent(home: &Path) -> Option<Consent> {
     let bytes = crate::paths::read_capped(&file(home), MAX_FILE).ok()??;
     let v: Value = serde_json::from_slice(&bytes).ok()?;
-    if v.as_object()?.len() != 2 {
+    if v.as_object()?.len() != 3 {
         return None;
     }
-    let provider = v["provider"].as_str().filter(|p| *p == PROVIDER_ID)?;
-    let at = v["at"].as_str().filter(|a| is_utc_time(a))?;
+    let id = |k: &str| {
+        v[k].as_str()
+            .filter(|s| crate::agents::plain_id(s))
+            .map(str::to_string)
+    };
     Some(Consent {
-        provider: provider.into(),
-        at: at.into(),
+        agent: id("agent")?,
+        way: id("way")?,
+        at: v["at"].as_str().filter(|a| is_utc_time(a))?.to_string(),
     })
 }
 
@@ -65,13 +69,15 @@ pub fn is_linked(home: &Path) -> bool {
     consent(home).is_some()
 }
 
-/// Records consent now. The error never names the file (serve passes it on).
-pub fn link(home: &Path) -> Result<Consent, String> {
+/// Records consent now to send to `agent` by `way` (ids the caller checked
+/// against the definitions). The error never names the file.
+pub fn link(home: &Path, agent: &str, way: &str) -> Result<Consent, String> {
     let c = Consent {
-        provider: PROVIDER_ID.into(),
+        agent: agent.into(),
+        way: way.into(),
         at: utc_now(),
     };
-    let text = json!({ "provider": c.provider, "at": c.at }).to_string();
+    let text = json!({ "agent": c.agent, "way": c.way, "at": c.at }).to_string();
     crate::paths::write_atomic(&file(home), text.as_bytes())
         .map_err(|_| "the consent could not be saved".to_string())?;
     Ok(c)
@@ -116,8 +122,16 @@ fn lock_file(home: &Path) -> Result<std::fs::File, String> {
 /// The consent, held for one model call: from the check until it is
 /// dropped, unlink waits.
 pub struct Held {
+    consent: Consent,
     _file: std::fs::File,
     _calls: RwLockReadGuard<'static, ()>,
+}
+
+impl Held {
+    /// The agent and way the held consent is for.
+    pub fn consent(&self) -> &Consent {
+        &self.consent
+    }
 }
 
 /// Holds the consent; Err(NOT_LINKED) when there is none.
@@ -129,24 +143,62 @@ pub fn hold(home: &Path) -> Result<Held, String> {
     let file = lock_file(home)?;
     file.lock_shared()
         .map_err(|_| LOCK_UNAVAILABLE.to_string())?;
-    // Checked again under the lock: an unlink may have just finished.
-    if !is_linked(home) {
-        return Err(NOT_LINKED.into());
-    }
+    // Read again under the lock: an unlink may have just finished.
+    let consent = consent(home).ok_or(NOT_LINKED)?;
     Ok(Held {
+        consent,
         _file: file,
         _calls: calls,
     })
 }
 
-/// GET /v1/agent. `available`: this CLI has the key (never the key itself).
-pub fn status(home: Option<&Path>, available: bool) -> Value {
-    let c = home.and_then(consent);
+type LinkedWay<'a> = (Consent, &'a AgentDef, &'a WayDef);
+
+/// The consent when its agent and way are still defined.
+pub fn linked<'a>(home: &Path, agents: &'a Agents) -> Option<LinkedWay<'a>> {
+    let c = consent(home)?;
+    let (a, w) = agents.way(&c.agent, &c.way)?;
+    Some((c.clone(), a, w))
+}
+
+/// GET /v1/agent: the agents and ways (with whether each can be used here:
+/// program on PATH, key set; never a key, path or command), the consent,
+/// and what linking sends. `available` and `provider` describe the linked
+/// way, or the default one before linking.
+pub fn status(home: Option<&Path>, agents: &Agents) -> Value {
+    let linked = home.and_then(|h| linked(h, agents));
+    let (a, w) = linked
+        .as_ref()
+        .map(|(_, a, w)| (*a, *w))
+        .unwrap_or_else(|| agents.default_way());
+    let list: Vec<Value> = agents
+        .list
+        .iter()
+        .map(|a| {
+            let ways: Vec<Value> = a
+                .ways
+                .iter()
+                .map(|w| {
+                    json!({
+                        "id": w.id,
+                        "name": w.name,
+                        "kind": w.transport.kind(),
+                        "available": w.available(),
+                    })
+                })
+                .collect();
+            json!({ "id": a.id, "name": a.name, "provider": a.provider, "ways": ways })
+        })
+        .collect();
+    let (da, dw) = agents.default_way();
     json!({
-        "available": available,
-        "linked": c.is_some(),
-        "provider": { "id": PROVIDER_ID, "name": PROVIDER_NAME },
-        "consent": c.map(|c| json!({ "at": c.at, "provider": c.provider })),
+        "available": w.available(),
+        "linked": linked.is_some(),
+        "provider": { "id": a.id, "name": a.label() },
+        "consent": linked.map(|(c, _, _)| json!({ "agent": c.agent, "way": c.way, "at": c.at })),
+        "agents": list,
+        "default": { "agent": da.id, "way": dw.id },
+        "errors": agents.errors,
         "sends": SENDS,
         "never_sends": NEVER_SENDS,
     })
@@ -160,9 +212,9 @@ pub fn home() -> Result<PathBuf, String> {
         .ok_or_else(|| "cannot find the home folder".into())
 }
 
-/// The error `dagon ai topology` gives before linking.
+/// The error `dagon ai topology` and `ask` give before linking.
 pub fn require_linked(home: &Path) -> Result<(), String> {
-    if is_linked(home) {
+    if linked(home, &Agents::load(Some(home))).is_some() {
         Ok(())
     } else {
         Err(
@@ -173,37 +225,88 @@ pub fn require_linked(home: &Path) -> Result<(), String> {
 }
 
 /// The consent text of the terminal: the page's linking dialog, worded for
-/// the CLI (the key is this environment's, not the page's).
-fn consent_text() -> String {
+/// the CLI.
+fn consent_text(a: &AgentDef, w: &WayDef) -> String {
     let list = |l: &[&str]| l.join("、");
+    let key = match &w.transport {
+        Transport::Command(c) => format!(
+            "鍵: {} の設定とログインを使います。DAGON は鍵を読みません",
+            c.program
+        ),
+        Transport::MessagesHttp(h) => format!(
+            "鍵: 環境変数 {} に置いてください。鍵は画面にも送る文にも出しません",
+            h.key_env
+        ),
+    };
     format!(
         "DAGON と連携する\n\n\
          DAGON は連携したエージェントに構成について問い合わせて答えます。\
          送ることへの同意は、この連携のときに一度だけいただきます。\
          連携したあとの質問は確かめずに送ります。\n\n\
-         送り先: {PROVIDER_NAME}　今使えるのはこの 1 つです\n\
-         鍵: 環境変数 {key} に置いてください。鍵は画面にも送る文にも出しません\n\
+         送り先: {}　つなぎ方: {}\n\
+         {key}\n\
          送るもの: {}\n\
          送らないもの: {}\n\n\
          連携は dagon ai unlink でいつでも外せます。外すと同意も取り消します。",
+        a.label(),
+        w.name,
         list(&SENDS),
         list(&NEVER_SENDS),
-        key = crate::ai::KEY_ENV,
     )
 }
 
-/// `dagon ai link`: shows what is sent and records consent on "y".
-pub fn link_command(args: &[&str]) -> Result<(), String> {
-    no_args(args, "link")?;
-    let home = home()?;
-    if let Some(c) = consent(&home) {
-        println!(
-            "DAGON はすでに連携しています。同意は {} に記録しました",
-            c.at
-        );
-        return Ok(());
+const LINK_USAGE: &str = "usage: dagon ai link [--agent <id>] [--way <id>]";
+
+/// The agent and way `dagon ai link` names (default: the first agent, its
+/// first way).
+fn chosen<'a>(agents: &'a Agents, args: &[&str]) -> Result<(&'a AgentDef, &'a WayDef), String> {
+    let (mut agent, mut way) = (None, None);
+    let mut it = args.iter();
+    while let Some(flag) = it.next() {
+        match (*flag, it.next()) {
+            ("--agent", Some(v)) => agent = Some(*v),
+            ("--way", Some(v)) => way = Some(*v),
+            _ => return Err(format!("unknown argument {flag}; {LINK_USAGE}")),
+        }
     }
-    eprintln!("{}\n", consent_text());
+    let a = match agent {
+        Some(id) => agents.list.iter().find(|a| a.id == id),
+        None => agents.list.first(),
+    }
+    .ok_or_else(|| format!("no agent {}; {LINK_USAGE}", agent.unwrap_or_default()))?;
+    let w = match way {
+        Some(id) => a.ways.iter().find(|w| w.id == id),
+        None => a.ways.first(),
+    }
+    .ok_or_else(|| {
+        format!(
+            "{} has no way {}; {LINK_USAGE}",
+            a.id,
+            way.unwrap_or_default()
+        )
+    })?;
+    Ok((a, w))
+}
+
+/// `dagon ai link [--agent <id>] [--way <id>]`: shows what is sent and to
+/// whom, and records consent on "y".
+pub fn link_command(args: &[&str]) -> Result<(), String> {
+    let home = home()?;
+    let agents = Agents::load(Some(&home));
+    for e in &agents.errors {
+        eprintln!("warning: ~/.dagon/agents/{e}");
+    }
+    let (a, w) = chosen(&agents, args)?;
+    if let Some((c, _, _)) = linked(&home, &agents) {
+        if c.agent == a.id && c.way == w.id {
+            println!(
+                "DAGON はすでに連携しています。同意は {} に記録しました",
+                c.at
+            );
+            return Ok(());
+        }
+    }
+    eprintln!("{}\n", consent_text(a, w));
     eprint!("同意して連携しますか？ [y/N] ");
     let mut line = String::new();
     let _ = std::io::stdin().lock().read_line(&mut line);
@@ -211,18 +314,24 @@ pub fn link_command(args: &[&str]) -> Result<(), String> {
         println!("連携しませんでした");
         return Ok(());
     }
-    let c = link(&home)?;
+    let c = link(&home, &a.id, &w.id)?;
     println!(
-        "DAGON と連携しました。送り先 {PROVIDER_NAME} と送る中身への同意を {} に記録しました",
+        "DAGON と連携しました。送り先 {}（{}）と送る中身への同意を {} に記録しました",
+        a.label(),
+        w.name,
         c.at
     );
-    if !crate::ai::api_key_present() {
-        println!(
-            "{} が設定されていません。設定するまで DAGON は答えられません",
-            crate::ai::KEY_ENV
-        );
+    if !w.available() {
+        println!("このつなぎ方はまだ使えません。{}", unavailable_hint(w));
     }
     Ok(())
+}
+
+fn unavailable_hint(w: &WayDef) -> String {
+    match &w.transport {
+        Transport::Command(c) => format!("{} を PATH から使えるようにしてください", c.program),
+        Transport::MessagesHttp(h) => format!("環境変数 {} を設定してください", h.key_env),
+    }
 }
 
 /// `dagon ai unlink`: removes the consent.
@@ -230,8 +339,7 @@ pub fn unlink_command(args: &[&str]) -> Result<(), String> {
     no_args(args, "unlink")?;
     if unlink(&home()?)? {
         println!(
-            "DAGON との連携を外し、同意を取り消しました。鍵は環境変数 {} から消してください",
-            crate::ai::KEY_ENV
+            "DAGON との連携を外し、同意を取り消しました。鍵やログインはエージェントの側で消してください"
         );
     } else {
         println!("DAGON は連携していません");
@@ -345,15 +453,47 @@ mod tests {
         let h = tmp_home("cycle");
         assert!(!is_linked(&h));
         assert!(require_linked(&h).is_err());
-        let c = link(&h).unwrap();
+        let agents = Agents::load(None);
+        let s = status(Some(&h), &agents);
+        assert_eq!(s["linked"], false);
+        // Before linking: the default way, Claude Code.
+        assert_eq!(
+            s["default"],
+            json!({ "agent": "claude", "way": "claude-code" })
+        );
+        assert_eq!(
+            s["provider"],
+            json!({ "id": "claude", "name": "Claude (Anthropic)" })
+        );
+        let c = link(&h, "claude", "api").unwrap();
         assert_eq!(consent(&h), Some(c.clone()));
-        let s = status(Some(&h), false);
+        let s = status(Some(&h), &agents);
         assert_eq!(s["linked"], true);
-        assert_eq!(s["consent"]["at"], c.at.as_str());
-        assert_eq!(s["consent"]["provider"], PROVIDER_ID);
+        assert_eq!(
+            s["consent"],
+            json!({ "agent": "claude", "way": "api", "at": c.at })
+        );
+        let ways = &s["agents"][0]["ways"];
+        assert_eq!(ways[0]["id"], "claude-code");
+        assert_eq!(ways[0]["kind"], "command");
+        assert_eq!(ways[1]["kind"], "messages-http");
+        assert!(ways[0]["available"].is_boolean() && ways[1]["available"].is_boolean());
+        // Never a program, path, argument or key variable.
+        for never in [
+            "program",
+            "--tools",
+            "ANTHROPIC_API_KEY",
+            "https://",
+            "key_env",
+        ] {
+            assert!(!s["agents"].to_string().contains(never), "{never}");
+        }
+        // A consent for a way that is not defined is no link.
+        link(&h, "claude", "gone").unwrap();
+        assert!(linked(&h, &agents).is_none() && require_linked(&h).is_err());
         assert!(unlink(&h).unwrap());
         assert!(!unlink(&h).unwrap());
-        assert_eq!(status(Some(&h), true)["consent"], Value::Null);
+        assert_eq!(status(Some(&h), &agents)["consent"], Value::Null);
         std::fs::remove_dir_all(&h).unwrap();
     }
 
@@ -361,8 +501,12 @@ mod tests {
     fn unlink_waits_for_a_call_in_flight_and_no_call_passes_after_it() {
         let h = tmp_home("hold");
         assert_eq!(hold(&h).err().as_deref(), Some(NOT_LINKED));
-        link(&h).unwrap();
+        link(&h, "claude", "api").unwrap();
         let held = hold(&h).unwrap();
+        assert_eq!(
+            (held.consent().agent.as_str(), held.consent().way.as_str()),
+            ("claude", "api")
+        );
         let (done_tx, done) = std::sync::mpsc::channel();
         let h2 = h.clone();
         let t = std::thread::spawn(move || {
@@ -387,7 +531,7 @@ mod tests {
     #[test]
     fn unlink_waits_for_another_processs_call_through_the_lock_file() {
         let h = tmp_home("file-lock");
-        link(&h).unwrap();
+        link(&h, "claude", "api").unwrap();
         // What a call in another dagon holds: the shared file lock only.
         let other = lock_file(&h).unwrap();
         other.lock_shared().unwrap();
@@ -414,11 +558,13 @@ mod tests {
         for text in [
             "",
             "{",
-            r#"{"provider":"other","at":"2026-11-04T04:14:35Z"}"#,
-            r#"{"provider":"anthropic"}"#,
-            r#"{"provider":"anthropic","at":"yesterday"}"#,
-            r#"{"provider":"anthropic","at":"2026-13-04T04:14:35Z"}"#,
-            r#"{"provider":"anthropic","at":"2026-11-04T04:14:35Z","scope":"all"}"#,
+            // The round 1 form (one provider) asks for consent again.
+            r#"{"provider":"anthropic","at":"2026-11-04T04:14:35Z"}"#,
+            r#"{"agent":"claude","way":"api"}"#,
+            r#"{"agent":"claude","way":"api","at":"yesterday"}"#,
+            r#"{"agent":"claude","way":"api","at":"2026-13-04T04:14:35Z"}"#,
+            r#"{"agent":"Claude!","way":"api","at":"2026-11-04T04:14:35Z"}"#,
+            r#"{"agent":"claude","way":"api","at":"2026-11-04T04:14:35Z","scope":"all"}"#,
         ] {
             std::fs::write(file(&h), text).unwrap();
             assert!(!is_linked(&h), "{text}");
@@ -428,10 +574,19 @@ mod tests {
 
     #[test]
     fn the_terminal_shows_the_same_lists_as_the_page() {
-        let t = consent_text();
-        for s in SENDS.iter().chain(&NEVER_SENDS) {
-            assert!(t.contains(s), "{s}");
+        let agents = Agents::load(None);
+        let (a, cc) = agents.way("claude", "claude-code").unwrap();
+        let (_, api) = agents.way("claude", "api").unwrap();
+        for (w, key) in [(cc, "claude の設定とログイン"), (api, "ANTHROPIC_API_KEY")] {
+            let t = consent_text(a, w);
+            for s in SENDS.iter().chain(&NEVER_SENDS) {
+                assert!(t.contains(s), "{s}");
+            }
+            assert!(t.contains("Claude (Anthropic)") && t.contains(&w.name) && t.contains(key));
         }
-        assert!(t.contains(PROVIDER_NAME) && t.contains(crate::ai::KEY_ENV));
+        assert_eq!(chosen(&agents, &[]).unwrap().1.id, "claude-code");
+        assert_eq!(chosen(&agents, &["--way", "api"]).unwrap().1.id, "api");
+        assert!(chosen(&agents, &["--agent", "other"]).is_err());
+        assert!(chosen(&agents, &["--way"]).is_err());
     }
 }

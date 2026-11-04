@@ -373,38 +373,42 @@ fn coded(status: u16, msg: &str, code: &str) -> Response {
 }
 
 fn not_linked() -> Response {
-    coded(409, crate::agent::NOT_LINKED, crate::agent::NOT_LINKED_CODE)
+    coded(
+        409,
+        crate::consent::NOT_LINKED,
+        crate::consent::NOT_LINKED_CODE,
+    )
 }
 
-/// The agent a question goes to: the stand-in when set, else the Messages
-/// API with this CLI's key (409 AGENT_NO_KEY without one).
-/// Every call, the stand-in's too, passes [`crate::ai::before_call`] first:
-/// the consent read again and the size of the request. Err: no key.
+/// The linked agent, its linked way: the stand-in when set (tests), else
+/// [`crate::agents::call`]. Every call, the stand-in's too, passes
+/// [`crate::agents::before_call`] first and holds the consent through the
+/// call. Err: the linked way cannot be used here (no program, no key).
 fn agent_api(
     server: &Server,
     timeout: std::time::Duration,
-) -> Result<Box<crate::ai::Api<'static>>, String> {
-    let home = super::project::home(server).map_err(|_| crate::agent::NOT_LINKED.to_string())?;
+) -> Result<Box<crate::agents::Api<'static>>, String> {
+    let home = super::project::home(server).map_err(|_| crate::consent::NOT_LINKED.to_string())?;
     if let Some(f) = server.agent_api.get() {
         let f = Arc::clone(f);
-        return Ok(Box::new(move |b: &Value| {
+        return Ok(Box::new(move |p: &crate::agents::Prompt| {
             // Held through the stand-in's whole call, like a real one.
-            let _held = crate::ai::before_call(&home, b)?;
-            f(b)
+            let _held = crate::agents::before_call(&home, p)?;
+            f(p)
         }));
     }
-    let key = crate::ai::api_key(std::env::var(crate::ai::KEY_ENV))?;
-    Ok(Box::new(move |b: &Value| {
-        crate::ai::send(&home, &key, b, timeout)
+    crate::agents::ready(&home)?;
+    Ok(Box::new(move |p: &crate::agents::Prompt| {
+        crate::agents::call(&home, p, timeout)
     }))
 }
 
 /// A model call's error as the page tells it apart.
 fn agent_failure(e: &str) -> Response {
     match e {
-        crate::agent::NOT_LINKED => not_linked(),
-        crate::ai::TOO_LARGE => coded(413, e, "AGENT_CONTEXT_TOO_LARGE"),
-        crate::ai::TIMED_OUT => coded(504, e, "AGENT_TIMEOUT"),
+        crate::consent::NOT_LINKED => not_linked(),
+        crate::agents::TOO_LARGE => coded(413, e, "AGENT_CONTEXT_TOO_LARGE"),
+        crate::agents::TIMED_OUT => coded(504, e, "AGENT_TIMEOUT"),
         _ => coded(502, e, "AGENT_FAILED"),
     }
 }
@@ -418,8 +422,13 @@ fn agent_ask(server: &Server, req: &Request) -> Res {
     let _turn = server
         .ask_turn()
         .ok_or_else(|| coded(429, "DAGON is answering another question", "AGENT_BUSY"))?;
-    let mut api =
-        agent_api(server, crate::ask::ASK_TIMEOUT).map_err(|e| coded(409, &e, "AGENT_NO_KEY"))?;
+    let mut api = agent_api(server, crate::ask::ASK_TIMEOUT).map_err(|e| {
+        if e == crate::consent::NOT_LINKED {
+            not_linked()
+        } else {
+            coded(409, &e, "AGENT_UNAVAILABLE")
+        }
+    })?;
     let reg = registry_of(server).map_err(|e| Response::error(500, &e))?;
     let yaml = match topology_path(server) {
         Ok(p) => crate::ask::read_topology(&p).map_err(|e| agent_failure(&e))?,
@@ -430,9 +439,7 @@ fn agent_ask(server: &Server, req: &Request) -> Res {
         topology: yaml.as_deref(),
         jobs: server.recent_outcomes(crate::ask::MAX_JOBS),
     };
-    let model =
-        std::env::var(crate::ai::MODEL_ENV).unwrap_or_else(|_| crate::ai::DEFAULT_MODEL.into());
-    let r = crate::ask::ask(&q, &facts, &model, &mut *api).map_err(|e| agent_failure(&e))?;
+    let r = crate::ask::ask(&q, &facts, &mut *api).map_err(|e| agent_failure(&e))?;
     // Unlinked while the answer was on its way: it is not shown either.
     if !agent_linked(server) {
         return Err(not_linked());
@@ -440,39 +447,47 @@ fn agent_ask(server: &Server, req: &Request) -> Res {
     Ok(json_ok(r.to_json()))
 }
 
-fn agent_linked(server: &Server) -> bool {
-    super::project::home(server).is_ok_and(|h| crate::agent::is_linked(&h))
+/// The agents in use: builtin, and the user's own (~/.dagon/agents).
+fn agents_of(server: &Server) -> crate::agents::Agents {
+    let home = super::project::home(server).ok();
+    crate::agents::Agents::load(home.as_deref())
 }
 
-/// GET /v1/agent: whether DAGON can talk (this CLI has the key; never the
-/// key) and is linked, with what linking sends.
+fn agent_linked(server: &Server) -> bool {
+    super::project::home(server)
+        .is_ok_and(|h| crate::consent::linked(&h, &agents_of(server)).is_some())
+}
+
+/// GET /v1/agent: the agents and their ways (whether each can be used
+/// here; never a key, path or command), the consent, what linking sends.
 fn agent_get(server: &Server) -> Response {
     let home = super::project::home(server).ok();
-    json_ok(crate::agent::status(
-        home.as_deref(),
-        crate::ai::api_key_present(),
-    ))
+    json_ok(crate::consent::status(home.as_deref(), &agents_of(server)))
 }
 
-/// POST /v1/agent/link {provider:"anthropic", consent:true}: records the
-/// user's consent; anything short of an explicit yes records nothing.
+/// POST /v1/agent/link {agent, way, consent:true}: records the user's
+/// consent to send to that agent that way; anything short of an explicit
+/// yes for a defined agent and way records nothing.
 fn agent_link(server: &Server, req: &Request) -> Res {
     let v = body_json(req)?;
-    if v["provider"] != crate::agent::PROVIDER_ID {
-        return Err(Response::error(400, "provider must be anthropic"));
+    let agents = agents_of(server);
+    let (a, w) = match (v["agent"].as_str(), v["way"].as_str()) {
+        (Some(a), Some(w)) => agents.way(a, w),
+        _ => None,
     }
+    .ok_or_else(|| Response::error(400, "agent and way must name a defined agent and way"))?;
     if v["consent"] != true {
         return Err(Response::error(400, "consent must be true"));
     }
     let home = super::project::home(server)?;
-    crate::agent::link(&home).map_err(|e| Response::error(500, &e))?;
+    crate::consent::link(&home, &a.id, &w.id).map_err(|e| Response::error(500, &e))?;
     Ok(agent_get(server))
 }
 
 /// DELETE /v1/agent/link: withdraws the consent (done also when none was).
 fn agent_unlink(server: &Server) -> Res {
     let home = super::project::home(server)?;
-    crate::agent::unlink(&home).map_err(|e| Response::error(500, &e))?;
+    crate::consent::unlink(&home).map_err(|e| Response::error(500, &e))?;
     // Running topology drafts stop too; every call checks the consent anyway.
     server.cancel_kind("ai_topology");
     Ok(agent_get(server))
@@ -508,7 +523,8 @@ fn hello(server: &Server) -> Response {
         "cli": env!("CARGO_PKG_VERSION"),
         "workspace": workspace,
         "features": features,
-        "api_key": crate::ai::api_key_present(),
+        // The way DAGON uses (linked, else the default) can be used here.
+        "api_key": crate::consent::status(super::project::home(server).ok().as_deref(), &agents_of(server))["available"],
         "key": key.is_some(),
         "key_id": key,
         "release_key": server.release_key().map(|k| to_hex(&k)),
@@ -1270,7 +1286,7 @@ fn job_ai_topology(job: &mut Job, s: &Server, reg: &Registry, v: &Value) -> Resu
         .as_str()
         .ok_or("description is required")?
         .to_string();
-    let mut post = agent_api(s, crate::ai::HTTP_TIMEOUT)?;
+    let mut post = agent_api(s, crate::ai::DRAFT_TIMEOUT)?;
     let cancel = job.cancel_flag();
     let mut ask = |qs: &[String]| -> Result<Vec<String>, String> {
         qs.iter().enumerate().map(|(i, q)| job.ask(i, q)).collect()

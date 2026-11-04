@@ -1,0 +1,47 @@
+# Claude, the agent shipped with DAGON (it is a Claude hackathon). Agents are
+# data: another agent, or another way to reach one, of a kind DAGON
+# implements (command, messages-http) is a file like this one in
+# ~/.dagon/agents/ (never in a project). The first way is the default.
+id = "claude"
+name = "Claude"
+provider = "Anthropic"
+
+# Claude Code headless, with the user's own login. Flags as `claude --help`
+# lists them (Claude Code 2.1.316): -p prints one answer and exits; no
+# built-in tools (--tools ""); nothing saved (--no-session-persistence);
+# nothing may act or ask (--permission-mode dontAsk, --permission-prompts
+# none); no user customisations such as hooks, skills, CLAUDE.md or MCP
+# servers (--safe-mode, --strict-mcp-config, --disable-slash-commands);
+# DAGON's instructions replace Claude Code's own (--system-prompt-file).
+# DAGON runs it in an empty temporary folder.
+[[ways]]
+id = "claude-code"
+name = "Claude Code"
+[ways.transport]
+kind = "command"
+program = "claude"
+args = [
+    "-p",
+    "--tools", "",
+    "--no-session-persistence",
+    "--permission-mode", "dontAsk",
+    "--permission-prompts", "none",
+    "--safe-mode",
+    "--strict-mcp-config",
+    "--disable-slash-commands",
+    "--output-format", "text",
+    "--system-prompt-file", "{system_file}",
+]
+system = "file"
+
+# The Claude API (Messages) with a key from the environment.
+[[ways]]
+id = "api"
+name = "API キー"
+[ways.transport]
+kind = "messages-http"
+url = "https://api.anthropic.com/v1/messages"
+version = "2023-06-01"
+key_env = "ANTHROPIC_API_KEY"
+model = "claude-opus-5-5"
+model_env = "DAGON_AI_MODEL"

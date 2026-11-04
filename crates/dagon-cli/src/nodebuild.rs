@@ -21,12 +21,14 @@ use crate::config::{BuildInputs, Config, Opts};
 
 const OUT_DIR: &str = "out/build";
 const RECORD: &str = "build.json";
-/// Secrets the CLI holds that a build (build scripts, proc macros) must not
-/// see: the signing key path and the Claude API key.
 /// The public key file the firmware build scripts embed.
 pub const PUBKEY_ENV: &str = "DAGON_PUBKEY";
 
-pub const SECRET_ENV: [&str; 2] = [crate::config::KEY_ENV, crate::ai::KEY_ENV];
+/// Secrets the CLI holds that a build (build scripts, proc macros) must not
+/// see: the signing key path and every agent key a way names.
+pub fn secret_env() -> Vec<String> {
+    crate::agents::secret_env(crate::consent::home().ok().as_deref())
+}
 
 /// What the last successful build of a node produced.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -247,7 +249,10 @@ const INHERITED_BUILD_ENV: [&str; 7] = [
 /// Removes the CLI's secrets, and build settings inherited from a parent
 /// cargo, from a child's environment.
 fn scrub(cmd: &mut Command) {
-    for k in SECRET_ENV.iter().chain(&INHERITED_BUILD_ENV) {
+    for k in secret_env() {
+        cmd.env_remove(k);
+    }
+    for k in INHERITED_BUILD_ENV {
         cmd.env_remove(k);
     }
 }

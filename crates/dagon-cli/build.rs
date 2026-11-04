@@ -33,6 +33,8 @@ fn files(dir: &Path, rel: &str, out: &mut Vec<(String, PathBuf)>) {
     }
 }
 
+// Writes web_assets.rs into OUT_DIR, nowhere else.
+#[allow(clippy::disallowed_methods)]
 fn main() {
     println!("cargo:rerun-if-env-changed=DAGON_WEB_DIST");
     let manifest = PathBuf::from(env::var_os("CARGO_MANIFEST_DIR").expect("cargo sets it"));

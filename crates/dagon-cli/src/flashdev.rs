@@ -526,6 +526,8 @@ fn unescape(b: &[u8]) -> Vec<u8> {
 }
 
 #[cfg(test)]
+// Tests set up and inspect their own scratch folders directly.
+#[allow(clippy::disallowed_methods)]
 mod tests {
     use super::*;
     use std::sync::atomic::AtomicUsize;

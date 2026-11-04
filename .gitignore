@@ -36,3 +36,7 @@ keys/
 
 # The owner's source files of the product symbol: never committed
 assets/product-symbol/no_commit/
+
+# Python caches (scripts/ and their tests)
+__pycache__/
+*.py[cod]

@@ -273,9 +273,11 @@
     margin-top: var(--s-2);
   }
   @media (max-width: 1279px) {
+    /* Too narrow for one line (768–1279 px with the steps): a second row, never cut off (viewport matrix). */
     header {
-      gap: var(--s-4);
-      padding: 0 var(--s-4);
+      flex-wrap: wrap;
+      gap: var(--s-2) var(--s-4);
+      padding: var(--s-2) var(--s-4);
     }
     header .secondary {
       padding: 0 var(--s-4);

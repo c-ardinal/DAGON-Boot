@@ -465,10 +465,13 @@
     height: var(--h-secondary);
     display: grid;
     place-items: center;
+    padding: 0 var(--s-2);
+    text-align: center;
+    overflow: hidden;
     border: 1px solid var(--c-line);
     border-radius: var(--r-m);
     background: var(--c-ink);
-    font: 400 var(--t-small-size) / 1 var(--f-ja);
+    font: 400 var(--t-caption-size) / 1.25 var(--f-ja);
   }
   .empty {
     position: absolute;

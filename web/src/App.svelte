@@ -1120,8 +1120,10 @@
       {#if layout !== 'narrow'}{@render bottom()}{/if}
     {/if}
   </div>
+  <!-- Fixed, so the hidden chooser never adds a line under the full-height frame. -->
   <input
     class="visually-hidden"
+    style:position="fixed"
     type="file"
     accept=".dgb"
     tabindex="-1"

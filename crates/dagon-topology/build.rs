@@ -35,6 +35,17 @@ fn main() {
     println!("cargo:rerun-if-changed={}", mcu_dir.display());
     println!("cargo:rerun-if-changed={}", board_dir.display());
 
+    // Every file embedded, relative to the tree (`BUILTIN_FILES`).
+    let mut embedded: Vec<String> = Vec::new();
+    let rel = |p: &Path| {
+        let parts: Vec<_> = p
+            .strip_prefix(&root)
+            .expect("inside the tree")
+            .iter()
+            .map(|c| c.to_string_lossy().to_string())
+            .collect();
+        parts.join("/")
+    };
     let mut out = String::from("pub(super) const BUILTIN_MCUS: &[Embedded] = &[\n");
     for dir in packages(&mcu_dir, "dagon-mcu.toml") {
         let file = dir.join("dagon-mcu.toml");
@@ -43,8 +54,10 @@ fn main() {
             .parse()
             .unwrap_or_else(|e| panic!("{}: {e}", file.display()));
         let mut files = String::new();
-        if let Some(rel) = table.get("partitions").and_then(|v| v.as_str()) {
-            let _ = write!(files, "({rel:?}, include_str!({})),", lit(&dir.join(rel)));
+        embedded.push(rel(&file));
+        if let Some(name) = table.get("partitions").and_then(|v| v.as_str()) {
+            let _ = write!(files, "({name:?}, include_str!({})),", lit(&dir.join(name)));
+            embedded.push(rel(&dir.join(name)));
         }
         let _ = writeln!(
             out,
@@ -55,12 +68,17 @@ fn main() {
     }
     out.push_str("];\n\npub(super) const BUILTIN_BOARDS: &[(&str, &str)] = &[\n");
     for dir in packages(&board_dir, "dagon-board.toml") {
+        embedded.push(rel(&dir.join("dagon-board.toml")));
         let _ = writeln!(
             out,
             "    ({}, include_str!({})),",
             label(&root, &dir),
             lit(&dir.join("dagon-board.toml"))
         );
+    }
+    out.push_str("];\n\n/// Every file of the tree embedded here, relative to the tree.\npub const BUILTIN_FILES: &[&str] = &[\n");
+    for f in &embedded {
+        let _ = writeln!(out, "    {f:?},");
     }
     out.push_str("];\n");
     let dest = PathBuf::from(std::env::var_os("OUT_DIR").expect("OUT_DIR")).join("builtin_defs.rs");

@@ -915,3 +915,55 @@ fn write_refuses_a_symlink_at_the_final_path() {
     }
     let _ = std::fs::remove_dir_all(&base);
 }
+
+#[test]
+fn gen_skips_a_node_folder_reached_through_a_junction() {
+    if !cfg!(windows) {
+        return; // the link cases themselves are in genfs
+    }
+    let d = tmp("node-junction");
+    let src = clone(&d);
+    let base = project(&d);
+    std::fs::create_dir_all(base.join("elsewhere")).unwrap();
+    std::fs::write(
+        base.join("elsewhere/Cargo.lock"),
+        "user
+",
+    )
+    .unwrap();
+    std::fs::create_dir_all(base.join("nodes")).unwrap();
+    let p = |r: &str| base.join(r).components().collect::<PathBuf>();
+    let ok = std::process::Command::new("cmd")
+        .args(["/C", "mklink", "/J"])
+        .arg(p("nodes/watch"))
+        .arg(p("elsewhere"))
+        .output()
+        .unwrap()
+        .status
+        .success();
+    assert!(ok, "mklink /J");
+    let r = gen(
+        dagon_topology::defs::Registry::builtin(),
+        &base,
+        &desk(),
+        &src,
+        &BTreeMap::new(),
+        &["watch".into()],
+        false,
+    )
+    .unwrap();
+    assert_eq!(r.skipped.len(), 1, "{:?}", r.skipped);
+    assert!(
+        r.skipped[0].1.contains("nodes/watch is a link"),
+        "{:?}",
+        r.skipped
+    );
+    assert!(r.written.is_empty());
+    assert_eq!(
+        std::fs::read_dir(base.join("elsewhere")).unwrap().count(),
+        1
+    );
+    // gen ends non-zero, naming the node and the reason.
+    let lines = vec![format!("skipped    nodes/watch: {}", r.skipped[0].1)];
+    assert!(super::outcome(&lines).unwrap_err().contains("is a link"));
+}

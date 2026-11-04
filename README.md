@@ -166,7 +166,10 @@ says whether a version on trial may be confirmed. `dagon gen` can run
 again any time the topology changes: it rewrites `src/wiring.rs` and the
 DAGON package lines of `Cargo.toml`, and never touches `app.rs` (nor
 `main.rs`, unless `--force-main`). DAGON Console does the same with
-"プロジェクトを作る".
+"プロジェクトを作る". `dagon new`, `dagon init` and `dagon gen` never write
+or remove anything through a symbolic link or a junction: a node whose
+`nodes/<id>` (or `nodes`, or any file gen writes) is one is skipped with
+the reason, and `dagon gen` then exits with an error.
 
 ### 4. Build
 

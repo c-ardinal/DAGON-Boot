@@ -162,7 +162,7 @@ pub struct Extension {
     pub id: &'static str,
     pub trusted: bool,
     pub max_run_us: u32,
-    /// The accepted artifact SHA-256 (trusted extensions), hex.
+    /// The accepted source SHA-256 (trusted extensions), hex.
     pub sha256: Option<&'static str>,
 }
 
@@ -326,6 +326,17 @@ fn chain(out: &mut String, exts: &[Ext<'_>]) {
         );
     }
     out.push_str("];\n\n");
+    let budgets: Vec<String> = exts
+        .iter()
+        .map(|e| e.manifest.limits.max_run_us.to_string())
+        .collect();
+    let _ = writeln!(
+        out,
+        "/// Each extension's time limit per call, us, in chain order\n\
+         /// (`dagon_events::compose_boot`).\n\
+         pub const BOOT_BUDGETS_US: &[u32] = &[{}];\n",
+        budgets.join(", ")
+    );
     let mut ty = String::from("dagon_events::Nop");
     let mut value = String::from("dagon_events::Nop");
     for e in exts.iter().rev() {

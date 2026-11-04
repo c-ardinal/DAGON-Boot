@@ -14,7 +14,7 @@ pub struct Ext<'a> {
     pub manifest: &'a Manifest,
     /// The Rust crate (library name) that provides it.
     pub krate: String,
-    /// The SHA-256 of its built artifact the project accepts (trusted
+    /// The source SHA-256 of its package the project accepts (trusted
     /// extensions only), 64 hex digits.
     pub sha256: Option<String>,
 }
@@ -140,7 +140,7 @@ fn check_set(
                 .as_deref()
                 .is_some_and(|h| h.len() == 64 && h.bytes().all(|b| b.is_ascii_hexdigit()));
             fail(!ok, || {
-                format!("trusted extension {} needs its artifact SHA-256 (64 hex digits) in the project's trusted list", m.id)
+                format!("trusted extension {} needs its source SHA-256 (64 hex digits) in the project's trusted list", m.id)
             })?;
         }
         capabilities(def, board, m)?;
@@ -209,10 +209,13 @@ fn boot_calls(m: &Manifest, known: &Known) -> u64 {
     (events + m.provides.len()).max(1) as u64
 }
 
+/// Memory of the sandboxed extensions; time of every boot extension
+/// (a trusted one's calls are timed too).
 fn budgets(
     def: &McuDef,
     image: Image,
     sandboxed: &[&Manifest],
+    all: &[&Manifest],
     known: &Known,
 ) -> Result<(), String> {
     let i = def.isolation();
@@ -229,7 +232,7 @@ fn budgets(
             )
         })?;
     }
-    if image != Image::Bootcore || sandboxed.is_empty() {
+    if image != Image::Bootcore || all.is_empty() {
         return Ok(());
     }
     let w = def.watchdog.ok_or_else(|| {
@@ -239,7 +242,7 @@ fn budgets(
         )
     })?;
     let budget = u64::from(w.trial_ms) * 1000 / u64::from(BOOT_SHARE);
-    let need: u64 = sandboxed
+    let need: u64 = all
         .iter()
         .map(|m| u64::from(m.limits.max_run_us) * boot_calls(m, known))
         .sum();
@@ -288,7 +291,8 @@ pub fn plan<'a>(
         .map(|e| e.manifest)
         .filter(|m| m.sandboxed())
         .collect();
-    budgets(def, image, &sandboxed, known)?;
+    let all: Vec<&Manifest> = exts.iter().map(|e| e.manifest).collect();
+    budgets(def, image, &sandboxed, &all, known)?;
     let level = def.isolation().level;
     let mut notes = Vec::new();
     let mut memory = spaces(def, image);

@@ -118,8 +118,13 @@ fn manifests_are_checked_against_the_catalogs() {
     // A trusted verifier: no decisions, no limits needed.
     let verifier = "format = 1\nid = \"hsm-verify\"\nlayers = [\"boot\"]\nprovides = [\"ImageVerifier\"]\ntrusted = true\n";
     assert!(manifest(verifier).unwrap().trusted);
-    let e = manifest(&verifier.replace("[\"ImageVerifier\"]", "[]")).unwrap_err();
-    assert!(e.contains("no trusted-only port"), "{e}");
+    // A trusted observer (user code in the boot core, declared trusted in
+    // dagon.toml): no port needed, but its calls have a time limit.
+    let show = "format = 1\nid = \"boot-show\"\nlayers = [\"boot\"]\nobserves = [\"boot.*\"]\ntrusted = true\n";
+    let e = manifest(show).unwrap_err();
+    assert!(e.contains("limits.max_run_us 0"), "{e}");
+    let m = manifest(&format!("{show}[limits]\nmax_run_us = 2000\n")).unwrap();
+    assert!(m.trusted && m.provides.is_empty() && !m.sandboxed());
 }
 
 #[test]
@@ -611,7 +616,7 @@ fn a_node_set_is_checked_as_a_whole() {
     // A trusted extension needs its accepted hash.
     let v = manifest("format = 1\nid = \"hsm\"\nlayers = [\"boot\"]\nprovides = [\"ImageVerifier\"]\ntrusted = true\n").unwrap();
     let e = node::plan(def, Some(board), Image::Bootcore, vec![ext(&v)], &known()).unwrap_err();
-    assert!(e.contains("artifact SHA-256"), "{e}");
+    assert!(e.contains("source SHA-256"), "{e}");
     let ok = Ext {
         sha256: Some("ab".repeat(32)),
         ..ext(&v)

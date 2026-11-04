@@ -35,7 +35,7 @@ macro_rules! registry {
 }
 
 /// Each machine-declaring crate's `MACHINES`, one entry per crate.
-pub static REGISTRY: &[&Machines] = registry![dagon_events, dagon_agent, dagon_sim];
+pub static REGISTRY: &[&Machines] = registry![dagon_events, dagon_boot, dagon_agent, dagon_sim];
 
 /// Every machine of every layer.
 pub fn machines() -> Vec<Catalog> {

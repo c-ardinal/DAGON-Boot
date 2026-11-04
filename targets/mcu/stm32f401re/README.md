@@ -183,18 +183,25 @@ from the HSI (`clocks()`).
 
 ## Boot core
 
+Built for one node of a project, after `dagon gen`:
+
 ```sh
 export DAGON_PUBKEY=/path/outside/the/repo/dagon-signing.pub
-(cd targets/mcu/stm32f401re/bootcore && DAGON_TARGET_TAG=my-node cargo build --release)
+(cd <project>/boot/<node> && cargo build --release)
 ```
 
-It is built per node: it accepts only app images tagged with
-`DAGON_TARGET_TAG` (the node's tag, as in the app's `.cargo/config.toml`),
-and its build fails without it. With nothing startable it shows the board's
-halt pattern on the board's boot LED (`[boot] led` and `halt`): the build
-reads the board `DAGON_BOARD=<board id>` names (with
-`DAGON_PROJECT=<path of dagon.toml>`, a project's inline `[board.<id>]`
-too); it may be left out only while the MCU has a single board definition.
+`dagon gen` writes the node's boot crate into `boot/<node>/` of the
+project from `bootcore/template/`: it links `bootcore` (a library) with
+the node's boot extensions (`nodes/<node>/dagon/boot_wiring.rs`, each
+declared trusted in dagon.toml, see docs/extension-manifest.md) and sets
+`DAGON_BOOT_CRATE` (that folder) and `DAGON_TARGET_TAG` (the node's tag)
+for its build. It accepts only app images tagged with the node's tag.
+With nothing startable it shows the halt pattern on the boot LED of the
+node's board (`[boot] led` and `halt`; a node without a board has none).
+Builds without `DAGON_BOOT_CRATE` fail, and a boot crate that links
+anything else than DAGON's packages and its trusted extensions with the
+source hash dagon.toml declares does not build. The boot core must fit
+32,256 bytes: the boot extensions share that budget with it.
 
 ## Keys
 

@@ -19,6 +19,11 @@ and not on the board. Kind V: the stock ESP-IDF 2nd stage with app rollback
 Reset on panic is on by default (feature `panic-reset`), so a trial image
 that panics rolls back.
 
+There is no DAGON boot stage on this MCU: the vendor's 2nd stage starts
+the app. Boot extensions therefore do not exist here, and `dagon gen`
+refuses a node's `[extensions.nodes.<id>] boot` list with that reason
+(docs/extension-manifest.md); the app's extensions run as on every MCU.
+
 ## Links
 
 Every hop carries whole DAGON frames through one interface,

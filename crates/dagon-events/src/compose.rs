@@ -6,7 +6,7 @@ use crate::catalog::{Catalog, Layer};
 use crate::decisions;
 use crate::event::{Event, EventRecord, Payload};
 use crate::extension::{
-    Accept, Ctx, DecisionId, Delay, ExtId, Extension, Health, RebootRequest, TrialInfo,
+    Accept, Ctx, DecisionId, Delay, ExtId, Extension, Health, Nop, RebootRequest, TrialInfo,
     UpdateOffer, DECISION_BOUND_MS,
 };
 use crate::published::{Published, Reader, Snapshot};
@@ -262,6 +262,64 @@ pub fn compose_unpublished<B: Extension, U: Extension>(
         clock: (),
         watchdog: Watchdog::new(0, 0),
         decisions: decisions::Machine::new(),
+    }
+}
+
+/// The boot core's chain: no publisher and no decision point (what the
+/// boot core starts is not an extension's to change), the extensions the
+/// node's `boot_wiring.rs` lists in its order, and a time limit on every
+/// call. Each extension's handler is timed on its own with the boot core's
+/// clock against its budget (`budgets_us[i]`, the manifest's `max_run_us`;
+/// the decision bound where none is given). A call over its budget is not
+/// preempted (the boot core runs trusted extensions privileged); it is
+/// reported right after it returns as `boot.extension_overran`, delivered
+/// to every extension without a limit of its own, and the boot goes on
+/// with the same decision. A layer-start API.
+pub struct BootComposed<U: Extension, C: Clock> {
+    parts: Parts<NoPublisher, Nop, U>,
+    clock: C,
+    budgets_us: &'static [u32],
+    exts: crate::boot_extensions::Machine,
+}
+
+/// See [`BootComposed`].
+pub fn compose_boot<U: Extension, C: Clock>(
+    user: U,
+    clock: C,
+    budgets_us: &'static [u32],
+) -> BootComposed<U, C> {
+    BootComposed {
+        parts: Parts {
+            layer: Layer::Boot,
+            head: NoPublisher,
+            board: Nop,
+            user,
+        },
+        clock,
+        budgets_us,
+        exts: crate::boot_extensions::Machine::new(),
+    }
+}
+
+impl<U: Extension, C: Clock> SealedSink for BootComposed<U, C> {}
+impl<U: Extension, C: Clock> Sink for BootComposed<U, C> {
+    fn deliver<P: Payload>(&mut self, p: P) {
+        let e = Event::live(&p);
+        let ctx = Ctx::new(Layer::Boot);
+        let k = Token::new();
+        for i in 0..self.parts.user.__leaves(k) {
+            let t0 = self.clock.now_us();
+            self.parts.user.__event_at(i, &e, &ctx, k);
+            let us = self.clock.now_us().saturating_sub(t0);
+            let budget = self.budgets_us.get(i).copied().unwrap_or(BOUND_US as u32);
+            if us > u64::from(budget) {
+                let id = ExtId::of(self.parts.user.__id_at(i, k));
+                let us = u32::try_from(us).unwrap_or(u32::MAX);
+                // `overran` leaves from every state of its machine.
+                let delivered = self.exts.overran(&mut self.parts, id, budget, us);
+                debug_assert!(delivered.is_ok());
+            }
+        }
     }
 }
 

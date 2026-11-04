@@ -110,7 +110,7 @@ pub struct Extension {
     pub id: &'static str,
     pub trusted: bool,
     pub max_run_us: u32,
-    /// The accepted artifact SHA-256 (trusted extensions), hex.
+    /// The accepted source SHA-256 (trusted extensions), hex.
     pub sha256: Option<&'static str>,
 }
 
@@ -159,6 +159,10 @@ pub const READ_BACK: &[ReadBack] = &[ReadBack { register: "MPU_TYPE.DREGION", ad
 pub const EXTENSIONS: &[Extension] = &[
     Extension { id: "display", trusted: false, max_run_us: 1000, sha256: None },
 ];
+
+/// Each extension's time limit per call, us, in chain order
+/// (`dagon_events::compose_boot`).
+pub const BOOT_BUDGETS_US: &[u32] = &[1000];
 
 /// The boot core's extensions in chain order (each crate exports
 /// `DagonExtension` and `DAGON_EXTENSION`).

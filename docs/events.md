@@ -92,10 +92,11 @@ States: `Off` (initial), `Up`.
 
 | Kind | Code | Transition | Payload | Observed | Notes | Description |
 |---|---|---|---|---|---|---|
-| `app.starting` | 0x01 | `starting`: * → Up | `role: u8` (1 B), `mode: u8` (1 B) | live |  | DAGON's start began (the agent was made, or restarted); the slot store is read next. |
-| `app.watchdog_taken` | 0x02 | `watchdog_taken`: Up → Up | `period_ms: u32` (4 B), `trial: bool` (1 B) | live |  | The start took over the boot core's watchdog (`trial`: the running image is on trial). |
-| `app.link_up` | 0x03 | `link_up`: Up → Up | `link: u8` (1 B) | live |  | A DAGON link (its kind's code, `dagon_mcu_common::link::Kind`) is served. |
-| `app.link_down` | 0x04 | `link_down`: Up → Up | `link: u8` (1 B) | live |  | A DAGON link closed. |
+| `app.starting` | 0x01 | `starting`: * → Up | `tag: NameDigest` (8 B), `role: u8` (1 B), `mode: u8` (1 B) | live |  | DAGON's start began (the agent was made, or restarted); the slot store is read next. `tag`: the node's image target tag. |
+| `app.watchdog_taken` | 0x02 | `watchdog_taken`: Up → Up | `period_ms: u32` (4 B), `trial_policy: TrialPolicy` (5 B) | live |  | The start took over the boot core's watchdog: its period, and what the guard does with it while the image is on trial. |
+| `app.bring_up` | 0x07 | `bring_up`: Up → Up | `board: NameDigest` (8 B) | live |  | The board's bring-up ran (`board`: the board definition's id). |
+| `app.link_up` | 0x03 | `link_up`: Up → Up | `link: u8` (1 B), `addr: u8` (1 B) | live |  | A DAGON link carries frames: the first one arrived, at start or after the link went down. `link`: its kind's code (`dagon_format::with_link_kinds!`); `addr`: the node's own address on it (`NO_ADDR` where a link has none). |
+| `app.link_down` | 0x04 | `link_down`: Up → Up | `link: u8` (1 B), `addr: u8` (1 B) | live |  | A DAGON link stopped carrying frames: a reply could not be sent, or the link closed. |
 | `app.request` | 0x05 | `request`: Up → Up | `protocol: u8` (1 B), `cmd: u8` (1 B), `seq: u8` (1 B), `via: u8` (1 B) | live |  | A request arrived on link `via`. |
 | `app.replied` | 0x06 | `replied`: Up → Up | `status: u8` (1 B), `ms: u32` (4 B) | live |  | The reply to the last request left, `ms` after it arrived. |
 

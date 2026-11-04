@@ -56,16 +56,21 @@ fn images() -> [Vec<u8>; 4] {
     [img(0, good), img(1, good), img(0, bad), img(1, bad)]
 }
 
-/// CONF_RUN answered by the node-side handler, as a conformance build does.
+/// CONF_RUN answered by the node-side handler, as a conformance build does:
+/// on the MCU definition's scratch, apart from every image.
 fn conf_run(node: &mut SimNode, frame: &[u8], max: usize) -> Option<Vec<u8>> {
     if !node.responsive() {
         return None;
     }
-    let active = node.status().active.min(1) as usize;
+    let scratch = dagon_topology::defs::Registry::builtin()
+        .mcu("stm32f401re")
+        .and_then(|m| m.conformance)
+        .expect("stm32f401re has a conformance scratch")
+        .scratch;
     let setup_regions = node.flash().geometry().to_vec();
     let setup = NodeSetup {
         declared: &setup_regions,
-        scratch: Layout::STM32F401XE.slots[1 - active].0,
+        scratch: scratch.at,
     };
     let mut out = vec![0u8; RESPONSE_MAX];
     let n = node::handle_frame(frame, max, &mut *node.flash(), &setup, &mut out, &mut || {})?;

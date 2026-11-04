@@ -147,20 +147,31 @@ dagon_events::state_machine! {
         states { Off, Up }
         transitions {
             /// DAGON's start began (the agent was made, or restarted); the
-            /// slot store is read next.
-            starting(role: u8, mode: u8): * => Up
-                emits Starting = 0x01 { role: u8, mode: u8 }
+            /// slot store is read next. `tag`: the node's image target tag.
+            starting(tag: NameDigest, role: u8, mode: u8): * => Up
+                emits Starting = 0x01 { tag: NameDigest, role: u8, mode: u8 }
                 observe(live);
-            /// The start took over the boot core's watchdog (`trial`: the
-            /// running image is on trial).
-            watchdog_taken(period_ms: u32, trial: bool): Up => Up
-                emits WatchdogTaken = 0x02 { period_ms: u32, trial: bool }
+            /// The start took over the boot core's watchdog: its period, and
+            /// what the guard does with it while the image is on trial.
+            watchdog_taken(period_ms: u32, trial_policy: TrialPolicy): Up => Up
+                emits WatchdogTaken = 0x02 { period_ms: u32, trial_policy: TrialPolicy }
                 observe(live);
-            /// A DAGON link (its kind's code, `dagon_mcu_common::link::Kind`)
-            /// is served.
-            link_up(link: u8): Up => Up emits LinkUp = 0x03 { link: u8 } observe(live);
-            /// A DAGON link closed.
-            link_down(link: u8): Up => Up emits LinkDown = 0x04 { link: u8 } observe(live);
+            /// The board's bring-up ran (`board`: the board definition's id).
+            bring_up(board: NameDigest): Up => Up
+                emits BringUp = 0x07 { board: NameDigest }
+                observe(live);
+            /// A DAGON link carries frames: the first one arrived, at
+            /// start or after the link went down. `link`: its kind's code
+            /// (`dagon_format::with_link_kinds!`); `addr`: the node's own
+            /// address on it (`NO_ADDR` where a link has none).
+            link_up(link: u8, addr: u8): Up => Up
+                emits LinkUp = 0x03 { link: u8, addr: u8 }
+                observe(live);
+            /// A DAGON link stopped carrying frames: a reply could not be
+            /// sent, or the link closed.
+            link_down(link: u8, addr: u8): Up => Up
+                emits LinkDown = 0x04 { link: u8, addr: u8 }
+                observe(live);
             /// A request arrived on link `via`.
             request(protocol: u8, cmd: u8, seq: u8, via: u8): Up => Up
                 emits Request = 0x05 { protocol: u8, cmd: u8, seq: u8, via: u8 }
@@ -374,6 +385,76 @@ pub struct Config {
     /// Boots the boot core gives an image on trial before it rolls back
     /// (the MCU package's boot settings; `TrialInfo::max`).
     pub trial_attempts: u8,
+}
+
+/// `app.link_up` / `app.link_down` `addr` of a link without an address.
+pub const NO_ADDR: u8 = 0xFF;
+
+/// A name in an event's owned form: the first 8 bytes of the SHA-256 of a
+/// domain prefix and the name (as MCU identities are formed). A host maps
+/// it back through the names it knows (topology tags, board definitions).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct NameDigest(pub [u8; 8]);
+
+impl NameDigest {
+    /// Domain of a node's image target tag.
+    pub const TAG: &'static str = "dagon-tag/";
+    /// Domain of a board definition id.
+    pub const BOARD: &'static str = "dagon-board/";
+
+    /// The digest of `name` (trailing NULs left out) in `domain`.
+    pub fn of(domain: &str, name: &[u8]) -> Self {
+        let end = name.iter().rposition(|&b| b != 0).map_or(0, |i| i + 1);
+        let mut h = dagon_format::Sha256::new();
+        h.update(domain.as_bytes());
+        h.update(&name[..end]);
+        let d = h.finalize();
+        let mut out = [0u8; 8];
+        out.copy_from_slice(&d[..8]);
+        NameDigest(out)
+    }
+}
+
+impl Compact for NameDigest {
+    const SIZE: usize = 8;
+    fn put(&self, out: &mut [u8]) {
+        out.copy_from_slice(&self.0);
+    }
+    fn get(b: &[u8]) -> Option<Self> {
+        Some(NameDigest(b.try_into().ok()?))
+    }
+}
+
+/// What a watchdog guard does while the running image is on trial.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum TrialPolicy {
+    /// Never feeds: an image not confirmed in time is reset and rolled back.
+    #[default]
+    NeverFeed,
+    /// Feeds (gated by liveness) until this many ms after boot, then stops.
+    FeedUntilMs(u32),
+}
+
+impl Compact for TrialPolicy {
+    /// A tag byte (0 never, 1 until), then the ms (0 for never).
+    const SIZE: usize = 5;
+    fn put(&self, out: &mut [u8]) {
+        let (tag, ms) = match *self {
+            TrialPolicy::NeverFeed => (0u8, 0u32),
+            TrialPolicy::FeedUntilMs(ms) => (1, ms),
+        };
+        out[0] = tag;
+        out[1..].copy_from_slice(&ms.to_le_bytes());
+    }
+    fn get(b: &[u8]) -> Option<Self> {
+        let ms = u32::from_le_bytes(b.get(1..5)?.try_into().ok()?);
+        match b.first()? {
+            0 => Some(TrialPolicy::NeverFeed),
+            1 => Some(TrialPolicy::FeedUntilMs(ms)),
+            _ => None,
+        }
+    }
 }
 
 /// `app.request` `protocol` codes.

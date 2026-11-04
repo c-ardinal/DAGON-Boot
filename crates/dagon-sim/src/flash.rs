@@ -27,6 +27,7 @@ pub enum CutPoint {
     During(usize),
 }
 
+#[derive(Clone)]
 pub struct SimFlash {
     regions: Vec<FlashRegion>,
     mem: Vec<Vec<u8>>,

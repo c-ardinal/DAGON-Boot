@@ -4,7 +4,7 @@
 
 use crate::flash::SimFlash;
 use crate::rom::{SimRom, ROM_ADDR};
-use crate::store::{Boot, Layout, SimStore, MAX_ATTEMPTS};
+use crate::store::{Boot, Layout, SimStore};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, MutexGuard};
 
@@ -210,7 +210,7 @@ impl SimNode {
     }
 
     fn boot_app(&mut self) -> Run {
-        for _ in 0..=MAX_ATTEMPTS + 1 {
+        for _ in 0..=self.store.layout.trial_attempts() + 1 {
             let boot = self.store.boot();
             if !self.flash().is_powered() {
                 return Run::Off;

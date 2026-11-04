@@ -262,6 +262,7 @@ name = "dagon-sim"
 version = "0.1.0"
 dependencies = [
  "dagon-agent",
+ "dagon-core",
  "dagon-events",
  "dagon-format",
  "dagon-port",

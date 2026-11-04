@@ -11,12 +11,6 @@ pub struct Mapped {
     len: usize,
 }
 
-// SAFETY: a `Mapped` only ever reads, and its constructor's contract keeps
-// the range readable while it lives, from any context.
-unsafe impl Send for Mapped {}
-// SAFETY: as for `Send`; `&Mapped` offers no access at all.
-unsafe impl Sync for Mapped {}
-
 impl Mapped {
     /// # Safety
     /// `base..base + len` must stay readable while this lives.

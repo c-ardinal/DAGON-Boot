@@ -63,7 +63,7 @@ fn run() -> Result<String, String> {
         pubkey,
         mcu_id: mcu_id::RP2040,
         target_tag: target_tag(tag),
-        max_attempts: MAX_ATTEMPTS,
+        max_attempts: dagon_mcu_rp2040::TRIAL_ATTEMPTS,
     };
     match boot::decide(&mut flash, &mut log, &APP_SLOTS, &cfg) {
         Decision::Boot { slot, trial, .. } => Ok(format!(

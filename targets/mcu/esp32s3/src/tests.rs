@@ -441,3 +441,126 @@ fn trial_from_blank_otadata_rolls_back_to_factory() {
         .iter()
         .any(|e| e[..4] == 2u32.to_le_bytes() && e[28..] == seq_crc(2).to_le_bytes()));
 }
+
+/// The definition's `trial_attempts` is what the vendor 2nd stage does: with
+/// app rollback on, an image left on trial is aborted at its next boot.
+#[test]
+fn trial_attempts_match_the_vendor_second_stage() {
+    let cfg = include_str!("../vendor/sdkconfig.defaults");
+    let rollback = cfg
+        .lines()
+        .any(|l| l.trim() == "CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE=y");
+    assert!(
+        rollback,
+        "the vendored 2nd stage is built with app rollback"
+    );
+    assert_eq!(crate::TRIAL_ATTEMPTS, 1);
+    // The fake 2nd stage of these tests aborts after the same one boot.
+    let mut s = store();
+    let h = receive(&mut s, SLOT_B, 1);
+    s.set_pending(SLOT_B, &h, &t()).unwrap();
+    for _ in 0..crate::TRIAL_ATTEMPTS {
+        s.ota.boot();
+        assert_eq!(s.status().active, SLOT_B);
+    }
+    s.ota.boot();
+    assert_eq!(s.status().slots[1].state, SlotState::Reverted);
+}
+
+/// README.md's link matrix is the one `LINK_KINDS` generates.
+#[test]
+fn the_readme_link_matrix_is_generated_from_link_kinds() {
+    let mut want = String::new();
+    dagon_mcu_common::link::write_matrix(crate::links::LINK_KINDS, &mut want).unwrap();
+    let readme = std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/README.md"))
+        .unwrap()
+        .replace("\r\n", "\n");
+    let at = readme
+        .find("| Kind | Up | Down |")
+        .expect("README.md has the matrix");
+    let end = readme[at..]
+        .find("\n\n")
+        .map_or(readme.len(), |e| at + e + 1);
+    assert_eq!(
+        &readme[at..end],
+        want,
+        "README.md: replace the matrix with this"
+    );
+}
+
+/// The conformance scratch is the definition's: inside the dagon partition,
+/// past every detached header sector, in no OTA slot.
+#[test]
+fn the_conformance_scratch_holds_no_header_or_image() {
+    let (at, size) = crate::CONFORM_SCRATCH.unwrap();
+    assert_eq!(region_for(at, size), Some(&REGIONS[2]));
+    for s in [SLOT_A, SLOT_B, SLOT_FACTORY] {
+        assert!(header_addr(s).unwrap() + HEADER_SECTOR <= at);
+    }
+    assert!(at.is_multiple_of(crate::layout::ERASE_UNIT));
+}
+
+/// An erase cut by a power loss at any step (after each otadata sector it
+/// withdraws, after the header sector, during the body) never leaves the
+/// 2nd stage selecting the slot without the image it was selected with:
+/// what boots is either the slot's old, intact image or another slot. The
+/// steps are `EspStore::erase`'s order: withdraw, header sector, body.
+#[test]
+fn a_cut_erase_never_boots_a_partial_image() {
+    let entry = |seq: u32, state: u32| {
+        let mut e = [0xFFu8; ENTRY_LEN];
+        e[0..4].copy_from_slice(&seq.to_le_bytes());
+        e[24..28].copy_from_slice(&state.to_le_bytes());
+        e[28..32].copy_from_slice(&seq_crc(seq).to_le_bytes());
+        e
+    };
+    // B pending over a confirmed A; and B selected by both sectors while
+    // factory runs (an aborted entry and a newer trial entry).
+    let cases: [(u8, [[u8; ENTRY_LEN]; 2]); 2] = [
+        (SLOT_A, [entry(1, raw::VALID), entry(2, raw::NEW)]),
+        (SLOT_FACTORY, [entry(2, raw::ABORTED), entry(4, raw::NEW)]),
+    ];
+    for (running, entries) in cases {
+        let setup = || {
+            let mut s = store();
+            let hb = receive(&mut s, SLOT_B, 1);
+            s.ota.entries = entries;
+            s.ota.running = running;
+            (s, hb)
+        };
+        let withdrawn = crate::otadata::selecting(&entries, SLOT_B);
+        let sectors: Vec<usize> = (0..2).filter(|&i| withdrawn[i]).collect();
+        let steps = sectors.len() + 2;
+        for cut in 0..=steps {
+            let (mut s, hb) = setup();
+            for step in 0..cut {
+                if step < sectors.len() {
+                    s.ota.entries[sectors[step]] = [0xFF; ENTRY_LEN];
+                } else if step == sectors.len() {
+                    s.flash
+                        .erase(header_addr(SLOT_B).unwrap(), HEADER_SECTOR)
+                        .unwrap();
+                } else {
+                    s.flash
+                        .erase(OTA_1.offset, crate::layout::ERASE_UNIT)
+                        .unwrap();
+                }
+            }
+            s.ota.boot();
+            if s.ota.running == SLOT_B {
+                let mut h = [0u8; HEADER_SIZE];
+                s.read_header(SLOT_B, &mut h).unwrap();
+                assert_eq!(
+                    h, hb,
+                    "running {running}, cut {cut}: B boots without its image"
+                );
+                let mut first = [0u8; 4];
+                s.read(APP, SLOT_B, 0, &mut first).unwrap();
+                assert_ne!(
+                    first, [0xFF; 4],
+                    "running {running}, cut {cut}: B's body is gone"
+                );
+            }
+        }
+    }
+}

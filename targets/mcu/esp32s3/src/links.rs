@@ -1,14 +1,7 @@
 //! The link kinds this package offers, by direction, for ESP32-S3 (a 子機: no downlinks):
 //!
-//! | Kind | Up | Down |
-//! |---|---|---|
-//! | `usb-cdc` | Yes | No |
-//! | `uart` | Yes | No |
-//! | `i2c` | NotYet | No |
-//! | `ble` | NotYet | No |
-//! | `wifi-tcp` | NotYet | No |
-//! | `ethernet` | NotYet | No |
-//! | `can` | NotYet | No |
+//! README.md, "Links", shows the matrix (generated from `LINK_KINDS`;
+//! a kind the table leaves out is `No`).
 //!
 //! `NotYet`: the 構成 may name it, but a project asking for it does not
 //! build yet (`require_uplink` / `require_downlinks` say which hop).

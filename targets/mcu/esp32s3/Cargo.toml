@@ -34,6 +34,10 @@ dagon-mcu-common = { path = "../common" }
 dagon-port = { path = "../../../crates/dagon-port" }
 dagon-proto = { path = "../../../crates/dagon-proto" }
 
+[build-dependencies]
+# The constants of dagon-mcu.toml (build.rs).
+dagon-mcu-build = { path = "../build" }
+
 [dev-dependencies]
 dagon-agent = { path = "../../../crates/dagon-agent", features = ["store-tests"] }
 ed25519-compact = { version = "2.6", default-features = false }

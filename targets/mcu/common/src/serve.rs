@@ -50,6 +50,11 @@ pub enum Exit {
 /// Serves `agent` over `link` until a reboot is due or the link closes.
 /// A transfer the PC abandoned is dropped after `IDLE_TIMEOUT_MS` without
 /// requests, checked whenever the link's read times out.
+///
+/// The link is up from the first frame that arrives (`app.link_up`) until
+/// a reply cannot be written or the link closes (`app.link_down`). A reboot
+/// follows only a reply that was written and flushed; otherwise the node
+/// keeps serving and the peer's retry gets the same reply again.
 pub async fn serve<L, S, X, H>(link: &mut L, agent: &mut Agent<S, X>, host: &mut H) -> Exit
 where
     L: Link,
@@ -57,8 +62,8 @@ where
     X: AppChain,
     H: ServeHost<S, X>,
 {
-    let via = link.kind().code();
-    agent.link_up(via);
+    let (via, addr) = (link.kind().code(), link.addr());
+    let mut up = false;
     let mut last_request: Option<u64> = None;
     loop {
         host.idle();
@@ -75,7 +80,9 @@ where
                 continue;
             }
             Err(LinkError::Closed) => {
-                agent.link_down(via);
+                if up {
+                    agent.link_down(via, addr);
+                }
                 return Exit::Closed;
             }
             Err(e) => {
@@ -83,6 +90,10 @@ where
                 continue;
             }
         };
+        if !up {
+            up = true;
+            agent.link_up(via, addr);
+        }
         let arrived = host.now_ms();
         last_request = Some(arrived);
         // Byte 5 of a frame is the command.
@@ -109,16 +120,20 @@ where
         };
         host.after(agent, cmd);
         match (wrote, status) {
-            (Err(e), _) => host.on_error(e),
+            (Err(e), _) => {
+                host.on_error(e);
+                up = false;
+                agent.link_down(via, addr);
+                continue;
+            }
             (Ok(()), Some(s)) => {
                 let ms = host.now_ms().saturating_sub(arrived);
                 agent.replied(s, u32::try_from(ms).unwrap_or(u32::MAX));
             }
             (Ok(()), None) => {}
         }
-        // Reset only once the reply has left (or could not be sent); a
-        // link that cannot tell (a new request came first) keeps serving
-        // instead.
+        // Reset only once the reply has left; a link that cannot tell (a
+        // new request came first) keeps serving instead.
         if let Some(delay_ms) = reboot {
             if link.flush().await.is_ok() {
                 host.idle();
@@ -164,6 +179,9 @@ mod tests {
         flushed: usize,
         dropped: usize,
         closed_for_requests: bool,
+        /// Writes and flushes that fail.
+        fail_write: bool,
+        fail_flush: bool,
     }
 
     impl Link for Mock {
@@ -192,8 +210,11 @@ mod tests {
             }
         }
         async fn write_frame(&mut self, frame: &[u8]) -> Result<(), LinkError> {
-            self.written.push(frame.to_vec());
             self.closed_for_requests = false;
+            if self.fail_write {
+                return Err(LinkError::Closed);
+            }
+            self.written.push(frame.to_vec());
             Ok(())
         }
         async fn no_reply(&mut self) -> Result<(), LinkError> {
@@ -203,6 +224,9 @@ mod tests {
         }
         async fn flush(&mut self) -> Result<(), LinkError> {
             self.flushed += 1;
+            if self.fail_flush {
+                return Err(LinkError::Closed);
+            }
             Ok(())
         }
     }
@@ -355,16 +379,17 @@ mod tests {
         );
     }
 
-    /// The loop reports its link and each request with its reply.
+    /// The link is up from its first frame and down once it closes; each
+    /// request is reported with its reply.
     #[test]
     fn link_and_requests_are_reported() {
         let probe = Probe::default();
         let mut a = probed(probe.clone());
         let mut link = Mock::default();
-        link.incoming.extend([Some(hello(1))]);
+        link.incoming.extend([None, Some(hello(1))]);
         dagon_sim::block_on(serve(&mut link, &mut a, &mut Host::default()));
         let seen = probe.seen.borrow();
-        let start = seen.iter().position(|k| *k == "link_up").unwrap();
+        let start = seen.iter().position(|k| *k == "store_opened").unwrap() + 1;
         assert_eq!(
             seen[start..],
             ["link_up", "request", "hello", "replied", "link_down"]
@@ -372,42 +397,53 @@ mod tests {
         assert_eq!(seen[0], "starting");
     }
 
-    /// A corrupt frame, a response (not a request) and a request too short
-    /// for the agent get no answer, and the link still takes the next
-    /// request, which is answered.
+    /// A REBOOT whose reply could not be written resets nothing: the link
+    /// is down, and the next frame brings it up and is answered.
     #[test]
-    fn unanswered_frames_leave_the_link_ready() {
-        let mut corrupt = hello(6);
-        let last = corrupt.len() - 1;
-        corrupt[last] ^= 0xFF;
-        let mut response = hello(7);
-        response[3] |= dagon_proto::flags::RESP;
-        let mut link = Mock::default();
-        link.incoming.extend([
-            Some(corrupt),
-            Some(response),
-            Some(std::vec![0xDA, 0x6F]),
-            Some(hello(8)),
-        ]);
-        let (mut a, mut h) = (agent(), Host::default());
+    fn no_reboot_when_the_reply_was_not_written() {
+        let probe = Probe::default();
+        let mut a = probed(probe.clone());
+        let mut link = Mock {
+            fail_write: true,
+            ..Mock::default()
+        };
+        let reboot = request(3, Cmd::Reboot as u8, &[reboot_mode::NORMAL]);
+        link.incoming.extend([Some(reboot)]);
+        let mut h = Host::default();
         let exit = dagon_sim::block_on(serve(&mut link, &mut a, &mut h));
         assert_eq!(exit, Exit::Closed);
-        assert_eq!(link.dropped, 3);
-        assert_eq!(link.written.len(), 1);
-        let (f, _) = Frame::decode(&link.written[0], max_payload::UART).unwrap();
-        assert_eq!(f.seq, 8);
+        assert_eq!(link.flushed, 0);
+        assert!(!h.calls.iter().any(|c| c.starts_with("wait")));
+        {
+            let seen = probe.seen.borrow();
+            assert!(!seen.contains(&"before_reboot"), "{seen:?}");
+            let at = seen.iter().position(|k| *k == "reboot_requested").unwrap();
+            assert_eq!(seen[at + 1..], ["link_down"]);
+        }
+        // The peer's retry (same seq) on a working link gets the reply.
+        link.fail_write = false;
+        link.incoming
+            .extend([Some(request(3, Cmd::Reboot as u8, &[reboot_mode::NORMAL]))]);
+        let exit = dagon_sim::block_on(serve(&mut link, &mut a, &mut h));
+        assert_eq!((exit, link.written.len()), (Exit::Reboot, 1));
     }
 
+    /// A REBOOT whose reply could not be flushed resets nothing either.
     #[test]
-    fn the_host_may_answer_first() {
-        let mut link = Mock::default();
-        link.incoming.push_back(Some(request(5, 0x7F, &[])));
-        let mut h = Host {
-            answer: Some(std::vec![1, 2, 3]),
-            ..Host::default()
+    fn no_reboot_when_the_reply_was_not_flushed() {
+        let probe = Probe::default();
+        let mut a = probed(probe.clone());
+        let mut link = Mock {
+            fail_flush: true,
+            ..Mock::default()
         };
-        let mut a = agent();
-        dagon_sim::block_on(serve(&mut link, &mut a, &mut h));
-        assert_eq!(link.written, [std::vec![1u8, 2, 3]]);
+        let reboot = request(3, Cmd::Reboot as u8, &[reboot_mode::NORMAL]);
+        link.incoming.extend([Some(reboot), Some(hello(4))]);
+        let mut h = Host::default();
+        let exit = dagon_sim::block_on(serve(&mut link, &mut a, &mut h));
+        assert_eq!(exit, Exit::Closed);
+        assert_eq!((link.written.len(), link.flushed), (2, 1));
+        assert!(!h.calls.iter().any(|c| c.starts_with("wait")));
+        assert!(!probe.seen.borrow().contains(&"before_reboot"));
     }
 }

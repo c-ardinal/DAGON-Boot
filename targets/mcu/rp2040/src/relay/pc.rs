@@ -8,7 +8,6 @@
 use portable_atomic::{AtomicU32, Ordering};
 
 use dagon_agent::reply_status;
-use dagon_mcu_common::mapped::Mapped;
 use dagon_port::{Nrst, SubControl};
 use dagon_proto::payload::{boot0, link, nrst, HelloResp, Relay, Show, StatusResp, SubCtl};
 use dagon_proto::{flags, max_payload, Cmd, Frame, Status, HEADER_LEN, MAX_FRAME};
@@ -39,8 +38,9 @@ static NEXT_ID: AtomicU32 = AtomicU32::new(1);
 
 pub struct Pc {
     pub agent: AppAgent,
-    /// The topology display copy, read-only ([`nodes::stored`]).
-    pub topology: Mapped,
+    /// A handle on the flash the agent's store writes: the topology
+    /// display copy is read through the same driver, after its write.
+    pub flash: crate::node::SharedFlash,
     pub sub: Option<SubLines<'static>>,
     pub has_i2c: bool,
     pub has_uart: bool,
@@ -71,8 +71,8 @@ pub async fn task(
 async fn serve<L: Link>(mut pc: Pc, mut up: L) -> ! {
     pc.publish(true);
     let max = up.max_payload();
-    let via = up.kind().code();
-    pc.agent.link_up(via);
+    let (via, addr) = (up.kind().code(), up.addr());
+    let mut link_up = false;
     loop {
         pc.watch.idle(task::PC);
         let read = up.read_frame().await;
@@ -80,18 +80,30 @@ async fn serve<L: Link>(mut pc: Pc, mut up: L) -> ! {
         let Ok(request) = read else {
             continue;
         };
+        if !link_up {
+            link_up = true;
+            pc.agent.link_up(via, addr);
+        }
         let arrived = Instant::now();
         pc.agent.request(request, via);
         let (out, reboot) = pc.handle(request, max).await;
-        let sent = up.write_frame(&pc.resp[..out]).await.is_ok();
-        if let Some(status) = reply_status(&pc.resp[..out]).filter(|_| sent) {
+        if up.write_frame(&pc.resp[..out]).await.is_err() {
+            // The PC is gone: no reply, no reboot; its retry gets the
+            // same reply (same seq).
+            link_up = false;
+            pc.agent.link_down(via, addr);
+            continue;
+        }
+        if let Some(status) = reply_status(&pc.resp[..out]) {
             let ms = arrived.elapsed().as_millis();
             pc.agent
                 .replied(status, u32::try_from(ms).unwrap_or(u32::MAX));
         }
         if let Some(delay_ms) = reboot {
-            // The reply leaves before the reset drops the link.
-            let _ = up.flush().await;
+            // Only once the reply has left: the reset drops the link.
+            if up.flush().await.is_err() {
+                continue;
+            }
             pc.watch.idle(task::PC);
             Timer::after_millis(delay_ms.into()).await;
             pc.agent.before_reboot();
@@ -106,7 +118,7 @@ impl Pc {
     fn publish(&mut self, subs: bool) {
         state::set_hub(Seen::from_status(self.agent.images().status()));
         if subs {
-            state::set_subs(nodes::load(&mut self.topology, self.fallback));
+            state::set_subs(nodes::load(&mut self.flash, self.fallback));
         }
     }
 

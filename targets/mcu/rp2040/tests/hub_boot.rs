@@ -113,7 +113,7 @@ fn config(kp: &KeyPair) -> BootConfig {
         pubkey: *kp.pk,
         mcu_id: mcu_id::RP2040,
         target_tag: target_tag(HUB_TAG),
-        max_attempts: MAX_ATTEMPTS,
+        max_attempts: dagon_mcu_rp2040::TRIAL_ATTEMPTS,
     }
 }
 
@@ -169,7 +169,7 @@ fn trial_without_confirm_rolls_back_to_a() {
     log.append(&mut m, kind::SLOT_PENDING, b, 0).unwrap();
     assert_eq!(status_now(&mut m, 0).slots[1].state, SlotState::Pending);
 
-    for _ in 0..MAX_ATTEMPTS {
+    for _ in 0..dagon_mcu_rp2040::TRIAL_ATTEMPTS {
         let mut log = Log::load(&mut m, &APP_LOG_LAYOUT).unwrap();
         let d = boot::decide(&mut m, &mut log, &APP_SLOTS, &cfg);
         assert!(
@@ -200,7 +200,7 @@ fn trial_without_confirm_rolls_back_to_a() {
     );
 
     // The ROLLBACK record names the destination slot (A).
-    let last = APP_LOG[0] + 32 * (1 + 2 + 1 + MAX_ATTEMPTS as u32);
+    let last = APP_LOG[0] + 32 * (1 + 2 + 1 + dagon_mcu_rp2040::TRIAL_ATTEMPTS as u32);
     let mut raw = [0u8; 32];
     m.read(last, &mut raw).unwrap();
     let r = Record::parse(&raw).unwrap();

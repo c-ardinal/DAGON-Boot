@@ -29,7 +29,7 @@ const CONFIG: BootConfig = BootConfig {
     pubkey: PUBKEY,
     mcu_id: board::MCU_ID,
     target_tag: checked_tag(TARGET_TAG),
-    max_attempts: board::MAX_ATTEMPTS,
+    max_attempts: dagon_mcu_stm32f401re::TRIAL_ATTEMPTS,
 };
 
 /// Half period of the "no image" blink (about 50 ms).

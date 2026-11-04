@@ -125,6 +125,21 @@ impl<D: Dog, const N: usize> Guard<D, N> {
         }
     }
 
+    /// What the guard does while the image is on trial, as
+    /// `app.watchdog_taken` reports it.
+    pub const fn trial_policy(&self) -> dagon_agent::TrialPolicy {
+        match self.trial {
+            Trial::NeverFeed => dagon_agent::TrialPolicy::NeverFeed,
+            Trial::FeedUntilMs(ms) => {
+                dagon_agent::TrialPolicy::FeedUntilMs(if ms > u32::MAX as u64 {
+                    u32::MAX
+                } else {
+                    ms as u32
+                })
+            }
+        }
+    }
+
     /// Takes the running watchdog (started by the boot core or the app).
     pub fn install(&self, dog: D, on_trial: bool) {
         critical_section::with(|cs| {

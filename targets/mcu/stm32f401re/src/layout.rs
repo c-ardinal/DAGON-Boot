@@ -31,19 +31,30 @@ pub const RAM: u32 = 0x2000_0000;
 pub const RAM_LEN: u32 = 96 * 1024;
 pub const HEADER_LEN: u32 = 512;
 
-pub const MAX_ATTEMPTS: u8 = 3;
 pub const TRIAL_WDT_MS: u32 = 4_000;
 pub const CONFIRMED_WDT_MS: u32 = 8_000;
 
+/// Sector 4: the conformance build's scratch (`[conformance] scratch` of
+/// dagon-mcu.toml); no image or log is there.
+pub const SCRATCH_SECTOR: u32 = 0x0801_0000;
+pub const SCRATCH_SECTOR_LEN: u32 = 0x1_0000;
+
 /// Regions DAGON may erase and write (the flash port's geometry, and the
-/// layout a conformance build declares): the two log faces and the two APP
-/// slots. Reads are allowed anywhere in flash; the boot core sectors are
-/// never erased or written through the port.
-pub const FLASH_REGIONS: [FlashRegion; 2] = [
+/// layout a conformance build declares): the two log faces, the scratch
+/// sector and the two APP slots. Reads are allowed anywhere in flash; the
+/// boot core sectors are never erased or written through the port.
+pub const FLASH_REGIONS: [FlashRegion; 3] = [
     FlashRegion {
         start: LOG.faces[0],
         len: 2 * LOG.face_len,
         erase_size: LOG.face_len,
+        write_size: 4,
+        erased_value: 0xFF,
+    },
+    FlashRegion {
+        start: SCRATCH_SECTOR,
+        len: SCRATCH_SECTOR_LEN,
+        erase_size: SCRATCH_SECTOR_LEN,
         write_size: 4,
         erased_value: 0xFF,
     },

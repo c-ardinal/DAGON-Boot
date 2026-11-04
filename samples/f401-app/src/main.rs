@@ -98,7 +98,12 @@ fn main() -> ! {
     let period = node::watchdog_period_ms(on_trial);
     node::install_watchdog(dagon.iwdg, &GUARD, period, &store);
     let (target, regs) = Board::open_link(dagon.link);
-    let mut agent = node::agent(dagon_mcu_stm32f401re::target_tag!(), store, self_check);
+    let mut agent = node::agent(
+        dagon_mcu_stm32f401re::target_tag!(),
+        store,
+        self_check,
+        &GUARD,
+    );
     if on_trial && SELF_CONFIRM {
         match agent.confirm_own() {
             Ok(()) => info!("confirmed slot {}", ACTIVE),

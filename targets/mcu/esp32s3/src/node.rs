@@ -38,12 +38,14 @@ use crate::{
     boot::EspBootSelect,
     flash::EspFlash,
     framer::{INTER_BYTE_TIMEOUT_MS, MAX_UART_FRAME},
-    links::{self, Kind, Link as _},
+    links::{self, Kind},
     otadata::ENTRY_LEN,
     sys::{EspClock, EspReset, RtcWatchdog},
     TRIAL_WDT_MS,
 };
-use dagon_agent::{reply_status, Agent, SlotStore, StoreError, IDLE_TIMEOUT_MS};
+use dagon_agent::{
+    reply_status, Agent, SlotStore, StoreError, TrialPolicy, IDLE_TIMEOUT_MS, NO_ADDR,
+};
 use dagon_events::{Published, Watchdog as Periods};
 use dagon_mcu_common::hooks::{node_chain, Events, NodeChain};
 use dagon_mcu_common::link::Link as DagonLink;
@@ -273,6 +275,9 @@ impl Via {
 /// the trial watchdog.
 struct Link {
     agent: Node,
+    /// Whether each uplink (`Via` order) carries frames: up from its first
+    /// frame, down when a reply cannot be sent on it.
+    up: [bool; 2],
     wdt: &'static RefCell<Wdt>,
     /// The flash, for a conformance build's tests.
     #[cfg(feature = "conform")]
@@ -301,15 +306,6 @@ impl Link {
         // Armed by `arm_watchdog`; not restarted here (a start feeds it).
         let rtc = Rtc::new(p.rtc_timer);
         let rwdt = RtcWatchdog::new(rtc.rwdt);
-
-        // Board bring-up, once, before serving anything.
-        p.board.bring_up();
-        let board = RomBoard {
-            swd: rtc.swd,
-            board: p.board,
-        };
-        let uart = links::Uart::new(p.uart.into_async());
-        let usb = links::UsbCdc::new(UsbSerialJtag::new(p.usb_device).into_async());
 
         let storage = STORAGE.init(RefCell::new(FlashStorage::new(p.flash)));
         let boot = EspBootSelect::new(storage).ok()?;
@@ -341,9 +337,22 @@ impl Link {
             store,
             chain,
         );
-        agent.watchdog_taken(TRIAL_WDT_MS, trial);
+        // The trial watchdog never feeds while on trial.
+        agent.watchdog_taken(TRIAL_WDT_MS, TrialPolicy::NeverFeed);
+        // Board bring-up, once, before the links open and anything is served.
+        p.board.bring_up();
+        if let Some(id) = p.board.id() {
+            agent.bring_up(id);
+        }
+        let board = RomBoard {
+            swd: rtc.swd,
+            board: p.board,
+        };
+        let uart = links::Uart::new(p.uart.into_async());
+        let usb = links::UsbCdc::new(UsbSerialJtag::new(p.usb_device).into_async());
         Some(Self {
             agent,
+            up: [false; 2],
             wdt,
             #[cfg(feature = "conform")]
             storage,
@@ -358,8 +367,6 @@ impl Link {
         let idle = Duration::from_millis(IDLE_TIMEOUT_MS.into());
         let mut last = Instant::now();
         let mut req = [0u8; MAX_UART_FRAME];
-        self.agent.link_up(self.uart.kind().code());
-        self.agent.link_up(self.usb.kind().code());
         loop {
             self.wdt.borrow_mut().feed();
             if last.elapsed() >= idle {
@@ -393,6 +400,11 @@ impl Link {
     /// Returns the longest synchronous section (ms) it ran.
     async fn serve(&mut self, frame: &[u8], via: Via) -> u32 {
         let start = now_ms();
+        let up = &mut self.up[via as usize];
+        if !*up {
+            *up = true;
+            self.agent.link_up(via.code(), NO_ADDR);
+        }
         self.agent.request(frame, via.code());
         self.lease.busy(start, REQUEST_BUDGET_MS);
         self.lease.hold_cpu(start);
@@ -405,7 +417,10 @@ impl Link {
                 Via::Usb => self.usb.write_frame(&out[..n]).await,
             }
             .is_ok();
-            if let Some(status) = reply_status(&out[..n]).filter(|_| sent) {
+            if !sent {
+                self.up[via as usize] = false;
+                self.agent.link_down(via.code(), NO_ADDR);
+            } else if let Some(status) = reply_status(&out[..n]) {
                 self.agent.replied(status, now_ms().wrapping_sub(start));
             }
             held = held.max(self.after_reply(serve::next(then, sent)).await);
@@ -480,12 +495,13 @@ impl Link {
         EspReset.reset()
     }
 
-    /// CONF_RUN in a conformance build. The scratch unit is the first erase
-    /// unit of the OTA slot that is neither running nor the fallback;
-    /// without one the request falls through to the agent (E_UNSUPPORTED).
+    /// CONF_RUN in a conformance build, on the definition's scratch
+    /// (`[conformance] scratch`: no image, header or selection data is
+    /// there); without one the request falls through to the agent
+    /// (E_UNSUPPORTED).
     #[cfg(feature = "conform")]
     fn conform(&mut self, frame: &[u8], out: &mut [u8]) -> Option<usize> {
-        use crate::layout::{app_partition, REGIONS, SLOT_A, SLOT_B};
+        use crate::layout::REGIONS;
         use dagon_conform::node::{handle_frame, NodeSetup};
         use dagon_proto::{Cmd, Frame};
 
@@ -493,13 +509,10 @@ impl Link {
         if Frame::decode(frame, max).ok()?.0.cmd != Cmd::ConfRun as u8 {
             return None;
         }
-        let st = self.agent.images().status();
-        let idle = [SLOT_A, SLOT_B]
-            .into_iter()
-            .find(|&s| s != st.active && s != st.confirmed)?;
+        let (scratch, _) = crate::CONFORM_SCRATCH?;
         let setup = NodeSetup {
             declared: &REGIONS,
-            scratch: app_partition(idle)?.offset,
+            scratch,
         };
         let mut flash = EspFlash::new(self.storage);
         let wdt = self.wdt;

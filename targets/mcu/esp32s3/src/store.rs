@@ -21,9 +21,9 @@ use dagon_proto::payload::{target, SlotState, StatusResp};
 
 /// One detached header sector per slot in the dagon partition.
 pub const HEADER_SECTOR: u32 = 0x1000;
-/// Erase step on 64 KiB aligned ranges (one block erase stays well inside
-/// the trial watchdog).
-const BLOCK: u32 = 0x1_0000;
+/// Largest erase step: the definition's erase unit (one block erase stays
+/// below the watchdog period, `[execution] erase_unit_max_ms`).
+const BLOCK: u32 = crate::ERASE_UNIT;
 const WORD: usize = WRITE_UNIT as usize;
 
 /// otadata as the receiver needs it.

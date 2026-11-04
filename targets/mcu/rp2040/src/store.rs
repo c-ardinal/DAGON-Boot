@@ -1,12 +1,12 @@
 //! Receiver side of an RP2040 app: APP-A/B slots, the app state log and the
 //! topology display copy, behind dagon-agent's `SlotStore`.
 
-use crate::flash::RpFlash;
 use crate::image;
 use crate::layout::{
     body_capacity, sectors, APP_LOG_LAYOUT, APP_SLOT, APP_SLOT_SIZE, HEADER_LEN, SECTOR, TOPOLOGY,
     TOPOLOGY_SIZE,
 };
+use crate::node::SharedFlash;
 use crate::watchdog::Watch;
 use dagon_agent::{SlotStore, StoreError, Transition};
 use dagon_core::log::Log;
@@ -22,7 +22,7 @@ pub const ACTIVE: u8 = if cfg!(feature = "slot-b") { 1 } else { 0 };
 /// task that serves the agent: long erases report progress for it, and
 /// CONFIRM ends the trial.
 pub struct AppStore {
-    pub(crate) flash: RpFlash,
+    pub(crate) flash: SharedFlash,
     pub(crate) watch: &'static dyn Watch,
     pub(crate) task: usize,
 }

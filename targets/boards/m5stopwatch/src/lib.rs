@@ -36,6 +36,9 @@ pub const FLASH_SIZE: u32 = 16 * 1024 * 1024;
 /// `DAGON_TARGET_TAG` at build time overrides it.
 pub const TARGET_TAG: &str = "watch-s3";
 
+/// This board's definition id (`dagon-board.toml`).
+pub const BOARD_ID: &str = "m5stopwatch";
+
 /// M5IOE1 I/O expander on the internal SYS I2C bus (SDA G47, SCL G48).
 const IOE_ADDR: u8 = 0x4F;
 const IOE_REG_MODE_L: u8 = 0x03;
@@ -110,6 +113,10 @@ pub struct M5StopWatch {
 }
 
 impl BoardDef for M5StopWatch {
+    fn id(&self) -> Option<&'static str> {
+        Some(BOARD_ID)
+    }
+
     /// Rear pins to UART0.
     fn bring_up(&mut self) {
         let Ok(mut i2c) = sys_i2c(&mut self.i2c0, &mut self.sda, &mut self.scl) else {

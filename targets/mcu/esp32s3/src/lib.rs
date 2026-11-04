@@ -48,9 +48,10 @@ pub mod sys;
 /// feed, and the 2nd stage then rolls back to the previous slot.
 pub const TRIAL_WDT_MS: u32 = 4000;
 
-/// Boots the rollback-enabled 2nd stage gives an image on trial: a reset
-/// before CONFIRM aborts it.
-pub const TRIAL_ATTEMPTS: u8 = 1;
+// The constants this package's MCU definition states (`dagon-mcu.toml`):
+// `TRIAL_ATTEMPTS`, `MASKED_MAX_US`, `ERASE_UNIT`, `ERASE_UNIT_MAX_MS`,
+// `CONFORM_SCRATCH`. The boot stage and the app layer read these.
+include!(concat!(env!("OUT_DIR"), "/definition.rs"));
 
 /// A panic resets the chip: a hung image would never let the 2nd stage roll
 /// back. Turn off the `panic-reset` feature to bring your own handler.

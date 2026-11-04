@@ -35,8 +35,10 @@ pub fn next(then: Then, sent: bool) -> Next {
         Then::Nothing => Next::Stay,
         Then::Rom(m) if sent => Next::EnterRom(m),
         Then::Rom(_) => Next::RomReplyLost,
-        // A lost REBOOT reply is recovered by the host's HELLO polling.
-        Then::Reboot(ms) => Next::Reset(ms),
+        // A REBOOT reply that did not leave resets nothing: the host's
+        // retry (same seq) gets the same reply.
+        Then::Reboot(ms) if sent => Next::Reset(ms),
+        Then::Reboot(_) => Next::Stay,
         Then::CheckTrial => Next::CheckTrial,
     }
 }
@@ -50,8 +52,8 @@ mod tests {
         let m = Method::ForceDownloadBoot;
         assert_eq!(next(Then::Rom(m), true), Next::EnterRom(m));
         assert_eq!(next(Then::Rom(m), false), Next::RomReplyLost);
-        assert_eq!(next(Then::Reboot(0), false), Next::Reset(0));
         assert_eq!(next(Then::Reboot(300), true), Next::Reset(300));
+        assert_eq!(next(Then::Reboot(0), false), Next::Stay);
         assert_eq!(next(Then::CheckTrial, false), Next::CheckTrial);
         assert_eq!(next(Then::Nothing, true), Next::Stay);
     }

@@ -8,8 +8,12 @@
 //! - [`frames`]: DAGON frames cut out of a byte stream (USB CDC, UART);
 //! - [`uart`]: request/response over a byte stream (bounded, resyncing);
 //! - [`serve`]: the agent's serving loop over any link;
-//! - [`mapped`]: read-only `Flash` over memory-mapped flash.
+//! - [`mapped`]: read-only `Flash` over memory-mapped flash;
+//! - [`shared`]: several handles on one flash driver, no interrupt masking.
 #![no_std]
+
+#[doc(hidden)]
+pub use dagon_format as __format;
 
 pub mod frames;
 pub mod guard;
@@ -18,5 +22,6 @@ pub mod link;
 pub mod liveness;
 pub mod mapped;
 pub mod serve;
+pub mod shared;
 pub mod tag;
 pub mod uart;

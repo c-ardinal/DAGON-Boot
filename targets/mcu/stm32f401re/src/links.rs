@@ -1,14 +1,7 @@
 //! The link kinds this package offers, by direction, for STM32F401RE (a 子機: no downlinks):
 //!
-//! | Kind | Up | Down |
-//! |---|---|---|
-//! | `usb-cdc` | NotYet | No |
-//! | `uart` | NotYet | No |
-//! | `i2c` | Yes | No |
-//! | `ble` | NotYet | No |
-//! | `wifi-tcp` | NotYet | No |
-//! | `ethernet` | NotYet | No |
-//! | `can` | NotYet | No |
+//! README.md, "Links", shows the matrix (generated from `LINK_KINDS`;
+//! a kind the table leaves out is `No`).
 //!
 //! `NotYet`: the 構成 may name it, but a project asking for it does not
 //! build yet (`require_uplink` / `require_downlinks` say which hop).
@@ -168,6 +161,11 @@ mod target {
 
         fn kind(&self) -> Kind {
             Kind::I2c
+        }
+
+        /// The own 7-bit address, as the board's link configured it.
+        fn addr(&self) -> u8 {
+            ((self.regs.oar1().read().add() >> 1) & 0x7F) as u8
         }
 
         async fn read_frame(&mut self) -> Result<&[u8], LinkError> {

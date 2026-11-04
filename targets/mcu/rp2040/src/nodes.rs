@@ -42,22 +42,6 @@ pub const fn named(index: u8, s: &str, link: u8, addr: u8) -> SubNode {
     }
 }
 
-/// The topology display copy as the XIP window shows it: read-only (the
-/// agent's slot store writes it, as image target TOPOLOGY).
-#[cfg(target_os = "none")]
-pub fn stored() -> dagon_mcu_common::mapped::Mapped {
-    use crate::layout::TOPOLOGY_SIZE;
-    // SAFETY: the XIP window maps the whole flash, readable at all times;
-    // the flash driver flushes the XIP cache after every erase and write.
-    unsafe {
-        dagon_mcu_common::mapped::Mapped::new(
-            TOPOLOGY as *const u8,
-            TOPOLOGY,
-            TOPOLOGY_SIZE as usize,
-        )
-    }
-}
-
 /// The node list: the topology display copy, else `fallback`.
 pub fn load<F: Flash>(flash: &mut F, fallback: &[SubNode]) -> Subs {
     from_topology(flash).unwrap_or_else(|| fallback.iter().take(MAX_SUBS).copied().collect())

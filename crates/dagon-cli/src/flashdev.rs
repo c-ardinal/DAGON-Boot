@@ -28,6 +28,8 @@ pub(crate) struct Candidate {
     #[serde(rename = "device")]
     pub id: String,
     pub label: String,
+    /// The definition's hint (USB ID, UF2 Board-ID) matches this device.
+    pub matched: bool,
     /// The volume itself for a drive (`id` is its lossy display form, so
     /// a mount path that is not UTF-8 is still written to exactly).
     #[serde(skip)]
@@ -78,13 +80,20 @@ pub(crate) fn listing(cands: &[Candidate], w: &Writer) -> String {
         .collect()
 }
 
+/// Hint-matched candidates first, each group in the order reported.
+pub(crate) fn ordered(mut cands: Vec<Candidate>) -> Vec<Candidate> {
+    cands.sort_by_key(|c| !c.matched);
+    cands
+}
+
 /// The candidate to write to: the one `selector` names, else the only
 /// one. Several without a selector: [`Pick::Choose`]. None: an error.
 pub(crate) fn pick(
-    mut cands: Vec<Candidate>,
+    cands: Vec<Candidate>,
     selector: Option<&str>,
     w: &Writer,
 ) -> Result<Pick, String> {
+    let mut cands = ordered(cands);
     if let Some(s) = selector {
         return match cands.iter().position(|c| names(s, &c.id)) {
             Some(i) => Ok(Pick::Use(cands.swap_remove(i))),
@@ -128,12 +137,23 @@ pub(crate) fn choose(
     for (i, c) in cands.iter().enumerate() {
         println!("  {}) --{} {}  {}", i + 1, flag(w), c.id, c.label);
     }
-    print!("write to which one? [1-{}] ", cands.len());
+    // `cands` come ordered by `pick`: a match, if any, is first.
+    let default = cands.first().is_some_and(|c| c.matched);
+    if default {
+        print!("write to which one? [1-{}, Enter = 1] ", cands.len());
+    } else {
+        print!("write to which one? [1-{}] ", cands.len());
+    }
     let _ = std::io::Write::flush(&mut std::io::stdout());
     let mut line = String::new();
     let _ = input.read_line(&mut line);
-    line.trim()
-        .parse::<usize>()
+    let line = line.trim();
+    let line = if default && line.is_empty() {
+        "1"
+    } else {
+        line
+    };
+    line.parse::<usize>()
         .ok()
         .and_then(|n| n.checked_sub(1))
         .and_then(|i| cands.get(i).cloned())
@@ -198,6 +218,7 @@ pub(crate) fn parse_probes(out: &str) -> Vec<Candidate> {
                 label: format!("{} {}", name.trim(), kind.trim())
                     .trim()
                     .to_string(),
+                matched: false,
                 path: None,
             })
         })
@@ -215,6 +236,7 @@ fn ports(mcu: &str, hint: Option<UsbHint>) -> Result<Vec<Candidate>, String> {
             other => Candidate {
                 id: p.port_name,
                 label: format!("{other:?}"),
+                matched: false,
                 path: None,
             },
         })
@@ -234,12 +256,14 @@ pub(crate) fn usb_port(
     if let Some(p) = product {
         label.push_str(&format!(" {p}"));
     }
-    if hint.is_some_and(|h| (h.vid, h.pid) == (vid, pid)) {
+    let matched = hint.is_some_and(|h| (h.vid, h.pid) == (vid, pid));
+    if matched {
         label.push_str(&format!(" ({mcu})"));
     }
     Candidate {
         id: name,
         label,
+        matched,
         path: None,
     }
 }
@@ -406,6 +430,7 @@ fn uf2_candidate(root: &Path, info: &str, want: &Uf2Want<'_>) -> Option<Candidat
         return None;
     }
     let board = lines.find_map(|l| l.strip_prefix("Board-ID: "));
+    let matched = board == Some(want.board_id);
     let label = match board {
         Some(b) if b == want.board_id => format!("UF2 drive, Board-ID {b} ({})", want.mcu),
         Some(b) => format!("UF2 drive, Board-ID {b}"),
@@ -414,6 +439,7 @@ fn uf2_candidate(root: &Path, info: &str, want: &Uf2Want<'_>) -> Option<Candidat
     Some(Candidate {
         id: root.display().to_string(),
         label,
+        matched,
         path: Some(root.to_path_buf()),
     })
 }
@@ -507,6 +533,7 @@ mod tests {
         Candidate {
             id: id.into(),
             label: format!("label of {id}"),
+            matched: false,
             path: None,
         }
     }
@@ -549,6 +576,44 @@ mod tests {
         );
         // A selector is never passed on unless it names a candidate.
         assert!(pick(vec![c("COM3")], Some("--erase-all"), &w).is_err());
+    }
+
+    fn m(id: &str) -> Candidate {
+        Candidate {
+            matched: true,
+            ..c(id)
+        }
+    }
+
+    #[test]
+    fn matched_candidates_come_first_in_stable_order() {
+        let w = probe_rs();
+        let got = pick(vec![c("a"), m("b"), c("c"), m("d")], None, &w).unwrap();
+        assert_eq!(got, Pick::Choose(vec![m("b"), m("d"), c("a"), c("c")]));
+    }
+
+    #[test]
+    fn enter_takes_the_matched_one_and_another_number_still_works() {
+        let w = probe_rs();
+        let l = [m("b"), c("a")];
+        assert_eq!(choose(&l, &w, &mut "\n".as_bytes()), Ok(m("b")));
+        assert_eq!(choose(&l, &w, &mut "2\n".as_bytes()), Ok(c("a")));
+        // No match: Enter chooses nothing.
+        assert!(choose(&[c("a"), c("b")], &w, &mut "\n".as_bytes()).is_err());
+    }
+
+    #[test]
+    fn non_interactive_refusal_lists_the_matched_first() {
+        let w = probe_rs();
+        let Ok(Pick::Choose(l)) = pick(vec![c("a"), m("b")], None, &w) else {
+            panic!()
+        };
+        let s = several(&l, &w);
+        assert!(
+            s.find("--probe b").unwrap() < s.find("--probe a").unwrap(),
+            "{s}"
+        );
+        assert!(s.contains("Nothing was written"), "{s}");
     }
 
     #[test]

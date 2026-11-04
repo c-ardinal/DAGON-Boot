@@ -193,8 +193,8 @@ dagon flash watch      # ESP32-S3: over USB-C with espflash
 `dagon flash` prints its plan first and asks before it touches the board
 (`--yes` skips the question). It writes to a device the writer reports:
 every probe-rs probe, every serial port, every UF2 drive (USB IDs and
-the UF2 Board-ID only label them). One device is taken and shown before
-the question; with several it asks which, or takes `--probe
+the UF2 Board-ID only label them and put the matching ones first). One device is taken and shown before
+the question; with several it asks which (Enter takes the first match, if any), or takes `--probe
 <vid:pid[:serial]>`, `--port <port>` or `--drive <path>` (on Windows
 compared without regard to case, so `--drive e:` names `E:\`); with several
 and no terminal (or `--yes`) and no option, or with none, it stops

@@ -32,7 +32,9 @@ pub enum Phase {
     Confirmed,
     /// A trial ran out or failed; the previous image runs again.
     RolledBack,
-    /// A transfer was refused, failed its checks or was dropped.
+    /// A transfer was refused (by DAGON or an extension), failed its
+    /// checks or was dropped, or a SET_PENDING was refused. A refused
+    /// confirm is not a failure here: the trial goes on (`Trial`).
     Failed,
 }
 
@@ -74,10 +76,14 @@ impl Snapshot for AppSnapshot {
         } else if e.get::<requests::RebootRequested>().is_some() {
             self.phase = Phase::RebootPending;
         } else if e.get::<session::TransferAborted>().is_some()
-            || e.get::<requests::VerifyFailed>().is_some()
+            || e.get::<requests::UpdateRefused>().is_some()
             || e.get::<requests::HeaderRejected>().is_some()
+            || e.get::<requests::VerifyFailed>().is_some()
+            || e.get::<requests::PendingRefused>().is_some()
         {
             (self.phase, self.progress) = (Phase::Failed, None);
+        } else if e.get::<requests::ConfirmRefused>().is_some() && self.trial {
+            self.phase = Phase::Trial;
         }
     }
 }

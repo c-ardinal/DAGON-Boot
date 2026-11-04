@@ -406,21 +406,20 @@ fn tool_call(resp: &Value) -> Result<(String, String, Vec<String>), String> {
 pub(crate) const MAX_REQUEST: usize = 192 * 1024;
 pub(crate) const TOO_LARGE: &str = "the question and its context are too large to send to DAGON";
 
-/// Proof that [`before_call`] passed for one request; the only way to make
-/// a model call ([`post_messages_within`] takes it).
-pub(crate) struct Cleared(());
+/// The consent held for one request, from the check in [`before_call`]
+/// until the call ends (keep it alive across the call: unlink waits for
+/// it). The only way to make a model call ([`post_messages_within`] takes
+/// it); `None` only in this file's tests, which talk to a local server.
+pub(crate) struct Cleared(#[allow(dead_code)] Option<crate::agent::Held>);
 
-/// What every model call passes just before it leaves: the consent, read
-/// again from agent.json (an unlink stops the next call, however the work
-/// started), and the size of the body.
+/// What every model call passes just before it leaves: the size of the
+/// body, and the consent, read again from agent.json and held (an unlink
+/// waits for the call and stops every later one, however the work started).
 pub(crate) fn before_call(home: &std::path::Path, body: &Value) -> Result<Cleared, String> {
-    if !crate::agent::is_linked(home) {
-        return Err(crate::agent::NOT_LINKED.into());
-    }
     if body.to_string().len() > MAX_REQUEST {
         return Err(TOO_LARGE.into());
     }
-    Ok(Cleared(()))
+    Ok(Cleared(Some(crate::agent::hold(home)?)))
 }
 
 /// One model call with this CLI's key, after [`before_call`].
@@ -620,10 +619,13 @@ mod tests {
         // A topology draft stops at the call after an unlink.
         let mut calls = 0;
         let mut api = |b: &Value| {
-            before_call(&home, b)?;
-            calls += 1;
+            let r = {
+                let _held = before_call(&home, b)?;
+                calls += 1;
+                Ok(reply("t", "not: [valid", &[]))
+            };
             crate::agent::unlink(&home).unwrap();
-            Ok(reply("t", "not: [valid", &[]))
+            r
         };
         let mut ask = |_: &[String]| -> Result<Vec<String>, String> { unreachable!() };
         let e = generate("x", "m", Registry::builtin(), &mut api, &mut ask).unwrap_err();
@@ -697,7 +699,7 @@ mod tests {
         let ok = reply("t1", "y", &[]).to_string();
         let (base, h) = mock_server("200 OK", &ok);
         let v = post_messages_within(
-            &Cleared(()),
+            &Cleared(None),
             &base,
             "sk-test",
             &json!({ "model": "m" }),
@@ -718,7 +720,7 @@ mod tests {
         never.set_nonblocking(true).unwrap();
         let target = format!("http://{}/v1/messages", never.local_addr().unwrap());
         let (base, h) = mock_server(&format!("302 Found\r\nlocation: {target}"), "");
-        let e = post_messages_within(&Cleared(()), &base, "sk-secret", &json!({}), HTTP_TIMEOUT)
+        let e = post_messages_within(&Cleared(None), &base, "sk-secret", &json!({}), HTTP_TIMEOUT)
             .unwrap_err();
         h.join().unwrap();
         assert!(e.contains("302") && e.contains("not followed"), "{e}");
@@ -867,7 +869,7 @@ mod tests {
     fn http_error_message_without_key() {
         let body = r#"{"type":"error","error":{"type":"authentication_error","message":"invalid x-api-key"}}"#;
         let (base, h) = mock_server("401 Unauthorized", body);
-        let e = post_messages_within(&Cleared(()), &base, "sk-secret", &json!({}), HTTP_TIMEOUT)
+        let e = post_messages_within(&Cleared(None), &base, "sk-secret", &json!({}), HTTP_TIMEOUT)
             .unwrap_err();
         h.join().unwrap();
         assert!(e.contains("401") && e.contains("invalid x-api-key"), "{e}");

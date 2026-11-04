@@ -7,6 +7,7 @@
 
 use std::io::BufRead;
 use std::path::{Path, PathBuf};
+use std::sync::{PoisonError, RwLock, RwLockReadGuard};
 
 use serde_json::{json, Value};
 
@@ -77,12 +78,65 @@ pub fn link(home: &Path) -> Result<Consent, String> {
 }
 
 /// Removes the consent; Ok(false) when there was none.
+///
+/// Waits until no model call is in flight in any dagon process (they hold
+/// the consent through [`hold`]); no call passes the check afterwards.
 pub fn unlink(home: &Path) -> Result<bool, String> {
+    if !file(home).exists() {
+        return Ok(false);
+    }
+    let _calls = CONSENT.write().unwrap_or_else(PoisonError::into_inner);
+    let lock = lock_file(home)?;
+    lock.lock().map_err(|_| LOCK_UNAVAILABLE.to_string())?;
     match std::fs::remove_file(file(home)) {
         Ok(()) => Ok(true),
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(false),
         Err(_) => Err("the consent could not be removed".into()),
     }
+}
+
+/// One consent lock: model calls of this process share the read side,
+/// unlink takes the write side; ~/.dagon/agent.lock does the same between
+/// processes (`dagon ai unlink` while `dagon serve` runs). The OS drops a
+/// file lock when its process ends, so no lock is ever left stale.
+static CONSENT: RwLock<()> = RwLock::new(());
+const LOCK_FILE: &str = "agent.lock";
+const LOCK_UNAVAILABLE: &str = "the consent lock is not available";
+
+fn lock_file(home: &Path) -> Result<std::fs::File, String> {
+    std::fs::OpenOptions::new()
+        .read(true)
+        .write(true)
+        .create(true)
+        .truncate(false)
+        .open(home.join(".dagon").join(LOCK_FILE))
+        .map_err(|_| LOCK_UNAVAILABLE.to_string())
+}
+
+/// The consent, held for one model call: from the check until it is
+/// dropped, unlink waits.
+pub struct Held {
+    _file: std::fs::File,
+    _calls: RwLockReadGuard<'static, ()>,
+}
+
+/// Holds the consent; Err(NOT_LINKED) when there is none.
+pub fn hold(home: &Path) -> Result<Held, String> {
+    if !is_linked(home) {
+        return Err(NOT_LINKED.into());
+    }
+    let calls = CONSENT.read().unwrap_or_else(PoisonError::into_inner);
+    let file = lock_file(home)?;
+    file.lock_shared()
+        .map_err(|_| LOCK_UNAVAILABLE.to_string())?;
+    // Checked again under the lock: an unlink may have just finished.
+    if !is_linked(home) {
+        return Err(NOT_LINKED.into());
+    }
+    Ok(Held {
+        _file: file,
+        _calls: calls,
+    })
 }
 
 /// GET /v1/agent. `available`: this CLI has the key (never the key itself).
@@ -211,7 +265,17 @@ fn is_utc_time(s: &str) -> bool {
     shape
         && num(0..4).is_some()
         && num(5..7).is_some_and(|m| (1..=12).contains(&m))
-        && num(8..10).is_some_and(|d| (1..=31).contains(&d))
+        && num(8..10).is_some_and(|d| {
+            let (y, m) = (num(0..4).unwrap_or(0), num(5..7).unwrap_or(0));
+            let leap = y % 4 == 0 && (y % 100 != 0 || y % 400 == 0);
+            let days = match m {
+                2 if leap => 29,
+                2 => 28,
+                4 | 6 | 9 | 11 => 30,
+                _ => 31,
+            };
+            (1..=days).contains(&d)
+        })
         && num(11..13).is_some_and(|h| h < 24)
         && num(14..16).is_some_and(|m| m < 60)
         && num(17..19).is_some_and(|x| x < 60)
@@ -266,9 +330,14 @@ mod tests {
             "2026-11-04T24:00:00Z",
             "2026-11-04T11:59:59",
             "２026-11-04T11:59:59Z",
+            "2026-02-31T00:00:00Z",
+            "2026-02-29T00:00:00Z",
+            "2100-02-29T00:00:00Z",
+            "2026-04-31T00:00:00Z",
         ] {
             assert!(!is_utc_time(bad), "{bad}");
         }
+        assert!(is_utc_time("2028-02-29T00:00:00Z") && is_utc_time("2000-02-29T00:00:00Z"));
     }
 
     #[test]
@@ -285,6 +354,56 @@ mod tests {
         assert!(unlink(&h).unwrap());
         assert!(!unlink(&h).unwrap());
         assert_eq!(status(Some(&h), true)["consent"], Value::Null);
+        std::fs::remove_dir_all(&h).unwrap();
+    }
+
+    #[test]
+    fn unlink_waits_for_a_call_in_flight_and_no_call_passes_after_it() {
+        let h = tmp_home("hold");
+        assert_eq!(hold(&h).err().as_deref(), Some(NOT_LINKED));
+        link(&h).unwrap();
+        let held = hold(&h).unwrap();
+        let (done_tx, done) = std::sync::mpsc::channel();
+        let h2 = h.clone();
+        let t = std::thread::spawn(move || {
+            let r = unlink(&h2);
+            done_tx.send(()).unwrap();
+            r
+        });
+        let waited = done.recv_timeout(std::time::Duration::from_millis(300));
+        assert!(
+            waited.is_err(),
+            "unlink returned while a call was in flight"
+        );
+        assert!(is_linked(&h));
+        drop(held);
+        done.recv_timeout(std::time::Duration::from_secs(10))
+            .unwrap();
+        assert!(t.join().unwrap().unwrap());
+        assert_eq!(hold(&h).err().as_deref(), Some(NOT_LINKED));
+        std::fs::remove_dir_all(&h).unwrap();
+    }
+
+    #[test]
+    fn unlink_waits_for_another_processs_call_through_the_lock_file() {
+        let h = tmp_home("file-lock");
+        link(&h).unwrap();
+        // What a call in another dagon holds: the shared file lock only.
+        let other = lock_file(&h).unwrap();
+        other.lock_shared().unwrap();
+        let (done_tx, done) = std::sync::mpsc::channel();
+        let h2 = h.clone();
+        let t = std::thread::spawn(move || {
+            let r = unlink(&h2);
+            done_tx.send(()).unwrap();
+            r
+        });
+        let waited = done.recv_timeout(std::time::Duration::from_millis(300));
+        assert!(waited.is_err(), "unlink did not wait for the file lock");
+        drop(other);
+        done.recv_timeout(std::time::Duration::from_secs(10))
+            .unwrap();
+        assert!(t.join().unwrap().unwrap());
         std::fs::remove_dir_all(&h).unwrap();
     }
 

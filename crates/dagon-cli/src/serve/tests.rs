@@ -1972,24 +1972,63 @@ fn counting(
 }
 
 #[test]
-fn an_unlink_while_dagon_answers_stops_further_calls_and_the_answer() {
-    let home_slot = Arc::new(std::sync::OnceLock::<PathBuf>::new());
-    let h = home_slot.clone();
+fn an_unlink_waits_for_the_call_in_flight_and_no_call_follows() {
+    // The stand-in blocks mid-call until the test lets it go.
+    let (go, wait) = std::sync::mpsc::channel::<()>();
+    let wait = std::sync::Mutex::new(wait);
+    let (entered, inside) = std::sync::mpsc::channel::<()>();
+    let entered = std::sync::Mutex::new(entered);
     let (fake, calls) = counting(
-        said("案です。", Some("dagon: 1\nname: broken\n")),
+        said(
+            "案です。",
+            Some(
+                "dagon: 1
+name: broken
+",
+            ),
+        ),
         move || {
-            crate::agent::unlink(h.get().unwrap()).unwrap();
+            let _ = entered.lock().unwrap().send(());
+            let _ = wait.lock().unwrap().recv();
         },
     );
     let (a, home) = linked_with("ask-unlink", fake);
-    home_slot.set(home).unwrap();
-    let q = serde_json::json!({ "question": "変更を提案", "kind": "propose" });
-    let (st, body) = post(&a, "/v1/agent/ask", q);
+    let a = Arc::new(a);
+    let asking = {
+        let a = a.clone();
+        std::thread::spawn(move || {
+            let q = serde_json::json!({ "question": "変更を提案", "kind": "propose" });
+            post(&a, "/v1/agent/ask", q)
+        })
+    };
+    inside.recv().unwrap();
+    let (done_tx, done) = std::sync::mpsc::channel();
+    let unlinking = {
+        let a = a.clone();
+        std::thread::spawn(move || {
+            let b = auth(&a);
+            let r = http(
+                &a,
+                "DELETE",
+                "/v1/agent/link",
+                &[("Authorization", b.as_str())],
+                b"",
+            );
+            done_tx.send(()).unwrap();
+            r
+        })
+    };
+    let early = done.recv_timeout(std::time::Duration::from_millis(400));
+    assert!(early.is_err(), "DELETE answered while a call was in flight");
+    assert!(home.join(".dagon/agent.json").exists());
+    go.send(()).unwrap();
+    assert_eq!(unlinking.join().unwrap().0, 200);
+    let (st, body) = asking.join().unwrap();
     assert!(st == 409 && body.contains("AGENT_NOT_LINKED"), "{body}");
     assert_eq!(
         calls.load(std::sync::atomic::Ordering::SeqCst),
         1,
-        "no repair call"
+        "no call after the unlink"
     );
 }
 

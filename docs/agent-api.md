@@ -49,11 +49,17 @@ Withdraws the consent (also fine when none was recorded).
 
 - 200: the same body as GET /v1/agent (now `linked: false`).
 - 403 in `dagon demo`.
-- Work already running stops: running `ai_topology` jobs are cancelled, and
-  every model call (each round of a topology draft, each call of a question)
-  reads the consent again just before it is sent, so no call follows an
-  unlink. A question whose answer arrives after the unlink answers 409
-  `AGENT_NOT_LINKED` instead of the answer.
+- **Unlinking waits for a model call in flight.** Every model call holds the
+  consent from its check until the call ends (one lock in the process, and
+  `~/.dagon/agent.lock` between `dagon serve` and `dagon ai unlink`); DELETE
+  takes that lock, removes the consent and only then answers 200. The wait is
+  at most one call: up to about 120 s for a question, up to 600 s for a round
+  of a topology draft. The page should show a waiting state until DELETE
+  answers.
+- After that no call passes the check: running `ai_topology` jobs are
+  cancelled, a question being answered makes no further call and answers 409
+  `AGENT_NOT_LINKED` instead of its answer (`dagon ai ask` does not print it
+  either).
 
 ## AI routes before linking
 
@@ -168,7 +174,7 @@ not per project: the key it goes with belongs to the user's environment, a
 per-project consent would ask again in every project, and nothing lands in a
 project folder that may be committed. A file that does not parse, holds any
 field besides those two, names another provider or has an `at` that is not
-`YYYY-MM-DDTHH:MM:SSZ` counts as not linked.
+`YYYY-MM-DDTHH:MM:SSZ` on a real calendar date counts as not linked.
 
 ## CLI
 

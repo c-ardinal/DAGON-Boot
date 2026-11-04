@@ -388,7 +388,8 @@ fn agent_api(
     if let Some(f) = server.agent_api.get() {
         let f = Arc::clone(f);
         return Ok(Box::new(move |b: &Value| {
-            crate::ai::before_call(&home, b)?;
+            // Held through the stand-in's whole call, like a real one.
+            let _held = crate::ai::before_call(&home, b)?;
             f(b)
         }));
     }

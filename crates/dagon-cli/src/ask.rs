@@ -475,6 +475,8 @@ pub fn command(args: &[&str]) -> Result<(), String> {
         jobs: Vec::new(),
     };
     let r = ask(&q, &facts, &model, &mut api)?;
+    // Unlinked (elsewhere) while the answer was on its way: not shown.
+    crate::agent::require_linked(&home)?;
     println!("{}", r.answer);
     if let Some((diff, _)) = r.proposal {
         println!(
@@ -708,12 +710,16 @@ mod tests {
         let mut calls = 0;
         let mut fake = |_: &Value| {
             calls += 1;
-            crate::agent::unlink(&home).unwrap();
             Ok(reply("t", "案です。", Some("dagon: 1\nname: broken\n")))
         };
+        // The unlink comes after the call has ended (during it, it waits).
         let mut api = |b: &Value| {
-            crate::ai::before_call(&home, b)?;
-            fake(b)
+            let r = {
+                let _held = crate::ai::before_call(&home, b)?;
+                fake(b)
+            };
+            crate::agent::unlink(&home).unwrap();
+            r
         };
         let facts = Facts {
             reg: Registry::builtin(),

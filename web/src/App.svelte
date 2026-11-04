@@ -1,13 +1,14 @@
 <script lang="ts">
   import { tick, untrack } from 'svelte';
   import { bandOf } from './app/band.ts';
-  import { AGENT, ANNOUNCE, BAND, BUTTON, CANVAS, DEFINE, DIFF, DRAWER, FLOW, HUB, LOCK, SHEET, STATUS, ZOOM, HUB_TOGGLE, MODE, NODE, ORDER, PLAN, PRODUCT, RECONNECT, SAVE, SKIP, STEP, TIME } from './app/copy.ts';
+  import { AGENT, ANNOUNCE, BAND, BUTTON, CANVAS, DEFINE, DIFF, DRAWER, JOBS, FLOW, HUB, LOCK, SHEET, STATUS, ZOOM, HUB_TOGGLE, MODE, NODE, ORDER, PLAN, PRODUCT, RECONNECT, SAVE, SKIP, STEP, TIME } from './app/copy.ts';
   import { webSerial } from './app/connect.ts';
   import { HUB_LOCKED, hubOf, view, type Action } from './app/machine.ts';
   import { Operate, waterOf, type Progress } from './app/operate.svelte.ts';
   import Graph, { type Chip, type Dot } from './graph/Graph.svelte';
   import Status from './screens/Status.svelte';
   import Drawer, { type DrawerTab } from './screens/Drawer.svelte';
+  import Timeline, { type StageEvent } from './screens/Timeline.svelte';
   import { PARTS } from './app/copy.ts';
   import { activeStates, lockOf, stateName, type Control } from './app/locks.ts';
   import { Agent, type AgentChoice, type AskKind, type Selection } from './app/agent.svelte.ts';
@@ -211,6 +212,7 @@
 
   /** SC-M: the menu under the header, and its one confirmation (M53). */
   let menuOpen = $state(false);
+  let helpOpen = $state(false);
   let restartOpen = $state(false);
   let restartButton = $state<HTMLButtonElement>();
   /** Menu 新しく作る / 見本から新しく作る / 開く: the 構成 is saved first (or the dialog asks). */
@@ -419,6 +421,8 @@
   const problemCount = $derived(d.problems.filter((p) => p.severity === 'error').length);
   const drawerTabs = $derived<DrawerTab[]>([
     { id: 'problems', label: DRAWER.problems, count: problemCount + d.notYet, alarm: problemCount > 0 },
+    { id: 'output', label: DRAWER.output },
+    { id: 'timeline', label: DRAWER.timeline },
     { id: 'log', label: DRAWER.log },
     ...(cli.state === 'ready' ? [{ id: 'jobs', label: DRAWER.jobs, count: runningJobs }] : []),
     ...(agent.linked ? [{ id: 'talk', label: DRAWER.talk }] : []),
@@ -751,6 +755,38 @@
     const t = setInterval(tick, 1000);
     return () => clearInterval(t);
   });
+  /** The timeline (DES-UX3-131): each node's stage changes since the update began; it opens with the update. */
+  let tlEvents = $state<StageEvent[]>([]);
+  let tlStart = 0;
+  let tlLast: Record<string, string> = {};
+  $effect(() => {
+    const start = op.startedAt;
+    const prog = op.progress;
+    if (start === null) return;
+    untrack(() => {
+      if (start !== tlStart) {
+        tlStart = start;
+        tlEvents = [];
+        tlLast = {};
+        if (drawerTab === null) drawerTab = 'timeline';
+      }
+      const t = Date.now() - start;
+      const add = Object.entries(prog)
+        .filter(([id, p]) => tlLast[id] !== p.stage)
+        .map(([id, p]) => ((tlLast[id] = p.stage), { t, id, stage: p.stage }));
+      if (add.length) tlEvents = [...tlEvents, ...add];
+    });
+  });
+  const tlNow = $derived(tlStart && PERCENT.has(op.state) ? Math.max(0, wallMs - tlStart) : Math.max(0, ...tlEvents.map((e) => e.t)));
+  const stageWord = (s: string) => (CHIP[s as Progress['stage']] ?? s).replace(/^\S+\s/, '');
+  /** 出力: the CLI jobs' output lines, oldest job first (the latest 300). */
+  const outputLines = $derived(
+    [...cli.jobs]
+      .reverse()
+      .flatMap((j) => j.lines.map((line) => ({ kind: j.kind, line })))
+      .slice(-300),
+  );
+
   /** M27: seconds left of the automatic reconnect, in 5 s steps (L20). */
   const RECONNECT_STEP_S = 5;
   const reconnectLeft = $derived(
@@ -1087,6 +1123,16 @@
         {/each}
       </ol>
     {/if}
+  {:else if tab === 'output'}
+    {#if outputLines.length === 0}
+      <p class="log-none">{DRAWER.outputNone}</p>
+    {:else}
+      <ol class="log out">
+        {#each outputLines as o, i (i)}<li><span class="k">{JOBS.kinds[o.kind] ?? o.kind}</span> {o.line}</li>{/each}
+      </ol>
+    {/if}
+  {:else if tab === 'timeline'}
+    <Timeline rows={(op.config?.nodes ?? []).filter((n) => op.targets.includes(n.id)).map((n) => ({ id: n.id, name: `[${n.no}] ${n.name}` }))} events={tlEvents} now={tlNow} label={stageWord} />
   {:else if tab === 'jobs'}
     <CliPanel {cli} {d} {autosave} panel="jobs" onuse={useRelease} />
   {:else if tab === 'log'}
@@ -1179,6 +1225,7 @@
       onhub={screen === 'start' ? undefined : toggleHub}
       {hubLocked}
       flow={screen === 'work' ? flow : undefined}
+      bind:helpOpen
       title={screen === 'work' ? (d.doc.topo.name ?? '') : ''}
     />
     {#if menuOpen}
@@ -1191,6 +1238,7 @@
         onlink={openLink}
         ontalk={() => ((menuOpen = false), dagonOpen++)}
         onunlink={() => void unlink()}
+        onhelp={() => ((menuOpen = false), (helpOpen = true))}
       />
     {/if}
     {#if screen === 'start'}
@@ -1505,6 +1553,15 @@
     grid-template-columns: var(--w-left) minmax(0, 1fr) var(--w-right);
     height: 100vh;
   }
+  /* The start page (DES-UX3-012): one centred column under the bar, its status line at the bottom. */
+  .frame:not(.work) {
+    grid-template-areas: 'header' 'help' 'menu' 'canvas' 'right' 'band';
+    grid-template-rows: auto auto auto auto minmax(0, 1fr) auto;
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .frame:not(.work) > .left {
+    display: none;
+  }
   /* Work: the graph is the whole stage; a drawer under it, the band at the bottom. */
   .frame.work {
     grid-template-areas: 'header' 'help' 'menu' 'canvas' 'drawer' 'band';
@@ -1566,6 +1623,13 @@
   }
   .log {
     list-style: none;
+  }
+  .log.out {
+    font-family: var(--f-mono);
+    white-space: pre-wrap;
+  }
+  .log .k {
+    color: var(--c-muted);
   }
   .talk {
     display: grid;

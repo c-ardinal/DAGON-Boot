@@ -417,6 +417,13 @@ export const AGENT = {
 } as const;
 
 /** The bottom drawer (DES-UX3-015) and its tabs. */
+/** The drawer's timeline of an update (DES-UX3-131). */
+export const TIMELINE = {
+  label: '更新のタイムライン',
+  time: '時間',
+  none: '更新を始めると、ノードごとの段階がここに時間の順で並びます。',
+} as const;
+
 /** The status row (DES-UX3-016). */
 export const STATUS = {
   label: '状態',
@@ -464,6 +471,9 @@ export const DRAWER = {
   logNone: 'まだ記録はありません。',
   close: 'パネルを閉じる',
   jobs: '作業',
+  output: '出力',
+  timeline: 'タイムライン',
+  outputNone: 'まだ出力はありません。CLI の作業の記録がここに出ます。',
 } as const;
 
 /** Canvas: uplink cards, the empty canvas, dot numbers. */
@@ -1111,6 +1121,8 @@ export const START = {
   heading: '始め',
   new: '新しく作る',
   sample: '見本から新しく作る',
+  /** Under the product's name on the start page (the mock's line). */
+  sub: '構成を描くと、ビルドできるプロジェクトと、書き込み・更新の手順ができます。',
   open: '開く',
   recent: '最近のプロジェクト',
   recentNone: 'なし',

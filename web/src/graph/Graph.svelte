@@ -31,7 +31,7 @@
 </script>
 
 <script lang="ts">
-  import { CANVAS, LINK, NODE } from '../app/copy.ts';
+  import { CANVAS, LINK, NODE, SLOT } from '../app/copy.ts';
   import { KIND_LABEL, type LinkKind } from '../app/define/model.ts';
   import type { Live } from '../app/operate.svelte.ts';
   import type { Config, Link, Node } from '../app/sample.ts';
@@ -249,6 +249,29 @@
     return h ? versionText(h.activeVersion) : '';
   }
 
+  /** The slot line (A / B with versions, ▸ on the running one), from the node's last STATUS. */
+  function slotsOf(n: Node): { row: string; text: string; on: boolean }[] | null {
+    const st = connected ? live[n.id]?.status : null;
+    if (!st) return null;
+    return st.slots.slice(0, 2).map((s, i) => ({ row: SLOT.rows[i], text: s.state === 0 ? SLOT.states[0] : versionText(s.version), on: st.active === i }));
+  }
+
+  /** Marks of the boot state (DES-UX3-130): ✓ settled, ◐ waiting for the check, ↺ went back. */
+  const BOOT_MARK: Record<number, string> = { 1: '…', 2: '…', 3: '◐', 4: '✓', 5: '↺' };
+  /** The boot-state chip: the running slot's state from STATUS, else what HELLO says (on trial or not). */
+  function bootOf(n: Node): { text: string; trial: boolean } | null {
+    const l = connected ? live[n.id] : undefined;
+    if (!l?.responding) return null;
+    const st = l.status;
+    if (st && st.active < 2) {
+      const state = st.slots[st.active].state;
+      return { text: `${BOOT_MARK[state] ?? ''} ${SLOT.states[state] ?? ''} ${SLOT.rows[st.active]}`.trim(), trial: state === 3 };
+    }
+    if (!l.hello) return null;
+    // On trial the state chip (● 確認待ち) already says it.
+    return l.hello.trial ? null : { text: `✓ ${SLOT.states[4]}`, trial: false };
+  }
+
   /** A 親機's own connection line: its uplink as the 構成 writes it, or the link from the node above it. */
   function hubVia(n: Node): string {
     if (!n.uplink) return n.via || NODE.usb;
@@ -418,6 +441,8 @@
         {@const v = versionOf(n)}
         {@const level = fill[n.id]}
         {@const linked = (config?.links ?? []).some((l) => l.to === n.id)}
+        {@const slots = slotsOf(n)}
+        {@const boot = m !== null && m !== 'skeleton' && m.silent ? null : bootOf(n)}
         <button
           class="node"
           class:uns={!!n.notYet}
@@ -449,11 +474,19 @@
           <span class="bd">
             <span class="prod" translate="no" title={n.product}>{n.product}</span>
             <span class="meta" translate="no">{metaOf(n)}</span>
+            {#if slots}
+              <span class="slotline" translate="no">{#each slots as sl (sl.row)}<span class:on={sl.on}>{sl.row} {sl.text}</span>{/each}</span>
+            {/if}
             {#if m === 'skeleton'}
               <span class="chips"><span class="skeleton chip-sk"></span></span>
-            {:else if m}
-              <span class="chips"><span class="chip" class:silent={m.silent} class:uns={!!n.notYet && m.chip === NODE.notYet}>{m.chip}</span></span>
-              {#if m.note}<span class="note">{m.note}</span>{/if}
+            {:else if m || boot}
+              <span class="chips"
+                >{#if m}<span class="chip" class:silent={m.silent} class:uns={!!n.notYet && m.chip === NODE.notYet}>{m.chip}</span>{/if}{#if boot}<span
+                    class="chip boot"
+                    class:trial={boot.trial}>{boot.text}</span
+                  >{/if}</span
+              >
+              {#if m?.note}<span class="note">{m.note}</span>{/if}
             {/if}
           </span>
           {#if level !== undefined}<span class="pct" aria-hidden="true">{Math.round(level)}%</span>{/if}
@@ -729,6 +762,26 @@
     background: var(--c-ink);
     font: 700 var(--t-11) / 1 var(--f-ja);
     white-space: nowrap;
+  }
+  .chip.boot.trial {
+    border-style: dashed;
+  }
+  .slotline {
+    display: flex;
+    gap: 0.5rem;
+    color: var(--c-muted);
+    font: 500 var(--t-11) / 1.5 var(--f-mono);
+  }
+  .slotline .on {
+    color: var(--c-paper);
+  }
+  .slotline .on::before {
+    content: '▸';
+    margin-right: 2px;
+  }
+  .compact .slotline,
+  .compact .chip.boot {
+    display: none;
   }
   .chip.silent {
     border-color: var(--c-signal);

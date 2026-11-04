@@ -35,6 +35,8 @@
     /** The work screen's bar (DES-UX3-010/020): the project's name and the 01–05 flow with the next action, instead of the three steps. */
     flow?: Snippet;
     title?: string;
+    /** 困ったとき is open (the menu opens it too, where the bar has no room for its button). */
+    helpOpen?: boolean;
   }
 
   let {
@@ -58,6 +60,7 @@
     sim = false,
     flow,
     title = '',
+    helpOpen = $bindable(false),
   }: Props = $props();
   const now = $derived(step === null ? null : STEP.of3(step));
   /** Position of the current step; recovery happens in the third (更新). */
@@ -70,7 +73,6 @@
     if (m === 'operate' && operateLocked && !modeLocked) return onlocked?.();
     if (!off(m)) onmode?.(m);
   }
-  let helpOpen = $state(false);
 </script>
 
 <header class:bar={!!flow}>

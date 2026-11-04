@@ -1,6 +1,6 @@
 <script lang="ts">
   import { tick } from 'svelte';
-  import { BAND, BUTTON, CLI_LINK, MENU, START } from '../app/copy.ts';
+  import { BAND, BUTTON, CLI_LINK, MENU, PRODUCT, START } from '../app/copy.ts';
   import { inside, type Start, type StartChoice } from '../app/start.svelte.ts';
 
   interface Props {
@@ -48,7 +48,8 @@
 
 <main id="canvas" class="start" tabindex="-1" aria-labelledby="start-h">
   <h1 id="start-h" class="visually-hidden">{START.heading}</h1>
-  <img class="mark" src="./icons/favicon-180.png" alt="" width="72" height="72" />
+  <!-- DES-UX3-012: the mock's start page, one centred column of 36 px rows. -->
+  <div class="intro" aria-hidden="true"><p class="title" translate="no">{PRODUCT}</p><p class="sub">{START.sub}</p></div>
   <div class="choices">
     {#each CHOICES as [c, no, label], i (c)}
       <button class="choice" bind:this={buttons[i]} aria-pressed={s.choice === c} aria-disabled={!s.usable(c)} onclick={() => void s.choose(c)}
@@ -134,34 +135,42 @@
   .start {
     grid-area: canvas;
     display: grid;
+    grid-template-columns: minmax(0, 35rem);
+    justify-content: center;
     align-content: start;
-    gap: var(--s-6);
+    gap: var(--s-5);
     min-height: 0;
-    padding: var(--s-7) var(--s-6);
-    overflow: auto;
+    padding: 3.5rem var(--s-4) var(--s-4);
     background: var(--c-layer-0);
   }
   .start:focus {
     outline: none;
   }
-  .mark {
-    border-radius: 16px;
+  .intro p {
+    margin: 0;
+  }
+  .title {
+    margin-bottom: 0.25rem !important;
+    font: 700 var(--t-title-size) / var(--t-title-lh) var(--f-ja);
+  }
+  .sub {
+    color: var(--c-muted);
   }
   .choices {
     display: grid;
-    gap: var(--s-3);
-    max-width: 36rem;
+    gap: 0.375rem;
   }
   .choice {
     display: flex;
-    align-items: baseline;
-    gap: var(--s-5);
-    padding: var(--s-5) var(--s-6);
+    align-items: center;
+    gap: var(--s-3);
+    height: 2.25rem;
+    padding: 0 var(--s-3);
     border: 1px solid var(--c-line);
     border-radius: var(--r-m);
-    background: var(--c-layer-1);
+    background: var(--c-ink);
     text-align: left;
-    font: 700 var(--t-heading-size) / var(--t-heading-lh) var(--f-ja);
+    font: 700 var(--t-13) / 1 var(--f-ja);
     cursor: pointer;
     outline: 3px solid transparent;
     outline-offset: -3px;
@@ -296,21 +305,32 @@
     border-color: var(--c-paper);
     box-shadow: inset 0 0 0 2px var(--c-paper);
   }
+  /* 最近のプロジェクト: under the choices in the same column (28 px rows). */
   .right {
     grid-area: right;
     display: grid;
+    grid-template-columns: minmax(0, 35rem);
+    justify-content: center;
     align-content: start;
-    gap: var(--s-4);
+    gap: var(--s-2);
     min-height: 0;
-    padding: var(--s-5);
+    padding: 0 var(--s-4) var(--s-4);
     overflow: auto;
-    border-left: 1px solid var(--c-line);
-    background: var(--c-ink);
+    background: var(--c-layer-0);
+  }
+  .right h2 {
+    color: var(--c-muted);
+    font: 700 var(--t-11) / 1 var(--f-ja);
+    letter-spacing: 0.06em;
+  }
+  .recent {
+    gap: 0.375rem;
   }
   .recent .entry {
-    flex-direction: column;
-    gap: 0;
-    padding: var(--s-3);
+    align-items: center;
+    min-height: 1.75rem;
+    padding: 0 var(--s-3);
+    border: 1px solid var(--c-hair);
     border-radius: var(--r-m);
     font-family: var(--f-ja);
   }
@@ -324,8 +344,12 @@
     align-items: center;
     gap: var(--s-4);
     min-height: var(--h-band);
-    padding: 0 var(--s-5);
-    border-top: 1px solid var(--c-line);
+    padding: 0 var(--s-3);
+    border-top: 1px solid var(--c-hair);
+    font-size: var(--t-12);
+  }
+  .band :global(.primary) {
+    height: 1.25rem;
   }
   .next {
     display: flex;
@@ -348,9 +372,8 @@
     .start {
       padding: var(--s-5) var(--s-4);
     }
-    .right {
-      border-left: 0;
-      border-top: 1px solid var(--c-line);
+    .band :global(.primary) {
+      height: var(--h-primary);
     }
   }
 </style>

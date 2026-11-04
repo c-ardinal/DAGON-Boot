@@ -77,6 +77,10 @@ const L3B_CHECKS: usize = 10;
 /// Settling time after the expander switches to 400 kHz.
 const SPEED_SWITCH_MS: u32 = 50;
 const WAKE_MS: u32 = 10;
+/// Right after power-on the M5IOE1 (its own MCU) does not answer yet; the
+/// official `M5IOE1::begin` then waits this long, wakes it and tries once
+/// more. The whole power sequence stays well inside the 4 s start watchdog.
+const IOE_RETRY_MS: u32 = 800;
 /// Wait before the panel is first addressed (official `Hal::init`).
 const PANEL_SETTLE_MS: u32 = 50;
 
@@ -137,7 +141,16 @@ fn pm1(bus: &mut Bus, con: &mut Console) -> bool {
 /// Whether L3B_EN reads high, and at which check (0: never).
 fn ioe(bus: &mut Bus, delay: &Delay, con: &mut Console) -> (bool, u8) {
     wake_ioe(bus, delay);
-    if !update8(bus, IOE, IOE_I2C_CFG, IOE_I2C_400K, 0xFF) {
+    let mut answered = update8(bus, IOE, IOE_I2C_CFG, IOE_I2C_400K, 0xFF);
+    if !answered {
+        con.line(format_args!(
+            "IOE 23 = 10: no answer, again in {IOE_RETRY_MS} ms"
+        ));
+        delay.delay_millis(IOE_RETRY_MS);
+        wake_ioe(bus, delay);
+        answered = update8(bus, IOE, IOE_I2C_CFG, IOE_I2C_400K, 0xFF);
+    }
+    if !answered {
         con.line(format_args!("IOE 23 = 10: failed"));
         return (false, 0);
     }

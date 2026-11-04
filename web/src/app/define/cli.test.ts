@@ -62,6 +62,17 @@ function fake(opts: { status?: number; hash?: string } = {}) {
 }
 
 describe('dagon serve link', () => {
+  test('a job stopped by the lock table is not started (no request)', async () => {
+    const f = fake();
+    const cli = new Cli(f.deps);
+    await cli.connect();
+    const n = f.calls.length;
+    cli.guard = () => true;
+    expect(await cli.build(['seg'])).toBeNull();
+    expect(await cli.flash('seg')).toBeNull();
+    expect(f.calls.length).toBe(n);
+  });
+
   test('the passphrase moves from the URL fragment to sessionStorage, rides as Bearer, and opens the event stream', async () => {
     const f = fake();
     const cli = new Cli(f.deps);

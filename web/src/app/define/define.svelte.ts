@@ -80,16 +80,26 @@ export class Define {
     return this.revision >= 0 && this.future.length > 0;
   }
 
-  /** One edit, undoable. */
-  apply(next: Doc): void {
-    if (next === this.doc) return;
+  /**
+   * The lock table's check for editing (DES-UX3-182), set by the page: true when editing is
+   * stopped now (the page has shown why). Every edit goes through apply, undo or redo, so a
+   * key, a double-click, a drag or any later path is stopped the same way.
+   */
+  guard: (kind: 'edit') => boolean = () => false;
+
+  /** One edit, undoable; false when nothing changed or editing is stopped now. */
+  apply(next: Doc): boolean {
+    if (next === this.doc) return false;
+    if (this.guard('edit')) return false;
     this.past = [...this.past.slice(-(HISTORY - 1)), $state.snapshot(this.doc) as Doc];
     this.future = [];
     this.doc = next;
     this.revision++;
+    return true;
   }
 
   undo(): void {
+    if (!this.past.length || this.guard('edit')) return;
     const prev = this.past.pop();
     if (!prev) return;
     this.future.push($state.snapshot(this.doc) as Doc);
@@ -99,6 +109,7 @@ export class Define {
   }
 
   redo(): void {
+    if (!this.future.length || this.guard('edit')) return;
     const next = this.future.pop();
     if (!next) return;
     this.past.push($state.snapshot(this.doc) as Doc);
@@ -109,15 +120,14 @@ export class Define {
 
   /** "見本を置く": the desk demo with its names (undoable). */
   placeSample(): void {
-    this.apply(fromYaml(DESK_DEMO_YAML, Object.fromEntries(DESK_DEMO.nodes.map((n) => [n.id, n.name]))));
+    if (!this.apply(fromYaml(DESK_DEMO_YAML, Object.fromEntries(DESK_DEMO.nodes.map((n) => [n.id, n.name]))))) return;
     this.selected = null;
   }
 
   /** "置く" from the node list (A01). */
   place(board: string, product: string): void {
     const r = place(this.doc, board);
-    if (!r.id) return;
-    this.apply(r.doc);
+    if (!r.id || !this.apply(r.doc)) return;
     this.selected = `node:${r.id}`;
     this.status = ANNOUNCE.A01(product, r.doc.topo.nodes.find((n) => n.id === r.id)!.role === 'coordinator');
   }
@@ -130,7 +140,7 @@ export class Define {
     const r = 'board' in part ? place(this.doc, part.board) : placeMcu(this.doc, part.mcu);
     if (!r.id) return;
     const next = parent ? connect(r.doc, r.id, parent) : r.doc;
-    this.apply(next);
+    if (!this.apply(next)) return;
     this.selected = `node:${r.id}`;
     this.status = ANNOUNCE.A01(name, next.topo.nodes.find((n) => n.id === r.id)!.role === 'coordinator');
   }
@@ -158,8 +168,7 @@ export class Define {
   /** "置く" by MCU (§4): a node without a board; its flash size is the developer's to fill. */
   placeMcu(mcu: string, name: string): void {
     const r = placeMcu(this.doc, mcu);
-    if (!r.id) return;
-    this.apply(r.doc);
+    if (!r.id || !this.apply(r.doc)) return;
     this.selected = `node:${r.id}`;
     this.status = ANNOUNCE.A01(name, r.doc.topo.nodes.find((n) => n.id === r.id)!.role === 'coordinator');
   }
@@ -171,11 +180,11 @@ export class Define {
     if (s.startsWith('node:')) {
       const id = s.slice(5);
       const name = this.doc.names[id] ?? id;
-      this.apply(removeNode(this.doc, id));
+      if (!this.apply(removeNode(this.doc, id))) return;
       this.status = ANNOUNCE.A03(name);
     } else if (s.startsWith('link:')) {
       const i = (this.doc.topo.links ?? []).findIndex((l) => l.to === s.slice(5));
-      if (i >= 0) this.apply(removeLink(this.doc, i));
+      if (i < 0 || !this.apply(removeLink(this.doc, i))) return;
     }
     this.selected = null;
   }
@@ -200,7 +209,7 @@ export class Define {
   importYaml(text: string): boolean {
     try {
       const doc = fromYaml(text);
-      this.apply(doc);
+      if (!this.apply(doc)) return false;
       this.source = { text, as: toYaml(doc.topo) };
     } catch {
       this.unreadable = true;
@@ -237,12 +246,13 @@ export class Define {
    * replaces this one, keeping the names and board fields of the nodes it
    * shares; undoable.
    */
-  importRelease(topo: Topo): void {
+  importRelease(topo: Topo): boolean {
     const t = { buses: [], links: [], recovery: {}, ...topo };
     const ids = new Set(t.nodes.map((n) => n.id));
     const keep = <T>(r: Record<string, T> | undefined) => Object.fromEntries(Object.entries(r ?? {}).filter(([id]) => ids.has(id)));
-    this.apply({ topo: t, names: keep(this.doc.names), boards: keep(this.doc.boards) });
+    if (!this.apply({ topo: t, names: keep(this.doc.names), boards: keep(this.doc.boards) })) return false;
     this.selected = null;
+    return true;
   }
 
   /** Undo or redo can remove what was selected. */

@@ -18,6 +18,27 @@ describe('define session', () => {
     expect(d.doc.topo.links ?? []).toEqual([]);
   });
 
+  test('editing stopped by the lock table: no path changes the 構成 (keys, double-click, drag, import, undo)', () => {
+    const d = new Define();
+    d.placeSample();
+    const before = JSON.stringify(d.doc);
+    let asked = 0;
+    d.guard = () => (asked++, true);
+    // Enter / double-click in the parts window, the table's 置く, a drop, a port drag, Delete, import, undo.
+    d.place('nucleo-f401re', 'NUCLEO-F401RE');
+    d.placeMcu('stm32f401re', 'STM32F401RE（自作ボード）');
+    d.placeAt({ board: 'nucleo-f401re' }, 'NUCLEO-F401RE', 'hub');
+    d.link('seg', 'watch');
+    d.selected = 'node:seg';
+    d.removeSelected();
+    expect(d.importRelease({ ...d.doc.topo, nodes: d.doc.topo.nodes.slice(0, 1) })).toBe(false);
+    expect(d.importYaml(DESK_DEMO_YAML)).toBe(false);
+    d.undo();
+    expect(JSON.stringify(d.doc)).toBe(before);
+    // Seven edits asked (linking an already linked node changes nothing and needs no asking).
+    expect(asked).toBe(7);
+  });
+
   test('a port drag links a node under another; a taken node and a loop are refused with why', () => {
     const d = new Define();
     d.placeSample();

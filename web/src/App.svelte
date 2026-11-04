@@ -217,6 +217,7 @@
   let restartButton = $state<HTMLButtonElement>();
   /** Menu 新しく作る / 見本から新しく作る / 開く: the 構成 is saved first (or the dialog asks). */
   function toStart(c: StartChoice) {
+    if (stopped('project')) return;
     menuOpen = false;
     void autosave.leave(() => goStart(c));
   }
@@ -230,6 +231,7 @@
 
   /** "最初からやり直す": the page's records go and SC-S0 opens; the project's files stay (§7.20). */
   function restart() {
+    if (stopped('project')) return void (restartOpen = false);
     restartOpen = false;
     menuOpen = false;
     void autosave.leave(restartNow);
@@ -267,6 +269,7 @@
 
   /** "このリリースを運用で使う" (X03): the release goes to the operate mode's file check. */
   async function useRelease(name: string, bytes: Uint8Array) {
+    if (stopped('file')) return;
     if (!(await autosave.ready())) return lock('unsaved');
     switchMode('operate');
     op.takeFile(name, bytes);
@@ -303,6 +306,7 @@
 
   /** "親機へ送る" / "つないで、親機へ送る" from define mode: the operate session sends the document. */
   async function sendDefined() {
+    if (stopped('connect')) return;
     // The 親機 gets the saved 構成 only.
     if (!(await autosave.ready())) return lock('unsaved');
     op.useConfig(d.config);
@@ -347,8 +351,8 @@
   /** "ファイルの構成を取り込む" (§7.6): the release's 構成 replaces this one (undoable) and goes to the YAML. */
   async function importFileTopology() {
     const t = op.fileTopology;
-    if (!t) return;
-    d.importRelease(t as unknown as Topo);
+    // Editing stopped (the lock table): nothing is replaced and nothing is saved.
+    if (!t || !d.importRelease(t as unknown as Topo)) return;
     op.fileTopology = null;
     await save();
   }
@@ -371,7 +375,8 @@
   async function agree(choice: AgentChoice) {
     linkOpen = false;
     const p = await agent.setLink(choice);
-    if (p) return showWhy(p.text, null, p.failed);
+    // An empty text: the lock table stopped it and has already said why.
+    if (p) return void (p.text && showWhy(p.text, null, p.failed));
     const c = agent.status?.consent;
     note(AGENT.linked(agent.status?.provider.name ?? '', c?.at ?? ''));
     dagonOpen++;
@@ -379,7 +384,7 @@
   async function unlink() {
     menuOpen = false;
     const p = await agent.setLink(null);
-    if (p) return showWhy(p.text, null, p.failed);
+    if (p) return void (p.text && showWhy(p.text, null, p.failed));
     note(AGENT.unlinked);
     if (drawerTab === 'talk') drawerTab = null;
   }
@@ -402,7 +407,7 @@
     const p = agent.messages[i]?.proposal;
     if (!p) return;
     try {
-      d.importRelease(fromYaml(p.topology, d.doc.names).topo);
+      if (!d.importRelease(fromYaml(p.topology, d.doc.names).topo)) return;
     } catch {
       return showWhy(AGENT.errors.AGENT_FAILED.text, at, true);
     }
@@ -705,6 +710,7 @@
     const input = e.currentTarget as HTMLInputElement;
     const f = input.files?.[0];
     input.value = '';
+    if (f && stopped(pickForRecovery ? 'recover' : 'file')) return void (pickForRecovery = false);
     const forRecovery = pickForRecovery;
     pickForRecovery = false;
     if (!f) return;
@@ -716,6 +722,7 @@
   /** The file chooser is open for a recovery that found no release. */
   let pickForRecovery = false;
   async function recover(again = false) {
+    if (stopped('recover')) return;
     if ((await (again ? op.retry() : op.recover())) === 'needFile') {
       pickForRecovery = true;
       fileInput?.click();
@@ -864,6 +871,10 @@
       removeEventListener('keydown', lockKeys, true);
     };
   });
+  // The models check the lock table inside their actions: any path to them (key, double-click, drag) is stopped.
+  d.guard = (k) => stopped(k);
+  cli.guard = (k) => stopped(k);
+  agent.guard = (k) => stopped(k);
   /** Band actions as lock-table operations. */
   const CONTROL_OF: Partial<Record<Action, Control>> = {
     chooseFile: 'file', updateResponding: 'file', otherFile: 'file', useLatest: 'update', update: 'update',
@@ -876,6 +887,7 @@
   const hubNoticeShown = $derived(hubNotice && hubNotice.at === op.state ? hubNotice.why : null);
   /** The header's つなぐ / 切断 (owner 11/2): 切断 closes the port and keeps its permission. */
   function toggleHub() {
+    if (stopped('connect')) return;
     if (hubLocked) {
       hubNotice = { at: op.state, why: hubLocked };
       if (mode === 'operate') void tick().then(() => nextEl?.focus());
@@ -941,6 +953,8 @@
   });
 
   function act(a: Action) {
+    const c = CONTROL_OF[a];
+    if (c && stopped(c)) return;
     switch (a) {
       case 'connectDiscover':
       case 'connect':
@@ -1063,7 +1077,7 @@
         <button class="tb side" onclick={() => void importFileTopology()}>{DEFINE.importFileTopology}</button>
       {/if}
       {#if empty}
-        <button class="tb primary" data-control="connect" bind:this={primaryEl} onclick={() => void op.connect()}>{BUTTON.connectDiscover}</button>
+        <button class="tb primary" data-control="connect" bind:this={primaryEl} onclick={() => act('connectDiscover')}>{BUTTON.connectDiscover}</button>
       {:else if firstError}
         <button class="tb primary" data-control="edit" bind:this={primaryEl} onclick={() => d.fix(firstError)}>{DEFINE.fix}</button>
       {:else if d.operable === 'ok'}
@@ -1191,8 +1205,8 @@
         selected={op.selected}
         {connected}
         act={nodeActions}
-        onkeep={(id) => void op.keepTrial(id)}
-        onback={(id) => void op.rollback(id)}
+        onkeep={(id) => !stopped('rollback') && void op.keepTrial(id)}
+        onback={(id) => !stopped('rollback') && void op.rollback(id)}
         recovery={op.recovering && op.recovered ? { id: op.recovering, result: op.recovered } : null}
       />
   {/if}

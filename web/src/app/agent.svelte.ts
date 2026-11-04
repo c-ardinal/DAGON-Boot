@@ -101,6 +101,9 @@ export class Agent {
   thinking = $state(false);
   messages = $state<Message[]>([]);
 
+  /** The lock table's check (DES-UX3-182), set by the page: true when it is stopped now (the page has shown why). */
+  guard: (kind: 'ask' | 'link') => boolean = () => false;
+
   constructor(private readonly api: AgentApi) {}
 
   /** Linked: DAGON is shown and questions go out without asking again. */
@@ -119,6 +122,7 @@ export class Agent {
 
   /** POST (with the chosen agent and way) or DELETE /v1/agent/link; null when it went through, else why not. */
   async setLink(choice: AgentChoice | null): Promise<AgentProblem | null> {
+    if (this.guard('link')) return { text: '', failed: false };
     try {
       const r = choice ? await this.api('POST', 'agent/link', { ...choice, consent: true }) : await this.api('DELETE', 'agent/link');
       if (!r.ok) return problemOf(r.status, await codeOf(r));
@@ -132,6 +136,9 @@ export class Agent {
 
   /** Sends a question at once (consent was given when linking); the answer or why not joins the conversation. */
   async ask(question: string, kind: AskKind, selection?: Selection): Promise<void> {
+    if (this.guard('ask')) return;
+    // Sending needs the consent given when linking: without it nothing leaves the page (serve refuses too).
+    if (!this.linked) return this.say(AGENT.errors.AGENT_NOT_LINKED);
     const history = this.messages.slice(-HISTORY).map((m) => ({ role: m.role, text: [m.text, m.more].filter(Boolean).join('\n\n') }));
     this.messages = [...this.messages, { role: 'user', text: question }];
     this.thinking = true;

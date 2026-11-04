@@ -544,12 +544,20 @@ pub(crate) fn build_parts(
 ) -> Result<Vec<(String, PathBuf)>, String> {
     let node = &n.id;
     let mut built = Vec::new();
+    // The node's boot stages (stage0, boot core) are built for its boot crate.
+    let boot = boot_crate(cfg, n).ok();
     for part in parts(reg, &n.mcu, n.board.as_deref()) {
-        let dir = part_dir(root, &part)?;
-        let bin = match &part.bin {
+        let mut dir = part_dir(root, &part)?;
+        let mut bin = match &part.bin {
             Some(b) => b.clone(),
             None => nodebuild::package_name(&dir)?,
         };
+        // A boot core library is linked into the node's boot crate, which
+        // is what builds (slot A, as for a first write).
+        if boot_library(&dir)? {
+            dir = boot_crate(cfg, n)?;
+            bin = BOOT_BIN.to_string();
+        }
         let target = cfg.base.join("out/flash/target").join(&part.name);
         log(&format!(
             "{node}: building {} in {}",
@@ -581,6 +589,7 @@ pub(crate) fn build_parts(
                 pubkey_hex: Some(hex),
                 // The boot core accepts only images carrying this tag.
                 target_tag: Some(&n.tag),
+                boot_crate: boot.as_deref(),
             },
             &mut |l| log(&hide(l)),
             cancel,
@@ -621,14 +630,7 @@ pub(crate) fn build_core_slots(
     if slots.is_empty() {
         return Ok(Vec::new());
     }
-    let dir = cfg.base.join(crate::extgen::BOOT_CRATES).join(&n.id);
-    if !dir.join("Cargo.toml").is_file() {
-        return Err(format!(
-            "{}: no boot crate in {}; run `dagon gen` first",
-            n.id,
-            dir.display()
-        ));
-    }
+    let dir = boot_crate(cfg, n)?;
     let mut out = Vec::new();
     for (slot, features) in slots {
         log(&format!("{}: building the boot core for slot {slot}", n.id));
@@ -644,6 +646,7 @@ pub(crate) fn build_core_slots(
             nodebuild::FirmwareEnv {
                 pubkey_hex: Some(hex),
                 target_tag: Some(&n.tag),
+                boot_crate: Some(&dir),
             },
             log,
             cancel,
@@ -652,6 +655,33 @@ pub(crate) fn build_core_slots(
         out.push((slot, elf));
     }
     Ok(out)
+}
+
+/// Node `n`'s boot crate, `boot/<id>/` of the project (`dagon gen` writes it).
+fn boot_crate(cfg: &Config, n: &dagon_topology::schema::Node) -> Result<PathBuf, String> {
+    let dir = cfg.base.join(crate::extgen::BOOT_CRATES).join(&n.id);
+    if !dir.join("Cargo.toml").is_file() {
+        return Err(format!(
+            "{}: no boot crate in {}; run `dagon gen` first",
+            n.id,
+            dir.display()
+        ));
+    }
+    Ok(dir)
+}
+
+/// Whether the package in `dir` is a boot core library (it declares
+/// `[package.metadata.dagon] bootcore = "<mcu>"`, as `dagon gen` looks for).
+fn boot_library(dir: &Path) -> Result<bool, String> {
+    let path = dir.join("Cargo.toml");
+    let text = std::fs::read_to_string(&path)
+        .map_err(|e| format!("cannot read {}: {e}", path.display()))?;
+    let v: toml::Value = toml::from_str(&text).map_err(|e| format!("{}: {e}", path.display()))?;
+    Ok(v.get("package")
+        .and_then(|p| p.get("metadata"))
+        .and_then(|m| m.get("dagon"))
+        .and_then(|d| d.get("bootcore"))
+        .is_some())
 }
 
 /// The binary a node's boot crate builds (its template's `[[bin]]`).
@@ -1394,6 +1424,25 @@ mod tests {
             .map(|p| p.name)
             .collect();
         assert_eq!(names, ["stage0", "bootcore"]);
+    }
+
+    #[test]
+    fn a_boot_core_library_part_builds_from_the_node_boot_crate() {
+        let reg = &crate::defs::registry_at(&Config::default(), Some(&here())).unwrap();
+        for (mcu, lib) in [("rp2040", [false, true]), ("stm32f401re", [false, true])] {
+            let found: Vec<bool> = parts(reg, mcu, None)
+                .iter()
+                .map(|p| boot_library(&part_dir(&here(), p).unwrap()).unwrap())
+                .collect();
+            assert_eq!(
+                found, lib,
+                "{mcu}: stage0 builds itself, the boot core is a library"
+            );
+        }
+        let (cfg, t) = area("seg");
+        let err = boot_crate(&cfg, t.node("seg").unwrap()).unwrap_err();
+        assert!(err.contains("run `dagon gen` first"), "{err}");
+        let _ = std::fs::remove_dir_all(&cfg.base);
     }
 
     #[test]

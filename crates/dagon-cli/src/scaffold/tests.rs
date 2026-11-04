@@ -328,7 +328,10 @@ fn new_pins_this_clis_release_unless_a_clone_is_asked_for() {
     new_project(&d.join("a"), "a", DESK, &keys, &release).unwrap();
     let c = Config::load(Some(&d.join("a/dagon.toml").to_string_lossy())).unwrap();
     assert_eq!(c.dagon.git.as_deref(), Some(crate::dagonsrc::REPO_URL));
-    assert_eq!(c.dagon.tag, Some(format!("v{}", env!("CARGO_PKG_VERSION"))));
+    assert_eq!(
+        c.dagon.tag,
+        Some(format!("cli-v{}", env!("CARGO_PKG_VERSION")))
+    );
     assert_eq!(c.dagon.path, None);
 
     let clone =
@@ -553,14 +556,34 @@ fn topology_names_and_tags_cannot_break_out_of_generated_code() {
 /// against this DAGON clone's board support packages (real firmware
 /// builds: run with --ignored).
 fn new_gen_build(node: &str) {
-    let d = tmp(&format!("e2e-{node}"));
+    new_gen_build_from(SAMPLE, node, &format!("e2e-{node}"));
+}
+
+/// As [`new_gen_build`] for the sample with no board named: the node is
+/// generated from its MCU package's template.
+fn new_gen_build_by_mcu(node: &str) {
+    let text: String = SAMPLE
+        .lines()
+        .filter(|l| !l.trim_start().starts_with("board:"))
+        .map(|l| {
+            format!(
+                "{l}
+"
+            )
+        })
+        .collect();
+    new_gen_build_from(&text, node, &format!("e2e-mcu-{node}"));
+}
+
+fn new_gen_build_from(topology: &str, node: &str, name: &str) {
+    let d = tmp(name);
     // As deep as a project in a beginner's documents folder can be: slot B
     // (in its own target folder) must still link the host build scripts.
     let dir = d
         .join("documents-of-a-beginner")
         .join("projects-in-a-rather-deep-folder")
         .join("proj");
-    new_project(&dir, "proj", SAMPLE, &d.join("keys"), &dev()).unwrap();
+    new_project(&dir, "proj", topology, &d.join("keys"), &dev()).unwrap();
     let config = dir.join(crate::config::CONFIG_FILE);
     let lines = gen_project(&config, &[node.to_string()], false).unwrap();
     assert!(!lines.iter().any(|l| l.starts_with("skipped")), "{lines:?}");
@@ -589,6 +612,18 @@ fn new_gen_build(node: &str) {
 #[ignore = "builds firmware with the ESP toolchain"]
 fn new_gen_build_esp32s3_node() {
     new_gen_build("watch");
+}
+
+#[test]
+#[ignore = "builds firmware for the RP2040"]
+fn new_gen_build_rp2040_hub_by_mcu() {
+    new_gen_build_by_mcu("hub");
+}
+
+#[test]
+#[ignore = "builds firmware for the STM32F401RE"]
+fn new_gen_build_f401_node_by_mcu() {
+    new_gen_build_by_mcu("seg");
 }
 
 #[test]
@@ -700,19 +735,112 @@ fn hop_placeholders_name_each_nodes_link_kinds() {
     assert_eq!(up, "dagon_mcu_esp32s3::links::Kind::Uart");
 }
 
+/// An MCU package's template (a node without a board package) takes its
+/// link wiring from the 構成 and the MCU definition, never a board's.
+#[test]
+fn mcu_templates_wire_the_links_the_topology_names() {
+    let reg = dagon_topology::defs::Registry::builtin();
+    let t = desk();
+    let src = DagonSource::default();
+    let tpl = |mcu: &str| {
+        std::fs::read_to_string(
+            Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("../../targets/mcu")
+                .join(mcu)
+                .join("template/src/board.rs"),
+        )
+        .unwrap()
+    };
+    let render_for = |id: &str, text: &str| {
+        let n = t.node(id).unwrap();
+        let hops = hop_placeholders(reg, &t, n).unwrap();
+        render(
+            text,
+            n,
+            &hops,
+            &wiring_placeholders(reg, &t, n),
+            &src,
+            Path::new("."),
+        )
+        .unwrap()
+    };
+    let hub = render_for("hub", &tpl("rp2040"));
+    assert!(!hub.contains("{{"), "{hub}");
+    let bus = t.buses.first().unwrap();
+    assert!(hub.contains(&format!("p.PIN_{}", bus.sda)), "{hub}");
+    assert!(hub.contains("#[cfg(all())]"), "{hub}");
+    let seg = render_for("seg", &tpl("stm32f401re"));
+    assert!(!seg.contains("{{"), "{seg}");
+    let pins = t.link_to("seg").and_then(|l| l.node_pins.clone()).unwrap();
+    assert!(seg.contains(&format!("sda: p.{}", pins.sda)), "{seg}");
+    // Without a UART downlink its code is left out and still parses.
+    let mut no_uart = t.clone();
+    no_uart.links.retain(|l| l.kind != LinkKind::Uart);
+    let n = no_uart.node("hub").unwrap();
+    let w = wiring_placeholders(reg, &no_uart, n).unwrap();
+    let get = |k: &str| w.iter().find(|(p, _)| p == k).unwrap().1.clone();
+    assert_eq!(get("{{if_down_uart}}"), "any()");
+    assert_eq!(get("{{down_uart_tx}}"), "none");
+    // Two I2C buses and two UART links: refused by name, never one picked.
+    let mut many = t.clone();
+    let mut bus2 = many.buses[0].clone();
+    bus2.id = "bus-2".into();
+    many.buses.push(bus2);
+    let i2c = many
+        .links
+        .iter()
+        .find(|l| l.kind == LinkKind::I2c)
+        .unwrap()
+        .clone();
+    let uart = many
+        .links
+        .iter()
+        .find(|l| l.kind == LinkKind::Uart)
+        .unwrap()
+        .clone();
+    let mut i2c2 = i2c.clone();
+    i2c2.to = "second".into();
+    i2c2.bus = Some("bus-2".into());
+    let mut uart2 = uart.clone();
+    uart2.to = "third".into();
+    many.links.extend([i2c2, uart2.clone()]);
+    let hub = many.node("hub").unwrap().clone();
+    let e = wiring_placeholders(reg, &many, &hub).unwrap_err();
+    assert!(
+        e.contains("one I2C bus") && e.contains("bus-2") && e.contains("hub -> second"),
+        "{e}"
+    );
+    many.links.retain(|l| l.to != "second");
+    let n = &hub;
+    let e = wiring_placeholders(reg, &many, n).unwrap_err();
+    assert!(
+        e.contains("one UART link") && e.contains("hub -> third"),
+        "{e}"
+    );
+    // A template that does not use the wiring is rendered all the same.
+    let hops = hop_placeholders(reg, &many, n).unwrap();
+    let w = wiring_placeholders(reg, &many, n);
+    assert!(render("plain {{node}}", n, &hops, &w, &src, Path::new(".")).is_ok());
+    assert!(render("{{down_i2c}}", n, &hops, &w, &src, Path::new(".")).is_err());
+    // No template of an MCU package names a board fact of its own.
+    for mcu in ["rp2040", "stm32f401re"] {
+        for fact in [
+            "PA5",
+            "PIN_25",
+            "512 * 1024",
+            "4 * 1024 * 1024",
+            "PB4",
+            "PIN_16",
+        ] {
+            assert!(!tpl(mcu).contains(fact), "{mcu}: {fact}");
+        }
+    }
+}
+
 /// The firmware's generator contract (targets/mcu/<mcu>/README.md, "Links"):
-/// `{{uplink}}` / `{{downlinks}}` are `dagon_mcu_<mcu>::links::Kind::<Variant>`,
-/// with these variants by kind name, and the kinds each MCU offers up and
-/// down (its table's "Yes" cells).
-const FW_VARIANTS: [(&str, &str); 7] = [
-    ("usb-cdc", "UsbCdc"),
-    ("uart", "Uart"),
-    ("i2c", "I2c"),
-    ("ble", "Ble"),
-    ("wifi-tcp", "WifiTcp"),
-    ("ethernet", "Ethernet"),
-    ("can", "Can"),
-];
+/// `{{uplink}}` / `{{downlinks}}` are `dagon_mcu_<mcu>::links::Kind::<Variant>`
+/// (both enums come from `dagon_format::with_link_kinds!`), and the kinds
+/// each MCU offers up and down (its table's "Yes" cells).
 const FW_OFFERS: [(&str, &[&str], &[&str]); 3] = [
     ("rp2040", &["usb-cdc"], &["uart", "i2c"]),
     ("stm32f401re", &["i2c"], &[]),
@@ -722,12 +850,7 @@ const FW_OFFERS: [(&str, &[&str], &[&str]); 3] = [
 #[test]
 fn the_hop_paths_are_exactly_the_firmware_links_contract() {
     use dagon_topology::links::{available, Dir};
-    let names: Vec<&str> = LinkKind::ALL.iter().map(|k| k.name()).collect();
-    assert_eq!(names, FW_VARIANTS.map(|(n, _)| n));
-    for k in LinkKind::ALL {
-        let want = FW_VARIANTS.iter().find(|(n, _)| *n == k.name()).unwrap().1;
-        assert_eq!(kind_variant(k), want, "{}", k.name());
-    }
+    assert_eq!(kind_variant(LinkKind::WifiTcp), "WifiTcp");
     for (mcu, up, down) in FW_OFFERS {
         let names = |d: Dir| -> Vec<&'static str> {
             let mut v: Vec<&'static str> = available(mcu, d).iter().map(|k| k.name()).collect();
@@ -837,4 +960,130 @@ fn templates_get_the_hops_and_gen_refuses_one_not_available_yet() {
         e.contains("link hub -> seg over wifi-tcp: not available yet"),
         "{e}"
     );
+}
+
+#[test]
+fn write_refuses_a_symlink_at_the_final_path() {
+    let base = std::env::temp_dir().join(format!("dagon-write-link-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&base);
+    std::fs::create_dir_all(base.join("nodes/n")).unwrap();
+    std::fs::write(
+        base.join("user.rs"),
+        "mine
+",
+    )
+    .unwrap();
+    #[cfg(unix)]
+    let made =
+        std::os::unix::fs::symlink(base.join("user.rs"), base.join("nodes/n/wiring.rs")).is_ok();
+    // Windows creates file symlinks only with the privilege (or developer mode).
+    #[cfg(windows)]
+    let made =
+        std::os::windows::fs::symlink_file(base.join("user.rs"), base.join("nodes/n/wiring.rs"))
+            .is_ok();
+    if made {
+        let mut out = Vec::new();
+        let e = super::write(
+            &base,
+            "nodes/n/wiring.rs",
+            "generated
+",
+            true,
+            &mut out,
+        )
+        .unwrap_err();
+        assert!(e.contains("is a link"), "{e}");
+        assert!(out.is_empty());
+        assert_eq!(
+            std::fs::read_to_string(base.join("user.rs")).unwrap(),
+            "mine
+"
+        );
+        assert!(std::fs::symlink_metadata(base.join("nodes/n/wiring.rs"))
+            .unwrap()
+            .file_type()
+            .is_symlink());
+    } else {
+        eprintln!("symlinks are not allowed here: the symlink case did not run");
+    }
+    // A junction (Windows: no privilege needed) at the final path is a link too.
+    #[cfg(windows)]
+    {
+        std::fs::create_dir_all(base.join("src")).unwrap();
+        let p = |r: &str| base.join(r).components().collect::<std::path::PathBuf>();
+        let ok = std::process::Command::new("cmd")
+            .args(["/C", "mklink", "/J"])
+            .arg(p("nodes/n/main.rs"))
+            .arg(p("src"))
+            .output()
+            .unwrap()
+            .status
+            .success();
+        assert!(ok, "mklink /J");
+        let mut out = Vec::new();
+        let e = super::write(
+            &base,
+            "nodes/n/main.rs",
+            "generated
+",
+            true,
+            &mut out,
+        )
+        .unwrap_err();
+        assert!(e.contains("is a link"), "{e}");
+        assert_eq!(std::fs::read_dir(base.join("src")).unwrap().count(), 0);
+    }
+    let _ = std::fs::remove_dir_all(&base);
+}
+
+#[test]
+fn gen_skips_a_node_folder_reached_through_a_junction() {
+    if !cfg!(windows) {
+        return; // the link cases themselves are in genfs
+    }
+    let d = tmp("node-junction");
+    let src = clone(&d);
+    let base = project(&d);
+    std::fs::create_dir_all(base.join("elsewhere")).unwrap();
+    std::fs::write(
+        base.join("elsewhere/Cargo.lock"),
+        "user
+",
+    )
+    .unwrap();
+    std::fs::create_dir_all(base.join("nodes")).unwrap();
+    let p = |r: &str| base.join(r).components().collect::<PathBuf>();
+    let ok = std::process::Command::new("cmd")
+        .args(["/C", "mklink", "/J"])
+        .arg(p("nodes/watch"))
+        .arg(p("elsewhere"))
+        .output()
+        .unwrap()
+        .status
+        .success();
+    assert!(ok, "mklink /J");
+    let r = gen(
+        dagon_topology::defs::Registry::builtin(),
+        &base,
+        &desk(),
+        &src,
+        &BTreeMap::new(),
+        &["watch".into()],
+        false,
+    )
+    .unwrap();
+    assert_eq!(r.skipped.len(), 1, "{:?}", r.skipped);
+    assert!(
+        r.skipped[0].1.contains("nodes/watch is a link"),
+        "{:?}",
+        r.skipped
+    );
+    assert!(r.written.is_empty());
+    assert_eq!(
+        std::fs::read_dir(base.join("elsewhere")).unwrap().count(),
+        1
+    );
+    // gen ends non-zero, naming the node and the reason.
+    let lines = vec![format!("skipped    nodes/watch: {}", r.skipped[0].1)];
+    assert!(super::outcome(&lines).unwrap_err().contains("is a link"));
 }

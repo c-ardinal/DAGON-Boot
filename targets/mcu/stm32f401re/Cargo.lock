@@ -190,9 +190,10 @@ dependencies = [
 
 [[package]]
 name = "dagon-agent"
-version = "0.0.0"
+version = "0.1.0"
 dependencies = [
- "dagon-core",
+ "critical-section",
+ "dagon-events",
  "dagon-format",
  "dagon-port",
  "dagon-proto",
@@ -200,9 +201,8 @@ dependencies = [
 
 [[package]]
 name = "dagon-conform"
-version = "0.0.0"
+version = "0.1.0"
 dependencies = [
- "dagon-agent",
  "dagon-core",
  "dagon-format",
  "dagon-port",
@@ -211,7 +211,7 @@ dependencies = [
 
 [[package]]
 name = "dagon-core"
-version = "0.0.0"
+version = "0.1.0"
 dependencies = [
  "dagon-format",
  "dagon-port",
@@ -219,8 +219,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "dagon-events"
+version = "0.1.0"
+dependencies = [
+ "dagon-format",
+ "embassy-sync",
+ "embedded-hal 1.0.0",
+]
+
+[[package]]
 name = "dagon-format"
-version = "0.0.0"
+version = "0.1.0"
 dependencies = [
  "ed25519-compact",
  "sha2",
@@ -228,27 +237,33 @@ dependencies = [
 
 [[package]]
 name = "dagon-mcu-build"
-version = "0.0.0"
+version = "0.1.0"
+dependencies = [
+ "toml",
+]
 
 [[package]]
 name = "dagon-mcu-common"
-version = "0.0.0"
+version = "0.1.0"
 dependencies = [
  "critical-section",
  "dagon-agent",
+ "dagon-events",
  "dagon-format",
  "dagon-port",
  "dagon-proto",
+ "embassy-sync",
 ]
 
 [[package]]
 name = "dagon-mcu-stm32f401re"
-version = "0.0.0"
+version = "0.1.0"
 dependencies = [
  "cortex-m",
  "dagon-agent",
  "dagon-conform",
  "dagon-core",
+ "dagon-events",
  "dagon-format",
  "dagon-mcu-build",
  "dagon-mcu-common",
@@ -260,15 +275,16 @@ dependencies = [
  "embassy-futures",
  "embassy-stm32",
  "embassy-time",
+ "static_cell",
 ]
 
 [[package]]
 name = "dagon-port"
-version = "0.0.0"
+version = "0.1.0"
 
 [[package]]
 name = "dagon-proto"
-version = "0.0.0"
+version = "0.1.0"
 dependencies = [
  "dagon-format",
 ]
@@ -669,6 +685,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "equivalent"
+version = "1.0.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "00d174d5400e5e8fd687ad1049e2f578285fa914201b1af7e8b112a4546bd826"
+
+[[package]]
 name = "find-msvc-tools"
 version = "0.1.15"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -734,6 +756,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "hashbrown"
+version = "0.17.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ed5909b6e89a2db4456e54cd5f673791d7eca6732202bbf2a9cc504fe2f9b84a"
+
+[[package]]
 name = "heapless"
 version = "0.9.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -757,6 +785,16 @@ name = "ident_case"
 version = "1.0.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b9e0384b61958566e926dc50660321d12159025e767c18e043daf26b70104c39"
+
+[[package]]
+name = "indexmap"
+version = "2.14.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "cc4e190f5d26ca7051642629da2c52fc03bde85a03197c99408dcd291734c855"
+dependencies = [
+ "equivalent",
+ "hashbrown",
+]
 
 [[package]]
 name = "lazy_static"
@@ -963,6 +1001,44 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "388a1df253eca08550bef6c72392cfe7c30914bf41df5269b68cbd6ff8f570a3"
 
 [[package]]
+name = "serde"
+version = "1.0.229"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4148590afebada386688f18773da617792bf2ef03ffc1e4cbd2b1d45b023e0ba"
+dependencies = [
+ "serde_core",
+]
+
+[[package]]
+name = "serde_core"
+version = "1.0.229"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "67dca2c9c51e58a4791a4b1ed58308b39c64224d349a935ab5039aa360942a48"
+dependencies = [
+ "serde_derive",
+]
+
+[[package]]
+name = "serde_derive"
+version = "1.0.229"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e7a5d71263a5a7d47b41f6b3f06ba276f10cc18b0931f1799f710578e2309348"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 3.0.9",
+]
+
+[[package]]
+name = "serde_spanned"
+version = "0.6.9"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "bf41e0cfaf7226dca15e8197172c295a782857fcb97fad1808a166870dee75a3"
+dependencies = [
+ "serde",
+]
+
+[[package]]
 name = "sha2"
 version = "0.11.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1005,6 +1081,15 @@ name = "static_assertions"
 version = "1.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a2eb9349b6444b326872e140eb1cf5e7c522154d69e7a0ffb0fb81c06b37543f"
+
+[[package]]
+name = "static_cell"
+version = "2.1.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0530892bb4fa575ee0da4b86f86c667132a94b74bb72160f58ee5a4afec74c23"
+dependencies = [
+ "portable-atomic",
+]
 
 [[package]]
 name = "stm32-fmc"
@@ -1092,6 +1177,40 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1ad99c4c6d32803332c548b1af0540b357b3f5fc0be8f6c6bfe8b2e6ae784070"
 dependencies = [
  "cfg-if",
+]
+
+[[package]]
+name = "toml"
+version = "0.8.23"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "dc1beb996b9d83529a9e75c17a1686767d148d70663143c7854d8b4a09ced362"
+dependencies = [
+ "serde",
+ "serde_spanned",
+ "toml_datetime",
+ "toml_edit",
+]
+
+[[package]]
+name = "toml_datetime"
+version = "0.6.11"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "22cddaf88f4fbc13c51aebbf5f8eceb5c7c5a9da2ac40a13519eb5b0a0e8f11c"
+dependencies = [
+ "serde",
+]
+
+[[package]]
+name = "toml_edit"
+version = "0.22.27"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "41fe8c660ae4257887cf66394862d21dbca4a6ddd26f04a3560410406a2f819a"
+dependencies = [
+ "indexmap",
+ "serde",
+ "serde_spanned",
+ "toml_datetime",
+ "winnow",
 ]
 
 [[package]]
@@ -1227,4 +1346,13 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ae137229bcbd6cdf0f7b80a31df61766145077ddf49416a728b02cb3921ff3fc"
 dependencies = [
  "windows-link",
+]
+
+[[package]]
+name = "winnow"
+version = "0.7.15"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "df79d97927682d2fd8adb29682d1140b343be4ac0f08fd68b7765d9c059d3945"
+dependencies = [
+ "memchr",
 ]

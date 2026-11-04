@@ -160,6 +160,8 @@ fn has_ext(p: &std::path::Path) -> bool {
 }
 
 /// One call: the prompt in, stdout out.
+// Removes the call's own temporary folder (in the system temp folder).
+#[allow(clippy::disallowed_methods)]
 pub(crate) fn run(
     _cleared: &Cleared,
     cmd: &Command,
@@ -175,6 +177,8 @@ pub(crate) fn run(
     r
 }
 
+// Writes the system text into the call's own temporary folder.
+#[allow(clippy::disallowed_methods)]
 fn run_in(
     dir: &std::path::Path,
     exe: &std::path::Path,
@@ -371,6 +375,8 @@ fn spawn(
 }
 
 #[cfg(test)]
+// Tests set up and inspect their own scratch folders directly.
+#[allow(clippy::disallowed_methods)]
 pub(super) fn run_unchecked(
     cmd: &Command,
     prompt: &Prompt,
@@ -384,6 +390,8 @@ pub(super) fn run_unchecked(
 }
 
 #[cfg(test)]
+// Tests set up and inspect their own scratch folders directly.
+#[allow(clippy::disallowed_methods)]
 mod tests {
     use super::*;
     use std::ffi::OsString;

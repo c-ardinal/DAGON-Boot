@@ -1,0 +1,14 @@
+# The execution model (docs/design/lifecycle-events.md, section 12): no flash
+# operation, and nothing without a bound in microseconds, runs with
+# interrupts masked by DAGON's own code. Every way to mask is refused in the
+# MCU packages (clippy resolves the path, so a `use .. as ..` alias or a
+# wrapper does not hide it). The one function that masks says why with
+# `#[allow(clippy::disallowed_methods)]` on itself, and its closure can only
+# reach the state it guards.
+disallowed-methods = [
+    { path = "critical_section::with", reason = "masks interrupts: execution model 12.1 rule 2" },
+    { path = "critical_section::acquire", reason = "masks interrupts: execution model 12.1 rule 2" },
+    { path = "cortex_m::interrupt::free", reason = "masks interrupts: execution model 12.1 rule 2" },
+    { path = "cortex_m::interrupt::disable", reason = "masks interrupts: execution model 12.1 rule 2" },
+    { path = "embassy_sync::blocking_mutex::Mutex::lock", reason = "masks interrupts with a critical-section raw mutex: execution model 12.1 rule 2" },
+]

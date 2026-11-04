@@ -1,18 +1,47 @@
-# Builds the dagon executables when a version tag is pushed. Build only:
-# the archives are kept as workflow artifacts; making a GitHub release from
-# them is a separate step the owner takes by hand each time.
+# Runs when a component release tag (<component>-v<version>,
+# docs/versioning.md) is pushed. Every such tag first passes the bump
+# check: the tag names a component of compat.toml with that version, and
+# the version is at least what the commits since the component's last tag
+# require. Only a CLI tag (cli-v<version>) then builds the dagon
+# executables. Build only: the archives are kept as workflow artifacts;
+# making a GitHub release from them is a separate step the owner takes by
+# hand each time.
 name: release build
 
 on:
   push:
-    tags: ["v*"]
+    # Every component's tag; bump_check.py refuses one naming no component.
+    tags: ["*-v*"]
   workflow_dispatch:
 
 permissions:
   contents: read
 
 jobs:
+  bump-check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # The commits since the component's last tag.
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Bump check (the tag names the component)
+        if: startsWith(github.ref, 'refs/tags/')
+        # Through the environment, not pasted into the script: a tag name is
+        # pusher-controlled text.
+        env:
+          TAG: ${{ github.ref_name }}
+        run: python scripts/bump_check.py --tag "$TAG"
+      - name: Bump check (cli, run by hand)
+        if: ${{ !startsWith(github.ref, 'refs/tags/') }}
+        run: python scripts/bump_check.py cli
+
   build:
+    needs: bump-check
+    if: startsWith(github.ref_name, 'cli-v') || github.event_name == 'workflow_dispatch'
     strategy:
       fail-fast: false
       matrix:

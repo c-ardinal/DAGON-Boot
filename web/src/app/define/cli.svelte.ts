@@ -6,10 +6,21 @@
 // dagon.toml) except where to open or make a project, chosen from serve's own
 // GET /v1/fs list (§8.2).
 
+import pkg from '../../../package.json';
+
 export type CliState = 'none' | 'connecting' | 'ready' | 'stopped' | 'denied';
+
+/** The `dagon serve` API number this Console speaks (GET /v1/hello `api`; docs/versioning.md). */
+export const SERVE_API = 1;
+/** This Console's own version: the cli component's (web/package.json). */
+export const CONSOLE_VERSION: string = pkg.version;
 
 export interface Hello {
   cli: string;
+  /** Serve API number; missing from a dagon older than numbered APIs. */
+  api?: number;
+  /** Every format number the dagon reads and writes (`wire`, `image-header`, ...). */
+  formats?: Record<string, number>;
   workspace: string | null;
   features: string[];
   api_key: boolean;
@@ -118,6 +129,11 @@ export class Cli {
   private pass: string | null = null;
   private ws: WebSocket | null = null;
   private readonly d: Required<CliDeps>;
+  /**
+   * The lock table's check, set by the page: true when the operation is stopped now
+   * (the page has shown why). Every job asks it in `start`.
+   */
+  guard: (kind: 'gen' | 'build' | 'release' | 'flash') => boolean = () => false;
   /** Called when the CLI needs the hub (the page closes Web Serial first) and when it returns it. */
   onDevice: (need: boolean) => void | Promise<void> = () => undefined;
 
@@ -136,6 +152,11 @@ export class Cli {
   /** Whether serve's flash can write a node of MCU family `mcu`. */
   canFlash(mcu: string): boolean {
     return this.has('flash') && (this.hello?.flash_mcus ?? []).includes(mcu);
+  }
+
+  /** Whether the connected dagon serves the API this Console speaks. */
+  get apiMatches(): boolean {
+    return this.hello?.api === SERVE_API;
   }
 
   /** Whether a feature of /v1/hello is there (gen, flash, build, ...). */
@@ -196,6 +217,11 @@ export class Cli {
     const r = await this.call('GET', `sim/read?wait=${Math.round(waitMs)}`);
     if (!r.ok) throw new Error(String(r.status));
     return new Uint8Array(await r.arrayBuffer());
+  }
+
+  /** A /v1/ call with the passphrase (the DAGON agent routes: /v1/agent, /v1/agent/link, /v1/agent/ask). */
+  api(method: string, path: string, body?: unknown): Promise<Response> {
+    return this.call(method, path, body);
   }
 
   private call(method: string, path: string, body?: unknown): Promise<Response> {
@@ -261,6 +287,8 @@ export class Cli {
   }
 
   private async start(kind: JobKind, path: string, body: unknown, target: string): Promise<Job | null> {
+    const lock = ({ gen: 'gen', build: 'build', sign: 'build', release: 'release', flash: 'flash' } as const)[kind as 'gen'];
+    if (lock && this.guard(lock)) return null;
     const r = await this.json<{ job: number }>('POST', path, body);
     const job: Job = { id: r.job, kind, state: 'queued', target, stage: '', percent: null, lines: [], result: null, question: null, started: this.d.now(), ended: null };
     this.jobs = [job, ...this.jobs];

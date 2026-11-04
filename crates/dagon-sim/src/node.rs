@@ -4,8 +4,14 @@
 
 use crate::flash::SimFlash;
 use crate::rom::{SimRom, ROM_ADDR};
-use crate::store::{Boot, Layout, SimStore, MAX_ATTEMPTS};
-use dagon_agent::{Agent, Config, Hooks, SlotStore, StoreError};
+use crate::store::{Boot, Layout, SimStore};
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, MutexGuard};
+
+use dagon_agent::{Agent, Config, SlotStore, StoreError};
+use dagon_events::{
+    compose, Bounds, Composed, Ctx, Extension, Health, Layer, Nop, Published, TrialInfo, Watchdog,
+};
 use dagon_format::statelog::slot;
 use dagon_port::BusError;
 use dagon_proto::mailbox::{State, STATE_LEN};
@@ -19,6 +25,9 @@ pub enum TrialApp {
     Confirms,
     /// Answers, but its self-check refuses CONFIRM.
     NeverConfirms,
+    /// Answers; its self-check passes only this many ms after boot (an app
+    /// whose tasks are still starting).
+    ConfirmsAfter(u64),
     /// Resets right after start.
     CrashesAtBoot,
     /// Runs but never answers on the link.
@@ -40,18 +49,59 @@ pub enum Run {
     Off,
 }
 
-pub struct SimHooks {
-    pub self_check: bool,
-}
+/// The simulated app's answer to `self_check`, set by the node as its
+/// trial behaviour asks.
+#[derive(Clone, Default)]
+pub struct SimCheck(Arc<AtomicBool>);
 
-impl Hooks for SimHooks {
-    fn self_check(&mut self) -> bool {
-        self.self_check
+impl SimCheck {
+    fn set(&self, healthy: bool) {
+        self.0.store(healthy, Ordering::Relaxed);
     }
 }
 
+impl Extension for SimCheck {
+    fn id(&self) -> &'static str {
+        "sim-app"
+    }
+
+    fn self_check(&mut self, _: &TrialInfo, _: &Ctx<'_>) -> Option<Health> {
+        Some(if self.0.load(Ordering::Relaxed) {
+            Health::Healthy
+        } else {
+            Health::Unhealthy
+        })
+    }
+}
+
+/// The app layer's chain of a simulated node.
+pub type SimChain = Composed<&'static Published<(), 8>, Nop, SimCheck, fn() -> u64>;
+
+/// The chain of a simulated node, made once with the node: its resets
+/// restart the agent over the same chain, as the publisher outlives the
+/// simulated app.
+fn chain(check: SimCheck) -> SimChain {
+    let events: &'static mut Published<(), 8> = Box::leak(Box::new(Published::new()));
+    let now: fn() -> u64 = || 0;
+    compose(
+        Layer::App,
+        events,
+        Nop,
+        check,
+        Bounds::new(now, Watchdog::new(TRIAL_WDT_MS, TRIAL_WDT_MS)),
+    )
+}
+
+/// Trial watchdog period of the simulated layer (the default of
+/// [`SimNode::trial_wdt_ms`]).
+const TRIAL_WDT_MS: u32 = 10_000;
+
 pub struct SimNode {
-    agent: Agent<SimStore, SimHooks>,
+    agent: Agent<SimStore, SimChain>,
+    /// The board's own handle on the flash the agent's store uses: its
+    /// boot core, ROM loader and power.
+    store: SimStore,
+    check: SimCheck,
     cfg: Config,
     pub i2c_addr: Option<u8>,
     pub trial_app: TrialApp,
@@ -75,17 +125,16 @@ pub struct SimNode {
 impl SimNode {
     /// Powers up and boots whatever the flash holds.
     pub fn new(cfg: Config, flash: SimFlash, layout: Layout) -> Self {
-        let pubkey = cfg.pubkey;
+        let store = SimStore::new(flash, layout, cfg.pubkey);
+        let check = SimCheck::default();
         let mut n = SimNode {
-            agent: Agent::new(
-                cfg.clone(),
-                SimStore::new(flash, layout, pubkey),
-                SimHooks { self_check: true },
-            ),
+            agent: Agent::new(cfg.clone(), store.clone(), chain(check.clone())),
+            store,
+            check,
             cfg,
             i2c_addr: None,
             trial_app: TrialApp::default(),
-            trial_wdt_ms: 10_000,
+            trial_wdt_ms: TRIAL_WDT_MS.into(),
             busy_reads: 1,
             rom: SimRom::default(),
             run: Run::Dead,
@@ -115,22 +164,24 @@ impl SimNode {
         self.boots
     }
 
+    /// The board's handle on the slot store's flash (provisioning, the
+    /// boot core's view).
     pub fn store(&mut self) -> &mut SimStore {
-        self.agent.store()
+        &mut self.store
     }
 
-    pub fn flash(&mut self) -> &mut SimFlash {
-        &mut self.agent.store().flash
+    pub fn flash(&self) -> MutexGuard<'_, SimFlash> {
+        self.store.flash()
     }
 
     pub fn status(&mut self) -> StatusResp {
-        self.agent.store().status()
+        self.store.status()
     }
 
     /// Writes a factory image into slot A as provisioned and confirmed, then
     /// resets.
     pub fn provision(&mut self, image: &[u8], now_ms: u64) -> Result<(), StoreError> {
-        self.agent.store().provision(slot::A, image)?;
+        self.store.provision(slot::A, image)?;
         self.reset(now_ms);
         Ok(())
     }
@@ -141,8 +192,7 @@ impl SimNode {
         self.boots += 1;
         self.reboot_after_read = false;
         self.busy_left = 0;
-        let store = std::mem::take(self.agent.store());
-        self.agent = Agent::new(self.cfg.clone(), store, SimHooks { self_check: true });
+        self.check.set(true);
         self.booted_ms = now_ms;
         self.on_trial = false;
         self.run = if !self.flash().is_powered() {
@@ -155,11 +205,13 @@ impl SimNode {
         } else {
             self.boot_app()
         };
+        // The app starts over the store as the boot core left it.
+        self.agent.restart();
     }
 
     fn boot_app(&mut self) -> Run {
-        for _ in 0..=MAX_ATTEMPTS + 1 {
-            let boot = self.agent.store().boot();
+        for _ in 0..=self.store.layout.trial_attempts() + 1 {
+            let boot = self.store.boot();
             if !self.flash().is_powered() {
                 return Run::Off;
             }
@@ -171,8 +223,13 @@ impl SimNode {
                 self.boots += 1;
                 continue;
             }
-            self.agent.hooks().self_check =
-                !(self.on_trial && self.trial_app == TrialApp::NeverConfirms);
+            self.check.set(
+                !(self.on_trial
+                    && matches!(
+                        self.trial_app,
+                        TrialApp::NeverConfirms | TrialApp::ConfirmsAfter(_)
+                    )),
+            );
             return Run::App(s);
         }
         self.idle_firmware()
@@ -246,6 +303,9 @@ impl SimNode {
         if !self.responsive() {
             return None;
         }
+        if let (true, TrialApp::ConfirmsAfter(ms)) = (self.on_trial, self.trial_app) {
+            self.check.set(now_ms.saturating_sub(self.booted_ms) >= ms);
+        }
         let reply = self
             .agent
             .handle(request)
@@ -285,8 +345,7 @@ impl SimNode {
             return Ok(());
         }
         if self.run == Run::Rom {
-            let flash = &mut self.agent.store().flash;
-            self.rom.write(flash, data, now_ms);
+            self.rom.write(&mut self.store.flash(), data, now_ms);
             return Ok(());
         }
         let served = self.serve(data, *now_ms);

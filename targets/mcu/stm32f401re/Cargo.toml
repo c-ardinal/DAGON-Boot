@@ -2,7 +2,7 @@
 name = "dagon-mcu-stm32f401re"
 edition = "2021"
 license = "MIT OR Apache-2.0"
-version = "0.0.0"
+version = "0.1.0"
 publish = false
 build = "build.rs"
 
@@ -13,6 +13,8 @@ build = "build.rs"
 
 [package.metadata.dagon]
 mcu = "stm32f401re"
+# Firmware clippy runs in CI (scripts/ci_crates.py --firmware-lint).
+lint = { target = "thumbv7em-none-eabihf", features = ["", "conform"] }
 
 [features]
 # node by default: a generated node names this package without features.
@@ -22,7 +24,7 @@ default = ["node"]
 hal = ["dep:embassy-stm32", "dep:embassy-time", "dep:cortex-m", "dep:ed25519-compact"]
 # Node start-up and the I2C target serving loop (logs through defmt: the
 # app links a defmt logger, e.g. defmt-rtt).
-node = ["hal", "embassy-stm32?/defmt", "dep:embassy-futures", "dep:embassy-executor", "dep:defmt"]
+node = ["hal", "embassy-stm32?/defmt", "dep:embassy-futures", "dep:embassy-executor", "dep:defmt", "dep:static_cell"]
 # Conformance build: CONF_RUN runs dagon-conform's node-side tests.
 conform = ["node", "dep:dagon-conform"]
 # The final binary's memory.x comes from this package: an APP slot body
@@ -32,6 +34,7 @@ image-bootcore = []
 
 [dependencies]
 dagon-agent = { path = "../../../crates/dagon-agent" }
+dagon-events = { path = "../../../crates/dagon-events" }
 dagon-core = { path = "../../../crates/dagon-core" }
 dagon-format = { path = "../../../crates/dagon-format" }
 dagon-port = { path = "../../../crates/dagon-port" }
@@ -45,6 +48,8 @@ embassy-futures = { version = "0.1", optional = true }
 embassy-executor = { version = "0.10", features = ["platform-cortex-m", "executor-interrupt"], optional = true }
 cortex-m = { version = "0.7", optional = true }
 defmt = { version = "1", optional = true }
+# The node's published events (`node::agent`), the shared flash driver.
+static_cell = { version = "2", optional = true }
 # Smaller verifier code for every image (the boot core must fit 32,256 bytes).
 ed25519-compact = { version = "2.6", default-features = false, features = ["opt_size"], optional = true }
 
@@ -56,5 +61,6 @@ dagon-format = { path = "../../../crates/dagon-format" }
 dagon-port = { path = "../../../crates/dagon-port" }
 
 [dev-dependencies]
+dagon-agent = { path = "../../../crates/dagon-agent", features = ["store-tests"] }
 dagon-conform = { path = "../../../crates/dagon-conform" }
 ed25519-compact = { version = "2.6", default-features = false }

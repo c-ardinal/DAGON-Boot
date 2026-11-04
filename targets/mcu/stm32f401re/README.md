@@ -94,15 +94,18 @@ feeder on `spawner`. The app's tasks run in thread mode below it, so the
 `self_check` decides whether a version on trial may be confirmed. An app
 that keeps `embassy_stm32::Peripherals` itself passes `dagon_pins!(p)`
 instead of splitting. Build with `DAGON_PUBKEY` set (below);
-`--features slot-b` links the same app for slot B. The demo node
-(`../../../samples/f401-app`) uses the same pieces (`open_store`,
-`install_watchdog`, `exec`, `serve`).
+`--features slot-b` links the same app for slot B. An app that runs
+the pieces itself uses `open_store`, `install_watchdog`, `agent`, `exec`
+and `serve`. `open_store` returns the slot store and the serving loop's
+handle on the same flash driver (`SharedFlash`; a conformance build runs
+CONF_RUN through it): the agent keeps its store to itself. A REBOOT reply
+is followed by the delay the app's `allow_reboot_now` asked for, the
+serving task idle under the guard, then the reset.
 
 ## Links
 
 Every hop carries whole DAGON frames through one interface,
-`dagon_mcu_common::link::Link` (`read_frame`, `write_frame`, `flush`,
-`max_payload`, `reconnect`); the serve loops are generic over it. The
+`dagon_mcu_common::link::Link`; the serve loops are generic over it. The
 kinds this package offers (`links::LINK_KINDS`):
 
 | Kind | Up | Down |
@@ -186,9 +189,12 @@ export DAGON_PUBKEY=/path/outside/the/repo/dagon-signing.pub
 ```
 
 It is built per node: it accepts only app images tagged with
-`DAGON_TARGET_TAG` (the node's tag, as in the app's `.cargo/config.toml`;
-`seg-f401-7seg` for the demo node), and its build fails without it. With
-nothing startable it blinks PA5 (LD2 on NUCLEO boards).
+`DAGON_TARGET_TAG` (the node's tag, as in the app's `.cargo/config.toml`),
+and its build fails without it. With nothing startable it shows the board's
+halt pattern on the board's boot LED (`[boot] led` and `halt`): the build
+reads the board `DAGON_BOARD=<board id>` names (with
+`DAGON_PROJECT=<path of dagon.toml>`, a project's inline `[board.<id>]`
+too); it may be left out only while the MCU has a single board definition.
 
 ## Keys
 

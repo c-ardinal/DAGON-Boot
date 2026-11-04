@@ -393,4 +393,6 @@ pub(crate) fn temp_dir() -> Result<PathBuf, String> {
 }
 
 #[cfg(test)]
+// Tests set up and inspect their own scratch folders directly.
+#[allow(clippy::disallowed_methods)]
 mod tests;

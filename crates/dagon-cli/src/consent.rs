@@ -99,6 +99,8 @@ fn refusal(home: &Path) -> String {
 
 /// Records consent now to send to `agent` by `way` (ids the caller checked
 /// against the definitions). The error never names the file.
+// Writes the consent file in the user's home folder (~/.dagon).
+#[allow(clippy::disallowed_methods)]
 pub fn link(home: &Path, agent: &str, way: &str) -> Result<Consent, String> {
     let c = Consent {
         agent: agent.into(),
@@ -118,6 +120,8 @@ pub fn link(home: &Path, agent: &str, way: &str) -> Result<Consent, String> {
 /// call reads it again under the lock); then this waits until no call that
 /// passed before is still in flight in any dagon process (they hold the
 /// lock through [`hold`]), so on return nothing is being sent.
+// Removes the consent file in the user's home folder (~/.dagon).
+#[allow(clippy::disallowed_methods)]
 pub fn unlink(home: &Path) -> Result<bool, String> {
     let removed = match std::fs::remove_file(file(home)) {
         Ok(()) => true,
@@ -168,6 +172,8 @@ fn wait_lock(f: &std::fs::File, shared: bool, max: std::time::Duration) -> bool 
     }
 }
 
+// Opens (creating) the consent lock file in the user's home folder (~/.dagon).
+#[allow(clippy::disallowed_methods)]
 fn lock_file(home: &Path) -> Result<std::fs::File, String> {
     std::fs::OpenOptions::new()
         .read(true)
@@ -485,6 +491,8 @@ fn rfc3339(secs: u64) -> String {
 }
 
 #[cfg(test)]
+// Tests set up and inspect their own scratch folders directly.
+#[allow(clippy::disallowed_methods)]
 mod tests {
     use super::*;
 

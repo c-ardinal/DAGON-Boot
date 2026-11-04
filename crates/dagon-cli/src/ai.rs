@@ -46,6 +46,8 @@ struct Args {
 }
 
 /// `dagon ai topology [--in <file>] [--out <yaml>] [--model <id>]`
+// Writes the topology file the user names with --out.
+#[allow(clippy::disallowed_methods)]
 pub fn topology(args: &[&str]) -> Result<(), String> {
     let a = parse_args(args)?;
     let home = crate::consent::home()?;
@@ -366,6 +368,8 @@ fn unanswered(qs: &[String]) -> String {
 }
 
 #[cfg(test)]
+// Tests set up and inspect their own scratch folders directly.
+#[allow(clippy::disallowed_methods)]
 mod tests {
     use super::*;
     use std::collections::VecDeque;

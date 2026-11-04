@@ -1,10 +1,13 @@
 # DAGON board definition (format: targets/README.md).
+format = 1
 id = "nucleo-f401re"
 product = "NUCLEO-F401RE"
 mcu = "stm32f401re"
 flash_bytes = 0x8_0000
 i2c_target = true
 drawing = "nucleo-64"
+# The board a node naming only its MCU is checked against.
+default = true
 
 header = [
     { pin = "PB4", label = "D5" },
@@ -26,3 +29,54 @@ kind = "i2c"
 addr = 0x42
 control = "full"
 rom_entry = "stm32-i2c-rom"
+
+# The boot stage's LED: LD2, blinking at 10 Hz when nothing can start.
+[boot]
+led = "PA5"
+halt = { pattern = "blink", period_ms = 100 }
+
+[[pin]]
+pin = "PA5"
+name = "led"
+boot = true
+
+# User button B1.
+[[pin]]
+pin = "PC13"
+name = "button"
+
+# A4 and A5 (ADC1 inputs).
+[[pin]]
+pin = "PC1"
+name = "a4"
+
+[[pin]]
+pin = "PC0"
+name = "a5"
+
+# DAGON's link to the 親機: I2C3 as a target at default_link.addr, on D7
+# (SCL) and D5 (SDA).
+[[bus]]
+id = "link"
+kind = "i2c"
+controller = "i2c3"
+sda = "PB4"
+scl = "PA8"
+dagon = true
+
+# The Arduino I2C on D14 (SDA) and D15 (SCL), for what is stacked on the
+# headers.
+[[bus]]
+id = "arduino-i2c"
+kind = "i2c"
+controller = "i2c1"
+sda = "PB9"
+scl = "PB8"
+
+# The ST-LINK virtual COM port.
+[[bus]]
+id = "vcp"
+kind = "uart"
+controller = "usart2"
+tx = "PA2"
+rx = "PA3"

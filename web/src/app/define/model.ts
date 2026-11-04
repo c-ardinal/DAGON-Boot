@@ -3,7 +3,7 @@
 // edit is a pure function returning a new document, so undo keeps snapshots.
 // Validity is never decided here: topo_check (dagon-topology in WASM) does it.
 import { board_template, coordinator_capable, coordinator_uart0, link_kinds, rom_i2c_addrs, supported_mcus, topo_cut, topo_parse } from '../../wasm/pkg/dagon_wasm.js';
-import { supportedBoards, type Board } from '../../wasm/dagon.ts';
+import { defaultBoard, type Board } from '../../wasm/dagon.ts';
 import { INSPECT } from '../copy.ts';
 import type { Config, Link as GLink, Node as GNode, Skip, UplinkHost, Wire } from '../sample.ts';
 
@@ -141,9 +141,9 @@ export function template(board: string): BoardTemplate | null {
   return board_template(board) as BoardTemplate | null;
 }
 
-/** 親機 `h`'s board's [coordinator] pins (a node placed by MCU: the first listed board with that MCU). */
+/** 親機 `h`'s board's [coordinator] pins (a node placed by MCU: its MCU's default board, if any). */
 function hubPins(h: TNode): BoardTemplate['coordinator'] {
-  const board = h.board ?? supportedBoards().find((b) => b.mcu === h.mcu)?.id;
+  const board = h.board ?? defaultBoard(h.mcu);
   return (board ? template(board)?.coordinator : null) ?? null;
 }
 
@@ -162,8 +162,22 @@ function hubUart(h: TNode): { tx: number; rx: number } {
   return { ...hubPins(h)?.pioUart } as { tx: number; rx: number };
 }
 
+/**
+ * The parts of a 構成 the page fills in when a file leaves them out: one place, used when a
+ * file is read, when a document starts empty, when a release's 構成 is taken in, and when two
+ * documents are compared (a filled-in default is not a change).
+ */
+export function withDefaults(t: Topo): Topo {
+  return { buses: [], links: [], recovery: {}, ...t, update: t.update ?? { order: [] } };
+}
+
+/** A document with every default filled in (its 構成's, and no board fields). */
+export function docWithDefaults(doc: Doc): Doc {
+  return { ...doc, topo: withDefaults(doc.topo), boards: doc.boards ?? {} };
+}
+
 export function emptyDoc(name = 'my-desk'): Doc {
-  return { topo: { dagon: 1, name, nodes: [], buses: [], links: [], recovery: {}, update: { order: [] } }, names: {} };
+  return { topo: withDefaults({ dagon: 1, name, nodes: [] } as unknown as Topo), names: {} };
 }
 
 /** A YAML file as a document; throws when it is not YAML at all. */
@@ -171,7 +185,7 @@ export function fromYaml(yaml: string, names: Record<string, string> = {}): Doc 
   const t = topo_parse(yaml) as Topo | null;
   // An empty file or one that is not a mapping with nodes is not a 構成 (C09), not a crash.
   if (!t || typeof t !== 'object' || Array.isArray(t) || !Array.isArray(t.nodes)) throw new Error('not a topology');
-  return { topo: { buses: [], links: [], recovery: {}, ...t, update: t.update ?? { order: [] } }, names };
+  return { topo: withDefaults(t), names };
 }
 
 const hub = (t: Topo) => t.nodes.find((n) => n.role === 'coordinator');
@@ -279,8 +293,8 @@ export function connect(doc: Doc, id: string, parent?: string): Doc {
   const h = parent ? t.nodes.find((x) => x.id === parent) : hub(t);
   const n = t.nodes.find((x) => x.id === id);
   if (!h || !n || n === h || (t.links ?? []).some((l) => l.to === id)) return doc;
-  // A node chosen by MCU links like the first listed board with that MCU (its pins are the developer's).
-  const stand = n.board ?? supportedBoards().find((b) => b.mcu === n.mcu)?.id;
+  // A node chosen by MCU links like its MCU's default board, if any (its pins are the developer's).
+  const stand = n.board ?? defaultBoard(n.mcu);
   const tpl = stand ? template(stand) : null;
   const d = tpl?.link ?? { kind: 'uart' as const, iface: 'pio-uart', addr: null, baud: 115200, control: 'cooperative' as const, romEntry: null };
   if (h.role !== 'coordinator' || n.role === 'coordinator') {

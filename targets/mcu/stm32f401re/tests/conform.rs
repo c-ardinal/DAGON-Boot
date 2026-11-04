@@ -1,14 +1,10 @@
 //! The node-side conformance tests over a fake flash with the board's
-//! declared layout and the scratch slot the conformance build picks.
+//! declared layout and the definition's scratch.
 
 use dagon_conform::node::{run, NodeSetup};
-use dagon_core::log::{LogState, SlotRef};
-use dagon_format::Version;
-use dagon_mcu_stm32f401re::{scratch_addr, scratch_slot, NO_SCRATCH};
+use dagon_mcu_stm32f401re::{conform_scratch, layout, CONFORM_SCRATCH};
 use dagon_port::{Flash, FlashError, FlashRegion};
 use dagon_proto::payload::ConfRunReq;
-
-use dagon_mcu_stm32f401re::layout;
 
 const BASE: u32 = 0x0800_0000;
 
@@ -43,27 +39,37 @@ impl Flash for Mem {
     }
 }
 
-fn confirmed(slot: u8) -> LogState {
-    LogState {
-        confirmed: Some(SlotRef {
-            slot,
-            version: Version::default(),
-            digest16: [0; 16],
-        }),
-        ..LogState::default()
+/// The scratch is the definition's, a declared region of its own, apart
+/// from both APP slots and the log faces.
+#[test]
+fn the_scratch_is_the_definitions_and_holds_no_image() {
+    assert_eq!(
+        CONFORM_SCRATCH,
+        Some((layout::SCRATCH_SECTOR, layout::SCRATCH_SECTOR_LEN))
+    );
+    let at = conform_scratch();
+    assert!(layout::FLASH_REGIONS
+        .iter()
+        .any(|r| r.start == at && r.len == layout::SCRATCH_SECTOR_LEN));
+    for s in layout::SLOTS.slots {
+        assert!(at + layout::SCRATCH_SECTOR_LEN <= s || at >= s + layout::SLOTS.slot_len);
+    }
+    for f in layout::LOG.faces {
+        assert!(at + layout::SCRATCH_SECTOR_LEN <= f || at >= f + layout::LOG.face_len);
     }
 }
 
+/// Every node-side test passes on the scratch and erases nothing else: both
+/// APP slots (whatever images they hold) and the log stay as they were.
 #[test]
-fn node_tests_pass_and_only_touch_the_spare_slot() {
+fn node_tests_pass_and_only_touch_the_scratch() {
     let mut m = Mem {
         bytes: vec![0x11; 512 * 1024],
         erased: Vec::new(),
     };
-    let spare = scratch_slot(&confirmed(0), 0).unwrap();
     let setup = NodeSetup {
         declared: &layout::FLASH_REGIONS,
-        scratch: layout::SLOTS.slots[spare as usize],
+        scratch: conform_scratch(),
     };
     let mut feeds = 0;
     for test_id in [1, 2, 3, 7, 8] {
@@ -72,35 +78,11 @@ fn node_tests_pass_and_only_touch_the_spare_slot() {
         assert!(o.pass, "CT-{test_id:02}: {:?}", o.detail);
     }
     assert!(feeds > 0);
-    assert!(m.erased.iter().all(|&a| a == layout::SLOTS.slots[1]));
-    // Running slot A and the log are untouched.
-    let a = (layout::SLOTS.slots[0] - BASE) as usize;
-    assert!(m.bytes[a..a + 0x2_0000].iter().all(|&b| b == 0x11));
+    assert!(m.erased.iter().all(|&a| a == layout::SCRATCH_SECTOR));
+    for s in layout::SLOTS.slots {
+        let a = (s - BASE) as usize;
+        assert!(m.bytes[a..a + 0x2_0000].iter().all(|&b| b == 0x11));
+    }
     let log = (layout::LOG.faces[0] - BASE) as usize;
     assert!(m.bytes[log..log + 0x8000].iter().all(|&b| b == 0x11));
-}
-
-#[test]
-fn on_trial_erase_tests_fail_without_erasing() {
-    let mut m = Mem {
-        bytes: vec![0x11; 512 * 1024],
-        erased: Vec::new(),
-    };
-    let mut trial = confirmed(0);
-    trial.pending = trial.confirmed.map(|c| SlotRef { slot: 1, ..c });
-    trial.attempts = 1;
-    let scratch = scratch_addr(&trial, 1, &layout::SLOTS);
-    assert_eq!(scratch, NO_SCRATCH);
-    let setup = NodeSetup {
-        declared: &layout::FLASH_REGIONS,
-        scratch,
-    };
-    for test_id in [2, 3] {
-        let req = ConfRunReq { test_id, param: 0 };
-        let o = run(&mut m, &setup, req, &mut || {}).unwrap();
-        assert!(!o.pass, "CT-{test_id:02} passed");
-        assert!(o.detail.as_bytes().ends_with(b"outside flash"));
-    }
-    assert!(m.erased.is_empty());
-    assert!(m.bytes.iter().all(|&b| b == 0x11));
 }

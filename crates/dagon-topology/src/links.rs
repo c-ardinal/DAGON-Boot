@@ -92,7 +92,8 @@ mod tests {
                 };
                 let variant = field("kind");
                 let kind = LinkKind::ALL
-                    .into_iter()
+                    .iter()
+                    .copied()
                     .find(|k| format!("Kind::{k:?}") == variant)
                     .unwrap_or_else(|| panic!("{mcu}: {variant}"));
                 if field("up") == "Support::Yes" {

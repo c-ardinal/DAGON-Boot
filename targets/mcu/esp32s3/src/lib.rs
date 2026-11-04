@@ -48,6 +48,12 @@ pub mod sys;
 /// feed, and the 2nd stage then rolls back to the previous slot.
 pub const TRIAL_WDT_MS: u32 = 4000;
 
+// The constants this package's MCU definition states (`dagon-mcu.toml`):
+// `TRIAL_ATTEMPTS`, `MASKED_MAX_US` (`None` while unmeasured), `ERASE_UNIT`,
+// `ERASE_UNIT_MAX_MS`, the `_KNOWN` flags (checked against their source),
+// `CONFORM_SCRATCH`. The boot stage and the app layer read these.
+include!(concat!(env!("OUT_DIR"), "/definition.rs"));
+
 /// A panic resets the chip: a hung image would never let the 2nd stage roll
 /// back. Turn off the `panic-reset` feature to bring your own handler.
 #[cfg(all(target_arch = "xtensa", feature = "panic-reset", not(test)))]
@@ -87,6 +93,7 @@ pub fn config(mode: u8, target_tag: [u8; 16]) -> Config {
         role: role::NODE,
         mode,
         max_payload: dagon_proto::max_payload::UART as u16,
+        trial_attempts: TRIAL_ATTEMPTS,
     }
 }
 
@@ -98,8 +105,8 @@ pub const REFUSAL_LEN: usize = dagon_proto::frame_len(1);
 /// the trial watchdog window and could replace the fallback's Valid entry.
 /// Going back from a trial needs no SET_PENDING: a REBOOT without CONFIRM
 /// rolls back.
-pub fn refuse_set_pending_on_trial<S: dagon_agent::SlotStore>(
-    store: &mut S,
+pub fn refuse_set_pending_on_trial(
+    st: &dagon_proto::payload::StatusResp,
     request: &[u8],
     out: &mut [u8; REFUSAL_LEN],
 ) -> Option<usize> {
@@ -108,7 +115,6 @@ pub fn refuse_set_pending_on_trial<S: dagon_agent::SlotStore>(
     if f.cmd != Cmd::SetPending as u8 || f.flags & (flags::RESP | flags::EVENT) != 0 {
         return None;
     }
-    let st = store.status();
     if st.slots.get(st.active as usize)?.state != dagon_proto::payload::SlotState::Trying {
         return None;
     }

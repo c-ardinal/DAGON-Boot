@@ -37,18 +37,27 @@ static QUIET_UNTIL: Mutex<Cs, Cell<Instant>> = Mutex::new(Cell::new(Instant::fro
 /// Something on the home screen changed.
 pub static REDRAW: Signal<Cs, ()> = Signal::new();
 
+/// The values above are read and written only here. The one place the
+/// relay masks interrupts: each closure copies or replaces a small value
+/// (at most the three-entry node list), well inside `[execution]
+/// masked_max_us`; none reaches the flash or waits.
+#[allow(clippy::disallowed_methods)]
+fn locked<T, R>(m: &Mutex<Cs, T>, f: impl FnOnce(&T) -> R) -> R {
+    m.lock(f)
+}
+
 pub fn set_subs(subs: Subs) {
-    SUBS.lock(|s| *s.borrow_mut() = subs);
+    locked(&SUBS, |s| *s.borrow_mut() = subs);
     REDRAW.signal(());
 }
 
 pub fn subs() -> Subs {
-    SUBS.lock(|s| s.borrow().clone())
+    locked(&SUBS, |s| s.borrow().clone())
 }
 
 /// What the node at `link`/`addr` answered (a relayed HELLO or STATUS).
 pub fn set_seen_at(link: u8, addr: u8, seen: Seen) {
-    let index = SUBS.lock(|s| {
+    let index = locked(&SUBS, |s| {
         s.borrow()
             .iter()
             .find(|n| n.link == link && n.addr == addr)
@@ -60,7 +69,7 @@ pub fn set_seen_at(link: u8, addr: u8, seen: Seen) {
 }
 
 pub fn set_seen(index: u8, seen: Seen) {
-    let changed = SEEN.lock(|s| {
+    let changed = locked(&SEEN, |s| {
         let mut all = s.get();
         let slot = all.get_mut(index as usize);
         let mut changed = false;
@@ -78,41 +87,41 @@ pub fn set_seen(index: u8, seen: Seen) {
 }
 
 pub fn set_hub(seen: Seen) {
-    if HUB.lock(|h| h.replace(seen)) != seen {
+    if locked(&HUB, |h| h.replace(seen)) != seen {
         REDRAW.signal(());
     }
 }
 
 /// A RELAY or SHOW arrived: the PC drives the nodes for a while.
 pub fn pc_active() {
-    QUIET_UNTIL.lock(|q| q.set(Instant::now() + QUIET_AFTER_PC));
+    locked(&QUIET_UNTIL, |q| q.set(Instant::now() + QUIET_AFTER_PC));
 }
 
 pub fn pc_quiet() -> bool {
-    Instant::now() >= QUIET_UNTIL.lock(|q| q.get())
+    Instant::now() >= locked(&QUIET_UNTIL, |q| q.get())
 }
 
 pub fn set_progress(p: Progress) {
-    PROGRESS.lock(|s| *s.borrow_mut() = Some(p));
+    locked(&PROGRESS, |s| *s.borrow_mut() = Some(p));
     REDRAW.signal(());
 }
 
 /// Drops the progress screen once the PC has been quiet; true if it did.
 pub fn expire_progress() -> bool {
-    pc_quiet() && PROGRESS.lock(|s| s.borrow_mut().take()).is_some()
+    pc_quiet() && locked(&PROGRESS, |s| s.borrow_mut().take()).is_some()
 }
 
 /// What the home screen shows now.
 pub fn home() -> Home {
-    let seen = SEEN.lock(|s| s.get());
-    let hub = HUB.lock(|h| h.get());
+    let seen = locked(&SEEN, |s| s.get());
+    let hub = locked(&HUB, |h| h.get());
     let mut home = Home {
         hub: Node {
             node: nodes::HUB,
             version: hub.version,
             shade: hub.shade,
         },
-        progress: PROGRESS.lock(|p| p.borrow().clone()),
+        progress: locked(&PROGRESS, |p| p.borrow().clone()),
         ..Default::default()
     };
     for sub in subs() {

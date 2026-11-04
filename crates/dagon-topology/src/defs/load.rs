@@ -6,7 +6,7 @@ use std::path::{Component, Path, PathBuf};
 
 use super::{
     page_safe, BoardDef, McuDef, Origin, Part, Partition, Placement, Registry, Slot, Writer,
-    HEADER, PROJECT_TEXT,
+    FORMAT, HEADER, PROJECT_TEXT,
 };
 
 pub const MCU_FILE: &str = "dagon-mcu.toml";
@@ -147,41 +147,19 @@ type Embedded = (
     &'static [(&'static str, &'static str)],
 );
 
-const BUILTIN_MCUS: [Embedded; 3] = [
-    (
-        "targets/mcu/rp2040",
-        include_str!("../../../../targets/mcu/rp2040/dagon-mcu.toml"),
-        &[],
-    ),
-    (
-        "targets/mcu/stm32f401re",
-        include_str!("../../../../targets/mcu/stm32f401re/dagon-mcu.toml"),
-        &[],
-    ),
-    (
-        "targets/mcu/esp32s3",
-        include_str!("../../../../targets/mcu/esp32s3/dagon-mcu.toml"),
-        &[(
-            "partitions.csv",
-            include_str!("../../../../targets/mcu/esp32s3/partitions.csv"),
-        )],
-    ),
-];
+// BUILTIN_MCUS and BUILTIN_BOARDS: every package folder of the source tree
+// (build.rs), in the order a source tree loads; BUILTIN_FILES: the files
+// they embed.
+include!(concat!(env!("OUT_DIR"), "/builtin_defs.rs"));
 
-const BUILTIN_BOARDS: [(&str, &str); 3] = [
+/// The builtin definitions' TOML: MCUs, then boards.
+#[cfg(test)]
+pub(super) fn builtin_texts() -> (Vec<&'static str>, Vec<&'static str>) {
     (
-        "targets/boards/waveshare-rp2040-touch-lcd-1.28",
-        include_str!("../../../../targets/boards/waveshare-rp2040-touch-lcd-1.28/dagon-board.toml"),
-    ),
-    (
-        "targets/boards/nucleo-f401re",
-        include_str!("../../../../targets/boards/nucleo-f401re/dagon-board.toml"),
-    ),
-    (
-        "targets/boards/m5stopwatch",
-        include_str!("../../../../targets/boards/m5stopwatch/dagon-board.toml"),
-    ),
-];
+        BUILTIN_MCUS.iter().map(|(_, t, _)| *t).collect(),
+        BUILTIN_BOARDS.iter().map(|(_, t)| *t).collect(),
+    )
+}
 
 /// What a definition was read from: its TOML and the text files it
 /// references (by package-relative name).
@@ -416,7 +394,7 @@ pub(super) fn from_json(json: &str) -> Result<Registry, DefError> {
 
 pub(super) fn builtin() -> Result<Registry, DefError> {
     let mut reg = empty();
-    for (label, text, files) in BUILTIN_MCUS {
+    for &(label, text, files) in BUILTIN_MCUS {
         reg.push_mcu(
             text,
             &Pkg::Embedded { label, files },
@@ -424,7 +402,7 @@ pub(super) fn builtin() -> Result<Registry, DefError> {
             false,
         )?;
     }
-    for (label, text) in BUILTIN_BOARDS {
+    for &(label, text) in BUILTIN_BOARDS {
         reg.push_board(
             text,
             &Pkg::Embedded { label, files: &[] },
@@ -488,6 +466,44 @@ fn tree(root: &Path) -> Result<Registry, DefError> {
     Ok(reg)
 }
 
+/// Every file [`load`] reads from disk for `sources`, found the way it
+/// finds them: a tree's MCU and board definitions and the text files the
+/// MCU definitions name, a project's dagon.toml and its MCU files with
+/// theirs. A build script that validates with `load` watches these.
+pub(super) fn files(sources: &[Source<'_>]) -> Result<Vec<PathBuf>, DefError> {
+    let mut out = Vec::new();
+    let mcu = |path: PathBuf, out: &mut Vec<PathBuf>| -> Result<(), DefError> {
+        let dir = path.parent().unwrap_or(Path::new(".")).to_path_buf();
+        let m = parse_mcu(&read(&path)?, &Pkg::Dir(dir.clone()))?;
+        out.extend(m.partitions.iter().map(|rel| dir.join(rel)));
+        out.push(path);
+        Ok(())
+    };
+    for s in sources {
+        match s {
+            Source::Tree(root) => {
+                let targets = root.join("targets");
+                for dir in packages(&targets.join("mcu"), MCU_FILE)? {
+                    mcu(dir.join(MCU_FILE), &mut out)?;
+                }
+                for dir in packages(&targets.join("boards"), BOARD_FILE)? {
+                    out.push(dir.join(BOARD_FILE));
+                }
+            }
+            Source::Project(toml) => {
+                let defs: ProjectDefs =
+                    toml::from_str(&read(toml)?).or_else(|e| err(toml.display(), e.to_string()))?;
+                let base = toml.parent().unwrap_or(Path::new("."));
+                for rel in &defs.mcu_files {
+                    mcu(base.join(rel), &mut out)?;
+                }
+                out.push(toml.to_path_buf());
+            }
+        }
+    }
+    Ok(out)
+}
+
 #[derive(serde::Deserialize)]
 struct ProjectDefs {
     #[serde(default)]
@@ -527,6 +543,7 @@ fn project(reg: &mut Registry, dagon_toml: &Path) -> Result<(), DefError> {
         t.insert("id".into(), toml::Value::String(id.clone()));
         let text = toml::to_string(&t).or_else(|e| err(&at, e.to_string()))?;
         let label = format!("{at} [board.{id}]");
+        check_format(&text, &label)?;
         let b: BoardDef = toml::from_str(&text).or_else(|e| err(&label, e.to_string()))?;
         if !b.parts.is_empty() {
             return err(
@@ -550,13 +567,33 @@ fn project(reg: &mut Registry, dagon_toml: &Path) -> Result<(), DefError> {
     Ok(())
 }
 
+/// Refuses a definition in a format this reader does not know, before its
+/// fields are read (a newer format may have fields this one rejects).
+fn check_format(text: &str, at: impl fmt::Display) -> Result<(), DefError> {
+    let n = toml::from_str::<toml::Table>(text)
+        .ok()
+        .and_then(|t| t.get("format").cloned());
+    match n {
+        None => Ok(()),
+        Some(toml::Value::Integer(n)) if n == i64::from(FORMAT) => Ok(()),
+        Some(v) => err(
+            at,
+            format!(
+                "definition format {v}; this dagon reads definition format {FORMAT}                  (use a dagon release that reads it; docs/versioning.md)"
+            ),
+        ),
+    }
+}
+
 fn parse_board(text: &str, pkg: &Pkg<'_>) -> Result<BoardDef, DefError> {
+    check_format(text, pkg.label())?;
     let b: BoardDef = toml::from_str(text).or_else(|e| err(pkg.label(), e.to_string()))?;
     pkg.check_parts(&b.parts)?;
     Ok(b)
 }
 
 fn parse_mcu(text: &str, pkg: &Pkg<'_>) -> Result<McuDef, DefError> {
+    check_format(text, pkg.label())?;
     let mut m: McuDef = toml::from_str(text).or_else(|e| err(pkg.label(), e.to_string()))?;
     let at = format!("{} (MCU '{}')", pkg.label(), m.id);
     if let Some(rel) = &m.partitions {
@@ -714,6 +751,24 @@ fn validate(reg: &Registry) -> Result<(), DefError> {
             return err(at, format!("MCU '{}' is not defined", b.mcu));
         };
         super::requirements::check_board(b, m).or_else(|e| err(&at, e))?;
+    }
+    for m in &reg.mcus {
+        let at = format!("MCU '{}'", m.id);
+        let defaults: Vec<&str> = reg
+            .boards
+            .iter()
+            .filter(|b| b.mcu == m.id && b.default)
+            .map(|b| b.id.as_str())
+            .collect();
+        if defaults.len() > 1 {
+            return err(
+                at,
+                format!(
+                    "boards {} are all marked default = true: at most one is the default",
+                    defaults.join(", ")
+                ),
+            );
+        }
     }
     Ok(())
 }

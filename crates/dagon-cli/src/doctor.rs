@@ -243,6 +243,13 @@ pub fn command(args: &[&str]) -> Result<(), String> {
     let o = Opts::parse(&args, &["topology", "config"])?;
     let cfg = Config::load(o.get("config"))?;
     let reg = crate::defs::registry(&cfg)?;
+    println!("{}", crate::versions::known_text());
+    let d = &cfg.dagon;
+    match (&d.tag, &d.path) {
+        (Some(tag), _) => println!("this project's DAGON source: release {tag}"),
+        (None, Some(p)) => println!("this project's DAGON source: local clone {}", p.display()),
+        (None, None) => {}
+    }
     let mcus: Vec<String> = match o.get("topology").map(Into::into).or(cfg.topology.clone()) {
         Some(p) => {
             let t = read_topology(&cfg, &p)?;
@@ -268,6 +275,8 @@ pub fn command(args: &[&str]) -> Result<(), String> {
 }
 
 #[cfg(test)]
+// Tests set up and inspect their own scratch folders directly.
+#[allow(clippy::disallowed_methods)]
 mod tests {
     use std::cell::RefCell;
     use std::collections::BTreeMap;

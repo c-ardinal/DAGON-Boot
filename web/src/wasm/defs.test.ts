@@ -1,10 +1,18 @@
-import { readFileSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { describe, expect, test } from 'vitest';
-import { mcuConnection, supportedBoards, useDefinitions } from './dagon.ts';
+import { defaultBoard, mcuConnection, supportedBoards, useDefinitions } from './dagon.ts';
 
 const text = (rel: string) => new TextDecoder().decode(readFileSync(new URL(`../../../${rel}`, import.meta.url)));
 const mcu = (id: string, files: [string, string][] = []) => ({ label: id, toml: text(`targets/mcu/${id}/dagon-mcu.toml`), files });
 const board = (id: string) => ({ label: id, toml: text(`targets/boards/${id}/dagon-board.toml`) });
+
+/** The builtin set: the id of every board package of the tree (as a set; order carries no meaning). */
+const expectBuiltin = (ids: string[]) => {
+  const want = readdirSync(new URL('../../../targets/boards/', import.meta.url), { withFileTypes: true })
+    .filter((d) => d.isDirectory() && existsSync(new URL(`../../../targets/boards/${d.name}/dagon-board.toml`, import.meta.url)))
+    .map((d) => /^id = "([^"]+)"/m.exec(text(`targets/boards/${d.name}/dagon-board.toml`))?.[1] ?? d.name);
+  expect([...ids].sort()).toEqual(want.sort());
+};
 
 /** What GET /v1/definitions sends for the builtin set plus a project's own board. */
 const served = JSON.stringify({
@@ -27,7 +35,7 @@ describe('definitions from dagon serve', () => {
 
   test('none (no serve, an older serve) is the builtin set', () => {
     expect(useDefinitions(null)).toBe('builtin');
-    expect(supportedBoards().map((b) => b.id)).toEqual(['waveshare-rp2040-touch-lcd-1.28', 'nucleo-f401re', 'm5stopwatch']);
+    expectBuiltin(supportedBoards().map((b) => b.id));
     expect(mcuConnection('rp2040')).not.toBeNull();
   });
 
@@ -55,11 +63,30 @@ describe('definitions from dagon serve', () => {
     const ids = () => supportedBoards().map((b) => b.id);
     expect(useDefinitions(served)).toBe('loaded');
     expect(useDefinitions(null)).toBe('builtin');
-    expect(ids()).toEqual(['waveshare-rp2040-touch-lcd-1.28', 'nucleo-f401re', 'm5stopwatch']);
+    expectBuiltin(ids());
     expect(useDefinitions(served)).toBe('loaded');
     expect(useDefinitions('{"mcus": []}')).toBe('blocked');
     expect(ids()).toEqual([]);
     expect(useDefinitions(null)).toBe('builtin');
-    expect(ids()).toEqual(['waveshare-rp2040-touch-lcd-1.28', 'nucleo-f401re', 'm5stopwatch']);
+    expectBuiltin(ids());
+  });
+
+  test("an MCU's default board is the definitions' rule, never list order", () => {
+    // desk-pico (rp2040) is listed before the marked board: the marked one is the default.
+    const first = JSON.parse(served) as { mcus: unknown[]; boards: { label: string; toml: string }[] };
+    first.boards.unshift(first.boards.pop()!);
+    expect(useDefinitions(JSON.stringify(first))).toBe('loaded');
+    expect(supportedBoards()[0].id).toBe('desk-pico');
+    expect(defaultBoard('rp2040')).toBe('waveshare-rp2040-touch-lcd-1.28');
+    // An MCU's only board is its default; several and none marked: no default.
+    expect(defaultBoard('stm32f401re')).toBe('nucleo-f401re');
+    const unmarked = JSON.stringify({
+      ...first,
+      boards: first.boards.map((b) => ({ ...b, toml: b.toml.replace('default = true\n', '') })),
+    });
+    expect(useDefinitions(unmarked)).toBe('loaded');
+    expect(defaultBoard('rp2040')).toBeUndefined();
+    expect(defaultBoard('stm32f401re')).toBe('nucleo-f401re');
+    expect(useDefinitions(null)).toBe('builtin');
   });
 });

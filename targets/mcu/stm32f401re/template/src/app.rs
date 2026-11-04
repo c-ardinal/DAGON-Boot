@@ -4,7 +4,6 @@
 use crate::board::Io;
 use dagon_mcu_stm32f401re::watchdog::{Guard, Lease};
 use embassy_executor::Spawner;
-use embassy_stm32::gpio::{Level, Output, Speed};
 use embassy_time::{Duration, Timer};
 
 /// How many watchdog guard tasks your application uses.
@@ -24,15 +23,15 @@ pub fn start<const N: usize>(spawner: Spawner, io: Io, guard: &'static Guard<N>,
     spawner.spawn(work(io, guard.lease(first)).expect("task pool"));
 }
 
-/// Blinks LD2, announcing a deadline before each piece of work: a stuck
-/// task resets the board, and a version on trial then goes back to the
-/// previous one.
+/// Announces a deadline before each piece of work: a stuck task resets
+/// the board, and a version on trial then goes back to the previous one.
 #[embassy_executor::task]
 async fn work(io: Io, lease: Lease) {
-    let mut led = Output::new(io.led, Level::Low, Speed::Low);
+    // The pins and peripherals board.rs gives the app are in `io`.
+    let _ = io;
     loop {
         lease.busy(WORK_BUDGET_MS);
-        led.toggle();
+        // Your work here.
         lease.idle();
         Timer::after(Duration::from_millis(500)).await;
     }

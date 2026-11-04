@@ -29,7 +29,8 @@ use dagon_topology::schema::{LinkKind, Node, Role, Topology};
 use serde::Deserialize;
 
 use crate::config::{read_topology, Config, Opts};
-use crate::paths::{contained, write_atomic};
+use crate::genfs;
+use crate::paths::contained;
 
 pub const SAMPLE: &str = include_str!("../../../topology/desk-demo.yaml");
 const FIRST_VERSION: &str = "0.1.0";
@@ -163,14 +164,16 @@ pub fn wiring_rs(t: &Topology, n: &Node, board: Option<&BoardFacts>) -> String {
     )
 }
 
-fn write(
+pub(crate) fn write(
     base: &Path,
     rel: &str,
     text: &str,
     overwrite: bool,
     out: &mut Vec<Written>,
 ) -> Result<(), String> {
-    let path = contained(base, Path::new(rel))?;
+    // A link on the way is refused, never followed or replaced (genfs).
+    let rel_path = genfs::Rel::new(rel)?;
+    let path = genfs::checked(base, &rel_path)?;
     let exists = path.exists();
     if exists && !overwrite {
         out.push(Written {
@@ -181,7 +184,7 @@ fn write(
     }
     let same = exists && std::fs::read_to_string(&path).is_ok_and(|t| t == text);
     if !same {
-        write_atomic(&path, text.as_bytes())?;
+        genfs::write(base, &rel_path, text.as_bytes())?;
     }
     out.push(Written {
         path: rel.into(),
@@ -359,15 +362,7 @@ fn collect(dir: &Path, rel: &str, out: &mut Vec<(String, String)>) {
 /// The variant of `dagon_mcu_<mcu>::links::Kind` for a link kind (the MCU
 /// packages' generator contract, "Links").
 fn kind_variant(k: LinkKind) -> &'static str {
-    match k {
-        LinkKind::UsbCdc => "UsbCdc",
-        LinkKind::Uart => "Uart",
-        LinkKind::I2c => "I2c",
-        LinkKind::Ble => "Ble",
-        LinkKind::WifiTcp => "WifiTcp",
-        LinkKind::Ethernet => "Ethernet",
-        LinkKind::Can => "Can",
-    }
+    k.variant()
 }
 
 /// `{{uplink}}` and `{{downlinks}}` of node `n`: its uplink kind (a 親機's
@@ -416,10 +411,150 @@ pub fn hop_placeholders(
     Ok((path(up), downs.join(", ")))
 }
 
+/// The link wiring of node `n` for an MCU package's template (a node
+/// without a board package), from the 構成 and the MCU definition, so the
+/// template names no board's pins:
+///
+/// - `{{link_i2c}}`, `{{link_sda}}`, `{{link_scl}}`: a node reached over
+///   I2C: the pins its link names (`node_pins`) and the controller the
+///   MCU's ROM loader pair of those pins names (upper case; the loader
+///   refuses a pin pair listed for two controllers);
+/// - `{{down_i2c}}`, `{{down_i2c_sda}}`, `{{down_i2c_scl}}`,
+///   `{{down_i2c_hz}}` and `{{down_uart_tx}}`, `{{down_uart_rx}}`,
+///   `{{down_uart_baud}}`: a 親機's I2C bus and UART link to its 子機
+///   (GPIO numbers; speeds default as in wiring.rs), with `{{if_down_i2c}}`
+///   / `{{if_down_uart}}` `all()` when it has one, `any()` (the code is
+///   left out; its names then render as placeholders that still parse)
+///   when not.
+///
+/// The template serves one I2C bus and one UART link: a 親機 with more, or
+/// an I2C node whose link names no pins the MCU knows, is refused, naming
+/// the links, rather than wiring one of them.
+pub fn wiring_placeholders(
+    reg: &Registry,
+    t: &Topology,
+    n: &Node,
+) -> Result<Vec<(String, String)>, String> {
+    let mut out: Vec<(String, String)> = Vec::new();
+    let mut put = |k: &str, v: String| out.push((format!("{{{{{k}}}}}"), v));
+    let pairs = reg
+        .mcu(&n.mcu)
+        .and_then(|m| m.rom_i2c.as_ref())
+        .map_or(&[][..], |r| &r.pairs[..]);
+    let (ctl, sda, scl) = match t.link_to(&n.id).filter(|l| l.kind == LinkKind::I2c) {
+        Some(l) => {
+            let at = format!("link {} -> {}", l.from, l.to);
+            let p = l.node_pins.as_ref().ok_or_else(|| {
+                format!("{at}: name the node's pins (node_pins) for its MCU template")
+            })?;
+            let q = pairs
+                .iter()
+                .find(|q| q.sda == p.sda && q.scl == p.scl)
+                .ok_or_else(|| {
+                    format!(
+                        "{at}: {}/{} is no I2C pair of {} this template knows",
+                        p.sda, p.scl, n.mcu
+                    )
+                })?;
+            (q.controller.to_uppercase(), p.sda.clone(), p.scl.clone())
+        }
+        None => Default::default(),
+    };
+    put("link_i2c", ctl);
+    put("link_sda", sda);
+    put("link_scl", scl);
+    let downs: Vec<_> = t.links.iter().filter(|l| l.from == n.id).collect();
+    let names = |ls: &[&&dagon_topology::schema::Link]| {
+        ls.iter()
+            .map(|l| format!("{} -> {}", l.from, l.to))
+            .collect::<Vec<_>>()
+            .join(", ")
+    };
+    let i2c: Vec<_> = downs.iter().filter(|l| l.kind == LinkKind::I2c).collect();
+    let mut buses: Vec<&str> = i2c.iter().filter_map(|l| l.bus.as_deref()).collect();
+    buses.sort_unstable();
+    buses.dedup();
+    if buses.len() > 1 {
+        return Err(format!(
+            "{}: its MCU template serves one I2C bus; the 構成 has {} ({}): give the node a board package or one bus",
+            n.id,
+            buses.join(", "),
+            names(&i2c)
+        ));
+    }
+    let bus = buses
+        .first()
+        .and_then(|b| t.buses.iter().find(|x| x.id == *b));
+    put(
+        "if_down_i2c",
+        if bus.is_some() { "all()" } else { "any()" }.into(),
+    );
+    put(
+        "down_i2c",
+        bus.map_or("NoI2c".into(), |b| b.controller.to_uppercase()),
+    );
+    put(
+        "down_i2c_sda",
+        bus.map_or("none".into(), |b| b.sda.to_string()),
+    );
+    put(
+        "down_i2c_scl",
+        bus.map_or("none".into(), |b| b.scl.to_string()),
+    );
+    put(
+        "down_i2c_hz",
+        bus.map_or("0".into(), |b| b.speed_hz.unwrap_or(100_000).to_string()),
+    );
+    let uarts: Vec<_> = downs.iter().filter(|l| l.kind == LinkKind::Uart).collect();
+    if uarts.len() > 1 {
+        return Err(format!(
+            "{}: its MCU template serves one UART link; the 構成 has {} ({}): give the node a board package or one UART link",
+            n.id,
+            uarts.len(),
+            names(&uarts)
+        ));
+    }
+    let uart = uarts.first();
+    let pins = match uart {
+        Some(l) => Some(l.pins.as_ref().ok_or_else(|| {
+            format!(
+                "link {} -> {}: name its UART pins for the MCU template",
+                l.from, l.to
+            )
+        })?),
+        None => None,
+    };
+    put(
+        "if_down_uart",
+        if uart.is_some() { "all()" } else { "any()" }.into(),
+    );
+    put(
+        "down_uart_tx",
+        pins.map_or("none".into(), |p| p.tx.to_string()),
+    );
+    put(
+        "down_uart_rx",
+        pins.map_or("none".into(), |p| p.rx.to_string()),
+    );
+    put(
+        "down_uart_baud",
+        uart.map_or("0".into(), |l| l.baud.unwrap_or(115_200).to_string()),
+    );
+    Ok(out)
+}
+
+/// Whether a template uses [`wiring_placeholders`].
+fn wires(text: &str) -> bool {
+    ["{{link_", "{{down_", "{{if_down_"]
+        .iter()
+        .any(|k| text.contains(k))
+}
+
 fn render(
     text: &str,
     n: &Node,
     hops: &(String, String),
+    wiring: &Result<Vec<(String, String)>, String>,
     src: &DagonSource,
     base: &Path,
 ) -> Result<String, String> {
@@ -436,6 +571,14 @@ fn render(
         out.replace_range(at..end + 2, &line);
     }
     let tag = n.tag.escape_debug().to_string();
+    let out = if wires(text) {
+        wiring
+            .clone()?
+            .iter()
+            .fold(out, |o, (k, v)| o.replace(k.as_str(), v))
+    } else {
+        out
+    };
     Ok(out
         .replace("{{node}}", &n.id)
         .replace("{{tag}}", &tag)
@@ -548,7 +691,8 @@ fn refresh_manifest(
     rendered: &str,
     out: &mut Vec<Written>,
 ) -> Result<(), String> {
-    let path = contained(base, Path::new(rel))?;
+    let rel_path = genfs::Rel::new(rel)?;
+    let path = genfs::checked(base, &rel_path)?;
     let text = std::fs::read_to_string(&path).map_err(|e| format!("{rel}: {e}"))?;
     let mut doc: toml_edit::DocumentMut =
         text.parse().map_err(|_| format!("{rel} does not parse"))?;
@@ -600,17 +744,15 @@ fn refresh_manifest(
     let new = doc.to_string();
     let changed = new != text;
     if changed {
-        write_atomic(&path, new.as_bytes())?;
+        genfs::write(base, &rel_path, new.as_bytes())?;
         // The lock file pins the old source; the next build writes a new
         // one (a crate without Cargo.lock is resolved once).
-        let lock = path.with_file_name("Cargo.lock");
-        match std::fs::remove_file(&lock) {
-            Ok(()) => out.push(Written {
-                path: rel.replace("Cargo.toml", "Cargo.lock"),
+        let lock = rel.replace("Cargo.toml", "Cargo.lock");
+        if genfs::remove(base, &genfs::Rel::new(&lock)?)? {
+            out.push(Written {
+                path: lock,
                 action: "removed",
-            }),
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
-            Err(e) => return Err(format!("cannot remove {}: {e}", lock.display())),
+            });
         }
     }
     out.push(Written {
@@ -642,11 +784,12 @@ fn node_files(
     })?;
     let name = f.name;
     let hops = hop_placeholders(reg, t, n)?;
+    let wiring = wiring_placeholders(reg, t, n);
     let files =
         template_for(&f.dir).ok_or_else(|| format!("{name} has no project template yet"))?;
     files
         .into_iter()
-        .map(|(rel, text)| Ok((rel, render(&text, n, &hops, src, base)?)))
+        .map(|(rel, text)| Ok((rel, render(&text, n, &hops, &wiring, src, base)?)))
         .collect()
 }
 
@@ -676,6 +819,12 @@ pub fn gen(
         }
         // A hop its firmware cannot do yet stops gen, by name.
         hop_placeholders(reg, t, n)?;
+        // A node folder reached through a link is the user's: refused, as
+        // for the generated protection files (the node is reported skipped).
+        if let Some(link) = genfs::link_in(base, &genfs::Rel::new(format!("nodes/{}", n.id))?) {
+            r.skipped.push((n.id.clone(), genfs::link_reason(&link)));
+            continue;
+        }
         let files = match node_files(reg, t, n, src, base) {
             Ok(f) => f,
             Err(e) => {
@@ -741,7 +890,8 @@ pub fn add_build_tables(
         added.push(n.id.clone());
     }
     if !added.is_empty() {
-        write_atomic(config, doc.to_string().as_bytes())?;
+        let (dir, name) = split(config)?;
+        genfs::write(dir, &genfs::Rel::new(&name)?, doc.to_string().as_bytes())?;
     }
     Ok(added)
 }
@@ -753,6 +903,8 @@ struct ProjectTables {
     dagon: DagonSource,
     #[serde(default)]
     board: std::collections::BTreeMap<String, BoardFacts>,
+    #[serde(default)]
+    extensions: crate::extgen::Extensions,
 }
 
 fn project_tables(config: &Path) -> Result<ProjectTables, String> {
@@ -775,11 +927,25 @@ pub fn gen_command(args: &[&str]) -> Result<(), String> {
     for line in &lines {
         println!("{line}");
     }
-    let skipped = lines.iter().filter(|l| l.starts_with("skipped")).count();
-    if skipped > 0 {
-        return Err(format!("{skipped} node(s) not generated; see above"));
+    outcome(&lines)
+}
+
+/// How `dagon gen` ends: an error naming every node (or generated folder)
+/// it did not generate, with the reason, so the exit status is non-zero.
+pub(crate) fn outcome(lines: &[String]) -> Result<(), String> {
+    let skipped: Vec<&str> = lines
+        .iter()
+        .filter_map(|l| l.strip_prefix("skipped"))
+        .map(str::trim)
+        .collect();
+    if skipped.is_empty() {
+        return Ok(());
     }
-    Ok(())
+    Err(format!(
+        "{} not generated: {}",
+        skipped.len(),
+        skipped.join("; ")
+    ))
 }
 
 /// `dagon gen` for the project whose dagon.toml is `config`: the lines it
@@ -809,6 +975,17 @@ pub fn gen_project(config: &Path, only: &[String], force: bool) -> Result<Vec<St
     for (id, why) in &report.skipped {
         out.push(format!("skipped    nodes/{id}: {why}"));
     }
+    // Every selected node's generated folder holds exactly this run's
+    // files; a node whose crate was skipped keeps none.
+    let failed: Vec<String> = report.skipped.iter().map(|(id, _)| id.clone()).collect();
+    out.extend(crate::extgen::write_nodes(
+        &reg,
+        &cfg.base,
+        &t.nodes,
+        only,
+        &failed,
+        &tables.extensions,
+    )?);
     for id in add_build_tables(&reg, config, &t)? {
         out.push(format!("added      [build.{id}] to dagon.toml"));
     }
@@ -912,6 +1089,20 @@ const CLAUDE_FILES: [(&str, &str); 4] = [
     ),
 ];
 
+/// `path` as its folder and its last name, for the genfs calls.
+fn split(path: &Path) -> Result<(&Path, String), String> {
+    let name = path
+        .file_name()
+        .ok_or_else(|| format!("{} has no file name", path.display()))?
+        .to_string_lossy()
+        .to_string();
+    let dir = path
+        .parent()
+        .filter(|d| !d.as_os_str().is_empty())
+        .unwrap_or(Path::new("."));
+    Ok((dir, name))
+}
+
 /// Creates the project folder: dagon.toml, topology.yaml, .gitignore, the
 /// Claude Code files and,
 /// when `keys` holds none, a signing key pair there (outside any git work
@@ -933,7 +1124,7 @@ pub fn new_project(
     let written = files
         .into_iter()
         .chain(CLAUDE_FILES)
-        .try_for_each(|(f, text)| write_atomic(&dir.join(f), text.as_bytes()));
+        .try_for_each(|(f, text)| genfs::write(dir, &genfs::Rel::new(f)?, text.as_bytes()));
     let made = written.and_then(|_| init_project(dir, name, "topology.yaml", keys, src));
     let mut made = match made {
         Ok(m) => m,
@@ -961,19 +1152,26 @@ fn undo_new(dir: &Path, existed: bool) {
     .into_iter()
     .chain(CLAUDE_FILES)
     {
-        let p = dir.join(f);
-        let _ = std::fs::remove_file(&p);
+        if let Ok(r) = genfs::Rel::new(f) {
+            let _ = genfs::remove(dir, &r);
+        }
         // Folders the file needed, innermost first; only while empty.
-        let mut up = p.parent();
-        while let Some(d) = up.filter(|d| *d != dir) {
-            if std::fs::remove_dir(d).is_err() {
+        let mut up = Path::new(f).parent();
+        while let Some(d) = up.filter(|d| !d.as_os_str().is_empty()) {
+            let gone = genfs::Rel::new(d.to_string_lossy())
+                .is_ok_and(|r| genfs::remove_empty_dir(dir, &r));
+            if !gone {
                 break;
             }
             up = d.parent();
         }
     }
     if !existed {
-        let _ = std::fs::remove_dir(dir);
+        if let Ok((parent, name)) = split(dir) {
+            if let Ok(r) = genfs::Rel::new(&name) {
+                genfs::remove_empty_dir(parent, &r);
+            }
+        }
     }
 }
 
@@ -1014,10 +1212,16 @@ pub fn init_project(
          [dagon]\n{}",
         src.toml()
     );
-    write_atomic(&config, toml.as_bytes())?;
+    genfs::write(
+        dir,
+        &genfs::Rel::new(crate::config::CONFIG_FILE)?,
+        toml.as_bytes(),
+    )?;
     made.push("created    dagon.toml".into());
     Ok(made)
 }
 
 #[cfg(test)]
+// Tests set up and inspect project folders directly.
+#[allow(clippy::disallowed_methods)]
 mod tests;

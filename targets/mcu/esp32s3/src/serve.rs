@@ -9,8 +9,8 @@ pub enum Then {
     Nothing,
     /// ENTER_ROM accepted.
     Rom(Method),
-    /// REBOOT accepted.
-    Reboot,
+    /// REBOOT accepted; reset after this many ms (`allow_reboot_now`).
+    Reboot(u32),
     /// An agent reply: a CONFIRM may have ended the trial.
     CheckTrial,
 }
@@ -20,7 +20,8 @@ pub enum Then {
 pub enum Next {
     Stay,
     EnterRom(Method),
-    Reset,
+    /// Reset after this many ms, feeding meanwhile.
+    Reset(u32),
     CheckTrial,
     /// The ENTER_ROM OK did not leave the node: stay in the app; the host
     /// retries (the same seq gets the same answer) or gives up.
@@ -34,8 +35,10 @@ pub fn next(then: Then, sent: bool) -> Next {
         Then::Nothing => Next::Stay,
         Then::Rom(m) if sent => Next::EnterRom(m),
         Then::Rom(_) => Next::RomReplyLost,
-        // A lost REBOOT reply is recovered by the host's HELLO polling.
-        Then::Reboot => Next::Reset,
+        // A REBOOT reply that did not leave resets nothing: the host's
+        // retry (same seq) gets the same reply.
+        Then::Reboot(ms) if sent => Next::Reset(ms),
+        Then::Reboot(_) => Next::Stay,
         Then::CheckTrial => Next::CheckTrial,
     }
 }
@@ -49,7 +52,8 @@ mod tests {
         let m = Method::ForceDownloadBoot;
         assert_eq!(next(Then::Rom(m), true), Next::EnterRom(m));
         assert_eq!(next(Then::Rom(m), false), Next::RomReplyLost);
-        assert_eq!(next(Then::Reboot, false), Next::Reset);
+        assert_eq!(next(Then::Reboot(300), true), Next::Reset(300));
+        assert_eq!(next(Then::Reboot(0), false), Next::Stay);
         assert_eq!(next(Then::CheckTrial, false), Next::CheckTrial);
         assert_eq!(next(Then::Nothing, true), Next::Stay);
     }

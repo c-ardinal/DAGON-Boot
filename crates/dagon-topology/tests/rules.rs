@@ -369,17 +369,24 @@ fn json_report_shape() {
 }
 
 #[test]
-fn board_table_starts_with_demo_boards() {
+fn builtin_boards_are_the_board_packages() {
     let reg = Registry::builtin();
-    let ids: Vec<_> = reg.boards().iter().map(|b| b.id.as_str()).collect();
-    assert_eq!(
-        ids,
-        [
-            "waveshare-rp2040-touch-lcd-1.28",
-            "nucleo-f401re",
-            "m5stopwatch"
-        ]
-    );
+    let mut ids: Vec<String> = reg.boards().iter().map(|b| b.id.clone()).collect();
+    ids.sort();
+    // Each package folder's definition id (the set; order carries no meaning).
+    let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../targets/boards");
+    let mut want: Vec<String> = std::fs::read_dir(dir)
+        .unwrap()
+        .flatten()
+        .map(|e| e.path().join("dagon-board.toml"))
+        .filter(|p| p.is_file())
+        .map(|p| {
+            let t: toml::Table = std::fs::read_to_string(p).unwrap().parse().unwrap();
+            t["id"].as_str().unwrap().to_string()
+        })
+        .collect();
+    want.sort();
+    assert_eq!(ids, want);
     let f401 = reg.board("nucleo-f401re").unwrap();
     for pin in ["NRST", "BOOT0"] {
         let h = f401.header.iter().find(|h| h.pin == pin).unwrap();
@@ -417,7 +424,7 @@ fn every_link_kind_and_uplink_round_trips_through_the_schema() {
         let up = dagon_topology::Topology::uplink(hub);
         assert_eq!(
             (up.kind, up.host),
-            (k, dagon_topology::schema::UplinkHost::Browser)
+            (*k, dagon_topology::schema::UplinkHost::Browser)
         );
     }
     let t = dagon_topology::parse_str(DEMO).unwrap();

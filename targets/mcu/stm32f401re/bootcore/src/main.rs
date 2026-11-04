@@ -1,11 +1,13 @@
 //! NUCLEO-F401RE boot core: reads the state log, picks the APP slot (trial
 //! of the pending slot, rollback after the attempts run out, otherwise the
 //! confirmed slot), starts the watchdog and jumps. With no startable slot it
-//! blinks LD2 fast and stays here.
+//! shows the board's halt pattern on its boot LED and stays here.
 //!
 //! Images are verified with `dagon_mcu_stm32f401re::PUBKEY` (`DAGON_PUBKEY`
 //! at build time; the public test key only with `DAGON_ALLOW_TEST_KEY=1`).
-//! The halt LED is PA5 (LD2 on NUCLEO boards). It accepts only images
+//! The halt LED and pattern are the board definition's `[boot] led` and
+//! `halt` (`DAGON_BOARD` names the board, else the MCU's default board). It
+//! accepts only images
 //! tagged with its node's tag: `DAGON_TARGET_TAG` at build time (the build
 //! fails without it).
 #![no_std]
@@ -25,15 +27,29 @@ use dagon_port::BootSelectS;
 use embassy_stm32::gpio::{Level, Output, Speed};
 use embassy_stm32::wdg::IndependentWatchdog;
 
+/// The board's `[boot]` values (build.rs).
+#[allow(dead_code)]
+mod board_def {
+    include!(concat!(env!("OUT_DIR"), "/board.rs"));
+}
+#[allow(dead_code, unused_macros)]
+#[macro_use]
+mod pins {
+    include!(concat!(env!("OUT_DIR"), "/pins.rs"));
+}
+
 const CONFIG: BootConfig = BootConfig {
     pubkey: PUBKEY,
     mcu_id: board::MCU_ID,
     target_tag: checked_tag(TARGET_TAG),
-    max_attempts: board::MAX_ATTEMPTS,
+    max_attempts: dagon_mcu_stm32f401re::TRIAL_ATTEMPTS,
 };
 
-/// Half period of the "no image" blink (about 50 ms).
-const HALT_BLINK_CYCLES: u32 = SYSCLK_HZ / 20;
+/// Half period of the halt blink in CPU cycles; `None`: the LED stays off.
+const HALT_BLINK_CYCLES: Option<u32> = match board_def::HALT_BLINK_PERIOD_MS {
+    Some(ms) => Some(SYSCLK_HZ / 1000 * (ms / 2)),
+    None => None,
+};
 
 #[entry]
 fn main() -> ! {
@@ -54,10 +70,23 @@ fn main() -> ! {
             Jump.boot(entry)
         }
         Decision::NoImage => {
-            let mut led = Output::new(p.PA5, Level::Low, Speed::Low);
+            #[cfg(boot_led)]
+            {
+                let off = if board_def::BOOT_LED_ACTIVE_HIGH {
+                    Level::Low
+                } else {
+                    Level::High
+                };
+                let mut led = Output::new(take!(p.boot_led), off, Speed::Low);
+                if let Some(cycles) = HALT_BLINK_CYCLES {
+                    loop {
+                        led.toggle();
+                        cortex_m::asm::delay(cycles);
+                    }
+                }
+            }
             loop {
-                led.toggle();
-                cortex_m::asm::delay(HALT_BLINK_CYCLES);
+                cortex_m::asm::wfi();
             }
         }
     }

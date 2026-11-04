@@ -208,6 +208,8 @@ pub(crate) fn vendor_files(
 }
 
 #[cfg(test)]
+// Tests set up and inspect their own scratch folders directly.
+#[allow(clippy::disallowed_methods)]
 mod tests {
     use super::*;
     use dagon_topology::defs::Registry;

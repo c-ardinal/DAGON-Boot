@@ -2,8 +2,15 @@
 name = "dagon-rp2040-bootcore"
 edition = "2021"
 license = "MIT OR Apache-2.0"
-version = "0.0.0"
+version = "0.1.0"
 publish = false
+
+# Firmware clippy runs in CI (scripts/ci_crates.py --firmware-lint): the
+# masking rule of the execution model applies to the boot images too.
+# DAGON_TARGET_TAG names which images this boot stage accepts; its value
+# does not change the code, so the lint uses a neutral one.
+[package.metadata.dagon]
+lint = { features = [""], env = { DAGON_TARGET_TAG = "lint" } }
 
 # Standalone: built for thumbv6m only, so it stays out of the host workspace.
 # Its memory.x and verifying key come from dagon-mcu-rp2040.
@@ -22,6 +29,10 @@ embassy-time = "0.5"
 cortex-m = "0.7"
 cortex-m-rt = "0.7"
 panic-halt = "1"
+
+[build-dependencies]
+# The boot LED and halt pattern from the board definition.
+dagon-topology = { path = "../../../../crates/dagon-topology" }
 
 [profile.release]
 opt-level = "z"

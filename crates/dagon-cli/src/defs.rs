@@ -33,4 +33,6 @@ pub(crate) fn registry(cfg: &Config) -> Result<Registry, String> {
 }
 
 #[cfg(test)]
+// Tests set up and inspect their own scratch folders directly.
+#[allow(clippy::disallowed_methods)]
 mod tests;

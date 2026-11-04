@@ -8,6 +8,7 @@
 pub mod bundle;
 pub mod header;
 pub mod le;
+pub mod link;
 pub mod manifest;
 pub mod statelog;
 pub mod topology;

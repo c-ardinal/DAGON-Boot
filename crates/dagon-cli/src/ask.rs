@@ -463,6 +463,8 @@ pub fn command(args: &[&str]) -> Result<(), String> {
 }
 
 #[cfg(test)]
+// Tests set up and inspect their own scratch folders directly.
+#[allow(clippy::disallowed_methods)]
 mod tests {
     use super::*;
     use std::collections::VecDeque;

@@ -1,14 +1,7 @@
 //! The link kinds this package offers, by direction, for STM32F401RE (a 子機: no downlinks):
 //!
-//! | Kind | Up | Down |
-//! |---|---|---|
-//! | `usb-cdc` | NotYet | No |
-//! | `uart` | NotYet | No |
-//! | `i2c` | Yes | No |
-//! | `ble` | NotYet | No |
-//! | `wifi-tcp` | NotYet | No |
-//! | `ethernet` | NotYet | No |
-//! | `can` | NotYet | No |
+//! README.md, "Links", shows the matrix (generated from `LINK_KINDS`;
+//! a kind the table leaves out is `No`).
 //!
 //! `NotYet`: the 構成 may name it, but a project asking for it does not
 //! build yet (`require_uplink` / `require_downlinks` say which hop).
@@ -67,7 +60,7 @@ mod target {
     use embassy_stm32::pac;
     use embassy_time::{Duration, Timer};
 
-    use super::{Link, LinkError, Reconnect};
+    use super::{Kind, Link, LinkError, Reconnect};
     use crate::mailbox::Mailbox;
     use crate::node::I2cTarget;
 
@@ -128,16 +121,28 @@ mod target {
                     if n == 0 {
                         return Ok(None);
                     }
+                    defmt::debug!("i2c write: {} bytes", n);
                     self.mailbox.request();
                     self.acknowledge(false);
                     Ok(Some(n))
                 }
                 SlaveCommandKind::Read => {
+                    let phase = self.mailbox.phase_name();
+                    let offered = self.mailbox.read_data().len();
                     let sent = self
                         .target
                         .respond_to_read(self.mailbox.read_data())
                         .await
-                        .map_err(|_| LinkError::Corrupt)?;
+                        .map_err(|e| {
+                            defmt::debug!("i2c read: phase {} offered {}: {}", phase, offered, e);
+                            LinkError::Corrupt
+                        })?;
+                    defmt::debug!(
+                        "i2c read: phase {} offered {} sent {}",
+                        phase,
+                        offered,
+                        sent
+                    );
                     *done = self.mailbox.read_done(sent);
                     Ok(None)
                 }
@@ -152,6 +157,15 @@ mod target {
 
         fn reconnect(&self) -> Reconnect {
             Reconnect::Persistent
+        }
+
+        fn kind(&self) -> Kind {
+            Kind::I2c
+        }
+
+        /// The own 7-bit address, as the board's link configured it.
+        fn addr(&self) -> u8 {
+            ((self.regs.oar1().read().add() >> 1) & 0x7F) as u8
         }
 
         async fn read_frame(&mut self) -> Result<&[u8], LinkError> {

@@ -12,7 +12,7 @@ use crate::layout::{MIN_FLASH_SIZE, XIP_BASE};
 /// [`MIN_FLASH_SIZE`] bytes; a larger chip's rest stays the app's own).
 pub struct RpFlash(RpDriver<'static, FLASH, Blocking, MIN_FLASH_SIZE>);
 
-const REGIONS: [FlashRegion; 1] = [FlashRegion {
+pub const REGIONS: [FlashRegion; 1] = [FlashRegion {
     start: XIP_BASE,
     len: MIN_FLASH_SIZE as u32,
     erase_size: ERASE_SIZE as u32,

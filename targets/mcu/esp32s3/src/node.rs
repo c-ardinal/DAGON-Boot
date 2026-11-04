@@ -15,7 +15,10 @@
 //!   trial, so an image that is not confirmed in time is reset and rolled
 //!   back. Once confirmed it is fed only while every task registered in the
 //!   [`Liveness`] registry is within its deadline; the link task registers
-//!   too and announces a budget for every request.
+//!   too and announces a budget for every request. The link task holds the
+//!   watchdog; the slot store feeds it through a handle while it erases.
+//! - REBOOT: the reset follows the reply after the delay `allow_reboot_now`
+//!   asked for, the link task idle and feeding meanwhile.
 //! - UART and USB receivers drop a partial frame after 20 ms without a byte
 //!   (inclusive). Bytes of one read share its completion time; after a
 //!   synchronous section of 20 ms or more any partial frame is dropped, since
@@ -35,12 +38,16 @@ use crate::{
     boot::EspBootSelect,
     flash::EspFlash,
     framer::{INTER_BYTE_TIMEOUT_MS, MAX_UART_FRAME},
-    links,
+    links::{self, Kind},
     otadata::ENTRY_LEN,
     sys::{EspClock, EspReset, RtcWatchdog},
     TRIAL_WDT_MS,
 };
-use dagon_agent::{Agent, Hooks, SlotStore, StoreError, IDLE_TIMEOUT_MS};
+use dagon_agent::{
+    reply_status, Agent, SlotStore, StoreError, TrialPolicy, IDLE_TIMEOUT_MS, NO_ADDR,
+};
+use dagon_events::{Published, Watchdog as Periods};
+use dagon_mcu_common::hooks::{node_chain, Events, NodeChain};
 use dagon_mcu_common::link::Link as DagonLink;
 use dagon_port::{BootSelectV, Reset, Watchdog};
 use dagon_proto::payload::SlotState;
@@ -77,7 +84,7 @@ const REQUEST_BUDGET_MS: u32 = 120_000;
 pub struct NodePeripherals<'d> {
     pub rtc_timer: RTC_TIMER<'d>,
     /// The link UART on the board's pins, configured with
-    /// `link::uart_config()` (115200 8N1).
+    /// `link::uart_config(baud)` (8N1 at the board's link bit rate).
     pub uart: Uart<'d, Blocking>,
     pub usb_device: USB_DEVICE<'d>,
     pub flash: FLASH<'d>,
@@ -205,12 +212,23 @@ async fn link_task(p: NodePeripherals<'static>, cfg: NodeConfig, liveness: &'sta
     // No link: the RTC WDT, already running, resets the chip.
 }
 
-type Store = EspStore<
-    EspFlash<'static, 'static>,
-    EspBootSelect<'static, 'static>,
-    TrialWatchdog<RtcWatchdog, EspClock>,
->;
-type Node = Agent<Store, NodeHooks>;
+type Wdt = TrialWatchdog<RtcWatchdog, EspClock>;
+
+/// The slot store's handle on the trial watchdog the link task holds.
+#[derive(Clone, Copy)]
+struct SharedWdt(&'static RefCell<Wdt>);
+
+impl Watchdog for SharedWdt {
+    fn start(&mut self, timeout_ms: u32) {
+        self.0.borrow_mut().start(timeout_ms);
+    }
+    fn feed(&mut self) {
+        self.0.borrow_mut().feed();
+    }
+}
+
+type Store = EspStore<EspFlash<'static, 'static>, EspBootSelect<'static, 'static>, SharedWdt>;
+type Node = Agent<Store, NodeChain>;
 
 impl Otadata for EspBootSelect<'_, '_> {
     fn running(&self) -> u8 {
@@ -225,15 +243,8 @@ impl Otadata for EspBootSelect<'_, '_> {
     fn confirm(&mut self) -> Result<(), StoreError> {
         EspBootSelect::confirm(self).map_err(|_| StoreError::Flash)
     }
-}
-
-pub struct NodeHooks {
-    self_check: fn() -> bool,
-}
-
-impl Hooks for NodeHooks {
-    fn self_check(&mut self) -> bool {
-        (self.self_check)()
+    fn withdraw(&mut self, slot: u8) -> Result<(), StoreError> {
+        EspBootSelect::withdraw(self, slot).map_err(|_| StoreError::Flash)
     }
 }
 
@@ -250,9 +261,27 @@ enum Via {
     Usb,
 }
 
-/// The link task: both uplinks (common [`DagonLink`]s) and the agent.
+impl Via {
+    /// The link kind's code in events.
+    fn code(self) -> u8 {
+        match self {
+            Via::Uart => Kind::Uart.code(),
+            Via::Usb => Kind::UsbCdc.code(),
+        }
+    }
+}
+
+/// The link task: both uplinks (common [`DagonLink`]s), the agent and
+/// the trial watchdog.
 struct Link {
     agent: Node,
+    /// Whether each uplink (`Via` order) carries frames: up from its first
+    /// frame, down when a reply cannot be sent on it.
+    up: [bool; 2],
+    wdt: &'static RefCell<Wdt>,
+    /// The flash, for a conformance build's tests.
+    #[cfg(feature = "conform")]
+    storage: &'static RefCell<FlashStorage<'static>>,
     uart: links::Uart,
     usb: links::UsbCdc,
     board: RomBoard,
@@ -273,38 +302,60 @@ impl Link {
         liveness: &'static Liveness,
     ) -> Option<Self> {
         static STORAGE: StaticCell<RefCell<FlashStorage<'static>>> = StaticCell::new();
+        static WDT: StaticCell<RefCell<Wdt>> = StaticCell::new();
         // Armed by `arm_watchdog`; not restarted here (a start feeds it).
         let rtc = Rtc::new(p.rtc_timer);
         let rwdt = RtcWatchdog::new(rtc.rwdt);
 
-        // Board bring-up, once, before serving anything.
+        let storage = STORAGE.init(RefCell::new(FlashStorage::new(p.flash)));
+        let boot = EspBootSelect::new(storage).ok()?;
+        let wdt = WDT.init(RefCell::new(
+            TrialWatchdog::new(rwdt, EspClock).with_liveness(liveness),
+        ));
+        let mut store = EspStore::new(EspFlash::new(storage), boot, SharedWdt(wdt));
+        let trial = trying(&mut store);
+        if trial {
+            wdt.borrow_mut().begin_trial();
+        } else {
+            wdt.borrow_mut().end_trial();
+        }
+        publish_startup(&mut store);
+        static EVENTS: StaticCell<Events> = StaticCell::new();
+        let now_us: fn() -> u64 = || {
+            use dagon_port::Clock;
+            EspClock.now_us()
+        };
+        let periods = Periods::new(TRIAL_WDT_MS, TRIAL_WDT_MS);
+        let chain = node_chain(
+            EVENTS.init(Published::new()),
+            cfg.self_check,
+            now_us,
+            periods,
+        );
+        let mut agent = Agent::new(
+            crate::config(cfg.mode, crate::target_tag(p.target_tag)),
+            store,
+            chain,
+        );
+        // The trial watchdog never feeds while on trial.
+        agent.watchdog_taken(TRIAL_WDT_MS, TrialPolicy::NeverFeed);
+        // Board bring-up, once, before the links open and anything is served.
         p.board.bring_up();
+        if let Some(id) = p.board.id() {
+            agent.bring_up(id);
+        }
         let board = RomBoard {
             swd: rtc.swd,
             board: p.board,
         };
         let uart = links::Uart::new(p.uart.into_async());
         let usb = links::UsbCdc::new(UsbSerialJtag::new(p.usb_device).into_async());
-
-        let storage = STORAGE.init(RefCell::new(FlashStorage::new(p.flash)));
-        let boot = EspBootSelect::new(storage).ok()?;
-        let wdt = TrialWatchdog::new(rwdt, EspClock).with_liveness(liveness);
-        let mut store = EspStore::new(EspFlash::new(storage), boot, wdt);
-        if trying(&mut store) {
-            store.wdt.begin_trial();
-        } else {
-            store.wdt.end_trial();
-        }
-        publish_startup(&mut store);
-        let hooks = NodeHooks {
-            self_check: cfg.self_check,
-        };
         Some(Self {
-            agent: Agent::new(
-                crate::config(cfg.mode, crate::target_tag(p.target_tag)),
-                store,
-                hooks,
-            ),
+            agent,
+            up: [false; 2],
+            wdt,
+            #[cfg(feature = "conform")]
+            storage,
             uart,
             usb,
             board,
@@ -317,7 +368,7 @@ impl Link {
         let mut last = Instant::now();
         let mut req = [0u8; MAX_UART_FRAME];
         loop {
-            self.agent.store().wdt.feed();
+            self.wdt.borrow_mut().feed();
             if last.elapsed() >= idle {
                 self.agent.abort();
                 last = Instant::now();
@@ -348,7 +399,16 @@ impl Link {
     /// ROM loader after the reply to ENTER_ROM if that reply left the node.
     /// Returns the longest synchronous section (ms) it ran.
     async fn serve(&mut self, frame: &[u8], via: Via) -> u32 {
+        // Every request starts with a gated feed (execution model, section
+        // 12, rule 4); on trial the trial watchdog feeds nothing.
+        self.wdt.borrow_mut().feed();
         let start = now_ms();
+        let up = &mut self.up[via as usize];
+        if !*up {
+            *up = true;
+            self.agent.link_up(via.code(), NO_ADDR);
+        }
+        self.agent.request(frame, via.code());
         self.lease.busy(start, REQUEST_BUDGET_MS);
         self.lease.hold_cpu(start);
         let mut out = [0u8; REPLY_MAX];
@@ -360,7 +420,13 @@ impl Link {
                 Via::Usb => self.usb.write_frame(&out[..n]).await,
             }
             .is_ok();
-            held = held.max(self.after_reply(serve::next(then, sent)));
+            if !sent {
+                self.up[via as usize] = false;
+                self.agent.link_down(via.code(), NO_ADDR);
+            } else if let Some(status) = reply_status(&out[..n]) {
+                self.agent.replied(status, now_ms().wrapping_sub(start));
+            }
+            held = held.max(self.after_reply(serve::next(then, sent)).await);
         }
         self.lease.idle();
         held
@@ -375,13 +441,14 @@ impl Link {
             out[..n].copy_from_slice(&rom_reply[..n]);
             return Some((n, method.map_or(Then::Nothing, Then::Rom)));
         }
-        let agent = &mut self.agent;
         #[cfg(feature = "conform")]
-        if let Some(n) = conform(agent, frame, &mut out[..]) {
+        if let Some(n) = self.conform(frame, &mut out[..]) {
             return Some((n, Then::Nothing));
         }
+        let agent = &mut self.agent;
         let mut refusal = [0u8; crate::REFUSAL_LEN];
-        if let Some(n) = crate::refuse_set_pending_on_trial(agent.store(), frame, &mut refusal) {
+        let st = agent.images().status();
+        if let Some(n) = crate::refuse_set_pending_on_trial(st, frame, &mut refusal) {
             out[..n].copy_from_slice(&refusal[..n]);
             return Some((n, Then::Nothing));
         }
@@ -389,7 +456,7 @@ impl Link {
         let n = reply.frame.len();
         out.get_mut(..n)?.copy_from_slice(reply.frame);
         let then = if reply.reboot {
-            Then::Reboot
+            Then::Reboot(reply.reboot_delay_ms)
         } else {
             Then::CheckTrial
         };
@@ -397,27 +464,64 @@ impl Link {
     }
 
     /// Runs the step after a reply; returns how long it kept the CPU (ms).
-    fn after_reply(&mut self, next: Next) -> u32 {
+    async fn after_reply(&mut self, next: Next) -> u32 {
         match next {
             Next::Stay => 0,
-            Next::EnterRom(m) => enter_rom(m, &mut self.board, self.agent.store().wdt.inner()),
+            Next::EnterRom(m) => enter_rom(m, &mut self.board, self.wdt.borrow_mut().inner()),
             Next::RomReplyLost => {
                 ROM_REPLY_LOST.fetch_add(1, Ordering::Relaxed);
                 0
             }
-            Next::Reset => {
-                self.agent.hooks().before_reboot();
-                EspReset.reset()
-            }
+            Next::Reset(ms) => self.reset_after(ms).await,
             Next::CheckTrial => {
                 self.lease.hold_cpu(now_ms());
-                let store = self.agent.store();
-                if store.wdt.on_trial() && !trying(store) {
-                    store.wdt.end_trial();
+                let mut wdt = self.wdt.borrow_mut();
+                if wdt.on_trial() && !self.agent.images().on_trial() {
+                    wdt.end_trial();
                 }
+                drop(wdt);
                 self.lease.release_cpu(now_ms())
             }
         }
+    }
+
+    /// Waits `ms` (capped below the watchdog period by the chain), idle
+    /// and feeding, then resets.
+    async fn reset_after(&mut self, ms: u32) -> ! {
+        self.lease.idle();
+        let until = Instant::now() + Duration::from_millis(ms.into());
+        while Instant::now() < until {
+            self.wdt.borrow_mut().feed();
+            Timer::at(until.min(Instant::now() + FEED_PERIOD)).await;
+        }
+        self.agent.before_reboot();
+        EspReset.reset()
+    }
+
+    /// CONF_RUN in a conformance build, on the definition's scratch
+    /// (`[conformance] scratch`: no image, header or selection data is
+    /// there); without one the request falls through to the agent
+    /// (E_UNSUPPORTED).
+    #[cfg(feature = "conform")]
+    fn conform(&mut self, frame: &[u8], out: &mut [u8]) -> Option<usize> {
+        use crate::layout::REGIONS;
+        use dagon_conform::node::{handle_frame, NodeSetup};
+        use dagon_proto::{Cmd, Frame};
+
+        let max = dagon_proto::max_payload::UART;
+        if Frame::decode(frame, max).ok()?.0.cmd != Cmd::ConfRun as u8 {
+            return None;
+        }
+        let (scratch, _) = crate::CONFORM_SCRATCH?;
+        let setup = NodeSetup {
+            declared: &REGIONS,
+            scratch,
+        };
+        let mut flash = EspFlash::new(self.storage);
+        let wdt = self.wdt;
+        handle_frame(frame, max, &mut flash, &setup, out, &mut || {
+            wdt.borrow_mut().feed()
+        })
     }
 }
 
@@ -432,32 +536,6 @@ fn copy(req: &mut [u8; MAX_UART_FRAME], f: &[u8]) -> usize {
     let n = f.len().min(MAX_UART_FRAME);
     req[..n].copy_from_slice(&f[..n]);
     n
-}
-
-/// CONF_RUN in a conformance build. The scratch unit is the first erase unit
-/// of the OTA slot that is neither running nor the fallback; without one the
-/// request falls through to the agent (E_UNSUPPORTED).
-#[cfg(feature = "conform")]
-fn conform(agent: &mut Node, frame: &[u8], out: &mut [u8]) -> Option<usize> {
-    use crate::layout::{app_partition, REGIONS, SLOT_A, SLOT_B};
-    use dagon_conform::node::{handle_frame, NodeSetup};
-    use dagon_proto::{Cmd, Frame};
-
-    let max = dagon_proto::max_payload::UART;
-    if Frame::decode(frame, max).ok()?.0.cmd != Cmd::ConfRun as u8 {
-        return None;
-    }
-    let store = agent.store();
-    let st = store.status();
-    let idle = [SLOT_A, SLOT_B]
-        .into_iter()
-        .find(|&s| s != st.active && s != st.confirmed)?;
-    let setup = NodeSetup {
-        declared: &REGIONS,
-        scratch: app_partition(idle)?.offset,
-    };
-    let (flash, wdt) = (&mut store.flash, &mut store.wdt);
-    handle_frame(frame, max, flash, &setup, out, &mut || wdt.feed())
 }
 
 /// Runs [`rom::steps`] after the reply has been sent: watchdogs off, the

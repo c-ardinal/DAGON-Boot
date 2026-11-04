@@ -217,6 +217,8 @@ export interface Board {
   flashBytes: number;
   i2cTarget: boolean;
   drawing: string;
+  /** The board a node naming only its MCU stands for (the definitions' rule, not list order). */
+  isDefault: boolean;
 }
 
 export function supportedBoards(): Board[] {
@@ -230,11 +232,17 @@ export function supportedBoards(): Board[] {
         flashBytes: b.flash_bytes,
         i2cTarget: b.i2c_target,
         drawing: b.drawing,
+        isDefault: b.is_default,
       };
     } finally {
       b.free();
     }
   });
+}
+
+/** The board a node naming only `mcu` stands for; undefined when the MCU has none (several boards, none marked). */
+export function defaultBoard(mcu: string): string | undefined {
+  return supportedBoards().find((b) => b.mcu === mcu && b.isDefault)?.id;
 }
 
 export function encodeHelloReq(r: HelloReq): Uint8Array {

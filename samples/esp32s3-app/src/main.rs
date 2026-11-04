@@ -25,6 +25,7 @@ use embassy_executor::Spawner;
 use embassy_time::{Duration, Timer};
 use esp_hal::timer::timg::TimerGroup;
 
+mod bootlog;
 mod display;
 mod power;
 
@@ -51,8 +52,12 @@ async fn main(spawner: Spawner) {
     esp_rtos::start(TimerGroup::new(p.TIMG0).timer0, p.FROM_CPU_INTR0);
     // The panel supply is on the internal I2C bus, which DAGON owns once
     // started: power it first, on every start (an update only resets the chip).
-    let powered =
-        power::panel_power_on(p.I2C0.reborrow(), p.GPIO47.reborrow(), p.GPIO48.reborrow());
+    let powered = power::panel_power_on(
+        p.I2C0.reborrow(),
+        p.GPIO47.reborrow(),
+        p.GPIO48.reborrow(),
+        p.USB_DEVICE.reborrow(),
+    );
     board::start(
         armed,
         dagon_pins!(p),

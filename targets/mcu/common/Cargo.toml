@@ -2,7 +2,7 @@
 name = "dagon-mcu-common"
 edition = "2021"
 license = "MIT OR Apache-2.0"
-version = "0.0.0"
+version = "0.1.0"
 publish = false
 
 # MCU-independent parts of the DAGON MCU packages, host-testable:
@@ -11,10 +11,13 @@ publish = false
 
 [dependencies]
 dagon-agent = { path = "../../../crates/dagon-agent" }
+dagon-events = { path = "../../../crates/dagon-events" }
 dagon-format = { path = "../../../crates/dagon-format" }
 dagon-port = { path = "../../../crates/dagon-port" }
 dagon-proto = { path = "../../../crates/dagon-proto" }
 critical-section = "1"
+# SharedFlash: a lock taken without masking interrupts for the operation.
+embassy-sync = "0.8"
 
 [dev-dependencies]
 critical-section = { version = "1", features = ["std"] }

@@ -125,10 +125,24 @@ impl<D: Dog, const N: usize> Guard<D, N> {
         }
     }
 
+    /// What the guard does while the image is on trial, as
+    /// `app.watchdog_taken` reports it.
+    pub const fn trial_policy(&self) -> dagon_agent::TrialPolicy {
+        match self.trial {
+            Trial::NeverFeed => dagon_agent::TrialPolicy::NeverFeed,
+            Trial::FeedUntilMs(ms) => {
+                dagon_agent::TrialPolicy::FeedUntilMs(if ms > u32::MAX as u64 {
+                    u32::MAX
+                } else {
+                    ms as u32
+                })
+            }
+        }
+    }
+
     /// Takes the running watchdog (started by the boot core or the app).
     pub fn install(&self, dog: D, on_trial: bool) {
-        critical_section::with(|cs| {
-            let mut s = self.state.borrow_ref_mut(cs);
+        self.with_state(|s| {
             s.dog = Some(dog);
             s.on_trial = on_trial;
         });
@@ -136,7 +150,7 @@ impl<D: Dog, const N: usize> Guard<D, N> {
 
     /// The running image is (no longer) on trial.
     pub fn set_trial(&self, on_trial: bool) {
-        critical_section::with(|cs| self.state.borrow_ref_mut(cs).on_trial = on_trial);
+        self.with_state(|s| s.on_trial = on_trial);
     }
 
     /// `task` starts (or makes progress in) a piece of work.
@@ -152,21 +166,20 @@ impl<D: Dog, const N: usize> Guard<D, N> {
 
     fn busy_ms(&self, task: usize, ms: u64) {
         let now = (self.now_ms)();
-        critical_section::with(|cs| self.state.borrow_ref_mut(cs).live.busy(task, now, ms));
+        self.with_state(|s| s.live.busy(task, now, ms));
     }
 
     /// `task` waits for its next piece of work.
     pub fn idle(&self, task: usize) {
         let now = (self.now_ms)();
-        critical_section::with(|cs| self.state.borrow_ref_mut(cs).live.idle(task, now));
+        self.with_state(|s| s.live.idle(task, now));
     }
 
     /// Feeds if every task is alive and the trial policy allows it. The
     /// only way the watchdog is fed.
     pub fn feed(&self) {
         let now = (self.now_ms)();
-        critical_section::with(|cs| {
-            let mut s = self.state.borrow_ref_mut(cs);
+        self.with_state(|s| {
             let allowed = !s.on_trial
                 || match self.trial {
                     Trial::FeedUntilMs(end) => now < end,
@@ -190,7 +203,16 @@ impl<D: Dog, const N: usize> Guard<D, N> {
 
     /// Runs `f` on the watchdog (if installed), e.g. to force a reset.
     pub fn with_dog<R>(&self, f: impl FnOnce(&mut D) -> R) -> Option<R> {
-        critical_section::with(|cs| self.state.borrow_ref_mut(cs).dog.as_mut().map(f))
+        self.with_state(|s| s.dog.as_mut().map(f))
+    }
+
+    /// The guard's state, shared by DAGON's tasks and the app's. The only
+    /// place DAGON's own code masks interrupts: the closures above update a
+    /// few fields or feed the watchdog (a register write), well inside
+    /// `[execution] masked_max_us`; none reaches the flash.
+    #[allow(clippy::disallowed_methods)]
+    fn with_state<R>(&self, f: impl FnOnce(&mut State<D, N>) -> R) -> R {
+        critical_section::with(|cs| f(&mut self.state.borrow_ref_mut(cs)))
     }
 }
 

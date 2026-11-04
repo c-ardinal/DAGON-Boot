@@ -2,8 +2,10 @@
 
 The archive holds `dagon` (`dagon.exe` on Windows) with the browser page
 built in (crates/dagon-cli/page, checked to be up to date first). It is
-named as cargo-binstall expects it (crates/dagon-cli/Cargo.toml):
-`dagon-<target>.tar.gz`, or `.zip` for Windows, next to a `.sha256` file.
+named with the component and version as cargo-binstall expects it
+(crates/dagon-cli/Cargo.toml): `dagon-cli-<version>-<target>.tar.gz`, or
+`.zip` for Windows, next to a `.sha256` file. The version is the cli entry
+of compat.toml (docs/versioning.md).
 Nothing is uploaded or published.
 
     python scripts/release.py [--target <rust target>] [--out <dir>]
@@ -16,6 +18,7 @@ import pathlib
 import subprocess
 import sys
 import tarfile
+import tomllib
 import zipfile
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
@@ -44,7 +47,9 @@ def main():
 
     exe = ROOT / "target" / target / "release" / ("dagon.exe" if windows else "dagon")
     a.out.mkdir(parents=True, exist_ok=True)
-    archive = a.out / f"dagon-{target}{'.zip' if windows else '.tar.gz'}"
+    compat = tomllib.loads((ROOT / "compat.toml").read_text(encoding="utf-8"))
+    version = next(c["version"] for c in compat["component"] if c["name"] == "cli")
+    archive = a.out / f"dagon-cli-{version}-{target}{'.zip' if windows else '.tar.gz'}"
     if windows:
         with zipfile.ZipFile(archive, "w", zipfile.ZIP_DEFLATED) as z:
             z.write(exe, exe.name)

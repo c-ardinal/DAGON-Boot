@@ -1,10 +1,11 @@
 import { describe, expect, test } from 'vitest';
-import { Cli, type CliDeps } from './cli.svelte.ts';
+import { Cli, CONSOLE_VERSION, SERVE_API, type CliDeps } from './cli.svelte.ts';
+import pkg from '../../../package.json';
 import { Define } from './define.svelte.ts';
 import { SAVE } from '../copy.ts';
 
 const PASS = '0123456789abcdef0123456789abcdef';
-const HELLO = { cli: '0.1.0', workspace: 'my-fleet', features: ['build', 'sign', 'release', 'gen'], api_key: false, key: true, key_id: '3f9a21c7aabbccdd' };
+const HELLO = { cli: '0.1.0', api: 1, workspace: 'my-fleet', features: ['build', 'sign', 'release', 'gen'], api_key: false, key: true, key_id: '3f9a21c7aabbccdd' };
 
 interface Call {
   url: string;
@@ -62,6 +63,17 @@ function fake(opts: { status?: number; hash?: string } = {}) {
 }
 
 describe('dagon serve link', () => {
+  test('a job stopped by the lock table is not started (no request)', async () => {
+    const f = fake();
+    const cli = new Cli(f.deps);
+    await cli.connect();
+    const n = f.calls.length;
+    cli.guard = () => true;
+    expect(await cli.build(['seg'])).toBeNull();
+    expect(await cli.flash('seg')).toBeNull();
+    expect(f.calls.length).toBe(n);
+  });
+
   test('the passphrase moves from the URL fragment to sessionStorage, rides as Bearer, and opens the event stream', async () => {
     const f = fake();
     const cli = new Cli(f.deps);
@@ -264,5 +276,23 @@ describe('dagon serve link', () => {
     d.saved(d.revision, await cli.saveTopology(d.exportYaml().text));
     expect([d.saveFailure, d.unsaved]).toEqual(['demoLink', true]);
     expect(SAVE.demoLink.sentence).toContain('USB');
+  });
+});
+
+describe('versions', () => {
+  test('the Console is the cli component and speaks serve API 1', () => {
+    expect(CONSOLE_VERSION).toBe(pkg.version);
+    expect(SERVE_API).toBe(1);
+  });
+
+  test('a dagon serving another API number, or none, does not match', async () => {
+    const { deps } = fake();
+    const cli = new Cli(deps);
+    await cli.connect();
+    expect(cli.apiMatches).toBe(true);
+    cli.hello = { ...cli.hello!, api: 2 };
+    expect(cli.apiMatches).toBe(false);
+    cli.hello = { ...cli.hello!, api: undefined };
+    expect(cli.apiMatches).toBe(false);
   });
 });

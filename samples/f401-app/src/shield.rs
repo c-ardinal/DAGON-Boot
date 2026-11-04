@@ -49,9 +49,12 @@ pub const INIT: [Write; 4] = [
     write(LEFT, GPDR, SEGMENTS | XSHUT_LEFT | XSHUT_RIGHT),
 ];
 
+/// Writes one [`show`] makes.
+pub const SHOW_WRITES: usize = 2;
+
 /// Shows `codes` (see [`crate::seg`]; points are dropped), sensors kept in
 /// XSHUT: the GPSR writes after [`INIT`].
-pub fn show(codes: &[u8; DIGITS]) -> [Write; 2] {
+pub fn show(codes: &[u8; DIGITS]) -> [Write; SHOW_WRITES] {
     [
         write(LEFT, GPSR, levels(codes[0], codes[1])),
         write(RIGHT, GPSR, levels(codes[2], codes[3])),

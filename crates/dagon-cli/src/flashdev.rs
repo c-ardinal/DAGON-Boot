@@ -28,6 +28,8 @@ pub(crate) struct Candidate {
     #[serde(rename = "device")]
     pub id: String,
     pub label: String,
+    /// The definition's hint (USB ID, UF2 Board-ID) matches this device.
+    pub matched: bool,
     /// The volume itself for a drive (`id` is its lossy display form, so
     /// a mount path that is not UTF-8 is still written to exactly).
     #[serde(skip)]
@@ -78,13 +80,20 @@ pub(crate) fn listing(cands: &[Candidate], w: &Writer) -> String {
         .collect()
 }
 
+/// Hint-matched candidates first, each group in the order reported.
+pub(crate) fn ordered(mut cands: Vec<Candidate>) -> Vec<Candidate> {
+    cands.sort_by_key(|c| !c.matched);
+    cands
+}
+
 /// The candidate to write to: the one `selector` names, else the only
 /// one. Several without a selector: [`Pick::Choose`]. None: an error.
 pub(crate) fn pick(
-    mut cands: Vec<Candidate>,
+    cands: Vec<Candidate>,
     selector: Option<&str>,
     w: &Writer,
 ) -> Result<Pick, String> {
+    let mut cands = ordered(cands);
     if let Some(s) = selector {
         return match cands.iter().position(|c| names(s, &c.id)) {
             Some(i) => Ok(Pick::Use(cands.swap_remove(i))),
@@ -128,12 +137,23 @@ pub(crate) fn choose(
     for (i, c) in cands.iter().enumerate() {
         println!("  {}) --{} {}  {}", i + 1, flag(w), c.id, c.label);
     }
-    print!("write to which one? [1-{}] ", cands.len());
+    // `cands` come ordered by `pick`: a match, if any, is first.
+    let default = cands.first().is_some_and(|c| c.matched);
+    if default {
+        print!("write to which one? [1-{}, Enter = 1] ", cands.len());
+    } else {
+        print!("write to which one? [1-{}] ", cands.len());
+    }
     let _ = std::io::Write::flush(&mut std::io::stdout());
     let mut line = String::new();
     let _ = input.read_line(&mut line);
-    line.trim()
-        .parse::<usize>()
+    let line = line.trim();
+    let line = if default && line.is_empty() {
+        "1"
+    } else {
+        line
+    };
+    line.parse::<usize>()
         .ok()
         .and_then(|n| n.checked_sub(1))
         .and_then(|i| cands.get(i).cloned())
@@ -198,6 +218,7 @@ pub(crate) fn parse_probes(out: &str) -> Vec<Candidate> {
                 label: format!("{} {}", name.trim(), kind.trim())
                     .trim()
                     .to_string(),
+                matched: false,
                 path: None,
             })
         })
@@ -215,6 +236,7 @@ fn ports(mcu: &str, hint: Option<UsbHint>) -> Result<Vec<Candidate>, String> {
             other => Candidate {
                 id: p.port_name,
                 label: format!("{other:?}"),
+                matched: false,
                 path: None,
             },
         })
@@ -234,12 +256,14 @@ pub(crate) fn usb_port(
     if let Some(p) = product {
         label.push_str(&format!(" {p}"));
     }
-    if hint.is_some_and(|h| (h.vid, h.pid) == (vid, pid)) {
+    let matched = hint.is_some_and(|h| (h.vid, h.pid) == (vid, pid));
+    if matched {
         label.push_str(&format!(" ({mcu})"));
     }
     Candidate {
         id: name,
         label,
+        matched,
         path: None,
     }
 }
@@ -406,6 +430,7 @@ fn uf2_candidate(root: &Path, info: &str, want: &Uf2Want<'_>) -> Option<Candidat
         return None;
     }
     let board = lines.find_map(|l| l.strip_prefix("Board-ID: "));
+    let matched = board == Some(want.board_id);
     let label = match board {
         Some(b) if b == want.board_id => format!("UF2 drive, Board-ID {b} ({})", want.mcu),
         Some(b) => format!("UF2 drive, Board-ID {b}"),
@@ -414,6 +439,7 @@ fn uf2_candidate(root: &Path, info: &str, want: &Uf2Want<'_>) -> Option<Candidat
     Some(Candidate {
         id: root.display().to_string(),
         label,
+        matched,
         path: Some(root.to_path_buf()),
     })
 }
@@ -500,13 +526,17 @@ fn unescape(b: &[u8]) -> Vec<u8> {
 }
 
 #[cfg(test)]
+// Tests set up and inspect their own scratch folders directly.
+#[allow(clippy::disallowed_methods)]
 mod tests {
     use super::*;
+    use std::sync::atomic::AtomicUsize;
 
     fn c(id: &str) -> Candidate {
         Candidate {
             id: id.into(),
             label: format!("label of {id}"),
+            matched: false,
             path: None,
         }
     }
@@ -549,6 +579,44 @@ mod tests {
         );
         // A selector is never passed on unless it names a candidate.
         assert!(pick(vec![c("COM3")], Some("--erase-all"), &w).is_err());
+    }
+
+    fn m(id: &str) -> Candidate {
+        Candidate {
+            matched: true,
+            ..c(id)
+        }
+    }
+
+    #[test]
+    fn matched_candidates_come_first_in_stable_order() {
+        let w = probe_rs();
+        let got = pick(vec![c("a"), m("b"), c("c"), m("d")], None, &w).unwrap();
+        assert_eq!(got, Pick::Choose(vec![m("b"), m("d"), c("a"), c("c")]));
+    }
+
+    #[test]
+    fn enter_takes_the_matched_one_and_another_number_still_works() {
+        let w = probe_rs();
+        let l = [m("b"), c("a")];
+        assert_eq!(choose(&l, &w, &mut "\n".as_bytes()), Ok(m("b")));
+        assert_eq!(choose(&l, &w, &mut "2\n".as_bytes()), Ok(c("a")));
+        // No match: Enter chooses nothing.
+        assert!(choose(&[c("a"), c("b")], &w, &mut "\n".as_bytes()).is_err());
+    }
+
+    #[test]
+    fn non_interactive_refusal_lists_the_matched_first() {
+        let w = probe_rs();
+        let Ok(Pick::Choose(l)) = pick(vec![c("a"), m("b")], None, &w) else {
+            panic!()
+        };
+        let s = several(&l, &w);
+        assert!(
+            s.find("--probe b").unwrap() < s.find("--probe a").unwrap(),
+            "{s}"
+        );
+        assert!(s.contains("Nothing was written"), "{s}");
     }
 
     #[test]
@@ -778,13 +846,57 @@ mod tests {
         Some("UF2 Bootloader v3.0\nBoard-ID: RPI-RP2\n".into())
     }
 
+    /// A fake volume's read waits on a gate the test opens; the wait is
+    /// bounded, so a test that never opens it fails instead of hanging.
+    struct Gate(Mutex<bool>, std::sync::Condvar);
+
+    impl Gate {
+        const fn new() -> Self {
+            Gate(Mutex::new(false), std::sync::Condvar::new())
+        }
+
+        fn open(&self) {
+            *self.0.lock().unwrap() = true;
+            self.1.notify_all();
+        }
+
+        /// UF2 info once opened; None if never opened within 30 s.
+        fn read(&self) -> Option<String> {
+            let g = self.0.lock().unwrap();
+            let (g, t) = self
+                .1
+                .wait_timeout_while(g, Duration::from_secs(30), |open| !*open)
+                .unwrap();
+            drop(g);
+            if t.timed_out() {
+                return None;
+            }
+            slow_rp(0)
+        }
+    }
+
+    /// Spins (bounded to 30 s) until `done`.
+    fn wait_until(what: &str, done: impl Fn() -> bool) {
+        let until = Instant::now() + Duration::from_secs(30);
+        while !done() {
+            assert!(Instant::now() < until, "never happened: {what}");
+            std::thread::yield_now();
+        }
+    }
+
+    fn finished(root: &Path) -> bool {
+        let key = (root.to_path_buf(), RP.info_file.to_string());
+        matches!(reads().get(&key), Some(Read::Finished(..)))
+    }
+
     #[test]
     fn a_silent_volume_holds_one_thread_and_is_asked_again_later() {
         let _alone = timing_tests_alone();
-        static READS: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+        static GATE: Gate = Gate::new();
+        static READS: AtomicUsize = AtomicUsize::new(0);
         fn read(_: &Path) -> Option<String> {
             READS.fetch_add(1, Ordering::SeqCst);
-            slow_rp(800)
+            GATE.read()
         }
         let roots = [PathBuf::from("/silent-rp")];
         for _ in 0..3 {
@@ -792,50 +904,42 @@ mod tests {
             assert!(found.is_empty());
             assert_eq!(late, roots, "not answered yet, never dropped");
         }
+        wait_until("the first read starts", || {
+            READS.load(Ordering::SeqCst) >= 1
+        });
         assert_eq!(READS.load(Ordering::SeqCst), 1, "one thread, not three");
-        std::thread::sleep(Duration::from_millis(1000));
+        GATE.open();
+        wait_until("that read ends", || finished(&roots[0]));
         // Once that read is over, the next scan takes its result.
-        let (found, late) = uf2_drives(&roots, &RP, Duration::from_secs(3), read);
+        let (found, late) = uf2_drives(&roots, &RP, Duration::from_secs(30), read);
         assert!(late.is_empty());
         assert_eq!(found.len(), 1);
         assert_eq!(READS.load(Ordering::SeqCst), 1);
         // Taken: the scan after that reads the volume afresh.
-        let _ = uf2_drives(&roots, &RP, Duration::from_millis(50), read);
+        let _ = uf2_drives(&roots, &RP, Duration::from_secs(30), read);
         assert_eq!(READS.load(Ordering::SeqCst), 2);
     }
 
     #[test]
     fn a_read_that_finishes_after_its_scan_is_used_by_the_next() {
         let _alone = timing_tests_alone();
-        use std::sync::{Condvar, Mutex};
-        static READS_DONE: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+        static READS_DONE: AtomicUsize = AtomicUsize::new(0);
         // The volume answers only once the test opens the gate: the first
         // scan has given up by then, whatever the machine's load.
-        static GATE: (Mutex<bool>, Condvar) = (Mutex::new(false), Condvar::new());
+        static GATE: Gate = Gate::new();
         fn read(_: &Path) -> Option<String> {
             READS_DONE.fetch_add(1, Ordering::SeqCst);
-            let mut open = GATE.0.lock().unwrap();
-            while !*open {
-                open = GATE.1.wait(open).unwrap();
-            }
-            drop(open);
-            slow_rp(0)
+            GATE.read()
         }
         let roots = [PathBuf::from("/just-late-rp")];
         let (found, late) = uf2_drives(&roots, &RP, Duration::from_millis(50), read);
         assert!(found.is_empty());
         assert_eq!(late, roots);
-        *GATE.0.lock().unwrap() = true;
-        GATE.1.notify_all();
+        GATE.open();
         // The read finishes after its scan gave up and is kept.
-        let key = (roots[0].clone(), RP.info_file.to_string());
-        let until = Instant::now() + Duration::from_secs(30);
-        while !matches!(reads().get(&key), Some(Read::Finished(..))) {
-            assert!(Instant::now() < until, "the released read never finished");
-            std::thread::yield_now();
-        }
+        wait_until("the released read finishes", || finished(&roots[0]));
         // The next poll takes the kept result instead of reading again.
-        let (found, late) = uf2_drives(&roots, &RP, Duration::from_millis(50), read);
+        let (found, late) = uf2_drives(&roots, &RP, Duration::from_secs(30), read);
         assert!(late.is_empty());
         assert_eq!(found.len(), 1);
         assert_eq!(READS_DONE.load(Ordering::SeqCst), 1);
@@ -844,37 +948,45 @@ mod tests {
     #[test]
     fn a_late_read_is_kept_per_info_file_and_dropped_once_unmounted() {
         let _alone = timing_tests_alone();
+        static GATE: Gate = Gate::new();
         fn read(_: &Path) -> Option<String> {
-            slow_rp(300)
+            GATE.read()
         }
         let roots = [PathBuf::from("/late-keyed-rp")];
         let other = Uf2Want {
             info_file: "OTHER.TXT",
             ..RP
         };
-        let _ = uf2_drives(&roots, &RP, Duration::from_millis(100), read);
-        std::thread::sleep(Duration::from_millis(400));
+        let _ = uf2_drives(&roots, &RP, Duration::from_millis(50), read);
+        GATE.open();
+        wait_until("the released read finishes", || finished(&roots[0]));
         let kept = |file: &str| reads().contains_key(&(roots[0].clone(), file.to_string()));
         assert!(kept(RP.info_file));
         assert!(!kept("OTHER.TXT"), "another info file is not this read");
         // A scan of other volumes forgets the finished read of this one.
-        let _ = uf2_drives(&[], &other, Duration::from_millis(100), read);
+        let _ = uf2_drives(&[], &other, Duration::from_secs(30), read);
         assert!(!kept(RP.info_file));
     }
 
     #[test]
     fn three_concurrent_scans_all_get_a_slow_volume() {
         let _alone = timing_tests_alone();
+        static GATE: Gate = Gate::new();
+        static ENTERED: AtomicUsize = AtomicUsize::new(0);
         fn read(_: &Path) -> Option<String> {
-            slow_rp(300)
+            ENTERED.fetch_add(1, Ordering::SeqCst);
+            GATE.read()
         }
         let roots = vec![PathBuf::from("/slow-rp-3")];
         let scans: Vec<_> = (0..3)
             .map(|_| {
                 let roots = roots.clone();
-                std::thread::spawn(move || uf2_drives(&roots, &RP, Duration::from_secs(5), read))
+                std::thread::spawn(move || uf2_drives(&roots, &RP, Duration::from_secs(30), read))
             })
             .collect();
+        // A scan is waiting on the volume; the others queue behind it.
+        wait_until("a read starts", || ENTERED.load(Ordering::SeqCst) >= 1);
+        GATE.open();
         for s in scans {
             let (found, late) = s.join().unwrap();
             assert!(late.is_empty());
@@ -886,19 +998,26 @@ mod tests {
     #[test]
     fn a_scan_kept_waiting_by_another_reports_busy_and_finds_it_next_time() {
         let _alone = timing_tests_alone();
+        static GATE: Gate = Gate::new();
+        static ENTERED: AtomicUsize = AtomicUsize::new(0);
         fn read(_: &Path) -> Option<String> {
-            slow_rp(500)
+            ENTERED.fetch_add(1, Ordering::SeqCst);
+            GATE.read()
         }
         let roots = vec![PathBuf::from("/slow-rp-4")];
         let owner = {
             let roots = roots.clone();
-            std::thread::spawn(move || uf2_drives(&roots, &RP, Duration::from_secs(3), read))
+            std::thread::spawn(move || uf2_drives(&roots, &RP, Duration::from_secs(30), read))
         };
-        std::thread::sleep(Duration::from_millis(50));
+        // The owner holds the scan lock before it starts the read.
+        wait_until("the owner's read starts", || {
+            ENTERED.load(Ordering::SeqCst) >= 1
+        });
         let (found, late) = uf2_drives(&roots, &RP, Duration::from_millis(100), read);
         assert!(found.is_empty());
         assert_eq!(late, roots, "busy: every volume late, none excluded");
-        let (found, _) = uf2_drives(&roots, &RP, Duration::from_secs(3), read);
+        GATE.open();
+        let (found, _) = uf2_drives(&roots, &RP, Duration::from_secs(30), read);
         assert_eq!(found.len(), 1);
         assert_eq!(owner.join().unwrap().0.len(), 1);
     }

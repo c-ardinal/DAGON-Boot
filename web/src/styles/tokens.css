@@ -10,7 +10,12 @@
   --c-paper: #f1efe8;
   --c-muted: #9a9892;
   --c-line: #7a7873;
+  --c-hair: #2c2b29;
+  --c-layer-3: #282725;
+  /* red: failures and danger only */
   --c-signal: #ff4b3a;
+  /* blue (water): the next step, progress, information */
+  --c-accent: #3cb4f0;
   --c-hover: #141413;
   --c-scrim: rgb(10 10 10 / 0.8);
 
@@ -22,25 +27,31 @@
   --f-mono: 'JetBrains Mono', Consolas, 'Courier New', monospace;
 
   /* type steps: size / line-height (rem, 1rem = 16px) */
-  --t-display-size: 10rem; /* 160 */
+  --t-display-size: 7rem; /* 112, the focal number */
   --t-display-lh: 1;
-  --t-version-size: 2.75rem; /* 44 */
+  --t-version-size: 1.5rem; /* 24, the card's version */
   --t-version-lh: 1.1;
-  --t-version-small-size: 1.25rem; /* 20, in lists and tables */
+  --t-version-small-size: 0.875rem; /* 14, in lists and tables */
   --t-version-small-lh: 1.2;
-  --t-title-size: 1.75rem; /* 28 */
-  --t-title-lh: 1.4;
-  --t-heading-size: 1.25rem; /* 20 */
-  --t-heading-lh: 1.5;
-  --t-body-size: 1rem; /* 16 */
-  --t-body-lh: 1.75;
-  --t-small-size: 0.875rem; /* 14 */
-  --t-small-lh: 1.7;
-  --t-caption-size: 0.75rem; /* 12, chips, layer labels, times only */
-  --t-caption-lh: 1.6;
-  --t-mono-size: 0.8125rem; /* 13 */
+  --t-title-size: 1.25rem; /* 20, the start page's title only */
+  --t-title-lh: 1.3;
+  --t-heading-size: 0.875rem; /* 14, headings of sheets and windows */
+  --t-heading-lh: 1.3;
+  --t-body-size: 0.8125rem; /* 13, UI text */
+  --t-body-lh: 1.45;
+  --t-small-size: 0.75rem; /* 12, labels and values */
+  --t-small-lh: 1.45;
+  --t-caption-size: 0.6875rem; /* 11, chips and small labels */
+  --t-caption-lh: 1.4;
+  --t-mono-size: 0.75rem; /* 12 */
   --t-mono-lh: 1.5;
-  --t-mono-log-lh: 1.6;
+  --t-mono-log-lh: 1.54;
+
+  /* dense steps: 11 chips, 12 values, 13 UI text, 14 version */
+  --t-11: 0.6875rem;
+  --t-12: 0.75rem;
+  --t-13: 0.8125rem;
+  --t-14: 0.875rem;
 
   /* spacing: 4px steps only */
   --s-1: 0.25rem;
@@ -54,19 +65,19 @@
   --s-9: 6rem;
 
   /* component sizes */
-  --h-header: 3.5rem; /* 56 */
-  --h-band: 5rem; /* 80 */
-  --h-primary: 3.25rem; /* 52 */
-  --h-secondary: 2.75rem; /* 44 */
-  --h-chip: 1.5rem; /* 24 */
-  --w-node: 15rem; /* 240 */
-  --w-left: 18.75rem; /* 300 */
-  --w-right: 21.25rem; /* 340 */
+  --h-header: 2.75rem; /* 44, the one bar */
+  --h-band: 1.5rem; /* 24, the status row */
+  --h-primary: 1.75rem; /* 28 */
+  --h-secondary: 1.75rem; /* 28 */
+  --h-chip: 1.25rem; /* 20 */
+  --w-node: 16.25rem; /* 260, a normal card */
+  --w-left: 14.5rem; /* the parts window */
+  --w-right: 18rem; /* the sheet */
 
   /* radius */
   --r-0: 0;
   --r-s: 6px;
-  --r-m: 12px;
+  --r-m: 0.75rem;
   --r-l: 20px;
   --r-full: 9999px;
 
@@ -92,9 +103,13 @@
   --dur-reduced: 150ms;
 }
 
-@media (max-width: 1279px) {
+/* Phones and touch screens: every control is at least 44 × 44 px (viewport-matrix touch-target-44). */
+@media (max-width: 767px), (pointer: coarse) {
   :root {
-    --t-display-size: 6rem;
+    --h-header: max(56px, 3.5rem);
+    --h-band: max(45px, 2.75rem);
+    --h-secondary: max(44px, 2.75rem);
+    --h-primary: max(44px, 2.75rem);
   }
 }
 

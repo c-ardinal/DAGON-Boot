@@ -4,6 +4,9 @@
 //! its header carries the wiring to sub nodes (I2C0, a PIO UART, and the
 //! reset/boot lines of an STM32 sub node).
 //!
+//! Every board fact (pins, buses and their speeds, the boot LED) is read
+//! from `dagon-board.toml` when the package builds ([`def`]).
+//!
 //! | Use | Pins |
 //! |---|---|
 //! | Display SPI1 (CLK, MOSI), CS, DC, RST, backlight | GPIO10, 11, 9, 8, 13, 25 |
@@ -22,6 +25,19 @@
 //! (`Irqs`). Without `hal` only the screen layout builds (host tests).
 #![no_std]
 
+/// The board's facts from `dagon-board.toml`.
+#[macro_use]
+pub mod def {
+    include!(concat!(env!("OUT_DIR"), "/def.rs"));
+
+    /// Pins and blocks by their definition names, and `take!`.
+    #[cfg(feature = "hal")]
+    #[macro_use]
+    pub mod pins {
+        include!(concat!(env!("OUT_DIR"), "/pins.rs"));
+    }
+}
+
 #[cfg(feature = "display")]
 pub mod display;
 #[cfg(feature = "hal")]
@@ -34,12 +50,17 @@ pub mod screen;
 #[cfg(feature = "hal")]
 pub use hal::*;
 
-pub const BOARD_ID: &str = "waveshare-rp2040-touch-lcd-1.28";
-pub const FLASH_SIZE: usize = 4 * 1024 * 1024;
-/// The backlight doubles as the diagnostic LED.
-pub const DIAG_LED: u8 = 25;
+pub const BOARD_ID: &str = def::BOARD_ID;
+pub const FLASH_SIZE: usize = def::FLASH_BYTES as usize;
+/// The backlight doubles as the diagnostic LED (`[boot] led`).
+pub const DIAG_LED: u8 = match def::BOOT_LED_GPIO {
+    Some(g) => g,
+    None => panic!("dagon-board.toml: [boot] led"),
+};
+/// The level that lights it (`[boot] led_active`).
+pub const DIAG_LED_ACTIVE_HIGH: bool = def::BOOT_LED_ACTIVE_HIGH;
 
-pub const I2C_HZ: u32 = 400_000;
-pub const UART_BAUD: u32 = 115_200;
+pub const I2C_HZ: u32 = def::BUS_CHILD_I2C_HZ;
+pub const UART_BAUD: u32 = def::BUS_CHILD_UART_BAUD;
 /// Conservative for the panel wiring (the controller allows more).
-pub const LCD_SPI_HZ: u32 = 20_000_000;
+pub const LCD_SPI_HZ: u32 = def::BUS_LCD_HZ;

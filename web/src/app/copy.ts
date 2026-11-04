@@ -11,7 +11,7 @@ export const SKIP = {
 } as const;
 
 /**
- * Header step indicator in three steps (owner 11/3): ① つなぐ ② ファイル ③ 更新.
+ * Header step indicator in three steps: ① つなぐ ② ファイル ③ 更新.
  * The operate machine's six steps fold into them (STEP.of3); recovery shows its name only.
  */
 export const STEP = {
@@ -100,7 +100,7 @@ export const BAND = {
   M18b: { sentence: '何も書いていないので、別のファイルを選んでください。' },
   M19: { sentence: '何も書いていないので、別のファイルを選んでください。' },
   M20: { sentence: '何も書いていないので、この構成向けのファイルを選んでください。' },
-  M22: { sentence: '終わるまで電源と USB を抜かず、このページを開いたままにしてください（止まっても前のバージョンのまま動きます）。' },
+  M22: { sentence: '終わるまで電源と USB を抜かず、このページを開いたままにしてください。途中で止まっても、ノードは前のバージョンのまま動きます。' },
   M33: { sentence: '基板どうしの配線が抜けていないか確かめてから、もう一度直してください。' },
   M34: { sentence: 'USB ケーブルを挿し直してから、もう一度つないでください。' },
   M35: { chip: '× 作れない', sentence: 'そのフォルダに書き込めるか確かめてから、もう一度選んでください。' },
@@ -199,30 +199,303 @@ export const UNSUPPORTED = {
   button: 'この URL をコピー',
 } as const;
 
-/** Canvas: layers, empty receptacles, dot numbers. */
+/**
+ * The state-lock table: each state's
+ * short name for the status line and, per operation it stops, the reason
+ * shown when that operation is pressed (information style, never red).
+ */
+export const LOCK = {
+  controls: {
+    edit: '構成の編集',
+    gen: 'プロジェクトを作る',
+    build: 'ビルド',
+    flash: '書き込み',
+    release: 'リリース',
+    update: '更新',
+    recover: '復旧',
+    rollback: '前のバージョンに戻す',
+    connect: 'つなぐ・切断',
+    project: 'プロジェクトの切替',
+    ask: 'DAGON に聞く',
+    apply: 'DAGON の案を反映',
+    link: 'DAGON と連携',
+    file: '更新ファイルを置く',
+  },
+  idle: '待機',
+  stateLabel: '今の状態',
+  stateTitle: '今の状態。使えない操作は押すと理由を表示します',
+  states: {
+    demo: {
+      name: 'デモの再生中',
+      why: {
+        link: 'デモを再生しています',
+        edit: 'デモを再生しています。「■ 止める」を押すと操作できます',
+        gen: 'デモを再生しています',
+        build: 'デモを再生しています',
+        flash: 'デモを再生しています',
+        release: 'デモを再生しています',
+        update: 'デモを再生しています',
+        recover: 'デモを再生しています',
+        rollback: 'デモを再生しています',
+        connect: 'デモを再生しています',
+        project: 'デモを再生しています',
+        apply: 'デモを再生しています',
+        file: 'デモを再生しています',
+      },
+    },
+    updating: {
+      name: '更新中',
+      why: {
+        edit: '送った構成と食い違うので、更新中は構成を変えられません',
+        gen: '更新が終わるまで使えません',
+        build: '更新が終わるまで使えません',
+        flash: '更新で親機を使っているので、書き込めません',
+        release: '更新が終わるまで使えません',
+        update: '更新しています。終わるまでお待ちください',
+        recover: '更新が終わってから使えます',
+        rollback: '更新が終わってから使えます',
+        connect: '更新中に切断すると、書いている途中のノードは前のバージョンのまま残ります。終わるまでお待ちください',
+        project: '更新が終わるまで使えません',
+        apply: '更新中は構成を変えられません',
+        file: '更新が終わるまで使えません',
+      },
+    },
+    recovering: {
+      name: '復旧中',
+      why: {
+        edit: '復旧中は構成を変えられません',
+        flash: '復旧で親機を使っているので、書き込めません',
+        update: '復旧が終わってから使えます',
+        recover: '復旧しています',
+        rollback: '復旧が終わってから使えます',
+        connect: '復旧中に切断すると、復旧が止まります',
+        project: '復旧が終わるまで使えません',
+        apply: '復旧中は構成を変えられません',
+        file: '復旧が終わるまで使えません',
+      },
+    },
+    flashing: {
+      name: '書き込み中',
+      why: {
+        edit: '書いている構成と食い違うので、書き込み中は構成を変えられません',
+        gen: '書き込みが終わるまで使えません',
+        build: '書き込みが終わるまで使えません',
+        flash: '書き込んでいます',
+        release: '書き込みが終わるまで使えません',
+        update: '書き込みが終わってから使えます',
+        recover: '書き込みが終わってから使えます',
+        rollback: '書き込みが終わってから使えます',
+        connect: '書き込みで USB を使っているので、切断できません',
+        project: '書き込みが終わるまで使えません',
+        apply: '書き込みが終わるまで使えません',
+      },
+    },
+    building: {
+      name: 'ビルド中',
+      why: {
+        edit: 'ビルドで構成を使っているので、ビルド中は構成を変えられません',
+        gen: 'ビルドが終わってから使えます',
+        build: 'ビルドしています',
+        flash: 'ビルドが終わってから使えます',
+        release: 'ビルドが終わってから使えます',
+        update: 'ビルドが終わってから使えます',
+        project: 'ビルドが終わるまで使えません',
+        apply: 'ビルド中は構成を変えられません',
+      },
+    },
+    unsaved: {
+      name: '保存中',
+      why: {
+        gen: '構成を保存しています。0.5 秒ほどで終わります',
+        build: '構成を保存しています。0.5 秒ほどで終わります',
+        flash: '構成を保存しています',
+        release: '構成を保存しています',
+        update: '保存した構成で更新するので、保存が終わるまでお待ちください',
+        project: '保存が終わってから切り替えられます',
+      },
+    },
+    connecting: {
+      name: '接続の途中',
+      why: {
+        connect: '親機とつないでいる途中です',
+        update: '親機とつないでいる途中です',
+        recover: '親機とつないでいる途中です',
+        rollback: '親機とつないでいる途中です',
+        file: '親機とつないでいる途中です',
+      },
+    },
+    disconnected: {
+      name: '未接続',
+      why: {
+        update: '親機とつないでいません。「親機とつなぐ」を押してください',
+        recover: '親機とつないでいません',
+        rollback: '親機とつないでいません',
+      },
+    },
+    thinking: {
+      name: 'DAGON の返事待ち',
+      why: {
+        ask: 'DAGON の返事を待っています',
+        apply: 'DAGON の返事を待っています',
+      },
+    },
+    cliNone: {
+      name: 'CLI 未接続',
+      why: {
+        link: '鍵は CLI に置くので、先にターミナルで dagon serve を起動してください',
+        gen: 'CLI とつながっていません。ターミナルで dagon serve を起動してください',
+        build: 'CLI とつながっていません',
+        flash: 'CLI とつながっていません',
+        release: 'CLI とつながっていません',
+        ask: 'DAGON は CLI を通して話すので、CLI とつながっていないと使えません',
+      },
+    },
+  },
+} as const;
+
+/**
+ * DAGON, the page's agent. The character and
+ * every UI word say DAGON; the provider's name comes from serve and is shown
+ * only in the linking step.
+ */
+export const AGENT = {
+  name: 'DAGON',
+  menuLink: 'DAGON と連携する…',
+  menuTalk: 'DAGON と話す',
+  menuUnlink: 'DAGON との連携を外す…',
+  link: {
+    heading: 'DAGON と連携する',
+    intro: 'DAGON は連携したエージェントに構成について問い合わせて答えます。送ることへの同意は、この連携のときに一度だけいただきます。連携したあとの質問は確かめずに送ります。',
+    agent: '送り先',
+    agentNote: '手元の dagon serve を通して送ります',
+    way: 'つなぎ方',
+    /** What each kind of way needs on this machine (the provider is named only here, at linking). */
+    ready: '準備',
+    wayNote: {
+      command: 'このパソコンでログインしたエージェントのプログラムを使います。ログインの情報はこのページにも送る文にも入りません',
+      'messages-http': 'ターミナルで ANTHROPIC_API_KEY を設定し、dagon serve を起動し直してください。鍵はこのページにも送る文にも入りません',
+    } as Record<string, string>,
+    wayMissing: 'このつなぎ方はまだこのパソコンで使えません。連携は先に済ませておけます。',
+    sends: '送るもの',
+    neverSends: '送らないもの',
+    undo: '連携は、メニューの「DAGON との連携を外す…」でいつでも外せます。外すと同意も取り消します。',
+    agree: '同意して連携',
+    cancel: 'やめる',
+  },
+  linked: (provider: string, at: string) => `DAGON と連携した。送り先（${provider}）と送る中身への同意を記録した（${at}）`,
+  unlinked: 'DAGON との連携を外し、同意を取り消した。CLI の鍵は CLI 側で消す',
+  demoLink: 'デモでは DAGON と連携できません',
+  hello: '選んだノードやリンクについて聞けます。/ を押すと入力欄に移ります。',
+  thinking: '返事を待っています…',
+  placeholder: '質問を入力（/ キーでここに移ります）',
+  send: '送る',
+  questions: [
+    ['problem', 'これは何が問題？'],
+    ['next', '次は？'],
+    ['propose', '変更を提案'],
+    ['failure', '失敗の理由は？'],
+  ] as const,
+  showDiff: '差分を見る',
+  apply: '反映する',
+  applied: '反映した。「元に戻す」（Ctrl+Z）で戻せる',
+  allTalk: '会話をすべて見る（下の「会話」タブ）',
+  diffCaption: '変更の案（反映したあとも「元に戻す」で戻せます）',
+  talkNone: 'まだ会話はありません。DAGON の吹き出しか / キーで質問してください。',
+  you: 'あなた',
+  markOpen: 'ドラッグで移動。クリックで開く',
+  markClose: 'ドラッグで移動。クリックで畳む',
+  question: 'DAGON への質問',
+  errors: {
+    AGENT_NOT_LINKED: { text: 'DAGON はまだ連携していません。メニューの「DAGON と連携する…」から連携してください', failed: false },
+    AGENT_UNAVAILABLE: { text: '連携した方法がこのパソコンで使えません。連携の手順に書いた準備をしてから、dagon serve を起動し直してください', failed: false },
+    AGENT_BUSY: { text: 'DAGON はほかの質問に答えています。少し待ってから聞いてください', failed: false },
+    AGENT_TIMEOUT: { text: '× 返事が時間内に届きませんでした。もう一度聞いてください', failed: true },
+    AGENT_FAILED: { text: '× 返事を受け取れませんでした。もう一度聞いてください', failed: true },
+    DEMO: { text: 'デモでは DAGON と連携できません', failed: false },
+    OLD_CLI: { text: 'この CLI は DAGON に対応していません。新しい dagon で dagon serve を起動し直してください', failed: false },
+  },
+} as const;
+
+/** The bottom drawer and its tabs. */
+/** The drawer's timeline of an update. */
+export const TIMELINE = {
+  label: '更新のタイムライン',
+  time: '時間',
+  none: '更新を始めると、ノードごとの段階がここに時間の順で並びます。',
+} as const;
+
+/** The status row. */
+export const STATUS = {
+  label: '状態',
+  key: '鍵',
+  keyTitle: 'リリースを確かめる鍵の ID',
+  progress: '更新の進み具合',
+  saving: '保存中…',
+  saved: '保存済み',
+} as const;
+
+/** The bar's flow: the steps from 構成 to 更新, each its own place to work. */
+export const FLOW = {
+  label: '作業の手順（構成から更新まで）',
+  steps: { define: '構成', project: 'プロジェクト', build: 'ビルド', flash: '書き込み', update: '更新' },
+  problems: (n: number) => `問題 ${n}`,
+  unsupported: (n: number) => `◇ 未対応 ${n}`,
+  responding: (n: number, of: number) => `親機 応答 ${n}/${of}`,
+} as const;
+
+/** The canvas controls bottom-right. */
+export const ZOOM = {
+  label: '表示の操作',
+  out: '小さく',
+  fit: '全体',
+  in: '大きく',
+} as const;
+
+/** The parts window. */
+export const PARTS = {
+  heading: '部品',
+  hint: 'ドラッグで置く',
+  close: '部品を閉じる',
+  closeOrder: '更新の順を閉じる',
+  open: '＋ 部品',
+} as const;
+
+/** The floating sheet's spoken name. */
+export const SHEET = '選んだものの詳細';
+
+export const DRAWER = {
+  label: '下の引き出し',
+  problems: '問題',
+  log: '記録',
+  talk: '会話',
+  logNone: 'まだ記録はありません。',
+  close: 'パネルを閉じる',
+  jobs: '作業',
+  output: '出力',
+  timeline: 'タイムライン',
+  outputNone: 'まだ出力はありません。CLI の作業の記録がここに出ます。',
+} as const;
+
+/** Canvas: uplink cards, the empty canvas, dot numbers. */
 export const CANVAS = {
-  layerL0: 'L0 つなぐ先',
-  layerL1: 'L1 親機',
-  layerL2: 'L2 子機',
-  /** L0 of the 親機 this page is connected to now. */
+  /** Uplink card of the 親機 this page is connected to now. */
   pc: 'このパソコン（ブラウザ）',
-  /** L0 by each 親機's uplink host as the 構成 writes it (none written: dagon on a PC). */
+  /** Uplink card by each 親機's uplink host as the 構成 writes it (none written: dagon on a PC). */
   pcBy: { 'pc-cli': 'パソコン（dagon）', browser: 'ブラウザ（パソコン・スマホ）', embedded: '自作の機器' } as Record<string, string>,
-  /** S01 */
-  hubSlot: '親機を置く場所',
-  nodeSlot: '子機を置く場所',
   /** C02 */
   empty: '親機を USB でパソコンにつないでから、『つないで、自動で見つける』を押してください。',
+  /** After the uplink card of a 親機 this page is not connected to. */
+  notThisPc: '（このパソコンとはつながっていない）',
   /** S17: canvas description for screen readers. */
   describe: '矢印でノードを移り、Enter で選びます。ほかのキーは「困ったとき」の「キー操作」にあります。',
   /** M49 dot-number labels. */
   dotResponding: '応答',
   dotFound: '発見',
   /** M49 during an update, and after it stopped. */
-  dotProgress: '進捗',
+  dotProgress: '更新の進み具合',
   dotPercent: '%',
   dotStopped: '% 停止',
-  dotProgressName: (n: number, stopped: boolean) => `進捗 ${n}%${stopped ? '、停止' : ''}`,
+  dotProgressName: (n: number, stopped: boolean) => `更新の進み具合 ${n}%${stopped ? '、停止' : ''}`,
   dotRespondingName: (n: number, of: number) => `応答 ${n}/${of}、${of} つのノードのうち ${n} つが応答`,
   dotFoundName: (n: number) => `発見 ${n}`,
   /** S19 */
@@ -233,6 +506,9 @@ export const CANVAS = {
 export const NODE = {
   roleHub: '親機',
   roleNode: '子機',
+  /** A node under a 子機 (TOPO2), and the rows below that. */
+  roleGrandchild: '孫機',
+  roleDeeper: (d: number) => `孫機の下（${d} 段目）`,
   mcu: 'MCU',
   /** The hub's own connection line: its uplink kind and what drives it (案 beyond USB（パソコン）). */
   usb: 'USB（パソコン）',
@@ -298,8 +574,21 @@ export const NODE = {
 /** Link chip (S18) and its spoken name. */
 export const LINK = {
   /** CAN and Ethernet carry no wires the page draws: the kind alone. */
-  bundle: (kind: string, n: number, shared: number) => (n ? `${kind} · ${n} 本${shared ? `（うち共有 ${shared}）` : ''}` : kind),
+  /** The bus, the value it needs (address or speed: ), its wires. */
+  bundle: (kind: string, n: number, shared: number, value = '') => {
+    const head = value ? `${kind} ${value}` : kind;
+    return n ? `${head} · ${n} 本${shared ? `（うち共有 ${shared}）` : ''}` : head;
+  },
+  /** The lower port of a card. */
+  portOut: (name: string) => `${name} の下のポート（ここから子のノードへドラッグ）`,
   name: (label: string, from: string, to: string, addr: string) => `${label}、${from}から ${to}へのリンク${addr ? `、${addr}` : ''}`,
+} as const;
+
+/** Why a port drag is refused (a failure: red). */
+export const LINK_WHY = {
+  taken: 'このノードはもう親機とつながっています',
+  under: (name: string) => `このノードはもう ${name} の下です`,
+  loop: 'このノードの下にあるノードにはつなげません',
 } as const;
 
 /** Left column (S02, M43). */
@@ -447,7 +736,7 @@ export const ANNOUNCE = {
   A10topology: '構成 不一致',
   A10format: '更新ファイルではない',
   A11: (name: string) => `${name} 書き込み`,
-  A11percent: (n: number) => `進捗 ${n}%`,
+  A11percent: (n: number) => `更新の進み具合 ${n}%`,
   A12: '親機 再起動中、自動で再接続',
   A13: (name: string) => `更新 停止、${name}`,
   A13previous: (name: string) => `${name} 前のバージョン`,
@@ -564,6 +853,11 @@ export const DEFINE = {
   chooseBy: '選び方',
   listHelp: '選んで Enter で置けます。',
   place: '置く',
+  /** The parts window. */
+  search: '製品・マイコンを探す',
+  byMcuOwn: 'マイコン（自作ボード）',
+  ownBoard: (mcu: string) => `${mcu}（自作ボード）`,
+  count: (n: number) => `${n} 個`,
   placed: '配置済み',
   firstHeading: 'はじめての方へ',
   connectDiscover: 'つないで、自動で見つける',
@@ -580,6 +874,9 @@ export const DEFINE = {
   dotNodes: 'ノード',
   dotLinks: 'リンク',
   dotNodesName: (n: number, l: number) => `ノード ${n}、リンク ${l}`,
+  dotProblems: '問題',
+  dotNotYet: '◇ 未対応',
+  dotProblemsName: (p: number, n: number, l: number) => `問題 ${p}、ノード ${n}、リンク ${l}`,
   /** S25: nothing selected and nothing to fix. */
   nothingSelected: 'ノードかリンクを選ぶと、ここで直せます。',
   /** SC-D3 (S23, S15). */
@@ -621,7 +918,7 @@ export const INSPECT = {
   role: '役割',
   roles: { coordinator: '親機', node: '子機' } as Record<string, string>,
   product: '製品名 · MCU',
-  connectTo: 'つなぐ先',
+  connectTo: 'つながる親',
   none: 'なし',
   reset: 'リセット',
   boot: '起動',
@@ -657,8 +954,8 @@ export const INSPECT = {
     'wifi-tcp': 'Wi-Fi（TCP）',
   } as Record<string, string>,
   /** The 親機's hop towards the PC (案). */
-  uplink: '上流へのつながり',
-  uplinkHost: 'つなぐ先',
+  uplink: '接続元',
+  uplinkHost: '接続元の機器',
   hosts: { 'pc-cli': 'パソコンの dagon', browser: 'ブラウザ（パソコン・スマートフォン）', embedded: '自作の機器' } as Record<string, string>,
   /** On a kind the firmware does not implement yet (案). */
   notYet: 'まだ使えない',
@@ -768,7 +1065,7 @@ export const FLASH = {
   write: '書き込む',
   /** How each MCU is connected comes from its definition ([connection], dagon-wasm's mcu_connection). */
   via: 'つなぎ方',
-  hubFirst: '親機から書き込んでください（親機が無いと子機を確かめられません）。',
+  hubFirst: '親機がないと子機を確かめられないので、親機から順に書き込みます。',
   /** 案: the confirmation before serve writes the board (its job question). */
   confirm: (name: string) => `${name} に書き込みます。よろしいですか。`,
   /** 案: a family serve's flash does not write yet (ESP32-S3). */
@@ -803,7 +1100,7 @@ export const SAVE = {
   /** 422 in dagon demo: an uplink the demo cannot simulate (案). */
   demoLink: {
     chip: '× デモでは使えないつながり',
-    sentence: 'デモで試せる親機のつながりは USB・UART・Wi-Fi（つなぐ先はパソコンかブラウザ）です。そのどれかを選んでください。',
+    sentence: 'デモで試せる親機の接続元は、パソコンかブラウザから USB・UART・Wi-Fi でつないだものです。そのどれかを選んでください。',
   },
   /** 409: a job holds the project. */
   busy: { chip: '× 作業中', sentence: '作業が終わってから、もう一度保存してください。' },
@@ -824,6 +1121,8 @@ export const START = {
   heading: '始め',
   new: '新しく作る',
   sample: '見本から新しく作る',
+  /** Under the product's name on the start page. */
+  sub: '構成を描くと、ビルドできるプロジェクトと、書き込み・更新の手順ができます。',
   open: '開く',
   recent: '最近のプロジェクト',
   recentNone: 'なし',

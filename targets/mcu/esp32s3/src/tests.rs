@@ -6,13 +6,18 @@ use crate::layout::{
 };
 use crate::otadata::{raw, seq_crc, trial_entry, Counted, ENTRY_LEN};
 use crate::store::{header_addr, EspStore, Otadata, HEADER_SECTOR};
-use dagon_agent::{SlotStore, StoreError};
+use dagon_agent::{SlotStore, StoreError, Transition};
 use dagon_format::header::{self, image_kind, mcu_id, placement, port_kind, slot_binding};
 use dagon_format::header::{ImageHeader, HEADER_SIZE};
 use dagon_format::statelog::reason;
 use dagon_format::Version;
 use dagon_port::{Flash, FlashError, FlashRegion, Watchdog};
 use dagon_proto::payload::{target::APP, SlotState};
+
+/// What the agent's image machine hands the store's mutators.
+fn t() -> Transition {
+    Transition::for_store_tests()
+}
 
 /// NOR flash: erase sets 0xFF, a write needs aligned, erased bytes.
 pub(crate) struct FakeFlash(pub(crate) Vec<u8>);
@@ -106,6 +111,15 @@ impl Otadata for FakeOta {
         self.entries[sector] = e;
         Ok(())
     }
+    fn withdraw(&mut self, slot: u8) -> Result<(), StoreError> {
+        let hit = crate::otadata::selecting(&self.entries, slot);
+        for (e, erase) in self.entries.iter_mut().zip(hit) {
+            if erase {
+                *e = [0xFF; ENTRY_LEN];
+            }
+        }
+        Ok(())
+    }
     fn confirm(&mut self) -> Result<(), StoreError> {
         let i = (0..2)
             .filter_map(|i| Counted::of(&self.entries[i]).map(|c| (i, c)))
@@ -172,11 +186,11 @@ fn body(len: u32, seed: u8) -> Vec<u8> {
 fn receive(s: &mut Store, slot: u8, minor: u8) -> [u8; HEADER_SIZE] {
     let len = 5003;
     let b = body(len, minor);
-    s.erase(APP, slot, len).unwrap();
+    s.erase(APP, slot, len, &t()).unwrap();
     let mut off = 0usize;
     for n in [1usize, 3, 5, 1024, 7, 1024, 2, 1024].iter().cycle() {
         let end = (off + n).min(b.len());
-        s.write(APP, slot, off as u32, &b[off..end]).unwrap();
+        s.write(APP, slot, off as u32, &b[off..end], &t()).unwrap();
         off = end;
         if off == b.len() {
             break;
@@ -188,7 +202,7 @@ fn receive(s: &mut Store, slot: u8, minor: u8) -> [u8; HEADER_SIZE] {
     }
     assert_eq!(back, b);
     let h = header(minor, len);
-    s.write_header(slot, &h).unwrap();
+    s.write_header(slot, &h, &t()).unwrap();
     h
 }
 
@@ -199,7 +213,7 @@ fn digest(h: &[u8; HEADER_SIZE]) -> [u8; 16] {
 #[test]
 fn receive_pads_the_last_unit_and_erases_the_header_sector_first() {
     let mut s = store();
-    s.write_header(SLOT_B, &header(0, 1)).unwrap();
+    s.write_header(SLOT_B, &header(0, 1), &t()).unwrap();
     let h = receive(&mut s, SLOT_B, 1);
     let tail = (OTA_1.offset + 5003) as usize;
     assert_eq!(s.flash.0[tail], 0xFF, "pad byte");
@@ -214,7 +228,7 @@ fn receive_pads_the_last_unit_and_erases_the_header_sector_first() {
         .all(|&b| b == 0xFF));
     assert!(s.wdt.0 > 0, "fed while erasing and writing");
 
-    s.erase(APP, SLOT_B, 10).unwrap();
+    s.erase(APP, SLOT_B, 10, &t()).unwrap();
     s.read_header(SLOT_B, &mut back).unwrap();
     assert_eq!(back, [0xFF; HEADER_SIZE], "no image after erase");
     assert_eq!(s.status().slots[1].state, SlotState::Empty);
@@ -227,13 +241,22 @@ fn refuses_running_slot_gaps_and_other_targets() {
     assert_eq!(s.capacity(APP, SLOT_FACTORY), 0);
     assert_eq!(s.capacity(3, 0), 0);
     s.ota.running = SLOT_A;
-    assert_eq!(s.erase(APP, SLOT_A, 16), Err(StoreError::Unsupported));
-    assert_eq!(s.erase(APP, SLOT_B, OTA_1.size + 1), Err(StoreError::Range));
-    assert_eq!(s.write(APP, SLOT_B, 0, &[1]), Err(StoreError::Range));
-    s.erase(APP, SLOT_B, 16).unwrap();
-    assert_eq!(s.write(APP, SLOT_B, 4, &[1; 4]), Err(StoreError::Range));
-    assert_eq!(s.write(APP, SLOT_B, 0, &[1; 17]), Err(StoreError::Range));
-    assert_eq!(s.erase(3, 0, 16), Err(StoreError::Unsupported));
+    assert_eq!(s.erase(APP, SLOT_A, 16, &t()), Err(StoreError::Unsupported));
+    assert_eq!(
+        s.erase(APP, SLOT_B, OTA_1.size + 1, &t()),
+        Err(StoreError::Range)
+    );
+    assert_eq!(s.write(APP, SLOT_B, 0, &[1], &t()), Err(StoreError::Range));
+    s.erase(APP, SLOT_B, 16, &t()).unwrap();
+    assert_eq!(
+        s.write(APP, SLOT_B, 4, &[1; 4], &t()),
+        Err(StoreError::Range)
+    );
+    assert_eq!(
+        s.write(APP, SLOT_B, 0, &[1; 17], &t()),
+        Err(StoreError::Range)
+    );
+    assert_eq!(s.erase(3, 0, 16, &t()), Err(StoreError::Unsupported));
 }
 
 #[test]
@@ -245,13 +268,13 @@ fn trial_confirm_and_rollback_map_to_status() {
 
     let ha = receive(&mut s, SLOT_A, 0);
     assert_eq!(s.status().slots[0].state, SlotState::Written);
-    s.set_pending(SLOT_A, &ha).unwrap();
+    s.set_pending(SLOT_A, &ha, &t()).unwrap();
     assert_eq!(s.status().slots[0].state, SlotState::Pending);
     s.ota.boot();
     let st = s.status();
     assert_eq!(st.slots[0].state, SlotState::Trying);
     assert_eq!((st.active, st.confirmed, st.attempts), (0, SLOT_FACTORY, 1));
-    s.confirm(SLOT_A, &ha).unwrap();
+    s.confirm(SLOT_A, &ha, &t()).unwrap();
     s.ota.boot();
     let st = s.status();
     assert_eq!(st.slots[0].state, SlotState::Confirmed);
@@ -259,12 +282,12 @@ fn trial_confirm_and_rollback_map_to_status() {
 
     // Update to B, confirm: A stays Written as the previous version.
     let hb = receive(&mut s, SLOT_B, 1);
-    s.set_pending(SLOT_B, &hb).unwrap();
+    s.set_pending(SLOT_B, &hb, &t()).unwrap();
     s.ota.boot();
     let st = s.status();
     assert_eq!((st.active, st.confirmed), (1, 0), "falls back to A");
     assert_eq!(st.slots[1].state, SlotState::Trying);
-    s.confirm(SLOT_B, &hb).unwrap();
+    s.confirm(SLOT_B, &hb, &t()).unwrap();
     s.ota.boot();
     let st = s.status();
     assert_eq!((st.active, st.confirmed), (1, 1));
@@ -276,7 +299,7 @@ fn trial_confirm_and_rollback_map_to_status() {
 
     // An image that never confirms: one trial, then back to B.
     let hn = receive(&mut s, SLOT_A, 2);
-    s.set_pending(SLOT_A, &hn).unwrap();
+    s.set_pending(SLOT_A, &hn, &t()).unwrap();
     s.ota.boot();
     assert_eq!(s.status().slots[0].state, SlotState::Trying);
     s.ota.boot();
@@ -297,21 +320,21 @@ fn set_pending_back_to_the_previously_confirmed_slot() {
     let mut s = store();
     for (slot, minor) in [(SLOT_A, 0), (SLOT_B, 1)] {
         let h = receive(&mut s, slot, minor);
-        s.set_pending(slot, &h).unwrap();
+        s.set_pending(slot, &h, &t()).unwrap();
         s.ota.boot();
-        s.confirm(slot, &h).unwrap();
+        s.confirm(slot, &h, &t()).unwrap();
     }
     assert_eq!(s.status().active, SLOT_B);
     // Back to the 1.0.0 still in A: no transfer, only the trial entry.
     let mut ha = [0u8; HEADER_SIZE];
     s.read_header(SLOT_A, &mut ha).unwrap();
-    s.set_pending(SLOT_A, &ha).unwrap();
+    s.set_pending(SLOT_A, &ha, &t()).unwrap();
     assert_eq!(s.status().slots[0].state, SlotState::Pending);
     s.ota.boot();
     let st = s.status();
     assert_eq!((st.active, st.confirmed), (0, 1), "B is the fallback");
     assert_eq!(st.slots[0].state, SlotState::Trying);
-    s.confirm(SLOT_A, &ha).unwrap();
+    s.confirm(SLOT_A, &ha, &t()).unwrap();
     s.ota.boot();
     let st = s.status();
     assert_eq!((st.active, st.confirmed), (0, 0));
@@ -337,20 +360,20 @@ fn set_pending_is_refused_while_on_trial() {
     let mut s = store();
     let mut out = [0u8; REFUSAL_LEN];
     let ha = receive(&mut s, SLOT_A, 0);
-    s.set_pending(SLOT_A, &ha).unwrap();
+    s.set_pending(SLOT_A, &ha, &t()).unwrap();
     s.ota.boot();
-    s.confirm(SLOT_A, &ha).unwrap();
+    s.confirm(SLOT_A, &ha, &t()).unwrap();
     // Confirmed: SET_PENDING goes through to the agent.
     assert_eq!(
-        refuse_set_pending_on_trial(&mut s, &set_pending_frame(1), &mut out),
+        refuse_set_pending_on_trial(&s.status(), &set_pending_frame(1), &mut out),
         None
     );
     let hb = receive(&mut s, SLOT_B, 1);
-    s.set_pending(SLOT_B, &hb).unwrap();
+    s.set_pending(SLOT_B, &hb, &t()).unwrap();
     s.ota.boot();
     let before = s.ota.entries;
     // On trial in B: refused with E_STATE, otadata untouched.
-    let n = refuse_set_pending_on_trial(&mut s, &set_pending_frame(0), &mut out).unwrap();
+    let n = refuse_set_pending_on_trial(&s.status(), &set_pending_frame(0), &mut out).unwrap();
     let (f, _) = Frame::decode(&out[..n], 1024).unwrap();
     assert_eq!((f.seq, f.cmd), (7, dagon_proto::Cmd::SetPending as u8));
     assert_eq!(split_status(f.payload).unwrap().0, Status::State);
@@ -360,14 +383,50 @@ fn set_pending_is_refused_while_on_trial() {
     let mut hello = set_pending_frame(0);
     dagon_proto::finish(&mut hello, 0, 7, dagon_proto::Cmd::Hello as u8, 2).unwrap();
     assert!(Frame::decode(&hello, 1024).is_ok());
-    assert_eq!(refuse_set_pending_on_trial(&mut s, &hello, &mut out), None);
+    assert_eq!(
+        refuse_set_pending_on_trial(&s.status(), &hello, &mut out),
+        None
+    );
+}
+
+/// A re-transfer into a pending slot, or into a rolled-back one, takes
+/// the slot out of the selection: STATUS shows it written, and the next
+/// reset starts what ran before, not the new image.
+#[test]
+fn erase_takes_the_slot_out_of_the_selection() {
+    let mut s = store();
+    let ha = receive(&mut s, SLOT_A, 0);
+    s.set_pending(SLOT_A, &ha, &t()).unwrap();
+    s.ota.boot();
+    s.confirm(SLOT_A, &ha, &t()).unwrap();
+    let hb = receive(&mut s, SLOT_B, 1);
+    s.set_pending(SLOT_B, &hb, &t()).unwrap();
+    assert_eq!(s.status().slots[1].state, SlotState::Pending);
+
+    receive(&mut s, SLOT_B, 2);
+    let st = s.status();
+    assert_eq!(st.slots[1].state, SlotState::Written);
+    assert_eq!(st.slots[1].version, Version::new(1, 2, 0));
+    s.ota.boot();
+    assert_eq!(s.status().active, SLOT_A, "no trial without SET_PENDING");
+
+    // Rolled back, then received again.
+    let hb = receive(&mut s, SLOT_B, 3);
+    s.set_pending(SLOT_B, &hb, &t()).unwrap();
+    s.ota.boot();
+    s.ota.boot();
+    assert_eq!(s.status().slots[1].state, SlotState::Reverted);
+    receive(&mut s, SLOT_B, 4);
+    let st = s.status();
+    assert_eq!((st.slots[1].state, st.active), (SlotState::Written, SLOT_A));
+    assert_eq!(st.slots[0].state, SlotState::Confirmed);
 }
 
 #[test]
 fn trial_from_blank_otadata_rolls_back_to_factory() {
     let mut s = store();
     let hb = receive(&mut s, SLOT_B, 3);
-    s.set_pending(SLOT_B, &hb).unwrap();
+    s.set_pending(SLOT_B, &hb, &t()).unwrap();
     s.ota.boot();
     assert_eq!(s.status().confirmed, SLOT_FACTORY);
     s.ota.boot();
@@ -381,4 +440,127 @@ fn trial_from_blank_otadata_rolls_back_to_factory() {
         .entries
         .iter()
         .any(|e| e[..4] == 2u32.to_le_bytes() && e[28..] == seq_crc(2).to_le_bytes()));
+}
+
+/// The definition's `trial_attempts` is what the vendor 2nd stage does: with
+/// app rollback on, an image left on trial is aborted at its next boot.
+#[test]
+fn trial_attempts_match_the_vendor_second_stage() {
+    let cfg = include_str!("../vendor/sdkconfig.defaults");
+    let rollback = cfg
+        .lines()
+        .any(|l| l.trim() == "CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE=y");
+    assert!(
+        rollback,
+        "the vendored 2nd stage is built with app rollback"
+    );
+    assert_eq!(crate::TRIAL_ATTEMPTS, 1);
+    // The fake 2nd stage of these tests aborts after the same one boot.
+    let mut s = store();
+    let h = receive(&mut s, SLOT_B, 1);
+    s.set_pending(SLOT_B, &h, &t()).unwrap();
+    for _ in 0..crate::TRIAL_ATTEMPTS {
+        s.ota.boot();
+        assert_eq!(s.status().active, SLOT_B);
+    }
+    s.ota.boot();
+    assert_eq!(s.status().slots[1].state, SlotState::Reverted);
+}
+
+/// README.md's link matrix is the one `LINK_KINDS` generates.
+#[test]
+fn the_readme_link_matrix_is_generated_from_link_kinds() {
+    let mut want = String::new();
+    dagon_mcu_common::link::write_matrix(crate::links::LINK_KINDS, &mut want).unwrap();
+    let readme = std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/README.md"))
+        .unwrap()
+        .replace("\r\n", "\n");
+    let at = readme
+        .find("| Kind | Up | Down |")
+        .expect("README.md has the matrix");
+    let end = readme[at..]
+        .find("\n\n")
+        .map_or(readme.len(), |e| at + e + 1);
+    assert_eq!(
+        &readme[at..end],
+        want,
+        "README.md: replace the matrix with this"
+    );
+}
+
+/// The conformance scratch is the definition's: inside the dagon partition,
+/// past every detached header sector, in no OTA slot.
+#[test]
+fn the_conformance_scratch_holds_no_header_or_image() {
+    let (at, size) = crate::CONFORM_SCRATCH.unwrap();
+    assert_eq!(region_for(at, size), Some(&REGIONS[2]));
+    for s in [SLOT_A, SLOT_B, SLOT_FACTORY] {
+        assert!(header_addr(s).unwrap() + HEADER_SECTOR <= at);
+    }
+    assert!(at.is_multiple_of(crate::layout::ERASE_UNIT));
+}
+
+/// An erase cut by a power loss at any step (after each otadata sector it
+/// withdraws, after the header sector, during the body) never leaves the
+/// 2nd stage selecting the slot without the image it was selected with:
+/// what boots is either the slot's old, intact image or another slot. The
+/// steps are `EspStore::erase`'s order: withdraw, header sector, body.
+#[test]
+fn a_cut_erase_never_boots_a_partial_image() {
+    let entry = |seq: u32, state: u32| {
+        let mut e = [0xFFu8; ENTRY_LEN];
+        e[0..4].copy_from_slice(&seq.to_le_bytes());
+        e[24..28].copy_from_slice(&state.to_le_bytes());
+        e[28..32].copy_from_slice(&seq_crc(seq).to_le_bytes());
+        e
+    };
+    // B pending over a confirmed A; and B selected by both sectors while
+    // factory runs (an aborted entry and a newer trial entry).
+    let cases: [(u8, [[u8; ENTRY_LEN]; 2]); 2] = [
+        (SLOT_A, [entry(1, raw::VALID), entry(2, raw::NEW)]),
+        (SLOT_FACTORY, [entry(2, raw::ABORTED), entry(4, raw::NEW)]),
+    ];
+    for (running, entries) in cases {
+        let setup = || {
+            let mut s = store();
+            let hb = receive(&mut s, SLOT_B, 1);
+            s.ota.entries = entries;
+            s.ota.running = running;
+            (s, hb)
+        };
+        let withdrawn = crate::otadata::selecting(&entries, SLOT_B);
+        let sectors: Vec<usize> = (0..2).filter(|&i| withdrawn[i]).collect();
+        let steps = sectors.len() + 2;
+        for cut in 0..=steps {
+            let (mut s, hb) = setup();
+            for step in 0..cut {
+                if step < sectors.len() {
+                    s.ota.entries[sectors[step]] = [0xFF; ENTRY_LEN];
+                } else if step == sectors.len() {
+                    s.flash
+                        .erase(header_addr(SLOT_B).unwrap(), HEADER_SECTOR)
+                        .unwrap();
+                } else {
+                    s.flash
+                        .erase(OTA_1.offset, crate::layout::ERASE_UNIT)
+                        .unwrap();
+                }
+            }
+            s.ota.boot();
+            if s.ota.running == SLOT_B {
+                let mut h = [0u8; HEADER_SIZE];
+                s.read_header(SLOT_B, &mut h).unwrap();
+                assert_eq!(
+                    h, hb,
+                    "running {running}, cut {cut}: B boots without its image"
+                );
+                let mut first = [0u8; 4];
+                s.read(APP, SLOT_B, 0, &mut first).unwrap();
+                assert_ne!(
+                    first, [0xFF; 4],
+                    "running {running}, cut {cut}: B's body is gone"
+                );
+            }
+        }
+    }
 }

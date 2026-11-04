@@ -1,0 +1,210 @@
+# DAGON components and compatibility contracts: the single list of both.
+# The rules that use it are in docs/versioning.md.
+#
+# [formats]
+#   <contract> = <number>: every compatibility contract (a file format, a
+#   protocol, an API) and the format number it is at in this tree. The
+#   comment beside each says where the number is written and which code
+#   constant holds it.
+#
+# [[component]] (one entry per long-lived component)
+#   name      The component's name; also its commit scope (feat(<name>):)
+#             and its tag prefix (<name>-v<version>).
+#   version   Its SemVer version. A new component starts at 0.1.0.
+#   paths     The files it owns. A file belongs to the component with the
+#             longest matching path; a file outside every component needs
+#             no release.
+#   packages  The Cargo packages whose own Cargo.toml carries this version
+#             (all of them the same). The "cli" entry also stands for the
+#             page it serves: web/package.json carries the same version.
+#   formats   <contract> = [numbers]: the format numbers it reads and
+#             writes, for each contract it uses.
+#
+# Adding a component or a contract means editing this file (and, for a
+# contract, the CLI's list of format numbers in
+# crates/dagon-cli/src/versions.rs). The CLI's tests check this file
+# against the code constants, the package manifests and web/package.json,
+# and that every Cargo package outside these entries stays 0.0.0.
+# dagon --version, status, doctor and GET /v1/hello read it;
+# scripts/bump_check.py and scripts/changelog.py read it for releases.
+
+[formats]
+wire = 1            # frames and payloads between host, hub and nodes: byte 2 of every frame, HELLO proto_ver (dagon-proto PROTO_VERSION)
+image-header = 1    # signed 512-byte image header: offset 0x004 (dagon-format header::HDR_VERSION)
+state-log = 1       # boot core and app state log faces: offset 0x004 (dagon-format statelog::FORMAT_VERSION)
+manifest = 1        # release manifest: offset 4 (dagon-format manifest::MF_VERSION)
+bundle = 1          # release file .dgb: offset 4 (dagon-format bundle::BN_VERSION)
+topology-bin = 1    # compiled topology: offset 4 (dagon-format topology::TP_VERSION)
+topology-yaml = 1   # topology source: its `dagon:` key (dagon-topology SCHEMA_VERSION)
+definitions = 1     # dagon-mcu.toml / dagon-board.toml / [board.<id>]: `format` key, left out = 1 (dagon-topology defs::FORMAT)
+serve-api = 1       # dagon serve HTTP API: GET /v1/hello `api` (dagon-cli versions::SERVE_API)
+event = 1           # lifecycle event kinds, codes, payloads and EventRecord (dagon-events EVENT_FORMAT)
+extension-manifest = 1  # dagon-extension.toml: its `format` key (dagon-extension MANIFEST_FORMAT)
+boot-program = 1    # boot action program ops in a board's [boot]: the generated BOOT_PROGRAM_FORMAT (dagon-topology defs::board_boot::BOOT_PROGRAM_FORMAT)
+
+[[component]]
+name = "cli"
+version = "0.1.0"
+packages = ["dagon-cli"]
+paths = ["crates/dagon-cli", "crates/dagon-wasm", "web"]
+formats = { wire = [1], image-header = [1], state-log = [1], manifest = [1], bundle = [1], topology-bin = [1], topology-yaml = [1], definitions = [1], serve-api = [1], event = [1], extension-manifest = [1], boot-program = [1] }
+
+[[component]]
+name = "boot-rp2040"
+version = "0.1.0"
+packages = ["dagon-rp2040-stage0", "dagon-rp2040-bootcore"]
+paths = ["targets/mcu/rp2040/stage0", "targets/mcu/rp2040/bootcore"]
+formats = { image-header = [1], state-log = [1] }
+
+[[component]]
+name = "boot-stm32f401re"
+version = "0.1.0"
+packages = ["dagon-stm32f401re-bootcore"]
+paths = ["targets/mcu/stm32f401re/bootcore"]
+formats = { image-header = [1], state-log = [1] }
+
+[[component]]
+name = "mcu-rp2040"
+version = "0.1.0"
+packages = ["dagon-mcu-rp2040"]
+paths = ["targets/mcu/rp2040"]
+formats = { wire = [1], image-header = [1], state-log = [1], topology-bin = [1], definitions = [1] }
+
+[[component]]
+name = "mcu-stm32f401re"
+version = "0.1.0"
+packages = ["dagon-mcu-stm32f401re"]
+paths = ["targets/mcu/stm32f401re"]
+formats = { wire = [1], image-header = [1], state-log = [1], definitions = [1] }
+
+# The ESP32-S3 boots through the vendor 2nd stage (port vendor-stage2),
+# built from targets/esp32s3-2ndstage with the package's vendored options.
+[[component]]
+name = "mcu-esp32s3"
+version = "0.1.0"
+packages = ["dagon-mcu-esp32s3"]
+paths = ["targets/mcu/esp32s3", "targets/esp32s3-2ndstage"]
+formats = { wire = [1], image-header = [1], state-log = [1], definitions = [1] }
+
+[[component]]
+name = "mcu-common"
+version = "0.1.0"
+packages = ["dagon-mcu-common"]
+paths = ["targets/mcu/common"]
+formats = { wire = [1] }
+
+[[component]]
+name = "mcu-build"
+version = "0.1.0"
+packages = ["dagon-mcu-build"]
+paths = ["targets/mcu/build"]
+
+[[component]]
+name = "board-waveshare-rp2040-touch-lcd-1.28"
+version = "0.1.0"
+packages = ["dagon-board-waveshare-rp2040-touch-lcd-1-28"]
+paths = ["targets/boards/waveshare-rp2040-touch-lcd-1.28"]
+formats = { definitions = [1] }
+
+[[component]]
+name = "board-nucleo-f401re"
+version = "0.1.0"
+packages = ["dagon-board-nucleo-f401re"]
+paths = ["targets/boards/nucleo-f401re"]
+formats = { definitions = [1] }
+
+[[component]]
+name = "board-m5stopwatch"
+version = "0.1.0"
+packages = ["dagon-board-m5stopwatch"]
+paths = ["targets/boards/m5stopwatch"]
+formats = { definitions = [1] }
+
+[[component]]
+name = "format"
+version = "0.1.0"
+packages = ["dagon-format"]
+paths = ["crates/dagon-format"]
+formats = { image-header = [1], state-log = [1], manifest = [1], bundle = [1], topology-bin = [1] }
+
+[[component]]
+name = "proto"
+version = "0.1.0"
+packages = ["dagon-proto"]
+paths = ["crates/dagon-proto"]
+formats = { wire = [1] }
+
+[[component]]
+name = "core"
+version = "0.1.0"
+packages = ["dagon-core"]
+paths = ["crates/dagon-core"]
+formats = { image-header = [1], state-log = [1] }
+
+[[component]]
+name = "events"
+version = "0.1.0"
+packages = ["dagon-events"]
+paths = ["crates/dagon-events"]
+formats = { event = [1] }
+
+[[component]]
+name = "port"
+version = "0.1.0"
+packages = ["dagon-port"]
+paths = ["crates/dagon-port"]
+
+[[component]]
+name = "agent"
+version = "0.1.0"
+packages = ["dagon-agent"]
+paths = ["crates/dagon-agent"]
+formats = { wire = [1], image-header = [1] }
+
+[[component]]
+name = "host"
+version = "0.1.0"
+packages = ["dagon-host"]
+paths = ["crates/dagon-host"]
+formats = { wire = [1], image-header = [1], state-log = [1], bundle = [1], topology-bin = [1] }
+
+[[component]]
+name = "extension"
+version = "0.1.0"
+packages = ["dagon-extension"]
+paths = ["crates/dagon-extension"]
+formats = { extension-manifest = [1], definitions = [1], boot-program = [1] }
+
+[[component]]
+name = "topology"
+version = "0.1.0"
+packages = ["dagon-topology"]
+paths = ["crates/dagon-topology"]
+formats = { topology-bin = [1], topology-yaml = [1], definitions = [1], boot-program = [1] }
+
+[[component]]
+name = "sign"
+version = "0.1.0"
+packages = ["dagon-sign"]
+paths = ["crates/dagon-sign"]
+formats = { image-header = [1], state-log = [1], manifest = [1], bundle = [1], topology-bin = [1] }
+
+[[component]]
+name = "sim"
+version = "0.1.0"
+packages = ["dagon-sim"]
+paths = ["crates/dagon-sim"]
+formats = { wire = [1], image-header = [1], state-log = [1] }
+
+[[component]]
+name = "conform"
+version = "0.1.0"
+packages = ["dagon-conform"]
+paths = ["crates/dagon-conform"]
+formats = { wire = [1], image-header = [1], state-log = [1] }
+
+[[component]]
+name = "romlink"
+version = "0.1.0"
+packages = ["dagon-romlink"]
+paths = ["crates/dagon-romlink"]

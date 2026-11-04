@@ -60,10 +60,12 @@ window_eligible = true
 /// The fake MCU with an armv7m-mpu record, its blocks, a watchdog and a
 /// boot record (every numeric isolation field appears).
 pub(super) fn isolated_mcu() -> String {
-    let top = FAKE_MCU.replace(
-        "gpio_count = 16\n",
-        "gpio_count = 16\nram = { at = 0x2000_0000, size = 0x1_0000 }\n",
-    );
+    let top = FAKE_MCU
+        .replace(
+            "gpio_count = 16\n",
+            "gpio_count = 16\nram = { at = 0x2000_0000, size = 0x1_0000 }\n",
+        )
+        .replace("bytes = 0x10_0000\n", "bytes = 0x10_0000\nxip = true\n");
     format!(
         r#"{top}
 [watchdog]
@@ -397,17 +399,23 @@ fn kind_names_round_trip_through_the_definition_format() {
 
 #[test]
 fn flash_offsets_of_an_mmu_mapped_mcu_share_no_space_with_register_blocks() {
-    // The same blocks at addresses that are flash offsets of the fake
-    // MCU's flash map: refused where images run from flash in place,
-    // accepted where flash is MMU-mapped (its addresses are offsets).
+    // The same block at an address inside the fake MCU's flash map:
+    // refused when the definition says the CPU reads flash there (xip),
+    // accepted when its flash addresses are offsets (no xip), whatever
+    // the port kind.
     let low = isolated("base = 0x4000_4800", "base = 0x0010_0000");
     assert!(mcu_err(&low).contains("overlaps a flash map"));
-    let mapped = low
-        .replace("port = \"self-boot\"", "port = \"vendor-stage2\"")
-        .replace("[boot.record]", "[unused]")
-        .replace("boot_extensions = true", "boot_extensions = false");
-    let mapped = mapped[..mapped.find("[unused]").unwrap()].to_string()
-        + &mapped[mapped.find("[[core]]").unwrap()..];
-    let m = parse_mcu_text(&mapped, &[]).unwrap();
+    let offsets = low.replace("xip = true\n", "");
+    let m = parse_mcu_text(&offsets, &[]).unwrap();
     assert!(!m.flash_is_cpu_mapped());
+    // The shipped MCUs: the two that run from flash in place, and not the
+    // MMU-mapped one.
+    let mapped: Vec<(&str, bool)> = Registry::builtin()
+        .mcus()
+        .iter()
+        .map(|m| (m.id.as_str(), m.flash_is_cpu_mapped()))
+        .collect();
+    for want in [("rp2040", true), ("stm32f401re", true), ("esp32s3", false)] {
+        assert!(mapped.contains(&want), "{want:?}");
+    }
 }

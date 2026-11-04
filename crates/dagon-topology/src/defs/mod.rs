@@ -139,6 +139,11 @@ pub struct FlashMapDef {
     /// Address of the first flash byte as images see it.
     pub base: u32,
     pub bytes: u32,
+    /// The CPU reads (and executes) flash at `base`: flash shares the
+    /// address space with RAM and register blocks. Left out: `base` and
+    /// the slots are flash offsets an MMU maps elsewhere.
+    #[serde(default)]
+    pub xip: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
@@ -431,12 +436,11 @@ impl McuDef {
         &self.flash_maps[0]
     }
 
-    /// Whether images run from flash at the flash maps' addresses
-    /// (self-boot, execute in place). Otherwise flash map and slot
-    /// addresses are flash offsets the MMU maps elsewhere, and share no
-    /// address space with RAM or register blocks.
+    /// Whether flash map and slot addresses are CPU addresses (every flash
+    /// map says `xip = true`); otherwise they are flash offsets and share
+    /// no address space with RAM or register blocks.
     pub fn flash_is_cpu_mapped(&self) -> bool {
-        self.port == PortKind::SelfBoot
+        self.flash_maps.iter().all(|f| f.xip)
     }
 }
 

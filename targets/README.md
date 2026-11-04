@@ -28,7 +28,7 @@ errors; kind fields accept only the values listed below.
 | `wire_id` | Image header `mcu_id`; unique |
 | `port` | `self-boot` or `vendor-stage2` |
 | `gpio_count` | GPIO0..n-1 checked for nodes without a board; 0 when pins are named by port |
-| `[[flash_map]]` | `name` (unique), `base` (address of flash byte 0), `bytes`. The first is the default |
+| `[[flash_map]]` | `name` (unique), `base` (address of flash byte 0), `bytes`, `xip` (`true`: the CPU reads flash at `base`, so flash shares the address space with RAM and register blocks; left out: `base` and the slots are flash offsets an MMU maps elsewhere). The first is the default |
 | `partitions` | ESP-IDF partition table CSV in the package (rows need explicit offset and size) |
 | `[layout]` | Optional fixed regions: `stage0 = { at, size }`, `bootcore_log` / `app_log = { faces = [a, b], face_size }` |
 | `[[slot]]` | `image` (`app`, `bootcore`, `agent`, `stage0`), `binding` (`a`, `b`, `any`), `header` (`inline`, `trailer`, `detached`); the region is `at` + `size` or `partition`; a detached header is at `header_at` or `header_partition` + `header_offset` |
@@ -89,7 +89,7 @@ definition that leaves a class out is refused with the class named.
 |---|---|
 | `format` | As in `dagon-mcu.toml` |
 | `id` | Board id used in `nodes[].board` |
-| `default` | `true`: the board a node naming only its MCU is checked against. At most one board of an MCU says so; an MCU's only board is its default without it; an MCU with several boards and none marked has no default (its nodes are checked without board facts). Definition order never decides it |
+| `default` | `true`: the board a node naming only its MCU is checked against (a project cannot replace the default of a builtin MCU that already has one: two marked boards do not load). At most one board of an MCU says so; an MCU's only board is its default without it; an MCU with several boards and none marked has no default (its nodes are checked without board facts). Definition order never decides it |
 | `product`, `mcu`, `flash_bytes`, `drawing` | Product name, MCU id (must be defined), flash size (must hold one of the MCU's flash maps), UI drawing |
 | `i2c_target` | Whether the board can be an I2C target |
 | `header` | `[{ pin, label }]`; `label` left out until confirmed on the board |

@@ -1,6 +1,6 @@
 import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { describe, expect, test } from 'vitest';
-import { mcuConnection, supportedBoards, useDefinitions } from './dagon.ts';
+import { defaultBoard, mcuConnection, supportedBoards, useDefinitions } from './dagon.ts';
 
 const text = (rel: string) => new TextDecoder().decode(readFileSync(new URL(`../../../${rel}`, import.meta.url)));
 const mcu = (id: string, files: [string, string][] = []) => ({ label: id, toml: text(`targets/mcu/${id}/dagon-mcu.toml`), files });
@@ -69,5 +69,24 @@ describe('definitions from dagon serve', () => {
     expect(ids()).toEqual([]);
     expect(useDefinitions(null)).toBe('builtin');
     expectBuiltin(ids());
+  });
+
+  test("an MCU's default board is the definitions' rule, never list order", () => {
+    // desk-pico (rp2040) is listed before the marked board: the marked one is the default.
+    const first = JSON.parse(served) as { mcus: unknown[]; boards: { label: string; toml: string }[] };
+    first.boards.unshift(first.boards.pop()!);
+    expect(useDefinitions(JSON.stringify(first))).toBe('loaded');
+    expect(supportedBoards()[0].id).toBe('desk-pico');
+    expect(defaultBoard('rp2040')).toBe('waveshare-rp2040-touch-lcd-1.28');
+    // An MCU's only board is its default; several and none marked: no default.
+    expect(defaultBoard('stm32f401re')).toBe('nucleo-f401re');
+    const unmarked = JSON.stringify({
+      ...first,
+      boards: first.boards.map((b) => ({ ...b, toml: b.toml.replace('default = true\n', '') })),
+    });
+    expect(useDefinitions(unmarked)).toBe('loaded');
+    expect(defaultBoard('rp2040')).toBeUndefined();
+    expect(defaultBoard('stm32f401re')).toBe('nucleo-f401re');
+    expect(useDefinitions(null)).toBe('builtin');
   });
 });

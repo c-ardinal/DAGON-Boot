@@ -13,6 +13,8 @@ ram = { at = 0x2000_0000, size = 0x4_2000 }
 # The first flash map is the MCU's default.
 [[flash_map]]
 name = "rp2040-4m"
+# Images run from flash in place at base.
+xip = true
 base = 0x1000_0000
 bytes = 0x40_0000
 

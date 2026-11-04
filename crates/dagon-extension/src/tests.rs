@@ -365,6 +365,7 @@ ram = {{ at = 0x2000_0000, size = 0x2_0000 }}
 name = "synth-1m"
 base = 0x0800_0000
 bytes = 0x10_0000
+xip = true
 
 [[slot]]
 image = "bootcore"

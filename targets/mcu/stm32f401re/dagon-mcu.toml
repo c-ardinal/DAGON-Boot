@@ -12,6 +12,8 @@ ram = { at = 0x2000_0000, size = 0x1_8000 }
 
 [[flash_map]]
 name = "f401-default"
+# Images run from flash in place at base.
+xip = true
 base = 0x0800_0000
 bytes = 0x8_0000
 

@@ -45,6 +45,9 @@ pub struct BoardInfo {
     pub i2c_target: bool,
     /// Which line drawing the UI uses.
     pub drawing: String,
+    /// The board a node naming only its MCU stands for
+    /// (`Registry::default_board`); an MCU has at most one.
+    pub is_default: bool,
 }
 
 #[wasm_bindgen]
@@ -60,6 +63,7 @@ pub fn supported_boards() -> Vec<BoardInfo> {
                 flash_bytes: b.flash_bytes,
                 i2c_target: b.i2c_target,
                 drawing: b.drawing.clone(),
+                is_default: reg.default_board(&b.mcu).is_some_and(|d| d.id == b.id),
             })
             .collect()
     })

@@ -737,7 +737,6 @@ version = "0.0.0"
 dependencies = [
  "cortex-m",
  "cortex-m-rt",
- "dagon-agent",
  "dagon-board-nucleo-f401re",
  "dagon-format",
  "dagon-mcu-stm32f401re",
@@ -748,7 +747,6 @@ dependencies = [
  "embassy-stm32",
  "embassy-time",
  "panic-probe",
- "static_cell",
 ]
 
 [[package]]

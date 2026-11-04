@@ -1,24 +1,16 @@
-//! NUCLEO-F401RE demo app with DAGON: an I2C target at
-//! [`board::I2C_ADDR`] on I2C3 (PA8 SCL, PB4 SDA) serving dagon-agent
-//! through the mailbox, and its own version on the X-NUCLEO-53L0A1's
-//! 4-digit 7-segment display (`110` for 1.1.0: the shield has no points),
-//! stacked on the board's Arduino I2C. Built for slot A or B (`slot-b`); the boot
-//! core picks which one runs. DAGON comes from the MCU package
-//! (dagon-mcu-stm32f401re) and the board package (dagon-board-nucleo-f401re).
+//! NUCLEO-F401RE demo app with DAGON: DAGON starts through the board
+//! package's public `start` (the I2C target link to the 親機, update
+//! receiver, trial and confirm), and the app shows its own version on the
+//! X-NUCLEO-53L0A1's 4-digit 7-segment display (`110` for 1.1.0: the
+//! shield has no points), stacked on the board's Arduino I2C. Built for
+//! slot A or B (`slot-b`); the boot core picks which one runs.
 //!
-//! Tasks (each peripheral owned by one task):
-//! - DAGON's interrupt executor (`exec`, on the unused USART6 interrupt;
-//!   preempts thread mode): mailbox serving (`node::serve`), owning I2C3 (target) and the
-//!   agent with the flash, so the hub is answered whatever the display does;
-//! - thread executor: the display (the Arduino I2C, async: it never holds
-//!   up the link) and the watchdog task (IWDG, LED heartbeat).
+//! Tasks: DAGON's link runs on its own high-priority executor (`start`);
+//! the display (async on the Arduino I2C, so it never holds up the link)
+//! and the LED heartbeat run on the main executor below it. The display
+//! announces a deadline before each write: a stuck display stops the
+//! feeding, and an image on trial is then rolled back.
 //!
-//! Watchdog: fed by its task only while no task is past the deadline of its
-//! current work, and never while on trial: an image that does not get
-//! CONFIRM resets when the 4 s trial watchdog runs out and the boot core
-//! counts the attempt (rolling back after the third).
-//!
-//! `confirm`: confirms its own trial at start-up (bench use without a hub).
 //! `no-confirm`: the self-check always fails, so CONFIRM is refused and the
 //! trial rolls back (hardware tests).
 #![no_std]
@@ -26,113 +18,65 @@
 
 use board::{Board, BoardDef};
 use dagon_board_nucleo_f401re as board;
-use dagon_mcu_stm32f401re::node::{self, ACTIVE};
-use dagon_mcu_stm32f401re::watchdog::{now_ms, Guard, Level, Trial};
+use dagon_mcu_stm32f401re::links::Kind;
+use dagon_mcu_stm32f401re::node;
+use dagon_mcu_stm32f401re::watchdog::{now_ms, Guard, Lease, Trial};
 use defmt::{error, info, Display2Format};
 use defmt_rtt as _;
-use embassy_executor::Executor;
-use embassy_stm32::gpio::{Level as Pin, Output, Speed};
+use embassy_executor::Spawner;
+use embassy_stm32::gpio::{Level, Output, Speed};
 use embassy_time::{Duration, Timer};
 use f401_app::seg;
 use panic_probe as _;
-use static_cell::StaticCell;
 
 mod display;
 
-const SELF_CONFIRM: bool = cfg!(feature = "confirm");
-
 /// How long "TEST KEY" (`tESt`) shows before the version.
 const TEST_KEY_SPLASH: Duration = Duration::from_millis(1500);
+/// Longest one display write may take before the board is reset.
+const DISPLAY_BUDGET_MS: u64 = 500;
 
-/// Watchdog guard tasks: mailbox serving (preempting), display.
-mod task {
-    pub const SERVE: usize = 0;
-    pub const DISPLAY: usize = 1;
-}
+/// Watchdog guard tasks: DAGON's link, then the display.
+const DISPLAY_TASK: usize = node::APP_TASKS;
+const TASKS: usize = DISPLAY_TASK + 1;
 
-static GUARD: Guard<2> = Guard::new(
-    [Level::Preempting, Level::Background],
-    Trial::NeverFeed,
-    now_ms,
-);
+/// A version on trial is never fed: unless the 親機 confirms it, the
+/// watchdog resets the chip and the boot core goes back to the previous
+/// version.
+static GUARD: Guard<TASKS> = Guard::new(node::levels::<TASKS>(), Trial::NeverFeed, now_ms);
 
 /// Healthy unless built with `no-confirm`.
 fn self_check() -> bool {
     !cfg!(feature = "no-confirm")
 }
 
-static EXECUTOR_LOW: StaticCell<Executor> = StaticCell::new();
-
-#[cortex_m_rt::entry]
-fn main() -> ! {
+#[embassy_executor::main]
+async fn main(spawner: Spawner) {
     let (dagon, io) = Board::split(embassy_stm32::init(dagon_mcu_stm32f401re::clocks()));
-    let led = Output::new(io.led, Pin::Low, Speed::Low);
-    let low = EXECUTOR_LOW.init(Executor::new());
-
-    let mut store = match node::open_store(dagon.flash) {
-        Ok(s) => s,
+    let led = Output::new(io.led, Level::Low, Speed::Low);
+    let version = display::running_version();
+    info!("app {} slot {}", Display2Format(&version), node::ACTIVE);
+    let tag = dagon_mcu_stm32f401re::target_tag!();
+    let (first, then) = match board::start(spawner, dagon, &GUARD, tag, self_check, Kind::I2c) {
+        Ok(()) if dagon_mcu_stm32f401re::TEST_KEY => {
+            info!("TEST KEY: built with the public test verifying key");
+            (seg::TEST_KEY, seg::version(version))
+        }
+        Ok(()) => (seg::version(version), seg::version(version)),
+        // DAGON does not serve: the display shows dashes.
         Err(e) => {
             error!("state log unreadable: {}", defmt::Debug2Format(&e));
-            low.run(|s| {
-                s.spawn(display(io.arduino_i2c, seg::DASHES, seg::DASHES).unwrap());
-                s.spawn(blink(led).unwrap());
-            })
+            (seg::DASHES, seg::DASHES)
         }
     };
-    let version = node::own_version(&mut store);
-    let splash = if dagon_mcu_stm32f401re::TEST_KEY {
-        info!("TEST KEY: built with the public test verifying key");
-        seg::TEST_KEY
-    } else {
-        seg::version(version)
-    };
-
-    let s = store.log_state();
-    let on_trial = node::on_trial(&store);
-    info!(
-        "app {} slot {} on_trial={} attempts={} last_reason={}",
-        Display2Format(&version),
-        ACTIVE,
-        on_trial,
-        s.attempts,
-        s.last_reason
-    );
-    let period = node::watchdog_period_ms(on_trial);
-    node::install_watchdog(dagon.iwdg, &GUARD, period, &store);
-    let (target, regs) = Board::open_link(dagon.link);
-    let mut agent = node::agent(dagon_mcu_stm32f401re::target_tag!(), store, self_check);
-    if on_trial && SELF_CONFIRM {
-        match agent.confirm_own() {
-            Ok(()) => info!("confirmed slot {}", ACTIVE),
-            Err(_) => error!("self-confirm failed"),
-        }
-        GUARD.set_trial(node::on_trial(agent.store()));
-    }
-
-    let high = dagon_mcu_stm32f401re::exec::start();
-    let link = dagon_mcu_stm32f401re::links::I2c::new(target, regs);
-    high.spawn(node::serve(agent, link, &GUARD, task::SERVE).unwrap());
-
-    low.run(|s| {
-        s.spawn(display(io.arduino_i2c, splash, seg::version(version)).unwrap());
-        s.spawn(watchdog(led).unwrap());
-    })
+    spawner.spawn(display(io.arduino_i2c, first, then, GUARD.lease(DISPLAY_TASK)).unwrap());
+    spawner.spawn(heartbeat(led).unwrap());
 }
 
-/// Blinks the LED fast forever (no usable state log).
+/// The LED blinks as a heartbeat.
 #[embassy_executor::task]
-async fn blink(mut led: Output<'static>) -> ! {
+async fn heartbeat(mut led: Output<'static>) -> ! {
     loop {
-        led.toggle();
-        Timer::after_millis(100).await;
-    }
-}
-
-/// Feeds while every task is alive; the LED blinks as a heartbeat.
-#[embassy_executor::task]
-async fn watchdog(mut led: Output<'static>) -> ! {
-    loop {
-        GUARD.feed();
         led.toggle();
         Timer::after(node::FEED_EVERY).await;
     }
@@ -141,19 +85,24 @@ async fn watchdog(mut led: Output<'static>) -> ! {
 /// Shows `first`, then `then` after the splash time (sensors kept in
 /// XSHUT).
 #[embassy_executor::task]
-async fn display(bus: board::ArduinoI2c, first: [u8; seg::DIGITS], then: [u8; seg::DIGITS]) {
+async fn display(
+    bus: board::ArduinoI2c,
+    first: [u8; seg::DIGITS],
+    then: [u8; seg::DIGITS],
+    lease: Lease,
+) {
     let mut display = display::SegDisplay::open(bus);
-    show(&mut display, first).await;
+    show(&mut display, first, &lease).await;
     if then != first {
         Timer::after(TEST_KEY_SPLASH).await;
-        show(&mut display, then).await;
+        show(&mut display, then, &lease).await;
     }
 }
 
-async fn show(display: &mut display::SegDisplay, codes: [u8; seg::DIGITS]) {
-    GUARD.busy(task::DISPLAY);
+async fn show(display: &mut display::SegDisplay, codes: [u8; seg::DIGITS], lease: &Lease) {
+    lease.busy(DISPLAY_BUDGET_MS);
     if let Err(e) = display.show(codes).await {
         error!("display: {}", defmt::Debug2Format(&e));
     }
-    GUARD.idle(task::DISPLAY);
+    lease.idle();
 }

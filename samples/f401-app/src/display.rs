@@ -3,6 +3,9 @@
 //! the link).
 
 use dagon_board_nucleo_f401re::ArduinoI2c;
+use dagon_format::header::{ImageHeader, HEADER_SIZE};
+use dagon_format::Version;
+use dagon_mcu_stm32f401re::{layout, node};
 use embassy_stm32::i2c::{self, I2c, Master};
 use embassy_stm32::interrupt::{self, InterruptExt, Priority};
 use embassy_stm32::mode::Async;
@@ -64,4 +67,17 @@ impl SegDisplay {
         }
         Ok(())
     }
+}
+
+/// The running image's version, from its header at the start of its slot
+/// (default if unreadable).
+pub fn running_version() -> Version {
+    let addr = layout::SLOTS.slots[node::ACTIVE as usize] as usize;
+    // SAFETY: the slot start is in the memory-mapped internal flash
+    // (always readable, aligned for u8), and DAGON never erases or writes
+    // the running image's slot.
+    let raw = unsafe { &*(addr as *const [u8; HEADER_SIZE]) };
+    ImageHeader::parse(raw)
+        .map(|h| h.version)
+        .unwrap_or_default()
 }

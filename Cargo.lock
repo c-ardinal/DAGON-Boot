@@ -169,6 +169,7 @@ version = "0.0.0"
 dependencies = [
  "dagon-conform",
  "dagon-format",
+ "dagon-host",
  "dagon-port",
  "dagon-proto",
  "dagon-romlink",
@@ -223,8 +224,15 @@ dependencies = [
 name = "dagon-topology"
 version = "0.0.0"
 dependencies = [
+ "dagon-core",
  "dagon-format",
+ "dagon-host",
+ "dagon-port",
+ "dagon-romlink",
+ "dagon-sign",
  "serde",
+ "serde_json",
+ "toml",
  "yaml_serde",
 ]
 

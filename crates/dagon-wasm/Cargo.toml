@@ -10,7 +10,7 @@ crate-type = ["cdylib", "rlib"]
 
 [dependencies]
 dagon-format = { path = "../dagon-format" }
-dagon-host = { path = "../dagon-host" }
+dagon-host = { path = "../dagon-host", features = ["defs"] }
 # The simulated desk (`sim` feature): test and development builds only.
 dagon-sim = { path = "../dagon-sim", optional = true }
 dagon-port = { path = "../dagon-port", optional = true }

@@ -15,8 +15,7 @@
 //!
 //! The files of a node come from its package's project template: a
 //! `template/` folder shipped inside the board (or MCU) package, so the
-//! package owns its start-up code, else a copy built into this CLI
-//! (crates/dagon-cli/templates/<package>/). Placeholders: `{{node}}`,
+//! package owns its start-up code. Placeholders: `{{node}}`,
 //! `{{tag}}`, `{{dep:<package>}}` (the dependency line for that package).
 //!
 //! `dagon gen` rewrites only wiring.rs and the DAGON package entries of
@@ -25,6 +24,7 @@
 
 use std::path::{Path, PathBuf};
 
+use dagon_topology::defs::Registry;
 use dagon_topology::schema::{LinkKind, Node, Role, Topology};
 use serde::Deserialize;
 
@@ -309,22 +309,11 @@ fn dependency(name: &str, src: &DagonSource, base: &Path) -> Result<String, Stri
     }
 }
 
-/// Project template files of a package: `template/` shipped inside the
-/// package (its own snippet), else the copy built into this CLI.
-fn template_for(name: &str, dir: Option<&Path>) -> Option<Vec<(String, String)>> {
-    if let Some(t) = dir.map(|d| d.join("template")).filter(|t| t.is_dir()) {
-        let mut files = Vec::new();
-        collect(&t, "", &mut files);
-        if !files.is_empty() {
-            return Some(real_names(files));
-        }
-    }
-    let built_in: Vec<(String, String)> = templates::TEMPLATES
-        .iter()
-        .filter(|(p, _, _)| *p == name)
-        .map(|(_, rel, text)| (rel.to_string(), text.to_string()))
-        .collect();
-    (!built_in.is_empty()).then(|| real_names(built_in))
+/// Project template files of a package: the `template/` it ships.
+fn template_for(dir: &Path) -> Option<Vec<(String, String)>> {
+    let mut files = Vec::new();
+    collect(&dir.join("template"), "", &mut files);
+    (!files.is_empty()).then(|| real_names(files))
 }
 
 /// Suffix of template files kept under another name: a template manifest
@@ -366,10 +355,6 @@ fn collect(dir: &Path, rel: &str, out: &mut Vec<(String, String)>) {
     }
 }
 
-mod templates {
-    include!(concat!(env!("OUT_DIR"), "/templates.rs"));
-}
-
 /// Fills `{{node}}`, `{{tag}}` and `{{dep:<package>}}` in a template file.
 /// The variant of `dagon_mcu_<mcu>::links::Kind` for a link kind (the MCU
 /// packages' generator contract, "Links").
@@ -389,8 +374,12 @@ fn kind_variant(k: LinkKind) -> &'static str {
 /// declared one, else USB CDC; a 子機's link from its 親機) and its
 /// downlink kinds, as Rust paths into its MCU package. A hop its firmware
 /// does not implement yet is refused here, by name.
-pub fn hop_placeholders(t: &Topology, n: &Node) -> Result<(String, String), String> {
-    use dagon_topology::links::{available, known, Dir};
+pub fn hop_placeholders(
+    reg: &Registry,
+    t: &Topology,
+    n: &Node,
+) -> Result<(String, String), String> {
+    use dagon_topology::links::{available_in, known_in, Dir};
     let krate = format!("dagon_mcu_{}", n.mcu.replace('-', "_"));
     let path = |k: LinkKind| format!("{krate}::links::Kind::{}", kind_variant(k));
     let refuse = |hop: String, k: LinkKind| {
@@ -400,7 +389,8 @@ pub fn hop_placeholders(t: &Topology, n: &Node) -> Result<(String, String), Stri
             n.mcu
         )
     };
-    let can = |k: LinkKind, d: Dir| !known(&n.mcu) || available(&n.mcu, d).contains(&k);
+    let can =
+        |k: LinkKind, d: Dir| !known_in(reg, &n.mcu) || available_in(reg, &n.mcu, d).contains(&k);
     let (up, hop) = match n.role {
         Role::Coordinator => (Topology::uplink(n).kind, format!("uplink of {}", n.id)),
         Role::Node => {
@@ -632,6 +622,7 @@ fn refresh_manifest(
 
 /// The template files of node `n` (rendered), or why there are none.
 fn node_files(
+    reg: &Registry,
     t: &Topology,
     n: &Node,
     src: &DagonSource,
@@ -650,9 +641,9 @@ fn node_files(
         )
     })?;
     let name = f.name;
-    let hops = hop_placeholders(t, n)?;
-    let files = template_for(&name, Some(&f.dir))
-        .ok_or_else(|| format!("{name} has no project template yet"))?;
+    let hops = hop_placeholders(reg, t, n)?;
+    let files =
+        template_for(&f.dir).ok_or_else(|| format!("{name} has no project template yet"))?;
     files
         .into_iter()
         .map(|(rel, text)| Ok((rel, render(&text, n, &hops, src, base)?)))
@@ -670,6 +661,7 @@ pub struct GenReport {
 /// A node whose package or template is missing is skipped with the reason;
 /// the others are still generated.
 pub fn gen(
+    reg: &Registry,
     base: &Path,
     t: &Topology,
     src: &DagonSource,
@@ -683,8 +675,8 @@ pub fn gen(
             continue;
         }
         // A hop its firmware cannot do yet stops gen, by name.
-        hop_placeholders(t, n)?;
-        let files = match node_files(t, n, src, base) {
+        hop_placeholders(reg, t, n)?;
+        let files = match node_files(reg, t, n, src, base) {
             Ok(f) => f,
             Err(e) => {
                 r.skipped.push((n.id.clone(), e));
@@ -717,7 +709,11 @@ pub fn gen(
 }
 
 /// Adds `[build.<id>]` for nodes that have none (comments kept).
-pub fn add_build_tables(config: &Path, t: &Topology) -> Result<Vec<String>, String> {
+pub fn add_build_tables(
+    reg: &Registry,
+    config: &Path,
+    t: &Topology,
+) -> Result<Vec<String>, String> {
     let text = std::fs::read_to_string(config).map_err(|e| format!("{}: {e}", config.display()))?;
     let mut doc: toml_edit::DocumentMut = text
         .parse()
@@ -737,7 +733,7 @@ pub fn add_build_tables(config: &Path, t: &Topology) -> Result<Vec<String>, Stri
         tbl.insert("package", toml_edit::value(format!("nodes/{}", n.id)));
         // An MCU without its own slot B link (ESP32-S3: one image runs
         // from either OTA slot) builds once.
-        if crate::deploy::has_slot_b_link(&n.mcu) {
+        if crate::deploy::has_slot_b_link(reg, &n.mcu) {
             tbl.insert("slot_b_feature", toml_edit::value("slot-b"));
         }
         tbl.insert("version", toml_edit::value(FIRST_VERSION));
@@ -790,12 +786,21 @@ pub fn gen_command(args: &[&str]) -> Result<(), String> {
 /// reports (written, skipped, added, notes).
 pub fn gen_project(config: &Path, only: &[String], force: bool) -> Result<Vec<String>, String> {
     let cfg = Config::load(Some(&config.to_string_lossy()))?;
-    let t = read_topology(&contained(&cfg.base, &cfg.topology_path(None)?)?)?;
+    let t = read_topology(&cfg, &contained(&cfg.base, &cfg.topology_path(None)?)?)?;
     let tables = project_tables(config)?;
     if let Some(bad) = only.iter().find(|id| t.node(id).is_none()) {
         return Err(format!("no node '{bad}' in the topology"));
     }
-    let report = gen(&cfg.base, &t, &tables.dagon, &tables.board, only, force)?;
+    let reg = crate::defs::registry(&cfg)?;
+    let report = gen(
+        &reg,
+        &cfg.base,
+        &t,
+        &tables.dagon,
+        &tables.board,
+        only,
+        force,
+    )?;
     let mut out: Vec<String> = report
         .written
         .iter()
@@ -804,7 +809,7 @@ pub fn gen_project(config: &Path, only: &[String], force: bool) -> Result<Vec<St
     for (id, why) in &report.skipped {
         out.push(format!("skipped    nodes/{id}: {why}"));
     }
-    for id in add_build_tables(config, &t)? {
+    for id in add_build_tables(&reg, config, &t)? {
         out.push(format!("added      [build.{id}] to dagon.toml"));
     }
     for n in &t.nodes {

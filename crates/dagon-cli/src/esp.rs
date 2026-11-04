@@ -1,82 +1,131 @@
-//! ESP32-S3 helpers for `flash` and `deploy`: the app ELF turned into an
-//! ESP image (espflash save-image), the bundled unmodified ESP-IDF 2nd stage
-//! checked against its SHA256SUMS, the partition offsets, the first otadata
-//! entry, and the one USB Serial/JTAG port a write may use.
+//! Helpers for MCUs written by espflash (`flash` and `deploy`): the app ELF
+//! turned into an ESP image (espflash save-image), the bundled unmodified
+//! 2nd stage checked against its checksums, the partitions a first write
+//! fills and the first otadata entry. Chip, flash size, table offset and
+//! the vendor files come from the MCU definition's `espflash` writer.
 
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-/// The bundled 2nd stage and the partition table, in the DAGON checkout.
-pub(crate) const VENDOR_DIR: &str = "targets/mcu/esp32s3/vendor";
-pub(crate) const PARTITIONS: &str = "targets/mcu/esp32s3/partitions.csv";
-const BOOTLOADER: &str = "bootloader.bin";
-/// The flash size the bundled 2nd stage was built for (its image header):
-/// every image and every write uses it.
-pub(crate) const FLASH_SIZE: &str = "16mb";
-pub(crate) const CHIP: &str = "esp32s3";
-/// Where the 2nd stage reads the partition table (its sdkconfig).
-pub(crate) const TABLE_AT: u32 = 0x8000;
-/// Espressif's USB VID and the ESP32-S3's USB Serial/JTAG PID.
-pub(crate) const USB_JTAG: (u16, u16) = (0x303A, 0x1001);
+use dagon_topology::defs::{Binding, ImageKind, McuDef, Writer};
+
 /// otadata `ota_state` Valid.
 const OTA_VALID: u32 = 2;
+/// The ESP-IDF partition that selects the OTA slot to boot.
+pub(crate) const OTADATA: &str = "otadata";
+/// Where espflash puts the 2nd stage (shown in the plan only; espflash
+/// places it itself).
+// ponytail: true for the ESP32-S3 (and C3/C6/S2-class chips), not the
+// classic ESP32 (0x1000); move to the writer definition when one is added.
+pub(crate) const BOOTLOADER_AT: u32 = 0x0;
 
-/// Offsets of the partitions a first write fills.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+/// An MCU definition's `espflash` writer.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct Esp<'a> {
+    pub chip: &'a str,
+    /// The flash size the bundled 2nd stage was built for (its image
+    /// header): every image and every write uses it.
+    pub flash_size: &'a str,
+    /// Where the 2nd stage reads the partition table (its sdkconfig).
+    pub table_at: u32,
+    /// Package-relative paths of the 2nd stage and its checksums.
+    pub bootloader: &'a str,
+    pub checksums: &'a str,
+}
+
+impl<'a> Esp<'a> {
+    /// `mcu`'s writer when it is `espflash`.
+    pub(crate) fn of(mcu: &'a McuDef) -> Option<Esp<'a>> {
+        match &mcu.writer {
+            Writer::Espflash {
+                chip,
+                flash_size,
+                table_at,
+                bootloader,
+                checksums,
+                ..
+            } => Some(Esp {
+                chip,
+                flash_size,
+                table_at: *table_at,
+                bootloader,
+                checksums,
+            }),
+            _ => None,
+        }
+    }
+}
+
+/// The partitions a first write fills, by name and offset.
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct Layout {
     pub otadata: u32,
-    pub factory: u32,
-    pub ota_0: u32,
-    pub dagon: u32,
+    /// The recovery agent's partition.
+    pub factory: (String, u32),
+    /// The app's slot A partition.
+    pub ota_0: (String, u32),
+    /// The partition holding the app's detached header, and the header's
+    /// absolute address.
+    pub dagon: (String, u32),
 }
 
-fn number(s: &str) -> Option<u32> {
-    let s = s.trim();
-    if let Some(h) = s.strip_prefix("0x").or_else(|| s.strip_prefix("0X")) {
-        return u32::from_str_radix(h, 16).ok();
-    }
-    s.parse().ok()
-}
-
-/// The offsets in a partition table CSV (`# Name, Type, SubType, Offset,
-/// Size`); every partition the first write uses must be there.
-pub(crate) fn layout(csv: &str) -> Result<Layout, String> {
-    let offset = |name: &str| {
-        csv.lines()
-            .map(str::trim)
-            .filter(|l| !l.is_empty() && !l.starts_with('#'))
-            .map(|l| l.split(',').map(str::trim).collect::<Vec<_>>())
-            .find(|f| f.first() == Some(&name))
-            .and_then(|f| f.get(3).and_then(|o| number(o)))
-            .ok_or_else(|| format!("the partition table has no offset for {name}"))
+/// The first-write partitions of `mcu`, from its slots (app slot A, the
+/// agent) and its partition table (otadata).
+pub(crate) fn layout(mcu: &McuDef) -> Result<Layout, String> {
+    let slot = |image: ImageKind| {
+        mcu.slot_defs
+            .iter()
+            .zip(&mcu.slots)
+            .find(|(d, _)| d.image == image && matches!(d.binding, Binding::A | Binding::Any))
+            .ok_or_else(|| format!("{} has no {image:?} slot A", mcu.id))
     };
+    let partition = |d: &dagon_topology::defs::SlotDef, what: &str| {
+        d.partition
+            .clone()
+            .ok_or_else(|| format!("{}: the {what} slot names no partition", mcu.id))
+    };
+    let (app_def, app) = slot(ImageKind::App)?;
+    let (agent_def, agent) = slot(ImageKind::Agent)?;
+    let header = app_def
+        .header_partition
+        .clone()
+        .ok_or_else(|| format!("{}: the app header names no partition", mcu.id))?;
+    let otadata = mcu
+        .partition_table
+        .iter()
+        .find(|p| p.name == OTADATA)
+        .ok_or_else(|| format!("the partition table has no offset for {OTADATA}"))?
+        .offset;
     Ok(Layout {
-        otadata: offset("otadata")?,
-        factory: offset("factory")?,
-        ota_0: offset("ota_0")?,
-        dagon: offset("dagon")?,
+        otadata,
+        factory: (partition(agent_def, "agent")?, agent.start),
+        ota_0: (partition(app_def, "app")?, app.start),
+        dagon: (header, app.header_addr),
     })
 }
 
-/// The bundled 2nd stage, only when its SHA-256 is the one SHA256SUMS
-/// lists for it (the unmodified ESP-IDF build).
-pub(crate) fn checked_bootloader(vendor: &Path) -> Result<Vec<u8>, String> {
-    let sums = std::fs::read_to_string(vendor.join("SHA256SUMS"))
-        .map_err(|e| format!("{}: {e}", vendor.join("SHA256SUMS").display()))?;
-    let want = sums
+/// The bundled 2nd stage at `bootloader`, only when its SHA-256 is the one
+/// `sums` lists for its file name (the unmodified ESP-IDF build).
+pub(crate) fn checked_bootloader(bootloader: &Path, sums: &Path) -> Result<Vec<u8>, String> {
+    let list = std::fs::read_to_string(sums).map_err(|e| format!("{}: {e}", sums.display()))?;
+    let name = bootloader
+        .file_name()
+        .map(|n| n.to_string_lossy().into_owned())
+        .unwrap_or_default();
+    let want = list
         .lines()
         .filter_map(|l| l.split_once(char::is_whitespace))
-        .find(|(_, name)| name.trim().trim_start_matches('*') == BOOTLOADER)
+        .find(|(_, n)| n.trim().trim_start_matches('*') == name)
         .map(|(sum, _)| sum.trim().to_ascii_lowercase())
-        .ok_or("SHA256SUMS lists no bootloader.bin")?;
-    let path = vendor.join(BOOTLOADER);
-    let bytes = std::fs::read(&path).map_err(|e| format!("{}: {e}", path.display()))?;
+        .ok_or_else(|| format!("{} lists no {name}", sums.display()))?;
+    let bytes = std::fs::read(bootloader).map_err(|e| format!("{}: {e}", bootloader.display()))?;
     let got = dagon_sign::to_hex(&dagon_format::sha256(&bytes));
     if got != want {
         return Err(format!(
-            "{} is not the bundled ESP-IDF 2nd stage (sha256 {got}, SHA256SUMS {want}); \
+            "{} is not the bundled ESP-IDF 2nd stage (sha256 {got}, {} {want}); \
              nothing is written",
-            path.display()
+            bootloader.display(),
+            sums.display()
         ));
     }
     Ok(bytes)
@@ -106,11 +155,11 @@ pub(crate) fn otadata_slot_a() -> [u8; 32] {
 }
 
 /// Turns the app ELF into the ESP image the OTA partitions hold.
-pub(crate) fn save_image(elf: &Path, out: &Path) -> Result<Vec<u8>, String> {
+pub(crate) fn save_image(esp: &Esp<'_>, elf: &Path, out: &Path) -> Result<Vec<u8>, String> {
     if let Some(dir) = out.parent() {
         std::fs::create_dir_all(dir).map_err(|e| format!("{}: {e}", dir.display()))?;
     }
-    let args = save_image_args(elf, out);
+    let args = save_image_args(esp, elf, out);
     let o = Command::new("espflash")
         .args(&args)
         .output()
@@ -125,82 +174,74 @@ pub(crate) fn save_image(elf: &Path, out: &Path) -> Result<Vec<u8>, String> {
     std::fs::read(out).map_err(|e| format!("{}: {e}", out.display()))
 }
 
-pub(crate) fn save_image_args(elf: &Path, out: &Path) -> Vec<String> {
-    let mut a: Vec<String> = ["save-image", "--chip", CHIP, "--flash-size", FLASH_SIZE]
-        .map(String::from)
-        .to_vec();
+pub(crate) fn save_image_args(esp: &Esp<'_>, elf: &Path, out: &Path) -> Vec<String> {
+    let mut a: Vec<String> = [
+        "save-image",
+        "--chip",
+        esp.chip,
+        "--flash-size",
+        esp.flash_size,
+    ]
+    .map(String::from)
+    .to_vec();
     a.push(elf.display().to_string());
     a.push(out.display().to_string());
     a
 }
 
-/// The one ESP32-S3 USB Serial/JTAG port among `ports` (name, VID, PID).
-/// None or several: an error, and nothing is written.
-pub(crate) fn pick_port(ports: &[(String, u16, u16)]) -> Result<String, String> {
-    let found: Vec<&String> = ports
-        .iter()
-        .filter(|(_, v, p)| (*v, *p) == USB_JTAG)
-        .map(|(n, _, _)| n)
-        .collect();
-    match found[..] {
-        [one] => Ok(one.clone()),
-        [] => Err(format!(
-            "no ESP32-S3 on USB (USB Serial/JTAG {:04x}:{:04x}); connect it with USB-C \
-             (hold BOOT while plugging in if it does not show up). Nothing was written.",
-            USB_JTAG.0, USB_JTAG.1
-        )),
-        _ => Err(format!(
-            "{} ESP32-S3 boards are connected ({}); unplug every board but the one to \
-             flash, then run flash again. Nothing was written.",
-            found.len(),
-            found
-                .iter()
-                .map(|s| s.as_str())
-                .collect::<Vec<_>>()
-                .join(", ")
-        )),
-    }
-}
-
-/// Serial ports with their USB IDs (non-USB ports are left out).
-pub(crate) fn usb_ports() -> Result<Vec<(String, u16, u16)>, String> {
-    let ports = serialport::available_ports().map_err(|e| format!("cannot list ports: {e}"))?;
-    Ok(ports
-        .into_iter()
-        .filter_map(|p| match p.port_type {
-            serialport::SerialPortType::UsbPort(u) => Some((p.port_name, u.vid, u.pid)),
-            _ => None,
-        })
-        .collect())
-}
-
-/// The bundled 2nd stage's directory and the partition table of `home`.
-pub(crate) fn vendor_files(home: &Path) -> (PathBuf, PathBuf) {
-    (home.join(VENDOR_DIR), home.join(PARTITIONS))
+/// The bundled 2nd stage, its checksums and the partition table of `mcu`,
+/// whose package is `pkg`.
+pub(crate) fn vendor_files(
+    mcu: &McuDef,
+    esp: &Esp<'_>,
+    pkg: &Path,
+) -> Result<(PathBuf, PathBuf, PathBuf), String> {
+    let table = mcu
+        .partitions
+        .as_deref()
+        .ok_or_else(|| format!("{} has no partition table", mcu.id))?;
+    Ok((
+        pkg.join(esp.bootloader),
+        pkg.join(esp.checksums),
+        pkg.join(table),
+    ))
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use dagon_topology::defs::Registry;
 
-    const CSV: &str = include_str!("../../../targets/mcu/esp32s3/partitions.csv");
+    fn s3() -> &'static McuDef {
+        Registry::builtin().mcu("esp32s3").unwrap()
+    }
 
     #[test]
-    fn the_layout_comes_from_the_partition_table_and_matches_signing() {
-        let l = layout(CSV).unwrap();
+    fn the_layout_comes_from_the_definition_and_matches_signing() {
+        let l = layout(s3()).unwrap();
         assert_eq!(
             l,
             Layout {
                 otadata: 0xD000,
-                factory: 0x1_0000,
-                ota_0: 0x11_0000,
-                dagon: 0x71_0000,
+                factory: ("factory".into(), 0x1_0000),
+                ota_0: ("ota_0".into(), 0x11_0000),
+                dagon: ("dagon".into(), 0x71_0000),
             }
         );
         use dagon_format::header::{image_kind, slot_binding};
-        let s = dagon_sign::image::slot(CHIP, image_kind::APP, slot_binding::A).unwrap();
-        assert_eq!((s.load_addr, s.header_addr), (l.ota_0, l.dagon));
-        assert!(layout("factory, app, factory, 0x10000, 1M\n").is_err());
+        let s = dagon_sign::image::slot("esp32s3", image_kind::APP, slot_binding::A).unwrap();
+        assert_eq!((s.load_addr, s.header_addr), (l.ota_0.1, l.dagon.1));
+        assert!(layout(Registry::builtin().mcu("rp2040").unwrap()).is_err());
+    }
+
+    #[test]
+    fn the_writer_parameters_are_the_definitions() {
+        let e = Esp::of(s3()).unwrap();
+        assert_eq!(
+            (e.chip, e.flash_size, e.table_at),
+            ("esp32s3", "16mb", 0x8000)
+        );
+        assert!(Esp::of(Registry::builtin().mcu("stm32f401re").unwrap()).is_none());
     }
 
     #[test]
@@ -216,35 +257,23 @@ mod tests {
 
     #[test]
     fn only_the_unmodified_bootloader_passes() {
-        let real = Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("../..")
-            .join(VENDOR_DIR);
-        assert!(checked_bootloader(&real).is_ok());
+        let pkg = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../targets/mcu/esp32s3");
+        let esp = Esp::of(s3()).unwrap();
+        let (bl, sums, table) = vendor_files(s3(), &esp, &pkg).unwrap();
+        assert!(table.is_file());
+        assert!(checked_bootloader(&bl, &sums).is_ok());
 
         let d = std::env::temp_dir().join(format!("dagon-esp-bl-{}", std::process::id()));
         std::fs::create_dir_all(&d).unwrap();
-        std::fs::copy(real.join("SHA256SUMS"), d.join("SHA256SUMS")).unwrap();
-        let mut bl = std::fs::read(real.join(BOOTLOADER)).unwrap();
-        bl[100] ^= 1;
-        std::fs::write(d.join(BOOTLOADER), &bl).unwrap();
-        let e = checked_bootloader(&d).unwrap_err();
+        let (bl2, sums2) = (d.join("bootloader.bin"), d.join("SHA256SUMS"));
+        std::fs::copy(&sums, &sums2).unwrap();
+        let mut bytes = std::fs::read(&bl).unwrap();
+        bytes[100] ^= 1;
+        std::fs::write(&bl2, &bytes).unwrap();
+        let e = checked_bootloader(&bl2, &sums2).unwrap_err();
         assert!(e.contains("not the bundled ESP-IDF 2nd stage"), "{e}");
-        std::fs::write(d.join("SHA256SUMS"), "00  other.bin\n").unwrap();
-        assert!(checked_bootloader(&d).is_err());
+        std::fs::write(&sums2, "00  other.bin\n").unwrap();
+        assert!(checked_bootloader(&bl2, &sums2).is_err());
         let _ = std::fs::remove_dir_all(&d);
-    }
-
-    #[test]
-    fn writes_only_to_exactly_one_esp32s3() {
-        let esp = |n: &str| (n.to_string(), 0x303A, 0x1001);
-        let other = ("COM5".to_string(), 0xC0DE, 0xCAFE);
-        assert_eq!(pick_port(&[other.clone(), esp("COM7")]).unwrap(), "COM7");
-        let none = pick_port(std::slice::from_ref(&other)).unwrap_err();
-        assert!(none.contains("no ESP32-S3") && none.contains("Nothing was written"));
-        let two = pick_port(&[esp("COM7"), other, esp("COM9")]).unwrap_err();
-        assert!(
-            two.contains("2 ESP32-S3 boards") && two.contains("COM9"),
-            "{two}"
-        );
     }
 }

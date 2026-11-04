@@ -1,9 +1,11 @@
-//! ROM path for the STM32F401: the hub's SUBCTL / I2C_RAW as a
-//! [`RomLink`], and the first-install flash contents written through it.
+//! ROM path (ROM entry kind `stm32-i2c-rom`): the hub's SUBCTL / I2C_RAW as
+//! a [`RomLink`], and the first-install flash contents written through it,
+//! placed by the MCU definition's [`RomMap`].
 
 use alloc::vec;
+use alloc::vec::Vec;
 use dagon_conform::timeout::REQUEST_MS;
-use dagon_format::header::{self, image_kind, mcu_id, HEADER_SIZE};
+use dagon_format::header::{self, image_kind, HEADER_SIZE};
 use dagon_format::statelog::{self, kind, reason, slot, FaceHeader, Record};
 use dagon_format::{sha256, FormatError, ImageHeader};
 use dagon_port::{BusError, I2cBus, Nrst, SubControl};
@@ -14,14 +16,63 @@ use dagon_romlink::{Region, RomLink, FRAME_TIMEOUT_MS, ROM_ADDR};
 use crate::ops::Event;
 use crate::{Clock, Error, Host, Target, Transport};
 
-/// F401 flash map: boot core payload, its trailer header, APP state log A,
-/// APP-A (inline header, payload after it).
-pub const F401_BOOTCORE: u32 = 0x0800_0000;
-pub const F401_BOOTCORE_HEADER: u32 = 0x0800_7E00;
-pub const F401_LOG_A: u32 = 0x0800_8000;
-pub const F401_APP_A: u32 = 0x0802_0000;
-/// Boot core (0-1), state logs A/B (2-3), APP-A (5).
-pub const F401_ERASE: [u16; 5] = [0, 1, 2, 3, 5];
+/// Where an image goes: its header and its payload, and the largest
+/// payload that fits.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct RomSlot {
+    pub header: u32,
+    pub load: u32,
+    pub max_payload: u32,
+}
+
+/// A first install through an MCU's ROM I2C loader, from its definition
+/// (the caller builds it from the Registry: no std here).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct RomMap {
+    /// Image header `mcu_id` of the MCU this map is for.
+    pub wire_id: u16,
+    /// The loader's I2C address (never probed with DAGON frames).
+    pub addr: u8,
+    pub bootcore: RomSlot,
+    pub app_a: RomSlot,
+    /// APP state log face A.
+    pub log_a: u32,
+    /// Flash sectors erased first.
+    pub erase: Vec<u16>,
+}
+
+/// The ROM maps of every MCU in `reg` with a ROM I2C loader whose boot core
+/// slot, APP slot A and APP log are defined.
+#[cfg(feature = "defs")]
+pub fn rom_maps(reg: &dagon_topology::defs::Registry) -> Vec<RomMap> {
+    use dagon_topology::defs::{Binding, ImageKind, McuDef, Slot};
+    let slot = |m: &McuDef, kind| -> Option<RomSlot> {
+        let s: &Slot = m
+            .slots
+            .iter()
+            .find(|s| s.image == kind && matches!(s.binding, Binding::A | Binding::Any))?;
+        Some(RomSlot {
+            header: s.header_addr,
+            load: s.load_addr,
+            max_payload: s.max_payload,
+        })
+    };
+    reg.mcus()
+        .iter()
+        .filter_map(|m| {
+            let rom = m.rom_i2c.as_ref()?;
+            Some(RomMap {
+                wire_id: m.wire_id,
+                addr: rom.addr,
+                bootcore: slot(m, ImageKind::Bootcore)?,
+                app_a: slot(m, ImageKind::App)?,
+                log_a: m.layout.app_log?.faces[0],
+                erase: rom.erase_sectors.clone(),
+            })
+        })
+        .collect()
+}
+
 /// Face header, PROVISION, CONFIRMED.
 pub const INITIAL_LOG_LEN: usize = statelog::FACE_HEADER_SIZE + 2 * statelog::RECORD_SIZE;
 
@@ -46,17 +97,21 @@ pub fn initial_log(app_header: &[u8; HEADER_SIZE]) -> Result<[u8; INITIAL_LOG_LE
     Ok(out)
 }
 
-/// Checks a signed F401 boot core image: signature under `pubkey`, kind,
-/// MCU, payload digest and size (it must end before its trailer header).
-pub fn check_bootcore(img: &[u8], pubkey: &[u8; 32]) -> Result<ImageHeader, FormatError> {
+/// Checks a signed boot core image for `map`'s MCU: signature under
+/// `pubkey`, kind, MCU, payload digest and size (it must fit its slot).
+pub fn check_bootcore(
+    img: &[u8],
+    pubkey: &[u8; 32],
+    map: &RomMap,
+) -> Result<ImageHeader, FormatError> {
     let raw: &[u8; HEADER_SIZE] = img
         .get(..HEADER_SIZE)
         .and_then(|h| h.try_into().ok())
         .ok_or(FormatError::Truncated)?;
     let h = header::verify_header(raw, pubkey)?;
     let body = &img[HEADER_SIZE..];
-    let fits = (F401_BOOTCORE + body.len() as u32) <= F401_BOOTCORE_HEADER;
-    if h.image_kind != image_kind::BOOTCORE || h.mcu_id != mcu_id::STM32F401XE || !fits {
+    let fits = body.len() as u64 <= u64::from(map.bootcore.max_payload);
+    if h.image_kind != image_kind::BOOTCORE || h.mcu_id != map.wire_id || !fits {
         return Err(FormatError::BadField);
     }
     if h.payload_size as usize != body.len() || sha256(body) != h.payload_sha256 {
@@ -65,28 +120,29 @@ pub fn check_bootcore(img: &[u8], pubkey: &[u8; 32]) -> Result<ImageHeader, Form
     Ok(h)
 }
 
-/// APP-A is sector 5 (128 KiB): header and payload must fit it.
-pub const F401_APP_A_LEN: usize = 0x2_0000;
-
-/// An APP-A image (header + payload) that fits its sector.
-pub fn check_app_a(img: &[u8]) -> Result<(), FormatError> {
-    if img.len() < HEADER_SIZE || img.len() > F401_APP_A_LEN {
+/// An APP-A image (header + payload) that fits its slot.
+pub fn check_app_a(img: &[u8], map: &RomMap) -> Result<(), FormatError> {
+    let body = img
+        .len()
+        .checked_sub(HEADER_SIZE)
+        .ok_or(FormatError::BadField)?;
+    if body as u64 > u64::from(map.app_a.max_payload) {
         return Err(FormatError::BadField);
     }
     Ok(())
 }
 
 /// Bodies first, then headers, then the state log.
-pub fn f401_regions<'a>(boot: &'a [u8], app: &'a [u8], log: &'a [u8]) -> [Region<'a>; 5] {
+pub fn regions<'a>(boot: &'a [u8], app: &'a [u8], log: &'a [u8], map: &RomMap) -> [Region<'a>; 5] {
     let (bh, bb) = boot.split_at(HEADER_SIZE);
     let (ah, ab) = app.split_at(HEADER_SIZE);
     let r = |addr, data| Region { addr, data };
     [
-        r(F401_BOOTCORE, bb),
-        r(F401_APP_A + HEADER_SIZE as u32, ab),
-        r(F401_BOOTCORE_HEADER, bh),
-        r(F401_APP_A, ah),
-        r(F401_LOG_A, log),
+        r(map.bootcore.load, bb),
+        r(map.app_a.load, ab),
+        r(map.bootcore.header, bh),
+        r(map.app_a.header, ah),
+        r(map.log_a, log),
     ]
 }
 
@@ -211,9 +267,26 @@ impl<'h, T: Transport, C: Clock> HubRom<'h, T, C> {
 
 #[cfg(test)]
 mod tests {
+    use super::{RomMap, RomSlot};
+
     #[test]
-    fn app_a_larger_than_its_sector_is_refused() {
-        assert!(super::check_app_a(&alloc::vec![0; super::F401_APP_A_LEN + 1]).is_err());
-        assert!(super::check_app_a(&alloc::vec![0; super::F401_APP_A_LEN]).is_ok());
+    fn app_a_larger_than_its_slot_is_refused() {
+        let slot = RomSlot {
+            header: 0x0802_0000,
+            load: 0x0802_0200,
+            max_payload: 0x1_FE00,
+        };
+        let map = RomMap {
+            wire_id: 2,
+            addr: 0x39,
+            bootcore: slot,
+            app_a: slot,
+            log_a: 0,
+            erase: alloc::vec![],
+        };
+        // Header + payload: the whole 128 KiB slot and no more.
+        assert!(super::check_app_a(&alloc::vec![0; 0x2_0000 + 1], &map).is_err());
+        assert!(super::check_app_a(&alloc::vec![0; 0x2_0000], &map).is_ok());
+        assert!(super::check_app_a(&alloc::vec![0; 511], &map).is_err());
     }
 }

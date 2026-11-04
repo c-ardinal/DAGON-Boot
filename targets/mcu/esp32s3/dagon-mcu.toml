@@ -1,0 +1,70 @@
+# DAGON MCU definition (format: targets/README.md). Slots come from
+# partitions.csv; addresses are flash offsets (images are MMU-mapped).
+id = "esp32s3"
+name = "ESP32-S3"
+wire_id = 0x0003
+port = "vendor-stage2"
+gpio_count = 49
+partitions = "partitions.csv"
+
+[[flash_map]]
+name = "esp32s3-16m"
+base = 0x0
+bytes = 0x100_0000
+
+# Images run from either OTA partition (binding any; load names ota_0).
+# Headers are detached into the dagon partition.
+[[slot]]
+image = "app"
+binding = "any"
+header = "detached"
+partition = "ota_0"
+header_partition = "dagon"
+header_offset = 0x0
+
+[[slot]]
+image = "agent"
+binding = "any"
+header = "detached"
+partition = "factory"
+header_partition = "dagon"
+header_offset = 0x2000
+
+# First write: the bundled ESP-IDF 2nd stage, the partition table, the
+# board's factory agent, slot A and otadata. usb_hint labels the candidates
+# the writer reports; it never filters them.
+[writer]
+kind = "espflash"
+chip = "esp32s3"
+flash_size = "16mb"
+table_at = 0x8000
+bootloader = "vendor/bootloader.bin"
+checksums = "vendor/SHA256SUMS"
+usb_hint = { vid = 0x303A, pid = 0x1001 }
+
+# Link kinds the firmware implements (src/links.rs LINK_KINDS).
+[links]
+up = ["uart", "usb-cdc"]
+
+[connection]
+label = "USB-C"
+hint = "USB-C でつないでから、書き込んでください（つながらないときは BOOT を押しながら）。"
+
+[[doctor]]
+what = "espup"
+probe = ["espup", "--version"]
+expect = "runs"
+fix = ["cargo", "install", "espup", "--locked"]
+
+[[doctor]]
+what = "esp toolchain"
+probe = ["rustup", "toolchain", "list"]
+expect = { prefix = "esp" }
+fix = ["espup", "install"]
+slow = true
+
+[[doctor]]
+what = "espflash"
+probe = ["espflash", "--version"]
+expect = "runs"
+fix = ["cargo", "install", "espflash", "--locked"]

@@ -6,10 +6,24 @@ use dagon_format::header::{build_flags, capabilities, image_kind, target_tag, HE
 use dagon_format::manifest::ManifestView;
 use dagon_format::{sha256, Version};
 use dagon_sign::image::{self, sign_image, verify_image, ImageSpec, TEST_PUBLIC_KEY};
-use dagon_sign::provision::{self, FlashImage, UF2_FAMILY_RP2040};
+use dagon_sign::provision::{self, FlashImage};
 use dagon_sign::release::{self, ReleaseItem};
 use dagon_topology::Topology;
 use ed25519_compact::{KeyPair, Seed};
+
+/// The RP2040 UF2 family ID (the UF2 spec's registry).
+const UF2_FAMILY_RP2040: u32 = 0xE48B_FF56;
+
+/// The first-install file of a builtin MCU (its writer takes one file).
+fn first_file(
+    mcu: &str,
+    stage0: Option<&[u8]>,
+    boot: (&image::Slot, &[u8]),
+    app: (&image::Slot, &[u8]),
+) -> Vec<u8> {
+    let def = dagon_topology::defs::Registry::builtin().mcu(mcu).unwrap();
+    provision::first_install_file(def, stage0, boot, app).unwrap()
+}
 
 const TEST_SEED: [u8; 32] = [
     0x9d, 0x61, 0xb1, 0x9d, 0xef, 0xfd, 0x5a, 0x60, 0xba, 0x84, 0x4a, 0xf4, 0x92, 0xec, 0x2c, 0xc4,
@@ -136,7 +150,15 @@ fn release_build_with_desk_demo() {
     let t = desk_demo();
     // Hub images first on purpose: the build orders entries by update.order.
     let images = vec![hub_app(1), hub_app(0), f401_app(1), f401_app(0)];
-    let r = release::build(&t, &topology_bin(), &images, "release-1.1", &key()).unwrap();
+    let r = release::build(
+        dagon_topology::defs::Registry::builtin(),
+        &t,
+        &topology_bin(),
+        &images,
+        "release-1.1",
+        &key(),
+    )
+    .unwrap();
     let b = BundleView::parse(&r.bundle).unwrap();
     b.verify(&TEST_PUBLIC_KEY).unwrap();
     let m = b.manifest();
@@ -180,9 +202,16 @@ fn release_build_rejects_bad_sets() {
     let t = desk_demo();
     let topo = topology_bin();
     let check = |images: Vec<Vec<u8>>| {
-        release::build(&t, &topo, &images, "r", &key())
-            .unwrap_err()
-            .check
+        release::build(
+            dagon_topology::defs::Registry::builtin(),
+            &t,
+            &topo,
+            &images,
+            "r",
+            &key(),
+        )
+        .unwrap_err()
+        .check
     };
 
     assert_eq!(check(vec![f401_app(0)]), "RB-02", "slot B missing");
@@ -227,11 +256,27 @@ fn release_build_rejects_bad_sets() {
     s.proto_version = 2;
     let skewed = sign_image(&s, &body(1), &key()).unwrap();
     let images = vec![f401_app(0), skewed];
-    assert!(release::build(&t, &topo, &images, "r", &key()).is_ok());
+    assert!(release::build(
+        dagon_topology::defs::Registry::builtin(),
+        &t,
+        &topo,
+        &images,
+        "r",
+        &key()
+    )
+    .is_ok());
     let yaml = format!("{DESK_DEMO}\nconstraints:\n  - lockstep: [hub, seg]\n");
     let locked = dagon_topology::parse_str(&yaml).unwrap();
     let topo = dagon_topology::compile(&locked).unwrap();
-    let err = release::build(&locked, &topo, &images, "r", &key()).unwrap_err();
+    let err = release::build(
+        dagon_topology::defs::Registry::builtin(),
+        &locked,
+        &topo,
+        &images,
+        "r",
+        &key(),
+    )
+    .unwrap_err();
     assert_eq!(err.check, "RB-05", "lockstep proto");
 }
 
@@ -263,7 +308,12 @@ fn f401_flash_places_bootcore_log_and_app() {
     let boot = sign_image(&boot_spec, &body(2), &key()).unwrap();
     let app = f401_app(0);
     let app_slot = image::slot("stm32f401re", image_kind::APP, 0).unwrap();
-    let bin = provision::f401_flash((&boot_spec.slot, &boot), (&app_slot, &app));
+    let bin = first_file(
+        "stm32f401re",
+        None,
+        (&boot_spec.slot, &boot),
+        (&app_slot, &app),
+    );
     assert_eq!(&bin[..1024], &boot[HEADER_SIZE..]);
     assert_eq!(&bin[0x7E00..0x8000], &boot[..HEADER_SIZE]);
     assert_eq!(
@@ -320,7 +370,7 @@ fn rescue_uf2_writes_whole_sectors_in_aligned_runs() {
     .unwrap();
     let bs = image::slot("rp2040", image_kind::BOOTCORE, 0).unwrap();
     let as_ = image::slot("rp2040", image_kind::APP, 0).unwrap();
-    let uf2 = provision::hub_rescue_uf2(&stage0, (&bs, &boot), (&as_, &app));
+    let uf2 = first_file("rp2040", Some(&stage0), (&bs, &boot), (&as_, &app));
     let sectors = uf2_sectors(&uf2);
     assert!(sectors.contains_key(&0x1000_3000), "stage0 tail sector");
     for (s, blocks) in &sectors {

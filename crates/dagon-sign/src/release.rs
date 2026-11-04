@@ -7,10 +7,11 @@ use dagon_format::bundle::{self, dest, BundleItem, NO_ENTRY};
 use dagon_format::header::{image_kind, target_tag, ImageHeader, HEADER_SIZE};
 use dagon_format::manifest::{self, entry_flags, ManifestEntry, ManifestFields};
 use dagon_format::{crc32, header, key_id, sha256};
+use dagon_topology::defs::Registry;
 use dagon_topology::schema::{Constraint, Role, Topology};
 use ed25519_compact::KeyPair;
 
-use crate::image::{self, capabilities_ok, mcu_id_of, parse_version, port_kind_of, sign};
+use crate::image::{self, capabilities_ok, parse_version, port_kind_of, sign};
 
 /// Size of one hub bundle store face (4 MiB flash layout).
 pub const SUB_BUNDLE_LIMIT: usize = 884_736;
@@ -143,16 +144,18 @@ struct Placed<'a> {
     node: usize,
 }
 
-/// Runs the release checks against topology `t`, then signs and assembles.
-/// `topology_bin` is the canonical binary of `t`; it is carried as is.
+/// Runs the release checks against topology `t` and the MCU definitions of
+/// `reg`, then signs and assembles. `topology_bin` is the canonical binary
+/// of `t`; it is carried as is.
 pub fn build(
+    reg: &Registry,
     t: &Topology,
     topology_bin: &[u8],
     images: &[Vec<u8>],
     name: &str,
     key: &KeyPair,
 ) -> Result<Release, ReleaseError> {
-    if !dagon_topology::check(t).is_pushable() {
+    if !dagon_topology::check_with(reg, t).is_pushable() {
         return Err(fail(
             "RB-02",
             "R-NODE",
@@ -162,9 +165,9 @@ pub fn build(
     let placed = images
         .iter()
         .enumerate()
-        .map(|(i, img)| place(t, i, img, &key.pk))
+        .map(|(i, img)| place(reg, t, i, img, &key.pk))
         .collect::<Result<Vec<_>, _>>()?;
-    let release_seq = check_set(t, &placed)?;
+    let release_seq = check_set(reg, t, &placed)?;
     check_constraints(t, &placed)?;
 
     let rank = |node: usize| {
@@ -201,6 +204,7 @@ pub fn build(
 
 /// RB-01 (signature, key), RB-02 (node match), RB-03 (slot budget), RB-04.
 fn place<'a>(
+    reg: &Registry,
     t: &Topology,
     i: usize,
     img: &'a [u8],
@@ -220,7 +224,8 @@ fn place<'a>(
             )
         })?;
     let n = &t.nodes[node];
-    if mcu_id_of(&n.mcu) != Some(h.mcu_id) || port_kind_of(&n.port) != Some(h.port_kind) {
+    let mcu_id = reg.mcu(&n.mcu).map(|m| m.wire_id);
+    if mcu_id != Some(h.mcu_id) || port_kind_of(&n.port) != Some(h.port_kind) {
         return Err(fail(
             "RB-02",
             "R-NODE",
@@ -230,7 +235,7 @@ fn place<'a>(
             ),
         ));
     }
-    let slot = image::slot_of(&n.mcu, &h).ok_or_else(|| {
+    let slot = image::slot_of(reg, &n.mcu, &h).ok_or_else(|| {
         fail(
             "RB-02",
             "R-NODE",
@@ -259,7 +264,7 @@ fn place<'a>(
 }
 
 /// RB-02: 1..=16 entries, one release_seq, no duplicate slot, A/B pairs whole.
-fn check_set(t: &Topology, placed: &[Placed<'_>]) -> Result<u32, ReleaseError> {
+fn check_set(reg: &Registry, t: &Topology, placed: &[Placed<'_>]) -> Result<u32, ReleaseError> {
     if !(1..=manifest::MAX_ENTRIES).contains(&placed.len()) {
         return Err(fail("RB-02", "R-NODE", "a release holds 1 to 16 images"));
     }
@@ -284,7 +289,7 @@ fn check_set(t: &Topology, placed: &[Placed<'_>]) -> Result<u32, ReleaseError> {
             ));
         }
         let n = &t.nodes[a.node];
-        let has_pair = image::slot(&n.mcu, a.header.image_kind, 1).is_some();
+        let has_pair = image::slot_with(reg, &n.mcu, a.header.image_kind, 1).is_some();
         let other = 1 - a.header.slot_binding.min(1);
         let paired = placed.iter().any(|b| {
             (b.node, b.header.image_kind, b.header.slot_binding)

@@ -174,8 +174,12 @@ fn link_of(to: Target) -> LinkKind {
 }
 
 /// The relay target of topology node `node` (not the hub).
-pub(crate) fn node_target(t: &dagon_topology::Topology, node: &str) -> Result<Target, String> {
-    let bin = dagon_topology::compile(t).map_err(|e| e.to_string())?;
+pub(crate) fn node_target(
+    reg: &dagon_topology::defs::Registry,
+    t: &dagon_topology::Topology,
+    node: &str,
+) -> Result<Target, String> {
+    let bin = dagon_topology::compile_with(reg, t).map_err(|e| e.to_string())?;
     let view = dagon_format::TopologyView::parse(&bin).map_err(|e| format!("{e:?}"))?;
     let i = t
         .nodes
@@ -226,7 +230,8 @@ pub fn command(args: &[&str]) -> Result<(), String> {
         Target::Hub
     } else {
         node_target(
-            &read_topology(&cfg.topology_path(o.get("topology"))?)?,
+            &crate::defs::registry(&cfg)?,
+            &read_topology(&cfg, &cfg.topology_path(o.get("topology"))?)?,
             node,
         )?
     };

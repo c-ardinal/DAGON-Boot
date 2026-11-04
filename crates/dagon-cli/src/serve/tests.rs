@@ -122,6 +122,121 @@ fn host_origin_and_passphrase_are_enforced() {
 }
 
 #[test]
+fn definitions_are_served_behind_the_same_guards_with_the_projects_boards() {
+    let a = start("defs");
+    let toml = std::fs::read_to_string(a.dir.join("dagon.toml")).unwrap();
+    std::fs::write(
+        a.dir.join("dagon.toml"),
+        format!(
+            "{toml}\n[board.desk-pico]\nproduct = \"Desk Pico\"\nmcu = \"rp2040\"\n\
+             flash_bytes = 0x40_0000\ndrawing = \"pico\"\n\
+             default_link = {{ kind = \"i2c\", addr = 0x44, control = \"full\" }}\n"
+        ),
+    )
+    .unwrap();
+    let bearer = auth(&a);
+    assert_eq!(http(&a, "GET", "/v1/definitions", &[], b"").0, 401);
+    let rebind = [("Host", "attacker.example:80"), ("Authorization", &bearer)];
+    assert_eq!(http(&a, "GET", "/v1/definitions", &rebind, b"").0, 403);
+    let cross = [
+        ("Origin", "https://example.com"),
+        ("Authorization", &bearer),
+    ];
+    assert_eq!(http(&a, "GET", "/v1/definitions", &cross, b"").0, 403);
+    let (st, body) = http(
+        &a,
+        "GET",
+        "/v1/definitions",
+        &[("Authorization", &bearer)],
+        b"",
+    );
+    assert_eq!(st, 200, "{body}");
+    let reg = dagon_topology::defs::Registry::from_json(&body).unwrap();
+    assert_eq!(reg.board("desk-pico").unwrap().product, "Desk Pico");
+    assert!(reg.mcu("esp32s3").is_some());
+    // Nothing local leaves: no project or DAGON source path, no command.
+    let plain = body.replace("\\\\", "\\");
+    let src = std::path::Path::new(crate::dagonsrc::BUILT_FROM);
+    for local in [
+        a.dir.display().to_string(),
+        src.display().to_string(),
+        src.canonicalize().unwrap().display().to_string(),
+        "dagon.toml".into(),
+        "targets/".into(),
+        "rustup".into(),
+    ] {
+        assert!(!plain.contains(&local), "{local} in {body}");
+    }
+
+    // A broken project definition is a 500 without its path.
+    std::fs::write(
+        a.dir.join("dagon.toml"),
+        format!("{toml}\n[board.bad]\nmcu = \"nope\"\n"),
+    )
+    .unwrap();
+    let (st, body) = http(
+        &a,
+        "GET",
+        "/v1/definitions",
+        &[("Authorization", &bearer)],
+        b"",
+    );
+    assert_eq!(st, 500);
+    assert!(!body.contains(&*a.dir.to_string_lossy()), "{body}");
+    assert!(body.contains(super::api::DEFS_ERROR), "{body}");
+    // hello still answers, but offers nothing to flash: the builtin set
+    // never stands in for a project's definitions.
+    let (st, hello) = http(&a, "GET", "/v1/hello", &[("Authorization", &bearer)], b"");
+    assert_eq!(st, 200);
+    let v: serde_json::Value = serde_json::from_str(&hello).unwrap();
+    assert_eq!(v["flash_mcus"], serde_json::json!([]));
+    // A 構成 is not checked against the builtin set instead either.
+    let yaml = std::fs::read(a.dir.join("topology/t.yaml")).unwrap();
+    let (st, body) = http(
+        &a,
+        "PUT",
+        "/v1/topology",
+        &[("Authorization", &bearer)],
+        &yaml,
+    );
+    assert_eq!(st, 500);
+    assert!(body.contains(super::api::DEFS_ERROR), "{body}");
+    // Every job of the project stops before it starts, with the same words.
+    for (path, body) in [
+        ("/v1/sign", r#"{"nodes":["seg"]}"#),
+        ("/v1/release", r#"{"version":"1.0.0"}"#),
+        ("/v1/flash", r#"{"node":"seg"}"#),
+        ("/v1/build", r#"{}"#),
+        ("/v1/gen", r#"{}"#),
+    ] {
+        let h = [
+            ("Authorization", bearer.as_str()),
+            ("Content-Type", "application/json"),
+        ];
+        let (st, started) = http(&a, "POST", path, &h, body.as_bytes());
+        assert_eq!(st, 202, "{path}: {started}");
+        let v: serde_json::Value = serde_json::from_str(&started).unwrap();
+        let job_path = format!("/v1/jobs/{}", v["job"]);
+        let t = std::time::Instant::now();
+        let job = loop {
+            let (_, j) = http(&a, "GET", &job_path, &[("Authorization", &bearer)], b"");
+            if j.contains(r#""failed""#) || t.elapsed() > std::time::Duration::from_secs(5) {
+                break j;
+            }
+            std::thread::yield_now();
+        };
+        assert!(
+            job.contains(r#""failed""#) && job.contains(super::api::DEFS_ERROR),
+            "{path}: {job}"
+        );
+        assert!(
+            !job.contains("nope"),
+            "{path}: the reason stays in the terminal: {job}"
+        );
+    }
+}
+
+#[test]
 fn hello_reports_keys_without_their_values() {
     let a = start("hello");
     let (st, body) = http(&a, "GET", "/v1/hello", &[("Authorization", &auth(&a))], b"");
@@ -476,6 +591,53 @@ slot-b = []
         (Some("nodes/seg"), Some("seg"))
     );
     assert_eq!(t["features"][0], "slot-b");
+}
+
+#[test]
+fn a_projects_own_words_reach_the_page_only_as_plain_names() {
+    let a = start("plain");
+    let toml = std::fs::read_to_string(a.dir.join("dagon.toml")).unwrap();
+    let secret = "C:/Users/me/sk-ant-FAKE:TOKEN";
+    std::fs::write(
+        a.dir.join("dagon.toml"),
+        format!(
+            "{toml}\n[board.desk-pico]\nproduct = \"{secret}\"\nmcu = \"rp2040\"\n\
+             flash_bytes = 0x40_0000\ndrawing = \"pico\"\n\
+             header = [{{ pin = \"GPIO4\", label = \"{secret}\" }}]\n\
+             default_link = {{ kind = \"i2c\", addr = 0x44, control = \"full\" }}\n\
+             [board.desk-two]\nproduct = \"Desk Two\"\nmcu = \"rp2040\"\n\
+             flash_bytes = 0x40_0000\ndrawing = \"pico\"\n\
+             default_link = {{ kind = \"i2c\", addr = 0x45, control = \"full\" }}\n"
+        ),
+    )
+    .unwrap();
+    let ok = [("Authorization", auth(&a))];
+    let ok: Vec<(&str, &str)> = ok.iter().map(|(k, v)| (*k, v.as_str())).collect();
+    for route in ["/v1/targets", "/v1/definitions", "/v1/hello"] {
+        let (st, body) = http(&a, "GET", route, &ok, b"");
+        assert_eq!(st, 200, "{route}: {body}");
+        assert!(
+            !body.contains("sk-ant") && !body.contains("Users"),
+            "{route}: {body}"
+        );
+    }
+    let (_, body) = http(&a, "GET", "/v1/targets", &ok, b"");
+    let v: serde_json::Value = serde_json::from_str(&body).unwrap();
+    let product = |id: &str| {
+        v["boards"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|b| b["id"] == id)
+            .map(|b| b["product"].clone())
+    };
+    assert_eq!(product("desk-pico"), Some("project-text".into()));
+    assert_eq!(product("desk-two"), Some("Desk Two".into()));
+    // Builtin boards keep their own product names.
+    assert_eq!(
+        product("waveshare-rp2040-touch-lcd-1.28"),
+        Some("Waveshare RP2040-Touch-LCD-1.28".into())
+    );
 }
 
 #[test]
@@ -1425,4 +1587,106 @@ fn the_demo_uplink_follows_the_saved_topology() {
     // Without an uplink the 親機 is on USB again.
     assert_eq!(http(&d, "PUT", "/v1/topology", &h, YAML.as_bytes()).0, 200);
     assert_eq!(sim(&d)["uplink"], "usb-cdc");
+}
+
+/// What the page receives of job `started` (its log lines and its error),
+/// decoded from the events: every string as the page reads it.
+fn job_text(rx: &std::sync::mpsc::Receiver<String>, started: &str) -> String {
+    let id = serde_json::from_str::<serde_json::Value>(started).unwrap()["job"].clone();
+    let mut text = Vec::new();
+    loop {
+        let ev = rx
+            .recv_timeout(std::time::Duration::from_secs(300))
+            .unwrap();
+        let ev: serde_json::Value = serde_json::from_str(&ev).unwrap();
+        if ev["job"] != id {
+            continue;
+        }
+        if ev["type"] == "job.log" {
+            for l in ev["lines"].as_array().unwrap() {
+                text.push(l.as_str().unwrap().to_string());
+            }
+        }
+        if ev["type"] == "job.result" {
+            if let Some(e) = ev["data"]["error"].as_str() {
+                text.push(e.to_string());
+            }
+            break;
+        }
+    }
+    text.join("\n")
+}
+
+/// Every spelling of the work area's folder.
+fn local_dirs(a: &Area) -> Vec<String> {
+    let canon = std::fs::canonicalize(&a.dir).unwrap();
+    vec![
+        a.dir.display().to_string(),
+        crate::config::plain_path(canon).display().to_string(),
+    ]
+}
+
+/// A job's first step can fail (here: dagon.toml does not parse); the
+/// error already hides the project's folder, for every kind of job.
+#[test]
+fn a_job_hides_the_project_folder_before_anything_can_fail() {
+    let a = start("pagebad");
+    std::fs::write(a.dir.join("dagon.toml"), "this is = not [toml\n").unwrap();
+    let rx = a.server.subscribe();
+    for (path, body) in [
+        ("/v1/build", serde_json::json!({ "nodes": ["seg"] })),
+        ("/v1/gen", serde_json::json!({})),
+    ] {
+        let (st, started) = post(&a, path, body);
+        assert_eq!(st, 202, "{path}: {started}");
+        let text = job_text(&rx, &started);
+        assert!(text.contains("<project>"), "{path}: {text}");
+        for local in local_dirs(&a) {
+            assert!(
+                !text.contains(&local),
+                "{path}: {local} reached the page: {text}"
+            );
+        }
+    }
+}
+
+/// /v1/build runs cargo: its lines and error name the app by its package,
+/// never a folder of this machine.
+#[test]
+fn build_output_reaches_the_page_without_local_folders() {
+    let a = start("pagebuild");
+    let app = a.dir.join("private/token/app");
+    std::fs::create_dir_all(app.join("src")).unwrap();
+    std::fs::write(
+        app.join("Cargo.toml"),
+        "[package]\nname = \"fake-app\"\nversion = \"0.0.0\"\nedition = \"2021\"\n[workspace]\n",
+    )
+    .unwrap();
+    // Does not compile: cargo names the package folder in its lines.
+    std::fs::write(
+        app.join("src/main.rs"),
+        "fn main() { let x: u8 = \"no\"; }\n",
+    )
+    .unwrap();
+    std::fs::write(
+        a.dir.join("dagon.toml"),
+        "topology = \"topology/t.yaml\"\n[build.seg]\npackage = \"private/token/app\"\n",
+    )
+    .unwrap();
+    let rx = a.server.subscribe();
+    let (st, started) = post(&a, "/v1/build", serde_json::json!({ "nodes": ["seg"] }));
+    assert_eq!(st, 202, "{started}");
+    let all = job_text(&rx, &started);
+    assert!(all.contains("Compiling fake-app"), "{all}");
+    assert!(all.contains("fake-app (the seg app)"), "{all}");
+    assert!(
+        all.contains("cargo build failed in fake-app (the seg app)"),
+        "{all}"
+    );
+    for local in ["private".to_string(), "token".to_string()]
+        .into_iter()
+        .chain(local_dirs(&a))
+    {
+        assert!(!all.contains(&local), "{local} reached the page: {all}");
+    }
 }

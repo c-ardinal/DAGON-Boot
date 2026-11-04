@@ -202,6 +202,10 @@ impl Server {
             server.set_state(id, "running");
             let mut job = Job {
                 id,
+                // Before anything can fail: the project's folder and home.
+                swaps: crate::flash::base_swaps(
+                    config.as_deref().and_then(std::path::Path::parent),
+                ),
                 config,
                 server: server.clone(),
                 cancel,
@@ -214,7 +218,7 @@ impl Server {
             let (state, data) = match r {
                 Ok(v) => ("succeeded", v),
                 Err(_) if job.cancelled() => ("cancelled", Value::Null),
-                Err(e) => ("failed", json!({ "error": e })),
+                Err(e) => ("failed", json!({ "error": job.page_text(&e) })),
             };
             if let Some(j) = server.jobs.lock().expect("jobs").get_mut(&id) {
                 j.result = Some(data.clone());
@@ -254,14 +258,18 @@ impl Server {
 /// A running job's handle on the server.
 pub struct Job {
     pub id: u64,
-    /// dagon.toml of the project open when the job was registered.
-    pub config: Option<PathBuf>,
+    /// dagon.toml of the project open when the job was registered; a job
+    /// reaches it only through [`Job::project`].
+    config: Option<PathBuf>,
     server: Arc<Server>,
     cancel: Arc<AtomicBool>,
     lines: Vec<String>,
     flushed: Instant,
     /// Log lines taken so far (for [`MAX_LOG_LINES`]).
     sent: usize,
+    /// Folders of this machine and what the page sees instead
+    /// ([`crate::flash::page_swaps`]); applied to every line and error.
+    swaps: Vec<(String, String)>,
 }
 
 impl Job {
@@ -279,8 +287,41 @@ impl Job {
         );
     }
 
-    /// Adds a log line; lines go out in batches.
+    /// The project the job was registered with: its dagon.toml, settings
+    /// and definitions. The only way a job reaches its project: from here
+    /// on every log line and the job's error also name its apps, packages
+    /// and DAGON source as the page should see them.
+    pub fn project(
+        &mut self,
+    ) -> Result<
+        (
+            Option<PathBuf>,
+            crate::config::Config,
+            dagon_topology::defs::Registry,
+        ),
+        String,
+    > {
+        let cfg = super::api::config_at(&self.server, self.config.as_deref())?;
+        let reg = super::api::project_registry(&cfg)?;
+        let more = crate::flash::page_swaps(&cfg, &reg);
+        let all = std::mem::take(&mut self.swaps)
+            .into_iter()
+            .chain(more)
+            .collect();
+        self.swaps = crate::flash::most_specific_first(all);
+        Ok((self.config.clone(), cfg, reg))
+    }
+
+    /// `text` as the page may see it.
+    pub fn page_text(&self, text: &str) -> String {
+        crate::flash::hidden(text, &self.swaps)
+    }
+
+    /// Adds a log line, folders hidden as [`Job::page_text`] does (home and
+    /// the project from the start, its apps, packages and DAGON source once
+    /// [`Job::project`] loads it); lines go out in batches.
     pub fn log(&mut self, line: &str) {
+        let line = &self.page_text(line);
         self.sent += 1;
         if self.sent > MAX_LOG_LINES {
             if self.sent == MAX_LOG_LINES + 1 {

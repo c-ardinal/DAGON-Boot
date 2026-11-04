@@ -24,13 +24,15 @@ pub enum LinkError {
 }
 
 /// What the peer sees when this end restarts (a reboot after an update).
+/// The same split as dagon-host's `Reconnect` (`Reopen` / `Stays`).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Reconnect {
-    /// The link disappears and comes back as a new device (USB): the host
-    /// waits for it to re-enumerate and reopens it.
+    /// The link goes away with this end and the peer opens it again: a USB
+    /// device re-enumerates; a TCP connection (wifi-tcp, ethernet) or a BLE
+    /// connection is dropped by the restart and connected anew.
     Reenumerates,
-    /// The link stays (UART, I2C, TCP, BLE): the peer keeps it open and
-    /// simply sees silence while the node restarts.
+    /// The link stays (UART, I2C, CAN): the peer keeps it open and simply
+    /// sees silence while the node restarts.
     Persistent,
 }
 

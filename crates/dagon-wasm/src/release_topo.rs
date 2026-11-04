@@ -4,9 +4,9 @@
 //! come from the 構成 on the page wherever a node's tag matches; the rest is
 //! the binary's. Compiling the result gives the release's topology bytes again.
 
-use dagon_format::header::{mcu_id, port_kind};
 use dagon_format::topology::{self as tp, TopologyView};
 use dagon_format::BundleView;
+use dagon_topology::defs::PortKind;
 use dagon_topology::schema::{Link, Node};
 use dagon_topology::Topology;
 use yaml_serde::{Mapping, Value};
@@ -27,21 +27,12 @@ fn map(entries: impl IntoIterator<Item = (&'static str, Value)>) -> Value {
     Value::Mapping(m)
 }
 
-fn mcu_name(id: u16) -> Option<&'static str> {
-    match id {
-        mcu_id::RP2040 => Some("rp2040"),
-        mcu_id::STM32F401XE => Some("stm32f401re"),
-        mcu_id::ESP32S3 => Some("esp32s3"),
-        _ => None,
-    }
+fn mcu_name(id: u16) -> Option<String> {
+    crate::defs::with_registry(|reg| reg.mcu_by_wire(id).map(|m| m.id.clone()))
 }
 
 fn port_name(k: u8) -> Option<&'static str> {
-    match k {
-        port_kind::SELF_BOOT => Some("self-boot"),
-        port_kind::VENDOR_STAGE2 => Some("vendor-stage2"),
-        _ => None,
-    }
+    PortKind::from_wire(k).map(PortKind::as_str)
 }
 
 fn tier_name(t: u8) -> Option<&'static str> {
@@ -87,7 +78,7 @@ fn node_value(x: &tp::TopoNode, id: &str, tag: &str, page: Option<&Node>) -> Res
     } else {
         "node"
     };
-    let mut m = vec![("id", s(id)), ("mcu", s(mcu))];
+    let mut m = vec![("id", s(id)), ("mcu", s(&mcu))];
     if let Some(b) = page.and_then(|p| p.board.as_deref()) {
         m.push(("board", s(b)));
     }
@@ -212,7 +203,7 @@ pub fn release_topology_value(bundle: &[u8], current: &str) -> Result<Option<Val
     let mut recovery = Mapping::new();
     for x in &raw {
         let tag = tag_text(&x.target_tag);
-        let page = mcu_name(x.mcu_id).and_then(|m| matching(cur, &tag, m));
+        let page = mcu_name(x.mcu_id).and_then(|m| matching(cur, &tag, &m));
         let id = page.map_or_else(|| tag.clone(), |p| p.id.clone());
         nodes.push(node_value(x, &id, &tag, page)?);
         let tiers: Vec<Value> = x

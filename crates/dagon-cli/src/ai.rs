@@ -6,6 +6,8 @@
 use std::io::{BufRead, Read, Write};
 use std::time::Duration;
 
+use dagon_topology::defs::{BoardDef, I2cPair, McuDef, Registry, Writer};
+use dagon_topology::schema::{ControlKind, LinkKind, RomEntry, UartIface};
 use serde_json::{json, Value};
 
 /// The API key is read from here only; it is never printed, logged or written.
@@ -39,7 +41,6 @@ checker report (JSON) of your YAML. Fix every reported error and submit the whol
 Always reply by calling `submit_topology`.";
 
 const SCHEMA_RS: &str = include_str!("../../dagon-topology/src/schema.rs");
-const BOARDS_RS: &str = include_str!("../../dagon-topology/src/boards.rs");
 const CHECK_RS: &str = include_str!("../../dagon-topology/src/check.rs");
 const EXAMPLE_YAML: &str = include_str!("../../../topology/desk-demo.yaml");
 
@@ -75,7 +76,10 @@ pub fn topology(args: &[&str]) -> Result<(), String> {
             Err(unanswered(qs))
         }
     };
-    let done = generate(&description, &a.model, &mut api, &mut ask)?;
+    // The dagon.toml here, if any (else the builtin set); definitions that
+    // do not load stop here with the reason.
+    let reg = crate::defs::registry(&crate::config::Config::load(None)?)?;
+    let done = generate(&description, &a.model, &reg, &mut api, &mut ask)?;
     std::fs::write(&a.out, &done.yaml).map_err(|e| format!("cannot write {}: {e}", a.out))?;
     for i in done.report.warnings() {
         println!("warning {} {}: {}", i.rule, i.path, i.message);
@@ -101,6 +105,7 @@ pub(crate) fn api_key_present() -> bool {
 /// report (JSON), with the model's questions answered through `ask`.
 pub(crate) fn topology_for(
     description: &str,
+    reg: &Registry,
     ask: &mut Ask,
     cancel: &std::sync::atomic::AtomicBool,
 ) -> Result<(String, String), String> {
@@ -111,7 +116,7 @@ pub(crate) fn topology_for(
     let model = std::env::var(MODEL_ENV).unwrap_or_else(|_| DEFAULT_MODEL.into());
     let mut post = |body: &Value| post_messages(API_URL, &key, body);
     let mut api = |body: &Value| unless_cancelled(cancel, &mut post, body);
-    let done = generate(description, &model, &mut api, ask)?;
+    let done = generate(description, &model, reg, &mut api, ask)?;
     Ok((done.yaml, done.report.to_json()))
 }
 
@@ -181,6 +186,7 @@ pub(crate) type Ask<'a> = dyn FnMut(&[String]) -> Result<Vec<String>, String> + 
 fn generate(
     description: &str,
     model: &str,
+    reg: &Registry,
     api: &mut Api,
     ask: &mut Ask,
 ) -> Result<Outcome, String> {
@@ -191,7 +197,7 @@ fn generate(
     let mut answers = Vec::new();
     let mut last_errors = String::new();
     for round in 1..=MAX_ROUNDS {
-        let resp = api(&request(model, &messages))?;
+        let resp = api(&request(model, reg, &messages))?;
         let (id, yaml, questions) = tool_call(&resp)?;
         messages.push(json!({ "role": "assistant", "content": resp["content"] }));
         let (feedback, is_error) = if !questions.is_empty() {
@@ -205,7 +211,7 @@ fn generate(
             answers.extend(questions.into_iter().zip(got));
             (format!("User answers:\n{text}"), false)
         } else {
-            let report = dagon_topology::check_str(&yaml);
+            let report = dagon_topology::check_str_with(reg, &yaml);
             if report.is_pushable() {
                 return Ok(Outcome {
                     yaml,
@@ -236,7 +242,91 @@ fn generate(
     ))
 }
 
-fn request(model: &str, messages: &[Value]) -> Value {
+/// What the model needs of every MCU and board in use, as JSON built field
+/// by field from an allow-list: ids, names, pins and their labels, flash
+/// sizes, link kinds, the writer kind. Nothing else a definition holds
+/// (doctor commands and hints, file names, comments) is ever sent.
+/// A project's own words were made safe when its definitions loaded
+/// (`page_safe`, else `project-text`; identifiers must be plain).
+fn board_table(reg: &Registry) -> String {
+    let mcus: Vec<Value> = reg.mcus().iter().map(mcu_facts).collect();
+    let boards: Vec<Value> = reg.boards().iter().map(board_facts).collect();
+    serde_json::to_string_pretty(&json!({ "mcus": mcus, "boards": boards }))
+        .expect("facts serialise")
+}
+
+fn names(kinds: &[LinkKind]) -> Vec<&'static str> {
+    kinds.iter().map(|k| k.name()).collect()
+}
+
+fn pairs(p: &[I2cPair]) -> Vec<Value> {
+    p.iter()
+        .map(|p| json!({ "controller": p.controller, "sda": p.sda, "scl": p.scl }))
+        .collect()
+}
+
+fn mcu_facts(m: &McuDef) -> Value {
+    let writer = match m.writer {
+        Writer::Uf2Drive { .. } => "uf2-drive",
+        Writer::ProbeRs { .. } => "probe-rs",
+        Writer::Espflash { .. } => "espflash",
+    };
+    json!({
+        "id": m.id,
+        "name": m.name,
+        "port": m.port.as_str(),
+        "gpio_count": m.gpio_count,
+        "flash_maps": m.flash_maps.iter().map(|f| json!({ "name": f.name, "bytes": f.bytes })).collect::<Vec<_>>(),
+        "writer": writer,
+        "links": { "up": names(&m.links.up), "down": names(&m.links.down) },
+        "coordinator": m.coordinator.as_ref().map(|c| json!({
+            "pio_state_machines": c.pio_state_machines,
+            "pio_uart_state_machines": c.pio_uart_state_machines,
+            "uart0_tx": c.uart0_tx,
+            "uart0_rx": c.uart0_rx,
+        })),
+        "rom_i2c": m.rom_i2c.as_ref().map(|r| json!({
+            "addr": r.addr,
+            "max_hz": r.max_hz,
+            "pairs": pairs(&r.pairs),
+        })),
+    })
+}
+
+fn board_facts(b: &BoardDef) -> Value {
+    let link = b.default_link.map(|l| {
+        json!({
+            "kind": l.kind.name(),
+            "iface": l.iface.map(|i| match i {
+                UartIface::HwUart0 => "hw-uart0",
+                UartIface::PioUart => "pio-uart",
+            }),
+            "addr": l.addr,
+            "baud": l.baud,
+            "control": match l.control {
+                ControlKind::Full => "full",
+                ControlKind::Cooperative => "cooperative",
+            },
+            "rom_entry": l.rom_entry.map(|r| match r {
+                RomEntry::ForceDownloadBoot => "force-download-boot",
+                RomEntry::M5pm1 => "m5pm1",
+                RomEntry::Stm32I2cRom => "stm32-i2c-rom",
+            }),
+        })
+    });
+    json!({
+        "id": b.id,
+        "product": b.product,
+        "mcu": b.mcu,
+        "flash_bytes": b.flash_bytes,
+        "i2c_target": b.i2c_target,
+        "header": b.header.iter().map(|h| json!({ "pin": h.pin, "label": h.label })).collect::<Vec<_>>(),
+        "i2c": pairs(&b.i2c_pairs),
+        "default_link": link,
+    })
+}
+
+fn request(model: &str, reg: &Registry, messages: &[Value]) -> Value {
     // A cache breakpoint on the newest block bills only the delta next round.
     let mut messages = messages.to_vec();
     if let Some(block) = messages
@@ -248,9 +338,10 @@ fn request(model: &str, messages: &[Value]) -> Value {
     }
     let system = format!(
         "{INSTRUCTIONS}\n\n<schema file=\"schema.rs\">\n{SCHEMA_RS}</schema>\n\n\
-         <board_table file=\"boards.rs\">\n{BOARDS_RS}</board_table>\n\n\
+         <board_table format=\"json\">\n{}\n</board_table>\n\n\
          <checks file=\"check.rs\">\n{CHECK_RS}</checks>\n\n\
-         <example file=\"desk-demo.yaml\">\n{EXAMPLE_YAML}</example>"
+         <example file=\"desk-demo.yaml\">\n{EXAMPLE_YAML}</example>",
+        board_table(reg)
     );
     json!({
         "model": model,
@@ -381,7 +472,7 @@ mod tests {
         };
         let mut api = |b: &Value| unless_cancelled(&flag, &mut fake, b);
         let mut ask = |_: &[String]| Ok(Vec::new());
-        let r = generate("a hub", "m", &mut api, &mut ask);
+        let r = generate("a hub", "m", Registry::builtin(), &mut api, &mut ask);
         assert_eq!(r.unwrap_err(), "cancelled");
         assert_eq!(calls, 0);
     }
@@ -414,7 +505,14 @@ mod tests {
             asked.extend_from_slice(qs);
             Ok(vec!["0x42".to_string()])
         };
-        let out = generate("hub and seg", "m-test", &mut api, &mut ask).unwrap();
+        let out = generate(
+            "hub and seg",
+            "m-test",
+            Registry::builtin(),
+            &mut api,
+            &mut ask,
+        )
+        .unwrap();
         assert_eq!(out.rounds, 3);
         assert_eq!(out.yaml, EXAMPLE_YAML);
         assert!(out.report.is_pushable());
@@ -440,7 +538,7 @@ mod tests {
             Ok(reply("t", "not: [valid", &[]))
         };
         let mut ask = |_: &[String]| -> Result<Vec<String>, String> { unreachable!() };
-        let e = generate("x", "m", &mut api, &mut ask).unwrap_err();
+        let e = generate("x", "m", Registry::builtin(), &mut api, &mut ask).unwrap_err();
         assert_eq!(calls, MAX_ROUNDS);
         assert!(e.contains("no error-free topology"), "{e}");
     }
@@ -449,7 +547,7 @@ mod tests {
     fn non_interactive_questions_are_printed_as_error() {
         let mut api = |_: &Value| Ok(reply("t", "", &["baud rate of watch?"]));
         let mut ask = |qs: &[String]| Err(unanswered(qs));
-        let e = generate("x", "m", &mut api, &mut ask).unwrap_err();
+        let e = generate("x", "m", Registry::builtin(), &mut api, &mut ask).unwrap_err();
         assert!(e.contains("baud rate of watch?"), "{e}");
     }
 
@@ -541,7 +639,7 @@ mod tests {
     fn last_message_gets_cache_breakpoint_only_in_request() {
         let msg = |role: &str, t: &str| json!({ "role": role, "content": [{ "type": "text", "text": t }] });
         let msgs = vec![msg("user", "a"), msg("assistant", "b"), msg("user", "c")];
-        let r = request("m", &msgs);
+        let r = request("m", Registry::builtin(), &msgs);
         assert_eq!(
             r["messages"][2]["content"][0]["cache_control"]["type"],
             "ephemeral"
@@ -550,6 +648,128 @@ mod tests {
             .get("cache_control")
             .is_none());
         assert!(msgs[2]["content"][0].get("cache_control").is_none());
+    }
+
+    #[test]
+    fn the_board_table_sends_facts_only_never_a_projects_commands_or_paths() {
+        let dir = std::env::temp_dir().join(format!("dagon-ai-defs-{}", std::process::id()));
+        for sub in ["m/stage0", "m/bootcore"] {
+            std::fs::create_dir_all(dir.join(sub)).unwrap();
+        }
+        let secret = "sk-ant-FAKE-TOKEN-4242";
+        let tool = dir
+            .join("bin/tool.exe")
+            .display()
+            .to_string()
+            .replace('\\', "/");
+        let mcu = include_str!("../../../targets/mcu/rp2040/dagon-mcu.toml")
+            .replace(
+                "id = \"rp2040\"",
+                &format!("# {secret} at {tool}\nid = \"desk-m0\""),
+            )
+            .replace("wire_id = 0x0001", "wire_id = 0x00F2")
+            .replace("name = \"rp2040-4m\"", "name = \"desk-m0-4m\"");
+        let doctor = format!(
+            "\n[[doctor]]\nwhat = \"desk tool\"\nprobe = [\"{tool}\", \"--token\", \"{secret}\"]\n\
+             expect = \"runs\"\nfix = [\"{tool}\", \"install\"]\nhint = \"ask {secret}\"\n"
+        );
+        std::fs::write(dir.join("m/dagon-mcu.toml"), format!("{mcu}{doctor}")).unwrap();
+        let toml = dir.join("dagon.toml");
+        std::fs::write(
+            &toml,
+            "mcu_files = [\"m/dagon-mcu.toml\"]\n\
+             [board.desk-pico]\nproduct = \"Desk Pico\"\nmcu = \"desk-m0\"\n\
+             flash_bytes = 0x40_0000\ndrawing = \"pico\"\n\
+             header = [{ pin = \"GPIO4\", label = \"D4\" }]\n\
+             default_link = { kind = \"i2c\", addr = 0x44, control = \"full\" }\n\
+             [board.desk-path]\nproduct = \"C:/Users/me/desk\"\nmcu = \"desk-m0\"\n\
+             flash_bytes = 0x40_0000\ndrawing = \"pico\"\n\
+             header = [{ pin = \"GPIO4\", label = \"see C:/Users/me/notes\" }]\n\
+             default_link = { kind = \"i2c\", addr = 0x45, control = \"full\" }\n",
+        )
+        .unwrap();
+        let reg = Registry::load(&[dagon_topology::defs::Source::Project(&toml)]).unwrap();
+        std::fs::remove_dir_all(&dir).unwrap();
+        assert!(!reg.mcu("desk-m0").unwrap().doctor.is_empty());
+
+        let system = request("m", &reg, &[])["system"][0]["text"]
+            .as_str()
+            .unwrap()
+            .to_string();
+        let table: Value = serde_json::from_str(&board_table(&reg)).unwrap();
+        let ids = |k: &str| -> Vec<String> {
+            table[k]
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|d| d["id"].as_str().unwrap().into())
+                .collect()
+        };
+        assert_eq!(
+            ids("mcus"),
+            reg.mcus().iter().map(|m| m.id.clone()).collect::<Vec<_>>()
+        );
+        assert_eq!(
+            ids("boards"),
+            reg.boards()
+                .iter()
+                .map(|b| b.id.clone())
+                .collect::<Vec<_>>()
+        );
+        let board = |id: &str| -> Value {
+            table["boards"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .find(|b| b["id"] == id)
+                .unwrap()
+                .clone()
+        };
+        let pico = &board("desk-pico");
+        // A project's words that are not plain names go as project-text.
+        let path = board("desk-path");
+        assert_eq!(path["product"], dagon_topology::defs::PROJECT_TEXT);
+        assert_eq!(
+            path["header"][0],
+            json!({ "pin": "GPIO4", "label": dagon_topology::defs::PROJECT_TEXT })
+        );
+        assert_eq!(pico["product"], "Desk Pico");
+        // Builtin facts go as they are.
+        assert_eq!(
+            board("waveshare-rp2040-touch-lcd-1.28")["product"],
+            "Waveshare RP2040-Touch-LCD-1.28"
+        );
+        assert_eq!(pico["header"][0], json!({ "pin": "GPIO4", "label": "D4" }));
+        assert_eq!(pico["default_link"]["addr"], 0x44);
+        let m0 = table["mcus"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|m| m["id"] == "desk-m0")
+            .unwrap();
+        assert_eq!(m0["writer"], "uf2-drive");
+        assert_eq!(m0["links"]["up"], json!(["usb-cdc"]));
+
+        let plain = system.replace("\\\\", "\\");
+        let home = std::env::var("USERPROFILE")
+            .or_else(|_| std::env::var("HOME"))
+            .unwrap_or_default();
+        for never in [
+            secret,
+            "tool.exe",
+            "desk tool",
+            "rustup",
+            "INFO_UF2",
+            "boards.rs",
+            "Users",
+            &dir.display().to_string(),
+            &home,
+        ] {
+            assert!(
+                never.is_empty() || !plain.contains(never),
+                "{never} reached the prompt"
+            );
+        }
     }
 
     #[test]

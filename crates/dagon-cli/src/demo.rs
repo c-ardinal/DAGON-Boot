@@ -130,8 +130,15 @@ fn release(key: &KeyPair) -> Result<Vec<u8>, String> {
         img(key, &HUB, 0, NEW, HUB_LEN)?,
         img(key, &HUB, 1, NEW, HUB_LEN)?,
     ];
-    let r =
-        dagon_sign::release::build(&t, &bin, &images, RELEASE, key).map_err(|e| e.to_string())?;
+    let r = dagon_sign::release::build(
+        dagon_topology::defs::Registry::builtin(),
+        &t,
+        &bin,
+        &images,
+        RELEASE,
+        key,
+    )
+    .map_err(|e| e.to_string())?;
     Ok(r.bundle)
 }
 

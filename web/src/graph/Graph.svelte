@@ -185,9 +185,11 @@
     return h ? versionText(h.activeVersion) : '';
   }
 
-  /** Product names wrap after hyphens and after "RP2040". */
-  function breaks(product: string): string[] {
-    return product.split(/(?<=-|RP2040)/);
+  /** Product names wrap after hyphens and after the MCU's name in them ("Waveshare RP2040" / "-Touch-…"). */
+  function breaks(product: string, mcu: string): string[] {
+    const at = mcu ? product.indexOf(mcu) : -1;
+    const cut = at < 0 ? [product] : [product.slice(0, at + mcu.length), product.slice(at + mcu.length)];
+    return cut.filter(Boolean).flatMap((p) => p.split(/(?<=-)/));
   }
 
   const hubVia = $derived(
@@ -293,7 +295,7 @@
           {#if v}<span class="version" translate="no">{v}</span>{:else if m === 'skeleton'}<span class="skeleton version-sk"></span>{/if}
         </span>
         <span class="node-body">
-          <span class="product" translate="no">{#each breaks(n.product) as part, i (i)}{#if i}<wbr />{/if}{part}{/each}</span>
+          <span class="product" translate="no">{#each breaks(n.product, n.mcu) as part, i (i)}{#if i}<wbr />{/if}{part}{/each}</span>
           <span class="mono"><span class="label">{NODE.mcu}</span> <span translate="no">{n.mcu}</span></span>
           {#if n.role === 'hub'}
             <span class="mono">{hubVia}</span>

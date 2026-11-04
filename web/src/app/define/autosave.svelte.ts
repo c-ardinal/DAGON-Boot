@@ -25,6 +25,12 @@ export interface AutosaveDeps {
   put: (yaml: string) => Promise<SaveResult>;
   /** There is a project to save to (not a development stand-in's unsaved 構成, not SC-S0). */
   enabled: () => boolean;
+  /**
+   * Saving is refused (the project's definitions do not load): no save is
+   * scheduled or sent, whatever asks for it; leaving then asks as for a
+   * failed save.
+   */
+  blocked?: () => boolean;
   timers?: Timers;
   delayMs?: number;
 }
@@ -55,7 +61,7 @@ export class Autosave {
   /** An edit happened: save after the quiet time (each edit starts it again). */
   edited(): void {
     this.cancel();
-    if (!this.pending) return;
+    if (!this.pending || this.isBlocked()) return;
     this.timer = this.timers.set(() => {
       this.timer = null;
       void this.now();
@@ -67,6 +73,8 @@ export class Autosave {
     this.cancel();
     this.chain = this.chain.then(async () => {
       if (!this.pending) return true;
+      // The one place every save goes through (timer, 保存, leaving, unload).
+      if (this.isBlocked()) return false;
       const at = this.d.revision;
       this.d.saved(at, await this.deps.put(this.d.exportYaml().text));
       return !this.d.unsaved;
@@ -111,6 +119,10 @@ export class Autosave {
   /** The dialog's "やめる". */
   stay(): void {
     this.asking = null;
+  }
+
+  private isBlocked(): boolean {
+    return this.deps.blocked?.() ?? false;
   }
 
   cancel(): void {

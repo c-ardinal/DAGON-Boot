@@ -146,3 +146,45 @@ describe('autosave of the 構成 (UC-D04)', () => {
     expect([a.pending, await a.ready(), puts]).toEqual([false, true, []]);
   });
 });
+
+describe("blocked (the project's definitions do not load)", () => {
+  test('no save is ever sent: edits, the quiet time, 保存, leaving, unload and mode switch all stop at the one save', async () => {
+    const d = new Define();
+    d.placeSample();
+    const puts: string[] = [];
+    const t = manualTimers();
+    let blocked = false;
+    const a = new Autosave(d, {
+      put: async (yaml) => {
+        puts.push(yaml);
+        return 'saved';
+      },
+      enabled: () => true,
+      blocked: () => blocked,
+      timers: t.timers,
+    });
+    // An edit before the block: its save is waiting for the quiet time.
+    edit(d, 0x43);
+    a.edited();
+    expect(t.due()?.ms).toBe(AUTOSAVE_MS);
+    // Entering blocked drops it (App cancels), and nothing schedules another.
+    blocked = true;
+    a.cancel();
+    expect(t.due()).toBeNull();
+    edit(d, 0x44);
+    a.edited();
+    expect(t.due()).toBeNull();
+    await new Promise((r) => setTimeout(r, AUTOSAVE_MS + 50));
+    // 保存, unload flush (now), mode switch (ready), leaving (leave): none sends.
+    expect(await a.now()).toBe(false);
+    expect(await a.ready()).toBe(false);
+    let left = false;
+    await a.leave(() => (left = true));
+    expect(left).toBe(false);
+    expect(a.asking).not.toBeNull();
+    await a.saveAgain();
+    await settle();
+    expect(puts).toEqual([]);
+    expect(a.pending).toBe(true);
+  });
+});

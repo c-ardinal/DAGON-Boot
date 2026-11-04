@@ -161,9 +161,16 @@ fn world() -> Result<World, String> {
         hub_img(&key, 0, NEW),
         hub_img(&key, 1, NEW),
     ];
-    let release = dagon_sign::release::build(&t, &topology, &images, "sim-1.1", &key)
-        .map_err(|e| e.to_string())?
-        .bundle;
+    let release = dagon_sign::release::build(
+        dagon_topology::defs::Registry::builtin(),
+        &t,
+        &topology,
+        &images,
+        "sim-1.1",
+        &key,
+    )
+    .map_err(|e| e.to_string())?
+    .bundle;
     let mut hub = demo_hub(*key.pk, 1);
     hub.node
         .provision(&hub_img(&key, 0, OLD), 0)
@@ -336,6 +343,7 @@ fn s4() -> R {
         topology: &w.topology,
         pubkey: &w.key.pk,
         bootcore: Some(&boot),
+        roms: &dagon_host::rom::rom_maps(dagon_topology::defs::Registry::builtin()),
     };
     let (path, v) =
         block_on(w.host().recover(SEG, &assets, &mut |_| {})).map_err(|e| format!("{e:?}"))?;
@@ -392,15 +400,27 @@ mod tests {
         assert!(all_done(&out), "{out:?}");
         let t = dagon_topology::parse_str(YAML).unwrap();
         let mut events = Vec::new();
-        let v = crate::device::rollback_node(&mut w.host(), &t, "seg", &mut |e| events.push(e))
-            .unwrap();
+        let v = crate::device::rollback_node(
+            &mut w.host(),
+            dagon_topology::defs::Registry::builtin(),
+            &t,
+            "seg",
+            &mut |e| events.push(e),
+        )
+        .unwrap();
         assert_eq!(v, OLD);
         w.expect(SEG_AT, OLD).unwrap();
         let st = block_on(w.host().status(SEG_AT)).unwrap().status;
         assert_eq!((st.active, st.confirmed), (0, 0));
         assert_eq!(st.slots[0].state, SlotState::Confirmed);
         w.expect(Target::Hub, NEW).unwrap();
-        let unknown = crate::device::rollback_node(&mut w.host(), &t, "nope", &mut |_| {});
+        let unknown = crate::device::rollback_node(
+            &mut w.host(),
+            dagon_topology::defs::Registry::builtin(),
+            &t,
+            "nope",
+            &mut |_| {},
+        );
         assert!(unknown.is_err());
     }
 }

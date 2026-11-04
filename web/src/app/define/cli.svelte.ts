@@ -109,6 +109,8 @@ export interface CliDeps {
 export class Cli {
   state = $state<CliState>('none');
   hello = $state<Hello | null>(null);
+  /** The open project's definitions did not load (GET /v1/definitions 500): the builtin set is not used in their place. */
+  defsFailed = $state(false);
   jobs = $state<Job[]>([]);
   /** CLI asked for the hub's port (device.need) and has not returned it yet. */
   holdsHub = $state(false);
@@ -409,6 +411,13 @@ export class Cli {
     // 409 is a running job, or (making) a folder that is not empty.
     const msg = String(((await r.json().catch(() => ({}))) as { error?: string }).error ?? '');
     return making && !/job/.test(msg) ? 'exists' : 'busy';
+  }
+
+  /** GET /v1/definitions: the project's MCU and board definitions (JSON), or null without them. */
+  async definitions(): Promise<string | null> {
+    const r = await this.call('GET', 'definitions').catch(() => null);
+    this.defsFailed = r?.status === 500;
+    return r?.ok ? await r.text() : null;
   }
 
   /** GET /v1/hello again (after switching projects). */

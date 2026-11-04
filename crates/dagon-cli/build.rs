@@ -54,27 +54,4 @@ fn main() {
     code.push_str("];\n");
     let out_dir = PathBuf::from(env::var_os("OUT_DIR").expect("cargo sets it"));
     fs::write(out_dir.join("web_assets.rs"), code).expect("write web_assets.rs");
-
-    // Project templates for `dagon gen`: templates/<package>/<files>.
-    let tdir = manifest.join("templates");
-    println!("cargo:rerun-if-changed={}", tdir.display());
-    let mut code = String::from("pub static TEMPLATES: &[(&str, &str, &str)] = &[\n");
-    let mut packages: Vec<_> = fs::read_dir(&tdir)
-        .map(|d| d.filter_map(Result::ok).collect())
-        .unwrap_or_default();
-    packages.sort_by_key(|e| e.file_name());
-    for p in packages.iter().filter(|p| p.path().is_dir()) {
-        let name = p.file_name().to_string_lossy().into_owned();
-        let mut list = Vec::new();
-        files(&p.path(), "", &mut list);
-        for (rel, path) in list {
-            let abs = fs::canonicalize(&path).unwrap_or(path);
-            code.push_str(&format!(
-                "    ({name:?}, {rel:?}, include_str!({:?})),\n",
-                abs.to_string_lossy()
-            ));
-        }
-    }
-    code.push_str("];\n");
-    fs::write(out_dir.join("templates.rs"), code).expect("write templates.rs");
 }

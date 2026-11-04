@@ -60,6 +60,11 @@ impl BuildInputs {
         if !inside || self.package.as_os_str().is_empty() {
             return Err("package must be a relative path inside the work area".into());
         }
+        self.validate_names()
+    }
+
+    /// Plain names (bin, features) and a valid version.
+    pub fn validate_names(&self) -> Result<(), String> {
         let plain = |s: &str| {
             !s.is_empty()
                 && !s.starts_with('-')
@@ -259,11 +264,12 @@ impl<'a> Opts<'a> {
     }
 }
 
-pub fn read_topology(path: &Path) -> Result<dagon_topology::Topology, String> {
+/// The topology at `path`, checked against `cfg`'s project definitions.
+pub fn read_topology(cfg: &Config, path: &Path) -> Result<dagon_topology::Topology, String> {
     let yaml = std::fs::read_to_string(path)
         .map_err(|e| format!("cannot read {}: {e}", path.display()))?;
     let t = dagon_topology::parse_str(&yaml).map_err(|e| format!("{}: {e}", path.display()))?;
-    if !dagon_topology::check(&t).is_pushable() {
+    if !dagon_topology::check_with(&crate::defs::registry(cfg)?, &t).is_pushable() {
         return Err(format!(
             "{}: topology has errors; run `dagon topo check`",
             path.display()

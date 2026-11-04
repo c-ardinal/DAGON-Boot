@@ -2,7 +2,7 @@
 // shapes of dagon-topology's schema) plus the page-side display names. Every
 // edit is a pure function returning a new document, so undo keeps snapshots.
 // Validity is never decided here: topo_check (dagon-topology in WASM) does it.
-import { board_template, link_kinds, supported_mcus, topo_parse } from '../../wasm/pkg/dagon_wasm.js';
+import { board_template, coordinator_capable, coordinator_uart0, link_kinds, rom_i2c_addrs, supported_mcus, topo_parse } from '../../wasm/pkg/dagon_wasm.js';
 import { supportedBoards, type Board } from '../../wasm/dagon.ts';
 import { INSPECT } from '../copy.ts';
 import type { Config, Link as GLink, Node as GNode, Wire } from '../sample.ts';
@@ -128,21 +128,39 @@ export interface BoardTemplate {
   header: string[];
   i2cPairs: { sda: string; scl: string }[];
   link: { kind: 'i2c' | 'uart'; iface: string | null; addr: number | null; baud: number | null; control: 'full' | 'cooperative'; romEntry: string | null } | null;
+  /** Pins of a new I2C bus / PIO UART link when the board is the 親機 (its [coordinator]). */
+  coordinator: { i2c: { controller: string; sda: number; scl: number }; pioUart: { tx: number; rx: number } } | null;
 }
 
 /** Nodes the editor places and draws; updating reaches 8 (V-23 says when more). */
 export const MAX_NODES = 32;
-/** The STM32 ROM loader's address: never offered (V-18). */
-export const ROM_ADDR = 0x39;
 const I2C_FIRST = 0x08;
 const I2C_LAST = 0x77;
-/** The hub's I2C pins and PIO UART pins (hackathon §4.1; V-17, V-09). */
-const HUB_I2C = { sda: 16, scl: 17 };
-const HUB_UART = { tx: 26, rx: 27 };
 const I2C_SPEED = 400_000;
 
 export function template(board: string): BoardTemplate | null {
   return board_template(board) as BoardTemplate | null;
+}
+
+/** 親機 `h`'s board's [coordinator] pins (a node placed by MCU: the first listed board with that MCU). */
+function hubPins(h: TNode): BoardTemplate['coordinator'] {
+  const board = h.board ?? supportedBoards().find((b) => b.mcu === h.mcu)?.id;
+  return (board ? template(board)?.coordinator : null) ?? null;
+}
+
+/** A new I2C bus on 親機 `h`; without defined pins the check asks for them. */
+function hubBus(h: TNode): TBus {
+  return { id: 'i2c-main', kind: 'i2c', ...hubPins(h)?.i2c, speed_hz: I2C_SPEED, pullups: 'external' } as TBus;
+}
+
+/** UART0 pins for a link from `h`: its MCU's [coordinator] pair, else the 親機 MCU's; none defined: the check asks for them. */
+function uart0Pins(t: Topo, h: TNode): { pins?: { tx: number; rx: number } } {
+  const pins = (coordinator_uart0(h.mcu) ?? coordinator_uart0(hub(t)?.mcu ?? '')) as { tx: number; rx: number } | null;
+  return pins ? { pins } : {};
+}
+
+function hubUart(h: TNode): { tx: number; rx: number } {
+  return { ...hubPins(h)?.pioUart } as { tx: number; rx: number };
 }
 
 export function emptyDoc(name = 'my-desk'): Doc {
@@ -209,7 +227,7 @@ export function placeMcu(doc: Doc, mcu: string): { doc: Doc; id: string } {
   const m = mcus().find((x) => x.id === mcu);
   if (!m || doc.topo.nodes.length >= MAX_NODES) return { doc, id: '' };
   const t = doc.topo;
-  const asHub = !hub(t) && m.port === 'self-boot' && mcu === 'rp2040';
+  const asHub = !hub(t) && coordinator_capable(mcu);
   const id = asHub ? freeId(t, 'hub') : freeId(t, mcu);
   const node: TNode = {
     id,
@@ -245,11 +263,12 @@ export function setBoard(doc: Doc, id: string, fields: BoardFields): Doc {
   return { ...doc, boards: { ...doc.boards, [id]: { ...doc.boards?.[id], ...fields } } };
 }
 
-/** I2C addresses no other link on `bus` uses, without the ROM loader's. */
+/** I2C addresses no other link on `bus` uses, without the defined ROM loaders' (V-18). */
 export function freeAddrs(t: Topo, except?: number): number[] {
   const used = new Set((t.links ?? []).filter((l, i) => l.kind === 'i2c' && i !== except).map((l) => l.addr));
+  const rom = rom_i2c_addrs();
   const out: number[] = [];
-  for (let a = I2C_FIRST; a <= I2C_LAST; a++) if (a !== ROM_ADDR && !used.has(a)) out.push(a);
+  for (let a = I2C_FIRST; a <= I2C_LAST; a++) if (!rom.includes(a) && !used.has(a)) out.push(a);
   return out;
 }
 
@@ -265,7 +284,7 @@ export function connect(doc: Doc, id: string, parent?: string): Doc {
   if (!h || !n || n === h || (t.links ?? []).some((l) => l.to === id)) return doc;
   if (h.role !== 'coordinator' || n.role === 'coordinator') {
     const kind: LinkKind = n.role === 'coordinator' ? 'can' : 'uart';
-    const link: TLink = kind === 'can' ? { from: h.id, to: id, kind } : { from: h.id, to: id, kind, iface: 'hw-uart0', pins: { tx: 0, rx: 1 }, baud: 115200 };
+    const link: TLink = kind === 'can' ? { from: h.id, to: id, kind } : { from: h.id, to: id, kind, iface: 'hw-uart0', ...uart0Pins(t, h), baud: 115200 };
     return { ...doc, topo: { ...t, links: [...(t.links ?? []), link] } };
   }
   // A node chosen by MCU links like the first listed board with that MCU (its pins are the developer's).
@@ -275,7 +294,7 @@ export function connect(doc: Doc, id: string, parent?: string): Doc {
   let buses = t.buses ?? [];
   let link: TLink;
   if (d.kind === 'i2c') {
-    if (!buses.length) buses = [{ id: 'i2c-main', kind: 'i2c', controller: 'i2c0', ...HUB_I2C, speed_hz: I2C_SPEED, pullups: 'external' }];
+    if (!buses.length) buses = [hubBus(h)];
     const free = freeAddrs(t);
     const addr = d.addr !== null && free.includes(d.addr) ? d.addr : free[0];
     const pins = tpl?.i2cPairs[0];
@@ -294,7 +313,7 @@ export function connect(doc: Doc, id: string, parent?: string): Doc {
       to: id,
       kind: 'uart',
       iface: d.iface ?? 'pio-uart',
-      pins: { ...HUB_UART },
+      pins: hubUart(h),
       baud: d.baud ?? 115200,
       control: { kind: d.control, ...(d.romEntry ? { rom_entry: d.romEntry } : {}) },
     };
@@ -371,9 +390,9 @@ export function setLinkKind(doc: Doc, index: number, kind: LinkKind): Doc {
   if (tpl?.link?.kind === kind && h.role === 'coordinator') return connect(without, l.to, h.id);
   const link: TLink =
     kind === 'uart'
-      ? { from: h.id, to: l.to, kind, iface: 'pio-uart', pins: { ...HUB_UART }, baud: 115200, control: { kind: 'cooperative' } }
+      ? { from: h.id, to: l.to, kind, iface: 'pio-uart', pins: hubUart(h), baud: 115200, control: { kind: 'cooperative' } }
       : { from: h.id, to: l.to, kind, bus: t.buses?.[0]?.id ?? 'i2c-main', addr: freeAddrs(t)[0], control: { kind: 'full' } };
-  const buses = kind === 'i2c' && !t.buses?.length ? [{ id: 'i2c-main', kind: 'i2c' as const, controller: 'i2c0', ...HUB_I2C, speed_hz: I2C_SPEED, pullups: 'external' }] : t.buses;
+  const buses = kind === 'i2c' && !t.buses?.length ? [hubBus(h)] : t.buses;
   return { ...without, topo: { ...t, buses, links: [...(t.links ?? []), link] } };
 }
 

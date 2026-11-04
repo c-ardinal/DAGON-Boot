@@ -1,7 +1,8 @@
 import { describe, expect, test } from 'vitest';
 import { supportedBoards, topo_check, topo_compile } from '../../wasm/dagon.ts';
+import { rom_i2c_addrs } from '../../wasm/pkg/dagon_wasm.js';
 import { DESK_DEMO, DESK_DEMO_YAML } from '../sample.ts';
-import { boardMissing, canPlace, connect, emptyDoc, freeAddrs, fromYaml, hopAvailable, linkKinds, place, placeMcu, removeNode, ROM_ADDR, setBoard, setLink, setLinkKind, setNode, setUplink, toConfig, toYaml } from './model.ts';
+import { boardMissing, canPlace, connect, emptyDoc, freeAddrs, fromYaml, hopAvailable, linkKinds, place, placeMcu, removeNode, setBoard, setLink, setLinkKind, setNode, setUplink, toConfig, toYaml } from './model.ts';
 import { problemChip } from './problems.ts';
 import { problems } from './problems.ts';
 
@@ -42,6 +43,17 @@ describe('define document', () => {
     expect(canPlace(doc, 'nucleo-f401re')).toBe(false);
   });
 
+  test("the hub's new I2C bus and PIO UART link take its board's [coordinator] pins", () => {
+    let doc = emptyDoc();
+    for (const b of ['waveshare-rp2040-touch-lcd-1.28', 'nucleo-f401re', 'm5stopwatch']) doc = place(doc, b).doc;
+    doc = connect(connect(doc, 'nucleo'), 'm5stopwatch');
+    // The values the page held before it read them from the definition.
+    expect(doc.topo.buses).toEqual([{ id: 'i2c-main', kind: 'i2c', controller: 'i2c0', sda: 16, scl: 17, speed_hz: 400_000, pullups: 'external' }]);
+    expect(doc.topo.links!.find((l) => l.kind === 'uart')!.pins).toEqual({ tx: 26, rx: 27 });
+    const yaml = toYaml(doc.topo);
+    expect(yaml.indexOf('controller')).toBeLessThan(yaml.indexOf('sda: 16'));
+  });
+
   test('renaming a node carries the id into links, recovery, order and names', () => {
     let doc = fromYaml(DESK_DEMO_YAML, { seg: '7セグ' });
     doc = setNode(doc, 'seg', 'id', 'seven');
@@ -57,7 +69,9 @@ describe('define document', () => {
     doc = setLinkKind(doc, 1, 'i2c');
     doc = setLink(doc, 1, 'addr', 0x42);
     expect(check(toYaml(doc.topo)).issues.map((i) => i.rule)).toContain('V-18');
-    expect(freeAddrs(doc.topo)).not.toContain(ROM_ADDR);
+    // The F401's ROM loader (its definition's [rom_i2c]) is the only one defined.
+    expect([...rom_i2c_addrs()]).toEqual([0x39]);
+    expect(freeAddrs(doc.topo)).not.toContain(0x39);
   });
 
   test('removing a node removes its links, recovery and order entries', () => {
@@ -101,6 +115,8 @@ describe('define document', () => {
     let deep = removeNode(fromYaml(DESK_DEMO_YAML), 'watch');
     deep = place(deep, 'm5stopwatch').doc;
     deep = connect(deep, 'm5stopwatch', 'seg');
+    // No [coordinator] on the F401: UART0 pins of the 親機 MCU's definition (the former fixed 0/1).
+    expect(deep.topo.links!.find((l) => l.from === 'seg')).toMatchObject({ iface: 'hw-uart0', pins: { tx: 0, rx: 1 } });
     const cfg = toConfig(deep, supportedBoards());
     expect(cfg.nodes.map((n) => [n.id, n.depth])).toEqual([['hub', 0], ['seg', 1], ['m5stopwatch', 2]]);
     expect(problems(deep).map((p) => p.rule)).toContain('V-23');

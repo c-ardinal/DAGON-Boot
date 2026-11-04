@@ -1,0 +1,86 @@
+# DAGON MCU definition (format: targets/README.md). Addresses match
+# src/layout.rs (sectors 16K x4, 64K, 128K x3); never move them.
+id = "stm32f401re"
+name = "STM32F401RE"
+wire_id = 0x0002
+port = "self-boot"
+# Pins are named by port (PB4), not numbered.
+gpio_count = 0
+
+[[flash_map]]
+name = "f401-default"
+base = 0x0800_0000
+bytes = 0x8_0000
+
+[layout]
+app_log = { faces = [0x0800_8000, 0x0800_C000], face_size = 0x4000 }
+
+# Boot core: sectors 0-1, its header in the trailer.
+[[slot]]
+image = "bootcore"
+binding = "a"
+header = "trailer"
+at = 0x0800_0000
+size = 0x8000
+
+[[slot]]
+image = "app"
+binding = "a"
+header = "inline"
+at = 0x0802_0000
+size = 0x2_0000
+
+[[slot]]
+image = "app"
+binding = "b"
+header = "inline"
+at = 0x0804_0000
+size = 0x2_0000
+
+# First write: chip erase, flash.bin from the flash base, reset.
+[writer]
+kind = "probe-rs"
+chip = "STM32F401RETx"
+
+[[part]]
+name = "bootcore"
+sub = "bootcore"
+
+# The system-memory I2C bootloader (ROM entry kind stm32-i2c-rom).
+[rom_i2c]
+name = "STM32 ROM bootloader"
+addr = 0x39
+max_hz = 400_000
+# Boot core (0-1), state logs A/B (2-3), APP-A (5).
+erase_sectors = [0, 1, 2, 3, 5]
+pairs = [
+    { controller = "i2c3", sda = "PB4", scl = "PA8" },
+    { controller = "i2c1", sda = "PB7", scl = "PB6" },
+    { controller = "i2c2", sda = "PB3", scl = "PB10" },
+]
+
+# Link kinds the firmware implements (src/links.rs LINK_KINDS).
+[links]
+up = ["i2c"]
+
+[connection]
+label = "ST-LINK"
+hint = "ST-LINK を USB でつないでから、書き込んでください。"
+
+[[doctor]]
+what = "target thumbv7em-none-eabihf"
+probe = ["rustup", "target", "list", "--installed"]
+expect = { line = "thumbv7em-none-eabihf" }
+fix = ["rustup", "target", "add", "thumbv7em-none-eabihf"]
+
+[[doctor]]
+what = "probe-rs"
+probe = ["probe-rs", "--version"]
+expect = "runs"
+fix = ["cargo", "install", "probe-rs-tools", "--locked"]
+
+[[doctor]]
+what = "ST-LINK probe connected"
+probe = ["probe-rs", "list"]
+expect = { prefix = "[" }
+hint = "plug in the ST-LINK; on Windows install the ST-LINK USB driver from st.com"

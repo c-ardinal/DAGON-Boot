@@ -300,10 +300,7 @@ pub(crate) mod tests {
     #[test]
     fn this_repository_ships_no_template_manifest_cargo_would_read() {
         let here = Path::new(BUILT_FROM);
-        let mut stack = vec![
-            here.join("targets"),
-            here.join("crates/dagon-cli/templates"),
-        ];
+        let mut stack = vec![here.join("targets")];
         while let Some(dir) = stack.pop() {
             for e in std::fs::read_dir(&dir).into_iter().flatten().flatten() {
                 let p = e.path();

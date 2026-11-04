@@ -39,6 +39,30 @@ fn package(clone: &Path, name: &str, meta: &str, template: &[(&str, &str)]) {
     }
 }
 
+/// The template the M5StopWatch board package ships.
+const WATCH_TEMPLATE: &[(&str, &str)] = &[
+    (
+        ".cargo/config.toml",
+        include_str!("../../../../targets/boards/m5stopwatch/template/.cargo/config.toml"),
+    ),
+    (
+        "Cargo.toml.tpl",
+        include_str!("../../../../targets/boards/m5stopwatch/template/Cargo.toml.tpl"),
+    ),
+    (
+        "rust-toolchain.toml",
+        include_str!("../../../../targets/boards/m5stopwatch/template/rust-toolchain.toml"),
+    ),
+    (
+        "src/app.rs",
+        include_str!("../../../../targets/boards/m5stopwatch/template/src/app.rs"),
+    ),
+    (
+        "src/main.rs",
+        include_str!("../../../../targets/boards/m5stopwatch/template/src/main.rs"),
+    ),
+];
+
 // The manifest under its template name, as the board packages ship it.
 const F401_TEMPLATE: &[(&str, &str)] = &[
     (
@@ -54,7 +78,7 @@ const F401_TEMPLATE: &[(&str, &str)] = &[
 fn clone(d: &Path) -> DagonSource {
     let c = d.join("dagon");
     package(&c, "dagon-mcu-esp32s3", "", &[]);
-    package(&c, "dagon-board-m5stopwatch", "", &[]);
+    package(&c, "dagon-board-m5stopwatch", "", WATCH_TEMPLATE);
     package(&c, "dagon-board-nucleo-f401re", "", F401_TEMPLATE);
     DagonSource {
         path: Some(c),
@@ -81,7 +105,16 @@ fn desk_demo_uses_each_packages_template_and_skips_what_is_missing() {
     let d = tmp("desk");
     let src = clone(&d);
     let base = project(&d);
-    let r = gen(&base, &desk(), &src, &BTreeMap::new(), &[], false).unwrap();
+    let r = gen(
+        dagon_topology::defs::Registry::builtin(),
+        &base,
+        &desk(),
+        &src,
+        &BTreeMap::new(),
+        &[],
+        false,
+    )
+    .unwrap();
 
     // The hub's board package does not exist yet: skipped, with the reason.
     assert_eq!(r.skipped.len(), 1, "{:?}", r.skipped);
@@ -91,7 +124,7 @@ fn desk_demo_uses_each_packages_template_and_skips_what_is_missing() {
         .contains("dagon-board-waveshare-rp2040-touch-lcd-1-28"));
     assert!(!base.join("nodes/hub").exists());
 
-    // ESP32-S3: the template built into the CLI, on the real package API.
+    // ESP32-S3: the template the board package ships, on the real package API.
     let watch = read(&base, "nodes/watch/Cargo.toml");
     assert!(watch.contains("name = \"watch\""));
     assert!(watch.contains("dagon-board-m5stopwatch = { path = "));
@@ -122,7 +155,16 @@ fn gen_keeps_the_developers_code_and_refreshes_only_generated_parts() {
     let d = tmp("regen");
     let src = clone(&d);
     let base = project(&d);
-    gen(&base, &desk(), &src, &BTreeMap::new(), &[], false).unwrap();
+    gen(
+        dagon_topology::defs::Registry::builtin(),
+        &base,
+        &desk(),
+        &src,
+        &BTreeMap::new(),
+        &[],
+        false,
+    )
+    .unwrap();
 
     std::fs::write(base.join("nodes/watch/src/app.rs"), "// mine").unwrap();
     std::fs::write(base.join("nodes/watch/src/main.rs"), "// my main").unwrap();
@@ -136,7 +178,16 @@ fn gen_keeps_the_developers_code_and_refreshes_only_generated_parts() {
     std::fs::write(&cargo, own).unwrap();
 
     let t2 = dagon_topology::parse_str(&DESK.replace("baud: 115200", "baud: 230400")).unwrap();
-    let r = gen(&base, &t2, &src, &BTreeMap::new(), &["watch".into()], false).unwrap();
+    let r = gen(
+        dagon_topology::defs::Registry::builtin(),
+        &base,
+        &t2,
+        &src,
+        &BTreeMap::new(),
+        &["watch".into()],
+        false,
+    )
+    .unwrap();
     let act = |p: &str| r.written.iter().find(|x| x.path == p).unwrap().action;
     assert_eq!(act("nodes/watch/src/app.rs"), "kept");
     assert_eq!(act("nodes/watch/src/main.rs"), "kept");
@@ -149,7 +200,16 @@ fn gen_keeps_the_developers_code_and_refreshes_only_generated_parts() {
     assert!(!c.contains("\"stale\""), "{c}");
     assert!(r.written.iter().all(|x| !x.path.starts_with("nodes/seg")));
 
-    let r = gen(&base, &t2, &src, &BTreeMap::new(), &["watch".into()], true).unwrap();
+    let r = gen(
+        dagon_topology::defs::Registry::builtin(),
+        &base,
+        &t2,
+        &src,
+        &BTreeMap::new(),
+        &["watch".into()],
+        true,
+    )
+    .unwrap();
     let act = |p: &str| r.written.iter().find(|x| x.path == p).unwrap().action;
     assert_eq!(act("nodes/watch/src/main.rs"), "rewritten");
     assert_eq!(
@@ -188,7 +248,16 @@ fn a_node_chosen_by_mcu_finds_the_package_that_declares_the_mcu() {
         },
     );
     let base = project(&d);
-    let r = gen(&base, &t, &src, &boards, &["seg".into()], false).unwrap();
+    let r = gen(
+        dagon_topology::defs::Registry::builtin(),
+        &base,
+        &t,
+        &src,
+        &boards,
+        &["seg".into()],
+        false,
+    )
+    .unwrap();
     assert!(r.skipped.is_empty(), "{:?}", r.skipped);
     assert!(read(&base, "nodes/seg/Cargo.toml").contains("dagon-mcu-stm32f401 = { path = "));
     assert!(read(&base, "nodes/seg/src/wiring.rs").contains("flash_bytes: Some(524288)"));
@@ -199,7 +268,7 @@ fn a_release_source_pins_the_git_tag_and_reads_its_packages_from_cargos_checkout
     let d = tmp("git");
     // A stand-in release repository, tagged, served from a local file URL.
     let c = d.join("release");
-    package(&c, "dagon-board-m5stopwatch", "", &[]);
+    package(&c, "dagon-board-m5stopwatch", "", WATCH_TEMPLATE);
     package(
         &c,
         "dagon-format",
@@ -216,6 +285,7 @@ fn a_release_source_pins_the_git_tag_and_reads_its_packages_from_cargos_checkout
         path: None,
     };
     let r = gen(
+        dagon_topology::defs::Registry::builtin(),
         &base,
         &desk(),
         &src,
@@ -235,6 +305,7 @@ fn a_release_source_pins_the_git_tag_and_reads_its_packages_from_cargos_checkout
         ..src
     };
     let e = gen(
+        dagon_topology::defs::Registry::builtin(),
         &base,
         &desk(),
         &missing,
@@ -295,7 +366,7 @@ fn new_makes_the_project_and_a_key_outside_it() {
     assert!(!again.iter().any(|l| l.starts_with("key:")));
 
     let cfg = proj.join("dagon.toml");
-    let added = add_build_tables(&cfg, &desk()).unwrap();
+    let added = add_build_tables(dagon_topology::defs::Registry::builtin(), &cfg, &desk()).unwrap();
     assert_eq!(added, ["hub", "seg", "watch"]);
     let c = Config::load(Some(&cfg.to_string_lossy())).unwrap();
     assert_eq!(c.build["seg"].package, PathBuf::from("nodes/seg"));
@@ -304,7 +375,11 @@ fn new_makes_the_project_and_a_key_outside_it() {
         c.build["watch"].slot_b_feature, None,
         "ESP images serve both slots"
     );
-    assert!(add_build_tables(&cfg, &desk()).unwrap().is_empty());
+    assert!(
+        add_build_tables(dagon_topology::defs::Registry::builtin(), &cfg, &desk())
+            .unwrap()
+            .is_empty()
+    );
 }
 
 #[test]
@@ -353,6 +428,7 @@ fn regen_restores_a_deleted_dagon_dependency() {
     let src = clone(&d);
     let base = project(&d);
     gen(
+        dagon_topology::defs::Registry::builtin(),
         &base,
         &desk(),
         &src,
@@ -369,6 +445,7 @@ fn regen_restores_a_deleted_dagon_dependency() {
         .collect();
     std::fs::write(&cargo, without).unwrap();
     let r = gen(
+        dagon_topology::defs::Registry::builtin(),
         &base,
         &desk(),
         &src,
@@ -390,6 +467,7 @@ fn regen_adds_a_dagon_package_the_template_newly_needs() {
     let src = clone(&d);
     let base = project(&d);
     gen(
+        dagon_topology::defs::Registry::builtin(),
         &base,
         &desk(),
         &src,
@@ -410,6 +488,7 @@ fn regen_adds_a_dagon_package_the_template_newly_needs() {
     // The lock of the old dependencies goes with them.
     std::fs::write(base.join("nodes/seg/Cargo.lock"), "# old\n").unwrap();
     let r = gen(
+        dagon_topology::defs::Registry::builtin(),
         &base,
         &desk(),
         &src,
@@ -448,7 +527,16 @@ fn topology_names_and_tags_cannot_break_out_of_generated_code() {
         .replace("name: desk-demo", "name: \"x\\nfn evil() {}\"")
         .replace("tag: seg-f401-7seg", "tag: \"a\\\"); evil(); (\\\"\"");
     let t = dagon_topology::parse_str(&yaml).unwrap();
-    gen(&base, &t, &src, &BTreeMap::new(), &["seg".into()], false).unwrap();
+    gen(
+        dagon_topology::defs::Registry::builtin(),
+        &base,
+        &t,
+        &src,
+        &BTreeMap::new(),
+        &["seg".into()],
+        false,
+    )
+    .unwrap();
     let wiring = read(&base, "nodes/seg/src/wiring.rs");
     assert!(
         !wiring.lines().any(|l| l.starts_with("fn evil")),
@@ -557,9 +645,27 @@ fn gen_refresh_replaces_a_renamed_dagon_dependency() {
     let src = clone(&d);
     let base = project(&d);
     let nodes = ["seg".to_string()];
-    gen(&base, &desk(), &src, &BTreeMap::new(), &nodes, false).unwrap();
+    gen(
+        dagon_topology::defs::Registry::builtin(),
+        &base,
+        &desk(),
+        &src,
+        &BTreeMap::new(),
+        &nodes,
+        false,
+    )
+    .unwrap();
     std::fs::write(base.join("nodes/seg/Cargo.toml"), RENAMED_STALE).unwrap();
-    gen(&base, &desk(), &src, &BTreeMap::new(), &nodes, false).unwrap();
+    gen(
+        dagon_topology::defs::Registry::builtin(),
+        &base,
+        &desk(),
+        &src,
+        &BTreeMap::new(),
+        &nodes,
+        false,
+    )
+    .unwrap();
     let m = read(&base, "nodes/seg/Cargo.toml");
     assert!(!m.contains("v0.0.1") && !m.contains("board = {"), "{m}");
     assert!(m.contains("dagon-board-nucleo-f401re = { path = "), "{m}");
@@ -569,18 +675,28 @@ fn gen_refresh_replaces_a_renamed_dagon_dependency() {
 fn hop_placeholders_name_each_nodes_link_kinds() {
     let t = desk();
     let hub = t.node("hub").unwrap();
-    let (up, down) = hop_placeholders(&t, hub).unwrap();
+    let (up, down) = hop_placeholders(dagon_topology::defs::Registry::builtin(), &t, hub).unwrap();
     assert_eq!(up, "dagon_mcu_rp2040::links::Kind::UsbCdc");
     assert_eq!(
         down,
         "dagon_mcu_rp2040::links::Kind::I2c, dagon_mcu_rp2040::links::Kind::Uart"
     );
-    let (up, down) = hop_placeholders(&t, t.node("seg").unwrap()).unwrap();
+    let (up, down) = hop_placeholders(
+        dagon_topology::defs::Registry::builtin(),
+        &t,
+        t.node("seg").unwrap(),
+    )
+    .unwrap();
     assert_eq!(
         (up.as_str(), down.as_str()),
         ("dagon_mcu_stm32f401re::links::Kind::I2c", "")
     );
-    let (up, _) = hop_placeholders(&t, t.node("watch").unwrap()).unwrap();
+    let (up, _) = hop_placeholders(
+        dagon_topology::defs::Registry::builtin(),
+        &t,
+        t.node("watch").unwrap(),
+    )
+    .unwrap();
     assert_eq!(up, "dagon_mcu_esp32s3::links::Kind::Uart");
 }
 
@@ -635,7 +751,12 @@ fn the_hop_paths_are_exactly_the_firmware_links_contract() {
         ("seg", "dagon_mcu_stm32f401re::links::Kind::I2c", ""),
         ("watch", "dagon_mcu_esp32s3::links::Kind::Uart", ""),
     ] {
-        let got = hop_placeholders(&t, t.node(id).unwrap()).unwrap();
+        let got = hop_placeholders(
+            dagon_topology::defs::Registry::builtin(),
+            &t,
+            t.node(id).unwrap(),
+        )
+        .unwrap();
         assert_eq!((got.0.as_str(), got.1.as_str()), (up, down), "{id}");
     }
 }
@@ -661,6 +782,7 @@ fn templates_get_the_hops_and_gen_refuses_one_not_available_yet() {
     };
     let base = project(&d);
     gen(
+        dagon_topology::defs::Registry::builtin(),
         &base,
         &desk(),
         &src,
@@ -680,7 +802,16 @@ fn templates_get_the_hops_and_gen_refuses_one_not_available_yet() {
         1,
     ))
     .unwrap();
-    let e = gen(&base, &ble, &src, &BTreeMap::new(), &["hub".into()], false).unwrap_err();
+    let e = gen(
+        dagon_topology::defs::Registry::builtin(),
+        &base,
+        &ble,
+        &src,
+        &BTreeMap::new(),
+        &["hub".into()],
+        false,
+    )
+    .unwrap_err();
     assert!(
         e.contains("uplink of hub over ble: not available yet on rp2040"),
         "{e}"
@@ -692,7 +823,16 @@ fn templates_get_the_hops_and_gen_refuses_one_not_available_yet() {
         1,
     ))
     .unwrap();
-    let e = gen(&base, &wifi, &src, &BTreeMap::new(), &["seg".into()], false).unwrap_err();
+    let e = gen(
+        dagon_topology::defs::Registry::builtin(),
+        &base,
+        &wifi,
+        &src,
+        &BTreeMap::new(),
+        &["seg".into()],
+        false,
+    )
+    .unwrap_err();
     assert!(
         e.contains("link hub -> seg over wifi-tcp: not available yet"),
         "{e}"

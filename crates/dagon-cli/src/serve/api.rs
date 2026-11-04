@@ -7,6 +7,7 @@ use std::sync::Arc;
 
 use dagon_format::header::{image_kind, slot_binding, ImageHeader, HEADER_SIZE};
 use dagon_sign::to_hex;
+use dagon_topology::defs::{page_safe as plain_name, Registry};
 use dagon_topology::schema::{Uplink, UplinkHost};
 use serde_json::{json, Value};
 
@@ -121,9 +122,14 @@ fn config(server: &Server) -> Result<Config, String> {
 
 /// The project of dagon.toml `path`, with the key folders it may take key
 /// files from.
+/// Its error goes to the page (routes and jobs): the project's folder and
+/// home in it are hidden.
 pub(super) fn config_at(server: &Server, path: Option<&Path>) -> Result<Config, String> {
     let p = path.map(|p| p.to_string_lossy().into_owned());
-    let mut c = Config::load(p.as_deref())?;
+    let mut c = Config::load(p.as_deref()).map_err(|e| {
+        let swaps = crate::flash::base_swaps(path.and_then(Path::parent));
+        crate::flash::hidden(&e, &swaps)
+    })?;
     c.key_roots = super::project::home(server)
         .map(|h| super::project::key_dirs(&h))
         .unwrap_or_default();
@@ -161,6 +167,7 @@ pub fn handle(server: &Arc<Server>, req: &Request) -> Response {
     let r = match (req.method.as_str(), parts.as_slice()) {
         ("GET", ["hello"]) => Ok(hello(server)),
         ("GET", ["targets"]) => targets(server),
+        ("GET", ["definitions"]) => definitions(server),
         ("GET", ["topology"]) => topology_get(server),
         ("PUT", ["topology"]) => topology_put(server, req),
         ("GET", ["nodes", id, "build"]) => build_get(server, id),
@@ -315,7 +322,8 @@ fn gen_start(server: &Arc<Server>, req: &Request) -> Res {
     }
     let s = Arc::clone(server);
     match server.spawn("gen", move |job| {
-        let config = job.config.clone().ok_or("no project is open")?;
+        let (config, _, _) = job.project()?;
+        let config = config.ok_or("no project is open")?;
         let lines = {
             let _lock = s.files.lock().map_err(|_| "lock".to_string())?;
             crate::scaffold::gen_project(&config, &only, force)?
@@ -334,11 +342,13 @@ type Work = fn(&mut Job, Config, Value) -> Result<Value, String>;
 
 fn start(server: &Arc<Server>, req: &Request, kind: &str, work: Work) -> Res {
     let v = body_json(req)?;
-    let s = Arc::clone(server);
     // The project is the one registered with the job (under the jobs lock),
-    // so a project switch never lands between the two.
+    // so a project switch never lands between the two. Job::project loads
+    // it (a project whose definitions do not load runs no job) and from
+    // then on every line (cargo's, probe-rs', espflash's) and error reach
+    // the page through the job's one scrubbing logger.
     match server.spawn(kind, move |job| {
-        let cfg = config_at(&s, job.config.as_deref())?;
+        let (_, cfg, _) = job.project()?;
         work(job, cfg, v)
     }) {
         Some(id) => Ok(accepted(id)),
@@ -357,9 +367,14 @@ fn hello(server: &Server) -> Response {
         .as_ref()
         .and_then(|c| project_key(c).ok())
         .map(|k| to_hex(&dagon_format::key_id(&k.pk)));
-    let flash_mcus: Vec<&str> = ["rp2040", "stm32f401re", "esp32s3"]
+    // Definitions that do not load offer nothing to flash (GET
+    // /v1/definitions says why).
+    let mut defined: Vec<_> = registry_of(server).map_or(Vec::new(), |r| r.mcus().to_vec());
+    defined.sort_by_key(|m| m.wire_id);
+    let flash_mcus: Vec<String> = defined
         .into_iter()
-        .filter(|m| crate::flash::flashable(m))
+        .map(|m| m.id)
+        .filter(|m| plain_name(m))
         .collect();
     let sim = server.sim.get();
     let mut features = FEATURES.to_vec();
@@ -424,11 +439,49 @@ fn targets(server: &Server) -> Res {
             "features": features,
         }));
     }
-    let boards: Vec<Value> = dagon_topology::boards::BOARDS
+    let reg = project_registry(&cfg).map_err(|e| Response::error(500, &e))?;
+    let boards: Vec<Value> = reg
+        .boards()
         .iter()
+        // A project's own words were made safe when its definitions loaded.
         .map(|b| json!({"id": b.id, "product": b.product, "mcu": b.mcu}))
         .collect();
     Ok(json_ok(json!({ "targets": out, "boards": boards })))
+}
+
+/// What the page is told when the open project's definitions do not load
+/// (the reason, which may name its files, goes to the terminal only).
+pub(super) const DEFS_ERROR: &str =
+    "the project's definitions do not load; see the dagon serve terminal";
+
+/// The definitions of project `cfg` (its DAGON source and its own); when
+/// they do not load, the reason goes to the terminal and [`DEFS_ERROR`] to
+/// the caller. Never the builtin set instead: a project MCU must not just
+/// vanish.
+pub(super) fn project_registry(cfg: &Config) -> Result<Registry, String> {
+    crate::defs::registry(cfg).map_err(|e| {
+        eprintln!("dagon serve: {e}");
+        DEFS_ERROR.to_string()
+    })
+}
+
+/// The open project's definitions; the builtin set only while no project
+/// is open.
+fn registry_of(server: &Server) -> Result<Registry, String> {
+    if server.config_path().is_none() {
+        return Ok(Registry::builtin().clone());
+    }
+    project_registry(&config(server)?)
+}
+
+/// GET /v1/definitions: the definitions in use as `Registry::to_json`
+/// gives them, for the page's dagon-wasm (`load_definitions`).
+fn definitions(server: &Server) -> Res {
+    let reg = registry_of(server).map_err(|e| Response::error(500, &e))?;
+    Ok(Response::bytes(
+        "application/json",
+        reg.to_json().into_bytes(),
+    ))
 }
 
 /// Package directories relative to `base`, `/`-separated and sorted:
@@ -500,7 +553,8 @@ fn topology_put(server: &Server, req: &Request) -> Res {
     let p = topology_path(server)?;
     let yaml =
         std::str::from_utf8(&req.body).map_err(|_| Response::error(400, "YAML must be UTF-8"))?;
-    let report = dagon_topology::check_str(yaml);
+    let reg = registry_of(server).map_err(|e| Response::error(500, &e))?;
+    let report = dagon_topology::check_str_with(&reg, yaml);
     let report_json: Value = serde_json::from_str(&report.to_json()).unwrap_or(Value::Null);
     // A 構成 whose only errors are V-23 (a shape updating does not cover
     // yet) is saved; compile, send, release and apply still refuse it.
@@ -624,7 +678,7 @@ fn sha_hex(b: &[u8]) -> String {
 /// Signs the built applications of `nodes` with the CLI's key.
 fn job_sign(job: &mut Job, cfg: Config, v: Value) -> Result<Value, String> {
     let nodes = nodes_of(&v).map_err(|_| "nodes must be node ids".to_string())?;
-    let t = read_topology(&inside(&cfg, &cfg.topology_path(None)?)?)?;
+    let t = read_topology(&cfg, &inside(&cfg, &cfg.topology_path(None)?)?)?;
     let key = serve_key(&cfg)?;
     let cancel = job.cancel_flag();
     sign_nodes(&cfg, &t, &nodes, &key, &mut |l| job.log(l), &cancel)
@@ -665,6 +719,7 @@ fn sign_nodes(
     // All images are signed in memory first; files change only after
     // every one succeeded, so a bad ELF, a signing error or a cancel
     // leaves the old images and records as they were.
+    let reg = crate::defs::registry(cfg)?;
     let mut out = Vec::new();
     let mut signed = Vec::new();
     for (node, ver, parsed, elfs) in ready {
@@ -683,7 +738,16 @@ fn sign_nodes(
             } else {
                 slot_binding::B
             };
-            let img = image_for_node(t, node, image_kind::APP, binding, &elf, Some(&opts), key)?;
+            let img = image_for_node(
+                &reg,
+                t,
+                node,
+                image_kind::APP,
+                binding,
+                &elf,
+                Some(&opts),
+                key,
+            )?;
             log(&format!(
                 "{node}: slot {slot} signed, {} bytes, {ver}",
                 img.len()
@@ -830,7 +894,7 @@ fn job_release(job: &mut Job, cfg: Config, v: Value) -> Result<Value, String> {
     let name = v["name"].as_str().filter(|n| plain(n) && n.len() <= 16);
     let name = name.ok_or("name must be up to 16 plain characters")?;
     let want = version(v["version"].as_str().ok_or("version is required")?)?;
-    let t = read_topology(&inside(&cfg, &cfg.topology_path(None)?)?)?;
+    let t = read_topology(&cfg, &inside(&cfg, &cfg.topology_path(None)?)?)?;
     let key = serve_key(&cfg)?;
     let cancel = job.cancel_flag();
     release_from(&cfg, &t, want, name, &key, &mut |l| job.log(l), &cancel)
@@ -886,11 +950,12 @@ fn release_from(
     cancel: &AtomicBool,
 ) -> Result<Value, String> {
     stop_if(cancel)?;
-    let topo_bin = dagon_topology::compile(t).map_err(|e| e.to_string())?;
+    let reg = crate::defs::registry(cfg)?;
+    let topo_bin = dagon_topology::compile_with(&reg, t).map_err(|e| e.to_string())?;
     let images = signed_images(cfg, want)?;
     stop_if(cancel)?;
-    let r =
-        dagon_sign::release::build(t, &topo_bin, &images, name, key).map_err(|e| e.to_string())?;
+    let r = dagon_sign::release::build(&reg, t, &topo_bin, &images, name, key)
+        .map_err(|e| e.to_string())?;
     stop_if(cancel)?;
     let out = inside(cfg, &cfg.base.join(RELEASE_DIR).join(format!("{name}.dgb")))?;
     write_file(&out, &r.bundle)?;
@@ -1021,8 +1086,8 @@ fn job_conform(job: &mut Job, cfg: Config, v: Value) -> Result<Value, String> {
         .as_str()
         .filter(|n| plain(n))
         .ok_or("node is required")?;
-    let t = read_topology(&inside(&cfg, &cfg.topology_path(None)?)?)?;
-    let to = crate::conform::node_target(&t, node)?;
+    let t = read_topology(&cfg, &inside(&cfg, &cfg.topology_path(None)?)?)?;
+    let to = crate::conform::node_target(&crate::defs::registry(&cfg)?, &t, node)?;
     let dir = inside(&cfg, &cfg.base.join(CONFORM_DIR).join(node))?;
     let key = serve_key(&cfg)?;
     job.progress("waiting for the hub", None);
@@ -1050,7 +1115,7 @@ fn conform_get(server: &Server, node: &str) -> Res {
 }
 
 /// Topology from a description; the model's questions go to the page.
-fn job_ai_topology(job: &mut Job, _cfg: Config, v: Value) -> Result<Value, String> {
+fn job_ai_topology(job: &mut Job, cfg: Config, v: Value) -> Result<Value, String> {
     let description = v["description"]
         .as_str()
         .ok_or("description is required")?
@@ -1059,7 +1124,8 @@ fn job_ai_topology(job: &mut Job, _cfg: Config, v: Value) -> Result<Value, Strin
     let mut ask = |qs: &[String]| -> Result<Vec<String>, String> {
         qs.iter().enumerate().map(|(i, q)| job.ask(i, q)).collect()
     };
-    let (yaml, report) = crate::ai::topology_for(&description, &mut ask, &cancel)?;
+    let reg = project_registry(&cfg)?;
+    let (yaml, report) = crate::ai::topology_for(&description, &reg, &mut ask, &cancel)?;
     let report: Value = serde_json::from_str(&report).unwrap_or(Value::Null);
     Ok(json!({ "yaml": yaml, "report": report }))
 }
@@ -1407,7 +1473,17 @@ mod tests {
                 };
                 imgs.push((
                     slot,
-                    image_for_node(&t, node, image_kind::APP, b, &elf, Some(&opts), &key).unwrap(),
+                    image_for_node(
+                        Registry::builtin(),
+                        &t,
+                        node,
+                        image_kind::APP,
+                        b,
+                        &elf,
+                        Some(&opts),
+                        &key,
+                    )
+                    .unwrap(),
                 ));
             }
             images.push((node, imgs));

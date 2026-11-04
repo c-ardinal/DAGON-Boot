@@ -62,7 +62,15 @@ fn generated() -> Vec<(&'static str, Vec<u8>)> {
     let t = dagon_topology::parse_str(YAML).unwrap();
     let bin = dagon_topology::compile_str(YAML).unwrap();
     let images = [seg(0, v1), seg(1, v1), watch(v1), hub(0, v1), hub(1, v1)];
-    let release = dagon_sign::release::build(&t, &bin, &images, "desk-1.1.0", &key()).unwrap();
+    let release = dagon_sign::release::build(
+        dagon_topology::defs::Registry::builtin(),
+        &t,
+        &bin,
+        &images,
+        "desk-1.1.0",
+        &key(),
+    )
+    .unwrap();
     vec![
         ("desk-hub-1.0.0.img", hub(0, v0)),
         ("desk-seg-1.0.0.img", seg(0, v0)),

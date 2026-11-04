@@ -80,9 +80,16 @@ fn release() -> Vec<u8> {
     let t = dagon_topology::parse_str(&yaml()).unwrap();
     let v = Version::new(1, 1, 0);
     let images = [seg_img(0, v), seg_img(1, v), hub_img(0, v), hub_img(1, v)];
-    dagon_sign::release::build(&t, &topology(&yaml()), &images, "r1.1", &key())
-        .unwrap()
-        .bundle
+    dagon_sign::release::build(
+        dagon_topology::defs::Registry::builtin(),
+        &t,
+        &topology(&yaml()),
+        &images,
+        "r1.1",
+        &key(),
+    )
+    .unwrap()
+    .bundle
 }
 
 /// Hub and seg both running 1.0.0 from slot A, confirmed.
@@ -247,7 +254,7 @@ fn status_and_discover() {
     let seg = block_on(h.status(SEG_AT)).unwrap();
     assert_eq!((seg.status.active, seg.status.confirmed), (0, 0));
 
-    let d = block_on(h.discover()).unwrap();
+    let d = block_on(h.discover(&rom_addrs())).unwrap();
     assert_eq!(d.nodes.len(), 1);
     assert_eq!(d.nodes[0].0, SEG_AT);
     assert_eq!(d.nodes[0].1.active_version, Version::new(1, 0, 0));
@@ -465,7 +472,11 @@ fn bootcore() -> Vec<u8> {
 fn rom_plan_matches_the_provision_binary() {
     let (boot, app) = (bootcore(), seg_img(0, Version::new(1, 1, 0)));
     let log = rom::initial_log(app[..512].try_into().unwrap()).unwrap();
-    let want = dagon_sign::provision::f401_flash(
+    let want = dagon_sign::provision::first_install_file(
+        dagon_topology::defs::Registry::builtin()
+            .mcu("stm32f401re")
+            .unwrap(),
+        None,
         (
             &image::slot("stm32f401re", image_kind::BOOTCORE, 0).unwrap(),
             &boot,
@@ -474,10 +485,12 @@ fn rom_plan_matches_the_provision_binary() {
             &image::slot("stm32f401re", image_kind::APP, 0).unwrap(),
             &app,
         ),
-    );
+    )
+    .unwrap();
     let mut got = vec![0xFF; want.len()];
-    for r in rom::f401_regions(&boot, &app, &log) {
-        let off = (r.addr - rom::F401_BOOTCORE) as usize;
+    let map = f401_rom();
+    for r in rom::regions(&boot, &app, &log, &map) {
+        let off = (r.addr - map.bootcore.load) as usize;
         got[off..off + r.data.len()].copy_from_slice(r.data);
     }
     assert!(got == want, "ROM regions and provision binary differ");
@@ -503,6 +516,7 @@ fn recover_seg(s: &Sim) -> (RecoverPath, Version) {
         topology: &topo,
         pubkey: &key().pk,
         bootcore: Some(&boot),
+        roms: &roms(),
     };
     block_on(host(s).recover(SEG, &assets, &mut |_| {})).unwrap()
 }
@@ -567,6 +581,7 @@ fn rom_session_gives_up_after_three_attempts() {
         topology: &topo,
         pubkey: &key().pk,
         bootcore: Some(&boot),
+        roms: &roms(),
     };
     let r = block_on(host(&s).recover(SEG, &assets, &mut |_| {}));
     assert!(
@@ -602,6 +617,7 @@ fn rom_path_needs_a_valid_boot_core() {
         topology: &topo,
         pubkey: &key().pk,
         bootcore: Some(&boot),
+        roms: &roms(),
     };
     let r = block_on(host(&s).recover(SEG, &assets, &mut |_| {}));
     assert!(matches!(r, Err(Error::Format(_))));
@@ -950,4 +966,18 @@ fn the_uplink_sets_the_frame_size_and_what_a_hub_reboot_does() {
     block_on(h.apply(&release(), &topology(&yaml()), &key().pk, None, &mut |_| {})).unwrap();
     assert!(*s.largest.borrow() > 512);
     assert!(*s.reopens.borrow() >= 1);
+}
+
+/// The ROM maps of the builtin MCU definitions.
+fn roms() -> Vec<rom::RomMap> {
+    rom::rom_maps(dagon_topology::defs::Registry::builtin())
+}
+
+fn rom_addrs() -> Vec<u8> {
+    roms().iter().map(|m| m.addr).collect()
+}
+
+fn f401_rom() -> rom::RomMap {
+    let wire = image::mcu_id_of("stm32f401re").unwrap();
+    roms().into_iter().find(|m| m.wire_id == wire).unwrap()
 }

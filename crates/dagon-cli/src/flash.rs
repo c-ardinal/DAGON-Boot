@@ -1,71 +1,74 @@
-//! `dagon flash <id>`: the first write of a board. Builds the boot core (and
-//! the RP2040's stage0) and the app with the developer's key, makes the
-//! first-install files as `provision` / `rescue hub` do, then writes them:
-//! RP2040 by copying `rescue.uf2` to the RPI-RP2 drive, F401 with probe-rs,
-//! ESP32-S3 with espflash (the bundled 2nd stage, the partition table, the
-//! factory agent, slot A and otadata) to the one ESP32-S3 on USB.
-//! The plan is printed before anything is built, and nothing touches a
-//! device until the user confirms (`--yes`) or ever with `--dry-run`.
+//! `dagon flash <id>`: the first write of a board, as its MCU definition
+//! says. Builds the definition's parts (the boot core, stage0, a board's
+//! recovery agent) and the app with the developer's key, makes the
+//! first-install files as `provision` / `rescue hub` do, then hands them to
+//! the definition's writer: a UF2 drive, probe-rs, or espflash (the bundled
+//! 2nd stage, the partition table, the agent, slot A and otadata).
+//! The plan is printed before anything is built; the device written to is
+//! one the writer reports, chosen by the user when there are several, and
+//! nothing touches it until the user confirms (`--yes`) or ever with
+//! `--dry-run`.
 
+use std::io::IsTerminal;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::time::{Duration, Instant};
 
+use dagon_topology::defs::{McuDef, Registry, Writer};
 use dagon_topology::Topology;
 use ed25519_compact::KeyPair;
 
-use crate::commands::{command_lines, provision_files, FirstWrite};
+use crate::commands::{command_lines, node_mcu, provision_files, FirstWrite};
 use crate::config::{load_key, read_topology, Config, Opts, ProvisionInputs};
 use crate::deploy::{confirm, firmware_key, YES};
+use crate::esp::Esp;
+use crate::flashdev::{self, Pick, DRIVE_WAIT};
 use crate::nodebuild;
+use crate::scaffold::Want;
 
 const DRY_RUN: &str = "--dry-run";
-/// How long the RP2040's boot ROM drive is waited for.
-const DRIVE_WAIT: Duration = Duration::from_secs(60);
-const DRIVE_POLL: Duration = Duration::from_millis(500);
-/// File the RP2040 boot ROM drive always holds, naming the board.
-const UF2_INFO: &str = "INFO_UF2.TXT";
-const UF2_BOARD: &str = "RPI-RP2";
 /// Version of the first install when dagon.toml gives none.
 const FIRST_VERSION: &str = "1.0.0";
+/// The stage0 part (the layout's `stage0` region); every other part is
+/// the boot image of the first install.
+const STAGE0: &str = "stage0";
 
 /// A DAGON firmware part built from the project's DAGON source.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct Part {
-    pub name: &'static str,
-    /// The DAGON package the part belongs to, found by name in the source.
-    pub anchor: String,
+    pub name: String,
+    /// The MCU or board package the part belongs to.
+    pub owner: Want,
     /// The part's own package folder inside that package ("" for itself).
-    pub sub: &'static str,
+    pub sub: String,
     /// Binary target; `None`: the part package's own name.
-    pub bin: Option<&'static str>,
+    pub bin: Option<String>,
+    /// The owner's package folder when a project defines it (else found
+    /// in the DAGON source).
+    pub package: Option<PathBuf>,
 }
 
-/// The parts each MCU family's first install needs besides the app, for a
-/// node on `board`. The one place that knows where they live.
-pub(crate) fn parts(mcu: &str, board: Option<&str>) -> Option<Vec<Part>> {
-    let part = |name, anchor: String, sub, bin| Part {
-        name,
-        anchor,
-        sub,
-        bin,
+/// The parts `mcu`'s first install needs besides the app, for a node on
+/// `board`: the MCU definition's, then the board definition's.
+pub(crate) fn parts(reg: &Registry, mcu: &str, board: Option<&str>) -> Vec<Part> {
+    let of = |owner: Want, package: &Option<PathBuf>, p: &dagon_topology::defs::Part| Part {
+        name: p.name.clone(),
+        owner,
+        sub: p.sub.clone(),
+        bin: p.bin.clone(),
+        package: package.clone(),
     };
-    let mcu_pkg = || format!("dagon-mcu-{mcu}");
-    match mcu {
-        "rp2040" => Some(vec![
-            part("stage0", mcu_pkg(), "stage0", None),
-            part("bootcore", mcu_pkg(), "bootcore", None),
-        ]),
-        "stm32f401re" => Some(vec![part("bootcore", mcu_pkg(), "bootcore", None)]),
-        // The recovery agent for the factory partition ships with the
-        // board package: a node without one has none to write.
-        "esp32s3" => board.map(|b| {
-            let board_pkg = format!("dagon-board-{}", b.replace('.', "-"));
-            vec![part("factory", board_pkg, "", Some("factory"))]
-        }),
-        _ => None,
-    }
+    let from_mcu = reg.mcu(mcu).into_iter().flat_map(|m| {
+        m.parts
+            .iter()
+            .map(|p| of(Want::Mcu(mcu.into()), &m.package, p))
+    });
+    let from_board = board.and_then(|b| reg.board(b)).into_iter().flat_map(|b| {
+        b.parts
+            .iter()
+            .map(|p| of(Want::Board(b.id.clone()), &b.package, p))
+    });
+    from_mcu.chain(from_board).collect()
 }
 
 /// The root of the project's DAGON source: its clone (path mode), or
@@ -75,15 +78,29 @@ pub(crate) fn source_root(cfg: &Config) -> Result<PathBuf, String> {
     Ok(std::fs::canonicalize(&r).map_or(r, crate::config::plain_path))
 }
 
+/// Folder of the package `owner` under `root`.
+fn package_dir(root: &Path, owner: &Want) -> Result<PathBuf, String> {
+    crate::scaffold::find_for(root, owner)
+        .map(|f| crate::config::plain_path(f.dir))
+        .ok_or_else(|| {
+            format!(
+                "no package {} in {}",
+                crate::scaffold::conventional_name(owner),
+                root.display()
+            )
+        })
+}
+
 /// Package folder of `part` under `root`.
 pub(crate) fn part_dir(root: &Path, part: &Part) -> Result<PathBuf, String> {
-    let at = crate::scaffold::find_named(root, &part.anchor)
-        .ok_or_else(|| format!("no package {} in {}", part.anchor, root.display()))?;
-    let at = crate::config::plain_path(at);
+    let at = match &part.package {
+        Some(p) => p.clone(),
+        None => package_dir(root, &part.owner)?,
+    };
     Ok(if part.sub.is_empty() {
         at
     } else {
-        at.join(part.sub)
+        at.join(&part.sub)
     })
 }
 
@@ -106,15 +123,189 @@ pub(crate) fn same_source(cfg: &Config, node: &str) -> Result<(), String> {
     }
 }
 
-/// How the plan names where `part` comes from.
-fn part_origin(cfg: &Config, part: &Part) -> String {
-    let rel = if part.sub.is_empty() {
-        part.anchor.clone()
+/// Whether `node`'s package lies inside the DAGON source at `root` (a
+/// sample): built from that source, it is on the boot images' DAGON.
+fn package_in_source(cfg: &Config, node: &str, root: &Path) -> bool {
+    cfg.build
+        .get(node)
+        .is_some_and(|b| crate::paths::contained(root, &cfg.base.join(&b.package)).is_ok())
+}
+
+/// How plan lines name local folders and files: in full (the terminal),
+/// or relative to the project or the DAGON source (the page: no path of
+/// this machine leaves it).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Paths {
+    Full,
+    Relative,
+}
+
+/// `p` as plan lines show it: in full, or relative to the project (its
+/// file name when outside it).
+fn shown(cfg: &Config, p: &Path, paths: Paths) -> String {
+    if paths == Paths::Full {
+        return p.display().to_string();
+    }
+    let base = std::fs::canonicalize(&cfg.base).map_or(cfg.base.clone(), crate::config::plain_path);
+    [&cfg.base, &base]
+        .iter()
+        .find_map(|b| p.strip_prefix(b).ok())
+        .map(crate::config::forward_path)
+        .or_else(|| p.file_name().map(|n| n.to_string_lossy().into_owned()))
+        .unwrap_or_default()
+}
+
+/// Every spelling of `dir` a line may carry: as given and canonical.
+pub(crate) fn spellings(dir: &Path) -> Vec<String> {
+    let canon = std::fs::canonicalize(dir).map(crate::config::plain_path);
+    let mut v: Vec<String> = [Some(dir.to_path_buf()), canon.ok()]
+        .into_iter()
+        .flatten()
+        .map(|d| d.display().to_string())
+        .collect();
+    v.dedup();
+    v
+}
+
+/// Every folder of this machine a serve job's lines may name for project
+/// `cfg`, and what the page sees instead, most specific first: each app
+/// (its package name), each project-defined MCU/board package, the DAGON
+/// source, the project, the home folder (cargo's registry paths).
+pub(crate) fn page_swaps(cfg: &Config, reg: &Registry) -> Vec<(String, String)> {
+    let mut swaps = Vec::new();
+    for (node, b) in &cfg.build {
+        let label = app_label(cfg, node);
+        for f in spellings(&cfg.base.join(&b.package)) {
+            swaps.push((f, label.clone()));
+        }
+        // As dagon.toml writes it, either slash (a bare one-word folder
+        // would match ordinary words in the lines; its absolute form is
+        // replaced above).
+        let written = b.package.display().to_string();
+        if written.contains(['/', '\\']) {
+            swaps.push((written.replace('\\', "/"), label.clone()));
+            swaps.push((written.replace('/', "\\"), label));
+        }
+    }
+    let owned = reg
+        .mcus()
+        .iter()
+        .map(|m| (Want::Mcu(m.id.clone()), &m.package))
+        .chain(
+            reg.boards()
+                .iter()
+                .map(|b| (Want::Board(b.id.clone()), &b.package)),
+        );
+    for (owner, package) in owned {
+        if let Some(p) = package {
+            let label = project_package(&owner);
+            swaps.extend(spellings(p).into_iter().map(|f| (f, label.clone())));
+        }
+    }
+    if let Some(root) = crate::dagonsrc::clone_root(&cfg.dagon, &cfg.base) {
+        swaps.extend(
+            spellings(&root)
+                .into_iter()
+                .map(|f| (f, "<DAGON source>".into())),
+        );
+    }
+    swaps.extend(base_swaps(Some(&cfg.base)));
+    most_specific_first(swaps)
+}
+
+/// What every page-bound line hides even before a project loads: the
+/// project's folder (when known) as <project>, the home folder as ~.
+pub(crate) fn base_swaps(project: Option<&Path>) -> Vec<(String, String)> {
+    let mut swaps = Vec::new();
+    if let Some(p) = project {
+        swaps.extend(spellings(p).into_iter().map(|f| (f, "<project>".into())));
+    }
+    let home = std::env::var_os("USERPROFILE").or_else(|| std::env::var_os("HOME"));
+    if let Some(h) = home.filter(|h| !h.is_empty()) {
+        swaps.extend(
+            spellings(Path::new(&h))
+                .into_iter()
+                .map(|f| (f, "~".into())),
+        );
+    }
+    most_specific_first(swaps)
+}
+
+/// Longest folder first, so a folder inside another is replaced before it
+/// (stable: equal lengths keep their order).
+pub(crate) fn most_specific_first(mut swaps: Vec<(String, String)>) -> Vec<(String, String)> {
+    swaps.sort_by_key(|s| std::cmp::Reverse(s.0.len()));
+    swaps
+}
+
+/// `line` with each folder of `swaps` replaced by its name.
+pub(crate) fn hidden(line: &str, swaps: &[(String, String)]) -> String {
+    swaps
+        .iter()
+        .filter(|(f, _)| !f.is_empty())
+        .fold(line.to_string(), |l, (f, to)| l.replace(f.as_str(), to))
+}
+
+/// How the page names `node`'s app: its Cargo package name, never its folder.
+fn app_label(cfg: &Config, node: &str) -> String {
+    cfg.build
+        .get(node)
+        .and_then(|b| nodebuild::package_name(&cfg.base.join(&b.package)).ok())
+        .map_or_else(
+            || format!("the {node} app"),
+            |n| format!("{n} (the {node} app)"),
+        )
+}
+
+/// How the page's plan names a project's own package (no folder of it).
+fn project_package(owner: &Want) -> String {
+    format!(
+        "{} (the project's own package)",
+        crate::scaffold::conventional_name(owner)
+    )
+}
+
+/// How the plan names a part's folder: in its project package, or in the
+/// DAGON source.
+fn part_origin(cfg: &Config, part: &Part, paths: Paths) -> String {
+    match (&part.package, paths) {
+        (Some(p), Paths::Full) => {
+            let dir = if part.sub.is_empty() {
+                p.clone()
+            } else {
+                p.join(&part.sub)
+            };
+            dir.display().to_string()
+        }
+        // The page never gets a project's own folder names, only the package.
+        (Some(_), Paths::Relative) => project_package(&part.owner),
+        (None, Paths::Full) => origin(cfg, &part.owner, &part.sub),
+        (None, Paths::Relative) => {
+            let rel = source_relative(cfg, &part.owner);
+            let rel = if part.sub.is_empty() {
+                rel
+            } else {
+                format!("{rel}/{}", part.sub)
+            };
+            format!("{rel} of the DAGON source")
+        }
+    }
+}
+
+/// How the plan names a package or a part folder of the DAGON source.
+fn origin(cfg: &Config, owner: &Want, sub: &str) -> String {
+    let name = crate::scaffold::conventional_name(owner);
+    let rel = if sub.is_empty() {
+        name
     } else {
-        format!("{}/{}", part.anchor, part.sub)
+        format!("{name}/{sub}")
     };
     match crate::dagonsrc::clone_root(&cfg.dagon, &cfg.base) {
-        Some(root) => part_dir(&root, part).map_or(rel, |d| d.display().to_string()),
+        Some(root) => package_dir(&root, owner).map_or(rel, |d| {
+            (if sub.is_empty() { d } else { d.join(sub) })
+                .display()
+                .to_string()
+        }),
         None => format!(
             "{rel} of DAGON {} ({})",
             cfg.dagon.tag.as_deref().unwrap_or("?"),
@@ -123,24 +314,47 @@ fn part_origin(cfg: &Config, part: &Part) -> String {
     }
 }
 
+/// `owner`'s package as a path from the DAGON source root (its package
+/// name when there is no local clone).
+fn source_relative(cfg: &Config, owner: &Want) -> String {
+    let name = crate::scaffold::conventional_name(owner);
+    let Some(root) = crate::dagonsrc::clone_root(&cfg.dagon, &cfg.base) else {
+        return name;
+    };
+    let root = std::fs::canonicalize(&root).map_or(root, crate::config::plain_path);
+    package_dir(&root, owner)
+        .ok()
+        .and_then(|d| d.strip_prefix(&root).ok().map(crate::config::forward_path))
+        .unwrap_or(name)
+}
+
 /// What `flash` will do, one line each, printed before it starts.
 pub(crate) fn plan(
     cfg: &Config,
     t: &Topology,
     node: &str,
     out: &Path,
+    paths: Paths,
 ) -> Result<Vec<String>, String> {
     let n = t
         .node(node)
         .ok_or_else(|| format!("no node '{node}' in the topology"))?;
-    let parts = parts(&n.mcu, n.board.as_deref()).ok_or_else(|| match n.mcu.as_str() {
-        "esp32s3" => {
-            format!("'{node}' names no board: its factory agent comes from the board package")
-        }
-        mcu => {
-            format!("flash supports rp2040, stm32f401re and esp32s3 nodes, not {mcu} ('{node}')")
-        }
-    })?;
+    let reg = crate::defs::registry(cfg)?;
+    let mcu = node_mcu(&reg, t, node)?;
+    let parts = parts(&reg, &mcu.id, n.board.as_deref());
+    if parts.is_empty() {
+        return Err(match &n.board {
+            None => format!(
+                "'{node}' names no board and the {} definition names no first-write part \
+                 (its boot image comes from a board package)",
+                mcu.id
+            ),
+            Some(b) => format!(
+                "neither the {} nor the {b} definition names a first-write part",
+                mcu.id
+            ),
+        });
+    }
     let mut lines = vec![format!("flash {node} ({}):", n.mcu)];
     if cfg.provision.contains_key(node) {
         lines.push(format!(
@@ -151,7 +365,7 @@ pub(crate) fn plan(
         lines.push(format!(
             "  build    {:<8} {} (tag {})",
             part.name,
-            part_origin(cfg, part),
+            part_origin(cfg, part, paths),
             n.tag
         ));
     }
@@ -159,97 +373,114 @@ pub(crate) fn plan(
         .build
         .get(node)
         .ok_or_else(|| format!("no [build.{node}] in dagon.toml"))?;
-    lines.push(format!("  build    app      {}", b.package.display()));
-    let write = match n.mcu.as_str() {
-        "rp2040" => vec![
-            format!("  make     {}", out.join("rescue.uf2").display()),
+    lines.push(format!(
+        "  build    app      {}",
+        match paths {
+            Paths::Full => shown(cfg, &b.package, paths),
+            Paths::Relative => app_label(cfg, node),
+        }
+    ));
+    lines.extend(write_plan(cfg, mcu, out, paths)?);
+    Ok(lines)
+}
+
+/// The plan's lines for the files made and the write, by writer kind.
+fn write_plan(cfg: &Config, mcu: &McuDef, out: &Path, paths: Paths) -> Result<Vec<String>, String> {
+    let via = &mcu.connection.label;
+    Ok(match &mcu.writer {
+        Writer::Uf2Drive { board_id, .. } => vec![
+            format!("  make     {}", shown(cfg, &out.join("rescue.uf2"), paths)),
             format!(
-                "  write    copy it to the {UF2_BOARD} drive (hold BOOT while plugging in USB; \
-                 waits {} s)",
+                "  write    copy it to the UF2 drive chosen after the build (Board-ID {board_id} \
+                 is the {}; waits {} s for one)",
+                mcu.name,
                 DRIVE_WAIT.as_secs()
             ),
         ],
-        "esp32s3" => {
+        Writer::ProbeRs { .. } => vec![
+            format!("  make     {}", shown(cfg, &out.join("flash.bin"), paths)),
+            format!("  write    probe-rs erase, download, reset through the {via} chosen after the build"),
+        ],
+        Writer::Espflash { usb_hint, .. } => {
+            let esp = Esp::of(mcu).expect("espflash writer");
+            let sums = Path::new(esp.checksums)
+                .file_name()
+                .map_or(esp.checksums.into(), |n| n.to_string_lossy());
+            let check = match (&mcu.package, paths) {
+                // A project's own MCU package.
+                (Some(p), Paths::Full) => format!(
+                    "{} against {sums}",
+                    p.join(esp.bootloader).display()
+                ),
+                (Some(_), Paths::Relative) => format!(
+                    "the 2nd stage of {} against its checksums",
+                    project_package(&Want::Mcu(mcu.id.clone()))
+                ),
+                (None, _) => format!(
+                    "{}/{} of the DAGON source against {sums}",
+                    source_relative(cfg, &Want::Mcu(mcu.id.clone())),
+                    esp.bootloader
+                ),
+            };
             let mut l = vec![format!(
-                "  check    {}/bootloader.bin of the DAGON source against SHA256SUMS (the unmodified ESP-IDF 2nd stage)",
-                crate::esp::VENDOR_DIR
+                "  check    {check} (the unmodified ESP-IDF 2nd stage)"
             )];
-            l.push(format!("  make     in {}:", out.display()));
+            l.push(format!("  make     in {}:", shown(cfg, out, paths)));
             l.extend(
-                esp_files_plan()
+                esp_files_plan(mcu, &esp)?
                     .into_iter()
                     .map(|f| format!("             {f}")),
             );
+            let hint = usb_hint.map_or(String::new(), |h| {
+                format!(" (USB {:04x}:{:04x} is the {})", h.vid, h.pid, mcu.name)
+            });
             l.push(format!(
-                "  write    espflash over USB-C to the one ESP32-S3 connected (USB {:04x}:{:04x})",
-                crate::esp::USB_JTAG.0,
-                crate::esp::USB_JTAG.1
+                "  write    espflash over {via} to the serial port chosen after the build{hint}"
             ));
             l
         }
-        _ => vec![
-            format!("  make     {}", out.join("flash.bin").display()),
-            "  write    probe-rs erase, download, reset through the ST-LINK".into(),
-        ],
-    };
-    lines.extend(write);
-    Ok(lines)
+    })
 }
 
 /// The first-install inputs, all built now with the signing key's public
 /// half embedded. Prebuilt `[provision.<id>]` files are never used: a boot
 /// core with another key would refuse every image signed later.
+#[allow(clippy::too_many_arguments)]
 fn inputs(
     cfg: &Config,
+    reg: &Registry,
     t: &Topology,
     node: &str,
     key: &KeyPair,
+    paths: Paths,
     log: &mut dyn FnMut(&str),
     cancel: &AtomicBool,
 ) -> Result<ProvisionInputs, String> {
     let n = t.node(node).ok_or("checked in plan")?;
-    same_source(cfg, node)?;
+    let root = source_root(cfg)?;
+    let in_source = package_in_source(cfg, node, &root);
+    if !in_source {
+        same_source(cfg, node)?;
+    }
     let fw_key = firmware_key(cfg, key)?;
     let hex = dagon_sign::to_hex(&fw_key);
-    let root = source_root(cfg)?;
-    log(&format!("{node}: DAGON source {}", root.display()));
-    let mut built = Vec::new();
-    for part in parts(&n.mcu, n.board.as_deref()).ok_or("checked in plan")? {
-        let dir = part_dir(&root, &part)?;
-        let bin = match part.bin {
-            Some(b) => b.to_string(),
-            None => nodebuild::package_name(&dir)?,
-        };
-        let target = cfg.base.join("out/flash/target").join(part.name);
-        log(&format!(
-            "{node}: building {} in {}",
-            part.name,
-            dir.display()
-        ));
-        let exe = nodebuild::cargo_build(
-            &dir,
-            &bin,
-            &[],
-            Some(&target),
-            nodebuild::FirmwareEnv {
-                pubkey_hex: Some(&hex),
-                // The boot core accepts only images carrying this tag.
-                target_tag: Some(&n.tag),
-            },
-            log,
-            cancel,
-        )?;
-        built.push((part.name, exe));
-    }
-    nodebuild::build_nodes_keyed(cfg, &[node.to_string()], Some(fw_key), log, cancel)?;
-    let take = |name: &str| built.iter().find(|p| p.0 == name).map(|p| p.1.clone());
+    log(&match paths {
+        Paths::Full => format!("{node}: DAGON source {}", root.display()),
+        Paths::Relative => format!("{node}: building with the project's DAGON source"),
+    });
+    let built = build_parts(cfg, reg, n, &root, &hex, paths, log, cancel)?;
+    let source = in_source.then_some(root.as_path());
+    build_app(cfg, node, fw_key, source, paths, log, cancel)?;
+    let stage0 = built.iter().find(|p| p.0 == STAGE0).map(|p| p.1.clone());
     let version = cfg.build.get(node).and_then(|b| b.version.clone());
     Ok(ProvisionInputs {
-        stage0: take("stage0"),
-        // ESP32-S3: the factory agent stands where the boot core is.
-        bootcore: take("bootcore")
-            .or_else(|| take("factory"))
-            .ok_or("no boot core part")?,
+        stage0,
+        // The boot core, or the agent that stands where it is.
+        bootcore: built
+            .iter()
+            .find(|p| p.0 != STAGE0)
+            .map(|p| p.1.clone())
+            .ok_or("no boot image part")?,
         app: nodebuild::elf_path(cfg, node, 'a'),
         version: Some(version.unwrap_or_else(|| FIRST_VERSION.into())),
         bootcore_version: None,
@@ -258,46 +489,174 @@ fn inputs(
     })
 }
 
+/// Builds `node`'s app with the firmware key (`source`: the DAGON source
+/// when the app is one of its samples). For the page, the app's folder is
+/// its package name and the project's folder is <project>, in DAGON's
+/// lines and cargo's alike (errors included).
+pub(crate) fn build_app(
+    cfg: &Config,
+    node: &str,
+    fw_key: [u8; 32],
+    source: Option<&Path>,
+    paths: Paths,
+    log: &mut dyn FnMut(&str),
+    cancel: &AtomicBool,
+) -> Result<(), String> {
+    let mut swaps = Vec::new();
+    if paths == Paths::Relative {
+        if let Some(b) = cfg.build.get(node) {
+            let label = app_label(cfg, node);
+            for f in spellings(&cfg.base.join(&b.package)) {
+                swaps.push((f, label.clone()));
+            }
+            swaps.push((b.package.display().to_string(), label));
+        }
+        for f in spellings(&cfg.base) {
+            swaps.push((f, "<project>".to_string()));
+        }
+    }
+    let hide = |l: &str| hidden(l, &swaps);
+    nodebuild::build_nodes_keyed(
+        cfg,
+        &[node.to_string()],
+        Some(fw_key),
+        source,
+        &mut |l| log(&hide(l)),
+        cancel,
+    )
+    .map_err(|e| hide(&e))?;
+    Ok(())
+}
+
+/// Builds the first-write parts of node `n` with the firmware key `hex`:
+/// a project-defined package's in that package, the others found in the
+/// DAGON source at `root`. Returns (part name, built executable).
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn build_parts(
+    cfg: &Config,
+    reg: &Registry,
+    n: &dagon_topology::schema::Node,
+    root: &Path,
+    hex: &str,
+    paths: Paths,
+    log: &mut dyn FnMut(&str),
+    cancel: &AtomicBool,
+) -> Result<Vec<(String, PathBuf)>, String> {
+    let node = &n.id;
+    let mut built = Vec::new();
+    for part in parts(reg, &n.mcu, n.board.as_deref()) {
+        let dir = part_dir(root, &part)?;
+        let bin = match &part.bin {
+            Some(b) => b.clone(),
+            None => nodebuild::package_name(&dir)?,
+        };
+        let target = cfg.base.join("out/flash/target").join(&part.name);
+        log(&format!(
+            "{node}: building {} in {}",
+            part.name,
+            match paths {
+                Paths::Full => dir.display().to_string(),
+                Paths::Relative => part_origin(cfg, &part, paths),
+            }
+        ));
+        // cargo's own lines and errors name the folder: for the page, a
+        // project package's folder becomes its package name.
+        let swaps: Vec<(String, String)> = match (&part.package, paths) {
+            (Some(_), Paths::Relative) => {
+                let label = project_package(&part.owner);
+                spellings(&dir)
+                    .into_iter()
+                    .map(|f| (f, label.clone()))
+                    .collect()
+            }
+            _ => Vec::new(),
+        };
+        let hide = |l: &str| hidden(l, &swaps);
+        let exe = nodebuild::cargo_build(
+            &dir,
+            &bin,
+            &[],
+            Some(&target),
+            nodebuild::FirmwareEnv {
+                pubkey_hex: Some(hex),
+                // The boot core accepts only images carrying this tag.
+                target_tag: Some(&n.tag),
+            },
+            &mut |l| log(&hide(l)),
+            cancel,
+        )
+        .map_err(|e| hide(&e))?;
+        built.push((part.name, exe));
+    }
+    Ok(built)
+}
+
 /// Builds the parts and the app and writes the first-install files into
 /// `out`.
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn prepare(
     cfg: &Config,
     t: &Topology,
     node: &str,
     key: &KeyPair,
     out: &Path,
+    paths: Paths,
     log: &mut dyn FnMut(&str),
     cancel: &AtomicBool,
 ) -> Result<FirstWrite, String> {
-    let i = inputs(cfg, t, node, key, log, cancel)?;
-    match t.node(node).map(|n| n.mcu.as_str()) {
-        Some("esp32s3") => {
-            let app = crate::esp::save_image(&i.app, &out.join("app.bin"))?;
-            esp_files(t, node, &i, &app, &source_root(cfg)?, out, key)
+    let reg = crate::defs::registry(cfg)?;
+    let i = inputs(cfg, &reg, t, node, key, paths, log, cancel)?;
+    let mcu = node_mcu(&reg, t, node)?;
+    match Esp::of(mcu) {
+        Some(esp) => {
+            let app = crate::esp::save_image(&esp, &i.app, &out.join("app.bin"))?;
+            esp_files(&reg, t, node, &i, &app, &source_root(cfg)?, out, key)
         }
-        _ => provision_files(t, node, &i, out, key),
+        None => provision_files(&reg, t, node, &i, out, key),
     }
 }
 
-/// The ESP32-S3 first-install files, as the plan names them.
-fn esp_files_plan() -> Vec<String> {
-    [
-        "bootloader.bin  at 0x0       (2nd stage)",
-        "partitions.csv  at 0x8000    (partition table)",
-        "factory.elf     in factory   (recovery agent)",
-        "body.bin        in ota_0     (app, slot A)",
-        "header.bin      in dagon     (its signed header)",
-        "otadata.bin     in otadata   (ota_0 selected, confirmed)",
-    ]
-    .map(String::from)
-    .to_vec()
+/// The espflash first-install files, as the plan names them.
+fn esp_files_plan(mcu: &McuDef, esp: &Esp<'_>) -> Result<Vec<String>, String> {
+    let l = crate::esp::layout(mcu)?;
+    let row = |file: &str, at: String, what: &str| format!("{file:<16}{at:<13}({what})");
+    Ok(vec![
+        row(
+            "bootloader.bin",
+            format!("at {:#x}", crate::esp::BOOTLOADER_AT),
+            "2nd stage",
+        ),
+        row(
+            "partitions.csv",
+            format!("at {:#x}", esp.table_at),
+            "partition table",
+        ),
+        row(
+            "factory.elf",
+            format!("in {}", l.factory.0),
+            "recovery agent",
+        ),
+        row("body.bin", format!("in {}", l.ota_0.0), "app, slot A"),
+        row(
+            "header.bin",
+            format!("in {}", l.dagon.0),
+            "its signed header",
+        ),
+        row(
+            "otadata.bin",
+            format!("in {}", crate::esp::OTADATA),
+            &format!("{} selected, confirmed", l.ota_0.0),
+        ),
+    ])
 }
 
-/// Writes the ESP32-S3 first-install files into `out` and returns the
+/// Writes the espflash first-install files into `out` and returns the
 /// espflash commands (without the port, chosen when writing): the checked
-/// 2nd stage, the partition table and the factory agent, then slot A's body
-/// and header and the otadata entry that selects it.
+/// 2nd stage, the partition table and the recovery agent, then slot A's
+/// body and header and the otadata entry that selects it.
+#[allow(clippy::too_many_arguments)]
 fn esp_files(
+    reg: &Registry,
     t: &Topology,
     node: &str,
     i: &ProvisionInputs,
@@ -308,11 +667,17 @@ fn esp_files(
 ) -> Result<FirstWrite, String> {
     use crate::esp;
     use dagon_format::header::{image_kind, slot_binding, HEADER_SIZE};
-    let (vendor, csv_path) = esp::vendor_files(home);
-    let boot = esp::checked_bootloader(&vendor)?;
+    let mcu = node_mcu(reg, t, node)?;
+    let e = Esp::of(mcu).ok_or("not an espflash MCU")?;
+    let pkg = match &mcu.package {
+        Some(p) => p.clone(),
+        None => package_dir(home, &Want::Mcu(mcu.id.clone()))?,
+    };
+    let (bl_path, sums, csv_path) = esp::vendor_files(mcu, &e, &pkg)?;
+    let boot = esp::checked_bootloader(&bl_path, &sums)?;
     let csv =
         std::fs::read_to_string(&csv_path).map_err(|e| format!("{}: {e}", csv_path.display()))?;
-    let l = esp::layout(&csv)?;
+    let l = esp::layout(mcu)?;
     let version = crate::commands::version(i.version.as_deref().unwrap_or(FIRST_VERSION))?;
     let opts = crate::commands::SignOpts {
         version,
@@ -322,6 +687,7 @@ fn esp_files(
         bits: None,
     };
     let img = crate::commands::image_for_node(
+        reg,
         t,
         node,
         image_kind::APP,
@@ -346,22 +712,22 @@ fn esp_files(
 
     let s = |v: &str| v.to_string();
     let p = |p: &PathBuf| p.display().to_string();
-    let common = [s("--chip"), s(esp::CHIP)];
+    let common = [s("--chip"), s(e.chip)];
     let mut first = vec![s("flash")];
     first.extend(common.clone());
     first.extend([
         s("--flash-size"),
-        s(esp::FLASH_SIZE),
+        s(e.flash_size),
         s("--partition-table-offset"),
-        format!("{:#x}", esp::TABLE_AT),
+        format!("{:#x}", e.table_at),
         s("--bootloader"),
         p(&bootloader),
         s("--partition-table"),
         p(&table),
         s("--erase-parts"),
-        s("otadata,dagon"),
+        format!("{},{}", esp::OTADATA, l.dagon.0),
         s("--target-app-partition"),
-        s("factory"),
+        l.factory.0.clone(),
         p(&factory),
     ]);
     let write_bin = |at: u32, f: &PathBuf| {
@@ -372,16 +738,16 @@ fn esp_files(
     };
     let commands = vec![
         first,
-        write_bin(l.ota_0, &body),
-        write_bin(l.dagon, &header),
+        write_bin(l.ota_0.1, &body),
+        write_bin(l.dagon.1, &header),
         write_bin(l.otadata, &otadata),
     ];
     let files = vec![
-        (0, bootloader),
-        (esp::TABLE_AT, table),
-        (l.factory, factory),
-        (l.ota_0, body),
-        (l.dagon, header),
+        (esp::BOOTLOADER_AT, bootloader),
+        (e.table_at, table),
+        (l.factory.1, factory),
+        (l.ota_0.1, body),
+        (l.dagon.1, header),
         (l.otadata, otadata),
     ];
     crate::config::write_file(
@@ -391,107 +757,60 @@ fn esp_files(
     Ok(FirstWrite::Espflash { files, commands })
 }
 
-/// The RP2040 boot ROM drive among `roots` (its INFO_UF2.TXT names
-/// RPI-RP2): `Ok(None)` while there is none, an error when there are
-/// several, since the file must reach exactly the board being flashed.
-pub(crate) fn find_uf2_drive(roots: &[PathBuf]) -> Result<Option<PathBuf>, String> {
-    let found: Vec<&PathBuf> = roots
-        .iter()
-        .filter(|r| std::fs::read_to_string(r.join(UF2_INFO)).is_ok_and(|s| is_rp2040_rom(&s)))
-        .collect();
-    match found[..] {
-        [] => Ok(None),
-        [one] => Ok(Some(one.clone())),
-        _ => Err(format!(
-            "{} {UF2_BOARD} drives are connected ({}); unplug every board but the one to \
-             flash, then run flash again. Nothing was copied.",
-            found.len(),
-            found
-                .iter()
-                .map(|p| p.display().to_string())
-                .collect::<Vec<_>>()
-                .join(", ")
-        )),
-    }
+/// Every device `node`'s writer reports now (a UF2 writer waits for its
+/// drive), with the writer.
+pub(crate) fn devices(
+    cfg: &Config,
+    t: &Topology,
+    node: &str,
+    log: &mut dyn FnMut(&str),
+    cancel: &AtomicBool,
+) -> Result<(Writer, Vec<flashdev::Candidate>), String> {
+    let reg = crate::defs::registry(cfg)?;
+    let mcu = node_mcu(&reg, t, node)?;
+    Ok((mcu.writer.clone(), flashdev::find(mcu, log, cancel)?))
 }
 
-/// Whether INFO_UF2.TXT is the RP2040 boot ROM's: a `UF2 Bootloader` first
-/// line and the exact line `Board-ID: RPI-RP2` (not a part of another ID).
-fn is_rp2040_rom(info: &str) -> bool {
-    // The literal first line (lines() drops only the line break).
-    let mut lines = info.lines();
-    let header = lines
-        .next()
-        .is_some_and(|l| l.starts_with("UF2 Bootloader"));
-    let board = format!("Board-ID: {UF2_BOARD}");
-    header && lines.any(|l| l == board)
-}
-
-/// The MCU families `flash` can write (the page offers it for these).
-pub(crate) fn flashable(mcu: &str) -> bool {
-    parts(mcu, Some("any")).is_some()
-}
-
-/// Where a removable drive shows up on this system.
-fn drive_roots() -> Vec<PathBuf> {
-    if cfg!(windows) {
-        return (b'D'..=b'Z')
-            .map(|c| PathBuf::from(format!("{}:\\", c as char)))
-            .collect();
-    }
-    let user = std::env::var("USER").unwrap_or_default();
-    let parents = [
-        PathBuf::from("/Volumes"),
-        Path::new("/media").join(&user),
-        Path::new("/run/media").join(&user),
-        PathBuf::from("/media"),
-        PathBuf::from("/mnt"),
-    ];
-    mounts_under(&parents)
-}
-
-/// Every directory directly under `parents`: a second board mounts under
-/// another name ("RPI-RP2 1"), so names are not guessed.
-fn mounts_under(parents: &[PathBuf]) -> Vec<PathBuf> {
-    let mut out: Vec<PathBuf> = parents
-        .iter()
-        .filter_map(|p| std::fs::read_dir(p).ok())
-        .flatten()
-        .filter_map(|e| e.ok().map(|e| e.path()))
-        .filter(|p| p.is_dir())
-        .collect();
-    out.sort();
-    out.dedup();
-    out
-}
-
-/// Writes the first-install files to the board (after the confirmation).
+/// Writes the first-install files to `device` (after the confirmation).
 pub(crate) fn write(
     w: &FirstWrite,
+    c: &flashdev::Candidate,
     log: &mut dyn FnMut(&str),
     cancel: &AtomicBool,
 ) -> Result<(), String> {
+    let device = c.id.as_str();
     match w {
-        FirstWrite::ProbeRs { commands, .. } => run_probe_rs(commands, log),
-        FirstWrite::Uf2 { file, .. } => copy_uf2(file, log, cancel),
+        FirstWrite::ProbeRs { commands, .. } => run_probe_rs(&with_probe(commands, device), log),
+        FirstWrite::Uf2 { file, .. } => {
+            copy_uf2(file, c.path.as_deref().unwrap_or(Path::new(device)), log)
+        }
         FirstWrite::Espflash { commands, .. } => {
-            let port = crate::esp::pick_port(&crate::esp::usb_ports()?)?;
-            run_espflash(&with_port(commands, &port), log, cancel)
+            run_espflash(&with_port(commands, device), log, cancel)
         }
     }
 }
 
-/// `commands` aimed at `port`, never asking which port to use.
-fn with_port(commands: &[Vec<String>], port: &str) -> Vec<Vec<String>> {
+/// `commands` with `extra` after each verb.
+fn after_verb(commands: &[Vec<String>], extra: &[&str]) -> Vec<Vec<String>> {
     commands
         .iter()
         .map(|c| {
             let mut a = vec![c[0].clone()];
-            a.extend(["--port".into(), port.into(), "--non-interactive".into()]);
+            a.extend(extra.iter().map(|s| s.to_string()));
             a.extend(c[1..].iter().cloned());
             a
         })
         .collect()
+}
+
+/// `commands` aimed at `port`, never asking which port to use.
+fn with_port(commands: &[Vec<String>], port: &str) -> Vec<Vec<String>> {
+    after_verb(commands, &["--port", port, "--non-interactive"])
+}
+
+/// `commands` aimed at `probe` (`vid:pid[:serial]`).
+fn with_probe(commands: &[Vec<String>], probe: &str) -> Vec<Vec<String>> {
+    after_verb(commands, &["--probe", probe])
 }
 
 fn run_espflash(
@@ -524,32 +843,11 @@ fn run_espflash(
     Ok(())
 }
 
-fn copy_uf2(file: &Path, log: &mut dyn FnMut(&str), cancel: &AtomicBool) -> Result<(), String> {
-    log(&format!(
-        "waiting for the {UF2_BOARD} drive: hold BOOT while plugging the hub's USB in"
-    ));
-    let until = Instant::now() + DRIVE_WAIT;
-    let drive = loop {
-        if cancel.load(Ordering::Relaxed) {
-            return Err("cancelled; nothing was copied".into());
-        }
-        if let Some(d) = find_uf2_drive(&drive_roots())? {
-            break d;
-        }
-        if Instant::now() >= until {
-            return Err(format!(
-                "no {UF2_BOARD} drive within {} s; hold BOOT while plugging in USB, then copy {} \
-                 to the drive by hand",
-                DRIVE_WAIT.as_secs(),
-                file.display()
-            ));
-        }
-        std::thread::sleep(DRIVE_POLL);
-    };
+fn copy_uf2(file: &Path, drive: &Path, log: &mut dyn FnMut(&str)) -> Result<(), String> {
     let dest = drive.join("rescue.uf2");
     std::fs::copy(file, &dest).map_err(|e| format!("cannot copy to {}: {e}", dest.display()))?;
     log(&format!(
-        "copied to {}; the hub restarts on its own",
+        "copied to {}; the board restarts on its own",
         dest.display()
     ));
     Ok(())
@@ -570,7 +868,32 @@ fn run_probe_rs(commands: &[Vec<String>], log: &mut dyn FnMut(&str)) -> Result<(
     Ok(())
 }
 
-/// `dagon flash <id> [--dry-run] [--yes] [--out <dir>] [--topology <yaml>]
+/// What the dry run prints instead of writing.
+fn dry_run(w: &FirstWrite) {
+    match w {
+        FirstWrite::ProbeRs { commands, .. } => print!(
+            "dry run; would run, on the probe chosen:\n{}",
+            command_lines("probe-rs", &with_probe(commands, "<probe>"))
+        ),
+        FirstWrite::Uf2 { file, .. } => println!(
+            "dry run; would copy {} to the UF2 drive chosen",
+            file.display()
+        ),
+        FirstWrite::Espflash { files, commands } => {
+            println!("dry run; the flash would hold:");
+            for (at, f) in files {
+                println!("  {at:#09x}  {}", f.display());
+            }
+            print!(
+                "and would run, on the port chosen:\n{}",
+                command_lines("espflash", &with_port(commands, "<port>"))
+            )
+        }
+    }
+}
+
+/// `dagon flash <id> [--dry-run] [--yes] [--probe <vid:pid[:serial]> |
+/// --port <port> | --drive <path>] [--out <dir>] [--topology <yaml>]
 /// [--key <file>] [--config <file>]`
 pub fn command(args: &[&str]) -> Result<(), String> {
     let dry = args.contains(&DRY_RUN);
@@ -580,50 +903,74 @@ pub fn command(args: &[&str]) -> Result<(), String> {
         .copied()
         .filter(|a| *a != DRY_RUN && *a != YES)
         .collect();
-    let o = Opts::parse(&args, &["out", "topology", "key", "config"])?;
+    let o = Opts::parse(
+        &args,
+        &["out", "topology", "key", "config", "probe", "port", "drive"],
+    )?;
     let [node] = o.pos[..] else {
         return Err("flash needs <id>".into());
     };
     let cfg = Config::load(o.get("config"))?;
-    let t = read_topology(&cfg.topology_path(o.get("topology"))?)?;
+    let t = read_topology(&cfg, &cfg.topology_path(o.get("topology"))?)?;
     let out = o
         .get("out")
         .map_or_else(|| cfg.provision_dir().join(node), PathBuf::from);
-    let steps = plan(&cfg, &t, node, &out)?.join("\n");
+    let steps = plan(&cfg, &t, node, &out, Paths::Full)?.join("\n");
     println!("{steps}");
+    let selector = selector(&o, &cfg, &t, node)?;
     let key = load_key(o.get("key"))?;
     let mut log = |l: &str| println!("{l}");
     let cancel = AtomicBool::new(false);
-    let w = prepare(&cfg, &t, node, &key, &out, &mut log, &cancel)?;
+    let w = prepare(&cfg, &t, node, &key, &out, Paths::Full, &mut log, &cancel)?;
     if dry {
-        match &w {
-            FirstWrite::ProbeRs { commands, .. } => {
-                print!(
-                    "dry run; would run:\n{}",
-                    command_lines("probe-rs", commands)
-                )
-            }
-            FirstWrite::Uf2 { file, .. } => println!(
-                "dry run; would copy {} to the {UF2_BOARD} drive",
-                file.display()
-            ),
-            FirstWrite::Espflash { files, commands } => {
-                println!("dry run; the flash would hold:");
-                for (at, f) in files {
-                    println!("  {at:#09x}  {}", f.display());
-                }
-                print!(
-                    "and would run, on the one ESP32-S3 connected:\n{}",
-                    command_lines("espflash", &with_port(commands, "<port>"))
-                )
-            }
-        }
+        dry_run(&w);
         return Ok(());
     }
+    let (writer, found) = devices(&cfg, &t, node, &mut log, &cancel)?;
+    let device = match flashdev::pick(found, selector, &writer)? {
+        Pick::Use(c) => c,
+        Pick::Choose(list) if !yes && std::io::stdin().is_terminal() => {
+            flashdev::choose(&list, &writer, &mut std::io::stdin().lock())?
+        }
+        Pick::Choose(list) => return Err(flashdev::several(&list, &writer)),
+    };
+    println!(
+        "  device   --{} {}  {}",
+        flashdev::flag(&writer),
+        device.id,
+        device.label
+    );
     if !yes && !confirm("", &mut std::io::stdin().lock()) {
         return Err("nothing written to the board".into());
     }
-    write(&w, &mut log, &cancel)
+    write(&w, &device, &mut log, &cancel)
+}
+
+/// The device option given, which must be the one `node`'s writer takes.
+fn selector<'a>(
+    o: &'a Opts<'_>,
+    cfg: &Config,
+    t: &Topology,
+    node: &str,
+) -> Result<Option<&'a str>, String> {
+    let given: Vec<(&str, &str)> = ["probe", "port", "drive"]
+        .into_iter()
+        .filter_map(|f| o.get(f).map(|v| (f, v)))
+        .collect();
+    let [(f, v)] = given[..] else {
+        return match given.len() {
+            0 => Ok(None),
+            _ => Err("name the device once (--probe, --port or --drive)".into()),
+        };
+    };
+    let reg = crate::defs::registry(cfg)?;
+    let want = flashdev::flag(&node_mcu(&reg, t, node)?.writer);
+    if f != want {
+        return Err(format!(
+            "'{node}' is written to a device named with --{want}, not --{f}"
+        ));
+    }
+    Ok(Some(v))
 }
 
 #[cfg(test)]
@@ -691,7 +1038,7 @@ mod tests {
     fn rp2040_dry_run_makes_the_uf2_and_plans_the_drive_copy() {
         let (cfg, t) = area("hub");
         let out = cfg.base.join("out/hub");
-        let plan = plan(&cfg, &t, "hub", &out).unwrap().join("\n");
+        let plan = plan(&cfg, &t, "hub", &out, Paths::Full).unwrap().join("\n");
         assert!(
             plan.contains("rescue.uf2") && plan.contains("RPI-RP2"),
             "{plan}"
@@ -701,7 +1048,29 @@ mod tests {
             "{plan}"
         );
         assert!(plan.contains("(tag hub-rp2040-lcd)"), "{plan}");
-        match provision_files(&t, "hub", &built(&cfg, true), &out, &key()).unwrap() {
+        // The page's plan: the same steps with no path of this machine.
+        let page = super::plan(&cfg, &t, "hub", &out, Paths::Relative)
+            .unwrap()
+            .join(
+                "
+",
+            );
+        assert_eq!(page.lines().count(), plan.lines().count());
+        assert!(page.contains("  make     out/hub/rescue.uf2"), "{page}");
+        assert!(page.contains("/stage0 of the DAGON source"), "{page}");
+        for local in [cfg.base.display().to_string(), here().display().to_string()] {
+            assert!(!page.contains(&local), "{local} in {page}");
+        }
+        match provision_files(
+            Registry::builtin(),
+            &t,
+            "hub",
+            &built(&cfg, true),
+            &out,
+            &key(),
+        )
+        .unwrap()
+        {
             FirstWrite::Uf2 { file, blocks } => {
                 assert_eq!(file, out.join("rescue.uf2"));
                 let len = std::fs::metadata(&file).unwrap().len() as usize;
@@ -717,7 +1086,7 @@ mod tests {
     fn f401_dry_run_makes_the_image_and_the_probe_rs_commands() {
         let (cfg, t) = area("seg");
         let out = cfg.base.join("out/seg");
-        let plan = plan(&cfg, &t, "seg", &out).unwrap().join("\n");
+        let plan = plan(&cfg, &t, "seg", &out, Paths::Full).unwrap().join("\n");
         assert!(
             plan.contains("flash.bin") && plan.contains("probe-rs"),
             "{plan}"
@@ -727,7 +1096,16 @@ mod tests {
             "{plan}"
         );
         assert!(plan.contains("(tag seg-f401-7seg)"), "{plan}");
-        match provision_files(&t, "seg", &built(&cfg, false), &out, &key()).unwrap() {
+        match provision_files(
+            Registry::builtin(),
+            &t,
+            "seg",
+            &built(&cfg, false),
+            &out,
+            &key(),
+        )
+        .unwrap()
+        {
             FirstWrite::ProbeRs {
                 bin,
                 bytes,
@@ -750,7 +1128,7 @@ mod tests {
         let (mut cfg, t) = area("prov");
         let prebuilt = built(&cfg, false);
         cfg.provision.insert("seg".into(), prebuilt.clone());
-        let plan = plan(&cfg, &t, "seg", &cfg.base.join("out"))
+        let plan = plan(&cfg, &t, "seg", &cfg.base.join("out"), Paths::Full)
             .unwrap()
             .join("\n");
         assert!(plan.contains("ignore   [provision.seg]"), "{plan}");
@@ -767,12 +1145,12 @@ mod tests {
         let (mut cfg, t) = area("esp");
         let out = cfg.base.join("out");
         assert!(
-            parts("esp32s3", None).is_none(),
+            parts(Registry::builtin(), "esp32s3", None).is_empty(),
             "no board, no factory agent"
         );
-        assert!(plan(&cfg, &t, "nope", &out).is_err());
+        assert!(plan(&cfg, &t, "nope", &out, Paths::Full).is_err());
         cfg.build.clear();
-        assert!(plan(&cfg, &t, "seg", &out)
+        assert!(plan(&cfg, &t, "seg", &out, Paths::Full)
             .unwrap_err()
             .contains("[build.seg]"));
         let _ = std::fs::remove_dir_all(&cfg.base);
@@ -807,7 +1185,7 @@ mod tests {
             tag: Some("v3.1.4".into()),
             path: None,
         };
-        let plan = plan(&cfg, &t, "hub", &cfg.base.join("out"))
+        let plan = plan(&cfg, &t, "hub", &cfg.base.join("out"), Paths::Full)
             .unwrap()
             .join("\n");
         assert!(
@@ -820,10 +1198,10 @@ mod tests {
             !root.starts_with(&cfg.base),
             "cargo's checkout, not the repository"
         );
-        for p in parts("rp2040", None).unwrap() {
+        for p in parts(Registry::builtin(), "rp2040", None) {
             let dir = part_dir(&root, &p).unwrap();
             assert!(dir.starts_with(&root) && dir.join("Cargo.toml").is_file());
-            assert!(dir.ends_with(p.sub), "{}", dir.display());
+            assert!(dir.ends_with(&p.sub), "{}", dir.display());
         }
 
         cfg.dagon.tag = Some("v0.0.0-missing".into());
@@ -887,15 +1265,16 @@ mod tests {
 
     #[test]
     fn the_parts_are_in_this_checkout() {
-        for mcu in ["rp2040", "stm32f401re", "esp32s3"] {
-            for p in parts(mcu, Some("m5stopwatch")).unwrap() {
+        let reg = &crate::defs::registry_at(&Config::default(), Some(&here())).unwrap();
+        for mcu in reg.mcus().iter().map(|m| m.id.as_str()) {
+            let board = reg.default_board(mcu).map(|b| b.id.as_str());
+            for p in parts(reg, mcu, board) {
                 let toml = part_dir(&here(), &p).unwrap().join("Cargo.toml");
                 assert!(toml.is_file(), "{} is not in the checkout", toml.display());
             }
         }
-        let names: Vec<&str> = parts("rp2040", None)
-            .unwrap()
-            .iter()
+        let names: Vec<String> = parts(reg, "rp2040", None)
+            .into_iter()
             .map(|p| p.name)
             .collect();
         assert_eq!(names, ["stage0", "bootcore"]);
@@ -915,7 +1294,9 @@ mod tests {
             },
         );
         let out = cfg.base.join("out/watch");
-        let plan = plan(&cfg, &t, "watch", &out).unwrap().join("\n");
+        let plan = plan(&cfg, &t, "watch", &out, Paths::Full)
+            .unwrap()
+            .join("\n");
         for want in [
             "m5stopwatch (tag watch-s3)",
             "SHA256SUMS",
@@ -928,7 +1309,8 @@ mod tests {
 
         let i = built(&cfg, false);
         let app = vec![0xE9; 7000];
-        let w = esp_files(&t, "watch", &i, &app, &here(), &out, &key()).unwrap();
+        let reg = Registry::builtin();
+        let w = esp_files(reg, &t, "watch", &i, &app, &here(), &out, &key()).unwrap();
         let FirstWrite::Espflash { files, commands } = w else {
             panic!("{w:?}")
         };
@@ -970,78 +1352,116 @@ mod tests {
         let _ = std::fs::remove_dir_all(&cfg.base);
     }
 
+    /// An MCU the project registers (existing kinds only): flash plans it,
+    /// makes its files and aims probe-rs at it with no DAGON code for it.
     #[test]
-    fn copies_only_to_a_single_rp2040_boot_drive() {
-        let base = std::env::temp_dir().join(format!("dagon-uf2-{}", std::process::id()));
-        let (other, rp, rp2) = (base.join("usb"), base.join("rp"), base.join("rp2"));
-        for d in [&other, &rp, &rp2] {
-            std::fs::create_dir_all(d).unwrap();
-        }
-        std::fs::write(other.join(UF2_INFO), "Board-ID: SOMETHING-ELSE").unwrap();
-        let info = "UF2 Bootloader v3.0\nModel: Raspberry Pi RP2\nBoard-ID: RPI-RP2\n";
-        std::fs::write(rp.join(UF2_INFO), info).unwrap();
-        std::fs::write(rp2.join(UF2_INFO), info).unwrap();
-        let none = base.join("missing");
-        assert_eq!(
-            find_uf2_drive(&[none.clone(), other.clone(), rp.clone()]),
-            Ok(Some(rp.clone()))
-        );
-        assert_eq!(find_uf2_drive(&[none.clone(), other.clone()]), Ok(None));
-        let two = find_uf2_drive(&[rp, other, rp2]).unwrap_err();
+    fn a_project_mcu_is_flashed_from_its_definition_alone() {
+        let (mut cfg, _) = area("fake");
+        let mcu = include_str!("../../dagon-topology/src/defs/tests.rs");
+        let def = |name: &str| {
+            let at = mcu.find(&format!("const {name}: &str = r#\"")).unwrap();
+            let rest = &mcu[at..];
+            let start = rest.find("r#\"").unwrap() + 3;
+            rest[start..start + rest[start..].find("\"#;").unwrap()].to_string()
+        };
+        let pkg = cfg.base.join("m");
+        std::fs::create_dir_all(pkg.join("bootcore")).unwrap();
+        std::fs::write(pkg.join("dagon-mcu.toml"), def("FAKE_MCU")).unwrap();
+        let board = def("FAKE_BOARD").replace("product", "[board.fake-board]\nproduct");
+        let toml = cfg.base.join(crate::config::CONFIG_FILE);
+        std::fs::write(
+            &toml,
+            format!("mcu_files = [\"m/dagon-mcu.toml\"]\n{board}"),
+        )
+        .unwrap();
+        let yaml = YAML
+            .replace("mcu: stm32f401re", "mcu: fake-m0")
+            .replace("board: nucleo-f401re", "board: fake-board")
+            .replace("flash_map: f401-default", "flash_map: fake-1m")
+            .replace("{ sda: PB4, scl: PA8 }", "{ sda: GPIO2, scl: GPIO3 }");
+        let t = dagon_topology::parse_str(&yaml).unwrap();
+        cfg.build.get_mut("seg").unwrap().package = PathBuf::from("nodes/seg");
+
+        let out = cfg.base.join("out/seg");
+        let plan = plan(&cfg, &t, "seg", &out, Paths::Full).unwrap().join("\n");
+        assert!(plan.contains("flash seg (fake-m0):"), "{plan}");
+        // The part is in the project's MCU package, not in a DAGON source.
         assert!(
-            two.contains("2 RPI-RP2 drives") && two.contains("unplug"),
-            "{two}"
+            plan.contains(&format!(
+                "build    bootcore {} (tag",
+                pkg.join("bootcore").display()
+            )),
+            "{plan}"
         );
-        let _ = std::fs::remove_dir_all(&base);
+        assert!(plan.contains("through the SWD"), "{plan}");
+
+        let reg = crate::defs::registry(&cfg).unwrap();
+        let FirstWrite::ProbeRs { bin, commands, .. } =
+            provision_files(&reg, &t, "seg", &built(&cfg, false), &out, &key()).unwrap()
+        else {
+            panic!("a probe-rs writer")
+        };
+        assert_eq!(
+            commands[1][..7],
+            [
+                "download",
+                "--chip",
+                "FAKE0",
+                "--binary-format",
+                "bin",
+                "--base-address",
+                "0x00100000"
+            ]
+        );
+        let flash = std::fs::read(&bin).unwrap();
+        // The app's inline header at its slot (0x11_0000 from the base).
+        assert_eq!(&flash[0x1_0000..0x1_0004], &dagon_format::header::MAGIC);
+        let _ = std::fs::remove_dir_all(&cfg.base);
     }
 
     #[test]
-    fn only_the_rp2040_boot_rom_is_an_rp2040_drive() {
-        let rom = "UF2 Bootloader v3.0\r\nModel: Raspberry Pi RP2\r\nBoard-ID: RPI-RP2\r\n";
-        assert!(is_rp2040_rom(rom));
-        for not in [
-            "UF2 Bootloader v3.0\nBoard-ID: NOT-RPI-RP2\n",
-            "UF2 Bootloader v3.0\nBoard-ID: RPI-RP2-CLONE\n",
-            "UF2 Bootloader v3.0\nBoard-ID: RPI-RP2350\n",
-            "UF2 Bootloader v3.0\nModel: RPI-RP2\n",
-            "UF2 Bootloader v3.0\nNote: Board-ID: RPI-RP2\n",
-            "Board-ID: RPI-RP2\n",
-            "My stick\nUF2 Bootloader v3.0\nBoard-ID: RPI-RP2\n",
-            "\nUF2 Bootloader v3.0\nBoard-ID: RPI-RP2\n",
-            "\r\nUF2 Bootloader v3.0\r\nBoard-ID: RPI-RP2\r\n",
-            "  UF2 Bootloader v3.0\nBoard-ID: RPI-RP2\n",
-            "UF2 Bootloader v3.0\n Board-ID: RPI-RP2\n",
-            "UF2 Bootloader v3.0\nBoard-ID: RPI-RP2 \n",
-            "UF2 Bootloader v3.0\nBoard-ID : RPI-RP2\n",
-            "UF2 Bootloader v3.0\nBoard-ID:RPI-RP2\n",
-            "UF2 Bootloader v3.0\nBoard-ID:  RPI-RP2\n",
-            "UF2 Bootloader v3.0\r\n Board-ID : RPI-RP2 \r\n",
-            "",
-        ] {
-            assert!(!is_rp2040_rom(not), "{not:?}");
+    fn a_folder_inside_another_is_named_before_it() {
+        let (mut cfg, _) = area("nested");
+        let template = cfg.build["seg"].clone();
+        cfg.build.clear();
+        for (node, package) in [("a", "private"), ("z", "private/token/app")] {
+            let dir = cfg.base.join(package);
+            std::fs::create_dir_all(&dir).unwrap();
+            std::fs::write(
+                dir.join("Cargo.toml"),
+                format!("[package]\nname = \"app-{node}\"\nversion = \"0.0.0\"\n"),
+            )
+            .unwrap();
+            let mut b = template.clone();
+            b.package = PathBuf::from(package);
+            cfg.build.insert(node.into(), b);
         }
+        let swaps = page_swaps(&cfg, Registry::builtin());
+        let lens: Vec<usize> = swaps.iter().map(|(f, _)| f.len()).collect();
+        assert!(lens.windows(2).all(|w| w[0] >= w[1]), "{swaps:?}");
+        let inner = cfg.base.join("private/token/app/src/main.rs");
+        let outer = cfg.base.join("private/lib.rs");
+        let line = format!("{} and {}", inner.display(), outer.display());
+        let shown = hidden(&line, &swaps);
+        assert!(shown.contains("app-z (the z app)"), "{shown}");
+        assert!(shown.contains("app-a (the a app)"), "{shown}");
+        assert!(
+            !shown.contains("token") && !shown.contains("private"),
+            "{shown}"
+        );
+        let _ = std::fs::remove_dir_all(&cfg.base);
     }
 
     #[test]
-    fn a_second_board_under_another_mount_name_is_seen() {
-        let base = std::env::temp_dir().join(format!("dagon-mnt-{}", std::process::id()));
-        let (volumes, media) = (base.join("Volumes"), base.join("media/user"));
-        let info = "UF2 Bootloader v3.0\nModel: Raspberry Pi RP2\nBoard-ID: RPI-RP2\n";
-        for d in [volumes.join("RPI-RP2"), volumes.join("RPI-RP2 1")] {
-            std::fs::create_dir_all(&d).unwrap();
-            std::fs::write(d.join(UF2_INFO), info).unwrap();
-        }
-        std::fs::create_dir_all(media.join("USB STICK")).unwrap();
-        std::fs::write(volumes.join("not-a-dir"), "x").unwrap();
-        let parents = [volumes.clone(), media.clone(), base.join("missing")];
-        let roots = mounts_under(&parents);
-        assert_eq!(roots.len(), 3, "{roots:?}");
-        let err = find_uf2_drive(&roots).unwrap_err();
-        assert!(err.contains("2 RPI-RP2 drives"), "{err}");
-
-        std::fs::remove_dir_all(volumes.join("RPI-RP2")).unwrap();
-        let one = find_uf2_drive(&mounts_under(&parents)).unwrap();
-        assert_eq!(one, Some(volumes.join("RPI-RP2 1")));
-        let _ = std::fs::remove_dir_all(&base);
+    fn a_package_in_the_dagon_source_needs_no_source_check() {
+        let (mut cfg, _) = area("insrc");
+        let root = here();
+        cfg.build.get_mut("seg").unwrap().package = root.join("samples/f401-app");
+        assert!(package_in_source(&cfg, "seg", &root));
+        assert!(
+            !package_in_source(&cfg, "hub", &root),
+            "targets/rp2040-hub is in the project"
+        );
+        let _ = std::fs::remove_dir_all(&cfg.base);
     }
 }

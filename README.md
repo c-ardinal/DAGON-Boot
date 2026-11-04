@@ -149,6 +149,11 @@ export ANTHROPIC_API_KEY=...        # read by the CLI only, never shown or saved
 dagon ai topology --in boards.txt --out topology.yaml
 ```
 
+Definitions are not a place for secrets. Names in them (ids, product
+names, pin labels, partition names) appear in DAGON Console and are sent
+to Claude when you ask it; commands, hints, comments and file paths are
+never sent. See `targets/README.md`.
+
 ### 3. Generate the node crates
 
 ```sh
@@ -186,7 +191,14 @@ dagon flash watch      # ESP32-S3: over USB-C with espflash
 ```
 
 `dagon flash` prints its plan first and asks before it touches the board
-(`--yes` skips the question). `--dry-run` still does everything up to
+(`--yes` skips the question). It writes to a device the writer reports:
+every probe-rs probe, every serial port, every UF2 drive (USB IDs and
+the UF2 Board-ID only label them). One device is taken and shown before
+the question; with several it asks which, or takes `--probe
+<vid:pid[:serial]>`, `--port <port>` or `--drive <path>` (on Windows
+compared without regard to case, so `--drive e:` names `E:\`); with several
+and no terminal (or `--yes`) and no option, or with none, it stops
+before writing. `--dry-run` still does everything up to
 the write: it builds the parts and the app and makes the first-install
 files in the provision folder (`out/provision/<id>/` beside `dagon.toml`,
 or under `provision_dir` when `dagon.toml` sets it; `--out <dir>`
@@ -204,8 +216,7 @@ matches `targets/mcu/esp32s3/vendor/SHA256SUMS`), the partition table
 (`targets/mcu/esp32s3/partitions.csv`, at 0x8000), the factory agent, the
 app in ota_0 (0x110000) with its signed header in the `dagon` partition
 (0x710000), and the otadata entry that starts it as confirmed (0xD000).
-Exactly one ESP32-S3 must be connected over USB-C (USB Serial/JTAG,
-`303a:1001`); with none or several it stops before writing. `--dry-run`
+`--dry-run`
 lists the files with their offsets and the `espflash` commands
 (`commands.txt` in the same provision folder).
 
@@ -342,8 +353,12 @@ and, on the 親機, for its uplink. Kinds the firmware of either end does not
 implement yet are marked ◇ まだ使えない; the 構成 may still name them
 (problem まだ使えないつながり), and `dagon gen` refuses them with the hop's
 name (`uplink of hub over ble: not available yet on rp2040`). Today the
-firmware offers the hub's USB CDC uplink, I2C and UART to its 子機, and
-the ESP32-S3's UART or USB CDC towards its 親機.
+firmware offers, as each MCU's definition lists it (`[links]`; up: towards
+the PC or the 親機, down: to 子機):
+
+- RP2040: up usb-cdc; down i2c, uart
+- STM32F401RE: up i2c
+- ESP32-S3: up uart, usb-cdc
 
 The demo shows the swap without new radios:
 

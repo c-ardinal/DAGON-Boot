@@ -1,12 +1,13 @@
 //! Validation rules for `dagon topo check`.
 //!
-//! 20 errors (V-01..V-21 without V-19) and one warning (V-22). Errors block
-//! `topo push`; warnings do not.
+//! Errors V-01..V-21 (no V-19), V-23 and V-25; warnings V-22 and V-24
+//! (V-24 is an error for an uplink on a 子機). Errors block `topo push`;
+//! warnings do not.
 
 use crate::links::{self, Dir};
 use std::collections::{BTreeMap, BTreeSet};
 
-use crate::boards::{self, Board};
+use crate::defs::{BoardDef, Coordinator, McuDef, PortKind, Registry};
 use crate::report::{Issue, Report, Severity};
 use crate::schema::{ControlKind, Link, LinkKind, Node, Role, Tier, Topology, UartIface};
 
@@ -18,23 +19,21 @@ const MAX_UPDATABLE_NODES: usize = 8;
 const MAX_ID_LEN: usize = 15;
 const MAX_TAG_LEN: usize = 16;
 const BAUD_RATES: &[u32] = &[9_600, 57_600, 115_200, 460_800];
+/// Standard and fast mode; each ROM I2C bootloader's `max_hz` caps it further.
 const I2C_SPEEDS: &[u32] = &[100_000, 400_000];
 const I2C_ADDR_MIN: u8 = 0x08;
 const I2C_ADDR_MAX: u8 = 0x77;
-/// Address the STM32 ROM I2C bootloader answers on.
-const STM32_ROM_ADDR: u8 = 0x39;
-// ponytail: the coordinator is always an RP2040 today; move these into the
-// port registry when a second coordinator MCU appears.
-const RP2040_PIO_STATE_MACHINES: usize = 8;
-const PIO_UART_STATE_MACHINES: usize = 2;
-const RP2040_UART0_TX: &[u8] = &[0, 12, 16, 28];
-const RP2040_UART0_RX: &[u8] = &[1, 13, 17, 29];
 
 /// Parse YAML and run every rule. A document that does not parse yields a
 /// single V-01 error.
 pub fn check_str(yaml: &str) -> Report {
+    check_str_with(Registry::builtin(), yaml)
+}
+
+/// [`check_str`] against the MCUs and boards of `reg`.
+pub fn check_str_with(reg: &Registry, yaml: &str) -> Report {
     match yaml_serde::from_str::<Topology>(yaml) {
-        Ok(t) => check(&t),
+        Ok(t) => check_with(reg, &t),
         Err(e) => Report {
             issues: vec![Issue {
                 rule: "V-01",
@@ -46,9 +45,16 @@ pub fn check_str(yaml: &str) -> Report {
     }
 }
 
+/// Every rule against the builtin MCU and board definitions.
 pub fn check(t: &Topology) -> Report {
+    check_with(Registry::builtin(), t)
+}
+
+/// Every rule against the MCUs and boards of `reg`.
+pub fn check_with(reg: &Registry, t: &Topology) -> Report {
     let mut c = Ctx {
         t,
+        reg,
         issues: Vec::new(),
     };
     c.v01();
@@ -73,6 +79,7 @@ pub fn check(t: &Topology) -> Report {
     c.v22();
     c.v23();
     c.v24();
+    c.v25();
     Report { issues: c.issues }
 }
 
@@ -102,21 +109,22 @@ pub fn effective_tiers(t: &Topology, id: &str) -> Vec<Tier> {
 /// The board a node names. Pin and flash-size checks use only this (P1): a
 /// node chosen by MCU is checked against the MCU's GPIO range, and its flash
 /// size against the project's `[board.<id>]`, not against a stand-in board.
-pub fn named_board(n: &Node) -> Option<&'static Board> {
-    n.board.as_deref().and_then(boards::board)
+fn named_board<'r>(reg: &'r Registry, n: &Node) -> Option<&'r BoardDef> {
+    n.board.as_deref().and_then(|id| reg.board(id))
 }
 
 /// Board for a node's capabilities (I2C target, ROM loader pins): the named
-/// one, else the first table entry for its MCU.
-pub fn node_board(n: &Node) -> Option<&'static Board> {
+/// one, else the first board defined for its MCU.
+fn board_for<'r>(reg: &'r Registry, n: &Node) -> Option<&'r BoardDef> {
     match &n.board {
-        Some(id) => boards::board(id),
-        None => boards::default_board(&n.mcu),
+        Some(id) => reg.board(id),
+        None => reg.default_board(&n.mcu),
     }
 }
 
 struct Ctx<'a> {
     t: &'a Topology,
+    reg: &'a Registry,
     issues: Vec<Issue>,
 }
 
@@ -157,7 +165,10 @@ impl<'a> Ctx<'a> {
                 );
                 continue;
             }
-            if links::known(&n.mcu) && !links::available(&n.mcu, Dir::Up).contains(&up.kind) {
+            let reg = self.reg;
+            if links::known_in(reg, &n.mcu)
+                && !links::available_in(reg, &n.mcu, Dir::Up).contains(&up.kind)
+            {
                 self.warn(
                     "V-24",
                     format!("nodes[{i}].uplink.kind"),
@@ -177,7 +188,8 @@ impl<'a> Ctx<'a> {
             let missing: Vec<&str> = [(from, Dir::Down), (to, Dir::Up)]
                 .into_iter()
                 .filter(|(n, d)| {
-                    links::known(&n.mcu) && !links::available(&n.mcu, *d).contains(&l.kind)
+                    links::known_in(self.reg, &n.mcu)
+                        && !links::available_in(self.reg, &n.mcu, *d).contains(&l.kind)
                 })
                 .map(|(n, _)| n.mcu.as_str())
                 .collect();
@@ -201,8 +213,32 @@ impl<'a> Ctx<'a> {
         self.t.nodes.iter().find(|n| n.role == Role::Coordinator)
     }
 
-    fn coordinator_board(&self) -> Option<&'static Board> {
-        self.coordinator().and_then(named_board)
+    fn coordinator_board(&self) -> Option<&'a BoardDef> {
+        self.coordinator().and_then(|c| named_board(self.reg, c))
+    }
+
+    fn coordinator_mcu(&self) -> Option<&'a McuDef> {
+        self.coordinator().and_then(|c| self.reg.mcu(&c.mcu))
+    }
+
+    /// What the coordinator's MCU offers its links; `None` when its
+    /// definition has no `[coordinator]` data (then those checks are skipped).
+    fn coordinator_data(&self) -> Option<&'a Coordinator> {
+        self.coordinator_mcu().and_then(|m| m.coordinator.as_ref())
+    }
+
+    fn node_board(&self, id: &str) -> Option<&'a BoardDef> {
+        self.t.node(id).and_then(|n| board_for(self.reg, n))
+    }
+
+    /// The ROM I2C bootloader of the node `id` when it is reached through
+    /// its ROM (`rom-forced`).
+    fn forced_rom(&self, id: &str) -> Option<&'a crate::defs::RomI2c> {
+        let n = self.t.node(id)?;
+        if !effective_tiers(self.t, id).contains(&Tier::RomForced) {
+            return None;
+        }
+        self.reg.mcu(&n.mcu)?.rom_i2c.as_ref()
     }
 
     fn links(&self) -> impl Iterator<Item = (usize, &'a Link)> + 'a {
@@ -434,6 +470,34 @@ impl<'a> Ctx<'a> {
         }
     }
 
+    /// The coordinator's MCU must define what it offers as one (its
+    /// `[coordinator]` section). Only the first coordinator, the one the hub
+    /// rules check: further ones are a shape not updatable yet (V-23).
+    /// Unknown MCUs are V-06's.
+    fn v25(&mut self) {
+        let first = self
+            .t
+            .nodes
+            .iter()
+            .enumerate()
+            .find(|(_, n)| n.role == Role::Coordinator);
+        if let Some((i, n)) = first {
+            let Some(m) = self.reg.mcu(&n.mcu) else {
+                return;
+            };
+            if m.coordinator.is_none() {
+                self.err(
+                    "V-25",
+                    format!("nodes[{i}].mcu"),
+                    format!(
+                        "{} cannot be the coordinator: its MCU definition has no [coordinator] section",
+                        m.id
+                    ),
+                );
+            }
+        }
+    }
+
     fn v05(&mut self) {
         for (i, n) in self
             .t
@@ -455,26 +519,26 @@ impl<'a> Ctx<'a> {
 
     fn v06(&mut self) {
         for (i, n) in self.t.nodes.iter().enumerate() {
-            match boards::mcu(&n.mcu) {
+            match self.reg.mcu(&n.mcu) {
                 None => {
-                    let known: Vec<_> = boards::MCUS.iter().map(|m| m.id).collect();
+                    let known: Vec<_> = self.reg.mcus().iter().map(|m| m.id.as_str()).collect();
                     self.err(
                         "V-06",
                         format!("nodes[{i}].mcu"),
                         format!("mcu '{}' is not in the port registry {known:?}", n.mcu),
                     );
                 }
-                Some(m) if m.port != n.port => {
+                Some(m) if m.port.as_str() != n.port => {
                     self.err(
                         "V-06",
                         format!("nodes[{i}].port"),
-                        format!("{} uses port '{}', not '{}'", m.id, m.port, n.port),
+                        format!("{} uses port '{}', not '{}'", m.id, m.port.as_str(), n.port),
                     );
                 }
                 Some(_) => {}
             }
             if let Some(b) = &n.board {
-                match boards::board(b) {
+                match self.reg.board(b) {
                     None => self.err(
                         "V-06",
                         format!("nodes[{i}].board"),
@@ -520,7 +584,7 @@ impl<'a> Ctx<'a> {
             for (path, gpio) in &pins {
                 let name = format!("GPIO{gpio}");
                 if !board.header.iter().any(|h| h.pin == name) {
-                    let avail: Vec<_> = board.header.iter().map(|h| h.pin).collect();
+                    let avail: Vec<_> = board.header.iter().map(|h| h.pin.as_str()).collect();
                     self.err(
                         "V-07",
                         path.clone(),
@@ -528,11 +592,7 @@ impl<'a> Ctx<'a> {
                     );
                 }
             }
-        } else if let Some(mcu) = self
-            .coordinator()
-            .and_then(|c| boards::mcu(&c.mcu))
-            .filter(|m| m.gpio_count > 0)
-        {
+        } else if let Some(mcu) = self.coordinator_mcu().filter(|m| m.gpio_count > 0) {
             // P1: a coordinator chosen by MCU is checked against the MCU's GPIOs.
             for (path, gpio) in &pins {
                 if *gpio >= mcu.gpio_count {
@@ -561,12 +621,15 @@ impl<'a> Ctx<'a> {
 
     fn v09(&mut self) {
         let bus_pins: BTreeSet<u8> = self.t.buses.iter().flat_map(|b| [b.sda, b.scl]).collect();
+        let hub = self.coordinator_data();
         for (i, l) in self.hub_links() {
             let (Some(UartIface::HwUart0), Some(u)) = (l.iface, l.pins) else {
                 continue;
             };
             let p = link_path(i);
-            if !RP2040_UART0_TX.contains(&u.tx) || !RP2040_UART0_RX.contains(&u.rx) {
+            let not_uart0 =
+                |c: &Coordinator| !c.uart0_tx.contains(&u.tx) || !c.uart0_rx.contains(&u.rx);
+            if hub.is_some_and(not_uart0) {
                 self.err(
                     "V-09",
                     format!("{p}.pins"),
@@ -588,14 +651,16 @@ impl<'a> Ctx<'a> {
             .hub_links()
             .filter(|(_, l)| l.iface == Some(UartIface::PioUart))
             .count();
-        if pio_links * PIO_UART_STATE_MACHINES > RP2040_PIO_STATE_MACHINES {
+        let Some(hub) = self.coordinator_data() else {
+            return;
+        };
+        let need = pio_links * usize::from(hub.pio_uart_state_machines);
+        let have = usize::from(hub.pio_state_machines);
+        if need > have {
             self.err(
                 "V-10",
                 "links",
-                format!(
-                    "{pio_links} pio-uart links need {} PIO state machines, {RP2040_PIO_STATE_MACHINES} exist",
-                    pio_links * PIO_UART_STATE_MACHINES
-                ),
+                format!("{pio_links} pio-uart links need {need} PIO state machines, {have} exist"),
             );
         }
     }
@@ -636,7 +701,7 @@ impl<'a> Ctx<'a> {
                     }
                     Tier::RomCoop
                         if control != Some(ControlKind::Cooperative)
-                            || node.port != "vendor-stage2" =>
+                            || PortKind::from_name(&node.port) != Some(PortKind::VendorStage2) =>
                     {
                         self.err(
                             "V-12",
@@ -655,19 +720,21 @@ impl<'a> Ctx<'a> {
             if !effective_tiers(self.t, &l.to).contains(&Tier::RomForced) {
                 continue;
             }
-            let Some(board) = self.t.node(&l.to).and_then(node_board) else {
+            let Some(board) = self.node_board(&l.to) else {
                 continue;
             };
+            // The ROM pairs are the board MCU's (the board brings them out).
+            let rom_pairs = self
+                .reg
+                .mcu(&board.mcu)
+                .and_then(|m| m.rom_i2c.as_ref())
+                .map_or(&[][..], |r| &r.pairs[..]);
             let on_rom_pins = l.kind == LinkKind::I2c
-                && l.node_pins.as_ref().is_some_and(|np| {
-                    board
-                        .rom_i2c_pairs
-                        .iter()
-                        .any(|r| r.sda == np.sda && r.scl == np.scl)
-                });
+                && l.node_pins
+                    .as_ref()
+                    .is_some_and(|np| rom_pairs.iter().any(|r| r.sda == np.sda && r.scl == np.scl));
             if !on_rom_pins {
-                let pairs: Vec<_> = board
-                    .rom_i2c_pairs
+                let pairs: Vec<_> = rom_pairs
                     .iter()
                     .map(|r| format!("{}/{}", r.sda, r.scl))
                     .collect();
@@ -731,14 +798,16 @@ impl<'a> Ctx<'a> {
         for (i, n) in self.t.nodes.iter().enumerate() {
             let Some(name) = &n.flash_map else { continue };
             let path = format!("nodes[{i}].flash_map");
-            match boards::flash_map(name) {
+            match self.reg.flash_map(name) {
                 None => self.err("V-16", path, format!("unknown flash map '{name}'")),
-                Some(m) if m.mcu != n.mcu => {
-                    self.err("V-16", path, format!("flash map '{name}' is for {}", m.mcu))
-                }
-                Some(m) => {
+                Some((mcu, _)) if mcu.id != n.mcu => self.err(
+                    "V-16",
+                    path,
+                    format!("flash map '{name}' is for {}", mcu.id),
+                ),
+                Some((_, m)) => {
                     // P1: a node chosen by MCU has its flash size in dagon.toml, checked there.
-                    if let Some(b) = named_board(n).filter(|b| m.bytes > b.flash_bytes) {
+                    if let Some(b) = named_board(self.reg, n).filter(|b| m.bytes > b.flash_bytes) {
                         self.err(
                             "V-16",
                             path,
@@ -788,10 +857,11 @@ impl<'a> Ctx<'a> {
                 .links()
                 .filter(|(_, l)| l.kind == LinkKind::I2c && l.bus.as_ref() == Some(&bus.id))
                 .collect();
-            let stm32_rom = on_bus.iter().any(|(_, l)| {
-                t.node(&l.to).is_some_and(|n| n.mcu.starts_with("stm32"))
-                    && effective_tiers(t, &l.to).contains(&Tier::RomForced)
-            });
+            // Addresses the ROM loaders of nodes reached through them answer on.
+            let reserved: BTreeMap<u8, &str> = on_bus
+                .iter()
+                .filter_map(|(_, l)| self.forced_rom(&l.to).map(|r| (r.addr, r.name.as_str())))
+                .collect();
             let mut seen = BTreeSet::new();
             for (i, l) in on_bus {
                 let Some(addr) = l.addr else { continue };
@@ -810,8 +880,12 @@ impl<'a> Ctx<'a> {
                         format!("address {addr:#04x} is already used on bus '{}'", bus.id),
                     );
                 }
-                if stm32_rom && addr == STM32_ROM_ADDR {
-                    self.err("V-18", path, format!("{STM32_ROM_ADDR:#04x} is reserved for the STM32 ROM bootloader on this bus"));
+                if let Some(rom) = reserved.get(&addr) {
+                    self.err(
+                        "V-18",
+                        path,
+                        format!("{addr:#04x} is reserved for the {rom} on this bus"),
+                    );
                 }
             }
         }
@@ -819,11 +893,23 @@ impl<'a> Ctx<'a> {
 
     fn v20(&mut self) {
         for (i, b) in self.t.buses.iter().enumerate() {
-            if b.speed_hz.is_some_and(|s| !I2C_SPEEDS.contains(&s)) {
+            // The slowest ROM loader reached over this bus caps its speed.
+            let rom_cap = self
+                .links()
+                .filter(|(_, l)| l.kind == LinkKind::I2c && l.bus.as_ref() == Some(&b.id))
+                .filter_map(|(_, l)| self.forced_rom(&l.to))
+                .min_by_key(|r| r.max_hz);
+            let over_cap = |s: u32| rom_cap.is_some_and(|r| s > r.max_hz);
+            if b.speed_hz
+                .is_some_and(|s| !I2C_SPEEDS.contains(&s) || over_cap(s))
+            {
+                let limit = rom_cap.map_or(String::new(), |r| {
+                    format!(" ({} limit {})", r.name, r.max_hz)
+                });
                 self.err(
                     "V-20",
                     format!("buses[{i}].speed_hz"),
-                    format!("speed_hz must be one of {I2C_SPEEDS:?} (STM32 ROM limit 400000)"),
+                    format!("speed_hz must be one of {I2C_SPEEDS:?}{limit}"),
                 );
             }
             if !matches!(b.pullups.as_deref(), Some("external" | "board")) {
@@ -841,18 +927,14 @@ impl<'a> Ctx<'a> {
             if l.kind != LinkKind::I2c {
                 continue;
             }
-            if let Some(b) = self
-                .t
-                .node(&l.to)
-                .and_then(node_board)
-                .filter(|b| !b.i2c_target)
-            {
+            if let Some(b) = self.node_board(&l.to).filter(|b| !b.i2c_target) {
+                let mcu_name = self.reg.mcu(&b.mcu).map_or(b.mcu.as_str(), |m| &m.name);
                 self.err(
                     "V-21",
                     format!("{}.kind", link_path(i)),
                     format!(
-                        "{} · {} cannot be an I2C target; use uart",
-                        b.product, b.mcu_name
+                        "{} · {mcu_name} cannot be an I2C target; use uart",
+                        b.product
                     ),
                 );
             }

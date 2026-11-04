@@ -177,7 +177,8 @@ impl WasmHost {
     pub fn discover(&self) -> Promise {
         self.run(|h, _| async move {
             let mut h = h.try_borrow_mut().map_err(|_| busy())?;
-            h.discover()
+            let rom_addrs = crate::defs::rom_i2c_addrs();
+            h.discover(&rom_addrs)
                 .await
                 .map(|d| discovery_js(&d))
                 .map_err(|e| fail(&e))
@@ -321,12 +322,25 @@ pub fn check_release_for(bundle: &[u8], topology: &[u8]) -> Result<(), JsError> 
     }
 }
 
-/// A signed STM32F401 boot core the ROM path may write, checked under
-/// [`PUBKEY`] as dagon-host checks it; throws with the failure name.
+/// A signed boot core the ROM path may write (for an MCU with a ROM I2C
+/// loader, by its header's `mcu_id`), checked under [`PUBKEY`] as
+/// dagon-host checks it; throws with the failure name.
 #[wasm_bindgen]
 pub fn check_bootcore_for(img: &[u8]) -> Result<(), JsError> {
     let key = release_key().ok_or_else(|| JsError::new("no release key"))?;
-    dagon_host::rom::check_bootcore(img, &key)
+    let raw: &[u8; dagon_format::header::HEADER_SIZE] = img
+        .get(..dagon_format::header::HEADER_SIZE)
+        .and_then(|h| h.try_into().ok())
+        .ok_or_else(|| JsError::new("Truncated"))?;
+    let mcu = dagon_format::ImageHeader::parse(raw)
+        .map_err(|e| JsError::new(&alloc::format!("{e:?}")))?
+        .mcu_id;
+    let roms = crate::defs::with_registry(dagon_host::rom::rom_maps);
+    let map = roms
+        .iter()
+        .find(|m| m.wire_id == mcu)
+        .ok_or_else(|| JsError::new("BadField"))?;
+    dagon_host::rom::check_bootcore(img, &key, map)
         .map(|_| ())
         .map_err(|e| JsError::new(&alloc::format!("{e:?}")))
 }
@@ -437,11 +451,13 @@ impl WasmHost {
                 let _ = on_event.call1(&JsValue::NULL, &event_js(&e));
             };
             let key = release_key().ok_or_else(|| JsValue::from(JsError::new("key")))?;
+            let roms = crate::defs::with_registry(dagon_host::rom::rom_maps);
             let assets = RecoverAssets {
                 release: &release,
                 topology: &topology,
                 pubkey: &key,
                 bootcore: bootcore.as_deref(),
+                roms: &roms,
             };
             let (path, v) = h
                 .recover(node, &assets, &mut emit)

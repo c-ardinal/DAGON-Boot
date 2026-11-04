@@ -9,13 +9,14 @@
 
 use std::fmt;
 
-use dagon_format::header::{mcu_id, port_kind, target_tag};
+use dagon_format::header::target_tag;
 use dagon_format::manifest::{constraint_kind, Constraint as BinConstraint};
 use dagon_format::topology::{self as tp, TopoLink, TopoNode};
 use dagon_format::Version;
 
+use crate::defs::{PortKind, Registry};
 use crate::schema::{Constraint, ControlKind, Link, LinkKind, Role, RomEntry, Tier, UartIface};
-use crate::{check, effective_tiers, Report, Topology};
+use crate::{check_with, effective_tiers, Report, Topology};
 
 const DEFAULT_MAX_ATTEMPTS: u8 = 3;
 const DEFAULT_I2C_HZ: u32 = 400_000;
@@ -52,13 +53,19 @@ fn bad(msg: impl Into<String>) -> CompileError {
     CompileError::Unrepresentable(msg.into())
 }
 
-/// Canonical binary of a topology that passes `check` (warnings allowed).
+/// Canonical binary of a topology that passes `check` (warnings allowed),
+/// against the builtin definitions.
 pub fn compile(t: &Topology) -> Result<Vec<u8>, CompileError> {
-    let report = check(t);
+    compile_with(Registry::builtin(), t)
+}
+
+/// [`compile`] against the MCUs and boards of `reg`.
+pub fn compile_with(reg: &Registry, t: &Topology) -> Result<Vec<u8>, CompileError> {
+    let report = check_with(reg, t);
     if !report.is_pushable() {
         return Err(CompileError::Invalid(report));
     }
-    encode(t)
+    encode(reg, t)
 }
 
 pub fn parse_str(yaml: &str) -> Result<Topology, CompileError> {
@@ -69,23 +76,14 @@ pub fn compile_str(yaml: &str) -> Result<Vec<u8>, CompileError> {
     compile(&parse_str(yaml)?)
 }
 
-/// Image header `mcu_id` for a topology MCU id.
+/// Image header `mcu_id` for a topology MCU id (builtin definitions).
 pub fn mcu_id_of(mcu: &str) -> Option<u16> {
-    match mcu {
-        "rp2040" => Some(mcu_id::RP2040),
-        "stm32f401re" => Some(mcu_id::STM32F401XE),
-        "esp32s3" => Some(mcu_id::ESP32S3),
-        _ => None,
-    }
+    Registry::builtin().mcu(mcu).map(|m| m.wire_id)
 }
 
 /// Image header `port_kind` for a topology port name.
 pub fn port_kind_of(port: &str) -> Option<u8> {
-    match port {
-        "self-boot" => Some(port_kind::SELF_BOOT),
-        "vendor-stage2" => Some(port_kind::VENDOR_STAGE2),
-        _ => None,
-    }
+    PortKind::from_name(port).map(PortKind::wire)
 }
 
 /// `"major.minor.patch"` (as shown by `Version`'s Display).
@@ -116,7 +114,7 @@ fn tier_code(tier: Tier) -> u8 {
     }
 }
 
-fn nodes(t: &Topology) -> Result<Vec<TopoNode>, CompileError> {
+fn nodes(reg: &Registry, t: &Topology) -> Result<Vec<TopoNode>, CompileError> {
     t.nodes
         .iter()
         .enumerate()
@@ -145,7 +143,10 @@ fn nodes(t: &Topology) -> Result<Vec<TopoNode>, CompileError> {
                     Role::Coordinator => tp::role::COORDINATOR,
                     Role::Node => tp::role::NODE,
                 },
-                mcu_id: mcu_id_of(&n.mcu).ok_or_else(|| bad(format!("unknown MCU '{}'", n.mcu)))?,
+                mcu_id: reg
+                    .mcu(&n.mcu)
+                    .map(|m| m.wire_id)
+                    .ok_or_else(|| bad(format!("unknown MCU '{}'", n.mcu)))?,
                 port_kind: port_kind_of(&n.port)
                     .ok_or_else(|| bad(format!("unknown port '{}'", n.port)))?,
                 max_attempts: n.max_attempts.unwrap_or(DEFAULT_MAX_ATTEMPTS),
@@ -251,8 +252,8 @@ fn constraint(t: &Topology, c: &Constraint) -> Result<BinConstraint, CompileErro
     })
 }
 
-fn encode(t: &Topology) -> Result<Vec<u8>, CompileError> {
-    let nodes = nodes(t)?;
+fn encode(reg: &Registry, t: &Topology) -> Result<Vec<u8>, CompileError> {
+    let nodes = nodes(reg, t)?;
     let mut links = t
         .links
         .iter()

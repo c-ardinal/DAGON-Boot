@@ -11,6 +11,7 @@ use std::sync::atomic::AtomicBool;
 
 use dagon_format::header::{image_kind, slot_binding};
 use dagon_format::{BundleView, Version};
+use dagon_topology::defs::Registry;
 use dagon_topology::Topology;
 use ed25519_compact::KeyPair;
 
@@ -114,8 +115,8 @@ fn configured(cfg: &Config, node: &str) -> Vec<Version> {
 
 /// Whether apps for `mcu` are linked separately for slot B. Not for an MCU
 /// whose one image runs from either slot (ESP32-S3): it builds once.
-pub(crate) fn has_slot_b_link(mcu: &str) -> bool {
-    dagon_sign::image::slot(mcu, image_kind::APP, slot_binding::B).is_some()
+pub(crate) fn has_slot_b_link(reg: &Registry, mcu: &str) -> bool {
+    dagon_sign::image::slot_with(reg, mcu, image_kind::APP, slot_binding::B).is_some()
 }
 
 /// `pos`, else every `[build.<id>]` node, ordered as the topology updates
@@ -130,6 +131,7 @@ pub(crate) fn pick_nodes(cfg: &Config, t: &Topology, pos: &[&str]) -> Result<Vec
     if wanted.is_empty() {
         return Err("no [build.<id>] tables in dagon.toml".into());
     }
+    let reg = crate::defs::registry(cfg)?;
     for id in &wanted {
         let n = t
             .node(id)
@@ -138,7 +140,7 @@ pub(crate) fn pick_nodes(cfg: &Config, t: &Topology, pos: &[&str]) -> Result<Vec
             .build
             .get(id)
             .ok_or_else(|| format!("no [build.{id}] in dagon.toml"))?;
-        if has_slot_b_link(&n.mcu) && b.slot_b_feature.is_none() {
+        if has_slot_b_link(&reg, &n.mcu) && b.slot_b_feature.is_none() {
             return Err(format!(
                 "[build.{id}] needs slot_b_feature: a release carries slot A and B images \
                  for {}",
@@ -168,19 +170,23 @@ pub(crate) fn release_inputs(
     version: Version,
     built: Vec<(String, SlotElfs)>,
 ) -> Result<Vec<(String, SlotElfs)>, String> {
+    let reg = crate::defs::registry(cfg)?;
     built
         .into_iter()
         .map(|(node, slots)| {
-            let esp = t.node(&node).is_some_and(|n| n.mcu == crate::esp::CHIP);
-            if !esp {
+            let esp = t
+                .node(&node)
+                .and_then(|n| reg.mcu(&n.mcu))
+                .and_then(crate::esp::Esp::of);
+            let Some(esp) = esp else {
                 return Ok((node, slots));
-            }
+            };
             let out = cfg
                 .base
                 .join(DEPLOY_DIR)
                 .join(version.to_string())
                 .join(format!("{node}.bin"));
-            let image = crate::esp::save_image(&nodebuild::elf_path(cfg, &node, 'a'), &out)?;
+            let image = crate::esp::save_image(&esp, &nodebuild::elf_path(cfg, &node, 'a'), &out)?;
             Ok((node, vec![('a', image)]))
         })
         .collect()
@@ -203,6 +209,7 @@ pub(crate) fn prepare(
         proto: 1,
         bits: None,
     };
+    let reg = crate::defs::registry(cfg)?;
     let mut images = Vec::new();
     for (node, slots) in elfs {
         for (slot, elf) in slots {
@@ -211,15 +218,24 @@ pub(crate) fn prepare(
             } else {
                 slot_binding::A
             };
-            let img = image_for_node(t, node, image_kind::APP, binding, elf, Some(&opts), key)?;
+            let img = image_for_node(
+                &reg,
+                t,
+                node,
+                image_kind::APP,
+                binding,
+                elf,
+                Some(&opts),
+                key,
+            )?;
             write_file(&dir.join(format!("{node}-{slot}.img")), &img)?;
             images.push(img);
         }
     }
-    let topo_bin = dagon_topology::compile(t).map_err(|e| e.to_string())?;
+    let topo_bin = dagon_topology::compile_with(&reg, t).map_err(|e| e.to_string())?;
     let name = format!("v{version}");
-    let r =
-        dagon_sign::release::build(t, &topo_bin, &images, &name, key).map_err(|e| e.to_string())?;
+    let r = dagon_sign::release::build(&reg, t, &topo_bin, &images, &name, key)
+        .map_err(|e| e.to_string())?;
     let release = cfg.base.join(DEPLOY_DIR).join(format!("{name}.dgb"));
     write_file(&release, &r.bundle)?;
     Ok(Prepared {
@@ -269,7 +285,7 @@ pub fn command(args: &[&str]) -> Result<(), String> {
     let args: Vec<&str> = args.iter().copied().filter(|a| *a != YES).collect();
     let o = Opts::parse(&args, &["version", "port", "topology", "key", "config"])?;
     let cfg = Config::load(o.get("config"))?;
-    let t = read_topology(&cfg.topology_path(o.get("topology"))?)?;
+    let t = read_topology(&cfg, &cfg.topology_path(o.get("topology"))?)?;
     let nodes = pick_nodes(&cfg, &t, &o.pos)?;
     let key = load_key(o.get("key"))?;
     let latest = release_path(&cfg);
@@ -295,6 +311,7 @@ pub fn command(args: &[&str]) -> Result<(), String> {
         &cfg,
         &nodes,
         Some(fw_key),
+        None,
         &mut log,
         &AtomicBool::new(false),
     )?;
@@ -314,7 +331,14 @@ pub fn command(args: &[&str]) -> Result<(), String> {
         ));
     }
     let mut host = crate::serial::host(o.get("port"))?;
-    crate::device::apply_bundle(&mut host, &p.bundle, &t, Some(&key.pk), None)?;
+    crate::device::apply_bundle(
+        &mut host,
+        &crate::defs::registry(&cfg)?,
+        &p.bundle,
+        &t,
+        Some(&key.pk),
+        None,
+    )?;
     // Only an applied release is the one the next deploy counts from.
     write_file(&latest, &p.bundle)
 }

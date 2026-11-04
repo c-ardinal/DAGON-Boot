@@ -8,6 +8,7 @@ use dagon_sign::image::{self, ImageSpec};
 use dagon_sign::provision;
 use dagon_sign::release;
 use dagon_sign::to_hex;
+use dagon_topology::defs::{McuDef, Registry, Writer};
 use dagon_topology::schema::{Role, Topology};
 use ed25519_compact::KeyPair;
 
@@ -42,7 +43,10 @@ fn slot_arg(s: &str) -> Result<u8, String> {
 
 /// Signs `input` (ELF or raw payload) for `node`, or, when `input` already is
 /// a signed image, verifies it and checks it belongs to `node`/`kind`/`slot`.
+/// Slot geometry comes from the MCU definitions of `reg`.
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn image_for_node(
+    reg: &Registry,
     t: &Topology,
     node: &str,
     kind: u8,
@@ -54,7 +58,7 @@ pub(crate) fn image_for_node(
     let n = t
         .node(node)
         .ok_or_else(|| format!("no node '{node}' in the topology"))?;
-    let geometry = image::slot(&n.mcu, kind, slot).ok_or_else(|| {
+    let geometry = image::slot_with(reg, &n.mcu, kind, slot).ok_or_else(|| {
         format!(
             "node '{node}' ({}) has no such slot for this image kind",
             n.mcu
@@ -78,7 +82,7 @@ pub(crate) fn image_for_node(
     let spec = ImageSpec {
         image_kind: kind,
         port_kind: image::port_kind_of(&n.port).ok_or("unknown port kind")?,
-        mcu_id: image::mcu_id_of(&n.mcu).ok_or("unknown MCU")?,
+        mcu_id: reg.mcu(&n.mcu).ok_or("unknown MCU")?.wire_id,
         slot: geometry,
         version: o.version,
         build_flags: flags,
@@ -127,7 +131,7 @@ pub fn image_sign(args: &[&str]) -> Res {
         return Err("image sign needs exactly one input file".into());
     };
     let cfg = Config::load(o.get("config"))?;
-    let t = read_topology(&cfg.topology_path(o.get("topology"))?)?;
+    let t = read_topology(&cfg, &cfg.topology_path(o.get("topology"))?)?;
     let kind_name = o.get("kind").unwrap_or("app");
     let kind = image::image_kind_of(kind_name).ok_or("--kind must be app, bootcore or agent")?;
     let slot = slot_arg(o.get("slot").unwrap_or("a"))?;
@@ -156,6 +160,7 @@ pub fn image_sign(args: &[&str]) -> Res {
     let key = load_key(o.get("key"))?;
     let input_bytes = read_file(Path::new(input))?;
     let img = image_for_node(
+        &crate::defs::registry(&cfg)?,
         &t,
         o.need("node")?,
         kind,
@@ -196,10 +201,11 @@ pub fn release_build(args: &[&str]) -> Res {
         return Err("release build needs image files or directories".into());
     }
     let cfg = Config::load(o.get("config"))?;
-    let t = read_topology(&cfg.topology_path(o.get("topology"))?)?;
+    let t = read_topology(&cfg, &cfg.topology_path(o.get("topology"))?)?;
+    let reg = crate::defs::registry(&cfg)?;
     let topo_bin = match o.get("topology-bin") {
         Some(p) => read_file(Path::new(p))?,
-        None => dagon_topology::compile(&t).map_err(|e| e.to_string())?,
+        None => dagon_topology::compile_with(&reg, &t).map_err(|e| e.to_string())?,
     };
     let out = o
         .get("out")
@@ -212,7 +218,7 @@ pub fn release_build(args: &[&str]) -> Res {
         .map(|p| read_file(p))
         .collect::<Result<Vec<_>, _>>()?;
     let key = load_key(o.get("key"))?;
-    let r = release::build(&t, &topo_bin, &images, name, &key).map_err(|e| e.to_string())?;
+    let r = release::build(&reg, &t, &topo_bin, &images, name, &key).map_err(|e| e.to_string())?;
     write_file(&out, &r.bundle)?;
     println!(
         "{}: {} images, {} bytes, topology sha256 {}",
@@ -229,8 +235,11 @@ pub fn topo_compile(args: &[&str]) -> Res {
     let [path] = o.pos[..] else {
         return Err("topo compile needs <yaml>".into());
     };
-    let t = read_topology(Path::new(path))?;
-    let bin = dagon_topology::compile(&t).map_err(|e| e.to_string())?;
+    // Without --config: the dagon.toml here, if any, else the builtin set.
+    let cfg = Config::load(o.get("config"))?;
+    let t = read_topology(&cfg, Path::new(path))?;
+    let bin = dagon_topology::compile_with(&crate::defs::registry(&cfg)?, &t)
+        .map_err(|e| e.to_string())?;
     let out = o
         .get("out")
         .map_or_else(|| Path::new(path).with_extension("bin"), PathBuf::from);
@@ -243,8 +252,6 @@ pub fn topo_compile(args: &[&str]) -> Res {
     );
     Ok(())
 }
-
-const F401_CHIP: &str = "STM32F401RETx";
 
 pub fn provision(args: &[&str]) -> Res {
     let o = Opts::parse(args, &["topology", "key", "config", "out"])?;
@@ -260,25 +267,19 @@ pub fn rescue(args: &[&str]) -> Res {
         return Err("usage: rescue hub".into());
     }
     let cfg = Config::load(o.get("config"))?;
-    let t = read_topology(&cfg.topology_path(o.get("topology"))?)?;
+    let t = read_topology(&cfg, &cfg.topology_path(o.get("topology"))?)?;
     let hub = t
         .nodes
         .iter()
         .find(|n| n.role == Role::Coordinator)
         .ok_or("topology has no coordinator")?;
-    if hub.mcu != "rp2040" {
-        return Err(format!(
-            "rescue hub supports an rp2040 coordinator, not {}",
-            hub.mcu
-        ));
-    }
     let id = hub.id.clone();
     provision_node(&o, &id)
 }
 
 fn provision_node(o: &Opts<'_>, node: &str) -> Res {
     let cfg = Config::load(o.get("config"))?;
-    let t = read_topology(&cfg.topology_path(o.get("topology"))?)?;
+    let t = read_topology(&cfg, &cfg.topology_path(o.get("topology"))?)?;
     if t.node(node).is_none() {
         return Err(format!("no node '{node}' in the topology"));
     }
@@ -290,23 +291,28 @@ fn provision_node(o: &Opts<'_>, node: &str) -> Res {
         .get("out")
         .map_or_else(|| cfg.provision_dir().join(node), PathBuf::from);
     let key = load_key(o.get("key"))?;
-    match provision_files(&t, node, inputs, &dir, &key)? {
-        FirstWrite::ProbeRs {
-            bin,
-            bytes,
-            commands,
-        } => println!(
-            "{}: {bytes} bytes\nwrite with ST-LINK:\n{}",
+    let reg = crate::defs::registry(&cfg)?;
+    let w = provision_files(&reg, &t, node, inputs, &dir, &key)?;
+    let mcu = node_mcu(&reg, &t, node)?;
+    let via = &mcu.connection.label;
+    match (w, &mcu.writer) {
+        (
+            FirstWrite::ProbeRs {
+                bin,
+                bytes,
+                commands,
+            },
+            _,
+        ) => println!(
+            "{}: {bytes} bytes\nwrite with {via}:\n{}",
             bin.display(),
             command_lines("probe-rs", &commands)
         ),
-        FirstWrite::Uf2 { file, blocks } => println!(
-            "{}: {blocks} blocks\nhold BOOT while plugging in USB, then copy the file to the RPI-RP2 drive",
+        (FirstWrite::Uf2 { file, blocks }, Writer::Uf2Drive { board_id, .. }) => println!(
+            "{}: {blocks} blocks\ncopy the file to the {board_id} drive ({via})",
             file.display()
         ),
-        FirstWrite::Espflash { .. } => {
-            return Err("provision does not make ESP32-S3 files; use `dagon flash`".into())
-        }
+        _ => return Err("provision makes no files for this writer; use `dagon flash`".into()),
     }
     Ok(())
 }
@@ -314,18 +320,18 @@ fn provision_node(o: &Opts<'_>, node: &str) -> Res {
 /// How the first-install files reach the board.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum FirstWrite {
-    /// F401: `flash.bin` written with probe-rs through an ST-LINK; `commands`
-    /// are the probe-rs argument lists, in order.
+    /// Writer `probe-rs`: `flash.bin` from the flash base; `commands` are the
+    /// probe-rs argument lists, in order, without the probe (chosen when
+    /// writing).
     ProbeRs {
         bin: PathBuf,
         bytes: usize,
         commands: Vec<Vec<String>>,
     },
-    /// RP2040: `rescue.uf2` copied to the RPI-RP2 drive (BOOT held at power-up).
+    /// Writer `uf2-drive`: `rescue.uf2` copied to the boot ROM's drive.
     Uf2 { file: PathBuf, blocks: usize },
-    /// ESP32-S3: espflash over USB-C; `files` are (flash offset, file) and
-    /// `commands` the espflash argument lists without the port, which is
-    /// chosen when writing (exactly one ESP32-S3 connected).
+    /// Writer `espflash`: `files` are (flash offset, file) and `commands`
+    /// the espflash argument lists without the port (chosen when writing).
     Espflash {
         files: Vec<(u32, PathBuf)>,
         commands: Vec<Vec<String>>,
@@ -340,36 +346,58 @@ pub(crate) fn command_lines(program: &str, commands: &[Vec<String>]) -> String {
         .collect()
 }
 
-/// probe-rs argument lists that erase the F401 and write `bin` from the
-/// start of its flash, then reset it.
-pub(crate) fn f401_probe_rs(bin: &Path) -> Vec<Vec<String>> {
-    let words = |s: String| s.split(' ').map(String::from).collect::<Vec<_>>();
-    let chip = format!("--chip {F401_CHIP}");
-    let mut download = words(format!(
-        "download {chip} --binary-format bin --base-address {:#010x}",
-        provision::F401_FLASH_BASE
-    ));
-    // The path may hold spaces: one argument, never split.
-    download.push(bin.display().to_string());
+/// probe-rs argument lists that erase `chip` and write `bin` from `base`
+/// (the start of its flash), then reset it.
+pub(crate) fn probe_rs_commands(chip: &str, base: u32, bin: &Path) -> Vec<Vec<String>> {
+    let cmd = |verb: &str, rest: &[String]| {
+        let mut c = vec![verb.to_string(), "--chip".into(), chip.to_string()];
+        c.extend_from_slice(rest);
+        c
+    };
+    let download = [
+        "--binary-format".into(),
+        "bin".into(),
+        "--base-address".into(),
+        format!("{base:#010x}"),
+        bin.display().to_string(),
+    ];
     vec![
-        words(format!("erase {chip}")),
-        download,
-        words(format!("reset {chip}")),
+        cmd("erase", &[]),
+        cmd("download", &download),
+        cmd("reset", &[]),
     ]
+}
+
+/// The MCU definition of `node`.
+pub(crate) fn node_mcu<'r>(
+    reg: &'r Registry,
+    t: &Topology,
+    node: &str,
+) -> Result<&'r McuDef, String> {
+    let n = t
+        .node(node)
+        .ok_or_else(|| format!("no node '{node}' in the topology"))?;
+    reg.mcu(&n.mcu)
+        .ok_or_else(|| format!("no MCU definition '{}' ('{node}')", n.mcu))
 }
 
 /// Signs `inputs` for `node` and writes the first-install files into `dir`
 /// (bootcore.img, app-a.img, then flash.bin and commands.txt or rescue.uf2).
 pub(crate) fn provision_files(
+    reg: &Registry,
     t: &Topology,
     node: &str,
     inputs: &crate::config::ProvisionInputs,
     dir: &Path,
     key: &KeyPair,
 ) -> Result<FirstWrite, String> {
-    let n = t
-        .node(node)
-        .ok_or_else(|| format!("no node '{node}' in the topology"))?;
+    let mcu = node_mcu(reg, t, node)?;
+    if let Writer::Espflash { .. } = mcu.writer {
+        return Err(format!(
+            "provision does not make {} files; use `dagon flash`",
+            mcu.name
+        ));
+    }
     let app_v = inputs.version.as_deref().map(version).transpose()?;
     let boot_v = inputs
         .bootcore_version
@@ -387,6 +415,7 @@ pub(crate) fn provision_files(
         })
     };
     let boot = image_for_node(
+        reg,
         t,
         node,
         image_kind::BOOTCORE,
@@ -396,6 +425,7 @@ pub(crate) fn provision_files(
         key,
     )?;
     let app = image_for_node(
+        reg,
         t,
         node,
         image_kind::APP,
@@ -404,8 +434,10 @@ pub(crate) fn provision_files(
         sign_opts(app_v, boot_v.unwrap_or_default()).as_ref(),
         key,
     )?;
-    let boot_slot = image::slot(&n.mcu, image_kind::BOOTCORE, slot_binding::A).expect("checked");
-    let app_slot = image::slot(&n.mcu, image_kind::APP, slot_binding::A).expect("checked");
+    let boot_slot =
+        image::slot_with(reg, &mcu.id, image_kind::BOOTCORE, slot_binding::A).expect("checked");
+    let app_slot =
+        image::slot_with(reg, &mcu.id, image_kind::APP, slot_binding::A).expect("checked");
     let boot_path = dir.join("bootcore.img");
     let app_path = dir.join("app-a.img");
     write_file(&boot_path, &boot)?;
@@ -413,44 +445,61 @@ pub(crate) fn provision_files(
     describe(&boot_path, &boot);
     describe(&app_path, &app);
 
-    match n.mcu.as_str() {
-        "stm32f401re" => {
-            let bin = provision::f401_flash((&boot_slot, &boot), (&app_slot, &app));
+    let stage0 = stage0_payload(mcu, node, inputs)?;
+    let file = provision::first_install_file(
+        mcu,
+        stage0.as_deref(),
+        (&boot_slot, &boot),
+        (&app_slot, &app),
+    )?;
+    match &mcu.writer {
+        Writer::ProbeRs { chip } => {
             let bin_path = dir.join("flash.bin");
-            write_file(&bin_path, &bin)?;
-            let commands = f401_probe_rs(&bin_path);
+            write_file(&bin_path, &file)?;
+            let commands = probe_rs_commands(chip, mcu.default_flash_map().base, &bin_path);
             write_file(
                 &dir.join("commands.txt"),
                 command_lines("probe-rs", &commands).as_bytes(),
             )?;
             Ok(FirstWrite::ProbeRs {
                 bin: bin_path,
-                bytes: bin.len(),
+                bytes: file.len(),
                 commands,
             })
         }
-        "rp2040" => {
-            let stage0_path = inputs
-                .stage0
-                .as_ref()
-                .ok_or_else(|| format!("[provision.{node}] needs stage0 for an rp2040"))?;
-            let stage0 = image::payload_from_file(&read_file(stage0_path)?, 0x1000_0000)
-                .map_err(|e| format!("stage0: {e}"))?;
-            if stage0.len() > provision::RP2040_STAGE0_MAX as usize {
-                return Err(format!(
-                    "stage0 is {} bytes, the region holds {}",
-                    stage0.len(),
-                    provision::RP2040_STAGE0_MAX
-                ));
-            }
-            let uf2 = provision::hub_rescue_uf2(&stage0, (&boot_slot, &boot), (&app_slot, &app));
+        Writer::Uf2Drive { .. } => {
             let uf2_path = dir.join("rescue.uf2");
-            write_file(&uf2_path, &uf2)?;
+            write_file(&uf2_path, &file)?;
             Ok(FirstWrite::Uf2 {
                 file: uf2_path,
-                blocks: uf2.len() / 512,
+                blocks: file.len() / 512,
             })
         }
-        other => Err(format!("provision does not support {other} yet")),
+        Writer::Espflash { .. } => unreachable!("refused above"),
     }
+}
+
+/// stage0's payload when `mcu`'s layout has a stage0 region (it must fit).
+fn stage0_payload(
+    mcu: &McuDef,
+    node: &str,
+    inputs: &crate::config::ProvisionInputs,
+) -> Result<Option<Vec<u8>>, String> {
+    let Some(region) = mcu.layout.stage0 else {
+        return Ok(None);
+    };
+    let path = inputs
+        .stage0
+        .as_ref()
+        .ok_or_else(|| format!("[provision.{node}] needs stage0 for an {}", mcu.id))?;
+    let stage0 = image::payload_from_file(&read_file(path)?, region.at)
+        .map_err(|e| format!("stage0: {e}"))?;
+    if stage0.len() > region.size as usize {
+        return Err(format!(
+            "stage0 is {} bytes, the region holds {}",
+            stage0.len(),
+            region.size
+        ));
+    }
+    Ok(Some(stage0))
 }

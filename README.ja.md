@@ -104,6 +104,8 @@ export ANTHROPIC_API_KEY=...        # 読むのは CLI だけ。表示も保存�
 dagon ai topology --in boards.txt --out topology.yaml
 ```
 
+定義ファイルは秘密を書く場所ではありません。定義の中の名前（id、製品名、ピンのラベル、パーティション名）は DAGON Console に表示され、Claude に頼んだときは Claude にも送られます。コマンド、ヒント、コメント、ファイルのパスは送りません。詳しくは `targets/README.md` を見てください。
+
 ### 3. ノードの crate を作る
 
 ```sh
@@ -130,9 +132,9 @@ dagon flash seg        # STM32F401RE: ST-LINK 経由で probe-rs が書き込む
 dagon flash watch      # ESP32-S3: USB-C 経由で espflash が書き込む
 ```
 
-`dagon flash` は先に手順を表示し、ボードに触れる前に確認を求めます（`--yes` で確認を省きます）。`--dry-run` も書き込みの手前まではすべて行います: 部品とアプリをビルドし、初回書込みのファイルを provision のフォルダ（`dagon.toml` の横の `out/provision/<id>/`、`dagon.toml` に `provision_dir` があればその下、`--out <dir>` で別の場所）に作り、ボードにだけ触れません。ブートコア（親機は `stage0` も）を CLI をビルドした DAGON のクローン（または `DAGON_HOME`）から、ノードのアプリと一緒に、署名の鍵の公開側でビルドします。ブートコアはデスクのデモの tag（`hub-rp2040-lcd`、`seg-f401-7seg`）を受け付けるので、これらのボードでは `topology.yaml` の tag をそのままにします。
+`dagon flash` は先に手順を表示し、ボードに触れる前に確認を求めます（`--yes` で確認を省きます）。書き込み先は書き込みツールが見つけたデバイス（probe-rs のすべてのプローブ、すべてのシリアルポート、すべての UF2 ドライブ）から選びます。USB の ID や UF2 の Board-ID は表示に使うだけで、候補を絞りません。1 つならそれを選んで確認のときに示し、2 つ以上なら番号で選ぶか `--probe <vid:pid[:serial]>`・`--port <port>`・`--drive <path>` で指定します（Windows では大文字と小文字を区別せず、`--drive e:` は `E:\` を指します）。2 つ以上で端末がない（または `--yes`）のに指定がないとき、または 1 つもないときは書く前に止まります。`--dry-run` も書き込みの手前まではすべて行います: 部品とアプリをビルドし、初回書込みのファイルを provision のフォルダ（`dagon.toml` の横の `out/provision/<id>/`、`dagon.toml` に `provision_dir` があればその下、`--out <dir>` で別の場所）に作り、ボードにだけ触れません。ブートコア（親機は `stage0` も）を CLI をビルドした DAGON のクローン（または `DAGON_HOME`）から、ノードのアプリと一緒に、署名の鍵の公開側でビルドします。ブートコアはデスクのデモの tag（`hub-rp2040-lcd`、`seg-f401-7seg`）を受け付けるので、これらのボードでは `topology.yaml` の tag をそのままにします。
 
-ESP32-S3 のノードでは、`dagon flash` がボードの factory エージェントとアプリをビルドし、アプリを ESP のイメージにして（`espflash save-image --chip esp32s3 --flash-size 16mb`）署名し、`espflash` で書き込みます: 同梱の無改変の ESP-IDF 2nd stage を 0x0 に（SHA-256 が `targets/mcu/esp32s3/vendor/SHA256SUMS` と一致しなければ書きません）、パーティション表（`targets/mcu/esp32s3/partitions.csv`、0x8000）、factory エージェント、ota_0（0x110000）にアプリ、`dagon` パーティション（0x710000）にその署名済みヘッダ、確定済みとして起動させる otadata の項目（0xD000）。USB-C でつながった ESP32-S3（USB Serial/JTAG、`303a:1001`）がちょうど 1 つのときだけ書き込み、つながっていないときや 2 つ以上のときは書く前に止まります。`--dry-run` はファイルとそのオフセット、`espflash` のコマンドを示します（同じ provision のフォルダの `commands.txt`）。
+ESP32-S3 のノードでは、`dagon flash` がボードの factory エージェントとアプリをビルドし、アプリを ESP のイメージにして（`espflash save-image --chip esp32s3 --flash-size 16mb`）署名し、`espflash` で書き込みます: 同梱の無改変の ESP-IDF 2nd stage を 0x0 に（SHA-256 が `targets/mcu/esp32s3/vendor/SHA256SUMS` と一致しなければ書きません）、パーティション表（`targets/mcu/esp32s3/partitions.csv`、0x8000）、factory エージェント、ota_0（0x110000）にアプリ、`dagon` パーティション（0x710000）にその署名済みヘッダ、確定済みとして起動させる otadata の項目（0xD000）。`--dry-run` はファイルとそのオフセット、`espflash` のコマンドを示します（同じ provision のフォルダの `commands.txt`）。
 
 そのあと親機をつなぎ、すべてのノードが応答するか確かめます:
 
@@ -222,7 +224,11 @@ dagon sim run
     uplink: { kind: uart, host: browser }   # pc-cli | browser | embedded
 ```
 
-`uplink` を書かなければ、これまでどおりパソコンの dagon への `usb-cdc` です。上りのつながりはコンパイルした構成に入らないので、今ある構成とそのリリースは変わりません。DAGON Console の定義では、インスペクタでリンクごとの種類と、親機の上りのつながりを選べます。どちらかの端のファームウェアがまだ実装していない種類には ◇ まだ使えない が付きます。構成には書けます（問題「まだ使えないつながり」）が、`dagon gen` はそのホップの名前を挙げて断ります（`uplink of hub over ble: not available yet on rp2040`）。今ファームウェアにあるのは、親機の USB CDC の上り、子機への I2C と UART、ESP32-S3 の親機への UART と USB CDC です。
+`uplink` を書かなければ、これまでどおりパソコンの dagon への `usb-cdc` です。上りのつながりはコンパイルした構成に入らないので、今ある構成とそのリリースは変わりません。DAGON Console の定義では、インスペクタでリンクごとの種類と、親機の上りのつながりを選べます。どちらかの端のファームウェアがまだ実装していない種類には ◇ まだ使えない が付きます。構成には書けます（問題「まだ使えないつながり」）が、`dagon gen` はそのホップの名前を挙げて断ります（`uplink of hub over ble: not available yet on rp2040`）。今ファームウェアにあるのは、各 MCU の定義（`[links]`）にあるとおり次のものです（上り: パソコンや親機へ、下り: 子機へ）:
+
+- RP2040: 上り usb-cdc、下り i2c, uart
+- STM32F401RE: 上り i2c
+- ESP32-S3: 上り uart, usb-cdc
 
 デモでは、新しい無線なしで差し替えを見られます:
 

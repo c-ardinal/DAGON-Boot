@@ -1,0 +1,86 @@
+# DAGON MCU definition (format: targets/README.md). Addresses match
+# src/layout.rs; never move them.
+id = "rp2040"
+name = "RP2040"
+wire_id = 0x0001
+port = "self-boot"
+gpio_count = 30
+
+# The first flash map is the MCU's default.
+[[flash_map]]
+name = "rp2040-4m"
+base = 0x1000_0000
+bytes = 0x40_0000
+
+[layout]
+stage0 = { at = 0x1000_0000, size = 0x4000 }
+bootcore_log = { faces = [0x1000_4000, 0x1000_5000], face_size = 0x1000 }
+app_log = { faces = [0x1000_6000, 0x1000_7000], face_size = 0x1000 }
+
+[[slot]]
+image = "bootcore"
+binding = "a"
+header = "inline"
+at = 0x1000_8000
+size = 0x2_0000
+
+[[slot]]
+image = "bootcore"
+binding = "b"
+header = "inline"
+at = 0x1002_8000
+size = 0x2_0000
+
+[[slot]]
+image = "app"
+binding = "a"
+header = "inline"
+at = 0x1004_8000
+size = 0x10_0000
+
+[[slot]]
+image = "app"
+binding = "b"
+header = "inline"
+at = 0x1014_8000
+size = 0x10_0000
+
+# First write: rescue.uf2 copied to the boot ROM drive (BOOT held at plug-in).
+[writer]
+kind = "uf2-drive"
+family = 0xE48B_FF56
+sector = 0x1000
+info_file = "INFO_UF2.TXT"
+info_header = "UF2 Bootloader"
+board_id = "RPI-RP2"
+
+# Parts built from this package besides the app (sub: package folder).
+[[part]]
+name = "stage0"
+sub = "stage0"
+
+[[part]]
+name = "bootcore"
+sub = "bootcore"
+
+# What the coordinator (hub) rules check on this MCU.
+[coordinator]
+pio_state_machines = 8
+pio_uart_state_machines = 2
+uart0_tx = [0, 12, 16, 28]
+uart0_rx = [1, 13, 17, 29]
+
+# Link kinds the firmware implements (src/kinds.rs LINK_KINDS).
+[links]
+up = ["usb-cdc"]
+down = ["i2c", "uart"]
+
+[connection]
+label = "USB（BOOT を押しながら）"
+hint = "BOOT を押しながら USB をつないでから、書き込んでください。"
+
+[[doctor]]
+what = "target thumbv6m-none-eabi"
+probe = ["rustup", "target", "list", "--installed"]
+expect = { line = "thumbv6m-none-eabi" }
+fix = ["rustup", "target", "add", "thumbv6m-none-eabi"]

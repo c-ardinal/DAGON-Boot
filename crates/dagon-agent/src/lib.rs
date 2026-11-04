@@ -147,7 +147,10 @@ dagon_events::state_machine! {
         states { Off, Up }
         transitions {
             /// DAGON's start began (the agent was made, or restarted); the
-            /// slot store is read next. `tag`: the node's image target tag.
+            /// slot store is read next. `tag`: the node's image target tag
+            /// as a name digest (`NameDigest`: the compact form "digest
+            /// prefix", made as MCU identities are); a host resolves it
+            /// from the topology's node tags.
             starting(tag: NameDigest, role: u8, mode: u8): * => Up
                 emits Starting = 0x01 { tag: NameDigest, role: u8, mode: u8 }
                 observe(live);
@@ -156,7 +159,9 @@ dagon_events::state_machine! {
             watchdog_taken(period_ms: u32, trial_policy: TrialPolicy): Up => Up
                 emits WatchdogTaken = 0x02 { period_ms: u32, trial_policy: TrialPolicy }
                 observe(live);
-            /// The board's bring-up ran (`board`: the board definition's id).
+            /// The board's bring-up ran. `board`: the board definition's id
+            /// as a name digest (`NameDigest`); a host resolves it from the
+            /// board definitions it knows.
             bring_up(board: NameDigest): Up => Up
                 emits BringUp = 0x07 { board: NameDigest }
                 observe(live);

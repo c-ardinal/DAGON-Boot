@@ -90,13 +90,15 @@ trial_attempts = 3
 
 # Flash operations run from RAM with XIP off; the flash driver masks
 # interrupts and pauses core 1 for each. DAGON erases one 4 KiB sector per
-# operation; 400 ms is the QSPI flash's 4 KiB sector erase maximum
-# (W25Q-class parts, tSE).
+# operation. Its maximum erase time is the board's QSPI flash part's
+# (sector erase tSE in that part's datasheet): the part is the board's, not
+# named here, so the value is not yet verified. The masking budget of
+# DAGON's own code is to be measured on the board.
 [execution]
-masked_max_us = 50
+masked_max_us = "unmeasured"
 flash_op = "xip-off-masked"
 erase_unit = 0x1000
-erase_unit_max_ms = 400
+erase_unit_max_ms = { unverified = 400 }
 
 # Protection hardware: the Cortex-M0+ ARMv6-M MPU, 8 regions of at least
 # 256 bytes (RP2040 datasheet section 2.4), read back from MPU_TYPE at boot.

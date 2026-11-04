@@ -10,7 +10,8 @@
 //! flash operation runs with interrupts masked (the execution model of
 //! docs/design/lifecycle-events.md): an erase or program stalls instruction
 //! fetch for at most `ERASE_UNIT_MAX_MS` (the definition's 128 KiB sector
-//! erase maximum), below the confirmed IWDG period; every request starts
+//! erase maximum; `ERASE_UNIT_MAX_MS_KNOWN` says whether it is checked
+//! against the datasheet), below the confirmed IWDG period; every request starts
 //! with a gated feed, and the own I2C address is NACKed while a request
 //! runs, so the parent retries instead of meeting a stretched clock.
 //!

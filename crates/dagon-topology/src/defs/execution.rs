@@ -36,19 +36,54 @@ impl FlashOp {
     }
 }
 
+/// A hardware fact and how far it is established: a plain number is
+/// checked against its source (the definition's comment cites it);
+/// `{ unverified = N }` is a value not yet checked against its source;
+/// `"unmeasured"` has no value yet (to be measured on the hardware).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[serde(untagged)]
+pub enum Fact {
+    Known(u32),
+    Unverified { unverified: u32 },
+    Unmeasured(Unmeasured),
+}
+
+/// The `"unmeasured"` of a [`Fact`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+pub enum Unmeasured {
+    #[serde(rename = "unmeasured")]
+    Unmeasured,
+}
+
+impl Fact {
+    /// The value, checked or not; `None` when unmeasured.
+    pub fn value(self) -> Option<u32> {
+        match self {
+            Fact::Known(v) | Fact::Unverified { unverified: v } => Some(v),
+            Fact::Unmeasured(_) => None,
+        }
+    }
+
+    /// The value is checked against its source.
+    pub fn is_known(self) -> bool {
+        matches!(self, Fact::Known(_))
+    }
+}
+
 /// `[execution]`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Execution {
     /// Longest DAGON's own code masks interrupts (a critical section of
     /// its own, never a flash operation), in microseconds.
-    pub masked_max_us: u32,
+    pub masked_max_us: Fact,
     pub flash_op: FlashOp,
     /// Largest unit DAGON erases in one flash operation (bytes).
     pub erase_unit: u32,
     /// Worst-case time of one such erase (the flash's datasheet maximum),
-    /// in milliseconds.
-    pub erase_unit_max_ms: u32,
+    /// in milliseconds; required (measured or not), the watchdog check
+    /// needs it.
+    pub erase_unit_max_ms: Fact,
 }
 
 /// `[conformance]`.
@@ -69,25 +104,31 @@ fn fail(cond: bool, msg: impl FnOnce() -> String) -> Result<(), String> {
 }
 
 /// `[execution]`: budgets above 0, the erase unit a power of two, and one
-/// erase shorter than every watchdog period that is fed around it.
+/// erase shorter than every watchdog period that is fed around it. An
+/// unverified or unmeasured value passes the check it can take; tools
+/// report it as not established.
 pub(super) fn execution(m: &McuDef) -> Result<(), String> {
     let Some(e) = m.execution else { return Ok(()) };
+    let masked = e.masked_max_us.value();
     fail(
-        e.masked_max_us == 0 || e.masked_max_us > MASKED_MAX_US_LIMIT,
+        masked.is_some_and(|v| v == 0 || v > MASKED_MAX_US_LIMIT),
         || format!("execution.masked_max_us must be 1..={MASKED_MAX_US_LIMIT}"),
     )?;
     fail(!e.erase_unit.is_power_of_two(), || {
         "execution.erase_unit must be a power of two".into()
     })?;
-    fail(e.erase_unit_max_ms == 0, || {
+    let Some(erase_ms) = e.erase_unit_max_ms.value() else {
+        return Err("execution.erase_unit_max_ms needs a value (measured or not)".into());
+    };
+    fail(erase_ms == 0, || {
         "execution.erase_unit_max_ms must be above 0".into()
     })?;
     let Some(w) = m.watchdog else { return Ok(()) };
-    fail(e.erase_unit_max_ms >= w.confirmed_ms, || {
+    fail(erase_ms >= w.confirmed_ms, || {
         format!(
-            "execution.erase_unit_max_ms {} must be below watchdog.confirmed_ms {}: one \
-             erase runs between two feeds",
-            e.erase_unit_max_ms, w.confirmed_ms
+            "execution.erase_unit_max_ms {erase_ms} must be below watchdog.confirmed_ms {}: \
+             one erase runs between two feeds",
+            w.confirmed_ms
         )
     })
 }

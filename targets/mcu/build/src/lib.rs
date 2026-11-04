@@ -107,65 +107,73 @@ pub fn definition() {
     fs::write(out_dir().join("definition.rs"), definition_rs(&text)).unwrap();
 }
 
-fn int(t: &toml::Table, table: &str, key: &str) -> Option<i64> {
-    t.get(table)?.as_table()?.get(key)?.as_integer()
+fn required<'a>(t: &'a toml::Table, table: &str, key: &str) -> &'a toml::Value {
+    t.get(table)
+        .and_then(|v| v.as_table())
+        .and_then(|v| v.get(key))
+        .unwrap_or_else(|| panic!("dagon-mcu.toml: [{table}] {key} is missing"))
 }
 
-fn required(t: &toml::Table, table: &str, key: &str) -> i64 {
-    int(t, table, key).unwrap_or_else(|| panic!("dagon-mcu.toml: [{table}] {key} is missing"))
+fn int(v: &toml::Value, what: &str) -> u32 {
+    v.as_integer()
+        .and_then(|i| u32::try_from(i).ok())
+        .unwrap_or_else(|| panic!("dagon-mcu.toml: {what} is not a u32"))
+}
+
+/// A hardware fact (`N`, `{ unverified = N }` or `"unmeasured"`): its value
+/// and whether it is checked against its source.
+fn fact(v: &toml::Value, what: &str) -> (Option<u32>, bool) {
+    if v.as_str() == Some("unmeasured") {
+        return (None, false);
+    }
+    match v.as_table().and_then(|t| t.get("unverified")) {
+        Some(u) => (Some(int(u, what)), false),
+        None => (Some(int(v, what)), true),
+    }
 }
 
 /// The generated source for a definition's text.
 pub fn definition_rs(text: &str) -> String {
     let t: toml::Table = text.parse().expect("dagon-mcu.toml");
-    let attempts = u8::try_from(required(&t, "watchdog", "trial_attempts"))
-        .expect("[watchdog] trial_attempts fits a u8");
-    let mut out = format!(
-        "/// Boots the boot stage gives a pending image before it rolls back
-         /// (`[watchdog] trial_attempts`).
-         pub const TRIAL_ATTEMPTS: u8 = {attempts};
-"
+    let mut out = String::new();
+    let attempts = int(required(&t, "watchdog", "trial_attempts"), "trial_attempts");
+    let attempts = u8::try_from(attempts).expect("[watchdog] trial_attempts fits a u8");
+    out += "/// Boots the boot stage gives a pending image before it rolls back\n";
+    out += "/// (`[watchdog] trial_attempts`).\n";
+    out += &format!("pub const TRIAL_ATTEMPTS: u8 = {attempts};\n");
+
+    let unit = int(required(&t, "execution", "erase_unit"), "erase_unit");
+    out += "/// Largest unit one flash erase covers, bytes (`[execution] erase_unit`).\n";
+    out += &format!("pub const ERASE_UNIT: u32 = {unit:#x};\n");
+
+    let (masked, masked_known) = fact(required(&t, "execution", "masked_max_us"), "masked_max_us");
+    out += "/// Longest DAGON's own code masks interrupts, us (`[execution]\n";
+    out += "/// masked_max_us`); `None` while it is not measured.\n";
+    out += &format!("pub const MASKED_MAX_US: Option<u32> = {masked:?};\n");
+    out += "/// `MASKED_MAX_US` is checked against its source.\n";
+    out += &format!("pub const MASKED_MAX_US_KNOWN: bool = {masked_known};\n");
+
+    let (erase, erase_known) = fact(
+        required(&t, "execution", "erase_unit_max_ms"),
+        "erase_unit_max_ms",
     );
-    for (key, name, doc) in [
-        (
-            "masked_max_us",
-            "MASKED_MAX_US",
-            "Longest DAGON's own code masks interrupts (us)",
-        ),
-        (
-            "erase_unit",
-            "ERASE_UNIT",
-            "Largest unit one flash erase covers (bytes)",
-        ),
-        (
-            "erase_unit_max_ms",
-            "ERASE_UNIT_MAX_MS",
-            "Worst-case time of that erase (ms)",
-        ),
-    ] {
-        let v = u32::try_from(required(&t, "execution", key)).expect("fits a u32");
-        out += &format!(
-            "/// {doc} (`[execution] {key}`).
-pub const {name}: u32 = {v:#x};
-"
-        );
-    }
+    let erase = erase.expect("[execution] erase_unit_max_ms needs a value");
+    out += "/// Worst-case time of one such erase, ms (`[execution]\n";
+    out += "/// erase_unit_max_ms`).\n";
+    out += &format!("pub const ERASE_UNIT_MAX_MS: u32 = {erase};\n");
+    out += "/// `ERASE_UNIT_MAX_MS` is checked against the flash's datasheet.\n";
+    out += &format!("pub const ERASE_UNIT_MAX_MS_KNOWN: bool = {erase_known};\n");
+
     let scratch = t
         .get("conformance")
         .and_then(|c| c.get("scratch"))
         .and_then(|s| Some((s.get("at")?.as_integer()?, s.get("size")?.as_integer()?)));
-    out += "/// Flash a conformance build may destroy (`[conformance] scratch`).
-";
+    out += "/// Flash a conformance build may destroy (`[conformance] scratch`).\n";
     out += &match scratch {
         Some((at, size)) => {
-            format!(
-                "pub const CONFORM_SCRATCH: Option<(u32, u32)> = Some(({at:#x}, {size:#x}));
-"
-            )
+            format!("pub const CONFORM_SCRATCH: Option<(u32, u32)> = Some(({at:#x}, {size:#x}));\n")
         }
-        None => "pub const CONFORM_SCRATCH: Option<(u32, u32)> = None;
-"
-        .into(),
+        None => "pub const CONFORM_SCRATCH: Option<(u32, u32)> = None;\n".into(),
     };
     out
 }
@@ -174,25 +182,56 @@ pub const {name}: u32 = {v:#x};
 mod tests {
     use super::*;
 
+    const DEF: &str = "[watchdog]\ntrial_attempts = 3\n\
+                       [execution]\nmasked_max_us = 50\nerase_unit = 0x1000\n\
+                       erase_unit_max_ms = 400\n\
+                       [conformance]\nscratch = { at = 0x100, size = 0x10 }\n";
+
     #[test]
     fn constants_come_from_the_definition() {
-        let rs = definition_rs(
-            "[watchdog]
-trial_attempts = 3
-[execution]
-masked_max_us = 50
-             erase_unit = 0x1000
-erase_unit_max_ms = 400
-             [conformance]
-scratch = { at = 0x100, size = 0x10 }
-",
-        );
-        assert!(rs.contains("pub const TRIAL_ATTEMPTS: u8 = 3;"), "{rs}");
-        assert!(rs.contains("pub const ERASE_UNIT: u32 = 0x1000;"), "{rs}");
+        let rs = definition_rs(DEF);
+        assert!(rs.contains("pub const TRIAL_ATTEMPTS: u8 = 3;\n"), "{rs}");
+        assert!(rs.contains("pub const ERASE_UNIT: u32 = 0x1000;\n"), "{rs}");
         assert!(
-            rs.contains("pub const ERASE_UNIT_MAX_MS: u32 = 0x190;"),
+            rs.contains("pub const ERASE_UNIT_MAX_MS: u32 = 400;\n"),
+            "{rs}"
+        );
+        assert!(
+            rs.contains("pub const ERASE_UNIT_MAX_MS_KNOWN: bool = true;\n"),
+            "{rs}"
+        );
+        assert!(
+            rs.contains("pub const MASKED_MAX_US: Option<u32> = Some(50);\n"),
             "{rs}"
         );
         assert!(rs.contains("Some((0x100, 0x10))"), "{rs}");
+    }
+
+    /// Facts not yet established stay marked so in the constants.
+    #[test]
+    fn unverified_and_unmeasured_facts_are_marked() {
+        let def = DEF
+            .replace("masked_max_us = 50", "masked_max_us = \"unmeasured\"")
+            .replace(
+                "erase_unit_max_ms = 400",
+                "erase_unit_max_ms = { unverified = 400 }",
+            );
+        let rs = definition_rs(&def);
+        assert!(
+            rs.contains("pub const MASKED_MAX_US: Option<u32> = None;\n"),
+            "{rs}"
+        );
+        assert!(
+            rs.contains("pub const MASKED_MAX_US_KNOWN: bool = false;\n"),
+            "{rs}"
+        );
+        assert!(
+            rs.contains("pub const ERASE_UNIT_MAX_MS: u32 = 400;\n"),
+            "{rs}"
+        );
+        assert!(
+            rs.contains("pub const ERASE_UNIT_MAX_MS_KNOWN: bool = false;\n"),
+            "{rs}"
+        );
     }
 }

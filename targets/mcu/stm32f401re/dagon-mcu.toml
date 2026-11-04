@@ -77,13 +77,15 @@ trial_attempts = 3
 
 # Single-bank flash: an erase or program stalls instruction fetch (nothing
 # runs; interrupts stay enabled and wait). DAGON erases one 128 KiB sector
-# per operation; 4 s is the datasheet maximum (DS10086, 128 KiB sector,
-# x8 parallelism, the slowest).
+# per operation. Its maximum erase time is to be checked against the
+# STM32F401xD/xE datasheet (DS10086, flash memory programming
+# characteristics, 128 KiB sector erase): not yet verified. The masking
+# budget of DAGON's own code is to be measured on the board.
 [execution]
-masked_max_us = 50
+masked_max_us = "unmeasured"
 flash_op = "fetch-stall"
 erase_unit = 0x2_0000
-erase_unit_max_ms = 4_000
+erase_unit_max_ms = { unverified = 4_000 }
 
 # Sector 4 (64 KiB), used by no image or log.
 [conformance]

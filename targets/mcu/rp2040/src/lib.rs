@@ -27,7 +27,8 @@
 pub use dagon_mcu_common::{frames, liveness, mapped, tag, uart};
 
 // The constants this package's MCU definition states (`dagon-mcu.toml`):
-// `TRIAL_ATTEMPTS`, `MASKED_MAX_US`, `ERASE_UNIT`, `ERASE_UNIT_MAX_MS`,
+// `TRIAL_ATTEMPTS`, `MASKED_MAX_US` (`None` while unmeasured), `ERASE_UNIT`,
+// `ERASE_UNIT_MAX_MS`, the `_KNOWN` flags (checked against their source),
 // `CONFORM_SCRATCH`. The boot stage and the app layer read these.
 include!(concat!(env!("OUT_DIR"), "/definition.rs"));
 

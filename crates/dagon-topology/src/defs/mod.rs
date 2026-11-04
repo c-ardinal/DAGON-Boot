@@ -24,7 +24,7 @@ use serde::Deserialize;
 use crate::schema::{ControlKind, LinkKind, RomEntry, UartIface};
 
 pub use board_boot::{BoardBoot, BoardBus, BoardDevice, BoardPeripheral, BoardPin};
-pub use execution::{Conformance, Execution, FlashOp};
+pub use execution::{Conformance, Execution, Fact, FlashOp};
 pub use isolation::{Core, Isolation, McuBoot, Peripheral, RecordPlacement, Watchdog};
 pub use load::{DefError, DefSource, Source, BUILTIN_FILES};
 

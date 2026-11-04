@@ -1990,6 +1990,12 @@ below keep code and data to it.
    for with the serving task idle (so the guard keeps feeding); a reply
    that was not sent resets nothing, and the requester's retry gets the
    same reply.
+7. **Facts say how far they are established.** A definition's hardware
+   fact is a number checked against its source (the definition's comment
+   cites the document and table), `{ unverified = N }` (a value not yet
+   checked against its source) or `"unmeasured"` (no value yet). Tools and
+   documents report the last two as not established; a check that needs a
+   value uses an unverified one; none is relied on in a release.
 
 ### 12.2 Per MCU
 
@@ -1997,7 +2003,8 @@ The tables are what the MCU packages do; the budgets are each MCU
 definition's.
 
 **STM32F401RE** (`flash_op = "fetch-stall"`, `erase_unit` one 128 KiB
-sector, `erase_unit_max_ms = 4000`, IWDG `confirmed_ms = 8000`)
+sector, `erase_unit_max_ms` 4000 unverified (DS10086, 128 KiB sector
+erase), `masked_max_us` unmeasured, IWDG `confirmed_ms = 8000`)
 
 | Work | Runs in | Priority |
 |---|---|---|
@@ -2007,14 +2014,16 @@ sector, `erase_unit_max_ms = 4000`, IWDG `confirmed_ms = 8000`)
 | Watchdog feeding | the app's feeder task, gated by the guard | thread mode |
 | The sandbox timer (4.3) | SysTick | above every capability interrupt |
 
-During an erase nothing executes until the sector is done (at most
-4 s); the IWDG counts from the request's feed (8 s confirmed). The own
+During an erase nothing executes until the sector is done (4 s by the
+unverified value); the IWDG counts from the request's feed (8 s
+confirmed). The own
 I2C address is NACKed for the whole request, so the parent's polls are
 NACKed by the peripheral without the CPU, and the parent retries until
 its own deadline.
 
 **RP2040** (`flash_op = "xip-off-masked"`, `erase_unit` one 4 KiB
-sector, `erase_unit_max_ms = 400`, watchdog 8000 ms)
+sector, `erase_unit_max_ms` 400 unverified (the board's QSPI flash part
+decides it), `masked_max_us` unmeasured, watchdog 8000 ms)
 
 | Work | Runs in | Priority |
 |---|---|---|
@@ -2023,14 +2032,15 @@ sector, `erase_unit_max_ms = 400`, watchdog 8000 ms)
 | Flash erase and program | the PC task, through the slot store's `SharedFlash` handle | one sector or page per operation, masked by the driver |
 | Watchdog feeding | the feeder task, gated by the guard | thread mode |
 
-Each flash operation masks interrupts for one sector erase (at most
-400 ms) or one page program; the slot store reports progress to the
+Each flash operation masks interrupts for one sector erase (400 ms by the
+unverified value) or one page program; the slot store reports progress to the
 guard between sectors. The USB controller NAKs the host meanwhile and
 the host retries. The topology copy is read through the same flash
 driver it is written with.
 
 **ESP32-S3** (`flash_op = "cache-off-masked"`, `erase_unit` one 64 KiB
-block, `erase_unit_max_ms = 2000`, RTC WDT 4000 ms)
+block, `erase_unit_max_ms` 2000 unverified (the board's SPI flash part
+decides it), `masked_max_us` unmeasured, RTC WDT 4000 ms)
 
 | Work | Runs in | Priority |
 |---|---|---|
@@ -2038,15 +2048,18 @@ block, `erase_unit_max_ms = 2000`, RTC WDT 4000 ms)
 | Watchdog feeding (once confirmed, gated by liveness) | the link task | Priority2 |
 | The app's tasks | thread mode | lowest |
 
-Each flash operation masks interrupts for one block erase (at most
-2 s); the slot store feeds the watchdog between blocks. The UART receive
+Each flash operation masks interrupts for one block erase (2 s by the
+unverified value); the slot store feeds the watchdog between blocks. The UART receive
 FIFO keeps what fits; a frame cut by the stall is dropped by the 20 ms
 gap rule and the requester retries. USB Serial/JTAG NAKs the host
 meanwhile.
 
 ### 12.3 Measured on hardware
 
-The budgets above are datasheet values. For each MCU the worst-case
-erase time, the watchdog margin left at its end, and the link's recovery
-after it (the parent's retry answered) are measured on the boards before
-a release relies on a definition's numbers.
+None of the budgets above is established yet. For each MCU, measured on
+the boards before a release relies on them: the longest critical section
+of DAGON's own code (`masked_max_us`: the worst measured plus a margin),
+the worst-case erase time of the board's flash part (and its datasheet
+value, cited in the definition), the watchdog margin left at the end of
+one erase, and the link's recovery after it (the parent's retry
+answered).

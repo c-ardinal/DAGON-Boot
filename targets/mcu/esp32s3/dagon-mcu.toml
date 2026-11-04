@@ -59,13 +59,16 @@ trial_attempts = 1
 
 # The flash cache is off during an operation; the flash driver masks
 # interrupts for each (handlers outside IRAM cannot run). DAGON erases at
-# most one 64 KiB block per operation; 2 s is the SPI flash's 64 KiB block
-# erase maximum (tBE2 of the quad SPI NOR parts the module carries).
+# most one 64 KiB block per operation. Its maximum erase time is the
+# board's SPI flash part's (64 KiB block erase in that part's datasheet):
+# the part is the board's, not named here, so the value is not yet
+# verified. The masking budget of DAGON's own code is to be measured on the
+# board.
 [execution]
-masked_max_us = 50
+masked_max_us = "unmeasured"
 flash_op = "cache-off-masked"
 erase_unit = 0x1_0000
-erase_unit_max_ms = 2_000
+erase_unit_max_ms = { unverified = 2_000 }
 
 # The last 4 KiB of the dagon partition: after the three header sectors,
 # used by nothing.

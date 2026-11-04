@@ -1,0 +1,12 @@
+[package]
+name = "dagon-retained-model"
+edition.workspace = true
+license.workspace = true
+version = "0.0.0"
+publish = false
+description = "Executable model of DAGON's retained and persistent formats under fault injection"
+
+[dependencies]
+dagon-format = { path = "../dagon-format" }
+dagon-proto = { path = "../dagon-proto" }
+dagon-sim = { path = "../dagon-sim" }

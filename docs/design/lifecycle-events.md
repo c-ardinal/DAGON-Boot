@@ -1402,6 +1402,9 @@ capability at every boot step) against the boot machine's continuation.
 
 This section states what those formats must satisfy; the model is
 accepted only when every property below holds under its fault injection.
+The formats that pass are specified in
+[retained-formats.md](retained-formats.md), with the model's property list
+and the limits of each claim.
 
 #### Boot record
 

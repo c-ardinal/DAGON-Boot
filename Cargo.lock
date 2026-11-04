@@ -191,6 +191,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "dagon-retained-model"
+version = "0.0.0"
+dependencies = [
+ "dagon-format",
+ "dagon-proto",
+ "dagon-sim",
+]
+
+[[package]]
 name = "dagon-romlink"
 version = "0.1.0"
 dependencies = [

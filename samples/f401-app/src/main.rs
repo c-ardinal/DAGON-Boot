@@ -8,8 +8,10 @@
 //! Tasks: DAGON's link runs on its own high-priority executor (`start`);
 //! the display (async on the Arduino I2C, so it never holds up the link)
 //! and the LED heartbeat run on the main executor below it. The display
-//! announces a deadline before each write: a stuck display stops the
-//! feeding, and an image on trial is then rolled back.
+//! announces its deadline before each update: the bound its own write
+//! timeouts give (`display::SHOW_BOUND_MS`), plus the guard's margin. A
+//! display stuck past it stops the feeding, and an image on trial is then
+//! rolled back.
 //!
 //! `no-confirm`: the self-check always fails, so CONFIRM is refused and the
 //! trial rolls back (hardware tests).
@@ -33,8 +35,6 @@ mod display;
 
 /// How long "TEST KEY" (`tESt`) shows before the version.
 const TEST_KEY_SPLASH: Duration = Duration::from_millis(1500);
-/// Longest one display write may take before the board is reset.
-const DISPLAY_BUDGET_MS: u64 = 500;
 
 /// Watchdog guard tasks: DAGON's link, then the display.
 const DISPLAY_TASK: usize = node::APP_TASKS;
@@ -100,7 +100,7 @@ async fn display(
 }
 
 async fn show(display: &mut display::SegDisplay, codes: [u8; seg::DIGITS], lease: &Lease) {
-    lease.busy(DISPLAY_BUDGET_MS);
+    lease.busy(display::SHOW_BOUND_MS);
     if let Err(e) = display.show(codes).await {
         error!("display: {}", defmt::Debug2Format(&e));
     }

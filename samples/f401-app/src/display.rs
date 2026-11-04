@@ -22,7 +22,12 @@ bind_interrupts!(struct Irqs {
 
 /// Longest one expander write may take (a 4-byte write at 100 kHz takes
 /// about 0.4 ms; a held bus fails instead of hanging the task).
-const WRITE_TIMEOUT: Duration = Duration::from_millis(20);
+const WRITE_TIMEOUT_MS: u64 = 20;
+const WRITE_TIMEOUT: Duration = Duration::from_millis(WRITE_TIMEOUT_MS);
+
+/// The longest one [`SegDisplay::show`] can take: every write it makes
+/// (the set-up the first time, then the digits) at its timeout.
+pub const SHOW_BOUND_MS: u64 = WRITE_TIMEOUT_MS * (shield::INIT.len() + shield::SHOW_WRITES) as u64;
 /// Below DAGON's executor (P6) and every default-priority interrupt.
 const IRQ_PRIORITY: Priority = Priority::P7;
 

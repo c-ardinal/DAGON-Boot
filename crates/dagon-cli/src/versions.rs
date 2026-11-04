@@ -12,7 +12,7 @@ pub const SERVE_API: u32 = 1;
 const COMPAT: &str = include_str!("../../../compat.toml");
 
 /// Each contract and the number this dagon reads and writes.
-pub fn formats() -> [(&'static str, u32); 9] {
+pub fn formats() -> [(&'static str, u32); 10] {
     use dagon_format::{bundle, header, manifest, statelog, topology};
     [
         ("wire", u32::from(dagon_proto::PROTO_VERSION)),
@@ -24,6 +24,7 @@ pub fn formats() -> [(&'static str, u32); 9] {
         ("topology-yaml", dagon_topology::SCHEMA_VERSION),
         ("definitions", dagon_topology::defs::FORMAT),
         ("serve-api", SERVE_API),
+        ("event", u32::from(dagon_events::EVENT_FORMAT)),
     ]
 }
 

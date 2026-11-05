@@ -1481,7 +1481,7 @@ mod tests {
                 "{mcu}: stage0 builds itself, the boot core is a library"
             );
         }
-        let (cfg, t) = area("seg");
+        let (cfg, t) = area("seg-boot");
         let err = boot_crate(&cfg, t.node("seg").unwrap()).unwrap_err();
         assert!(err.contains("run `dagon gen` first"), "{err}");
         let _ = std::fs::remove_dir_all(&cfg.base);

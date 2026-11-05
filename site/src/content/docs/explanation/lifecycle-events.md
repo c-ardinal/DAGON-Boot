@@ -1744,7 +1744,7 @@ harness may still exercise VERSION paging against every link size.
 
 ## 6. Versioning rules
 
-Numbers and components follow `docs/versioning.md` and are registered in
+Numbers and components follow [Versions and releases](/explanation/versioning/) and are registered in
 `compat.toml`. The rules specific to this model:
 
 | Contract | Number moves when | Reader rule |

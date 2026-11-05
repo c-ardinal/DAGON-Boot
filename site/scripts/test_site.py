@@ -108,6 +108,38 @@ class Examples(unittest.TestCase):
             self.assertTrue(found[0].startswith("x.md:1:"))
 
 
+class MovedDocuments(unittest.TestCase):
+    """Every `docs/<name>.md` the repository mentions exists: documents moved into the site are named there."""
+
+    MENTION = re.compile(r"(?<![\w/])(?:\.\./)*docs/[\w./-]+\.md")
+    SAMPLES = {"scripts/test_markers.py", "site/scripts/test_site.py"}
+
+    def test_no_mention_of_a_document_that_is_not_there(self):
+        import subprocess
+        names = subprocess.run(["git", "-C", str(ROOT), "ls-files", "-z", "--cached", "--others", "--exclude-standard"],
+                               check=True, capture_output=True).stdout.decode("utf-8").split("\0")
+        missing = []
+        for name in names:
+            path = ROOT / name
+            # The built page, and the checks whose own samples name such paths on purpose.
+            if not name or name.startswith("crates/dagon-cli/page/") or name in self.SAMPLES or not path.is_file():
+                continue
+            data = path.read_bytes()
+            if b"\0" in data:
+                continue
+            for no, line in enumerate(data.decode("utf-8", errors="replace").splitlines(), 1):
+                for m in self.MENTION.finditer(line):
+                    rel = m.group(0).lstrip("./")
+                    if not (ROOT / rel).is_file() and not (path.parent / m.group(0)).is_file():
+                        missing.append(f"{name}:{no}: {m.group(0)}")
+        self.assertEqual(missing, [])
+
+    def test_the_pattern_finds_old_paths_and_leaves_site_paths(self):
+        self.assertTrue(self.MENTION.search("follow `docs/versioning.md` and"))
+        self.assertTrue(self.MENTION.search("(../../docs/extension-manifest.md#boot)"))
+        self.assertIsNone(self.MENTION.search("site/src/content/docs/reference/events.md"))
+
+
 class Wording(unittest.TestCase):
     def test_a_japanese_page_in_english_says_only_that(self):
         # Starlight's own notice says a translation is missing ("まだ"); the site replaces it.

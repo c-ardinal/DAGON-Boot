@@ -161,7 +161,7 @@ image).
 The boot core runs its extensions privileged, so it runs only trusted
 ones (manifest `trusted = true`, listed with their source hash under
 `[extensions.nodes.<id>] trusted`). From `boot.watchdog_armed` to
-`boot.before_jump` or `boot.halt`, each boot event (docs/events.md, layer
+`boot.before_jump` or `boot.halt`, each boot event ([Events](/reference/events/), layer
 `boot`) reaches, in chain order, the extensions whose `observes` names
 it, each call timed against its `max_run_us`: a call that takes longer
 is not stopped, but the boot core then delivers `boot.extension_overran`

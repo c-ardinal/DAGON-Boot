@@ -28,11 +28,11 @@ BOARDS = ROOT / "targets" / "boards"
 PT_LOAD = 1
 # The part of a stage0 region every build must leave free: 1/16 (1 KiB of
 # 16 KiB). Stage0 is never updated in the field, yet its source is rebuilt
-# for every new node with whatever toolchain is current; a new compiler or
-# library release, a board's boot pins or a needed fix moves an opt-level
-# "z" image by hundreds of bytes, and an image that fits only today turns
-# into a first write that cannot be built (as the Waveshare build did, 64
-# bytes over, while the board-less build fitted).
+# for every new node with the toolchain of that build; a compiler or
+# library release, a board's boot pins or a fix moves an opt-level "z"
+# image by hundreds of bytes, and an image without spare room turns into a
+# first write that cannot be built (as the Waveshare build did, 64 bytes
+# over, while the board-less build fitted).
 MARGIN_DIVISOR = 16
 
 

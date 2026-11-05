@@ -1290,8 +1290,8 @@ The one authentication rule, applied by every verifier in the chain
   1/16 of the region free (`scripts/stage0_size.py`, in CI): the board-less
   build and one per board whose definition names the MCU, since a board
   puts its boot LED and halt pattern into stage0. Stage0 is never updated
-  in the field but is rebuilt for every new node with the current
-  toolchain, so an image that fits only today becomes a first write that
+  in the field but is rebuilt for every new node with the toolchain of
+  that build, so an image without spare room becomes a first write that
   cannot be built. Both stage0s use the compact SHA-256 rounds: on the
   RP2040 the unrolled ones took stage0 from 7,484 to over 16,384 bytes,
   for about 1.2 s less boot time on a full 128 KiB boot core slot at the

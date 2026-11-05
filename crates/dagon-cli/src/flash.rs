@@ -548,6 +548,7 @@ pub(crate) fn build_parts(
     let boot = boot_crate(cfg, n).ok();
     for part in parts(reg, &n.mcu, n.board.as_deref()) {
         let mut dir = part_dir(root, &part)?;
+        let boot_folder = boot_folder_of(&part, &dir, boot.as_deref())?;
         let mut bin = match &part.bin {
             Some(b) => b.clone(),
             None => nodebuild::package_name(&dir)?,
@@ -589,7 +590,7 @@ pub(crate) fn build_parts(
                 pubkey_hex: Some(hex),
                 // The boot core accepts only images carrying this tag.
                 target_tag: Some(&n.tag),
-                boot_crate: boot.as_deref(),
+                boot_crate: boot_folder,
             },
             &mut |l| log(&hide(l)),
             cancel,
@@ -668,6 +669,19 @@ fn boot_crate(cfg: &Config, n: &dagon_topology::schema::Node) -> Result<PathBuf,
         ));
     }
     Ok(dir)
+}
+
+/// The boot folder part `part` (its package in `dir`) is built for:
+/// `boot` for a boot stage (stage0, or a boot core library), `None` for
+/// any other part, so a part that is not a boot stage never reads a
+/// node's boot crate.
+fn boot_folder_of<'a>(
+    part: &Part,
+    dir: &Path,
+    boot: Option<&'a Path>,
+) -> Result<Option<&'a Path>, String> {
+    let stage = part.name == STAGE0 || boot_library(dir)?;
+    Ok(boot.filter(|_| stage))
 }
 
 /// Whether the package in `dir` is a boot core library (it declares
@@ -1424,6 +1438,41 @@ mod tests {
             .map(|p| p.name)
             .collect();
         assert_eq!(names, ["stage0", "bootcore"]);
+    }
+
+    /// Only the boot stages (stage0 and a boot core library) are built for
+    /// the node's boot folder (`DAGON_BOOT_CRATE`); every other first-write
+    /// part (the ESP32-S3 factory agent, a board's own part) is built
+    /// without it.
+    #[test]
+    fn only_boot_stages_get_the_boot_folder() {
+        let reg = &crate::defs::registry_at(&Config::default(), Some(&here())).unwrap();
+        let mut seen = Vec::new();
+        for mcu in reg.mcus().iter().map(|m| m.id.as_str()) {
+            let board = reg.default_board(mcu).map(|b| b.id.as_str());
+            for p in parts(reg, mcu, board) {
+                let dir = part_dir(&here(), &p).unwrap();
+                let folder = boot_folder_of(&p, &dir, Some(Path::new("boot/n"))).unwrap();
+                seen.push((mcu.to_string(), p.name.clone(), folder.is_some()));
+            }
+        }
+        let boot_stage = |name: &str| ["stage0", "bootcore"].contains(&name);
+        assert!(seen.iter().any(|(_, n, _)| !boot_stage(n)), "{seen:?}");
+        for (mcu, name, has) in &seen {
+            assert_eq!(*has, boot_stage(name), "{mcu} {name}");
+        }
+        let app = Part {
+            name: "app".into(),
+            owner: Want::Mcu("rp2040".into()),
+            sub: String::new(),
+            bin: None,
+            package: None,
+        };
+        let dir = here().join("targets/mcu/rp2040");
+        assert_eq!(
+            boot_folder_of(&app, &dir, Some(Path::new("boot/n"))).unwrap(),
+            None
+        );
     }
 
     #[test]

@@ -24,7 +24,7 @@ describe('lock table', () => {
   test('several states: the leftmost one gives the reason', () => {
     const s = states({ disconnected: true, updating: true });
     expect(lockOf('update', s)).toBe(LOCK.states.updating.why.update);
-    expect(stateName(s)).toBe('更新中');
+    expect(stateName(s)).toBe('書き込み中');
   });
 
   test('保存中 keeps editing open and waits for the save before the CLI operations', () => {

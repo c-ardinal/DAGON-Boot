@@ -57,7 +57,7 @@ describe('bottom band', () => {
     const b = bandOf('L13', { hasConfig: true, answering: true }, { stuck: 'ウォッチ', responding: 2 });
     expect([b.sentence, b.primary?.label, b.secondary.map((x) => x.label)]).toEqual([
       BAND.M62b.sentence,
-      '応答する 2 つだけ先に更新',
+      '応答する 2 つだけ先に書き込む',
       ['ウォッチを復旧する'],
     ]);
     expect(b.sentence).toMatch(/電源と配線/);

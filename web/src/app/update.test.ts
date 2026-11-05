@@ -228,8 +228,8 @@ describe('update from the page with dagon-host apply against the mock hub', () =
   }, 60_000);
 
   test.each([
-    [0x07, 'E_FLASH', '× 書き込めない'],
-    [0x09, 'E_SIGNATURE', '× 配布元を確認できない'],
+    [0x07, 'E_FLASH', '× 書き込み失敗'],
+    [0x09, 'E_SIGNATURE', '× 配布元不明'],
   ])('a node that refuses (status %i) is shown with its reason, not as not answering', async (status, reason, chip) => {
     const { t, op } = await sentTo({ refuse: { 'i2c:66': status } });
     op.takeFile('desk-1.1.0.dgb', RELEASE);

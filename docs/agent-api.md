@@ -211,7 +211,7 @@ Errors (all `{ "error": "...", "code": "..." }` except the 400s):
 | 429 | `AGENT_BUSY` | another question is being answered (one at a time per serve) |
 | 413 | `AGENT_CONTEXT_TOO_LARGE` | the topology file is over 64 KiB (not read), or one prompt would be over 192 KiB (not sent) |
 | 504 | `AGENT_TIMEOUT` | one agent call took longer than 120 s (a `command` way's program is stopped) |
-| 502 | `AGENT_FAILED` | the agent refused, its program ended with an error, or it answered in an unexpected form; `error` says which (never the program's output) |
+| 502 | `AGENT_FAILED` | the agent refused, its program ended with an error, or it answered in an unexpected form; `error` says which (never the program's output; an error from the API is cut to 300 characters, and the key never appears in an answer or an error, even when the API echoes it) |
 
 What goes to the agent (and only this, the same two texts for every agent
 and way): a system text (DAGON's instructions, the topology schema and checks,

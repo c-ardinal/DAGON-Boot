@@ -12,6 +12,11 @@ use super::{Cleared, Prompt, TIMED_OUT};
 
 /// Tokens an answer may take.
 const MAX_TOKENS: u32 = 16_000;
+/// Characters an error from the agent's side is cut to: a summary for one
+/// notice or log line, not the remote body.
+const MAX_ERROR: usize = 300;
+/// What stands where the agent's answer or error held the key.
+const KEY_MARK: &str = "[API key]";
 
 #[derive(Debug, Clone, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -89,7 +94,31 @@ pub(crate) fn post(
     prompt: &Prompt,
     timeout: Duration,
 ) -> Result<String, String> {
-    text_of(&send(&h.url, &h.version, key, &body(h, prompt), timeout)?)
+    answer(h, key, prompt, timeout)
+}
+
+/// The call's answer or error, as every caller gets it. Both come from the
+/// remote side, which may reflect the request's key header: every
+/// occurrence of the key is replaced before either leaves this module, and
+/// an error is cut to a short summary (after the replacement, so no part of
+/// the key survives a cut).
+fn answer(
+    h: &MessagesHttp,
+    key: &str,
+    prompt: &Prompt,
+    timeout: Duration,
+) -> Result<String, String> {
+    let clean = |s: String| {
+        if key.is_empty() {
+            s
+        } else {
+            s.replace(key, KEY_MARK)
+        }
+    };
+    send(&h.url, &h.version, key, &body(h, prompt), timeout)
+        .and_then(|v| text_of(&v))
+        .map(clean)
+        .map_err(|e| clean(e).chars().take(MAX_ERROR).collect())
 }
 
 fn agent_error(e: ureq::Error, what: &str) -> String {
@@ -255,5 +284,53 @@ mod tests {
         bad = way();
         bad.model_env = Some("lower".into());
         assert!(bad.check().is_err());
+    }
+
+    const KEY: &str = "sk-reflected-0123456789abcdef";
+
+    fn ask(url: String) -> Result<String, String> {
+        let h = MessagesHttp { url, ..way() };
+        let p = Prompt {
+            system: "s".into(),
+            user: "u".into(),
+            model: None,
+        };
+        answer(&h, KEY, &p, T)
+    }
+
+    /// An endpoint that reflects the x-api-key header: in the answer, in
+    /// an error message, and in a body that is no JSON. Nothing returned
+    /// carries the key.
+    #[test]
+    fn a_reflected_key_never_comes_back() {
+        let ok = json!({ "content": [{ "type": "text", "text": format!("your key is {KEY}.") }] });
+        let (url, h) = mock_server("200 OK", &ok.to_string());
+        let text = ask(url).unwrap();
+        h.join().unwrap();
+        assert!(
+            !text.contains(KEY) && text.contains("your key is"),
+            "{text}"
+        );
+
+        let msg = format!("invalid x-api-key {KEY} {}", "x".repeat(4000));
+        let err =
+            json!({ "type": "error", "error": { "type": "authentication_error", "message": msg } });
+        let (url, h) = mock_server("401 Unauthorized", &err.to_string());
+        let e = ask(url).unwrap_err();
+        h.join().unwrap();
+        assert!(
+            !e.contains(KEY) && e.contains("401") && e.contains("invalid x-api-key"),
+            "{e}"
+        );
+        assert!(
+            e.chars().count() <= MAX_ERROR,
+            "an error is a bounded summary: {}",
+            e.len()
+        );
+
+        let (url, h) = mock_server("500 Internal Server Error", &format!("{{oops {KEY}"));
+        let e = ask(url).unwrap_err();
+        h.join().unwrap();
+        assert!(!e.contains(KEY) && e.contains("500"), "{e}");
     }
 }

@@ -24,7 +24,10 @@ describe('雛形を作る modal', () => {
   test('success: where each node was made, and what to do next', () => {
     const b = html(job({ state: 'succeeded', percent: 100 }));
     expect(b).toContain(SKELETON.state.done);
-    for (const [label, folder] of nodes) expect(b).toContain(label) && expect(b).toContain(folder);
+    for (const [label, folder] of nodes) {
+      expect(b).toContain(label);
+      expect(b).toContain(folder);
+    }
     expect(b).toContain(SKELETON.next.heading);
     expect(b).toContain(SKELETON.copyPath);
   });

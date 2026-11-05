@@ -30,7 +30,7 @@ export interface StateInput {
 
 /** One state per node, strongest first: error, attention, busy, then what the watch saw. */
 export function nodeState(s: StateInput): NodeState {
-  if (s.chip?.startsWith('×')) return 'error';
+  if (s.chip?.startsWith('×') || s.chip?.startsWith('!')) return 'error';
   if (s.chip?.startsWith('▲') || s.chip?.startsWith('↺') || s.trial) return 'attention';
   if (s.writing) return 'busy';
   if (!s.connected || s.unreachable || s.responding == null) return 'idle';

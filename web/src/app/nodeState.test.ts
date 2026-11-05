@@ -13,6 +13,7 @@ describe('node state', () => {
     [{ connected: true, responding: true, trial: true }, 'attention'],
     [{ connected: true, chip: '↺ 前のバージョン' }, 'attention'],
     [{ connected: true, chip: '× 配布元不明', writing: true }, 'error'],
+    [{ connected: true, responding: true, chip: '! ビルド失敗' }, 'error'],
   ] as const)('%j is %s', (input, state) => {
     expect(nodeState(input)).toBe(state);
   });

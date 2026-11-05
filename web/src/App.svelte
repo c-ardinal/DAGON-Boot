@@ -39,8 +39,9 @@
   import Header from './screens/Header.svelte';
   import ZoomPill from './screens/ZoomPill.svelte';
   import SkeletonModal from './screens/SkeletonModal.svelte';
+  import Modal from './screens/Modal.svelte';
   import Toast, { type Notice } from './screens/Toast.svelte';
-  import { CONN, fill as fillIn } from './app/copy.ts';
+  import { CONN, NOTICE, fill as fillIn } from './app/copy.ts';
   import OrderList from './screens/OrderList.svelte';
   import { devHub } from './serial/devHub.ts';
   import { serveSim, type SimStand } from './serial/serveSim.ts';
@@ -701,7 +702,45 @@
       }),
     ),
   );
-  const chips = $derived(updating ? progressChips : op.state === 'L18' ? planChips : diffChips);
+  /** ビルドする in 運用: build, then sign with the project's key; the jobs are serve's. */
+  let buildIds = $state<{ build: number | null; sign: number | null }>({ build: null, sign: null });
+  let buildFailureOpen = $state(false);
+  const jobOf = (id: number | null) => (id === null ? null : (cli.jobs.find((j) => j.id === id) ?? null));
+  const buildJob = $derived(jobOf(buildIds.build));
+  const signJob = $derived(jobOf(buildIds.sign));
+  /** Where the build stands: null before any, else running, done or failed (signing counts as building). */
+  const buildState = $derived.by(() => {
+    const jobs = [buildJob, signJob].filter((j) => j !== null);
+    if (jobs.length === 0) return null;
+    if (jobs.some((j) => j.state === 'failed')) return 'failed';
+    if (signJob?.state === 'succeeded' || (buildJob?.state === 'succeeded' && !cli.hello?.key)) return 'done';
+    return 'running';
+  });
+  async function build() {
+    if (stopped('build') || !cli.has('build')) return;
+    buildFailureOpen = false;
+    buildIds = { build: null, sign: null };
+    await autosave.whenSaved(async () => {
+      const j = await cli.build(d.config.reach);
+      buildIds = { build: j?.id ?? null, sign: null };
+    });
+  }
+  $effect(() => {
+    const s = buildState;
+    untrack(() => {
+      if (buildJob?.state === 'succeeded' && buildIds.sign === null && cli.hello?.key) {
+        buildIds = { ...buildIds, sign: -1 };
+        void cli.sign(d.config.reach).then((j) => (buildIds = { ...buildIds, sign: j?.id ?? null }));
+      }
+      if (s === 'done') notice = { word: fillIn(BUILD.toast.done, { n: d.config.reach.length }) };
+      if (s === 'failed') buildFailureOpen = true;
+    });
+  });
+  const buildChip = $derived(buildState ? { done: BUILD.state.done, failed: BUILD.state.failed, running: BUILD.state.running }[buildState] : null);
+  const buildChips = $derived(
+    buildChip ? Object.fromEntries(d.config.reach.map((id) => [id, { chip: buildChip, spoken: buildChip, silent: false }])) : null,
+  );
+  const chips = $derived(updating ? progressChips : op.state === 'L18' ? planChips : (buildChips ?? diffChips));
   /** The water in each node while it is written (L19, L20, L24). */
   const fill = $derived(PERCENT.has(op.state) ? waterOf(op.progress) : {});
   const percent = $derived(
@@ -1106,7 +1145,7 @@
     {@const blocked = problemCount > 0 || d.doc.topo.nodes.length === 0}
     <button class="button-primary-header" data-control="gen" bind:this={primaryEl} aria-disabled={blocked || sheetHolds} title={blocked ? SKELETON.disabled : undefined} onclick={() => !blocked && !sheetHolds && void makeSkeleton()}><span>{SKELETON.make}</span></button>
   {:else}
-    <button class="button-secondary-header" data-control="build" aria-disabled={sheetHolds} onclick={() => goStep('build')}><span>{BUILD.run}</span></button>
+    <button class="button-secondary-header" data-control="build" aria-disabled={sheetHolds || buildState === 'running'} onclick={() => !sheetHolds && buildState !== 'running' && void build()}><span>{BUILD.run}</span></button>
     <button class="button-primary-header" data-control={writeControl} bind:this={primaryEl} aria-disabled={writeOff || sheetHolds} onclick={write}><span>{WRITE.run}</span></button>
   {/if}
 {/snippet}
@@ -1338,6 +1377,19 @@
       onstay={() => autosave.stay()}
     />
   {/if}
+  {#if buildFailureOpen}
+    {@const failed = [buildJob, signJob].find((j) => j?.state === 'failed')}
+    <Modal title={BUILD.title} chip={{ text: BUILD.state.failed, kind: 'error' }} target={d.config.reach.map((id) => `nodes/${id}/`).join(' · ')} onclose={() => (buildFailureOpen = false)} onmore={() => ((drawerTab = 'jobs'), (buildFailureOpen = false))}>
+      <h3 class="modal-h">{NOTICE.reason}</h3>
+      <p class="modal-mono">{failed?.lines[failed.lines.length - 1] ?? ''}</p>
+      {#snippet actions()}
+        {#if agent.linked}
+          <button class="button-secondary" data-control="ask" onclick={(e) => askDagon(BUILD.askAgent, 'failure', e.currentTarget)}>{BUILD.askAgent}</button>
+        {/if}
+        <button class="button-primary" data-control="build" onclick={() => void build()}>{BUILD.retry}</button>
+      {/snippet}
+    </Modal>
+  {/if}
   {#if skeleton}
     <SkeletonModal
       job={skeletonJob}
@@ -1357,6 +1409,15 @@
 <svelte:window onkeydown={defineKeys} />
 
 <style>
+  .modal-h {
+    margin: 0;
+    font: 700 var(--t-caption) / 16px var(--f-ja);
+  }
+  .modal-mono {
+    margin: 0;
+    font: 400 var(--t-mono) / 24px var(--f-mono);
+    overflow-wrap: anywhere;
+  }
   main.define {
     position: relative;
   }

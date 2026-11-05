@@ -214,6 +214,49 @@ jobs:
       - name: Types (svelte-check)
         run: npx svelte-check --tsconfig ./tsconfig.json
 
+  # The documentation site and the Console demo it publishes: the generated
+  # reference pages match their sources, the examples parse, the site builds
+  # with every internal link resolving, and the demo build compiles.
+  site:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version: "3.12"
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: |
+            site/package-lock.json
+            web/package-lock.json
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
+      - name: Generated reference pages up to date
+        run: python site/scripts/gen.py --check
+      - name: Site script tests
+        run: python -m unittest discover -s site/scripts -p "test_*.py"
+      - name: Examples parse
+        run: python site/scripts/examples.py
+      - name: Build the site and check its links
+        working-directory: site
+        run: |
+          npm ci
+          npm run build
+      - name: Build the Console demo
+        working-directory: web
+        run: |
+          npm ci
+          npm install --global wasm-pack@0.15.1
+          npm run build:demo -- --outDir ../site/dist/demo --emptyOutDir
+      - name: The served Console carries none of the demo
+        # The demo's flag compiles to false elsewhere: no test-key release, no stand-in hub.
+        working-directory: web
+        run: |
+          npx vite build --outDir "$RUNNER_TEMP/served" --emptyOutDir
+          if ls "$RUNNER_TEMP/served/assets" | grep -E 'desk-|bootcore'; then exit 1; fi
+          if grep -lE 'URLSearchParams\(["`]sim' "$RUNNER_TEMP"/served/assets/*.js; then exit 1; fi
+
   scripts:
     runs-on: ubuntu-latest
     steps:

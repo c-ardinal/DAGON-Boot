@@ -1,6 +1,7 @@
 use std::path::PathBuf;
 
 use dagon_format::header::{image_kind, slot_binding};
+use dagon_format::BundleView;
 use dagon_host::{Host, Target};
 use dagon_sim::{block_on, demo_hub, NODE_I2C_ADDR};
 use ed25519_compact::{KeyPair, Seed};

@@ -682,6 +682,8 @@ export const FILE = {
   targets: '対象',
   /** The sheet's per-node table (columns as the design names them). */
   nodes: { node: 'ノード', now: '今', next: '新', progress: '進み' },
+  /** The version picker's accessible name. */
+  version: 'バージョン',
 } as const;
 
 /** SC-O7: the hub reconnect dialog (M26), and M27 beside the hub while the page reconnects by itself (L20). */
@@ -1251,6 +1253,8 @@ export const WRITE = {
     rolledBack: '▲ 戻した',
   },
   retry: 'もう一度書き込む',
+  /** The written package could not be kept in the project (a toast; writing went on). */
+  keepFailed: { label: '× 保存できない', detail: '書き込んだパッケージをプロジェクトの out/deploy に保存できませんでした。' },
   rolled: {
     reason: '新しいバージョンで起動を続けられず、前のバージョン {version} に戻りました。ノードは動いています。',
     next: 'アプリを直してビルドしてから、もう一度書き込んでください。',

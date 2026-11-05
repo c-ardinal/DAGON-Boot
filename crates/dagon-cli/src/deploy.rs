@@ -10,7 +10,7 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::AtomicBool;
 
 use dagon_format::header::{image_kind, slot_binding};
-use dagon_format::{BundleView, Version};
+use dagon_format::Version;
 use dagon_topology::defs::Registry;
 use dagon_topology::Topology;
 use ed25519_compact::KeyPair;
@@ -84,24 +84,7 @@ pub(crate) fn release_versions(
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(BTreeMap::new()),
         Err(e) => return Err(format!("cannot read {}: {e}", path.display())),
     };
-    crate::versions::check_number("bundle", &path.display().to_string(), &bytes)?;
-    let b = BundleView::parse(&bytes).map_err(|e| format!("{}: {e:?}", path.display()))?;
-    b.verify(pubkey).map_err(|e| {
-        format!(
-            "{} does not verify under the signing key: {e:?}",
-            path.display()
-        )
-    })?;
-    let m = b.manifest();
-    let mut out = BTreeMap::new();
-    for i in 0..m.entry_count() {
-        let e = m.entry(i);
-        if let Some(n) = t.nodes.get(e.node_index as usize) {
-            let v = out.entry(n.id.clone()).or_insert(e.version);
-            *v = (*v).max(e.version);
-        }
-    }
-    Ok(out)
+    crate::kept::versions_of(t, &bytes, pubkey).map_err(|e| format!("{}: {e}", path.display()))
 }
 
 /// One patch above the newest of `known`, else [`FIRST`].

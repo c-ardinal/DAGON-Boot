@@ -7,7 +7,8 @@
 //! Everything is made fresh at start in a demo folder under the system's
 //! temporary folder: a demo key pair (never the developer's key), the
 //! desk-demo 構成, the 1.0.0 images the simulated boards run and release
-//! demo-1.1.0, all signed with the demo key. `--sim-fail <node>` makes that
+//! demo-1.1.0, all signed with the demo key; the 1.0.0 package is kept
+//! (out/deploy) as written firmware is. `--sim-fail <node>` makes that
 //! 子機's new version crash at boot, so its update falls back to 1.0.0.
 
 use std::path::{Path, PathBuf};
@@ -119,23 +120,28 @@ pub fn desk(key: &KeyPair, fail: Option<&str>, seed: u64) -> Result<SimHub, Stri
     Ok(h)
 }
 
-/// Release demo-1.1.0 of the desk-demo 構成, signed with `key`.
-fn release(key: &KeyPair) -> Result<Vec<u8>, String> {
+/// The desk-demo 構成's package giving every node `v`, signed with `key`.
+pub(crate) fn package(key: &KeyPair, v: Version) -> Result<Vec<u8>, String> {
     let t = dagon_topology::parse_str(YAML).map_err(|e| e.to_string())?;
     let bin = dagon_topology::compile_str(YAML).map_err(|e| e.to_string())?;
     let images = [
-        img(key, &SEG, 0, NEW, SEG_LEN)?,
-        img(key, &SEG, 1, NEW, SEG_LEN)?,
-        img(key, &WATCH, 0, NEW, WATCH_LEN)?,
-        img(key, &HUB, 0, NEW, HUB_LEN)?,
-        img(key, &HUB, 1, NEW, HUB_LEN)?,
+        img(key, &SEG, 0, v, SEG_LEN)?,
+        img(key, &SEG, 1, v, SEG_LEN)?,
+        img(key, &WATCH, 0, v, WATCH_LEN)?,
+        img(key, &HUB, 0, v, HUB_LEN)?,
+        img(key, &HUB, 1, v, HUB_LEN)?,
     ];
+    let name = if v == NEW {
+        RELEASE.to_string()
+    } else {
+        format!("demo-{v}")
+    };
     let r = dagon_sign::release::build(
         dagon_topology::defs::Registry::builtin(),
         &t,
         &bin,
         &images,
-        RELEASE,
+        &name,
         key,
     )
     .map_err(|e| e.to_string())?;
@@ -184,7 +190,12 @@ pub fn project(dir: &Path, uplink: Medium) -> Result<(PathBuf, KeyPair), String>
           pubkey = \"demo-key/dagon-signing.pub\"\n\
           signing_key = \"demo-key/dagon-signing.key\"\n",
     )?;
-    write(&format!("out/release/{RELEASE}.dgb"), &release(&key)?)?;
+    write(&format!("out/release/{RELEASE}.dgb"), &package(&key, NEW)?)?;
+    // The desk runs OLD, as if written through DAGON: it is kept like any written package.
+    write(
+        &format!("{}/v{OLD}.dgb", crate::kept::DIR),
+        &package(&key, OLD)?,
+    )?;
     Ok((dir.join(crate::config::CONFIG_FILE), key))
 }
 
@@ -414,6 +425,54 @@ mod tests {
         let running = format!("running: {OLD:?}, trial: false");
         assert!(watch.1.contains(&running), "back on 1.0.0: {out:?}");
         assert!(out.iter().any(|(_, w)| w == "done 1.1.0"), "{out:?}");
+    }
+
+    #[test]
+    fn the_demo_keeps_the_version_its_desk_runs() {
+        let dir = std::env::temp_dir().join(format!("dagon-demo-kept-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let (config, key) = project(&dir, Medium::UsbCdc).unwrap();
+        let cfg = crate::config::Config::load(Some(&config.to_string_lossy())).unwrap();
+        let t = dagon_topology::parse_str(&yaml(Medium::UsbCdc)).unwrap();
+        let ids: Vec<String> = crate::kept::list(&cfg, &t, &key.pk)
+            .into_iter()
+            .map(|k| k.id)
+            .collect();
+        assert_eq!(ids, ["v1.0.0"]);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_kept_past_version_is_written_back_to_the_whole_desk() {
+        const SPEED: f64 = 50.0;
+        let dir = std::env::temp_dir().join(format!("dagon-demo-back-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let (config, key) = project(&dir, Medium::UsbCdc).unwrap();
+        let cfg = crate::config::Config::load(Some(&config.to_string_lossy())).unwrap();
+        let t = dagon_topology::parse_str(&yaml(Medium::UsbCdc)).unwrap();
+        let topo = dagon_topology::compile_str(&yaml(Medium::UsbCdc)).unwrap();
+        let dev = Arc::new(crate::serve::SimDevice::new(
+            desk(&key, None, 1).unwrap(),
+            SPEED,
+            None,
+        ));
+        let mut h = Host::new(Link(dev, Vec::new()), Clock(Instant::now(), SPEED));
+        let new = std::fs::read(dir.join(format!("out/release/{RELEASE}.dgb"))).unwrap();
+        let run = |h: &mut Host<Link, Clock>, b: &[u8]| -> Vec<String> {
+            dagon_sim::block_on(h.apply(b, &topo, &key.pk, None, &mut |_| {}))
+                .unwrap()
+                .into_iter()
+                .map(|o| match o.outcome {
+                    Outcome::Done(v) => format!("done {v}"),
+                    other => format!("{other:?}"),
+                })
+                .collect()
+        };
+        assert_eq!(run(&mut h, &new), ["done 1.1.0"; 3]);
+        crate::kept::store(&cfg, &t, &key.pk, &new).unwrap();
+        let back = crate::kept::read(&cfg, &key.pk, "v1.0.0").unwrap();
+        assert_eq!(run(&mut h, &back), ["done 1.0.0"; 3]);
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]

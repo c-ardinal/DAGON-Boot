@@ -7,6 +7,8 @@ use std::net::TcpStream;
 /// Largest request head and body the API takes.
 pub const MAX_HEAD: usize = 16 * 1024;
 pub const MAX_BODY: usize = 1024 * 1024;
+/// Largest package `POST /v1/kept` takes (a whole release).
+pub const MAX_PACKAGE: usize = 16 * 1024 * 1024;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Request {
@@ -67,7 +69,12 @@ pub fn read_request(stream: &mut TcpStream) -> Result<Request, String> {
         .map(|v| v.parse().map_err(|_| "bad content-length".to_string()))
         .transpose()?
         .unwrap_or(0);
-    if len > MAX_BODY {
+    let max = if out.method == "POST" && out.path == "/v1/kept" {
+        MAX_PACKAGE
+    } else {
+        MAX_BODY
+    };
+    if len > max {
         return Err("body too large".into());
     }
     out.body = vec![0; len];

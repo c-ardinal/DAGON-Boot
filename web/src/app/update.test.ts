@@ -28,9 +28,10 @@ function fastClock(): LinkClock {
   };
 }
 
-async function sentTo(opts: MockOptions = {}) {
+async function sentTo(opts: MockOptions = {}, keep?: (bytes: Uint8Array) => Promise<boolean>) {
   const t = new MockTransport(opts);
   const op = new Operate({
+    keep,
     open: async () => {
       await t.open();
       return t;
@@ -262,6 +263,27 @@ describe('update from the page with dagon-host apply against the mock hub', () =
     expect(op.state).toBe('L23');
     expect(t.reboots).toEqual(['uart', 'hub']);
     expect(v(t.helloOf('i2c:66').activeVersion)).toBe('1.0.0');
+  }, 60_000);
+
+  test('kept: the package is kept in the project before anything is written to a node', async () => {
+    const seen: [number, number][] = [];
+    let t: MockTransport | null = null;
+    const r = await sentTo({}, async (bytes) => {
+      seen.push([bytes.length, t!.reboots.length]);
+      return true;
+    });
+    t = r.t;
+    r.op.takeFile('desk-1.1.0.dgb', RELEASE);
+    await r.op.update();
+    expect(seen).toEqual([[RELEASE.length, 0]]);
+    expect([r.op.state, r.op.keepFailed]).toEqual(['L23', false]);
+  }, 60_000);
+
+  test('kept: a package that could not be kept is still written, and the failure is told', async () => {
+    const { op } = await sentTo({}, async () => false);
+    op.takeFile('desk-1.1.0.dgb', RELEASE);
+    await op.update();
+    expect([op.state, op.keepFailed]).toEqual(['L23', true]);
   }, 60_000);
 
   test('node choice: with every node unchecked nothing is written', async () => {

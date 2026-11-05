@@ -115,6 +115,8 @@ export interface Deps {
   bootcore?: (id: string) => Promise<Uint8Array | null>;
   /** stage0's bytes for the ROM path of an MCU with a stage0. */
   stage0?: (id: string) => Promise<Uint8Array | null>;
+  /** Keeps the package about to be written in the project (POST /v1/kept); false when it was not kept. */
+  keep?: (bytes: Uint8Array) => Promise<boolean>;
   /** Opens the device the page had again, without the chooser (the CLI gave it back). Throws when it cannot. */
   again?: () => Promise<Transport>;
 }
@@ -191,6 +193,8 @@ export class Operate {
   returnRefused = $state<ReconnectNote | null>(null);
   /** The hub's HELLO when the user connected: what "the same 親機" means after its reboot. */
   private hubHello: HelloResp | null = null;
+  /** The package being written could not be kept in the project (it is written all the same). */
+  keepFailed = $state(false);
   /** What the last update, recovery or rollback left (L23). */
   finished = $state<Finish | null>(null);
   /** Nodes on the chosen release's version since it was chosen (an update, its rest, a recovery). */
@@ -549,6 +553,9 @@ export class Operate {
     const my = this.session;
     this.go('update');
     this.stopWatching();
+    // Every package written is kept first, so it can be written back later.
+    this.keepFailed = this.deps.keep ? !(await this.deps.keep(f.bytes).catch(() => false)) : false;
+    if (my !== this.session) return;
     this.running = 'update';
     this.startedAt = Date.now();
     this.failed = null;
@@ -936,6 +943,7 @@ export class Operate {
     this.startedAt = null;
     this.reconnectNotes = [];
     this.finished = null;
+    this.keepFailed = false;
     this.updated.clear();
     this.sentVersion = {};
   }

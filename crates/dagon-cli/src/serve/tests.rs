@@ -79,6 +79,22 @@ fn http(a: &Area, method: &str, path: &str, extra: &[(&str, &str)], body: &[u8])
     (status, body)
 }
 
+/// GET of a binary body; returns (status, body bytes).
+fn get_bytes(a: &Area, path: &str) -> (u16, Vec<u8>) {
+    let mut s = TcpStream::connect(("127.0.0.1", a.server.port)).unwrap();
+    let head = format!(
+        "GET {path} HTTP/1.1\r\nHost: 127.0.0.1:{}\r\nAuthorization: {}\r\nContent-Length: 0\r\n\r\n",
+        a.server.port,
+        auth(a)
+    );
+    s.write_all(head.as_bytes()).unwrap();
+    let mut out = Vec::new();
+    s.read_to_end(&mut out).unwrap();
+    let status = String::from_utf8_lossy(&out[9..12]).parse().unwrap();
+    let at = out.windows(4).position(|w| w == b"\r\n\r\n").unwrap() + 4;
+    (status, out[at..].to_vec())
+}
+
 fn auth(a: &Area) -> String {
     format!("Bearer {}", a.server.pass)
 }
@@ -2182,4 +2198,47 @@ fn a_topology_file_too_large_to_send_is_refused_without_a_call() {
         "{body}"
     );
     assert_eq!(calls.load(std::sync::atomic::Ordering::SeqCst), 0);
+}
+
+#[test]
+fn written_packages_are_kept_listed_and_read_back_for_the_page() {
+    use dagon_format::Version;
+    let a = start("kept");
+    std::fs::write(
+        a.dir.join("topology/t.yaml"),
+        crate::demo::yaml(super::Medium::UsbCdc),
+    )
+    .unwrap();
+    let key = ed25519_compact::KeyPair::from_seed(ed25519_compact::Seed::new([9; 32]));
+    a.server.set_release_key(*key.pk);
+    let bearer = auth(&a);
+    let h = [("Authorization", bearer.as_str())];
+    let old = crate::demo::package(&key, Version::new(1, 0, 0)).unwrap();
+    let new = crate::demo::package(&key, Version::new(1, 1, 0)).unwrap();
+    let (st, body) = http(&a, "POST", "/v1/kept", &h, &old);
+    assert_eq!((st, body.contains("\"v1.0.0\"")), (200, true), "{body}");
+    assert_eq!(http(&a, "POST", "/v1/kept", &h, &new).0, 200);
+    assert!(a.dir.join("out/deploy/v1.1.0.dgb").is_file());
+    let other = ed25519_compact::KeyPair::from_seed(ed25519_compact::Seed::new([3; 32]));
+    let foreign = crate::demo::package(&other, Version::new(2, 0, 0)).unwrap();
+    assert_eq!(http(&a, "POST", "/v1/kept", &h, &foreign).0, 422);
+    assert_eq!(http(&a, "POST", "/v1/kept", &h, &[0u8; 64]).0, 422);
+    // A package larger than other requests is still taken.
+    let big = vec![0u8; super::http::MAX_BODY + 1];
+    assert_eq!(http(&a, "POST", "/v1/kept", &h, &big).0, 422);
+    let (st, body) = http(&a, "GET", "/v1/kept", &h, b"");
+    assert_eq!(st, 200);
+    let v: serde_json::Value = serde_json::from_str(&body).unwrap();
+    let ids: Vec<&str> = v["kept"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|k| k["id"].as_str().unwrap())
+        .collect();
+    assert_eq!(ids, ["v1.1.0", "v1.0.0"]);
+    assert_eq!(v["kept"][1]["versions"]["seg"], "1.0.0");
+    assert_eq!(v["kept"][1]["bytes"], old.len());
+    assert_eq!(get_bytes(&a, "/v1/kept/v1.0.0"), (200, old));
+    assert_eq!(http(&a, "GET", "/v1/kept/v9.9.9", &h, b"").0, 404);
+    assert_eq!(http(&a, "GET", "/v1/kept/..", &h, b"").0, 400);
 }

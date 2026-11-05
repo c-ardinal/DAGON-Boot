@@ -21,7 +21,7 @@ const SIGN_DIR: &str = "out/sign";
 const RELEASE_DIR: &str = "out/release";
 
 /// Node ids, release names: what may become a file name.
-pub(super) fn plain(s: &str) -> bool {
+pub(crate) fn plain(s: &str) -> bool {
     (1..=32).contains(&s.len())
         && s.bytes()
             .all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_' || b == b'.')
@@ -183,6 +183,9 @@ pub fn handle(server: &Arc<Server>, req: &Request) -> Response {
         ("POST", ["release"]) => start(server, req, "release", job_release),
         ("GET", ["release", "latest"]) => release_latest(server),
         ("GET", ["release", id]) => release_get(server, id),
+        ("GET", ["kept"]) => kept_list(server),
+        ("GET", ["kept", id]) => kept_get(server, id),
+        ("POST", ["kept"]) => kept_post(server, req),
         ("GET", ["bootcore", node]) => bootcore_get(server, node),
         ("GET", ["stage0", node]) => stage0_get(server, node),
         ("GET", ["layout"]) => layout_get(server),
@@ -299,7 +302,7 @@ fn sim_read(server: &Server, req: &Request) -> Res {
 
 /// What this serve offers the page. `flash` and `doctor` join when this
 /// dagon has those commands.
-const FEATURES: [&str; 12] = [
+const FEATURES: [&str; 13] = [
     "topology_save",
     "ai_topology",
     "build",
@@ -309,6 +312,7 @@ const FEATURES: [&str; 12] = [
     "gen",
     "project",
     "bootcore",
+    "kept",
     "layout",
     "flash",
     "doctor",
@@ -1208,6 +1212,64 @@ fn release_latest(server: &Server) -> Res {
         .max()
         .ok_or_else(|| Response::error(404, "no release yet"))?;
     release_get(server, &newest.1)
+}
+
+/// The open project, its 構成 and the key its packages verify with.
+fn kept_ctx(server: &Server) -> Result<(Config, dagon_topology::Topology, [u8; 32]), Response> {
+    let cfg = config(server).map_err(|e| Response::error(500, &e))?;
+    let key = server
+        .release_key()
+        .ok_or_else(|| Response::error(409, "the open project has no public key to verify with"))?;
+    let path = inside(
+        &cfg,
+        &cfg.topology_path(None)
+            .map_err(|e| Response::error(500, &e))?,
+    )
+    .map_err(|e| Response::error(403, &e))?;
+    let t = read_topology(&cfg, &path).map_err(|e| Response::error(409, &e))?;
+    Ok((cfg, t, key))
+}
+
+/// GET /v1/kept: the packages kept in the project (out/deploy), newest
+/// version first, each with the version it gives each node.
+fn kept_list(server: &Server) -> Res {
+    let (cfg, t, key) = kept_ctx(server)?;
+    let list: Vec<Value> = crate::kept::list(&cfg, &t, &key)
+        .into_iter()
+        .map(|k| {
+            let versions: serde_json::Map<String, Value> = k
+                .versions
+                .iter()
+                .map(|(n, v)| (n.clone(), json!(v.to_string())))
+                .collect();
+            json!({ "id": k.id, "versions": versions, "bytes": k.bytes })
+        })
+        .collect();
+    Ok(json_ok(json!({ "kept": list })))
+}
+
+/// GET /v1/kept/{id}: a kept package's bytes, once they verify.
+fn kept_get(server: &Server, id: &str) -> Res {
+    if !plain(id) {
+        return Err(Response::error(400, "bad package id"));
+    }
+    let (cfg, _, key) = kept_ctx(server)?;
+    crate::kept::read(&cfg, &key, id)
+        .map(|b| Response::bytes("application/octet-stream", b))
+        .map_err(|_| Response::error(404, "no such kept package"))
+}
+
+/// POST /v1/kept (body: the package): keeps a package about to be written,
+/// once it verifies with the project's key; answers its id.
+fn kept_post(server: &Server, req: &Request) -> Res {
+    let (cfg, t, key) = kept_ctx(server)?;
+    let _lock = server
+        .files
+        .lock()
+        .map_err(|_| Response::error(500, "lock"))?;
+    crate::kept::store(&cfg, &t, &key, &req.body)
+        .map(|id| json_ok(json!({ "id": id })))
+        .map_err(|e| Response::error(422, &e))
 }
 
 /// GET /v1/bootcore/{node}: the node's signed boot core (the ROM path):

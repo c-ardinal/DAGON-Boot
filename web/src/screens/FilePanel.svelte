@@ -16,6 +16,12 @@
     onchoose?: (id: string, on: boolean) => void;
     /** Writing has started: the checks stay as they are. */
     locked?: boolean;
+    /** The kept versions to choose from (newest first); none: the header names the file. */
+    versions?: { id: string; label: string }[];
+    /** The kept version on the sheet. */
+    current?: string;
+    /** Another kept version chosen. */
+    onpick?: (id: string) => void;
   }
   interface SheetNode {
     id: string;
@@ -32,13 +38,19 @@
     onclick: () => void;
   }
 
-  let { file, minutes, go = null, others = [], nodes = [], onchoose, locked = false }: Props = $props();
+  let { file, minutes, go = null, others = [], nodes = [], onchoose, locked = false, versions = [], current, onpick }: Props = $props();
 </script>
 
 <!-- A refused package is told in a modal (its reason and next step), never as rows here. -->
 <section class="file" aria-labelledby="file-h">
   <h2 id="file-h" class="title" tabindex="-1">{FILE.heading}</h2>
-  <p class="name"><span translate="no">{file.name}</span><span class="size">{FILE.size(file.size)}</span></p>
+  {#if versions.length}
+    <select class="version" aria-label={FILE.version} disabled={locked} onchange={(e) => onpick?.(e.currentTarget.value)}>
+      {#each versions as v (v.id)}<option value={v.id} selected={v.id === current} translate="no">{v.label}</option>{/each}
+    </select>
+  {:else}
+    <p class="name"><span translate="no">{file.name}</span><span class="size">{FILE.size(file.size)}</span></p>
+  {/if}
   {#if file.verdict === 'checking'}
     <p class="muted">{FILE.checking}</p>
   {/if}
@@ -94,6 +106,22 @@
     border-radius: var(--r-s);
     font: 400 var(--t-mono-size) / var(--t-mono-lh) var(--f-mono);
     overflow-wrap: anywhere;
+  }
+  /* Button/Secondary/Small in the header: the kept version on the sheet, the others to choose. */
+  .version {
+    margin: 0 0 var(--s-5);
+    height: var(--h-button-small);
+    padding: 0 var(--s-3);
+    border: 1px solid var(--c-line);
+    border-radius: var(--r-m);
+    background: none;
+    color: var(--c-paper);
+    font: 700 var(--t-small-size) / 1 var(--f-mono);
+    cursor: pointer;
+  }
+  .version:focus-visible {
+    outline: var(--st-w-focus) solid var(--c-paper);
+    outline-offset: 2px;
   }
   .size,
   .label,

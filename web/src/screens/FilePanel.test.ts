@@ -54,3 +54,27 @@ describe('write sheet: node choice', () => {
     expect(r.every((x) => /<input[^>]*disabled/.test(x.html))).toBe(true);
   });
 });
+
+describe('write sheet: the kept versions', () => {
+  const versions = [
+    { id: 'v1.1.0', label: '1.1.0' },
+    { id: 'v1.0.0', label: '1.0.0' },
+  ];
+  test('the header picks among the kept versions, the one on the sheet selected', () => {
+    const b = html({ versions, current: 'v1.0.0' });
+    const sel = /<select[^>]*aria-label="([^"]+)"[^>]*>([\s\S]*?)<\/select>/.exec(b);
+    expect(sel?.[1]).toBe(FILE.version);
+    const opts = [...(sel?.[2] ?? '').matchAll(/<option[^>]*value="([^"]+)"[^>]*>([^<]*)<\/option>/g)].map((m) => [m[1], m[2]]);
+    expect(opts).toEqual([
+      ['v1.1.0', '1.1.0'],
+      ['v1.0.0', '1.0.0'],
+    ]);
+    expect(/<option[^>]*value="v1.0.0"[^>]*selected/.test(sel?.[2] ?? '')).toBe(true);
+  });
+
+  test('without kept versions the header names the file', () => {
+    const b = html();
+    expect(b).not.toContain('<select');
+    expect(b).toContain('desk-1.1.0.dgb');
+  });
+});

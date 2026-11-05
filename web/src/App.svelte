@@ -5,6 +5,7 @@
   import { webSerial } from './app/connect.ts';
   import { HUB_LOCKED, hubOf, view, type Action } from './app/machine.ts';
   import { Operate, waterOf, type Progress, type ReleaseFile } from './app/operate.svelte.ts';
+  import { keptChoices, type Kept } from './app/kept.ts';
   import Graph, { type Chip, type Dot } from './graph/Graph.svelte';
   import Status from './screens/Status.svelte';
   import Drawer, { type DrawerTab } from './screens/Drawer.svelte';
@@ -101,6 +102,8 @@
     latest: async () => (cli.state === 'ready' ? await cli.latestRelease() : null) ?? (await stand?.latest?.()) ?? null,
     bootcore: async (id) => (cli.state === 'ready' ? await cli.bootcore(id) : null) ?? (await stand?.bootcore?.(id)) ?? null,
     stage0: async (id) => (cli.state === 'ready' ? await cli.stage0(id) : null),
+    // Every package written through DAGON is kept in the project (serve); without serve there is nowhere to keep it.
+    keep: async (bytes) => (cli.state === 'ready' ? (await cli.keep(bytes)) !== null : true),
   });
 
   /** `dagon serve` (§8): the page is always its page; K0/K3 when it cannot be reached. */
@@ -836,6 +839,28 @@
     });
   });
   const tlNow = $derived(tlStart && PERCENT.has(op.state) ? Math.max(0, wallMs - tlStart) : Math.max(0, ...tlEvents.map((e) => e.t)));
+  /** The packages kept in the project, read again whenever another package comes onto the sheet. */
+  let kept = $state<Kept[]>([]);
+  $effect(() => {
+    const f = op.file;
+    if (f && cli.state === 'ready') untrack(() => void cli.keptList().then((l) => (kept = l)).catch(() => undefined));
+  });
+  /** The version picker: the package on the sheet (the latest build by default), then the kept ones. */
+  const fileId = $derived(op.file?.name.replace(/\.dgb$/, '') ?? '');
+  const versionChoices = $derived.by(() => {
+    const choices = keptChoices(kept);
+    if (!op.file || choices.some((c) => c.id === fileId)) return choices;
+    const given = [...new Set(Object.values(op.fileVersions).map(versionText))];
+    return [{ id: fileId, label: given.length === 1 ? given[0] : op.file.name }, ...choices];
+  });
+  async function pickVersion(id: string) {
+    if (id === fileId || stopped('file')) return;
+    const bytes = await cli.keptBytes(id);
+    if (bytes) op.takeFile(`${id}.dgb`, bytes);
+  }
+  $effect(() => {
+    if (op.keepFailed) untrack(() => (notice = { word: WRITE.keepFailed.label, error: true, detail: WRITE.keepFailed.detail }));
+  });
   /** The write sheet's Per Node rows: every node writing reaches, checked when it is written. */
   const sheetNodes = $derived(
     op.reach.map((n) => {
@@ -1292,6 +1317,9 @@
         file={op.file}
         minutes={op.targets.length * MINUTES_PER_NODE}
         nodes={sheetNodes}
+        versions={versionChoices}
+        current={fileId}
+        onpick={(id) => void pickVersion(id)}
         onchoose={(id, on) => op.choose(id, on)}
         locked={op.state !== 'L18'}
         go={band.primary

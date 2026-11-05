@@ -20,6 +20,7 @@ mod flashdev;
 // Writes outside genfs: the one guarded path for generated files.
 #[allow(clippy::disallowed_methods)]
 mod genfs;
+mod kept;
 mod nodebuild;
 // Writes outside genfs: implements the atomic write genfs and the commands use.
 #[allow(clippy::disallowed_methods)]

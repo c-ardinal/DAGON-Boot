@@ -38,7 +38,7 @@ Use these words with the developer, and count in ノード ("3 ノード").
 
 `dagon --help` lists every command, and `dagon <command> --help` its
 arguments and options; the same reference is the Command line page of
-DAGON's documentation (https://c-ardinal.github.io/DAGON-Boot/doc/reference/cli/).
+DAGON's documentation (Reference, Command line).
 The ones a project uses most: `dagon topo check topology.yaml`, `dagon gen`,
 `dagon build`, `dagon serve` (DAGON Console), `dagon flash <id>` (a node's
 first write) and `dagon deploy`.

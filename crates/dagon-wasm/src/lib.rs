@@ -110,6 +110,8 @@ pub fn release_versions(bundle: &[u8]) -> Vec<u32> {
     let m = b.manifest();
     (0..m.entry_count())
         .map(|i| m.entry(i))
+        // The version a node's app gets (its boot core may carry another).
+        .filter(|e| e.image_kind == dagon_format::header::image_kind::APP)
         .flat_map(|e| [u32::from(e.node_index), e.version.raw()])
         .collect()
 }

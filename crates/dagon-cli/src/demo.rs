@@ -137,17 +137,22 @@ pub fn desk(key: &KeyPair, fail: Option<&str>, seed: u64) -> Result<SimHub, Stri
     Ok(h)
 }
 
-/// The desk-demo 構成's package giving every node `v`, signed with `key`.
+/// The demo 構成's package giving every node `v`, signed with `key`.
 pub(crate) fn package(key: &KeyPair, v: Version) -> Result<Vec<u8>, String> {
+    package_with(key, v, v)
+}
+
+/// The demo 構成's package: every app `v`, the 子機's boot core `core`.
+pub(crate) fn package_with(key: &KeyPair, v: Version, core: Version) -> Result<Vec<u8>, String> {
     let t = dagon_topology::parse_str(YAML).map_err(|e| e.to_string())?;
     let bin = dagon_topology::compile_str(YAML).map_err(|e| e.to_string())?;
     let images = [
         img(key, &SEG, 0, v, SEG_LEN)?,
         img(key, &SEG, 1, v, SEG_LEN)?,
-        // The 子機's boot core of the same version: written when the one it
-        // runs is of another version.
-        img_of(key, &SEG, image_kind::BOOTCORE, 0, v, CORE_LEN)?,
-        img_of(key, &SEG, image_kind::BOOTCORE, 1, v, CORE_LEN)?,
+        // The 子機's boot core: written when the one it runs is of another
+        // version.
+        img_of(key, &SEG, image_kind::BOOTCORE, 0, core, CORE_LEN)?,
+        img_of(key, &SEG, image_kind::BOOTCORE, 1, core, CORE_LEN)?,
         img(key, &WATCH, 0, v, WATCH_LEN)?,
         img(key, &HUB, 0, v, HUB_LEN)?,
         img(key, &HUB, 1, v, HUB_LEN)?,
@@ -212,7 +217,7 @@ pub fn project(dir: &Path, uplink: Medium) -> Result<(PathBuf, KeyPair), String>
           signing_key = \"demo-key/dagon-signing.key\"\n",
     )?;
     write(&format!("out/release/{RELEASE}.dgb"), &package(&key, NEW)?)?;
-    // The desk runs OLD, as if written through DAGON: it is kept like any written package.
+    // The simulated nodes run OLD, as if written through DAGON: it is kept like any written package.
     write(
         &format!("{}/v{OLD}.dgb", crate::kept::DIR),
         &package(&key, OLD)?,
@@ -449,7 +454,7 @@ mod tests {
     }
 
     #[test]
-    fn the_demo_keeps_the_version_its_desk_runs() {
+    fn the_demo_keeps_the_version_its_nodes_run() {
         let dir = std::env::temp_dir().join(format!("dagon-demo-kept-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         let (config, key) = project(&dir, Medium::UsbCdc).unwrap();
@@ -464,7 +469,7 @@ mod tests {
     }
 
     #[test]
-    fn a_kept_past_version_is_written_back_to_the_whole_desk() {
+    fn a_kept_past_version_is_written_back_to_every_node() {
         const SPEED: f64 = 50.0;
         let dir = std::env::temp_dir().join(format!("dagon-demo-back-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);

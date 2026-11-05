@@ -45,7 +45,7 @@ pub(crate) fn id_of(versions: &BTreeMap<String, Version>) -> String {
     format!("v{newest}-{}", dagon_sign::to_hex(&digest[..4]))
 }
 
-/// Node id → the newest version `bundle` gives it, once it verifies under
+/// Node id → the newest app version `bundle` gives it, once it verifies under
 /// `pubkey`.
 pub(crate) fn versions_of(
     t: &Topology,
@@ -60,6 +60,10 @@ pub(crate) fn versions_of(
     let mut out = BTreeMap::new();
     for i in 0..m.entry_count() {
         let e = m.entry(i);
+        // A node's version is its app's; its boot core has its own.
+        if e.image_kind != dagon_format::header::image_kind::APP {
+            continue;
+        }
         if let Some(n) = t.nodes.get(e.node_index as usize) {
             let v = out.entry(n.id.clone()).or_insert(e.version);
             *v = (*v).max(e.version);
@@ -200,6 +204,16 @@ mod tests {
         );
         assert_eq!(l[1].bytes, old.len());
         assert_eq!(read(&cfg, &key.pk, "v1.0.0").unwrap(), old);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_package_is_named_and_listed_by_its_app_versions_not_its_boot_cores() {
+        let (dir, cfg, t, key) = area("core");
+        let pkg = crate::demo::package_with(&key, V100, Version::new(2, 0, 0)).unwrap();
+        assert_eq!(store(&cfg, &t, &key.pk, &pkg).unwrap(), "v1.0.0");
+        let l = list(&cfg, &t, &key.pk);
+        assert_eq!(l[0].versions["seg"], V100);
         let _ = std::fs::remove_dir_all(&dir);
     }
 

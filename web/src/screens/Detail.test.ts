@@ -58,17 +58,21 @@ describe('node detail: VERSION under 詳しく見る', () => {
     expect(row(body, 'boot_core[1]')).toBe('state 1 · 1.1.0');
   });
 
-  test('an agent that predates VERSION, or a stage0 without its mark, is 不明', () => {
-    expect(row(detail(answered(PORT_SELF_BOOT, null)), 'stage0')).toBe(DETAIL.unknown);
-    const unmarked = { ...VERSION, stage0: null };
-    expect(row(detail(answered(PORT_SELF_BOOT, unmarked)), 'stage0')).toBe(DETAIL.unknown);
+  test('an agent that predates VERSION: every VERSION value is 不明', () => {
+    const body = detail(answered(PORT_SELF_BOOT, null));
+    for (const key of ['stage0', 'boot_core[0]', 'boot_core[1]']) expect(row(body, key), key).toBe(DETAIL.unknown);
   });
 
-  test('an MCU booted by its vendor 2nd stage has no stage0', () => {
-    const v = { ...VERSION, stage0: null, bootCore: null, coreSlots: null };
-    const body = detail(answered(PORT_VENDOR_STAGE2, v));
-    expect(row(body, 'stage0')).toBe(DETAIL.none);
-    expect(row(body, 'boot_core[0]')).toBeNull();
+  test('a value the node left out is 不明 (a stage0 without its mark, unread boot core slots)', () => {
+    const body = detail(answered(PORT_SELF_BOOT, { ...VERSION, stage0: null, bootCore: null, coreSlots: null }));
+    for (const key of ['stage0', 'boot_core[0]', 'boot_core[1]']) expect(row(body, key), key).toBe(DETAIL.unknown);
+  });
+
+  test('an MCU booted by its vendor 2nd stage has no stage0 and no boot core: なし', () => {
+    for (const v of [{ ...VERSION, stage0: null, bootCore: null, coreSlots: null }, null]) {
+      const body = detail(answered(PORT_VENDOR_STAGE2, v));
+      for (const key of ['stage0', 'boot_core[0]', 'boot_core[1]']) expect(row(body, key), key).toBe(DETAIL.none);
+    }
   });
 
   test('not read yet: no row', () => {

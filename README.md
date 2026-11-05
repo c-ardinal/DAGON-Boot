@@ -183,7 +183,10 @@ public key from `dagon.toml` embedded. A node's version is the `version`
 in its crate's `Cargo.toml` (its boot core's, in its boot crate's
 `Cargo.toml`); raise it there for every change you write. A `version` in
 `[build.<id>]` or `--version` is not needed; if given, it must be the same
-or the command stops and says which.
+or the command stops and says which. A node's boot core goes into the
+package with its app, and the node writes it only when its version differs
+from the boot core it runs: a changed boot core is written once its version
+is raised, as with apps.
 
 ### 5. Write the first version (once per node)
 

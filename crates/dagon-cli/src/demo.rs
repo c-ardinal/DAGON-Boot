@@ -34,6 +34,7 @@ const NEW: Version = Version::new(1, 1, 0);
 /// its real time.
 const HUB_LEN: usize = 128 * 1024;
 const SEG_LEN: usize = 48 * 1024;
+const CORE_LEN: usize = 16 * 1024;
 const WATCH_LEN: usize = 48 * 1024;
 const SPEEDS: std::ops::RangeInclusive<f64> = 0.1..=20.0;
 /// The 子機 a failure can be set on.
@@ -63,21 +64,37 @@ const WATCH: Board = Board {
 };
 
 fn img(key: &KeyPair, b: &Board, slot: u8, v: Version, len: usize) -> Result<Vec<u8>, String> {
-    let (flags, caps) = image::default_bits(image_kind::APP);
+    img_of(key, b, image_kind::APP, slot, v, len)
+}
+
+fn img_of(
+    key: &KeyPair,
+    b: &Board,
+    kind: u8,
+    slot: u8,
+    v: Version,
+    len: usize,
+) -> Result<Vec<u8>, String> {
+    let (flags, caps) = image::default_bits(kind);
+    let min_bootcore = if kind == image_kind::APP {
+        Version::new(1, 0, 0)
+    } else {
+        Version::new(0, 0, 0)
+    };
     let spec = ImageSpec {
-        image_kind: image_kind::APP,
+        image_kind: kind,
         port_kind: image::port_kind_of(b.port).ok_or("port kind")?,
         mcu_id: image::mcu_id_of(b.mcu).ok_or("mcu")?,
-        slot: image::slot(b.mcu, image_kind::APP, slot).ok_or("slot")?,
+        slot: image::slot(b.mcu, kind, slot).ok_or("slot")?,
         version: v,
         build_flags: flags,
         release_seq: 1,
-        min_bootcore_version: Version::new(1, 0, 0),
+        min_bootcore_version: min_bootcore,
         target_tag: target_tag(b.tag),
         proto_version: 1,
         capabilities: caps,
     };
-    let salt = b.tag.len() as u8 ^ v.minor() ^ (slot << 4);
+    let salt = b.tag.len() as u8 ^ v.minor() ^ (slot << 4) ^ kind;
     let body: Vec<u8> = (0..len)
         .map(|i| (i as u8).wrapping_mul(31) ^ salt)
         .collect();
@@ -127,6 +144,10 @@ pub(crate) fn package(key: &KeyPair, v: Version) -> Result<Vec<u8>, String> {
     let images = [
         img(key, &SEG, 0, v, SEG_LEN)?,
         img(key, &SEG, 1, v, SEG_LEN)?,
+        // The 子機's boot core of the same version: written when the one it
+        // runs is of another version.
+        img_of(key, &SEG, image_kind::BOOTCORE, 0, v, CORE_LEN)?,
+        img_of(key, &SEG, image_kind::BOOTCORE, 1, v, CORE_LEN)?,
         img(key, &WATCH, 0, v, WATCH_LEN)?,
         img(key, &HUB, 0, v, HUB_LEN)?,
         img(key, &HUB, 1, v, HUB_LEN)?,
@@ -469,9 +490,18 @@ mod tests {
                 .collect()
         };
         assert_eq!(run(&mut h, &new), ["done 1.1.0"; 3]);
+        let core = |h: &mut Host<Link, Clock>| {
+            let cs = dagon_sim::block_on(
+                h.boot_core_status(dagon_host::Target::I2c(dagon_sim::NODE_I2C_ADDR)),
+            )
+            .unwrap();
+            cs.slots[usize::from(cs.active)].version
+        };
+        assert_eq!(core(&mut h), NEW, "the 子機's boot core went with it");
         crate::kept::store(&cfg, &t, &key.pk, &new).unwrap();
         let back = crate::kept::read(&cfg, &key.pk, "v1.0.0").unwrap();
         assert_eq!(run(&mut h, &back), ["done 1.0.0"; 3]);
+        assert_eq!(core(&mut h), OLD);
         let _ = std::fs::remove_dir_all(&dir);
     }
 

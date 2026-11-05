@@ -351,7 +351,7 @@ impl<T: Transport, C: Clock> Host<T, C> {
 
     /// The node's boot core from the release, before its app (an app may
     /// need the newer core): when the release has boot core images for the
-    /// node and the running core is none of them, the image for the idle
+    /// node and the running core's version is none of theirs, the image for the idle
     /// core slot goes in, is set pending, the node reboots, and the new
     /// core must be the confirmed one when the app (`app`, unchanged)
     /// answers again. `true` when a core was written.
@@ -372,11 +372,13 @@ impl<T: Transport, C: Clock> Host<T, C> {
         }
         let cs = self.boot_core_status(to).await?;
         let running = cs.slots.get(usize::from(cs.active)).copied();
+        // By version, as apps: a changed boot core is written only when its
+        // version (its boot crate's) was raised.
         let installed = cores.iter().any(|img| {
             img.get(..HEADER_SIZE)
                 .and_then(|h| <&[u8; HEADER_SIZE]>::try_from(h).ok())
-                .map(dagon_format::header::header_digest16)
-                .is_some_and(|d| running.is_some_and(|r| r.digest16 == d))
+                .and_then(|h| ImageHeader::parse(h).ok())
+                .is_some_and(|h| running.is_some_and(|r| r.version == h.version))
         });
         if installed {
             return Ok(false);

@@ -253,7 +253,8 @@ pub(crate) fn confirm(listing: &str, input: &mut dyn BufRead) -> bool {
 
 /// Flag of `deploy` (and `flash`): do not ask before writing.
 pub(crate) const YES: &str = "--yes";
-/// `dagon deploy --bootcore`: the nodes' boot cores go into the release too.
+/// `dagon deploy --bootcore`: every node with boot core slots must have its
+/// boot crate (without it, nodes without one are deployed without a core).
 pub(crate) const BOOTCORE: &str = "--bootcore";
 
 /// The key the firmware embeds: the build key of dagon.toml or
@@ -273,8 +274,9 @@ pub(crate) fn firmware_key(cfg: &Config, key: &KeyPair) -> Result<[u8; 32], Stri
 
 /// `dagon deploy [<id>...] [--version x.y.z] [--yes] [--bootcore]
 /// [--port <name>] [--topology <yaml>] [--key <file>] [--config <file>]`
-/// (`--bootcore`: each node's boot core too, for every boot core slot its
-/// MCU definition declares; nodes without boot core slots get none).
+/// (each node's boot core goes in too, from its boot crate, for every boot
+/// core slot its MCU definition declares; `--bootcore` makes a missing boot
+/// crate an error).
 pub fn command(args: &[&str]) -> Result<(), String> {
     let yes = args.contains(&YES);
     let with_cores = args.contains(&BOOTCORE);
@@ -315,14 +317,20 @@ pub fn command(args: &[&str]) -> Result<(), String> {
         .map(|n| nodebuild::last_build(&cfg, n).map(|(_, e)| (n.clone(), versions[n], e)))
         .collect::<Result<Vec<_>, _>>()?;
     let elfs = release_inputs(&cfg, &t, elfs)?;
+    // Every node with a boot crate gets its boot core into the package; the
+    // node takes it only when its version differs from the running one.
     let mut cores = Vec::new();
-    if with_cores {
+    {
         let reg = crate::defs::registry(&cfg)?;
         let hex = dagon_sign::to_hex(&fw_key);
         for id in &nodes {
             let n = t
                 .node(id)
                 .ok_or_else(|| format!("no node '{id}' in the topology"))?;
+            let boot = cfg.base.join(crate::extgen::BOOT_CRATES).join(id);
+            if !with_cores && !boot.join("Cargo.toml").is_file() {
+                continue;
+            }
             let built = crate::flash::build_core_slots(
                 &cfg,
                 &reg,

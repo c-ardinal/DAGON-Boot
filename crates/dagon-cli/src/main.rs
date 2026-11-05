@@ -102,8 +102,10 @@ Usage:
                                      go; each node's version is its crate's Cargo.toml
                                      version (--version must equal it); lists node ->
                                      version and asks first; keeps the package in out/deploy;
-                                     --bootcore also builds each node's boot core for its
-                                     boot core slots (the node takes it before its app)
+                                     each node's boot core goes in from its boot crate;
+                                     a node writes it (before its app) only when its version
+                                     differs from the running boot core's; --bootcore
+                                     makes a missing boot crate an error
   dagon flash <id> [--dry-run] [--yes] [--probe <vid:pid[:serial]> | --port <port> |
         --drive <path>] [--out <dir>] [--topology <yaml>] [--key <file>]
                                      first write as the node's MCU definition says (UF2

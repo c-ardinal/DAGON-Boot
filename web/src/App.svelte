@@ -982,7 +982,9 @@
   /** The write sheet holds the emphasis: the header's actions step back while it is open. */
   const sheetHolds = $derived(mode === 'operate' && showFile && op.file !== null);
   /** 書き込む: the 親機 answered nothing (L07) → writing directly over USB; otherwise the next step of writing through DAGON. */
-  const writeAction = $derived(op.state === 'L07' ? null : (band.primary?.action ?? null));
+  const writeAction = $derived(
+    op.state === 'L07' ? null : op.state === 'L12' && !op.latestMissing && band.secondary.some((b) => b.action === 'useLatest') ? 'useLatest' : (band.primary?.action ?? null),
+  );
   const writeControl = $derived(writeAction ? CONTROL_OF[writeAction] : 'flash');
   const writeOff = $derived(op.state === 'L03' || (op.state !== 'L07' && (writeAction === null || !RUNS.has(writeAction))));
   function write() {
@@ -1179,7 +1181,21 @@
 
 {#snippet operateRight()}
   {#if showFile && op.file}
-      <FilePanel file={op.file} targets={op.targets.length} minutes={op.targets.length * MINUTES_PER_NODE} diff={fileDiff} />
+      <FilePanel
+        file={op.file}
+        targets={op.targets.length}
+        minutes={op.targets.length * MINUTES_PER_NODE}
+        diff={fileDiff}
+        go={band.primary
+          ? {
+              label: band.primary.action === 'update' ? fillIn(WRITE.go, { n: op.targets.length }) : band.primary.label,
+              off: !RUNS.has(band.primary.action),
+              control: CONTROL_OF[band.primary.action],
+              onclick: () => band.primary && act(band.primary.action),
+            }
+          : null}
+        others={band.secondary.map((b) => ({ label: b.label, off: !RUNS.has(b.action), control: CONTROL_OF[b.action], onclick: () => act(b.action) }))}
+      />
     {:else}
       <Detail
         config={op.config}

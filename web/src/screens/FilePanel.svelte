@@ -11,9 +11,19 @@
     minutes?: number;
     /** §7.6: how the file's 構成 differs (L17); empty otherwise. */
     diff?: DiffRow[];
+    /** The sheet's one primary (while the sheet is open it holds the emphasis): writing, or the next step. */
+    go?: Act | null;
+    /** The sheet's other actions (another file, fixing the 構成 in 定義), outlined, before the primary. */
+    others?: Act[];
+  }
+  interface Act {
+    label: string;
+    off: boolean;
+    control?: string;
+    onclick: () => void;
   }
 
-  let { file, targets, minutes, diff = [] }: Props = $props();
+  let { file, targets, minutes, diff = [], go = null, others = [] }: Props = $props();
 
   /** dagon-host checks the source first, then the configuration: a source refusal leaves the configuration unchecked. */
   const rows = $derived.by((): [string, string, boolean][] => {
@@ -68,6 +78,14 @@
     <p class="pair">
       <span class="label">{FILE.targets}</span> {targets}{#if minutes}&emsp;<span class="label">{PLAN.estimateLabel}</span> {PLAN.minutes(minutes)}{/if}
     </p>
+  {/if}
+  {#if go || others.length}
+    <div class="acts">
+      {#each others as o (o.label)}
+        <button class="other" data-control={o.control} aria-disabled={o.off} onclick={() => !o.off && o.onclick()}>{o.label}</button>
+      {/each}
+      {#if go}<button class="go" data-control={go.control} aria-disabled={go.off} onclick={() => !go.off && go.onclick()}>{go.label}</button>{/if}
+    </div>
   {/if}
 </section>
 
@@ -157,6 +175,40 @@
   }
   .diff td:last-child {
     color: var(--c-signal);
+  }
+  /* Button/Primary: the sheet's one emphasised action, full width (0S-3 sheet). */
+  .acts {
+    display: grid;
+    gap: var(--s-2);
+    margin-top: var(--s-5);
+  }
+  .go,
+  .other {
+    width: 100%;
+    height: var(--h-button);
+    border: 0;
+    border-radius: var(--r-m);
+    background: var(--c-accent);
+    color: var(--c-ink);
+    font: 700 var(--t-body) / 1 var(--f-ja);
+    cursor: pointer;
+  }
+  /* Button/Secondary: the same shape, outlined. */
+  .other {
+    border: 1px solid var(--c-line);
+    background: none;
+    color: var(--c-paper);
+  }
+  .go[aria-disabled='true'],
+  .other[aria-disabled='true'] {
+    background: var(--c-layer-2);
+    color: var(--c-muted);
+    cursor: default;
+  }
+  .go:focus-visible,
+  .other:focus-visible {
+    outline: var(--st-w-focus) solid var(--c-paper);
+    outline-offset: 2px;
   }
   .pair {
     margin-top: var(--s-5);

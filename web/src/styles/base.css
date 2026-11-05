@@ -170,6 +170,103 @@ button {
   }
 }
 
+/* Button/Primary/Header and Button/Secondary/Header: a 28 px body (2560: 44) inside a
+   44 px hit area made of invisible padding; same shape, only fill and colour differ. */
+.button-primary-header,
+.button-secondary-header {
+  display: inline-flex;
+  flex: none;
+  padding: var(--p-hit) 0;
+  border: 0;
+  background: none;
+  cursor: pointer;
+}
+.button-primary-header > span,
+.button-secondary-header > span {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--s-2);
+  height: var(--h-button-header);
+  padding: 0 var(--s-5);
+  border: 1px solid transparent;
+  border-radius: var(--r-m);
+  font: 700 var(--t-body) / 1 var(--f-ja);
+  white-space: nowrap;
+  transition: background-color var(--dur-feedback) ease;
+}
+.button-primary-header > span {
+  background: var(--c-accent);
+  color: var(--c-ink);
+}
+.button-secondary-header > span {
+  border-color: var(--c-line);
+  color: var(--c-paper);
+}
+@media (hover: hover) and (pointer: fine) {
+  .button-primary-header:not([aria-disabled='true']):hover > span {
+    background: var(--c-accent-hover);
+  }
+  .button-secondary-header:not([aria-disabled='true']):hover > span {
+    background: var(--c-layer-1);
+  }
+}
+.button-primary-header:not([aria-disabled='true']):active > span {
+  background: var(--c-accent-press);
+}
+/* Unavailable (or a modal or sheet holds the emphasis): L2 fill, muted words; still focusable. */
+.button-primary-header[aria-disabled='true'] > span,
+.button-secondary-header[aria-disabled='true'] > span {
+  border-color: transparent;
+  background: var(--c-layer-2);
+  color: var(--c-muted);
+  cursor: default;
+}
+.button-primary-header:focus-visible,
+.button-secondary-header:focus-visible {
+  outline: none;
+}
+.button-primary-header:focus-visible > span,
+.button-secondary-header:focus-visible > span {
+  outline: var(--st-w-focus) solid var(--c-paper);
+  outline-offset: 2px;
+}
+
+/* Button/Icon: ghost, a 28 px state layer (2560: 44) in a 44 px hit area. */
+.button-icon {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  padding: var(--p-hit);
+  border: 0;
+  border-radius: var(--r-full);
+  background: none;
+  color: var(--c-paper);
+  cursor: pointer;
+}
+.button-icon > .layer {
+  display: inline-flex;
+  padding: var(--p-layer);
+  border-radius: var(--r-full);
+  transition: background-color var(--dur-feedback) ease;
+}
+@media (hover: hover) and (pointer: fine) {
+  .button-icon:not([aria-disabled='true']):hover > .layer {
+    background: var(--c-layer-2);
+  }
+}
+.button-icon[aria-disabled='true'] {
+  color: var(--c-muted);
+  cursor: default;
+}
+.button-icon:focus-visible {
+  outline: none;
+}
+.button-icon:focus-visible > .layer {
+  outline: var(--st-w-focus) solid var(--c-paper);
+}
+
 .chip {
   display: inline-flex;
   align-items: center;

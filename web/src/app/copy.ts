@@ -434,15 +434,6 @@ export const STATUS = {
   saved: '保存済み',
 } as const;
 
-/** The bar's flow: the steps from 構成 to 更新, each its own place to work. */
-export const FLOW = {
-  label: '作業の手順（構成から更新まで）',
-  steps: { define: '構成', project: 'プロジェクト', build: 'ビルド', flash: '書き込み', update: '更新' },
-  problems: (n: number) => `問題 ${n}`,
-  unsupported: (n: number) => `◇ 未対応 ${n}`,
-  responding: (n: number, of: number) => `親機 応答 ${n}/${of}`,
-} as const;
-
 /** The canvas controls bottom-right. */
 export const ZOOM = {
   label: '表示の操作',
@@ -1164,3 +1155,120 @@ export const MENU = {
   restartConfirm: '消して最初からやり直す',
   cancel: 'やり直しをやめる',
 } as const;
+
+/** Fills {name} slots in a copy string. */
+export const fill = (s: string, v: Record<string, string | number>): string => s.replace(/\{(\w+)\}/g, (m, k: string) => (k in v ? String(v[k]) : m));
+
+export const SKELETON = {
+  make: '雛形を作る',
+  disabled: '問題あり',
+  title: '雛形を作る',
+  state: {
+    running: '… 作成中',
+    done: '✓ 作成済',
+    failed: '! 失敗',
+  },
+  row: {
+    waiting: '○ 待ち',
+    notMade: '○ 未作成',
+  },
+  where: '作った場所',
+  next: {
+    '1': 'エディタで、各ノードの src/app.rs にアプリのコードを書く（main.rs と wiring.rs は DAGON が作るので、触らなくてよい）',
+    '2': '運用 で「ビルドする」、続けて「書き込む」',
+    heading: '次にすること',
+  },
+  copyPath: '場所をコピー',
+  fail: {
+    reason: '{path} に書き込めません。フォルダが読み取り専用です。',
+    fix: 'フォルダの読み取り専用を外してから、「もう一度作る」を押します。作成済みのノードはそのまま残ります。',
+  },
+  retry: 'もう一度作る',
+  cancel: '中止',
+} as const;
+
+export const NOTICE = {
+  close: '閉じる',
+  more: '詳しく見る',
+  reason: '理由',
+  fix: '直し方',
+  after: 'このあと',
+} as const;
+
+export const BUILD = {
+  run: 'ビルドする',
+  title: 'ビルドする',
+  state: {
+    running: '… ビルド中',
+    done: '✓ ビルド済',
+    failed: '! ビルド失敗',
+  },
+  toast: {
+    done: 'ビルド済 {n} ノード',
+  },
+  fail: {
+    fix: 'エディタで app.rs の {line} 行目を直してから、もう一度ビルドします。ほかの {n} ノードはビルド済みです。',
+  },
+  retry: 'もう一度ビルドする',
+  askAgent: '失敗の理由を聞く',
+} as const;
+
+export const WRITE = {
+  run: '書き込む',
+  go: '{n} ノードへ書き込む',
+  toast: {
+    done: '書き込み済み {n} ノード',
+  },
+  state: {
+    writing: '… 書き込み中',
+    done: '✓ 書き込み済み',
+    rolledBack: '▲ 戻した',
+  },
+  retry: 'もう一度書き込む',
+  rolled: {
+    reason: '新しいバージョンで起動を続けられず、前のバージョン {version} に戻りました。ノードは動いています。',
+    next: 'アプリを直してビルドしてから、もう一度書き込んでください。',
+  },
+  factory: {
+    first: '◇ 初回',
+    intro: '{node} の DAGON が応答しないため、USB で直接書き込みます。初めての書き込みと、DAGON が消えたときだけの手順です。',
+    steps: '手順',
+    drive: 'ドライブ',
+    waiting: '… 待機中',
+    after: '書き終わると、DAGON 経由で残りのノードへ続けます。DAGON の無い子機があれば、その子機をつなぐ手順を続けて出します。',
+    cancel: '中止',
+    childIntro: '{node} は親機から届かないため、この子機を直接つないで書き込んでいます。',
+    howToConnect: 'つなぎ方',
+    cancelLocked: '書き込み中',
+  },
+} as const;
+
+export const STATE = {
+  idle: '未接続',
+  alive: '応答あり',
+  silent: '応答なし',
+  busy: '作業中',
+  attention: '要確認',
+  error: 'エラー',
+} as const;
+
+export const CONN = {
+  chip: '● USB 接続中',
+  status: {
+    connected: '● 接続済 {node}（親機）· {via}',
+    none: '○ 未接続',
+    child: '● 接続済 {node}（子機）· {via}',
+  },
+  send: {
+    disabled: '親機が未接続',
+  },
+  toast: {
+    connected: '接続済 {node}',
+    lost: '接続が切れた {node}',
+  },
+} as const;
+
+export const RECOVER = {
+  fix: '電源と配線を確かめてから、復旧します。復旧中は構成を変えられません。',
+} as const;
+

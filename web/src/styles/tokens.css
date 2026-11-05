@@ -101,6 +101,98 @@
   --dur-ui: 200ms;
   --dur-line: 260ms;
   --dur-reduced: 150ms;
+
+  /* The Console design's own tokens, same names and values as the design file
+     (desktop; the 2560 px values follow below). */
+  --c-water: #123a4c;
+  --c-attention: #f5a524;
+  --c-progress: #b48cf2;
+  --c-accent-hover: #6ec9f4;
+  --c-accent-press: #2a9fd6;
+  --c-signal-hover: #ff7467;
+  --c-signal-press: #e0402f;
+  /* node and link states (one meaning per channel) */
+  --st-idle: var(--c-line);
+  --st-alive: var(--c-muted);
+  --st-silent: var(--c-line);
+  --st-busy: var(--c-progress);
+  --st-attention: var(--c-attention);
+  --st-error: var(--c-signal);
+  --st-w-thin: 1px;
+  --st-w-strong: 2px;
+  --st-w-focus: 3px;
+  --dur-orbit: 1600ms;
+  --dur-feedback: 100ms;
+  --busy-light: 48px;
+  /* type roles (px) */
+  --t-display: 160px;
+  --t-version: 20px;
+  --t-title: 28px;
+  --t-heading: 20px;
+  --t-body: 16px;
+  --t-small: 14px;
+  --t-caption: 12px;
+  --t-mono: 13px;
+  /* component sizes */
+  --h-bar: 44px;
+  --h-status: 32px;
+  --h-control: 28px;
+  --h-button: 44px;
+  --h-button-small: 32px;
+  --h-button-header: 28px;
+  --h-text-button: 24px;
+  --h-row: 44px;
+  --h-drawer: 176px;
+  --m-edge: 24px;
+  --p-hit: 8px;
+  --p-layer: 4px;
+  --p-toggle: 4px;
+  --p-bar-gap: 24px;
+  --p-icon-gap: 24px;
+  --i-s: 16px;
+  --i-m: 20px;
+  --i-l: 24px;
+  --i-state: 16px;
+  --w-modal: 560px;
+  --w-toast: 360px;
+  --w-sheet: 340px;
+  --w-parts: 240px;
+  --w-bubble: 360px;
+}
+
+/* The 2560 px theme of the design (wqhd). */
+@media (min-width: 2560px) {
+  :root {
+    --t-version: 28px;
+    --t-title: 44px;
+    --t-heading: 28px;
+    --t-body: 20px;
+    --t-small: 16px;
+    --t-caption: 14px;
+    --t-mono: 18px;
+    --h-bar: 68px;
+    --h-status: 48px;
+    --h-control: 44px;
+    --h-button: 68px;
+    --h-button-small: 48px;
+    --h-button-header: 44px;
+    --h-text-button: 36px;
+    --h-drawer: 264px;
+    --m-edge: 32px;
+    --p-hit: 12px;
+    --p-layer: 8px;
+    --p-bar-gap: 32px;
+    --p-icon-gap: 32px;
+    --i-s: 20px;
+    --i-m: 28px;
+    --i-l: 32px;
+    --i-state: 20px;
+    --w-modal: 800px;
+    --w-toast: 480px;
+    --w-sheet: 488px;
+    --w-parts: 344px;
+    --w-bubble: 516px;
+  }
 }
 
 /* Phones and touch screens: every control is at least 44 × 44 px (viewport-matrix touch-target-44). */

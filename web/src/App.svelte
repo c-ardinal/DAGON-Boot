@@ -1,7 +1,7 @@
 <script lang="ts">
   import { tick, untrack } from 'svelte';
   import { bandOf } from './app/band.ts';
-  import { AGENT, ANNOUNCE, BAND, BUTTON, CANVAS, DEFINE, DIFF, DRAWER, JOBS, FLOW, HUB, LOCK, SHEET, STATUS, ZOOM, HUB_TOGGLE, MODE, NODE, ORDER, PLAN, PRODUCT, RECONNECT, SAVE, SKIP, STEP, TIME } from './app/copy.ts';
+  import { AGENT, ANNOUNCE, BAND, BUILD, BUTTON, CANVAS, DEFINE, DIFF, DRAWER, JOBS, SKELETON, WRITE, HUB, LOCK, SHEET, STATUS, ZOOM, HUB_TOGGLE, MODE, NODE, ORDER, PLAN, PRODUCT, RECONNECT, SAVE, SKIP, STEP, TIME } from './app/copy.ts';
   import { webSerial } from './app/connect.ts';
   import { HUB_LOCKED, hubOf, view, type Action } from './app/machine.ts';
   import { Operate, waterOf, type Progress } from './app/operate.svelte.ts';
@@ -953,6 +953,18 @@
     void tick().then(() => (band.primary ? primaryEl : nextEl)?.focus());
   });
 
+  /** The write sheet holds the emphasis: the header's actions step back while it is open. */
+  const sheetHolds = $derived(mode === 'operate' && showFile && op.file !== null);
+  /** 書き込む: the 親機 answered nothing (L07) → writing directly over USB; otherwise the next step of writing through DAGON. */
+  const writeAction = $derived(op.state === 'L07' ? null : (band.primary?.action ?? null));
+  const writeControl = $derived(writeAction ? CONTROL_OF[writeAction] : 'flash');
+  const writeOff = $derived(op.state === 'L03' || (op.state !== 'L07' && (writeAction === null || !RUNS.has(writeAction))));
+  function write() {
+    if (writeOff || sheetHolds) return;
+    if (writeAction === null) return goStep('flash');
+    act(writeAction);
+  }
+
   function act(a: Action) {
     const c = CONTROL_OF[a];
     if (c && stopped(c)) return;
@@ -1048,70 +1060,14 @@
   {/if}
 {/snippet}
 
-{#snippet flow()}
-  {@const errs = problemCount}
-  {@const step = (id: 'define' | 'project' | 'build' | 'flash' | 'update') => id}
-  <div class="toolbar" role="toolbar" aria-label={FLOW.label}>
-    <div class="flow">
-      {#each [['define', '01'], ['project', '02'], ['build', '03'], ['flash', '04'], ['update', '05']] as const as [id, no], i (id)}
-        {@const done = id === 'define' ? d.doc.topo.nodes.length > 0 && errs === 0 : id === 'update' && op.state === 'L23'}
-        {@const here = id === 'update' ? mode === 'operate' : mode === 'define' && (id === 'define' ? cliPanel === null : cliPanel === (id === 'build' ? 'release' : id))}
-        {#if i}<span class="dash" aria-hidden="true"></span>{/if}
-        <button
-          class="tb"
-          class:done
-          class:here
-          aria-current={here ? 'step' : undefined}
-          data-control={id === 'project' ? 'gen' : id === 'build' ? 'build' : id === 'flash' ? 'flash' : undefined}
-          onclick={() => goStep(step(id))}
-        >
-          <span class="no">{done ? '✓' : no}</span><span class="lbl">{FLOW.steps[id]}</span>
-          {#if id === 'define' && errs}<span class="st err">{FLOW.problems(errs)}</span>{:else if id === 'define' && d.notYet}<span class="st">{FLOW.unsupported(d.notYet)}</span>{/if}
-          {#if id === 'update' && PERCENT.has(op.state)}<span class="st">{op.overall}%</span>{/if}
-        </button>
-      {/each}
-    </div>
-    {#if mode === 'define'}
-      {@const empty = d.doc.topo.nodes.length === 0}
-      {@const firstError = d.problems.find((p) => p.severity === 'error')}
-      {#if op.fileTopology && op.state === 'L17'}
-        <button class="tb side" onclick={() => void importFileTopology()}>{DEFINE.importFileTopology}</button>
-      {/if}
-      {#if empty}
-        <button class="tb primary" data-control="connect" bind:this={primaryEl} onclick={() => act('connectDiscover')}>{BUTTON.connectDiscover}</button>
-      {:else if firstError}
-        <button class="tb primary" data-control="edit" bind:this={primaryEl} onclick={() => d.fix(firstError)}>{DEFINE.fix}</button>
-      {:else if d.operable === 'ok'}
-        <!-- Optional: updating sends the 構成 before it updates. -->
-        <button class="tb side" data-control="connect" onclick={() => void sendDefined()}>{connected ? DEFINE.send : DEFINE.connectSend}</button>
-        <button class="tb primary" bind:this={primaryEl} onclick={() => switchMode('operate')}>{DEFINE.toOperate}</button>
-      {/if}
-    {:else}
-      {#each band.secondary as b (b.action)}
-        {@const off = !RUNS.has(b.action)}
-        <button class="tb side" data-control={CONTROL_OF[b.action]} aria-disabled={off} onclick={() => !off && act(b.action)}>{b.label}</button>
-      {/each}
-      {#if band.primary}
-        {@const p = band.primary}
-        {@const off = op.state === 'L03' || !RUNS.has(p.action)}
-        <!-- Busy and unavailable stay focusable (aria-disabled) so focus never drops to the page. -->
-        <button class="tb primary" data-control={CONTROL_OF[p.action]} bind:this={primaryEl} aria-disabled={off} onclick={() => !off && act(p.action)}>
-          {op.state === 'L03' ? `${p.label}…` : p.label}
-        </button>
-      {/if}
-    {/if}
-    <button
-      class="tb conn"
-      class:on={connected}
-      data-control="connect"
-      aria-disabled={hubLocked !== null}
-      title={connected ? HUB_TOGGLE.disconnect : HUB_TOGGLE.connect}
-      aria-label={connected ? `${FLOW.responding(op.responding, op.reach.length)}、${HUB_TOGGLE.disconnect}` : HUB_TOGGLE.connect}
-      onclick={toggleHub}
-    >
-      <span class="dot" aria-hidden="true"></span><span class="lbl">{connected ? FLOW.responding(op.responding, op.reach.length) : HUB_TOGGLE.connect}</span>
-    </button>
-  </div>
+{#snippet actions()}
+  {#if mode === 'define'}
+    {@const blocked = problemCount > 0 || d.doc.topo.nodes.length === 0}
+    <button class="button-primary-header" data-control="gen" bind:this={primaryEl} aria-disabled={blocked || sheetHolds} title={blocked ? SKELETON.disabled : undefined} onclick={() => !blocked && goStep('project')}><span>{SKELETON.make}</span></button>
+  {:else}
+    <button class="button-secondary-header" data-control="build" aria-disabled={sheetHolds} onclick={() => goStep('build')}><span>{BUILD.run}</span></button>
+    <button class="button-primary-header" data-control={writeControl} bind:this={primaryEl} aria-disabled={writeOff || sheetHolds} onclick={write}><span>{WRITE.run}</span></button>
+  {/if}
 {/snippet}
 
 {#snippet drawerBody(tab: string)}
@@ -1222,24 +1178,14 @@
   <div class="frame {layout}" data-locks={locksNow} class:work={screen === 'work'} class:open={drawerOpen} class:modal={restartOpen || autosave.asking !== null}>
     <Header
       sim={cli.sim !== null}
-      step={screen === 'start' ? null : step}
-      {hub}
-      drawer={false}
-      {drawerOpen}
-      ondrawer={() => (drawerOpen ? closeDrawer() : openDrawer())}
-      bind:drawerButton
       {mode}
       onmode={screen === 'start' ? undefined : switchMode}
       {modeLocked}
-      {cliLabel}
       operateLocked={d.operable !== 'ok'}
       onlocked={() => lock(d.operable)}
       {menuOpen}
       onmenu={() => (menuOpen = !menuOpen)}
-      done={op.state === 'L23'}
-      onhub={screen === 'start' ? undefined : toggleHub}
-      {hubLocked}
-      flow={screen === 'work' ? flow : undefined}
+      actions={screen === 'work' ? actions : undefined}
       bind:helpOpen
       title={screen === 'work' ? (d.doc.topo.name ?? '') : ''}
     />
@@ -1346,124 +1292,6 @@
 <style>
   main.define {
     position: relative;
-  }
-  /* The flow: 構成 › プロジェクト › ビルド › 書き込み › 更新, the next action, and the 親機. */
-  .toolbar {
-    display: flex;
-    flex: 1;
-    flex-wrap: wrap;
-    align-items: center;
-    justify-content: center;
-    gap: 0.25rem var(--s-2);
-    min-width: 0;
-    padding: 0.25rem 0;
-  }
-  .flow {
-    display: flex;
-    align-items: center;
-    gap: 2px;
-  }
-  .dash {
-    width: 0.875rem;
-    height: 1px;
-    background: var(--c-line);
-  }
-  .tb {
-    display: inline-flex;
-    align-items: center;
-    gap: 0.375rem;
-    height: 1.75rem;
-    padding: 0 0.625rem;
-    border: 1px solid transparent;
-    border-radius: var(--r-full);
-    background: none;
-    color: var(--c-paper);
-    font: 400 var(--t-13) / 1 var(--f-ja);
-    white-space: nowrap;
-    cursor: pointer;
-    transition: transform var(--dur-press) var(--ease-out), background-color var(--dur-press) ease;
-  }
-  .tb:active {
-    transform: scale(0.97);
-  }
-  @media (hover: hover) and (pointer: fine) {
-    .tb:hover {
-      background: var(--c-layer-2);
-    }
-  }
-  .tb:focus-visible {
-    outline: 2px solid var(--c-paper);
-    outline-offset: -2px;
-  }
-  .tb .no {
-    color: var(--c-muted);
-    font: 400 var(--t-13) / 1 var(--f-version);
-  }
-  .tb.done .no,
-  .tb.here .no {
-    color: var(--c-paper);
-  }
-  .tb.here {
-    border-color: var(--c-line);
-  }
-  .tb .st {
-    color: var(--c-muted);
-    font-size: var(--t-12);
-  }
-  .tb .st.err {
-    color: var(--c-signal);
-  }
-  .tb.primary {
-    background: var(--c-accent);
-    color: var(--c-ink);
-    font-weight: 700;
-  }
-  .tb.side {
-    height: 1.5rem;
-    padding: 0 0.5rem;
-    border-color: var(--c-hair);
-    color: var(--c-muted);
-    font-size: var(--t-12);
-  }
-  .tb[aria-disabled='true'] {
-    opacity: 0.45;
-    cursor: not-allowed;
-  }
-  .tb.conn {
-    border-color: var(--c-line);
-  }
-  .tb.conn .dot {
-    width: 0.5rem;
-    height: 0.5rem;
-    border: 1.5px solid currentColor;
-    border-radius: 50%;
-  }
-  .tb.conn.on .dot {
-    background: currentColor;
-  }
-  /* Narrower bars drop words before controls: the step names, then the side buttons' words. */
-  @media (max-width: 1365px) {
-    .flow .tb:not(.here) .lbl {
-      display: none;
-    }
-  }
-  @media (max-width: 1099px) {
-    .flow .tb .st {
-      display: none;
-    }
-  }
-  /* Phones: the bar keeps the one next action; the 親機 is on the status row, the rest in the sheet and menu. */
-  @media (max-width: 767px) {
-    .flow,
-    .tb.conn {
-      display: none;
-    }
-    /* The band's other actions stay reachable: they wrap onto a second row of the bar. */
-    .toolbar {
-      flex-wrap: wrap;
-      justify-content: flex-end;
-      padding: 0.25rem 0;
-    }
   }
   .zoom {
     position: absolute;

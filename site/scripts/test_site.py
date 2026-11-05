@@ -10,6 +10,7 @@ sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 import examples  # noqa: E402
 import gen  # noqa: E402
 import llms  # noqa: E402
+import pages  # noqa: E402
 
 ROOT = gen.ROOT
 
@@ -106,6 +107,20 @@ class Examples(unittest.TestCase):
             found = examples.problems(pathlib.Path(d))
             self.assertEqual(len(found), 1)
             self.assertTrue(found[0].startswith("x.md:1:"))
+
+
+class BuiltPages(unittest.TestCase):
+    def test_the_served_page_carries_none_of_the_demo(self):
+        self.assertEqual(pages.served_problems(), [])
+
+    def test_a_fixture_a_stand_in_hub_or_an_agent_name_is_found(self):
+        with tempfile.TemporaryDirectory() as d:
+            root = pathlib.Path(d)
+            (root / "assets").mkdir()
+            (root / "assets" / "sample-full-1.1.0-x.dgb").write_bytes(b"\0")
+            (root / "assets" / "index-x.js").write_bytes(b'devHub(new URLSearchParams("sim")); "Claude Code"')
+            self.assertEqual(len(pages.served_problems(root)), 3)
+            self.assertEqual(len(pages.demo_problems(root)), 1)
 
 
 class MovedDocuments(unittest.TestCase):

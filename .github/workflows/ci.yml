@@ -252,13 +252,11 @@ jobs:
           npm ci
           npm install --global wasm-pack@0.15.1
           npm run build:demo -- --outDir ../site/dist/demo --emptyOutDir
-      - name: The served Console carries none of the demo
-        # The demo's flag compiles to false elsewhere: no test-key release, no stand-in hub.
-        working-directory: web
-        run: |
-          npx vite build --outDir "$RUNNER_TEMP/served" --emptyOutDir
-          if ls "$RUNNER_TEMP/served/assets" | grep -E 'sample-|bootcore'; then exit 1; fi
-          if grep -lE 'URLSearchParams\(["`]sim' "$RUNNER_TEMP"/served/assets/*.js; then exit 1; fi
+      - name: What the two pages carry
+        # The page dagon serve hands out (as committed; the scripts job checks it
+        # is built from its sources) carries none of the demo, and neither page
+        # names an agent product.
+        run: python site/scripts/pages.py --demo site/dist/demo
 
   scripts:
     runs-on: ubuntu-latest

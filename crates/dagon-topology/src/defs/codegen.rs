@@ -362,6 +362,41 @@ fn watch(files: &[PathBuf]) {
     }
 }
 
+/// The bit rate of the node's UART link a firmware build is given: `dagon`
+/// sets it from the topology ([`crate::Topology::uart_baud`]) for every
+/// build of a node, so both ends of a link are built with one value.
+pub const LINK_BAUD_ENV: &str = "DAGON_LINK_BAUD";
+
+/// `LINK_BAUD`, the bit rate a board package runs DAGON's UART link at:
+/// `env` ([`LINK_BAUD_ENV`]) when set, else the board's own value
+/// (`[default_link] baud`, or the baud of its `dagon = true` UART bus).
+/// A value that is not a bit rate fails the build, naming it.
+pub fn link_baud_rs(b: &BoardDef, env: Option<&str>) -> Result<String, String> {
+    let own = b.default_link.and_then(|l| l.baud).or_else(|| {
+        b.buses
+            .iter()
+            .find(|x| x.dagon && x.baud.is_some())
+            .and_then(|x| x.baud)
+    });
+    let baud = match env.filter(|v| !v.is_empty()) {
+        Some(v) => match v.parse::<u32>() {
+            Ok(n) if n > 0 => Some(n),
+            _ => {
+                return Err(format!(
+                    "{LINK_BAUD_ENV}={v:?} is not a bit rate (1 or more)"
+                ))
+            }
+        },
+        None => own,
+    };
+    Ok(format!(
+        "/// The bit rate of DAGON's UART link: the topology's for this node \
+         when built by dagon ({LINK_BAUD_ENV}), else the board's own.\n\
+         pub const LINK_BAUD: Option<u32> = {};\n",
+        opt(baud)
+    ))
+}
+
 /// A board package's build script: writes `def.rs` ([`board_rs`]),
 /// `pins.rs` ([`pins_rs`]) and `devices.rs` ([`devices_rs`]) into
 /// `OUT_DIR` from the package's own definition, and reruns when any
@@ -370,7 +405,10 @@ fn watch(files: &[PathBuf]) {
 pub fn package_build(hal: &Hal<'_>) {
     let l = package_board(&manifest_dir()).unwrap_or_else(|e| panic!("{e}"));
     watch(&l.files);
-    write(&out_dir().join("def.rs"), &board_rs(&l.board));
+    println!("cargo:rerun-if-env-changed={LINK_BAUD_ENV}");
+    let env = std::env::var(LINK_BAUD_ENV).ok();
+    let baud = link_baud_rs(&l.board, env.as_deref()).unwrap_or_else(|e| panic!("{e}"));
+    write(&out_dir().join("def.rs"), &(board_rs(&l.board) + &baud));
     write(&out_dir().join("pins.rs"), &pins_rs(&l.board, hal));
     write(&out_dir().join("devices.rs"), &devices_rs(&l.board));
 }
@@ -505,6 +543,31 @@ mod tests {
         ] {
             assert!(rs.contains(want), "{want} in\n{rs}");
         }
+    }
+
+    #[test]
+    fn link_baud_is_the_builds_and_else_the_boards_own() {
+        let reg = Registry::builtin();
+        let want = |v: &str| format!("pub const LINK_BAUD: Option<u32> = {v};");
+        for id in ["waveshare-rp2040-touch-lcd-1.28", "m5stopwatch"] {
+            let b = reg.board(id).unwrap();
+            // Both ends of a link get the same value from the build.
+            assert!(link_baud_rs(b, Some("230400"))
+                .unwrap()
+                .contains(&want("Some(230400)")));
+            assert!(link_baud_rs(b, None)
+                .unwrap()
+                .contains(&want("Some(115200)")));
+            assert!(link_baud_rs(b, Some(""))
+                .unwrap()
+                .contains(&want("Some(115200)")));
+            for bad in ["0", "fast", "-1", "4294967296"] {
+                let e = link_baud_rs(b, Some(bad)).unwrap_err();
+                assert!(e.contains(LINK_BAUD_ENV) && e.contains(bad), "{e}");
+            }
+        }
+        let f401 = reg.board("nucleo-f401re").unwrap();
+        assert!(link_baud_rs(f401, None).unwrap().contains(&want("None")));
     }
 
     #[test]

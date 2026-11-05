@@ -16,7 +16,8 @@ pub mod rom;
 pub use dagon_romlink::{RomError, Stats as RomStats};
 pub use ops::{
     check_release, reason, ConfirmOutcome, Discovery, Event, NodeOutcome, NodeState, Outcome,
-    RecoverAssets, RecoverPath, CONFIRM_RETRY_MS, NODE_POLL_MS, NODE_TRIAL_MAX_MS, NODE_TRIAL_MS,
+    RecoverAssets, RecoverPath, XferTimes, CONFIRM_RETRY_MS, NODE_POLL_MS, NODE_TRIAL_MAX_MS,
+    NODE_TRIAL_MS,
 };
 
 use alloc::boxed::Box;

@@ -546,6 +546,7 @@ pub(crate) fn build_parts(
     let mut built = Vec::new();
     // The node's boot stages (stage0, boot core) are built for its boot crate.
     let boot = boot_crate(cfg, n).ok();
+    let link_baud = nodebuild::link_baud(cfg, node)?;
     for part in parts(reg, &n.mcu, n.board.as_deref()) {
         let mut dir = part_dir(root, &part)?;
         let boot_folder = boot_folder_of(&part, &dir, boot.as_deref())?;
@@ -591,6 +592,8 @@ pub(crate) fn build_parts(
                 // The boot core accepts only images carrying this tag.
                 target_tag: Some(&n.tag),
                 boot_crate: boot_folder,
+                // A recovery agent talks over the same link as the app.
+                link_baud,
             },
             &mut |l| log(&hide(l)),
             cancel,
@@ -648,6 +651,7 @@ pub(crate) fn build_core_slots(
                 pubkey_hex: Some(hex),
                 target_tag: Some(&n.tag),
                 boot_crate: Some(&dir),
+                link_baud: None,
             },
             log,
             cancel,

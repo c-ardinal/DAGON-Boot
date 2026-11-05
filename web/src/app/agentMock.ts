@@ -9,7 +9,7 @@ const NEVER = ['鍵', 'コマンドとその出力の全文', 'ファイルの�
 const ANSWERS: Record<string, string> = {
   problem: 'このノードに問題はありません。\n\n確かめた結果と更新の記録のどちらにも、このノードの問題は出ていません。',
   next: '親機とつないで、更新ファイルを選んでください。\n\n構成に問題はなく、このパソコンにつながる親機とその直下の子機を更新できます。',
-  propose: 'ウォッチの UART の速さを 921600 にする案です。\n\n速さを上げると、更新の時間が短くなります。',
+  propose: 'ウォッチの UART の速さを 230400 にする案です。\n\n速さを上げると、更新の時間が短くなります。',
   failure: '失敗した記録はありません。',
 };
 
@@ -52,7 +52,7 @@ export function agentMock(q: URLSearchParams, yaml: () => string, wait = (ms: nu
       if (!consent) return json({ error: 'not linked', code: 'AGENT_NOT_LINKED' }, 409);
       await wait(1200);
       const kind = String((body as { kind?: string }).kind ?? 'free');
-      const proposal = kind === 'propose' ? { yaml_diff: '   - from: hub\n     to: watch\n     kind: uart\n-    baud: 115200\n+    baud: 921600', topology: yaml().replace('baud: 115200', 'baud: 921600') } : null;
+      const proposal = kind === 'propose' ? { yaml_diff: '   - from: hub\n     to: watch\n     kind: uart\n-    baud: 115200\n+    baud: 230400', topology: yaml().replace('baud: 115200', 'baud: 230400') } : null;
       return json({ answer: ANSWERS[kind] ?? 'その質問には、構成の事実からは答えられません。', proposal });
     }
     return json({ error: 'not found' }, 404);

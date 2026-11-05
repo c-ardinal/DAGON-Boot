@@ -23,7 +23,8 @@ control = "cooperative"
 rom_entry = "force-download-boot"
 
 # DAGON's link: UART0 on the rear pins MUX_IO_1/2 (the expander's PYG1
-# low routes them to UART0), at default_link.baud.
+# low routes them to UART0), at the topology link's baud (dagon gives it to
+# the build; default_link.baud otherwise).
 [[bus]]
 id = "link"
 kind = "uart"

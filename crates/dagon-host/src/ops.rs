@@ -92,6 +92,20 @@ pub struct Event {
     pub phase: u8,
     pub percent: u8,
     pub version: Version,
+    /// On the VERIFY event of a written image: how long its phases took.
+    pub times: Option<XferTimes>,
+}
+
+/// How long one image's transfer took, by phase, in ms of the host's clock.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct XferTimes {
+    /// XFER_BEGIN and the header, up to the node's answer that it erased
+    /// the slot (the node erases before it answers the last of them).
+    pub erase_ms: u32,
+    /// The image body (XFER_DATA).
+    pub data_ms: u32,
+    /// XFER_END: the node's digest over what it wrote.
+    pub verify_ms: u32,
 }
 
 #[derive(Debug)]
@@ -172,7 +186,9 @@ impl<T: Transport, C: Clock> Host<T, C> {
             body: bin,
             show: None,
         };
-        self.transfer(Target::Hub, &hub, xfer, &mut quiet).await
+        self.transfer(Target::Hub, &hub, xfer, &mut quiet)
+            .await
+            .map(|_| ())
     }
 
     /// Checks `bundle` (signature chain under `pubkey`, and that it was built
@@ -264,6 +280,7 @@ impl<T: Transport, C: Clock> Host<T, C> {
                 phase: ph,
                 percent: 0,
                 version: v,
+                times: None,
             });
             self.show(node, ph, 0, v, reason(e).as_bytes()).await;
         }
@@ -322,12 +339,12 @@ impl<T: Transport, C: Clock> Host<T, C> {
             body,
             show: Some((node, v)),
         };
-        self.transfer(to, &st.hello, xfer, on_event).await?;
+        let times = self.transfer(to, &st.hello, xfer, on_event).await?;
         let after = self.status(to).await?;
         if after.status.slots[usize::from(FACTORY)].digest16 != want {
             return Err(Error::DigestMismatch);
         }
-        self.emit(on_event, node, phase::VERIFY, 100, v).await;
+        self.emit_verified(on_event, node, v, times).await;
         Ok(true)
     }
 
@@ -380,14 +397,14 @@ impl<T: Transport, C: Clock> Host<T, C> {
             body,
             show: Some((node, v)),
         };
-        match self.transfer(to, &hello, xfer, on_event).await {
+        let times = match self.transfer(to, &hello, xfer, on_event).await {
             Err(Error::Rejected {
                 cmd: Cmd::XferBegin,
                 status: Status::Unsupported,
             }) => return Err(Error::BootCoreRefused),
             r => r?,
-        }
-        self.emit(on_event, node, phase::VERIFY, 100, v).await;
+        };
+        self.emit_verified(on_event, node, v, times).await;
         let mut p = [0u8; 2];
         SetPending {
             target: target::BOOTCORE,
@@ -448,8 +465,8 @@ impl<T: Transport, C: Clock> Host<T, C> {
             body,
             show: Some((node, v)),
         };
-        self.transfer(to, &st.hello, xfer, on_event).await?;
-        self.emit(on_event, node, phase::VERIFY, 100, v).await;
+        let times = self.transfer(to, &st.hello, xfer, on_event).await?;
+        self.emit_verified(on_event, node, v, times).await;
         self.switch_and_confirm(to, slot, v, node, on_event).await?;
         Ok(v)
     }
@@ -674,7 +691,9 @@ impl<T: Transport, C: Clock> Host<T, C> {
         hello: &HelloResp,
         x: Xfer<'_>,
         on_event: &mut dyn FnMut(Event),
-    ) -> Result<(), T::Error> {
+    ) -> Result<XferTimes, T::Error> {
+        let since = |t0: u64, t1: u64| t1.saturating_sub(t0).min(u32::MAX.into()) as u32;
+        let t0 = self.clock.now_ms();
         let Xfer {
             tgt,
             slot,
@@ -704,6 +723,7 @@ impl<T: Transport, C: Clock> Host<T, C> {
             };
             self.chunk(to, Cmd::XferHdr, i * chunk, c, wait).await?;
         }
+        let t1 = self.clock.now_ms();
         let mut shown = 0u8;
         for (i, c) in body.chunks(chunk).enumerate() {
             self.chunk(to, Cmd::XferData, i * chunk, c, REQUEST_MS)
@@ -716,12 +736,17 @@ impl<T: Transport, C: Clock> Host<T, C> {
                 }
             }
         }
+        let t2 = self.clock.now_ms();
         let d = self.call(to, Cmd::XferEnd, &[], VERIFY_MS).await?;
         let digest = payload::parse_digest(&d).map_err(|_| Error::BadResponse)?;
         if digest != sha256(body) {
             return Err(Error::DigestMismatch);
         }
-        Ok(())
+        Ok(XferTimes {
+            erase_ms: since(t0, t1),
+            data_ms: since(t1, t2),
+            verify_ms: since(t2, self.clock.now_ms()),
+        })
     }
 
     async fn chunk(
@@ -762,8 +787,27 @@ impl<T: Transport, C: Clock> Host<T, C> {
             phase: ph,
             percent,
             version,
+            times: None,
         });
         self.show(node, ph, percent, version, &[]).await;
+    }
+
+    /// VERIFY 100 % of an image written in `times`.
+    async fn emit_verified(
+        &mut self,
+        on_event: &mut dyn FnMut(Event),
+        node: u8,
+        version: Version,
+        times: XferTimes,
+    ) {
+        on_event(Event {
+            node,
+            phase: phase::VERIFY,
+            percent: 100,
+            version,
+            times: Some(times),
+        });
+        self.show(node, phase::VERIFY, 100, version, &[]).await;
     }
 
     /// SHOW on the hub LCD, best effort.

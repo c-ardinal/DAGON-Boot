@@ -285,6 +285,19 @@ fn full_apply_then_rollback() {
     assert!(events
         .iter()
         .any(|e| e.phase == phase::TRANSFER && e.percent == 100));
+    // Each written image reports how long its erase, data and verify took,
+    // once, with its VERIFY event (the simulator's clock moves with traffic).
+    let timed: Vec<_> = events.iter().filter(|e| e.times.is_some()).collect();
+    assert_eq!(timed.len(), 2, "{events:?}");
+    for e in timed {
+        assert_eq!(e.phase, phase::VERIFY);
+        let t = e.times.unwrap();
+        assert!(t.data_ms > 0, "{t:?}");
+    }
+    assert!(events
+        .iter()
+        .filter(|e| e.phase != phase::VERIFY)
+        .all(|e| e.times.is_none()));
     let screen = s.hub.borrow().screen.clone().unwrap();
     assert_eq!((screen.node, screen.phase), (0, phase::CONFIRM));
 

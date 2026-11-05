@@ -4,7 +4,7 @@
 //! Mapping: node index = position in `nodes[]`; links sorted by `to`;
 //! `bus_id` = position in `buses[]`; every flash map is its MCU's default
 //! (`map_id` 0); omitted `listen_window_ms` = 0, `max_attempts` = 3, bus speed
-//! = 400 kHz, baud = 115200. Node ids, the topology name, positions and
+//! = 400 kHz, baud = [`crate::schema::DEFAULT_BAUD`]. Node ids, the topology name, positions and
 //! nicknames are not in the binary.
 
 use std::fmt;
@@ -20,7 +20,6 @@ use crate::{check_with, effective_tiers, Report, Topology};
 
 const DEFAULT_MAX_ATTEMPTS: u8 = 3;
 const DEFAULT_I2C_HZ: u32 = 400_000;
-const DEFAULT_BAUD: u32 = 115_200;
 const MAX_TIERS: usize = 3;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -194,7 +193,7 @@ fn link(t: &Topology, l: &Link) -> Result<TopoLink, CompileError> {
                 UartIface::HwUart0 => tp::iface::HW_UART0,
                 UartIface::PioUart => tp::iface::PIO_UART,
             };
-            let baud = l.baud.unwrap_or(DEFAULT_BAUD);
+            let baud = l.uart_baud();
             (iface, pins.tx, pins.rx, baud, tp::NONE, tp::NONE)
         }
         LinkKind::Can

@@ -282,6 +282,38 @@ pub struct Coordinator {
     pub uart0_rx: Vec<u8>,
 }
 
+/// How the UART the MCU package's firmware runs DAGON's UART links on makes
+/// a bit rate: `clock_hz` divided by `clocks_per_bit` times a divider with
+/// `frac_bits` fraction bits, the divider rounded down (as the HAL the
+/// package builds with computes it).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct LinkUart {
+    pub clock_hz: u32,
+    pub clocks_per_bit: u32,
+    pub frac_bits: u8,
+}
+
+impl LinkUart {
+    /// The bit rate this UART runs at when asked for `baud`; `None` when
+    /// it cannot divide its clock down to it (0, or faster than the clock).
+    pub fn actual_baud(&self, baud: u32) -> Option<f64> {
+        let per_bit = u64::from(self.clocks_per_bit) * u64::from(baud);
+        let steps = (u64::from(self.clock_hz) << self.frac_bits).checked_div(per_bit)?;
+        if steps >> self.frac_bits == 0 {
+            return None;
+        }
+        let divider = steps as f64 / f64::from(1u32 << self.frac_bits);
+        Some(f64::from(self.clock_hz) / (f64::from(self.clocks_per_bit) * divider))
+    }
+
+    /// How far [`LinkUart::actual_baud`] is from `baud`, as a fraction
+    /// (+0.0122 is 1.22 % fast).
+    pub fn baud_error(&self, baud: u32) -> Option<f64> {
+        self.actual_baud(baud).map(|a| a / f64::from(baud) - 1.0)
+    }
+}
+
 /// The pins a board wires new links to when it is the 親機 (numbered
 /// GPIOs, as the topology's `buses[]` and `links[].pins` take them).
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
@@ -406,6 +438,8 @@ pub struct McuDef {
     #[serde(default, rename = "part")]
     pub parts: Vec<Part>,
     pub coordinator: Option<Coordinator>,
+    /// Left out: a UART link's speed is not checked against this MCU.
+    pub link_uart: Option<LinkUart>,
     pub rom_i2c: Option<RomI2c>,
     /// Link kinds the MCU package's firmware implements (its `LINK_KINDS`).
     #[serde(default)]

@@ -116,8 +116,9 @@ pub fn route_rear_uart() -> Result<(), BusError<I2cError>> {
     ioe_update(def::DEVICE_IOE_REG_MODE_L, PYG1_BIT, 0)
 }
 
-/// The link's bit rate (`[default_link] baud`).
-pub const LINK_BAUD: u32 = match def::DEFAULT_LINK_BAUD {
+/// The link's bit rate: the topology's link speed when dagon builds the
+/// node, else `[default_link] baud`.
+pub const LINK_BAUD: u32 = match def::LINK_BAUD {
     Some(b) => b,
     None => panic!("dagon-board.toml: default_link.baud"),
 };

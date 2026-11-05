@@ -38,12 +38,12 @@ describe('hand-written YAML comments across a save (C-383)', () => {
   test('desk-demo edited and saved: the comments of the untouched lines survive and the compiled 構成 is the same as without them', () => {
     const d = new Define();
     d.load(fromYaml(commented), commented);
-    d.apply(setLink(d.doc, 1, 'baud', 460800));
+    d.apply(setLink(d.doc, 1, 'baud', 230400));
     const text = d.exportYaml().text;
     expect(text).toMatch(/^# Desk demo, hand-written note\.\n# Desk demo: RP2040 hub/);
     expect(text).toMatch(/ {4}# the 7-segment board\n {4}addr: 0x42/);
     expect(text).toContain('order: [seg, watch, hub]  # hub last');
-    expect(text).toContain('baud: 460800');
+    expect(text).toContain('baud: 230400');
     expect(topo_compile(text)).toEqual(topo_compile(toYaml(d.doc.topo)));
     expect(fromYaml(text).topo).toEqual(d.doc.topo);
   });

@@ -1,6 +1,6 @@
 //! Validation rules for `dagon topo check`.
 //!
-//! Errors V-01..V-21 (no V-19) and V-25; warnings V-22 and V-24 (V-24 is
+//! Errors V-01..V-21 (no V-19), V-25 and V-26; warnings V-22 and V-24 (V-24 is
 //! an error for an uplink on a 子機); information V-23 (a valid part that
 //! updating skips for now). Errors block `topo push`; the others do not.
 
@@ -17,7 +17,11 @@ const MAX_NODES: usize = 32;
 use crate::reach::MAX_UPDATABLE_NODES;
 const MAX_ID_LEN: usize = 15;
 const MAX_TAG_LEN: usize = 16;
-const BAUD_RATES: &[u32] = &[9_600, 57_600, 115_200, 460_800];
+/// How far each end of a UART link may be from its `baud`. The two ends'
+/// errors add up; an 8N1 receiver that samples mid-bit loses the frame at
+/// half a bit over its 10 bits, 5 % between the ends, and 2 % a side keeps
+/// a margin for clock tolerance and edge timing below that.
+const MAX_BAUD_ERROR: f64 = 0.02;
 /// Standard and fast mode; each ROM I2C bootloader's `max_hz` caps it further.
 const I2C_SPEEDS: &[u32] = &[100_000, 400_000];
 const I2C_ADDR_MIN: u8 = 0x08;
@@ -79,6 +83,7 @@ pub fn check_with(reg: &Registry, t: &Topology) -> Report {
     c.v23();
     c.v24();
     c.v25();
+    c.v26();
     Report { issues: c.issues }
 }
 
@@ -328,13 +333,6 @@ impl<'a> Ctx<'a> {
                             "V-01",
                             format!("{p}.pins"),
                             "uart link needs 'pins' (tx, rx)",
-                        );
-                    }
-                    if l.baud.is_some_and(|b| !BAUD_RATES.contains(&b)) {
-                        self.err(
-                            "V-01",
-                            format!("{p}.baud"),
-                            format!("baud must be one of {BAUD_RATES:?}"),
                         );
                     }
                 }
@@ -941,6 +939,38 @@ impl<'a> Ctx<'a> {
                     "V-20",
                     format!("buses[{i}].pullups"),
                     "pullups must be 'external' or 'board'",
+                );
+            }
+        }
+    }
+
+    /// A UART link's speed on each end, from its MCU's `[link_uart]`.
+    fn v26(&mut self) {
+        for (i, l) in self.links() {
+            if l.kind != LinkKind::Uart {
+                continue;
+            }
+            let baud = l.uart_baud();
+            for id in [&l.from, &l.to] {
+                let Some(m) = self.t.node(id).and_then(|n| self.reg.mcu(&n.mcu)) else {
+                    continue;
+                };
+                let Some(u) = m.link_uart else {
+                    continue;
+                };
+                let what = match (u.actual_baud(baud), u.baud_error(baud)) {
+                    (Some(a), Some(e)) if e.abs() > MAX_BAUD_ERROR => format!(
+                        "runs at {a:.0} bit/s, {:+.2} %; each end of a UART link must be within {:.0} %",
+                        e * 100.0,
+                        MAX_BAUD_ERROR * 100.0
+                    ),
+                    (Some(_), Some(_)) => continue,
+                    _ => "cannot make it".into(),
+                };
+                self.err(
+                    "V-26",
+                    format!("{}.baud", link_path(i)),
+                    format!("baud {baud}: {id} ({}) {what}", m.name),
                 );
             }
         }

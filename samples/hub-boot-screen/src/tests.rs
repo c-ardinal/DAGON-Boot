@@ -28,8 +28,23 @@ fn each_boot_step_has_its_gauge_step_and_text() {
     assert_eq!(STEPS, 4);
     assert_eq!(texts::STARTING, "起動しています");
     assert_eq!(texts::CHECKING, "ファームウェアを確かめています");
-    assert_eq!(texts::CONFIRMED, "確定した版で起動します");
-    assert_eq!(texts::TRIAL, "新しい版を試します");
+    assert_eq!(texts::CONFIRMED, "確定したバージョンで起動します");
+    assert_eq!(texts::TRIAL, "新しいバージョンを試します");
+}
+
+#[test]
+fn the_screen_uses_the_defined_words() {
+    // DAGON's screen words: バージョン, never 版; ノード, never 台.
+    for w in [
+        texts::STARTING,
+        texts::CHECKING,
+        texts::CONFIRMED,
+        texts::TRIAL,
+    ] {
+        assert!(!w.contains('版') && !w.contains('台'), "{w}");
+    }
+    let readme = include_str!("../README.md");
+    assert!(!readme.contains('版') && !readme.contains('台'));
 }
 
 /// Records the screen of every event the boot core delivers (`None`: the

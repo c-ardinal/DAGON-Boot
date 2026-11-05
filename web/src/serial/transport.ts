@@ -50,11 +50,11 @@ export type HubIdentity = Pick<HelloResp, 'mcuId' | 'keyId'>;
 
 /**
  * The one check every path that adopts a port goes through (dagon-host's
- * reopen in L20, the device reported or chosen in L21, the CLI's hand-back):
+ * reopen in hubRestarting, the device reported or chosen in reconnectNeeded, the CLI's hand-back):
  * why the device answering `h` is not the 親機 first seen as `first`, or null.
  * With `version` it must also be on trial with that version (the one just
  * sent); without it a hub back on its previous version still passes, for
- * CONFIRM to stop there (L22).
+ * CONFIRM to stop there (stopped).
  */
 export function notThisHub(h: HelloResp | null, first: HubIdentity | null, version: number | null): ReconnectNote | null {
   if (h === null) return { kind: 'silent' };

@@ -53,7 +53,7 @@ export interface TLink {
   control?: TControl;
 }
 
-/** I2C and UART: 親機 to 子機, updatable. CAN and Ethernet: between 親機 and deeper, described only (V-23). */
+/** I2C and UART: 親機 to 子機, updatable. CAN and Ethernet: between 親機 and deeper, described only. */
 export type LinkKind = 'usb-cdc' | 'uart' | 'i2c' | 'ble' | 'wifi-tcp' | 'ethernet' | 'can';
 
 /** Every hop kind a 構成 may name, in the order the define screen offers them. */
@@ -131,7 +131,7 @@ export interface BoardTemplate {
   coordinator: { i2c: { controller: string; sda: number; scl: number }; pioUart: { tx: number; rx: number } } | null;
 }
 
-/** Nodes the editor places and draws; updating reaches 8 and skips the rest (V-23). */
+/** Nodes the editor places and draws; updating reaches 8 and skips the rest. */
 export const MAX_NODES = 32;
 const I2C_FIRST = 0x08;
 const I2C_LAST = 0x77;
@@ -176,14 +176,14 @@ export function docWithDefaults(doc: Doc): Doc {
   return { ...doc, topo: withDefaults(doc.topo), boards: doc.boards ?? {} };
 }
 
-export function emptyDoc(name = 'my-desk'): Doc {
+export function emptyDoc(name = 'my-project'): Doc {
   return { topo: withDefaults({ dagon: 1, name, nodes: [] } as unknown as Topo), names: {} };
 }
 
 /** A YAML file as a document; throws when it is not YAML at all. */
 export function fromYaml(yaml: string, names: Record<string, string> = {}): Doc {
   const t = topo_parse(yaml) as Topo | null;
-  // An empty file or one that is not a mapping with nodes is not a 構成 (C09), not a crash.
+  // An empty file or one that is not a mapping with nodes is not a 構成, not a crash.
   if (!t || typeof t !== 'object' || Array.isArray(t) || !Array.isArray(t.nodes)) throw new Error('not a topology');
   return { topo: withDefaults(t), names };
 }
@@ -262,7 +262,7 @@ export function boardMissing(doc: Doc, id: string): ('flash')[] | null {
   return b.flashBytes ? null : ['flash'];
 }
 
-/** Flash too small for the node's flash map: an error before building (§4.3). */
+/** Flash too small for the node's flash map: an error before building. */
 export function flashTooSmall(doc: Doc, id: string): number | null {
   const n = doc.topo.nodes.find((x) => x.id === id);
   const need = n ? mcus().find((m) => m.id === n.mcu)?.flashBytes : null;
@@ -274,7 +274,7 @@ export function setBoard(doc: Doc, id: string, fields: BoardFields): Doc {
   return { ...doc, boards: { ...doc.boards, [id]: { ...doc.boards?.[id], ...fields } } };
 }
 
-/** I2C addresses no other link on `bus` uses, without the defined ROM loaders' (V-18). */
+/** I2C addresses no other link on `bus` uses, without the defined ROM loaders'. */
 export function freeAddrs(t: Topo, except?: number): number[] {
   const used = new Set((t.links ?? []).filter((l, i) => l.kind === 'i2c' && i !== except).map((l) => l.addr));
   const rom = rom_i2c_addrs();
@@ -286,7 +286,7 @@ export function freeAddrs(t: Topo, except?: number): number[] {
 /**
  * "つなぐ先": links node `id` to `parent` (the hub when omitted). From the
  * hub to a 子機 the board's default link (I2C or UART); between 親機 a CAN
- * link, and deeper a UART link, both described only (V-23).
+ * link, and deeper a UART link, both described only.
  */
 export function connect(doc: Doc, id: string, parent?: string): Doc {
   const t = doc.topo;

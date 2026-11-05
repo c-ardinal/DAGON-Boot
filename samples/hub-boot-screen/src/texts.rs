@@ -6,6 +6,6 @@ pub const STARTING: &str = "起動しています";
 /// Before the boot core decides (it checks the image's signature and hash).
 pub const CHECKING: &str = "ファームウェアを確かめています";
 /// A confirmed image is chosen.
-pub const CONFIRMED: &str = "確定した版で起動します";
+pub const CONFIRMED: &str = "確定したバージョンで起動します";
 /// A new image is chosen on trial.
-pub const TRIAL: &str = "新しい版を試します";
+pub const TRIAL: &str = "新しいバージョンを試します";

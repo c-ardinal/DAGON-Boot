@@ -13,7 +13,7 @@
 
 DAGON Boot is for developers, from first-timers to experienced firmware
 engineers, who build something out of a few microcontrollers and want to
-keep improving it once it is on the desk, the wall or the wrist. You choose
+keep improving it once it is on a shelf, the wall or the wrist. You choose
 the boards (or just their MCUs), draw how they connect, and write your
 application in Rust. DAGON takes care of the rest:
 
@@ -43,7 +43,7 @@ application in Rust. DAGON takes care of the rest:
 
 ## Supported hardware
 
-| MCU | Role in the desk demo | Board in the table | Flash it needs |
+| MCU | Role in the sample | Board in the table | Flash it needs |
 |---|---|---|---|
 | RP2040 (`rp2040`) | hub | Waveshare RP2040-Touch-LCD-1.28 (`waveshare-rp2040-touch-lcd-1.28`) | 4 MiB |
 | STM32F401RE (`stm32f401re`) | child, I2C | NUCLEO-F401RE (`nucleo-f401re`) | 512 KiB |
@@ -106,7 +106,7 @@ DAGON Console itself (`web/README.md`).
 
 ## The journey
 
-The example is the desk demo: an RP2040 hub with a round LCD, a
+The example is the sample: an RP2040 hub with a round LCD, a
 NUCLEO-F401RE (I2C) and an M5StopWatch (UART). What their sample apps do
 is in `samples/f401-app` and `samples/esp32s3-app`. Replace it with your
 own topology at step 2.
@@ -118,7 +118,7 @@ dagon new my-fleet
 cd my-fleet
 ```
 
-`dagon new` creates `dagon.toml`, `topology.yaml` (the desk demo, or your
+`dagon new` creates `dagon.toml`, `topology.yaml` (the sample, or your
 own with `--from <yaml>`), `.gitignore`, the Claude Code files (below) and,
 if none exists yet, a signing key pair in `~/.dagon/keys/my-fleet` (or
 `--keys <dir>`). The secret key stays outside the project and outside any
@@ -145,9 +145,17 @@ From the command line the same is `dagon topo check topology.yaml`, or a
 first draft from a plain-language description through the Claude API:
 
 ```sh
-export ANTHROPIC_API_KEY=...        # read by the CLI only, never shown or saved
+dagon ai key set                    # the API key, typed without echo, into the OS credential store
+dagon ai link --way api             # consent to send, asked once
 dagon ai topology --in boards.txt --out topology.yaml
 ```
+
+The API key lives only in the OS credential store (Windows Credential
+Manager, macOS Keychain, or a Secret Service such as GNOME Keyring on Linux),
+never in an environment variable or a file. `dagon ai key status` shows
+whether it is registered and `dagon ai key delete` removes it; DAGON Console
+registers it too (CLI 連携). Without a credential store, use Claude Code with
+your own login instead (`dagon ai link`). See `docs/agent-api.md`.
 
 Definitions are not a place for secrets. Names in them (ids, product
 names, pin labels, partition names) appear in DAGON Console and are sent
@@ -186,7 +194,10 @@ in its crate's `Cargo.toml` (its boot core's, in its boot crate's
 or the command stops and says which. A node's boot core goes into the
 package with its app, and the node writes it only when its version differs
 from the boot core it runs: a changed boot core is written once its version
-is raised, as with apps.
+is raised, as with apps. The build brings the crate's own entry in its
+`Cargo.lock` to the raised version and changes nothing else there; every
+other package stays as locked. `dagon gen` keeps the boot crate's
+`version`: it is the one field of that file that is yours.
 
 ### 5. Write the first version (once per node)
 
@@ -213,8 +224,8 @@ files in the provision folder (`out/provision/<id>/` beside `dagon.toml`,
 or under `provision_dir` when `dagon.toml` sets it; `--out <dir>`
 chooses another), and only leaves the board untouched. It builds the boot core (and the hub's `stage0`) from the DAGON
 clone the CLI was built from (or `DAGON_HOME`) and the node's app, all
-with the public half of your signing key. The boot cores accept the desk
-demo's tags (`hub-rp2040-lcd`, `seg-f401-7seg`), so keep those tags in
+with the public half of your signing key. The boot cores accept the sample's
+tags (`hub-rp2040-lcd`, `seg-f401-7seg`), so keep those tags in
 `topology.yaml` for these boards.
 
 For an ESP32-S3 node, `dagon flash` builds the board's factory agent and
@@ -234,6 +245,11 @@ Then connect the hub and check that every node answers:
 ```sh
 dagon status
 ```
+
+Each node's line `versions:` names its stage0, boot core slots A/B (and the
+running one), app slots, wire version and MCU id; "unknown" is a node that
+cannot tell (an agent or stage0 built before it reported them). With the hub
+connected, `dagon doctor` prints the same lines after its tool checks.
 
 Without `dagon flash` (boot images you built yourself): `dagon rescue hub`
 and `dagon provision <id>` make the same files from `[provision.<id>]`
@@ -329,13 +345,13 @@ check and `dagon gen` tell you what is still missing; the
 ## Try it without hardware
 
 ```sh
-dagon demo                         # DAGON Console with a simulated desk
+dagon demo                         # DAGON Console with a simulator
 dagon demo --sim-fail watch        # the same, and watch's update fails and falls back
 dagon demo --sim-speed 4           # four times faster (for recordings)
 ```
 
 `dagon demo` opens DAGON Console against a simulated 親機 with its two
-子機 (the desk-demo 構成: hub, seg, watch, all on 1.0.0), the simulator
+子機 (the sample 構成: hub, seg, watch, all on 1.0.0), the simulator
 `dagon sim run` uses, driven by the same dagon-host code as real boards.
 Connect, choose the latest release (demo-1.1.0) and update all three with
 live progress; with `--sim-fail seg` or `--sim-fail watch` that 子機's new
@@ -371,7 +387,7 @@ the same. In DAGON Console's 定義 the inspector offers each kind for a link
 and, on the 親機, for its uplink. Kinds the firmware of either end does not
 implement yet are marked ◇ まだ使えない; the 構成 may still name them
 (problem まだ使えないつながり), and `dagon gen` refuses them with the hop's
-name (`uplink of hub over ble: not available yet on rp2040`). Today the
+name (`uplink of hub over ble: not available yet on rp2040`). The
 firmware offers, as each MCU's definition lists it (`[links]`; up: towards
 the PC or the 親機, down: to 子機):
 
@@ -390,9 +406,9 @@ The simulated uplink follows the demo 構成: change the 親機's uplink in
 its own frame size, speed and behaviour while the 親機 reboots (USB CDC
 and Wi-Fi reconnect; a UART adapter stays).
 
-## What works today
+## What is in this repository
 
-What the code and its tests in this repository show:
+What the code and its tests show:
 
 - Formats and protocol: `dagon-format` and `dagon-proto`, checked against the
   golden vectors in `crates/dagon-format/golden/`.
@@ -409,14 +425,13 @@ What the code and its tests in this repository show:
 - `dagon conform`: the 12 conformance tests of `dagon-conform`; 12 of 12 pass
   against the simulated F401, through the hub and directly.
 - Topology YAML: 22 validation rules and the supported-board table
-  (`dagon-topology`); `topology/desk-demo.yaml` passes them.
+  (`dagon-topology`); `topology/sample.yaml` passes them.
 - DAGON Console (`web/`, served by `dagon serve`; `web/README.md` lists what
-  it does today).
+  it does).
 - Firmware: the RP2040 hub (`targets/rp2040-hub`), the F401 demo node
   (`samples/f401-app`) and the ESP32-S3 node (`targets/boards/m5stopwatch`,
-  `samples/esp32s3-app`). The hub firmware has been flashed and starts on
-  the hub hardware; on-device checks of the rest are still in progress (see
-  Limitations).
+  `samples/esp32s3-app`). Limitations says which of them have been checked
+  on the hardware.
 
 ## Adding DAGON to existing firmware
 
@@ -986,10 +1001,10 @@ written for this project.
   firmware. There is no hardware root of trust (no secure boot fuses, no key
   storage in hardware).
 - A systematic survey of power cuts at every flash operation on real
-  hardware has not been done yet; power cuts are tested in the simulator.
+  hardware has not been done; power cuts are tested in the simulator.
 - The USB VID:PID `c0de:cafe` is a test ID, not an assigned one.
-- On-device checks are still pending for the F401 node and the ESP32-S3
-  node firmware. The hub firmware (RP2040 with LCD) has been flashed and
+- The F401 node and the ESP32-S3 node firmware have not been checked on
+  the hardware. The hub firmware (RP2040 with LCD) has been flashed and
   starts on the hardware, but its host communication and display are still
   being validated, and so is the full three-board flow.
 - `dagon conform` drives the synchronous test sequence and is CLI only; the

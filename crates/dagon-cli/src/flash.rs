@@ -1113,7 +1113,7 @@ mod tests {
     use crate::config::BuildInputs;
     use ed25519_compact::Seed;
 
-    const YAML: &str = include_str!("../../../topology/desk-demo.yaml");
+    const YAML: &str = include_str!("../../../topology/sample.yaml");
 
     /// A work area with `[build.<id>]` for hub and seg, and the topology.
     fn area(name: &str) -> (Config, Topology) {

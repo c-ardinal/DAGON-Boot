@@ -41,7 +41,7 @@ describe('lock table', () => {
     expect(stateName(s)).toBe('待機');
   });
 
-  test('the public demo page: files, projects, CLI jobs and DAGON stop with the demo reason; the simulated desk stays usable', () => {
+  test('the public demo page: files, projects, CLI jobs and DAGON stop with the demo reason; the simulator stays usable', () => {
     const s = states({ site: true, cliNone: true });
     expect(all.filter((c) => lockOf(c, s))).toEqual(['gen', 'build', 'flash', 'release', 'open', 'ask', 'apply', 'link', 'file']);
     for (const c of all.filter((c) => lockOf(c, s))) expect(lockOf(c, s)).toBe((LOCK.states.site.why as Record<string, string>)[c]);

@@ -19,13 +19,14 @@ import {
   type RecoverResult,
   type Refusal,
   type StatusResp,
+  type VersionResp,
   type UpdateEvent,
 } from '../wasm/dagon.ts';
 import { FAILURE_BAND } from './band.ts';
 import { ConnectError, wasmReady } from './connect.ts';
 import { ANNOUNCE, FILE } from './copy.ts';
 import { HUB_LOCKED, WATCHED, next, type ConnectFailure, type Ctx, type Ev, type L } from './machine.ts';
-import { DESK_DEMO, targetKey, type Config, type Node } from './sample.ts';
+import { SAMPLE_CONFIG, targetKey, type Config, type Node } from './sample.ts';
 
 /** What the page knows about one node from the hub. */
 export interface Live {
@@ -38,6 +39,8 @@ export interface Live {
   status: StatusResp | null;
   /** STATUS of the boot core slots; null when the node keeps none or it is not read yet. */
   core?: StatusResp | null;
+  /** VERSION; null when the node's agent predates it (or it was not readable), undefined until read. */
+  version?: VersionResp | null;
 }
 
 const UNKNOWN: Live = { responding: null, rttMs: null, lastSeen: null, hello: null, status: null };
@@ -50,11 +53,11 @@ export interface Progress {
   reason?: string;
 }
 
-/** Stages in which a node's water rises with its progress (SC-O5); a finished or stopped node drains. */
+/** Stages in which a node's water rises with its progress; a finished or stopped node drains. */
 const FILLING: ReadonlySet<Progress['stage']> = new Set(['writing', 'lastResort', 'rebooting']);
 
 /** While a write or a recovery runs, the card checks stay as they are. */
-const UPDATE_LOCKED: ReadonlySet<L> = new Set(['L19', 'L20', 'L21', 'L22', 'L24']);
+const UPDATE_LOCKED: ReadonlySet<L> = new Set(['writing', 'hubRestarting', 'reconnectNeeded', 'stopped', 'recovering']);
 
 /** How full each node being written is, 0–100 (the node's background on the canvas). */
 export function waterOf(progress: Record<string, Progress>): Record<string, number> {
@@ -66,7 +69,7 @@ export function waterOf(progress: Record<string, Progress>): Record<string, numb
 }
 
 /**
- * What the last run left (L23's one sentence says only this): an update with
+ * What the last run left (done's one sentence says only this): an update with
  * `left` nodes of the 構成 not on the new version (they did not answer), a
  * node rolled back to its previous version, or a node recovered.
  */
@@ -197,7 +200,7 @@ function fileTopologyOf(bytes: Uint8Array, yaml: string): Record<string, unknown
 }
 
 export class Operate {
-  state = $state<L>('L02');
+  state = $state<L>('idle');
   failure = $state<ConnectFailure | undefined>();
   config = $state<Config | null>(null);
   live = $state<Record<string, Live>>({});
@@ -218,14 +221,14 @@ export class Operate {
   failed = $state<string | null>(null);
   /** Clock time when dagon-host stops reopening the rebooted hub. */
   reconnectUntil = $state<number | null>(null);
-  /** The node being recovered or rolled back (and tried again from L25). */
+  /** The node being recovered or rolled back (and tried again from recoverFailed). */
   recovering = $state<string | null>(null);
   /** How the last recovery got through: the ROM path shows its figures in the detail. */
   recovered = $state<RecoverResult | null>(null);
   /** The update after a recovery covers the nodes not written yet ("残りのノードへ書き込む"). */
   rest = $state(false);
   /**
-   * The 構成 a release made for another 構成 was made for (L17, §7.6): shown
+   * The 構成 a release made for another 構成 was made for (otherTopology): shown
    * as differences, and taken in 定義 by "ファイルの構成を取り込む". Null when
    * the file carries none.
    */
@@ -236,9 +239,9 @@ export class Operate {
   fileVersions = $state<Record<string, number>>({});
   /** Date.now() when the running update or recovery started (elapsed time); null when none runs. */
   startedAt = $state<number | null>(null);
-  /** Why the page could not get the rebooted hub back by itself (L21's diagnostic log). */
+  /** Why the page could not get the rebooted hub back by itself (reconnectNeeded's diagnostic log). */
   reconnectNotes = $state<ReconnectNote[]>([]);
-  /** Why the device the CLI gave back was not taken (L26 shows it, C-389); null otherwise. */
+  /** Why the device the CLI gave back was not taken (lost shows it); null otherwise. */
   returnRefused = $state<ReconnectNote | null>(null);
   /** The hub's HELLO when the user connected: what "the same 親機" means after its reboot. */
   private hubHello: HelloResp | null = null;
@@ -248,11 +251,11 @@ export class Operate {
   track = $state<Record<string, WriteTrack>>({});
   /** The package being written could not be kept in the project (it is written all the same). */
   keepFailed = $state(false);
-  /** What the last update, recovery or rollback left (L23). */
+  /** What the last update, recovery or rollback left (done). */
   finished = $state<Finish | null>(null);
   /** Nodes on the chosen release's version since it was chosen (an update, its rest, a recovery). */
   private updated = new Set<string>();
-  /** The run L20 / L21 belong to, so L23 says what it did. */
+  /** The run hubRestarting / reconnectNeeded belong to, so done says what it did. */
   private running: 'update' | 'recover' | 'rollback' = 'update';
 
   private link: SwapLink | null = null;
@@ -276,7 +279,7 @@ export class Operate {
   /**
    * The nodes updating reaches, as the checked cut lists them (config.reach):
    * the compiled topology's nodes, so a node's topology index is its place
-   * here. The others (V-23) are drawn but never watched, updated or recovered.
+   * here. The others are drawn but never watched, updated or recovered.
    */
   get reach(): Node[] {
     const c = this.config;
@@ -309,11 +312,11 @@ export class Operate {
     this.state = to;
     this.latestMissing = false;
     // Out of the hub's reboot (confirmed, stopped, lost, ...): no version to keep a reopened device by any more.
-    if (to !== 'L20' && to !== 'L21') this.transport?.expectHub?.(null);
+    if (to !== 'hubRestarting' && to !== 'reconnectNeeded') this.transport?.expectHub?.(null);
     if (focus) this.focusRequest++;
   }
 
-  /** `dagon serve` needs the hub's port (device.need): close Web Serial and show L28. */
+  /** `dagon serve` needs the hub's port (device.need): close Web Serial and show cliTurn. */
   async handOver(): Promise<void> {
     this.session++;
     await this.drop();
@@ -322,7 +325,7 @@ export class Operate {
 
   /**
    * The header's 切断: the port is closed but its permission is kept (no
-   * forget()), so the CLI or a later つなぐ can open it; the session waits at L02.
+   * forget()), so the CLI or a later つなぐ can open it; the session waits at idle.
    */
   async disconnect(): Promise<void> {
     if (HUB_LOCKED.has(this.state) || next(this.state, 'disconnect') === this.state) return;
@@ -335,13 +338,13 @@ export class Operate {
 
   /**
    * The CLI gave the port back (device.returned): the page opens the device
-   * it had again by itself and goes on watching (L12, M67); when that fails
-   * the user connects again (L26, M34). It must be the same 親機 as before
+   * it had again by itself and goes on watching (ready, M67); when that fails
+   * the user connects again (lost, M34). It must be the same 親機 as before
    * (notThisHub against the first HELLO); otherwise it is closed and the
    * reason goes to the log.
    */
   async cliReturned(): Promise<void> {
-    if (this.state !== 'L28') return;
+    if (this.state !== 'cliTurn') return;
     const my = ++this.session;
     this.reconnectNotes = [];
     this.returnRefused = null;
@@ -380,8 +383,8 @@ export class Operate {
   }
 
   placeSample(): void {
-    this.config = DESK_DEMO;
-    this.live = Object.fromEntries(DESK_DEMO.nodes.map((n) => [n.id, UNKNOWN]));
+    this.config = SAMPLE_CONFIG;
+    this.live = Object.fromEntries(SAMPLE_CONFIG.nodes.map((n) => [n.id, UNKNOWN]));
     this.go('placeSample', false);
   }
 
@@ -391,13 +394,13 @@ export class Operate {
    */
   async connect(): Promise<void> {
     this.returnRefused = null;
-    if (this.state === 'L03') return;
+    if (this.state === 'choosing') return;
     const discover = !this.config;
     const my = ++this.session;
     await this.drop();
     this.alert = '';
     this.failure = undefined;
-    this.go(this.state === 'L07' ? 'reselect' : this.state === 'L26' ? 'reconnect' : 'connect');
+    this.go(this.state === 'silentHub' ? 'reselect' : this.state === 'lost' ? 'reconnect' : 'connect');
     if (!(await wasmReady(this.deps.ready))) return this.fail(my, 'wasmFailed', 'unavailable');
     let t: Transport;
     try {
@@ -433,7 +436,7 @@ export class Operate {
 
   /** "もう一度探す" and the scan after "つないで、自動で見つける". */
   async discover(my = this.session): Promise<void> {
-    this.go(this.state === 'L09' ? 'scanAgain' : 'helloDiscover');
+    this.go(this.state === 'scanned' ? 'scanAgain' : 'helloDiscover');
     this.stopWatching();
     this.found = 1;
     if (!this.config) this.placeSample();
@@ -443,7 +446,7 @@ export class Operate {
       const seen = new Map(d.nodes.map((n) => [targetKey(n), n.hello]));
       seen.set('hub', d.hub);
       const now = Date.now();
-      // ponytail: places the sample and marks which of its nodes answered; a
+      // places the sample and marks which of its nodes answered; a
       // scan result that is not the sample needs the definition mode.
       this.live = Object.fromEntries(
         this.config!.nodes.map((n) => {
@@ -463,7 +466,7 @@ export class Operate {
   /** "親機へ送る" / "もう一度送る". */
   async push(): Promise<void> {
     if (!this.config || !this.host) return;
-    this.go(this.state === 'L11' ? 'pushAgain' : 'push');
+    this.go(this.state === 'sendFailed' ? 'pushAgain' : 'push');
     const my = this.session;
     try {
       const bin = topo_compile(this.config.yaml);
@@ -484,7 +487,7 @@ export class Operate {
 
   /** The device went away (USB unplugged). The hub leaving for its reboot is not a loss. */
   lose(): void {
-    if (this.state === 'L20' || this.state === 'L21') return;
+    if (this.state === 'hubRestarting' || this.state === 'reconnectNeeded') return;
     this.session++;
     void this.drop();
     const was = this.state;
@@ -522,10 +525,10 @@ export class Operate {
       this.watching = false;
     }
     if (this.responding !== before) this.status = ANNOUNCE.A08(this.responding, this.reach.length);
-    // L12 and L23 move to L13 by themselves while a node does not answer: it stays visible and recoverable
+    // ready and done move to nodesSilent by themselves while a node does not answer: it stays visible and recoverable
     // (after "応答する n つだけ先に書き込む" the ones left out are named there).
-    if ((this.state === 'L12' || this.state === 'L23') && this.stuck) this.go('watchAlarm', false);
-    else if (this.state === 'L13' && !this.stuck) this.go('watchOk', false);
+    if ((this.state === 'ready' || this.state === 'done') && this.stuck) this.go('watchAlarm', false);
+    else if (this.state === 'nodesSilent' && !this.stuck) this.go('watchOk', false);
   }
 
   private async refreshStatus(id: string): Promise<void> {
@@ -535,7 +538,9 @@ export class Operate {
       const s = await this.call((h) => h.status(n.target.kind, n.target.addr));
       // A node without boot core slots refuses this STATUS: no row then.
       const core = await this.call((h) => h.bootCoreStatus(n.target.kind, n.target.addr)).catch(() => null);
-      this.live[id] = { ...(this.live[id] ?? UNKNOWN), hello: s.hello, status: s.status, core };
+      // An agent that predates VERSION answers null: its versions show as unknown.
+      const version = await this.call((h) => h.version(n.target.kind, n.target.addr)).catch(() => null);
+      this.live[id] = { ...(this.live[id] ?? UNKNOWN), hello: s.hello, status: s.status, core, version };
     } catch {
       // A missed STATUS shows the last values; the next watch round decides answering or not.
     }
@@ -559,9 +564,9 @@ export class Operate {
    */
   takeFile(name: string, bytes: Uint8Array): void {
     if (!this.config) return;
-    const ev = this.state === 'L12' ? 'chooseFile' : this.state === 'L13' ? 'updateResponding' : 'otherFile';
+    const ev = this.state === 'ready' ? 'chooseFile' : this.state === 'nodesSilent' ? 'updateResponding' : 'otherFile';
     this.go(ev);
-    if (this.state !== 'L14') return;
+    if (this.state !== 'reading') return;
     const file: ReleaseFile = { name, size: bytes.length, bytes, verdict: 'checking' };
     this.file = file;
     this.refusal = undefined;
@@ -580,7 +585,7 @@ export class Operate {
     }
     this.file = { ...file, verdict: 'pass' };
     const given = releaseVersions(bytes);
-    // ponytail: topology node index = position in reach, as in update().
+    // topology node index = position in reach, as in update().
     this.updated.clear();
     this.fileVersions = Object.fromEntries(this.reach.flatMap((n, i) => (given.has(i) ? [[n.id, given.get(i)!]] : [])));
     this.rest = false;
@@ -604,9 +609,9 @@ export class Operate {
     return k ? writePercent(k, now, this.deps.trialMs?.(id) ?? null) : 0;
   }
 
-  /** The write's check of node `id` once a file is chosen (L18): an unchecked node is not written. Targets keep update order. */
+  /** The write's check of node `id` once a file is chosen (fileReady): an unchecked node is not written. Targets keep update order. */
   choose(id: string, on: boolean): void {
-    if (this.state !== 'L18' || !this.reach.some((n) => n.id === id)) return;
+    if (this.state !== 'fileReady' || !this.reach.some((n) => n.id === id)) return;
     const chosen = new Set(this.targets);
     if (on) chosen.add(id);
     else chosen.delete(id);
@@ -617,7 +622,7 @@ export class Operate {
   async update(): Promise<void> {
     const c = this.config;
     const f = this.file;
-    if (!c || !f || f.verdict !== 'pass' || this.state !== 'L18' || this.targets.length === 0) return;
+    if (!c || !f || f.verdict !== 'pass' || this.state !== 'fileReady' || this.targets.length === 0) return;
     const my = this.session;
     this.go('update');
     this.stopWatching();
@@ -630,7 +635,7 @@ export class Operate {
     this.sentVersion = {};
     this.progress = Object.fromEntries(this.targets.map((id) => [id, { stage: 'waiting', percent: 0 }]));
     this.track = Object.fromEntries(this.targets.map((id) => [id, { ...NO_TRACK }]));
-    // ponytail: topology node index = position in reach (true for the sample, which follows its YAML).
+    // topology node index = position in reach (true for the sample, which follows its YAML).
     const reach = this.reach;
     const nodes = this.targets.map((id) => reach.findIndex((n) => n.id === id));
     let results: NodeResult[];
@@ -688,7 +693,7 @@ export class Operate {
     }
   }
 
-  /** The hub reboots onto `version`: dagon-host reopens it for 45 s (L20), keeping only that hub. */
+  /** The hub reboots onto `version`: dagon-host reopens it for 45 s (hubRestarting), keeping only that hub. */
   private hubAway(version: number | undefined): void {
     if (version !== undefined) this.transport?.expectHub?.(version, this.hubHello);
     this.reconnectNotes = [];
@@ -697,7 +702,7 @@ export class Operate {
     this.go('hubTurn');
   }
 
-  /** dagon-host gave up reopening the hub (L21): the dialog opens, with why. */
+  /** dagon-host gave up reopening the hub (reconnectNeeded): the dialog opens, with why. */
   private autoFailed(): void {
     this.reconnectNotes = this.transport?.notes?.() ?? [];
     this.alert = ANNOUNCE.A21timeout;
@@ -724,7 +729,7 @@ export class Operate {
     const stop = results.find((r) => r.outcome === 'failed');
     if (!stop) return this.done();
     const n = reach[stop.node];
-    if (n.role === 'hub' && this.state === 'L20' && stop.failure?.reason === 'NO ANSWER') return this.autoFailed();
+    if (n.role === 'hub' && this.state === 'hubRestarting' && stop.failure?.reason === 'NO ANSWER') return this.autoFailed();
     const why = stop.failure;
     const f = why?.running != null ? { stage: 'previous' as const } : failureStage(why?.reason ?? 'NO ANSWER');
     // A stopped update has no "cannot fix" yet: an unnamed failure is a refusal of the update.
@@ -736,7 +741,7 @@ export class Operate {
     this.failed = id;
     this.progress[id] = { stage, percent: this.progress[id]?.percent ?? 0, reason };
     this.status = stage === 'previous' ? ANNOUNCE.A13previous(n.name) : ANNOUNCE.A13(n.name);
-    this.go(this.state === 'L21' ? 'revertedOnReconnect' : 'nodeStuck');
+    this.go(this.state === 'reconnectNeeded' ? 'revertedOnReconnect' : 'nodeStuck');
     this.startWatching();
   }
 
@@ -744,32 +749,32 @@ export class Operate {
     const v = Object.values(this.sentVersion)[0];
     this.status = ANNOUNCE.A14(v === undefined ? '' : versionText(v));
     this.finished = { kind: 'updated', left: this.reach.filter((n) => !this.updated.has(n.id)).length };
-    this.go(this.state === 'L20' ? 'confirmed' : this.state === 'L21' ? 'reconnected' : 'doneNoHub');
+    this.go(this.state === 'hubRestarting' ? 'confirmed' : this.state === 'reconnectNeeded' ? 'reconnected' : 'doneNoHub');
     this.startWatching();
   }
 
   /**
    * "もう一度つなぐ" while the hub reboots: the user chooses it again. While
-   * dagon-host still reopens (L20) the chosen device goes under its next
-   * reopen; after that (L21) dagon-host applies the confirm rule to it.
+   * dagon-host still reopens (hubRestarting) the chosen device goes under its next
+   * reopen; after that (reconnectNeeded) dagon-host applies the confirm rule to it.
    * `onlyMine` (a device the browser reported connected, nobody chose it):
    * taken only when it is the hub on trial with the version just sent.
    * Resolves whether the device was taken.
    */
   async reconnectHub(pick = this.deps.reselect, onlyMine = false): Promise<boolean> {
-    if (!pick || !this.link || (this.state !== 'L20' && this.state !== 'L21')) return false;
+    if (!pick || !this.link || (this.state !== 'hubRestarting' && this.state !== 'reconnectNeeded')) return false;
     let t: Transport;
     try {
       t = await pick();
     } catch {
       return false;
     }
-    // L20: dagon-host is still reopening (its apply holds the queue), so the device goes under its next reopen now.
-    if (this.state === 'L20') {
+    // hubRestarting: dagon-host is still reopening (its apply holds the queue), so the device goes under its next reopen now.
+    if (this.state === 'hubRestarting') {
       this.swap(t);
       return true;
     }
-    // L21: swapping, checking and confirming run as one queued step, so two devices reported at once cannot interleave.
+    // reconnectNeeded: swapping, checking and confirming run as one queued step, so two devices reported at once cannot interleave.
     const link = this.link;
     const r = await this.call(async (h) => {
       const old = this.transport;
@@ -801,10 +806,10 @@ export class Operate {
    * HELLO carries no serial number, so "the same 親機" is the role, MCU and
    * release key of its first HELLO; `onTrial` (a device nobody chose) also
    * needs it on trial with the version just sent. One the user chose may be
-   * back on its previous version: CONFIRM then stops there (L22).
+   * back on its previous version: CONFIRM then stops there (stopped).
    */
   private notThisHub(h: HelloResp, onTrial: boolean): ReconnectNote | null {
-    // ponytail: -1 matches no version, so a device nobody chose is never kept when nothing was sent.
+    // -1 matches no version, so a device nobody chose is never kept when nothing was sent.
     return notThisHub(h, this.hubHello, onTrial ? (this.hubSent() ?? -1) : null);
   }
 
@@ -825,7 +830,7 @@ export class Operate {
     if (!this.reconnectNotes.some((x) => JSON.stringify(x) === JSON.stringify(why))) this.reconnectNotes = [...this.reconnectNotes, why];
   }
 
-  /** L21: the hub confirmed on the version just sent goes on to L23; on its previous version it stops there (L22). */
+  /** reconnectNeeded: the hub confirmed on the version just sent goes on to done; on its previous version it stops there (stopped). */
   private confirmed(r: ConfirmResult): void {
     const hub = this.reach.find((n) => n.role === 'hub')!;
     const mine = r.outcome === 'confirmed' || (r.outcome === 'notOnTrial' && r.version === this.sentVersion[hub.id]);
@@ -842,9 +847,9 @@ export class Operate {
     this.startWatching();
   }
 
-  /** The node "（ノード）を復旧する" names: the stopped one (L22, L25) or the first silent one (L13). */
+  /** The node "（ノード）を復旧する" names: the stopped one (stopped, recoverFailed) or the first silent one (nodesSilent). */
   get recoverTarget(): Node | undefined {
-    const id = this.state === 'L25' ? this.recovering : this.state === 'L22' ? this.failed : this.stuck?.id;
+    const id = this.state === 'recoverFailed' ? this.recovering : this.state === 'stopped' ? this.failed : this.stuck?.id;
     return this.reach.find((n) => n.id === id);
   }
 
@@ -873,7 +878,7 @@ export class Operate {
   async recover(chosen?: { name: string; bytes: Uint8Array }): Promise<'needFile' | void> {
     const c = this.config;
     const n = this.recoverTarget;
-    if (!c || !n || !['L13', 'L22', 'L25'].includes(this.state)) return;
+    if (!c || !n || !['nodesSilent', 'stopped', 'recoverFailed'].includes(this.state)) return;
     const topo = topo_compile(c.yaml);
     let release = chosen?.bytes ?? (this.file?.verdict === 'pass' ? this.file.bytes : null);
     if (chosen) {
@@ -894,9 +899,9 @@ export class Operate {
     await this.runRecovery(n, 'recover', (h, on) => h.recover(index, bytes, topo, bootcore, stage0, on));
   }
 
-  /** "もう一度直す" (L25): the operation that failed, again (a rollback stays a rollback). */
+  /** "もう一度直す" (recoverFailed): the operation that failed, again (a rollback stays a rollback). */
   async retry(): Promise<'needFile' | void> {
-    if (this.state !== 'L25') return;
+    if (this.state !== 'recoverFailed') return;
     if (this.lastKind === 'rollback' && this.recovering) return this.rollback(this.recovering);
     return this.recover();
   }
@@ -913,7 +918,7 @@ export class Operate {
     });
   }
 
-  /** "このバージョンで確定する" (M38): keeps the version a node runs on trial. */
+  /** "このバージョンで確定する": keeps the version a node runs on trial. */
   async keepTrial(id: string): Promise<void> {
     const n = this.reach.find((x) => x.id === id);
     if (!n || !this.host) return;
@@ -925,7 +930,7 @@ export class Operate {
     await this.refreshStatus(id);
   }
 
-  /** What ran last in L24, so "もう一度直す" repeats it. */
+  /** What ran last in recovering, so "もう一度直す" repeats it. */
   private lastKind: 'recover' | 'rollback' = 'recover';
 
   private async runRecovery(
@@ -934,8 +939,8 @@ export class Operate {
     run: (h: Host, on: (e: UpdateEvent) => void) => Promise<RecoverResult>,
   ): Promise<void> {
     const my = this.session;
-    this.go(this.state === 'L25' ? 'recoverAgain' : kind);
-    if (this.state !== 'L24') return;
+    this.go(this.state === 'recoverFailed' ? 'recoverAgain' : kind);
+    if (this.state !== 'recovering') return;
     this.stopWatching();
     this.lastKind = kind;
     this.recovering = n.id;
@@ -949,7 +954,7 @@ export class Operate {
       else if (e.phase === PHASE.transfer) this.progress[n.id] = { stage: 'writing', percent: e.percent };
       // TRANSFER and REBOOT carry the version the node is given (FAILED carries the one it runs).
       if ((e.phase === PHASE.transfer || e.phase === PHASE.reboot) && !e.bootCore) this.sentVersion[n.id] = e.version;
-      // The hub reboots onto it: the same reconnect and confirm rule as an update (L20 / L21).
+      // The hub reboots onto it: the same reconnect and confirm rule as an update (hubRestarting / reconnectNeeded).
       if (e.phase === PHASE.reboot && n.role === 'hub') {
         this.progress[n.id] = { stage: 'rebooting', percent: 100 };
         this.hubAway(this.sentVersion[n.id]);
@@ -974,7 +979,7 @@ export class Operate {
     const rest = this.file?.verdict === 'pass' ? Object.entries(this.progress).filter(([, p]) => p.stage === 'unwritten').map(([id]) => id) : [];
     this.status = kind === 'rollback' ? ANNOUNCE.A15(n.name, versionText(r.version)) : ANNOUNCE.A16(n.name, rest.length);
     // The hub's REBOOT event moved the state on while dagon-host ran.
-    if ((this.state as L) === 'L20') {
+    if ((this.state as L) === 'hubRestarting') {
       this.go('confirmed');
     } else if (rest.length) {
       this.targets = rest;
@@ -987,7 +992,7 @@ export class Operate {
     await this.refreshStatus(n.id);
   }
 
-  /** A recovery or rollback got through on `version`: what L23 says. */
+  /** A recovery or rollback got through on `version`: what done says. */
   private finishRun(n: Node, version: number): void {
     if (this.running === 'recover' && this.file?.verdict === 'pass') this.updated.add(n.id);
     const v = versionText(version);
@@ -996,23 +1001,23 @@ export class Operate {
 
   /** A recovery or rollback that did not get through, shown with dagon-host's reason. */
   private recoveryFailed(n: Node, reason: string): void {
-    // The rebooted hub was not reopened in time: the user chooses it again (L21).
-    if (this.state === 'L20' && reason === 'NO ANSWER') return this.autoFailed();
+    // The rebooted hub was not reopened in time: the user chooses it again (reconnectNeeded).
+    if (this.state === 'hubRestarting' && reason === 'NO ANSWER') return this.autoFailed();
     const percent = this.progress[n.id]?.percent ?? 0;
     this.progress[n.id] = { ...failureStage(reason), percent };
     this.status = REFUSALS.includes(reason) ? refusalAnnounce(reason as Refusal) : ANNOUNCE.A13(n.name);
-    this.go(this.state === 'L20' ? 'nodeStuck' : 'gaveUp');
+    this.go(this.state === 'hubRestarting' ? 'nodeStuck' : 'gaveUp');
   }
 
   /**
-   * "最初からやり直す" (SC-M): the page's records go (connection, file,
-   * progress) and the session waits at L02; the project's files are untouched.
+   * "最初からやり直す": the page's records go (connection, file,
+   * progress) and the session waits at idle; the project's files are untouched.
    */
   reset(): void {
     this.returnRefused = null;
     this.session++;
     void this.drop();
-    this.state = 'L02';
+    this.state = 'idle';
     this.failure = undefined;
     this.config = null;
     this.live = {};

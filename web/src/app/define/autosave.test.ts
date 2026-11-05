@@ -33,7 +33,7 @@ function setup(answers: SaveResult[], enabled = true) {
 const settle = () => new Promise((r) => setTimeout(r, 0));
 const edit = (d: Define, addr: number) => d.apply(setLink(d.doc, 0, 'addr', addr));
 
-describe('「プロジェクトを作る」 through the autosave queue (C-377)', () => {
+describe('「プロジェクトを作る」 through the autosave queue', () => {
   test('gen runs after the save already running and the one for the newest edit, never on an older YAML', async () => {
     const d = new Define();
     d.placeSample();

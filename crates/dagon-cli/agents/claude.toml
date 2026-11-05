@@ -37,7 +37,8 @@ args = [
 ]
 system = "file"
 
-# The Claude API (Messages) with a key from the environment.
+# The Claude API (Messages). Its key is in the OS credential store under
+# service "dagon", account "claude/api" (dagon ai key set, or DAGON Console).
 [[ways]]
 id = "api"
 name = "API キー"
@@ -45,6 +46,5 @@ name = "API キー"
 kind = "messages-http"
 url = "https://api.anthropic.com/v1/messages"
 version = "2023-06-01"
-key_env = "ANTHROPIC_API_KEY"
 model = "claude-opus-5-5"
 model_env = "DAGON_AI_MODEL"

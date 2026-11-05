@@ -50,8 +50,24 @@ sha1 = "0.11"
 base64 = "0.23"
 getrandom = "0.4"
 toml_edit = "0.22"
+# MIT OR Apache-2.0 (keyring-rs). Agent API keys live only in the OS
+# credential store: keyring-core is the store interface (with an in-memory
+# mock for tests), and each platform links its own native store below, as
+# keyring-rs advises for applications (no file or home-made fallback).
+keyring-core = "1"
+# Apache-2.0. `dagon ai key set` reads the key from the terminal without echo.
+rpassword = "7"
+
+[target.'cfg(target_os = "macos")'.dependencies]
+apple-native-keyring-store = { version = "1", features = ["keychain"] }
+
+# The Secret Service over pure-Rust D-Bus (zbus) with pure-Rust crypto: no
+# libdbus or OpenSSL needed to build.
+[target.'cfg(all(unix, not(any(target_os = "macos", target_os = "ios", target_os = "android"))))'.dependencies]
+zbus-secret-service-keyring-store = { version = "1", features = ["crypto-rust"] }
 
 [target.'cfg(windows)'.dependencies]
+windows-native-keyring-store = { version = "1", default-features = false }
 # MIT OR Apache-2.0 (watchexec). A command agent runs in a Windows job
 # object through a safe API: the program and everything it starts stop
 # together, by PID-free job termination, and also when dagon itself ends

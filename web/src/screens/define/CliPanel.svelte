@@ -1,6 +1,7 @@
 <script lang="ts">
   import { CLI_LINK, CLI_NAV, FLASH, JOBS, NODE, PROJECT, RELEASE_STEPS } from '../../app/copy.ts';
   import type { Cli, Job } from '../../app/define/cli.svelte.ts';
+  import { KeyDraft, type Agent } from '../../app/agent.svelte.ts';
   import type { Autosave } from '../../app/define/autosave.svelte.ts';
   import type { Define } from '../../app/define/define.svelte.ts';
   import { boardMissing } from '../../app/define/model.ts';
@@ -9,14 +10,27 @@
   interface Props {
     cli: Cli;
     d: Define;
-    /** The one way the 構成 goes to the project's YAML (C-377). */
+    /** The one way the 構成 goes to the project's YAML. */
     autosave: Autosave;
     panel: 'link' | 'jobs' | 'release' | 'project' | 'flash';
     /** "このリリースを運用で使う": hand the .dgb to the operate mode. */
     onuse: (name: string, bytes: Uint8Array) => void;
+    /** The agent link: the API key of each way that takes one is registered here (CLI 連携). */
+    agent?: Agent;
   }
 
-  let { cli, d, autosave, panel, onuse }: Props = $props();
+  let { cli, d, autosave, panel, onuse, agent }: Props = $props();
+
+  /** Every way that takes an API key, as GET /v1/agent lists them. */
+  const keyWays = $derived((agent?.status?.agents ?? []).flatMap((a) => a.ways.filter((w) => w.key != null).map((w) => ({ a, w }))));
+  /** One field per way, kept across status refreshes (it holds no key once sent). */
+  const drafts = new Map<string, KeyDraft>();
+  function draftOf(a: string, w: string): KeyDraft {
+    const id = `${a}/${w}`;
+    let draft = drafts.get(id);
+    if (!draft && agent) drafts.set(id, (draft = new KeyDraft(agent, { agent: a, way: w })));
+    return draft!;
+  }
 
   const ready = $derived(cli.state === 'ready');
   const nodes = $derived(d.config.nodes);
@@ -80,9 +94,34 @@
     {#if cli.state === 'ready' && cli.hello}
       <dl class="pairs">
         <dt>{CLI_LINK.workspace}</dt><dd translate="no">{cli.hello.workspace ?? ''}</dd>
-        <dt>{CLI_LINK.apiKey}</dt><dd>{cli.hello.api_key ? CLI_LINK.yes : CLI_LINK.no}</dd>
         <dt>{CLI_LINK.key}</dt><dd>{cli.hello.key ? `${CLI_LINK.yes}（${(cli.hello.key_id ?? '').slice(0, 8)}…）` : CLI_LINK.no}</dd>
       </dl>
+      {#if keyWays.length > 0}
+        <h3>{CLI_LINK.keys.heading}</h3>
+        <p class="note">{CLI_LINK.keys.detail}</p>
+        <ul class="rows">
+          {#each keyWays as { a, w } (`${a.id}/${w.id}`)}
+            {@const draft = draftOf(a.id, w.id)}
+            <li>
+              <span class="who"><strong>{a.name}</strong><span>{w.name}</span></span>
+              <span class="chip">{w.key ? CLI_LINK.keys.set : CLI_LINK.keys.unset}</span>
+              <form
+                onsubmit={(e) => {
+                  e.preventDefault();
+                  void draft.save();
+                }}
+              >
+                <label>{CLI_LINK.keys.input}<input type="password" autocomplete="off" spellcheck="false" translate="no" bind:value={draft.value} /></label>
+                <div class="actions">
+                  <button type="submit" class="secondary" aria-disabled={!draft.value.trim()} title={draft.value.trim() ? undefined : CLI_LINK.keys.saveWhy}>{CLI_LINK.keys.save}</button>
+                  {#if w.key}<button type="button" class="secondary destructive" title={CLI_LINK.keys.removeWhy} onclick={() => void draft.remove()}>{CLI_LINK.keys.remove}</button>{/if}
+                </div>
+              </form>
+              {#if draft.problem}<p class="bad">{draft.problem.label ?? ''} {draft.problem.text}</p>{/if}
+            </li>
+          {/each}
+        </ul>
+      {/if}
       <h3>{CLI_LINK.features}</h3>
       <dl class="pairs">
         {#each Object.entries(CLI_LINK.featureNames) as [f, label] (f)}
@@ -316,6 +355,18 @@
     display: flex;
     flex-wrap: wrap;
     gap: var(--s-3);
+  }
+  .note {
+    color: var(--c-muted);
+  }
+  form {
+    display: grid;
+    gap: var(--s-2);
+  }
+  /* Destructive: the secondary shape in red (red only for errors and destroying actions). */
+  .destructive {
+    border-color: var(--c-signal);
+    color: var(--c-signal);
   }
   table {
     width: 100%;

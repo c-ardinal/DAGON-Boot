@@ -165,7 +165,7 @@ def main():
                     help="public key file embedded in the firmware")
     ap.add_argument("--out", type=pathlib.Path,
                     default=pathlib.Path(tempfile.gettempdir()) / "dagon-demo-data")
-    ap.add_argument("--topology", type=pathlib.Path, default=ROOT / "topology" / "desk-demo.yaml")
+    ap.add_argument("--topology", type=pathlib.Path, default=ROOT / "topology" / "sample.yaml")
     a = ap.parse_args()
     out, key, pubkey = a.out.resolve(), a.key.resolve(), a.pubkey.resolve()
     check_out(out)

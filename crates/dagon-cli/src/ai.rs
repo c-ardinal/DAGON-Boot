@@ -37,7 +37,7 @@ whole file again.
 
 pub(crate) const SCHEMA_RS: &str = include_str!("../../dagon-topology/src/schema.rs");
 pub(crate) const CHECK_RS: &str = include_str!("../../dagon-topology/src/check.rs");
-const EXAMPLE_YAML: &str = include_str!("../../../topology/desk-demo.yaml");
+const EXAMPLE_YAML: &str = include_str!("../../../topology/sample.yaml");
 
 struct Args {
     input: Option<String>,
@@ -52,7 +52,8 @@ pub fn topology(args: &[&str]) -> Result<(), String> {
     let a = parse_args(args)?;
     let home = crate::consent::home()?;
     crate::consent::require_linked(&home)?;
-    crate::agents::ready(&home)?;
+    let keys = crate::keystore::Keys::system();
+    crate::agents::ready(&home, &keys)?;
     let description = match &a.input {
         Some(p) => std::fs::read_to_string(p).map_err(|e| format!("cannot read {p}: {e}"))?,
         None => {
@@ -67,7 +68,7 @@ pub fn topology(args: &[&str]) -> Result<(), String> {
         return Err("the board description is empty".into());
     }
     let interactive = a.input.is_some();
-    let mut api = |p: &Prompt| crate::agents::call(&home, p, DRAFT_TIMEOUT);
+    let mut api = |p: &Prompt| crate::agents::call(&home, &keys, p, DRAFT_TIMEOUT);
     let mut ask = |qs: &[String]| {
         if interactive {
             prompt(qs)
@@ -182,7 +183,7 @@ fn system_text(reg: &Registry) -> String {
         "{INSTRUCTIONS}\n\n<schema file=\"schema.rs\">\n{SCHEMA_RS}</schema>\n\n\
          <board_table format=\"json\">\n{}\n</board_table>\n\n\
          <checks file=\"check.rs\">\n{CHECK_RS}</checks>\n\n\
-         <example file=\"desk-demo.yaml\">\n{EXAMPLE_YAML}</example>\n\n{}",
+         <example file=\"sample.yaml\">\n{EXAMPLE_YAML}</example>\n\n{}",
         board_table(reg),
         crate::agents::reply_rule(&reply_schema())
     )
@@ -514,12 +515,12 @@ mod tests {
         let mcu = include_str!("../../../targets/mcu/rp2040/dagon-mcu.toml")
             .replace(
                 "id = \"rp2040\"",
-                &format!("# {secret} at {tool}\nid = \"desk-m0\""),
+                &format!("# {secret} at {tool}\nid = \"my-m0\""),
             )
             .replace("wire_id = 0x0001", "wire_id = 0x00F2")
-            .replace("name = \"rp2040-4m\"", "name = \"desk-m0-4m\"");
+            .replace("name = \"rp2040-4m\"", "name = \"my-m0-4m\"");
         let doctor = format!(
-            "\n[[doctor]]\nwhat = \"desk tool\"\nprobe = [\"{tool}\", \"--token\", \"{secret}\"]\n\
+            "\n[[doctor]]\nwhat = \"my tool\"\nprobe = [\"{tool}\", \"--token\", \"{secret}\"]\n\
              expect = \"runs\"\nfix = [\"{tool}\", \"install\"]\nhint = \"ask {secret}\"\n"
         );
         std::fs::write(dir.join("m/dagon-mcu.toml"), format!("{mcu}{doctor}")).unwrap();
@@ -527,11 +528,11 @@ mod tests {
         std::fs::write(
             &toml,
             "mcu_files = [\"m/dagon-mcu.toml\"]\n\
-             [board.desk-pico]\nproduct = \"Desk Pico\"\nmcu = \"desk-m0\"\n\
+             [board.my-pico]\nproduct = \"My Pico\"\nmcu = \"my-m0\"\n\
              flash_bytes = 0x40_0000\ndrawing = \"pico\"\n\
              header = [{ pin = \"GPIO4\", label = \"D4\" }]\n\
              default_link = { kind = \"i2c\", addr = 0x44, control = \"full\" }\n\
-             [board.desk-path]\nproduct = \"C:/Users/me/desk\"\nmcu = \"desk-m0\"\n\
+             [board.my-path]\nproduct = \"C:/Users/me/project\"\nmcu = \"my-m0\"\n\
              flash_bytes = 0x40_0000\ndrawing = \"pico\"\n\
              header = [{ pin = \"GPIO4\", label = \"see C:/Users/me/notes\" }]\n\
              default_link = { kind = \"i2c\", addr = 0x45, control = \"full\" }\n",
@@ -539,7 +540,7 @@ mod tests {
         .unwrap();
         let reg = Registry::load(&[dagon_topology::defs::Source::Project(&toml)]).unwrap();
         std::fs::remove_dir_all(&dir).unwrap();
-        assert!(!reg.mcu("desk-m0").unwrap().doctor.is_empty());
+        assert!(!reg.mcu("my-m0").unwrap().doctor.is_empty());
 
         let system = system_text(&reg);
         let table: Value = serde_json::from_str(&board_table(&reg)).unwrap();
@@ -571,15 +572,15 @@ mod tests {
                 .unwrap()
                 .clone()
         };
-        let pico = &board("desk-pico");
+        let pico = &board("my-pico");
         // A project's words that are not plain names go as project-text.
-        let path = board("desk-path");
+        let path = board("my-path");
         assert_eq!(path["product"], dagon_topology::defs::PROJECT_TEXT);
         assert_eq!(
             path["header"][0],
             json!({ "pin": "GPIO4", "label": dagon_topology::defs::PROJECT_TEXT })
         );
-        assert_eq!(pico["product"], "Desk Pico");
+        assert_eq!(pico["product"], "My Pico");
         // Builtin facts go as they are.
         assert_eq!(
             board("waveshare-rp2040-touch-lcd-1.28")["product"],
@@ -591,7 +592,7 @@ mod tests {
             .as_array()
             .unwrap()
             .iter()
-            .find(|m| m["id"] == "desk-m0")
+            .find(|m| m["id"] == "my-m0")
             .unwrap();
         assert_eq!(m0["writer"], "uf2-drive");
         assert_eq!(m0["links"]["up"], json!(["usb-cdc"]));
@@ -603,7 +604,7 @@ mod tests {
         for never in [
             secret,
             "tool.exe",
-            "desk tool",
+            "my tool",
             "rustup",
             "INFO_UF2",
             "boards.rs",

@@ -50,7 +50,7 @@ export async function wasmReady(ready: () => Promise<unknown> = dagonReady): Pro
 
 /**
  * Web Serial as the page may use it: none while it drives `dagon demo`'s
- * simulated desk, so the demo never opens a real port, not even when a
+ * simulator, so the demo never opens a real port, not even when a
  * device is plugged in during a reconnect.
  */
 export function webSerial(serial: Serial | undefined, isSim: () => boolean) {

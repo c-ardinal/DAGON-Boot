@@ -21,7 +21,7 @@ With `dagon` installed, the same simulated nodes run on your PC:
 dagon demo
 ```
 
-`dagon demo` opens DAGON Console with a simulated desk and a project of its
+`dagon demo` opens DAGON Console with a simulator and a project of its
 own, signed with a key made for the demo.
 
 ## Set up DAGON

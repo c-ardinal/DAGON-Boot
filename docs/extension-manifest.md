@@ -120,8 +120,17 @@ its own because cargo merges the `.cargo/config.toml` of every folder
 above a crate, and the node's app crate has one made for the app.
 `boot/<id>/` holds only what the last `dagon gen` wrote, as
 `nodes/<id>/dagon/` does; cargo's `target/` and `Cargo.lock` in it are
-left alone. Build it in that folder with `cargo build --release`
-(`DAGON_PUBKEY` as for every image).
+left alone. One field is yours: `version` under `[package]` of
+`boot/<id>/Cargo.toml`, the boot core's version. `dagon gen` writes the
+template's value once and keeps yours from then on; raise it for each
+boot core you release (a node writes a boot core whose version differs
+from the one it runs). `dagon gen` and the build bring the crate's own
+entry in `Cargo.lock` to it and change nothing else in the lock. When
+that file cannot be read or does not parse, `dagon gen` stops with the
+reason and leaves it as it is; when a node is skipped, its other boot
+crate files are removed but this file is kept. Build it
+in that folder with `cargo build --release` (`DAGON_PUBKEY` as for every
+image).
 
 The boot core runs its extensions privileged, so it runs only trusted
 ones (manifest `trusted = true`, listed with their source hash under

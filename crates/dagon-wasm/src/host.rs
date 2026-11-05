@@ -10,7 +10,7 @@ use dagon_host::{
     check_release, reason, Clock, ConfirmOutcome, Discovery, Error, Event, Host, NodeOutcome,
     NodeState, Outcome, RecoverAssets, RecoverPath, RomStats, Target, Transport,
 };
-use dagon_proto::payload::{HelloResp, SlotInfo, StatusResp};
+use dagon_proto::payload::{HelloResp, SlotInfo, StatusResp, VersionResp, VersionSlots};
 use js_sys::{Array, Object, Promise, Reflect, Uint8Array};
 use wasm_bindgen::prelude::*;
 use wasm_bindgen_futures::{future_to_promise, JsFuture};
@@ -182,6 +182,20 @@ impl WasmHost {
             h.boot_core_status(to?)
                 .await
                 .map(|s| status_js(&s))
+                .map_err(|e| fail(&e))
+        })
+    }
+
+    /// VERSION of one target: `{wire, mcuId, stage0, bootCore, coreSlots,
+    /// appSlots}`, each `null` when the node left it out; `null` for a node
+    /// whose agent predates VERSION.
+    pub fn version(&self, kind: &str, addr: u8) -> Promise {
+        let to = target(kind, addr);
+        self.run(|h, _| async move {
+            let mut h = h.try_borrow_mut().map_err(|_| busy())?;
+            h.version(to?)
+                .await
+                .map(|v| v.as_ref().map_or(JsValue::NULL, version_js))
                 .map_err(|e| fail(&e))
         })
     }
@@ -565,6 +579,39 @@ fn status_js(s: &StatusResp) -> JsValue {
     set(&o, "attempts", s.attempts.into());
     set(&o, "lastReason", s.last_reason.into());
     set(&o, "logGeneration", s.log_generation.into());
+    o.into()
+}
+
+fn version_js(v: &VersionResp) -> JsValue {
+    fn or_null<T: Into<JsValue>>(x: Option<T>) -> JsValue {
+        x.map_or(JsValue::NULL, Into::into)
+    }
+    fn slots_js<const N: usize>(s: Option<VersionSlots<N>>) -> JsValue {
+        let Some(s) = s else {
+            return JsValue::NULL;
+        };
+        let o = Object::new();
+        let slots: Array = s
+            .slots
+            .iter()
+            .map(|x| {
+                let e = Object::new();
+                set(&e, "state", (x.state as u8).into());
+                set(&e, "version", x.version.raw().into());
+                JsValue::from(e)
+            })
+            .collect();
+        set(&o, "active", s.active.into());
+        set(&o, "slots", slots.into());
+        o.into()
+    }
+    let o = Object::new();
+    set(&o, "wire", or_null(v.wire));
+    set(&o, "mcuId", or_null(v.mcu_id));
+    set(&o, "stage0", or_null(v.stage0.map(|x| x.raw())));
+    set(&o, "bootCore", or_null(v.boot_core.map(|x| x.raw())));
+    set(&o, "coreSlots", slots_js(v.core_slots));
+    set(&o, "appSlots", slots_js(v.app_slots));
     o.into()
 }
 

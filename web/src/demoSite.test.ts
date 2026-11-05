@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, test, vi } from 'vitest';
 import { CLI_LINK, LOCK, START, UNSUPPORTED } from './app/copy.ts';
 
-// The public demo page (Vite mode `demo`): the Console on the simulated desk, with no serve behind it.
+// The public demo page (Vite mode `demo`): the Console on the simulator, with no serve behind it.
 // Fresh modules (and the Svelte runtime with them) after the mode is set, as a `vite build --mode demo` sees it.
 async function demoBody(): Promise<string> {
   vi.stubEnv('MODE', 'demo');

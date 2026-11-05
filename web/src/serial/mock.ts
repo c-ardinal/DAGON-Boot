@@ -1,4 +1,4 @@
-// In-memory desk hub for development and tests: the sample hub plus the
+// In-memory hub for development and tests: the sample hub plus the
 // 7-segment node (I2C 0x42) and the watch (UART), answering in the
 // dagon-proto frame format. It covers what the page drives: HELLO, STATUS,
 // RELAY to the two nodes, the topology transfer and the update steps
@@ -94,7 +94,7 @@ function device(hello: HelloResp, slots = aConfirmed()): Device {
 }
 
 /** Start state of the sample: every device on 1.0.0 in slot A; the watch also has its factory image. */
-function deskDevices(hub: HelloResp): Map<DeviceKey, Device> {
+function sampleDevices(hub: HelloResp): Map<DeviceKey, Device> {
   const watch = aConfirmed();
   watch[2] = { state: SLOT_WRITTEN, version: V100 };
   return new Map<DeviceKey, Device>([
@@ -143,7 +143,7 @@ export class MockTransport implements Transport {
   }
 
   constructor(private readonly opts: MockOptions = {}) {
-    this.devices = deskDevices(opts.hello ?? SAMPLE_HUB_HELLO);
+    this.devices = sampleDevices(opts.hello ?? SAMPLE_HUB_HELLO);
     this.quiet = new Set(opts.quiet);
     this.refuse = { ...opts.refuse };
     this.hubAway = opts.hubAway ?? 2;

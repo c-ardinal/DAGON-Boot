@@ -17,21 +17,21 @@ export interface Band extends BandCopy {
 
 /** Names a button needs beyond its action: the node to recover, how many still answer. */
 export interface Names {
-  /** L26 after the CLI gave back a device that is not this 親機 (C-389): why. */
+  /** lost after the CLI gave back a device that is not this 親機: why. */
   refused?: ReconnectNote['kind'] | null;
   stuck?: string;
   responding?: number;
-  /** Nodes after the stopped one that were not written (L22). */
+  /** Nodes after the stopped one that were not written (stopped). */
   unwritten?: number;
-  /** The update covers the nodes left after a recovery (M50). */
+  /** The update covers the nodes left after a recovery. */
   rest?: boolean;
   /** dagon demo: the 親機 is simulated, so no device list appears. */
   sim?: boolean;
-  /** What the last run left (L23): the band says only that. */
+  /** What the last run left (done): the band says only that. */
   finish?: Finish | null;
 }
 
-/** 案: the cause chip on L26 when the device the CLI gave back was not taken. */
+/** the cause chip on lost when the device the CLI gave back was not taken. */
 const REFUSED_CHIP: Partial<Record<ReconnectNote['kind'], string>> = {
   otherHub: BAND_CHIP.otherHub,
   notHub: BAND_CHIP.notHub,
@@ -48,63 +48,63 @@ export const FAILURE_BAND = {
   unavailable: BAND.M57,
 } as const;
 
-/** One short sentence in every operating state (W9); L01 has no band (SC-00). */
+/** One short sentence in every operating state; unsupported has no band. */
 function words(s: L, c: Ctx, n: Names): BandCopy {
   switch (s) {
-    case 'L02':
-    case 'L03':
+    case 'idle':
+    case 'choosing':
       return n.sim ? SIM.connect : BAND.M03;
-    case 'L04':
-    case 'L05':
-    case 'L07':
+    case 'notChosen':
+    case 'portFailed':
+    case 'silentHub':
       return c.failure ? FAILURE_BAND[c.failure] : n.sim ? SIM.connect : BAND.M03;
-    case 'L06':
+    case 'checking':
       return BAND.M59;
-    case 'L08':
+    case 'scanning':
       return BAND.M60;
-    case 'L09':
+    case 'scanned':
       return BAND.M10;
-    case 'L10':
+    case 'sending':
       return BAND.M61;
-    case 'L11':
+    case 'sendFailed':
       return BAND.M12;
-    case 'L12':
+    case 'ready':
       return BAND.M13;
-    case 'L13':
-      // Nothing left to update first: recovery is the main action (M62).
+    case 'nodesSilent':
+      // Nothing left to update first: recovery is the main action.
       return c.answering === false ? BAND.M62 : BAND.M62b;
-    case 'L14':
-    case 'L15':
+    case 'reading':
+    case 'verifying':
       return BAND.M63;
-    case 'L20':
+    case 'hubRestarting':
       return BAND.M64;
-    case 'L21':
+    case 'reconnectNeeded':
       return BAND.M26;
-    case 'L22':
+    case 'stopped':
       return n.unwritten && n.stuck ? BAND_FOR.M29(n.stuck) : BAND.M65;
-    case 'L23':
+    case 'done':
       return done(n.finish);
-    case 'L28':
+    case 'cliTurn':
       return BAND.M67;
-    case 'L16':
-    case 'L17':
+    case 'fileRefused':
+    case 'otherTopology':
       return REFUSAL_BAND[c.refusal ?? 'source'];
-    case 'L18':
-    case 'L19':
-    case 'L24':
+    case 'fileReady':
+    case 'writing':
+    case 'recovering':
       return BAND.M22;
-    case 'L25':
+    case 'recoverFailed':
       return BAND.M33;
-    case 'L26':
+    case 'lost':
       return n.refused ? { chip: REFUSED_CHIP[n.refused] ?? REFUSED_CHIP.otherHub, sentence: BAND.M34.sentence } : BAND.M34;
-    case 'L27':
+    case 'sampleError':
       return BAND.M35;
     default:
       return {};
   }
 }
 
-/** L23 says only what is true: all updated, some not (they did not answer), or one node rolled back or recovered. */
+/** done says only what is true: all updated, some not (they did not answer), or one node rolled back or recovered. */
 function done(f: Finish | null | undefined): BandCopy {
   if (f?.kind === 'rolledBack') return BAND_FOR.M66back(f.name, f.version);
   if (f?.kind === 'recovered') return BAND_FOR.M66fixed(f.name, f.version);

@@ -1,7 +1,7 @@
-//! The committed desk-demo fixtures are exactly what signing produces with
+//! The committed sample fixtures are exactly what signing produces with
 //! the RFC 8032 section 7.1 TEST 1 key (Ed25519 signatures are
 //! deterministic). Regenerate with `DAGON_SIM_WRITE_FIXTURES=1 cargo test -p
-//! dagon-sim --test desk_fixtures`.
+//! dagon-sim --test sample_fixtures`.
 
 use dagon_format::header::{image_kind, target_tag};
 use dagon_format::Version;
@@ -12,7 +12,7 @@ const SEED: [u8; 32] = [
     0x9d, 0x61, 0xb1, 0x9d, 0xef, 0xfd, 0x5a, 0x60, 0xba, 0x84, 0x4a, 0xf4, 0x92, 0xec, 0x2c, 0xc4,
     0x44, 0x49, 0xc5, 0x69, 0x7b, 0x32, 0x69, 0x19, 0x70, 0x3b, 0xac, 0x03, 0x1c, 0xae, 0x7f, 0x60,
 ];
-const YAML: &str = include_str!("../../../topology/desk-demo.yaml");
+const YAML: &str = include_str!("../../../topology/sample.yaml");
 const BODY_LEN: u32 = 1024;
 
 fn key() -> KeyPair {
@@ -67,22 +67,22 @@ fn generated() -> Vec<(&'static str, Vec<u8>)> {
         &t,
         &bin,
         &images,
-        "desk-1.1.0",
+        "sample-1.1.0",
         &key(),
     )
     .unwrap();
     vec![
-        ("desk-hub-1.0.0.img", hub(0, v0)),
-        ("desk-seg-1.0.0.img", seg(0, v0)),
-        ("desk-watch-1.0.0.img", watch(v0)),
-        ("desk-1.1.0.dgb", release.bundle),
+        ("sample-hub-1.0.0.img", hub(0, v0)),
+        ("sample-seg-1.0.0.img", seg(0, v0)),
+        ("sample-watch-1.0.0.img", watch(v0)),
+        ("sample-1.1.0.dgb", release.bundle),
     ]
 }
 
 #[test]
 fn committed_fixtures_match_signing() {
     assert_eq!(*key().pk, TEST_PUBLIC_KEY);
-    assert_eq!(dagon_sim::desk::PUBKEY, TEST_PUBLIC_KEY);
+    assert_eq!(dagon_sim::sample::PUBKEY, TEST_PUBLIC_KEY);
     let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("fixtures");
     let write = std::env::var_os("DAGON_SIM_WRITE_FIXTURES").is_some();
     for (name, bytes) in generated() {
@@ -96,10 +96,10 @@ fn committed_fixtures_match_signing() {
     }
     let g = generated();
     let embedded = [
-        dagon_sim::desk::HUB_1_0_0,
-        dagon_sim::desk::SEG_1_0_0,
-        dagon_sim::desk::WATCH_1_0_0,
-        dagon_sim::desk::RELEASE_1_1_0,
+        dagon_sim::sample::HUB_1_0_0,
+        dagon_sim::sample::SEG_1_0_0,
+        dagon_sim::sample::WATCH_1_0_0,
+        dagon_sim::sample::RELEASE_1_1_0,
     ];
     for ((name, bytes), e) in g.iter().zip(embedded) {
         assert!(e == &bytes[..], "{name}: embedded copy differs");

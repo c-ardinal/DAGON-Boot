@@ -322,6 +322,8 @@ fn firmware_env(cmd: &mut Command, fw: FirmwareEnv<'_>) {
 /// Runs `cargo build --release --locked` in `dir`; returns the executable
 /// of binary `bin`. A crate without Cargo.lock yet (just generated) is
 /// resolved once without --locked, and keeps the lock file cargo writes.
+/// A version raised in its Cargo.toml is brought into its own lock entry
+/// first ([`crate::srcver::lock_own_version`]).
 pub(crate) fn cargo_build(
     dir: &Path,
     bin: &str,
@@ -345,6 +347,9 @@ pub(crate) fn cargo_build(
     .stdin(Stdio::null())
     .stdout(Stdio::piped())
     .stderr(Stdio::piped());
+    if let Some(v) = crate::srcver::lock_own_version(dir)? {
+        log(&format!("Cargo.lock: the crate's own entry is now {v}"));
+    }
     if dir.join("Cargo.lock").is_file() {
         cmd.arg("--locked");
     } else {
@@ -628,6 +633,52 @@ mod tests {
         cfg.pubkey = Some(leak);
         let e = build_nodes(&cfg, &[], &mut |_| {}, &AtomicBool::new(false)).unwrap_err();
         assert!(e.contains("holds a secret key"), "{e}");
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    #[test]
+    fn a_raised_crate_version_builds_with_only_its_own_lock_entry_changed() {
+        let base = std::env::temp_dir().join(format!("dagon-raised-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&base);
+        let pkg = base.join("pkg");
+        std::fs::create_dir_all(pkg.join("src")).unwrap();
+        let manifest = |v: &str| {
+            format!("[package]\nname = \"raised\"\nversion = \"{v}\"\nedition = \"2021\"\n[workspace]\n")
+        };
+        std::fs::write(pkg.join("Cargo.toml"), manifest("1.0.0")).unwrap();
+        std::fs::write(pkg.join("src/main.rs"), "fn main() {}\n").unwrap();
+        let mut cfg = Config {
+            base: base.clone(),
+            ..Config::default()
+        };
+        cfg.build.insert(
+            "raised".into(),
+            BuildInputs {
+                package: PathBuf::from("pkg"),
+                bin: None,
+                features: vec![],
+                slot_b_feature: None,
+                version: None,
+            },
+        );
+        let quiet = &AtomicBool::new(false);
+        build_nodes(&cfg, &[], &mut |_| {}, quiet).unwrap();
+        let before = std::fs::read_to_string(pkg.join("Cargo.lock")).unwrap();
+        // The developer raises the version; the next build takes it.
+        std::fs::write(pkg.join("Cargo.toml"), manifest("1.1.0")).unwrap();
+        let mut lines = Vec::new();
+        let r = build_nodes(&cfg, &[], &mut |l| lines.push(l.to_string()), quiet);
+        assert!(r.is_ok(), "{lines:?}");
+        assert_eq!(
+            last_build(&cfg, "raised").unwrap().0.version.as_deref(),
+            Some("1.1.0")
+        );
+        let after = std::fs::read_to_string(pkg.join("Cargo.lock")).unwrap();
+        assert_eq!(
+            after,
+            before.replace("version = \"1.0.0\"", "version = \"1.1.0\""),
+            "only the crate's own entry changes"
+        );
         let _ = std::fs::remove_dir_all(&base);
     }
 

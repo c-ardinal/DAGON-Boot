@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
-"""Desk sample hardware test: drives the desk (hub on USB, seg on I2C,
+"""Sample hardware test: drives the setup (hub on USB, seg on I2C,
 watch on UART) through the dagon CLI, scenario by scenario (hwt.toml), and
 records every step: time, command, exit code and the status of every node.
 Stops at the first unexpected state, then brings every node back to the
 last known-good release. See README.md.
 
-    python hwt.py sync --project <desk> --repo <DAGON-Boot clone> --dagon <exe>
-    python hwt.py run  --project <desk> --dagon <exe> --key <secret key file> --port <COMn>
+    python hwt.py sync --project <project> --repo <DAGON-Boot clone> --dagon <exe>
+    python hwt.py run  --project <project> --dagon <exe> --key <secret key file> --port <COMn>
                        [--out <dir>] [--only <id>...] [--from <id>]
     python hwt.py selftest
 """
@@ -143,10 +143,10 @@ class Fail(Exception):
 
 
 class Run:
-    def __init__(self, a, desk):
-        self.desk = desk
-        self.nodes = desk["nodes"]
-        self.coord = desk["coordinator"]
+    def __init__(self, a, setup):
+        self.setup = setup
+        self.nodes = setup["nodes"]
+        self.coord = setup["coordinator"]
         self.project = Path(a.project).resolve()
         # The CLI as an argv prefix (the selftest puts a fake one here).
         self.dagon = getattr(a, "dagon_argv", None) or [str(Path(a.dagon).resolve())]
@@ -218,13 +218,13 @@ class Run:
 
     def status(self, label):
         """Status of every node (retried while the hub is away, e.g. rebooting)."""
-        for _ in range(self.desk["status_tries"]):
+        for _ in range(self.setup["status_tries"]):
             rc, text, cmd, log = self.cli(["status"], f"status-{label}")
             st = parse_status(text, self.coord)
             if rc == 0 and all(k in st for k in self.nodes):
                 return st
-            time.sleep(self.desk["poll_s"])
-        raise Fail(f"dagon status failed {self.desk['status_tries']} times (last {log.name})")
+            time.sleep(self.setup["poll_s"])
+        raise Fail(f"dagon status failed {self.setup['status_tries']} times (last {log.name})")
 
     def check_identity(self, label):
         """The pinned port is still the same hub: PnP id (USB VID/PID, position)
@@ -233,8 +233,8 @@ class Run:
         st = self.status(f"{label}-identity")
         ident = {"pnp": pnp, "mcu": st[self.coord] and st[self.coord]["mcu"]}
         if self.identity is None:
-            if not pnp or self.desk["hub_usb"].upper() not in pnp.upper():
-                raise Fail(f"{self.port} is not the hub ({self.desk['hub_usb']}): {pnp}")
+            if not pnp or self.setup["hub_usb"].upper() not in pnp.upper():
+                raise Fail(f"{self.port} is not the hub ({self.setup['hub_usb']}): {pnp}")
             self.identity = ident
         elif ident != self.identity:
             raise Fail(f"hub identity changed: {self.identity} -> {ident}")
@@ -252,14 +252,14 @@ class Run:
     def wait_settled(self, want, label):
         """Polls until every node in `want` ({node: version, or None for any})
         runs it, confirmed."""
-        end = time.time() + self.desk["settle_timeout_s"]
+        end = time.time() + self.setup["settle_timeout_s"]
         while True:
             st = self.status(label)
             if all(settled(st[k]) and v in (None, st[k]["version"]) for k, v in want.items()):
                 return st
             if time.time() > end:
-                raise Fail(f"not settled on {want} after {self.desk['settle_timeout_s']} s")
-            time.sleep(self.desk["poll_s"])
+                raise Fail(f"not settled on {want} after {self.setup['settle_timeout_s']} s")
+            time.sleep(self.setup["poll_s"])
 
     def fail_config(self, nodes):
         """dagon.hwt-fail.toml: dagon.toml with the self-check-failing feature for `nodes`."""
@@ -268,7 +268,7 @@ class Run:
             head = f"[build.{n}]\n"
             if head not in text:
                 raise Fail(f"no [build.{n}] in dagon.toml")
-            text = text.replace(head, f'{head}features = ["{self.desk["fail_feature"]}"]\n', 1)
+            text = text.replace(head, f'{head}features = ["{self.setup["fail_feature"]}"]\n', 1)
         p = self.project / "dagon.hwt-fail.toml"
         p.write_text(text, encoding="utf-8")
         return p
@@ -349,7 +349,7 @@ class Run:
             unchanged(before, st, [k for k in self.nodes if k not in nodes])
             return cmd, rc, log, st, f"rolled back to {want}"
         # interrupted
-        time.sleep(self.desk["poll_s"])
+        time.sleep(self.setup["poll_s"])
         st = self.wait_settled({k: before[k]["version"] for k in self.nodes}, f"{name}-after")
         for k in self.nodes:
             expect(core(st[k]) == core(before[k]), f"{k}: changed after the interrupt")
@@ -573,19 +573,19 @@ def unchanged(before, after, nodes, slots=False):
         expect(a == b, f"{k} changed: {a} -> {b}")
 
 
-# -- sync: the desk's node crates from the repo samples ----------------------
+# -- sync: the setup's node crates from the repo samples ----------------------
 
 HUB_CHECK_OLD = "pub fn self_check() -> bool {\n    true\n}"
 
 
-def sync(a, desk):
-    """Copies each sample of [desk.sync] into its node's package (paths to
+def sync(a, setup):
+    """Copies each sample of [setup.sync] into its node's package (paths to
     the repo), gives the coordinator's generated app the self-check switch
     and runs dagon gen for it."""
     project, repo = Path(a.project).resolve(), Path(a.repo).resolve()
     cfg = tomllib.loads((project / "dagon.toml").read_text(encoding="utf-8"))
-    feat = desk["fail_feature"]
-    for node, sample in desk["sync"].items():
+    feat = setup["fail_feature"]
+    for node, sample in setup["sync"].items():
         src, dst = repo / "samples" / sample, project / cfg["build"][node]["package"]
         shutil.rmtree(dst / "src", ignore_errors=True)
         for p in src.rglob("*"):
@@ -601,7 +601,7 @@ def sync(a, desk):
             else:
                 shutil.copy2(p, out)
         set_bin(project / "dagon.toml", node, src / "Cargo.toml")
-    hub = project / cfg["build"][desk["coordinator"]]["package"]
+    hub = project / cfg["build"][setup["coordinator"]]["package"]
     new = f'pub fn self_check() -> bool {{\n    !cfg!(feature = "{feat}")\n}}'
     app = hub / "src" / "app.rs"
     text = app.read_text(encoding="utf-8").replace("\r\n", "\n")
@@ -612,10 +612,10 @@ def sync(a, desk):
     cargo = hub / "Cargo.toml"
     text = cargo.read_text(encoding="utf-8")
     if f"\n{feat} = []" not in text:
-        line = f"\n# Test build whose self-check fails (samples/desk-test).\n{feat} = []\n"
+        line = f"\n# Test build whose self-check fails (samples/hardware-test).\n{feat} = []\n"
         cargo.write_text(text.replace("\n[features]\n", "\n[features]" + line, 1),
                          encoding="utf-8", newline="\n")
-    rc = subprocess.call([str(Path(a.dagon).resolve()), "gen", desk["coordinator"]], cwd=project)
+    rc = subprocess.call([str(Path(a.dagon).resolve()), "gen", setup["coordinator"]], cwd=project)
     print("synced; dagon gen rc =", rc)
     return rc
 
@@ -753,7 +753,7 @@ def selftest_select():
 
 def fake_dagon(argv):
     """`hwt.py _fake-dagon <state.json> <dagon args>`: status, rollback and
-    apply over a JSON desk; every call is logged in the state's `calls`."""
+    apply over a JSON setup; every call is logged in the state's `calls`."""
     path, args = Path(argv[0]), [a for a in argv[1:]]
     st = json.loads(path.read_text(encoding="utf-8"))
     st["calls"].append(args[0])
@@ -787,7 +787,7 @@ def selftest_restore():
     by rollback when no release reached every node; nothing written when the
     hub's identity changed, the known-good copy changed, or the start
     version is out of reach."""
-    desk = {"nodes": ["seg", "hub"], "coordinator": "hub", "hub_usb": "VID_C0DE",
+    setup = {"nodes": ["seg", "hub"], "coordinator": "hub", "hub_usb": "VID_C0DE",
             "status_tries": 1, "poll_s": 0, "settle_timeout_s": 0}
 
     def node(v, other=("Written", "1.0.0")):
@@ -804,7 +804,7 @@ def selftest_restore():
             a = argparse.Namespace(project=tmp, dagon=None, key="k", port="COMX", out=tmp / "o",
                                    dagon_argv=[sys.executable, __file__, "_fake-dagon", str(state)],
                                    port_identity=lambda port: ident["pnp"])
-            r = Run(a, desk)
+            r = Run(a, setup)
             r.start_state = r.check_identity("start")
             return r
 
@@ -902,19 +902,19 @@ def main():
     r.add_argument("--only", nargs="*", help="scenario ids to run")
     r.add_argument("--from", dest="start", help="start at this scenario id")
     for p in (s, r):
-        p.add_argument("--desk", default=str(HERE / "hwt.toml"), help="desk data and scenarios")
+        p.add_argument("--setup", default=str(HERE / "hwt.toml"), help="setup data and scenarios")
     sub.add_parser("selftest")
     a = ap.parse_args()
     if a.cmd == "selftest":
         return selftest()
-    data = tomllib.loads(Path(a.desk).read_text(encoding="utf-8"))
+    data = tomllib.loads(Path(a.setup).read_text(encoding="utf-8"))
     if a.cmd == "sync":
-        return sync(a, data["desk"])
+        return sync(a, data["setup"])
     try:
         scs = select(data["scenario"], a.only, a.start)
     except ValueError as e:
         ap.error(str(e))
-    return Run(a, data["desk"]).run(scs)
+    return Run(a, data["setup"]).run(scs)
 
 
 if __name__ == "__main__":

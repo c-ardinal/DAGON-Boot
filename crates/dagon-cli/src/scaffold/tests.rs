@@ -6,9 +6,7 @@ use std::path::{Path, PathBuf};
 
 use super::*;
 
-const DESK: &str = include_str!("../../../../topology/desk-demo.yaml");
-
-/// Today's source of a DAGON developer's project: this clone.
+/// The source of a DAGON developer's project: this clone.
 fn dev() -> crate::dagonsrc::NewSource {
     let here = std::fs::canonicalize(crate::dagonsrc::BUILT_FROM).unwrap();
     crate::dagonsrc::NewSource::Clone(crate::config::plain_path(here))
@@ -90,8 +88,8 @@ fn read(base: &Path, rel: &str) -> String {
     std::fs::read_to_string(base.join(rel)).unwrap()
 }
 
-fn desk() -> Topology {
-    dagon_topology::parse_str(DESK).unwrap()
+fn sample() -> Topology {
+    dagon_topology::parse_str(SAMPLE).unwrap()
 }
 
 fn project(d: &Path) -> PathBuf {
@@ -101,14 +99,14 @@ fn project(d: &Path) -> PathBuf {
 }
 
 #[test]
-fn desk_demo_uses_each_packages_template_and_skips_what_is_missing() {
-    let d = tmp("desk");
+fn sample_uses_each_packages_template_and_skips_what_is_missing() {
+    let d = tmp("sample");
     let src = clone(&d);
     let base = project(&d);
     let r = gen(
         dagon_topology::defs::Registry::builtin(),
         &base,
-        &desk(),
+        &sample(),
         &src,
         &BTreeMap::new(),
         &[],
@@ -158,7 +156,7 @@ fn gen_keeps_the_developers_code_and_refreshes_only_generated_parts() {
     gen(
         dagon_topology::defs::Registry::builtin(),
         &base,
-        &desk(),
+        &sample(),
         &src,
         &BTreeMap::new(),
         &[],
@@ -177,7 +175,7 @@ fn gen_keeps_the_developers_code_and_refreshes_only_generated_parts() {
     let own = own + "\n[target.'cfg(target_arch = \"xtensa\")'.dependencies]\ndagon-mcu-esp32s3 = { path = \"stale\" }\n";
     std::fs::write(&cargo, own).unwrap();
 
-    let t2 = dagon_topology::parse_str(&DESK.replace("baud: 115200", "baud: 230400")).unwrap();
+    let t2 = dagon_topology::parse_str(&SAMPLE.replace("baud: 115200", "baud: 230400")).unwrap();
     let r = gen(
         dagon_topology::defs::Registry::builtin(),
         &base,
@@ -238,7 +236,7 @@ fn a_node_chosen_by_mcu_finds_the_package_that_declares_the_mcu() {
         path: Some(c),
         ..DagonSource::default()
     };
-    let yaml = DESK.replace("    board: nucleo-f401re\n", "");
+    let yaml = SAMPLE.replace("    board: nucleo-f401re\n", "");
     let t = dagon_topology::parse_str(&yaml).unwrap();
     let mut boards = BTreeMap::new();
     boards.insert(
@@ -287,7 +285,7 @@ fn a_release_source_pins_the_git_tag_and_reads_its_packages_from_cargos_checkout
     let r = gen(
         dagon_topology::defs::Registry::builtin(),
         &base,
-        &desk(),
+        &sample(),
         &src,
         &BTreeMap::new(),
         &["watch".into()],
@@ -307,7 +305,7 @@ fn a_release_source_pins_the_git_tag_and_reads_its_packages_from_cargos_checkout
     let e = gen(
         dagon_topology::defs::Registry::builtin(),
         &base,
-        &desk(),
+        &sample(),
         &missing,
         &BTreeMap::new(),
         &["seg".into()],
@@ -325,7 +323,7 @@ fn new_pins_this_clis_release_unless_a_clone_is_asked_for() {
         git: crate::dagonsrc::REPO_URL.into(),
         tag: crate::dagonsrc::release_tag(),
     };
-    new_project(&d.join("a"), "a", DESK, &keys, &release).unwrap();
+    new_project(&d.join("a"), "a", SAMPLE, &keys, &release).unwrap();
     let c = Config::load(Some(&d.join("a/dagon.toml").to_string_lossy())).unwrap();
     assert_eq!(c.dagon.git.as_deref(), Some(crate::dagonsrc::REPO_URL));
     assert_eq!(
@@ -336,7 +334,7 @@ fn new_pins_this_clis_release_unless_a_clone_is_asked_for() {
 
     let clone =
         crate::dagonsrc::NewSource::from_options(Some(&d.to_string_lossy()), None, None).unwrap();
-    new_project(&d.join("b"), "b", DESK, &keys, &clone).unwrap();
+    new_project(&d.join("b"), "b", SAMPLE, &keys, &clone).unwrap();
     let c = Config::load(Some(&d.join("b/dagon.toml").to_string_lossy())).unwrap();
     assert!(c.dagon.path.is_some() && c.dagon.git.is_none());
 
@@ -356,20 +354,21 @@ fn new_makes_the_project_and_a_key_outside_it() {
     let d = tmp("new");
     let proj = d.join("fleet");
     let keys = d.join("keys");
-    let made = new_project(&proj, "fleet", DESK, &keys, &dev()).unwrap();
+    let made = new_project(&proj, "fleet", SAMPLE, &keys, &dev()).unwrap();
     assert!(made.iter().any(|l| l.starts_with("key:")));
     assert!(keys.join(dagon_sign::SECRET_FILE).exists());
     let toml = read(&proj, "dagon.toml");
     assert!(toml.contains("topology = \"topology.yaml\"") && toml.contains("[dagon]"));
     let secret = std::fs::read_to_string(keys.join(dagon_sign::SECRET_FILE)).unwrap();
     assert!(!toml.contains(secret.trim()));
-    assert_eq!(read(&proj, "topology.yaml"), DESK);
-    assert!(new_project(&proj, "fleet", DESK, &keys, &dev()).is_err());
-    let again = new_project(&d.join("fleet2"), "fleet2", DESK, &keys, &dev()).unwrap();
+    assert_eq!(read(&proj, "topology.yaml"), SAMPLE);
+    assert!(new_project(&proj, "fleet", SAMPLE, &keys, &dev()).is_err());
+    let again = new_project(&d.join("fleet2"), "fleet2", SAMPLE, &keys, &dev()).unwrap();
     assert!(!again.iter().any(|l| l.starts_with("key:")));
 
     let cfg = proj.join("dagon.toml");
-    let added = add_build_tables(dagon_topology::defs::Registry::builtin(), &cfg, &desk()).unwrap();
+    let added =
+        add_build_tables(dagon_topology::defs::Registry::builtin(), &cfg, &sample()).unwrap();
     assert_eq!(added, ["hub", "seg", "watch"]);
     let c = Config::load(Some(&cfg.to_string_lossy())).unwrap();
     assert_eq!(c.build["seg"].package, PathBuf::from("nodes/seg"));
@@ -379,7 +378,7 @@ fn new_makes_the_project_and_a_key_outside_it() {
         "ESP images serve both slots"
     );
     assert!(
-        add_build_tables(dagon_topology::defs::Registry::builtin(), &cfg, &desk())
+        add_build_tables(dagon_topology::defs::Registry::builtin(), &cfg, &sample())
             .unwrap()
             .is_empty()
     );
@@ -390,7 +389,7 @@ fn new_writes_claude_files_with_no_paths_or_secrets() {
     let d = tmp("claude");
     let proj = d.join("fleet");
     let keys = d.join("keys");
-    let made = new_project(&proj, "fleet", DESK, &keys, &dev()).unwrap();
+    let made = new_project(&proj, "fleet", SAMPLE, &keys, &dev()).unwrap();
     let secret = std::fs::read_to_string(keys.join(dagon_sign::SECRET_FILE)).unwrap();
     let home = home().unwrap().to_string_lossy().replace('\\', "/");
     let rels = [
@@ -433,7 +432,7 @@ fn regen_restores_a_deleted_dagon_dependency() {
     gen(
         dagon_topology::defs::Registry::builtin(),
         &base,
-        &desk(),
+        &sample(),
         &src,
         &BTreeMap::new(),
         &["seg".into()],
@@ -450,7 +449,7 @@ fn regen_restores_a_deleted_dagon_dependency() {
     let r = gen(
         dagon_topology::defs::Registry::builtin(),
         &base,
-        &desk(),
+        &sample(),
         &src,
         &BTreeMap::new(),
         &["seg".into()],
@@ -472,7 +471,7 @@ fn regen_adds_a_dagon_package_the_template_newly_needs() {
     gen(
         dagon_topology::defs::Registry::builtin(),
         &base,
-        &desk(),
+        &sample(),
         &src,
         &BTreeMap::new(),
         &["seg".into()],
@@ -493,7 +492,7 @@ fn regen_adds_a_dagon_package_the_template_newly_needs() {
     let r = gen(
         dagon_topology::defs::Registry::builtin(),
         &base,
-        &desk(),
+        &sample(),
         &src,
         &BTreeMap::new(),
         &["seg".into()],
@@ -526,8 +525,8 @@ fn topology_names_and_tags_cannot_break_out_of_generated_code() {
     let d = tmp("inject");
     let src = clone(&d);
     let base = project(&d);
-    let yaml = DESK
-        .replace("name: desk-demo", "name: \"x\\nfn evil() {}\"")
+    let yaml = SAMPLE
+        .replace("name: sample", "name: \"x\\nfn evil() {}\"")
         .replace("tag: seg-f401-7seg", "tag: \"a\\\"); evil(); (\\\"\"");
     let t = dagon_topology::parse_str(&yaml).unwrap();
     gen(
@@ -760,7 +759,7 @@ fn gen_refresh_replaces_a_renamed_dagon_dependency() {
     gen(
         dagon_topology::defs::Registry::builtin(),
         &base,
-        &desk(),
+        &sample(),
         &src,
         &BTreeMap::new(),
         &nodes,
@@ -771,7 +770,7 @@ fn gen_refresh_replaces_a_renamed_dagon_dependency() {
     gen(
         dagon_topology::defs::Registry::builtin(),
         &base,
-        &desk(),
+        &sample(),
         &src,
         &BTreeMap::new(),
         &nodes,
@@ -785,7 +784,7 @@ fn gen_refresh_replaces_a_renamed_dagon_dependency() {
 
 #[test]
 fn hop_placeholders_name_each_nodes_link_kinds() {
-    let t = desk();
+    let t = sample();
     let hub = t.node("hub").unwrap();
     let (up, down) = hop_placeholders(dagon_topology::defs::Registry::builtin(), &t, hub).unwrap();
     assert_eq!(up, "dagon_mcu_rp2040::links::Kind::UsbCdc");
@@ -817,7 +816,7 @@ fn hop_placeholders_name_each_nodes_link_kinds() {
 #[test]
 fn mcu_templates_wire_the_links_the_topology_names() {
     let reg = dagon_topology::defs::Registry::builtin();
-    let t = desk();
+    let t = sample();
     let src = DagonSource::default();
     let tpl = |mcu: &str| {
         std::fs::read_to_string(
@@ -956,8 +955,8 @@ fn the_hop_paths_are_exactly_the_firmware_links_contract() {
         assert_eq!(names(Dir::Up), up, "{mcu} up");
         assert_eq!(names(Dir::Down), down, "{mcu} down");
     }
-    // Every node of the desk, rendered: the exact paths of the contract.
-    let t = desk();
+    // Every node of the sample, rendered: the exact paths of the contract.
+    let t = sample();
     for (id, up, down) in [
         (
             "hub",
@@ -1000,7 +999,7 @@ fn templates_get_the_hops_and_gen_refuses_one_not_available_yet() {
     gen(
         dagon_topology::defs::Registry::builtin(),
         &base,
-        &desk(),
+        &sample(),
         &src,
         &BTreeMap::new(),
         &["seg".into()],
@@ -1012,7 +1011,7 @@ fn templates_get_the_hops_and_gen_refuses_one_not_available_yet() {
         "const UPLINK: Kind = dagon_mcu_stm32f401re::links::Kind::I2c;\nconst DOWNLINKS: &[Kind] = &[];\n"
     );
     // The 親機 over BLE: gen stops, naming the hop.
-    let ble = dagon_topology::parse_str(&DESK.replacen(
+    let ble = dagon_topology::parse_str(&SAMPLE.replacen(
         "    tag: hub-rp2040-lcd\n",
         "    tag: hub-rp2040-lcd\n    uplink: { kind: ble, host: browser }\n",
         1,
@@ -1033,7 +1032,7 @@ fn templates_get_the_hops_and_gen_refuses_one_not_available_yet() {
         "{e}"
     );
     // A link a 子機 cannot do: named by its two ends.
-    let wifi = dagon_topology::parse_str(&DESK.replacen(
+    let wifi = dagon_topology::parse_str(&SAMPLE.replacen(
         "    kind: i2c\n    bus: ",
         "    kind: wifi-tcp\n    bus: ",
         1,
@@ -1158,7 +1157,7 @@ fn gen_skips_a_node_folder_reached_through_a_junction() {
     let r = gen(
         dagon_topology::defs::Registry::builtin(),
         &base,
-        &desk(),
+        &sample(),
         &src,
         &BTreeMap::new(),
         &["watch".into()],

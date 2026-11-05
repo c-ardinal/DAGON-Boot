@@ -2,10 +2,10 @@ use std::collections::BTreeSet;
 
 use dagon_topology::{check_str, defs::Registry, Severity};
 
-const DEMO: &str = include_str!("../../../topology/desk-demo.yaml");
+const DEMO: &str = include_str!("../../../topology/sample.yaml");
 
 fn mutate(from: &str, to: &str) -> String {
-    assert!(DEMO.contains(from), "desk-demo has no {from:?}");
+    assert!(DEMO.contains(from), "sample has no {from:?}");
     DEMO.replacen(from, to, 1)
 }
 
@@ -28,7 +28,7 @@ fn assert_fires(yaml: &str, rule: &str) {
 }
 
 #[test]
-fn desk_demo_is_clean() {
+fn sample_is_clean() {
     let report = check_str(DEMO);
     assert!(report.issues.is_empty(), "{:?}", report.issues);
     assert!(report.is_pushable());
@@ -132,7 +132,7 @@ fn v23_several_coordinators_over_can() {
     // The shape itself parses: no V-01, and the coordinator count is not V-03.
     let rules = error_rules(&yaml);
     assert!(rules.is_empty(), "{rules:?}");
-    // The second 親機 is skipped: the compiled topology is the desk demo's.
+    // The second 親機 is skipped: the compiled topology is the sample's.
     let (_, skipped) = dagon_topology::updatable(&dagon_topology::parse_str(&yaml).unwrap());
     assert_eq!(
         skipped,
@@ -394,7 +394,7 @@ fn builtin_boards_are_the_board_packages() {
     }
 }
 
-/// desk-demo with the hub's uplink set to `kind` (host `host`).
+/// sample with the hub's uplink set to `kind` (host `host`).
 fn with_uplink(kind: &str, host: &str) -> String {
     mutate(
         "    tag: hub-rp2040-lcd

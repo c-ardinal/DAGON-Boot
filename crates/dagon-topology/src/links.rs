@@ -45,7 +45,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn the_desk_demo_hops_are_available_and_radios_are_not() {
+    fn the_sample_hops_are_available_and_radios_are_not() {
         assert!(available("rp2040", Dir::Up).contains(&LinkKind::UsbCdc));
         assert!(available("rp2040", Dir::Down).contains(&LinkKind::I2c));
         assert!(available("stm32f401re", Dir::Up).contains(&LinkKind::I2c));

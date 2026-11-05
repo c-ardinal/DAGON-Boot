@@ -1,20 +1,20 @@
-//! The simulated desk (dagon-sim) as the page's byte link: the desk-demo hub
+//! The simulator (dagon-sim) as the page's byte link: the sample hub
 //! with the F401 on I2C (NRST/BOOT0 wired, ROM loader simulated) and the
 //! watch on the UART, each on 1.0.0. Tests and `?sim` in development drive
 //! dagon-host through the same `HostLink` as Web Serial, on the simulator's
 //! clock. Built with the `sim` feature only.
 
-use dagon_sim::{demo_hub_desk, SimHub};
+use dagon_sim::{sample_hub, SimHub};
 use wasm_bindgen::prelude::*;
 
 #[wasm_bindgen]
-pub struct SimDesk(SimHub);
+pub struct Simulator(SimHub);
 
 #[wasm_bindgen]
-impl SimDesk {
+impl Simulator {
     #[wasm_bindgen(constructor)]
-    pub fn new(seed: u32) -> SimDesk {
-        SimDesk(demo_hub_desk(seed as u64))
+    pub fn new(seed: u32) -> Simulator {
+        Simulator(sample_hub(seed as u64))
     }
 
     /// Bytes from the page (USB CDC).

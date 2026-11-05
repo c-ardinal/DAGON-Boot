@@ -2,7 +2,7 @@ import { describe, expect, test } from 'vitest';
 import type { Cli, FsList, ProjectResult } from './define/cli.svelte.ts';
 import { Start } from './start.svelte.ts';
 
-const HOME: FsList = { path: 'C:/Users/u', parent: null, folders: [{ name: 'desk', project: true }, { name: 'work', project: false }] };
+const HOME: FsList = { path: 'C:/Users/u', parent: null, folders: [{ name: 'project', project: true }, { name: 'work', project: false }] };
 
 function fakeCli(features: string[], answer: ProjectResult = 'opened') {
   const calls: string[] = [];
@@ -20,29 +20,29 @@ function fakeCli(features: string[], answer: ProjectResult = 'opened') {
   return { cli, calls };
 }
 
-describe('SC-S0 start', () => {
+describe('start screen', () => {
   test('new: the home folder list, a name, then serve makes the folder and the page opens it', async () => {
     const { cli, calls } = fakeCli(['project']);
     let opened = 0;
     const s = new Start({ cli, opened: async () => void opened++, local: null });
     await s.choose('new');
     expect(s.list).toEqual(HOME);
-    s.name = 'my-desk';
+    s.name = 'my-project';
     await s.make();
-    expect(calls).toEqual(['fs ', 'new C:/Users/u/my-desk false']);
+    expect(calls).toEqual(['fs ', 'new C:/Users/u/my-project false']);
     expect([opened, s.failed]).toEqual([1, null]);
   });
 
-  test('sample: from desk-demo; open: a project folder opens, another folder is entered', async () => {
+  test('sample: from sample; open: a project folder opens, another folder is entered', async () => {
     const { cli, calls } = fakeCli(['project']);
     const s = new Start({ cli, opened: async () => undefined, local: null });
     await s.choose('sample');
-    expect(s.name).toBe('desk-demo');
+    expect(s.name).toBe('sample');
     await s.make();
     await s.choose('open');
-    await s.open('C:/Users/u/desk');
+    await s.open('C:/Users/u/project');
     await s.browse('C:/Users/u/work');
-    expect(calls).toEqual(['fs ', 'new C:/Users/u/desk-demo true', 'fs C:/Users/u', 'open C:/Users/u/desk', 'fs C:/Users/u/work']);
+    expect(calls).toEqual(['fs ', 'new C:/Users/u/sample true', 'fs C:/Users/u', 'open C:/Users/u/project', 'fs C:/Users/u/work']);
   });
 
   test('a folder with only a 構成 asks first: yes makes dagon.toml and opens it, no stays', async () => {
@@ -69,12 +69,12 @@ describe('SC-S0 start', () => {
     expect(s.recent.map((r) => r.name)).toEqual(['p0', 'p1', 'p2', 'p3', 'p4']);
   });
 
-  test('a refusal stays on SC-S0 with its reason; nothing opens', async () => {
+  test('a refusal stays on the start screen with its reason; nothing opens', async () => {
     const { cli } = fakeCli(['project'], 'busy');
     let opened = 0;
     const s = new Start({ cli, opened: async () => void opened++, local: null });
     await s.choose('open');
-    await s.open('C:/Users/u/desk');
+    await s.open('C:/Users/u/project');
     expect([s.failed, s.making, opened]).toEqual(['busy', false, 0]);
   });
 

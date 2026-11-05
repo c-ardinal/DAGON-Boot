@@ -1,10 +1,10 @@
-// The sample desk set-up (desk-demo): hub, 7-segment node on I2C and watch on
+// The sample 構成 (topology/sample.yaml): hub, 7-segment node on I2C and watch on
 // UART, with the names the page uses for them and the physical wiring of each
 // link. The YAML is the repository's sample topology; it is what "send to the
 // hub" compiles and sends.
-import deskDemoYaml from '../../../topology/desk-demo.yaml?raw';
+import sampleYaml from '../../../topology/sample.yaml?raw';
 
-export const DESK_DEMO_YAML: string = deskDemoYaml;
+export const SAMPLE_YAML: string = sampleYaml;
 
 export type LinkKind = 'USB' | 'UART' | 'I2C' | 'BLE' | 'Wi-Fi' | 'Ethernet' | 'CAN';
 
@@ -33,7 +33,7 @@ export interface Node {
   depth?: number;
   /** A 親機's uplink as the 構成 writes it; absent when none is written (USB to the PC) or the 親機 is linked from another node. */
   uplink?: { kind: string; host: UplinkHost };
-  /** Why updating skips this node for now (V-23); absent when updating reaches it. */
+  /** Why updating skips this node (V-23); absent when updating reaches it. */
   notYet?: Skip;
 }
 
@@ -77,9 +77,9 @@ export interface Config {
 const NRST_HEADER = 'NRST（ヘッダの位置: 未設定）';
 const BOOT0_HEADER = 'BOOT0（ヘッダの位置: 未設定）';
 
-export const DESK_DEMO: Config = {
-  name: 'desk-demo',
-  yaml: DESK_DEMO_YAML,
+export const SAMPLE_CONFIG: Config = {
+  name: 'sample',
+  yaml: SAMPLE_YAML,
   nodes: [
     { id: 'hub', no: 1, name: 'メイン', role: 'hub', product: 'Waveshare RP2040-Touch-LCD-1.28', mcu: 'RP2040', via: '', reset: null, boot: null, target: { kind: 'hub', addr: 0 } },
     { id: 'seg', no: 2, name: '7セグ', role: 'node', product: 'NUCLEO-F401RE', mcu: 'STM32F401RE', via: 'I2C 0x42', reset: 'GPIO18', boot: 'GPIO28', target: { kind: 'i2c', addr: 0x42 } },

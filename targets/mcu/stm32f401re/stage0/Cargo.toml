@@ -17,6 +17,7 @@ lint = { features = [""] }
 dagon-mcu-stm32f401re = { path = "..", default-features = false, features = ["image-stage0"] }
 dagon-mcu-common = { path = "../../common" }
 dagon-core = { path = "../../../../crates/dagon-core" }
+dagon-format = { path = "../../../../crates/dagon-format" }
 cortex-m = { version = "0.7", features = ["critical-section-single-core"] }
 cortex-m-rt = "0.7"
 panic-halt = "1"

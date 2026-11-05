@@ -9,8 +9,10 @@ export interface AgentWay {
   id: string;
   name: string;
   kind: 'command' | 'messages-http' | string;
-  /** It can be used on this machine now (program on PATH, key set). */
+  /** It can be used on this machine now (program on PATH, key registered). */
   available: boolean;
+  /** A way that takes an API key: whether one is in the OS credential store; null (or absent) for a login way. */
+  key?: boolean | null;
 }
 
 export interface AgentDef {
@@ -143,6 +145,26 @@ export class Agent {
     }
   }
 
+  /**
+   * PUT (with the key) or DELETE /v1/agent/key/<agent>/<way>: the key goes only to the local serve, which keeps
+   * it in the OS credential store; nothing of it stays here. null when it went through, else why not.
+   */
+  async setKey(choice: AgentChoice, key: string | null): Promise<AgentProblem | null> {
+    const path = `agent/key/${encodeURIComponent(choice.agent)}/${encodeURIComponent(choice.way)}`;
+    try {
+      const r = key === null ? await this.api('DELETE', path) : await this.api('PUT', path, { key });
+      if (!r.ok) {
+        const body = (await r.json().catch(() => ({}))) as { error?: unknown; code?: unknown };
+        if (body.code === 'AGENT_KEY_STORE' && typeof body.error === 'string') return { ...AGENT.errors.AGENT_KEY_STORE, text: body.error };
+        return r.status === 400 ? AGENT.errors.KEY_REFUSED : problemOf(r.status, typeof body.code === 'string' ? body.code : undefined);
+      }
+      this.status = (await r.json()) as AgentStatus;
+      return null;
+    } catch {
+      return AGENT.errors.AGENT_FAILED;
+    }
+  }
+
   /** Sends a question at once (consent was given when linking); the answer or why not joins the conversation. */
   async ask(question: string, kind: AskKind, selection?: Selection): Promise<void> {
     if (this.guard('ask')) return;
@@ -170,6 +192,31 @@ export class Agent {
   /** The proposal of message `i` went into the 構成. */
   applied(i: number) {
     this.messages = this.messages.map((m, k) => (k === i ? { ...m, applied: true } : m));
+  }
+}
+
+/**
+ * The key field of one way. What is typed stays only until it is sent: the field is cleared before the
+ * request leaves, whatever the answer, and nothing of it is kept in any browser storage.
+ */
+export class KeyDraft {
+  value = $state('');
+  problem = $state<AgentProblem | null>(null);
+
+  constructor(
+    private readonly agent: Agent,
+    readonly choice: AgentChoice,
+  ) {}
+
+  async save(): Promise<void> {
+    const key = this.value;
+    this.value = '';
+    if (!key.trim()) return;
+    this.problem = await this.agent.setKey(this.choice, key);
+  }
+
+  async remove(): Promise<void> {
+    this.problem = await this.agent.setKey(this.choice, null);
   }
 }
 

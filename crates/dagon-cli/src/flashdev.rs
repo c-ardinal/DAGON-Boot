@@ -448,7 +448,7 @@ fn uf2_candidate(root: &Path, info: &str, want: &Uf2Want<'_>) -> Option<Candidat
 /// with nothing mounted fails its read at once; reads are time-limited),
 /// elsewhere every mount point in /proc/self/mountinfo and every folder in
 /// /Volumes (macOS).
-// ponytail: all 26 letters rather than GetLogicalDrives, which needs an
+// all 26 letters rather than GetLogicalDrives, which needs an
 // unsafe FFI call the crate forbids (`#![forbid(unsafe_code)]`).
 fn mounted_volumes() -> Vec<PathBuf> {
     if cfg!(windows) {

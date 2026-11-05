@@ -16,6 +16,7 @@ use dagon_format::statelog::slot;
 use dagon_port::BusError;
 use dagon_proto::mailbox::{State, STATE_LEN};
 use dagon_proto::payload::{role, SlotState, StatusResp};
+use dagon_proto::{finish, flags, frame_len, max_payload, Frame, Status, HEADER_LEN};
 
 /// How an image running on trial behaves (confirmed images always work).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
@@ -110,6 +111,9 @@ pub struct SimNode {
     pub trial_wdt_ms: u64,
     /// 3-byte state reads answered BUSY before a response becomes READY.
     pub busy_reads: u32,
+    /// Commands this node's agent was built before: it answers them
+    /// `Unsupported`, as such an agent does.
+    pub predates: Vec<u8>,
     pub rom: SimRom,
     run: Run,
     on_trial: bool,
@@ -136,6 +140,7 @@ impl SimNode {
             trial_app: TrialApp::default(),
             trial_wdt_ms: TRIAL_WDT_MS.into(),
             busy_reads: 1,
+            predates: Vec::new(),
             rom: SimRom::default(),
             run: Run::Dead,
             on_trial: false,
@@ -307,6 +312,9 @@ impl SimNode {
         if let (true, TrialApp::ConfirmsAfter(ms)) = (self.on_trial, self.trial_app) {
             self.check.set(now_ms.saturating_sub(self.booted_ms) >= ms);
         }
+        if let Some(old) = self.predated(request) {
+            return Some((old, false));
+        }
         let reply = self
             .agent
             .handle(request)
@@ -316,6 +324,18 @@ impl SimNode {
             return None;
         }
         reply
+    }
+
+    /// The `Unsupported` reply to a request in [`SimNode::predates`].
+    fn predated(&self, request: &[u8]) -> Option<Vec<u8>> {
+        let (f, _) = Frame::decode(request, max_payload::USB).ok()?;
+        if !self.predates.contains(&f.cmd) || f.flags & flags::RESP != 0 {
+            return None;
+        }
+        let mut out = vec![0u8; frame_len(1)];
+        out[HEADER_LEN] = Status::Unsupported as u8;
+        finish(&mut out, flags::RESP, f.seq, f.cmd, 1).ok()?;
+        Some(out)
     }
 
     /// Stream links (UART, USB): returns the response frame; a REBOOT reply

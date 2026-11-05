@@ -21,7 +21,7 @@
   });
 </script>
 
-<!-- 案: leaving with edits the project's YAML does not have (ui-design §5.2, UC-D04). -->
+<!-- leaving with edits the project's YAML does not have. -->
 <dialog bind:this={dialog} aria-labelledby="unsaved-h" aria-describedby="unsaved-s" onclose={onstay}>
   <h2 id="unsaved-h">{UNSAVED.heading}</h2>
   <p class="cause">{reason}</p>

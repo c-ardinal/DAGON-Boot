@@ -78,7 +78,7 @@
 {#snippet bad(field: string)}
   {#each issues(field) as p (p.rule + p.path)}
     {@const c = problemChip(p)}
-    <!-- B-01 is said once, beside the ボード heading (§11.0b). -->
+    <!-- B-01 is said once, beside the ボード heading. -->
     {#if p.rule !== 'B-01'}<span class={c.kind} id="bad-{p.rule}-{field}">{c.mark} {p.short}</span>{/if}
   {/each}
 {/snippet}

@@ -9,11 +9,11 @@ import { Define } from './define/define.svelte.ts';
 import { topoDiff } from './define/diff.ts';
 import { fromYaml, type Topo } from './define/model.ts';
 import { Operate, waterOf } from './operate.svelte.ts';
-import { DESK_DEMO, DESK_DEMO_YAML } from './sample.ts';
+import { SAMPLE_CONFIG, SAMPLE_YAML } from './sample.ts';
 
 const repo = (rel: string) => new URL(`../../../${rel}`, import.meta.url);
-/** dagon-sim's desk release 1.1.0: hub A/B, seg A/B and watch images for desk-demo, test key. */
-const RELEASE = new Uint8Array(readFileSync(repo('crates/dagon-sim/fixtures/desk-1.1.0.dgb')));
+/** dagon-sim's sample release 1.1.0: hub A/B, seg A/B and watch images for sample, test key. */
+const RELEASE = new Uint8Array(readFileSync(repo('crates/dagon-sim/fixtures/sample-1.1.0.dgb')));
 const SIM_PAIR_YAML = new TextDecoder().decode(readFileSync(repo('topology/sim-pair.yaml')));
 
 /** dagon-host's real timeouts (45 s hub reconnect, 30 s node wait) on a clock that runs fast. */
@@ -44,7 +44,7 @@ async function sentTo(opts: MockOptions = {}, keep?: (bytes: Uint8Array) => Prom
   });
   await op.connect();
   await op.push();
-  expect(op.state).toBe('L12');
+  expect(op.state).toBe('ready');
   return { t, op };
 }
 
@@ -53,13 +53,13 @@ const v = (raw: number) => versionText(raw);
 describe('update from the page with dagon-host apply against the mock hub', () => {
   test('all three: children in update order, the hub last, reconnect after its reboot, each confirmed on 1.1.0', async () => {
     const { t, op } = await sentTo();
-    op.takeFile('desk-1.1.0.dgb', RELEASE);
-    expect([op.state, op.file?.verdict, op.targets]).toEqual(['L18', 'pass', ['hub', 'seg', 'watch']]);
+    op.takeFile('sample-1.1.0.dgb', RELEASE);
+    expect([op.state, op.file?.verdict, op.targets]).toEqual(['fileReady', 'pass', ['hub', 'seg', 'watch']]);
     expect(op.status).toBe(ANNOUNCE.A10ok(3));
 
     await op.update();
     expect(t.reboots).toEqual(['i2c:66', 'uart', 'hub']);
-    expect(op.state).toBe('L23');
+    expect(op.state).toBe('done');
     expect(op.status).toBe(ANNOUNCE.A14('1.1.0'));
     expect(Object.values(op.progress).map((p) => p.stage)).toEqual(['done', 'done', 'done']);
     expect(op.overall).toBe(100);
@@ -72,12 +72,12 @@ describe('update from the page with dagon-host apply against the mock hub', () =
     const { t, op } = await sentTo({ quiet: ['i2c:66', 'uart'] });
     await op.round();
     await op.round();
-    expect(op.state).toBe('L13');
-    op.takeFile('desk-1.1.0.dgb', RELEASE);
-    expect([op.state, op.targets]).toEqual(['L18', ['hub']]);
+    expect(op.state).toBe('nodesSilent');
+    op.takeFile('sample-1.1.0.dgb', RELEASE);
+    expect([op.state, op.targets]).toEqual(['fileReady', ['hub']]);
 
     await op.update();
-    expect(op.state).toBe('L23');
+    expect(op.state).toBe('done');
     expect(t.reboots).toEqual(['hub']);
     expect(v(t.helloOf('hub').activeVersion)).toBe('1.1.0');
     expect(v(t.helloOf('i2c:66').activeVersion)).toBe('1.0.0');
@@ -88,28 +88,28 @@ describe('update from the page with dagon-host apply against the mock hub', () =
     const bad = RELEASE.slice();
     bad[bad.length - 1] ^= 1;
     op.takeFile('tampered.dgb', bad);
-    expect([op.state, op.file?.verdict, op.refusal]).toEqual(['L16', 'source', 'source']);
+    expect([op.state, op.file?.verdict, op.refusal]).toEqual(['fileRefused', 'source', 'source']);
     expect(bandOf(op.state, op.ctx).sentence).toBe(BAND.M18.sentence);
     await op.update();
-    expect([op.state, t.reboots]).toEqual(['L16', []]);
+    expect([op.state, t.reboots]).toEqual(['fileRefused', []]);
   }, 20_000);
 
   test('a release built for another configuration is refused (topology mismatch)', async () => {
     const { t, op } = await sentTo();
-    op.config = { ...DESK_DEMO, yaml: SIM_PAIR_YAML };
-    op.takeFile('desk-1.1.0.dgb', RELEASE);
-    expect([op.state, op.refusal]).toEqual(['L17', 'topology']);
+    op.config = { ...SAMPLE_CONFIG, yaml: SIM_PAIR_YAML };
+    op.takeFile('sample-1.1.0.dgb', RELEASE);
+    expect([op.state, op.refusal]).toEqual(['otherTopology', 'topology']);
     expect(bandOf(op.state, op.ctx).sentence).toBe(BAND.M20.sentence);
     expect(t.reboots).toEqual([]);
   }, 20_000);
 
-  test('L17: the differences are shown, and 定義 takes the 構成 of the file so the same file then passes', async () => {
+  test('otherTopology: the differences are shown, and 定義 takes the 構成 of the file so the same file then passes', async () => {
     const { op } = await sentTo();
     const d = new Define();
-    d.load(fromYaml(DESK_DEMO_YAML.replace('addr: 0x42', 'addr: 0x43')));
+    d.load(fromYaml(SAMPLE_YAML.replace('addr: 0x42', 'addr: 0x43')));
     op.useConfig(d.config);
-    op.takeFile('desk-1.1.0.dgb', RELEASE);
-    expect([op.state, op.refusal]).toEqual(['L17', 'topology']);
+    op.takeFile('sample-1.1.0.dgb', RELEASE);
+    expect([op.state, op.refusal]).toEqual(['otherTopology', 'topology']);
     const file = op.fileTopology as unknown as Topo;
     const rows = topoDiff(d.doc.topo, file, d.doc.names);
     expect(rows).toEqual([expect.objectContaining({ here: expect.stringContaining('0x43'), file: expect.stringContaining('0x42'), nodes: ['seg'] })]);
@@ -117,8 +117,8 @@ describe('update from the page with dagon-host apply against the mock hub', () =
     d.importRelease(file);
     expect(d.errors).toBe(0);
     op.useConfig(d.config);
-    op.takeFile('desk-1.1.0.dgb', RELEASE);
-    expect([op.state, op.file?.verdict]).toEqual(['L18', 'pass']);
+    op.takeFile('sample-1.1.0.dgb', RELEASE);
+    expect([op.state, op.file?.verdict]).toEqual(['fileReady', 'pass']);
     d.undo();
     expect(d.doc.topo.links?.[0].addr).toBe(0x43);
   }, 20_000);
@@ -130,7 +130,7 @@ describe('update from the page with dagon-host apply against the mock hub', () =
     const extra = (id: string, role: string) => `  - id: ${id}\n    mcu: rp2040\n    role: ${role}\n    port: self-boot\n    tag: ${id}\n`;
     d.load(
       fromYaml(
-        DESK_DEMO_YAML.replace('  - id: seg\n', `${extra('hub2', 'coordinator')}${extra('x', 'node')}${extra('y', 'node')}  - id: seg\n`)
+        SAMPLE_YAML.replace('  - id: seg\n', `${extra('hub2', 'coordinator')}${extra('x', 'node')}${extra('y', 'node')}  - id: seg\n`)
           .replace('\nbuses:', `${extra('deep', 'node')}\nbuses:`)
           .replace('links:\n', 'links:\n  - from: hub\n    to: hub2\n    kind: can\n  - from: seg\n    to: deep\n    kind: uart\n    iface: hw-uart0\n    pins: { tx: 0, rx: 1 }\n    control:\n      kind: cooperative\n      rom_entry: force-download-boot\n  - from: x\n    to: y\n    kind: uart\n    iface: hw-uart0\n    pins: { tx: 0, rx: 1 }\n    control:\n      kind: cooperative\n      rom_entry: force-download-boot\n  - from: y\n    to: x\n    kind: uart\n    iface: hw-uart0\n    pins: { tx: 0, rx: 1 }\n    control:\n      kind: cooperative\n      rom_entry: force-download-boot\n')
           .replace('order: [seg, watch, hub]', 'order: [seg, watch, deep, x, y, hub2, hub]'),
@@ -150,13 +150,13 @@ describe('update from the page with dagon-host apply against the mock hub', () =
     await op.round();
     expect([op.live.hub2.responding, op.live.deep.responding, op.live.x.responding]).toEqual([null, null, null]);
     expect(op.stuck).toBeUndefined();
-    op.takeFile('desk-1.1.0.dgb', RELEASE);
-    expect([op.state, op.file?.verdict, op.targets]).toEqual(['L18', 'pass', ['hub', 'seg', 'watch']]);
+    op.takeFile('sample-1.1.0.dgb', RELEASE);
+    expect([op.state, op.file?.verdict, op.targets]).toEqual(['fileReady', 'pass', ['hub', 'seg', 'watch']]);
     expect(op.status).toBe(ANNOUNCE.A10ok(3, 4));
 
     await op.update();
     expect(t.reboots).toEqual(['i2c:66', 'uart', 'hub']);
-    expect(op.state).toBe('L23');
+    expect(op.state).toBe('done');
     expect(Object.keys(op.progress).sort()).toEqual(['hub', 'seg', 'watch']);
     expect(op.finished).toEqual({ kind: 'updated', left: 0 });
   }, 60_000);
@@ -164,54 +164,54 @@ describe('update from the page with dagon-host apply against the mock hub', () =
   test('not a release at all', async () => {
     const { op } = await sentTo();
     op.takeFile('notes.txt', new TextEncoder().encode('hello'));
-    expect([op.state, op.refusal]).toEqual(['L16', 'format']);
+    expect([op.state, op.refusal]).toEqual(['fileRefused', 'format']);
     expect(bandOf(op.state, op.ctx).sentence).toBe(BAND.M19.sentence);
   }, 20_000);
 
   test('hub not back within 45 s: chosen again by the user, then dagon-host confirms it', async () => {
     const { t, op } = await sentTo({ hubAway: Infinity });
-    op.takeFile('desk-1.1.0.dgb', RELEASE);
+    op.takeFile('sample-1.1.0.dgb', RELEASE);
     const run = op.update();
     await new Promise((r) => setTimeout(r, 0));
     await run;
-    expect(op.state).toBe('L21');
+    expect(op.state).toBe('reconnectNeeded');
     expect(op.alert).toBe(ANNOUNCE.A21timeout);
     expect(t.helloOf('hub').trial).toBe(true);
 
     t.replug();
     await op.reconnectHub();
-    expect(op.state).toBe('L23');
+    expect(op.state).toBe('done');
     expect([v(t.helloOf('hub').activeVersion), t.helloOf('hub').trial]).toEqual(['1.1.0', false]);
   }, 60_000);
 
   test('hub not back within 45 s and back on its previous version when chosen again: stopped there, not done', async () => {
     const { t, op } = await sentTo({ hubAway: Infinity, fallBack: ['hub'] });
-    op.takeFile('desk-1.1.0.dgb', RELEASE);
+    op.takeFile('sample-1.1.0.dgb', RELEASE);
     await op.update();
-    expect(op.state).toBe('L21');
+    expect(op.state).toBe('reconnectNeeded');
     t.replug();
     await op.reconnectHub();
     expect(v(t.helloOf('hub').activeVersion)).toBe('1.0.0');
-    expect([op.state, op.failed, op.progress.hub.stage]).toEqual(['L22', 'hub', 'previous']);
+    expect([op.state, op.failed, op.progress.hub.stage]).toEqual(['stopped', 'hub', 'previous']);
     expect(op.status).toBe(ANNOUNCE.A13previous('メイン'));
   }, 60_000);
 
   test('a USB disconnect while the hub reboots is not taken for a lost connection', async () => {
     const { op } = await sentTo({ hubAway: 5 });
-    op.takeFile('desk-1.1.0.dgb', RELEASE);
+    op.takeFile('sample-1.1.0.dgb', RELEASE);
     const run = op.update();
-    while (op.state !== 'L20') await new Promise((r) => setTimeout(r, 1));
+    while (op.state !== 'hubRestarting') await new Promise((r) => setTimeout(r, 1));
     op.lose();
     await run;
-    expect(op.state).toBe('L23');
+    expect(op.state).toBe('done');
   }, 60_000);
 
   test('a node that does not answer stops the run there; later nodes are not written', async () => {
     const { t, op } = await sentTo();
-    op.takeFile('desk-1.1.0.dgb', RELEASE);
+    op.takeFile('sample-1.1.0.dgb', RELEASE);
     t.setQuiet('i2c:66', true);
     await op.update();
-    expect([op.state, op.failed]).toEqual(['L22', 'seg']);
+    expect([op.state, op.failed]).toEqual(['stopped', 'seg']);
     expect(op.progress).toMatchObject({ seg: { stage: 'silent' }, watch: { stage: 'unwritten' }, hub: { stage: 'unwritten' } });
     expect(op.status).toBe(ANNOUNCE.A13('7セグ'));
     expect(bandOf(op.state, op.ctx, { stuck: '7セグ', unwritten: 2 })).toMatchObject(BAND_FOR.M29('7セグ'));
@@ -220,10 +220,10 @@ describe('update from the page with dagon-host apply against the mock hub', () =
 
   test('a run that stops at a later node shows the earlier confirmed node on its new version', async () => {
     const { t, op } = await sentTo();
-    op.takeFile('desk-1.1.0.dgb', RELEASE);
+    op.takeFile('sample-1.1.0.dgb', RELEASE);
     t.setQuiet('uart', true);
     await op.update();
-    expect([op.state, op.failed]).toEqual(['L22', 'watch']);
+    expect([op.state, op.failed]).toEqual(['stopped', 'watch']);
     expect(op.progress.seg.stage).toBe('done');
     expect([v(op.live.seg?.hello?.activeVersion ?? 0), op.live.seg?.hello?.trial]).toEqual(['1.1.0', false]);
   }, 60_000);
@@ -233,9 +233,9 @@ describe('update from the page with dagon-host apply against the mock hub', () =
     [0x09, 'E_SIGNATURE', '× 配布元不明'],
   ])('a node that refuses (status %i) is shown with its reason, not as not answering', async (status, reason, chip) => {
     const { t, op } = await sentTo({ refuse: { 'i2c:66': status } });
-    op.takeFile('desk-1.1.0.dgb', RELEASE);
+    op.takeFile('sample-1.1.0.dgb', RELEASE);
     await op.update();
-    expect([op.state, op.failed]).toEqual(['L22', 'seg']);
+    expect([op.state, op.failed]).toEqual(['stopped', 'seg']);
     expect(op.progress.seg).toMatchObject({ stage: 'refused', reason });
     expect(NODE.refused[reason]).toBe(chip);
     expect(op.progress).toMatchObject({ watch: { stage: 'unwritten' }, hub: { stage: 'unwritten' } });
@@ -244,7 +244,7 @@ describe('update from the page with dagon-host apply against the mock hub', () =
 
   test('before the update each target shows what it gets: the version the release gives it', async () => {
     const { op } = await sentTo();
-    op.takeFile('desk-1.1.0.dgb', RELEASE);
+    op.takeFile('sample-1.1.0.dgb', RELEASE);
     expect(Object.fromEntries(Object.entries(op.fileVersions).map(([id, raw]) => [id, v(raw)]))).toEqual({ hub: '1.1.0', seg: '1.1.0', watch: '1.1.0' });
   }, 20_000);
 
@@ -260,7 +260,7 @@ describe('update from the page with dagon-host apply against the mock hub', () =
     expect(op.targets).toEqual(['hub', 'watch']);
 
     await op.update();
-    expect(op.state).toBe('L23');
+    expect(op.state).toBe('done');
     expect(t.reboots).toEqual(['uart', 'hub']);
     expect(v(t.helloOf('i2c:66').activeVersion)).toBe('1.0.0');
   }, 60_000);
@@ -276,14 +276,14 @@ describe('update from the page with dagon-host apply against the mock hub', () =
     r.op.takeFile('v1.1.0.dgb', RELEASE);
     await r.op.update();
     expect(seen).toEqual([[RELEASE.length, 0]]);
-    expect([r.op.state, r.op.keepFailed]).toEqual(['L23', false]);
+    expect([r.op.state, r.op.keepFailed]).toEqual(['done', false]);
   }, 60_000);
 
   test('kept: a package that could not be kept is still written, and the failure is told', async () => {
     const { op } = await sentTo({}, async () => false);
     op.takeFile('v1.1.0.dgb', RELEASE);
     await op.update();
-    expect([op.state, op.keepFailed]).toEqual(['L23', true]);
+    expect([op.state, op.keepFailed]).toEqual(['done', true]);
   }, 60_000);
 
   test('boot core and app in one write: the boot core\'s confirmation does not finish the node; only the app\'s makes 100 %', async () => {
@@ -331,13 +331,13 @@ describe('update from the page with dagon-host apply against the mock hub', () =
     op.takeFile('v1.1.0.dgb', RELEASE);
     for (const id of ['hub', 'seg', 'watch']) op.choose(id, false);
     await op.update();
-    expect(op.state).toBe('L18');
+    expect(op.state).toBe('fileReady');
     expect(t.reboots).toEqual([]);
   }, 20_000);
 
-  test('the hub back by itself within 45 s: the reconnect dialog state (L21) is never entered', async () => {
+  test('the hub back by itself within 45 s: the reconnect dialog state (reconnectNeeded) is never entered', async () => {
     const { op } = await sentTo({ hubAway: 3 });
-    op.takeFile('desk-1.1.0.dgb', RELEASE);
+    op.takeFile('sample-1.1.0.dgb', RELEASE);
     const seen = new Set<string>();
     let running = true;
     const run = op.update().finally(() => (running = false));
@@ -346,66 +346,66 @@ describe('update from the page with dagon-host apply against the mock hub', () =
       await new Promise((r) => setTimeout(r, 0));
     }
     await run;
-    expect(seen.has('L20')).toBe(true);
-    expect(seen.has('L21')).toBe(false);
-    expect([op.state, op.startedAt]).toEqual(['L23', null]);
+    expect(seen.has('hubRestarting')).toBe(true);
+    expect(seen.has('reconnectNeeded')).toBe(false);
+    expect([op.state, op.startedAt]).toEqual(['done', null]);
   }, 60_000);
 
-  test('auto reconnect failed (L21): a device the browser reports is taken by itself when it is the hub on trial with the version just sent', async () => {
+  test('auto reconnect failed (reconnectNeeded): a device the browser reports is taken by itself when it is the hub on trial with the version just sent', async () => {
     const { t, op } = await sentTo({ hubAway: Infinity });
-    op.takeFile('desk-1.1.0.dgb', RELEASE);
+    op.takeFile('sample-1.1.0.dgb', RELEASE);
     await op.update();
-    expect(op.state).toBe('L21');
+    expect(op.state).toBe('reconnectNeeded');
     t.replug();
     const took = await op.reconnectHub(async () => {
       await t.open();
       return t;
     }, true);
-    expect([took, op.state]).toEqual([true, 'L23']);
+    expect([took, op.state]).toEqual([true, 'done']);
     expect([v(t.helloOf('hub').activeVersion), t.helloOf('hub').trial]).toEqual(['1.1.0', false]);
   }, 60_000);
 
   test('auto reconnect failed: a reported device that is not the hub on trial is left alone, with the reason noted', async () => {
     const { t, op } = await sentTo({ hubAway: Infinity, fallBack: ['hub'] });
-    op.takeFile('desk-1.1.0.dgb', RELEASE);
+    op.takeFile('sample-1.1.0.dgb', RELEASE);
     await op.update();
-    expect(op.state).toBe('L21');
+    expect(op.state).toBe('reconnectNeeded');
     t.replug();
     const took = await op.reconnectHub(async () => {
       await t.open();
       return t;
     }, true);
-    expect([took, op.state]).toEqual([false, 'L21']);
+    expect([took, op.state]).toEqual([false, 'reconnectNeeded']);
     expect(op.reconnectNotes).toEqual([{ kind: 'version', version: t.helloOf('hub').activeVersion, trial: false }]);
-    // The user can still choose it: then it is shown stopped on its previous version (L22).
+    // The user can still choose it: then it is shown stopped on its previous version (stopped).
     await op.reconnectHub();
-    expect([op.state, op.progress.hub.stage]).toEqual(['L22', 'previous']);
+    expect([op.state, op.progress.hub.stage]).toEqual(['stopped', 'previous']);
   }, 60_000);
 
-  test('the header 切断 releases the hub to L02 while idle, and does nothing while an update runs', async () => {
+  test('the header 切断 releases the hub to idle while idle, and does nothing while an update runs', async () => {
     const { t, op } = await sentTo({ hubAway: Infinity });
     await op.disconnect();
-    expect([op.state, op.status]).toEqual(['L02', ANNOUNCE.A21lost]);
+    expect([op.state, op.status]).toEqual(['idle', ANNOUNCE.A21lost]);
     await expect(t.write(new Uint8Array(1))).rejects.toThrow('port not open');
 
     await op.connect();
-    expect(op.state).toBe('L12');
-    op.takeFile('desk-1.1.0.dgb', RELEASE);
+    expect(op.state).toBe('ready');
+    op.takeFile('sample-1.1.0.dgb', RELEASE);
     const run = op.update();
-    while (op.state !== 'L19') await new Promise((r) => setTimeout(r, 0));
+    while (op.state !== 'writing') await new Promise((r) => setTimeout(r, 0));
     await op.disconnect();
-    expect(op.state).not.toBe('L02');
+    expect(op.state).not.toBe('idle');
     await run;
-    expect(op.state).toBe('L21');
+    expect(op.state).toBe('reconnectNeeded');
     await op.disconnect();
-    expect(op.state).toBe('L21');
+    expect(op.state).toBe('reconnectNeeded');
   }, 60_000);
 
-  test('L21: two devices reported at once (another hub and this one) do not interleave; only this hub is taken', async () => {
+  test('reconnectNeeded: two devices reported at once (another hub and this one) do not interleave; only this hub is taken', async () => {
     const { t, op } = await sentTo({ hubAway: Infinity });
-    op.takeFile('desk-1.1.0.dgb', RELEASE);
+    op.takeFile('sample-1.1.0.dgb', RELEASE);
     await op.update();
-    expect(op.state).toBe('L21');
+    expect(op.state).toBe('reconnectNeeded');
     const other = new MockTransport();
     t.replug();
     const open = (x: MockTransport) => async () => {
@@ -414,7 +414,7 @@ describe('update from the page with dagon-host apply against the mock hub', () =
     };
     const took = await Promise.all([op.reconnectHub(open(other), true), op.reconnectHub(open(t), true)]);
     expect(took).toEqual([false, true]);
-    expect(op.state).toBe('L23');
+    expect(op.state).toBe('done');
     expect([v(t.helloOf('hub').activeVersion), t.helloOf('hub').trial]).toEqual(['1.1.0', false]);
     expect([v(other.helloOf('hub').activeVersion), other.reboots]).toEqual(['1.0.0', []]);
   }, 60_000);
@@ -422,62 +422,62 @@ describe('update from the page with dagon-host apply against the mock hub', () =
   test.each([
     ['another hub (other MCU)', { hello: { ...SAMPLE_HUB_HELLO, mcuId: 9 } }, { kind: 'otherHub' }],
     ['a device that does not answer', { silent: true }, { kind: 'silent' }],
-  ] as const)('L21: the user chose %s: closed at once, still L21, the reason in the log', async (_, opts, note) => {
+  ] as const)('reconnectNeeded: the user chose %s: closed at once, still reconnectNeeded, the reason in the log', async (_, opts, note) => {
     const { op } = await sentTo({ hubAway: Infinity });
-    op.takeFile('desk-1.1.0.dgb', RELEASE);
+    op.takeFile('sample-1.1.0.dgb', RELEASE);
     await op.update();
-    expect(op.state).toBe('L21');
+    expect(op.state).toBe('reconnectNeeded');
     const wrong = new MockTransport(opts);
     const took = await op.reconnectHub(async () => {
       await wrong.open();
       return wrong;
     });
-    expect([took, op.state, op.alert]).toEqual([false, 'L21', ANNOUNCE.A21timeout]);
+    expect([took, op.state, op.alert]).toEqual([false, 'reconnectNeeded', ANNOUNCE.A21timeout]);
     expect(op.reconnectNotes).toContainEqual(note);
     await expect(wrong.write(new Uint8Array(1))).rejects.toThrow('port not open');
     expect(op.device).not.toBe(wrong);
   }, 60_000);
 
-  test('after updating only the answering nodes, the ones left out stay visible and recoverable: L23 moves to L13 with recovery first', async () => {
+  test('after updating only the answering nodes, the ones left out stay visible and recoverable: done moves to nodesSilent with recovery first', async () => {
     const { op } = await sentTo({ quiet: ['i2c:66', 'uart'] });
     await op.round();
     await op.round();
     expect(bandOf(op.state, op.ctx).primary?.action).toBe('updateResponding');
-    op.takeFile('desk-1.1.0.dgb', RELEASE);
+    op.takeFile('sample-1.1.0.dgb', RELEASE);
     await op.update();
-    expect(op.state).toBe('L23');
+    expect(op.state).toBe('done');
     await op.round();
-    expect([op.state, op.stuck?.id, op.needUpdate]).toEqual(['L13', 'seg', 0]);
+    expect([op.state, op.stuck?.id, op.needUpdate]).toEqual(['nodesSilent', 'seg', 0]);
     const b = bandOf(op.state, op.ctx, { stuck: op.recoverTarget?.name });
     expect([b.primary?.label, b.secondary, b.sentence]).toEqual([BUTTON_FOR.recover('7セグ'), [], BAND.M62.sentence]);
   }, 60_000);
 
-  test('L23 says all nodes run the new version only when they all do', async () => {
+  test('done says all nodes run the new version only when they all do', async () => {
     const { op } = await sentTo();
-    op.takeFile('desk-1.1.0.dgb', RELEASE);
+    op.takeFile('sample-1.1.0.dgb', RELEASE);
     await op.update();
-    expect([op.state, op.finished]).toEqual(['L23', { kind: 'updated', left: 0 }]);
+    expect([op.state, op.finished]).toEqual(['done', { kind: 'updated', left: 0 }]);
     expect(bandOf(op.state, op.ctx, { finish: op.finished }).sentence).toBe(BAND.M66.sentence);
   }, 60_000);
 
-  test('L23 after updating only the answering nodes: says how many were not updated, and to recover them', async () => {
+  test('done after updating only the answering nodes: says how many were not updated, and to recover them', async () => {
     const { op } = await sentTo({ quiet: ['i2c:66', 'uart'] });
     await op.round();
     await op.round();
-    op.takeFile('desk-1.1.0.dgb', RELEASE);
+    op.takeFile('sample-1.1.0.dgb', RELEASE);
     await op.update();
-    expect([op.state, op.finished]).toEqual(['L23', { kind: 'updated', left: 2 }]);
+    expect([op.state, op.finished]).toEqual(['done', { kind: 'updated', left: 2 }]);
     const b = bandOf(op.state, op.ctx, { finish: op.finished });
     expect(b.sentence).toBe(BAND_FOR.M66some(2).sentence);
     expect(b.sentence).not.toBe(BAND.M66.sentence);
   }, 60_000);
 
-  test('L23 after 「前のバージョンに戻す」: says the node runs its previous version', async () => {
+  test('done after 「前のバージョンに戻す」: says the node runs its previous version', async () => {
     const { op } = await sentTo();
-    op.takeFile('desk-1.1.0.dgb', RELEASE);
+    op.takeFile('sample-1.1.0.dgb', RELEASE);
     await op.update();
     await op.rollback('seg');
-    expect([op.state, op.finished]).toEqual(['L23', { kind: 'rolledBack', name: '7セグ', version: '1.0.0' }]);
+    expect([op.state, op.finished]).toEqual(['done', { kind: 'rolledBack', name: '7セグ', version: '1.0.0' }]);
     expect(bandOf(op.state, op.ctx, { finish: op.finished }).sentence).toBe(BAND_FOR.M66back('7セグ', '1.0.0').sentence);
   }, 60_000);
 
@@ -497,15 +497,15 @@ describe('update from the page with dagon-host apply against the mock hub', () =
     await op.connect();
     await op.push();
     await op.handOver();
-    expect(op.state).toBe('L28');
+    expect(op.state).toBe('cliTurn');
     expect(bandOf(op.state, op.ctx).sentence).toBe(BAND.M67.sentence);
     await op.cliReturned();
-    expect([op.state, op.status]).toEqual(['L12', ANNOUNCE.A05]);
+    expect([op.state, op.status]).toEqual(['ready', ANNOUNCE.A05]);
     await op.round();
     expect(op.responding).toBe(3);
   }, 20_000);
 
-  test('the CLI gives back another 親機 than the one connected: closed, L26 (M34), the reason in the log', async () => {
+  test('the CLI gives back another 親機 than the one connected: closed, lost (M34), the reason in the log', async () => {
     const t = new MockTransport();
     const other = new MockTransport({ hello: { ...SAMPLE_HUB_HELLO, mcuId: 9 } });
     const op = new Operate({
@@ -523,10 +523,10 @@ describe('update from the page with dagon-host apply against the mock hub', () =
     await op.push();
     await op.handOver();
     await op.cliReturned();
-    expect([op.state, op.reconnectNotes]).toEqual(['L26', [{ kind: 'otherHub' }]]);
+    expect([op.state, op.reconnectNotes]).toEqual(['lost', [{ kind: 'otherHub' }]]);
     expect(bandOf(op.state, op.ctx).sentence).toBe(BAND.M34.sentence);
     await expect(other.write(new Uint8Array(1))).rejects.toThrow('port not open');
-    // C-389: the reason shows on L26 itself, as its cause chip; connecting again clears it.
+    // The reason shows on lost itself, as its cause chip; connecting again clears it.
     expect(op.returnRefused).toEqual({ kind: 'otherHub' });
     expect(bandOf(op.state, op.ctx, { refused: op.returnRefused?.kind })).toMatchObject({ chip: BAND_CHIP.otherHub, sentence: BAND.M34.sentence });
     await op.connect();
@@ -550,17 +550,17 @@ describe('update from the page with dagon-host apply against the mock hub', () =
     });
     await op.connect();
     await op.push();
-    op.takeFile('desk-1.1.0.dgb', RELEASE);
+    op.takeFile('sample-1.1.0.dgb', RELEASE);
     t.expected = [];
     await op.update();
-    expect(op.state).toBe('L23');
+    expect(op.state).toBe('done');
     const sent = t.expected.findIndex((x) => x !== null);
     expect(v(t.expected[sent]!)).toBe('1.1.0');
     expect(t.expected[t.expected.length - 1]).toBeNull();
     expect(t.expected.slice(sent + 1)).toContain(null);
   }, 60_000);
 
-  test('the CLI gives the hub back but it cannot be opened: L26, connect again (M34)', async () => {
+  test('the CLI gives the hub back but it cannot be opened: lost, connect again (M34)', async () => {
     const t = new MockTransport();
     const op = new Operate({
       open: async () => {
@@ -576,7 +576,7 @@ describe('update from the page with dagon-host apply against the mock hub', () =
     await op.push();
     await op.handOver();
     await op.cliReturned();
-    expect(op.state).toBe('L26');
+    expect(op.state).toBe('lost');
     expect(bandOf(op.state, op.ctx).sentence).toBe(BAND.M34.sentence);
   }, 20_000);
 
@@ -595,9 +595,9 @@ describe('update from the page with dagon-host apply against the mock hub', () =
 
   test('the hub came back on its previous version: stopped there, marked previous', async () => {
     const { t, op } = await sentTo({ fallBack: ['hub'] });
-    op.takeFile('desk-1.1.0.dgb', RELEASE);
+    op.takeFile('sample-1.1.0.dgb', RELEASE);
     await op.update();
-    expect([op.state, op.failed, op.progress.hub.stage]).toEqual(['L22', 'hub', 'previous']);
+    expect([op.state, op.failed, op.progress.hub.stage]).toEqual(['stopped', 'hub', 'previous']);
     expect(op.status).toBe(ANNOUNCE.A13previous('メイン'));
     expect(v(t.helloOf('hub').activeVersion)).toBe('1.0.0');
   }, 60_000);

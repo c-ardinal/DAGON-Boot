@@ -4,9 +4,9 @@
   import { DEMO_SITE } from '../app/site.ts';
 
   interface Props {
-    /** 新しく作る / 見本から新しく作る / 開く: all go to SC-S0 (the project is saved, nothing to confirm). */
+    /** 新しく作る / 見本から新しく作る / 開く: all go to the start screen (the project is saved, nothing to confirm). */
     onstart: (c: StartChoice) => void;
-    /** "最初からやり直す": asks first (M53). */
+    /** "最初からやり直す": asks first. */
     onrestart: () => void;
     /** Held while an update or recovery runs. */
     locked: boolean;
@@ -28,7 +28,7 @@
   ];
 </script>
 
-<!-- SC-M: a fold under the header that pushes the content down; the right column stays as it was. -->
+<!-- The menu: a fold under the header that pushes the content down; the right column stays as it was. -->
 <nav id="menu" class="menu" aria-label={MENU.button}>
   <ul>
     {#each ITEMS as [c, label] (c)}

@@ -21,7 +21,7 @@ const served = JSON.stringify({
     board('waveshare-rp2040-touch-lcd-1.28'),
     board('nucleo-f401re'),
     board('m5stopwatch'),
-    { label: 'dagon.toml [board.desk-pico]', toml: 'id = "desk-pico"\nproduct = "Desk Pico"\nmcu = "rp2040"\nflash_bytes = 0x400000\ndrawing = "pico"\ndefault_link = { kind = "i2c", addr = 0x44, control = "full" }\n' },
+    { label: 'dagon.toml [board.my-pico]', toml: 'id = "my-pico"\nproduct = "My Pico"\nmcu = "rp2040"\nflash_bytes = 0x400000\ndrawing = "pico"\ndefault_link = { kind = "i2c", addr = 0x44, control = "full" }\n' },
   ],
 });
 
@@ -56,7 +56,7 @@ describe('definitions from dagon serve', () => {
 
   test("the project's own board joins the table once they load", () => {
     expect(useDefinitions(served)).toBe('loaded');
-    expect(supportedBoards().find((b) => b.id === 'desk-pico')).toMatchObject({ product: 'Desk Pico', mcu: 'rp2040', mcuName: 'RP2040' });
+    expect(supportedBoards().find((b) => b.id === 'my-pico')).toMatchObject({ product: 'My Pico', mcu: 'rp2040', mcuName: 'RP2040' });
   });
 
   test('the next project without definitions is back on the builtin set; one whose definitions fail on none', () => {
@@ -72,11 +72,11 @@ describe('definitions from dagon serve', () => {
   });
 
   test("an MCU's default board is the definitions' rule, never list order", () => {
-    // desk-pico (rp2040) is listed before the marked board: the marked one is the default.
+    // my-pico (rp2040) is listed before the marked board: the marked one is the default.
     const first = JSON.parse(served) as { mcus: unknown[]; boards: { label: string; toml: string }[] };
     first.boards.unshift(first.boards.pop()!);
     expect(useDefinitions(JSON.stringify(first))).toBe('loaded');
-    expect(supportedBoards()[0].id).toBe('desk-pico');
+    expect(supportedBoards()[0].id).toBe('my-pico');
     expect(defaultBoard('rp2040')).toBe('waveshare-rp2040-touch-lcd-1.28');
     // An MCU's only board is its default; several and none marked: no default.
     expect(defaultBoard('stm32f401re')).toBe('nucleo-f401re');

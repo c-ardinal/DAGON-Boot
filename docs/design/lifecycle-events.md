@@ -1098,7 +1098,7 @@ registers at bring-up):
 **STM32F401RE** — `kind = "armv7m-mpu"`, `mpu_regions = 8` (read back
 from `MPU_TYPE`), `min_region = 32`, `subregions_from = 256`, `fault_address = true`, `unwind =
 "cortex-m-exception"`, `level = "mpu"` at boot and in the app (ST
-PM0214 §4.2 MPU; ST RM0368 §2 memory map for the block addresses).
+PM0214 section 4.2 MPU; ST RM0368 section 2 memory map for the block addresses).
 Generated map for one extension with two windows:
 
 | Region | Base | Size | Attributes | Purpose |
@@ -1123,7 +1123,7 @@ FS `0x5000_0000` (shared with DAGON's link), CRC, the system memory
 `subregions_from = 256`, `fault_address = false`, `unwind =
 "cortex-m-exception"`, two `[[core]]`, `level = "mpu"` at boot and in
 the app with HardFault attribution and the lockup fuse (RP2040
-datasheet §2.4 Cortex-M0+ features and the MPU type register; Arm
+datasheet section 2.4 Cortex-M0+ features and the MPU type register; Arm
 ARMv6-M Architecture Reference Manual, exception model). Generated map:
 
 | Region | Base | Size | Attributes | Purpose |
@@ -1268,7 +1268,7 @@ The one authentication rule, applied by every verifier in the chain
   by DAGON's agent and boot core alone (the sandbox, 4, keeps extensions
   from it), and code that can write flash without the signing key (a
   trusted-code bug, or an attacker with flash access) can make stage0
-  start an unsigned core. **This trade-off is an open owner decision.**
+  start an unsigned core.
   The measured cost of the verifier: the STM32F401RE stage0 is 8,216
   bytes with digests only and about 23,960 with the Ed25519 verifier
   (ed25519-compact `opt_size`), past its 16 KiB sector; the RP2040 stage0
@@ -1544,10 +1544,14 @@ smallest link payload (10).
 | 0x03 | agent (`dagon-agent`) version |
 | 0x04 | MCU package version |
 | 0x05 | board package version |
-| 0x06 | MCU identity (5.5): the value the image header and the compiled topology carry |
+| 0x06 | MCU identity (5.5): the value the image header and the compiled topology carry; with len 2 the image header's `mcu_id`, u16 LE |
 | 0x07 | isolation (4.5): `level u8`, `kind u8`, `boot_extensions u8`, `root_protection` (kind and exact level as the definition enumerates them, e.g. `rdp1`/`rdp2`, the write-protected sectors, and whether the level is reversible), `fuse` (Clear, or Tripped with the disabled extension's identity as the model encodes it, 5.5) |
 | 0x08 | extensions, for display: per linked extension `id` (up to 32 bytes), `trusted u8`, first 8 bytes of its source hash (4.7); repeated TLVs, one per extension |
 | 0x09 | extensions, for identity: per trusted extension its full 32-byte source hash (4.7); repeated TLVs |
+| 0x0A | stage0 version: the version mark stage0 carries in its region (`dagon_format::stage0`; `Version`, LE u32); omitted for a stage0 without the mark and on a vendor-stage2 MCU |
+| 0x0B | boot core slots A, B: `active u8` (the running slot), then per slot `state u8` (STATUS slot state) and `version` (LE u32) |
+| 0x0C | app slots A, B, factory, in the shape of 0x0B |
+| 0x0D | wire version the agent speaks (`PROTO_VERSION`, u8) |
 | 0x10 | formats: pairs `(format id u8, number u8)`: wire, image-header, state-log, event, definitions, boot-program, boot-record, extension-manifest |
 | 0x20 | boot record summary (5.5): which boots the record holds and the decision and reason of the newest; layout by the model |
 | 0x21 | one page of the raw boot record region: `offset u16`, then `len` bytes (`len ≤ RECORD_PAGE`, 10); the host reads the region page by page and decodes it with the model's reader |

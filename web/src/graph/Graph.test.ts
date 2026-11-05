@@ -1,11 +1,11 @@
 import { render } from 'svelte/server';
 import { describe, expect, test } from 'vitest';
-import { DESK_DEMO } from '../app/sample.ts';
+import { SAMPLE_CONFIG } from '../app/sample.ts';
 import Graph from './Graph.svelte';
 
 const html = (props: Record<string, unknown> = {}) =>
   render(Graph, {
-    props: { config: DESK_DEMO, live: {}, connected: false, sending: false, selected: null, onselect: () => undefined, dot: null, ...props },
+    props: { config: SAMPLE_CONFIG, live: {}, connected: false, sending: false, selected: null, onselect: () => undefined, dot: null, ...props },
   }).body;
 const checks = (b: string) => [...b.matchAll(/<button[^>]*role="checkbox"[^>]*>/g)].map((m) => m[0]);
 

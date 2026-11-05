@@ -39,6 +39,10 @@ pub const MAX_FRAME: usize = frame_len(max_payload::USB);
 pub enum Cmd {
     Hello = 0x01,
     Status = 0x02,
+    /// What the node runs: stage0, boot core and app versions, wire
+    /// version, MCU id (`payload::VersionResp`). Additive: an agent that
+    /// predates it answers `Status::Unsupported`.
+    Version = 0x03,
     XferBegin = 0x10,
     XferData = 0x11,
     XferEnd = 0x12,
@@ -46,8 +50,8 @@ pub enum Cmd {
     SetPending = 0x20,
     Reboot = 0x21,
     Confirm = 0x22,
-    /// Node (kind V) replies OK, then enters its ROM loader. Added after G1,
-    /// owner-approved, additive: the other commands are unchanged.
+    /// Node (kind V) replies OK, then enters its ROM loader. Added later as
+    /// an additive change: the other commands are unchanged.
     EnterRom = 0x24,
     Show = 0x41,
     Relay = 0x50,
@@ -57,9 +61,10 @@ pub enum Cmd {
 }
 
 impl Cmd {
-    pub const ALL: [Cmd; 15] = [
+    pub const ALL: [Cmd; 16] = [
         Cmd::Hello,
         Cmd::Status,
+        Cmd::Version,
         Cmd::XferBegin,
         Cmd::XferData,
         Cmd::XferEnd,
@@ -289,11 +294,12 @@ mod tests {
 
     #[test]
     fn command_and_status_tables() {
-        assert_eq!(Cmd::ALL.len(), 15);
+        assert_eq!(Cmd::ALL.len(), 16);
+        assert_eq!(Cmd::from_u8(0x03), Some(Cmd::Version));
         assert_eq!(Cmd::from_u8(0x24), Some(Cmd::EnterRom));
         assert_eq!(Status::ALL.len(), 12);
         assert_eq!(Cmd::from_u8(0x15), Some(Cmd::XferHdr));
-        assert_eq!(Cmd::from_u8(0x03), None);
+        assert_eq!(Cmd::from_u8(0x04), None);
         assert_eq!(Status::from_u8(0x0F), Some(Status::Timeout));
         assert_eq!(Status::from_u8(0x04), None);
     }

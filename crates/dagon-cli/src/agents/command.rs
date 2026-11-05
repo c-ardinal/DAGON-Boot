@@ -22,7 +22,7 @@ use serde::Deserialize;
 use super::{Cleared, Prompt, TIMED_OUT};
 
 /// Stdout kept at most; a longer answer is refused.
-const MAX_OUTPUT: usize = 1024 * 1024;
+pub(super) const MAX_OUTPUT: usize = 1024 * 1024;
 const POLL: Duration = Duration::from_millis(20);
 /// The arg that becomes the path of the file holding the system text.
 const SYSTEM_FILE: &str = "{system_file}";

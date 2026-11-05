@@ -42,9 +42,9 @@ static GUARD: Guard<{ board::APP_TASKS }> = Guard::new(
 
 static EXECUTOR_LOW: StaticCell<Executor> = StaticCell::new();
 
-/// The desk demo's wiring, shown and polled until a topology display copy
+/// The sample's wiring, shown and polled until a topology display copy
 /// is stored.
-static DESK_DEMO: [SubNode; 2] = [
+static SAMPLE_WIRING: [SubNode; 2] = [
     named(1, "seg", link::I2C0, 0x42),
     named(2, "watch", link::PIO_UART, link::UART_ADDR),
 ];
@@ -60,7 +60,7 @@ fn main() -> ! {
     let cfg = RelayConfig {
         tag: dagon_mcu_rp2040::target_tag!(),
         name: "DAGON hub",
-        fallback: &DESK_DEMO,
+        fallback: &SAMPLE_WIRING,
         app: App::new(always),
     };
     EXECUTOR_LOW.init(Executor::new()).run(|low| {

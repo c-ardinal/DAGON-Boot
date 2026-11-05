@@ -11,7 +11,7 @@ crate-type = ["cdylib", "rlib"]
 [dependencies]
 dagon-format = { path = "../dagon-format" }
 dagon-host = { path = "../dagon-host", features = ["defs"] }
-# The simulated desk (`sim` feature): test and development builds only.
+# The simulator (`sim` feature): test and development builds only.
 dagon-sim = { path = "../dagon-sim", optional = true }
 dagon-port = { path = "../dagon-port", optional = true }
 dagon-proto = { path = "../dagon-proto" }
@@ -22,7 +22,7 @@ wasm-bindgen = "0.2.130"
 wasm-bindgen-futures = "0.4"
 
 [features]
-# SimDesk: the simulated desk hub as a byte link (tests, `npm run dev`'s `?sim`).
+# Simulator: the simulated hub as a byte link (tests, `npm run dev`'s `?sim`).
 sim = ["dep:dagon-sim", "dep:dagon-port"]
 
 [dev-dependencies]

@@ -1,6 +1,6 @@
 # Builds the public site and publishes it to GitHub Pages:
 #   <Pages URL>/doc/   the documentation (Starlight), with the Rust API at doc/api/
-#   <Pages URL>/demo/  DAGON Console on the simulated desk (no files, devices or keys)
+#   <Pages URL>/demo/  DAGON Console on the simulator (no files, devices or keys)
 #   <Pages URL>/llms.txt
 # It runs only when started by hand from the Actions tab. No secrets: the demo
 # verifies its prepared release with the public RFC 8032 test key.

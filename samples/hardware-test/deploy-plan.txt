@@ -1,0 +1,3 @@
+deploy to 2 node(s) (<release>):
+  seg  (none) -> 2.0.7
+  hub  (none) -> 2.0.7

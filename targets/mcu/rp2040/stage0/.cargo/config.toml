@@ -2,7 +2,17 @@
 target = "thumbv6m-none-eabi"
 
 [target.thumbv6m-none-eabi]
-# The default (unrolled) SHA-256, as in the boot core and app: the compact
-# variant was the one stage0-only difference when stage0 refused a boot core
-# the host accepted.
-rustflags = ["-C", "link-arg=--nmagic", "-C", "link-arg=-Tlink.x"]
+# Compact SHA-256 rounds, as in the STM32F401RE stage0: 7,304 bytes of the
+# 16 KiB region without a board, 7,484 for the Waveshare board; the unrolled
+# rounds made it 16,256 and the Waveshare build did not link (64 bytes over).
+# The cost is boot time: checking a boot core that fills its 128 KiB slot
+# takes about 21.9 million cycles instead of 14.2 million, about 1.2 s more
+# at the ROSC's nominal 6.5 MHz that stage0 runs on (cycles estimated by
+# emulating this image to the jump; flash wait states not counted).
+#
+# The unrolled rounds came in (1d115aa) while stage0 refused a boot core the
+# host accepted on the board: the compact variant was then the one
+# stage0-only difference, not a found fault. Emulating this exact image
+# hashes a full slot to the host's digest; the diag build still blinks 7
+# when SHA-256 fails its own test vector on the board.
+rustflags = ["-C", "link-arg=--nmagic", "-C", "link-arg=-Tlink.x", "--cfg", 'sha2_backend_soft="compact"']

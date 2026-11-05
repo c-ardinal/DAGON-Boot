@@ -152,8 +152,9 @@ jobs:
           fi
           cargo "${args[@]}" -- -D warnings
 
-  # Each stage0 built in release and measured against the region its MCU
-  # definition gives it (`[layout] stage0`).
+  # Each stage0 built in release, without a board and for every board of
+  # its MCU, and measured against the region its MCU definition gives it
+  # (`[layout] stage0`), leaving 1/16 of it free.
   stage0-size:
     runs-on: ubuntu-latest
     steps:

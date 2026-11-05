@@ -39,8 +39,13 @@ LINE = re.compile(
     r"last reason (?P<reason>\d+), \[(?P<slots>.*)\]$"
 )
 SLOT = re.compile(r"([ABF]):(\w+) ([^,\s]+)")
-PLAN_HEAD = re.compile(r"^deploy (\S+) to (\d+) node\(s\) \((.+)\):$")
+# `dagon deploy`'s plan before its prompt (deploy-plan.txt is one, as the CLI prints it):
+#   deploy to <n> node(s) (<package file>):
+#     <node>  <version now, or (none)> -> <new version>
+PLAN_HEAD = re.compile(r"^deploy to (\d+) node\(s\) \((.+)\):$")
 PLAN_NODE = re.compile(r"^  (\S+)\s+(\S+) -> (\S+)$")
+# The version line of a crate's [package] table.
+PACKAGE_VERSION = re.compile(r'(?m)^(version\s*=\s*)"[^"]*"')
 
 
 def parse_status(text, coordinator="hub"):
@@ -69,27 +74,44 @@ def parse_status(text, coordinator="hub"):
 
 
 def check_plan(text, version, nodes, release):
-    """The deploy listing before PROMPT must be exactly: `version`, the
-    nodes `nodes`, each `-> version`, written to `release`. Returns the
-    problem, or None."""
+    """The deploy listing before PROMPT must be exactly: the nodes `nodes`,
+    each `-> version`, written to `release`. Returns the problem, or None."""
     lines = text.splitlines()
     heads = [i for i, l in enumerate(lines) if PLAN_HEAD.match(l)]
     if not heads or not text.endswith(PROMPT):
         return "no deploy plan before the prompt"
-    v, count, path = PLAN_HEAD.match(lines[heads[-1]]).groups()
+    count, path = PLAN_HEAD.match(lines[heads[-1]]).groups()
     rows = [PLAN_NODE.match(l) for l in lines[heads[-1] + 1:-1]]
-    if v != version:
-        return f"plan version {v}, want {version}"
     if None in rows or int(count) != len(rows):
         return "plan node lines do not match its count"
     ids = [r[1] for r in rows]
     if sorted(ids) != sorted(nodes):
         return f"plan nodes {ids}, want {nodes}"
     if any(r[3] != version for r in rows):
-        return "a plan line goes to another version"
+        return f"a plan line goes to another version than {version}"
     if Path(path.replace("\\", "/")).resolve() != Path(release).resolve():
         return f"plan release {path}, want {release}"
     return None
+
+
+def set_crate_version(manifest, version):
+    """Sets the [package] version of the crate `manifest` (its Cargo.toml):
+    a node's version comes from it, so each deploy step raises it there.
+    An inherited version (version.workspace = true) is refused."""
+    text = Path(manifest).read_text(encoding="utf-8")
+    head, sep, rest = text.partition("[package]\n")
+    if not sep:
+        raise Fail(f"{manifest}: no [package] table")
+    table, nxt, tail = rest.partition("\n[")
+    if re.search(r"(?m)^version\.workspace\s*=|^version\s*=\s*\{", table):
+        raise Fail(f"{manifest}: the version is inherited from the workspace; set it there")
+    if PACKAGE_VERSION.search(table):
+        table = PACKAGE_VERSION.sub(lambda m: f'{m[1]}"{version}"', table, count=1)
+    else:
+        table = f'version = "{version}"\n' + table
+    new = head + sep + table + nxt + tail
+    if new != text:
+        Path(manifest).write_text(new, encoding="utf-8", newline="\n")
 
 
 def select(scs, only, start):
@@ -261,6 +283,11 @@ class Run:
                 raise Fail(f"not settled on {want} after {self.setup['settle_timeout_s']} s")
             time.sleep(self.setup["poll_s"])
 
+    def crate(self, node):
+        """Node `node`'s Cargo.toml ([build.<node>] package of dagon.toml)."""
+        cfg = tomllib.loads((self.project / "dagon.toml").read_text(encoding="utf-8"))
+        return self.project / cfg["build"][node]["package"] / "Cargo.toml"
+
     def fail_config(self, nodes):
         """dagon.hwt-fail.toml: dagon.toml with the self-check-failing feature for `nodes`."""
         text = (self.project / "dagon.toml").read_text(encoding="utf-8")
@@ -326,7 +353,10 @@ class Run:
         cfg = self.fail_config(nodes) if mode == "rolled-back" else None
         inter = (nodes[0], s["interrupt_at"]) if "interrupt_at" in s else None
         release = self.project / "out" / "deploy" / f"v{v}.dgb"
-        args = ["deploy", *s.get("nodes", []), "--version", v, "--key", self.key]
+        # The version comes from each node's crate: raise it there.
+        for k in nodes:
+            set_crate_version(self.crate(k), v)
+        args = ["deploy", *s.get("nodes", []), "--key", self.key]
         rc, text, cmd, log = self.cli(args, name, config=cfg, plan=(v, nodes, release),
                                       interrupt=inter)
         if mode == "ok":
@@ -665,6 +695,7 @@ def selftest():
         pass
     selftest_tamper()
     selftest_plan()
+    selftest_crate_version()
     selftest_select()
     selftest_restore()
     selftest_set_bin()
@@ -720,19 +751,46 @@ def selftest_tamper():
 
 
 def selftest_plan():
+    """deploy-plan.txt is `dagon deploy`'s plan as the CLI printed it before
+    its prompt (the simulated-hub deploy of two nodes on 2.0.7; the
+    package path replaced by <release>): it must pass as is, and every
+    change hwt must catch must fail."""
     rel = Path(tempfile.gettempdir()) / "p" / "out" / "deploy" / "v2.0.7.dgb"
     shown = str(rel).replace("/out/deploy/", "/out/deploy\\")
-    good = (f"seg: building slot a\ndeploy 2.0.7 to 2 node(s) ({shown}):\n"
-            f"  seg    2.0.4 -> 2.0.7\n  watch  (none) -> 2.0.7\n{PROMPT}")
-    assert check_plan(good, "2.0.7", ["watch", "seg"], rel) is None
-    assert "version" in check_plan(good, "2.0.8", ["seg", "watch"], rel)
+    plan = (HERE / "deploy-plan.txt").read_text(encoding="utf-8").replace("<release>", shown)
+    good = f"seg: building slot a\n{plan}{PROMPT}"
+    assert check_plan(good, "2.0.7", ["hub", "seg"], rel) is None, check_plan(good, "2.0.7", ["hub", "seg"], rel)
+    assert "version" in check_plan(good, "2.0.8", ["seg", "hub"], rel)
     assert "nodes" in check_plan(good, "2.0.7", ["seg"], rel)
-    assert "release" in check_plan(good, "2.0.7", ["seg", "watch"], rel.with_name("x.dgb"))
-    assert check_plan(good.replace(f"\n{PROMPT}", "\n"), "2.0.7", ["seg", "watch"], rel)
-    other = good.replace("watch  (none) -> 2.0.7", "watch  (none) -> 9.9.9")
-    assert check_plan(other, "2.0.7", ["seg", "watch"], rel)
+    assert "release" in check_plan(good, "2.0.7", ["seg", "hub"], rel.with_name("x.dgb"))
+    assert check_plan(good.replace(f"\n{PROMPT}", "\n"), "2.0.7", ["seg", "hub"], rel)
+    other = good.replace("-> 2.0.7\n", "-> 9.9.9\n", 1)
+    assert "version" in check_plan(other, "2.0.7", ["seg", "hub"], rel)
     extra = good.replace("2 node(s)", "3 node(s)")
-    assert check_plan(extra, "2.0.7", ["seg", "watch"], rel)
+    assert check_plan(extra, "2.0.7", ["seg", "hub"], rel)
+    old = good.replace("deploy to 2 node(s)", "deploy 2.0.7 to 2 node(s)")
+    assert check_plan(old, "2.0.7", ["seg", "hub"], rel), "an older CLI's plan is not taken"
+
+
+def selftest_crate_version():
+    """Only the [package] version changes; a dependency's stays; an inherited
+    one is refused."""
+    with throwaway_dir() as d:
+        m = d / "Cargo.toml"
+        m.write_text('[package]\nname = "seg"\nversion = "0.0.0"\nedition = "2021"\n\n'
+                     '[dependencies]\nx = { version = "1.2" }\ny = "3"\n', encoding="utf-8")
+        set_crate_version(m, "2.0.4")
+        t = tomllib.loads(m.read_text(encoding="utf-8"))
+        assert t["package"]["version"] == "2.0.4" and t["dependencies"] == {"x": {"version": "1.2"}, "y": "3"}
+        m.write_text('[package]\nname = "seg"\n', encoding="utf-8")
+        set_crate_version(m, "2.0.5")
+        assert tomllib.loads(m.read_text(encoding="utf-8"))["package"]["version"] == "2.0.5"
+        m.write_text('[package]\nname = "seg"\nversion.workspace = true\n', encoding="utf-8")
+        try:
+            set_crate_version(m, "2.0.6")
+            raise AssertionError("an inherited version was overwritten")
+        except Fail:
+            pass
 
 
 def selftest_select():

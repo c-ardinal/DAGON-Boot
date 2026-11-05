@@ -156,6 +156,33 @@ fn deploys_each_node_with_its_crate_version_through_the_simulated_hub() {
 }
 
 #[test]
+fn the_plan_names_the_package_and_each_node_s_old_and_new_version() {
+    // The listing `dagon deploy` prints before it asks: tools that answer
+    // its question read this exact form.
+    let (cfg, t) = work_area("plan");
+    for id in ["hub", "seg"] {
+        std::fs::write(
+            cfg.base.join(id).join("Cargo.toml"),
+            format!("[package]\nname = \"{id}\"\nversion = \"2.0.7\"\n"),
+        )
+        .unwrap();
+    }
+    let nodes = pick_nodes(&cfg, &t, &[]).unwrap();
+    let apps = versioned(&cfg, built(&nodes));
+    let p = prepare(&cfg, &t, &key(), &BTreeMap::new(), (&apps, &[])).unwrap();
+    assert_eq!(p.release, cfg.base.join("out/deploy/v2.0.7.dgb"));
+    let shown = p
+        .listing()
+        .replace(&p.release.display().to_string(), "<release>");
+    println!("{shown}");
+    assert_eq!(
+        shown,
+        "deploy to 2 node(s) (<release>):\n  seg  (none) -> 2.0.7\n  hub  (none) -> 2.0.7\n"
+    );
+    let _ = std::fs::remove_dir_all(&cfg.base);
+}
+
+#[test]
 fn a_version_given_must_be_the_crate_s_own() {
     let (mut cfg, _) = work_area("given");
     assert_eq!(

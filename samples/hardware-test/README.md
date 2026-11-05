@@ -17,6 +17,11 @@ connected; a DAGON project for it (`topology.yaml` as
 - `hwt.toml`: the setup's data (`[setup]`: nodes, coordinator, hub USB id,
   self-check switch name, settle timing, which sample feeds which node) and
   the scenarios, in order.
+- `deploy-plan.txt`: the plan `dagon deploy` prints before it asks, as the
+  CLI printed it (two nodes on 2.0.7, the package path shown as
+  `<release>`); `selftest` checks the plan reader against it. DAGON's own
+  test of that plan is `the_plan_names_the_package_and_each_node_s_old_and_new_version`
+  (`cargo test -p dagon-cli -- the_plan_names --nocapture` prints it).
 
 ## Usage
 
@@ -34,7 +39,8 @@ python samples/hardware-test/hwt.py run --project <project> --dagon <dagon.exe> 
 python samples/hardware-test/hwt.py run ... --only status batch final
 python samples/hardware-test/hwt.py run ... --from interrupt-seg
 
-# no hardware: status parsing, plan check, --only, tampering, key cleanup
+# no hardware: status parsing, plan check (deploy-plan.txt), crate versions,
+# --only, tampering, key cleanup, restore
 python samples/hardware-test/hwt.py selftest
 ```
 
@@ -45,9 +51,9 @@ python samples/hardware-test/hwt.py selftest
 - `--port` is required and passed to every CLI call that talks to the
   hub. At the start of each scenario the port must still be the same device
   (Windows PnP id with `hub_usb`, and the hub's MCU id).
-- `dagon deploy` is never answered in advance: its plan (version, nodes,
-  release file) is read first and must be exactly the step's; otherwise
-  the harness answers `n` and fails.
+- `dagon deploy` is never answered in advance: its plan (each node and the
+  version it goes to, and the package file) is read first and must be
+  exactly the step's; otherwise the harness answers `n` and fails.
 - `dagon rollback`, `apply` and `recover` ask nothing; the harness checks
   what they will do before calling them (rollback: the other slot holds a
   confirmed version; apply: only the deliberately bad releases, which must
@@ -98,7 +104,11 @@ three times; `dagon recover seg` while it answers; F401 ROM recovery
 (SKIPPED); a final good deploy.
 
 Test versions are 2.0.N (the format is major.minor.patch only, no
-pre-release tags).
+pre-release tags). A node's version is its crate's: before each deploy step
+`run` sets `[package] version` in the Cargo.toml of each node it deploys
+(the `[build.<id>]` package) to the step's version, and the crates keep the
+last one. A crate whose version is inherited from a workspace is refused;
+set it in the crate itself.
 
 ## Test switches
 

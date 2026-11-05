@@ -21,16 +21,21 @@ status_tries = 6
 # `sync`: the sample each node's package is refreshed from.
 sync = { seg = "f401-app", watch = "esp32s3-app" }
 
-# Versions: the version format is major.minor.patch (u8.u8.u16, no
-# pre-release tags), so tests use major 2 (2.0.N) as their range; the setup's
-# own releases stay below 2.0.0 or move on above the test range.
-# A re-run may reuse the same versions: nothing refuses a lower or equal one.
+# Versions: a node's version is its crate's ([package] version in the
+# Cargo.toml of its [build.<id>] package). Each deploy step sets it there for
+# the nodes it deploys; the crates keep the last one. The format is
+# major.minor.patch (u8.u8.u16, no pre-release tags), so tests use major 2
+# (2.0.N) as their range; the setup's own releases stay below 2.0.0 or move
+# on above the test range. A re-run may reuse the same versions: nothing
+# refuses a lower or equal one.
 #
 # Step kinds (`do`):
 #   status                                   record only; every node answers, confirmed
-#   deploy   version [nodes] [expect]        dagon deploy; its confirmation is answered y only
-#                                             when the plan lists exactly this version, these
-#                                             nodes and out/deploy/v<version>.dgb (else n: FAIL)
+#   deploy   version [nodes] [expect]        sets each deployed node's crate version to
+#                                             `version`, then dagon deploy; its confirmation is
+#                                             answered y only when the plan lists exactly these
+#                                             nodes, each -> `version`, and
+#                                             out/deploy/v<version>.dgb (else n: FAIL)
 #            expect = "ok"          (default) deployed nodes on `version`, confirmed,
 #                                             active slot flipped; others unchanged
 #            expect = "rolled-back"           built with feature no-confirm (self-check

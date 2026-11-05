@@ -21,14 +21,15 @@ extension the LCD stays dark until then.
 ## What you see
 
 Usually only the last step's text, briefly, just before the app's screen
-appears. Nothing waits for the screen to be seen, and the panel needs time
+appears. The boot events come as fast as the boot core works and the app
+takes the chip over right after them ([boot extensions](../../docs/extension-manifest.md#boot-extensions)).
+Nothing here waits for the screen to be seen, and the panel needs time
 before it takes commands:
 
 - The panel's reset line is low from the chip's reset on (the pad's
   pull-down), so the panel restarts on every boot. The extension releases
   it at the first event, and the panel takes commands 120 ms later. The
-  first three events come within a few milliseconds of each other, so they
-  pass before the panel is ready. The screen is drawn at the first event
+  first three events pass before the panel is ready. The screen is drawn at the first event
   where the rest of that wait is at most 20 ms, waited inside the call.
 - After sleep out the panel is given another 120 ms before the next command.
   A step that comes sooner is not drawn, and the call does not wait for it.
@@ -46,8 +47,8 @@ follows sleep out in the same call) and the panel's memory after a reset.
 
 ## Time per call and per boot
 
-Each call stays within the manifest's `max_run_us` (45 ms; an observer's
-handler is bounded by 50 ms). A call stops sending rows once 40 ms have
+Each call stays within the manifest's `max_run_us` of 45 ms (its bounds:
+[`limits`](../../docs/extension-manifest.md#dagon-extensiontoml-extension-manifest-format-1)). A call stops sending rows once 40 ms have
 passed since it started (`DEADLINE_US`), and it waits for the panel at most
 20 ms. The longest call is the one that sets the panel up: about 9,000
 bytes (the init sequence, the text line of 210 x 14 pixels and the gauge
@@ -68,9 +69,10 @@ each, which holds whatever the real time per byte.
 
 ## What it takes from the chip
 
-A trusted extension runs privileged in the boot core, and keeping it safe
-is its author's job. This one takes its parts straight from the HAL the
-boot core runs on (`embassy-rp`, the version the MCU package uses):
+As a trusted extension it takes what it drives itself, and its safety is
+this sample's own ([boot extensions](../../docs/extension-manifest.md#boot-extensions)). It takes its
+parts straight from the HAL the boot core runs on (`embassy-rp`, the
+version the MCU package uses):
 
 - SPI1 with SCK GPIO10 and MOSI GPIO11 at 20 MHz, and the pins CS GPIO9,
   DC GPIO8 and reset GPIO13. These numbers are from the hub's board
@@ -81,8 +83,7 @@ boot core runs on (`embassy-rp`, the version the MCU package uses):
 - The backlight through the MCU package's boot LED (`arm::led`), which the
   boot core selects from the board's `[boot] led`.
 
-The boot core uses none of these. The extension changes nothing the boot
-core decides.
+The boot core uses none of these.
 
 ## Japanese text
 
@@ -100,13 +101,11 @@ and the words differ.
 
 ## Enable it for the hub
 
-`dagon gen` takes extension packages from inside the project only. Copy
-this folder to `extensions/hub-boot-screen/` of the project. Then point its
-`path = "../../..."` dependencies at the DAGON checkout that the project's
-`[dagon] path` names, as the template says for a copy. Point the
-`#[path]` of `src/tests.rs` there too: the host tests run the real boot
-core on DAGON's boot test bench (`crates/dagon-core/tests/bench`). Then, in the
-project's `dagon.toml`:
+Copy this folder to `extensions/hub-boot-screen/` of the project and
+point its paths at the DAGON checkout ([dagon.toml](../../docs/extension-manifest.md#dagontoml)). Point
+the `#[path]` of `src/tests.rs` there too: the host tests run the real
+boot core on DAGON's boot test bench (`crates/dagon-core/tests/bench`).
+Then, in the project's `dagon.toml`:
 
 ```toml
 [extensions]
@@ -116,26 +115,18 @@ boot = ["boot-screen"]
 trusted = [{ id = "boot-screen", sha256 = "<the hash dagon gen names>" }]
 ```
 
-1. `dagon gen hub`: the first run refuses and names the folder's source
-   hash; put it in `sha256` (it depends on the copy's paths, so each
-   project has its own).
-2. If `boot/hub/Cargo.lock` exists from an earlier build, gen then stops
-   at the lock (`--locked`): run `cargo metadata --offline
-   --format-version 1` in `boot/hub/` once (it adds the extension to the
-   lock and changes nothing else), then `dagon gen hub` again.
-3. Build the boot core in `boot/hub/` (`cargo build --release`,
-   `DAGON_PUBKEY` as for every image). stage0 does not change.
-
-The hash covers every file in the copied folder. Run its tests with a
-target directory outside the folder, or `dagon gen` names a new hash:
+Then run `dagon gen hub`, put the hash it names in `sha256`, and build
+the boot core in `boot/hub/` ([boot extensions](../../docs/extension-manifest.md#boot-extensions)).
+stage0 does not change. Run the copy's tests with a target directory
+outside its folder, since files written there change its hash
+([dagon.toml](../../docs/extension-manifest.md#dagontoml)):
 
 ```sh
 CARGO_TARGET_DIR=/tmp/hub-boot-screen cargo test --target <host triple>
 ```
 
-To build the boot core without it, remove `"boot-screen"` from the hub's
-`boot` list and its entry from the hub's `trusted` list. Remove the
-`extensions/*` package glob too, unless another extension uses it. Then
+To remove it, take `"boot-screen"` out of the hub's `boot` and `trusted`
+lists (and the `extensions/*` glob unless another extension uses it), then
 run `dagon gen hub` again.
 
 Size: the hub boot core grows by 8,388 bytes (67,616 to 76,004 bytes of

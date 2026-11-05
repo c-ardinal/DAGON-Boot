@@ -62,6 +62,13 @@ changes the hash. `dagon gen` checks it and names the hash it found when
 the two differ. The registry crates the extension itself depends on are
 pinned by the boot crate's `Cargo.lock`, not by this hash.
 
+`packages` are folders inside the project; `dagon gen` refuses one
+outside it. To use an extension from DAGON's source tree (the template
+below, or a sample under `samples/`), copy its folder into the project
+and point its `path = "../../..."` dependencies at the DAGON checkout the
+project's `[dagon] path` names. The copy's hash depends on those paths, so
+each project has its own: the first `dagon gen` refuses and names it.
+
 For each node `dagon gen` refuses, naming the extension and the reason: an
 extension listed for an image whose layers it does not have, a port
 provided twice in one chain, a trusted extension without its hash or
@@ -142,6 +149,21 @@ change it. The calls share the boot core's flash budget (the
 STM32F401RE's is 32,256 bytes) and its watchdog: one that does not
 return makes the watchdog reset the chip.
 
+Once `boot/<id>/Cargo.lock` exists, `dagon gen` resolves the graph with
+`--locked`, so after an extension is added it stops at the lock. Run
+`cargo metadata --offline --format-version 1` in `boot/<id>/` once (it
+adds the new package to the lock), then `dagon gen` again. To build the
+boot core without an extension, remove it from the node's `boot` and
+`trusted` lists and run `dagon gen` again.
+
+The boot events come as fast as the boot core works:
+`boot.watchdog_armed`, `boot.log_read` and `boot.before_decision` follow
+each other with only the state log's flash reads between them,
+`boot.slot_chosen` or `boot.no_image` follows the image check, and
+`boot.before_jump` comes right before the app starts and takes the chip
+over. Whatever an extension shows lasts only until then, and every wait
+in a handler adds to the boot.
+
 A minimal trusted boot extension to copy is
 `targets/boot-extension-template/` (it counts the boot events and keeps
 the slot the boot core chose):
@@ -187,8 +209,14 @@ boot = ["boot-count"]
 trusted = [{ id = "boot-count", sha256 = "<the hash dagon gen names>" }]
 ```
 
-An extension that shows the boot on a display reaches the display through
-the MCU's HAL in `on_event` (it runs privileged) and keeps each call
-within its `max_run_us`. The ESP32-S3 has no DAGON boot stage (its
+DAGON hands a boot extension no peripheral or pin (`Ctx` carries the
+layer only). A trusted extension that drives hardware (a display, a pin)
+takes it from the MCU's HAL itself in `on_event`, after the boot core's
+HAL init (it runs privileged). What it takes, and that this is safe, is
+the extension's author's responsibility: DAGON checks none of it. It must
+leave alone what the boot core uses (on the RP2040: the flash, the
+watchdog, the clocks, and the board's `[boot] led` once the boot core
+halts) and keep each call within
+its `max_run_us`. The ESP32-S3 has no DAGON boot stage (its
 vendor's second stage starts the app), so boot extensions do not exist
 there and `dagon gen` refuses them with that reason.

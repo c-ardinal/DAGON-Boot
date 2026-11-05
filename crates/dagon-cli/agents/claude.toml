@@ -1,0 +1,50 @@
+# Claude, an agent shipped with DAGON. Agents are data: another agent, or
+# another way to reach one, of a kind DAGON implements (command,
+# messages-http) is a file like this one in ~/.dagon/agents/ (never in a
+# project). The first way of the first agent is the default.
+dagon_agent = 1
+id = "claude"
+name = "Claude"
+provider = "Anthropic"
+
+# Claude Code headless, with the user's own login (needs Claude Code 2.1.316
+# or later for these flags): -p prints one answer and exits; no
+# built-in tools (--tools ""); nothing saved (--no-session-persistence);
+# nothing may act or ask (--permission-mode dontAsk, --permission-prompts
+# none); no user customisations such as hooks, skills, CLAUDE.md or MCP
+# servers (--safe-mode, --strict-mcp-config, --disable-slash-commands);
+# DAGON's instructions replace Claude Code's own (--system-prompt-file).
+# DAGON starts it in a fresh temporary working folder with a short
+# environment allow-list; Claude Code's own flags above are what keep it
+# from acting (DAGON does not sandbox it).
+[[ways]]
+id = "claude-code"
+name = "Claude Code"
+[ways.transport]
+kind = "command"
+program = "claude"
+args = [
+    "-p",
+    "--tools", "",
+    "--no-session-persistence",
+    "--permission-mode", "dontAsk",
+    "--permission-prompts", "none",
+    "--safe-mode",
+    "--strict-mcp-config",
+    "--disable-slash-commands",
+    "--output-format", "text",
+    "--system-prompt-file", "{system_file}",
+]
+system = "file"
+
+# The Claude API (Messages) with a key from the environment.
+[[ways]]
+id = "api"
+name = "API キー"
+[ways.transport]
+kind = "messages-http"
+url = "https://api.anthropic.com/v1/messages"
+version = "2023-06-01"
+key_env = "ANTHROPIC_API_KEY"
+model = "claude-opus-5-5"
+model_env = "DAGON_AI_MODEL"

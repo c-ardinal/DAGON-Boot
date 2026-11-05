@@ -70,6 +70,23 @@ pub struct Server {
     device_cv: Condvar,
     /// One job uses the hub at a time.
     hub: Mutex<()>,
+    /// DAGON answers one question at a time.
+    asking: AtomicBool,
+    /// Stands in for the agent (tests); unset: the Messages API with the
+    /// CLI's key.
+    pub agent_api: std::sync::OnceLock<Arc<AgentApi>>,
+}
+
+/// One agent call: the prompt in, the agent's text out.
+pub type AgentApi = dyn Fn(&crate::agents::Prompt) -> Result<String, String> + Send + Sync;
+
+/// The question being answered; dropping it lets the next one in.
+pub struct AskTurn<'a>(&'a AtomicBool);
+
+impl Drop for AskTurn<'_> {
+    fn drop(&mut self) {
+        self.0.store(false, Ordering::Release);
+    }
 }
 
 impl Server {
@@ -90,6 +107,8 @@ impl Server {
             device: Mutex::new(Device::Page),
             device_cv: Condvar::new(),
             hub: Mutex::new(()),
+            asking: AtomicBool::new(false),
+            agent_api: std::sync::OnceLock::new(),
         })
     }
 
@@ -106,6 +125,28 @@ impl Server {
         if let Ok(mut k) = self.release_key.write() {
             *k = Some(key);
         }
+    }
+
+    /// The turn to ask DAGON; None while another question is answered.
+    pub fn ask_turn(&self) -> Option<AskTurn<'_>> {
+        self.asking
+            .compare_exchange(false, true, Ordering::Acquire, Ordering::Relaxed)
+            .ok()
+            .map(|_| AskTurn(&self.asking))
+    }
+
+    /// Kind and outcome of the last `n` finished jobs, oldest first (no
+    /// logs, errors or results).
+    pub fn recent_outcomes(&self, n: usize) -> Vec<Value> {
+        let jobs = self.jobs.lock().expect("jobs");
+        let done: Vec<Value> = jobs
+            .values()
+            .rev()
+            .filter(|j| finished(j))
+            .take(n)
+            .map(|j| json!({ "kind": j.kind, "state": j.state }))
+            .collect();
+        done.into_iter().rev().collect()
     }
 
     /// Whether a job has not finished yet.
@@ -238,6 +279,16 @@ impl Server {
         drop(jobs);
         self.device_cv.notify_all();
         true
+    }
+
+    /// Asks every unfinished job of `kind` to stop.
+    pub fn cancel_kind(&self, kind: &str) {
+        let jobs = self.jobs.lock().expect("jobs");
+        for j in jobs.values().filter(|j| j.kind == kind && !finished(j)) {
+            j.cancel.store(true, Ordering::Relaxed);
+        }
+        drop(jobs);
+        self.device_cv.notify_all();
     }
 
     /// Hands `text` to job `id`'s open question. `false`: none open.

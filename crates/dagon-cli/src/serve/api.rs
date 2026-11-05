@@ -163,8 +163,15 @@ pub fn handle(server: &Arc<Server>, req: &Request) -> Response {
             "not in dagon demo (a simulated desk with its own project)",
         );
     }
+    if parts.first() == Some(&"ai") && !agent_linked(server) {
+        return consent_refusal(server);
+    }
     let r = match (req.method.as_str(), parts.as_slice()) {
         ("GET", ["hello"]) => Ok(hello(server)),
+        ("GET", ["agent"]) => Ok(agent_get(server)),
+        ("POST", ["agent", "link"]) => agent_link(server, req),
+        ("DELETE", ["agent", "link"]) => agent_unlink(server),
+        ("POST", ["agent", "ask"]) => agent_ask(server, req),
         ("GET", ["targets"]) => targets(server),
         ("GET", ["definitions"]) => definitions(server),
         ("GET", ["topology"]) => topology_get(server),
@@ -182,7 +189,7 @@ pub fn handle(server: &Arc<Server>, req: &Request) -> Response {
         ("PUT", ["layout"]) => layout_put(server, req),
         ("POST", ["conform"]) => start(server, req, "conform", job_conform),
         ("GET", ["conform", node]) => conform_get(server, node),
-        ("POST", ["ai", "topology"]) => start(server, req, "ai_topology", job_ai_topology),
+        ("POST", ["ai", "topology"]) => ai_topology_start(server, req),
         ("POST", ["ai", "port"]) => Ok(Response::error(501, "porting is not available here")),
         ("GET", ["jobs", id]) => job_get(server, id),
         ("POST", ["jobs", id, "answer"]) => answer(server, id, req),
@@ -205,7 +212,11 @@ pub fn handle(server: &Arc<Server>, req: &Request) -> Response {
 
 /// What dagon demo refuses: other projects (opening one would load its
 /// signing key) and everything that touches real hardware or the machine.
-const DEMO_REFUSED: [&str; 8] = [
+/// Never a real agent in a demo either: linking, questions, AI routes.
+const DEMO_REFUSED: [&str; 11] = [
+    "agent/link",
+    "agent/ask",
+    "ai",
     "project/open",
     "project/new",
     "project/init",
@@ -224,7 +235,7 @@ fn demo_refuses(parts: &[&str]) -> bool {
 }
 
 /// Features dagon demo leaves out of hello (the page hides them).
-const DEMO_HIDDEN: [&str; 4] = ["project", "flash", "doctor", "conform"];
+const DEMO_HIDDEN: [&str; 5] = ["project", "flash", "doctor", "conform", "ai_topology"];
 
 /// The simulated medium a 構成's 親機 uplink names (None: not one the
 /// demo simulates, or no 親機).
@@ -356,6 +367,151 @@ fn start(server: &Arc<Server>, req: &Request, kind: &str, work: Work) -> Res {
     }
 }
 
+/// An error the page tells apart by `code`.
+fn coded(status: u16, msg: &str, code: &str) -> Response {
+    Response::json(status, &json!({ "error": msg, "code": code }))
+}
+
+/// Why no call may start: a consent file of a version this dagon does not
+/// read (AGENT_CONSENT_VERSION), else not linked.
+fn consent_refusal(server: &Server) -> Response {
+    let unknown = super::project::home(server)
+        .ok()
+        .and_then(|h| crate::consent::unknown_version(&h));
+    match unknown {
+        Some(e) => coded(409, &e, crate::agents::codes::CONSENT_VERSION),
+        None => not_linked(),
+    }
+}
+
+fn not_linked() -> Response {
+    coded(
+        409,
+        crate::consent::NOT_LINKED,
+        crate::consent::NOT_LINKED_CODE,
+    )
+}
+
+/// The linked agent, its linked way: the stand-in when set (tests), else
+/// [`crate::agents::call`]. Every call, the stand-in's too, passes
+/// [`crate::agents::before_call`] first and holds the consent through the
+/// call. Err: the linked way cannot be used here (no program, no key).
+fn agent_api(
+    server: &Server,
+    timeout: std::time::Duration,
+) -> Result<Box<crate::agents::Api<'static>>, String> {
+    let home = super::project::home(server).map_err(|_| crate::consent::NOT_LINKED.to_string())?;
+    if let Some(f) = server.agent_api.get() {
+        let f = Arc::clone(f);
+        return Ok(Box::new(move |p: &crate::agents::Prompt| {
+            // Held through the stand-in's whole call, like a real one.
+            let _held = crate::agents::before_call(&home, p)?;
+            f(p)
+        }));
+    }
+    crate::agents::ready(&home)?;
+    Ok(Box::new(move |p: &crate::agents::Prompt| {
+        crate::agents::call(&home, p, timeout)
+    }))
+}
+
+/// A model call's error as the page tells it apart.
+fn agent_failure(e: &str) -> Response {
+    match e {
+        crate::consent::NOT_LINKED => not_linked(),
+        e if e.starts_with(crate::consent::VERSION_REFUSAL) => {
+            coded(409, e, crate::agents::codes::CONSENT_VERSION)
+        }
+        crate::agents::TOO_LARGE => coded(413, e, crate::agents::codes::CONTEXT_TOO_LARGE),
+        crate::agents::TIMED_OUT => coded(504, e, crate::agents::codes::TIMEOUT),
+        _ => coded(502, e, crate::agents::codes::FAILED),
+    }
+}
+
+/// POST /v1/agent/ask: one question to DAGON, answered in this request.
+fn agent_ask(server: &Server, req: &Request) -> Res {
+    if !agent_linked(server) {
+        return Err(consent_refusal(server));
+    }
+    let q = crate::ask::parse(&body_json(req)?).map_err(|e| Response::error(400, &e))?;
+    let _turn = server.ask_turn().ok_or_else(|| {
+        coded(
+            429,
+            "DAGON is answering another question",
+            crate::agents::codes::BUSY,
+        )
+    })?;
+    let mut api = agent_api(server, crate::ask::ASK_TIMEOUT).map_err(|e| {
+        if e == crate::consent::NOT_LINKED || e.starts_with(crate::consent::VERSION_REFUSAL) {
+            consent_refusal(server)
+        } else {
+            coded(409, &e, crate::agents::codes::UNAVAILABLE)
+        }
+    })?;
+    let reg = registry_of(server).map_err(|e| Response::error(500, &e))?;
+    let yaml = match topology_path(server) {
+        Ok(p) => crate::ask::read_topology(&p).map_err(|e| agent_failure(&e))?,
+        Err(_) => None,
+    };
+    let facts = crate::ask::Facts {
+        reg: &reg,
+        topology: yaml.as_deref(),
+        jobs: server.recent_outcomes(crate::ask::MAX_JOBS),
+    };
+    let r = crate::ask::ask(&q, &facts, &mut *api).map_err(|e| agent_failure(&e))?;
+    // Unlinked while the answer was on its way: it is not shown either.
+    if !agent_linked(server) {
+        return Err(consent_refusal(server));
+    }
+    Ok(json_ok(r.to_json()))
+}
+
+/// The agents in use: builtin, and the user's own (~/.dagon/agents).
+fn agents_of(server: &Server) -> crate::agents::Agents {
+    let home = super::project::home(server).ok();
+    crate::agents::Agents::load(home.as_deref())
+}
+
+fn agent_linked(server: &Server) -> bool {
+    super::project::home(server)
+        .is_ok_and(|h| crate::consent::linked(&h, &agents_of(server)).is_some())
+}
+
+/// GET /v1/agent: the agents and their ways (whether each can be used
+/// here; never a key, path or command), the consent, what linking sends.
+fn agent_get(server: &Server) -> Response {
+    let home = super::project::home(server).ok();
+    json_ok(crate::consent::status(home.as_deref(), &agents_of(server)))
+}
+
+/// POST /v1/agent/link {agent, way, consent:true}: records the user's
+/// consent to send to that agent that way; anything short of an explicit
+/// yes for a defined agent and way records nothing.
+fn agent_link(server: &Server, req: &Request) -> Res {
+    let v = body_json(req)?;
+    let agents = agents_of(server);
+    let (a, w) = match (v["agent"].as_str(), v["way"].as_str()) {
+        (Some(a), Some(w)) => agents.way(a, w),
+        _ => None,
+    }
+    .ok_or_else(|| Response::error(400, "agent and way must name a defined agent and way"))?;
+    if v["consent"] != true {
+        return Err(Response::error(400, "consent must be true"));
+    }
+    let home = super::project::home(server)?;
+    crate::consent::link(&home, &a.id, &w.id).map_err(|e| Response::error(500, &e))?;
+    Ok(agent_get(server))
+}
+
+/// DELETE /v1/agent/link: withdraws the consent (done also when none was).
+fn agent_unlink(server: &Server) -> Res {
+    let home = super::project::home(server)?;
+    crate::consent::unlink(&home).map_err(|e| Response::error(500, &e))?;
+    // Running topology drafts stop too; every call checks the consent anyway.
+    server.cancel_kind("ai_topology");
+    Ok(agent_get(server))
+}
+
 /// Versions, work area, abilities; whether keys exist (never the keys).
 fn hello(server: &Server) -> Response {
     let cfg = config(server).ok();
@@ -390,7 +546,8 @@ fn hello(server: &Server) -> Response {
         "formats": crate::versions::formats().into_iter().collect::<std::collections::BTreeMap<_, _>>(),
         "workspace": workspace,
         "features": features,
-        "api_key": crate::ai::api_key_present(),
+        // The way DAGON uses (linked, else the default) can be used here.
+        "api_key": crate::consent::status(super::project::home(server).ok().as_deref(), &agents_of(server))["available"],
         "key": key.is_some(),
         "key_id": key,
         "release_key": server.release_key().map(|k| to_hex(&k)),
@@ -1173,18 +1330,31 @@ fn conform_get(server: &Server, node: &str) -> Res {
     Ok(Response::bytes("application/json", bytes))
 }
 
-/// Topology from a description; the model's questions go to the page.
-fn job_ai_topology(job: &mut Job, cfg: Config, v: Value) -> Result<Value, String> {
+/// POST /v1/ai/topology {description}: a job; the model's questions go to
+/// the page.
+fn ai_topology_start(server: &Arc<Server>, req: &Request) -> Res {
+    let v = body_json(req)?;
+    let s = Arc::clone(server);
+    match server.spawn("ai_topology", move |job| {
+        let (_, _, reg) = job.project()?;
+        job_ai_topology(job, &s, &reg, &v)
+    }) {
+        Some(id) => Ok(accepted(id)),
+        None => Err(Response::error(429, "too many jobs running")),
+    }
+}
+
+fn job_ai_topology(job: &mut Job, s: &Server, reg: &Registry, v: &Value) -> Result<Value, String> {
     let description = v["description"]
         .as_str()
         .ok_or("description is required")?
         .to_string();
+    let mut post = agent_api(s, crate::ai::DRAFT_TIMEOUT)?;
     let cancel = job.cancel_flag();
     let mut ask = |qs: &[String]| -> Result<Vec<String>, String> {
         qs.iter().enumerate().map(|(i, q)| job.ask(i, q)).collect()
     };
-    let reg = project_registry(&cfg)?;
-    let (yaml, report) = crate::ai::topology_for(&description, &reg, &mut ask, &cancel)?;
+    let (yaml, report) = crate::ai::topology_for(&description, reg, &mut ask, &cancel, &mut *post)?;
     let report: Value = serde_json::from_str(&report).unwrap_or(Value::Null);
     Ok(json!({ "yaml": yaml, "report": report }))
 }

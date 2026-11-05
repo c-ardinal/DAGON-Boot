@@ -130,7 +130,7 @@ fn checkout(git: &str, tag: &str, base: &Path) -> Result<PathBuf, String> {
     crate::genfs::write(base, &probe.join("Cargo.toml")?, manifest.as_bytes())?;
     crate::genfs::write(base, &probe.join("lib.rs")?, b"")?;
     let mut cmd = Command::new("cargo");
-    for k in crate::nodebuild::SECRET_ENV {
+    for k in crate::nodebuild::secret_env() {
         cmd.env_remove(k);
     }
     let o = cmd

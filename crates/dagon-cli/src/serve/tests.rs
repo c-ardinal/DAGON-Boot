@@ -306,7 +306,6 @@ fn release_and_conform_reads_reject_paths() {
     assert_eq!(http(&a, "GET", "/v1/release/..%2Fdagon", &h, b"").0, 400);
     assert_eq!(http(&a, "GET", "/v1/release/none", &h, b"").0, 404);
     assert_eq!(http(&a, "GET", "/v1/conform/seg", &h, b"").0, 404);
-    assert_eq!(http(&a, "POST", "/v1/ai/port", &h, b"{}").0, 501);
 }
 
 /// Opens the event stream and sends `first` as the first message.
@@ -1735,4 +1734,452 @@ fn build_output_reaches_the_page_without_local_folders() {
     {
         assert!(!all.contains(&local), "{local} reached the page: {all}");
     }
+}
+
+#[test]
+fn dagon_links_with_consent_once_and_ai_routes_wait_for_it() {
+    let (a, home) = with_home("agent-link");
+    let b = auth(&a);
+    let ok = [("Authorization", b.as_str())];
+    let agent =
+        |a: &Area| -> serde_json::Value { serde_json::from_str(&get(a, "/v1/agent").1).unwrap() };
+    let v = agent(&a);
+    assert_eq!(v["linked"], false);
+    assert_eq!(v["consent"], serde_json::Value::Null);
+    assert_eq!(v["provider"]["id"], "claude");
+    assert_eq!(
+        v["default"],
+        serde_json::json!({ "agent": "claude", "way": "claude-code" })
+    );
+    assert_eq!(v["agents"][0]["ways"].as_array().unwrap().len(), 2);
+    assert!(v["available"].is_boolean());
+    assert_eq!(v["sends"].as_array().unwrap().len(), 3);
+    assert_eq!(v["never_sends"].as_array().unwrap().len(), 3);
+
+    for path in ["/v1/ai/topology", "/v1/ai/port"] {
+        let (st, body) = post(&a, path, serde_json::json!({ "description": "a hub" }));
+        assert_eq!(st, 409, "{path}");
+        assert!(body.contains("\"code\":\"AGENT_NOT_LINKED\""), "{body}");
+    }
+    // Anything but an explicit yes for a defined agent and way records
+    // nothing (an older body, with a provider only, included).
+    for body in [
+        serde_json::json!({ "agent": "claude", "way": "api" }),
+        serde_json::json!({ "agent": "claude", "way": "api", "consent": "true" }),
+        serde_json::json!({ "agent": "claude", "way": "other", "consent": true }),
+        serde_json::json!({ "agent": "other", "way": "api", "consent": true }),
+        serde_json::json!({ "provider": "anthropic", "consent": true }),
+    ] {
+        assert_eq!(post(&a, "/v1/agent/link", body).0, 400);
+    }
+    assert!(!home.join(".dagon/agent.json").exists());
+    let yes = br#"{"agent":"claude","way":"api","consent":true}"#;
+    assert_eq!(http(&a, "POST", "/v1/agent/link", &[], yes).0, 401);
+    let cross = [
+        ("Origin", "https://example.com"),
+        ("Authorization", b.as_str()),
+    ];
+    assert_eq!(http(&a, "POST", "/v1/agent/link", &cross, yes).0, 403);
+
+    let (st, body) = http(&a, "POST", "/v1/agent/link", &ok, yes);
+    assert_eq!(st, 200, "{body}");
+    let v = agent(&a);
+    assert_eq!(v["linked"], true);
+    assert_eq!(v["consent"]["agent"], "claude");
+    assert_eq!(v["consent"]["way"], "api");
+    assert!(v["consent"]["at"].as_str().unwrap().ends_with('Z'));
+    let shown = home.to_string_lossy().replace('\\', "/");
+    assert!(!body.replace("\\\\", "/").contains(&shown) && !body.contains("agent.json"));
+    // Linked: the AI route starts its job (no description: it stops before
+    // any model call, so no request leaves even with a key set).
+    let (st, _) = post(&a, "/v1/ai/topology", serde_json::json!({}));
+    assert_eq!(st, 202);
+    assert_eq!(post(&a, "/v1/ai/port", serde_json::json!({})).0, 501);
+
+    assert_eq!(http(&a, "DELETE", "/v1/agent/link", &ok, b"").0, 200);
+    assert_eq!(agent(&a)["linked"], false);
+    assert!(!home.join(".dagon/agent.json").exists());
+    assert_eq!(post(&a, "/v1/ai/topology", serde_json::json!({})).0, 409);
+}
+
+#[test]
+fn a_demo_does_not_link_or_unlink() {
+    let d = demo_area("demo-agent");
+    let b = auth(&d);
+    let ok = [("Authorization", b.as_str())];
+    let yes = br#"{"agent":"claude","way":"api","consent":true}"#;
+    assert_eq!(http(&d, "POST", "/v1/agent/link", &ok, yes).0, 403);
+    assert_eq!(http(&d, "DELETE", "/v1/agent/link", &ok, b"").0, 403);
+}
+
+/// A linked server whose agent is `fake` (no network).
+fn linked_with(name: &str, fake: Arc<super::jobs::AgentApi>) -> (Area, PathBuf) {
+    let (a, home) = with_home(name);
+    let yes = serde_json::json!({ "agent": "claude", "way": "api", "consent": true });
+    assert_eq!(post(&a, "/v1/agent/link", yes).0, 200);
+    let _ = a.server.agent_api.set(fake);
+    (a, home)
+}
+
+fn said(answer: &str, topology: Option<&str>) -> String {
+    serde_json::json!({ "answer": answer, "topology": topology }).to_string()
+}
+
+#[test]
+fn dagon_answers_with_the_projects_facts_and_a_checked_proposal() {
+    let sent = Arc::new(std::sync::Mutex::new(Vec::new()));
+    let log = sent.clone();
+    let better = YAML.replace("max_attempts: 3", "max_attempts: 2");
+    let reply = better.clone();
+    let fake: Arc<super::jobs::AgentApi> = Arc::new(move |p: &crate::agents::Prompt| {
+        log.lock()
+            .unwrap()
+            .push(format!("{}\n{}", p.system, p.user));
+        Ok(said("試す回数を 2 回に減らす案です。", Some(&reply)))
+    });
+    let (a, home) = linked_with("agent-ask", fake);
+    let q = serde_json::json!({
+        "question": "変更を提案", "kind": "propose", "selection": { "node": "seg" },
+        "history": [{ "role": "user", "text": "次は？" }, { "role": "dagon", "text": "ビルドします。" }],
+    });
+    let (st, body) = post(&a, "/v1/agent/ask", q);
+    assert_eq!(st, 200, "{body}");
+    let v: serde_json::Value = serde_json::from_str(&body).unwrap();
+    assert_eq!(v["answer"], "試す回数を 2 回に減らす案です。");
+    assert_eq!(v["proposal"]["topology"], better.as_str());
+    assert!(v["proposal"]["yaml_diff"]
+        .as_str()
+        .unwrap()
+        .contains("-    max_attempts: 3\n+    max_attempts: 2"));
+    let sent = sent.lock().unwrap().join("\n");
+    assert!(sent.contains("i2c-main") && sent.contains("ビルドします。") && sent.contains("seg"));
+    let shown = home.to_string_lossy().replace('\\', "/");
+    for never in [
+        shown.as_str(),
+        &a.dir.to_string_lossy(),
+        "Users",
+        "# work area",
+    ] {
+        assert!(
+            !sent.replace("\\\\", "/").contains(never),
+            "{never} reached the agent"
+        );
+    }
+    // Bad questions are refused before the agent is called.
+    let (st, _) = post(&a, "/v1/agent/ask", serde_json::json!({ "question": "" }));
+    assert_eq!(st, 400);
+    let (st, _) = post(
+        &a,
+        "/v1/agent/ask",
+        serde_json::json!({ "question": "x", "kind": "other" }),
+    );
+    assert_eq!(st, 400);
+}
+
+#[test]
+fn questions_wait_for_linking_and_go_one_at_a_time() {
+    let (a, _) = with_home("ask-unlinked");
+    let (st, body) = post(&a, "/v1/agent/ask", serde_json::json!({ "question": "x" }));
+    assert!(st == 409 && body.contains("AGENT_NOT_LINKED"), "{body}");
+    let b = auth(&a);
+    assert_eq!(http(&a, "POST", "/v1/agent/ask", &[], b"{}").0, 401);
+    let cross = [
+        ("Origin", "https://example.com"),
+        ("Authorization", b.as_str()),
+    ];
+    assert_eq!(http(&a, "POST", "/v1/agent/ask", &cross, b"{}").0, 403);
+
+    let (go, wait) = std::sync::mpsc::channel::<()>();
+    let wait = std::sync::Mutex::new(wait);
+    let (entered, inside) = std::sync::mpsc::channel::<()>();
+    let entered = std::sync::Mutex::new(entered);
+    let fake: Arc<super::jobs::AgentApi> = Arc::new(move |_: &crate::agents::Prompt| {
+        let _ = entered.lock().unwrap().send(());
+        let _ = wait.lock().unwrap().recv();
+        Ok(said("はい。", None))
+    });
+    let (a, _) = linked_with("ask-busy", fake);
+    let a = Arc::new(a);
+    let first = {
+        let a = a.clone();
+        std::thread::spawn(move || {
+            post(&a, "/v1/agent/ask", serde_json::json!({ "question": "1" }))
+        })
+    };
+    inside.recv().unwrap();
+    let (st, body) = post(&a, "/v1/agent/ask", serde_json::json!({ "question": "2" }));
+    assert!(st == 429 && body.contains("AGENT_BUSY"), "{body}");
+    go.send(()).unwrap();
+    assert_eq!(first.join().unwrap().0, 200);
+    // The turn is free again.
+    go.send(()).unwrap();
+    assert_eq!(
+        post(&a, "/v1/agent/ask", serde_json::json!({ "question": "3" })).0,
+        200
+    );
+}
+
+#[test]
+fn an_agent_that_times_out_or_fails_gives_a_page_safe_error() {
+    let fake: Arc<super::jobs::AgentApi> =
+        Arc::new(|_: &crate::agents::Prompt| Err(crate::agents::TIMED_OUT.to_string()));
+    let (a, _) = linked_with("ask-timeout", fake);
+    let (st, body) = post(&a, "/v1/agent/ask", serde_json::json!({ "question": "x" }));
+    assert!(st == 504 && body.contains("AGENT_TIMEOUT"), "{body}");
+
+    let fake: Arc<super::jobs::AgentApi> =
+        Arc::new(|_: &crate::agents::Prompt| Ok("no JSON here".to_string()));
+    let (a, _) = linked_with("ask-odd", fake);
+    let (st, body) = post(&a, "/v1/agent/ask", serde_json::json!({ "question": "x" }));
+    assert!(st == 502 && body.contains("AGENT_FAILED"), "{body}");
+}
+
+#[test]
+fn a_consent_file_of_another_version_answers_its_own_code() {
+    let (a, home) = with_home("consent-version");
+    std::fs::write(
+        home.join(".dagon/agent.json"),
+        r#"{"version":9,"agent":"claude","way":"api","at":"2026-11-04T04:14:35Z"}"#,
+    )
+    .unwrap();
+    for path in ["/v1/agent/ask", "/v1/ai/topology"] {
+        let (st, body) = post(&a, path, serde_json::json!({ "question": "x" }));
+        assert!(
+            st == 409 && body.contains("AGENT_CONSENT_VERSION"),
+            "{path}: {body}"
+        );
+        assert!(body.contains("version 9"), "{body}");
+    }
+    let v: serde_json::Value = serde_json::from_str(&get(&a, "/v1/agent").1).unwrap();
+    assert_eq!(v["linked"], false);
+    assert!(v["consent_error"].as_str().unwrap().contains("version 9"));
+    // Linking again records a consent this dagon reads.
+    let yes = serde_json::json!({ "agent": "claude", "way": "api", "consent": true });
+    assert_eq!(post(&a, "/v1/agent/link", yes).0, 200);
+    let v: serde_json::Value = serde_json::from_str(&get(&a, "/v1/agent").1).unwrap();
+    assert_eq!(v["consent_error"], serde_json::Value::Null);
+}
+
+#[test]
+fn a_way_that_cannot_be_used_here_is_refused_before_any_call() {
+    // With the key set this would reach the real agent: not here.
+    if std::env::var_os("ANTHROPIC_API_KEY").is_some() {
+        return;
+    }
+    let (a, _) = with_home("ask-nokey");
+    let yes = serde_json::json!({ "agent": "claude", "way": "api", "consent": true });
+    assert_eq!(post(&a, "/v1/agent/link", yes).0, 200);
+    let (st, body) = post(&a, "/v1/agent/ask", serde_json::json!({ "question": "x" }));
+    assert!(st == 409 && body.contains("AGENT_UNAVAILABLE"), "{body}");
+    assert!(
+        body.contains("ANTHROPIC_API_KEY") && !body.contains("sk-"),
+        "{body}"
+    );
+}
+
+/// An agent added as data only (a TOML file in ~/.dagon/agents naming a
+/// program) answers the page's question, with every guard in front.
+#[test]
+fn an_agent_defined_only_as_data_answers_the_page() {
+    let (a, home) = with_home("ask-toml");
+    let answer = home.join("answer.json");
+    std::fs::write(
+        &answer,
+        r#"{"answer":"データだけで足したエージェントです。"}"#,
+    )
+    .unwrap();
+    let (program, args) = if cfg!(windows) {
+        ("cmd", format!("['/C', 'type', '{}']", answer.display()))
+    } else {
+        ("cat", format!("['{}']", answer.display()))
+    };
+    std::fs::create_dir_all(home.join(".dagon/agents")).unwrap();
+    std::fs::write(
+        home.join(".dagon/agents/fake.toml"),
+        format!(
+            "dagon_agent = 1\nid = \"fake\"\nname = \"Fake\"\nprovider = \"Test\"\n\
+             [[ways]]\nid = \"print\"\nname = \"Print\"\n\
+             [ways.transport]\nkind = \"command\"\nprogram = \"{program}\"\nargs = {args}\n"
+        ),
+    )
+    .unwrap();
+    let v: serde_json::Value = serde_json::from_str(&get(&a, "/v1/agent").1).unwrap();
+    assert_eq!(v["agents"][1]["id"], "fake");
+    assert_eq!(v["agents"][1]["ways"][0]["available"], true);
+    assert!(!v.to_string().contains("answer.json"), "{v}");
+    let (st, _) = post(&a, "/v1/agent/ask", serde_json::json!({ "question": "x" }));
+    assert_eq!(st, 409, "not linked yet");
+    let yes = serde_json::json!({ "agent": "fake", "way": "print", "consent": true });
+    assert_eq!(post(&a, "/v1/agent/link", yes).0, 200);
+    let (st, body) = post(
+        &a,
+        "/v1/agent/ask",
+        serde_json::json!({ "question": "次は？" }),
+    );
+    assert_eq!(st, 200, "{body}");
+    let r: serde_json::Value = serde_json::from_str(&body).unwrap();
+    assert_eq!(r["answer"], "データだけで足したエージェントです。");
+}
+
+#[test]
+fn a_demo_never_calls_an_agent() {
+    let d = demo_area("demo-ask");
+    let b = auth(&d);
+    let ok = [("Authorization", b.as_str())];
+    for path in ["/v1/agent/ask", "/v1/ai/topology", "/v1/ai/port"] {
+        let (st, _) = http(
+            &d,
+            "POST",
+            path,
+            &ok,
+            br#"{"question":"x","description":"x"}"#,
+        );
+        assert_eq!(st, 403, "{path}");
+    }
+    assert_eq!(http(&d, "GET", "/v1/agent", &ok, b"").0, 200);
+    let (_, hello) = http(&d, "GET", "/v1/hello", &ok, b"");
+    assert!(!hello.contains("ai_topology"), "{hello}");
+}
+
+fn counting(
+    reply: String,
+    on_call: impl Fn() + Send + Sync + 'static,
+) -> (
+    Arc<super::jobs::AgentApi>,
+    Arc<std::sync::atomic::AtomicUsize>,
+) {
+    let calls = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let n = calls.clone();
+    let fake: Arc<super::jobs::AgentApi> = Arc::new(move |_: &crate::agents::Prompt| {
+        n.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        on_call();
+        Ok(reply.clone())
+    });
+    (fake, calls)
+}
+
+#[test]
+fn an_unlink_waits_for_the_call_in_flight_and_no_call_follows() {
+    // The stand-in blocks mid-call until the test lets it go.
+    let (go, wait) = std::sync::mpsc::channel::<()>();
+    let wait = std::sync::Mutex::new(wait);
+    let (entered, inside) = std::sync::mpsc::channel::<()>();
+    let entered = std::sync::Mutex::new(entered);
+    let (fake, calls) = counting(
+        said(
+            "案です。",
+            Some(
+                "dagon: 1
+name: broken
+",
+            ),
+        ),
+        move || {
+            let _ = entered.lock().unwrap().send(());
+            let _ = wait.lock().unwrap().recv();
+        },
+    );
+    let (a, home) = linked_with("ask-unlink", fake);
+    let a = Arc::new(a);
+    let asking = {
+        let a = a.clone();
+        std::thread::spawn(move || {
+            let q = serde_json::json!({ "question": "変更を提案", "kind": "propose" });
+            post(&a, "/v1/agent/ask", q)
+        })
+    };
+    inside.recv().unwrap();
+    let (done_tx, done) = std::sync::mpsc::channel();
+    let unlinking = {
+        let a = a.clone();
+        std::thread::spawn(move || {
+            let b = auth(&a);
+            let r = http(
+                &a,
+                "DELETE",
+                "/v1/agent/link",
+                &[("Authorization", b.as_str())],
+                b"",
+            );
+            done_tx.send(()).unwrap();
+            r
+        })
+    };
+    // The consent is gone at once; DELETE answers when the call has ended.
+    let consent = home.join(".dagon/agent.json");
+    let t0 = std::time::Instant::now();
+    while consent.exists() && t0.elapsed() < std::time::Duration::from_secs(10) {
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
+    assert!(!consent.exists());
+    let early = done.recv_timeout(std::time::Duration::from_millis(400));
+    assert!(early.is_err(), "DELETE answered while a call was in flight");
+    go.send(()).unwrap();
+    assert_eq!(unlinking.join().unwrap().0, 200);
+    let (st, body) = asking.join().unwrap();
+    assert!(st == 409 && body.contains("AGENT_NOT_LINKED"), "{body}");
+    assert_eq!(
+        calls.load(std::sync::atomic::Ordering::SeqCst),
+        1,
+        "no call after the unlink"
+    );
+}
+
+fn job_state(a: &Area, id: u64, want: &str) {
+    let mut last = serde_json::Value::Null;
+    for _ in 0..3000 {
+        let (_, body) = get(a, &format!("/v1/jobs/{id}"));
+        last = serde_json::from_str(&body).unwrap();
+        if last["state"] == want {
+            return;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
+    panic!("job {id} never reached {want}: {last}");
+}
+
+#[test]
+fn unlinking_cancels_a_running_topology_draft() {
+    let question =
+        serde_json::json!({ "yaml": "", "questions": ["baud rate of seg?"] }).to_string();
+    let (fake, calls) = counting(question, || {});
+    let (a, _) = linked_with("topo-unlink", fake);
+    let (st, body) = post(
+        &a,
+        "/v1/ai/topology",
+        serde_json::json!({ "description": "a hub" }),
+    );
+    assert_eq!(st, 202, "{body}");
+    let id = serde_json::from_str::<serde_json::Value>(&body).unwrap()["job"]
+        .as_u64()
+        .unwrap();
+    job_state(&a, id, "question");
+    let b = auth(&a);
+    assert_eq!(
+        http(
+            &a,
+            "DELETE",
+            "/v1/agent/link",
+            &[("Authorization", b.as_str())],
+            b""
+        )
+        .0,
+        200
+    );
+    job_state(&a, id, "cancelled");
+    assert_eq!(calls.load(std::sync::atomic::Ordering::SeqCst), 1);
+}
+
+#[test]
+fn a_topology_file_too_large_to_send_is_refused_without_a_call() {
+    let (fake, calls) = counting(said("はい。", None), || {});
+    let (a, _) = linked_with("ask-large", fake);
+    let big = format!("{YAML}{}", "# padding\n".repeat(7_000));
+    std::fs::write(a.dir.join("topology/t.yaml"), big).unwrap();
+    let (st, body) = post(&a, "/v1/agent/ask", serde_json::json!({ "question": "x" }));
+    assert!(
+        st == 413 && body.contains("AGENT_CONTEXT_TOO_LARGE"),
+        "{body}"
+    );
+    assert_eq!(calls.load(std::sync::atomic::Ordering::SeqCst), 0);
 }

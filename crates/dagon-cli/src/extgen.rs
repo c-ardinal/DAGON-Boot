@@ -279,7 +279,7 @@ fn boot_graph_stamp(p: &ProjectRef<'_>, id: &str, mcu: &str) -> Result<(String, 
     let dir = contained(p.base, Path::new(&rel))?;
     let f = BootFolder::read(&dir)?;
     let mut cmd = std::process::Command::new("cargo");
-    for k in crate::nodebuild::SECRET_ENV {
+    for k in crate::nodebuild::secret_env() {
         cmd.env_remove(k);
     }
     cmd.args(["metadata", "--format-version", "1", "--all-features"])

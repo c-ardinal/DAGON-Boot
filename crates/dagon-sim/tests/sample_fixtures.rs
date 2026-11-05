@@ -21,10 +21,11 @@ fn key() -> KeyPair {
 
 /// Patterned payload of `len` bytes, distinct per node, slot and version.
 fn body(salt: u8, len: usize) -> Vec<u8> {
-    (0..len).map(|i| (i as u8).wrapping_mul(31) ^ salt).collect()
+    (0..len)
+        .map(|i| (i as u8).wrapping_mul(31) ^ salt)
+        .collect()
 }
 
-#[allow(clippy::too_many_arguments)]
 fn img(mcu: &str, port: &str, tag: &str, slot: u8, v: Version, salt: u8, len: usize) -> Vec<u8> {
     let (flags, caps) = image::default_bits(image_kind::APP);
     let spec = ImageSpec {
@@ -50,7 +51,15 @@ fn hub(slot: u8, v: Version, len: usize) -> Vec<u8> {
 }
 
 fn seg(slot: u8, v: Version, len: usize) -> Vec<u8> {
-    img("stm32f401re", "self-boot", "seg-f401-7seg", slot, v, 0x5A, len)
+    img(
+        "stm32f401re",
+        "self-boot",
+        "seg-f401-7seg",
+        slot,
+        v,
+        0x5A,
+        len,
+    )
 }
 
 fn watch(v: Version, len: usize) -> Vec<u8> {

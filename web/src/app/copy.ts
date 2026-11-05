@@ -414,13 +414,13 @@ export const AGENT = {
     DEMO: { text: 'デモでは DAGON と連携できません', failed: false },
     OLD_CLI: { text: 'この CLI は DAGON に対応していません。新しい dagon で dagon serve を起動し直してください', failed: false },
     AGENT_CONSENT_VERSION: {
-      label: '× 同意のバージョン違い',
-      text: 'このパソコンに残っている連携の同意は、この dagon では読めないバージョンです。メニューの「DAGON と連携する」から、もう一度連携してください',
+      label: '× 利用規約の確認',
+      text: '利用規約が更新されています。連携のために確認してください。',
       failed: true,
     },
     AGENT_CONTEXT_TOO_LARGE: {
-      label: '× 大きすぎる',
-      text: '構成か質問が大きすぎるため、DAGON に送りませんでした。構成を分けるか、質問を短くしてから聞いてください',
+      label: '× 長すぎる',
+      text: '文字数が多すぎて送れません',
       failed: true,
     },
   },

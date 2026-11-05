@@ -131,8 +131,10 @@ describe('copy', () => {
 
 describe('the writing vocabulary', () => {
   // Writing to nodes is 書き込む / 書き込み中 / 書き込み済み / 書き込めない and the .dgb is the パッケージファイル.
-  test('no screen text (nor the stand-in agent) says 更新', () => {
-    expect([...shownExcept(), ...MOCK_TEXTS()].filter((s) => s.includes('更新'))).toEqual([]);
+  // 更新 is barred as a word for writing to nodes; the terms of use being updated is not writing.
+  const NOT_WRITING = new Set<string>([copy.AGENT.errors.AGENT_CONSENT_VERSION.text]);
+  test('no screen text (nor the stand-in agent) says 更新 for writing', () => {
+    expect([...shownExcept(), ...MOCK_TEXTS()].filter((s) => s.includes('更新') && !NOT_WRITING.has(s))).toEqual([]);
   });
 });
 

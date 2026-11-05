@@ -91,6 +91,13 @@ describe('DAGON and its agent (docs/agent-api.md)', () => {
   });
 });
 
+describe('AI link refusals use the agreed words', () => {
+  test('too long and terms of use: short label, plain detail', () => {
+    expect(AGENT.errors.AGENT_CONTEXT_TOO_LARGE).toMatchObject({ label: '× 長すぎる', text: '文字数が多すぎて送れません' });
+    expect(AGENT.errors.AGENT_CONSENT_VERSION).toMatchObject({ label: '× 利用規約の確認', text: '利用規約が更新されています。連携のために確認してください。' });
+  });
+});
+
 describe('refusals serve tells apart by code', () => {
   test.each([
     [409, 'AGENT_CONSENT_VERSION'],

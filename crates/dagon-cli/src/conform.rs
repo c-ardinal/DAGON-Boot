@@ -13,7 +13,8 @@ use dagon_host::{Clock, Error, Host, Target, Transport};
 use dagon_port::LinkKind;
 use dagon_sim::block_on;
 
-use crate::config::{load_key, read_file, read_topology, Config, Opts};
+use crate::cli::ConformArgs;
+use crate::config::{load_key, read_file, read_topology, Config};
 
 /// Where conformance results go in the work area, per node.
 pub(crate) const CONFORM_DIR: &str = "out/conform";
@@ -226,41 +227,34 @@ pub(crate) fn conform_files(
     Ok(report)
 }
 
-pub fn command(args: &[&str]) -> Result<(), String> {
-    let usb = args.contains(&"--usb");
-    let args: Vec<&str> = args.iter().copied().filter(|a| *a != "--usb").collect();
-    let o = Opts::parse(
-        &args,
-        &["node", "images", "out", "port", "topology", "config", "key"],
-    )?;
-    if !o.pos.is_empty() {
-        return Err("conform takes options only".into());
-    }
-    let node = o.need("node")?;
-    let cfg = Config::load(o.get("config"))?;
+pub fn command(a: &ConformArgs) -> Result<(), String> {
+    let usb = a.usb;
+    let node = a.node.as_str();
+    let cfg = Config::load(a.config.as_deref())?;
     let to = if usb {
         Target::Hub
     } else {
         node_target(
             &crate::defs::registry(&cfg)?,
-            &read_topology(&cfg, &cfg.topology_path(o.get("topology"))?)?,
+            &read_topology(&cfg, &cfg.topology_path(a.topology.as_deref())?)?,
             node,
         )?
     };
-    let dir = o
-        .get("images")
+    let dir = a
+        .images
+        .as_ref()
         .map_or_else(|| cfg.base.join(CONFORM_DIR).join(node), PathBuf::from);
-    let key = load_key(o.get("key"))?;
+    let key = load_key(a.key.as_deref())?;
     // Results go to --out, else next to the images (--images), else to
     // out/conform/<node> in the work area.
-    let out = match (o.get("out"), o.get("images")) {
+    let out = match (a.out.as_deref(), a.images.as_deref()) {
         (Some(p), _) => crate::genfs::Out::User(PathBuf::from(p)),
         (None, Some(_)) => crate::genfs::Out::of(&cfg.base, &dir)?,
         (None, None) => {
             crate::genfs::Out::Work(crate::genfs::Rel::new(format!("{CONFORM_DIR}/{node}"))?)
         }
     };
-    let report = conform_files(node, to, &dir, &out, &cfg.base, &key, o.get("port"))?;
+    let report = conform_files(node, to, &dir, &out, &cfg.base, &key, a.port.as_deref())?;
     for c in CTS {
         if let Some(r) = report.results.iter().find(|r| r.id == c.id) {
             println!("{} {:<24} {}", Label(c.id), c.name, r.verdict.as_str());

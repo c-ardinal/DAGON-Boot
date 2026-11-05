@@ -15,8 +15,9 @@ use dagon_topology::defs::Registry;
 use dagon_topology::Topology;
 use ed25519_compact::KeyPair;
 
+use crate::cli::DeployArgs;
 use crate::commands::{image_for_node, SignOpts};
-use crate::config::{load_key, read_topology, Config, Opts};
+use crate::config::{load_key, read_topology, Config};
 use crate::nodebuild::{self, SlotElfs};
 
 /// Release `apply` takes by default when dagon.toml names none.
@@ -251,12 +252,6 @@ pub(crate) fn confirm(listing: &str, input: &mut dyn BufRead) -> bool {
     }
 }
 
-/// Flag of `deploy` (and `flash`): do not ask before writing.
-pub(crate) const YES: &str = "--yes";
-/// `dagon deploy --bootcore`: every node with boot core slots must have its
-/// boot crate (without it, nodes without one are deployed without a core).
-pub(crate) const BOOTCORE: &str = "--bootcore";
-
 /// The key the firmware embeds: the build key of dagon.toml or
 /// DAGON_PUBKEY ([`crate::config::build_pubkey`]), else the signing key's
 /// public half. A build key other than the signing key is refused: the
@@ -272,24 +267,18 @@ pub(crate) fn firmware_key(cfg: &Config, key: &KeyPair) -> Result<[u8; 32], Stri
     }
 }
 
-/// `dagon deploy [<id>...] [--version x.y.z] [--yes] [--bootcore]
-/// [--port <name>] [--topology <yaml>] [--key <file>] [--config <file>]`
-/// (each node's boot core goes in too, from its boot crate, for every boot
-/// core slot its MCU definition declares; `--bootcore` makes a missing boot
-/// crate an error).
-pub fn command(args: &[&str]) -> Result<(), String> {
-    let yes = args.contains(&YES);
-    let with_cores = args.contains(&BOOTCORE);
-    let args: Vec<&str> = args
-        .iter()
-        .copied()
-        .filter(|a| *a != YES && *a != BOOTCORE)
-        .collect();
-    let o = Opts::parse(&args, &["version", "port", "topology", "key", "config"])?;
-    let cfg = Config::load(o.get("config"))?;
-    let t = read_topology(&cfg, &cfg.topology_path(o.get("topology"))?)?;
-    let nodes = pick_nodes(&cfg, &t, &o.pos)?;
-    let key = load_key(o.get("key"))?;
+/// `dagon deploy` (each node's boot core goes in too, from its boot crate,
+/// for every boot core slot its MCU definition declares; `--bootcore` makes
+/// a missing boot crate an error, without it nodes without one are deployed
+/// without a core).
+pub fn command(a: &DeployArgs) -> Result<(), String> {
+    let yes = a.yes;
+    let with_cores = a.bootcore;
+    let cfg = Config::load(a.config.as_deref())?;
+    let t = read_topology(&cfg, &cfg.topology_path(a.topology.as_deref())?)?;
+    let pos: Vec<&str> = a.nodes.iter().map(String::as_str).collect();
+    let nodes = pick_nodes(&cfg, &t, &pos)?;
+    let key = load_key(a.key.as_deref())?;
     let latest = release_path(&cfg);
     let previous = release_versions(&t, &latest, &key.pk).unwrap_or_else(|e| {
         eprintln!("warning: {e}; its versions are not used");
@@ -299,7 +288,7 @@ pub fn command(args: &[&str]) -> Result<(), String> {
     // source's refuses the deploy.
     let versions = nodes
         .iter()
-        .map(|n| app_version(&cfg, n, o.get("version")).map(|v| (n.clone(), v)))
+        .map(|n| app_version(&cfg, n, a.version.as_deref()).map(|v| (n.clone(), v)))
         .collect::<Result<BTreeMap<_, _>, _>>()?;
 
     let fw_key = firmware_key(&cfg, &key)?;
@@ -355,7 +344,7 @@ pub fn command(args: &[&str]) -> Result<(), String> {
             p.release.display()
         ));
     }
-    let mut host = crate::serial::host(o.get("port"))?;
+    let mut host = crate::serial::host(a.port.as_deref())?;
     crate::device::apply_bundle(
         &mut host,
         &crate::defs::registry(&cfg)?,

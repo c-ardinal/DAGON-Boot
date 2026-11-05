@@ -12,7 +12,10 @@ use dagon_topology::defs::{McuDef, Registry, Writer};
 use dagon_topology::schema::{Role, Topology};
 use ed25519_compact::KeyPair;
 
-use crate::config::{load_key, read_file, read_topology, write_file, Config, Opts};
+use crate::cli::{
+    FirstInstallOpts, ImageSignArgs, ProvisionArgs, ReleaseBuildArgs, RescueArgs, TopoCompileArgs,
+};
+use crate::config::{load_key, read_file, read_topology, write_file, Config};
 
 type Res = Result<(), String>;
 
@@ -108,34 +111,12 @@ fn describe(path: &Path, img: &[u8]) {
     );
 }
 
-pub fn image_sign(args: &[&str]) -> Res {
-    let o = Opts::parse(
-        args,
-        &[
-            "node",
-            "slot",
-            "kind",
-            "version",
-            "seq",
-            "min-bootcore",
-            "proto",
-            "flags",
-            "caps",
-            "topology",
-            "key",
-            "config",
-            "out",
-        ],
-    )?;
-    let [input] = o.pos[..] else {
-        return Err("image sign needs exactly one input file".into());
-    };
-    let cfg = Config::load(o.get("config"))?;
-    let t = read_topology(&cfg, &cfg.topology_path(o.get("topology"))?)?;
-    let kind_name = o.get("kind").unwrap_or("app");
-    let kind = image::image_kind_of(kind_name).ok_or("--kind must be app, bootcore or agent")?;
-    let slot = slot_arg(o.get("slot").unwrap_or("a"))?;
-    let bits = match (o.get("flags"), o.get("caps")) {
+pub fn image_sign(a: &ImageSignArgs) -> Res {
+    let cfg = Config::load(a.config.as_deref())?;
+    let t = read_topology(&cfg, &cfg.topology_path(a.topology.as_deref())?)?;
+    let kind = image::image_kind_of(&a.kind).ok_or("--kind must be app, bootcore or agent")?;
+    let slot = slot_arg(&a.slot)?;
+    let bits = match (a.flags.as_deref(), a.caps.as_deref()) {
         (None, None) => None,
         (f, c) => {
             let (df, dc) = image::default_bits(kind);
@@ -148,21 +129,22 @@ pub fn image_sign(args: &[&str]) -> Res {
         }
     };
     let opts = SignOpts {
-        version: version(o.need("version")?)?,
-        release_seq: o.get("seq").map_or(Ok(1), |s| number("seq", s))?,
-        min_bootcore: o
-            .get("min-bootcore")
+        version: version(&a.version)?,
+        release_seq: number("seq", &a.seq)?,
+        min_bootcore: a
+            .min_bootcore
+            .as_deref()
             .map_or(Ok(Version::default()), version)?,
-        proto: o.get("proto").map_or(Ok(1), |s| number("proto", s))?,
+        proto: number("proto", &a.proto)?,
         bits,
     };
-    let out = PathBuf::from(o.need("out")?);
-    let key = load_key(o.get("key"))?;
-    let input_bytes = read_file(Path::new(input))?;
+    let out = PathBuf::from(&a.out);
+    let key = load_key(a.key.as_deref())?;
+    let input_bytes = read_file(Path::new(&a.input))?;
     let img = image_for_node(
         &crate::defs::registry(&cfg)?,
         &t,
-        o.need("node")?,
+        &a.node,
         kind,
         slot,
         &input_bytes,
@@ -174,7 +156,7 @@ pub fn image_sign(args: &[&str]) -> Res {
     Ok(())
 }
 
-fn image_files(paths: &[&str]) -> Result<Vec<PathBuf>, String> {
+fn image_files(paths: &[String]) -> Result<Vec<PathBuf>, String> {
     let mut out = Vec::new();
     for p in paths.iter().map(PathBuf::from) {
         if p.is_dir() {
@@ -192,32 +174,26 @@ fn image_files(paths: &[&str]) -> Result<Vec<PathBuf>, String> {
     Ok(out)
 }
 
-pub fn release_build(args: &[&str]) -> Res {
-    let o = Opts::parse(
-        args,
-        &["name", "topology", "topology-bin", "key", "config", "out"],
-    )?;
-    if o.pos.is_empty() {
-        return Err("release build needs image files or directories".into());
-    }
-    let cfg = Config::load(o.get("config"))?;
-    let t = read_topology(&cfg, &cfg.topology_path(o.get("topology"))?)?;
+pub fn release_build(a: &ReleaseBuildArgs) -> Res {
+    let cfg = Config::load(a.config.as_deref())?;
+    let t = read_topology(&cfg, &cfg.topology_path(a.topology.as_deref())?)?;
     let reg = crate::defs::registry(&cfg)?;
-    let topo_bin = match o.get("topology-bin") {
+    let topo_bin = match &a.topology_bin {
         Some(p) => read_file(Path::new(p))?,
         None => dagon_topology::compile_with(&reg, &t).map_err(|e| e.to_string())?,
     };
-    let out = o
-        .get("out")
+    let out = a
+        .out
+        .as_ref()
         .map(PathBuf::from)
         .or(cfg.release.clone())
         .ok_or("no output: pass --out <dgb> or set release in dagon.toml")?;
-    let name = o.need("name")?;
-    let images = image_files(&o.pos)?
+    let name = &a.name;
+    let images = image_files(&a.inputs)?
         .iter()
         .map(|p| read_file(p))
         .collect::<Result<Vec<_>, _>>()?;
-    let key = load_key(o.get("key"))?;
+    let key = load_key(a.key.as_deref())?;
     let r = release::build(&reg, &t, &topo_bin, &images, name, &key).map_err(|e| e.to_string())?;
     write_file(&out, &r.bundle)?;
     println!(
@@ -230,18 +206,16 @@ pub fn release_build(args: &[&str]) -> Res {
     Ok(())
 }
 
-pub fn topo_compile(args: &[&str]) -> Res {
-    let o = Opts::parse(args, &["out", "config"])?;
-    let [path] = o.pos[..] else {
-        return Err("topo compile needs <yaml>".into());
-    };
+pub fn topo_compile(a: &TopoCompileArgs) -> Res {
+    let path = a.yaml.as_str();
     // Without --config: the dagon.toml here, if any, else the builtin set.
-    let cfg = Config::load(o.get("config"))?;
+    let cfg = Config::load(a.config.as_deref())?;
     let t = read_topology(&cfg, Path::new(path))?;
     let bin = dagon_topology::compile_with(&crate::defs::registry(&cfg)?, &t)
         .map_err(|e| e.to_string())?;
-    let out = o
-        .get("out")
+    let out = a
+        .out
+        .as_ref()
         .map_or_else(|| Path::new(path).with_extension("bin"), PathBuf::from);
     write_file(&out, &bin)?;
     println!(
@@ -253,33 +227,27 @@ pub fn topo_compile(args: &[&str]) -> Res {
     Ok(())
 }
 
-pub fn provision(args: &[&str]) -> Res {
-    let o = Opts::parse(args, &["topology", "key", "config", "out"])?;
-    let [node] = o.pos[..] else {
-        return Err("provision needs <node>".into());
-    };
-    provision_node(&o, node)
+pub fn provision(a: &ProvisionArgs) -> Res {
+    provision_node(&a.files, &a.node)
 }
 
-pub fn rescue(args: &[&str]) -> Res {
-    let o = Opts::parse(args, &["topology", "key", "config", "out"])?;
-    if o.pos[..] != ["hub"] {
-        return Err("usage: rescue hub".into());
-    }
-    let cfg = Config::load(o.get("config"))?;
-    let t = read_topology(&cfg, &cfg.topology_path(o.get("topology"))?)?;
+/// `rescue hub`: the coordinator's first-install files.
+pub fn rescue(a: &RescueArgs) -> Res {
+    let o = &a.files;
+    let cfg = Config::load(o.config.as_deref())?;
+    let t = read_topology(&cfg, &cfg.topology_path(o.topology.as_deref())?)?;
     let hub = t
         .nodes
         .iter()
         .find(|n| n.role == Role::Coordinator)
         .ok_or("topology has no coordinator")?;
     let id = hub.id.clone();
-    provision_node(&o, &id)
+    provision_node(o, &id)
 }
 
-fn provision_node(o: &Opts<'_>, node: &str) -> Res {
-    let cfg = Config::load(o.get("config"))?;
-    let t = read_topology(&cfg, &cfg.topology_path(o.get("topology"))?)?;
+fn provision_node(o: &FirstInstallOpts, node: &str) -> Res {
+    let cfg = Config::load(o.config.as_deref())?;
+    let t = read_topology(&cfg, &cfg.topology_path(o.topology.as_deref())?)?;
     if t.node(node).is_none() {
         return Err(format!("no updatable node '{node}' in the topology"));
     }
@@ -288,9 +256,10 @@ fn provision_node(o: &Opts<'_>, node: &str) -> Res {
         .get(node)
         .ok_or_else(|| format!("no [provision.{node}] in dagon.toml"))?;
     let dir = o
-        .get("out")
+        .out
+        .as_ref()
         .map_or_else(|| cfg.provision_dir().join(node), PathBuf::from);
-    let key = load_key(o.get("key"))?;
+    let key = load_key(o.key.as_deref())?;
     let reg = crate::defs::registry(&cfg)?;
     let w = provision_files(&reg, &t, node, inputs, &dir, &key, &cfg.base)?;
     let mcu = node_mcu(&reg, &t, node)?;

@@ -12,6 +12,7 @@ use std::path::{Path, PathBuf};
 use serde_json::{json, Value};
 
 use crate::agents::{AgentDef, Agents, Transport, WayDef};
+use crate::cli::AgentWay;
 use crate::keystore::Keys;
 
 /// What a linked DAGON sends and never sends; the page and the terminal
@@ -334,47 +335,36 @@ fn consent_text(a: &AgentDef, w: &WayDef) -> String {
     )
 }
 
-const LINK_USAGE: &str = "usage: dagon ai link [--agent <id>] [--way <id>]";
-
 /// The agent and way `--agent` / `--way` name (default: the first agent,
 /// its first way `default_way` accepts, else its first way).
 pub(crate) fn chosen<'a>(
     agents: &'a Agents,
-    args: &[&str],
-    usage: &str,
+    sel: &AgentWay,
     default_way: impl Fn(&WayDef) -> bool,
 ) -> Result<(&'a AgentDef, &'a WayDef), String> {
-    let (mut agent, mut way) = (None, None);
-    let mut it = args.iter();
-    while let Some(flag) = it.next() {
-        match (*flag, it.next()) {
-            ("--agent", Some(v)) => agent = Some(*v),
-            ("--way", Some(v)) => way = Some(*v),
-            _ => return Err(format!("unknown argument {flag}; {usage}")),
-        }
-    }
+    let (agent, way) = (sel.agent.as_deref(), sel.way.as_deref());
     let a = match agent {
         Some(id) => agents.list.iter().find(|a| a.id == id),
         None => agents.list.first(),
     }
-    .ok_or_else(|| format!("no agent {}; {usage}", agent.unwrap_or_default()))?;
+    .ok_or_else(|| format!("no agent {}", agent.unwrap_or_default()))?;
     let w = match way {
         Some(id) => a.ways.iter().find(|w| w.id == id),
         None => a.ways.iter().find(|w| default_way(w)).or(a.ways.first()),
     }
-    .ok_or_else(|| format!("{} has no way {}; {usage}", a.id, way.unwrap_or_default()))?;
+    .ok_or_else(|| format!("{} has no way {}", a.id, way.unwrap_or_default()))?;
     Ok((a, w))
 }
 
-/// `dagon ai link [--agent <id>] [--way <id>]`: shows what is sent and to
+/// `dagon ai link`: shows what is sent and to
 /// whom, and records consent on "y".
-pub fn link_command(args: &[&str]) -> Result<(), String> {
+pub fn link_command(sel: &AgentWay) -> Result<(), String> {
     let home = home()?;
     let agents = Agents::load(Some(&home));
     for e in &agents.errors {
         eprintln!("warning: ~/.dagon/agents/{e}");
     }
-    let (a, w) = chosen(&agents, args, LINK_USAGE, |_| true)?;
+    let (a, w) = chosen(&agents, sel, |_| true)?;
     if let Some((c, _, _)) = linked(&home, &agents) {
         if c.agent == a.id && c.way == w.id {
             println!(
@@ -416,8 +406,7 @@ fn unavailable_hint(a: &AgentDef, w: &WayDef) -> String {
 }
 
 /// `dagon ai unlink`: removes the consent.
-pub fn unlink_command(args: &[&str]) -> Result<(), String> {
-    no_args(args, "unlink")?;
+pub fn unlink_command() -> Result<(), String> {
     if unlink(&home()?)? {
         println!(
             "DAGON との連携を外し、同意を取り消しました。鍵やログインはエージェントの側で消してください"
@@ -426,13 +415,6 @@ pub fn unlink_command(args: &[&str]) -> Result<(), String> {
         println!("DAGON は連携していません");
     }
     Ok(())
-}
-
-fn no_args(args: &[&str], cmd: &str) -> Result<(), String> {
-    match args.first() {
-        None => Ok(()),
-        Some(a) => Err(format!("unknown argument {a}; usage: dagon ai {cmd}")),
-    }
 }
 
 /// `YYYY-MM-DDTHH:MM:SSZ` with a real month, day and time of day.
@@ -722,20 +704,21 @@ mod tests {
             assert!(t.contains("Claude (Anthropic)") && t.contains(&w.name) && t.contains(key));
         }
         let any = |_: &WayDef| true;
+        let pick = |agent: Option<&str>, way: Option<&str>| AgentWay {
+            agent: agent.map(String::from),
+            way: way.map(String::from),
+        };
         assert_eq!(
-            chosen(&agents, &[], LINK_USAGE, any).unwrap().1.id,
+            chosen(&agents, &pick(None, None), any).unwrap().1.id,
             "claude-code"
         );
         let key = |w: &WayDef| w.transport.takes_key();
-        assert_eq!(chosen(&agents, &[], LINK_USAGE, key).unwrap().1.id, "api");
+        assert_eq!(chosen(&agents, &pick(None, None), key).unwrap().1.id, "api");
         assert_eq!(
-            chosen(&agents, &["--way", "api"], LINK_USAGE, any)
-                .unwrap()
-                .1
-                .id,
+            chosen(&agents, &pick(None, Some("api")), any).unwrap().1.id,
             "api"
         );
-        assert!(chosen(&agents, &["--agent", "other"], LINK_USAGE, any).is_err());
-        assert!(chosen(&agents, &["--way"], LINK_USAGE, any).is_err());
+        assert!(chosen(&agents, &pick(Some("other"), None), any).is_err());
+        assert!(chosen(&agents, &pick(None, Some("nope")), any).is_err());
     }
 }

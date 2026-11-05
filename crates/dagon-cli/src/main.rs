@@ -3,6 +3,7 @@
 mod agents;
 mod ai;
 mod ask;
+mod cli;
 mod commands;
 mod config;
 mod conform;
@@ -36,170 +37,63 @@ mod versions;
 use std::path::Path;
 use std::process::ExitCode;
 
-const USAGE: &str = "dagon - DAGON Boot command line tool
-
-Usage:
-  dagon key gen --out <dir>          generate a signing key pair (dir must be outside any git work tree)
-  dagon key pub [--key <file>]       public key (hex) and key id of the signing key
-  dagon topo check [--json] <yaml>   validate a topology file
-  dagon topo compile <yaml> [--out <bin>]
-                                     topology canonical binary
-  dagon image sign <elf|bin> --node <id> --version <x.y.z> --out <img>
-        [--slot a|b] [--kind app|bootcore|agent] [--seq <n>] [--min-bootcore <x.y.z>]
-        [--proto <n>] [--flags <list>] [--caps <list>] [--topology <yaml>] [--key <file>]
-                                     build and sign an image for a topology node
-  dagon release build <img|dir>... --name <name> [--out <dgb>] [--topology <yaml>]
-        [--topology-bin <bin>] [--key <file>]
-                                     check, sign the manifest and write the .dgb
-  dagon provision <node> [--out <dir>] [--topology <yaml>] [--key <file>]
-                                     first-install files from [provision.<node>] in dagon.toml
-  dagon rescue hub [--out <dir>] [--topology <yaml>] [--key <file>]
-                                     hub rescue UF2 (boot2, stage0, logs, boot core, app)
-  dagon status [--port <name>] [--topology <yaml>]
-                                     HELLO, STATUS and VERSION (stage0, boot core, app,
-                                     wire, MCU) of the hub and each topology node
-  dagon apply [<dgb>] [--node <id>]... [--port <name>] [--topology <yaml>]
-        [--pubkey <file>] [--key <file>] [--no-host-verify]
-                                     verify the release, check it matches the topology,
-                                     push the topology, update children then the hub
-                                     (--no-host-verify: leave signature and digest
-                                     checks to the nodes; demonstration only)
-  dagon conform --node <id> [--usb] [--images <dir>] [--out <dir>] [--port <name>]
-        [--topology <yaml>] [--key <file>]
-                                     the 12 conformance tests through the hub (or with
-                                     --usb on a node plugged in directly); writes
-                                     result.json and report.html into --out, else the
-                                     --images folder. The images folder holds good-a.img,
-                                     good-b.img, no-confirm-a.img, no-confirm-b.img
-                                     (default for both: out/conform/<id> next to
-                                     dagon.toml)
-  dagon topo push [<yaml>] [--port <name>]
-                                     send the topology canonical binary to the hub
-  dagon recover <node> [--release <dgb>] [--bootcore <img>] [--port <name>]
-        [--topology <yaml>] [--pubkey <file>] [--key <file>]
-                                     rewrite a node from the release: normal transfer if
-                                     it answers, else the F401 ROM loader (boot core from
-                                     <provision_dir>/<node>/bootcore.img by default)
-  dagon rollback --node <id> [--port <name>] [--topology <yaml>]
-                                     back to the node's previously confirmed version
-                                     (its other slot), then confirm it there
-  dagon new <dir> [--from <yaml>] [--keys <dir>] [--dagon-path <clone>]
-        [--dagon-git <url>] [--dagon-tag <tag>]
-                                     a project folder: dagon.toml, topology.yaml (the
-                                     sample unless --from), and a signing key pair in
-                                     --keys (default ~/.dagon/keys/<name>) if none is there.
-                                     DAGON comes from this CLI's release (git + tag
-                                     cli-v<version>) unless --dagon-path or DAGON_HOME names a
-                                     local clone
-  dagon gen [<id>...] [--force-main]
-                                     one Rust crate per node in nodes/<id> on the board
-                                     support packages; rewrites only wiring.rs and the
-                                     package line, never app.rs (main.rs only with
-                                     --force-main)
-  dagon build [<id>...]              cargo build each node in [build.<id>] of dagon.toml
-                                     into out/build/<id>/app-a.elf (and app-b.elf)
-  dagon deploy [<id>...] [--version <x.y.z>] [--yes] [--bootcore] [--port <name>]
-        [--topology <yaml>] [--key <file>]
-                                     build, sign both slots, release build and apply in one
-                                     go; each node's version is its crate's Cargo.toml
-                                     version (--version must equal it); lists node ->
-                                     version and asks first; keeps the package in out/deploy;
-                                     each node's boot core goes in from its boot crate;
-                                     a node writes it (before its app) only when its version
-                                     differs from the running boot core's; --bootcore
-                                     makes a missing boot crate an error
-  dagon flash <id> [--dry-run] [--yes] [--probe <vid:pid[:serial]> | --port <port> |
-        --drive <path>] [--out <dir>] [--topology <yaml>] [--key <file>]
-                                     first write as the node's MCU definition says (UF2
-                                     drive, probe-rs or espflash); builds its parts
-                                     (boot core, stage0, factory agent) with the key;
-                                     prints the plan first; writes to the one device
-                                     the writer reports, or the one you choose or name
-  dagon doctor [--fix] [--port <name>]
-                                     tools each MCU family of the topology needs; --fix
-                                     installs what needs no administrator rights; then
-                                     each node's versions when a hub is connected
-  dagon serve [--port <n>] [--web <dir>] [--pubkey <file>] [--no-open]
-                                     DAGON Console, the browser tool (built into dagon,
-                                     or --web), and its API on 127.0.0.1 only; opens it
-                                     with a one-time passphrase. DAGON Console verifies
-                                     releases with the public key given here (--pubkey,
-                                     pubkey in dagon.toml, or the signing key's public half)
-  dagon sim run                      the four simulator scenarios (no hardware)
-  dagon demo [--sim-speed <x>] [--sim-fail seg|watch] [--port <n>] [--no-open]
-                                     DAGON Console against a SIMULATED hub (親機 + 2 子機)
-                                     with a demo key made for it: try updates without
-                                     boards; --sim-fail makes that 子機's update fall back
-  dagon ai link [--agent <id>] [--way <id>]
-                                     link DAGON to an agent one way (default: the first
-                                     agent's first way; agents are TOML files, builtin or
-                                     in ~/.dagon/agents): shows where it sends and what,
-                                     and asks your consent once; logins stay with the
-                                     agent, API keys in the OS credential store
-  dagon ai unlink                    unlink DAGON and withdraw the consent
-  dagon ai key set|status|delete [--agent <id>] [--way <id>]
-                                     an agent's API key in the OS credential store
-                                     (Windows Credential Manager, macOS Keychain, Secret
-                                     Service): set reads it without echo; status shows
-                                     登録済み / 未登録 for every way that takes a key
-  dagon ai ask <question>            ask DAGON about the topology of ./dagon.toml; a
-                                     proposed change is shown as a diff, never applied
-  dagon ai topology [--in <text>] [--out <yaml>] [--model <id>]
-                                     board description (file or stdin) to topology YAML
-                                     by DAGON, checked to 0 errors (needs dagon ai link)
-  dagon --help
-  dagon --version
-
-The hub is found by USB ID c0de:cafe or product \"DAGON hub\" unless --port
-is given. Defaults come from ./dagon.toml (or --config <file>). The secret key file is
---key <file> or $DAGON_SIGNING_KEY and must lie outside any git work tree.
---flags: verify-enforced,debug,sim-only  --caps: confirm-by-hub,reboot-to-update,
-rom-entry-coop,sig-verifier";
-
-/// Exit code for bad command-line usage.
-const EXIT_USAGE: u8 = 2;
+use cli::{AiCmd, Cli, Command, ImageCmd, KeyCmd, ReleaseCmd, SimCmd, TopoCmd};
 
 fn main() -> ExitCode {
-    let args: Vec<String> = std::env::args().skip(1).collect();
-    let args: Vec<&str> = args.iter().map(String::as_str).collect();
-    match args.as_slice() {
-        [] | ["--help" | "-h" | "help", ..] => {
-            println!("{USAGE}");
-            ExitCode::SUCCESS
+    use clap::{CommandFactory, Parser};
+    let cli = match Cli::try_parse() {
+        Ok(c) => c,
+        // --help (exit 0) or a usage error (exit 2), as clap prints them.
+        Err(e) => {
+            let _ = e.print();
+            return ExitCode::from(u8::try_from(e.exit_code()).unwrap_or(2));
         }
-        ["--version" | "-V" | "version"] => {
+    };
+    let command = match cli.command {
+        _ if cli.version => Command::Version,
+        Some(c) => c,
+        None => {
+            let _ = Cli::command().print_long_help();
+            return ExitCode::SUCCESS;
+        }
+    };
+    match command {
+        Command::Version => {
             println!("{}", version_text(banner()));
             ExitCode::SUCCESS
         }
-        ["key", "gen", rest @ ..] => key_gen(rest),
-        ["key", "pub", rest @ ..] => run(key_pub(rest)),
-        ["topo", "check", rest @ ..] => topo_check(rest),
-        ["topo", "compile", rest @ ..] => run(commands::topo_compile(rest)),
-        ["image", "sign", rest @ ..] => run(commands::image_sign(rest)),
-        ["release", "build", rest @ ..] => run(commands::release_build(rest)),
-        ["provision", rest @ ..] => run(commands::provision(rest)),
-        ["rescue", rest @ ..] => run(commands::rescue(rest)),
-        ["status", rest @ ..] => run(device::status(rest)),
-        ["apply", rest @ ..] => run(device::apply(rest)),
-        ["topo", "push", rest @ ..] => run(device::topo_push(rest)),
-        ["recover", rest @ ..] => run(device::recover(rest)),
-        ["rollback", rest @ ..] => run(device::rollback(rest)),
-        ["build", rest @ ..] => run(nodebuild::command(rest)),
-        ["deploy", rest @ ..] => run(deploy::command(rest)),
-        ["flash", rest @ ..] => run(flash::command(rest)),
-        ["doctor", rest @ ..] => run(doctor::command(rest)),
-        ["new", rest @ ..] => run(scaffold::new_command(rest)),
-        ["gen", rest @ ..] => run(scaffold::gen_command(rest)),
-        ["serve", rest @ ..] => run(serve::command(rest)),
-        ["demo", rest @ ..] => run(demo::command(rest)),
-        ["conform", rest @ ..] => run(conform::command(rest)),
-        ["sim", "run", rest @ ..] => run(simrun::run(rest)),
-        ["ai", "topology", rest @ ..] => run(ai::topology(rest)),
-        ["ai", "ask", rest @ ..] => run(ask::command(rest)),
-        ["ai", "link", rest @ ..] => run(consent::link_command(rest)),
-        ["ai", "unlink", rest @ ..] => run(consent::unlink_command(rest)),
-        ["ai", "key", rest @ ..] => run(keystore::command(rest)),
-        _ => usage_error("unknown command"),
+        Command::HelpMarkdown => {
+            print!("{}", cli::markdown());
+            ExitCode::SUCCESS
+        }
+        Command::Key(KeyCmd::Gen { out }) => key_gen(&out),
+        Command::Key(KeyCmd::Pub { key }) => run(key_pub(key.as_deref())),
+        Command::Topo(TopoCmd::Check(a)) => topo_check(a.json, &a.yaml),
+        Command::Topo(TopoCmd::Compile(a)) => run(commands::topo_compile(&a)),
+        Command::Topo(TopoCmd::Push(a)) => run(device::topo_push(&a)),
+        Command::Image(ImageCmd::Sign(a)) => run(commands::image_sign(&a)),
+        Command::Release(ReleaseCmd::Build(a)) => run(commands::release_build(&a)),
+        Command::Provision(a) => run(commands::provision(&a)),
+        Command::Rescue(a) => run(commands::rescue(&a)),
+        Command::Status(a) => run(device::status(&a)),
+        Command::Apply(a) => run(device::apply(&a)),
+        Command::Conform(a) => run(conform::command(&a)),
+        Command::Recover(a) => run(device::recover(&a)),
+        Command::Rollback(a) => run(device::rollback(&a)),
+        Command::New(a) => run(scaffold::new_command(&a)),
+        Command::Gen(a) => run(scaffold::gen_command(&a)),
+        Command::Build(a) => run(nodebuild::command(&a)),
+        Command::Deploy(a) => run(deploy::command(&a)),
+        Command::Flash(a) => run(flash::command(&a)),
+        Command::Doctor(a) => run(doctor::command(&a)),
+        Command::Serve(a) => run(serve::command(&a)),
+        Command::Sim(SimCmd::Run) => run(simrun::run()),
+        Command::Demo(a) => run(demo::command(&a)),
+        Command::Ai(AiCmd::Link(a)) => run(consent::link_command(&a)),
+        Command::Ai(AiCmd::Unlink) => run(consent::unlink_command()),
+        Command::Ai(AiCmd::Key(k)) => run(keystore::command(&k)),
+        Command::Ai(AiCmd::Ask(a)) => run(ask::command(&a.question)),
+        Command::Ai(AiCmd::Topology(a)) => run(ai::topology(&a)),
     }
 }
 
@@ -213,24 +107,15 @@ fn run(r: Result<(), String>) -> ExitCode {
     }
 }
 
-fn usage_error(msg: &str) -> ExitCode {
-    eprintln!("error: {msg}\n\n{USAGE}");
-    ExitCode::from(EXIT_USAGE)
-}
-
 /// Prints the public half of the signing key (never the secret).
-fn key_pub(args: &[&str]) -> Result<(), String> {
-    let o = config::Opts::parse(args, &["key"])?;
-    let k = config::load_key(o.get("key"))?;
+fn key_pub(key: Option<&str>) -> Result<(), String> {
+    let k = config::load_key(key)?;
     println!("public_key: {}", dagon_sign::to_hex(&*k.pk));
     println!("key_id:     {}", config::key_id_text(&k.pk));
     Ok(())
 }
 
-fn key_gen(args: &[&str]) -> ExitCode {
-    let ["--out", dir] = args else {
-        return usage_error("key gen needs --out <dir>");
-    };
+fn key_gen(dir: &str) -> ExitCode {
     match dagon_sign::generate_to_dir(Path::new(dir)) {
         Ok(k) => {
             println!("public_key: {}", dagon_sign::to_hex(&k.public_key));
@@ -249,12 +134,7 @@ fn key_gen(args: &[&str]) -> ExitCode {
     }
 }
 
-fn topo_check(args: &[&str]) -> ExitCode {
-    let (json, path) = match args {
-        ["--json", path] | [path, "--json"] => (true, *path),
-        [path] if !path.starts_with('-') => (false, *path),
-        _ => return usage_error("topo check needs [--json] <yaml>"),
-    };
+fn topo_check(json: bool, path: &str) -> ExitCode {
     let yaml = match std::fs::read_to_string(path) {
         Ok(y) => y,
         Err(e) => {

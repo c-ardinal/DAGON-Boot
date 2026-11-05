@@ -18,15 +18,15 @@ use dagon_topology::defs::{McuDef, Registry, Writer};
 use dagon_topology::Topology;
 use ed25519_compact::KeyPair;
 
+use crate::cli::FlashArgs;
 use crate::commands::{command_lines, node_mcu, provision_files, FirstWrite};
-use crate::config::{load_key, read_topology, Config, Opts, ProvisionInputs};
-use crate::deploy::{confirm, firmware_key, YES};
+use crate::config::{load_key, read_topology, Config, ProvisionInputs};
+use crate::deploy::{confirm, firmware_key};
 use crate::esp::Esp;
 use crate::flashdev::{self, Pick, DRIVE_WAIT};
 use crate::nodebuild;
 use crate::scaffold::Want;
 
-const DRY_RUN: &str = "--dry-run";
 /// Version of the first install when dagon.toml gives none.
 const FIRST_VERSION: &str = "1.0.0";
 /// The stage0 part (the layout's `stage0` region); every other part is
@@ -1024,33 +1024,22 @@ fn dry_run(w: &FirstWrite) {
     }
 }
 
-/// `dagon flash <id> [--dry-run] [--yes] [--probe <vid:pid[:serial]> |
-/// --port <port> | --drive <path>] [--out <dir>] [--topology <yaml>]
-/// [--key <file>] [--config <file>]`
-pub fn command(args: &[&str]) -> Result<(), String> {
-    let dry = args.contains(&DRY_RUN);
-    let yes = args.contains(&YES);
-    let args: Vec<&str> = args
-        .iter()
-        .copied()
-        .filter(|a| *a != DRY_RUN && *a != YES)
-        .collect();
-    let o = Opts::parse(
-        &args,
-        &["out", "topology", "key", "config", "probe", "port", "drive"],
-    )?;
-    let [node] = o.pos[..] else {
-        return Err("flash needs <id>".into());
-    };
-    let cfg = Config::load(o.get("config"))?;
-    let t = read_topology(&cfg, &cfg.topology_path(o.get("topology"))?)?;
-    let out = o
-        .get("out")
+/// `dagon flash <id>`: writes to the device `--probe`, `--port` or
+/// `--drive` names (the one the node's writer takes), else the one found.
+pub fn command(a: &FlashArgs) -> Result<(), String> {
+    let dry = a.dry_run;
+    let yes = a.yes;
+    let node = a.node.as_str();
+    let cfg = Config::load(a.config.as_deref())?;
+    let t = read_topology(&cfg, &cfg.topology_path(a.topology.as_deref())?)?;
+    let out = a
+        .out
+        .as_ref()
         .map_or_else(|| cfg.provision_dir().join(node), PathBuf::from);
     let steps = plan(&cfg, &t, node, &out, Paths::Full)?.join("\n");
     println!("{steps}");
-    let selector = selector(&o, &cfg, &t, node)?;
-    let key = load_key(o.get("key"))?;
+    let selector = selector(a, &cfg, &t, node)?;
+    let key = load_key(a.key.as_deref())?;
     let mut log = |l: &str| println!("{l}");
     let cancel = AtomicBool::new(false);
     let w = prepare(&cfg, &t, node, &key, &out, Paths::Full, &mut log, &cancel)?;
@@ -1080,14 +1069,14 @@ pub fn command(args: &[&str]) -> Result<(), String> {
 
 /// The device option given, which must be the one `node`'s writer takes.
 fn selector<'a>(
-    o: &'a Opts<'_>,
+    a: &'a FlashArgs,
     cfg: &Config,
     t: &Topology,
     node: &str,
 ) -> Result<Option<&'a str>, String> {
-    let given: Vec<(&str, &str)> = ["probe", "port", "drive"]
+    let given: Vec<(&str, &str)> = [("probe", &a.probe), ("port", &a.port), ("drive", &a.drive)]
         .into_iter()
-        .filter_map(|f| o.get(f).map(|v| (f, v)))
+        .filter_map(|(f, v)| v.as_deref().map(|v| (f, v)))
         .collect();
     let [(f, v)] = given[..] else {
         return match given.len() {

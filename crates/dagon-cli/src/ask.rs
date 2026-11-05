@@ -432,9 +432,8 @@ fn line_diff(old: &str, new: &str) -> String {
 }
 
 /// `dagon ai ask <question>`: about the topology of ./dagon.toml.
-pub fn command(args: &[&str]) -> Result<(), String> {
-    let q = parse(&json!({ "question": args.join(" ") }))
-        .map_err(|e| format!("{e}; usage: dagon ai ask <question>"))?;
+pub fn command(words: &[String]) -> Result<(), String> {
+    let q = parse(&json!({ "question": words.join(" ") }))?;
     let home = crate::consent::home()?;
     crate::consent::require_linked(&home)?;
     let keys = crate::keystore::Keys::system();

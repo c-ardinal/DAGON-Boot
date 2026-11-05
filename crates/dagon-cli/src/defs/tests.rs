@@ -156,14 +156,21 @@ fn a_project_defined_mcu_and_board_go_through_every_command() {
 
     // compile
     let bin = dir.join("t.bin");
-    crate::commands::topo_compile(&[&s(&topo), "--config", &cfg_arg, "--out", &s(&bin)]).unwrap();
+    crate::commands::topo_compile(&crate::cli::args(&[
+        &s(&topo),
+        "--config",
+        &cfg_arg,
+        "--out",
+        &s(&bin),
+    ]))
+    .unwrap();
     assert!(!std::fs::read(&bin).unwrap().is_empty());
 
     // image sign, both app slots of the fake node
     let imgs = dir.join("imgs");
     for (slot, want_at) in [("a", 0x0011_0200), ("b", 0x0015_0200)] {
         let out = imgs.join(format!("seg-{slot}.img"));
-        crate::commands::image_sign(&[
+        crate::commands::image_sign(&crate::cli::args(&[
             &s(&dir.join("app.bin")),
             "--node",
             "seg",
@@ -177,7 +184,7 @@ fn a_project_defined_mcu_and_board_go_through_every_command() {
             &key_arg,
             "--out",
             &s(&out),
-        ])
+        ]))
         .unwrap();
         let img = std::fs::read(&out).unwrap();
         let h = ImageHeader::parse(&img[..HEADER_SIZE].try_into().unwrap()).unwrap();
@@ -186,7 +193,7 @@ fn a_project_defined_mcu_and_board_go_through_every_command() {
 
     // release build
     let dgb = dir.join("r.dgb");
-    crate::commands::release_build(&[
+    crate::commands::release_build(&crate::cli::args(&[
         &s(&imgs),
         "--name",
         "fake-1.1",
@@ -196,7 +203,7 @@ fn a_project_defined_mcu_and_board_go_through_every_command() {
         &key_arg,
         "--out",
         &s(&dgb),
-    ])
+    ]))
     .unwrap();
     let bundle = std::fs::read(&dgb).unwrap();
     let view = BundleView::parse(&bundle).unwrap();
@@ -208,7 +215,7 @@ fn a_project_defined_mcu_and_board_go_through_every_command() {
 
     // first-write files: the probe-rs binary from the fake flash base
     let out = dir.join("prov");
-    crate::commands::provision(&[
+    crate::commands::provision(&crate::cli::args(&[
         "seg",
         "--config",
         &cfg_arg,
@@ -216,7 +223,7 @@ fn a_project_defined_mcu_and_board_go_through_every_command() {
         &key_arg,
         "--out",
         &s(&out),
-    ])
+    ]))
     .unwrap();
     let flash = std::fs::read(out.join("flash.bin")).unwrap();
     let app = std::fs::read(out.join("app-a.img")).unwrap();

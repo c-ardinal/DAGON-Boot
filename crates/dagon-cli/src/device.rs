@@ -13,7 +13,8 @@ use dagon_sim::block_on;
 use dagon_topology::defs::Registry;
 use dagon_topology::Topology;
 
-use crate::config::{load_key, read_file, read_topology, Config, Opts};
+use crate::cli::{ApplyArgs, RecoverArgs, RollbackArgs, StatusArgs, TopoPushArgs};
+use crate::config::{load_key, read_file, read_topology, Config};
 use crate::serial;
 
 type Res = Result<(), String>;
@@ -81,23 +82,18 @@ pub(crate) fn core_line<E: std::fmt::Debug>(
 }
 
 /// The topology from `--topology` or `dagon.toml`, if any.
-fn optional_topology(o: &Opts<'_>, cfg: &Config) -> Result<Option<Topology>, String> {
-    match o
-        .get("topology")
-        .map(PathBuf::from)
-        .or(cfg.topology.clone())
-    {
+fn optional_topology(topology: Option<&str>, cfg: &Config) -> Result<Option<Topology>, String> {
+    match topology.map(PathBuf::from).or(cfg.topology.clone()) {
         Some(p) => read_topology(cfg, &p).map(Some),
         None => Ok(None),
     }
 }
 
-pub fn status(args: &[&str]) -> Res {
-    let o = Opts::parse(args, &["port", "topology", "config"])?;
-    let cfg = Config::load(o.get("config"))?;
-    let t = optional_topology(&o, &cfg)?;
+pub fn status(a: &StatusArgs) -> Res {
+    let cfg = Config::load(a.config.as_deref())?;
+    let t = optional_topology(a.topology.as_deref(), &cfg)?;
     println!("{}", crate::versions::known_text());
-    let mut host = serial::host(o.get("port"))?;
+    let mut host = serial::host(a.port.as_deref())?;
     let hub = block_on(host.status(Target::Hub)).map_err(|e| format!("hub: {e:?}"))?;
     show_state("hub", &hub);
     println!(
@@ -260,15 +256,11 @@ pub fn rollback_node<T: Transport, C: Clock>(
     })
 }
 
-pub fn rollback(args: &[&str]) -> Res {
-    let o = Opts::parse(args, &["node", "port", "topology", "config"])?;
-    if !o.pos.is_empty() {
-        return Err("rollback takes --node <id>".into());
-    }
-    let node = o.need("node")?;
-    let cfg = Config::load(o.get("config"))?;
-    let t = read_topology(&cfg, &cfg.topology_path(o.get("topology"))?)?;
-    let mut host = serial::host(o.get("port"))?;
+pub fn rollback(a: &RollbackArgs) -> Res {
+    let node = a.node.as_str();
+    let cfg = Config::load(a.config.as_deref())?;
+    let t = read_topology(&cfg, &cfg.topology_path(a.topology.as_deref())?)?;
+    let mut host = serial::host(a.port.as_deref())?;
     let mut print = |e: Event| println!("{node}: {} ({})", phase_name(e.phase), e.version);
     let v = rollback_node(
         &mut host,
@@ -281,16 +273,14 @@ pub fn rollback(args: &[&str]) -> Res {
     Ok(())
 }
 
-pub fn topo_push(args: &[&str]) -> Res {
-    let o = Opts::parse(args, &["port", "config"])?;
-    let cfg = Config::load(o.get("config"))?;
-    let path = match o.pos[..] {
-        [p] => PathBuf::from(p),
-        [] => cfg.topology_path(None)?,
-        _ => return Err("topo push takes at most one <yaml>".into()),
+pub fn topo_push(a: &TopoPushArgs) -> Res {
+    let cfg = Config::load(a.config.as_deref())?;
+    let path = match &a.yaml {
+        Some(p) => PathBuf::from(p),
+        None => cfg.topology_path(None)?,
     };
     let bin = topology_bin(&crate::defs::registry(&cfg)?, &read_topology(&cfg, &path)?)?;
-    let mut host = serial::host(o.get("port"))?;
+    let mut host = serial::host(a.port.as_deref())?;
     block_on(host.push_topology(&bin)).map_err(|e| format!("topo push: {e:?}"))?;
     println!(
         "{}: {} bytes sent to the hub, sha256 {}",
@@ -327,43 +317,40 @@ fn phase_name(p: u8) -> &'static str {
 
 /// Verifying key: `--pubkey <file>`, `pubkey` in dagon.toml, else the
 /// public half of the signing key.
-pub(crate) fn pubkey(o: &Opts<'_>, cfg: &Config) -> Result<[u8; 32], String> {
-    match o.get("pubkey").map(PathBuf::from).or(cfg.pubkey.clone()) {
+pub(crate) fn pubkey(
+    pubkey: Option<&str>,
+    key: Option<&str>,
+    cfg: &Config,
+) -> Result<[u8; 32], String> {
+    match pubkey.map(PathBuf::from).or(cfg.pubkey.clone()) {
         Some(p) => {
             let k = dagon_sign::load_public_key(&p).map_err(|e| e.to_string())?;
             crate::config::allow_key(&k, crate::config::test_key_allowed())?;
             Ok(k)
         }
-        None => Ok(*load_key(o.get("key"))?.pk),
+        None => Ok(*load_key(key)?.pk),
     }
 }
 
-pub fn recover(args: &[&str]) -> Res {
-    let o = Opts::parse(
-        args,
-        &[
-            "port", "topology", "config", "release", "bootcore", "pubkey", "key",
-        ],
-    )?;
-    let [node] = o.pos[..] else {
-        return Err("recover needs <node>".into());
-    };
-    let cfg = Config::load(o.get("config"))?;
-    let t = read_topology(&cfg, &cfg.topology_path(o.get("topology"))?)?;
+pub fn recover(a: &RecoverArgs) -> Res {
+    let node = a.node.as_str();
+    let cfg = Config::load(a.config.as_deref())?;
+    let t = read_topology(&cfg, &cfg.topology_path(a.topology.as_deref())?)?;
     let bin = topology_bin(&crate::defs::registry(&cfg)?, &t)?;
     let index =
         t.nodes
             .iter()
             .position(|n| n.id == node)
             .ok_or_else(|| format!("no updatable node '{node}' in the topology"))? as u8;
-    let dgb = o
-        .get("release")
+    let dgb = a
+        .release
+        .as_ref()
         .map(PathBuf::from)
         .or(cfg.release.clone())
         .ok_or("no release: pass --release <dgb> or set release in dagon.toml")?;
     let release = read_file(&dgb)?;
     crate::versions::check_number("bundle", &dgb.display().to_string(), &release)?;
-    let boot_path = o.get("bootcore").map_or_else(
+    let boot_path = a.bootcore.as_deref().map_or_else(
         || cfg.provision_dir().join(node).join("bootcore.img"),
         PathBuf::from,
     );
@@ -376,7 +363,7 @@ pub fn recover(args: &[&str]) -> Res {
             .join(crate::commands::STAGE0_FILE),
     )
     .ok();
-    let key = pubkey(&o, &cfg)?;
+    let key = pubkey(a.pubkey.as_deref(), a.key.as_deref(), &cfg)?;
     let roms = dagon_host::rom::rom_maps(&crate::defs::registry(&cfg)?);
     let assets = dagon_host::RecoverAssets {
         release: &release,
@@ -386,7 +373,7 @@ pub fn recover(args: &[&str]) -> Res {
         stage0: stage0.as_deref(),
         roms: &roms,
     };
-    let mut host = serial::host(o.get("port"))?;
+    let mut host = serial::host(a.port.as_deref())?;
     let mut print = |e: Event| {
         println!(
             "{node}: {} {}% ({})",
@@ -422,33 +409,21 @@ pub fn recover(args: &[&str]) -> Res {
     Ok(())
 }
 
-/// Flag of `apply`: skip the PC-side signature and digest checks.
-const NO_HOST_VERIFY: &str = "--no-host-verify";
-
-pub fn apply(args: &[&str]) -> Res {
-    let no_verify = args.contains(&NO_HOST_VERIFY);
-    let args: Vec<&str> = args
-        .iter()
-        .copied()
-        .filter(|a| *a != NO_HOST_VERIFY)
-        .collect();
-    let o = Opts::parse(
-        &args,
-        &["port", "topology", "config", "node", "pubkey", "key"],
-    )?;
-    let cfg = Config::load(o.get("config"))?;
-    let dgb = match o.pos[..] {
-        [p] => PathBuf::from(p),
-        [] => cfg
+pub fn apply(a: &ApplyArgs) -> Res {
+    let no_verify = a.no_host_verify;
+    let cfg = Config::load(a.config.as_deref())?;
+    let dgb = match &a.dgb {
+        Some(p) => PathBuf::from(p),
+        None => cfg
             .release
             .clone()
             .ok_or("no release: pass <dgb> or set release in dagon.toml")?,
-        _ => return Err("apply takes at most one <dgb>".into()),
     };
-    let t = read_topology(&cfg, &cfg.topology_path(o.get("topology"))?)?;
+    let t = read_topology(&cfg, &cfg.topology_path(a.topology.as_deref())?)?;
     let ids: Vec<String> = t.nodes.iter().map(|n| n.id.clone()).collect();
-    let picked = o
-        .all("node")
+    let picked = a
+        .node
+        .iter()
         .map(|id| {
             ids.iter()
                 .position(|x| x == id)
@@ -459,17 +434,17 @@ pub fn apply(args: &[&str]) -> Res {
     let only = (!picked.is_empty()).then_some(picked.as_slice());
     let key = if no_verify {
         eprintln!(
-            "warning: {NO_HOST_VERIFY}: signatures and digests are left to the nodes; \
+            "warning: --no-host-verify: signatures and digests are left to the nodes; \
              the topology must still match"
         );
         None
     } else {
-        Some(pubkey(&o, &cfg)?)
+        Some(pubkey(a.pubkey.as_deref(), a.key.as_deref(), &cfg)?)
     };
     let bundle = read_file(Path::new(&dgb))?;
     crate::versions::check_number("bundle", &dgb.display().to_string(), &bundle)?;
 
-    let mut host = serial::host(o.get("port"))?;
+    let mut host = serial::host(a.port.as_deref())?;
     let reg = crate::defs::registry(&cfg)?;
     // Every package written is kept (out/deploy), so it can be written back later.
     if let Some(k) = &key {

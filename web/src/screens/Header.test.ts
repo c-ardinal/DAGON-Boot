@@ -22,8 +22,8 @@ describe('header (TopBar)', () => {
   });
 
   test('brand, then the project name', () => {
-    const body = head({ title: 'desk-demo' });
-    expect(body.indexOf(PRODUCT)).toBeLessThan(body.indexOf('desk-demo'));
+    const body = head({ title: 'home-garden' });
+    expect(body.indexOf(PRODUCT)).toBeLessThan(body.indexOf('home-garden'));
   });
 
   test('the menu is a ghost icon button with its name for screen readers', () => {

@@ -135,3 +135,14 @@ describe('the writing vocabulary', () => {
     expect([...shownExcept(), ...MOCK_TEXTS()].filter((s) => s.includes('更新'))).toEqual([]);
   });
 });
+
+describe('copy names no sample', () => {
+  // Samples are data serve hands out; the screen words never name one (or the desk it was made on).
+  const samples = Object.keys(import.meta.glob('../../../topology/*.yaml')).map((p) => p.split('/').pop()!.replace(/\.yaml$/, ''));
+  test('the samples are found', () => {
+    expect(samples.length).toBeGreaterThan(0);
+  });
+  test('no screen text contains a sample name', () => {
+    expect(shownExcept().filter((s) => samples.some((n) => s.includes(n)))).toEqual([]);
+  });
+});

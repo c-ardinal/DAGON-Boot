@@ -16,7 +16,6 @@
   /** The open modal: making (how, then where) or opening. */
   let modal = $state<'how' | 'where' | 'open' | null>(null);
   let how = $state<'new' | 'sample'>('new');
-  const SAMPLE = Object.keys(START.sample)[0];
 
   /** A folder that cannot be written or made is M35; the others are their own. */
   const fail = $derived.by(() => {
@@ -119,12 +118,6 @@
         <button class="option" role="radio" aria-checked={how === c} onclick={() => (how = c)}><span class="radio" aria-hidden="true"></span>{label}</button>
       {/each}
     </div>
-    {#if how === 'sample'}
-      <div class="sample" aria-label={START.create.sample}>
-        <b translate="no">{START.sample[SAMPLE].label}</b>
-        <span class="muted">{START.sample[SAMPLE].detail}</span>
-      </div>
-    {/if}
     {#snippet actions()}
       <button class="button-secondary" onclick={close}>{START.create.cancel}</button>
       <button class="button-primary" onclick={() => void toWhere()}>{START.create.next}</button>
@@ -132,7 +125,7 @@
   </Modal>
 {:else if modal === 'where'}
   <Modal title={START.create.title} onclose={close}>
-    {#if s.choice === 'sample'}<p class="muted">{START.create.sample}: <span class="mono" translate="no">{SAMPLE}</span></p>{/if}
+    {#if s.choice === 'sample'}<p class="muted">{START.create.sample}</p>{/if}
     <label class="field">{START.name}<input bind:value={s.name} translate="no" autocomplete="off" spellcheck="false" /></label>
     <div class="field">{START.place}{@render folders(false)}</div>
     {#if s.list && s.name.trim()}
@@ -311,16 +304,6 @@
   }
   .option[aria-checked='true'] .radio {
     background: radial-gradient(currentColor 0 3px, transparent 3.5px);
-  }
-  .sample {
-    display: grid;
-    gap: var(--s-1);
-    margin-left: var(--s-6);
-    padding: var(--s-3);
-    border: 1px solid var(--c-paper);
-    border-left-width: 3px;
-    border-radius: var(--r-m);
-    background: var(--c-layer-2);
   }
   .field {
     display: grid;

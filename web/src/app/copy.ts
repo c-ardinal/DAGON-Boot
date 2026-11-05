@@ -1123,10 +1123,6 @@ export const UNSAVED = {
 export const START = {
   heading: '始め',
   new: 'プロジェクトを作る',
-  /** The samples serve can make, each with what it holds. */
-  sample: {
-    'desk-demo': { label: 'desk-demo', detail: 'RP2040 の親機に、NUCLEO-F401RE（I2C）と M5StopWatch（UART）をつなぐ' },
-  } as Record<string, { label: string; detail: string }>,
   /** 「プロジェクトを作る」's modal: how, then name and place. */
   create: {
     title: 'プロジェクトを作る',

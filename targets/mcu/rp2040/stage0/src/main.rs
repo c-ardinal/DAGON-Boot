@@ -21,6 +21,7 @@
 #![no_main]
 
 use cortex_m_rt::entry;
+use dagon_format::stage0;
 use dagon_mcu_rp2040::arm::{jump, led, step, trial, xip_flash};
 use dagon_mcu_rp2040::layout::{BL_LOG, BL_SLOT, RAM, RAM_LEN, STAGE0};
 use dagon_mcu_rp2040::{bl, image};
@@ -31,6 +32,10 @@ use panic_halt as _;
 #[link_section = ".boot2"]
 #[used]
 static BOOT2: [u8; 256] = rp2040_boot2::BOOT_LOADER_GENERIC_03H;
+
+/// The version mark the agent's VERSION reads (`dagon_format::stage0`):
+/// this package's Cargo.toml version.
+static VERSION_MARK: stage0::Mark = stage0::Mark::of(stage0::version(env!("CARGO_PKG_VERSION")));
 
 /// Half period of stage0's halt blink: five times faster than the
 /// board's.
@@ -71,6 +76,8 @@ fn probe(flash: &mut impl Flash, addr: u32, expected: &[u8; 4]) -> u8 {
 
 #[entry]
 fn main() -> ! {
+    // Keeps the mark in the image (nothing else reads it here).
+    core::hint::black_box(&VERSION_MARK);
     step(1);
     if cfg!(feature = "diag") {
         led_init();

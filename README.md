@@ -145,9 +145,17 @@ From the command line the same is `dagon topo check topology.yaml`, or a
 first draft from a plain-language description through the Claude API:
 
 ```sh
-export ANTHROPIC_API_KEY=...        # read by the CLI only, never shown or saved
+dagon ai key set                    # the API key, typed without echo, into the OS credential store
+dagon ai link --way api             # consent to send, asked once
 dagon ai topology --in boards.txt --out topology.yaml
 ```
+
+The API key lives only in the OS credential store (Windows Credential
+Manager, macOS Keychain, or a Secret Service such as GNOME Keyring on Linux),
+never in an environment variable or a file. `dagon ai key status` shows
+whether it is registered and `dagon ai key delete` removes it; DAGON Console
+registers it too (CLI 連携). Without a credential store, use Claude Code with
+your own login instead (`dagon ai link`). See `docs/agent-api.md`.
 
 Definitions are not a place for secrets. Names in them (ids, product
 names, pin labels, partition names) appear in DAGON Console and are sent
@@ -237,6 +245,11 @@ Then connect the hub and check that every node answers:
 ```sh
 dagon status
 ```
+
+Each node's line `versions:` names its stage0, boot core slots A/B (and the
+running one), app slots, wire version and MCU id; "unknown" is a node that
+cannot tell (an agent or stage0 built before it reported them). With the hub
+connected, `dagon doctor` prints the same lines after its tool checks.
 
 Without `dagon flash` (boot images you built yourself): `dagon rescue hub`
 and `dagon provision <id>` make the same files from `[provision.<id>]`

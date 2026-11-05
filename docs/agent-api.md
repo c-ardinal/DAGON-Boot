@@ -4,8 +4,8 @@ DAGON talks to an agent through one interface. Agents are data: an agent
 (id, name, provider) and the ways to reach it, each of a transport kind DAGON
 implements (see Builtin agents and Transport kinds below). The user consents once, when linking,
 to one agent and one way; after that questions are sent without asking again.
-Logins and keys stay with the agent or in the CLI's environment and never reach
-the page.
+Logins stay with the agent; API keys stay in the OS credential store (see
+Where API keys live). Neither ever reaches the page.
 
 All routes below are under `dagon serve` with the same guards as every `/v1/`
 route: Host and Origin checks (403), `Authorization: Bearer <passphrase>` (401).
@@ -17,8 +17,8 @@ route: Host and Origin checks (403), `Authorization: Bearer <passphrase>` (401).
   "agents": [
     { "id": "claude", "name": "Claude", "provider": "Anthropic",
       "ways": [
-        { "id": "claude-code", "name": "Claude Code", "kind": "command", "available": true },
-        { "id": "api", "name": "API キー", "kind": "messages-http", "available": false }
+        { "id": "claude-code", "name": "Claude Code", "kind": "command", "available": true, "key": null },
+        { "id": "api", "name": "API キー", "kind": "messages-http", "available": false, "key": false }
       ] }
   ],
   "default": { "agent": "claude", "way": "claude-code" },
@@ -37,8 +37,9 @@ route: Host and Origin checks (403), `Authorization: Bearer <passphrase>` (401).
   Each way has `kind` (`command` | `messages-http`; more kinds may come, so
   treat an unknown one as opaque) and `available`: whether it
   can be used on this machine now (a `command` way: its program is on PATH; a
-  `messages-http` way: its key variable is set). No program, argument, URL,
-  key variable or key is ever in this body.
+  `messages-http` way: its key is registered). `key`: for a way that takes
+  an API key, whether one is registered (`true` / `false`); `null` for a way
+  that takes none. No program, argument, URL or key is ever in this body.
 - `default`: the way the linking dialog preselects (first agent, first way).
 - `linked`: a consent is recorded for an agent and way that are still defined.
 - `consent`: `{ "agent": "claude", "way": "claude-code", "at": "2026-11-04T04:14:35Z" }`
@@ -68,7 +69,7 @@ the way asks for consent again).
 - 500 `the consent could not be saved`.
 
 Linking does not need the way to be available (the user may install Claude
-Code or set the key afterwards).
+Code or register the key afterwards).
 
 ## DELETE /v1/agent/link
 
@@ -90,6 +91,40 @@ Withdraws the consent (also fine when none was recorded).
   `AGENT_NOT_LINKED` instead of its answer (`dagon ai ask` does not print it
   either).
 
+## PUT /v1/agent/key/{agent}/{way}
+
+Body: `{ "key": "..." }`. Registers the way's API key in the OS credential
+store (replacing the one before). The key is taken without surrounding
+blanks; it must be 1 to 1024 visible ASCII characters (it goes into an HTTP
+header; Windows Credential Manager holds at most 2560 bytes, stored as
+UTF-16). The key is never answered, logged or written to a file; the page
+keeps it in no storage and clears its field once sent.
+
+- 200: the same body as GET /v1/agent (the way's `key` is now `true`).
+- 400 `this way takes no key` (a login way), or `key must be a string`, or
+  why the key is refused; nothing is stored.
+- 404 `no such agent and way`.
+- 403 in `dagon demo`, or the Host/Origin check (another origin is refused).
+- 503 `AGENT_KEY_STORE`: the OS credential store cannot be used here (for
+  example Linux without a running Secret Service); `error` says why and how
+  to install or start one. Nothing is stored anywhere else.
+
+## DELETE /v1/agent/key/{agent}/{way}
+
+Removes the way's key from the store (also fine when none was registered).
+
+- 200: the same body as GET /v1/agent (the way's `key` is now `false`).
+- 400 / 404 / 403 / 503 as for PUT.
+
+## Where API keys live
+
+Only in the OS credential store: Windows Credential Manager, the macOS
+Keychain, or the Secret Service (GNOME Keyring, KeePassXC, ...) on Linux.
+Each key is the entry of service `dagon`, account `<agent id>/<way id>`
+(`claude/api`). DAGON reads no key from an environment variable and keeps no
+key in a file; where no store can be used, registering is refused. A key
+leaves the store only into the request header of its way.
+
 ## AI routes before linking
 
 Every `/v1/ai/...` route answers, until linked:
@@ -103,7 +138,7 @@ HTTP 409
 Match on `code`, not on the text. A consent file of a version this dagon does
 not read answers 409 `AGENT_CONSENT_VERSION` instead, on every route above. Once linked the routes behave as before
 (`/v1/ai/topology` starts a job; a way that cannot be used here fails inside
-the job with its reason, e.g. `ANTHROPIC_API_KEY is not set`).
+the job with its reason, e.g. `no API key is registered for claude/api`).
 
 In `dagon demo` every route that would reach an agent answers 403
 (`/v1/agent/link` POST/DELETE, `/v1/agent/ask`, `/v1/ai/...`): a demo never
@@ -172,11 +207,11 @@ Errors (all `{ "error": "...", "code": "..." }` except the 400s):
 | 409 | `AGENT_NOT_LINKED` | not linked, or the linked agent/way is no longer defined |
 | 409 | `AGENT_NOT_LINKED` | also: unlinked while the question was being answered (no further call is made) |
 | 409 | `AGENT_CONSENT_VERSION` | ~/.dagon/agent.json is of a version this dagon does not read; `error` says which and to link again |
-| 409 | `AGENT_UNAVAILABLE` | linked, but the way cannot be used here: its program is not on PATH, or its key variable is not set (`error` names the program or the variable; restart `dagon serve` after setting a key). |
+| 409 | `AGENT_UNAVAILABLE` | linked, but the way cannot be used here: its program is not on PATH, or no key is registered for it (`error` names the program, or the way and how to register its key). |
 | 429 | `AGENT_BUSY` | another question is being answered (one at a time per serve) |
 | 413 | `AGENT_CONTEXT_TOO_LARGE` | the topology file is over 64 KiB (not read), or one prompt would be over 192 KiB (not sent) |
 | 504 | `AGENT_TIMEOUT` | one agent call took longer than 120 s (a `command` way's program is stopped) |
-| 502 | `AGENT_FAILED` | the agent refused, its program ended with an error, or it answered in an unexpected form; `error` says which (never the program's output) |
+| 502 | `AGENT_FAILED` | the agent refused, its program ended with an error, or it answered in an unexpected form; `error` says which (never the program's output; an error from the API is cut to 300 characters, and the key never appears in an answer or an error, even when the API echoes it) |
 
 What goes to the agent (and only this, the same two texts for every agent
 and way): a system text (DAGON's instructions, the topology schema and checks,
@@ -240,7 +275,8 @@ text); DAGON reads the object from its text.
   - Environment: only `PATH`, `PATHEXT`, `HOME`, `USERPROFILE`, `APPDATA`,
     `LOCALAPPDATA`, `TEMP`, `TMP`, `TMPDIR`, `SYSTEMROOT`, `WINDIR`, `COMSPEC`,
     `LANG`, `LC_*`, `TERM` (those that are set), plus the names in `pass_env`.
-    Never `DAGON_*` or a key variable any way names, even when listed.
+    Never `DAGON_*`, the signing key's variable or `ANTHROPIC_API_KEY`, even
+    when listed.
   - Working folder: a fresh temporary folder, removed afterwards, so the
     program does not start in the project. This is hygiene, not a sandbox:
     the program can still reach whatever your account can.
@@ -252,15 +288,17 @@ text); DAGON reads the object from its text.
     not) never outlives the call. The answer is what the program printed
     before it ended.
 - `messages-http`: `url` (https only), `version` (the `anthropic-version`
-  header), `key_env` (the variable holding the key), `model`, optional
-  `model_env` (a variable that overrides `model`).
+  header), `model`, optional `model_env` (a variable that overrides `model`).
+  The key is the way's entry in the OS credential store (Where API keys
+  live); a definition naming a key variable (`key_env`) is refused. The
+  answer is read up to 1 MiB; a larger one is refused while it is read.
 
 ## Where the consent lives
 
 `~/.dagon/agent.json` (`{"version":1,"agent":"claude","way":"claude-code","at":"..."}`), one
 per user, shared by `dagon serve` and `dagon ai link` / `dagon ai unlink`. Per
-user and not per project: the agent's login or key belongs to the user's
-environment, a per-project consent would ask again in every project, and
+user and not per project: the agent's login or key belongs to the user,
+a per-project consent would ask again in every project, and
 nothing lands in a project folder that may be committed. A file that does not
 parse, has another `version`, holds any other field, has an id that is not
 plain or an `at` that is not `YYYY-MM-DDTHH:MM:SSZ` on a real calendar date
@@ -271,7 +309,7 @@ counts as not linked: the user links again.
 Agents shipped with dagon (`crates/dagon-cli/agents/*.toml`), each with its
 ways in order; the first way of the first agent is the default.
 
-- `claude` (Claude, Anthropic): `claude-code` (Claude Code headless with the user's own login), `api` (the Messages API, key in the ANTHROPIC_API_KEY variable)
+- `claude` (Claude, Anthropic): `claude-code` (Claude Code headless with the user's own login), `api` (the Messages API, key in the OS credential store)
 
 ## What linking sends
 
@@ -300,8 +338,13 @@ says which number it reads.
 - `dagon ai link [--agent <id>] [--way <id>]`: shows the consent text (agent
   and way, where the login or key stays, sends, never sends, how to unlink) and
   records consent on `y`. Default: the first agent's first way.
-- `dagon ai unlink`: removes the consent; logins and keys are removed by the
-  user on the agent's side.
+- `dagon ai unlink`: removes the consent; logins are removed by the user on
+  the agent's side, keys with `dagon ai key delete`.
+- `dagon ai key set [--agent <id>] [--way <id>]`: reads the way's API key from
+  the terminal without echo and registers it in the OS credential store
+  (default: the first agent's first way that takes a key).
+- `dagon ai key status`: 登録済み / 未登録 for every way that takes a key.
+- `dagon ai key delete [--agent <id>] [--way <id>]`: removes the key.
 - `dagon ai topology` refuses until linked.
 - `dagon ai ask <question>`: the same question to DAGON about ./dagon.toml's
   topology (no selection, history or job outcomes); prints the answer and, for

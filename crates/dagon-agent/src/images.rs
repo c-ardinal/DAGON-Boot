@@ -230,6 +230,11 @@ impl<S: SlotStore> ImageStore<S> {
         &self.view
     }
 
+    /// The stage0 version mark the store reads ([`SlotStore::stage0_version`]).
+    pub(crate) fn stage0_version(&mut self) -> Option<Version> {
+        self.store.stage0_version()
+    }
+
     /// The store, for the fold test's boot core.
     #[cfg(test)]
     pub(crate) fn store(&mut self) -> &mut S {

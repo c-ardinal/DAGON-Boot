@@ -100,9 +100,12 @@ DAGON Console が 127.0.0.1 だけで、使い捨てのパスフレーズ付き�
 コマンドでは `dagon topo check topology.yaml` で検査します。言葉で書いた説明から Claude API で構成の案を作ることもできます:
 
 ```sh
-export ANTHROPIC_API_KEY=...        # 読むのは CLI だけ。表示も保存もしない
+dagon ai key set                    # API キーを入力（表示しない）。OS の資格情報ストアに保存する
+dagon ai link --way api             # 送ることへの同意（一度だけ）
 dagon ai topology --in boards.txt --out topology.yaml
 ```
+
+API キーは OS の資格情報ストア（Windows の資格情報マネージャー、macOS のキーチェーン、Linux では GNOME Keyring などの Secret Service）にだけ置き、環境変数やファイルには置きません。`dagon ai key status` で登録済みかを確かめ、`dagon ai key delete` で削除します。DAGON Console の「CLI 連携」でも登録できます。資格情報ストアが無い環境では、自分のログインで使う Claude Code を選んでください（`dagon ai link`）。詳しくは `docs/agent-api.md` を見てください。
 
 定義ファイルは秘密を書く場所ではありません。定義の中の名前（id、製品名、ピンのラベル、パーティション名）は DAGON Console に表示され、Claude に頼んだときは Claude にも送られます。コマンド、ヒント、コメント、ファイルのパスは送りません。詳しくは `targets/README.md` を見てください。
 
@@ -141,6 +144,8 @@ ESP32-S3 のノードでは、`dagon flash` がボードの factory エージェ
 ```sh
 dagon status
 ```
+
+各ノードの `versions:` の行に、stage0、ブートコアのスロット A/B（と動いている方）、アプリのスロット、通信のバージョン、MCU の ID が出ます。`unknown` は、それを伝えられないノード（伝える前に作られたエージェントや stage0）です。親機をつないでいれば、`dagon doctor` もツールの確認のあとに同じ行を出します。
 
 `dagon flash` を使わない場合（自分でビルドしたブート用のイメージを使うとき）: `dagon rescue hub` と `dagon provision <id>` が、`dagon.toml` の `[provision.<id>]`（親機は `stage0`、ほかに `bootcore`、`app`、`version`）から同じファイルを作ります。ブート用のイメージのビルドは MCU のパッケージの README にあります。
 

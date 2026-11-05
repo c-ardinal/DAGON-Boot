@@ -3,9 +3,10 @@
 
 use std::path::{Path, PathBuf};
 
+use dagon_format::header::port_kind;
 use dagon_format::Version;
 use dagon_host::{Clock, Event, Host, NodeState, Outcome, Target, Transport};
-use dagon_proto::payload::{phase, StatusResp};
+use dagon_proto::payload::{phase, SlotState, StatusResp, VersionResp, VersionSlots};
 use dagon_proto::Status;
 use dagon_sign::to_hex;
 use dagon_sim::block_on;
@@ -103,25 +104,134 @@ pub fn status(args: &[&str]) -> Res {
         "{}",
         core_line("hub", block_on(host.boot_core_status(Target::Hub)))
     );
+    let port = Some(hub.hello.port_kind);
+    println!(
+        "{}",
+        version_line("hub", block_on(host.version(Target::Hub)), port)
+    );
     let Some(t) = t else {
         return Ok(());
     };
-    let bin = topology_bin(&crate::defs::registry(&cfg)?, &t)?;
-    let view = dagon_format::TopologyView::parse(&bin).map_err(|e| format!("{e:?}"))?;
-    for (i, n) in t.nodes.iter().enumerate() {
-        match Target::of_node(&view, i as u8) {
-            Some(Target::Hub) => {}
+    for (id, to) in node_targets(&cfg, &t)? {
+        match to {
             Some(to) => match block_on(host.status(to)) {
                 Ok(s) => {
-                    show_state(&n.id, &s);
-                    println!("{}", core_line(&n.id, block_on(host.boot_core_status(to))));
+                    show_state(&id, &s);
+                    println!("{}", core_line(&id, block_on(host.boot_core_status(to))));
+                    let port = Some(s.hello.port_kind);
+                    println!("{}", version_line(&id, block_on(host.version(to)), port));
                 }
-                Err(e) => println!("{}: no answer ({e:?})", n.id),
+                Err(e) => println!("{id}: no answer ({e:?})"),
             },
-            None => println!("{}: not reachable through the hub", n.id),
+            None => println!("{id}: not reachable through the hub"),
         }
     }
     Ok(())
+}
+
+/// The topology's nodes other than the hub, each with its route through
+/// the hub (`None`: not reachable through it).
+fn node_targets(cfg: &Config, t: &Topology) -> Result<Vec<(String, Option<Target>)>, String> {
+    let bin = topology_bin(&crate::defs::registry(cfg)?, t)?;
+    let view = dagon_format::TopologyView::parse(&bin).map_err(|e| format!("{e:?}"))?;
+    Ok(t.nodes
+        .iter()
+        .enumerate()
+        .map(|(i, n)| (n.id.clone(), Target::of_node(&view, i as u8)))
+        .filter(|(_, to)| *to != Some(Target::Hub))
+        .collect())
+}
+
+/// The VERSION line of `dagon status` and `dagon doctor`: stage0, boot
+/// core slots, app slots, wire version and MCU id. A value the node left
+/// out is "unknown", or "none" on an MCU booted by its vendor's 2nd stage
+/// (HELLO `port_kind`); a node whose agent predates VERSION is "unknown".
+pub(crate) fn version_line<E: std::fmt::Debug>(
+    name: &str,
+    r: Result<Option<VersionResp>, dagon_host::Error<E>>,
+    port: Option<u8>,
+) -> String {
+    let v = match r {
+        Ok(Some(v)) => v,
+        Ok(None) => return format!("{name}: versions unknown (its agent predates VERSION)"),
+        Err(e) => return format!("{name}: versions unreadable ({e:?})"),
+    };
+    let absent = || match port {
+        Some(port_kind::VENDOR_STAGE2) => "none (vendor 2nd stage)".to_string(),
+        _ => "unknown".to_string(),
+    };
+    let unknown = || "unknown".to_string();
+    let stage0 = v.stage0.map_or_else(absent, |x| x.to_string());
+    let core = v
+        .core_slots
+        .map_or_else(absent, |c| slots_text(&c, &["A", "B"]));
+    let app = v
+        .app_slots
+        .map_or_else(unknown, |a| slots_text(&a, &["A", "B", "F"]));
+    let wire = v.wire.map_or_else(unknown, |w| w.to_string());
+    let mcu = v.mcu_id.map_or_else(unknown, |m| format!("{m:#06x}"));
+    format!(
+        "{name}: versions: stage0 {stage0}; boot core {core}; app {app}; wire {wire}; mcu {mcu}"
+    )
+}
+
+/// `A:Confirmed 1.0.0 (running), B:Empty`
+fn slots_text<const N: usize>(s: &VersionSlots<N>, names: &[&str]) -> String {
+    let parts: Vec<String> = s
+        .slots
+        .iter()
+        .zip(names)
+        .enumerate()
+        .map(|(i, (x, n))| {
+            let running = if i == usize::from(s.active) {
+                " (running)"
+            } else {
+                ""
+            };
+            match x.state {
+                SlotState::Empty => format!("{n}:Empty{running}"),
+                st => format!("{n}:{st:?} {}{running}", x.version),
+            }
+        })
+        .collect();
+    parts.join(", ")
+}
+
+/// `dagon doctor`'s node section: each node's VERSION line when a hub
+/// answers on `port` (or is found); otherwise why none were read. Never a
+/// failure of the tool checks.
+pub(crate) fn doctor_versions(
+    port: Option<&str>,
+    cfg: &Config,
+    t: Option<&Topology>,
+) -> Vec<String> {
+    let nodes = match t.map(|t| node_targets(cfg, t)).transpose() {
+        Ok(n) => n.unwrap_or_default(),
+        Err(e) => return vec![format!("node versions not read: {e}")],
+    };
+    match serial::host(port) {
+        Ok(mut host) => version_lines(&mut host, &nodes),
+        Err(e) => vec![format!("node versions not read: {e}")],
+    }
+}
+
+/// The hub's VERSION line, then each node's.
+pub(crate) fn version_lines<T: Transport, C: Clock>(
+    host: &mut Host<T, C>,
+    nodes: &[(String, Option<Target>)],
+) -> Vec<String> {
+    let mut one = |name: &str, to: Target| {
+        let port = block_on(host.hello(to)).ok().map(|h| h.port_kind);
+        version_line(name, block_on(host.version(to)), port)
+    };
+    let mut out = vec![one("hub", Target::Hub)];
+    for (id, to) in nodes {
+        out.push(match to {
+            Some(to) => one(id, *to),
+            None => format!("{id}: not reachable through the hub"),
+        });
+    }
+    out
 }
 
 /// Rolls topology node `node` back to the version in its other slot and
@@ -429,7 +539,7 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use dagon_proto::payload::{SlotInfo, SlotState};
+    use dagon_proto::payload::{SlotInfo, SlotVersion};
     use dagon_proto::Cmd;
 
     #[test]
@@ -460,5 +570,59 @@ mod tests {
             none,
             "watch: boot core not written through releases on this node"
         );
+    }
+
+    #[test]
+    fn version_line_names_each_part_and_unknown_or_none() {
+        let sv = |state, version| SlotVersion { state, version };
+        let v = VersionResp {
+            wire: Some(1),
+            mcu_id: Some(2),
+            stage0: Some(Version::new(0, 1, 0)),
+            boot_core: Some(Version::new(1, 0, 0)),
+            core_slots: Some(VersionSlots {
+                active: 0,
+                slots: [
+                    sv(SlotState::Confirmed, Version::new(1, 0, 0)),
+                    SlotVersion::default(),
+                ],
+            }),
+            app_slots: Some(VersionSlots {
+                active: 1,
+                slots: [
+                    sv(SlotState::Written, Version::new(1, 0, 0)),
+                    sv(SlotState::Confirmed, Version::new(1, 1, 0)),
+                    SlotVersion::default(),
+                ],
+            }),
+        };
+        let self_boot = Some(port_kind::SELF_BOOT);
+        assert_eq!(
+            version_line::<()>("seg", Ok(Some(v)), self_boot),
+            "seg: versions: stage0 0.1.0; boot core A:Confirmed 1.0.0 (running), B:Empty; \
+             app A:Written 1.0.0, B:Confirmed 1.1.0 (running), F:Empty; wire 1; mcu 0x0002"
+        );
+        let left_out = VersionResp {
+            stage0: None,
+            boot_core: None,
+            core_slots: None,
+            ..v
+        };
+        let line = version_line::<()>("seg", Ok(Some(left_out)), self_boot);
+        assert!(
+            line.contains("stage0 unknown; boot core unknown;"),
+            "{line}"
+        );
+        let watch = version_line::<()>("watch", Ok(Some(left_out)), Some(port_kind::VENDOR_STAGE2));
+        assert!(
+            watch.contains("stage0 none (vendor 2nd stage); boot core none (vendor 2nd stage);"),
+            "{watch}"
+        );
+        assert_eq!(
+            version_line::<()>("seg", Ok(None), self_boot),
+            "seg: versions unknown (its agent predates VERSION)"
+        );
+        let e = version_line::<()>("seg", Err(dagon_host::Error::Timeout), None);
+        assert_eq!(e, "seg: versions unreadable (Timeout)");
     }
 }

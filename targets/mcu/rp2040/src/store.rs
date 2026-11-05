@@ -5,7 +5,7 @@
 use crate::image;
 use crate::layout::{
     body_capacity, sectors, APP_LOG_LAYOUT, APP_SLOT, APP_SLOT_SIZE, BL_LOG_LAYOUT, BL_SLOT,
-    BL_SLOT_SIZE, HEADER_LEN, SECTOR, TOPOLOGY, TOPOLOGY_SIZE,
+    BL_SLOT_SIZE, HEADER_LEN, SECTOR, STAGE0, STAGE0_SIZE, TOPOLOGY, TOPOLOGY_SIZE,
 };
 use crate::node::SharedFlash;
 use crate::watchdog::Watch;
@@ -14,6 +14,7 @@ use dagon_agent::{SlotStore, StoreError, Transition};
 use dagon_core::log::{trial_room, Log};
 use dagon_format::header::HEADER_SIZE;
 use dagon_format::statelog::{kind, slot};
+use dagon_format::{stage0, Version};
 use dagon_port::Flash;
 use dagon_proto::payload::{target, StatusResp};
 
@@ -167,6 +168,11 @@ impl SlotStore for AppStore {
                 .map_err(|_| StoreError::Flash)?;
         }
         Ok(())
+    }
+
+    /// Stage0's version mark in its region (`dagon_format::stage0`).
+    fn stage0_version(&mut self) -> Option<Version> {
+        stage0::find(STAGE0, STAGE0_SIZE, |a, b| self.flash.read(a, b).is_ok())
     }
 
     /// The boot core slots: the boot core settles its trial before it

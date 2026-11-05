@@ -12,6 +12,7 @@ use std::path::{Path, PathBuf};
 use serde_json::{json, Value};
 
 use crate::agents::{AgentDef, Agents, Transport, WayDef};
+use crate::keystore::Keys;
 
 /// What a linked DAGON sends and never sends; the page and the terminal
 /// show these same words when asking for consent.
@@ -232,10 +233,11 @@ pub fn linked<'a>(home: &Path, agents: &'a Agents) -> Option<LinkedWay<'a>> {
 }
 
 /// GET /v1/agent: the agents and ways (with whether each can be used here:
-/// program on PATH, key set; never a key, path or command), the consent,
-/// and what linking sends. `available` and `provider` describe the linked
-/// way, or the default one before linking.
-pub fn status(home: Option<&Path>, agents: &Agents) -> Value {
+/// program on PATH, key registered; never a key, path or command), the
+/// consent, and what linking sends. A way that takes a key also says
+/// whether one is registered (`key`). `available` and `provider` describe
+/// the linked way, or the default one before linking.
+pub fn status(home: Option<&Path>, agents: &Agents, keys: &Keys) -> Value {
     let linked = home.and_then(|h| linked(h, agents));
     let (a, w) = linked
         .as_ref()
@@ -249,11 +251,13 @@ pub fn status(home: Option<&Path>, agents: &Agents) -> Value {
                 .ways
                 .iter()
                 .map(|w| {
+                    let key = w.transport.takes_key().then(|| keys.is_set(&a.id, &w.id));
                     json!({
                         "id": w.id,
                         "name": w.name,
                         "kind": w.transport.kind(),
-                        "available": w.available(),
+                        "available": w.available(&a.id, keys),
+                        "key": key,
                     })
                 })
                 .collect();
@@ -262,7 +266,7 @@ pub fn status(home: Option<&Path>, agents: &Agents) -> Value {
         .collect();
     let (da, dw) = agents.default_way();
     json!({
-        "available": w.available(),
+        "available": w.available(&a.id, keys),
         "linked": linked.is_some(),
         "provider": { "id": a.id, "name": a.label() },
         "consent": linked.map(|(c, _, _)| json!({ "agent": c.agent, "way": c.way, "at": c.at })),
@@ -307,9 +311,10 @@ fn consent_text(a: &AgentDef, w: &WayDef) -> String {
             "鍵: {} の設定とログインを使います。DAGON は鍵を読みません",
             c.program
         ),
-        Transport::MessagesHttp(h) => format!(
-            "鍵: 環境変数 {} に置いてください。鍵は画面にも送る文にも出しません",
-            h.key_env
+        Transport::MessagesHttp(_) => format!(
+            "鍵: OS の資格情報ストアに置きます（dagon ai key set --agent {} --way {}）。\
+             鍵は画面にも送る文にも出しません",
+            a.id, w.id
         ),
     };
     format!(
@@ -331,34 +336,33 @@ fn consent_text(a: &AgentDef, w: &WayDef) -> String {
 
 const LINK_USAGE: &str = "usage: dagon ai link [--agent <id>] [--way <id>]";
 
-/// The agent and way `dagon ai link` names (default: the first agent, its
-/// first way).
-fn chosen<'a>(agents: &'a Agents, args: &[&str]) -> Result<(&'a AgentDef, &'a WayDef), String> {
+/// The agent and way `--agent` / `--way` name (default: the first agent,
+/// its first way `default_way` accepts, else its first way).
+pub(crate) fn chosen<'a>(
+    agents: &'a Agents,
+    args: &[&str],
+    usage: &str,
+    default_way: impl Fn(&WayDef) -> bool,
+) -> Result<(&'a AgentDef, &'a WayDef), String> {
     let (mut agent, mut way) = (None, None);
     let mut it = args.iter();
     while let Some(flag) = it.next() {
         match (*flag, it.next()) {
             ("--agent", Some(v)) => agent = Some(*v),
             ("--way", Some(v)) => way = Some(*v),
-            _ => return Err(format!("unknown argument {flag}; {LINK_USAGE}")),
+            _ => return Err(format!("unknown argument {flag}; {usage}")),
         }
     }
     let a = match agent {
         Some(id) => agents.list.iter().find(|a| a.id == id),
         None => agents.list.first(),
     }
-    .ok_or_else(|| format!("no agent {}; {LINK_USAGE}", agent.unwrap_or_default()))?;
+    .ok_or_else(|| format!("no agent {}; {usage}", agent.unwrap_or_default()))?;
     let w = match way {
         Some(id) => a.ways.iter().find(|w| w.id == id),
-        None => a.ways.first(),
+        None => a.ways.iter().find(|w| default_way(w)).or(a.ways.first()),
     }
-    .ok_or_else(|| {
-        format!(
-            "{} has no way {}; {LINK_USAGE}",
-            a.id,
-            way.unwrap_or_default()
-        )
-    })?;
+    .ok_or_else(|| format!("{} has no way {}; {usage}", a.id, way.unwrap_or_default()))?;
     Ok((a, w))
 }
 
@@ -370,7 +374,7 @@ pub fn link_command(args: &[&str]) -> Result<(), String> {
     for e in &agents.errors {
         eprintln!("warning: ~/.dagon/agents/{e}");
     }
-    let (a, w) = chosen(&agents, args)?;
+    let (a, w) = chosen(&agents, args, LINK_USAGE, |_| true)?;
     if let Some((c, _, _)) = linked(&home, &agents) {
         if c.agent == a.id && c.way == w.id {
             println!(
@@ -395,16 +399,19 @@ pub fn link_command(args: &[&str]) -> Result<(), String> {
         w.name,
         c.at
     );
-    if !w.available() {
-        println!("このつなぎ方はまだ使えません。{}", unavailable_hint(w));
+    if !w.available(&a.id, &Keys::system()) {
+        println!("このつなぎ方はまだ使えません。{}", unavailable_hint(a, w));
     }
     Ok(())
 }
 
-fn unavailable_hint(w: &WayDef) -> String {
+fn unavailable_hint(a: &AgentDef, w: &WayDef) -> String {
     match &w.transport {
         Transport::Command(c) => format!("{} を PATH から使えるようにしてください", c.program),
-        Transport::MessagesHttp(h) => format!("環境変数 {} を設定してください", h.key_env),
+        Transport::MessagesHttp(_) => format!(
+            "dagon ai key set --agent {} --way {} でキーを登録してください",
+            a.id, w.id
+        ),
     }
 }
 
@@ -530,7 +537,7 @@ mod tests {
         assert!(!is_linked(&h));
         assert!(require_linked(&h).is_err());
         let agents = Agents::load(None);
-        let s = status(Some(&h), &agents);
+        let s = status(Some(&h), &agents, &Keys::double());
         assert_eq!(s["linked"], false);
         // Before linking: the default way, Claude Code.
         assert_eq!(
@@ -543,7 +550,7 @@ mod tests {
         );
         let c = link(&h, "claude", "api").unwrap();
         assert_eq!(consent(&h), Some(c.clone()));
-        let s = status(Some(&h), &agents);
+        let s = status(Some(&h), &agents, &Keys::double());
         assert_eq!(s["linked"], true);
         assert_eq!(
             s["consent"],
@@ -553,7 +560,10 @@ mod tests {
         assert_eq!(ways[0]["id"], "claude-code");
         assert_eq!(ways[0]["kind"], "command");
         assert_eq!(ways[1]["kind"], "messages-http");
-        assert!(ways[0]["available"].is_boolean() && ways[1]["available"].is_boolean());
+        assert!(ways[0]["available"].is_boolean());
+        assert_eq!(ways[1]["available"], false, "no key in the store");
+        assert_eq!(ways[1]["key"], false);
+        assert_eq!(ways[0]["key"], Value::Null, "a login way takes no key");
         // Never a program, path, argument or key variable.
         for never in [
             "program",
@@ -569,7 +579,10 @@ mod tests {
         assert!(linked(&h, &agents).is_none() && require_linked(&h).is_err());
         assert!(unlink(&h).unwrap());
         assert!(!unlink(&h).unwrap());
-        assert_eq!(status(Some(&h), &agents)["consent"], Value::Null);
+        assert_eq!(
+            status(Some(&h), &agents, &Keys::double())["consent"],
+            Value::Null
+        );
         std::fs::remove_dir_all(&h).unwrap();
     }
 
@@ -682,14 +695,14 @@ mod tests {
             assert_eq!(hold(&h).err(), Some(e.clone()));
             assert_eq!(require_linked(&h).err(), Some(e.clone()));
             assert_eq!(
-                status(Some(&h), &Agents::load(None))["consent_error"],
+                status(Some(&h), &Agents::load(None), &Keys::double())["consent_error"],
                 e.as_str()
             );
         }
         link(&h, "claude", "api").unwrap();
         assert_eq!(unknown_version(&h), None);
         assert_eq!(
-            status(Some(&h), &Agents::load(None))["consent_error"],
+            status(Some(&h), &Agents::load(None), &Keys::double())["consent_error"],
             Value::Null
         );
         std::fs::remove_dir_all(&h).unwrap();
@@ -700,16 +713,29 @@ mod tests {
         let agents = Agents::load(None);
         let (a, cc) = agents.way("claude", "claude-code").unwrap();
         let (_, api) = agents.way("claude", "api").unwrap();
-        for (w, key) in [(cc, "claude の設定とログイン"), (api, "ANTHROPIC_API_KEY")] {
+        let api_key = "dagon ai key set --agent claude --way api";
+        for (w, key) in [(cc, "claude の設定とログイン"), (api, api_key)] {
             let t = consent_text(a, w);
             for s in SENDS.iter().chain(&NEVER_SENDS) {
                 assert!(t.contains(s), "{s}");
             }
             assert!(t.contains("Claude (Anthropic)") && t.contains(&w.name) && t.contains(key));
         }
-        assert_eq!(chosen(&agents, &[]).unwrap().1.id, "claude-code");
-        assert_eq!(chosen(&agents, &["--way", "api"]).unwrap().1.id, "api");
-        assert!(chosen(&agents, &["--agent", "other"]).is_err());
-        assert!(chosen(&agents, &["--way"]).is_err());
+        let any = |_: &WayDef| true;
+        assert_eq!(
+            chosen(&agents, &[], LINK_USAGE, any).unwrap().1.id,
+            "claude-code"
+        );
+        let key = |w: &WayDef| w.transport.takes_key();
+        assert_eq!(chosen(&agents, &[], LINK_USAGE, key).unwrap().1.id, "api");
+        assert_eq!(
+            chosen(&agents, &["--way", "api"], LINK_USAGE, any)
+                .unwrap()
+                .1
+                .id,
+            "api"
+        );
+        assert!(chosen(&agents, &["--agent", "other"], LINK_USAGE, any).is_err());
+        assert!(chosen(&agents, &["--way"], LINK_USAGE, any).is_err());
     }
 }

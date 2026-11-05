@@ -337,6 +337,210 @@ impl StatusResp {
     }
 }
 
+/// VERSION request: empty for the summary set. A selector (a boot record
+/// page, docs/design/lifecycle-events.md 5.4) is `Status::Unsupported`
+/// here: this agent keeps no boot record.
+pub fn parse_version_req(b: &[u8]) -> Result<(), Status> {
+    if b.is_empty() {
+        Ok(())
+    } else {
+        Err(Status::Unsupported)
+    }
+}
+
+/// VERSION response TLV ids (docs/design/lifecycle-events.md 5.4). A
+/// value the node cannot determine is left out; a reader skips ids it
+/// does not know and values of a length it does not read.
+pub mod version_id {
+    /// The running boot core's version (`Version`, u32 LE).
+    pub const BOOTCORE: u8 = 0x01;
+    /// The image header `mcu_id` (u16 LE).
+    pub const MCU: u8 = 0x06;
+    /// The stage0 version mark (`dagon_format::stage0`; `Version`, u32 LE).
+    pub const STAGE0: u8 = 0x0A;
+    /// Boot core slots A, B: [`VersionSlots`].
+    pub const BOOTCORE_SLOTS: u8 = 0x0B;
+    /// App slots A, B, factory: [`VersionSlots`].
+    pub const APP_SLOTS: u8 = 0x0C;
+    /// The wire version the agent speaks (`PROTO_VERSION`, u8).
+    pub const WIRE: u8 = 0x0D;
+
+    /// Every id of the summary set and its value, as
+    /// docs/design/lifecycle-events.md 5.4 lists them (a test keeps that
+    /// table equal to this one). This agent sends the ids named above.
+    pub const TABLE: [(u8, &str); 16] = [
+        (0x01, "boot core version (`Version`, LE u32)"),
+        (0x02, "installed boot image identity: first 8 bytes of its SHA-256"),
+        (0x03, "agent (`dagon-agent`) version"),
+        (0x04, "MCU package version"),
+        (0x05, "board package version"),
+        (0x06, "MCU identity (5.5): the value the image header and the compiled topology carry; with len 2 the image header's `mcu_id`, u16 LE"),
+        (0x07, "isolation (4.5): `level u8`, `kind u8`, `boot_extensions u8`, `root_protection` (kind and exact level as the definition enumerates them, e.g. `rdp1`/`rdp2`, the write-protected sectors, and whether the level is reversible), `fuse` (Clear, or Tripped with the disabled extension's identity as the model encodes it, 5.5)"),
+        (0x08, "extensions, for display: per linked extension `id` (up to 32 bytes), `trusted u8`, first 8 bytes of its source hash (4.7); repeated TLVs, one per extension"),
+        (0x09, "extensions, for identity: per trusted extension its full 32-byte source hash (4.7); repeated TLVs"),
+        (0x0A, "stage0 version: the version mark stage0 carries in its region (`dagon_format::stage0`; `Version`, LE u32); omitted for a stage0 without the mark and on a vendor-stage2 MCU"),
+        (0x0B, "boot core slots A, B: `active u8` (the running slot), then per slot `state u8` (STATUS slot state) and `version` (LE u32)"),
+        (0x0C, "app slots A, B, factory, in the shape of 0x0B"),
+        (0x0D, "wire version the agent speaks (`PROTO_VERSION`, u8)"),
+        (0x10, "formats: pairs `(format id u8, number u8)`: wire, image-header, state-log, event, definitions, boot-program, boot-record, extension-manifest"),
+        (0x20, "boot record summary (5.5): which boots the record holds and the decision and reason of the newest; layout by the model"),
+        (0x21, "one page of the raw boot record region: `offset u16`, then `len` bytes (`len ≤ RECORD_PAGE`, 10); the host reads the region page by page and decodes it with the model's reader"),
+    ];
+}
+
+/// One slot in VERSION: its state and version (no digest; STATUS has it).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
+pub struct SlotVersion {
+    pub state: SlotState,
+    pub version: Version,
+}
+
+/// Slots of one image kind and the running one (`0xFF` none), in STATUS
+/// order: `active u8`, then per slot `state u8`, `version u32 LE`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct VersionSlots<const N: usize> {
+    pub active: u8,
+    pub slots: [SlotVersion; N],
+}
+
+impl<const N: usize> Default for VersionSlots<N> {
+    fn default() -> Self {
+        VersionSlots {
+            active: 0,
+            slots: [SlotVersion::default(); N],
+        }
+    }
+}
+
+impl<const N: usize> VersionSlots<N> {
+    pub const LEN: usize = 1 + 5 * N;
+
+    /// From a STATUS of the same slots (its first `N`).
+    pub fn of(st: &StatusResp) -> Self {
+        let mut slots = [SlotVersion::default(); N];
+        for (o, s) in slots.iter_mut().zip(&st.slots) {
+            *o = SlotVersion {
+                state: s.state,
+                version: s.version,
+            };
+        }
+        VersionSlots {
+            active: st.active,
+            slots,
+        }
+    }
+
+    /// The running slot's version.
+    pub fn running(&self) -> Option<Version> {
+        self.slots.get(usize::from(self.active)).map(|s| s.version)
+    }
+
+    fn parse(b: &[u8]) -> Result<Self, Status> {
+        let mut r = Rd(b);
+        let active = r.u8()?;
+        let mut slots = [SlotVersion::default(); N];
+        for s in &mut slots {
+            *s = SlotVersion {
+                state: SlotState::from_u8(r.u8()?).ok_or(Status::Arg)?,
+                version: Version::from_raw(r.u32()?),
+            };
+        }
+        r.end()?;
+        Ok(VersionSlots { active, slots })
+    }
+
+    fn encode(&self) -> [u8; 16] {
+        let mut b = [0u8; 16];
+        let mut w = Wr::new(&mut b).u8(self.active).expect("fits");
+        for s in &self.slots {
+            w = w
+                .u8(s.state as u8)
+                .and_then(|w| w.u32(s.version.raw()))
+                .expect("fits");
+        }
+        b
+    }
+}
+
+/// VERSION response body: `count u8`, then `count` TLVs (`id u8`, `len
+/// u8`, value). Adding a value is a new id; a field left `None` is not
+/// sent.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
+pub struct VersionResp {
+    pub wire: Option<u8>,
+    pub mcu_id: Option<u16>,
+    pub stage0: Option<Version>,
+    /// The running boot core ([`version_id::BOOTCORE`]).
+    pub boot_core: Option<Version>,
+    pub core_slots: Option<VersionSlots<2>>,
+    pub app_slots: Option<VersionSlots<3>>,
+}
+
+// The whole reply (a status byte before the body) fits the smallest link.
+const _: () = assert!(VersionResp::MAX_LEN < crate::max_payload::I2C);
+
+impl VersionResp {
+    /// The longest body (every value present).
+    pub const MAX_LEN: usize =
+        1 + 6 * 2 + 1 + 2 + 4 + 4 + VersionSlots::<2>::LEN + VersionSlots::<3>::LEN;
+
+    pub fn parse(b: &[u8]) -> Result<Self, Status> {
+        let mut r = Rd(b);
+        let mut v = VersionResp::default();
+        for _ in 0..r.u8()? {
+            let id = r.u8()?;
+            let len = r.u8()?;
+            let x = r.take(len.into())?;
+            let u32_of = |x: &[u8]| x.try_into().ok().map(Version::from_le_bytes);
+            match id {
+                version_id::WIRE if len == 1 => v.wire = Some(x[0]),
+                version_id::MCU if len == 2 => v.mcu_id = Some(u16::from_le_bytes([x[0], x[1]])),
+                version_id::STAGE0 => v.stage0 = u32_of(x).or(v.stage0),
+                version_id::BOOTCORE => v.boot_core = u32_of(x).or(v.boot_core),
+                version_id::BOOTCORE_SLOTS if x.len() == VersionSlots::<2>::LEN => {
+                    v.core_slots = Some(VersionSlots::parse(x)?)
+                }
+                version_id::APP_SLOTS if x.len() == VersionSlots::<3>::LEN => {
+                    v.app_slots = Some(VersionSlots::parse(x)?)
+                }
+                _ => {}
+            }
+        }
+        r.end().map(|_| v)
+    }
+
+    pub fn encode(&self, out: &mut [u8]) -> Result<usize, FrameError> {
+        let core = self.core_slots.map(|s| s.encode());
+        let app = self.app_slots.map(|s| s.encode());
+        let wire = self.wire.map(|w| [w]);
+        let mcu = self.mcu_id.map(u16::to_le_bytes);
+        let stage0 = self.stage0.map(Version::to_le_bytes);
+        let boot_core = self.boot_core.map(Version::to_le_bytes);
+        let tlvs: [(u8, Option<&[u8]>); 6] = [
+            (version_id::WIRE, wire.as_ref().map(|x| &x[..])),
+            (version_id::MCU, mcu.as_ref().map(|x| &x[..])),
+            (version_id::STAGE0, stage0.as_ref().map(|x| &x[..])),
+            (version_id::BOOTCORE, boot_core.as_ref().map(|x| &x[..])),
+            (
+                version_id::BOOTCORE_SLOTS,
+                core.as_ref().map(|x| &x[..VersionSlots::<2>::LEN]),
+            ),
+            (
+                version_id::APP_SLOTS,
+                app.as_ref().map(|x| &x[..VersionSlots::<3>::LEN]),
+            ),
+        ];
+        let count = tlvs.iter().filter(|t| t.1.is_some()).count() as u8;
+        let mut w = Wr::new(out).u8(count)?;
+        for (id, x) in tlvs {
+            if let Some(x) = x {
+                w = w.u8(id)?.u8(x.len() as u8)?.put(x)?;
+            }
+        }
+        Ok(w.done())
+    }
+}
+
 /// XFER_BEGIN request. `total_len` = `hdr_len` + body length; XFER_HDR
 /// offsets run over the header, XFER_DATA offsets over the body, both from 0.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -653,6 +857,67 @@ mod tests {
         assert_eq!(
             StatusResp::parse(&b[..StatusResp::LEN - 1]),
             Err(Status::Arg)
+        );
+    }
+
+    #[test]
+    fn version_reply_skips_what_it_does_not_read() {
+        let mut b = [0u8; 64];
+        let full = VersionResp {
+            wire: Some(1),
+            mcu_id: Some(3),
+            stage0: Some(Version::new(0, 1, 0)),
+            boot_core: Some(Version::new(1, 0, 0)),
+            core_slots: Some(VersionSlots::default()),
+            app_slots: Some(VersionSlots::default()),
+        };
+        assert_eq!(full.encode(&mut b).unwrap(), VersionResp::MAX_LEN);
+        let n = full.encode(&mut b).unwrap();
+        assert_eq!(VersionResp::parse(&b[..n]), Ok(full));
+
+        // Only what the node knows: no stage0, no boot core.
+        let some = VersionResp {
+            stage0: None,
+            boot_core: None,
+            core_slots: None,
+            ..full
+        };
+        let n = some.encode(&mut b).unwrap();
+        assert_eq!(b[0], 3, "three values sent");
+        assert_eq!(VersionResp::parse(&b[..n]), Ok(some));
+
+        // A later id and a known id at a length this reader does not read
+        // are skipped.
+        let mut later = b[..n].to_vec();
+        later[0] += 2;
+        later.extend([0x7E, 2, 0xAA, 0xBB, version_id::MCU, 8]);
+        later.extend([0; 8]);
+        assert_eq!(VersionResp::parse(&later), Ok(some));
+
+        assert_eq!(
+            VersionResp::parse(&b[..n - 1]),
+            Err(Status::Arg),
+            "cut short"
+        );
+        assert_eq!(VersionResp::parse(&[]), Err(Status::Arg));
+        assert_eq!(
+            VersionResp::parse(&[0, 0]),
+            Err(Status::Arg),
+            "trailing byte"
+        );
+        let mut bad_state = [0u8; 64];
+        let n = VersionResp {
+            app_slots: Some(VersionSlots::default()),
+            ..VersionResp::default()
+        }
+        .encode(&mut bad_state)
+        .unwrap();
+        bad_state[4] = 6;
+        assert_eq!(VersionResp::parse(&bad_state[..n]), Err(Status::Arg));
+        assert_eq!(parse_version_req(&[]), Ok(()));
+        assert_eq!(
+            parse_version_req(&[0x21, 0, 0, 8]),
+            Err(Status::Unsupported)
         );
     }
 

@@ -437,14 +437,15 @@ pub fn command(args: &[&str]) -> Result<(), String> {
         .map_err(|e| format!("{e}; usage: dagon ai ask <question>"))?;
     let home = crate::consent::home()?;
     crate::consent::require_linked(&home)?;
-    crate::agents::ready(&home)?;
+    let keys = crate::keystore::Keys::system();
+    crate::agents::ready(&home, &keys)?;
     let cfg = crate::config::Config::load(None)?;
     let reg = crate::defs::registry(&cfg)?;
     let yaml = match cfg.topology_path(None) {
         Ok(p) => read_topology(&p)?,
         Err(_) => None,
     };
-    let mut api = |p: &Prompt| crate::agents::call(&home, p, ASK_TIMEOUT);
+    let mut api = |p: &Prompt| crate::agents::call(&home, &keys, p, ASK_TIMEOUT);
     let facts = Facts {
         reg: &reg,
         topology: yaml.as_deref(),

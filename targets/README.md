@@ -35,7 +35,7 @@ errors; kind fields accept only the values listed below.
 | `[writer]` | First-write tool: `kind` and its parameters (below) |
 | `[[part]]` | DAGON parts built from this package for a first write: `name`, `sub` (folder in the package), `bin` |
 | `[coordinator]` | Only for an MCU that can be the coordinator: `pio_state_machines`, `pio_uart_state_machines` (per link), `uart0_tx`, `uart0_rx` |
-| `[link_uart]` | How the UART the MCU package runs DAGON's UART links on makes a bit rate, as its HAL computes it: `clock_hz` divided by `clocks_per_bit` times a divider with `frac_bits` fraction bits, rounded down. The topology check (V-26) refuses a link `baud` either end makes more than 2 % off. Left out: not checked on this MCU |
+| `[link_uart]` | How the UART the MCU package runs DAGON's UART links on makes a bit rate, as its HAL computes it: `clock_hz` divided by `clocks_per_bit` times a divider with `frac_bits` fraction bits, rounded down. The topology check (V-26) refuses a link `baud` either end makes more than 2 % off. Required on an MCU whose `[links]` has `uart`: without it, every UART link that MCU's firmware runs is refused, since no speed on it is known to work |
 | `[rom_i2c]` | ROM I2C bootloader (`stm32-i2c-rom`): `name` (as check messages call it), `addr`, `max_hz`, `erase_sectors`, `pairs = [{ controller, sda, scl }]` it listens on |
 | (coordinator) | A topology may make the MCU its coordinator only when `[coordinator]` is defined (V-25) |
 | `[connection]` | How the user connects it for a write: `label`, `hint` |

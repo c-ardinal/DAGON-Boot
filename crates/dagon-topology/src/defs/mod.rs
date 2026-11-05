@@ -438,7 +438,7 @@ pub struct McuDef {
     #[serde(default, rename = "part")]
     pub parts: Vec<Part>,
     pub coordinator: Option<Coordinator>,
-    /// Left out: a UART link's speed is not checked against this MCU.
+    /// Left out: every UART link this MCU's firmware runs is refused (V-26).
     pub link_uart: Option<LinkUart>,
     pub rom_i2c: Option<RomI2c>,
     /// Link kinds the MCU package's firmware implements (its `LINK_KINDS`).

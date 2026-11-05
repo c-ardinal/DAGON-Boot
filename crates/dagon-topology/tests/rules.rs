@@ -528,6 +528,39 @@ fn v26_uart_baud_must_be_within_two_percent_on_both_ends() {
 }
 
 #[test]
+fn v26_refuses_a_uart_end_whose_mcu_states_no_link_uart() {
+    // An ESP32-S3 definition without [link_uart]: its firmware runs the
+    // UART link, but no speed on it is known to work, so none is accepted,
+    // the default included.
+    let block = "[link_uart]\\nclock_hz = 40000000\\nclocks_per_bit = 1\\nfrac_bits = 4\\n";
+    let json = Registry::builtin().to_json();
+    assert!(json.contains(block), "the esp32s3 [link_uart] block moved");
+    let reg = Registry::from_json(&json.replacen(block, "", 1)).unwrap();
+    assert!(reg.mcu("esp32s3").unwrap().link_uart.is_none());
+    for baud in ["115200", "230400"] {
+        let yaml = mutate("baud: 115200", &format!("baud: {baud}"));
+        let got: Vec<_> = dagon_topology::check_str_with(&reg, &yaml)
+            .errors()
+            .filter(|i| i.rule == "V-26")
+            .map(|i| i.message.clone())
+            .collect();
+        assert_eq!(
+            got,
+            [format!(
+                "baud {baud}: watch (ESP32-S3) cannot be checked: its MCU definition has no [link_uart]"
+            )]
+        );
+    }
+    // An end whose firmware runs no UART link (STM32F401RE: I2C up only)
+    // runs no speed: V-24 reports the link, not V-26.
+    let yaml = mutate(
+        "  - id: watch\n    mcu: esp32s3\n",
+        "  - id: watch\n    mcu: stm32f401re\n",
+    );
+    assert!(messages(&yaml, "V-26").is_empty());
+}
+
+#[test]
 fn both_ends_of_a_uart_link_take_its_baud_from_the_topology() {
     let t = dagon_topology::parse_str(&mutate("baud: 115200", "baud: 230400")).unwrap();
     assert_eq!(t.uart_baud("hub"), Ok(Some(230_400)));

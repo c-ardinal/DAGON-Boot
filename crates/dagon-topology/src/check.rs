@@ -944,28 +944,33 @@ impl<'a> Ctx<'a> {
         }
     }
 
-    /// A UART link's speed on each end, from its MCU's `[link_uart]`.
+    /// A UART link's speed on each end whose firmware runs it, from its
+    /// MCU's `[link_uart]`; such an end whose MCU states none is refused (no
+    /// speed is known to work on it).
     fn v26(&mut self) {
         for (i, l) in self.links() {
             if l.kind != LinkKind::Uart {
                 continue;
             }
             let baud = l.uart_baud();
-            for id in [&l.from, &l.to] {
+            for (id, dir) in [(&l.from, Dir::Down), (&l.to, Dir::Up)] {
                 let Some(m) = self.t.node(id).and_then(|n| self.reg.mcu(&n.mcu)) else {
                     continue;
                 };
-                let Some(u) = m.link_uart else {
+                // An end whose firmware runs no UART link here runs no
+                // speed: V-24 reports the link instead.
+                if !links::available_in(self.reg, &m.id, dir).contains(&LinkKind::Uart) {
                     continue;
-                };
-                let what = match (u.actual_baud(baud), u.baud_error(baud)) {
-                    (Some(a), Some(e)) if e.abs() > MAX_BAUD_ERROR => format!(
+                }
+                let what = match m.link_uart.map(|u| (u.actual_baud(baud), u.baud_error(baud))) {
+                    None => "cannot be checked: its MCU definition has no [link_uart]".into(),
+                    Some((Some(a), Some(e))) if e.abs() > MAX_BAUD_ERROR => format!(
                         "runs at {a:.0} bit/s, {:+.2} %; each end of a UART link must be within {:.0} %",
                         e * 100.0,
                         MAX_BAUD_ERROR * 100.0
                     ),
-                    (Some(_), Some(_)) => continue,
-                    _ => "cannot make it".into(),
+                    Some((Some(_), Some(_))) => continue,
+                    Some(_) => "cannot make it".into(),
                 };
                 self.err(
                     "V-26",

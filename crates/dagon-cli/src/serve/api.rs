@@ -1082,11 +1082,12 @@ fn with_suffix(path: &Path, suffix: &str) -> PathBuf {
     path.with_file_name(name)
 }
 
-/// Builds a release from every signed image, all of `version`.
+/// Builds a release from every signed image, each of the version its node's
+/// crate gave it (`version`, if given, must be every image's).
 fn job_release(job: &mut Job, cfg: Config, v: Value) -> Result<Value, String> {
     let name = v["name"].as_str().filter(|n| plain(n) && n.len() <= 16);
     let name = name.ok_or("name must be up to 16 plain characters")?;
-    let want = version(v["version"].as_str().ok_or("version is required")?)?;
+    let want = v["version"].as_str().map(version).transpose()?;
     let t = read_topology(&cfg, &inside(&cfg, &cfg.topology_path(None)?)?)?;
     let key = serve_key(&cfg)?;
     let cancel = job.cancel_flag();
@@ -1094,8 +1095,11 @@ fn job_release(job: &mut Job, cfg: Config, v: Value) -> Result<Value, String> {
 }
 
 /// Images listed by the sign records only (each checked against its
-/// recorded SHA-256), all of version `want`.
-fn signed_images(cfg: &Config, want: dagon_format::Version) -> Result<Vec<Vec<u8>>, String> {
+/// recorded SHA-256), all of version `want` when one is given.
+fn signed_images(
+    cfg: &Config,
+    want: Option<dagon_format::Version>,
+) -> Result<Vec<Vec<u8>>, String> {
     let dir = inside(cfg, &cfg.base.join(SIGN_DIR))?;
     let mut records: Vec<PathBuf> = std::fs::read_dir(&dir)
         .map_err(|_| "nothing signed yet".to_string())?
@@ -1122,7 +1126,7 @@ fn signed_images(cfg: &Config, want: dagon_format::Version) -> Result<Vec<Vec<u8
                 .ok_or_else(|| format!("{file}: not an image"))?;
             crate::versions::check_number("image-header", file, raw)?;
             let h = ImageHeader::parse(raw).map_err(|e| format!("{file}: {e:?}"))?;
-            if h.version != want {
+            if let Some(want) = want.filter(|w| h.version != *w) {
                 return Err(format!("{file} is {}, not {want}", h.version));
             }
             images.push(img);
@@ -1137,7 +1141,7 @@ fn signed_images(cfg: &Config, want: dagon_format::Version) -> Result<Vec<Vec<u8
 fn release_from(
     cfg: &Config,
     t: &dagon_topology::Topology,
-    want: dagon_format::Version,
+    want: Option<dagon_format::Version>,
     name: &str,
     key: &ed25519_compact::KeyPair,
     log: &mut dyn FnMut(&str),
@@ -1635,11 +1639,11 @@ mod tests {
         // A stale image that no record lists never reaches a release.
         std::fs::write(cfg.base.join(SIGN_DIR).join("hub-a.img"), b"stale").unwrap();
         let v = dagon_format::Version::new(1, 1, 0);
-        assert_eq!(signed_images(&cfg, v).unwrap().len(), 2);
+        assert_eq!(signed_images(&cfg, Some(v)).unwrap().len(), 2);
         let r = release_from(
             &cfg,
             &t,
-            v,
+            Some(v),
             "r1",
             &key,
             &mut |_| {},
@@ -1647,11 +1651,13 @@ mod tests {
         )
         .unwrap();
         assert_eq!(r["release"], "r1");
-        assert!(signed_images(&cfg, dagon_format::Version::new(1, 0, 0)).is_err());
+        assert!(signed_images(&cfg, Some(dagon_format::Version::new(1, 0, 0))).is_err());
+        // Without a version given, the images go as their crates versioned them.
+        assert_eq!(signed_images(&cfg, None).unwrap().len(), 2);
 
         // A signed image changed afterwards is refused.
         std::fs::write(sign_path(&cfg, "seg", 'b'), b"changed").unwrap();
-        assert!(signed_images(&cfg, v).is_err());
+        assert!(signed_images(&cfg, Some(v)).is_err());
 
         // Signed again; then requests that fail their checks remove
         // nothing: an unknown node, an ELF changed after its build.
@@ -1665,7 +1671,7 @@ mod tests {
         assert!(sign_nodes(&cfg, &t, &seg, &key, &mut |_| {}, &AtomicBool::new(false)).is_err());
         assert_eq!(std::fs::read(sign_path(&cfg, "seg", 'a')).unwrap(), before);
         assert_eq!(
-            signed_images(&cfg, v).unwrap().len(),
+            signed_images(&cfg, Some(v)).unwrap().len(),
             2,
             "still the signed build"
         );
@@ -1830,7 +1836,7 @@ mod tests {
         let files = sign_folder(&cfg);
         assert_eq!(files.len(), 6, "no .new or .old left: {:?}", files.keys());
         let v = dagon_format::Version::new(1, 1, 0);
-        assert_eq!(signed_images(&cfg, v).unwrap().len(), 4);
+        assert_eq!(signed_images(&cfg, Some(v)).unwrap().len(), 4);
         let _ = std::fs::remove_dir_all(&cfg.base);
     }
 
@@ -1876,7 +1882,7 @@ mod tests {
         sign_nodes(&cfg, &t, &seg, &key, &mut |_| {}, &go).unwrap();
         assert_ne!(signed_files(&cfg), old);
         let v = dagon_format::Version::new(1, 1, 0);
-        assert_eq!(signed_images(&cfg, v).unwrap().len(), 2);
+        assert_eq!(signed_images(&cfg, Some(v)).unwrap().len(), 2);
         let _ = std::fs::remove_dir_all(&cfg.base);
     }
 
@@ -1912,9 +1918,9 @@ mod tests {
         .unwrap();
         let v = dagon_format::Version::new(1, 1, 0);
         let stop = AtomicBool::new(false);
-        release_from(&cfg, &t, v, "r1", &key, &mut |_| {}, &stop).unwrap();
+        release_from(&cfg, &t, Some(v), "r1", &key, &mut |_| {}, &stop).unwrap();
         std::thread::sleep(std::time::Duration::from_millis(20));
-        release_from(&cfg, &t, v, "r2", &key, &mut |_| {}, &stop).unwrap();
+        release_from(&cfg, &t, Some(v), "r2", &key, &mut |_| {}, &stop).unwrap();
         let r2 = std::fs::read(cfg.base.join(RELEASE_DIR).join("r2.dgb")).unwrap();
         let got = release_latest(&server).unwrap();
         assert_eq!((got.status, got.body.clone()), (200, r2));
@@ -2022,7 +2028,7 @@ mod tests {
         sign_nodes(&cfg, &t, &seg, &key, &mut |_| {}, &AtomicBool::new(false)).unwrap();
         let v = dagon_format::Version::new(1, 1, 0);
         assert_eq!(
-            release_from(&cfg, &t, v, "r1", &key, &mut |_| {}, &stop).unwrap_err(),
+            release_from(&cfg, &t, Some(v), "r1", &key, &mut |_| {}, &stop).unwrap_err(),
             "cancelled"
         );
         assert!(!cfg.base.join(RELEASE_DIR).join("r1.dgb").exists());

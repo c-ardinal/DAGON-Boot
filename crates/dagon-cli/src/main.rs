@@ -29,6 +29,7 @@ mod scaffold;
 mod serial;
 mod serve;
 mod simrun;
+mod srcver;
 mod versions;
 
 use std::path::Path;
@@ -98,8 +99,9 @@ Usage:
   dagon deploy [<id>...] [--version <x.y.z>] [--yes] [--bootcore] [--port <name>]
         [--topology <yaml>] [--key <file>]
                                      build, sign both slots, release build and apply in one
-                                     go; version defaults to one patch above the last
-                                     release; lists node -> version and asks first;
+                                     go; each node's version is its crate's Cargo.toml
+                                     version (--version must equal it); lists node ->
+                                     version and asks first; keeps the package in out/deploy;
                                      --bootcore also builds each node's boot core for its
                                      boot core slots (the node takes it before its app)
   dagon flash <id> [--dry-run] [--yes] [--probe <vid:pid[:serial]> | --port <port> |

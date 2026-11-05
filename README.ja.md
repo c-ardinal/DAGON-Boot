@@ -120,7 +120,7 @@ dagon gen
 dagon build            # または: dagon build seg
 ```
 
-各ノードを `out/build/<id>/app-a.elf` と、スロット B 用の `app-b.elf` にビルドします（ESP32-S3 のイメージは両方のスロットで使えるので 1 つ）。`dagon.toml` の公開鍵が埋め込まれます。バージョンは `dagon.toml` の `[build.<id>]` から取ります。
+各ノードを `out/build/<id>/app-a.elf` と、スロット B 用の `app-b.elf` にビルドします（ESP32-S3 のイメージは両方のスロットで使えるので 1 つ）。`dagon.toml` の公開鍵が埋め込まれます。ノードのバージョンは、そのクレートの `Cargo.toml` の `version` です（ブートコアはブート用クレートの `Cargo.toml`）。書き込む変更ごとに、そこで上げてください。`[build.<id>]` の `version` や `--version` は要りません。書いた場合は同じでなければならず、違うとコマンドは止まり、どこが違うかを示します。
 
 ### 5. 最初のバージョンを書き込む（ノードごとに 1 回）
 
@@ -149,10 +149,12 @@ dagon status
 コードを変えたら:
 
 ```sh
-dagon deploy                       # または: dagon deploy seg watch --version 1.2.0
+dagon deploy                       # または: dagon deploy seg watch
 ```
 
-`dagon deploy` はスロット A と B をビルドし、署名し、リリースを作り、ノードごとに今のバージョンと新しいバージョンを並べて、適用の前に確認を求めます（`--yes` で省けます）。今のバージョンは、前回のリリース（`out/release-latest.dgb`、または `dagon.toml` の `release`）がその鍵で検証できたときに、そのリリースにあるノードのバージョンです。ボードから読むのではありません。バージョンの既定は、知っているいちばん新しいものの 1 つ上のパッチです。ノードの id を省くと `[build.<id>]` のすべてのノードが対象です。ESP32-S3 のノードは 1 回だけビルドし（イメージはどちらの OTA スロットでも動く）、deploy がそれを ESP のイメージにして（`espflash save-image`）署名し、親機がほかのノードと同じように中継します。1 つずつの手順は `dagon build`、`dagon image sign`、`dagon release build`、`dagon apply` です（`dagon --help`）。DAGON Console ではビルド → 署名 → リリース → 渡す のあと、運用モードで Web Serial から更新します。
+`dagon deploy` はスロット A と B をビルドし、署名し、リリースを作り、ノードごとに今のバージョンと新しいバージョンを並べて、適用の前に確認を求めます（`--yes` で省けます）。今のバージョンは、前回のリリース（`out/release-latest.dgb`、または `dagon.toml` の `release`）がその鍵で検証できたときに、そのリリースにあるノードのバージョンです。ボードから読むのではありません。新しいバージョンは、各ノードのクレートのバージョンです。ノードの id を省くと `[build.<id>]` のすべてのノードが対象です。ESP32-S3 のノードは 1 回だけビルドし（イメージはどちらの OTA スロットでも動く）、deploy がそれを ESP のイメージにして（`espflash save-image`）署名し、親機がほかのノードと同じように中継します。1 つずつの手順は `dagon build`、`dagon image sign`、`dagon release build`、`dagon apply` です（`dagon --help`）。DAGON Console ではビルド → 署名 → リリース → 渡す のあと、運用モードで Web Serial から書き込みます。
+
+ノードへ書き込んだパッケージ（Console、`dagon apply`、`dagon deploy`）は、すべてプロジェクトの `out/deploy/` に `v<バージョン>.dgb` として保存されます（ノードごとにバージョンが違うときは `v<いちばん新しい版>-<ダイジェスト>.dgb`）。前の版に戻すには、保存された古い版をもう一度書き込みます。Console はその一覧を出し、コマンドでは `dagon apply out/deploy/v1.0.0.dgb` で書き込めます。
 
 適用では、署名と、リリースがこの構成に対して作られたことを確かめ、構成を親機へ送り、子機を更新してから親機を更新します。ノードは新しいバージョンを試行起動し、確定されなければウォッチドッグでリセットされて前のバージョンで起動し直します。
 

@@ -145,6 +145,8 @@ ESP32-S3 のノードでは、`dagon flash` がボードの factory エージェ
 dagon status
 ```
 
+各ノードの `versions:` の行に、stage0、ブートコアのスロット A/B（と動いている方）、アプリのスロット、通信のバージョン、MCU の ID が出ます。`unknown` は、それを伝えられないノード（伝える前に作られたエージェントや stage0）です。親機をつないでいれば、`dagon doctor` もツールの確認のあとに同じ行を出します。
+
 `dagon flash` を使わない場合（自分でビルドしたブート用のイメージを使うとき）: `dagon rescue hub` と `dagon provision <id>` が、`dagon.toml` の `[provision.<id>]`（親機は `stage0`、ほかに `bootcore`、`app`、`version`）から同じファイルを作ります。ブート用のイメージのビルドは MCU のパッケージの README にあります。
 
 ### 6. 更新し、必要なら戻す

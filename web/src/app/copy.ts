@@ -605,6 +605,8 @@ export const DETAIL = {
   lastReason: '最後に戻った理由',
   ms: (n: number) => `${n} ms`,
   none: 'なし',
+  /** A version the node did not tell (VERSION left it out, or the node predates VERSION). */
+  unknown: '不明',
   /** Values of the last-reason code (STATUS last_reason). */
   reasons: { 1: '中身の破損', 2: '配布元不明', 3: '起動失敗', 5: '起動できるバージョンなし' } as Record<number, string>,
   details: '詳しく見る',

@@ -300,3 +300,75 @@ fn enter_rom_vector() {
     assert_eq!(file.len(), 13);
     assert_crc(&file);
 }
+
+fn version_resp() -> VersionResp {
+    let sv = |state, version| SlotVersion { state, version };
+    VersionResp {
+        wire: Some(1),
+        mcu_id: Some(2),
+        stage0: Some(Version::new(0, 1, 0)),
+        boot_core: Some(Version::new(1, 0, 0)),
+        core_slots: Some(VersionSlots {
+            active: 0,
+            slots: [
+                sv(SlotState::Confirmed, Version::new(1, 0, 0)),
+                SlotVersion::default(),
+            ],
+        }),
+        app_slots: Some(VersionSlots {
+            active: 1,
+            slots: [
+                sv(SlotState::Written, Version::new(1, 0, 0)),
+                sv(SlotState::Trying, Version::new(1, 1, 0)),
+                SlotVersion::default(),
+            ],
+        }),
+    }
+}
+
+/// VERSION is an additive command of wire 1: the files above are
+/// unchanged.
+#[test]
+fn version_vectors() {
+    let file = golden(
+        "frame_version_req.bin",
+        &frame(0, 0x15, Cmd::Version, |_| 0),
+    );
+    let f = decode(&file);
+    assert_eq!((f.cmd, f.payload), (0x03, &[][..]));
+    expect_at(&file, &[(0, &[0xDA, 0x6F, 1, 0, 0x15, 0x03, 0, 0])]);
+    assert_eq!(file.len(), 12);
+    assert_crc(&file);
+
+    let file = golden(
+        "frame_version_resp.bin",
+        &frame(flags::RESP, 0x15, Cmd::Version, |b| {
+            version_resp().encode(b).unwrap()
+        }),
+    );
+    let (st, body) = split_status(decode(&file).payload).unwrap();
+    assert_eq!(st, Status::Ok);
+    assert_eq!(body.len(), VersionResp::MAX_LEN);
+    assert_eq!(VersionResp::parse(body), Ok(version_resp()));
+    // count, then TLVs: id, len, value
+    expect_at(
+        &file,
+        &[
+            (6, &[52, 0]),                            // len = status + 51
+            (9, &[6]),                                // six values
+            (10, &[0x0D, 1, 1]),                      // wire 1
+            (13, &[0x06, 2, 0x02, 0x00]),             // mcu_id F401
+            (17, &[0x0A, 4, 0x00, 0x00, 0x01, 0x00]), // stage0 0.1.0
+            (23, &[0x01, 4, 0x00, 0x00, 0x00, 0x01]), // running boot core 1.0.0
+            (29, &[0x0B, 11, 0]),                     // boot core slots, A running
+            (32, &[4, 0x00, 0x00, 0x00, 0x01]),       // core A confirmed 1.0.0
+            (37, &[0; 5]),                            // core B empty
+            (42, &[0x0C, 16, 1]),                     // app slots, B running
+            (45, &[1, 0x00, 0x00, 0x00, 0x01]),       // A written 1.0.0
+            (50, &[3, 0x00, 0x00, 0x01, 0x01]),       // B trying 1.1.0
+            (55, &[0; 5]),                            // factory empty
+        ],
+    );
+    assert_eq!(file.len(), 64);
+    assert_crc(&file);
+}

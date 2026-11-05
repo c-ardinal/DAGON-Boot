@@ -1,4 +1,4 @@
-//! DAGON agent: embedded in an application, it answers HELLO/STATUS, receives
+//! DAGON agent: embedded in an application, it answers HELLO/STATUS/VERSION, receives
 //! images into the inactive slot, switches the boot target and confirms.
 //!
 //! Every state change is a transition of one of the machines declared
@@ -430,6 +430,13 @@ pub trait SlotStore {
         (target == payload::target::APP).then(|| self.status())
     }
 
+    /// The version mark of the stage0 this board boots behind
+    /// (`dagon_format::stage0::find` over its stage0 region). `None`: no
+    /// mark (a stage0 built before it) or no stage0.
+    fn stage0_version(&mut self) -> Option<Version> {
+        None
+    }
+
     /// [`SlotStore::write_header`] for a slot of `target` (APP, or a
     /// `target_status` target this board keeps).
     fn write_target_header(
@@ -637,6 +644,9 @@ impl<S: SlotStore + ?Sized> SlotStore for &core::cell::RefCell<S> {
     }
     fn keep_room(&mut self) -> Result<(), StoreError> {
         self.borrow_mut().keep_room()
+    }
+    fn stage0_version(&mut self) -> Option<Version> {
+        self.borrow_mut().stage0_version()
     }
     fn write_target_header(
         &mut self,

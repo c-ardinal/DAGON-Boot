@@ -578,6 +578,7 @@ mod tests {
         for c in [
             Cmd::Hello,
             Cmd::Status,
+            Cmd::Version,
             Cmd::XferBegin,
             Cmd::XferData,
             Cmd::XferEnd,

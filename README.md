@@ -246,6 +246,11 @@ Then connect the hub and check that every node answers:
 dagon status
 ```
 
+Each node's line `versions:` names its stage0, boot core slots A/B (and the
+running one), app slots, wire version and MCU id; "unknown" is a node that
+cannot tell (an agent or stage0 built before it reported them). With the hub
+connected, `dagon doctor` prints the same lines after its tool checks.
+
 Without `dagon flash` (boot images you built yourself): `dagon rescue hub`
 and `dagon provision <id>` make the same files from `[provision.<id>]`
 tables in `dagon.toml` (`stage0` for the hub, `bootcore`, `app`,

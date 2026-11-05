@@ -41,6 +41,23 @@ export interface StatusResp {
   logGeneration: number;
 }
 
+/** Slots of one image kind in VERSION (dagon_proto::payload::VersionSlots). */
+export interface VersionSlots {
+  /** The running slot (0xFF none). */
+  active: number;
+  slots: { state: number; version: number }[];
+}
+
+/** VERSION of a node (dagon_proto::payload::VersionResp); null where the node left a value out. */
+export interface VersionResp {
+  wire: number | null;
+  mcuId: number | null;
+  stage0: number | null;
+  bootCore: number | null;
+  coreSlots: VersionSlots | null;
+  appSlots: VersionSlots | null;
+}
+
 export interface NodeState {
   hello: HelloResp;
   status: StatusResp;
@@ -119,6 +136,8 @@ export interface Host {
   status(kind: TargetKind, addr: number): Promise<NodeState>;
   /** STATUS of the boot core slots; rejects when the node keeps none. */
   bootCoreStatus(kind: TargetKind, addr: number): Promise<StatusResp>;
+  /** VERSION; null when the node's agent predates it. */
+  version(kind: TargetKind, addr: number): Promise<VersionResp | null>;
   discover(): Promise<Discovery>;
   pushTopology(bin: Uint8Array): Promise<void>;
   watch(kind: TargetKind, addr: number): Promise<WatchRound>;
@@ -139,6 +158,7 @@ export function newHost(link: HostLink): Host {
     hello: (k, a) => h.hello(k, a),
     status: (k, a) => h.status(k, a),
     bootCoreStatus: (k, a) => h.boot_core_status(k, a),
+    version: (k, a) => h.version(k, a),
     discover: () => h.discover(),
     pushTopology: (bin) => h.push_topology(bin),
     watch: (k, a) => h.watch(k, a),

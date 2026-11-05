@@ -8,8 +8,8 @@ use dagon_format::header::{self, image_kind, slot_binding, ImageHeader, HEADER_S
 use dagon_format::{FormatError, Sha256};
 use dagon_port::{Link, LinkError, Reset};
 use dagon_proto::payload::{
-    self, reboot_mode, target, HelloReq, HelloResp, SetPending, SlotState, StatusResp, XferBegin,
-    XferChunk, IMAGE_HDR_LEN,
+    self, reboot_mode, target, HelloReq, HelloResp, SetPending, SlotState, StatusResp, VersionResp,
+    VersionSlots, XferBegin, XferChunk, IMAGE_HDR_LEN,
 };
 use dagon_proto::{
     flags, frame_len, max_payload, split_status, Cmd, Frame, Status, HEADER_LEN, MAX_FRAME,
@@ -24,6 +24,8 @@ use crate::{
 pub const IDLE_TIMEOUT_MS: u32 = 10_000;
 
 const RESP_BUF: usize = frame_len(1 + StatusResp::LEN);
+// The largest reply body is STATUS's; VERSION's fits the same buffer.
+const _: () = assert!(VersionResp::MAX_LEN <= StatusResp::LEN);
 const BODY_AT: usize = HEADER_LEN + 1;
 const READ_CHUNK: usize = 256;
 const SLOT_A: u8 = 0;
@@ -289,6 +291,7 @@ impl<S: SlotStore, X: AppChain> Agent<S, X> {
         match Cmd::from_u8(cmd) {
             Some(Cmd::Hello) => self.hello(p),
             Some(Cmd::Status) => self.status(p),
+            Some(Cmd::Version) => self.version(p),
             Some(Cmd::XferBegin) => self.xfer_begin(XferBegin::parse(p)?),
             Some(Cmd::XferHdr) => self.xfer_hdr(XferChunk::parse(p)?),
             Some(Cmd::XferData) => self.xfer_data(XferChunk::parse(p)?),
@@ -340,6 +343,26 @@ impl<S: SlotStore, X: AppChain> Agent<S, X> {
         let st = self.images.target_status(t).ok_or(Status::Unsupported)?;
         noted(self.requests.status_asked(&mut self.chain));
         Ok((st.encode(self.body()).expect("fits"), None))
+    }
+
+    /// VERSION's summary set: what this node runs, read from flash. A
+    /// value it cannot read (a stage0 without its mark, no boot core
+    /// slots) is left out.
+    fn version(&mut self, p: &[u8]) -> Handled {
+        payload::parse_version_req(p)?;
+        let core = self
+            .images
+            .target_status(target::BOOTCORE)
+            .map(|st| VersionSlots::<2>::of(&st));
+        let resp = VersionResp {
+            wire: Some(dagon_proto::PROTO_VERSION),
+            mcu_id: Some(self.cfg.mcu_id),
+            stage0: self.images.stage0_version(),
+            boot_core: core.and_then(|c| c.running()),
+            core_slots: core,
+            app_slots: Some(VersionSlots::of(&self.images.status())),
+        };
+        Ok((resp.encode(self.body()).expect("fits"), None))
     }
 
     fn xfer_begin(&mut self, req: XferBegin) -> Handled {

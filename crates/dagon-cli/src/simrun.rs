@@ -384,6 +384,39 @@ pub fn run(args: &[&str]) -> Result<(), String> {
 mod tests {
     use super::*;
 
+    /// `dagon status` and `dagon doctor` print these lines: every node's
+    /// versions, and "unknown" for an agent that predates VERSION.
+    #[test]
+    fn version_lines_of_the_hub_and_its_nodes() {
+        let w = world().unwrap();
+        let nodes = [("seg".to_string(), Some(SEG_AT)), ("far".to_string(), None)];
+        let lines = crate::device::version_lines(&mut w.host(), &nodes);
+        let s0 = dagon_sim::store::STAGE0_VERSION;
+        assert_eq!(lines.len(), 3, "{lines:?}");
+        assert!(
+            lines[0].starts_with(&format!("hub: versions: stage0 {s0}; boot core A:")),
+            "{lines:?}"
+        );
+        assert!(lines[0].ends_with("; wire 1; mcu 0x0001"), "{lines:?}");
+        assert!(
+            lines[1].contains(&format!("app A:Confirmed {OLD} (running)")),
+            "{lines:?}"
+        );
+        assert!(lines[1].ends_with("mcu 0x0002"), "{lines:?}");
+        assert_eq!(lines[2], "far: not reachable through the hub");
+
+        seg(&mut w.sim.hub.borrow_mut()).predates = vec![dagon_proto::Cmd::Version as u8];
+        let lines = crate::device::version_lines(&mut w.host(), &nodes);
+        assert_eq!(
+            lines[1],
+            "seg: versions unknown (its agent predates VERSION)"
+        );
+        assert!(
+            lines[0].starts_with("hub: versions: stage0"),
+            "the hub still answers"
+        );
+    }
+
     #[test]
     fn all_scenarios_pass() {
         super::run(&[]).unwrap();

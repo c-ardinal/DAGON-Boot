@@ -11,9 +11,8 @@ use std::process::Command;
 
 use dagon_topology::defs::{DoctorCheck, Expect, Origin, Registry};
 
-use crate::config::{read_topology, Config, Opts};
-
-const FIX: &str = "--fix";
+use crate::cli::DoctorArgs;
+use crate::config::{read_topology, Config};
 
 const RUST_HINT: &str = "install Rust from https://rustup.rs";
 
@@ -238,13 +237,10 @@ fn install_cmd(args: &[&str]) -> Option<String> {
     s.success().then(String::new)
 }
 
-/// `dagon doctor [--fix] [--port <name>] [--topology <yaml>] [--config <file>]`:
-/// the tool checks, then each node's versions when a hub is connected.
-pub fn command(args: &[&str]) -> Result<(), String> {
-    let fix = args.contains(&FIX);
-    let args: Vec<&str> = args.iter().copied().filter(|a| *a != FIX).collect();
-    let o = Opts::parse(&args, &["topology", "config", "port"])?;
-    let cfg = Config::load(o.get("config"))?;
+/// `dagon doctor`: the tool checks, then each node's versions when a hub is connected.
+pub fn command(a: &DoctorArgs) -> Result<(), String> {
+    let fix = a.fix;
+    let cfg = Config::load(a.config.as_deref())?;
     let reg = crate::defs::registry(&cfg)?;
     println!("{}", crate::versions::known_text());
     let d = &cfg.dagon;
@@ -253,7 +249,7 @@ pub fn command(args: &[&str]) -> Result<(), String> {
         (None, Some(p)) => println!("this project's DAGON source: local clone {}", p.display()),
         (None, None) => {}
     }
-    let topology = match o.get("topology").map(Into::into).or(cfg.topology.clone()) {
+    let topology = match a.topology.as_ref().map(Into::into).or(cfg.topology.clone()) {
         Some(p) => {
             let t = read_topology(&cfg, &p)?;
             println!("checking for {}", p.display());
@@ -275,7 +271,7 @@ pub fn command(args: &[&str]) -> Result<(), String> {
         out: &mut |l| println!("{l}"),
     };
     let ok = doctor(&reg, &mcus, fix, &mut io);
-    for l in crate::device::doctor_versions(o.get("port"), &cfg, topology.as_ref()) {
+    for l in crate::device::doctor_versions(a.port.as_deref(), &cfg, topology.as_ref()) {
         println!("{l}");
     }
     if ok {

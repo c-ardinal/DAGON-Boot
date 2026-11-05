@@ -1238,7 +1238,7 @@ fn every_start_pubkey_source_goes_through_the_same_checks() {
     );
     let config = home.join("p/dagon.toml");
     let start = |args: &[&str]| {
-        let o = crate::config::Opts::parse(args, &["pubkey", "key"]).unwrap();
+        let o: crate::cli::ServeArgs = crate::cli::args(args);
         super::start_key(&o, &a.server, Some(&config))
     };
     // --pubkey naming a renamed secret, and the same in dagon.toml.
@@ -1315,7 +1315,7 @@ fn start_key_is_none_without_any_source() {
         return;
     }
     let (a, _home) = bare("bare-key");
-    let o = crate::config::Opts::parse(&[], &["pubkey", "key"]).unwrap();
+    let o = crate::cli::ServeArgs::default();
     let none = super::start_key(&o, &a.server, None);
     // Without dagon.toml in the current folder (the test's) there is none.
     if !std::path::Path::new(crate::config::CONFIG_FILE).exists() {

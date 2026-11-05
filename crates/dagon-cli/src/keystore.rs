@@ -10,6 +10,8 @@
 
 use std::sync::{Arc, OnceLock};
 
+use crate::cli::{AgentWay, AiKeyCmd};
+
 use keyring_core::{CredentialStore, Error};
 
 use crate::agents::{AgentDef, Agents, WayDef};
@@ -183,27 +185,24 @@ pub fn check_key(key: &str) -> Result<&str, String> {
     Ok(k)
 }
 
-const USAGE: &str =
-    "usage: dagon ai key set|status|delete [--agent <id>] [--way <id>] (status lists every key way)";
-
 /// The way `--agent` / `--way` name; default: the first agent, its first
 /// way that takes a key.
-fn chosen<'a>(agents: &'a Agents, args: &[&str]) -> Result<(&'a AgentDef, &'a WayDef), String> {
-    let (a, w) = crate::consent::chosen(agents, args, USAGE, |w| w.transport.takes_key())?;
+fn chosen<'a>(agents: &'a Agents, sel: &AgentWay) -> Result<(&'a AgentDef, &'a WayDef), String> {
+    let (a, w) = crate::consent::chosen(agents, sel, |w| w.transport.takes_key())?;
     if !w.transport.takes_key() {
-        return Err(format!("{}/{} takes no key; {USAGE}", a.id, w.id));
+        return Err(format!("{}/{} takes no key", a.id, w.id));
     }
     Ok((a, w))
 }
 
 /// `dagon ai key set|status|delete`.
-pub fn command(args: &[&str]) -> Result<(), String> {
+pub fn command(cmd: &AiKeyCmd) -> Result<(), String> {
     let home = crate::consent::home()?;
     let agents = Agents::load(Some(&home));
     let keys = Keys::system();
-    match args {
-        ["set", rest @ ..] => {
-            let (a, w) = chosen(&agents, rest)?;
+    match cmd {
+        AiKeyCmd::Set(sel) => {
+            let (a, w) = chosen(&agents, sel)?;
             // Refused before anything is typed: no store, or no terminal to type into.
             keys.0.as_ref().map_err(Clone::clone)?;
             if !std::io::IsTerminal::is_terminal(&std::io::stdin()) {
@@ -219,8 +218,8 @@ pub fn command(args: &[&str]) -> Result<(), String> {
             println!("{}/{}: 登録済み", a.id, w.id);
             Ok(())
         }
-        ["delete", rest @ ..] => {
-            let (a, w) = chosen(&agents, rest)?;
+        AiKeyCmd::Delete(sel) => {
+            let (a, w) = chosen(&agents, sel)?;
             let removed = keys.delete(&a.id, &w.id)?;
             println!(
                 "{}/{}: {}",
@@ -230,7 +229,7 @@ pub fn command(args: &[&str]) -> Result<(), String> {
             );
             Ok(())
         }
-        ["status"] => {
+        AiKeyCmd::Status => {
             for a in &agents.list {
                 for w in a.ways.iter().filter(|w| w.transport.takes_key()) {
                     let state = match keys.get(&a.id, &w.id) {
@@ -243,7 +242,6 @@ pub fn command(args: &[&str]) -> Result<(), String> {
             }
             Ok(())
         }
-        _ => Err(USAGE.into()),
     }
 }
 

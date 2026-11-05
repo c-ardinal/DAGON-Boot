@@ -236,56 +236,6 @@ pub(crate) fn forward_path(p: &Path) -> String {
         .replace('\\', "/")
 }
 
-/// `--name value` options after positional arguments. Every option takes a
-/// value; options not in `allowed` are rejected.
-pub struct Opts<'a> {
-    pub pos: Vec<&'a str>,
-    opts: Vec<(&'a str, &'a str)>,
-}
-
-impl<'a> Opts<'a> {
-    pub fn parse(args: &[&'a str], allowed: &[&str]) -> Result<Self, String> {
-        let mut out = Opts {
-            pos: Vec::new(),
-            opts: Vec::new(),
-        };
-        let mut it = args.iter();
-        while let Some(&a) = it.next() {
-            if let Some(name) = a.strip_prefix("--") {
-                if !allowed.contains(&name) {
-                    return Err(format!("unknown option --{name}"));
-                }
-                let v = it.next().ok_or_else(|| format!("--{name} needs a value"))?;
-                out.opts.push((name, v));
-            } else {
-                out.pos.push(a);
-            }
-        }
-        Ok(out)
-    }
-
-    pub fn get(&self, name: &str) -> Option<&'a str> {
-        self.opts
-            .iter()
-            .rev()
-            .find(|(n, _)| *n == name)
-            .map(|(_, v)| *v)
-    }
-
-    /// Every value of a repeatable option, in order.
-    pub fn all<'s>(&'s self, name: &'s str) -> impl Iterator<Item = &'a str> + 's {
-        self.opts
-            .iter()
-            .filter(move |(n, _)| *n == name)
-            .map(|(_, v)| *v)
-    }
-
-    pub fn need(&self, name: &str) -> Result<&'a str, String> {
-        self.get(name)
-            .ok_or_else(|| format!("--{name} is required"))
-    }
-}
-
 /// The topology at `path`, checked against `cfg`'s project definitions:
 /// its updatable part, the one every update, deploy, flash and project
 /// command works on. The nodes it leaves out are named on stderr with why.
@@ -589,15 +539,6 @@ mod tests {
         let c = Config::load(Some(&toml.to_string_lossy())).unwrap();
         assert_eq!(c.provision_dir(), c.base.join("p"));
         let _ = std::fs::remove_dir_all(&dir);
-    }
-
-    #[test]
-    fn opts_split_positional_and_named() {
-        let o = Opts::parse(&["a", "--out", "x", "b"], &["out"]).unwrap();
-        assert_eq!(o.pos, ["a", "b"]);
-        assert_eq!(o.get("out"), Some("x"));
-        assert!(Opts::parse(&["--bad", "x"], &["out"]).is_err());
-        assert!(Opts::parse(&["--out"], &["out"]).is_err());
     }
 
     #[test]

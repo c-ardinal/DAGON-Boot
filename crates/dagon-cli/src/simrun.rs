@@ -353,10 +353,7 @@ fn s4() -> R {
     ))
 }
 
-pub fn run(args: &[&str]) -> Result<(), String> {
-    if !args.is_empty() {
-        return Err("sim run takes no arguments".into());
-    }
+pub fn run() -> Result<(), String> {
     let scenarios: [Scenario; 4] = [
         ("S1", "update with a power cut", s1),
         ("S2", "trial app never confirms", s2),
@@ -419,7 +416,7 @@ mod tests {
 
     #[test]
     fn all_scenarios_pass() {
-        super::run(&[]).unwrap();
+        super::run().unwrap();
     }
 
     #[test]

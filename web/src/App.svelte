@@ -1229,7 +1229,7 @@
 
 {#snippet defineRight()}
   {#if cliPanel}
-    <CliPanel {cli} {d} {autosave} panel={cliPanel} onuse={useRelease} />
+    <CliPanel {cli} {d} {autosave} {agent} panel={cliPanel} onuse={useRelease} />
   {:else if d.selected}
     <div class="edit-area" data-control="edit"><Inspector {d} /></div>
   {/if}

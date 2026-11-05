@@ -57,8 +57,11 @@ Use these words with the developer, and count in ノード ("3 ノード").
 ## Rules
 
 - Never open, print, copy or move the signing secret key (the file named
-  by `DAGON_SIGNING_KEY`) or any API key. Do not put keys or paths from
-  outside this folder into project files.
+  by `DAGON_SIGNING_KEY`) or any API key. API keys live only in the OS
+  credential store; registering or deleting one (`dagon ai key set`,
+  `dagon ai key delete`) is the developer's step. Never ask for a key, put
+  one in an environment variable, or read it from the store. Do not put
+  keys or paths from outside this folder into project files.
 - Signing, building releases and anything that writes to hardware
   (`image sign`, `release build`, `deploy`, `apply`, `flash`,
   `provision`, `rescue`, `rollback`, `recover`, `topo push`) are the developer's steps. Suggest

@@ -1,7 +1,7 @@
 //! Transport kind `messages-http`: a Messages API (Anthropic's protocol)
-//! over HTTPS, with the key from the environment variable the way names.
-//! The key goes only into the request header; it is never printed, logged,
-//! written or put in an error.
+//! over HTTPS, with the way's key from the OS credential store
+//! ([`crate::keystore`]). The key goes only into the request header; it is
+//! never printed, logged, written or put in an error.
 
 use std::time::Duration;
 
@@ -12,6 +12,14 @@ use super::{Cleared, Prompt, TIMED_OUT};
 
 /// Tokens an answer may take.
 const MAX_TOKENS: u32 = 16_000;
+/// Characters an error from the agent's side is cut to: a summary for one
+/// notice or log line, not the remote body.
+const MAX_ERROR: usize = 300;
+/// Bytes of a response body read at most: the same cap as a command way's
+/// answer (its stdout).
+const MAX_ANSWER: usize = super::command::MAX_OUTPUT;
+/// What stands where the agent's answer or error held the key.
+const KEY_MARK: &str = "[API key]";
 
 #[derive(Debug, Clone, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -20,8 +28,6 @@ pub struct MessagesHttp {
     pub url: String,
     /// The `anthropic-version` header.
     pub version: String,
-    /// The environment variable holding the key.
-    pub key_env: String,
     pub model: String,
     /// An environment variable that overrides `model`, if set.
     #[serde(default)]
@@ -39,24 +45,13 @@ impl MessagesHttp {
         if !self.url.starts_with("https://") {
             return Err("url must start with https://".into());
         }
-        if !env_name(&self.key_env) || !self.model_env.as_deref().is_none_or(env_name) {
-            return Err("key_env and model_env must be environment variable names".into());
+        if !self.model_env.as_deref().is_none_or(env_name) {
+            return Err("model_env must be an environment variable name".into());
         }
         if self.model.trim().is_empty() || self.version.trim().is_empty() {
             return Err("model and version are required".into());
         }
         Ok(())
-    }
-
-    /// The key, or why there is none (naming the variable, never a value).
-    pub fn key(&self) -> Result<String, String> {
-        match std::env::var(&self.key_env) {
-            Ok(k) if !k.trim().is_empty() => Ok(k.trim().to_string()),
-            _ => Err(format!(
-                "{} is not set; export the agent's API key in that environment variable",
-                self.key_env
-            )),
-        }
     }
 
     fn model(&self, prompt: &Prompt) -> String {
@@ -98,11 +93,35 @@ fn text_of(resp: &Value) -> Result<String, String> {
 pub(crate) fn post(
     _cleared: &Cleared,
     h: &MessagesHttp,
+    key: &str,
     prompt: &Prompt,
     timeout: Duration,
 ) -> Result<String, String> {
-    let key = h.key()?;
-    text_of(&send(&h.url, &h.version, &key, &body(h, prompt), timeout)?)
+    answer(h, key, prompt, timeout)
+}
+
+/// The call's answer or error, as every caller gets it. Both come from the
+/// remote side, which may reflect the request's key header: every
+/// occurrence of the key is replaced before either leaves this module, and
+/// an error is cut to a short summary (after the replacement, so no part of
+/// the key survives a cut).
+fn answer(
+    h: &MessagesHttp,
+    key: &str,
+    prompt: &Prompt,
+    timeout: Duration,
+) -> Result<String, String> {
+    let clean = |s: String| {
+        if key.is_empty() {
+            s
+        } else {
+            s.replace(key, KEY_MARK)
+        }
+    };
+    send(&h.url, &h.version, key, &body(h, prompt), timeout)
+        .and_then(|v| text_of(&v))
+        .map(clean)
+        .map_err(|e| clean(e).chars().take(MAX_ERROR).collect())
 }
 
 fn agent_error(e: ureq::Error, what: &str) -> String {
@@ -142,8 +161,15 @@ fn send(
     }
     let text = resp
         .body_mut()
+        .with_config()
+        .limit(MAX_ANSWER as u64)
         .read_to_string()
-        .map_err(|e| agent_error(e, "cannot read the agent's answer"))?;
+        .map_err(|e| match e {
+            ureq::Error::BodyExceedsLimit(_) => {
+                "the agent's answer is larger than 1 MiB; it was not read".to_string()
+            }
+            e => agent_error(e, "cannot read the agent's answer"),
+        })?;
     let v: Value = serde_json::from_str(&text)
         .map_err(|e| format!("the agent answered with non-JSON (HTTP {status}): {e}"))?;
     if !status.is_success() {
@@ -199,7 +225,6 @@ mod tests {
         MessagesHttp {
             url: "https://example.invalid/v1/messages".into(),
             version: "2023-06-01".into(),
-            key_env: "DAGON_TEST_NO_SUCH_KEY".into(),
             model: "m-def".into(),
             model_env: None,
         }
@@ -257,19 +282,78 @@ mod tests {
     }
 
     #[test]
-    fn a_cut_off_answer_and_a_missing_key_are_clear_errors() {
+    fn a_cut_off_answer_and_a_bad_definition_are_clear_errors() {
         assert!(
             text_of(&json!({ "stop_reason": "max_tokens", "content": [] }))
                 .unwrap_err()
                 .contains("cut off")
         );
-        let e = way().key().unwrap_err();
-        assert!(e.contains("DAGON_TEST_NO_SUCH_KEY"), "{e}");
         let mut bad = way();
         bad.url = "http://example.invalid".into();
         assert!(bad.check().is_err());
         bad = way();
-        bad.key_env = "lower".into();
+        bad.model_env = Some("lower".into());
         assert!(bad.check().is_err());
+    }
+
+    const KEY: &str = "sk-reflected-0123456789abcdef";
+
+    fn ask(url: String) -> Result<String, String> {
+        let h = MessagesHttp { url, ..way() };
+        let p = Prompt {
+            system: "s".into(),
+            user: "u".into(),
+            model: None,
+        };
+        answer(&h, KEY, &p, T)
+    }
+
+    /// An endpoint that reflects the x-api-key header: in the answer, in
+    /// an error message, and in a body that is no JSON. Nothing returned
+    /// carries the key.
+    #[test]
+    fn a_reflected_key_never_comes_back() {
+        let ok = json!({ "content": [{ "type": "text", "text": format!("your key is {KEY}.") }] });
+        let (url, h) = mock_server("200 OK", &ok.to_string());
+        let text = ask(url).unwrap();
+        h.join().unwrap();
+        assert!(
+            !text.contains(KEY) && text.contains("your key is"),
+            "{text}"
+        );
+
+        let msg = format!("invalid x-api-key {KEY} {}", "x".repeat(4000));
+        let err =
+            json!({ "type": "error", "error": { "type": "authentication_error", "message": msg } });
+        let (url, h) = mock_server("401 Unauthorized", &err.to_string());
+        let e = ask(url).unwrap_err();
+        h.join().unwrap();
+        assert!(
+            !e.contains(KEY) && e.contains("401") && e.contains("invalid x-api-key"),
+            "{e}"
+        );
+        assert!(
+            e.chars().count() <= MAX_ERROR,
+            "an error is a bounded summary: {}",
+            e.len()
+        );
+
+        let (url, h) = mock_server("500 Internal Server Error", &format!("{{oops {KEY}"));
+        let e = ask(url).unwrap_err();
+        h.join().unwrap();
+        assert!(!e.contains(KEY) && e.contains("500"), "{e}");
+    }
+
+    /// An answer over [`MAX_ANSWER`] is refused while it is read (never
+    /// read whole first), with a clear error that carries no key.
+    #[test]
+    fn an_oversized_answer_is_refused_while_read() {
+        let text = format!("{KEY} {}", "x".repeat(MAX_ANSWER));
+        let big = json!({ "content": [{ "type": "text", "text": text }] });
+        let (url, h) = mock_server("200 OK", &big.to_string());
+        let e = ask(url).unwrap_err();
+        // The stand-in may fail to write what was never read.
+        let _ = h.join();
+        assert!(e.contains("larger than 1 MiB") && !e.contains(KEY), "{e}");
     }
 }

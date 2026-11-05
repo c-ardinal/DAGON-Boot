@@ -52,7 +52,8 @@ pub fn topology(args: &[&str]) -> Result<(), String> {
     let a = parse_args(args)?;
     let home = crate::consent::home()?;
     crate::consent::require_linked(&home)?;
-    crate::agents::ready(&home)?;
+    let keys = crate::keystore::Keys::system();
+    crate::agents::ready(&home, &keys)?;
     let description = match &a.input {
         Some(p) => std::fs::read_to_string(p).map_err(|e| format!("cannot read {p}: {e}"))?,
         None => {
@@ -67,7 +68,7 @@ pub fn topology(args: &[&str]) -> Result<(), String> {
         return Err("the board description is empty".into());
     }
     let interactive = a.input.is_some();
-    let mut api = |p: &Prompt| crate::agents::call(&home, p, DRAFT_TIMEOUT);
+    let mut api = |p: &Prompt| crate::agents::call(&home, &keys, p, DRAFT_TIMEOUT);
     let mut ask = |qs: &[String]| {
         if interactive {
             prompt(qs)

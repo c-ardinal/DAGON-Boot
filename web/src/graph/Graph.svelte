@@ -1034,8 +1034,8 @@
   .hero {
     position: absolute;
     z-index: var(--z-chip);
-    left: 0.75rem;
-    bottom: 0.75rem;
+    left: var(--m-edge);
+    bottom: var(--m-edge);
     display: grid;
     gap: 2px;
     pointer-events: none;

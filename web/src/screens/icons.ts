@@ -45,6 +45,11 @@ export const ICONS = {
   'chevron-up': ['m18 15-6-6-6 6'],
   'chevron-right': ['m9 18 6-6-6-6'],
   check: ['M20 6 9 17l-5-5'],
+  search: ['m21 21-4.34-4.34', 'M19 11a8 8 0 1 1-16 0 8 8 0 0 1 16 0z'],
+  'grip-vertical': [
+    'M9 13a1 1 0 1 0 0-2 1 1 0 0 0 0 2z', 'M9 6a1 1 0 1 0 0-2 1 1 0 0 0 0 2z', 'M9 20a1 1 0 1 0 0-2 1 1 0 0 0 0 2z',
+    'M15 13a1 1 0 1 0 0-2 1 1 0 0 0 0 2z', 'M15 6a1 1 0 1 0 0-2 1 1 0 0 0 0 2z', 'M15 20a1 1 0 1 0 0-2 1 1 0 0 0 0 2z',
+  ],
   folder: ['M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z'],
   'arrow-right': ['M5 12h14', 'm12 5 7 7-7 7'],
 } as const satisfies Record<string, readonly string[]>;

@@ -1,6 +1,6 @@
 <script lang="ts">
   import { FLASH, NOTICE, WRITE, fill } from '../app/copy.ts';
-  import type { Job } from '../app/define/cli.svelte.ts';
+  import { jobReason, type Job } from '../app/define/cli.svelte.ts';
   import Modal from './Modal.svelte';
 
   interface Props {
@@ -47,7 +47,7 @@
   {#if !canWrite}<p>{FLASH.otherTools}</p>{/if}
   {#if failed}
     <h3>{NOTICE.reason}</h3>
-    <p class="mono">{job?.lines[job.lines.length - 1] ?? ''}</p>
+    <p class="mono">{jobReason(job)}</p>
   {/if}
   <h3>{NOTICE.after}</h3>
   <p>{WRITE.factory.after}</p>

@@ -839,7 +839,7 @@ export const DEFINE = {
   /** SC-D1 left column. */
   listHeading: 'ノードリスト',
   /** §5.2 SC-D1: choose by product or by MCU. */
-  byProduct: 'ボード',
+  byProduct: '製品',
   byMcu: 'マイコン',
   chooseBy: '選び方',
   listHelp: '選んで Enter で置けます。',

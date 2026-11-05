@@ -32,7 +32,7 @@
   import Problems from './screens/define/Problems.svelte';
   import Table from './screens/define/Table.svelte';
   import CliPanel from './screens/define/CliPanel.svelte';
-  import { Cli, type Layout } from './app/define/cli.svelte.ts';
+  import { Cli, jobReason, type Layout } from './app/define/cli.svelte.ts';
   import { CLI_LINK, CLI_STATE } from './app/copy.ts';
   import FilePanel from './screens/FilePanel.svelte';
   import Reconnect from './screens/Reconnect.svelte';
@@ -1414,7 +1414,7 @@
     {@const failed = [buildJob, signJob].find((j) => j?.state === 'failed')}
     <Modal title={BUILD.title} chip={{ text: BUILD.state.failed, kind: 'error' }} target={d.config.reach.map((id) => `nodes/${id}/`).join(' · ')} onclose={() => (buildFailureOpen = false)} onmore={() => ((drawerTab = 'jobs'), (buildFailureOpen = false))}>
       <h3 class="modal-h">{NOTICE.reason}</h3>
-      <p class="modal-mono">{failed?.lines[failed.lines.length - 1] ?? ''}</p>
+      <p class="modal-mono">{jobReason(failed)}</p>
       {#snippet actions()}
         {#if agent.linked}
           <button class="button-secondary" data-control="ask" onclick={(e) => askDagon(BUILD.askAgent, 'failure', e.currentTarget)}>{BUILD.askAgent}</button>
@@ -1598,25 +1598,25 @@
     outline: none;
   }
   /* Floating windows: over the graph, apart from its edges, never under the focal number. */
+  /* PartsWindow and DetailSheet: L1 surfaces with a 1 px frame, no shadow (0S-2 elevation). */
   .float {
     position: absolute;
     z-index: var(--z-chrome);
-    top: 0.75rem;
+    top: var(--s-4);
     overflow: auto;
-    border: 1px solid var(--c-hair);
-    border-radius: var(--r-m);
-    background: rgb(15 15 14 / 0.96);
-    box-shadow: 0 0.75rem 2rem rgb(0 0 0 / 0.5);
+    border: 1px solid var(--c-line);
+    border-radius: var(--r-l);
+    background: var(--c-layer-1);
   }
   .float.parts {
-    left: 0.75rem;
-    width: var(--w-left);
+    left: var(--s-4);
+    width: var(--w-parts);
     /* The focal number keeps the bottom-left: the window stops above it. */
     max-height: calc(100% - 9.5rem - 1.5rem);
   }
   .float.sheet {
-    right: 0.75rem;
-    width: var(--w-right);
+    right: var(--s-4);
+    width: var(--w-sheet);
     max-height: calc(100% - 1.5rem);
   }
   .log-none,

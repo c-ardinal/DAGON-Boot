@@ -1,6 +1,6 @@
 <script lang="ts">
   import { NOTICE, SKELETON } from '../app/copy.ts';
-  import type { Job } from '../app/define/cli.svelte.ts';
+  import { jobReason, type Job } from '../app/define/cli.svelte.ts';
   import Modal from './Modal.svelte';
 
   interface Props {
@@ -22,7 +22,7 @@
   const percent = $derived(Math.max(0, Math.min(100, job?.percent ?? 0)));
   const made = $derived(state === 'done' ? nodes.length : Math.floor((percent / 100) * nodes.length));
   /** The job's last line is its reason (serve writes why it stopped last). */
-  const reason = $derived(job?.lines[job.lines.length - 1] ?? '');
+  const reason = $derived(jobReason(job));
   const chip = $derived(
     state === 'done'
       ? ({ text: SKELETON.state.done, kind: 'ok' } as const)

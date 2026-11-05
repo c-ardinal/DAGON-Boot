@@ -5,7 +5,7 @@ export interface Kept {
   bytes: number;
 }
 
-/** The write sheet's version choices: a package giving every node one version is named by it, others by their id. */
+/** 書込's version picker: a package giving every node one version is named by it, others by their id. */
 export function keptChoices(list: Kept[]): { id: string; label: string }[] {
   return list.map((k) => {
     const one = [...new Set(Object.values(k.versions))];

@@ -53,6 +53,9 @@ export interface Progress {
 /** Stages in which a node's water rises with its progress (SC-O5); a finished or stopped node drains. */
 const FILLING: ReadonlySet<Progress['stage']> = new Set(['writing', 'lastResort', 'rebooting']);
 
+/** While a write or a recovery runs, the card checks stay as they are. */
+const UPDATE_LOCKED: ReadonlySet<L> = new Set(['L19', 'L20', 'L21', 'L22', 'L24']);
+
 /** How full each node being written is, 0–100 (the node's background on the canvas). */
 export function waterOf(progress: Record<string, Progress>): Record<string, number> {
   return Object.fromEntries(
@@ -71,6 +74,50 @@ export type Finish =
   | { kind: 'updated'; left: number }
   | { kind: 'rolledBack'; name: string; version: string }
   | { kind: 'recovered'; name: string; version: string };
+
+/**
+ * Where one node's write is, for its one %: when the transfer of the
+ * current image started (`t0`), how many of its bytes are sent, how long
+ * the transfer took once verified, when the node was rebooted onto it, and
+ * whether it confirmed. `floor` keeps the % from moving back when a
+ * second image (boot core, then app) starts.
+ */
+export interface WriteTrack {
+  t0: number | null;
+  xferPct: number;
+  xferMs: number | null;
+  rebootAt: number | null;
+  done: boolean;
+  floor: number;
+}
+
+/**
+ * One % over a node's whole write: the transfer by its bytes, then the
+ * trial (start-up and self-check until CONFIRM) by time against the MCU
+ * definition's `[watchdog] trial_ms`; the two parts weigh what each takes
+ * (the transfer's time projected from its byte rate until it is verified).
+ * Only the confirmation makes 100. Without a trial deadline only the bytes
+ * count.
+ */
+export function writePercent(k: WriteTrack, now: number, trialMs: number | null): number {
+  if (k.done) return 100;
+  let p: number;
+  if (k.xferMs === null) {
+    if (k.t0 === null || k.xferPct <= 0) p = 0;
+    else if (trialMs === null) p = k.xferPct;
+    else {
+      const elapsed = Math.max(0, now - k.t0);
+      p = (100 * elapsed) / ((elapsed * 100) / k.xferPct + trialMs);
+    }
+  } else if (trialMs === null) p = 99;
+  else {
+    const onTrial = k.rebootAt === null ? 0 : Math.min(trialMs, Math.max(0, now - k.rebootAt));
+    p = (100 * (k.xferMs + onTrial)) / (k.xferMs + trialMs);
+  }
+  return Math.max(k.floor, Math.min(99, p));
+}
+
+const NO_TRACK: WriteTrack = { t0: null, xferPct: 0, xferMs: null, rebootAt: null, done: false, floor: 0 };
 
 /** The chosen release and dagon-host's verdict on it. */
 export interface ReleaseFile {
@@ -117,6 +164,8 @@ export interface Deps {
   stage0?: (id: string) => Promise<Uint8Array | null>;
   /** Keeps the package about to be written in the project (POST /v1/kept); false when it was not kept. */
   keep?: (bytes: Uint8Array) => Promise<boolean>;
+  /** The node's trial deadline (its MCU definition's `[watchdog] trial_ms`), for its %; null without one. */
+  trialMs?: (id: string) => number | null;
   /** Opens the device the page had again, without the chooser (the CLI gave it back). Throws when it cannot. */
   again?: () => Promise<Transport>;
 }
@@ -193,6 +242,10 @@ export class Operate {
   returnRefused = $state<ReconnectNote | null>(null);
   /** The hub's HELLO when the user connected: what "the same 親機" means after its reboot. */
   private hubHello: HelloResp | null = null;
+  /** Nodes whose card check is off: the next write leaves them out. */
+  skip = $state(new Set<string>());
+  /** Each node's write so far, for its one % (see writePercent). */
+  track = $state<Record<string, WriteTrack>>({});
   /** The package being written could not be kept in the project (it is written all the same). */
   keepFailed = $state(false);
   /** What the last update, recovery or rollback left (L23). */
@@ -494,9 +547,9 @@ export class Operate {
     return p.length ? Math.floor(p.reduce((a, b) => a + b, 0) / p.length) : 0;
   }
 
-  /** The nodes an update runs on: those answering now (the hub alone when only it answers). */
+  /** The nodes an update runs on: those answering now and checked on their cards (the hub alone when only it answers). */
   private answering(): string[] {
-    return this.reach.filter((n) => this.live[n.id]?.responding === true).map((n) => n.id);
+    return this.reach.filter((n) => this.live[n.id]?.responding === true && !this.skip.has(n.id)).map((n) => n.id);
   }
 
   /**
@@ -536,7 +589,22 @@ export class Operate {
     this.go('pass');
   }
 
-  /** The write sheet's check of node `id` (L18): an unchecked node is not written. Targets keep update order. */
+  /** A node card's check: off leaves the node out of the next write (not while one runs). */
+  toggleSkip(id: string): void {
+    if (UPDATE_LOCKED.has(this.state)) return;
+    const next = new Set(this.skip);
+    if (next.has(id)) next.delete(id);
+    else next.add(id);
+    this.skip = next;
+  }
+
+  /** Node `id`'s one % for its write, at the clock's `now`. */
+  percentOf(id: string, now = this.now()): number {
+    const k = this.track[id];
+    return k ? writePercent(k, now, this.deps.trialMs?.(id) ?? null) : 0;
+  }
+
+  /** The write's check of node `id` once a file is chosen (L18): an unchecked node is not written. Targets keep update order. */
   choose(id: string, on: boolean): void {
     if (this.state !== 'L18' || !this.reach.some((n) => n.id === id)) return;
     const chosen = new Set(this.targets);
@@ -561,6 +629,7 @@ export class Operate {
     this.failed = null;
     this.sentVersion = {};
     this.progress = Object.fromEntries(this.targets.map((id) => [id, { stage: 'waiting', percent: 0 }]));
+    this.track = Object.fromEntries(this.targets.map((id) => [id, { ...NO_TRACK }]));
     // ponytail: topology node index = position in reach (true for the sample, which follows its YAML).
     const reach = this.reach;
     const nodes = this.targets.map((id) => reach.findIndex((n) => n.id === id));
@@ -581,6 +650,7 @@ export class Operate {
   private onEvent(e: UpdateEvent): void {
     const n = this.reach[e.node];
     if (!n) return;
+    this.trackEvent(n.id, e);
     // Only the transfer carries the release's version; FAILED / REJECTED carry the version the node still runs.
     if (e.phase === PHASE.transfer) this.sentVersion[n.id] = e.version;
     const was = this.progress[n.id] ?? { stage: 'waiting', percent: 0 };
@@ -593,6 +663,27 @@ export class Operate {
     } else if (e.phase === PHASE.confirm) {
       this.progress[n.id] = { stage: 'done', percent: 100 };
       this.updated.add(n.id);
+      // The card shows the version the node now runs.
+      const was = this.live[n.id];
+      if (was?.hello) this.live[n.id] = { ...was, hello: { ...was.hello, activeVersion: e.version, trial: false } };
+    }
+  }
+
+  /** Feeds node `id`'s write track (its one %) with one of dagon-host's events. */
+  private trackEvent(id: string, e: UpdateEvent): void {
+    const now = this.now();
+    const k = this.track[id] ?? { ...NO_TRACK };
+    if (e.phase === PHASE.transfer) {
+      // A new image (after a boot core's reboot) starts its own transfer.
+      const fresh = k.t0 === null || k.xferMs !== null;
+      const base = fresh ? { ...k, floor: this.percentOf(id, now), t0: now, xferMs: null, rebootAt: null } : k;
+      this.track[id] = { ...base, xferPct: e.percent };
+    } else if (e.phase === PHASE.verify) {
+      this.track[id] = { ...k, xferPct: 100, xferMs: Math.max(1, now - (k.t0 ?? now)) };
+    } else if (e.phase === PHASE.reboot) {
+      this.track[id] = { ...k, rebootAt: now };
+    } else if (e.phase === PHASE.confirm) {
+      this.track[id] = { ...k, done: true };
     }
   }
 
@@ -944,6 +1035,8 @@ export class Operate {
     this.reconnectNotes = [];
     this.finished = null;
     this.keepFailed = false;
+    this.skip = new Set();
+    this.track = {};
     this.updated.clear();
     this.sentVersion = {};
   }

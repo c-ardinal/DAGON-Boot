@@ -347,8 +347,9 @@ export class Cli {
     return this.start('sign', 'sign', { nodes }, nodes.join(' · '));
   }
 
-  release(version: string, name: string): Promise<Job | null> {
-    return this.start('release', 'release', { version, name }, name);
+  /** POST /v1/release: the signed images into a package; without a version each keeps its crate's, without a name serve names it by the newest. */
+  release(version?: string, name?: string): Promise<Job | null> {
+    return this.start('release', 'release', { ...(version ? { version } : {}), ...(name ? { name } : {}) }, name ?? '');
   }
 
   flash(node: string): Promise<Job | null> {

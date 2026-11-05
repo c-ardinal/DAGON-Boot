@@ -943,18 +943,71 @@ fn sign_nodes(
             );
             images.push((slot, img));
         }
-        signed.push((node, ver, images));
+        let cores = sign_cores(cfg, &reg, t, node, key, log, cancel)?;
+        signed.push((node, ver, images, cores));
     }
     stop_if(cancel)?;
     let mut files = Vec::new();
-    for (node, ver, images) in &signed {
-        files.extend(sign_swaps(node, ver, images)?);
+    for (node, ver, images, cores) in &signed {
+        files.extend(sign_swaps(node, ver, images, cores)?);
     }
     let base = cfg.base.clone();
     commit_files(&base, &files, &mut |from, to| {
         crate::genfs::rename(&base, from, to)
     })?;
     Ok(json!({ "images": out }))
+}
+
+/// Node `node`'s boot core, built from its boot crate (as `dagon deploy`
+/// does) and signed as the boot crate's Cargo.toml version, for every boot
+/// core slot its MCU declares; none without a boot crate. The node writes it
+/// only when that version differs from the boot core it runs.
+fn sign_cores(
+    cfg: &Config,
+    reg: &Registry,
+    t: &dagon_topology::Topology,
+    node: &str,
+    key: &ed25519_compact::KeyPair,
+    log: &mut dyn FnMut(&str),
+    cancel: &AtomicBool,
+) -> Result<Vec<(char, Vec<u8>)>, String> {
+    let dir = cfg.base.join(crate::extgen::BOOT_CRATES).join(node);
+    let Some(n) = t.node(node) else {
+        return Ok(Vec::new());
+    };
+    if !dir.join("Cargo.toml").is_file() {
+        return Ok(Vec::new());
+    }
+    let opts = SignOpts {
+        version: crate::srcver::crate_version(&dir)?,
+        release_seq: 1,
+        min_bootcore: Default::default(),
+        proto: 1,
+        bits: None,
+    };
+    let built = crate::flash::build_core_slots(cfg, reg, n, &to_hex(&*key.pk), log, cancel)?;
+    built
+        .into_iter()
+        .map(|(slot, elf)| {
+            stop_if(cancel)?;
+            let binding = if slot == 'b' {
+                slot_binding::B
+            } else {
+                slot_binding::A
+            };
+            image_for_node(
+                reg,
+                t,
+                node,
+                image_kind::BOOTCORE,
+                binding,
+                &elf,
+                Some(&opts),
+                key,
+            )
+            .map(|img| (slot, img))
+        })
+        .collect()
 }
 
 /// Held for a whole sign (stage and commit).
@@ -967,22 +1020,30 @@ type FileSwap = (crate::genfs::Rel, Option<Vec<u8>>);
 /// A node's new images and record, and its old images of slots no longer
 /// signed (to remove); the record last. Paths stay as written (never
 /// resolved): every file operation of the swap checks them for links.
-fn sign_swaps(node: &str, ver: &str, images: &[(char, Vec<u8>)]) -> Result<Vec<FileSwap>, String> {
+fn sign_swaps(
+    node: &str,
+    ver: &str,
+    images: &[(char, Vec<u8>)],
+    cores: &[(char, Vec<u8>)],
+) -> Result<Vec<FileSwap>, String> {
     let mut record = SignRecord {
         version: ver.to_string(),
         images: Vec::new(),
     };
     let mut files = Vec::new();
-    for slot in ['a', 'b'] {
-        let rel = crate::genfs::Rel::new(format!("{SIGN_DIR}/{node}-{slot}.img"))?;
-        let Some((_, img)) = images.iter().find(|(s, _)| *s == slot) else {
-            files.push((rel, None));
-            continue;
-        };
-        record
-            .images
-            .push((rel.file_name().to_string(), sha_hex(img)));
-        files.push((rel, Some(img.clone())));
+    // The app's images, then its boot core's (`bootcore-<node>-<slot>.img`).
+    for (prefix, set) in [("", images), ("bootcore-", cores)] {
+        for slot in ['a', 'b'] {
+            let rel = crate::genfs::Rel::new(format!("{SIGN_DIR}/{prefix}{node}-{slot}.img"))?;
+            let Some((_, img)) = set.iter().find(|(s, _)| *s == slot) else {
+                files.push((rel, None));
+                continue;
+            };
+            record
+                .images
+                .push((rel.file_name().to_string(), sha_hex(img)));
+            files.push((rel, Some(img.clone())));
+        }
     }
     let text = serde_json::to_string_pretty(&record).map_err(|e| e.to_string())?;
     files.push((
@@ -1085,13 +1146,35 @@ fn with_suffix(path: &Path, suffix: &str) -> PathBuf {
 /// Builds a release from every signed image, each of the version its node's
 /// crate gave it (`version`, if given, must be every image's).
 fn job_release(job: &mut Job, cfg: Config, v: Value) -> Result<Value, String> {
-    let name = v["name"].as_str().filter(|n| plain(n) && n.len() <= 16);
-    let name = name.ok_or("name must be up to 16 plain characters")?;
     let want = v["version"].as_str().map(version).transpose()?;
+    // Without a name the release is named by its newest version (v1.2.0).
+    let named;
+    let name = match v.get("name").and_then(Value::as_str) {
+        Some(n) => Some(n),
+        None => {
+            named = newest_name(&cfg, want)?;
+            Some(named.as_str())
+        }
+    };
+    let name = name.filter(|n| plain(n) && n.len() <= 16);
+    let name = name.ok_or("name must be up to 16 plain characters")?;
     let t = read_topology(&cfg, &inside(&cfg, &cfg.topology_path(None)?)?)?;
     let key = serve_key(&cfg)?;
     let cancel = job.cancel_flag();
     release_from(&cfg, &t, want, name, &key, &mut |l| job.log(l), &cancel)
+}
+
+/// `v<newest version>` of the signed images.
+fn newest_name(cfg: &Config, want: Option<dagon_format::Version>) -> Result<String, String> {
+    let newest = signed_images(cfg, want)?
+        .iter()
+        .filter_map(|img| {
+            let raw: &[u8; HEADER_SIZE] = img.get(..HEADER_SIZE)?.try_into().ok()?;
+            ImageHeader::parse(raw).ok().map(|h| h.version)
+        })
+        .max()
+        .unwrap_or_default();
+    Ok(format!("v{newest}"))
 }
 
 /// Images listed by the sign records only (each checked against its
@@ -1629,6 +1712,27 @@ mod tests {
     }
 
     #[test]
+    fn a_signed_boot_core_is_recorded_with_its_node_so_a_release_takes_it() {
+        let files = sign_swaps(
+            "seg",
+            "1.1.0",
+            &[('a', b"APP A".to_vec()), ('b', b"APP B".to_vec())],
+            &[('a', b"CORE A".to_vec())],
+        )
+        .unwrap();
+        let named = |n: &str| files.iter().find(|(r, _)| r.file_name() == n);
+        assert!(named("bootcore-seg-a.img").unwrap().1.is_some());
+        assert!(
+            named("bootcore-seg-b.img").unwrap().1.is_none(),
+            "a slot without one goes"
+        );
+        let (_, record) = files.last().unwrap();
+        let rec: SignRecord = serde_json::from_slice(record.as_ref().unwrap()).unwrap();
+        let listed: Vec<&str> = rec.images.iter().map(|(f, _)| f.as_str()).collect();
+        assert_eq!(listed, ["seg-a.img", "seg-b.img", "bootcore-seg-a.img"]);
+    }
+
+    #[test]
     fn signing_uses_only_the_recorded_build() {
         let (cfg, t) = built_area("recorded");
         let key = test_key();
@@ -1654,6 +1758,8 @@ mod tests {
         assert!(signed_images(&cfg, Some(dagon_format::Version::new(1, 0, 0))).is_err());
         // Without a version given, the images go as their crates versioned them.
         assert_eq!(signed_images(&cfg, None).unwrap().len(), 2);
+        // Without a name the release is named by the newest of them.
+        assert_eq!(newest_name(&cfg, None).unwrap(), "v1.1.0");
 
         // A signed image changed afterwards is refused.
         std::fs::write(sign_path(&cfg, "seg", 'b'), b"changed").unwrap();
@@ -1789,7 +1895,7 @@ mod tests {
         }
         let mut files = Vec::new();
         for (node, imgs) in &images {
-            files.extend(sign_swaps(node, "1.1.0", imgs).unwrap());
+            files.extend(sign_swaps(node, "1.1.0", imgs, &[]).unwrap());
         }
         for fail_at in [1usize, 4, 7, 9] {
             let mut n = 0;
@@ -2142,7 +2248,7 @@ mod tests {
         assert!(ok, "mklink /J");
         // Slot a signed, slot b no longer: without the guard this would
         // replace user/seg-a.img and seg.json and delete user/seg-b.img.
-        let files = sign_swaps("seg", "1.1.0", &[('a', b"NEW A".to_vec())]).unwrap();
+        let files = sign_swaps("seg", "1.1.0", &[('a', b"NEW A".to_vec())], &[]).unwrap();
         let e = commit_files(&base, &files, &mut |from, to| {
             crate::genfs::rename(&base, from, to)
         })

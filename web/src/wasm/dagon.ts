@@ -9,6 +9,7 @@ import init, {
   hello_request,
   load_definitions,
   mcu_connection,
+  mcu_trial_ms,
   release_versions,
   use_builtin_definitions,
   supported_boards as boards,
@@ -208,6 +209,11 @@ export function useDefinitions(json: string | null, failed = false): 'loaded' | 
 }
 
 /** How the user connects `mcu` for a write (its definition's [connection]); null for an unknown MCU. */
+/** How long a new image of `mcu` may take to start and pass its self-check (`[watchdog] trial_ms`); null without one. */
+export function trialMs(mcu: string): number | null {
+  return mcu_trial_ms(mcu) ?? null;
+}
+
 export function mcuConnection(mcu: string): { label: string; hint: string } | null {
   return (mcu_connection(mcu) as { label: string; hint: string } | null) ?? null;
 }

@@ -31,7 +31,7 @@
 </script>
 
 <script lang="ts">
-  import { CANVAS, LINK, NODE, SLOT, STATE } from '../app/copy.ts';
+  import { CANVAS, LINK, NODE, SLOT, STATE, WRITE } from '../app/copy.ts';
   import { lightsStill, nodeState, STATE_ICON, type NodeState } from '../app/nodeState.ts';
   import Icon from '../screens/Icon.svelte';
   import { KIND_LABEL, type LinkKind } from '../app/define/model.ts';
@@ -69,6 +69,12 @@
     controls?: Snippet<[number]>;
     /** The id of the node a dragged part would go under (highlighted). */
     dropOn?: string | null;
+    /** 書込: each writable node's card check (true: it is written next); none in 準備. */
+    checks?: Record<string, boolean>;
+    /** A card check pressed. */
+    oncheck?: (id: string) => void;
+    /** The card checks stay as they are (a write runs). */
+    checksLocked?: boolean;
   }
 
   let {
@@ -88,6 +94,9 @@
     onrefuse,
     controls,
     dropOn = null,
+    checks = {},
+    oncheck,
+    checksLocked = false,
   }: Props = $props();
 
   /**
@@ -264,21 +273,6 @@
   }
 
   /** Marks of the boot state: ✓ settled, ◐ waiting for the check, ↺ went back. */
-  const BOOT_MARK: Record<number, string> = { 1: '…', 2: '…', 3: '◐', 4: '✓', 5: '↺' };
-  /** The boot-state chip: the running slot's state from STATUS, else what HELLO says (on trial or not). */
-  function bootOf(n: Node): { text: string; trial: boolean } | null {
-    const l = connected ? live[n.id] : undefined;
-    if (!l?.responding) return null;
-    const st = l.status;
-    if (st && st.active < 2) {
-      const state = st.slots[st.active].state;
-      return { text: `${BOOT_MARK[state] ?? ''} ${SLOT.states[state] ?? ''} ${SLOT.rows[st.active]}`.trim(), trial: state === 3 };
-    }
-    if (!l.hello) return null;
-    // On trial the state chip (● 確認待ち) already says it.
-    return l.hello.trial ? null : { text: `✓ ${SLOT.states[4]}`, trial: false };
-  }
-
   /** Each node's state mark: from the page's chip, the water level and the watch. */
   const states = $derived(
     Object.fromEntries(
@@ -460,13 +454,14 @@
         {@const level = fill[n.id]}
         {@const linked = (config?.links ?? []).some((l) => l.to === n.id)}
         {@const slots = slotsOf(n)}
-        {@const boot = m !== null && m !== 'skeleton' && m.silent ? null : bootOf(n)}
+        {@const check = checks[n.id]}
         <button
           class="node st-{states[n.id]}"
           class:still
           class:uns={!!n.notYet}
           class:err={m !== null && m !== 'skeleton' && m.silent}
           class:drop={dropOn === n.id}
+          class:checkable={check !== undefined}
           style:left="{pos[n.id].x}px"
           style:top="{pos[n.id].y}px"
           style:width="{NODE_W}px"
@@ -499,18 +494,29 @@
             {/if}
             {#if m === 'skeleton'}
               <span class="chips"><span class="skeleton chip-sk"></span></span>
-            {:else if m || boot}
+            {:else if m}
               <span class="chips"
-                >{#if m?.chip}<span class="chip" class:silent={m.silent} class:uns={!!n.notYet && m.chip === NODE.notYet}>{m.chip}</span>{/if}{#if boot}<span
-                    class="chip boot"
-                    class:trial={boot.trial}>{boot.text}</span
-                  >{/if}</span
+                >{#if m.chip}<span class="chip" class:silent={m.silent} class:uns={!!n.notYet && m.chip === NODE.notYet}>{m.chip}</span>{/if}</span
               >
               {#if m?.note}<span class="note">{m.note}</span>{/if}
             {/if}
           </span>
           {#if level !== undefined}<span class="pct" aria-hidden="true">{Math.round(level)}%</span>{/if}
         </button>
+        {#if check !== undefined}
+          <!-- Beside the card's button, never inside it: the check is its own control. -->
+          <button
+            class="check"
+            role="checkbox"
+            aria-checked={check}
+            aria-label={WRITE.pick(`[${n.no}] ${n.name}`)}
+            aria-disabled={checksLocked}
+            data-avoid=""
+            style:left="{pos[n.id].x}px"
+            style:top="{pos[n.id].y}px"
+            onclick={() => !checksLocked && oncheck?.(n.id)}><Icon name={check ? 'square-check' : 'square'} size="var(--i-state)" /></button
+          >
+        {/if}
         {#if n.role !== 'hub' || linked}
           <span class="port in" class:linked aria-hidden="true" style:left="{pos[n.id].x + NODE_W / 2}px" style:top="{pos[n.id].y}px" class:ok={wire !== null && wire.from !== n.id && reasons[n.id] === null}></span>
         {/if}
@@ -795,6 +801,34 @@
     position: relative;
     z-index: 1;
   }
+  /* 書込: the card check sits at the card's top-left, in the header's padding. */
+  .check {
+    position: absolute;
+    z-index: 1;
+    display: grid;
+    place-items: center;
+    width: calc(var(--i-state) + 2 * var(--s-2));
+    height: calc(var(--i-state) + 2 * var(--s-2));
+    margin: var(--s-1) 0 0 var(--s-1);
+    padding: 0;
+    border: 0;
+    background: none;
+    color: var(--c-muted);
+    cursor: pointer;
+  }
+  .check[aria-checked='true'] {
+    color: var(--c-accent);
+  }
+  .check[aria-disabled='true'] {
+    color: var(--c-muted);
+    cursor: default;
+  }
+  .check:focus-visible {
+    outline: var(--st-w-focus) solid var(--c-paper);
+  }
+  .node.checkable .hd {
+    padding-left: calc(var(--i-state) + var(--s-2));
+  }
   .hd {
     display: flex;
     align-items: center;
@@ -868,9 +902,6 @@
     font: 700 var(--t-11) / 1 var(--f-ja);
     white-space: nowrap;
   }
-  .chip.boot.trial {
-    border-style: dashed;
-  }
   .slotline {
     display: flex;
     gap: 0.5rem;
@@ -884,8 +915,7 @@
     content: '▸';
     margin-right: 2px;
   }
-  .compact .slotline,
-  .compact .chip.boot {
+  .compact .slotline {
     display: none;
   }
   .chip.silent {

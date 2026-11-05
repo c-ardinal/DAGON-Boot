@@ -16,7 +16,8 @@ mod watch;
 
 pub use define::{board_template, release_topology, supported_mcus, topo_parse};
 pub use defs::{
-    coordinator_capable, coordinator_uart0, load_definitions, mcu_connection, rom_i2c_addrs,
+    coordinator_capable, coordinator_uart0, load_definitions, mcu_connection, mcu_trial_ms,
+    rom_i2c_addrs,
 };
 pub use frame::{frame_encode, FrameCutter};
 pub use host::{

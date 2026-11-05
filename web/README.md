@@ -10,7 +10,7 @@ other origin and offers no download-to-save (releases stay in the project's `out
 SC-S0 (新しく作る / 見本から新しく作る / 開く) until serve has a project open.
 
 構成 edits go to the project's YAML by themselves (PUT /v1/topology about 500 ms after the last
-edit; 保存 saves at once). Until a save goes through the band shows 「● 未保存」 and why; 運用 and
+edit; 保存 saves at once). Until a save goes through the band shows 「● 未保存」 and why; 書込 and
 親機へ送る wait for the saved 構成, and leaving the project (menu, 最初からやり直す, closing the
 tab) saves first and asks when it cannot. Known limit: the YAML is written out from the page's
 document, so comments in the file are not kept.
@@ -69,8 +69,8 @@ A simulated hub plugs in as one more `Transport` in `src/serial/devHub.ts`, unde
 | `src/app/copy.ts` | All screen and announcement text. |
 | `src/graph/` | The layered graph: own SVG (layers, wire bundles, ties, ports) + HTML (nodes, chips), roving focus with arrow keys. |
 | `src/app/start.svelte.ts` | SC-S0: making and opening projects through serve (GET /v1/project, GET /v1/fs, POST /v1/project/open, /new). |
-| `src/app/define/` | 定義: the document and its history, the check's problems, the 構成 differences of a release (L17), and the serve link (`cli.svelte.ts`: passphrase, API, events, saving the YAML). |
-| `src/screens/` | Header, menu and its restart dialog, SC-S0, bottom band, update order (left column), detail and update file (right column), hub reconnect dialog; `define/` holds 定義's columns. |
+| `src/app/define/` | 準備: the document and its history, the check's problems, the 構成 differences of a release (L17), and the serve link (`cli.svelte.ts`: passphrase, API, events, saving the YAML). |
+| `src/screens/` | Header, menu and its restart dialog, SC-S0, bottom band, update order (left column), detail (right column), hub reconnect dialog; `define/` holds 準備's columns. |
 | `src/styles/tokens.css` | Design tokens: colour, type, spacing, radius, z-index, motion. |
 
 `Transport` carries whole frames: the page owns choosing and opening the device, and the protocol

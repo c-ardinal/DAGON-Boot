@@ -51,6 +51,17 @@ pub fn mcu_connection(mcu: &str) -> JsValue {
     })
 }
 
+/// `mcu`'s trial watchdog period in ms (`[watchdog] trial_ms`): how long a
+/// new image may take to start and pass its self-check; none without one.
+#[wasm_bindgen]
+pub fn mcu_trial_ms(mcu: &str) -> Option<u32> {
+    with_registry(|reg| {
+        reg.mcu(mcu)
+            .and_then(|m| m.watchdog.as_ref())
+            .map(|w| w.trial_ms)
+    })
+}
+
 /// Whether `mcu` can be the coordinator (its definition has `[coordinator]`).
 #[wasm_bindgen]
 pub fn coordinator_capable(mcu: &str) -> bool {

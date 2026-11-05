@@ -55,7 +55,7 @@ export const BUTTON = {
   push: '親機へ送る',
   pushAgain: '構成を送り直す',
   scanAgain: 'ノードを探し直す',
-  defineFix: '定義で構成を直す',
+  defineFix: '準備で構成を直す',
   chooseFile: 'パッケージファイルを選ぶ',
   useLatest: '最新のリリースを使う',
   otherFile: '別のファイルを選ぶ',
@@ -64,7 +64,7 @@ export const BUTTON = {
   recoverAgain: '止まったノードを復旧する',
   copyLog: '記録をコピー',
   retrySample: '見本を作り直す',
-  placeInDefine: '見本を定義に置く',
+  placeInDefine: '見本を準備に置く',
   showJobs: '作業を見る',
 } as const satisfies Record<Exclude<Action, 'recover' | 'updateResponding'>, string>;
 
@@ -96,7 +96,7 @@ export const BAND = {
   M13: { sentence: 'パッケージファイルをこの画面に置くか、選んでください。' },
   /** M14 / M15 / M28: label-value pair, no sentence. */
   M14: { pair: ['目安', '約 1 分'] },
-  M18: { sentence: '何も書いていないので、定義でリリースをもう一度作るか、正しいファイルを選んでください。' },
+  M18: { sentence: '何も書いていないので、準備でもう一度ビルドするか、正しいファイルを選んでください。' },
   M18b: { sentence: '何も書いていないので、別のファイルを選んでください。' },
   M19: { sentence: '何も書いていないので、別のファイルを選んでください。' },
   M20: { sentence: '何も書いていないので、この構成向けのファイルを選んでください。' },
@@ -105,7 +105,7 @@ export const BAND = {
   M34: { sentence: 'USB ケーブルを挿し直してから、もう一度つないでください。' },
   M35: { chip: '× 作成失敗', sentence: 'そのフォルダに書き込めるか確かめてから、もう一度選んでください。' },
   /** M58: "最新のリリースを使う" found no release in the project. */
-  M58: { chip: '× リリースなし', sentence: '定義でリリースを作るか、パッケージファイルを選んでください。' },
+  M58: { chip: '× ビルドなし', sentence: '準備でビルドするか、パッケージファイルを選んでください。' },
   /** M57: part of the page (dagon-wasm) did not load. */
   M57: { chip: '× 読み込み失敗', sentence: 'このページの一部を読み込めませんでした。ページを開き直してください。' },
   /** M26: L21 (the dialog's sentence, and the band's once the dialog is closed). */
@@ -144,18 +144,6 @@ export const HUB_TOGGLE = {
     L24: '復旧が終わるまで、切断できません。',
     L28: 'CLI の作業が終わるまで、切断できません。',
   } as Partial<Record<string, string>>,
-} as const;
-
-/** 案: before an update, what each target node gets and about how long it takes (L18, SC-O4). */
-export const PLAN = {
-  up: (from: string, to: string) => `↑ ${from} → ${to}`,
-  upName: (from: string, to: string) => `新しいバージョンあり、${from} から ${to}`,
-  same: (v: string) => `＝ 同じ ${v}`,
-  sameName: (v: string) => `同じ、${v}`,
-  unknown: '不明',
-  estimate: (min: number) => `目安 約 ${min} 分`,
-  estimateLabel: '目安',
-  minutes: (min: number) => `約 ${min} 分`,
 } as const;
 
 /** S28 and SC-O5: elapsed and remaining time under the dot number while updating or recovering. */
@@ -671,19 +659,9 @@ export const FILE = {
   /** File input label (the drop place). */
   choose: 'パッケージファイルを選ぶ',
   size: (bytes: number) => `${Math.max(1, Math.round(bytes / 1024))} KB`,
-  checking: '確認中…',
-  source: '配布元',
-  sourceOk: '✓ 確認済み',
   sourceBad: '× 配布元不明',
-  topology: '構成',
-  topologyOk: '✓ 一致',
   topologyBad: '× 構成不一致',
   notRelease: '× 形式違い',
-  targets: '対象',
-  /** The sheet's per-node table (columns as the design names them). */
-  nodes: { node: 'ノード', now: '今', next: '新', progress: '進み' },
-  /** The version picker's accessible name. */
-  version: 'バージョン',
 } as const;
 
 /** SC-O7: the hub reconnect dialog (M26), and M27 beside the hub while the page reconnects by itself (L20). */
@@ -734,7 +712,7 @@ export const ANNOUNCE = {
   A01: (product: string, hub: boolean) => `${product} 配置、${hub ? '親機' : '子機'}`,
   A03: (name: string) => `${name} 削除、Ctrl+Z で戻せる`,
   A04: (errors: number, warnings: number) => `問題 ${errors}、注意 ${warnings}`,
-  A22: (define: boolean) => (define ? '定義モード' : '運用モード'),
+  A22: (define: boolean) => (define ? '準備モード' : '書込モード'),
   A09: (name: string, size: string) => `${name} ${size}、確認中`,
   A10ok: (n: number, skipped = 0) => `配布元 確認済み、構成 一致、対象 ${n}${skipped ? `、書き込めない ${skipped} つは飛ばす` : ''}`,
   A10source: '配布元 確認できない',
@@ -839,15 +817,15 @@ export const RULE_FIX: Record<string, (w: FixWords) => string> = {
   'B-02': (w) => `${w.to}は容量が ${w.size ?? ''} 以上のボードにしてください。`,
 };
 
-/** Header: the two modes (運用｜定義). */
+/** Header: the two modes (準備｜書込). */
 export const MODE = {
-  operate: '運用',
-  define: '定義',
+  operate: '書込',
+  define: '準備',
   label: 'モード',
-  /** 案: 運用 or 親機へ送る pressed while the 構成 is not in the project's YAML. */
-  lockedUnsaved: { sentence: '構成を保存すると、運用と親機へ送るを使えます。' },
-  /** M69: 運用 pressed with no 構成 or one with problems. */
-  lockedProblems: { sentence: '構成を作り、問題を直すと、運用を使えます。' },
+  /** 案: 書込 or 親機へ送る pressed while the 構成 is not in the project's YAML. */
+  lockedUnsaved: { sentence: '構成を保存すると、書込と親機へ送るを使えます。' },
+  /** M69: 書込 pressed with no 構成 or one with problems. */
+  lockedProblems: { sentence: '構成を作り、問題を直すと、書込を使えます。' },
 } as const;
 
 /** Define mode (SC-D1–D3, SC-T, SC-M, §11.1). */
@@ -899,14 +877,14 @@ export const DEFINE = {
   problemName: (short: string, rule: string, sentence: string) => `${short}、規則 ${rule}、${sentence}`,
   /** Bottom band (C02, C05, C06, C09). */
   emptySentence: '親機を USB でパソコンにつないでから、『つないで、自動で見つける』を押してください。',
-  /** E5: 運用 from 定義 (§6.2). */
-  toOperate: '運用へ',
+  /** E5: 書込 from 準備 (§6.2). */
+  toOperate: '書込へ',
   /** Writes the 構成 back to the project's YAML through dagon serve. */
   save: '保存',
   fixSentence: '直すと、親機へ送れます。',
   /** C19: E6, nodes updating skips for now (V-23); the 構成 is valid as it is. */
   notYetSentence: (k: number) => `書き込めないノードが ${k} つあります。構成はこのままで使え、書き込みではそのノードを飛ばします。`,
-  /** §7.6: the 構成 of the release file chosen in 運用 replaces this one (undoable, saved to the YAML). */
+  /** §7.6: the 構成 of the release file chosen in 書込 replaces this one (undoable, saved to the YAML). */
   importFileTopology: 'ファイルの構成を取り込む',
   sendSentence: '親機へ送ると、書き込めるようになります。',
   send: '親機へ送る',
@@ -1005,7 +983,7 @@ export const CLI_STATE = {
 /** SC-D4 CLI 連携 (S09, C11, §7.13). */
 export const CLI_LINK = {
   steps: ['ターミナルを開く', 'dagon serve を実行する', '表示されたアドレスをこのブラウザで開く'],
-  withoutCli: ['CLI なしで使える', 'グラフの編集・運用'] as const,
+  withoutCli: ['CLI なしで使える', 'グラフの編集・書込'] as const,
   deniedChip: '× 合言葉違い',
   deniedSentence: 'ターミナルに表示されたアドレスを、そのまま開き直してください。',
   stoppedSentence: 'ターミナルで dagon serve を実行し直してください。',
@@ -1042,7 +1020,7 @@ export const RELEASE_STEPS = {
   build: 'ビルド',
   sign: '署名',
   makeRelease: 'リリースを作る',
-  useInOperate: 'このリリースを運用で使う',
+  useInOperate: 'このリリースを書込で使う',
   keyLabel: '鍵',
   sizeLabel: '大きさ',
   version: 'バージョン',
@@ -1203,7 +1181,7 @@ export const SKELETON = {
   where: '作った場所',
   next: {
     '1': 'エディタで、各ノードの src/app.rs にアプリのコードを書く（main.rs と wiring.rs は DAGON が作るので、触らなくてよい）',
-    '2': '運用 で「ビルドする」、続けて「書き込む」',
+    '2': '準備で「ビルドする」、続けて書込で「書き込む」',
     heading: '次にすること',
   },
   copyPath: '場所をコピー',
@@ -1253,6 +1231,16 @@ export const WRITE = {
     rolledBack: '▲ 戻した',
   },
   retry: 'もう一度書き込む',
+  /** The header's version picker: its accessible name, and the latest build when its nodes' versions differ. */
+  version: 'バージョン',
+  latest: '最新のビルド',
+  /** A node card's check: its accessible name. */
+  pick: (name: string) => `${name}へ書き込む`,
+  /** On a card while it is written: the version it gets. */
+  to: (v: string) => `→ ${v}`,
+  /** On a card after the write: it went back, or it could not be written. */
+  previous: '↺ 前のバージョンに戻った',
+  failed: '× 書き込めなかった',
   /** The written package could not be kept in the project (a toast; writing went on). */
   keepFailed: { label: '× 保存できない', detail: '書き込んだパッケージをプロジェクトの out/deploy に保存できませんでした。' },
   rolled: {

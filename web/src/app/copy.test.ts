@@ -100,8 +100,8 @@ describe('copy', () => {
 
   test('chips are a symbol and a short word, never a sentence', () => {
     const { responding, silent, trial, writing, waiting, done, unwritten, rebooting, previous } = copy.NODE;
-    const { sourceOk, sourceBad, topologyOk, topologyBad, notRelease } = copy.FILE;
-    const chips = [responding, silent, trial, writing, waiting, done, unwritten, rebooting, previous, ...Object.values(copy.NODE.refused), copy.NODE.refusedOther, copy.NODE.lastResort, copy.NODE.cannotFix, sourceOk, sourceBad, topologyOk, topologyBad, notRelease, ...Object.values(copy.HUB)];
+    const { sourceBad, topologyBad, notRelease } = copy.FILE;
+    const chips = [responding, silent, trial, writing, waiting, done, unwritten, rebooting, previous, ...Object.values(copy.NODE.refused), copy.NODE.refusedOther, copy.NODE.lastResort, copy.NODE.cannotFix, sourceBad, topologyBad, notRelease, copy.WRITE.previous, copy.WRITE.failed, copy.BUILD.state.running, ...Object.values(copy.HUB)];
     for (const c of chips) {
       expect(c, c).toMatch(/^(?:[●○×…↑↺✓▲◎]|▼▼) \S/);
       expect(c, c).not.toMatch(/ます|ました|。/);
@@ -126,6 +126,13 @@ describe('copy', () => {
     for (const b of Object.values(copy.BAND)) {
       if ('chip' in b && b.chip.startsWith('×')) expect('sentence' in b && b.sentence, b.chip).toBeTruthy();
     }
+  });
+});
+
+describe('the two modes', () => {
+  test('are 準備 and 書込; 運用 and 定義 name no mode on the screen', () => {
+    expect([copy.MODE.define, copy.MODE.operate]).toEqual(['準備', '書込']);
+    expect(shownExcept().filter((s) => s.includes('運用'))).toEqual([]);
   });
 });
 

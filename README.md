@@ -258,8 +258,11 @@ ESP32-S3 node is built once (its image runs from either OTA slot); deploy
 turns the build into an ESP image (`espflash save-image`) and signs that,
 and the hub relays it like any other node's. The single steps are
 `dagon build`, `dagon image sign`, `dagon release build` and `dagon apply`
-(`dagon --help`). In DAGON Console the same is ビルド → 署名 → リリース →
-渡す, then the update in 運用 mode, over Web Serial.
+(`dagon --help`). In DAGON Console, 「ビルドする」 in 準備 builds every node,
+signs and makes the package; in 書込 you check the nodes on their cards,
+pick the version in the header (the latest build, or a kept one to go
+back) and 「書き込む」 writes it over Web Serial. Each card shows its
+current → new version and one % for the whole write, then the result.
 
 Every package written to nodes (by the Console, `dagon apply` or
 `dagon deploy`) is kept in the project's `out/deploy/` folder as

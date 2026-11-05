@@ -9,6 +9,7 @@ sidebar:
 ページと元のソースが食い違うと、リポジトリの検査が失敗します。
 ページは英語です。
 
+- [Command line](/ja/reference/cli/): `dagon` のすべてのコマンド（clap の定義から）
 - [Serve HTTP API](/ja/reference/serve-api/): `dagon serve` のすべてのルート
 - [イベント](/ja/reference/events/)と[ポート](/ja/reference/ports/): 拡張が使うすべてのイベントとポート
 - [エージェント定義の形式](/ja/reference/agent-definition/): DAGON が読むエージェントのファイル

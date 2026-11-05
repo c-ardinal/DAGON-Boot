@@ -339,20 +339,11 @@ says which number it reads.
 
 ## CLI
 
-- `dagon ai link [--agent <id>] [--way <id>]`: shows the consent text (agent
-  and way, where the login or key stays, sends, never sends, how to unlink) and
-  records consent on `y`. Default: the first agent's first way.
-- `dagon ai unlink`: removes the consent; logins are removed by the user on
-  the agent's side, keys with `dagon ai key delete`.
-- `dagon ai key set [--agent <id>] [--way <id>]`: reads the way's API key from
-  the terminal without echo and registers it in the OS credential store
-  (default: the first agent's first way that takes a key).
-- `dagon ai key status`: 登録済み / 未登録 for every way that takes a key.
-- `dagon ai key delete [--agent <id>] [--way <id>]`: removes the key.
-- `dagon ai topology` refuses until linked.
-- `dagon ai ask <question>`: the same question to DAGON about ./dagon.toml's
-  topology (no selection, history or job outcomes); prints the answer and, for
-  a proposal, its diff. The file is never changed. Refuses until linked.
+The `dagon ai` commands (`link`, `unlink`, `key`, `ask`, `topology`) and their
+options are in [Command line](/reference/cli/#dagon-ai). Linking shows the
+consent text (agent and way, where the login or key stays, sends, never
+sends, how to unlink) and records consent on `y`; every AI command refuses
+until DAGON is linked, and `dagon ai ask` never changes the topology file.
 
 ## Checking a command way against the installed program
 

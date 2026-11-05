@@ -4,10 +4,14 @@
     python site/scripts/gen.py --check   # exit 1 when a page differs from its source
 
 Each page says which source it comes from; nobody edits a generated page.
-The sources are read as text (Rust and TOML), so this needs only Python 3.11+.
+The sources are read as text (Rust and TOML) with Python 3.11+; the command
+line page runs `dagon help-markdown` (DAGON_BIN, else `cargo run`).
 """
+import functools
+import os
 import pathlib
 import re
+import subprocess
 import sys
 import tomllib
 
@@ -296,6 +300,31 @@ files is in `targets/README.md`.
                 ["targets/mcu/*/dagon-mcu.toml", "targets/boards/*/dagon-board.toml"], body)
 
 
+# ---------------------------------------------------------------- command line
+
+@functools.cache
+def cli_markdown():
+    """`dagon help-markdown`: every command, from the clap definitions (DAGON_BIN, else built with cargo)."""
+    cmd = [os.environ["DAGON_BIN"]] if os.environ.get("DAGON_BIN") else [
+        "cargo", "run", "-q", "--locked", "-p", "dagon-cli", "--bin", "dagon", "--"]
+    out = subprocess.run([*cmd, "help-markdown"], cwd=ROOT, capture_output=True, text=True, encoding="utf-8")
+    if out.returncode != 0:
+        sys.exit(f"dagon help-markdown failed:\n{out.stderr}")
+    return out.stdout.replace("\r\n", "\n")
+
+
+def cli():
+    body = f"""
+Every `dagon` command, its arguments and options, as `dagon <command> --help`
+prints them. Most commands take their defaults from `./dagon.toml` (or
+`--config <file>`).
+
+{cli_markdown()}
+"""
+    return page("Command line (dagon)", "Every dagon command, from its clap definitions.",
+                ["crates/dagon-cli/src/cli.rs"], body)
+
+
 # ---------------------------------------------------------------- contracts and components
 
 def contracts():
@@ -403,6 +432,7 @@ PAGES = {
     "boards.md": boards,
     "tools.md": tools,
     "contracts.md": contracts,
+    "cli.md": cli,
     "rust-api.md": rust_api,
 }
 

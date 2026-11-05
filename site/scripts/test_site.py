@@ -61,6 +61,13 @@ class Generated(unittest.TestCase):
             for field, *_ in fields:
                 self.assertIn(f"| `{field}` |", page)
 
+    def test_every_command_has_its_section(self):
+        text = gen.cli_markdown()
+        top = re.search(r"Commands:\n(.*?)\n\n", text, re.S).group(1)
+        for name in re.findall(r"^  (\w[\w-]*) ", top, re.M):
+            if name != "help":
+                self.assertIn(f"## dagon {name}\n", text, name)
+
     def test_every_workspace_crate_is_listed(self):
         page = gen.rust_api()
         for manifest in ROOT.glob("crates/*/Cargo.toml"):

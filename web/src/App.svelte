@@ -40,15 +40,16 @@
   import ZoomPill from './screens/ZoomPill.svelte';
   import SkeletonModal from './screens/SkeletonModal.svelte';
   import Modal from './screens/Modal.svelte';
+  import FactoryModal from './screens/FactoryModal.svelte';
   import Toast, { type Notice } from './screens/Toast.svelte';
-  import { CONN, NOTICE, fill as fillIn } from './app/copy.ts';
+  import { CONN, FLASH, NOTICE, fill as fillIn } from './app/copy.ts';
   import OrderList from './screens/OrderList.svelte';
   import { devHub } from './serial/devHub.ts';
   import { serveSim, type SimStand } from './serial/serveSim.ts';
   import { MockTransport } from './serial/mock.ts';
   import { WebSerialTransport, type Transport } from './serial/transport.ts';
   import Unsupported from './Unsupported.svelte';
-  import { dagonReady, require_release_key, set_release_key, useDefinitions, versionText } from './wasm/dagon.ts';
+  import { dagonReady, mcuConnection, require_release_key, set_release_key, useDefinitions, versionText } from './wasm/dagon.ts';
 
   const params = new URLSearchParams(location.search);
   // The stand-in hubs are for development builds only.
@@ -1044,9 +1045,29 @@
   const writeOff = $derived(op.state === 'L03' || (op.state !== 'L07' && (writeAction === null || !RUNS.has(writeAction))));
   function write() {
     if (writeOff || sheetHolds) return;
-    if (writeAction === null) return goStep('flash');
+    if (writeAction === null) return void (factory = { id: null });
     act(writeAction);
   }
+
+  /** Writing directly over USB to the 親機 whose DAGON answered nothing (the hub first: it reaches the rest). */
+  let factory = $state<{ id: number | null } | null>(null);
+  const factoryNode = $derived(hubNode ?? op.config?.nodes.find((n) => n.role === 'hub') ?? null);
+  const factoryMcu = $derived(d.doc.topo.nodes.find((n) => n.id === factoryNode?.id)?.mcu ?? '');
+  const factoryJob = $derived(factory?.id == null ? null : (cli.jobs.find((j) => j.id === factory?.id) ?? null));
+  async function factoryWrite() {
+    if (!factoryNode || stopped('flash')) return;
+    const j = await cli.flash(factoryNode.id);
+    factory = { id: j?.id ?? null };
+  }
+  // Pressing 書き込む in the modal is the consent serve's write asks for.
+  $effect(() => {
+    const j = factoryJob;
+    if (j?.question) untrack(() => void cli.answer(j, FLASH.yes));
+  });
+  $effect(() => {
+    if (factoryJob?.state === 'succeeded') untrack(() => (notice = { word: WRITE.state.done }));
+    if (factoryJob?.state === 'cancelled') untrack(() => (factory = null));
+  });
 
   function act(a: Action) {
     const c = CONTROL_OF[a];
@@ -1375,6 +1396,18 @@
       onsave={() => void autosave.saveAgain()}
       ondiscard={() => autosave.discard()}
       onstay={() => autosave.stay()}
+    />
+  {/if}
+  {#if factory && factoryNode}
+    <FactoryModal
+      node={{ label: `[${factoryNode.no}] ${factoryNode.name}`, target: `[${factoryNode.no}] ${factoryNode.name}（${NODE.roleHub}）· ${factoryNode.product}` }}
+      how={mcuConnection(factoryMcu)}
+      canWrite={cli.canFlash(factoryMcu)}
+      job={factoryJob}
+      onwrite={() => void factoryWrite()}
+      oncancel={() => (factoryJob ? void cli.cancel(factoryJob) : (factory = null))}
+      onclose={() => (factory = null)}
+      onmore={() => ((drawerTab = 'jobs'), (factory = null))}
     />
   {/if}
   {#if buildFailureOpen}

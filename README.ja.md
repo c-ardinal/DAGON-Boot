@@ -11,7 +11,7 @@
 
 **動くハードウェアを簡単に作り、作ったあとも育て続ける。**
 
-DAGON Boot は、いくつかのマイコンを組み合わせて何かを作り、机や壁や腕に置いたあとも良くしていきたい開発者（はじめての方から経験者まで）のためのものです。ボード（またはそのマイコン）を選び、つなぎ方を描き、アプリを Rust で書くだけで、残りは DAGON が受け持ちます。
+DAGON Boot は、いくつかのマイコンを組み合わせて何かを作り、棚や壁や腕に置いたあとも良くしていきたい開発者（はじめての方から経験者まで）のためのものです。ボード（またはそのマイコン）を選び、つなぎ方を描き、アプリを Rust で書くだけで、残りは DAGON が受け持ちます。
 
 - **ビルドできるプロジェクト。** `dagon new` と `dagon gen` が、ノードごとに起動・配線・自分のコードを書く空の `app.rs` を持つ Rust の crate を作ります。フラッシュの配置、イメージヘッダ、リンカの番地、ブートローダは DAGON が決めます。
 - **全体を安全に更新。** PC の USB につないだ親機が、各ノードへ新しいバージョンを送ります。イメージはすべて署名付きです。ノードは新しいバージョンを試行起動し、確定されなければ自分で前のバージョンに戻ります。応答しなくなったノードも親機経由で書き直せます。
@@ -203,7 +203,7 @@ I2C の子機では、リンクにノード側のピン（`node_pins`）を書�
 ## ハードウェアなしで試す
 
 ```sh
-dagon demo                         # 模擬の机で DAGON Console を開く
+dagon demo                         # 模擬のノードで DAGON Console を開く
 dagon demo --sim-fail watch        # 同じで、watch の更新が失敗して元に戻る
 dagon demo --sim-speed 4           # 4 倍の速さ（録画用）
 ```
@@ -249,7 +249,7 @@ dagon demo --uplink uart          # または usb-cdc（既定）、wifi-tcp
 - PC 側: `dagon-host`（状態、自動で見つける、構成の送信、更新、前のバージョンに戻す、確定、復旧）、`dagon-romlink`（STM32 の I2C ROM ブートローダの手順）、`dagon` CLI。これらは `dagon-sim`（F401 子機付きの模擬親機、電断点付きのフラッシュ、損失のあるリンク、ROM ブートローダの模擬）を相手にテストしています。
 - プロジェクト: `dagon new`、`dagon gen`、`dagon build` が、MCU ごと（`targets/mcu/*`）とボードごと（`targets/boards/*`）の支援パッケージの上にノードの crate を作り、ビルドします。
 - `dagon conform`: `dagon-conform` の 12 件の適合試験。模擬の F401 に対し、親機経由でも直結でも 12 件すべて合格します。
-- 構成 YAML: 22 件の検証規則と対応ボードの表（`dagon-topology`）。`topology/desk-demo.yaml` はこれを通ります。
+- 構成 YAML: 22 件の検証規則と対応ボードの表（`dagon-topology`）。`topology/sample.yaml` はこれを通ります。
 - DAGON Console（`web/`。`dagon serve` が配る。いまできることは `web/README.md` を参照）。
 - ファームウェア: RP2040 親機（`targets/rp2040-hub`）、F401 のデモ子機（`samples/f401-app`）、ESP32-S3 子機（`targets/boards/m5stopwatch`、`samples/esp32s3-app`）。親機のファームウェアは親機の実機に書き込み済みで起動します。それ以外の実機での確認はまだ進行中です（「制限事項」を参照）。
 

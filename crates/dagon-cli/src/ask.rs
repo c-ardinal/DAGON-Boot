@@ -536,7 +536,7 @@ mod tests {
     fn the_context_hides_comments_and_the_projects_words() {
         let secret = "sk-ant-FAKE-4242";
         let yaml = YAML
-            .replace("name: sim-pair", "name: \"C:/Users/me/desk\"")
+            .replace("name: sim-pair", "name: \"C:/Users/me/project\"")
             .replace("dagon: 1", &format!("# token {secret}\ndagon: 1"))
             .replace("tag: seg-f401-7seg", "tag: \"see C:/Users/me/notes\"");
         let q = question(
@@ -649,7 +649,7 @@ mod tests {
     #[test]
     fn a_topology_with_hidden_values_gets_no_file_proposal_and_no_repair_call() {
         let q = question(json!({ "question": "変更を提案", "kind": "propose" }));
-        let yaml = YAML.replace("name: sim-pair", "name: \"C:/Users/me/desk\"");
+        let yaml = YAML.replace("name: sim-pair", "name: \"C:/Users/me/project\"");
         let better = YAML.replace("max_attempts: 3", "max_attempts: 2");
         let (r, sent) = run(&q, Some(&yaml), vec![reply("案です。", Some(&better))]);
         let r = r.unwrap();

@@ -83,7 +83,7 @@ Usage:
                                      (its other slot), then confirm it there
   dagon new <dir> [--from <yaml>] [--keys <dir>] [--dagon-path <clone>]
         [--dagon-git <url>] [--dagon-tag <tag>]
-                                     a project folder: dagon.toml, topology.yaml (the desk
+                                     a project folder: dagon.toml, topology.yaml (the
                                      sample unless --from), and a signing key pair in
                                      --keys (default ~/.dagon/keys/<name>) if none is there.
                                      DAGON comes from this CLI's release (git + tag
@@ -123,7 +123,7 @@ Usage:
                                      pubkey in dagon.toml, or the signing key's public half)
   dagon sim run                      the four simulator scenarios (no hardware)
   dagon demo [--sim-speed <x>] [--sim-fail seg|watch] [--port <n>] [--no-open]
-                                     DAGON Console against a SIMULATED desk (親機 + 2 子機)
+                                     DAGON Console against a SIMULATED hub (親機 + 2 子機)
                                      with a demo key made for it: try updates without
                                      boards; --sim-fail makes that 子機's update fall back
   dagon ai link [--agent <id>] [--way <id>]

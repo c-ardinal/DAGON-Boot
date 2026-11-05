@@ -364,9 +364,9 @@ fn write(path: &Path, text: &str) {
     std::fs::write(path, text).unwrap();
 }
 
-/// The desk demo with its F401 node replaced by the fake MCU and board.
-fn fake_desk(addr: &str) -> crate::Topology {
-    let yaml = include_str!("../../../../topology/desk-demo.yaml")
+/// The sample with its F401 node replaced by the fake MCU and board.
+fn fake_sample(addr: &str) -> crate::Topology {
+    let yaml = include_str!("../../../../topology/sample.yaml")
         .replace("mcu: stm32f401re", "mcu: fake-m0")
         .replace("board: nucleo-f401re", "board: fake-board")
         .replace("flash_map: f401-default", "flash_map: fake-1m")
@@ -401,7 +401,7 @@ fn rules(r: &crate::Report) -> Vec<&'static str> {
 #[test]
 fn checks_and_compile_follow_a_project_registry() {
     let reg = fake_registry("check-with", 400_000);
-    let t = fake_desk("0x42");
+    let t = fake_sample("0x42");
     assert_eq!(rules(&crate::check_with(&reg, &t)), Vec::<&str>::new());
     let bin = crate::compile_with(&reg, &t).unwrap();
     assert!(!bin.is_empty());
@@ -410,11 +410,11 @@ fn checks_and_compile_follow_a_project_registry() {
     assert!(crate::compile(&t).is_err());
     // Its ROM loader's address is reserved on the bus (from the definition).
     assert_eq!(
-        rules(&crate::check_with(&reg, &fake_desk("0x3A"))),
+        rules(&crate::check_with(&reg, &fake_sample("0x3A"))),
         ["V-18"]
     );
     assert_eq!(
-        rules(&crate::check_with(&reg, &fake_desk("0x39"))),
+        rules(&crate::check_with(&reg, &fake_sample("0x39"))),
         Vec::<&str>::new()
     );
     // Its ROM loader caps the bus speed.
@@ -428,7 +428,7 @@ fn checks_and_compile_follow_a_project_registry() {
             .collect()
     };
     assert_eq!(
-        msgs(&reg, &fake_desk("0x3A")),
+        msgs(&reg, &fake_sample("0x3A")),
         ["0x3a is reserved for the Fake ROM loader on this bus"]
     );
     assert_eq!(
@@ -436,7 +436,7 @@ fn checks_and_compile_follow_a_project_registry() {
         ["speed_hz must be one of [100000, 400000] (Fake ROM loader limit 100000)"]
     );
     // The fake MCU has no [coordinator] section: it cannot be the hub.
-    let mut hub = fake_desk("0x42");
+    let mut hub = fake_sample("0x42");
     hub.nodes[0].mcu = "fake-m0".into();
     hub.nodes[0].board = None;
     hub.nodes[0].flash_map = None;
@@ -493,7 +493,7 @@ max_hz = 400_000
     );
     assert_eq!(reg.board("fake-board").unwrap().product, PROJECT_TEXT);
     // Check messages read the stored words: none of the project's own reach them.
-    let r = crate::check_with(&reg, &fake_desk("0x3A"));
+    let r = crate::check_with(&reg, &fake_sample("0x3A"));
     let msgs: Vec<_> = r.errors().map(|i| i.message.clone()).collect();
     assert_eq!(msgs, ["0x3a is reserved for the project-text on this bus"]);
     // Identifiers and writer parameters other text names must be plain.
@@ -946,13 +946,7 @@ fn each_mcu_records_where_its_definition_came_from() {
 
 #[test]
 fn page_safe_is_a_short_plain_name() {
-    for ok in [
-        "Desk Pico",
-        "rp2040",
-        "GPIO16",
-        "v1.2_rev-B",
-        &"x".repeat(40),
-    ] {
+    for ok in ["My Pico", "rp2040", "GPIO16", "v1.2_rev-B", &"x".repeat(40)] {
         assert!(page_safe(ok), "{ok}");
     }
     for bad in [
@@ -975,11 +969,11 @@ fn project_text_that_is_not_a_plain_name_leaves_as_a_generic_label() {
     write(
         &dir.join("dagon.toml"),
         &format!(
-            "[board.desk-pico]\nproduct = \"C:/Users/me/{secret}\"\nmcu = \"rp2040\"\n\
+            "[board.my-pico]\nproduct = \"C:/Users/me/{secret}\"\nmcu = \"rp2040\"\n\
              flash_bytes = 0x40_0000\ndrawing = \"pico\"\n\
              header = [{{ pin = \"GPIO4\", label = \"{secret}\" }}, {{ pin = \"GPIO5\", label = \"D5\" }}]\n\
              default_link = {{ kind = \"i2c\", addr = 0x44, control = \"full\" }}\n\
-             [board.desk-two]\nproduct = \"Desk Two\"\nmcu = \"rp2040\"\n\
+             [board.my-two]\nproduct = \"My Two\"\nmcu = \"rp2040\"\n\
              flash_bytes = 0x40_0000\ndrawing = \"pico\"\n\
              default_link = {{ kind = \"i2c\", addr = 0x45, control = \"full\" }}\n"
         ),
@@ -992,11 +986,11 @@ fn project_text_that_is_not_a_plain_name_leaves_as_a_generic_label() {
         "{json}"
     );
     let back = Registry::from_json(&json).unwrap();
-    let pico = back.board("desk-pico").unwrap();
+    let pico = back.board("my-pico").unwrap();
     assert_eq!(pico.product, PROJECT_TEXT);
     let labels: Vec<_> = pico.header.iter().map(|h| h.label.as_deref()).collect();
     assert_eq!(labels, [Some(PROJECT_TEXT), Some("D5")]);
-    assert_eq!(back.board("desk-two").unwrap().product, "Desk Two");
+    assert_eq!(back.board("my-two").unwrap().product, "My Two");
     // Builtin text (Japanese connection hints) is ours and stays as it is.
     assert_eq!(
         back.mcu("rp2040").unwrap().connection,
@@ -1022,9 +1016,9 @@ fn a_projects_file_names_and_csv_fields_are_scrubbed_and_still_load() {
     );
     write(&pkg.join("private-token/partitions.csv"), &csv);
     let mcu = include_str!("../../../../targets/mcu/esp32s3/dagon-mcu.toml")
-        .replace("id = \"esp32s3\"", "id = \"desk-s3\"")
+        .replace("id = \"esp32s3\"", "id = \"my-s3\"")
         .replace("wire_id = 0x0003", "wire_id = 0x00F3")
-        .replace("name = \"esp32s3-16m\"", "name = \"desk-s3-16m\"")
+        .replace("name = \"esp32s3-16m\"", "name = \"my-s3-16m\"")
         .replace(
             "partitions = \"partitions.csv\"",
             "partitions = \"private-token/partitions.csv\"",
@@ -1046,7 +1040,7 @@ fn a_projects_file_names_and_csv_fields_are_scrubbed_and_still_load() {
         .as_array()
         .unwrap()
         .iter()
-        .find(|m| m["label"] == "project MCU desk-s3")
+        .find(|m| m["label"] == "project MCU my-s3")
         .unwrap();
     assert_eq!(s3["files"][0][0], "file-1");
     let sent = s3["files"][0][1].as_str().unwrap();
@@ -1061,12 +1055,12 @@ fn a_projects_file_names_and_csv_fields_are_scrubbed_and_still_load() {
     // What the browser does (dagon-wasm's load_definitions): the scrubbed
     // form loads, with the same slots as on this machine.
     let back = Registry::from_json(&json).unwrap();
-    let m = back.mcu("desk-s3").unwrap();
+    let m = back.mcu("my-s3").unwrap();
     assert_eq!(m.partitions.as_deref(), Some("file-1"));
-    assert_eq!(m.slots, project.mcu("desk-s3").unwrap().slots);
+    assert_eq!(m.slots, project.mcu("my-s3").unwrap().slots);
     assert_eq!(
         m.partition_table,
-        project.mcu("desk-s3").unwrap().partition_table
+        project.mcu("my-s3").unwrap().partition_table
     );
     // Builtin and source-tree definitions go out as before.
     let builtin = Registry::from_json(&reg().to_json()).unwrap();
@@ -1187,14 +1181,14 @@ fn a_board_added_in_an_earlier_folder_changes_no_default_and_no_check() {
         );
     }
     // Nodes that name only their MCU are checked exactly as before.
-    let desk: String = include_str!("../../../../topology/desk-demo.yaml")
+    let sample: String = include_str!("../../../../topology/sample.yaml")
         .lines()
         .filter(|l| !l.trim_start().starts_with("board:"))
         .map(|l| format!("{l}\n"))
         .collect();
     assert_eq!(
-        crate::check_str_with(&tree, &desk).to_json(),
-        crate::check_str(&desk).to_json()
+        crate::check_str_with(&tree, &sample).to_json(),
+        crate::check_str(&sample).to_json()
     );
     // Two defaults do not load.
     let marked = nucleo.replace(

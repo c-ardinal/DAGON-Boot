@@ -15,7 +15,7 @@ const OTA_VALID: u32 = 2;
 pub(crate) const OTADATA: &str = "otadata";
 /// Where espflash puts the 2nd stage (shown in the plan only; espflash
 /// places it itself).
-// ponytail: true for the ESP32-S3 (and C3/C6/S2-class chips), not the
+// true for the ESP32-S3 (and C3/C6/S2-class chips), not the
 // classic ESP32 (0x1000); move to the writer definition when one is added.
 pub(crate) const BOOTLOADER_AT: u32 = 0x0;
 

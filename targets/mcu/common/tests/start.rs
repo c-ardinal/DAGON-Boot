@@ -18,10 +18,10 @@ use dagon_mcu_common::hooks::{
 use dagon_proto::payload::*;
 use dagon_proto::{split_status, Cmd, Frame, Status};
 use dagon_sim::store::Boot;
-use dagon_sim::{desk, f401_config, Layout, SimFlash, SimStore};
+use dagon_sim::{f401_config, sample, Layout, SimFlash, SimStore};
 use ed25519_compact::{KeyPair, Seed};
 
-/// RFC 8032 section 7.1 TEST 1 key (public test data; `desk::PUBKEY`).
+/// RFC 8032 section 7.1 TEST 1 key (public test data; `sample::PUBKEY`).
 const SEED: [u8; 32] = [
     0x9d, 0x61, 0xb1, 0x9d, 0xef, 0xfd, 0x5a, 0x60, 0xba, 0x84, 0x4a, 0xf4, 0x92, 0xec, 0x2c, 0xc4,
     0x44, 0x49, 0xc5, 0x69, 0x7b, 0x32, 0x69, 0x19, 0x70, 0x3b, 0xac, 0x03, 0x1c, 0xae, 0x7f, 0x60,
@@ -97,7 +97,7 @@ fn start_with(
         || 0,
         Watchdog::new(4_000, 8_000),
     );
-    let agent = Agent::new(f401_config(desk::PUBKEY), store.clone(), chain);
+    let agent = Agent::new(f401_config(sample::PUBKEY), store.clone(), chain);
     (agent, reader)
 }
 
@@ -205,8 +205,12 @@ impl Wire {
 
 /// A node running 1.0.0 from slot A, confirmed.
 fn provisioned() -> SimStore {
-    let mut store = SimStore::new(SimFlash::stm32f401xe(1), Layout::STM32F401XE, desk::PUBKEY);
-    store.provision(0, desk::SEG_1_0_0).unwrap();
+    let mut store = SimStore::new(
+        SimFlash::stm32f401xe(1),
+        Layout::STM32F401XE,
+        sample::PUBKEY,
+    );
+    store.provision(0, sample::SEG_1_0_0).unwrap();
     assert_eq!(store.boot(), Boot::Run(0));
     store
 }

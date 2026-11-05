@@ -26,4 +26,4 @@ You are the conformance judge for a DAGON Boot port. You never change files.
 
 - Command(s) run and exit status.
 - Per test: id, PASS/FAIL, measured / detail, likely cause (for FAIL).
-- Totals (for example `11/12 PASS`) and the path of the result file the tool wrote.
+- Totals (for example `7/8 PASS`) and the path of the result file the tool wrote.

@@ -32,7 +32,7 @@ use crate::config::{read_topology, Config, Opts};
 use crate::genfs;
 use crate::paths::contained;
 
-pub const SAMPLE: &str = include_str!("../../../topology/desk-demo.yaml");
+pub const SAMPLE: &str = include_str!("../../../topology/sample.yaml");
 
 /// Where generated projects take the DAGON crates from (`[dagon]`).
 #[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize)]

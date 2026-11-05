@@ -2,7 +2,7 @@
 // item and the check result. Edits go through `apply`, which keeps undo.
 import { supportedBoards } from '../../wasm/dagon.ts';
 import { ANNOUNCE, LINK_WHY } from '../copy.ts';
-import { DESK_DEMO, DESK_DEMO_YAML, type Config } from '../sample.ts';
+import { SAMPLE_CONFIG, SAMPLE_YAML, type Config } from '../sample.ts';
 import { connect, docWithDefaults, emptyDoc, fromYaml, place, placeMcu, removeLink, withDefaults, removeNode, toConfig, toYaml, type Doc, type Topo } from './model.ts';
 import type { SaveResult } from './cli.svelte.ts';
 import { keepComments } from './comments.ts';
@@ -32,8 +32,8 @@ export function canonical(doc: Doc): string {
 const HISTORY = 100;
 
 /**
- * Whether 運用 can be entered (§5.2): a 構成 with no problems. Parts
- * updating does not reach yet (V-23) are valid and do not stop it; they
+ * Whether 運用 can be entered: a 構成 with no problems. Parts
+ * updating does not reach yet are valid and do not stop it; they
  * are skipped there. `empty` and `problems` say M69.
  */
 export type Operable = 'ok' | 'empty' | 'problems';
@@ -42,11 +42,11 @@ export class Define {
   doc = $state<Doc>(emptyDoc());
   /** `node:<id>`, `link:<to>`, `bus:<i>`, or null (the problem list shows). */
   selected = $state<string | null>(null);
-  /** Graph or table (SC-T) in the canvas place. */
+  /** Graph or table in the canvas place. */
   view = $state<'graph' | 'table'>('graph');
   status = $state('');
   alert = $state('');
-  /** The last file read did not parse (C09). */
+  /** The last file read did not parse. */
   unreadable = $state(false);
   /** Bumped to ask the page to focus the inspector field `focusField`. */
   focusRequest = $state(0);
@@ -56,19 +56,19 @@ export class Define {
   private future: Doc[] = [];
   /** Bumped by every change, so the derived check and view follow. */
   revision = $state(0);
-  /** The revision last in the project's YAML (opened or saved); it never goes back (C-377). */
+  /** The revision last in the project's YAML (opened or saved); it never goes back. */
   savedAt = $state(0);
-  /** The YAML as opened or read (its hand-written comments are kept on save, C-383), and the page's layout of it. */
+  /** The YAML as opened or read (its hand-written comments are kept on save), and the page's layout of it. */
   private source: { text: string; as: string } | null = null;
   /** Why the last save did not go through; the edits stay on the page (null after a save). */
   saveFailure = $state<Exclude<SaveResult, 'saved'> | null>(null);
 
-  /** Nothing placed yet (E1) is not a problem to list. */
+  /** Nothing placed yet is not a problem to list. */
   readonly problems: Problem[] = $derived(this.revision >= 0 && this.doc.topo.nodes.length ? problems(this.doc) : []);
   readonly errors = $derived(this.problems.filter((p) => p.severity === 'error').length);
   readonly warnings = $derived(this.problems.filter((p) => p.severity === 'warning').length);
   readonly config: Config = $derived(toConfig(this.doc, supportedBoards()));
-  /** Nodes updating skips for now (V-23): shown as 書き込めない, never a problem. */
+  /** Nodes updating skips for now: shown as 書き込めない, never a problem. */
   readonly notYet = $derived(this.config.nodes.filter((n) => n.notYet).length);
   readonly operable: Operable = $derived(
     this.doc.topo.nodes.length === 0
@@ -138,9 +138,9 @@ export class Define {
     this.revision++;
   }
 
-  /** "見本を置く": the desk demo with its names (undoable). */
+  /** "見本を置く": the sample with its names (undoable). */
   placeSample(): void {
-    if (!this.apply(fromYaml(DESK_DEMO_YAML, Object.fromEntries(DESK_DEMO.nodes.map((n) => [n.id, n.name]))))) return;
+    if (!this.apply(fromYaml(SAMPLE_YAML, Object.fromEntries(SAMPLE_CONFIG.nodes.map((n) => [n.id, n.name]))))) return;
     this.selected = null;
   }
 
@@ -185,7 +185,7 @@ export class Define {
     return null;
   }
 
-  /** "置く" by MCU (§4): a node without a board; its flash size is the developer's to fill. */
+  /** "置く" by MCU: a node without a board; its flash size is the developer's to fill. */
   placeMcu(mcu: string, name: string): void {
     const r = placeMcu(this.doc, mcu);
     if (!r.id || !this.apply(r.doc)) return;
@@ -263,7 +263,7 @@ export class Define {
   }
 
   /**
-   * "ファイルの構成を取り込む" (§7.6): the 構成 a release was made for
+   * "ファイルの構成を取り込む": the 構成 a release was made for
    * replaces this one, keeping the names and board fields of the nodes it
    * shares; undoable.
    */

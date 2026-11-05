@@ -1,8 +1,8 @@
-# Desk sample hardware test: the desk's data and its scenarios, run in this
+# Sample hardware test: the setup's data and its scenarios, run in this
 # order by hwt.py (see README.md).
 
-[desk]
-# The [build.<id>] nodes of the desk project, in update order.
+[setup]
+# The [build.<id>] nodes of the setup project, in update order.
 nodes = ["seg", "watch", "hub"]
 # The coordinator's node id (dagon status prints it as "hub").
 coordinator = "hub"
@@ -22,7 +22,7 @@ status_tries = 6
 sync = { seg = "f401-app", watch = "esp32s3-app" }
 
 # Versions: the version format is major.minor.patch (u8.u8.u16, no
-# pre-release tags), so tests use major 2 (2.0.N) as their range; the desk's
+# pre-release tags), so tests use major 2 (2.0.N) as their range; the setup's
 # own releases stay below 2.0.0 or move on above the test range.
 # A re-run may reuse the same versions: nothing refuses a lower or equal one.
 #

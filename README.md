@@ -13,7 +13,7 @@
 
 DAGON Boot is for developers, from first-timers to experienced firmware
 engineers, who build something out of a few microcontrollers and want to
-keep improving it once it is on the desk, the wall or the wrist. You choose
+keep improving it once it is on a shelf, the wall or the wrist. You choose
 the boards (or just their MCUs), draw how they connect, and write your
 application in Rust. DAGON takes care of the rest:
 
@@ -43,7 +43,7 @@ application in Rust. DAGON takes care of the rest:
 
 ## Supported hardware
 
-| MCU | Role in the desk demo | Board in the table | Flash it needs |
+| MCU | Role in the sample | Board in the table | Flash it needs |
 |---|---|---|---|
 | RP2040 (`rp2040`) | hub | Waveshare RP2040-Touch-LCD-1.28 (`waveshare-rp2040-touch-lcd-1.28`) | 4 MiB |
 | STM32F401RE (`stm32f401re`) | child, I2C | NUCLEO-F401RE (`nucleo-f401re`) | 512 KiB |
@@ -106,7 +106,7 @@ DAGON Console itself (`web/README.md`).
 
 ## The journey
 
-The example is the desk demo: an RP2040 hub with a round LCD, a
+The example is the sample: an RP2040 hub with a round LCD, a
 NUCLEO-F401RE (I2C) and an M5StopWatch (UART). What their sample apps do
 is in `samples/f401-app` and `samples/esp32s3-app`. Replace it with your
 own topology at step 2.
@@ -118,7 +118,7 @@ dagon new my-fleet
 cd my-fleet
 ```
 
-`dagon new` creates `dagon.toml`, `topology.yaml` (the desk demo, or your
+`dagon new` creates `dagon.toml`, `topology.yaml` (the sample, or your
 own with `--from <yaml>`), `.gitignore`, the Claude Code files (below) and,
 if none exists yet, a signing key pair in `~/.dagon/keys/my-fleet` (or
 `--keys <dir>`). The secret key stays outside the project and outside any
@@ -216,8 +216,8 @@ files in the provision folder (`out/provision/<id>/` beside `dagon.toml`,
 or under `provision_dir` when `dagon.toml` sets it; `--out <dir>`
 chooses another), and only leaves the board untouched. It builds the boot core (and the hub's `stage0`) from the DAGON
 clone the CLI was built from (or `DAGON_HOME`) and the node's app, all
-with the public half of your signing key. The boot cores accept the desk
-demo's tags (`hub-rp2040-lcd`, `seg-f401-7seg`), so keep those tags in
+with the public half of your signing key. The boot cores accept the sample's
+tags (`hub-rp2040-lcd`, `seg-f401-7seg`), so keep those tags in
 `topology.yaml` for these boards.
 
 For an ESP32-S3 node, `dagon flash` builds the board's factory agent and
@@ -332,13 +332,13 @@ check and `dagon gen` tell you what is still missing; the
 ## Try it without hardware
 
 ```sh
-dagon demo                         # DAGON Console with a simulated desk
+dagon demo                         # DAGON Console with a simulator
 dagon demo --sim-fail watch        # the same, and watch's update fails and falls back
 dagon demo --sim-speed 4           # four times faster (for recordings)
 ```
 
 `dagon demo` opens DAGON Console against a simulated 親機 with its two
-子機 (the desk-demo 構成: hub, seg, watch, all on 1.0.0), the simulator
+子機 (the sample 構成: hub, seg, watch, all on 1.0.0), the simulator
 `dagon sim run` uses, driven by the same dagon-host code as real boards.
 Connect, choose the latest release (demo-1.1.0) and update all three with
 live progress; with `--sim-fail seg` or `--sim-fail watch` that 子機's new
@@ -412,7 +412,7 @@ What the code and its tests in this repository show:
 - `dagon conform`: the 12 conformance tests of `dagon-conform`; 12 of 12 pass
   against the simulated F401, through the hub and directly.
 - Topology YAML: 22 validation rules and the supported-board table
-  (`dagon-topology`); `topology/desk-demo.yaml` passes them.
+  (`dagon-topology`); `topology/sample.yaml` passes them.
 - DAGON Console (`web/`, served by `dagon serve`; `web/README.md` lists what
   it does today).
 - Firmware: the RP2040 hub (`targets/rp2040-hub`), the F401 demo node

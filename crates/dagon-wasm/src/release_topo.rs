@@ -1,5 +1,5 @@
 //! The 構成 a release was made for, read back from its topology item as a
-//! topology the page can edit ("ファイルの構成を取り込む", ui-design §7.6).
+//! topology the page can edit ("ファイルの構成を取り込む").
 //! The canonical binary carries no ids, names, boards or node pins, so those
 //! come from the 構成 on the page wherever a node's tag matches; the rest is
 //! the binary's. Compiling the result gives the release's topology bytes again.
@@ -253,8 +253,8 @@ pub fn release_topology_value(bundle: &[u8], current: &str) -> Result<Option<Val
 mod tests {
     use super::*;
 
-    const DESK: &str = include_str!("../../../topology/desk-demo.yaml");
-    const RELEASE: &[u8] = include_bytes!("../../dagon-sim/fixtures/desk-1.1.0.dgb");
+    const SAMPLE: &str = include_str!("../../../topology/sample.yaml");
+    const RELEASE: &[u8] = include_bytes!("../../dagon-sim/fixtures/sample-1.1.0.dgb");
 
     fn release_topo() -> Vec<u8> {
         topology_bytes(RELEASE).unwrap().unwrap().to_vec()
@@ -262,7 +262,7 @@ mod tests {
 
     #[test]
     fn the_release_topology_compiles_back_to_its_bytes() {
-        let v = release_topology_value(RELEASE, DESK).unwrap().unwrap();
+        let v = release_topology_value(RELEASE, SAMPLE).unwrap().unwrap();
         let yaml = yaml_serde::to_string(&v).unwrap();
         assert_eq!(dagon_topology::compile_str(&yaml).unwrap(), release_topo());
         // The page's ids and boards are kept where the tags match.
@@ -274,7 +274,7 @@ mod tests {
 
     #[test]
     fn a_different_page_topology_still_reads_the_release() {
-        let other = DESK
+        let other = SAMPLE
             .replace("tag: seg-f401-7seg", "tag: other")
             .replace("id: seg", "id: x");
         let v = release_topology_value(RELEASE, &other).unwrap().unwrap();
@@ -287,6 +287,6 @@ mod tests {
 
     #[test]
     fn not_a_release_is_an_error() {
-        assert!(release_topology_value(b"nope", DESK).is_err());
+        assert!(release_topology_value(b"nope", SAMPLE).is_err());
     }
 }

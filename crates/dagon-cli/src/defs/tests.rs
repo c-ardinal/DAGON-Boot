@@ -87,10 +87,10 @@ fn write(path: &Path, bytes: &[u8]) {
     std::fs::write(path, bytes).unwrap();
 }
 
-/// The desk demo with its 7セグ node on the fake MCU and board, in a
+/// The sample with its 7セグ node on the fake MCU and board, in a
 /// project that defines both.
 fn fake_project(dir: &Path) -> PathBuf {
-    let yaml = include_str!("../../../../topology/desk-demo.yaml")
+    let yaml = include_str!("../../../../topology/sample.yaml")
         .replace("mcu: stm32f401re", "mcu: fake-m0")
         .replace("board: nucleo-f401re", "board: fake-board")
         .replace("flash_map: f401-default", "flash_map: fake-1m")

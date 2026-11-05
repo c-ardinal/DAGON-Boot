@@ -117,7 +117,7 @@ When one change is several kinds, the largest one counts.
 | No release | unchanged | unchanged |
 
 The `0.x` rule is Cargo's: a change in the left-most non-zero number is
-breaking. Only the owner declares `1.0.0`.
+breaking. Only the maintainers declare `1.0.0`.
 
 Several changes between two releases: take the largest kind over all of
 them and bump once.
@@ -210,7 +210,7 @@ docs: <no release>
 
 - One tag per component release: `<name>-v<version>`, for example
   `<name>-v0.2.0`.
-- Pre-releases for owner trials: `-rc.N` (`<name>-v0.2.0-rc.1`). The
+- Pre-releases for maintainer trials: `-rc.N` (`<name>-v0.2.0-rc.1`). The
   release that follows drops the suffix and keeps the version.
 - Release files carry the component name and version in their names.
 - A component's changelog is made from the commits since its last tag that
@@ -224,7 +224,7 @@ docs: <no release>
   tag, and fails a tag that names no component or another version. The
   workflow says which components then build release files.
 - Nothing is pushed, tagged on the remote or published without the
-  owner's OK.
+  maintainers' OK.
 
 ## Compatibility between components
 

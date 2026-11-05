@@ -23,7 +23,7 @@ export const LOCK_ORDER: readonly LockState[] = [
 
 /** What the page knows now, reduced to the table's states. */
 export interface LockInput {
-  /** `dagon demo` is playing its desk (none of the page's own controls may change it). */
+  /** `dagon demo` is playing its simulator (none of the page's own controls may change it). */
   demo: boolean;
   updating: boolean;
   recovering: boolean;

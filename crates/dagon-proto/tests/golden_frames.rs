@@ -284,7 +284,7 @@ fn hub_command_vectors() {
     expect_at(&file, &[(5, &[0x61, 6, 0, 2, 0, 1, 0, 0x00, 0xFF])]);
 }
 
-/// ENTER_ROM was added after G1 (owner-approved, additive).
+/// ENTER_ROM was added later as an additive change.
 #[test]
 fn enter_rom_vector() {
     let req = EnterRom {

@@ -39,8 +39,8 @@ describe('operating-mode state machine', () => {
   });
 
   test('every target is a state and every state is reachable from the start', () => {
-    const seen = new Set<L>(['L01', 'L02']);
-    const todo: L[] = ['L02'];
+    const seen = new Set<L>(['unsupported', 'idle']);
+    const todo: L[] = ['idle'];
     while (todo.length) {
       for (const to of Object.values(MACHINE[todo.pop()!].on)) {
         expect(STATES).toContain(to);
@@ -53,82 +53,82 @@ describe('operating-mode state machine', () => {
     expect([...seen].sort()).toEqual([...STATES].sort());
   });
 
-  test('a lost device ends in L26 from every connected state except the hub restart (L20, L21)', () => {
+  test('a lost device ends in lost from every connected state except the hub restart (hubRestarting, reconnectNeeded)', () => {
     for (const s of STATES) {
       const connected = !['idle', 'lost'].includes(hubOf(s));
-      const want = connected && s !== 'L20' && s !== 'L21' ? 'L26' : s;
+      const want = connected && s !== 'hubRestarting' && s !== 'reconnectNeeded' ? 'lost' : s;
       expect(next(s, 'lost'), s).toBe(want);
     }
   });
 
   test.each([
-    ['L02', 'connect', 'L03'],
-    ['L03', 'dismissed', 'L04'],
-    ['L03', 'openFailed', 'L05'],
-    ['L03', 'chosen', 'L06'],
-    ['L06', 'noAnswer', 'L07'],
-    ['L06', 'helloDiscover', 'L08'],
-    ['L06', 'helloConfigured', 'L12'],
-    ['L07', 'reselect', 'L03'],
-    ['L08', 'scanned', 'L09'],
-    ['L09', 'push', 'L10'],
-    ['L10', 'pushed', 'L12'],
-    ['L10', 'pushFailed', 'L11'],
-    ['L11', 'pushAgain', 'L10'],
-    ['L12', 'watchAlarm', 'L13'],
-    ['L12', 'chooseFile', 'L14'],
-    ['L13', 'recover', 'L24'],
-    ['L15', 'pass', 'L18'],
-    ['L18', 'update', 'L19'],
-    ['L19', 'hubTurn', 'L20'],
-    ['L20', 'autoFailed', 'L21'],
-    ['L22', 'recover', 'L24'],
-    ['L24', 'fixedRest', 'L18'],
-    ['L24', 'gaveUp', 'L25'],
-    ['L26', 'reconnect', 'L03'],
-    ['L12', 'cliClaim', 'L28'],
-    ['L28', 'cliReturn', 'L12'],
-    ['L17', 'otherFile', 'L14'],
+    ['idle', 'connect', 'choosing'],
+    ['choosing', 'dismissed', 'notChosen'],
+    ['choosing', 'openFailed', 'portFailed'],
+    ['choosing', 'chosen', 'checking'],
+    ['checking', 'noAnswer', 'silentHub'],
+    ['checking', 'helloDiscover', 'scanning'],
+    ['checking', 'helloConfigured', 'ready'],
+    ['silentHub', 'reselect', 'choosing'],
+    ['scanning', 'scanned', 'scanned'],
+    ['scanned', 'push', 'sending'],
+    ['sending', 'pushed', 'ready'],
+    ['sending', 'pushFailed', 'sendFailed'],
+    ['sendFailed', 'pushAgain', 'sending'],
+    ['ready', 'watchAlarm', 'nodesSilent'],
+    ['ready', 'chooseFile', 'reading'],
+    ['nodesSilent', 'recover', 'recovering'],
+    ['verifying', 'pass', 'fileReady'],
+    ['fileReady', 'update', 'writing'],
+    ['writing', 'hubTurn', 'hubRestarting'],
+    ['hubRestarting', 'autoFailed', 'reconnectNeeded'],
+    ['stopped', 'recover', 'recovering'],
+    ['recovering', 'fixedRest', 'fileReady'],
+    ['recovering', 'gaveUp', 'recoverFailed'],
+    ['lost', 'reconnect', 'choosing'],
+    ['ready', 'cliClaim', 'cliTurn'],
+    ['cliTurn', 'cliReturn', 'ready'],
+    ['otherTopology', 'otherFile', 'reading'],
   ] as [L, Ev, L][])('%s --%s--> %s', (from, ev, to) => {
     expect(next(from, ev)).toBe(to);
   });
 
-  test('the header 切断 goes back to L02 from every connected state it may be used in, and is held while working', () => {
+  test('the header 切断 goes back to idle from every connected state it may be used in, and is held while working', () => {
     for (const s of STATES) {
       const connected = !['idle', 'lost'].includes(hubOf(s));
-      const want = connected && !HUB_LOCKED.has(s) ? 'L02' : s;
+      const want = connected && !HUB_LOCKED.has(s) ? 'idle' : s;
       expect(next(s, 'disconnect'), s).toBe(want);
     }
-    // Sending, updating, reconnecting, recovering and the CLI's turn (ui-design §7.1).
-    for (const s of ['L10', 'L19', 'L20', 'L21', 'L24', 'L28'] as L[]) expect(HUB_LOCKED.has(s), s).toBe(true);
+    // Sending, updating, reconnecting, recovering and the CLI's turn.
+    for (const s of ['sending', 'writing', 'hubRestarting', 'reconnectNeeded', 'recovering', 'cliTurn'] as L[]) expect(HUB_LOCKED.has(s), s).toBe(true);
   });
 
-  test('L13: the answering nodes are updated first and recovery is beside it (owner 11/2)', () => {
-    expect(view('L13', { hasConfig: true })).toMatchObject({ primary: 'updateResponding', secondary: ['recover'] });
-    expect(view('L13', { hasConfig: true, answering: false })).toMatchObject({ primary: 'recover', secondary: [] });
+  test('nodesSilent: the answering nodes are updated first and recovery is beside it', () => {
+    expect(view('nodesSilent', { hasConfig: true })).toMatchObject({ primary: 'updateResponding', secondary: ['recover'] });
+    expect(view('nodesSilent', { hasConfig: true, answering: false })).toMatchObject({ primary: 'recover', secondary: [] });
   });
 
   test('an event that does not apply keeps the state', () => {
-    expect(next('L12', 'pushed')).toBe('L12');
+    expect(next('ready', 'pushed')).toBe('ready');
   });
 
-  test('運用 never sends or replaces the 構成 from L17 (owner 11/3): its side action leaves for 定義', () => {
-    expect(view('L17', { hasConfig: true }).secondary).toEqual(['defineFix']);
-    expect(Object.values(MACHINE.L17.on)).not.toContain('L10');
+  test('運用 never sends or replaces the 構成 from otherTopology: its side action leaves for 定義', () => {
+    expect(view('otherTopology', { hasConfig: true }).secondary).toEqual(['defineFix']);
+    expect(Object.values(MACHINE.otherTopology.on)).not.toContain('sending');
   });
 
   test('empty canvas: find automatically; with a configuration: connect', () => {
-    expect(view('L02', { hasConfig: false })).toEqual({ step: 2, primary: 'connectDiscover', secondary: [] });
-    expect(view('L02', { hasConfig: true })).toEqual({ step: 1, primary: 'connect', secondary: [] });
+    expect(view('idle', { hasConfig: false })).toEqual({ step: 2, primary: 'connectDiscover', secondary: [] });
+    expect(view('idle', { hasConfig: true })).toEqual({ step: 1, primary: 'connect', secondary: [] });
   });
 
   test('a page whose dagon-wasm did not load offers reloading', () => {
-    expect(view('L05', { hasConfig: false, failure: 'unavailable' }).primary).toBe('reload');
-    expect(view('L05', { hasConfig: false, failure: 'busy' }).primary).toBe('connect');
+    expect(view('portFailed', { hasConfig: false, failure: 'unavailable' }).primary).toBe('reload');
+    expect(view('portFailed', { hasConfig: false, failure: 'busy' }).primary).toBe('connect');
   });
 
   test('header steps follow the flow', () => {
     const step = (s: L) => view(s, { hasConfig: true }).step;
-    expect(['L06', 'L09', 'L12', 'L19', 'L23', 'L24'].map((s) => step(s as L))).toEqual([1, 3, 4, 5, 6, 'recover']);
+    expect(['checking', 'scanned', 'ready', 'writing', 'done', 'recovering'].map((s) => step(s as L))).toEqual([1, 3, 4, 5, 6, 'recover']);
   });
 });

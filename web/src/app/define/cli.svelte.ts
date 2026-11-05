@@ -1,10 +1,10 @@
-// The link to `dagon serve` (ui-design §8, dev-flow §5): the passphrase from
+// The link to `dagon serve`: the passphrase from
 // the URL fragment kept in sessionStorage, API calls with it as a Bearer
 // token, and the event WebSocket for job progress, logs, results, questions
 // and the hub hand-over. Keys never come here: hello reports only whether
 // a key exists and its id. Paths are never sent (serve takes them from
 // dagon.toml) except where to open or make a project, chosen from serve's own
-// GET /v1/fs list (§8.2).
+// GET /v1/fs list.
 
 import type { Kept } from '../kept.ts';
 import pkg from '../../../package.json';
@@ -31,7 +31,7 @@ export interface Hello {
   release_key?: string;
   /** MCU families POST /v1/flash can write (rp2040, stm32f401re). */
   flash_mcus?: string[];
-  /** `dagon demo`: a simulated desk, never a real hub (its speed, and the 子機 set to fail). */
+  /** `dagon demo`: a simulator, never a real hub (its speed, and the 子機 set to fail). */
   sim?: { speed: number; fail: string | null; uplink?: string; max_payload?: number; reconnect?: 'reopen' | 'stays' } | null;
 }
 
@@ -110,7 +110,7 @@ export const jobReason = (j: Job | null | undefined): string => {
   return e !== undefined && e !== null ? String(e) : (j?.lines[j.lines.length - 1] ?? '');
 };
 
-/** Log lines kept per job (SC-D7: the latest 2000). */
+/** Log lines kept per job (作業: the latest 2000). */
 const MAX_LINES = 2000;
 const PASS_KEY = 'dagon-serve-pass';
 const PASS = /^[0-9a-f]{32}$/;
@@ -198,7 +198,7 @@ export class Cli {
     this.openEvents();
   }
 
-  /** The simulated desk of `dagon demo`, when this serve has one. */
+  /** The simulator of `dagon demo`, when this serve has one. */
   get sim(): Hello['sim'] {
     return this.state === 'ready' && this.hello?.sim ? this.hello.sim : null;
   }
@@ -254,7 +254,7 @@ export class Cli {
     };
   }
 
-  /** One serve event (ui-design §8.1's table). */
+  /** One serve event. */
   event(e: Record<string, unknown>): void {
     const job = this.jobs.find((j) => j.id === e.job);
     switch (e.type) {
@@ -420,7 +420,7 @@ export class Cli {
     return r.ok ? new Uint8Array(await r.arrayBuffer()) : null;
   }
 
-  /** GET /v1/project (feature `project`): the open project, if any (SC-S0). */
+  /** GET /v1/project (feature `project`): the open project, if any. */
   project(): Promise<ProjectInfo> {
     return this.json<ProjectInfo>('GET', 'project');
   }
@@ -499,7 +499,7 @@ export class Cli {
     this.jobs = [];
   }
 
-  /** GET/PUT /v1/nodes/{id}/board (dev-flow §5.1), when serve offers it. */
+  /** GET/PUT /v1/nodes/{id}/board, when serve offers it. */
   saveBoard(id: string, fields: { flash_bytes?: number }): Promise<unknown> {
     return this.json('PUT', `nodes/${encodeURIComponent(id)}/board`, fields);
   }

@@ -106,7 +106,7 @@ fn flash_with(
         };
         job.log(&format!("  device   {}  {}", c.id, c.label));
         // The page shows this question (its own wording, with はい / いいえ);
-        // the plan is in the log above. 案: the owner has not fixed the words.
+        // the plan is in the log above.
         let question = format!(
             "{node} を {}（{}）に書き込みます。よろしいですか。",
             c.label, c.id
@@ -181,7 +181,7 @@ mod tests {
         let k = dagon_sign::generate_to_dir(&dir.join("keys")).unwrap();
         std::fs::write(
             dir.join("t.yaml"),
-            include_str!("../../../../topology/desk-demo.yaml"),
+            include_str!("../../../../topology/sample.yaml"),
         )
         .unwrap();
         let pk = k.public_path.to_string_lossy().replace(char::from(92), "/");

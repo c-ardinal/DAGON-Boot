@@ -3,7 +3,7 @@
 DAGON's own hub firmware: the 親機 relay of the RP2040 MCU package
 (`../mcu/rp2040`: relay, layout, boot images, watchdog, USB, links) on the
 board package (`../boards/waveshare-rp2040-touch-lcd-1.28`: pins, display,
-sub-node wiring), with the desk demo's node list and its tag
+sub-node wiring), with the sample's node list and its tag
 `hub-rp2040-lcd` (`.cargo/config.toml`; the boot core is built with the
 same `DAGON_TARGET_TAG`). Three images share the 4 MiB flash:
 

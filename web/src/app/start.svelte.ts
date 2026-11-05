@@ -1,7 +1,7 @@
-// SC-S0 始め (ui-design §7.2b): make a project, make one from the sample, or
+// The start screen (始め): make a project, make one from the sample, or
 // open one, in a folder chosen from dagon serve's own list (GET /v1/fs). The
 // page sends only a path built from that list; serve confines it to the home
-// folder and refuses key folders (§8.2).
+// folder and refuses key folders.
 import type { Cli, FsList, ProjectRef, ProjectResult } from './define/cli.svelte.ts';
 
 export type StartChoice = 'new' | 'sample' | 'open';
@@ -11,13 +11,13 @@ export type StartFailure = Exclude<ProjectResult, 'opened' | 'yaml'>;
 
 export interface StartDeps {
   cli: Cli;
-  /** serve has switched to a project: the page reads its 構成 and leaves SC-S0. */
+  /** serve has switched to a project: the page reads its 構成 and leaves the start screen. */
   opened: () => Promise<void>;
   /** Without serve's project feature (development stand-ins): start an unsaved 構成 here; null where that is not allowed. */
   local: ((c: 'new' | 'sample') => void) | null;
 }
 
-const SAMPLE_NAME = 'desk-demo';
+const SAMPLE_NAME = 'sample';
 
 /** `name` inside folder `dir` as serve shows paths (forward slashes). */
 export const inside = (dir: string, name: string): string => `${dir.replace(/\/+$/, '')}/${name}`;
@@ -30,7 +30,7 @@ export class Start {
   /** The new project's folder name (new, sample). */
   name = $state('');
   failed = $state<StartFailure | null>(null);
-  /** Whether the failure came from making (M35) or opening. */
+  /** Whether the failure came from making or opening. */
   making = $state(false);
   recent = $state<ProjectRef[]>([]);
   /** A folder with a 構成 but no dagon.toml: the band asks whether to make it there. */

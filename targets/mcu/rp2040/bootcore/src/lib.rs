@@ -119,7 +119,7 @@ fn app_verifies(flash: &mut RpFlash, slot: u8) -> bool {
 }
 
 /// Microseconds since reset: the TIMER, which counts the watchdog's 1 MHz
-/// tick that HAL init starts (RP2040 datasheet §4.6). The high word is read
+/// tick that HAL init starts (RP2040 datasheet section 4.6). The high word is read
 /// around the low one so a carry between the two reads is not lost.
 fn now_us() -> u64 {
     let t = embassy_rp::pac::TIMER;

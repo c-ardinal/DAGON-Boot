@@ -1,6 +1,6 @@
-// §7.6: how the 構成 a release was made for differs from the one on the
+// How the 構成 a release was made for differs from the one on the
 // page — nodes only on one side, a different MCU, board or role, and links of
-// another kind, address or pins. Rows for the SC-O4 table and the graph chips.
+// another kind, address or pins. Rows for the file check's table and the graph chips.
 import { DIFF, INSPECT } from '../copy.ts';
 import { KIND_LABEL, type TLink, type TNode, type Topo } from './model.ts';
 

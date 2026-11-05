@@ -553,7 +553,7 @@ impl<T: Transport, C: Clock> Host<T, C> {
         // end of the window tells them apart.
         let mut other = None;
         loop {
-            // ponytail: reopens before every hub attempt; add a grace period
+            // reopens before every hub attempt; add a grace period
             // for slow enumeration if real ports need it.
             // A link that goes away with the hub is opened again; one that
             // stays (a UART adapter) is only polled.

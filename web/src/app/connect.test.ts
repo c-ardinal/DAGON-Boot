@@ -42,7 +42,7 @@ describe('dagon demo never opens Web Serial', () => {
     return { serial, fire, chooser: () => chooser };
   }
 
-  test('while the page drives the simulated desk, a plugged device and the chooser reach no port', async () => {
+  test('while the page drives the simulator, a plugged device and the chooser reach no port', async () => {
     const f = fakeSerial();
     const ws = webSerial(f.serial, () => true);
     const seen: string[] = [];

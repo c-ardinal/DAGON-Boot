@@ -25,7 +25,7 @@ pub use host::{
     WasmHost,
 };
 #[cfg(feature = "sim")]
-pub use sim::SimDesk;
+pub use sim::Simulator;
 
 use dagon_format::{BundleView, Version};
 use dagon_proto::payload::{HelloReq, HelloResp};
@@ -231,12 +231,12 @@ mod tests {
     }
 
     #[test]
-    fn desk_demo_checks_and_compiles_to_the_golden_binary() {
-        let yaml = std::fs::read_to_string(root("topology/desk-demo.yaml")).unwrap();
+    fn sample_checks_and_compiles_to_the_golden_binary() {
+        let yaml = std::fs::read_to_string(root("topology/sample.yaml")).unwrap();
         assert!(topo_check(&yaml).starts_with("{\"ok\":true"));
         assert_eq!(
             dagon_topology::compile_str(&yaml).unwrap(),
-            golden("topology_desk_demo.bin")
+            golden("topology_sample.bin")
         );
         assert!(topo_check("nodes: [").starts_with("{\"ok\":false"));
     }
@@ -254,7 +254,7 @@ mod tests {
     #[test]
     fn release_verdict_names_why_nothing_is_sent() {
         use crate::host::{release_refusal, PUBKEY};
-        let topo = golden("topology_desk_demo.bin");
+        let topo = golden("topology_sample.bin");
         let mut dgb = golden("release.dgb");
         // The default build embeds the test key the golden release is signed with.
         assert_eq!(PUBKEY.to_vec(), pubkey());

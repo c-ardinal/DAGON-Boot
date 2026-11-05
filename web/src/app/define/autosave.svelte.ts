@@ -1,4 +1,4 @@
-// 構成 changes go to the project's YAML by themselves (ui-design UC-D04, §5.2):
+// 構成 changes go to the project's YAML by themselves:
 // a save follows the last edit by AUTOSAVE_MS, one at a time; 保存 saves now.
 // A save that does not go through leaves the edits on the page (Define keeps
 // them and says why) and the next edit tries again. Nothing leaves the
@@ -23,7 +23,7 @@ const REAL: Timers = {
 export interface AutosaveDeps {
   /** PUT /v1/topology. */
   put: (yaml: string) => Promise<SaveResult>;
-  /** There is a project to save to (not a development stand-in's unsaved 構成, not SC-S0). */
+  /** There is a project to save to (not a development stand-in's unsaved 構成, not the start screen). */
   enabled: () => boolean;
   /**
    * Saving is refused (the project's definitions do not load): no save is
@@ -89,7 +89,7 @@ export class Autosave {
 
   /**
    * Runs `then` once the project's YAML has every edit, after the saves
-   * already queued (「プロジェクトを作る」: gen reads that YAML, C-377);
+   * already queued (「プロジェクトを作る」: gen reads that YAML);
    * false, without running it, when the save does not go through.
    */
   async whenSaved(then: () => Promise<unknown>): Promise<boolean> {

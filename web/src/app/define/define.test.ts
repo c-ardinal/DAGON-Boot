@@ -2,7 +2,7 @@ import { describe, expect, test } from 'vitest';
 import { RULE_FIX } from '../copy.ts';
 import { Define } from './define.svelte.ts';
 import { connect, emptyDoc, fromYaml, placeMcu, setLink, setLinkKind, setNode } from './model.ts';
-import { DESK_DEMO_YAML } from '../sample.ts';
+import { SAMPLE_YAML } from '../sample.ts';
 import { problemChip } from './problems.ts';
 import { LINK, LINK_WHY } from '../copy.ts';
 
@@ -20,14 +20,14 @@ describe('define session', () => {
 
   test('importing a topology identical to the 構成 is no change: no revision, nothing to save, no undo step', () => {
     const d = new Define();
-    d.load(fromYaml(DESK_DEMO_YAML));
+    d.load(fromYaml(SAMPLE_YAML));
     const rev = d.revision;
     // A fresh object with the same content (a release made for this very 構成).
     expect(d.importRelease(JSON.parse(JSON.stringify(d.doc.topo)))).toBe(false);
     expect([d.revision, d.unsaved, d.canUndo]).toEqual([rev, false, false]);
     // The same through apply from any caller (table, proposal, import of the YAML).
     expect(d.apply(JSON.parse(JSON.stringify(d.doc)))).toBe(false);
-    expect(d.importYaml(DESK_DEMO_YAML)).toBe(true);
+    expect(d.importYaml(SAMPLE_YAML)).toBe(true);
     expect([d.revision, d.unsaved]).toEqual([rev, false]);
     // A real difference is still an edit.
     expect(d.importRelease({ ...d.doc.topo, name: 'other' })).toBe(true);
@@ -36,7 +36,7 @@ describe('define session', () => {
 
   test('an empty entry the file writes is content: recovery for a node that is not there is a change, and the check reports it', () => {
     const d = new Define();
-    d.load(fromYaml(DESK_DEMO_YAML));
+    d.load(fromYaml(SAMPLE_YAML));
     expect(d.problems.filter((p) => p.path.includes('ghost'))).toEqual([]);
     const t = d.doc.topo;
     expect(d.importRelease({ ...t, recovery: { ...t.recovery, ghost: [] } })).toBe(true);
@@ -46,7 +46,7 @@ describe('define session', () => {
 
   test('an identical import while editing is stopped: no change, so nothing is asked and nothing moves', () => {
     const d = new Define();
-    d.load(fromYaml(DESK_DEMO_YAML));
+    d.load(fromYaml(SAMPLE_YAML));
     const rev = d.revision;
     let asked = 0;
     d.guard = () => (asked++, true);
@@ -68,7 +68,7 @@ describe('define session', () => {
     d.selected = 'node:seg';
     d.removeSelected();
     expect(d.importRelease({ ...d.doc.topo, nodes: d.doc.topo.nodes.slice(0, 1) })).toBe(false);
-    expect(d.importYaml(DESK_DEMO_YAML)).toBe(false);
+    expect(d.importYaml(SAMPLE_YAML)).toBe(false);
     d.undo();
     expect(JSON.stringify(d.doc)).toBe(before);
     // Seven edits asked (linking an already linked node changes nothing and needs no asking).
@@ -134,7 +134,7 @@ describe('define session', () => {
     expect(d.doc.topo.nodes.length).toBe(3);
 
     const { name, text } = d.exportYaml();
-    expect(name).toBe('desk-demo.yaml');
+    expect(name).toBe('sample.yaml');
     const e = new Define();
     expect(e.importYaml(text)).toBe(true);
     expect(e.config.yaml).toBe(d.config.yaml);
@@ -178,7 +178,7 @@ describe('define session', () => {
 
   test('a coordinator whose MCU cannot be one is V-25, with its own name and fix sentence', () => {
     const d = new Define();
-    const espHub = DESK_DEMO_YAML.replace(
+    const espHub = SAMPLE_YAML.replace(
       '    mcu: rp2040\n    board: waveshare-rp2040-touch-lcd-1.28\n    role: coordinator\n    port: self-boot\n    flash_map: rp2040-4m',
       '    mcu: esp32s3\n    role: coordinator\n    port: vendor-stage2',
     );

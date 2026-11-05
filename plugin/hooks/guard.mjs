@@ -15,7 +15,7 @@
 // build on it or are new, samples/esp32s3-*/ and targets/esp32s3-*/) and
 // conformance-judge may only run `dagon conform` / `dagon sim`.
 //
-// ponytail: shell commands are judged by string inspection (fail-closed on
+// shell commands are judged by string inspection (fail-closed on
 // substitutions); globs, patch tools and build scripts are caught afterwards
 // by the PostToolUse diff check, not prevented.
 

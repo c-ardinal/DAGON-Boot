@@ -1,7 +1,7 @@
 # Retained and persistent formats
 
 This document is the normative specification of the formats that
-[lifecycle-events.md §5.5](lifecycle-events.md#55-boot-record-mcu-identity-and-compiled-topology-requirements-and-the-executable-model)
+[lifecycle-events.md section 5.5](lifecycle-events.md#55-boot-record-mcu-identity-and-compiled-topology-requirements-and-the-executable-model)
 leaves to an executable model: the boot record, the lockup fuse, the MCU
 identity and the compiled topology's node layout and replacement. Every
 shape here is the one `crates/dagon-retained-model` proves; a change to a
@@ -316,7 +316,7 @@ Before a sandboxed call the layer feeds the watchdog and writes an armed
 record into its arm slot; the first store of the return path, also after
 an overrun or a fault, frees the arm slot (disarm). A call has returned
 exactly when its disarm is stored. The budget of every call is far below
-the watchdog period (lifecycle-events.md §10), so a watchdog reset with a call armed means that
+the watchdog period (lifecycle-events.md section 10), so a watchdog reset with a call armed means that
 call locked up. A layer whose start reports `can_arm = false` arms
 nothing in that run.
 

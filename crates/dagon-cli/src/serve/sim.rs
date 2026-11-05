@@ -1,4 +1,4 @@
-//! The simulated desk behind `dagon demo`: dagon-sim's hub with its two
+//! The simulator behind `dagon demo`: dagon-sim's hub with its two
 //! nodes, reached by the page through serve instead of Web Serial
 //! (POST /v1/sim/write, GET /v1/sim/read). The page runs dagon-host as it
 //! does with a real hub; only the bytes go another way.
@@ -136,7 +136,7 @@ impl SimDevice {
         *self.medium.lock().unwrap_or_else(|p| p.into_inner()) = m;
     }
 
-    /// The simulated desk catches up with the wall clock.
+    /// The simulator catches up with the wall clock.
     fn sync(&self, st: &mut State) {
         let elapsed = st.wall0.elapsed().as_secs_f64() * 1_000.0 * self.speed;
         let target = st.sim0 + elapsed as u64;
@@ -286,7 +286,7 @@ mod tests {
     #[test]
     fn answers_come_when_their_time_has_passed() {
         let key = ed25519_compact::KeyPair::from_seed(ed25519_compact::Seed::new([7; 32]));
-        let dev = SimDevice::new(crate::demo::desk(&key, None, 1).unwrap(), 50.0, None);
+        let dev = SimDevice::new(crate::demo::sim_hub(&key, None, 1).unwrap(), 50.0, None);
         let hello = frame(Cmd::Hello as u8, &[1, 0, 0, 0, 0x40, 0x04]);
         dev.write(&hello);
         let got = dev.read(Duration::from_millis(500));

@@ -5,7 +5,7 @@ import { topo_compile } from '../wasm/dagon.ts';
 import { ConnectError } from './connect.ts';
 import { ANNOUNCE, BAND } from './copy.ts';
 import { Operate } from './operate.svelte.ts';
-import { DESK_DEMO } from './sample.ts';
+import { SAMPLE_CONFIG } from './sample.ts';
 
 function session(opts: MockOptions = {}) {
   const t = new MockTransport(opts);
@@ -20,13 +20,13 @@ function session(opts: MockOptions = {}) {
 
 const settle = () => new Promise((r) => setTimeout(r, 0));
 
-// dagon-host (through dagon-wasm) against the in-memory desk hub.
-describe('operating mode against the desk hub', () => {
+// dagon-host (through dagon-wasm) against the in-memory hub.
+describe('operating mode against the in-memory hub', () => {
   test('find automatically → found → send → watching, with every node answering', async () => {
     const { t, op } = session();
     await op.connect();
-    expect(op.state).toBe('L09');
-    expect(op.config).toBe(DESK_DEMO);
+    expect(op.state).toBe('scanned');
+    expect(op.config).toBe(SAMPLE_CONFIG);
     expect(op.found).toBe(3);
     expect(op.status).toBe(ANNOUNCE.A06(3));
     await settle();
@@ -34,8 +34,8 @@ describe('operating mode against the desk hub', () => {
     expect(op.responding).toBe(3);
 
     await op.push();
-    expect(op.state).toBe('L12');
-    expect(t.received).toEqual(topo_compile(DESK_DEMO.yaml));
+    expect(op.state).toBe('ready');
+    expect(t.received).toEqual(topo_compile(SAMPLE_CONFIG.yaml));
   }, 20_000);
 
   test('a node that misses two rounds in a row is not answering; it comes back on the next reply', async () => {
@@ -45,16 +45,16 @@ describe('operating mode against the desk hub', () => {
     await op.round();
     t.setQuiet('uart', true);
     await op.round();
-    expect([op.state, op.live.watch.responding]).toEqual(['L12', true]);
+    expect([op.state, op.live.watch.responding]).toEqual(['ready', true]);
     await op.round();
-    expect([op.state, op.live.watch.responding, op.stuck?.id]).toEqual(['L13', false, 'watch']);
+    expect([op.state, op.live.watch.responding, op.stuck?.id]).toEqual(['nodesSilent', false, 'watch']);
     expect(op.alert).toBe(ANNOUNCE.A21silent('ウォッチ'));
     expect(op.status).toBe(ANNOUNCE.A08(2, 3));
     expect(op.live.watch.hello).not.toBeNull();
 
     t.setQuiet('uart', false);
     await op.round();
-    expect([op.state, op.responding]).toEqual(['L12', 3]);
+    expect([op.state, op.responding]).toEqual(['ready', 3]);
   }, 20_000);
 
   test('selecting a node reads its slots and health', async () => {
@@ -77,35 +77,34 @@ describe('operating mode against the desk hub', () => {
       },
     });
     await op.connect();
-    expect(op.state).toBe('L09');
+    expect(op.state).toBe('scanned');
   }, 20_000);
 
-  // Superseded: connecting with a 構成 used to stop at L09 ("send first") until this page had sent it.
-  // The project's YAML is the one source of truth (owner 11/3): connecting goes straight to watching.
+  // The project's YAML is the one source of truth: connecting goes straight to watching.
   test('a 構成 on the canvas, then connecting: watching at once, nothing to send first', async () => {
     const { t, op } = session();
-    op.useConfig(DESK_DEMO);
-    expect(op.state).toBe('L02');
+    op.useConfig(SAMPLE_CONFIG);
+    expect(op.state).toBe('idle');
     await op.connect();
-    expect(op.state).toBe('L12');
+    expect(op.state).toBe('ready');
     expect(t.received).toBeNull();
   }, 20_000);
 
-  test('"最初からやり直す" drops the connection and the records and waits at L02', async () => {
+  test('"最初からやり直す" drops the connection and the records and waits at idle', async () => {
     const { op } = session();
     await op.connect();
     op.reset();
-    expect([op.state, op.config, op.file, op.live]).toEqual(['L02', null, null, {}]);
+    expect([op.state, op.config, op.file, op.live]).toEqual(['idle', null, null, {}]);
   }, 20_000);
 
   test('a device that does not answer: choose again', async () => {
     const { op } = session({ silent: true });
     await op.connect();
-    expect([op.state, op.failure, op.status]).toEqual(['L07', 'no-response', BAND.M08.chip]);
+    expect([op.state, op.failure, op.status]).toEqual(['silentHub', 'no-response', BAND.M08.chip]);
   }, 20_000);
 
   test('closing the chooser and a busy port end in their own states', async () => {
-    for (const [f, want] of [['not-found', 'L04'], ['busy', 'L05']] as const) {
+    for (const [f, want] of [['not-found', 'notChosen'], ['busy', 'portFailed']] as const) {
       const op = new Operate({ open: () => Promise.reject(new ConnectError(f)) });
       await op.connect();
       expect([op.state, op.failure]).toEqual([want, f]);
@@ -115,13 +114,13 @@ describe('operating mode against the desk hub', () => {
   test('dagon-wasm missing: reload is the way on', async () => {
     const op = new Operate({ open: () => Promise.reject(new Error('unused')), ready: () => Promise.reject(new Error('404')) });
     await op.connect();
-    expect([op.state, op.failure]).toEqual(['L05', 'unavailable']);
+    expect([op.state, op.failure]).toEqual(['portFailed', 'unavailable']);
   });
 
-  test('unplugging while watching: L26 with the alert', async () => {
+  test('unplugging while watching: lost with the alert', async () => {
     const { op } = session();
     await op.connect();
     op.lose();
-    expect([op.state, op.alert]).toEqual(['L26', ANNOUNCE.A21lost]);
+    expect([op.state, op.alert]).toEqual(['lost', ANNOUNCE.A21lost]);
   }, 20_000);
 });

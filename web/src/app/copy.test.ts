@@ -52,19 +52,19 @@ const shownExcept = (...skip: string[]) =>
 const shown = shownExcept();
 
 describe('copy', () => {
-  // §11.4's list is for the operate mode's guidance and results; the define mode's CLI screens
-  // (S16 05 署名とリリース, SC-D4, SC-D7, SC-D10, SC-D11) name signing and the like by design.
+  // The list is for the operate mode's guidance and results; the define mode's CLI screens
+  // (CLI 連携, 作業, 署名とリリース, プロジェクト, 書き込み) name signing and the like by design.
   const DEFINE_CLI = ['CLI_NAV', 'CLI_LINK', 'JOBS', 'RELEASE_STEPS', 'PROJECT', 'FLASH'];
   test.each(copy.FORBIDDEN_WORDS)('no screen text uses %s', (word) => {
     // 確定 is allowed only as a slot value in the slot section.
-    // 確定 only as a slot value and in M38; フラッシュ only in V-16's name (§11.4).
+    // 確定 only as a slot value and in M38; フラッシュ only in V-16's name.
     const operate = shownExcept(...DEFINE_CLI);
     const texts = word === '確定' ? shownExcept('SLOT', 'TRIAL_CHOICE', ...DEFINE_CLI) : word === 'フラッシュ' ? operate.filter((s) => s !== copy.RULE_SHORT['V-16'] && s !== copy.INSPECT.flashSize) : operate;
     expect(texts.filter((s) => s.includes(word))).toEqual([]);
   });
 
   test('no ASCII ellipsis, no colon in label-value pairs', () => {
-    // §7.11 writes the in-use note of a pin choice as 「（使用中: …）」 itself.
+    // The pin choice writes the in-use note of a pin choice as 「（使用中: …）」 itself.
     const notes = new Set([copy.INSPECT.inUse('7セグのリセット')]);
     expect(shown.filter((s) => !notes.has(s) && (s.includes('...') || s.includes('：') || /\S:\s/.test(s)))).toEqual([]);
   });
@@ -146,7 +146,7 @@ describe('the writing vocabulary', () => {
 });
 
 describe('copy names no sample', () => {
-  // Samples are data serve hands out; the screen words never name one (or the desk it was made on).
+  // Samples are data serve hands out; the screen words never name one (or the hardware it was made on).
   const samples = Object.keys(import.meta.glob('../../../topology/*.yaml')).map((p) => p.split('/').pop()!.replace(/\.yaml$/, ''));
   test('the samples are found', () => {
     expect(samples.length).toBeGreaterThan(0);

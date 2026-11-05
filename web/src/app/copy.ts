@@ -41,7 +41,7 @@ export const HUB_NAME = {
   cli: '親機、CLI 使用中',
 } as const satisfies Record<HubState, string>;
 
-/** CLI link in the header (K0). */
+/** CLI link in the header. */
 export const CLI_NONE = 'CLI 未連携';
 
 /** Bottom-band buttons (fixed names); per-node names are in BUTTON_FOR. */
@@ -68,7 +68,7 @@ export const BUTTON = {
   showJobs: '作業を見る',
 } as const satisfies Record<Exclude<Action, 'recover' | 'updateResponding'>, string>;
 
-/** Buttons named after a node or a count (M14, M47). */
+/** Buttons named after a node or a count. */
 export const BUTTON_FOR = {
   recover: (name: string) => `${name}を復旧する`,
   updateResponding: (n: number) => `応答する ${n} つだけ先に書き込む`,
@@ -91,7 +91,7 @@ export const BAND = {
   M05: { chip: '× 使用中', sentence: '親機を使っているタブやアプリ（dagon CLI を含む）を閉じてから、もう一度押してください。' },
   M06: { chip: '× 許可なし', sentence: 'ターミナルに表示されたアドレスから開き直してください。' },
   M08: { chip: '× 応答なし', sentence: '一覧から「DAGON hub」を選び直してください。' },
-  M10: { sentence: '机の上と同じか確かめてから、親機へ送ってください。' },
+  M10: { sentence: '実際の配線と同じか確かめてから、親機へ送ってください。' },
   M12: { chip: '× 送信失敗', sentence: 'USB ケーブルを確かめてから、もう一度送ってください。' },
   M13: { sentence: 'パッケージファイルをこの画面に置くか、選んでください。' },
   /** M14 / M15 / M28: label-value pair, no sentence. */
@@ -108,17 +108,17 @@ export const BAND = {
   M58: { chip: '× ビルドなし', sentence: '準備でビルドするか、パッケージファイルを選んでください。' },
   /** M57: part of the page (dagon-wasm) did not load. */
   M57: { chip: '× 読み込み失敗', sentence: 'このページの一部を読み込めませんでした。ページを開き直してください。' },
-  /** M26: L21 (the dialog's sentence, and the band's once the dialog is closed). */
+  /** M26: reconnectNeeded (the dialog's sentence, and the band's once the dialog is closed). */
   M26: { sentence: '『もう一度つなぐ』を押して、同じ機器を選んでください。' },
   M59: { sentence: 'そのまま待ってください（数秒で終わります）。' },
   M60: { sentence: '見つかったノードが降りてくるまで、そのまま待ってください。' },
   M61: { sentence: '送り終わるまで、USB を抜かないでください。' },
   /**
-   * 案 (replaces M62: the answering nodes are updated first, recovery is the side action):
-   * L13, with a power and wiring hint for the silent ones.
+   * The answering nodes are updated first, recovery is the side action:
+   * nodesSilent, with a power and wiring hint for the silent ones.
    */
   M62b: { sentence: '応答しないノードは電源と配線を確かめ、応答するノードから先に書き込んでください。' },
-  /** M62: L13 when the answering nodes need nothing more (already updated, or after 「応答する n つだけ先に書き込む」). */
+  /** M62: nodesSilent when the answering nodes need nothing more (already updated, or after 「応答する n つだけ先に書き込む」). */
   M62: { pair: ['目安', '約 1 分'], sentence: '印の付いたノードは、復旧すると元どおりに動きます。' },
   M63: { sentence: '確かめ終わるまで、そのまま待ってください。' },
   M64: { sentence: '親機が再起動したら自動でつなぎ直すので、そのまま待ってください。' },
@@ -128,25 +128,25 @@ export const BAND = {
 } as const satisfies Record<string, BandCopy>;
 
 /**
- * The header's つなぐ / 切断 (S30) and, 案, why it cannot be
+ * The header's つなぐ / 切断 and why it cannot be
  * used in a state (the band says it when it is pressed then).
  */
 export const HUB_TOGGLE = {
   connect: '接続する',
   disconnect: '切断する',
   locked: {
-    L03: '一覧で選び終わるまで、そのまま待ってください。',
-    L08: '探し終わるまで、切断できません。',
-    L10: '送り終わるまで、切断できません。',
-    L19: '書き込みが終わるまで、切断できません。',
-    L20: '親機とつなぎ直すまで、切断できません。',
-    L21: '親機とつなぎ直すまで、切断できません。',
-    L24: '復旧が終わるまで、切断できません。',
-    L28: 'CLI の作業が終わるまで、切断できません。',
+    choosing: '一覧で選び終わるまで、そのまま待ってください。',
+    scanning: '探し終わるまで、切断できません。',
+    sending: '送り終わるまで、切断できません。',
+    writing: '書き込みが終わるまで、切断できません。',
+    hubRestarting: '親機とつなぎ直すまで、切断できません。',
+    reconnectNeeded: '親機とつなぎ直すまで、切断できません。',
+    recovering: '復旧が終わるまで、切断できません。',
+    cliTurn: 'CLI の作業が終わるまで、切断できません。',
   } as Partial<Record<string, string>>,
 } as const;
 
-/** S28 and SC-O5: elapsed and remaining time under the dot number while updating or recovering. */
+/** Elapsed and remaining time under the dot number while updating or recovering. */
 export const TIME = {
   elapsed: '経過',
   left: '残り',
@@ -160,7 +160,7 @@ export const TIME = {
   about: (ms: number) => (ms < 30_000 ? 'まもなく' : `約 ${Math.ceil(ms / 60_000)} 分`),
 } as const;
 
-/** 案 (C-389): L26's cause chip when the device the CLI gave back was not this 親機. */
+/** lost's cause chip when the device the CLI gave back was not this 親機. */
 export const BAND_CHIP = {
   otherHub: '× 別の親機',
   notHub: '× 親機以外',
@@ -170,11 +170,11 @@ export const BAND_CHIP = {
 /** M29: beside the recover button when nodes after the stopped one are not written yet. */
 export const BAND_FOR = {
   M29: (stuck: string) => ({ pair: ['目安', '約 1 分'] as const, sentence: `${stuck}を直すと、残りのノードへ書き込めます。` }),
-  /** 案 (L23 when M66 is not true): the nodes that did not answer were not updated. */
+  /** done when M66 is not true: the nodes that did not answer were not updated. */
   M66some: (n: number) => ({ sentence: `応答しなかった ${n} つのノードは前のままなので、電源と配線を確かめてから復旧してください。` }),
-  /** 案 (L23 after 「前のバージョンに戻す」). */
+  /** done after 「前のバージョンに戻す」. */
   M66back: (name: string, version: string) => ({ sentence: `${name}は前のバージョン ${version} で動いています。` }),
-  /** 案 (L23 after a recovery with nothing left to update). */
+  /** done after a recovery with nothing left to update. */
   M66fixed: (name: string, version: string) => ({ sentence: `${name}は直り、${version} で動いています。` }),
 } as const;
 
@@ -499,7 +499,7 @@ export const NODE = {
   roleGrandchild: '孫機',
   roleDeeper: (d: number) => `孫機の下（${d} 段目）`,
   mcu: 'MCU',
-  /** The hub's own connection line: its uplink kind and what drives it (案 beyond USB（パソコン）). */
+  /** The hub's own connection line: its uplink kind and what drives it. */
   usb: 'USB（パソコン）',
   uplinkVia: (kind: string, host: string) =>
     `${kind}（${({ 'pc-cli': 'パソコン', browser: 'ブラウザ', embedded: '組込み機器' } as Record<string, string>)[host] ?? 'パソコン'}）`,
@@ -547,7 +547,7 @@ export const NODE = {
   name: (p: { name: string; product: string; mcu: string; role: string; via: string; state: string; version: string }) =>
     [p.name, `${p.product} · ${p.mcu}`, p.role, p.via, p.state, p.version && `バージョン ${p.version}`].filter(Boolean).join('、'),
   viaName: (via: string) => `親機と ${via}`,
-  /** A node updating does not reach yet (V-23): a calm note, not a fault. */
+  /** A node updating does not reach yet: a calm note, not a fault. */
   notYet: '◇ 書き込めない',
   notYetWhy: {
     'second-hub': '2 つ目の親機の側にあるため',
@@ -560,7 +560,7 @@ export const NODE = {
   notYetName: (why: string) => `書き込めない、${why}`,
 } as const;
 
-/** Link chip (S18) and its spoken name. */
+/** Link chip and its spoken name. */
 export const LINK = {
   /** CAN and Ethernet carry no wires the page draws: the kind alone. */
   /** The bus, the value it needs (address or speed: ), its wires. */
@@ -580,7 +580,7 @@ export const LINK_WHY = {
   loop: 'このノードの下にあるノードにはつなげません',
 } as const;
 
-/** Left column (S02, M43). */
+/** Left column. */
 export const ORDER = {
   heading: '書き込みの順',
   none: 'なし',
@@ -625,7 +625,7 @@ export const NODE_ACTION = {
   romAttempts: 'やり直し',
 } as const;
 
-/** Slot section (M41). Inside it the rows are A / B / 予備. */
+/** Slot section. Inside it the rows are A / B / 予備. */
 export const SLOT = {
   heading: 'スロット',
   rows: ['A', 'B', '予備'],
@@ -653,7 +653,7 @@ export const WIRING = {
   print: '配線表を印刷',
 } as const;
 
-/** SC-O4: the file and dagon-host's verdict on it (the one place for the verdict). */
+/** The file check: the file and dagon-host's verdict on it (the one place for the verdict). */
 export const FILE = {
   heading: '書き込む',
   /** File input label (the drop place). */
@@ -664,13 +664,13 @@ export const FILE = {
   notRelease: '× 形式違い',
 } as const;
 
-/** SC-O7: the hub reconnect dialog (M26), and M27 beside the hub while the page reconnects by itself (L20). */
+/** The hub reconnect dialog, and M27 beside the hub while the page reconnects by itself (hubRestarting). */
 export const RECONNECT = {
   heading: '親機の再接続',
   sentence: BAND.M26.sentence,
   auto: '自動の再接続',
   left: (s: number) => `あと ${s} s`,
-  /** 案: why the page could not reconnect by itself (the diagnostic log under 詳しく見る). */
+  /** why the page could not reconnect by itself (the diagnostic log under 詳しく見る). */
   why: '詳しく見る',
   notes: {
     away: '前の親機 使用不可',
@@ -683,7 +683,7 @@ export const RECONNECT = {
   },
 } as const;
 
-/** Help in the header, and the operating-mode key list (S06). */
+/** Help in the header, and the operating-mode key list. */
 export const HELP = {
   heading: '困ったとき',
   rows: [
@@ -727,7 +727,7 @@ export const ANNOUNCE = {
   A21timeout: '親機 再接続 時間切れ',
   A15: (name: string, version: string) => `${name} ${version} に戻した`,
   A16: (name: string, rest: number) => `${name} 復旧済み、残り ${rest}`,
-  /** "最新のリリースを使う" found no release in the project (M58). */
+  /** "最新のリリースを使う" found no release in the project. */
   A22latest: 'リリース なし',
 } as const;
 
@@ -771,19 +771,19 @@ export const RULE_SHORT: Record<string, string> = {
   'B-02': '容量不足',
 };
 
-/** Names a §11.2 sentence needs: the node (呼び名), its board, its id, and whether there are too many nodes. */
+/** Names a fix sentence needs: the node (呼び名), its board, its id, and whether there are too many nodes. */
 export interface FixWords {
   to: string;
   board: string;
   id: string;
   many: boolean;
-  /** A size such as "512 KiB" (B-02). */
+  /** A size such as "512 KiB". */
   size?: string;
-  /** The node is one updating skips for now (V-23): its link is not a thing to fix. */
+  /** The node is one updating skips for now: its link is not a thing to fix. */
   skipped?: boolean;
 }
 
-/** §11.2: how to fix each rule, one sentence. */
+/** How to fix each rule, one sentence. */
 export const RULE_FIX: Record<string, (w: FixWords) => string> = {
   'V-01': () => 'dagon の新しいバージョンで書き出したファイルを読み込んでください。',
   'V-02': (w) => (w.many ? 'ノードを 32 までにしてください。' : `名前「${w.id}」の 2 つのどちらかを変えてください。`),
@@ -822,17 +822,17 @@ export const MODE = {
   operate: '書込',
   define: '準備',
   label: 'モード',
-  /** 案: 書込 or 親機へ送る pressed while the 構成 is not in the project's YAML. */
+  /** 書込 or 親機へ送る pressed while the 構成 is not in the project's YAML. */
   lockedUnsaved: { sentence: '構成を保存すると、書込と親機へ送るを使えます。' },
   /** M69: 書込 pressed with no 構成 or one with problems. */
   lockedProblems: { sentence: '構成を作り、問題を直すと、書込を使えます。' },
 } as const;
 
-/** Define mode (SC-D1–D3, SC-T, SC-M, §11.1). */
+/** Define mode. */
 export const DEFINE = {
-  /** SC-D1 left column. */
+  /** The parts column. */
   listHeading: 'ノードリスト',
-  /** §5.2 SC-D1: choose by product or by MCU. */
+  /** Parts column: choose by product or by MCU. */
   byProduct: '製品',
   byMcu: 'マイコン',
   chooseBy: '選び方',
@@ -864,7 +864,7 @@ export const DEFINE = {
   dotProblemsName: (p: number, n: number, l: number) => `問題 ${p}、ノード ${n}、リンク ${l}`,
   /** S25: nothing selected and nothing to fix. */
   nothingSelected: 'ノードかリンクを選ぶと、ここで直せます。',
-  /** SC-D3 (S23, S15). */
+  /** The problem list. */
   problems: (n: number) => `! 問題 ${n}`,
   problemsNone: '問題 0',
   cautions: (m: number) => `▲ 注意 ${m}`,
@@ -875,16 +875,16 @@ export const DEFINE = {
   yamlPath: 'YAML の場所',
   details: '詳しく見る',
   problemName: (short: string, rule: string, sentence: string) => `${short}、規則 ${rule}、${sentence}`,
-  /** Bottom band (C02, C05, C06, C09). */
+  /** Bottom band. */
   emptySentence: '親機を USB でパソコンにつないでから、『つないで、自動で見つける』を押してください。',
-  /** E5: 書込 from 準備 (§6.2). */
+  /** E5: 書込 from 準備. */
   toOperate: '書込へ',
   /** Writes the 構成 back to the project's YAML through dagon serve. */
   save: '保存',
   fixSentence: '直すと、親機へ送れます。',
-  /** C19: E6, nodes updating skips for now (V-23); the 構成 is valid as it is. */
+  /** C19: E6, nodes updating skips for now; the 構成 is valid as it is. */
   notYetSentence: (k: number) => `書き込めないノードが ${k} つあります。構成はこのままで使え、書き込みではそのノードを飛ばします。`,
-  /** §7.6: the 構成 of the release file chosen in 書込 replaces this one (undoable, saved to the YAML). */
+  /** The 構成 of the release file chosen in 書込 replaces this one (undoable, saved to the YAML). */
   importFileTopology: 'ファイルの構成を取り込む',
   sendSentence: '親機へ送ると、書き込めるようになります。',
   send: '親機へ送る',
@@ -896,7 +896,7 @@ export const DEFINE = {
   defsSentence: 'このプロジェクトの MCU・ボード定義を読み込めません。理由は dagon serve の端末に出ています。',
 } as const;
 
-/** SC-D2 inspector labels; 詳しい設定 shows the schema names as they are (§11.4, 2 段目). */
+/** Inspector labels; 詳しい設定 shows the schema names as they are. */
 export const INSPECT = {
   name: '呼び名',
   id: '名前 id',
@@ -925,7 +925,7 @@ export const INSPECT = {
   pullups: 'プルアップ',
   pullupKinds: { external: '外付け', board: '基板上' } as Record<string, string>,
   inUse: (what: string) => `（使用中: ${what}）`,
-  /** §4.3: the board of a node chosen by MCU. */
+  /** The board of a node chosen by MCU. */
   board: 'ボード',
   boardOwn: 'ボード定義なし',
   flashSize: 'フラッシュ容量',
@@ -938,15 +938,15 @@ export const INSPECT = {
     ble: 'BLE',
     'wifi-tcp': 'Wi-Fi（TCP）',
   } as Record<string, string>,
-  /** The 親機's hop towards the PC (案). */
+  /** The 親機's hop towards the PC. */
   uplink: '接続元',
   uplinkHost: '接続元の機器',
   hosts: { 'pc-cli': 'パソコンの dagon', browser: 'ブラウザ', embedded: '組込み機器' } as Record<string, string>,
-  /** On a kind the firmware does not implement yet (案). */
+  /** On a kind the firmware does not implement yet. */
   notYet: '未対応',
 } as const;
 
-/** SC-T: the table view (S03 words in its cells). */
+/** The table view. */
 export const TABLE = {
   tabs: ['ノード', 'リンク', '配線'],
   nodeCols: ['番号', '呼び名', '製品名 · MCU', '役割', 'つなぎ方', 'ピン'],
@@ -957,7 +957,7 @@ export const TABLE = {
   remove: '消す',
 } as const;
 
-/** SC-DN: the define mode's CLI features (S16, dev-flow §5.2's 07 and 08). */
+/** The define mode's CLI features. */
 export const CLI_NAV = {
   heading: 'CLI 専用の機能',
   items: {
@@ -971,7 +971,7 @@ export const CLI_NAV = {
   none: 'CLI 未連携',
 } as const;
 
-/** Header CLI link (K0–K3). */
+/** Header CLI link. */
 export const CLI_STATE = {
   none: 'CLI 未連携',
   connecting: 'CLI 接続中…',
@@ -980,7 +980,7 @@ export const CLI_STATE = {
   ready: (v: string) => `CLI ${v}`,
 } as const;
 
-/** SC-D4 CLI 連携 (S09, C11, §7.13). */
+/** CLI 連携. */
 export const CLI_LINK = {
   steps: ['ターミナルを開く', 'dagon serve を実行する', '表示されたアドレスをこのブラウザで開く'],
   withoutCli: ['CLI なしで使える', 'グラフの編集・書込'] as const,
@@ -999,7 +999,7 @@ export const CLI_LINK = {
   unsupported: '非対応',
 } as const;
 
-/** SC-D7 作業 (S35, C14). */
+/** 作業. */
 export const JOBS = {
   heading: '作業',
   cols: ['種類', '対象', '状態', '経過', '結果'],
@@ -1013,7 +1013,7 @@ export const JOBS = {
   answer: 'つないだ',
 } as const;
 
-/** SC-D8 署名とリリース (S33, C15). */
+/** 署名とリリース. */
 export const RELEASE_STEPS = {
   heading: '署名とリリース',
   steps: ['ビルド', '署名', 'リリース', '渡す'],
@@ -1033,7 +1033,7 @@ export const RELEASE_STEPS = {
   done: '✓ 完了',
 } as const;
 
-/** SC-D10 プロジェクト (dev-flow §5.2). */
+/** プロジェクト. */
 export const PROJECT = {
   heading: 'プロジェクト',
   make: '雛形を作る',
@@ -1044,16 +1044,16 @@ export const PROJECT = {
   fixFirst: '直すと、プロジェクトを作れます。',
 } as const;
 
-/** SC-D11 書き込み (dev-flow §3.2, §5.2). */
+/** 書き込み. */
 export const FLASH = {
   heading: '書き込み',
   write: '書き込む',
   /** How each MCU is connected comes from its definition ([connection], dagon-wasm's mcu_connection). */
   via: 'つなぎ方',
   hubFirst: '親機がないと子機を確かめられないので、親機から順に書き込みます。',
-  /** 案: the confirmation before serve writes the board (its job question). */
+  /** the confirmation before serve writes the board (its job question). */
   confirm: (name: string) => `${name} に書き込みます。よろしいですか。`,
-  /** 案: a family serve's flash does not write yet (ESP32-S3). */
+  /** a family serve's flash does not write yet (ESP32-S3). */
   otherTools: 'このマイコンは、今は ESP のツールで書き込んでください。',
   yes: 'はい',
   no: 'いいえ',
@@ -1062,7 +1062,7 @@ export const FLASH = {
   notFound: '× 未検出',
 } as const;
 
-/** §7.6: the 構成 differences of a release made for another 構成 (SC-O4, L17). */
+/** The 構成 differences of a release made for another 構成 (otherTopology). */
 export const DIFF = {
   heading: '構成の違い',
   cols: ['ノード・リンク', 'この構成', 'ファイル'],
@@ -1075,14 +1075,13 @@ export const DIFF = {
 } as const;
 
 /**
- * Saving the 構成 to the project's YAML (案, §11.0 W1–W3; not yet in the
- * §11.1 table): the edits stay on the page, marked 未保存, until a save goes through.
+ * Saving the 構成 to the project's YAML: the edits stay on the page, marked 未保存, until a save goes through.
  */
 export const SAVE = {
   unsaved: '● 未保存',
   /** 422: the CLI's own check refused the 構成. */
   invalid: { chip: '× 保存失敗', sentence: '問題を直してから、もう一度保存してください。' },
-  /** 422 in dagon demo: an uplink the demo cannot simulate (案). */
+  /** 422 in dagon demo: an uplink the demo cannot simulate. */
   demoLink: {
     chip: '× デモ非対応',
     sentence: 'デモで試せる親機の接続元は、パソコンかブラウザから USB・UART・Wi-Fi でつないだものです。そのどれかを選んでください。',
@@ -1092,7 +1091,7 @@ export const SAVE = {
   failed: { chip: '× 保存失敗', sentence: 'ターミナルで dagon serve が動いているか確かめてから、もう一度保存してください。' },
 } as const;
 
-/** 案: leaving the project while its 構成 could not be saved (the dialog). */
+/** leaving the project while its 構成 could not be saved (the dialog). */
 export const UNSAVED = {
   heading: '保存していない変更があります',
   sentence: 'もう一度保存するか、変更を捨てて進むかを選んでください。',
@@ -1101,7 +1100,7 @@ export const UNSAVED = {
   stay: '編集に戻る',
 } as const;
 
-/** SC-S0 始め (S46, M35). */
+/** The start screen (始め). */
 export const START = {
   heading: '始め',
   new: 'プロジェクトを作る',
@@ -1132,8 +1131,7 @@ export const START = {
   /** The folder of a project (it holds dagon.toml). */
   project: '● プロジェクト',
   /**
-   * Why serve did not open or make it (案, §11.0 W1–W3; not yet in the §11.3
-   * table): 404 / 422 / 409 / 403. A folder that cannot be written is M35.
+   * Why serve did not open or make it: 404 / 422 / 409 / 403. A folder that cannot be written is M35.
    */
   missing: { chip: '× フォルダ違い', sentence: 'dagon.toml のあるフォルダを選んでください。' },
   key: { chip: '× 鍵エラー', sentence: 'dagon serve のターミナルで鍵の理由を確かめてから、もう一度選んでください。' },
@@ -1144,7 +1142,7 @@ export const START = {
   initAsk: 'このフォルダに dagon.toml を作りますか。',
 } as const;
 
-/** `dagon demo`: the simulated desk, marked wherever the page is (案). */
+/** `dagon demo`: the simulator, marked wherever the page is. */
 export const SIM = {
   badge: '模擬',
   label: '模擬の親機と子機（実機ではありません）',
@@ -1152,7 +1150,7 @@ export const SIM = {
   connect: { sentence: '模擬の親機につなぎます。機器を選ぶ一覧は出ません。' },
 } as const;
 
-/** SC-M メニュー and its one confirmation (M53). */
+/** The menu (メニュー) and its one confirmation. */
 export const MENU = {
   button: 'メニューを開く',
   restart: '最初からやり直す',

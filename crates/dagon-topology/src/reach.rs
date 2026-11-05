@@ -157,7 +157,7 @@ pub fn updatable(t: &Topology) -> (Topology, Vec<(String, Skip)>) {
                 .cloned()
                 .collect(),
         },
-        // ponytail: a constraint naming a skipped node is dropped (lockstep keeps
+        // a constraint naming a skipped node is dropped (lockstep keeps
         // its reached ids); multi-hop relay will carry them whole.
         constraints: t
             .constraints
@@ -222,11 +222,11 @@ mod tests {
     use super::*;
     use crate::parse_str;
 
-    const DESK: &str = include_str!("../../../topology/desk-demo.yaml");
+    const SAMPLE: &str = include_str!("../../../topology/sample.yaml");
 
     #[test]
     fn a_valid_single_hub_topology_is_reached_whole() {
-        let t = parse_str(DESK).unwrap();
+        let t = parse_str(SAMPLE).unwrap();
         let (sub, skipped) = updatable(&t);
         assert!(skipped.is_empty());
         assert_eq!(sub.nodes.len(), t.nodes.len());
@@ -274,7 +274,7 @@ nodes:
         assert_eq!(sub.links.len(), 1);
     }
 
-    /// The desk demo's 親機 and bus with `children` NUCLEO-F401RE 子機 on I2C,
+    /// The sample's 親機 and bus with `children` NUCLEO-F401RE 子機 on I2C,
     /// listed before the 親機 when `hub_last`.
     fn fan(children: usize, hub_last: bool) -> String {
         let hub = "  - id: hub
@@ -534,7 +534,7 @@ links:
     fn for_generated_topologies_reach_is_the_compiled_order_and_every_node_is_told() {
         use dagon_format::header::target_tag;
         use dagon_format::topology::TopologyView;
-        // ponytail: a small LCG instead of a property-testing crate; 400 shapes.
+        // a small LCG instead of a property-testing crate; 400 shapes.
         let mut seed: u64 = 0x5eed_7090;
         let mut next = |n: usize| {
             seed = seed

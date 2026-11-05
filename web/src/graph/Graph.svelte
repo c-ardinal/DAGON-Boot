@@ -55,7 +55,7 @@
     chips?: Record<string, Chip>;
     /** The user's zoom on top of the fit (1 = fitted). */
     zoom?: number;
-    /** Nodes being written: how full their water is, 0–100 (SC-O5). */
+    /** Nodes being written: how full their water is, 0–100. */
     fill?: Record<string, number>;
     /** Room the floating windows take on the left and right (px): the graph centres in what is left. */
     inset?: { left: number; right: number; bottom?: number };
@@ -620,7 +620,7 @@
   .bundle.open .wire.shared {
     stroke-dasharray: 6 4;
   }
-  /* ◇ not updatable yet: paper, dashed, never red (V-23). */
+  /* ◇ not updatable yet: paper, dashed, never red. */
   .bundle.uns .wire {
     stroke: var(--c-paper);
     stroke-dasharray: 2 4;

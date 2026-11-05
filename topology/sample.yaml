@@ -1,6 +1,6 @@
-# Desk demo: RP2040 hub, NUCLEO-F401RE on I2C, M5StopWatch on UART.
+# Sample: RP2040 hub, NUCLEO-F401RE on I2C, M5StopWatch on UART.
 dagon: 1
-name: desk-demo
+name: sample
 
 nodes:
   - id: hub

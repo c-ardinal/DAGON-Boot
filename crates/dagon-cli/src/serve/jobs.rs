@@ -54,7 +54,7 @@ pub struct Server {
     /// The folder projects may be opened or created under; unset: the
     /// user's home.
     pub home: std::sync::OnceLock<PathBuf>,
-    /// The simulated desk of `dagon demo`; none for a real hub.
+    /// The simulator of `dagon demo`; none for a real hub.
     pub sim: std::sync::OnceLock<Arc<super::SimDevice>>,
     /// Public key the page verifies releases with: given at start, then
     /// the open project's.

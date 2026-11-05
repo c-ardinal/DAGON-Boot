@@ -21,7 +21,7 @@
   import { topoDiff } from './app/define/diff.ts';
   import { fromYaml, type Topo } from './app/define/model.ts';
   import { problemChip } from './app/define/problems.ts';
-  import { DESK_DEMO, DESK_DEMO_YAML } from './app/sample.ts';
+  import { SAMPLE_CONFIG, SAMPLE_YAML } from './app/sample.ts';
   import { Start, type StartChoice } from './app/start.svelte.ts';
   import Menu from './screens/Menu.svelte';
   import Restart from './screens/Restart.svelte';
@@ -61,7 +61,7 @@
   if (serial || dev) dagonReady().catch(() => undefined);
 
   let opened: Transport | null = null;
-  /** `dagon demo`'s simulated desk through serve, made once serve says it has one; null for a real hub. */
+  /** `dagon demo`'s simulator through serve, made once serve says it has one; null for a real hub. */
   let simStand: SimStand | null = null;
   function simHub(): SimStand | null {
     const s = cli.sim;
@@ -87,7 +87,7 @@
       return ports.chooseAndOpen();
     },
     timer: true,
-    // The simulated desk's clock runs at the demo's speed; a real hub keeps the default.
+    // The simulator's clock runs at the demo's speed; a real hub keeps the default.
     get clock() {
       return stand?.clock ?? simHub()?.clock;
     },
@@ -107,19 +107,19 @@
     trialMs: (id) => trialMs(d.doc.topo.nodes.find((n) => n.id === id)?.mcu ?? ''),
   });
 
-  /** `dagon serve` (§8): the page is always its page; K0/K3 when it cannot be reached. */
+  /** `dagon serve`: the page is always its page; K0/K3 when it cannot be reached. */
   const cli = new Cli();
-  /** The 定義 document: the project's 構成 as edited (§5.2: its YAML is the one source of truth). */
+  /** The 定義 document: the project's 構成 as edited (its YAML is the one source of truth). */
   const d = new Define();
   /** DAGON's link to its agent through serve (development: `?agent` stands in for serve's routes). */
   const agentStandIn = dev && params.has('agent');
   const agent = new Agent(agentStandIn ? agentMock(params, () => d.config.yaml) : (m, p, b) => cli.api(m, p, b));
   if (agentStandIn) void agent.refresh();
-  /** Web Serial, which the page never uses while it drives the simulated desk. */
+  /** Web Serial, which the page never uses while it drives the simulator. */
   const ports = webSerial(serial, () => cli.sim !== null);
   cli.onDevice = (need) => (need ? op.handOver() : op.cliReturned());
 
-  /** SC-S0 until a project is open (§7.2b); then 定義 and 運用. */
+  /** The start screen until a project is open; then 定義 and 運用. */
   let screen = $state<'start' | 'work'>('start');
   const start = new Start({
     cli,
@@ -132,7 +132,7 @@
     // Development stand-ins (?mock, ?sim) have no serve: an unsaved 構成 on the page.
     local: dev ? (c) => startLocal(c) : null,
   });
-  /** `#mode=operate` / `#mode=define` (§5.2): the mode a reload or a shared URL comes back to. */
+  /** `#mode=operate` / `#mode=define`: the mode a reload or a shared URL comes back to. */
   const wantMode = /(?:^|[#&])mode=(operate|define)\b/.exec(globalThis.location?.hash ?? '')?.[1] as 'operate' | 'define' | undefined;
 
   /**
@@ -150,7 +150,7 @@
       void agent.refresh();
       // The project's MCU and board definitions; the builtin set when serve has none (or no serve).
       useServedDefinitions(await cli.definitions());
-      // A project open in serve opens at once; without one the page stays on SC-S0.
+      // A project open in serve opens at once; without one the page stays on the start screen.
       if (cli.has('project')) {
         const p = await cli.project();
         start.recent = (p.recent ?? []).slice(0, 5);
@@ -168,8 +168,8 @@
     if (key) set_release_key(key);
   }
 
-  /** The open project's 構成 (its YAML through serve): 運用 when it has no problems, else 定義 (§7.2b). */
-  // SC-S0 is reached only through `leave` (menu, 最初からやり直す), so no unsaved edit is here when a project opens.
+  /** The open project's 構成 (its YAML through serve): 運用 when it has no problems, else 定義. */
+  // The start screen is reached only through `leave` (menu, 最初からやり直す), so no unsaved edit is here when a project opens.
   async function openWork(want?: 'operate' | 'define') {
     const yaml = await cli.loadTopology().catch(() => null);
     // 呼び名 and positions live beside the YAML (GET /v1/layout).
@@ -209,7 +209,7 @@
     const m = want !== 'define' && d.operable === 'ok' ? 'operate' : 'define';
     mode = 'define';
     switchMode(m);
-    // #mode=operate on a 構成 that cannot be operated: 定義 with the reason (§5.2).
+    // #mode=operate on a 構成 that cannot be operated: 定義 with the reason.
     if (want === 'operate' && m === 'define') lock(d.operable);
   }
 
@@ -218,11 +218,11 @@
     local = true;
     op.reset();
     d.reset();
-    if (c === 'sample') d.load(fromYaml(DESK_DEMO_YAML, Object.fromEntries(DESK_DEMO.nodes.map((n) => [n.id, n.name]))), DESK_DEMO_YAML);
+    if (c === 'sample') d.load(fromYaml(SAMPLE_YAML, Object.fromEntries(SAMPLE_CONFIG.nodes.map((n) => [n.id, n.name]))), SAMPLE_YAML);
     enterWork('define');
   }
 
-  /** SC-M: the menu under the header, and its one confirmation (M53). */
+  /** The menu under the header, and its one confirmation. */
   let menuOpen = $state(false);
   let helpOpen = $state(false);
   let restartOpen = $state(false);
@@ -241,7 +241,7 @@
     void start.choose(c);
   }
 
-  /** "最初からやり直す": the page's records go and SC-S0 opens; the project's files stay (§7.20). */
+  /** "最初からやり直す": the page's records go and the start screen opens; the project's files stay. */
   function restart() {
     if (stopped('project')) return void (restartOpen = false);
     restartOpen = false;
@@ -287,13 +287,13 @@
     op.takeFile(name, bytes);
   }
 
-  /** 運用 / 定義 (§5). The define document goes to the operate canvas when leaving define mode. */
+  /** 運用 / 定義. The define document goes to the operate canvas when leaving define mode. */
   let mode = $state<'operate' | 'define'>('define');
-  const busyStates = ['L19', 'L20', 'L21', 'L22', 'L24'];
+  const busyStates = ['writing', 'hubRestarting', 'reconnectNeeded', 'stopped', 'recovering'];
   const modeLocked = $derived(busyStates.includes(op.state));
 
   function switchMode(m: 'operate' | 'define') {
-    // 運用 only with a 構成 that has no problems (§5.2; parts not updatable yet are skipped there); the YAML decides, never the 親機.
+    // 運用 only with a 構成 that has no problems (parts not updatable yet are skipped there); the YAML decides, never the 親機.
     if (m === 'operate' && d.operable !== 'ok') return lock(d.operable);
     // ... and only the saved one, the 構成 build, sign and release use too.
     if (m === 'operate' && autosave.pending) {
@@ -304,8 +304,8 @@
   }
 
   function enterMode(m: 'operate' | 'define') {
-    // A file checked against another 構成 (L16–L18, e.g. after "ファイルの構成を取り込む") is checked again.
-    const recheck = m === 'operate' && op.file !== null && ['L16', 'L17', 'L18'].includes(op.state) && op.config?.yaml !== d.config.yaml;
+    // A file checked against another 構成 (fileRefused, otherTopology or fileReady, e.g. after "ファイルの構成を取り込む") is checked again.
+    const recheck = m === 'operate' && op.file !== null && ['fileRefused', 'otherTopology', 'fileReady'].includes(op.state) && op.config?.yaml !== d.config.yaml;
     if (m === 'operate') op.useConfig(d.config);
     mode = m;
     d.status = ANNOUNCE.A22(m === 'define');
@@ -328,7 +328,7 @@
 
   /** Development stand-ins (?mock, ?sim without serve): an unsaved 構成 on the page, nothing to save to. */
   let local = $state(false);
-  /** Edits go to the project's YAML by themselves (UC-D04); 保存 saves at once. */
+  /** Edits go to the project's YAML by themselves; 保存 saves at once. */
   const autosave = new Autosave(d, {
     put: (yaml) => cli.saveTopology(yaml),
     enabled: () => screen === 'work' && !local,
@@ -360,7 +360,7 @@
     if (cli.defsFailed) autosave.cancel();
   }
 
-  /** "ファイルの構成を取り込む" (§7.6): the release's 構成 replaces this one (undoable) and goes to the YAML. */
+  /** "ファイルの構成を取り込む": the release's 構成 replaces this one (undoable) and goes to the YAML. */
   async function importFileTopology() {
     const t = op.fileTopology;
     // Editing stopped (the lock table): nothing is replaced and nothing is saved.
@@ -368,7 +368,7 @@
     op.fileTopology = null;
     await save();
   }
-  const fileDiff = $derived(op.state === 'L17' && op.fileTopology ? topoDiff(d.doc.topo, op.fileTopology as unknown as Topo, d.doc.names) : []);
+  const fileDiff = $derived(op.state === 'otherTopology' && op.fileTopology ? topoDiff(d.doc.topo, op.fileTopology as unknown as Topo, d.doc.names) : []);
 
   /** Define mode's drawing scale: up to 32 ノード fit by zooming out; the canvas scrolls to pan. */
   let zoom = $state(1);
@@ -514,7 +514,7 @@
   let sheetW = $state(0);
   let sheetH = $state(0);
 
-  /** Ctrl+Z / Ctrl+Shift+Z anywhere but in a field; Delete and L on the canvas (§12.2); Ctrl+J the drawer. */
+  /** Ctrl+Z / Ctrl+Shift+Z anywhere but in a field; Delete and L on the canvas; Ctrl+J the drawer. */
   function defineKeys(e: KeyboardEvent) {
     if (screen === 'work' && e.key.toLowerCase() === 'j' && (e.ctrlKey || e.metaKey)) {
       e.preventDefault();
@@ -569,7 +569,7 @@
   });
   /**
    * An allowed device came (back): while dagon-host reopens the rebooted hub
-   * (L20) it is a candidate; once that is over (L21) the page takes it by
+   * (hubRestarting) it is a candidate; once that is over (reconnectNeeded) the page takes it by
    * itself when it is the hub on trial with the version just sent.
    */
   ports.on('connect', (e) => {
@@ -584,7 +584,7 @@
   }
   async function hubConnected(port: SerialPort) {
     if (opened instanceof WebSerialTransport) opened.arrived(port);
-    if (op.state !== 'L21') return;
+    if (op.state !== 'reconnectNeeded') return;
     const t = new WebSerialTransport(port);
     const took = await op.reconnectHub(async () => {
       await t.open();
@@ -663,9 +663,9 @@
   ]);
 
   /** States that show the update's progress (node chips, percent, the dot number). */
-  const UPDATING: ReadonlySet<string> = new Set(['L19', 'L20', 'L21', 'L22', 'L23', 'L24', 'L25']);
+  const UPDATING: ReadonlySet<string> = new Set(['writing', 'hubRestarting', 'reconnectNeeded', 'stopped', 'done', 'recovering', 'recoverFailed']);
   /** States whose dot number and update-order rows show percent. */
-  const PERCENT: ReadonlySet<string> = new Set(['L19', 'L20', 'L21', 'L22', 'L24']);
+  const PERCENT: ReadonlySet<string> = new Set(['writing', 'hubRestarting', 'reconnectNeeded', 'stopped', 'recovering']);
   const CHIP: Record<Progress['stage'], string> = {
     waiting: NODE.waiting,
     writing: NODE.writing,
@@ -682,7 +682,7 @@
   const FILLING_STAGES: ReadonlySet<Progress['stage']> = new Set(['writing', 'lastResort', 'rebooting']);
   const updating = $derived(UPDATING.has(op.state));
   const diffChips = $derived(Object.fromEntries(fileDiff.flatMap((r) => r.nodes).map((id) => [id, { chip: DIFF.chip, spoken: DIFF.spoken, silent: true }])));
-  /** 案: ponytail: a flat minute per node, the copy's 目安; measure per link and image size if it misleads. */
+  /** a flat minute per node, the copy's 目安; measure per link and image size if it misleads. */
   const MINUTES_PER_NODE = 1;
   /** On the cards while and after writing: → the new version, then 前のバージョンに戻った / 書き込めなかった; nothing once confirmed. */
   const RESULT: Partial<Record<Progress['stage'], { word: string; silent: boolean }>> = {
@@ -758,7 +758,7 @@
     return id && d.config.reach.includes(id) ? { [id]: { chip: BUILD.state.running, spoken: BUILD.state.running, silent: false } } : {};
   });
   const chips = $derived(updating ? progressChips : diffChips);
-  /** The water in each node while it is written (L19, L20, L24). */
+  /** The water in each node while it is written (writing, hubRestarting, recovering). */
   const fill = $derived(PERCENT.has(op.state) ? Object.fromEntries(Object.keys(waterOf(op.progress)).map((id) => [id, op.percentOf(id, nowMs)])) : {});
   const percent = $derived(
     PERCENT.has(op.state) ? Object.fromEntries(Object.keys(op.progress).map((id) => [id, op.percentOf(id, nowMs)])) : {},
@@ -766,13 +766,13 @@
   // The comparison stays while the update runs (P14: never silently replaced).
   /** The refusal modal: why the package cannot be written and what to do; closing leaves the band's buttons. */
   let refusalClosed = $state<ReleaseFile | null>(null);
-  const refusalOpen = $derived(op.file !== null && (op.state === 'L16' || op.state === 'L17') && refusalClosed !== op.file);
+  const refusalOpen = $derived(op.file !== null && (op.state === 'fileRefused' || op.state === 'otherTopology') && refusalClosed !== op.file);
   /** A write that stopped at a node (back on its previous version, or not written): what happened and what to do, until closed. */
   let stopClosed = $state<string | null>(null);
-  const stopNode = $derived(op.state === 'L22' && op.failed ? (op.config?.nodes.find((n) => n.id === op.failed) ?? null) : null);
+  const stopNode = $derived(op.state === 'stopped' && op.failed ? (op.config?.nodes.find((n) => n.id === op.failed) ?? null) : null);
   const stopOpen = $derived(stopNode !== null && stopClosed !== op.failed);
   $effect(() => {
-    if (op.state !== 'L22') stopClosed = null;
+    if (op.state !== 'stopped') stopClosed = null;
   });
   const refusalWord = (v: ReleaseFile['verdict']) => (v === 'topology' ? FILE.topologyBad : v === 'format' ? FILE.notRelease : FILE.sourceBad);
 
@@ -812,13 +812,13 @@
     if (layout === 'narrow' || !(mode === 'define' ? partsOpen : orderOpen)) partsW = 0;
   });
   /** Node actions in the detail: while watching, with nothing running. */
-  const nodeActions = $derived(['L12', 'L13', 'L23'].includes(op.state));
+  const nodeActions = $derived(['ready', 'nodesSilent', 'done'].includes(op.state));
 
-  /** SC-O7 only after the automatic reconnect failed (L21); Escape leaves the same button in the band. */
+  /** The reconnect dialog only after the automatic reconnect failed (reconnectNeeded); Escape leaves the same button in the band. */
   let dialogDismissed = $state(false);
-  const dialogOpen = $derived(op.state === 'L21' && !dialogDismissed);
+  const dialogOpen = $derived(op.state === 'reconnectNeeded' && !dialogDismissed);
   $effect(() => {
-    if (op.state !== 'L21') dialogDismissed = false;
+    if (op.state !== 'reconnectNeeded') dialogDismissed = false;
   });
   /** Clock for M27 (dagon-host's clock) and the elapsed time (wall clock), once a second while they show. */
   let nowMs = $state(0);
@@ -878,7 +878,7 @@
   ]);
   $effect(() => {
     // Again on entering 書込 and after each write (the written package was kept).
-    if (mode === 'operate' && (op.state === 'L12' || op.state === 'L23')) untrack(() => void loadVersions());
+    if (mode === 'operate' && (op.state === 'ready' || op.state === 'done')) untrack(() => void loadVersions());
   });
   /** 書き込む while watching: the chosen version, checked against the 構成, to the checked cards. */
   async function writeChosen() {
@@ -889,7 +889,7 @@
       return;
     }
     op.takeFile(pkg.name, pkg.bytes);
-    if (op.state === 'L18') await op.update();
+    if (op.state === 'fileReady') await op.update();
   }
   $effect(() => {
     if (op.keepFailed) untrack(() => (notice = { word: WRITE.keepFailed.label, error: true, detail: WRITE.keepFailed.detail }));
@@ -903,10 +903,10 @@
       .slice(-300),
   );
 
-  /** M27: seconds left of the automatic reconnect, in 5 s steps (L20). */
+  /** M27: seconds left of the automatic reconnect, in 5 s steps (hubRestarting). */
   const RECONNECT_STEP_S = 5;
   const reconnectLeft = $derived(
-    op.reconnectUntil === null || op.state !== 'L20'
+    op.reconnectUntil === null || op.state !== 'hubRestarting'
       ? null
       : Math.ceil(Math.max(0, (op.reconnectUntil - nowMs) / 1000) / RECONNECT_STEP_S) * RECONNECT_STEP_S,
   );
@@ -922,14 +922,14 @@
   /** The lock table's states now, leftmost first. */
   const lockStates = $derived(
     activeStates({
-      // ponytail: the page has no demo playback of its own yet; `dagon demo`'s desk is driven by the user like a real one.
+      // the page has no demo playback of its own yet; `dagon demo`'s simulator is driven by the user like a real one.
       demo: false,
-      updating: ['L19', 'L20', 'L21'].includes(op.state),
-      recovering: op.state === 'L24',
+      updating: ['writing', 'hubRestarting', 'reconnectNeeded'].includes(op.state),
+      recovering: op.state === 'recovering',
       flashing: running((k) => k === 'flash'),
       building: running((k) => BUILD_KINDS.has(k)),
       unsaved: autosave.pending && !local,
-      connecting: ['L03', 'L06', 'L08'].includes(op.state),
+      connecting: ['choosing', 'checking', 'scanning'].includes(op.state),
       disconnected: !connected,
       thinking,
       // The development stand-in answers for serve's agent routes, so DAGON is not stopped by its absence.
@@ -1005,7 +1005,7 @@
       return;
     }
     if (connected) return void op.disconnect();
-    if (op.state === 'L05' && op.failure === 'unavailable') return location.reload();
+    if (op.state === 'portFailed' && op.failure === 'unavailable') return location.reload();
     if (mode === 'define' && d.operable === 'ok') op.useConfig(d.config);
     void op.connect();
   }
@@ -1016,7 +1016,7 @@
       stuck: op.recoverTarget?.name,
       responding: op.responding,
       unwritten,
-      rest: op.rest && op.state === 'L18',
+      rest: op.rest && op.state === 'fileReady',
       finish: op.finished,
       refused: op.returnRefused?.kind,
       sim: cli.sim !== null,
@@ -1034,19 +1034,19 @@
   );
   const dot = $derived.by((): Dot | null => {
     const c = op.config;
-    if (!c || !connected || op.state === 'L06') return null;
+    if (!c || !connected || op.state === 'checking') return null;
     if (PERCENT.has(op.state)) {
-      const stopped = op.state === 'L22';
+      const stopped = op.state === 'stopped';
       const progress = { label: CANVAS.dotProgress, value: op.overall, unit: stopped ? CANVAS.dotStopped : CANVAS.dotPercent, name: CANVAS.dotProgressName(op.overall, stopped) };
       if (op.startedAt === null) return progress;
-      // S28 and SC-O5: 経過 under the number, 残り beside it (the estimate less the time gone).
+      // 経過 under the number, 残り beside it (the estimate less the time gone).
       const gone = Math.max(0, wallMs - op.startedAt);
-      const nodes = op.state === 'L24' ? 1 : Math.max(1, op.targets.length);
+      const nodes = op.state === 'recovering' ? 1 : Math.max(1, op.targets.length);
       const left = nodes * MINUTES_PER_NODE * 60_000 - gone;
       return { ...progress, sub: [TIME.elapsed, TIME.clock(gone)] as const, more: [[TIME.left, TIME.about(left)]] as const };
     }
-    if (op.state === 'L08' || op.state === 'L09') return { label: CANVAS.dotFound, value: op.found, name: CANVAS.dotFoundName(op.found) };
-    // Out of the nodes updating reaches: the others are never watched (V-23).
+    if (op.state === 'scanning' || op.state === 'scanned') return { label: CANVAS.dotFound, value: op.found, name: CANVAS.dotFoundName(op.found) };
+    // Out of the nodes updating reaches: the others are never watched.
     const n = op.reach.length;
     return { label: CANVAS.dotResponding, value: op.responding, of: n, name: CANVAS.dotRespondingName(op.responding, n) };
   });
@@ -1091,7 +1091,7 @@
     });
   });
   $effect(() => {
-    if (op.state === 'L23') untrack(() => (notice = { word: fillIn(WRITE.toast.done, { n: op.targets.length }) }));
+    if (op.state === 'done') untrack(() => (notice = { word: fillIn(WRITE.toast.done, { n: op.targets.length }) }));
   });
   // A consent of a version this dagon does not read: a failure the user must notice.
   $effect(() => {
@@ -1106,14 +1106,14 @@
     if (cause && !untrack(() => refusalOpen || stopNode !== null)) untrack(() => (notice = { word: cause, error: cause.startsWith('×'), detail: next.sentence }));
   });
 
-  /** 書き込む: the 親機 answered nothing (L07) → writing directly over USB; otherwise the next step of writing through DAGON. */
+  /** 書き込む: the 親機 answered nothing (silentHub) → writing directly over USB; otherwise the next step of writing through DAGON. */
   const writeAction = $derived(
-    op.state === 'L07' ? null : op.state === 'L12' && !op.latestMissing && band.secondary.some((b) => b.action === 'useLatest') ? 'useLatest' : (band.primary?.action ?? null),
+    op.state === 'silentHub' ? null : op.state === 'ready' && !op.latestMissing && band.secondary.some((b) => b.action === 'useLatest') ? 'useLatest' : (band.primary?.action ?? null),
   );
   const writeControl = $derived(writeAction ? CONTROL_OF[writeAction] : 'flash');
   /** States 書き込む writes in directly: the hub answers and nothing runs. */
-  const WRITABLE: ReadonlySet<string> = new Set(['L12', 'L13', 'L23']);
-  const writeOff = $derived(op.state === 'L03' || (op.state !== 'L07' && !WRITABLE.has(op.state) && (writeAction === null || !RUNS.has(writeAction))));
+  const WRITABLE: ReadonlySet<string> = new Set(['ready', 'nodesSilent', 'done']);
+  const writeOff = $derived(op.state === 'choosing' || (op.state !== 'silentHub' && !WRITABLE.has(op.state) && (writeAction === null || !RUNS.has(writeAction))));
   function write() {
     if (writeOff) return;
     if (writeAction === null) return void (factory = { id: null });
@@ -1152,7 +1152,7 @@
       case 'reselect':
         return void op.connect();
       case 'reconnect':
-        return void (op.state === 'L20' || op.state === 'L21' ? reconnectChosen() : op.connect());
+        return void (op.state === 'hubRestarting' || op.state === 'reconnectNeeded' ? reconnectChosen() : op.connect());
       case 'chooseFile':
       case 'updateResponding':
       case 'otherFile':
@@ -1317,7 +1317,7 @@
       config={op.config}
       live={op.live}
       {connected}
-      sending={op.state === 'L10'}
+      sending={op.state === 'sending'}
       selected={op.selected}
       onselect={(k) => op.select(op.selected === k ? null : k)}
       {dot}
@@ -1328,7 +1328,7 @@
       inset={{ left: partsW, right: sheetW }}
       checks={Object.fromEntries(op.reach.map((n) => [n.id, !op.skip.has(n.id)]))}
       oncheck={(id) => op.toggleSkip(id)}
-      checksLocked={updating && !['L23', 'L25'].includes(op.state)}
+      checksLocked={updating && !['done', 'recoverFailed'].includes(op.state)}
     />
   </main>
 {/snippet}

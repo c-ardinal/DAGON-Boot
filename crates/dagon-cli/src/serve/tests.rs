@@ -144,7 +144,7 @@ fn definitions_are_served_behind_the_same_guards_with_the_projects_boards() {
     std::fs::write(
         a.dir.join("dagon.toml"),
         format!(
-            "{toml}\n[board.desk-pico]\nproduct = \"Desk Pico\"\nmcu = \"rp2040\"\n\
+            "{toml}\n[board.my-pico]\nproduct = \"My Pico\"\nmcu = \"rp2040\"\n\
              flash_bytes = 0x40_0000\ndrawing = \"pico\"\n\
              default_link = {{ kind = \"i2c\", addr = 0x44, control = \"full\" }}\n"
         ),
@@ -168,7 +168,7 @@ fn definitions_are_served_behind_the_same_guards_with_the_projects_boards() {
     );
     assert_eq!(st, 200, "{body}");
     let reg = dagon_topology::defs::Registry::from_json(&body).unwrap();
-    assert_eq!(reg.board("desk-pico").unwrap().product, "Desk Pico");
+    assert_eq!(reg.board("my-pico").unwrap().product, "My Pico");
     assert!(reg.mcu("esp32s3").is_some());
     // Nothing local leaves: no project or DAGON source path, no command.
     let plain = body.replace("\\\\", "\\");
@@ -622,11 +622,11 @@ fn a_projects_own_words_reach_the_page_only_as_plain_names() {
     std::fs::write(
         a.dir.join("dagon.toml"),
         format!(
-            "{toml}\n[board.desk-pico]\nproduct = \"{secret}\"\nmcu = \"rp2040\"\n\
+            "{toml}\n[board.my-pico]\nproduct = \"{secret}\"\nmcu = \"rp2040\"\n\
              flash_bytes = 0x40_0000\ndrawing = \"pico\"\n\
              header = [{{ pin = \"GPIO4\", label = \"{secret}\" }}]\n\
              default_link = {{ kind = \"i2c\", addr = 0x44, control = \"full\" }}\n\
-             [board.desk-two]\nproduct = \"Desk Two\"\nmcu = \"rp2040\"\n\
+             [board.my-two]\nproduct = \"My Two\"\nmcu = \"rp2040\"\n\
              flash_bytes = 0x40_0000\ndrawing = \"pico\"\n\
              default_link = {{ kind = \"i2c\", addr = 0x45, control = \"full\" }}\n"
         ),
@@ -652,8 +652,8 @@ fn a_projects_own_words_reach_the_page_only_as_plain_names() {
             .find(|b| b["id"] == id)
             .map(|b| b["product"].clone())
     };
-    assert_eq!(product("desk-pico"), Some("project-text".into()));
-    assert_eq!(product("desk-two"), Some("Desk Two".into()));
+    assert_eq!(product("my-pico"), Some("project-text".into()));
+    assert_eq!(product("my-two"), Some("My Two".into()));
     // Builtin boards keep their own product names.
     assert_eq!(
         product("waveshare-rp2040-touch-lcd-1.28"),
@@ -909,7 +909,7 @@ fn a_new_project_is_created_under_home_and_opened() {
     assert_eq!(st, 200);
     assert!(std::fs::read_to_string(home.join("sample/topology.yaml"))
         .unwrap()
-        .contains("desk-demo"));
+        .contains("sample"));
 }
 
 #[test]
@@ -1381,7 +1381,7 @@ fn recent_projects_are_kept_newest_first_and_only_under_home() {
 fn a_folder_with_only_a_topology_is_offered_dagon_toml() {
     let (a, home) = bare("yamlonly");
     std::fs::create_dir_all(home.join("y")).unwrap();
-    std::fs::write(home.join("y/desk.yaml"), YAML).unwrap();
+    std::fs::write(home.join("y/main.yaml"), YAML).unwrap();
     let (_, fs) = get(&a, "/v1/fs");
     assert!(
         fs.contains("\"name\":\"y\",\"project\":false,\"yaml\":true"),
@@ -1389,7 +1389,7 @@ fn a_folder_with_only_a_topology_is_offered_dagon_toml() {
     );
     let (st, body) = post(&a, "/v1/project/open", serde_json::json!({ "path": "y" }));
     assert_eq!(st, 428, "{body}");
-    assert!(body.contains("desk.yaml"), "{body}");
+    assert!(body.contains("main.yaml"), "{body}");
     // Refused: outside home, the home itself, a key folder, another file.
     assert_eq!(
         post(&a, "/v1/project/init", serde_json::json!({ "path": ".." })).0,
@@ -1422,7 +1422,7 @@ fn a_folder_with_only_a_topology_is_offered_dagon_toml() {
     assert_eq!(st, 200, "{body}");
     assert!(std::fs::read_to_string(home.join("y/dagon.toml"))
         .unwrap()
-        .contains("topology = \"desk.yaml\""));
+        .contains("topology = \"main.yaml\""));
     assert_eq!(get(&a, "/v1/topology"), (200, YAML.to_string()));
     let (_, hello) = get(&a, "/v1/hello");
     assert!(!serde_json::from_str::<serde_json::Value>(&hello).unwrap()["release_key"].is_null());
@@ -1505,11 +1505,11 @@ fn a_page_that_stops_reading_events_is_dropped() {
     drop(s);
 }
 
-/// A serve with dagon demo's simulated desk.
+/// A serve with dagon demo's simulator.
 fn demo_area(name: &str) -> Area {
     let a = start(name);
     let key = ed25519_compact::KeyPair::from_seed(ed25519_compact::Seed::new([5; 32]));
-    let hub = crate::demo::desk(&key, None, 1).unwrap();
+    let hub = crate::demo::sim_hub(&key, None, 1).unwrap();
     let _ = a
         .server
         .sim

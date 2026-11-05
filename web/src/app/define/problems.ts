@@ -1,6 +1,6 @@
-// The problem list (SC-D3): topo_check's issues with the page's words. The
-// check itself is dagon-topology's; this file only names each rule (S07),
-// says how to fix it (§11.2) and finds the item and field it points at.
+// The problem list: topo_check's issues with the page's words. The
+// check itself is dagon-topology's; this file only names each rule,
+// says how to fix it and finds the item and field it points at.
 import { topo_check } from '../../wasm/dagon.ts';
 import { topo_cut } from '../../wasm/pkg/dagon_wasm.js';
 import { RULE_FIX, RULE_SHORT, type FixWords } from '../copy.ts';
@@ -8,7 +8,7 @@ import { boardMissing, flashTooSmall, MAX_NODES, type Doc } from './model.ts';
 
 export interface Issue {
   rule: string;
-  /** `info`: a valid part updating skips for now (V-23), never a problem to fix. */
+  /** `info`: a valid part updating skips for now, never a problem to fix. */
   severity: 'error' | 'warning' | 'info';
   /** YAML path such as `links[0].control.nrst`. */
   path: string;
@@ -18,7 +18,7 @@ export interface Issue {
 export interface Problem extends Issue {
   /** S07 short name. */
   short: string;
-  /** §11.2: how to fix it, one sentence. */
+  /** How to fix it, one sentence. */
   sentence: string;
   /** The item to select (`node:<id>`, `link:<to>`, `bus:<i>`) or null. */
   select: string | null;
@@ -47,7 +47,7 @@ function where(path: string, doc: Doc): Where {
   return { rest: path };
 }
 
-/** The chip of a problem (S23, S45): ! an error, ▲ a caution, ◇ a part not updatable yet. */
+/** The chip of a problem: ! an error, ▲ a caution, ◇ a part not updatable yet. */
 export function problemChip(p: Pick<Issue, 'rule' | 'severity'>): { mark: '!' | '▲' | '◇'; kind: 'error' | 'warning' | 'unsupported' } {
   // V-24 (a hop the firmware cannot do yet) is the same kind of "not yet" as V-23.
   if (p.rule === 'V-23' || p.rule === 'V-24') return { mark: '◇', kind: 'unsupported' };
@@ -56,7 +56,7 @@ export function problemChip(p: Pick<Issue, 'rule' | 'severity'>): { mark: '!' | 
 
 const nameOf = (doc: Doc, id: string | undefined) => (id ? (doc.names[id] ?? id) : '');
 
-/** §11.2, filled with the names of the nodes and links the issue is about. */
+/** The fix sentence, filled with the names of the nodes and links the issue is about. */
 function sentence(i: Issue, w: Where, doc: Doc, skipped: Record<string, string>): string {
   const t = doc.topo;
   const link = w.link !== undefined ? t.links?.[w.link] : undefined;
@@ -87,7 +87,7 @@ const RANK: Record<Issue['severity'], number> = { error: 0, warning: 1, info: 2 
 
 const kib = (b: number) => (b >= 1 << 20 ? `${b >> 20} MiB` : `${b >> 10} KiB`);
 
-/** The board fields of nodes chosen by MCU (§4.3): missing (B-01, before making the project) or too small (B-02). */
+/** The board fields of nodes chosen by MCU: missing (B-01, before making the project) or too small. */
 function boardIssues(doc: Doc): Issue[] {
   return doc.topo.nodes.flatMap((n, i): Issue[] => {
     const need = flashTooSmall(doc, n.id);

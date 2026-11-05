@@ -1,5 +1,5 @@
 # Defaults for the dagon CLI. Paths are relative to this file.
-topology = "topology/desk-demo.yaml"
+topology = "topology/sample.yaml"
 release = "out/release-latest.dgb"
 provision_dir = "out/provision"
 

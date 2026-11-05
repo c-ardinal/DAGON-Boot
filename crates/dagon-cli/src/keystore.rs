@@ -308,10 +308,10 @@ mod tests {
         assert!(!e.contains(KEY) && e.contains("register it again"), "{e}");
     }
 
-    /// Manual, Windows only (the user's own Credential Manager): one entry
-    /// under a test account is written, read, and removed.
+    /// Manual (the user's own OS store: Credential Manager, Keychain or
+    /// Secret Service): one entry under a test account is written, read,
+    /// and removed. Ignored in CI, which has no unlocked store.
     /// `cargo test -p dagon-cli os_store_round_trip -- --ignored`
-    #[cfg(windows)]
     #[test]
     #[ignore]
     fn os_store_round_trip() {

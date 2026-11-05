@@ -94,6 +94,9 @@ pub struct Event {
     pub version: Version,
     /// On the VERIFY event of a written image: how long its phases took.
     pub times: Option<XferTimes>,
+    /// About the node's boot core, written before its app: its CONFIRM is
+    /// not the node's (the app is confirmed after it).
+    pub boot_core: bool,
 }
 
 /// How long one image's transfer took, by phase, in ms of the host's clock.
@@ -282,6 +285,7 @@ impl<T: Transport, C: Clock> Host<T, C> {
                 percent: 0,
                 version: v,
                 times: None,
+                boot_core: false,
             });
             self.show(node, ph, 0, v, reason(e).as_bytes()).await;
         }
@@ -297,7 +301,9 @@ impl<T: Transport, C: Clock> Host<T, C> {
         on_event: &mut dyn FnMut(Event),
     ) -> Result<Version, T::Error> {
         let running = st.hello.active_version;
-        let core = self.update_core(b, node, to, running, on_event).await?;
+        let core = self.update_core(b, node, to, running, on_event).await;
+        self.core_write = false;
+        let core = core?;
         let agent = self.update_agent(b, node, to, on_event).await?;
         if core || agent {
             let st = self.status(to).await?;
@@ -351,7 +357,7 @@ impl<T: Transport, C: Clock> Host<T, C> {
 
     /// The node's boot core from the release, before its app (an app may
     /// need the newer core): when the release has boot core images for the
-    /// node and the running core is none of them, the image for the idle
+    /// node and the running core's version is none of theirs, the image for the idle
     /// core slot goes in, is set pending, the node reboots, and the new
     /// core must be the confirmed one when the app (`app`, unchanged)
     /// answers again. `true` when a core was written.
@@ -372,11 +378,13 @@ impl<T: Transport, C: Clock> Host<T, C> {
         }
         let cs = self.boot_core_status(to).await?;
         let running = cs.slots.get(usize::from(cs.active)).copied();
+        // By version, as apps: a changed boot core is written only when its
+        // version (its boot crate's) was raised.
         let installed = cores.iter().any(|img| {
             img.get(..HEADER_SIZE)
                 .and_then(|h| <&[u8; HEADER_SIZE]>::try_from(h).ok())
-                .map(dagon_format::header::header_digest16)
-                .is_some_and(|d| running.is_some_and(|r| r.digest16 == d))
+                .and_then(|h| ImageHeader::parse(h).ok())
+                .is_some_and(|h| running.is_some_and(|r| r.version == h.version))
         });
         if installed {
             return Ok(false);
@@ -389,6 +397,7 @@ impl<T: Transport, C: Clock> Host<T, C> {
             .ok_or(Error::Format(dagon_format::FormatError::Truncated))?;
         let v = ImageHeader::parse(raw)?.version;
         let (hdr, body) = img.split_at(HEADER_SIZE);
+        self.core_write = true;
         self.emit(on_event, node, phase::TRANSFER, 0, v).await;
         let hello = self.hello(to).await?;
         let xfer = Xfer {
@@ -793,6 +802,7 @@ impl<T: Transport, C: Clock> Host<T, C> {
             percent,
             version,
             times: None,
+            boot_core: self.core_write,
         });
         self.show(node, ph, percent, version, &[]).await;
     }
@@ -811,6 +821,7 @@ impl<T: Transport, C: Clock> Host<T, C> {
             percent: 100,
             version,
             times: Some(times),
+            boot_core: self.core_write,
         });
         self.show(node, phase::VERIFY, 100, version, &[]).await;
     }

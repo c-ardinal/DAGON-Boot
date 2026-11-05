@@ -19,6 +19,8 @@ mod project;
 mod recent;
 mod sim;
 
+/// What may become a file name (node ids, package ids).
+pub(crate) use api::plain as plain_id;
 pub use sim::{Medium, SimDevice};
 mod ws;
 

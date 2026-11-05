@@ -20,6 +20,7 @@ mod flashdev;
 // Writes outside genfs: the one guarded path for generated files.
 #[allow(clippy::disallowed_methods)]
 mod genfs;
+mod kept;
 mod nodebuild;
 // Writes outside genfs: implements the atomic write genfs and the commands use.
 #[allow(clippy::disallowed_methods)]
@@ -28,6 +29,7 @@ mod scaffold;
 mod serial;
 mod serve;
 mod simrun;
+mod srcver;
 mod versions;
 
 use std::path::Path;
@@ -97,10 +99,13 @@ Usage:
   dagon deploy [<id>...] [--version <x.y.z>] [--yes] [--bootcore] [--port <name>]
         [--topology <yaml>] [--key <file>]
                                      build, sign both slots, release build and apply in one
-                                     go; version defaults to one patch above the last
-                                     release; lists node -> version and asks first;
-                                     --bootcore also builds each node's boot core for its
-                                     boot core slots (the node takes it before its app)
+                                     go; each node's version is its crate's Cargo.toml
+                                     version (--version must equal it); lists node ->
+                                     version and asks first; keeps the package in out/deploy;
+                                     each node's boot core goes in from its boot crate;
+                                     a node writes it (before its app) only when its version
+                                     differs from the running boot core's; --bootcore
+                                     makes a missing boot crate an error
   dagon flash <id> [--dry-run] [--yes] [--probe <vid:pid[:serial]> | --port <port> |
         --drive <path>] [--out <dir>] [--topology <yaml>] [--key <file>]
                                      first write as the node's MCU definition says (UF2

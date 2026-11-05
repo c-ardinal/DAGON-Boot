@@ -361,6 +361,13 @@ pub fn apply(args: &[&str]) -> Res {
 
     let mut host = serial::host(o.get("port"))?;
     let reg = crate::defs::registry(&cfg)?;
+    // Every package written is kept (out/deploy), so it can be written back later.
+    if let Some(k) = &key {
+        match crate::kept::store(&cfg, &t, k, &bundle) {
+            Ok(id) => println!("kept as {}/{id}.dgb", crate::kept::DIR),
+            Err(e) => eprintln!("warning: the package is not kept: {e}"),
+        }
+    }
     apply_bundle(&mut host, &reg, &bundle, &t, key.as_ref(), only)
 }
 

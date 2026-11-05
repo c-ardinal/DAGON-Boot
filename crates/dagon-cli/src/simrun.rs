@@ -419,4 +419,93 @@ mod tests {
         );
         assert!(unknown.is_err());
     }
+
+    /// A package of the F401 app `app` and its boot core `core` (slots A
+    /// and B, `len` bytes each).
+    fn with_core(w: &World, app: Version, core: Version, len: usize) -> Vec<u8> {
+        let t = dagon_topology::parse_str(YAML).unwrap();
+        let tag = topology_tag("seg");
+        let images = [
+            seg_img(&w.key, 0, app),
+            seg_img(&w.key, 1, app),
+            sign(
+                &w.key,
+                "stm32f401re",
+                image_kind::BOOTCORE,
+                &tag,
+                0,
+                core,
+                len,
+            ),
+            sign(
+                &w.key,
+                "stm32f401re",
+                image_kind::BOOTCORE,
+                &tag,
+                1,
+                core,
+                len,
+            ),
+        ];
+        dagon_sign::release::build(
+            dagon_topology::defs::Registry::builtin(),
+            &t,
+            &w.topology,
+            &images,
+            "core",
+            &w.key,
+        )
+        .unwrap()
+        .bundle
+    }
+
+    /// The F401's running boot core: (version, digest16).
+    fn running_core(w: &World) -> (Version, [u8; 16]) {
+        let cs = block_on(w.host().boot_core_status(SEG_AT)).unwrap();
+        let s = cs.slots[usize::from(cs.active)];
+        (s.version, s.digest16)
+    }
+
+    #[test]
+    fn a_boot_core_is_written_only_when_its_version_differs_from_the_running_one() {
+        let w = world().unwrap();
+        // A boot core of another version than the running one is written.
+        let mut confirms = Vec::new();
+        let out = block_on(w.host().apply(
+            &with_core(&w, NEW, NEW, 4000),
+            &w.topology,
+            &w.key.pk,
+            None,
+            &mut |e| {
+                if e.node == SEG && e.phase == dagon_proto::payload::phase::CONFIRM {
+                    confirms.push(e.boot_core);
+                }
+            },
+        ))
+        .unwrap();
+        assert!(
+            matches!(out[0].outcome, Outcome::Done(v) if v == NEW),
+            "{out:?}"
+        );
+        // The boot core's CONFIRM says it is the boot core's; the node's
+        // write ends with its app's.
+        assert_eq!(confirms, [true, false]);
+        let (v, written) = running_core(&w);
+        assert_eq!(v, NEW);
+        // The same version, even with other bytes, is not written again.
+        let app = Version::new(1, 2, 0);
+        let out = w.apply(&with_core(&w, app, NEW, 4004)).unwrap();
+        assert!(matches!(out[0], Outcome::Done(v) if v == app), "{out:?}");
+        assert_eq!(
+            running_core(&w),
+            (NEW, written),
+            "same version: not written"
+        );
+        // A raised version is written.
+        let core = Version::new(1, 2, 0);
+        let app = Version::new(1, 3, 0);
+        let out = w.apply(&with_core(&w, app, core, 4004)).unwrap();
+        assert!(matches!(out[0], Outcome::Done(v) if v == app), "{out:?}");
+        assert_eq!(running_core(&w).0, core);
+    }
 }

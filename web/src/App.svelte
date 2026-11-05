@@ -1,10 +1,11 @@
 <script lang="ts">
   import { tick, untrack } from 'svelte';
   import { bandOf } from './app/band.ts';
-  import { AGENT, ANNOUNCE, BAND, BUILD, BUTTON, CANVAS, DEFINE, DIFF, DRAWER, JOBS, SKELETON, WRITE, HUB, LOCK, SHEET, STATUS, ZOOM, HUB_TOGGLE, MODE, NODE, ORDER, PLAN, PRODUCT, RECONNECT, SAVE, SKIP, STEP, TIME } from './app/copy.ts';
+  import { AGENT, ANNOUNCE, BAND, BUILD, BUTTON, CANVAS, DEFINE, DIFF, DRAWER, JOBS, SKELETON, WRITE, HUB, LOCK, SHEET, STATUS, ZOOM, HUB_TOGGLE, MODE, NODE, ORDER, PRODUCT, RECONNECT, SAVE, SKIP, STEP, TIME } from './app/copy.ts';
   import { webSerial } from './app/connect.ts';
   import { HUB_LOCKED, hubOf, view, type Action } from './app/machine.ts';
-  import { Operate, waterOf, type Progress } from './app/operate.svelte.ts';
+  import { Operate, waterOf, type Progress, type ReleaseFile } from './app/operate.svelte.ts';
+  import { keptChoices, type Kept } from './app/kept.ts';
   import Graph, { type Chip, type Dot } from './graph/Graph.svelte';
   import Status from './screens/Status.svelte';
   import Drawer, { type DrawerTab } from './screens/Drawer.svelte';
@@ -34,7 +35,6 @@
   import CliPanel from './screens/define/CliPanel.svelte';
   import { Cli, jobReason, type Layout } from './app/define/cli.svelte.ts';
   import { CLI_LINK, CLI_STATE } from './app/copy.ts';
-  import FilePanel from './screens/FilePanel.svelte';
   import Reconnect from './screens/Reconnect.svelte';
   import Header from './screens/Header.svelte';
   import ZoomPill from './screens/ZoomPill.svelte';
@@ -43,14 +43,14 @@
   import FactoryModal from './screens/FactoryModal.svelte';
   import { answerConsent } from './app/factory.ts';
   import Toast, { type Notice } from './screens/Toast.svelte';
-  import { CONN, NOTICE, fill as fillIn } from './app/copy.ts';
+  import { CONN, FILE, NOTICE, fill as fillIn } from './app/copy.ts';
   import OrderList from './screens/OrderList.svelte';
   import { devHub } from './serial/devHub.ts';
   import { serveSim, type SimStand } from './serial/serveSim.ts';
   import { MockTransport } from './serial/mock.ts';
   import { WebSerialTransport, type Transport } from './serial/transport.ts';
   import Unsupported from './Unsupported.svelte';
-  import { dagonReady, mcuConnection, require_release_key, set_release_key, useDefinitions, versionText } from './wasm/dagon.ts';
+  import { dagonReady, mcuConnection, releaseVersions, require_release_key, set_release_key, trialMs, useDefinitions, versionText } from './wasm/dagon.ts';
 
   const params = new URLSearchParams(location.search);
   // The stand-in hubs are for development builds only.
@@ -101,6 +101,10 @@
     latest: async () => (cli.state === 'ready' ? await cli.latestRelease() : null) ?? (await stand?.latest?.()) ?? null,
     bootcore: async (id) => (cli.state === 'ready' ? await cli.bootcore(id) : null) ?? (await stand?.bootcore?.(id)) ?? null,
     stage0: async (id) => (cli.state === 'ready' ? await cli.stage0(id) : null),
+    // Every package written through DAGON is kept in the project (serve); without serve there is nowhere to keep it.
+    keep: async (bytes) => (cli.state === 'ready' ? (await cli.keep(bytes)) !== null : true),
+    // A node's % counts its trial against its MCU definition's [watchdog] trial_ms.
+    trialMs: (id) => trialMs(d.doc.topo.nodes.find((n) => n.id === id)?.mcu ?? ''),
   });
 
   /** `dagon serve` (§8): the page is always its page; K0/K3 when it cannot be reached. */
@@ -674,57 +678,58 @@
     previous: NODE.previous,
     unwritten: NODE.unwritten,
   };
-  const chipOf = ({ stage, reason }: Progress): Chip => {
-    const chip = (stage === 'refused' && reason && NODE.refused[reason]) || CHIP[stage];
-    return { chip, spoken: chip.slice(chip.indexOf(' ') + 1), silent: ['silent', 'refused', 'previous', 'cannotFix'].includes(stage) };
-  };
+  /** Stages in which a card shows → the new version and its one %. */
+  const FILLING_STAGES: ReadonlySet<Progress['stage']> = new Set(['writing', 'lastResort', 'rebooting']);
   const updating = $derived(UPDATING.has(op.state));
   const diffChips = $derived(Object.fromEntries(fileDiff.flatMap((r) => r.nodes).map((id) => [id, { chip: DIFF.chip, spoken: DIFF.spoken, silent: true }])));
   /** 案: ponytail: a flat minute per node, the copy's 目安; measure per link and image size if it misleads. */
   const MINUTES_PER_NODE = 1;
-  /** L18: what each target node gets ("↑ 1.0.0 → 1.1.0") and about how long it takes. */
-  const planChips = $derived(
-    Object.fromEntries(
-      op.targets.flatMap((id): [string, Chip][] => {
-        const to = op.fileVersions[id];
-        if (to === undefined) return [];
-        const from = op.live[id]?.hello?.activeVersion;
-        const [a, b] = [from === undefined ? PLAN.unknown : versionText(from), versionText(to)];
-        const same = from === to;
-        return [[id, { chip: same ? PLAN.same(b) : PLAN.up(a, b), spoken: same ? PLAN.sameName(b) : PLAN.upName(a, b), silent: false, note: same ? undefined : PLAN.estimate(MINUTES_PER_NODE) }]];
-      }),
-    ),
-  );
+  /** On the cards while and after writing: → the new version, then 前のバージョンに戻った / 書き込めなかった; nothing once confirmed. */
+  const RESULT: Partial<Record<Progress['stage'], { word: string; silent: boolean }>> = {
+    previous: { word: WRITE.previous, silent: false },
+    refused: { word: WRITE.failed, silent: true },
+    silent: { word: WRITE.failed, silent: true },
+    cannotFix: { word: WRITE.failed, silent: true },
+    unwritten: { word: WRITE.failed, silent: true },
+  };
+  const cardChipOf = (id: string, p: Progress): Chip | null => {
+    const to = op.fileVersions[id];
+    if (FILLING_STAGES.has(p.stage)) return to === undefined ? null : { chip: WRITE.to(versionText(to)), spoken: WRITE.to(versionText(to)), silent: false };
+    const r = RESULT[p.stage];
+    return r ? { chip: r.word, spoken: r.word.slice(2), silent: r.silent } : null;
+  };
   const progressChips = $derived(
     Object.fromEntries(
-      Object.entries(op.progress).map(([id, p]) => {
-        const c = chipOf(p);
+      Object.entries(op.progress).flatMap(([id, p]): [string, Chip][] => {
+        const c = cardChipOf(id, p);
+        if (!c) return [];
         // M27 beside the rebooting hub while the page reconnects by itself.
-        return [id, p.stage === 'rebooting' && reconnectLeft !== null ? { ...c, note: `${RECONNECT.auto} ${RECONNECT.left(reconnectLeft)}` } : c];
+        return [[id, p.stage === 'rebooting' && reconnectLeft !== null ? { ...c, note: `${RECONNECT.auto} ${RECONNECT.left(reconnectLeft)}` } : c]];
       }),
     ),
   );
-  /** ビルドする in 運用: build, then sign with the project's key; the jobs are serve's. */
-  let buildIds = $state<{ build: number | null; sign: number | null }>({ build: null, sign: null });
+  /** ビルドする in 準備: build every node (cargo skips unchanged ones), sign with the project's key, then make the release 書込 offers first; the jobs are serve's. */
+  let buildIds = $state<{ build: number | null; sign: number | null; release: number | null }>({ build: null, sign: null, release: null });
   let buildFailureOpen = $state(false);
   const jobOf = (id: number | null) => (id === null ? null : (cli.jobs.find((j) => j.id === id) ?? null));
   const buildJob = $derived(jobOf(buildIds.build));
   const signJob = $derived(jobOf(buildIds.sign));
+  const releaseJob = $derived(jobOf(buildIds.release));
   /** Where the build stands: null before any, else running, done or failed (signing counts as building). */
   const buildState = $derived.by(() => {
-    const jobs = [buildJob, signJob].filter((j) => j !== null);
+    const jobs = [buildJob, signJob, releaseJob].filter((j) => j !== null);
     if (jobs.length === 0) return null;
     if (jobs.some((j) => j.state === 'failed')) return 'failed';
-    if (signJob?.state === 'succeeded' || (buildJob?.state === 'succeeded' && !cli.hello?.key)) return 'done';
+    if (releaseJob?.state === 'succeeded' || (buildJob?.state === 'succeeded' && !cli.hello?.key)) return 'done';
     return 'running';
   });
   async function build() {
     if (stopped('build') || !cli.has('build')) return;
     buildFailureOpen = false;
-    buildIds = { build: null, sign: null };
+    buildIds = { build: null, sign: null, release: null };
     await autosave.whenSaved(async () => {
       const j = await cli.build(d.config.reach);
-      buildIds = { build: j?.id ?? null, sign: null };
+      buildIds = { build: j?.id ?? null, sign: null, release: null };
     });
   }
   $effect(() => {
@@ -734,22 +739,42 @@
         buildIds = { ...buildIds, sign: -1 };
         void cli.sign(d.config.reach).then((j) => (buildIds = { ...buildIds, sign: j?.id ?? null }));
       }
-      if (s === 'done') notice = { word: fillIn(BUILD.toast.done, { n: d.config.reach.length }) };
+      if (signJob?.state === 'succeeded' && buildIds.release === null) {
+        buildIds = { ...buildIds, release: -1 };
+        void cli.release().then((j) => (buildIds = { ...buildIds, release: j?.id ?? null }));
+      }
+      if (s === 'done') {
+        notice = { word: fillIn(BUILD.toast.done, { n: d.config.reach.length }) };
+        void loadVersions();
+      }
       if (s === 'failed') buildFailureOpen = true;
     });
   });
-  const buildChip = $derived(buildState ? { done: BUILD.state.done, failed: BUILD.state.failed, running: BUILD.state.running }[buildState] : null);
-  const buildChips = $derived(
-    buildChip ? Object.fromEntries(d.config.reach.map((id) => [id, { chip: buildChip, spoken: buildChip, silent: false }])) : null,
-  );
-  const chips = $derived(updating ? progressChips : op.state === 'L18' ? planChips : (buildChips ?? diffChips));
+  /** While building, only the card of the node cargo builds now says so; nothing stays once it is done. */
+  const buildingChips = $derived.by((): Record<string, Chip> => {
+    if (buildJob?.state !== 'running') return {};
+    const line = [...buildJob.lines].reverse().find((l) => /^\S+: building /.test(l));
+    const id = line?.slice(0, line.indexOf(':'));
+    return id && d.config.reach.includes(id) ? { [id]: { chip: BUILD.state.running, spoken: BUILD.state.running, silent: false } } : {};
+  });
+  const chips = $derived(updating ? progressChips : diffChips);
   /** The water in each node while it is written (L19, L20, L24). */
-  const fill = $derived(PERCENT.has(op.state) ? waterOf(op.progress) : {});
+  const fill = $derived(PERCENT.has(op.state) ? Object.fromEntries(Object.keys(waterOf(op.progress)).map((id) => [id, op.percentOf(id, nowMs)])) : {});
   const percent = $derived(
-    PERCENT.has(op.state) ? Object.fromEntries(Object.entries(op.progress).map(([id, p]) => [id, p.percent])) : {},
+    PERCENT.has(op.state) ? Object.fromEntries(Object.keys(op.progress).map((id) => [id, op.percentOf(id, nowMs)])) : {},
   );
   // The comparison stays while the update runs (P14: never silently replaced).
-  const showFile = $derived(op.file !== null && op.selected === null && ['L14', 'L15', 'L16', 'L17', 'L18', 'L19', 'L20', 'L21', 'L22', 'L23'].includes(op.state));
+  /** The refusal modal: why the package cannot be written and what to do; closing leaves the band's buttons. */
+  let refusalClosed = $state<ReleaseFile | null>(null);
+  const refusalOpen = $derived(op.file !== null && (op.state === 'L16' || op.state === 'L17') && refusalClosed !== op.file);
+  /** A write that stopped at a node (back on its previous version, or not written): what happened and what to do, until closed. */
+  let stopClosed = $state<string | null>(null);
+  const stopNode = $derived(op.state === 'L22' && op.failed ? (op.config?.nodes.find((n) => n.id === op.failed) ?? null) : null);
+  const stopOpen = $derived(stopNode !== null && stopClosed !== op.failed);
+  $effect(() => {
+    if (op.state !== 'L22') stopClosed = null;
+  });
+  const refusalWord = (v: ReleaseFile['verdict']) => (v === 'topology' ? FILE.topologyBad : v === 'format' ? FILE.notRelease : FILE.sourceBad);
 
   let fileInput = $state<HTMLInputElement>();
   async function picked(e: Event) {
@@ -778,7 +803,7 @@
   const sheetShown = $derived(
     mode === 'define'
       ? cliPanel !== null || d.selected !== null
-      : !op.config || op.selected !== null || (showFile && op.file !== null) || (!!op.recovering && !!op.recovered),
+      : !op.config || op.selected !== null || (!!op.recovering && !!op.recovered),
   );
   $effect(() => {
     if (!sheetShown || layout === 'narrow') sheetW = 0;
@@ -831,6 +856,44 @@
     });
   });
   const tlNow = $derived(tlStart && PERCENT.has(op.state) ? Math.max(0, wallMs - tlStart) : Math.max(0, ...tlEvents.map((e) => e.t)));
+  /** 書込's version picker: the latest build (the project's newest release) first, then the kept packages; writing an older one is going back. */
+  let latest = $state<{ bytes: Uint8Array; label: string } | null>(null);
+  let kept = $state<Kept[]>([]);
+  let chosen = $state('latest');
+  /** One version for all of a package's nodes names it; otherwise it is 最新のビルド. */
+  function labelOf(bytes: Uint8Array): string {
+    const one = [...new Set([...releaseVersions(bytes).values()].map(versionText))];
+    return one.length === 1 ? one[0] : WRITE.latest;
+  }
+  async function loadVersions() {
+    if (cli.state !== 'ready') return;
+    const bytes = await cli.latestRelease().catch(() => null);
+    latest = bytes ? { bytes, label: labelOf(bytes) } : null;
+    kept = await cli.keptList().catch(() => []);
+    if (chosen === 'latest' ? !latest : !kept.some((k) => k.id === chosen)) chosen = latest ? 'latest' : (kept[0]?.id ?? 'latest');
+  }
+  const versionChoices = $derived([
+    ...(latest ? [{ id: 'latest', label: latest.label }] : []),
+    ...keptChoices(kept).filter((c) => c.label !== latest?.label),
+  ]);
+  $effect(() => {
+    // Again on entering 書込 and after each write (the written package was kept).
+    if (mode === 'operate' && (op.state === 'L12' || op.state === 'L23')) untrack(() => void loadVersions());
+  });
+  /** 書き込む while watching: the chosen version, checked against the 構成, to the checked cards. */
+  async function writeChosen() {
+    if (stopped('update')) return;
+    const pkg = chosen === 'latest' ? (latest ? { name: `${latest.label}.dgb`, bytes: latest.bytes } : null) : await cli.keptBytes(chosen).then((b) => (b ? { name: `${chosen}.dgb`, bytes: b } : null));
+    if (!pkg) {
+      notice = { word: BAND.M58.chip, error: true, detail: BAND.M58.sentence };
+      return;
+    }
+    op.takeFile(pkg.name, pkg.bytes);
+    if (op.state === 'L18') await op.update();
+  }
+  $effect(() => {
+    if (op.keepFailed) untrack(() => (notice = { word: WRITE.keepFailed.label, error: true, detail: WRITE.keepFailed.detail }));
+  });
   const stageWord = (s: string) => (CHIP[s as Progress['stage']] ?? s).replace(/^\S+\s/, '');
   /** 出力: the CLI jobs' output lines, oldest job first (the latest 300). */
   const outputLines = $derived(
@@ -1039,20 +1102,22 @@
   // A failure or warning the user must notice: its short word on a toast, the sentence behind it.
   $effect(() => {
     const cause = next.cause;
-    if (cause) untrack(() => (notice = { word: cause, error: cause.startsWith('×'), detail: next.sentence }));
+    // A stop or refusal that needs the user opens its modal instead.
+    if (cause && !untrack(() => refusalOpen || stopNode !== null)) untrack(() => (notice = { word: cause, error: cause.startsWith('×'), detail: next.sentence }));
   });
 
-  /** The write sheet holds the emphasis: the header's actions step back while it is open. */
-  const sheetHolds = $derived(mode === 'operate' && showFile && op.file !== null);
   /** 書き込む: the 親機 answered nothing (L07) → writing directly over USB; otherwise the next step of writing through DAGON. */
   const writeAction = $derived(
     op.state === 'L07' ? null : op.state === 'L12' && !op.latestMissing && band.secondary.some((b) => b.action === 'useLatest') ? 'useLatest' : (band.primary?.action ?? null),
   );
   const writeControl = $derived(writeAction ? CONTROL_OF[writeAction] : 'flash');
-  const writeOff = $derived(op.state === 'L03' || (op.state !== 'L07' && (writeAction === null || !RUNS.has(writeAction))));
+  /** States 書き込む writes in directly: the hub answers and nothing runs. */
+  const WRITABLE: ReadonlySet<string> = new Set(['L12', 'L13', 'L23']);
+  const writeOff = $derived(op.state === 'L03' || (op.state !== 'L07' && !WRITABLE.has(op.state) && (writeAction === null || !RUNS.has(writeAction))));
   function write() {
-    if (writeOff || sheetHolds) return;
+    if (writeOff) return;
     if (writeAction === null) return void (factory = { id: null });
+    if (WRITABLE.has(op.state)) return void writeChosen();
     act(writeAction);
   }
 
@@ -1146,7 +1211,7 @@
         selected={d.selected}
         onselect={(k) => (d.selected = d.selected === k ? null : k)}
         dot={defineDot}
-        chips={defineChips}
+        chips={{ ...defineChips, ...buildingChips }}
         {zoom}
         inset={layout === 'narrow' ? { left: 0, right: 0, bottom: sheetShown ? sheetH : 0 } : { left: partsW, right: sheetW }}
         controls={zoomBar}
@@ -1173,10 +1238,15 @@
 {#snippet actions()}
   {#if mode === 'define'}
     {@const blocked = problemCount > 0 || d.doc.topo.nodes.length === 0}
-    <button class="button-primary-header" data-control="gen" bind:this={primaryEl} aria-disabled={blocked || sheetHolds} title={blocked ? SKELETON.disabled : undefined} onclick={() => !blocked && !sheetHolds && void makeSkeleton()}><span>{SKELETON.make}</span></button>
+    <button class="button-primary-header" data-control="gen" bind:this={primaryEl} aria-disabled={blocked} title={blocked ? SKELETON.disabled : undefined} onclick={() => !blocked && void makeSkeleton()}><span>{SKELETON.make}</span></button>
+    <button class="button-secondary-header" data-control="build" aria-disabled={buildState === 'running'} onclick={() => buildState !== 'running' && void build()}><span>{BUILD.run}</span></button>
   {:else}
-    <button class="button-secondary-header" data-control="build" aria-disabled={sheetHolds || buildState === 'running'} onclick={() => !sheetHolds && buildState !== 'running' && void build()}><span>{BUILD.run}</span></button>
-    <button class="button-primary-header" data-control={writeControl} bind:this={primaryEl} aria-disabled={writeOff || sheetHolds} onclick={write}><span>{WRITE.run}</span></button>
+    {#if versionChoices.length}
+      <select class="button-secondary-header version" aria-label={WRITE.version} data-control="update" disabled={updating} onchange={(e) => (chosen = e.currentTarget.value)}>
+        {#each versionChoices as c (c.id)}<option value={c.id} selected={c.id === chosen} translate="no">{c.label}</option>{/each}
+      </select>
+    {/if}
+    <button class="button-primary-header" data-control={writeControl} bind:this={primaryEl} aria-disabled={writeOff} onclick={write}><span>{WRITE.run}</span></button>
   {/if}
 {/snippet}
 
@@ -1256,6 +1326,9 @@
       {zoom}
       controls={zoomBar}
       inset={{ left: partsW, right: sheetW }}
+      checks={Object.fromEntries(op.reach.map((n) => [n.id, !op.skip.has(n.id)]))}
+      oncheck={(id) => op.toggleSkip(id)}
+      checksLocked={updating && !['L23', 'L25'].includes(op.state)}
     />
   </main>
 {/snippet}
@@ -1265,23 +1338,6 @@
 {/snippet}
 
 {#snippet operateRight()}
-  {#if showFile && op.file}
-      <FilePanel
-        file={op.file}
-        targets={op.targets.length}
-        minutes={op.targets.length * MINUTES_PER_NODE}
-        diff={fileDiff}
-        go={band.primary
-          ? {
-              label: band.primary.action === 'update' ? fillIn(WRITE.go, { n: op.targets.length }) : band.primary.label,
-              off: !RUNS.has(band.primary.action),
-              control: CONTROL_OF[band.primary.action],
-              onclick: () => band.primary && act(band.primary.action),
-            }
-          : null}
-        others={band.secondary.map((b) => ({ label: b.label, off: !RUNS.has(b.action), control: CONTROL_OF[b.action], onclick: () => act(b.action) }))}
-      />
-    {:else}
       <Detail
         config={op.config}
         live={op.live}
@@ -1292,7 +1348,6 @@
         onback={(id) => !stopped('rollback') && void op.rollback(id)}
         recovery={op.recovering && op.recovered ? { id: op.recovering, result: op.recovered } : null}
       />
-  {/if}
 {/snippet}
 
 {#if !serial && !dev && !cli.sim}
@@ -1419,8 +1474,53 @@
       onmore={() => ((drawerTab = 'jobs'), (factory = null))}
     />
   {/if}
+  {#if refusalOpen && op.file}
+    <Modal title={FILE.heading} chip={{ text: refusalWord(op.file.verdict), kind: 'error' }} target={op.file.name} onclose={() => (refusalClosed = op.file)}>
+      {#if fileDiff.length}
+        <table class="modal-diff">
+          <caption>{DIFF.heading}</caption>
+          <thead><tr>{#each DIFF.cols as c (c)}<th scope="col">{c}</th>{/each}</tr></thead>
+          <tbody>
+            {#each fileDiff as r, i (i)}
+              <tr><th scope="row">{r.what}</th><td translate="no">{r.here}</td><td translate="no">{r.file}</td></tr>
+            {/each}
+          </tbody>
+        </table>
+      {/if}
+      <h3 class="modal-h">{NOTICE.fix}</h3>
+      <p>{next.sentence}</p>
+      {#snippet actions()}
+        {#each band.secondary as b (b.label)}
+          <button class="button-secondary" data-control={CONTROL_OF[b.action]} aria-disabled={!RUNS.has(b.action)} onclick={() => RUNS.has(b.action) && ((refusalClosed = op.file), act(b.action))}>{b.label}</button>
+        {/each}
+        {#if band.primary}
+          {@const p = band.primary}
+          <button class="button-primary" data-control={CONTROL_OF[p.action]} aria-disabled={!RUNS.has(p.action)} onclick={() => RUNS.has(p.action) && ((refusalClosed = op.file), act(p.action))}>{p.label}</button>
+        {/if}
+      {/snippet}
+    </Modal>
+  {/if}
+  {#if stopOpen && stopNode}
+    {@const back = op.progress[stopNode.id]?.stage === 'previous'}
+    {@const running = op.live[stopNode.id]?.hello?.activeVersion}
+    <Modal title={WRITE.run} chip={{ text: back ? WRITE.previous : WRITE.failed, kind: back ? 'info' : 'error' }} target={`[${stopNode.no}] ${stopNode.name}`} onclose={() => (stopClosed = op.failed)} onmore={() => ((drawerTab = 'log'), (stopClosed = op.failed))}>
+      <h3 class="modal-h">{NOTICE.reason}</h3>
+      <p>{back && running !== undefined ? fillIn(WRITE.rolled.reason, { version: versionText(running) }) : (next.cause ?? WRITE.failed)}</p>
+      <h3 class="modal-h">{NOTICE.fix}</h3>
+      <p>{back ? WRITE.rolled.next : next.sentence}</p>
+      {#snippet actions()}
+        {#each band.secondary as b (b.label)}
+          <button class="button-secondary" data-control={CONTROL_OF[b.action]} aria-disabled={!RUNS.has(b.action)} onclick={() => RUNS.has(b.action) && ((stopClosed = op.failed), act(b.action))}>{b.label}</button>
+        {/each}
+        {#if band.primary}
+          {@const p = band.primary}
+          <button class="button-primary" data-control={CONTROL_OF[p.action]} aria-disabled={!RUNS.has(p.action)} onclick={() => RUNS.has(p.action) && ((stopClosed = op.failed), act(p.action))}>{p.label}</button>
+        {/if}
+      {/snippet}
+    </Modal>
+  {/if}
   {#if buildFailureOpen}
-    {@const failed = [buildJob, signJob].find((j) => j?.state === 'failed')}
+    {@const failed = [buildJob, signJob, releaseJob].find((j) => j?.state === 'failed')}
     <Modal title={BUILD.title} chip={{ text: BUILD.state.failed, kind: 'error' }} target={d.config.reach.map((id) => `nodes/${id}/`).join(' · ')} onclose={() => (buildFailureOpen = false)} onmore={() => ((drawerTab = 'jobs'), (buildFailureOpen = false))}>
       <h3 class="modal-h">{NOTICE.reason}</h3>
       <p class="modal-mono">{jobReason(failed)}</p>
@@ -1458,6 +1558,28 @@
   .modal-mono {
     margin: 0;
     font: 400 var(--t-mono) / 24px var(--f-mono);
+    overflow-wrap: anywhere;
+  }
+  /* The refusal modal's 構成 differences (the table the sheet had). */
+  .modal-diff {
+    width: 100%;
+    border-collapse: collapse;
+    font: 400 var(--t-small-size) / var(--t-small-lh) var(--f-ja);
+  }
+  .modal-diff caption {
+    margin-bottom: var(--s-2);
+    text-align: left;
+    font-weight: 700;
+  }
+  .modal-diff th,
+  .modal-diff td {
+    padding: var(--s-2) var(--s-3) var(--s-2) 0;
+    border-bottom: 1px solid var(--c-line);
+    text-align: left;
+    vertical-align: top;
+  }
+  .modal-diff td {
+    font-family: var(--f-mono);
     overflow-wrap: anywhere;
   }
   main.define {

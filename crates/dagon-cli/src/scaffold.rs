@@ -33,7 +33,6 @@ use crate::genfs;
 use crate::paths::contained;
 
 pub const SAMPLE: &str = include_str!("../../../topology/desk-demo.yaml");
-const FIRST_VERSION: &str = "0.1.0";
 
 /// Where generated projects take the DAGON crates from (`[dagon]`).
 #[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize)]
@@ -931,7 +930,6 @@ pub fn add_build_tables(
         if crate::deploy::has_slot_b_link(reg, &n.mcu) {
             tbl.insert("slot_b_feature", toml_edit::value("slot-b"));
         }
-        tbl.insert("version", toml_edit::value(FIRST_VERSION));
         builds.insert(&n.id, toml_edit::Item::Table(tbl));
         added.push(n.id.clone());
     }

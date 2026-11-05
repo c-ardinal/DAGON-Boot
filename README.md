@@ -179,8 +179,14 @@ dagon build            # or: dagon build seg
 
 Each node is built into `out/build/<id>/app-a.elf` and, for slot B,
 `app-b.elf` (an ESP32-S3 image serves both slots, so it has one), with the
-public key from `dagon.toml` embedded. The
-version comes from `[build.<id>]` in `dagon.toml`.
+public key from `dagon.toml` embedded. A node's version is the `version`
+in its crate's `Cargo.toml` (its boot core's, in its boot crate's
+`Cargo.toml`); raise it there for every change you write. A `version` in
+`[build.<id>]` or `--version` is not needed; if given, it must be the same
+or the command stops and says which. A node's boot core goes into the
+package with its app, and the node writes it only when its version differs
+from the boot core it runs: a changed boot core is written once its version
+is raised, as with apps.
 
 ### 5. Write the first version (once per node)
 
@@ -239,7 +245,7 @@ tables in `dagon.toml` (`stage0` for the hub, `bootcore`, `app`,
 Change your code, then:
 
 ```sh
-dagon deploy                       # or: dagon deploy seg watch --version 1.2.0
+dagon deploy                       # or: dagon deploy seg watch
 ```
 
 `dagon deploy` builds slots A and B, signs them, makes the release, lists
@@ -247,13 +253,23 @@ each node with its old and new version and asks before applying (`--yes`
 skips the question). The old version is the node's version in the last
 release (`out/release-latest.dgb`, or `release` in `dagon.toml`), read once
 that release verifies under your key; it is not read from the boards. The
-version defaults to one patch above the newest one it knows. Without node ids it takes every node in `[build.<id>]`. An
+new version is each node's crate version. Without node ids it takes every node in `[build.<id>]`. An
 ESP32-S3 node is built once (its image runs from either OTA slot); deploy
 turns the build into an ESP image (`espflash save-image`) and signs that,
 and the hub relays it like any other node's. The single steps are
 `dagon build`, `dagon image sign`, `dagon release build` and `dagon apply`
-(`dagon --help`). In DAGON Console the same is ビルド → 署名 → リリース →
-渡す, then the update in 運用 mode, over Web Serial.
+(`dagon --help`). In DAGON Console, 「ビルドする」 in 準備 builds every node,
+signs and makes the package; in 書込 you check the nodes on their cards,
+pick the version in the header (the latest build, or a kept one to go
+back) and 「書き込む」 writes it over Web Serial. Each card shows its
+current → new version and one % for the whole write, then the result.
+
+Every package written to nodes (by the Console, `dagon apply` or
+`dagon deploy`) is kept in the project's `out/deploy/` folder as
+`v<version>.dgb` (`v<newest>-<digest>.dgb` when its nodes get different
+versions). To go back, write a kept older version again: the Console lists
+them, and `dagon apply out/deploy/v1.0.0.dgb` writes one from the command
+line.
 
 Applying checks the signatures and that the release was built for this
 topology, sends the topology to the hub, updates the children and then the

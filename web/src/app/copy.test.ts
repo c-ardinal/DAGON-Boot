@@ -100,8 +100,8 @@ describe('copy', () => {
 
   test('chips are a symbol and a short word, never a sentence', () => {
     const { responding, silent, trial, writing, waiting, done, unwritten, rebooting, previous } = copy.NODE;
-    const { sourceOk, sourceBad, topologyOk, topologyBad, notRelease } = copy.FILE;
-    const chips = [responding, silent, trial, writing, waiting, done, unwritten, rebooting, previous, ...Object.values(copy.NODE.refused), copy.NODE.refusedOther, copy.NODE.lastResort, copy.NODE.cannotFix, sourceOk, sourceBad, topologyOk, topologyBad, notRelease, ...Object.values(copy.HUB)];
+    const { sourceBad, topologyBad, notRelease } = copy.FILE;
+    const chips = [responding, silent, trial, writing, waiting, done, unwritten, rebooting, previous, ...Object.values(copy.NODE.refused), copy.NODE.refusedOther, copy.NODE.lastResort, copy.NODE.cannotFix, sourceBad, topologyBad, notRelease, copy.WRITE.previous, copy.WRITE.failed, copy.BUILD.state.running, ...Object.values(copy.HUB)];
     for (const c of chips) {
       expect(c, c).toMatch(/^(?:[●○×…↑↺✓▲◎]|▼▼) \S/);
       expect(c, c).not.toMatch(/ます|ました|。/);
@@ -129,10 +129,19 @@ describe('copy', () => {
   });
 });
 
+describe('the two modes', () => {
+  test('are 準備 and 書込; 運用 and 定義 name no mode on the screen', () => {
+    expect([copy.MODE.define, copy.MODE.operate]).toEqual(['準備', '書込']);
+    expect(shownExcept().filter((s) => s.includes('運用'))).toEqual([]);
+  });
+});
+
 describe('the writing vocabulary', () => {
   // Writing to nodes is 書き込む / 書き込み中 / 書き込み済み / 書き込めない and the .dgb is the パッケージファイル.
-  test('no screen text (nor the stand-in agent) says 更新', () => {
-    expect([...shownExcept(), ...MOCK_TEXTS()].filter((s) => s.includes('更新'))).toEqual([]);
+  // 更新 is barred as a word for writing to nodes; the terms of use being updated is not writing.
+  const NOT_WRITING = new Set<string>([copy.AGENT.errors.AGENT_CONSENT_VERSION.text]);
+  test('no screen text (nor the stand-in agent) says 更新 for writing', () => {
+    expect([...shownExcept(), ...MOCK_TEXTS()].filter((s) => s.includes('更新') && !NOT_WRITING.has(s))).toEqual([]);
   });
 });
 

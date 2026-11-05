@@ -16,7 +16,8 @@ mod watch;
 
 pub use define::{board_template, release_topology, supported_mcus, topo_parse};
 pub use defs::{
-    coordinator_capable, coordinator_uart0, load_definitions, mcu_connection, rom_i2c_addrs,
+    coordinator_capable, coordinator_uart0, load_definitions, mcu_connection, mcu_trial_ms,
+    rom_i2c_addrs,
 };
 pub use frame::{frame_encode, FrameCutter};
 pub use host::{
@@ -109,6 +110,8 @@ pub fn release_versions(bundle: &[u8]) -> Vec<u32> {
     let m = b.manifest();
     (0..m.entry_count())
         .map(|i| m.entry(i))
+        // The version a node's app gets (its boot core may carry another).
+        .filter(|e| e.image_kind == dagon_format::header::image_kind::APP)
         .flat_map(|e| [u32::from(e.node_index), e.version.raw()])
         .collect()
 }

@@ -7,7 +7,8 @@
 //! Everything is made fresh at start in a demo folder under the system's
 //! temporary folder: a demo key pair (never the developer's key), the
 //! desk-demo 構成, the 1.0.0 images the simulated boards run and release
-//! demo-1.1.0, all signed with the demo key. `--sim-fail <node>` makes that
+//! demo-1.1.0, all signed with the demo key; the 1.0.0 package is kept
+//! (out/deploy) as written firmware is. `--sim-fail <node>` makes that
 //! 子機's new version crash at boot, so its update falls back to 1.0.0.
 
 use std::path::{Path, PathBuf};
@@ -33,6 +34,7 @@ const NEW: Version = Version::new(1, 1, 0);
 /// its real time.
 const HUB_LEN: usize = 128 * 1024;
 const SEG_LEN: usize = 48 * 1024;
+const CORE_LEN: usize = 16 * 1024;
 const WATCH_LEN: usize = 48 * 1024;
 const SPEEDS: std::ops::RangeInclusive<f64> = 0.1..=20.0;
 /// The 子機 a failure can be set on.
@@ -62,21 +64,37 @@ const WATCH: Board = Board {
 };
 
 fn img(key: &KeyPair, b: &Board, slot: u8, v: Version, len: usize) -> Result<Vec<u8>, String> {
-    let (flags, caps) = image::default_bits(image_kind::APP);
+    img_of(key, b, image_kind::APP, slot, v, len)
+}
+
+fn img_of(
+    key: &KeyPair,
+    b: &Board,
+    kind: u8,
+    slot: u8,
+    v: Version,
+    len: usize,
+) -> Result<Vec<u8>, String> {
+    let (flags, caps) = image::default_bits(kind);
+    let min_bootcore = if kind == image_kind::APP {
+        Version::new(1, 0, 0)
+    } else {
+        Version::new(0, 0, 0)
+    };
     let spec = ImageSpec {
-        image_kind: image_kind::APP,
+        image_kind: kind,
         port_kind: image::port_kind_of(b.port).ok_or("port kind")?,
         mcu_id: image::mcu_id_of(b.mcu).ok_or("mcu")?,
-        slot: image::slot(b.mcu, image_kind::APP, slot).ok_or("slot")?,
+        slot: image::slot(b.mcu, kind, slot).ok_or("slot")?,
         version: v,
         build_flags: flags,
         release_seq: 1,
-        min_bootcore_version: Version::new(1, 0, 0),
+        min_bootcore_version: min_bootcore,
         target_tag: target_tag(b.tag),
         proto_version: 1,
         capabilities: caps,
     };
-    let salt = b.tag.len() as u8 ^ v.minor() ^ (slot << 4);
+    let salt = b.tag.len() as u8 ^ v.minor() ^ (slot << 4) ^ kind;
     let body: Vec<u8> = (0..len)
         .map(|i| (i as u8).wrapping_mul(31) ^ salt)
         .collect();
@@ -119,23 +137,37 @@ pub fn desk(key: &KeyPair, fail: Option<&str>, seed: u64) -> Result<SimHub, Stri
     Ok(h)
 }
 
-/// Release demo-1.1.0 of the desk-demo 構成, signed with `key`.
-fn release(key: &KeyPair) -> Result<Vec<u8>, String> {
+/// The demo 構成's package giving every node `v`, signed with `key`.
+pub(crate) fn package(key: &KeyPair, v: Version) -> Result<Vec<u8>, String> {
+    package_with(key, v, v)
+}
+
+/// The demo 構成's package: every app `v`, the 子機's boot core `core`.
+pub(crate) fn package_with(key: &KeyPair, v: Version, core: Version) -> Result<Vec<u8>, String> {
     let t = dagon_topology::parse_str(YAML).map_err(|e| e.to_string())?;
     let bin = dagon_topology::compile_str(YAML).map_err(|e| e.to_string())?;
     let images = [
-        img(key, &SEG, 0, NEW, SEG_LEN)?,
-        img(key, &SEG, 1, NEW, SEG_LEN)?,
-        img(key, &WATCH, 0, NEW, WATCH_LEN)?,
-        img(key, &HUB, 0, NEW, HUB_LEN)?,
-        img(key, &HUB, 1, NEW, HUB_LEN)?,
+        img(key, &SEG, 0, v, SEG_LEN)?,
+        img(key, &SEG, 1, v, SEG_LEN)?,
+        // The 子機's boot core: written when the one it runs is of another
+        // version.
+        img_of(key, &SEG, image_kind::BOOTCORE, 0, core, CORE_LEN)?,
+        img_of(key, &SEG, image_kind::BOOTCORE, 1, core, CORE_LEN)?,
+        img(key, &WATCH, 0, v, WATCH_LEN)?,
+        img(key, &HUB, 0, v, HUB_LEN)?,
+        img(key, &HUB, 1, v, HUB_LEN)?,
     ];
+    let name = if v == NEW {
+        RELEASE.to_string()
+    } else {
+        format!("demo-{v}")
+    };
     let r = dagon_sign::release::build(
         dagon_topology::defs::Registry::builtin(),
         &t,
         &bin,
         &images,
-        RELEASE,
+        &name,
         key,
     )
     .map_err(|e| e.to_string())?;
@@ -184,7 +216,12 @@ pub fn project(dir: &Path, uplink: Medium) -> Result<(PathBuf, KeyPair), String>
           pubkey = \"demo-key/dagon-signing.pub\"\n\
           signing_key = \"demo-key/dagon-signing.key\"\n",
     )?;
-    write(&format!("out/release/{RELEASE}.dgb"), &release(&key)?)?;
+    write(&format!("out/release/{RELEASE}.dgb"), &package(&key, NEW)?)?;
+    // The simulated nodes run OLD, as if written through DAGON: it is kept like any written package.
+    write(
+        &format!("{}/v{OLD}.dgb", crate::kept::DIR),
+        &package(&key, OLD)?,
+    )?;
     Ok((dir.join(crate::config::CONFIG_FILE), key))
 }
 
@@ -414,6 +451,63 @@ mod tests {
         let running = format!("running: {OLD:?}, trial: false");
         assert!(watch.1.contains(&running), "back on 1.0.0: {out:?}");
         assert!(out.iter().any(|(_, w)| w == "done 1.1.0"), "{out:?}");
+    }
+
+    #[test]
+    fn the_demo_keeps_the_version_its_nodes_run() {
+        let dir = std::env::temp_dir().join(format!("dagon-demo-kept-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let (config, key) = project(&dir, Medium::UsbCdc).unwrap();
+        let cfg = crate::config::Config::load(Some(&config.to_string_lossy())).unwrap();
+        let t = dagon_topology::parse_str(&yaml(Medium::UsbCdc)).unwrap();
+        let ids: Vec<String> = crate::kept::list(&cfg, &t, &key.pk)
+            .into_iter()
+            .map(|k| k.id)
+            .collect();
+        assert_eq!(ids, ["v1.0.0"]);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_kept_past_version_is_written_back_to_every_node() {
+        const SPEED: f64 = 50.0;
+        let dir = std::env::temp_dir().join(format!("dagon-demo-back-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let (config, key) = project(&dir, Medium::UsbCdc).unwrap();
+        let cfg = crate::config::Config::load(Some(&config.to_string_lossy())).unwrap();
+        let t = dagon_topology::parse_str(&yaml(Medium::UsbCdc)).unwrap();
+        let topo = dagon_topology::compile_str(&yaml(Medium::UsbCdc)).unwrap();
+        let dev = Arc::new(crate::serve::SimDevice::new(
+            desk(&key, None, 1).unwrap(),
+            SPEED,
+            None,
+        ));
+        let mut h = Host::new(Link(dev, Vec::new()), Clock(Instant::now(), SPEED));
+        let new = std::fs::read(dir.join(format!("out/release/{RELEASE}.dgb"))).unwrap();
+        let run = |h: &mut Host<Link, Clock>, b: &[u8]| -> Vec<String> {
+            dagon_sim::block_on(h.apply(b, &topo, &key.pk, None, &mut |_| {}))
+                .unwrap()
+                .into_iter()
+                .map(|o| match o.outcome {
+                    Outcome::Done(v) => format!("done {v}"),
+                    other => format!("{other:?}"),
+                })
+                .collect()
+        };
+        assert_eq!(run(&mut h, &new), ["done 1.1.0"; 3]);
+        let core = |h: &mut Host<Link, Clock>| {
+            let cs = dagon_sim::block_on(
+                h.boot_core_status(dagon_host::Target::I2c(dagon_sim::NODE_I2C_ADDR)),
+            )
+            .unwrap();
+            cs.slots[usize::from(cs.active)].version
+        };
+        assert_eq!(core(&mut h), NEW, "the 子機's boot core went with it");
+        crate::kept::store(&cfg, &t, &key.pk, &new).unwrap();
+        let back = crate::kept::read(&cfg, &key.pk, "v1.0.0").unwrap();
+        assert_eq!(run(&mut h, &back), ["done 1.0.0"; 3]);
+        assert_eq!(core(&mut h), OLD);
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]

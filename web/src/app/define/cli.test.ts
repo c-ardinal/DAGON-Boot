@@ -27,6 +27,9 @@ function fake(opts: { status?: number; hash?: string } = {}) {
       if (opts.status) return new Response('', { status: opts.status });
       if (url === '/v1/hello') return Response.json(HELLO);
       if (url.startsWith('/v1/release/')) return new Response(Uint8Array.of(1, 2, 3));
+      if (url === '/v1/kept' && init.method === 'POST') return Response.json({ id: 'v1.1.0' });
+      if (url === '/v1/kept') return Response.json({ kept: [{ id: 'v1.0.0', versions: { hub: '1.0.0' }, bytes: 3 }] });
+      if (url.startsWith('/v1/kept/')) return new Response(Uint8Array.of(1, 2, 3));
       if (url === '/v1/layout') {
         if (init.method === 'PUT') {
           layout = String(init.body);
@@ -227,6 +230,22 @@ describe('dagon serve link', () => {
     const n = f.calls.length;
     expect(await cli.bootcore('seg')).toBeNull();
     expect(f.calls.length).toBe(n);
+  });
+
+  test('kept packages are listed, read and kept through serve only, when serve offers them', async () => {
+    const f = fake();
+    const cli = new Cli(f.deps);
+    await cli.connect();
+    const n = f.calls.length;
+    expect(await cli.keptList()).toEqual([]);
+    expect(await cli.keep(Uint8Array.of(9))).toBeNull();
+    expect(f.calls.length).toBe(n);
+    cli.hello = { ...cli.hello!, features: [...cli.hello!.features, 'kept'] };
+    expect(await cli.keptList()).toEqual([{ id: 'v1.0.0', versions: { hub: '1.0.0' }, bytes: 3 }]);
+    expect(await cli.keptBytes('v1.0.0')).toEqual(Uint8Array.of(1, 2, 3));
+    expect(f.calls[f.calls.length - 1]).toMatchObject({ url: '/v1/kept/v1.0.0', auth: `Bearer ${PASS}` });
+    expect(await cli.keep(Uint8Array.of(9))).toBe('v1.1.0');
+    expect(f.calls[f.calls.length - 1]).toMatchObject({ url: '/v1/kept', method: 'POST', body: Uint8Array.of(9) });
   });
 
   test('a save serve refuses (422, 409) or cannot take keeps the edits on the page, marked unsaved, with the reason', async () => {

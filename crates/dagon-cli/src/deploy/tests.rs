@@ -1,6 +1,7 @@
 use std::path::PathBuf;
 
 use dagon_format::header::{image_kind, slot_binding};
+use dagon_format::BundleView;
 use dagon_host::{Host, Target};
 use dagon_sim::{block_on, demo_hub, NODE_I2C_ADDR};
 use ed25519_compact::{KeyPair, Seed};
@@ -25,7 +26,13 @@ fn work_area(name: &str) -> (Config, Topology) {
         base,
         ..Config::default()
     };
-    for id in ["hub", "seg"] {
+    for (id, v) in [("hub", "1.2.0"), ("seg", "1.0.1")] {
+        std::fs::create_dir_all(cfg.base.join(id)).unwrap();
+        std::fs::write(
+            cfg.base.join(id).join("Cargo.toml"),
+            format!("[package]\nname = \"{id}\"\nversion = \"{v}\"\n"),
+        )
+        .unwrap();
         cfg.build.insert(
             id.into(),
             BuildInputs {
@@ -33,7 +40,7 @@ fn work_area(name: &str) -> (Config, Topology) {
                 bin: None,
                 features: vec![],
                 slot_b_feature: Some("slot-b".into()),
-                version: Some("1.0.0".into()),
+                version: None,
             },
         );
     }
@@ -86,8 +93,15 @@ fn desk(t: &Topology, key: &KeyPair) -> Sim {
     Sim::new(hub)
 }
 
+/// `built` with each node's version from its crate.
+fn versioned(cfg: &Config, elfs: Vec<(String, SlotElfs)>) -> Vec<NodeBuild> {
+    elfs.into_iter()
+        .map(|(n, e)| (n.clone(), app_version(cfg, &n, None).unwrap(), e))
+        .collect()
+}
+
 #[test]
-fn deploys_every_built_node_one_patch_up_through_the_simulated_hub() {
+fn deploys_each_node_with_its_crate_version_through_the_simulated_hub() {
     let (cfg, t) = work_area("sim");
     let key = key();
     let nodes = pick_nodes(&cfg, &t, &[]).unwrap();
@@ -95,23 +109,29 @@ fn deploys_every_built_node_one_patch_up_through_the_simulated_hub() {
 
     let previous = release_versions(&t, &release_path(&cfg), &key.pk).unwrap();
     assert!(previous.is_empty(), "no release yet");
-    let v = next_version(
-        previous
-            .values()
-            .copied()
-            .chain(nodes.iter().flat_map(|n| configured(&cfg, n))),
-    )
-    .unwrap();
-    assert_eq!(v, Version::new(1, 0, 1), "one above the [build] version");
-
-    let p = prepare(&cfg, &t, &key, v, &previous, (&built(&nodes), &[])).unwrap();
+    let apps = versioned(&cfg, built(&nodes));
+    let p = prepare(&cfg, &t, &key, &previous, (&apps, &[])).unwrap();
     let listing = p.listing();
-    assert!(listing.contains("deploy 1.0.1 to 2 node(s)"), "{listing}");
+    assert!(listing.contains("deploy to 2 node(s)"), "{listing}");
     assert!(listing.contains("seg  (none) -> 1.0.1"), "{listing}");
-    assert!(listing.contains("hub  (none) -> 1.0.1"), "{listing}");
-    for f in ["seg-a.img", "seg-b.img", "hub-a.img", "hub-b.img"] {
-        assert!(cfg.base.join("out/deploy/1.0.1").join(f).exists(), "{f}");
+    assert!(listing.contains("hub  (none) -> 1.2.0"), "{listing}");
+    for f in [
+        "1.0.1/seg-a.img",
+        "1.0.1/seg-b.img",
+        "1.2.0/hub-a.img",
+        "1.2.0/hub-b.img",
+    ] {
+        assert!(cfg.base.join("out/deploy").join(f).exists(), "{f}");
     }
+    // The package is kept under the kept-store name for its versions.
+    assert!(p.release.starts_with(cfg.base.join(crate::kept::DIR)));
+    let name = p
+        .release
+        .file_name()
+        .unwrap()
+        .to_string_lossy()
+        .into_owned();
+    assert!(name.starts_with("v1.2.0-"), "{name}");
     assert_eq!(std::fs::read(&p.release).unwrap(), p.bundle);
 
     let sim = desk(&t, &key);
@@ -125,23 +145,37 @@ fn deploys_every_built_node_one_patch_up_through_the_simulated_hub() {
         None,
     )
     .unwrap();
-    for to in [Target::Hub, Target::I2c(NODE_I2C_ADDR)] {
+    for (to, v) in [
+        (Target::Hub, Version::new(1, 2, 0)),
+        (Target::I2c(NODE_I2C_ADDR), Version::new(1, 0, 1)),
+    ] {
         let h = block_on(host.hello(to)).unwrap();
         assert_eq!((h.active_version, h.trial), (v, false), "{to:?}");
     }
+    let _ = std::fs::remove_dir_all(&cfg.base);
+}
 
-    // The next deploy counts up from the release just made.
-    let after = release_versions(&t, &p.release, &key.pk).unwrap();
-    let other = KeyPair::from_seed(Seed::new([8; 32]));
-    assert!(
-        release_versions(&t, &p.release, &other.pk).is_err(),
-        "a release that does not verify is not read"
-    );
-    assert_eq!(after.get("seg"), Some(&v));
+#[test]
+fn a_version_given_must_be_the_crate_s_own() {
+    let (mut cfg, _) = work_area("given");
     assert_eq!(
-        next_version(after.values().copied()).unwrap(),
-        Version::new(1, 0, 2)
+        app_version(&cfg, "seg", None).unwrap(),
+        Version::new(1, 0, 1)
     );
+    assert_eq!(
+        app_version(&cfg, "seg", Some("1.0.1")).unwrap(),
+        Version::new(1, 0, 1)
+    );
+    let e = app_version(&cfg, "seg", Some("1.1.0")).unwrap_err();
+    assert!(
+        e.contains("1.1.0") && e.contains("1.0.1") && e.contains("Cargo.toml"),
+        "{e}"
+    );
+    // A version in [build.<id>] is held to the same rule.
+    cfg.build.get_mut("seg").unwrap().version = Some("2.0.0".into());
+    assert!(app_version(&cfg, "seg", None)
+        .unwrap_err()
+        .contains("2.0.0"));
     let _ = std::fs::remove_dir_all(&cfg.base);
 }
 
@@ -150,15 +184,8 @@ fn a_release_signed_with_another_key_is_not_applied() {
     let (cfg, t) = work_area("key");
     let key = key();
     let nodes = pick_nodes(&cfg, &t, &["seg"]).unwrap();
-    let p = prepare(
-        &cfg,
-        &t,
-        &key,
-        Version::new(1, 0, 1),
-        &BTreeMap::new(),
-        (&built(&nodes), &[]),
-    )
-    .unwrap();
+    let apps = versioned(&cfg, built(&nodes));
+    let p = prepare(&cfg, &t, &key, &BTreeMap::new(), (&apps, &[])).unwrap();
     let other = KeyPair::from_seed(Seed::new([8; 32]));
     let sim = desk(&t, &other);
     let mut host = Host::new(sim.clone(), sim);
@@ -221,17 +248,13 @@ fn a_generated_desk_project_deploys_every_node_including_the_esp32s3() {
 
     // The ESP32-S3 node's one image (either slot) goes into the release
     // next to the others' A and B images.
-    let mut elfs = built(&["seg".into(), "hub".into()]);
-    elfs.insert(1, ("watch".into(), vec![('a', vec![0x5a; 5000])]));
-    let p = prepare(
-        &gen,
-        &t,
-        &key(),
-        Version::new(1, 0, 1),
-        &BTreeMap::new(),
-        (&elfs, &[]),
-    )
-    .unwrap();
+    let v = Version::new(1, 0, 1);
+    let mut elfs: Vec<NodeBuild> = built(&["seg".into(), "hub".into()])
+        .into_iter()
+        .map(|(n, e)| (n, v, e))
+        .collect();
+    elfs.insert(1, ("watch".into(), v, vec![('a', vec![0x5a; 5000])]));
+    let p = prepare(&gen, &t, &key(), &BTreeMap::new(), (&elfs, &[])).unwrap();
     assert!(
         p.listing().contains("watch  (none) -> 1.0.1"),
         "{}",
@@ -242,14 +265,6 @@ fn a_generated_desk_project_deploys_every_node_including_the_esp32s3() {
         .verify(&key().pk)
         .is_ok());
     let _ = std::fs::remove_dir_all(&cfg.base);
-}
-
-#[test]
-fn version_counts_up_one_patch() {
-    assert_eq!(next_version([]).unwrap(), FIRST);
-    let v = next_version([Version::new(1, 3, 0), Version::new(1, 1, 9)]).unwrap();
-    assert_eq!(v, Version::new(1, 3, 1));
-    assert!(next_version([Version::new(1, 0, u16::MAX)]).is_err());
 }
 
 #[test]

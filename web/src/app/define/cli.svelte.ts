@@ -6,6 +6,7 @@
 // dagon.toml) except where to open or make a project, chosen from serve's own
 // GET /v1/fs list (§8.2).
 
+import type { Kept } from '../kept.ts';
 import pkg from '../../../package.json';
 
 export type CliState = 'none' | 'connecting' | 'ready' | 'stopped' | 'denied';
@@ -346,8 +347,9 @@ export class Cli {
     return this.start('sign', 'sign', { nodes }, nodes.join(' · '));
   }
 
-  release(version: string, name: string): Promise<Job | null> {
-    return this.start('release', 'release', { version, name }, name);
+  /** POST /v1/release: the signed images into a package; without a version each keeps its crate's, without a name serve names it by the newest. */
+  release(version?: string, name?: string): Promise<Job | null> {
+    return this.start('release', 'release', { ...(version ? { version } : {}), ...(name ? { name } : {}) }, name ?? '');
   }
 
   flash(node: string): Promise<Job | null> {
@@ -377,6 +379,31 @@ export class Cli {
     if (this.state !== 'ready') return null;
     const r = await this.call('GET', 'release/latest');
     return r.ok ? new Uint8Array(await r.arrayBuffer()) : null;
+  }
+
+  /** GET /v1/kept (feature `kept`): the packages kept in the project, newest version first. */
+  async keptList(): Promise<Kept[]> {
+    if (!this.has('kept')) return [];
+    const r = await this.call('GET', 'kept');
+    return r.ok ? (((await r.json()) as { kept?: Kept[] }).kept ?? []) : [];
+  }
+
+  /** GET /v1/kept/{id}: a kept package's bytes; null when it is not there. */
+  async keptBytes(id: string): Promise<Uint8Array | null> {
+    if (!this.has('kept')) return null;
+    const r = await this.call('GET', `kept/${encodeURIComponent(id)}`);
+    return r.ok ? new Uint8Array(await r.arrayBuffer()) : null;
+  }
+
+  /** POST /v1/kept: keeps a package about to be written; its id, or null when it was not kept. */
+  async keep(bytes: Uint8Array): Promise<string | null> {
+    if (!this.has('kept')) return null;
+    try {
+      const r = await this.d.fetch('/v1/kept', { method: 'POST', headers: { Authorization: `Bearer ${this.pass}`, 'Content-Type': 'application/octet-stream' }, body: bytes as BodyInit });
+      return r.ok ? (((await r.json()) as { id?: string }).id ?? null) : null;
+    } catch {
+      return null;
+    }
   }
 
   /** GET /v1/bootcore/{node}: the node's signed boot core for the ROM path (feature `bootcore`); null when there is none. */

@@ -2,7 +2,7 @@ import { readFileSync } from 'node:fs';
 import { describe, expect, test } from 'vitest';
 import type { LinkClock } from '../serial/hostLink.ts';
 import { MockTransport, SAMPLE_HUB_HELLO, type MockOptions } from '../serial/mock.ts';
-import { versionText } from '../wasm/dagon.ts';
+import { PHASE, versionText, type UpdateEvent } from '../wasm/dagon.ts';
 import { bandOf } from './band.ts';
 import { ANNOUNCE, BAND, BAND_CHIP, BAND_FOR, BUTTON_FOR, NODE } from './copy.ts';
 import { Define } from './define/define.svelte.ts';
@@ -28,9 +28,10 @@ function fastClock(): LinkClock {
   };
 }
 
-async function sentTo(opts: MockOptions = {}) {
+async function sentTo(opts: MockOptions = {}, keep?: (bytes: Uint8Array) => Promise<boolean>) {
   const t = new MockTransport(opts);
   const op = new Operate({
+    keep,
     open: async () => {
       await t.open();
       return t;
@@ -245,6 +246,93 @@ describe('update from the page with dagon-host apply against the mock hub', () =
     const { op } = await sentTo();
     op.takeFile('desk-1.1.0.dgb', RELEASE);
     expect(Object.fromEntries(Object.entries(op.fileVersions).map(([id, raw]) => [id, v(raw)]))).toEqual({ hub: '1.1.0', seg: '1.1.0', watch: '1.1.0' });
+  }, 20_000);
+
+  test('node choice: an unchecked node is not written; checking it again puts it back in update order', async () => {
+    const { t, op } = await sentTo();
+    op.takeFile('v1.1.0.dgb', RELEASE);
+    op.choose('seg', false);
+    expect(op.targets).toEqual(['hub', 'watch']);
+    op.choose('seg', true);
+    expect(op.targets).toEqual(['hub', 'seg', 'watch']);
+    op.choose('seg', false);
+    op.choose('nobody', true);
+    expect(op.targets).toEqual(['hub', 'watch']);
+
+    await op.update();
+    expect(op.state).toBe('L23');
+    expect(t.reboots).toEqual(['uart', 'hub']);
+    expect(v(t.helloOf('i2c:66').activeVersion)).toBe('1.0.0');
+  }, 60_000);
+
+  test('kept: the package is kept in the project before anything is written to a node', async () => {
+    const seen: [number, number][] = [];
+    let t: MockTransport | null = null;
+    const r = await sentTo({}, async (bytes) => {
+      seen.push([bytes.length, t!.reboots.length]);
+      return true;
+    });
+    t = r.t;
+    r.op.takeFile('v1.1.0.dgb', RELEASE);
+    await r.op.update();
+    expect(seen).toEqual([[RELEASE.length, 0]]);
+    expect([r.op.state, r.op.keepFailed]).toEqual(['L23', false]);
+  }, 60_000);
+
+  test('kept: a package that could not be kept is still written, and the failure is told', async () => {
+    const { op } = await sentTo({}, async () => false);
+    op.takeFile('v1.1.0.dgb', RELEASE);
+    await op.update();
+    expect([op.state, op.keepFailed]).toEqual(['L23', true]);
+  }, 60_000);
+
+  test('boot core and app in one write: the boot core\'s confirmation does not finish the node; only the app\'s makes 100 %', async () => {
+    const { op } = await sentTo();
+    op.takeFile('v1.1.0.dgb', RELEASE);
+    const feed = (e: Omit<UpdateEvent, 'node'>) => (op as unknown as { onEvent(e: UpdateEvent): void }).onEvent({ node: 1, ...e });
+    const app = op.fileVersions.seg!;
+    const was = op.live.seg!.hello!.activeVersion;
+    for (const phase of [PHASE.transfer, PHASE.verify, PHASE.reboot, PHASE.confirm]) feed({ phase, percent: 100, version: app, bootCore: true });
+    expect(op.percentOf('seg')).toBeLessThan(100);
+    expect(op.progress.seg?.stage).not.toBe('done');
+    expect(op.live.seg!.hello!.activeVersion).toBe(was);
+    feed({ phase: PHASE.transfer, percent: 10, version: app, bootCore: false });
+    expect(op.percentOf('seg')).toBeLessThan(100);
+    for (const phase of [PHASE.verify, PHASE.reboot, PHASE.confirm]) feed({ phase, percent: 100, version: app, bootCore: false });
+    expect(op.percentOf('seg')).toBe(100);
+    expect(op.progress.seg?.stage).toBe('done');
+    expect(v(op.live.seg!.hello!.activeVersion)).toBe('1.1.0');
+  }, 20_000);
+
+  test('node choice on the cards: an unchecked node is left out of the next write', async () => {
+    const { t, op } = await sentTo();
+    op.toggleSkip('seg');
+    expect(op.skip.has('seg')).toBe(true);
+    op.takeFile('v1.1.0.dgb', RELEASE);
+    expect(op.targets).toEqual(['hub', 'watch']);
+    await op.update();
+    expect(t.reboots).toEqual(['uart', 'hub']);
+    op.toggleSkip('seg');
+    expect(op.skip.has('seg')).toBe(false);
+  }, 60_000);
+
+  test('every written node ends at 100 % and shows its new version on confirmation', async () => {
+    const { op } = await sentTo();
+    op.takeFile('v1.1.0.dgb', RELEASE);
+    await op.update();
+    for (const id of ['hub', 'seg', 'watch']) {
+      expect(op.percentOf(id), id).toBe(100);
+      expect(v(op.live[id]!.hello!.activeVersion), id).toBe('1.1.0');
+    }
+  }, 60_000);
+
+  test('node choice: with every node unchecked nothing is written', async () => {
+    const { t, op } = await sentTo();
+    op.takeFile('v1.1.0.dgb', RELEASE);
+    for (const id of ['hub', 'seg', 'watch']) op.choose(id, false);
+    await op.update();
+    expect(op.state).toBe('L18');
+    expect(t.reboots).toEqual([]);
   }, 20_000);
 
   test('the hub back by itself within 45 s: the reconnect dialog state (L21) is never entered', async () => {

@@ -1,8 +1,8 @@
 //! `dagon deploy`: build, sign (slots A and B), release build and apply in
-//! one command. The version defaults to one patch above the newest version
-//! known (any node of the last release, the deployed nodes' `[build]` and
-//! `[provision]` versions); before writing, the node → version list is shown and the user
-//! confirms (`--yes` skips).
+//! one command. Each node's version is its crate's Cargo.toml `version`
+//! (`--version`, if given, must be the same); before writing, the node →
+//! version list is shown and the user confirms (`--yes` skips). The package
+//! is kept in `out/deploy` (see [`crate::kept`]).
 
 use std::collections::BTreeMap;
 use std::io::BufRead;
@@ -10,31 +10,29 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::AtomicBool;
 
 use dagon_format::header::{image_kind, slot_binding};
-use dagon_format::{BundleView, Version};
+use dagon_format::Version;
 use dagon_topology::defs::Registry;
 use dagon_topology::Topology;
 use ed25519_compact::KeyPair;
 
-use crate::commands::{image_for_node, version, SignOpts};
+use crate::commands::{image_for_node, SignOpts};
 use crate::config::{load_key, read_topology, Config, Opts};
 use crate::nodebuild::{self, SlotElfs};
 
 /// Release `apply` takes by default when dagon.toml names none.
 const DEFAULT_RELEASE: &str = "out/release-latest.dgb";
-/// Signed images and versioned releases of each deploy.
-const DEPLOY_DIR: &str = "out/deploy";
-/// Version of a first deploy with nothing to count up from.
-const FIRST: Version = Version::new(1, 0, 0);
+/// Signed images (`<version>/<node>-<slot>.img`) and the kept packages.
+const DEPLOY_DIR: &str = crate::kept::DIR;
 
 /// What a deploy writes, before it is applied.
 #[derive(Debug)]
 pub(crate) struct Prepared {
-    pub version: Version,
-    /// `out/deploy/v<version>.dgb`.
+    /// The kept package, `out/deploy/<id>.dgb`.
     pub release: PathBuf,
     pub bundle: Vec<u8>,
-    /// (node, version in the previous release, if any), in update order.
-    pub nodes: Vec<(String, Option<Version>)>,
+    /// (node, version in the previous release if any, new version), in
+    /// update order.
+    pub nodes: Vec<(String, Option<Version>, Version)>,
 }
 
 impl Prepared {
@@ -42,14 +40,13 @@ impl Prepared {
     pub fn listing(&self) -> String {
         let width = self.nodes.iter().map(|n| n.0.len()).max().unwrap_or(0);
         let mut s = format!(
-            "deploy {} to {} node(s) ({}):\n",
-            self.version,
+            "deploy to {} node(s) ({}):\n",
             self.nodes.len(),
             self.release.display()
         );
-        for (id, old) in &self.nodes {
+        for (id, old, new) in &self.nodes {
             let old = old.map_or("(none)".to_string(), |v| v.to_string());
-            s += &format!("  {id:<width$}  {old} -> {}\n", self.version);
+            s += &format!("  {id:<width$}  {old} -> {new}\n");
         }
         s
     }
@@ -84,45 +81,25 @@ pub(crate) fn release_versions(
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(BTreeMap::new()),
         Err(e) => return Err(format!("cannot read {}: {e}", path.display())),
     };
-    crate::versions::check_number("bundle", &path.display().to_string(), &bytes)?;
-    let b = BundleView::parse(&bytes).map_err(|e| format!("{}: {e:?}", path.display()))?;
-    b.verify(pubkey).map_err(|e| {
-        format!(
-            "{} does not verify under the signing key: {e:?}",
-            path.display()
-        )
-    })?;
-    let m = b.manifest();
-    let mut out = BTreeMap::new();
-    for i in 0..m.entry_count() {
-        let e = m.entry(i);
-        if let Some(n) = t.nodes.get(e.node_index as usize) {
-            let v = out.entry(n.id.clone()).or_insert(e.version);
-            *v = (*v).max(e.version);
-        }
-    }
-    Ok(out)
+    crate::kept::versions_of(t, &bytes, pubkey).map_err(|e| format!("{}: {e}", path.display()))
 }
 
-/// One patch above the newest of `known`, else [`FIRST`].
-pub(crate) fn next_version(known: impl IntoIterator<Item = Version>) -> Result<Version, String> {
-    match known.into_iter().max() {
-        None => Ok(FIRST),
-        Some(v) if v.patch() == u16::MAX => Err(format!(
-            "{v}: the patch number is at its maximum; pass --version"
-        )),
-        Some(v) => Ok(Version::from_raw(v.raw() + 1)),
-    }
-}
-
-/// Versions configured for `node` in dagon.toml.
-fn configured(cfg: &Config, node: &str) -> Vec<Version> {
-    let b = cfg.build.get(node).and_then(|b| b.version.as_deref());
-    let p = cfg.provision.get(node).and_then(|p| p.version.as_deref());
-    b.into_iter()
-        .chain(p)
-        .filter_map(|s| version(s).ok())
-        .collect()
+/// Node `node`'s app version: its crate's Cargo.toml `version`; a
+/// `version` in `[build.<id>]` and `given` (`--version`) must be the same.
+pub(crate) fn app_version(
+    cfg: &Config,
+    node: &str,
+    given: Option<&str>,
+) -> Result<Version, String> {
+    let b = cfg
+        .build
+        .get(node)
+        .ok_or_else(|| format!("no [build.{node}] in dagon.toml"))?;
+    let what = b.package.join("Cargo.toml").display().to_string();
+    let source = crate::srcver::crate_version(&cfg.base.join(&b.package))?;
+    let source = crate::srcver::agreed(source, b.version.as_deref(), &what)
+        .map_err(|e| format!("[build.{node}] {e}"))?;
+    crate::srcver::agreed(source, given, &what)
 }
 
 /// Whether apps for `mcu` are linked separately for slot B. Not for an MCU
@@ -179,19 +156,18 @@ pub(crate) fn pick_nodes(cfg: &Config, t: &Topology, pos: &[&str]) -> Result<Vec
 pub(crate) fn release_inputs(
     cfg: &Config,
     t: &Topology,
-    version: Version,
-    built: Vec<(String, SlotElfs)>,
-) -> Result<Vec<(String, SlotElfs)>, String> {
+    built: Vec<NodeBuild>,
+) -> Result<Vec<NodeBuild>, String> {
     let reg = crate::defs::registry(cfg)?;
     built
         .into_iter()
-        .map(|(node, slots)| {
+        .map(|(node, version, slots)| {
             let esp = t
                 .node(&node)
                 .and_then(|n| reg.mcu(&n.mcu))
                 .and_then(crate::esp::Esp::of);
             let Some(esp) = esp else {
-                return Ok((node, slots));
+                return Ok((node, version, slots));
             };
             let out = cfg
                 .base
@@ -199,38 +175,37 @@ pub(crate) fn release_inputs(
                 .join(version.to_string())
                 .join(format!("{node}.bin"));
             let image = crate::esp::save_image(&esp, &nodebuild::elf_path(cfg, &node, 'a'), &out)?;
-            Ok((node, vec![('a', image)]))
+            Ok((node, version, vec![('a', image)]))
         })
         .collect()
 }
 
-/// One node's built slots.
-pub(crate) type NodeElfs = (String, SlotElfs);
+/// One node's built slots and the version they are signed as.
+pub(crate) type NodeBuild = (String, Version, SlotElfs);
 
-/// Signs every built slot of `elfs` (apps) and `cores` (boot cores, with
-/// `--bootcore`) as `version` and writes the release.
+/// Signs every built slot of `elfs` (apps) and `cores` (boot cores), each
+/// as its own version, and writes the package where it is kept.
 pub(crate) fn prepare(
     cfg: &Config,
     t: &Topology,
     key: &KeyPair,
-    version: Version,
     previous: &BTreeMap<String, Version>,
-    (elfs, cores): (&[NodeElfs], &[NodeElfs]),
+    (elfs, cores): (&[NodeBuild], &[NodeBuild]),
 ) -> Result<Prepared, String> {
-    let opts = SignOpts {
-        version,
-        release_seq: 1,
-        min_bootcore: Version::default(),
-        proto: 1,
-        bits: None,
-    };
     let reg = crate::defs::registry(cfg)?;
     let mut images = Vec::new();
     let kinds = elfs
         .iter()
         .map(|e| (image_kind::APP, "", e))
         .chain(cores.iter().map(|e| (image_kind::BOOTCORE, "bootcore-", e)));
-    for (kind, prefix, (node, slots)) in kinds {
+    for (kind, prefix, (node, version, slots)) in kinds {
+        let opts = SignOpts {
+            version: *version,
+            release_seq: 1,
+            min_bootcore: Version::default(),
+            proto: 1,
+            bits: None,
+        };
         for (slot, elf) in slots {
             let binding = if *slot == 'b' {
                 slot_binding::B
@@ -246,19 +221,21 @@ pub(crate) fn prepare(
         }
     }
     let topo_bin = dagon_topology::compile_with(&reg, t).map_err(|e| e.to_string())?;
-    let name = format!("v{version}");
-    let r = dagon_sign::release::build(&reg, t, &topo_bin, &images, &name, key)
+    let versions: BTreeMap<String, Version> =
+        elfs.iter().map(|(n, v, _)| (n.clone(), *v)).collect();
+    let newest = versions.values().max().copied().unwrap_or_default();
+    let r = dagon_sign::release::build(&reg, t, &topo_bin, &images, &format!("v{newest}"), key)
         .map_err(|e| e.to_string())?;
-    let release = cfg.base.join(DEPLOY_DIR).join(format!("{name}.dgb"));
-    let rel = crate::genfs::Rel::new(format!("{DEPLOY_DIR}/{name}.dgb"))?;
+    let id = crate::kept::id_of(&versions);
+    let release = cfg.base.join(DEPLOY_DIR).join(format!("{id}.dgb"));
+    let rel = crate::genfs::Rel::new(format!("{DEPLOY_DIR}/{id}.dgb"))?;
     crate::genfs::write(&cfg.base, &rel, &r.bundle)?;
     Ok(Prepared {
-        version,
         release,
         bundle: r.bundle,
         nodes: elfs
             .iter()
-            .map(|(n, _)| (n.clone(), previous.get(n).copied()))
+            .map(|(n, v, _)| (n.clone(), previous.get(n).copied(), *v))
             .collect(),
     })
 }
@@ -276,7 +253,8 @@ pub(crate) fn confirm(listing: &str, input: &mut dyn BufRead) -> bool {
 
 /// Flag of `deploy` (and `flash`): do not ask before writing.
 pub(crate) const YES: &str = "--yes";
-/// `dagon deploy --bootcore`: the nodes' boot cores go into the release too.
+/// `dagon deploy --bootcore`: every node with boot core slots must have its
+/// boot crate (without it, nodes without one are deployed without a core).
 pub(crate) const BOOTCORE: &str = "--bootcore";
 
 /// The key the firmware embeds: the build key of dagon.toml or
@@ -296,8 +274,9 @@ pub(crate) fn firmware_key(cfg: &Config, key: &KeyPair) -> Result<[u8; 32], Stri
 
 /// `dagon deploy [<id>...] [--version x.y.z] [--yes] [--bootcore]
 /// [--port <name>] [--topology <yaml>] [--key <file>] [--config <file>]`
-/// (`--bootcore`: each node's boot core too, for every boot core slot its
-/// MCU definition declares; nodes without boot core slots get none).
+/// (each node's boot core goes in too, from its boot crate, for every boot
+/// core slot its MCU definition declares; `--bootcore` makes a missing boot
+/// crate an error).
 pub fn command(args: &[&str]) -> Result<(), String> {
     let yes = args.contains(&YES);
     let with_cores = args.contains(&BOOTCORE);
@@ -316,17 +295,12 @@ pub fn command(args: &[&str]) -> Result<(), String> {
         eprintln!("warning: {e}; its versions are not used");
         BTreeMap::new()
     });
-    let version = match o.get("version") {
-        Some(v) => version(v)?,
-        // Every node of the last release counts, so versions keep rising
-        // when only some nodes are deployed.
-        None => next_version(
-            previous
-                .values()
-                .copied()
-                .chain(nodes.iter().flat_map(|n| configured(&cfg, n))),
-        )?,
-    };
+    // Checked before anything is built: a version given that is not the
+    // source's refuses the deploy.
+    let versions = nodes
+        .iter()
+        .map(|n| app_version(&cfg, n, o.get("version")).map(|v| (n.clone(), v)))
+        .collect::<Result<BTreeMap<_, _>, _>>()?;
 
     let fw_key = firmware_key(&cfg, &key)?;
     let mut log = |l: &str| println!("{l}");
@@ -340,17 +314,23 @@ pub fn command(args: &[&str]) -> Result<(), String> {
     )?;
     let elfs = nodes
         .iter()
-        .map(|n| nodebuild::last_build(&cfg, n).map(|(_, e)| (n.clone(), e)))
+        .map(|n| nodebuild::last_build(&cfg, n).map(|(_, e)| (n.clone(), versions[n], e)))
         .collect::<Result<Vec<_>, _>>()?;
-    let elfs = release_inputs(&cfg, &t, version, elfs)?;
+    let elfs = release_inputs(&cfg, &t, elfs)?;
+    // Every node with a boot crate gets its boot core into the package; the
+    // node takes it only when its version differs from the running one.
     let mut cores = Vec::new();
-    if with_cores {
+    {
         let reg = crate::defs::registry(&cfg)?;
         let hex = dagon_sign::to_hex(&fw_key);
         for id in &nodes {
             let n = t
                 .node(id)
                 .ok_or_else(|| format!("no node '{id}' in the topology"))?;
+            let boot = cfg.base.join(crate::extgen::BOOT_CRATES).join(id);
+            if !with_cores && !boot.join("Cargo.toml").is_file() {
+                continue;
+            }
             let built = crate::flash::build_core_slots(
                 &cfg,
                 &reg,
@@ -360,11 +340,12 @@ pub fn command(args: &[&str]) -> Result<(), String> {
                 &AtomicBool::new(false),
             )?;
             if !built.is_empty() {
-                cores.push((id.clone(), built));
+                let dir = cfg.base.join(crate::extgen::BOOT_CRATES).join(id);
+                cores.push((id.clone(), crate::srcver::crate_version(&dir)?, built));
             }
         }
     }
-    let p = prepare(&cfg, &t, &key, version, &previous, (&elfs, &cores))?;
+    let p = prepare(&cfg, &t, &key, &previous, (&elfs, &cores))?;
 
     if yes {
         print!("{}", p.listing());

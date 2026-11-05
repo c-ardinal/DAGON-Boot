@@ -168,8 +168,13 @@ fn build_node(
     let link_baud = link_baud(cfg, id)?;
     let out_rel = clear_output(cfg, id)?;
     let mut built = Vec::new();
+    // The version is the crate's own; a `version` in [build.<id>] must agree.
+    let source = crate::srcver::crate_version(&dir)?;
+    let what = format!("{}", b.package.join("Cargo.toml").display());
+    let version = crate::srcver::agreed(source, b.version.as_deref(), &what)
+        .map_err(|e| format!("[build.{id}] {e}"))?;
     let mut record = BuildRecord {
-        version: b.version.clone(),
+        version: Some(version.to_string()),
         slots: Vec::new(),
     };
     for (slot, features, target_dir) in slots {

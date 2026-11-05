@@ -804,7 +804,8 @@
   /* 書込: the card check sits at the card's top-left, in the header's padding. */
   .check {
     position: absolute;
-    z-index: 1;
+    /* Above its card (ports sit there too). */
+    z-index: calc(var(--z-node) + 1);
     display: grid;
     place-items: center;
     width: calc(var(--i-state) + 2 * var(--s-2));
@@ -827,7 +828,7 @@
     outline: var(--st-w-focus) solid var(--c-paper);
   }
   .node.checkable .hd {
-    padding-left: calc(var(--i-state) + var(--s-2));
+    padding-left: calc(var(--i-state) + 2 * var(--s-2) + var(--s-1));
   }
   .hd {
     display: flex;

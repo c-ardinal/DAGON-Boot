@@ -1826,6 +1826,175 @@ fn a_demo_does_not_link_or_unlink() {
     let yes = br#"{"agent":"claude","way":"api","consent":true}"#;
     assert_eq!(http(&d, "POST", "/v1/agent/link", &ok, yes).0, 403);
     assert_eq!(http(&d, "DELETE", "/v1/agent/link", &ok, b"").0, 403);
+    let key = br#"{"key":"sk-demo-0123456789"}"#;
+    assert_eq!(http(&d, "PUT", "/v1/agent/key/claude/api", &ok, key).0, 403);
+    assert_eq!(
+        http(&d, "DELETE", "/v1/agent/key/claude/api", &ok, b"").0,
+        403
+    );
+}
+
+/// A value that must never come back: in no body, no file.
+const SECRET: &str = "sk-test-NEVER-SHOWN-0123456789abcdef";
+
+/// Every file under `dir` that holds `needle`.
+fn files_holding(dir: &std::path::Path, needle: &str) -> Vec<PathBuf> {
+    let mut out = Vec::new();
+    for e in std::fs::read_dir(dir).into_iter().flatten().flatten() {
+        let p = e.path();
+        if p.is_dir() {
+            out.extend(files_holding(&p, needle));
+        } else if std::fs::read(&p)
+            .is_ok_and(|b| b.windows(needle.len()).any(|w| w == needle.as_bytes()))
+        {
+            out.push(p);
+        }
+    }
+    out
+}
+
+/// The `key` of a way in GET /v1/agent: registered or not.
+fn key_state(a: &Area, agent: &str, way: &str) -> serde_json::Value {
+    let v: serde_json::Value = serde_json::from_str(&get(a, "/v1/agent").1).unwrap();
+    let ways = v["agents"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|x| x["id"] == agent)
+        .unwrap()["ways"]
+        .clone();
+    ways.as_array()
+        .unwrap()
+        .iter()
+        .find(|w| w["id"] == way)
+        .unwrap()["key"]
+        .clone()
+}
+
+#[test]
+fn the_key_is_stored_and_never_comes_back() {
+    let (a, home) = with_home("key-store");
+    let b = auth(&a);
+    let ok = [("Authorization", b.as_str())];
+    assert_eq!(key_state(&a, "claude", "api"), false);
+    // A way that takes no key has none to register.
+    assert_eq!(
+        key_state(&a, "claude", "claude-code"),
+        serde_json::Value::Null
+    );
+    let body = serde_json::json!({ "key": SECRET }).to_string();
+    let (st, put) = http(&a, "PUT", "/v1/agent/key/claude/api", &ok, body.as_bytes());
+    assert_eq!(st, 200, "{put}");
+    assert_eq!(key_state(&a, "claude", "api"), true);
+    let mut bodies = vec![put];
+    for path in ["/v1/agent", "/v1/hello"] {
+        bodies.push(get(&a, path).1);
+    }
+    let (st, del) = http(&a, "DELETE", "/v1/agent/key/claude/api", &ok, b"");
+    assert_eq!(st, 200, "{del}");
+    bodies.push(del);
+    assert_eq!(key_state(&a, "claude", "api"), false);
+    for body in &bodies {
+        assert!(
+            !body.contains(SECRET) && !body.contains("NEVER-SHOWN"),
+            "{body}"
+        );
+    }
+    assert!(
+        files_holding(&a.dir, SECRET).is_empty(),
+        "the key was written to a file"
+    );
+    assert!(files_holding(&home, SECRET).is_empty());
+}
+
+#[test]
+fn the_key_api_refuses_bad_requests_and_other_origins() {
+    let (a, _) = with_home("key-refuse");
+    let b = auth(&a);
+    let ok = [("Authorization", b.as_str())];
+    let body = serde_json::json!({ "key": SECRET }).to_string();
+    let put = |path: &str, h: &[(&str, &str)], body: &[u8]| http(&a, "PUT", path, h, body).0;
+    assert_eq!(put("/v1/agent/key/claude/api", &[], body.as_bytes()), 401);
+    for origin in ["https://example.com", "http://127.0.0.1:1", "null"] {
+        let cross = [("Origin", origin), ("Authorization", b.as_str())];
+        assert_eq!(
+            put("/v1/agent/key/claude/api", &cross, body.as_bytes()),
+            403,
+            "{origin}"
+        );
+        assert_eq!(
+            http(&a, "DELETE", "/v1/agent/key/claude/api", &cross, b"").0,
+            403
+        );
+    }
+    let rebind = [
+        ("Host", "attacker.example:80"),
+        ("Authorization", b.as_str()),
+    ];
+    assert_eq!(
+        put("/v1/agent/key/claude/api", &rebind, body.as_bytes()),
+        403
+    );
+    // No such way, a way that takes no key, a key that cannot go in a header.
+    assert_eq!(put("/v1/agent/key/claude/other", &ok, body.as_bytes()), 404);
+    assert_eq!(put("/v1/agent/key/other/api", &ok, body.as_bytes()), 404);
+    assert_eq!(
+        put("/v1/agent/key/claude/claude-code", &ok, body.as_bytes()),
+        400
+    );
+    for bad in [
+        "",
+        "   ",
+        "sk with space",
+        "sk\nnext",
+        &"k".repeat(crate::keystore::MAX_KEY + 1),
+    ] {
+        let b = serde_json::json!({ "key": bad }).to_string();
+        let (st, msg) = http(&a, "PUT", "/v1/agent/key/claude/api", &ok, b.as_bytes());
+        assert_eq!(st, 400, "{bad:?}: {msg}");
+    }
+    assert_eq!(put("/v1/agent/key/claude/api", &ok, b"{}"), 400);
+    assert_eq!(key_state(&a, "claude", "api"), false);
+}
+
+#[test]
+fn an_unavailable_store_refuses_with_its_reason_and_writes_nothing() {
+    let (a, home) = with_home("key-nostore");
+    let why = "no Secret Service is running; install and start one";
+    let _ = a.server.keys.set(crate::keystore::Keys::unavailable(why));
+    let b = auth(&a);
+    let ok = [("Authorization", b.as_str())];
+    let body = serde_json::json!({ "key": SECRET }).to_string();
+    let (st, msg) = http(&a, "PUT", "/v1/agent/key/claude/api", &ok, body.as_bytes());
+    assert_eq!(st, 503, "{msg}");
+    let v: serde_json::Value = serde_json::from_str(&msg).unwrap();
+    assert_eq!(v["code"], crate::agents::codes::KEY_STORE);
+    assert!(v["error"].as_str().unwrap().contains(why), "{msg}");
+    assert!(!msg.contains(SECRET));
+    assert_eq!(key_state(&a, "claude", "api"), false);
+    assert!(files_holding(&a.dir, SECRET).is_empty() && files_holding(&home, SECRET).is_empty());
+}
+
+/// The linked API way with a key in the store reaches the agent with that
+/// key in the header (a local stand-in for the API; nothing else carries it).
+#[test]
+fn a_registered_key_makes_the_api_way_available() {
+    let (a, _) = with_home("key-ready");
+    let yes = serde_json::json!({ "agent": "claude", "way": "api", "consent": true });
+    assert_eq!(post(&a, "/v1/agent/link", yes).0, 200);
+    let v: serde_json::Value = serde_json::from_str(&get(&a, "/v1/agent").1).unwrap();
+    assert_eq!(v["available"], false);
+    let b = auth(&a);
+    let body = serde_json::json!({ "key": SECRET }).to_string();
+    let ok = [("Authorization", b.as_str())];
+    assert_eq!(
+        http(&a, "PUT", "/v1/agent/key/claude/api", &ok, body.as_bytes()).0,
+        200
+    );
+    let v: serde_json::Value = serde_json::from_str(&get(&a, "/v1/agent").1).unwrap();
+    assert_eq!(v["available"], true);
+    let hello: serde_json::Value = serde_json::from_str(&get(&a, "/v1/hello").1).unwrap();
+    assert_eq!(hello["api_key"], true);
 }
 
 /// A linked server whose agent is `fake` (no network).
@@ -1978,17 +2147,14 @@ fn a_consent_file_of_another_version_answers_its_own_code() {
 
 #[test]
 fn a_way_that_cannot_be_used_here_is_refused_before_any_call() {
-    // With the key set this would reach the real agent: not here.
-    if std::env::var_os("ANTHROPIC_API_KEY").is_some() {
-        return;
-    }
+    // The server's key store is an empty test double: no key, no call.
     let (a, _) = with_home("ask-nokey");
     let yes = serde_json::json!({ "agent": "claude", "way": "api", "consent": true });
     assert_eq!(post(&a, "/v1/agent/link", yes).0, 200);
     let (st, body) = post(&a, "/v1/agent/ask", serde_json::json!({ "question": "x" }));
     assert!(st == 409 && body.contains("AGENT_UNAVAILABLE"), "{body}");
     assert!(
-        body.contains("ANTHROPIC_API_KEY") && !body.contains("sk-"),
+        body.contains("dagon ai key set") && !body.contains("sk-"),
         "{body}"
     );
 }

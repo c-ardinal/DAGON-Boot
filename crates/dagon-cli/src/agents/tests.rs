@@ -82,7 +82,11 @@ fn the_builtin_agent_is_claude_with_two_ways_claude_code_first() {
     let Transport::MessagesHttp(h) = &api.transport else {
         panic!("api is messages-http")
     };
-    assert_eq!(h.key_env, "ANTHROPIC_API_KEY");
+    assert!(h.url.starts_with("https://") && api.transport.takes_key());
+    assert!(
+        !way.transport.takes_key(),
+        "Claude Code uses the user's own login"
+    );
     assert!(secret_env(None).contains(&"ANTHROPIC_API_KEY".to_string()));
     assert!(secret_env(None).contains(&crate::config::KEY_ENV.to_string()));
 }
@@ -101,7 +105,8 @@ fn user_definitions_are_checked_and_reported_by_file_name_only() {
         ("d-bad-id.toml", ok.replace("id = \"local\"", "id = \"Local Agent\"")),
         ("e-again.toml", ok.to_string()),
         ("f-claude.toml", ok.replace("id = \"local\"", "id = \"claude\"")),
-        ("g-http.toml", ok.replace("kind = \"command\"\nprogram = \"local-agent\"", "kind = \"messages-http\"\nurl = \"http://x\"\nversion = \"1\"\nkey_env = \"K\"\nmodel = \"m\"")),
+        ("g-http.toml", ok.replace("kind = \"command\"\nprogram = \"local-agent\"", "kind = \"messages-http\"\nurl = \"http://x\"\nversion = \"1\"\nmodel = \"m\"")),
+        ("m-key-env.toml", ok.replace("kind = \"command\"\nprogram = \"local-agent\"", "kind = \"messages-http\"\nurl = \"https://x\"\nversion = \"1\"\nkey_env = \"K\"\nmodel = \"m\"")),
         ("h-placeholder.toml", ok.replace("program = \"local-agent\"", "program = \"x\"\nargs = [\"--in={user}\"]")),
         ("i-no-ways.toml", "dagon_agent = 1\nid = \"x\"\nname = \"X\"\nprovider = \"P\"\nways = []\n".into()),
         ("k-newer-format.toml", ok.replace("dagon_agent = 1", "dagon_agent = 2")),
@@ -114,7 +119,14 @@ fn user_definitions_are_checked_and_reported_by_file_name_only() {
     let a = Agents::load(Some(&h));
     assert_eq!(a.list.len(), 2, "{:?}", a.errors);
     assert!(a.way("local", "run").is_some());
-    assert_eq!(a.errors.len(), 11, "{:?}", a.errors);
+    assert_eq!(a.errors.len(), 12, "{:?}", a.errors);
+    // A key is never named by an environment variable: `key_env` is refused.
+    let key_env = a
+        .errors
+        .iter()
+        .find(|e| e.starts_with("m-key-env.toml"))
+        .unwrap();
+    assert!(key_env.contains("key_env"), "{key_env}");
     let newer = a
         .errors
         .iter()
@@ -163,12 +175,18 @@ fn every_call_is_checked_for_consent_and_size_first() {
         before_call(&h, &small).err().unwrap(),
         crate::consent::NOT_LINKED
     );
-    assert_eq!(call(&h, &small, T).unwrap_err(), crate::consent::NOT_LINKED);
+    assert_eq!(
+        call(&h, &crate::keystore::Keys::double(), &small, T).unwrap_err(),
+        crate::consent::NOT_LINKED
+    );
     crate::consent::link(&h, "claude", "api").unwrap();
     assert!(before_call(&h, &small).is_ok());
     let big = prompt(&"s".repeat(MAX_REQUEST), "u");
     assert_eq!(before_call(&h, &big).err().unwrap(), TOO_LARGE);
-    assert_eq!(call(&h, &big, T).unwrap_err(), TOO_LARGE);
+    assert_eq!(
+        call(&h, &crate::keystore::Keys::double(), &big, T).unwrap_err(),
+        TOO_LARGE
+    );
     std::fs::remove_dir_all(&h).unwrap();
 }
 
@@ -305,10 +323,11 @@ fn an_agent_defined_only_in_a_toml_file_answers_through_command() {
     let agents = Agents::load(Some(&h));
     assert!(agents.errors.is_empty(), "{:?}", agents.errors);
     let (_, way) = agents.way("fake", "print").unwrap();
-    assert!(way.available());
+    assert!(way.available("fake", &crate::keystore::Keys::double()));
     crate::consent::link(&h, "fake", "print").unwrap();
-    assert!(ready(&h).is_ok());
-    let text = call(&h, &prompt("s", "u"), T).unwrap();
+    let keys = crate::keystore::Keys::double();
+    assert!(ready(&h, &keys).is_ok());
+    let text = call(&h, &keys, &prompt("s", "u"), T).unwrap();
     assert_eq!(
         reply_json(&text).unwrap()["answer"],
         "偽のエージェントです。"
@@ -320,13 +339,13 @@ fn an_agent_defined_only_in_a_toml_file_answers_through_command() {
         topology: None,
         jobs: Vec::new(),
     };
-    let mut api = |p: &Prompt| call(&h, p, T);
+    let mut api = |p: &Prompt| call(&h, &keys, p, T);
     let r = crate::ask::ask(&q, &facts, &mut api).unwrap();
     assert_eq!(r.answer, "偽のエージェントです。");
     // Unlinked: the same agent is not called again.
     crate::consent::unlink(&h).unwrap();
     assert_eq!(
-        call(&h, &prompt("s", "u"), T).unwrap_err(),
+        call(&h, &keys, &prompt("s", "u"), T).unwrap_err(),
         crate::consent::NOT_LINKED
     );
     std::fs::remove_dir_all(&h).unwrap();
@@ -406,7 +425,10 @@ fn transport_kind_names_round_trip() {
     for kind in KINDS {
         let text = match kind {
             "command" => "kind = \"command\"\nprogram = \"x\"\n".to_string(),
-            "messages-http" => "kind = \"messages-http\"\nurl = \"https://x\"\nversion = \"1\"\nkey_env = \"K\"\nmodel = \"m\"\n".to_string(),
+            "messages-http" => {
+                "kind = \"messages-http\"\nurl = \"https://x\"\nversion = \"1\"\nmodel = \"m\"\n"
+                    .to_string()
+            }
             other => panic!("give the test a minimal {other} transport"),
         };
         let t: Transport = toml::from_str(&text).unwrap();
@@ -477,4 +499,68 @@ fn the_contract_document_follows_the_code() {
     base.sort();
     assert_eq!(listed, base, "environment allow-list");
     assert!(env.contains("`LC_*`"));
+}
+
+/// Product code (not its tests) of dagon-cli and the builtin definitions:
+/// (file, line number, line) of every line before a file's test module.
+fn product_lines() -> Vec<(String, usize, String)> {
+    fn walk(dir: &Path, out: &mut Vec<PathBuf>) {
+        for e in std::fs::read_dir(dir).unwrap().flatten() {
+            let p = e.path();
+            if p.is_dir() {
+                walk(&p, out);
+            } else if p.extension().is_some_and(|x| x == "rs" || x == "toml") {
+                out.push(p);
+            }
+        }
+    }
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let mut files = Vec::new();
+    walk(&root.join("src"), &mut files);
+    walk(&root.join("agents"), &mut files);
+    let mut out = Vec::new();
+    for f in files
+        .iter()
+        .filter(|f| f.file_name().is_some_and(|n| n != "tests.rs"))
+    {
+        let name = f.strip_prefix(root).unwrap().display().to_string();
+        let text = std::fs::read_to_string(f).unwrap();
+        let lines: Vec<&str> = text.lines().collect();
+        for (i, line) in lines.iter().enumerate() {
+            // A file's test module comes last: what follows is test code.
+            let test_mod = line.trim() == "#[cfg(test)]"
+                && lines[i + 1..]
+                    .iter()
+                    .take(3)
+                    .any(|n| n.trim_start().starts_with("mod tests"));
+            if test_mod {
+                break;
+            }
+            out.push((name.clone(), i + 1, line.to_string()));
+        }
+    }
+    out
+}
+
+/// An agent key is read only from the OS credential store: no definition
+/// names a key variable (`key_env`), and no product code reads
+/// ANTHROPIC_API_KEY or any `*_API_KEY` variable. The one line that may
+/// name ANTHROPIC_API_KEY is [`NEVER_PASSED`], which keeps it from children.
+#[test]
+fn no_code_reads_an_agent_key_from_the_environment() {
+    let mut found = Vec::new();
+    for (file, n, line) in product_lines() {
+        let named = line.contains("key_env") || line.contains("ANTHROPIC_API_KEY");
+        let reads =
+            (line.contains("env::var") || line.contains("var_os(")) && line.contains("API_KEY");
+        let never_passed = line.contains("NEVER_PASSED") && line.contains("ANTHROPIC_API_KEY");
+        if (named || reads) && !never_passed {
+            found.push(format!("{file}:{n}: {}", line.trim()));
+        }
+    }
+    assert!(
+        found.is_empty(),
+        "an agent key read from the environment:\n{}",
+        found.join("\n")
+    );
 }

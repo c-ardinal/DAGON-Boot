@@ -75,6 +75,8 @@ pub struct Server {
     /// Stands in for the agent (tests); unset: the Messages API with the
     /// CLI's key.
     pub agent_api: std::sync::OnceLock<Arc<AgentApi>>,
+    /// Where agent API keys are; unset: [`crate::keystore::Keys::system`].
+    pub keys: std::sync::OnceLock<crate::keystore::Keys>,
 }
 
 /// One agent call: the prompt in, the agent's text out.
@@ -109,7 +111,13 @@ impl Server {
             hub: Mutex::new(()),
             asking: AtomicBool::new(false),
             agent_api: std::sync::OnceLock::new(),
+            keys: std::sync::OnceLock::new(),
         })
+    }
+
+    /// The agent key store this server uses.
+    pub fn keys(&self) -> &crate::keystore::Keys {
+        self.keys.get_or_init(crate::keystore::Keys::system)
     }
 
     /// dagon.toml of the open project.

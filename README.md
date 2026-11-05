@@ -145,9 +145,17 @@ From the command line the same is `dagon topo check topology.yaml`, or a
 first draft from a plain-language description through the Claude API:
 
 ```sh
-export ANTHROPIC_API_KEY=...        # read by the CLI only, never shown or saved
+dagon ai key set                    # the API key, typed without echo, into the OS credential store
+dagon ai link --way api             # consent to send, asked once
 dagon ai topology --in boards.txt --out topology.yaml
 ```
+
+The API key lives only in the OS credential store (Windows Credential
+Manager, macOS Keychain, or a Secret Service such as GNOME Keyring on Linux),
+never in an environment variable or a file. `dagon ai key status` shows
+whether it is registered and `dagon ai key delete` removes it; DAGON Console
+registers it too (CLI 連携). Without a credential store, use Claude Code with
+your own login instead (`dagon ai link`). See `docs/agent-api.md`.
 
 Definitions are not a place for secrets. Names in them (ids, product
 names, pin labels, partition names) appear in DAGON Console and are sent
@@ -186,7 +194,10 @@ in its crate's `Cargo.toml` (its boot core's, in its boot crate's
 or the command stops and says which. A node's boot core goes into the
 package with its app, and the node writes it only when its version differs
 from the boot core it runs: a changed boot core is written once its version
-is raised, as with apps.
+is raised, as with apps. The build brings the crate's own entry in its
+`Cargo.lock` to the raised version and changes nothing else there; every
+other package stays as locked. `dagon gen` keeps the boot crate's
+`version`: it is the one field of that file that is yours.
 
 ### 5. Write the first version (once per node)
 

@@ -171,6 +171,8 @@ pub fn handle(server: &Arc<Server>, req: &Request) -> Response {
         ("GET", ["agent"]) => Ok(agent_get(server)),
         ("POST", ["agent", "link"]) => agent_link(server, req),
         ("DELETE", ["agent", "link"]) => agent_unlink(server),
+        ("PUT", ["agent", "key", agent, way]) => key_put(server, agent, way, req),
+        ("DELETE", ["agent", "key", agent, way]) => key_delete(server, agent, way),
         ("POST", ["agent", "ask"]) => agent_ask(server, req),
         ("GET", ["targets"]) => targets(server),
         ("GET", ["definitions"]) => definitions(server),
@@ -216,8 +218,9 @@ pub fn handle(server: &Arc<Server>, req: &Request) -> Response {
 /// What dagon demo refuses: other projects (opening one would load its
 /// signing key) and everything that touches real hardware or the machine.
 /// Never a real agent in a demo either: linking, questions, AI routes.
-const DEMO_REFUSED: [&str; 11] = [
+const DEMO_REFUSED: [&str; 12] = [
     "agent/link",
+    "agent/key",
     "agent/ask",
     "ai",
     "project/open",
@@ -413,9 +416,10 @@ fn agent_api(
             f(p)
         }));
     }
-    crate::agents::ready(&home)?;
+    let keys = server.keys().clone();
+    crate::agents::ready(&home, &keys)?;
     Ok(Box::new(move |p: &crate::agents::Prompt| {
-        crate::agents::call(&home, p, timeout)
+        crate::agents::call(&home, &keys, p, timeout)
     }))
 }
 
@@ -485,7 +489,59 @@ fn agent_linked(server: &Server) -> bool {
 /// here; never a key, path or command), the consent, what linking sends.
 fn agent_get(server: &Server) -> Response {
     let home = super::project::home(server).ok();
-    json_ok(crate::consent::status(home.as_deref(), &agents_of(server)))
+    json_ok(crate::consent::status(
+        home.as_deref(),
+        &agents_of(server),
+        server.keys(),
+    ))
+}
+
+/// The defined way `agent`/`way` that takes a key: 404 for no such way,
+/// 400 for one that takes none (its login stays with the agent).
+fn key_way(server: &Server, agent: &str, way: &str) -> Result<(), Response> {
+    let agents = agents_of(server);
+    let (_, w) = agents
+        .way(agent, way)
+        .ok_or_else(|| Response::error(404, "no such agent and way"))?;
+    if w.transport.takes_key() {
+        Ok(())
+    } else {
+        Err(Response::error(400, "this way takes no key"))
+    }
+}
+
+/// A key store error: 503 AGENT_KEY_STORE when the store cannot be used,
+/// with its reason (never the key).
+fn key_store_failure(e: &str) -> Response {
+    coded(503, e, crate::agents::codes::KEY_STORE)
+}
+
+/// PUT /v1/agent/key/<agent>/<way> {key}: registers the way's key in the
+/// OS credential store. The answer is GET /v1/agent's body (whether a key
+/// is registered, never the key).
+fn key_put(server: &Server, agent: &str, way: &str, req: &Request) -> Res {
+    key_way(server, agent, way)?;
+    let v = body_json(req)?;
+    let key = v["key"]
+        .as_str()
+        .ok_or_else(|| Response::error(400, "key must be a string"))?;
+    let key = crate::keystore::check_key(key).map_err(|e| Response::error(400, &e))?;
+    server
+        .keys()
+        .set(agent, way, key)
+        .map_err(|e| key_store_failure(&e))?;
+    Ok(agent_get(server))
+}
+
+/// DELETE /v1/agent/key/<agent>/<way>: removes the way's key (fine when
+/// none was registered).
+fn key_delete(server: &Server, agent: &str, way: &str) -> Res {
+    key_way(server, agent, way)?;
+    server
+        .keys()
+        .delete(agent, way)
+        .map_err(|e| key_store_failure(&e))?;
+    Ok(agent_get(server))
 }
 
 /// POST /v1/agent/link {agent, way, consent:true}: records the user's
@@ -551,7 +607,7 @@ fn hello(server: &Server) -> Response {
         "workspace": workspace,
         "features": features,
         // The way DAGON uses (linked, else the default) can be used here.
-        "api_key": crate::consent::status(super::project::home(server).ok().as_deref(), &agents_of(server))["available"],
+        "api_key": crate::consent::status(super::project::home(server).ok().as_deref(), &agents_of(server), server.keys())["available"],
         "key": key.is_some(),
         "key_id": key,
         "release_key": server.release_key().map(|k| to_hex(&k)),
@@ -1730,6 +1786,86 @@ mod tests {
         let rec: SignRecord = serde_json::from_slice(record.as_ref().unwrap()).unwrap();
         let listed: Vec<&str> = rec.images.iter().map(|(f, _)| f.as_str()).collect();
         assert_eq!(listed, ["seg-a.img", "seg-b.img", "bootcore-seg-a.img"]);
+    }
+
+    /// `dagon new` and `dagon gen`, built and signed once; then the app
+    /// crate's and the boot crate's versions raised in their Cargo.toml,
+    /// `dagon gen` and the Console's build, sign and release again: the
+    /// package carries both new versions (real firmware builds).
+    fn raised_versions_reach_the_package(node: &str) {
+        let d = std::env::temp_dir().join(format!("dagon-raise-{node}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&d);
+        let dir = d.join("proj");
+        let here = std::fs::canonicalize(crate::dagonsrc::BUILT_FROM).unwrap();
+        let src = crate::dagonsrc::NewSource::Clone(crate::config::plain_path(here));
+        let yaml = crate::scaffold::SAMPLE;
+        crate::scaffold::new_project(&dir, "proj", yaml, &d.join("keys"), &src).unwrap();
+        let config = dir.join(crate::config::CONFIG_FILE);
+        let load = || Config::load(Some(&config.to_string_lossy())).unwrap();
+        let t = dagon_topology::parse_str(yaml).unwrap();
+        let key = test_key();
+        let only = [node.to_string()];
+        let mut log = Vec::new();
+        let cycle = |log: &mut Vec<String>| {
+            let lines = crate::scaffold::gen_project(&config, &only, false).unwrap();
+            assert!(!lines.iter().any(|l| l.starts_with("skipped")), "{lines:?}");
+            let cfg = load();
+            let go = AtomicBool::new(false);
+            nodebuild::build_nodes(&cfg, &only, &mut |l| log.push(l.into()), &go)
+                .and_then(|_| sign_nodes(&cfg, &t, &only, &key, &mut |l| log.push(l.into()), &go))
+                .unwrap_or_else(|e| panic!("{e}\n{}", log.join("\n")));
+        };
+        cycle(&mut log);
+        let raise = |rel: &str, to: &str| {
+            let path = dir.join(rel).join("Cargo.toml");
+            let text = std::fs::read_to_string(&path).unwrap();
+            let doc: toml_edit::DocumentMut = text.parse().unwrap();
+            let from = doc["package"]["version"].as_str().unwrap().to_string();
+            let raised = text.replacen(
+                &format!("version = \"{from}\""),
+                &format!("version = \"{to}\""),
+                1,
+            );
+            assert_ne!(raised, text, "{rel}");
+            std::fs::write(&path, raised).unwrap();
+        };
+        raise(&format!("nodes/{node}"), "1.3.0");
+        raise(&format!("boot/{node}"), "0.2.0");
+        cycle(&mut log);
+        let go = AtomicBool::new(false);
+        release_from(&load(), &t, None, "raised", &key, &mut |_| {}, &go).unwrap();
+        let bundle = std::fs::read(dir.join(RELEASE_DIR).join("raised.dgb")).unwrap();
+        let view = dagon_format::bundle::BundleView::parse(&bundle).unwrap();
+        let versions: Vec<(u8, dagon_format::Version)> = (0..view.item_count())
+            .filter(|&i| Some(i) != view.topology_item())
+            .map(|i| {
+                let raw = &view.item_bytes(i)[..HEADER_SIZE];
+                let h = ImageHeader::parse(raw.try_into().unwrap()).unwrap();
+                (h.image_kind, h.version)
+            })
+            .collect();
+        let of = |kind: u8| -> Vec<dagon_format::Version> {
+            versions
+                .iter()
+                .filter(|v| v.0 == kind)
+                .map(|v| v.1)
+                .collect()
+        };
+        assert_eq!(
+            of(image_kind::APP),
+            [dagon_format::Version::new(1, 3, 0); 2]
+        );
+        assert_eq!(
+            of(image_kind::BOOTCORE),
+            [dagon_format::Version::new(0, 2, 0); 2]
+        );
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
+    #[test]
+    #[ignore = "builds firmware for the STM32F401"]
+    fn raised_versions_reach_the_package_f401() {
+        raised_versions_reach_the_package("seg");
     }
 
     #[test]

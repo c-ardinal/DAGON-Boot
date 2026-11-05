@@ -100,9 +100,12 @@ DAGON Console が 127.0.0.1 だけで、使い捨てのパスフレーズ付き�
 コマンドでは `dagon topo check topology.yaml` で検査します。言葉で書いた説明から Claude API で構成の案を作ることもできます:
 
 ```sh
-export ANTHROPIC_API_KEY=...        # 読むのは CLI だけ。表示も保存もしない
+dagon ai key set                    # API キーを入力（表示しない）。OS の資格情報ストアに保存する
+dagon ai link --way api             # 送ることへの同意（一度だけ）
 dagon ai topology --in boards.txt --out topology.yaml
 ```
+
+API キーは OS の資格情報ストア（Windows の資格情報マネージャー、macOS のキーチェーン、Linux では GNOME Keyring などの Secret Service）にだけ置き、環境変数やファイルには置きません。`dagon ai key status` で登録済みかを確かめ、`dagon ai key delete` で削除します。DAGON Console の「CLI 連携」でも登録できます。資格情報ストアが無い環境では、自分のログインで使う Claude Code を選んでください（`dagon ai link`）。詳しくは `docs/agent-api.md` を見てください。
 
 定義ファイルは秘密を書く場所ではありません。定義の中の名前（id、製品名、ピンのラベル、パーティション名）は DAGON Console に表示され、Claude に頼んだときは Claude にも送られます。コマンド、ヒント、コメント、ファイルのパスは送りません。詳しくは `targets/README.md` を見てください。
 
@@ -120,7 +123,7 @@ dagon gen
 dagon build            # または: dagon build seg
 ```
 
-各ノードを `out/build/<id>/app-a.elf` と、スロット B 用の `app-b.elf` にビルドします（ESP32-S3 のイメージは両方のスロットで使えるので 1 つ）。`dagon.toml` の公開鍵が埋め込まれます。ノードのバージョンは、そのクレートの `Cargo.toml` の `version` です（ブートコアはブート用クレートの `Cargo.toml`）。書き込む変更ごとに、そこで上げてください。`[build.<id>]` の `version` や `--version` は要りません。書いた場合は同じでなければならず、違うとコマンドは止まり、どこが違うかを示します。ノードのブートコアはアプリと一緒にパッケージに入り、ノードが動かしているブートコアとバージョンが違うときだけ書き込まれます。アプリと同じく、ブートコアを変えたらバージョンを上げてください。
+各ノードを `out/build/<id>/app-a.elf` と、スロット B 用の `app-b.elf` にビルドします（ESP32-S3 のイメージは両方のスロットで使えるので 1 つ）。`dagon.toml` の公開鍵が埋め込まれます。ノードのバージョンは、そのクレートの `Cargo.toml` の `version` です（ブートコアはブート用クレートの `Cargo.toml`）。書き込む変更ごとに、そこで上げてください。`[build.<id>]` の `version` や `--version` は要りません。書いた場合は同じでなければならず、違うとコマンドは止まり、どこが違うかを示します。ノードのブートコアはアプリと一緒にパッケージに入り、ノードが動かしているブートコアとバージョンが違うときだけ書き込まれます。アプリと同じく、ブートコアを変えたらバージョンを上げてください。ビルドは、そのクレート自身の `Cargo.lock` の項目だけを上げたバージョンにそろえ、ほかのパッケージは固定したままです。`dagon gen` はブート用クレートの `version` を書き換えません。このファイルのうち、あなたが決めるのはこの欄だけです。
 
 ### 5. 最初のバージョンを書き込む（ノードごとに 1 回）
 
@@ -304,7 +307,7 @@ dagon demo --uplink uart          # または usb-cdc（既定）、wifi-tcp
 - ESP32-S3 の 2nd stage を `targets/esp32s3-2ndstage` からビルドし直すときは ESP-IDF v6.1（ビルド済みのものを `targets/mcu/esp32s3/vendor/bootloader.bin` として同梱している。無改変の ESP-IDF v6.1。`vendor/PROVENANCE.md` を参照）
 - RP2040 の立ち上げ用イメージに使う `elf2uf2-rs`
 - `cargo install --path crates/dagon-cli` でクローンから CLI を入れます。プロジェクトは `dagon new --dagon-path <クローン>`（または `DAGON_HOME`）でそのクローンを使います
-- リリースのアーカイブ: `python scripts/release.py [--target <triple>]` が、ページを組み込んだ `out/release/dagon-cli-<version>-<target>.*` を作ります。`.github/workflows/release.yml` は `cli-v*` のタグが push されたときに、コミットが求める上げ幅に版が足りているかを `scripts/bump_check.py` で確かめてから各プラットフォームで同じことをし、ワークフローの成果物として残します（公開はしません）
+- リリースのアーカイブ: `python scripts/release.py [--target <triple>]` が、ページを組み込んだ `out/release/dagon-cli-<version>-<target>.*` を作ります。`.github/workflows/release.yml` は `cli-v*` のタグが push されたときに、コミットが求める上げ幅にバージョンが足りているかを `scripts/bump_check.py` で確かめてから各プラットフォームで同じことをし、ワークフローの成果物として残します（公開はしません）
 
 ## ライセンス (MIT / Apache-2.0 デュアル)
 

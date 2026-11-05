@@ -15,6 +15,9 @@ const MAX_TOKENS: u32 = 16_000;
 /// Characters an error from the agent's side is cut to: a summary for one
 /// notice or log line, not the remote body.
 const MAX_ERROR: usize = 300;
+/// Bytes of a response body read at most: the same cap as a command way's
+/// answer (its stdout).
+const MAX_ANSWER: usize = super::command::MAX_OUTPUT;
 /// What stands where the agent's answer or error held the key.
 const KEY_MARK: &str = "[API key]";
 
@@ -158,8 +161,15 @@ fn send(
     }
     let text = resp
         .body_mut()
+        .with_config()
+        .limit(MAX_ANSWER as u64)
         .read_to_string()
-        .map_err(|e| agent_error(e, "cannot read the agent's answer"))?;
+        .map_err(|e| match e {
+            ureq::Error::BodyExceedsLimit(_) => {
+                "the agent's answer is larger than 1 MiB; it was not read".to_string()
+            }
+            e => agent_error(e, "cannot read the agent's answer"),
+        })?;
     let v: Value = serde_json::from_str(&text)
         .map_err(|e| format!("the agent answered with non-JSON (HTTP {status}): {e}"))?;
     if !status.is_success() {
@@ -332,5 +342,18 @@ mod tests {
         let e = ask(url).unwrap_err();
         h.join().unwrap();
         assert!(!e.contains(KEY) && e.contains("500"), "{e}");
+    }
+
+    /// An answer over [`MAX_ANSWER`] is refused while it is read (never
+    /// read whole first), with a clear error that carries no key.
+    #[test]
+    fn an_oversized_answer_is_refused_while_read() {
+        let text = format!("{KEY} {}", "x".repeat(MAX_ANSWER));
+        let big = json!({ "content": [{ "type": "text", "text": text }] });
+        let (url, h) = mock_server("200 OK", &big.to_string());
+        let e = ask(url).unwrap_err();
+        // The stand-in may fail to write what was never read.
+        let _ = h.join();
+        assert!(e.contains("larger than 1 MiB") && !e.contains(KEY), "{e}");
     }
 }

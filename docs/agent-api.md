@@ -290,7 +290,8 @@ text); DAGON reads the object from its text.
 - `messages-http`: `url` (https only), `version` (the `anthropic-version`
   header), `model`, optional `model_env` (a variable that overrides `model`).
   The key is the way's entry in the OS credential store (Where API keys
-  live); a definition naming a key variable (`key_env`) is refused.
+  live); a definition naming a key variable (`key_env`) is refused. The
+  answer is read up to 1 MiB; a larger one is refused while it is read.
 
 ## Where the consent lives
 

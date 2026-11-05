@@ -21,7 +21,7 @@ extension the LCD stays dark until then.
 ## What you see
 
 Usually only the last step's text, briefly, just before the app's screen
-appears. The boot is not held up for the screen, and the panel needs time
+appears. Nothing waits for the screen to be seen, and the panel needs time
 before it takes commands:
 
 - The panel's reset line is low from the chip's reset on (the pad's
@@ -30,8 +30,8 @@ before it takes commands:
   first three events come within a few milliseconds of each other, so they
   pass before the panel is ready. The screen is drawn at the first event
   where the rest of that wait is at most 20 ms, waited inside the call.
-- After sleep out the panel is given another 120 ms before the next command,
-  so a step that comes sooner is not drawn.
+- After sleep out the panel is given another 120 ms before the next command.
+  A step that comes sooner is not drawn, and the call does not wait for it.
 - The app resets the panel when it starts, so the screen lasts from the
   slot being chosen to the jump to the app.
 - Only the text line and the gauge are drawn, never the whole screen.
@@ -44,7 +44,7 @@ not checked against the GC9A01 datasheet. Neither are the order used here
 (the screen written and display on sent before sleep out, so no command
 follows sleep out in the same call) and the panel's memory after a reset.
 
-## Time per call
+## Time per call and per boot
 
 Each call stays within the manifest's `max_run_us` (45 ms; an observer's
 handler is bounded by 50 ms). A call stops sending rows once 40 ms have
@@ -55,6 +55,16 @@ of 184 x 8 pixels). At an estimated 1 µs per byte (8 bits at 15.625 MHz,
 the board's 20 MHz bus as the HAL divides the 125 MHz peripheral clock, plus
 the HAL's byte-by-byte blocking write), that is about 9 ms, or about 29 ms
 with the longest wait. This estimate is not measured on the board.
+
+The extension adds at most 47 ms to a boot (estimated; at most 135 ms at
+any bus speed). Its only wait is the rest of the panel's reset release,
+at most 20 ms, in the one call that sets the panel up. The first event
+never draws, because it releases the reset and the panel then needs
+120 ms. So at most the three later steps draw: the set-up call (about
+9,000 bytes) and two redraws of the text line and the gauge (about 8,800
+bytes each), at the estimated 1 µs per byte. Calls that draw nothing return
+at once. The 135 ms bound is three drawing calls at the manifest's 45 ms
+each, which holds whatever the real time per byte.
 
 ## What it takes from the chip
 
@@ -93,7 +103,9 @@ and the words differ.
 `dagon gen` takes extension packages from inside the project only. Copy
 this folder to `extensions/hub-boot-screen/` of the project. Then point its
 `path = "../../..."` dependencies at the DAGON checkout that the project's
-`[dagon] path` names, as the template says for a copy. Then, in the
+`[dagon] path` names, as the template says for a copy. Point the
+`#[path]` of `src/tests.rs` there too: the host tests run the real boot
+core on DAGON's boot test bench (`crates/dagon-core/tests/bench`). Then, in the
 project's `dagon.toml`:
 
 ```toml
@@ -126,5 +138,5 @@ To build the boot core without it, remove `"boot-screen"` from the hub's
 `extensions/*` package glob too, unless another extension uses it. Then
 run `dagon gen hub` again.
 
-Size: the hub boot core grows by 8,380 bytes (67,616 to 75,996 bytes of
+Size: the hub boot core grows by 8,388 bytes (67,616 to 76,004 bytes of
 its 131,072-byte (128 KiB) slot).

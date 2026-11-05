@@ -25,6 +25,8 @@ embassy-rp = { version = "0.10.0", default-features = false, features = ["rp2040
 
 [dev-dependencies]
 critical-section = { version = "1.1", features = ["std"] }
-# A boot core's run on a blank flash, for the event mapping test.
+# Real boot core runs on DAGON's boot test bench (crates/dagon-core/tests/bench).
 dagon-core = { path = "../../crates/dagon-core" }
+dagon-format = { path = "../../crates/dagon-format" }
 dagon-port = { path = "../../crates/dagon-port" }
+ed25519-compact = { version = "2.6", default-features = false }

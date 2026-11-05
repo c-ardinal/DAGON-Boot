@@ -15,11 +15,12 @@
 //! No call waits for the screen to be seen. The panel needs its reset
 //! released for a while before it takes commands, and the first three
 //! events come within a few milliseconds of each other, so usually only
-//! the last step's text shows, briefly, before the app starts. A call waits
-//! for the panel only when the rest of that wait fits the call's budget
-//! ([`wait_before_drawing`]); every call ends within [`DEADLINE_US`],
-//! below the manifest's `max_run_us`. It changes nothing the boot core
-//! decides.
+//! the last step's text shows, briefly, before the app starts. The one wait
+//! is the rest of the panel's reset-release time, at most [`WAIT_MAX_US`],
+//! once per boot ([`wait_before_drawing`]); every call ends within
+//! [`DEADLINE_US`], below the manifest's `max_run_us`, and
+//! [`BOOT_DELAY_MAX_US`] bounds what a boot takes longer. It changes
+//! nothing the boot core decides.
 #![cfg_attr(not(test), no_std)]
 
 use dagon_boot::sequence;
@@ -195,8 +196,9 @@ pub const SLEEP_OUT_US: u32 = 120_000;
 /// `max_run_us` (45 ms) less a 5 ms margin for the last row sent after the
 /// check and the call's own overhead.
 pub const DEADLINE_US: u32 = 40_000;
-/// The longest a call waits for the panel: half the deadline, leaving the
-/// rest for the commands and both areas (the budget test checks the sum).
+/// The longest the call that initialises the panel waits for its reset
+/// release: half the deadline, leaving the rest for the commands and both
+/// areas (the budget test checks the sum).
 pub const WAIT_MAX_US: u32 = 20_000;
 /// The slowest time per byte sent: 8 bits at 15.625 MHz (the bus's 20 MHz
 /// from the board definition, as the HAL divides the 125 MHz peripheral
@@ -216,32 +218,57 @@ pub enum Panel {
 }
 
 /// How long a call at `now` waits before it may send the panel commands,
-/// or `None` when it would wait longer than [`WAIT_MAX_US`] (the call then
-/// draws nothing; a later one draws the screen it missed).
+/// or `None` when it may not draw now (the call then draws nothing; a later
+/// one draws the screen it missed). Only the reset release is waited for,
+/// and only when the rest is at most [`WAIT_MAX_US`]; after sleep out a
+/// call never waits.
 pub fn wait_before_drawing(panel: Panel, now: u32) -> Option<u32> {
-    let ready = match panel {
+    let (ready, wait_max) = match panel {
         Panel::Off => return None,
-        Panel::Released { at } => at.wrapping_add(RESET_RELEASE_US),
-        Panel::On { at } => at.wrapping_add(SLEEP_OUT_US),
+        Panel::Released { at } => (at.wrapping_add(RESET_RELEASE_US), WAIT_MAX_US),
+        Panel::On { at } => (at.wrapping_add(SLEEP_OUT_US), 0),
     };
     let rest = ready.wrapping_sub(now) as i32;
     match rest {
         r if r <= 0 => Some(0),
-        r if r as u32 <= WAIT_MAX_US => Some(r as u32),
+        r if r as u32 <= wait_max => Some(r as u32),
         _ => None,
     }
 }
 
 /// Bytes of the window commands and pixels of `r`.
-fn area_bytes(r: Rect) -> u32 {
-    gc9a01::WINDOW_BYTES + u32::from(r.w) * u32::from(r.h) * 2
+const fn area_bytes(r: Rect) -> u32 {
+    gc9a01::WINDOW_BYTES + r.w as u32 * r.h as u32 * 2
 }
 
 /// The most bytes one call sends: the first, which initialises the panel
 /// and draws both areas.
-pub fn worst_call_bytes() -> u32 {
-    gc9a01::INIT_BYTES + area_bytes(TEXT) + area_bytes(GAUGE) + gc9a01::WAKE_BYTES
+pub const fn worst_call_bytes() -> u32 {
+    gc9a01::INIT_BYTES + redraw_bytes() + gc9a01::WAKE_BYTES
 }
+
+/// Bytes of a later call that draws both areas again.
+pub const fn redraw_bytes() -> u32 {
+    area_bytes(TEXT) + area_bytes(GAUGE)
+}
+
+/// Calls that can draw in one boot: not the first event's, which releases
+/// the panel's reset (its whole release time is longer than
+/// [`WAIT_MAX_US`]), so at most each later step's.
+pub const DRAWS_MAX: u32 = STEPS as u32 - 1;
+
+/// The most a boot takes longer with this extension, as estimated: the one
+/// wait, the call that initialises the panel and the later redraws, at
+/// [`NS_PER_BYTE_MAX`]. Calls that draw nothing return at once.
+pub const fn boot_delay_estimate_us() -> u32 {
+    WAIT_MAX_US
+        + (gc9a01::INIT_BYTES + gc9a01::WAKE_BYTES + DRAWS_MAX * redraw_bytes()) * NS_PER_BYTE_MAX
+            / 1000
+}
+
+/// The most a boot takes longer, whatever the bus speed: every drawing call
+/// at the manifest's `max_run_us`.
+pub const BOOT_DELAY_MAX_US: u32 = DRAWS_MAX * 45_000;
 
 pub struct BootScreen {
     lcd: Option<hw::Lcd>,

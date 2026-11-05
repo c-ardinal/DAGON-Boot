@@ -1,9 +1,12 @@
 use super::*;
 use critical_section as _;
-use dagon_core::boot::{BootConfig, SlotLayout};
-use dagon_core::log::LogLayout;
 use dagon_events::{compose_boot, BootExtension};
-use dagon_port::{Flash, FlashError, FlashRegion};
+
+// DAGON's boot test bench: an in-memory flash, signed test images and state
+// logs (in a copy, point this path at the DAGON checkout too).
+#[path = "../../../crates/dagon-core/tests/bench/mod.rs"]
+mod bench;
+use bench::*;
 
 const CONFIRMED_SCREEN: Screen = Screen {
     step: 4,
@@ -29,89 +32,72 @@ fn each_boot_step_has_its_gauge_step_and_text() {
     assert_eq!(texts::TRIAL, "新しい版を試します");
 }
 
-/// An erased flash: no state log, so the boot core finds nothing to start.
-struct Blank;
-
-const REGION: [FlashRegion; 1] = [FlashRegion {
-    start: 0x1000_0000,
-    len: 0x40_0000,
-    erase_size: 0x1000,
-    write_size: 256,
-    erased_value: 0xFF,
-}];
-
-impl Flash for Blank {
-    fn geometry(&self) -> &[FlashRegion] {
-        &REGION
-    }
-    fn read(&mut self, _: u32, buf: &mut [u8]) -> Result<(), FlashError> {
-        buf.fill(0xFF);
-        Ok(())
-    }
-    fn erase(&mut self, _: u32, _: u32) -> Result<(), FlashError> {
-        Ok(())
-    }
-    fn write(&mut self, _: u32, _: &[u8]) -> Result<(), FlashError> {
-        Ok(())
-    }
-}
-
-/// Records what `stage` makes of every event the boot core delivers.
-struct Probe<'a>(&'a mut [Option<Stage>; 8], usize);
+/// Records the screen of every event the boot core delivers (`None`: the
+/// event draws nothing).
+struct Probe<'a>(&'a mut Vec<Option<Screen>>);
 
 impl Extension for Probe<'_> {
     fn id(&self) -> &'static str {
         "probe"
     }
     fn on_event(&mut self, e: &Event<'_>, _: &Ctx<'_>) {
-        self.0[self.1] = stage(e);
-        self.1 += 1;
+        self.0.push(stage(e).map(screen));
     }
 }
 
-#[test]
-fn the_boot_cores_events_reach_their_steps_and_no_image_draws_nothing() {
-    let mut seen = [None; 8];
+/// The screens of one real boot core run on `m`, through to the jump or
+/// the halt.
+fn screens_of_a_boot(m: &mut Mem) -> Vec<Option<Screen>> {
+    let mut seen = Vec::new();
     let every: &'static [u8] = &[1, 2, 3, 4, 5, 6, 7];
     let limits: &'static [BootExtension] = Box::leak(Box::new([BootExtension::new(45_000, every)]));
     let mut t = 0;
-    {
-        let mut chain = compose_boot(
-            Probe(&mut seen, 0),
-            move || {
-                t += 1;
-                t
-            },
-            limits,
-        );
-        let cfg = BootConfig {
-            pubkey: [0; 32],
-            mcu_id: 1,
-            target_tag: *b"hub-rp2040-lcd\0\0",
-            max_attempts: 3,
-        };
-        let log = LogLayout {
-            faces: [0x1000_6000, 0x1000_7000],
-            face_len: 0x1000,
-        };
-        let slots = SlotLayout {
-            slots: [0x1004_8000, 0x1014_8000],
-            slot_len: 0x10_0000,
-        };
-        let mut run = dagon_boot::BootRun::start(&mut chain, &mut Blank, &log, &slots, &cfg, 8_000);
-        run.halt(&mut chain);
-    }
-    // watchdog armed, log read, before decision, no image, halt.
-    assert_eq!(
-        seen[..5],
-        [
-            Some(Stage::Armed),
-            Some(Stage::LogRead),
-            Some(Stage::Checking),
-            None,
-            None
-        ]
-    );
+    let clock = move || {
+        t += 1;
+        t
+    };
+    let mut chain = compose_boot(Probe(&mut seen), clock, limits);
+    let mut run = dagon_boot::BootRun::start(&mut chain, m, &LOG, &SLOTS, &cfg(), 8_000);
+    run.before_jump(&mut chain);
+    run.halt(&mut chain);
+    seen
+}
+
+const fn at(step: u8, text: &'static str) -> Option<Screen> {
+    Some(Screen { step, text })
+}
+
+/// The first three events of every boot.
+const FIRST: [Option<Screen>; 3] = [
+    at(1, texts::STARTING),
+    at(2, texts::STARTING),
+    at(3, texts::CHECKING),
+];
+
+#[test]
+fn a_boot_of_the_confirmed_image_ends_on_its_text() {
+    let mut m = Mem::new();
+    let a = install(&mut m, A, &image(A, 0));
+    write_log(&mut m, 0, 1, &[(kind::PROVISION, a), (kind::CONFIRMED, a)]);
+    // ..., slot chosen (confirmed), before jump.
+    let want = [&FIRST[..], &[at(4, texts::CONFIRMED), None]].concat();
+    assert_eq!(screens_of_a_boot(&mut m), want);
+}
+
+#[test]
+fn a_boot_of_a_new_image_on_trial_ends_on_its_text() {
+    // A confirmed, B pending: B is started on trial.
+    let mut m = with_pending_b();
+    let want = [&FIRST[..], &[at(4, texts::TRIAL), None]].concat();
+    assert_eq!(screens_of_a_boot(&mut m), want);
+}
+
+#[test]
+fn a_boot_with_nothing_to_start_draws_nothing_after_the_check() {
+    let mut m = Mem::new();
+    // ..., no image, halt.
+    let want = [&FIRST[..], &[None, None]].concat();
+    assert_eq!(screens_of_a_boot(&mut m), want);
 }
 
 #[test]
@@ -242,8 +228,10 @@ fn the_panel_is_drawn_only_once_its_waits_fit_a_call() {
         wait_before_drawing(released, 1_000 + RESET_RELEASE_US + 1),
         Some(0)
     );
+    // After sleep out it never waits, not even a little.
     let on = Panel::On { at: 0 };
     assert_eq!(wait_before_drawing(on, 10), None);
+    assert_eq!(wait_before_drawing(on, SLEEP_OUT_US - 1), None);
     assert_eq!(wait_before_drawing(on, SLEEP_OUT_US), Some(0));
     assert_eq!(wait_before_drawing(Panel::Off, 0), None);
     // The timer's low word wraps.
@@ -259,4 +247,23 @@ fn it_starts_with_the_panel_not_taken() {
         (Panel::Off, None, "boot-screen")
     );
     assert_eq!(CONFIRMED_SCREEN, screen(Stage::Chosen { trial: false }));
+}
+
+#[test]
+fn the_readme_states_what_the_extension_adds_to_a_boot() {
+    // The first event releases the reset and never draws.
+    const { assert!(RESET_RELEASE_US > WAIT_MAX_US) };
+    assert_eq!(DRAWS_MAX, u32::from(STEPS) - 1);
+    assert_eq!(BOOT_DELAY_MAX_US, DRAWS_MAX * manifest_max_run_us());
+    let ms = |us: u32| (us + 500) / 1000;
+    let readme = include_str!("../README.md")
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ");
+    let want = format!(
+        "at most {} ms to a boot (estimated; at most {} ms at any bus speed)",
+        ms(boot_delay_estimate_us()),
+        ms(BOOT_DELAY_MAX_US)
+    );
+    assert!(readme.contains(&want), "README: {want}");
 }

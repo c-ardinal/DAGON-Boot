@@ -670,8 +670,10 @@ dependencies = [
  "dagon-boot",
  "dagon-core",
  "dagon-events",
+ "dagon-format",
  "dagon-mcu-rp2040",
  "dagon-port",
+ "ed25519-compact",
  "embassy-rp",
 ]
 

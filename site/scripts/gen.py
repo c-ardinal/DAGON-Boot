@@ -37,7 +37,8 @@ def doc_before(lines, i):
     """The `///` comment directly above line i, as one paragraph."""
     out = []
     j = i - 1
-    while j >= 0 and lines[j].strip().startswith(("#[", "///")):
+    # Attributes and plain `//` notes may sit between the doc comment and the item.
+    while j >= 0 and lines[j].strip().startswith(("#[", "//")):
         s = lines[j].strip()
         if s.startswith("///"):
             out.insert(0, s[3:].strip())
@@ -86,13 +87,16 @@ def serve_api():
     refused = re.search(r"const DEMO_REFUSED: \[&str; \d+\] = \[(.*?)\];", api, re.S)
     refused = re.findall(r'"([^"]+)"', refused.group(1)) if refused else []
     rows = []
-    for line in api.split("pub fn handle(", 1)[1].split("\n    };", 1)[0].splitlines():
+    router = api.split("pub fn handle(", 1)[1].split("\n    };", 1)[0].splitlines()
+    for i, line in enumerate(router):
         m = ARM.match(line)
         if not m:
             continue
         method, parts, rhs = m.groups()
         path = route_path(parts)
-        doc = fn_doc(handler(rhs))
+        # An arm answered in place carries its note as a `//` comment above it.
+        above = router[i - 1].strip() if i else ""
+        doc = fn_doc(handler(rhs)) or (above[2:].strip() if above.startswith("//") else "")
         # A doc that starts with its own route ("POST /v1/sim/write: ...") keeps only the rest.
         doc = re.sub(r"^(GET|POST|PUT|DELETE) /v1/\S*( \([^)]*\)| \{[^}]*\})?:\s*", "", doc)
         doc = doc[:1].upper() + doc[1:]
@@ -115,7 +119,7 @@ first message, then receives serve's events (job progress, logs, results,
 questions and the hub hand-over).
 
 A route marked *refused* answers 403 while `dagon demo` runs: the demo has
-its own simulated desk and project and never touches real hardware, other
+its own simulator and project and never touches real hardware, other
 projects or an agent.
 """
     return page("Serve HTTP API", "Every route of dagon serve, from its router.",
@@ -273,7 +277,7 @@ def boards():
         )
     for f in sorted((ROOT / "targets" / "boards").glob("*/dagon-board.toml")):
         b = tomllib.loads(f.read_text(encoding="utf-8"))
-        link = b.get("default_link", {}).get("kind", "")
+        link = b.get("default_link", {}).get("kind", "—")
         rows_b.append(
             f"| `{b['id']}` | {cell(b['product'])} | {mcus.get(b['mcu'], b['mcu'])} (`{b['mcu']}`) "
             f"| {size(b['flash_bytes'])} | {link} |"

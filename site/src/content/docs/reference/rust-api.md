@@ -13,7 +13,7 @@ published with these pages; each name below opens its crate.
 
 | Crate | What it holds |
 |---|---|
-| [`dagon-agent`](/api/dagon_agent/) | DAGON agent: embedded in an application, it answers HELLO/STATUS, receives images into the inactive slot, switches the boot target and confirms. |
+| [`dagon-agent`](/api/dagon_agent/) | DAGON agent: embedded in an application, it answers HELLO/STATUS/VERSION, receives images into the inactive slot, switches the boot target and confirms. |
 | [`dagon-boot`](/api/dagon_boot/) | The boot core's sequence as a state machine: every step from the armed watchdog to the jump or the halt is an event the boot core's extensions observe |
 | [`dagon-catalog`](/api/dagon_catalog/) | Every DAGON state machine's catalog in one registry, and the generated docs/events.md and docs/ports.md |
 | [`dagon-cli`](/api/dagon/) | DAGON Boot command line tool |

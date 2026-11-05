@@ -28,6 +28,7 @@ pub struct MessagesHttp {
     pub url: String,
     /// The `anthropic-version` header.
     pub version: String,
+    /// The model named in each request.
     pub model: String,
     /// An environment variable that overrides `model`, if set.
     #[serde(default)]

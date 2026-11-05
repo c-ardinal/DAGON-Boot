@@ -60,6 +60,12 @@ class Generated(unittest.TestCase):
             name = tomllib.loads(manifest.read_text(encoding="utf-8"))["package"]["name"]
             self.assertIn(f"[`{name}`]", page)
 
+    def test_every_route_and_agent_key_says_what_it_is(self):
+        # A blank cell means the source has no doc comment for it: write one there.
+        for page in (gen.serve_api(), gen.agent_definition()):
+            blank = [l for l in page.splitlines() if l.startswith("| `") and l.rstrip().endswith("|  |")]
+            self.assertEqual(blank, [])
+
     def test_angle_brackets_in_a_source_comment_stay_text(self):
         self.assertEqual(gen.cell("<dir>/x `<y>`"), "&lt;dir&gt;/x `<y>`")
 

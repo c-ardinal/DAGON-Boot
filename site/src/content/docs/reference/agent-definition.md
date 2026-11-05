@@ -20,18 +20,18 @@ number refuses the file and says why.
 | Key | Type | Required | Meaning |
 |---|---|---|---|
 | `dagon_agent` | integer | yes | The definition format, `FORMAT`. |
-| `id` | string | yes |  |
-| `name` | string | yes |  |
-| `provider` | string | yes |  |
-| `ways` | `[[ways]]` tables | yes |  |
+| `id` | string | yes | The agent's id: lower-case letters, digits and '-', up to 32; unique among all agents. |
+| `name` | string | yes | The name the linking texts show. |
+| `provider` | string | yes | Who makes the agent, shown after its name. |
+| `ways` | `[[ways]]` tables | yes | The ways to reach the agent, in order; the first is the default. |
 
 ## `[[ways]]`
 
 | Key | Type | Required | Meaning |
 |---|---|---|---|
-| `id` | string | yes |  |
-| `name` | string | yes |  |
-| `transport` | `[ways.transport]` table | yes |  |
+| `id` | string | yes | The way's id, unique within its agent (same characters as an agent id). |
+| `name` | string | yes | The name the linking texts show for this way. |
+| `transport` | `[ways.transport]` table | yes | How DAGON reaches the agent this way: one of the transport kinds and its keys. |
 
 ## `[ways.transport]`
 
@@ -42,7 +42,7 @@ number refuses the file and says why.
 | Key | Type | Required | Meaning |
 |---|---|---|---|
 | `program` | string | yes | A name looked up on PATH, or a path. |
-| `args` | array of strings | no |  |
+| `args` | array of strings | no | The arguments, in order; `{system_file}` is replaced by the system text's file when `system = "file"`. |
 | `system` | string | no | How the system text reaches the program. |
 | `pass_env` | array of strings | no | Environment variables passed on besides `BASE_ENV` (names only). |
 
@@ -54,8 +54,7 @@ number refuses the file and says why.
 |---|---|---|---|
 | `url` | string | yes | The messages endpoint, https only. |
 | `version` | string | yes | The `anthropic-version` header. |
-| `key_env` | string | yes | The environment variable holding the key. |
-| `model` | string | yes |  |
+| `model` | string | yes | The model named in each request. |
 | `model_env` | string | no | An environment variable that overrides `model`, if set. |
 
 ## Builtin agents

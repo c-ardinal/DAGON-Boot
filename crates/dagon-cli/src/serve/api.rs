@@ -192,6 +192,7 @@ pub fn handle(server: &Arc<Server>, req: &Request) -> Response {
         ("POST", ["conform"]) => start(server, req, "conform", job_conform),
         ("GET", ["conform", node]) => conform_get(server, node),
         ("POST", ["ai", "topology"]) => ai_topology_start(server, req),
+        // Porting DAGON to a board: answers 501, this dagon has no porting job.
         ("POST", ["ai", "port"]) => Ok(Response::error(501, "porting is not available here")),
         ("GET", ["jobs", id]) => job_get(server, id),
         ("POST", ["jobs", id, "answer"]) => answer(server, id, req),
@@ -760,6 +761,7 @@ fn topology_path(server: &Server) -> Result<PathBuf, Response> {
     inside(&cfg, &p).map_err(|e| Response::error(403, &e))
 }
 
+/// The project's 構成 YAML as it is on disk (404 before the first save).
 fn topology_get(server: &Server) -> Res {
     let p = topology_path(server)?;
     let yaml = std::fs::read(&p).map_err(|_| Response::error(404, "no topology file yet"))?;
@@ -824,6 +826,7 @@ fn skipped_of(cut: Option<&dagon_topology::Cut>) -> Value {
     )
 }
 
+/// The node's `[build.<id>]` table of dagon.toml (404 when it has none).
 fn build_get(server: &Server, id: &str) -> Res {
     let cfg = config(server).map_err(|e| Response::error(500, &e))?;
     let b = cfg
@@ -871,6 +874,7 @@ fn build_put(server: &Server, id: &str, req: &Request) -> Res {
     Ok(json_ok(serde_json::to_value(&b).unwrap_or(Value::Null)))
 }
 
+/// Builds the applications of `nodes` (all when left out) as a job; the answer lists each built slot and its size.
 fn job_build(job: &mut Job, cfg: Config, v: Value) -> Result<Value, String> {
     let nodes = nodes_of(&v).map_err(|_| "nodes must be node ids".to_string())?;
     if let Some(p) = &cfg.pubkey {
@@ -1302,6 +1306,7 @@ fn release_from(
     Ok(json!({ "release": name, "topology_sha256": sha, "bytes": r.bundle.len() }))
 }
 
+/// A release of the project's out/release by name, once it verifies with the project's key.
 fn release_get(server: &Server, id: &str) -> Res {
     if !plain(id) {
         return Err(Response::error(400, "bad release id"));
@@ -1517,6 +1522,7 @@ fn job_conform(job: &mut Job, cfg: Config, v: Value) -> Result<Value, String> {
     Ok(serde_json::from_str(&file).unwrap_or(Value::Null))
 }
 
+/// The node's last conformance result (404 before the first run).
 fn conform_get(server: &Server, node: &str) -> Res {
     if !plain(node) {
         return Err(Response::error(400, "bad node id"));
@@ -1565,6 +1571,7 @@ fn job_id(id: &str) -> Result<u64, Response> {
     id.parse().map_err(|_| Response::error(400, "bad job id"))
 }
 
+/// A job's state, stage, progress, log lines, question and result.
 fn job_get(server: &Server, id: &str) -> Res {
     server
         .job_json(job_id(id)?)
@@ -1572,6 +1579,7 @@ fn job_get(server: &Server, id: &str) -> Res {
         .ok_or_else(|| Response::error(404, "no such job"))
 }
 
+/// `{answer}` to the job's open question (409 when it has none).
 fn answer(server: &Server, id: &str, req: &Request) -> Res {
     let id = job_id(id)?;
     let v = body_json(req)?;
@@ -1585,6 +1593,7 @@ fn answer(server: &Server, id: &str, req: &Request) -> Res {
     }
 }
 
+/// Stops a running job.
 fn cancel(server: &Server, id: &str) -> Res {
     let id = job_id(id)?;
     if server.cancel(id) {
@@ -1594,6 +1603,7 @@ fn cancel(server: &Server, id: &str) -> Res {
     }
 }
 
+/// `{state: "released"}`: the page has closed the hub's port, so the CLI job waiting for it can use it.
 fn device(server: &Server, req: &Request) -> Res {
     let v = body_json(req)?;
     if v["state"] != "released" {

@@ -116,8 +116,9 @@
   /** The 定義 document: the project's 構成 as edited (its YAML is the one source of truth). */
   const d = new Define();
   /** DAGON's link to its agent through serve (development: `?agent` stands in for serve's routes). */
-  const agentStandIn = dev && !DEMO_SITE && params.has('agent');
-  const agent = new Agent(agentStandIn ? agentMock(params, () => d.config.yaml) : (m, p, b) => cli.api(m, p, b));
+  // Development builds only, written so every other build (the served page, the demo page) leaves agentMock out.
+  const agentStandIn = import.meta.env.DEV && dev && params.has('agent');
+  const agent = new Agent(import.meta.env.DEV && agentStandIn ? agentMock(params, () => d.config.yaml) : (m, p, b) => cli.api(m, p, b));
   if (agentStandIn) void agent.refresh();
   /** Web Serial, which the page never uses while it drives the simulator. */
   const ports = webSerial(serial, () => cli.sim !== null);

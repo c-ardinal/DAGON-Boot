@@ -532,11 +532,20 @@ export class Operate {
     this.go('pass');
   }
 
-  /** "ノードへ書き込む": dagon-host's apply on the target nodes, children first and the hub last. */
+  /** The write sheet's check of node `id` (L18): an unchecked node is not written. Targets keep update order. */
+  choose(id: string, on: boolean): void {
+    if (this.state !== 'L18' || !this.reach.some((n) => n.id === id)) return;
+    const chosen = new Set(this.targets);
+    if (on) chosen.add(id);
+    else chosen.delete(id);
+    this.targets = this.reach.map((n) => n.id).filter((x) => chosen.has(x));
+  }
+
+  /** "n ノードへ書き込む": dagon-host's apply on the checked nodes, children first and the hub last. */
   async update(): Promise<void> {
     const c = this.config;
     const f = this.file;
-    if (!c || !f || f.verdict !== 'pass' || this.state !== 'L18') return;
+    if (!c || !f || f.verdict !== 'pass' || this.state !== 'L18' || this.targets.length === 0) return;
     const my = this.session;
     this.go('update');
     this.stopWatching();

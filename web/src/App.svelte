@@ -4,7 +4,7 @@
   import { AGENT, ANNOUNCE, BAND, BUILD, BUTTON, CANVAS, DEFINE, DIFF, DRAWER, JOBS, SKELETON, WRITE, HUB, LOCK, SHEET, STATUS, ZOOM, HUB_TOGGLE, MODE, NODE, ORDER, PLAN, PRODUCT, RECONNECT, SAVE, SKIP, STEP, TIME } from './app/copy.ts';
   import { webSerial } from './app/connect.ts';
   import { HUB_LOCKED, hubOf, view, type Action } from './app/machine.ts';
-  import { Operate, waterOf, type Progress } from './app/operate.svelte.ts';
+  import { Operate, waterOf, type Progress, type ReleaseFile } from './app/operate.svelte.ts';
   import Graph, { type Chip, type Dot } from './graph/Graph.svelte';
   import Status from './screens/Status.svelte';
   import Drawer, { type DrawerTab } from './screens/Drawer.svelte';
@@ -43,7 +43,7 @@
   import FactoryModal from './screens/FactoryModal.svelte';
   import { answerConsent } from './app/factory.ts';
   import Toast, { type Notice } from './screens/Toast.svelte';
-  import { CONN, NOTICE, fill as fillIn } from './app/copy.ts';
+  import { CONN, FILE, NOTICE, fill as fillIn } from './app/copy.ts';
   import OrderList from './screens/OrderList.svelte';
   import { devHub } from './serial/devHub.ts';
   import { serveSim, type SimStand } from './serial/serveSim.ts';
@@ -749,7 +749,12 @@
     PERCENT.has(op.state) ? Object.fromEntries(Object.entries(op.progress).map(([id, p]) => [id, p.percent])) : {},
   );
   // The comparison stays while the update runs (P14: never silently replaced).
-  const showFile = $derived(op.file !== null && op.selected === null && ['L14', 'L15', 'L16', 'L17', 'L18', 'L19', 'L20', 'L21', 'L22', 'L23'].includes(op.state));
+  // A refused package (L16, L17) is told in the refusal modal instead.
+  const showFile = $derived(op.file !== null && op.selected === null && ['L14', 'L15', 'L18', 'L19', 'L20', 'L21', 'L22', 'L23'].includes(op.state));
+  /** The refusal modal: why the package cannot be written and what to do; closing leaves the band's buttons. */
+  let refusalClosed = $state<ReleaseFile | null>(null);
+  const refusalOpen = $derived(op.file !== null && (op.state === 'L16' || op.state === 'L17') && refusalClosed !== op.file);
+  const refusalWord = (v: ReleaseFile['verdict']) => (v === 'topology' ? FILE.topologyBad : v === 'format' ? FILE.notRelease : FILE.sourceBad);
 
   let fileInput = $state<HTMLInputElement>();
   async function picked(e: Event) {
@@ -831,6 +836,23 @@
     });
   });
   const tlNow = $derived(tlStart && PERCENT.has(op.state) ? Math.max(0, wallMs - tlStart) : Math.max(0, ...tlEvents.map((e) => e.t)));
+  /** The write sheet's Per Node rows: every node writing reaches, checked when it is written. */
+  const sheetNodes = $derived(
+    op.reach.map((n) => {
+      const from = op.live[n.id]?.hello?.activeVersion;
+      const to = op.fileVersions[n.id];
+      const checked = op.targets.includes(n.id);
+      const p = op.progress[n.id];
+      return {
+        id: n.id,
+        name: `[${n.no}] ${n.name}`,
+        from: from === undefined ? PLAN.unknown : versionText(from),
+        to: to === undefined ? PLAN.unknown : versionText(to),
+        checked,
+        stage: !checked ? '' : stageWord(p && UPDATING.has(op.state) ? p.stage : 'waiting'),
+      };
+    }),
+  );
   const stageWord = (s: string) => (CHIP[s as Progress['stage']] ?? s).replace(/^\S+\s/, '');
   /** 出力: the CLI jobs' output lines, oldest job first (the latest 300). */
   const outputLines = $derived(
@@ -1268,9 +1290,10 @@
   {#if showFile && op.file}
       <FilePanel
         file={op.file}
-        targets={op.targets.length}
         minutes={op.targets.length * MINUTES_PER_NODE}
-        diff={fileDiff}
+        nodes={sheetNodes}
+        onchoose={(id, on) => op.choose(id, on)}
+        locked={op.state !== 'L18'}
         go={band.primary
           ? {
               label: band.primary.action === 'update' ? fillIn(WRITE.go, { n: op.targets.length }) : band.primary.label,
@@ -1419,6 +1442,32 @@
       onmore={() => ((drawerTab = 'jobs'), (factory = null))}
     />
   {/if}
+  {#if refusalOpen && op.file}
+    <Modal title={FILE.heading} chip={{ text: refusalWord(op.file.verdict), kind: 'error' }} target={op.file.name} onclose={() => (refusalClosed = op.file)}>
+      {#if fileDiff.length}
+        <table class="modal-diff">
+          <caption>{DIFF.heading}</caption>
+          <thead><tr>{#each DIFF.cols as c (c)}<th scope="col">{c}</th>{/each}</tr></thead>
+          <tbody>
+            {#each fileDiff as r, i (i)}
+              <tr><th scope="row">{r.what}</th><td translate="no">{r.here}</td><td translate="no">{r.file}</td></tr>
+            {/each}
+          </tbody>
+        </table>
+      {/if}
+      <h3 class="modal-h">{NOTICE.fix}</h3>
+      <p>{next.sentence}</p>
+      {#snippet actions()}
+        {#each band.secondary as b (b.label)}
+          <button class="button-secondary" data-control={CONTROL_OF[b.action]} aria-disabled={!RUNS.has(b.action)} onclick={() => RUNS.has(b.action) && ((refusalClosed = op.file), act(b.action))}>{b.label}</button>
+        {/each}
+        {#if band.primary}
+          {@const p = band.primary}
+          <button class="button-primary" data-control={CONTROL_OF[p.action]} aria-disabled={!RUNS.has(p.action)} onclick={() => RUNS.has(p.action) && ((refusalClosed = op.file), act(p.action))}>{p.label}</button>
+        {/if}
+      {/snippet}
+    </Modal>
+  {/if}
   {#if buildFailureOpen}
     {@const failed = [buildJob, signJob].find((j) => j?.state === 'failed')}
     <Modal title={BUILD.title} chip={{ text: BUILD.state.failed, kind: 'error' }} target={d.config.reach.map((id) => `nodes/${id}/`).join(' · ')} onclose={() => (buildFailureOpen = false)} onmore={() => ((drawerTab = 'jobs'), (buildFailureOpen = false))}>
@@ -1458,6 +1507,28 @@
   .modal-mono {
     margin: 0;
     font: 400 var(--t-mono) / 24px var(--f-mono);
+    overflow-wrap: anywhere;
+  }
+  /* The refusal modal's 構成 differences (the table the sheet had). */
+  .modal-diff {
+    width: 100%;
+    border-collapse: collapse;
+    font: 400 var(--t-small-size) / var(--t-small-lh) var(--f-ja);
+  }
+  .modal-diff caption {
+    margin-bottom: var(--s-2);
+    text-align: left;
+    font-weight: 700;
+  }
+  .modal-diff th,
+  .modal-diff td {
+    padding: var(--s-2) var(--s-3) var(--s-2) 0;
+    border-bottom: 1px solid var(--c-line);
+    text-align: left;
+    vertical-align: top;
+  }
+  .modal-diff td {
+    font-family: var(--f-mono);
     overflow-wrap: anywhere;
   }
   main.define {

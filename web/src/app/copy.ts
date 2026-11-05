@@ -680,6 +680,8 @@ export const FILE = {
   topologyBad: '× 構成不一致',
   notRelease: '× 形式違い',
   targets: '対象',
+  /** The sheet's per-node table (columns as the design names them). */
+  nodes: { node: 'ノード', now: '今', next: '新', progress: '進み' },
 } as const;
 
 /** SC-O7: the hub reconnect dialog (M26), and M27 beside the hub while the page reconnects by itself (L20). */

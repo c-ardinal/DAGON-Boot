@@ -247,6 +247,32 @@ describe('update from the page with dagon-host apply against the mock hub', () =
     expect(Object.fromEntries(Object.entries(op.fileVersions).map(([id, raw]) => [id, v(raw)]))).toEqual({ hub: '1.1.0', seg: '1.1.0', watch: '1.1.0' });
   }, 20_000);
 
+  test('node choice: an unchecked node is not written; checking it again puts it back in update order', async () => {
+    const { t, op } = await sentTo();
+    op.takeFile('desk-1.1.0.dgb', RELEASE);
+    op.choose('seg', false);
+    expect(op.targets).toEqual(['hub', 'watch']);
+    op.choose('seg', true);
+    expect(op.targets).toEqual(['hub', 'seg', 'watch']);
+    op.choose('seg', false);
+    op.choose('nobody', true);
+    expect(op.targets).toEqual(['hub', 'watch']);
+
+    await op.update();
+    expect(op.state).toBe('L23');
+    expect(t.reboots).toEqual(['uart', 'hub']);
+    expect(v(t.helloOf('i2c:66').activeVersion)).toBe('1.0.0');
+  }, 60_000);
+
+  test('node choice: with every node unchecked nothing is written', async () => {
+    const { t, op } = await sentTo();
+    op.takeFile('desk-1.1.0.dgb', RELEASE);
+    for (const id of ['hub', 'seg', 'watch']) op.choose(id, false);
+    await op.update();
+    expect(op.state).toBe('L18');
+    expect(t.reboots).toEqual([]);
+  }, 20_000);
+
   test('the hub back by itself within 45 s: the reconnect dialog state (L21) is never entered', async () => {
     const { op } = await sentTo({ hubAway: 3 });
     op.takeFile('desk-1.1.0.dgb', RELEASE);

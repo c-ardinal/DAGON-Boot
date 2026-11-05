@@ -38,6 +38,7 @@
   import Reconnect from './screens/Reconnect.svelte';
   import Header from './screens/Header.svelte';
   import ZoomPill from './screens/ZoomPill.svelte';
+  import SkeletonModal from './screens/SkeletonModal.svelte';
   import Toast, { type Notice } from './screens/Toast.svelte';
   import { CONN, fill as fillIn } from './app/copy.ts';
   import OrderList from './screens/OrderList.svelte';
@@ -958,6 +959,21 @@
     void tick().then(() => (band.primary ? primaryEl : nextEl)?.focus());
   });
 
+  /** 雛形を作る: the modal is open while `skeleton` is set; `id` is serve's job once it has taken it. */
+  let skeleton = $state<{ id: number | null } | null>(null);
+  const skeletonJob = $derived(skeleton?.id == null ? null : (cli.jobs.find((j) => j.id === skeleton?.id) ?? null));
+  // 中止: the modal goes with the job.
+  $effect(() => {
+    if (skeletonJob?.state === 'cancelled') untrack(() => (skeleton = null));
+  });
+  async function makeSkeleton() {
+    skeleton = { id: null };
+    let job: Awaited<ReturnType<typeof cli.gen>> = null;
+    // Made from the saved YAML: after the saves queued before it.
+    await autosave.whenSaved(async () => (job = await cli.gen(d.config.reach)));
+    skeleton = job ? { id: (job as { id: number }).id } : null;
+  }
+
   /** The non-blocking notice on screen (bottom-right), or null. */
   let notice = $state<Notice | null>(null);
   const hubName = $derived(hubNode ? `[${hubNode.no}] ${hubNode.name}` : '');
@@ -1088,7 +1104,7 @@
 {#snippet actions()}
   {#if mode === 'define'}
     {@const blocked = problemCount > 0 || d.doc.topo.nodes.length === 0}
-    <button class="button-primary-header" data-control="gen" bind:this={primaryEl} aria-disabled={blocked || sheetHolds} title={blocked ? SKELETON.disabled : undefined} onclick={() => !blocked && goStep('project')}><span>{SKELETON.make}</span></button>
+    <button class="button-primary-header" data-control="gen" bind:this={primaryEl} aria-disabled={blocked || sheetHolds} title={blocked ? SKELETON.disabled : undefined} onclick={() => !blocked && !sheetHolds && void makeSkeleton()}><span>{SKELETON.make}</span></button>
   {:else}
     <button class="button-secondary-header" data-control="build" aria-disabled={sheetHolds} onclick={() => goStep('build')}><span>{BUILD.run}</span></button>
     <button class="button-primary-header" data-control={writeControl} bind:this={primaryEl} aria-disabled={writeOff || sheetHolds} onclick={write}><span>{WRITE.run}</span></button>
@@ -1320,6 +1336,17 @@
       onsave={() => void autosave.saveAgain()}
       ondiscard={() => autosave.discard()}
       onstay={() => autosave.stay()}
+    />
+  {/if}
+  {#if skeleton}
+    <SkeletonModal
+      job={skeletonJob}
+      place={cli.hello?.workspace ?? d.doc.topo.name ?? ''}
+      nodes={d.config.nodes.filter((n) => d.config.reach.includes(n.id)).map((n) => [`[${n.no}] ${n.name}`, `nodes/${n.id}/`] as [string, string])}
+      onclose={() => (skeleton = null)}
+      oncancel={() => skeletonJob && void cli.cancel(skeletonJob)}
+      onretry={() => void makeSkeleton()}
+      onmore={() => ((drawerTab = 'jobs'), (skeleton = null))}
     />
   {/if}
   {#if dialogOpen}

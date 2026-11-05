@@ -191,6 +191,17 @@ pub fn topo_push(args: &[&str]) -> Res {
     Ok(())
 }
 
+/// How long a written image's erase, data and verify took, after its
+/// verify line.
+fn print_times(node: &str, e: &Event) {
+    if let Some(t) = e.times {
+        println!(
+            "{node}: erase {} ms, data {} ms, verify {} ms",
+            t.erase_ms, t.data_ms, t.verify_ms
+        );
+    }
+}
+
 fn phase_name(p: u8) -> &'static str {
     match p {
         phase::TRANSFER => "transfer",
@@ -273,6 +284,7 @@ pub fn recover(args: &[&str]) -> Res {
             e.percent,
             e.version
         );
+        print_times(node, &e);
     };
     let (path, v) = block_on(host.recover(index, &assets, &mut print)).map_err(|e| match e {
         dagon_host::Error::NoImage { .. } if boot.is_none() => format!(
@@ -381,6 +393,7 @@ where
             phase_name(e.phase),
             e.version
         );
+        print_times(name(e.node), &e);
     };
     let run = match key {
         Some(k) => block_on(host.apply(bundle, &bin, k, only, &mut print)),

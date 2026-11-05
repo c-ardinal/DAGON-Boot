@@ -76,6 +76,16 @@ pio_uart_state_machines = 2
 uart0_tx = [0, 12, 16, 28]
 uart0_rx = [1, 13, 17, 29]
 
+# The UART the UART links run on (src/links.rs): embassy-rp 0.10's PIO
+# UART program, 8 PIO cycles a bit, its divider clk_sys / (8 * baud) in
+# whole numbers (pio_programs/uart.rs, u32 division). clk_sys is 125 MHz:
+# embassy_rp::init's default ClockConfig::crystal(12 MHz), 12 MHz * 125 / 6
+# / 2 (RP2040 datasheet section 2.18, PLL).
+[link_uart]
+clock_hz = 125_000_000
+clocks_per_bit = 8
+frac_bits = 0
+
 # Link kinds the firmware implements (src/kinds.rs LINK_KINDS).
 [links]
 up = ["usb-cdc"]

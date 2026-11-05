@@ -310,4 +310,38 @@ impl Topology {
     pub fn link_to(&self, id: &str) -> Option<&Link> {
         self.links.iter().find(|l| l.to == id)
     }
+
+    /// The bit rate node `id`'s firmware runs its UART link at: its uplink's
+    /// when that is UART, else the one of its UART links to 子機 (`None`
+    /// when it has no UART link). Both ends of a link are built with this
+    /// value, so they always agree. Down links at different rates are
+    /// refused: a node's firmware drives one UART link speed.
+    pub fn uart_baud(&self, id: &str) -> Result<Option<u32>, String> {
+        if let Some(l) = self.link_to(id).filter(|l| l.kind == LinkKind::Uart) {
+            return Ok(Some(l.uart_baud()));
+        }
+        let mut rates = self
+            .links
+            .iter()
+            .filter(|l| l.from == id && l.kind == LinkKind::Uart)
+            .map(Link::uart_baud);
+        let first = rates.next();
+        match rates.find(|b| Some(*b) != first) {
+            Some(other) => Err(format!(
+                "{id}: its UART links run at {} and {other} bit/s; give them one baud",
+                first.unwrap_or_default()
+            )),
+            None => Ok(first),
+        }
+    }
+}
+
+/// A UART link's bit rate when the topology gives no `baud`.
+pub const DEFAULT_BAUD: u32 = 115_200;
+
+impl Link {
+    /// `baud`, or [`DEFAULT_BAUD`] when left out.
+    pub fn uart_baud(&self) -> u32 {
+        self.baud.unwrap_or(DEFAULT_BAUD)
+    }
 }

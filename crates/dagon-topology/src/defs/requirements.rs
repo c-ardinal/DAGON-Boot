@@ -148,6 +148,16 @@ pub const MCU: &[Requirement<McuCheck>] = &[
         check: coordinator,
     },
     Requirement {
+        engine: "topology check V-26",
+        fields: &[
+            "link_uart.clock_hz",
+            "link_uart.clocks_per_bit",
+            "link_uart.frac_bits",
+        ],
+        rule: "clock_hz >= 1; clocks_per_bit >= 1; frac_bits <= 24",
+        check: link_uart,
+    },
+    Requirement {
         engine: "topology check V-18/V-20, host ROM path",
         fields: &["rom_i2c.addr", "rom_i2c.max_hz", "rom_i2c.erase_sectors[]"],
         rule: "addr in 0x08..=0x77; max_hz >= 1; erase_sectors unique; each pin pair (sda, scl) once, so a pair names one controller",
@@ -530,6 +540,18 @@ fn coordinator(m: &McuDef) -> Result<(), String> {
             bad.unwrap(),
             m.gpio_count
         )
+    })
+}
+
+fn link_uart(m: &McuDef) -> Result<(), String> {
+    let Some(u) = m.link_uart else {
+        return Ok(());
+    };
+    fail(u.clock_hz == 0 || u.clocks_per_bit == 0, || {
+        "link_uart.clock_hz and clocks_per_bit must be at least 1".into()
+    })?;
+    fail(u.frac_bits > 24, || {
+        "link_uart.frac_bits must be at most 24".into()
     })
 }
 

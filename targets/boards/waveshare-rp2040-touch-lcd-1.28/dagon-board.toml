@@ -90,5 +90,6 @@ kind = "uart"
 controller = "pio0"
 tx = "GPIO26"
 rx = "GPIO27"
+# The link speed when a build is not given the topology's (dagon gives it).
 baud = 115_200
 dagon = true

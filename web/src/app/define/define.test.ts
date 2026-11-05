@@ -150,7 +150,7 @@ describe('define session', () => {
     d.apply(setLink(d.doc, 0, 'addr', 0x39));
     expect(d.operable).toBe('problems');
     d.undo();
-    // A second 親機 over CAN: valid, a part updating skips for now (V-23, information).
+    // A second 親機 over CAN: valid, a part updating skips (V-23, information).
     const r = placeMcu(d.doc, 'rp2040');
     d.apply(connect(setNode(r.doc, r.id, 'role', 'coordinator'), r.id, 'hub'));
     expect(d.errors).toBe(0);

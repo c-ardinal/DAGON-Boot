@@ -1,4 +1,4 @@
-//! The part of a 構成 updating reaches today: the first 親機 and the 子機
+//! The part of a 構成 updating reaches: the first 親機 and the 子機
 //! linked straight to it over I2C or UART, up to eight nodes. Everything
 //! else is a valid definition that updating skips (V-23 tells why).
 
@@ -11,7 +11,7 @@ use crate::{check_with, Report};
 /// Nodes the compiled topology can carry (the hub's table size).
 pub const MAX_UPDATABLE_NODES: usize = dagon_format::topology::MAX_NODES;
 
-/// Why updating skips a node for now.
+/// Why updating skips a node.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Skip {
     /// A second 親機, or a node in a second 親機's tree.

@@ -2,7 +2,7 @@
 //!
 //! Errors V-01..V-21 (no V-19), V-25 and V-26; warnings V-22 and V-24 (V-24 is
 //! an error for an uplink on a 子機); information V-23 (a valid part that
-//! updating skips for now). Errors block `topo push`; the others do not.
+//! updating skips). Errors block `topo push`; the others do not.
 
 use crate::links::{self, Dir};
 use std::collections::{BTreeMap, BTreeSet};
@@ -417,7 +417,7 @@ impl<'a> Ctx<'a> {
     /// (never errors): more than one coordinator and their trees, nodes
     /// below a 子機, links of a kind the compiled topology cannot carry, and
     /// nodes beyond eight. Updating covers one 親機 with its direct 子機
-    /// today and skips the rest (see [`crate::updatable`]).
+    /// and skips the rest (see [`crate::updatable`]).
     fn v23(&mut self) {
         let hubs: Vec<&str> = self
             .t
@@ -431,9 +431,7 @@ impl<'a> Ctx<'a> {
             self.info(
                 "V-23",
                 "nodes",
-                format!(
-                    "{n} nodes; updating reaches {MAX_UPDATABLE_NODES} for now and skips the rest"
-                ),
+                format!("{n} nodes; updating reaches {MAX_UPDATABLE_NODES} and skips the rest"),
             );
         }
         if hubs.len() > 1 {
@@ -441,7 +439,7 @@ impl<'a> Ctx<'a> {
                 "V-23",
                 "nodes",
                 format!(
-                    "{} coordinators {hubs:?}; updating reaches '{}' for now and skips the others' trees",
+                    "{} coordinators {hubs:?}; updating reaches '{}' and skips the others' trees",
                     hubs.len(),
                     hubs[0]
                 ),

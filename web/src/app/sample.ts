@@ -33,7 +33,7 @@ export interface Node {
   depth?: number;
   /** A 親機's uplink as the 構成 writes it; absent when none is written (USB to the PC) or the 親機 is linked from another node. */
   uplink?: { kind: string; host: UplinkHost };
-  /** Why updating skips this node for now (V-23); absent when updating reaches it. */
+  /** Why updating skips this node (V-23); absent when updating reaches it. */
   notYet?: Skip;
 }
 

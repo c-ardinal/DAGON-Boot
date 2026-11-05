@@ -756,7 +756,7 @@ fn topology_put(server: &Server, req: &Request) -> Res {
     ))
 }
 
-/// `{id: why}` of the nodes updating skips for now (`Skip::code`); every
+/// `{id: why}` of the nodes updating skips (`Skip::code`); every
 /// node (`cut-invalid` where nothing else applies) when no part is updatable.
 fn skipped_of(cut: Option<&dagon_topology::Cut>) -> Value {
     Value::Object(

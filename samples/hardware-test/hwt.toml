@@ -153,7 +153,7 @@ steps = [{ do = "recover", node = "seg", of = "2.0.16" }]
 [[scenario]]
 id = "rom-recovery"
 title = "F401 recovery through the hub's ROM path"
-steps = [{ do = "skip", reason = "dagon recover takes the ROM path only when the F401 does not answer HELLO; no CLI step makes a healthy F401 silent without a write the normal confirmation does not allow (erasing it), and the owner asked for this path only if it can be undone safely" }]
+steps = [{ do = "skip", reason = "dagon recover takes the ROM path only when the F401 does not answer HELLO; no CLI step makes a healthy F401 silent without a write the normal confirmation does not allow (erasing it), and this path is run only when it can be undone safely" }]
 
 [[scenario]]
 id = "final"

@@ -6,7 +6,7 @@ use std::path::{Path, PathBuf};
 
 use super::*;
 
-/// Today's source of a DAGON developer's project: this clone.
+/// The source of a DAGON developer's project: this clone.
 fn dev() -> crate::dagonsrc::NewSource {
     let here = std::fs::canonicalize(crate::dagonsrc::BUILT_FROM).unwrap();
     crate::dagonsrc::NewSource::Clone(crate::config::plain_path(here))

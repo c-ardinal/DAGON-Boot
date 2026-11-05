@@ -374,7 +374,7 @@ the same. In DAGON Console's 定義 the inspector offers each kind for a link
 and, on the 親機, for its uplink. Kinds the firmware of either end does not
 implement yet are marked ◇ まだ使えない; the 構成 may still name them
 (problem まだ使えないつながり), and `dagon gen` refuses them with the hop's
-name (`uplink of hub over ble: not available yet on rp2040`). Today the
+name (`uplink of hub over ble: not available yet on rp2040`). The
 firmware offers, as each MCU's definition lists it (`[links]`; up: towards
 the PC or the 親機, down: to 子機):
 
@@ -393,9 +393,9 @@ The simulated uplink follows the demo 構成: change the 親機's uplink in
 its own frame size, speed and behaviour while the 親機 reboots (USB CDC
 and Wi-Fi reconnect; a UART adapter stays).
 
-## What works today
+## What is in this repository
 
-What the code and its tests in this repository show:
+What the code and its tests show:
 
 - Formats and protocol: `dagon-format` and `dagon-proto`, checked against the
   golden vectors in `crates/dagon-format/golden/`.
@@ -414,12 +414,11 @@ What the code and its tests in this repository show:
 - Topology YAML: 22 validation rules and the supported-board table
   (`dagon-topology`); `topology/sample.yaml` passes them.
 - DAGON Console (`web/`, served by `dagon serve`; `web/README.md` lists what
-  it does today).
+  it does).
 - Firmware: the RP2040 hub (`targets/rp2040-hub`), the F401 demo node
   (`samples/f401-app`) and the ESP32-S3 node (`targets/boards/m5stopwatch`,
-  `samples/esp32s3-app`). The hub firmware has been flashed and starts on
-  the hub hardware; on-device checks of the rest are still in progress (see
-  Limitations).
+  `samples/esp32s3-app`). Limitations says which of them have been checked
+  on the hardware.
 
 ## Adding DAGON to existing firmware
 
@@ -989,10 +988,10 @@ written for this project.
   firmware. There is no hardware root of trust (no secure boot fuses, no key
   storage in hardware).
 - A systematic survey of power cuts at every flash operation on real
-  hardware has not been done yet; power cuts are tested in the simulator.
+  hardware has not been done; power cuts are tested in the simulator.
 - The USB VID:PID `c0de:cafe` is a test ID, not an assigned one.
-- On-device checks are still pending for the F401 node and the ESP32-S3
-  node firmware. The hub firmware (RP2040 with LCD) has been flashed and
+- The F401 node and the ESP32-S3 node firmware have not been checked on
+  the hardware. The hub firmware (RP2040 with LCD) has been flashed and
   starts on the hardware, but its host communication and display are still
   being validated, and so is the full three-board flow.
 - `dagon conform` drives the synchronous test sequence and is CLI only; the

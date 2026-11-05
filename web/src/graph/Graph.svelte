@@ -1061,7 +1061,7 @@
     outline: 2px solid var(--c-paper);
   }
 
-  /* The focal number: today's dot numerals, bottom-left. */
+  /* The focal number: the dot numerals, bottom-left. */
   .hero {
     position: absolute;
     z-index: var(--z-chip);

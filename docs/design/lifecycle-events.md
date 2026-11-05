@@ -1268,7 +1268,7 @@ The one authentication rule, applied by every verifier in the chain
   by DAGON's agent and boot core alone (the sandbox, 4, keeps extensions
   from it), and code that can write flash without the signing key (a
   trusted-code bug, or an attacker with flash access) can make stage0
-  start an unsigned core. **This trade-off is an open design decision.**
+  start an unsigned core.
   The measured cost of the verifier: the STM32F401RE stage0 is 8,216
   bytes with digests only and about 23,960 with the Ed25519 verifier
   (ed25519-compact `opt_size`), past its 16 KiB sector; the RP2040 stage0

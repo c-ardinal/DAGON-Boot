@@ -779,7 +779,7 @@ export interface FixWords {
   many: boolean;
   /** A size such as "512 KiB". */
   size?: string;
-  /** The node is one updating skips for now: its link is not a thing to fix. */
+  /** The node is one updating skips: its link is not a thing to fix. */
   skipped?: boolean;
 }
 
@@ -882,7 +882,7 @@ export const DEFINE = {
   /** Writes the 構成 back to the project's YAML through dagon serve. */
   save: '保存',
   fixSentence: '直すと、親機へ送れます。',
-  /** C19: E6, nodes updating skips for now; the 構成 is valid as it is. */
+  /** C19: E6, nodes updating skips; the 構成 is valid as it is. */
   notYetSentence: (k: number) => `書き込めないノードが ${k} つあります。構成はこのままで使え、書き込みではそのノードを飛ばします。`,
   /** The 構成 of the release file chosen in 書込 replaces this one (undoable, saved to the YAML). */
   importFileTopology: 'ファイルの構成を取り込む',

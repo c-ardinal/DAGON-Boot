@@ -656,7 +656,7 @@
     }
   }
 
-  /** Buttons whose procedures this page runs today; the others show as unavailable. */
+  /** Buttons whose procedures this page runs; the others show as unavailable. */
   const RUNS: ReadonlySet<Action> = new Set([
     'connectDiscover', 'connect', 'reselect', 'reconnect', 'push', 'pushAgain', 'scanAgain', 'reload',
     'chooseFile', 'updateResponding', 'otherFile', 'update', 'useLatest', 'recover', 'recoverAgain', 'defineFix',

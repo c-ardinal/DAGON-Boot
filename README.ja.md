@@ -27,7 +27,7 @@ DAGON Boot は、いくつかのマイコンを組み合わせて何かを作り
 
 ## 対応するハードウェア
 
-| マイコン | デスクのデモでの役割 | 対応表のボード | 要るフラッシュ |
+| マイコン | 見本の構成での役割 | 対応表のボード | 要るフラッシュ |
 |---|---|---|---|
 | RP2040（`rp2040`） | 親機 | Waveshare RP2040-Touch-LCD-1.28（`waveshare-rp2040-touch-lcd-1.28`） | 4 MiB |
 | STM32F401RE（`stm32f401re`） | 子機（I2C） | NUCLEO-F401RE（`nucleo-f401re`） | 512 KiB |
@@ -74,7 +74,7 @@ DAGON Console は `dagon` に組み込まれています。Node.js が要るの�
 
 ## はじめから更新まで
 
-例はデスクのデモです: 丸い LCD の RP2040 親機、NUCLEO-F401RE（I2C）、M5StopWatch（UART）。子機のサンプルのアプリの動きは `samples/f401-app` と `samples/esp32s3-app` にあります。手順 2 で自分の構成に置き換えます。
+例は見本の構成です: 丸い LCD の RP2040 親機、NUCLEO-F401RE（I2C）、M5StopWatch（UART）。子機のサンプルのアプリの動きは `samples/f401-app` と `samples/esp32s3-app` にあります。手順 2 で自分の構成に置き換えます。
 
 ### 1. プロジェクトを始める
 
@@ -83,7 +83,7 @@ dagon new my-fleet
 cd my-fleet
 ```
 
-`dagon new` は `dagon.toml`、`topology.yaml`（デスクのデモ。`--from <yaml>` で自分の構成）、`.gitignore`、Claude Code のファイル（下）を作り、まだ無ければ署名の鍵の組を `~/.dagon/keys/my-fleet`（または `--keys <dir>`）に作ります。秘密鍵はプロジェクトの外、git の作業ツリーの外に置かれ、`dagon.toml` には公開鍵の場所だけが書かれます。署名するときは秘密鍵の場所を CLI に教えます:
+`dagon new` は `dagon.toml`、`topology.yaml`（見本の構成。`--from <yaml>` で自分の構成）、`.gitignore`、Claude Code のファイル（下）を作り、まだ無ければ署名の鍵の組を `~/.dagon/keys/my-fleet`（または `--keys <dir>`）に作ります。秘密鍵はプロジェクトの外、git の作業ツリーの外に置かれ、`dagon.toml` には公開鍵の場所だけが書かれます。署名するときは秘密鍵の場所を CLI に教えます:
 
 ```sh
 export DAGON_SIGNING_KEY=~/.dagon/keys/my-fleet/dagon-signing.key
@@ -132,7 +132,7 @@ dagon flash seg        # STM32F401RE: ST-LINK 経由で probe-rs が書き込む
 dagon flash watch      # ESP32-S3: USB-C 経由で espflash が書き込む
 ```
 
-`dagon flash` は先に手順を表示し、ボードに触れる前に確認を求めます（`--yes` で確認を省きます）。書き込み先は書き込みツールが見つけたデバイス（probe-rs のすべてのプローブ、すべてのシリアルポート、すべての UF2 ドライブ）から選びます。USB の ID や UF2 の Board-ID は表示に使うだけで、候補を絞らず、一致した候補を先頭に並べます。1 つならそれを選んで確認のときに示し、2 つ以上なら番号で選ぶ（一致した候補があれば Enter でそれを選べる）か `--probe <vid:pid[:serial]>`・`--port <port>`・`--drive <path>` で指定します（Windows では大文字と小文字を区別せず、`--drive e:` は `E:\` を指します）。2 つ以上で端末がない（または `--yes`）のに指定がないとき、または 1 つもないときは書く前に止まります。`--dry-run` も書き込みの手前まではすべて行います: 部品とアプリをビルドし、初回書込みのファイルを provision のフォルダ（`dagon.toml` の横の `out/provision/<id>/`、`dagon.toml` に `provision_dir` があればその下、`--out <dir>` で別の場所）に作り、ボードにだけ触れません。ブートコア（親機は `stage0` も）を CLI をビルドした DAGON のクローン（または `DAGON_HOME`）から、ノードのアプリと一緒に、署名の鍵の公開側でビルドします。ブートコアはデスクのデモの tag（`hub-rp2040-lcd`、`seg-f401-7seg`）を受け付けるので、これらのボードでは `topology.yaml` の tag をそのままにします。
+`dagon flash` は先に手順を表示し、ボードに触れる前に確認を求めます（`--yes` で確認を省きます）。書き込み先は書き込みツールが見つけたデバイス（probe-rs のすべてのプローブ、すべてのシリアルポート、すべての UF2 ドライブ）から選びます。USB の ID や UF2 の Board-ID は表示に使うだけで、候補を絞らず、一致した候補を先頭に並べます。1 つならそれを選んで確認のときに示し、2 つ以上なら番号で選ぶ（一致した候補があれば Enter でそれを選べる）か `--probe <vid:pid[:serial]>`・`--port <port>`・`--drive <path>` で指定します（Windows では大文字と小文字を区別せず、`--drive e:` は `E:\` を指します）。2 つ以上で端末がない（または `--yes`）のに指定がないとき、または 1 つもないときは書く前に止まります。`--dry-run` も書き込みの手前まではすべて行います: 部品とアプリをビルドし、初回書込みのファイルを provision のフォルダ（`dagon.toml` の横の `out/provision/<id>/`、`dagon.toml` に `provision_dir` があればその下、`--out <dir>` で別の場所）に作り、ボードにだけ触れません。ブートコア（親機は `stage0` も）を CLI をビルドした DAGON のクローン（または `DAGON_HOME`）から、ノードのアプリと一緒に、署名の鍵の公開側でビルドします。ブートコアは見本の構成の tag（`hub-rp2040-lcd`、`seg-f401-7seg`）を受け付けるので、これらのボードでは `topology.yaml` の tag をそのままにします。
 
 ESP32-S3 のノードでは、`dagon flash` がボードの factory エージェントとアプリをビルドし、アプリを ESP のイメージにして（`espflash save-image --chip esp32s3 --flash-size 16mb`）署名し、`espflash` で書き込みます: 同梱の無改変の ESP-IDF 2nd stage を 0x0 に（SHA-256 が `targets/mcu/esp32s3/vendor/SHA256SUMS` と一致しなければ書きません）、パーティション表（`targets/mcu/esp32s3/partitions.csv`、0x8000）、factory エージェント、ota_0（0x110000）にアプリ、`dagon` パーティション（0x710000）にその署名済みヘッダ、確定済みとして起動させる otadata の項目（0xD000）。`--dry-run` はファイルとそのオフセット、`espflash` のコマンドを示します（同じ provision のフォルダの `commands.txt`）。
 
@@ -208,7 +208,7 @@ dagon demo --sim-fail watch        # 同じで、watch の更新が失敗して�
 dagon demo --sim-speed 4           # 4 倍の速さ（録画用）
 ```
 
-`dagon demo` は、模擬の親機と子機の 3 つのノード（デスクのデモの構成: hub、seg、watch、すべて 1.0.0）を相手に DAGON Console を開きます。`dagon sim run` と同じシミュレータを、実機と同じ dagon-host のコードで動かします。つないで、最新のリリース（demo-1.1.0）を選び、3 つのノードすべてを進み具合を見ながら更新できます。`--sim-fail seg` か `--sim-fail watch` を付けると、その子機の新しいバージョンが起動時に落ち、1.0.0 に戻ります。リンクとフラッシュは実機に近い時間がかかります（`--sim-speed` で 0.1〜20 倍）。ヘッダには常に「模擬」が出ます。デモは一時フォルダに自分のプロジェクト（`dagon-demo-<ユーザー名のハッシュ>`、起動のたびに新しく作る）と、そのためだけの DEMO の鍵を作ります。あなたの鍵は使わず、デモで署名したものは実機では動きません。
+`dagon demo` は、模擬の親機と子機の 3 つのノード（見本の構成: hub、seg、watch、すべて 1.0.0）を相手に DAGON Console を開きます。`dagon sim run` と同じシミュレータを、実機と同じ dagon-host のコードで動かします。つないで、最新のリリース（demo-1.1.0）を選び、3 つのノードすべてを進み具合を見ながら更新できます。`--sim-fail seg` か `--sim-fail watch` を付けると、その子機の新しいバージョンが起動時に落ち、1.0.0 に戻ります。リンクとフラッシュは実機に近い時間がかかります（`--sim-speed` で 0.1〜20 倍）。ヘッダには常に「模擬」が出ます。デモは一時フォルダに自分のプロジェクト（`dagon-demo-<ユーザー名のハッシュ>`、起動のたびに新しく作る）と、そのためだけの DEMO の鍵を作ります。あなたの鍵は使わず、デモで署名したものは実機では動きません。
 
 ```sh
 dagon sim run
@@ -226,7 +226,7 @@ dagon sim run
     uplink: { kind: uart, host: browser }   # pc-cli | browser | embedded
 ```
 
-`uplink` を書かなければ、これまでどおりパソコンの dagon への `usb-cdc` です。上りのつながりはコンパイルした構成に入らないので、今ある構成とそのリリースは変わりません。DAGON Console の準備では、インスペクタでリンクごとの種類と、親機の上りのつながりを選べます。どちらかの端のファームウェアがまだ実装していない種類には ◇ まだ使えない が付きます。構成には書けます（問題「まだ使えないつながり」）が、`dagon gen` はそのホップの名前を挙げて断ります（`uplink of hub over ble: not available yet on rp2040`）。今ファームウェアにあるのは、各 MCU の定義（`[links]`）にあるとおり次のものです（上り: パソコンや親機へ、下り: 子機へ）:
+`uplink` を書かなければ、これまでどおりパソコンの dagon への `usb-cdc` です。上りのつながりはコンパイルした構成に入らないので、今ある構成とそのリリースは変わりません。DAGON Console の準備では、インスペクタでリンクごとの種類と、親機の上りのつながりを選べます。どちらかの端のファームウェアがまだ実装していない種類には ◇ まだ使えない が付きます。構成には書けます（問題「まだ使えないつながり」）が、`dagon gen` はそのホップの名前を挙げて断ります（`uplink of hub over ble: not available yet on rp2040`）。ファームウェアにあるのは、各 MCU の定義（`[links]`）にあるとおり次のものです（上り: パソコンや親機へ、下り: 子機へ）:
 
 - RP2040: 上り usb-cdc、下り i2c, uart
 - STM32F401RE: 上り i2c
@@ -240,7 +240,7 @@ dagon demo --uplink uart          # または usb-cdc（既定）、wifi-tcp
 
 模擬の上りのつながりはデモの構成に従います。準備で親機の上りのつながりを変える（USB、UART、Wi-Fi）と、同じ更新が別の媒体で動きます。媒体ごとに、フレームの大きさ、速さ、親機の再起動中のふるまい（USB CDC と Wi-Fi はつなぎ直し、UART アダプタはつながったまま）が違います。
 
-## 現在できること
+## このリポジトリにあるもの
 
 このリポジトリのコードとテストが示していること:
 
@@ -250,8 +250,8 @@ dagon demo --uplink uart          # または usb-cdc（既定）、wifi-tcp
 - プロジェクト: `dagon new`、`dagon gen`、`dagon build` が、MCU ごと（`targets/mcu/*`）とボードごと（`targets/boards/*`）の支援パッケージの上にノードの crate を作り、ビルドします。
 - `dagon conform`: `dagon-conform` の 12 件の適合試験。模擬の F401 に対し、親機経由でも直結でも 12 件すべて合格します。
 - 構成 YAML: 22 件の検証規則と対応ボードの表（`dagon-topology`）。`topology/sample.yaml` はこれを通ります。
-- DAGON Console（`web/`。`dagon serve` が配る。いまできることは `web/README.md` を参照）。
-- ファームウェア: RP2040 親機（`targets/rp2040-hub`）、F401 のデモ子機（`samples/f401-app`）、ESP32-S3 子機（`targets/boards/m5stopwatch`、`samples/esp32s3-app`）。親機のファームウェアは親機の実機に書き込み済みで起動します。それ以外の実機での確認はまだ進行中です（「制限事項」を参照）。
+- DAGON Console（`web/`。`dagon serve` が配る。できることは `web/README.md` を参照）。
+- ファームウェア: RP2040 親機（`targets/rp2040-hub`）、F401 のデモ子機（`samples/f401-app`）、ESP32-S3 子機（`targets/boards/m5stopwatch`、`samples/esp32s3-app`）。どれを実機で確認したかは「制限事項」にあります。
 
 ## 既にあるファームウェアに DAGON を組み込む
 
@@ -757,7 +757,7 @@ npm packages (`web/package-lock.json`): 86. Only those marked "page" ship in the
 
 - ESP32-S3 は公式の ESP-IDF の 2nd stage を使います。その 2nd stage 自体が壊れた場合、DAGON では救えません。ベンダーのツールで USB から書き直す必要があります。
 - 署名の鍵は PC 上のファイルで、公開鍵はファームウェアに組み込まれます。ハードウェアの信頼の起点（セキュアブートのヒューズやハードウェアの鍵保管）はありません。
-- 実機でのすべてのフラッシュ操作に対する電断の網羅的な調査はまだ行っていません。電断はシミュレータでテストしています。
+- 実機でのすべてのフラッシュ操作に対する電断の網羅的な調査は行っていません。電断はシミュレータでテストしています。
 - USB の VID:PID `c0de:cafe` は試験用の ID で、割り当てを受けたものではありません。
-- F401 子機と ESP32-S3 子機のファームウェアの実機での確認はまだです。親機（LCD 付き RP2040）のファームウェアは実機に書き込み済みで起動しますが、PC との通信と表示はまだ確認中で、3 ノードでの通しの流れも同様です。
+- F401 子機と ESP32-S3 子機のファームウェアは実機で確認していません。親機（LCD 付き RP2040）のファームウェアは実機に書き込み済みで起動しますが、PC との通信と表示はまだ確認中で、3 ノードでの通しの流れも同様です。
 - `dagon conform` は同期の試験手順を動かすもので CLI 専用です。ブラウザでは適合試験を実行しません。

@@ -8,7 +8,7 @@ import { boardMissing, flashTooSmall, MAX_NODES, type Doc } from './model.ts';
 
 export interface Issue {
   rule: string;
-  /** `info`: a valid part updating skips for now, never a problem to fix. */
+  /** `info`: a valid part updating skips, never a problem to fix. */
   severity: 'error' | 'warning' | 'info';
   /** YAML path such as `links[0].control.nrst`. */
   path: string;

@@ -12,9 +12,9 @@ description: "What DAGON does not do, and where its guarantees stop."
 - A systematic survey of power cuts at every flash operation on real
   hardware has not been done; power cuts are tested in the simulator.
 - The USB VID:PID `c0de:cafe` is a test ID, not an assigned one.
-- The F401 node and the ESP32-S3 node firmware have not been checked on
-  the hardware. The hub firmware (RP2040 with LCD) has been flashed and
-  starts on the hardware, but its host communication and display are still
-  being validated, and so is the full three-board flow.
+- Checked on hardware: the hub firmware (RP2040 with LCD) is flashed and
+  starts. Not checked on hardware: the hub's communication with the PC and
+  its display, the F401 and ESP32-S3 node firmware, and the full three-node
+  flow.
 - `dagon conform` drives the synchronous test sequence and is CLI only; the
   browser does not run conformance tests.

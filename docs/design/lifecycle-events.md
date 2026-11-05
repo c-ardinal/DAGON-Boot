@@ -1269,11 +1269,12 @@ The one authentication rule, applied by every verifier in the chain
   from it), and code that can write flash without the signing key (a
   trusted-code bug, or an attacker with flash access) can make stage0
   start an unsigned core. **This trade-off is an open owner decision.**
-  The measured cost of the verifier: the RP2040 stage0 with digests only
-  is 16,248 of its 16,384 bytes (boot2 included), so the verifier needs a
-  larger stage0 region there; the STM32F401RE stage0 is 8,192 bytes with
-  digests only and about 23,960 with the Ed25519 verifier (ed25519-compact
-  `opt_size`), past its 16 KiB sector. When the log's choice does not
+  The measured cost of the verifier: the STM32F401RE stage0 is 8,216
+  bytes with digests only and about 23,960 with the Ed25519 verifier
+  (ed25519-compact `opt_size`), past its 16 KiB sector; the RP2040 stage0
+  is 7,484 of its 16,384 bytes with digests only (Waveshare board, boot2
+  included), so a verifier of that size does not fit there either within
+  the margin below. When the log's choice does not
   check out (a corrupt slot, or a record naming a slot without a core),
   stage0 tries the other slots on their own before it has nothing to
   start. On a self-boot MCU without a stage0, the boot core is the root
@@ -1285,7 +1286,16 @@ The one authentication rule, applied by every verifier in the chain
   fails when stage0 outgrows it. RP2040: 16 KiB with boot2 (the boot
   ROM's 256-byte second stage). STM32F401RE: 16 KiB, all of sector 0
   where the core fetches its reset vector (the smallest erase unit
-  holding it, so no update ever erases stage0). A stage0 that needs more
+  holding it, so no update ever erases stage0). Every build must leave
+  1/16 of the region free (`scripts/stage0_size.py`, in CI): the board-less
+  build and one per board whose definition names the MCU, since a board
+  puts its boot LED and halt pattern into stage0. Stage0 is never updated
+  in the field but is rebuilt for every new node with the toolchain of
+  that build, so an image without spare room becomes a first write that
+  cannot be built. Both stage0s use the compact SHA-256 rounds: on the
+  RP2040 the unrolled ones took stage0 from 7,484 to over 16,384 bytes,
+  for about 1.2 s less boot time on a full 128 KiB boot core slot at the
+  ROSC clock stage0 runs on. A stage0 that needs more
   takes a larger region before the first public release; formats before
   that release carry no compatibility promise (6).
 - **No erase under a trial watchdog.** Stage0 never writes flash, and the

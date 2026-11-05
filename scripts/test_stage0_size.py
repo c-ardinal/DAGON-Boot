@@ -34,6 +34,30 @@ class Stage0Size(unittest.TestCase):
         ])
         self.assertEqual(stage0_size.flash_bytes(img, at, size), 0x3140)
 
+    def test_every_board_of_a_stage0_mcu_is_built_besides_the_boardless_one(self):
+        # From the board definitions, not a list: a board added for the MCU
+        # is measured without touching the script.
+        self.assertEqual(
+            stage0_size.configurations("rp2040"),
+            [None, "waveshare-rp2040-touch-lcd-1.28"],
+        )
+        self.assertEqual(stage0_size.configurations("stm32f401re"), [None, "nucleo-f401re"])
+
+    def test_the_boot_folder_names_the_board_for_the_build(self):
+        import tomllib
+        meta = tomllib.loads(stage0_size.boot_folder_toml("rp2040", "waveshare-rp2040-touch-lcd-1.28"))
+        boot = meta["package"]["metadata"]["dagon"]["boot"]
+        self.assertEqual(boot, {"node": "size", "mcu": "rp2040",
+                                "board": "waveshare-rp2040-touch-lcd-1.28"})
+
+    def test_a_stage0_must_leave_the_margin_free(self):
+        size = 0x4000
+        margin = stage0_size.margin(size)
+        self.assertEqual(margin, 1024)
+        self.assertIsNone(stage0_size.verdict(size - margin, size))
+        self.assertIn("margin", stage0_size.verdict(size - margin + 1, size))
+        self.assertIn("over its", stage0_size.verdict(size + 1, size))
+
     def test_an_image_over_its_region_is_reported(self):
         at, size = 0x1000_0000, 0x4000
         img = elf([(1, at, 0x4001)])

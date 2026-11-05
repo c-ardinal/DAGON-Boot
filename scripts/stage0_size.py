@@ -6,12 +6,14 @@
 
 An MCU whose definition (targets/mcu/<id>/dagon-mcu.toml) has `[layout]
 stage0 = { at, size }` and whose package has a `stage0/` folder is built
-in release for the board-less lint boot folder (`bootcore/lint`, the
-stage0's own firmware lint input) and measured: the bytes its loadable
-segments put into flash (code, read-only data and the initial data
-image) must not exceed `size`. The linker refuses an image over its
-region too; this records the size and keeps the limit's source the
-definition.
+in release once for a node without a board (the stage0's firmware lint
+boot folder, `bootcore/lint`) and once for every board whose definition
+(targets/boards/<id>/dagon-board.toml) names that MCU: the board puts its
+boot LED and halt pattern into stage0, so each is a different image. Each
+is measured: the bytes its loadable segments put into flash (code,
+read-only data and the initial data image) must leave `margin(size)`
+bytes of the region free. The linker refuses an image over its region;
+this keeps the limit's source the definition and fails before the limit.
 """
 import os
 import pathlib
@@ -22,7 +24,16 @@ import tomllib
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 MCU = ROOT / "targets" / "mcu"
+BOARDS = ROOT / "targets" / "boards"
 PT_LOAD = 1
+# The part of a stage0 region every build must leave free: 1/16 (1 KiB of
+# 16 KiB). Stage0 is never updated in the field, yet its source is rebuilt
+# for every new node with the toolchain of that build; a compiler or
+# library release, a board's boot pins or a fix moves an opt-level "z"
+# image by hundreds of bytes, and an image without spare room turns into a
+# first write that cannot be built (as the Waveshare build did, 64 bytes
+# over, while the board-less build fitted).
+MARGIN_DIVISOR = 16
 
 
 def region(mcu_id: str) -> tuple[int, int]:
@@ -47,13 +58,49 @@ def flash_bytes(elf: bytes, at: int, size: int) -> int:
     return total
 
 
-def check(elf_path: pathlib.Path, mcu_id: str) -> int:
+def margin(size: int) -> int:
+    """Bytes of a `size`-byte stage0 region every build leaves free."""
+    return size // MARGIN_DIVISOR
+
+
+def verdict(used: int, size: int) -> str | None:
+    """Why `used` bytes do not pass in a `size`-byte region (None: they do)."""
+    if used > size:
+        return f"{used} bytes, over its {size}-byte region"
+    if used > size - margin(size):
+        return f"{used} bytes, inside the {margin(size)}-byte margin of its {size}-byte region"
+    return None
+
+
+def check(elf_path: pathlib.Path, mcu_id: str, label: str = "") -> str | None:
     at, size = region(mcu_id)
     used = flash_bytes(elf_path.read_bytes(), at, size)
-    print(f"{mcu_id} stage0: {used} of {size} bytes ({size - used} free)")
-    if used > size:
-        sys.exit(f"{mcu_id} stage0 is {used} bytes, over its {size}-byte region")
-    return used
+    name = f"{mcu_id} stage0{label}"
+    print(f"{name}: {used} of {size} bytes ({size - used} free, margin {margin(size)})")
+    why = verdict(used, size)
+    return f"{name}: {why}" if why else None
+
+
+def configurations(mcu_id: str) -> list[str | None]:
+    """The boards a stage0 is built for: None (a node without a board),
+    then every board whose definition names the MCU."""
+    boards = []
+    for f in sorted(BOARDS.glob("*/dagon-board.toml")):
+        d = tomllib.loads(f.read_text(encoding="utf-8"))
+        if d.get("mcu") == mcu_id:
+            boards.append(d["id"])
+    return [None, *boards]
+
+
+def boot_folder_toml(mcu_id: str, board: str) -> str:
+    """A boot folder (`DAGON_BOOT_CRATE`) for a node named `size` on
+    `board`: all a stage0 build reads of it."""
+    return (
+        "[package]\nname = \"dagon-stage0-size\"\nversion = \"0.0.0\"\n"
+        "edition = \"2021\"\npublish = false\n\n"
+        "[package.metadata.dagon.boot]\n"
+        f"node = \"size\"\nmcu = \"{mcu_id}\"\nboard = \"{board}\"\n"
+    )
 
 
 def stage0_mcus() -> list[str]:
@@ -72,20 +119,38 @@ def target_of(mcu: str) -> str:
 
 
 def build_all() -> None:
+    failed = []
     for mcu in stage0_mcus():
         pkg = MCU / mcu / "stage0"
-        env = dict(os.environ, DAGON_BOOT_CRATE=str(MCU / mcu / "bootcore" / "lint"))
-        env.setdefault("DAGON_ALLOW_TEST_KEY", "1")
-        subprocess.run(["cargo", "build", "--release"], cwd=pkg, env=env, check=True)
-        meta = tomllib.loads((pkg / "Cargo.toml").read_text(encoding="utf-8"))
-        elf = pkg / "target" / target_of(mcu) / "release" / meta["package"]["name"]
-        check(elf, mcu)
+        name = tomllib.loads((pkg / "Cargo.toml").read_text(encoding="utf-8"))["package"]["name"]
+        for board in configurations(mcu):
+            if board is None:
+                folder, out = MCU / mcu / "bootcore" / "lint", pkg / "target"
+            else:
+                folder = pkg / "target" / "stage0-size" / board
+                folder.mkdir(parents=True, exist_ok=True)
+                (folder / "Cargo.toml").write_text(boot_folder_toml(mcu, board), encoding="utf-8")
+                out = folder / "target"
+            env = dict(os.environ, DAGON_BOOT_CRATE=str(folder), CARGO_TARGET_DIR=str(out))
+            env.setdefault("DAGON_ALLOW_TEST_KEY", "1")
+            label = f" ({board or 'no board'})"
+            if subprocess.run(["cargo", "build", "--release"], cwd=pkg, env=env).returncode:
+                # The linker refuses an image over its region.
+                failed.append(f"{mcu} stage0{label}: does not build (over its region?)")
+                continue
+            why = check(out / target_of(mcu) / "release" / name, mcu, label)
+            if why:
+                failed.append(why)
+    if failed:
+        sys.exit("\n".join(failed))
 
 
 if __name__ == "__main__":
     if sys.argv[1:] == ["--targets"]:
         print(" ".join(sorted({target_of(m) for m in stage0_mcus()})))
     elif len(sys.argv) == 3:
-        check(pathlib.Path(sys.argv[1]), sys.argv[2])
+        why = check(pathlib.Path(sys.argv[1]), sys.argv[2])
+        if why:
+            sys.exit(why)
     else:
         build_all()

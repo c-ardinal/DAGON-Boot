@@ -265,6 +265,7 @@ fn status_and_discover() {
 fn full_apply_then_rollback() {
     let s = sim();
     let mut h = host(&s);
+    let hub_max = usize::from(block_on(h.hello(Target::Hub)).unwrap().max_payload);
     let mut events = Vec::new();
     let out = block_on(
         h.apply(&release(), &topology(&yaml()), &key().pk, None, &mut |e| {
@@ -286,14 +287,28 @@ fn full_apply_then_rollback() {
         .iter()
         .any(|e| e.phase == phase::TRANSFER && e.percent == 100));
     // Each written image reports how long its erase, data and verify took,
-    // once, with its VERIFY event (the simulator's clock moves with traffic).
+    // once, with its VERIFY event.
     let timed: Vec<_> = events.iter().filter(|e| e.times.is_some()).collect();
     assert_eq!(timed.len(), 2, "{events:?}");
-    for e in timed {
-        assert_eq!(e.phase, phase::VERIFY);
-        let t = e.times.unwrap();
-        assert!(t.data_ms > 0, "{t:?}");
-    }
+    assert!(timed.iter().all(|e| e.phase == phase::VERIFY));
+    // The hub's own image: the simulator's clock moves PC_ROUND_TRIP_MS per
+    // request, so each phase is exactly its requests. Erase is the one
+    // request the hub erases on (the last header chunk; the header's other
+    // chunks and XFER_BEGIN are no phase), verify the one XFER_END, data one
+    // request per body chunk and one SHOW per progress step on the LCD.
+    let rt = dagon_sim::hub::PC_ROUND_TRIP_MS as u32;
+    let chunk = hub_max.min(s.max_payload()) - 4;
+    let body = hub_img(1, v).len() - dagon_format::header::HEADER_SIZE;
+    let shows = events
+        .iter()
+        .filter(|e| e.node == 0 && e.phase == phase::TRANSFER && e.percent > 0)
+        .count();
+    let t = timed.iter().find(|e| e.node == 0).unwrap().times.unwrap();
+    assert_eq!(
+        (t.erase_ms, t.data_ms, t.verify_ms),
+        (rt, rt * (body.div_ceil(chunk) + shows) as u32, rt),
+        "{t:?}"
+    );
     assert!(events
         .iter()
         .filter(|e| e.phase != phase::VERIFY)

@@ -99,10 +99,11 @@ pub struct Event {
 /// How long one image's transfer took, by phase, in ms of the host's clock.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct XferTimes {
-    /// XFER_BEGIN and the header, up to the node's answer that it erased
-    /// the slot (the node erases before it answers the last of them).
+    /// The round trip of the request the node erases the slot on: the last
+    /// header chunk (XFER_BEGIN for an image without header). The header's
+    /// other requests are in no phase.
     pub erase_ms: u32,
-    /// The image body (XFER_DATA).
+    /// The image body (XFER_DATA), with the hub LCD's progress updates.
     pub data_ms: u32,
     /// XFER_END: the node's digest over what it wrote.
     pub verify_ms: u32,
@@ -693,7 +694,6 @@ impl<T: Transport, C: Clock> Host<T, C> {
         on_event: &mut dyn FnMut(Event),
     ) -> Result<XferTimes, T::Error> {
         let since = |t0: u64, t1: u64| t1.saturating_sub(t0).min(u32::MAX.into()) as u32;
-        let t0 = self.clock.now_ms();
         let Xfer {
             tgt,
             slot,
@@ -711,17 +711,22 @@ impl<T: Transport, C: Clock> Host<T, C> {
         let mut p = [0u8; 8];
         let n = begin.encode(&mut p).expect("8 bytes");
         let begin_wait = if hdr.is_empty() { erase } else { REQUEST_MS };
+        let t0 = self.clock.now_ms();
         self.call(to, Cmd::XferBegin, &p[..n], begin_wait).await?;
+        // The node erases before it answers XFER_BEGIN (no header) or the
+        // last header chunk: that request's round trip is the erase phase.
+        let mut erase_ms = since(t0, self.clock.now_ms());
 
         let chunk = chunk_len(hello.max_payload, self.link_max(to)).ok_or(Error::BadResponse)?;
         let hdr_chunks = hdr.len().div_ceil(chunk);
         for (i, c) in hdr.chunks(chunk).enumerate() {
-            let wait = if i + 1 == hdr_chunks {
-                erase
-            } else {
-                REQUEST_MS
-            };
+            let last = i + 1 == hdr_chunks;
+            let wait = if last { erase } else { REQUEST_MS };
+            let t = self.clock.now_ms();
             self.chunk(to, Cmd::XferHdr, i * chunk, c, wait).await?;
+            if last {
+                erase_ms = since(t, self.clock.now_ms());
+            }
         }
         let t1 = self.clock.now_ms();
         let mut shown = 0u8;
@@ -743,7 +748,7 @@ impl<T: Transport, C: Clock> Host<T, C> {
             return Err(Error::DigestMismatch);
         }
         Ok(XferTimes {
-            erase_ms: since(t0, t1),
+            erase_ms,
             data_ms: since(t1, t2),
             verify_ms: since(t2, self.clock.now_ms()),
         })

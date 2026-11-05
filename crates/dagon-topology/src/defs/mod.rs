@@ -412,59 +412,124 @@ pub struct DoctorCheck {
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct McuDef {
-    /// Definition format number; absent means [`FORMAT`] (see
-    /// site/src/content/docs/explanation/versioning.md). Other numbers are refused on load.
+    /// Definition format number (`1`; left out means 1). A dagon that does not read the number
+    /// refuses the file (site/src/content/docs/explanation/versioning.md).
     pub format: Option<u32>,
+    /// MCU id used in topologies (`stm32f401re`).
     pub id: String,
-    /// Display name (`RP2040`).
+    /// Display name (`STM32F401RE`).
     pub name: String,
-    /// Image header `mcu_id`.
+    /// Image header `mcu_id`; unique.
     pub wire_id: u16,
+    /// `self-boot` or `vendor-stage2`.
     pub port: PortKind,
-    /// GPIO0..GPIOn-1 a node without a named board is checked against;
-    /// 0 when pins are named by port (`PB4`).
+    /// GPIO0..n-1 checked for nodes without a board; 0 when pins are named by port.
     #[serde(default)]
     pub gpio_count: u8,
-    /// The first entry is the default.
+    /// `name` (unique), `base` (address of flash byte 0), `bytes`, `xip` (required; `true`: the CPU
+    /// reads flash at `base`, so flash shares the address space with RAM and register blocks;
+    /// `false`: `base` and the slots are flash offsets an MMU maps elsewhere). The first is the
+    /// default.
     #[serde(rename = "flash_map")]
     pub flash_maps: Vec<FlashMapDef>,
-    /// Partition table CSV inside the package.
+    /// ESP-IDF partition table CSV in the package (rows need explicit offset and size).
     pub partitions: Option<String>,
+    /// Optional fixed regions: `stage0 = { at, size }`, `bootcore_log` / `app_log = { faces = [a,
+    /// b], face_size }`; a `bootcore_log` equal to `app_log` is one log holding both the boot core
+    /// and the APP records; `stage0_verifies = true`: stage0 also checks a boot core's signature
+    /// (left out: digests only).
     #[serde(default)]
     pub layout: Layout,
+    /// `image` (`app`, `bootcore`, `agent`, `stage0`), `binding` (`a`, `b`, `any`), `header`
+    /// (`inline`, `trailer`, `detached`); the region is `at` + `size` or `partition`; a detached
+    /// header is at `header_at` or `header_partition` + `header_offset`.
     #[serde(rename = "slot")]
     pub slot_defs: Vec<SlotDef>,
+    /// First-write tool: `kind` and its parameters (below).
     pub writer: Writer,
+    /// DAGON parts built from this package for a first write: `name`, `sub` (folder in the
+    /// package), `bin`.
     #[serde(default, rename = "part")]
     pub parts: Vec<Part>,
+    /// Only for an MCU that can be the coordinator: `pio_state_machines`, `pio_uart_state_machines`
+    /// (per link), `uart0_tx`, `uart0_rx`. A topology may make the MCU its coordinator only when
+    /// `[coordinator]` is defined (V-25).
     pub coordinator: Option<Coordinator>,
-    /// Left out: every UART link this MCU's firmware runs is refused (V-26).
+    /// How the UART the MCU package runs DAGON's UART links on makes a bit rate, as its HAL
+    /// computes it: `clock_hz` divided by `clocks_per_bit` times a divider with `frac_bits`
+    /// fraction bits, rounded down. The topology check (V-26) refuses a link `baud` either end
+    /// makes more than 2 % off. Required on an MCU whose `[links]` has `uart`: without it, every
+    /// UART link that MCU's firmware runs is refused, since no speed on it is known to work.
     pub link_uart: Option<LinkUart>,
+    /// ROM I2C bootloader (`stm32-i2c-rom`): `name` (as check messages call it), `addr`, `max_hz`,
+    /// `erase_sectors`, `pairs = [{ controller, sda, scl }]` it listens on.
     pub rom_i2c: Option<RomI2c>,
     /// Link kinds the MCU package's firmware implements (its `LINK_KINDS`).
     #[serde(default)]
     pub links: Links,
+    /// How the user connects it for a write: `label`, `hint`.
     pub connection: Connection,
+    /// Tool check: `what`, `probe` (command), `expect` (`"runs"`, `{ line = "..." }`, `{ prefix =
+    /// "..." }`), `fix` (command), `hint`, `slow` (`true`: `dagon doctor --fix` says the install
+    /// takes a while before it starts).
     #[serde(default)]
     pub doctor: Vec<DoctorCheck>,
-    /// The MCU's RAM (all of it, as the address map has it).
+    /// `{ at, size }`: all of the MCU's RAM. Images get the RAM below the boot record, the fuse
+    /// cells and the extension regions.
     pub ram: Option<Region>,
-    /// Left out: no protection hardware DAGON uses ([`McuDef::isolation`]).
+    /// How DAGON keeps extensions away from itself (below). Left out: `kind = "none"`, `level =
+    /// "none"`.
     pub isolation: Option<Isolation>,
-    /// Every register block of the MCU.
+    /// Every register block: `id`, `base`, `size`, `window_eligible` (an extension may get it as a
+    /// window), `bus_master` (it can write memory), `privileged_why` (one or a list of `dma`,
+    /// `flash`, `watchdog`, `clock`, `reset`, `irq-routing`, `pinmux`, `power`, `rom`,
+    /// `core-control`, `protection`, `shared`), `dma = { streams, channels }` (a DMA controller, a
+    /// bus master: its streams, each selecting one of `channels` requests), `dma_requests = [{
+    /// signal, controller, stream, channel }]` (the block's rows of the MCU's DMA request mapping
+    /// table: `signal` `a-z 0-9` such as `tx`, `rx`, `ch1`, `up`; one cell serves one block). Board
+    /// packages and MCU templates take DMA streams from these (first row of the request on a stream
+    /// not yet taken).
     #[serde(default, rename = "peripheral")]
     pub peripherals: Vec<Peripheral>,
-    /// Every processor core; DAGON runs on the first.
+    /// Every processor core, `id`; DAGON runs on the first.
     #[serde(default, rename = "core")]
     pub cores: Vec<Core>,
+    /// `kind` (`iwdg`, `rp-watchdog`, `rtc-wdt`), `trial_ms` (armed on a trial boot),
+    /// `confirmed_ms` (armed otherwise), `trial_attempts` (boots the boot stage gives a pending
+    /// image before it rolls back: the boot core's limit, or the vendor second stage's). An app may
+    /// delay a reboot by at most half the shorter period. The MCU package's build turns
+    /// `trial_attempts` into the constant its boot core and its agent use. `flag` (required): the
+    /// watchdog-reset flag the lockup fuse needs (set by a watchdog reset, kept over every later
+    /// reset but power-on, cleared when a start acknowledges it), a fact of `none`, `register` (a
+    /// reset-flag register; name it and its source in a comment) or `package` (the MCU package
+    /// keeps it): `"register"`, `{ unverified = "package" }`, `"unmeasured"`. Without a flag with a
+    /// source the MCU has no lockup fuse.
     pub watchdog: Option<Watchdog>,
-    /// What a flash operation stops and DAGON's masking budget.
+    /// Hardware facts of the execution model
+    /// (site/src/content/docs/explanation/lifecycle-events.md, "Execution model"): `masked_max_us`
+    /// (longest DAGON's own code masks interrupts, 1..=1000), `flash_op` (what an erase or program
+    /// stops: `fetch-stall`, `xip-off-masked`, `cache-off-masked`), `erase_unit` (largest unit
+    /// DAGON erases in one operation, a power of two), `erase_unit_max_ms` (that erase's datasheet
+    /// maximum; below `watchdog.confirmed_ms`). A fact is a number checked against its source (cite
+    /// it in a comment), `{ unverified = N }` or `"unmeasured"` (no value yet; not for
+    /// `erase_unit_max_ms`).
     pub execution: Option<Execution>,
-    /// Flash a conformance build may destroy.
+    /// `scratch = { at, size }`: flash a conformance build erases and writes; apart from every
+    /// slot, header, log face and stage0.
     pub conformance: Option<Conformance>,
+    /// `[boot.record]`, for MCUs with a DAGON boot stage: where the boot record and
+    /// the lockup fuse live. `kind`
+    /// (`noinit-ram` inside `ram`, `retained-registers` inside a `[[peripheral]]`), `at`, `size`
+    /// (at most 4096), `survives` (`reset-random`, `reset-cleared`, `power`: what a power loss
+    /// leaves), `entropy = { source, min_bits }` (required; the start-up word a new record sequence
+    /// mixes in: `source` one of `rng`, `ring-osc`, `osc-capture`, `adc-noise`; `min_bits` its
+    /// min-entropy per word, a fact, at least 16 when it has a value), `rings = [{ writer, at, size
+    /// }]` (one per boot stage, in boot order, inside the record), `fuse = { cells = [{ image, at,
+    /// size }] }` (`bootcore`, `app`; outside the record), `reserved` (addresses the record never
+    /// stores to). The byte layout inside is the `boot-record` contract's.
     #[serde(default)]
     pub boot: McuBoot,
-    /// What a boot action program may use besides pins.
+    /// What a board's boot action program may use besides pins: `["i2c"]` allows `bus_write`.
     #[serde(default)]
     pub boot_capabilities: Vec<isolation::BootCapability>,
     /// Filled on load from `partitions`.
@@ -517,44 +582,81 @@ pub struct DefaultLink {
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct BoardDef {
-    /// Definition format number; absent means [`FORMAT`] (see
-    /// site/src/content/docs/explanation/versioning.md). Other numbers are refused on load.
+    /// Definition format number (`1`; left out means 1). A dagon that does not read the number
+    /// refuses the file (site/src/content/docs/explanation/versioning.md).
     pub format: Option<u32>,
+    /// Board id used in `nodes[].board`.
     pub id: String,
+    /// Product name.
     pub product: String,
+    /// MCU id (must be defined).
     pub mcu: String,
+    /// Flash size (must hold one of the MCU's flash maps).
     pub flash_bytes: u32,
+    /// Whether the board can be an I2C target.
     #[serde(default)]
     pub i2c_target: bool,
-    /// Which line drawing the UI uses.
+    /// UI drawing.
     pub drawing: String,
-    /// The board a node naming only its MCU is checked against. At most
-    /// one board of an MCU says so; an MCU's only board is its default
-    /// without it.
+    /// `true`: the board a node naming only its MCU is checked against (a project cannot replace
+    /// the default of a builtin MCU that already has one: two marked boards do not load). At most
+    /// one board of an MCU says so; an MCU's only board is its default without it; an MCU with
+    /// several boards and none marked has no default (its nodes are checked without board facts).
+    /// Definition order never decides it.
     #[serde(default)]
     pub default: bool,
+    /// `[{ pin, label }]`; `label` left out until confirmed on the board.
     #[serde(default)]
     pub header: Vec<HeaderPin>,
-    /// I2C pin pairs usable from the header.
+    /// `[{ controller, sda, scl }]` pairs usable from the header.
     #[serde(default, rename = "i2c")]
     pub i2c_pairs: Vec<I2cPair>,
-    /// `None` for the coordinator.
+    /// How a node board is wired unless the topology says otherwise: `kind` (`i2c`, `uart`, `can`,
+    /// `ethernet`), `iface` (`hw-uart0`, `pio-uart`), `addr`, `baud`, `control` (`full`,
+    /// `cooperative`), `rom_entry` (`force-download-boot`, `m5pm1`, `stm32-i2c-rom`). Left out for
+    /// the coordinator.
     pub default_link: Option<DefaultLink>,
-    /// Pins of a new I2C bus / PIO UART link when this board is the 親機.
+    /// Pins the page wires new links to when this board is the 親機: `i2c = { controller, sda, scl }`
+    /// (a new I2C bus; `controller` is one of the board's `i2c`) and `pio_uart = { tx, rx }` (a new
+    /// PIO UART link), numbered GPIOs below the MCU's `gpio_count`. Only on boards whose MCU has
+    /// `[coordinator]`.
     pub coordinator: Option<HubPins>,
-    /// Parts built from the board package itself.
+    /// Parts built from the board package itself (`name`, `sub`, `bin`).
     #[serde(default, rename = "part")]
     pub parts: Vec<Part>,
-    /// The boot stage's LED, halt pattern, power hold and action program.
+    /// The boot stage's board values: `led` (a `[[pin]]`), `led_active` (`high`, `low`), `halt = {
+    /// pattern, period_ms }` (`blink`, `code`, `off`), `power_hold = { pin, level }`. Its boot
+    /// action programs, `[[boot.action]]`: A boot action program (`boot-program` format 1): `on` (a
+    /// boot event the event catalog marks action-capable) and `ops`: `{ op = "led", state }` (`on`,
+    /// `off`, `toggle`), `{ op = "gpio", pin, level }` (a `[[pin]]` with `boot = true`; the power
+    /// hold pin takes only its hold level), `{ op = "delay", ms }` (1 to 20), `{ op = "bus_write",
+    /// device, reg, bytes }` (a `[[device]]` register in its `writable` list, 1 to 8 bytes, only on
+    /// an MCU with `boot_capabilities = ["i2c"]`). At most 32 ops and 50 ms per event, a bus write
+    /// counting 5 ms.
     pub boot: Option<BoardBoot>,
-    /// Pins extensions and boot actions may name.
+    /// The board's pins: `pin`, `name` (what the board package's code takes it by, `a-z 0-9 _`),
+    /// `boot` (a boot program may drive it), `levels` (allowed levels; all when left out).
     #[serde(default, rename = "pin")]
     pub pins: Vec<BoardPin>,
+    /// The board's buses: `id` (`a-z 0-9 - _`), `kind` (`i2c`, `spi`, `uart`, `can`), `controller`
+    /// (an MCU `[[peripheral]]`), its pins by signal (`sda`, `scl` for i2c; `tx` and/or `rx` for
+    /// uart; `tx`, `rx` for can; `sck` and `mosi` and/or `miso` for spi), `hz` (i2c, spi) or `baud`
+    /// (uart, can; on a `dagon = true` UART bus the link speed of a build dagon does not give the
+    /// topology's, see below), `dagon` (`true`: DAGON's own link runs on it, so neither the bus nor
+    /// its controller is ever an extension's), `dma` (`true`: the board package opens or hands out
+    /// the bus with DMA; i2c, spi, uart; its tx and rx streams come from the MCU's `dma_requests`,
+    /// buses in order, and the board package's build writes them as `<Bus>TxDma`/`<Bus>RxDma`,
+    /// `take_dma!` and `bind_<bus>_dma!`).
     #[serde(default, rename = "bus")]
     pub buses: Vec<BoardBus>,
-    /// Board names for MCU register blocks extensions may declare.
+    /// Board names for MCU blocks extensions may declare: `id`, `mcu` (the MCU `[[peripheral]]` id;
+    /// never the controller of a `dagon = true` bus).
     #[serde(default, rename = "peripheral")]
     pub peripherals: Vec<BoardPeripheral>,
+    /// A device on a board bus: `id` (`a-z 0-9 - _`), `bus`, `addr`, `max_transfer` (required: the
+    /// most data bytes it takes in one transfer, from its datasheet; the bus port and boot programs
+    /// keep to it), `regs = [{ name, reg }]` (its registers by name, `a-z 0-9 _`), `writable`
+    /// (registers anything outside DAGON may write: numbers or names of `regs`).
     #[serde(default, rename = "device")]
     pub devices: Vec<BoardDevice>,
     /// As [`McuDef::package`] (inline project boards have none).

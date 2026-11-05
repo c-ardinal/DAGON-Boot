@@ -199,22 +199,43 @@ pub struct Capabilities {
 #[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Isolation {
+    /// What DAGON enforces: `none`, `mpu`, `pms`, `tz`. A kind gives `none` or one level (`mpu` for
+    /// the MPU and PMP kinds, `pms` for `esp-pms`, `tz` for `armv8m-tz`).
     #[serde(default)]
     pub level: Level,
+    /// The protection hardware: `armv6m-mpu`, `armv7m-mpu`, `armv8m-mpu`, `armv8m-tz`, `riscv-pmp`,
+    /// `riscv-epmp`, `esp-pms`, `none`.
     #[serde(default)]
     pub kind: Kind,
-    /// The MCU has a DAGON boot stage that runs extensions.
+    /// The MCU has a DAGON boot stage that runs extensions (`port = "self-boot"` only).
     #[serde(default)]
     pub boot_extensions: bool,
-    /// Most RAM all sandboxed extensions of one image may take (data,
-    /// bss and stacks).
+    /// Most RAM the sandboxed extensions of one image take, regions rounded up (required when
+    /// `kind` is not `none`).
     pub ext_ram_max: Option<u32>,
+    /// Root-image protection `dagon provision` may set: `rdp1` (reversible), `rdp2` (permanent),
+    /// `wrp` (reversible), `esp-secure-boot`, `esp-flash-encryption` (permanent).
     #[serde(default)]
     pub root_protection: Vec<RootProtection>,
+    /// `none`, `i-cache`, `id-cache` (instruction and data).
     #[serde(default)]
     pub cache: Cache,
+    /// Tightly coupled memories, `[{ at, size }]`.
     #[serde(default)]
     pub tcm: Vec<Region>,
+    /// The kind's capability record, read back from the hardware at boot (a mismatch turns the
+    /// level to `none`). `armv6m-mpu`: `mpu_regions` 0 or 8, `min_region` at least 256,
+    /// `subregions_from`; `armv7m-mpu`: `mpu_regions` 8 or 16, `min_region` at least 32,
+    /// `subregions_from`; `armv8m-mpu`: `mpu_regions` 0, 4, 8, 12 or 16; `armv8m-tz`: `sau_regions`
+    /// (0, 4, 8), `s_mpu_regions`, `ns_mpu_regions`, `idau = [{ base, size, attribution }]`;
+    /// `riscv-pmp`, `riscv-epmp`: `pmp_entries` (0, 16, 64), `grain`, `na4`, `tor`; `esp-pms`:
+    /// `worlds`, `gdma_channels`, `memory_regions`, `peripheral_slots`. Every kind:
+    /// `critical_section` (`primask` on armv6m, `basepri` on armv7m and armv8m, `mstatus-mie` on
+    /// RISC-V, `xtensa-level` on esp-pms), `unwind` (`cortex-m-exception`, `armv8m-tz`,
+    /// `riscv-trap`, `xtensa-world`, by kind), `timer` (`systick`, `riscv-mtime`, `timer-group`),
+    /// `reset_cleanup` (`peripheral-reset`, `reinit`), `background_privileged`, `fault_address`;
+    /// optionally `np_max_us` and `dma_stop_max_us`, which may only lower DAGON's bounds (50 and
+    /// 20).
     #[serde(default)]
     pub capabilities: Capabilities,
 }

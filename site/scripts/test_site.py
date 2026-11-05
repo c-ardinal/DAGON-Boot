@@ -23,7 +23,7 @@ class Generated(unittest.TestCase):
             saved = gen.OUT
             gen.OUT = pathlib.Path(d)
             # The hand-written pages with generated regions come along.
-            for name in gen.REGIONS:
+            for name in {n for n, _, _ in gen.REGIONS}:
                 (gen.OUT / name).write_text((saved / name).read_text(encoding="utf-8"), encoding="utf-8")
             try:
                 self.assertEqual(gen.main([]), 0)
@@ -76,7 +76,8 @@ class Generated(unittest.TestCase):
 
     def test_every_route_and_agent_key_says_what_it_is(self):
         # A blank cell means the source has no doc comment for it: write one there.
-        for page in (gen.serve_api(), gen.agent_definition()):
+        tables = [make() for _, _, make in gen.REGIONS]
+        for page in (gen.serve_api(), gen.agent_definition(), *tables):
             blank = [l for l in page.splitlines() if l.startswith("| `") and l.rstrip().endswith("|  |")]
             self.assertEqual(blank, [])
 

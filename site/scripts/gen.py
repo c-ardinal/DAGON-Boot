@@ -152,8 +152,12 @@ def rust_struct(path, name):
         while j > start and lines[j].strip().startswith(("#[", "///")):
             attrs.append(lines[j])
             j -= 1
+        if any(re.search(r"serde\(.*\bskip\b", a) for a in attrs):
+            continue
         optional = any("serde(default" in a for a in attrs) or m.group(2).startswith("Option<")
-        out.append((m.group(1), m.group(2), optional, doc_before(lines, i)))
+        # The key the file uses: serde's rename, else the field's name.
+        renamed = next((r.group(1) for a in attrs if (r := re.search(r'rename = "([^"]+)"', a))), m.group(1))
+        out.append((renamed, m.group(2), optional, doc_before(lines, i)))
     return out
 
 
@@ -282,7 +286,7 @@ def boards():
     body = f"""
 Every MCU package in `targets/mcu/` and board package in `targets/boards/`
 of this release. Adding a package folder adds a row; the format of both
-files is in `targets/README.md`.
+files is in [MCU and board definitions](/reference/definitions/).
 
 ## MCUs
 
@@ -449,12 +453,50 @@ def extension_keys():
             f"`[limits]`:\n\n{field_table(rust_struct(EXTENSION, 'Limits'))}\n")
 
 
-REGION_BEGIN = "<!-- generated from {}: python site/scripts/gen.py -->\n"
+DEFS = ROOT / "crates" / "dagon-topology" / "src" / "defs"
+
+
+@functools.cache
+def defs_source():
+    return "\n".join(p.read_text(encoding="utf-8") for p in sorted(DEFS.glob("*.rs")))
+
+
+def is_table(name):
+    """Whether type `name` is written as a TOML table: a struct, or an enum tagged by a key."""
+    src = defs_source()
+    if re.search(rf"pub struct {name}\b", src):
+        return True
+    m = re.search(rf"pub enum {name}\b", src)
+    return bool(m) and "tag =" in src[max(0, m.start() - 200):m.start()].splitlines()[-1]
+
+
+def def_rows(path, struct, prefix=""):
+    """Key rows of a definition file's table, from the struct it is read into."""
+    rows = []
+    for key, t, optional, doc in rust_struct(path, struct):
+        m = re.fullmatch(r"(Option|Vec)<(.+)>", t)
+        outer, inner = (m.group(1), m.group(2).split("::")[-1]) if m else ("", t.split("::")[-1])
+        full = f"{prefix}.{key}" if prefix else key
+        if is_table(inner):
+            shown, kind = (f"`[[{full}]]`", "tables") if outer == "Vec" else (f"`[{full}]`", "table")
+        else:
+            shown = f"`{key}`"
+            kind = {"String": "string", "bool": "boolean"}.get(inner, "integer" if re.fullmatch(r"[ui]\d+", inner) else "string")
+            kind = f"array of {kind}s" if outer == "Vec" else kind
+        rows.append(f"| {shown} | {kind} | {'no' if optional else 'yes'} | {cell(doc)} |")
+    return "| Key | Type | Required | Meaning |\n|---|---|---|---|\n" + "\n".join(rows) + "\n"
+
+
+REGION_BEGIN ="<!-- generated from {}: python site/scripts/gen.py -->\n"
 REGION_END = "<!-- end of generated table -->\n"
 # Hand-written page -> (what its region is generated from, the region's text).
-REGIONS = {
-    "extension-manifest.md": ("dagon-extension's manifest types", extension_keys),
-}
+# (hand-written page, what the region is generated from, the region's text); a page may hold several.
+REGIONS = [
+    ("extension-manifest.md", "dagon-extension's manifest types", extension_keys),
+    ("definitions.md", "dagon-topology's McuDef", lambda: def_rows(DEFS / "mod.rs", "McuDef")),
+    ("definitions.md", "dagon-topology's Isolation", lambda: def_rows(DEFS / "isolation.rs", "Isolation", "isolation")),
+    ("definitions.md", "dagon-topology's BoardDef", lambda: def_rows(DEFS / "mod.rs", "BoardDef")),
+]
 
 
 def with_region(text, source, body):
@@ -467,10 +509,12 @@ def with_region(text, source, body):
 def main(argv):
     check = "--check" in argv
     stale = []
-    for name, (source, make) in REGIONS.items():
+    for name in dict.fromkeys(n for n, _, _ in REGIONS):
         path = OUT / name
         old = path.read_text(encoding="utf-8")
-        new = with_region(old, source, make())
+        new = old
+        for _, source, make in (r for r in REGIONS if r[0] == name):
+            new = with_region(new, source, make())
         if check and new != old:
             stale.append(path.as_posix())
         elif not check:

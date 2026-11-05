@@ -10,7 +10,7 @@ Generated from `targets/mcu/*/dagon-mcu.toml`, `targets/boards/*/dagon-board.tom
 
 Every MCU package in `targets/mcu/` and board package in `targets/boards/`
 of this release. Adding a package folder adds a row; the format of both
-files is in `targets/README.md`.
+files is in [MCU and board definitions](/reference/definitions/).
 
 ## MCUs
 

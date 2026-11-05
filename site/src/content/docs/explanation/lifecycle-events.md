@@ -1017,7 +1017,7 @@ id = "cpu0"
 
 Spelling: definition values are kebab-case words of `a-z 0-9 -` (hence
 `id-cache`), because a project definition's strings that are not plain
-names are replaced before they leave the machine (`targets/README.md`).
+names are replaced before they leave the machine ([MCU and board definitions](/reference/definitions/)).
 
 The capability record is checked twice: `dagon gen` plans against the
 definition's numbers and refuses a definition whose numbers are outside

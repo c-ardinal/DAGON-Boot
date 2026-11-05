@@ -24,5 +24,7 @@ Written by hand, with their lists generated or checked by tests:
 
 - [Agent link: serve API](/reference/agent-api/): linking DAGON's agent, the
   questions and the keys.
-- [Extension manifest](/reference/extension-manifest/).
+- [Extension manifest](/reference/extension-manifest/) and
+  [MCU and board definitions](/reference/definitions/), their key tables
+  generated from the types DAGON reads the files into.
 - [Licenses](/reference/licenses/).

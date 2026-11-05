@@ -57,7 +57,7 @@ your own login instead (`dagon ai link`). See [Agent link: serve API](/reference
 Definitions are not a place for secrets. Names in them (ids, product
 names, pin labels, partition names) appear in DAGON Console and are sent
 to Claude when you ask it; commands, hints, comments and file paths are
-never sent. See `targets/README.md`.
+never sent. See [MCU and board definitions](/reference/definitions/).
 
 ## 3. Generate the node crates
 

@@ -36,7 +36,7 @@ dagon ai topology --in boards.txt --out topology.yaml
 
 API キーは OS の資格情報ストア（Windows の資格情報マネージャー、macOS のキーチェーン、Linux では GNOME Keyring などの Secret Service）にだけ置き、環境変数やファイルには置きません。`dagon ai key status` で登録済みかを確かめ、`dagon ai key delete` で削除します。DAGON Console の「CLI 連携」でも登録できます。資格情報ストアが無い環境では、自分のログインで使う Claude Code を選んでください（`dagon ai link`）。詳しくは [Agent link: serve API](/ja/reference/agent-api/) を見てください。
 
-定義ファイルは秘密を書く場所ではありません。定義の中の名前（id、製品名、ピンのラベル、パーティション名）は DAGON Console に表示され、Claude に頼んだときは Claude にも送られます。コマンド、ヒント、コメント、ファイルのパスは送りません。詳しくは `targets/README.md` を見てください。
+定義ファイルは秘密を書く場所ではありません。定義の中の名前（id、製品名、ピンのラベル、パーティション名）は DAGON Console に表示され、Claude に頼んだときは Claude にも送られます。コマンド、ヒント、コメント、ファイルのパスは送りません。詳しくは [MCU and board definitions](/ja/reference/definitions/) を見てください。
 
 ## 3. ノードの crate を作る
 

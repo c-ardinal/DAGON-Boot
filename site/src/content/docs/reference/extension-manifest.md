@@ -7,7 +7,7 @@ An extension is a Rust crate with a `dagon-extension.toml` next to its
 `Cargo.toml`. The manifest says what the extension replaces, observes and
 answers, and what it needs. `dagon gen` checks it against the port catalog
 ([ports.md](/reference/ports/)), the event catalog ([events.md](/reference/events/)) and the
-node's MCU and board definitions ([targets/README.md](https://github.com/c-ardinal/DAGON-Boot/blob/main/targets/README.md)),
+node's MCU and board definitions ([MCU and board definitions](/reference/definitions/)),
 then writes the node's protection files.
 
 ## dagon-extension.toml (`extension-manifest` format 1)

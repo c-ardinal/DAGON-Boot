@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'vitest';
 import * as copy from './copy.ts';
 import { MACHINE, view, type Action } from './machine.ts';
+import { MOCK_TEXTS } from './agentMock.ts';
 
 const strings = (v: unknown): string[] =>
   typeof v === 'string' ? [v] : v && typeof v === 'object' ? Object.values(v).flatMap(strings) : [];
@@ -125,5 +126,23 @@ describe('copy', () => {
     for (const b of Object.values(copy.BAND)) {
       if ('chip' in b && b.chip.startsWith('×')) expect('sentence' in b && b.sentence, b.chip).toBeTruthy();
     }
+  });
+});
+
+describe('the writing vocabulary', () => {
+  // Writing to nodes is 書き込む / 書き込み中 / 書き込み済み / 書き込めない and the .dgb is the パッケージファイル.
+  test('no screen text (nor the stand-in agent) says 更新', () => {
+    expect([...shownExcept(), ...MOCK_TEXTS()].filter((s) => s.includes('更新'))).toEqual([]);
+  });
+});
+
+describe('copy names no sample', () => {
+  // Samples are data serve hands out; the screen words never name one (or the desk it was made on).
+  const samples = Object.keys(import.meta.glob('../../../topology/*.yaml')).map((p) => p.split('/').pop()!.replace(/\.yaml$/, ''));
+  test('the samples are found', () => {
+    expect(samples.length).toBeGreaterThan(0);
+  });
+  test('no screen text contains a sample name', () => {
+    expect(shownExcept().filter((s) => samples.some((n) => s.includes(n)))).toEqual([]);
   });
 });

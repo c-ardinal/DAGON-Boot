@@ -1,7 +1,7 @@
 <script lang="ts">
   import { tick, untrack } from 'svelte';
   import { bandOf } from './app/band.ts';
-  import { AGENT, ANNOUNCE, BAND, BUTTON, CANVAS, DEFINE, DIFF, DRAWER, JOBS, FLOW, HUB, LOCK, SHEET, STATUS, ZOOM, HUB_TOGGLE, MODE, NODE, ORDER, PLAN, PRODUCT, RECONNECT, SAVE, SKIP, STEP, TIME } from './app/copy.ts';
+  import { AGENT, ANNOUNCE, BAND, BUILD, BUTTON, CANVAS, DEFINE, DIFF, DRAWER, JOBS, SKELETON, WRITE, HUB, LOCK, SHEET, STATUS, ZOOM, HUB_TOGGLE, MODE, NODE, ORDER, PLAN, PRODUCT, RECONNECT, SAVE, SKIP, STEP, TIME } from './app/copy.ts';
   import { webSerial } from './app/connect.ts';
   import { HUB_LOCKED, hubOf, view, type Action } from './app/machine.ts';
   import { Operate, waterOf, type Progress } from './app/operate.svelte.ts';
@@ -11,7 +11,7 @@
   import Timeline, { type StageEvent } from './screens/Timeline.svelte';
   import { PARTS } from './app/copy.ts';
   import { activeStates, lockOf, stateName, type Control } from './app/locks.ts';
-  import { Agent, type AgentChoice, type AskKind, type Selection } from './app/agent.svelte.ts';
+  import { Agent, consentProblem, type AgentChoice, type AskKind, type Selection } from './app/agent.svelte.ts';
   import { agentMock } from './app/agentMock.ts';
   import Dagon from './screens/Dagon.svelte';
   import LinkDialog from './screens/LinkDialog.svelte';
@@ -32,18 +32,25 @@
   import Problems from './screens/define/Problems.svelte';
   import Table from './screens/define/Table.svelte';
   import CliPanel from './screens/define/CliPanel.svelte';
-  import { Cli, type Layout } from './app/define/cli.svelte.ts';
+  import { Cli, jobReason, type Layout } from './app/define/cli.svelte.ts';
   import { CLI_LINK, CLI_STATE } from './app/copy.ts';
   import FilePanel from './screens/FilePanel.svelte';
   import Reconnect from './screens/Reconnect.svelte';
   import Header from './screens/Header.svelte';
+  import ZoomPill from './screens/ZoomPill.svelte';
+  import SkeletonModal from './screens/SkeletonModal.svelte';
+  import Modal from './screens/Modal.svelte';
+  import FactoryModal from './screens/FactoryModal.svelte';
+  import { answerConsent } from './app/factory.ts';
+  import Toast, { type Notice } from './screens/Toast.svelte';
+  import { CONN, NOTICE, fill as fillIn } from './app/copy.ts';
   import OrderList from './screens/OrderList.svelte';
   import { devHub } from './serial/devHub.ts';
   import { serveSim, type SimStand } from './serial/serveSim.ts';
   import { MockTransport } from './serial/mock.ts';
   import { WebSerialTransport, type Transport } from './serial/transport.ts';
   import Unsupported from './Unsupported.svelte';
-  import { dagonReady, require_release_key, set_release_key, useDefinitions, versionText } from './wasm/dagon.ts';
+  import { dagonReady, mcuConnection, require_release_key, set_release_key, useDefinitions, versionText } from './wasm/dagon.ts';
 
   const params = new URLSearchParams(location.search);
   // The stand-in hubs are for development builds only.
@@ -427,11 +434,11 @@
   const problemCount = $derived(d.problems.filter((p) => p.severity === 'error').length);
   const drawerTabs = $derived<DrawerTab[]>([
     { id: 'problems', label: DRAWER.problems, count: problemCount + d.notYet, alarm: problemCount > 0 },
+    { id: 'jobs', label: DRAWER.jobs, ...(runningJobs ? { count: runningJobs } : {}) },
     { id: 'output', label: DRAWER.output },
     { id: 'timeline', label: DRAWER.timeline },
+    { id: 'talk', label: DRAWER.talk },
     { id: 'log', label: DRAWER.log },
-    ...(cli.state === 'ready' ? [{ id: 'jobs', label: DRAWER.jobs, count: runningJobs }] : []),
-    ...(agent.linked ? [{ id: 'talk', label: DRAWER.talk }] : []),
   ]);
   /** 定義's next step in one sentence (the status row), and its failure cause. */
   const defineNext = $derived.by((): { cause?: string; sentence: string } => {
@@ -697,7 +704,45 @@
       }),
     ),
   );
-  const chips = $derived(updating ? progressChips : op.state === 'L18' ? planChips : diffChips);
+  /** ビルドする in 運用: build, then sign with the project's key; the jobs are serve's. */
+  let buildIds = $state<{ build: number | null; sign: number | null }>({ build: null, sign: null });
+  let buildFailureOpen = $state(false);
+  const jobOf = (id: number | null) => (id === null ? null : (cli.jobs.find((j) => j.id === id) ?? null));
+  const buildJob = $derived(jobOf(buildIds.build));
+  const signJob = $derived(jobOf(buildIds.sign));
+  /** Where the build stands: null before any, else running, done or failed (signing counts as building). */
+  const buildState = $derived.by(() => {
+    const jobs = [buildJob, signJob].filter((j) => j !== null);
+    if (jobs.length === 0) return null;
+    if (jobs.some((j) => j.state === 'failed')) return 'failed';
+    if (signJob?.state === 'succeeded' || (buildJob?.state === 'succeeded' && !cli.hello?.key)) return 'done';
+    return 'running';
+  });
+  async function build() {
+    if (stopped('build') || !cli.has('build')) return;
+    buildFailureOpen = false;
+    buildIds = { build: null, sign: null };
+    await autosave.whenSaved(async () => {
+      const j = await cli.build(d.config.reach);
+      buildIds = { build: j?.id ?? null, sign: null };
+    });
+  }
+  $effect(() => {
+    const s = buildState;
+    untrack(() => {
+      if (buildJob?.state === 'succeeded' && buildIds.sign === null && cli.hello?.key) {
+        buildIds = { ...buildIds, sign: -1 };
+        void cli.sign(d.config.reach).then((j) => (buildIds = { ...buildIds, sign: j?.id ?? null }));
+      }
+      if (s === 'done') notice = { word: fillIn(BUILD.toast.done, { n: d.config.reach.length }) };
+      if (s === 'failed') buildFailureOpen = true;
+    });
+  });
+  const buildChip = $derived(buildState ? { done: BUILD.state.done, failed: BUILD.state.failed, running: BUILD.state.running }[buildState] : null);
+  const buildChips = $derived(
+    buildChip ? Object.fromEntries(d.config.reach.map((id) => [id, { chip: buildChip, spoken: buildChip, silent: false }])) : null,
+  );
+  const chips = $derived(updating ? progressChips : op.state === 'L18' ? planChips : (buildChips ?? diffChips));
   /** The water in each node while it is written (L19, L20, L24). */
   const fill = $derived(PERCENT.has(op.state) ? waterOf(op.progress) : {});
   const percent = $derived(
@@ -744,7 +789,7 @@
   /** Node actions in the detail: while watching, with nothing running. */
   const nodeActions = $derived(['L12', 'L13', 'L23'].includes(op.state));
 
-  /** SC-O7 only after the automatic reconnect failed (L21, owner 11/2); Escape leaves the same button in the band. */
+  /** SC-O7 only after the automatic reconnect failed (L21); Escape leaves the same button in the band. */
   let dialogDismissed = $state(false);
   const dialogOpen = $derived(op.state === 'L21' && !dialogDismissed);
   $effect(() => {
@@ -804,6 +849,8 @@
   );
 
   const hub = $derived(hubOf(op.state));
+  /** The 親機 this page talks to (the one writing reaches). */
+  const hubNode = $derived(op.config?.nodes.find((n) => n.role === 'hub' && op.config?.reach.includes(n.id)));
   const connected = $derived(!['idle', 'lost'].includes(hub));
   /** DAGON waits for its agent's answer (the lock table's 返事待ち). */
   const thinking = $derived(agent.thinking);
@@ -953,6 +1000,84 @@
     void tick().then(() => (band.primary ? primaryEl : nextEl)?.focus());
   });
 
+  /** 雛形を作る: the modal is open while `skeleton` is set; `id` is serve's job once it has taken it. */
+  let skeleton = $state<{ id: number | null } | null>(null);
+  const skeletonJob = $derived(skeleton?.id == null ? null : (cli.jobs.find((j) => j.id === skeleton?.id) ?? null));
+  // 中止: the modal goes with the job.
+  $effect(() => {
+    if (skeletonJob?.state === 'cancelled') untrack(() => (skeleton = null));
+  });
+  async function makeSkeleton() {
+    skeleton = { id: null };
+    let job: Awaited<ReturnType<typeof cli.gen>> = null;
+    // Made from the saved YAML: after the saves queued before it.
+    await autosave.whenSaved(async () => (job = await cli.gen(d.config.reach)));
+    skeleton = job ? { id: (job as { id: number }).id } : null;
+  }
+
+  /** The non-blocking notice on screen (bottom-right), or null. */
+  let notice = $state<Notice | null>(null);
+  const hubName = $derived(hubNode ? `[${hubNode.no}] ${hubNode.name}` : '');
+  let wasConnected = false;
+  $effect(() => {
+    const c = connected;
+    untrack(() => {
+      if (c && !wasConnected && hubName) notice = { word: fillIn(CONN.toast.connected, { node: hubName }) };
+      if (!c && wasConnected && hub === 'lost') notice = { word: fillIn(CONN.toast.lost, { node: hubName }), error: true };
+      wasConnected = c;
+    });
+  });
+  $effect(() => {
+    if (op.state === 'L23') untrack(() => (notice = { word: fillIn(WRITE.toast.done, { n: op.targets.length }) }));
+  });
+  // A consent of a version this dagon does not read: a failure the user must notice.
+  $effect(() => {
+    const p = consentProblem(agent.status);
+    const why = agent.status?.consent_error ?? '';
+    if (p) untrack(() => (notice = { word: p.label ?? p.text, error: true, detail: `${p.text}（${why}）` }));
+  });
+  // A failure or warning the user must notice: its short word on a toast, the sentence behind it.
+  $effect(() => {
+    const cause = next.cause;
+    if (cause) untrack(() => (notice = { word: cause, error: cause.startsWith('×'), detail: next.sentence }));
+  });
+
+  /** The write sheet holds the emphasis: the header's actions step back while it is open. */
+  const sheetHolds = $derived(mode === 'operate' && showFile && op.file !== null);
+  /** 書き込む: the 親機 answered nothing (L07) → writing directly over USB; otherwise the next step of writing through DAGON. */
+  const writeAction = $derived(
+    op.state === 'L07' ? null : op.state === 'L12' && !op.latestMissing && band.secondary.some((b) => b.action === 'useLatest') ? 'useLatest' : (band.primary?.action ?? null),
+  );
+  const writeControl = $derived(writeAction ? CONTROL_OF[writeAction] : 'flash');
+  const writeOff = $derived(op.state === 'L03' || (op.state !== 'L07' && (writeAction === null || !RUNS.has(writeAction))));
+  function write() {
+    if (writeOff || sheetHolds) return;
+    if (writeAction === null) return void (factory = { id: null });
+    act(writeAction);
+  }
+
+  /** Writing directly over USB to the 親機 whose DAGON answered nothing (the hub first: it reaches the rest). */
+  let factory = $state<{ id: number | null } | null>(null);
+  const factoryNode = $derived(hubNode ?? op.config?.nodes.find((n) => n.role === 'hub') ?? null);
+  const factoryMcu = $derived(d.doc.topo.nodes.find((n) => n.id === factoryNode?.id)?.mcu ?? '');
+  const factoryJob = $derived(factory?.id == null ? null : (cli.jobs.find((j) => j.id === factory?.id) ?? null));
+  async function factoryWrite() {
+    if (!factoryNode || stopped('flash')) return;
+    const j = await cli.flash(factoryNode.id);
+    factory = { id: j?.id ?? null };
+  }
+  // Pressing 書き込む in the modal is the consent serve's write asks for.
+  const consentAnswered = new Set<string>();
+  $effect(() => {
+    const j = factoryJob;
+    void j?.state;
+    untrack(() => answerConsent(j, (job, text) => cli.answer(job, text), consentAnswered));
+  });
+  $effect(() => {
+    if (factoryJob?.state === 'succeeded') untrack(() => (notice = { word: WRITE.state.done }));
+    if (factoryJob?.state === 'cancelled') untrack(() => (factory = null));
+  });
+
   function act(a: Action) {
     const c = CONTROL_OF[a];
     if (c && stopped(c)) return;
@@ -1004,10 +1129,7 @@
     </span>
   {/if}
   {#if mode === 'operate' || d.view === 'graph'}
-    <button aria-disabled={zoom <= 0.5} title="{ZOOM.out} (Ctrl+-)" aria-label={ZOOM.out} onclick={() => (zoom = Math.max(0.5, zoom / 1.2))}>−</button>
-    <button title="{ZOOM.fit} (F)" onclick={() => (zoom = 1)}>{ZOOM.fit}</button>
-    <button aria-disabled={zoom >= 2} title="{ZOOM.in} (Ctrl++)" aria-label={ZOOM.in} onclick={() => (zoom = Math.min(2, zoom * 1.2))}>＋</button>
-    <span class="pct wide-only">{Math.round(scale * 100)}%</span>
+    <ZoomPill {scale} canIn={zoom < 2} canOut={zoom > 0.5} onin={() => (zoom = Math.min(2, zoom * 1.2))} onout={() => (zoom = Math.max(0.5, zoom / 1.2))} onfit={() => (zoom = 1)} />
   {/if}
 {/snippet}
 
@@ -1048,70 +1170,14 @@
   {/if}
 {/snippet}
 
-{#snippet flow()}
-  {@const errs = problemCount}
-  {@const step = (id: 'define' | 'project' | 'build' | 'flash' | 'update') => id}
-  <div class="toolbar" role="toolbar" aria-label={FLOW.label}>
-    <div class="flow">
-      {#each [['define', '01'], ['project', '02'], ['build', '03'], ['flash', '04'], ['update', '05']] as const as [id, no], i (id)}
-        {@const done = id === 'define' ? d.doc.topo.nodes.length > 0 && errs === 0 : id === 'update' && op.state === 'L23'}
-        {@const here = id === 'update' ? mode === 'operate' : mode === 'define' && (id === 'define' ? cliPanel === null : cliPanel === (id === 'build' ? 'release' : id))}
-        {#if i}<span class="dash" aria-hidden="true"></span>{/if}
-        <button
-          class="tb"
-          class:done
-          class:here
-          aria-current={here ? 'step' : undefined}
-          data-control={id === 'project' ? 'gen' : id === 'build' ? 'build' : id === 'flash' ? 'flash' : undefined}
-          onclick={() => goStep(step(id))}
-        >
-          <span class="no">{done ? '✓' : no}</span><span class="lbl">{FLOW.steps[id]}</span>
-          {#if id === 'define' && errs}<span class="st err">{FLOW.problems(errs)}</span>{:else if id === 'define' && d.notYet}<span class="st">{FLOW.unsupported(d.notYet)}</span>{/if}
-          {#if id === 'update' && PERCENT.has(op.state)}<span class="st">{op.overall}%</span>{/if}
-        </button>
-      {/each}
-    </div>
-    {#if mode === 'define'}
-      {@const empty = d.doc.topo.nodes.length === 0}
-      {@const firstError = d.problems.find((p) => p.severity === 'error')}
-      {#if op.fileTopology && op.state === 'L17'}
-        <button class="tb side" onclick={() => void importFileTopology()}>{DEFINE.importFileTopology}</button>
-      {/if}
-      {#if empty}
-        <button class="tb primary" data-control="connect" bind:this={primaryEl} onclick={() => act('connectDiscover')}>{BUTTON.connectDiscover}</button>
-      {:else if firstError}
-        <button class="tb primary" data-control="edit" bind:this={primaryEl} onclick={() => d.fix(firstError)}>{DEFINE.fix}</button>
-      {:else if d.operable === 'ok'}
-        <!-- Optional: updating sends the 構成 before it updates. -->
-        <button class="tb side" data-control="connect" onclick={() => void sendDefined()}>{connected ? DEFINE.send : DEFINE.connectSend}</button>
-        <button class="tb primary" bind:this={primaryEl} onclick={() => switchMode('operate')}>{DEFINE.toOperate}</button>
-      {/if}
-    {:else}
-      {#each band.secondary as b (b.action)}
-        {@const off = !RUNS.has(b.action)}
-        <button class="tb side" data-control={CONTROL_OF[b.action]} aria-disabled={off} onclick={() => !off && act(b.action)}>{b.label}</button>
-      {/each}
-      {#if band.primary}
-        {@const p = band.primary}
-        {@const off = op.state === 'L03' || !RUNS.has(p.action)}
-        <!-- Busy and unavailable stay focusable (aria-disabled) so focus never drops to the page. -->
-        <button class="tb primary" data-control={CONTROL_OF[p.action]} bind:this={primaryEl} aria-disabled={off} onclick={() => !off && act(p.action)}>
-          {op.state === 'L03' ? `${p.label}…` : p.label}
-        </button>
-      {/if}
-    {/if}
-    <button
-      class="tb conn"
-      class:on={connected}
-      data-control="connect"
-      aria-disabled={hubLocked !== null}
-      title={connected ? HUB_TOGGLE.disconnect : HUB_TOGGLE.connect}
-      aria-label={connected ? `${FLOW.responding(op.responding, op.reach.length)}、${HUB_TOGGLE.disconnect}` : HUB_TOGGLE.connect}
-      onclick={toggleHub}
-    >
-      <span class="dot" aria-hidden="true"></span><span class="lbl">{connected ? FLOW.responding(op.responding, op.reach.length) : HUB_TOGGLE.connect}</span>
-    </button>
-  </div>
+{#snippet actions()}
+  {#if mode === 'define'}
+    {@const blocked = problemCount > 0 || d.doc.topo.nodes.length === 0}
+    <button class="button-primary-header" data-control="gen" bind:this={primaryEl} aria-disabled={blocked || sheetHolds} title={blocked ? SKELETON.disabled : undefined} onclick={() => !blocked && !sheetHolds && void makeSkeleton()}><span>{SKELETON.make}</span></button>
+  {:else}
+    <button class="button-secondary-header" data-control="build" aria-disabled={sheetHolds || buildState === 'running'} onclick={() => !sheetHolds && buildState !== 'running' && void build()}><span>{BUILD.run}</span></button>
+    <button class="button-primary-header" data-control={writeControl} bind:this={primaryEl} aria-disabled={writeOff || sheetHolds} onclick={write}><span>{WRITE.run}</span></button>
+  {/if}
 {/snippet}
 
 {#snippet drawerBody(tab: string)}
@@ -1187,6 +1253,8 @@
       {dot}
       {chips}
       {fill}
+      {zoom}
+      controls={zoomBar}
       inset={{ left: partsW, right: sheetW }}
     />
   </main>
@@ -1198,7 +1266,21 @@
 
 {#snippet operateRight()}
   {#if showFile && op.file}
-      <FilePanel file={op.file} targets={op.targets.length} minutes={op.targets.length * MINUTES_PER_NODE} diff={fileDiff} />
+      <FilePanel
+        file={op.file}
+        targets={op.targets.length}
+        minutes={op.targets.length * MINUTES_PER_NODE}
+        diff={fileDiff}
+        go={band.primary
+          ? {
+              label: band.primary.action === 'update' ? fillIn(WRITE.go, { n: op.targets.length }) : band.primary.label,
+              off: !RUNS.has(band.primary.action),
+              control: CONTROL_OF[band.primary.action],
+              onclick: () => band.primary && act(band.primary.action),
+            }
+          : null}
+        others={band.secondary.map((b) => ({ label: b.label, off: !RUNS.has(b.action), control: CONTROL_OF[b.action], onclick: () => act(b.action) }))}
+      />
     {:else}
       <Detail
         config={op.config}
@@ -1222,24 +1304,14 @@
   <div class="frame {layout}" data-locks={locksNow} class:work={screen === 'work'} class:open={drawerOpen} class:modal={restartOpen || autosave.asking !== null}>
     <Header
       sim={cli.sim !== null}
-      step={screen === 'start' ? null : step}
-      {hub}
-      drawer={false}
-      {drawerOpen}
-      ondrawer={() => (drawerOpen ? closeDrawer() : openDrawer())}
-      bind:drawerButton
       {mode}
       onmode={screen === 'start' ? undefined : switchMode}
       {modeLocked}
-      {cliLabel}
       operateLocked={d.operable !== 'ok'}
       onlocked={() => lock(d.operable)}
       {menuOpen}
       onmenu={() => (menuOpen = !menuOpen)}
-      done={op.state === 'L23'}
-      onhub={screen === 'start' ? undefined : toggleHub}
-      {hubLocked}
-      flow={screen === 'work' ? flow : undefined}
+      actions={screen === 'work' ? actions : undefined}
       bind:helpOpen
       title={screen === 'work' ? (d.doc.topo.name ?? '') : ''}
     />
@@ -1271,16 +1343,17 @@
         {#if agent.linked}
           <Dagon {agent} place={cli.hello?.workspace ?? d.doc.topo.name ?? 'local'} onask={askDagon} onapply={applyProposal} ontalk={() => (drawerTab = 'talk')} openRequest={dagonOpen} />
         {/if}
+        {#if notice}<Toast {notice} onmore={() => (drawerTab = 'log')} ondone={() => (notice = null)} />{/if}
         {#if sheetShown}
           <aside class="float sheet right" aria-label={SHEET} data-avoid="" bind:offsetWidth={sheetW} bind:offsetHeight={sheetH}>{@render right()}</aside>
         {/if}
       </div>
-      {#if drawerTab}
-        <Drawer tabs={drawerTabs} open={drawerTab} onpick={(id) => (drawerTab = id)} onclose={() => (drawerTab = null)} body={drawerBody} />
-      {/if}
+      <Drawer tabs={drawerTabs} open={drawerTab} onpick={(id) => (drawerTab = id)} onclose={() => (drawerTab = null)} body={drawerBody} />
       <Status
-        hub={{ on: connected, text: HUB[hub].replace(/^\S+\s/, '') }}
+        hub={connected && hubNode ? `${HUB[hub]} [${hubNode.no}] ${hubNode.name}（${NODE.roleHub}）` : HUB[hub]}
+        hubAction={connected ? HUB_TOGGLE.disconnect : HUB_TOGGLE.connect}
         onhub={toggleHub}
+        {hubLocked}
         state={stateName(lockStates)}
         cli={cliLabel}
         oncli={() => {
@@ -1289,12 +1362,10 @@
           cliPanel = 'link';
         }}
         key={cli.hello?.key_id?.slice(0, 8) ?? null}
-        toggles={drawerTabs}
-        open={drawerTab}
-        ontoggle={pickTab}
-        progress={PERCENT.has(op.state) ? op.overall : null}
-        sentence={next.sentence}
-        cause={next.cause}
+        problems={problemCount}
+        unreachable={d.notYet}
+        progress={PERCENT.has(op.state) ? `${LOCK.controls.update} ${op.overall}%` : null}
+        sentence={[next.cause, next.sentence].filter(Boolean).join(' ')}
         mode={mode === 'define' ? MODE.define : MODE.operate}
         saved={savedLabel}
         status={d.status || op.status}
@@ -1336,6 +1407,42 @@
       onstay={() => autosave.stay()}
     />
   {/if}
+  {#if factory && factoryNode}
+    <FactoryModal
+      node={{ label: `[${factoryNode.no}] ${factoryNode.name}`, target: `[${factoryNode.no}] ${factoryNode.name}（${NODE.roleHub}）· ${factoryNode.product}` }}
+      how={mcuConnection(factoryMcu)}
+      canWrite={cli.canFlash(factoryMcu)}
+      job={factoryJob}
+      onwrite={() => void factoryWrite()}
+      oncancel={() => (factoryJob ? void cli.cancel(factoryJob) : (factory = null))}
+      onclose={() => (factory = null)}
+      onmore={() => ((drawerTab = 'jobs'), (factory = null))}
+    />
+  {/if}
+  {#if buildFailureOpen}
+    {@const failed = [buildJob, signJob].find((j) => j?.state === 'failed')}
+    <Modal title={BUILD.title} chip={{ text: BUILD.state.failed, kind: 'error' }} target={d.config.reach.map((id) => `nodes/${id}/`).join(' · ')} onclose={() => (buildFailureOpen = false)} onmore={() => ((drawerTab = 'jobs'), (buildFailureOpen = false))}>
+      <h3 class="modal-h">{NOTICE.reason}</h3>
+      <p class="modal-mono">{jobReason(failed)}</p>
+      {#snippet actions()}
+        {#if agent.linked}
+          <button class="button-secondary" data-control="ask" onclick={(e) => askDagon(BUILD.askAgent, 'failure', e.currentTarget)}>{BUILD.askAgent}</button>
+        {/if}
+        <button class="button-primary" data-control="build" onclick={() => void build()}>{BUILD.retry}</button>
+      {/snippet}
+    </Modal>
+  {/if}
+  {#if skeleton}
+    <SkeletonModal
+      job={skeletonJob}
+      place={cli.hello?.workspace ?? d.doc.topo.name ?? ''}
+      nodes={d.config.nodes.filter((n) => d.config.reach.includes(n.id)).map((n) => [`[${n.no}] ${n.name}`, `nodes/${n.id}/`] as [string, string])}
+      onclose={() => (skeleton = null)}
+      oncancel={() => skeletonJob && void cli.cancel(skeletonJob)}
+      onretry={() => void makeSkeleton()}
+      onmore={() => ((drawerTab = 'jobs'), (skeleton = null))}
+    />
+  {/if}
   {#if dialogOpen}
     <Reconnect notes={op.reconnectNotes} onreconnect={() => void reconnectChosen()} onclose={() => (dialogDismissed = true)} />
   {/if}
@@ -1344,126 +1451,17 @@
 <svelte:window onkeydown={defineKeys} />
 
 <style>
+  .modal-h {
+    margin: 0;
+    font: 700 var(--t-caption) / 16px var(--f-ja);
+  }
+  .modal-mono {
+    margin: 0;
+    font: 400 var(--t-mono) / 24px var(--f-mono);
+    overflow-wrap: anywhere;
+  }
   main.define {
     position: relative;
-  }
-  /* The flow: 構成 › プロジェクト › ビルド › 書き込み › 更新, the next action, and the 親機. */
-  .toolbar {
-    display: flex;
-    flex: 1;
-    flex-wrap: wrap;
-    align-items: center;
-    justify-content: center;
-    gap: 0.25rem var(--s-2);
-    min-width: 0;
-    padding: 0.25rem 0;
-  }
-  .flow {
-    display: flex;
-    align-items: center;
-    gap: 2px;
-  }
-  .dash {
-    width: 0.875rem;
-    height: 1px;
-    background: var(--c-line);
-  }
-  .tb {
-    display: inline-flex;
-    align-items: center;
-    gap: 0.375rem;
-    height: 1.75rem;
-    padding: 0 0.625rem;
-    border: 1px solid transparent;
-    border-radius: var(--r-full);
-    background: none;
-    color: var(--c-paper);
-    font: 400 var(--t-13) / 1 var(--f-ja);
-    white-space: nowrap;
-    cursor: pointer;
-    transition: transform var(--dur-press) var(--ease-out), background-color var(--dur-press) ease;
-  }
-  .tb:active {
-    transform: scale(0.97);
-  }
-  @media (hover: hover) and (pointer: fine) {
-    .tb:hover {
-      background: var(--c-layer-2);
-    }
-  }
-  .tb:focus-visible {
-    outline: 2px solid var(--c-paper);
-    outline-offset: -2px;
-  }
-  .tb .no {
-    color: var(--c-muted);
-    font: 400 var(--t-13) / 1 var(--f-version);
-  }
-  .tb.done .no,
-  .tb.here .no {
-    color: var(--c-paper);
-  }
-  .tb.here {
-    border-color: var(--c-line);
-  }
-  .tb .st {
-    color: var(--c-muted);
-    font-size: var(--t-12);
-  }
-  .tb .st.err {
-    color: var(--c-signal);
-  }
-  .tb.primary {
-    background: var(--c-accent);
-    color: var(--c-ink);
-    font-weight: 700;
-  }
-  .tb.side {
-    height: 1.5rem;
-    padding: 0 0.5rem;
-    border-color: var(--c-hair);
-    color: var(--c-muted);
-    font-size: var(--t-12);
-  }
-  .tb[aria-disabled='true'] {
-    opacity: 0.45;
-    cursor: not-allowed;
-  }
-  .tb.conn {
-    border-color: var(--c-line);
-  }
-  .tb.conn .dot {
-    width: 0.5rem;
-    height: 0.5rem;
-    border: 1.5px solid currentColor;
-    border-radius: 50%;
-  }
-  .tb.conn.on .dot {
-    background: currentColor;
-  }
-  /* Narrower bars drop words before controls: the step names, then the side buttons' words. */
-  @media (max-width: 1365px) {
-    .flow .tb:not(.here) .lbl {
-      display: none;
-    }
-  }
-  @media (max-width: 1099px) {
-    .flow .tb .st {
-      display: none;
-    }
-  }
-  /* Phones: the bar keeps the one next action; the 親機 is on the status row, the rest in the sheet and menu. */
-  @media (max-width: 767px) {
-    .flow,
-    .tb.conn {
-      display: none;
-    }
-    /* The band's other actions stay reachable: they wrap onto a second row of the bar. */
-    .toolbar {
-      flex-wrap: wrap;
-      justify-content: flex-end;
-      padding: 0.25rem 0;
-    }
   }
   .zoom {
     position: absolute;
@@ -1477,8 +1475,8 @@
     border-radius: var(--r-full);
     background: var(--c-layer-1);
   }
-  .zoom button,
-  :global(.graph .zoom button) {
+  .zoom button:not(.button-icon),
+  :global(.graph .zoom button:not(.button-icon)) {
     height: 1.5rem;
     min-width: 1.5rem;
     padding: 0 0.5rem;
@@ -1489,7 +1487,7 @@
     font: 400 var(--t-12) / 1 var(--f-ja);
     cursor: pointer;
   }
-  :global(.graph .zoom button[aria-checked='true']),
+  :global(.graph .zoom button:not(.button-icon)[aria-checked='true']),
   .zoom button[aria-checked='true'] {
     background: var(--c-paper);
     color: var(--c-ink);
@@ -1508,13 +1506,13 @@
     font: 500 var(--t-12) / 1 var(--f-mono);
   }
   @media (hover: hover) and (pointer: fine) {
-    :global(.graph .zoom button:hover) {
+    :global(.graph .zoom button:not(.button-icon):hover) {
       background: var(--c-layer-3);
       color: var(--c-paper);
     }
   }
   @media (max-width: 767px), (pointer: coarse) {
-    :global(.graph .zoom button),
+    :global(.graph .zoom button:not(.button-icon)),
     .tb {
       min-height: 44px;
       min-width: 44px;
@@ -1609,25 +1607,25 @@
     outline: none;
   }
   /* Floating windows: over the graph, apart from its edges, never under the focal number. */
+  /* PartsWindow and DetailSheet: L1 surfaces with a 1 px frame, no shadow. */
   .float {
     position: absolute;
     z-index: var(--z-chrome);
-    top: 0.75rem;
+    top: var(--s-4);
     overflow: auto;
-    border: 1px solid var(--c-hair);
-    border-radius: var(--r-m);
-    background: rgb(15 15 14 / 0.96);
-    box-shadow: 0 0.75rem 2rem rgb(0 0 0 / 0.5);
+    border: 1px solid var(--c-line);
+    border-radius: var(--r-l);
+    background: var(--c-layer-1);
   }
   .float.parts {
-    left: 0.75rem;
-    width: var(--w-left);
+    left: var(--s-4);
+    width: var(--w-parts);
     /* The focal number keeps the bottom-left: the window stops above it. */
     max-height: calc(100% - 9.5rem - 1.5rem);
   }
   .float.sheet {
-    right: 0.75rem;
-    width: var(--w-right);
+    right: var(--s-4);
+    width: var(--w-sheet);
     max-height: calc(100% - 1.5rem);
   }
   .log-none,

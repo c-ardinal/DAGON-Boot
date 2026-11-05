@@ -102,7 +102,7 @@ describe('recovery from the page with dagon-host recover', () => {
     // The node refused again: its reason stays (× 書き込めない), not a generic failure nor 応答なし.
     expect(op.state).toBe('L25');
     expect(op.progress.seg).toMatchObject({ stage: 'refused', reason: 'E_FLASH' });
-    expect(NODE.refused[op.progress.seg.reason!]).toBe('× 書き込めない');
+    expect(NODE.refused[op.progress.seg.reason!]).toBe('× 書き込み失敗');
     expect(bandOf(op.state, op.ctx).sentence).toBe(BAND.M33.sentence);
     expect(op.recoverTarget?.id).toBe('seg');
 
@@ -169,24 +169,24 @@ describe('recovery from the page with dagon-host recover', () => {
     expect(failureStage('NO IMAGE')).toEqual({ stage: 'cannotFix' });
   });
 
-  test('recovery refused for another configuration says 構成 不一致, as the update does', async () => {
+  test('recovery refused for another configuration says 構成不一致, as the update does', async () => {
     const { op } = await stoppedAt({ refuse: { 'i2c:66': 0x07 } });
     op.config = { ...DESK_DEMO, yaml: SIM_PAIR_YAML };
     await op.recover();
     expect(op.state).toBe('L25');
     expect(op.progress.seg).toMatchObject({ stage: 'refused', reason: 'topology' });
-    expect(NODE.refused.topology).toBe('× 構成 不一致');
+    expect(NODE.refused.topology).toBe('× 構成不一致');
     expect(op.status).toBe(ANNOUNCE.A10topology);
   }, 120_000);
 
-  test('recovery with a published file that is not a release says 更新ファイルではない', async () => {
+  test('recovery with a published file that is not a release says 形式違い', async () => {
     const t = new MockTransport({ quiet: ['i2c:66'] });
     const op = session(t, fastClock(), async (p) => (p === LATEST_RELEASE ? new TextEncoder().encode('not a release') : null));
     await silentNode(op);
     await op.recover();
     expect(op.state).toBe('L25');
     expect(op.progress.seg).toMatchObject({ stage: 'refused', reason: 'format' });
-    expect(NODE.refused.format).toBe('× 更新ファイルではない');
+    expect(NODE.refused.format).toBe('× 形式違い');
     expect(op.status).toBe(ANNOUNCE.A10format);
   }, 120_000);
 

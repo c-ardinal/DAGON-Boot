@@ -25,7 +25,7 @@ export type Ev =
   | 'watchAlarm' | 'watchOk' | 'read' | 'badSource' | 'topoDiff' | 'pass'
   | 'hubTurn' | 'nodeStuck' | 'doneNoHub' | 'confirmed' | 'autoFailed' | 'reconnected' | 'revertedOnReconnect'
   | 'fixedNoRest' | 'fixedRest' | 'gaveUp' | 'rollback' | 'sampleFailed' | 'cliClaim' | 'cliReturn' | 'lost'
-  /** The header's 切断 (owner 11/2): back to L02, not L26. */
+  /** The header's 切断: back to L02, not L26. */
   | 'disconnect';
 
 /** Why connecting stopped (L04, L05, L07). */
@@ -60,7 +60,7 @@ export const MACHINE: Record<L, Spec> = {
   L02: {
     step: (c) => (c.hasConfig ? 1 : 2),
     primary: (c) => (c.hasConfig ? 'connect' : 'connectDiscover'),
-    // The sample comes from the start screen (SC-S0), not from here (owner 11/3).
+    // The sample comes from the start screen (SC-S0), not from here.
     on: { connect: 'L03', connectDiscover: 'L03', placeSample: 'L02', sampleFailed: 'L27' },
   },
   // The chooser is open: the button stays (busy) and a second press changes nothing.
@@ -69,7 +69,7 @@ export const MACHINE: Record<L, Spec> = {
   L05: { step: 1, primary: (c) => (c.failure === 'unavailable' ? 'reload' : 'connect'), on: { connect: 'L03' } },
   L06: {
     step: 1,
-    // The 構成 is the project's YAML: connecting never asks whether the 親機 holds it (owner 11/3).
+    // The 構成 is the project's YAML: connecting never asks whether the 親機 holds it.
     on: { noAnswer: 'L07', helloDiscover: 'L08', helloConfigured: 'L12', ...leave },
   },
   L07: { step: 1, primary: 'reselect', on: { reselect: 'L03' } },
@@ -86,7 +86,7 @@ export const MACHINE: Record<L, Spec> = {
   },
   L13: {
     step: 4,
-    // Updating the nodes that answer comes first; recovery is the side action (owner 11/2).
+    // Updating the nodes that answer comes first; recovery is the side action.
     primary: (c) => (c.answering === false ? 'recover' : 'updateResponding'),
     secondary: (c) => (c.answering === false ? [] : ['recover']),
     on: { recover: 'L24', watchOk: 'L12', updateResponding: 'L14', rollback: 'L24', ...leave },
@@ -97,7 +97,7 @@ export const MACHINE: Record<L, Spec> = {
   L17: {
     step: 4,
     primary: 'otherFile',
-    // The 構成 is replaced in 定義 (ファイルの構成を取り込む), never from here (owner 11/3).
+    // The 構成 is replaced in 定義 (ファイルの構成を取り込む), never from here.
     secondary: ['defineFix'],
     on: { otherFile: 'L14', ...leave },
   },

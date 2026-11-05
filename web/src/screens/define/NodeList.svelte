@@ -11,6 +11,7 @@
   import type { Define } from '../../app/define/define.svelte.ts';
   import { canPlace, MAX_NODES, mcus } from '../../app/define/model.ts';
   import { dagonReady, supportedBoards } from '../../wasm/dagon.ts';
+  import Icon from '../Icon.svelte';
 
   interface Props {
     d: Define;
@@ -33,6 +34,8 @@
       .catch(() => undefined);
   });
   let q = $state('');
+  /** 製品 / マイコン: one list each (one long list stops scaling as boards and MCUs grow). */
+  let tab = $state<'product' | 'mcu'>('product');
   const match = (...t: string[]) => !q.trim() || t.some((s) => s.toLowerCase().includes(q.trim().toLowerCase()));
   const full = $derived(d.doc.topo.nodes.length >= MAX_NODES);
   const used = (key: Part['key']) => d.doc.topo.nodes.filter((n) => ('board' in key ? n.board === key.board : !n.board && n.mcu === key.mcu)).length;
@@ -60,6 +63,7 @@
       ondblclick={() => ok && placeNow(p)}
       onkeydown={(e) => (e.key === 'Enter' || e.key === ' ') && (e.preventDefault(), ok && placeNow(p))}
     >
+      <Icon name="grip-vertical" size="var(--i-s)" />
       <span class="n"><span translate="no">{p.name}</span><small translate="no">{sub}</small></span>
       <span class="used">{n ? DEFINE.count(n) : ''}</span>
     </div>
@@ -69,22 +73,25 @@
 <section class="list" aria-labelledby="list-h">
   <div class="float-h">
     <h2 id="list-h" tabindex="-1">{PARTS.heading}</h2>
-    <span class="hint">{PARTS.hint}</span>
-    {#if onclose}<button class="x" title={PARTS.close} aria-label={PARTS.close} onclick={onclose}>×</button>{/if}
+    {#if onclose}<button class="button-icon" title={PARTS.close} aria-label={PARTS.close} onclick={onclose}><span class="layer"><Icon name="x" /></span></button>{/if}
   </div>
-  <input class="search" bind:value={q} placeholder={DEFINE.search} aria-label={DEFINE.search} />
-  <div class="rows">
-    <h3>{DEFINE.byProduct}</h3>
+  <div class="tabs" role="tablist" aria-label={PARTS.heading}>
+    {#each [['product', DEFINE.byProduct], ['mcu', DEFINE.byMcuOwn]] as const as [t, label] (t)}
+      <button role="tab" aria-selected={tab === t} aria-controls="parts-rows" onclick={() => (tab = t)}>{label}</button>
+    {/each}
+  </div>
+  <label class="search"><Icon name="search" size="var(--i-s)" /><input bind:value={q} placeholder={DEFINE.search} aria-label={DEFINE.search} /></label>
+  <div class="rows" id="parts-rows" role="tabpanel">
     <ul>
-      {#each boards.filter((b) => match(b.product, b.mcuName)) as b (b.id)}
-        {@render row({ key: { board: b.id }, name: b.product }, b.mcuName, canPlace(d.doc, b.id))}
-      {/each}
-    </ul>
-    <h3>{DEFINE.byMcuOwn}</h3>
-    <ul>
-      {#each mcuList.filter((m) => match(m.name)) as m (m.id)}
-        {@render row({ key: { mcu: m.id }, name: DEFINE.ownBoard(m.name) }, m.name, !full)}
-      {/each}
+      {#if tab === 'product'}
+        {#each boards.filter((b) => match(b.product, b.mcuName)) as b (b.id)}
+          {@render row({ key: { board: b.id }, name: b.product }, b.mcuName, canPlace(d.doc, b.id))}
+        {/each}
+      {:else}
+        {#each mcuList.filter((m) => match(m.name)) as m (m.id)}
+          {@render row({ key: { mcu: m.id }, name: DEFINE.ownBoard(m.name) }, m.name, !full)}
+        {/each}
+      {/if}
     </ul>
   </div>
 </section>
@@ -96,16 +103,41 @@
     max-height: inherit;
     min-height: 0;
   }
+  .list {
+    gap: var(--s-3);
+    padding: var(--s-4);
+  }
   .float-h {
     display: flex;
     flex: none;
     align-items: center;
-    gap: var(--s-2);
-    height: 1.75rem;
-    padding: 0 0.375rem 0 var(--s-3);
-    border-bottom: 1px solid var(--c-hair);
+    justify-content: space-between;
+    color: var(--c-paper);
+    font: 700 var(--t-small) / 24px var(--f-ja);
+  }
+  .float-h .button-icon {
+    margin: calc(-1 * var(--p-hit));
+  }
+  .tabs {
+    display: flex;
+    border-bottom: 1px solid var(--c-layer-2);
+  }
+  [role='tab'] {
+    height: var(--h-row);
+    padding: 0 var(--s-4);
+    border: 0;
+    background: none;
     color: var(--c-muted);
-    font: 700 var(--t-12) / 1 var(--f-ja);
+    font: 700 var(--t-small) / 1 var(--f-ja);
+    cursor: pointer;
+  }
+  [role='tab'][aria-selected='true'] {
+    color: var(--c-paper);
+    box-shadow: inset 0 -2px 0 var(--c-paper);
+  }
+  [role='tab']:focus-visible {
+    outline: var(--st-w-focus) solid var(--c-paper);
+    outline-offset: calc(-1 * var(--st-w-focus));
   }
   h2 {
     margin: 0;
@@ -114,40 +146,35 @@
   h2:focus {
     outline: none;
   }
-  .hint {
-    font-weight: 400;
-  }
-  .x {
-    width: 1.5rem;
-    height: 1.5rem;
-    margin-left: auto;
-    border: 0;
-    border-radius: var(--r-full);
-    background: none;
-    color: var(--c-muted);
-    cursor: pointer;
-  }
   .search {
+    display: flex;
     flex: none;
-    height: 1.5rem;
-    margin: var(--s-2) var(--s-2) var(--s-1);
-    padding: 0 var(--s-2);
-    border: 1px solid var(--c-hair);
-    border-radius: var(--r-full);
-    background: var(--c-layer-1);
+    align-items: center;
+    gap: var(--s-2);
+    height: var(--h-button);
+    padding: 0 var(--s-3);
+    border: 1px solid var(--c-line);
+    border-radius: var(--r-m);
+    background: var(--c-ink);
+    color: var(--c-muted);
+  }
+  .search input {
+    flex: 1;
+    min-width: 0;
+    border: 0;
+    background: none;
     color: var(--c-paper);
-    font: 400 var(--t-12) / 1 var(--f-ja);
+    font: 400 var(--t-small) / 1 var(--f-ja);
+    outline: none;
+  }
+  .search:focus-within {
+    outline: var(--st-w-focus) solid var(--c-paper);
+    outline-offset: 2px;
   }
   .rows {
     min-height: 0;
     overflow: auto;
     padding-bottom: var(--s-2);
-  }
-  h3 {
-    margin: 0;
-    padding: 0.375rem var(--s-3) 2px;
-    color: var(--c-muted);
-    font: 400 var(--t-11) / 1.3 var(--f-ja);
   }
   ul {
     margin: 0;
@@ -156,7 +183,8 @@
   }
   .part {
     display: grid;
-    grid-template-columns: 1fr auto;
+    grid-template-columns: auto 1fr auto;
+    color: var(--c-paper);
     align-items: center;
     gap: 0.375rem;
     min-height: 2rem;
@@ -183,7 +211,7 @@
   .n {
     display: grid;
     min-width: 0;
-    font: 400 var(--t-13) / 1.3 var(--f-ja);
+    font: 400 var(--t-small) / 20px var(--f-ja);
   }
   .n > span {
     overflow: hidden;
@@ -192,15 +220,14 @@
   }
   small {
     color: var(--c-muted);
-    font: 500 var(--t-11) / 1.2 var(--f-mono);
+    font: 500 var(--t-caption) / 16px var(--f-mono);
   }
   .used {
     color: var(--c-muted);
     font-size: var(--t-11);
   }
   @media (max-width: 767px), (pointer: coarse) {
-    .part,
-    .x {
+    .part {
       min-height: 44px;
       min-width: 44px;
     }

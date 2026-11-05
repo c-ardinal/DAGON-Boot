@@ -103,6 +103,12 @@ export interface Job {
   ended: number | null;
 }
 
+/** Why a job stopped: serve's error in its result, else its last log line. */
+export const jobReason = (j: Job | null | undefined): string => {
+  const e = (j?.result as { error?: unknown } | null | undefined)?.error;
+  return e !== undefined && e !== null ? String(e) : (j?.lines[j.lines.length - 1] ?? '');
+};
+
 /** Log lines kept per job (SC-D7: the latest 2000). */
 const MAX_LINES = 2000;
 const PASS_KEY = 'dagon-serve-pass';

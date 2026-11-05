@@ -1,23 +1,23 @@
 <script lang="ts">
   import { tick } from 'svelte';
-  import { BAND, BUTTON, CLI_LINK, MENU, PRODUCT, START } from '../app/copy.ts';
-  import { inside, type Start, type StartChoice } from '../app/start.svelte.ts';
+  import { BAND, CLI_LINK, MENU, PRODUCT, START } from '../app/copy.ts';
+  import { inside, type Start } from '../app/start.svelte.ts';
+  import Icon from './Icon.svelte';
+  import Modal from './Modal.svelte';
 
   interface Props {
     s: Start;
-    /** dagon serve answers (K2); otherwise C11 says how to start it. */
+    /** dagon serve answers; otherwise the page says how to start it. */
     served: boolean;
   }
 
   let { s, served }: Props = $props();
 
-  const CHOICES: [StartChoice, string, string][] = [
-    ['new', '01', START.new],
-    ['sample', '02', START.sample],
-    ['open', '03', START.open],
-  ];
-  const making = $derived(s.choice === 'new' || s.choice === 'sample');
-  /** A folder that cannot be written or made is M35; the others are their own (案). */
+  /** The open modal: making (how, then where) or opening. */
+  let modal = $state<'how' | 'where' | 'open' | null>(null);
+  let how = $state<'new' | 'sample'>('new');
+
+  /** A folder that cannot be written or made is M35; the others are their own. */
   const fail = $derived.by(() => {
     const f = s.failed;
     if (!f) return null;
@@ -25,355 +25,321 @@
     return f === 'refused' && s.making ? { chip: START.cantMake, sentence: START.refused.sentence } : START[f];
   });
 
-  const buttons = $state<HTMLButtonElement[]>([]);
-  let listEl = $state<HTMLElement>();
-  // §7.2b: focus starts on 『新しく作る』.
+  let first = $state<HTMLButtonElement>();
   $effect(() => {
-    void tick().then(() => buttons[0]?.focus());
+    void tick().then(() => first?.focus());
   });
 
-  async function into(path: string) {
-    await s.browse(path);
-    await tick();
-    listEl?.querySelector<HTMLButtonElement>('button')?.focus();
+  function close() {
+    modal = null;
+    s.clear();
   }
-
-  /** Backspace goes up a folder (§7.2b a11y). */
+  async function toWhere() {
+    await s.choose(how);
+    // Without serve the page starts an unsaved 構成 at once (development stand-ins).
+    modal = s.online ? 'where' : null;
+  }
+  async function toOpen() {
+    modal = 'open';
+    await s.choose('open');
+  }
+  /** Backspace goes up a folder. */
   function listKeys(e: KeyboardEvent) {
     if (e.key !== 'Backspace' || !s.list?.parent || (e.target as HTMLElement).tagName === 'INPUT') return;
     e.preventDefault();
-    void into(s.list.parent);
+    void s.browse(s.list.parent);
   }
 </script>
 
-<main id="canvas" class="start" tabindex="-1" aria-labelledby="start-h">
-  <h1 id="start-h" class="visually-hidden">{START.heading}</h1>
-  <!-- One centred column of 36 px rows. -->
-  <div class="intro" aria-hidden="true"><p class="title" translate="no">{PRODUCT}</p><p class="sub">{START.sub}</p></div>
-  <div class="choices">
-    {#each CHOICES as [c, no, label], i (c)}
-      <button class="choice" bind:this={buttons[i]} aria-pressed={s.choice === c} aria-disabled={!s.usable(c)} onclick={() => void s.choose(c)}
-        ><span class="no">{no}</span>{label}</button
-      >
-    {/each}
-  </div>
-
-  {#if s.choice && s.online}
-    <section class="where" aria-labelledby="where-h">
-      <h2 id="where-h">{START.place}</h2>
-      {#if s.loading}
-        <span class="skeleton crumb-sk"></span>
-        <ul class="fs" aria-busy="true">
-          {#each [0, 1, 2] as k (k)}<li><span class="skeleton row-sk"></span></li>{/each}
-        </ul>
-      {:else if s.list}
-        {@const list = s.list}
-        <div class="crumb">
-          <button class="secondary small" aria-disabled={!list.parent} onclick={() => list.parent && void into(list.parent)}>{START.up}</button>
-          <span class="path" translate="no">{list.path}</span>
-        </div>
-        <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
-        <ul class="fs" bind:this={listEl} onkeydown={listKeys}>
-          {#each list.folders as f (f.name)}
-            {@const opens = s.choice === 'open' && (f.project || f.yaml === true)}
-            <li>
-              <button class="entry" class:opens onclick={() => void (opens ? s.open(inside(list.path, f.name)) : into(inside(list.path, f.name)))}
-                ><span class="kind" aria-hidden="true">{opens ? '·' : '▸'}</span><span translate="no">{f.name}</span>{#if f.project}<span class="tag">{START.project}</span>{/if}</button
-              >
-            </li>
-          {/each}
-        </ul>
-        {#if making}
-          <label class="name">{START.name}<input bind:value={s.name} translate="no" autocomplete="off" spellcheck="false" /></label>
-        {/if}
-      {/if}
-    </section>
-  {/if}
-</main>
-
-<aside class="right" aria-labelledby="recent-h">
-  <h2 id="recent-h">{START.recent}</h2>
-  {#if s.recent.length === 0}
-    <p class="muted">{START.recentNone}</p>
-  {:else}
-    <ul class="recent">
-      {#each s.recent as r (r.path)}
+{#snippet folders(opening: boolean)}
+  {#if s.loading}
+    <ul class="fs" aria-busy="true">
+      {#each [0, 1, 2] as k (k)}<li><span class="skeleton row-sk"></span></li>{/each}
+    </ul>
+  {:else if s.list}
+    {@const list = s.list}
+    <div class="crumb">
+      <button class="button-secondary small" aria-disabled={!list.parent} onclick={() => list.parent && void s.browse(list.parent)}>{START.up}</button>
+      <span class="mono" translate="no">{list.path}</span>
+    </div>
+    <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
+    <ul class="fs" onkeydown={listKeys}>
+      {#each list.folders as f (f.name)}
+        {@const opens = opening && (f.project || f.yaml === true)}
         <li>
-          <button class="entry" aria-disabled={!s.online} onclick={() => s.online && void s.open(r.path)}>
-            <strong>{r.name}</strong><span class="path" translate="no">{r.path}</span>
+          <button class="row" class:opens onclick={() => void (opens ? s.open(inside(list.path, f.name)) : s.browse(inside(list.path, f.name)))}>
+            <Icon name="folder" size="var(--i-s)" /><span translate="no">{f.name}</span>{#if f.project}<span class="tag">{START.project}</span>{/if}
           </button>
         </li>
       {/each}
     </ul>
   {/if}
-</aside>
+{/snippet}
+
+{#snippet failure()}
+  {#if fail}<p class="fail"><b>{fail.chip}</b> {fail.sentence}</p>{/if}
+{/snippet}
+
+<main id="canvas" class="start" tabindex="-1" aria-labelledby="start-h">
+  <h1 id="start-h" class="title" translate="no">{PRODUCT}</h1>
+  <p class="sub">{START.sub}</p>
+  <div class="choices">
+    <button class="button-primary" bind:this={first} aria-disabled={!s.usable('new')} onclick={() => s.usable('new') && (modal = 'how')}>{START.new}</button>
+    <button class="button-secondary" aria-disabled={!s.usable('open')} onclick={() => s.usable('open') && void toOpen()}>{START.open}</button>
+  </div>
+  <section class="recent" aria-labelledby="recent-h">
+    <h2 id="recent-h">{START.recent}</h2>
+    {#if s.recent.length === 0}
+      <p class="muted">{START.recentNone}</p>
+    {:else}
+      <ul>
+        {#each s.recent as r (r.path)}
+          <li>
+            <button class="row" aria-disabled={!s.online} onclick={() => s.online && void s.open(r.path)}>
+              <Icon name="folder" size="var(--i-s)" /><span class="name">{r.name}</span><span class="mono path" translate="no">{r.path}</span><Icon name="chevron-right" size="var(--i-s)" />
+            </button>
+          </li>
+        {/each}
+      </ul>
+    {/if}
+  </section>
+</main>
 
 <footer id="band" class="band" tabindex="-1">
-  <div class="next">
-    {#if !served && !s.usable('new')}
-      <p>{CLI_LINK.needCli}</p>
-    {:else if s.asking}
-      <p>{START.initAsk}</p>
-    {:else if fail}
-      <span class="cause">{fail.chip}</span>
-      <p>{fail.sentence}</p>
-    {/if}
-  </div>
-  {#if s.asking}
-    <button class="secondary" onclick={() => void s.init(false)}>{MENU.cancel}</button>
-    <button class="primary" onclick={() => void s.init(true)}>{START.open}<span class="arrow" aria-hidden="true">→</span></button>
-  {:else if making && s.online}
-    <button class="primary" aria-disabled={!s.list || s.loading || !s.name.trim()} onclick={() => void s.make()}
-      >{s.failed && s.making ? BUTTON.retrySample : s.choice === 'sample' ? START.sample : START.new}<span class="arrow" aria-hidden="true">→</span></button
-    >
-  {:else if s.choice !== 'open'}
-    <button class="primary" aria-disabled={!s.usable('new')} onclick={() => void s.choose('new')}>{START.new}<span class="arrow" aria-hidden="true">→</span></button>
-  {/if}
+  {#if !served && !s.usable('new')}<p>{CLI_LINK.needCli}</p>{/if}
+  {#if fail && !modal}{@render failure()}{/if}
 </footer>
 
+{#if modal === 'how'}
+  <Modal title={START.create.title} onclose={close}>
+    <h3>{START.create.how}</h3>
+    <div class="options" role="radiogroup" aria-label={START.create.how}>
+      {#each [['new', START.create.empty], ['sample', START.create.sample]] as const as [c, label] (c)}
+        <button class="option" role="radio" aria-checked={how === c} onclick={() => (how = c)}><span class="radio" aria-hidden="true"></span>{label}</button>
+      {/each}
+    </div>
+    {#snippet actions()}
+      <button class="button-secondary" onclick={close}>{START.create.cancel}</button>
+      <button class="button-primary" onclick={() => void toWhere()}>{START.create.next}</button>
+    {/snippet}
+  </Modal>
+{:else if modal === 'where'}
+  <Modal title={START.create.title} onclose={close}>
+    {#if s.choice === 'sample'}<p class="muted">{START.create.sample}</p>{/if}
+    <label class="field">{START.name}<input bind:value={s.name} translate="no" autocomplete="off" spellcheck="false" /></label>
+    <div class="field">{START.place}{@render folders(false)}</div>
+    {#if s.list && s.name.trim()}
+      <h3>{START.create.where}</h3>
+      <p class="mono" translate="no">{inside(s.list.path, s.name.trim())}</p>
+    {/if}
+    {@render failure()}
+    {#snippet actions()}
+      <button class="button-secondary" onclick={() => (modal = 'how')}>{START.create.back}</button>
+      <button class="button-primary" aria-disabled={!s.list || s.loading || !s.name.trim()} onclick={() => void s.make()}>{START.create.go}</button>
+    {/snippet}
+  </Modal>
+{:else if modal === 'open'}
+  <Modal title={START.open} onclose={close}>
+    {#if s.asking}
+      <p>{START.initAsk}</p>
+    {:else}
+      {@render folders(true)}
+    {/if}
+    {@render failure()}
+    {#snippet actions()}
+      {#if s.asking}
+        <button class="button-secondary" onclick={() => void s.init(false)}>{MENU.cancel}</button>
+        <button class="button-primary" onclick={() => void s.init(true)}>{START.open}</button>
+      {/if}
+    {/snippet}
+  </Modal>
+{/if}
+
 <style>
+  /* Start: one centred column (w-modal), title → words → actions → recent. */
   .start {
     grid-area: canvas;
-    display: grid;
-    grid-template-columns: minmax(0, 35rem);
-    justify-content: center;
-    align-content: start;
-    gap: var(--s-5);
+    display: flex;
+    flex-direction: column;
+    align-items: stretch;
+    gap: var(--s-4);
+    width: min(var(--w-modal), calc(100% - 2 * var(--s-4)));
     min-height: 0;
-    padding: 3.5rem var(--s-4) var(--s-4);
-    background: var(--c-layer-0);
+    margin: 0 auto;
+    padding: var(--s-6) 0 var(--s-4);
+    overflow: auto;
   }
   .start:focus {
     outline: none;
   }
-  .intro p {
-    margin: 0;
-  }
   .title {
-    margin-bottom: 0.25rem !important;
-    font: 700 var(--t-title-size) / var(--t-title-lh) var(--f-ja);
+    margin: 0;
+    font: 700 var(--t-title) / 40px var(--f-ja);
   }
   .sub {
+    margin: 0;
     color: var(--c-muted);
+    font: 400 var(--t-small) / 24px var(--f-ja);
   }
   .choices {
-    display: grid;
-    gap: 0.375rem;
-  }
-  .choice {
     display: flex;
-    align-items: center;
-    gap: var(--s-3);
-    height: 2.25rem;
-    padding: 0 var(--s-3);
-    border: 1px solid var(--c-line);
-    border-radius: var(--r-m);
-    background: var(--c-ink);
-    text-align: left;
-    font: 700 var(--t-13) / 1 var(--f-ja);
-    cursor: pointer;
-    outline: 3px solid transparent;
-    outline-offset: -3px;
-    transition: background var(--dur-quick) var(--ease-out);
+    gap: var(--s-2);
   }
-  .no {
-    color: var(--c-muted);
-    font: 400 var(--t-version-small-size) / 1 var(--f-version);
-  }
-  .choice[aria-pressed='true'] {
-    background: var(--c-paper);
-    color: var(--c-ink);
-  }
-  .choice[aria-pressed='true'] .no {
-    color: var(--c-ink);
-  }
-  .choice:focus-visible {
-    border-color: var(--c-paper);
-    box-shadow: inset 0 0 0 2px var(--c-paper);
-  }
-  .choice[aria-pressed='true']:focus-visible {
-    box-shadow: inset 0 0 0 2px var(--c-ink);
-  }
-  .choice[aria-disabled='true'] {
-    background: var(--c-layer-2);
-    color: var(--c-muted);
-    cursor: default;
-  }
-  @media (hover: hover) and (pointer: fine) {
-    .choice:not([aria-pressed='true'], [aria-disabled='true']):hover {
-      background: var(--c-layer-2);
-    }
-  }
-  .where {
-    display: grid;
-    gap: var(--s-3);
-    max-width: 36rem;
-  }
-  h2 {
+  h2,
+  h3 {
     margin: 0;
-    font: 700 var(--t-heading-size) / var(--t-heading-lh) var(--f-ja);
-  }
-  .crumb {
-    display: flex;
-    align-items: center;
-    gap: var(--s-4);
-  }
-  .small {
-    height: var(--h-chip);
-    padding: 0 var(--s-3);
-    font-size: var(--t-small-size);
-  }
-  .path {
     color: var(--c-muted);
-    font: 400 var(--t-mono-size) / var(--t-mono-lh) var(--f-mono);
-    overflow-wrap: anywhere;
+    font: 700 var(--t-caption) / 16px var(--f-ja);
+    letter-spacing: 0.06em;
   }
   ul {
     display: grid;
-    margin: 0;
+    margin: var(--s-3) 0 0;
     padding: 0;
     list-style: none;
   }
-  .fs {
-    border-top: 1px solid var(--c-line);
+  li {
+    border-bottom: 1px solid var(--c-layer-2);
   }
-  .fs li {
-    border-bottom: 1px solid var(--c-line);
-  }
-  .entry {
+  .row {
     display: flex;
-    align-items: baseline;
-    gap: var(--s-3);
+    align-items: center;
+    gap: var(--s-2);
     width: 100%;
-    min-height: var(--h-secondary);
-    padding: var(--s-2) var(--s-3);
+    min-height: 40px;
+    padding: 0 var(--s-3);
     border: 0;
     background: none;
+    color: var(--c-paper);
     text-align: left;
-    font: 400 var(--t-mono-size) / var(--t-mono-lh) var(--f-mono);
+    font: 400 var(--t-small) / 24px var(--f-ja);
     cursor: pointer;
-    outline: 3px solid transparent;
-    outline-offset: -3px;
   }
-  .entry:focus-visible {
-    box-shadow: inset 0 0 0 3px var(--c-paper);
+  .row :global(.icon) {
+    color: var(--c-muted);
   }
-  .entry[aria-disabled='true'] {
+  .row .path {
+    margin-left: auto;
+    color: var(--c-muted);
+  }
+  .row:focus-visible {
+    outline: var(--st-w-focus) solid var(--c-paper);
+    outline-offset: calc(-1 * var(--st-w-focus));
+  }
+  .row[aria-disabled='true'] {
     color: var(--c-muted);
     cursor: default;
   }
   @media (hover: hover) and (pointer: fine) {
-    .entry:not([aria-disabled='true']):hover {
+    .row:not([aria-disabled='true']):hover {
       background: var(--c-layer-2);
     }
   }
-  .kind {
-    color: var(--c-muted);
+  .row.opens {
+    font-weight: 700;
   }
   .tag {
     margin-left: auto;
     color: var(--c-muted);
-    font: 700 var(--t-caption-size) / 1 var(--f-ja);
+    font: 700 var(--t-caption) / 1 var(--f-ja);
   }
-  .entry.opens {
-    font-weight: 700;
-  }
-  .crumb-sk {
-    width: 60%;
-    height: var(--h-chip);
-  }
-  .row-sk {
-    height: var(--h-secondary);
-    margin: 2px 0;
-  }
-  .name {
-    display: grid;
-    gap: var(--s-2);
-    font: 700 var(--t-small-size) / var(--t-small-lh) var(--f-ja);
-  }
-  .name input {
-    min-height: var(--h-secondary);
-    padding: 0 var(--s-3);
-    border: 1px solid var(--c-line);
-    border-radius: var(--r-s);
-    background: var(--c-ink);
-    color: var(--c-paper);
-    font: 400 var(--t-mono-size) / var(--t-mono-lh) var(--f-mono);
-  }
-  .name input:focus-visible {
-    outline: none;
-    border-color: var(--c-paper);
-    box-shadow: inset 0 0 0 2px var(--c-paper);
-  }
-  /* 最近のプロジェクト: under the choices in the same column (28 px rows). */
-  .right {
-    grid-area: right;
-    display: grid;
-    grid-template-columns: minmax(0, 35rem);
-    justify-content: center;
-    align-content: start;
-    gap: var(--s-2);
-    min-height: 0;
-    padding: 0 var(--s-4) var(--s-4);
-    overflow: auto;
-    background: var(--c-layer-0);
-  }
-  .right h2 {
-    color: var(--c-muted);
-    font: 700 var(--t-11) / 1 var(--f-ja);
-    letter-spacing: 0.06em;
-  }
-  .recent {
-    gap: 0.375rem;
-  }
-  .recent .entry {
-    align-items: center;
-    min-height: 1.75rem;
-    padding: 0 var(--s-3);
-    border: 1px solid var(--c-hair);
-    border-radius: var(--r-m);
-    font-family: var(--f-ja);
+  .mono {
+    font: 400 var(--t-mono) / 24px var(--f-mono);
+    overflow-wrap: anywhere;
   }
   .muted {
     margin: 0;
     color: var(--c-muted);
+  }
+  .crumb {
+    display: flex;
+    align-items: center;
+    gap: var(--s-3);
+    margin-top: var(--s-2);
+  }
+  .small {
+    height: var(--h-button-small);
+    padding: 0 var(--s-3);
+    font-size: var(--t-small);
+  }
+  .fs {
+    max-height: 200px;
+    overflow: auto;
+  }
+  .row-sk {
+    display: block;
+    height: 40px;
+    margin: 2px 0;
+  }
+  .options {
+    display: grid;
+    gap: var(--s-3);
+  }
+  .option {
+    display: flex;
+    align-items: center;
+    gap: var(--s-3);
+    height: var(--h-button);
+    padding: 0 var(--s-4);
+    border: 1px solid var(--c-line);
+    border-radius: var(--r-m);
+    background: var(--c-ink);
+    color: var(--c-paper);
+    font: 700 var(--t-body) / 1 var(--f-ja);
+    cursor: pointer;
+  }
+  .option[aria-checked='true'] {
+    border-color: var(--c-paper);
+    background: var(--c-layer-2);
+  }
+  .option:focus-visible {
+    outline: var(--st-w-focus) solid var(--c-paper);
+    outline-offset: 2px;
+  }
+  .radio {
+    width: var(--i-m);
+    height: var(--i-m);
+    border: 2px solid currentColor;
+    border-radius: var(--r-full);
+  }
+  .option[aria-checked='true'] .radio {
+    background: radial-gradient(currentColor 0 3px, transparent 3.5px);
+  }
+  .field {
+    display: grid;
+    gap: var(--s-2);
+  }
+  .field input {
+    height: var(--h-button);
+    padding: 0 var(--s-3);
+    border: 1px solid var(--c-line);
+    border-radius: var(--r-m);
+    background: var(--c-ink);
+    color: var(--c-paper);
+    font: 400 var(--t-mono) / 24px var(--f-mono);
+  }
+  .field input:focus-visible {
+    outline: var(--st-w-focus) solid var(--c-paper);
+    outline-offset: 2px;
+  }
+  .fail {
+    margin: 0;
+  }
+  .fail b {
+    color: var(--c-signal);
   }
   .band {
     grid-area: band;
     display: flex;
     align-items: center;
     gap: var(--s-4);
-    min-height: var(--h-band);
-    padding: 0 var(--s-3);
-    border-top: 1px solid var(--c-hair);
-    font-size: var(--t-12);
+    min-height: var(--h-status);
+    padding: 0 var(--m-edge);
+    border-top: 1px solid var(--c-layer-2);
+    color: var(--c-muted);
+    font: 400 var(--t-caption) / 1 var(--f-ja);
   }
-  .band :global(.primary) {
-    height: 1.25rem;
-  }
-  .next {
-    display: flex;
-    align-items: baseline;
-    gap: var(--s-2);
-    margin-right: auto;
-  }
-  .next p {
+  .band p {
     margin: 0;
-  }
-  .cause {
-    font: 700 var(--t-heading-size) / var(--t-heading-lh) var(--f-ja);
-  }
-  @media (prefers-reduced-motion: reduce) {
-    .choice {
-      transition: none;
-    }
-  }
-  @media (max-width: 767px) {
-    .start {
-      padding: var(--s-5) var(--s-4);
-    }
-    .band :global(.primary) {
-      height: var(--h-primary);
-    }
   }
 </style>

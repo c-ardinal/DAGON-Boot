@@ -48,7 +48,7 @@ export const FAILURE_BAND = {
   unavailable: BAND.M57,
 } as const;
 
-/** One short sentence in every operating state (W9, owner 11/2); L01 has no band (SC-00). */
+/** One short sentence in every operating state (W9); L01 has no band (SC-00). */
 function words(s: L, c: Ctx, n: Names): BandCopy {
   switch (s) {
     case 'L02':

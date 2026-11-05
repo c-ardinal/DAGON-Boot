@@ -172,7 +172,7 @@ describe('define session', () => {
     const r = placeMcu(d.doc, 'rp2040');
     d.apply(connect(r.doc, r.id));
     const n = d.config.nodes.find((x) => x.id === r.id)!;
-    expect([n.product, n.mcu]).toEqual(['自作', 'RP2040']);
+    expect([n.product, n.mcu]).toEqual(['ボード定義なし', 'RP2040']);
     expect(problemChip(d.problems.find((p) => p.rule === 'B-01')!)).toEqual({ mark: '▲', kind: 'warning' });
   });
 

@@ -207,6 +207,7 @@ fn boot_crate(
     exts: &[Ext<'_>],
     found: &[Found],
     p: &ProjectRef<'_>,
+    mine: &DeveloperFields,
 ) -> Result<Files, String> {
     let root = crate::dagonsrc::root(p.src, p.base)?;
     let template = crate::scaffold::boot_template(&root, &n.mcu)
@@ -251,7 +252,7 @@ fn boot_crate(
                 .replace("{{tag}}", &tag);
             let path = format!("{BOOT_CRATES}/{}/{rel}", n.id);
             let text = match rel.as_str() {
-                "Cargo.toml" => keep_developer_fields(text, p.base, &path)?,
+                "Cargo.toml" => keep_developer_fields(text, mine)?,
                 _ => text,
             };
             Ok((path, text))
@@ -266,25 +267,56 @@ fn boot_crate(
 /// the one it runs.
 const DEVELOPER_FIELDS: [&str; 1] = ["version"];
 
-/// `rendered` (the boot crate manifest gen makes) with the
-/// [`DEVELOPER_FIELDS`] of the one at `rel` gen wrote before, if any.
-fn keep_developer_fields(rendered: String, base: &Path, rel: &str) -> Result<String, String> {
-    let Ok(earlier) = std::fs::read_to_string(base.join(rel)) else {
-        return Ok(rendered);
+/// The [`DEVELOPER_FIELDS`] a boot crate's Cargo.toml has, as values.
+type DeveloperFields = Vec<(&'static str, toml_edit::Value)>;
+
+/// The [`DEVELOPER_FIELDS`] of node `id`'s boot crate manifest gen wrote
+/// before (none when there is none yet). A manifest gen cannot read or
+/// parse holds the developer's values: gen stops with the reason and
+/// leaves it as it is.
+fn developer_fields(base: &Path, id: &str) -> Result<DeveloperFields, String> {
+    let rel = format!("{BOOT_CRATES}/{id}/Cargo.toml");
+    let path = contained(base, Path::new(&rel))?;
+    let text = match std::fs::read_to_string(&path) {
+        Ok(t) => t,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
+        Err(e) => {
+            return Err(format!(
+                "{rel}: cannot read it ({e}); dagon gen keeps the version you set there, \
+                 so it stops and leaves the file as it is"
+            ))
+        }
     };
-    let earlier: toml_edit::DocumentMut = earlier.parse().map_err(|e| {
-        format!("{rel}: {e}; correct it, or remove it to start again from the template")
+    let doc: toml_edit::DocumentMut = text.parse().map_err(|e| {
+        format!(
+            "{rel} does not parse ({e}); dagon gen keeps the version you set there, \
+             so it stops and leaves the file as it is: correct it, or remove it to \
+             start again from the template"
+        )
     })?;
+    let package = doc.get("package");
+    Ok(DEVELOPER_FIELDS
+        .iter()
+        .filter_map(|k| {
+            let v = package.and_then(|p| p.get(k))?.as_value()?;
+            Some((*k, v.clone()))
+        })
+        .collect())
+}
+
+/// `rendered` (the boot crate manifest gen makes) with the developer's
+/// fields `mine`; its line endings as rendered.
+fn keep_developer_fields(rendered: String, mine: &DeveloperFields) -> Result<String, String> {
+    if mine.is_empty() {
+        return Ok(rendered);
+    }
     let mut doc: toml_edit::DocumentMut = rendered
         .parse()
-        .map_err(|e| format!("{rel} from the boot core template: {e}"))?;
-    for k in DEVELOPER_FIELDS {
-        let mine = earlier.get("package").and_then(|p| p.get(k));
-        if let Some(v) = mine.and_then(toml_edit::Item::as_value) {
-            doc["package"][k] = toml_edit::Item::Value(v.clone());
-        }
+        .map_err(|e| format!("the boot crate manifest from the boot core template: {e}"))?;
+    for (k, v) in mine {
+        doc["package"][*k] = toml_edit::Item::Value(v.clone());
     }
-    Ok(doc.to_string())
+    Ok(crate::srcver::line_endings_of(&rendered, doc.to_string()))
 }
 
 /// Where the project's DAGON crates come from and where it is.
@@ -341,7 +373,11 @@ fn boot_graph_stamp(p: &ProjectRef<'_>, id: &str, mcu: &str) -> Result<(String, 
         .and_then(|x| x["name"].as_str())
         .ok_or_else(|| format!("the boot crate links no boot core library for {mcu}"))?
         .to_string();
-    let lock = std::fs::read_to_string(dir.join("Cargo.lock")).unwrap_or_default();
+    let lock = match std::fs::read_to_string(dir.join("Cargo.lock")) {
+        Ok(t) => t,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => String::new(),
+        Err(e) => return Err(format!("cannot read {rel}/Cargo.lock: {e}")),
+    };
     let root = crate::dagonsrc::root(p.src, p.base)?;
     f.check_graph(&metadata, &lock, &own, &root)?;
     Ok((format!("{rel}/{STAMP_FILE}"), stamp_text(&f.stamp()?)))
@@ -363,6 +399,7 @@ fn plan_files(
     found: &[Found],
     known: &Known,
     p: &ProjectRef<'_>,
+    fields: &DeveloperFields,
 ) -> Result<(Files, Vec<String>), String> {
     let def = reg
         .mcu(&n.mcu)
@@ -373,7 +410,7 @@ fn plan_files(
     if has_boot_stage(def) {
         let exts = chain(found, &mine.boot, &mine.trusted)?;
         boot_trusted(&exts, &n.id)?;
-        files.extend(boot_crate(n, n.board.as_deref(), &exts, found, p)?);
+        files.extend(boot_crate(n, n.board.as_deref(), &exts, found, p, fields)?);
         plans.push(node::plan(def, board, Image::Bootcore, exts, known)?);
     } else if !mine.boot.is_empty() {
         return Err(format!(
@@ -526,10 +563,14 @@ pub fn write_nodes(
             ));
             continue;
         }
+        // Read first: an error stops gen before any file of the node changes.
+        let fields = developer_fields(base, &n.id)?;
         let mut written: Vec<Written> = Vec::new();
+        let mut planned = false;
         if !failed.contains(&n.id) {
-            match plan_files(reg, n, mine, &found, &known, p) {
+            match plan_files(reg, n, mine, &found, &known, p, &fields) {
                 Ok((files, notes)) => {
+                    planned = true;
                     let boot = files
                         .iter()
                         .any(|(rel, _)| rel.starts_with(&format!("{BOOT_CRATES}/")));
@@ -555,7 +596,13 @@ pub fn write_nodes(
                 Err(why) => lines.push(format!("skipped    nodes/{}/{GENERATED}: {why}", n.id)),
             }
         }
-        let keep: Vec<String> = written.into_iter().map(|w| w.path).collect();
+        let mut keep: Vec<String> = written.into_iter().map(|w| w.path).collect();
+        // A node not generated this time keeps the developer's fields.
+        let manifest = format!("{BOOT_CRATES}/{}/Cargo.toml", n.id);
+        if !planned && !fields.is_empty() {
+            lines.push(format!("{:<10} {manifest} (its version is yours)", "kept"));
+            keep.push(manifest);
+        }
         for f in &folders {
             lines.extend(prune(base, f, &keep)?);
         }
@@ -766,14 +813,17 @@ mod tests {
         assert!(!base.join("nodes/seg/dagon/memory-app-c.x").exists());
         assert!(base.join("boot/seg/target/x").exists());
         assert!(base.join("boot/seg/Cargo.lock").exists());
-        // A node whose crate gen skipped keeps no generated file.
+        // A node whose crate gen skipped keeps no generated file but its
+        // boot manifest, whose version is the developer's.
         let gone = write(&base, &nodes, &["hub".into()], &["hub".into()], &cfg).unwrap();
         assert!(
             gone.iter()
                 .all(|l| l.starts_with("removed    nodes/hub/dagon/")
-                    || l.starts_with("removed    boot/hub/")),
+                    || l.starts_with("removed    boot/hub/")
+                    || l.starts_with("kept       boot/hub/Cargo.toml")),
             "{gone:?}"
         );
+        assert!(base.join("boot/hub/Cargo.toml").is_file());
         assert!(gone.iter().any(|l| l.ends_with("boot_wiring.rs")));
         assert!(gone.iter().any(|l| l.ends_with(".cargo/config.toml")));
         assert!(!base.join("nodes/hub/dagon/protection.toml").exists());
@@ -819,6 +869,97 @@ mod tests {
         f.verify_stamp().unwrap();
         std::fs::write(base.join("extensions/show/src/extra.rs"), "").unwrap();
         assert!(f.verify_stamp().is_err());
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    /// A boot manifest gen cannot read or parse holds the developer's
+    /// version: gen stops with the reason and leaves it, and the rest of
+    /// the boot crate, as they are.
+    fn a_boot_manifest_gen_cannot_take(name: &str, bytes: &[u8], why: &str) {
+        let base = scratch(name);
+        let seg = [node("seg", "stm32f401re", "nucleo-f401re", "node")];
+        let none = Extensions::default();
+        write(&base, &seg, &[], &[], &none).unwrap();
+        let manifest = base.join("boot/seg/Cargo.toml");
+        std::fs::write(&manifest, bytes).unwrap();
+        let e = write(&base, &seg, &[], &[], &none).unwrap_err();
+        assert!(e.contains("boot/seg/Cargo.toml") && e.contains(why), "{e}");
+        assert_eq!(std::fs::read(&manifest).unwrap(), bytes);
+        assert!(base.join("boot/seg/boot.rs").is_file());
+        // Nor when the node's crate failed: nothing of it is pruned.
+        let e = write(&base, &seg, &[], &["seg".into()], &none).unwrap_err();
+        assert!(e.contains("boot/seg/Cargo.toml"), "{e}");
+        assert_eq!(std::fs::read(&manifest).unwrap(), bytes);
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    #[test]
+    fn a_malformed_boot_manifest_stops_gen_and_is_kept() {
+        a_boot_manifest_gen_cannot_take(
+            "malformed",
+            b"# Generated by `dagon gen`\n[package\nversion = \"0.2.0\"\n",
+            "does not parse",
+        );
+    }
+
+    #[test]
+    fn an_unreadable_boot_manifest_stops_gen_and_is_kept() {
+        a_boot_manifest_gen_cannot_take(
+            "unreadable",
+            b"# Generated by `dagon gen`\n\xff\xfe version = \"0.2.0\"\n",
+            "cannot read",
+        );
+    }
+
+    /// A node whose plan fails keeps its boot manifest (its version is the
+    /// developer's); the rest of its generated files go.
+    #[test]
+    fn a_skipped_node_keeps_its_boot_manifest() {
+        let base = scratch("skipkeep");
+        let seg = [node("seg", "stm32f401re", "nucleo-f401re", "node")];
+        let none = Extensions::default();
+        write(&base, &seg, &[], &[], &none).unwrap();
+        let manifest = base.join("boot/seg/Cargo.toml");
+        let raised = std::fs::read_to_string(&manifest).unwrap().replacen(
+            "version = \"0.1.0\"",
+            "version = \"0.2.0\"",
+            1,
+        );
+        std::fs::write(&manifest, &raised).unwrap();
+        // An extension in no folder: the plan of seg fails.
+        let bad = cfg(&base, &["missing"]);
+        let lines = write(&base, &seg, &[], &[], &bad).unwrap();
+        assert!(lines.iter().any(|l| l.starts_with("skipped")), "{lines:?}");
+        assert!(
+            lines
+                .iter()
+                .any(|l| l.starts_with("kept       boot/seg/Cargo.toml")),
+            "{lines:?}"
+        );
+        assert_eq!(std::fs::read_to_string(&manifest).unwrap(), raised);
+        assert!(!base.join("boot/seg/boot.rs").exists());
+        // The next gen that succeeds keeps the version.
+        write(&base, &seg, &[], &[], &none).unwrap();
+        assert!(std::fs::read_to_string(&manifest)
+            .unwrap()
+            .contains("version = \"0.2.0\""));
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    #[test]
+    fn the_kept_version_does_not_change_line_endings() {
+        let base = scratch("crlf");
+        let rel = "boot/seg/Cargo.toml";
+        std::fs::create_dir_all(base.join("boot/seg")).unwrap();
+        std::fs::write(base.join(rel), "[package]\r\nversion = \"0.2.0\"\r\n").unwrap();
+        let rendered = "# Generated by `dagon gen`\r\n[package]\r\nname = \"seg-boot\"\r\n\
+                        version = \"0.1.0\"\r\nedition = \"2021\"\r\n";
+        let mine = developer_fields(&base, "seg").unwrap();
+        let out = keep_developer_fields(rendered.to_string(), &mine).unwrap();
+        assert_eq!(out, rendered.replace("0.1.0", "0.2.0"));
+        let lf = rendered.replace("\r\n", "\n");
+        let out = keep_developer_fields(lf.clone(), &mine).unwrap();
+        assert_eq!(out, lf.replace("0.1.0", "0.2.0"));
         let _ = std::fs::remove_dir_all(&base);
     }
 
@@ -899,21 +1040,26 @@ mod tests {
         let seg = [node("seg", "stm32f401re", "nucleo-f401re", "node")];
         write(&base, &seg, &[], &[], &cfg(&base, &["show"])).unwrap();
         assert!(base.join("nodes/seg/dagon/boot_wiring.rs").is_file());
-        // A refused set removes what the previous gen wrote for the node.
+        // A refused set removes what the previous gen wrote for the node,
+        // but the boot manifest whose version is the developer's.
         let lines = write(&base, &seg, &[], &[], &cfg(&base, &["nope"])).unwrap();
         assert_eq!(
             lines[0],
             "skipped    nodes/seg/dagon: extension nope is in no folder of [extensions] packages"
         );
+        assert_eq!(
+            lines[1],
+            "kept       boot/seg/Cargo.toml (its version is yours)"
+        );
         assert!(
-            lines[1..].iter().all(|l| l.starts_with("removed")),
+            lines[2..].iter().all(|l| l.starts_with("removed")),
             "{lines:?}"
         );
         assert!(lines
             .iter()
             .any(|l| l.ends_with("nodes/seg/dagon/memory-boot-a.x")));
         assert!(!base.join("nodes/seg/dagon/boot_wiring.rs").exists());
-        assert!(!base.join("boot/seg/Cargo.toml").exists());
+        assert!(!base.join("boot/seg/boot.rs").exists());
         assert!(!base.join("nodes/seg/dagon/protection.toml").exists());
         // The boot core runs trusted extensions only.
         let lines = write(&base, &seg, &[], &[], &cfg(&base, &["logger"])).unwrap();

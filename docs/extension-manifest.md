@@ -125,7 +125,10 @@ left alone. One field is yours: `version` under `[package]` of
 template's value once and keeps yours from then on; raise it for each
 boot core you release (a node writes a boot core whose version differs
 from the one it runs). `dagon gen` and the build bring the crate's own
-entry in `Cargo.lock` to it and change nothing else in the lock. Build it
+entry in `Cargo.lock` to it and change nothing else in the lock. When
+that file cannot be read or does not parse, `dagon gen` stops with the
+reason and leaves it as it is; when a node is skipped, its other boot
+crate files are removed but this file is kept. Build it
 in that folder with `cargo build --release` (`DAGON_PUBKEY` as for every
 image).
 

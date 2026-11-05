@@ -3,11 +3,19 @@
 DAGON Console, the browser tool of DAGON Boot: Svelte 5 + Vite + TypeScript, built for Chrome / Edge 89 and later
 (the first versions with Web Serial). Screen text is Japanese only and lives in `src/app/copy.ts`.
 
-The page is local only: `dagon serve` hands it out on 127.0.0.1 from the developer's own PC and is
+The page is local: `dagon serve` hands it out on 127.0.0.1 from the developer's own PC and is
 the only place it reads or writes anything (the project's 構成 YAML, releases, boot cores, jobs).
-There is no public site and no page of its own outside serve; the page fetches nothing from any
-other origin and offers no download-to-save (releases stay in the project's `out/`). It opens on
-SC-S0 (新しく作る / 見本から新しく作る / 開く) until serve has a project open.
+The page fetches nothing from any other origin and offers no download-to-save (releases stay in
+the project's `out/`). It opens on SC-S0 (新しく作る / 見本から新しく作る / 開く) until serve has a
+project open.
+
+The one build of its own is the public demo (`npm run build:demo`, Vite mode `demo`, flag
+`src/app/site.ts`): the same page on the simulated desk (`?sim` below) compiled into the
+browser, with the repository's test-key release and F401 boot core as its files. It never calls
+serve, reads or writes no files, opens no device and holds no keys; the controls for those
+(開く, 雛形を作る, ビルド, 書き込み over USB, リリース, DAGON に聞く / 連携, choosing a package file)
+stay visible, dimmed, and give the reason in the lock table's `site` row on hover, focus and
+press. Every other build compiles the flag to false and leaves the demo's parts out.
 
 構成 edits go to the project's YAML by themselves (PUT /v1/topology about 500 ms after the last
 edit; 保存 saves at once). Until a save goes through the band shows 「● 未保存」 and why; 書込 and
@@ -25,6 +33,7 @@ npm install
 npm run wasm      # build crates/dagon-wasm into src/wasm/pkg (needs DAGON_PUBKEY; see Release key)
 npm run dev       # http://127.0.0.1:5173
 npm run build     # svelte-check, then vite build into dist/ (target chrome89)
+npm run build:demo -- --outDir <dir> --emptyOutDir   # the public demo (simulated desk, test key)
 npm run preview   # serves dist/ on http://127.0.0.1:4173
 npm test          # Vitest
 npm run fonts     # re-fetch the font subsets after screen text changes

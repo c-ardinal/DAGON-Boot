@@ -1,6 +1,7 @@
 <script lang="ts">
   import { AGENT, HELP, MENU, START } from '../app/copy.ts';
   import type { StartChoice } from '../app/start.svelte.ts';
+  import { DEMO_SITE } from '../app/site.ts';
 
   interface Props {
     /** 新しく作る / 見本から新しく作る / 開く: all go to SC-S0 (the project is saved, nothing to confirm). */
@@ -31,7 +32,7 @@
 <nav id="menu" class="menu" aria-label={MENU.button}>
   <ul>
     {#each ITEMS as [c, label] (c)}
-      <li><button class="secondary" data-control="project" aria-disabled={locked} onclick={() => !locked && onstart(c)}>{label}</button></li>
+      <li><button class="secondary" data-control={DEMO_SITE && c === 'open' ? 'open' : 'project'} aria-disabled={locked} onclick={() => !locked && onstart(c)}>{label}</button></li>
     {/each}
     <li><button class="secondary" data-control="project" aria-disabled={locked} bind:this={restartButton} onclick={() => !locked && onrestart()}>{MENU.restart}</button></li>
     <li class="help"><button class="secondary" onclick={onhelp}>{HELP.heading}</button></li>

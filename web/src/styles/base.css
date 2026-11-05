@@ -122,6 +122,7 @@ button {
 [data-locks~='rollback'] [data-control='rollback'],
 [data-locks~='connect'] [data-control='connect'],
 [data-locks~='project'] [data-control='project'],
+[data-locks~='open'] [data-control='open'],
 [data-locks~='ask'] [data-control='ask'],
 [data-locks~='apply'] [data-control='apply'],
 [data-locks~='link'] [data-control='link'],

@@ -48,7 +48,7 @@ Query parameters for development (`npm run dev` only; production builds leave th
 | `&quiet=uart,i2c:66` | With `?mock`: these nodes do not answer RELAY (not-answering path after two monitoring rounds; `quiet=uart,i2c:66` is the hub alone). |
 | `&away` | With `?mock`: after its REBOOT the hub stays away until chosen again (the reconnect dialog, after the 45 s automatic reopening). |
 | `&factory=uart` | With `?mock`: these nodes answer as their factory agent (recovery takes the factory path). |
-| `?sim` | The simulator (`crates/dagon-sim` through dagon-wasm's `Simulator`, `sim` feature): hub, F401 with its ROM loader, watch, on the simulator's clock. `&wipe` erases the F401 first, so "7セグを復旧する" takes the ROM path. |
+| `?sim` | The simulator (`crates/dagon-sim` through dagon-wasm's `Simulator`, `sim` feature): hub, F401 with its ROM loader, watch. It runs on the wall clock and each answer takes the links' and flash's time (dagon-sim's `TimedHub`, as in `dagon demo`), so a write runs about as long as on hardware. `&wipe` erases the F401 first, so "7セグを復旧する" takes the ROM path. |
 
 With `?mock` and `?sim` (no serve behind the dev server) the repository's test-key release
 (`crates/dagon-sim/fixtures/sample-1.1.0.dgb`) and F401 boot core

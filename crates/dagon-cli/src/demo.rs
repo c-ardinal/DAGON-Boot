@@ -360,7 +360,11 @@ mod tests {
             self.0.medium().max_payload()
         }
         fn reconnect_kind(&self) -> dagon_host::Reconnect {
-            self.0.medium().reconnect()
+            if self.0.medium().stays_on_reboot() {
+                dagon_host::Reconnect::Stays
+            } else {
+                dagon_host::Reconnect::Reopen
+            }
         }
         async fn write(&mut self, bytes: &[u8]) -> Result<(), ()> {
             self.0.write(bytes);

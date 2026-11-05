@@ -3,6 +3,9 @@ import { MockTransport, type DeviceKey } from './mock.ts';
 import { simulator } from './simHub.ts';
 import type { Transport } from './transport.ts';
 
+/** Simulated ms per wall ms for the stand-in simulator: real time. */
+const REAL_PACE = 1;
+
 /** A stand-in hub, the clock dagon-host runs on with it, and the project files dagon serve would hand out. */
 export interface DevHub {
   transport: Transport;
@@ -44,7 +47,8 @@ const FIXTURES = {
  */
 export function devHub(q: URLSearchParams): DevHub | null {
   if (q.has('sim')) {
-    const s = simulator(1, (d) => q.has('wipe') && d.wipe(0x42));
+    // On the wall clock: a write runs about as long as on hardware.
+    const s = simulator(1, (d) => q.has('wipe') && d.wipe(0x42), REAL_PACE);
     if (!s) return null;
     return { transport: s.transport, clock: s.clock, ...FIXTURES };
   }

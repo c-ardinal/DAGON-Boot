@@ -9,6 +9,8 @@
 //!   reset, an I2C mailbox and selectable trial-app behaviour.
 //! - [`SimHub`]: answers the PC (directly or as a USB byte stream), relays to
 //!   nodes on I2C and UART, drives NRST/BOOT0 and raw ROM transactions.
+//! - [`TimedHub`]: a [`SimHub`] whose answers take the links' and flash's
+//!   real time (one model for `dagon demo` and the browser demo).
 //!
 //! Randomness comes only from [`SimRng`] seeds, so a seed replays a run.
 #![forbid(unsafe_code)]
@@ -21,6 +23,7 @@ mod ports;
 pub mod rng;
 pub mod rom;
 pub mod store;
+pub mod timing;
 
 pub use flash::{CutPoint, FlashOp, OpKind, SimFlash};
 pub use hub::{FrameCutter, Screen, SimBus, SimHub};
@@ -29,6 +32,7 @@ pub use node::{Run, SimNode, TrialApp};
 pub use rng::SimRng;
 pub use rom::SimRom;
 pub use store::{Layout, SimStore};
+pub use timing::{Medium, TimedHub};
 
 // The simulator declares no machine of its own: its nodes run the agent's.
 dagon_events::state_machine! {}

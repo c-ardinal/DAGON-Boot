@@ -618,7 +618,7 @@ fn hello(server: &Server) -> Response {
                 // The simulated uplink: its kind, frame size and reboot behaviour.
                 "uplink": m.kind().name(),
                 "max_payload": m.max_payload(),
-                "reconnect": if m.reconnect() == dagon_host::Reconnect::Stays { "stays" } else { "reopen" },
+                "reconnect": if m.stays_on_reboot() { "stays" } else { "reopen" },
             })
         }),
         // The MCU families POST /v1/flash can write.

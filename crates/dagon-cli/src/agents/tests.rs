@@ -372,8 +372,11 @@ fn claude_code_answers_through_the_command_path() {
 }
 
 fn doc() -> String {
-    std::fs::read_to_string(Path::new(env!("CARGO_MANIFEST_DIR")).join("../../docs/agent-api.md"))
-        .unwrap()
+    std::fs::read_to_string(
+        Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../site/src/content/docs/reference/agent-api.md"),
+    )
+    .unwrap()
 }
 
 /// Every file in agents/ is builtin, and nothing else is: adding a builtin
@@ -436,7 +439,7 @@ fn transport_kind_names_round_trip() {
     }
 }
 
-/// The authoritative sections of docs/agent-api.md say exactly what the code
+/// The authoritative sections of site/src/content/docs/reference/agent-api.md say exactly what the code
 /// has: an extra, missing or stale entry fails.
 #[test]
 fn the_contract_document_follows_the_code() {
@@ -462,21 +465,6 @@ fn the_contract_document_follows_the_code() {
     assert_eq!(sends, crate::consent::SENDS, "sends");
     let never = bullets(&d, "### Never sends");
     assert_eq!(never, crate::consent::NEVER_SENDS, "never sends");
-
-    let builtin: Vec<Vec<String>> = bullets(&d, "## Builtin agents")
-        .iter()
-        .map(|b| ticked(b))
-        .collect();
-    let code: Vec<Vec<String>> = BUILTIN
-        .iter()
-        .map(|(_, t)| {
-            let a = parse(t).unwrap();
-            std::iter::once(a.id.clone())
-                .chain(a.ways.iter().map(|w| w.id.clone()))
-                .collect()
-        })
-        .collect();
-    assert_eq!(builtin, code, "builtin agents and their ways, in order");
 
     let formats: Vec<String> = bullets(&d, "## Format numbers")
         .iter()

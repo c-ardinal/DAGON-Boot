@@ -46,7 +46,7 @@ function serve(fail?: { status: number; body: unknown }) {
 
 afterEach(() => vi.unstubAllGlobals());
 
-describe('the API key in the Console (docs/agent-api.md, PUT/DELETE /v1/agent/key)', () => {
+describe('the API key in the Console (site/src/content/docs/reference/agent-api.md, PUT/DELETE /v1/agent/key)', () => {
   test('saving sends the key to serve once and clears the field; the status says 登録済み', async () => {
     const s = serve();
     const a = new Agent(s.api);

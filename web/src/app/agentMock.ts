@@ -1,4 +1,4 @@
-// Development stand-in for serve's agent routes (docs/agent-api.md), until
+// Development stand-in for serve's agent routes (site/src/content/docs/reference/agent-api.md), until
 // the CLI side is merged: `?agent` links on the page only, `?agent=linked`
 // starts linked, `&agentdemo` refuses linking as `dagon demo` does. The
 // answers are fixed sentences, never an agent's.

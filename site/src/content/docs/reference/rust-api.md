@@ -15,7 +15,7 @@ published with these pages; each name below opens its crate.
 |---|---|
 | [`dagon-agent`](/api/dagon_agent/) | DAGON agent: embedded in an application, it answers HELLO/STATUS/VERSION, receives images into the inactive slot, switches the boot target and confirms. |
 | [`dagon-boot`](/api/dagon_boot/) | The boot core's sequence as a state machine: every step from the armed watchdog to the jump or the halt is an event the boot core's extensions observe |
-| [`dagon-catalog`](/api/dagon_catalog/) | Every DAGON state machine's catalog in one registry, and the generated docs/events.md and docs/ports.md |
+| [`dagon-catalog`](/api/dagon_catalog/) | Every DAGON state machine's catalog in one registry, and the generated Events and Ports pages of the documentation |
 | [`dagon-cli`](/api/dagon/) | DAGON Boot command line tool |
 | [`dagon-conform`](/api/dagon_conform/) | DAGON conformance tests: the 12 normal-path checks a port must pass. |
 | [`dagon-core`](/api/dagon_core/) | Board-independent DAGON logic over the port contract: the state log (fold, load, append, compaction), the kind S boot decision (verify, trial, rollback), the boot core A/B rules of a stage0 MCU and build-time key helpers. |

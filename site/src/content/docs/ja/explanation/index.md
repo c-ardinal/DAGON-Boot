@@ -14,4 +14,10 @@ DAGON の中の状態の変化は、どれも状態機械の遷移です。遷�
 拡張はそのイベントを受け取り、いくつかの判断に[ポート](/ja/reference/ports/)を通して答えます。
 
 DAGON が読み書きする形式、プロトコル、API には、どれも番号があります。
-知らない番号は、読む側が理由を示して受け付けません（[バージョンの決まり](https://github.com/c-ardinal/DAGON-Boot/blob/main/docs/versioning.md)）。
+知らない番号は、読む側が理由を示して受け付けません。
+
+- [このページの言葉](/ja/explanation/words/)
+- [Versions and releases](/ja/explanation/versioning/)（英語）
+- [ライフサイクルイベントと拡張](/ja/explanation/lifecycle-events/)
+- [リポジトリ](/ja/explanation/repository/)
+- [制限事項](/ja/explanation/limitations/)

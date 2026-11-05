@@ -4,7 +4,7 @@
 //! [`state_machine!`]; the transition method is the only way to change the
 //! state and it delivers the transition's event to the layer's composed
 //! chain before the state changes. The machines' catalogs are the event
-//! catalog (`docs/events.md` is generated from them). Code outside DAGON
+//! catalog (`site/src/content/docs/reference/events.md` is generated from them). Code outside DAGON
 //! observes events, answers the decision points within their bounds and
 //! replaces parts of DAGON through the ports of [`PORTS`], composed in one
 //! fixed order ([`compose`]). Async display and log tasks read

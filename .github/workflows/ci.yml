@@ -37,7 +37,7 @@ jobs:
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
       - name: Test the workspace
         run: cargo test --workspace --locked
-      - name: Generated catalogs up to date (docs/events.md, docs/ports.md)
+      - name: Generated catalogs up to date (the site's Events and Ports pages)
         run: cargo test -p dagon-catalog --test docs --locked
       - name: Format
         if: matrix.os == 'ubuntu-latest'

@@ -126,26 +126,16 @@ projects or an agent.
                 ["crates/dagon-cli/src/serve/api.rs"], body)
 
 
-# ---------------------------------------------------------------- events
-
-def from_doc(src, title, description):
-    """A page generated elsewhere (dagon-catalog), carried over without its H1 and regeneration line."""
-    text = (ROOT / src).read_text(encoding="utf-8")
-    text = re.sub(r"\A# .*\n+", "", text)
-    text = re.sub(r"\AGenerated from .*?\n\n", "", text, flags=re.S)
-    return page(title, description, [src], text)
-
-
 # ---------------------------------------------------------------- agents
 
 AGENTS = ROOT / "crates" / "dagon-cli" / "src" / "agents"
-FIELD = re.compile(r"^\s*pub (\w+): (.+),\s*$")
+FIELD = re.compile(r"^\s*(?:pub )?(\w+): (.+),\s*$")
 
 
 def rust_struct(path, name):
-    """(field, type, optional, doc) of `pub struct name` in path."""
+    """(field, type, optional, doc) of `struct name` in path (public or not)."""
     lines = path.read_text(encoding="utf-8").splitlines()
-    start = next(i for i, l in enumerate(lines) if re.match(rf"\s*pub struct {name}\b", l))
+    start = next(i for i, l in enumerate(lines) if re.match(rf"\s*(?:pub )?struct {name}\b", l))
     out = []
     for i in range(start + 1, len(lines)):
         if lines[i].strip() == "}":
@@ -185,6 +175,9 @@ TYPES = {
     "Vec<WayDef>": "`[[ways]]` tables",
     "Transport": "`[ways.transport]` table",
     "SystemVia": "string",
+    "bool": "boolean",
+    "Capabilities": "`[capabilities]` table",
+    "Limits": "`[limits]` table",
 }
 
 
@@ -303,6 +296,67 @@ files is in `targets/README.md`.
                 ["targets/mcu/*/dagon-mcu.toml", "targets/boards/*/dagon-board.toml"], body)
 
 
+# ---------------------------------------------------------------- contracts and components
+
+def contracts():
+    path = ROOT / "compat.toml"
+    text = path.read_text(encoding="utf-8")
+    compat = tomllib.loads(text)
+    # The comment beside each format number says where it is written; tomllib drops comments.
+    section = re.search(r"^\[formats\]\n(.*?)^\[", text, re.M | re.S).group(1)
+    notes = dict(re.findall(r"^([a-z0-9-]+)\s*=\s*\d+\s*#\s*(.*)$", section, re.M))
+    rows_f = [f"| `{k}` | {v} | {cell(notes.get(k, ''))} |" for k, v in compat["formats"].items()]
+    rows_c = []
+    for c in compat.get("component", []):
+        fmts = ", ".join(f"`{k}` {'/'.join(map(str, v))}" for k, v in c.get("formats", {}).items())
+        pkgs = ", ".join(f"`{p}`" for p in c.get("packages", []))
+        rows_c.append(f"| `{c['name']}` | {c['version']} | {pkgs} | {fmts} |")
+    body = f"""
+Every contract between DAGON's components and the number it is at, and
+every component with its version and the format numbers it reads and
+writes, as `compat.toml` holds them. The rules for changing them are in
+[Versions and releases](/explanation/versioning/).
+
+## Contracts
+
+| Contract | Format | Where the number is written |
+|---|---|---|
+{chr(10).join(rows_f)}
+
+## Components
+
+| Component | Version | Packages | Formats |
+|---|---|---|---|
+{chr(10).join(rows_c)}
+"""
+    return page("Contracts and components", "Every contract's format number and every component's version, from compat.toml.",
+                ["compat.toml"], body)
+
+
+# ---------------------------------------------------------------- tools by MCU
+
+def tools():
+    rows = []
+    for f in sorted((ROOT / "targets" / "mcu").glob("*/dagon-mcu.toml")):
+        m = tomllib.loads(f.read_text(encoding="utf-8"))
+        for d in m.get("doctor", []):
+            how = f"`{' '.join(d['fix'])}`" if "fix" in d else ""
+            note = d.get("hint", "") + (" (takes a while)" if d.get("slow") else "")
+            rows.append(f"| {cell(m['name'])} | {cell(d['what'])} | {how} | {cell(note)} |")
+    body = f"""
+The tools each MCU needs besides Rust, as its MCU definition's `[[doctor]]`
+entries name them. `dagon doctor` checks them in a project (every MCU
+outside one), and `dagon doctor --fix` runs the install commands that need
+no administrator rights.
+
+| MCU | Tool | Install | Note |
+|---|---|---|---|
+{chr(10).join(rows)}
+"""
+    return page("Tools by MCU", "What dagon doctor checks for each MCU, from the MCU definitions.",
+                ["targets/mcu/*/dagon-mcu.toml"], body)
+
+
 # ---------------------------------------------------------------- Rust API
 
 def crate_doc(src):
@@ -345,17 +399,52 @@ published with these pages; each name below opens its crate.
 
 PAGES = {
     "serve-api.md": serve_api,
-    "events.md": lambda: from_doc("docs/events.md", "Events", "Every event DAGON emits, from the state machines' catalogs."),
-    "ports.md": lambda: from_doc("docs/ports.md", "Ports", "Every port DAGON's extensions use, from the catalogs."),
     "agent-definition.md": agent_definition,
     "boards.md": boards,
+    "tools.md": tools,
+    "contracts.md": contracts,
     "rust-api.md": rust_api,
 }
+
+
+# ---------------------------------------------------------------- regions of hand-written pages
+
+EXTENSION = ROOT / "crates" / "dagon-extension" / "src" / "manifest.rs"
+
+
+def extension_keys():
+    """The key tables of dagon-extension.toml, from the types the manifest is read into."""
+    return (f"{field_table(rust_struct(EXTENSION, 'Raw'))}\n\n"
+            f"`[capabilities]`:\n\n{field_table(rust_struct(EXTENSION, 'Capabilities'))}\n\n"
+            f"`[limits]`:\n\n{field_table(rust_struct(EXTENSION, 'Limits'))}\n")
+
+
+REGION_BEGIN = "<!-- generated from {}: python site/scripts/gen.py -->\n"
+REGION_END = "<!-- end of generated table -->\n"
+# Hand-written page -> (what its region is generated from, the region's text).
+REGIONS = {
+    "extension-manifest.md": ("dagon-extension's manifest types", extension_keys),
+}
+
+
+def with_region(text, source, body):
+    begin = REGION_BEGIN.format(source)
+    a = text.index(begin) + len(begin)
+    b = text.index(REGION_END, a)
+    return text[:a] + body + text[b:]
 
 
 def main(argv):
     check = "--check" in argv
     stale = []
+    for name, (source, make) in REGIONS.items():
+        path = OUT / name
+        old = path.read_text(encoding="utf-8")
+        new = with_region(old, source, make())
+        if check and new != old:
+            stale.append(path.as_posix())
+        elif not check:
+            path.write_text(new, encoding="utf-8", newline="\n")
     for name, make in PAGES.items():
         text = make()
         path = OUT / name

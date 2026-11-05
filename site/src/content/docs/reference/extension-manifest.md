@@ -1,10 +1,13 @@
-# Extension manifest and generated protection files
+---
+title: "Extension manifest"
+description: "dagon-extension.toml, the extension keys of dagon.toml and the files dagon gen writes from them."
+---
 
 An extension is a Rust crate with a `dagon-extension.toml` next to its
 `Cargo.toml`. The manifest says what the extension replaces, observes and
 answers, and what it needs. `dagon gen` checks it against the port catalog
-([ports.md](ports.md)), the event catalog ([events.md](events.md)) and the
-node's MCU and board definitions ([targets/README.md](../targets/README.md)),
+([ports.md](/reference/ports/)), the event catalog ([events.md](/reference/events/)) and the
+node's MCU and board definitions ([targets/README.md](https://github.com/c-ardinal/DAGON-Boot/blob/main/targets/README.md)),
 then writes the node's protection files.
 
 ## dagon-extension.toml (`extension-manifest` format 1)
@@ -29,21 +32,44 @@ ram_bytes = 4096                     # .ext.data + .ext.bss
 text_bytes = 16384                   # .ext.text + .ext.rodata + the data load image
 ```
 
-| Key | Rule |
-|---|---|
-| `format` | Read first; a number this dagon does not read is refused with both numbers |
-| `provides` | Ports that exist in every listed layer; a trusted-only port needs `trusted = true` |
-| `observes` | `layer.kind`, `layer.prefix*` (matching at least one kind of the catalog) or `layer.*` |
-| `decides` | Decision points asked in one of the listed layers; a trusted extension answers none |
-| `trusted` | The extension is part of DAGON for the project: it runs privileged, in DAGON's own memory, and nothing of the sandbox holds against it. A trusted-only port needs it; an extension that only observes may say it too (code of the project's own that runs in the boot core) |
-| `limits` | Device layers: `max_run_us` 1 to the decision bound (50 ms) for an untrusted extension and for every one that observes events (each handler call is timed against it); untrusted only: `stack_bytes` at least 256, `text_bytes` above 0 |
+<!-- generated from dagon-extension's manifest types: python site/scripts/gen.py -->
+| Key | Type | Required | Meaning |
+|---|---|---|---|
+| `format` | integer | yes | Read first; a number this dagon does not read is refused with both numbers. |
+| `id` | string | yes | The extension's id: `a-z 0-9 -`, 1 to 32 characters. |
+| `layers` | array of strings | yes | The layers it runs in: `boot`, `app`, `relay`, `host`. |
+| `provides` | array of strings | no | Ports that exist in every listed layer; a trusted-only port needs `trusted = true`. |
+| `observes` | array of strings | no | `layer.kind`, `layer.prefix*` (matching at least one kind of the catalog) or `layer.*`. |
+| `decides` | array of strings | no | Decision points asked in one of the listed layers; a trusted extension answers none. |
+| `trusted` | boolean | no | The extension is part of DAGON for the project: it runs privileged, in DAGON's own memory, and nothing of the sandbox holds against it. A trusted-only port needs it; an extension that only observes may say it too (code of the project's own that runs in the boot core). |
+| `capabilities` | `[capabilities]` table | no | What DAGON hands the extension (the `[capabilities]` keys below). |
+| `limits` | `[limits]` table | no | Device layers: `max_run_us` 1 to the decision bound (50 ms) for an untrusted extension and for every one that observes events (each handler call is timed against it); untrusted only: `stack_bytes` at least 256, `text_bytes` above 0 (the `[limits]` keys below). |
+
+`[capabilities]`:
+
+| Key | Type | Required | Meaning |
+|---|---|---|---|
+| `peripherals` | array of strings | no | Board `[[peripheral]]` ids: windows onto window-eligible blocks. |
+| `pins` | array of strings | no | Board `[[pin]]` names, reached through the pin service. |
+| `buses` | array of strings | no | Board `[[bus]]` ids, reached through the bus service. |
+| `timer` | boolean | no | The time service. |
+
+`[limits]`:
+
+| Key | Type | Required | Meaning |
+|---|---|---|---|
+| `max_run_us` | integer | yes | Per handler call. |
+| `stack_bytes` | integer | no | Required (at least `STACK_MIN`) for a sandboxed extension; a trusted one runs on DAGON's stack. |
+| `ram_bytes` | integer | no | `.ext.data` + `.ext.bss`. |
+| `text_bytes` | integer | no | `.ext.text` + `.ext.rodata` + the `.ext.data` load image. |
+<!-- end of generated table -->
 
 The crate exports its extension as `pub type DagonExtension` and
 `pub const DAGON_EXTENSION: DagonExtension`; the generated chain names them.
 
 ## dagon.toml
 
-```toml
+```toml nocheck
 [extensions]
 packages = ["extensions/*"]          # folders, or folder/* for each subfolder
 [extensions.nodes.<id>]

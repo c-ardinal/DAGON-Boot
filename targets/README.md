@@ -22,7 +22,7 @@ errors; kind fields accept only the values listed below.
 
 | Key | Meaning |
 |---|---|
-| `format` | Definition format number (`1`; left out means 1). A dagon that does not read the number refuses the file (docs/versioning.md) |
+| `format` | Definition format number (`1`; left out means 1). A dagon that does not read the number refuses the file (site/src/content/docs/explanation/versioning.md) |
 | `id` | MCU id used in topologies (`stm32f401re`) |
 | `name` | Display name (`STM32F401RE`) |
 | `wire_id` | Image header `mcu_id`; unique |
@@ -42,7 +42,7 @@ errors; kind fields accept only the values listed below.
 | `[[doctor]]` | Tool check: `what`, `probe` (command), `expect` (`"runs"`, `{ line = "..." }`, `{ prefix = "..." }`), `fix` (command), `hint`, `slow` (`true`: `dagon doctor --fix` says the install takes a while before it starts) |
 | `ram` | `{ at, size }`: all of the MCU's RAM. Images get the RAM below the boot record, the fuse cells and the extension regions |
 | `[watchdog]` | `kind` (`iwdg`, `rp-watchdog`, `rtc-wdt`), `trial_ms` (armed on a trial boot), `confirmed_ms` (armed otherwise), `trial_attempts` (boots the boot stage gives a pending image before it rolls back: the boot core's limit, or the vendor second stage's). An app may delay a reboot by at most half the shorter period. The MCU package's build turns `trial_attempts` into the constant its boot core and its agent use. `flag` (required): the watchdog-reset flag the lockup fuse needs (set by a watchdog reset, kept over every later reset but power-on, cleared when a start acknowledges it), a fact of `none`, `register` (a reset-flag register; name it and its source in a comment) or `package` (the MCU package keeps it): `"register"`, `{ unverified = "package" }`, `"unmeasured"`. Without a flag with a source the MCU has no lockup fuse |
-| `[execution]` | Hardware facts of the execution model (docs/design/lifecycle-events.md, "Execution model"): `masked_max_us` (longest DAGON's own code masks interrupts, 1..=1000), `flash_op` (what an erase or program stops: `fetch-stall`, `xip-off-masked`, `cache-off-masked`), `erase_unit` (largest unit DAGON erases in one operation, a power of two), `erase_unit_max_ms` (that erase's datasheet maximum; below `watchdog.confirmed_ms`). A fact is a number checked against its source (cite it in a comment), `{ unverified = N }` or `"unmeasured"` (no value yet; not for `erase_unit_max_ms`) |
+| `[execution]` | Hardware facts of the execution model (site/src/content/docs/explanation/lifecycle-events.md, "Execution model"): `masked_max_us` (longest DAGON's own code masks interrupts, 1..=1000), `flash_op` (what an erase or program stops: `fetch-stall`, `xip-off-masked`, `cache-off-masked`), `erase_unit` (largest unit DAGON erases in one operation, a power of two), `erase_unit_max_ms` (that erase's datasheet maximum; below `watchdog.confirmed_ms`). A fact is a number checked against its source (cite it in a comment), `{ unverified = N }` or `"unmeasured"` (no value yet; not for `erase_unit_max_ms`) |
 | `[conformance]` | `scratch = { at, size }`: flash a conformance build erases and writes; apart from every slot, header, log face and stage0 |
 | `[isolation]` | How DAGON keeps extensions away from itself (below). Left out: `kind = "none"`, `level = "none"` |
 | `[[core]]` | Every processor core, `id`; DAGON runs on the first |

@@ -338,7 +338,7 @@ impl StatusResp {
 }
 
 /// VERSION request: empty for the summary set. A selector (a boot record
-/// page, docs/design/lifecycle-events.md 5.4) is `Status::Unsupported`
+/// page, site/src/content/docs/explanation/lifecycle-events.md 5.4) is `Status::Unsupported`
 /// here: this agent keeps no boot record.
 pub fn parse_version_req(b: &[u8]) -> Result<(), Status> {
     if b.is_empty() {
@@ -348,7 +348,7 @@ pub fn parse_version_req(b: &[u8]) -> Result<(), Status> {
     }
 }
 
-/// VERSION response TLV ids (docs/design/lifecycle-events.md 5.4). A
+/// VERSION response TLV ids (site/src/content/docs/explanation/lifecycle-events.md 5.4). A
 /// value the node cannot determine is left out; a reader skips ids it
 /// does not know and values of a length it does not read.
 pub mod version_id {
@@ -366,7 +366,7 @@ pub mod version_id {
     pub const WIRE: u8 = 0x0D;
 
     /// Every id of the summary set and its value, as
-    /// docs/design/lifecycle-events.md 5.4 lists them (a test keeps that
+    /// site/src/content/docs/explanation/lifecycle-events.md 5.4 lists them (a test keeps that
     /// table equal to this one). This agent sends the ids named above.
     pub const TABLE: [(u8, &str); 16] = [
         (0x01, "boot core version (`Version`, LE u32)"),

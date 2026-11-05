@@ -17,5 +17,11 @@ observe those events and answer a few decisions through
 [ports](/reference/ports/).
 
 Every format, protocol and API DAGON reads or writes carries a number, and
-a reader refuses a number it does not know:
-[versioning](https://github.com/c-ardinal/DAGON-Boot/blob/main/docs/versioning.md).
+a reader refuses a number it does not know.
+
+- [Words used here](/explanation/words/)
+- [Versions and releases](/explanation/versioning/)
+- [Lifecycle events and extensions](/explanation/lifecycle-events/), and the
+  [retained and persistent formats](/explanation/retained-formats/) it leaves to an executable model
+- [The repository](/explanation/repository/)
+- [Limitations](/explanation/limitations/)

@@ -5,7 +5,8 @@ editUrl: false
 ---
 
 :::note
-Generated from `docs/events.md`; do not edit. Regenerate with `python site/scripts/gen.py`.
+Generated from the state machines' catalogs; do not edit. Regenerate with
+`DAGON_BLESS=1 cargo test -p dagon-catalog --test docs`.
 :::
 
 Every state change in DAGON is a transition of a state machine, and every

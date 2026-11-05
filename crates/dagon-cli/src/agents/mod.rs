@@ -33,7 +33,7 @@ pub(crate) const TIMED_OUT: &str = "DAGON did not answer in time";
 pub(crate) const UNEXPECTED: &str = "DAGON's agent did not answer in the expected form";
 
 /// The `code` of every agent error the page tells apart (the serve API
-/// contract; docs/agent-api.md lists exactly these, a test checks it).
+/// contract; site/src/content/docs/reference/agent-api.md lists exactly these, a test checks it).
 pub mod codes {
     /// Declares each code once: its constant, and its place in [`ALL`].
     macro_rules! codes {

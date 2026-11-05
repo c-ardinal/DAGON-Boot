@@ -413,7 +413,7 @@ pub struct DoctorCheck {
 #[serde(deny_unknown_fields)]
 pub struct McuDef {
     /// Definition format number; absent means [`FORMAT`] (see
-    /// docs/versioning.md). Other numbers are refused on load.
+    /// site/src/content/docs/explanation/versioning.md). Other numbers are refused on load.
     pub format: Option<u32>,
     pub id: String,
     /// Display name (`RP2040`).
@@ -518,7 +518,7 @@ pub struct DefaultLink {
 #[serde(deny_unknown_fields)]
 pub struct BoardDef {
     /// Definition format number; absent means [`FORMAT`] (see
-    /// docs/versioning.md). Other numbers are refused on load.
+    /// site/src/content/docs/explanation/versioning.md). Other numbers are refused on load.
     pub format: Option<u32>,
     pub id: String,
     pub product: String,

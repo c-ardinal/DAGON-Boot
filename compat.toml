@@ -1,5 +1,5 @@
 # DAGON components and compatibility contracts: the single list of both.
-# The rules that use it are in docs/versioning.md.
+# The rules that use it are in site/src/content/docs/explanation/versioning.md.
 #
 # [formats]
 #   <contract> = <number>: every compatibility contract (a file format, a

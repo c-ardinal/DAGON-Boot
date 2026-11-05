@@ -1,6 +1,6 @@
 ---
-title: DAGON を試す
-description: 模擬の親機と子機で動く DAGON Console を、ブラウザか dagon コマンドで試します。
+title: "DAGON を試す"
+description: "模擬の親機と子機で動く DAGON Console を、ブラウザか dagon コマンドで試します。"
 sidebar:
   order: 0
 ---
@@ -14,14 +14,17 @@ sidebar:
 
 ## dagon コマンドで
 
-`dagon` を入れてあれば、同じ模擬のノードを自分の PC で動かせます。
 
 ```sh
-dagon demo
+dagon demo                         # 模擬のノードで DAGON Console を開く
+dagon demo --sim-fail watch        # 同じで、watch の更新が失敗して元に戻る
+dagon demo --sim-speed 4           # 4 倍の速さ（録画用）
 ```
 
-`dagon demo` は、模擬の親機と子機、デモ専用のプロジェクトと鍵で DAGON Console を開きます。
+`dagon demo` は、模擬の親機と子機の 3 つのノード（見本の構成: hub、seg、watch、すべて 1.0.0）を相手に DAGON Console を開きます。`dagon sim run` と同じシミュレータを、実機と同じ dagon-host のコードで動かします。つないで、最新のリリース（demo-1.1.0）を選び、3 つのノードすべてを進み具合を見ながら更新できます。`--sim-fail seg` か `--sim-fail watch` を付けると、その子機の新しいバージョンが起動時に落ち、1.0.0 に戻ります。リンクとフラッシュは実機に近い時間がかかります（`--sim-speed` で 0.1〜20 倍）。ヘッダには常に「模擬」が出ます。デモは一時フォルダに自分のプロジェクト（`dagon-demo-<ユーザー名のハッシュ>`、起動のたびに新しく作る）と、そのためだけの DEMO の鍵を作ります。あなたの鍵は使わず、デモで署名したものは実機では動きません。
 
-## DAGON を使えるようにする
+```sh
+dagon sim run
+```
 
-入れるツールと最初のプロジェクトは [README](https://github.com/c-ardinal/DAGON-Boot/blob/main/README.ja.md#必要なもの) にあります。
+シミュレータ上の 4 つの通しシナリオ: 転送中の電断を含む更新、確定しないイメージ、改ざんしたリリース、全消去した F401 の ROM ブートローダ経由の復活。

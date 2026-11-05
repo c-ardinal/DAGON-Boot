@@ -55,18 +55,21 @@ fn rust_files(dir: &std::path::Path) -> Vec<PathBuf> {
 
 #[test]
 fn events_md_is_generated() {
-    check("docs/events.md", &events_md(&machines()));
+    check(
+        "site/src/content/docs/reference/events.md",
+        &events_md(&machines()),
+    );
 }
 
 #[test]
 fn ports_md_is_generated() {
-    check("docs/ports.md", &ports_md(PORTS));
+    check("site/src/content/docs/reference/ports.md", &ports_md(PORTS));
 }
 
 /// Section 2.1 of the design holds the port table generated from PORTS.
 #[test]
 fn the_design_port_table_is_generated() {
-    const DESIGN: &str = "docs/design/lifecycle-events.md";
+    const DESIGN: &str = "site/src/content/docs/explanation/lifecycle-events.md";
     const BEGIN: &str = "<!-- generated from dagon_events::PORTS -->\n";
     const END: &str = "<!-- end of generated table -->\n";
     let text = read(DESIGN);

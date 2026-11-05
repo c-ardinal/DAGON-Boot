@@ -13,4 +13,6 @@ sidebar:
 - [イベント](/ja/reference/events/)と[ポート](/ja/reference/ports/): 拡張が使うすべてのイベントとポート
 - [エージェント定義の形式](/ja/reference/agent-definition/): DAGON が読むエージェントのファイル
 - [ボードとマイコン](/ja/reference/boards/): すべてのボードとマイコンの定義
+- [Tools by MCU](/ja/reference/tools/): `dagon doctor` がマイコンごとに確かめるツール
 - [Rust API](/ja/reference/rust-api/): ワークスペースの crate とその rustdoc
+- [ライセンス](/ja/reference/licenses/)

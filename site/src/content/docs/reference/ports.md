@@ -5,7 +5,8 @@ editUrl: false
 ---
 
 :::note
-Generated from `docs/ports.md`; do not edit. Regenerate with `python site/scripts/gen.py`.
+Generated from `dagon_events::PORTS`; do not edit. Regenerate with
+`DAGON_BLESS=1 cargo test -p dagon-catalog --test docs`.
 :::
 
 A port is a part of DAGON that a plug-in replaces, in the layers listed, for

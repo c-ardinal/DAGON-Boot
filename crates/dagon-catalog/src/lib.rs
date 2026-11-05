@@ -9,8 +9,8 @@
 //! crate's `MACHINES` by path, and a test fails while such a crate is
 //! missing from it. A crate that depends on this one (the CLI) reads the
 //! catalogs and declares no machine. The tests also check the layers'
-//! event codes and regenerate `docs/events.md`; `docs/ports.md` and the
-//! port table of `docs/design/lifecycle-events.md` come from
+//! event codes and regenerate the site's Events page; its Ports page and
+//! the port table of its Lifecycle events page come from
 //! `dagon_events::PORTS`. Regenerate them with
 //! `DAGON_BLESS=1 cargo test -p dagon-catalog --test docs`.
 #![forbid(unsafe_code)]
@@ -134,13 +134,13 @@ fn notes(e: &Entry) -> String {
     n.join(", ")
 }
 
-/// `docs/events.md`.
+/// The site's Events page (`site/src/content/docs/reference/events.md`).
 pub fn events_md(machines: &[Catalog]) -> String {
     let mut s = String::new();
     s.push_str(
-        "# Events\n\n\
-         Generated from the state machines' catalogs; do not edit. Regenerate with\n\
-         `DAGON_BLESS=1 cargo test -p dagon-catalog --test docs`.\n\n\
+        "---\ntitle: Events\ndescription: Every event DAGON emits, from the state machines' catalogs.\neditUrl: false\n---\n\n\
+         :::note\nGenerated from the state machines' catalogs; do not edit. Regenerate with\n\
+         `DAGON_BLESS=1 cargo test -p dagon-catalog --test docs`.\n:::\n\n\
          Every state change in DAGON is a transition of a state machine, and every\n\
          transition emits one event. This page is generated from the machines'\n\
          declarations, so it lists every event there is.\n\n",
@@ -306,12 +306,12 @@ pub fn design_ports_table(ports: &[Port]) -> String {
     s
 }
 
-/// `docs/ports.md`.
+/// The site's Ports page (`site/src/content/docs/reference/ports.md`).
 pub fn ports_md(ports: &[Port]) -> String {
     let mut s = String::from(
-        "# Ports\n\n\
-         Generated from `dagon_events::PORTS`; do not edit. Regenerate with\n\
-         `DAGON_BLESS=1 cargo test -p dagon-catalog --test docs`.\n\n\
+        "---\ntitle: Ports\ndescription: Every port DAGON's extensions use, from the catalogs.\neditUrl: false\n---\n\n\
+         :::note\nGenerated from `dagon_events::PORTS`; do not edit. Regenerate with\n\
+         `DAGON_BLESS=1 cargo test -p dagon-catalog --test docs`.\n:::\n\n\
          A port is a part of DAGON that a plug-in replaces, in the layers listed, for\n\
          the image it is linked into; DAGON's own implementation is the default. A\n\
          plug-in's manifest may provide a port only in layers the port exists in, and\n\

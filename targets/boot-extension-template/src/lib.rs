@@ -1,6 +1,6 @@
 //! A trusted boot extension to copy. The boot core calls `on_event` for
 //! every boot event from `boot.watchdog_armed` to `boot.before_jump` or
-//! `boot.halt` (docs/events.md, layer `boot`), each call within the
+//! `boot.halt` (site/src/content/docs/reference/events.md, layer `boot`), each call within the
 //! manifest's `max_run_us`. It runs privileged in the boot core: what it
 //! drives (a display, a pin) it reaches through the MCU's HAL itself.
 //! Nothing it does changes which slot the boot core starts.
@@ -44,7 +44,7 @@ impl Extension for BootCount {
 
     fn on_event(&mut self, e: &Event<'_>, _ctx: &Ctx<'_>) {
         self.events += 1;
-        // Each event's payload as its type (docs/events.md, layer `boot`).
+        // Each event's payload as its type (site/src/content/docs/reference/events.md, layer `boot`).
         if let Some(c) = e.get::<sequence::SlotChosen>() {
             self.chosen = Some((c.slot, c.trial));
         }

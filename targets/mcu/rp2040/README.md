@@ -222,7 +222,7 @@ carries one for each slot.
 `dagon gen` writes the node's boot crate into `boot/<node>/` of the
 project from `bootcore/template/`: it links `bootcore` (a library) with
 the node's boot extensions (`nodes/<node>/dagon/boot_wiring.rs`, each
-declared trusted in dagon.toml, see docs/extension-manifest.md) and sets
+declared trusted in dagon.toml, see site/src/content/docs/reference/extension-manifest.md) and sets
 `DAGON_BOOT_CRATE` (that folder) and `DAGON_TARGET_TAG` (the node's tag)
 for its build. The boot core accepts only app images tagged with the
 node's tag (a host test, `tests/hub_boot.rs`, shows another node's image

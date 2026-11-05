@@ -58,19 +58,33 @@ pub struct Limits {
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct Raw {
+    /// Read first; a number this dagon does not read is refused with both numbers.
     format: u32,
+    /// The extension's id: `a-z 0-9 -`, 1 to 32 characters.
     id: String,
+    /// The layers it runs in: `boot`, `app`, `relay`, `host`.
     layers: Vec<String>,
+    /// Ports that exist in every listed layer; a trusted-only port needs `trusted = true`.
     #[serde(default)]
     provides: Vec<String>,
+    /// `layer.kind`, `layer.prefix*` (matching at least one kind of the catalog) or `layer.*`.
     #[serde(default)]
     observes: Vec<String>,
+    /// Decision points asked in one of the listed layers; a trusted extension answers none.
     #[serde(default)]
     decides: Vec<String>,
+    /// The extension is part of DAGON for the project: it runs privileged, in DAGON's own
+    /// memory, and nothing of the sandbox holds against it. A trusted-only port needs it; an
+    /// extension that only observes may say it too (code of the project's own that runs in the
+    /// boot core).
     #[serde(default)]
     trusted: bool,
+    /// What DAGON hands the extension (the `[capabilities]` keys below).
     #[serde(default)]
     capabilities: Capabilities,
+    /// Device layers: `max_run_us` 1 to the decision bound (50 ms) for an untrusted extension
+    /// and for every one that observes events (each handler call is timed against it);
+    /// untrusted only: `stack_bytes` at least 256, `text_bytes` above 0 (the `[limits]` keys below).
     #[serde(default)]
     limits: Limits,
 }

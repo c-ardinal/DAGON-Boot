@@ -1,4 +1,7 @@
-# Lifecycle events and extensions: one model for boot core, agent, relay and host
+---
+title: "Lifecycle events and extensions"
+description: "One model for boot core, agent, relay and host: state machines, events, ports and protection."
+---
 
 This document is the design of DAGON's lifecycle-event and extension
 model: how every state transition in every layer is an observable
@@ -30,7 +33,7 @@ that DAGON runs at one of its extension points. 親機/子機 are hub/node.
 Every state change in DAGON happens through a transition of a declared
 state machine, and every transition emits its event. The machines are
 declared once each with `state_machine!` (1.7). The normative catalog is
-the generated one: `docs/events.md`, produced from the machines'
+the generated one: [イベント](/ja/reference/events/), produced from the machines'
 `CATALOG` constants (kind, payload, attributes, observer path) and
 checked against them in CI. The event tables in this section are
 illustrative examples of what the machines produce; they carry no entry
@@ -342,7 +345,7 @@ a test there fails while a crate that depends on `dagon-events` is
 missing. A state no transition reaches, a transition without `emits` or
 an `observe` path, a duplicate code, an oversized payload, a second
 `state_machine!` in a crate, or a machine outside it are compile
-errors. `dagon events catalog` prints the catalogs; `docs/events.md` is
+errors. `dagon events catalog` prints the catalogs; [イベント](/ja/reference/events/) is
 generated from them and a test keeps the two equal.
 
 Decision points (3) are never `emits` clauses: a new one is a design
@@ -355,7 +358,7 @@ construct them.
 ### 1.8 Who observes what
 
 Every event has at least one observer path, and the path is an attribute
-of the generated catalog, so the generated `docs/events.md` carries this
+of the generated catalog, so the generated [イベント](/ja/reference/events/) carries this
 table per event; a generated test fails on a kind with no path. *Live*
 is an extension in the same image (2); *replay* is the app's agent
 re-emitting it at start from the boot record (5.5) or the state log;
@@ -394,7 +397,7 @@ that part for the image it is linked into. Ports exist in every layer.
 The port catalog is one table in code, `dagon_events::PORTS`, one
 record per port (`id`, the set of layers it exists in, the default per
 layer, the trust policy, the services it needs, a description),
-from which this table, the generated `docs/ports.md`, the manifest
+from which this table, the generated [ポート](/ja/reference/ports/), the manifest
 validator (`provides` must name a port of the extension's layers), the
 service tables of 4.2 and the `dagon status` port columns derive; a
 test keeps this excerpt equal to the catalog. The parts of DAGON that
@@ -1598,7 +1601,7 @@ capability at every boot step) against the boot machine's continuation.
 This section states what those formats must satisfy; the model is
 accepted only when every property below holds under its fault injection.
 The formats that pass are specified in
-[retained-formats.md](retained-formats.md), with the model's property list
+[retained-formats.md](/explanation/retained-formats/), with the model's property list
 and the limits of each claim.
 
 #### Boot record

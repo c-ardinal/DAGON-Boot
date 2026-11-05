@@ -22,6 +22,9 @@ class Generated(unittest.TestCase):
         with tempfile.TemporaryDirectory() as d:
             saved = gen.OUT
             gen.OUT = pathlib.Path(d)
+            # The hand-written pages with generated regions come along.
+            for name in gen.REGIONS:
+                (gen.OUT / name).write_text((saved / name).read_text(encoding="utf-8"), encoding="utf-8")
             try:
                 self.assertEqual(gen.main([]), 0)
                 page = gen.OUT / "boards.md"
@@ -29,6 +32,10 @@ class Generated(unittest.TestCase):
                 self.assertEqual(gen.main(["--check"]), 1)
                 page.unlink()
                 self.assertEqual(gen.main(["--check"]), 1)
+                self.assertEqual(gen.main([]), 0)
+                hand = gen.OUT / "extension-manifest.md"
+                hand.write_text(hand.read_text(encoding="utf-8").replace("| `trusted` |", "| `trust` |"), encoding="utf-8")
+                self.assertEqual(gen.main(["--check"]), 1, "a generated region edited by hand")
             finally:
                 gen.OUT = saved
 

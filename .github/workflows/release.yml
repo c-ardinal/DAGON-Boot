@@ -1,5 +1,5 @@
 # Runs when a component release tag (<component>-v<version>,
-# docs/versioning.md) is pushed. Every such tag first passes the bump
+# site/src/content/docs/explanation/versioning.md) is pushed. Every such tag first passes the bump
 # check: the tag names a component of compat.toml with that version, and
 # the version is at least what the commits since the component's last tag
 # require. Only a CLI tag (cli-v<version>) then builds the dagon

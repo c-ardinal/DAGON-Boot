@@ -1,4 +1,7 @@
-# Versions and releases
+---
+title: "Versions and releases"
+description: "How DAGON's components and contracts are numbered, and how a change picks its version."
+---
 
 DAGON is made of several components that are released on their own. Each
 carries its own [SemVer](https://semver.org/) version, and every
@@ -7,7 +10,7 @@ carries its own integer format number. This page gives the rules for both,
 so that anyone looking at the same change reaches the same version.
 
 The list of components and contracts is not kept here. It is
-[`compat.toml`](../compat.toml), the single source: every component with
+[`compat.toml`](https://github.com/c-ardinal/DAGON-Boot/blob/main/compat.toml), the single source: every component with
 its version, files, packages and the format numbers it reads and writes,
 and the number each contract is at. The CLI's tests check it against the
 code and the package manifests, so it cannot drift.
@@ -51,7 +54,8 @@ A contract's format number is separate from every product version: a
 component can go from 0.1.0 to 0.4.2 while it still writes the same format
 number.
 
-`[formats]` in `compat.toml` names every contract and the number it is at;
+`[formats]` in `compat.toml` names every contract and the number it is at
+(listed in [Contracts and components](/reference/contracts/));
 the comment beside each says where the number is written and which code
 constant holds it. Every artifact and message of a contract states its
 number, and a reader refuses a number it does not read with a message that

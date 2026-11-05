@@ -1,4 +1,7 @@
-# DAGON agents: serve API contract
+---
+title: "Agent link: serve API"
+description: "How DAGON reaches its agent through dagon serve: routes, consent, keys and what is sent."
+---
 
 DAGON talks to an agent through one interface. Agents are data: an agent
 (id, name, provider) and the ways to reach it, each of a transport kind DAGON
@@ -129,7 +132,7 @@ leaves the store only into the request header of its way.
 
 Every `/v1/ai/...` route answers, until linked:
 
-```json
+```json nocheck
 HTTP 409
 { "error": "DAGON is not linked to an agent; link it first (consent is asked once)",
   "code": "AGENT_NOT_LINKED" }
@@ -261,7 +264,9 @@ system = "file"          # "stdin" (default): system text, a blank line, then th
 pass_env = ["MY_AGENT_HOME"]  # optional: more variables the program needs
 ```
 
-Each `kind` is one of the Transport kinds below.
+Every key, its type and whether it is required are in
+[Agent definition format](/reference/agent-definition/), generated from the
+types dagon reads the file into. Each `kind` is one of the Transport kinds below.
 
 The agent replies with one JSON object (the reply format is in the system
 text); DAGON reads the object from its text.
@@ -306,10 +311,9 @@ counts as not linked: the user links again.
 
 ## Builtin agents
 
-Agents shipped with dagon (`crates/dagon-cli/agents/*.toml`), each with its
-ways in order; the first way of the first agent is the default.
-
-- `claude` (Claude, Anthropic): `claude-code` (Claude Code headless with the user's own login), `api` (the Messages API, key in the OS credential store)
+The agents shipped with dagon (`crates/dagon-cli/agents/*.toml`) and their
+ways, in order, are listed in [Agent definition format](/reference/agent-definition/#builtin-agents);
+the first way of the first agent is the default.
 
 ## What linking sends
 

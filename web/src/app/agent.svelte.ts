@@ -1,4 +1,4 @@
-// DAGON, the page's side of the agent link (docs/agent-api.md on the CLI):
+// DAGON, the page's side of the agent link (site/src/content/docs/reference/agent-api.md on the CLI):
 // GET /v1/agent, POST/DELETE /v1/agent/link (consent asked once, when
 // linking), POST /v1/agent/ask (no confirmation per question). The key never
 // comes here; the provider's name is shown only in the linking step.

@@ -110,7 +110,7 @@ fn release_assemble_reproduces_golden_manifest_and_bundle() {
         })
         .collect();
     let topo = topology_bin();
-    assert_eq!(topo, golden("topology_desk_demo.bin"));
+    assert_eq!(topo, golden("topology_sample.bin"));
     let r = release::assemble("release-1.1", 1, &items, &topo, &key()).unwrap();
     assert_eq!(r.manifest, golden("manifest.bin"));
     assert_eq!(r.bundle, golden("release.dgb"));
@@ -124,10 +124,10 @@ fn release_assemble_reproduces_golden_manifest_and_bundle() {
         .unwrap();
 }
 
-const DESK_DEMO: &str = include_str!("../../../topology/desk-demo.yaml");
+const SAMPLE_YAML: &str = include_str!("../../../topology/sample.yaml");
 
-fn desk_demo() -> Topology {
-    dagon_topology::parse_str(DESK_DEMO).unwrap()
+fn sample() -> Topology {
+    dagon_topology::parse_str(SAMPLE_YAML).unwrap()
 }
 
 fn hub_app(slot: u8) -> Vec<u8> {
@@ -142,12 +142,12 @@ fn hub_app(slot: u8) -> Vec<u8> {
 }
 
 fn topology_bin() -> Vec<u8> {
-    dagon_topology::compile(&desk_demo()).unwrap()
+    dagon_topology::compile(&sample()).unwrap()
 }
 
 #[test]
-fn release_build_with_desk_demo() {
-    let t = desk_demo();
+fn release_build_with_the_sample() {
+    let t = sample();
     // Hub images first on purpose: the build orders entries by update.order.
     let images = vec![hub_app(1), hub_app(0), f401_app(1), f401_app(0)];
     let r = release::build(
@@ -164,8 +164,8 @@ fn release_build_with_desk_demo() {
     let m = b.manifest();
     assert_eq!(
         m.fields().topology_sha256,
-        sha256(&golden("topology_desk_demo.bin")),
-        "manifest binds the compiled desk-demo topology"
+        sha256(&golden("topology_sample.bin")),
+        "manifest binds the compiled sample topology"
     );
     let order: Vec<(u8, u8, u8)> = (0..m.entry_count())
         .map(|i| {
@@ -202,7 +202,7 @@ fn release_build_with_desk_demo() {
 /// saying why. The hub and the F401 take boot core A/B pairs.
 #[test]
 fn boot_cores_go_only_to_nodes_whose_mcu_keeps_boot_core_slots() {
-    let t = desk_demo();
+    let t = sample();
     let reg = dagon_topology::defs::Registry::builtin();
     let core = |mcu: &str, tag: &str, port: &str, slot: u8| {
         let mut s = spec(mcu, image_kind::BOOTCORE, slot, tag, Version::new(1, 1, 0));
@@ -242,7 +242,7 @@ fn boot_cores_go_only_to_nodes_whose_mcu_keeps_boot_core_slots() {
 
 #[test]
 fn release_build_rejects_bad_sets() {
-    let t = desk_demo();
+    let t = sample();
     let topo = topology_bin();
     let check = |images: Vec<Vec<u8>>| {
         release::build(
@@ -308,7 +308,7 @@ fn release_build_rejects_bad_sets() {
         &key()
     )
     .is_ok());
-    let yaml = format!("{DESK_DEMO}\nconstraints:\n  - lockstep: [hub, seg]\n");
+    let yaml = format!("{SAMPLE_YAML}\nconstraints:\n  - lockstep: [hub, seg]\n");
     let locked = dagon_topology::parse_str(&yaml).unwrap();
     let topo = dagon_topology::compile(&locked).unwrap();
     let err = release::build(

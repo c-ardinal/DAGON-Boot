@@ -50,8 +50,8 @@ pub enum Cmd {
     SetPending = 0x20,
     Reboot = 0x21,
     Confirm = 0x22,
-    /// Node (kind V) replies OK, then enters its ROM loader. Added after G1,
-    /// owner-approved, additive: the other commands are unchanged.
+    /// Node (kind V) replies OK, then enters its ROM loader. Added later as
+    /// an additive change: the other commands are unchanged.
     EnterRom = 0x24,
     Show = 0x41,
     Relay = 0x50,

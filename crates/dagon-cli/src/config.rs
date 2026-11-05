@@ -315,7 +315,7 @@ pub fn read_topology(cfg: &Config, path: &Path) -> Result<dagon_topology::Topolo
     })
 }
 
-/// One line per node updating skips for now, with why (none for a 構成
+/// One line per node updating skips, with why (none for a 構成
 /// updating reaches whole).
 pub fn skipped_lines(cut: &dagon_topology::Cut) -> Vec<String> {
     cut.skipped

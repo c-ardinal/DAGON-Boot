@@ -35,11 +35,10 @@ and is rolled back after three attempts. RTT shows the boot state and every requ
 Version display (this app's own format, `seg::version`):
 
 - `major.minor.patch` right-aligned on the 4 digits, each `.` set as the
-  point of the digit before it. The shield's decimal-point wiring is not
-  confirmed yet; the driver currently does not light it, so for now the
-  digits show side by side: ` 110` for 1.1.0, ` 120` for 1.2.0, `1107`
+  point of the digit before it. The driver does not light the
+  shield's decimal point, so the digits show side by side: ` 110` for 1.1.0, ` 120` for 1.2.0, `1107`
   for 1.10.7.
-- `major.minor.` when that does not fit (10.10.x: `1010` for now), else
+- `major.minor.` when that does not fit (10.10.x: `1010`), else
   `----`.
 - Builds with the public test key show `tESt` for 1.5 s first; an
   unreadable state log shows `----`.

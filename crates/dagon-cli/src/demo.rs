@@ -1,4 +1,4 @@
-//! `dagon demo`: DAGON Console against a simulated desk, no boards needed.
+//! `dagon demo`: DAGON Console against a simulator, no boards needed.
 //! The 親機 (RP2040) with its two 子機 (the F401 on I2C, the ESP32-S3 watch
 //! on the UART), all on 1.0.0, as dagon-sim simulates them for `dagon sim
 //! run`; the page drives them with the same dagon-host code as real
@@ -6,7 +6,7 @@
 //!
 //! Everything is made fresh at start in a demo folder under the system's
 //! temporary folder: a demo key pair (never the developer's key), the
-//! desk-demo 構成, the 1.0.0 images the simulated boards run and release
+//! sample 構成, the 1.0.0 images the simulated boards run and release
 //! demo-1.1.0, all signed with the demo key; the 1.0.0 package is kept
 //! (out/deploy) as written firmware is. `--sim-fail <node>` makes that
 //! 子機's new version crash at boot, so its update falls back to 1.0.0.
@@ -23,14 +23,14 @@ use ed25519_compact::KeyPair;
 use crate::config::Opts;
 use crate::serve::Medium;
 
-const YAML: &str = include_str!("../../../topology/desk-demo.yaml");
+const YAML: &str = include_str!("../../../topology/sample.yaml");
 /// Marks a folder this command made (and may make again).
 const MARK: &str = ".dagon-demo";
 const DEMO_DIR: &str = "dagon-demo";
 const RELEASE: &str = "demo-1.1.0";
 const OLD: Version = Version::new(1, 0, 0);
 const NEW: Version = Version::new(1, 1, 0);
-/// Image bodies: about what the desk-demo apps weigh, so a transfer takes
+/// Image bodies: about what the sample apps weigh, so a transfer takes
 /// its real time.
 const HUB_LEN: usize = 128 * 1024;
 const SEG_LEN: usize = 48 * 1024;
@@ -40,7 +40,7 @@ const SPEEDS: std::ops::RangeInclusive<f64> = 0.1..=20.0;
 /// The 子機 a failure can be set on.
 const NODES: [&str; 2] = ["seg", "watch"];
 
-/// A node of the desk: MCU, port kind, target tag.
+/// A node of the simulator: MCU, port kind, target tag.
 struct Board {
     mcu: &'static str,
     port: &'static str,
@@ -101,9 +101,9 @@ fn img_of(
     sign_image(&spec, &body, key).map_err(|e| format!("{e:?}"))
 }
 
-/// The simulated desk on 1.0.0, verifying under `key`; `fail`'s next
+/// The simulator on 1.0.0, verifying under `key`; `fail`'s next
 /// version crashes at boot.
-pub fn desk(key: &KeyPair, fail: Option<&str>, seed: u64) -> Result<SimHub, String> {
+pub fn sim_hub(key: &KeyPair, fail: Option<&str>, seed: u64) -> Result<SimHub, String> {
     let pk = *key.pk;
     let mut h = demo_hub(pk, seed);
     h.node
@@ -111,7 +111,7 @@ pub fn desk(key: &KeyPair, fail: Option<&str>, seed: u64) -> Result<SimHub, Stri
         .map_err(|e| format!("hub: {e:?}"))?;
     let seg = h
         .i2c_node(dagon_sim::NODE_I2C_ADDR)
-        .ok_or("the desk has no seg")?;
+        .ok_or("the sample has no seg")?;
     seg.provision(&img(key, &SEG, 0, OLD, SEG_LEN)?, 0)
         .map_err(|e| format!("seg: {e:?}"))?;
     if fail == Some("seg") {
@@ -177,7 +177,7 @@ pub(crate) fn package_with(key: &KeyPair, v: Version, core: Version) -> Result<V
 /// Makes the demo folder `dir` afresh (only one this command made before is
 /// replaced): its 構成, a demo key pair, dagon.toml and the release.
 /// Returns dagon.toml's path and the demo key.
-/// The demo 構成: desk-demo with the 親機's uplink set to `uplink` (it is
+/// The demo 構成: sample with the 親機's uplink set to `uplink` (it is
 /// not part of the compiled topology, so the release matches either way).
 pub fn yaml(uplink: Medium) -> String {
     YAML.replacen(
@@ -210,7 +210,7 @@ pub fn project(dir: &Path, uplink: Medium) -> Result<(PathBuf, KeyPair), String>
     write("topology.yaml", yaml(uplink).as_bytes())?;
     write(
         crate::config::CONFIG_FILE,
-        b"# The dagon demo project (simulated desk). Its key is a DEMO key made\n\
+        b"# The dagon demo project (simulator). Its key is a DEMO key made\n\
           # for this demo only; nothing it signs runs on real boards.\n\
           topology = \"topology.yaml\"\n\
           pubkey = \"demo-key/dagon-signing.pub\"\n\
@@ -275,12 +275,12 @@ pub fn command(args: &[&str]) -> Result<(), String> {
         .unwrap_or_default();
     let dir = std::env::temp_dir().join(demo_dir_name(&user));
     let (config, key) = project(&dir, uplink)?;
-    let hub = desk(&key, fail, 1)?;
+    let hub = sim_hub(&key, fail, 1)?;
     let mut sim = crate::serve::SimDevice::new(hub, speed, fail.map(String::from));
     sim.set_medium(uplink);
     sim.notes = vec![
         format!(
-            "demo: a SIMULATED desk (親機 + 2 子機, desk-demo) over {}, speed x{speed}{}",
+            "demo: a SIMULATED hub (親機 + 2 子機, sample) over {}, speed x{speed}{}",
             uplink.kind().name(),
             fail.map_or(String::new(), |f| format!(", {f}'s update set to fail"))
         ),
@@ -351,7 +351,7 @@ mod tests {
     use dagon_host::{Host, Outcome};
     use std::time::{Duration, Instant};
 
-    /// dagon-host's link to the demo desk, as the page has it through serve.
+    /// dagon-host's link to the simulator, as the page has it through serve.
     struct Link(Arc<crate::serve::SimDevice>, Vec<u8>);
 
     impl dagon_host::Transport for Link {
@@ -392,7 +392,7 @@ mod tests {
         }
     }
 
-    /// Release demo-1.1.0 applied to the whole desk through the demo link.
+    /// Release demo-1.1.0 applied to every node through the demo link.
     fn update(name: &str, fail: Option<&str>) -> Vec<(u8, String)> {
         update_over(name, fail, Medium::UsbCdc)
     }
@@ -405,7 +405,7 @@ mod tests {
         let bundle = std::fs::read(dir.join(format!("out/release/{RELEASE}.dgb"))).unwrap();
         let topo = dagon_topology::compile_str(&yaml(uplink)).unwrap();
         let dev = Arc::new(crate::serve::SimDevice::new(
-            desk(&key, fail, 1).unwrap(),
+            sim_hub(&key, fail, 1).unwrap(),
             SPEED,
             None,
         ));
@@ -435,7 +435,7 @@ mod tests {
     }
 
     #[test]
-    fn the_whole_desk_updates_through_the_demo_link() {
+    fn the_whole_sample_updates_through_the_demo_link() {
         let out = update("all", None);
         assert_eq!(out.len(), 3, "{out:?}");
         assert!(out.iter().all(|(_, w)| w == "done 1.1.0"), "{out:?}");
@@ -478,7 +478,7 @@ mod tests {
         let t = dagon_topology::parse_str(&yaml(Medium::UsbCdc)).unwrap();
         let topo = dagon_topology::compile_str(&yaml(Medium::UsbCdc)).unwrap();
         let dev = Arc::new(crate::serve::SimDevice::new(
-            desk(&key, None, 1).unwrap(),
+            sim_hub(&key, None, 1).unwrap(),
             SPEED,
             None,
         ));

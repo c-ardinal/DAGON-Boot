@@ -58,7 +58,7 @@ export function tAtLength(table: number[], s: number): number {
   return (i - 1 + f) / SAMPLES;
 }
 
-// ponytail: horizontal shift instead of a true offset curve. Exact enough for
+// horizontal shift instead of a true offset curve. Exact enough for
 // links that run mostly downwards; switch to a normal-offset polyline if
 // links get steep sideways runs.
 export function shifted(b: Bezier, dx: number): Bezier {

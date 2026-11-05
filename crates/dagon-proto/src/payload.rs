@@ -729,7 +729,7 @@ impl SubCtl {
     }
 }
 
-/// ENTER_ROM request (added after G1, owner-approved, additive). Response:
+/// ENTER_ROM request (an additive change). Response:
 /// status only; the node enters its ROM loader after sending it.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct EnterRom {

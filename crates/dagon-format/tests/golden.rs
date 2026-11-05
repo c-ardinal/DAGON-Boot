@@ -88,7 +88,7 @@ fn image(slot: u8) -> Vec<u8> {
     [&h.to_bytes()[..], &body].concat()
 }
 
-/// Canonical binary of the desk demo: hub (RP2040) with seg (F401 on I2C0
+/// Canonical binary of the sample: hub (RP2040) with seg (F401 on I2C0
 /// GPIO16/17, address 0x42, NRST GPIO18, BOOT0 GPIO28) and watch (ESP32-S3
 /// on PIO UART GPIO26/27 at 115200).
 fn topology() -> Vec<u8> {
@@ -501,9 +501,9 @@ fn state_log_vector() {
 }
 
 #[test]
-fn topology_desk_demo_vector() {
+fn topology_sample_vector() {
     use dagon_format::topology::{self as tp, TopologyView};
-    let file = golden("topology_desk_demo.bin", &topology());
+    let file = golden("topology_sample.bin", &topology());
     let t = TopologyView::parse(&file).unwrap();
     assert_eq!(
         (t.node_count(), t.link_count(), t.constraint_count()),

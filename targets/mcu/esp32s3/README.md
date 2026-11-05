@@ -107,7 +107,7 @@ and the node tag from the generated `wiring.rs`.
 - Task liveness is deadline based: a task announces work with
   `Lease::busy(now, budget_ms)` and ends it with `Lease::idle()`; there is no
   bare `feed()`. A task that waits without a deadline is not blamed, a task
-  stuck past its budget stops the watchdog feeding (owner-approved design).
+  stuck past its budget stops the watchdog feeding.
 - There is no `UserIo` bundle: the app keeps the peripherals returned by
   `esp_hal::init`, and the board package's macro (`dagon_pins!`) moves out
   only what DAGON takes.

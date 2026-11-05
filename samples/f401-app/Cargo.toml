@@ -17,7 +17,7 @@ slot-b = ["dagon-board-nucleo-f401re/slot-b"]
 # Confirm the own trial at start-up (bench use without a hub).
 confirm = []
 # Test build whose self-check fails, so its trial always rolls back
-# (samples/desk-test).
+# (samples/hardware-test).
 no-confirm = []
 # Conformance build: serves CONF_RUN (dagon-conform node-side tests).
 conform = ["dagon-board-nucleo-f401re/conform"]

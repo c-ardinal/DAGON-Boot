@@ -10,7 +10,7 @@
   interface Props {
     cli: Cli;
     d: Define;
-    /** The one way the 構成 goes to the project's YAML (C-377). */
+    /** The one way the 構成 goes to the project's YAML. */
     autosave: Autosave;
     panel: 'link' | 'jobs' | 'release' | 'project' | 'flash';
     /** "このリリースを運用で使う": hand the .dgb to the operate mode. */

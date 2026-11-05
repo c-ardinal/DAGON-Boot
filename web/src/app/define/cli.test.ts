@@ -171,7 +171,7 @@ describe('dagon serve link', () => {
     const cli = new Cli(f.deps);
     await cli.connect();
     const hellos = () => f.calls.filter((c) => c.url === '/v1/hello').length;
-    expect(await cli.openProject('desk')).toBe('opened');
+    expect(await cli.openProject('sample')).toBe('opened');
     expect(hellos()).toBe(2);
     expect(await cli.openProject('empty')).toBe('missing');
     expect(await cli.openProject('badkey')).toBe('key');

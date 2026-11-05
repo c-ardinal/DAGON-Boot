@@ -8,7 +8,7 @@ pub enum Severity {
     Error,
     /// Reported only; does not block `topo push`.
     Warning,
-    /// A valid shape told as it is (V-23: a part updating skips for now);
+    /// A valid shape told as it is (V-23: a part updating skips);
     /// never blocks.
     Info,
 }

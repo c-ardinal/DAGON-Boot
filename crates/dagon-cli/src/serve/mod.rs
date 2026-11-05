@@ -83,7 +83,7 @@ pub fn command(args: &[&str]) -> Result<(), String> {
     run(args, None)
 }
 
-/// `dagon serve`, with the simulated desk of `dagon demo` when `sim` is
+/// `dagon serve`, with the simulator of `dagon demo` when `sim` is
 /// given (the page then reaches it instead of a real hub).
 pub fn run(args: &[&str], sim: Option<Arc<SimDevice>>) -> Result<(), String> {
     // serve's output is a log for a person (a terminal, or a file it is

@@ -1,20 +1,20 @@
-# Desk sample hardware test
+# Sample hardware test
 
-Drives the desk sample through the `dagon` CLI and checks every node after
-each step. This tests DAGON together with the sample apps on this one desk
+Drives the sample through the `dagon` CLI and checks every node after
+each step. This tests DAGON together with the sample apps on this one setup
 configuration; it is a sample, not part of DAGON. Python 3.11+ standard
 library only; Windows (the hub identity check uses PowerShell).
 
-The desk: 親機 Waveshare RP2040-Touch-LCD-1.28 on USB (`hub`), NUCLEO-F401RE
+The setup: 親機 Waveshare RP2040-Touch-LCD-1.28 on USB (`hub`), NUCLEO-F401RE
 + X-NUCLEO-53L0A1 on I2C 0x42 (`seg`), M5StopWatch on UART (`watch`), all
 connected; a DAGON project for it (`topology.yaml` as
-`topology/desk-demo.yaml`, `dagon.toml` with `[build.hub]`, `[build.seg]`,
+`topology/sample.yaml`, `dagon.toml` with `[build.hub]`, `[build.seg]`,
 `[build.watch]`).
 
 ## Files
 
 - `hwt.py`: the runner (`sync`, `run`, `selftest`).
-- `hwt.toml`: the desk's data (`[desk]`: nodes, coordinator, hub USB id,
+- `hwt.toml`: the setup's data (`[setup]`: nodes, coordinator, hub USB id,
   self-check switch name, settle timing, which sample feeds which node) and
   the scenarios, in order.
 
@@ -25,17 +25,17 @@ connected; a DAGON project for it (`topology.yaml` as
 #    (seg = samples/f401-app, watch = samples/esp32s3-app, paths to this
 #    repo), give the hub app the self-check switch, dagon gen hub.
 #    Point [dagon] path in the project's dagon.toml at this repo first.
-python samples/desk-test/hwt.py sync --project <desk> --repo <this repo> --dagon <dagon.exe>
+python samples/hardware-test/hwt.py sync --project <project> --repo <this repo> --dagon <dagon.exe>
 
 # 2. every scenario
-python samples/desk-test/hwt.py run --project <desk> --dagon <dagon.exe> --key <secret key file> --port <COMn> [--out <log dir>]
+python samples/hardware-test/hwt.py run --project <project> --dagon <dagon.exe> --key <secret key file> --port <COMn> [--out <log dir>]
 
 # some scenarios, or resume from one (unknown or missing ids are an error)
-python samples/desk-test/hwt.py run ... --only status batch final
-python samples/desk-test/hwt.py run ... --from interrupt-seg
+python samples/hardware-test/hwt.py run ... --only status batch final
+python samples/hardware-test/hwt.py run ... --from interrupt-seg
 
 # no hardware: status parsing, plan check, --only, tampering, key cleanup
-python samples/desk-test/hwt.py selftest
+python samples/hardware-test/hwt.py selftest
 ```
 
 `--key` is passed to `dagon` as a path; the harness never opens it.

@@ -4,8 +4,8 @@
 # the version is at least what the commits since the component's last tag
 # require. Only a CLI tag (cli-v<version>) then builds the dagon
 # executables. Build only: the archives are kept as workflow artifacts;
-# making a GitHub release from them is a separate step the owner takes by
-# hand each time.
+# making a GitHub release from them is a separate manual step each
+# time.
 name: release build
 
 on:
@@ -45,8 +45,8 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # macOS labels as listed in github.com/actions/runner-images (README,
-        # checked 2026-11-03): macos-15 is Arm64, macos-15-intel is x64;
+        # macOS labels as listed in github.com/actions/runner-images (README):
+        # macos-15 is Arm64, macos-15-intel is x64;
         # macos-13 and macos-14 are retired.
         include:
           - { os: windows-latest, target: x86_64-pc-windows-msvc }

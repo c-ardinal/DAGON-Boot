@@ -158,10 +158,7 @@ pub fn handle(server: &Arc<Server>, req: &Request) -> Response {
     let path = req.path.split('?').next().unwrap_or("");
     let parts: Vec<&str> = path.trim_start_matches("/v1/").split('/').collect();
     if server.sim.get().is_some() && demo_refuses(&parts) {
-        return Response::error(
-            403,
-            "not in dagon demo (a simulated desk with its own project)",
-        );
+        return Response::error(403, "not in dagon demo (a simulator with its own project)");
     }
     if parts.first() == Some(&"ai") && !agent_linked(server) {
         return consent_refusal(server);
@@ -279,7 +276,7 @@ fn sim_of(server: &Server) -> Result<&Arc<super::SimDevice>, Response> {
     server
         .sim
         .get()
-        .ok_or_else(|| Response::error(404, "no simulated desk (dagon demo)"))
+        .ok_or_else(|| Response::error(404, "no simulator (dagon demo)"))
 }
 
 /// POST /v1/sim/write: bytes for the simulated hub's USB port.
@@ -611,7 +608,7 @@ fn hello(server: &Server) -> Response {
         "key": key.is_some(),
         "key_id": key,
         "release_key": server.release_key().map(|k| to_hex(&k)),
-        // The simulated desk of dagon demo: the page shows 模擬 and reaches
+        // The simulator of dagon demo: the page shows 模擬 and reaches
         // it through /v1/sim.
         "sim": sim.map(|s| {
             let m = s.medium();
@@ -815,7 +812,7 @@ fn topology_put(server: &Server, req: &Request) -> Res {
     ))
 }
 
-/// `{id: why}` of the nodes updating skips for now (`Skip::code`); every
+/// `{id: why}` of the nodes updating skips (`Skip::code`); every
 /// node (`cut-invalid` where nothing else applies) when no part is updatable.
 fn skipped_of(cut: Option<&dagon_topology::Cut>) -> Value {
     Value::Object(

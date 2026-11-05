@@ -1,4 +1,4 @@
-// Hand-written comments of the project's YAML across a save (C-383). The page
+// Hand-written comments of the project's YAML across a save. The page
 // writes the 構成 back in its own layout (toYaml), which drops comments; the
 // comments of the opened text are kept by the content line they sit above or
 // end, and put back on the same line of the new text. A line that changed

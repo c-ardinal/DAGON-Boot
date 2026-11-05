@@ -33,8 +33,8 @@ pub struct Slot {
 }
 
 /// Slot for an image of `kind` in slot `slot` (`slot_binding::A` / `B`) on
-/// `mcu` (topology MCU id), from the builtin MCU definitions (the simulated
-/// desk and tests; a project uses [`slot_with`] with its own). Single-slot
+/// `mcu` (topology MCU id), from the builtin MCU definitions (the simulator
+/// and tests; a project uses [`slot_with`] with its own). Single-slot
 /// images (a trailer boot core, images bound to `any` slot) answer for
 /// slot A only.
 pub fn slot(mcu: &str, kind: u8, slot: u8) -> Option<Slot> {
@@ -43,7 +43,7 @@ pub fn slot(mcu: &str, kind: u8, slot: u8) -> Option<Slot> {
 
 /// [`slot`] from the MCU definitions of `reg`.
 pub fn slot_with(reg: &Registry, mcu: &str, kind: u8, slot: u8) -> Option<Slot> {
-    // ponytail: ESP images are MMU-mapped and run from either OTA
+    // ESP images are MMU-mapped and run from either OTA
     // partition, so load_addr names ota_0; per-partition headers are
     // placed by the receiver.
     reg.slot(mcu, kind, slot).map(|s| Slot {

@@ -283,24 +283,24 @@ fn encode(reg: &Registry, t: &Topology) -> Result<Vec<u8>, CompileError> {
 mod tests {
     use super::*;
 
-    const DESK_DEMO: &str = include_str!("../../../topology/desk-demo.yaml");
+    const SAMPLE_YAML: &str = include_str!("../../../topology/sample.yaml");
 
     #[test]
-    fn desk_demo_matches_golden_vector() {
-        let golden = include_bytes!("../../dagon-format/golden/topology_desk_demo.bin");
-        assert_eq!(compile_str(DESK_DEMO).unwrap(), golden);
+    fn sample_matches_golden_vector() {
+        let golden = include_bytes!("../../dagon-format/golden/topology_sample.bin");
+        assert_eq!(compile_str(SAMPLE_YAML).unwrap(), golden);
     }
 
     #[test]
     fn link_order_in_yaml_does_not_change_bytes() {
-        let mut t = parse_str(DESK_DEMO).unwrap();
+        let mut t = parse_str(SAMPLE_YAML).unwrap();
         t.links.reverse();
-        assert_eq!(compile(&t).unwrap(), compile_str(DESK_DEMO).unwrap());
+        assert_eq!(compile(&t).unwrap(), compile_str(SAMPLE_YAML).unwrap());
     }
 
     #[test]
     fn constraints_are_carried() {
-        let yaml = format!("{DESK_DEMO}\nconstraints:\n  - lockstep: [hub, seg]\n");
+        let yaml = format!("{SAMPLE_YAML}\nconstraints:\n  - lockstep: [hub, seg]\n");
         let bin = compile_str(&yaml).unwrap();
         let v = tp::TopologyView::parse(&bin).unwrap();
         assert_eq!(v.constraint_count(), 1);
@@ -309,7 +309,7 @@ mod tests {
 
     #[test]
     fn invalid_topology_is_rejected_before_encoding() {
-        let yaml = DESK_DEMO.replace("dagon: 1", "dagon: 2");
+        let yaml = SAMPLE_YAML.replace("dagon: 1", "dagon: 2");
         assert!(matches!(compile_str(&yaml), Err(CompileError::Invalid(_))));
     }
 }

@@ -2,7 +2,7 @@
 // comes from DAGON_PUBKEY (the .pub file from `dagon key gen`, or its hex);
 // `--test-key` opts in to the public test key when DAGON_PUBKEY is unset
 // (the stand-in hubs and the tests), as DAGON_ALLOW_TEST_KEY=1 does; `--sim`
-// adds the simulated desk (SimDesk, dagon-sim) for the tests and `?sim`.
+// adds the simulator (Simulator, dagon-sim) for the tests and `?sim`.
 import { spawnSync } from 'node:child_process';
 
 const testKey = process.argv.includes('--test-key');

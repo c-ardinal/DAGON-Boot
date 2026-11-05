@@ -1,11 +1,11 @@
 import { describe, expect, test } from 'vitest';
 import { topo_compile } from '../../wasm/dagon.ts';
-import { DESK_DEMO_YAML } from '../sample.ts';
+import { SAMPLE_YAML } from '../sample.ts';
 import { keepComments } from './comments.ts';
 import { Define } from './define.svelte.ts';
 import { fromYaml, setLink, toYaml } from './model.ts';
 
-describe('hand-written YAML comments across a save (C-383)', () => {
+describe('hand-written YAML comments across a save', () => {
   test('comments above a line and at its end come back on the same line, at the new indentation', () => {
     const source = '# head\nnodes:\n  # the hub\n  - id: hub  # main\n    mcu: rp2040\n';
     const generated = 'nodes:\n    - id: hub\n      mcu: rp2040\n';
@@ -26,21 +26,21 @@ describe('hand-written YAML comments across a save (C-383)', () => {
     expect(keepComments('a: 1\n', 'a: 2\n')).toBe('a: 2\n');
   });
 
-  const commented = `# Desk demo, hand-written note.\n${DESK_DEMO_YAML.replace('    addr: 0x42', '    # the 7-segment board\n    addr: 0x42').replace('  order: [seg, watch, hub]', '  order: [seg, watch, hub]  # hub last')}`;
+  const commented = `# Sample, hand-written note.\n${SAMPLE_YAML.replace('    addr: 0x42', '    # the 7-segment board\n    addr: 0x42').replace('  order: [seg, watch, hub]', '  order: [seg, watch, hub]  # hub last')}`;
 
-  test('desk-demo opened and saved untouched: the text as written, comment and all', () => {
+  test('sample opened and saved untouched: the text as written, comment and all', () => {
     const d = new Define();
-    d.load(fromYaml(DESK_DEMO_YAML), DESK_DEMO_YAML);
-    expect(d.exportYaml().text).toBe(DESK_DEMO_YAML);
-    expect(DESK_DEMO_YAML).toMatch(/^# Desk demo/);
+    d.load(fromYaml(SAMPLE_YAML), SAMPLE_YAML);
+    expect(d.exportYaml().text).toBe(SAMPLE_YAML);
+    expect(SAMPLE_YAML).toMatch(/^# Sample/);
   });
 
-  test('desk-demo edited and saved: the comments of the untouched lines survive and the compiled 構成 is the same as without them', () => {
+  test('sample edited and saved: the comments of the untouched lines survive and the compiled 構成 is the same as without them', () => {
     const d = new Define();
     d.load(fromYaml(commented), commented);
     d.apply(setLink(d.doc, 1, 'baud', 230400));
     const text = d.exportYaml().text;
-    expect(text).toMatch(/^# Desk demo, hand-written note\.\n# Desk demo: RP2040 hub/);
+    expect(text).toMatch(/^# Sample, hand-written note\.\n# Sample: RP2040 hub/);
     expect(text).toMatch(/ {4}# the 7-segment board\n {4}addr: 0x42/);
     expect(text).toContain('order: [seg, watch, hub]  # hub last');
     expect(text).toContain('baud: 230400');
@@ -57,9 +57,9 @@ describe('hand-written YAML comments across a save (C-383)', () => {
     expect(text).toContain('addr: 0x43');
   });
 
-  test('desk-demo saved untouched compiles exactly as before', () => {
+  test('sample saved untouched compiles exactly as before', () => {
     const d = new Define();
-    d.load(fromYaml(DESK_DEMO_YAML), DESK_DEMO_YAML);
-    expect(topo_compile(d.exportYaml().text)).toEqual(topo_compile(DESK_DEMO_YAML));
+    d.load(fromYaml(SAMPLE_YAML), SAMPLE_YAML);
+    expect(topo_compile(d.exportYaml().text)).toEqual(topo_compile(SAMPLE_YAML));
   });
 });

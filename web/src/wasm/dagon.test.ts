@@ -17,10 +17,10 @@ describe('dagon-wasm exports', () => {
     expect(mcus).toContain('stm32f401re');
   });
 
-  test('desk demo checks clean and compiles to the golden binary', () => {
-    const yaml = new TextDecoder().decode(readFileSync(repo('topology/desk-demo.yaml')));
+  test('sample checks clean and compiles to the golden binary', () => {
+    const yaml = new TextDecoder().decode(readFileSync(repo('topology/sample.yaml')));
     expect(JSON.parse(topo_check(yaml)).ok).toBe(true);
-    expect(topo_compile(yaml)).toEqual(golden('topology_desk_demo.bin'));
+    expect(topo_compile(yaml)).toEqual(golden('topology_sample.bin'));
     expect(JSON.parse(topo_check('nodes: [')).ok).toBe(false);
     expect(() => topo_compile('nodes: [')).toThrow();
   });

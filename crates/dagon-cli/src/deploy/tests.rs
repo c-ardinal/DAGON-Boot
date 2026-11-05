@@ -62,7 +62,7 @@ fn built(nodes: &[String]) -> Vec<(String, SlotElfs)> {
 }
 
 /// The simulated hub and F401, both confirmed on `OLD` signed with `key`.
-fn desk(t: &Topology, key: &KeyPair) -> Sim {
+fn sample_sim(t: &Topology, key: &KeyPair) -> Sim {
     let opts = SignOpts {
         version: OLD,
         release_seq: 1,
@@ -134,7 +134,7 @@ fn deploys_each_node_with_its_crate_version_through_the_simulated_hub() {
     assert!(name.starts_with("v1.2.0-"), "{name}");
     assert_eq!(std::fs::read(&p.release).unwrap(), p.bundle);
 
-    let sim = desk(&t, &key);
+    let sim = sample_sim(&t, &key);
     let mut host = Host::new(sim.clone(), sim.clone());
     crate::device::apply_bundle(
         &mut host,
@@ -187,7 +187,7 @@ fn a_release_signed_with_another_key_is_not_applied() {
     let apps = versioned(&cfg, built(&nodes));
     let p = prepare(&cfg, &t, &key, &BTreeMap::new(), (&apps, &[])).unwrap();
     let other = KeyPair::from_seed(Seed::new([8; 32]));
-    let sim = desk(&t, &other);
+    let sim = sample_sim(&t, &other);
     let mut host = Host::new(sim.clone(), sim);
     assert!(crate::device::apply_bundle(
         &mut host,
@@ -230,11 +230,11 @@ fn firmware_embeds_the_signing_key_and_refuses_another_build_key() {
 }
 
 #[test]
-fn a_generated_desk_project_deploys_every_node_including_the_esp32s3() {
-    let (mut cfg, _) = work_area("desk");
+fn a_generated_sample_project_deploys_every_node_including_the_esp32s3() {
+    let (mut cfg, _) = work_area("sample");
     cfg.build.clear();
-    let desk = include_str!("../../../../topology/desk-demo.yaml");
-    let t = dagon_topology::parse_str(desk).unwrap();
+    let yaml = include_str!("../../../../topology/sample.yaml");
+    let t = dagon_topology::parse_str(yaml).unwrap();
     let toml = cfg.base.join("dagon.toml");
     std::fs::write(&toml, "").unwrap();
     crate::scaffold::add_build_tables(dagon_topology::defs::Registry::builtin(), &toml, &t)

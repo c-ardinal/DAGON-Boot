@@ -1,4 +1,4 @@
-//! The desk demo hub: three nodes on 1.0.0 and the pre-signed 1.1.0 release.
+//! The sample hub: three nodes on 1.0.0 and the pre-signed 1.1.0 release.
 
 use dagon_format::bundle::BundleView;
 use dagon_format::header::{mcu_id, ImageHeader, HEADER_SIZE};
@@ -79,7 +79,7 @@ fn hello() -> Vec<u8> {
 #[test]
 fn three_nodes_on_1_0_0() {
     let mut pc = Pc {
-        hub: demo_hub_desk(1),
+        hub: sample_hub(1),
         seq: 0,
     };
     let v = Version::new(1, 0, 0);
@@ -104,8 +104,8 @@ fn three_nodes_on_1_0_0() {
 
 #[test]
 fn release_verifies_and_updates_the_watch() {
-    let bundle = BundleView::parse(desk::RELEASE_1_1_0).unwrap();
-    bundle.verify(&desk::PUBKEY).unwrap();
+    let bundle = BundleView::parse(sample::RELEASE_1_1_0).unwrap();
+    bundle.verify(&sample::PUBKEY).unwrap();
     let watch_img = (0..bundle.item_count())
         .map(|i| bundle.item_bytes(i))
         .find(|b| {
@@ -117,7 +117,7 @@ fn release_verifies_and_updates_the_watch() {
         .expect("watch image in the release");
 
     let mut pc = Pc {
-        hub: demo_hub_desk(2),
+        hub: sample_hub(2),
         seq: 0,
     };
     let mut b = [0u8; 8];

@@ -1098,7 +1098,7 @@ registers at bring-up):
 **STM32F401RE** — `kind = "armv7m-mpu"`, `mpu_regions = 8` (read back
 from `MPU_TYPE`), `min_region = 32`, `subregions_from = 256`, `fault_address = true`, `unwind =
 "cortex-m-exception"`, `level = "mpu"` at boot and in the app (ST
-PM0214 §4.2 MPU; ST RM0368 §2 memory map for the block addresses).
+PM0214 section 4.2 MPU; ST RM0368 section 2 memory map for the block addresses).
 Generated map for one extension with two windows:
 
 | Region | Base | Size | Attributes | Purpose |
@@ -1123,7 +1123,7 @@ FS `0x5000_0000` (shared with DAGON's link), CRC, the system memory
 `subregions_from = 256`, `fault_address = false`, `unwind =
 "cortex-m-exception"`, two `[[core]]`, `level = "mpu"` at boot and in
 the app with HardFault attribution and the lockup fuse (RP2040
-datasheet §2.4 Cortex-M0+ features and the MPU type register; Arm
+datasheet section 2.4 Cortex-M0+ features and the MPU type register; Arm
 ARMv6-M Architecture Reference Manual, exception model). Generated map:
 
 | Region | Base | Size | Attributes | Purpose |
@@ -1268,7 +1268,7 @@ The one authentication rule, applied by every verifier in the chain
   by DAGON's agent and boot core alone (the sandbox, 4, keeps extensions
   from it), and code that can write flash without the signing key (a
   trusted-code bug, or an attacker with flash access) can make stage0
-  start an unsigned core. **This trade-off is an open owner decision.**
+  start an unsigned core.
   The measured cost of the verifier: the STM32F401RE stage0 is 8,216
   bytes with digests only and about 23,960 with the Ed25519 verifier
   (ed25519-compact `opt_size`), past its 16 KiB sector; the RP2040 stage0

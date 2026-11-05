@@ -202,7 +202,7 @@ describe('WebSerialTransport read loop', () => {
     test.each([
       ['another MCU', { mcuId: 9 }],
       ['another release key', { keyId: Uint8Array.of(1, 2, 3, 4, 5, 6, 7, 8) }],
-    ])('L20: a hub of the same USB kind on trial with the version just sent but %s is not this 親機: closed, not kept, logged', async (_, differs) => {
+    ])('hubRestarting: a hub of the same USB kind on trial with the version just sent but %s is not this 親機: closed, not kept, logged', async (_, differs) => {
       const first = hub(V100, false);
       const impostor = answering({ ...hub(V110, true), ...differs });
       const t = await rebooted([impostor], V110, first);

@@ -2,7 +2,7 @@ import { render } from 'svelte/server';
 import { describe, expect, test } from 'vitest';
 import { DETAIL } from '../app/copy.ts';
 import type { Live } from '../app/operate.svelte.ts';
-import { DESK_DEMO } from '../app/sample.ts';
+import { SAMPLE_CONFIG } from '../app/sample.ts';
 import type { HelloResp } from '../serial/hello.ts';
 import type { VersionResp } from '../wasm/dagon.ts';
 import Detail from './Detail.svelte';
@@ -33,7 +33,7 @@ const answered = (portKind: number, version: VersionResp | null | undefined): Li
 });
 
 const detail = (live: Live) =>
-  render(Detail, { props: { config: DESK_DEMO, live: { seg: live }, selected: 'node:seg', connected: true } }).body;
+  render(Detail, { props: { config: SAMPLE_CONFIG, live: { seg: live }, selected: 'node:seg', connected: true } }).body;
 
 /** The value of row `key` under 詳しく見る. */
 function row(body: string, key: string): string | null {

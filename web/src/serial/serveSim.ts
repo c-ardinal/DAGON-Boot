@@ -1,7 +1,7 @@
-// The simulated desk of `dagon demo`: the hub's bytes go through dagon serve
+// The simulator of `dagon demo`: the hub's bytes go through dagon serve
 // (POST /v1/sim/write, GET /v1/sim/read) instead of Web Serial, so dagon-host
 // runs exactly as with a real hub. Its clock runs at the demo's speed, as the
-// simulated desk's does.
+// simulator's does.
 import type { LinkClock } from './hostLink.ts';
 import type { Transport } from './transport.ts';
 

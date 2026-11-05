@@ -94,6 +94,9 @@ pub struct Event {
     pub version: Version,
     /// On the VERIFY event of a written image: how long its phases took.
     pub times: Option<XferTimes>,
+    /// About the node's boot core, written before its app: its CONFIRM is
+    /// not the node's (the app is confirmed after it).
+    pub boot_core: bool,
 }
 
 /// How long one image's transfer took, by phase, in ms of the host's clock.
@@ -282,6 +285,7 @@ impl<T: Transport, C: Clock> Host<T, C> {
                 percent: 0,
                 version: v,
                 times: None,
+                boot_core: false,
             });
             self.show(node, ph, 0, v, reason(e).as_bytes()).await;
         }
@@ -297,7 +301,9 @@ impl<T: Transport, C: Clock> Host<T, C> {
         on_event: &mut dyn FnMut(Event),
     ) -> Result<Version, T::Error> {
         let running = st.hello.active_version;
-        let core = self.update_core(b, node, to, running, on_event).await?;
+        let core = self.update_core(b, node, to, running, on_event).await;
+        self.core_write = false;
+        let core = core?;
         let agent = self.update_agent(b, node, to, on_event).await?;
         if core || agent {
             let st = self.status(to).await?;
@@ -391,6 +397,7 @@ impl<T: Transport, C: Clock> Host<T, C> {
             .ok_or(Error::Format(dagon_format::FormatError::Truncated))?;
         let v = ImageHeader::parse(raw)?.version;
         let (hdr, body) = img.split_at(HEADER_SIZE);
+        self.core_write = true;
         self.emit(on_event, node, phase::TRANSFER, 0, v).await;
         let hello = self.hello(to).await?;
         let xfer = Xfer {
@@ -795,6 +802,7 @@ impl<T: Transport, C: Clock> Host<T, C> {
             percent,
             version,
             times: None,
+            boot_core: self.core_write,
         });
         self.show(node, ph, percent, version, &[]).await;
     }
@@ -813,6 +821,7 @@ impl<T: Transport, C: Clock> Host<T, C> {
             percent: 100,
             version,
             times: Some(times),
+            boot_core: self.core_write,
         });
         self.show(node, phase::VERIFY, 100, version, &[]).await;
     }

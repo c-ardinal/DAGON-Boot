@@ -651,8 +651,8 @@ export class Operate {
     const n = this.reach[e.node];
     if (!n) return;
     this.trackEvent(n.id, e);
-    // Only the transfer carries the release's version; FAILED / REJECTED carry the version the node still runs.
-    if (e.phase === PHASE.transfer) this.sentVersion[n.id] = e.version;
+    // Only the app's transfer carries the release's version; FAILED / REJECTED carry the version the node still runs.
+    if (e.phase === PHASE.transfer && !e.bootCore) this.sentVersion[n.id] = e.version;
     const was = this.progress[n.id] ?? { stage: 'waiting', percent: 0 };
     if (e.phase === PHASE.transfer || e.phase === PHASE.verify) {
       if (was.stage !== 'writing') this.status = ANNOUNCE.A11(n.name);
@@ -660,7 +660,8 @@ export class Operate {
     } else if (e.phase === PHASE.reboot && n.role === 'hub') {
       this.progress[n.id] = { stage: 'rebooting', percent: 100 };
       this.hubAway(this.sentVersion[n.id]);
-    } else if (e.phase === PHASE.confirm) {
+    } else if (e.phase === PHASE.confirm && !e.bootCore) {
+      // Only the app's confirmation finishes the node; its boot core's comes before it.
       this.progress[n.id] = { stage: 'done', percent: 100 };
       this.updated.add(n.id);
       // The card shows the version the node now runs.
@@ -676,13 +677,13 @@ export class Operate {
     if (e.phase === PHASE.transfer) {
       // A new image (after a boot core's reboot) starts its own transfer.
       const fresh = k.t0 === null || k.xferMs !== null;
-      const base = fresh ? { ...k, floor: this.percentOf(id, now), t0: now, xferMs: null, rebootAt: null } : k;
+      const base = fresh ? { ...k, floor: this.percentOf(id, now), t0: now, xferMs: null, rebootAt: null, done: false } : k;
       this.track[id] = { ...base, xferPct: e.percent };
     } else if (e.phase === PHASE.verify) {
       this.track[id] = { ...k, xferPct: 100, xferMs: Math.max(1, now - (k.t0 ?? now)) };
     } else if (e.phase === PHASE.reboot) {
       this.track[id] = { ...k, rebootAt: now };
-    } else if (e.phase === PHASE.confirm) {
+    } else if (e.phase === PHASE.confirm && !e.bootCore) {
       this.track[id] = { ...k, done: true };
     }
   }
@@ -947,7 +948,7 @@ export class Operate {
       if (e.phase === PHASE.rom) this.progress[n.id] = { stage: 'lastResort', percent: e.percent };
       else if (e.phase === PHASE.transfer) this.progress[n.id] = { stage: 'writing', percent: e.percent };
       // TRANSFER and REBOOT carry the version the node is given (FAILED carries the one it runs).
-      if (e.phase === PHASE.transfer || e.phase === PHASE.reboot) this.sentVersion[n.id] = e.version;
+      if ((e.phase === PHASE.transfer || e.phase === PHASE.reboot) && !e.bootCore) this.sentVersion[n.id] = e.version;
       // The hub reboots onto it: the same reconnect and confirm rule as an update (L20 / L21).
       if (e.phase === PHASE.reboot && n.role === 'hub') {
         this.progress[n.id] = { stage: 'rebooting', percent: 100 };

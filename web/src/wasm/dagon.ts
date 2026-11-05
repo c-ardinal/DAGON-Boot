@@ -65,6 +65,8 @@ export interface UpdateEvent {
   phase: number;
   percent: number;
   version: number;
+  /** About the node's boot core, written before its app: its confirmation is not the node's. */
+  bootCore: boolean;
 }
 
 /** SHOW phases (dagon_proto::payload::phase). */

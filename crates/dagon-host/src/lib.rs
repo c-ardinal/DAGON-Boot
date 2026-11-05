@@ -199,6 +199,8 @@ pub struct Host<T: Transport, C: Clock> {
     /// Pause between a node's HELLO polls after REBOOT
     /// ([`NODE_POLL_MS`]; tests show a longer one misses the trial).
     pub node_poll_ms: u32,
+    /// A node's boot core is being written: the events say so.
+    core_write: bool,
     /// Lines about steps that are retried (a CONFIRM sent again), for the
     /// caller's log; `None`: not shown.
     pub note: Option<Note>,
@@ -215,6 +217,7 @@ impl<T: Transport, C: Clock> Host<T, C> {
             opened: Vec::new(),
             stale: true,
             node_poll_ms: ops::NODE_POLL_MS,
+            core_write: false,
             note: None,
         }
     }

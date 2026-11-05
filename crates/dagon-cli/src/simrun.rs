@@ -470,8 +470,26 @@ mod tests {
     fn a_boot_core_is_written_only_when_its_version_differs_from_the_running_one() {
         let w = world().unwrap();
         // A boot core of another version than the running one is written.
-        let out = w.apply(&with_core(&w, NEW, NEW, 4000)).unwrap();
-        assert!(matches!(out[0], Outcome::Done(v) if v == NEW), "{out:?}");
+        let mut confirms = Vec::new();
+        let out = block_on(w.host().apply(
+            &with_core(&w, NEW, NEW, 4000),
+            &w.topology,
+            &w.key.pk,
+            None,
+            &mut |e| {
+                if e.node == SEG && e.phase == dagon_proto::payload::phase::CONFIRM {
+                    confirms.push(e.boot_core);
+                }
+            },
+        ))
+        .unwrap();
+        assert!(
+            matches!(out[0].outcome, Outcome::Done(v) if v == NEW),
+            "{out:?}"
+        );
+        // The boot core's CONFIRM says it is the boot core's; the node's
+        // write ends with its app's.
+        assert_eq!(confirms, [true, false]);
         let (v, written) = running_core(&w);
         assert_eq!(v, NEW);
         // The same version, even with other bytes, is not written again.

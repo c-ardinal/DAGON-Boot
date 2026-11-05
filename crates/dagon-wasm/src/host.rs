@@ -403,6 +403,7 @@ fn event_js(e: &Event) -> JsValue {
     set(&o, "node", e.node.into());
     set(&o, "phase", e.phase.into());
     set(&o, "percent", e.percent.into());
+    set(&o, "bootCore", e.boot_core.into());
     set(&o, "version", e.version.raw().into());
     o.into()
 }

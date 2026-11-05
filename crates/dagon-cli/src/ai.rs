@@ -17,7 +17,6 @@ use crate::agents::{Api, Prompt};
 const MAX_ROUNDS: usize = 8;
 /// One call of a topology draft waits at most this long.
 pub(crate) const DRAFT_TIMEOUT: Duration = Duration::from_secs(600);
-const DEFAULT_OUT: &str = "topology.yaml";
 
 const INSTRUCTIONS: &str = "You write DAGON Boot topology YAML files from a natural-language \
 description of a board setup (hub, nodes, buses, links, addresses, pins).
@@ -39,17 +38,10 @@ pub(crate) const SCHEMA_RS: &str = include_str!("../../dagon-topology/src/schema
 pub(crate) const CHECK_RS: &str = include_str!("../../dagon-topology/src/check.rs");
 const EXAMPLE_YAML: &str = include_str!("../../../topology/sample.yaml");
 
-struct Args {
-    input: Option<String>,
-    out: String,
-    model: Option<String>,
-}
-
-/// `dagon ai topology [--in <file>] [--out <yaml>] [--model <id>]`
+/// `dagon ai topology`
 // Writes the topology file the user names with --out.
 #[allow(clippy::disallowed_methods)]
-pub fn topology(args: &[&str]) -> Result<(), String> {
-    let a = parse_args(args)?;
+pub fn topology(a: &crate::cli::AiTopologyArgs) -> Result<(), String> {
     let home = crate::consent::home()?;
     crate::consent::require_linked(&home)?;
     let keys = crate::keystore::Keys::system();
@@ -79,7 +71,7 @@ pub fn topology(args: &[&str]) -> Result<(), String> {
     // The dagon.toml here, if any (else the builtin set); definitions that
     // do not load stop here with the reason.
     let reg = crate::defs::registry(&crate::config::Config::load(None)?)?;
-    let done = generate(&description, a.model, &reg, &mut api, &mut ask)?;
+    let done = generate(&description, a.model.clone(), &reg, &mut api, &mut ask)?;
     std::fs::write(&a.out, &done.yaml).map_err(|e| format!("cannot write {}: {e}", a.out))?;
     for i in done.report.warnings() {
         println!("warning {} {}: {}", i.rule, i.path, i.message);
@@ -125,33 +117,6 @@ fn unless_cancelled(
         return Err("cancelled".into());
     }
     api(p)
-}
-
-fn parse_args(args: &[&str]) -> Result<Args, String> {
-    let mut a = Args {
-        input: None,
-        out: DEFAULT_OUT.into(),
-        model: None,
-    };
-    let mut it = args.iter();
-    while let Some(flag) = it.next() {
-        let mut value = || {
-            it.next()
-                .map(|v| v.to_string())
-                .ok_or_else(|| format!("{flag} needs a value"))
-        };
-        match *flag {
-            "--in" => a.input = Some(value()?),
-            "--out" => a.out = value()?,
-            "--model" => a.model = Some(value()?),
-            other => {
-                return Err(format!(
-                    "unknown argument {other}; usage: dagon ai topology [--in <file>] [--out <yaml>] [--model <id>]"
-                ))
-            }
-        }
-    }
-    Ok(a)
 }
 
 #[derive(Debug)]
@@ -484,20 +449,6 @@ mod tests {
         let size = system_text(Registry::builtin()).len();
         assert!(size < crate::agents::MAX_REQUEST / 2, "{size}");
         std::fs::remove_dir_all(&home).unwrap();
-    }
-
-    #[test]
-    fn args_and_model_override() {
-        let a = parse_args(&[]).unwrap();
-        assert_eq!((a.out.as_str(), a.model.as_deref()), (DEFAULT_OUT, None));
-        assert!(a.input.is_none());
-        let a = parse_args(&["--in", "d.txt", "--model", "m2"]).unwrap();
-        assert_eq!(
-            (a.input.as_deref(), a.model.as_deref()),
-            (Some("d.txt"), Some("m2"))
-        );
-        assert!(parse_args(&["--out"]).is_err());
-        assert!(parse_args(&["--bogus"]).is_err());
     }
 
     #[test]

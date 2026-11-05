@@ -20,7 +20,7 @@ use dagon_sign::image::{self, sign_image, ImageSpec};
 use dagon_sim::{demo_hub, watch_config, Layout, SimFlash, SimHub, SimLink, SimNode, TrialApp};
 use ed25519_compact::KeyPair;
 
-use crate::config::Opts;
+use crate::cli::{DemoArgs, ServeArgs};
 use crate::serve::Medium;
 
 const YAML: &str = include_str!("../../../topology/sample.yaml");
@@ -36,9 +36,9 @@ const HUB_LEN: usize = 128 * 1024;
 const SEG_LEN: usize = 48 * 1024;
 const CORE_LEN: usize = 16 * 1024;
 const WATCH_LEN: usize = 48 * 1024;
-const SPEEDS: std::ops::RangeInclusive<f64> = 0.1..=20.0;
+pub(crate) const SPEEDS: std::ops::RangeInclusive<f64> = 0.1..=20.0;
 /// The 子機 a failure can be set on.
-const NODES: [&str; 2] = ["seg", "watch"];
+pub(crate) const NODES: [&str; 2] = ["seg", "watch"];
 
 /// A node of the simulator: MCU, port kind, target tag.
 struct Board {
@@ -237,18 +237,13 @@ fn demo_dir_name(user: &str) -> String {
     format!("{DEMO_DIR}-{hex}")
 }
 
-/// `dagon demo [--sim-speed <x>] [--sim-fail seg|watch]
-/// [--uplink usb-cdc|uart|wifi-tcp] [--port <n>] [--no-open]`
-pub fn command(args: &[&str]) -> Result<(), String> {
-    let no_open = args.contains(&"--no-open");
-    let rest: Vec<&str> = args.iter().copied().filter(|a| *a != "--no-open").collect();
-    let o = Opts::parse(&rest, &["sim-speed", "sim-fail", "uplink", "port"])?;
-    if !o.pos.is_empty() {
-        return Err("demo takes options only".into());
-    }
-    let speed: f64 = o.get("sim-speed").map_or(Ok(1.0), |s| {
-        s.parse().map_err(|_| "--sim-speed must be a number")
-    })?;
+/// `dagon demo`: `--sim-fail` and `--uplink` are checked by the parser
+/// against [`NODES`] and the simulated media.
+pub fn command(a: &DemoArgs) -> Result<(), String> {
+    let speed: f64 = a
+        .sim_speed
+        .parse()
+        .map_err(|_| "--sim-speed must be a number")?;
     if !SPEEDS.contains(&speed) {
         return Err(format!(
             "--sim-speed must be {} to {}",
@@ -256,20 +251,11 @@ pub fn command(args: &[&str]) -> Result<(), String> {
             SPEEDS.end()
         ));
     }
-    let fail = o.get("sim-fail");
-    if let Some(f) = fail.filter(|f| !NODES.contains(f)) {
-        return Err(format!(
-            "--sim-fail takes a 子機: {} (not {f})",
-            NODES.join(" or ")
-        ));
-    }
-    let uplink = match o.get("uplink") {
-        None => Medium::UsbCdc,
-        Some(u) => Medium::ALL
-            .into_iter()
-            .find(|m| m.kind().name() == u)
-            .ok_or_else(|| format!("--uplink takes usb-cdc, uart or wifi-tcp (not {u})"))?,
-    };
+    let fail = a.sim_fail.as_deref();
+    let uplink = Medium::ALL
+        .into_iter()
+        .find(|m| m.kind().name() == a.uplink)
+        .ok_or_else(|| format!("--uplink: no simulated link {}", a.uplink))?;
     let user = std::env::var("USERNAME")
         .or_else(|_| std::env::var("USER"))
         .unwrap_or_default();
@@ -291,15 +277,13 @@ pub fn command(args: &[&str]) -> Result<(), String> {
         ),
     ];
     let sim = Arc::new(sim);
-    let config = config.to_string_lossy().into_owned();
-    let mut serve_args = vec!["--config", config.as_str()];
-    if let Some(p) = o.get("port") {
-        serve_args.extend(["--port", p]);
-    }
-    if no_open {
-        serve_args.push("--no-open");
-    }
-    crate::serve::run(&serve_args, Some(sim))
+    let serve = ServeArgs {
+        config: Some(config.to_string_lossy().into_owned()),
+        port: a.port.clone(),
+        no_open: a.no_open,
+        ..Default::default()
+    };
+    crate::serve::run(&serve, Some(sim))
 }
 
 #[cfg(test)]
@@ -512,13 +496,13 @@ mod tests {
 
     #[test]
     fn options_are_checked() {
-        for bad in [
-            &["--sim-speed", "0"][..],
-            &["--sim-speed", "fast"],
-            &["--sim-fail", "hub"],
-            &["extra"],
-        ] {
-            assert!(command(bad).is_err(), "{bad:?}");
+        // The parser refuses an unknown 子機 or uplink (cli tests); the speed
+        // is checked here.
+        for bad in ["0", "fast"] {
+            assert!(
+                command(&crate::cli::args(&["--sim-speed", bad])).is_err(),
+                "{bad}"
+            );
         }
     }
 }

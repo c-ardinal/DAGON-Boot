@@ -21,6 +21,9 @@ name = "dagon"
 path = "src/main.rs"
 
 [dependencies]
+# MIT OR Apache-2.0. Every command and option is a clap definition: parsing,
+# --help and usage errors all come from it.
+clap = { version = "4.6", features = ["derive"] }
 dagon-format = { path = "../dagon-format" }
 ed25519-compact = { version = "2", default-features = false }
 serde = { version = "1", features = ["derive"] }

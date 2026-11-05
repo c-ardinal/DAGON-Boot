@@ -31,7 +31,8 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{mpsc, Arc, Mutex};
 use std::time::Duration;
 
-use crate::config::{Config, Opts, CONFIG_FILE};
+use crate::cli::ServeArgs;
+use crate::config::{Config, CONFIG_FILE};
 use http::{Request, Response};
 use jobs::Server;
 
@@ -58,68 +59,63 @@ fn passphrase() -> Result<String, String> {
     Ok(dagon_sign::to_hex(&b))
 }
 
-/// `dagon serve [--port <n>] [--web <dir>] [--no-open] [--config <file>]`
 /// The key the page verifies with at start, through the same checks as an
 /// opened project: --pubkey, pubkey in dagon.toml (also only from the
 /// project or a key folder), else the public half of the signing key
 /// (--key or DAGON_SIGNING_KEY). None when none of them is given: serve
 /// starts on the start screen and the key comes with the project.
 fn start_key(
-    o: &Opts<'_>,
+    a: &ServeArgs,
     server: &Server,
     config: Option<&Path>,
 ) -> Result<Option<[u8; 32]>, String> {
     let c = api::config_at(server, config)?;
-    let explicit_key = o.get("key").is_some() || std::env::var_os(crate::config::KEY_ENV).is_some();
-    match (o.get("pubkey"), &c.pubkey) {
+    let explicit_key = a.key.is_some() || std::env::var_os(crate::config::KEY_ENV).is_some();
+    match (a.pubkey.as_deref(), &c.pubkey) {
         (Some(p), _) => crate::config::checked_pubkey(&c, Path::new(p)).map(Some),
         (None, Some(_)) => api::release_key_of(&c).map(Some),
-        (None, None) if explicit_key => Ok(Some(*crate::config::load_key(o.get("key"))?.pk)),
+        (None, None) if explicit_key => Ok(Some(*crate::config::load_key(a.key.as_deref())?.pk)),
         (None, None) => Ok(None),
     }
 }
 
-pub fn command(args: &[&str]) -> Result<(), String> {
-    run(args, None)
+pub fn command(a: &ServeArgs) -> Result<(), String> {
+    run(a, None)
 }
 
 /// `dagon serve`, with the simulator of `dagon demo` when `sim` is
 /// given (the page then reaches it instead of a real hub).
-pub fn run(args: &[&str], sim: Option<Arc<SimDevice>>) -> Result<(), String> {
+pub fn run(a: &ServeArgs, sim: Option<Arc<SimDevice>>) -> Result<(), String> {
     // serve's output is a log for a person (a terminal, or a file it is
     // sent to): the banner opens it. Machine-readable output never has it.
     println!("{}\n", crate::banner_text());
-    let no_open = args.contains(&"--no-open");
-    let args: Vec<&str> = args.iter().copied().filter(|a| *a != "--no-open").collect();
-    let o = Opts::parse(&args, &["port", "web", "config", "pubkey", "key"])?;
-    if !o.pos.is_empty() {
-        return Err("serve takes options only".into());
-    }
-    let config = match o.get("config") {
+    let no_open = a.no_open;
+    let config = match a.config.as_deref() {
         Some(p) => Some(PathBuf::from(p)),
         None => Path::new(CONFIG_FILE)
             .exists()
             .then(|| PathBuf::from(CONFIG_FILE)),
     };
-    let cfg = Config::load(o.get("config"))?;
+    let cfg = Config::load(a.config.as_deref())?;
     // The page verifies releases with the developer's public key, given
     // now (not baked into the page): --pubkey, pubkey in dagon.toml, or the
     // public half of the signing key. The test key needs
     // DAGON_ALLOW_TEST_KEY=1.
-    let web = match o.get("web") {
+    let web = match a.web.as_deref() {
         Some(w) => PathBuf::from(w),
         None if api::page_embedded() => PathBuf::new(),
         None => cfg.base.join(DEFAULT_WEB),
     };
-    let port: u16 = o
-        .get("port")
+    let port: u16 = a
+        .port
+        .as_deref()
         .map_or(Ok(0), |p| p.parse().map_err(|_| "--port must be a number"))?;
     // Loopback only: never 0.0.0.0.
     let listener = TcpListener::bind(("127.0.0.1", port))
         .map_err(|e| format!("cannot listen on 127.0.0.1:{port}: {e}"))?;
     let port = listener.local_addr().map_err(|e| e.to_string())?.port();
     let server = Server::new(passphrase()?, port, config.clone(), web.clone());
-    let key = start_key(&o, &server, config.as_deref()).map_err(|e| {
+    let key = start_key(a, &server, config.as_deref()).map_err(|e| {
         format!(
             "dagon serve needs the developer's public key: pass --pubkey <file> \
              (from dagon key gen) or set pubkey in dagon.toml ({e})"

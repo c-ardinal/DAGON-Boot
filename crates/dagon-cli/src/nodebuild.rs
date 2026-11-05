@@ -17,7 +17,8 @@ use std::time::Duration;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-use crate::config::{BuildInputs, Config, Opts};
+use crate::cli::BuildArgs;
+use crate::config::{BuildInputs, Config};
 
 const OUT_DIR: &str = "out/build";
 const RECORD: &str = "build.json";
@@ -413,16 +414,15 @@ fn artifact(line: &str, bin: &str) -> Option<PathBuf> {
         .flatten()
 }
 
-/// `dagon build [<id>...] [--config <file>]`
-pub fn command(args: &[&str]) -> Result<(), String> {
-    let o = Opts::parse(args, &["config"])?;
-    let cfg = Config::load(o.get("config"))?;
+/// `dagon build`
+pub fn command(a: &BuildArgs) -> Result<(), String> {
+    let cfg = Config::load(a.config.as_deref())?;
     if cfg.build.is_empty() {
         return Err("no [build.<id>] tables in dagon.toml".into());
     }
-    let nodes: Vec<String> = o.pos.iter().map(|s| s.to_string()).collect();
+    let nodes = &a.nodes;
     let mut log = |l: &str| println!("{l}");
-    let built = build_nodes(&cfg, &nodes, &mut log, &AtomicBool::new(false))?;
+    let built = build_nodes(&cfg, nodes, &mut log, &AtomicBool::new(false))?;
     for b in &built {
         let files: Vec<String> = b.slots.iter().map(|s| s.1.display().to_string()).collect();
         println!("{}: {}", b.node, files.join(", "));

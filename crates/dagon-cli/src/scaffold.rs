@@ -28,7 +28,8 @@ use dagon_topology::defs::Registry;
 use dagon_topology::schema::{LinkKind, Node, Role, Topology};
 use serde::Deserialize;
 
-use crate::config::{read_topology, Config, Opts};
+use crate::cli::{GenArgs, NewArgs};
+use crate::config::{read_topology, Config};
 use crate::genfs;
 use crate::paths::contained;
 
@@ -956,18 +957,10 @@ fn project_tables(config: &Path) -> Result<ProjectTables, String> {
     toml::from_str(&text).map_err(|e| format!("{}: {e}", config.display()))
 }
 
-/// `dagon gen [<id>...] [--force-main] [--config <file>]`
-pub fn gen_command(args: &[&str]) -> Result<(), String> {
-    let force = args.contains(&"--force-main");
-    let args: Vec<&str> = args
-        .iter()
-        .copied()
-        .filter(|a| *a != "--force-main")
-        .collect();
-    let o = Opts::parse(&args, &["config"])?;
-    let config = PathBuf::from(o.get("config").unwrap_or(crate::config::CONFIG_FILE));
-    let only: Vec<String> = o.pos.iter().map(|s| s.to_string()).collect();
-    let lines = gen_project(&config, &only, force)?;
+/// `dagon gen`
+pub fn gen_command(a: &GenArgs) -> Result<(), String> {
+    let config = PathBuf::from(a.config.as_deref().unwrap_or(crate::config::CONFIG_FILE));
+    let lines = gen_project(&config, &a.nodes, a.force_main)?;
     for line in &lines {
         println!("{line}");
     }
@@ -1077,33 +1070,26 @@ update:
     )
 }
 
-/// `dagon new <dir> [--from <yaml>] [--keys <dir>]`
-pub fn new_command(args: &[&str]) -> Result<(), String> {
-    let o = Opts::parse(
-        args,
-        &["from", "keys", "dagon-path", "dagon-git", "dagon-tag"],
-    )?;
-    let [dir] = o.pos[..] else {
-        return Err("new needs <dir>".into());
-    };
-    let dir = PathBuf::from(dir);
+/// `dagon new <dir>`
+pub fn new_command(a: &NewArgs) -> Result<(), String> {
+    let dir = PathBuf::from(&a.dir);
     let name = dir
         .file_name()
         .map(|n| n.to_string_lossy().into_owned())
         .filter(|n| !n.is_empty())
         .ok_or("new needs a folder name")?;
-    let yaml = match o.get("from") {
+    let yaml = match a.from.as_deref() {
         Some(p) => std::fs::read_to_string(p).map_err(|e| format!("cannot read {p}: {e}"))?,
         None => SAMPLE.to_string(),
     };
-    let keys = match o.get("keys") {
+    let keys = match a.keys.as_deref() {
         Some(k) => PathBuf::from(k),
         None => home()?.join(".dagon").join("keys").join(&name),
     };
     let src = crate::dagonsrc::NewSource::from_options(
-        o.get("dagon-path"),
-        o.get("dagon-git"),
-        o.get("dagon-tag"),
+        a.dagon_path.as_deref(),
+        a.dagon_git.as_deref(),
+        a.dagon_tag.as_deref(),
     )?;
     let made = new_project(&dir, &name, &yaml, &keys, &src)?;
     for line in &made {

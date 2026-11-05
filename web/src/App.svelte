@@ -6,6 +6,7 @@
   import { HUB_LOCKED, hubOf, view, type Action } from './app/machine.ts';
   import { Operate, waterOf, type Progress, type ReleaseFile } from './app/operate.svelte.ts';
   import { keptChoices, type Kept } from './app/kept.ts';
+  import { logStages } from './app/stageLog.svelte.ts';
   import Graph, { type Chip, type Dot } from './graph/Graph.svelte';
   import Status from './screens/Status.svelte';
   import Drawer, { type DrawerTab } from './screens/Drawer.svelte';
@@ -839,24 +840,13 @@
   /** The timeline: each node's stage changes since the update began; it opens with the update. */
   let tlEvents = $state<StageEvent[]>([]);
   let tlStart = 0;
-  let tlLast: Record<string, string> = {};
-  $effect(() => {
-    const start = op.startedAt;
-    const prog = op.progress;
-    if (start === null) return;
-    untrack(() => {
-      if (start !== tlStart) {
-        tlStart = start;
-        tlEvents = [];
-        tlLast = {};
-        if (drawerTab === null) drawerTab = 'timeline';
-      }
-      const t = Date.now() - start;
-      const add = Object.entries(prog)
-        .filter(([id, p]) => tlLast[id] !== p.stage)
-        .map(([id, p]) => ((tlLast[id] = p.stage), { t, id, stage: p.stage }));
-      if (add.length) tlEvents = [...tlEvents, ...add];
-    });
+  logStages(op, {
+    begin: (start) => {
+      tlStart = start;
+      tlEvents = [];
+      if (drawerTab === null) drawerTab = 'timeline';
+    },
+    add: (events) => (tlEvents = [...tlEvents, ...events]),
   });
   const tlNow = $derived(tlStart && PERCENT.has(op.state) ? Math.max(0, wallMs - tlStart) : Math.max(0, ...tlEvents.map((e) => e.t)));
   /** 書込's version picker: the latest build (the project's newest release) first, then the kept packages; writing an older one is going back. */

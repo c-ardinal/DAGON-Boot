@@ -1,7 +1,7 @@
 //! Transport kind `messages-http`: a Messages API (Anthropic's protocol)
-//! over HTTPS, with the key from the environment variable the way names.
-//! The key goes only into the request header; it is never printed, logged,
-//! written or put in an error.
+//! over HTTPS, with the way's key from the OS credential store
+//! ([`crate::keystore`]). The key goes only into the request header; it is
+//! never printed, logged, written or put in an error.
 
 use std::time::Duration;
 
@@ -20,8 +20,6 @@ pub struct MessagesHttp {
     pub url: String,
     /// The `anthropic-version` header.
     pub version: String,
-    /// The environment variable holding the key.
-    pub key_env: String,
     pub model: String,
     /// An environment variable that overrides `model`, if set.
     #[serde(default)]
@@ -39,24 +37,13 @@ impl MessagesHttp {
         if !self.url.starts_with("https://") {
             return Err("url must start with https://".into());
         }
-        if !env_name(&self.key_env) || !self.model_env.as_deref().is_none_or(env_name) {
-            return Err("key_env and model_env must be environment variable names".into());
+        if !self.model_env.as_deref().is_none_or(env_name) {
+            return Err("model_env must be an environment variable name".into());
         }
         if self.model.trim().is_empty() || self.version.trim().is_empty() {
             return Err("model and version are required".into());
         }
         Ok(())
-    }
-
-    /// The key, or why there is none (naming the variable, never a value).
-    pub fn key(&self) -> Result<String, String> {
-        match std::env::var(&self.key_env) {
-            Ok(k) if !k.trim().is_empty() => Ok(k.trim().to_string()),
-            _ => Err(format!(
-                "{} is not set; export the agent's API key in that environment variable",
-                self.key_env
-            )),
-        }
     }
 
     fn model(&self, prompt: &Prompt) -> String {
@@ -98,11 +85,11 @@ fn text_of(resp: &Value) -> Result<String, String> {
 pub(crate) fn post(
     _cleared: &Cleared,
     h: &MessagesHttp,
+    key: &str,
     prompt: &Prompt,
     timeout: Duration,
 ) -> Result<String, String> {
-    let key = h.key()?;
-    text_of(&send(&h.url, &h.version, &key, &body(h, prompt), timeout)?)
+    text_of(&send(&h.url, &h.version, key, &body(h, prompt), timeout)?)
 }
 
 fn agent_error(e: ureq::Error, what: &str) -> String {
@@ -199,7 +186,6 @@ mod tests {
         MessagesHttp {
             url: "https://example.invalid/v1/messages".into(),
             version: "2023-06-01".into(),
-            key_env: "DAGON_TEST_NO_SUCH_KEY".into(),
             model: "m-def".into(),
             model_env: None,
         }
@@ -257,19 +243,17 @@ mod tests {
     }
 
     #[test]
-    fn a_cut_off_answer_and_a_missing_key_are_clear_errors() {
+    fn a_cut_off_answer_and_a_bad_definition_are_clear_errors() {
         assert!(
             text_of(&json!({ "stop_reason": "max_tokens", "content": [] }))
                 .unwrap_err()
                 .contains("cut off")
         );
-        let e = way().key().unwrap_err();
-        assert!(e.contains("DAGON_TEST_NO_SUCH_KEY"), "{e}");
         let mut bad = way();
         bad.url = "http://example.invalid".into();
         assert!(bad.check().is_err());
         bad = way();
-        bad.key_env = "lower".into();
+        bad.model_env = Some("lower".into());
         assert!(bad.check().is_err());
     }
 }

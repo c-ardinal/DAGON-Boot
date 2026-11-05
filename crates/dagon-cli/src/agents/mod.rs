@@ -15,6 +15,8 @@ use std::time::Duration;
 use serde::Deserialize;
 use serde_json::Value;
 
+use crate::keystore::Keys;
+
 const BUILTIN: [(&str, &str); 1] = [("claude.toml", include_str!("../../agents/claude.toml"))];
 /// ~/.dagon/agents/*.toml: the user's own agents and ways.
 const USER_DIR: &str = "agents";
@@ -48,6 +50,7 @@ pub mod codes {
         UNAVAILABLE = "AGENT_UNAVAILABLE",
         BUSY = "AGENT_BUSY",
         CONTEXT_TOO_LARGE = "AGENT_CONTEXT_TOO_LARGE",
+        KEY_STORE = "AGENT_KEY_STORE",
         TIMEOUT = "AGENT_TIMEOUT",
         FAILED = "AGENT_FAILED",
     }
@@ -89,6 +92,12 @@ pub enum Transport {
 pub const KINDS: [&str; 2] = ["command", "messages-http"];
 
 impl Transport {
+    /// Whether a way of this kind needs an API key (kept in the OS
+    /// credential store under the agent and way ids).
+    pub fn takes_key(&self) -> bool {
+        matches!(self, Transport::MessagesHttp(_))
+    }
+
     pub fn kind(&self) -> &'static str {
         match self {
             Transport::Command(_) => KINDS[0],
@@ -105,12 +114,12 @@ impl Transport {
 }
 
 impl WayDef {
-    /// Whether this way can be used here now: the program is on PATH, or
-    /// the key's environment variable is set (never its value).
-    pub fn available(&self) -> bool {
+    /// Whether this way of `agent` can be used here now: the program is
+    /// on PATH, or its key is in the store (never the key itself).
+    pub fn available(&self, agent: &str, keys: &Keys) -> bool {
         match &self.transport {
             Transport::Command(c) => c.program_path().is_some(),
-            Transport::MessagesHttp(h) => h.key().is_ok(),
+            Transport::MessagesHttp(_) => keys.is_set(agent, &self.id),
         }
     }
 }
@@ -248,18 +257,19 @@ fn user_files(home: &Path) -> Vec<(String, Result<String, String>)> {
     out
 }
 
+/// Variables never passed to a child of dagon, even when a way lists
+/// them: dagon reads no agent key from the environment, but a user may
+/// keep one there for other tools, and Claude Code would use it ahead of
+/// the user's own login.
+const NEVER_PASSED: [&str; 1] = ["ANTHROPIC_API_KEY"];
+
 /// Environment variables a child process of dagon never sees: the signing
-/// key's and every key an agent way names.
-pub fn secret_env(home: Option<&Path>) -> Vec<String> {
-    let mut out = vec![crate::config::KEY_ENV.to_string()];
-    for a in Agents::load(home).list {
-        for w in a.ways {
-            if let Transport::MessagesHttp(h) = w.transport {
-                out.push(h.key_env);
-            }
-        }
-    }
-    out
+/// key's and [`NEVER_PASSED`].
+pub fn secret_env(_home: Option<&Path>) -> Vec<String> {
+    std::iter::once(crate::config::KEY_ENV)
+        .chain(NEVER_PASSED)
+        .map(str::to_string)
+        .collect()
 }
 
 /// What every AI feature sends: the same two texts whatever the way.
@@ -300,7 +310,12 @@ pub(crate) fn before_call(home: &Path, prompt: &Prompt) -> Result<Cleared, Strin
 
 /// The linked agent, reached the linked way: the one call of every AI
 /// feature.
-pub(crate) fn call(home: &Path, prompt: &Prompt, timeout: Duration) -> Result<String, String> {
+pub(crate) fn call(
+    home: &Path,
+    keys: &Keys,
+    prompt: &Prompt,
+    timeout: Duration,
+) -> Result<String, String> {
     let cleared = before_call(home, prompt)?;
     let agents = Agents::load(Some(home));
     let c = cleared.consent();
@@ -309,13 +324,25 @@ pub(crate) fn call(home: &Path, prompt: &Prompt, timeout: Duration) -> Result<St
         .ok_or(crate::consent::NOT_LINKED)?;
     match &way.transport {
         Transport::Command(cmd) => command::run(&cleared, cmd, prompt, timeout),
-        Transport::MessagesHttp(h) => http::post(&cleared, h, prompt, timeout),
+        Transport::MessagesHttp(h) => {
+            let key = key_of(keys, &c.agent, &c.way)?;
+            http::post(&cleared, h, &key, prompt, timeout)
+        }
     }
+}
+
+/// The way's key from the store, or why there is none (never a value).
+fn key_of(keys: &Keys, agent: &str, way: &str) -> Result<String, String> {
+    keys.get(agent, way)?.ok_or_else(|| {
+        format!(
+            "no API key is registered for {agent}/{way}; register it with              dagon ai key set --agent {agent} --way {way} or in DAGON Console"
+        )
+    })
 }
 
 /// The linked way's problem before any call: Err(why) when it cannot be
 /// used here (no program, no key).
-pub(crate) fn ready(home: &Path) -> Result<(), String> {
+pub(crate) fn ready(home: &Path, keys: &Keys) -> Result<(), String> {
     let Some(c) = crate::consent::consent(home) else {
         return Err(crate::consent::NOT_LINKED.into());
     };
@@ -330,7 +357,7 @@ pub(crate) fn ready(home: &Path) -> Result<(), String> {
                 cmd.program
             )
         }),
-        Transport::MessagesHttp(h) => h.key().map(|_| ()),
+        Transport::MessagesHttp(_) => key_of(keys, &c.agent, &c.way).map(|_| ()),
     }
 }
 

@@ -21,6 +21,7 @@ mod flashdev;
 #[allow(clippy::disallowed_methods)]
 mod genfs;
 mod kept;
+mod keystore;
 mod nodebuild;
 // Writes outside genfs: implements the atomic write genfs and the commands use.
 #[allow(clippy::disallowed_methods)]
@@ -130,9 +131,14 @@ Usage:
                                      link DAGON to an agent one way (default: the first
                                      agent's first way; agents are TOML files, builtin or
                                      in ~/.dagon/agents): shows where it sends and what,
-                                     and asks your consent once; logins and keys stay
-                                     with the agent or in the environment
+                                     and asks your consent once; logins stay with the
+                                     agent, API keys in the OS credential store
   dagon ai unlink                    unlink DAGON and withdraw the consent
+  dagon ai key set|status|delete [--agent <id>] [--way <id>]
+                                     an agent's API key in the OS credential store
+                                     (Windows Credential Manager, macOS Keychain, Secret
+                                     Service): set reads it without echo; status shows
+                                     登録済み / 未登録 for every way that takes a key
   dagon ai ask <question>            ask DAGON about the topology of ./dagon.toml; a
                                      proposed change is shown as a diff, never applied
   dagon ai topology [--in <text>] [--out <yaml>] [--model <id>]
@@ -189,6 +195,7 @@ fn main() -> ExitCode {
         ["ai", "ask", rest @ ..] => run(ask::command(rest)),
         ["ai", "link", rest @ ..] => run(consent::link_command(rest)),
         ["ai", "unlink", rest @ ..] => run(consent::unlink_command(rest)),
+        ["ai", "key", rest @ ..] => run(keystore::command(rest)),
         _ => usage_error("unknown command"),
     }
 }

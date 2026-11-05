@@ -171,6 +171,8 @@ pub fn handle(server: &Arc<Server>, req: &Request) -> Response {
         ("GET", ["agent"]) => Ok(agent_get(server)),
         ("POST", ["agent", "link"]) => agent_link(server, req),
         ("DELETE", ["agent", "link"]) => agent_unlink(server),
+        ("PUT", ["agent", "key", agent, way]) => key_put(server, agent, way, req),
+        ("DELETE", ["agent", "key", agent, way]) => key_delete(server, agent, way),
         ("POST", ["agent", "ask"]) => agent_ask(server, req),
         ("GET", ["targets"]) => targets(server),
         ("GET", ["definitions"]) => definitions(server),
@@ -216,8 +218,9 @@ pub fn handle(server: &Arc<Server>, req: &Request) -> Response {
 /// What dagon demo refuses: other projects (opening one would load its
 /// signing key) and everything that touches real hardware or the machine.
 /// Never a real agent in a demo either: linking, questions, AI routes.
-const DEMO_REFUSED: [&str; 11] = [
+const DEMO_REFUSED: [&str; 12] = [
     "agent/link",
+    "agent/key",
     "agent/ask",
     "ai",
     "project/open",
@@ -413,9 +416,10 @@ fn agent_api(
             f(p)
         }));
     }
-    crate::agents::ready(&home)?;
+    let keys = server.keys().clone();
+    crate::agents::ready(&home, &keys)?;
     Ok(Box::new(move |p: &crate::agents::Prompt| {
-        crate::agents::call(&home, p, timeout)
+        crate::agents::call(&home, &keys, p, timeout)
     }))
 }
 
@@ -485,7 +489,59 @@ fn agent_linked(server: &Server) -> bool {
 /// here; never a key, path or command), the consent, what linking sends.
 fn agent_get(server: &Server) -> Response {
     let home = super::project::home(server).ok();
-    json_ok(crate::consent::status(home.as_deref(), &agents_of(server)))
+    json_ok(crate::consent::status(
+        home.as_deref(),
+        &agents_of(server),
+        server.keys(),
+    ))
+}
+
+/// The defined way `agent`/`way` that takes a key: 404 for no such way,
+/// 400 for one that takes none (its login stays with the agent).
+fn key_way(server: &Server, agent: &str, way: &str) -> Result<(), Response> {
+    let agents = agents_of(server);
+    let (_, w) = agents
+        .way(agent, way)
+        .ok_or_else(|| Response::error(404, "no such agent and way"))?;
+    if w.transport.takes_key() {
+        Ok(())
+    } else {
+        Err(Response::error(400, "this way takes no key"))
+    }
+}
+
+/// A key store error: 503 AGENT_KEY_STORE when the store cannot be used,
+/// with its reason (never the key).
+fn key_store_failure(e: &str) -> Response {
+    coded(503, e, crate::agents::codes::KEY_STORE)
+}
+
+/// PUT /v1/agent/key/<agent>/<way> {key}: registers the way's key in the
+/// OS credential store. The answer is GET /v1/agent's body (whether a key
+/// is registered, never the key).
+fn key_put(server: &Server, agent: &str, way: &str, req: &Request) -> Res {
+    key_way(server, agent, way)?;
+    let v = body_json(req)?;
+    let key = v["key"]
+        .as_str()
+        .ok_or_else(|| Response::error(400, "key must be a string"))?;
+    let key = crate::keystore::check_key(key).map_err(|e| Response::error(400, &e))?;
+    server
+        .keys()
+        .set(agent, way, key)
+        .map_err(|e| key_store_failure(&e))?;
+    Ok(agent_get(server))
+}
+
+/// DELETE /v1/agent/key/<agent>/<way>: removes the way's key (fine when
+/// none was registered).
+fn key_delete(server: &Server, agent: &str, way: &str) -> Res {
+    key_way(server, agent, way)?;
+    server
+        .keys()
+        .delete(agent, way)
+        .map_err(|e| key_store_failure(&e))?;
+    Ok(agent_get(server))
 }
 
 /// POST /v1/agent/link {agent, way, consent:true}: records the user's
@@ -551,7 +607,7 @@ fn hello(server: &Server) -> Response {
         "workspace": workspace,
         "features": features,
         // The way DAGON uses (linked, else the default) can be used here.
-        "api_key": crate::consent::status(super::project::home(server).ok().as_deref(), &agents_of(server))["available"],
+        "api_key": crate::consent::status(super::project::home(server).ok().as_deref(), &agents_of(server), server.keys())["available"],
         "key": key.is_some(),
         "key_id": key,
         "release_key": server.release_key().map(|k| to_hex(&k)),

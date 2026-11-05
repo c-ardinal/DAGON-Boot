@@ -58,12 +58,13 @@ async fn main(spawner: Spawner) {
         flash: p.FLASH,
         target_tag: wiring::NODE.tag,
         board: node::plain_board(),
+        board_extension: None,
     };
     node::start(
         armed,
         dagon,
         p.FROM_CPU_INTR1,
-        NodeConfig::app(app::self_check),
+        NodeConfig::app(app::dagon()),
         &LIVENESS,
     );
     app::start(spawner, &LIVENESS);

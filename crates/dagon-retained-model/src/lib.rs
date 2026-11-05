@@ -6,7 +6,8 @@
 //! ([`record::RecordCodec`], [`fuse::FuseCodec`], [`topology::BodyCodec`])
 //! so a production codec plugs into the same harness and stays checked.
 //!
-//! Worlds ([`world_record`], [`world_fuse`], [`world_topology`]) generate
+//! Worlds ([`world_record`], [`world_fuse`], [`world_topology`],
+//! [`world_trial`]: the boot core trial cell) generate
 //! seeded scenarios with faults after any byte, run them against an oracle
 //! and check the properties P1..P26 after every operation; a failure
 //! shrinks to a minimal case ([`harness`]). [`identity`] and [`boot`] hold
@@ -25,3 +26,4 @@ pub mod topology;
 pub mod world_fuse;
 pub mod world_record;
 pub mod world_topology;
+pub mod world_trial;

@@ -32,7 +32,7 @@ fn every_slot_matches_dagon_sign() {
             }
         }
     }
-    assert_eq!(seen, 9);
+    assert_eq!(seen, 10);
 }
 
 #[test]
@@ -56,7 +56,8 @@ fn provision_layouts_match() {
 #[test]
 fn host_rom_path_matches() {
     use dagon_host::rom::{rom_maps, RomSlot};
-    // The values dagon-host's rom.rs held before it read the definitions.
+    // The F401's layout: stage0 in sector 0, one log for both targets in
+    // sectors 1-2, boot core A in sector 4, APP-A in sector 5.
     let maps = rom_maps(reg());
     assert_eq!(maps.len(), 1, "only the F401 has a ROM I2C loader");
     let m = &maps[0];
@@ -64,9 +65,9 @@ fn host_rom_path_matches() {
     assert_eq!(
         m.bootcore,
         RomSlot {
-            header: 0x0800_7E00,
-            load: 0x0800_0000,
-            max_payload: 0x7E00
+            header: 0x0801_0000,
+            load: 0x0801_0200,
+            max_payload: 0x1_0000 - 512
         }
     );
     assert_eq!(
@@ -77,8 +78,10 @@ fn host_rom_path_matches() {
             max_payload: 0x2_0000 - 512
         }
     );
-    assert_eq!(m.log_a, 0x0800_8000);
-    assert_eq!(m.erase, [0, 1, 2, 3, 5]);
+    assert_eq!(m.log_a, 0x0800_4000);
+    assert_eq!(m.stage0, Some((0x0800_0000, 0x4000)));
+    assert!(m.shared_log);
+    assert_eq!(m.erase, [0, 1, 2, 4, 5]);
     assert_eq!(m.addr, dagon_romlink::ROM_ADDR);
 }
 
@@ -138,7 +141,10 @@ fn first_write_parts_load_from_the_tree() {
         names(&tree.mcu("rp2040").unwrap().parts),
         ["stage0", "bootcore"]
     );
-    assert_eq!(names(&tree.mcu("stm32f401re").unwrap().parts), ["bootcore"]);
+    assert_eq!(
+        names(&tree.mcu("stm32f401re").unwrap().parts),
+        ["stage0", "bootcore"]
+    );
     assert!(tree.mcu("esp32s3").unwrap().parts.is_empty());
     let watch = &tree.board("m5stopwatch").unwrap().parts;
     assert_eq!(

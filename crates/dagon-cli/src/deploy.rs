@@ -204,14 +204,18 @@ pub(crate) fn release_inputs(
         .collect()
 }
 
-/// Signs every built slot of `elfs` as `version` and writes the release.
+/// One node's built slots.
+pub(crate) type NodeElfs = (String, SlotElfs);
+
+/// Signs every built slot of `elfs` (apps) and `cores` (boot cores, with
+/// `--bootcore`) as `version` and writes the release.
 pub(crate) fn prepare(
     cfg: &Config,
     t: &Topology,
     key: &KeyPair,
     version: Version,
     previous: &BTreeMap<String, Version>,
-    elfs: &[(String, SlotElfs)],
+    (elfs, cores): (&[NodeElfs], &[NodeElfs]),
 ) -> Result<Prepared, String> {
     let opts = SignOpts {
         version,
@@ -222,24 +226,21 @@ pub(crate) fn prepare(
     };
     let reg = crate::defs::registry(cfg)?;
     let mut images = Vec::new();
-    for (node, slots) in elfs {
+    let kinds = elfs
+        .iter()
+        .map(|e| (image_kind::APP, "", e))
+        .chain(cores.iter().map(|e| (image_kind::BOOTCORE, "bootcore-", e)));
+    for (kind, prefix, (node, slots)) in kinds {
         for (slot, elf) in slots {
             let binding = if *slot == 'b' {
                 slot_binding::B
             } else {
                 slot_binding::A
             };
-            let img = image_for_node(
-                &reg,
-                t,
-                node,
-                image_kind::APP,
-                binding,
-                elf,
-                Some(&opts),
-                key,
-            )?;
-            let rel = crate::genfs::Rel::new(format!("{DEPLOY_DIR}/{version}/{node}-{slot}.img"))?;
+            let img = image_for_node(&reg, t, node, kind, binding, elf, Some(&opts), key)?;
+            let rel = crate::genfs::Rel::new(format!(
+                "{DEPLOY_DIR}/{version}/{prefix}{node}-{slot}.img"
+            ))?;
             crate::genfs::write(&cfg.base, &rel, &img)?;
             images.push(img);
         }
@@ -275,6 +276,8 @@ pub(crate) fn confirm(listing: &str, input: &mut dyn BufRead) -> bool {
 
 /// Flag of `deploy` (and `flash`): do not ask before writing.
 pub(crate) const YES: &str = "--yes";
+/// `dagon deploy --bootcore`: the nodes' boot cores go into the release too.
+pub(crate) const BOOTCORE: &str = "--bootcore";
 
 /// The key the firmware embeds: the build key of dagon.toml or
 /// DAGON_PUBKEY ([`crate::config::build_pubkey`]), else the signing key's
@@ -291,11 +294,18 @@ pub(crate) fn firmware_key(cfg: &Config, key: &KeyPair) -> Result<[u8; 32], Stri
     }
 }
 
-/// `dagon deploy [<id>...] [--version x.y.z] [--yes] [--port <name>]
-/// [--topology <yaml>] [--key <file>] [--config <file>]`
+/// `dagon deploy [<id>...] [--version x.y.z] [--yes] [--bootcore]
+/// [--port <name>] [--topology <yaml>] [--key <file>] [--config <file>]`
+/// (`--bootcore`: each node's boot core too, for every boot core slot its
+/// MCU definition declares; nodes without boot core slots get none).
 pub fn command(args: &[&str]) -> Result<(), String> {
     let yes = args.contains(&YES);
-    let args: Vec<&str> = args.iter().copied().filter(|a| *a != YES).collect();
+    let with_cores = args.contains(&BOOTCORE);
+    let args: Vec<&str> = args
+        .iter()
+        .copied()
+        .filter(|a| *a != YES && *a != BOOTCORE)
+        .collect();
     let o = Opts::parse(&args, &["version", "port", "topology", "key", "config"])?;
     let cfg = Config::load(o.get("config"))?;
     let t = read_topology(&cfg, &cfg.topology_path(o.get("topology"))?)?;
@@ -333,7 +343,28 @@ pub fn command(args: &[&str]) -> Result<(), String> {
         .map(|n| nodebuild::last_build(&cfg, n).map(|(_, e)| (n.clone(), e)))
         .collect::<Result<Vec<_>, _>>()?;
     let elfs = release_inputs(&cfg, &t, version, elfs)?;
-    let p = prepare(&cfg, &t, &key, version, &previous, &elfs)?;
+    let mut cores = Vec::new();
+    if with_cores {
+        let reg = crate::defs::registry(&cfg)?;
+        let hex = dagon_sign::to_hex(&fw_key);
+        for id in &nodes {
+            let n = t
+                .node(id)
+                .ok_or_else(|| format!("no node '{id}' in the topology"))?;
+            let built = crate::flash::build_core_slots(
+                &cfg,
+                &reg,
+                n,
+                &hex,
+                &mut log,
+                &AtomicBool::new(false),
+            )?;
+            if !built.is_empty() {
+                cores.push((id.clone(), built));
+            }
+        }
+    }
+    let p = prepare(&cfg, &t, &key, version, &previous, (&elfs, &cores))?;
 
     if yes {
         print!("{}", p.listing());

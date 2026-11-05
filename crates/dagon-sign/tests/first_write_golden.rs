@@ -34,7 +34,7 @@ const MCUS: [(&str, &str); 3] = [
 /// mcu, kind, slot, [header_addr, load_addr, max_payload], placement, binding.
 type SlotRow = (&'static str, u8, u8, [u32; 3], u8, u8);
 
-const SLOTS: [SlotRow; 9] = [
+const SLOTS: [SlotRow; 10] = [
     ("rp2040", 2, 0, [0x1000_8000, 0x1000_8200, 0x1_FE00], 0, 0),
     ("rp2040", 2, 1, [0x1002_8000, 0x1002_8200, 0x1_FE00], 0, 1),
     ("rp2040", 1, 0, [0x1004_8000, 0x1004_8200, 0xF_FE00], 0, 0),
@@ -43,9 +43,17 @@ const SLOTS: [SlotRow; 9] = [
         "stm32f401re",
         2,
         0,
-        [0x0800_7E00, 0x0800_0000, 0x7E00],
-        2,
+        [0x0801_0000, 0x0801_0200, 0xFE00],
         0,
+        0,
+    ),
+    (
+        "stm32f401re",
+        2,
+        1,
+        [0x0806_0000, 0x0806_0200, 0x1_FE00],
+        0,
+        1,
     ),
     (
         "stm32f401re",
@@ -68,19 +76,22 @@ const SLOTS: [SlotRow; 9] = [
 ];
 
 /// SHA-256 of each signed image, in `SLOTS` order.
-const IMAGE_SHA256: [&str; 9] = [
+const IMAGE_SHA256: [&str; 10] = [
     "9bc167e2b4ce2d8748ab5176dbd593e49660177cb10d19c7face2d31141e98cd",
     "45efbf2ff884dcfcc800d77969e6474d704321597e45426ea77e4883b2798ecc",
     "0fbf0acc6a4842b8fb658a6a901d6bd6606f6ef46edc70e9ca0ab21635017c0e",
     "455bcaa34d1174314cdd6794bbfd96bcb9d021615bd3b612a64859ddd2bb7396",
-    "1b8c15efeb6bf5cfecd43fb4a735e6a4e4f4654e21bc262dd2186389a119835e",
+    "d0c3aa83143fb19f5a229cd5c7a7bab907e50ea016f1ef7dec242ede8929a499",
+    "533b305e7d843bf92b3781b197eac5cab6ac0eeafefa8f1dc94b4e2bc97c4a9b",
     "c2a364d9ead164338b1a31f0eb77f48dff34a76d38bdd9f56b88e95d1c0fb622",
     "bcb4e5d10aa41e62c3cba546d965eaaa3a59e50e9c94fcf59ba2b73c1ea7e4cf",
     "b8a7614b2de0d1393189121b272ad9147c068e192d03fcdaf57995a9522d6af0",
     "d35b69b885455d466565b721d49e60d00c468fbd23255db87bc766e766a126a8",
 ];
-/// F401 flash.bin: 133120 bytes.
-const F401_BIN_SHA256: &str = "165128c72cbe402b472a0145f16b1ce22c3c94889f0cf4ecea8a77ba190fd2ea";
+/// F401 flash.bin (stage0, one state log for both targets, boot core A in
+/// sector 4, APP-A): 133120 bytes.
+const F401_BIN_SHA256: &str = "562cc3be57928bbaaa4cb071b5e57128d6e943ab4d9d630a8580bbba2b00a3cf";
+
 const F401_BIN_LEN: usize = 133_120;
 /// RP2040 rescue.uf2: 81920 bytes (160 blocks).
 const RP2040_UF2_SHA256: &str = "1236d745960c7709c20185f7d269ad5d5eb5599beed5bfd03ec75ade75e4b113";
@@ -190,7 +201,10 @@ fn first_install_follows_the_writer_and_layout_of_the_definition() {
         .unwrap_err()
         .contains("partition by partition"));
     assert!(one("rp2040", None).unwrap_err().contains("needs stage0"));
-    assert!(one("stm32f401re", Some(&[0; 4]))
+    assert!(one("stm32f401re", None)
+        .unwrap_err()
+        .contains("needs stage0"));
+    assert!(one("esp32s3", Some(&[0; 4]))
         .unwrap_err()
         .contains("no stage0 region"));
 }
@@ -203,7 +217,13 @@ fn signed_images_and_first_install_files_are_byte_identical() {
         .collect();
     let (bs, boot) = signed("stm32f401re", image_kind::BOOTCORE, slot_binding::A);
     let (as_, app) = signed("stm32f401re", image_kind::APP, slot_binding::A);
-    let bin = first_file("stm32f401re", None, (&bs, &boot), (&as_, &app));
+    let bin = first_file(
+        "stm32f401re",
+        Some(&payload(0x3000, 0xA5)),
+        (&bs, &boot),
+        (&as_, &app),
+    );
+
     let (bs, boot) = signed("rp2040", image_kind::BOOTCORE, slot_binding::A);
     let (as_, app) = signed("rp2040", image_kind::APP, slot_binding::A);
     let uf2 = first_file(

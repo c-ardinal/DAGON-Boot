@@ -17,6 +17,9 @@
 //! - [`node`]: the node's start and its links, reported by the MCU
 //!   package's start and serving loop.
 //!
+//! The layer's publisher folds the events into [`snapshot::AppSnapshot`]
+//! (phase, version, progress, trial) for display and log tasks.
+//!
 //! Applications read the slots through [`Agent::images`] and confirm their
 //! own trial with [`Agent::confirm_own`]; extensions answer the decision
 //! points (`accept_update`, `allow_reboot_now`, `self_check`) through the
@@ -28,6 +31,7 @@
 
 mod agent;
 mod images;
+pub mod snapshot;
 
 pub use agent::{reply_status, Agent, AppChain, Reply, IDLE_TIMEOUT_MS};
 pub use images::{ImageView, Transition};
@@ -35,7 +39,7 @@ pub use images::{ImageView, Transition};
 use dagon_events::Compact;
 use dagon_format::header::HEADER_SIZE;
 use dagon_format::Version;
-use dagon_proto::payload::StatusResp;
+use dagon_proto::payload::{self, StatusResp};
 
 // Links the standard library's critical section on hosted targets.
 #[cfg(not(target_os = "none"))]
@@ -95,6 +99,47 @@ dagon_events::state_machine! {
             pending_withdrawn(slot: u8, version: Version): Pending | Trial => Confirmed
                 emits PendingWithdrawn = 0x28 { slot: u8, version: Version }
                 observe(live, replay, host);
+        }
+    }
+
+    /// The lifecycle of one boot core slot of a self-boot MCU with a
+    /// stage0 (its definition's `bootcore` slots), kept in the boot core
+    /// records of the state log. The agent writes a new core into the idle
+    /// slot and sets it pending; stage0 tries it and the core settles the
+    /// trial itself: `confirmed` by the new core after its own check,
+    /// `rolled_back` by the old one when stage0 gave the new one up. The
+    /// app sees those at its next start.
+    pub machine core_image in App {
+        initial Empty;
+        states { Empty, Written, Pending, Confirmed, Reverted }
+        transitions {
+            /// The idle boot core slot was erased for a new core (never the
+            /// running or the confirmed core's slot).
+            erase(slot: u8, len: u32): Empty | Written | Pending | Reverted => Empty
+                emits CoreTransferStarted = 0x40 { slot: u8, len: u32 }
+                observe(live, host);
+            /// The core's body verified and its header written and read
+            /// back.
+            written(slot: u8, version: Version): Empty => Written
+                emits CoreWritten = 0x41 { slot: u8, version: Version }
+                observe(live, host);
+            /// The core is the one stage0 tries at the next reset.
+            pending_set(slot: u8, version: Version): Written | Pending | Reverted => Pending
+                emits CorePendingSet = 0x42 { slot: u8, version: Version }
+                observe(live, host);
+            /// The new core passed its own check and confirmed itself.
+            confirmed(slot: u8, version: Version): Pending => Confirmed
+                emits CoreConfirmed = 0x43 { slot: u8, version: Version }
+                observe(host);
+            /// Another core confirmed itself; this one is no longer.
+            demoted(slot: u8, version: Version): Confirmed => Written
+                emits CoreDemoted = 0x44 { slot: u8, version: Version }
+                observe(host);
+            /// Stage0 gave the pending core up (its starts ran out, or its
+            /// image failed the check) and the core in `to` recorded it.
+            rolled_back(from: u8, to: u8, reason: u8): Pending => Reverted
+                emits CoreRolledBack = 0x45 { from: u8, to: u8, reason: u8 }
+                observe(replay, host);
         }
     }
 
@@ -368,6 +413,65 @@ pub trait SlotStore {
         header: &[u8; HEADER_SIZE],
         t: &Transition,
     ) -> Result<(), StoreError>;
+
+    /// Restores the room the state logs keep for trials (a record torn by
+    /// a power cut leaves none), compacting now, while the app runs and no
+    /// trial watchdog is waiting on the boot stage: the boot stage itself
+    /// never erases. Called when the agent starts.
+    fn keep_room(&mut self) -> Result<(), StoreError> {
+        Ok(())
+    }
+
+    /// STATUS of `target`'s slots: `target::APP` is [`SlotStore::status`];
+    /// `target::BOOTCORE` the boot core slots (`active` the core that
+    /// started this app), folded from the boot core records. `None`: this
+    /// board keeps no such slots (its MCU definition declares none).
+    fn target_status(&mut self, target: u8) -> Option<StatusResp> {
+        (target == payload::target::APP).then(|| self.status())
+    }
+
+    /// [`SlotStore::write_header`] for a slot of `target` (APP, or a
+    /// `target_status` target this board keeps).
+    fn write_target_header(
+        &mut self,
+        target: u8,
+        slot: u8,
+        header: &[u8; HEADER_SIZE],
+        t: &Transition,
+    ) -> Result<(), StoreError> {
+        match target {
+            payload::target::APP => self.write_header(slot, header, t),
+            _ => Err(StoreError::Unsupported),
+        }
+    }
+
+    /// [`SlotStore::read_header`] for a slot of `target`.
+    fn read_target_header(
+        &mut self,
+        target: u8,
+        slot: u8,
+        out: &mut [u8; HEADER_SIZE],
+    ) -> Result<(), StoreError> {
+        match target {
+            payload::target::APP => self.read_header(slot, out),
+            _ => Err(StoreError::Unsupported),
+        }
+    }
+
+    /// [`SlotStore::set_pending`] for a slot of `target` (for BOOTCORE:
+    /// append SLOT_PENDING with target BOOTCORE).
+    fn set_target_pending(
+        &mut self,
+        target: u8,
+        slot: u8,
+        header: &[u8; HEADER_SIZE],
+        t: &Transition,
+    ) -> Result<(), StoreError> {
+        match target {
+            payload::target::APP => self.set_pending(slot, header, t),
+            _ => Err(StoreError::Unsupported),
+        }
+    }
 }
 
 /// Identity of the node the agent runs on.
@@ -527,5 +631,39 @@ impl<S: SlotStore + ?Sized> SlotStore for &core::cell::RefCell<S> {
         t: &Transition,
     ) -> Result<(), StoreError> {
         self.borrow_mut().confirm(slot, header, t)
+    }
+    fn target_status(&mut self, target: u8) -> Option<StatusResp> {
+        self.borrow_mut().target_status(target)
+    }
+    fn keep_room(&mut self) -> Result<(), StoreError> {
+        self.borrow_mut().keep_room()
+    }
+    fn write_target_header(
+        &mut self,
+        target: u8,
+        slot: u8,
+        header: &[u8; HEADER_SIZE],
+        t: &Transition,
+    ) -> Result<(), StoreError> {
+        self.borrow_mut()
+            .write_target_header(target, slot, header, t)
+    }
+    fn read_target_header(
+        &mut self,
+        target: u8,
+        slot: u8,
+        out: &mut [u8; HEADER_SIZE],
+    ) -> Result<(), StoreError> {
+        self.borrow_mut().read_target_header(target, slot, out)
+    }
+    fn set_target_pending(
+        &mut self,
+        target: u8,
+        slot: u8,
+        header: &[u8; HEADER_SIZE],
+        t: &Transition,
+    ) -> Result<(), StoreError> {
+        self.borrow_mut()
+            .set_target_pending(target, slot, header, t)
     }
 }

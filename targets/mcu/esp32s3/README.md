@@ -19,6 +19,11 @@ and not on the board. Kind V: the stock ESP-IDF 2nd stage with app rollback
 Reset on panic is on by default (feature `panic-reset`), so a trial image
 that panics rolls back.
 
+There is no DAGON boot stage on this MCU: the vendor's 2nd stage starts
+the app. Boot extensions therefore do not exist here, and `dagon gen`
+refuses a node's `[extensions.nodes.<id>] boot` list with that reason
+(docs/extension-manifest.md); the app's extensions run as on every MCU.
+
 ## Links
 
 Every hop carries whole DAGON frames through one interface,
@@ -78,8 +83,10 @@ Pins and wiring are not here. A board crate (`targets/boards/*`, e.g.
 UART already set up on its pins with `link::uart_config(baud)`, USB Serial/JTAG,
 the flash, the RTC timer, and a `&'static mut dyn BoardDef`:
 
-- `bring_up()`: runs once in the link task before it serves (IO expander pin
-  routing for the link). Displays and other peripherals are the app's.
+- `bring_up_port()`: the board's `BoardBringUp`, run once in the link task
+  before it serves (IO expander pin routing for the link), then
+  `app.bring_up` naming `id()`; a board without one emits nothing. Displays
+  and other peripherals are the app's.
 - `pmic_download_supported()` / `pmic_download()`: ENTER_ROM method 2
   through the board's power manager, if it has one.
 

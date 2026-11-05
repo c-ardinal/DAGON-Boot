@@ -48,6 +48,9 @@ function session(t: Transport, clock: LinkClock, fetchAsset: Fetch = site) {
     clock,
     latest: () => fetchAsset(LATEST_RELEASE),
     bootcore: (id) => fetchAsset(bootcorePath(id)),
+    // The F401's stage0 for the ROM loader's full rewrite (the simulated
+    // node runs no code, so any bytes stand in).
+    stage0: async () => new Uint8Array(0x400).fill(0x5a),
   });
 }
 

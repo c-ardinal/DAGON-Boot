@@ -1,5 +1,6 @@
 //! Display task: owns the CO5300 AMOLED (QSPI on SPI2) and shows the running
-//! version.
+//! version, or while DAGON updates the watch the update phase
+//! ([`dagon_esp32s3_app::screen`], from the node's published events).
 //!
 //! The panel's power and reset sit on the internal I2C expander; `main` runs
 //! [`crate::power::panel_power_on`] before DAGON takes that bus and passes
@@ -8,10 +9,12 @@
 //! task runs in thread mode, below the DAGON link task, and announces a
 //! liveness budget for each blocking step.
 
-use dagon_esp32s3_app::digits::{self, Rect, MAX_CHARS, MAX_RECTS};
+use dagon_agent::snapshot::{AppSnapshot, Phase};
+use dagon_esp32s3_app::digits::{self, Rect, MAX_RECTS};
+use dagon_esp32s3_app::screen::{self, Screen};
 use dagon_mcu_esp32s3::liveness::Lease;
 use dagon_mcu_esp32s3::{node, Version};
-use embassy_time::{Duration, Instant, Timer};
+use embassy_time::{with_timeout, Duration, Instant, Timer};
 use esp_hal::{
     gpio::{Input, InputConfig, Pull},
     peripherals::{GPIO38, GPIO39, GPIO40, GPIO41, GPIO42, GPIO45, GPIO46, SPI2},
@@ -80,6 +83,10 @@ const VERSION_POLL: Duration = Duration::from_millis(20);
 /// A pause that hands the thread executor to the other demo tasks between
 /// blocking panel steps (the SPI writes do not yield by themselves).
 const YIELD: Duration = Duration::from_millis(1);
+/// How often the screen is recomputed without a new event: the trial
+/// blink and the results' hold time step at this rate.
+/// Chosen so the display stays readable; change it to suit your device.
+const TICK: Duration = Duration::from_millis(250);
 
 struct Panel {
     spi: Spi<'static, Blocking>,
@@ -182,10 +189,12 @@ async fn running_version() -> Option<Version> {
     }
 }
 
-/// Shows the running version. `powered`: the panel supply came up. Gives up
-/// quietly (the screen stays dark) if the panel cannot be driven.
+/// Shows the running version, and each update phase while it lasts
+/// (`events`: the node's published events). `powered`: the panel supply
+/// came up. Gives up quietly (the screen stays dark) if the panel cannot
+/// be driven.
 #[embassy_executor::task]
-pub async fn display_task(p: DisplayPins, lease: Lease, powered: bool) {
+pub async fn display_task(p: DisplayPins, lease: Lease, powered: bool, events: node::AppEvents) {
     if !powered {
         return;
     }
@@ -201,13 +210,43 @@ pub async fn display_task(p: DisplayPins, lease: Lease, powered: bool) {
     if !ready {
         return;
     }
-    let mut text = [0u8; MAX_CHARS];
-    let n = digits::text(running_version().await, &mut text);
+    let version = running_version().await;
+    let normal = screen::screen(Phase::Idle, None, 0, version);
+    show(&mut panel, &lease, &normal).await;
+    // Without a receiver the version stays: keep the panel (and its pins).
+    let Some(mut rx) = events.receiver() else {
+        return core::future::pending().await;
+    };
+    let (mut shown, mut since) = (normal, Instant::now());
+    let mut state: Option<AppSnapshot> = None;
+    loop {
+        if let Ok(latest) = with_timeout(TICK, rx.changed()).await {
+            let s = latest.state;
+            if state.map(|old| old.phase) != Some(s.phase) {
+                since = Instant::now();
+            }
+            state = Some(s);
+        }
+        let next = state.map_or(normal, |s| {
+            let ms = since.elapsed().as_millis() as u32;
+            screen::screen(s.phase, s.progress, ms, version)
+        });
+        if next != shown {
+            show(&mut panel, &lease, &next).await;
+            shown = next;
+        }
+    }
+}
+
+/// Draws `s` (its line and progress bar) within the draw budget.
+async fn show(panel: &mut Panel, lease: &Lease, s: &Screen) {
     let mut rects = [Rect::default(); MAX_RECTS];
-    let k = digits::layout(&text[..n], &mut rects);
+    let k = digits::layout(s.chars(), &mut rects);
     lease.busy(node::now_ms(), DRAW_BUDGET_MS);
-    let _ = panel.draw(&rects[..k]).await;
+    if panel.draw(&rects[..k]).await.is_ok() {
+        if let Some(bar) = s.percent.and_then(screen::bar) {
+            let _ = panel.fill(bar, digits::INK);
+        }
+    }
     lease.idle();
-    // Nothing changes while this image runs: keep the panel (and its pins).
-    core::future::pending::<()>().await;
 }

@@ -39,6 +39,34 @@ extension abstains, the default applies.
 | `self_check` | app | `TrialInfo` -> `Health` | board package, libraries, user (first answer wins) | each call within `DECISION_BOUND_MS` (a later answer is ignored); `Pending` keeps the "state" status and the host retries | healthy | confirming a slot not on trial; confirming outside the `confirmed` transition |
 | `confirm_plan` | host | the deploy listing -> yes or no | the interactive user (terminal, page) or `--yes`; never actions or host extensions | until the user answers | ask | skipping the key check and image verification, done before the listing is shown |
 
+## Layer `boot`
+
+### Machine `boot_extensions`
+
+Boot-stage extension calls and their time limits.
+
+States: `Ready` (initial).
+
+| Kind | Code | Transition | Payload | Observed | Notes | Description |
+|---|---|---|---|---|---|---|
+| `boot.extension_overran` | 0xf0 | `overran`: Ready → Ready | `id: ExtId` (8 B), `budget_us: u32` (4 B), `us: u32` (4 B) | live |  | An extension's handler ran longer than its `budget_us` (the manifest's `max_run_us`); the boot went on with the same decision. |
+
+### Machine `sequence`
+
+The boot core's sequence from the armed watchdog to the jump or the halt. Its events reach the boot core's extensions as they happen; nothing an extension does changes the decision.
+
+States: `Started` (initial), `WatchdogArmed`, `LogRead`, `BeforeDecision`, `Chosen`, `NoImage`, `Jumping`, `Halted`.
+
+| Kind | Code | Transition | Payload | Observed | Notes | Description |
+|---|---|---|---|---|---|---|
+| `boot.watchdog_armed` | 0x01 | `watchdog_armed`: Started → WatchdogArmed | `period_ms: u32` (4 B) | live |  | The watchdog runs with the trial period; from here extensions run. |
+| `boot.log_read` | 0x02 | `log_read`: WatchdogArmed → LogRead | `ok: bool` (1 B), `pending: bool` (1 B), `confirmed: bool` (1 B), `attempts: u8` (1 B) | live |  | The state log was read (`ok: false`: no valid face). |
+| `boot.before_decision` | 0x03 | `before_decision`: LogRead → BeforeDecision | `pending: bool` (1 B), `confirmed: bool` (1 B), `attempts: u8` (1 B) | live |  | The last event before the decision is made. |
+| `boot.slot_chosen` | 0x04 | `slot_chosen`: BeforeDecision → Chosen | `slot: u8` (1 B), `trial: bool` (1 B) | live |  | The slot to start is final (`trial`: the pending slot on a counted attempt). |
+| `boot.no_image` | 0x05 | `no_image`: BeforeDecision → NoImage | – | live |  | No slot can be started. |
+| `boot.before_jump` | 0x06 | `before_jump`: Chosen → Jumping | `slot: u8` (1 B), `trial: bool` (1 B) | live |  | The last event before control leaves DAGON. |
+| `boot.halt` | 0x07 | `halt`: NoImage → Halted | – | live |  | The boot core stays here for good. |
+
 ## Layer `app`
 
 ### Machine `decisions`
@@ -68,6 +96,21 @@ States: `Empty` (initial), `Written`, `Pending`, `Trial`, `Confirmed`, `Reverted
 | `app.demoted` | 0x26 | `demoted`: Confirmed → Written | `slot: u8` (1 B), `version: Version` (4 B) | live, host |  | The other slot was confirmed; this one is no longer. |
 | `app.rolled_back` | 0x27 | `rolled_back`: Pending \| Trial → Reverted | `from: u8` (1 B), `to: u8` (1 B), `reason: u8` (1 B) | replay, host |  | The boot core rolled the slot back (attempts exhausted, or the pending image failed its check) and started `to`. |
 | `app.pending_withdrawn` | 0x28 | `pending_withdrawn`: Pending \| Trial → Confirmed | `slot: u8` (1 B), `version: Version` (4 B) | live, replay, host |  | The confirmed slot had been set pending again; another slot was set pending, or the boot core ended its trial: it is the confirmed slot again. |
+
+### Machine `core_image`
+
+The lifecycle of one boot core slot of a self-boot MCU with a stage0 (its definition's `bootcore` slots), kept in the boot core records of the state log. The agent writes a new core into the idle slot and sets it pending; stage0 tries it and the core settles the trial itself: `confirmed` by the new core after its own check, `rolled_back` by the old one when stage0 gave the new one up. The app sees those at its next start.
+
+States: `Empty` (initial), `Written`, `Pending`, `Confirmed`, `Reverted`.
+
+| Kind | Code | Transition | Payload | Observed | Notes | Description |
+|---|---|---|---|---|---|---|
+| `app.core_transfer_started` | 0x40 | `erase`: Empty \| Written \| Pending \| Reverted → Empty | `slot: u8` (1 B), `len: u32` (4 B) | live, host |  | The idle boot core slot was erased for a new core (never the running or the confirmed core's slot). |
+| `app.core_written` | 0x41 | `written`: Empty → Written | `slot: u8` (1 B), `version: Version` (4 B) | live, host |  | The core's body verified and its header written and read back. |
+| `app.core_pending_set` | 0x42 | `pending_set`: Written \| Pending \| Reverted → Pending | `slot: u8` (1 B), `version: Version` (4 B) | live, host |  | The core is the one stage0 tries at the next reset. |
+| `app.core_confirmed` | 0x43 | `confirmed`: Pending → Confirmed | `slot: u8` (1 B), `version: Version` (4 B) | host |  | The new core passed its own check and confirmed itself. |
+| `app.core_demoted` | 0x44 | `demoted`: Confirmed → Written | `slot: u8` (1 B), `version: Version` (4 B) | host |  | Another core confirmed itself; this one is no longer. |
+| `app.core_rolled_back` | 0x45 | `rolled_back`: Pending → Reverted | `from: u8` (1 B), `to: u8` (1 B), `reason: u8` (1 B) | replay, host |  | Stage0 gave the pending core up (its starts ran out, or its image failed the check) and the core in `to` recorded it. |
 
 ### Machine `session`
 

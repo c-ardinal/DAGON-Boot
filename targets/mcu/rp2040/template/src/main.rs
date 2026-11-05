@@ -45,7 +45,7 @@ async fn main(spawner: Spawner) {
         tag: dagon_mcu_rp2040::target_tag!(),
         name: "{{node}}",
         fallback: &[],
-        self_check: app::self_check,
+        app: app::dagon(),
     };
     let (links, spare) = board::links(io, UPLINK, DOWNLINKS);
     relay::start::<Board, TASKS>(spawner, dagon, links, &GUARD, cfg);

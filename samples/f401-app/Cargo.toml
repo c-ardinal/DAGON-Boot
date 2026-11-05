@@ -14,6 +14,8 @@ publish = false
 [features]
 # Link for APP-B (0x08040200) instead of APP-A (0x08020200).
 slot-b = ["dagon-board-nucleo-f401re/slot-b"]
+# Confirm the own trial at start-up (bench use without a hub).
+confirm = []
 # Test build whose self-check fails, so its trial always rolls back
 # (samples/desk-test).
 no-confirm = []
@@ -30,6 +32,8 @@ test = false
 
 [dependencies]
 dagon-format = { path = "../../crates/dagon-format" }
+# The published AppSnapshot the display follows.
+dagon-agent = { path = "../../crates/dagon-agent" }
 
 # The firmware.
 [target.'cfg(target_os = "none")'.dependencies]

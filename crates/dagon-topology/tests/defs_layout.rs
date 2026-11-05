@@ -77,15 +77,22 @@ fn stm32f401re_matches_its_layout_and_memory_x() {
     let m = mcu("stm32f401re");
     let map = m.default_flash_map();
     assert_eq!(m.wire_id, MCU_ID);
-    assert_eq!(map.base, BOOTCORE);
+    assert_eq!(map.base, STAGE0);
     assert!(map.bytes as usize >= MIN_FLASH_SIZE);
+    let stage0 = m.layout.stage0.unwrap();
+    assert_eq!((stage0.at, stage0.size), (STAGE0, STAGE0_SIZE));
+    // One log for both targets.
     let log = m.layout.app_log.unwrap();
     assert_eq!((log.faces, log.face_size), (LOG.faces, LOG.face_len));
-    let bc = slot("stm32f401re", image_kind::BOOTCORE, slot_binding::A);
-    assert_eq!(bc.header_addr, BOOTCORE_TRAILER);
-    // build.rs: sectors 0-1 up to the trailer.
-    assert_eq!(flash(bc), (BOOTCORE, BOOTCORE_TRAILER - BOOTCORE));
+    assert_eq!(m.layout.bootcore_log, Some(log));
     for (i, b) in [slot_binding::A, slot_binding::B].into_iter().enumerate() {
+        let bc = slot("stm32f401re", image_kind::BOOTCORE, b);
+        assert_eq!((bc.start, bc.size), CORE_SLOTS[i]);
+        // build.rs: body after the header.
+        assert_eq!(
+            flash(bc),
+            (CORE_SLOTS[i].0 + HEADER_LEN, CORE_SLOTS[i].1 - HEADER_LEN)
+        );
         let a = slot("stm32f401re", image_kind::APP, b);
         assert_eq!((a.start, a.size), (SLOTS.slots[i], SLOTS.slot_len));
         assert_eq!(
@@ -101,7 +108,7 @@ fn stm32f401re_matches_its_layout_and_memory_x() {
         (TRIAL_WDT_MS, CONFIRMED_WDT_MS)
     );
     // The port's writable regions are exactly the log faces, the
-    // conformance scratch and the APP slots.
+    // conformance scratch, the boot core slots and the APP slots.
     assert_eq!(FLASH_REGIONS[0].start, log.faces[0]);
     assert_eq!(FLASH_REGIONS[0].len, 2 * log.face_size);
     let scratch = m.conformance.unwrap().scratch;
@@ -109,7 +116,15 @@ fn stm32f401re_matches_its_layout_and_memory_x() {
         (FLASH_REGIONS[1].start, FLASH_REGIONS[1].len),
         (scratch.at, scratch.size)
     );
-    assert_eq!(FLASH_REGIONS[2].start, SLOTS.slots[0]);
+    assert_eq!(
+        (FLASH_REGIONS[2].start, FLASH_REGIONS[2].len),
+        CORE_SLOTS[0]
+    );
+    assert_eq!(FLASH_REGIONS[3].start, SLOTS.slots[0]);
+    assert_eq!(
+        (FLASH_REGIONS[4].start, FLASH_REGIONS[4].len),
+        CORE_SLOTS[1]
+    );
 }
 
 #[test]

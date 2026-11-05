@@ -103,7 +103,8 @@ erased again, so a fault leaves no image the machine has not recorded.
 The agent exposes `images() -> &ImageView`
 (read-only: status, each slot's lifecycle state, own version, on
 trial). An app that confirms itself at start
-(bench use) calls `confirm_own()`, which is the `confirmed` transition:
+(bench use) asks its start for it (`App { confirm: Confirm::Own, .. }`), which
+calls `confirm_own()` after the board's bring-up; that is the `confirmed` transition:
 the `self_check` decision first, the port's confirm, the events always.
 The boot-layer transitions are replayed by the app at start (1.2, 5.5)
 so app-stage observers see them too (`app.trial_started`,
@@ -117,10 +118,34 @@ Jumping | Halted`. `plan` is pure (reads flash, computes the decision
 and the records to append); `commit` performs the image-lifecycle
 transitions `attempt`, `rolled_back`, `chosen` or `no_image`. Stage0
 has only `Entry`, `CoreChosen` and `Halted`: it picks the boot core slot
-from the boot core log and verifies that image under the one
-authentication rule of 4.7 (header signature with the project key, body
-digest) before `core_slot_chosen`; it runs no extension.
-The watchdog rule is in 4.1.
+from the boot core records of the state log and the trial cell
+(`dagon_core::bootcore::choose`; retained-formats.md 7): the pending core
+while fewer than `trial_attempts` starts are counted for it, else the
+confirmed one. It checks that the core's header is the one the record
+names and that its body matches the header's digest (4.7) before
+`core_slot_chosen`, starts the watchdog before a core on trial, and runs
+no extension. Stage0 never writes flash. The started boot core settles
+the boot core trial before its own boot decision is acted on
+(`settle_log`): the pending core appends CONFIRMED (target BOOTCORE) only
+after its own check (an app is startable and that app's header verifies
+under the core's key) and resets otherwise; the old core, started while
+another core is pending, appends the ROLLBACK. The watchdog rule is in
+4.1.
+
+The boot core image lifecycle (the agent's `core_image` machine) follows
+the app image lifecycle of 1.1 with the transitions the boot core path
+has: `erase`, `written` and `pending_set` by the agent (XFER and
+SET_PENDING with target BOOTCORE into the idle boot core slot, never the
+running or the confirmed core's), `confirmed` and `demoted` by the new
+core's own CONFIRMED, `rolled_back` by the old core's ROLLBACK (replayed
+at the app's start). There is no `Trial` state the app can see: a core
+settles its trial before any app runs. STATUS with the target byte
+`BOOTCORE` reports the boot core slots (version, header digest, running
+and confirmed core); a board whose MCU definition declares no boot core
+slots answers `Unsupported`. The number and placement of the boot core
+slots come from the MCU definition's `[[slot]] image = "bootcore"`
+entries (two for every MCU that has them; a single-slot MCU would keep
+one, and the agent then refuses BOOTCORE as it does for none).
 
 Boot-stage extensions (2) and the boot action program (5.2) run only
 from `WatchdogArmed` on: every event before it is recorded and replayed
@@ -254,7 +279,8 @@ never a half-written one that a reader accepts.
 |---|---|---|---|---|
 | App image slots (headers, bodies) and their selection (state log kind S) | node flash | image lifecycle (1.1) | `erase`, `written`, `pending_set`, `pending_moved`, `attempt`, `confirmed`, `demoted`, `rolled_back` | body first, header last (a slot has an image only once its header reads back and verifies); the state log is append-only records, each with its own CRC, on two faces that alternate: a torn record fails its CRC and is ignored, the previous record stands |
 | Vendor selection (kind V) | node flash | image lifecycle (1.1) | `pending_set`, `attempt`, `confirmed`, `rolled_back` | the vendor's two-sector scheme: a whole entry with sequence and CRC written to the other sector, the newest valid sequence wins |
-| Boot core slots and the boot core log | node flash (self-boot) | boot core image lifecycle: `Provisioned → Chosen` | host `provision` (`host.provision.recorded`), stage0 `chosen` (`boot.core_slot_chosen`) | same as the app slots and state log |
+| Boot core slots and their records (the boot core log, or the state log shared with the APP records where the MCU definition gives both logs the same faces) | node flash (self-boot with a stage0) | boot core image lifecycle (`core_image`, 1.2) | agent `erase`, `written`, `pending_set`; the new core's `confirmed` / `demoted`; the old core's `rolled_back`; host `provision` (`host.provision.recorded`); stage0 `chosen` (`boot.core_slot_chosen`, no write) | same as the app slots and state log; stage0's start count lives in the trial cell (retained-formats.md 7), not in flash |
+| Factory recovery agent (vendor-stage2 MCUs) | node flash, factory partition, header detached | image lifecycle (1.1), `erase` and `written` with target AGENT | agent, only while a confirmed app runs from an OTA slot | body first, header last; while it is written the running app (with its agent) stays the way back |
 | Installed boot image identity (vendor-stage2 MCUs) | provisioning record in the project | host `provision` | `host.provision.recorded` | written to a temporary file and renamed over the old one |
 | Boot record (retained memory, 5.5) | node RAM or retained registers | boot record: append-only, no state beyond the recorded events | every `boot.*` transition appends one event | required property: a write interrupted at any byte loses at most that event and never makes another one readable as valid; the format that meets it is defined by the executable model (5.5) |
 | Lockup fuse (retained memory, 5.5) | node RAM or retained registers | fuse: `Clear → Armed → Clear` (a call), `Armed → Tripped → Clear` (a lockup, then a clear) | armed and cleared around every sandboxed call; tripped by the next start | required property: no reset at any point forges a fuse for a call that returned or loses one for a call that locked up; the format that meets it is defined by the executable model (5.5) |
@@ -506,8 +532,17 @@ Registration per layer:
   image contains the extensions, so an update of an extension is an
   update of the boot core through the ROM path like any boot core
   change.
-- **App (embassy).** `node::start` / `board::start` take `exts: impl
-  Extension + 'static`. The MCU package creates and keeps the layer's
+- **App (embassy).** `node::start` / `board::start` take an `App`:
+  the self-check function, `exts: Option<&'static mut (dyn Extension +
+  Send)>` (the app's `extensions![..]` in a `static`; a reference, not a
+  generic, because an embassy task cannot be generic and the serving
+  task owns the chain) and `confirm` (`ByHost`, or `Own`: the start
+  confirms the app's trial). The start runs the board's `BoardBringUp`
+  port (`app.bring_up`; a board without one emits nothing) and then the
+  own confirm before the link serves. The board package's extension
+  (the board definition's `extension()`; on ESP32-S3 `NodePeripherals::
+  board_extension`) takes the chain's board place. The agent stays the
+  start's and its serving task's: no public function hands it out. The MCU package creates and keeps the layer's
   `Published`, composes it, and returns a `Reader` to the app. The
   agent's machines deliver every event into the chain, and the chain
   asks the decision methods at the three points. Where the MCU's isolation
@@ -531,7 +566,8 @@ There is no separate hooks trait; observing events and answering
 `accept_update`, `allow_reboot_now` and `self_check` are `Extension`
 methods. The MCU packages' `start` still accepts the app's
 `fn() -> bool` self-check and wraps it as a one-method extension
-(`SelfCheck`) in the user part of the chain.
+(`SelfCheck`) in the user part of the chain, after the app's extensions:
+it never abstains, so placed first it would hide their answers.
 
 ### 2.4 Waitable published state
 
@@ -1150,16 +1186,53 @@ the safety rules are made of. It is accepted only when:
 
 1. its manifest says `trusted = true` and names the trusted ports it
    provides;
-2. the project's `dagon.toml` lists it under `[boot] trusted_extensions`
-   or `[app] trusted_extensions` by id and by the SHA-256 of its built
-   artifact (the linked `.ext.*` bytes, computed by `dagon gen`);
+2. the project's `dagon.toml` lists it for the node under
+   `[extensions.nodes.<id>] trusted` by id and by the source hash of its
+   package: SHA-256 over every file of the package folder, sorted by path
+   (`/`-separated), each as its path, a zero byte, its length as a
+   little-endian u64 and its bytes with CRLF read as LF. No file is left
+   out, `target/` and hidden folders included, because `include!` and
+   `#[path]` let the compiler read any of them; running cargo inside the
+   extension's own folder therefore changes its hash. The hash is of the
+   source because the linked bytes do not exist when `dagon gen` runs.
+   `dagon gen` checks the hash (and names the one it found when they
+   differ), then checks the boot crate's dependency graph on the host:
+   cargo resolves it with every feature for every target (`--locked` once
+   its `Cargo.lock` exists), a superset of any one build of it, and every
+   package built into it (normal and build dependencies) must be DAGON's,
+   inside a declared trusted extension's folder (and so in its hash), or
+   a registry crate with a checksum in the boot crate's `Cargo.lock`. The
+   check passed, gen writes `graph.stamp`: the SHA-256 of the boot
+   crate's `Cargo.toml`, its `Cargo.lock` and each trusted extension's
+   source hash. The boot core's build recomputes that stamp and refuses
+   to build when it is missing or differs, so a boot crate whose graph
+   was not checked for exactly its current inputs is never built. The
+   graph is checked on the host and not in the build script because a
+   build script sees neither the outer build's features nor, offline,
+   every crate cargo would resolve. Not covered: the registry crates the
+   extension depends on (pinned by checksum, not reviewed), and source
+   an extension includes from outside its own folder (`include!` or
+   `#[path]` with a path leaving it), which trusted code is reviewed for
+   like any code that runs privileged;
 3. the image that contains it is signed with the project key, the
    signature covering the extension's bytes, and the device verifies
    that signature before the image runs (below);
 4. `dagon gen`, `dagon status`, `dagon doctor` and the page show the
    trusted extensions of each node by id, and VERSION reports their ids
-   and the first bytes of their artifact hashes for display (0x08) and
+   and the first bytes of their source hashes for display (0x08) and
    the full hashes for identity (0x09).
+
+A plug-in may also be trusted without providing any port: an observer
+whose manifest says `trusted = true` and observes events only. It is
+accepted under items 2 to 4 above, answers no decision point, and each
+of its handler calls is timed against its manifest's `max_run_us` like
+any extension's (a call over it is reported as
+`<layer>.extension_overran`, not stopped). The reason: a project's own
+code at boot (showing the boot on a display, driving its own hardware)
+often needs exactly what the sandbox denies an extension, such as a bus
+or a peripheral DAGON's map does not open; declaring it trusted makes it
+part of DAGON for that project instead of weakening the sandbox for
+every project.
 
 A trusted extension runs privileged, in DAGON's own regions: it is that
 part of DAGON for that project. Nothing in 4.1–4.6 holds against it, and
@@ -1182,26 +1255,65 @@ The one authentication rule, applied by every verifier in the chain
   fallback key.
 - **Who verifies what.** The agent verifies an image before `written`
   and the boot core before `chosen` on a trial boot (and checks the
-  digest on every boot). On a self-boot MCU with a stage0, **stage0
-  verifies the boot core image under the same rule before
-  `core_slot_chosen`**, not its digest alone; the boot core log's
-  confirmed record names the slot and the header digest, and stage0
-  checks both the record's digest and the signature. On a self-boot MCU
-  without a stage0, the boot core is the root and is verified by the
-  host before it is written and by the agent when it is written through
-  the update path.
+  digest on every boot). A boot core image is verified under the rule
+  by the agent before `written` and again before `pending_set` (the
+  SLOT_PENDING record names its header digest). On a self-boot MCU with
+  a stage0 whose definition sets `[layout] stage0_verifies`, stage0
+  checks the boot core header's signature under the project key built
+  into it as well as the digests. Where it is left out, stage0 checks
+  digests only: it starts a boot core only when its header's digest is
+  the one a boot core record names and its body matches that header's
+  digest; the record exists only for a core whose signature the agent
+  verified, so this chain holds only as long as the state log is written
+  by DAGON's agent and boot core alone (the sandbox, 4, keeps extensions
+  from it), and code that can write flash without the signing key (a
+  trusted-code bug, or an attacker with flash access) can make stage0
+  start an unsigned core. **This trade-off is an open owner decision.**
+  The measured cost of the verifier: the STM32F401RE stage0 is 8,216
+  bytes with digests only and about 23,960 with the Ed25519 verifier
+  (ed25519-compact `opt_size`), past its 16 KiB sector; the RP2040 stage0
+  is 7,484 of its 16,384 bytes with digests only (Waveshare board, boot2
+  included), so a verifier of that size does not fit there either within
+  the margin below. When the log's choice does not
+  check out (a corrupt slot, or a record naming a slot without a core),
+  stage0 tries the other slots on their own before it has nothing to
+  start. On a self-boot MCU without a stage0, the boot core is the root
+  and is verified by the host before it is written and by the agent when
+  it is written through the update path.
 - **Stage0 budget.** The MCU definition's `[layout] stage0.size` is the
-  whole of stage0 (vector table, the verifier, the flash reader, the
-  recovery path, the record writer); `dagon gen` emits a link-time
-  assertion (`ASSERT(SIZEOF(.text) + SIZEOF(.rodata) + SIZEOF(.data)
-  <= stage0.size - trailer)`) and a `#[cfg]`-checked constant so the
-  build fails when the verifier does not fit, and a worst-case
-  verification time (`[layout] stage0.max_ms`, the signature check plus
-  the digest of the largest boot core slot at the reset clock) that the
-  conformance build measures with the cycle counter and compares. When
-  a definition's stage0 does not fit the verifier, the layout is
-  changed (a larger stage0 region) before the first public release;
-  formats before that release carry no compatibility promise (6).
+  whole of stage0 (vector table, the log reader, the checks, the trial
+  cell); the image's memory.x gives it exactly that region, so the link
+  fails when stage0 outgrows it. RP2040: 16 KiB with boot2 (the boot
+  ROM's 256-byte second stage). STM32F401RE: 16 KiB, all of sector 0
+  where the core fetches its reset vector (the smallest erase unit
+  holding it, so no update ever erases stage0). Every build must leave
+  1/16 of the region free (`scripts/stage0_size.py`, in CI): the board-less
+  build and one per board whose definition names the MCU, since a board
+  puts its boot LED and halt pattern into stage0. Stage0 is never updated
+  in the field but is rebuilt for every new node with the toolchain of
+  that build, so an image without spare room becomes a first write that
+  cannot be built. Both stage0s use the compact SHA-256 rounds: on the
+  RP2040 the unrolled ones took stage0 from 7,484 to over 16,384 bytes,
+  for about 1.2 s less boot time on a full 128 KiB boot core slot at the
+  ROSC clock stage0 runs on. A stage0 that needs more
+  takes a larger region before the first public release; formats before
+  that release carry no compatibility promise (6).
+- **No erase under a trial watchdog.** Stage0 never writes flash, and the
+  boot core writes its records (BOOT_ATTEMPT, ROLLBACK, the boot core's
+  CONFIRMED or ROLLBACK) only into room the log already has
+  (`Log::append_in_place`): the agent reserves room for the trials an
+  image starts when it sets it pending (`Log::reserve`, `trial_room`),
+  and the app's agent restores it at start (`SlotStore::keep_room`)
+  after a power cut tore a record. Erases run only in the app, under a
+  watchdog period the definition check proves long enough: both
+  `[watchdog]` periods are at least twice `[execution]
+  erase_unit_max_ms`.
+- **Trial cell.** A node whose trial cell does not hold what is written
+  to it (`bootcore::cell_holds`, checked by the app's store and by the
+  boot core) takes no boot core (XFER refused as unsupported), and a
+  pending core that finds it broken records its own rollback, so a
+  broken core is never retried without a count.
+
 - **The root image** (stage0 where it exists, else the boot core) is
   written through the MCU's ROM loader at provisioning. ROM loaders
   verify nothing of DAGON's: whoever can drive the ROM loader can
@@ -1434,8 +1546,8 @@ smallest link payload (10).
 | 0x05 | board package version |
 | 0x06 | MCU identity (5.5): the value the image header and the compiled topology carry |
 | 0x07 | isolation (4.5): `level u8`, `kind u8`, `boot_extensions u8`, `root_protection` (kind and exact level as the definition enumerates them, e.g. `rdp1`/`rdp2`, the write-protected sectors, and whether the level is reversible), `fuse` (Clear, or Tripped with the disabled extension's identity as the model encodes it, 5.5) |
-| 0x08 | extensions, for display: per linked extension `id` (up to 32 bytes), `trusted u8`, first 8 bytes of its artifact hash; repeated TLVs, one per extension |
-| 0x09 | extensions, for identity: per trusted extension the full 32-byte SHA-256 of its linked artifact; repeated TLVs |
+| 0x08 | extensions, for display: per linked extension `id` (up to 32 bytes), `trusted u8`, first 8 bytes of its source hash (4.7); repeated TLVs, one per extension |
+| 0x09 | extensions, for identity: per trusted extension its full 32-byte source hash (4.7); repeated TLVs |
 | 0x10 | formats: pairs `(format id u8, number u8)`: wire, image-header, state-log, event, definitions, boot-program, boot-record, extension-manifest |
 | 0x20 | boot record summary (5.5): which boots the record holds and the decision and reason of the newest; layout by the model |
 | 0x21 | one page of the raw boot record region: `offset u16`, then `len` bytes (`len ≤ RECORD_PAGE`, 10); the host reads the region page by page and decodes it with the model's reader |
@@ -1683,21 +1795,26 @@ to (4.7).
 
 ```rust
 #[embassy_executor::task]
-async fn display_task(mut lcd: Lcd, events: Reader<AppSnapshot, 16>) {
+async fn display_task(mut lcd: Lcd, events: AppEvents) {
+    // AppEvents = Reader<dagon_agent::snapshot::AppSnapshot, RECENT>
     let mut rx = events.receiver().unwrap();
     loop {
         let s = rx.changed().await.state;
         match s.phase {
-            Phase::Starting | Phase::Serving => lcd.splash(s.version, s.trial),
-            Phase::Transferring => lcd.bar(s.progress),
+            Phase::Starting | Phase::Idle | Phase::Trial => lcd.splash(s.version, s.trial),
+            Phase::Transferring => lcd.bar(s.progress), // Some((done, total))
             Phase::Verifying => lcd.text("verify"),
+            Phase::Written | Phase::Pending => lcd.text("written"),
             Phase::RebootPending => lcd.text("reboot"),
             Phase::Confirmed => lcd.text("ok"),
+            Phase::RolledBack | Phase::Failed => lcd.text("back"),
             _ => {}
         }
     }
 }
-// main: let events = node::start::<Board, N>(spawner, dagon, &GUARD, tag, extensions![MyApp], UPLINK);
+// main: static EXTS: StaticCell<MyApp> = StaticCell::new();
+//       let app = App { exts: Some(EXTS.init(MyApp)), ..App::new(self_check) };
+//       let events = node::start::<Board, N>(spawner, dagon, &GUARD, tag, app, UPLINK)?;
 //       spawner.spawn(display_task(lcd, events))
 ```
 
@@ -1829,7 +1946,9 @@ impl Extension for Bench {
     fn id(&self) -> &'static str { "bench" }
     fn self_check(&mut self, _: &TrialInfo, _: &Ctx) -> Option<Health> { Some(Health::Healthy) }
 }
-// after start: if agent.images().on_trial() { agent.confirm_own(); }   // emits app.self_check, app.confirmed (and app.demoted for the other slot)
+// main: let app = App { exts: Some(EXTS.init(Bench)), confirm: Confirm::Own, ..App::new(always) };
+// The start, after the board's bring-up and while the image is on trial, calls
+// agent.confirm_own(): app.self_check, app.confirmed (and app.demoted for the other slot).
 ```
 
 ## 9. Alternatives rejected

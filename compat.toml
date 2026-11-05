@@ -54,14 +54,14 @@ name = "boot-rp2040"
 version = "0.1.0"
 packages = ["dagon-rp2040-stage0", "dagon-rp2040-bootcore"]
 paths = ["targets/mcu/rp2040/stage0", "targets/mcu/rp2040/bootcore"]
-formats = { image-header = [1], state-log = [1] }
+formats = { image-header = [1], state-log = [1], event = [1] }
 
 [[component]]
 name = "boot-stm32f401re"
 version = "0.1.0"
-packages = ["dagon-stm32f401re-bootcore"]
-paths = ["targets/mcu/stm32f401re/bootcore"]
-formats = { image-header = [1], state-log = [1] }
+packages = ["dagon-stm32f401re-stage0", "dagon-stm32f401re-bootcore"]
+paths = ["targets/mcu/stm32f401re/stage0", "targets/mcu/stm32f401re/bootcore"]
+formats = { image-header = [1], state-log = [1], event = [1] }
 
 [[component]]
 name = "mcu-rp2040"
@@ -140,6 +140,13 @@ version = "0.1.0"
 packages = ["dagon-core"]
 paths = ["crates/dagon-core"]
 formats = { image-header = [1], state-log = [1] }
+
+[[component]]
+name = "boot"
+version = "0.1.0"
+packages = ["dagon-boot"]
+paths = ["crates/dagon-boot"]
+formats = { state-log = [1], event = [1] }
 
 [[component]]
 name = "events"

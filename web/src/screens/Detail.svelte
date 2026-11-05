@@ -106,6 +106,11 @@
         ['log_generation', String(s.logGeneration)],
       );
     }
+    const c = l?.core;
+    const core = c?.slots[c.active];
+    if (c && core) {
+      rows.push(['boot_core', `${versionText(core.version)} · slot ${c.active} · ${hex(core.digest16.subarray(0, SHORT_HEX))}…`]);
+    }
     return rows;
   }
 

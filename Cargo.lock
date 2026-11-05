@@ -134,10 +134,23 @@ dependencies = [
 ]
 
 [[package]]
+name = "dagon-boot"
+version = "0.1.0"
+dependencies = [
+ "critical-section",
+ "dagon-core",
+ "dagon-events",
+ "dagon-format",
+ "dagon-port",
+ "ed25519-compact",
+]
+
+[[package]]
 name = "dagon-catalog"
 version = "0.0.0"
 dependencies = [
  "dagon-agent",
+ "dagon-boot",
  "dagon-events",
  "dagon-sim",
  "serde_json",
@@ -257,6 +270,7 @@ dependencies = [
 name = "dagon-retained-model"
 version = "0.0.0"
 dependencies = [
+ "dagon-core",
  "dagon-format",
  "dagon-proto",
 ]

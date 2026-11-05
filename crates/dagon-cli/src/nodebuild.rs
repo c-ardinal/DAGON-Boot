@@ -184,6 +184,7 @@ fn build_node(
             FirmwareEnv {
                 pubkey_hex,
                 target_tag: None,
+                boot_crate: None,
             },
             log,
             cancel,
@@ -274,6 +275,9 @@ pub(crate) struct FirmwareEnv<'a> {
     pub pubkey_hex: Option<&'a str>,
     /// DAGON_TARGET_TAG: the node's tag from the topology.
     pub target_tag: Option<&'a str>,
+    /// DAGON_BOOT_CRATE: the node's boot crate folder, which a boot stage
+    /// (stage0, boot core) is built for.
+    pub boot_crate: Option<&'a Path>,
 }
 
 /// Runs `cargo build --release --locked` in `dir`; returns the executable
@@ -296,6 +300,10 @@ pub(crate) fn cargo_build(
             None => cmd.env_remove(name),
         };
     }
+    match fw.boot_crate {
+        Some(d) => cmd.env(dagon_topology::defs::boot_folder::BOOT_FOLDER_ENV, d),
+        None => cmd.env_remove(dagon_topology::defs::boot_folder::BOOT_FOLDER_ENV),
+    };
     cmd.args([
         "build",
         "--release",

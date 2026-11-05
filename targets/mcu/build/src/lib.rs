@@ -141,6 +141,27 @@ pub fn definition_rs(text: &str) -> String {
     out += "/// Boots the boot stage gives a pending image before it rolls back\n";
     out += "/// (`[watchdog] trial_attempts`).\n";
     out += &format!("pub const TRIAL_ATTEMPTS: u8 = {attempts};\n");
+    for (key, name, what) in [
+        (
+            "trial_ms",
+            "TRIAL_WDT_MS",
+            "a trial boot (stage0 arms it before a core on trial)",
+        ),
+        ("confirmed_ms", "CONFIRMED_WDT_MS", "a confirmed boot"),
+    ] {
+        let ms = int(required(&t, "watchdog", key), key);
+        out += &format!("/// Watchdog period of {what}, ms (`[watchdog] {key}`).\n");
+        out += &format!("pub const {name}: u32 = {ms};\n");
+    }
+
+    let verifies = t
+        .get("layout")
+        .and_then(|l| l.get("stage0_verifies"))
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false);
+    out += "/// Stage0 checks a boot core header's signature too (`[layout]\n";
+    out += "/// stage0_verifies`).\n";
+    out += &format!("pub const STAGE0_VERIFIES: bool = {verifies};\n");
 
     let unit = int(required(&t, "execution", "erase_unit"), "erase_unit");
     out += "/// Largest unit one flash erase covers, bytes (`[execution] erase_unit`).\n";
@@ -182,7 +203,7 @@ pub fn definition_rs(text: &str) -> String {
 mod tests {
     use super::*;
 
-    const DEF: &str = "[watchdog]\ntrial_attempts = 3\n\
+    const DEF: &str = "[watchdog]\ntrial_attempts = 3\ntrial_ms = 4000\nconfirmed_ms = 8000\n\
                        [execution]\nmasked_max_us = 50\nerase_unit = 0x1000\n\
                        erase_unit_max_ms = 400\n\
                        [conformance]\nscratch = { at = 0x100, size = 0x10 }\n";
@@ -191,6 +212,15 @@ mod tests {
     fn constants_come_from_the_definition() {
         let rs = definition_rs(DEF);
         assert!(rs.contains("pub const TRIAL_ATTEMPTS: u8 = 3;\n"), "{rs}");
+        assert!(rs.contains("pub const TRIAL_WDT_MS: u32 = 4000;\n"), "{rs}");
+        assert!(
+            rs.contains("pub const CONFIRMED_WDT_MS: u32 = 8000;\n"),
+            "{rs}"
+        );
+        assert!(
+            rs.contains("pub const STAGE0_VERIFIES: bool = false;\n"),
+            "{rs}"
+        );
         assert!(rs.contains("pub const ERASE_UNIT: u32 = 0x1000;\n"), "{rs}");
         assert!(
             rs.contains("pub const ERASE_UNIT_MAX_MS: u32 = 400;\n"),

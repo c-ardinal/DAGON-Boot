@@ -42,6 +42,6 @@ async fn main(spawner: Spawner) {
     // DAGON_TARGET_TAG in .cargo/config.toml (the boot core uses it too).
     let tag = dagon_mcu_stm32f401re::target_tag!();
     // An unreadable state log: nothing starts and the watchdog resets.
-    node::start::<Board, TASKS>(spawner, dagon, &GUARD, tag, app::self_check, UPLINK).ok();
+    node::start::<Board, TASKS>(spawner, dagon, &GUARD, tag, app::dagon(), UPLINK).ok();
     app::start(spawner, io, &GUARD, node::APP_TASKS);
 }

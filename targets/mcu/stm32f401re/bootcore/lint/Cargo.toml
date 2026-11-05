@@ -1,0 +1,12 @@
+# The boot folder the firmware lint builds this package against
+# (`DAGON_BOOT_CRATE = "lint"` in [package.metadata.dagon] lint): a node
+# on this MCU without a board and without extensions. Never built itself.
+[package]
+name = "dagon-stm32f401re-bootcore-lint"
+version = "0.0.0"
+edition = "2021"
+publish = false
+
+[package.metadata.dagon.boot]
+node = "lint"
+mcu = "stm32f401re"

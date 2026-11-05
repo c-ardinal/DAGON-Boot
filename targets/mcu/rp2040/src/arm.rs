@@ -186,6 +186,64 @@ fn panic(_: &core::panic::PanicInfo) -> ! {
     }
 }
 
+/// The boot core trial cell (`dagon_core::bootcore::trial_cell`) in the
+/// watchdog's SCRATCH0 and SCRATCH1: they keep their value through every
+/// reset except power-on and the RUN pin (RP2040 datasheet section 4.7,
+/// "Scratch registers"). The boot ROM uses SCRATCH4-7 only.
+pub mod trial {
+    const SCRATCH: [*mut u32; 2] = [0x4005_800C as *mut u32, 0x4005_8010 as *mut u32];
+
+    pub fn read() -> [u32; 2] {
+        // SAFETY: fixed RP2040 watchdog scratch registers; reading has no
+        // side effect.
+        SCRATCH.map(|r| unsafe { r.read_volatile() })
+    }
+
+    /// Stores the cell, word 0 then word 1 (one store each).
+    pub fn write(cell: [u32; 2]) {
+        cell.into_iter()
+            .enumerate()
+            .for_each(|(i, w)| write_word(i, w));
+    }
+
+    fn write_word(i: usize, w: u32) {
+        // SAFETY: as above; nothing else in DAGON uses SCRATCH0-1.
+        unsafe { SCRATCH[i].write_volatile(w) };
+    }
+
+    /// The cell holds what is written to it (`dagon_core::bootcore::cell_holds`).
+    pub fn holds() -> bool {
+        dagon_core::bootcore::cell_holds(read, write_word)
+    }
+
+    const CTRL: *mut u32 = 0x4005_8000 as *mut u32;
+    const LOAD: *mut u32 = 0x4005_8004 as *mut u32;
+    const TICK: *mut u32 = 0x4005_802C as *mut u32;
+    const CTRL_ENABLE: u32 = 1 << 30;
+    const TICK_ENABLE: u32 = 1 << 9;
+    /// clk_ref cycles per tick: the ring oscillator's nominal 6.5 MHz at
+    /// reset, so a tick is about 1 µs (it varies with the chip).
+    const TICK_CYCLES: u32 = 6;
+    const LOAD_MAX: u32 = 0x00FF_FFFF;
+    /// The counter runs down twice per tick (erratum RP2040-E1).
+    const COUNTS_PER_US: u32 = 2;
+
+    /// Starts the watchdog for `ms` (the definition's trial period; about,
+    /// as the ring oscillator varies) before stage0 jumps to a core on
+    /// trial, so a core that hangs before it takes the watchdog over is
+    /// reset and its start counted.
+    pub fn arm_watchdog(ms: u32) {
+        let load = ms.saturating_mul(1000 * COUNTS_PER_US).min(LOAD_MAX);
+        // SAFETY: fixed RP2040 watchdog registers; the started core takes
+        // the watchdog over (embassy-rp `Watchdog::start`).
+        unsafe {
+            TICK.write_volatile(TICK_ENABLE | TICK_CYCLES);
+            LOAD.write_volatile(load);
+            CTRL.write_volatile(CTRL_ENABLE);
+        }
+    }
+}
+
 /// Starts the image whose vector table is at XIP address `body`.
 /// Interrupts must not be in use (NVIC enables and pendings are cleared).
 pub fn jump(body: u32) -> ! {

@@ -130,7 +130,7 @@ fn desk_demo_uses_each_packages_template_and_skips_what_is_missing() {
     assert!(watch.contains("dagon-board-m5stopwatch = { path = "));
     assert!(watch.contains("dagon-mcu-esp32s3 = { path = "));
     let main = read(&base, "nodes/watch/src/main.rs");
-    assert!(main.contains("board::start(") && main.contains("NodeConfig::app(app::self_check)"));
+    assert!(main.contains("board::start(") && main.contains("NodeConfig::app(app::dagon())"));
     assert!(read(&base, "nodes/watch/src/app.rs").contains("lease.busy(node::now_ms()"));
     assert!(read(&base, "nodes/watch/rust-toolchain.toml").contains("esp"));
     assert!(read(&base, "nodes/watch/.cargo/config.toml").contains("xtensa-esp32s3-none-elf"));
@@ -638,6 +638,83 @@ fn new_gen_build_f401_node() {
     new_gen_build("seg");
 }
 
+/// `dagon new` and `dagon gen`, then `node`'s generated boot crate built
+/// for every boot core slot its MCU declares and signed for that slot as a
+/// release signs it: the signer refuses an ELF whose lowest load address
+/// is not the slot's payload address (real firmware builds; CI runs them
+/// in the boot-crates job).
+fn gen_boot_core_slots_sign(node: &str) {
+    use dagon_format::header::{image_kind, slot_binding, ImageHeader, HEADER_SIZE};
+    let d = tmp(&format!("e2e-boot-{node}"));
+    let dir = d.join("proj");
+    new_project(&dir, "proj", SAMPLE, &d.join("keys"), &dev()).unwrap();
+    let config = dir.join(crate::config::CONFIG_FILE);
+    gen_project(&config, &[node.to_string()], false).unwrap();
+    let cfg = Config::load(Some(&config.to_string_lossy())).unwrap();
+    let reg = crate::defs::registry(&cfg).unwrap();
+    let t = dagon_topology::parse_str(SAMPLE).unwrap();
+    let n = t.node(node).unwrap();
+    let key = ed25519_compact::KeyPair::from_seed(ed25519_compact::Seed::new([9; 32]));
+    let mut log = Vec::new();
+    let built = crate::flash::build_core_slots(
+        &cfg,
+        &reg,
+        n,
+        &dagon_sign::to_hex(&key.pk[..]),
+        &mut |l| log.push(l.to_string()),
+        &std::sync::atomic::AtomicBool::new(false),
+    )
+    .unwrap_or_else(|e| panic!("{e}\n{}", log.join("\n")));
+    // As deploy signs a release (deploy::prepare).
+    let opts = crate::commands::SignOpts {
+        version: dagon_format::Version::new(1, 0, 0),
+        release_seq: 1,
+        min_bootcore: dagon_format::Version::default(),
+        proto: 1,
+        bits: None,
+    };
+    let slots: Vec<char> = built.iter().map(|(s, _)| *s).collect();
+    assert_eq!(slots, ['a', 'b'], "{node}");
+    for (slot, elf) in &built {
+        let binding = if *slot == 'b' {
+            slot_binding::B
+        } else {
+            slot_binding::A
+        };
+        let img = crate::commands::image_for_node(
+            &reg,
+            &t,
+            node,
+            image_kind::BOOTCORE,
+            binding,
+            elf,
+            Some(&opts),
+            &key,
+        )
+        .unwrap_or_else(|e| panic!("{node} slot {slot}: {e}"));
+        let h = ImageHeader::parse(img[..HEADER_SIZE].try_into().unwrap()).unwrap();
+        let s = dagon_sign::image::slot_with(&reg, &n.mcu, image_kind::BOOTCORE, binding).unwrap();
+        assert_eq!(
+            (h.load_addr, h.slot_binding),
+            (s.load_addr, binding),
+            "{node} slot {slot}"
+        );
+    }
+    let _ = std::fs::remove_dir_all(&d);
+}
+
+#[test]
+#[ignore = "builds firmware for the STM32F401"]
+fn gen_boot_core_slots_sign_f401() {
+    gen_boot_core_slots_sign("seg");
+}
+
+#[test]
+#[ignore = "builds firmware for the RP2040"]
+fn gen_boot_core_slots_sign_rp2040() {
+    gen_boot_core_slots_sign("hub");
+}
+
 #[test]
 fn a_new_project_whose_key_cannot_be_made_leaves_nothing_behind() {
     let d = tmp("new-undo");
@@ -773,6 +850,22 @@ fn mcu_templates_wire_the_links_the_topology_names() {
     assert!(!seg.contains("{{"), "{seg}");
     let pins = t.link_to("seg").and_then(|l| l.node_pins.clone()).unwrap();
     assert!(seg.contains(&format!("sda: p.{}", pins.sda)), "{seg}");
+    // Its DMA streams come from the MCU definition's request mapping
+    // (I2C3: tx stream 4, rx stream 1), not from the template.
+    assert!(
+        seg.contains("use embassy_stm32::peripherals::{DMA1_CH4, DMA1_CH1};"),
+        "{seg}"
+    );
+    assert!(
+        seg.contains("DMA1_STREAM1 => dma::InterruptHandler<peripherals::DMA1_CH1>;"),
+        "{seg}"
+    );
+    assert!(seg.contains("rx_dma: p.DMA1_CH1,"), "{seg}");
+    let tpl_text = tpl("stm32f401re");
+    assert!(
+        !tpl_text.contains("DMA1_CH"),
+        "the template names no stream"
+    );
     // Without a UART downlink its code is left out and still parses.
     let mut no_uart = t.clone();
     no_uart.links.retain(|l| l.kind != LinkKind::Uart);

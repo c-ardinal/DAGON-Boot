@@ -71,6 +71,7 @@ kind = "iwdg"
 trial_ms = 4_000
 confirmed_ms = 8_000
 trial_attempts = 3
+flag = "register"
 
 [execution]
 masked_max_us = 50
@@ -102,6 +103,7 @@ kind = "noinit-ram"
 at = 0x2000_F000
 size = 0x400
 survives = "reset-random"
+entropy = {{ source = "rng", min_bits = 32 }}
 rings = [{{ writer = "bootcore", at = 0x2000_F000, size = 0x400 }}]
 fuse = {{ cells = [{{ image = "app", at = 0x2000_F400, size = 0x100 }}] }}
 {BLOCKS}"#
@@ -345,7 +347,7 @@ fn the_record_lies_inside_ram_within_its_limit() {
     assert!(e.contains("trial_attempts must be above 0"), "{e}");
 }
 
-/// `[execution]`: one erase fits between two feeds; `[conformance]`: the
+/// `[execution]`: two erases fit every watchdog period; `[conformance]`: the
 /// scratch never touches an image slot.
 #[test]
 fn execution_budgets_and_conformance_scratch_are_checked() {
@@ -364,8 +366,13 @@ scratch = {conformance}
     };
     let free = "{ at = 0x0010_A000, size = 0x1000 }";
     parse_mcu_text(&with("1_000", free), &[]).unwrap();
-    let e = mcu_err(&with("8_000", free));
-    assert!(e.contains("below watchdog.confirmed_ms 8000"), "{e}");
+    // The fake's trial period is 4000 ms: two erases of 2001 ms do not fit.
+    parse_mcu_text(&with("2_000", free), &[]).unwrap();
+    let e = mcu_err(&with("2_001", free));
+    assert!(
+        e.contains("watchdog.trial_ms 4000 must be at least 2 x"),
+        "{e}"
+    );
     let slot = parse_mcu_text(&with("1_000", free), &[]).unwrap().slots[0].start;
     let e = mcu_err(&with(
         "1_000",
@@ -379,7 +386,7 @@ scratch = {conformance}
     let m = parse_mcu_text(&with("{ unverified = 1_000 }", free), &[]).unwrap();
     assert!(!m.execution.unwrap().erase_unit_max_ms.is_known());
     let e = mcu_err(&with("{ unverified = 9_000 }", free));
-    assert!(e.contains("below watchdog.confirmed_ms"), "{e}");
+    assert!(e.contains("must be at least 2 x"), "{e}");
     let e = mcu_err(&with("\"unmeasured\"", free));
     assert!(e.contains("needs a value"), "{e}");
     let unmeasured = isolated("masked_max_us = 50", "masked_max_us = \"unmeasured\"");
@@ -677,4 +684,61 @@ fn flash_offsets_of_an_mmu_mapped_mcu_share_no_space_with_register_blocks() {
     for want in [("rp2040", true), ("stm32f401re", true), ("esp32s3", false)] {
         assert!(mapped.contains(&want), "{want:?}");
     }
+}
+
+/// `[watchdog] flag` and `[boot.record] entropy`: required, facts with an
+/// establishment state, and the fuse is available only with a flag.
+#[test]
+fn the_watchdog_flag_and_the_record_entropy_are_stated_facts() {
+    use super::execution::Fact;
+    use super::isolation::{EntropySource, WatchdogFlag};
+
+    let reg = Registry::builtin();
+    let flag = |id: &str| reg.mcu(id).unwrap().watchdog.unwrap().flag;
+    assert_eq!(
+        flag("stm32f401re"),
+        Fact::Unverified {
+            unverified: WatchdogFlag::Register
+        }
+    );
+    assert_eq!(
+        flag("rp2040"),
+        Fact::Unverified {
+            unverified: WatchdogFlag::Package
+        }
+    );
+    assert_eq!(flag("esp32s3").value(), None, "unmeasured");
+    let entropy = |id: &str| reg.mcu(id).unwrap().record().unwrap().entropy;
+    let st = entropy("stm32f401re");
+    assert_eq!(st.source, EntropySource::OscCapture);
+    assert_eq!(st.min_bits.value(), None, "to be measured");
+    assert_eq!(entropy("rp2040").source, EntropySource::RingOsc);
+    // A boot record and a flag with a source; a vendor stage has neither.
+    assert_eq!(reg.mcu("stm32f401re").unwrap().fuse_unavailable(), None);
+    assert_eq!(reg.mcu("rp2040").unwrap().fuse_unavailable(), None);
+    assert!(reg.mcu("esp32s3").unwrap().fuse_unavailable().is_some());
+
+    // Required keys.
+    let e = mcu_err(&isolated("flag = \"register\"\n", ""));
+    assert!(e.contains("flag"), "{e}");
+    let e = mcu_err(&isolated(
+        "entropy = { source = \"rng\", min_bits = 32 }\n",
+        "",
+    ));
+    assert!(e.contains("entropy"), "{e}");
+    // Below the record's need; unknown words.
+    let e = mcu_err(&isolated("min_bits = 32", "min_bits = { unverified = 8 }"));
+    assert!(e.contains("at least 16"), "{e}");
+    assert!(parse_mcu_text(&isolated("\"rng\"", "\"dice\""), &[]).is_err());
+    assert!(parse_mcu_text(&isolated("\"register\"", "\"fuse\""), &[]).is_err());
+    // The loader says why a fuse is unavailable.
+    let none = parse_mcu_text(&isolated("\"register\"", "\"none\""), &[]).unwrap();
+    assert!(none.fuse_unavailable().unwrap().contains("none"));
+    let open = parse_mcu_text(&isolated("\"register\"", "\"unmeasured\""), &[]).unwrap();
+    assert!(open.fuse_unavailable().unwrap().contains("unmeasured"));
+    let unverified = isolated("\"register\"", "{ unverified = \"package\" }");
+    assert_eq!(
+        parse_mcu_text(&unverified, &[]).unwrap().fuse_unavailable(),
+        None
+    );
 }

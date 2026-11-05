@@ -4,7 +4,9 @@
 //! - The link task is the only owner of the link UART (on the board's pins),
 //!   USB Serial/JTAG, the flash, the RTC/super watchdogs and whatever the
 //!   board's `BoardDef` implementation holds (e.g. an internal I2C bus). It runs
-//!   `BoardDef::bring_up` once before serving.
+//!   the board's `BoardBringUp` port once before serving (`app.bring_up`;
+//!   a board without one emits nothing) and, with `Confirm::Own`, confirms
+//!   the app's trial.
 //!   It waits on both links with interrupt-driven async reads (no polling),
 //!   serves each request (CONF_RUN in a conformance build, ENTER_ROM, the
 //!   agent) and replies on the link the request came in on. Agent access is
@@ -47,7 +49,9 @@ use dagon_agent::{
     reply_status, Agent, SlotStore, StoreError, TrialPolicy, IDLE_TIMEOUT_MS, NO_ADDR,
 };
 use dagon_events::{Published, Watchdog as Periods};
-use dagon_mcu_common::hooks::{node_chain, Events, NodeChain};
+pub use dagon_mcu_common::hooks::BoardExtension;
+pub use dagon_mcu_common::hooks::{always, App, AppEvents, Confirm, NodeChain, SelfCheck};
+use dagon_mcu_common::hooks::{finish_start, node_chain, Events};
 use dagon_mcu_common::link::Link as DagonLink;
 use dagon_port::{BootSelectV, Reset, Watchdog};
 use dagon_proto::payload::SlotState;
@@ -92,23 +96,26 @@ pub struct NodePeripherals<'d> {
     pub target_tag: &'static str,
     /// Board extras (bring-up, optional PMIC ROM entry).
     pub board: &'d mut dyn BoardDef,
+    /// The board package's extension, which the start puts in the node's
+    /// chain after the publisher and before the app's: it observes every
+    /// event and answers the decision points before the app.
+    pub board_extension: Option<BoardExtension>,
 }
 
-/// How the node identifies itself and decides CONFIRM.
-#[derive(Clone, Copy)]
+/// How the node identifies itself, and what the app hands DAGON (its
+/// self-check, extensions and who confirms).
 pub struct NodeConfig {
     /// HELLO mode: `payload::mode::APP` (ota_0/ota_1) or `AGENT` (factory).
     pub mode: u8,
-    /// Self-check on CONFIRM while on trial; `false` keeps the trial.
-    pub self_check: fn() -> bool,
+    pub app: App,
 }
 
 impl NodeConfig {
     /// App image (ota_0/ota_1): HELLO mode app.
-    pub const fn app(self_check: fn() -> bool) -> Self {
+    pub const fn app(app: App) -> Self {
         Self {
             mode: dagon_proto::payload::mode::APP,
-            self_check,
+            app,
         }
     }
 
@@ -116,7 +123,7 @@ impl NodeConfig {
     pub const fn factory() -> Self {
         Self {
             mode: dagon_proto::payload::mode::AGENT,
-            self_check: || true,
+            app: App::new(always),
         }
     }
 }
@@ -176,37 +183,68 @@ pub fn now_ms() -> u32 {
     (EspClock.now_us() / 1000) as u32
 }
 
+/// What the link task starts with besides the peripherals.
+struct Start {
+    mode: u8,
+    confirm: Confirm,
+    chain: NodeChain,
+}
+
 /// Starts the DAGON side: the link task on a high-priority interrupt
 /// executor driven by software interrupt 1 (`esp_rtos::start` takes 0).
-/// Call once, after `esp_rtos::start`. If the flashed partition table does
-/// not match, the task stops and the watchdog resets the chip.
+/// Call once, after `esp_rtos::start`. Returns the node's events (the
+/// app's extensions in `cfg.app` see the same ones). If the flashed
+/// partition table does not match, the task stops and the watchdog resets
+/// the chip.
 pub fn start(
     _armed: WatchdogArmed,
-    p: NodePeripherals<'static>,
+    mut p: NodePeripherals<'static>,
     link_irq: FROM_CPU_INTR1<'static>,
     cfg: NodeConfig,
     liveness: &'static Liveness,
-) {
+) -> AppEvents {
     static EXECUTOR: StaticCell<InterruptExecutor<1>> = StaticCell::new();
+    static EVENTS: StaticCell<Events> = StaticCell::new();
+    let now_us: fn() -> u64 = || {
+        use dagon_port::Clock;
+        EspClock.now_us()
+    };
+    let periods = Periods::new(TRIAL_WDT_MS, TRIAL_WDT_MS);
+    let events = EVENTS.init(Published::new());
+    let board = p.board_extension.take();
+    let (chain, events) = node_chain(
+        events,
+        board,
+        cfg.app.exts,
+        cfg.app.self_check,
+        now_us,
+        periods,
+    );
+    let start = Start {
+        mode: cfg.mode,
+        confirm: cfg.app.confirm,
+        chain,
+    };
     let spawner: SendSpawner = EXECUTOR
         .init(InterruptExecutor::new(link_irq))
         .start(LINK_PRIORITY);
-    spawner.spawn(bootstrap(p, cfg, liveness).expect("link bootstrap spawned once"));
+    spawner.spawn(bootstrap(p, start, liveness).expect("link bootstrap spawned once"));
+    events
 }
 
 /// Hands the link task its peripherals on the link executor itself: the
 /// link task holds non-`Send` state, so it is spawned from there.
 #[embassy_executor::task]
-async fn bootstrap(p: NodePeripherals<'static>, cfg: NodeConfig, liveness: &'static Liveness) {
+async fn bootstrap(p: NodePeripherals<'static>, start: Start, liveness: &'static Liveness) {
     // SAFETY: awaited inside an embassy task, so the context comes from the
     // embassy executor (the documented way to spawn on an InterruptExecutor).
     let spawner = unsafe { Spawner::for_current_executor() }.await;
-    spawner.spawn(link_task(p, cfg, liveness).expect("link task spawned once"));
+    spawner.spawn(link_task(p, start, liveness).expect("link task spawned once"));
 }
 
 #[embassy_executor::task]
-async fn link_task(p: NodePeripherals<'static>, cfg: NodeConfig, liveness: &'static Liveness) {
-    if let Some(link) = Link::new(p, cfg, liveness) {
+async fn link_task(p: NodePeripherals<'static>, start: Start, liveness: &'static Liveness) {
+    if let Some(link) = Link::new(p, start, liveness) {
         link.run().await;
     }
     // No link: the RTC WDT, already running, resets the chip.
@@ -296,11 +334,7 @@ fn trying(store: &mut Store) -> bool {
 }
 
 impl Link {
-    fn new(
-        p: NodePeripherals<'static>,
-        cfg: NodeConfig,
-        liveness: &'static Liveness,
-    ) -> Option<Self> {
+    fn new(p: NodePeripherals<'static>, start: Start, liveness: &'static Liveness) -> Option<Self> {
         static STORAGE: StaticCell<RefCell<FlashStorage<'static>>> = StaticCell::new();
         static WDT: StaticCell<RefCell<Wdt>> = StaticCell::new();
         // Armed by `arm_watchdog`; not restarted here (a start feeds it).
@@ -320,29 +354,18 @@ impl Link {
             wdt.borrow_mut().end_trial();
         }
         publish_startup(&mut store);
-        static EVENTS: StaticCell<Events> = StaticCell::new();
-        let now_us: fn() -> u64 = || {
-            use dagon_port::Clock;
-            EspClock.now_us()
-        };
-        let periods = Periods::new(TRIAL_WDT_MS, TRIAL_WDT_MS);
-        let chain = node_chain(
-            EVENTS.init(Published::new()),
-            cfg.self_check,
-            now_us,
-            periods,
-        );
         let mut agent = Agent::new(
-            crate::config(cfg.mode, crate::target_tag(p.target_tag)),
+            crate::config(start.mode, crate::target_tag(p.target_tag)),
             store,
-            chain,
+            start.chain,
         );
         // The trial watchdog never feeds while on trial.
         agent.watchdog_taken(TRIAL_WDT_MS, TrialPolicy::NeverFeed);
-        // Board bring-up, once, before the links open and anything is served.
-        p.board.bring_up();
-        if let Some(id) = p.board.id() {
-            agent.bring_up(id);
+        // Board bring-up, once, before the links open and anything is
+        // served; then the app's own confirm, if it asked.
+        let id = p.board.id();
+        if !finish_start(&mut agent, id.zip(p.board.bring_up_port()), start.confirm) {
+            wdt.borrow_mut().end_trial();
         }
         let board = RomBoard {
             swd: rtc.swd,

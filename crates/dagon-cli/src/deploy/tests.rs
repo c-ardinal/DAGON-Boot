@@ -104,7 +104,7 @@ fn deploys_every_built_node_one_patch_up_through_the_simulated_hub() {
     .unwrap();
     assert_eq!(v, Version::new(1, 0, 1), "one above the [build] version");
 
-    let p = prepare(&cfg, &t, &key, v, &previous, &built(&nodes)).unwrap();
+    let p = prepare(&cfg, &t, &key, v, &previous, (&built(&nodes), &[])).unwrap();
     let listing = p.listing();
     assert!(listing.contains("deploy 1.0.1 to 2 node(s)"), "{listing}");
     assert!(listing.contains("seg  (none) -> 1.0.1"), "{listing}");
@@ -156,7 +156,7 @@ fn a_release_signed_with_another_key_is_not_applied() {
         &key,
         Version::new(1, 0, 1),
         &BTreeMap::new(),
-        &built(&nodes),
+        (&built(&nodes), &[]),
     )
     .unwrap();
     let other = KeyPair::from_seed(Seed::new([8; 32]));
@@ -229,7 +229,7 @@ fn a_generated_desk_project_deploys_every_node_including_the_esp32s3() {
         &key(),
         Version::new(1, 0, 1),
         &BTreeMap::new(),
-        &elfs,
+        (&elfs, &[]),
     )
     .unwrap();
     assert!(

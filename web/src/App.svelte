@@ -93,6 +93,7 @@
     // The project's files through dagon serve only (stand-ins in development); nothing public.
     latest: async () => (cli.state === 'ready' ? await cli.latestRelease() : null) ?? (await stand?.latest?.()) ?? null,
     bootcore: async (id) => (cli.state === 'ready' ? await cli.bootcore(id) : null) ?? (await stand?.bootcore?.(id)) ?? null,
+    stage0: async (id) => (cli.state === 'ready' ? await cli.stage0(id) : null),
   });
 
   /** `dagon serve` (§8): the page is always its page; K0/K3 when it cannot be reached. */

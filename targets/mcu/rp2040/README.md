@@ -61,9 +61,9 @@ async fn main(spawner: embassy_executor::Spawner) {
         tag: dagon_mcu_rp2040::target_tag!(),
         name: "my-hub",
         fallback: &[],
-        self_check: app::self_check,
+        app: app::dagon(),
     };
-    let spare = board::start(spawner, dagon, io, &GUARD, cfg, UPLINK, DOWNLINKS);
+    let (spare, _events) = board::start(spawner, dagon, io, &GUARD, cfg, UPLINK, DOWNLINKS);
     app::start(spawner, spare, &GUARD, board::APP_TASKS);
 }
 ```
@@ -75,6 +75,12 @@ pub const TASKS: usize = 1;
 
 pub fn self_check() -> bool {
     true
+}
+
+/// What the app hands the start: the self-check, its extensions
+/// (`exts`) and who confirms (`confirm`).
+pub fn dagon() -> App {
+    App::new(self_check)
 }
 
 /// `spare`: the pins and peripherals DAGON does not use.
@@ -185,33 +191,49 @@ the rest for the app.
 | 0x10004000 | 2 x 4 KiB | boot core state log faces (read by stage0) |
 | 0x10006000 | 2 x 4 KiB | APP state log faces A/B |
 | 0x10008000 | 128 KiB | boot core slot A (`bootcore/`), body at +0x200 |
-| 0x10028000 | 128 KiB | boot core slot B (reserved) |
+| 0x10028000 | 128 KiB | boot core slot B, as slot A |
 | 0x10048000 | 1 MiB | APP-A: 512-byte header, body at 0x10048200 |
 | 0x10148000 | 1 MiB | APP-B: same, body at 0x10148200 |
 | 0x10248000 | 4 KiB | topology display copy |
 
-The boot core starts the watchdog for 8 s before every jump.
+The boot core starts the watchdog for 8 s before every jump. Stage0 starts
+the pending boot core (written by the running app's agent from a release)
+on trial, up to 3 starts counted in the watchdog's SCRATCH0/SCRATCH1, with
+the watchdog started before the jump; else the confirmed one. The new core
+confirms itself once it can start a verified app; one that cannot is reset
+and, after its starts run out, the old core runs again and records the
+rollback.
 
 ## Boot images
 
-`stage0/` and `bootcore/` are DAGON's boot images for this MCU, built from
-this package (their memory maps and the boot core's key come from here):
+`stage0/` and `bootcore/` are DAGON's boot images for this MCU (their
+memory maps and the boot core's key come from this package). Both are
+built for one node of a project, after `dagon gen`:
 
 ```sh
 export DAGON_PUBKEY=/path/outside/the/repo/dagon-signing.pub
-(cd targets/mcu/rp2040/stage0 && cargo build --release)
-(cd targets/mcu/rp2040/bootcore && DAGON_TARGET_TAG=my-hub cargo build --release)
+(cd <project>/boot/<node> && cargo build --release)    # the boot core
+(cd targets/mcu/rp2040/stage0 && DAGON_BOOT_CRATE=<project>/boot/<node> cargo build --release)
 ```
 
-The boot core is built per node: it accepts only app images tagged with
-`DAGON_TARGET_TAG` (the node's tag, as in the app's `.cargo/config.toml`),
-and its build fails without it. A host test (`tests/hub_boot.rs`) shows another node's image refused.
-Their status LED, its polarity and the halt pattern are the board
-definition's `[boot] led`, `led_active` and `halt`: the build reads the
-board `DAGON_BOARD=<board id>` names (with `DAGON_PROJECT=<path of
-dagon.toml>`, a project's inline `[board.<id>]` too); it may be left out
-only while the MCU has a single board definition. Both builds take
-`--features diag` for step blink codes (see the hub README).
+`--features slot-b` links the boot core for boot core slot B; a release
+carries one for each slot.
+
+`dagon gen` writes the node's boot crate into `boot/<node>/` of the
+project from `bootcore/template/`: it links `bootcore` (a library) with
+the node's boot extensions (`nodes/<node>/dagon/boot_wiring.rs`, each
+declared trusted in dagon.toml, see docs/extension-manifest.md) and sets
+`DAGON_BOOT_CRATE` (that folder) and `DAGON_TARGET_TAG` (the node's tag)
+for its build. The boot core accepts only app images tagged with the
+node's tag (a host test, `tests/hub_boot.rs`, shows another node's image
+refused); its status LED, the LED's polarity and the halt pattern are the
+node's board definition's `[boot] led`, `led_active` and `halt` (a node
+without a board has none). Builds without `DAGON_BOOT_CRATE` fail, and a
+boot crate that links anything else than DAGON's packages and its
+trusted extensions with the source hash dagon.toml declares does not
+build. Both builds take `--features diag` for step blink codes (see the
+hub README).
+
 
 ## Keys
 

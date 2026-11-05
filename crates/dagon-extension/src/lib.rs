@@ -30,6 +30,8 @@ pub const BOOT_SHARE: u32 = 4;
 pub struct EventKind {
     pub layer: Layer,
     pub kind: &'static str,
+    /// Its number within its layer (`EventRecord::kind`).
+    pub code: u8,
     /// Delivered to extensions as it happens.
     pub live: bool,
     /// A boot action program may run on it.
@@ -61,6 +63,7 @@ impl Known {
                     .map(|e| EventKind {
                         layer: m.layer,
                         kind: e.kind,
+                        code: e.code,
                         live: e.observe.live,
                         action: e.flags.action,
                     })

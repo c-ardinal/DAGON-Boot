@@ -14,20 +14,31 @@ use crate::image::Slot;
 /// State log face: header (generation 1), PROVISION and CONFIRMED for
 /// slot A of `target`.
 pub fn initial_log(target: u8, image: &[u8]) -> Vec<u8> {
-    let raw: [u8; HEADER_SIZE] = image[..HEADER_SIZE].try_into().expect("signed image");
-    let h = ImageHeader::parse(&raw).expect("signed image");
-    let rec = |k, seq| Record {
-        kind: k,
-        target,
-        slot: slot::A,
-        reason: reason::NONE,
-        seq,
-        version: h.version,
-        digest16: header::header_digest16(&raw),
-    };
+    initial_log_for(&[(target, image)])
+}
+
+/// State log face holding PROVISION and CONFIRMED for slot A of each
+/// `(target, image)`, in order (one log for several targets).
+pub fn initial_log_for(images: &[(u8, &[u8])]) -> Vec<u8> {
     let mut out = FaceHeader { generation: 1 }.to_bytes().to_vec();
-    out.extend_from_slice(&rec(kind::PROVISION, 1).to_bytes());
-    out.extend_from_slice(&rec(kind::CONFIRMED, 2).to_bytes());
+    let mut seq = 0;
+    for &(target, image) in images {
+        let raw: [u8; HEADER_SIZE] = image[..HEADER_SIZE].try_into().expect("signed image");
+        let h = ImageHeader::parse(&raw).expect("signed image");
+        for k in [kind::PROVISION, kind::CONFIRMED] {
+            seq += 1;
+            let rec = Record {
+                kind: k,
+                target,
+                slot: slot::A,
+                reason: reason::NONE,
+                seq,
+                version: h.version,
+                digest16: header::header_digest16(&raw),
+            };
+            out.extend_from_slice(&rec.to_bytes());
+        }
+    }
     out
 }
 
@@ -140,6 +151,9 @@ const UF2_MAGIC1: u32 = 0x9E5D_5157;
 const UF2_MAGIC_END: u32 = 0x0AB1_6F30;
 const UF2_FLAG_FAMILY: u32 = 0x0000_2000;
 
+/// The `(target, image)` pairs one log face is provisioned with.
+type LogImages<'a> = &'a [(u8, &'a [u8])];
+
 /// First-install contents of `mcu` from its definition: stage0 at its
 /// region (exactly when the layout has one), each state log with face A
 /// provisioned (PROVISION + CONFIRMED for slot A) and face B erased, and
@@ -157,16 +171,24 @@ pub fn first_install(
         (Some(_), None) => return Err(format!("{} needs stage0", mcu.id)),
         (None, Some(_)) => return Err(format!("{} has no stage0 region", mcu.id)),
     }
-    let logs = [
-        (mcu.layout.bootcore_log, statelog::target::BOOTCORE, boot.1),
-        (mcu.layout.app_log, statelog::target::APP, app.1),
-    ];
-    for (log, target, image) in logs {
+    let core = (statelog::target::BOOTCORE, boot.1);
+    let app_rec = (statelog::target::APP, app.1);
+    let shared = mcu.layout.bootcore_log.is_some() && mcu.layout.bootcore_log == mcu.layout.app_log;
+    let logs: [(_, LogImages); 2] = if shared {
+        [(mcu.layout.app_log, &[core, app_rec]), (None, &[])]
+    } else {
+        [
+            (mcu.layout.bootcore_log, &[core]),
+            (mcu.layout.app_log, &[app_rec]),
+        ]
+    };
+    for (log, images) in logs {
         let Some(log) = log else { continue };
         for face in log.faces {
             f.blank(face, log.face_size);
         }
-        let face = initial_log(target, image);
+        let face = initial_log_for(images);
+
         assert!(
             face.len() as u32 <= log.face_size,
             "{}: a provisioned face needs {} bytes (requirements::LOG_FACE_MIN)",

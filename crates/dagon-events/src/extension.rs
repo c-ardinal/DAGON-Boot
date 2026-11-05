@@ -159,6 +159,11 @@ pub trait Extension {
     }
 
     #[doc(hidden)]
+    fn __event_at(&mut self, _i: usize, e: &Event<'_>, ctx: &Ctx<'_>, _: Token) {
+        self.on_event(e, ctx)
+    }
+
+    #[doc(hidden)]
     fn __accept_at(
         &mut self,
         _i: usize,
@@ -256,6 +261,15 @@ impl<A: Extension, B: Extension> Extension for Chain<A, B> {
         }
     }
 
+    fn __event_at(&mut self, i: usize, e: &Event<'_>, ctx: &Ctx<'_>, k: Token) {
+        let n = self.first.__leaves(k);
+        if i < n {
+            self.first.__event_at(i, e, ctx, k)
+        } else {
+            self.then.__event_at(i - n, e, ctx, k)
+        }
+    }
+
     fn __accept_at(
         &mut self,
         i: usize,
@@ -325,6 +339,10 @@ impl<T: Extension + ?Sized> Extension for &mut T {
         (**self).__id_at(i, k)
     }
 
+    fn __event_at(&mut self, i: usize, e: &Event<'_>, ctx: &Ctx<'_>, k: Token) {
+        (**self).__event_at(i, e, ctx, k)
+    }
+
     fn __accept_at(
         &mut self,
         i: usize,
@@ -347,6 +365,64 @@ impl<T: Extension + ?Sized> Extension for &mut T {
 
     fn __check_at(&mut self, i: usize, t: &TrialInfo, ctx: &Ctx<'_>, k: Token) -> Option<Health> {
         (**self).__check_at(i, t, ctx, k)
+    }
+}
+
+/// An extension that may be absent: `None` has no parts, like [`Nop`], so
+/// a layer start can take the user's extensions as an `Option`.
+impl<T: Extension> Extension for Option<T> {
+    fn id(&self) -> &'static str {
+        self.as_ref().map_or("nop", T::id)
+    }
+
+    fn on_event(&mut self, e: &Event<'_>, ctx: &Ctx<'_>) {
+        if let Some(x) = self {
+            x.on_event(e, ctx);
+        }
+    }
+
+    fn accept_update(&mut self, o: &UpdateOffer, ctx: &Ctx<'_>) -> Option<Accept> {
+        self.as_mut()?.accept_update(o, ctx)
+    }
+
+    fn allow_reboot_now(&mut self, r: &RebootRequest, ctx: &Ctx<'_>) -> Option<Delay> {
+        self.as_mut()?.allow_reboot_now(r, ctx)
+    }
+
+    fn self_check(&mut self, t: &TrialInfo, ctx: &Ctx<'_>) -> Option<Health> {
+        self.as_mut()?.self_check(t, ctx)
+    }
+
+    fn __leaves(&self, k: Token) -> usize {
+        self.as_ref().map_or(0, |x| x.__leaves(k))
+    }
+
+    fn __id_at(&self, i: usize, k: Token) -> &'static str {
+        self.as_ref().map_or("nop", |x| x.__id_at(i, k))
+    }
+
+    fn __accept_at(
+        &mut self,
+        i: usize,
+        o: &UpdateOffer,
+        ctx: &Ctx<'_>,
+        k: Token,
+    ) -> Option<Accept> {
+        self.as_mut()?.__accept_at(i, o, ctx, k)
+    }
+
+    fn __reboot_at(
+        &mut self,
+        i: usize,
+        r: &RebootRequest,
+        ctx: &Ctx<'_>,
+        k: Token,
+    ) -> Option<Delay> {
+        self.as_mut()?.__reboot_at(i, r, ctx, k)
+    }
+
+    fn __check_at(&mut self, i: usize, t: &TrialInfo, ctx: &Ctx<'_>, k: Token) -> Option<Health> {
+        self.as_mut()?.__check_at(i, t, ctx, k)
     }
 }
 

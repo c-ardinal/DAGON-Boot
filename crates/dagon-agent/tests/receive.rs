@@ -4,10 +4,11 @@
 use std::cell::RefCell;
 use std::rc::Rc;
 
+use dagon_agent::snapshot::{AppSnapshot, Phase};
 use dagon_agent::{image, requests, session, Agent, Config, SlotStore, StoreError, Transition};
 use dagon_events::{
     compose, Accept, Bounds, Composed, Ctx, Delay, Event, Extension, Health, Layer, Nop, Published,
-    RebootRequest, TrialInfo, UpdateOffer, Watchdog,
+    Reader, RebootRequest, TrialInfo, UpdateOffer, Watchdog,
 };
 use dagon_format::header::*;
 use dagon_format::{key_id, sha256, Version};
@@ -230,14 +231,14 @@ impl Extension for Probe {
     }
 }
 
-type Chain = Composed<&'static Published<(), 32>, Nop, Probe, fn() -> u64>;
+type Chain = Composed<&'static Published<AppSnapshot, 32>, Nop, Probe, fn() -> u64>;
 
 fn now() -> u64 {
     0
 }
 
 fn chain(probe: Probe) -> Chain {
-    let events: &'static mut Published<(), 32> = Box::leak(Box::new(Published::new()));
+    let events: &'static mut Published<AppSnapshot, 32> = Box::leak(Box::new(Published::new()));
     compose(
         Layer::App,
         events,
@@ -264,6 +265,8 @@ struct Node {
     /// The slot store, shared with the bench (it plays the boot core).
     mem: &'static RefCell<Mem>,
     agent: Agent<&'static RefCell<Mem>, Chain>,
+    /// The agent's published snapshot.
+    events: Reader<AppSnapshot, 32>,
     probe: Probe,
     seq: u8,
 }
@@ -275,9 +278,12 @@ impl Node {
 
     fn with(mem: Mem, probe: Probe) -> Self {
         let mem: &'static RefCell<Mem> = Box::leak(Box::new(RefCell::new(mem)));
+        let c = chain(probe.clone());
+        let events = c.reader();
         Node {
             mem,
-            agent: Agent::new(config(), mem, chain(probe.clone())),
+            agent: Agent::new(config(), mem, c),
+            events,
             probe,
             seq: 0,
         }
@@ -287,7 +293,14 @@ impl Node {
     fn reset(&mut self, boot: impl FnOnce(&mut Mem)) {
         boot(&mut self.mem.borrow_mut());
         self.probe.seen.borrow_mut().events.clear();
-        self.agent = Agent::new(config(), self.mem, chain(self.probe.clone()));
+        let c = chain(self.probe.clone());
+        self.events = c.reader();
+        self.agent = Agent::new(config(), self.mem, c);
+    }
+
+    /// The published snapshot's phase.
+    fn phase(&self) -> Phase {
+        self.events.latest().expect("published").state.phase
     }
 
     fn events(&self) -> Vec<String> {
@@ -659,6 +672,76 @@ fn an_app_confirms_its_own_trial() {
     assert_eq!(n.events(), ["self_check", "confirm_refused"]);
 }
 
+/// Every failure lands in a defined phase of the published snapshot: a
+/// refused, rejected, failed or dropped transfer and a refused SET_PENDING
+/// are `Failed`; a refused confirm leaves the trial running (`Trial`).
+#[test]
+fn every_failure_lands_in_a_defined_phase() {
+    // Refused by DAGON: the running slot.
+    let mut n = Node::new(Probe::default());
+    assert_eq!(n.phase(), Phase::Idle);
+    assert_eq!(n.transfer(0, &image(0, &body())), Status::State);
+    assert_eq!(dedup(n.events()).last().unwrap(), "update_refused");
+    assert_eq!(n.phase(), Phase::Failed);
+
+    // Refused by an extension.
+    let mut n = Node::new(Probe {
+        refuse_update: true,
+        ..Default::default()
+    });
+    assert_eq!(n.transfer(1, &image(1, &body())), Status::State);
+    assert_eq!(n.events().last().unwrap(), "update_refused");
+    assert_eq!(n.phase(), Phase::Failed);
+
+    // A header that fails its signature.
+    let mut n = Node::new(Probe::default());
+    let mut img = image(1, &body());
+    img[0x018] ^= 1;
+    assert_eq!(n.transfer(1, &img), Status::Signature);
+    assert_eq!(dedup(n.events()).last().unwrap(), "header_rejected");
+    assert_eq!(n.phase(), Phase::Failed);
+
+    // A body that fails its digest, then a refused SET_PENDING.
+    let mut n = Node::new(Probe::default());
+    let mut img = image(1, &body());
+    img[HEADER_SIZE + 10] ^= 1;
+    assert_eq!(n.transfer(1, &img), Status::Digest);
+    assert_eq!(n.events().last().unwrap(), "verify_failed");
+    assert_eq!(n.phase(), Phase::Failed);
+    let mut n = Node::new(Probe::default());
+    assert_eq!(n.call(Cmd::SetPending, &[target::APP, 1]).0, Status::State);
+    assert_eq!(n.events().last().unwrap(), "pending_refused");
+    assert_eq!(n.phase(), Phase::Failed);
+
+    // A transfer dropped after silence.
+    let mut n = Node::new(Probe::default());
+    let begin = XferBegin {
+        target: target::APP,
+        slot: 1,
+        total_len: 1512,
+        hdr_len: 512,
+    };
+    n.call(Cmd::XferBegin, &Node::enc(begin, XferBegin::encode));
+    n.agent.abort();
+    assert_eq!(n.events().last().unwrap(), "transfer_aborted");
+    assert_eq!(n.phase(), Phase::Failed);
+
+    // A refused confirm: the trial goes on.
+    let mut m = Mem::new();
+    b_on_trial(&mut m);
+    let mut n = Node::with(
+        m,
+        Probe {
+            health: Some(Health::Unhealthy),
+            ..Default::default()
+        },
+    );
+    assert_eq!(n.phase(), Phase::Trial);
+    assert_eq!(n.agent.confirm_own(), Err(Status::State));
+    assert_eq!(n.events().last().unwrap(), "confirm_refused");
+    assert_eq!(n.phase(), Phase::Trial);
+}
+
 #[test]
 fn an_idle_transfer_is_aborted() {
     let mut n = Node::new(Probe::default());
@@ -752,7 +835,10 @@ fn the_agent_declares_its_machines() {
         .iter()
         .map(|c| c.machine)
         .collect();
-    assert_eq!(names, ["image", "session", "node", "requests"]);
+    assert_eq!(
+        names,
+        ["image", "core_image", "session", "node", "requests"]
+    );
     assert_eq!(session::CATALOG.initial, "Idle");
     assert_eq!(requests::CATALOG.states, ["Ready"]);
 }

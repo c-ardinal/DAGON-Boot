@@ -5,6 +5,7 @@ use dagon_retained_model::harness::{run_many, run_params, World};
 use dagon_retained_model::world_fuse::FuseWorld;
 use dagon_retained_model::world_record::RecordWorld;
 use dagon_retained_model::world_topology::TopologyWorld;
+use dagon_retained_model::world_trial::TrialWorld;
 
 const DEFAULT: u64 = 10_000;
 const FULL: u64 = 1_000_000;
@@ -38,6 +39,17 @@ fn fuse_default() {
 #[ignore = "full profile: cargo test --release -- --ignored"]
 fn fuse_full() {
     go::<FuseWorld>("fuse", FULL);
+}
+
+#[test]
+fn trial_default() {
+    go::<TrialWorld>("trial", DEFAULT);
+}
+
+#[test]
+#[ignore = "full profile: cargo test --release -- --ignored"]
+fn trial_full() {
+    go::<TrialWorld>("trial", FULL);
 }
 
 #[test]

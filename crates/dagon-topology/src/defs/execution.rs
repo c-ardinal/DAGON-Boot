@@ -36,15 +36,16 @@ impl FlashOp {
     }
 }
 
-/// A hardware fact and how far it is established: a plain number is
+/// A hardware fact and how far it is established: a plain value is
 /// checked against its source (the definition's comment cites it);
-/// `{ unverified = N }` is a value not yet checked against its source;
-/// `"unmeasured"` has no value yet (to be measured on the hardware).
+/// `{ unverified = V }` is a value not yet checked against its source;
+/// `"unmeasured"` has no value yet (to be measured on the hardware). Most
+/// facts are numbers; some are a word of a closed set (`[watchdog] flag`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
 #[serde(untagged)]
-pub enum Fact {
-    Known(u32),
-    Unverified { unverified: u32 },
+pub enum Fact<T = u32> {
+    Known(T),
+    Unverified { unverified: T },
     Unmeasured(Unmeasured),
 }
 
@@ -55,9 +56,9 @@ pub enum Unmeasured {
     Unmeasured,
 }
 
-impl Fact {
+impl<T: Copy> Fact<T> {
     /// The value, checked or not; `None` when unmeasured.
-    pub fn value(self) -> Option<u32> {
+    pub fn value(self) -> Option<T> {
         match self {
             Fact::Known(v) | Fact::Unverified { unverified: v } => Some(v),
             Fact::Unmeasured(_) => None,
@@ -103,8 +104,10 @@ fn fail(cond: bool, msg: impl FnOnce() -> String) -> Result<(), String> {
     }
 }
 
-/// `[execution]`: budgets above 0, the erase unit a power of two, and one
-/// erase shorter than every watchdog period that is fed around it. An
+/// `[execution]`: budgets above 0, the erase unit a power of two, and two
+/// erases shorter than every watchdog period (trial and confirmed): the
+/// watchdog is fed between flash operations, so when an erase starts up
+/// to one operation has run since the last feed. An
 /// unverified or unmeasured value passes the check it can take; tools
 /// report it as not established.
 pub(super) fn execution(m: &McuDef) -> Result<(), String> {
@@ -124,14 +127,23 @@ pub(super) fn execution(m: &McuDef) -> Result<(), String> {
         "execution.erase_unit_max_ms must be above 0".into()
     })?;
     let Some(w) = m.watchdog else { return Ok(()) };
-    fail(erase_ms >= w.confirmed_ms, || {
-        format!(
-            "execution.erase_unit_max_ms {erase_ms} must be below watchdog.confirmed_ms {}: \
-             one erase runs between two feeds",
-            w.confirmed_ms
-        )
-    })
+    for (name, period) in [("trial_ms", w.trial_ms), ("confirmed_ms", w.confirmed_ms)] {
+        fail(
+            u64::from(erase_ms) * ERASE_MARGIN > u64::from(period),
+            || {
+                format!(
+                    "watchdog.{name} {period} must be at least {ERASE_MARGIN} x \
+                 execution.erase_unit_max_ms {erase_ms}: the watchdog is fed between \
+                 flash operations, and one may already have run when an erase starts"
+                )
+            },
+        )?;
+    }
+    Ok(())
 }
+
+/// Erases a watchdog period must cover (see [`execution`]).
+const ERASE_MARGIN: u64 = 2;
 
 fn overlaps(a: (u32, u32), b: (u32, u32)) -> bool {
     let (a0, a1) = (u64::from(a.0), u64::from(a.0) + u64::from(a.1));

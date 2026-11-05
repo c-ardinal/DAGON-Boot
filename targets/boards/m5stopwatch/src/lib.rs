@@ -148,8 +148,8 @@ impl BoardDef for M5StopWatch {
         Some(BOARD_ID)
     }
 
-    fn bring_up(&mut self) {
-        BoardBringUp::bring_up(self);
+    fn bring_up_port(&mut self) -> Option<&mut dyn BoardBringUp> {
+        Some(self)
     }
 
     fn pmic_download_supported(&self) -> bool {
@@ -204,7 +204,13 @@ macro_rules! dagon_pins {
 /// Starts DAGON on this board: puts the internal bus into [`SYS_I2C`], then
 /// the link task on the rear UART and USB-C, at high priority. Call once,
 /// after `node::arm_watchdog` and `esp_rtos::start`.
-pub fn start(armed: WatchdogArmed, pins: DagonPins, cfg: NodeConfig, liveness: &'static Liveness) {
+/// Returns the node's events.
+pub fn start(
+    armed: WatchdogArmed,
+    pins: DagonPins,
+    cfg: NodeConfig,
+    liveness: &'static Liveness,
+) -> node::AppEvents {
     static BOARD: StaticCell<M5StopWatch> = StaticCell::new();
     // Without the bus the bring-up finds nothing to drive: the rear pins
     // keep their default (UART).
@@ -216,8 +222,9 @@ pub fn start(armed: WatchdogArmed, pins: DagonPins, cfg: NodeConfig, liveness: &
         flash: pins.flash,
         target_tag: TARGET_TAG,
         board: BOARD.init(M5StopWatch),
+        board_extension: None,
     };
-    node::start(armed, p, pins.link_irq, cfg, liveness);
+    node::start(armed, p, pins.link_irq, cfg, liveness)
 }
 
 /// Text console on both the rear UART and USB Serial/JTAG (USB-C). The USB

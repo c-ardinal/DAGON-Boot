@@ -2,7 +2,7 @@
 //! unconfirmed trials, rollback to A; STATUS as the hub app reports it.
 
 use dagon_core::boot::{self, BootConfig, Decision};
-use dagon_core::log::{Log, SlotRef};
+use dagon_core::log::{trial_room, Log, SlotRef};
 use dagon_format::header::*;
 use dagon_format::statelog::{kind, reason, target, FaceHeader, Record};
 use dagon_format::{key_id, sha256, Version};
@@ -127,6 +127,9 @@ fn hundreds_of_updates_compact_the_log() {
     for i in 0..200 {
         let to = if i % 2 == 0 { b } else { a };
         let mut log = Log::load(&mut m, &APP_LOG_LAYOUT).unwrap();
+        // As the store does before SET_PENDING: room for the trial.
+        log.reserve(&mut m, trial_room(dagon_mcu_rp2040::TRIAL_ATTEMPTS))
+            .unwrap();
         log.append(&mut m, kind::SLOT_PENDING, to, 0).unwrap();
         let d = boot::decide(&mut m, &mut log, &APP_SLOTS, &config(&kp));
         assert!(

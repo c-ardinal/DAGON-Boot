@@ -419,6 +419,10 @@ pub fn hop_placeholders(
 ///   I2C: the pins its link names (`node_pins`) and the controller the
 ///   MCU's ROM loader pair of those pins names (upper case; the loader
 ///   refuses a pin pair listed for two controllers);
+/// - `{{link_tx_dma_ctl}}`, `{{link_tx_dma_stream}}` and the `rx` pair:
+///   the DMA controller (upper case) and stream of that I2C controller's
+///   tx and rx, from the MCU definition's request mapping
+///   (`defs::dma::assign`), empty when the MCU lists none for it;
 /// - `{{down_i2c}}`, `{{down_i2c_sda}}`, `{{down_i2c_scl}}`,
 ///   `{{down_i2c_hz}}` and `{{down_uart_tx}}`, `{{down_uart_rx}}`,
 ///   `{{down_uart_baud}}`: a 親機's I2C bus and UART link to its 子機
@@ -456,11 +460,31 @@ pub fn wiring_placeholders(
                         p.sda, p.scl, n.mcu
                     )
                 })?;
-            (q.controller.to_uppercase(), p.sda.clone(), p.scl.clone())
+            (q.controller.clone(), p.sda.clone(), p.scl.clone())
         }
         None => Default::default(),
     };
-    put("link_i2c", ctl);
+    let mcu = reg.mcu(&n.mcu);
+    let has_dma = mcu
+        .and_then(|m| m.peripheral(&ctl))
+        .is_some_and(|p| !p.dma_requests.is_empty());
+    let streams = match mcu.filter(|_| has_dma) {
+        Some(m) => dagon_topology::defs::dma::assign(m, &[(&ctl, "tx"), (&ctl, "rx")])
+            .map_err(|e| format!("{}: {e}", n.id))?,
+        None => Vec::new(),
+    };
+    for (i, dir) in ["tx", "rx"].into_iter().enumerate() {
+        let s = streams.get(i);
+        put(
+            &format!("link_{dir}_dma_ctl"),
+            s.map_or(String::new(), |s| s.controller.to_uppercase()),
+        );
+        put(
+            &format!("link_{dir}_dma_stream"),
+            s.map_or(String::new(), |s| s.stream.to_string()),
+        );
+    }
+    put("link_i2c", ctl.to_uppercase());
     put("link_sda", sda);
     put("link_scl", scl);
     let downs: Vec<_> = t.links.iter().filter(|l| l.from == n.id).collect();
@@ -560,16 +584,7 @@ fn render(
 ) -> Result<String, String> {
     // Package lines first, so a tag cannot add placeholders; the tag goes
     // into string literals and comments, escaped as in a Rust string.
-    let mut out = text.to_string();
-    while let Some(at) = out.find("{{dep:") {
-        let end = out[at..]
-            .find("}}")
-            .map(|e| at + e)
-            .ok_or("unclosed {{dep: in a template")?;
-        let name = out[at + 6..end].trim().to_string();
-        let line = dependency(&name, src, base)?;
-        out.replace_range(at..end + 2, &line);
-    }
+    let out = render_deps(text, src, base)?;
     let tag = n.tag.escape_debug().to_string();
     let out = if wires(text) {
         wiring
@@ -584,6 +599,37 @@ fn render(
         .replace("{{tag}}", &tag)
         .replace("{{uplink}}", &hops.0)
         .replace("{{downlinks}}", &hops.1))
+}
+
+/// Fills every `{{dep:<package>}}` of a template file with the dependency
+/// line for that DAGON package (from the project's `[dagon]` source).
+pub(crate) fn render_deps(text: &str, src: &DagonSource, base: &Path) -> Result<String, String> {
+    let mut out = text.to_string();
+    while let Some(at) = out.find("{{dep:") {
+        let end = out[at..]
+            .find("}}")
+            .map(|e| at + e)
+            .ok_or("unclosed {{dep: in a template")?;
+        let name = out[at + 6..end].trim().to_string();
+        let line = dependency(&name, src, base)?;
+        out.replace_range(at..end + 2, &line);
+    }
+    Ok(out)
+}
+
+/// The project template of the boot core of `mcu`: the `template/` of the
+/// package declaring `[package.metadata.dagon] bootcore = "<mcu>"` in the
+/// DAGON source at `root`, as (file, text) with `.tpl` names restored.
+pub(crate) fn boot_template(root: &Path, mcu: &str) -> Option<Vec<(String, String)>> {
+    let (dir, _) = manifests(root).into_iter().find(|(_, v)| {
+        v.get("package")
+            .and_then(|p| p.get("metadata"))
+            .and_then(|m| m.get("dagon"))
+            .and_then(|d| d.get("bootcore"))
+            .and_then(|x| x.as_str())
+            == Some(mcu)
+    })?;
+    template_for(&dir)
 }
 
 /// Whether a dependency is a DAGON board or MCU package, by its effective
@@ -978,9 +1024,19 @@ pub fn gen_project(config: &Path, only: &[String], force: bool) -> Result<Vec<St
     // Every selected node's generated folder holds exactly this run's
     // files; a node whose crate was skipped keeps none.
     let failed: Vec<String> = report.skipped.iter().map(|(id, _)| id.clone()).collect();
+    let config_name = config
+        .file_name()
+        .map(|n| n.to_string_lossy().into_owned())
+        .unwrap_or_else(|| crate::config::CONFIG_FILE.to_string());
+    let project = crate::extgen::ProjectRef {
+        base: &cfg.base,
+        config: &config_name,
+        src: &tables.dagon,
+        check_boot_graph: true,
+    };
     out.extend(crate::extgen::write_nodes(
         &reg,
-        &cfg.base,
+        &project,
         &t.nodes,
         only,
         &failed,

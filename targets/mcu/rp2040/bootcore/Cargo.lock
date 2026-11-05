@@ -236,6 +236,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "dagon-boot"
+version = "0.1.0"
+dependencies = [
+ "critical-section",
+ "dagon-core",
+ "dagon-events",
+ "dagon-port",
+]
+
+[[package]]
 name = "dagon-core"
 version = "0.1.0"
 dependencies = [
@@ -318,9 +328,12 @@ version = "0.1.0"
 dependencies = [
  "cortex-m",
  "cortex-m-rt",
+ "dagon-boot",
  "dagon-core",
+ "dagon-events",
  "dagon-format",
  "dagon-mcu-rp2040",
+ "dagon-port",
  "dagon-topology",
  "embassy-rp",
  "embassy-time",

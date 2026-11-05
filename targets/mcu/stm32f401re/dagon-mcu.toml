@@ -1,5 +1,7 @@
 # DAGON MCU definition (format: targets/README.md). Addresses match
-# src/layout.rs (sectors 16K x4, 64K, 128K x3); never move them.
+# src/layout.rs (sectors 16K x4, 64K, 128K x3); never move them. Sector 0
+# stage0, 1-2 the state log, 3 conformance scratch, 4 boot core A, 5-6 APP
+# A/B, 7 boot core B.
 format = 1
 id = "stm32f401re"
 name = "STM32F401RE"
@@ -17,16 +19,33 @@ xip = true
 base = 0x0800_0000
 bytes = 0x8_0000
 
+# Stage0 is all of sector 0, where the core fetches its reset vector, so no
+# update ever erases it (RM0368 section 3.3, sector 0 is 16 KiB). The
+# boot core and the app records share one log: the four small sectors hold
+# stage0, two log faces and the conformance scratch.
 [layout]
-app_log = { faces = [0x0800_8000, 0x0800_C000], face_size = 0x4000 }
+stage0 = { at = 0x0800_0000, size = 0x4000 }
+# stage0_verifies is left out (digest only): with the Ed25519 verifier
+# (ed25519-compact opt_size) stage0 links to about 23,960 bytes, past the
+# 16 KiB sector; without it, 7,672.
+app_log = { faces = [0x0800_4000, 0x0800_8000], face_size = 0x4000 }
+bootcore_log = { faces = [0x0800_4000, 0x0800_8000], face_size = 0x4000 }
 
-# Boot core: sectors 0-1, its header in the trailer.
+# Boot core A/B: the only erase units of at least 32 KiB besides the APP
+# slots (sector 4, 64 KiB; sector 7, 128 KiB).
 [[slot]]
 image = "bootcore"
 binding = "a"
-header = "trailer"
-at = 0x0800_0000
-size = 0x8000
+header = "inline"
+at = 0x0801_0000
+size = 0x1_0000
+
+[[slot]]
+image = "bootcore"
+binding = "b"
+header = "inline"
+at = 0x0806_0000
+size = 0x2_0000
 
 [[slot]]
 image = "app"
@@ -48,6 +67,10 @@ kind = "probe-rs"
 chip = "STM32F401RETx"
 
 [[part]]
+name = "stage0"
+sub = "stage0"
+
+[[part]]
 name = "bootcore"
 sub = "bootcore"
 
@@ -56,8 +79,9 @@ sub = "bootcore"
 name = "STM32 ROM bootloader"
 addr = 0x39
 max_hz = 400_000
-# Boot core (0-1), state logs A/B (2-3), APP-A (5).
-erase_sectors = [0, 1, 2, 3, 5]
+# The last resort writes the whole first install: stage0 (0), the state
+# log faces (1-2), boot core A (4) and APP-A (5).
+erase_sectors = [0, 1, 2, 4, 5]
 pairs = [
     { controller = "i2c3", sda = "PB4", scl = "PA8" },
     { controller = "i2c1", sda = "PB7", scl = "PB6" },
@@ -68,12 +92,19 @@ pairs = [
 [links]
 up = ["i2c"]
 
+# Both periods cover two of the slowest erase (a 128 KiB sector), as the
+# definition check requires: the watchdog is fed between flash operations.
 [watchdog]
 kind = "iwdg"
-trial_ms = 4_000
+trial_ms = 8_000
 confirmed_ms = 8_000
 # The boot core starts a pending image this many times before it rolls back.
 trial_attempts = 3
+# The lockup fuse's watchdog-reset flag: RCC_CSR IWDGRSTF/WWDGRSTF (RM0368,
+# RCC clock control & status register), set by a watchdog reset, kept over
+# every reset but a power reset, cleared by writing RMVF. Unverified
+# against RM0368 itself.
+flag = { unverified = "register" }
 
 # Single-bank flash: an erase or program stalls instruction fetch (nothing
 # runs; interrupts stay enabled and wait). DAGON erases one 128 KiB sector
@@ -87,9 +118,10 @@ flash_op = "fetch-stall"
 erase_unit = 0x2_0000
 erase_unit_max_ms = { unverified = 4_000 }
 
-# Sector 4 (64 KiB), used by no image or log.
+# Sector 3 (16 KiB), used by no image or log.
 [conformance]
-scratch = { at = 0x0801_0000, size = 0x1_0000 }
+scratch = { at = 0x0800_C000, size = 0x4000 }
+
 
 # Protection hardware: ARMv7-M PMSAv7 MPU, 8 regions (ST PM0214 section 4.2),
 # read back from MPU_TYPE at boot.
@@ -118,6 +150,11 @@ kind = "noinit-ram"
 at = 0x2001_7000
 size = 0x800
 survives = "reset-random"
+# The F401 has no random number generator (no RNG block in the RM0368
+# memory map above). The word comes from LSI periods captured against the
+# HSI-clocked TIM5 (channel 4 can take the LSI, which the IWDG runs from
+# anyway); its min-entropy is to be measured on the board.
+entropy = { source = "osc-capture", min_bits = "unmeasured" }
 rings = [{ writer = "bootcore", at = 0x2001_7000, size = 0x800 }]
 fuse = { cells = [
     { image = "bootcore", at = 0x2001_7800, size = 0x100 },
@@ -127,6 +164,12 @@ fuse = { cells = [
 [[core]]
 id = "cpu0"
 
+# DMA: two controllers of 8 streams, each stream selecting one of 8 request
+# channels; `dma_requests` are the DMA1 and DMA2 request mapping tables of
+# ST RM0368, in stream order. The MCU package's tests check them against
+# ST's chip data as stm32-metapac ships it. That data has no I2S2_EXT,
+# I2S3_EXT or SPI4 requests, so they are not listed here and cannot be
+# assigned a stream.
 # Every register block (ST RM0368 section 2.3, memory map). The GPIO ports
 # hold DAGON's own pins, so pins are reached through the pin service.
 [[peripheral]]
@@ -134,24 +177,58 @@ id = "tim2"
 base = 0x4000_0000
 size = 0x400
 window_eligible = true
+dma_requests = [
+    { signal = "ch3", controller = "dma1", stream = 1, channel = 3 },
+    { signal = "up", controller = "dma1", stream = 1, channel = 3 },
+    { signal = "ch1", controller = "dma1", stream = 5, channel = 3 },
+    { signal = "ch2", controller = "dma1", stream = 6, channel = 3 },
+    { signal = "ch4", controller = "dma1", stream = 6, channel = 3 },
+    { signal = "ch4", controller = "dma1", stream = 7, channel = 3 },
+    { signal = "up", controller = "dma1", stream = 7, channel = 3 },
+]
 
 [[peripheral]]
 id = "tim3"
 base = 0x4000_0400
 size = 0x400
 window_eligible = true
+dma_requests = [
+    { signal = "ch4", controller = "dma1", stream = 2, channel = 5 },
+    { signal = "up", controller = "dma1", stream = 2, channel = 5 },
+    { signal = "ch1", controller = "dma1", stream = 4, channel = 5 },
+    { signal = "trig", controller = "dma1", stream = 4, channel = 5 },
+    { signal = "ch2", controller = "dma1", stream = 5, channel = 5 },
+    { signal = "ch3", controller = "dma1", stream = 7, channel = 5 },
+]
 
 [[peripheral]]
 id = "tim4"
 base = 0x4000_0800
 size = 0x400
 window_eligible = true
+dma_requests = [
+    { signal = "ch1", controller = "dma1", stream = 0, channel = 2 },
+    { signal = "ch2", controller = "dma1", stream = 3, channel = 2 },
+    { signal = "up", controller = "dma1", stream = 6, channel = 2 },
+    { signal = "ch3", controller = "dma1", stream = 7, channel = 2 },
+]
 
 [[peripheral]]
 id = "tim5"
 base = 0x4000_0C00
 size = 0x400
 window_eligible = true
+dma_requests = [
+    { signal = "ch3", controller = "dma1", stream = 0, channel = 6 },
+    { signal = "up", controller = "dma1", stream = 0, channel = 6 },
+    { signal = "ch4", controller = "dma1", stream = 1, channel = 6 },
+    { signal = "trig", controller = "dma1", stream = 1, channel = 6 },
+    { signal = "ch1", controller = "dma1", stream = 2, channel = 6 },
+    { signal = "ch4", controller = "dma1", stream = 3, channel = 6 },
+    { signal = "trig", controller = "dma1", stream = 3, channel = 6 },
+    { signal = "ch2", controller = "dma1", stream = 4, channel = 6 },
+    { signal = "up", controller = "dma1", stream = 6, channel = 6 },
+]
 
 [[peripheral]]
 id = "rtc-bkp"
@@ -182,12 +259,22 @@ id = "spi2"
 base = 0x4000_3800
 size = 0x400
 window_eligible = true
+dma_requests = [
+    { signal = "rx", controller = "dma1", stream = 3, channel = 0 },
+    { signal = "tx", controller = "dma1", stream = 4, channel = 0 },
+]
 
 [[peripheral]]
 id = "spi3"
 base = 0x4000_3C00
 size = 0x400
 window_eligible = true
+dma_requests = [
+    { signal = "rx", controller = "dma1", stream = 0, channel = 0 },
+    { signal = "rx", controller = "dma1", stream = 2, channel = 0 },
+    { signal = "tx", controller = "dma1", stream = 5, channel = 0 },
+    { signal = "tx", controller = "dma1", stream = 7, channel = 0 },
+]
 
 [[peripheral]]
 id = "i2s3ext"
@@ -200,24 +287,45 @@ id = "usart2"
 base = 0x4000_4400
 size = 0x400
 window_eligible = true
+dma_requests = [
+    { signal = "rx", controller = "dma1", stream = 5, channel = 4 },
+    { signal = "tx", controller = "dma1", stream = 6, channel = 4 },
+]
 
 [[peripheral]]
 id = "i2c1"
 base = 0x4000_5400
 size = 0x400
 window_eligible = true
+dma_requests = [
+    { signal = "rx", controller = "dma1", stream = 0, channel = 1 },
+    { signal = "rx", controller = "dma1", stream = 5, channel = 1 },
+    { signal = "tx", controller = "dma1", stream = 6, channel = 1 },
+    { signal = "tx", controller = "dma1", stream = 7, channel = 1 },
+]
 
 [[peripheral]]
 id = "i2c2"
 base = 0x4000_5800
 size = 0x400
 window_eligible = true
+dma_requests = [
+    { signal = "rx", controller = "dma1", stream = 2, channel = 7 },
+    { signal = "rx", controller = "dma1", stream = 3, channel = 7 },
+    { signal = "tx", controller = "dma1", stream = 7, channel = 7 },
+]
 
 [[peripheral]]
 id = "i2c3"
 base = 0x4000_5C00
 size = 0x400
 window_eligible = true
+dma_requests = [
+    { signal = "rx", controller = "dma1", stream = 1, channel = 1 },
+    { signal = "rx", controller = "dma1", stream = 2, channel = 3 },
+    { signal = "tx", controller = "dma1", stream = 4, channel = 3 },
+    { signal = "tx", controller = "dma1", stream = 5, channel = 6 },
+]
 
 [[peripheral]]
 id = "pwr"
@@ -230,36 +338,79 @@ id = "tim1"
 base = 0x4001_0000
 size = 0x400
 window_eligible = true
+dma_requests = [
+    { signal = "trig", controller = "dma2", stream = 0, channel = 6 },
+    { signal = "ch1", controller = "dma2", stream = 1, channel = 6 },
+    { signal = "ch2", controller = "dma2", stream = 2, channel = 6 },
+    { signal = "ch1", controller = "dma2", stream = 3, channel = 6 },
+    { signal = "ch4", controller = "dma2", stream = 4, channel = 6 },
+    { signal = "trig", controller = "dma2", stream = 4, channel = 6 },
+    { signal = "com", controller = "dma2", stream = 4, channel = 6 },
+    { signal = "up", controller = "dma2", stream = 5, channel = 6 },
+    { signal = "ch1", controller = "dma2", stream = 6, channel = 0 },
+    { signal = "ch2", controller = "dma2", stream = 6, channel = 0 },
+    { signal = "ch3", controller = "dma2", stream = 6, channel = 0 },
+    { signal = "ch3", controller = "dma2", stream = 6, channel = 6 },
+]
 
 [[peripheral]]
 id = "usart1"
 base = 0x4001_1000
 size = 0x400
 window_eligible = true
+dma_requests = [
+    { signal = "rx", controller = "dma2", stream = 2, channel = 4 },
+    { signal = "rx", controller = "dma2", stream = 5, channel = 4 },
+    { signal = "tx", controller = "dma2", stream = 7, channel = 4 },
+]
 
 [[peripheral]]
 id = "usart6"
 base = 0x4001_1400
 size = 0x400
 window_eligible = true
+dma_requests = [
+    { signal = "rx", controller = "dma2", stream = 1, channel = 5 },
+    { signal = "rx", controller = "dma2", stream = 2, channel = 5 },
+    { signal = "tx", controller = "dma2", stream = 6, channel = 5 },
+    { signal = "tx", controller = "dma2", stream = 7, channel = 5 },
+]
 
 [[peripheral]]
 id = "adc1"
 base = 0x4001_2000
 size = 0x400
 window_eligible = true
+dma_requests = [
+    { signal = "adc1", controller = "dma2", stream = 0, channel = 0 },
+    { signal = "adc1", controller = "dma2", stream = 4, channel = 0 },
+]
 
 [[peripheral]]
 id = "sdio"
 base = 0x4001_2C00
 size = 0x400
 window_eligible = true
+dma_requests = [
+    { signal = "sdio", controller = "dma2", stream = 3, channel = 4 },
+    { signal = "rx", controller = "dma2", stream = 3, channel = 4 },
+    { signal = "tx", controller = "dma2", stream = 3, channel = 4 },
+    { signal = "sdio", controller = "dma2", stream = 6, channel = 4 },
+    { signal = "rx", controller = "dma2", stream = 6, channel = 4 },
+    { signal = "tx", controller = "dma2", stream = 6, channel = 4 },
+]
 
 [[peripheral]]
 id = "spi1"
 base = 0x4001_3000
 size = 0x400
 window_eligible = true
+dma_requests = [
+    { signal = "rx", controller = "dma2", stream = 0, channel = 3 },
+    { signal = "rx", controller = "dma2", stream = 2, channel = 3 },
+    { signal = "tx", controller = "dma2", stream = 3, channel = 3 },
+    { signal = "tx", controller = "dma2", stream = 5, channel = 3 },
+]
 
 [[peripheral]]
 id = "spi4"
@@ -327,6 +478,7 @@ base = 0x4002_6000
 size = 0x400
 bus_master = true
 privileged_why = "dma"
+dma = { streams = 8, channels = 8 }
 
 [[peripheral]]
 id = "dma2"
@@ -334,6 +486,7 @@ base = 0x4002_6400
 size = 0x400
 bus_master = true
 privileged_why = "dma"
+dma = { streams = 8, channels = 8 }
 
 [[peripheral]]
 id = "usb-otg-fs"

@@ -73,12 +73,14 @@ static GUARD: Guard<TASKS> = Guard::new(node::levels::<TASKS>(), Trial::NeverFee
 async fn main(spawner: Spawner) {
     let (dagon, io) = Board::split(embassy_stm32::init(clocks()));
     let tag = dagon_mcu_stm32f401re::target_tag!();
-    board::start(spawner, dagon, &GUARD, tag, app::self_check, UPLINK).ok();
+    board::start(spawner, dagon, &GUARD, tag, app::dagon(), UPLINK).ok();
     app::start(spawner, io, &GUARD, node::APP_TASKS);
 }
 ```
 
-`src/app.rs` holds `TASKS`, `self_check()` and `start()`, which spawns the
+`src/app.rs` holds `TASKS`, `self_check()`, `dagon()` (the `node::App` the
+start takes: the self-check, the app's extensions, who confirms) and
+`start()`, which spawns the
 app's tasks, each with a `Lease` (`lease.busy(budget_ms)` before a piece of
 work, `lease.idle()` when waiting).
 
@@ -91,14 +93,21 @@ feeder on `spawner`. The app's tasks run in thread mode below it, so the
 親機 is answered whatever they do. The node's tag comes from
 `DAGON_TARGET_TAG` in `.cargo/config.toml`
 (`DAGON_TARGET_TAG = { value = "my-node", force = true }` under `[env]`);
-`self_check` decides whether a version on trial may be confirmed. An app
+the `App` gives the self-check (whether a version on trial may be
+confirmed), the app's extensions (`exts`: they observe every `app.*` event
+and answer the decision points, after the board package in the chain) and
+`confirm` (`Confirm::Own`: the start confirms a trial itself before the
+link serves). The board's `BoardDef::bring_up_port` runs before the link
+serves (`app.bring_up`); a board without one emits nothing. `start`
+returns the node's events (`AppEvents`) for display and log tasks. An app
 that keeps `embassy_stm32::Peripherals` itself passes `dagon_pins!(p)`
 instead of splitting. Build with `DAGON_PUBKEY` set (below);
-`--features slot-b` links the same app for slot B. An app that runs
-the pieces itself uses `open_store`, `install_watchdog`, `agent`, `exec`
-and `serve`. `open_store` returns the slot store and the serving loop's
-handle on the same flash driver (`SharedFlash`; a conformance build runs
-CONF_RUN through it): the agent keeps its store to itself. A REBOOT reply
+`--features slot-b` links the same app for slot B. The agent is the
+start's and its serving task's only: no public function hands it out, so
+application code reaches DAGON through `AppEvents`, its extensions and
+`Confirm`. The board definition's `BoardDef::extension` is the board
+package's place in the chain (after the publisher, before the app's
+extensions). A REBOOT reply
 is followed by the delay the app's `allow_reboot_now` asked for, the
 serving task idle under the guard, then the reset.
 
@@ -160,8 +169,8 @@ builds the link on the board's pins; link types are constructed as
 | `hal` | `clocks`, `flash`, `watchdog`; `PUBKEY` / `TEST_KEY` (the boot core stops here) |
 | `node` (default) | `node` (board definition, start-up, serving loop) and `exec` (binds USART6's vector); logs through defmt |
 | `conform` | the conformance build's CONF_RUN in front of the agent |
-| `slot-b` | link the app for APP slot B |
-| `image-bootcore` | link the boot core instead of an app |
+| `slot-b` | link the app for APP slot B (the boot core for boot core slot B) |
+| `image-stage0`, `image-bootcore` | link the boot images instead of an app |
 
 ## Flash layout (fixed; needs 512 KiB)
 
@@ -169,32 +178,52 @@ The board's flash size is check-only: a board with less fails to build.
 
 | Address | Size | Content |
 |---|---|---|
-| 0x08000000 | 32 KiB | boot core (`bootcore/`), signed header in the last 512 B |
-| 0x08008000 | 2 x 16 KiB | APP state log faces A/B |
-| 0x08010000 | 64 KiB | reserved |
+| 0x08000000 | 16 KiB | stage0 (`stage0/`, never updated: the reset vector) |
+| 0x08004000 | 2 x 16 KiB | state log faces A/B (APP and boot core records) |
+| 0x0800C000 | 16 KiB | conformance scratch |
+| 0x08010000 | 64 KiB | boot core slot A (`bootcore/`): 512-byte header, body at 0x08010200 |
 | 0x08020000 | 128 KiB | APP-A: 512-byte header, body at 0x08020200 |
 | 0x08040000 | 128 KiB | APP-B: same, body at 0x08040200 |
-| 0x08060000 | 128 KiB | reserved |
+| 0x08060000 | 128 KiB | boot core slot B: same, body at 0x08060200 |
 
-The boot core tries a pending slot up to 3 times (signature + SHA-256,
-BOOT_ATTEMPT before each start, 4 s watchdog) and then rolls back;
-otherwise it starts the confirmed slot (8 s watchdog). Both run at 84 MHz
-from the HSI (`clocks()`).
+Stage0 starts the boot core: the pending one (written by the running app's
+agent from a release) on trial, up to 3 starts counted in the RTC backup
+registers BKP0R/BKP1R, else the confirmed one. The new core confirms
+itself once it can start a verified app; one that cannot is reset and,
+after its starts run out, the old core runs again and records the
+rollback. The boot core tries a pending APP slot up to 3 times (signature
++ SHA-256, BOOT_ATTEMPT before each start, 4 s watchdog) and then rolls
+back; otherwise it starts the confirmed slot (8 s watchdog). Both run at
+84 MHz from the HSI (`clocks()`). The ROM loader's full rewrite (the last
+resort) writes stage0, boot core A, the state log and APP-A.
 
-## Boot core
+## Boot images
+
+Built for one node of a project, after `dagon gen`:
 
 ```sh
 export DAGON_PUBKEY=/path/outside/the/repo/dagon-signing.pub
-(cd targets/mcu/stm32f401re/bootcore && DAGON_TARGET_TAG=my-node cargo build --release)
+(cd targets/mcu/stm32f401re/stage0 && cargo build --release)
+(cd <project>/boot/<node> && cargo build --release)
 ```
 
-It is built per node: it accepts only app images tagged with
-`DAGON_TARGET_TAG` (the node's tag, as in the app's `.cargo/config.toml`),
-and its build fails without it. With nothing startable it shows the board's
-halt pattern on the board's boot LED (`[boot] led` and `halt`): the build
-reads the board `DAGON_BOARD=<board id>` names (with
-`DAGON_PROJECT=<path of dagon.toml>`, a project's inline `[board.<id>]`
-too); it may be left out only while the MCU has a single board definition.
+`--features slot-b` links the boot core for boot core slot B; a release
+carries one for each slot.
+
+`dagon gen` writes the node's boot crate into `boot/<node>/` of the
+project from `bootcore/template/`: it links `bootcore` (a library) with
+the node's boot extensions (`nodes/<node>/dagon/boot_wiring.rs`, each
+declared trusted in dagon.toml, see docs/extension-manifest.md) and sets
+`DAGON_BOOT_CRATE` (that folder) and `DAGON_TARGET_TAG` (the node's tag)
+for its build. It accepts only app images tagged with the node's tag.
+With nothing startable it shows the halt pattern on the boot LED of the
+node's board (`[boot] led` and `halt`; a node without a board has none).
+Builds without `DAGON_BOOT_CRATE` fail, and a boot crate that links
+anything else than DAGON's packages and its trusted extensions with the
+source hash dagon.toml declares does not build. The boot core must fit
+boot core slot A's 65,024-byte body: the boot extensions share that
+budget with it.
+
 
 ## Keys
 

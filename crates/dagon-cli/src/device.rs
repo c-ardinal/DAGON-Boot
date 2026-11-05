@@ -5,7 +5,8 @@ use std::path::{Path, PathBuf};
 
 use dagon_format::Version;
 use dagon_host::{Clock, Event, Host, NodeState, Outcome, Target, Transport};
-use dagon_proto::payload::phase;
+use dagon_proto::payload::{phase, StatusResp};
+use dagon_proto::Status;
 use dagon_sign::to_hex;
 use dagon_sim::block_on;
 use dagon_topology::defs::Registry;
@@ -45,6 +46,39 @@ fn show_state(name: &str, s: &NodeState) {
     }
 }
 
+/// The boot core line of `dagon status`: the running core's version and
+/// header digest, then each boot core slot; or why there is none.
+pub(crate) fn core_line<E: std::fmt::Debug>(
+    name: &str,
+    r: Result<StatusResp, dagon_host::Error<E>>,
+) -> String {
+    match r {
+        Ok(st) => {
+            let slots: Vec<String> = st.slots[..2]
+                .iter()
+                .zip(["A", "B"])
+                .map(|(x, n)| format!("{n}:{:?} {}", x.state, x.version))
+                .collect();
+            let running = st.slots.get(usize::from(st.active));
+            match running {
+                Some(r) => format!(
+                    "{name}: boot core {} (slot {}, digest {}), [{}]",
+                    r.version,
+                    if st.active == 0 { "A" } else { "B" },
+                    to_hex(&r.digest16[..8]),
+                    slots.join(", ")
+                ),
+                None => format!("{name}: boot core unknown, [{}]", slots.join(", ")),
+            }
+        }
+        Err(dagon_host::Error::Rejected {
+            status: Status::Unsupported | Status::Arg,
+            ..
+        }) => format!("{name}: boot core not written through releases on this node"),
+        Err(e) => format!("{name}: boot core status unreadable ({e:?})"),
+    }
+}
+
 /// The topology from `--topology` or `dagon.toml`, if any.
 fn optional_topology(o: &Opts<'_>, cfg: &Config) -> Result<Option<Topology>, String> {
     match o
@@ -65,6 +99,10 @@ pub fn status(args: &[&str]) -> Res {
     let mut host = serial::host(o.get("port"))?;
     let hub = block_on(host.status(Target::Hub)).map_err(|e| format!("hub: {e:?}"))?;
     show_state("hub", &hub);
+    println!(
+        "{}",
+        core_line("hub", block_on(host.boot_core_status(Target::Hub)))
+    );
     let Some(t) = t else {
         return Ok(());
     };
@@ -74,7 +112,10 @@ pub fn status(args: &[&str]) -> Res {
         match Target::of_node(&view, i as u8) {
             Some(Target::Hub) => {}
             Some(to) => match block_on(host.status(to)) {
-                Ok(s) => show_state(&n.id, &s),
+                Ok(s) => {
+                    show_state(&n.id, &s);
+                    println!("{}", core_line(&n.id, block_on(host.boot_core_status(to))));
+                }
                 Err(e) => println!("{}: no answer ({e:?})", n.id),
             },
             None => println!("{}: not reachable through the hub", n.id),
@@ -207,6 +248,13 @@ pub fn recover(args: &[&str]) -> Res {
     );
     // Only the ROM path needs it; a missing file is reported if it gets there.
     let boot = std::fs::read(&boot_path).ok();
+    // stage0 as provision wrote it, for an MCU with a stage0.
+    let stage0 = std::fs::read(
+        cfg.provision_dir()
+            .join(node)
+            .join(crate::commands::STAGE0_FILE),
+    )
+    .ok();
     let key = pubkey(&o, &cfg)?;
     let roms = dagon_host::rom::rom_maps(&crate::defs::registry(&cfg)?);
     let assets = dagon_host::RecoverAssets {
@@ -214,6 +262,7 @@ pub fn recover(args: &[&str]) -> Res {
         topology: &bin,
         pubkey: &key,
         bootcore: boot.as_deref(),
+        stage0: stage0.as_deref(),
         roms: &roms,
     };
     let mut host = serial::host(o.get("port"))?;
@@ -354,5 +403,42 @@ where
         Ok(())
     } else {
         Err("apply stopped; see above".into())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use dagon_proto::payload::{SlotInfo, SlotState};
+    use dagon_proto::Cmd;
+
+    #[test]
+    fn status_shows_the_running_boot_core_or_why_there_is_none() {
+        let mut st = StatusResp {
+            active: 1,
+            confirmed: 1,
+            ..Default::default()
+        };
+        st.slots[1] = SlotInfo {
+            state: SlotState::Confirmed,
+            version: Version::new(1, 2, 0),
+            digest16: [0xAB; 16],
+        };
+        let line = core_line::<()>("hub", Ok(st));
+        assert!(
+            line.starts_with("hub: boot core 1.2.0 (slot B, digest abababababababab)"),
+            "{line}"
+        );
+        let none = core_line::<()>(
+            "watch",
+            Err(dagon_host::Error::Rejected {
+                cmd: Cmd::Status,
+                status: Status::Unsupported,
+            }),
+        );
+        assert_eq!(
+            none,
+            "watch: boot core not written through releases on this node"
+        );
     }
 }

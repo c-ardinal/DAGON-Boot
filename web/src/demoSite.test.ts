@@ -32,7 +32,7 @@ afterEach(() => {
 });
 
 describe('the public demo page', () => {
-  test('opens on SC-S0 without Web Serial: making a 構成 is usable, opening a project is the demo-stopped project control', { timeout: 30_000 }, async () => {
+  test('opens on the start screen without Web Serial: making a 構成 is usable, opening a project is the demo-stopped project control', { timeout: 30_000 }, async () => {
     stubBrowser();
     const body = await demoBody();
     expect(body).not.toContain(UNSUPPORTED.heading);

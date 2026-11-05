@@ -19,14 +19,13 @@ fn key() -> KeyPair {
     KeyPair::from_seed(Seed::new(SEED))
 }
 
-/// Patterned payload, distinct per node, slot and version.
-fn body(salt: u8) -> Vec<u8> {
-    (0..BODY_LEN)
-        .map(|i| (i as u8).wrapping_mul(31) ^ salt)
-        .collect()
+/// Patterned payload of `len` bytes, distinct per node, slot and version.
+fn body(salt: u8, len: usize) -> Vec<u8> {
+    (0..len).map(|i| (i as u8).wrapping_mul(31) ^ salt).collect()
 }
 
-fn img(mcu: &str, port: &str, tag: &str, slot: u8, v: Version, salt: u8) -> Vec<u8> {
+#[allow(clippy::too_many_arguments)]
+fn img(mcu: &str, port: &str, tag: &str, slot: u8, v: Version, salt: u8, len: usize) -> Vec<u8> {
     let (flags, caps) = image::default_bits(image_kind::APP);
     let spec = ImageSpec {
         image_kind: image_kind::APP,
@@ -41,28 +40,36 @@ fn img(mcu: &str, port: &str, tag: &str, slot: u8, v: Version, salt: u8) -> Vec<
         proto_version: 1,
         capabilities: caps,
     };
-    sign_image(&spec, &body(salt ^ v.minor() ^ slot << 4), &key()).unwrap()
+    sign_image(&spec, &body(salt ^ v.minor() ^ slot << 4, len), &key()).unwrap()
 }
 
-fn hub(slot: u8, v: Version) -> Vec<u8> {
-    img("rp2040", "self-boot", "hub-rp2040-lcd", slot, v, 0x11)
+const SMALL: usize = BODY_LEN as usize;
+
+fn hub(slot: u8, v: Version, len: usize) -> Vec<u8> {
+    img("rp2040", "self-boot", "hub-rp2040-lcd", slot, v, 0x11, len)
 }
 
-fn seg(slot: u8, v: Version) -> Vec<u8> {
-    img("stm32f401re", "self-boot", "seg-f401-7seg", slot, v, 0x5A)
+fn seg(slot: u8, v: Version, len: usize) -> Vec<u8> {
+    img("stm32f401re", "self-boot", "seg-f401-7seg", slot, v, 0x5A, len)
 }
 
-fn watch(v: Version) -> Vec<u8> {
-    img("esp32s3", "vendor-stage2", "watch-s3", 0, v, 0xA5)
+fn watch(v: Version, len: usize) -> Vec<u8> {
+    img("esp32s3", "vendor-stage2", "watch-s3", 0, v, 0xA5, len)
 }
 
-fn generated() -> Vec<(&'static str, Vec<u8>)> {
-    let v0 = Version::new(1, 0, 0);
+/// Release 1.1.0 of the sample with apps of the given sizes.
+fn release(hub_len: usize, seg_len: usize, watch_len: usize) -> Vec<u8> {
     let v1 = Version::new(1, 1, 0);
     let t = dagon_topology::parse_str(YAML).unwrap();
     let bin = dagon_topology::compile_str(YAML).unwrap();
-    let images = [seg(0, v1), seg(1, v1), watch(v1), hub(0, v1), hub(1, v1)];
-    let release = dagon_sign::release::build(
+    let images = [
+        seg(0, v1, seg_len),
+        seg(1, v1, seg_len),
+        watch(v1, watch_len),
+        hub(0, v1, hub_len),
+        hub(1, v1, hub_len),
+    ];
+    dagon_sign::release::build(
         dagon_topology::defs::Registry::builtin(),
         &t,
         &bin,
@@ -70,12 +77,23 @@ fn generated() -> Vec<(&'static str, Vec<u8>)> {
         "sample-1.1.0",
         &key(),
     )
-    .unwrap();
+    .unwrap()
+    .bundle
+}
+
+fn generated() -> Vec<(&'static str, Vec<u8>)> {
+    use dagon_sim::sample::{HUB_APP_BYTES, SEG_APP_BYTES, WATCH_APP_BYTES};
+    let v0 = Version::new(1, 0, 0);
     vec![
-        ("sample-hub-1.0.0.img", hub(0, v0)),
-        ("sample-seg-1.0.0.img", seg(0, v0)),
-        ("sample-watch-1.0.0.img", watch(v0)),
-        ("sample-1.1.0.dgb", release.bundle),
+        ("sample-hub-1.0.0.img", hub(0, v0, SMALL)),
+        ("sample-seg-1.0.0.img", seg(0, v0, SMALL)),
+        ("sample-watch-1.0.0.img", watch(v0, SMALL)),
+        ("sample-1.1.0.dgb", release(SMALL, SMALL, SMALL)),
+        // What the browser demo writes: the apps at their real size.
+        (
+            "sample-full-1.1.0.dgb",
+            release(HUB_APP_BYTES, SEG_APP_BYTES, WATCH_APP_BYTES),
+        ),
     ]
 }
 

@@ -29,7 +29,7 @@ async function fixture(url: string | null): Promise<Uint8Array | null> {
 
 /** The repository's test-key release and F401 boot core, standing in for the project's through dagon serve. */
 const FIXTURES = {
-  latest: async () => fixture(FIXTURED ? (await import('../../../crates/dagon-sim/fixtures/sample-1.1.0.dgb?url')).default : null),
+  latest: async () => fixture(FIXTURED ? (await import('../../../crates/dagon-sim/fixtures/sample-full-1.1.0.dgb?url')).default : null),
   bootcore: async (id: string) =>
     fixture(FIXTURED && id === 'seg' ? (await import('../../../crates/dagon-wasm/fixtures/f401-bootcore-1.0.0.img?url')).default : null),
 };

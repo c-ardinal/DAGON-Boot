@@ -7,7 +7,8 @@ import { simulator } from './simHub.ts';
 import type { Transport } from './transport.ts';
 
 const repo = (rel: string) => new Uint8Array(readFileSync(new URL(`../../../${rel}`, import.meta.url)));
-const RELEASE = repo('crates/dagon-sim/fixtures/sample-1.1.0.dgb');
+// The apps at their real size (48 KiB on each 子機), as the demo page writes them.
+const RELEASE = repo('crates/dagon-sim/fixtures/sample-full-1.1.0.dgb');
 /** The sample's MCUs: each node's self-check counts against its MCU definition's trial time, as on the page. */
 const MCU: Record<string, string> = { hub: 'rp2040', seg: 'stm32f401re', watch: 'esp32s3' };
 
@@ -40,7 +41,7 @@ describe('the browser simulator takes the links and flash their real time', () =
     });
     await op.connect();
     await op.push();
-    op.takeFile('sample-1.1.0.dgb', RELEASE);
+    op.takeFile('sample-full-1.1.0.dgb', RELEASE);
     await op.update();
     expect(op.state).toBe('done');
 
@@ -48,10 +49,10 @@ describe('the browser simulator takes the links and flash their real time', () =
       const between = new Set((seen[id] ?? []).filter((p) => p > 0 && p < 100));
       expect(between.size, `${id}: distinct steps between 0 and 100 %`).toBeGreaterThan(3);
     }
-    // Each 子機's transfer takes its sector erase (600 ms) and its link's time on top: about 25 bytes per ms each way on I2C, 11 on the UART.
+    // 48 KiB crosses I2C at about 25 bytes per ms each way, and the UART at 11: seconds, not milliseconds.
     for (const id of ['seg', 'watch']) {
       const [from, to] = writing[id] ?? [0, 0];
-      expect(to - from, `${id}: simulated ms in transfer`).toBeGreaterThan(600);
+      expect(to - from, `${id}: simulated ms in transfer`).toBeGreaterThan(3_000);
     }
   }, 120_000);
 });

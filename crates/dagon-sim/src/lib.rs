@@ -127,6 +127,12 @@ pub mod sample {
     /// Release 1.1.0 (.dgb) for the sample topology: seg A/B, watch,
     /// hub A/B, plus the topology.
     pub const RELEASE_1_1_0: &[u8] = include_bytes!("../fixtures/sample-1.1.0.dgb");
+    /// App sizes about what the sample apps weigh, so a simulated transfer
+    /// takes its real time: the images of `dagon demo`, and the full-size
+    /// sample release (`fixtures/sample-full-1.1.0.dgb`) the browser demo writes.
+    pub const HUB_APP_BYTES: usize = 128 * 1024;
+    pub const SEG_APP_BYTES: usize = 48 * 1024;
+    pub const WATCH_APP_BYTES: usize = 48 * 1024;
 }
 
 /// The sample, every node confirmed on 1.0.0: hub (RP2040, USB), seg

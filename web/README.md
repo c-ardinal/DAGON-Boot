@@ -51,7 +51,7 @@ Query parameters for development (`npm run dev` only; production builds leave th
 | `?sim` | The simulator (`crates/dagon-sim` through dagon-wasm's `Simulator`, `sim` feature): hub, F401 with its ROM loader, watch. It runs on the wall clock and each answer takes the links' and flash's time (dagon-sim's `TimedHub`, as in `dagon demo`), so a write runs about as long as on hardware. `&wipe` erases the F401 first, so "7セグを復旧する" takes the ROM path. |
 
 With `?mock` and `?sim` (no serve behind the dev server) the repository's test-key release
-(`crates/dagon-sim/fixtures/sample-1.1.0.dgb`) and F401 boot core
+(`crates/dagon-sim/fixtures/sample-full-1.1.0.dgb`, the apps at their real size) and F401 boot core
 (`crates/dagon-wasm/fixtures/f401-bootcore-1.0.0.img`) stand in for the project's files that serve
 hands out (GET /v1/release/latest, GET /v1/bootcore/{node}), and the start screen's 新しく作る / 見本から新しく作る
 start an unsaved 構成 on the page. Production builds leave every stand-in out.

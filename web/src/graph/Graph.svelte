@@ -31,7 +31,9 @@
 </script>
 
 <script lang="ts">
-  import { CANVAS, LINK, NODE, SLOT } from '../app/copy.ts';
+  import { CANVAS, LINK, NODE, SLOT, STATE } from '../app/copy.ts';
+  import { lightsStill, nodeState, STATE_ICON, type NodeState } from '../app/nodeState.ts';
+  import Icon from '../screens/Icon.svelte';
   import { KIND_LABEL, type LinkKind } from '../app/define/model.ts';
   import type { Live } from '../app/operate.svelte.ts';
   import type { Config, Link, Node } from '../app/sample.ts';
@@ -120,7 +122,7 @@
 
   /** Card geometry of each class (normal, compact): width, gaps, the uplink card above each top 親機. */
   const sizes = (compact: boolean) => ({
-    w: (compact ? 11 : 16.25) * rem,
+    w: (compact ? 11 : 15) * rem,
     gapX: (compact ? 1.25 : 2.5) * rem,
     gapY: (compact ? 3 : 4.5) * rem,
   });
@@ -243,9 +245,10 @@
     if (!connected) return null;
     const l = live[n.id];
     if (!l || l.responding === null) return 'skeleton';
-    if (!l.responding) return { chip: NODE.silent, spoken: NODE.silentName, silent: true };
+    // 応答あり・応答なし are the state mark itself (0S-5): no chip repeats them.
+    if (!l.responding) return { chip: '', spoken: NODE.silentName, silent: true };
     if (l.hello?.trial) return { chip: NODE.trial, spoken: NODE.trialName, silent: false };
-    return { chip: NODE.responding, spoken: NODE.respondingName, silent: false };
+    return { chip: '', spoken: NODE.respondingName, silent: false };
   }
 
   function versionOf(n: Node): string {
@@ -275,6 +278,17 @@
     // On trial the state chip (● 確認待ち) already says it.
     return l.hello.trial ? null : { text: `✓ ${SLOT.states[4]}`, trial: false };
   }
+
+  /** Each node's state mark (0S-5): from the page's chip, the water level and the watch. */
+  const states = $derived(
+    Object.fromEntries(
+      (config?.nodes ?? []).map((n): [string, NodeState] => {
+        const l = live[n.id];
+        return [n.id, nodeState({ connected, responding: l?.responding, trial: !!l?.hello?.trial, chip: chips[n.id]?.chip, writing: fill[n.id] !== undefined, unreachable: !!n.notYet })];
+      }),
+    ),
+  );
+  const still = $derived(lightsStill(Object.values(states)));
 
   /** A 親機's own connection line: its uplink as the 構成 writes it, or the link from the node above it. */
   function hubVia(n: Node): string {
@@ -448,7 +462,8 @@
         {@const slots = slotsOf(n)}
         {@const boot = m !== null && m !== 'skeleton' && m.silent ? null : bootOf(n)}
         <button
-          class="node"
+          class="node st-{states[n.id]}"
+          class:still
           class:uns={!!n.notYet}
           class:err={m !== null && m !== 'skeleton' && m.silent}
           class:drop={dropOn === n.id}
@@ -459,7 +474,7 @@
           data-avoid=""
           tabindex={focusKey === key ? 0 : -1}
           aria-pressed={selected === key}
-          aria-label={spokenName(n, m, v)}
+          aria-label="{spokenName(n, m, v)}、{STATE[states[n.id]]}"
           bind:offsetHeight={heights[n.id]}
           onclick={() => pick(key)}
         >
@@ -474,6 +489,7 @@
           <span class="hd">
             <b>[{n.no}] {n.name}</b><span class="role">{roleOf(n)}</span>
             {#if v}<span class="ver" translate="no">{v}</span>{:else if m === 'skeleton'}<span class="skeleton ver-sk"></span>{/if}
+            <span class="state" title={STATE[states[n.id]]}><Icon name={STATE_ICON[states[n.id]]} size="var(--i-state)" /><span class="visually-hidden">{STATE[states[n.id]]}</span></span>
           </span>
           <span class="bd">
             <span class="prod" translate="no" title={n.product}>{n.product}</span>
@@ -485,7 +501,7 @@
               <span class="chips"><span class="skeleton chip-sk"></span></span>
             {:else if m || boot}
               <span class="chips"
-                >{#if m}<span class="chip" class:silent={m.silent} class:uns={!!n.notYet && m.chip === NODE.notYet}>{m.chip}</span>{/if}{#if boot}<span
+                >{#if m?.chip}<span class="chip" class:silent={m.silent} class:uns={!!n.notYet && m.chip === NODE.notYet}>{m.chip}</span>{/if}{#if boot}<span
                     class="chip boot"
                     class:trial={boot.trial}>{boot.text}</span
                   >{/if}</span
@@ -656,38 +672,116 @@
     text-align: center;
   }
 
-  /* Node cards: band with [n] name, role and version; product; one mono line; chips. */
+  /* NodeCard: header (name, role, version, state mark), product, one mono line, chips.
+     The frame carries the state (0S-5): 1 px when normal, 2 px in the state colour for 要確認 and エラー. */
   .node {
     position: absolute;
     z-index: var(--z-node);
     display: grid;
     padding: 0;
-    border: 1.5px solid #b9b6ae;
+    border: var(--st-w-thin) solid var(--st-idle);
     border-radius: var(--r-m);
     background: var(--c-ink);
     color: var(--c-paper);
     text-align: left;
-    font: 400 var(--t-13) / 1.45 var(--f-ja);
+    font: 400 var(--t-small) / 1.45 var(--f-ja);
     cursor: pointer;
     overflow: hidden;
     transition: box-shadow 160ms var(--ease-out);
   }
+  .node.st-alive,
+  .node.st-busy {
+    border-color: var(--st-alive);
+  }
+  .node.st-silent {
+    border-color: var(--st-silent);
+  }
+  .node.st-silent .prod {
+    color: var(--c-muted);
+  }
+  .node.st-attention {
+    border: var(--st-w-strong) solid var(--st-attention);
+  }
+  .node.st-error {
+    border: var(--st-w-strong) solid var(--st-error);
+  }
+  .state {
+    display: inline-flex;
+    flex: none;
+    align-self: center;
+    padding: var(--s-1);
+    color: var(--st-idle);
+  }
+  .st-alive .state {
+    color: var(--c-paper);
+  }
+  .st-silent .state {
+    color: var(--st-silent);
+  }
+  .st-busy .state {
+    color: var(--st-busy);
+  }
+  .st-attention .state {
+    color: var(--st-attention);
+  }
+  .st-error .state {
+    color: var(--st-error);
+  }
+  /* 作業中: a 48 px light runs once round the frame every 1.6 s; the only moving thing on the canvas. */
+  @property --orbit {
+    syntax: '<angle>';
+    inherits: false;
+    initial-value: 0deg;
+  }
+  .node.st-busy::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    z-index: 2;
+    padding: var(--st-w-strong);
+    border-radius: inherit;
+    background: conic-gradient(from var(--orbit), var(--st-busy) 0 30deg, transparent 30deg);
+    mask:
+      linear-gradient(#000 0 0) content-box exclude,
+      linear-gradient(#000 0 0);
+    pointer-events: none;
+    animation: orbit var(--dur-orbit) linear infinite;
+  }
+  @keyframes orbit {
+    to {
+      --orbit: 360deg;
+    }
+  }
+  /* Standing still (reduced motion, or another node needs attention): a dashed light along the top edge. */
+  .node.st-busy.still::after {
+    inset: 0 0 auto;
+    height: var(--st-w-strong);
+    padding: 0;
+    mask: none;
+    background: repeating-linear-gradient(90deg, var(--st-busy) 0 12px, transparent 12px 20px);
+    animation: none;
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .node.st-busy::after {
+      inset: 0 0 auto;
+      height: var(--st-w-strong);
+      padding: 0;
+      mask: none;
+      background: repeating-linear-gradient(90deg, var(--st-busy) 0 12px, transparent 12px 20px);
+      animation: none;
+    }
+  }
   .node[aria-pressed='true'] {
-    border-color: var(--c-paper);
-    box-shadow: 0 0 0 2px var(--c-paper);
+    box-shadow: 0 0 0 var(--st-w-thin) var(--c-paper);
   }
   .node.drop {
     box-shadow: 0 0 0 2px var(--c-accent);
   }
-  .node.err {
-    border-color: var(--c-signal);
-  }
   .node.uns {
     border-style: dashed;
-    border-color: var(--c-paper);
   }
   .node:focus-visible {
-    outline: 2px solid var(--c-paper);
+    outline: var(--st-w-focus) solid var(--c-paper);
     outline-offset: 2px;
   }
   @media (hover: hover) and (pointer: fine) {
@@ -703,27 +797,27 @@
   }
   .hd {
     display: flex;
-    align-items: baseline;
-    gap: 0.375rem;
+    align-items: center;
+    gap: var(--s-2);
     min-width: 0;
-    padding: 0.5rem 0.75rem 0.375rem;
-    border-bottom: 1px solid var(--c-hair);
-    background: var(--c-layer-2);
+    height: 40px;
+    padding: var(--s-2) var(--s-3);
+    background: var(--c-layer-1);
   }
   .hd b {
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
-    font: 700 1rem / 1.3 var(--f-ja);
+    font: 700 var(--t-small) / 20px var(--f-ja);
   }
   .role {
-    font-size: var(--t-11);
     color: var(--c-muted);
+    font: 500 var(--t-caption) / 16px var(--f-ja);
     white-space: nowrap;
   }
   .ver {
     margin-left: auto;
-    font: 400 1.5rem / 1 var(--f-version);
+    font: 400 var(--t-version) / 24px var(--f-version);
     font-variant-numeric: tabular-nums;
   }
   .ver-sk {
@@ -731,24 +825,31 @@
     height: 1rem;
     margin-left: auto;
   }
+  .state {
+    margin-left: auto;
+  }
+  .ver + .state,
+  .ver-sk + .state {
+    margin-left: 0;
+  }
   .bd {
     display: grid;
-    gap: 1px;
+    gap: 0;
     min-width: 0;
-    padding: 0.375rem 0.75rem 0.625rem;
+    padding: var(--s-3) var(--s-4);
   }
   .prod {
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
-    font: 700 1rem / 1.4 var(--f-ja);
+    font: 700 var(--t-body) / 24px var(--f-ja);
   }
   .meta {
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
     color: var(--c-muted);
-    font: 500 var(--t-12) / 1.5 var(--f-mono);
+    font: 500 var(--t-mono) / 24px var(--f-mono);
   }
   .chips {
     display: flex;

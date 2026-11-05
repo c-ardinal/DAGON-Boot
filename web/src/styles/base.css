@@ -232,6 +232,56 @@ button {
   outline-offset: 2px;
 }
 
+/* Button/Primary and Button/Secondary: one shape (44 px, 2560: 68), only fill and colour differ. */
+.button-primary,
+.button-secondary {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  gap: var(--s-2);
+  height: var(--h-button);
+  padding: 0 var(--s-5);
+  border: 1px solid transparent;
+  border-radius: var(--r-m);
+  font: 700 var(--t-body) / 1 var(--f-ja);
+  white-space: nowrap;
+  cursor: pointer;
+  transition: background-color var(--dur-feedback) ease;
+}
+.button-primary {
+  background: var(--c-accent);
+  color: var(--c-ink);
+}
+.button-secondary {
+  border-color: var(--c-line);
+  background: none;
+  color: var(--c-paper);
+}
+@media (hover: hover) and (pointer: fine) {
+  .button-primary:not([aria-disabled='true']):hover {
+    background: var(--c-accent-hover);
+  }
+  .button-secondary:not([aria-disabled='true']):hover {
+    background: var(--c-layer-2);
+  }
+}
+.button-primary:not([aria-disabled='true']):active {
+  background: var(--c-accent-press);
+}
+.button-primary[aria-disabled='true'],
+.button-secondary[aria-disabled='true'] {
+  border-color: transparent;
+  background: var(--c-layer-2);
+  color: var(--c-muted);
+  cursor: default;
+}
+.button-primary:focus-visible,
+.button-secondary:focus-visible {
+  outline: var(--st-w-focus) solid var(--c-paper);
+  outline-offset: 2px;
+}
+
 /* Button/Icon: ghost, a 28 px state layer (2560: 44) in a 44 px hit area. */
 .button-icon {
   display: inline-flex;

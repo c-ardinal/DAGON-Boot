@@ -1111,10 +1111,26 @@ export const UNSAVED = {
 export const START = {
   heading: '始め',
   new: 'プロジェクトを作る',
-  sample: '見本から作る',
+  /** The samples serve can make, each with what it holds. */
+  sample: {
+    'desk-demo': { label: 'desk-demo', detail: 'RP2040 の親機に、NUCLEO-F401RE（I2C）と M5StopWatch（UART）をつなぐ' },
+  } as Record<string, { label: string; detail: string }>,
+  /** 「プロジェクトを作る」's modal: how, then name and place. */
+  create: {
+    title: 'プロジェクトを作る',
+    how: '作り方',
+    empty: '空から作る',
+    sample: '見本から作る',
+    cancel: 'やめる',
+    next: '名前と場所を決める',
+    back: '戻る',
+    pick: '場所を選ぶ',
+    where: '作る場所',
+    go: 'プロジェクトを作る',
+  },
   /** Under the product's name on the start page. */
   sub: 'ノードとリンクの構成を描くと、ノードごとのアプリの雛形を作れます。',
-  open: '開く',
+  open: 'プロジェクトを開く',
   recent: '最近のプロジェクト',
   recentNone: 'なし',
   up: '上へ',

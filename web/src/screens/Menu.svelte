@@ -22,7 +22,7 @@
   let { onstart, onrestart, locked, restartButton = $bindable(), agentLinked, onlink, ontalk, onunlink, onhelp }: Props = $props();
   const ITEMS: [StartChoice, string][] = [
     ['new', START.new],
-    ['sample', START.sample],
+    ['sample', START.create.sample],
     ['open', START.open],
   ];
 </script>

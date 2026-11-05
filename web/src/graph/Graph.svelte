@@ -1084,20 +1084,15 @@
       font-size: 1.5rem;
     }
   }
+  /* Canvas controls: bottom-right at the edge margin; the zoom pill is the right-most. */
   .zoom {
     position: absolute;
-    right: 0.75rem;
-    bottom: 0.75rem;
+    right: var(--m-edge);
+    bottom: var(--m-edge);
     z-index: var(--z-chrome);
     display: flex;
-    flex-wrap: wrap;
-    justify-content: flex-end;
-    gap: 2px;
-    max-width: calc(100% - 1.5rem);
-    padding: 2px;
-    border: 1px solid var(--c-hair);
-    border-radius: var(--r-full);
-    background: var(--c-layer-1);
+    align-items: flex-end;
+    gap: var(--s-2);
   }
   /* Phones: the focal number takes the bottom-left; the controls move to the top-right corner. */
   @media (max-width: 767px) {

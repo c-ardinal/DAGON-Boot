@@ -37,6 +37,9 @@
   import FilePanel from './screens/FilePanel.svelte';
   import Reconnect from './screens/Reconnect.svelte';
   import Header from './screens/Header.svelte';
+  import ZoomPill from './screens/ZoomPill.svelte';
+  import Toast, { type Notice } from './screens/Toast.svelte';
+  import { CONN, fill as fillIn } from './app/copy.ts';
   import OrderList from './screens/OrderList.svelte';
   import { devHub } from './serial/devHub.ts';
   import { serveSim, type SimStand } from './serial/serveSim.ts';
@@ -427,11 +430,11 @@
   const problemCount = $derived(d.problems.filter((p) => p.severity === 'error').length);
   const drawerTabs = $derived<DrawerTab[]>([
     { id: 'problems', label: DRAWER.problems, count: problemCount + d.notYet, alarm: problemCount > 0 },
+    { id: 'jobs', label: DRAWER.jobs, ...(runningJobs ? { count: runningJobs } : {}) },
     { id: 'output', label: DRAWER.output },
     { id: 'timeline', label: DRAWER.timeline },
+    { id: 'talk', label: DRAWER.talk },
     { id: 'log', label: DRAWER.log },
-    ...(cli.state === 'ready' ? [{ id: 'jobs', label: DRAWER.jobs, count: runningJobs }] : []),
-    ...(agent.linked ? [{ id: 'talk', label: DRAWER.talk }] : []),
   ]);
   /** 定義's next step in one sentence (the status row), and its failure cause. */
   const defineNext = $derived.by((): { cause?: string; sentence: string } => {
@@ -804,6 +807,8 @@
   );
 
   const hub = $derived(hubOf(op.state));
+  /** The 親機 this page talks to (the one writing reaches). */
+  const hubNode = $derived(op.config?.nodes.find((n) => n.role === 'hub' && op.config?.reach.includes(n.id)));
   const connected = $derived(!['idle', 'lost'].includes(hub));
   /** DAGON waits for its agent's answer (the lock table's 返事待ち). */
   const thinking = $derived(agent.thinking);
@@ -953,6 +958,27 @@
     void tick().then(() => (band.primary ? primaryEl : nextEl)?.focus());
   });
 
+  /** The non-blocking notice on screen (bottom-right), or null. */
+  let notice = $state<Notice | null>(null);
+  const hubName = $derived(hubNode ? `[${hubNode.no}] ${hubNode.name}` : '');
+  let wasConnected = false;
+  $effect(() => {
+    const c = connected;
+    untrack(() => {
+      if (c && !wasConnected && hubName) notice = { word: fillIn(CONN.toast.connected, { node: hubName }) };
+      if (!c && wasConnected && hub === 'lost') notice = { word: fillIn(CONN.toast.lost, { node: hubName }), error: true };
+      wasConnected = c;
+    });
+  });
+  $effect(() => {
+    if (op.state === 'L23') untrack(() => (notice = { word: fillIn(WRITE.toast.done, { n: op.targets.length }) }));
+  });
+  // A failure or warning the user must notice: its short word on a toast, the sentence behind it.
+  $effect(() => {
+    const cause = next.cause;
+    if (cause) untrack(() => (notice = { word: cause, error: cause.startsWith('×'), detail: next.sentence }));
+  });
+
   /** The write sheet holds the emphasis: the header's actions step back while it is open. */
   const sheetHolds = $derived(mode === 'operate' && showFile && op.file !== null);
   /** 書き込む: the 親機 answered nothing (L07) → writing directly over USB; otherwise the next step of writing through DAGON. */
@@ -1016,10 +1042,7 @@
     </span>
   {/if}
   {#if mode === 'operate' || d.view === 'graph'}
-    <button aria-disabled={zoom <= 0.5} title="{ZOOM.out} (Ctrl+-)" aria-label={ZOOM.out} onclick={() => (zoom = Math.max(0.5, zoom / 1.2))}>−</button>
-    <button title="{ZOOM.fit} (F)" onclick={() => (zoom = 1)}>{ZOOM.fit}</button>
-    <button aria-disabled={zoom >= 2} title="{ZOOM.in} (Ctrl++)" aria-label={ZOOM.in} onclick={() => (zoom = Math.min(2, zoom * 1.2))}>＋</button>
-    <span class="pct wide-only">{Math.round(scale * 100)}%</span>
+    <ZoomPill {scale} canIn={zoom < 2} canOut={zoom > 0.5} onin={() => (zoom = Math.min(2, zoom * 1.2))} onout={() => (zoom = Math.max(0.5, zoom / 1.2))} onfit={() => (zoom = 1)} />
   {/if}
 {/snippet}
 
@@ -1143,6 +1166,8 @@
       {dot}
       {chips}
       {fill}
+      {zoom}
+      controls={zoomBar}
       inset={{ left: partsW, right: sheetW }}
     />
   </main>
@@ -1217,16 +1242,17 @@
         {#if agent.linked}
           <Dagon {agent} place={cli.hello?.workspace ?? d.doc.topo.name ?? 'local'} onask={askDagon} onapply={applyProposal} ontalk={() => (drawerTab = 'talk')} openRequest={dagonOpen} />
         {/if}
+        {#if notice}<Toast {notice} onmore={() => (drawerTab = 'log')} ondone={() => (notice = null)} />{/if}
         {#if sheetShown}
           <aside class="float sheet right" aria-label={SHEET} data-avoid="" bind:offsetWidth={sheetW} bind:offsetHeight={sheetH}>{@render right()}</aside>
         {/if}
       </div>
-      {#if drawerTab}
-        <Drawer tabs={drawerTabs} open={drawerTab} onpick={(id) => (drawerTab = id)} onclose={() => (drawerTab = null)} body={drawerBody} />
-      {/if}
+      <Drawer tabs={drawerTabs} open={drawerTab} onpick={(id) => (drawerTab = id)} onclose={() => (drawerTab = null)} body={drawerBody} />
       <Status
-        hub={{ on: connected, text: HUB[hub].replace(/^\S+\s/, '') }}
+        hub={connected && hubNode ? `${HUB[hub]} [${hubNode.no}] ${hubNode.name}（${NODE.roleHub}）` : HUB[hub]}
+        hubAction={connected ? HUB_TOGGLE.disconnect : HUB_TOGGLE.connect}
         onhub={toggleHub}
+        {hubLocked}
         state={stateName(lockStates)}
         cli={cliLabel}
         oncli={() => {
@@ -1235,12 +1261,10 @@
           cliPanel = 'link';
         }}
         key={cli.hello?.key_id?.slice(0, 8) ?? null}
-        toggles={drawerTabs}
-        open={drawerTab}
-        ontoggle={pickTab}
-        progress={PERCENT.has(op.state) ? op.overall : null}
-        sentence={next.sentence}
-        cause={next.cause}
+        problems={problemCount}
+        unreachable={d.notYet}
+        progress={PERCENT.has(op.state) ? `${LOCK.controls.update} ${op.overall}%` : null}
+        sentence={[next.cause, next.sentence].filter(Boolean).join(' ')}
         mode={mode === 'define' ? MODE.define : MODE.operate}
         saved={savedLabel}
         status={d.status || op.status}
@@ -1305,8 +1329,8 @@
     border-radius: var(--r-full);
     background: var(--c-layer-1);
   }
-  .zoom button,
-  :global(.graph .zoom button) {
+  .zoom button:not(.button-icon),
+  :global(.graph .zoom button:not(.button-icon)) {
     height: 1.5rem;
     min-width: 1.5rem;
     padding: 0 0.5rem;
@@ -1317,7 +1341,7 @@
     font: 400 var(--t-12) / 1 var(--f-ja);
     cursor: pointer;
   }
-  :global(.graph .zoom button[aria-checked='true']),
+  :global(.graph .zoom button:not(.button-icon)[aria-checked='true']),
   .zoom button[aria-checked='true'] {
     background: var(--c-paper);
     color: var(--c-ink);
@@ -1336,13 +1360,13 @@
     font: 500 var(--t-12) / 1 var(--f-mono);
   }
   @media (hover: hover) and (pointer: fine) {
-    :global(.graph .zoom button:hover) {
+    :global(.graph .zoom button:not(.button-icon):hover) {
       background: var(--c-layer-3);
       color: var(--c-paper);
     }
   }
   @media (max-width: 767px), (pointer: coarse) {
-    :global(.graph .zoom button),
+    :global(.graph .zoom button:not(.button-icon)),
     .tb {
       min-height: 44px;
       min-width: 44px;

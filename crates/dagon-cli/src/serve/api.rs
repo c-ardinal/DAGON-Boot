@@ -1732,6 +1732,86 @@ mod tests {
         assert_eq!(listed, ["seg-a.img", "seg-b.img", "bootcore-seg-a.img"]);
     }
 
+    /// `dagon new` and `dagon gen`, built and signed once; then the app
+    /// crate's and the boot crate's versions raised in their Cargo.toml,
+    /// `dagon gen` and the Console's build, sign and release again: the
+    /// package carries both new versions (real firmware builds).
+    fn raised_versions_reach_the_package(node: &str) {
+        let d = std::env::temp_dir().join(format!("dagon-raise-{node}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&d);
+        let dir = d.join("proj");
+        let here = std::fs::canonicalize(crate::dagonsrc::BUILT_FROM).unwrap();
+        let src = crate::dagonsrc::NewSource::Clone(crate::config::plain_path(here));
+        let yaml = crate::scaffold::SAMPLE;
+        crate::scaffold::new_project(&dir, "proj", yaml, &d.join("keys"), &src).unwrap();
+        let config = dir.join(crate::config::CONFIG_FILE);
+        let load = || Config::load(Some(&config.to_string_lossy())).unwrap();
+        let t = dagon_topology::parse_str(yaml).unwrap();
+        let key = test_key();
+        let only = [node.to_string()];
+        let mut log = Vec::new();
+        let cycle = |log: &mut Vec<String>| {
+            let lines = crate::scaffold::gen_project(&config, &only, false).unwrap();
+            assert!(!lines.iter().any(|l| l.starts_with("skipped")), "{lines:?}");
+            let cfg = load();
+            let go = AtomicBool::new(false);
+            nodebuild::build_nodes(&cfg, &only, &mut |l| log.push(l.into()), &go)
+                .and_then(|_| sign_nodes(&cfg, &t, &only, &key, &mut |l| log.push(l.into()), &go))
+                .unwrap_or_else(|e| panic!("{e}\n{}", log.join("\n")));
+        };
+        cycle(&mut log);
+        let raise = |rel: &str, to: &str| {
+            let path = dir.join(rel).join("Cargo.toml");
+            let text = std::fs::read_to_string(&path).unwrap();
+            let doc: toml_edit::DocumentMut = text.parse().unwrap();
+            let from = doc["package"]["version"].as_str().unwrap().to_string();
+            let raised = text.replacen(
+                &format!("version = \"{from}\""),
+                &format!("version = \"{to}\""),
+                1,
+            );
+            assert_ne!(raised, text, "{rel}");
+            std::fs::write(&path, raised).unwrap();
+        };
+        raise(&format!("nodes/{node}"), "1.3.0");
+        raise(&format!("boot/{node}"), "0.2.0");
+        cycle(&mut log);
+        let go = AtomicBool::new(false);
+        release_from(&load(), &t, None, "raised", &key, &mut |_| {}, &go).unwrap();
+        let bundle = std::fs::read(dir.join(RELEASE_DIR).join("raised.dgb")).unwrap();
+        let view = dagon_format::bundle::BundleView::parse(&bundle).unwrap();
+        let versions: Vec<(u8, dagon_format::Version)> = (0..view.item_count())
+            .filter(|&i| Some(i) != view.topology_item())
+            .map(|i| {
+                let raw = &view.item_bytes(i)[..HEADER_SIZE];
+                let h = ImageHeader::parse(raw.try_into().unwrap()).unwrap();
+                (h.image_kind, h.version)
+            })
+            .collect();
+        let of = |kind: u8| -> Vec<dagon_format::Version> {
+            versions
+                .iter()
+                .filter(|v| v.0 == kind)
+                .map(|v| v.1)
+                .collect()
+        };
+        assert_eq!(
+            of(image_kind::APP),
+            [dagon_format::Version::new(1, 3, 0); 2]
+        );
+        assert_eq!(
+            of(image_kind::BOOTCORE),
+            [dagon_format::Version::new(0, 2, 0); 2]
+        );
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
+    #[test]
+    #[ignore = "builds firmware for the STM32F401"]
+    fn raised_versions_reach_the_package_f401() {
+        raised_versions_reach_the_package("seg");
+    }
+
     #[test]
     fn signing_uses_only_the_recorded_build() {
         let (cfg, t) = built_area("recorded");

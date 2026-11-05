@@ -62,6 +62,49 @@ fn workspace_version(dir: &Path) -> Result<String, String> {
     ))
 }
 
+/// Brings the crate's own entry in `dir`'s Cargo.lock to the `version`
+/// its Cargo.toml says, so a version the developer raised builds with no
+/// step of theirs. Only that entry changes, offline: every other package
+/// stays as locked, and the `--locked` build after it still stops at a
+/// dependency that was added or changed. Returns the version written, if
+/// the entry changed.
+pub(crate) fn lock_own_version(dir: &Path) -> Result<Option<String>, String> {
+    let lock = dir.join("Cargo.lock");
+    let Ok(text) = std::fs::read_to_string(&lock) else {
+        return Ok(None);
+    };
+    let manifest = read_toml(&dir.join("Cargo.toml"))?;
+    let package = manifest.get("package");
+    let field = |k: &str| package.and_then(|p| p.get(k)).and_then(toml::Value::as_str);
+    // An inherited version is the workspace's, whose lock is not here.
+    let (Some(name), Some(version)) = (field("name"), field("version")) else {
+        return Ok(None);
+    };
+    let mut doc: toml_edit::DocumentMut = text
+        .parse()
+        .map_err(|e| format!("{}: {e}", lock.display()))?;
+    let Some(entries) = doc
+        .get_mut("package")
+        .and_then(toml_edit::Item::as_array_of_tables_mut)
+    else {
+        return Ok(None);
+    };
+    // A registry or git package has a `source`; the crate itself has none.
+    let own = entries.iter_mut().find(|t| {
+        t.get("name").and_then(toml_edit::Item::as_str) == Some(name) && !t.contains_key("source")
+    });
+    let Some(own) = own else {
+        return Ok(None);
+    };
+    if own.get("version").and_then(toml_edit::Item::as_str) == Some(version) {
+        return Ok(None);
+    }
+    own["version"] = toml_edit::value(version);
+    let rel = crate::genfs::Rel::new("Cargo.lock")?;
+    crate::genfs::write(dir, &rel, doc.to_string().as_bytes())?;
+    Ok(Some(version.to_string()))
+}
+
 /// `source` (read from `what`), refused when `given` names another version.
 pub(crate) fn agreed(source: Version, given: Option<&str>, what: &str) -> Result<Version, String> {
     let Some(g) = given else {

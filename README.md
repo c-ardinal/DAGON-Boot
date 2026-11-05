@@ -186,7 +186,10 @@ in its crate's `Cargo.toml` (its boot core's, in its boot crate's
 or the command stops and says which. A node's boot core goes into the
 package with its app, and the node writes it only when its version differs
 from the boot core it runs: a changed boot core is written once its version
-is raised, as with apps.
+is raised, as with apps. The build brings the crate's own entry in its
+`Cargo.lock` to the raised version and changes nothing else there; every
+other package stays as locked. `dagon gen` keeps the boot crate's
+`version`: it is the one field of that file that is yours.
 
 ### 5. Write the first version (once per node)
 

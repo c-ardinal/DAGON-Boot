@@ -179,7 +179,9 @@ jobs:
 
   # `dagon new` and `dagon gen`, then each self-boot node's generated boot
   # crate built for both boot core slots and signed for each, as a release
-  # does (crates/dagon-cli/src/scaffold/tests.rs).
+  # does (crates/dagon-cli/src/scaffold/tests.rs); and an app crate's and a
+  # boot crate's raised versions reaching the package after `dagon gen` and
+  # the build (crates/dagon-cli/src/serve/api.rs).
   boot-crates:
     runs-on: ubuntu-latest
     steps:
@@ -192,6 +194,7 @@ jobs:
         run: |
           for t in $(python scripts/stage0_size.py --targets); do rustup target add "$t"; done
           cargo test -p dagon-cli --bin dagon --locked -- --ignored gen_boot_core_slots_sign
+          cargo test -p dagon-cli --bin dagon --locked -- --ignored raised_versions_reach_the_package
 
   web:
     runs-on: ubuntu-latest

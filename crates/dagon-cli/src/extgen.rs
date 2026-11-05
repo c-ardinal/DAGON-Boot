@@ -249,9 +249,42 @@ fn boot_crate(
                 .replace("{{boot_metadata}}", meta.trim_end())
                 .replace("{{node}}", &n.id)
                 .replace("{{tag}}", &tag);
-            Ok((format!("{BOOT_CRATES}/{}/{rel}", n.id), text))
+            let path = format!("{BOOT_CRATES}/{}/{rel}", n.id);
+            let text = match rel.as_str() {
+                "Cargo.toml" => keep_developer_fields(text, p.base, &path)?,
+                _ => text,
+            };
+            Ok((path, text))
         })
         .collect()
+}
+
+/// The `[package]` fields of a boot crate's Cargo.toml that are the
+/// developer's: gen writes the template's value once and keeps theirs from
+/// then on (the template's header says so). The version is the boot core's
+/// (crate::srcver); a node writes a boot core whose version differs from
+/// the one it runs.
+const DEVELOPER_FIELDS: [&str; 1] = ["version"];
+
+/// `rendered` (the boot crate manifest gen makes) with the
+/// [`DEVELOPER_FIELDS`] of the one at `rel` gen wrote before, if any.
+fn keep_developer_fields(rendered: String, base: &Path, rel: &str) -> Result<String, String> {
+    let Ok(earlier) = std::fs::read_to_string(base.join(rel)) else {
+        return Ok(rendered);
+    };
+    let earlier: toml_edit::DocumentMut = earlier.parse().map_err(|e| {
+        format!("{rel}: {e}; correct it, or remove it to start again from the template")
+    })?;
+    let mut doc: toml_edit::DocumentMut = rendered
+        .parse()
+        .map_err(|e| format!("{rel} from the boot core template: {e}"))?;
+    for k in DEVELOPER_FIELDS {
+        let mine = earlier.get("package").and_then(|p| p.get(k));
+        if let Some(v) = mine.and_then(toml_edit::Item::as_value) {
+            doc["package"][k] = toml_edit::Item::Value(v.clone());
+        }
+    }
+    Ok(doc.to_string())
 }
 
 /// Where the project's DAGON crates come from and where it is.
@@ -268,7 +301,8 @@ pub struct ProjectRef<'a> {
 
 /// The host check of node `id`'s boot crate (`boot/<id>/`): cargo
 /// resolves its whole graph (every feature, every target; `--locked` once
-/// its Cargo.lock exists, else cargo writes it), every package built into
+/// its Cargo.lock exists, else cargo writes it; the crate's own lock entry
+/// first takes the version its Cargo.toml says), every package built into
 /// it must pass [`BootFolder::check_graph`], and the stamp of its inputs
 /// is returned for `boot/<id>/graph.stamp`, which the boot core's build
 /// requires. All features and all targets make the checked graph a
@@ -278,6 +312,7 @@ fn boot_graph_stamp(p: &ProjectRef<'_>, id: &str, mcu: &str) -> Result<(String, 
     let rel = format!("{BOOT_CRATES}/{id}");
     let dir = contained(p.base, Path::new(&rel))?;
     let f = BootFolder::read(&dir)?;
+    crate::srcver::lock_own_version(&dir)?;
     let mut cmd = std::process::Command::new("cargo");
     for k in crate::nodebuild::secret_env() {
         cmd.env_remove(k);
@@ -784,6 +819,55 @@ mod tests {
         f.verify_stamp().unwrap();
         std::fs::write(base.join("extensions/show/src/extra.rs"), "").unwrap();
         assert!(f.verify_stamp().is_err());
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    /// The boot crate's version is the developer's: gen keeps a raised
+    /// one, brings the lock's own entry up to date and stamps the graph.
+    #[test]
+    fn a_raised_boot_crate_version_survives_gen() {
+        use dagon_topology::defs::boot_folder::BootFolder;
+        let base = scratch("raised");
+        let hub = [node(
+            "hub",
+            "rp2040",
+            "waveshare-rp2040-touch-lcd-1.28",
+            "coordinator",
+        )];
+        let src = dagon_src();
+        let p = ProjectRef {
+            base: &base,
+            config: "dagon.toml",
+            src: &src,
+            check_boot_graph: true,
+        };
+        let none = Extensions::default();
+        write_nodes(Registry::builtin(), &p, &hub, &[], &[], &none).unwrap();
+        let manifest = base.join("boot/hub/Cargo.toml");
+        let text = std::fs::read_to_string(&manifest).unwrap();
+        assert!(base.join("boot/hub/Cargo.lock").is_file());
+        // The header names every field that is the developer's.
+        let header: String = text.lines().take_while(|l| l.starts_with('#')).collect();
+        for k in DEVELOPER_FIELDS {
+            assert!(
+                header.contains(&format!("`{k}` under [package]")),
+                "{header}"
+            );
+        }
+        let raised = text.replacen("version = \"0.1.0\"", "version = \"0.2.0\"", 1);
+        assert_ne!(raised, text);
+        std::fs::write(&manifest, &raised).unwrap();
+        let lines = write_nodes(Registry::builtin(), &p, &hub, &[], &[], &none).unwrap();
+        assert!(!lines.iter().any(|l| l.starts_with("skipped")), "{lines:?}");
+        assert_eq!(std::fs::read_to_string(&manifest).unwrap(), raised);
+        assert_eq!(
+            crate::srcver::crate_version(&base.join("boot/hub")).unwrap(),
+            dagon_format::Version::new(0, 2, 0)
+        );
+        BootFolder::read(&base.join("boot/hub"))
+            .unwrap()
+            .verify_stamp()
+            .unwrap();
         let _ = std::fs::remove_dir_all(&base);
     }
 

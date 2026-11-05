@@ -11,7 +11,7 @@ use dagon_format::topology::{self, TopologyView};
 use dagon_format::{sha256, ImageHeader, Version};
 use dagon_proto::payload::{
     self, phase, reboot_mode, target, HelloResp, SetPending, Show, SlotState, StatusResp,
-    XferBegin, XferChunk,
+    VersionResp, XferBegin, XferChunk,
 };
 use dagon_proto::{Cmd, Status};
 
@@ -156,6 +156,24 @@ impl<T: Transport, C: Clock> Host<T, C> {
             .call(to, Cmd::Status, &[target::BOOTCORE], REQUEST_MS)
             .await?;
         StatusResp::parse(&body).map_err(|_| Error::BadResponse)
+    }
+
+    /// VERSION of the target: its stage0, boot core and app slots, wire
+    /// version and MCU id, each when the node could read it. `None`: its
+    /// agent predates VERSION (it answers `Unsupported`): the versions are
+    /// unknown, not an error.
+    pub async fn version(&mut self, to: Target) -> Result<Option<VersionResp>, T::Error> {
+        let body = match self.call(to, Cmd::Version, &[], REQUEST_MS).await {
+            Ok(b) => b,
+            Err(Error::Rejected {
+                status: Status::Unsupported,
+                ..
+            }) => return Ok(None),
+            Err(e) => return Err(e),
+        };
+        VersionResp::parse(&body)
+            .map(Some)
+            .map_err(|_| Error::BadResponse)
     }
 
     /// Hub HELLO, then a short RELAY HELLO to every I2C address but the ROM

@@ -10,6 +10,7 @@ pub mod header;
 pub mod le;
 pub mod link;
 pub mod manifest;
+pub mod stage0;
 pub mod statelog;
 pub mod topology;
 pub mod version;

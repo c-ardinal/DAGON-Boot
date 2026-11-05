@@ -40,6 +40,8 @@
   const FACTORY = 2;
   const MODE_FACTORY = 3;
   const SHORT_HEX = 4;
+  /** HELLO port_kind of an MCU booted by its vendor's 2nd stage (dagon_format::header::port_kind). */
+  const PORT_VENDOR_STAGE2 = 2;
 
   const clock = new Intl.DateTimeFormat('ja-JP', { hour: '2-digit', minute: '2-digit' });
   const hex = (b: Uint8Array) => Array.from(b, (x) => x.toString(16).padStart(2, '0')).join('');
@@ -111,6 +113,19 @@
     if (c && core) {
       rows.push(['boot_core', `${versionText(core.version)} · slot ${c.active} · ${hex(core.digest16.subarray(0, SHORT_HEX))}…`]);
     }
+    return [...rows, ...versionRows(l)];
+  }
+
+  /** VERSION: stage0 (none on an MCU booted by its vendor 2nd stage, unknown when not told) and each boot core slot. */
+  function versionRows(l: Live | undefined): [string, string][] {
+    if (l?.version === undefined) return [];
+    const v = l.version;
+    const absent = l.hello?.portKind === PORT_VENDOR_STAGE2 ? DETAIL.none : DETAIL.unknown;
+    const rows: [string, string][] = [['stage0', v?.stage0 != null ? versionText(v.stage0) : absent]];
+    const cs = v?.coreSlots;
+    cs?.slots.forEach((x, i) =>
+      rows.push([`boot_core[${i}]`, `state ${x.state} · ${versionText(x.version)}${i === cs.active ? ' · running' : ''}`]),
+    );
     return rows;
   }
 

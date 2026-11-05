@@ -197,6 +197,7 @@ dependencies = [
  "cortex-m",
  "cortex-m-rt",
  "dagon-core",
+ "dagon-format",
  "dagon-mcu-common",
  "dagon-mcu-stm32f401re",
  "ed25519-compact",

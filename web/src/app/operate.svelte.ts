@@ -19,6 +19,7 @@ import {
   type RecoverResult,
   type Refusal,
   type StatusResp,
+  type VersionResp,
   type UpdateEvent,
 } from '../wasm/dagon.ts';
 import { FAILURE_BAND } from './band.ts';
@@ -38,6 +39,8 @@ export interface Live {
   status: StatusResp | null;
   /** STATUS of the boot core slots; null when the node keeps none or it is not read yet. */
   core?: StatusResp | null;
+  /** VERSION; null when the node's agent predates it (or it was not readable), undefined until read. */
+  version?: VersionResp | null;
 }
 
 const UNKNOWN: Live = { responding: null, rttMs: null, lastSeen: null, hello: null, status: null };
@@ -535,7 +538,9 @@ export class Operate {
       const s = await this.call((h) => h.status(n.target.kind, n.target.addr));
       // A node without boot core slots refuses this STATUS: no row then.
       const core = await this.call((h) => h.bootCoreStatus(n.target.kind, n.target.addr)).catch(() => null);
-      this.live[id] = { ...(this.live[id] ?? UNKNOWN), hello: s.hello, status: s.status, core };
+      // An agent that predates VERSION answers null: its versions show as unknown.
+      const version = await this.call((h) => h.version(n.target.kind, n.target.addr)).catch(() => null);
+      this.live[id] = { ...(this.live[id] ?? UNKNOWN), hello: s.hello, status: s.status, core, version };
     } catch {
       // A missed STATUS shows the last values; the next watch round decides answering or not.
     }

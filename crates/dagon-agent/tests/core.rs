@@ -29,6 +29,8 @@ const TAG: [u8; 16] = target_tag("hub-rp2040-lcd");
 /// Two boot core slots of 4 KiB (header inline) and the boot core log.
 const CORE: [u32; 2] = [0x0000, 0x1000];
 const CORE_LEN: u32 = 0x1000;
+/// The stage0 version mark the store reads.
+const STAGE0: Version = Version::new(0, 1, 0);
 const LOG: LogLayout = LogLayout {
     faces: [0x2000, 0x2400],
     face_len: 0x400,
@@ -182,6 +184,10 @@ impl SlotStore for Store {
     }
     fn confirm(&mut self, _: u8, _: &[u8; HEADER_SIZE], _: &Transition) -> Result<(), StoreError> {
         unreachable!("no APP confirm here")
+    }
+    /// A board with boot core slots boots behind a marked stage0.
+    fn stage0_version(&mut self) -> Option<Version> {
+        self.cores.then_some(STAGE0)
     }
     fn target_status(&mut self, t: u8) -> Option<StatusResp> {
         match t {
@@ -549,4 +555,42 @@ fn status_of_an_unknown_target_or_shape_is_refused() {
     assert_eq!(n.call(Cmd::Status, &[9]).0, Status::Unsupported);
     assert_eq!(n.call(Cmd::Status, &[1, 1]).0, Status::Arg);
     assert_eq!(n.call(Cmd::Status, &[]).0, Status::Ok, "APP as before");
+}
+
+fn version(n: &mut Node) -> VersionResp {
+    let (st, body) = n.call(Cmd::Version, &[]);
+    assert_eq!(st, Status::Ok);
+    VersionResp::parse(&body).unwrap()
+}
+
+#[test]
+fn version_names_stage0_the_boot_core_slots_and_the_app() {
+    let mut n = Node::new(installed(true));
+    let v = version(&mut n);
+    assert_eq!((v.wire, v.mcu_id), (Some(1), Some(mcu_id::RP2040)));
+    assert_eq!(v.stage0, Some(STAGE0));
+    let core = v.core_slots.expect("boot core slots");
+    assert_eq!(core.active, 0);
+    assert_eq!(v.boot_core, Some(Version::new(1, 0, 0)));
+    assert_eq!(core.slots[1].state, SlotState::Empty);
+    assert_eq!(v.app_slots, Some(VersionSlots::of(&app_status())));
+    assert_eq!(
+        n.call(Cmd::Version, &[0x21, 0, 0, 8]).0,
+        Status::Unsupported
+    );
+
+    // A new boot core written to B shows there, A still running.
+    assert_eq!(n.transfer(target::BOOTCORE, 1, &bootcore(1, 1)), Status::Ok);
+    let core = version(&mut n).core_slots.unwrap();
+    assert_eq!(core.slots[1].version, Version::new(1, 1, 0));
+    assert_eq!(core.active, 0);
+}
+
+#[test]
+fn version_leaves_out_what_the_node_cannot_read() {
+    // No stage0 mark and no boot core slots: neither is sent.
+    let mut n = Node::new(installed(false));
+    let v = version(&mut n);
+    assert_eq!((v.stage0, v.boot_core, v.core_slots), (None, None, None));
+    assert!(v.app_slots.is_some() && v.mcu_id.is_some());
 }

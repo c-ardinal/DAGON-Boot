@@ -55,7 +55,8 @@ Usage:
   dagon rescue hub [--out <dir>] [--topology <yaml>] [--key <file>]
                                      hub rescue UF2 (boot2, stage0, logs, boot core, app)
   dagon status [--port <name>] [--topology <yaml>]
-                                     HELLO and STATUS of the hub and each topology node
+                                     HELLO, STATUS and VERSION (stage0, boot core, app,
+                                     wire, MCU) of the hub and each topology node
   dagon apply [<dgb>] [--node <id>]... [--port <name>] [--topology <yaml>]
         [--pubkey <file>] [--key <file>] [--no-host-verify]
                                      verify the release, check it matches the topology,
@@ -113,8 +114,10 @@ Usage:
                                      (boot core, stage0, factory agent) with the key;
                                      prints the plan first; writes to the one device
                                      the writer reports, or the one you choose or name
-  dagon doctor [--fix]               tools each MCU family of the topology needs; --fix
-                                     installs what needs no administrator rights
+  dagon doctor [--fix] [--port <name>]
+                                     tools each MCU family of the topology needs; --fix
+                                     installs what needs no administrator rights; then
+                                     each node's versions when a hub is connected
   dagon serve [--port <n>] [--web <dir>] [--pubkey <file>] [--no-open]
                                      DAGON Console, the browser tool (built into dagon,
                                      or --web), and its API on 127.0.0.1 only; opens it

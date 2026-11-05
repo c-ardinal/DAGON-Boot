@@ -4,6 +4,8 @@
 //! commands (no administrator rights: `rustup target add`, `cargo install`,
 //! ...); drivers and the like are left to the developer. Commands from the
 //! project's own definitions run only after the user agrees to each one.
+//! With a hub connected (found, or `--port`), each node's versions follow
+//! (VERSION, as in `dagon status`); without one, a line says why.
 
 use std::process::Command;
 
@@ -236,11 +238,12 @@ fn install_cmd(args: &[&str]) -> Option<String> {
     s.success().then(String::new)
 }
 
-/// `dagon doctor [--fix] [--topology <yaml>] [--config <file>]`
+/// `dagon doctor [--fix] [--port <name>] [--topology <yaml>] [--config <file>]`:
+/// the tool checks, then each node's versions when a hub is connected.
 pub fn command(args: &[&str]) -> Result<(), String> {
     let fix = args.contains(&FIX);
     let args: Vec<&str> = args.iter().copied().filter(|a| *a != FIX).collect();
-    let o = Opts::parse(&args, &["topology", "config"])?;
+    let o = Opts::parse(&args, &["topology", "config", "port"])?;
     let cfg = Config::load(o.get("config"))?;
     let reg = crate::defs::registry(&cfg)?;
     println!("{}", crate::versions::known_text());
@@ -250,16 +253,20 @@ pub fn command(args: &[&str]) -> Result<(), String> {
         (None, Some(p)) => println!("this project's DAGON source: local clone {}", p.display()),
         (None, None) => {}
     }
-    let mcus: Vec<String> = match o.get("topology").map(Into::into).or(cfg.topology.clone()) {
+    let topology = match o.get("topology").map(Into::into).or(cfg.topology.clone()) {
         Some(p) => {
             let t = read_topology(&cfg, &p)?;
             println!("checking for {}", p.display());
-            t.nodes.iter().map(|n| n.mcu.clone()).collect()
+            Some(t)
         }
         None => {
             println!("no topology: checking every family");
-            all_mcus(&reg)
+            None
         }
+    };
+    let mcus: Vec<String> = match &topology {
+        Some(t) => t.nodes.iter().map(|n| n.mcu.clone()).collect(),
+        None => all_mcus(&reg),
     };
     let mut io = Io {
         probe: &mut probe_cmd,
@@ -267,7 +274,11 @@ pub fn command(args: &[&str]) -> Result<(), String> {
         consent: Some(&mut |q| crate::deploy::confirm(q, &mut std::io::stdin().lock())),
         out: &mut |l| println!("{l}"),
     };
-    if doctor(&reg, &mcus, fix, &mut io) {
+    let ok = doctor(&reg, &mcus, fix, &mut io);
+    for l in crate::device::doctor_versions(o.get("port"), &cfg, topology.as_ref()) {
+        println!("{l}");
+    }
+    if ok {
         Ok(())
     } else {
         Err("some prerequisites are missing; see above".into())

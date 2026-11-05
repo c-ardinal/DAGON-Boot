@@ -31,3 +31,5 @@ data; images carry the `TEST_KEY` build flag). Public key:
 | `frame_subctl.bin` | SUBCTL nrst = pulse, boot0 = high |
 | `frame_i2c_raw_get.bin` | I2C_RAW writing `00 FF`, reading 1 byte |
 | `frame_enter_rom.bin` | ENTER_ROM (0x24) method = 1 FORCE_DOWNLOAD_BOOT, seq 0x14. Added after G1, owner-approved, additive: the files above are unchanged |
+| `frame_version_req.bin` | VERSION (0x03) request, empty (the summary set), seq 0x15. Additive: the files above are unchanged |
+| `frame_version_resp.bin` | VERSION response: OK, 6 TLVs: wire 1, mcu_id F401, stage0 0.1.0, running boot core 1.0.0, boot core slots (A confirmed 1.0.0 running, B empty), app slots (A written 1.0.0, B trying 1.1.0 running, factory empty) |

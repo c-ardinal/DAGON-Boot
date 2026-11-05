@@ -15,13 +15,20 @@
 use cortex_m::peripheral::{NVIC, SCB};
 use cortex_m_rt::entry;
 use dagon_core::bootcore;
+use dagon_format::stage0;
 use dagon_mcu_common::mapped::Mapped;
 use dagon_mcu_stm32f401re::layout::{CORE_SLOTS, LOG, MCU_ID, MIN_FLASH_SIZE, STAGE0};
 use dagon_mcu_stm32f401re::{trial, PUBKEY, STAGE0_VERIFIES, TRIAL_ATTEMPTS, TRIAL_WDT_MS};
 use panic_halt as _;
 
+/// The version mark the agent's VERSION reads (`dagon_format::stage0`):
+/// this package's Cargo.toml version.
+static VERSION_MARK: stage0::Mark = stage0::Mark::of(stage0::version(env!("CARGO_PKG_VERSION")));
+
 #[entry]
 fn main() -> ! {
+    // Keeps the mark in the image (nothing else reads it here).
+    core::hint::black_box(&VERSION_MARK);
     // SAFETY: the flash is memory-mapped read-only from its base for
     // MIN_FLASH_SIZE bytes, and nothing writes it while stage0 runs.
     let mut flash = unsafe { Mapped::new(STAGE0 as *const u8, STAGE0, MIN_FLASH_SIZE) };

@@ -7,7 +7,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 
 use dagon_conform::timeout::REQUEST_MS;
-use dagon_format::header::{image_kind, target_tag};
+use dagon_format::header::{image_kind, mcu_id, target_tag};
 use dagon_format::Version;
 use dagon_host::{
     rom, Clock, ConfirmOutcome, Error, Event, Host, NodeOutcome, Outcome, RecoverAssets,
@@ -259,6 +259,54 @@ fn status_and_discover() {
     assert_eq!(d.nodes.len(), 1);
     assert_eq!(d.nodes[0].0, SEG_AT);
     assert_eq!(d.nodes[0].1.active_version, Version::new(1, 0, 0));
+}
+
+#[test]
+fn version_of_the_hub_and_a_node_and_of_an_agent_that_predates_it() {
+    let s = sim();
+    let mut h = host(&s);
+    for (to, mcu) in [(Target::Hub, mcu_id::RP2040), (SEG_AT, mcu_id::STM32F401XE)] {
+        let v = block_on(h.version(to)).unwrap().expect("answers VERSION");
+        assert_eq!((v.wire, v.mcu_id), (Some(1), Some(mcu)), "{to:?}");
+        assert_eq!(v.stage0, Some(dagon_sim::store::STAGE0_VERSION));
+        assert!(v.core_slots.is_some(), "boot core slots behind stage0");
+        assert_eq!(v.boot_core, Some(Version::new(1, 0, 0)));
+        let app = v.app_slots.unwrap();
+        assert_eq!(
+            (app.active, app.running()),
+            (0, Some(Version::new(1, 0, 0)))
+        );
+    }
+
+    // An agent built before VERSION: unknown, not an error; the rest of
+    // the session goes on.
+    let old = [Cmd::Version as u8].to_vec();
+    s.hub.borrow_mut().i2c_node(NODE_I2C_ADDR).unwrap().predates = old.clone();
+    s.hub.borrow_mut().node.predates = old;
+    assert_eq!(block_on(h.version(SEG_AT)).unwrap(), None);
+    assert_eq!(block_on(h.version(Target::Hub)).unwrap(), None);
+    assert_eq!(
+        block_on(h.status(SEG_AT)).unwrap().hello.active_version,
+        Version::new(1, 0, 0)
+    );
+}
+
+#[test]
+fn version_of_a_stage0_without_its_mark_is_unknown() {
+    let s = sim();
+    let mut h = host(&s);
+    // A stage0 built before the mark existed: its region holds code, no mark.
+    let (at, len) = dagon_sim::Layout::STM32F401XE.bootcore;
+    let mut hub = s.hub.borrow_mut();
+    let seg = hub.i2c_node(NODE_I2C_ADDR).unwrap();
+    let mut f = seg.flash();
+    dagon_port::Flash::erase(&mut *f, at, len).unwrap();
+    dagon_port::Flash::write(&mut *f, at, b"DGBC").unwrap();
+    drop(f);
+    drop(hub);
+    let v = block_on(h.version(SEG_AT)).unwrap().unwrap();
+    assert_eq!(v.stage0, None, "left out: unknown");
+    assert!(v.app_slots.is_some());
 }
 
 #[test]

@@ -7,6 +7,9 @@ use dagon_core::boot::SlotLayout;
 use dagon_core::log::{trial_room, Log, LogError, LogLayout, LogState, SlotRef};
 use dagon_format::header::{header_digest16, ImageHeader, HEADER_SIZE};
 use dagon_format::statelog::{kind, reason, slot};
+use dagon_format::{stage0, Version};
+
+use crate::layout::{STAGE0, STAGE0_SIZE};
 
 use dagon_port::{Flash, FlashError};
 use dagon_proto::payload::{target, StatusResp};
@@ -276,6 +279,11 @@ impl<F: Flash> SlotStore for KindSStore<F> {
         self.log
             .reserve(&mut self.flash, trial_room(crate::TRIAL_ATTEMPTS))
             .map_err(|_| StoreError::Flash)
+    }
+
+    /// Stage0's version mark in its region (`dagon_format::stage0`).
+    fn stage0_version(&mut self) -> Option<Version> {
+        stage0::find(STAGE0, STAGE0_SIZE, |a, b| self.flash.read(a, b).is_ok())
     }
 
     /// The boot core slots: the core settles its trial before it starts

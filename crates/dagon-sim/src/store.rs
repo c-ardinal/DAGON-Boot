@@ -17,9 +17,15 @@ use dagon_format::header::{
     HEADER_SIZE,
 };
 use dagon_format::statelog::{self, kind, reason, FaceHeader, Record, RECORD_SIZE};
-use dagon_format::{sha256, Version};
+use dagon_format::{sha256, stage0, Version};
 use dagon_port::{Flash, FlashError, FlashRegion};
 use dagon_proto::payload::{target, SlotInfo, SlotState, StatusResp};
+
+/// The version of the stage0 a provisioned layout with boot core slots
+/// carries (its mark at [`STAGE0_MARK_AT`] of the `bootcore` region).
+pub const STAGE0_VERSION: Version = Version::new(1, 0, 0);
+/// Offset of that mark: after the region's 4-byte presence marker.
+pub const STAGE0_MARK_AT: u32 = 4;
 
 /// Where things live in a node's flash.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -305,7 +311,9 @@ impl SimStore {
     }
 
     /// Writes a factory image into `slot` and records it as provisioned and
-    /// confirmed; also marks the boot core region as present.
+    /// confirmed; also marks the boot core region as present, and on a
+    /// layout with boot core slots (behind a stage0) puts stage0's version
+    /// mark ([`STAGE0_VERSION`]) after that marker.
     pub fn provision(&mut self, slot: u8, image: &[u8]) -> Result<(), StoreError> {
         let (b, _) = self.layout.bootcore;
         let mut marker = [0u8; 4];
@@ -314,6 +322,9 @@ impl SimStore {
             .map_err(|_| StoreError::Flash)?;
         if marker == [0xFF; 4] {
             self.program(b, b"DGBC")?;
+            if self.layout.cores.is_some() {
+                self.program(b + STAGE0_MARK_AT, &stage0::Mark::of(STAGE0_VERSION).0)?;
+            }
         }
         self.provision_core()?;
         let hdr: [u8; HEADER_SIZE] = image
@@ -701,6 +712,15 @@ impl SlotStore for SimStore {
                 .map_err(|_| StoreError::Flash),
             Err(_) => Ok(()),
         }
+    }
+
+    /// Stage0's mark in the `bootcore` region, on a layout that models a
+    /// stage0 (boot core slots behind it).
+    fn stage0_version(&mut self) -> Option<Version> {
+        self.layout.cores?;
+        let (at, len) = self.layout.bootcore;
+        let mut f = self.flash();
+        stage0::find(at, len, |a, b| f.read(a, b).is_ok())
     }
 
     /// The boot core slots, folded from their log as the hub's store does

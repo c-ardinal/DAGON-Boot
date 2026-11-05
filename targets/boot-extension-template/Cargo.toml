@@ -4,7 +4,7 @@ version = "0.0.0"
 edition = "2021"
 license = "MIT OR Apache-2.0"
 publish = false
-description = "A trusted boot extension to copy: it observes the boot core's events (docs/extension-manifest.md)"
+description = "A trusted boot extension to copy: it observes the boot core's events (site/src/content/docs/reference/extension-manifest.md)"
 
 # Standalone: a node's boot crate links it by path; its host tests run on
 # their own (`cargo test`).

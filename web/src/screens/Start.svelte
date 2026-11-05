@@ -2,6 +2,7 @@
   import { tick } from 'svelte';
   import { BAND, CLI_LINK, MENU, PRODUCT, START } from '../app/copy.ts';
   import { inside, type Start } from '../app/start.svelte.ts';
+  import { DEMO_SITE } from '../app/site.ts';
   import Icon from './Icon.svelte';
   import Modal from './Modal.svelte';
 
@@ -85,7 +86,7 @@
   <p class="sub">{START.sub}</p>
   <div class="choices">
     <button class="button-primary" bind:this={first} aria-disabled={!s.usable('new')} onclick={() => s.usable('new') && (modal = 'how')}>{START.new}</button>
-    <button class="button-secondary" aria-disabled={!s.usable('open')} onclick={() => s.usable('open') && void toOpen()}>{START.open}</button>
+    <button class="button-secondary" data-control={DEMO_SITE ? 'open' : undefined} aria-disabled={!s.usable('open')} onclick={() => s.usable('open') && void toOpen()}>{START.open}</button>
   </div>
   <section class="recent" aria-labelledby="recent-h">
     <h2 id="recent-h">{START.recent}</h2>

@@ -204,6 +204,7 @@ export const LOCK = {
     rollback: '前のバージョンに戻す',
     connect: 'つなぐ・切断',
     project: 'プロジェクトの切替',
+    open: 'プロジェクトを開く',
     ask: 'DAGON に聞く',
     apply: 'DAGON の案を反映',
     link: 'DAGON と連携',
@@ -325,6 +326,21 @@ export const LOCK = {
       why: {
         ask: 'DAGON の返事を待っています',
         apply: 'DAGON の返事を待っています',
+      },
+    },
+    /** The public demo page: only the simulator in this browser; the rest needs dagon serve on the user's PC. */
+    site: {
+      name: 'デモ',
+      why: {
+        gen: 'このデモはファイルを作りません。手元の PC で dagon serve を起動すると使えます',
+        build: 'このデモはビルドしません。手元の PC で dagon serve を起動すると使えます',
+        flash: 'このデモは実機につなぎません。手元の PC で dagon serve を起動すると使えます',
+        release: 'このデモはリリースを作りません。手元の PC で dagon serve を起動すると使えます',
+        open: 'このデモはファイルを開いたり保存したりしません。手元の PC で dagon serve を起動すると使えます',
+        ask: 'このデモは AI につなぎません。手元の PC で dagon serve を起動すると使えます',
+        apply: 'このデモは AI につなぎません。手元の PC で dagon serve を起動すると使えます',
+        link: 'このデモは鍵を扱いません。手元の PC で dagon serve を起動すると使えます',
+        file: 'このデモはファイルを読みません。用意してあるパッケージファイルで書き込めます',
       },
     },
     cliNone: {
@@ -1164,6 +1180,8 @@ export const SIM = {
   label: '模擬の親機と子機（実機ではありません）',
   /** Before connecting: no device list appears for the simulated 親機. */
   connect: { sentence: '模擬の親機につなぎます。機器を選ぶ一覧は出ません。' },
+  /** The demo page while watching: it reads no files, so its prepared package is what 書き込む writes. */
+  siteWrite: '「書き込む」で、用意してある新しいバージョンを書き込めます。',
 } as const;
 
 /** The menu (メニュー) and its one confirmation. */

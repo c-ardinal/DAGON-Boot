@@ -14,7 +14,11 @@ export default defineConfig({
   server: { host: '127.0.0.1', fs: { allow: ['..'] } },
   preview: { host: '127.0.0.1' },
   test: {
-    include: ['src/**/*.test.ts'],
-    setupFiles: ['src/wasm/test-setup.ts'],
+    projects: [
+      // The page's logic, and its first paint rendered on the server.
+      { extends: true, test: { name: 'page', include: ['src/**/*.test.ts'], exclude: ['src/**/*.svelte.test.ts'], setupFiles: ['src/wasm/test-setup.ts'] } },
+      // Runes as the browser runs them ($effect, flushSync): Svelte's client build.
+      { extends: true, resolve: { conditions: ['browser'] }, test: { name: 'runes', include: ['src/**/*.svelte.test.ts'], environment: './src/test-client-env.ts' } },
+    ],
   },
 });

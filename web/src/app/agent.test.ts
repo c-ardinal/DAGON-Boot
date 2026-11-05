@@ -6,7 +6,7 @@ import { AGENT } from './copy.ts';
 const json = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } });
 const now = () => Promise.resolve();
 
-describe('DAGON and its agent (docs/agent-api.md)', () => {
+describe('DAGON and its agent (site/src/content/docs/reference/agent-api.md)', () => {
   test('linking records the consent once; unlinking withdraws it and clears the conversation', async () => {
     const a = new Agent(agentMock(new URLSearchParams('agent'), () => '', now));
     await a.refresh();

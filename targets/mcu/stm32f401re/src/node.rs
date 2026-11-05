@@ -9,7 +9,7 @@
 //! handle on it, the serving loop another (a conformance build runs its
 //! flash tests through it); both are used by the serving task only. No
 //! flash operation runs with interrupts masked (the execution model of
-//! docs/design/lifecycle-events.md): an erase or program stalls instruction
+//! site/src/content/docs/explanation/lifecycle-events.md): an erase or program stalls instruction
 //! fetch for at most `ERASE_UNIT_MAX_MS` (the definition's 128 KiB sector
 //! erase maximum; `ERASE_UNIT_MAX_MS_KNOWN` says whether it is checked
 //! against the datasheet), below the confirmed IWDG period; every request starts

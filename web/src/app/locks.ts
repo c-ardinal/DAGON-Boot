@@ -18,6 +18,7 @@ export const LOCK_ORDER: readonly LockState[] = [
   'connecting',
   'disconnected',
   'thinking',
+  'site',
   'cliNone',
 ];
 
@@ -37,6 +38,8 @@ export interface LockInput {
   disconnected: boolean;
   /** DAGON is waiting for its agent's answer. */
   thinking: boolean;
+  /** The public demo page: the simulator only, no serve, files, devices or keys. */
+  site: boolean;
   /** No `dagon serve` behind the page. */
   cliNone: boolean;
 }
@@ -45,17 +48,25 @@ export function activeStates(i: LockInput): LockState[] {
   return LOCK_ORDER.filter((s) => i[s]);
 }
 
+/** A control that is also a case of a broader one: whatever stops the broader one stops it too. */
+const PART_OF: Partial<Record<Control, Control>> = { open: 'project' };
+
 /** Why `control` is stopped now, or null when it can be used. */
 export function lockOf(control: Control, states: readonly LockState[]): string | null {
+  const broader = PART_OF[control];
   for (const s of states) {
-    const why = (LOCK.states[s].why as Partial<Record<Control, string>>)[control];
-    if (why) return why;
+    const why = LOCK.states[s].why as Partial<Record<Control, string>>;
+    const r = why[control] ?? (broader && why[broader]);
+    if (r) return r;
   }
   return null;
 }
 
+/** States that hold for the whole page, never named in the status line. */
+const STANDING: readonly LockState[] = ['site', 'cliNone'];
+
 /** The state's short name for the status line; 待機 or 未接続 when nothing runs. */
 export function stateName(states: readonly LockState[]): string {
-  const s = states.find((x) => x !== 'cliNone');
+  const s = states.find((x) => !STANDING.includes(x));
   return s ? LOCK.states[s].name : LOCK.idle;
 }

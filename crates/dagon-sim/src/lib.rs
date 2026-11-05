@@ -9,6 +9,8 @@
 //!   reset, an I2C mailbox and selectable trial-app behaviour.
 //! - [`SimHub`]: answers the PC (directly or as a USB byte stream), relays to
 //!   nodes on I2C and UART, drives NRST/BOOT0 and raw ROM transactions.
+//! - [`TimedHub`]: a [`SimHub`] whose answers take the links' and flash's
+//!   real time (one model for `dagon demo` and the browser demo).
 //!
 //! Randomness comes only from [`SimRng`] seeds, so a seed replays a run.
 #![forbid(unsafe_code)]
@@ -21,6 +23,7 @@ mod ports;
 pub mod rng;
 pub mod rom;
 pub mod store;
+pub mod timing;
 
 pub use flash::{CutPoint, FlashOp, OpKind, SimFlash};
 pub use hub::{FrameCutter, Screen, SimBus, SimHub};
@@ -29,6 +32,7 @@ pub use node::{Run, SimNode, TrialApp};
 pub use rng::SimRng;
 pub use rom::SimRom;
 pub use store::{Layout, SimStore};
+pub use timing::{Medium, TimedHub};
 
 // The simulator declares no machine of its own: its nodes run the agent's.
 dagon_events::state_machine! {}
@@ -123,6 +127,12 @@ pub mod sample {
     /// Release 1.1.0 (.dgb) for the sample topology: seg A/B, watch,
     /// hub A/B, plus the topology.
     pub const RELEASE_1_1_0: &[u8] = include_bytes!("../fixtures/sample-1.1.0.dgb");
+    /// App sizes about what the sample apps weigh, so a simulated transfer
+    /// takes its real time: the images of `dagon demo`, and the full-size
+    /// sample release (`fixtures/sample-full-1.1.0.dgb`) the browser demo writes.
+    pub const HUB_APP_BYTES: usize = 128 * 1024;
+    pub const SEG_APP_BYTES: usize = 48 * 1024;
+    pub const WATCH_APP_BYTES: usize = 48 * 1024;
 }
 
 /// The sample, every node confirmed on 1.0.0: hub (RP2040, USB), seg

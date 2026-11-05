@@ -6,6 +6,7 @@
   import { HUB_LOCKED, hubOf, view, type Action } from './app/machine.ts';
   import { Operate, waterOf, type Progress, type ReleaseFile } from './app/operate.svelte.ts';
   import { keptChoices, type Kept } from './app/kept.ts';
+  import { logStages } from './app/stageLog.svelte.ts';
   import Graph, { type Chip, type Dot } from './graph/Graph.svelte';
   import Status from './screens/Status.svelte';
   import Drawer, { type DrawerTab } from './screens/Drawer.svelte';
@@ -43,9 +44,10 @@
   import FactoryModal from './screens/FactoryModal.svelte';
   import { answerConsent } from './app/factory.ts';
   import Toast, { type Notice } from './screens/Toast.svelte';
-  import { CONN, FILE, NOTICE, fill as fillIn } from './app/copy.ts';
+  import { CONN, FILE, NOTICE, SIM, fill as fillIn } from './app/copy.ts';
   import OrderList from './screens/OrderList.svelte';
   import { devHub } from './serial/devHub.ts';
+  import { DEMO_SITE } from './app/site.ts';
   import { serveSim, type SimStand } from './serial/serveSim.ts';
   import { MockTransport } from './serial/mock.ts';
   import { WebSerialTransport, type Transport } from './serial/transport.ts';
@@ -53,8 +55,8 @@
   import { dagonReady, mcuConnection, releaseVersions, require_release_key, set_release_key, trialMs, useDefinitions, versionText } from './wasm/dagon.ts';
 
   const params = new URLSearchParams(location.search);
-  // The stand-in hubs are for development builds only.
-  const stand = import.meta.env.DEV ? devHub(params) : null;
+  // The stand-in hubs are for development builds only; the public demo page always drives the simulator.
+  const stand = import.meta.env.DEV ? devHub(params) : DEMO_SITE ? devHub(new URLSearchParams('sim')) : null;
   const dev = stand !== null;
   const serial = navigator.serial;
   // Fetch the .wasm alongside the first paint; connecting awaits it and reports a failure.
@@ -109,11 +111,14 @@
 
   /** `dagon serve`: the page is always its page; K0/K3 when it cannot be reached. */
   const cli = new Cli();
+  /** The 親機 and 子機 are simulated: `dagon demo` through serve, or the demo page's own simulator. */
+  const simulated = $derived(cli.sim !== null || DEMO_SITE);
   /** The 定義 document: the project's 構成 as edited (its YAML is the one source of truth). */
   const d = new Define();
   /** DAGON's link to its agent through serve (development: `?agent` stands in for serve's routes). */
-  const agentStandIn = dev && params.has('agent');
-  const agent = new Agent(agentStandIn ? agentMock(params, () => d.config.yaml) : (m, p, b) => cli.api(m, p, b));
+  // Development builds only, written so every other build (the served page, the demo page) leaves agentMock out.
+  const agentStandIn = import.meta.env.DEV && dev && params.has('agent');
+  const agent = new Agent(import.meta.env.DEV && agentStandIn ? agentMock(params, () => d.config.yaml) : (m, p, b) => cli.api(m, p, b));
   if (agentStandIn) void agent.refresh();
   /** Web Serial, which the page never uses while it drives the simulator. */
   const ports = webSerial(serial, () => cli.sim !== null);
@@ -139,8 +144,8 @@
    * The release key: dagon serve writes the developer's key into the page (meta) and /v1/hello;
    * a page it serves verifies with that key only, and with none until it is there.
    */
-  void cli
-    .connect()
+  // The public demo page has no serve behind it and never calls one.
+  void (DEMO_SITE ? Promise.resolve() : cli.connect())
     .then(async () => {
       await dagonReady();
       if (cli.state === 'none') return;
@@ -229,7 +234,7 @@
   let restartButton = $state<HTMLButtonElement>();
   /** Menu 新しく作る / 見本から新しく作る / 開く: the 構成 is saved first (or the dialog asks). */
   function toStart(c: StartChoice) {
-    if (stopped('project')) return;
+    if (stopped(DEMO_SITE && c === 'open' ? 'open' : 'project')) return;
     menuOpen = false;
     void autosave.leave(() => goStart(c));
   }
@@ -836,24 +841,13 @@
   /** The timeline: each node's stage changes since the update began; it opens with the update. */
   let tlEvents = $state<StageEvent[]>([]);
   let tlStart = 0;
-  let tlLast: Record<string, string> = {};
-  $effect(() => {
-    const start = op.startedAt;
-    const prog = op.progress;
-    if (start === null) return;
-    untrack(() => {
-      if (start !== tlStart) {
-        tlStart = start;
-        tlEvents = [];
-        tlLast = {};
-        if (drawerTab === null) drawerTab = 'timeline';
-      }
-      const t = Date.now() - start;
-      const add = Object.entries(prog)
-        .filter(([id, p]) => tlLast[id] !== p.stage)
-        .map(([id, p]) => ((tlLast[id] = p.stage), { t, id, stage: p.stage }));
-      if (add.length) tlEvents = [...tlEvents, ...add];
-    });
+  logStages(op, {
+    begin: (start) => {
+      tlStart = start;
+      tlEvents = [];
+      if (drawerTab === null) drawerTab = 'timeline';
+    },
+    add: (events) => (tlEvents = [...tlEvents, ...events]),
   });
   const tlNow = $derived(tlStart && PERCENT.has(op.state) ? Math.max(0, wallMs - tlStart) : Math.max(0, ...tlEvents.map((e) => e.t)));
   /** 書込's version picker: the latest build (the project's newest release) first, then the kept packages; writing an older one is going back. */
@@ -866,10 +860,13 @@
     return one.length === 1 ? one[0] : WRITE.latest;
   }
   async function loadVersions() {
-    if (cli.state !== 'ready') return;
-    const bytes = await cli.latestRelease().catch(() => null);
+    const served = cli.state === 'ready';
+    // Without serve the stand-in's release is the latest build (development, the demo page); nothing is kept.
+    const fetchLatest = served ? () => cli.latestRelease() : stand?.latest;
+    if (!fetchLatest) return;
+    const bytes = await fetchLatest().catch(() => null);
     latest = bytes ? { bytes, label: labelOf(bytes) } : null;
-    kept = await cli.keptList().catch(() => []);
+    kept = served ? await cli.keptList().catch(() => []) : [];
     if (chosen === 'latest' ? !latest : !kept.some((k) => k.id === chosen)) chosen = latest ? 'latest' : (kept[0]?.id ?? 'latest');
   }
   const versionChoices = $derived([
@@ -933,6 +930,7 @@
       disconnected: !connected,
       thinking,
       // The development stand-in answers for serve's agent routes, so DAGON is not stopped by its absence.
+      site: DEMO_SITE,
       cliNone: cli.state !== 'ready' && !agentStandIn,
     }),
   );
@@ -973,13 +971,35 @@
     e.preventDefault();
     e.stopImmediatePropagation();
   }
+  /**
+   * The public demo page keeps controls stopped for good (files, devices, keys), so their reason is also the
+   * hover text and the accessible description, not only the note shown on press. The control's own title comes back once it is usable.
+   */
+  function lockHint(e: Event) {
+    const el = (e.target as Element | null)?.closest?.<HTMLElement>('[data-control]');
+    if (!el) return;
+    const r = lockedBy(el.dataset.control as Control);
+    if (r) {
+      el.dataset.title ??= el.title;
+      el.title = r;
+    } else if (el.dataset.title !== undefined) {
+      el.title = el.dataset.title;
+      delete el.dataset.title;
+    }
+  }
   // On the window in the capture phase: ahead of every handler on the page (Svelte delegates clicks to its root).
   $effect(() => {
     addEventListener('click', lockClick, true);
     addEventListener('keydown', lockKeys, true);
+    if (DEMO_SITE) {
+      addEventListener('pointerover', lockHint, true);
+      addEventListener('focusin', lockHint, true);
+    }
     return () => {
       removeEventListener('click', lockClick, true);
       removeEventListener('keydown', lockKeys, true);
+      removeEventListener('pointerover', lockHint, true);
+      removeEventListener('focusin', lockHint, true);
     };
   });
   // The models check the lock table inside their actions: any path to them (key, double-click, drag) is stopped.
@@ -1019,9 +1039,11 @@
       rest: op.rest && op.state === 'fileReady',
       finish: op.finished,
       refused: op.returnRefused?.kind,
-      sim: cli.sim !== null,
+      sim: simulated,
     });
     if (dialogOpen) return { ...b, primary: null };
+    // The demo page reads no files: its prepared package is what 書き込む writes.
+    if (DEMO_SITE && op.state === 'ready') return { ...b, sentence: SIM.siteWrite };
     if (op.latestMissing) return { ...b, ...BAND.M58 };
     if (hubNoticeShown) return { ...b, chip: undefined, pair: undefined, sentence: hubNoticeShown };
     return b;
@@ -1358,7 +1380,7 @@
   <!-- The DOM follows the visual order of each layout, so Tab order matches what is seen. -->
   <div class="frame {layout}" data-locks={locksNow} class:work={screen === 'work'} class:open={drawerOpen} class:modal={restartOpen || autosave.asking !== null}>
     <Header
-      sim={cli.sim !== null}
+      sim={simulated}
       {mode}
       onmode={screen === 'start' ? undefined : switchMode}
       {modeLocked}

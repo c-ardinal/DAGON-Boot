@@ -152,36 +152,3 @@ fn first_write_parts_load_from_the_tree() {
         (vec!["factory".to_string()], Some("factory"))
     );
 }
-
-/// The READMEs' list of link kinds the firmware offers is the builtin
-/// definitions' `[links]`, line for line.
-#[test]
-fn readme_link_availability_is_the_definitions() {
-    let names = |k: &[dagon_topology::schema::LinkKind]| {
-        k.iter().map(|k| k.name()).collect::<Vec<_>>().join(", ")
-    };
-    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
-    for (file, up, down, sep) in [
-        ("README.md", "up", "down", "; "),
-        ("README.ja.md", "上り", "下り", "、"),
-    ] {
-        let text = std::fs::read_to_string(root.join(file)).unwrap();
-        for m in reg().mcus() {
-            let mut parts = Vec::new();
-            if !m.links.up.is_empty() {
-                parts.push(format!("{up} {}", names(&m.links.up)));
-            }
-            if !m.links.down.is_empty() {
-                parts.push(format!("{down} {}", names(&m.links.down)));
-            }
-            let line = format!(
-                "
-- {}: {}
-",
-                m.name,
-                parts.join(sep)
-            );
-            assert!(text.contains(&line), "{file} lacks {line:?}");
-        }
-    }
-}

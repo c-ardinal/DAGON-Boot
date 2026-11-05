@@ -3,6 +3,9 @@ import { MockTransport, type DeviceKey } from './mock.ts';
 import { simulator } from './simHub.ts';
 import type { Transport } from './transport.ts';
 
+/** Simulated ms per wall ms for the stand-in simulator: real time. */
+const REAL_PACE = 1;
+
 /** A stand-in hub, the clock dagon-host runs on with it, and the project files dagon serve would hand out. */
 export interface DevHub {
   transport: Transport;
@@ -11,18 +14,24 @@ export interface DevHub {
   bootcore?: (id: string) => Promise<Uint8Array | null>;
 }
 
-/** A repository fixture served by the dev server (development builds only). */
+/**
+ * Development builds and the public demo page (src/app/site.ts) carry the repository's fixtures; no other build does.
+ * Written out in full so every other build folds it to false and leaves the fixture files out.
+ */
+const FIXTURED = import.meta.env.DEV || import.meta.env.MODE === 'demo';
+
+/** A repository fixture served with the page (development builds and the demo page only). */
 async function fixture(url: string | null): Promise<Uint8Array | null> {
-  if (!import.meta.env.DEV || !url) return null;
+  if (!FIXTURED || !url) return null;
   const r = await fetch(url);
   return r.ok ? new Uint8Array(await r.arrayBuffer()) : null;
 }
 
 /** The repository's test-key release and F401 boot core, standing in for the project's through dagon serve. */
 const FIXTURES = {
-  latest: async () => fixture(import.meta.env.DEV ? (await import('../../../crates/dagon-sim/fixtures/sample-1.1.0.dgb?url')).default : null),
+  latest: async () => fixture(FIXTURED ? (await import('../../../crates/dagon-sim/fixtures/sample-full-1.1.0.dgb?url')).default : null),
   bootcore: async (id: string) =>
-    fixture(import.meta.env.DEV && id === 'seg' ? (await import('../../../crates/dagon-wasm/fixtures/f401-bootcore-1.0.0.img?url')).default : null),
+    fixture(FIXTURED && id === 'seg' ? (await import('../../../crates/dagon-wasm/fixtures/f401-bootcore-1.0.0.img?url')).default : null),
 };
 
 /**
@@ -38,7 +47,8 @@ const FIXTURES = {
  */
 export function devHub(q: URLSearchParams): DevHub | null {
   if (q.has('sim')) {
-    const s = simulator(1, (d) => q.has('wipe') && d.wipe(0x42));
+    // On the wall clock: a write runs about as long as on hardware.
+    const s = simulator(1, (d) => q.has('wipe') && d.wipe(0x42), REAL_PACE);
     if (!s) return null;
     return { transport: s.transport, clock: s.clock, ...FIXTURES };
   }

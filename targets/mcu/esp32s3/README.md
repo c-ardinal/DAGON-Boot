@@ -22,7 +22,7 @@ that panics rolls back.
 There is no DAGON boot stage on this MCU: the vendor's 2nd stage starts
 the app. Boot extensions therefore do not exist here, and `dagon gen`
 refuses a node's `[extensions.nodes.<id>] boot` list with that reason
-(docs/extension-manifest.md); the app's extensions run as on every MCU.
+(site/src/content/docs/reference/extension-manifest.md); the app's extensions run as on every MCU.
 
 ## Links
 

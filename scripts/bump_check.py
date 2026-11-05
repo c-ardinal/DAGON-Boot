@@ -3,7 +3,7 @@
 The version is the component's entry in compat.toml; the commits are those
 since the component's last release tag (`<component>-v<version>`) that
 touch its files (a file belongs to the component with the longest matching
-path). Kinds and bumps follow docs/versioning.md. Offline: reads only git
+path). Kinds and bumps follow site/src/content/docs/explanation/versioning.md. Offline: reads only git
 and compat.toml.
 
     python scripts/bump_check.py <component> [--tag <tag being released>]

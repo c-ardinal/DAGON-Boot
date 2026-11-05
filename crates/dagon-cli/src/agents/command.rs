@@ -33,6 +33,7 @@ const SYSTEM_FILE_NAME: &str = "system.txt";
 pub struct Command {
     /// A name looked up on PATH, or a path.
     pub program: String,
+    /// The arguments, in order; `{system_file}` is replaced by the system text's file when `system = "file"`.
     #[serde(default)]
     pub args: Vec<String>,
     /// How the system text reaches the program.

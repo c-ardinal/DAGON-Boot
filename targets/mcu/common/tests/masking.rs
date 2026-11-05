@@ -1,4 +1,4 @@
-//! The execution model's rule for DAGON's own code (docs/design/
+//! The execution model's rule for DAGON's own code (site/src/content/docs/explanation/
 //! lifecycle-events.md, section 12, rule 2) is enforced by clippy:
 //! `targets/mcu/clippy.toml` refuses every way to mask interrupts in the MCU
 //! packages (clippy resolves the path, so an alias or a wrapper does not

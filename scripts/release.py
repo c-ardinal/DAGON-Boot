@@ -5,7 +5,7 @@ built in (crates/dagon-cli/page, checked to be up to date first). It is
 named with the component and version as cargo-binstall expects it
 (crates/dagon-cli/Cargo.toml): `dagon-cli-<version>-<target>.tar.gz`, or
 `.zip` for Windows, next to a `.sha256` file. The version is the cli entry
-of compat.toml (docs/versioning.md).
+of compat.toml (site/src/content/docs/explanation/versioning.md).
 Nothing is uploaded or published.
 
     python scripts/release.py [--target <rust target>] [--out <dir>]

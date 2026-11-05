@@ -4,7 +4,7 @@ import { activeStates, lockOf, stateName, type Control, type LockInput } from '.
 
 const none: LockInput = {
   demo: false, updating: false, recovering: false, flashing: false, building: false,
-  unsaved: false, connecting: false, disconnected: false, thinking: false, cliNone: false,
+  unsaved: false, connecting: false, disconnected: false, thinking: false, site: false, cliNone: false,
 };
 const states = (p: Partial<LockInput>) => activeStates({ ...none, ...p });
 const all = Object.keys(LOCK.controls) as Control[];
@@ -38,6 +38,13 @@ describe('lock table', () => {
     expect(lockOf('link', s)).toBe(LOCK.states.cliNone.why.link);
     expect(lockOf('ask', s)).toBe(LOCK.states.cliNone.why.ask);
     expect(lockOf('update', s)).toBeNull();
+    expect(stateName(s)).toBe('待機');
+  });
+
+  test('the public demo page: files, projects, CLI jobs and DAGON stop with the demo reason; the simulator stays usable', () => {
+    const s = states({ site: true, cliNone: true });
+    expect(all.filter((c) => lockOf(c, s))).toEqual(['gen', 'build', 'flash', 'release', 'open', 'ask', 'apply', 'link', 'file']);
+    for (const c of all.filter((c) => lockOf(c, s))) expect(lockOf(c, s)).toBe((LOCK.states.site.why as Record<string, string>)[c]);
     expect(stateName(s)).toBe('待機');
   });
 

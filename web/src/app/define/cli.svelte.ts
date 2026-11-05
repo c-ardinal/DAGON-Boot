@@ -11,7 +11,7 @@ import pkg from '../../../package.json';
 
 export type CliState = 'none' | 'connecting' | 'ready' | 'stopped' | 'denied';
 
-/** The `dagon serve` API number this Console speaks (GET /v1/hello `api`; docs/versioning.md). */
+/** The `dagon serve` API number this Console speaks (GET /v1/hello `api`; site/src/content/docs/explanation/versioning.md). */
 export const SERVE_API = 1;
 /** This Console's own version: the cli component's (web/package.json). */
 export const CONSOLE_VERSION: string = pkg.version;

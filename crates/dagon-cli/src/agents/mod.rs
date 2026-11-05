@@ -33,7 +33,7 @@ pub(crate) const TIMED_OUT: &str = "DAGON did not answer in time";
 pub(crate) const UNEXPECTED: &str = "DAGON's agent did not answer in the expected form";
 
 /// The `code` of every agent error the page tells apart (the serve API
-/// contract; docs/agent-api.md lists exactly these, a test checks it).
+/// contract; site/src/content/docs/reference/agent-api.md lists exactly these, a test checks it).
 pub mod codes {
     /// Declares each code once: its constant, and its place in [`ALL`].
     macro_rules! codes {
@@ -65,17 +65,24 @@ pub const FORMAT: u32 = 1;
 pub struct AgentDef {
     /// The definition format, [`FORMAT`].
     pub dagon_agent: u32,
+    /// The agent's id: lower-case letters, digits and '-', up to 32; unique among all agents.
     pub id: String,
+    /// The name the linking texts show.
     pub name: String,
+    /// Who makes the agent, shown after its name.
     pub provider: String,
+    /// The ways to reach the agent, in order; the first is the default.
     pub ways: Vec<WayDef>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct WayDef {
+    /// The way's id, unique within its agent (same characters as an agent id).
     pub id: String,
+    /// The name the linking texts show for this way.
     pub name: String,
+    /// How DAGON reaches the agent this way: one of the transport kinds and its keys.
     pub transport: Transport,
 }
 

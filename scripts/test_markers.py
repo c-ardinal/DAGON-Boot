@@ -32,7 +32,9 @@ MARKERS = [
     (
         "project status",
         r"(?i)\btoday(?:'s)?\b|\bfor now\b|\bstill in progress\b|\bstill pending for\b"
-        r"|\bopen (?:\w+ )?decision\b|進行中|当面|今のところ|いまのところ|現在できること",
+        r"|\bopen (?:\w+ )?decision\b|進行中|当面|今のところ|いまのところ|現在できること"
+        # Work under way on the project: "still being validated", まだ確認中 (a bare 確認中, or "being checked", is a product state).
+        r"|\bstill being\b|\bbeing validated\b|まだ(?:確認|検証)中",
     ),
     ("plan screen id", r"\bSC-[A-Z0-9]"),
     ("plan section", r"§"),
@@ -109,13 +111,15 @@ class Markers(unittest.TestCase):
                   "checked 2026-11-03", "Lane: x", "C-389", "desk", "desk_demo", "SimDesk", "デスクのデモ",
                   "and the owner asked for this", "the PM decided", "## What works today",
                   "checks are still in progress (see", "skips it for now", "an open design decision",
-                  "## 現在できること", "docs/SC-S0.md"]:
+                  "## 現在できること", "docs/SC-S0.md", "display are still being validated",
+                  "the flow is being validated", "通信と表示はまだ確認中で"]:
             self.assertTrue(list(line_hits(s)), s)
         for s in ["the round LCD", "round trip", "Math.round(x)", "one owner per peripheral",
                   "the owner process of the next test", "at: 2026-11-04T04:14:35Z", "package_dir(owner)",
                   "the round 466×466 screen", "変更の案です", "PMP", "L0", "desktop", "helpdesk", "3 PM",
                   "11:30 PM", "7/12 PASS", "anthropic-version: 2023-06-01", "the pending slot",
-                  "a transfer in progress", "not available yet on rp2040", "a clear request still pending clear"]:
+                  "a transfer in progress", "not available yet on rp2040", "a clear request still pending clear",
+                  "The received body is being checked.", "… 確認中"]:
             self.assertFalse(list(line_hits(s)), s)
 
 

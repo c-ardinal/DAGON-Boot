@@ -32,10 +32,10 @@ const OLD: Version = Version::new(1, 0, 0);
 const NEW: Version = Version::new(1, 1, 0);
 /// Image bodies: about what the sample apps weigh, so a transfer takes
 /// its real time.
-const HUB_LEN: usize = 128 * 1024;
-const SEG_LEN: usize = 48 * 1024;
+const HUB_LEN: usize = dagon_sim::sample::HUB_APP_BYTES;
+const SEG_LEN: usize = dagon_sim::sample::SEG_APP_BYTES;
 const CORE_LEN: usize = 16 * 1024;
-const WATCH_LEN: usize = 48 * 1024;
+const WATCH_LEN: usize = dagon_sim::sample::WATCH_APP_BYTES;
 pub(crate) const SPEEDS: std::ops::RangeInclusive<f64> = 0.1..=20.0;
 /// The 子機 a failure can be set on.
 pub(crate) const NODES: [&str; 2] = ["seg", "watch"];
@@ -344,7 +344,11 @@ mod tests {
             self.0.medium().max_payload()
         }
         fn reconnect_kind(&self) -> dagon_host::Reconnect {
-            self.0.medium().reconnect()
+            if self.0.medium().stays_on_reboot() {
+                dagon_host::Reconnect::Stays
+            } else {
+                dagon_host::Reconnect::Reopen
+            }
         }
         async fn write(&mut self, bytes: &[u8]) -> Result<(), ()> {
             self.0.write(bytes);

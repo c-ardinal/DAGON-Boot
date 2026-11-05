@@ -1,5 +1,5 @@
 //! The port catalog: every part of DAGON a plug-in can replace, and the
-//! parts it cannot, one record each. `docs/ports.md`, the manifest
+//! parts it cannot, one record each. `site/src/content/docs/reference/ports.md`, the manifest
 //! validator and the sandbox service tables derive from it.
 
 use crate::catalog::Layer;

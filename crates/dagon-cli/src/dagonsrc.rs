@@ -28,7 +28,7 @@ const PROBE_DEP: &str = "dagon-format";
 const PROBE_DIR: &str = "out/dagon-source";
 
 /// The release tag of this CLI's own version (`cli-v<version>`,
-/// docs/versioning.md).
+/// site/src/content/docs/explanation/versioning.md).
 pub fn release_tag() -> String {
     format!("cli-v{}", env!("CARGO_PKG_VERSION"))
 }

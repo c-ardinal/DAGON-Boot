@@ -2,7 +2,7 @@
 //!
 //! The boot record, the lockup fuse, the MCU identity and the compiled
 //! topology's storage are specified by the shapes this model proves
-//! (`docs/design/retained-formats.md`). Each format's codec is a trait
+//! (`site/src/content/docs/explanation/retained-formats.md`). Each format's codec is a trait
 //! ([`record::RecordCodec`], [`fuse::FuseCodec`], [`topology::BodyCodec`])
 //! so a production codec plugs into the same harness and stays checked.
 //!

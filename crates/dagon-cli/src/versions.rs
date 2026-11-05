@@ -1,6 +1,6 @@
 //! Versions this dagon knows: its own, the DAGON components of the source
 //! tree it was built from (`compat.toml`), and the format numbers it reads
-//! and writes. Rules: docs/versioning.md.
+//! and writes. Rules: site/src/content/docs/explanation/versioning.md.
 
 use std::collections::BTreeMap;
 
@@ -119,7 +119,7 @@ pub fn wire_warning(who: &str, proto_ver: u32) -> Option<String> {
     (!speaks).then(|| {
         format!(
             "warning: {who} speaks wire protocol {proto_ver}; this dagon {} speaks {ours}. \
-             Use a dagon and boot images whose wire numbers match (compat.toml, docs/versioning.md)",
+             Use a dagon and boot images whose wire numbers match (compat.toml, site/src/content/docs/explanation/versioning.md)",
             env!("CARGO_PKG_VERSION")
         )
     })
@@ -151,7 +151,7 @@ pub fn check_number(contract: &str, what: &str, raw: &[u8]) -> Result<(), String
     }
     Err(format!(
         "{what} is {contract} format {n}; this dagon {} reads {contract} format {ours}. \
-         Use a dagon release that reads it (docs/versioning.md)",
+         Use a dagon release that reads it (site/src/content/docs/explanation/versioning.md)",
         env!("CARGO_PKG_VERSION")
     ))
 }

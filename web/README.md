@@ -3,11 +3,19 @@
 DAGON Console, the browser tool of DAGON Boot: Svelte 5 + Vite + TypeScript, built for Chrome / Edge 89 and later
 (the first versions with Web Serial). Screen text is Japanese only and lives in `src/app/copy.ts`.
 
-The page is local only: `dagon serve` hands it out on 127.0.0.1 from the developer's own PC and is
+The page is local: `dagon serve` hands it out on 127.0.0.1 from the developer's own PC and is
 the only place it reads or writes anything (the project's 構成 YAML, releases, boot cores, jobs).
-There is no public site and no page of its own outside serve; the page fetches nothing from any
-other origin and offers no download-to-save (releases stay in the project's `out/`). It opens on
-the start screen (新しく作る / 見本から新しく作る / 開く) until serve has a project open.
+The page fetches nothing from any other origin and offers no download-to-save (releases stay in
+the project's `out/`). It opens on the start screen (新しく作る / 見本から新しく作る / 開く) until
+serve has a project open.
+
+The one build of its own is the public demo (`npm run build:demo`, Vite mode `demo`, flag
+`src/app/site.ts`): the same page on the simulator (`?sim` below) compiled into the
+browser, with the repository's test-key release and F401 boot core as its files. It never calls
+serve, reads or writes no files, opens no device and holds no keys; the controls for those
+(開く, 雛形を作る, ビルド, 書き込み over USB, リリース, DAGON に聞く / 連携, choosing a package file)
+stay visible, dimmed, and give the reason in the lock table's `site` row on hover, focus and
+press. Every other build compiles the flag to false and leaves the demo's parts out.
 
 構成 edits go to the project's YAML by themselves (PUT /v1/topology about 500 ms after the last
 edit; 保存 saves at once). Until a save goes through the band shows 「● 未保存」 and why; 書込 and
@@ -25,6 +33,7 @@ npm install
 npm run wasm      # build crates/dagon-wasm into src/wasm/pkg (needs DAGON_PUBKEY; see Release key)
 npm run dev       # http://127.0.0.1:5173
 npm run build     # svelte-check, then vite build into dist/ (target chrome89)
+npm run build:demo -- --outDir <dir> --emptyOutDir   # the public demo (simulator, test key)
 npm run preview   # serves dist/ on http://127.0.0.1:4173
 npm test          # Vitest
 npm run fonts     # re-fetch the font subsets after screen text changes
@@ -39,10 +48,10 @@ Query parameters for development (`npm run dev` only; production builds leave th
 | `&quiet=uart,i2c:66` | With `?mock`: these nodes do not answer RELAY (not-answering path after two monitoring rounds; `quiet=uart,i2c:66` is the hub alone). |
 | `&away` | With `?mock`: after its REBOOT the hub stays away until chosen again (the reconnect dialog, after the 45 s automatic reopening). |
 | `&factory=uart` | With `?mock`: these nodes answer as their factory agent (recovery takes the factory path). |
-| `?sim` | The simulator (`crates/dagon-sim` through dagon-wasm's `Simulator`, `sim` feature): hub, F401 with its ROM loader, watch, on the simulator's clock. `&wipe` erases the F401 first, so "7セグを復旧する" takes the ROM path. |
+| `?sim` | The simulator (`crates/dagon-sim` through dagon-wasm's `Simulator`, `sim` feature): hub, F401 with its ROM loader, watch. It runs on the wall clock and each answer takes the links' and flash's time (dagon-sim's `TimedHub`, as in `dagon demo`), so a write runs about as long as on hardware. `&wipe` erases the F401 first, so "7セグを復旧する" takes the ROM path. |
 
 With `?mock` and `?sim` (no serve behind the dev server) the repository's test-key release
-(`crates/dagon-sim/fixtures/sample-1.1.0.dgb`) and F401 boot core
+(`crates/dagon-sim/fixtures/sample-full-1.1.0.dgb`, the apps at their real size) and F401 boot core
 (`crates/dagon-wasm/fixtures/f401-bootcore-1.0.0.img`) stand in for the project's files that serve
 hands out (GET /v1/release/latest, GET /v1/bootcore/{node}), and the start screen's 新しく作る / 見本から新しく作る
 start an unsaved 構成 on the page. Production builds leave every stand-in out.

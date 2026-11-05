@@ -579,7 +579,7 @@ fn check_format(text: &str, at: impl fmt::Display) -> Result<(), DefError> {
         Some(v) => err(
             at,
             format!(
-                "definition format {v}; this dagon reads definition format {FORMAT}                  (use a dagon release that reads it; docs/versioning.md)"
+                "definition format {v}; this dagon reads definition format {FORMAT}                  (use a dagon release that reads it; site/src/content/docs/explanation/versioning.md)"
             ),
         ),
     }

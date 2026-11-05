@@ -1,11 +1,11 @@
 format = 1
-id = "boot-light"
+id = "boot-screen"
 layers = ["boot"]
 observes = ["boot.*"]
 # Runs privileged in the boot core: list it in dagon.toml under
 # [extensions.nodes.hub] trusted with the source SHA-256 `dagon gen` names.
 trusted = true
 [limits]
-# Per handler call: the longest pattern (src/lib.rs, LONGEST_US) plus a
-# margin for the register writes, below the 50 ms bound of an observer.
+# Per handler call, below the 50 ms bound of an observer; src/lib.rs keeps
+# each call inside it (DEADLINE_US and its test).
 max_run_us = 45000

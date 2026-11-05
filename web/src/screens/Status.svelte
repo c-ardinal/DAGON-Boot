@@ -32,7 +32,7 @@
   let { hub, hubAction, onhub, hubLocked = null, state, cli, oncli, key, problems, unreachable, progress, mode, saved, sentence, status, alert, nextEl = $bindable() }: Props = $props();
 </script>
 
-<!-- StatusRow: information left, the connection's action right (0S-3). -->
+<!-- StatusRow: information left, the connection's action right. -->
 <footer id="band" class="status" aria-label={STATUS.label}>
   <span class="on">{hub}</span>
   <span class="on" title={LOCK.stateTitle}><span class="visually-hidden">{LOCK.stateLabel} </span>{state}</span>

@@ -171,7 +171,7 @@ export class Operate {
   recovering = $state<string | null>(null);
   /** How the last recovery got through: the ROM path shows its figures in the detail. */
   recovered = $state<RecoverResult | null>(null);
-  /** The update after a recovery covers the nodes not written yet ("残りのノードを更新"). */
+  /** The update after a recovery covers the nodes not written yet ("残りのノードへ書き込む"). */
   rest = $state(false);
   /**
    * The 構成 a release made for another 構成 was made for (L17, §7.6): shown
@@ -466,7 +466,7 @@ export class Operate {
     }
     if (this.responding !== before) this.status = ANNOUNCE.A08(this.responding, this.reach.length);
     // L12 and L23 move to L13 by themselves while a node does not answer: it stays visible and recoverable
-    // (after "応答する n つだけ先に更新" the ones left out are named there).
+    // (after "応答する n つだけ先に書き込む" the ones left out are named there).
     if ((this.state === 'L12' || this.state === 'L23') && this.stuck) this.go('watchAlarm', false);
     else if (this.state === 'L13' && !this.stuck) this.go('watchOk', false);
   }
@@ -496,8 +496,8 @@ export class Operate {
   }
 
   /**
-   * A release file was chosen ("更新ファイルを選ぶ", "応答する n つだけ先に
-   * 更新", "別のファイルを選ぶ"): dagon-host's release check against the
+   * A release file was chosen ("パッケージファイルを選ぶ", "応答する n つだけ先に
+   * 書き込む", "別のファイルを選ぶ"): dagon-host's release check against the
    * configuration on the canvas, before anything is sent.
    */
   takeFile(name: string, bytes: Uint8Array): void {
@@ -532,7 +532,7 @@ export class Operate {
     this.go('pass');
   }
 
-  /** "更新": dagon-host's apply on the target nodes, children first and the hub last. */
+  /** "ノードへ書き込む": dagon-host's apply on the target nodes, children first and the hub last. */
   async update(): Promise<void> {
     const c = this.config;
     const f = this.file;

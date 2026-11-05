@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'vitest';
-import { Agent, splitAnswer, type AgentApi } from './agent.svelte.ts';
+import { Agent, consentProblem, problemOf, splitAnswer, type AgentApi, type AgentStatus } from './agent.svelte.ts';
 import { agentMock } from './agentMock.ts';
 import { AGENT } from './copy.ts';
 
@@ -88,5 +88,28 @@ describe('DAGON and its agent (docs/agent-api.md)', () => {
   test('no UI text of DAGON names the provider: it comes from serve, in the linking step only', () => {
     const strings = JSON.stringify(AGENT);
     expect(strings).not.toMatch(/Claude|Anthropic/);
+  });
+});
+
+describe('refusals serve tells apart by code', () => {
+  test.each([
+    [409, 'AGENT_CONSENT_VERSION'],
+    [413, 'AGENT_CONTEXT_TOO_LARGE'],
+  ] as const)('%s %s has its own words, not the generic failure', (status, code) => {
+    const p = problemOf(status, code);
+    expect(p).toBe(AGENT.errors[code]);
+    expect(p).not.toBe(AGENT.errors.AGENT_FAILED);
+    expect(p.failed).toBe(true);
+    // A short word for the notice, the sentence as its detail.
+    expect(p.label).toMatch(/^× \S+$/);
+    expect(p.text.length).toBeGreaterThan(p.label!.length);
+  });
+
+  test("GET /v1/agent's consent_error becomes the consent-version notice", () => {
+    const base = { agents: [], default: { agent: 'claude', way: 'claude-code' }, linked: false, consent: null, available: true, provider: { id: 'anthropic', name: 'Anthropic' }, errors: [], sends: [], never_sends: [] } as AgentStatus;
+    expect(consentProblem({ ...base, consent_error: 'agent.json is version 9' })).toBe(AGENT.errors.AGENT_CONSENT_VERSION);
+    expect(consentProblem({ ...base, consent_error: null })).toBeNull();
+    expect(consentProblem(base)).toBeNull();
+    expect(consentProblem(null)).toBeNull();
   });
 });

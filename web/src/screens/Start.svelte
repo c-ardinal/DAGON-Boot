@@ -163,7 +163,7 @@
 {/if}
 
 <style>
-  /* Start: one centred column (w-modal), title → words → actions → recent (0S-3 start). */
+  /* Start: one centred column (w-modal), title → words → actions → recent. */
   .start {
     grid-area: canvas;
     display: flex;

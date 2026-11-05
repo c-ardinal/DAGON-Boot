@@ -38,6 +38,8 @@ export interface AgentStatus {
   provider: { id: string; name: string };
   /** User definition files that did not load. */
   errors: string[];
+  /** Why the recorded consent cannot be read (a version this dagon does not read), else null. */
+  consent_error?: string | null;
   sends: string[];
   never_sends: string[];
 }
@@ -66,6 +68,8 @@ export interface Message {
 
 /** Why a call did not go through: information unless `failed`. */
 export interface AgentProblem {
+  /** A short word for a notice (toast); the text is its detail. */
+  label?: string;
   text: string;
   failed: boolean;
 }
@@ -84,6 +88,11 @@ export function problemOf(status: number, code: string | undefined): AgentProble
   if (status === 403) return AGENT.errors.DEMO;
   if (status === 404) return AGENT.errors.OLD_CLI;
   return AGENT.errors.AGENT_FAILED;
+}
+
+/** The notice for a consent this dagon cannot read (GET /v1/agent's consent_error), or null. */
+export function consentProblem(s: AgentStatus | null): AgentProblem | null {
+  return s?.consent_error ? AGENT.errors.AGENT_CONSENT_VERSION : null;
 }
 
 /** The answer's first part (up to the first blank line, ≤ 110 characters) and the rest. */

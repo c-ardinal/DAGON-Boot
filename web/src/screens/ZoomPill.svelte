@@ -15,7 +15,7 @@
   let { scale, canIn, canOut, onin, onout, onfit }: Props = $props();
 </script>
 
-<!-- ZoomPill: a vertical stack, + on top; ghost icon buttons in a pill (0S-4). -->
+<!-- ZoomPill: a vertical stack, + on top; ghost icon buttons in a pill. -->
 <div class="pill" role="toolbar" aria-label={ZOOM.label} aria-orientation="vertical">
   <button class="button-icon" aria-label={ZOOM.in} title="{ZOOM.in} (Ctrl++)" aria-disabled={!canIn} onclick={() => canIn && onin()}><span class="layer"><Icon name="plus" /></span></button>
   <button class="button-icon" aria-label={ZOOM.out} title="{ZOOM.out} (Ctrl+-)" aria-disabled={!canOut} onclick={() => canOut && onout()}><span class="layer"><Icon name="minus" /></span></button>

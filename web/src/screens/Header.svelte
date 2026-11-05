@@ -96,7 +96,7 @@
 </section>
 
 <style>
-  /* TopBar: brand left, mode toggle centre, actions right (0S-3 header alignment). */
+  /* TopBar: brand left, mode toggle centre, actions right. */
   header {
     grid-area: header;
     display: flex;

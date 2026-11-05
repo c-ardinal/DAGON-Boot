@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'vitest';
 import * as copy from './copy.ts';
 import { MACHINE, view, type Action } from './machine.ts';
+import { MOCK_TEXTS } from './agentMock.ts';
 
 const strings = (v: unknown): string[] =>
   typeof v === 'string' ? [v] : v && typeof v === 'object' ? Object.values(v).flatMap(strings) : [];
@@ -125,5 +126,12 @@ describe('copy', () => {
     for (const b of Object.values(copy.BAND)) {
       if ('chip' in b && b.chip.startsWith('×')) expect('sentence' in b && b.sentence, b.chip).toBeTruthy();
     }
+  });
+});
+
+describe('the writing vocabulary', () => {
+  // Writing to nodes is 書き込む / 書き込み中 / 書き込み済み / 書き込めない and the .dgb is the パッケージファイル.
+  test('no screen text (nor the stand-in agent) says 更新', () => {
+    expect([...shownExcept(), ...MOCK_TEXTS()].filter((s) => s.includes('更新'))).toEqual([]);
   });
 });

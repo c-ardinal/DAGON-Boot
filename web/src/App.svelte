@@ -11,7 +11,7 @@
   import Timeline, { type StageEvent } from './screens/Timeline.svelte';
   import { PARTS } from './app/copy.ts';
   import { activeStates, lockOf, stateName, type Control } from './app/locks.ts';
-  import { Agent, type AgentChoice, type AskKind, type Selection } from './app/agent.svelte.ts';
+  import { Agent, consentProblem, type AgentChoice, type AskKind, type Selection } from './app/agent.svelte.ts';
   import { agentMock } from './app/agentMock.ts';
   import Dagon from './screens/Dagon.svelte';
   import LinkDialog from './screens/LinkDialog.svelte';
@@ -41,8 +41,9 @@
   import SkeletonModal from './screens/SkeletonModal.svelte';
   import Modal from './screens/Modal.svelte';
   import FactoryModal from './screens/FactoryModal.svelte';
+  import { answerConsent } from './app/factory.ts';
   import Toast, { type Notice } from './screens/Toast.svelte';
-  import { CONN, FLASH, NOTICE, fill as fillIn } from './app/copy.ts';
+  import { CONN, NOTICE, fill as fillIn } from './app/copy.ts';
   import OrderList from './screens/OrderList.svelte';
   import { devHub } from './serial/devHub.ts';
   import { serveSim, type SimStand } from './serial/serveSim.ts';
@@ -788,7 +789,7 @@
   /** Node actions in the detail: while watching, with nothing running. */
   const nodeActions = $derived(['L12', 'L13', 'L23'].includes(op.state));
 
-  /** SC-O7 only after the automatic reconnect failed (L21, owner 11/2); Escape leaves the same button in the band. */
+  /** SC-O7 only after the automatic reconnect failed (L21); Escape leaves the same button in the band. */
   let dialogDismissed = $state(false);
   const dialogOpen = $derived(op.state === 'L21' && !dialogDismissed);
   $effect(() => {
@@ -1029,6 +1030,12 @@
   $effect(() => {
     if (op.state === 'L23') untrack(() => (notice = { word: fillIn(WRITE.toast.done, { n: op.targets.length }) }));
   });
+  // A consent of a version this dagon does not read: a failure the user must notice.
+  $effect(() => {
+    const p = consentProblem(agent.status);
+    const why = agent.status?.consent_error ?? '';
+    if (p) untrack(() => (notice = { word: p.label ?? p.text, error: true, detail: `${p.text}（${why}）` }));
+  });
   // A failure or warning the user must notice: its short word on a toast, the sentence behind it.
   $effect(() => {
     const cause = next.cause;
@@ -1060,9 +1067,11 @@
     factory = { id: j?.id ?? null };
   }
   // Pressing 書き込む in the modal is the consent serve's write asks for.
+  const consentAnswered = new Set<string>();
   $effect(() => {
     const j = factoryJob;
-    if (j?.question) untrack(() => void cli.answer(j, FLASH.yes));
+    void j?.state;
+    untrack(() => answerConsent(j, (job, text) => cli.answer(job, text), consentAnswered));
   });
   $effect(() => {
     if (factoryJob?.state === 'succeeded') untrack(() => (notice = { word: WRITE.state.done }));
@@ -1598,7 +1607,7 @@
     outline: none;
   }
   /* Floating windows: over the graph, apart from its edges, never under the focal number. */
-  /* PartsWindow and DetailSheet: L1 surfaces with a 1 px frame, no shadow (0S-2 elevation). */
+  /* PartsWindow and DetailSheet: L1 surfaces with a 1 px frame, no shadow. */
   .float {
     position: absolute;
     z-index: var(--z-chrome);

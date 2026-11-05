@@ -68,7 +68,7 @@ export class Define {
   readonly errors = $derived(this.problems.filter((p) => p.severity === 'error').length);
   readonly warnings = $derived(this.problems.filter((p) => p.severity === 'warning').length);
   readonly config: Config = $derived(toConfig(this.doc, supportedBoards()));
-  /** Nodes updating skips for now (V-23): shown as まだ更新できない, never a problem. */
+  /** Nodes updating skips for now (V-23): shown as 書き込めない, never a problem. */
   readonly notYet = $derived(this.config.nodes.filter((n) => n.notYet).length);
   readonly operable: Operable = $derived(
     this.doc.topo.nodes.length === 0

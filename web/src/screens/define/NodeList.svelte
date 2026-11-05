@@ -34,7 +34,7 @@
       .catch(() => undefined);
   });
   let q = $state('');
-  /** 製品 / マイコン: one list each (owner decision: one long list stops scaling as boards and MCUs grow). */
+  /** 製品 / マイコン: one list each (one long list stops scaling as boards and MCUs grow). */
   let tab = $state<'product' | 'mcu'>('product');
   const match = (...t: string[]) => !q.trim() || t.some((s) => s.toLowerCase().includes(q.trim().toLowerCase()));
   const full = $derived(d.doc.topo.nodes.length >= MAX_NODES);

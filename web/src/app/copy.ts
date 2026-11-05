@@ -114,7 +114,7 @@ export const BAND = {
   M60: { sentence: '見つかったノードが降りてくるまで、そのまま待ってください。' },
   M61: { sentence: '送り終わるまで、USB を抜かないでください。' },
   /**
-   * 案 (replaces M62, owner 11/2: the answering nodes are updated first, recovery is the side action):
+   * 案 (replaces M62: the answering nodes are updated first, recovery is the side action):
    * L13, with a power and wiring hint for the silent ones.
    */
   M62b: { sentence: '応答しないノードは電源と配線を確かめ、応答するノードから先に書き込んでください。' },
@@ -128,7 +128,7 @@ export const BAND = {
 } as const satisfies Record<string, BandCopy>;
 
 /**
- * The header's つなぐ / 切断 (S30, owner 11/2) and, 案, why it cannot be
+ * The header's つなぐ / 切断 (S30) and, 案, why it cannot be
  * used in a state (the band says it when it is pressed then).
  */
 export const HUB_TOGGLE = {
@@ -413,6 +413,16 @@ export const AGENT = {
     AGENT_FAILED: { text: '× 返事を受け取れませんでした。もう一度聞いてください', failed: true },
     DEMO: { text: 'デモでは DAGON と連携できません', failed: false },
     OLD_CLI: { text: 'この CLI は DAGON に対応していません。新しい dagon で dagon serve を起動し直してください', failed: false },
+    AGENT_CONSENT_VERSION: {
+      label: '× 同意のバージョン違い',
+      text: 'このパソコンに残っている連携の同意は、この dagon では読めないバージョンです。メニューの「DAGON と連携する」から、もう一度連携してください',
+      failed: true,
+    },
+    AGENT_CONTEXT_TOO_LARGE: {
+      label: '× 大きすぎる',
+      text: '構成か質問が大きすぎるため、DAGON に送りませんでした。構成を分けるか、質問を短くしてから聞いてください',
+      failed: true,
+    },
   },
 } as const;
 

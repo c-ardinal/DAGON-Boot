@@ -55,7 +55,7 @@
     chips?: Record<string, Chip>;
     /** The user's zoom on top of the fit (1 = fitted). */
     zoom?: number;
-    /** Nodes being written: how full their water is, 0–100 (SC-O5, owner 11/2 and 11/3). */
+    /** Nodes being written: how full their water is, 0–100 (SC-O5). */
     fill?: Record<string, number>;
     /** Room the floating windows take on the left and right (px): the graph centres in what is left. */
     inset?: { left: number; right: number; bottom?: number };
@@ -245,7 +245,7 @@
     if (!connected) return null;
     const l = live[n.id];
     if (!l || l.responding === null) return 'skeleton';
-    // 応答あり・応答なし are the state mark itself (0S-5): no chip repeats them.
+    // 応答あり・応答なし are the state mark itself: no chip repeats them.
     if (!l.responding) return { chip: '', spoken: NODE.silentName, silent: true };
     if (l.hello?.trial) return { chip: NODE.trial, spoken: NODE.trialName, silent: false };
     return { chip: '', spoken: NODE.respondingName, silent: false };
@@ -279,7 +279,7 @@
     return l.hello.trial ? null : { text: `✓ ${SLOT.states[4]}`, trial: false };
   }
 
-  /** Each node's state mark (0S-5): from the page's chip, the water level and the watch. */
+  /** Each node's state mark: from the page's chip, the water level and the watch. */
   const states = $derived(
     Object.fromEntries(
       (config?.nodes ?? []).map((n): [string, NodeState] => {
@@ -673,7 +673,7 @@
   }
 
   /* NodeCard: header (name, role, version, state mark), product, one mono line, chips.
-     The frame carries the state (0S-5): 1 px when normal, 2 px in the state colour for 要確認 and エラー. */
+     The frame carries the state: 1 px when normal, 2 px in the state colour for 要確認 and エラー. */
   .node {
     position: absolute;
     z-index: var(--z-node);

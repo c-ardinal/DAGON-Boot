@@ -176,7 +176,7 @@
   .diff td:last-child {
     color: var(--c-signal);
   }
-  /* Button/Primary: the sheet's one emphasised action, full width (0S-3 sheet). */
+  /* Button/Primary: the sheet's one emphasised action, full width. */
   .acts {
     display: grid;
     gap: var(--s-2);

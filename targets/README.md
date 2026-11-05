@@ -35,6 +35,7 @@ errors; kind fields accept only the values listed below.
 | `[writer]` | First-write tool: `kind` and its parameters (below) |
 | `[[part]]` | DAGON parts built from this package for a first write: `name`, `sub` (folder in the package), `bin` |
 | `[coordinator]` | Only for an MCU that can be the coordinator: `pio_state_machines`, `pio_uart_state_machines` (per link), `uart0_tx`, `uart0_rx` |
+| `[link_uart]` | How the UART the MCU package runs DAGON's UART links on makes a bit rate, as its HAL computes it: `clock_hz` divided by `clocks_per_bit` times a divider with `frac_bits` fraction bits, rounded down. The topology check (V-26) refuses a link `baud` either end makes more than 2 % off. Required on an MCU whose `[links]` has `uart`: without it, every UART link that MCU's firmware runs is refused, since no speed on it is known to work |
 | `[rom_i2c]` | ROM I2C bootloader (`stm32-i2c-rom`): `name` (as check messages call it), `addr`, `max_hz`, `erase_sectors`, `pairs = [{ controller, sda, scl }]` it listens on |
 | (coordinator) | A topology may make the MCU its coordinator only when `[coordinator]` is defined (V-25) |
 | `[connection]` | How the user connects it for a write: `label`, `hint` |
@@ -102,9 +103,16 @@ definition that leaves a class out is refused with the class named.
 | `[boot]` | The boot stage's board values: `led` (a `[[pin]]`), `led_active` (`high`, `low`), `halt = { pattern, period_ms }` (`blink`, `code`, `off`), `power_hold = { pin, level }` |
 | `[[boot.action]]` | A boot action program (`boot-program` format 1): `on` (a boot event the event catalog marks action-capable) and `ops`: `{ op = "led", state }` (`on`, `off`, `toggle`), `{ op = "gpio", pin, level }` (a `[[pin]]` with `boot = true`; the power hold pin takes only its hold level), `{ op = "delay", ms }` (1 to 20), `{ op = "bus_write", device, reg, bytes }` (a `[[device]]` register in its `writable` list, 1 to 8 bytes, only on an MCU with `boot_capabilities = ["i2c"]`). At most 32 ops and 50 ms per event, a bus write counting 5 ms |
 | `[[pin]]` | The board's pins: `pin`, `name` (what the board package's code takes it by, `a-z 0-9 _`), `boot` (a boot program may drive it), `levels` (allowed levels; all when left out) |
-| `[[bus]]` | The board's buses: `id` (`a-z 0-9 - _`), `kind` (`i2c`, `spi`, `uart`, `can`), `controller` (an MCU `[[peripheral]]`), its pins by signal (`sda`, `scl` for i2c; `tx` and/or `rx` for uart; `tx`, `rx` for can; `sck` and `mosi` and/or `miso` for spi), `hz` (i2c, spi) or `baud` (uart, can), `dagon` (`true`: DAGON's own link runs on it, so neither the bus nor its controller is ever an extension's), `dma` (`true`: the board package opens or hands out the bus with DMA; i2c, spi, uart; its tx and rx streams come from the MCU's `dma_requests`, buses in order, and the board package's build writes them as `<Bus>TxDma`/`<Bus>RxDma`, `take_dma!` and `bind_<bus>_dma!`) |
+| `[[bus]]` | The board's buses: `id` (`a-z 0-9 - _`), `kind` (`i2c`, `spi`, `uart`, `can`), `controller` (an MCU `[[peripheral]]`), its pins by signal (`sda`, `scl` for i2c; `tx` and/or `rx` for uart; `tx`, `rx` for can; `sck` and `mosi` and/or `miso` for spi), `hz` (i2c, spi) or `baud` (uart, can; on a `dagon = true` UART bus the link speed of a build dagon does not give the topology's, see below), `dagon` (`true`: DAGON's own link runs on it, so neither the bus nor its controller is ever an extension's), `dma` (`true`: the board package opens or hands out the bus with DMA; i2c, spi, uart; its tx and rx streams come from the MCU's `dma_requests`, buses in order, and the board package's build writes them as `<Bus>TxDma`/`<Bus>RxDma`, `take_dma!` and `bind_<bus>_dma!`) |
 | `[[peripheral]]` | Board names for MCU blocks extensions may declare: `id`, `mcu` (the MCU `[[peripheral]]` id; never the controller of a `dagon = true` bus) |
 | `[[device]]` | A device on a board bus: `id` (`a-z 0-9 - _`), `bus`, `addr`, `max_transfer` (required: the most data bytes it takes in one transfer, from its datasheet; the bus port and boot programs keep to it), `regs = [{ name, reg }]` (its registers by name, `a-z 0-9 _`), `writable` (registers anything outside DAGON may write: numbers or names of `regs`) |
+
+A board package runs DAGON's UART link at the topology link's `baud`:
+`dagon build`, `deploy` and `flash` give every build of a node (its app and
+its recovery agent) the speed of that node's UART link as `DAGON_LINK_BAUD`,
+so both ends are built with the same value. A build without it (plain
+`cargo build`) takes `[default_link] baud`, or the `baud` of the board's
+`dagon = true` UART bus.
 
 No pin appears twice across `[[pin]]` and the buses, and every name code is
 generated from (pin names, bus ids and their signals, device ids, with `-`

@@ -165,6 +165,7 @@ fn build_node(
         let feats = b.features.iter().cloned().chain([f.clone()]).collect();
         slots.push(('b', feats, Some(dir.join("target").join("slot-b"))));
     }
+    let link_baud = link_baud(cfg, id)?;
     let out_rel = clear_output(cfg, id)?;
     let mut built = Vec::new();
     let mut record = BuildRecord {
@@ -185,6 +186,7 @@ fn build_node(
                 pubkey_hex,
                 target_tag: None,
                 boot_crate: None,
+                link_baud,
             },
             log,
             cancel,
@@ -278,6 +280,38 @@ pub(crate) struct FirmwareEnv<'a> {
     /// DAGON_BOOT_CRATE: the node's boot crate folder, which a boot stage
     /// (stage0, boot core) is built for.
     pub boot_crate: Option<&'a Path>,
+    /// DAGON_LINK_BAUD: the node's UART link speed ([`link_baud`]).
+    pub link_baud: Option<u32>,
+}
+
+/// The UART link speed node `id`'s firmware is built with: the project
+/// topology's ([`dagon_topology::Topology::uart_baud`]), the same for both
+/// ends of the link; `None` without a topology or a UART link. A topology
+/// with errors (a speed one end cannot make, V-26) stops the build.
+pub(crate) fn link_baud(cfg: &Config, id: &str) -> Result<Option<u32>, String> {
+    let Some(path) = &cfg.topology else {
+        return Ok(None);
+    };
+    crate::config::read_topology(cfg, path)?.uart_baud(id)
+}
+
+/// Sets (or removes) the firmware build inputs of `fw` on `cmd`.
+fn firmware_env(cmd: &mut Command, fw: FirmwareEnv<'_>) {
+    for (name, value) in [(PUBKEY_ENV, fw.pubkey_hex), (TARGET_TAG_ENV, fw.target_tag)] {
+        match value {
+            Some(v) => cmd.env(name, v),
+            None => cmd.env_remove(name),
+        };
+    }
+    match fw.boot_crate {
+        Some(d) => cmd.env(dagon_topology::defs::boot_folder::BOOT_FOLDER_ENV, d),
+        None => cmd.env_remove(dagon_topology::defs::boot_folder::BOOT_FOLDER_ENV),
+    };
+    let baud = dagon_topology::defs::codegen::LINK_BAUD_ENV;
+    match fw.link_baud {
+        Some(b) => cmd.env(baud, b.to_string()),
+        None => cmd.env_remove(baud),
+    };
 }
 
 /// Runs `cargo build --release --locked` in `dir`; returns the executable
@@ -294,16 +328,7 @@ pub(crate) fn cargo_build(
 ) -> Result<PathBuf, String> {
     let mut cmd = Command::new("cargo");
     scrub(&mut cmd);
-    for (name, value) in [(PUBKEY_ENV, fw.pubkey_hex), (TARGET_TAG_ENV, fw.target_tag)] {
-        match value {
-            Some(v) => cmd.env(name, v),
-            None => cmd.env_remove(name),
-        };
-    }
-    match fw.boot_crate {
-        Some(d) => cmd.env(dagon_topology::defs::boot_folder::BOOT_FOLDER_ENV, d),
-        None => cmd.env_remove(dagon_topology::defs::boot_folder::BOOT_FOLDER_ENV),
-    };
+    firmware_env(&mut cmd, fw);
     cmd.args([
         "build",
         "--release",
@@ -439,6 +464,54 @@ mod tests {
         let _ = std::fs::remove_dir_all(&base);
     }
     use super::*;
+
+    #[test]
+    fn both_ends_of_a_uart_link_are_built_with_the_topologys_baud() {
+        let base = std::env::temp_dir().join(format!("dagon-nb-baud-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&base);
+        std::fs::create_dir_all(&base).unwrap();
+        let yaml = crate::scaffold::SAMPLE.replace("baud: 115200", "baud: 230400");
+        std::fs::write(base.join("topology.yaml"), yaml).unwrap();
+        let mut cfg = Config {
+            base: crate::config::base_of(&base.join("dagon.toml")),
+            ..Config::default()
+        };
+        assert_eq!(link_baud(&cfg, "hub"), Ok(None), "no topology: none given");
+        cfg.topology = Some(base.join("topology.yaml"));
+        assert_eq!(link_baud(&cfg, "hub"), Ok(Some(230_400)));
+        assert_eq!(link_baud(&cfg, "watch"), Ok(Some(230_400)));
+        assert_eq!(link_baud(&cfg, "seg"), Ok(None));
+        let mut cmd = Command::new("cargo");
+        let fw = FirmwareEnv {
+            link_baud: Some(230_400),
+            ..FirmwareEnv::default()
+        };
+        firmware_env(&mut cmd, fw);
+        let env = |k: &str| {
+            cmd.get_envs()
+                .find(|(n, _)| *n == k)
+                .map(|(_, v)| v.map(|v| v.to_string_lossy().into_owned()))
+        };
+        assert_eq!(
+            env(dagon_topology::defs::codegen::LINK_BAUD_ENV),
+            Some(Some("230400".into()))
+        );
+        // Not given: removed, never inherited from the caller's shell.
+        let mut cmd = Command::new("cargo");
+        firmware_env(&mut cmd, FirmwareEnv::default());
+        assert!(cmd
+            .get_envs()
+            .any(|(n, v)| n == dagon_topology::defs::codegen::LINK_BAUD_ENV && v.is_none()));
+        // An out-of-range speed is refused before anything builds.
+        std::fs::write(
+            base.join("topology.yaml"),
+            crate::scaffold::SAMPLE.replace("baud: 115200", "baud: 921600"),
+        )
+        .unwrap();
+        let e = link_baud(&cfg, "watch").unwrap_err();
+        assert!(e.contains("topology has errors"), "{e}");
+        let _ = std::fs::remove_dir_all(&base);
+    }
 
     #[test]
     fn cargo_does_not_inherit_the_cli_secrets() {

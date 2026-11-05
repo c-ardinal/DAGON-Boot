@@ -13,7 +13,7 @@ and `take!`.
 | Display SPI1 (CLK, MOSI) at 20 MHz; CS, DC, RST, backlight | bus `lcd`; pins `lcd_cs`, `lcd_dc`, `lcd_rst`, `backlight` | GPIO10, 11; 9, 8, 13, 25 |
 | Touch controller reset (held high) | pin `touch_rst` | GPIO22 |
 | DAGON's I2C0 to sub nodes (SDA, SCL), 400 kHz | bus `child-i2c` (`dagon = true`) | GPIO16, 17 |
-| DAGON's PIO0 UART to sub nodes (TX, RX), 115200 8N1 | bus `child-uart` (`dagon = true`) | GPIO26, 27 |
+| DAGON's PIO0 UART to sub nodes (TX, RX), 8N1 at the topology link's `baud` (built outside dagon: the bus's `baud`) | bus `child-uart` (`dagon = true`) | GPIO26, 27 |
 | Sub-node NRST (open drain), BOOT0 | pins `child_nrst`, `child_boot0` | GPIO18, 28 |
 | Boot LED and diagnostic blink codes (1 Hz halt) | `[boot] led`, `halt` | GPIO25 (backlight) |
 

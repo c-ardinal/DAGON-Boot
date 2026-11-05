@@ -45,6 +45,15 @@ bootloader = "vendor/bootloader.bin"
 checksums = "vendor/SHA256SUMS"
 usb_hint = { vid = 0x303A, pid = 0x1001 }
 
+# The UART the UART link runs on (link::uart_config): esp-hal 1.2's UART
+# with its default clock source XTAL_CLK, 40 MHz on the ESP32-S3, and its
+# 12.4 divider (clk << 4) / baud rounded down (uart/low_level change_baud;
+# ESP32-S3 TRM, UART baud rate generation).
+[link_uart]
+clock_hz = 40_000_000
+clocks_per_bit = 1
+frac_bits = 4
+
 # Link kinds the firmware implements (src/links.rs LINK_KINDS).
 [links]
 up = ["uart", "usb-cdc"]

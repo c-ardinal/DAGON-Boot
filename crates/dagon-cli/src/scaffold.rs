@@ -86,7 +86,7 @@ fn hub_link(t: &Topology, child: &str) -> Option<String> {
                 "HubLink::Uart {{ tx: {}, rx: {}, baud: {} }}",
                 p.tx,
                 p.rx,
-                l.baud.unwrap_or(115_200)
+                l.uart_baud()
             )
         }
     })
@@ -116,7 +116,7 @@ pub fn wiring_rs(t: &Topology, n: &Node, board: Option<&BoardFacts>) -> String {
                     s(pins.map(|p| &p.scl))
                 )
             }
-            Some(l) => format!("Link::Uart {{ baud: {} }}", l.baud.unwrap_or(115_200)),
+            Some(l) => format!("Link::Uart {{ baud: {} }}", l.uart_baud()),
             None => "Link::Hub".to_string(),
         }
     };
@@ -562,7 +562,7 @@ pub fn wiring_placeholders(
     );
     put(
         "down_uart_baud",
-        uart.map_or("0".into(), |l| l.baud.unwrap_or(115_200).to_string()),
+        uart.map_or("0".into(), |l| l.uart_baud().to_string()),
     );
     Ok(out)
 }

@@ -12,7 +12,7 @@
 //! | Display SPI1 (CLK, MOSI), CS, DC, RST, backlight | GPIO10, 11, 9, 8, 13, 25 |
 //! | Touch controller reset (held high) | GPIO22 |
 //! | Sub-node I2C0 (SDA, SCL), 400 kHz | GPIO16, 17 |
-//! | Sub-node PIO0 UART (TX, RX), 115200 8N1 | GPIO26, 27 |
+//! | Sub-node PIO0 UART (TX, RX), 8N1 at [`UART_BAUD`] | GPIO26, 27 |
 //! | Sub-node NRST (open drain), BOOT0 | GPIO18, 28 |
 //! | Diagnostic blink codes | GPIO25 (backlight) |
 //!
@@ -61,6 +61,11 @@ pub const DIAG_LED: u8 = match def::BOOT_LED_GPIO {
 pub const DIAG_LED_ACTIVE_HIGH: bool = def::BOOT_LED_ACTIVE_HIGH;
 
 pub const I2C_HZ: u32 = def::BUS_CHILD_I2C_HZ;
-pub const UART_BAUD: u32 = def::BUS_CHILD_UART_BAUD;
+/// The bit rate of the PIO UART to sub nodes: the topology's link speed
+/// when dagon builds the node, else bus `child-uart`'s `baud`.
+pub const UART_BAUD: u32 = match def::LINK_BAUD {
+    Some(b) => b,
+    None => panic!("dagon-board.toml: bus child-uart baud"),
+};
 /// Conservative for the panel wiring (the controller allows more).
 pub const LCD_SPI_HZ: u32 = def::BUS_LCD_HZ;

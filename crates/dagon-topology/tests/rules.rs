@@ -491,3 +491,86 @@ fn v24_an_uplink_belongs_to_a_coordinator() {
     );
     assert_fires(&yaml, "V-24");
 }
+
+#[test]
+fn v26_uart_baud_must_be_within_two_percent_on_both_ends() {
+    // RP2040's link UART: 125 MHz / 8 / a whole divider; ESP32-S3's:
+    // 40 MHz / (n + k/16).
+    for ok in ["115200", "230400"] {
+        let yaml = mutate("baud: 115200", &format!("baud: {ok}"));
+        assert!(check_str(&yaml).issues.is_empty(), "{ok}");
+    }
+    assert_eq!(
+        messages(&mutate("baud: 115200", "baud: 460800"), "V-26"),
+        ["baud 460800: hub (RP2040) runs at 473485 bit/s, +2.75 %; each end of a UART link must be within 2 %"]
+    );
+    for bad in ["921600", "1000000"] {
+        let r = check_str(&mutate("baud: 115200", &format!("baud: {bad}")));
+        let v26: Vec<_> = r.errors().filter(|i| i.rule == "V-26").collect();
+        assert_eq!(v26.len(), 1, "{bad}: {:?}", r.issues);
+        assert_eq!(v26[0].path, "links[1].baud");
+        assert!(
+            v26[0].message.contains("hub (RP2040)"),
+            "{}",
+            v26[0].message
+        );
+    }
+    // Neither end can divide its clock down to these.
+    for none in ["0", "100000000"] {
+        assert_eq!(
+            messages(&mutate("baud: 115200", &format!("baud: {none}")), "V-26"),
+            [
+                format!("baud {none}: hub (RP2040) cannot make it"),
+                format!("baud {none}: watch (ESP32-S3) cannot make it")
+            ]
+        );
+    }
+}
+
+#[test]
+fn v26_refuses_a_uart_end_whose_mcu_states_no_link_uart() {
+    // An ESP32-S3 definition without [link_uart]: its firmware runs the
+    // UART link, but no speed on it is known to work, so none is accepted,
+    // the default included.
+    let block = "[link_uart]\\nclock_hz = 40000000\\nclocks_per_bit = 1\\nfrac_bits = 4\\n";
+    let json = Registry::builtin().to_json();
+    assert!(json.contains(block), "the esp32s3 [link_uart] block moved");
+    let reg = Registry::from_json(&json.replacen(block, "", 1)).unwrap();
+    assert!(reg.mcu("esp32s3").unwrap().link_uart.is_none());
+    for baud in ["115200", "230400"] {
+        let yaml = mutate("baud: 115200", &format!("baud: {baud}"));
+        let got: Vec<_> = dagon_topology::check_str_with(&reg, &yaml)
+            .errors()
+            .filter(|i| i.rule == "V-26")
+            .map(|i| i.message.clone())
+            .collect();
+        assert_eq!(
+            got,
+            [format!(
+                "baud {baud}: watch (ESP32-S3) cannot be checked: its MCU definition has no [link_uart]"
+            )]
+        );
+    }
+    // An end whose firmware runs no UART link (STM32F401RE: I2C up only)
+    // runs no speed: V-24 reports the link, not V-26.
+    let yaml = mutate(
+        "  - id: watch\n    mcu: esp32s3\n",
+        "  - id: watch\n    mcu: stm32f401re\n",
+    );
+    assert!(messages(&yaml, "V-26").is_empty());
+}
+
+#[test]
+fn both_ends_of_a_uart_link_take_its_baud_from_the_topology() {
+    let t = dagon_topology::parse_str(&mutate("baud: 115200", "baud: 230400")).unwrap();
+    assert_eq!(t.uart_baud("hub"), Ok(Some(230_400)));
+    assert_eq!(t.uart_baud("watch"), Ok(Some(230_400)));
+    assert_eq!(t.uart_baud("seg"), Ok(None));
+    // Left out: the default, the same on both ends.
+    let t = dagon_topology::parse_str(&mutate("    baud: 115200\n", "")).unwrap();
+    assert_eq!(
+        t.uart_baud("hub"),
+        Ok(Some(dagon_topology::schema::DEFAULT_BAUD))
+    );
+    assert_eq!(t.uart_baud("watch"), t.uart_baud("hub"));
+}

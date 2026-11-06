@@ -110,7 +110,7 @@ cargo build --release                                              # app
 cargo build --release --features conform --target-dir target/conform
 cargo build --release --features conform,no-confirm --target-dir target/noconfirm
 # digit layout on the host
-DAGON_ALLOW_TEST_KEY=1 cargo +stable test --lib --target x86_64-pc-windows-msvc
+DAGON_ALLOW_TEST_KEY=1 cargo +1.95.0 test --lib --target x86_64-pc-windows-msvc
 ```
 
 Features: `conform` (the node answers CONF_RUN), `no-confirm` (refuses

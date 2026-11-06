@@ -19,7 +19,7 @@ permissions:
 
 jobs:
   bump-check:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
         with:
@@ -48,11 +48,13 @@ jobs:
         # macOS labels as listed in github.com/actions/runner-images (README):
         # macos-15 is Arm64, macos-15-intel is x64;
         # macos-13 and macos-14 are retired.
+        # `cc`: the C compiler of that image, which the README and the install page state
+        # (github.com/actions/runner-images, each image's Readme).
         include:
-          - { os: windows-latest, target: x86_64-pc-windows-msvc }
-          - { os: macos-15, target: aarch64-apple-darwin }
-          - { os: macos-15-intel, target: x86_64-apple-darwin }
-          - { os: ubuntu-latest, target: x86_64-unknown-linux-gnu }
+          - { os: windows-2025, target: x86_64-pc-windows-msvc, cc: "Visual Studio 2022" }
+          - { os: macos-15, target: aarch64-apple-darwin, cc: "Xcode Command Line Tools 16.4" }
+          - { os: macos-15-intel, target: x86_64-apple-darwin, cc: "Xcode Command Line Tools 16.4" }
+          - { os: ubuntu-24.04, target: x86_64-unknown-linux-gnu, cc: "gcc 13" }
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4

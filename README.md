@@ -66,7 +66,7 @@ DAGONを動かすために必要なものです。
 
 - Chrome か Edge 89 以降
 - `dagon` コマンド: ビルド済みのファイルなら、ほかに要りません
-  - `cargo install` で入れるなら、Rust stable（1.95.0 で確認）と C コンパイラ（Windows は MSVC の C++ ビルドツール、Linux は gcc か clang、macOS は Xcode Command Line Tools）
+  - `cargo install` で入れるなら、Rust 1.95.0 以降と C コンパイラ（Windows は Visual Studio 2022 の C++ ビルドツール、Linux は gcc 13 以降、macOS は Xcode Command Line Tools 16.4 以降）
 
 `dagon`コマンドの入れ方は[入れる](https://c-ardinal.github.io/DAGON-Boot/doc/getting-started/install/)にあります。
 
@@ -76,10 +76,9 @@ DAGONを動かすために必要なものです。
 
 手元のPCでも、シミュレータを用いて実機なしで試せます。
 
-```sh
-cargo install --git https://github.com/c-ardinal/DAGON-Boot --tag cli-v0.1.0 dagon-cli
-dagon demo
-```
+1. [GitHub Releases](https://github.com/c-ardinal/DAGON-Boot/releases)から、自分のシステム用のファイルを取ります。
+2. `dagon`をPATHの通った場所に置きます。
+3. `dagon demo`を実行します。
 
 `dagon demo`は表示したアドレスでDAGON Consoleを開きます。`dagon sim run`はシミュレータ上で通しのシナリオを実行します。
 

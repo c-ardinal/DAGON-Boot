@@ -91,11 +91,28 @@ class Readmes(unittest.TestCase):
             for name in names:
                 self.assertIn(f"{name} ", text.replace("|", " "), f"{path.name}: {name}")
 
-    def test_the_install_tag_is_the_cli_version(self):
-        compat = tomllib.loads((ROOT / "compat.toml").read_text(encoding="utf-8"))
-        version = next(c["version"] for c in compat["component"] if c["name"] == "cli")
+    def test_no_dagon_release_number(self):
+        # Which version to install is the user's choice.
         for path in (JA, EN):
-            self.assertIn(f"--tag cli-v{version} dagon-cli", path.read_text(encoding="utf-8"), path.name)
+            self.assertEqual(re.findall(r"cli-v\d[\w.]*|--tag \S+|dagon-cli[ -]\d[\w.]*", path.read_text(encoding="utf-8")), [], path.name)
+
+    def test_the_stated_versions_are_the_ones_the_workflows_build_with(self):
+        rust = tomllib.loads((ROOT / "rust-toolchain.toml").read_text(encoding="utf-8"))["toolchain"]["channel"]
+        release = (ROOT / ".github/workflows/release.yml").read_text(encoding="utf-8")
+        compilers = set(re.findall(r'cc: "([^"]+)"', release))
+        self.assertTrue(compilers)
+        self.assertEqual(len(compilers), len(set(re.findall(r"\{ os: ([a-z]+)", release))))
+        docs = ROOT / "site/src/content/docs"
+        for path, word in ((JA, f"Rust {rust} 以降"), (EN, f"Rust {rust} or later"), (docs / "getting-started/install.md", f"Rust {rust} 以降"), (docs / "en/getting-started/install.md", f"Rust {rust} or later")):
+            text = path.read_text(encoding="utf-8")
+            self.assertIn(word, text, path.name)
+            for cc in compilers:
+                self.assertIn(cc, text, path.name)
+        for name in ("ci.yml", "release.yml", "pages.yml"):
+            self.assertNotIn("-latest", (ROOT / ".github/workflows" / name).read_text(encoding="utf-8"), name)
+        ci = (ROOT / ".github/workflows/ci.yml").read_text(encoding="utf-8")
+        for image in re.findall(r"os: \[([^\]]+)\]", ci)[0].split(", "):
+            self.assertIn(f"os: {image},", release, image)
 
     def test_files_they_point_at_exist(self):
         for path in (JA, EN):

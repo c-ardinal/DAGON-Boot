@@ -30,25 +30,27 @@ jobs:
       matrix:
         # Windows too: path, home and process handling differ there
         # (crates/dagon-cli, dagon-topology, dagon-sign have per-OS tests).
-        os: [ubuntu-latest, windows-latest]
+        os: [ubuntu-24.04, windows-2025]
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - name: Rust from rust-toolchain.toml
+        run: rustup toolchain install
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
       - name: Test the workspace
         run: cargo test --workspace --locked
       - name: Generated catalogs up to date (the site's Events and Ports pages)
         run: cargo test -p dagon-catalog --test docs --locked
       - name: Format
-        if: matrix.os == 'ubuntu-latest'
+        if: matrix.os == 'ubuntu-24.04'
         run: cargo fmt --all --check
       - name: Clippy
-        if: matrix.os == 'ubuntu-latest'
+        if: matrix.os == 'ubuntu-24.04'
         run: cargo clippy --workspace --all-targets --locked -- -D warnings
 
   plan:
     name: standalone packages
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     outputs:
       dirs: ${{ steps.list.outputs.dirs }}
       lints: ${{ steps.list.outputs.lints }}
@@ -65,43 +67,47 @@ jobs:
   standalone:
     name: ${{ matrix.dir }}
     needs: plan
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     strategy:
       fail-fast: false
       matrix:
         dir: ${{ fromJSON(needs.plan.outputs.dirs) }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - name: Rust from rust-toolchain.toml
+        run: rustup toolchain install
       # Host tests of firmware packages: the host target, no firmware features
-      # (the READMEs give the same command). +stable skips a package's own
+      # (the READMEs give the same command). The pinned Rust by name skips a package's own
       # toolchain file (the ESP one).
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
         with:
           workspaces: ${{ matrix.dir }}
+      - name: The pinned Rust by name
+        run: sed -n 's/^channel = "\(.*\)"/RUST=\1/p' rust-toolchain.toml >> "$GITHUB_ENV"
       - name: Format
         env:
           DIR: ${{ matrix.dir }}
-        run: cargo +stable fmt --check --manifest-path "$DIR/Cargo.toml"
+        run: cargo +"$RUST" fmt --check --manifest-path "$DIR/Cargo.toml"
       - name: Clippy
         # The library; a package without one is linted whole.
         env:
           DIR: ${{ matrix.dir }}
         run: |
-          host="$(rustc +stable -vV | sed -n 's/^host: //p')"
+          host="$(rustc +"$RUST" -vV | sed -n 's/^host: //p')"
           if cargo metadata --no-deps --format-version 1 --manifest-path "$DIR/Cargo.toml" \
               | jq -e 'any(.packages[].targets[]; .kind | index("lib"))' > /dev/null; then
             scope=--lib
           else
             scope=--all-targets
           fi
-          cargo +stable clippy --no-default-features $scope --target "$host" \
+          cargo +"$RUST" clippy --no-default-features $scope --target "$host" \
             --manifest-path "$DIR/Cargo.toml" -- -D warnings
       - name: Test on the host
         env:
           DIR: ${{ matrix.dir }}
         run: |
-          host="$(rustc +stable -vV | sed -n 's/^host: //p')"
-          cargo +stable test --no-default-features --target "$host" \
+          host="$(rustc +"$RUST" -vV | sed -n 's/^host: //p')"
+          cargo +"$RUST" test --no-default-features --target "$host" \
             --manifest-path "$DIR/Cargo.toml"
 
   # Clippy over the MCU packages' firmware code (node, relay, the ESP32-S3
@@ -112,13 +118,15 @@ jobs:
   firmware-lint:
     name: clippy ${{ matrix.lint.dir }} [${{ matrix.lint.features }}]
     needs: plan
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     strategy:
       fail-fast: false
       matrix:
         lint: ${{ fromJSON(needs.plan.outputs.lints) }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - name: Rust from rust-toolchain.toml
+        run: rustup toolchain install
       # The ESP32-S3 package builds with Espressif's Xtensa toolchain (its
       # rust-toolchain.toml names `esp`).
       - name: Xtensa toolchain
@@ -156,9 +164,11 @@ jobs:
   # its MCU, and measured against the region its MCU definition gives it
   # (`[layout] stage0`), leaving 1/16 of it free.
   stage0-size:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - name: Rust from rust-toolchain.toml
+        run: rustup toolchain install
       - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
         with:
           python-version: "3.12"
@@ -183,9 +193,11 @@ jobs:
   # boot crate's raised versions reaching the package after `dagon gen` and
   # the build (crates/dagon-cli/src/serve/api.rs).
   boot-crates:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - name: Rust from rust-toolchain.toml
+        run: rustup toolchain install
       - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
         with:
           python-version: "3.12"
@@ -197,7 +209,7 @@ jobs:
           cargo test -p dagon-cli --bin dagon --locked -- --ignored raised_versions_reach_the_package
 
   web:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     defaults:
       run:
         working-directory: web
@@ -226,7 +238,7 @@ jobs:
   # reference pages match their sources, the examples parse, the site builds
   # with every internal link resolving, and the demo build compiles.
   site:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
       - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
@@ -264,7 +276,7 @@ jobs:
         run: python site/scripts/pages.py --demo site/dist/demo
 
   scripts:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
       - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5

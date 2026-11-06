@@ -66,7 +66,7 @@ What running DAGON needs:
 
 - Chrome or Edge 89 or later
 - The `dagon` command: the prebuilt files need nothing else
-  - With `cargo install`, Rust stable (checked on 1.95.0) and a C compiler (the MSVC C++ build tools on Windows, gcc or clang on Linux, the Xcode Command Line Tools on macOS)
+  - With `cargo install`, Rust 1.95.0 or later and a C compiler (the Visual Studio 2022 C++ build tools on Windows, gcc 13 or later on Linux, Xcode Command Line Tools 16.4 or later on macOS)
 
 How to install the `dagon` command is in [Install](https://c-ardinal.github.io/DAGON-Boot/doc/en/getting-started/install/).
 
@@ -76,10 +76,9 @@ Try the [DAGON Console demo](https://c-ardinal.github.io/DAGON-Boot/demo/) with 
 
 On your own PC, you can also try it without hardware, using the simulator.
 
-```sh
-cargo install --git https://github.com/c-ardinal/DAGON-Boot --tag cli-v0.1.0 dagon-cli
-dagon demo
-```
+1. Download the file for your system from [GitHub Releases](https://github.com/c-ardinal/DAGON-Boot/releases).
+2. Put `dagon` on your PATH.
+3. Run `dagon demo`.
 
 `dagon demo` opens DAGON Console at the address it prints. `dagon sim run` runs end-to-end scenarios in the simulator.
 

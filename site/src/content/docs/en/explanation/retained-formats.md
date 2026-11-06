@@ -519,8 +519,7 @@ its digest bytes and its count check (the low nibble is the count's
 complement) hold; the cell counts the larger of its two words' counts,
 and `[0, 0]` is the cleared cell. Each word is one store, so a reset can
 land between the two: one new word and one old word then still count the
-new start, never fewer (the model found that the previous shape, a word
-and its complement, read such a pair as 0 and lost the start). A random
+new start, never fewer. A random
 word matches with probability 2^-28, and a match only makes stage0 give
 the core up sooner.
 
@@ -552,9 +551,7 @@ A cell with a word that
 holds a count was written by stage0, so it holds, and the check writes
 nothing over it; only a cell counting nothing gets a probe (a value no
 cell word takes) and its old value back, word by word, each read back, so
-a reset inside the check never leaves the cell counting fewer starts (the
-model found the earlier check, which probed over a running count, letting
-a failing core start without end).
+a reset inside the check never leaves the cell counting fewer starts.
 
 Limit of the claims: that each place keeps its value across the resets
 named is the vendor's documented behaviour.

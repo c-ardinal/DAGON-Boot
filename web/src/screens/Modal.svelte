@@ -118,6 +118,7 @@
     font: 400 var(--t-small) / 24px var(--f-ja);
   }
   footer {
+    flex-wrap: wrap;
     display: flex;
     align-items: center;
     gap: var(--s-3);

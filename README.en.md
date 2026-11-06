@@ -98,8 +98,6 @@ You can also add DAGON to existing firmware ([how](https://c-ardinal.github.io/D
 
 <img src="assets/architecture/node-en.svg" alt="The node firmware's layers and functional stacks" width="100%">
 
-<img src="assets/architecture/pc-en.svg" alt="The PC side's layers" width="100%">
-
 | To do this | Touch | Steps |
 |---|---|---|
 | Write your app | `targets/mcu/*/template/src/app.rs` becomes the node's `src/app.rs` | [From a new project to a new version](https://c-ardinal.github.io/DAGON-Boot/doc/en/getting-started/first-project/) |

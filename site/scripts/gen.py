@@ -676,7 +676,7 @@ REGIONS = [
     ("reference/definitions.md", "dagon-topology's McuDef", lambda lang: def_rows(lang, DEFS / "mod.rs", "McuDef")),
     ("reference/definitions.md", "dagon-topology's Isolation", lambda lang: def_rows(lang, DEFS / "isolation.rs", "Isolation", "isolation")),
     ("reference/definitions.md", "dagon-topology's BoardDef", lambda lang: def_rows(lang, DEFS / "mod.rs", "BoardDef")),
-    ("explanation/index.md", "site/scripts/architecture.py", lambda lang: "".join(f"<div>{make(lang)}</div>\n" for make in architecture.FIGURES.values())),
+    ("explanation/index.md", "site/scripts/architecture.py", lambda lang: f"<div>{architecture.node_svg(lang)}</div>\n\n{architecture.legend_table(lang)}"),
 ]
 
 

@@ -1,14 +1,20 @@
+import { RULE_FIX } from '../copy.ts';
 import { describe, expect, test } from 'vitest';
 import { supportedBoards, topo_check, topo_compile } from '../../wasm/dagon.ts';
 import { rom_i2c_addrs } from '../../wasm/pkg/dagon_wasm.js';
 import { SAMPLE_CONFIG, SAMPLE_YAML } from '../sample.ts';
-import { boardMissing, canPlace, connect, emptyDoc, freeAddrs, fromYaml, hopAvailable, linkKinds, place, placeMcu, removeNode, setBoard, setLink, setLinkKind, setNode, setUplink, toConfig, toYaml } from './model.ts';
+import { boardMissing, canPlace, maxNodes, connect, emptyDoc, freeAddrs, fromYaml, hopAvailable, linkKinds, place, placeMcu, removeNode, setBoard, setLink, setLinkKind, setNode, setUplink, toConfig, toYaml } from './model.ts';
 import { problemChip } from './problems.ts';
 import { problems } from './problems.ts';
 
 const check = (yaml: string) => JSON.parse(topo_check(yaml)) as { ok: boolean; errors: number; warnings: number; issues: { rule: string; path: string }[] };
 
 describe('define document', () => {
+  test('the Console draws up to the format\'s node limit, and its sentence names it', () => {
+    expect(maxNodes()).toBe(32);
+    expect(RULE_FIX['V-02']({ to: '', board: '', id: '', many: true, max: maxNodes() })).toContain('32');
+  });
+
   test('sample reads and writes back to the same canonical topology', () => {
     const doc = fromYaml(SAMPLE_YAML);
     const out = toYaml(doc.topo);

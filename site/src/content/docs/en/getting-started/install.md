@@ -3,15 +3,15 @@ title: "Install"
 description: "The tools DAGON needs and the dagon command."
 ---
 
-## The tools you need
+## What running DAGON needs
 
-| Tool | When | How |
+| What | When | How |
 |---|---|---|
-| Rust (`rustup`) | always | <https://rustup.rs> |
-| A C compiler | building the `dagon` command from source (the `ring` crate) | MSVC Build Tools on Windows, `cc` elsewhere |
 | Chrome or Edge 89+ | DAGON Console (Web Serial) | — |
+| Rust stable (checked on 1.95.0) | installing the `dagon` command with `cargo install` | <https://rustup.rs> |
+| A C compiler | installing the `dagon` command with `cargo install` (the `ring` crate) | the MSVC C++ build tools on Windows, gcc or clang on Linux, the Xcode Command Line Tools on macOS |
 
-The tools each MCU needs are in [Tools by MCU](/en/reference/tools/).
+With the prebuilt `dagon` command, nothing else is needed.
 
 ## Install the `dagon` command
 
@@ -29,11 +29,11 @@ Check that it is there:
 dagon --help
 ```
 
-DAGON Console is built into `dagon`. Node.js is only needed to work on DAGON Console itself (`web/README.md`).
+DAGON Console is built into `dagon`. Node.js is not needed.
 
-## Check the tools
+## The tools for developing firmware
 
-Let `dagon` check for missing tools:
+Developing firmware needs [Rust](https://rustup.rs) and the [tools each MCU needs](/en/reference/tools/). Let `dagon` check for missing ones:
 
 ```sh
 dagon doctor           # what is there and what is missing

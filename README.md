@@ -62,12 +62,13 @@ PCに繋いだ1つのマイコンを通してその先のマイコンにも、�
 
 ## 必要なもの
 
-- [Rust](https://rustup.rs): アプリはRustだけで書きます。
-- Cコンパイラ: `dagon`コマンドをソースからビルドするときに必要です。
-- Chrome か Edge 89 以降
-- マイコンごとのツール: `dagon doctor`が確かめます（[一覧](https://c-ardinal.github.io/DAGON-Boot/doc/reference/tools/)）。
+DAGONを動かすために必要なものです。
 
-`dagon`コマンドは、ビルド済みのファイルからも入れられます。手順は[入れる](https://c-ardinal.github.io/DAGON-Boot/doc/getting-started/install/)にあります。
+- Chrome か Edge 89 以降
+- `dagon` コマンド: ビルド済みのファイルなら、ほかに要りません
+  - `cargo install` で入れるなら、Rust stable（1.95.0 で確認）と C コンパイラ（Windows は MSVC の C++ ビルドツール、Linux は gcc か clang、macOS は Xcode Command Line Tools）
+
+`dagon`コマンドの入れ方は[入れる](https://c-ardinal.github.io/DAGON-Boot/doc/getting-started/install/)にあります。
 
 ## まず試す
 
@@ -93,7 +94,9 @@ dagon serve
 
 `dagon new`は`dagon.toml`、構成のファイル、署名の鍵を作ります。構成のファイルには、見本として3つのマイコンの構成が入ります。秘密鍵はプロジェクトの外に置かれます。
 
-`dagon doctor`は、この構成に必要なツールを確かめます。
+アプリは[Rust](https://rustup.rs)だけで書きます。
+
+`dagon doctor`はマイコンごとに必要なツール（[一覧](https://c-ardinal.github.io/DAGON-Boot/doc/reference/tools/)）を確かめ、`dagon doctor --fix`は管理者の権限が要らないものを入れます。
 
 `dagon serve`が表示するアドレスを開くと、DAGON Consoleで続けられます。
 
@@ -131,16 +134,21 @@ DAGONがしないことは[制限事項](https://c-ardinal.github.io/DAGON-Boot/
 
 ## 変更する場所
 
-やりたいことごとに、触る場所と手順を示します。
+### DAGONを使うとき
 
-| やりたいこと       | 触る場所                                                                                        | 手順                                                                                                |
-| ------------------ | ----------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------- |
-| アプリを書く       | `nodes/<id>/src/app.rs`                                                                         | [はじめから書き込みまで](https://c-ardinal.github.io/DAGON-Boot/doc/getting-started/first-project/) |
-| 拡張を足す         | `targets/boot-extension-template/`、`crates/dagon-events/src/ports.rs`                          | [拡張のマニフェスト](https://c-ardinal.github.io/DAGON-Boot/doc/reference/extension-manifest/)      |
-| ボードを足す       | `targets/boards/*/dagon-board.toml`                                                             | [自分のボード](https://c-ardinal.github.io/DAGON-Boot/doc/how-to/own-board/)                        |
-| マイコンを足す     | `targets/mcu/*/dagon-mcu.toml`、`crates/dagon-port/src/lib.rs`                                  | [マイコンとリンクを足す](https://c-ardinal.github.io/DAGON-Boot/doc/how-to/new-mcu-or-link/)        |
-| リンクや転送を足す | `crates/dagon-format/src/link.rs`、`targets/mcu/*/src/links.rs`、`crates/dagon-host/src/lib.rs` | [マイコンとリンクを足す](https://c-ardinal.github.io/DAGON-Boot/doc/how-to/new-mcu-or-link/)        |
-| エージェントを足す | `crates/dagon-cli/agents/`、`~/.dagon/agents/*.toml`                                            | [エージェント定義の形式](https://c-ardinal.github.io/DAGON-Boot/doc/reference/agent-definition/)    |
+| やりたいこと       | 触る場所                                                               | 手順                                                                                                |
+| ------------------ | ---------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------- |
+| アプリを書く       | `nodes/<id>/src/app.rs`                                                | [はじめから書き込みまで](https://c-ardinal.github.io/DAGON-Boot/doc/getting-started/first-project/) |
+| 拡張を足す         | `targets/boot-extension-template/`、`crates/dagon-events/src/ports.rs` | [拡張のマニフェスト](https://c-ardinal.github.io/DAGON-Boot/doc/reference/extension-manifest/)      |
+| ボードを足す       | `targets/boards/*/dagon-board.toml`                                    | [自分のボード](https://c-ardinal.github.io/DAGON-Boot/doc/how-to/own-board/)                        |
+| エージェントを足す | `crates/dagon-cli/agents/`、`~/.dagon/agents/*.toml`                   | [エージェント定義の形式](https://c-ardinal.github.io/DAGON-Boot/doc/reference/agent-definition/)    |
+
+### DAGONそのものに足すとき
+
+| やりたいこと       | 触る場所                                                                                        | 手順                                                                                         |
+| ------------------ | ----------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------- |
+| マイコンを足す     | `targets/mcu/*/dagon-mcu.toml`、`crates/dagon-port/src/lib.rs`                                  | [マイコンとリンクを足す](https://c-ardinal.github.io/DAGON-Boot/doc/how-to/new-mcu-or-link/) |
+| リンクや転送を足す | `crates/dagon-format/src/link.rs`、`targets/mcu/*/src/links.rs`、`crates/dagon-host/src/lib.rs` | [マイコンとリンクを足す](https://c-ardinal.github.io/DAGON-Boot/doc/how-to/new-mcu-or-link/) |
 
 ## 依存しているものと外部のデータ
 

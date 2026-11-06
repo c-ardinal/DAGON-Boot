@@ -36,8 +36,8 @@ editUrl: false
 | `POST` | `/v1/kept` |  | 書き込もうとしているパッケージを残します。プロジェクトの鍵で検証が通ったときだけです。その id を答えます。 |
 | `GET` | `/v1/bootcore/{node}` |  | ノードの署名付きのブートローダ（ROM の経路）: [provision.&lt;node&gt;] bootcore、無ければ &lt;provision_dir&gt;/&lt;node&gt;/bootcore.img。 |
 | `GET` | `/v1/stage0/{node}` |  | stage0 のあるマイコンを ROM の経路ですべて書き直すときの stage0 のバイト列。provision が書いたもので、&lt;provision_dir&gt;/&lt;node&gt;/stage0.bin です。stage0 に署名はありません。ホストは書き込む前に、マイコンの stage0 の領域に収まることを確かめます。 |
-| `GET` | `/v1/layout` |  | 呼び名とエディタの位置（最初の保存の前は 404）。 |
-| `PUT` | `/v1/layout` |  | JSON オブジェクト。全体をまとめて書きます。 |
+| `GET` | `/v1/layout` |  | 呼び名とエディタの位置（最初の保存の前は空の配置）。 |
+| `PUT` | `/v1/layout` |  | この形式の配置ファイル。全体をまとめて書きます。 |
 | `POST` | `/v1/conform` | 拒否 | ページがポートを渡した後で、親機を通して `node` に 12 の適合試験を行います。 |
 | `GET` | `/v1/conform/{node}` | 拒否 | ノードの最後の適合試験の結果（最初の実行の前は 404）。 |
 | `POST` | `/v1/ai/topology` | 拒否 | 作業。モデルからの質問はページに届きます。 |

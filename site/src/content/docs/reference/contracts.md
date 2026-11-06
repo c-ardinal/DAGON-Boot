@@ -25,6 +25,7 @@ DAGON の部品のあいだの取り決めとその番号、部品ごとのバ�
 | `topology-yaml` | 1 | 構成のソース: その `dagon:` キー（dagon-topology SCHEMA_VERSION） |
 | `definitions` | 1 | dagon-mcu.toml / dagon-board.toml / [board.&lt;id&gt;]: `format` キー。省くと 1（dagon-topology defs::FORMAT） |
 | `serve-api` | 1 | dagon serve の HTTP API: GET /v1/hello の `api`（dagon-cli versions::SERVE_API） |
+| `layout` | 1 | 構成の隣の配置ファイル: その `format`（dagon-cli versions::LAYOUT_FORMAT） |
 | `event` | 1 | ライフサイクルイベントの種類、コード、ペイロード、EventRecord（dagon-events EVENT_FORMAT） |
 | `extension-manifest` | 1 | dagon-extension.toml: その `format` キー（dagon-extension MANIFEST_FORMAT） |
 | `boot-program` | 1 | ボードの [boot] にあるブートのアクションプログラムの操作: 生成される BOOT_PROGRAM_FORMAT（dagon-topology defs::board_boot::BOOT_PROGRAM_FORMAT） |
@@ -33,7 +34,7 @@ DAGON の部品のあいだの取り決めとその番号、部品ごとのバ�
 
 | 部品 | バージョン | crate | 形式 |
 |---|---|---|---|
-| `cli` | 0.1.0 | `dagon-cli` | `wire` 1, `image-header` 1, `state-log` 1, `manifest` 1, `bundle` 1, `topology-bin` 1, `topology-yaml` 1, `definitions` 1, `serve-api` 1, `event` 1, `extension-manifest` 1, `boot-program` 1 |
+| `cli` | 0.1.0 | `dagon-cli` | `wire` 1, `image-header` 1, `state-log` 1, `manifest` 1, `bundle` 1, `topology-bin` 1, `topology-yaml` 1, `definitions` 1, `serve-api` 1, `layout` 1, `event` 1, `extension-manifest` 1, `boot-program` 1 |
 | `boot-rp2040` | 0.1.0 | `dagon-rp2040-stage0`, `dagon-rp2040-bootcore` | `image-header` 1, `state-log` 1, `event` 1 |
 | `boot-stm32f401re` | 0.1.0 | `dagon-stm32f401re-stage0`, `dagon-stm32f401re-bootcore` | `image-header` 1, `state-log` 1, `event` 1 |
 | `mcu-rp2040` | 0.1.0 | `dagon-mcu-rp2040` | `wire` 1, `image-header` 1, `state-log` 1, `topology-bin` 1, `definitions` 1 |

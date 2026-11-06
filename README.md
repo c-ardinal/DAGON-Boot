@@ -60,6 +60,15 @@ PCに繋いだ1つのマイコンを通してその先のマイコンにも、�
 | STM32F401RE | NUCLEO-F401RE                   |
 | ESP32-S3    | M5StopWatch                     |
 
+## 必要なもの
+
+- [Rust](https://rustup.rs): アプリはRustだけで書きます。
+- Cコンパイラ: `dagon`コマンドをソースからビルドするときに必要です。
+- Chrome か Edge 89 以降
+- マイコンごとのツール: `dagon doctor`が確かめます（[一覧](https://c-ardinal.github.io/DAGON-Boot/doc/reference/tools/)）。
+
+`dagon`コマンドは、ビルド済みのファイルからも入れられます。手順は[入れる](https://c-ardinal.github.io/DAGON-Boot/doc/getting-started/install/)にあります。
+
 ## まず試す
 
 インストールも実機も不要で[DAGON Console のデモ](https://c-ardinal.github.io/DAGON-Boot/demo/)を試せます。模擬の親機と子機を相手に、書き込みと前のバージョンへの戻し方を体験できます。ファイルの読み書き、実際の機器との接続、AI連携操作はデモでは使えません。
@@ -73,14 +82,6 @@ dagon demo
 
 `dagon demo` は表示したアドレスでDAGON Consoleを開きます。`dagon sim run` はシミュレータ上で通しのシナリオを実行します。
 
-## 必要なもの
-
-- [Rust](https://rustup.rs): アプリはRustだけで書きます（ソースからビルドするときは C コンパイラも）
-- Chrome か Edge 89 以降
-- マイコンごとのツールは `dagon doctor` が確かめます（[一覧](https://c-ardinal.github.io/DAGON-Boot/doc/reference/tools/)）
-
-ビルド済みのファイルからの入れ方は[入れる](https://c-ardinal.github.io/DAGON-Boot/doc/getting-started/install/)にあります。
-
 ## 自分のプロジェクトを始める
 
 ```sh
@@ -90,24 +91,21 @@ dagon doctor
 dagon serve
 ```
 
-`dagon new` は `dagon.toml` と構成のファイル（見本の 3 ノード）、署名の鍵を作ります。秘密鍵はプロジェクトの外に置かれます。`dagon serve` が表示するアドレスを開くとDAGON Consoleで続けられます。ビルドから最初の書き込みまでは[はじめから書き込みまで](https://c-ardinal.github.io/DAGON-Boot/doc/getting-started/first-project/)を見てください。
+`dagon new`は`dagon.toml`、構成のファイル、署名の鍵を作ります。構成のファイルには、見本として3つのマイコンの構成が入ります。秘密鍵はプロジェクトの外に置かれます。
 
-既にあるファームウェアに組み込むこともできます（[手順](https://c-ardinal.github.io/DAGON-Boot/doc/how-to/existing-firmware/)）。
+`dagon doctor`は、この構成に必要なツールを確かめます。
 
-## しくみ
+`dagon serve`が表示するアドレスを開くと、DAGON Consoleで続けられます。
 
-次の図は DAGON が目指すソフトウェアの設計です。今のバージョンがどこまで実装しているかは示していません。
+ビルドから最初の書き込みまでは[はじめから書き込みまで](https://c-ardinal.github.io/DAGON-Boot/doc/getting-started/first-project/)を見てください。
 
-<img src="assets/architecture/node-ja.svg" alt="DAGON のソフトウェアの設計を層とコンポーネントで示す図" width="100%">
+既にあるファームウェアにDAGONを組み込むこともできます（[手順](https://c-ardinal.github.io/DAGON-Boot/doc/how-to/existing-firmware/)）。
 
-| やりたいこと       | 触る場所                                                                                        | 手順                                                                                                |
-| ------------------ | ----------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------- |
-| アプリを書く       | `targets/mcu/*/template/src/app.rs` がノードの `src/app.rs` になります                          | [はじめから書き込みまで](https://c-ardinal.github.io/DAGON-Boot/doc/getting-started/first-project/) |
-| 拡張を足す         | `targets/boot-extension-template/`、`crates/dagon-events/src/ports.rs`                          | [拡張のマニフェスト](https://c-ardinal.github.io/DAGON-Boot/doc/reference/extension-manifest/)      |
-| ボードを足す       | `targets/boards/*/dagon-board.toml`                                                             | [自分のボード](https://c-ardinal.github.io/DAGON-Boot/doc/how-to/own-board/)                        |
-| マイコンを足す     | `targets/mcu/*/dagon-mcu.toml`、`crates/dagon-port/src/lib.rs`                                  | [マイコンとリンクを足す](https://c-ardinal.github.io/DAGON-Boot/doc/how-to/new-mcu-or-link/)        |
-| リンクや転送を足す | `crates/dagon-format/src/link.rs`、`targets/mcu/*/src/links.rs`、`crates/dagon-host/src/lib.rs` | [マイコンとリンクを足す](https://c-ardinal.github.io/DAGON-Boot/doc/how-to/new-mcu-or-link/)        |
-| エージェントを足す | `crates/dagon-cli/agents/`、`~/.dagon/agents/*.toml`                                            | [エージェント定義の形式](https://c-ardinal.github.io/DAGON-Boot/doc/reference/agent-definition/)    |
+## 書き込みのしくみ
+
+PCにUSBでつないだマイコンを親機と呼びます。親機の先にあるマイコンを子機と呼びます。
+
+次の図は見本の構成です。
 
 ```mermaid
 flowchart LR
@@ -116,19 +114,40 @@ flowchart LR
   HUB -- UART --> WATCH["子機<br>ESP32-S3"]
 ```
 
-1. PC が署名付きのパッケージの署名と構成を確かめ、親機へ送ります。
-2. 親機が子機へ中継します。子機から順に書き込み、親機は最後です。
-3. ノードは新しいイメージを動いているものの隣に書き、試しに起動します。
-4. 自己確認が通れば確定し、通らなければウォッチドッグのリセットで前のバージョンに戻ります。
+1. PCがパッケージの署名を確かめ、パッケージがこの構成に合うことを確かめます。
+2. PCが構成を親機へ送ります。
+3. PCが親機を通して、マイコンごとに新しいイメージを送ります。子機が先で、親機は最後です。
+4. マイコンは、動いているイメージとは別の場所に新しいイメージを書き込みます。
+5. マイコンは新しいイメージを試しに起動します。
+6. 自己確認が通れば、新しいバージョンに確定します。通らなければ、リセットして前のバージョンに戻ります。
 
-DAGON がしないことは[制限事項](https://c-ardinal.github.io/DAGON-Boot/doc/explanation/limitations/)にあります。
+DAGONがしないことは[制限事項](https://c-ardinal.github.io/DAGON-Boot/doc/explanation/limitations/)にあります。
+
+## DAGONの設計
+
+次の図は DAGON が目指すソフトウェアの設計です。今のバージョンがどこまで実装しているかは示していません。
+
+<img src="assets/architecture/node-ja.svg" alt="DAGON のソフトウェアの設計を層とコンポーネントで示す図" width="100%">
+
+## 変更する場所
+
+やりたいことごとに、触る場所と手順を示します。
+
+| やりたいこと       | 触る場所                                                                                        | 手順                                                                                                |
+| ------------------ | ----------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------- |
+| アプリを書く       | `nodes/<id>/src/app.rs`                                                                         | [はじめから書き込みまで](https://c-ardinal.github.io/DAGON-Boot/doc/getting-started/first-project/) |
+| 拡張を足す         | `targets/boot-extension-template/`、`crates/dagon-events/src/ports.rs`                          | [拡張のマニフェスト](https://c-ardinal.github.io/DAGON-Boot/doc/reference/extension-manifest/)      |
+| ボードを足す       | `targets/boards/*/dagon-board.toml`                                                             | [自分のボード](https://c-ardinal.github.io/DAGON-Boot/doc/how-to/own-board/)                        |
+| マイコンを足す     | `targets/mcu/*/dagon-mcu.toml`、`crates/dagon-port/src/lib.rs`                                  | [マイコンとリンクを足す](https://c-ardinal.github.io/DAGON-Boot/doc/how-to/new-mcu-or-link/)        |
+| リンクや転送を足す | `crates/dagon-format/src/link.rs`、`targets/mcu/*/src/links.rs`、`crates/dagon-host/src/lib.rs` | [マイコンとリンクを足す](https://c-ardinal.github.io/DAGON-Boot/doc/how-to/new-mcu-or-link/)        |
+| エージェントを足す | `crates/dagon-cli/agents/`、`~/.dagon/agents/*.toml`                                            | [エージェント定義の形式](https://c-ardinal.github.io/DAGON-Boot/doc/reference/agent-definition/)    |
 
 ## 依存しているものと外部のデータ
 
 - 自作の範囲: `crates/`、`targets/`（下のベンダー部品を除く）、`web/`、`site/`、`samples/`、`plugin/`、`topology/`、`scripts/`
-- 依存ライブラリ: Rust の crate と npm パッケージを改変せずに使っています（embassy、esp-hal、ed25519-compact、Svelte、Vite、Astro など）
-- ベンダー部品: ESP-IDF の 2nd stage、`rp2040-boot2`、STM32F401 の ROM ブートローダ
+- 依存ライブラリ: Rustとnpmのライブラリを改変せずに使っています（embassy、esp-hal、ed25519-compact、Svelte、Vite、Astroなど）。
+- ベンダー部品: ESP-IDFの2nd stage、`rp2040-boot2`、STM32F401のROMブートローダ
 - 書体とアイコン: Doto、DotGothic16、Zen Kaku Gothic New、JetBrains Mono（SIL OFL 1.1）、Lucide（ISC）
-- マイコンとボードの定義の値: 各社のデータシートとボードの資料から取っています。出典を確かめていない値は、定義の中で `unverified` と示します
+- マイコンとボードの定義の値: 各社のデータシートとボードの資料から取っています。出典を確かめていない値は、定義の中で`unverified`と示します。
 
 全部の一覧とライセンスは[ライセンス](https://c-ardinal.github.io/DAGON-Boot/doc/reference/licenses/)にあります。

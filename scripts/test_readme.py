@@ -50,8 +50,25 @@ class Readmes(unittest.TestCase):
         self.assertEqual(structure(JA), structure(EN))
 
     def test_the_notice_is_word_for_word_where_it_belongs(self):
-        for rel, text in NOTICE_FILES.items():
-            self.assertIn(text, (ROOT / rel).read_text(encoding="utf-8"), rel)
+        for rel, lines in NOTICE_FILES.items():
+            for text in lines:
+                self.assertIn(text, (ROOT / rel).read_text(encoding="utf-8"), rel)
+
+    def test_the_japanese_readme_says_microcontroller(self):
+        self.assertNotIn("ノード", JA.read_text(encoding="utf-8"))
+
+    def test_console_goes_by_its_full_name(self):
+        for path in (JA, EN):
+            self.assertEqual(re.findall(r".{0,20}(?<!DAGON )Console.{0,20}", path.read_text(encoding="utf-8")), [], path.name)
+
+    def test_requirements_come_before_the_first_command_that_needs_them(self):
+        for path, heading in ((JA, "## 必要なもの"), (EN, "## Prerequisites")):
+            text = path.read_text(encoding="utf-8")
+            self.assertLess(text.index(heading), text.index("cargo install"), path.name)
+
+    def test_the_figure_says_word_for_word_what_it_shows(self):
+        self.assertIn("次の図は DAGON が目指すソフトウェアの設計です。今のバージョンがどこまで実装しているかは示していません。", JA.read_text(encoding="utf-8"))
+        self.assertIn("The figure below is the software design DAGON aims for. It does not show how much of it the current version implements.", EN.read_text(encoding="utf-8"))
 
     def test_the_notice_says_how_many_microcontrollers_there_are(self):
         mcus = definitions("mcu", "dagon-mcu.toml")

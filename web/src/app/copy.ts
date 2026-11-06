@@ -31,25 +31,10 @@ export const HUB = {
   cli: '● 親機 CLI 使用中',
 } as const satisfies Record<HubState, string>;
 
-/** M48 accessible names ("親機、接続中"). */
-export const HUB_NAME = {
-  idle: '親機、未接続',
-  checking: '親機、確認中',
-  connected: '親機、接続中',
-  reconnecting: '親機、再接続中',
-  lost: '親機、切断',
-  cli: '親機、CLI 使用中',
-} as const satisfies Record<HubState, string>;
-
-/** CLI link in the header. */
-export const CLI_NONE = 'CLI 未連携';
-
 /** Bottom-band buttons (fixed names); per-node names are in BUTTON_FOR. */
 export const BUTTON = {
-  copyUrl: 'この URL をコピー',
   connectDiscover: '親機を探す',
   connect: '接続する',
-  placeSample: '見本の構成を置く',
   reselect: '親機を選び直す',
   reload: '構成を読み直す',
   push: '親機へ送る',
@@ -62,10 +47,6 @@ export const BUTTON = {
   update: 'ノードへ書き込む',
   reconnect: '接続し直す',
   recoverAgain: 'もう一度試す',
-  copyLog: '記録をコピー',
-  retrySample: '見本を作り直す',
-  placeInDefine: '見本を準備に置く',
-  showJobs: '作業を見る',
 } as const satisfies Record<Exclude<Action, 'recover' | 'updateResponding'>, string>;
 
 /** Buttons named after a node or a count. */
@@ -671,7 +652,6 @@ export const WIRING = {
     ['—', 'このノードだけの配線'],
   ],
   copy: '配線表をコピー',
-  print: '配線表を印刷',
 } as const;
 
 /** The file check: the file and dagon-host's verdict on it (the one place for the verdict). */
@@ -1168,7 +1148,6 @@ export const fill = (s: string, v: Record<string, string | number>): string => s
 
 export const SKELETON = {
   make: '雛形を作る',
-  disabled: '問題あり',
   title: '雛形を作る',
   state: {
     running: '… 作成中',
@@ -1251,7 +1230,6 @@ export const WRITE = {
     body: '{node} が応答しません。書き込むと、中身をすべて書き換えます。配線の抜けでも応答しなくなるので、確かめてから進めてください。',
   },
   factory: {
-    first: '◇ 初回',
     intro: '{node} の DAGON が応答しないため、USB で直接書き込みます。初めての書き込みと、DAGON が消えたときだけの手順です。',
     steps: '手順',
     drive: 'ドライブ',

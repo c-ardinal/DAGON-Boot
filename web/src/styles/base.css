@@ -348,23 +348,3 @@ button {
   }
 }
 
-/* Printing prints only the marked part, black on white. */
-@media print {
-  html {
-    background: #fff;
-    color: #000;
-  }
-  body * {
-    visibility: hidden;
-  }
-  [data-print],
-  [data-print] * {
-    visibility: visible;
-    color: #000;
-  }
-  [data-print] {
-    position: absolute;
-    top: 0;
-    left: 0;
-  }
-}

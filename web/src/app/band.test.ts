@@ -77,6 +77,10 @@ describe('bottom band', () => {
     expect([b.primary?.label, b.secondary]).toEqual(['ウォッチへ書き込む', []]);
   });
 
+  test('sending failed needs the user: a modal, not a toast', () => {
+    expect(connectNotice('sendFailed')).toBe('modal');
+  });
+
   // One short sentence in every operating state, done and no-answer included.
   const FAILURE: Partial<Record<L, ConnectFailure>> = { notChosen: 'not-found', portFailed: 'busy', silentHub: 'no-response' };
   test.each((Object.keys(MACHINE) as L[]).filter((s) => s !== 'unsupported'))('%s: one short sentence and a step to highlight', (s) => {

@@ -55,9 +55,9 @@ describe('direct writing modal of a 子機', () => {
 });
 
 describe('direct writing modal', () => {
-  test('before writing: 初回, why and how, 中止 and 書き込む, closable', () => {
+  test('before writing: why and how, 中止 and 書き込む, closable', () => {
     const b = html(null);
-    expect(b).toContain(WRITE.factory.first);
+    expect(b).not.toContain('初回');
     expect(b).toContain(fill(WRITE.factory.intro, { node: '[1] メイン' }));
     expect(b).toContain('BOOTSEL を押したまま USB をつなぐ');
     expect(button(b, WRITE.factory.cancel)).toContain('aria-disabled="false"');
@@ -118,5 +118,10 @@ describe('the modal press is the consent serve asks for', () => {
     expect(answerConsent(job({ state: 'running' }), answer, seen)).toBe(false);
     expect(answerConsent(job({ kind: 'build', state: 'question', question: { id: 'q', text: '?' } }), answer, seen)).toBe(false);
     expect(answer).not.toHaveBeenCalled();
+  });
+  test('このあと is for the 親機: a 子機 goes on from its own card', () => {
+    const props = { node: { label: '[2] seg', target: '[2] seg' }, how: [], canWrite: true, job: null, onwrite: () => undefined, oncancel: () => undefined, onclose: () => undefined, onmore: () => undefined } as never;
+    expect(render(FactoryModal, { props }).body).toContain(WRITE.factory.after);
+    expect(render(FactoryModal, { props: { ...(props as object), child: true } as never }).body).not.toContain(WRITE.factory.after);
   });
 });

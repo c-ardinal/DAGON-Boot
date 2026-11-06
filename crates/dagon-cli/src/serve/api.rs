@@ -34,6 +34,35 @@ pub(super) fn inside(cfg: &Config, p: &Path) -> Result<PathBuf, String> {
     crate::paths::contained(&cfg.base, p)
 }
 
+/// `dagon gen`, one node at a time: a cancel takes effect before the next
+/// node; those made stay. Each line goes out once as it is made.
+fn gen_nodes(
+    config: &Path,
+    only: &[String],
+    force: bool,
+    log: &mut dyn FnMut(&str),
+    cancel: &AtomicBool,
+) -> Result<Vec<String>, String> {
+    let ids = if only.is_empty() {
+        let cfg = Config::load(Some(&config.to_string_lossy()))?;
+        let t = read_topology(&cfg, &inside(&cfg, &cfg.topology_path(None)?)?)?;
+        t.nodes.iter().map(|n| n.id.clone()).collect()
+    } else {
+        only.to_vec()
+    };
+    let mut lines: Vec<String> = Vec::new();
+    for id in &ids {
+        stop_if(cancel)?;
+        for l in crate::scaffold::gen_project(config, std::slice::from_ref(id), force)? {
+            if !lines.contains(&l) {
+                log(&l);
+                lines.push(l);
+            }
+        }
+    }
+    Ok(lines)
+}
+
 fn stop_if(cancel: &AtomicBool) -> Result<(), String> {
     if cancel.load(Ordering::Relaxed) {
         Err("cancelled".into())
@@ -340,13 +369,11 @@ fn gen_start(server: &Arc<Server>, req: &Request) -> Res {
     match server.spawn("gen", move |job| {
         let (config, _, _) = job.project()?;
         let config = config.ok_or("no project is open")?;
+        let cancel = job.cancel_flag();
         let lines = {
             let _lock = s.files.lock().map_err(|_| "lock".to_string())?;
-            crate::scaffold::gen_project(&config, &only, force)?
+            gen_nodes(&config, &only, force, &mut |l| job.log(l), &cancel)?
         };
-        for l in &lines {
-            job.log(l);
-        }
         let skipped: Vec<&String> = lines.iter().filter(|l| l.starts_with("skipped")).collect();
         Ok(json!({ "lines": lines.len(), "skipped": skipped }))
     }) {
@@ -1801,6 +1828,37 @@ mod tests {
         let rec: SignRecord = serde_json::from_slice(record.as_ref().unwrap()).unwrap();
         let listed: Vec<&str> = rec.images.iter().map(|(f, _)| f.as_str()).collect();
         assert_eq!(listed, ["seg-a.img", "seg-b.img", "bootcore-seg-a.img"]);
+    }
+
+    /// 中止 of 雛形を作る: the node being made finishes, the next is not started.
+    #[test]
+    fn gen_stops_between_nodes_when_cancelled() {
+        let d = std::env::temp_dir().join(format!("dagon-gen-cancel-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&d);
+        let dir = d.join("proj");
+        let here = std::fs::canonicalize(crate::dagonsrc::BUILT_FROM).unwrap();
+        let src = crate::dagonsrc::NewSource::Clone(crate::config::plain_path(here));
+        crate::scaffold::new_project(&dir, "proj", crate::scaffold::SAMPLE, &d.join("keys"), &src)
+            .unwrap();
+        let config = dir.join(crate::config::CONFIG_FILE);
+        let cancel = AtomicBool::new(false);
+        let r = gen_nodes(
+            &config,
+            &[],
+            false,
+            &mut |_| cancel.store(true, Ordering::Relaxed),
+            &cancel,
+        );
+        assert_eq!(r.unwrap_err(), "cancelled");
+        assert!(dir.join("nodes/hub/Cargo.toml").exists());
+        assert!(!dir.join("nodes/seg").exists());
+        // Not cancelled: every node, and each line once.
+        let lines = gen_nodes(&config, &[], false, &mut |_| {}, &AtomicBool::new(false)).unwrap();
+        assert!(dir.join("nodes/watch/Cargo.toml").exists());
+        let mut once = lines.clone();
+        once.dedup();
+        assert_eq!(lines, once);
+        let _ = std::fs::remove_dir_all(&d);
     }
 
     /// `dagon new` and `dagon gen`, built and signed once; then the app

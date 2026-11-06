@@ -249,7 +249,7 @@
 {/snippet}
 
 {#snippet wiring(l: Link)}
-  <section class="wiring" data-print aria-labelledby="wiring-h">
+  <section class="wiring" aria-labelledby="wiring-h">
     <h2 id="wiring-h" class="title">{WIRING.heading}</h2>
     <div class="scroll">
     <table class="wires">
@@ -277,7 +277,6 @@
     </dl>
     <div class="actions">
       <button class="secondary" onclick={() => copyWiring(l)}>{WIRING.copy}</button>
-      <button class="secondary" onclick={() => window.print()}>{WIRING.print}</button>
     </div>
   </section>
 {/snippet}
@@ -408,10 +407,5 @@
     flex-wrap: wrap;
     gap: var(--s-3);
     margin-top: var(--s-5);
-  }
-  @media print {
-    .actions {
-      display: none;
-    }
   }
 </style>

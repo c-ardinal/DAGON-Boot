@@ -35,7 +35,7 @@
           ? ({ text: WRITE.state.writing, kind: 'active' } as const)
           : job
             ? ({ text: WRITE.factory.waiting, kind: 'active' } as const)
-            : ({ text: WRITE.factory.first, kind: 'info' } as const),
+            : null,
   );
 </script>
 
@@ -51,8 +51,10 @@
     <h3>{NOTICE.reason}</h3>
     <p class="mono">{jobReason(job)}</p>
   {/if}
-  <h3>{NOTICE.after}</h3>
-  <p>{WRITE.factory.after}</p>
+  {#if !child}
+    <h3>{NOTICE.after}</h3>
+    <p>{WRITE.factory.after}</p>
+  {/if}
   {#snippet actions()}
     {#if canWrite && !done}
       <!-- 中止 only before writing starts: stopping half way can leave the node unable to start. -->

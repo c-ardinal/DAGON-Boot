@@ -54,7 +54,7 @@ export const FAILURE_BAND = {
  * browser's list may be what they meant, so it is a toast.
  */
 export function connectNotice(s: L): 'modal' | 'toast' | null {
-  if (s === 'portFailed' || s === 'silentHub') return 'modal';
+  if (s === 'portFailed' || s === 'silentHub' || s === 'sendFailed') return 'modal';
   return s === 'notChosen' ? 'toast' : null;
 }
 
@@ -107,8 +107,6 @@ function words(s: L, c: Ctx, n: Names): BandCopy {
       return BAND.M33;
     case 'lost':
       return n.refused ? { chip: REFUSED_CHIP[n.refused] ?? REFUSED_CHIP.otherHub, sentence: BAND.M34.sentence } : BAND.M34;
-    case 'sampleError':
-      return BAND.M35;
     default:
       return {};
   }

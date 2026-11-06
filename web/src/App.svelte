@@ -1229,7 +1229,7 @@
 {#snippet actions()}
   {#if mode === 'define'}
     {@const blocked = problemCount > 0 || d.doc.topo.nodes.length === 0}
-    <button class="button-primary-header" data-control="gen" bind:this={primaryEl} aria-disabled={blocked} title={blocked ? SKELETON.disabled : undefined} onclick={() => !blocked && void makeSkeleton()}><span>{SKELETON.make}</span></button>
+    <button class="button-primary-header" data-control="gen" bind:this={primaryEl} aria-disabled={blocked} onclick={() => !blocked && void makeSkeleton()}><span>{SKELETON.make}</span></button>
     <button class="button-secondary-header" data-control="build" aria-disabled={buildState === 'running'} onclick={() => buildState !== 'running' && void build()}><span>{BUILD.run}</span></button>
   {:else}
     {#if versionChoices.length}
@@ -1401,6 +1401,7 @@
         hub={connected && hubNode ? `${HUB[hub]} [${hubNode.no}] ${hubNode.name}（${NODE.roleHub}）` : HUB[hub]}
         hubAction={connected ? HUB_TOGGLE.disconnect : HUB_TOGGLE.connect}
         onhub={toggleHub}
+        hubHint={op.state === 'idle' || op.state === 'choosing' ? band.sentence : undefined}
         {hubLocked}
         state={stateName(lockStates)}
         cli={cliLabel}

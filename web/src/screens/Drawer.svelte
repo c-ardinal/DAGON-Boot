@@ -55,10 +55,13 @@
   .drawer {
     grid-area: drawer;
     display: flex;
+    flex: 0 1 auto;
     flex-direction: column;
+    min-height: var(--h-row);
     border-top: 1px solid var(--c-line);
     background: var(--c-layer-0);
   }
+  /* In a low window the drawer gives way (its body scrolls; the tabs stay), so the focal number and the zoom keep their room above it. */
   .drawer.open {
     height: var(--h-drawer);
   }

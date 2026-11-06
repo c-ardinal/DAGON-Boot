@@ -48,6 +48,7 @@
   .status {
     grid-area: band;
     display: flex;
+    flex: none;
     align-items: center;
     gap: var(--s-5);
     min-width: 0;
@@ -59,8 +60,9 @@
   }
   .hub {
     display: flex;
-    flex: 0 1 var(--w-parts);
+    flex: 0 1 auto;
     align-items: center;
+    max-width: var(--w-parts);
     gap: var(--s-2);
     min-width: var(--i-s);
     font: 400 var(--t-caption) / 16px var(--f-ja);

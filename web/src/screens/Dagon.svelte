@@ -29,7 +29,8 @@
   let field = $state<HTMLInputElement>();
   let mark = $state(72);
   let pos = $state<{ x: number; y: number } | null>(null);
-  let open = $state(true);
+  /** Closed until asked for or answering: the canvas stays clear for what the nodes show. */
+  let open = $state(false);
   let text = $state('');
   let answered = $state(false);
   let bubbleEl = $state<HTMLElement>();
@@ -174,6 +175,7 @@
     if (n <= seen) return void (seen = n);
     seen = n;
     if (agent.messages[n - 1].role !== 'dagon') return;
+    open = true;
     answered = true;
     const t = setTimeout(() => (answered = false), REPLIED_MS);
     return () => clearTimeout(t);

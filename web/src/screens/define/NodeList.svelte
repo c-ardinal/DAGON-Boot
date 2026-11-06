@@ -64,7 +64,7 @@
       onkeydown={(e) => (e.key === 'Enter' || e.key === ' ') && (e.preventDefault(), ok && placeNow(p))}
     >
       <Icon name="grip-vertical" size="var(--i-s)" />
-      <span class="n"><span translate="no">{p.name}</span><small translate="no">{sub}</small></span>
+      <span class="n"><span translate="no" title={p.name}>{p.name}</span><small translate="no">{sub}</small></span>
       <span class="used">{n ? DEFINE.count(n) : ''}</span>
     </div>
   </li>

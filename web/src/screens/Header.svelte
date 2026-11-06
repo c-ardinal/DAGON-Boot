@@ -122,9 +122,11 @@
     min-width: 0;
     height: var(--h-bar);
     padding: 0 var(--m-edge);
-    border-bottom: 1px solid var(--c-layer-2);
+    /* Inside the bar's height, so the controls keep their full clearance. */
+    box-shadow: inset 0 -1px 0 var(--c-layer-2);
     background: var(--c-ink);
-    z-index: var(--z-chrome);
+    /* Its popovers open over the canvas's columns. */
+    z-index: calc(var(--z-chrome) + 1);
     white-space: nowrap;
   }
   .left,
@@ -176,7 +178,7 @@
     border-radius: var(--r-full);
   }
   .modes button {
-    height: calc(var(--h-control) - 2 * var(--p-toggle));
+    height: calc(var(--h-control) - 2 * var(--p-toggle) - 2px);
     padding: 0 var(--s-4);
     border: 0;
     border-radius: var(--r-full);

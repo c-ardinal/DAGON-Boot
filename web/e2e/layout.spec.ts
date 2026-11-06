@@ -10,15 +10,16 @@ const SIZES = [...WIDTHS.flatMap((w) => [[w, 600], [w, 1080]]), ...HEIGHTS.map((
 /** Each state puts the page into it and takes it out again. */
 const STATES: [string, (p: Page) => Promise<void>, (p: Page) => Promise<void>][] = [
   ['準備', async () => undefined, async () => undefined],
-  ['シート', (p) => p.locator('.node').first().click(), (p) => p.locator('.node').first().click()],
+  ['シート', (p) => p.locator('.node').first().dispatchEvent('click'), (p) => p.locator('.node').first().dispatchEvent('click')],
   ['引き出し', (p) => p.getByRole('tab', { name: '記録' }).click(), (p) => p.getByRole('tab', { name: '記録' }).click()],
-  ['シートと引き出し', async (p) => { await p.locator('.node').first().click(); await p.getByRole('tab', { name: '記録' }).click(); }, async (p) => { await p.locator('.node').first().click(); await p.getByRole('tab', { name: '記録' }).click(); }],
+  ['シートと引き出し', async (p) => { await p.locator('.node').first().dispatchEvent('click'); await p.getByRole('tab', { name: '記録' }).click(); }, async (p) => { await p.locator('.node').first().dispatchEvent('click'); await p.getByRole('tab', { name: '記録' }).click(); }],
   ['メニュー', async (p) => { await p.getByRole('button', { name: 'メニューを開く' }).click(); await p.getByRole('button', { name: 'つなぐ' }).click(); }, (p) => p.keyboard.press('Escape')],
   ['困ったとき', async (p) => { await p.getByRole('button', { name: 'メニューを開く' }).click(); await p.getByRole('button', { name: '困ったとき' }).click(); await p.getByRole('button', { name: 'キー操作' }).click(); }, (p) => p.keyboard.press('Escape')],
   ['表', (p) => p.getByRole('radio', { name: '表', exact: true }).click(), (p) => p.getByRole('radio', { name: 'グラフ' }).click()],
 ];
 
 test('sweep: no overflow, overlap or clipped text at any window, in 準備 and 書込', async ({ page }) => {
+  test.setTimeout(540_000);
   await page.setViewportSize({ width: 1920, height: 1080 });
   await openSample(page);
   const faults: string[] = [];

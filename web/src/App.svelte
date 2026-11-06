@@ -51,7 +51,7 @@
   import FactoryModal from './screens/FactoryModal.svelte';
   import { answerConsent } from './app/factory.ts';
   import Toast, { type Notice } from './screens/Toast.svelte';
-  import { CONN, FILE, HELP, MENU, NOTICE, SIM, START, fill as fillIn } from './app/copy.ts';
+  import { CONN, FILE, HELP, MENU, NOTICE, SIM, START, TABLE, fill as fillIn } from './app/copy.ts';
   import { devHub } from './serial/devHub.ts';
   import { DEMO_SITE } from './app/site.ts';
   import { serveSim, type SimStand } from './serial/serveSim.ts';
@@ -393,6 +393,7 @@
     projectLayout = { ...projectLayout, positions };
     if (!local) void cli.saveLayout(projectLayout);
   }
+  let tableTab = $state(0);
   /** The free part of the canvas (between the floating columns): what a fit fills. */
   let midEl = $state<HTMLElement>();
 
@@ -1127,6 +1128,7 @@
       items: [
         { label: HELP.heading, run: () => ((helpKeys = false), (helpOpen = true)) },
         { label: MENU.keys, run: () => ((helpKeys = true), (helpOpen = true)) },
+        { label: MENU.wiring, off: d.doc.topo.nodes.length ? null : MENU.off.nothing, run: () => (switchMode('define'), (d.view = 'table'), (tableTab = TABLE.tabs.indexOf('配線'))) },
         { label: MENU.copyLog, off: notes.length ? null : MENU.off.nothing, run: () => void copyText(notes.map((n) => `${n.at} ${n.text}`).join('\n')) },
         { label: MENU.copyUrl, run: () => void copyText(location.href) },
       ],
@@ -1401,7 +1403,7 @@
           <div class="col">
             {#if mode === 'define'}
               <!-- Undo, redo: top-left, where editors keep them and next to what they change. -->
-              <div class="tools">
+              <div class="tools" data-avoid="">
                 <button class="button-icon" data-control="edit" aria-disabled={!d.canUndo} aria-label={DEFINE.undo} title="{DEFINE.undo} (Ctrl+Z)" onclick={() => d.undo()}><span class="layer"><Icon name="undo-2" /></span></button>
                 <button class="button-icon" data-control="edit" aria-disabled={!d.canRedo} aria-label={DEFINE.redo} title="{DEFINE.redo} (Ctrl+Shift+Z)" onclick={() => d.redo()}><span class="layer"><Icon name="redo-2" /></span></button>
                 {#if !partsOpen}
@@ -1419,7 +1421,7 @@
           </div>
           <div class="col mid" bind:this={midEl}>
             {#if mode === 'define' && d.view === 'table'}
-              <div in:fade class="edit-area table" data-control="edit"><Table {d} onaddnode={() => document.querySelector<HTMLElement>('#list-h')?.focus()} /></div>
+              <div in:fade class="edit-area table" data-control="edit"><Table {d} bind:tab={tableTab} onaddnode={() => document.querySelector<HTMLElement>('#list-h')?.focus()} /></div>
             {/if}
             {#if stopOpen && stopNode && op.wentBack}
               {@const running = op.live[stopNode.id]?.hello?.activeVersion}
@@ -1441,7 +1443,7 @@
           <div class="col end">
             {#if mode === 'define'}
               <!-- Graph or table: top-right of what it switches, away from the edit tools. -->
-              <div class="tools seg" role="radiogroup" aria-label="{DEFINE.graph}・{DEFINE.table}">
+              <div class="tools seg" data-avoid="" role="radiogroup" aria-label="{DEFINE.graph}・{DEFINE.table}">
                 <button class="button-icon" role="radio" aria-checked={d.view === 'graph'} aria-label={DEFINE.graph} title={DEFINE.graph} onclick={() => (d.view = 'graph')}><span class="layer"><Icon name="network" /></span></button>
                 <button class="button-icon" role="radio" aria-checked={d.view === 'table'} aria-label={DEFINE.table} title={DEFINE.table} onclick={() => (d.view = 'table')}><span class="layer"><Icon name="table-2" /></span></button>
               </div>
@@ -1458,7 +1460,7 @@
         <div class="dock" data-avoid="">
           <Drawer tabs={drawerTabs} open={drawerTab} onpick={(id) => (drawerTab = id)} onclose={() => (drawerTab = null)} body={drawerBody} />
           <Status
-            hub={connected && hubNode ? `[${hubNode.no}] ${hubNode.name}` : HUB[hub]}
+            hub={connected && hubNode ? `[${hubNode.no}] ${hubNode.name}` : stageWord(HUB[hub])}
             {connected}
             hubAction={connected ? HUB_TOGGLE.disconnect : HUB_TOGGLE.connect}
             onhub={toggleHub}
@@ -1558,8 +1560,8 @@
       back={false}
       reason={next.cause ?? WRITE.failed}
       fix={next.sentence}
-      linked={agent.linked}
-      onask={(at) => askWhy(at, () => (stopClosed = op.failed))}
+      linked={false}
+      onask={() => undefined}
       onclose={() => (stopClosed = op.failed)}
       onmore={() => ((drawerTab = 'log'), (stopClosed = op.failed))}
     >
@@ -1647,17 +1649,17 @@
     height: 100vh;
     overflow: hidden;
   }
-  /* Work: the stage holds everything under the bar. */
+  /* Work: the stage holds everything under the bar; the start page's band, on its way out, takes no room from it. */
   .frame.work {
-    grid-template-areas: 'header' 'canvas';
-    grid-template-rows: auto minmax(0, 1fr);
+    grid-template-rows: auto minmax(0, 1fr) 0;
   }
   /* The canvas spans both rows, so its box does not depend on the dock; the overlay is what is left above the dock. */
   .stage {
     grid-area: canvas;
     position: relative;
     display: grid;
-    grid-template-rows: minmax(0, 1fr) auto;
+    /* The overlay's least: a window's worth of tools over the zoom pill or the focal number; the dock gives way below that. */
+    grid-template-rows: minmax(calc(4 * var(--h-button) + var(--s-7) + var(--s-6)), 1fr) minmax(0, auto);
     grid-template-columns: minmax(0, 1fr);
     min-height: 0;
     overflow: clip;
@@ -1684,7 +1686,11 @@
   .dock {
     grid-area: 2 / 1 / 3 / 2;
     z-index: var(--z-chrome);
+    display: flex;
+    flex-direction: column;
     min-width: 0;
+    min-height: 0;
+    overflow: hidden;
   }
   /* A column: what shares a side, top to bottom; it gives way by scrolling its window, never by covering the next. */
   .col {

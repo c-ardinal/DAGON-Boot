@@ -223,7 +223,7 @@
   const clampZoom = (z: number) => Math.min(ZOOM_LIMITS.max, Math.max(ZOOM_LIMITS.min, z));
 
   /** The explicit fit: the whole graph in the free part of the window, at most `cap`. */
-  export function fit(cap: number = ZOOM_LIMITS.max, smooth = true) {
+  export function fit(cap: number = firstZoom(), smooth = true) {
     if (!boxEl || !config?.nodes.length) return;
     const box = boxEl.getBoundingClientRect();
     const free = freeArea?.() ?? box;
@@ -254,7 +254,7 @@
 
   // The first view of a project, once: afterwards only the user changes it.
   $effect(() => {
-    if (view.set || !boxEl || !nodesOf.length) return;
+    if (view.set || !boxEl || !nodesOf.length || nodesOf.some((n) => !heights[n.id])) return;
     const t = setTimeout(() => untrack(() => !view.set && fit(firstZoom(), false)));
     return () => clearTimeout(t);
   });
@@ -350,15 +350,14 @@
       // Compact cards: the chip sits lower on the link, clear of the card above.
       const mid = along(points, lengths, total * (compact ? 0.7 : 0.5)).p;
       const label = bundleLabel(l);
-      return { l, key, open, start: route[0], strands: offsets.map((o) => strandPath(points, o)), ties, mid, label, name: LINK.name(label, nameOf(l.from), nameOf(l.to), l.addr), skipped: !!config?.nodes.find((n) => n.id === l.to)?.notYet };
+      return { l, key, open, start: route[0], strands: offsets.map((o) => strandPath(points, o)), ties, mid, label, name: LINK.name(LINK.bundle(l.kind, l.wires.length, l.wires.filter((w) => w.shared).length, label.slice(l.kind.length + 1)), nameOf(l.from), nameOf(l.to), l.addr), skipped: !!config?.nodes.find((n) => n.id === l.to)?.notYet };
     }),
   );
 
   function bundleLabel(l: Link): string {
-    // Compact level of detail keeps the bus and its value; the wire count stays in the sheet.
+    // The bus and its value: the strands show their count, and the words for it are in the name and the sheet.
     const value = l.addr || config?.nodes.find((n) => n.id === l.to)?.via.split(' ')[1] || '';
-    if (compact) return [l.kind, value].filter(Boolean).join(' ');
-    return LINK.bundle(l.kind, l.wires.length, l.wires.filter((w) => w.shared).length, value);
+    return [l.kind, value].filter(Boolean).join(' ');
   }
 
   /** Focus stops in screen order: nodes, then link chips. */

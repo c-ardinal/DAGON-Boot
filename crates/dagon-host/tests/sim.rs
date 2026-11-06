@@ -310,6 +310,29 @@ fn version_of_a_stage0_without_its_mark_is_unknown() {
 }
 
 #[test]
+fn the_number_on_the_hubs_screen_is_the_number_every_caller_is_told() {
+    let s = sim();
+    let mut h = host(&s);
+    h.trial_ms = vec![(0, 4000), (SEG, 4000)];
+    let mut told: Option<u8> = None;
+    let mut seen = 0;
+    block_on(
+        h.apply(&release(), &topology(&yaml()), &key().pk, None, &mut |e| {
+            // SHOW follows its event: the screen holds what the last event said.
+            if let (Some(n), Some(screen)) = (told, s.hub.borrow().screen.as_ref()) {
+                assert_eq!(screen.percent, n, "{e:?}");
+                seen += 1;
+            }
+            // The hub's own reboot clears its screen.
+            told = (e.phase != phase::REBOOT).then_some(e.shown);
+            assert!(e.shown < 100 || e.phase == phase::CONFIRM, "{e:?}");
+        }),
+    )
+    .unwrap();
+    assert!(seen > 10, "{seen}");
+}
+
+#[test]
 fn full_apply_then_rollback() {
     let s = sim();
     let mut h = host(&s);

@@ -26,7 +26,7 @@
   $effect(() => {
     const c = card()?.getBoundingClientRect();
     const n = el?.getBoundingClientRect();
-    if (c && n && c.left < n.right && n.left < c.right && c.top < n.bottom && n.top < c.bottom) high = !high;
+    if (c && n && c.left < n.right && n.left < c.right && c.top < n.bottom && n.top < c.bottom) high = true;
   });
 </script>
 

@@ -38,6 +38,7 @@
 <div
   transition:rise
   class="toast"
+  data-avoid=""
   class:error={notice.error}
   role={notice.error ? 'alert' : 'status'}
   title={notice.detail}

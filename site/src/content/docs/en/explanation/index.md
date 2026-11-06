@@ -13,6 +13,11 @@ A node writes the new image to a different slot from the running image and start
 It keeps it only once the new version confirms itself.
 Otherwise it goes back to the previous version by itself.
 
+A normal write does not write an app whose digest equals the running app's.
+When only the boot loader or the recovery agent differs, the previous version stays in the other slot, and the node can go back to it.
+An app with another digest is written, even at the same version.
+Only a recovery chosen by the user rewrites the same app.
+
 ## Events and extensions
 
 Every state change in DAGON is a transition of a state machine, and every

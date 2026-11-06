@@ -5,10 +5,10 @@ editUrl: false
 ---
 
 :::note
-`targets/mcu/*/dagon-mcu.toml`, `targets/boards/*/dagon-board.toml` から生成しています。直接編集せず、`python site/scripts/gen.py` でもう一度生成してください。
+`targets/mcu/*/dagon-mcu.toml`, `targets/boards/*/dagon-board.toml`から生成しています。直接編集せず、`python site/scripts/gen.py`でもう一度生成してください。
 :::
 
-このリリースの `targets/mcu/` のマイコンの定義と、`targets/boards/` のボードの定義です。
+このリリースの`targets/mcu/`のマイコンの定義と、`targets/boards/`のボードの定義です。
 定義のフォルダを足すと行が増えます。どちらのファイルの形式も
 [マイコンとボードの定義](/reference/definitions/)にあります。
 

@@ -62,7 +62,7 @@ def page(lang, title, description, sources, body, english=""):
     `english`: what on the Japanese page stays in the source's English."""
     names = ", ".join(f"`{s}`" for s in sources)
     if lang == "ja":
-        note = f"{names} から生成しています。直接編集せず、`{REGEN}` でもう一度生成してください。"
+        note = f"{names}から生成しています。直接編集せず、`{REGEN}`でもう一度生成してください。"
         if english:
             note += f"\n{english}は元のソースのままで、英語です。"
     else:
@@ -157,18 +157,18 @@ def serve_api(lang="en"):
     table = "\n".join(rows)
     if lang == "ja":
         body = f"""
-どのルートも、`dagon serve` が表示するループバックのアドレスの下にあります。
-`/v1/` へのリクエストには、serve が表示したアドレスの合言葉を
-`Authorization: Bearer <passphrase>` で付けます（無いと 401）。Host と Origin の確認も通ります（通らないと 403）。
+どのルートも、`dagon serve`が表示するループバックのアドレスの下にあります。
+`/v1/`へのリクエストには、serveが表示したアドレスの合言葉を
+`Authorization: Bearer <passphrase>`で付けます（無いと401）。HostとOriginの確認も通ります（通らないと403）。
 
 | メソッド | パス | `dagon demo` | 内容 |
 |---|---|---|---|
 {table}
 
-`{ws}` は WebSocket です。ページが最初のメッセージで合言葉を送ると、serve のイベント
+`{ws}`はWebSocketです。ページが最初のメッセージで合言葉を送ると、serveのイベント
 （作業の進み具合、ログ、結果、質問、親機の受け渡し）を受け取ります。
 
-「{word}」のルートは、`dagon demo` の実行中は 403 を返します。デモは自分の模擬の親機と子機、
+「{word}」のルートは、`dagon demo`の実行中は403を返します。デモは自分の模擬の親機と子機、
 自分のプロジェクトだけを使い、実機、ほかのプロジェクト、エージェントには触れません。
 """
     else:
@@ -190,7 +190,7 @@ A route marked *{word}* answers 403 while `dagon demo` runs: the demo has
 its own simulator and project and never touches real hardware, other
 projects or an agent.
 """
-    return page(lang, "Serve HTTP API", tr(lang, "dagon serve のすべてのルートです。", "Every route of dagon serve, from its router."),
+    return page(lang, "Serve HTTP API", tr(lang, "dagon serveのすべてのルートです。", "Every route of dagon serve, from its router."),
                 ["crates/dagon-cli/src/serve/api.rs"], body)
 
 
@@ -244,12 +244,12 @@ TYPES = {
     "String": ("文字列", "string"),
     "u32": ("整数", "integer"),
     "Vec<String>": ("文字列の配列", "array of strings"),
-    "Vec<WayDef>": ("`[[ways]]` テーブル", "`[[ways]]` tables"),
-    "Transport": ("`[ways.transport]` テーブル", "`[ways.transport]` table"),
+    "Vec<WayDef>": ("`[[ways]]`テーブル", "`[[ways]]` tables"),
+    "Transport": ("`[ways.transport]`テーブル", "`[ways.transport]` table"),
     "SystemVia": ("文字列", "string"),
     "bool": ("真偽値", "boolean"),
-    "Capabilities": ("`[capabilities]` テーブル", "`[capabilities]` table"),
-    "Limits": ("`[limits]` テーブル", "`[limits]` table"),
+    "Capabilities": ("`[capabilities]`テーブル", "`[capabilities]` table"),
+    "Limits": ("`[limits]`テーブル", "`[limits]` table"),
 }
 
 
@@ -288,9 +288,9 @@ def agent_definition(lang="en"):
     rows = "\n".join(builtin)
     if lang == "ja":
         body = f"""
-エージェントは TOML ファイルです。組み込みのものは `dagon` に入っていて、自分のものは
-`~/.dagon/agents/*.toml` に足します（プロジェクトの中には置きません）。知らないキー、
-DAGON に無い種類、使われている id があるファイルは読み込みません。
+エージェントはTOMLファイルです。組み込みのものは`dagon`に入っていて、自分のものは
+`~/.dagon/agents/*.toml`に足します（プロジェクトの中には置きません）。知らないキー、
+DAGONに無い種類、使われているidがあるファイルは読み込みません。
 
 定義の形式: **{fmt}**（`dagon_agent = {fmt}`）。別の番号のファイルは、理由を示して受け付けません。
 
@@ -304,13 +304,13 @@ DAGON に無い種類、使われている id があるファイルは読み込�
 
 ## `[ways.transport]`
 
-`kind` は次のどれかです: {kind_list}。
+`kind`は次のどれかです: {kind_list}。
 
 ### `kind = "command"`
 
 {command}
 
-`system` は次のどれかです: {via_list}。
+`system`は次のどれかです: {via_list}。
 
 ### `kind = "messages-http"`
 
@@ -394,7 +394,7 @@ def boards(lang="en"):
     table_m, table_b = "\n".join(rows_m), "\n".join(rows_b)
     if lang == "ja":
         body = f"""
-このリリースの `targets/mcu/` のマイコンの定義と、`targets/boards/` のボードの定義です。
+このリリースの`targets/mcu/`のマイコンの定義と、`targets/boards/`のボードの定義です。
 定義のフォルダを足すと行が増えます。どちらのファイルの形式も
 [マイコンとボードの定義](/reference/definitions/)にあります。
 
@@ -447,13 +447,13 @@ def cli_markdown():
 
 
 def cli(lang="en"):
-    lead = tr(lang, """`dagon` のすべてのコマンド、引数、オプションです。`dagon <command> --help` が表示するものと同じです。
-多くのコマンドは、既定の値を `./dagon.toml`（または `--config <file>`）から取ります。""",
+    lead = tr(lang, """`dagon`のすべてのコマンド、引数、オプションです。`dagon <command> --help`が表示するものと同じです。
+多くのコマンドは、既定の値を`./dagon.toml`（または`--config <file>`）から取ります。""",
               """Every `dagon` command, its arguments and options, as `dagon <command> --help`
 prints them. Most commands take their defaults from `./dagon.toml` (or
 `--config <file>`).""")
     return page(lang, tr(lang, "コマンド（dagon）", "Command line (dagon)"),
-                tr(lang, "dagon のすべてのコマンドです。", "Every dagon command, from its clap definitions."),
+                tr(lang, "dagonのすべてのコマンドです。", "Every dagon command, from its clap definitions."),
                 ["crates/dagon-cli/src/cli.rs"], f"{lead}\n\n{cli_markdown()}\n", english="コマンドの説明")
 
 
@@ -475,8 +475,8 @@ def contracts(lang="en"):
     table_f, table_c = "\n".join(rows_f), "\n".join(rows_c)
     if lang == "ja":
         body = f"""
-DAGON の部品のあいだの取り決めとその番号、部品ごとのバージョンと、読み書きする形式の番号です。
-どれも `compat.toml` にあるとおりです。変えるときの決まりは
+DAGONの部品のあいだの取り決めとその番号、部品ごとのバージョンと、読み書きする形式の番号です。
+どれも`compat.toml`にあるとおりです。変えるときの決まりは
 [バージョンとリリース](/explanation/versioning/)にあります。
 
 ## 取り決め
@@ -520,7 +520,7 @@ writes, as `compat.toml` holds them. The rules for changing them are in
 # What a `[[doctor]]` entry's probe runs says what kind of tool it checks. The
 # definition reader refuses unknown keys, so the kind is not a key of the entry.
 TOOL_KINDS = {
-    ("rustup", "target"): ("Rust ターゲット", "Rust target"),
+    ("rustup", "target"): ("Rustターゲット", "Rust target"),
     ("rustup", "toolchain"): ("コンパイラ", "compiler"),
     ("espup",): ("コンパイラ", "compiler"),
     ("espflash",): ("書き込みツール", "write tool"),
@@ -551,9 +551,9 @@ def tools(lang="en"):
     table = "\n".join(rows)
     if lang == "ja":
         body = f"""
-Rust のほかに、マイコンごとに要るツールです。マイコンの定義の `[[doctor]]` にあるとおりです。
-`dagon doctor` はプロジェクトの中ではそのマイコンの分を、外ではすべてのマイコンの分を確かめます。
-`dagon doctor --fix` は、管理者の権限が要らないものを入れます。
+Rustのほかに、マイコンごとに要るツールです。マイコンの定義の`[[doctor]]`にあるとおりです。
+`dagon doctor`はプロジェクトの中ではそのマイコンの分を、外ではすべてのマイコンの分を確かめます。
+`dagon doctor --fix`は、管理者の権限が要らないものを入れます。
 
 | マイコン | 種類 | ツール | 入れ方 | 補足 |
 |---|---|---|---|---|
@@ -571,7 +571,7 @@ no administrator rights.
 {table}
 """
     return page(lang, tr(lang, "マイコンごとのツール", "Tools by MCU"),
-                tr(lang, "dagon doctor がマイコンごとに確かめるものです。", "What dagon doctor checks for each MCU, from the MCU definitions."),
+                tr(lang, "dagon doctorがマイコンごとに確かめるものです。", "What dagon doctor checks for each MCU, from the MCU definitions."),
                 ["targets/mcu/*/dagon-mcu.toml"], body)
 
 
@@ -607,8 +607,8 @@ def rust_api(lang="en"):
     table = "\n".join(rows)
     if lang == "ja":
         body = f"""
-ワークスペースのすべての crate の Rust API の文書（rustdoc）を、このサイトと一緒に公開しています。
-下の名前を選ぶと、その crate を開きます。
+ワークスペースのすべてのcrateのRust APIの文書（rustdoc）を、このサイトと一緒に公開しています。
+下の名前を選ぶと、そのcrateを開きます。
 
 | Crate | 中身 |
 |---|---|
@@ -623,8 +623,8 @@ published with these pages; each name below opens its crate.
 |---|---|
 {table}
 """
-    return page(lang, "Rust API", tr(lang, "ワークスペースの crate と rustdoc です。", "The workspace crates and their rustdoc."),
-                ["Cargo.toml"], body, english="rustdoc の本文")
+    return page(lang, "Rust API", tr(lang, "ワークスペースのcrateとrustdocです。", "The workspace crates and their rustdoc."),
+                ["Cargo.toml"], body, english="rustdocの本文")
 
 
 PAGES = {

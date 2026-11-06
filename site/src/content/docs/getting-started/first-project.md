@@ -261,6 +261,6 @@ dagon rollback --node seg
 dagon deploy seg
 ```
 
-そのことを伝えて確かめてから（`--yes` で省略）、ROM ローダで書き換えます。ROM ローダが無いマイコンでは `dagon flash` を案内します。
+そのことを伝えて確かめてから（`--yes` で省略）、ROM ローダで書き込みます。ROM ローダが無いマイコンでは `dagon flash` を案内します。
 
 すべてのコマンドとオプションは `dagon --help` で確認できます。

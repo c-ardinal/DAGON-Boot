@@ -51,8 +51,8 @@ class Readmes(unittest.TestCase):
 
     def test_the_notice_is_word_for_word_where_it_belongs(self):
         for rel, lines in NOTICE_FILES.items():
-            for text in lines:
-                self.assertIn(text, (ROOT / rel).read_text(encoding="utf-8"), rel)
+            # Next to each other, in order: the notice's lines are one notice in a block quote.
+            self.assertIn("\n> ".join(lines), (ROOT / rel).read_text(encoding="utf-8"), rel)
 
     def test_the_japanese_readme_says_microcontroller(self):
         self.assertNotIn("ノード", JA.read_text(encoding="utf-8"))

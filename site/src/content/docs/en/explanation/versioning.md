@@ -17,11 +17,10 @@ code and the package manifests, so it cannot drift.
 
 ## Components
 
-A component is something a user installs, flashes or depends on that
-lives on from release to release: the CLI (with the page it serves), a
-boot loader, an MCU package, a board package, a library crate. Samples
-(including demo firmware), test apps, bring-up and dump programs and test
-images are not components; they stay at `0.0.0` with `publish = false`.
+A component is something a user installs, flashes or depends on that lives on from release to release.
+
+- Components: the CLI (with the page it serves), a boot loader, an MCU definition, a board definition, a library crate
+- Not components: samples (including demo firmware), test apps, bring-up and dump programs and test images. They stay at `0.0.0` with `publish = false`.
 
 A new component starts at `0.1.0`.
 
@@ -33,7 +32,7 @@ Each `[[component]]` entry has:
 |---|---|
 | `name` | The component's name. It is also the commit scope (`feat(<name>):`) and the tag prefix (`<name>-v<version>`) |
 | `version` | Its SemVer version |
-| `paths` | The files it owns. A file belongs to the component with the longest matching path, so a boot loader inside an MCU package's folder is its own component. A file outside every component (README, `scripts/`, `.github/`, samples) never needs a release |
+| `paths` | The files it owns. A file belongs to the component with the longest matching path, so a boot loader inside an MCU definition's folder is its own component. A file outside every component (README, `scripts/`, `.github/`, samples) never needs a release |
 | `packages` | The Cargo packages that carry this version in their own `Cargo.toml`; a component made of several packages gives them all the same version. There is no version shared through the workspace |
 | `formats` | For each contract it uses, the format numbers it reads and writes |
 
@@ -96,7 +95,7 @@ Decide for each component whose files the change touches.
 - A boot loader: an old image or state log format no longer accepted, or a
   device needs its ROM re-provisioned (rewritten through the boot ROM) to
   take the new version.
-- An MCU or board package: its public Rust API, or its definition keys,
+- An MCU or board definition: its public Rust API, or its definition keys,
   changed incompatibly.
 - A library crate: an incompatible public API change, as
   [cargo-semver-checks](https://github.com/obi1kenobi/cargo-semver-checks)
@@ -185,7 +184,7 @@ The same in words:
 | A boot loader fixes a CRC check bug | boot loader fix |
 | Image header format N+1, which boot loaders reading only N cannot read | image header format +1; a boot loader that reads N and N+1: feature; the CLI: breaking only when it stops writing N |
 | A README typo | no release |
-| A board package adds a definition key the definition reader already accepts | board package feature |
+| A board definition adds a definition key the definition reader already accepts | board definition feature |
 | A library crate removes a public function | that library breaking (cargo-semver-checks) |
 | A refactor inside a library with no API or behaviour change | no release |
 | The protocol library adds a command and the CLI starts using it | protocol library feature, CLI feature; components that only rebuild against them keep their versions |

@@ -165,19 +165,16 @@ class MovedDocuments(unittest.TestCase):
 
 
 class Wording(unittest.TestCase):
-    # Pages where 更新 does not mean writing to a node: the word for that is 書き込む.
-    KOUSHIN_ELSEWHERE = {"site/src/content/docs/reference/licenses.md": "the licence text and third-party notes"}
-
     def test_writing_to_a_node_is_not_called_koushin_in_japanese(self):
         pages = [p for p in llms.DOCS.rglob("*.md*") if p.relative_to(llms.DOCS).parts[0] != "en"]
         pages.append(ROOT / "README.md")
         found = []
         for p in pages:
             rel = p.relative_to(ROOT).as_posix()
-            if rel in self.KOUSHIN_ELSEWHERE:
-                continue
-            # The README's opening calls what is written after the first time 更新用イメージ: a kind of image, not the act.
-            found += [f"{rel}:{n}" for n, line in enumerate(p.read_text(encoding="utf-8").splitlines(), 1) if "更新" in line.replace("更新用イメージ", "")]
+            for n, line in enumerate(p.read_text(encoding="utf-8").splitlines(), 1):
+                # The README's opening calls what is written after the first time 更新用イメージ: a kind of image, not the act.
+                if "更新" in (line.replace("更新用イメージ", "") if p.name == "README.md" else line):
+                    found.append(f"{rel}:{n}")
         self.assertEqual(found, [])
 
     # Words the Japanese pages do not use for DAGON's own things.
@@ -198,8 +195,8 @@ class Wording(unittest.TestCase):
         self.assertEqual(found, [])
 
     def test_plugin_is_only_the_claude_code_plugin_in_japanese(self):
-        # DAGON's own word is 拡張. reference/ports.md's lead is written in dagon-catalog and follows when that crate changes.
-        pages = [p for p in llms.DOCS.rglob("*.md*") if p.relative_to(llms.DOCS).parts[0] != "en" and p.name != "ports.md"]
+        # DAGON's own word is 拡張.
+        pages = [p for p in llms.DOCS.rglob("*.md*") if p.relative_to(llms.DOCS).parts[0] != "en"]
         found = [f"{p.name}:{n}" for p in pages for n, line in enumerate(p.read_text(encoding="utf-8").splitlines(), 1)
                  if "プラグイン" in line.replace("Claude Code のプラグイン", "")]
         self.assertEqual(found, [])
@@ -214,10 +211,9 @@ class Wording(unittest.TestCase):
     def test_console_goes_by_its_full_name_on_the_pages(self):
         found = []
         for p in llms.DOCS.rglob("*.md*"):
-            if p.name in ("cli.md", "licenses.md"):  # the command help and third-party text are quoted as they are
+            if p.name == "cli.md":  # the command help, quoted from the clap definitions
                 continue
-            text = re.sub(r"<div><svg.*?</svg></div>", "", p.read_text(encoding="utf-8"), flags=re.S)
-            found += [f"{p.relative_to(ROOT).as_posix()}: {m}" for m in re.findall(r".{0,20}(?<!DAGON )Console.{0,20}", text)]
+            found += [f"{p.relative_to(ROOT).as_posix()}: {m}" for m in re.findall(r".{0,20}(?<!DAGON )Console.{0,20}", p.read_text(encoding="utf-8"))]
         self.assertEqual(found, [])
 
     def test_a_japanese_page_links_a_page_by_its_japanese_title(self):

@@ -19,12 +19,15 @@ peripheral. The model is written for needs that are not known in advance
 (an automotive diagnostic transport, added security processing, a
 display, a different storage), not for a fixed list.
 
-Terms: *boot loader* is the image DAGON runs before the app (stage0 and
-the boot loader on a self-boot MCU; the vendor 2nd stage on a
-vendor-stage2 MCU); *stage0* is the small program that runs first after a reset and picks the boot loader slot to start; *agent* is `dagon-agent` inside the app; *relay* is
-the hub's PC link and sub-node links; *host* is `dagon-host` driven by
-the CLI and `dagon serve`; an *extension* is code or data outside DAGON
-that DAGON runs at one of its extension points. 親機/子機 are hub/node.
+The words of this document:
+
+- *boot loader*: the image DAGON runs before the app (stage0 and the boot loader on a self-boot MCU; the vendor 2nd stage on a vendor-stage2 MCU).
+- *stage0*: the small program that runs first after a reset. It picks the boot loader slot to start.
+- *agent*: `dagon-agent` inside the app.
+- *relay*: the hub's PC link and sub-node links.
+- *host*: `dagon-host` driven by the CLI and `dagon serve`.
+- *extension*: code or data outside DAGON that DAGON runs at one of its extension points.
+- 親機/子機: hub/node.
 
 ## 1. State machines and their events
 

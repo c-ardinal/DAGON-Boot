@@ -261,6 +261,6 @@ dagon rollback --node seg
 dagon deploy seg
 ```
 
-It says so, asks (`--yes` answers), then rewrites the node through its ROM loader. For an MCU with no ROM loader it names `dagon flash`.
+It says so, asks (`--yes` answers), then writes the node through its ROM loader. For an MCU with no ROM loader it names `dagon flash`.
 
 `dagon --help` lists every command and option.

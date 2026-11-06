@@ -393,11 +393,11 @@ const PORTS_INTRO_JA: &str =
     "---\ntitle: ポート\ndescription: DAGON の拡張が使うすべてのポートです。\neditUrl: false\n---\n\n\
      :::note\n`dagon_events::PORTS` から生成しています。直接編集せず、\n\
      `DAGON_BLESS=1 cargo test -p dagon-catalog --test docs` でもう一度生成してください。\n:::\n\n\
-     ポートは、プラグインが置き換えられる DAGON の部品です。置き換えは、一覧のレイヤーで、リンクされた\n\
-     イメージの中だけに効きます。既定は DAGON 自身の実装です。プラグインのマニフェストは、そのポートがある\n\
+     ポートは、拡張が置き換えられる DAGON の部品です。置き換えは、一覧のレイヤーで、リンクされた\n\
+     イメージの中だけに効きます。既定は DAGON 自身の実装です。拡張のマニフェストは、そのポートがある\n\
      レイヤーでだけポートを提供でき、1 つのイメージで 1 つのポートを提供できるのは 1 つだけです。\n\n\
      信頼の区分:\n\n\
-     - *untrusted*: どのプラグインでも使えます。レイヤーのサンドボックスの中で、マニフェストで宣言した能力で\n\
+     - *untrusted*: どの拡張でも使えます。レイヤーのサンドボックスの中で、マニフェストで宣言した能力で\n\
      \x20 動き、DAGON は一覧のサービスを通してだけ呼びます。\n\
      - *untrusted, additive*: untrusted と同じで、足すだけです。DAGON 自身の実装は残ります。\n\
      - *trusted only*: 宣言して署名した、信頼する拡張だけが使えます。特権で動き、サービスは呼びません。\n\n\
@@ -448,12 +448,12 @@ const PORTS_INTRO_EN: &str =
         "---\ntitle: Ports\ndescription: Every port DAGON's extensions use, from the catalogs.\neditUrl: false\n---\n\n\
          :::note\nGenerated from `dagon_events::PORTS`; do not edit. Regenerate with\n\
          `DAGON_BLESS=1 cargo test -p dagon-catalog --test docs`.\n:::\n\n\
-         A port is a part of DAGON that a plug-in replaces, in the layers listed, for\n\
-         the image it is linked into; DAGON's own implementation is the default. A\n\
-         plug-in's manifest may provide a port only in layers the port exists in, and\n\
+         A port is a part of DAGON that an extension replaces, in the layers listed, for\n\
+         the image it is linked into; DAGON's own implementation is the default. An\n\
+         extension's manifest may provide a port only in layers the port exists in, and\n\
          one image has at most one provider per port.\n\n\
          Trust:\n\n\
-         - *untrusted*: any plug-in; it runs in the layer's sandbox with the\n\
+         - *untrusted*: any extension; it runs in the layer's sandbox with the\n\
          \x20 capabilities its manifest declares and calls DAGON only through the\n\
          \x20 services listed.\n\
          - *untrusted, additive*: as untrusted, and it only adds; DAGON's own\n\
@@ -464,6 +464,6 @@ const PORTS_INTRO_EN: &str =
          |---|---|---|---|---|---|\n";
 
 const PORTS_NOT_EN: &str = "\n## Parts that are not ports\n\n\
-         No plug-in replaces these, trusted or not.\n\n\
+         No extension replaces these, trusted or not.\n\n\
          | Part | What it is | Layers | Why not a port |\n\
          |---|---|---|---|\n";

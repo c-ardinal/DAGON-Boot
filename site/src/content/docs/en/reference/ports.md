@@ -9,14 +9,14 @@ Generated from `dagon_events::PORTS`; do not edit. Regenerate with
 `DAGON_BLESS=1 cargo test -p dagon-catalog --test docs`.
 :::
 
-A port is a part of DAGON that a plug-in replaces, in the layers listed, for
-the image it is linked into; DAGON's own implementation is the default. A
-plug-in's manifest may provide a port only in layers the port exists in, and
+A port is a part of DAGON that an extension replaces, in the layers listed, for
+the image it is linked into; DAGON's own implementation is the default. An
+extension's manifest may provide a port only in layers the port exists in, and
 one image has at most one provider per port.
 
 Trust:
 
-- *untrusted*: any plug-in; it runs in the layer's sandbox with the
+- *untrusted*: any extension; it runs in the layer's sandbox with the
   capabilities its manifest declares and calls DAGON only through the
   services listed.
 - *untrusted, additive*: as untrusted, and it only adds; DAGON's own
@@ -50,7 +50,7 @@ Trust:
 
 ## Parts that are not ports
 
-No plug-in replaces these, trusted or not.
+No extension replaces these, trusted or not.
 
 | Part | What it is | Layers | Why not a port |
 |---|---|---|---|

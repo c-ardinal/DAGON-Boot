@@ -99,6 +99,7 @@
   --dur-press: 120ms;
   --dur-flash: 90ms;
   --dur-quick: 160ms; /* small things: a chip, a mark, a hint */
+  --dur-nudge: 160ms; /* a small thing that moves or grows: a port under the pointer */
   --dur-ui: 200ms; /* surfaces and screens */
   --dur-line: 260ms; /* cards and lines moving to a new place */
   --dur-settle: 480ms; /* the water leaving a card: long enough to read the outcome */
@@ -233,6 +234,8 @@
     --enter-shift: 0px;
     --enter-scale: 1;
     --move: 0;
+    --dur-press: 0ms;
+    --dur-nudge: 0ms;
     --dur-line: 0ms;
     --dur-rise: 0ms;
     --dur-ui: var(--dur-reduced);

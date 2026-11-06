@@ -87,7 +87,7 @@
     display: block;
     height: 100%;
     background: var(--c-water);
-    transition: width var(--dur-ui) var(--ease-steady);
+    transition: width var(--dur-rise) var(--ease-steady);
   }
   ul,
   ol {

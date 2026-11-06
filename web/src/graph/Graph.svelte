@@ -664,12 +664,12 @@
           >
         {/if}
         {#if n.role !== 'hub' || linked}
-          <span in:fade|global class="port in" class:linked aria-hidden="true" style:left="{at(n.id).x + NODE_W / 2}px" style:top="{at(n.id).y}px" class:ok={wire !== null && wire.from !== n.id && reasons[n.id] === null}></span>
+          <span transition:fade|global class="port in" class:linked aria-hidden="true" style:left="{at(n.id).x + NODE_W / 2}px" style:top="{at(n.id).y}px" class:ok={wire !== null && wire.from !== n.id && reasons[n.id] === null}></span>
         {/if}
         {#if onlink}
           <!-- svelte-ignore a11y_no_static_element_interactions -->
           <span
-            in:fade|global
+            transition:fade|global
             class="port out"
             aria-hidden="true"
             title={LINK.portOut(n.name)}
@@ -1201,7 +1201,7 @@
     background: var(--c-ink);
     pointer-events: none;
     transition:
-      transform var(--dur-quick) var(--ease-out),
+      transform var(--dur-nudge) var(--ease-out),
       border-color var(--dur-quick) var(--ease-out),
       background-color var(--dur-quick) var(--ease-out);
   }

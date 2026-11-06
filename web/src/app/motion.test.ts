@@ -103,6 +103,27 @@ describe('reduced motion turns every transition into an immediate or fade-only c
     for (const d of ['--dur-ui', '--dur-quick', '--dur-settle']) expect(reduced[d], d).toBe('var(--dur-reduced)');
   });
 
+  test('nothing travels by a CSS transition under it: what moves takes a duration reduced motion makes 0', () => {
+    const reduced = reducedTokens();
+    const place = baseValue('--t-place');
+    // translate and scale come only from tokens that reduced motion makes nothing.
+    const moving = /^(?:transform|rotate|left|right|top|bottom|width|height|inline-size|block-size|d|cx|cy|r|x|y|zoom|margin(?:-\w+)?|--shown)\b/;
+    for (const rel of sources) {
+      if (rel === 'styles/tokens.css') continue;
+      for (const { prop, value } of motionDecls(cssOf(rel))) {
+        if (prop !== 'transition' || value.trim() === 'none') continue;
+        for (const part of value.replace('var(--t-place)', place).split(',')) {
+          const p = part.trim();
+          if (!moving.test(p)) continue;
+          const dur = /var\((--dur-[\w-]+)\)/.exec(p)?.[1] ?? '';
+          expect(reduced[dur], `${rel}: ${p}`).toBe('0ms');
+        }
+      }
+    }
+    // Moved by a one-shot of its own: the same rule would not see it, so none is left outside the tokens.
+    expect(cssOf('styles/base.css')).not.toMatch(/@keyframes/);
+  });
+
   test.each([
     ['rise', () => rise({} as Element)],
     ['fade', () => fade({} as Element)],
@@ -128,6 +149,12 @@ describe('reduced motion turns every transition into an immediate or fade-only c
     expect(waterEnd(el, { confirmed: true }).css!(1, 0)).toContain('translateY(40%)');
     expect(waterEnd(el, { confirmed: true }).css!(0, 1)).toContain('translateY(0%)');
     expect(waterEnd(el, { confirmed: false }).css!(0, 1)).toContain('translateY(100%)');
+  });
+});
+
+describe('the canvas view never changes by itself', () => {
+  test('its zoom is not animated', () => {
+    expect(cssOf('graph/Graph.svelte')).not.toMatch(/transition[^;]*\bzoom\b/);
   });
 });
 

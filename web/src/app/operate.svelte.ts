@@ -22,6 +22,7 @@ import {
   type VersionResp,
   type UpdateEvent,
 } from '../wasm/dagon.ts';
+import type { RollbackRecord } from './agent.svelte.ts';
 import { FAILURE_BAND } from './band.ts';
 import { ConnectError, wasmReady } from './connect.ts';
 import { ANNOUNCE, FILE } from './copy.ts';
@@ -253,6 +254,11 @@ export class Operate {
   keepFailed = $state(false);
   /** What the last update, recovery or rollback left (done). */
   finished = $state<Finish | null>(null);
+  private backRecord = $state.raw<RollbackRecord | null>(null);
+  /** The record of the write that went back, while the node stays stopped on it; else null. */
+  get rollbackRecord(): RollbackRecord | null {
+    return this.failed && this.progress[this.failed]?.stage === 'previous' ? this.backRecord : null;
+  }
   /** Nodes on the chosen release's version since it was chosen (an update, its rest, a recovery). */
   private updated = new Set<string>();
   /** The run hubRestarting / reconnectNeeded belong to, so done says what it did. */
@@ -734,6 +740,22 @@ export class Operate {
     const f = why?.running != null ? { stage: 'previous' as const } : failureStage(why?.reason ?? 'NO ANSWER');
     // A stopped update has no "cannot fix" yet: an unnamed failure is a refusal of the update.
     this.stopAt(n.id, f.stage === 'cannotFix' ? 'refused' : f.stage, f.reason);
+    if (why?.running != null) void this.recordBack(n.id, why.running, why.reason);
+  }
+
+  /** Keeps what a write that went back left: the versions and reason at once, then what the node reports now. */
+  private async recordBack(id: string, returned: number, reason: string): Promise<void> {
+    const sent = this.sentVersion[id] ?? this.fileVersions[id];
+    const n = this.reach.find((x) => x.id === id);
+    if (sent === undefined || !n) return;
+    const record: RollbackRecord = { node: id, failed_version: versionText(sent), returned_version: versionText(returned), reason, node_state: null };
+    this.backRecord = record;
+    try {
+      const { hello, status } = await this.call((h) => h.status(n.target.kind, n.target.addr));
+      if (this.backRecord === record) this.backRecord = { ...record, node_state: { trial: hello.trial, last_reason: status.lastReason } };
+    } catch {
+      // A node that does not answer STATUS: the record says its state is not known.
+    }
   }
 
   private stopAt(id: string, stage: Progress['stage'], reason?: string): void {
@@ -835,7 +857,11 @@ export class Operate {
     const hub = this.reach.find((n) => n.role === 'hub')!;
     const mine = r.outcome === 'confirmed' || (r.outcome === 'notOnTrial' && r.version === this.sentVersion[hub.id]);
     this.alert = '';
-    if (!mine) return this.stopAt(hub.id, 'previous');
+    if (!mine) {
+      this.stopAt(hub.id, 'previous');
+      void this.recordBack(hub.id, r.version, 'ROLLED BACK');
+      return;
+    }
     this.progress[hub.id] = { stage: 'done', percent: 100 };
     if (this.running === 'update') {
       this.updated.add(hub.id);

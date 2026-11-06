@@ -37,6 +37,21 @@ describe('DAGON and its agent (site/src/content/docs/reference/agent-api.md)', (
     expect(a.thinking).toBe(false);
   });
 
+  test('the record of a write that went back goes with every question while there is one, and not otherwise', async () => {
+    const sent: { body: Record<string, unknown> }[] = [];
+    const a = new Agent(async (_m, path, body) => (path === 'agent' ? json({ linked: true }) : (sent.push({ body: body as Record<string, unknown> }), json({ answer: 'はい。' }))));
+    await a.refresh();
+    await a.ask('次は？', 'next');
+    const rollback = { node: 'watch', failed_version: '1.1.0', returned_version: '1.0.0', reason: 'ROLLED BACK', node_state: { trial: false, last_reason: 3 } };
+    let record: typeof rollback | null = rollback;
+    a.record = () => record;
+    await a.ask('失敗の理由を聞く', 'failure');
+    record = null;
+    await a.ask('次は？', 'next');
+    expect(sent.map((s) => 'rollback' in s.body)).toEqual([false, true, false]);
+    expect(sent[1].body.rollback).toEqual(rollback);
+  });
+
   test('not linked: a question sends nothing and says how to link (serve refuses it too)', async () => {
     const sent: string[] = [];
     const a = new Agent(async (_m, path) => (sent.push(path), json({ linked: false })));

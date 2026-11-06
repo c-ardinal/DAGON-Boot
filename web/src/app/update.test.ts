@@ -1,5 +1,5 @@
 import { readFileSync } from 'node:fs';
-import { describe, expect, test } from 'vitest';
+import { describe, expect, test, vi } from 'vitest';
 import type { LinkClock } from '../serial/hostLink.ts';
 import { MockTransport, SAMPLE_HUB_HELLO, type MockOptions } from '../serial/mock.ts';
 import { PHASE, versionText, type UpdateEvent } from '../wasm/dagon.ts';
@@ -450,6 +450,52 @@ describe('update from the page with dagon-host apply against the mock hub', () =
     expect([op.state, op.stuck?.id, op.needUpdate]).toEqual(['nodesSilent', 'seg', 0]);
     const b = bandOf(op.state, op.ctx, { stuck: op.recoverTarget?.name });
     expect([b.primary?.label, b.secondary, b.sentence]).toEqual([BUTTON_FOR.recover('7セグ'), [], BAND.M62.sentence]);
+  }, 60_000);
+
+  test('a write that goes back leaves its record: the node, both versions, the reason and what the node reports then', async () => {
+    const { op } = await sentTo({ fallBack: ['uart'] });
+    op.takeFile('sample-1.1.0.dgb', RELEASE);
+    await op.update();
+    expect([op.state, op.failed, op.progress.watch.stage]).toEqual(['stopped', 'watch', 'previous']);
+    await vi.waitFor(() => expect(op.rollbackRecord?.node_state).not.toBeNull());
+    expect(op.rollbackRecord).toEqual({
+      node: 'watch',
+      failed_version: '1.1.0',
+      returned_version: '1.0.0',
+      reason: 'ROLLED BACK',
+      node_state: { trial: false, last_reason: 3 },
+    });
+  }, 60_000);
+
+  test('the record of a hub found back on its previous version when chosen again', async () => {
+    const { t, op } = await sentTo({ hubAway: Infinity, fallBack: ['hub'] });
+    op.takeFile('sample-1.1.0.dgb', RELEASE);
+    await op.update();
+    t.replug();
+    await op.reconnectHub();
+    expect(op.rollbackRecord).toMatchObject({ node: 'hub', failed_version: '1.1.0', returned_version: '1.0.0', reason: 'ROLLED BACK' });
+  }, 60_000);
+
+  test('no record when no write went back, and none once the page has moved on from one', async () => {
+    const { op } = await sentTo();
+    op.takeFile('sample-1.1.0.dgb', RELEASE);
+    await op.update();
+    expect(op.rollbackRecord).toBeNull();
+
+    const back = await sentTo({ fallBack: ['uart'] });
+    back.op.takeFile('sample-1.1.0.dgb', RELEASE);
+    await back.op.update();
+    expect(back.op.rollbackRecord).not.toBeNull();
+    back.op.reset();
+    expect(back.op.rollbackRecord).toBeNull();
+  }, 60_000);
+
+  test('a node that stops without going back leaves no record', async () => {
+    const { op } = await sentTo({ refuse: { uart: 0x07 } });
+    op.takeFile('sample-1.1.0.dgb', RELEASE);
+    await op.update();
+    expect([op.state, op.progress.watch.stage]).toEqual(['stopped', 'refused']);
+    expect(op.rollbackRecord).toBeNull();
   }, 60_000);
 
   test('done says all nodes run the new version only when they all do', async () => {

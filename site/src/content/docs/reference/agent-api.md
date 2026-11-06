@@ -177,6 +177,22 @@ Body:
   characters of `A-Z a-z 0-9 . _ -` and space).
 - `history` (optional): up to 10 turns, oldest first, `role` `user` | `dagon`,
   `text` 1 to 2000 characters (text only).
+- `rollback` (optional, sent while the page shows a write that went back to the
+  previous version): the record of that write. Only these fields are taken:
+
+  ```json
+  {
+    "node": "watch",
+    "failed_version": "1.1.0",
+    "returned_version": "1.0.0",
+    "reason": "ROLLED BACK",
+    "node_state": { "trial": false, "last_reason": 3 }
+  }
+  ```
+
+  `node`, the versions and `reason` are plain names like ids. `node_state` is what
+  the node's STATUS reported at that moment (`last_reason`: its code, 0 to 255),
+  or `null` when the node did not answer it.
 
 200:
 
@@ -222,8 +238,11 @@ the allow-listed facts of the definitions in use, the reply format) and a user
 text (the question as one JSON document: the topology as plain data with
 comments dropped and every string or key that is not a plain name as
 `project-text`, its check results with those words hidden, the selection, the
-kind and outcome of the last 5 finished jobs, the history and the question;
-the user's words are data in it). Never: keys, file paths, commands, logs, job
+kind and outcome of the last 5 finished jobs, the `rollback` record when the
+request has one (with `last_reason` in words), the history and the question;
+the user's words are data in it). The system text tells the agent to explain a
+write that went back from that record only and to say what it cannot see, never
+inventing a reason. Never: keys, file paths, commands, logs, job
 errors. A topology with any hidden value gets no file proposal (the answer
 then ends with 「この構成には DAGON に送らなかった値があるため、変更の案は出していません。」 and
 no repair call is made); a proposal that contains `project-text` is refused

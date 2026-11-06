@@ -41,6 +41,7 @@
   import ZoomPill from './screens/ZoomPill.svelte';
   import SkeletonModal from './screens/SkeletonModal.svelte';
   import Modal from './screens/Modal.svelte';
+  import StopModal from './screens/StopModal.svelte';
   import FactoryModal from './screens/FactoryModal.svelte';
   import { answerConsent } from './app/factory.ts';
   import Toast, { type Notice } from './screens/Toast.svelte';
@@ -417,6 +418,12 @@
   function askDagon(text: string, kind: AskKind, at: Element) {
     if (stopped('ask', at)) return;
     void agent.ask(text, kind, selection());
+  }
+  /** The stop modal's 失敗の理由を聞く: it closes, because a modal's scrim would cover DAGON's answer. */
+  function askWhy(at: Element) {
+    if (stopped('ask', at)) return;
+    stopClosed = op.failed;
+    void agent.ask(BUILD.askAgent, 'failure', selection());
   }
   /** 『反映する』: the proposal goes in as one 構成 edit (undoable) and is saved like any edit. */
   function applyProposal(i: number, at: Element) {
@@ -1006,6 +1013,7 @@
   d.guard = (k) => stopped(k);
   cli.guard = (k) => stopped(k);
   agent.guard = (k) => stopped(k);
+  agent.record = () => op.rollbackRecord;
   /** Band actions as lock-table operations. */
   const CONTROL_OF: Partial<Record<Action, Control>> = {
     chooseFile: 'file', updateResponding: 'file', otherFile: 'file', useLatest: 'update', update: 'update',
@@ -1525,12 +1533,17 @@
   {#if stopOpen && stopNode}
     {@const back = op.progress[stopNode.id]?.stage === 'previous'}
     {@const running = op.live[stopNode.id]?.hello?.activeVersion}
-    <Modal title={WRITE.run} chip={{ text: back ? WRITE.previous : WRITE.failed, kind: back ? 'info' : 'error' }} target={`[${stopNode.no}] ${stopNode.name}`} onclose={() => (stopClosed = op.failed)} onmore={() => ((drawerTab = 'log'), (stopClosed = op.failed))}>
-      <h3 class="modal-h">{NOTICE.reason}</h3>
-      <p>{back && running !== undefined ? fillIn(WRITE.rolled.reason, { version: versionText(running) }) : (next.cause ?? WRITE.failed)}</p>
-      <h3 class="modal-h">{NOTICE.fix}</h3>
-      <p>{back ? WRITE.rolled.next : next.sentence}</p>
-      {#snippet actions()}
+    <StopModal
+      target={`[${stopNode.no}] ${stopNode.name}`}
+      {back}
+      reason={back && running !== undefined ? fillIn(WRITE.rolled.reason, { version: versionText(running) }) : (next.cause ?? WRITE.failed)}
+      fix={back ? WRITE.rolled.next : next.sentence}
+      linked={agent.linked}
+      onask={askWhy}
+      onclose={() => (stopClosed = op.failed)}
+      onmore={() => ((drawerTab = 'log'), (stopClosed = op.failed))}
+    >
+      {#snippet buttons()}
         {#each band.secondary as b (b.label)}
           <button class="button-secondary" data-control={CONTROL_OF[b.action]} aria-disabled={!RUNS.has(b.action)} onclick={() => RUNS.has(b.action) && ((stopClosed = op.failed), act(b.action))}>{b.label}</button>
         {/each}
@@ -1539,7 +1552,7 @@
           <button class="button-primary" data-control={CONTROL_OF[p.action]} aria-disabled={!RUNS.has(p.action)} onclick={() => RUNS.has(p.action) && ((stopClosed = op.failed), act(p.action))}>{p.label}</button>
         {/if}
       {/snippet}
-    </Modal>
+    </StopModal>
   {/if}
   {#if buildFailureOpen}
     {@const failed = [buildJob, signJob, releaseJob].find((j) => j?.state === 'failed')}

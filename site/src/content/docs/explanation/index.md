@@ -31,7 +31,7 @@ DAGON が読み書きする形式、プロトコル、API には、どれも番�
 | Host Extension Chain | ホストの拡張を順に呼ぶチェーン |
 | Action Definitions | イベントの後で動かすアクションのデータ |
 | Agent Definitions | エージェントとそのつなぎ方のデータ |
-| Project Generator | — |
+| Project Generator | 構成からプロジェクトを作る（`dagon new`、`dagon gen`） |
 | Definition Registry | 対応ボードの表を持つ |
 | Topology Check | 構成の YAML を読み、検証規則を適用する |
 | Node Build | dagon.toml の `[build.<id>]` に従ってノードごとに cargo build する |

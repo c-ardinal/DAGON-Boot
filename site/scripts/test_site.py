@@ -201,6 +201,8 @@ class Architecture(unittest.TestCase):
         a = gen.architecture
         for name, lines in a.COMPONENTS.items():
             self.assertEqual(len(lines), 2, name)
+            for line in lines:
+                self.assertNotIn(line.strip(), ("", "—", "-", "–"), f"{name} has no line")
         for lang in gen.LANGS:
             svg = a.node_svg(lang).split('<g class="legend">')[0]
             # a long name is drawn over two lines

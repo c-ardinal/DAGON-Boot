@@ -61,7 +61,7 @@ COMPONENTS = {
     "Host Extension Chain": ("ホストの拡張を順に呼ぶチェーン", "The chain of host extensions, in order"),
     "Action Definitions": ("イベントの後で動かすアクションのデータ", "Data for actions run after an event"),
     "Agent Definitions": ("エージェントとそのつなぎ方のデータ", "Data for agents and their ways"),
-    "Project Generator": ("—", "—"),
+    "Project Generator": ("構成からプロジェクトを作る（`dagon new`、`dagon gen`）", "Renders a project from the 構成 (`dagon new`, `dagon gen`)"),
     "Definition Registry": ("対応ボードの表を持つ", "Holds the supported-board table"),
     "Topology Check": ("構成の YAML を読み、検証規則を適用する", "Reads the topology YAML and applies the validation rules"),
     "Node Build": ("dagon.toml の `[build.<id>]` に従ってノードごとに cargo build する", "Runs cargo build per node from `[build.<id>]` in dagon.toml"),

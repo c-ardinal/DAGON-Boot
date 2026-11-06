@@ -34,7 +34,7 @@ The figure below is DAGON's software design.
 | Host Extension Chain | The chain of host extensions, in order |
 | Action Definitions | Data for actions run after an event |
 | Agent Definitions | Data for agents and their ways |
-| Project Generator | — |
+| Project Generator | Renders a project from the 構成 (`dagon new`, `dagon gen`) |
 | Definition Registry | Holds the supported-board table |
 | Topology Check | Reads the topology YAML and applies the validation rules |
 | Node Build | Runs cargo build per node from `[build.<id>]` in dagon.toml |

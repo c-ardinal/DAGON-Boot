@@ -21,6 +21,8 @@ import subprocess
 import sys
 import tomllib
 
+import architecture
+
 ROOT = pathlib.Path(__file__).resolve().parents[2]
 OUT = ROOT / "site" / "src" / "content" / "docs"
 REGEN = "python site/scripts/gen.py"
@@ -673,6 +675,7 @@ REGIONS = [
     ("reference/definitions.md", "dagon-topology's McuDef", lambda lang: def_rows(lang, DEFS / "mod.rs", "McuDef")),
     ("reference/definitions.md", "dagon-topology's Isolation", lambda lang: def_rows(lang, DEFS / "isolation.rs", "Isolation", "isolation")),
     ("reference/definitions.md", "dagon-topology's BoardDef", lambda lang: def_rows(lang, DEFS / "mod.rs", "BoardDef")),
+    ("explanation/index.md", "site/scripts/architecture.py", lambda lang: f"<div>{architecture.svg(lang)}</div>\n"),
 ]
 
 
@@ -706,6 +709,14 @@ def main(argv):
             else:
                 path.parent.mkdir(parents=True, exist_ok=True)
                 path.write_text(text, encoding="utf-8", newline="\n")
+    for lang in LANGS:
+        # What the READMEs show. A test run writes to a temporary OUT, never here.
+        path = ROOT / "assets" / "architecture" / f"architecture-{lang}.svg"
+        if check and (not path.is_file() or path.read_text(encoding="utf-8") != architecture.svg(lang)):
+            stale.append(path.as_posix())
+        elif not check and OUT == ROOT / "site" / "src" / "content" / "docs":
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(architecture.svg(lang), encoding="utf-8", newline="\n")
     unused = sorted(k for k in set(i18n()) - USED)
     if MISSING or unused:
         print(f"{I18N.relative_to(ROOT).as_posix()}: add a Japanese value for the first list, drop the second")

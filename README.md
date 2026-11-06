@@ -31,13 +31,20 @@ DAGON は、プロや専門家が使う分散マイコンの設計を、AI と�
 
 DAGON の違いは、種類の違うマイコンが混ざっていても、構成を描くだけで扱えることです。開発者は、ボードを選び、つなぎ方を描き、アプリを書きます。起動のしくみ、フラッシュの配置、署名、書き込みの手順は DAGON が受け持ちます。
 
+## ドキュメント
+
+- [はじめに](https://c-ardinal.github.io/DAGON-Boot/doc/getting-started/): 試す、入れる、はじめから書き込みまで
+- [やり方](https://c-ardinal.github.io/DAGON-Boot/doc/how-to/): 自分のボード、つながりの差し替え、AI の手助け
+- [しくみ](https://c-ardinal.github.io/DAGON-Boot/doc/explanation/): 言葉の意味、イベントと拡張、バージョンの決まり
+- [リファレンス](https://c-ardinal.github.io/DAGON-Boot/doc/reference/): コマンド、HTTP API、イベント、定義の形式、Rust API
+
 ## できること
 
 - **構成を描く**: ブラウザで動く DAGON Console で、ノードとそのつながりをグラフに描きます。編集のたびに配線やピンの問題を確かめます。
 - **ビルドできるプロジェクトを作る**: `dagon new` と `dagon gen` が、ノードごとに起動処理と配線と、自分のコードを書く空の `app.rs` を持つ Rust の crate を作ります。
 - **まとめて書き込む**: `dagon deploy` は、ビルド、署名、パッケージ作成、書き込みまでを 1 回で行います。Console では、ノードごとの進み具合を見ながら書き込めます。
 - **失敗しても戻る**: イメージはすべて署名付きです。ノードは新しいバージョンを試しに起動し、確定できなければ前のバージョンに戻ります。`dagon rollback` で手でも戻せます。
-- **ブートコアにも書き込む**: ブートコア自体も 2 つのスロットに置き、アプリと同じように書き込みます（RP2040、STM32F401）。新しいものが動かなければ前のものに戻ります。
+- **ブートローダにも書き込む**: ブートローダ自体も 2 つのスロットに置き、アプリと同じように書き込みます（RP2040、STM32F401）。新しいものが動かなければ前のものに戻ります。
 - **拡張する**: DAGON のソースを変えずに、イベントを受け取る、判断に答える、部品（ポート）を置き換える拡張を足せます。
 - **AI に頼る**: 新しいプロジェクトには Claude Code 用の指示とスキルが入っています。`dagon ai link` で、同意のうえエージェントとつなげます。API キーは OS の資格情報ストアに保管します。
 
@@ -89,6 +96,8 @@ dagon serve
 
 ## しくみ
 
+<img src="assets/architecture/architecture-ja.svg" alt="DAGON の層の図: ノード側はアプリ、DAGON のサービス、ブート、マイコンとボード、ハードウェアの順で、PC 側は DAGON Console、dagon コマンド、dagon-host など" width="100%">
+
 ```mermaid
 flowchart LR
   PC["PC<br>dagon / DAGON Console"] -- USB --> HUB["親機<br>RP2040"]
@@ -101,7 +110,7 @@ flowchart LR
 3. ノードは新しいイメージを動いているものの隣に書き、試しに起動します。
 4. 自己確認が通れば確定し、通らなければウォッチドッグのリセットで前のバージョンに戻ります。
 
-実機で確かめた範囲と、DAGON がしないことは[制限事項](https://c-ardinal.github.io/DAGON-Boot/doc/explanation/limitations/)にあります。
+DAGON がしないことは[制限事項](https://c-ardinal.github.io/DAGON-Boot/doc/explanation/limitations/)にあります。
 
 ## 依存しているものと外部のデータ
 
@@ -112,10 +121,3 @@ flowchart LR
 - マイコンとボードの定義の値: 各社のデータシートとボードの資料から取り、定義ファイルのコメントに出典を書いています
 
 全部の一覧とライセンスは[ライセンス](https://c-ardinal.github.io/DAGON-Boot/doc/reference/licenses/)にあります。
-
-## ドキュメント
-
-- [はじめに](https://c-ardinal.github.io/DAGON-Boot/doc/getting-started/): 試す、入れる、はじめから書き込みまで
-- [やり方](https://c-ardinal.github.io/DAGON-Boot/doc/how-to/): 自分のボード、つながりの差し替え、AI の手助け
-- [しくみ](https://c-ardinal.github.io/DAGON-Boot/doc/explanation/): 言葉の意味、イベントと拡張、バージョンの決まり
-- [リファレンス](https://c-ardinal.github.io/DAGON-Boot/doc/reference/): コマンド、HTTP API、イベント、定義の形式、Rust API

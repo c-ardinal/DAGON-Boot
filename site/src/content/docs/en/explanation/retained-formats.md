@@ -71,7 +71,7 @@ bytes at offsets 1, 2, …, 23.
 The MCU definition's `[boot.record]` declares the region (at most
 `RECORD_MAX` = 4096 bytes), one ring per writer as a byte range, in boot
 order, and the entropy word (2.3). Ring 0 belongs to the first DAGON
-stage (stage0 where the MCU has one), ring 1 to the next stage, and so
+stage (stage0, the small program that runs first after a reset, where the MCU has one), ring 1 to the next stage, and so
 on, at most 16 writers. A ring holds `bytes / 28` entry slots, from 2 to
 256. Rings do not overlap and lie inside the region; reserved addresses
 of a register file lie outside every ring. The same definition reaches
@@ -281,7 +281,7 @@ writer's `event` number, carried in each entry.
 
 ### 3.1 Cells
 
-One cell per image kind that runs sandboxed calls: the boot core's cell
+One cell per image kind that runs sandboxed calls: the boot loader's cell
 and the app's cell (the app and relay layers share it; at most one
 sandboxed call is open per core). A cell is an arm slot followed by
 record slots (`[boot.record] fuse` declares both cells and their slot
@@ -359,9 +359,9 @@ Each layer's start, before it runs any extension, frees what is done
    verdict in another cell are held (not armed this run); other cells'
    trips are reported, never acted on.
 
-So an app or relay lockup survives the boot core's start unchanged (the
-boot core only stores its verdict in its own cell) and is tripped by the
-app's start; a boot-core lockup is tripped by the boot core's next start.
+So an app or relay lockup survives the boot loader's start unchanged (the
+boot loader only stores its verdict in its own cell) and is tripped by the
+app's start; a boot-loader lockup is tripped by the boot loader's next start.
 A reset at any byte of arming, of the call, of the return or of the
 disarm never trips a call that returned; a reset during the start keeps
 the flag and the armed record, so the next start repeats the decision.
@@ -370,7 +370,7 @@ the flag and the armed record, so the next start repeats the decision.
 
 DAGON has no request that clears a trip yet: neither the protocol nor the CLI
 has one. This is what the format's model holds for one: the agent frees an app
-trip in its own cell, or stores a clear request for a boot-core trip; the boot
+trip in its own cell, or stores a clear request for a boot-loader trip; the boot
 core's next start turns the trip into clear-done, and each side frees its
 record when it sees the other's. One request clears one trip. Nothing else
 clears a trip whose id is installed.
@@ -494,14 +494,14 @@ fixed cases in `tests/fixed.rs` name the property they guard.
 | P20 | A layer stores only into its own fuse cell. |
 | P21 | Distinct call sites have distinct fuse ids. |
 | P22 | A trip names only a call that locked up; a lockup is tripped by its layer's next completed start. |
-| P23 | The boot core's run leaves the app's cell unchanged; the app's start acts on it. |
+| P23 | The boot loader's run leaves the app's cell unchanged; the app's start acts on it. |
 | P24 | A trip whose id is no longer installed is freed by its layer's start; a new build runs again. |
 | P25 | Records of another fuse layout are never acted on. |
 | P26 | A trip of an installed id disappears only by a clear request, which exists only in the model (3.6). |
 
-## 7. Boot core trial cell
+## 7. Boot loader trial cell
 
-Stage0 counts the starts of a pending boot core in two retained words,
+Stage0 counts the starts of a pending boot loader in two retained words,
 not in flash: stage0 then has no flash writer (it is never written again, so it
 holds as little code as it can), and a writer bug cannot turn into a
 stage0 that never starts anything. `dagon_core::bootcore` is the codec and
@@ -525,7 +525,7 @@ word matches with probability 2^-28, and a match only makes stage0 give
 the core up sooner.
 
 The executable model is `dagon-retained-model`'s `world_trial`: the
-production codec and stage0's and the boot core's rules
+production codec and stage0's and the boot loader's rules
 (`bootcore::choose`, `settle`) over the two words, new cores set pending
 good or broken (a broken core passes stage0's check and fails its own),
 a reset or a power loss (the cell then cleared or random) after any store
@@ -543,7 +543,7 @@ The MCU packages' sweeps (`a_power_cut_at_every_flash_step_leaves_a_bootable_cor
 add the flash side: a cut at every flash operation of a write,
 compaction of the state log included. A cell that does not hold what is
 written to it at all is found by `bootcore::cell_holds`, run by the
-started boot core and by the app: such a node takes no boot core, and a
+started boot loader and by the app: such a node takes no boot loader, and a
 pending core that finds it so rolls itself back. A cell with a word that
 holds a count was written by stage0, so it holds, and the check writes
 nothing over it; only a cell counting nothing gets a probe (a value no

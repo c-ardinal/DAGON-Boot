@@ -31,13 +31,20 @@ Writing is safe. Every image is signed, a node runs a new version on trial, and 
 
 What sets DAGON apart is handling mixed MCUs by drawing the 構成 (the setup). As a developer you choose the boards, draw how they connect and write your application. DAGON takes care of start-up, flash layout, signing and the writing steps.
 
+## Documentation
+
+- [Getting started](https://c-ardinal.github.io/DAGON-Boot/doc/en/getting-started/): try it, install, from a new project to a new version
+- [How-to guides](https://c-ardinal.github.io/DAGON-Boot/doc/en/how-to/): your own board, swapping a link, AI help
+- [Explanation](https://c-ardinal.github.io/DAGON-Boot/doc/en/explanation/): words, events and extensions, versioning rules
+- [Reference](https://c-ardinal.github.io/DAGON-Boot/doc/en/reference/): commands, HTTP API, events, definition formats, Rust API
+
 ## Features
 
 - **Draw the setup**: DAGON Console, in your browser, shows the nodes and their links as a graph and checks wiring and pins as you edit.
 - **Get a project that builds**: `dagon new` and `dagon gen` give every node a Rust crate with its start-up, its wiring and an empty `app.rs` for your code.
 - **Write in one go**: `dagon deploy` builds, signs, packages and writes in one command. In the Console you write with each node's progress in view.
 - **Go back when it fails**: every image is signed. A node runs a new version on trial and goes back when it cannot be confirmed; `dagon rollback` goes back by hand.
-- **Write the boot core too**: the boot core itself lives in two slots and is written like an app (RP2040, STM32F401), going back if the new one fails.
+- **Write the boot loader too**: the boot loader itself lives in two slots and is written like an app (RP2040, STM32F401), going back if the new one fails.
 - **Extend it**: without changing DAGON's source, add extensions that receive events, answer decisions and replace parts (ports).
 - **Ask an AI**: a new project comes with Claude Code instructions and skills, and `dagon ai link` connects an agent with your consent. The API key stays in the OS credential store.
 
@@ -89,6 +96,8 @@ You can also add DAGON to existing firmware ([how](https://c-ardinal.github.io/D
 
 ## How it works
 
+<img src="assets/architecture/architecture-en.svg" alt="DAGON's layers: on the node side the app, DAGON services, boot, MCU and board, and hardware; on the PC side DAGON Console, the dagon command, dagon-host and others" width="100%">
+
 ```mermaid
 flowchart LR
   PC["PC<br>dagon / DAGON Console"] -- USB --> HUB["Hub<br>RP2040"]
@@ -101,7 +110,7 @@ flowchart LR
 3. A node writes the new image beside the running one and starts it on trial.
 4. When its self-check passes it confirms; otherwise a watchdog reset takes it back to the previous version.
 
-What has been checked on hardware, and what DAGON does not do, is in [Limitations](https://c-ardinal.github.io/DAGON-Boot/doc/en/explanation/limitations/).
+What DAGON does not do is in [Limitations](https://c-ardinal.github.io/DAGON-Boot/doc/en/explanation/limitations/).
 
 ## Dependencies and external data
 
@@ -112,10 +121,3 @@ What has been checked on hardware, and what DAGON does not do, is in [Limitation
 - Values in the MCU and board definitions: taken from the makers' datasheets and board documents, with the source in comments in the definition files
 
 The full list and licences are in [Licenses](https://c-ardinal.github.io/DAGON-Boot/doc/en/reference/licenses/).
-
-## Documentation
-
-- [Getting started](https://c-ardinal.github.io/DAGON-Boot/doc/en/getting-started/): try it, install, from a new project to a new version
-- [How-to guides](https://c-ardinal.github.io/DAGON-Boot/doc/en/how-to/): your own board, swapping a link, AI help
-- [Explanation](https://c-ardinal.github.io/DAGON-Boot/doc/en/explanation/): words, events and extensions, versioning rules
-- [Reference](https://c-ardinal.github.io/DAGON-Boot/doc/en/reference/): commands, HTTP API, events, definition formats, Rust API

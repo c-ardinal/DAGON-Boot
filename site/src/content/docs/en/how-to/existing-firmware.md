@@ -13,7 +13,7 @@ For firmware that is not a `dagon new` project:
    layout, linker map, boot images, watchdog, links) and a board package
    (`targets/boards/<board id>`), or implement the MCU package's `BoardDef`
    for your own board; the MCU package READMEs show a complete app in about
-   20 lines. On another MCU, lay out the flash the same way: a boot core,
+   20 lines. On another MCU, lay out the flash the same way: a boot loader,
    two state log faces, and slots A and B, each starting with the 512-byte
    signed image header and the body at slot start + 0x200.
 3. Implement the `dagon-port` traits for your board (`Flash`, `Link`,

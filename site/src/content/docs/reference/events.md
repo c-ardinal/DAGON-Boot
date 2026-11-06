@@ -55,7 +55,7 @@ DAGON の状態の変化は、どれも状態機械の遷移で、遷移はど�
 
 ### 状態機械 `sequence`
 
-有効にしたウォッチドッグからジャンプか停止までのブートコアの手順。そのイベントは起きたときにブートコアの拡張に届く。拡張が何をしても判断は変わらない。
+有効にしたウォッチドッグからジャンプか停止までのブートローダの手順。そのイベントは起きたときにブートローダの拡張に届く。拡張が何をしても判断は変わらない。
 
 状態: `Started` (最初の状態), `WatchdogArmed`, `LogRead`, `BeforeDecision`, `Chosen`, `NoImage`, `Jumping`, `Halted`。
 
@@ -67,7 +67,7 @@ DAGON の状態の変化は、どれも状態機械の遷移で、遷移はど�
 | `boot.slot_chosen` | 0x04 | `slot_chosen`: BeforeDecision → Chosen | `slot: u8` (1 B), `trial: bool` (1 B) | live |  | 起動するスロットが決まった（`trial`: 数える試行での待機のスロット）。 |
 | `boot.no_image` | 0x05 | `no_image`: BeforeDecision → NoImage | – | live |  | 起動できるスロットが無い。 |
 | `boot.before_jump` | 0x06 | `before_jump`: Chosen → Jumping | `slot: u8` (1 B), `trial: bool` (1 B) | live |  | 制御が DAGON を離れる前の最後のイベント。 |
-| `boot.halt` | 0x07 | `halt`: NoImage → Halted | – | live |  | ブートコアはここにとどまる。 |
+| `boot.halt` | 0x07 | `halt`: NoImage → Halted | – | live |  | ブートローダはここにとどまる。 |
 
 ## レイヤー `app`
 
@@ -83,7 +83,7 @@ DAGON の状態の変化は、どれも状態機械の遷移で、遷移はど�
 
 ### 状態機械 `image`
 
-イメージのスロット 1 つのライフサイクル（2 つの APP のスロットと、親機の構成のコピー）。スロットのストアの変更メソッドは、これらの遷移の中でだけ動く。`trial_started` と `rolled_back` はブートコアの変更で、起動時にスロットのストアからリプレイする。
+イメージのスロット 1 つのライフサイクル（2 つの APP のスロットと、親機の構成のコピー）。スロットのストアの変更メソッドは、これらの遷移の中でだけ動く。`trial_started` と `rolled_back` はブートローダの変更で、起動時にスロットのストアからリプレイする。
 
 状態: `Empty` (最初の状態), `Written`, `Pending`, `Trial`, `Confirmed`, `Reverted`。
 
@@ -93,21 +93,21 @@ DAGON の状態の変化は、どれも状態機械の遷移で、遷移はど�
 | `app.written` | 0x21 | `written`: Empty → Written | `target: u8` (1 B), `slot: u8` (1 B), `version: Version` (4 B) | live, host |  | 本体を検証し、ヘッダを書いて読み返した。スロットにイメージがある。 |
 | `app.pending_set` | 0x22 | `pending_set`: Written \| Pending \| Confirmed \| Reverted → Pending | `slot: u8` (1 B), `version: Version` (4 B) | live, host |  | 次のブートで試すスロットになった。 |
 | `app.pending_moved` | 0x23 | `pending_moved`: Pending \| Trial → Written | `from: u8` (1 B), `to: u8` (1 B) | live, host |  | 別のスロットが待機になった。このスロットはもう待機ではない。 |
-| `app.trial_started` | 0x24 | `trial_started`: Pending \| Trial → Trial | `slot: u8` (1 B), `version: Version` (4 B), `attempt: u8` (1 B), `max: u8` (1 B) | replay, host |  | ブートコアが待機のスロットを試行として起動した（これまで `attempt` 回のブートで、ブートコアが許すのは `max` 回）。 |
+| `app.trial_started` | 0x24 | `trial_started`: Pending \| Trial → Trial | `slot: u8` (1 B), `version: Version` (4 B), `attempt: u8` (1 B), `max: u8` (1 B) | replay, host |  | ブートローダが待機のスロットを試行として起動した（これまで `attempt` 回のブートで、ブートローダが許すのは `max` 回）。 |
 | `app.confirmed` | 0x25 | `confirmed`: Trial → Confirmed | `slot: u8` (1 B), `version: Version` (4 B) | live, host |  | 試行中のスロットを、自己検査の後で確定した。 |
 | `app.demoted` | 0x26 | `demoted`: Confirmed → Written | `slot: u8` (1 B), `version: Version` (4 B) | live, host |  | もう一方のスロットが確定した。このスロットはもう確定ではない。 |
-| `app.rolled_back` | 0x27 | `rolled_back`: Pending \| Trial → Reverted | `from: u8` (1 B), `to: u8` (1 B), `reason: u8` (1 B) | replay, host |  | ブートコアがスロットをロールバックし（試行回数を使い切った、または待機のイメージが検査に失敗した）、`to` を起動した。 |
-| `app.pending_withdrawn` | 0x28 | `pending_withdrawn`: Pending \| Trial → Confirmed | `slot: u8` (1 B), `version: Version` (4 B) | live, replay, host |  | 確定したスロットがもう一度待機にされていた。別のスロットが待機になったか、ブートコアがその試行を終えたので、確定したスロットに戻る。 |
+| `app.rolled_back` | 0x27 | `rolled_back`: Pending \| Trial → Reverted | `from: u8` (1 B), `to: u8` (1 B), `reason: u8` (1 B) | replay, host |  | ブートローダがスロットをロールバックし（試行回数を使い切った、または待機のイメージが検査に失敗した）、`to` を起動した。 |
+| `app.pending_withdrawn` | 0x28 | `pending_withdrawn`: Pending \| Trial → Confirmed | `slot: u8` (1 B), `version: Version` (4 B) | live, replay, host |  | 確定したスロットがもう一度待機にされていた。別のスロットが待機になったか、ブートローダがその試行を終えたので、確定したスロットに戻る。 |
 
 ### 状態機械 `core_image`
 
-stage0 のある self-boot のマイコンの、ブートコアのスロット 1 つのライフサイクル（定義の `bootcore` のスロット）。状態ログのブートコアの記録に持つ。エージェントが新しいコアを空いているスロットに書いて待機にし、stage0 がそれを試し、コアが自分で試行を決着させる。新しいコアが自分の検査の後で `confirmed`、stage0 が新しいコアをあきらめたときは古いコアが `rolled_back`。アプリは次の起動でそれらを見る。
+stage0 のある self-boot のマイコンの、ブートローダのスロット 1 つのライフサイクル（定義の `bootcore` のスロット）。状態ログのブートローダの記録に持つ。エージェントが新しいコアを空いているスロットに書いて待機にし、stage0 がそれを試し、コアが自分で試行を決着させる。新しいコアが自分の検査の後で `confirmed`、stage0 が新しいコアをあきらめたときは古いコアが `rolled_back`。アプリは次の起動でそれらを見る。
 
 状態: `Empty` (最初の状態), `Written`, `Pending`, `Confirmed`, `Reverted`。
 
 | 種類 | コード | 遷移 | ペイロード | 受け取り | 備考 | 説明 |
 |---|---|---|---|---|---|---|
-| `app.core_transfer_started` | 0x40 | `erase`: Empty \| Written \| Pending \| Reverted → Empty | `slot: u8` (1 B), `len: u32` (4 B) | live, host |  | 新しいコアのために空いているブートコアのスロットを消去した（動いているコアや確定したコアのスロットは消さない）。 |
+| `app.core_transfer_started` | 0x40 | `erase`: Empty \| Written \| Pending \| Reverted → Empty | `slot: u8` (1 B), `len: u32` (4 B) | live, host |  | 新しいコアのために空いているブートローダのスロットを消去した（動いているコアや確定したコアのスロットは消さない）。 |
 | `app.core_written` | 0x41 | `written`: Empty → Written | `slot: u8` (1 B), `version: Version` (4 B) | live, host |  | コアの本体を検証し、そのヘッダを書いて読み返した。 |
 | `app.core_pending_set` | 0x42 | `pending_set`: Written \| Pending \| Reverted → Pending | `slot: u8` (1 B), `version: Version` (4 B) | live, host |  | 次のリセットで stage0 が試すコアになった。 |
 | `app.core_confirmed` | 0x43 | `confirmed`: Pending → Confirmed | `slot: u8` (1 B), `version: Version` (4 B) | host |  | 新しいコアが自分の検査を通り、自分を確定した。 |
@@ -138,7 +138,7 @@ stage0 のある self-boot のマイコンの、ブートコアのスロット 1
 | 種類 | コード | 遷移 | ペイロード | 受け取り | 備考 | 説明 |
 |---|---|---|---|---|---|---|
 | `app.starting` | 0x01 | `starting`: * → Up | `tag: NameDigest` (8 B), `role: u8` (1 B), `mode: u8` (1 B) | live |  | DAGON の起動が始まった（エージェントを作った、または再開した）。次にスロットのストアを読む。`tag`: ノードのイメージのターゲットのタグの名前のダイジェスト（`NameDigest`: 短い形の「ダイジェストの先頭」で、マイコンの識別と同じように作る）。ホストは構成のノードのタグから解決する。 |
-| `app.watchdog_taken` | 0x02 | `watchdog_taken`: Up → Up | `period_ms: u32` (4 B), `trial_policy: TrialPolicy` (5 B) | live |  | 起動がブートコアのウォッチドッグを引き継いだ: その周期と、イメージが試行のあいだガードがそれをどう扱うか。 |
+| `app.watchdog_taken` | 0x02 | `watchdog_taken`: Up → Up | `period_ms: u32` (4 B), `trial_policy: TrialPolicy` (5 B) | live |  | 起動がブートローダのウォッチドッグを引き継いだ: その周期と、イメージが試行のあいだガードがそれをどう扱うか。 |
 | `app.bring_up` | 0x07 | `bring_up`: Up → Up | `board: NameDigest` (8 B) | live |  | ボードの立ち上げを実行した。`board`: ボードの定義の id の名前のダイジェスト（`NameDigest`）。ホストは知っているボードの定義から解決する。 |
 | `app.link_up` | 0x03 | `link_up`: Up → Up | `link: u8` (1 B), `addr: u8` (1 B) | live |  | DAGON のリンクがフレームを送受信する: 起動時か、リンクが切れた後の最初のフレームが届いた。`link`: その種類のコード（`dagon_format::with_link_kinds!`）。`addr`: そのリンクでのノード自身のアドレス（アドレスの無いリンクでは `NO_ADDR`）。 |
 | `app.link_down` | 0x04 | `link_down`: Up → Up | `link: u8` (1 B), `addr: u8` (1 B) | live |  | DAGON のリンクがフレームを送受信しなくなった: 返答を送れなかった、またはリンクが閉じた。 |

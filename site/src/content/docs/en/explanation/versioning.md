@@ -19,7 +19,7 @@ code and the package manifests, so it cannot drift.
 
 A component is something a user installs, flashes or depends on that
 lives on from release to release: the CLI (with the page it serves), a
-boot core, an MCU package, a board package, a library crate. Samples
+boot loader, an MCU package, a board package, a library crate. Samples
 (including demo firmware), test apps, bring-up and dump programs and test
 images are not components; they stay at `0.0.0` with `publish = false`.
 
@@ -33,7 +33,7 @@ Each `[[component]]` entry has:
 |---|---|
 | `name` | The component's name. It is also the commit scope (`feat(<name>):`) and the tag prefix (`<name>-v<version>`) |
 | `version` | Its SemVer version |
-| `paths` | The files it owns. A file belongs to the component with the longest matching path, so a boot core inside an MCU package's folder is its own component. A file outside every component (README, `scripts/`, `.github/`, samples) never needs a release |
+| `paths` | The files it owns. A file belongs to the component with the longest matching path, so a boot loader inside an MCU package's folder is its own component. A file outside every component (README, `scripts/`, `.github/`, samples) never needs a release |
 | `packages` | The Cargo packages that carry this version in their own `Cargo.toml`; a component made of several packages gives them all the same version. There is no version shared through the workspace |
 | `formats` | For each contract it uses, the format numbers it reads and writes |
 
@@ -70,7 +70,7 @@ files always state it. Every other contract always carries its number.
 Image versions are not component versions. The version in a signed image
 header (given when the image is signed, or the default a first install
 uses) is the version of that image on the device, chosen by the project.
-It has no relation to the version of the boot core component that built
+It has no relation to the version of the boot loader component that built
 it.
 
 ### Adding a contract
@@ -92,7 +92,7 @@ Decide for each component whose files the change touches.
 - The CLI: a command, flag, config key, exit code or machine-readable
   output (JSON, `--version` lines, API fields) removed or changed in
   meaning; or an old format number no longer read.
-- A boot core: an old image or state log format no longer accepted, or a
+- A boot loader: an old image or state log format no longer accepted, or a
   device needs its ROM re-provisioned (rewritten through the boot ROM) to
   take the new version.
 - An MCU or board package: its public Rust API, or its definition keys,
@@ -181,8 +181,8 @@ The same in words:
 | The CLI gains a subcommand | CLI feature |
 | A CLI flag is renamed | CLI breaking |
 | A JSON output of the CLI gains a field | CLI feature |
-| A boot core fixes a CRC check bug | boot core fix |
-| Image header format N+1, which boot cores reading only N cannot read | image header format +1; a boot core that reads N and N+1: feature; the CLI: breaking only when it stops writing N |
+| A boot loader fixes a CRC check bug | boot loader fix |
+| Image header format N+1, which boot loaders reading only N cannot read | image header format +1; a boot loader that reads N and N+1: feature; the CLI: breaking only when it stops writing N |
 | A README typo | no release |
 | A board package adds a definition key the definition reader already accepts | board package feature |
 | A library crate removes a public function | that library breaking (cargo-semver-checks) |

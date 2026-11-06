@@ -30,7 +30,7 @@ dagon --help
 
 A project made by `dagon new` takes DAGON from the same release as your
 `dagon` (`[dagon] git` and `tag = "cli-v<version>"` in `dagon.toml`). cargo
-fetches it when you build, and `dagon flash` builds the boot core, stage0
+fetches it when you build, and `dagon flash` builds the boot loader, stage0
 and factory agent from cargo's copy of that tag, so it needs the network
 the first time. Working on DAGON itself, keep a clone instead:
 `dagon new my-fleet --dagon-path <clone>` (or set `DAGON_HOME`) writes

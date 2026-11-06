@@ -24,7 +24,7 @@ description: "DAGON に要るツールと dagon コマンドです。"
 dagon --help
 ```
 
-`dagon new` で作るプロジェクトは、DAGON を手元の `dagon` と同じリリースから取ります（`dagon.toml` の `[dagon] git` と `tag = "cli-v<version>"`）。ビルドのときに cargo が取得し、`dagon flash` もブートコア・stage0・factory エージェントをそのタグの cargo の写しからビルドするので、最初の 1 回はネットワークが要ります。DAGON そのものを開発するときはクローンを使います: `dagon new my-fleet --dagon-path <クローン>`（または `DAGON_HOME` を設定）で `[dagon] path` を書きます。
+`dagon new` で作るプロジェクトは、DAGON を手元の `dagon` と同じリリースから取ります（`dagon.toml` の `[dagon] git` と `tag = "cli-v<version>"`）。ビルドのときに cargo が取得し、`dagon flash` もブートローダ・stage0・factory エージェントをそのタグの cargo の写しからビルドするので、最初の 1 回はネットワークが要ります。DAGON そのものを開発するときはクローンを使います: `dagon new my-fleet --dagon-path <クローン>`（または `DAGON_HOME` を設定）で `[dagon] path` を書きます。
 
 続けて、構成に要るツールを `dagon` に確かめさせます（プロジェクトのフォルダで実行します。それ以外では全部のマイコンの家族を確かめます）:
 

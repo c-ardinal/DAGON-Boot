@@ -18,7 +18,7 @@ DAGON の部品のあいだの取り決めとその番号、部品ごとのバ�
 |---|---|---|
 | `wire` | 1 | ホスト、親機、ノードのあいだのフレームとペイロード: すべてのフレームのバイト 2、HELLO の proto_ver（dagon-proto PROTO_VERSION） |
 | `image-header` | 1 | 署名付きの 512 バイトのイメージのヘッダ: オフセット 0x004（dagon-format header::HDR_VERSION） |
-| `state-log` | 1 | ブートコアとアプリの状態ログの面: オフセット 0x004（dagon-format statelog::FORMAT_VERSION） |
+| `state-log` | 1 | ブートローダとアプリの状態ログの面: オフセット 0x004（dagon-format statelog::FORMAT_VERSION） |
 | `manifest` | 1 | リリースのマニフェスト: オフセット 4（dagon-format manifest::MF_VERSION） |
 | `bundle` | 1 | リリースのファイル .dgb: オフセット 4（dagon-format bundle::BN_VERSION） |
 | `topology-bin` | 1 | コンパイル済みの構成: オフセット 4（dagon-format topology::TP_VERSION） |

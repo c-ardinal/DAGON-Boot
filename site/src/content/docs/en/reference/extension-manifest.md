@@ -99,7 +99,7 @@ For each node `dagon gen` refuses, naming the extension and the reason: an
 extension listed for an image whose layers it does not have, a port
 provided twice in one chain, a trusted extension without its hash or
 whose source no longer hashes to it, a boot extension that is not
-trusted (the boot core runs trusted extensions only), boot extensions on
+trusted (the boot loader runs trusted extensions only), boot extensions on
 an MCU without a DAGON boot stage (the ESP32-S3 starts its app from the
 vendor's second stage, so no boot extension runs there),
 capabilities the board does not declare, a peripheral that is not
@@ -116,7 +116,7 @@ cached); code, data and stacks are normal memory.
 
 | File | Content |
 |---|---|
-| `boot_wiring.rs` | MCUs with a DAGON boot stage: the board's LED, halt pattern, power hold and boot action program; the watchdog periods; the boot record and fuse placement; the isolation level, kind, bounds and the registers read back at boot; the extensions in chain order (`BootChain`, `BOOT_CHAIN`) and each boot core slot's protection map |
+| `boot_wiring.rs` | MCUs with a DAGON boot stage: the board's LED, halt pattern, power hold and boot action program; the watchdog periods; the boot record and fuse placement; the isolation level, kind, bounds and the registers read back at boot; the extensions in chain order (`BootChain`, `BOOT_CHAIN`) and each boot loader slot's protection map |
 | `memory-<image>-<slot>.x` | MCUs that define their RAM: the image's FLASH and RAM after the extension regions, each extension's regions and sections, the boot record and fuse cells |
 | `protection.toml` | Every image's extensions, memory and protection map, readable |
 
@@ -135,11 +135,11 @@ extensions run unguarded.
 
 On an MCU with a DAGON boot stage (RP2040, STM32F401RE), `dagon gen` also
 writes the node's boot crate into `boot/<id>/` of the project, from the
-boot core template its MCU package ships (`bootcore/template/`, found by
+boot loader template its MCU package ships (`bootcore/template/`, found by
 `[package.metadata.dagon] bootcore = "<mcu id>"`): `Cargo.toml` (the boot
 core library, `dagon-events` and each boot extension's package, and the
 node, its MCU, its board and its trusted extensions under
-`[package.metadata.dagon.boot]`), `boot.rs` (the boot core's `main`, from
+`[package.metadata.dagon.boot]`), `boot.rs` (the boot loader's `main`, from
 `nodes/<id>/dagon/boot_wiring.rs`), `graph.stamp` (below) and `.cargo/config.toml` (the target,
 `DAGON_BOOT_CRATE` and the node's `DAGON_TARGET_TAG`). It is a folder of
 its own because cargo merges the `.cargo/config.toml` of every folder
@@ -147,9 +147,9 @@ above a crate, and the node's app crate has one made for the app.
 `boot/<id>/` holds only what the last `dagon gen` wrote, as
 `nodes/<id>/dagon/` does; cargo's `target/` and `Cargo.lock` in it are
 left alone. One field is yours: `version` under `[package]` of
-`boot/<id>/Cargo.toml`, the boot core's version. `dagon gen` writes the
+`boot/<id>/Cargo.toml`, the boot loader's version. `dagon gen` writes the
 template's value once and keeps yours from then on; raise it for each
-boot core you release (a node writes a boot core whose version differs
+boot loader you release (a node writes a boot loader whose version differs
 from the one it runs). `dagon gen` and the build bring the crate's own
 entry in `Cargo.lock` to it and change nothing else in the lock. When
 that file cannot be read or does not parse, `dagon gen` stops with the
@@ -158,16 +158,16 @@ crate files are removed but this file is kept. Build it
 in that folder with `cargo build --release` (`DAGON_PUBKEY` as for every
 image).
 
-The boot core runs its extensions privileged, so it runs only trusted
+The boot loader runs its extensions privileged, so it runs only trusted
 ones (manifest `trusted = true`, listed with their source hash under
 `[extensions.nodes.<id>] trusted`). From `boot.watchdog_armed` to
 `boot.before_jump` or `boot.halt`, each boot event ([Events](/en/reference/events/), layer
 `boot`) reaches, in chain order, the extensions whose `observes` names
 it, each call timed against its `max_run_us`: a call that takes longer
-is not stopped, but the boot core then delivers `boot.extension_overran`
+is not stopped, but the boot loader then delivers `boot.extension_overran`
 (the extension, its budget, the time taken) to the extensions observing
 that kind, and goes on. Nothing a boot extension does changes which slot
-the boot core starts. `dagon gen` refuses a set whose calls could take
+the boot loader starts. `dagon gen` refuses a set whose calls could take
 more than a quarter of the trial watchdog period: one call per observed
 boot event, and for an extension observing `boot.extension_overran` one
 more per call of any boot extension.
@@ -177,21 +177,21 @@ cargo (every feature, every target): every crate built into it must be
 DAGON's, inside a declared trusted extension's folder, or a registry
 crate with a checksum in the boot crate's `Cargo.lock`. It then writes
 `boot/<id>/graph.stamp` for the boot crate's `Cargo.toml`, `Cargo.lock`
-and trusted sources as they are; the boot core's build refuses to build
+and trusted sources as they are; the boot loader's build refuses to build
 without that stamp or when any of them changed since (run `dagon gen`
 again). There is no decision point at boot: the slot
-the boot core starts is decided by DAGON alone, so an extension cannot
-change it. The calls share the boot core's flash budget and its watchdog: one that does not
+the boot loader starts is decided by DAGON alone, so an extension cannot
+change it. The calls share the boot loader's flash budget and its watchdog: one that does not
 return makes the watchdog reset the chip.
 
 Once `boot/<id>/Cargo.lock` exists, `dagon gen` resolves the graph with
 `--locked`, so after an extension is added it stops at the lock. Run
 `cargo metadata --offline --format-version 1` in `boot/<id>/` once (it
 adds the new package to the lock), then `dagon gen` again. To build the
-boot core without an extension, remove it from the node's `boot` and
+boot loader without an extension, remove it from the node's `boot` and
 `trusted` lists and run `dagon gen` again.
 
-The boot events come as fast as the boot core works:
+The boot events come as fast as the boot loader works:
 `boot.watchdog_armed`, `boot.log_read` and `boot.before_decision` follow
 each other with only the state log's flash reads between them,
 `boot.slot_chosen` or `boot.no_image` follows the image check, and
@@ -201,7 +201,7 @@ in a handler adds to the boot.
 
 A minimal trusted boot extension to copy is
 `targets/boot-extension-template/` (it counts the boot events and keeps
-the slot the boot core chose):
+the slot the boot loader chose):
 
 ```toml
 # dagon-extension.toml
@@ -246,11 +246,11 @@ trusted = [{ id = "boot-count", sha256 = "<the hash dagon gen names>" }]
 
 DAGON hands a boot extension no peripheral or pin (`Ctx` carries the
 layer only). A trusted extension that drives hardware (a display, a pin)
-takes it from the MCU's HAL itself in `on_event`, after the boot core's
+takes it from the MCU's HAL itself in `on_event`, after the boot loader's
 HAL init (it runs privileged). What it takes, and that this is safe, is
 the extension's author's responsibility: DAGON checks none of it. It must
-leave alone what the boot core uses (on the RP2040: the flash, the
-watchdog, the clocks, and the board's `[boot] led` once the boot core
+leave alone what the boot loader uses (on the RP2040: the flash, the
+watchdog, the clocks, and the board's `[boot] led` once the boot loader
 halts) and keep each call within
 its `max_run_us`. The ESP32-S3 has no DAGON boot stage (its
 vendor's second stage starts the app), so boot extensions do not exist

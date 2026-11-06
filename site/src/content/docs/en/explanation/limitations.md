@@ -11,10 +11,6 @@ description: "What DAGON does not do, and where its guarantees stop."
   storage in hardware).
 - DAGON writes the hub and the children beyond it. Nothing beyond a child can
   be written.
-- Power cuts, the F401's ROM recovery and writing the boot core have not been
-  run on hardware. Power cuts are covered in the simulator and in tests.
-- The hardware tests (`samples/hardware-test`) have not been run on the current
-  write flow.
 - The USB VID:PID `c0de:cafe` is a test ID, not an assigned one.
 - `dagon conform` drives the synchronous test sequence and is CLI only; the
   browser does not run conformance tests.

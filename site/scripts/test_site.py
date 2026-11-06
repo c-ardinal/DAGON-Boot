@@ -187,6 +187,16 @@ class Wording(unittest.TestCase):
         self.assertNotIn("yet", notice)
 
 
+class Architecture(unittest.TestCase):
+    def test_every_name_in_the_diagram_is_in_the_repository(self):
+        for lang in gen.LANGS:
+            svg = gen.architecture.svg(lang)
+            for crate in set(re.findall(r"\bdagon-[a-z]+\b", svg)) - {"dagon-mcu", "dagon-board", "dagon-extension"}:
+                self.assertTrue((ROOT / "crates" / crate / "Cargo.toml").is_file(), crate)
+            for folder in re.findall(r"\b(?:targets|web)/[a-z0-9/-]*", svg):
+                self.assertTrue((ROOT / folder.rstrip("/")).is_dir(), folder)
+
+
 class Translation(unittest.TestCase):
     """The design and format pages are normative in both languages, so a translation may not drop a fact."""
     PAGES = ["explanation/lifecycle-events.md", "explanation/retained-formats.md", "explanation/versioning.md", "reference/agent-api.md",

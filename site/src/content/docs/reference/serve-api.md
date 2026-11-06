@@ -34,7 +34,7 @@ editUrl: false
 | `GET` | `/v1/kept` |  | プロジェクトに残してあるパッケージ（out/deploy）。新しいバージョンから順に、各ノードに与えるバージョンとともに返します。 |
 | `GET` | `/v1/kept/{id}` |  | 残してあるパッケージのバイト列。検証が通ったときだけ返します。 |
 | `POST` | `/v1/kept` |  | 書き込もうとしているパッケージを残します。プロジェクトの鍵で検証が通ったときだけです。その id を答えます。 |
-| `GET` | `/v1/bootcore/{node}` |  | ノードの署名付きのブートコア（ROM の経路）: [provision.&lt;node&gt;] bootcore、無ければ &lt;provision_dir&gt;/&lt;node&gt;/bootcore.img。 |
+| `GET` | `/v1/bootcore/{node}` |  | ノードの署名付きのブートローダ（ROM の経路）: [provision.&lt;node&gt;] bootcore、無ければ &lt;provision_dir&gt;/&lt;node&gt;/bootcore.img。 |
 | `GET` | `/v1/stage0/{node}` |  | stage0 のあるマイコンを ROM の経路ですべて書き直すときの stage0 のバイト列。provision が書いたもので、&lt;provision_dir&gt;/&lt;node&gt;/stage0.bin です。stage0 に署名はありません。ホストは書き込む前に、マイコンの stage0 の領域に収まることを確かめます。 |
 | `GET` | `/v1/layout` |  | 呼び名とエディタの位置（最初の保存の前は 404）。 |
 | `PUT` | `/v1/layout` |  | JSON オブジェクト。全体をまとめて書きます。 |

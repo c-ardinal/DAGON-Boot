@@ -1,27 +1,43 @@
 ---
 title: "Install"
-description: "The tools DAGON needs and the dagon command."
+description: "Installing the dagon command from a release, and building it yourself."
 ---
 
-## What running DAGON needs
+## From a release
 
-| What | When | How |
-|---|---|---|
-| Chrome or Edge 89+ | DAGON Console (Web Serial) | — |
-| Rust 1.95.0 or later | building the `dagon` command yourself | <https://rustup.rs> |
-| A C compiler | building the `dagon` command yourself (the `ring` crate) | the Visual Studio 2022 C++ build tools on Windows, gcc 13 or later on Linux, Xcode Command Line Tools 16.4 or later on macOS |
+Linux and macOS:
 
-With the prebuilt `dagon` command, nothing else is needed.
+```sh
+curl -fsSL https://raw.githubusercontent.com/c-ardinal/DAGON-Boot/main/install.sh | sh
+```
 
-## Install the `dagon` command
+Windows (PowerShell):
 
-Use one of these:
+```powershell
+irm https://raw.githubusercontent.com/c-ardinal/DAGON-Boot/main/install.ps1 | iex
+```
 
-- Prebuilt files: from the GitHub release `cli-v<version>` you want, download the archive for your system (`dagon-cli-<version>-<target>.zip` for Windows, `dagon-cli-<version>-<target>.tar.gz` otherwise). Check it against its `.sha256` file, and put `dagon` on your `PATH`.
-- `cargo binstall dagon-cli --git https://github.com/c-ardinal/DAGON-Boot`: fetches that same archive, and needs `cargo-binstall`.
-- Build from source: `cargo install --git https://github.com/c-ardinal/DAGON-Boot --tag cli-v<version> dagon-cli`
+The script does this:
+
+1. It takes the archive for your system from the latest release (`cli-v<version>`).
+2. It checks it against its `.sha256` file, and stops if they differ.
+3. It puts `dagon` in a folder that needs no administrator rights: `~/.local/bin` on Linux and macOS, `%LOCALAPPDATA%\Programs\dagon` on Windows.
+4. On Windows it adds that folder to your user's PATH. On Linux and macOS it says how.
+5. It prints what it did.
+
+The script reads these environment variables:
+
+| Variable | Meaning |
+|---|---|
+| `DAGON_VERSION` | The version to install. `install.sh` also takes it as an argument (`sh -s -- <version>`) |
+| `DAGON_INSTALL_DIR` | The folder to put it in |
+| `DAGON_NO_MODIFY_PATH` | With `install.ps1`, leaves PATH as it is and says how to add the folder |
+
+`cargo binstall dagon-cli --git https://github.com/c-ardinal/DAGON-Boot` takes the same archive, and needs `cargo-binstall`.
 
 No clone of this repository and no git submodule is needed.
+
+The browser for DAGON Console is Chrome or Edge 89+ (Web Serial).
 
 Check that it is there:
 
@@ -30,6 +46,21 @@ dagon --help
 ```
 
 DAGON Console is built into `dagon`. Node.js is not needed.
+
+## Build it yourself
+
+These are the steps to build the `dagon` command from source, whether or not you change DAGON.
+
+| What | How |
+|---|---|
+| Rust 1.95.0 or later | <https://rustup.rs> |
+| A C compiler (the `ring` crate) | the Visual Studio 2022 C++ build tools on Windows, gcc 13 or later on Linux, Xcode Command Line Tools 16.4 or later on macOS |
+
+```sh
+cargo install --git https://github.com/c-ardinal/DAGON-Boot --tag cli-v<version> dagon-cli
+```
+
+From a clone, it is `cargo install --path crates/dagon-cli`.
 
 ## The tools for developing firmware
 

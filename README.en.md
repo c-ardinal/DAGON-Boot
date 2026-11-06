@@ -60,25 +60,35 @@ Every step can also be done with the `dagon` command.
 | STM32F401RE | NUCLEO-F401RE                   |
 | ESP32-S3    | M5StopWatch                     |
 
-## Prerequisites
-
-What running DAGON needs:
-
-- Chrome or Edge 89 or later
-- The `dagon` command: the prebuilt files need nothing else
-  - To build it yourself, Rust 1.95.0 or later and a C compiler (the Visual Studio 2022 C++ build tools on Windows, gcc 13 or later on Linux, Xcode Command Line Tools 16.4 or later on macOS)
-
-How to install the `dagon` command is in [Install](https://c-ardinal.github.io/DAGON-Boot/doc/en/getting-started/install/).
-
 ## Try it
+
+### Without installing
 
 Try the [DAGON Console demo](https://c-ardinal.github.io/DAGON-Boot/demo/) with no install and no hardware. You write to a simulated hub and its children and go back to a previous version. Reading and writing files, connecting real devices and AI link operations are not available in the demo.
 
+### Install and try
+
 On your own PC, you can also try it without hardware, using the simulator.
 
-1. Download the file for your system from [GitHub Releases](https://github.com/c-ardinal/DAGON-Boot/releases).
-2. Put `dagon` on your PATH.
-3. Run `dagon demo`.
+Install the `dagon` command. The first line is for Linux and macOS, the second for Windows.
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/c-ardinal/DAGON-Boot/main/install.sh | sh
+```
+
+```powershell
+irm https://raw.githubusercontent.com/c-ardinal/DAGON-Boot/main/install.ps1 | iex
+```
+
+The browser it uses:
+
+- Chrome or Edge 89 or later
+
+Start the demo:
+
+```sh
+dagon demo
+```
 
 `dagon demo` opens DAGON Console at the address it prints. `dagon sim run` runs end-to-end scenarios in the simulator.
 
@@ -148,6 +158,23 @@ The figure below is DAGON's software design.
 | --- | --- | --- |
 | Add an MCU | `targets/mcu/*/dagon-mcu.toml`, `crates/dagon-port/src/lib.rs` | [Adding an MCU or a link](https://c-ardinal.github.io/DAGON-Boot/doc/en/how-to/new-mcu-or-link/) |
 | Add a link or transport | `crates/dagon-format/src/link.rs`, `targets/mcu/*/src/links.rs`, `crates/dagon-host/src/lib.rs` | [Adding an MCU or a link](https://c-ardinal.github.io/DAGON-Boot/doc/en/how-to/new-mcu-or-link/) |
+
+## Build it yourself
+
+These are the steps to build the `dagon` command from source, whether or not you change DAGON.
+
+It needs two things:
+
+- Rust 1.95.0 or later
+- A C compiler (the Visual Studio 2022 C++ build tools on Windows, gcc 13 or later on Linux, Xcode Command Line Tools 16.4 or later on macOS)
+
+Build and install it:
+
+```sh
+cargo install --git https://github.com/c-ardinal/DAGON-Boot dagon-cli
+```
+
+From a clone, it is `cargo install --path crates/dagon-cli`.
 
 ## Dependencies and external data
 

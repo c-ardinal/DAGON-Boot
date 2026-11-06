@@ -601,6 +601,7 @@ mod tests {
                 bin: None,
                 features: vec![],
                 slot_b_feature: None,
+                boot_features: vec![],
             },
         );
         let mut lines = Vec::new();
@@ -673,6 +674,7 @@ mod tests {
                 bin: None,
                 features: vec![],
                 slot_b_feature: None,
+                boot_features: vec![],
             },
         );
         let quiet = &AtomicBool::new(false);
@@ -714,6 +716,7 @@ mod tests {
                     bin: None,
                     features: vec![],
                     slot_b_feature: None,
+                    boot_features: vec![],
                 },
             );
         }
@@ -739,6 +742,7 @@ mod tests {
             bin: None,
             features: vec!["conform".into()],
             slot_b_feature: Some("slot-b".into()),
+            boot_features: vec![],
         };
         assert!(ok.validate().is_ok());
         let with = |f: &dyn Fn(&mut BuildInputs)| {
@@ -769,6 +773,7 @@ mod tests {
             bin: None,
             features: vec![],
             slot_b_feature: None,
+            boot_features: vec![],
         };
         let dir = package_dir(&cfg, &sample, Some(&here)).unwrap();
         assert!(dir.join("Cargo.toml").is_file(), "{}", dir.display());
@@ -840,6 +845,7 @@ mod tests {
                 bin: None,
                 features: vec![],
                 slot_b_feature: Some("slot-b".into()),
+                boot_features: vec![],
             },
         );
         let mut lines = Vec::new();

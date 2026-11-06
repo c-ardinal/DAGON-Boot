@@ -53,7 +53,7 @@ pub enum Op {
     ReplaceExt { app: bool, index: u8 },
     /// A new boot core image, or a new app image pending in the other slot.
     ReplaceImage { app: bool },
-    /// `dagon extension reset` for the n-th disabled extension.
+    /// A clear request for the n-th disabled extension.
     HostClear { pick: u8 },
     /// Bytes of another fuse layout naming an installed call site.
     Skew {

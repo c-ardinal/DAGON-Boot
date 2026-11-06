@@ -634,14 +634,7 @@ pub(crate) fn build_core_slots(
         .filter(|(b, _)| {
             dagon_sign::image::slot_with(reg, &n.mcu, image_kind::BOOTCORE, *b).is_some()
         })
-        .map(|(b, c)| {
-            let features = if b == slot_binding::B {
-                vec![SLOT_B_FEATURE.to_string()]
-            } else {
-                Vec::new()
-            };
-            (c, features)
-        })
+        .map(|(b, c)| (c, core_features(cfg, &n.id, b == slot_binding::B)))
         .collect();
     if slots.is_empty() {
         return Ok(Vec::new());
@@ -672,6 +665,16 @@ pub(crate) fn build_core_slots(
         out.push((slot, elf));
     }
     Ok(out)
+}
+
+/// The features node `id`'s boot core builds with for a release.
+fn core_features(cfg: &Config, id: &str, slot_b: bool) -> Vec<String> {
+    let linked = slot_b.then(|| SLOT_B_FEATURE.to_string());
+    let asked = cfg.build.get(id).map(|b| b.boot_features.clone());
+    linked
+        .into_iter()
+        .chain(asked.into_iter().flatten())
+        .collect()
 }
 
 /// Node `n`'s boot crate, `boot/<id>/` of the project (`dagon gen` writes it).
@@ -1133,10 +1136,32 @@ mod tests {
                     bin: None,
                     features: vec![],
                     slot_b_feature: Some("slot-b".into()),
+                    boot_features: vec![],
                 },
             );
         }
         (cfg, dagon_topology::parse_str(YAML).unwrap())
+    }
+
+    #[test]
+    fn a_release_core_builds_with_the_node_s_boot_features() {
+        let mut cfg = Config::default();
+        assert_eq!(core_features(&cfg, "seg", false), Vec::<String>::new());
+        cfg.build.insert(
+            "seg".into(),
+            crate::config::BuildInputs {
+                package: PathBuf::from("nodes/seg"),
+                bin: None,
+                features: vec!["app-only".into()],
+                slot_b_feature: None,
+                boot_features: vec!["no-confirm".into()],
+            },
+        );
+        assert_eq!(core_features(&cfg, "seg", false), ["no-confirm"]);
+        assert_eq!(
+            core_features(&cfg, "seg", true),
+            [SLOT_B_FEATURE, "no-confirm"]
+        );
     }
 
     #[test]
@@ -1168,6 +1193,7 @@ mod tests {
                     bin: None,
                     features: vec![],
                     slot_b_feature: None,
+                    boot_features: vec![],
                 },
             );
         }
@@ -1552,6 +1578,7 @@ mod tests {
                 bin: None,
                 features: vec![],
                 slot_b_feature: None,
+                boot_features: vec![],
             },
         );
         let out = cfg.base.join("out/watch");

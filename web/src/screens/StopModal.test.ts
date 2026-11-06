@@ -45,6 +45,14 @@ describe('the modal of a stopped write', () => {
     expect(b).toContain('復旧する');
   });
 
+  test('its own label, when the outcome has one', () => {
+    const b = render(StopModal, {
+      props: { target: '[2] 7セグ', back: false, label: WRITE.coreBack.label, reason: WRITE.coreBack.detail, fix: WRITE.coreBack.next, linked: false, onask: () => undefined, onclose: () => undefined, onmore: () => undefined, buttons: createRawSnippet(() => ({ render: () => '<span></span>' })) },
+    }).body;
+    for (const words of [WRITE.coreBack.label, WRITE.coreBack.detail, WRITE.coreBack.next]) expect(b).toContain(words);
+    expect(b).not.toContain(WRITE.failed);
+  });
+
   test('stopped without going back: no record to ask about, so no action', () => {
     expect(html(false, true)).not.toContain(ask);
   });

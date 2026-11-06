@@ -58,6 +58,17 @@ impl Simulator {
         true
     }
 
+    /// A boot core `major.minor.patch` of the I2C node at `addr` fails its own
+    /// check, so its write goes back to the confirmed core.
+    #[wasm_bindgen(js_name = failCore)]
+    pub fn fail_core(&mut self, addr: u8, major: u8, minor: u8, patch: u16) -> bool {
+        let Some(node) = self.0.hub_mut().i2c_node(addr) else {
+            return false;
+        };
+        node.store().broken_core = Some(dagon_format::Version::new(major, minor, patch));
+        true
+    }
+
     /// The watch's next version crashes at boot, so its write goes back
     /// (what `dagon demo --sim-fail watch` sets up).
     #[wasm_bindgen(js_name = failWatch)]

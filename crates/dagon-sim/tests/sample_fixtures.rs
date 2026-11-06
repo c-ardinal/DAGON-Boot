@@ -90,6 +90,48 @@ fn release(hub_len: usize, seg_len: usize, watch_len: usize) -> Vec<u8> {
     .bundle
 }
 
+/// The F401's boot core for boot core slot `slot`.
+fn seg_core(slot: u8, v: Version) -> Vec<u8> {
+    let (flags, caps) = image::default_bits(image_kind::BOOTCORE);
+    let spec = ImageSpec {
+        image_kind: image_kind::BOOTCORE,
+        port_kind: image::port_kind_of("self-boot").unwrap(),
+        mcu_id: image::mcu_id_of("stm32f401re").unwrap(),
+        slot: image::slot("stm32f401re", image_kind::BOOTCORE, slot).unwrap(),
+        version: v,
+        build_flags: flags,
+        release_seq: 1,
+        min_bootcore_version: Version::new(0, 0, 0),
+        target_tag: target_tag("seg-f401-7seg"),
+        proto_version: 1,
+        capabilities: caps,
+    };
+    sign_image(&spec, &body(0xC0 ^ v.minor() ^ slot << 4, SMALL), &key()).unwrap()
+}
+
+/// seg's app and boot core at 1.1.0: a write that updates the boot core.
+fn core_release() -> Vec<u8> {
+    let v1 = Version::new(1, 1, 0);
+    let t = dagon_topology::parse_str(YAML).unwrap();
+    let bin = dagon_topology::compile_str(YAML).unwrap();
+    let images = [
+        seg(0, v1, SMALL),
+        seg(1, v1, SMALL),
+        seg_core(0, v1),
+        seg_core(1, v1),
+    ];
+    dagon_sign::release::build(
+        dagon_topology::defs::Registry::builtin(),
+        &t,
+        &bin,
+        &images,
+        "sample-core-1.1.0",
+        &key(),
+    )
+    .unwrap()
+    .bundle
+}
+
 fn generated() -> Vec<(&'static str, Vec<u8>)> {
     use dagon_sim::sample::{HUB_APP_BYTES, SEG_APP_BYTES, WATCH_APP_BYTES};
     let v0 = Version::new(1, 0, 0);
@@ -98,6 +140,7 @@ fn generated() -> Vec<(&'static str, Vec<u8>)> {
         ("sample-seg-1.0.0.img", seg(0, v0, SMALL)),
         ("sample-watch-1.0.0.img", watch(v0, SMALL)),
         ("sample-1.1.0.dgb", release(SMALL, SMALL, SMALL)),
+        ("sample-core-1.1.0.dgb", core_release()),
         // What the browser demo writes: the apps at their real size.
         (
             "sample-full-1.1.0.dgb",

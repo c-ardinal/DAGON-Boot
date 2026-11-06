@@ -43,6 +43,10 @@ pub struct BuildInputs {
     /// Feature that links the application for slot B.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub slot_b_feature: Option<String>,
+    /// Features of the node's boot crate when `dagon deploy` and the Console
+    /// build its boot core for a release. A first write never uses them.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub boot_features: Vec<String>,
 }
 
 impl BuildInputs {
@@ -72,7 +76,8 @@ impl BuildInputs {
             .bin
             .iter()
             .chain(&self.features)
-            .chain(&self.slot_b_feature);
+            .chain(&self.slot_b_feature)
+            .chain(&self.boot_features);
         if let Some(bad) = names.into_iter().find(|n| !plain(n)) {
             return Err(format!("'{bad}' is not a plain name"));
         }

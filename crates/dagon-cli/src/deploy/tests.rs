@@ -40,6 +40,7 @@ fn work_area(name: &str) -> (Config, Topology) {
                 bin: None,
                 features: vec![],
                 slot_b_feature: Some("slot-b".into()),
+                boot_features: vec![],
             },
         );
     }

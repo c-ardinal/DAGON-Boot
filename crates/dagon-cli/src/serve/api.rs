@@ -171,7 +171,6 @@ pub fn handle(server: &Arc<Server>, req: &Request) -> Response {
         ("PUT", ["agent", "key", agent, way]) => key_put(server, agent, way, req),
         ("DELETE", ["agent", "key", agent, way]) => key_delete(server, agent, way),
         ("POST", ["agent", "ask"]) => agent_ask(server, req),
-        ("GET", ["targets"]) => targets(server),
         ("GET", ["definitions"]) => definitions(server),
         ("GET", ["topology"]) => topology_get(server),
         ("PUT", ["topology"]) => topology_put(server, req),
@@ -631,39 +630,6 @@ fn json_ok(v: Value) -> Response {
     Response::json(200, &v)
 }
 
-/// The project's firmware packages (each `[build.<id>]` package of dagon.toml)
-/// with their features, and the board table.
-fn targets(server: &Server) -> Res {
-    let cfg = config(server).map_err(|e| Response::error(500, &e))?;
-    let mut out = Vec::new();
-    for rel in package_dirs(&cfg) {
-        let Ok(text) = std::fs::read_to_string(cfg.base.join(&rel).join("Cargo.toml")) else {
-            continue;
-        };
-        let Ok(v) = toml::from_str::<toml::Value>(&text) else {
-            continue;
-        };
-        let features: Vec<String> = v
-            .get("features")
-            .and_then(|f| f.as_table())
-            .map(|t| t.keys().filter(|k| *k != "default").cloned().collect())
-            .unwrap_or_default();
-        out.push(json!({
-            "dir": rel,
-            "name": v.get("package").and_then(|p| p.get("name")).and_then(|n| n.as_str()),
-            "features": features,
-        }));
-    }
-    let reg = project_registry(&cfg).map_err(|e| Response::error(500, &e))?;
-    let boards: Vec<Value> = reg
-        .boards()
-        .iter()
-        // A project's own words were made safe when its definitions loaded.
-        .map(|b| json!({"id": b.id, "product": b.product, "mcu": b.mcu}))
-        .collect();
-    Ok(json_ok(json!({ "targets": out, "boards": boards })))
-}
-
 /// What the page is told when the open project's definitions do not load
 /// (the reason, which may name its files, goes to the terminal only).
 pub(super) const DEFS_ERROR: &str =
@@ -697,26 +663,6 @@ fn definitions(server: &Server) -> Res {
         "application/json",
         reg.to_json().into_bytes(),
     ))
-}
-
-/// The packages dagon.toml names (`[build.<id>]`), relative to it,
-/// `/`-separated, sorted and each once. A package outside the project is left
-/// out: no path outside it reaches the page.
-fn package_dirs(cfg: &Config) -> Vec<String> {
-    let dirs: std::collections::BTreeSet<String> = cfg
-        .build
-        .values()
-        .filter(|b| b.package.is_relative() && inside(cfg, &b.package).is_ok())
-        .map(|b| {
-            b.package
-                .components()
-                .filter(|c| !matches!(c, std::path::Component::CurDir))
-                .map(|c| c.as_os_str().to_string_lossy().into_owned())
-                .collect::<Vec<_>>()
-                .join("/")
-        })
-        .collect();
-    dirs.into_iter().collect()
 }
 
 fn topology_path(server: &Server) -> Result<PathBuf, Response> {
@@ -1706,35 +1652,6 @@ mod tests {
         };
         let yaml = include_str!("../../../../topology/sim-pair.yaml");
         (cfg, dagon_topology::parse_str(yaml).unwrap())
-    }
-
-    #[test]
-    fn package_dirs_are_the_build_packages_inside_the_project() {
-        let base = std::env::temp_dir().join(format!("dagon-pkgdirs-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&base);
-        std::fs::create_dir_all(&base).unwrap();
-        let build = |p: &str| crate::config::BuildInputs {
-            package: PathBuf::from(p),
-            bin: None,
-            features: Vec::new(),
-            slot_b_feature: None,
-            version: None,
-        };
-        let outside = base.parent().unwrap().join("elsewhere");
-        let cfg = Config {
-            base: base.clone(),
-            build: [
-                ("b".to_string(), build("fw/b")),
-                ("a".to_string(), build("./fw/a")),
-                ("twin".to_string(), build("fw/a")),
-                ("up".to_string(), build("../elsewhere")),
-                ("far".to_string(), build(outside.to_str().unwrap())),
-            ]
-            .into(),
-            ..Config::default()
-        };
-        assert_eq!(package_dirs(&cfg), ["fw/a", "fw/b"]);
-        let _ = std::fs::remove_dir_all(&base);
     }
 
     #[test]

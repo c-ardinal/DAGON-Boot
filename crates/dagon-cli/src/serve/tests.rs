@@ -587,44 +587,16 @@ fn without_a_release_key_the_page_carries_none() {
 }
 
 #[test]
-fn targets_lists_the_packages_dagon_toml_names_and_no_folder_by_its_name() {
+fn no_route_lists_packages_by_folder() {
     let a = start("nodes");
-    std::fs::write(
-        a.dir.join("dagon.toml"),
-        "topology = \"topology/t.yaml\"\n\
-         [build.seg]\npackage = \"firmware/seg\"\n\
-         [build.none]\npackage = \"firmware/no-manifest\"\n",
-    )
-    .unwrap();
-    let manifest = "[package]\nname = \"seg\"\n[features]\nslot-b = []\n";
-    // Folders with a package in them that the project does not name.
-    for d in [
-        "firmware/seg",
-        "targets/board",
-        "samples/app",
-        "nodes/other",
-    ] {
-        std::fs::create_dir_all(a.dir.join(d)).unwrap();
-        std::fs::write(a.dir.join(d).join("Cargo.toml"), manifest).unwrap();
-    }
-    let (st, body) = http(
+    let (st, _) = http(
         &a,
         "GET",
         "/v1/targets",
         &[("Authorization", &auth(&a))],
         b"",
     );
-    assert_eq!(st, 200);
-    let v: serde_json::Value = serde_json::from_str(&body).unwrap();
-    let dirs: Vec<&str> = v["targets"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .map(|t| t["dir"].as_str().unwrap())
-        .collect();
-    assert_eq!(dirs, ["firmware/seg"]);
-    assert_eq!(v["targets"][0]["name"], "seg");
-    assert_eq!(v["targets"][0]["features"][0], "slot-b");
+    assert_eq!(st, 404);
 }
 
 #[test]
@@ -647,7 +619,7 @@ fn a_projects_own_words_reach_the_page_only_as_plain_names() {
     .unwrap();
     let ok = [("Authorization", auth(&a))];
     let ok: Vec<(&str, &str)> = ok.iter().map(|(k, v)| (*k, v.as_str())).collect();
-    for route in ["/v1/targets", "/v1/definitions", "/v1/hello"] {
+    for route in ["/v1/definitions", "/v1/hello"] {
         let (st, body) = http(&a, "GET", route, &ok, b"");
         assert_eq!(st, 200, "{route}: {body}");
         assert!(
@@ -655,22 +627,15 @@ fn a_projects_own_words_reach_the_page_only_as_plain_names() {
             "{route}: {body}"
         );
     }
-    let (_, body) = http(&a, "GET", "/v1/targets", &ok, b"");
-    let v: serde_json::Value = serde_json::from_str(&body).unwrap();
-    let product = |id: &str| {
-        v["boards"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .find(|b| b["id"] == id)
-            .map(|b| b["product"].clone())
-    };
-    assert_eq!(product("my-pico"), Some("project-text".into()));
-    assert_eq!(product("my-two"), Some("My Two".into()));
+    let (_, body) = http(&a, "GET", "/v1/definitions", &ok, b"");
+    let reg = dagon_topology::defs::Registry::from_json(&body).unwrap();
+    let product = |id: &str| reg.board(id).map(|b| b.product.as_str());
+    assert_eq!(product("my-pico"), Some("project-text"));
+    assert_eq!(product("my-two"), Some("My Two"));
     // Builtin boards keep their own product names.
     assert_eq!(
         product("waveshare-rp2040-touch-lcd-1.28"),
-        Some("Waveshare RP2040-Touch-LCD-1.28".into())
+        Some("Waveshare RP2040-Touch-LCD-1.28")
     );
 }
 

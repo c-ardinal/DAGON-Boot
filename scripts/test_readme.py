@@ -62,16 +62,23 @@ class Readmes(unittest.TestCase):
             self.assertEqual(re.findall(r".{0,20}(?<!DAGON )Console.{0,20}", path.read_text(encoding="utf-8")), [], path.name)
 
     def test_requirements_come_before_the_first_command_that_needs_them(self):
-        for path, heading in ((JA, "## 必要なもの"), (EN, "## Prerequisites")):
+        for path, browser, rust in ((JA, "- Chrome か Edge 89 以降\n", "- Rust 1.95.0 以降"), (EN, "- Chrome or Edge 89 or later\n", "- Rust 1.95.0 or later")):
             text = path.read_text(encoding="utf-8")
-            self.assertLess(text.index(heading), text.index("cargo install"), path.name)
+            self.assertLess(text.index(browser), text.index("dagon demo\n"), path.name)
+            self.assertLess(text.index(rust), text.index("cargo install"), path.name)
 
-    def test_requirements_say_what_running_dagon_needs(self):
-        for path, heading, next_heading, line in ((JA, "## 必要なもの", "## まず試す", "- Chrome か Edge 89 以降\n"), (EN, "## Prerequisites", "## Try it", "- Chrome or Edge 89 or later\n")):
+    def test_building_it_yourself_stays_out_of_trying_it(self):
+        for path, start, end, heading, next_heading in (
+            (JA, "## まず試す", "## 自分のプロジェクトを始める", "## 自分でビルドする", "## 依存しているものと外部のデータ"),
+            (EN, "## Try it", "## Start your own project", "## Build it yourself", "## Dependencies and external data"),
+        ):
             text = path.read_text(encoding="utf-8")
-            section = text[text.index(heading):text.index(next_heading)]
-            self.assertIn(line, section, path.name)
-            self.assertNotIn("dagon doctor", section, path.name)
+            section = text[text.index(start):text.index(end)]
+            for word in ("Rust", "コンパイラ", "compiler", "cargo", "ST-LINK", "rustup"):
+                self.assertNotIn(word, section, path.name)
+            self.assertLess(text.index(heading), text.index(next_heading), path.name)
+            self.assertEqual(text.count(next_heading), 1, path.name)
+            self.assertLess(text[text.index(heading):].index(next_heading), text[text.index(heading):].index("\n## ", 3) + 2, path.name)
 
     def test_the_figure_says_word_for_word_what_it_shows(self):
         self.assertIn("次の図は DAGON のソフトウェアの設計です。", JA.read_text(encoding="utf-8"))

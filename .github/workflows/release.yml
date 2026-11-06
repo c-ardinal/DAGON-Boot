@@ -3,9 +3,8 @@
 # check: the tag names a component of compat.toml with that version, and
 # the version is at least what the commits since the component's last tag
 # require. Only a CLI tag (cli-v<version>) then builds the dagon
-# executables. Build only: the archives are kept as workflow artifacts;
-# making a GitHub release from them is a separate manual step each
-# time.
+# executables and, once every build has passed, publishes the GitHub release
+# install.sh and install.ps1 read. A manual run builds and publishes nothing.
 name: release build
 
 on:
@@ -70,3 +69,28 @@ jobs:
           name: dagon-${{ matrix.target }}
           path: out/release/*
           if-no-files-found: error
+
+  publish:
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/cli-v')
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: out/release
+          merge-multiple: true
+      - name: Publish the release
+        # Through the environment, not pasted into the script: a tag name is
+        # pusher-controlled text.
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          case "$TAG" in
+            *-rc.*) kind=--prerelease ;;
+            *) kind= ;;
+          esac
+          gh release create "$TAG" out/release/* --verify-tag --title "$TAG" --generate-notes $kind

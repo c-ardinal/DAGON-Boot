@@ -39,6 +39,9 @@ Projects use the clone with `dagon new --dagon-path <clone>` (or by setting `DAG
 `.github/workflows/release.yml` does the same for each platform when a `cli-v*` tag is pushed:
 
 1. `scripts/bump_check.py` confirms the version is at least what the commits require.
-2. It builds the archives and keeps them as workflow artifacts (it publishes nothing).
+2. It builds each system's archive and its `.sha256`.
+3. Once every build has passed, it publishes a GitHub release carrying each system's archive and its `.sha256`.
+
+A failed build publishes nothing, and neither does a manual run.
 
 The versioning rules are in [Versions and releases](/en/explanation/versioning/).

@@ -7,13 +7,17 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { decide, dependsOn, parseStatusZ, postCheck } from "./guard.mjs";
 
-const PORT_WT = "C:/w/dagon-port-R";
-const toplevel = (d) => (String(d).replace(/\\/g, "/").toLowerCase().startsWith("c:/w/dagon-port-r") ? PORT_WT : "C:/repo");
+// Absolute on the system running the tests: a drive means nothing to Linux's path rules.
+const WINDOWS = process.platform === "win32";
+const DRIVE = WINDOWS ? "C:" : "";
+const ROOT = `${DRIVE}/repo`;
+const PORT_WT = `${DRIVE}/w/dagon-port-R`;
+const toplevel = (d) => (String(d).replace(/\\/g, "/").toLowerCase().startsWith(PORT_WT.toLowerCase()) ? PORT_WT : ROOT);
 const deps = (o = {}) => ({ env: {}, toplevel, portWorktrees: () => [], run: () => "", ...o });
 const offSession = deps();
 const inSession = deps({ portWorktrees: () => [PORT_WT] });
 
-const call = (tool, tool_input, extra = {}) => ({ tool_name: tool, tool_input, cwd: "C:/repo", ...extra });
+const call = (tool, tool_input, extra = {}) => ({ tool_name: tool, tool_input, cwd: ROOT, ...extra });
 const sh = (command, extra) => call("Bash", { command }, extra);
 const wr = (file_path, extra) => call("Write", { file_path, content: "x" }, extra);
 const denied = (r) => r?.hookSpecificOutput?.permissionDecision === "deny";
@@ -28,26 +32,26 @@ const expectDeny = (input, d, re) => {
 const expectPass = (input, d) => assert.equal(decide(input, d), null, JSON.stringify(input.tool_input));
 
 test("port-engineer Write to dagon-conform is denied as read-only", () => {
-  expectDeny(wr("C:/repo/crates/dagon-conform/src/lib.rs", engineer), offSession, /read-only/);
+  expectDeny(wr(`${ROOT}/crates/dagon-conform/src/lib.rs`, engineer), offSession, /read-only/);
 });
 
 test("port-engineer Write to targets/esp32s3-* is allowed", () => {
-  expectPass(wr("C:/repo/targets/esp32s3-watch/src/lib.rs", engineer), offSession);
+  expectPass(wr(`${ROOT}/targets/esp32s3-watch/src/lib.rs`, engineer), offSession);
 });
 
 test("port-engineer area follows the MCU / board / samples layout", () => {
   const manifests = {
-    "C:/repo/targets/boards/m5stopwatch/Cargo.toml": '[dependencies]\ndagon-mcu-esp32s3 = { path = "../../mcu/esp32s3" }\n',
-    "C:/repo/targets/boards/rp2040-touch-lcd/Cargo.toml": '[dependencies]\ndagon-mcu-rp2040 = { path = "../../mcu/rp2040" }\n',
+    [`${ROOT}/targets/boards/m5stopwatch/Cargo.toml`]: '[dependencies]\ndagon-mcu-esp32s3 = { path = "../../mcu/esp32s3" }\n',
+    [`${ROOT}/targets/boards/rp2040-touch-lcd/Cargo.toml`]: '[dependencies]\ndagon-mcu-rp2040 = { path = "../../mcu/rp2040" }\n',
   };
   const d = deps({ readText: (f) => manifests[f] ?? null });
-  expectPass(wr("C:/repo/targets/mcu/esp32s3/src/node.rs", engineer), d);
-  expectPass(wr("C:/repo/targets/boards/m5stopwatch/src/lib.rs", engineer), d);
-  expectPass(wr("C:/repo/targets/boards/new-s3-board/Cargo.toml", engineer), d);
-  expectPass(wr("C:/repo/samples/esp32s3-app/src/main.rs", engineer), d);
-  expectDeny(wr("C:/repo/targets/boards/rp2040-touch-lcd/src/lib.rs", engineer), d, /may only edit/);
-  expectDeny(wr("C:/repo/targets/mcu/rp2040/src/lib.rs", engineer), d, /may only edit/);
-  expectDeny(wr("C:/repo/samples/rp2040-hub/src/main.rs", engineer), d, /may only edit/);
+  expectPass(wr(`${ROOT}/targets/mcu/esp32s3/src/node.rs`, engineer), d);
+  expectPass(wr(`${ROOT}/targets/boards/m5stopwatch/src/lib.rs`, engineer), d);
+  expectPass(wr(`${ROOT}/targets/boards/new-s3-board/Cargo.toml`, engineer), d);
+  expectPass(wr(`${ROOT}/samples/esp32s3-app/src/main.rs`, engineer), d);
+  expectDeny(wr(`${ROOT}/targets/boards/rp2040-touch-lcd/src/lib.rs`, engineer), d, /may only edit/);
+  expectDeny(wr(`${ROOT}/targets/mcu/rp2040/src/lib.rs`, engineer), d, /may only edit/);
+  expectDeny(wr(`${ROOT}/samples/rp2040-hub/src/main.rs`, engineer), d, /may only edit/);
   expectPass(sh("cd targets/mcu/esp32s3 && sed -i s/a/b/ src/lib.rs", engineer), d);
   expectDeny(sh("cd targets/mcu/rp2040 && sed -i s/a/b/ src/lib.rs", engineer), d);
 
@@ -55,7 +59,7 @@ test("port-engineer area follows the MCU / board / samples layout", () => {
     " M targets/mcu/esp32s3/src/node.rs\0 M targets/boards/m5stopwatch/src/lib.rs\0 M targets/boards/rp2040-touch-lcd/src/lib.rs\0";
   const post = deps({
     portWorktrees: () => [PORT_WT],
-    readText: (f) => manifests[f.replace(PORT_WT, "C:/repo")] ?? null,
+    readText: (f) => manifests[f.replace(PORT_WT, ROOT)] ?? null,
     run: (_r, a) => (a[0] === "status" ? status : ""),
   });
   const r = postCheck(sh("cargo fmt", engineer), post);
@@ -77,12 +81,12 @@ test("dependsOn reads dependency tables, not comments or other tables", () => {
 });
 
 test("outside a port session protected crates are writable", () => {
-  expectPass(wr("C:/repo/crates/dagon-conform/x.rs"), offSession);
+  expectPass(wr(`${ROOT}/crates/dagon-conform/x.rs`), offSession);
   expectPass(sh("sed -i s/a/b/ crates/dagon-core/src/lib.rs"), offSession);
 });
 
 test("DAGON_PORT_SESSION=1 marks a port session", () => {
-  expectDeny(wr("C:/repo/crates/dagon-sim/x.rs"), deps({ env: { DAGON_PORT_SESSION: "1" } }), /read-only/);
+  expectDeny(wr(`${ROOT}/crates/dagon-sim/x.rs`), deps({ env: { DAGON_PORT_SESSION: "1" } }), /read-only/);
 });
 
 test("B1 judge: only a bare dagon conform / dagon sim command", () => {
@@ -98,45 +102,45 @@ test("B1 judge: only a bare dagon conform / dagon sim command", () => {
     "dagon sim s1 | tee x",
     "cargo build",
   ]) expectDeny(sh(c, judge), offSession);
-  expectDeny(wr("C:/repo/targets/esp32s3-x/a.rs", judge), offSession);
+  expectDeny(wr(`${ROOT}/targets/esp32s3-x/a.rs`, judge), offSession);
 });
 
 test("B2 port session: single &, substitutions and protected cwd", () => {
   expectDeny(sh("cat a & rm -rf crates/dagon-core"), inSession, /read-only/);
   expectDeny(sh("echo $(rm -rf crates/dagon-core)"), inSession);
   expectDeny(sh("echo `rm -rf x`"), inSession);
-  expectDeny(sh("sed -i s/a/b/ src/lib.rs", { cwd: "C:/repo/crates/dagon-conform" }), inSession, /read-only/);
+  expectDeny(sh("sed -i s/a/b/ src/lib.rs", { cwd: `${ROOT}/crates/dagon-conform` }), inSession, /read-only/);
   expectDeny(sh("cd crates/dagon-conform && sed -i s/a/b/ src/lib.rs"), inSession, /read-only/);
 });
 
 test("B3 port worktree is a sibling of the session cwd", () => {
   expectDeny(sh("cd ../dagon-port-R && sed -i s/a/b/ crates/dagon-conform/src/lib.rs"), inSession);
-  expectDeny(sh("sed -i s/a/b/ C:/w/dagon-port-R/crates/dagon-conform/src/lib.rs"), inSession);
+  expectDeny(sh(`sed -i s/a/b/ ${PORT_WT}/crates/dagon-conform/src/lib.rs`), inSession);
   expectDeny(sh("git -C ../dagon-port-R checkout develop -- crates/dagon-sim"), inSession);
-  expectDeny(wr("C:/w/dagon-port-R/crates/dagon-core/src/lib.rs"), inSession);
+  expectDeny(wr(`${PORT_WT}/crates/dagon-core/src/lib.rs`), inSession);
 });
 
 test("B4 paths are normalised and anchored at the repository root", () => {
   for (const f of [
-    "C:/repo/targets/esp32s3-a/../../Cargo.toml",
-    "C:/repo/targets/esp32s3-a/../../crates/dagon-port/src/lib.rs",
-    "C:/repo/crates/dagon-port/targets/esp32s3-x/a.rs",
+    `${ROOT}/targets/esp32s3-a/../../Cargo.toml`,
+    `${ROOT}/targets/esp32s3-a/../../crates/dagon-port/src/lib.rs`,
+    `${ROOT}/crates/dagon-port/targets/esp32s3-x/a.rs`,
   ]) expectDeny(wr(f, engineer), offSession);
   for (const f of [
-    "C:/repo/crates//dagon-core/src/lib.rs",
-    "C:/repo/crates/./dagon-core/src/lib.rs",
-    "C:\\repo\\crates\\\\dagon-core\\lib.rs",
+    `${ROOT}/crates//dagon-core/src/lib.rs`,
+    `${ROOT}/crates/./dagon-core/src/lib.rs`,
+    ...(WINDOWS ? ["C:\\repo\\crates\\\\dagon-core\\lib.rs"] : []),
   ]) expectDeny(wr(f), inSession, /read-only/);
-  expectDeny(wr("src/lib.rs", { cwd: "C:/repo/crates/dagon-conform" }), inSession, /read-only/);
+  expectDeny(wr("src/lib.rs", { cwd: `${ROOT}/crates/dagon-conform` }), inSession, /read-only/);
 });
 
 test("O2 port-engineer shell writes stay inside targets/esp32s3-*", () => {
   expectDeny(sh("sed -i s/a/b/ crates/dagon-port/src/lib.rs", engineer), offSession);
-  expectDeny(sh("cd C:/repo/targets/esp32s3-x && sed -i s/a/b/ ../../crates/dagon-port/src/lib.rs", engineer), offSession);
-  expectDeny(sh("cd C:/repo/targets/esp32s3-x && rm -rf $HOME/x", engineer), offSession);
-  expectDeny(sh("echo x > C:/repo/Cargo.toml", engineer), offSession);
-  expectPass(sh("cd C:/repo/targets/esp32s3-x && sed -i s/a/b/ src/lib.rs", engineer), offSession);
-  expectPass(sh("cd C:/repo/targets/esp32s3-x && cargo build --release 2>&1", engineer), offSession);
+  expectDeny(sh(`cd ${ROOT}/targets/esp32s3-x && sed -i s/a/b/ ../../crates/dagon-port/src/lib.rs`, engineer), offSession);
+  expectDeny(sh(`cd ${ROOT}/targets/esp32s3-x && rm -rf $HOME/x`, engineer), offSession);
+  expectDeny(sh(`echo x > ${ROOT}/Cargo.toml`, engineer), offSession);
+  expectPass(sh(`cd ${ROOT}/targets/esp32s3-x && sed -i s/a/b/ src/lib.rs`, engineer), offSession);
+  expectPass(sh(`cd ${ROOT}/targets/esp32s3-x && cargo build --release 2>&1`, engineer), offSession);
   expectPass(sh("cat crates/dagon-port/src/lib.rs", engineer), offSession);
 });
 
@@ -146,7 +150,7 @@ test("O3 read-only commands touching protected crates pass", () => {
   expectPass(sh("git diff crates/dagon-core"), inSession);
   expectPass(sh("git -C crates/dagon-core status"), inSession);
   expectPass(sh("find crates/dagon-core -name '*.rs'"), inSession);
-  expectPass(sh("cat crates/dagon-core/src/lib.rs > C:/tmp/x"), inSession);
+  expectPass(sh(`cat crates/dagon-core/src/lib.rs > ${DRIVE}/tmp/x`), inSession);
   expectDeny(sh("find crates/dagon-core -delete"), inSession);
   expectDeny(sh("git diff --output=crates/dagon-core/x HEAD"), inSession);
   expectDeny(sh("git checkout -- crates/dagon-conform"), inSession);

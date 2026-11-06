@@ -763,7 +763,7 @@ mod tests {
             b.validate()
         };
         assert!(with(&|b| b.package = PathBuf::from("../elsewhere")).is_err());
-        assert!(with(&|b| b.package = PathBuf::from("C:/abs")).is_err());
+        assert!(with(&|b| b.package = std::env::temp_dir()).is_err());
         assert!(with(&|b| b.features = vec!["a,b".into()]).is_err());
         assert!(with(&|b| b.bin = Some("x y".into())).is_err());
         // A name cargo would read as an option.

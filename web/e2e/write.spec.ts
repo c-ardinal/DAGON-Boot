@@ -22,6 +22,8 @@ const heights = (page: Page) => page.locator('.node').evaluateAll((els) => els.m
 test('the split button writes the checked nodes, again after done, and says when there is nothing to do', async ({ page }) => {
   await toWrite(page, 'sim');
   const before = await heights(page);
+  // With a build there to write, the band asks for the press, not for a file.
+  await expect(page.locator('#band .sentence')).toContainText('『書き込む』を押して');
 
   await check(page, 'watch').click();
   // Every height any card has while the write runs, the 親機's reboot included.

@@ -1,6 +1,6 @@
 <script lang="ts">
   import { tick, untrack } from 'svelte';
-  import { bandOf, connectNotice } from './app/band.ts';
+  import { bandOf, connectNotice, prepareSentence } from './app/band.ts';
   import { AGENT, ANNOUNCE, BAND, BUILD, BUTTON, CANVAS, DEFINE, DIFF, DRAWER, JOBS, SKELETON, WRITE, HUB, LOCK, SHEET, STATUS, ZOOM, HUB_TOGGLE, MODE, NODE, PRODUCT, RECONNECT, SAVE, SKIP, STEP, TIME } from './app/copy.ts';
   import { webSerial } from './app/connect.ts';
   import { fade, rise, tokenMs } from './app/motion.ts';
@@ -8,7 +8,7 @@
   import { HUB_LOCKED, hubOf, view, type Action } from './app/machine.ts';
   import { Operate, waterOf, type Progress, type ReleaseFile } from './app/operate.svelte.ts';
   import { keptChoices, type Kept } from './app/kept.ts';
-  import { buildFailure, buildingNode, buildStateOf, firstWriteNodes, type BuildState } from './app/jobFlow.ts';
+  import { buildFailure, buildingNow, buildStateOf, firstWriteNodes, type BuildingMemo, type BuildState } from './app/jobFlow.ts';
   import { logStages } from './app/stageLog.svelte.ts';
   import Graph, { COMPACT_FROM, newView, ZOOM_LIMITS, type Chip, type View } from './graph/Graph.svelte';
   import Focal, { type Dot } from './screens/Focal.svelte';
@@ -461,8 +461,7 @@
     if (firstError) return { sentence: DEFINE.fixSentence };
     if (d.notYet) return { sentence: DEFINE.notYetSentence(d.notYet) };
     if (d.doc.topo.nodes.length === 0) return { sentence: CANVAS.empty };
-    if (needsSkeleton) return { sentence: DEFINE.skeletonFirst };
-    return { sentence: DEFINE.readySentence };
+    return { sentence: prepareSentence({ needsSkeleton, building: buildState === 'running', built: builtRevision === d.revision }) };
   });
   const savedLabel = $derived(local ? '' : d.unsaved ? SAVE.unsaved : autosave.pending ? STATUS.saving : STATUS.saved);
   let graph = $state<ReturnType<typeof Graph>>();
@@ -690,19 +689,20 @@
       buildAnnounced = s;
       if (s === 'done') {
         notice = { word: fillIn(BUILD.toast.done, { n: d.config.reach.length }) };
+        builtRevision = d.revision;
         void loadVersions();
       }
       if (s === 'failed') buildFailureOpen = true;
     });
   });
-  let lastNamed: string | null = null;
-  /** While building, the node cargo builds now carries the edge light; every node waits under it until cargo names one, and while signing. */
+  /** While building, only the node cargo builds now carries the edge light; it goes when the next is named or the job ends. */
+  let buildingMemo: BuildingMemo = { job: null, node: null };
   const building = $derived.by((): readonly string[] => {
-    if (buildState !== 'running') return (lastNamed = null), [];
-    // A job keeps only its latest lines: under cargo's long output the node named earlier is still the one being built.
-    lastNamed = buildingNode(buildJobs, d.config.reach) ?? lastNamed;
-    return lastNamed ? [lastNamed] : d.config.reach;
+    buildingMemo = buildingNow(buildJobs, d.config.reach, buildingMemo);
+    return buildingMemo.node ? [buildingMemo.node] : [];
   });
+  /** The 構成 as it was when a build last finished: while it stays so, the next step is to write. */
+  let builtRevision = $state<number | null>(null);
   const chips = $derived(updating ? progressChips : diffChips);
   /** The water in each node while it is written (writing, hubRestarting, recovering). */
   const fill = $derived(PERCENT.has(op.state) ? Object.fromEntries(Object.keys(waterOf(op.progress)).map((id) => [id, op.percentOf(id, nowMs)])) : {});
@@ -998,6 +998,7 @@
       finish: op.finished,
       refused: op.returnRefused?.kind,
       sim: simulated,
+      built: latest !== null || kept.length > 0,
     });
     if (dialogOpen) return { ...b, primary: null };
     // The demo page reads no files: its prepared package is what 書き込む writes.
@@ -1009,7 +1010,10 @@
   /** The status row's sentence in either mode. */
   const next = $derived(
     mode === 'define'
-      ? defineNext
+      ? // Before a project opens there is no 構成 to read, and dagon-wasm may still be loading.
+        screen === 'work'
+        ? defineNext
+        : { sentence: '' }
       : { cause: band.chip, sentence: band.sentence ?? '' },
   );
   const dot = $derived.by((): Dot | null => {

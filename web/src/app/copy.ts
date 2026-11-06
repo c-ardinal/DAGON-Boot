@@ -75,6 +75,8 @@ export const BAND = {
   M10: { sentence: '実際の配線と同じか確かめてから、親機へ送ってください。' },
   M12: { chip: '× 送信失敗', sentence: 'USB ケーブルを確かめてから、もう一度送ってください。' },
   M13: { sentence: 'パッケージファイルをこの画面に置くか、選んでください。' },
+  /** ready with a build to write: the main action writes it. */
+  M13built: { sentence: '書き込むノードにチェックを入れて、『書き込む』を押してください。' },
   /** M14 / M15 / M28: label-value pair, no sentence. */
   M14: { pair: ['目安', '約 1 分'] },
   M18: { sentence: '何も書いていないので、準備でもう一度ビルドするか、正しいファイルを選んでください。' },
@@ -104,7 +106,7 @@ export const BAND = {
   M63: { sentence: '確かめ終わるまで、そのまま待ってください。' },
   M64: { sentence: '親機が再起動したら自動でつなぎ直すので、そのまま待ってください。' },
   M65: { pair: ['目安', '約 1 分'], sentence: '止まったノードへ書き込むと、新しいバージョンで動きます。' },
-  M66: { sentence: 'すべてのノードが新しいバージョンで動いています。' },
+  M66: { sentence: 'すべてのノードへ書き込みました。' },
   M66checked: { sentence: 'チェックしたノードへ書き込みました。' },
   M67: { sentence: 'CLI の作業が終わると、自動でつなぎ直します。' },
 } as const satisfies Record<string, BandCopy>;
@@ -882,8 +884,10 @@ export const DEFINE = {
   toOperate: '書込へ',
   /** Writes the 構成 back to the project's YAML through dagon serve. */
   save: '保存',
-  fixSentence: '直すと、親機へ送れます。',
+  fixSentence: '直すと、ビルドできます。',
   readySentence: 'ビルドしてから、書込で書き込みます。',
+  buildingSentence: 'ビルドが終わるまで、そのまま待ってください。',
+  builtSentence: '書込に切り替えて、ノードへ書き込みます。',
   skeletonFirst: '先に雛形を作ると、ビルドできます。',
   /** C19: E6, nodes updating skips; the 構成 is valid as it is. */
   notYetSentence: (k: number) => `書き込めないノードが ${k} つあります。構成はこのままで使え、書き込みではそのノードを飛ばします。`,

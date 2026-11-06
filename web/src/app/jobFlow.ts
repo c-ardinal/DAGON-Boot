@@ -36,10 +36,24 @@ const lastBuilding = (lines: string[], reach: readonly string[]): string | null 
   return null;
 };
 
-/** The node being built now, for its card; null when nothing runs. */
+/** The node being built now, for its card; null when nothing runs or the running job named none. */
 export function buildingNode(j: BuildJobs, reach: readonly string[]): string | null {
   const running = [j.sign, j.build].find((x) => x?.state === 'running');
   return running ? lastBuilding(running.lines, reach) : null;
+}
+
+/** A job keeps only its latest lines, so a name can scroll off while that node still builds: what the running job named last. */
+export interface BuildingMemo {
+  job: number | null;
+  node: string | null;
+}
+
+/** `buildingNode`, holding the running job's last name; a job that ended, or a new one, names nobody until it does. */
+export function buildingNow(j: BuildJobs, reach: readonly string[], memo: BuildingMemo): BuildingMemo {
+  const running = [j.sign, j.build].find((x) => x?.state === 'running');
+  if (!running) return { job: null, node: null };
+  const named = lastBuilding(running.lines, reach);
+  return { job: running.id, node: named ?? (memo.job === running.id ? memo.node : null) };
 }
 
 export interface BuildFailure {

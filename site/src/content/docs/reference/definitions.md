@@ -28,7 +28,7 @@ description: "dagon-mcu.tomlとdagon-board.toml: DAGONがマイコンやボー�
 | `[writer]` | テーブル | 必須 | 最初の書き込みのツール: `kind`とそのパラメータ（下記）。 |
 | `[[part]]` | テーブルの配列 | 任意 | 最初の書き込みのために、この定義のフォルダからビルドするDAGONの部品: `name`、`sub`（定義のフォルダの中のフォルダ）、`bin`。 |
 | `[coordinator]` | テーブル | 任意 | 親機になれるマイコンだけ: `pio_state_machines`、`pio_uart_state_machines`（リンクごと）、`uart0_tx`、`uart0_rx`。構成がそのマイコンを親機にできるのは、`[coordinator]`が定義されているときだけです（V-25）。 |
-| `[link_uart]` | テーブル | 任意 | How the UART the MCU package runs DAGON's UART links on makes a bit rate, as its HAL computes it: `clock_hz` divided by `clocks_per_bit` times a divider with `frac_bits` fraction bits, rounded down. `bauds` lists the bit rates the firmware runs its link at; the topology check (V-26) refuses a link `baud` that either end's list does not name or that either end makes more than 2 % off, and the Console offers only the speeds both ends name. Required on an MCU whose `[links]` has `uart`: without it, every UART link that MCU's firmware runs is refused, since no speed on it is known to work. |
+| `[link_uart]` | テーブル | 任意 | マイコンの定義のコードがDAGONのUARTリンクを動かすUARTのビットレートの作り方。HALが計算するとおりです: `clock_hz`を`clocks_per_bit`と、`frac_bits`ビットの小数部を持つ分周比の積で割り、切り捨てます。`bauds`は、そのコードがリンクを動かすビットレートの一覧です。構成の確認（V-26）は、どちらかの端の一覧に無いか、どちらかの端で2 %より大きくずれるリンクの`baud`を受け付けません。DAGON Consoleは両端の一覧にある速さだけを選べるようにします。`[links]`に`uart`があるマイコンでは必須です。これが無いと、そのマイコンのファームウェアが動かすUARTリンクはすべて受け付けません。動くと分かっている速度が無いためです。 |
 | `[rom_i2c]` | テーブル | 任意 | ROMのI2Cブートローダ（`stm32-i2c-rom`）: `name`（確認のメッセージでの呼び名）、`addr`、`max_hz`、`erase_sectors`、待ち受ける`pairs = [{ controller, sda, scl }]`。 |
 | `[links]` | テーブル | 任意 | マイコンの定義のファームウェアが実装するリンクの種類（その`LINK_KINDS`）。 |
 | `[connection]` | テーブル | 必須 | 書き込みのときに利用者がつなぐ方法: `label`、`hint`。 |

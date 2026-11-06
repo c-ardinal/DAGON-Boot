@@ -472,7 +472,7 @@ pub struct McuDef {
     /// computes it: `clock_hz` divided by `clocks_per_bit` times a divider with `frac_bits`
     /// fraction bits, rounded down. `bauds` lists the bit rates the firmware runs its link at;
     /// the topology check (V-26) refuses a link `baud` that either end's list does not name or
-    /// that either end makes more than 2 % off, and the Console offers only the speeds both
+    /// that either end makes more than 2 % off, and DAGON Console offers only the speeds both
     /// ends name. Required on an MCU whose `[links]` has `uart`: without it, every UART link
     /// that MCU's firmware runs is refused, since no speed on it is known to work.
     pub link_uart: Option<LinkUart>,

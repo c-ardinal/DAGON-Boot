@@ -166,7 +166,8 @@ ones (manifest `trusted = true`, listed with their source hash under
 it, each call timed against its `max_run_us`: a call that takes longer
 is not stopped, but the boot core then delivers `boot.extension_overran`
 (the extension, its budget, the time taken) to the extensions observing
-that kind, and goes on. `dagon gen` refuses a set whose calls could take
+that kind, and goes on. Nothing a boot extension does changes which slot
+the boot core starts. `dagon gen` refuses a set whose calls could take
 more than a quarter of the trial watchdog period: one call per observed
 boot event, and for an extension observing `boot.extension_overran` one
 more per call of any boot extension.

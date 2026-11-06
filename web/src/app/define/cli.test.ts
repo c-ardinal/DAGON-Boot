@@ -5,7 +5,7 @@ import { Define } from './define.svelte.ts';
 import { SAVE } from '../copy.ts';
 
 const PASS = '0123456789abcdef0123456789abcdef';
-const HELLO = { cli: '0.1.0', api: 1, workspace: 'my-fleet', features: ['build', 'sign', 'release', 'gen'], api_key: false, key: true, key_id: '3f9a21c7aabbccdd' };
+const HELLO = { cli: '0.1.0', api: 1, workspace: 'my-fleet', features: ['build', 'sign', 'release', 'gen'], key: true, key_id: '3f9a21c7aabbccdd' };
 
 interface Call {
   url: string;

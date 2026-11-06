@@ -28,13 +28,13 @@ SECTIONS = [("breaking", "Breaking"), ("feature", "Features"), ("fix", "Fixes")]
 def section(name, version, since, kinds):
     """The Markdown section for `kinds` [(kind, subject)]; commits that need
     no release are left out."""
-    head = f"## {name} {version}" + (f" (since {since})" if since else "")
-    lines = [head, ""]
+    lines = [f"## {name} {version}", ""] + ([f"Since {since}.", ""] if since else [])
+    bare = len(lines)
     for kind, title in SECTIONS:
         subjects = [s for k, s in kinds if k == kind]
         if subjects:
             lines += [f"### {title}", ""] + [f"- {s}" for s in subjects] + [""]
-    if len(lines) == 2:
+    if len(lines) == bare:
         lines += ["No changes that need a release.", ""]
     return "\n".join(lines)
 

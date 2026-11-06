@@ -26,7 +26,7 @@ A product can give each of its microcontrollers the role that suits it best and 
 
 DAGON makes the distributed microcontroller designs that professionals and specialists use workable for a wide range of people, from those starting electronics with AI to individual developers who do not compromise on design.
 
-The first time only, you connect each microcontroller directly, one at a time, and write its factory image. After that, you do not need to open the case or connect them one at a time.
+The first time only, you connect each microcontroller directly, one at a time, and write its factory image. After that, one connection is enough, and you do not need to connect them one at a time. If that port is outside the case, the case stays closed. Otherwise the case is opened only for that one connection.
 Through one microcontroller connected to your PC, you write to the microcontrollers beyond it with a single operation. More microcontrollers take more time; the operation does not grow.
 
 Update images are all signed and written safely. A microcontroller starts a new version on trial and goes back to the previous version by itself if it does not work. If a write stops part-way, the running version stays.

@@ -31,7 +31,7 @@ As a developer you choose the boards, draw how they connect and write your appli
 
 - **Draw the setup**: DAGON Console, in your browser, shows the nodes and their links as a graph and checks wiring and pins as you edit.
 - **Get a project that builds**: `dagon new` and `dagon gen` give every node a Rust crate with its start-up, its wiring and an empty `app.rs` for your code.
-- **Write in one go**: `dagon deploy` or the Console builds, signs, packages and writes in one action, with each node's progress in view.
+- **Write in one go**: `dagon deploy` builds, signs, packages and writes in one command. In the Console you write with each node's progress in view.
 - **Go back when it fails**: every image is signed. A node runs a new version on trial and goes back when it cannot be confirmed; `dagon rollback` goes back by hand.
 - **Extend it**: without changing DAGON's source, add extensions that receive events, answer decisions and replace parts (ports).
 - **Ask an AI**: a new project comes with Claude Code instructions and skills, and `dagon ai link` connects an agent with your consent.

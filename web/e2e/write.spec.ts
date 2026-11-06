@@ -92,8 +92,9 @@ test('a node whose boot loader alone differs is written, and its card says the b
   // The app is on 1.1.0 already: only the boot loader stands to be written.
   await page.locator('.split .main').click();
   await expect(page.locator('.node', { hasText: '→ ブートローダ 1.1.0' })).toBeVisible({ timeout: 60_000 });
-  await expect(page.locator('.node', { hasText: '→ 1.1.0' })).toBeVisible({ timeout: 120_000 });
   await finished(page);
+  // The app was what the node runs: it was not written.
+  await expect(page.locator('.node', { hasText: '→ 1.1.0' })).toHaveCount(0);
   await page.locator('.toast').waitFor({ state: 'detached', timeout: 10_000 });
 
   // Now both are the same: said, nothing written.

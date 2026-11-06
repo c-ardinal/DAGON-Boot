@@ -415,8 +415,8 @@ class Run:
 
     def core_update(self, name, s, before):
         """Raises the node's boot crate to the step's version and writes the node
-        with its app on the version it runs (a write also takes the app to its
-        other slot). Asserted through `dagon status`' versions lines. A failing
+        with its app on the version it runs (an app whose digest is the running
+        one's stays where it is). Asserted through `dagon status`' versions lines. A failing
         core's version is taken back afterwards, so later steps do not write it."""
         node, v = s["node"], s["version"]
         n = before[node]

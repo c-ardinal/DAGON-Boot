@@ -147,6 +147,14 @@ pub fn release_agent_digest(bundle: &[u8], node: u8) -> Option<Vec<u8>> {
     dagon_host::agent_digest(&b, node).map(|d| d.to_vec())
 }
 
+/// The header digest of the app `bundle` holds for `node` in `slot`, compared
+/// with that slot as dagon-host does; none when it holds no such app.
+#[wasm_bindgen]
+pub fn release_app_digest(bundle: &[u8], node: u8, slot: u8) -> Option<Vec<u8>> {
+    let b = BundleView::parse(bundle).ok()?;
+    dagon_host::app_digest(&b, node, slot).map(|d| d.to_vec())
+}
+
 /// Decoded HELLO response body.
 #[wasm_bindgen]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

@@ -663,8 +663,5 @@ describe('update from the page with dagon-host apply against the mock hub', () =
     for (const n of op.reach) op.toggleSkip(n.id);
     expect(await op.noWrite(RELEASE)).toBe('noneChecked');
     for (const n of op.reach) op.toggleSkip(n.id);
-    op.takeFile('v1.1.0.dgb', RELEASE);
-    await op.update();
-    expect(await op.noWrite(RELEASE)).toMatchObject({ same: op.fileVersions.hub });
   }, 60_000);
 });

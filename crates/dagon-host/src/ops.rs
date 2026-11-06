@@ -272,7 +272,7 @@ impl<T: Transport, C: Clock> Host<T, C> {
             let outcome = match target {
                 _ if failed => Outcome::NotStarted,
                 None => Outcome::Failed(Error::Unreachable { node }),
-                Some(to) => match self.update_node(&b, node, to, on_event).await {
+                Some(to) => match self.update_node(&b, node, to, false, on_event).await {
                     Ok(v) => Outcome::Done(v),
                     Err(e) => Outcome::Failed(e),
                 },
@@ -292,11 +292,12 @@ impl<T: Transport, C: Clock> Host<T, C> {
         b: &BundleView<'_>,
         node: u8,
         to: Target,
+        rewrite: bool,
         on_event: &mut dyn FnMut(Event),
     ) -> Result<Version, T::Error> {
         self.write = Default::default();
         let st = self.status(to).await?;
-        let r = self.update_inner(b, node, to, &st, on_event).await;
+        let r = self.update_inner(b, node, to, &st, rewrite, on_event).await;
         if let Err(e) = &r {
             let ph = match e {
                 Error::Rejected {
@@ -328,6 +329,7 @@ impl<T: Transport, C: Clock> Host<T, C> {
         node: u8,
         to: Target,
         st: &NodeState,
+        rewrite: bool,
         on_event: &mut dyn FnMut(Event),
     ) -> Result<Version, T::Error> {
         let running = st.hello.active_version;
@@ -337,9 +339,9 @@ impl<T: Transport, C: Clock> Host<T, C> {
         let agent = self.update_agent(b, node, to, on_event).await?;
         if core || agent {
             let st = self.status(to).await?;
-            return self.update_app(b, node, to, &st, on_event).await;
+            return self.update_app(b, node, to, &st, rewrite, on_event).await;
         }
-        self.update_app(b, node, to, st, on_event).await
+        self.update_app(b, node, to, st, rewrite, on_event).await
     }
 
     /// The node's recovery agent (the factory slot of a vendor-stage2 MCU)
@@ -475,17 +477,30 @@ impl<T: Transport, C: Clock> Host<T, C> {
         Ok(true)
     }
 
-    /// The node's app from the release into its free APP slot.
+    /// The node's app from the release into its free APP slot; unless
+    /// `rewrite`, not when it is what the node runs, so the other slot keeps
+    /// the version to go back to. The node's write is then over: its number
+    /// says so, as a confirmation does.
     async fn update_app(
         &mut self,
         b: &BundleView<'_>,
         node: u8,
         to: Target,
         st: &NodeState,
+        rewrite: bool,
         on_event: &mut dyn FnMut(Event),
     ) -> Result<Version, T::Error> {
-        if !has_kind(b, node, image_kind::APP) {
-            return Ok(st.hello.active_version);
+        let unchanged = !rewrite && app_unchanged(b, node, st);
+        if unchanged || !has_kind(b, node, image_kind::APP) {
+            let running = st.hello.active_version;
+            if unchanged {
+                self.note(&format!(
+                    "node {node}: app {running} not written, it is what the node runs"
+                ));
+            }
+            self.emit(on_event, node, phase::CONFIRM, 100, running)
+                .await;
+            return Ok(running);
         }
         let slot = free_slot(&st.status).ok_or(Error::NoImage { node })?;
         let img = image_for(b, node, slot).ok_or(Error::NoImage { node })?;
@@ -668,7 +683,8 @@ impl<T: Transport, C: Clock> Host<T, C> {
                 } else {
                     RecoverPath::Retransfer
                 };
-                let v = self.update_node(&b, node, to, on_event).await?;
+                // Chosen by the user: the app goes in again even when it is the same.
+                let v = self.update_node(&b, node, to, true, on_event).await?;
                 return Ok((path, v));
             }
             Err(Error::Transport(e)) => return Err(Error::Transport(e)),
@@ -1119,8 +1135,28 @@ fn plan(b: &BundleView<'_>, topo: &TopologyView<'_>, only: Option<&[u8]>) -> Vec
 /// The header digest of the recovery agent `bundle` holds for `node`: the node
 /// gets it written when its factory slot holds another ([`Host::apply`]).
 pub fn agent_digest(b: &BundleView<'_>, node: u8) -> Option<[u8; 16]> {
-    let raw = image_of(b, node, image_kind::AGENT, FACTORY_SLOT)?.get(..HEADER_SIZE)?;
+    image_digest(b, node, image_kind::AGENT, FACTORY_SLOT)
+}
+
+/// The header digest of the app `bundle` holds for `node` in `slot`. A normal
+/// write leaves it out when it is what the node runs in that slot, off trial.
+pub fn app_digest(b: &BundleView<'_>, node: u8, slot: u8) -> Option<[u8; 16]> {
+    image_digest(b, node, image_kind::APP, slot)
+}
+
+fn image_digest(b: &BundleView<'_>, node: u8, kind: u8, slot: u8) -> Option<[u8; 16]> {
+    let raw = image_of(b, node, kind, slot)?.get(..HEADER_SIZE)?;
     Some(dagon_format::header::header_digest16(raw.try_into().ok()?))
+}
+
+fn app_unchanged(b: &BundleView<'_>, node: u8, st: &NodeState) -> bool {
+    let active = st.status.active;
+    !st.hello.trial
+        && st
+            .status
+            .slots
+            .get(usize::from(active))
+            .is_some_and(|s| app_digest(b, node, active) == Some(s.digest16))
 }
 
 /// Slot neither running nor confirmed.

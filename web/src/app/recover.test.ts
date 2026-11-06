@@ -169,8 +169,14 @@ describe('recovery from the page with dagon-host recover', () => {
     await op.round();
     // Both match: nothing stands to be written, and the same app version stays.
     expect(await op.noWrite(both)).toMatchObject({ same: op.fileVersions.seg });
-    expect(said).toEqual(['→ ブートローダ 1.1.0', '→ 1.1.0']);
+    // The app is what the node runs: it is not written, and the card says only what was.
+    expect(said).toEqual(['→ ブートローダ 1.1.0']);
+    expect(op.progress.seg).toMatchObject({ stage: 'done', percent: 100 });
+    expect(op.percentOf('seg')).toBe(100);
     expect(await op.noWrite(both)).toMatchObject({ coreToo: true });
+    // The previous version stays to go back to.
+    await op.rollback('seg');
+    expect(v(op.live.seg.hello?.activeVersion)).toBe('1.0.0');
   }, 240_000);
 
   test('the one % never moves back across a boot loader and its app, and stays the number the node is told', async () => {
@@ -245,6 +251,10 @@ describe('recovery from the page with dagon-host recover', () => {
     expect(op.state).toBe('done');
     await op.round();
     expect(await op.noWrite(agent)).toMatchObject({ same: op.fileVersions.watch });
+    expect(op.progress.watch).toMatchObject({ stage: 'done', percent: 100 });
+    // The app was left alone: the watch's previous version stays to go back to.
+    await op.rollback('watch');
+    expect(v(op.live.watch.hello?.activeVersion)).toBe('1.0.0');
   }, 180_000);
 
   test('a boot core that cannot be read is not called the same', async () => {
@@ -263,6 +273,13 @@ describe('recovery from the page with dagon-host recover', () => {
     (op as unknown as { host: { bootCoreStatus: () => Promise<never> } }).host.bootCoreStatus = () => Promise.reject(new Error('no'));
     expect(await op.noWrite(both)).toBe(null);
   }, 120_000);
+
+  test('the hub chosen again after a boot core took over, with an app that needs no writing, is done', () => {
+    const core = 0x01010000;
+    expect(hubBack({ outcome: 'notOnTrial', version: 0x01000000 } as never, undefined, core, core, true)).toBe('done');
+    expect(hubBack({ outcome: 'notOnTrial', version: 0x01000000 } as never, undefined, core, core, false)).toBe('unwritten');
+    expect(hubBack({ outcome: 'notOnTrial', version: 0x01000000 } as never, undefined, core, 0x01000000, true)).toBe('coreBack');
+  });
 
   test('the hub chosen again by hand after its boot core write: what it says decides the words', () => {
     const on = (version: number) => ({ outcome: 'notOnTrial', version }) as never;

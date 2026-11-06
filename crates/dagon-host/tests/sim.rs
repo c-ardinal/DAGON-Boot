@@ -1677,6 +1677,144 @@ fn the_f401_takes_a_new_boot_core_through_the_release() {
 }
 
 /// After the ROM loader's full rewrite the F401 runs boot core A, recorded.
+/// A package of `images` for the sample of this file.
+fn package(images: &[Vec<u8>]) -> Vec<u8> {
+    dagon_sign::release::build(
+        dagon_topology::defs::Registry::builtin(),
+        &dagon_topology::parse_str(&yaml()).unwrap(),
+        &topology(&yaml()),
+        images,
+        "r",
+        &key(),
+    )
+    .unwrap()
+    .bundle
+}
+
+fn write_seg(s: &Sim, images: &[Vec<u8>]) -> Vec<Event> {
+    let mut events = Vec::new();
+    let out = block_on(host(s).apply(
+        &package(images),
+        &topology(&yaml()),
+        &key().pk,
+        Some(&[SEG]),
+        &mut |e| events.push(e),
+    ))
+    .unwrap();
+    assert!(matches!(out[0].outcome, Outcome::Done(_)), "{out:?}");
+    events
+}
+
+#[test]
+fn a_boot_loader_only_write_keeps_the_app_to_go_back_to() {
+    let s = sim();
+    let (v0, v1) = (Version::new(1, 0, 0), Version::new(1, 1, 0));
+    let apps = [seg_img(0, v1), seg_img(1, v1)];
+    write_seg(&s, &apps);
+    let before = block_on(host(&s).status(SEG_AT)).unwrap().status;
+    assert_eq!(before.active, 1);
+
+    let core = [
+        apps[0].clone(),
+        apps[1].clone(),
+        seg_core(0, v1),
+        seg_core(1, v1),
+    ];
+    let events = write_seg(&s, &core);
+    // Only the boot core's bytes moved, and the node's one number still ends at 100.
+    assert!(
+        events
+            .iter()
+            .all(|e| e.phase != phase::TRANSFER || e.boot_core),
+        "{events:?}"
+    );
+    let last = events.last().unwrap();
+    assert_eq!(
+        (last.phase, last.shown, last.boot_core, last.version),
+        (phase::CONFIRM, 100, false, v1)
+    );
+    assert!(
+        events.windows(2).all(|w| w[0].shown <= w[1].shown),
+        "{events:?}"
+    );
+    let after = block_on(host(&s).status(SEG_AT)).unwrap().status;
+    assert_eq!(after.active, before.active, "the app did not move");
+    assert_eq!(after.slots[0].version, v0, "the previous version stays");
+    assert_eq!(
+        block_on(host(&s).boot_core_status(SEG_AT)).unwrap().slots[1].version,
+        v1
+    );
+
+    assert_eq!(
+        block_on(host(&s).rollback(SEG_AT, SEG, &mut |_| {})).unwrap(),
+        v0
+    );
+}
+
+#[test]
+fn nothing_differing_writes_nothing_and_says_the_node_is_on_it() {
+    let s = sim();
+    let v1 = Version::new(1, 1, 0);
+    let apps = [seg_img(0, v1), seg_img(1, v1)];
+    write_seg(&s, &apps);
+    let before = block_on(host(&s).status(SEG_AT)).unwrap().status;
+    let events = write_seg(&s, &apps);
+    assert_eq!(events.len(), 1, "{events:?}");
+    assert_eq!((events[0].phase, events[0].shown), (phase::CONFIRM, 100));
+    assert_eq!(block_on(host(&s).status(SEG_AT)).unwrap().status, before);
+}
+
+#[test]
+fn a_same_version_rebuild_with_another_digest_is_written() {
+    let s = sim();
+    let v1 = Version::new(1, 1, 0);
+    write_seg(&s, &[seg_img(0, v1), seg_img(1, v1)]);
+    let before = block_on(host(&s).status(SEG_AT)).unwrap().status;
+    let rebuilt = |slot| img("stm32f401re", "seg-f401-7seg", slot, v1, 0x77 + slot);
+    let events = write_seg(&s, &[rebuilt(0), rebuilt(1)]);
+    assert!(events
+        .iter()
+        .any(|e| e.phase == phase::TRANSFER && !e.boot_core));
+    let after = block_on(host(&s).status(SEG_AT)).unwrap().status;
+    assert_ne!(after.active, before.active);
+    assert_ne!(
+        after.slots[usize::from(after.active)].digest16,
+        before.slots[usize::from(before.active)].digest16
+    );
+}
+
+#[test]
+fn a_recovery_rewrites_the_same_app_when_asked() {
+    let s = sim();
+    let v1 = Version::new(1, 1, 0);
+    let apps = package(&[seg_img(0, v1), seg_img(1, v1)]);
+    block_on(host(&s).apply(
+        &apps,
+        &topology(&yaml()),
+        &key().pk,
+        Some(&[SEG]),
+        &mut |_| {},
+    ))
+    .unwrap();
+    let before = block_on(host(&s).status(SEG_AT)).unwrap().status;
+    let topo = topology(&yaml());
+    let assets = RecoverAssets {
+        release: &apps,
+        topology: &topo,
+        pubkey: &key().pk,
+        bootcore: None,
+        stage0: None,
+        roms: &[],
+        rom_confirmed: false,
+    };
+    let (path, v) = block_on(host(&s).recover(SEG, &assets, &mut |_| {})).unwrap();
+    assert_eq!((path, v), (RecoverPath::Retransfer, v1));
+    assert_ne!(
+        block_on(host(&s).status(SEG_AT)).unwrap().status.active,
+        before.active
+    );
+}
+
 #[test]
 fn the_rom_path_leaves_boot_core_a_recorded() {
     let s = sim();

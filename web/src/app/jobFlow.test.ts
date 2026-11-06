@@ -83,6 +83,15 @@ describe('what a failed build says', () => {
   });
 });
 
+describe('a signing failure', () => {
+  test('names its node and gives the reason without the name', () => {
+    const sign = job({ kind: 'sign', state: 'failed', lines: [], result: { error: 'watch: espflash save-image failed' } });
+    const f = buildFailure({ ...none, sign }, reach);
+    expect(f.node).toBe('watch');
+    expect(f.reason).toBe('espflash save-image failed');
+  });
+});
+
 describe('the first write of a node', () => {
   const nodes = [{ id: 'hub' }, { id: 'seg' }, { id: 'garden', notYet: 'no link' }];
 

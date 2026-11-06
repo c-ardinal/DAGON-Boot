@@ -60,6 +60,10 @@ const CARGO_PLACE = /^\s*-->\s*(.+):(\d+):\d+\s*$/;
 export function buildFailure(j: BuildJobs, reach: readonly string[]): BuildFailure {
   const failed = [j.build, j.sign, j.release].find((x) => x?.state === 'failed') ?? null;
   const plain = { node: null, reason: jobReason(failed), file: null, line: null, others: 0 };
+  if (failed && failed === j.sign) {
+    const named = /^(\S+): (.*)$/s.exec(plain.reason ?? '');
+    return named && reach.includes(named[1]) ? { ...plain, node: named[1], reason: named[2] } : plain;
+  }
   if (!failed || failed !== j.build) return plain;
   const lines = failed.lines;
   const at = lines.findIndex((l, i) => CARGO_ERROR.test(l) && CARGO_PLACE.test(lines[i + 1] ?? ''));

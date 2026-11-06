@@ -959,13 +959,20 @@ fn sign_nodes(
         let parsed = version(&ver)?;
         ready.push((node, ver, parsed, elfs));
     }
+    let mut flat = Vec::new();
+    for (node, ver, parsed, elfs) in ready {
+        let mut built = crate::deploy::release_inputs(cfg, t, vec![(node.clone(), parsed, elfs)])
+            .map_err(|e| format!("{node}: {e}"))?;
+        let (_, _, elfs) = built.pop().ok_or("no build")?;
+        flat.push((node, ver, parsed, elfs));
+    }
     // All images are signed in memory first; files change only after
     // every one succeeded, so a bad ELF, a signing error or a cancel
     // leaves the old images and records as they were.
     let reg = crate::defs::registry(cfg)?;
     let mut out = Vec::new();
     let mut signed = Vec::new();
-    for (node, ver, parsed, elfs) in ready {
+    for (node, ver, parsed, elfs) in flat {
         let opts = SignOpts {
             version: parsed,
             release_seq: 1,
@@ -990,7 +997,8 @@ fn sign_nodes(
                 &elf,
                 Some(&opts),
                 key,
-            )?;
+            )
+            .map_err(|e| format!("{node}: {e}"))?;
             log(&format!(
                 "{node}: slot {slot} signed, {} bytes, {ver}",
                 img.len()
@@ -1873,6 +1881,38 @@ mod tests {
     #[ignore = "builds firmware for the STM32F401"]
     fn raised_versions_reach_the_package_f401() {
         raised_versions_reach_the_package("seg");
+    }
+
+    /// An ESP32-S3 app is signed as the flat image its OTA slots hold, as in
+    /// `dagon deploy`, never as the ELF: the ELF's sections are mapped far from
+    /// the slot. A stand-in ELF stops at that step, whether espflash is
+    /// installed or not, and the failure names the node.
+    #[test]
+    fn signing_an_esp32s3_node_goes_through_its_esp_image() {
+        let (cfg, _) = built_area("esp");
+        let t =
+            dagon_topology::parse_str(include_str!("../../../../topology/sample.yaml")).unwrap();
+        let dir = cfg.base.join("out/build/watch");
+        std::fs::create_dir_all(&dir).unwrap();
+        let body = vec![0x41u8; 1500];
+        std::fs::write(dir.join("app-a.elf"), &body).unwrap();
+        let rec = nodebuild::BuildRecord {
+            version: Some("0.1.0".into()),
+            slots: vec![('a', sha_hex(&body))],
+        };
+        std::fs::write(dir.join("build.json"), serde_json::to_string(&rec).unwrap()).unwrap();
+        let watch = ["watch".to_string()];
+        let e = sign_nodes(
+            &cfg,
+            &t,
+            &watch,
+            &test_key(),
+            &mut |_| {},
+            &AtomicBool::new(false),
+        )
+        .unwrap_err();
+        assert!(e.starts_with("watch: ") && e.contains("espflash"), "{e}");
+        let _ = std::fs::remove_dir_all(&cfg.base);
     }
 
     #[test]

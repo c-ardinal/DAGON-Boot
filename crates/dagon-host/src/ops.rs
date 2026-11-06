@@ -94,6 +94,9 @@ pub struct Event {
     pub percent: u8,
     /// The node's one progress number (`percent.rs`), what its display is told.
     pub shown: u8,
+    /// The host's clock when this number was reckoned: a caller that counts
+    /// the trial's time on from it reckons with the same moments.
+    pub at_ms: u64,
     pub version: Version,
     /// On the VERIFY event of a written image: how long its phases took.
     pub times: Option<XferTimes>,
@@ -301,11 +304,13 @@ impl<T: Transport, C: Clock> Host<T, C> {
                 _ => phase::FAILED,
             };
             let v = st.hello.active_version;
+            let at_ms = self.clock.now_ms();
             on_event(Event {
                 node,
                 phase: ph,
                 percent: 0,
                 shown: 0,
+                at_ms,
                 version: v,
                 times: None,
                 boot_core: false,
@@ -764,8 +769,8 @@ impl<T: Transport, C: Clock> Host<T, C> {
             hdr_len: hdr.len() as u16,
         };
         // The hub's display already hears every number from `emit`. The tell
-        // comes before XFER_BEGIN, so the node's number is there all through
-        // the erase, when it answers nothing.
+        // comes before XFER_BEGIN, so the number is there when the node's
+        // display turns to the transfer, after the erase.
         let mut tell = show.filter(|_| to != Target::Hub);
         let mut told = None;
         self.tell(to, &mut tell, &mut told).await;
@@ -849,12 +854,13 @@ impl<T: Transport, C: Clock> Host<T, C> {
         percent: u8,
         version: Version,
     ) {
-        let shown = self.shown_of(node, ph, percent);
+        let (shown, at_ms) = self.shown_of(node, ph, percent);
         on_event(Event {
             node,
             phase: ph,
             percent,
             shown,
+            at_ms,
             version,
             times: None,
             boot_core: self.core_write,
@@ -870,12 +876,13 @@ impl<T: Transport, C: Clock> Host<T, C> {
         version: Version,
         times: XferTimes,
     ) {
-        let shown = self.shown_of(node, phase::VERIFY, 100);
+        let (shown, at_ms) = self.shown_of(node, phase::VERIFY, 100);
         on_event(Event {
             node,
             phase: phase::VERIFY,
             percent: 100,
             shown,
+            at_ms,
             version,
             times: Some(times),
             boot_core: self.core_write,
@@ -883,16 +890,18 @@ impl<T: Transport, C: Clock> Host<T, C> {
         self.show(node, phase::VERIFY, shown, version, &[]).await;
     }
 
-    /// The node's one number for this report.
-    fn shown_of(&mut self, node: u8, ph: u8, percent: u8) -> u8 {
+    /// The node's one number for this report, and the moment it was reckoned.
+    fn shown_of(&mut self, node: u8, ph: u8, percent: u8) -> (u8, u64) {
         let trial = self
             .trial_ms
             .iter()
             .find(|(n, _)| *n == node)
             .map(|(_, ms)| *ms);
         let now = self.clock.now_ms();
-        self.write
-            .report(node, ph, percent, self.core_write, now, trial)
+        let shown = self
+            .write
+            .report(node, ph, percent, self.core_write, now, trial);
+        (shown, now)
     }
 
     /// SHOW on the hub LCD, best effort.
@@ -904,25 +913,24 @@ impl<T: Transport, C: Clock> Host<T, C> {
             version,
             text,
         };
-        self.show_to(Target::Hub, &show).await;
+        let _ = self.show_to(Target::Hub, &show).await;
     }
 
-    /// One SHOW, never resent; `false` when it was not taken.
-    async fn show_to(&mut self, to: Target, show: &Show<'_>) -> bool {
+    /// One SHOW, never resent.
+    async fn show_to(&mut self, to: Target, show: &Show<'_>) -> Result<(), T::Error> {
         let mut p = [0u8; 7 + payload::SHOW_TEXT_MAX];
-        let Ok(n) = show.encode(&mut p) else {
-            return false;
-        };
+        let n = show.encode(&mut p).map_err(|_| Error::BadResponse)?;
         self.call_once(to, Cmd::Show, &p[..n], REQUEST_MS)
             .await
-            .is_ok()
+            .map(|_| ())
     }
 
     /// Tells the node being written its one number when it moved, for its
-    /// own display. A display must not cost a write: a node that does not
-    /// take it (an agent that predates it answers `Unsupported`) is told
-    /// nothing more for this image, and a link that truly failed is the next
-    /// transfer request's to report.
+    /// own display. A display must not cost a write: one try per step. An
+    /// agent that predates it answers `Unsupported` and is told nothing more
+    /// for this image. A lost one is told again at the next step, so the
+    /// number does not freeze; a link that truly failed is the next transfer
+    /// request's to report.
     async fn tell(&mut self, to: Target, who: &mut Option<(u8, Version)>, told: &mut Option<u8>) {
         let Some((node, version)) = *who else {
             return;
@@ -931,7 +939,6 @@ impl<T: Transport, C: Clock> Host<T, C> {
         if *told == Some(percent) {
             return;
         }
-        *told = Some(percent);
         let show = Show {
             node,
             phase: phase::TRANSFER,
@@ -939,8 +946,13 @@ impl<T: Transport, C: Clock> Host<T, C> {
             version,
             text: &[],
         };
-        if !self.show_to(to, &show).await {
-            *who = None;
+        match self.show_to(to, &show).await {
+            Ok(()) => *told = Some(percent),
+            Err(Error::Rejected {
+                status: Status::Unsupported,
+                ..
+            }) => *who = None,
+            Err(_) => {}
         }
     }
 }

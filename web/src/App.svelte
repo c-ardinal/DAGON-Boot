@@ -839,7 +839,7 @@
     const no = await op.noWrite(pkg.bytes);
     if (no === 'noneChecked') return void (notice = { word: WRITE.noneChecked.label, detail: WRITE.noneChecked.detail });
     if (no) {
-      const said = WRITE.alreadyOn(versionText(no.same));
+      const said = WRITE.alreadyOn(versionText(no.same), no.coreToo);
       return void (notice = { word: said.label, detail: said.detail });
     }
     op.takeFile(pkg.name, pkg.bytes);

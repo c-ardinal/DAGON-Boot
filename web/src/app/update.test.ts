@@ -289,7 +289,7 @@ describe('update from the page with dagon-host apply against the mock hub', () =
   test('boot core and app in one write: the boot core\'s confirmation does not finish the node; only the app\'s makes 100 %', async () => {
     const { op } = await sentTo();
     op.takeFile('v1.1.0.dgb', RELEASE);
-    const feed = (e: Omit<UpdateEvent, 'node' | 'shown'>) => (op as unknown as { onEvent(e: UpdateEvent): void }).onEvent({ node: 1, shown: Math.min(99, e.percent), ...e });
+    const feed = (e: Omit<UpdateEvent, 'node' | 'shown' | 'atMs'>) => (op as unknown as { onEvent(e: UpdateEvent): void }).onEvent({ node: 1, shown: Math.min(99, e.percent), atMs: op.now(), ...e });
     const app = op.fileVersions.seg!;
     const was = op.live.seg!.hello!.activeVersion;
     for (const phase of [PHASE.transfer, PHASE.verify, PHASE.reboot, PHASE.confirm]) feed({ phase, percent: 100, version: app, bootCore: true });

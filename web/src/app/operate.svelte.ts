@@ -334,7 +334,7 @@ export class Operate {
    * checked node already on its app and its boot core. A boot core is compared as dagon-host's update_core does, against
    * what the node answers now; one that cannot be read is not called the same, so the write goes and says why.
    */
-  async noWrite(bytes: Uint8Array): Promise<'noneChecked' | { same: number } | null> {
+  async noWrite(bytes: Uint8Array): Promise<'noneChecked' | { same: number; coreToo: boolean } | null> {
     const nodes = this.answering();
     if (nodes.length === 0) return 'noneChecked';
     const given = releaseVersions(bytes);
@@ -343,11 +343,14 @@ export class Operate {
     const at = (id: string) => reach.findIndex((n) => n.id === id);
     const first = given.get(at(nodes[0]));
     if (first === undefined || !nodes.every((id) => given.get(at(id)) === this.live[id]?.hello?.activeVersion)) return null;
+    let coreToo = false;
     for (const id of nodes) {
       const held = cores.get(at(id));
-      if (held && !held.includes((await this.runningCore(id)) ?? NaN)) return null;
+      if (!held) continue;
+      if (!held.includes((await this.runningCore(id)) ?? NaN)) return null;
+      coreToo = true;
     }
-    return { same: first };
+    return { same: first, coreToo };
   }
 
   /** The version of the boot core node `id` runs now; null when it cannot be read. */
@@ -751,7 +754,7 @@ export class Operate {
 
   /** Feeds node `id`'s write track (its one %) with one of dagon-host's events. */
   private trackEvent(id: string, e: UpdateEvent): void {
-    const now = this.now();
+    const now = e.atMs;
     const k = this.track[id] ?? { ...NO_TRACK };
     if (e.phase === PHASE.transfer || e.phase === PHASE.rom) {
       // A new image (after a boot core's reboot) starts its own transfer.
@@ -762,7 +765,11 @@ export class Operate {
     } else if (e.phase === PHASE.reboot) {
       // A recovery may reboot without a VERIFY: its transfer ends here.
       this.track[id] = { ...k, shown: e.shown, xferMs: k.xferMs ?? (k.t0 === null ? null : Math.max(1, now - k.t0)), rebootAt: now };
-    } else if (e.phase === PHASE.confirm && !e.bootCore) {
+    } else if (e.phase === PHASE.confirm && e.bootCore) {
+      // dagon-host counted the boot core's trial up to this moment, from the same moments, so its number is not under
+      // what was shown; the clock stops here, or the page would run ahead of the number the next image starts from.
+      this.track[id] = { ...k, shown: e.shown, t0: null, xferMs: null, rebootAt: null };
+    } else if (e.phase === PHASE.confirm) {
       this.track[id] = { ...k, done: true };
     }
   }

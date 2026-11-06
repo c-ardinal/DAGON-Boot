@@ -132,6 +132,8 @@ struct Faults {
     nack_once: bool,
     /// Every request written: (command, RETRY flag set).
     seen: Vec<(u8, bool)>,
+    /// The number on the node's display when XFER_END left: the transfer's end.
+    number_at_end: Option<Option<u8>>,
 }
 
 /// Command and RETRY flag of a request frame (inner frame for RELAY).
@@ -191,6 +193,12 @@ impl Transport for Sim {
             return Ok(());
         }
         let mut hub = self.hub.borrow_mut();
+        if cmd == Cmd::XferEnd as u8 {
+            let seg = hub
+                .i2c_node(NODE_I2C_ADDR)
+                .map(|n| n.app_snapshot().percent);
+            f.number_at_end = seg.or(f.number_at_end);
+        }
         let nack = bytes[5] == Cmd::Relay as u8 && std::mem::take(&mut f.nack_once);
         if nack {
             hub.bus.set_reset(true);
@@ -372,6 +380,45 @@ fn the_number_a_node_is_told_is_the_consoles_at_every_step() {
     )
     .unwrap();
     assert!(steps >= 10, "{steps}");
+}
+
+#[test]
+fn a_lost_tell_is_told_again_at_the_next_step_and_never_resent() {
+    let s = sim();
+    let mut h = host(&s);
+    h.trial_ms = vec![(0, 4000), (SEG, 4000)];
+    let (mut armed, mut last, mut steps, mut events) = (true, 0, 0, 0);
+    let out = block_on(h.apply(
+        &release(),
+        &topology(&yaml()),
+        &key().pk,
+        Some(&[SEG]),
+        &mut |e| {
+            events += 1;
+            if e.phase == phase::TRANSFER {
+                (last, steps) = (e.shown, steps + 1);
+                if armed && e.percent >= 30 {
+                    armed = false;
+                    let drop = (Cmd::Show as u8, 3);
+                    s.faults.borrow_mut().drop_req.push(drop);
+                }
+            }
+        },
+    ))
+    .unwrap();
+    assert!(matches!(out[0].outcome, Outcome::Done(_)), "{out:?}");
+    let f = s.faults.borrow();
+    assert!(!armed);
+    assert_eq!(f.drop_req, [(Cmd::Show as u8, 0)], "all three were lost");
+    assert_eq!(f.number_at_end, Some(Some(last)), "the number froze");
+    // No extra resend: one SHOW to the hub per event, one to the node per step.
+    let shows: Vec<_> = f.seen.iter().filter(|x| x.0 == Cmd::Show as u8).collect();
+    assert!(shows.iter().all(|x| !x.1), "a SHOW is never resent");
+    assert!(
+        shows.len() <= events + steps,
+        "{} {events} {steps}",
+        shows.len()
+    );
 }
 
 #[test]

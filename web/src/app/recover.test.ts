@@ -4,9 +4,9 @@ import type { LinkClock } from '../serial/hostLink.ts';
 import { MockTransport, type MockOptions } from '../serial/mock.ts';
 import { simulator } from '../serial/simHub.ts';
 import type { Transport } from '../serial/transport.ts';
-import { versionText } from '../wasm/dagon.ts';
+import { PHASE, versionText } from '../wasm/dagon.ts';
 import { bandOf } from './band.ts';
-import { ANNOUNCE, BAND, BUTTON_FOR, NODE } from './copy.ts';
+import { ANNOUNCE, BAND, BUTTON_FOR, NODE, WRITE } from './copy.ts';
 import { SAMPLE_CONFIG } from './sample.ts';
 import { Operate, failureStage, hubBack, writingTo } from './operate.svelte.ts';
 
@@ -170,7 +170,49 @@ describe('recovery from the page with dagon-host recover', () => {
     // Both match: nothing stands to be written, and the same app version stays.
     expect(await op.noWrite(both)).toMatchObject({ same: op.fileVersions.seg });
     expect(said).toEqual(['→ ブートローダ 1.1.0', '→ 1.1.0']);
+    expect(await op.noWrite(both)).toMatchObject({ coreToo: true });
   }, 240_000);
+
+  test('the one % never moves back across a boot loader and its app, and stays the number the node is told', async () => {
+    const sim = simulator(13)!;
+    const op = session(sim.transport, sim.clock);
+    op['deps'].trialMs = () => 4000;
+    await op.connect();
+    await op.push();
+    op.toggleSkip('hub');
+    op.toggleSkip('watch');
+    op.takeFile('sample-core-1.1.0.dgb', repo('crates/dagon-sim/fixtures/sample-core-1.1.0.dgb'));
+    const seen: number[] = [];
+    let confirmedCore = false;
+    const on = op['onEvent'].bind(op);
+    op['onEvent'] = (e) => {
+      seen.push(op.percentOf('seg'));
+      on(e);
+      const after = op.percentOf('seg');
+      seen.push(after);
+      if (e.phase === PHASE.transfer) expect(after).toBe(e.shown);
+      confirmedCore ||= e.phase === PHASE.confirm && e.bootCore;
+    };
+    await op.update();
+    expect(op.state).toBe('done');
+    expect(confirmedCore).toBe(true);
+    expect(seen.filter((p, i) => i > 0 && p < seen[i - 1])).toEqual([]);
+    expect(seen[seen.length - 1]).toBe(100);
+  }, 120_000);
+
+  test('the words say the boot loader was the same only when it was compared', async () => {
+    expect(WRITE.alreadyOn('1.1.0', true).detail).toContain('ブートローダも同じ');
+    expect(WRITE.alreadyOn('1.1.0', false).detail).not.toContain('ブートローダ');
+    const sim = simulator(13)!;
+    const op = session(sim.transport, sim.clock);
+    await op.connect();
+    await op.push();
+    const apps = repo('crates/dagon-sim/fixtures/sample-1.1.0.dgb');
+    op.takeFile('sample-1.1.0.dgb', apps);
+    await op.update();
+    await op.round();
+    expect(await op.noWrite(apps)).toMatchObject({ coreToo: false });
+  }, 120_000);
 
   test('the app differs and the boot loader is the same: written, labelled by the app', async () => {
     const sim = simulator(13)!;

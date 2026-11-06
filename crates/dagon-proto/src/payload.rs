@@ -637,7 +637,8 @@ pub fn parse_u8(b: &[u8]) -> Result<u8, Status> {
     r.end().map(|_| v)
 }
 
-/// SHOW request (hub LCD).
+/// SHOW request: for the hub's display, or the display of the node being
+/// written.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Show<'a> {
     pub node: u8,

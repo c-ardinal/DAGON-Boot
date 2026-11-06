@@ -8,7 +8,9 @@
 //! `[watchdog] trial_ms`. Without a trial period only the bytes count. Only the
 //! confirmation makes 100, and within one run the number never moves back, also
 //! when a second image (the boot core, then the app) starts its own transfer. A
-//! new run of the same node starts again from 0.
+//! caller counting a trial's time on from `Event::at_ms` is never ahead of the
+//! number given at that trial's end. A new run of the same node starts again
+//! from 0.
 
 use dagon_proto::payload::phase;
 

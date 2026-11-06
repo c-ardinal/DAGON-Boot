@@ -86,6 +86,8 @@ export interface UpdateEvent {
   percent: number;
   /** The node's one progress number, what its display is told (dagon-host). */
   shown: number;
+  /** dagon-host's clock when it reckoned `shown`: the page counts a trial's time from the same moments. */
+  atMs: number;
   version: number;
   /** About the node's boot core, written before its app: its confirmation is not the node's. */
   bootCore: boolean;

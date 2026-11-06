@@ -1234,7 +1234,7 @@ export const LAYOUT = {
 
 export const WRITE = {
   noneChecked: { label: 'ノードを選ぶ', detail: '書き込むノードのカードにチェックを入れてください。' },
-  alreadyOn: (v: string) => ({ label: `すべて ${v}`, detail: `チェックしたノードはすでに ${v} で動いていて、ブートローダも同じなので、書き込みませんでした。` }),
+  alreadyOn: (v: string, coreToo: boolean) => ({ label: `すべて ${v}`, detail: `チェックしたノードはすでに ${v} で動いて${coreToo ? 'いて、ブートローダも同じなので' : 'いるので'}、書き込みませんでした。` }),
   pickVersion: 'バージョンを選んで書き込む',
   run: '書き込む',
   go: '{n} ノードへ書き込む',

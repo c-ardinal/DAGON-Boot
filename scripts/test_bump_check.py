@@ -80,12 +80,22 @@ cl = importlib.util.module_from_spec(cspec)
 cspec.loader.exec_module(cl)
 
 
+class ReleaseNotes(unittest.TestCase):
+    def test_the_cli_version_has_its_section_in_the_changelog(self):
+        root = HERE.parent
+        compat = tomllib.loads((root / "compat.toml").read_text(encoding="utf-8"))
+        version = next(c["version"] for c in compat["component"] if c["name"] == "cli")
+        text = (root / "CHANGELOG.md").read_text(encoding="utf-8") if (root / "CHANGELOG.md").is_file() else ""
+        self.assertIn(f"\n## cli {version}\n", text)
+
+
 class Changelog(unittest.TestCase):
     def test_sections_follow_the_kinds_and_skip_no_release_commits(self):
         kinds = [("feature", "feat(cli): a"), ("none", "docs: b"), ("breaking", "feat(cli)!: c"),
                  ("fix", "fix(cli): d")]
         text = cl.section("cli", "0.2.0", "cli-v0.1.0", kinds)
-        self.assertTrue(text.startswith("## cli 0.2.0 (since cli-v0.1.0)"))
+        # The heading is the one the CHANGELOG holds; the range is a line of its own.
+        self.assertTrue(text.startswith("## cli 0.2.0\n\nSince cli-v0.1.0.\n"), text)
         self.assertLess(text.index("### Breaking"), text.index("### Features"))
         self.assertLess(text.index("### Features"), text.index("### Fixes"))
         self.assertNotIn("docs: b", text)

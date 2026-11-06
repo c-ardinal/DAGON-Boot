@@ -3,6 +3,7 @@
   import { bandOf, connectNotice } from './app/band.ts';
   import { AGENT, ANNOUNCE, BAND, BUILD, BUTTON, CANVAS, DEFINE, DIFF, DRAWER, JOBS, SKELETON, WRITE, HUB, LOCK, SHEET, STATUS, ZOOM, HUB_TOGGLE, MODE, NODE, ORDER, PRODUCT, RECONNECT, SAVE, SKIP, STEP, TIME } from './app/copy.ts';
   import { webSerial } from './app/connect.ts';
+  import { resultChip } from './app/nodeState.ts';
   import { HUB_LOCKED, hubOf, view, type Action } from './app/machine.ts';
   import { Operate, waterOf, type Progress, type ReleaseFile } from './app/operate.svelte.ts';
   import { keptChoices, type Kept } from './app/kept.ts';
@@ -42,6 +43,7 @@
   import ZoomPill from './screens/ZoomPill.svelte';
   import SkeletonModal from './screens/SkeletonModal.svelte';
   import Modal from './screens/Modal.svelte';
+  import StopModal from './screens/StopModal.svelte';
   import FactoryModal from './screens/FactoryModal.svelte';
   import RomConfirm from './screens/RomConfirm.svelte';
   import { answerConsent } from './app/factory.ts';
@@ -394,6 +396,9 @@
     if (stopped('ask', at)) return;
     void agent.ask(text, kind, selection());
   }
+  function askWhy(at: Element, close: () => void) {
+    void agent.askWhy(() => stopped('ask', at), close, selection());
+  }
   /** 『反映する』: the proposal goes in as one 構成 edit (undoable) and is saved like any edit. */
   function applyProposal(i: number, at: Element) {
     if (stopped('apply', at)) return;
@@ -614,19 +619,11 @@
   const diffChips = $derived(Object.fromEntries(fileDiff.flatMap((r) => r.nodes).map((id) => [id, { chip: DIFF.chip, spoken: DIFF.spoken, silent: true }])));
   /** a flat minute per node, the copy's 目安; measure per link and image size if it misleads. */
   const MINUTES_PER_NODE = 1;
-  /** On the cards while and after writing: → the new version, then 前のバージョンに戻った / 書き込めなかった; nothing once confirmed. */
-  const RESULT: Partial<Record<Progress['stage'], { word: string; silent: boolean }>> = {
-    previous: { word: WRITE.previous, silent: false },
-    refused: { word: WRITE.failed, silent: true },
-    silent: { word: WRITE.failed, silent: true },
-    cannotFix: { word: WRITE.failed, silent: true },
-    unwritten: { word: WRITE.failed, silent: true },
-  };
+  /** On the cards while writing: → the new version; after it, what the write left (resultChip). */
   const cardChipOf = (id: string, p: Progress): Chip | null => {
     const to = op.fileVersions[id];
     if (FILLING_STAGES.has(p.stage)) return to === undefined ? null : { chip: WRITE.to(versionText(to)), spoken: WRITE.to(versionText(to)), silent: false };
-    const r = RESULT[p.stage];
-    return r ? { chip: r.word, spoken: r.word.slice(2), silent: r.silent } : null;
+    return resultChip(p.stage);
   };
   const progressChips = $derived(
     Object.fromEntries(
@@ -958,6 +955,7 @@
   d.guard = (k) => stopped(k);
   cli.guard = (k) => stopped(k);
   agent.guard = (k) => stopped(k);
+  agent.record = () => op.settledRollbackRecord();
   /** Band actions as lock-table operations. */
   const CONTROL_OF: Partial<Record<Action, Control>> = {
     chooseFile: 'file', updateResponding: 'file', otherFile: 'file', useLatest: 'update', update: 'update',
@@ -1496,14 +1494,19 @@
     </Modal>
   {/if}
   {#if stopOpen && stopNode}
-    {@const back = op.progress[stopNode.id]?.stage === 'previous'}
+    {@const back = op.wentBack}
     {@const running = op.live[stopNode.id]?.hello?.activeVersion}
-    <Modal title={WRITE.run} chip={{ text: back ? WRITE.previous : WRITE.failed, kind: back ? 'info' : 'error' }} target={`[${stopNode.no}] ${stopNode.name}`} onclose={() => (stopClosed = op.failed)} onmore={() => ((drawerTab = 'log'), (stopClosed = op.failed))}>
-      <h3 class="modal-h">{NOTICE.reason}</h3>
-      <p>{back && running !== undefined ? fillIn(WRITE.rolled.reason, { version: versionText(running) }) : (next.cause ?? WRITE.failed)}</p>
-      <h3 class="modal-h">{NOTICE.fix}</h3>
-      <p>{back ? WRITE.rolled.next : next.sentence}</p>
-      {#snippet actions()}
+    <StopModal
+      target={`[${stopNode.no}] ${stopNode.name}`}
+      {back}
+      reason={back && running !== undefined ? fillIn(WRITE.rolled.reason, { version: versionText(running) }) : (next.cause ?? WRITE.failed)}
+      fix={back ? WRITE.rolled.next : next.sentence}
+      linked={agent.linked}
+      onask={(at) => askWhy(at, () => (stopClosed = op.failed))}
+      onclose={() => (stopClosed = op.failed)}
+      onmore={() => ((drawerTab = 'log'), (stopClosed = op.failed))}
+    >
+      {#snippet buttons()}
         {#each band.secondary as b (b.label)}
           <button class="button-secondary" data-control={CONTROL_OF[b.action]} aria-disabled={!RUNS.has(b.action)} onclick={() => RUNS.has(b.action) && ((stopClosed = op.failed), act(b.action))}>{b.label}</button>
         {/each}
@@ -1512,7 +1515,7 @@
           <button class="button-primary" data-control={CONTROL_OF[p.action]} aria-disabled={!RUNS.has(p.action)} onclick={() => RUNS.has(p.action) && ((stopClosed = op.failed), act(p.action))}>{p.label}</button>
         {/if}
       {/snippet}
-    </Modal>
+    </StopModal>
   {/if}
 {#if romNode}
     <RomConfirm node={romNode.name} onwrite={writeRom} oncancel={() => (romAsk = null)} />
@@ -1527,7 +1530,7 @@
       <p>{f.file ? fillIn(BUILD.fail.fix, { file: f.file, line: f.line ?? 0 }) : BUILD.fail.plain}{f.others ? fillIn(BUILD.fail.others, { n: f.others }) : ''}</p>
       {#snippet actions()}
         {#if agent.linked}
-          <button class="button-secondary" data-control="ask" onclick={(e) => askDagon(BUILD.askAgent, 'failure', e.currentTarget)}>{BUILD.askAgent}</button>
+          <button class="button-secondary" data-control="ask" onclick={(e) => askWhy(e.currentTarget, () => (buildFailureOpen = false))}>{BUILD.askAgent}</button>
         {/if}
         <button class="button-primary" data-control="build" onclick={() => void build()}>{BUILD.retry}</button>
       {/snippet}
@@ -1565,10 +1568,6 @@
 <svelte:window onkeydown={defineKeys} />
 
 <style>
-  .modal-h {
-    margin: 0;
-    font: 700 var(--t-caption) / 16px var(--f-ja);
-  }
   .modal-mono {
     margin: 0;
     font: 400 var(--t-mono) / 24px var(--f-mono);

@@ -135,7 +135,7 @@ export type HubState = 'idle' | 'checking' | 'connected' | 'reconnecting' | 'los
 
 export function hubOf(s: L): HubState {
   switch (s) {
- case 'unsupported': case 'idle': case 'choosing': case 'notChosen': case 'portFailed': case 'silentHub': 
+    case 'unsupported': case 'idle': case 'choosing': case 'notChosen': case 'portFailed': case 'silentHub': 
       return 'idle';
     case 'checking':
       return 'checking';

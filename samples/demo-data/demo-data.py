@@ -26,7 +26,7 @@ keeps the cargo build cache in <out>/build. The CLI is built into
 stops before building anything when --key is not the secret half of
 --pubkey.
 
-    python scripts/demo-data.py --key <secret key file> --pubkey <public key file> [--out <dir>]
+    python samples/demo-data/demo-data.py --key <secret key file> --pubkey <public key file> [--out <dir>]
 """
 import argparse
 import hashlib
@@ -39,7 +39,7 @@ import sys
 import tempfile
 import zlib
 
-ROOT = pathlib.Path(__file__).resolve().parent.parent
+ROOT = pathlib.Path(__file__).resolve().parents[2]
 VERSIONS = {"1.0.0": "release-1.0.dgb", "1.1.0": "release-1.1.dgb"}
 # node id -> (firmware package dir under the repository root, Rust target triple)
 FIRMWARE = {
@@ -113,7 +113,7 @@ def check_out(out, root=ROOT, home=None):
 def clean_out(out):
     """Marks `out` as this script's and deletes only its earlier outputs."""
     out.mkdir(parents=True, exist_ok=True)
-    (out / MARKER).write_text("output folder of scripts/demo-data.py\n")
+    (out / MARKER).write_text("output folder of samples/demo-data/demo-data.py\n")
     for p in outputs(out):
         if p.is_dir() and not p.is_symlink():
             shutil.rmtree(p)

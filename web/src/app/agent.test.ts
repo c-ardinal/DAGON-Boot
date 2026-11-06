@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'vitest';
 import { Agent, consentProblem, problemOf, splitAnswer, type AgentApi, type AgentStatus } from './agent.svelte.ts';
 import { agentMock } from './agentMock.ts';
-import { AGENT } from './copy.ts';
+import { AGENT, BUILD } from './copy.ts';
 
 const json = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } });
 const now = () => Promise.resolve();
@@ -35,6 +35,67 @@ describe('DAGON and its agent (site/src/content/docs/reference/agent-api.md)', (
     ]);
     expect(a.messages[1]).toMatchObject({ text: '一文目です。', more: '続きです。' });
     expect(a.thinking).toBe(false);
+  });
+
+  test('the record of a write that went back goes with every question while there is one, and not otherwise', async () => {
+    const sent: { body: Record<string, unknown> }[] = [];
+    const a = new Agent(async (_m, path, body) => (path === 'agent' ? json({ linked: true }) : (sent.push({ body: body as Record<string, unknown> }), json({ answer: 'はい。' }))));
+    await a.refresh();
+    await a.ask('次は？', 'next');
+    const rollback = { node: 'watch', failed_version: '1.1.0', returned_version: '1.0.0', reason: 'ROLLED BACK', node_state: { trial: false, last_reason: 3 } };
+    let record: typeof rollback | null = rollback;
+    a.record = async () => record;
+    await a.ask('失敗の理由を聞く', 'failure');
+    record = null;
+    await a.ask('次は？', 'next');
+    expect(sent.map((s) => 'rollback' in s.body)).toEqual([false, true, false]);
+    expect(sent[1].body.rollback).toEqual(rollback);
+  });
+
+  test('a question waits for the record to be complete, showing thinking meanwhile', async () => {
+    const sent: unknown[] = [];
+    const a = new Agent(async (_m, path, body) => (path === 'agent' ? json({ linked: true }) : (sent.push(body), json({ answer: 'はい。' }))));
+    await a.refresh();
+    let read = (_: null) => undefined as void;
+    a.record = () => new Promise((r) => (read = r));
+    const asked = a.ask('失敗の理由を聞く', 'failure');
+    await now();
+    expect([sent.length, a.thinking]).toEqual([0, true]);
+    read(null);
+    await asked;
+    expect([sent.length, a.thinking]).toEqual([1, false]);
+  });
+
+  test('asking why from a modal closes it first, so its scrim does not cover the answer', async () => {
+    const order: string[] = [];
+    const a = new Agent(async (_m, path, body) => {
+      if (path === 'agent') return json({ linked: true });
+      order.push(`sent ${(body as { kind: string }).kind}`);
+      return json({ answer: 'はい。' });
+    });
+    await a.refresh();
+    await a.askWhy(
+      () => false,
+      () => order.push('closed'),
+      { node: 'seg' },
+    );
+    expect(order).toEqual(['closed', 'sent failure']);
+    expect(a.messages[0]).toEqual({ role: 'user', text: BUILD.askAgent });
+  });
+
+  test('asking why while the lock table stops it: the modal stays open and nothing is sent', async () => {
+    const order: string[] = [];
+    const a = new Agent(async (_m, path) => {
+      if (path === 'agent') return json({ linked: true });
+      order.push('sent');
+      return json({ answer: 'はい。' });
+    });
+    await a.refresh();
+    await a.askWhy(
+      () => true,
+      () => order.push('closed'),
+    );
+    expect(order).toEqual([]);
   });
 
   test('not linked: a question sends nothing and says how to link (serve refuses it too)', async () => {

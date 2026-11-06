@@ -29,6 +29,6 @@ rustdoc の本文は元のソースのままで、英語です。
 | [`dagon-retained-model`](/api/dagon_retained_model/) | 障害注入の下での、DAGON の保持と永続の形式の実行可能なモデル |
 | [`dagon-romlink`](/api/dagon_romlink/) | I2C の STM32 システムメモリのブートローダ（ST AN4221）。ホストから、親機の NRST/BOOT0 の線と生の I2C のやり取りで動かします。 |
 | [`dagon-sign`](/api/dagon_sign/) | DAGON の署名: 鍵、署名付きのイメージ、リリースのバンドル、最初のインストールのフラッシュの中身。 |
-| [`dagon-sim`](/api/dagon_sim/) | DAGON のシミュレータ: ハードウェアの決定的な代役です。ホストのツール、ブラウザの UI、テストが、ボードなしで相手を持てます。 |
+| [`dagon-sim`](/api/dagon_sim/) | DAGON のシミュレータ: ハードウェアの決定的な代役です。ホストのツール、ブラウザの UI、テストは、ボードがなくても相手を得られます。 |
 | [`dagon-topology`](/api/dagon_topology/) | 構成の YAML: スキーマ、検証のルール、対応ボードの表。CLI とブラウザ向けのビルドが共有し、同じルールを使います。 |
 | [`dagon-wasm`](/api/dagon_wasm/) | 共有する Rust のルールのブラウザ向けビルド: マイコンとボードの定義、構成の確認とコンパイル、リリースの検証、HELLO のペイロードとバージョンの文字列。公開する関数はどれも薄いラッパーで、ページと CLI が同じコードを使います。 |

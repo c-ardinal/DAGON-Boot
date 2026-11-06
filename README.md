@@ -43,9 +43,9 @@ PCに繋いだ1つのマイコンを通してその先のマイコンにも、�
 ## できること
 
 - **構成を描く**: ブラウザで動くDAGON Consoleで、マイコンとそのつながりをグラフに描きます。編集のたびに配線やピンの問題を確かめます。
-- **ビルドできるプロジェクトを作る**: `dagon new`と`dagon gen`が、マイコンごとに起動処理と配線と、自分のコードを書く空の`app.rs`を持つRustのcrateを作ります。
+- **ビルドできるプロジェクトを作る**: `dagon new`と`dagon gen`が、起動処理、配線、自分のコードを書く空の`app.rs`を持つRustのcrateをマイコンごとに作ります。
 - **まとめて書き込む**: `dagon deploy`は、ビルド・署名・パッケージ作成・書き込みまでを一気通貫で行います。DAGON Console上では、マイコンごとの進み具合をグラフィカルに確認しながら書き込めます。
-- **失敗しても戻る**: イメージはすべて署名付きです。マイコンは新しいバージョンを試しに起動し、確定できなければ前のバージョンに戻ります。`dagon rollback`で手でも戻せます。
+- **失敗しても戻る**: イメージはすべて署名付きです。マイコンは新しいバージョンを試しに起動し、確定できなければ前のバージョンに戻ります。`dagon rollback`で手動でも戻せます。
 - **ブートローダにも書き込む**: ブートローダ自体も2つのスロットに置き、アプリと同じように書き込みます。新しいものが動かなければ前のものに戻ります。
 - **DAGONを拡張する**: DAGONのソースを変えずに、イベントを受け取る、判断に答える、部品（ポート）を置き換える拡張を足せます。
 - **AIの力を借りる**: 新しいプロジェクトにはClaude Code用の指示とスキルが入っています。`dagon ai link`で、同意のうえエージェントとつなげます。APIキーはOSの資格情報ストアに保管します。
@@ -104,9 +104,9 @@ dagon serve
 
 アプリは[Rust](https://rustup.rs)だけで書きます。
 
-`dagon serve`がブラウザを開き、DAGON Consoleで続けられます。
+`dagon serve`がブラウザを開きます。続きはDAGON Consoleでできます。
 
-構成を描いたら、ビルドの前に`dagon doctor`がその構成のマイコンに必要なツール（[一覧](https://c-ardinal.github.io/DAGON-Boot/doc/reference/tools/)）を確かめ、`dagon doctor --fix`が管理者の権限が要らないものを入れます。
+構成を描いたら、ビルドの前に`dagon doctor`がその構成のマイコンに必要なツール（[一覧](https://c-ardinal.github.io/DAGON-Boot/doc/reference/tools/)）を確かめ、`dagon doctor --fix`が管理者の権限の要らないものを入れます。
 
 ビルドから最初の書き込みまでは[はじめから書き込みまで](https://c-ardinal.github.io/DAGON-Boot/doc/getting-started/first-project/)を見てください。
 
@@ -128,7 +128,7 @@ flowchart LR
 1. PCがパッケージの署名を確かめ、パッケージがこの構成に合うことを確かめます。
 2. PCが構成を親機へ送ります。
 3. PCが親機を通して、マイコンごとに新しいイメージを送ります。子機が先で、親機は最後です。
-4. マイコンは、動いているイメージとは別の場所に新しいイメージを書き込みます。
+4. マイコンは動いているイメージとは別の場所に新しいイメージを書き込みます。
 5. マイコンは新しいイメージを試しに起動します。
 6. 自己確認が通れば、新しいバージョンに確定します。通らなければ、リセットして前のバージョンに戻ります。
 
@@ -173,7 +173,7 @@ DAGONがしないことは[制限事項](https://c-ardinal.github.io/DAGON-Boot/
 cargo install --git https://github.com/c-ardinal/DAGON-Boot --tag cli-v<version> dagon-cli
 ```
 
-クローンからは`cargo install --path crates/dagon-cli`です。
+クローンからビルドするときは`cargo install --path crates/dagon-cli`です。
 
 ## 依存しているものと外部のデータ
 

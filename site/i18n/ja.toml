@@ -28,7 +28,7 @@
 "DAGON lifecycle events: state machines whose transitions emit events, extensions, ports and the published event state" = "DAGON のライフサイクルイベント: 遷移がイベントを出す状態機械、拡張、ポート、公開するイベントの状態"
 "DAGON link v1: frame format (shared by USB CDC, UART and I2C), the command set, status codes, request/response payloads and the I2C mailbox state." = "DAGON のリンク v1: フレームの形式（USB CDC、UART、I2C で共通）、コマンドの集合、ステータスコード、リクエストとレスポンスのペイロード、I2C のメールボックスの状態。"
 "DAGON parts built from this package for a first write: `name`, `sub` (folder in the package), `bin`." = "最初の書き込みのために、この定義のフォルダからビルドする DAGON の部品: `name`、`sub`（定義のフォルダの中のフォルダ）、`bin`。"
-"DAGON simulator: deterministic stand-ins for the hardware so the host tools, the browser UI and tests have a partner without boards." = "DAGON のシミュレータ: ハードウェアの決定的な代役です。ホストのツール、ブラウザの UI、テストが、ボードなしで相手を持てます。"
+"DAGON simulator: deterministic stand-ins for the hardware so the host tools, the browser UI and tests have a partner without boards." = "DAGON のシミュレータ: ハードウェアの決定的な代役です。ホストのツール、ブラウザの UI、テストは、ボードがなくても相手を得られます。"
 "Dagon.toml in a folder that has a 構成 but none, for that YAML (`yaml`, or the folder's only one); key pair in ~/.dagon/keys/<folder> when none. Then opens it." = "構成はあるが dagon.toml が無いフォルダに、その YAML（`yaml`、またはフォルダの唯一のもの）のための dagon.toml を作ります。鍵の組が無ければ ~/.dagon/keys/<folder> に作ります。その後で開きます。"
 "Decision points asked in one of the listed layers; a trusted extension answers none." = "一覧のレイヤーのどれかで尋ねられる判断点。信頼された拡張はどれにも答えません。"
 "Definition format number (`1`; left out means 1). A dagon that does not read the number refuses the file (site/src/content/docs/explanation/versioning.md)." = "定義の形式番号（`1`。省くと 1 です）。その番号を読まない dagon は、ファイルを受け付けません（site/src/content/docs/explanation/versioning.md）。"

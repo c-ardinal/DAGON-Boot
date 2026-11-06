@@ -19,13 +19,13 @@ irm https://raw.githubusercontent.com/c-ardinal/DAGON-Boot/main/install.ps1 | ie
 
 スクリプトは次のことをします。
 
-1. 自分のシステム用のアーカイブを、最新のリリース（`cli-v<version>`）から取ります。
-2. `.sha256` のファイルで確かめます。合わないときは止まります。
+1. 自分のシステム用のアーカイブを、最新のリリース（`cli-v<version>`）から取得します。
+2. `.sha256` のファイルでアーカイブを確かめます。合わないときは止まります。
 3. `dagon` を、管理者の権限の要らないフォルダに置きます。Linux と macOS は `~/.local/bin`、Windows は `%LOCALAPPDATA%\Programs\dagon` です。
 4. Windows はそのフォルダをユーザーの PATH に足します。Linux と macOS は足し方を表示します。
 5. したことを表示します。
 
-スクリプトは環境変数を読みます。
+スクリプトは次の環境変数を読みます。
 
 | 環境変数 | 意味 |
 |---|---|
@@ -33,7 +33,7 @@ irm https://raw.githubusercontent.com/c-ardinal/DAGON-Boot/main/install.ps1 | ie
 | `DAGON_INSTALL_DIR` | 置くフォルダ |
 | `DAGON_NO_MODIFY_PATH` | `install.ps1` で、PATH を変えず足し方を表示します |
 
-`cargo binstall dagon-cli --git https://github.com/c-ardinal/DAGON-Boot` でも同じアーカイブを取ります。`cargo-binstall` が要ります。
+`cargo binstall dagon-cli --git https://github.com/c-ardinal/DAGON-Boot` でも同じアーカイブを取得します。`cargo-binstall` が要ります。
 
 このリポジトリのクローンも git の submodule も要りません。
 
@@ -60,7 +60,7 @@ DAGON Console は `dagon` に組み込まれています。Node.js は要りま�
 cargo install --git https://github.com/c-ardinal/DAGON-Boot --tag cli-v<version> dagon-cli
 ```
 
-クローンからは `cargo install --path crates/dagon-cli` です。
+クローンからビルドするときは `cargo install --path crates/dagon-cli` です。
 
 ## ファームウェアを開発するためのツール
 
@@ -77,10 +77,10 @@ STM32F401RE のノードがあると、`dagon doctor` は ST-LINK がつなが�
 
 ## ネットワークが要るとき
 
-`dagon new` で作るプロジェクトは、DAGON を手元の `dagon` と同じリリースから取ります（`dagon.toml` の `[dagon] git` と `tag = "cli-v<version>"`）。
+`dagon new` で作るプロジェクトは、DAGON を手元の `dagon` と同じリリースから取得します（`dagon.toml` の `[dagon] git` と `tag = "cli-v<version>"`）。
 
 - ビルドのときに cargo が取得します。
-- `dagon flash` は、ブートローダ、stage0、factory エージェントを、そのタグの cargo の写しからビルドします。
+- `dagon flash` は、ブートローダ、stage0、factory エージェントを、cargo が取得したそのタグのコピーからビルドします。
 
 そのため、最初の 1 回はネットワークが要ります。
 

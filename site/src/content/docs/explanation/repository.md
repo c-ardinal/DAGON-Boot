@@ -21,7 +21,7 @@ description: "リポジトリにあるもの、その場所、DAGON そのもの
 
 - [入れる](/getting-started/install/)のツールのすべて
 - `wasm32-unknown-unknown` のターゲット（ターゲットはすべて `rust-toolchain.toml` にあります）
-- `crates/dagon-wasm` 用の `wasm-pack` 0.15.1（対応する `wasm-bindgen` と `wasm-opt` は自分で取得します）
+- `crates/dagon-wasm` 用の `wasm-pack` 0.15.1（対応する `wasm-bindgen` と `wasm-opt` はこのツールが自分で取得します）
 - `web/` 用の Node.js と npm
 - RP2040 の立ち上げ用イメージに使う `elf2uf2-rs`
 - ESP32-S3 の 2nd stage を `targets/esp32s3-2ndstage` からビルドし直すときは ESP-IDF v6.1。ビルド済みの無改変のものを `targets/mcu/esp32s3/vendor/bootloader.bin` として同梱しています（`vendor/PROVENANCE.md`）。

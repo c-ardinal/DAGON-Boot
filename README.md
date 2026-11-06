@@ -87,17 +87,17 @@ irm https://raw.githubusercontent.com/c-ardinal/DAGON-Boot/main/install.ps1 | ie
 #### デモ実行
 
 ```sh
-dagon demo    // 表示したアドレスでDAGON Consoleを開きます
-dagon sim run // シミュレータ上で通しのシナリオを実行します
+dagon demo    # 表示したアドレスでDAGON Consoleを開きます
+dagon sim run # シミュレータ上で通しのシナリオを実行します
 ```
 
 ## 自分のプロジェクトを始める
 
 ```sh
-dagon new my-fleet  // プロジェクトに必要なファイル一式を生成
+dagon new my-fleet  # プロジェクトに必要なファイル一式を生成
 cd my-fleet
-dagon serve         // DAGON Consoleを起動。ブラウザ上で構成を描く
-dagon doctor        // 構成に従ったビルドが出来る状態か検査
+dagon serve         # DAGON Consoleを起動。ブラウザ上で構成を描く
+dagon doctor        # 構成に従ったビルドが出来る状態か検査
 ```
 
 `dagon doctor`ではその構成のマイコンに必要なツール（[一覧](https://c-ardinal.github.io/DAGON-Boot/doc/reference/tools/)）を確かめ、`dagon doctor --fix`を実行すると管理者の権限の要らないものを自動で導入します。

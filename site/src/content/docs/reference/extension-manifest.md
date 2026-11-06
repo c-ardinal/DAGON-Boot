@@ -1,20 +1,11 @@
 ---
-title: "Extension manifest"
-description: "dagon-extension.toml, the extension keys of dagon.toml and the files dagon gen writes from them."
+title: "拡張のマニフェスト"
+description: "dagon-extension.toml、dagon.toml の拡張のキー、そこから dagon gen が書き出すファイルです。"
 ---
 
-:::note
-このページは英語だけです。
-:::
+拡張は、`Cargo.toml` の隣に `dagon-extension.toml` を持つ Rust の crate です。マニフェストは、拡張が何を置き換え、何を観測し、何に答えるか、何を必要とするかを示します。`dagon gen` は、これをポートのカタログ（[ports.md](/reference/ports/)）、イベントのカタログ（[events.md](/reference/events/)）、ノードのマイコンとボードの定義（[マイコンとボードの定義](/reference/definitions/)）に照らして確かめ、ノードの保護のファイルを書き出します。
 
-An extension is a Rust crate with a `dagon-extension.toml` next to its
-`Cargo.toml`. The manifest says what the extension replaces, observes and
-answers, and what it needs. `dagon gen` checks it against the port catalog
-([ports.md](/en/reference/ports/)), the event catalog ([events.md](/en/reference/events/)) and the
-node's MCU and board definitions ([MCU and board definitions](/en/reference/definitions/)),
-then writes the node's protection files.
-
-## dagon-extension.toml (`extension-manifest` format 1)
+## dagon-extension.toml（`extension-manifest` 形式 1）
 
 ```toml
 format = 1
@@ -37,39 +28,38 @@ text_bytes = 16384                   # .ext.text + .ext.rodata + the data load i
 ```
 
 <!-- generated from dagon-extension's manifest types: python site/scripts/gen.py -->
-| Key | Type | Required | Meaning |
+| キー | 型 | 必須か | 意味 |
 |---|---|---|---|
-| `format` | integer | yes | Read first; a number this dagon does not read is refused with both numbers. |
-| `id` | string | yes | The extension's id: `a-z 0-9 -`, 1 to 32 characters. |
-| `layers` | array of strings | yes | The layers it runs in: `boot`, `app`, `relay`, `host`. |
-| `provides` | array of strings | no | Ports that exist in every listed layer; a trusted-only port needs `trusted = true`. |
-| `observes` | array of strings | no | `layer.kind`, `layer.prefix*` (matching at least one kind of the catalog) or `layer.*`. |
-| `decides` | array of strings | no | Decision points asked in one of the listed layers; a trusted extension answers none. |
-| `trusted` | boolean | no | The extension is part of DAGON for the project: it runs privileged, in DAGON's own memory, and nothing of the sandbox holds against it. A trusted-only port needs it; an extension that only observes may say it too (code of the project's own that runs in the boot core). |
-| `capabilities` | `[capabilities]` table | no | What DAGON hands the extension (the `[capabilities]` keys below). |
-| `limits` | `[limits]` table | no | Device layers: `max_run_us` 1 to the decision bound (50 ms) for an untrusted extension and for every one that observes events (each handler call is timed against it); untrusted only: `stack_bytes` at least 256, `text_bytes` above 0 (the `[limits]` keys below). |
+| `format` | 整数 | 必須 | 最初に読みます。この dagon が読まない番号は、両方の番号を示して受け付けません。 |
+| `id` | 文字列 | 必須 | 拡張の id: `a-z 0-9 -`、1 から 32 文字。 |
+| `layers` | 文字列の配列 | 必須 | 動くレイヤー: `boot`、`app`、`relay`、`host`。 |
+| `provides` | 文字列の配列 | 任意 | 一覧のすべてのレイヤーにあるポート。信頼された拡張だけのポートには `trusted = true` が要ります。 |
+| `observes` | 文字列の配列 | 任意 | `layer.kind`、`layer.prefix*`（カタログの種類の少なくとも 1 つに一致すること）、または `layer.*`。 |
+| `decides` | 文字列の配列 | 任意 | 一覧のレイヤーのどれかで尋ねられる判断点。信頼された拡張はどれにも答えません。 |
+| `trusted` | 真偽値 | 任意 | この拡張は、そのプロジェクトにとって DAGON の一部です。特権で、DAGON 自身のメモリの中で動き、サンドボックスの制限はどれも効きません。信頼された拡張だけのポートには必要です。観測するだけの拡張も指定できます（ブートローダで動く、プロジェクト自身のコード）。 |
+| `capabilities` | `[capabilities]` テーブル | 任意 | DAGON が拡張に渡すもの（下の `[capabilities]` のキー）。 |
+| `limits` | `[limits]` テーブル | 任意 | デバイスのレイヤー: 信頼されていない拡張と、イベントを観測するすべての拡張では、`max_run_us` は 1 から判断の上限（50 ms）まで（ハンドラの呼び出しごとにこれに照らして測ります）。信頼されていないものだけ: `stack_bytes` は 256 以上、`text_bytes` は 0 より大きいこと（下の `[limits]` のキー）。 |
 
 `[capabilities]`:
 
-| Key | Type | Required | Meaning |
+| キー | 型 | 必須か | 意味 |
 |---|---|---|---|
-| `peripherals` | array of strings | no | Board `[[peripheral]]` ids: windows onto window-eligible blocks. |
-| `pins` | array of strings | no | Board `[[pin]]` names, reached through the pin service. |
-| `buses` | array of strings | no | Board `[[bus]]` ids, reached through the bus service. |
-| `timer` | boolean | no | The time service. |
+| `peripherals` | 文字列の配列 | 任意 | ボードの `[[peripheral]]` の id: ウィンドウにできるブロックへのウィンドウ。 |
+| `pins` | 文字列の配列 | 任意 | ボードの `[[pin]]` の名前。ピンのサービスを通して使います。 |
+| `buses` | 文字列の配列 | 任意 | ボードの `[[bus]]` の id。バスのサービスを通して使います。 |
+| `timer` | 真偽値 | 任意 | 時間のサービス。 |
 
 `[limits]`:
 
-| Key | Type | Required | Meaning |
+| キー | 型 | 必須か | 意味 |
 |---|---|---|---|
-| `max_run_us` | integer | yes | Per handler call. |
-| `stack_bytes` | integer | no | Required (at least `STACK_MIN`) for a sandboxed extension; a trusted one runs on DAGON's stack. |
-| `ram_bytes` | integer | no | `.ext.data` + `.ext.bss`. |
-| `text_bytes` | integer | no | `.ext.text` + `.ext.rodata` + the `.ext.data` load image. |
+| `max_run_us` | 整数 | 必須 | ハンドラの呼び出しごと。 |
+| `stack_bytes` | 整数 | 任意 | サンドボックスの拡張には必須です（`STACK_MIN` 以上）。信頼された拡張は DAGON のスタックで動きます。 |
+| `ram_bytes` | 整数 | 任意 | `.ext.data` + `.ext.bss`。 |
+| `text_bytes` | 整数 | 任意 | `.ext.text` + `.ext.rodata` + `.ext.data` のロードイメージ。 |
 <!-- end of generated table -->
 
-The crate exports its extension as `pub type DagonExtension` and
-`pub const DAGON_EXTENSION: DagonExtension`; the generated chain names them.
+crate は、拡張を `pub type DagonExtension` と `pub const DAGON_EXTENSION: DagonExtension` として公開します。生成されるチェーンがこの名前を使います。
 
 ## dagon.toml
 
@@ -82,131 +72,38 @@ app = ["uds-transport"]              # the app's chain (a hub's relay too)
 trusted = [{ id = "hsm-verify", sha256 = "<source SHA-256, 64 hex digits>" }]
 ```
 
-`sha256` is the source hash of the extension's package folder: SHA-256
-over every file in it, sorted by path (`/`-separated), each as its path, a
-zero byte, its length as a little-endian u64 and its bytes with CRLF read
-as LF. Nothing in the folder is left out (the compiler can read any of
-it through `include!` or `#[path]`), so running cargo inside the
-extension's own folder, which writes `target/` and `Cargo.lock` there,
-changes the hash. `dagon gen` checks it and names the hash it found when
-the two differ. The registry crates the extension itself depends on are
-pinned by the boot crate's `Cargo.lock`, not by this hash.
+`sha256` は、拡張の crate のフォルダのソースのハッシュです。フォルダの中のすべてのファイルをパス（`/` 区切り）の順に並べ、ファイルごとにパス、ゼロのバイト、長さ（リトルエンディアンの u64）、バイト列（CRLF は LF として読む）を続けたものの SHA-256 です。フォルダの中に除外するものはありません（コンパイラは `include!` や `#[path]` でどれでも読めるため）。そのため、拡張のフォルダの中で cargo を実行すると、そこに `target/` と `Cargo.lock` が書かれ、ハッシュが変わります。`dagon gen` はこれを確かめ、2 つが違うときは見つけたハッシュを示します。拡張自身が依存するレジストリの crate は、このハッシュではなく、ブート用クレートの `Cargo.lock` で固定します。
 
-`packages` are folders inside the project; `dagon gen` refuses one
-outside it. To use an extension from DAGON's source tree (the template
-below, or a sample under `samples/`), copy its folder into the project
-and point its `path = "../../..."` dependencies at the DAGON checkout the
-project's `[dagon] path` names. The copy's hash depends on those paths, so
-each project has its own: the first `dagon gen` refuses and names it.
+`packages` はプロジェクトの中のフォルダです。外のものは `dagon gen` が受け付けません。DAGON のソースツリーにある拡張（下のテンプレートや `samples/` の下のサンプル）を使うには、そのフォルダをプロジェクトにコピーし、`path = "../../..."` の依存先を、プロジェクトの `[dagon] path` が示す DAGON のチェックアウトに向けてください。コピーのハッシュはこれらのパスで変わるので、プロジェクトごとに違います。最初の `dagon gen` が受け付けず、そのハッシュを示します。
 
-For each node `dagon gen` refuses, naming the extension and the reason: an
-extension listed for an image whose layers it does not have, a port
-provided twice in one chain, a trusted extension without its hash or
-whose source no longer hashes to it, a boot extension that is not
-trusted (the boot core runs trusted extensions only), boot extensions on
-an MCU without a DAGON boot stage (the ESP32-S3 starts its app from the
-vendor's second stage, so no boot extension runs there),
-capabilities the board does not declare, a peripheral that is not
-window-eligible, stack and RAM over the MCU's `ext_ram_max`, boot calls
-over a quarter of the trial watchdog period, more windows than the
-protection unit has regions after code, data and stack, regions that do
-not fit the image, a window that would also open a block the
-extension did not declare, and an MCU whose data cache (`cache =
-"id-cache"`) or tightly coupled memory (`tcm`) the kind's generator does
-not place bounce buffers or regions for. Windows are device memory (never
-cached); code, data and stacks are normal memory.
+`dagon gen` は、ノードごとに次のものを、拡張の名前と理由を示して受け付けません。拡張が持たないレイヤーのイメージに挙げられた拡張。1 つのチェーンで 2 度提供されるポート。ハッシュが無い、またはソースのハッシュがもう一致しない信頼された拡張。信頼されていないブート拡張（ブートローダは信頼された拡張だけを動かします）。DAGON のブート段階を持たないマイコン上のブート拡張（ESP32-S3 はベンダーの第 2 段階からアプリを起動するので、そこではブート拡張は動きません）。ボードが宣言していない能力。ウィンドウにできないペリフェラル。マイコンの `ext_ram_max` を超えるスタックと RAM。試行のウォッチドッグの周期の 4 分の 1 を超えるブートの呼び出し。コード、データ、スタックの後で、保護ユニットのリージョンの数を超えるウィンドウ。イメージに収まらないリージョン。拡張が宣言していないブロックまで開くことになるウィンドウ。そして、その種類の生成器がバウンスバッファやリージョンを置かない、データキャッシュ（`cache =
+"id-cache"`）や密結合メモリ（`tcm`）を持つマイコン。ウィンドウはデバイスメモリです（キャッシュされません）。コード、データ、スタックは通常のメモリです。
 
-## Generated files (`nodes/<id>/dagon/`)
+## 生成されるファイル（`nodes/<id>/dagon/`）
 
-| File | Content |
+| ファイル | 中身 |
 |---|---|
-| `boot_wiring.rs` | MCUs with a DAGON boot stage: the board's LED, halt pattern, power hold and boot action program; the watchdog periods; the boot record and fuse placement; the isolation level, kind, bounds and the registers read back at boot; the extensions in chain order (`BootChain`, `BOOT_CHAIN`) and each boot core slot's protection map |
-| `memory-<image>-<slot>.x` | MCUs that define their RAM: the image's FLASH and RAM after the extension regions, each extension's regions and sections, the boot record and fuse cells |
-| `protection.toml` | Every image's extensions, memory and protection map, readable |
+| `boot_wiring.rs` | DAGON のブート段階を持つマイコン: ボードの LED、停止のパターン、電源の保持、ブートのアクションプログラム。ウォッチドッグの周期。ブート記録とヒューズの配置。隔離のレベル、種類、上限、ブート時に読み返すレジスタ。チェーンの順の拡張（`BootChain`、`BOOT_CHAIN`）と、ブートローダのスロットごとの保護マップ |
+| `memory-<image>-<slot>.x` | RAM を定義しているマイコン: 拡張のリージョンを除いたイメージの FLASH と RAM、拡張ごとのリージョンとセクション、ブート記録とヒューズのセル |
+| `protection.toml` | すべてのイメージの拡張、メモリ、保護マップ。読める形です |
 
-`nodes/<id>/dagon/` holds only what the last `dagon gen` wrote: every
-other file in it that carries gen's mark (its first line says it was
-generated by dagon gen) is
-removed (others are kept and reported), and a node gen refused or could not
-generate keeps none of gen's files. When `nodes`, `nodes/<id>` or
-`nodes/<id>/dagon` is a symbolic link or a junction, gen writes and removes
-nothing there and reports it.
+`nodes/<id>/dagon/` には、最後の `dagon gen` が書いたものだけがあります。そこにあるほかのファイルのうち、gen の印（dagon gen が生成したと最初の行にある）を持つものは消します（印の無いものは残して報告します）。gen が受け付けなかった、または生成できなかったノードには、gen のファイルを残しません。`nodes`、`nodes/<id>`、`nodes/<id>/dagon` がシンボリックリンクかジャンクションのときは、gen はそこに何も書かず、何も消さず、そのことを報告します。
 
-At level `none` no map is made and `dagon gen` notes that the node's
-extensions run unguarded.
+レベルが `none` のときはマップを作らず、`dagon gen` はノードの拡張が保護なしで動くことを知らせます。
 
-## Boot extensions
+## ブート拡張
 
-On an MCU with a DAGON boot stage (RP2040, STM32F401RE), `dagon gen` also
-writes the node's boot crate into `boot/<id>/` of the project, from the
-boot core template its MCU package ships (`bootcore/template/`, found by
-`[package.metadata.dagon] bootcore = "<mcu id>"`): `Cargo.toml` (the boot
-core library, `dagon-events` and each boot extension's package, and the
-node, its MCU, its board and its trusted extensions under
-`[package.metadata.dagon.boot]`), `boot.rs` (the boot core's `main`, from
-`nodes/<id>/dagon/boot_wiring.rs`), `graph.stamp` (below) and `.cargo/config.toml` (the target,
-`DAGON_BOOT_CRATE` and the node's `DAGON_TARGET_TAG`). It is a folder of
-its own because cargo merges the `.cargo/config.toml` of every folder
-above a crate, and the node's app crate has one made for the app.
-`boot/<id>/` holds only what the last `dagon gen` wrote, as
-`nodes/<id>/dagon/` does; cargo's `target/` and `Cargo.lock` in it are
-left alone. One field is yours: `version` under `[package]` of
-`boot/<id>/Cargo.toml`, the boot core's version. `dagon gen` writes the
-template's value once and keeps yours from then on; raise it for each
-boot core you release (a node writes a boot core whose version differs
-from the one it runs). `dagon gen` and the build bring the crate's own
-entry in `Cargo.lock` to it and change nothing else in the lock. When
-that file cannot be read or does not parse, `dagon gen` stops with the
-reason and leaves it as it is; when a node is skipped, its other boot
-crate files are removed but this file is kept. Build it
-in that folder with `cargo build --release` (`DAGON_PUBKEY` as for every
-image).
+DAGON のブート段階を持つマイコン（RP2040、STM32F401RE）では、`dagon gen` はノードのブート用クレートもプロジェクトの `boot/<id>/` に書き出します。元になるのは、マイコンの定義にあるブートローダのテンプレート（`bootcore/template/`、`[package.metadata.dagon] bootcore = "<mcu id>"` で見つけます）です。書き出すのは `Cargo.toml`（ブートローダのライブラリ、`dagon-events`、各ブート拡張の crate、そして `[package.metadata.dagon.boot]` の下のノード、マイコン、ボード、信頼された拡張）、`boot.rs`（ブートローダの `main`。`nodes/<id>/dagon/boot_wiring.rs` から）、`graph.stamp`（後述）、`.cargo/config.toml`（ターゲット、`DAGON_BOOT_CRATE`、ノードの `DAGON_TARGET_TAG`）です。独立したフォルダにしているのは、cargo が crate より上のすべてのフォルダの `.cargo/config.toml` を合わせて読み、ノードのアプリの crate にはアプリ用のものがあるからです。`boot/<id>/` には、`nodes/<id>/dagon/` と同じく、最後の `dagon gen` が書いたものだけがあります。そこにある cargo の `target/` と `Cargo.lock` には触れません。あなたが決める欄が 1 つあります。`boot/<id>/Cargo.toml` の `[package]` の下の `version`、つまりブートローダのバージョンです。`dagon gen` はテンプレートの値を 1 度だけ書き、それ以降はあなたの値を保ちます。ブートローダをリリースするたびに上げてください（ノードは、動かしているものとバージョンが違うブートローダを書き込みます）。`dagon gen` とビルドは、`Cargo.lock` にあるその crate 自身の項目をこの値にそろえ、ロックのほかの部分は変えません。そのファイルを読めない、または解析できないときは、`dagon gen` は理由を示して止まり、ファイルはそのままです。ノードを飛ばすときは、ほかのブート用クレートのファイルは消しますが、このファイルは残します。ビルドは、そのフォルダで `cargo build --release` を実行します（`DAGON_PUBKEY` はどのイメージとも同じです）。
 
-The boot core runs its extensions privileged, so it runs only trusted
-ones (manifest `trusted = true`, listed with their source hash under
-`[extensions.nodes.<id>] trusted`). From `boot.watchdog_armed` to
-`boot.before_jump` or `boot.halt`, each boot event ([Events](/en/reference/events/), layer
-`boot`) reaches, in chain order, the extensions whose `observes` names
-it, each call timed against its `max_run_us`: a call that takes longer
-is not stopped, but the boot core then delivers `boot.extension_overran`
-(the extension, its budget, the time taken) to the extensions observing
-that kind, and goes on. Nothing a boot extension does changes which slot
-the boot core starts. `dagon gen` refuses a set whose calls could take
-more than a quarter of the trial watchdog period: one call per observed
-boot event, and for an extension observing `boot.extension_overran` one
-more per call of any boot extension.
+ブートローダは拡張を特権で動かすので、信頼された拡張（マニフェストが `trusted = true` で、`[extensions.nodes.<id>] trusted` にソースのハッシュとともに挙げられたもの）だけを動かします。`boot.watchdog_armed` から `boot.before_jump` または `boot.halt` まで、ブートのイベント（[イベント](/reference/events/)、レイヤー `boot`）はそれぞれ、`observes` がそのイベントを挙げている拡張に、チェーンの順に届きます。呼び出しごとに `max_run_us` に照らして時間を測ります。それより長くかかった呼び出しは止めませんが、ブートローダはその後、`boot.extension_overran`（拡張、その持ち時間、かかった時間）を、その種類を観測している拡張に届け、先に進みます。ブート拡張が何をしても、ブートローダが起動するスロットは変わりません。呼び出しの合計が試行のウォッチドッグの周期の 4 分の 1 を超える可能性がある組み合わせは、`dagon gen` が受け付けません。数えるのは、観測するブートイベントごとに 1 回の呼び出しと、`boot.extension_overran` を観測する拡張については、いずれかのブート拡張の呼び出しごとにさらに 1 回です。
 
-`dagon gen` also checks the boot crate's resolved dependency graph with
-cargo (every feature, every target): every crate built into it must be
-DAGON's, inside a declared trusted extension's folder, or a registry
-crate with a checksum in the boot crate's `Cargo.lock`. It then writes
-`boot/<id>/graph.stamp` for the boot crate's `Cargo.toml`, `Cargo.lock`
-and trusted sources as they are; the boot core's build refuses to build
-without that stamp or when any of them changed since (run `dagon gen`
-again). There is no decision point at boot: the slot
-the boot core starts is decided by DAGON alone, so an extension cannot
-change it. The calls share the boot core's flash budget (the
-STM32F401RE's is 32,256 bytes) and its watchdog: one that does not
-return makes the watchdog reset the chip.
+`dagon gen` は、ブート用クレートの解決済みの依存グラフも cargo で確かめます（すべてのフィーチャ、すべてのターゲット）。組み込まれるすべての crate は、DAGON のもの、宣言された信頼された拡張のフォルダの中のもの、またはブート用クレートの `Cargo.lock` にチェックサムがあるレジストリの crate でなければなりません。その後で、ブート用クレートの `Cargo.toml`、`Cargo.lock`、信頼されたソースのいまの内容に対して `boot/<id>/graph.stamp` を書きます。ブートローダのビルドは、このスタンプが無いとき、またはそれ以降にどれかが変わったときはビルドしません（`dagon gen` をもう一度実行してください）。ブートに判断点はありません。ブートローダが起動するスロットは DAGON だけが決めるので、拡張には変えられません。呼び出しはブートローダのフラッシュの上限とウォッチドッグを共有します。戻らない呼び出しがあると、ウォッチドッグがチップをリセットします。
 
-Once `boot/<id>/Cargo.lock` exists, `dagon gen` resolves the graph with
-`--locked`, so after an extension is added it stops at the lock. Run
-`cargo metadata --offline --format-version 1` in `boot/<id>/` once (it
-adds the new package to the lock), then `dagon gen` again. To build the
-boot core without an extension, remove it from the node's `boot` and
-`trusted` lists and run `dagon gen` again.
+`boot/<id>/Cargo.lock` ができた後は、`dagon gen` はグラフを `--locked` で解決します。そのため、拡張を足した後はロックのところで止まります。`boot/<id>/` で `cargo metadata --offline --format-version 1` を 1 度実行し（ロックに新しい crate を足します）、その後でもう一度 `dagon gen` を実行してください。拡張なしでブートローダをビルドするには、ノードの `boot` と `trusted` の一覧からそれを外し、もう一度 `dagon gen` を実行します。
 
-The boot events come as fast as the boot core works:
-`boot.watchdog_armed`, `boot.log_read` and `boot.before_decision` follow
-each other with only the state log's flash reads between them,
-`boot.slot_chosen` or `boot.no_image` follows the image check, and
-`boot.before_jump` comes right before the app starts and takes the chip
-over. Whatever an extension shows lasts only until then, and every wait
-in a handler adds to the boot.
+ブートのイベントは、ブートローダの処理と同じ速さで来ます。`boot.watchdog_armed`、`boot.log_read`、`boot.before_decision` は、あいだに状態ログのフラッシュの読み出しだけを挟んで続きます。`boot.slot_chosen` または `boot.no_image` はイメージの検査の後に続き、`boot.before_jump` はアプリが起動してチップを引き継ぐ直前に来ます。拡張が表示したものはそこまでしか残らず、ハンドラの中の待ちはすべてブートの時間に加わります。
 
-A minimal trusted boot extension to copy is
-`targets/boot-extension-template/` (it counts the boot events and keeps
-the slot the boot core chose):
+コピーして使える最小の信頼されたブート拡張は `targets/boot-extension-template/` です（ブートのイベントを数え、ブートローダが選んだスロットを覚えます）。
 
 ```toml
 # dagon-extension.toml
@@ -249,14 +146,4 @@ boot = ["boot-count"]
 trusted = [{ id = "boot-count", sha256 = "<the hash dagon gen names>" }]
 ```
 
-DAGON hands a boot extension no peripheral or pin (`Ctx` carries the
-layer only). A trusted extension that drives hardware (a display, a pin)
-takes it from the MCU's HAL itself in `on_event`, after the boot core's
-HAL init (it runs privileged). What it takes, and that this is safe, is
-the extension's author's responsibility: DAGON checks none of it. It must
-leave alone what the boot core uses (on the RP2040: the flash, the
-watchdog, the clocks, and the board's `[boot] led` once the boot core
-halts) and keep each call within
-its `max_run_us`. The ESP32-S3 has no DAGON boot stage (its
-vendor's second stage starts the app), so boot extensions do not exist
-there and `dagon gen` refuses them with that reason.
+DAGON はブート拡張にペリフェラルもピンも渡しません（`Ctx` が持つのはレイヤーだけです）。ハードウェア（ディスプレイ、ピン）を動かす信頼された拡張は、ブートローダの HAL の初期化の後で、`on_event` の中でマイコンの HAL から自分で取ります（特権で動くためです）。何を取るか、それが安全かどうかは、拡張の作者の責任です。DAGON はどれも確かめません。ブートローダが使うもの（RP2040 では、フラッシュ、ウォッチドッグ、クロック、そしてブートローダが停止した後のボードの `[boot] led`）には触れず、各呼び出しを `max_run_us` に収めなければなりません。ESP32-S3 には DAGON のブート段階がない（ベンダーの第 2 段階がアプリを起動する）ので、そこにブート拡張は存在せず、`dagon gen` はその理由を示して受け付けません。

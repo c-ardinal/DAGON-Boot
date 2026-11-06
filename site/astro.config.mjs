@@ -32,8 +32,7 @@ export default defineConfig({
   integrations: [
     starlight({
       title: 'DAGON',
-      // Japanese is the default, at the root; English is under /en/. A page written only in English
-      // sits at the root and says so, and /en/ falls back to it.
+      // Japanese is the default, at the root; English is under /en/.
       defaultLocale: 'root',
       locales: {
         root: { label: '日本語', lang: 'ja' },
@@ -48,7 +47,7 @@ export default defineConfig({
       ],
       plugins: [
         starlightLinksValidator({
-          // /en/ falls back to the pages written only in English.
+          // Every page has both languages; a link may still name a page through the fallback.
           errorOnFallbackPages: false,
           // The Rust API pages are rustdoc's, copied in beside the site after it is built.
           // The demo is the Console's own build, beside the docs.

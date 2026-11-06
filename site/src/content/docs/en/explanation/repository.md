@@ -38,7 +38,7 @@ What the code and its tests show:
 | `crates/dagon-proto` | Link protocol v1: frames, commands, payloads |
 | `crates/dagon-port` | Board traits (flash, link, reset, watchdog, boot select, I2C, sub MCU lines) |
 | `crates/dagon-core` | Boot decision (trial, attempts, rollback) |
-| `crates/dagon-agent` | Node-side receiver of updates |
+| `crates/dagon-agent` | Node-side receiver of writes |
 | `crates/dagon-conform` | The 12 conformance tests and the result file format |
 | `crates/dagon-sim` | Simulator: flash, links, ROM loader, nodes, hub |
 | `crates/dagon-topology` | Topology YAML, validation rules, supported boards |

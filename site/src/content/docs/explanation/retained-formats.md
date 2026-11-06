@@ -1,23 +1,11 @@
 ---
-title: "Retained and persistent formats"
-description: "The boot record, the lockup fuse, the MCU identity and the compiled topology's layout."
+title: "保持と永続の形式"
+description: "ブート記録、ロックアップヒューズ、マイコンの識別、コンパイル済みの構成のレイアウトです。"
 ---
 
-:::note
-このページは英語だけです。
-:::
+この文書は、[lifecycle-events.md の 5.5 節](/explanation/lifecycle-events/#55-ブート記録マイコンの識別コンパイル済みの構成-要件と実行可能なモデル)が実行可能なモデルに任せている形式の、規範となる仕様です。対象は、ブート記録、ロックアップヒューズ、マイコンの識別、コンパイル済みの構成のノードのレイアウトと置き換えです。ここにある形はどれも `crates/dagon-retained-model` が証明しているものです。形を変えるときは、まずモデルを変え、モデルのテストで決めます。
 
-This document is the normative specification of the formats that
-[lifecycle-events.md section 5.5](/en/explanation/lifecycle-events/#55-boot-record-mcu-identity-and-compiled-topology-requirements-and-the-executable-model)
-leaves to an executable model: the boot record, the lockup fuse, the MCU
-identity and the compiled topology's node layout and replacement. Every
-shape here is the one `crates/dagon-retained-model` proves; a change to a
-shape is a change to the model first, and the model's tests decide.
-
-The model is host-only and not released. Each format's codec is a trait in
-the model (`RecordCodec`, `FuseCodec`, `BodyCodec`); a production codec
-implements the same trait and runs under the same harness, so the shipped
-codec and the proof cannot drift apart.
+モデルはホスト専用で、リリースしません。各形式のコーデックはモデルのトレイトです（`RecordCodec`、`FuseCodec`、`BodyCodec`）。本番のコーデックは同じトレイトを実装し、同じハーネスで動きます。そのため、配布するコーデックと証明がずれることはありません。
 
 ```
 cargo test -p dagon-retained-model                       # 10^4 scenarios per world, fixed cases
@@ -25,537 +13,260 @@ cargo test -p dagon-retained-model --release -- --ignored # 10^6 scenarios per w
 DAGON_MODEL_SCENARIOS=<n> DAGON_MODEL_SEED=<seed>         # override count and base seed
 ```
 
-A failing scenario prints its seed, its configuration and its operation
-list shrunk to the smallest list that still fails the same property; the
-case is added to `tests/fixed.rs` as a regression.
+失敗したシナリオは、そのシード、構成、そして同じ性質でなお失敗する最小の一覧まで縮めた操作の一覧を表示します。そのケースを回帰テストとして `tests/fixed.rs` に足します。
 
-## 1. Fault model
+## 1. 故障モデル
 
-What the proofs assume of the hardware and what they inject:
+証明がハードウェアについて仮定することと、注入するものです。
 
-- **Stores.** Retained memory is written by byte stores in program order
-  (volatile stores with a data memory barrier between the steps of one
-  write). A wider store is allowed when it does not combine bytes of two
-  different steps; a 32-bit-only register file rewrites a step's
-  neighbouring bytes with their current values. A run may stop after any
-  byte (a reset or a power cut); the model injects that stop after every
-  byte of every write.
-- **Reset** keeps retained bytes. **Power loss** does what the definition's
-  `[boot.record] survives` declares: `reset-random` (bytes random, SRAM),
-  `reset-cleared` (bytes zero, registers) or `power` (bytes kept,
-  battery-backed).
-- **NOR flash** erases to `0xFF` and programs bits from 1 to 0. An
-  interrupted erase leaves a prefix erased and the rest old or random; an
-  interrupted program leaves a prefix programmed. Every byte, including a
-  commit byte whose program was interrupted, reads the same on every read
-  until the next erase or program (no weak bits); flash that can return
-  different values for a partly programmed byte needs its MCU package to
-  read the commit byte back until two reads agree.
-- **Foreign bytes.** Any byte may also be overwritten by something that is
-  not the format's writer: a writer of another layout of the same stage,
-  or a fault. The model injects random bytes into every region.
+- **ストア。** 保持メモリは、プログラムの順にバイトのストアで書かれます（1 回の書き込みのステップのあいだにデータメモリバリアを挟んだ volatile のストア）。幅の広いストアは、異なる 2 つのステップのバイトを合わせないときに使えます。32 ビット単位だけのレジスタファイルは、ステップの隣のバイトをいまの値で書き直します。実行はどのバイトの後でも止まることがあります（リセットか電断）。モデルは、すべての書き込みのすべてのバイトの後にこの停止を注入します。
+- **リセット**は保持のバイトを残します。**電断**は、定義の `[boot.record] survives` が宣言するとおりです。`reset-random`（バイトはランダム、SRAM）、`reset-cleared`（バイトはゼロ、レジスタ）、`power`（バイトは残る、バッテリバックアップ）です。
+- **NOR フラッシュ**は `0xFF` に消去し、ビットを 1 から 0 に書き込みます。中断された消去は、先頭の一部を消去済みに、残りを古いかランダムなままにします。中断された書き込みは、先頭の一部を書き込み済みにします。どのバイトも、書き込みが中断されたコミットバイトを含め、次の消去か書き込みまで、読むたびに同じ値になります（弱いビットはありません）。一部だけ書かれたバイトで違う値を返すことがあるフラッシュでは、マイコンの定義のコードが、2 回の読み出しが一致するまでコミットバイトを読み返す必要があります。
+- **外来のバイト。** どのバイトも、その形式の書き手ではないもの（同じ段階の別のレイアウトの書き手や、故障）に上書きされることがあります。モデルは、すべての領域にランダムなバイトを注入します。
 
-Two guarantees are probabilistic. Random bytes are accepted as a valid
-entry or record only by coincidence of an 8-bit commit value and a CRC-32
-(at most 2^-40 per slot); the topology store also requires a SHA-256
-match. A new boot-record sequence repeats an earlier one's numbers and
-tag only with probability about 2^-k for k bits of min-entropy in the
-entropy word (2.3), and this matters only against the identities a
-consumer saw in its previous replay. Every other guarantee below is
-structural: it holds for every interruption point, not with a
-probability.
+2 つの保証は確率的です。ランダムなバイトが有効なエントリや記録として受け付けられるのは、8 ビットのコミット値と CRC-32 の偶然の一致のときだけです（スロットごとに最大 2^-40）。構成の保存は、さらに SHA-256 の一致も求めます。新しいブート記録のシーケンスが以前のシーケンスの番号とタグを繰り返す確率は、エントロピーワードの最小エントロピーが k ビットのとき約 2^-k で（2.3）、これが問題になるのは、読み手が前回のリプレイで見た識別子に対してだけです。下のほかの保証はどれも構造的なものです。確率ではなく、どの中断点でも成り立ちます。
 
-## 2. Boot record (`boot-record` 1)
+## 2. ブート記録（`boot-record` 1）
 
-Byte ranges in this document are inclusive: "bytes 1 to 23" are the 23
-bytes at offsets 1, 2, …, 23.
+この文書のバイトの範囲は両端を含みます。「バイト 1 から 23」は、オフセット 1、2、…、23 の 23 バイトです。
 
-### 2.1 Placement
+### 2.1 配置
 
-The MCU definition's `[boot.record]` declares the region (at most
-`RECORD_MAX` = 4096 bytes), one ring per writer as a byte range, in boot
-order, and the entropy word (2.3). Ring 0 belongs to the first DAGON
-stage (stage0 where the MCU has one), ring 1 to the next stage, and so
-on, at most 16 writers. A ring holds `bytes / 28` entry slots, from 2 to
-256. Rings do not overlap and lie inside the region; reserved addresses
-of a register file lie outside every ring. The same definition reaches
-every image's `memory.x`.
+マイコンの定義の `[boot.record]` は、領域（最大 `RECORD_MAX` = 4096 バイト）、書き手ごとに 1 つのリングをバイトの範囲としてブートの順に、そしてエントロピーワード（2.3）を宣言します。リング 0 は DAGON の最初の段階（マイコンにあれば、リセットの後で最初に動く小さなプログラムである stage0）のもので、リング 1 は次の段階のもの、以下同じで、書き手は最大 16 です。リングは `bytes / 28` 個のエントリのスロットを持ち、2 から 256 個です。リングは重ならず、領域の中にあります。レジスタファイルの予約アドレスは、どのリングの外にもあります。同じ定義が、すべてのイメージの `memory.x` に届きます。
 
-### 2.2 Entry
+### 2.2 エントリ
 
-28 bytes, little-endian:
+28 バイト、リトルエンディアンです。
 
-| Offset | Size | Field |
+| オフセット | 大きさ | 欄 |
 |---|---|---|
-| 0 | 1 | commit: `0xB1` committed; any other value: not an entry of layout 1 |
-| 1 | 1 | flags: bit 0 `start` (first entry of the writer's run), bit 1 `epoch` (first entry of a new sequence), bits 2-3 zero, bits 4-7 `opener` |
-| 2 | 1 | the writer's `event` format number |
-| 3 | 1 | event kind |
-| 4 | 4 | `eseq`: the writer's sequence number |
-| 8 | 4 | `boot`: the opener's `eseq` of its first entry in this boot |
-| 12 | 4 | `boot tag`: the opener's sequence tag |
-| 16 | 4 | `tag`: this writer's sequence tag |
-| 20 | 3 | payload (the event's compact form) |
-| 23 | 1 | zero |
-| 24 | 4 | CRC-32 (ISO-HDLC) over `[1, writer index]` followed by bytes 1 to 23 |
+| 0 | 1 | コミット: `0xB1` はコミット済み。ほかの値はレイアウト 1 のエントリではありません |
+| 1 | 1 | フラグ: ビット 0 `start`（書き手の実行の最初のエントリ）、ビット 1 `epoch`（新しいシーケンスの最初のエントリ）、ビット 2-3 はゼロ、ビット 4-7 `opener` |
+| 2 | 1 | 書き手の `event` の形式番号 |
+| 3 | 1 | イベントの種類 |
+| 4 | 4 | `eseq`: 書き手の連番 |
+| 8 | 4 | `boot`: このブートを開始した段階の最初のエントリの `eseq` |
+| 12 | 4 | `boot tag`: ブートを開始した段階のシーケンスのタグ |
+| 16 | 4 | `tag`: この書き手のシーケンスのタグ |
+| 20 | 3 | ペイロード（イベントの短い形） |
+| 23 | 1 | ゼロ |
+| 24 | 4 | `[1, writer index]` とそれに続くバイト 1 から 23 に対する CRC-32（ISO-HDLC） |
 
-An entry is valid when the commit byte is `0xB1`, the reserved bits and
-byte are zero and the CRC matches. The CRC binds the layout number and the
-writer index, so an entry of another layout or in another writer's ring is
-never valid.
+エントリが有効なのは、コミットバイトが `0xB1` で、予約のビットとバイトがゼロで、CRC が一致するときです。CRC はレイアウトの番号と書き手の番号を束ねるので、別のレイアウトのエントリや、別の書き手のリングにあるエントリは、決して有効になりません。
 
-**Append**, in this order: store byte 0 = `0x00`; store bytes 1 to 27;
-store byte 0 = `0xB1`. Only the commit byte is stored twice, and only by
-its own append: the first store makes the slot invalid before any other
-byte changes, the last one makes it valid after every byte is in place. A
-write interrupted anywhere loses at most that entry, also when it
-overwrites a valid one, and nothing a reader accepts is made of two
-writes. No other field is ever rewritten.
+**追記**は、この順です。バイト 0 に `0x00` をストアする。バイト 1 から 27 をストアする。バイト 0 に `0xB1` をストアする。2 度ストアするのはコミットバイトだけで、それも自分の追記の中だけです。最初のストアは、ほかのバイトが変わる前にスロットを無効にし、最後のストアは、すべてのバイトがそろった後でスロットを有効にします。どこで中断された書き込みでも、有効なエントリを上書きしている場合を含め、失うのは最大でそのエントリだけで、読み手が受け付けるものが 2 回の書き込みから作られることはありません。ほかの欄を書き直すことはありません。
 
-### 2.3 Writer
+### 2.3 書き手
 
-A writer's numbers form **sequences**: a sequence starts on an empty ring
-and carries one tag in every entry. A stage opens its writer once per run
-and reads **only its own ring**:
+書き手の番号は**シーケンス**を作ります。シーケンスは空のリングで始まり、すべてのエントリに 1 つのタグを持ちます。段階は、実行ごとに 1 度書き手を開き、**自分のリングだけ**を読みます。
 
-1. Decode every slot once (one CRC per slot). The newest entry is the
-   valid one with the most valid entries at most 2^24 sequence numbers
-   behind it (ties: the higher slot); in a ring the writer filled this is
-   the largest `eseq`, across wrap.
-2. **Intact ring.** The ring is intact when it shows exactly what the
-   writer's own appends leave: every slot valid with numbers falling slot
-   by slot backwards from the newest; or, before the first wrap, slots 0
-   to *p* (the newest) valid and falling back to an `epoch` entry at slot
-   0, and every later slot all zeros.
-3. **Continue.** With a newest entry, the next append goes to the
-   following slot (mod `slots`) with the newest entry's tag and `eseq` =
-   newest + 1 when the ring is intact, newest + `slots` when it is not
-   (bytes the writer did not write destroyed entries, which may have been
-   newer than the newest it holds; the jump passes them and the reader
-   states it as a gap).
-4. **New sequence.** Without a valid entry, the writer stores zero into
-   every byte of its ring, then appends at slot 0 with `epoch`, `eseq` =
-   FNV-1a-32 of the whole region's raw bytes from basis `0x811C9DC5` XOR
-   the entropy word, and tag = FNV-1a-32 of the same bytes from basis
-   `0x050C5D1F` XOR the entropy word rotated left by 16.
-5. **Boot.** The hand-off from the previous stage (2.4) when it is valid
-   for this layout and names an earlier writer; otherwise this stage opens
-   the boot itself (`opener` = its own index, `boot` = the `eseq` of its
-   first entry, `boot tag` = its tag). A stage that opens a boot appends
-   its first entry (the `entry` event) before it hands off.
-6. The run's first entry carries `start`.
+1. すべてのスロットを 1 度ずつ解読します（スロットごとに CRC 1 回）。いちばん新しいエントリは、後ろ 2^24 の連番以内に有効なエントリがいちばん多い有効なエントリです（同数なら上のスロット）。書き手が埋めたリングでは、一周をまたいで最大の `eseq` になります。
+2. **破損していないリング。** リングが破損していないのは、書き手自身の追記が残すものとぴったり同じときです。すべてのスロットが有効で、番号がいちばん新しいものからスロットごとに後ろへ下がるか、最初の一周の前で、スロット 0 から *p*（いちばん新しいもの）までが有効で、スロット 0 の `epoch` のエントリまで下がり、それより後のスロットがすべてゼロのときです。
+3. **続ける。** いちばん新しいエントリがあるとき、次の追記は次のスロット（`slots` の剰余）に、そのエントリのタグで行います。`eseq` は、リングが破損していないなら最新 + 1、破損していないでなければ最新 + `slots` です（書き手が書いていないバイトがエントリを壊していて、それが手元の最新より新しかった可能性があるためです。この番号の飛びで壊れたエントリを越え、読み手はそれをギャップとして示します）。
+4. **新しいシーケンス。** 有効なエントリが無いとき、書き手はリングのすべてのバイトにゼロをストアし、スロット 0 に `epoch` で追記します。`eseq` は、領域全体の生のバイトの FNV-1a-32 で、基底は `0x811C9DC5` XOR エントロピーワードです。タグは、同じバイトの FNV-1a-32 で、基底は `0x050C5D1F` XOR 左に 16 回転したエントロピーワードです。
+5. **ブート。** 前の段階からの引き渡し（2.4）が、このレイアウトで有効で、より前の書き手を示すときは、それを使います。それ以外のときは、この段階が自分でブートを開始します（`opener` = 自分の番号、`boot` = 最初のエントリの `eseq`、`boot tag` = 自分のタグ）。ブートを開始する段階は、引き渡す前に最初のエントリ（`entry` イベント）を追記します。
+6. 実行の最初のエントリは `start` を持ちます。
 
-Write positions come only from definition constants and from entries the
-writer validated in its own ring, so foreign bytes cannot direct a store
-outside the ring. The start values are not a CRC on purpose: CRC-32 over
-a region of CRC-32-protected entries barely depends on their contents.
+書き込みの位置は、定義の定数と、書き手が自分のリングで検証したエントリからしか来ません。そのため、外来のバイトがストアをリングの外に向けることはできません。開始の値をわざと CRC にしていないのは、CRC-32 で守られたエントリの領域に対する CRC-32 は、その中身にほとんど依存しないからです。
 
-**Entropy word.** The MCU definition declares where the entropy word
-comes from (`[boot.record] entropy`). The region alone can return to an
-earlier state (all zeros after power-on where `survives = reset-cleared`,
-or after another layout's writer of the same stage cleared the ring), so
-the word must carry at least 16 bits of min-entropy per new sequence.
-Any source that meets this is valid: a hardware random generator, a ring
-oscillator's random bit sampled repeatedly, low-speed against high-speed
-oscillator period captures, or the low bits of repeated ADC conversions
-of an internal sensor. An MCU without a source has no boot record.
+**エントロピーワード。** マイコンの定義は、エントロピーワードの出所を宣言します（`[boot.record] entropy`）。領域だけでは以前の状態に戻ることがあります（`survives = reset-cleared` の電源投入後のすべてゼロや、同じ段階の別のレイアウトの書き手がリングを消した後）。そのため、このワードは新しいシーケンスごとに最小エントロピーを 16 ビット以上持たなければなりません。これを満たすものならどれでも有効です。ハードウェアの乱数生成器、リングオシレータのランダムなビットの繰り返しサンプル、低速と高速のオシレータの周期のキャプチャ、内部センサの ADC の繰り返し変換の下位ビットなどです。出所の無いマイコンには、ブート記録はありません。
 
-**Stage0 budget.** The writer runs in every stage that records, stage0
-included, so its time counts in that stage's time limit
-(`stage0.max_ms` for stage0): one CRC per slot at open, a clear of the
-ring on a new sequence, one append per event. Stage0 records only a few
-events per boot; a stage0 ring of 2 to 4 slots is enough.
+**stage0 の上限。** 書き手は記録するすべての段階で動き、stage0 も含まれます。そのため、その時間はその段階の時間の上限（stage0 では `stage0.max_ms`）に数えます。開くときにスロットごとの CRC 1 回、新しいシーケンスでリングの消去、イベントごとに追記 1 回です。stage0 はブートごとにわずかなイベントしか記録しません。stage0 のリングは 2 から 4 スロットで足ります。
 
-### 2.4 Hand-off
+### 2.4 引き渡し
 
-A stage passes the boot identity to the next stage in four 32-bit
-registers at the jump, never through retained memory (a hung earlier boot
-cannot leave a stale value):
+段階は、ジャンプのときに 4 つの 32 ビットのレジスタでブートの識別を次の段階に渡します。保持メモリは決して使いません（ハングした前のブートが古い値を残すことがないように）。
 
-| Word | Value |
+| ワード | 値 |
 |---|---|
-| 0 | `0x52424744` (`DGBR`) |
+| 0 | `0x52424744`（`DGBR`） |
 | 1 | `boot` |
 | 2 | `boot tag` |
-| 3 | bits 0-7 `opener`, bits 8-15 record layout, bits 16-31 the low 16 bits of CRC-32 over words 0 to 2 and bits 0-15 of word 3 (little-endian) |
+| 3 | ビット 0-7 `opener`、ビット 8-15 記録のレイアウト、ビット 16-31 はワード 0 から 2 とワード 3 のビット 0-15（リトルエンディアン）に対する CRC-32 の下位 16 ビット |
 
-The receiving stage uses it only when the magic, the check and the layout
-match and `opener` is below its own index. A stage that receives a
-well-formed hand-off of another layout passes it on unchanged (so one
-stage of another layout in the middle does not cut the chain); otherwise
-it passes its own boot. A stage that predates the record leaves the next
-stage to open the boot itself.
+受け取る段階がこれを使うのは、マジック、検査、レイアウトが一致し、`opener` が自分の番号より小さいときだけです。別のレイアウトの正しい形の引き渡しを受け取った段階は、それをそのまま次に渡します（途中に別のレイアウトの段階が 1 つあっても、つながりが切れないように）。それ以外のときは、自分のブートを渡します。この記録より古い段階は、次の段階が自分でブートを開始するに任せます。
 
-### 2.5 Reader
+### 2.5 読み手
 
-The agent reads the region once at start with one layout (it never
-writes it). Per writer: the valid entries at most 2^24 behind the newest,
-oldest first; a run starts at each `start` entry or change of boot. Per
-writer it states a **window** (`from` = the oldest held `eseq`, and
-whether that entry carries `epoch`: nothing earlier of this sequence
-existed), and a **gap** for each missing range of sequence numbers
-(numbers inside a gap may never have been used, after a jump). A writer
-with no valid entry is stated **empty**.
+エージェントは、起動時に 1 つのレイアウトで領域を 1 度読みます（書くことはありません）。書き手ごとに、最新から 2^24 以内の有効なエントリを古い順に読みます。実行は、各 `start` のエントリか、ブートの変わり目で始まります。書き手ごとに**範囲**（`from` = 手元でいちばん古い `eseq` と、そのエントリが `epoch` を持つかどうか。持つなら、このシーケンスにそれより前のものはありません）と、欠けた連番の範囲ごとの**ギャップ**を示します（番号の飛びの後では、ギャップの中の番号は使われなかったことがあります）。有効なエントリが無い書き手は**空**と示します。
 
-Boots are ordered by every writer's run order, merged, and boots of one
-opener by its numbers:
+ブートは、すべての書き手の実行の順を合わせて順序づけ、同じ段階が開始したブートは番号で順序づけます。
 
-- a boot of the opener's current sequence (the tag of its newest held
-  entry) is newer than a boot of any other sequence;
-- within the current sequence, by distance back from the newest held
-  entry (a boot up to 2^24 ahead of it is newer: its entries were
-  destroyed);
-- within another sequence, by serial order when less than 2^30 apart
-  (only pairs no writer's run order relates are ordered by numbers);
-- boots of two other sequences, or 2^30 or more apart in another
-  sequence, are not ordered by numbers.
+- ブートを開始した段階のいまのシーケンス（手元の最新のエントリのタグ）のブートは、ほかのどのシーケンスのブートよりも新しいものです。
+- いまのシーケンスの中では、手元の最新のエントリから後ろへの距離で順序づけます（それより 2^24 先までのブートは新しいものです。そのエントリは壊れています）。
+- ほかのシーケンスの中では、離れ方が 2^30 未満のときに連番の順で順序づけます（番号で順序づけるのは、どの書き手の実行の順でも関係づけられない組だけです）。
+- ほかの 2 つのシーケンスのブートや、ほかのシーケンスで 2^30 以上離れたブートは、番号では順序づけません。
 
-The reader never reports a newer boot before an older one; pairs it
-cannot order are marked uncertain (`uncertain` on both boots). Such pairs
-are boots of different openers that no writer's order relates (2.7), or
-boots of one opener from sequences that are no longer current.
+読み手は、新しいブートを古いブートより先に報告することはありません。順序づけられない組は、不確かと印を付けます（両方のブートに `uncertain`）。そのような組は、どの書き手の順でも関係づけられない別々の段階が開始したブート（2.7）か、もういまのシーケンスでない 1 つのブートを開始した段階のシーケンスのブートです。
 
-Replay: boots oldest first; within a boot, writer order, then sequence.
-Each event is replayed as its catalog event with `replayed: true` and the
-identity `(writer, tag, eseq)`; its boot is `(opener, boot, boot tag)`.
-The loss statements are replayed with them. The record is not read by
-`plan`, `commit`, `self_check` or `confirm`, and `app.trial_started` and
-`app.rolled_back` come from the state log.
+リプレイ: ブートは古い順、ブートの中では書き手の順、次にシーケンスの順です。各イベントは、そのカタログのイベントとして `replayed: true` と識別子 `(writer, tag, eseq)` を付けてリプレイします。ブートは `(opener, boot, boot tag)` です。欠落の報告も一緒にリプレイします。`plan`、`commit`、`self_check`、`confirm` はこの記録を読みません。`app.trial_started` と `app.rolled_back` は状態ログから来ます。
 
-### 2.6 Consumers
+### 2.6 受信側
 
-Replay is at least once: every held entry is replayed at every start. An
-identity absent from one replay is never replayed again, so a consumer
-de-duplicates `(layout, writer, tag, eseq)` against the previous replay it
-read and needs to keep nothing older. A writer never appends an identity
-it appended before (2.3 step 3 jumps past destroyed entries; a new
-sequence has a new tag), so a new event is never taken for one already
-seen, within the limits of 2.7. A window whose `from` follows the last
-identity the consumer saw from that writer, a gap, or an `epoch` start
-is a loss of the entries in between.
+リプレイは少なくとも 1 回です。手元のすべてのエントリを、起動のたびにリプレイします。あるリプレイに無かった識別子は二度とリプレイされません。そのため、受信側は `(layout, writer, tag, eseq)` を読んだ前回のリプレイと比べて重複を除けばよく、それより古いものを持つ必要はありません。書き手は、以前に追記した識別子を追記しません（2.3 の手順 3 は壊れたエントリを飛び越えます。新しいシーケンスには新しいタグがあります）。そのため、2.7 の限界の中で、新しいイベントを見たものと取り違えることはありません。`from` が受信側がその書き手から最後に見た識別子より後である範囲、ギャップ、`epoch` の開始は、そのあいだのエントリの欠落です。
 
-### 2.7 Limits of the claims
+### 2.7 主張の限界
 
-- **2^32 wrap.** An identity repeats only after 2^32 appends of its
-  writer in one sequence; a consumer that reads two replays more than
-  2^32 − `slots` appends of one writer apart cannot tell a new entry from
-  an old one with the same number. A later stage's link to a boot more
-  than 2^32 − `slots` of the opener's appends old may likewise be placed
-  as a recent boot, and two boots of a sequence the opener no longer holds
-  that are about 3·2^30 or more of its appends apart may be misordered
-  when no writer's run order relates them (serial order across 2^32 makes
-  such a pair look less than 2^30 apart the other way, 2.5).
-- **Repeated destruction.** When bytes the writer did not write destroy
-  its newest entries again before it has appended `slots` entries since
-  the previous time, the jump of 2.3 may fall short and the writer may
-  reuse numbers of the destroyed entries (and their loss is not stated).
-  A destruction that leaves a slot all zeros during the first lap is not
-  detected.
-- **Opener changes.** When one writer stops recording in the reader's
-  layout and starts again (an old or other-layout stage0 in between),
-  boots it opened and boots the next stage opened itself are not ordered
-  against each other; the reader marks them uncertain. Ordering them would
-  need a counter both stages write, which writer independence excludes.
-- **Split boots.** A stage that predates the record in the middle of the
-  chain, or stages of two record layouts in one boot, may make a later
-  stage open the boot again: that boot is replayed as two.
+- **2^32 の一周。** 識別子が繰り返すのは、1 つのシーケンスで書き手が 2^32 回追記した後だけです。1 つの書き手の追記で 2^32 − `slots` 回より離れた 2 つのリプレイを読む受信側は、新しいエントリと同じ番号の古いエントリを区別できません。同じように、ブートを開始した段階の追記で 2^32 − `slots` 回より古いブートへの、後の段階のつながりは、最近のブートとして置かれることがあります。また、ブートを開始した段階がもう持っていないシーケンスの 2 つのブートが、その追記で約 3·2^30 回以上離れていて、どの書き手の実行の順でも関係づけられないときは、順序を間違えることがあります（2^32 をまたぐ連番の順では、そのような組は逆向きに 2^30 未満の離れ方に見えます。2.5）。
+- **繰り返しの破壊。** 書き手が書いていないバイトが、前回から `slots` 個のエントリを追記する前に、最新のエントリをまた壊すと、2.3 の番号の飛びでは足りず、書き手が壊れたエントリの番号を使い回すことがあります（その欠落は示されません）。最初の一周のあいだにスロットをすべてゼロにする破壊は検出しません。
+- **ブートを開始する段階の交代。** 1 つの書き手が読み手のレイアウトでの記録をやめ、また始めるとき（あいだに古いか別のレイアウトの stage0 があるとき）、それが開始したブートと、次の段階が自分で開始したブートは、互いに順序づけられません。読み手はこれを不確かと印を付けます。順序づけるには両方の段階が書くカウンタが必要で、書き手の独立性がそれを許しません。
+- **分かれたブート。** チェーンの途中にこの記録より古い段階があるとき、または 1 つのブートに 2 つの記録のレイアウトの段階があるときは、後の段階がブートをもう一度開始することがあります。そのブートは 2 つとしてリプレイされます。
 
 ### 2.8 VERSION
 
-0x20 (boot record summary): `layout u8, boots u8, flags u8` (bit 0: some
-boot is uncertain; bit 1: a loss is stated, i.e. some writer has a gap or
-a window whose oldest entry is not an `epoch` start), then for the newest
-boot `opener u8, boot u32 LE, boot tag u32 LE, count u8` and per writer
-of that boot its last entry as `writer u8, format u8, kind u8,
-payload[3]`. 0x21 serves the region raw, `offset u16` plus at most
-`RECORD_PAGE(link)` bytes; the host joins the pages and decodes them with
-this reader.
+0x20（ブート記録の要約）: `layout u8, boots u8, flags u8`（ビット 0: あるブートが不確か。ビット 1: 欠けが示されている、つまりある書き手にギャップか、いちばん古いエントリが `epoch` の開始でない範囲がある）、続いていちばん新しいブートの `opener u8, boot u32 LE, boot tag u32 LE, count u8` と、そのブートの書き手ごとの最後のエントリを `writer u8, format u8, kind u8,
+payload[3]` として。0x21 は領域を生で返します。`offset u16` と、最大 `RECORD_PAGE(link)` バイトです。ホストがページをつなぎ、この読み手で解読します。
 
-### 2.9 Versioning
+### 2.9 バージョン付け
 
-Layout *n* (1 to 15) commits with `0xB0 | n`, and its CRC is seeded with
-*n*. A layout beyond 15 takes a commit value that is neither `0x00` nor
-the value of any earlier layout, and is listed here. A reader counts the
-slots whose first byte is another layout's commit (where strides differ
-the count is approximate) so it can report a record of another layout,
-and never decodes them. A writer's event encoding moves with that
-writer's `event` number, carried in each entry.
+レイアウト *n*（1 から 15）は `0xB0 | n` でコミットし、その CRC は *n* を初期値にします。15 を超えるレイアウトは、`0x00` でも以前のどのレイアウトの値でもないコミット値を取り、ここに挙げます。読み手は、最初のバイトが別のレイアウトのコミットであるスロットを数え（刻みが違うところでは近似の数です）、別のレイアウトの記録があることを報告できますが、解読はしません。書き手のイベントの符号化は、その書き手の `event` の番号とともに変わり、番号は各エントリにあります。
 
-## 3. Lockup fuse (`boot-record` 1)
+## 3. ロックアップヒューズ（`boot-record` 1）
 
-### 3.1 Cells
+### 3.1 セル
 
-One cell per image kind that runs sandboxed calls: the boot core's cell
-and the app's cell (the app and relay layers share it; at most one
-sandboxed call is open per core). A cell is an arm slot followed by
-record slots (`[boot.record] fuse` declares both cells and their slot
-counts next to the record). Only the cell's own layer stores into it;
-every layer's start reads every cell.
+サンドボックスの呼び出しを動かすイメージの種類ごとに、セルが 1 つあります。ブートローダのセルとアプリのセルです（アプリとリレーのレイヤーは共有します。コアごとに、開いているサンドボックスの呼び出しは最大 1 つです）。セルは、有効化のスロットとそれに続く記録のスロットです（`[boot.record] fuse` が、記録の隣に両方のセルとそのスロットの数を宣言します）。セルにストアするのは、そのセル自身のレイヤーだけです。どのレイヤーの起動も、すべてのセルを読みます。
 
-### 3.2 Fuse id
+### 3.2 ヒューズの id
 
 `SHA-256("dagon-fuse/1" ‖ layer u8 ‖ slot u32 LE ‖ image header digest
-[32] ‖ chain index u32 LE ‖ artifact SHA-256 [32])`. The fields have fixed
-widths, so two different call sites never give the same input; no count
-of slots or extensions is capped. A new build of an extension or a new
-image is a new id.
+[32] ‖ chain index u32 LE ‖ artifact SHA-256 [32])`。欄の幅は固定なので、異なる 2 つの呼び出し箇所が同じ入力になることはありません。スロットや拡張の数に上限はありません。拡張の新しいビルドや新しいイメージは、新しい id です。
 
-### 3.3 Record
+### 3.3 記録
 
-40 bytes:
+40 バイトです。
 
-| Offset | Size | Field |
+| オフセット | 大きさ | 欄 |
 |---|---|---|
-| 0 | 1 | mark: `0xA1` armed, `0xA2` tripped, `0xA3` clear request, `0xA4` lockup verdict, `0xA5` clean verdict, `0xA6` clear done; any other value: free |
-| 1 | 1 | layer |
-| 2 | 2 | zero |
-| 4 | 32 | fuse id |
-| 36 | 4 | CRC-32 over `[1]` followed by bytes 1 to 35 |
+| 0 | 1 | 印: `0xA1` 有効化、`0xA2` トリップ、`0xA3` クリアの要求、`0xA4` ロックアップの判定、`0xA5` 正常の判定、`0xA6` クリア済み。ほかの値は空き |
+| 1 | 1 | レイヤー |
+| 2 | 2 | ゼロ |
+| 4 | 32 | ヒューズの id |
+| 36 | 4 | `[1]` とそれに続くバイト 1 から 35 に対する CRC-32 |
 
-A record is written like a record entry (mark `0x00`, bytes 1 to 39,
-mark last) into a free slot; freeing a slot is one store of `0x00` to its mark.
-The mark is outside the CRC, so turning a trip into a clear-done record is
-one byte.
+記録は、記録のエントリと同じように（印に `0x00`、バイト 1 から 39、最後に印）空きのスロットに書きます。スロットを解放るのは、印への `0x00` の 1 回のストアです。印は CRC の外にあるので、トリップをクリア済みの記録に変えるのは 1 バイトです。
 
-### 3.4 Calls
+### 3.4 呼び出し
 
-Before a sandboxed call the layer feeds the watchdog and writes an armed
-record into its arm slot; the first store of the return path, also after
-an overrun or a fault, frees the arm slot (disarm). A call has returned
-exactly when its disarm is stored. The budget of every call is far below
-the watchdog period (lifecycle-events.md section 10), so a watchdog reset with a call armed means that
-call locked up. A layer whose start reports `can_arm = false` arms
-nothing in that run.
+サンドボックスの呼び出しの前に、レイヤーはウォッチドッグをリセット（キック）し、有効化のスロットに有効化の記録を書きます。戻りの経路の最初のストアが、超過や故障の後でも、有効化のスロットを解放します（有効化の解除）。呼び出しが戻ったのは、有効化の解除がストアされたときです。どの呼び出しの持ち時間もウォッチドッグの周期よりずっと短いので（lifecycle-events.md の 10 節）、呼び出しが有効な状態のウォッチドッグによるリセットは、その呼び出しがロックアップしたことを意味します。起動が `can_arm = false` を報告したレイヤーは、その実行では何も有効にしません。
 
-The fuse needs a **watchdog flag**: set by a watchdog reset, kept
-across any later reset other than power-on, cleared only when a start
-acknowledges it. A start acknowledges it when it stored everything it
-had to (`complete`). The MCU definition declares whether the MCU has
-such a flag and its source (`[watchdog] flag`: a hardware register whose
-reset flags persist until cleared, or a flag the MCU package provides,
-e.g. in a retained register it sets on a watchdog reset). An MCU without
-one has no fuse: the definition loader reports the fuse as unavailable,
-and its layers run sandboxed calls without a lockup fuse.
+ヒューズには**ウォッチドッグのフラグ**が要ります。ウォッチドッグによるリセットで立ち、電源投入以外のそれ以降のリセットでも残り、起動が確認したときだけ消えるものです。起動が確認するのは、ストアすべきものをすべてストアしたとき（`complete`）です。マイコンの定義は、マイコンがそのようなフラグを持つかどうかと、その出所を宣言します（`[watchdog] flag`: リセットのフラグがクリアまで残るハードウェアのレジスタか、マイコンの定義のコードが用意するフラグ。例えば、ウォッチドッグによるリセットで立てる保持のレジスタ）。これが無いマイコンにはヒューズがありません。定義の読み込みがヒューズを使えないものとして報告し、レイヤーはロックアップヒューズなしでサンドボックスの呼び出しを動かします。
 
-### 3.5 Start
+### 3.5 起動
 
-Each layer's start, before it runs any extension, frees what is done
-(step 3) first, so that a verdict or trip finds room, then:
+各レイヤーの起動は、拡張を動かす前に、まず終わったものを解放し（手順 3）、判定やトリップの場所を作り、その後で次のことをします。
 
-1. **Classify.** For every other cell whose arm slot is armed with no
-   verdict in any cell, store a verdict in the own cell: *lockup* if the
-   watchdog flag is set, else *clean*. No room: `complete` and `can_arm`
-   are false.
-2. **Own call.** If the own arm slot is armed: it locked up when a verdict
-   says so, or, without a verdict, when the watchdog flag is set. A locked
-   call whose id is installed gets a tripped record (no duplicate), then
-   the arm slot is freed; no room: the arm slot stays armed and `can_arm`
-   and `complete` are false. A locked call whose id is not installed is
-   recorded as stale and freed. A clean call is just freed.
-3. **Own records** (done first, see above). A trip whose id is not
-   installed is stale: freed by this layer. A trip with a clear request
-   in another cell and no
-   clear-done of its own becomes clear-done (one byte). A clear request
-   is freed when another cell holds its clear-done, or no other cell
-   holds its trip. A clear-done is freed when no other cell holds its
-   request. A verdict is freed when no other cell's arm slot holds its id.
-4. **Result.** The installed trips are disabled for the run; ids with a
-   verdict in another cell are held (not armed this run); other cells'
-   trips are reported, never acted on.
+1. **分類。** 有効化のスロットが有効化されていて、どのセルにも判定が無いほかのセルごとに、自分のセルに判定をストアします。ウォッチドッグのフラグが立っていれば*ロックアップ*、立っていなければ*正常*です。場所が無ければ、`complete` と `can_arm` は false です。
+2. **自分の呼び出し。** 自分の有効化のスロットが有効化されているとき、判定がそう言うとき、または判定が無くウォッチドッグのフラグが立っているときに、ロックアップしたものとします。ロックアップした呼び出しの id がインストールされていれば、トリップの記録を得て（重複なし）、その後で有効化のスロットを解放します。場所が無ければ、有効化のスロットは有効化のままで、`can_arm` と `complete` は false です。ロックアップした呼び出しの id がインストールされていなければ、古いものとして記録して解放します。正常な呼び出しは、ただ解放します。
+3. **自分の記録**（上のとおり、最初に行います）。id がインストールされていないトリップは古いものです。このレイヤーが解放します。ほかのセルにクリアの要求があり、自分のクリア済みが無いトリップは、クリア済みになります（1 バイト）。クリアの要求は、ほかのセルがそのクリア済みを持つとき、またはほかのセルがそのトリップを持たないときに解放します。クリア済みは、ほかのセルがその要求を持たないときに解放します。判定は、ほかのセルの有効化のスロットがその id を持たないときに解放します。
+4. **結果。** インストールされているトリップは、その実行で無効にします。ほかのセルに判定がある id は保留します（この実行では有効にしません）。ほかのセルのトリップは報告し、それに基づいて動くことはありません。
 
-So an app or relay lockup survives the boot core's start unchanged (the
-boot core only stores its verdict in its own cell) and is tripped by the
-app's start; a boot-core lockup is tripped by the boot core's next start.
-A reset at any byte of arming, of the call, of the return or of the
-disarm never trips a call that returned; a reset during the start keeps
-the flag and the armed record, so the next start repeats the decision.
+そのため、アプリやリレーのロックアップは、ブートローダの起動をそのまま通り抜け（ブートローダは自分のセルに判定をストアするだけです）、アプリの起動がトリップします。ブートローダのロックアップは、ブートローダの次の起動がトリップします。有効化、呼び出し、戻り、有効化の解除のどのバイトでのリセットも、戻った呼び出しをトリップしません。起動中のリセットはフラグと有効化の記録を残すので、次の起動が同じ判断を繰り返します。
 
-### 3.6 Clearing
+### 3.6 クリア
 
-DAGON has no request that clears a trip yet: neither the protocol nor the CLI
-has one. This is what the format's model holds for one: the agent frees an app
-trip in its own cell, or stores a clear request for a boot-core trip; the boot
-core's next start turns the trip into clear-done, and each side frees its
-record when it sees the other's. One request clears one trip. Nothing else
-clears a trip whose id is installed.
+DAGON には、トリップをクリアする要求はありません。プロトコルにも CLI にもありません。形式のモデルが要求について持っているのは次のことです。エージェントは、自分のセルのアプリのトリップを解放するか、ブートローダのトリップに対してクリアの要求をストアします。ブートローダの次の起動がトリップをクリア済みに変え、双方は相手のものを見たときに自分の記録を解放します。1 つの要求は 1 つのトリップをクリアします。id がインストールされているトリップをクリアするものは、ほかにありません。
 
-### 3.7 Limits of the claims
+### 3.7 主張の限界
 
-Power-on clears the watchdog flag: a lockup not yet classified is lost,
-never forged. Foreign bytes may destroy records the same way; a destroyed
-clear verdict lets a later watchdog reset classify that interrupted call
-(one that never returned) as a lockup, and a destroyed clear-done record
-lets a clear request still pending clear the same extension's next trip
-once more. A full cell makes its layer arm nothing
-until the host clears a trip.
+電源投入はウォッチドッグのフラグを消します。まだ分類していないロックアップは失われますが、偽造はされません。外来のバイトも同じように記録を壊すことがあります。正常の判定が壊れると、その後のウォッチドッグによるリセットが、その中断された呼び出し（戻らなかったもの）をロックアップと分類します。クリア済みの記録が壊れると、まだ残っているクリアの要求が、同じ拡張の次のトリップをもう 1 度クリアします。セルがいっぱいになると、記録のどれかが解放されるまで、そのレイヤーは何も有効にしません。クリアの要求は無いので（3.6）、id がインストールされているトリップは残ります。
 
-### 3.8 Versioning
+### 3.8 バージョン付け
 
-Each fuse layout has its own six mark values, distinct from every other
-layout's and from `0x00`; layout 1 uses `0xA1` to `0xA6`, and a later
-layout lists its values here. The CRC is seeded with the layout number.
-Records of another layout are free slots to this reader and are never
-acted on.
+ヒューズのレイアウトはそれぞれ 6 つの印の値を持ち、ほかのどのレイアウトの値とも `0x00` とも違います。レイアウト 1 は `0xA1` から `0xA6` を使い、後のレイアウトはその値をここに挙げます。CRC はレイアウトの番号を初期値にします。別のレイアウトの記録は、この読み手には空きのスロットで、それに基づいて動くことはありません。
 
-## 4. MCU identity
+## 4. マイコンの識別
 
-`identity(id)` = the first 8 bytes of `SHA-256("dagon-mcu/" ‖ id)` as a
-little-endian u64, where `id` is the MCU definition's `id`. Every carrier
-holds all 64 bits. Carriers: `image-header`, `identity-reply`,
-`version-0x06`, `topology-node` (the model's `identity::CARRIERS`; a test
-checks this line against it). The definition loader refuses two
-definitions whose identities agree in the width of any carrier, naming
-both ids, and refuses an identity that is all zeros or all ones in a
-carrier's width. A device whose identity matches no loaded definition
-exactly is shown as unknown. No numeric MCU table exists.
+`identity(id)` は、`SHA-256("dagon-mcu/" ‖ id)` の最初の 8 バイトをリトルエンディアンの u64 にしたものです。`id` はマイコンの定義の `id` です。識別を持つ場所はどれも、64 ビットすべてを持ちます。識別を持つ場所: `image-header`、`identity-reply`、`version-0x06`、`topology-node`（モデルの `identity::CARRIERS`。テストがこの行と照合します）。定義の読み込みは、どれかの場所の幅で識別が一致する 2 つの定義を、両方の id を示して受け付けず、その場所の幅ですべてゼロかすべて 1 の識別を受け付けません。読み込んだどの定義とも完全には一致しない識別のデバイスは、不明と表示します。数値のマイコンの表はありません。
 
-## 5. Compiled topology
+## 5. コンパイル済みの構成
 
-### 5.1 Body (`topology-bin` 1)
+### 5.1 本体（`topology-bin` 1）
 
-Head, 16 bytes: magic `DGTP`, layout u16 LE (1), node count (1 to 8), link
-count (≤ 7), constraint count (≤ 16), 7 zero bytes. Then:
+先頭は 16 バイトです。マジック `DGTP`、レイアウト u16 LE（1）、ノードの数（1 から 8）、リンクの数（≤ 7）、制約の数（≤ 16）、ゼロ 7 バイト。続いて次のものです。
 
-- nodes, 40 bytes each: index, role, port kind, max attempts, listen
-  window ms u16 LE, map id, order rank, recovery tiers [3], 5 zero bytes,
-  MCU identity u64 LE at offset 16, target tag [16] at offset 24;
-- links, 16 bytes each, in the image tools' link layout;
-- constraints, 16 bytes each, in the manifest's constraint layout.
+- ノードは各 40 バイト: 番号、役割、ポートの種類、試行の上限、待ち受け時間 ms u16 LE、マップの id、順番、復旧の段階 [3]、ゼロ 5 バイト、オフセット 16 にマイコンの識別 u64 LE、オフセット 24 にターゲットのタグ [16]。
+- リンクは各 16 バイトで、イメージのツールのリンクのレイアウトです。
+- 制約は各 16 バイトで、マニフェストの制約のレイアウトです。
 
-Canonical: node `index` equals its position, links sorted by `to`,
-reserved bytes zero; a decoder re-encodes and compares. The host's
-`host.topology.pushed` and the hub's `relay.children_set` carry the body's
-SHA-256.
+正規の形: ノードの `index` は位置と同じ、リンクは `to` の順、予約のバイトはゼロです。デコーダは符号化し直して比べます。ホストの `host.topology.pushed` と親機の `relay.children_set` は、本体の SHA-256 を持ちます。
 
-### 5.2 Store on the hub
+### 5.2 親機での保存
 
-The TOPOLOGY region is two banks of equal size, each erasable on its own.
-Each bank starts with a 64-byte header:
+TOPOLOGY の領域は、同じ大きさで別々に消去できる 2 つのバンクです。各バンクは 64 バイトのヘッダで始まります。
 
-| Offset | Size | Field |
+| オフセット | 大きさ | 欄 |
 |---|---|---|
-| 0 | 1 | commit: `0xC1` (store layout 1) |
-| 1 | 3 | zero |
-| 4 | 4 | sequence u32 LE |
-| 8 | 4 | body length u32 LE |
-| 12 | 32 | SHA-256 of the body |
-| 44 | 4 | CRC-32 over `[1]` followed by bytes 1 to 43 |
-| 48 | 16 | zero |
+| 0 | 1 | コミット: `0xC1`（保存のレイアウト 1） |
+| 1 | 3 | ゼロ |
+| 4 | 4 | 連番 u32 LE |
+| 8 | 4 | 本体の長さ u32 LE |
+| 12 | 32 | 本体の SHA-256 |
+| 44 | 4 | `[1]` とそれに続くバイト 1 から 43 に対する CRC-32 |
+| 48 | 16 | ゼロ |
 
-Bytes 1 to 3 and 48 to 63 are programmed as zero and not checked by a
-reader (bytes 1 to 3 are under the CRC).
+バイト 1 から 3 と 48 から 63 はゼロとして書き込み、読み手は確かめません（バイト 1 から 3 は CRC の対象です）。
 
-followed by the body. A bank counts when its commit byte is `0xC1`, its
-length fits, its CRC matches and its body's SHA-256 equals the header's.
-The copy is the counted bank with the newer sequence (serial order);
-there is none when no bank counts.
+その後に本体が続きます。バンクが数えられるのは、コミットバイトが `0xC1` で、長さが収まり、CRC が一致し、本体の SHA-256 がヘッダのものと同じときです。コピーは、数えられるバンクのうち連番が新しいもの（連番の順）です。数えられるバンクが無ければ、コピーはありません。
 
-**Write** (image lifecycle `written`, target TOPOLOGY): the host refuses a
-body larger than a bank's capacity before sending any byte, and the hub
-refuses it again before erasing. Otherwise the hub writes the bank that is
-not the copy (bank 0 when there is none) with sequence = copy's + 1 (1
-when none): erase the bank, program the body, program header bytes 1 to
-63, program the commit byte. Number the steps of a write from 0, one per
-erased or programmed byte; the commit byte is step `bank size + body
-length + 63`. A write that stops before that step has completed leaves
-the previous copy, byte for byte; once it has completed, the new one.
-Every later read gives the same answer until the next write (1). A completed write makes
-the previous copy unreachable. The transition is `Absent → Written` when
-no copy existed, `Written → Written` otherwise.
+**書き込み**（イメージのライフサイクル `written`、ターゲット TOPOLOGY）: ホストは、バンクの容量より大きい本体を、1 バイトも送る前に拒み、親機も消去の前にもう一度拒みます。それ以外のとき、親機はコピーでないバンク（コピーが無ければバンク 0）に、連番 = コピーの連番 + 1（無ければ 1）で書きます。バンクを消去し、本体を書き込み、ヘッダのバイト 1 から 63 を書き込み、コミットバイトを書き込みます。書き込みのステップを 0 から、消去または書き込みの 1 バイトごとに 1 つ数えると、コミットバイトはステップ `bank size + body
+length + 63` です。そのステップが終わる前に止まった書き込みは、前のコピーを 1 バイトも変えず残します。終わった後は新しいコピーです。その後の読み出しは、次の書き込みまで同じ答えを返します（1）。書き込みが終わると、前のコピーには届かなくなります。遷移は、コピーが無かったときは `Absent → Written`、それ以外は `Written → Written` です。
 
-**Read** at the relay's start: a copy whose body does not decode (a layout
-number the hub does not read, or malformed) reads as absent and the
-project's fallback list is used (`relay.children_set { source: Fallback }`);
-a body is applied whole or not at all.
+**読み出し**はリレーの起動時です。本体を解読できないコピー（親機が読まないレイアウトの番号や、不正な形）は無いものとして読み、プロジェクトの予備の一覧を使います（`relay.children_set { source: Fallback }`）。本体は全部適用するか、まったく適用しないかです。
 
-## 6. Properties
+## 6. 性質
 
-The model checks these after every operation of every scenario; the
-fixed cases in `tests/fixed.rs` name the property they guard.
+モデルは、すべてのシナリオのすべての操作の後でこれらを確かめます。`tests/fixed.rs` の固定のケースは、守る性質を名前で示します。
 
-| Id | Property |
+| Id | 性質 |
 |---|---|
-| P1 | Every held entry is replayed by every app of its layout. |
-| P2 | Every replayed event is a held append of the reader's layout; no torn write is accepted. |
-| P3 | Every store of a writer lies in its own ring, whatever bytes the region holds. |
-| P4 | A writer never appends an identity it appended before in its sequence, and continues ahead of every number it used (outside 2.7); a boot number is held for one boot. |
-| P5 | The reader never reports a newer boot before an older one; pairs it cannot order are marked uncertain; per pair, an unordered pair has different openers, or one opener in two sequences, or one opener's numbers 2^30 or more apart. |
-| P6 | Every replayed boot holds the events of one boot, and one boot is one replayed boot (outside the split boots of 2.7). |
-| P7 | An append lost before any replay is covered by a window or gap: at once when its own writer overwrote it, when other bytes destroyed it, once an entry the writer appended later is held. |
-| P8 | `plan`, `commit` and `confirm` take only the state log (compile-time). |
-| P9 | A reader never accepts entries of another layout (in P2's lookup). |
-| P10 | Region ≤ `RECORD_MAX`; paged reads at every link size reassemble the region; the 0x20 summary fits one page. |
-| P11 | A consumer de-duplicating `(layout, writer, tag, eseq)` against its previous replay never meets one identity with two contents (outside 2.7). |
-| P12 | Identity is a pure function of the id; collisions refused at every carrier width; unknown never matched. |
-| P13 | Topology: stated outcome at every interruption point, previous copy unchanged, round trip with identity, bounds, unsupported or malformed reads as absent, stable reads. |
-| P14 | A call past its budget is abandoned; the boot reaches the decision the state log gives. |
-| P15 | An access to a denied region faults without effect. |
-| P16 | A capability misuse (undeclared window or bus target) faults or is refused. |
-| P17 | A handler is not called after `EXT_FAULT_LIMIT` faults or overruns in a run. |
-| P18 | Boot time with the service window stays within half the trial period. |
-| P19 | A verifier replacement decides only when listed, hash-matched and in a signed image. |
-| P20 | A layer stores only into its own fuse cell. |
-| P21 | Distinct call sites have distinct fuse ids. |
-| P22 | A trip names only a call that locked up; a lockup is tripped by its layer's next completed start. |
-| P23 | The boot core's run leaves the app's cell unchanged; the app's start acts on it. |
-| P24 | A trip whose id is no longer installed is freed by its layer's start; a new build runs again. |
-| P25 | Records of another fuse layout are never acted on. |
-| P26 | A trip of an installed id disappears only by the host's clear. |
+| P1 | 手元のすべてのエントリを、そのレイアウトのすべてのアプリがリプレイします。 |
+| P2 | リプレイするイベントはどれも、読み手のレイアウトの手元の追記です。途中で切れた書き込みは受け付けません。 |
+| P3 | 書き手のストアはどれも、領域のバイトがどうであっても、自分のリングの中です。 |
+| P4 | 書き手は、そのシーケンスで以前に追記した識別子を追記せず、使ったどの番号よりも先に進みます（2.7 の外）。ブートの番号は 1 つのブートのあいだ保たれます。 |
+| P5 | 読み手は、新しいブートを古いブートより先に報告しません。順序づけられない組には不確かと印を付けます。組ごとに、順序のない組は、開始した段階が異なるか、同じ段階が開始した 2 つのシーケンスか、同じ段階の 2^30 以上離れた番号です。 |
+| P6 | リプレイするブートはどれも 1 つのブートのイベントを持ち、1 つのブートは 1 つのリプレイするブートです（2.7 の分かれたブートの外）。 |
+| P7 | リプレイの前に失われた追記は、範囲かギャップで覆われます。自分の書き手が上書きしたときはすぐに、ほかのバイトが壊したときは、書き手がその後に追記したエントリを持ったときに、です。 |
+| P8 | `plan`、`commit`、`confirm` は状態ログだけを取ります（コンパイル時）。 |
+| P9 | 読み手は別のレイアウトのエントリを受け付けません（P2 の参照の中で）。 |
+| P10 | 領域は `RECORD_MAX` 以下です。どのリンクの大きさでも、ページごとの読み出しで領域を組み立てられます。0x20 の要約は 1 ページに収まります。 |
+| P11 | 前回のリプレイと `(layout, writer, tag, eseq)` を比べて重複を除く受信側が、同じ識別子で 2 つの中身に出会うことはありません（2.7 の外）。 |
+| P12 | 識別は id の純粋な関数です。衝突はどの場所の幅でも拒みます。不明なものを一致とはしません。 |
+| P13 | 構成: どの中断点でも結果が決まっていて、前のコピーは変わらず、識別子で行き来でき、上限を守り、対応しないものや不正なものは無いものとして読み、読み出しは安定します。 |
+| P14 | 持ち時間を超えた呼び出しは打ち切ります。ブートは状態ログが与える判断に達します。 |
+| P15 | 禁止された領域へのアクセスは、何の効果もなくフォールトします。 |
+| P16 | 能力の誤用（宣言していないウィンドウやバスの相手）はフォールトするか、拒まれます。 |
+| P17 | 1 回の実行で `EXT_FAULT_LIMIT` 回のフォールトか超過の後、ハンドラは呼ばれません。 |
+| P18 | サービスの時間枠を含むブートの時間は、試行の周期の半分以内に収まります。 |
+| P19 | 検証器の置き換えが判断するのは、一覧にあり、ハッシュが一致し、署名付きのイメージの中にあるときだけです。 |
+| P20 | レイヤーは自分のヒューズのセルにだけストアします。 |
+| P21 | 異なる呼び出し箇所は、異なるヒューズの id を持ちます。 |
+| P22 | トリップが示すのは、ロックアップした呼び出しだけです。ロックアップは、そのレイヤーの次に完了した起動がトリップします。 |
+| P23 | ブートローダの実行はアプリのセルを変えません。アプリの起動がそれに基づいて動きます。 |
+| P24 | id がもうインストールされていないトリップは、そのレイヤーの起動が解放します。新しいビルドはもう一度動きます。 |
+| P25 | 別のヒューズのレイアウトの記録に基づいて動くことはありません。 |
+| P26 | インストールされている id のトリップが消えるのは、クリアの要求のときだけで、その要求はモデルの中にしかありません（3.6）。 |
 
-## 7. Boot core trial cell
+## 7. ブートローダの試行のセル
 
-Stage0 counts the starts of a pending boot core in two retained words,
-not in flash: stage0 then has no flash writer (it is never updated, so it
-holds as little code as it can), and a writer bug cannot turn into a
-stage0 that never starts anything. `dagon_core::bootcore` is the codec and
-its tests are the proof.
+stage0 は、待機中のブートローダの起動の回数を、フラッシュではなく 2 つの保持のワードで数えます。こうすると stage0 にはフラッシュの書き手がなく（stage0 には書き込まないので、持つコードをできるだけ減らします）、書き手の不具合が、何も起動しない stage0 に変わることはありません。`dagon_core::bootcore` がコーデックで、そのテストが証明です。
 
-| MCU | Place | Kept through | Lost with |
+| マイコン | 場所 | 残るもの | 失うもの |
 |---|---|---|---|
-| RP2040 | watchdog SCRATCH0, SCRATCH1 (the boot ROM uses SCRATCH4-7) | every reset but power-on and the RUN pin | power |
-| STM32F401RE | RTC backup registers BKP0R, BKP1R | every system reset, the watchdog's included | the backup domain's supply (VDD where VBAT is tied to it) |
+| RP2040 | ウォッチドッグの SCRATCH0、SCRATCH1（ブート ROM は SCRATCH4-7 を使います） | 電源投入と RUN ピン以外のすべてのリセット | 電源 |
+| STM32F401RE | RTC のバックアップレジスタ BKP0R、BKP1R | ウォッチドッグのものを含むすべてのシステムリセット | バックアップドメインの電源（VBAT を結んでいるところでは VDD） |
 
-Value for start `n` (at most 15) of the pending image `p`: one word,
-`0xB7 << 24 | p.digest16[0] << 16 | p.digest16[1] << 8 | n << 4 | (!n &
-0xF)`, stored in both places. A word counts for `p` only when its tag,
-its digest bytes and its count check (the low nibble is the count's
-complement) hold; the cell counts the larger of its two words' counts,
-and `[0, 0]` is the cleared cell. Each word is one store, so a reset can
-land between the two: one new word and one old word then still count the
-new start, never fewer (the model found that the previous shape, a word
-and its complement, read such a pair as 0 and lost the start). A random
-word matches with probability 2^-28, and a match only makes stage0 give
-the core up sooner.
+待機中のイメージ `p` の起動 `n`（最大 15）の値は、1 つのワード `0xB7 << 24 | p.digest16[0] << 16 | p.digest16[1] << 8 | n << 4 | (!n &
+0xF)` で、両方の場所にストアします。ワードが `p` について数えられるのは、タグ、ダイジェストのバイト、回数の検査（下位 4 ビットは回数の補数）が成り立つときだけです。セルは 2 つのワードの回数の大きいほうを数え、`[0, 0]` はクリアされたセルです。ワードはそれぞれ 1 回のストアなので、リセットが 2 つのあいだに来ることがあります。その場合、新しいワード 1 つと古いワード 1 つでも新しい起動を数え、少なくなることはありません（モデルは、以前の形であるワードとその補数では、そのような組を 0 と読み、起動を失うことを見つけました）。ランダムなワードが一致する確率は 2^-28 で、一致しても stage0 がそのコアを早くあきらめるだけです。
 
-The executable model is `dagon-retained-model`'s `world_trial`: the
-production codec and stage0's and the boot core's rules
-(`bootcore::choose`, `settle`) over the two words, new cores set pending
-good or broken (a broken core passes stage0's check and fails its own),
-a reset or a power loss (the cell then cleared or random) after any store
-to the cell (the cell check's included, in the MCUs' order: word 0, then
-word 1), 10,000 seeded scenarios in `cargo test` and 1,000,000 in the
-full profile. Its properties, checked after every operation:
+実行可能なモデルは `dagon-retained-model` の `world_trial` です。本番のコーデックと、stage0 とブートローダのルール（`bootcore::choose`、`settle`）を、2 つのワードの上で動かします。新しいコアは良いものか壊れたものとして待機にし（壊れたコアは stage0 の検査を通り、自分の検査に失敗します）、セルへのどのストアの後にも（セルの検査のものを含み、マイコンの順に、ワード 0、次にワード 1）、リセットか電断（セルはクリアかランダムになります）を入れます。シードのシナリオを `cargo test` で実行し、完全なプロファイルではずっと多く実行します。その性質を、すべての操作の後で確かめます。
 
-| Id | Property |
+| Id | 性質 |
 |---|---|
-| C1 | Between two power losses a pending core is started on trial at most `max` times. |
-| C2 | With no further fault, at most `max + 1` boots end the trial: no core is pending and a core runs. |
-| C3 | A broken core is never confirmed. |
+| C1 | 2 回の電断のあいだに、待機中のコアを試行として起動するのは最大 `max` 回です。 |
+| C2 | それ以上の故障が無ければ、最大 `max + 1` 回のブートで試行が終わります。待機中のコアは無く、あるコアが動きます。 |
+| C3 | 壊れたコアが確定することはありません。 |
 
-The MCU packages' sweeps (`a_power_cut_at_every_flash_step_leaves_a_bootable_core`)
-add the flash side: a cut at every flash operation of an update,
-compaction of the state log included. A cell that does not hold what is
-written to it at all is found by `bootcore::cell_holds`, run by the
-started boot core and by the app: such a node takes no boot core, and a
-pending core that finds it so rolls itself back. A cell with a word that
-holds a count was written by stage0, so it holds, and the check writes
-nothing over it; only a cell counting nothing gets a probe (a value no
-cell word takes) and its old value back, word by word, each read back, so
-a reset inside the check never leaves the cell counting fewer starts (the
-model found the earlier check, which probed over a running count, letting
-a failing core start without end).
+マイコンの定義のスイープ（`a_power_cut_at_every_flash_step_leaves_a_bootable_core`）は、フラッシュの側を足します。書き込みのすべてのフラッシュ操作での電断で、状態ログのコンパクションも含みます。書いたものをまったく保持しないセルは、起動したブートローダとアプリが実行する `bootcore::cell_holds` が見つけます。そのようなノードはブートローダを受け取らず、それに気づいた待機中のコアは自分で元に戻ります。回数を持つワードがあるセルは stage0 が書いたものなので保持しており、検査はその上に何も書きません。何も数えていないセルにだけ、検査用の値（セルのワードが取らない値）と元の値を、ワードごとに書き、それぞれ読み返します。そのため、検査の中でのリセットで、セルの数える起動が少なくなることはありません（モデルは、数えている途中に検査用の値を書いた以前の検査では、失敗するコアが終わりなく起動できることを見つけました）。
 
-Limit of the claims: that each place keeps its value across the resets
-named is the vendor's documented behaviour, to be confirmed on each
-board.
-
+主張の限界: それぞれの場所が、挙げたリセットをまたいで値を保つことは、ベンダーが文書で示している動作で、ボードごとに確かめる必要があります。

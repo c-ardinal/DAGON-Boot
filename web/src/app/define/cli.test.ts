@@ -225,6 +225,21 @@ describe('dagon serve link', () => {
     expect(f.calls[f.calls.length - 1].url).toBe('/v1/hello');
   });
 
+  test('what serve says about a job before the page has its number is kept for the job', async () => {
+    const f = fake();
+    const cli = new Cli(f.deps);
+    await cli.connect();
+    cli.hello = { ...cli.hello!, features: [...cli.hello!.features, 'build'] };
+    const id = (f as unknown as { nextJob?: number }).nextJob ?? 1;
+    for (const n of [id, id + 1, id + 2]) {
+      cli.event({ type: 'job.state', job: n, state: 'running' });
+      cli.event({ type: 'job.log', job: n, lines: ['hub: building slot a'] });
+    }
+    const j = await cli.build(['hub']);
+    expect(j?.state).toBe('running');
+    expect(j?.lines).toEqual(['hub: building slot a']);
+  });
+
   test('the layout (呼び名, positions) is read and written whole through serve, only with the layout feature', async () => {
     const f = fake();
     const cli = new Cli(f.deps);

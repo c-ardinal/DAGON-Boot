@@ -6,7 +6,7 @@ const PASS = '0123456789abcdef0123456789abcdef';
 const KEY = '00'.repeat(32);
 
 /** A dagon serve that does what the test says when it says: a build advances only on `send`. */
-async function serve(page: Page, opts: { buildNodes: string[] }) {
+async function serve(page: Page, opts: { buildNodes: string[]; earlyEvents?: boolean }) {
   let ws: WebSocketRoute | undefined;
   let job = 0;
   const started: string[] = [];
@@ -20,7 +20,12 @@ async function serve(page: Page, opts: { buildNodes: string[] }) {
     const json = (v: unknown, status = 200) => route.fulfill({ status, contentType: 'application/json', body: JSON.stringify(v) });
     if (route.request().method() === 'POST' && ['build', 'sign', 'release'].includes(path)) {
       started.push(path);
-      return json({ job: ++job }, 202);
+      job++;
+      if (!opts.earlyEvents) return json({ job }, 202);
+      // As the real one does: the job runs and talks before its 202 reaches the page.
+      ws!.send(JSON.stringify({ type: 'job.state', job, state: 'running' }));
+      ws!.send(JSON.stringify({ type: 'job.log', job, lines: ['hub: building slot a in hub'] }));
+      return new Promise((r) => setTimeout(r, 200)).then(() => json({ job }, 202));
     }
     switch (path) {
       case 'hello':
@@ -108,6 +113,14 @@ test('spec 10: a build advances node by node: only the node being built has the 
   await expect(sentence(page)).toContainText('書込に切り替えて');
   await expect(sentence(page)).not.toContainText('ビルドしてから');
   expect(await lit(page)).toEqual([]);
+});
+
+test('spec 10: a job serve has already started when its number arrives still lights its node', async ({ page }) => {
+  const s = await serve(page, { buildNodes: ['hub', 'seg', 'watch'], earlyEvents: true });
+  await open(page);
+  await page.getByRole('button', { name: 'ビルドする' }).click();
+  await expect.poll(() => lit(page)).toEqual(['node:hub']);
+  expect(s.started).toEqual(['build']);
 });
 
 test('an edit after a build asks for a build again', async ({ page }) => {

@@ -147,6 +147,8 @@ export interface CliDeps {
 export class Cli {
   state = $state<CliState>('none');
   hello = $state<Hello | null>(null);
+  /** Events about a job the page has not yet been told the number of. */
+  private early: Record<string, unknown>[] = [];
   /** Why the project's layout file was not taken, or null. */
   layoutRefused = $state<string | null>(null);
   /** The open project's definitions did not load (GET /v1/definitions 500): the builtin set is not used in their place. */
@@ -279,6 +281,12 @@ export class Cli {
   /** One serve event. */
   event(e: Record<string, unknown>): void {
     const job = this.jobs.find((j) => j.id === e.job);
+    // serve starts a job before the page has its answer: what it says meanwhile waits for the job.
+    if (!job && typeof e.job === 'number' && String(e.type).startsWith('job.')) {
+      this.early.push(e);
+      this.early.splice(0, this.early.length - MAX_LINES);
+      return;
+    }
     switch (e.type) {
       case 'job.state':
         if (job) {
@@ -321,6 +329,9 @@ export class Cli {
     const r = await this.json<{ job: number }>('POST', path, body);
     const job: Job = { id: r.job, kind, state: 'queued', target, stage: '', percent: null, lines: [], result: null, question: null, started: this.d.now(), ended: null };
     this.jobs = [job, ...this.jobs];
+    const said = this.early.filter((e) => e.job === r.job);
+    this.early = this.early.filter((e) => e.job !== r.job);
+    said.forEach((e) => this.event(e));
     return this.jobs[0];
   }
 

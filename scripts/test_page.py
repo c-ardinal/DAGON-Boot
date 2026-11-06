@@ -32,6 +32,15 @@ class PageSources(unittest.TestCase):
         with mock.patch.object(type(target), "read_bytes", read_bytes):
             self.assertNotEqual(page.source_hash(), before)
 
+    def test_paths_sort_with_regard_to_case_on_every_system(self):
+        names = ["web/a.ts", "web/README.md", "web/Z.ts", "web/e2e/b.ts"]
+        order = page.in_order(ROOT / n for n in names)
+        self.assertEqual([p.relative_to(ROOT).as_posix() for p in order], ["web/README.md", "web/Z.ts", "web/a.ts", "web/e2e/b.ts"])
+
+    def test_the_sources_are_listed_in_that_order(self):
+        web = [p for p in page.source_files() if p.relative_to(ROOT).parts[0] == "web"]
+        self.assertEqual(web, page.in_order(web))
+
 
 if __name__ == "__main__":
     unittest.main()

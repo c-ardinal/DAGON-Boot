@@ -40,12 +40,7 @@ impl Screen {
 /// The screen for `phase` (`told`: the number the host told this node while
 /// transferring), `since_ms` after the phase began; the `version` line when
 /// nothing is under way.
-pub fn screen(
-    phase: Phase,
-    told: Option<u8>,
-    since_ms: u32,
-    version: Option<Version>,
-) -> Screen {
+pub fn screen(phase: Phase, told: Option<u8>, since_ms: u32, version: Option<Version>) -> Screen {
     let mut s = Screen {
         text: [0; MAX_CHARS],
         len: 0,

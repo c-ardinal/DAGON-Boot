@@ -60,6 +60,11 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
+      - name: Rust from rust-toolchain.toml
+        shell: bash
+        run: |
+          rustup toolchain install
+          rustup default "$(sed -n 's/^channel = "\([^"]*\)".*/\1/p' rust-toolchain.toml)"
       - name: Rust target
         run: rustup target add ${{ matrix.target }}
       - name: Build the archive

@@ -385,7 +385,10 @@ fn the_published_snapshot_follows_an_update_and_its_trial() {
     let img = image(1, Version::new(1, 1, 0), &body);
     let mut w = Wire { seq: 0 };
     // The host tells the number before the erase, so it is there all through.
-    assert_eq!(w.call(&mut a, Cmd::Show, &[1, 1, 7, 0, 0, 0, 0]), Status::Ok);
+    assert_eq!(
+        w.call(&mut a, Cmd::Show, &[1, 1, 7, 0, 0, 0, 0]),
+        Status::Ok
+    );
     w.begin(&mut a, 1, &img);
     let s = snapshot(&events);
     assert_eq!(s.phase, Phase::Transferring);
@@ -398,11 +401,17 @@ fn the_published_snapshot_follows_an_update_and_its_trial() {
     );
     assert_eq!(snapshot(&events).percent, Some(100));
     // Only a transfer's number is for the display.
-    assert_eq!(w.call(&mut a, Cmd::Show, &[1, 2, 9, 0, 0, 0, 0]), Status::Ok);
+    assert_eq!(
+        w.call(&mut a, Cmd::Show, &[1, 2, 9, 0, 0, 0, 0]),
+        Status::Ok
+    );
     assert_eq!(snapshot(&events).percent, Some(100));
     w.rest(&mut a, &img);
     let s = snapshot(&events);
-    assert_eq!((s.phase, s.progress, s.percent), (Phase::Written, None, None));
+    assert_eq!(
+        (s.phase, s.progress, s.percent),
+        (Phase::Written, None, None)
+    );
     assert_eq!(
         w.call(&mut a, Cmd::SetPending, &[target::APP, 1]),
         Status::Ok

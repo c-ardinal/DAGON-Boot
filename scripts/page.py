@@ -35,15 +35,21 @@ EMBEDDED = ROOT / "crates" / "dagon-topology" / "builtin-files.txt"
 PLACEHOLDER_KEY = "0" * 64
 
 
+def in_order(paths):
+    """By their path's parts, so the hash is the same on every system: Windows
+    sorts paths without regard to case."""
+    return sorted(paths, key=lambda p: p.relative_to(ROOT).parts)
+
+
 def source_files():
     files = []
-    for p in sorted(WEB.rglob("*")):
+    for p in in_order(WEB.rglob("*")):
         rel = p.relative_to(WEB).parts
         if p.is_file() and not WEB_SKIP.intersection(rel):
             files.append(p)
     for c in CRATES:
-        files += sorted(p for p in (ROOT / "crates" / c).rglob("*")
-                        if p.is_file() and "target" not in p.relative_to(ROOT).parts)
+        files += in_order(p for p in (ROOT / "crates" / c).rglob("*")
+                          if p.is_file() and "target" not in p.relative_to(ROOT).parts)
     files += embedded_files()
     files.append(ROOT / "Cargo.lock")
     return files

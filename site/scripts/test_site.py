@@ -201,7 +201,7 @@ class Wording(unittest.TestCase):
 
 class Translation(unittest.TestCase):
     """The design and format pages are normative in both languages, so a translation may not drop a fact."""
-    PAGES = ["explanation/retained-formats.md", "explanation/versioning.md", "reference/agent-api.md",
+    PAGES = ["explanation/lifecycle-events.md", "explanation/retained-formats.md", "explanation/versioning.md", "reference/agent-api.md",
              "reference/definitions.md", "reference/extension-manifest.md"]
 
     @staticmethod

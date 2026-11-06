@@ -7,7 +7,6 @@ editUrl: false
 :::note
 `dagon_events::PORTS` から生成しています。直接編集せず、
 `DAGON_BLESS=1 cargo test -p dagon-catalog --test docs` でもう一度生成してください。
-表の中の説明は、元のソースのままで英語です。
 :::
 
 ポートは、プラグインが置き換えられる DAGON の部品です。置き換えは、一覧のレイヤーで、リンクされた
@@ -23,27 +22,27 @@ editUrl: false
 
 | ポート | 役割 | レイヤー | 既定 | 信頼 | サービス |
 |---|---|---|---|---|---|
-| `UpdateTransport` | bytes in and out of a link | boot, app, relay, host | boot, app, relay: USB CDC, UART, I2C target, PIO UART; host: serial | untrusted | return, transport, dma, time, memory |
-| `UpdateProtocol` | messages ↔ session triggers: identity, status, transfer, switch, reboot, confirm | boot, app, relay, host | the DAGON wire | untrusted (it cannot skip a guard: the session machine runs the guards, not the protocol) | return, time, memory |
-| `ImageVerifier` | header signature, key lookup | boot, app | Ed25519 over the project key | trusted only | – |
-| `Digest` | body hash | boot, app | SHA-256 | trusted only | – |
-| `CryptoProvider` | the primitives the verifier and digest use; hardware acceleration, HSM | boot, app, host | software | trusted only | – |
-| `DecisionPolicy` | attempt limit, which slot wins | boot | `max_attempts` from the definition, pending before confirmed | trusted only | – |
-| `WatchdogDriver` | the watchdog that guards boot and trial | boot, app | the MCU's | trusted only | – |
-| `SlotStore` | where images live | boot, app | the MCU package's flash layout | trusted only | – |
-| `LogStorage` | where the state log lives | boot, app | the MCU package's flash layout | trusted only | – |
-| `Recovery` | an additional recovery path: a service window for a transport, a vendor download mode | boot, app | BOOTSEL/UF2, factory, ROM entry as the MCU and board define | untrusted, additive (a plug-in adds a path, never removes DAGON's) | return, transport, time, memory |
-| `Diagnostics` | extra VERSION TLVs, extra status, a UDS DID table | boot, app, relay | none | untrusted | return, time, memory |
-| `Display` | what a phase or a boot outcome looks like | boot, app, relay | boot: the `[boot] led` and `halt` of the board definition through the action program; app, relay: none | untrusted (at boot it runs in the sandbox with the declared pins and buses) | return, pins, buses, time, memory |
-| `LogSink` | where `Recent` overflow and extension logs go | app, relay, host | none | untrusted | return, events, time, memory |
-| `SelfCheck` | the health answer when a slot on trial is confirmed | app | healthy | untrusted (a decision point, 3) | return, time, memory |
-| `BoardBringUp` | the board's power, pins and buses at app start | app, relay | the board package's | untrusted | return, pins, buses, time, memory |
-| `ChildLink` | how a hub reaches a child | relay | I2C controller, PIO UART | untrusted | return, buses, transport, dma, time, memory |
-| `Signer` | signing images and releases | host | file key pair | untrusted (the host is trusted by definition; the device verifies) | – |
-| `KeyStore` | where the signing key is kept | host | file key pair | untrusted (the host is trusted by definition; the device verifies) | – |
-| `BuildRunner` | building node images | host | cargo | untrusted | – |
-| `Agent` | an external agent the CLI and the page hand requests to | host | data-defined (agent definitions) | untrusted | – |
-| `Action` | a program or request run after a host event | host | data-defined (action definitions) | untrusted | – |
+| `UpdateTransport` | リンクに出入りするバイト | boot, app, relay, host | boot, app, relay: USB CDC、UART、I2C ターゲット、PIO UART; host: シリアル | untrusted | return, transport, dma, time, memory |
+| `UpdateProtocol` | メッセージ ↔ セッションのきっかけ: 識別、ステータス、転送、切り替え、再起動、確定 | boot, app, relay, host | DAGON のリンク | untrusted (ガードは飛ばせません。ガードを実行するのはセッションの状態機械で、プロトコルではありません) | return, time, memory |
+| `ImageVerifier` | ヘッダの署名、鍵の検索 | boot, app | プロジェクトの鍵での Ed25519 | trusted only | – |
+| `Digest` | 本体のハッシュ | boot, app | SHA-256 | trusted only | – |
+| `CryptoProvider` | 検証器とダイジェストが使う基本要素。ハードウェアの加速、HSM | boot, app, host | ソフトウェア | trusted only | – |
+| `DecisionPolicy` | 試行の上限、どのスロットが勝つか | boot | 定義の `max_attempts`、確定より待機を先に | trusted only | – |
+| `WatchdogDriver` | ブートとトライアルを守るウォッチドッグ | boot, app | マイコンのもの | trusted only | – |
+| `SlotStore` | イメージの置き場所 | boot, app | マイコンのパッケージのフラッシュの配置 | trusted only | – |
+| `LogStorage` | 状態ログの置き場所 | boot, app | マイコンのパッケージのフラッシュの配置 | trusted only | – |
+| `Recovery` | 追加の復旧の経路: 転送のためのサービスの窓、ベンダーのダウンロードモード | boot, app | マイコンとボードの定義のとおりの BOOTSEL/UF2、factory、ROM の入り口 | untrusted, additive (プラグインは経路を足すだけで、DAGON のものを消せません) | return, transport, time, memory |
+| `Diagnostics` | 追加の VERSION の TLV、追加のステータス、UDS の DID の表 | boot, app, relay | なし | untrusted | return, time, memory |
+| `Display` | 段階やブートの結果の見え方 | boot, app, relay | boot: アクションプログラムを通した、ボードの定義の `[boot] led` と `halt`; app, relay: なし | untrusted (ブート時は、宣言されたピンとバスでサンドボックスの中で動きます) | return, pins, buses, time, memory |
+| `LogSink` | `Recent` のあふれと拡張のログの行き先 | app, relay, host | なし | untrusted | return, events, time, memory |
+| `SelfCheck` | トライアル中のスロットを確定するときの健全さの答え | app | 健全 | untrusted (判断点、3) | return, time, memory |
+| `BoardBringUp` | アプリの起動時のボードの電源、ピン、バス | app, relay | ボードのパッケージのもの | untrusted | return, pins, buses, time, memory |
+| `ChildLink` | 親機が子機に届く方法 | relay | I2C コントローラ、PIO UART | untrusted | return, buses, transport, dma, time, memory |
+| `Signer` | イメージとリリースの署名 | host | ファイルの鍵の組 | untrusted (ホストは定義上信頼されます。検証するのはデバイスです) | – |
+| `KeyStore` | 署名の鍵の置き場所 | host | ファイルの鍵の組 | untrusted (ホストは定義上信頼されます。検証するのはデバイスです) | – |
+| `BuildRunner` | ノードのイメージのビルド | host | cargo | untrusted | – |
+| `Agent` | CLI とページがリクエストを渡す外部のエージェント | host | データで定義（エージェントの定義） | untrusted | – |
+| `Action` | ホストのイベントの後で実行するプログラムやリクエスト | host | データで定義（アクションの定義） | untrusted | – |
 
 ## ポートではない部品
 
@@ -51,8 +50,8 @@ editUrl: false
 
 | 部品 | 内容 | レイヤー | ポートではない理由 |
 |---|---|---|---|
-| `ImageLifecycle` | the image-lifecycle machine over the slot store and the state log | boot, app | the only writer of persistent image state; every change emits its event and keeps the confirm rule |
-| `SessionGuards` | the update session's guards: target, slot, header signature and compatibility, body digest | boot, app | every protocol's triggers pass the same guards; replacing them would let a transport write what DAGON refuses |
-| `BootRecord` | the retained record of boot events the app replays | boot, app | its format is DAGON's retained contract and it is never an input to a boot or confirm decision |
-| `Composition` | the order of a layer's chain (publisher, board package, libraries, user) and the decision bounds | boot, app, relay, host | it is what makes every extension see every event and keeps answers bounded |
-| `Sandbox` | the entry gate, the service calls, the protection map and the lockup fuse | boot, app, relay | it is what keeps extensions away from DAGON's state |
+| `ImageLifecycle` | スロットのストアと状態ログの上のイメージのライフサイクルの状態機械 | boot, app | 永続のイメージの状態の唯一の書き手。どの変更もイベントを出し、確定の決まりを保ちます |
+| `SessionGuards` | 書き込みのセッションのガード: ターゲット、スロット、ヘッダの署名と互換性、本体のダイジェスト | boot, app | どのプロトコルのきっかけも同じガードを通ります。置き換えると、DAGON が拒むものを転送が書けてしまいます |
+| `BootRecord` | アプリがリプレイするブートのイベントの保持の記録 | boot, app | その形式は DAGON の保持の取り決めで、ブートや確定の判断の入力にはなりません |
+| `Composition` | レイヤーのチェーンの順（公開元、ボードのパッケージ、ライブラリ、利用者）と判断の上限 | boot, app, relay, host | すべての拡張がすべてのイベントを見られるようにし、答えを有界に保つものです |
+| `Sandbox` | 入り口のゲート、サービス呼び出し、保護マップ、ロックアップヒューズ | boot, app, relay | 拡張を DAGON の状態から遠ざけているものです |

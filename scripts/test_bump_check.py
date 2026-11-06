@@ -94,7 +94,8 @@ class Changelog(unittest.TestCase):
         kinds = [("feature", "feat(cli): a"), ("none", "docs: b"), ("breaking", "feat(cli)!: c"),
                  ("fix", "fix(cli): d")]
         text = cl.section("cli", "0.2.0", "cli-v0.1.0", kinds)
-        self.assertTrue(text.startswith("## cli 0.2.0 (since cli-v0.1.0)"))
+        # The heading is the one the CHANGELOG holds; the range is a line of its own.
+        self.assertTrue(text.startswith("## cli 0.2.0\n\nSince cli-v0.1.0.\n"), text)
         self.assertLess(text.index("### Breaking"), text.index("### Features"))
         self.assertLess(text.index("### Features"), text.index("### Fixes"))
         self.assertNotIn("docs: b", text)

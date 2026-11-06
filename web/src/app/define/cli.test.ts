@@ -232,7 +232,8 @@ describe('dagon serve link', () => {
     expect(await cli.loadLayout()).toBeNull();
     expect(f.calls.some((c) => c.url === '/v1/layout')).toBe(false);
     cli.hello = { ...cli.hello!, features: [...cli.hello!.features, 'layout'] };
-    expect(await cli.loadLayout()).toBeNull();
+    expect(await cli.loadLayout()).toMatchObject({ format: 1 });
+    expect(cli.layoutRefused).toBeNull();
     const l = { names: { seg: '7セグ' }, positions: { seg: { x: 10, y: 20 } } };
     expect(await cli.saveLayout(l)).toBe(true);
     expect(f.calls[f.calls.length - 1]).toMatchObject({ url: '/v1/layout', method: 'PUT', body: JSON.stringify(l) });

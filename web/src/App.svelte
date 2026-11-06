@@ -1111,7 +1111,6 @@
       label: MENU.groups.connect,
       items: [
         { label: connected ? HUB_TOGGLE.disconnect : HUB_TOGGLE.connect, control: 'connect', off: hubLocked, run: toggleHub },
-        { label: DEFINE.connectDiscover, control: 'connect', off: !connected ? MENU.off.notConnected : idle ? null : MENU.off.notIdle, run: () => void op.discover() },
         { label: MENU.place, control: 'file', off: !connected ? MENU.off.notConnected : idle ? null : MENU.off.notIdle, run: () => fileInput?.click() },
         { label: MENU.rollback, control: 'rollback', off: !connected ? MENU.off.notConnected : !idle ? MENU.off.notIdle : selectedNode ? null : MENU.off.noNode, run: () => selectedNode && void op.rollback(selectedNode) },
       ],

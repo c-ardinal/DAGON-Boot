@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { untrack, type Snippet } from 'svelte';
+  import { tick, untrack, type Snippet } from 'svelte';
   import { BUILD, NOTICE } from '../app/copy.ts';
   import { rise } from '../app/motion.ts';
   import Icon from './Icon.svelte';
@@ -28,26 +28,41 @@
   const key = (e: KeyboardEvent) => {
     if (e.key === 'Escape') onclose();
   };
-  function place() {
+  /** With little room it says only its word and its actions; the sentences stay in the record and on the title. */
+  let tight = $state(false);
+  const SPOTS = [[false, false], [true, false], [false, true], [true, true]];
+  /** A little more than its entrance moves it by, so a card is not touched once it has landed. */
+  const MARGIN = 12;
+  const clear = () => {
     const c = card()?.getBoundingClientRect();
     const n = el?.getBoundingClientRect();
-    if (c && n && c.left < n.right && n.left < c.right && c.top < n.bottom && n.top < c.bottom) high = !high;
+    return !c || !n || c.left >= n.right + MARGIN || n.left >= c.right + MARGIN || c.top >= n.bottom + MARGIN || n.top >= c.bottom + MARGIN;
+  };
+  async function place() {
+    for (const [h, t] of SPOTS) {
+      high = h;
+      tight = t;
+      await tick();
+      if (clear()) return;
+    }
   }
   $effect(() => {
-    if (el) untrack(place);
+    if (el) untrack(() => void place());
   });
 </script>
 
 <!-- A write that went back: told beside the graph, with no scrim, so the card's change is seen as it happens. -->
 <svelte:window onkeydown={key} onresize={place} />
-<div transition:rise bind:this={el} class="notice" class:high role="alert" data-stop-notice="">
+<div transition:rise bind:this={el} class="notice" class:high title={tight ? `${reason} ${fix}` : undefined} role="alert" data-stop-notice="">
   <header>
     <strong>{word}</strong>
     <span translate="no">{target}</span>
     <button class="button-icon" aria-label={NOTICE.close} title={NOTICE.close} onclick={onclose}><span class="layer"><Icon name="x" /></span></button>
   </header>
-  <p>{reason}</p>
-  <p>{fix}</p>
+  {#if !tight}
+    <p>{reason}</p>
+    <p>{fix}</p>
+  {/if}
   <footer>
     <button class="more" onclick={onmore}>{NOTICE.more}</button>
     <span class="grow"></span>

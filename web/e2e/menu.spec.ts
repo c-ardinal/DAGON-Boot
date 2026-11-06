@@ -123,17 +123,6 @@ const ITEMS: Record<string, { query?: string; check: (p: Page) => Promise<void> 
       await expect(p.locator('#band').getByRole('button', { name: '切断する' })).toBeVisible({ timeout: 30_000 });
     },
   },
-  'つなぐ/親機を探す': {
-    check: async (p) => {
-      await offWithReason(p, 'つなぐ', '親機を探す');
-      await p.getByRole('radio', { name: '書込' }).click();
-      await connect(p);
-      // While it looks, the focal number counts what it found.
-      const looked = p.waitForFunction(() => document.querySelector('.focal .lbl')?.textContent === '発見', undefined, { polling: 'raf', timeout: 15_000 });
-      await press(p, 'つなぐ', '親機を探す');
-      await looked;
-    },
-  },
   'つなぐ/パッケージファイルを置く': {
     check: async (p) => {
       await offWithReason(p, 'つなぐ', 'パッケージファイルを置く');
@@ -210,6 +199,8 @@ const ITEMS: Record<string, { query?: string; check: (p: Page) => Promise<void> 
       await offWithReason(p, '困ったとき', '記録をコピーする');
       await press(p, 'DAGON', 'DAGON と連携する');
       await expect(p.locator('.why')).toBeVisible();
+      // Stopped by the lock table: it said why where it was pressed, and the menu stays.
+      await p.keyboard.press('Escape');
       await press(p, '困ったとき', '記録をコピーする');
       await expect(p.locator('.toast')).toBeVisible();
       expect((await p.evaluate(() => navigator.clipboard.readText())).length).toBeGreaterThan(0);

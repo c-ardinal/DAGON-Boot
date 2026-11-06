@@ -133,7 +133,7 @@
   let boxEl = $state<HTMLDivElement>();
 
   /** Card geometry of each class (normal, compact): width and gaps, in canvas px; the zoom alone scales them. The rows stand far apart: the links' length is what lets a cable sweep and read. */
-  const sizes = (compact: boolean) => (compact ? { w: 176, gapX: 20, gapY: 96 } : { w: 260, gapX: 80, gapY: 176 });
+  const sizes = (compact: boolean) => (compact ? { w: 208, gapX: 20, gapY: 96 } : { w: 260, gapX: 80, gapY: 176 });
   const nodesOf = $derived((config?.nodes ?? []).map((n) => ({ id: n.id, hub: n.role === 'hub' })));
   const compact = $derived(nodesOf.length >= COMPACT_FROM || view.zoom * NAME_PX < NAME_MIN_PX);
   const S = $derived(sizes(compact));

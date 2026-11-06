@@ -7,6 +7,6 @@ export default defineConfig({
   workers: 1,
   outputDir: process.env.DAGON_E2E_OUT ?? 'test-results',
   reporter: 'line',
-  use: { baseURL: 'http://127.0.0.1:5199', video: 'off', channel: process.env.DAGON_E2E_CHANNEL },
+  use: { baseURL: 'http://127.0.0.1:5199', video: 'off', screenshot: 'only-on-failure', channel: process.env.DAGON_E2E_CHANNEL },
   webServer: { command: 'npx vite --port 5199 --strictPort', url: 'http://127.0.0.1:5199', reuseExistingServer: true },
 });

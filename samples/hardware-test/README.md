@@ -100,7 +100,11 @@ interrupted by killing the CLI at 30 % on each node (old version keeps
 running, the retry succeeds); a tampered release (plain, and with the item
 CRC recomputed) and a release signed with a throwaway key (refused by
 `dagon apply` before any write; every slot unchanged); A/B back and forth
-three times; F401 ROM write (SKIPPED); a final good deploy.
+three times; each boot core with a release, for seg and the hub (`core-seg`,
+`core-hub`): raised, it goes to the idle slot and is confirmed; raised again,
+back to the other slot; a failing one goes back to the confirmed slot and the
+node still answers, all read from `dagon status`' versions lines; F401 ROM
+write (SKIPPED); a final good deploy.
 
 Test versions are 2.0.N (the format is major.minor.patch only, no
 pre-release tags). A node's version is its crate's: before each deploy step
@@ -116,7 +120,12 @@ set it in the crate itself.
 generated `self_check()` in the hub's `src/app.rs` and adds the feature).
 `run` builds failing images through a copy of dagon.toml,
 `dagon.hwt-fail.toml`, with `features = ["no-confirm"]` for the node.
-Nothing in the DAGON packages changes.
+
+The same feature in a boot crate makes the core fail its own check, so stage0
+falls back to the confirmed core; `dagon gen` writes it into `boot/<id>/` and
+the core is built with it through `boot_features = ["no-confirm"]` in the same
+copy. A first write never builds a core with it. The `core` steps need boot
+crates from this DAGON: run `dagon gen` first.
 
 ## Not automated
 

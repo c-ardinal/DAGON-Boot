@@ -21,6 +21,9 @@ lint = { features = ["", "slot-b"], env = { DAGON_TARGET_TAG = "lint", DAGON_BOO
 [workspace]
 
 [features]
+# Test build that fails its own check, so its trial always goes back to the
+# confirmed core (samples/hardware-test).
+no-confirm = []
 # Linked for boot core slot B (a release carries a core for each slot).
 slot-b = ["dagon-mcu-stm32f401re/slot-b"]
 

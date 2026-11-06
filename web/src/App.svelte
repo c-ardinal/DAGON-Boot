@@ -990,6 +990,7 @@
       stuck: op.recoverTarget?.name,
       responding: op.responding,
       unwritten,
+      stopped: op.failed ? op.progress[op.failed]?.stage : undefined,
       rest: op.rest && op.state === 'fileReady',
       finish: op.finished,
       refused: op.returnRefused?.kind,

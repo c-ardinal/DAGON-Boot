@@ -197,6 +197,17 @@ export function failureStage(reason: string): Pick<Progress, 'stage' | 'reason'>
   return { stage: 'cannotFix' };
 }
 
+/**
+ * Where a hub chosen again by hand stands: on the app just `sent`; else, when
+ * only a boot core was sent, its running boot core `core` tells whether that
+ * core went back or took over with the app still to write.
+ */
+export function hubBack(r: ConfirmResult, sent: number | undefined, coreSent: number | undefined, core: number | null): 'done' | 'previous' | 'coreBack' | 'unwritten' {
+  if (r.outcome === 'confirmed' || (r.outcome === 'notOnTrial' && r.version === sent)) return 'done';
+  if (sent === undefined && coreSent !== undefined) return core === coreSent ? 'unwritten' : 'coreBack';
+  return 'previous';
+}
+
 /** The 構成 in a release's topology item (dagon-wasm reads it), or null when it has none or cannot be read. */
 function fileTopologyOf(bytes: Uint8Array, yaml: string): Record<string, unknown> | null {
   try {
@@ -289,6 +300,8 @@ export class Operate {
   private link: SwapLink | null = null;
   /** Version each node was given in this run. */
   private sentVersion: Record<string, number> = {};
+  /** The boot core version sent to each node in this run. */
+  private coreSent: Record<string, number> = {};
 
   private transport: Transport | null = null;
   private host: Host | null = null;
@@ -666,6 +679,7 @@ export class Operate {
     this.startedAt = Date.now();
     this.failed = null;
     this.sentVersion = {};
+    this.coreSent = {};
     this.progress = Object.fromEntries(this.targets.map((id) => [id, { stage: 'waiting', percent: 0 }]));
     this.track = Object.fromEntries(this.targets.map((id) => [id, { ...NO_TRACK }]));
     // topology node index = position in reach (true for the sample, which follows its YAML).
@@ -691,6 +705,7 @@ export class Operate {
     this.trackEvent(n.id, e);
     // Only the app's transfer carries the release's version; FAILED / REJECTED carry the version the node still runs.
     if (e.phase === PHASE.transfer && !e.bootCore) this.sentVersion[n.id] = e.version;
+    if (e.phase === PHASE.transfer && e.bootCore) this.coreSent[n.id] = e.version;
     const was = this.progress[n.id] ?? { stage: 'waiting', percent: 0 };
     if (e.phase === PHASE.transfer || e.phase === PHASE.verify) {
       if (was.stage !== 'writing') this.status = ANNOUNCE.A11(n.name);
@@ -833,8 +848,9 @@ export class Operate {
         const why = this.notThisHub(await h.hello('hub', 0), onlyMine);
         if (why) throw why;
         const confirmed = await h.confirm('hub', 0, false);
+        const core = await h.bootCoreStatus('hub', 0).catch(() => null);
         this.swap(t, old);
-        return confirmed;
+        return { confirmed, core: core ? core.slots[core.active].version : null };
       } catch (e) {
         this.noteWhy(isNote(e) ? e : { kind: 'silent' });
         if (old) link.use(old);
@@ -847,7 +863,7 @@ export class Operate {
       this.alert = ANNOUNCE.A21timeout;
       return false;
     }
-    this.confirmed(r);
+    this.confirmed(r.confirmed, r.core);
     return true;
   }
 
@@ -881,11 +897,12 @@ export class Operate {
   }
 
   /** reconnectNeeded: the hub confirmed on the version just sent goes on to done; on its previous version it stops there (stopped). */
-  private confirmed(r: ConfirmResult): void {
+  private confirmed(r: ConfirmResult, core: number | null): void {
     const hub = this.reach.find((n) => n.role === 'hub')!;
-    const mine = r.outcome === 'confirmed' || (r.outcome === 'notOnTrial' && r.version === this.sentVersion[hub.id]);
+    const stage = hubBack(r, this.sentVersion[hub.id], this.coreSent[hub.id], core);
     this.alert = '';
-    if (!mine) {
+    if (stage === 'coreBack' || stage === 'unwritten') return this.stopAt(hub.id, stage);
+    if (stage === 'previous') {
       this.stopAt(hub.id, 'previous');
       this.backRead = this.recordBack(hub.id, r.version, 'ROLLED BACK');
       return;

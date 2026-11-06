@@ -1676,9 +1676,9 @@ and the limits of each claim.
   recorded as stale and cleared by the layer that would have acted on
   it, never by another layer; an extension whose artifact hash changed
   is a new identity and runs again.
-- **Clearing.** A tripped fuse is cleared by a request through the agent
-  (retained-formats.md 3.6); the CLI has no command that
-  sends one, and nothing else clears a fuse whose identity still exists.
+- **Clearing.** DAGON has no request that clears a tripped fuse yet: neither
+  the protocol nor the CLI has one, so a fuse whose identity still exists
+  stays tripped. retained-formats.md 3.6 is the format's model of a clear.
 - **Versioned.** The fuse carries what a reader needs to refuse a layout
   it does not read (6); bytes of another layout are never acted on.
 - **Size and placement.** Declared in the MCU definition next to the

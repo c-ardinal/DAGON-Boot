@@ -21,7 +21,7 @@ test = false
 [features]
 # Step blink codes and a panic blink (bring-up diagnostics).
 diag = ["dagon-rp2040-bootcore/diag"]
-# Test build that fails its own check (samples/hardware-test).
+# Test build that fails its own check, so its trial goes back to the confirmed core.
 no-confirm = ["dagon-rp2040-bootcore/no-confirm"]
 # Linked for boot core slot B (a release carries a core for each slot).
 slot-b = ["dagon-rp2040-bootcore/slot-b"]

@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'vitest';
 import { bandOf, connectNotice } from './band.ts';
-import { BAND, BUTTON, SIM } from './copy.ts';
+import { BAND, BUTTON, SIM, WRITE } from './copy.ts';
 import { MACHINE, view, type ConnectFailure, type L } from './machine.ts';
 
 describe('how a failed connection is told', () => {
@@ -79,6 +79,18 @@ describe('bottom band', () => {
 
   test('sending failed needs the user: a modal, not a toast', () => {
     expect(connectNotice('sendFailed')).toBe('modal');
+  });
+
+  test.each([
+    ['coreBack', WRITE.coreBack.next],
+    ['previous', WRITE.rolled.next],
+  ] as const)('stopped on %s: what to fix, then raise the version and build, not "write it again"', (stage, words) => {
+    for (const unwritten of [0, 2]) {
+      const b = bandOf('stopped', { hasConfig: true }, { stuck: '7セグ', unwritten, stopped: stage });
+      expect(b.sentence).toBe(words);
+      expect(b.sentence).toContain('バージョンを上げ');
+      expect(b.sentence).toContain('ビルド');
+    }
   });
 
   // One short sentence in every operating state, done and no-answer included.

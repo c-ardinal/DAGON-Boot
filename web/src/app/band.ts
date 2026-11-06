@@ -1,8 +1,8 @@
 // What the bottom band shows in each state: cause chip, one sentence, and the
 // named buttons the machine allows there.
-import { BAND, BAND_CHIP, BAND_FOR, BUTTON, BUTTON_FOR, SIM, type BandCopy } from './copy.ts';
+import { BAND, BAND_CHIP, BAND_FOR, BUTTON, BUTTON_FOR, SIM, WRITE, type BandCopy } from './copy.ts';
 import { view, type Action, type Ctx, type L } from './machine.ts';
-import type { Finish } from './operate.svelte.ts';
+import type { Finish, Progress } from './operate.svelte.ts';
 import type { ReconnectNote } from '../serial/transport.ts';
 
 export interface Button {
@@ -21,6 +21,8 @@ export interface Names {
   refused?: ReconnectNote['kind'] | null;
   stuck?: string;
   responding?: number;
+  /** How the node the write stopped at ended (stopped). */
+  stopped?: Progress['stage'];
   /** Nodes after the stopped one that were not written (stopped). */
   unwritten?: number;
   /** The update covers the nodes left after a recovery. */
@@ -91,6 +93,8 @@ function words(s: L, c: Ctx, n: Names): BandCopy {
     case 'reconnectNeeded':
       return BAND.M26;
     case 'stopped':
+      if (n.stopped === 'coreBack') return { sentence: WRITE.coreBack.next };
+      if (n.stopped === 'previous') return { sentence: WRITE.rolled.next };
       return n.unwritten && n.stuck ? BAND_FOR.M29(n.stuck) : BAND.M65;
     case 'done':
       return done(n.finish);

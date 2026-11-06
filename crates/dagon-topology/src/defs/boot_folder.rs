@@ -329,9 +329,9 @@ fn normalized(bytes: &[u8]) -> Vec<u8> {
     out
 }
 
-/// `text` without the version line of what `start` opens (the first line
-/// that equals it): the crate's own version, which is the developer's to
-/// raise and changes no dependency graph.
+/// `text` without the version line of the section `start` opens (the first
+/// line that equals it, up to the next table): the crate's own version, which
+/// is the developer's to raise and changes no dependency graph.
 fn without_own_version(text: &str, start: &str) -> String {
     let mut out = String::with_capacity(text.len());
     let (mut inside, mut done) = (false, false);
@@ -342,7 +342,7 @@ fn without_own_version(text: &str, start: &str) -> String {
             done = true;
             continue;
         }
-        inside = inside || bare == start;
+        inside = (inside || bare == start) && (bare == start || !bare.starts_with('['));
         out.push_str(line);
     }
     out
@@ -576,6 +576,21 @@ mod tests {
         std::fs::write(f.dir.join("Cargo.lock"), lock("0.2.0", "1.0.1")).unwrap();
         assert!(again.verify_stamp().is_err(), "another package's version");
         std::fs::remove_dir_all(&d).unwrap();
+    }
+
+    /// Only the crate's own version line is left out: without one, a version
+    /// in a later table counts, in the manifest and in the lock file.
+    #[test]
+    fn only_the_own_version_line_is_left_out() {
+        let toml = "[package]\nname = \"n\"\n[dependencies.x]\nversion = \"1\"\n";
+        assert_eq!(without_own_version(toml, "[package]"), toml);
+        let toml = "[package]\nname = \"n\"\nversion = \"2\"\n[dependencies.x]\nversion = \"1\"\n";
+        assert_eq!(
+            without_own_version(toml, "[package]"),
+            "[package]\nname = \"n\"\n[dependencies.x]\nversion = \"1\"\n"
+        );
+        let lock = "[[package]]\nname = \"n\"\n\n[[package]]\nname = \"x\"\nversion = \"1\"\n";
+        assert_eq!(without_own_version(lock, "name = \"n\""), lock);
     }
 
     /// A project with the boot folder of node `n` and one extension.

@@ -87,7 +87,7 @@ def parse_status(text, coordinator="hub"):
 def parse_core(text):
     """The boot core part of a versions line -> {"running": slot, slot: {...}};
     None for a node without boot core slots, or when they are not known."""
-    found = re.findall(r"([AB]):(\w+)(?: (\S+))?( \(running\))?", text)
+    found = re.findall(r"([AB]):(\w+)(?: ([^\s,]+))?( \(running\))?", text)
     if not found:
         return None
     out = {s: {"state": st, "version": v or None} for s, st, v, _ in found}
@@ -134,6 +134,17 @@ def set_crate_version(manifest, version):
     new = head + sep + table + nxt + tail
     if new != text:
         Path(manifest).write_text(new, encoding="utf-8", newline="\n")
+
+
+@contextlib.contextmanager
+def crate_version_back(manifest, version, keep):
+    """Sets the crate's version back to `version` however the block ends,
+    unless `keep()` says what was written took over."""
+    try:
+        yield
+    finally:
+        if not keep():
+            set_crate_version(manifest, version)
 
 
 def select(scs, only, start):
@@ -418,24 +429,27 @@ class Run:
         app = n["version"]
         release = self.project / "out" / "deploy" / f"v{app}.dgb"
         set_crate_version(self.crate(node), app)
-        set_crate_version(manifest, v)
-        cfg = self.fail_config([node], "boot_features") if failing else None
-        rc, text, cmd, log = self.cli(["deploy", node, "--key", self.key], name, config=cfg,
-                                      plan=(app, [node], release))
-        others = [k for k in self.nodes if k != node]
-        if failing:
-            expect(rc != 0 and "BootCoreRolledBack" in text,
-                   f"deploy of a failing boot core: rc={rc}, no BootCoreRolledBack")
+        was = n["boot"][n["boot"]["running"]]["version"]
+        took_over = []
+        with crate_version_back(manifest, was, keep=lambda: bool(took_over)):
+            set_crate_version(manifest, v)
+            cfg = self.fail_config([node], "boot_features") if failing else None
+            rc, text, cmd, log = self.cli(["deploy", node, "--key", self.key], name, config=cfg,
+                                          plan=(app, [node], release))
+            if failing:
+                expect(rc != 0 and "BootCoreRolledBack" in text,
+                       f"deploy of a failing boot core: rc={rc}, no BootCoreRolledBack")
+                st = self.wait_settled({node: app}, f"{name}-after")
+                check_core_back(st[node], n["boot"])
+                # The write stopped at the core: the app did not move, nor did any other node.
+                unchanged(before, st, self.nodes, slots=True)
+                return cmd, rc, log, st, f"{node} back on boot core slot {n['boot']['running']}"
+            expect(rc == 0, f"deploy rc={rc}")
             st = self.wait_settled({node: app}, f"{name}-after")
-            check_core_back(st[node], n["boot"])
-            unchanged(before, st, others)
-            set_crate_version(manifest, n["boot"][n["boot"]["running"]]["version"])
-            return cmd, rc, log, st, f"{node} back on boot core slot {n['boot']['running']}"
-        expect(rc == 0, f"deploy rc={rc}")
-        st = self.wait_settled({node: app}, f"{name}-after")
-        check_core_on(st[node], v, n["boot"])
-        unchanged(before, st, others)
-        return cmd, rc, log, st, f"{node} boot core {v} on slot {st[node]['boot']['running']}"
+            check_core_on(st[node], v, n["boot"])
+            unchanged(before, st, [k for k in self.nodes if k != node])
+            took_over.append(True)
+            return cmd, rc, log, st, f"{node} boot core {v} on slot {st[node]['boot']['running']}"
 
     def refused(self, name, s, before):
         if s["do"] == "tamper":
@@ -801,6 +815,7 @@ def selftest_core():
     assert start["boot"] == {"running": "A", "A": {"state": "Confirmed", "version": "0.1.0"},
                              "B": {"state": "Empty", "version": None}}
     assert start["version"] == "2.0.4" and settled(start), start
+    assert status("seg", "A:Written 0.1.0, B:Confirmed 2.1.1 (running)")["boot"]["A"]["version"] == "0.1.0"
     assert status("watch", "none (vendor 2nd stage)")["boot"] is None
     assert status("seg", "unknown")["boot"] is None
     # A hub's lines are named `hub` whatever its id; so its boot core too.
@@ -836,6 +851,24 @@ def selftest_core():
             raise AssertionError(f"accepted {n}")
         except Fail:
             pass
+
+    with throwaway_dir() as d:
+        m = d / "Cargo.toml"
+        m.write_text('[package]\nname = "b"\nversion = "2.1.3"\n', encoding="utf-8")
+        version = lambda: tomllib.loads(m.read_text(encoding="utf-8"))["package"]["version"]
+        try:
+            with crate_version_back(m, "2.1.2", keep=lambda: False):
+                raise Fail("the step failed")
+        except Fail:
+            pass
+        assert version() == "2.1.2", "restored when the step fails"
+        m.write_text('[package]\nname = "b"\nversion = "2.1.3"\n', encoding="utf-8")
+        with crate_version_back(m, "2.1.2", keep=lambda: True):
+            pass
+        assert version() == "2.1.3", "a confirmed core keeps its version"
+        with crate_version_back(m, "2.1.2", keep=lambda: False):
+            pass
+        assert version() == "2.1.2", "a core that went back does not"
 
     with throwaway_dir() as d:
         (d / "dagon.toml").write_text('[build.seg]\npackage = "nodes/seg"\n', encoding="utf-8")

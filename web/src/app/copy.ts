@@ -1223,7 +1223,7 @@ export const WRITE = {
   keepFailed: { label: '× 保存できない', detail: '書き込んだパッケージをプロジェクトの out/deploy に保存できませんでした。' },
   rolled: {
     reason: '新しいバージョンで起動を続けられず、前のバージョン {version} に戻りました。ノードは動いています。',
-    next: 'アプリを直してビルドしてから、もう一度書き込んでください。',
+    next: 'アプリを直してバージョンを上げ、ビルドしてから、もう一度書き込んでください。',
   },
   /** The new boot core failed its check: the node runs its confirmed one, the app was not written. */
   coreBack: {

@@ -184,6 +184,10 @@ class Wording(unittest.TestCase):
     NOT_SAID = ["ブートコア", "給餌", "見守り", "武装", "運び手", "開始者", "トライアル", "将来の", "マイコンのパッケージ", "ボードのパッケージ", "MCU のパッケージ", "ルールます", "破損していないの記録",
                 # パッケージ is the .dgb file and nothing else; the verb is 書き込む, in full.
                 "npm パッケージ", "Cargo パッケージ", "書込み", "初回書", "書く前",
+                # One word for one thing.
+                "クレート",
+                # A sentence says what it refers to, and who does it.
+                "同様です", "だけで扱えます",
                 # Names of the English pages' columns.
                 "Up links", "Down links"]
 

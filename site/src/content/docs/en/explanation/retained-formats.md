@@ -476,7 +476,7 @@ fixed cases in `tests/fixed.rs` name the property they guard.
 | P2 | Every replayed event is a held append of the reader's layout; no torn write is accepted. |
 | P3 | Every store of a writer lies in its own ring, whatever bytes the region holds. |
 | P4 | A writer never appends an identity it appended before in its sequence, and continues ahead of every number it used (outside 2.7); a boot number is held for one boot. |
-| P5 | The reader never reports a newer boot before an older one; pairs it cannot order are marked uncertain; per pair, an unordered pair has different openers, or one opener in two sequences, or one opener's numbers 2^30 or more apart. |
+| P5 | The reader never reports a newer boot before an older one; pairs it cannot order are marked uncertain; an unordered pair has different openers, or one opener in two sequences, or one opener's numbers 2^30 or more apart. |
 | P6 | Every replayed boot holds the events of one boot, and one boot is one replayed boot (outside the split boots of 2.7). |
 | P7 | An append lost before any replay is covered by a window or gap: at once when its own writer overwrote it, when other bytes destroyed it, once an entry the writer appended later is held. |
 | P8 | `plan`, `commit` and `confirm` take only the state log (compile-time). |
@@ -541,10 +541,14 @@ the full profile. Its properties, checked after every operation:
 
 The MCU packages' sweeps (`a_power_cut_at_every_flash_step_leaves_a_bootable_core`)
 add the flash side: a cut at every flash operation of a write,
-compaction of the state log included. A cell that does not hold what is
+compaction of the state log included.
+
+A cell that does not hold what is
 written to it at all is found by `bootcore::cell_holds`, run by the
 started boot loader and by the app: such a node takes no boot loader, and a
-pending core that finds it so rolls itself back. A cell with a word that
+pending core that finds it so rolls itself back.
+
+A cell with a word that
 holds a count was written by stage0, so it holds, and the check writes
 nothing over it; only a cell counting nothing gets a probe (a value no
 cell word takes) and its old value back, word by word, each read back, so

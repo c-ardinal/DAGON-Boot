@@ -1166,11 +1166,14 @@ programs the PMS and WCL registers (the HAL exposes no driver), then
 Not guaranteed by any level: what a declared capability can do in the
 physical world. A pin the manifest declares can cut the board's power
 if the wiring lets it; a bus write to a declared device's writable
-register can change that device's state. The manifest declares; `dagon
-gen` shows the declared capabilities of every extension in the project;
-the board definition narrows a bus capability to a device and a register
-set and a pin to its allowed levels; and the board author owns the
-wiring. Whether a peripheral is window-eligible is the MCU definition's
+register can change that device's state. Each has its part:
+
+- The manifest declares the capabilities.
+- `dagon gen` shows the declared capabilities of every extension in the project.
+- The board definition narrows a bus capability to a device and a register set and a pin to its allowed levels.
+- The board author owns the wiring.
+
+Whether a peripheral is window-eligible is the MCU definition's
 statement that it cannot write memory, route interrupts or clocks, or
 share state with DAGON (11); the checker refuses a definition that
 marks a bus master eligible.
@@ -1347,28 +1350,27 @@ command transport's limits, and no host extension answers a decision
 
 ### 4.9 Conformance cases
 
-The MCU package's conformance build runs, from an extension on the
-device, and expects the recorded outcome: a write to each privileged
-block of the definition (fault), a read of DAGON code (fault), a jump
-into DAGON code (fault), a forged service id (fault), a service pointer
-outside the region and a length that overflows (refused), an invalid
-unprivileged stack pointer before a service call (the kind's documented
-outcome: flagged stacking error and unwind, or lockup, watchdog reset,
-fuse set and the extension disabled on the next boot), a loop past the
-budget (overran), an interrupt storm from a declared peripheral (source
-disabled), a DMA request through a window that is not eligible (refused
-at generation), nested faults (one unwind), a timer and a fault in the
-same call (one unwind), an attempt to start another core where the MCU
-has one (fault), and on a `pms` MCU a GDMA access from World 1
-(denied). Added for the services: the cancellation-boundary cases of 4.2 and the
-reset-time contract case (a watchdog reset inside each non-preemptible
-part, then first use succeeds); for the fuse: the scenarios of its
-model requirements (5.5), run on the device. The cases are generated from the
-definition (one per privileged block, one per core, one per bus master,
-one per service cancellation boundary), so a new MCU gets its cases from
-its definition. Each case is also a scenario of the
-executable model (5.5), which checks that the boot reaches the same
-decision as without the extension.
+The MCU package's conformance build runs these from an extension on the device, and expects the recorded outcome:
+
+- A write to each privileged block of the definition (fault)
+- A read of DAGON code (fault)
+- A jump into DAGON code (fault)
+- A forged service id (fault)
+- A service pointer outside the region and a length that overflows (refused)
+- An invalid unprivileged stack pointer before a service call (the kind's documented outcome: flagged stacking error and unwind, or lockup, watchdog reset, fuse set and the extension disabled on the next boot)
+- A loop past the budget (overran)
+- An interrupt storm from a declared peripheral (source disabled)
+- A DMA request through a window that is not eligible (refused at generation)
+- Nested faults (one unwind)
+- A timer and a fault in the same call (one unwind)
+- An attempt to start another core where the MCU has one (fault)
+- On a `pms` MCU, a GDMA access from World 1 (denied)
+- For the services: the cancellation-boundary cases of 4.2 and the reset-time contract case (a watchdog reset inside each non-preemptible part, then first use succeeds)
+- For the fuse: the scenarios of its model requirements (5.5), run on the device
+
+The cases are generated from the definition (one per privileged block, one per core, one per bus master, one per service cancellation boundary), so a new MCU gets its cases from its definition.
+
+Each case is also a scenario of the executable model (5.5), which checks that the boot reaches the same decision as without the extension.
 
 ### 4.10 Other architectures in the same model
 
@@ -1771,21 +1773,15 @@ no longer emitted stays in the catalog, marked `retired`, until the next
 
 ## 7. Attaching and detaching a DAGON-enabled app
 
-The boot loader expects a slot with a signed header for this MCU (by its
-identity, 5.5), target tag and slot, a body whose digest matches, a
-vector table at the body start, and an app that feeds the watchdog the
-boot loader armed (on trial: confirm within the trial period or be rolled
-back). An app that does not link DAGON can still be installed through
-the ROM path and runs after signing; it never confirms, so it rolls back
-after `max_attempts` unless installed as confirmed by `dagon provision`.
-To attach DAGON: add the MCU and board packages, call `start` with an
-extension chain (`Nop` is valid), read the published events through the
-`Reader` it returns, keep the guard fed. To detach: stop calling `start`; the boot loader still
-verifies and counts attempts, still runs its own extensions and still
-writes the boot record; the host sees no identity reply and `dagon
-status` says so. No extension, event, definition or boot action changes
-what the boot loader checks, except a trusted extension that is declared
-to (4.7).
+The boot loader expects a slot with a signed header for this MCU (by its identity, 5.5), target tag and slot, a body whose digest matches, a vector table at the body start, and an app that feeds the watchdog the boot loader armed (on trial: confirm within the trial period or be rolled back).
+
+An app that does not link DAGON can still be installed through the ROM path and runs after signing. It never confirms, so it rolls back after `max_attempts` unless installed as confirmed by `dagon provision`.
+
+To attach DAGON: add the MCU and board packages, call `start` with an extension chain (`Nop` is valid), read the published events through the `Reader` it returns, keep the guard fed.
+
+To detach: stop calling `start`. The boot loader still verifies and counts attempts, still runs its own extensions and still writes the boot record. The host sees no identity reply and `dagon status` says so.
+
+No extension, event, definition or boot action changes what the boot loader checks, except a trusted extension that is declared to (4.7).
 
 ## 8. Examples
 
@@ -1969,7 +1965,6 @@ impl Extension for Bench {
 | A fixed reboot-delay cap | A number chosen once is wrong for an MCU with a shorter trial watchdog; the cap derives from the MCU definition's periods. |
 | A boot record with CRC-covered headers updated in place | A count, state or CRC updated in place cannot be made atomic against a reset: a torn update invalidates every event the header covers; a hand-off that locates another writer's section by its header couples the writers' formats. |
 | Specifying the retained-memory and identity formats in prose | A format whose correctness depends on every interleaving of resets, partial writes and version skew is shown correct by an executable model with randomized fault injection, not by prose (5.5). |
-| A built-in example topology and `demo` command in the CLI | Trying DAGON without hardware is the simulator's job (`dagon sim` runs any topology with its definitions); a browser try page is a separate published page. DAGON holds no board or topology of its own. |
 
 ## 10. Size limits and where they come from
 
@@ -2085,9 +2080,7 @@ below keep code and data to it.
    one. The functions that mask (the watchdog guard's state update, the
    relay's shared display state) carry `#[allow(clippy::disallowed_methods)]`
    with their reason, and a test keeps the list and the exemptions as they
-   are reviewed. Every request starts with a gated feed through the
-   serving loop's `ServeHost::feed` (the RP2040 relay's PC loop through
-   the guard's `progress`).
+   are reviewed.
 3. **Flash operations are hardware facts.** What an erase or program
    stops is the definition's `[execution] flash_op`:
    - `fetch-stall`: single-bank flash the code runs from; instruction
@@ -2105,7 +2098,8 @@ below keep code and data to it.
    datasheet maximum `erase_unit_max_ms`.
 4. **The watchdog outlasts one erase.** `erase_unit_max_ms` is below
    `[watchdog] confirmed_ms` (checked when a definition is loaded); every
-   request starts with a gated feed, and a longer erase is split into
+   request starts with a gated feed through the serving loop's `ServeHost::feed`
+   (the RP2040 relay's PC loop through the guard's `progress`). A longer erase is split into
    erase units with a gated feed between them. A pending image's trial
    is a window of its own: the guard's trial policy decides whether
    anything is fed while it lasts (`app.watchdog_taken` reports it).

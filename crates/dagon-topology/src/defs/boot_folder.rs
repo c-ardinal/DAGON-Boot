@@ -342,7 +342,7 @@ fn without_own_version(text: &str, start: &str) -> String {
             done = true;
             continue;
         }
-        inside = (inside || bare == start) && (bare == start || !bare.starts_with('['));
+        inside = bare == start || (inside && !bare.starts_with('['));
         out.push_str(line);
     }
     out

@@ -29,7 +29,7 @@ DAGON makes the distributed microcontroller designs that professionals and speci
 The first time only, you connect each microcontroller directly, one at a time, and write its factory image. After that, you do not need to open the case or connect them one at a time.
 Through one microcontroller connected to your PC, you write to the microcontrollers beyond it with a single operation. More microcontrollers take more time; the operation does not grow.
 
-Update images are all signed and written safely. A microcontroller starts a new version on trial and goes back to the previous version by itself if it does not work. The same happens if a write stops part-way.
+Update images are all signed and written safely. A microcontroller starts a new version on trial and goes back to the previous version by itself if it does not work. If a write stops part-way, the running version stays.
 
 DAGON handles mixed kinds of microcontroller once you draw the setup. As a developer you choose the boards, draw how they connect and write your application. DAGON takes care of start-up, flash layout, signing and the writing steps.
 

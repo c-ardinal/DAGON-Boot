@@ -44,6 +44,7 @@ description: "設計との違いと、DAGON がしないことです。仕様上
 - 親機: Coordinator、Release Store、Bus Guardian。書き込みは PC が親機を通して進めます。
 - 書き込みの計画: Delivery Plan の試行の窓と昇格の判断
 - 復旧: Recovery Policy と Node Recovery の、段階の自動の選択と回数に上限のある再試行
-- ホスト: Host Extension Chain、Action Definitions
+- ホスト: Host Machines、Host Extension Chain、Action Definitions
 - ブート: Boot Record Writer、Boot Action Interpreter
-- Retained Codecs: ファームウェアにはありません。実行可能なモデルの中にだけあります。
+- Retained Codecs: ブート記録とロックアップヒューズの形式は、実行可能なモデルの中にだけあります。ファームウェアにはありません。
+- 構成の本体: ファームウェアの形式は `dagon-format` のもの（先頭 32 バイト、ノード 32 バイト）で、[保持と永続の形式](/explanation/retained-formats/)の形式ではありません。親機は 1 つの領域に保存し、2 バンクの置き換えはありません。

@@ -414,17 +414,17 @@ a reason, so one source answers "can this be replaced".
 | `CryptoProvider` (the primitives the verifier and digest use; hardware acceleration, HSM) | boot, app, host | software | trusted only | – |
 | `DecisionPolicy` (attempt limit, which slot wins) | boot | `max_attempts` from the definition, pending before confirmed | trusted only | – |
 | `WatchdogDriver` (the watchdog that guards boot and trial) | boot, app | the MCU's | trusted only | – |
-| `SlotStore` (where images live) | boot, app | the MCU package's flash layout | trusted only | – |
-| `LogStorage` (where the state log lives) | boot, app | the MCU package's flash layout | trusted only | – |
-| `Recovery` (an additional recovery path: a service window for a transport, a vendor download mode) | boot, app | BOOTSEL/UF2, factory, ROM entry as the MCU and board define | untrusted, additive (a plug-in adds a path, never removes DAGON's) | return, transport, time, memory |
+| `SlotStore` (where images live) | boot, app | the MCU definition's flash layout | trusted only | – |
+| `LogStorage` (where the state log lives) | boot, app | the MCU definition's flash layout | trusted only | – |
+| `Recovery` (an additional recovery path: a service window for a transport, a vendor download mode) | boot, app | BOOTSEL/UF2, factory, ROM entry as the MCU and board define | untrusted, additive (an extension adds a path, never removes DAGON's) | return, transport, time, memory |
 | `Diagnostics` (extra VERSION TLVs, extra status, a UDS DID table) | boot, app, relay | none | untrusted | return, time, memory |
 | `Display` (what a phase or a boot outcome looks like) | boot, app, relay | boot: the `[boot] led` and `halt` of the board definition through the action program; app, relay: none | untrusted (at boot it runs in the sandbox with the declared pins and buses) | return, pins, buses, time, memory |
 | `LogSink` (where `Recent` overflow and extension logs go) | app, relay, host | none | untrusted | return, events, time, memory |
 | `SelfCheck` (the health answer when a slot on trial is confirmed) | app | healthy | untrusted (a decision point, 3) | return, time, memory |
-| `BoardBringUp` (the board's power, pins and buses at app start) | app, relay | the board package's | untrusted | return, pins, buses, time, memory |
+| `BoardBringUp` (the board's power, pins and buses at app start) | app, relay | the board definition's | untrusted | return, pins, buses, time, memory |
 | `ChildLink` (how a hub reaches a child) | relay | I2C controller, PIO UART | untrusted | return, buses, transport, dma, time, memory |
 | `Signer` (signing images and releases) | host | file key pair | untrusted (the host is trusted by definition; the device verifies) | – |
-| `KeyStore` (where the signing key is kept) | host | file key pair | untrusted (the host is trusted by definition; the device verifies) | – |
+| `KeyStore` (receives the signing key from where the user chose to keep it (an environment variable, the OS key store, 1Password and so on)) | host | file key pair | untrusted (the host is trusted by definition; the device verifies) | – |
 | `BuildRunner` (building node images) | host | cargo | untrusted | – |
 | `Agent` (an external agent the CLI and the page hand requests to) | host | data-defined (agent definitions) | untrusted | – |
 | `Action` (a program or request run after a host event) | host | data-defined (action definitions) | untrusted | – |
@@ -1546,17 +1546,17 @@ smallest link payload (10).
 
 | id | Value |
 |---|---|
-| 0x01 | boot core version (`Version`, LE u32) |
+| 0x01 | boot loader version (`Version`, LE u32) |
 | 0x02 | installed boot image identity: first 8 bytes of its SHA-256 |
 | 0x03 | agent (`dagon-agent`) version |
-| 0x04 | MCU package version |
-| 0x05 | board package version |
+| 0x04 | MCU definition version |
+| 0x05 | board definition version |
 | 0x06 | MCU identity (5.5): the value the image header and the compiled topology carry; with len 2 the image header's `mcu_id`, u16 LE |
 | 0x07 | isolation (4.5): `level u8`, `kind u8`, `boot_extensions u8`, `root_protection` (kind and exact level as the definition enumerates them, e.g. `rdp1`/`rdp2`, the write-protected sectors, and whether the level is reversible), `fuse` (Clear, or Tripped with the disabled extension's identity as the model encodes it, 5.5) |
 | 0x08 | extensions, for display: per linked extension `id` (up to 32 bytes), `trusted u8`, first 8 bytes of its source hash (4.7); repeated TLVs, one per extension |
 | 0x09 | extensions, for identity: per trusted extension its full 32-byte source hash (4.7); repeated TLVs |
 | 0x0A | stage0 version: the version mark stage0 carries in its region (`dagon_format::stage0`; `Version`, LE u32); omitted for a stage0 without the mark and on a vendor-stage2 MCU |
-| 0x0B | boot core slots A, B: `active u8` (the running slot), then per slot `state u8` (STATUS slot state) and `version` (LE u32) |
+| 0x0B | boot loader slots A, B: `active u8` (the running slot), then per slot `state u8` (STATUS slot state) and `version` (LE u32) |
 | 0x0C | app slots A, B, factory, in the shape of 0x0B |
 | 0x0D | wire version the agent speaks (`PROTO_VERSION`, u8) |
 | 0x10 | formats: pairs `(format id u8, number u8)`: wire, image-header, state-log, event, definitions, boot-program, boot-record, extension-manifest |

@@ -262,7 +262,7 @@ dagon_events::state_machine! {
 | `BoardBringUp` (アプリの起動時のボードの電源、ピン、バス) | app, relay | ボードの定義のもの | untrusted | return, pins, buses, time, memory |
 | `ChildLink` (親機が子機に届く方法) | relay | I2C コントローラ、PIO UART | untrusted | return, buses, transport, dma, time, memory |
 | `Signer` (イメージとリリースの署名) | host | ファイルの鍵の組 | untrusted (ホストは定義上信頼されます。検証するのはデバイスです) | – |
-| `KeyStore` (署名の鍵の置き場所) | host | ファイルの鍵の組 | untrusted (ホストは定義上信頼されます。検証するのはデバイスです) | – |
+| `KeyStore` (利用者が選んだ置き場所（環境変数、OS のキーストア、1Password など）から署名の鍵を受け取る) | host | ファイルの鍵の組 | untrusted (ホストは定義上信頼されます。検証するのはデバイスです) | – |
 | `BuildRunner` (ノードのイメージのビルド) | host | cargo | untrusted | – |
 | `Agent` (CLI とページがリクエストを渡す外部のエージェント) | host | データで定義（エージェントの定義） | untrusted | – |
 | `Action` (ホストのイベントの後で実行するプログラムやリクエスト) | host | データで定義（アクションの定義） | untrusted | – |

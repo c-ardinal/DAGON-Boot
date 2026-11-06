@@ -44,6 +44,7 @@ Components in the design figure that the code does not have:
 - On the hub: Coordinator, Release Store, Bus Guardian. The PC drives a write through the hub.
 - The write plan: the Delivery Plan's trial window and promotion judgement
 - Recovery: Recovery Policy's and Node Recovery's automatic choice of tier and bounded retry
-- On the host: Host Extension Chain, Action Definitions
+- On the host: Host Machines, Host Extension Chain, Action Definitions
 - At boot: Boot Record Writer, Boot Action Interpreter
-- Retained Codecs: not in the firmware. They exist only in the executable model.
+- Retained Codecs: the boot record's and the lockup fuse's formats exist only in the executable model, not in the firmware.
+- The topology body: the firmware's format is `dagon-format`'s (a 32-byte head, 32-byte nodes), not the one in [Retained and persistent formats](/en/explanation/retained-formats/). The hub stores it in one region, with no two-bank replacement.

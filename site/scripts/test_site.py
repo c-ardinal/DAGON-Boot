@@ -206,10 +206,8 @@ class Wording(unittest.TestCase):
         self.assertEqual(found, [])
 
     def test_the_english_design_pages_use_one_word_for_each_thing(self):
-        # Generated tables and the VERSION rows quote dagon-events and dagon-proto, and follow when those crates change.
-        for rel in ("en/explanation/lifecycle-events.md", "en/explanation/retained-formats.md"):
-            text = re.sub(r"<!-- generated from.*?<!-- end of generated table -->", "", (llms.DOCS / rel).read_text(encoding="utf-8"), flags=re.S)
-            text = re.sub(r"^\| 0x.*$", "", text, flags=re.M)
+        for rel in ("en/explanation/lifecycle-events.md", "en/explanation/retained-formats.md", "en/reference/ports.md"):
+            text = (llms.DOCS / rel).read_text(encoding="utf-8")
             self.assertEqual(re.findall(r"(?i)plug-in|\bboot\s+core\b", text), [], rel)
 
     # Status of the code against the design is said once, on the limitations page.
@@ -221,15 +219,13 @@ class Wording(unittest.TestCase):
         "まだ使えない",  # how-to/swap-link quotes the Console's label and problem name
         "not available yet on rp2040",  # how-to/swap-link quotes dagon gen's refusal
     ]
-    # Doc comments of dagon-topology, copied as they are: that crate is compiled into the served page.
-    STATUS_FROM_SOURCE = {"en/reference/definitions.md"}
 
     def test_status_words_only_on_the_limitations_page(self):
         pages = [ROOT / "README.md", ROOT / "README.en.md", *llms.DOCS.rglob("*.md*")]
         found = []
         for p in pages:
             rel = p.relative_to(llms.DOCS).as_posix() if p.is_relative_to(llms.DOCS) else p.name
-            if p.name == "limitations.md" or rel in self.STATUS_FROM_SOURCE:
+            if p.name == "limitations.md":
                 continue
             for n, line in enumerate(p.read_text(encoding="utf-8").splitlines(), 1):
                 for quote in self.STATUS_QUOTES:

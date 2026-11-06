@@ -2,6 +2,7 @@
   import { tick } from 'svelte';
   import type { Agent, AskKind } from '../app/agent.svelte.ts';
   import { AGENT } from '../app/copy.ts';
+  import { rise } from '../app/motion.ts';
 
   interface Props {
     agent: Agent;
@@ -239,7 +240,7 @@
   </button>
 
   {#if open}
-    <section class="bubble" class:left={side.left} class:up={side.up} aria-label={AGENT.name} aria-live="polite" bind:this={bubbleEl}>
+    <section transition:rise={{ dur: '--dur-quick' }} class="bubble" class:left={side.left} class:up={side.up} aria-label={AGENT.name} aria-live="polite" bind:this={bubbleEl}>
       {#if agent.thinking}
         <p class="muted">{AGENT.thinking}</p>
       {:else if reply}
@@ -300,7 +301,6 @@
     width: 100%;
     height: 100%;
     user-select: none;
-    animation: float 3.6s var(--ease-in-out) infinite alternate;
   }
   /* A soft shadow on the canvas: darker and smaller as DAGON sinks, lighter and wider as it rises. */
   .shadow {
@@ -311,7 +311,9 @@
     height: 14%;
     border-radius: 50%;
     background: radial-gradient(closest-side, rgb(0 0 0 / 0.75), transparent);
-    animation: breathe 3.6s var(--ease-in-out) infinite alternate;
+  }
+  .thinking .shadow {
+    animation: breathe var(--dur-float) var(--ease-in-out) infinite alternate;
   }
   .answered .shadow {
     background: radial-gradient(closest-side, color-mix(in srgb, var(--c-accent) 55%, transparent), transparent);
@@ -321,8 +323,8 @@
   }
   .thinking img {
     animation:
-      float 3.6s var(--ease-in-out) infinite alternate,
-      think 1.2s ease-in-out infinite alternate;
+      float var(--dur-float) var(--ease-in-out) infinite alternate,
+      think var(--dur-think) var(--ease-in-out) infinite alternate;
   }
   @keyframes float {
     to {
@@ -341,9 +343,8 @@
     }
   }
   @media (prefers-reduced-motion: reduce) {
-    .mark img,
     .thinking img,
-    .shadow {
+    .thinking .shadow {
       animation: none;
     }
   }
@@ -359,7 +360,6 @@
     border-radius: var(--r-m);
     background: var(--c-layer-1);
     box-shadow: 0 0.5rem 1.5rem rgb(0 0 0 / 0.45);
-    animation: pop 160ms var(--ease-out);
     transform-origin: left top;
   }
   .bubble.left {
@@ -370,17 +370,6 @@
   .bubble.up {
     top: auto;
     bottom: 0;
-  }
-  @keyframes pop {
-    from {
-      opacity: 0;
-      transform: scale(0.97);
-    }
-  }
-  @media (prefers-reduced-motion: reduce) {
-    .bubble {
-      animation: none;
-    }
   }
   .bubble p {
     margin: 0;

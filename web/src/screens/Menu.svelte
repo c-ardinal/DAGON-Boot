@@ -1,5 +1,6 @@
 <script lang="ts">
   import { AGENT, HELP, MENU, START } from '../app/copy.ts';
+  import { rise } from '../app/motion.ts';
   import type { StartChoice } from '../app/start.svelte.ts';
   import { DEMO_SITE } from '../app/site.ts';
 
@@ -29,7 +30,7 @@
 </script>
 
 <!-- The menu: a fold under the header that pushes the content down; the right column stays as it was. -->
-<nav id="menu" class="menu" aria-label={MENU.button}>
+<nav id="menu" transition:rise class="menu" aria-label={MENU.button}>
   <ul>
     {#each ITEMS as [c, label] (c)}
       <li><button class="secondary" data-control={DEMO_SITE && c === 'open' ? 'open' : 'project'} aria-disabled={locked} onclick={() => !locked && onstart(c)}>{label}</button></li>

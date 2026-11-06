@@ -11,6 +11,7 @@
 <script lang="ts">
   import type { Snippet } from 'svelte';
   import { DRAWER } from '../app/copy.ts';
+  import { fade } from '../app/motion.ts';
   import Icon from './Icon.svelte';
 
   interface Props {
@@ -26,7 +27,7 @@
 </script>
 
 <!-- The tab strip always stays; the body opens under it (the canvas above shrinks, no overlap). -->
-<section class="drawer" class:open={open !== null} aria-label={DRAWER.label}>
+<section in:fade class="drawer" class:open={open !== null} aria-label={DRAWER.label}>
   <div class="tabs" role="tablist" aria-label={DRAWER.label}>
     <div class="scroll">
       {#each tabs as t (t.id)}
@@ -44,7 +45,7 @@
     >
   </div>
   {#if open}
-    <div class="body" id="drawer-body" role="tabpanel" aria-labelledby="drawer-tab-{open}" tabindex="-1">
+    <div in:fade class="body" id="drawer-body" role="tabpanel" aria-labelledby="drawer-tab-{open}" tabindex="-1">
       {@render body(open)}
     </div>
   {/if}

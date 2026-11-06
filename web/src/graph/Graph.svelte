@@ -32,6 +32,7 @@
 
 <script lang="ts">
   import { CANVAS, LINK, NODE, SLOT, STATE, WRITE } from '../app/copy.ts';
+  import { draw, fade, lateFade, rise, tokenMs, waterEnd } from '../app/motion.ts';
   import { lightsStill, nodeState, STATE_ICON, type NodeState } from '../app/nodeState.ts';
   import Icon from '../screens/Icon.svelte';
   import { KIND_LABEL, type LinkKind } from '../app/define/model.ts';
@@ -77,6 +78,8 @@
     oncheck?: (id: string) => void;
     /** The card checks stay as they are (a write runs). */
     checksLocked?: boolean;
+    /** The node confirmed its new version: its water rises to the top as it goes. */
+    confirmedOf?: (id: string) => boolean;
   }
 
   let {
@@ -100,7 +103,15 @@
     checks = {},
     oncheck,
     checksLocked = false,
+    confirmedOf = () => false,
   }: Props = $props();
+
+  /** The graph takes its first measure of the window after it appears: cards go straight to their places then, and move only from then on. */
+  let arriving = $state(true);
+  $effect(() => {
+    const t = setTimeout(() => (arriving = false), tokenMs('--dur-line'));
+    return () => clearTimeout(t);
+  });
 
   /**
    * Sizes in rem: the root font follows the window, so cards,
@@ -410,6 +421,7 @@
     <div
       class="canvas"
       class:compact
+      class:arriving
       bind:this={canvas}
       style:width="{W}px"
       style:height="{H}px"
@@ -428,7 +440,7 @@
         {/each}
 
         {#each drawn as d (d.key)}
-          <g class="bundle" class:open={d.open} class:uns={d.skipped}>
+          <g transition:draw class="bundle" class:open={d.open} class:uns={d.skipped}>
             {#each d.offsets as o, i (i)}
               <path d={pathD(shifted(d.base, o))} class="wire" class:shared={d.l.wires[i]?.shared} />
             {/each}
@@ -436,8 +448,8 @@
               <rect class="tie" x={-tie.len / 2} y={-3} width={tie.len} height={6} rx="3" transform="translate({tie.p.x} {tie.p.y}) rotate({tie.deg})" />
             {/each}
           </g>
-          <circle cx={d.base[0].x} cy={d.base[0].y} r="6" class="end" />
-          {#if d.l.kind === 'I2C'}<circle cx={d.base[0].x} cy={d.base[0].y} r="3" class="end" />{/if}
+          <circle transition:fade cx={d.base[0].x} cy={d.base[0].y} r="6" class="end" />
+          {#if d.l.kind === 'I2C'}<circle transition:fade|global cx={d.base[0].x} cy={d.base[0].y} r="3" class="end" />{/if}
         {/each}
         {#if wire}<path d={pathD(verticalLink(wire.a, wire.b))} class="temp" class:bad={wire.bad} />{/if}
       </svg>
@@ -459,6 +471,7 @@
         {@const slots = slotsOf(n)}
         {@const check = checks[n.id]}
         <button
+          transition:rise
           class="node st-{states[n.id]}"
           class:still
           class:uns={!!n.notYet}
@@ -478,16 +491,16 @@
         >
           {#if level !== undefined}
             <!-- The water rises with the node's progress; its edge is two CSS-masked strips drifting at different speeds. -->
-            <span class="water" aria-hidden="true">
-              <span class="level" style:transform="translateY({100 - Math.min(100, Math.max(0, level))}%)">
+            <span in:fade out:lateFade class="water" aria-hidden="true">
+              <span out:waterEnd={{ confirmed: confirmedOf(n.id) }} class="level" style:transform="translateY({100 - Math.min(100, Math.max(0, level))}%)">
                 <span class="crest back"></span><span class="crest front"></span>
               </span>
             </span>
           {/if}
           <span class="hd">
             <b>[{n.no}] {n.name}</b><span class="role">{roleOf(n)}</span>
-            {#if v}<span class="ver" translate="no">{v}</span>{:else if m === 'skeleton'}<span class="skeleton ver-sk"></span>{/if}
-            <span class="state" title={STATE[states[n.id]]}><Icon name={STATE_ICON[states[n.id]]} size="var(--i-state)" /><span class="visually-hidden">{STATE[states[n.id]]}</span></span>
+            {#if v}{#key v}<span in:rise={{ dur: '--dur-quick' }} class="ver" translate="no">{v}</span>{/key}{:else if m === 'skeleton'}<span class="skeleton ver-sk"></span>{/if}
+            {#key states[n.id]}<span in:rise={{ dur: '--dur-quick' }} class="state" title={STATE[states[n.id]]}><Icon name={STATE_ICON[states[n.id]]} size="var(--i-state)" /><span class="visually-hidden">{STATE[states[n.id]]}</span></span>{/key}
           </span>
           <span class="bd">
             <span class="prod" translate="no" title={n.product}>{n.product}</span>
@@ -499,16 +512,17 @@
               <span class="chips"><span class="skeleton chip-sk"></span></span>
             {:else if m}
               <span class="chips"
-                >{#if m.chip}<span class="chip" class:silent={m.silent} class:uns={!!n.notYet && m.chip === NODE.notYet}>{m.chip}</span>{/if}</span
+                >{#if m.chip}<span in:rise={{ dur: '--dur-quick' }} out:lateFade class="chip" class:silent={m.silent} class:uns={!!n.notYet && m.chip === NODE.notYet}>{m.chip}</span>{/if}</span
               >
               {#if m?.note}<span class="note">{m.note}</span>{/if}
             {/if}
           </span>
-          {#if level !== undefined}<span class="pct" aria-hidden="true">{Math.round(level)}%</span>{/if}
+          {#if level !== undefined}<span in:fade out:lateFade={{ shown: confirmedOf(n.id) ? 100 : undefined }} class="pct" aria-hidden="true" style:--shown={Math.round(level)}></span>{/if}
         </button>
         {#if check !== undefined}
           <!-- Beside the card's button, never inside it: the check is its own control. -->
           <button
+            in:fade
             class="check"
             role="checkbox"
             aria-checked={check}
@@ -521,11 +535,12 @@
           >
         {/if}
         {#if n.role !== 'hub' || linked}
-          <span class="port in" class:linked aria-hidden="true" style:left="{pos[n.id].x + NODE_W / 2}px" style:top="{pos[n.id].y}px" class:ok={wire !== null && wire.from !== n.id && reasons[n.id] === null}></span>
+          <span transition:fade|global class="port in" class:linked aria-hidden="true" style:left="{pos[n.id].x + NODE_W / 2}px" style:top="{pos[n.id].y}px" class:ok={wire !== null && wire.from !== n.id && reasons[n.id] === null}></span>
         {/if}
         {#if onlink}
           <!-- svelte-ignore a11y_no_static_element_interactions -->
           <span
+            transition:fade|global
             class="port out"
             aria-hidden="true"
             title={LINK.portOut(n.name)}
@@ -538,6 +553,7 @@
 
       {#each drawn as d (d.key)}
         <button
+          transition:fade
           class="link-chip"
           class:selected={d.open}
           class:uns={d.skipped}
@@ -556,7 +572,7 @@
   </div>
   {#if dot}
     <!-- The focal number: bottom-left, just above what is under the canvas; it never scrolls away. -->
-    <div class="hero" class:small={compact} style:bottom={inset.bottom ? `${inset.bottom + 0.75 * rem}px` : undefined} data-avoid="" role="img" aria-label={dot.name} bind:offsetHeight={dotH} bind:offsetWidth={dotW}>
+    <div transition:fade class="hero" class:small={compact} style:bottom={inset.bottom ? `${inset.bottom + 0.75 * rem}px` : undefined} data-avoid="" role="img" aria-label={dot.name} bind:offsetHeight={dotH} bind:offsetWidth={dotW}>
       <span class="lbl">{dot.label}</span>
       <span class="row"><span class="num" class:err={dot.alarm && dot.value > 0}>{dot.value}</span>{#if dot.of !== undefined}<span class="of">/{dot.of}</span>{/if}{#if dot.unit}<span class="of">{dot.unit}</span>{/if}</span>
       {#if dot.sub}<span class="sub"
@@ -586,6 +602,9 @@
     position: relative;
     user-select: none;
   }
+  .canvas.arriving :global(*) {
+    transition: none;
+  }
   .links {
     position: absolute;
     inset: 0;
@@ -601,7 +620,7 @@
   .pc-link.busy {
     stroke: var(--c-paper);
     stroke-dasharray: 6 6;
-    animation: march 600ms linear infinite;
+    animation: march var(--dur-march) var(--ease-steady) infinite;
   }
   @keyframes march {
     to {
@@ -612,6 +631,7 @@
     fill: none;
     stroke: var(--c-line);
     stroke-width: 1;
+    transition: d var(--dur-line) var(--ease-out);
   }
   .wire.shared {
     stroke-dasharray: 4 3;
@@ -636,6 +656,9 @@
     fill: var(--c-ink);
     stroke: var(--c-line);
     stroke-width: 2;
+    transition:
+      cx var(--dur-line) var(--ease-out),
+      cy var(--dur-line) var(--ease-out);
   }
   .temp {
     fill: none;
@@ -663,6 +686,7 @@
     overflow: hidden;
     text-overflow: ellipsis;
     transform: translateX(-50%);
+    transition: var(--t-place);
   }
   .uplink.off {
     border-style: dashed;
@@ -696,7 +720,11 @@
     font: 400 var(--t-small) / 1.45 var(--f-ja);
     cursor: pointer;
     overflow: hidden;
-    transition: box-shadow 160ms var(--ease-out);
+    transition:
+      var(--t-place),
+      box-shadow var(--dur-quick) var(--ease-out),
+      border-color var(--dur-ui) var(--ease-out),
+      background-color var(--dur-quick) var(--ease-out);
   }
   .node.st-alive,
   .node.st-busy {
@@ -754,7 +782,7 @@
       linear-gradient(#000 0 0) content-box exclude,
       linear-gradient(#000 0 0);
     pointer-events: none;
-    animation: orbit var(--dur-orbit) linear infinite;
+    animation: orbit var(--dur-orbit) var(--ease-steady) infinite;
   }
   @keyframes orbit {
     to {
@@ -819,6 +847,7 @@
     background: none;
     color: var(--c-muted);
     cursor: pointer;
+    transition: var(--t-place);
   }
   .check[aria-checked='true'] {
     color: var(--c-accent);
@@ -905,6 +934,10 @@
     background: var(--c-ink);
     font: 700 var(--t-11) / 1 var(--f-ja);
     white-space: nowrap;
+    transition:
+      border-color var(--dur-ui) var(--ease-out),
+      background-color var(--dur-ui) var(--ease-out),
+      color var(--dur-ui) var(--ease-out);
   }
   .slotline {
     display: flex;
@@ -940,11 +973,22 @@
     color: var(--c-muted);
     font: 400 var(--t-11) / 1.4 var(--f-ja);
   }
+  /* The number counts up with the water: the browser moves --shown between the values it is given. */
+  @property --shown {
+    syntax: '<integer>';
+    inherits: false;
+    initial-value: 0;
+  }
   .pct {
     position: absolute;
     right: 0.75rem;
     bottom: 0.625rem;
     font: 400 1.5rem / 1 var(--f-version);
+    counter-reset: shown var(--shown);
+    transition: --shown var(--dur-rise) var(--ease-steady);
+  }
+  .pct::before {
+    content: counter(shown) '%';
   }
   /* Compact (9 ノード and on, or when normal cards would shrink names under 13 px): name, version, state. */
   .compact .prod,
@@ -982,7 +1026,7 @@
     position: absolute;
     inset: 0;
     background: var(--wave-front);
-    transition: transform 250ms linear;
+    transition: transform var(--dur-rise) var(--ease-steady);
   }
   .crest {
     position: absolute;
@@ -995,12 +1039,12 @@
   .crest.front {
     top: -10px;
     background: var(--wave-front);
-    animation: drift 4.2s linear infinite;
+    animation: drift var(--dur-drift-front) var(--ease-steady) infinite;
   }
   .crest.back {
     top: -0.875rem;
     background: var(--wave-back);
-    animation: drift 7s linear infinite reverse;
+    animation: drift var(--dur-drift-back) var(--ease-steady) infinite reverse;
   }
   @keyframes drift {
     to {
@@ -1019,7 +1063,11 @@
     border-radius: 50%;
     background: var(--c-ink);
     pointer-events: none;
-    transition: transform 160ms var(--ease-out), border-color 160ms ease, background-color 160ms ease;
+    transition:
+      var(--t-place),
+      transform var(--dur-nudge) var(--ease-out),
+      border-color var(--dur-quick) var(--ease-out),
+      background-color var(--dur-quick) var(--ease-out);
   }
   .port.out {
     pointer-events: auto;
@@ -1051,6 +1099,7 @@
     font: 700 var(--t-11) / 1.25rem var(--f-ja);
     white-space: nowrap;
     cursor: pointer;
+    transition: var(--t-place);
   }
   .link-chip.uns {
     border-style: dashed;
@@ -1140,13 +1189,6 @@
     .crest,
     .pc-link.busy {
       animation: none;
-    }
-    .level {
-      transition: none;
-    }
-    .port,
-    .node {
-      transition: none;
     }
   }
 </style>

@@ -23,6 +23,7 @@ describe('the browser simulator takes the links and flash their real time', () =
     expect(sim, 'built with the sim feature (npm run wasm:dev)').not.toBeNull();
     // Every wait of dagon-host (a sleep, or a read waiting for an answer) is a moment the page could draw: note each node's progress there.
     const seen: Record<string, number[]> = {};
+    const overall: number[] = [];
     let op: Operate | null = null;
     /** Simulated time at which each node was first and last seen in its transfer. */
     const writing: Record<string, [number, number]> = {};
@@ -31,7 +32,16 @@ describe('the browser simulator takes the links and flash their real time', () =
         if (p.stage === 'writing') writing[id] = [writing[id]?.[0] ?? sim.clock.now(), sim.clock.now()];
       }
       // The node's one % as its card shows it: transfer, restart and self-check.
-      for (const id of Object.keys(op?.progress ?? {})) (seen[id] ??= []).push(op!.percentOf(id));
+      for (const id of Object.keys(op?.progress ?? {})) {
+        (seen[id] ??= []).push(op!.percentOf(id));
+        if (op!.percentOf(id) === 100) expect(op!.progress[id].stage, `${id}: 100 % only on confirmation`).toBe('done');
+      }
+      // The overall number, as the status row and the focal number show it.
+      if (op && op.targets.length) {
+        const all = op.overallAt(sim.clock.now());
+        overall.push(all);
+        if (all === 100) expect(op.targets.every((id) => op!.progress[id]?.stage === 'done'), '100 % overall only when every node confirmed').toBe(true);
+      }
     };
     const clock: LinkClock = { now: sim.clock.now, sleep: (ms) => (note(), sim.clock.sleep(ms)) };
     const transport: Transport = { ...sim.transport, read: (ms) => (note(), sim.transport.read(ms)) };
@@ -50,6 +60,10 @@ describe('the browser simulator takes the links and flash their real time', () =
     await op.update();
     expect(op.state).toBe('done');
 
+    // The % shown never moves backwards, per node or overall.
+    for (const [id, list] of Object.entries({ ...seen, overall })) {
+      list.forEach((p, i) => expect(p, `${id} sample ${i}`).toBeGreaterThanOrEqual(list[i - 1] ?? 0));
+    }
     for (const id of ['hub', 'seg', 'watch']) {
       const between = new Set((seen[id] ?? []).filter((p) => p > 0 && p < 100));
       expect(between.size, `${id}: distinct steps between 0 and 100 %`).toBeGreaterThan(3);

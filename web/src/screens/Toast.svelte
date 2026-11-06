@@ -13,6 +13,7 @@
 
 <script lang="ts">
   import { NOTICE } from '../app/copy.ts';
+  import { rise } from '../app/motion.ts';
   import Icon from './Icon.svelte';
 
   interface Props {
@@ -33,8 +34,9 @@
   });
 </script>
 
-<!-- Toast: bottom-right, left of the zoom pill; it never moves to catch the eye (motion is for 作業中 only). -->
+<!-- Toast: bottom-right, left of the zoom pill; it rises once as it arrives and sinks as it goes, and never moves to catch the eye. -->
 <div
+  transition:rise
   class="toast"
   class:error={notice.error}
   role={notice.error ? 'alert' : 'status'}

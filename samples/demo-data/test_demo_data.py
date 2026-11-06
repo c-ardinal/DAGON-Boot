@@ -1,6 +1,6 @@
-"""Checks of scripts/demo-data.py that need no firmware build.
+"""Checks of demo-data.py that need no firmware build.
 
-    python -m unittest discover -s scripts -p "test_*.py"
+    python -m unittest discover -s samples/demo-data -p "test_*.py"
 """
 import importlib.util
 import pathlib

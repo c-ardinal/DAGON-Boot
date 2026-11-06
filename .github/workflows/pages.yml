@@ -22,7 +22,12 @@ jobs:
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
       - name: Rust from rust-toolchain.toml
-        run: rustup toolchain install
+        # The default too: a test builds a generated project outside the repository,
+        # where no rust-toolchain.toml applies.
+        shell: bash
+        run: |
+          rustup toolchain install
+          rustup default "$(sed -n 's/^channel = "\([^"]*\)".*/\1/p' rust-toolchain.toml)"
       - id: pages
         uses: actions/configure-pages@983d7736d9b0ae728b81ab479565c72886d7745b # v5
       - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5

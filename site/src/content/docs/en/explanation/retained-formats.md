@@ -371,7 +371,7 @@ the flag and the armed record, so the next start repeats the decision.
 DAGON has no request that clears a trip: neither the protocol nor the CLI
 has one. This is what the format's model holds for one: the agent frees an app
 trip in its own cell, or stores a clear request for a boot-loader trip; the boot
-core's next start turns the trip into clear-done, and each side frees its
+loader's next start turns the trip into clear-done, and each side frees its
 record when it sees the other's. One request clears one trip. Nothing else
 clears a trip whose id is installed.
 
@@ -442,7 +442,7 @@ Each bank starts with a 64-byte header:
 Bytes 1 to 3 and 48 to 63 are programmed as zero and not checked by a
 reader (bytes 1 to 3 are under the CRC).
 
-followed by the body. A bank counts when its commit byte is `0xC1`, its
+The body follows the header. A bank counts when its commit byte is `0xC1`, its
 length fits, its CRC matches and its body's SHA-256 equals the header's.
 The copy is the counted bank with the newer sequence (serial order);
 there is none when no bank counts.

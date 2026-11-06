@@ -204,6 +204,13 @@ class Wording(unittest.TestCase):
                  if "プラグイン" in line.replace("Claude Code のプラグイン", "")]
         self.assertEqual(found, [])
 
+    def test_the_english_design_pages_use_one_word_for_each_thing(self):
+        # Generated tables and the VERSION rows quote dagon-events and dagon-proto, and follow when those crates change.
+        for rel in ("en/explanation/lifecycle-events.md", "en/explanation/retained-formats.md"):
+            text = re.sub(r"<!-- generated from.*?<!-- end of generated table -->", "", (llms.DOCS / rel).read_text(encoding="utf-8"), flags=re.S)
+            text = re.sub(r"^\| 0x.*$", "", text, flags=re.M)
+            self.assertEqual(re.findall(r"(?i)plug-in|\bboot\s+core\b", text), [], rel)
+
     def test_console_goes_by_its_full_name_on_the_pages(self):
         found = []
         for p in llms.DOCS.rglob("*.md*"):

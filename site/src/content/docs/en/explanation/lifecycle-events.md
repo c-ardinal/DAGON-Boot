@@ -187,7 +187,7 @@ len, next }`; every protocol request is a transition (self-transitions
 for HELLO, STATUS, VERSION and progress). The protocol itself is a port
 (2.1): the machine's triggers are protocol-neutral (`update_offered`,
 `header_chunk`, `data_chunk`, `transfer_end`, `switch`, `reboot`,
-`confirm`, `status`), and a protocol plug-in (DAGON wire, UDS, …) maps
+`confirm`, `status`), and a protocol extension (DAGON wire, UDS, …) maps
 its messages onto them.
 
 Generated order at start: `app.starting` → `app.store_opened` (or
@@ -227,7 +227,7 @@ The relay is also an app (its own agent emits `app.*`). Its own machine:
 PC link up/down, a quiet window after a relayed request or a display
 request, per-child `Unknown → Present | Absent` from polls and relayed
 replies, and a progress screen. Child links are ports (a child protocol
-plug-in may relay UDS as well as DAGON frames).
+extension may relay UDS as well as DAGON frames).
 
 | Event | When | Payload |
 |---|---|---|
@@ -377,18 +377,18 @@ other record is refused, not guessed.
 ## 2. The extension model
 
 One shape in every layer: **ports** DAGON exposes for replacement,
-**plug-ins** that provide a port, observe events and answer decisions,
+**extensions** that provide a port, observe events and answer decisions,
 **events** with no-op defaults, and **one composition order** (board
 package → libraries → user). The execution context differs (an
 unprivileged sandbox in the boot loader and, where the MCU allows it, in
 the app; embassy tasks in apps; threads and JSON on the host), the shape
-does not. A declarative action program (5.2) is the simplest plug-in
+does not. A declarative action program (5.2) is the simplest extension
 kind, for uses that need no code.
 
 ### 2.1 Ports
 
 A port is a trait DAGON calls for one replaceable part, with DAGON's own
-implementation as the default. A plug-in that provides a port replaces
+implementation as the default. An extension that provides a port replaces
 that part for the image it is linked into. Ports exist in every layer.
 
 The port catalog is one table in code, `dagon_events::PORTS`, one
@@ -436,9 +436,9 @@ catalog allows). Every other port's replacement
 runs in the layer's sandbox (4) with the capabilities its manifest
 declares.
 
-### 2.2 Plug-ins and the manifest
+### 2.2 Extensions and the manifest
 
-A plug-in is a Rust crate (or, for the simplest kind, an action program
+An extension is a Rust crate (or, for the simplest kind, an action program
 in a definition) with a manifest, `dagon-extension.toml`:
 
 ```toml
@@ -516,7 +516,7 @@ reordered, it is not an extension, and only the layer start holds it.
 User code cannot put itself first, and `extensions![..]` never contains
 the publisher. Notifications reach every extension;
 decisions stop at the first non-abstaining answer. A port can be
-provided by at most one plug-in per image: `dagon gen` refuses a project
+provided by at most one extension per image: `dagon gen` refuses a project
 whose chain provides a port twice (a library and the user both bringing
 an `UpdateProtocol`), naming both.
 
@@ -613,7 +613,7 @@ read; this is what lets variants be added without advancing
 `EVENT_FORMAT`. The CLI prints the same events with `--events` (one JSON
 line each).
 
-Actions are the host's data-defined plug-in kind, like agent
+Actions are the host's data-defined extension kind, like agent
 definitions: a TOML file naming what to run and when, over transport
 kinds DAGON implements. The command transport (environment allow-list,
 fresh working folder, process group, time and output limits) is one
@@ -648,7 +648,7 @@ built. DAGON has no built-in search path.
 
 Everything not in this table is a notification. There is no decision
 point in the boot loader: nothing outside DAGON influences what the boot
-core starts, except a trusted plug-in that provides `DecisionPolicy`
+loader starts, except a trusted extension that provides `DecisionPolicy`
 (4.7), which is then that part of DAGON.
 
 | # | Decision | Layer | Who may answer (first non-abstaining in order) | Bound | Default | Never overridable |
@@ -820,7 +820,7 @@ of any extension in its image could have touched: the kind record's
 where the MCU has one, else `reinit` through each port's default), and
 the list of blocks comes from the image's manifests, so the cleanup is
 generated with the protection map and runs at `boot.hal_ready` (boot
-core) and before `app.bring_up` (app), ahead of the first service call.
+loader) and before `app.bring_up` (app), ahead of the first service call.
 A peripheral DAGON itself uses (its link, its LED) is reinitialised by
 DAGON's own bring-up after any reset. The conformance
 build triggers a watchdog reset from inside each service's
@@ -1184,7 +1184,7 @@ construction.
 
 ### 4.7 Trusted extensions and the authenticated chain
 
-A plug-in that provides a trusted-only port (2.1) replaces a part that
+An extension that provides a trusted-only port (2.1) replaces a part that
 the safety rules are made of. It is accepted only when:
 
 1. its manifest says `trusted = true` and names the trusted ports it
@@ -1198,21 +1198,25 @@ the safety rules are made of. It is accepted only when:
    `#[path]` let the compiler read any of them; running cargo inside the
    extension's own folder therefore changes its hash. The hash is of the
    source because the linked bytes do not exist when `dagon gen` runs.
+
    `dagon gen` checks the hash (and names the one it found when they
    differ), then checks the boot crate's dependency graph on the host:
    cargo resolves it with every feature for every target (`--locked` once
    its `Cargo.lock` exists), a superset of any one build of it, and every
    package built into it (normal and build dependencies) must be DAGON's,
    inside a declared trusted extension's folder (and so in its hash), or
-   a registry crate with a checksum in the boot crate's `Cargo.lock`. The
-   check passed, gen writes `graph.stamp`: the SHA-256 of the boot
+   a registry crate with a checksum in the boot crate's `Cargo.lock`.
+
+   The check passed, gen writes `graph.stamp`: the SHA-256 of the boot
    crate's `Cargo.toml`, its `Cargo.lock` and each trusted extension's
    source hash. The boot loader's build recomputes that stamp and refuses
    to build when it is missing or differs, so a boot crate whose graph
    was not checked for exactly its current inputs is never built. The
    graph is checked on the host and not in the build script because a
    build script sees neither the outer build's features nor, offline,
-   every crate cargo would resolve. Not covered: the registry crates the
+   every crate cargo would resolve.
+
+   Not covered: the registry crates the
    extension depends on (pinned by checksum, not reviewed), and source
    an extension includes from outside its own folder (`include!` or
    `#[path]` with a path leaving it), which trusted code is reviewed for
@@ -1225,7 +1229,7 @@ the safety rules are made of. It is accepted only when:
    and the first bytes of their source hashes for display (0x08) and
    the full hashes for identity (0x09).
 
-A plug-in may also be trusted without providing any port: an observer
+An extension may also be trusted without providing any port: an observer
 whose manifest says `trusted = true` and observes events only. It is
 accepted under items 2 to 4 above, answers no decision point, and each
 of its handler calls is timed against its manifest's `max_run_us` like
@@ -1260,7 +1264,9 @@ The one authentication rule, applied by every verifier in the chain
   and the boot loader before `chosen` on a trial boot (and checks the
   digest on every boot). A boot loader image is verified under the rule
   by the agent before `written` and again before `pending_set` (the
-  SLOT_PENDING record names its header digest). On a self-boot MCU with
+  SLOT_PENDING record names its header digest).
+
+  On a self-boot MCU with
   a stage0 whose definition sets `[layout] stage0_verifies`, stage0
   checks the boot loader header's signature under the project key built
   into it as well as the digests. Where it is left out, stage0 checks
@@ -1273,10 +1279,13 @@ The one authentication rule, applied by every verifier in the chain
   trusted-code bug, or an attacker with flash access) can make stage0
   start an unsigned core.
   A verifier does not fit either stage0's region within the margin below.
+
   When the log's choice does not
   check out (a corrupt slot, or a record naming a slot without a core),
   stage0 tries the other slots on their own before it has nothing to
-  start. On a self-boot MCU without a stage0, the boot loader is the root
+  start.
+
+  On a self-boot MCU without a stage0, the boot loader is the root
   and is verified by the host before it is written and by the agent when
   it is written through the write path.
 - **Stage0 budget.** The MCU definition's `[layout] stage0.size` is the
@@ -1337,7 +1346,7 @@ API-shape guarantees only:
 | Rule | Enforced by |
 |---|---|
 | No store access | Extensions receive read-only payloads copied into their own region; applications get `ImageView` (2.3); the slot store's mutators are reachable only through the image-lifecycle machine. |
-| Verify/confirm order | The machines' transitions are the only state changes: `self_check` is consulted only inside the `confirmed` transition after the "on trial" guard; `accept_update` only after the DAGON guards. An extension's answer is a validated `enum` (`RETURN`), never a closure DAGON executes. A protocol plug-in produces triggers; the session machine runs the guards. |
+| Verify/confirm order | The machines' transitions are the only state changes: `self_check` is consulted only inside the `confirmed` transition after the "on trial" guard; `accept_update` only after the DAGON guards. An extension's answer is a validated `enum` (`RETURN`), never a closure DAGON executes. A protocol extension produces triggers; the session machine runs the guards. |
 | Time | Decision bounds in 3; notifications have the same bound, preempted at a hardware level, measured at `none`. |
 | Watchdog | No service touches it. |
 | Reboot | 3.2: capped delay, never refused. |
@@ -1660,7 +1669,7 @@ and the limits of each claim.
   fuse that names that call (reset survival as the MCU definition
   declares; power loss may lose a fuse but never forge one).
 - **Hand-off.** A fuse armed by an app or relay call survives the boot
-  core's start unchanged (the boot loader records it and does not clear
+  loader's start unchanged (the boot loader records it and does not clear
   or act on another layer's fuse) and is read by the app's start, which
   disables the named extension for its run; a fuse armed by a boot-loader
   call is acted on by the boot loader's next start.
@@ -1866,7 +1875,7 @@ drains `events.recent()` from the `Reader` (owned `EventRecord`s, 2.4).
 
 An automotive node is written by a diagnostic tester speaking UDS
 (ISO 14229) over CAN with ISO-TP (ISO 15765-2), not by DAGON's wire
-over a serial link. One plug-in provides two ports and runs at boot and
+over a serial link. One extension provides two ports and runs at boot and
 in the app.
 
 Manifest:
@@ -1888,7 +1897,7 @@ stack_bytes = 2048
 ram_bytes = 8192
 ```
 
-Boot stage. The boot loader links the plug-in into `.ext.*`, and the
+Boot stage. The boot loader links the extension into `.ext.*`, and the
 generated map (4.4) grants it the CAN1 register block, window-eligible in
 the MCU definition, and its own memory; the flash
 controller, the state log, the watchdog and DAGON's RAM are denied.
@@ -1896,13 +1905,13 @@ From `WatchdogArmed` the boot machine polls the `UpdateTransport` port
 between its steps for a bounded window (`[boot] service_window_ms` in
 the project, capped by the trial period): a tester that sends
 `DiagnosticSessionControl(programmingSession)` keeps the boot loader in
-its recovery path (`boot.recovery { path: Service }`) and the plug-in's
+its recovery path (`boot.recovery { path: Service }`) and the extension's
 `UpdateProtocol` maps `RequestDownload` → `update_offered`,
 `TransferData` → `header_chunk`/`data_chunk`, `RequestTransferExit` →
 `transfer_end`, `RoutineControl(switchSlot)` → `switch`, `ECUReset` →
 `reboot`; the session machine runs every DAGON guard and the verifier
 port on each trigger exactly as for the DAGON wire, so a tester cannot
-skip the signature or write the active slot. The plug-in's `Diagnostics`
+skip the signature or write the active slot. The extension's `Diagnostics`
 port answers `ReadDataByIdentifier` for the identifiers it declares
 (the versions and the isolation level from the same values VERSION
 carries). Each handler call runs under `max_run_us`; a stuck CAN
@@ -1911,7 +1920,7 @@ without the window.
 
 App stage. The same crate, in the app's chain, provides the same ports
 to the agent: the serving task reads frames from the `UpdateTransport`
-(ISO-TP reassembly inside the plug-in), the `UpdateProtocol` turns UDS
+(ISO-TP reassembly inside the extension), the `UpdateProtocol` turns UDS
 services into session triggers, and the agent's replies go back the
 same way. `accept_update` and `self_check` stay with the board package,
 libraries or the app (`decides = []` here). At level `mpu` the handlers
@@ -1919,7 +1928,7 @@ run unprivileged with the CAN window as their only peripheral; at level
 `none` the same code runs, and `dagon status` shows the node as
 "extensions unguarded".
 
-What the plug-in cannot do, at any level, through the API: reach the
+What the extension cannot do, at any level, through the API: reach the
 slot store or the log (no handle), confirm a slot (not a decision it
 declares), or change what the boot loader starts. What it cannot do at
 `mpu`/`pms` whatever its code does: write flash, touch the watchdog,
@@ -1953,7 +1962,7 @@ impl Extension for Bench {
 | Arbitrary code at boot with lints, dependency allow-lists and conformance scans as the barrier | Those inspect source, not what runs; a callback could loop until the watchdog resets the chip, write any register or flash. The barrier is the MCU's protection unit plus a preempting timer (4.1), and where an MCU has neither, the definition says `none` and the product says so. |
 | A boot-time veto answered by an extension | Any untrusted answer that turns a `Boot` into a rollback lets a faulty extension keep a valid image from ever running. Boot policy is DAGON's `DecisionPolicy` port; replacing it is a trusted extension (4.7), declared, signed and shown. |
 | Public slot store mutators with the agent as one user among others | Persistent image state could then change without its event and without the confirm rule; the image-lifecycle machine is the only writer. |
-| A fixed hook trait extended with a method per new timing | No composition, no payload stream for displays, no replacement of parts, and the list must be fixed again at every timing not foreseen. Kept only as a deprecated facade. |
+| A fixed hook trait extended with a method per new timing | No composition, no payload stream for displays, no replacement of parts, and the list must be fixed again at every timing not foreseen. |
 | A hand-maintained event enum checked against a hand-maintained catalog | Two lists can agree while a transition emits nothing; only a primitive that cannot change state without emitting makes the catalog derived. |
 | Linker-section registries (`linkme`) | Entry order undefined; hidden registration by libraries; `dyn` dispatch cost and size. |
 | `dyn Extension` list with `alloc` on the device | No alloc below the host; a static slice reintroduces the registry problem. |

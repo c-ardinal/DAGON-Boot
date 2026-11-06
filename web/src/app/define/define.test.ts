@@ -14,7 +14,7 @@ describe('define session', () => {
     expect(d.doc.topo.links?.map((l) => [l.from, l.to])).toEqual([['hub', 'nucleo']]);
     d.undo();
     expect(d.doc.topo.nodes.map((n) => n.id)).toEqual(['hub']);
-    d.placeAt({ mcu: 'stm32f401re' }, 'STM32F401RE（自作ボード）', null);
+    d.placeAt({ mcu: 'stm32f401re' }, 'ボード', null);
     expect(d.doc.topo.links ?? []).toEqual([]);
   });
 
@@ -62,7 +62,7 @@ describe('define session', () => {
     d.guard = () => (asked++, true);
     // Enter / double-click in the parts window, the table's 置く, a drop, a port drag, Delete, import, undo.
     d.place('nucleo-f401re', 'NUCLEO-F401RE');
-    d.placeMcu('stm32f401re', 'STM32F401RE（自作ボード）');
+    d.placeMcu('stm32f401re', 'ボード');
     d.placeAt({ board: 'nucleo-f401re' }, 'NUCLEO-F401RE', 'hub');
     d.link('seg', 'watch');
     d.selected = 'node:seg';
@@ -79,7 +79,7 @@ describe('define session', () => {
     const d = new Define();
     d.placeSample();
     expect(d.linkRefusal('hub', 'seg')).toBe(LINK_WHY.taken);
-    d.placeAt({ mcu: 'stm32f401re' }, 'STM32F401RE（自作ボード）', null);
+    d.placeAt({ mcu: 'stm32f401re' }, 'ボード', null);
     const id = d.doc.topo.nodes[d.doc.topo.nodes.length - 1].id;
     expect(d.linkRefusal('seg', id)).toBeNull();
     d.link(id, 'seg');
@@ -166,7 +166,7 @@ describe('define session', () => {
     expect([d.doc.topo.nodes.length, d.canUndo]).toEqual([0, false]);
   });
 
-  test('a node chosen by MCU reads 「自作 · MCU 名」, and its missing board is a caution (▲), not an error', () => {
+  test('a node chosen by MCU reads the name of the MCU, and its missing board is a caution (▲), not an error', () => {
     const d = new Define();
     d.placeSample();
     const r = placeMcu(d.doc, 'rp2040');

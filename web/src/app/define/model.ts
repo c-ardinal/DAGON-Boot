@@ -510,7 +510,7 @@ export function toConfig(doc: Doc, boards: Board[]): Config {
   const mcuTable = mcus();
   const nodes: GNode[] = t.nodes.map((n, i) => {
     const b = boards.find((x) => x.id === n.board);
-    // A node chosen by MCU (no board): 「自作 · RP2040」, the MCU's name and not its id.
+    // A node chosen by MCU (no board): the MCU's name and not its id.
     const mcuName = b?.mcuName ?? mcuTable.find((m) => m.id === n.mcu)?.name ?? n.mcu;
     const l = links.find((x) => x.to === n.id);
     const via = !l ? '' : l.kind === 'i2c' ? `I2C ${hex(l.addr)}` : l.kind === 'uart' ? `UART ${l.baud ?? ''}`.trim() : KIND_LABEL[l.kind];

@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'vitest';
-import { Cli, CONSOLE_VERSION, SERVE_API, type CliDeps } from './cli.svelte.ts';
+import { Cli, CONSOLE_VERSION, SERVE_API, type CliDeps, parseLayout } from './cli.svelte.ts';
 import pkg from '../../../package.json';
 import { Define } from './define.svelte.ts';
 import { SAVE } from '../copy.ts';
@@ -35,7 +35,7 @@ function fake(opts: { status?: number; hash?: string } = {}) {
           layout = String(init.body);
           return Response.json({ saved: true });
         }
-        return layout ? new Response(layout) : Response.json({ error: 'no layout yet' }, { status: 404 });
+        return layout ? new Response(layout) : Response.json({ format: 1 });
       }
       if (url === '/v1/project/init') return Response.json({ open: true });
       if (url === '/v1/project/open') {
@@ -64,6 +64,25 @@ function fake(opts: { status?: number; hash?: string } = {}) {
   };
   return { deps, calls, store, sent, sock: () => sock!, replaced: () => replaced };
 }
+
+describe('the layout file', () => {
+  test('takes names and finite places, of its format or none named', () => {
+    expect(parseLayout({ format: 1, names: { a: 'A' }, positions: { a: { x: 1, y: -2.5 } } })).toMatchObject({ layout: { format: 1, names: { a: 'A' }, positions: { a: { x: 1, y: -2.5 } } } });
+    expect(parseLayout({ names: { a: 'A' } })).toMatchObject({ layout: { names: { a: 'A' } } });
+  });
+
+  test.each([
+    [{ format: 2 }, 'format 2'],
+    [[], 'not an object'],
+    [{ names: { a: 1 } }, 'names'],
+    [{ positions: { a: { x: 'x', y: 0 } } }, 'positions'],
+    [{ positions: { a: { x: NaN, y: 0 } } }, 'positions'],
+    [{ positions: { a: { x: Infinity, y: 0 } } }, 'positions'],
+    [{ positions: { a: {} } }, 'positions'],
+  ])('refuses %j and says why', (v, why) => {
+    expect(parseLayout(v)).toEqual({ refused: why });
+  });
+});
 
 describe('dagon serve link', () => {
   test('a job stopped by the lock table is not started (no request)', async () => {
@@ -206,6 +225,21 @@ describe('dagon serve link', () => {
     expect(f.calls[f.calls.length - 1].url).toBe('/v1/hello');
   });
 
+  test('what serve says about a job before the page has its number is kept for the job', async () => {
+    const f = fake();
+    const cli = new Cli(f.deps);
+    await cli.connect();
+    cli.hello = { ...cli.hello!, features: [...cli.hello!.features, 'build'] };
+    const id = (f as unknown as { nextJob?: number }).nextJob ?? 1;
+    for (const n of [id, id + 1, id + 2]) {
+      cli.event({ type: 'job.state', job: n, state: 'running' });
+      cli.event({ type: 'job.log', job: n, lines: ['hub: building slot a'] });
+    }
+    const j = await cli.build(['hub']);
+    expect(j?.state).toBe('running');
+    expect(j?.lines).toEqual(['hub: building slot a']);
+  });
+
   test('the layout (呼び名, positions) is read and written whole through serve, only with the layout feature', async () => {
     const f = fake();
     const cli = new Cli(f.deps);
@@ -213,11 +247,12 @@ describe('dagon serve link', () => {
     expect(await cli.loadLayout()).toBeNull();
     expect(f.calls.some((c) => c.url === '/v1/layout')).toBe(false);
     cli.hello = { ...cli.hello!, features: [...cli.hello!.features, 'layout'] };
-    expect(await cli.loadLayout()).toBeNull();
+    expect(await cli.loadLayout()).toMatchObject({ format: 1 });
+    expect(cli.layoutRefused).toBeNull();
     const l = { names: { seg: '7セグ' }, positions: { seg: { x: 10, y: 20 } } };
     expect(await cli.saveLayout(l)).toBe(true);
     expect(f.calls[f.calls.length - 1]).toMatchObject({ url: '/v1/layout', method: 'PUT', body: JSON.stringify(l) });
-    expect(await cli.loadLayout()).toEqual(l);
+    expect(await cli.loadLayout()).toEqual({ format: 1, ...l });
   });
 
   test('the latest release and a boot core come only through serve; none is null', async () => {

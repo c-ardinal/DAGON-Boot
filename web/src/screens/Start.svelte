@@ -338,8 +338,8 @@
     min-height: var(--h-status);
     padding: 0 var(--m-edge);
     border-top: 1px solid var(--c-layer-2);
-    color: var(--c-muted);
-    font: 400 var(--t-caption) / 1 var(--f-ja);
+    color: var(--c-paper);
+    font: 500 var(--t-small) / 20px var(--f-ja);
   }
   .band p {
     margin: 0;

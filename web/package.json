@@ -15,9 +15,11 @@
     "preview": "vite preview",
     "pretest": "npm run wasm:dev",
     "test": "vitest run",
+    "e2e": "playwright test",
     "fonts": "node scripts/fonts.mjs"
   },
   "devDependencies": {
+    "@playwright/test": "^1.65.0",
     "@sveltejs/vite-plugin-svelte": "^7.3.1",
     "svelte": "^5.57.3",
     "svelte-check": "^4.7.8",

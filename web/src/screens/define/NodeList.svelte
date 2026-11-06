@@ -64,7 +64,7 @@
       onkeydown={(e) => (e.key === 'Enter' || e.key === ' ') && (e.preventDefault(), ok && placeNow(p))}
     >
       <Icon name="grip-vertical" size="var(--i-s)" />
-      <span class="n"><span translate="no">{p.name}</span><small translate="no">{sub}</small></span>
+      <span class="n"><span translate="no" title={p.name}>{p.name}</span><small translate="no">{sub}</small></span>
       <span class="used">{n ? DEFINE.count(n) : ''}</span>
     </div>
   </li>
@@ -89,7 +89,7 @@
         {/each}
       {:else}
         {#each mcuList.filter((m) => match(m.name)) as m (m.id)}
-          {@render row({ key: { mcu: m.id }, name: DEFINE.ownBoard(m.name) }, m.name, !full)}
+          {@render row({ key: { mcu: m.id }, name: DEFINE.ownBoard }, m.name, !full)}
         {/each}
       {/if}
     </ul>

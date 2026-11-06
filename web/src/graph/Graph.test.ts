@@ -6,16 +6,16 @@ import Graph from './Graph.svelte';
 
 const html = (props: Record<string, unknown> = {}) =>
   render(Graph, {
-    props: { config: SAMPLE_CONFIG, live: {}, connected: false, sending: false, selected: null, onselect: () => undefined, dot: null, ...props },
+    props: { config: SAMPLE_CONFIG, live: {}, connected: false, sending: false, selected: null, onselect: () => undefined, ...props },
   }).body;
 const checks = (b: string) => [...b.matchAll(/<button[^>]*role="checkbox"[^>]*>/g)].map((m) => m[0]);
 
-describe('the node being built (準備)', () => {
-  test('its card says 作業中; the others stay as they were', () => {
-    const b = html({ busy: 'hub' });
-    const labels = [...b.matchAll(/<button class="node[^>]*aria-label="([^"]+)"/g)].map((m) => m[1]);
-    expect(labels.filter((l) => l.endsWith(STATE.busy))).toHaveLength(1);
-    expect(labels.filter((l) => l.endsWith(STATE.idle)).length).toBe(labels.length - 1);
+describe('building', () => {
+  test('a node being built carries the edge light and no words stand in for it', () => {
+    const b = html({ building: ['seg'], chips: {} });
+    expect(b).toMatch(/class="node st-busy[^"]*"[^>]*data-key="node:seg"/);
+    expect(b).not.toMatch(/class="node st-busy[^"]*"[^>]*data-key="node:hub"/);
+    expect(b).not.toContain('ビルド中');
   });
 });
 

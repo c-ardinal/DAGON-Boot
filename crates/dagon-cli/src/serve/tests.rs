@@ -1431,7 +1431,9 @@ fn the_layout_is_kept_beside_the_topology() {
     let a = start("layout");
     let b = auth(&a);
     let h = [("Authorization", b.as_str())];
-    assert_eq!(http(&a, "GET", "/v1/layout", &h, b"").0, 404);
+    // Before the first save: empty, not an error the browser logs.
+    let (st, body) = http(&a, "GET", "/v1/layout", &h, b"");
+    assert_eq!((st, body.contains("\"format\"")), (200, true));
     let layout = serde_json::json!({ "names": { "seg": "7セグ" }, "positions": { "seg": { "x": 1, "y": 2 } } });
     let (st, _) = http(&a, "PUT", "/v1/layout", &h, layout.to_string().as_bytes());
     assert_eq!(st, 200);
@@ -1444,6 +1446,12 @@ fn the_layout_is_kept_beside_the_topology() {
     assert!(a.dir.join("topology/t.layout.json").is_file());
     assert_eq!(http(&a, "PUT", "/v1/layout", &h, b"[1]").0, 400);
     assert_eq!(http(&a, "PUT", "/v1/layout", &h, b"not json").0, 400);
+    let (st, why) = http(&a, "PUT", "/v1/layout", &h, br#"{"format":2}"#);
+    assert_eq!((st, why.contains("layout format 2")), (400, true));
+    let bad = br#"{"positions":{"seg":{"x":"far","y":2}}}"#;
+    assert_eq!(http(&a, "PUT", "/v1/layout", &h, bad).0, 400);
+    std::fs::write(a.dir.join("topology/t.layout.json"), bad).unwrap();
+    assert_eq!(http(&a, "GET", "/v1/layout", &h, b"").0, 422);
     let big = format!("{{\"x\":\"{}\"}}", "a".repeat(300 * 1024));
     assert_eq!(http(&a, "PUT", "/v1/layout", &h, big.as_bytes()).0, 413);
     // A layout file grown too large on disk is not read whole or served.

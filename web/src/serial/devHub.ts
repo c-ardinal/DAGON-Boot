@@ -42,13 +42,14 @@ const FIXTURES = {
  *   its REBOOT the hub stays away until chosen again; `&factory=uart`: nodes
  *   answering as their factory agent).
  * - `?sim`: the simulator (dagon-sim through dagon-wasm, ROM loader
- *   included) on its own clock; `&wipe` erases the F401 first. Both take the
+ *   included) on its own clock; `&wipe` erases the F401 first, `&fail` makes
+ *   the watch's next version crash at boot. Both take the
  *   repository's test-key release and boot core as the project's files.
  */
 export function devHub(q: URLSearchParams): DevHub | null {
   if (q.has('sim')) {
     // On the wall clock: a write runs about as long as on hardware.
-    const s = simulator(1, (d) => q.has('wipe') && d.wipe(0x42), REAL_PACE);
+    const s = simulator(1, (d) => (q.has('wipe') && d.wipe(0x42), q.has('fail') && d.failWatch()), REAL_PACE);
     if (!s) return null;
     return { transport: s.transport, clock: s.clock, ...FIXTURES };
   }

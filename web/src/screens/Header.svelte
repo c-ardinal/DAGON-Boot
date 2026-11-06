@@ -1,5 +1,7 @@
 <script lang="ts">
   import { HELP, MENU, MODE, PRODUCT, SIM } from '../app/copy.ts';
+  import { rise } from '../app/motion.ts';
+  import { dismiss } from './dismiss.ts';
   import Icon from './Icon.svelte';
   import type { Snippet } from 'svelte';
 
@@ -23,8 +25,12 @@
     title?: string;
     /** The mode's main actions (header-size buttons), right of the toggle. */
     actions?: Snippet;
+    /** The menu's popover, anchored to ☰. */
+    menu?: Snippet;
     /** 困ったとき is open (the menu opens it). */
     helpOpen?: boolean;
+    /** It opened on the keys. */
+    helpKeys?: boolean;
   }
 
   let {
@@ -38,7 +44,9 @@
     sim = false,
     title = '',
     actions,
+    menu,
     helpOpen = $bindable(false),
+    helpKeys = false,
   }: Props = $props();
 
   /** 定義 → 運用: the order the user works in. */
@@ -70,50 +78,60 @@
   <div class="right">
     {#if actions}<div class="actions">{@render actions()}</div>{/if}
     {#if onmenu}
-      <button class="button-icon" aria-label={MENU.button} title={MENU.button} aria-expanded={menuOpen} aria-controls="menu" onclick={onmenu}
-        ><span class="layer"><Icon name="menu" /></span></button
-      >
+      <!-- Pressing ☰ again closes it: the press is inside the anchor. -->
+      <span class="anchor" use:dismiss={() => menuOpen && onmenu()}>
+        <button class="button-icon" aria-label={MENU.button} title={MENU.button} aria-haspopup="true" aria-expanded={menuOpen} aria-controls="menu" onclick={onmenu}
+          ><span class="layer"><Icon name="menu" /></span></button
+        >
+        {@render menu?.()}
+      </span>
     {/if}
   </div>
 </header>
 
-<section id="help" class="help" hidden={!helpOpen} aria-label={HELP.heading}>
-  <dl class="rows">
-    {#each HELP.rows as [when, what] (when)}
-      <dt>{when}</dt>
-      <dd>{what}</dd>
-    {/each}
-  </dl>
-  <details>
-    <summary>{HELP.keysHeading}</summary>
-    <dl class="keys">
-      {#each HELP.keys as [key, does] (key)}
-        <dt translate="no">{key}</dt>
-        <dd>{does}</dd>
+{#if helpOpen}
+  <section id="help" transition:rise={{ dur: '--dur-quick' }} class="help" aria-label={HELP.heading} use:dismiss={() => (helpOpen = false)}>
+    <button class="button-icon close" aria-label={HELP.close} title={HELP.close} onclick={() => (helpOpen = false)}><span class="layer"><Icon name="x" /></span></button>
+    <dl class="rows">
+      {#each HELP.rows as [when, what] (when)}
+        <dt>{when}</dt>
+        <dd>{what}</dd>
       {/each}
     </dl>
-  </details>
-</section>
+    <details open={helpKeys}>
+      <summary>{HELP.keysHeading}</summary>
+      <dl class="keys">
+        {#each HELP.keys as [key, does] (key)}
+          <dt translate="no">{key}</dt>
+          <dd>{does}</dd>
+        {/each}
+      </dl>
+    </details>
+  </section>
+{/if}
 
 <style>
-  /* TopBar: brand left, mode toggle centre, actions right. */
+  /* TopBar: brand left, mode toggle centre, actions right. The two sides stand equal so the toggle is centred; the name gives way first, the actions never do. */
   header {
     grid-area: header;
-    display: flex;
+    position: relative;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto minmax(max-content, 1fr);
     align-items: center;
     gap: var(--p-bar-gap);
     min-width: 0;
     height: var(--h-bar);
     padding: 0 var(--m-edge);
-    border-bottom: 1px solid var(--c-layer-2);
+    /* Inside the bar's height, so the controls keep their full clearance. */
+    box-shadow: inset 0 -1px 0 var(--c-layer-2);
     background: var(--c-ink);
-    z-index: var(--z-chrome);
+    /* Its popovers open over the canvas's columns. */
+    z-index: calc(var(--z-chrome) + 1);
     white-space: nowrap;
   }
   .left,
   .right {
     display: flex;
-    flex: 1 1 0;
     align-items: center;
     min-width: 0;
   }
@@ -122,10 +140,16 @@
     padding-left: var(--p-hit);
   }
   .right {
+    grid-column: 3;
     justify-content: flex-end;
     gap: var(--p-icon-gap);
   }
+  .anchor {
+    position: relative;
+    display: inline-flex;
+  }
   .brand {
+    flex: none;
     display: flex;
     align-items: center;
     gap: var(--s-2);
@@ -139,6 +163,7 @@
     font: 700 var(--t-mono) / 24px var(--f-mono);
   }
   .project {
+    min-width: 0;
     overflow: hidden;
     color: var(--c-paper);
     font: 500 var(--t-small) / 24px var(--f-ja);
@@ -153,7 +178,7 @@
     border-radius: var(--r-full);
   }
   .modes button {
-    height: calc(var(--h-control) - 2 * var(--p-toggle));
+    height: calc(var(--h-control) - 2 * var(--p-toggle) - 2px);
     padding: 0 var(--s-4);
     border: 0;
     border-radius: var(--r-full);
@@ -184,6 +209,7 @@
   }
   /* 模擬: on the paper, not the signal colour (it is no fault), and never animated. */
   .sim {
+    flex: none;
     padding: var(--s-1) var(--s-3);
     border: 1px dashed var(--c-ink);
     border-radius: var(--r-full);
@@ -192,16 +218,27 @@
     font: 700 var(--t-caption) / 1 var(--f-ja);
     letter-spacing: 0.08em;
   }
+  /* 困ったとき: a popover under ☰, over the page; nothing under it moves. */
   .help {
-    grid-area: help;
+    position: absolute;
+    z-index: var(--z-announce);
+    top: var(--h-bar);
+    right: var(--m-edge);
     display: grid;
     gap: var(--s-4);
+    width: min(var(--w-modal), calc(100% - 2 * var(--m-edge)));
+    max-height: calc(100vh - var(--h-bar) - var(--s-4));
     padding: var(--s-5);
-    border-bottom: 1px solid var(--c-line);
+    overflow: auto;
+    border: 1px solid var(--c-paper);
+    border-radius: var(--r-m);
     background: var(--c-layer-1);
+    white-space: normal;
   }
-  .help[hidden] {
-    display: none;
+  .close {
+    position: absolute;
+    top: var(--s-2);
+    right: var(--s-2);
   }
   dl {
     display: grid;

@@ -66,10 +66,13 @@ pub fn draw<D: DrawTarget<Color = Rgb565>>(
             .find(|n| n.node.index == p.node)
             .map_or("?", |n| n.node.name());
         let mut line: String<64> = String::new();
-        if p.text.is_empty() {
+        if !p.text.is_empty() {
+            let _ = write!(line, "{name}: {}", p.text);
+        } else if matches!(p.phase, phase::TRANSFER | phase::ROM) {
             let _ = write!(line, "{name}: {} {}%", label(p.phase), p.percent);
         } else {
-            let _ = write!(line, "{name}: {}", p.text);
+            // Verifying, rebooting and self-check have no number of their own to tell.
+            let _ = write!(line, "{name}: {}", label(p.phase));
         }
         let shown = &line[..line.len().min(TOP_CHARS)];
         let style = MonoTextStyle::new(&FONT_6X10, Rgb565::WHITE);

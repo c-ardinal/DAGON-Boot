@@ -216,6 +216,11 @@ jobs:
         run: npm test
       - name: Types (svelte-check)
         run: npx svelte-check --tsconfig ./tsconfig.json
+      # The Console in a real browser: the layout sweep, the view, every menu item.
+      - name: Browser (Playwright)
+        run: |
+          npx playwright install --with-deps chromium
+          npm run e2e
 
   # The documentation site and the Console demo it publishes: the generated
   # reference pages match their sources, the examples parse, the site builds

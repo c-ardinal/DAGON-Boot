@@ -27,6 +27,15 @@ function curve(name: string): (t: number) => number {
   };
 }
 
+/** The motion system's ease for what enters, leaves or settles. */
+export const easeOut = (): ((t: number) => number) => curve('--ease-out');
+
+/** A unitless token (`--zoom-default`). */
+export const tokenNumber = (name: string): number => parseFloat(token(name));
+
+/** False under reduced motion: what would travel goes to its end at once. */
+export const moves = (): boolean => Number(token('--move')) > 0;
+
 interface Timing {
   /** Which duration token: small things take `--dur-quick`. */
   dur?: string;

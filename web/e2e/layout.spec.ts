@@ -54,7 +54,7 @@ test('sweep: no overflow, overlap or clipped text at any window, in 準備 (shee
   expect(faults).toEqual([]);
 });
 
-test('spec 1: scale and pan do not change when a sheet, drawer, menu or toast appears', async ({ page }) => {
+test('scale and pan do not change when a sheet, drawer, menu or toast appears', async ({ page }) => {
   await page.setViewportSize({ width: 1920, height: 1080 });
   await openSample(page);
   const before = await canvasState(page);
@@ -68,7 +68,7 @@ test('spec 1: scale and pan do not change when a sheet, drawer, menu or toast ap
   }
 });
 
-test('spec 1: closing the parts window and changing mode leave the view alone; the view survives the table', async ({ page }) => {
+test('closing the parts window and changing mode leave the view alone; the view survives the table', async ({ page }) => {
   await page.setViewportSize({ width: 1920, height: 1080 });
   await openSample(page);
   const before = await canvasState(page);
@@ -86,7 +86,7 @@ test('spec 1: closing the parts window and changing mode leave the view alone; t
   expect(await canvasState(page)).toEqual(before);
 });
 
-test('spec 1: the window is the only thing that sizes the box, and the page never scrolls', async ({ page }) => {
+test('the window is the only thing that sizes the box, and the page never scrolls', async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 900 });
   await openSample(page);
   const { transform } = await canvasState(page);
@@ -101,7 +101,7 @@ test('spec 1: the window is the only thing that sizes the box, and the page neve
   expect(scrolled).toEqual([0, 0]);
 });
 
-test('spec 1: pan, wheel zoom and the explicit fit are what move the view', async ({ page }) => {
+test('pan, wheel zoom and the explicit fit are what move the view', async ({ page }) => {
   await page.setViewportSize({ width: 1920, height: 1080 });
   await openSample(page);
   const start = await canvasState(page);
@@ -120,7 +120,7 @@ test('spec 1: pan, wheel zoom and the explicit fit are what move the view', asyn
   expect((await canvasState(page)).transform).toBe(start.transform);
 });
 
-test('spec 3: version choice and write are one split button; no separate dropdown', async ({ page }) => {
+test('version choice and write are one split button; no separate dropdown', async ({ page }) => {
   await page.setViewportSize({ width: 1920, height: 1080 });
   await openSample(page);
   await page.getByRole('radio', { name: '書込' }).click();
@@ -131,7 +131,7 @@ test('spec 3: version choice and write are one split button; no separate dropdow
   expect(caret!.y).toBe(main!.y);
 });
 
-test('spec 4: undo and redo are icons at the canvas top-left, in 準備 only; the view toggle is two icons at its top-right', async ({ page }) => {
+test('undo and redo are icons at the canvas top-left, in 準備 only; the view toggle is two icons at its top-right', async ({ page }) => {
   await page.setViewportSize({ width: 1920, height: 1080 });
   await openSample(page);
   const stage = (await page.locator('.stage').boundingBox())!;
@@ -151,7 +151,7 @@ test('spec 4: undo and redo are icons at the canvas top-left, in 準備 only; th
   expect(await page.locator('.seg').count()).toBe(0);
 });
 
-test('spec 5: the zoom readout stays inside the pill, every part on its axis, at the bottom-right', async ({ page }) => {
+test('the zoom readout stays inside the pill, every part on its axis, at the bottom-right', async ({ page }) => {
   await page.setViewportSize({ width: 1920, height: 1080 });
   await openSample(page);
   const pill = (await page.locator('.pill').boundingBox())!;
@@ -172,7 +172,7 @@ test('spec 5: the zoom readout stays inside the pill, every part on its axis, at
   expect(pill.y + pill.height).toBeLessThanOrEqual(dock.y);
 });
 
-test('spec 8: the menu is a popover at ☰ that moves nothing; groups, then their items', async ({ page }) => {
+test('the menu is a popover at ☰ that moves nothing; groups, then their items', async ({ page }) => {
   await page.setViewportSize({ width: 1920, height: 1080 });
   await openSample(page);
   const stage = await page.locator('.stage').boundingBox();
@@ -190,7 +190,7 @@ test('spec 8: the menu is a popover at ☰ that moves nothing; groups, then thei
   await expect(page.locator('#menu')).toHaveCount(0);
 });
 
-test('spec 9: the band says one sentence in readable type', async ({ page }) => {
+test('the band says one sentence in readable type', async ({ page }) => {
   await page.setViewportSize({ width: 1920, height: 1080 });
   await openSample(page);
   const s = page.locator('#band .sentence');
@@ -209,7 +209,7 @@ test('spec 9: the band says one sentence in readable type', async ({ page }) => 
   expect(colour).toBe(paper);
 });
 
-test('spec 9: the longest sentence wraps and the band grows over the canvas, moving nothing and covering nothing', async ({ page }) => {
+test('the longest sentence wraps and the band grows over the canvas, moving nothing and covering nothing', async ({ page }) => {
   for (const [width, height] of [[1024, 600], [1920, 1080]]) {
     await page.setViewportSize({ width, height });
     await openSample(page);
@@ -223,7 +223,7 @@ test('spec 9: the longest sentence wraps and the band grows over the canvas, mov
   }
 });
 
-test('spec 16: dragging a card pulls its cable behind it, ends on the ports, and the view stays', async ({ page }) => {
+test('dragging a card pulls its cable behind it, ends on the ports, and the view stays', async ({ page }) => {
   await page.setViewportSize({ width: 1920, height: 1080 });
   await openSample(page);
   const view = await canvasState(page);
@@ -256,7 +256,7 @@ test('spec 16: dragging a card pulls its cable behind it, ends on the ports, and
   expect(port.paths.some((p) => Math.abs(p.y - port.top) < 2 && Math.abs(p.x - port.mid) < 24)).toBe(true);
 });
 
-test('spec 16: reduced motion shows the rest shape at once', async ({ page }) => {
+test('reduced motion shows the rest shape at once', async ({ page }) => {
   await page.emulateMedia({ reducedMotion: 'reduce' });
   await page.setViewportSize({ width: 1920, height: 1080 });
   await openSample(page);
@@ -272,7 +272,7 @@ test('spec 16: reduced motion shows the rest shape at once', async ({ page }) =>
   await page.mouse.up();
 });
 
-test('spec 16: no animation frames are asked for once nothing moves', async ({ page }) => {
+test('no animation frames are asked for once nothing moves', async ({ page }) => {
   await page.setViewportSize({ width: 1920, height: 1080 });
   await openSample(page);
   await page.waitForTimeout(1500);
@@ -287,7 +287,7 @@ test('spec 16: no animation frames are asked for once nothing moves', async ({ p
   expect(asked).toBe(0);
 });
 
-test('C13: the mode toggle and zoom are pills, the header keeps its clearance', async ({ page }) => {
+test('the mode toggle and zoom are pills, the header keeps its clearance', async ({ page }) => {
   await page.setViewportSize({ width: 1920, height: 1080 });
   await openSample(page);
   for (const sel of ['header .modes', '.pill']) {
@@ -300,7 +300,7 @@ test('C13: the mode toggle and zoom are pills, the header keeps its clearance', 
   expect(bar.y + bar.height - (modes.y + modes.height)).toBeGreaterThanOrEqual(8);
 });
 
-test('C07: a toast stands left of the zoom pill, inside the canvas', async ({ page }) => {
+test('a toast stands left of the zoom pill, inside the canvas', async ({ page }) => {
   await page.setViewportSize({ width: 1920, height: 1080 });
   await openSample(page);
   await page.getByRole('button', { name: 'メニューを開く' }).click();

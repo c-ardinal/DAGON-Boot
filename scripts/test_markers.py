@@ -38,6 +38,7 @@ MARKERS = [
     ),
     ("plan screen id", r"\bSC-[A-Z0-9]"),
     ("plan section", r"§"),
+    ("requirement number", r"\b(?:spec \d+|C\d{2}):"),
     ("plan state id", r"\bL\d{2}\b"),
     ("plan document", r"\bui-design\b|\bdev-flow\b"),
     ("tracker reference", r"\bC-\d{3}\b"),

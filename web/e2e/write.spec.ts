@@ -75,7 +75,7 @@ test('the split button writes the checked nodes, again after done, and says when
 });
 
 for (const size of [{ width: 1920, height: 1080 }, { width: 1280, height: 720 }, { width: 1024, height: 600 }]) {
-  test(`spec 12: at ${size.width}x${size.height} a write that went back is told without a scrim, never over its node`, async ({ page }) => {
+  test(`at ${size.width}x${size.height} a write that went back is told without a scrim, never over its node`, async ({ page }) => {
     await toWrite(page, 'sim&fail', size);
     await page.locator('.split .main').click();
     const notice = page.locator('[data-stop-notice]');

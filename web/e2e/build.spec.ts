@@ -70,7 +70,7 @@ async function open(page: Page) {
   await page.getByRole('radio', { name: '準備' }).click();
 }
 
-test('spec 10: a build advances node by node: only the node being built has the light, and it goes when that node is done', async ({ page }) => {
+test('a build advances node by node: only the node being built has the light, and it goes when that node is done', async ({ page }) => {
   const s = await serve(page, { buildNodes: ['hub', 'seg', 'watch'] });
   await open(page);
   await expect(sentence(page)).toContainText('ビルドしてから');
@@ -115,7 +115,7 @@ test('spec 10: a build advances node by node: only the node being built has the 
   expect(await lit(page)).toEqual([]);
 });
 
-test('spec 10: a job serve has already started when its number arrives still lights its node', async ({ page }) => {
+test('a job serve has already started when its number arrives still lights its node', async ({ page }) => {
   const s = await serve(page, { buildNodes: ['hub', 'seg', 'watch'], earlyEvents: true });
   await open(page);
   await page.getByRole('button', { name: 'ビルドする' }).click();

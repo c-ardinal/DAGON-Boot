@@ -225,13 +225,13 @@ const ITEMS: Record<string, { query?: string; check: (p: Page) => Promise<void> 
 test.setTimeout(45_000);
 
 for (const [name, { query, check }] of Object.entries(ITEMS)) {
-  test(`spec 8: menu item ${name}`, async ({ page }) => {
+  test(`menu item ${name}`, async ({ page }) => {
     await start(page, query);
     await check(page);
   });
 }
 
-test('spec 8: the table above covers every item the menu shows, linked or not', async ({ page }) => {
+test('the table above covers every item the menu shows, linked or not', async ({ page }) => {
   const shown = new Set<string>();
   for (const query of ['sim', 'sim&agent=linked']) {
     await start(page, query);

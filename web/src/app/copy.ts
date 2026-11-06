@@ -889,7 +889,7 @@ export const DEFINE = {
   buildingSentence: 'ビルドが終わるまで、そのまま待ってください。',
   builtSentence: '書込に切り替えて、ノードへ書き込みます。',
   skeletonFirst: '先に雛形を作ると、ビルドできます。',
-  /** C19: E6, nodes updating skips; the 構成 is valid as it is. */
+  /** Nodes updating skips; the 構成 is valid as it is. */
   notYetSentence: (k: number) => `書き込めないノードが ${k} つあります。構成はこのままで使え、書き込みではそのノードを飛ばします。`,
   /** The 構成 of the release file chosen in 書込 replaces this one (undoable, saved to the YAML). */
   importFileTopology: 'ファイルの構成を取り込む',

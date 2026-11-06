@@ -1,21 +1,11 @@
 ---
-title: "Agent link: serve API"
-description: "How DAGON reaches its agent through dagon serve: routes, consent, keys and what is sent."
+title: "エージェントとのつなぎ方: serve API"
+description: "DAGON が dagon serve を通してエージェントに届く方法です。ルート、同意、キー、送るものを示します。"
 ---
 
-:::note
-このページは英語だけです。
-:::
+DAGON は 1 つのインターフェースでエージェントと話します。エージェントはデータです。エージェント（id、名前、提供元）と、そこに届くつなぎ方があり、つなぎ方はそれぞれ DAGON が実装する転送の種類のどれかです（後述の「組み込みのエージェント」と「転送の種類」）。利用者は、つなぐときに 1 度だけ、1 つのエージェントと 1 つのつなぎ方に同意します。その後は、もう一度尋ねずに質問を送ります。ログインはエージェントの側にとどまり、API キーは OS の資格情報ストアにとどまります（「API キーの置き場所」）。どちらもページには届きません。
 
-DAGON talks to an agent through one interface. Agents are data: an agent
-(id, name, provider) and the ways to reach it, each of a transport kind DAGON
-implements (see Builtin agents and Transport kinds below). The user consents once, when linking,
-to one agent and one way; after that questions are sent without asking again.
-Logins stay with the agent; API keys stay in the OS credential store (see
-Where API keys live). Neither ever reaches the page.
-
-All routes below are under `dagon serve` with the same guards as every `/v1/`
-route: Host and Origin checks (403), `Authorization: Bearer <passphrase>` (401).
+下のルートはどれも `dagon serve` の下にあり、ほかの `/v1/` のルートと同じ確認があります。Host と Origin の確認（403）と、`Authorization: Bearer <passphrase>`（401）です。
 
 ## GET /v1/agent
 
@@ -40,101 +30,59 @@ route: Host and Origin checks (403), `Authorization: Bearer <passphrase>` (401).
 }
 ```
 
-- `agents`: builtin first, then the user's own (`~/.dagon/agents/*.toml`).
-  Each way has `kind` (`command` | `messages-http`; more kinds may come, so
-  treat an unknown one as opaque) and `available`: whether it
-  can be used on this machine now (a `command` way: its program is on PATH; a
-  `messages-http` way: its key is registered). `key`: for a way that takes
-  an API key, whether one is registered (`true` / `false`); `null` for a way
-  that takes none. No program, argument, URL or key is ever in this body.
-- `default`: the way the linking dialog preselects (first agent, first way).
-- `linked`: a consent is recorded for an agent and way that are still defined.
-- `consent`: `{ "agent": "claude", "way": "claude-code", "at": "2026-11-04T04:14:35Z" }`
-  once linked (`at` is UTC, RFC 3339), else `null`.
-- `available` / `provider`: the linked way (or the default way before
-  linking): whether it can be used here, and the agent's name for the linking
-  texts (`"<name> (<provider>)"`). DAGON can answer only when `linked` and
-  `available` are both true.
-- `errors`: user definition files that did not load, as
-  `"<file name>: <why>"` (never a folder).
-- `consent_error`: when ~/.dagon/agent.json is of a version this dagon does
-  not read, why (link again to record one it reads); else `null`.
-- `sends` / `never_sends`: the lists under What linking sends, which the
-  linking dialog shows. The terminal (`dagon ai link`) shows the same lists.
+- `agents`: 組み込みが先で、その後に利用者のもの（`~/.dagon/agents/*.toml`）が続きます。つなぎ方はそれぞれ `kind`（`command` | `messages-http`。種類は増えることがあるので、知らないものは中身を解釈しないでください）と `available`（この PC でいま使えるか。`command` のつなぎ方はプログラムが PATH にあること、`messages-http` のつなぎ方はキーが登録されていること）を持ちます。`key`: API キーを取るつなぎ方では、登録されているかどうか（`true` / `false`）。取らないつなぎ方では `null` です。この本文に、プログラム、引数、URL、キーが入ることはありません。
+- `default`: つなぐときのダイアログがあらかじめ選ぶつなぎ方（最初のエージェントの最初のつなぎ方）。
+- `linked`: まだ定義されているエージェントとつなぎ方に対して、同意が記録されていること。
+- `consent`: つないだ後は `{ "agent": "claude", "way": "claude-code", "at": "2026-11-04T04:14:35Z" }`（`at` は UTC の RFC 3339）、それ以外は `null`。
+- `available` / `provider`: つないだつなぎ方（つなぐ前は既定のつなぎ方）について、ここで使えるかどうかと、つなぐときの文に使うエージェントの名前（`"<name> (<provider>)"`）。DAGON が答えられるのは、`linked` と `available` が両方とも true のときだけです。
+- `errors`: 読み込めなかった利用者の定義ファイル。`"<file name>: <why>"` の形です（フォルダは含みません）。
+- `consent_error`: ~/.dagon/agent.json がこの dagon の読まないバージョンのとき、その理由（つなぎ直すと、読めるものを記録します）。それ以外は `null`。
+- `sends` / `never_sends`: 「つなぐと送るもの」の一覧で、つなぐときのダイアログが表示します。ターミナル（`dagon ai link`）も同じ一覧を表示します。
 
 ## POST /v1/agent/link
 
-Body: `{ "agent": "claude", "way": "claude-code", "consent": true }`. Records
-the consent for that agent and way (a new link replaces the old one; changing
-the way asks for consent again).
+本文: `{ "agent": "claude", "way": "claude-code", "consent": true }`。そのエージェントとつなぎ方への同意を記録します（新しくつなぐと古いものに代わります。つなぎ方を変えると、もう一度同意を求めます）。
 
-- 200: the same body as GET /v1/agent (now `linked: true`).
-- 400 `agent and way must name a defined agent and way` /
-  `consent must be true` (only the JSON boolean `true` counts); nothing is
-  recorded.
-- 403 in `dagon demo` (linking is refused there; GET still works).
-- 500 `the consent could not be saved`.
+- 200: GET /v1/agent と同じ本文（`linked: true` になっています）。
+- 400 `agent and way must name a defined agent and way` / `consent must be true`（JSON の真偽値 `true` だけが有効です）。何も記録しません。
+- 403: `dagon demo` の実行中（そこではつなげません。GET は動きます）。
+- 500 `the consent could not be saved`。
 
-Linking does not need the way to be available (the user may install Claude
-Code or register the key afterwards).
+つなぐときに、つなぎ方が使える必要はありません（利用者は後から Claude Code を入れたり、キーを登録したりできます）。
 
 ## DELETE /v1/agent/link
 
-Withdraws the consent (also fine when none was recorded).
+同意を取り消します（記録が無いときも成功します）。
 
-- 200: the same body as GET /v1/agent (now `linked: false`).
-- 403 in `dagon demo`.
-- **Unlinking waits for an agent call in flight.** Every call holds the
-  consent from its check until the call ends (a shared lock on
-  `~/.dagon/agent.lock`, one handle per call, so threads and processes such as
-  `dagon serve` and `dagon ai unlink` exclude each other alike). DELETE
-  removes the consent at once (a call reads it again under the lock, so no
-  new call passes from then on), then takes the lock exclusively, so it
-  answers 200 only when no call is in flight. The wait is at most one call:
-  up to about 120 s for a question, up to 600 s for a round of a topology
-  draft. The page should show a waiting state until DELETE answers.
-- No call passes the check after that: running `ai_topology` jobs are
-  cancelled, a question being answered makes no further call and answers 409
-  `AGENT_NOT_LINKED` instead of its answer (`dagon ai ask` does not print it
-  either).
+- 200: GET /v1/agent と同じ本文（`linked: false` になっています）。
+- 403: `dagon demo` の実行中。
+- **切断は、実行中のエージェントの呼び出しを待ちます。** どの呼び出しも、確認から呼び出しの終わりまで同意を保持します（`~/.dagon/agent.lock` の共有ロック。呼び出しごとにハンドルが 1 つなので、スレッドでも、`dagon serve` と `dagon ai unlink` のようなプロセスでも、同じように排他されます）。DELETE はすぐに同意を消し（呼び出しはロックの下で読み直すので、その時点から新しい呼び出しは通りません）、その後でロックを排他的に取ります。そのため、200 を返すのは実行中の呼び出しが無いときだけです。待ちは最大で 1 回の呼び出しの分です。質問なら約 120 秒まで、構成の案の 1 ラウンドなら 600 秒までです。ページは、DELETE が答えるまで待ちの状態を表示してください。
+- その後は、どの呼び出しも確認を通りません。実行中の `ai_topology` の作業は取り消します。答えている途中の質問は、それ以上呼び出しをせず、答えの代わりに 409 `AGENT_NOT_LINKED` を返します（`dagon ai ask` も答えを表示しません）。
 
 ## PUT /v1/agent/key/{agent}/{way}
 
-Body: `{ "key": "..." }`. Registers the way's API key in the OS credential
-store (replacing the one before). The key is taken without surrounding
-blanks; it must be 1 to 1024 visible ASCII characters (it goes into an HTTP
-header; Windows Credential Manager holds at most 2560 bytes, stored as
-UTF-16). The key is never answered, logged or written to a file; the page
-keeps it in no storage and clears its field once sent.
+本文: `{ "key": "..." }`。つなぎ方の API キーを OS の資格情報ストアに登録します（前のものに代わります）。キーは前後の空白を除いて受け取ります。表示できる ASCII 文字で 1 から 1024 文字でなければなりません（HTTP のヘッダに入るためです。Windows 資格情報マネージャーが持てるのは最大 2560 バイトで、UTF-16 で保存します）。キーを応答に含めることも、ログに残すことも、ファイルに書くこともありません。ページはキーをどこにも保存せず、送った後で入力欄を空にします。
 
-- 200: the same body as GET /v1/agent (the way's `key` is now `true`).
-- 400 `this way takes no key` (a login way), or `key must be a string`, or
-  why the key is refused; nothing is stored.
-- 404 `no such agent and way`.
-- 403 in `dagon demo`, or the Host/Origin check (another origin is refused).
-- 503 `AGENT_KEY_STORE`: the OS credential store cannot be used here (for
-  example Linux without a running Secret Service); `error` says why and how
-  to install or start one. Nothing is stored anywhere else.
+- 200: GET /v1/agent と同じ本文（つなぎ方の `key` が `true` になっています）。
+- 400 `this way takes no key`（ログインのつなぎ方）、`key must be a string`、またはキーを受け付けない理由。何も保存しません。
+- 404 `no such agent and way`。
+- 403: `dagon demo` の実行中、または Host/Origin の確認（ほかのオリジンは受け付けません）。
+- 503 `AGENT_KEY_STORE`: ここでは OS の資格情報ストアを使えません（例: Secret Service が動いていない Linux）。`error` が理由と、入れ方や起動の仕方を示します。ほかの場所には何も保存しません。
 
 ## DELETE /v1/agent/key/{agent}/{way}
 
-Removes the way's key from the store (also fine when none was registered).
+つなぎ方のキーをストアから消します（登録が無いときも成功します）。
 
-- 200: the same body as GET /v1/agent (the way's `key` is now `false`).
-- 400 / 404 / 403 / 503 as for PUT.
+- 200: GET /v1/agent と同じ本文（つなぎ方の `key` が `false` になっています）。
+- 400 / 404 / 403 / 503 は PUT と同じです。
 
-## Where API keys live
+## API キーの置き場所
 
-Only in the OS credential store: Windows Credential Manager, the macOS
-Keychain, or the Secret Service (GNOME Keyring, KeePassXC, ...) on Linux.
-Each key is the entry of service `dagon`, account `<agent id>/<way id>`
-(`claude/api`). DAGON reads no key from an environment variable and keeps no
-key in a file; where no store can be used, registering is refused. A key
-leaves the store only into the request header of its way.
+OS の資格情報ストアだけです。Windows 資格情報マネージャー、macOS のキーチェーン、Linux の Secret Service（GNOME Keyring、KeePassXC など）です。キーはそれぞれ、サービス `dagon`、アカウント `<agent id>/<way id>`（`claude/api`）の項目です。DAGON は環境変数からキーを読まず、ファイルにキーを置きません。ストアを使えない場所では、登録を受け付けません。キーがストアから出るのは、そのつなぎ方のリクエストのヘッダに入るときだけです。
 
-## AI routes before linking
+## つなぐ前の AI のルート
 
-Every `/v1/ai/...` route answers, until linked:
+`/v1/ai/...` のルートはどれも、つなぐまで次の答えを返します。
 
 ```json nocheck
 HTTP 409
@@ -142,21 +90,15 @@ HTTP 409
   "code": "AGENT_NOT_LINKED" }
 ```
 
-Match on `code`, not on the text. A consent file of a version this dagon does
-not read answers 409 `AGENT_CONSENT_VERSION` instead, on every route above. Once linked the routes behave as before
-(`/v1/ai/topology` starts a job; a way that cannot be used here fails inside
-the job with its reason, e.g. `no API key is registered for claude/api`).
+文ではなく `code` で判定してください。同意のファイルがこの dagon の読まないバージョンのときは、上のどのルートでも代わりに 409 `AGENT_CONSENT_VERSION` を返します。つないだ後のルートは、いつもどおり動きます（`/v1/ai/topology` は作業を始めます。ここで使えないつなぎ方は、作業の中で理由を示して失敗します。例: `no API key is registered for claude/api`）。
 
-In `dagon demo` every route that would reach an agent answers 403
-(`/v1/agent/link` POST/DELETE, `/v1/agent/ask`, `/v1/ai/...`): a demo never
-calls a real agent. `GET /v1/agent` still answers, and `ai_topology` is left out
-of the demo's `features`.
+`dagon demo` の実行中は、エージェントに届くルートはどれも 403 を返します（`/v1/agent/link` の POST/DELETE、`/v1/agent/ask`、`/v1/ai/...`）。デモが本物のエージェントを呼ぶことはありません。`GET /v1/agent` は答え、`ai_topology` はデモの `features` に入りません。
 
 ## POST /v1/agent/ask
 
-One question to DAGON, answered in the same request (no job, no events).
+DAGON への 1 つの質問です。同じリクエストで答えます（作業もイベントもありません）。
 
-Body:
+本文:
 
 ```json
 {
@@ -170,16 +112,11 @@ Body:
 }
 ```
 
-- `question` (required): 1 to 2000 characters, not only spaces. For the four
-  fixed questions send their label (`これは何が問題？` and so on) together with `kind`.
-- `kind` (optional, default `free`): `problem` | `next` | `propose` | `failure` | `free`.
-- `selection` (optional, null for the whole 構成): `{ "node": "<id>" }` or
-  `{ "link": { "from": "<id>", "to": "<id>" } }`. Ids are plain names (up to 40
-  characters of `A-Z a-z 0-9 . _ -` and space).
-- `history` (optional): up to 10 turns, oldest first, `role` `user` | `dagon`,
-  `text` 1 to 2000 characters (text only).
-- `rollback` (optional, sent while the page shows a write that went back to the
-  previous version): the record of that write. Only these fields are taken:
+- `question`（必須）: 1 から 2000 文字で、空白だけではないもの。4 つの決まった質問では、そのラベル（`これは何が問題？` など）を `kind` と一緒に送ります。
+- `kind`（任意、既定は `free`）: `problem` | `next` | `propose` | `failure` | `free`。
+- `selection`（任意。構成全体なら null）: `{ "node": "<id>" }` または `{ "link": { "from": "<id>", "to": "<id>" } }`。id は単純な名前です（`A-Z a-z 0-9 . _ -` と空白で 40 文字まで）。
+- `history`（任意）: 10 ターンまで、古い順。`role` は `user` | `dagon`、`text` は 1 から 2000 文字（文字だけ）。
+- `rollback`（任意。ページが、前のバージョンに戻った書き込みを表示しているあいだに送ります）: その書き込みの記録。次の欄だけを受け取ります。
 
   ```json
   {
@@ -191,9 +128,7 @@ Body:
   }
   ```
 
-  `node`, the versions and `reason` are plain names like ids. `node_state` is what
-  the node's STATUS reported at that moment (`last_reason`: its code, 0 to 255),
-  or `null` when the node did not answer it.
+  `node`、バージョン、`reason` は、id と同じく単純な名前です。`node_state` は、そのときノードの STATUS が報告したもの（`last_reason`: そのコード、0 から 255）で、ノードが答えなかったときは `null` です。
 
 200:
 
@@ -205,67 +140,35 @@ Body:
 }
 ```
 
-- `answer`: plain text in Japanese. The first sentence answers the question
-  (at most 110 characters, for the speech bubble); details, if any, follow after
-  a blank line (for the 会話 tab).
-- `proposal`: `null`, or a whole new topology that already passed the same
-  check as `PUT /v1/topology` (0 errors). `yaml_diff` lists every line of the
-  current file and the proposal, one per line, prefixed `' '` (kept), `'-'`
-  (removed) or `'+'` (added). Apply it with `PUT /v1/topology` and the
-  `topology` text; nothing is changed before that.
-- A proposal is whole-file: the current file's comments are not in it. When the
-  agent's proposal does not pass the check after 3 calls, the answer comes
-  without it and ends with 「提案した構成は確認で誤りが残ったため、出していません。」.
+- `answer`: 日本語の平文です。最初の文が質問に答えます（吹き出しのため 110 文字まで）。詳しいことがあれば、空行の後に続きます（会話のタブのため）。
+- `proposal`: `null`、または `PUT /v1/topology` と同じ確認をすでに通った（エラー 0 件）新しい構成の全体です。`yaml_diff` は、いまのファイルと案のすべての行を 1 行ずつ挙げ、`' '`（そのまま）、`'-'`（消す）、`'+'`（足す）を先頭に付けます。適用するには、`PUT /v1/topology` に `topology` の文字列を渡します。それまで何も変わりません。
+- 案はファイル全体です。いまのファイルのコメントは入りません。エージェントの案が 3 回の呼び出しの後でも確認を通らないときは、案なしで答え、「提案した構成は確認で誤りが残ったため、出していません。」で終わります。
 
-Errors (all `{ "error": "...", "code": "..." }` except the 400s):
+エラー（400 以外はすべて `{ "error": "...", "code": "..." }`）:
 
-| Status | code | When |
+| ステータス | コード | いつ |
 |---|---|---|
-| 400 | (none) | body is not JSON or a field breaks the rules above |
-| 403 | (none) | `dagon demo`, or the Host/Origin check |
-| 401 | (none) | no passphrase |
-| 409 | `AGENT_NOT_LINKED` | not linked, or the linked agent/way is no longer defined |
-| 409 | `AGENT_NOT_LINKED` | also: unlinked while the question was being answered (no further call is made) |
-| 409 | `AGENT_CONSENT_VERSION` | ~/.dagon/agent.json is of a version this dagon does not read; `error` says which and to link again |
-| 409 | `AGENT_UNAVAILABLE` | linked, but the way cannot be used here: its program is not on PATH, or no key is registered for it (`error` names the program, or the way and how to register its key). |
-| 429 | `AGENT_BUSY` | another question is being answered (one at a time per serve) |
-| 413 | `AGENT_CONTEXT_TOO_LARGE` | the topology file is over 64 KiB (not read), or one prompt would be over 192 KiB (not sent) |
-| 504 | `AGENT_TIMEOUT` | one agent call took longer than 120 s (a `command` way's program is stopped) |
-| 502 | `AGENT_FAILED` | the agent refused, its program ended with an error, or it answered in an unexpected form; `error` says which (never the program's output; an error from the API is cut to 300 characters, and the key never appears in an answer or an error, even when the API echoes it) |
+| 400 | （なし） | 本文が JSON でない、または欄が上の決まりに反する |
+| 403 | （なし） | `dagon demo`、または Host/Origin の確認 |
+| 401 | （なし） | 合言葉が無い |
+| 409 | `AGENT_NOT_LINKED` | つないでいない、またはつないだエージェントやつなぎ方がもう定義されていない |
+| 409 | `AGENT_NOT_LINKED` | ほかに: 質問に答えているあいだに切断された（それ以上呼び出しません） |
+| 409 | `AGENT_CONSENT_VERSION` | ~/.dagon/agent.json がこの dagon の読まないバージョン。`error` がどれかと、つなぎ直すことを示します |
+| 409 | `AGENT_UNAVAILABLE` | つないでいるが、ここではそのつなぎ方を使えない。プログラムが PATH に無い、またはキーが登録されていない（`error` がプログラム、またはつなぎ方とキーの登録の仕方を示します） |
+| 429 | `AGENT_BUSY` | ほかの質問に答えている（serve ごとに 1 つずつ） |
+| 413 | `AGENT_CONTEXT_TOO_LARGE` | 構成のファイルが 64 KiB を超える（読みません）、または 1 つのプロンプトが 192 KiB を超える（送りません） |
+| 504 | `AGENT_TIMEOUT` | 1 回のエージェントの呼び出しが 120 秒を超えた（`command` のつなぎ方のプログラムは止めます） |
+| 502 | `AGENT_FAILED` | エージェントが断った、プログラムがエラーで終わった、または予期しない形で答えた。`error` がどれかを示します（プログラムの出力は含みません。API からのエラーは 300 文字で切り、API がキーをそのまま返しても、答えにもエラーにもキーは現れません） |
 
-What goes to the agent (and only this, the same two texts for every agent
-and way): a system text (DAGON's instructions, the topology schema and checks,
-the allow-listed facts of the definitions in use, the reply format) and a user
-text (the question as one JSON document: the topology as plain data with
-comments dropped and every string or key that is not a plain name as
-`project-text`, its check results with those words hidden, the selection, the
-kind and outcome of the last 5 finished jobs, the `rollback` record when the
-request has one (with `last_reason` in words), the history and the question;
-the user's words are data in it). The system text tells the agent to explain a
-write that went back from that record only and to say what it cannot see, never
-inventing a reason. Never: keys, file paths, commands, logs, job
-errors. A topology with any hidden value gets no file proposal (the answer
-then ends with 「この構成には DAGON に送らなかった値があるため、変更の案は出していません。」 and
-no repair call is made); a proposal that contains `project-text` is refused
-too.
+エージェントに届くもの（これだけで、どのエージェントとつなぎ方でも同じ 2 つの文です）: システムの文（DAGON の指示、構成のスキーマと確認、使っている定義の許可された事実、返答の形式）と、ユーザーの文（質問を 1 つの JSON 文書にしたもの。コメントを除いたデータとしての構成で、単純な名前でない文字列とキーはすべて `project-text` にしたもの、そうした語を隠した確認の結果、選択、最後に終わった 5 つの作業の種類と結果、リクエストにあれば `rollback` の記録（`last_reason` は言葉で）、履歴、質問。利用者の言葉は、その中のデータです）。システムの文は、前のバージョンに戻った書き込みをその記録だけで説明すること、見えないことはそう言うこと、理由を作らないことをエージェントに指示します。決して送らないもの: キー、ファイルのパス、コマンド、ログ、作業のエラー。隠した値がある構成には、ファイルの案を出しません（その場合、答えは「この構成には DAGON に送らなかった値があるため、変更の案は出していません。」で終わり、修復の呼び出しもしません）。`project-text` を含む案も受け付けません。
 
-The 192 KiB cap is measured on the system and user texts together before every
-call, whatever the way.
+192 KiB の上限は、どのつなぎ方でも、呼び出しのたびにシステムの文とユーザーの文を合わせて測ります。
 
-## Agent definitions
+## エージェントの定義
 
-Builtin: `crates/dagon-cli/agents/claude.toml`. The user may add files in
-`~/.dagon/agents/*.toml` (never a project's folder: a way may name a program).
-Each file is one agent; unknown keys, a kind DAGON does not implement, bad ids
-or an agent id that exists already make the file not load (`errors` above).
+組み込み: `crates/dagon-cli/agents/claude.toml`。利用者は `~/.dagon/agents/*.toml` にファイルを足せます（プロジェクトのフォルダには置けません。つなぎ方はプログラムを指定できるからです）。ファイル 1 つがエージェント 1 つです。知らないキー、DAGON が実装していない種類、不正な id、すでにあるエージェントの id があるファイルは読み込みません（上の `errors`）。
 
-**A command agent runs with your permissions; only add programs you trust.**
-DAGON does not sandbox the program a way names and does not claim to. What
-DAGON controls is what it sends (the prompt below) and what the program
-inherits (the environment allow-list, a fresh working folder, the time and
-output limits). Everything else the program does is up to the program: the
-builtin Claude Code way relies on Claude Code's own flags to turn off its
-tools, MCP servers, customisations and saved sessions.
+**command のエージェントは、あなたの権限で動きます。信頼できるプログラムだけを足してください。** DAGON は、つなぎ方が指定するプログラムをサンドボックスに入れませんし、入れているとも言いません。DAGON が制御するのは、送るもの（下のプロンプト）と、プログラムが受け継ぐもの（環境変数の許可リスト、新しい作業フォルダ、時間と出力の上限）です。プログラムがそれ以外に何をするかは、プログラム次第です。組み込みの Claude Code のつなぎ方は、Claude Code 自身のフラグで、そのツール、MCP サーバ、カスタマイズ、保存したセッションを無効にしています。
 
 ```toml
 dagon_agent = 1          # the definition format; another number is refused with the reason
@@ -284,92 +187,51 @@ system = "file"          # "stdin" (default): system text, a blank line, then th
 pass_env = ["MY_AGENT_HOME"]  # optional: more variables the program needs
 ```
 
-Every key, its type and whether it is required are in
-[Agent definition format](/en/reference/agent-definition/), generated from the
-types dagon reads the file into. Each `kind` is one of the Transport kinds below.
+すべてのキー、その型、必須かどうかは[エージェント定義の形式](/reference/agent-definition/)にあります。dagon がファイルを読み込む型から生成しています。`kind` はそれぞれ、下の転送の種類のどれかです。
 
-The agent replies with one JSON object (the reply format is in the system
-text); DAGON reads the object from its text.
+エージェントは 1 つの JSON オブジェクトで返答します（返答の形式はシステムの文にあります）。DAGON はその文字列からオブジェクトを読みます。
 
-## Transport kinds
+## 転送の種類
 
-- `command`: runs `program` with `args`; the user text goes to stdin (after
-  the system text when `system = "stdin"`; with `system = "file"` the system
-  text is in a file whose path replaces the arg `{system_file}`). Stdout is the
-  answer (at most 1 MiB, UTF-8); stderr is never read.
-  - Environment: only `PATH`, `PATHEXT`, `HOME`, `USERPROFILE`, `APPDATA`,
-    `LOCALAPPDATA`, `TEMP`, `TMP`, `TMPDIR`, `SYSTEMROOT`, `WINDIR`, `COMSPEC`,
-    `LANG`, `LC_*`, `TERM` (those that are set), plus the names in `pass_env`.
-    Never `DAGON_*`, the signing key's variable or `ANTHROPIC_API_KEY`, even
-    when listed.
-  - Working folder: a fresh temporary folder, removed afterwards, so the
-    program does not start in the project. This is hygiene, not a sandbox:
-    the program can still reach whatever your account can.
-  - Lifetime: the program runs in an OS group: a Windows job object (through
-    the `command-group` crate; closing it kills every process in it, also
-    when dagon itself ends) or a Unix process group it leads. The group is
-    stopped when the call's time runs out and as soon as the program itself
-    ends, so a process it started and left behind (holding its stdout or
-    not) never outlives the call. The answer is what the program printed
-    before it ended.
-- `messages-http`: `url` (https only), `version` (the `anthropic-version`
-  header), `model`, optional `model_env` (a variable that overrides `model`).
-  The key is the way's entry in the OS credential store (Where API keys
-  live); a definition naming a key variable (`key_env`) is refused. The
-  answer is read up to 1 MiB; a larger one is refused while it is read.
+- `command`: `program` を `args` で実行します。ユーザーの文は stdin に渡します（`system = "stdin"` のときはシステムの文の後に。`system = "file"` のときは、システムの文はファイルにあり、そのパスが引数 `{system_file}` に置き換わります）。stdout が答えです（1 MiB まで、UTF-8）。stderr は読みません。
+  - 環境変数: `PATH`、`PATHEXT`、`HOME`、`USERPROFILE`、`APPDATA`、`LOCALAPPDATA`、`TEMP`、`TMP`、`TMPDIR`、`SYSTEMROOT`、`WINDIR`、`COMSPEC`、`LANG`、`LC_*`、`TERM`（設定されているもの）と、`pass_env` の名前だけです。`DAGON_*`、署名の鍵の変数、`ANTHROPIC_API_KEY` は、挙げられていても渡しません。
+  - 作業フォルダ: 新しい一時フォルダで、後で消します。プログラムがプロジェクトの中で始まらないようにするためです。これは衛生のためで、サンドボックスではありません。プログラムは、あなたのアカウントが届くものには届きます。
+  - 寿命: プログラムは OS のグループの中で動きます。Windows のジョブオブジェクト（`command-group` の crate を通します。閉じると、dagon 自身が終わるときも含め、中のすべてのプロセスを終わらせます）か、プログラムを先頭とする Unix のプロセスグループです。グループは、呼び出しの時間が切れたときと、プログラム自身が終わったときにすぐ止めます。そのため、プログラムが始めて残したプロセスは（stdout を握っていてもいなくても）呼び出しより長く生きません。答えは、プログラムが終わる前に出力したものです。
+- `messages-http`: `url`（https だけ）、`version`（`anthropic-version` のヘッダ）、`model`、任意の `model_env`（`model` を上書きする変数）。キーは、OS の資格情報ストアにあるそのつなぎ方の項目です（「API キーの置き場所」）。キーの変数（`key_env`）を指定する定義は受け付けません。答えは 1 MiB まで読みます。それより大きいものは、読んでいる途中で受け付けなくなります。
 
-## Where the consent lives
+## 同意の置き場所
 
-`~/.dagon/agent.json` (`{"version":1,"agent":"claude","way":"claude-code","at":"..."}`), one
-per user, shared by `dagon serve` and `dagon ai link` / `dagon ai unlink`. Per
-user and not per project: the agent's login or key belongs to the user,
-a per-project consent would ask again in every project, and
-nothing lands in a project folder that may be committed. A file that does not
-parse, has another `version`, holds any other field, has an id that is not
-plain or an `at` that is not `YYYY-MM-DDTHH:MM:SSZ` on a real calendar date
-counts as not linked: the user links again.
+`~/.dagon/agent.json`（`{"version":1,"agent":"claude","way":"claude-code","at":"..."}`）。利用者ごとに 1 つで、`dagon serve` と `dagon ai link` / `dagon ai unlink` が共有します。プロジェクトごとではなく利用者ごとなのは、エージェントのログインやキーは利用者のものであること、プロジェクトごとの同意ではプロジェクトのたびに尋ねることになること、コミットされるかもしれないプロジェクトのフォルダに何も置かないことのためです。解析できない、別の `version` である、ほかの欄を持つ、単純でない id を持つ、または `at` が実在の日付の `YYYY-MM-DDTHH:MM:SSZ` でないファイルは、つないでいないものとして扱います。利用者はもう一度つなぎます。
 
-## Builtin agents
+## 組み込みのエージェント
 
-The agents shipped with dagon (`crates/dagon-cli/agents/*.toml`) and their
-ways, in order, are listed in [Agent definition format](/en/reference/agent-definition/#builtin-agents);
-the first way of the first agent is the default.
+dagon に入っているエージェント（`crates/dagon-cli/agents/*.toml`）とそのつなぎ方は、順に[エージェント定義の形式](/reference/agent-definition/#組み込みのエージェント)にあります。最初のエージェントの最初のつなぎ方が既定です。
 
-## What linking sends
+## つなぐと送るもの
 
-### Sends
+### 送るもの
 
 - 構成と定義の事実（ノード・リンク・部品・設定値）
 - 選んだノードやリンク
 - 確かめた結果（問題・◇ 未対応・書き込みの記録）
 
-### Never sends
+### 送らないもの
 
 - 鍵
 - コマンドとその出力の全文
 - ファイルのパス
 
-## Format numbers
+## 形式番号
 
-Each file format has a number; a reader refuses one it does not know and
-says which number it reads.
+ファイルの形式にはそれぞれ番号があります。読む側は、知らない番号を受け付けず、どの番号を読むかを示します。
 
-- `dagon_agent = 1`: an agent definition file
-- `"version": 1`: the consent file, ~/.dagon/agent.json
+- `dagon_agent = 1`: エージェントの定義ファイル
+- `"version": 1`: 同意のファイル、~/.dagon/agent.json
 
 ## CLI
 
-The `dagon ai` commands (`link`, `unlink`, `key`, `ask`, `topology`) and their
-options are in [Command line](/en/reference/cli/#dagon-ai). Linking shows the
-consent text (agent and way, where the login or key stays, sends, never
-sends, how to unlink) and records consent on `y`; every AI command refuses
-until DAGON is linked, and `dagon ai ask` never changes the topology file.
+`dagon ai` のコマンド（`link`、`unlink`、`key`、`ask`、`topology`）とそのオプションは、[コマンド](/reference/cli/#dagon-ai)にあります。つなぐときは同意の文（エージェントとつなぎ方、ログインやキーの置き場所、送るもの、送らないもの、切断の仕方）を表示し、`y` で同意を記録します。どの AI のコマンドも、DAGON をつなぐまで受け付けません。`dagon ai ask` が構成のファイルを変えることはありません。
 
-## Checking a command way against the installed program
+## command のつなぎ方を、入っているプログラムで確かめる
 
-Each builtin way's flags, and why each is there, are in its definition
-(`crates/dagon-cli/agents/*.toml`), not repeated here. The claude-code way can
-be run through DAGON's own spawn path (the environment allow-list, a fresh
-working folder, the system file) with
-`cargo test -p dagon-cli claude_code_answers -- --ignored` (ignored by default:
-it uses the network and the user's login; one line is sent, no project data).
+組み込みのつなぎ方のフラグと、それぞれの理由は、その定義（`crates/dagon-cli/agents/*.toml`）にあります。ここでは繰り返しません。claude-code のつなぎ方は、DAGON 自身の起動の経路（環境変数の許可リスト、新しい作業フォルダ、システムのファイル）で、`cargo test -p dagon-cli claude_code_answers -- --ignored` で実行できます（既定では無視します。ネットワークと利用者のログインを使い、1 行を送り、プロジェクトのデータは送りません）。

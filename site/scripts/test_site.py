@@ -24,7 +24,7 @@ class Generated(unittest.TestCase):
             saved = gen.OUT
             gen.OUT = pathlib.Path(d)
             # The hand-written pages with generated regions come along.
-            for name in {n for n, _, _ in gen.REGIONS}:
+            for name in (f"{folder}{n}" for n in {n for n, _, _ in gen.REGIONS} for folder in gen.LANGS.values()):
                 (gen.OUT / name).parent.mkdir(parents=True, exist_ok=True)
                 (gen.OUT / name).write_text((saved / name).read_text(encoding="utf-8"), encoding="utf-8")
             try:
@@ -85,7 +85,7 @@ class Generated(unittest.TestCase):
 
     def test_every_route_and_agent_key_says_what_it_is(self):
         # A blank cell means the source has no doc comment for it: write one there.
-        tables = [make() for _, _, make in gen.REGIONS]
+        tables = [make("en") for _, _, make in gen.REGIONS]
         for page in (gen.serve_api(), gen.agent_definition(), *tables):
             blank = [l for l in page.splitlines() if l.startswith("| `") and l.rstrip().endswith("|  |")]
             self.assertEqual(blank, [])
@@ -189,21 +189,63 @@ class Wording(unittest.TestCase):
             found += [f"{rel}:{n}" for n, line in enumerate(p.read_text(encoding="utf-8").splitlines(), 1) if "更新" in line]
         self.assertEqual(found, [])
 
-    # Written only in English, at the root so that both languages reach them: each says so.
-    ENGLISH_ONLY = ["explanation/retained-formats.md", "explanation/versioning.md", "reference/agent-api.md",
-                    "reference/definitions.md", "reference/extension-manifest.md"]
-
-    def test_a_page_only_in_english_says_so_and_only_those_lack_an_english_folder_copy(self):
-        for rel in self.ENGLISH_ONLY:
-            self.assertIn("このページは英語だけです。", (llms.DOCS / rel).read_text(encoding="utf-8"), rel)
+    def test_every_page_is_in_both_languages(self):
         root = {p.relative_to(llms.DOCS).as_posix() for p in llms.DOCS.rglob("*.md*") if p.relative_to(llms.DOCS).parts[0] != "en"}
         en = {p.relative_to(llms.DOCS / "en").as_posix() for p in (llms.DOCS / "en").rglob("*.md*")}
-        self.assertEqual(sorted(root - en), sorted(self.ENGLISH_ONLY))
-        self.assertEqual(en - root, set())
+        self.assertEqual(root ^ en, set())
 
     def test_the_english_fallback_notice_does_not_promise_a_translation(self):
         notice = (llms.DOCS.parent / "i18n" / "en.json").read_text(encoding="utf-8")
         self.assertNotIn("yet", notice)
+
+
+class Translation(unittest.TestCase):
+    """The design and format pages are normative in both languages, so a translation may not drop a fact."""
+    PAGES = ["explanation/retained-formats.md", "explanation/versioning.md", "reference/agent-api.md",
+             "reference/definitions.md", "reference/extension-manifest.md"]
+
+    @staticmethod
+    def facts(rel, folder):
+        text = (llms.DOCS / folder / rel).read_text(encoding="utf-8").split("---\n", 2)[2]
+        fences = re.findall(r"^( *)```([^\n]*)\n(.*?)^\1```$", text, re.M | re.S)
+        body = re.sub(r"^( *)```[^\n]*\n.*?^\1```$", "", text, flags=re.M | re.S)
+        # Tables generated from sources are checked by gen.py; a Mermaid chart's labels are translated.
+        body = re.sub(r"<!-- generated from.*?<!-- end of generated table -->", "", body, flags=re.S)
+        return {
+            "headings": [len(h) for h in re.findall(r"^(#+) ", body, re.M)],
+            "fences": [f if lang.startswith("mermaid") is False else "mermaid" for _, lang, f in fences],
+            "rows": [line.count("|") for line in body.splitlines() if line.startswith("|")],
+            "code": sorted(" ".join(c.split()) for c in re.findall(r"`[^`]+`", body)),
+            "links": sorted(re.sub(r"^/en/|#.*$", lambda m: "/" if m.group().startswith("/en") else "", u)
+                            for u in re.findall(r"\]\(([^)]+)\)", body)),
+        }
+
+    def test_a_translated_page_keeps_every_heading_fence_row_code_span_and_link(self):
+        for rel in self.PAGES:
+            ja, en = self.facts(rel, ""), self.facts(rel, "en")
+            for what in en:
+                with self.subTest(page=rel, what=what):
+                    self.assertEqual(ja[what], en[what])
+
+
+class GeneratedJapanese(unittest.TestCase):
+    def test_a_description_without_a_japanese_key_fails_the_generator(self):
+        gen.MISSING.clear()
+        self.assertEqual(gen.say("ja", "no such description"), "no such description")
+        self.assertEqual(gen.MISSING, {"no such description"})
+        self.assertEqual(gen.main(["--check"]), 1)
+        gen.MISSING.clear()
+        self.assertEqual(gen.say("en", "no such description"), "no such description")
+        self.assertEqual(gen.MISSING, set())
+
+    def test_a_translated_description_keeps_its_code_spans(self):
+        spans = lambda t: sorted(re.findall(r"`[^`]*`", t))
+        for en, ja in gen.i18n().items():
+            self.assertEqual(spans(en), spans(ja), en)
+
+    def test_the_japanese_pages_say_what_stays_english(self):
+        for rel, words in (("reference/cli.md", "コマンドの説明"), ("reference/rust-api.md", "rustdoc の本文")):
+            self.assertIn(f"{words}は元のソースのままで、英語です。", (llms.DOCS / rel).read_text(encoding="utf-8"))
 
 
 if __name__ == "__main__":

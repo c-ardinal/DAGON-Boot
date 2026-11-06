@@ -17,7 +17,7 @@ DAGON が読み書きする形式、プロトコル、API には、どれも番�
 知らない番号は、読む側が理由を示して受け付けません。
 
 - [このページの言葉](/explanation/words/)
-- [Versions and releases](/explanation/versioning/)（英語）
-- [ライフサイクルイベントと拡張](/explanation/lifecycle-events/)
+- [バージョンとリリース](/explanation/versioning/)
+- [ライフサイクルイベントと拡張](/explanation/lifecycle-events/)と、そこから実行可能なモデルに任せている[保持と永続の形式](/explanation/retained-formats/)
 - [リポジトリ](/explanation/repository/)
 - [制限事項](/explanation/limitations/)

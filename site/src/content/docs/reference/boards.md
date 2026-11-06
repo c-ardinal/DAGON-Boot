@@ -10,7 +10,7 @@ editUrl: false
 
 このリリースの `targets/mcu/` のマイコンのパッケージと、`targets/boards/` のボードのパッケージです。
 パッケージのフォルダを足すと行が増えます。どちらのファイルの形式も
-[MCU and board definitions](/reference/definitions/) にあります。
+[マイコンとボードの定義](/reference/definitions/)にあります。
 
 ## マイコン
 

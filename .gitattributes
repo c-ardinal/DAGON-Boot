@@ -1,0 +1,4 @@
+# Text is LF in every checkout: dagon embeds these files and writes them into
+# generated projects, so what it generates cannot depend on the Git settings
+# of the machine that built it.
+* text=auto eol=lf

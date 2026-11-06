@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { modal } from '../app/motion.ts';
   import type { AgentChoice, AgentStatus } from '../app/agent.svelte.ts';
   import { AGENT } from '../app/copy.ts';
   import { untrack } from 'svelte';
@@ -32,7 +33,7 @@
 </script>
 
 <!-- the one consent, when linking. The provider's name appears here and nowhere else in the page. -->
-<dialog bind:this={dialog} aria-labelledby="link-h" aria-describedby="link-s" onclose={oncancel}>
+<dialog bind:this={dialog} transition:modal|global aria-labelledby="link-h" aria-describedby="link-s" onclose={oncancel}>
   <img class="mark" src="./icons/dagon-256.png" alt="" width="64" height="64" />
   <h2 id="link-h">{L.heading}</h2>
   <p id="link-s">{L.intro}</p>

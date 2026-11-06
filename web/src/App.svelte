@@ -3,6 +3,7 @@
   import { bandOf } from './app/band.ts';
   import { AGENT, ANNOUNCE, BAND, BUILD, BUTTON, CANVAS, DEFINE, DIFF, DRAWER, JOBS, SKELETON, WRITE, HUB, LOCK, SHEET, STATUS, ZOOM, HUB_TOGGLE, MODE, NODE, ORDER, PRODUCT, RECONNECT, SAVE, SKIP, STEP, TIME } from './app/copy.ts';
   import { webSerial } from './app/connect.ts';
+  import { fade, rise, tokenMs } from './app/motion.ts';
   import { HUB_LOCKED, hubOf, view, type Action } from './app/machine.ts';
   import { Operate, waterOf, type Progress, type ReleaseFile } from './app/operate.svelte.ts';
   import { keptChoices, type Kept } from './app/kept.ts';
@@ -825,7 +826,7 @@
   $effect(() => {
     if (op.state !== 'reconnectNeeded') dialogDismissed = false;
   });
-  /** Clock for M27 (dagon-host's clock) and the elapsed time (wall clock), once a second while they show. */
+  /** Clock for the %, M27 (dagon-host's clock) and the elapsed time (wall clock), read while they show; the % rises as often. */
   let nowMs = $state(0);
   let wallMs = $state(Date.now());
   $effect(() => {
@@ -835,7 +836,7 @@
       wallMs = Date.now();
     };
     tick();
-    const t = setInterval(tick, 1000);
+    const t = setInterval(tick, tokenMs('--dur-tick'));
     return () => clearInterval(t);
   });
   /** The timeline: each node's stage changes since the update began; it opens with the update. */
@@ -1059,7 +1060,8 @@
     if (!c || !connected || op.state === 'checking') return null;
     if (PERCENT.has(op.state)) {
       const stopped = op.state === 'stopped';
-      const progress = { label: CANVAS.dotProgress, value: op.overall, unit: stopped ? CANVAS.dotStopped : CANVAS.dotPercent, name: CANVAS.dotProgressName(op.overall, stopped) };
+      const overall = op.overallAt(nowMs);
+      const progress = { label: CANVAS.dotProgress, value: overall, unit: stopped ? CANVAS.dotStopped : CANVAS.dotPercent, name: CANVAS.dotProgressName(overall, stopped) };
       if (op.startedAt === null) return progress;
       // 経過 under the number, 残り beside it (the estimate less the time gone).
       const gone = Math.max(0, wallMs - op.startedAt);
@@ -1072,6 +1074,42 @@
     const n = op.reach.length;
     return { label: CANVAS.dotResponding, value: op.responding, of: n, name: CANVAS.dotRespondingName(op.responding, n) };
   });
+
+  /** What the one graph shows in each mode. */
+  const graphProps = $derived(
+    mode === 'define'
+      ? {
+          config: d.doc.topo.nodes.length ? d.config : null,
+          live: {},
+          connected: false,
+          sending: false,
+          selected: d.selected,
+          onselect: (k: string) => (d.selected = d.selected === k ? null : k),
+          dot: defineDot,
+          chips: { ...defineChips, ...buildingChips },
+          inset: layout === 'narrow' ? { left: 0, right: 0, bottom: sheetShown ? sheetH : 0 } : { left: partsW, right: sheetW },
+          dropOn,
+          canLink: (from: string, to: string) => d.linkRefusal(from, to),
+          onlink: (from: string, to: string) => !stopped('edit') && d.link(to, from),
+          onrefuse: refuse,
+        }
+      : {
+          config: op.config,
+          live: op.live,
+          connected,
+          sending: op.state === 'sending',
+          selected: op.selected,
+          onselect: (k: string) => op.select(op.selected === k ? null : k),
+          dot,
+          chips,
+          fill,
+          inset: { left: partsW, right: sheetW },
+          checks: Object.fromEntries(op.reach.map((n) => [n.id, !op.skip.has(n.id)])),
+          oncheck: (id: string) => op.toggleSkip(id),
+          checksLocked: updating && !['done', 'recoverFailed'].includes(op.state),
+          confirmedOf: (id: string) => op.progress[id]?.stage === 'done',
+        },
+  );
 
   $effect(() => {
     const s = step;
@@ -1220,30 +1258,14 @@
   {/if}
 {/snippet}
 
-{#snippet defineCanvas()}
-  <main id="canvas" tabindex="-1" aria-describedby="canvas-help" class="define">
+{#snippet canvas()}
+  <main id="canvas" tabindex="-1" aria-describedby="canvas-help" class:define={mode === 'define'}>
     <p id="canvas-help" class="visually-hidden">{CANVAS.describe}</p>
-    {#if d.view === 'graph'}
-      <Graph
-        bind:this={graph}
-        config={d.doc.topo.nodes.length ? d.config : null}
-        live={{}}
-        connected={false}
-        sending={false}
-        selected={d.selected}
-        onselect={(k) => (d.selected = d.selected === k ? null : k)}
-        dot={defineDot}
-        chips={{ ...defineChips, ...buildingChips }}
-        {zoom}
-        inset={layout === 'narrow' ? { left: 0, right: 0, bottom: sheetShown ? sheetH : 0 } : { left: partsW, right: sheetW }}
-        controls={zoomBar}
-        dropOn={dropOn}
-        canLink={(from, to) => d.linkRefusal(from, to)}
-        onlink={(from, to) => !stopped('edit') && d.link(to, from)}
-        onrefuse={refuse}
-      />
+    {#if mode === 'operate' || d.view === 'graph'}
+      <!-- One graph for both modes: changing mode moves the same cards to their places. -->
+      <Graph bind:this={graph} {zoom} controls={zoomBar} {...graphProps} />
     {:else}
-      <div class="edit-area" data-control="edit"><Table {d} onaddnode={() => document.querySelector<HTMLElement>('#list-h')?.focus()} /></div>
+      <div in:fade class="edit-area" data-control="edit"><Table {d} onaddnode={() => document.querySelector<HTMLElement>('#list-h')?.focus()} /></div>
       <div class="zoom">{@render zoomBar(1)}</div>
     {/if}
   </main>
@@ -1328,33 +1350,6 @@
   <OrderList config={op.config} selected={op.selected} onselect={(k) => op.select(k)} fold={layout === 'narrow'} {percent} />
 {/snippet}
 
-{#snippet canvas()}
-  {#if mode === 'define'}{@render defineCanvas()}{:else}{@render operateCanvas()}{/if}
-{/snippet}
-
-{#snippet operateCanvas()}
-  <main id="canvas" tabindex="-1" aria-describedby="canvas-help">
-    <p id="canvas-help" class="visually-hidden">{CANVAS.describe}</p>
-    <Graph
-      config={op.config}
-      live={op.live}
-      {connected}
-      sending={op.state === 'sending'}
-      selected={op.selected}
-      onselect={(k) => op.select(op.selected === k ? null : k)}
-      {dot}
-      {chips}
-      {fill}
-      {zoom}
-      controls={zoomBar}
-      inset={{ left: partsW, right: sheetW }}
-      checks={Object.fromEntries(op.reach.map((n) => [n.id, !op.skip.has(n.id)]))}
-      oncheck={(id) => op.toggleSkip(id)}
-      checksLocked={updating && !['done', 'recoverFailed'].includes(op.state)}
-    />
-  </main>
-{/snippet}
-
 {#snippet right()}
   {#if mode === 'define'}{@render defineRight()}{:else}{@render operateRight()}{/if}
 {/snippet}
@@ -1410,19 +1405,19 @@
       <StartScreen s={start} served={cli.state === 'ready'} />
     {:else}
       <!-- The graph fills the stage; the parts window (top-left) and the sheet (right) float over it only when they hold something. -->
-      <div class="stage">
+      <div in:fade class="stage">
         {@render canvas()}
         {#if mode === 'define' ? partsOpen : orderOpen}
-          <aside class="float parts" data-avoid="" aria-label={mode === 'define' ? PARTS.heading : ORDER.heading} bind:offsetWidth={partsW}>{@render left()}</aside>
+          <aside transition:rise class="float parts" data-avoid="" aria-label={mode === 'define' ? PARTS.heading : ORDER.heading} bind:offsetWidth={partsW}>{@render left()}</aside>
         {:else}
-          <button class="secondary tray-open" onclick={() => (mode === 'define' ? (partsOpen = true) : (orderOpen = true))}>{mode === 'define' ? PARTS.open : ORDER.heading}</button>
+          <button transition:fade class="secondary tray-open" onclick={() => (mode === 'define' ? (partsOpen = true) : (orderOpen = true))}>{mode === 'define' ? PARTS.open : ORDER.heading}</button>
         {/if}
         {#if agent.linked}
           <Dagon {agent} place={cli.hello?.workspace ?? d.doc.topo.name ?? 'local'} onask={askDagon} onapply={applyProposal} ontalk={() => (drawerTab = 'talk')} openRequest={dagonOpen} />
         {/if}
         {#if notice}<Toast {notice} onmore={() => (drawerTab = 'log')} ondone={() => (notice = null)} />{/if}
         {#if sheetShown}
-          <aside class="float sheet right" aria-label={SHEET} data-avoid="" bind:offsetWidth={sheetW} bind:offsetHeight={sheetH}>{@render right()}</aside>
+          <aside transition:rise class="float sheet right" aria-label={SHEET} data-avoid="" bind:offsetWidth={sheetW} bind:offsetHeight={sheetH}>{@render right()}</aside>
         {/if}
       </div>
       <Drawer tabs={drawerTabs} open={drawerTab} onpick={(id) => (drawerTab = id)} onclose={() => (drawerTab = null)} body={drawerBody} />
@@ -1441,7 +1436,7 @@
         key={cli.hello?.key_id?.slice(0, 8) ?? null}
         problems={problemCount}
         unreachable={d.notYet}
-        progress={PERCENT.has(op.state) ? `${LOCK.controls.update} ${op.overall}%` : null}
+        progress={PERCENT.has(op.state) ? `${LOCK.controls.update} ${op.overallAt(nowMs)}%` : null}
         sentence={[next.cause, next.sentence].filter(Boolean).join(' ')}
         mode={mode === 'define' ? MODE.define : MODE.operate}
         saved={savedLabel}
@@ -1468,7 +1463,7 @@
   {/if}
   {#if why}
     <!-- a stopped operation's reason is information (blue edge), never red. -->
-    <div class="why" class:failed={why.failed} role={why.failed ? 'alert' : 'status'} style:left="{Math.max(8, Math.min(why.x, innerWidth - 336))}px" style:top="{Math.min(why.y, innerHeight - 96)}px">{why.text}</div>
+    <div transition:rise={{ dur: '--dur-quick' }} class="why" class:failed={why.failed} role={why.failed ? 'alert' : 'status'} style:left="{Math.max(8, Math.min(why.x, innerWidth - 336))}px" style:top="{Math.min(why.y, innerHeight - 96)}px">{why.text}</div>
   {/if}
   {#if linkOpen && agent.status}
     <LinkDialog status={agent.status} onagree={(c) => void agree(c)} oncancel={() => (linkOpen = false)} />
@@ -1870,7 +1865,6 @@
     font: 400 var(--t-small-size) / var(--t-small-lh) var(--f-ja);
     box-shadow: 0 0.25rem 1rem rgb(0 0 0 / 0.5);
     pointer-events: none;
-    animation: why-in 120ms var(--ease-out);
   }
   .ghost {
     position: fixed;
@@ -1885,17 +1879,6 @@
   }
   .why.failed {
     border-color: var(--c-signal);
-  }
-  @keyframes why-in {
-    from {
-      opacity: 0;
-      transform: translateY(-2px) scale(0.97);
-    }
-  }
-  @media (prefers-reduced-motion: reduce) {
-    .why {
-      animation: none;
-    }
   }
   /* Q2: while a dialog is open its own button is the one main action. */
   .frame.modal :global(footer .primary) {

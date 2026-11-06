@@ -3,6 +3,7 @@
   import { BAND, CLI_LINK, MENU, PRODUCT, START } from '../app/copy.ts';
   import { inside, type Start } from '../app/start.svelte.ts';
   import { DEMO_SITE } from '../app/site.ts';
+  import { fade } from '../app/motion.ts';
   import Icon from './Icon.svelte';
   import Modal from './Modal.svelte';
 
@@ -81,7 +82,7 @@
   {#if fail}<p class="fail"><b>{fail.chip}</b> {fail.sentence}</p>{/if}
 {/snippet}
 
-<main id="canvas" class="start" tabindex="-1" aria-labelledby="start-h">
+<main id="canvas" transition:fade class="start" tabindex="-1" aria-labelledby="start-h">
   <h1 id="start-h" class="title" translate="no">{PRODUCT}</h1>
   <p class="sub">{START.sub}</p>
   <div class="choices">

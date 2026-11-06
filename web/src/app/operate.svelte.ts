@@ -548,7 +548,12 @@ export class Operate {
 
   /** Update progress over the target nodes, 0–100. */
   get overall(): number {
-    const p = this.targets.map((id) => this.progress[id]?.percent ?? 0);
+    return this.overallAt(this.now());
+  }
+
+  /** The nodes' one % averaged at `now`: like theirs, it never moves back and reaches 100 only when all confirmed. */
+  overallAt(now: number): number {
+    const p = this.targets.map((id) => this.percentOf(id, now));
     return p.length ? Math.floor(p.reduce((a, b) => a + b, 0) / p.length) : 0;
   }
 

@@ -1,5 +1,6 @@
 <script lang="ts">
   import { MENU } from '../app/copy.ts';
+  import { modal } from '../app/motion.ts';
 
   interface Props {
     onconfirm: () => void;
@@ -19,7 +20,7 @@
 </script>
 
 <!-- M53: the one confirmation of the page. -->
-<dialog bind:this={dialog} aria-labelledby="restart-h" aria-describedby="restart-s" onclose={oncancel}>
+<dialog bind:this={dialog} transition:modal|global aria-labelledby="restart-h" aria-describedby="restart-s" onclose={oncancel}>
   <h2 id="restart-h">{MENU.restartHeading}</h2>
   <p id="restart-s">{MENU.restartSentence}</p>
   <div class="actions">

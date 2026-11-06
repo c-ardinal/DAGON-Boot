@@ -129,6 +129,52 @@ button {
 [data-locks~='file'] [data-control='file'] {
   opacity: 0.45;
 }
+[data-control] {
+  transition: opacity var(--dur-quick) var(--ease-out);
+}
+
+/* Every dialog: it opens and closes in CSS, the only way to reach the top layer and the scrim.
+   Closing frees the page at once (app/motion.ts), so the leave never holds input. */
+dialog {
+  /* The browser's own place for an open modal, kept while it closes: it would drop it the moment `open` goes. */
+  position: fixed;
+  inset: 0;
+  height: fit-content;
+  opacity: 0;
+  translate: 0 var(--enter-shift);
+  scale: var(--enter-scale);
+  transition:
+    opacity var(--dur-ui) var(--ease-out),
+    translate var(--dur-ui) var(--ease-out),
+    scale var(--dur-ui) var(--ease-out),
+    overlay var(--dur-ui) allow-discrete,
+    display var(--dur-ui) allow-discrete;
+}
+dialog[open] {
+  opacity: 1;
+  translate: 0 0;
+  scale: 1;
+}
+dialog::backdrop {
+  opacity: 0;
+  transition:
+    opacity var(--dur-ui) var(--ease-out),
+    overlay var(--dur-ui) allow-discrete,
+    display var(--dur-ui) allow-discrete;
+}
+dialog[open]::backdrop {
+  opacity: 1;
+}
+@starting-style {
+  dialog[open] {
+    opacity: 0;
+    translate: 0 var(--enter-shift);
+    scale: var(--enter-scale);
+  }
+  dialog[open]::backdrop {
+    opacity: 0;
+  }
+}
 
 .primary {
   display: inline-flex;
@@ -194,7 +240,7 @@ button {
   border-radius: var(--r-m);
   font: 700 var(--t-body) / 1 var(--f-ja);
   white-space: nowrap;
-  transition: background-color var(--dur-feedback) ease;
+  transition: background-color var(--dur-feedback) var(--ease-out);
 }
 .button-primary-header > span {
   background: var(--c-accent);
@@ -248,7 +294,9 @@ button {
   font: 700 var(--t-body) / 1 var(--f-ja);
   white-space: nowrap;
   cursor: pointer;
-  transition: background-color var(--dur-feedback) ease;
+  transition:
+    background-color var(--dur-feedback) var(--ease-out),
+    opacity var(--dur-quick) var(--ease-out);
 }
 .button-primary {
   background: var(--c-accent);
@@ -300,7 +348,7 @@ button {
   display: inline-flex;
   padding: var(--p-layer);
   border-radius: var(--r-full);
-  transition: background-color var(--dur-feedback) ease;
+  transition: background-color var(--dur-feedback) var(--ease-out);
 }
 @media (hover: hover) and (pointer: fine) {
   .button-icon:not([aria-disabled='true']):hover > .layer {

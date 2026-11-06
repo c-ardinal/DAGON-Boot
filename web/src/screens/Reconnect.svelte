@@ -18,6 +18,7 @@
 
 <script lang="ts">
   import { BUTTON } from '../app/copy.ts';
+  import { modal } from '../app/motion.ts';
 
   interface Props {
     /** Why the page could not reconnect by itself (dagon-host's 45 s are over: this dialog opens only then). */
@@ -40,7 +41,7 @@
   });
 </script>
 
-<dialog bind:this={dialog} aria-labelledby="reconnect-h" {onclose}>
+<dialog bind:this={dialog} transition:modal|global aria-labelledby="reconnect-h" {onclose}>
   <h2 id="reconnect-h">{RECONNECT.heading}</h2>
   <p>{RECONNECT.sentence}</p>
   <button class="primary" bind:this={button} onclick={onreconnect}>
@@ -65,27 +66,8 @@
     background: var(--c-layer-1);
     color: var(--c-paper);
   }
-  dialog[open] {
-    animation: enter 220ms var(--ease-out);
-  }
   dialog::backdrop {
     background: var(--c-scrim);
-  }
-  @keyframes enter {
-    from {
-      opacity: 0;
-      transform: scale(0.96);
-    }
-  }
-  @media (prefers-reduced-motion: reduce) {
-    dialog[open] {
-      animation: fade var(--dur-reduced) ease;
-    }
-    @keyframes fade {
-      from {
-        opacity: 0;
-      }
-    }
   }
   h2 {
     margin: 0 0 var(--s-4);

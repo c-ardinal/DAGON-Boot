@@ -112,6 +112,26 @@ pub fn build_nodes_keyed(
     } else {
         nodes.to_vec()
     };
+    // Before any build: 中止 of 雛形を作る leaves tables for crates not made yet.
+    let missing: Vec<&str> = ids
+        .iter()
+        .filter(|id| {
+            cfg.build
+                .get(*id)
+                .is_some_and(|b| !cfg.base.join(&b.package).join("Cargo.toml").is_file())
+                && !source.is_some_and(|s| {
+                    cfg.build[*id].package.is_relative()
+                        && s.join(&cfg.build[*id].package).join("Cargo.toml").is_file()
+                })
+        })
+        .map(String::as_str)
+        .collect();
+    if !missing.is_empty() {
+        return Err(format!(
+            "no crate yet for {}; make them again with 雛形を作る (dagon gen)",
+            missing.join(", ")
+        ));
+    }
     let key = key.map(|k| dagon_sign::to_hex(&k));
     let mut out = Vec::new();
     for id in ids {
@@ -674,6 +694,42 @@ mod tests {
             "only the crate's own entry changes"
         );
         let _ = std::fs::remove_dir_all(&base);
+    }
+
+    /// 中止 of 雛形を作る leaves tables for crates not made yet.
+    #[test]
+    fn a_build_names_every_crate_not_made_yet_before_building_any() {
+        let base =
+            std::env::temp_dir().join(format!("dagon-missing-crates-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&base);
+        let mut cfg = Config {
+            base: base.clone(),
+            ..Config::default()
+        };
+        for id in ["seg", "watch"] {
+            cfg.build.insert(
+                id.into(),
+                BuildInputs {
+                    package: PathBuf::from(format!("nodes/{id}")),
+                    bin: None,
+                    features: vec![],
+                    slot_b_feature: None,
+                },
+            );
+        }
+        let mut log = Vec::new();
+        let e = build_nodes(
+            &cfg,
+            &[],
+            &mut |l| log.push(l.to_string()),
+            &AtomicBool::new(false),
+        )
+        .unwrap_err();
+        assert!(
+            e.contains("seg") && e.contains("watch") && e.contains("雛形を作る"),
+            "{e}"
+        );
+        assert!(log.is_empty(), "{log:?}");
     }
 
     #[test]

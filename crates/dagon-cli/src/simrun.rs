@@ -398,21 +398,7 @@ mod tests {
         yes: bool,
         asked: &mut u32,
     ) -> Result<Vec<u8>, String> {
-        let dir =
-            std::env::temp_dir().join(format!("dagon-write-silent-{}-{yes}", std::process::id()));
-        let seg_dir = dir.join("seg");
-        std::fs::create_dir_all(&seg_dir).unwrap();
-        let boot = sign(
-            &w.key,
-            "stm32f401re",
-            image_kind::BOOTCORE,
-            &topology_tag("seg"),
-            0,
-            OLD,
-            4000,
-        );
-        std::fs::write(seg_dir.join("bootcore.img"), &boot).unwrap();
-        std::fs::write(seg_dir.join(crate::commands::STAGE0_FILE), [0x5A; 0x100]).unwrap();
+        let dir = provision_files(w, &["seg"]);
         let t = dagon_topology::parse_str(YAML).unwrap();
         let r = crate::device::write_silent_nodes(
             &mut w.host(),
@@ -430,6 +416,134 @@ mod tests {
         );
         let _ = std::fs::remove_dir_all(&dir);
         r
+    }
+
+    /// A folder of its own (tests run in parallel) with what `dagon flash`
+    /// leaves for each of `nodes`.
+    fn provision_files(w: &World, nodes: &[&str]) -> std::path::PathBuf {
+        static NEXT: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+        let n = NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        let dir =
+            std::env::temp_dir().join(format!("dagon-write-silent-{}-{n}", std::process::id()));
+        for node in nodes {
+            let d = dir.join(node);
+            std::fs::create_dir_all(&d).unwrap();
+            let boot = sign(
+                &w.key,
+                "stm32f401re",
+                image_kind::BOOTCORE,
+                &topology_tag("seg"),
+                0,
+                OLD,
+                4000,
+            );
+            std::fs::write(d.join("bootcore.img"), &boot).unwrap();
+            std::fs::write(d.join(crate::commands::STAGE0_FILE), [0x5A; 0x100]).unwrap();
+        }
+        dir
+    }
+
+    /// The simulated hub, recording every command sent to it.
+    #[derive(Clone)]
+    struct Recording(Sim, Rc<RefCell<Vec<u8>>>);
+
+    impl Transport for Recording {
+        type Error = ();
+        fn max_payload(&self) -> usize {
+            self.0.max_payload()
+        }
+        fn reconnect_kind(&self) -> dagon_host::Reconnect {
+            self.0.reconnect_kind()
+        }
+        async fn write(&mut self, bytes: &[u8]) -> Result<(), ()> {
+            if let Ok((f, _)) = dagon_proto::Frame::decode(bytes, dagon_proto::max_payload::USB) {
+                self.1.borrow_mut().push(f.cmd);
+            }
+            self.0.write(bytes).await
+        }
+        async fn read(&mut self, buf: &mut [u8]) -> Result<usize, ()> {
+            self.0.read(buf).await
+        }
+        async fn reopen(&mut self) -> Result<(), ()> {
+            self.0.reopen().await
+        }
+    }
+
+    /// Two silent F401s with a ROM entry: seg, wiped, and seg2, not there.
+    fn two_silent(
+        w: &World,
+        dir: &std::path::Path,
+        yes: bool,
+    ) -> (Result<Vec<u8>, String>, Vec<String>, Vec<u8>) {
+        let yaml = YAML
+            .replace(
+                "buses:\n",
+                "  - id: seg2\n    mcu: stm32f401re\n    board: nucleo-f401re\n    role: node\n    port: self-boot\n    flash_map: f401-default\n    max_attempts: 3\n    listen_window_ms: 50\n    tag: seg2-f401\nbuses:\n",
+            )
+            .replace(
+                "recovery:\n",
+                "  - from: hub\n    to: seg2\n    kind: i2c\n    bus: i2c-main\n    addr: 0x43\n    node_pins: { sda: PB4, scl: PA8 }\n    control:\n      kind: full\n      nrst: 26\n      boot: 27\n      rom_entry: stm32-i2c-rom\nrecovery:\n",
+            )
+            .replace("  seg: [local, redistribute, rom-forced]\n", "  seg: [local, redistribute, rom-forced]\n  seg2: [local, redistribute, rom-forced]\n")
+            .replace("order: [seg, hub]", "order: [seg, seg2, hub]");
+        let t = dagon_topology::parse_str(&yaml).unwrap();
+        let topology = dagon_topology::compile(&t).unwrap();
+        let sent = Rc::new(RefCell::new(Vec::new()));
+        let mut host = Host::new(Recording(w.sim.clone(), sent.clone()), w.sim.clone());
+        let mut asked = Vec::new();
+        let r = crate::device::write_silent_nodes(
+            &mut host,
+            &t,
+            &topology,
+            &w.release,
+            &w.key.pk,
+            &["seg".to_string(), "seg2".to_string()],
+            &all_roms(),
+            dir,
+            &mut |q| {
+                asked.push(q.to_string());
+                yes
+            },
+        );
+        let cmds = sent.borrow().clone();
+        (r, asked, cmds)
+    }
+
+    fn wrote(cmds: &[u8]) -> bool {
+        use dagon_proto::Cmd;
+        cmds.iter()
+            .any(|c| [Cmd::XferBegin as u8, Cmd::SubCtl as u8, Cmd::I2cRaw as u8].contains(c))
+    }
+
+    #[test]
+    fn one_question_names_every_silent_node_and_a_cancel_sends_nothing() {
+        let w = world().unwrap();
+        wipe(&w);
+        let dir = provision_files(&w, &["seg", "seg2"]);
+        let (r, asked, cmds) = two_silent(&w, &dir, false);
+        let _ = std::fs::remove_dir_all(&dir);
+        let e = r.unwrap_err();
+        assert!(e.contains("seg") && e.contains("seg2"), "{e}");
+        assert_eq!(asked.len(), 1, "{asked:?}");
+        assert!(
+            asked[0].contains("seg,") && asked[0].contains("seg2"),
+            "{asked:?}"
+        );
+        assert!(!wrote(&cmds), "{cmds:?}");
+        let mut hub = w.sim.hub.borrow_mut();
+        assert!(seg(&mut hub).flash().ops().is_empty(), "nothing erased");
+    }
+
+    #[test]
+    fn a_missing_boot_core_of_any_silent_node_stops_before_the_question() {
+        let w = world().unwrap();
+        wipe(&w);
+        let dir = provision_files(&w, &["seg"]);
+        let (r, asked, cmds) = two_silent(&w, &dir, true);
+        let _ = std::fs::remove_dir_all(&dir);
+        assert!(r.unwrap_err().contains("seg2"));
+        assert!(asked.is_empty(), "{asked:?}");
+        assert!(!wrote(&cmds), "{cmds:?}");
     }
 
     fn wipe(w: &World) {

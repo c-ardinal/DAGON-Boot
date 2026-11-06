@@ -92,20 +92,30 @@ describe('a signing failure', () => {
   });
 });
 
+describe('the first write of a node, while connected', () => {
+  test('only in a state where a write can start', () => {
+    const nodes = [{ id: 'seg' }];
+    const silent = { seg: { responding: false } };
+    expect(firstWriteNodes(nodes, silent, true, 'fileReady')).toEqual(['seg']);
+    expect(firstWriteNodes(nodes, silent, true, 'writing')).toEqual([]);
+    expect(firstWriteNodes(nodes, silent, false, 'idle')).toEqual(['seg']);
+  });
+});
+
 describe('the first write of a node', () => {
   const nodes = [{ id: 'hub' }, { id: 'seg' }, { id: 'garden', notYet: 'no link' }];
 
   test('with nothing connected every writable node can be started; one writing cannot reach, not', () => {
-    expect(firstWriteNodes(nodes, {}, false)).toEqual(['hub', 'seg']);
+    expect(firstWriteNodes(nodes, {}, false, 'idle')).toEqual(['hub', 'seg']);
   });
 
   test('connected: only those whose DAGON does not answer', () => {
     const live = { hub: { responding: true }, seg: { responding: false } };
-    expect(firstWriteNodes(nodes, live, true)).toEqual(['seg']);
-    expect(firstWriteNodes(nodes, { hub: { responding: true }, seg: { responding: true } }, true)).toEqual([]);
+    expect(firstWriteNodes(nodes, live, true, 'ready')).toEqual(['seg']);
+    expect(firstWriteNodes(nodes, { hub: { responding: true }, seg: { responding: true } }, true, 'ready')).toEqual([]);
   });
 
   test('a node not heard from yet counts as not answering', () => {
-    expect(firstWriteNodes(nodes, { hub: { responding: true }, seg: { responding: null } }, true)).toEqual(['seg']);
+    expect(firstWriteNodes(nodes, { hub: { responding: true }, seg: { responding: null } }, true, 'ready')).toEqual(['seg']);
   });
 });

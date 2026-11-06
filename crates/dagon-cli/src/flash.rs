@@ -27,7 +27,6 @@ use crate::flashdev::{self, Pick, DRIVE_WAIT};
 use crate::nodebuild;
 use crate::scaffold::Want;
 
-/// Version of the first install when dagon.toml gives none.
 /// The stage0 part (the layout's `stage0` region); every other part is
 /// the boot image of the first install.
 const STAGE0: &str = "stage0";

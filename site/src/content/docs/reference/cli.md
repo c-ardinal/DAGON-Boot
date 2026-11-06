@@ -597,7 +597,7 @@ Options:
           Version to deploy; must equal each node crate's version
 
       --yes
-          Write without asking
+          Write without asking, the ROM question of a silent node included
 
       --bootcore
           Refuse a node with boot core slots that has no boot crate

@@ -1107,7 +1107,7 @@
   const hubId = $derived((hubNode ?? op.config?.nodes.find((n) => n.role === 'hub'))?.id ?? null);
   const factoryNode = $derived(op.config?.nodes.find((n) => n.id === factory?.node) ?? null);
   /** Nodes whose first write can start from their card: not in dagon demo, whose nodes are simulated. */
-  const firstNodes = $derived(mode === 'operate' && !cli.sim && cli.has('flash') ? firstWriteNodes(op.config?.nodes ?? [], op.live, connected) : []);
+  const firstNodes = $derived(mode === 'operate' && !cli.sim && cli.has('flash') ? firstWriteNodes(op.config?.nodes ?? [], op.live, connected, op.state) : []);
   const factoryMcu = $derived(d.doc.topo.nodes.find((n) => n.id === factoryNode?.id)?.mcu ?? '');
   const factoryJob = $derived(factory?.id == null ? null : (cli.jobs.find((j) => j.id === factory?.id) ?? null));
   async function factoryWrite() {
@@ -1336,7 +1336,7 @@
         onkeep={(id) => !stopped('rollback') && void op.keepTrial(id)}
         onback={(id) => !stopped('rollback') && void op.rollback(id)}
         first={firstNodes}
-        onfirst={(id) => (op.state === 'nodesSilent' || op.state === 'stopped' || op.state === 'recoverFailed' ? void writeOne(id) : (factory = { node: id, id: null }))}
+        onfirst={(id) => (connected ? void writeOne(id) : (factory = { node: id, id: null }))}
         recovery={op.recovering && op.recovered ? { id: op.recovering, result: op.recovered } : null}
       />
 {/snippet}

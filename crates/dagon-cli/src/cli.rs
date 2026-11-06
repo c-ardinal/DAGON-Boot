@@ -432,7 +432,7 @@ pub struct DeployArgs {
     /// Version to deploy; must equal each node crate's version
     #[arg(long, value_name = "X.Y.Z")]
     pub version: Option<String>,
-    /// Write without asking
+    /// Write without asking, the ROM question of a silent node included
     #[arg(long)]
     pub yes: bool,
     /// Refuse a node with boot core slots that has no boot crate

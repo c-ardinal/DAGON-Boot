@@ -332,10 +332,11 @@ pub(crate) fn pubkey(
     }
 }
 
-/// The silent nodes of a write, before any transfer: one with a ROM entry is
-/// rewritten through it once `ask` says yes; one without goes to the direct
-/// write and nothing is written. Returns the indices of those that answer,
-/// for the normal transfer.
+/// The silent nodes of a write, before any transfer. Everything is checked
+/// and one question asked before anything is sent: a silent node without a
+/// ROM entry goes to the direct write, a ROM write needs its boot core, and
+/// `ask` answers for all of them. Then each is rewritten through its ROM.
+/// Returns the indices of the nodes that answer, for the normal transfer.
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn write_silent_nodes<T: Transport, C: Clock>(
     host: &mut Host<T, C>,
@@ -351,8 +352,7 @@ pub(crate) fn write_silent_nodes<T: Transport, C: Clock>(
 where
     T::Error: std::fmt::Debug,
 {
-    // A hub routes by its topology, so a node is silent only after it has one.
-    block_on(host.push_topology(topology)).map_err(|e| match e {
+    block_on(host.hello(Target::Hub)).map_err(|e| match e {
         dagon_host::Error::Timeout => {
             let hub = t.nodes.first().map_or("hub", |n| n.id.as_str());
             format!("the hub does not answer; write it directly: dagon flash {hub}")
@@ -360,7 +360,7 @@ where
         e => format!("{e:?}"),
     })?;
     let mut answering = Vec::new();
-    let mut rom = Vec::new();
+    let mut silent = Vec::new();
     for node in nodes {
         let index = t
             .nodes
@@ -370,7 +370,19 @@ where
             as u8;
         match block_on(host.write_path(index, topology, roms)).map_err(|e| format!("{e:?}"))? {
             WritePath::Transfer => answering.push(index),
-            WritePath::Rom => rom.push((node, index)),
+            WritePath::Rom => {
+                let boot_path = provision.join(node).join("bootcore.img");
+                let boot = std::fs::read(&boot_path).map_err(|_| {
+                    format!(
+                        "{node} does not answer; its ROM write needs {}",
+                        boot_path.display()
+                    )
+                })?;
+                // Stage0 as the first write left it, for an MCU with a stage0.
+                let stage0 =
+                    std::fs::read(provision.join(node).join(crate::commands::STAGE0_FILE)).ok();
+                silent.push((node, index, boot, stage0));
+            }
             WritePath::Direct => {
                 return Err(format!(
                     "{node} does not answer; write it directly: dagon flash {node}"
@@ -378,27 +390,29 @@ where
             }
         }
     }
-    for (node, index) in rom {
-        let boot_path = provision.join(node).join("bootcore.img");
-        let boot = std::fs::read(&boot_path).map_err(|_| {
-            format!(
-                "{node} does not answer; its ROM write needs {}",
-                boot_path.display()
-            )
-        })?;
-        // Stage0 as the first write left it, for an MCU with a stage0.
-        let stage0 = std::fs::read(provision.join(node).join(crate::commands::STAGE0_FILE)).ok();
-        if !ask(&format!(
-            "{node} does not answer. Writing it through its ROM loader rewrites all its \
-             contents. A loose wire also stops an answer: check it first.\n"
-        )) {
-            return Err(format!("stopped; {node} was not touched"));
-        }
+    if silent.is_empty() {
+        return Ok(answering);
+    }
+    let names = silent
+        .iter()
+        .map(|s| s.0.as_str())
+        .collect::<Vec<_>>()
+        .join(", ");
+    if !ask(&format!(
+        "{names} does not answer. Writing through the ROM loader rewrites all the contents. \
+         A loose wire also stops an answer: check it first.\n"
+    )) {
+        return Err(format!(
+            "stopped; nothing was written ({names} not touched)"
+        ));
+    }
+    block_on(host.push_topology(topology)).map_err(|e| format!("{e:?}"))?;
+    for (node, index, boot, stage0) in &silent {
         let assets = dagon_host::RecoverAssets {
             release,
             topology,
             pubkey: key,
-            bootcore: Some(&boot),
+            bootcore: Some(boot),
             stage0: stage0.as_deref(),
             roms,
             rom_confirmed: true,
@@ -411,7 +425,7 @@ where
                 e.version
             );
         };
-        let (_, v) = block_on(host.recover(index, &assets, &mut print))
+        let (_, v) = block_on(host.recover(*index, &assets, &mut print))
             .map_err(|e| format!("{node}: {e:?}"))?;
         println!("{node}: rewritten through the ROM loader, {v}");
     }

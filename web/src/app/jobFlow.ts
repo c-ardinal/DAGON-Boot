@@ -1,5 +1,6 @@
 // What ビルドする and the first write of a node show, from serve's jobs.
 import { jobReason, type Job } from './define/cli.svelte.ts';
+import { NODE_WRITE, type L } from './machine.ts';
 
 /** The jobs of one ビルドする: build every node, sign them, make the package 書込 offers first. */
 export interface BuildJobs {
@@ -84,6 +85,8 @@ export function firstWriteNodes(
   nodes: readonly { id: string; notYet?: string | null }[],
   live: Readonly<Record<string, { responding: boolean | null } | undefined>>,
   connected: boolean,
+  state: L,
 ): string[] {
+  if (connected && !NODE_WRITE.has(state)) return [];
   return nodes.filter((n) => !n.notYet && (!connected || live[n.id]?.responding !== true)).map((n) => n.id);
 }

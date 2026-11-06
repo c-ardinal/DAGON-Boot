@@ -23,7 +23,8 @@ protocol and API starts at format 1; `dagon --version` prints the numbers this
   writes a node for the first time, and `dagon deploy` builds, signs, packages
   and writes in one go. A node runs a new version on trial and goes back by
   itself when the version is not confirmed. `dagon rollback` goes back by hand,
-  and `dagon recover` rewrites a node that no longer runs its application.
+  and `dagon deploy` also rewrites a node that no longer answers, through its
+  ROM loader after asking.
 - **DAGON Console.** `dagon serve` opens the browser tool on your own PC: draw
   the 構成, build, and write to the nodes with each node's progress on its card.
 - **Try it without boards.** `dagon demo` runs DAGON Console on a simulated 親機

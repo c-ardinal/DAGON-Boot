@@ -26,7 +26,7 @@ import type { RollbackRecord } from './agent.svelte.ts';
 import { FAILURE_BAND } from './band.ts';
 import { ConnectError, wasmReady } from './connect.ts';
 import { ANNOUNCE, FILE } from './copy.ts';
-import { HUB_LOCKED, WATCHED, next, type ConnectFailure, type Ctx, type Ev, type L } from './machine.ts';
+import { HUB_LOCKED, NODE_WRITE, WATCHED, next, type ConnectFailure, type Ctx, type Ev, type L } from './machine.ts';
 import { SAMPLE_CONFIG, targetKey, type Config, type Node } from './sample.ts';
 
 /** What the page knows about one node from the hub. */
@@ -917,7 +917,7 @@ export class Operate {
     const c = this.config;
     const chosen = o.chosen;
     const n = o.id ? this.reach.find((x) => x.id === o.id) : this.recoverTarget;
-    if (!c || !n || !['nodesSilent', 'stopped', 'recoverFailed'].includes(this.state)) return;
+    if (!c || !n || !NODE_WRITE.has(this.state)) return;
     const topo = topo_compile(c.yaml);
     const index = this.reach.indexOf(n);
     // A link that fails here fails the write itself, with its reason.

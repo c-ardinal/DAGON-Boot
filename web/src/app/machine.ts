@@ -80,7 +80,7 @@ export const MACHINE: Record<L, Spec> = {
     primary: 'chooseFile',
     secondary: ['useLatest'],
     // rollback: M38's "前のバージョンに戻す" for a node left on trial.
-    on: { push: 'sending', watchAlarm: 'nodesSilent', chooseFile: 'reading', useLatest: 'reading', cliClaim: 'cliTurn', rollback: 'recovering', ...leave },
+    on: { recover: 'recovering', push: 'sending', watchAlarm: 'nodesSilent', chooseFile: 'reading', useLatest: 'reading', cliClaim: 'cliTurn', rollback: 'recovering', ...leave },
   },
   nodesSilent: {
     step: 4,
@@ -98,13 +98,13 @@ export const MACHINE: Record<L, Spec> = {
     secondary: ['defineFix'],
     on: { otherFile: 'reading', ...leave },
   },
-  fileReady: { step: 5, primary: 'update', secondary: ['otherFile'], on: { update: 'writing', otherFile: 'reading', watchAlarm: 'nodesSilent', ...leave } },
+  fileReady: { step: 5, primary: 'update', secondary: ['otherFile'], on: { recover: 'recovering', update: 'writing', otherFile: 'reading', watchAlarm: 'nodesSilent', ...leave } },
   writing: { step: 5, on: { hubTurn: 'hubRestarting', nodeStuck: 'stopped', doneNoHub: 'done', ...toLost } },
   // nodeStuck: the hub came back in time but on its previous version.
   hubRestarting: { step: 5, on: { confirmed: 'done', autoFailed: 'reconnectNeeded', nodeStuck: 'stopped' } },
   reconnectNeeded: { step: 5, primary: 'reconnect', on: { reconnect: 'reconnectNeeded', reconnected: 'done', revertedOnReconnect: 'stopped' } },
   stopped: { step: 5, primary: 'recover', on: { recover: 'recovering', ...leave } },
-  done: { step: 6, secondary: ['otherFile'], on: { watchAlarm: 'nodesSilent', rollback: 'recovering', otherFile: 'reading', ...leave } },
+  done: { step: 6, secondary: ['otherFile'], on: { recover: 'recovering', watchAlarm: 'nodesSilent', rollback: 'recovering', otherFile: 'reading', ...leave } },
   // hubTurn: recovering or rolling back the hub reboots it; reconnecting is hubRestarting / reconnectNeeded's.
   recovering: { step: 'recover', on: { fixedNoRest: 'done', fixedRest: 'fileReady', gaveUp: 'recoverFailed', hubTurn: 'hubRestarting', ...toLost } },
   recoverFailed: { step: 'recover', primary: 'recoverAgain', on: { recoverAgain: 'recovering', ...leave } },
@@ -158,4 +158,6 @@ export function hubOf(s: L): HubState {
 export const HUB_LOCKED: ReadonlySet<L> = new Set(['choosing', 'scanning', 'sending', 'writing', 'hubRestarting', 'reconnectNeeded', 'recovering', 'cliTurn']);
 
 /** States in which nodes are watched every round (no transfer running). */
+/** States a write of one node can start in (the hub answers, nothing runs). */
+export const NODE_WRITE: ReadonlySet<L> = new Set(['ready', 'nodesSilent', 'fileReady', 'done', 'stopped', 'recoverFailed']);
 export const WATCHED: ReadonlySet<L> = new Set(['scanned', 'ready', 'nodesSilent', 'fileReady', 'done']);

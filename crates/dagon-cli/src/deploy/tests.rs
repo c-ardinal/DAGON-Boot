@@ -201,6 +201,15 @@ fn a_version_given_must_be_the_crate_s_own() {
 }
 
 #[test]
+fn yes_answers_the_rom_question_and_otherwise_it_is_read() {
+    let mut nothing: &[u8] = b"";
+    assert!(answer(true, "seg does not answer\n", &mut nothing));
+    assert!(!answer(false, "seg does not answer\n", &mut nothing));
+    let mut y: &[u8] = b"y\n";
+    assert!(answer(false, "seg does not answer\n", &mut y));
+}
+
+#[test]
 fn a_release_signed_with_another_key_is_not_applied() {
     let (cfg, t) = work_area("key");
     let key = key();

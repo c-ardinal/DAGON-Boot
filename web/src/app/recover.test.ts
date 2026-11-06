@@ -98,6 +98,34 @@ describe('recovery from the page with dagon-host recover', () => {
     expect(op.live.seg.hello?.trial).toBe(false);
   }, 120_000);
 
+  // Every state a write can start in: the node's answer decides, not the page.
+  test.each(['ready', 'fileReady', 'done'] as const)('%s: a silent node with a ROM entry is asked, then written through its ROM', async (at) => {
+    const sim = simulator(11)!;
+    const op = session(sim.transport, sim.clock);
+    await op.connect();
+    await op.push();
+    await op.round();
+    if (at !== 'ready') op.takeFile('sample-1.1.0.dgb', SITE[LATEST_RELEASE]);
+    if (at === 'done') await op.update();
+    expect(op.state).toBe(at);
+    expect(sim.hub().wipe(0x42)).toBe(true);
+    expect(await op.writeNode({ id: 'seg' })).toBe('confirm');
+    expect(op.state).toBe(at);
+    await op.writeNode({ id: 'seg', confirmed: true });
+    expect(op.recovered?.path).toBe('rom');
+  }, 120_000);
+
+  test.each(['ready', 'fileReady'] as const)('%s: a silent node without a ROM entry gets the direct write', async (at) => {
+    const t = new MockTransport({ quiet: ['uart'] });
+    const op = session(t, fastClock());
+    await op.connect();
+    await op.push();
+    if (at === 'fileReady') op.takeFile('sample-1.1.0.dgb', SITE[LATEST_RELEASE]);
+    expect(op.state).toBe(at);
+    expect(await op.writeNode({ id: 'watch' })).toBe('direct');
+    expect(op.state).toBe(at);
+  }, 120_000);
+
   test('a silent node without a ROM entry gets the direct write: nothing runs', async () => {
     const t = new MockTransport({ quiet: ['uart'] });
     const op = session(t, fastClock());

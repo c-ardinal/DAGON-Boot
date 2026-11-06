@@ -239,6 +239,15 @@ pub(crate) fn prepare(
     })
 }
 
+/// `question` answered by `--yes`, else read from `input`.
+fn answer(yes: bool, question: &str, input: &mut dyn BufRead) -> bool {
+    if yes {
+        print!("{question}");
+        return true;
+    }
+    confirm(question, input)
+}
+
 /// Shows `listing` and reads one line: `y` or `yes` continues.
 pub(crate) fn confirm(listing: &str, input: &mut dyn BufRead) -> bool {
     print!("{listing}continue? [y/N] ");
@@ -345,13 +354,7 @@ pub fn command(a: &DeployArgs) -> Result<(), String> {
     let mut host = crate::serial::host(a.port.as_deref())?;
     let reg = crate::defs::registry(&cfg)?;
     let topology = dagon_topology::compile_with(&reg, &t).map_err(|e| e.to_string())?;
-    let mut ask = |question: &str| {
-        if yes {
-            print!("{question}");
-            return true;
-        }
-        confirm(question, &mut std::io::stdin().lock())
-    };
+    let mut ask = |question: &str| answer(yes, question, &mut std::io::stdin().lock());
     let answering = crate::device::write_silent_nodes(
         &mut host,
         &t,

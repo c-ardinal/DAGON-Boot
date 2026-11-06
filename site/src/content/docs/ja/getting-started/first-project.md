@@ -94,7 +94,7 @@ dagon deploy                       # または: dagon deploy seg watch
 
 ```sh
 dagon rollback --node seg     # 前に確定したバージョンへ戻す
-dagon deploy seg              # 応答しなくなったノードも。そう伝えて確かめてから ROM ローダで書き換える（ROM がなければ `dagon flash` を案内）
+dagon deploy seg              # 応答しなくなったノードも。そう伝えて確かめてから（`--yes` で省略）ROM ローダで書き換える（ROM がなければ `dagon flash` を案内）
 ```
 
 すべてのコマンドとオプションは `dagon --help` で確認できます。

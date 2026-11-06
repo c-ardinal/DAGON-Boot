@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'vitest';
-import { HUB_LOCKED, MACHINE, hubOf, next, view, type Ctx, type Ev, type L } from './machine.ts';
+import { HUB_LOCKED, MACHINE, NODE_WRITE, hubOf, next, view, type Ctx, type Ev, type L } from './machine.ts';
 
 /** Buttons that leave this page or mode instead of moving the machine. */
 const LEAVING: ReadonlySet<string> = new Set(['reload', 'defineFix']);
@@ -110,6 +110,10 @@ describe('operating-mode state machine', () => {
   test('nodesSilent: the answering nodes are updated first; a silent one is written from its card', () => {
     expect(view('nodesSilent', { hasConfig: true })).toMatchObject({ primary: 'updateResponding', secondary: [] });
     expect(view('nodesSilent', { hasConfig: true, answering: false })).toMatchObject({ primary: 'recover', secondary: [] });
+  });
+
+  test.each([...NODE_WRITE])('%s: a write of one node can start', (s) => {
+    expect(MACHINE[s].on.recover ?? MACHINE[s].on.recoverAgain).toBe('recovering');
   });
 
   test('an event that does not apply keeps the state', () => {

@@ -136,7 +136,7 @@ async fn display(
             state = Some(s);
         }
         let codes = state
-            .and_then(|s| update::pattern(s.phase, s.progress, since.elapsed().as_millis() as u32))
+            .and_then(|s| update::pattern(s.phase, s.percent, since.elapsed().as_millis() as u32))
             .unwrap_or(then);
         if codes != shown {
             show(&mut display, codes, &lease).await;

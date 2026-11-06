@@ -68,6 +68,8 @@ const I2C_SCAN: core::ops::RangeInclusive<u8> = 0x08..=0x77;
 /// XFER_HDR / XFER_DATA bytes before the data: the offset.
 const CHUNK_HEAD: usize = 4;
 const PERCENT_STEP: u8 = 10;
+/// The recovery agent's slot (STATUS slot 2).
+const FACTORY_SLOT: u8 = 2;
 
 /// HELLO and STATUS of one target.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -94,6 +96,12 @@ pub struct Event {
     pub percent: u8,
     /// The node's one progress number (`percent.rs`), what its display is told.
     pub shown: u8,
+    /// This run has written an image to the node: false on the last report
+    /// of a node left as it was, which is no confirmation of anything.
+    pub wrote: bool,
+    /// The host's clock when this number was reckoned: a caller that counts
+    /// the trial's time on from it reckons with the same moments.
+    pub at_ms: u64,
     pub version: Version,
     /// On the VERIFY event of a written image: how long its phases took.
     pub times: Option<XferTimes>,
@@ -109,7 +117,7 @@ pub struct XferTimes {
     /// header chunk (XFER_BEGIN for an image without header). The header's
     /// other requests are in no phase.
     pub erase_ms: u32,
-    /// The image body (XFER_DATA), with the hub LCD's progress updates.
+    /// The image body (XFER_DATA), with the displays' progress updates.
     pub data_ms: u32,
     /// XFER_END: the node's digest over what it wrote.
     pub verify_ms: u32,
@@ -267,7 +275,7 @@ impl<T: Transport, C: Clock> Host<T, C> {
             let outcome = match target {
                 _ if failed => Outcome::NotStarted,
                 None => Outcome::Failed(Error::Unreachable { node }),
-                Some(to) => match self.update_node(&b, node, to, on_event).await {
+                Some(to) => match self.update_node(&b, node, to, false, on_event).await {
                     Ok(v) => Outcome::Done(v),
                     Err(e) => Outcome::Failed(e),
                 },
@@ -287,11 +295,12 @@ impl<T: Transport, C: Clock> Host<T, C> {
         b: &BundleView<'_>,
         node: u8,
         to: Target,
+        rewrite: bool,
         on_event: &mut dyn FnMut(Event),
     ) -> Result<Version, T::Error> {
         self.write = Default::default();
         let st = self.status(to).await?;
-        let r = self.update_inner(b, node, to, &st, on_event).await;
+        let r = self.update_inner(b, node, to, &st, rewrite, on_event).await;
         if let Err(e) = &r {
             let ph = match e {
                 Error::Rejected {
@@ -301,11 +310,14 @@ impl<T: Transport, C: Clock> Host<T, C> {
                 _ => phase::FAILED,
             };
             let v = st.hello.active_version;
+            let at_ms = self.clock.now_ms();
             on_event(Event {
                 node,
                 phase: ph,
                 percent: 0,
                 shown: 0,
+                wrote: self.write.wrote(),
+                at_ms,
                 version: v,
                 times: None,
                 boot_core: false,
@@ -321,6 +333,7 @@ impl<T: Transport, C: Clock> Host<T, C> {
         node: u8,
         to: Target,
         st: &NodeState,
+        rewrite: bool,
         on_event: &mut dyn FnMut(Event),
     ) -> Result<Version, T::Error> {
         let running = st.hello.active_version;
@@ -330,9 +343,9 @@ impl<T: Transport, C: Clock> Host<T, C> {
         let agent = self.update_agent(b, node, to, on_event).await?;
         if core || agent {
             let st = self.status(to).await?;
-            return self.update_app(b, node, to, &st, on_event).await;
+            return self.update_app(b, node, to, &st, rewrite, on_event).await;
         }
-        self.update_app(b, node, to, st, on_event).await
+        self.update_app(b, node, to, st, rewrite, on_event).await
     }
 
     /// The node's recovery agent (the factory slot of a vendor-stage2 MCU)
@@ -346,7 +359,7 @@ impl<T: Transport, C: Clock> Host<T, C> {
         to: Target,
         on_event: &mut dyn FnMut(Event),
     ) -> Result<bool, T::Error> {
-        const FACTORY: u8 = 2;
+        const FACTORY: u8 = FACTORY_SLOT;
         let Some(img) = image_of(b, node, image_kind::AGENT, FACTORY) else {
             return Ok(false);
         };
@@ -403,12 +416,13 @@ impl<T: Transport, C: Clock> Host<T, C> {
         let running = cs.slots.get(usize::from(cs.active)).copied();
         // By version, as apps: a changed boot core is written only when its
         // version (its boot crate's) was raised.
-        let installed = cores.iter().any(|img| {
-            img.get(..HEADER_SIZE)
-                .and_then(|h| <&[u8; HEADER_SIZE]>::try_from(h).ok())
-                .and_then(|h| ImageHeader::parse(h).ok())
-                .is_some_and(|h| running.is_some_and(|r| r.version == h.version))
-        });
+        let installed = slots_settled(&cs)
+            && cores.iter().any(|img| {
+                img.get(..HEADER_SIZE)
+                    .and_then(|h| <&[u8; HEADER_SIZE]>::try_from(h).ok())
+                    .and_then(|h| ImageHeader::parse(h).ok())
+                    .is_some_and(|h| running.is_some_and(|r| r.version == h.version))
+            });
         if installed {
             return Ok(false);
         }
@@ -468,17 +482,35 @@ impl<T: Transport, C: Clock> Host<T, C> {
         Ok(true)
     }
 
-    /// The node's app from the release into its free APP slot.
+    /// The node's app from the release into its free APP slot; unless
+    /// `rewrite`, not when it is what the node runs, so the other slot keeps
+    /// the version to go back to. The node's write is then over: its number
+    /// says so, as a confirmation does.
     async fn update_app(
         &mut self,
         b: &BundleView<'_>,
         node: u8,
         to: Target,
         st: &NodeState,
+        rewrite: bool,
         on_event: &mut dyn FnMut(Event),
     ) -> Result<Version, T::Error> {
-        if !has_kind(b, node, image_kind::APP) {
-            return Ok(st.hello.active_version);
+        let unchanged = !rewrite && app_unchanged(b, node, st);
+        if unchanged || !has_kind(b, node, image_kind::APP) {
+            let running = st.hello.active_version;
+            if unchanged {
+                self.note(&format!(
+                    "node {node}: app {running} not written, it is what the node runs"
+                ));
+            }
+            // With nothing written there is nothing confirmed to show.
+            if self.write.wrote() {
+                self.emit(on_event, node, phase::CONFIRM, 100, running)
+                    .await;
+            } else {
+                self.report(on_event, node, phase::CONFIRM, 100, running);
+            }
+            return Ok(running);
         }
         let slot = free_slot(&st.status).ok_or(Error::NoImage { node })?;
         let img = image_for(b, node, slot).ok_or(Error::NoImage { node })?;
@@ -661,7 +693,8 @@ impl<T: Transport, C: Clock> Host<T, C> {
                 } else {
                     RecoverPath::Retransfer
                 };
-                let v = self.update_node(&b, node, to, on_event).await?;
+                // Chosen by the user: the app goes in again even when it is the same.
+                let v = self.update_node(&b, node, to, true, on_event).await?;
                 return Ok((path, v));
             }
             Err(Error::Transport(e)) => return Err(Error::Transport(e)),
@@ -763,6 +796,12 @@ impl<T: Transport, C: Clock> Host<T, C> {
             total_len: (hdr.len() + body.len()) as u32,
             hdr_len: hdr.len() as u16,
         };
+        // The hub's display already hears every number from `emit`. The tell
+        // comes before XFER_BEGIN, so the number is there when the node's
+        // display turns to the transfer, after the erase.
+        let mut tell = show.filter(|_| to != Target::Hub);
+        let mut told = None;
+        self.tell(to, &mut tell, &mut told).await;
         let mut p = [0u8; 8];
         let n = begin.encode(&mut p).expect("8 bytes");
         let begin_wait = if hdr.is_empty() { erase } else { REQUEST_MS };
@@ -794,6 +833,7 @@ impl<T: Transport, C: Clock> Host<T, C> {
                 if let Some((node, v)) = show {
                     self.emit(on_event, node, phase::TRANSFER, shown, v).await;
                 }
+                self.tell(to, &mut tell, &mut told).await;
             }
         }
         let t2 = self.clock.now_ms();
@@ -842,17 +882,32 @@ impl<T: Transport, C: Clock> Host<T, C> {
         percent: u8,
         version: Version,
     ) {
-        let shown = self.shown_of(node, ph, percent);
+        let shown = self.report(on_event, node, ph, percent, version);
+        self.show(node, ph, shown, version, &[]).await;
+    }
+
+    /// Reports `ev` to the caller only; returns its number.
+    fn report(
+        &mut self,
+        on_event: &mut dyn FnMut(Event),
+        node: u8,
+        ph: u8,
+        percent: u8,
+        version: Version,
+    ) -> u8 {
+        let (shown, at_ms) = self.shown_of(node, ph, percent);
         on_event(Event {
             node,
             phase: ph,
             percent,
             shown,
+            wrote: self.write.wrote(),
+            at_ms,
             version,
             times: None,
             boot_core: self.core_write,
         });
-        self.show(node, ph, shown, version, &[]).await;
+        shown
     }
 
     /// VERIFY of an image written in `times`.
@@ -863,12 +918,14 @@ impl<T: Transport, C: Clock> Host<T, C> {
         version: Version,
         times: XferTimes,
     ) {
-        let shown = self.shown_of(node, phase::VERIFY, 100);
+        let (shown, at_ms) = self.shown_of(node, phase::VERIFY, 100);
         on_event(Event {
             node,
             phase: phase::VERIFY,
             percent: 100,
             shown,
+            wrote: self.write.wrote(),
+            at_ms,
             version,
             times: Some(times),
             boot_core: self.core_write,
@@ -876,16 +933,18 @@ impl<T: Transport, C: Clock> Host<T, C> {
         self.show(node, phase::VERIFY, shown, version, &[]).await;
     }
 
-    /// The node's one number for this report.
-    fn shown_of(&mut self, node: u8, ph: u8, percent: u8) -> u8 {
+    /// The node's one number for this report, and the moment it was reckoned.
+    fn shown_of(&mut self, node: u8, ph: u8, percent: u8) -> (u8, u64) {
         let trial = self
             .trial_ms
             .iter()
             .find(|(n, _)| *n == node)
             .map(|(_, ms)| *ms);
         let now = self.clock.now_ms();
-        self.write
-            .report(node, ph, percent, self.core_write, now, trial)
+        let shown = self
+            .write
+            .report(node, ph, percent, self.core_write, now, trial);
+        (shown, now)
     }
 
     /// SHOW on the hub LCD, best effort.
@@ -897,13 +956,47 @@ impl<T: Transport, C: Clock> Host<T, C> {
             version,
             text,
         };
+        let _ = self.show_to(Target::Hub, &show).await;
+    }
+
+    /// One SHOW, never resent.
+    async fn show_to(&mut self, to: Target, show: &Show<'_>) -> Result<(), T::Error> {
         let mut p = [0u8; 7 + payload::SHOW_TEXT_MAX];
-        let Ok(n) = show.encode(&mut p) else {
+        let n = show.encode(&mut p).map_err(|_| Error::BadResponse)?;
+        self.call_once(to, Cmd::Show, &p[..n], REQUEST_MS)
+            .await
+            .map(|_| ())
+    }
+
+    /// Tells the node being written its one number when it moved, for its
+    /// own display. A display must not cost a write: one try per step. An
+    /// agent that predates it answers `Unsupported` and is told nothing more
+    /// for this image. A lost one is told again at the next step, so the
+    /// number does not freeze; a link that truly failed is the next transfer
+    /// request's to report.
+    async fn tell(&mut self, to: Target, who: &mut Option<(u8, Version)>, told: &mut Option<u8>) {
+        let Some((node, version)) = *who else {
             return;
         };
-        let _ = self
-            .call_once(Target::Hub, Cmd::Show, &p[..n], REQUEST_MS)
-            .await;
+        let percent = self.write.shown();
+        if *told == Some(percent) {
+            return;
+        }
+        let show = Show {
+            node,
+            phase: phase::TRANSFER,
+            percent,
+            version,
+            text: &[],
+        };
+        match self.show_to(to, &show).await {
+            Ok(()) => *told = Some(percent),
+            Err(Error::Rejected {
+                status: Status::Unsupported,
+                ..
+            }) => *who = None,
+            Err(_) => {}
+        }
     }
 }
 
@@ -1062,6 +1155,48 @@ fn plan(b: &BundleView<'_>, topo: &TopologyView<'_>, only: Option<&[u8]>) -> Vec
     });
     nodes.dedup();
     nodes
+}
+
+/// The header digest of the recovery agent `bundle` holds for `node`: the node
+/// gets it written when its factory slot holds another ([`Host::apply`]).
+pub fn agent_digest(b: &BundleView<'_>, node: u8) -> Option<[u8; 16]> {
+    image_digest(b, node, image_kind::AGENT, FACTORY_SLOT)
+}
+
+/// The header digest of the app `bundle` holds for `node` in `slot`. A normal
+/// write leaves it out when it is what the node runs in that slot, off trial.
+pub fn app_digest(b: &BundleView<'_>, node: u8, slot: u8) -> Option<[u8; 16]> {
+    image_digest(b, node, image_kind::APP, slot)
+}
+
+fn image_digest(b: &BundleView<'_>, node: u8, kind: u8, slot: u8) -> Option<[u8; 16]> {
+    let raw = image_of(b, node, kind, slot)?.get(..HEADER_SIZE)?;
+    Some(dagon_format::header::header_digest16(raw.try_into().ok()?))
+}
+
+fn app_unchanged(b: &BundleView<'_>, node: u8, st: &NodeState) -> bool {
+    let active = st.status.active;
+    !st.hello.trial
+        && slots_settled(&st.status)
+        && st
+            .status
+            .slots
+            .get(usize::from(active))
+            .is_some_and(|s| app_digest(b, node, active) == Some(s.digest16))
+}
+
+/// The running slot is the confirmed one and no slot waits for the next boot
+/// or is on trial: what runs now is what the next reset runs.
+fn slots_settled(st: &StatusResp) -> bool {
+    st.active == st.confirmed
+        && st
+            .slots
+            .get(usize::from(st.active))
+            .is_some_and(|s| s.state == SlotState::Confirmed)
+        && !st
+            .slots
+            .iter()
+            .any(|s| matches!(s.state, SlotState::Pending | SlotState::Trying))
 }
 
 /// Slot neither running nor confirmed.

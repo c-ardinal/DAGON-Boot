@@ -11,6 +11,9 @@ import init, {
   mcu_connection,
   mcu_trial_ms,
   trial_percent,
+  release_agent_digest,
+  release_app_digest,
+  release_core_versions,
   release_versions,
   use_builtin_definitions,
   supported_boards as boards,
@@ -85,6 +88,10 @@ export interface UpdateEvent {
   percent: number;
   /** The node's one progress number, what its display is told (dagon-host). */
   shown: number;
+  /** dagon-host's clock when it reckoned `shown`: the page counts a trial's time from the same moments. */
+  atMs: number;
+  /** This run has written an image to the node; false on the last report of a node left as it was. */
+  wrote: boolean;
   version: number;
   /** About the node's boot core, written before its app: its confirmation is not the node's. */
   bootCore: boolean;
@@ -326,6 +333,24 @@ export function releaseVersions(bundle: Uint8Array): Map<number, number> {
   const out = new Map<number, number>();
   for (let i = 0; i + 1 < flat.length; i += 2) if (!out.has(flat[i])) out.set(flat[i], flat[i + 1]);
   return out;
+}
+
+/** The boot core versions a release holds for each topology node (by node index); a node without any is absent. */
+export function releaseCoreVersions(bundle: Uint8Array): Map<number, number[]> {
+  const flat = release_core_versions(bundle);
+  const out = new Map<number, number[]>();
+  for (let i = 0; i + 1 < flat.length; i += 2) out.set(flat[i], [...(out.get(flat[i]) ?? []), flat[i + 1]]);
+  return out;
+}
+
+/** The header digest of the recovery agent a release holds for a topology node; null when it holds none. */
+export function releaseAgentDigest(bundle: Uint8Array, node: number): Uint8Array | null {
+  return release_agent_digest(bundle, node) ?? null;
+}
+
+/** The header digest of the app a release holds for a topology node in a slot; null when it holds none. */
+export function releaseAppDigest(bundle: Uint8Array, node: number, slot: number): Uint8Array | null {
+  return release_app_digest(bundle, node, slot) ?? null;
 }
 
 /** `major.minor.patch` of a raw version u32. */

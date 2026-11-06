@@ -122,6 +122,7 @@ len, next }` です。プロトコルのリクエストはどれも遷移です�
 | `app.transfer_started`、`app.transfer_progress`、`app.transfer_aborted` | 消去が終わった / 各チャンクを書いた / 無通信のタイムアウト、ストアのエラー、新しいリクエスト | `target`、`slot`、`len` / `done`、`total` / `cause` |
 | `app.verify_started`、`app.verify_ok`、`app.verify_failed` | 本体のハッシュと読み返し | `len` / `slot`、`version` / `status` |
 | `app.written`、`app.pending_set`、`app.pending_moved`、`app.pending_refused`、`app.confirmed`、`app.demoted`、`app.confirm_refused` | イメージのライフサイクル（1.1） | |
+| `app.percent_told` | ホストが、書き込みの進み具合のひとつの数字を伝えた（DAGON Console の % と同じ。転送のあいだ、ノードが受けられるときだけ。表示のタスクは `AppSnapshot::percent` で読みます） | `percent` |
 | `app.reboot_requested` | 再起動を受け付けた。**判断** `allow_reboot_now` | `mode` |
 | `app.before_reboot` | 返答が出た。リセットが続きます | |
 | `app.self_check` | 試行中の確定。**判断** `self_check` | `slot`、`version` |
@@ -343,7 +344,7 @@ pub struct Nop;  // no extension
 
 非同期の表示やログのタスクが、ハンドラの中で動くことはありません。チェーンの先頭の公開元が、各イベントを次のものにコピーします。
 
-- `Latest`: `Latest { state, last }` を持つ `embassy_sync::watch::Watch`（複数の受信側、最後の値）です。すべてのイベントから畳み込んだレイヤーのスナップショット（アプリの `{ phase, progress, version, trial }`、リレーの子機）と、最後のイベントの記録です。
+- `Latest`: `Latest { state, last }` を持つ `embassy_sync::watch::Watch`（複数の受信側、最後の値）です。すべてのイベントから畳み込んだレイヤーのスナップショット（アプリの `{ phase, progress, percent, version, trial }`、リレーの子機）と、最後のイベントの記録です。
 - `Recent<N>`: 最後の N 個のイベントの固定のリングで、`EventRecord` という、`state_machine!` がイベントごとに生成する所有された有界の形です。`{ layer: u8, kind: u8, flags: u8, dropped: u8, seq: u32, payload:
   [u8; 16] }`。フィールドは、カタログが示す短い形でコピーします（長さ、id、ダイジェストの先頭。ノードのタグやボードの id のような名前は、ドメインの接頭辞と名前の SHA-256 の最初の 8 バイトとして記録し、ホストが知っている名前を通して対応づけます）。作る側が戻った後で参照を残すことはありません。あふれると、いちばん古いものを捨てます。その後の記録が `dropped` で欠落を報告し（それぞれ最大 255 で、残りは次へ繰り越します）、作る側は決して待ちません。`seq` は一周し、連番の演算で比べます。
 
@@ -928,7 +929,7 @@ async fn display_task(mut lcd: Lcd, events: AppEvents) {
         let s = rx.changed().await.state;
         match s.phase {
             Phase::Starting | Phase::Idle | Phase::Trial => lcd.splash(s.version, s.trial),
-            Phase::Transferring => lcd.bar(s.progress), // Some((done, total))
+            Phase::Transferring => lcd.bar(s.percent), // Option<u8>
             Phase::Verifying => lcd.text("verify"),
             Phase::Written | Phase::Pending => lcd.text("written"),
             Phase::RebootPending => lcd.text("reboot"),

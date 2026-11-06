@@ -132,6 +132,8 @@ struct Faults {
     nack_once: bool,
     /// Every request written: (command, RETRY flag set).
     seen: Vec<(u8, bool)>,
+    /// The number on the node's display when XFER_END left: the transfer's end.
+    number_at_end: Option<Option<u8>>,
 }
 
 /// Command and RETRY flag of a request frame (inner frame for RELAY).
@@ -191,6 +193,12 @@ impl Transport for Sim {
             return Ok(());
         }
         let mut hub = self.hub.borrow_mut();
+        if cmd == Cmd::XferEnd as u8 {
+            let seg = hub
+                .i2c_node(NODE_I2C_ADDR)
+                .map(|n| n.app_snapshot().percent);
+            f.number_at_end = seg.or(f.number_at_end);
+        }
         let nack = bytes[5] == Cmd::Relay as u8 && std::mem::take(&mut f.nack_once);
         if nack {
             hub.bus.set_reset(true);
@@ -337,6 +345,116 @@ fn the_number_on_the_hubs_screen_is_the_number_every_caller_is_told() {
     assert_eq!(numbers.first(), Some(&0), "{numbers:?}");
     assert_eq!(numbers.last(), Some(&100), "{numbers:?}");
     assert!(numbers.windows(2).all(|w| w[0] <= w[1]), "{numbers:?}");
+}
+
+/// What the node's own display reads: the snapshot its app folds.
+fn seg_snapshot(s: &Sim) -> dagon_agent::snapshot::AppSnapshot {
+    let mut hub = s.hub.borrow_mut();
+    hub.i2c_node(NODE_I2C_ADDR).unwrap().app_snapshot()
+}
+
+#[test]
+fn the_number_a_node_is_told_is_the_consoles_at_every_step() {
+    use dagon_agent::snapshot::Phase;
+    let s = sim();
+    let mut h = host(&s);
+    h.trial_ms = vec![(0, 4000), (SEG, 4000)];
+    let mut told: Option<u8> = None;
+    let mut steps = 0;
+    block_on(
+        h.apply(&release(), &topology(&yaml()), &key().pk, None, &mut |e| {
+            // The tell follows its event: at the next step of the bytes the
+            // snapshot holds what the last step said.
+            if let (phase::TRANSFER, Some(n)) = (e.phase, told) {
+                assert_eq!(seg_snapshot(&s).percent, Some(n), "{e:?}");
+                steps += 1;
+            }
+            told = (e.node == SEG && e.phase == phase::TRANSFER).then_some(e.shown);
+            // Past the bytes the node is told no number: it shows its step.
+            if e.node == SEG && e.phase != phase::TRANSFER {
+                let snapshot = seg_snapshot(&s);
+                assert_eq!(snapshot.percent, None, "{e:?}");
+                assert_ne!(snapshot.phase, Phase::Transferring, "{e:?}");
+            }
+        }),
+    )
+    .unwrap();
+    assert!(steps >= 10, "{steps}");
+}
+
+#[test]
+fn a_lost_tell_is_told_again_at_the_next_step_and_never_resent() {
+    let s = sim();
+    let mut h = host(&s);
+    h.trial_ms = vec![(0, 4000), (SEG, 4000)];
+    let (mut armed, mut last, mut steps, mut events) = (true, 0, 0, 0);
+    let out = block_on(h.apply(
+        &release(),
+        &topology(&yaml()),
+        &key().pk,
+        Some(&[SEG]),
+        &mut |e| {
+            events += 1;
+            if e.phase == phase::TRANSFER {
+                (last, steps) = (e.shown, steps + 1);
+                if armed && e.percent >= 30 {
+                    armed = false;
+                    let drop = (Cmd::Show as u8, 3);
+                    s.faults.borrow_mut().drop_req.push(drop);
+                }
+            }
+        },
+    ))
+    .unwrap();
+    assert!(matches!(out[0].outcome, Outcome::Done(_)), "{out:?}");
+    let f = s.faults.borrow();
+    assert!(!armed);
+    assert_eq!(f.drop_req, [(Cmd::Show as u8, 0)], "all three were lost");
+    assert_eq!(f.number_at_end, Some(Some(last)), "the number froze");
+    // No extra resend: one SHOW to the hub per event, one to the node per step.
+    let shows: Vec<_> = f.seen.iter().filter(|x| x.0 == Cmd::Show as u8).collect();
+    assert!(shows.iter().all(|x| !x.1), "a SHOW is never resent");
+    assert!(
+        shows.len() <= events + steps,
+        "{} {events} {steps}",
+        shows.len()
+    );
+}
+
+#[test]
+fn telling_a_node_costs_a_write_at_most_a_request_per_step_and_an_old_agent_none() {
+    let seg_data_ms = |predates: &[u8]| {
+        let s = sim();
+        s.hub.borrow_mut().i2c_node(NODE_I2C_ADDR).unwrap().predates = predates.to_vec();
+        let mut h = host(&s);
+        let mut t = None;
+        let mut steps = 0u32;
+        let outcome = block_on(h.apply(
+            &release(),
+            &topology(&yaml()),
+            &key().pk,
+            Some(&[SEG]),
+            &mut |e| {
+                t = e.times.or(t);
+                steps += u32::from(e.phase == phase::TRANSFER && e.percent > 0);
+            },
+        ))
+        .unwrap();
+        // The display never decides the write.
+        assert!(
+            matches!(outcome[0].outcome, Outcome::Done(_)),
+            "{outcome:?}"
+        );
+        (t.unwrap().data_ms, steps)
+    };
+    // One relayed request in the simulator: the PC's round trip and the
+    // mailbox polls.
+    const RELAYED_MS: u32 = 6;
+    let (told, steps) = seg_data_ms(&[]);
+    // An agent built before the tell refuses the first one, before any
+    // data: nothing more is sent to it.
+    let (old, _) = seg_data_ms(&[Cmd::Show as u8]);
+    assert_eq!(told - old, steps * RELAYED_MS, "one request per step");
 }
 
 #[test]
@@ -1530,14 +1648,24 @@ fn the_f401_takes_a_new_boot_core_through_the_release() {
     )
     .unwrap()
     .bundle;
+    // Both images' numbers reach the node, the Console's at every step.
+    let mut told: Option<u8> = None;
+    let mut core_steps = 0;
     let out = block_on(host(&s).apply(
         &rel,
         &topology(&yaml()),
         &key().pk,
         Some(&[SEG]),
-        &mut |_| {},
+        &mut |e| {
+            if let (phase::TRANSFER, Some(n)) = (e.phase, told) {
+                assert_eq!(seg_snapshot(&s).percent, Some(n), "{e:?}");
+            }
+            told = (e.phase == phase::TRANSFER).then_some(e.shown);
+            core_steps += usize::from(e.boot_core && told.is_some());
+        },
     ))
     .unwrap();
+    assert!(core_steps > 0);
     assert!(
         matches!(out[0].outcome, Outcome::Done(x) if x == v),
         "{:?}",
@@ -1549,6 +1677,189 @@ fn the_f401_takes_a_new_boot_core_through_the_release() {
 }
 
 /// After the ROM loader's full rewrite the F401 runs boot core A, recorded.
+/// A package of `images` for the sample of this file.
+fn package(images: &[Vec<u8>]) -> Vec<u8> {
+    dagon_sign::release::build(
+        dagon_topology::defs::Registry::builtin(),
+        &dagon_topology::parse_str(&yaml()).unwrap(),
+        &topology(&yaml()),
+        images,
+        "r",
+        &key(),
+    )
+    .unwrap()
+    .bundle
+}
+
+fn write_seg(s: &Sim, images: &[Vec<u8>]) -> Vec<Event> {
+    let mut events = Vec::new();
+    let out = block_on(host(s).apply(
+        &package(images),
+        &topology(&yaml()),
+        &key().pk,
+        Some(&[SEG]),
+        &mut |e| events.push(e),
+    ))
+    .unwrap();
+    assert!(matches!(out[0].outcome, Outcome::Done(_)), "{out:?}");
+    events
+}
+
+#[test]
+fn a_boot_loader_only_write_keeps_the_app_to_go_back_to() {
+    let s = sim();
+    let (v0, v1) = (Version::new(1, 0, 0), Version::new(1, 1, 0));
+    let apps = [seg_img(0, v1), seg_img(1, v1)];
+    write_seg(&s, &apps);
+    let before = block_on(host(&s).status(SEG_AT)).unwrap().status;
+    assert_eq!(before.active, 1);
+
+    let core = [
+        apps[0].clone(),
+        apps[1].clone(),
+        seg_core(0, v1),
+        seg_core(1, v1),
+    ];
+    let events = write_seg(&s, &core);
+    // Only the boot core's bytes moved, and the node's one number still ends at 100.
+    assert!(
+        events
+            .iter()
+            .all(|e| e.phase != phase::TRANSFER || e.boot_core),
+        "{events:?}"
+    );
+    let last = events.last().unwrap();
+    assert!(last.wrote, "the boot core was written");
+    assert_eq!(
+        (last.phase, last.shown, last.boot_core, last.version),
+        (phase::CONFIRM, 100, false, v1)
+    );
+    assert!(
+        events.windows(2).all(|w| w[0].shown <= w[1].shown),
+        "{events:?}"
+    );
+    let after = block_on(host(&s).status(SEG_AT)).unwrap().status;
+    assert_eq!(after.active, before.active, "the app did not move");
+    assert_eq!(after.slots[0].version, v0, "the previous version stays");
+    assert_eq!(
+        block_on(host(&s).boot_core_status(SEG_AT)).unwrap().slots[1].version,
+        v1
+    );
+
+    assert_eq!(
+        block_on(host(&s).rollback(SEG_AT, SEG, &mut |_| {})).unwrap(),
+        v0
+    );
+}
+
+#[test]
+fn nothing_differing_writes_nothing_and_says_the_node_is_on_it() {
+    let s = sim();
+    let v1 = Version::new(1, 1, 0);
+    let apps = [seg_img(0, v1), seg_img(1, v1)];
+    write_seg(&s, &apps);
+    let before = block_on(host(&s).status(SEG_AT)).unwrap().status;
+    s.faults.borrow_mut().seen.clear();
+    let events = write_seg(&s, &apps);
+    assert_eq!(events.len(), 1, "{events:?}");
+    assert_eq!(
+        (events[0].phase, events[0].shown, events[0].wrote),
+        (phase::CONFIRM, 100, false)
+    );
+    // Nothing was confirmed: no display is told so.
+    assert_eq!(count(&s, Cmd::Show), 0);
+    assert_eq!(block_on(host(&s).status(SEG_AT)).unwrap().status, before);
+}
+
+#[test]
+fn a_slot_waiting_for_the_next_boot_is_no_app_to_leave_alone() {
+    let s = sim();
+    let (x, y) = (Version::new(1, 1, 0), Version::new(1, 2, 0));
+    let same = [seg_img(0, x), seg_img(1, x)];
+    write_seg(&s, &same);
+    let st = block_on(host(&s).status(SEG_AT)).unwrap().status;
+    assert_eq!(st.active, 1);
+    // Y goes into the other slot and is set pending; its REBOOT never arrives.
+    s.faults.borrow_mut().drop_req.push((Cmd::Reboot as u8, 1));
+    let pkg = package(&[seg_img(0, y), seg_img(1, y)]);
+    let _ = block_on(host(&s).apply(
+        &pkg,
+        &topology(&yaml()),
+        &key().pk,
+        Some(&[SEG]),
+        &mut |_| {},
+    ));
+    let st = block_on(host(&s).status(SEG_AT)).unwrap().status;
+    assert_eq!(st.active, 1, "still on X");
+    assert_eq!(st.slots[0].state, SlotState::Pending, "{st:?}");
+
+    // X again: not called the same, or Y would boot at the next reset.
+    let events = write_seg(&s, &same);
+    assert!(
+        events.iter().any(|e| e.phase == phase::TRANSFER),
+        "{events:?}"
+    );
+    let st = block_on(host(&s).status(SEG_AT)).unwrap().status;
+    assert_eq!(st.slots[usize::from(st.active)].version, x);
+    assert!(
+        !st.slots
+            .iter()
+            .any(|x| matches!(x.state, SlotState::Pending | SlotState::Trying)),
+        "{st:?}"
+    );
+}
+
+#[test]
+fn a_same_version_rebuild_with_another_digest_is_written() {
+    let s = sim();
+    let v1 = Version::new(1, 1, 0);
+    write_seg(&s, &[seg_img(0, v1), seg_img(1, v1)]);
+    let before = block_on(host(&s).status(SEG_AT)).unwrap().status;
+    let rebuilt = |slot| img("stm32f401re", "seg-f401-7seg", slot, v1, 0x77 + slot);
+    let events = write_seg(&s, &[rebuilt(0), rebuilt(1)]);
+    assert!(events
+        .iter()
+        .any(|e| e.phase == phase::TRANSFER && !e.boot_core));
+    let after = block_on(host(&s).status(SEG_AT)).unwrap().status;
+    assert_ne!(after.active, before.active);
+    assert_ne!(
+        after.slots[usize::from(after.active)].digest16,
+        before.slots[usize::from(before.active)].digest16
+    );
+}
+
+#[test]
+fn a_recovery_rewrites_the_same_app_when_asked() {
+    let s = sim();
+    let v1 = Version::new(1, 1, 0);
+    let apps = package(&[seg_img(0, v1), seg_img(1, v1)]);
+    block_on(host(&s).apply(
+        &apps,
+        &topology(&yaml()),
+        &key().pk,
+        Some(&[SEG]),
+        &mut |_| {},
+    ))
+    .unwrap();
+    let before = block_on(host(&s).status(SEG_AT)).unwrap().status;
+    let topo = topology(&yaml());
+    let assets = RecoverAssets {
+        release: &apps,
+        topology: &topo,
+        pubkey: &key().pk,
+        bootcore: None,
+        stage0: None,
+        roms: &[],
+        rom_confirmed: false,
+    };
+    let (path, v) = block_on(host(&s).recover(SEG, &assets, &mut |_| {})).unwrap();
+    assert_eq!((path, v), (RecoverPath::Retransfer, v1));
+    assert_ne!(
+        block_on(host(&s).status(SEG_AT)).unwrap().status.active,
+        before.active
+    );
+}
+
 #[test]
 fn the_rom_path_leaves_boot_core_a_recorded() {
     let s = sim();

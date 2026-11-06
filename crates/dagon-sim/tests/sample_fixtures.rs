@@ -132,6 +132,39 @@ fn core_release() -> Vec<u8> {
     .bundle
 }
 
+/// The watch's app at 1.1.0 with a recovery agent other than its factory slot's.
+fn agent_release() -> Vec<u8> {
+    let v1 = Version::new(1, 1, 0);
+    let t = dagon_topology::parse_str(YAML).unwrap();
+    let bin = dagon_topology::compile_str(YAML).unwrap();
+    let (flags, caps) = image::default_bits(image_kind::AGENT);
+    let spec = ImageSpec {
+        image_kind: image_kind::AGENT,
+        port_kind: image::port_kind_of("vendor-stage2").unwrap(),
+        mcu_id: image::mcu_id_of("esp32s3").unwrap(),
+        slot: image::slot("esp32s3", image_kind::AGENT, 0).unwrap(),
+        version: v1,
+        build_flags: flags,
+        release_seq: 1,
+        min_bootcore_version: Version::new(1, 0, 0),
+        target_tag: target_tag("watch-s3"),
+        proto_version: 1,
+        capabilities: caps,
+    };
+    let agent = sign_image(&spec, &body(0x3C, SMALL), &key()).unwrap();
+    let images = [watch(v1, SMALL), agent];
+    dagon_sign::release::build(
+        dagon_topology::defs::Registry::builtin(),
+        &t,
+        &bin,
+        &images,
+        "sample-agent-1.1.0",
+        &key(),
+    )
+    .unwrap()
+    .bundle
+}
+
 fn generated() -> Vec<(&'static str, Vec<u8>)> {
     use dagon_sim::sample::{HUB_APP_BYTES, SEG_APP_BYTES, WATCH_APP_BYTES};
     let v0 = Version::new(1, 0, 0);
@@ -141,6 +174,7 @@ fn generated() -> Vec<(&'static str, Vec<u8>)> {
         ("sample-watch-1.0.0.img", watch(v0, SMALL)),
         ("sample-1.1.0.dgb", release(SMALL, SMALL, SMALL)),
         ("sample-core-1.1.0.dgb", core_release()),
+        ("sample-agent-1.1.0.dgb", agent_release()),
         // What the browser demo writes: the apps at their real size.
         (
             "sample-full-1.1.0.dgb",

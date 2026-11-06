@@ -50,6 +50,7 @@ const RESULT: Partial<Record<Progress['stage'], { word: string; silent: boolean 
   silent: { word: WRITE.failed, silent: true },
   cannotFix: { word: WRITE.failed, silent: true },
   unwritten: { word: NODE.unwritten, silent: false },
+  unchanged: { word: NODE.unchanged, silent: false },
 };
 
 export function resultChip(stage: Progress['stage']): { chip: string; spoken: string; silent: boolean } | null {

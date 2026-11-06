@@ -1,3 +1,4 @@
+import { fileURLToPath } from 'node:url';
 import { expect, test, type Page } from '@playwright/test';
 import { layoutFaults, openSample, settled } from './console.ts';
 
@@ -72,6 +73,51 @@ test('the split button writes the checked nodes, again after done, and says when
   await expect(page.locator('.node.st-busy').first()).toBeVisible({ timeout: 30_000 });
   await finished(page);
   await expect(page.locator('dialog[open]')).toHaveCount(0);
+});
+
+test('a node whose boot loader alone differs is written, and its card says the boot loader', async ({ page }) => {
+  const fixture = (name: string) => fileURLToPath(new URL(`../../crates/dagon-sim/fixtures/${name}`, import.meta.url));
+  // What the project's latest build is: the apps at 1.1.0, then the same apps with the F401's boot loader at 1.1.0.
+  let latest = 'sample-1.1.0.dgb';
+  // The file itself, not the module that names its address (`?url`).
+  await page.route((url) => url.pathname.endsWith('/sample-full-1.1.0.dgb') && !url.search, (route) => route.fulfill({ path: fixture(latest) }));
+  await toWrite(page, 'sim');
+  for (const n of ['hub', 'watch'] as const) await check(page, n).click();
+  await page.locator('.split .main').click();
+  await expect(page.locator('.node.st-busy').first()).toBeVisible({ timeout: 30_000 });
+  latest = 'sample-core-1.1.0.dgb';
+  await finished(page);
+  await page.locator('.toast').waitFor({ state: 'detached', timeout: 10_000 });
+
+  // The app is on 1.1.0 already: only the boot loader stands to be written.
+  await page.locator('.split .main').click();
+  await expect(page.locator('.node', { hasText: '→ ブートローダ 1.1.0' })).toBeVisible({ timeout: 60_000 });
+  await finished(page);
+  // The app was what the node runs: it was not written.
+  await expect(page.locator('.node', { hasText: '→ 1.1.0' })).toHaveCount(0);
+  await page.locator('.toast').waitFor({ state: 'detached', timeout: 10_000 });
+
+  // Now both are the same: said, nothing written.
+  await page.locator('.split .main').click();
+  await expect(page.locator('.toast')).toContainText('すべて 1.1.0');
+  await expect(page.locator('.node.st-busy')).toHaveCount(0);
+});
+
+test('a package the nodes already run, chosen as a file: the band and the toast do not claim a write', async ({ page }) => {
+  const small = fileURLToPath(new URL('../../crates/dagon-sim/fixtures/sample-1.1.0.dgb', import.meta.url));
+  await page.route((url) => url.pathname.endsWith('/sample-full-1.1.0.dgb') && !url.search, (route) => route.fulfill({ path: small }));
+  await toWrite(page, 'sim');
+  await page.locator('.split .main').click();
+  await expect(page.locator('.node.st-busy').first()).toBeVisible({ timeout: 30_000 });
+  await finished(page);
+  await expect(page.locator('.toast')).toContainText('書き込み済み 3 ノード');
+  await page.locator('.toast').waitFor({ state: 'detached', timeout: 10_000 });
+
+  await page.locator('input[type=file]').setInputFiles(small);
+  await page.locator('.split .main').click();
+  await expect(page.locator('.toast')).toContainText('書き込み不要', { timeout: 60_000 });
+  await expect(page.locator('#band .sentence')).toContainText('書き込みませんでした');
+  await expect(page.locator('.node', { hasText: '書き込み不要' })).toHaveCount(3);
 });
 
 for (const size of [{ width: 1920, height: 1080 }, { width: 1280, height: 720 }, { width: 1024, height: 600 }]) {

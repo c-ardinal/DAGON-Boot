@@ -1452,6 +1452,16 @@ fn the_layout_is_kept_beside_the_topology() {
     assert_eq!(http(&a, "PUT", "/v1/layout", &h, bad).0, 400);
     std::fs::write(a.dir.join("topology/t.layout.json"), bad).unwrap();
     assert_eq!(http(&a, "GET", "/v1/layout", &h, b"").0, 422);
+    // A file not readable is not replaced: a newer format keeps its names and places.
+    let newer = br#"{"format":2,"names":{"seg":"7seg"}}"#;
+    std::fs::write(a.dir.join("topology/t.layout.json"), newer).unwrap();
+    let body = br#"{"format":1,"positions":{"seg":{"x":1,"y":2}}}"#;
+    assert_eq!(http(&a, "PUT", "/v1/layout", &h, body).0, 409);
+    assert_eq!(
+        std::fs::read(a.dir.join("topology/t.layout.json")).unwrap(),
+        newer
+    );
+    std::fs::write(a.dir.join("topology/t.layout.json"), bad).unwrap();
     let big = format!("{{\"x\":\"{}\"}}", "a".repeat(300 * 1024));
     assert_eq!(http(&a, "PUT", "/v1/layout", &h, big.as_bytes()).0, 413);
     // A layout file grown too large on disk is not read whole or served.

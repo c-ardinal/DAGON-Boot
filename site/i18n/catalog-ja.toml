@@ -49,6 +49,7 @@
 "The node's start and its DAGON links: what the MCU package's start and serving loop report through the agent." = "ノードの起動とその DAGON のリンク: マイコンの定義のコードの起動と応答のループがエージェントを通して報告するもの。"
 "The other slot was confirmed; this one is no longer." = "もう一方のスロットが確定した。このスロットはもう確定ではない。"
 "The reply has left; the reset follows." = "返答が出た。リセットが続く。"
+"The host told the node its write's one progress number, the one the host's caller shows for this node." = "ホストが、書き込みの進み具合のひとつの数字をノードに伝えた。ホストの呼び出し側がこのノードに見せる数字と同じ。"
 "The reply to the last request left, `ms` after it arrived." = "最後のリクエストへの返答が、届いてから `ms` の後に出た。"
 "The slot is erased and the header (where the target has one) accepted: body chunks are taken from here." = "スロットを消去し、ヘッダ（ターゲットが持つところでは）を受け付けた。ここから本体のチャンクを受け取る。"
 "The slot is the one tried on the next boot." = "次のブートで試すスロットになった。"

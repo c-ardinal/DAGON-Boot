@@ -2,6 +2,7 @@ import { describe, expect, test } from 'vitest';
 import { RULE_FIX } from '../copy.ts';
 import { Define } from './define.svelte.ts';
 import { connect, emptyDoc, fromYaml, placeMcu, setLink, setLinkKind, setNode } from './model.ts';
+import { setName } from './model.ts';
 import { SAMPLE_YAML } from '../sample.ts';
 import { problemChip } from './problems.ts';
 import { LINK, LINK_WHY } from '../copy.ts';
@@ -203,5 +204,23 @@ describe('define session', () => {
       expect(d.importYaml(text), JSON.stringify(text)).toBe(false);
       expect(d.unreadable).toBe(true);
     }
+  });
+});
+
+describe('names read after the project opened', () => {
+  test('go under the ones here, are no edit, and undoing does not drop them', () => {
+    const d = new Define();
+    d.load(fromYaml(SAMPLE_YAML));
+    const edits = d.revision;
+    d.apply(setName(d.doc, 'seg', 'A'));
+    const before = d.revision;
+    d.adoptNames({ seg: 'old', hub: 'saved' });
+    expect(d.doc.names).toEqual({ seg: 'A', hub: 'saved' });
+    expect(d.revision).toBe(before);
+    expect(before).toBeGreaterThan(edits);
+    d.undo();
+    expect(d.doc.names).toEqual({ seg: 'old', hub: 'saved' });
+    d.redo();
+    expect(d.doc.names).toEqual({ seg: 'A', hub: 'saved' });
   });
 });

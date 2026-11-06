@@ -48,6 +48,8 @@ export class Define {
   alert = $state('');
   /** The last file read did not parse. */
   unreadable = $state(false);
+  /** The project's YAML was not read as it opened: saving would replace what was not seen, until a 構成 is loaded or read from a file. */
+  notRead = $state(false);
   /** Bumped to ask the page to focus the inspector field `focusField`. */
   focusRequest = $state(0);
   focusField = $state('');
@@ -237,8 +239,17 @@ export class Define {
       return false;
     }
     this.unreadable = false;
+    this.notRead = false;
     this.selected = null;
     return true;
+  }
+
+  /** 呼び名 read only after the project opened: under the ones here, in the undo history too, so undoing cannot drop them. No edit. */
+  adoptNames(names: Record<string, string>): void {
+    const under = (doc: Doc): Doc => ({ ...doc, names: { ...names, ...doc.names } });
+    this.doc = under(this.doc);
+    this.past = this.past.map(under);
+    this.future = this.future.map(under);
   }
 
   /** A project's 構成 as opened (no undo back past it); `text` is its YAML as written. */
@@ -249,6 +260,7 @@ export class Define {
     this.doc = doc;
     this.selected = null;
     this.unreadable = false;
+    this.notRead = false;
     this.revision++;
     this.savedAt = this.revision;
     this.saveFailure = null;

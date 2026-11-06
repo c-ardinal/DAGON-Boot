@@ -6,7 +6,7 @@
   import { fade, rise, tokenMs } from './app/motion.ts';
   import { resultChip } from './app/nodeState.ts';
   import { HUB_LOCKED, hubOf, view, type Action } from './app/machine.ts';
-  import { Operate, waterOf, type Progress, type ReleaseFile } from './app/operate.svelte.ts';
+  import { Operate, waterOf, writingTo, type Progress, type ReleaseFile } from './app/operate.svelte.ts';
   import { keptChoices, type Kept } from './app/kept.ts';
   import { buildFailure, buildingNow, buildStateOf, firstWriteNodes, type BuildingMemo, type BuildState } from './app/jobFlow.ts';
   import { logStages } from './app/stageLog.svelte.ts';
@@ -41,7 +41,8 @@
   import Problems from './screens/define/Problems.svelte';
   import Table from './screens/define/Table.svelte';
   import CliPanel from './screens/define/CliPanel.svelte';
-  import { Cli, jobReason, LAYOUT_FORMAT, type Layout } from './app/define/cli.svelte.ts';
+  import { Cli, jobReason } from './app/define/cli.svelte.ts';
+  import { LayoutFile } from './app/define/layoutFile.ts';
   import { CLI_LINK, CLI_STATE } from './app/copy.ts';
   import Reconnect from './screens/Reconnect.svelte';
   import Header from './screens/Header.svelte';
@@ -53,7 +54,7 @@
   import RomConfirm from './screens/RomConfirm.svelte';
   import { answerConsent } from './app/factory.ts';
   import Toast, { type Notice } from './screens/Toast.svelte';
-  import { CONN, FILE, HELP, LAYOUT, MENU, NOTICE, SIM, START, TABLE, fill as fillIn } from './app/copy.ts';
+  import { CONN, FILE, HELP, LAYOUT, MENU, NOTICE, SIM, START, TABLE, TOPOLOGY_READ, fill as fillIn } from './app/copy.ts';
   import { devHub } from './serial/devHub.ts';
   import { DEMO_SITE } from './app/site.ts';
   import { serveSim, type SimStand } from './serial/serveSim.ts';
@@ -184,37 +185,44 @@
   /** The open project's 構成 (its YAML through serve): 運用 when it has no problems, else 定義. */
   // The start screen is reached only through `leave` (menu, 最初からやり直す), so no unsaved edit is here when a project opens.
   async function openWork(want?: 'operate' | 'define') {
-    const yaml = await cli.loadTopology().catch(() => null);
+    const yaml = await cli.loadTopology().catch(() => undefined);
     // 呼び名 and positions live beside the YAML (GET /v1/layout).
-    projectLayout = (await cli.loadLayout().catch(() => null)) ?? {};
-    if (cli.layoutRefused) notice = { word: LAYOUT.refused, error: true, detail: `${LAYOUT.refusedDetail}（${cli.layoutRefused}）` };
+    if (!(await layoutFile.open())) notice = { word: LAYOUT.refused, error: true, detail: `${LAYOUT.refusedDetail}（${cli.layoutRefused}）` };
     local = false;
     op.reset();
     d.reset();
     if (yaml) {
       try {
-        d.load(fromYaml(yaml, projectLayout.names ?? {}), yaml);
+        d.load(fromYaml(yaml, layoutFile.current.names ?? {}), yaml);
       } catch {
         d.unreadable = true;
+        d.notRead = true;
       }
+    } else if (yaml === undefined) {
+      d.notRead = true;
+      notice = { word: TOPOLOGY_READ.label, error: true, detail: TOPOLOGY_READ.detail };
     }
     layoutNames = JSON.stringify(d.doc.names);
-    positions = projectLayout.positions ?? {};
+    positions = layoutFile.current.positions ?? {};
     canvasView = newView();
     enterWork(want);
   }
 
-  /** The project's layout file as last read or written; names follow the edits. */
-  let projectLayout: Layout = {};
+  /** The project's layout file; names follow the edits. */
+  const layoutFile = new LayoutFile(cli, (read) => {
+    d.adoptNames(read.names ?? {});
+    layoutNames = JSON.stringify(d.doc.names);
+    positions = { ...read.positions, ...positions };
+  });
   let layoutNames = '';
   $effect(() => {
     const names = JSON.stringify(d.doc.names);
-    if (screen !== 'work' || local) return;
+    // With no 構成 read, the editor knows none of the file's nodes: its names say nothing about them.
+    if (screen !== 'work' || local || d.notRead) return;
     untrack(() => {
       if (names === layoutNames) return;
       layoutNames = names;
-      projectLayout = { ...projectLayout, format: LAYOUT_FORMAT, names: { ...d.doc.names } };
-      void cli.saveLayout(projectLayout);
+      void layoutFile.change(() => ({ names: { ...d.doc.names } }));
     });
   });
 
@@ -332,7 +340,7 @@
   const autosave = new Autosave(d, {
     put: (yaml) => cli.saveTopology(yaml),
     enabled: () => screen === 'work' && !local,
-    blocked: () => cli.defsFailed,
+    blocked: () => cli.defsFailed || d.notRead,
   });
   $effect(() => {
     void d.revision;
@@ -367,8 +375,8 @@
   /** Where the user put cards, kept in the project's layout file. */
   let positions = $state.raw<Record<string, { x: number; y: number }>>({});
   function savePositions() {
-    projectLayout = { ...projectLayout, format: LAYOUT_FORMAT, positions };
-    if (!local) void cli.saveLayout(projectLayout);
+    if (local) return;
+    void layoutFile.change(() => ({ positions }));
   }
   let tableTab = $state(0);
   /** The free part of the canvas (between the floating columns): what a fit fills. */
@@ -619,6 +627,7 @@
     previous: NODE.previous,
     coreBack: WRITE.coreBack.label,
     unwritten: NODE.unwritten,
+    unchanged: NODE.unchanged,
   };
   /** Stages in which a card shows → the new version and its one %. */
   const FILLING_STAGES: ReadonlySet<Progress['stage']> = new Set(['writing', 'lastResort', 'rebooting']);
@@ -629,7 +638,10 @@
   /** On the cards while writing: → the new version; after it, what the write left (resultChip). */
   const cardChipOf = (id: string, p: Progress): Chip | null => {
     const to = op.fileVersions[id];
-    if (FILLING_STAGES.has(p.stage)) return to === undefined ? null : { chip: WRITE.to(versionText(to)), spoken: WRITE.to(versionText(to)), silent: false };
+    if (FILLING_STAGES.has(p.stage)) {
+      const said = writingTo(p, to);
+      return said === null ? null : { chip: said, spoken: said, silent: false };
+    }
     return resultChip(p.stage);
   };
   const progressChips = $derived(
@@ -833,10 +845,10 @@
       notice = { word: BAND.M58.chip, error: true, detail: BAND.M58.sentence };
       return;
     }
-    const no = op.noWrite(pkg.bytes);
+    const no = await op.noWrite(pkg.bytes);
     if (no === 'noneChecked') return void (notice = { word: WRITE.noneChecked.label, detail: WRITE.noneChecked.detail });
     if (no) {
-      const said = WRITE.alreadyOn(versionText(no.same));
+      const said = WRITE.alreadyOn(versionText(no.same), no.coreToo);
       return void (notice = { word: said.label, detail: said.detail });
     }
     op.takeFile(pkg.name, pkg.bytes);
@@ -1185,7 +1197,12 @@
     });
   });
   $effect(() => {
-    if (op.state === 'done') untrack(() => (notice = { word: fillIn(WRITE.toast.done, { n: op.targets.length }) }));
+    if (op.state !== 'done') return;
+    untrack(() => {
+      const f = op.finished;
+      const wrote = f?.kind === 'updated' ? (f.wrote ?? op.targets.length) : op.targets.length;
+      notice = { word: wrote ? fillIn(WRITE.toast.done, { n: wrote }) : WRITE.toast.none };
+    });
   });
   // A consent of a version this dagon does not read: a failure the user must notice.
   $effect(() => {

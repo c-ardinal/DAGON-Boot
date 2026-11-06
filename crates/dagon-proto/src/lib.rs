@@ -53,6 +53,9 @@ pub enum Cmd {
     /// Node (kind V) replies OK, then enters its ROM loader. Added later as
     /// an additive change: the other commands are unchanged.
     EnterRom = 0x24,
+    /// To the hub, for its display. To a node being written, the write's
+    /// one number for the node's own display (additive: an agent that
+    /// predates it answers `Status::Unsupported` and is not told again).
     Show = 0x41,
     Relay = 0x50,
     SubCtl = 0x60,

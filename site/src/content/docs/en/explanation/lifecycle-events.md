@@ -217,6 +217,7 @@ Generated order at start: `app.starting` → `app.store_opened` (or
 | `app.transfer_started`, `app.transfer_progress`, `app.transfer_aborted` | erase done / each chunk written / idle timeout, store error, new request | `target`, `slot`, `len` / `done`, `total` / `cause` |
 | `app.verify_started`, `app.verify_ok`, `app.verify_failed` | body hashing and read-back | `len` / `slot`, `version` / `status` |
 | `app.written`, `app.pending_set`, `app.pending_moved`, `app.pending_refused`, `app.confirmed`, `app.demoted`, `app.confirm_refused` | image lifecycle (1.1) | |
+| `app.percent_told` | the host told the write's one progress number (the same as the DAGON Console's %; during a transfer, only when the node can take it; display tasks read `AppSnapshot::percent`) | `percent` |
 | `app.reboot_requested` | reboot accepted; **decision** `allow_reboot_now` | `mode` |
 | `app.before_reboot` | reply has left; reset follows | |
 | `app.self_check` | confirm while on trial; **decision** `self_check` | `slot`, `version` |
@@ -579,7 +580,7 @@ the head of the chain copies each event into:
 
 - `Latest`: an `embassy_sync::watch::Watch` (multi-receiver, last
   value) holding `Latest { state, last }`: the layer's snapshot, folded
-  from every event (the app's `{ phase, progress, version, trial }`, the
+  from every event (the app's `{ phase, progress, percent, version, trial }`, the
   relay's children), and the last event's record.
 - `Recent<N>`: a fixed ring of the last N events as `EventRecord`, an
   owned, bounded form generated per event by `state_machine!`:
@@ -1807,7 +1808,7 @@ async fn display_task(mut lcd: Lcd, events: AppEvents) {
         let s = rx.changed().await.state;
         match s.phase {
             Phase::Starting | Phase::Idle | Phase::Trial => lcd.splash(s.version, s.trial),
-            Phase::Transferring => lcd.bar(s.progress), // Some((done, total))
+            Phase::Transferring => lcd.bar(s.percent), // Option<u8>
             Phase::Verifying => lcd.text("verify"),
             Phase::Written | Phase::Pending => lcd.text("written"),
             Phase::RebootPending => lcd.text("reboot"),

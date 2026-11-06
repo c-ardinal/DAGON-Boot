@@ -706,7 +706,11 @@ fn topology_path(server: &Server) -> Result<PathBuf, Response> {
 /// The project's 構成 YAML as it is on disk (404 before the first save).
 fn topology_get(server: &Server) -> Res {
     let p = topology_path(server)?;
-    let yaml = std::fs::read(&p).map_err(|_| Response::error(404, "no topology file yet"))?;
+    let yaml = std::fs::read(&p).map_err(|e| match e.kind() {
+        std::io::ErrorKind::NotFound => Response::error(404, "no topology file yet"),
+        // A file not read is not a project without one: the page must not save over it.
+        _ => Response::error(500, &e.to_string()),
+    })?;
     Ok(Response::bytes("application/yaml; charset=utf-8", yaml))
 }
 
@@ -1470,6 +1474,21 @@ fn check_layout(v: &Value) -> Result<(), String> {
     Ok(())
 }
 
+/// Why the layout file at `p` cannot be read; none when it can, or there is none.
+fn unreadable_layout(p: &Path) -> Option<String> {
+    let bytes = match crate::paths::read_capped(p, MAX_LAYOUT) {
+        Ok(Some(b)) => b,
+        Ok(None) => return Some("the layout file is too large".into()),
+        Err(_) if !p.exists() => return None,
+        Err(e) => return Some(e.to_string()),
+    };
+    let v: Value = match serde_json::from_slice(&bytes) {
+        Ok(v) => v,
+        Err(_) => return Some("the layout file is not JSON".into()),
+    };
+    check_layout(&v).err()
+}
+
 /// PUT /v1/layout: a layout of this format, written whole.
 // Writes the project's layout file, the user's file the page edits.
 #[allow(clippy::disallowed_methods)]
@@ -1486,6 +1505,10 @@ fn layout_put(server: &Server, req: &Request) -> Res {
         .files
         .lock()
         .map_err(|_| Response::error(500, "lock"))?;
+    // Replacing is whole: a file no reader could have taken is not lost to a page that did not see it.
+    if let Some(e) = unreadable_layout(&p) {
+        return Err(Response::error(409, &format!("not replaced: {e}")));
+    }
     crate::paths::write_atomic(&p, &text).map_err(|e| Response::error(500, &e))?;
     Ok(json_ok(json!({ "saved": true })))
 }

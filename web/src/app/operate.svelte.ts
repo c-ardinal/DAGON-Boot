@@ -8,6 +8,9 @@ import {
   PHASE,
   check_release_for,
   newHost,
+  releaseAgentDigest,
+  releaseAppDigest,
+  releaseCoreVersions,
   releaseVersions,
   release_topology,
   topo_compile,
@@ -26,7 +29,7 @@ import {
 import type { RollbackRecord } from './agent.svelte.ts';
 import { FAILURE_BAND } from './band.ts';
 import { ConnectError, wasmReady } from './connect.ts';
-import { ANNOUNCE, FILE } from './copy.ts';
+import { ANNOUNCE, FILE, WRITE } from './copy.ts';
 import { HUB_LOCKED, NODE_WRITE, WATCHED, next, type ConnectFailure, type Ctx, type Ev, type L } from './machine.ts';
 import { SAMPLE_CONFIG, targetKey, type Config, type Node } from './sample.ts';
 
@@ -49,10 +52,38 @@ const UNKNOWN: Live = { responding: null, rttMs: null, lastSeen: null, hello: nu
 
 /** Where one node is in an update (the node chip and the update-order row). */
 export interface Progress {
-  stage: 'waiting' | 'writing' | 'lastResort' | 'rebooting' | 'done' | 'silent' | 'refused' | 'previous' | 'coreBack' | 'unwritten' | 'cannotFix';
+  stage: 'waiting' | 'writing' | 'lastResort' | 'rebooting' | 'done' | 'unchanged' | 'silent' | 'refused' | 'previous' | 'coreBack' | 'unwritten' | 'cannotFix';
   percent: number;
   /** dagon-host's reason when the node refused (`E_FLASH`, `E_SIGNATURE`, ...). */
   reason?: string;
+  /** The boot core version being written, while it is; the app's write has none. */
+  core?: number;
+}
+
+/** The recovery agent's slot in STATUS. */
+const FACTORY_SLOT = 2;
+
+const sameBytes = (a: Uint8Array | null, b: Uint8Array): boolean => a !== null && a.length === b.length && a.every((x, i) => x === b[i]);
+
+/** STATUS slot states (dagon_proto::payload::SlotState) that decide what the next reset runs. */
+const SLOT = { pending: 2, trying: 3, confirmed: 4 } as const;
+
+/** The running slot is the confirmed one and no slot waits for the next boot or is on trial (dagon-host's slots_settled). */
+export function slotsSettled(st: StatusResp): boolean {
+  return st.active === st.confirmed && st.slots[st.active]?.state === SLOT.confirmed && !st.slots.some((s) => s.state === SLOT.pending || s.state === SLOT.trying);
+}
+
+/** The package's app for a node is what it runs, and nothing else is about to: dagon-host's normal write leaves it out. */
+export function appUnchanged(bytes: Uint8Array, node: number, st: { hello: HelloResp; status: StatusResp }): boolean {
+  const running = st.status.slots[st.status.active]?.digest16 ?? null;
+  const app = releaseAppDigest(bytes, node, st.status.active);
+  return !st.hello.trial && slotsSettled(st.status) && app !== null && sameBytes(running, app);
+}
+
+/** On a node's card while it is written: what is being written now (its boot core comes first when that differs), or null when not known. */
+export function writingTo(p: Progress, app: number | undefined): string | null {
+  if (p.core !== undefined) return WRITE.toCore(versionText(p.core));
+  return app === undefined ? null : WRITE.to(versionText(app));
 }
 
 /** Stages in which a node's water rises with its progress; a finished or stopped node drains. */
@@ -76,7 +107,7 @@ export function waterOf(progress: Record<string, Progress>): Record<string, numb
  * node rolled back to its previous version, or a node recovered.
  */
 export type Finish =
-  | { kind: 'updated'; left: number; leftOut?: number }
+  | { kind: 'updated'; left: number; leftOut?: number; wrote?: number; same?: number }
   | { kind: 'rolledBack'; name: string; version: string }
   | { kind: 'recovered'; name: string; version: string };
 
@@ -188,11 +219,12 @@ export function failureStage(reason: string): Pick<Progress, 'stage' | 'reason'>
 /**
  * Where a hub chosen again by hand stands: on the app just `sent`; else, when
  * only a boot core was sent, its running boot core `core` tells whether that
- * core went back or took over with the app still to write.
+ * core went back or took over: with the app still to write, or with none to write when the package's is what it runs
+ * (`appSame`).
  */
-export function hubBack(r: ConfirmResult, sent: number | undefined, coreSent: number | undefined, core: number | null): 'done' | 'previous' | 'coreBack' | 'unwritten' {
+export function hubBack(r: ConfirmResult, sent: number | undefined, coreSent: number | undefined, core: number | null, appSame = false): 'done' | 'previous' | 'coreBack' | 'unwritten' {
   if (r.outcome === 'confirmed' || (r.outcome === 'notOnTrial' && r.version === sent)) return 'done';
-  if (sent === undefined && coreSent !== undefined) return core === coreSent ? 'unwritten' : 'coreBack';
+  if (sent === undefined && coreSent !== undefined) return core !== coreSent ? 'coreBack' : appSame ? 'done' : 'unwritten';
   return 'previous';
 }
 
@@ -282,6 +314,8 @@ export class Operate {
   }
   /** Nodes on the chosen release's version since it was chosen (an update, its rest, a recovery). */
   private updated = new Set<string>();
+  /** Nodes this run really wrote an image to; the others among `updated` were already on it. */
+  private wrote = new Set<string>();
   /** The run hubRestarting / reconnectNeeded belong to, so done says what it did. */
   private running: 'update' | 'recover' | 'rollback' = 'update';
 
@@ -320,16 +354,48 @@ export class Operate {
     return this.reach.filter((n) => this.live[n.id]?.responding === true && !this.updated.has(n.id)).length;
   }
 
-  /** What stands in the way of writing `bytes` to the checked nodes, before anything is sent: none checked, or every checked node already on it. */
-  noWrite(bytes: Uint8Array): 'noneChecked' | { same: number } | null {
+  /**
+   * What stands in the way of writing `bytes` to the checked nodes, before anything is sent: none checked, or every
+   * checked node already on its app, its boot core and its recovery agent, compared as dagon-host's update_app,
+   * update_core and update_agent do, against what the node answers now; what cannot be read is not called the same,
+   * so the write goes and says why.
+   */
+  async noWrite(bytes: Uint8Array): Promise<'noneChecked' | { same: number; coreToo: boolean } | null> {
     const nodes = this.answering();
     if (nodes.length === 0) return 'noneChecked';
     const given = releaseVersions(bytes);
+    const cores = releaseCoreVersions(bytes);
     const reach = this.reach;
-    const of = (id: string) => given.get(reach.findIndex((n) => n.id === id));
-    const first = of(nodes[0]);
-    const same = first !== undefined && nodes.every((id) => of(id) === this.live[id]?.hello?.activeVersion);
-    return same ? { same: first } : null;
+    const at = (id: string) => reach.findIndex((n) => n.id === id);
+    const first = given.get(at(nodes[0]));
+    if (first === undefined) return null;
+    let coreToo = false;
+    for (const id of nodes) {
+      const st = await this.statusOf(id);
+      if (!st || !appUnchanged(bytes, at(id), st)) return null;
+      const agent = releaseAgentDigest(bytes, at(id));
+      if (agent && !sameBytes(st.status.slots[FACTORY_SLOT]?.digest16 ?? null, agent)) return null;
+      const held = cores.get(at(id));
+      if (!held) continue;
+      if (!held.includes((await this.runningCore(id)) ?? NaN)) return null;
+      coreToo = true;
+    }
+    return { same: first, coreToo };
+  }
+
+  /** What node `id` answers now; null when it cannot be read. */
+  private async statusOf(id: string): Promise<{ hello: HelloResp; status: StatusResp } | null> {
+    const n = this.reach.find((x) => x.id === id);
+    if (!n) return null;
+    return this.call((h) => h.status(n.target.kind, n.target.addr)).catch(() => null);
+  }
+
+  /** The version of the boot core node `id` runs now; null when it cannot be read, or another waits for the next boot. */
+  private async runningCore(id: string): Promise<number | null> {
+    const n = this.reach.find((x) => x.id === id);
+    if (!n) return null;
+    const core = await this.call((h) => h.bootCoreStatus(n.target.kind, n.target.addr)).catch(() => null);
+    return core && slotsSettled(core) ? (core.slots[core.active]?.version ?? null) : null;
   }
 
   get responding(): number {
@@ -680,6 +746,7 @@ export class Operate {
     this.failed = null;
     this.sentVersion = {};
     this.coreSent = {};
+    this.wrote = new Set();
     this.progress = Object.fromEntries(this.targets.map((id) => [id, { stage: 'waiting', percent: 0 }]));
     this.track = Object.fromEntries(this.targets.map((id) => [id, { ...NO_TRACK }]));
     // topology node index = position in reach (true for the sample, which follows its YAML).
@@ -709,14 +776,15 @@ export class Operate {
     const was = this.progress[n.id] ?? { stage: 'waiting', percent: 0 };
     if (e.phase === PHASE.transfer || e.phase === PHASE.verify) {
       if (was.stage !== 'writing') this.status = ANNOUNCE.A11(n.name);
-      this.progress[n.id] = { stage: 'writing', percent: e.phase === PHASE.verify ? 100 : e.percent };
+      this.progress[n.id] = { stage: 'writing', percent: e.phase === PHASE.verify ? 100 : e.percent, ...(e.bootCore ? { core: e.version } : {}) };
     } else if (e.phase === PHASE.reboot && n.role === 'hub') {
-      this.progress[n.id] = { stage: 'rebooting', percent: 100 };
+      this.progress[n.id] = { stage: 'rebooting', percent: 100, ...(e.bootCore ? { core: e.version } : {}) };
       this.hubAway(this.sentVersion[n.id]);
     } else if (e.phase === PHASE.confirm && !e.bootCore) {
       // Only the app's confirmation finishes the node; its boot core's comes before it.
-      this.progress[n.id] = { stage: 'done', percent: 100 };
+      this.progress[n.id] = { stage: e.wrote ? 'done' : 'unchanged', percent: 100 };
       this.updated.add(n.id);
+      if (e.wrote) this.wrote.add(n.id);
       // The card shows the version the node now runs.
       const was = this.live[n.id];
       if (was?.hello) this.live[n.id] = { ...was, hello: { ...was.hello, activeVersion: e.version, trial: false } };
@@ -725,7 +793,7 @@ export class Operate {
 
   /** Feeds node `id`'s write track (its one %) with one of dagon-host's events. */
   private trackEvent(id: string, e: UpdateEvent): void {
-    const now = this.now();
+    const now = e.atMs;
     const k = this.track[id] ?? { ...NO_TRACK };
     if (e.phase === PHASE.transfer || e.phase === PHASE.rom) {
       // A new image (after a boot core's reboot) starts its own transfer.
@@ -736,7 +804,11 @@ export class Operate {
     } else if (e.phase === PHASE.reboot) {
       // A recovery may reboot without a VERIFY: its transfer ends here.
       this.track[id] = { ...k, shown: e.shown, xferMs: k.xferMs ?? (k.t0 === null ? null : Math.max(1, now - k.t0)), rebootAt: now };
-    } else if (e.phase === PHASE.confirm && !e.bootCore) {
+    } else if (e.phase === PHASE.confirm && e.bootCore) {
+      // dagon-host counted the boot core's trial up to this moment, from the same moments, so its number is not under
+      // what was shown; the clock stops here, or the page would run ahead of the number the next image starts from.
+      this.track[id] = { ...k, shown: e.shown, t0: null, xferMs: null, rebootAt: null };
+    } else if (e.phase === PHASE.confirm) {
       this.track[id] = { ...k, done: true };
     }
   }
@@ -818,9 +890,16 @@ export class Operate {
   }
 
   private done(): void {
-    const v = Object.values(this.sentVersion)[0];
+    // An app left unchanged is on the package's version too.
+    const v = Object.values(this.sentVersion)[0] ?? Object.values(this.fileVersions)[0];
     this.status = ANNOUNCE.A14(v === undefined ? '' : versionText(v));
-    this.finished = { kind: 'updated', left: this.reach.filter((n) => !this.updated.has(n.id) && !this.skip.has(n.id)).length, ...(this.skip.size ? { leftOut: this.skip.size } : {}) };
+    this.finished = {
+      kind: 'updated',
+      left: this.reach.filter((n) => !this.updated.has(n.id) && !this.skip.has(n.id)).length,
+      wrote: this.wrote.size,
+      same: this.reach.filter((n) => this.updated.has(n.id) && !this.wrote.has(n.id)).length,
+      ...(this.skip.size ? { leftOut: this.skip.size } : {}),
+    };
     this.go(this.state === 'hubRestarting' ? 'confirmed' : this.state === 'reconnectNeeded' ? 'reconnected' : 'doneNoHub');
     this.startWatching();
   }
@@ -856,8 +935,11 @@ export class Operate {
         if (why) throw why;
         const confirmed = await h.confirm('hub', 0, false);
         const core = await h.bootCoreStatus('hub', 0).catch(() => null);
+        const st = await h.status('hub', 0).catch(() => null);
+        const hubAt = this.reach.findIndex((n) => n.role === 'hub');
+        const appSame = !!st && !!this.file && appUnchanged(this.file.bytes, hubAt, st);
         this.swap(t, old);
-        return { confirmed, core: core ? core.slots[core.active].version : null };
+        return { confirmed, core: core ? core.slots[core.active].version : null, appSame };
       } catch (e) {
         this.noteWhy(isNote(e) ? e : { kind: 'silent' });
         if (old) link.use(old);
@@ -870,7 +952,7 @@ export class Operate {
       this.alert = ANNOUNCE.A21timeout;
       return false;
     }
-    this.confirmed(r.confirmed, r.core);
+    this.confirmed(r.confirmed, r.core, r.appSame);
     return true;
   }
 
@@ -904,9 +986,9 @@ export class Operate {
   }
 
   /** reconnectNeeded: the hub confirmed on the version just sent goes on to done; on its previous version it stops there (stopped). */
-  private confirmed(r: ConfirmResult, core: number | null): void {
+  private confirmed(r: ConfirmResult, core: number | null, appSame: boolean): void {
     const hub = this.reach.find((n) => n.role === 'hub')!;
-    const stage = hubBack(r, this.sentVersion[hub.id], this.coreSent[hub.id], core);
+    const stage = hubBack(r, this.sentVersion[hub.id], this.coreSent[hub.id], core, appSame);
     this.alert = '';
     if (stage === 'coreBack' || stage === 'unwritten') return this.stopAt(hub.id, stage);
     if (stage === 'previous') {
@@ -917,6 +999,7 @@ export class Operate {
     this.progress[hub.id] = { stage: 'done', percent: 100 };
     if (this.running === 'update') {
       this.updated.add(hub.id);
+      this.wrote.add(hub.id);
       return this.done();
     }
     this.finishRun(hub, r.version);

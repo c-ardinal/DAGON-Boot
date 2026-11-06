@@ -122,6 +122,39 @@ pub fn release_versions(bundle: &[u8]) -> Vec<u32> {
         .collect()
 }
 
+/// The boot core versions `bundle` holds for each node, as
+/// `[node_index, raw_version]` pairs (a node with A/B images appears once per
+/// image). A node whose running boot core is none of them gets one written
+/// (dagon-host `update_core`). Empty when the bundle does not parse.
+#[wasm_bindgen]
+pub fn release_core_versions(bundle: &[u8]) -> Vec<u32> {
+    let Ok(b) = BundleView::parse(bundle) else {
+        return Vec::new();
+    };
+    let m = b.manifest();
+    (0..m.entry_count())
+        .map(|i| m.entry(i))
+        .filter(|e| e.image_kind == dagon_format::header::image_kind::BOOTCORE)
+        .flat_map(|e| [u32::from(e.node_index), e.version.raw()])
+        .collect()
+}
+
+/// The header digest of the recovery agent `bundle` holds for `node`, compared
+/// with its factory slot as dagon-host does; none when it holds no agent.
+#[wasm_bindgen]
+pub fn release_agent_digest(bundle: &[u8], node: u8) -> Option<Vec<u8>> {
+    let b = BundleView::parse(bundle).ok()?;
+    dagon_host::agent_digest(&b, node).map(|d| d.to_vec())
+}
+
+/// The header digest of the app `bundle` holds for `node` in `slot`, compared
+/// with that slot as dagon-host does; none when it holds no such app.
+#[wasm_bindgen]
+pub fn release_app_digest(bundle: &[u8], node: u8, slot: u8) -> Option<Vec<u8>> {
+    let b = BundleView::parse(bundle).ok()?;
+    dagon_host::app_digest(&b, node, slot).map(|d| d.to_vec())
+}
+
 /// Decoded HELLO response body.
 #[wasm_bindgen]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

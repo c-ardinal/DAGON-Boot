@@ -287,6 +287,11 @@ dagon_events::state_machine! {
                 observe(live, host);
             /// The reply has left; the reset follows.
             before_reboot(): Ready => Ready emits BeforeReboot = 0x3C {} observe(live);
+            /// The host told the node its write's one progress number, the
+            /// one the host's caller shows for this node.
+            percent_told(percent: u8): Ready => Ready
+                emits PercentTold = 0x3D { percent: u8 }
+                observe(live);
         }
     }
 }

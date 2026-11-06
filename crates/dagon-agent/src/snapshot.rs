@@ -47,6 +47,10 @@ pub struct AppSnapshot {
     pub version: Version,
     /// Bytes of the body received and expected, while transferring.
     pub progress: Option<(u32, u32)>,
+    /// The write's one progress number, as the host told it: what a display
+    /// shows beside the host's own while transferring. `None`: not told
+    /// (the image's bytes are past, or the host does not tell).
+    pub percent: Option<u8>,
     /// The running image is on trial.
     pub trial: bool,
 }
@@ -70,7 +74,9 @@ impl Snapshot for AppSnapshot {
         } else if e.get::<session::VerifyStarted>().is_some() {
             self.phase = Phase::Verifying;
         } else if e.get::<image::Written>().is_some() {
-            (self.phase, self.progress) = (Phase::Written, None);
+            (self.phase, self.progress, self.percent) = (Phase::Written, None, None);
+        } else if let Some(t) = e.get::<requests::PercentTold>() {
+            self.percent = Some(t.percent);
         } else if e.get::<image::PendingSet>().is_some() {
             self.phase = Phase::Pending;
         } else if e.get::<requests::RebootRequested>().is_some() {
@@ -81,7 +87,7 @@ impl Snapshot for AppSnapshot {
             || e.get::<requests::VerifyFailed>().is_some()
             || e.get::<requests::PendingRefused>().is_some()
         {
-            (self.phase, self.progress) = (Phase::Failed, None);
+            (self.phase, self.progress, self.percent) = (Phase::Failed, None, None);
         } else if e.get::<requests::ConfirmRefused>().is_some() && self.trial {
             self.phase = Phase::Trial;
         }

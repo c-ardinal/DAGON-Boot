@@ -384,13 +384,25 @@ fn the_published_snapshot_follows_an_update_and_its_trial() {
     let body: Vec<u8> = (0..900u32).map(|i| (i * 7) as u8).collect();
     let img = image(1, Version::new(1, 1, 0), &body);
     let mut w = Wire { seq: 0 };
+    // The host tells the number before the erase, so it is there all through.
+    assert_eq!(w.call(&mut a, Cmd::Show, &[1, 1, 7, 0, 0, 0, 0]), Status::Ok);
     w.begin(&mut a, 1, &img);
     let s = snapshot(&events);
     assert_eq!(s.phase, Phase::Transferring);
     assert_eq!(s.progress, Some((200, 900)), "the first body chunk");
+    assert_eq!(s.percent, Some(7));
+    // Between chunks: the transfer goes on. A number past 100 is not shown.
+    assert_eq!(
+        w.call(&mut a, Cmd::Show, &[1, 1, 200, 0, 0, 0, 0]),
+        Status::Ok
+    );
+    assert_eq!(snapshot(&events).percent, Some(100));
+    // Only a transfer's number is for the display.
+    assert_eq!(w.call(&mut a, Cmd::Show, &[1, 2, 9, 0, 0, 0, 0]), Status::Ok);
+    assert_eq!(snapshot(&events).percent, Some(100));
     w.rest(&mut a, &img);
     let s = snapshot(&events);
-    assert_eq!((s.phase, s.progress), (Phase::Written, None));
+    assert_eq!((s.phase, s.progress, s.percent), (Phase::Written, None, None));
     assert_eq!(
         w.call(&mut a, Cmd::SetPending, &[target::APP, 1]),
         Status::Ok

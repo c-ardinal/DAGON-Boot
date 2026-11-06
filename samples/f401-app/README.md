@@ -45,12 +45,12 @@ Version display (this app's own format, `seg::version`):
 
 Update display (`src/update.rs`, host-tested): the display task follows
 the node's published events (`AppEvents`, which the public `start`
-returns; dagon-agent's `AppSnapshot` phase and progress) and shows, while
+returns; dagon-agent's `AppSnapshot` phase and percent) and shows, while
 DAGON updates the node:
 
 | Phase | Display |
 |---|---|
-| transferring | `d` and the share received, `d  0` to `d100` |
+| transferring | `d` and the number DAGON told the node, the same as the DAGON Console's % (`d---` when it told none) |
 | verifying | `ChEc` |
 | written | `donE` |
 | pending (next boot) | `PEnd` |

@@ -502,12 +502,12 @@ where
         } else {
             String::new()
         };
-        println!(
-            "{}: {}{pct} ({})",
-            name(e.node),
-            phase_name(e.phase),
-            e.version
-        );
+        let step = if e.phase == phase::CONFIRM && !e.wrote {
+            "not written, already on it"
+        } else {
+            phase_name(e.phase)
+        };
+        println!("{}: {step}{pct} ({})", name(e.node), e.version);
         print_times(name(e.node), &e);
     };
     let run = match key {

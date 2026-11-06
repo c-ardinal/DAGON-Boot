@@ -23,7 +23,7 @@ const BAR_HEIGHT: u16 = 16;
 const BAR_Y: u16 = 320;
 
 /// One screen: a line of characters (`digits::layout`) and, while
-/// transferring, the share received in percent.
+/// transferring, the number the host told this node.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Screen {
     pub text: [u8; MAX_CHARS],
@@ -37,12 +37,12 @@ impl Screen {
     }
 }
 
-/// The screen for `phase` (`progress`: bytes received and expected while
-/// transferring), `since_ms` after the phase began; the `version` line
-/// when nothing is under way.
+/// The screen for `phase` (`told`: the number the host told this node while
+/// transferring), `since_ms` after the phase began; the `version` line when
+/// nothing is under way.
 pub fn screen(
     phase: Phase,
-    progress: Option<(u32, u32)>,
+    told: Option<u8>,
     since_ms: u32,
     version: Option<Version>,
 ) -> Screen {
@@ -52,8 +52,10 @@ pub fn screen(
         percent: None,
     };
     let word: &[u8] = match phase {
+        // No number of this node's own competes with the host's.
+        Phase::Transferring if told.is_none() => b"d---",
         Phase::Transferring => {
-            let pct = percent(progress);
+            let pct = told.unwrap_or_default();
             s.text[..4].copy_from_slice(&[
                 b'd',
                 if pct >= 100 { b'1' } else { b' ' },
@@ -85,16 +87,6 @@ pub fn screen(
     s
 }
 
-/// The share received, 0 to 100 %.
-fn percent(progress: Option<(u32, u32)>) -> u8 {
-    match progress {
-        Some((done, total)) if total > 0 => {
-            (u64::from(done) * 100 / u64::from(total)).min(100) as u8
-        }
-        _ => 0,
-    }
-}
-
 /// The filled part of the progress bar for `percent`, centred under the
 /// line; `None` at 0 %. Even origin and size, as the panel draws.
 pub fn bar(percent: u8) -> Option<Rect> {
@@ -112,8 +104,8 @@ pub fn bar(percent: u8) -> Option<Rect> {
 mod tests {
     use super::*;
 
-    fn shown(phase: Phase, progress: Option<(u32, u32)>, since_ms: u32) -> Vec<u8> {
-        screen(phase, progress, since_ms, Some(Version::new(1, 2, 0)))
+    fn shown(phase: Phase, told: Option<u8>, since_ms: u32) -> Vec<u8> {
+        screen(phase, told, since_ms, Some(Version::new(1, 2, 0)))
             .chars()
             .to_vec()
     }
@@ -128,19 +120,13 @@ mod tests {
 
     #[test]
     fn transfer_shows_percent_and_bar() {
-        let s = screen(Phase::Transferring, Some((421, 1000)), 0, None);
+        let s = screen(Phase::Transferring, Some(42), 0, None);
         assert_eq!((s.chars(), s.percent), (&b"d 42"[..], Some(42)));
-        let s = screen(Phase::Transferring, Some((u32::MAX, u32::MAX)), 0, None);
-        assert_eq!((s.chars(), s.percent), (&b"d100"[..], Some(100)));
+        let s = screen(Phase::Transferring, Some(0), 0, None);
+        assert_eq!((s.chars(), s.percent), (&b"d  0"[..], Some(0)));
+        // Told nothing: no number and no bar of its own.
         let s = screen(Phase::Transferring, None, 0, None);
-        assert_eq!((s.chars(), s.percent), (&b"d  0"[..], Some(0)));
-        // Nothing received yet, nothing known of the size, more than expected.
-        let s = screen(Phase::Transferring, Some((0, 1000)), 0, None);
-        assert_eq!((s.chars(), s.percent), (&b"d  0"[..], Some(0)));
-        let s = screen(Phase::Transferring, Some((5, 0)), 0, None);
-        assert_eq!((s.chars(), s.percent), (&b"d  0"[..], Some(0)));
-        let s = screen(Phase::Transferring, Some((2000, 1000)), 0, None);
-        assert_eq!((s.chars(), s.percent), (&b"d100"[..], Some(100)));
+        assert_eq!((s.chars(), s.percent), (&b"d---"[..], None));
         // The bar only while transferring.
         assert_eq!(screen(Phase::Verifying, None, 0, None).percent, None);
     }

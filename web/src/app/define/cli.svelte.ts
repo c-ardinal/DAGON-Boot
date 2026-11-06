@@ -339,7 +339,10 @@ export class Cli {
   async loadTopology(): Promise<string | null> {
     if (this.state !== 'ready') return null;
     const r = await this.call('GET', 'topology');
-    return r.ok ? await r.text() : null;
+    // serve says 404 for a project with no 構成 yet; anything else is a file not read, not an empty one.
+    if (r.status === 404) return null;
+    if (!r.ok) throw new Error(`GET topology: ${r.status}`);
+    return r.text();
   }
 
   /**

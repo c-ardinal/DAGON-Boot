@@ -4,11 +4,11 @@ import type { LinkClock } from '../serial/hostLink.ts';
 import { MockTransport, type MockOptions } from '../serial/mock.ts';
 import { simulator } from '../serial/simHub.ts';
 import type { Transport } from '../serial/transport.ts';
-import { versionText } from '../wasm/dagon.ts';
+import { PHASE, versionText } from '../wasm/dagon.ts';
 import { bandOf } from './band.ts';
-import { ANNOUNCE, BAND, BUTTON_FOR, NODE } from './copy.ts';
+import { ANNOUNCE, BAND, BAND_FOR, BUTTON_FOR, NODE, WRITE } from './copy.ts';
 import { SAMPLE_CONFIG } from './sample.ts';
-import { Operate, failureStage, hubBack } from './operate.svelte.ts';
+import { Operate, failureStage, hubBack, slotsSettled, writingTo } from './operate.svelte.ts';
 
 const repo = (rel: string) => new Uint8Array(readFileSync(new URL(`../../../${rel}`, import.meta.url)));
 /** The project's files dagon serve hands out (release/latest, the boot core): the sample release 1.1.0 and the F401 boot core, both under the test key. */
@@ -136,6 +136,181 @@ describe('recovery from the page with dagon-host recover', () => {
     expect(op.state).toBe('done');
     expect(op.coreWentBack).toBe(false);
   }, 120_000);
+
+  test('a checked node whose boot loader differs is written though its app is the same, and says what is being written', async () => {
+    const sim = simulator(13)!;
+    const op = session(sim.transport, sim.clock);
+    await op.connect();
+    await op.push();
+    // Apps first: everything runs 1.1.0 on boot core 1.0.0.
+    const apps = repo('crates/dagon-sim/fixtures/sample-1.1.0.dgb');
+    const both = repo('crates/dagon-sim/fixtures/sample-core-1.1.0.dgb');
+    op.takeFile('sample-1.1.0.dgb', apps);
+    await op.update();
+    expect(op.state).toBe('done');
+    await op.round();
+    expect(await op.noWrite(apps)).toMatchObject({ same: op.fileVersions.seg });
+
+    // The package holds only the F401's images. Only its boot loader differs now.
+    op.toggleSkip('hub');
+    op.toggleSkip('watch');
+    expect(await op.noWrite(both)).toBe(null);
+    op.takeFile('sample-core-1.1.0.dgb', both);
+    const said: (string | null)[] = [];
+    const on = op['onEvent'].bind(op);
+    op['onEvent'] = (e) => {
+      on(e);
+      const p = op.progress.seg;
+      const line = p?.stage === 'writing' ? writingTo(p, op.fileVersions.seg) : null;
+      if (line && said[said.length - 1] !== line) said.push(line);
+    };
+    await op.update();
+    expect(op.state).toBe('done');
+    await op.round();
+    // Both match: nothing stands to be written, and the same app version stays.
+    expect(await op.noWrite(both)).toMatchObject({ same: op.fileVersions.seg });
+    // The app is what the node runs: it is not written, and the card says only what was.
+    expect(said).toEqual(['→ ブートローダ 1.1.0']);
+    expect(op.progress.seg).toMatchObject({ stage: 'done', percent: 100 });
+    expect(op.percentOf('seg')).toBe(100);
+    expect(await op.noWrite(both)).toMatchObject({ coreToo: true });
+    // The previous version stays to go back to.
+    await op.rollback('seg');
+    expect(v(op.live.seg.hello?.activeVersion)).toBe('1.0.0');
+  }, 240_000);
+
+  test('the one % never moves back across a boot loader and its app, and stays the number the node is told', async () => {
+    const sim = simulator(13)!;
+    const op = session(sim.transport, sim.clock);
+    op['deps'].trialMs = () => 4000;
+    await op.connect();
+    await op.push();
+    op.toggleSkip('hub');
+    op.toggleSkip('watch');
+    op.takeFile('sample-core-1.1.0.dgb', repo('crates/dagon-sim/fixtures/sample-core-1.1.0.dgb'));
+    const seen: number[] = [];
+    let confirmedCore = false;
+    const on = op['onEvent'].bind(op);
+    op['onEvent'] = (e) => {
+      seen.push(op.percentOf('seg'));
+      on(e);
+      const after = op.percentOf('seg');
+      seen.push(after);
+      if (e.phase === PHASE.transfer) expect(after).toBe(e.shown);
+      confirmedCore ||= e.phase === PHASE.confirm && e.bootCore;
+    };
+    await op.update();
+    expect(op.state).toBe('done');
+    expect(confirmedCore).toBe(true);
+    expect(seen.filter((p, i) => i > 0 && p < seen[i - 1])).toEqual([]);
+    expect(seen[seen.length - 1]).toBe(100);
+  }, 120_000);
+
+  test('the words say the boot loader was the same only when it was compared', async () => {
+    expect(WRITE.alreadyOn('1.1.0', true).detail).toContain('ブートローダも同じ');
+    expect(WRITE.alreadyOn('1.1.0', false).detail).not.toContain('ブートローダ');
+    const sim = simulator(13)!;
+    const op = session(sim.transport, sim.clock);
+    await op.connect();
+    await op.push();
+    const apps = repo('crates/dagon-sim/fixtures/sample-1.1.0.dgb');
+    op.takeFile('sample-1.1.0.dgb', apps);
+    await op.update();
+    await op.round();
+    expect(await op.noWrite(apps)).toMatchObject({ coreToo: false });
+  }, 120_000);
+
+  test('the app differs and the boot loader is the same: written, labelled by the app', async () => {
+    const sim = simulator(13)!;
+    const op = session(sim.transport, sim.clock);
+    await op.connect();
+    await op.push();
+    const apps = repo('crates/dagon-sim/fixtures/sample-1.1.0.dgb');
+    expect(await op.noWrite(apps)).toBe(null);
+    op.takeFile('sample-1.1.0.dgb', apps);
+    await op.update();
+    expect(op.state).toBe('done');
+    expect(op.progress.seg.core).toBeUndefined();
+  }, 120_000);
+
+  test('a package whose only difference is a recovery agent is written, then said to be the same', async () => {
+    const sim = simulator(13)!;
+    const op = session(sim.transport, sim.clock);
+    await op.connect();
+    await op.push();
+    op.takeFile('sample-1.1.0.dgb', repo('crates/dagon-sim/fixtures/sample-1.1.0.dgb'));
+    await op.update();
+    expect(op.state).toBe('done');
+    await op.round();
+    const agent = repo('crates/dagon-sim/fixtures/sample-agent-1.1.0.dgb');
+    op.toggleSkip('hub');
+    op.toggleSkip('seg');
+    expect(await op.noWrite(agent)).toBe(null);
+    op.takeFile('sample-agent-1.1.0.dgb', agent);
+    await op.update();
+    expect(op.state).toBe('done');
+    await op.round();
+    expect(await op.noWrite(agent)).toMatchObject({ same: op.fileVersions.watch });
+    expect(op.progress.watch).toMatchObject({ stage: 'done', percent: 100 });
+    // The app was left alone: the watch's previous version stays to go back to.
+    await op.rollback('watch');
+    expect(v(op.live.watch.hello?.activeVersion)).toBe('1.0.0');
+  }, 180_000);
+
+  test('a package every checked node already runs, chosen as a file: nothing is written and nothing says so', async () => {
+    const sim = simulator(13)!;
+    const op = session(sim.transport, sim.clock);
+    await op.connect();
+    await op.push();
+    const file = repo('crates/dagon-sim/fixtures/sample-1.1.0.dgb');
+    op.takeFile('sample-1.1.0.dgb', file);
+    await op.update();
+    expect(op.finished).toMatchObject({ kind: 'updated', wrote: 3, same: 0 });
+    await op.round();
+    op.takeFile('sample-1.1.0.dgb', file);
+    await op.update();
+    expect(op.state).toBe('done');
+    expect(op.finished).toMatchObject({ kind: 'updated', wrote: 0, same: 3 });
+    expect(bandOf(op.state, op.ctx, { finish: op.finished }).sentence).toBe(BAND.M66none.sentence);
+    expect(op.progress.seg).toMatchObject({ stage: 'unchanged', percent: 100 });
+    expect(NODE.unchanged).toContain('書き込み');
+    // One written, the others as they were: the sentence says which is which.
+    expect(bandOf('done', op.ctx, { finish: { kind: 'updated', left: 0, wrote: 1, same: 2 } }).sentence).toBe(BAND_FOR.M66part(1, 2).sentence);
+  }, 240_000);
+
+  test('a slot waiting for the next boot is not called unchanged', () => {
+    const slot = (state: number) => ({ state, version: 1, digest16: new Uint8Array(16) });
+    const st = (states: number[], active = 0, confirmed = 0) => ({ active, confirmed, slots: states.map(slot) }) as never;
+    expect(slotsSettled(st([4, 1, 4]))).toBe(true);
+    expect(slotsSettled(st([4, 2, 4]))).toBe(false);
+    expect(slotsSettled(st([4, 3, 4]))).toBe(false);
+    expect(slotsSettled(st([3, 4, 4], 0, 1))).toBe(false);
+    expect(slotsSettled(st([1, 4, 4], 0, 0))).toBe(false);
+  });
+
+  test('a boot core that cannot be read is not called the same', async () => {
+    const sim = simulator(13)!;
+    const op = session(sim.transport, sim.clock);
+    await op.connect();
+    await op.push();
+    const both = repo('crates/dagon-sim/fixtures/sample-core-1.1.0.dgb');
+    op.toggleSkip('hub');
+    op.toggleSkip('watch');
+    op.takeFile('sample-core-1.1.0.dgb', both);
+    await op.update();
+    expect(op.state).toBe('done');
+    await op.round();
+    expect(await op.noWrite(both)).toMatchObject({ same: op.fileVersions.seg });
+    (op as unknown as { host: { bootCoreStatus: () => Promise<never> } }).host.bootCoreStatus = () => Promise.reject(new Error('no'));
+    expect(await op.noWrite(both)).toBe(null);
+  }, 120_000);
+
+  test('the hub chosen again after a boot core took over, with an app that needs no writing, is done', () => {
+    const core = 0x01010000;
+    expect(hubBack({ outcome: 'notOnTrial', version: 0x01000000 } as never, undefined, core, core, true)).toBe('done');
+    expect(hubBack({ outcome: 'notOnTrial', version: 0x01000000 } as never, undefined, core, core, false)).toBe('unwritten');
+    expect(hubBack({ outcome: 'notOnTrial', version: 0x01000000 } as never, undefined, core, 0x01000000, true)).toBe('coreBack');
+  });
 
   test('the hub chosen again by hand after its boot core write: what it says decides the words', () => {
     const on = (version: number) => ({ outcome: 'notOnTrial', version }) as never;

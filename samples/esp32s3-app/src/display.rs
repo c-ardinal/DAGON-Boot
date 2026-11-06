@@ -229,7 +229,7 @@ pub async fn display_task(p: DisplayPins, lease: Lease, powered: bool, events: n
         }
         let next = state.map_or(normal, |s| {
             let ms = since.elapsed().as_millis() as u32;
-            screen::screen(s.phase, s.progress, ms, version)
+            screen::screen(s.phase, s.percent, ms, version)
         });
         if next != shown {
             show(&mut panel, &lease, &next).await;

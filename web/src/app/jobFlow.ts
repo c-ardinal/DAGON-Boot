@@ -51,8 +51,8 @@ export interface BuildFailure {
   line: number | null;
   /** Nodes built before it stopped. */
   others: number;
-  /** It stopped because the node has no [build.*]: the skeleton comes first. */
-  noSkeleton: boolean;
+  /** The skeleton is what stands in the way: the node has no [build.*] ('none'), or its boot crate changed since `dagon gen` ('stale'). */
+  skeleton: 'none' | 'stale' | null;
 }
 
 /** cargo's first error and the place under it (dagon build stops at the first node that fails). */
@@ -62,7 +62,7 @@ const CARGO_PLACE = /^\s*-->\s*(.+):(\d+):\d+\s*$/;
 /** What the failure dialog says about the failed step. */
 export function buildFailure(j: BuildJobs, reach: readonly string[]): BuildFailure {
   const failed = [j.build, j.sign, j.release].find((x) => x?.state === 'failed') ?? null;
-  const plain = { node: null, reason: jobReason(failed), file: null, line: null, others: 0, noSkeleton: /^no \[build\./.test(jobReason(failed) ?? '') };
+  const plain = { node: null, reason: jobReason(failed), file: null, line: null, others: 0, skeleton: /^no \[build\./.test(jobReason(failed) ?? '') ? ('none' as const) : failed?.lines.some((l) => l.includes('run `dagon gen`')) ? ('stale' as const) : null };
   if (failed && failed === j.sign) {
     const named = /^(\S+): (.*)$/s.exec(plain.reason ?? '');
     return named && reach.includes(named[1]) ? { ...plain, node: named[1], reason: named[2] } : plain;
@@ -76,7 +76,7 @@ export function buildFailure(j: BuildJobs, reach: readonly string[]): BuildFailu
   const shown = path.replace(/\\/g, '/');
   const built = new Set(lines.flatMap((l) => BUILDING.exec(l)?.[1] ?? []));
   built.delete(node);
-  return { node, reason: `${shown}:${line}  ${CARGO_ERROR.exec(lines[at])![1]}`, file: shown.split('/').pop()!, line: Number(line), others: built.size, noSkeleton: false };
+  return { node, reason: `${shown}:${line}  ${CARGO_ERROR.exec(lines[at])![1]}`, file: shown.split('/').pop()!, line: Number(line), others: built.size, skeleton: null };
 }
 
 /**

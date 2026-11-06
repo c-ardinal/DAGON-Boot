@@ -1202,7 +1202,7 @@ export const NOTICE = {
 
 export const BUILD = {
   /** A node with no [build.*] in dagon.toml: nothing to build until the skeleton is made. */
-  noSkeleton: { reason: 'このノードの雛形がまだありません。', fix: '雛形を作ると、ビルドできるようになります。' },
+  noSkeleton: { reason: 'このノードの雛形がまだありません。', stale: 'DAGON のソースが変わったので、雛形が古くなっています。', fix: '雛形を作ると、ビルドできるようになります。' },
   run: 'ビルドする',
   title: 'ビルドする',
   state: {

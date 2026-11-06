@@ -24,16 +24,24 @@ test('the split button writes the checked nodes, again after done, and says when
   const before = await heights(page);
 
   await check(page, 'watch').click();
+  // Every height any card has while the write runs, the 親機's reboot included.
+  await page.evaluate(() => {
+    const seen = new Set<string>();
+    (window as unknown as { seen: Set<string> }).seen = seen;
+    const look = () => {
+      seen.add(JSON.stringify([...document.querySelectorAll('.node')].map((e) => e.getBoundingClientRect().height)));
+      requestAnimationFrame(look);
+    };
+    look();
+  });
   await page.locator('.split .main').click();
   await expect(page.locator('.node.st-busy').first()).toBeVisible({ timeout: 30_000 });
   await finished(page);
+  expect(await page.evaluate(() => [...(window as unknown as { seen: Set<string> }).seen])).toEqual([JSON.stringify(before)]);
   await expect(page.locator('.toast')).toBeVisible();
   // Left out by choice is no node that did not answer.
   await expect.poll(() => sentence(page)).toContain('チェックしたノード');
   expect(await sentence(page)).not.toContain('応答しなかった');
-
-  // No card changed height from the start to the end of a write.
-  expect(await heights(page)).toEqual(before);
 
   // Every checked node is on it already: said, not silent.
   await page.locator('.toast').waitFor({ state: 'detached', timeout: 10_000 });

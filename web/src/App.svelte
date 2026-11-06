@@ -1602,8 +1602,8 @@
     {@const at = d.config.nodes.find((n) => n.id === f.node)}
     <Modal title={BUILD.title} chip={{ text: BUILD.state.failed, kind: 'error' }} target={at ? `[${at.no}] ${at.name} · nodes/${at.id}/` : undefined} onclose={() => (buildFailureOpen = false)} onmore={() => ((drawerTab = 'jobs'), (buildFailureOpen = false))}>
       <h3 class="modal-h">{NOTICE.reason}</h3>
-      {#if f.noSkeleton}
-        <p>{BUILD.noSkeleton.reason}</p>
+      {#if f.skeleton}
+        <p>{f.skeleton === 'none' ? BUILD.noSkeleton.reason : BUILD.noSkeleton.stale}</p>
         <h3 class="modal-h">{NOTICE.fix}</h3>
         <p>{BUILD.noSkeleton.fix}</p>
       {:else}
@@ -1612,12 +1612,12 @@
         <p>{f.file ? fillIn(BUILD.fail.fix, { file: f.file, line: f.line ?? 0 }) : BUILD.fail.plain}{f.others ? fillIn(BUILD.fail.others, { n: f.others }) : ''}</p>
       {/if}
       {#snippet actions()}
-        {#if f.noSkeleton}
+        {#if f.skeleton}
           <button class="button-primary" data-control="gen" onclick={() => ((buildFailureOpen = false), void makeSkeleton())}>{SKELETON.make}</button>
         {:else if agent.linked}
           <button class="button-secondary" data-control="ask" onclick={(e) => askWhy(e.currentTarget, () => (buildFailureOpen = false))}>{BUILD.askAgent}</button>
         {/if}
-        {#if !f.noSkeleton}<button class="button-primary" data-control="build" onclick={() => void build()}>{BUILD.retry}</button>{/if}
+        {#if !f.skeleton}<button class="button-primary" data-control="build" onclick={() => void build()}>{BUILD.retry}</button>{/if}
       {/snippet}
     </Modal>
   {/if}

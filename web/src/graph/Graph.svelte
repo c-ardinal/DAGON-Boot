@@ -639,14 +639,11 @@
           <span class="bd">
             <span class="prod" translate="no" title={n.product}>{n.product}</span>
             <span class="meta" translate="no">{metaOf(n)}</span>
-            {#if slots}
-              <span class="slotline" translate="no">{#each slots as sl (sl.row)}<span class:on={sl.on}>{sl.row} {sl.text}</span>{/each}</span>
-            {/if}
-            <!-- The chip's row is always there, so no card changes height when a chip comes. -->
+            <!-- Its row, and the chip's below it, are always there: no card changes height when one fills. -->
+            <span class="slotline" translate="no">{#each slots ?? [] as sl (sl.row)}<span class:on={sl.on}>{sl.row} {sl.text}</span>{/each}</span>
             <span class="chips"
-              >{#if m === 'skeleton'}<span class="skeleton chip-sk"></span>{:else if m?.chip}<span in:rise={{ dur: '--dur-quick' }} out:lateFade class="chip" class:silent={m.silent} class:uns={!!n.notYet && m.chip === NODE.notYet}>{m.chip}</span>{/if}</span
+              >{#if m === 'skeleton'}<span class="skeleton chip-sk"></span>{:else if m?.chip}<span in:rise={{ dur: '--dur-quick' }} out:lateFade class="chip" class:silent={m.silent} class:uns={!!n.notYet && m.chip === NODE.notYet}>{m.chip}</span>{/if}{#if m && m !== 'skeleton' && m.note}<span class="note" title={m.note}>{m.note}</span>{/if}</span
             >
-            {#if m && m !== 'skeleton' && m.note}<span class="note">{m.note}</span>{/if}
           </span>
           {#if level !== undefined}<span in:fade out:lateFade={{ shown: confirmedOf(n.id) ? 100 : undefined }} class="pct" aria-hidden="true" style:--shown={Math.round(level)}></span>{/if}
         </button>
@@ -1073,8 +1070,9 @@
   }
   .chips {
     display: flex;
-    flex-wrap: wrap;
-    gap: 4px;
+    align-items: center;
+    gap: 8px;
+    min-width: 0;
     min-height: 20px;
     margin-top: 4px;
   }
@@ -1095,6 +1093,7 @@
   }
   .slotline {
     display: flex;
+    min-height: 16px;
     gap: 8px;
     color: var(--c-muted);
     font: 500 var(--t-11) / 1.5 var(--f-mono);
@@ -1124,6 +1123,10 @@
     border-radius: var(--r-full);
   }
   .note {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
     color: var(--c-muted);
     font: 400 var(--t-11) / 1.4 var(--f-ja);
   }

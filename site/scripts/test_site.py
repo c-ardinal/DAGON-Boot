@@ -234,6 +234,12 @@ class Wording(unittest.TestCase):
                     found.append(f"{rel}:{n}")
         self.assertEqual(found, [])
 
+    def test_no_page_says_the_case_is_never_opened(self):
+        # One connection writes every node; whether the case opens depends on where that port is.
+        flat = re.compile(r"ケースを開ける必要|ケースを開けることも|(?i:nothing is opened|need to open the case)")
+        found = [p.name for p in (ROOT / "README.md", ROOT / "README.en.md", *llms.DOCS.rglob("*.md*")) if flat.search(p.read_text(encoding="utf-8"))]
+        self.assertEqual(found, [])
+
     def test_console_goes_by_its_full_name_on_the_pages(self):
         found = []
         for p in llms.DOCS.rglob("*.md*"):

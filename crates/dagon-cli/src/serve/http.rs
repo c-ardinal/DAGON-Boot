@@ -7,8 +7,6 @@ use std::net::TcpStream;
 /// Largest request head and body the API takes.
 pub const MAX_HEAD: usize = 16 * 1024;
 pub const MAX_BODY: usize = 1024 * 1024;
-/// Largest package `POST /v1/kept` takes (a whole release).
-pub const MAX_PACKAGE: usize = 16 * 1024 * 1024;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Request {
@@ -27,8 +25,14 @@ impl Request {
     }
 }
 
-/// Reads one request from `stream`.
-pub fn read_request(stream: &mut TcpStream) -> Result<Request, String> {
+/// Starts every refusal of a body for its size.
+pub const TOO_LARGE: &str = "body too large";
+
+/// Reads one request from `stream`; `limit` sizes its body from its head.
+pub fn read_request(
+    stream: &mut TcpStream,
+    limit: &dyn Fn(&Request) -> usize,
+) -> Result<Request, String> {
     let mut r = BufReader::new(stream);
     let mut head = Vec::new();
     while !head.ends_with(b"\r\n\r\n") {
@@ -69,13 +73,12 @@ pub fn read_request(stream: &mut TcpStream) -> Result<Request, String> {
         .map(|v| v.parse().map_err(|_| "bad content-length".to_string()))
         .transpose()?
         .unwrap_or(0);
-    let max = if out.method == "POST" && out.path == "/v1/kept" {
-        MAX_PACKAGE
-    } else {
-        MAX_BODY
-    };
-    if len > max {
-        return Err("body too large".into());
+    if len > limit(&out) {
+        return Err(if out.path == "/v1/kept" {
+            format!("{TOO_LARGE}: larger than a package of this project's nodes can be")
+        } else {
+            TOO_LARGE.into()
+        });
     }
     out.body = vec![0; len];
     r.read_exact(&mut out.body).map_err(|e| e.to_string())?;

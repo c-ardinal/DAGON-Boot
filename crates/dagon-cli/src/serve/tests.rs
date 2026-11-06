@@ -2376,6 +2376,45 @@ fn a_topology_file_too_large_to_send_is_refused_without_a_call() {
     assert_eq!(calls.load(std::sync::atomic::Ordering::SeqCst), 0);
 }
 
+/// Sends only a head with this Content-Length; what serve answers, without a body.
+fn head_only(a: &Area, extra: &str, len: usize) -> (u16, String) {
+    use std::io::{Read, Write};
+    let mut s = TcpStream::connect(("127.0.0.1", a.server.port)).unwrap();
+    let host = format!("127.0.0.1:{}", a.server.port);
+    write!(
+        s,
+        "POST /v1/kept HTTP/1.1\r\nHost: {host}\r\n{extra}Content-Length: {len}\r\n\r\n"
+    )
+    .unwrap();
+    let mut text = String::new();
+    let _ = s.read_to_string(&mut text);
+    let status = text
+        .split_whitespace()
+        .nth(1)
+        .unwrap_or("0")
+        .parse()
+        .unwrap();
+    (status, text)
+}
+
+#[test]
+fn a_package_at_the_node_limit_can_always_be_kept() {
+    let a = start("kept-limit");
+    let b = auth(&a);
+    let h = [("Authorization", b.as_str())];
+    // Past the old 16 MiB ceiling: it reaches the package check, refused as no package.
+    let big = vec![0u8; 16 * 1024 * 1024 + 1];
+    assert_eq!(http(&a, "POST", "/v1/kept", &h, &big).0, 422);
+    // Past any package of the limit: refused with the reason, before the body.
+    let over = crate::kept::largest_package(dagon_topology::defs::Registry::builtin()) + 1;
+    let (st, text) = head_only(&a, &format!("Authorization: {b}\r\n"), over);
+    assert_eq!(st, 413, "{text}");
+    assert!(text.contains("larger than a package"), "{text}");
+    // Without the passphrase only an ordinary body is read.
+    let (st, _) = head_only(&a, "", super::http::MAX_BODY + 1);
+    assert_eq!(st, 413);
+}
+
 #[test]
 fn written_packages_are_kept_listed_and_read_back_for_the_page() {
     use dagon_format::Version;

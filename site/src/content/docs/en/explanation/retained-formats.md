@@ -410,8 +410,8 @@ exactly is shown as unknown. No numeric MCU table exists.
 
 ### 5.1 Body (`topology-bin` 1)
 
-Head, 16 bytes: magic `DGTP`, layout u16 LE (1), node count (1 to 8), link
-count (≤ 7), constraint count (≤ 16), 7 zero bytes. Then:
+Head, 16 bytes: magic `DGTP`, layout u16 LE (1), node count (1 to `MAX_NODES`), link
+count (≤ `MAX_LINKS`), constraint count (≤ `MAX_CONSTRAINTS`), 7 zero bytes. Then:
 
 - nodes, 40 bytes each: index, role, port kind, max attempts, listen
   window ms u16 LE, map id, order rank, recovery tiers [3], 5 zero bytes,

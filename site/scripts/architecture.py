@@ -1,247 +1,385 @@
-"""DAGON's node firmware as one layered software map: bands, rows of functional stacks, short-named modules.
+"""DAGON's software architecture: the layered design, as one figure and one table of components.
 
-gen.py writes the figure to assets/architecture/ for the READMEs and, with the table of
-abbreviations, into the site's Explanation page, so this file is the one source.
-test_site.py checks every module in MODULES against the tree and `cargo metadata`.
+This is the design, kept by hand here; it is not read from the code. gen.py writes the figure
+to assets/architecture/ for the READMEs and, with the table, into the site's Explanation page.
 """
-import pathlib
-import tomllib
 from xml.sax.saxutils import escape
 
-ROOT = pathlib.Path(__file__).resolve().parents[2]
-W, H = 1400, 600
-BOX_H = 30
+# web/src/styles/tokens.css
+INK, LAYER1, LAYER2, LAYER3, PAPER, MUTED, HAIR = "#0a0a0a", "#141413", "#1e1e1c", "#282725", "#f1efe8", "#9a9892", "#2c2b29"
+ACCENT, WATER, ATTENTION, PROGRESS = "#3cb4f0", "#123a4c", "#f5a524", "#b48cf2"
+COLOURS = (INK, LAYER1, LAYER2, LAYER3, PAPER, MUTED, HAIR, ACCENT, WATER, ATTENTION, PROGRESS)
+FONT = "'Zen Kaku Gothic New','Hiragino Sans','Yu Gothic UI','Noto Sans JP',system-ui,sans-serif"
 
+W = 1400
+COLUMNS = ("Boot", "Image and Storage", "Update and Comms", "Hub", "Trust", "Liveness", "Isolation", "Observability")
+HUB = 3
 
-def _m(role_ja, role_en, module, crate, paths, needle="", extend=False):
-    return dict(role={"ja": role_ja, "en": role_en}, module=module, crate=crate, paths=paths, needle=needle, extend=extend)
+PC_ROWS = (
+    ("PC Front Ends", "full", ("dagon CLI", "dagon serve", "DAGON Console", "Claude Code Plugin")),
+    ("PC Host Extensions", "full", ("Host Extension Chain", "Action Definitions", "Agent Definitions")),
+    ("PC Host Services", "cols", (("Project Generator", "Definition Registry", "Topology Check"), ("Node Build",), ("Operations",), ("Host Machines",),
+                                  ("Release Builder",), ("AI Agent Link",), ("Protection Planner",), ("Event Stream", "Catalog"))),
+    ("PC Host Ports", "cols", ((), ("BuildRunner",), ("Transport",), ("confirm_plan",), ("Signer", "KeyStore"), ("Agent",), (), ("Action",))),
+    ("PC Host Adapters", "cols", ((), ("Cargo Runner",), ("Serial", "Web Serial", "Simulator Link"), ("ROM Writers",), ("File Key Pair",), (), (), ())),
+)
+PC_COLS = 8
+CONTRACTS = ("DAGON Link", "Release Bundle", "Image Header", "Topology Binary", "VERSION")
+DEVICE_TOP = (
+    ("Applications and Extensions", ("User Application", "User Extensions", "Library Extensions")),
+    ("Layer Start", ("Boot Start", "App Start", "Relay Start", "Chain Composer", "Extension API")),
+)
+DEVICE_COLS = (
+    ("Layer Services", {0: ("Stage0 Sequence", "Boot Sequence", "Boot Action Interpreter"), 1: ("Image Lifecycle",),
+                        2: ("Update Session", "Wire Protocol", "Serving Loop", "Recovery Entry"),
+                        3: ("Relay", "Coordinator", "Release Store", "Node Recovery", "Bus Guardian", "Topology Copy"),
+                        5: ("Liveness Guard", "Reboot Gate"),
+                        6: ("Entry Gate", "Service ABI", "Operation Cancellation", "Fault Unwind", "Lockup Fuse", "Reset Cleanup"),
+                        7: ("Publisher", "Boot Record Writer", "Boot Replay", "VERSION Responder")}),
+    ("Core Logic", {0: ("Boot Decision", "Core Chooser"), 1: ("State Log Fold",), 3: ("Delivery Plan", "Recovery Policy", "Constraint Evaluator"),
+                    4: ("Trust Rule",), 5: ("Deadline Book",)}),
+    ("Replaceable Ports", {0: ("DecisionPolicy", "BoardBringUp"), 1: ("SlotStore", "LogStorage", "SelfCheck"), 2: ("UpdateTransport", "UpdateProtocol", "Recovery"),
+                           3: ("ChildLink",), 4: ("ImageVerifier", "Digest", "CryptoProvider"), 5: ("WatchdogDriver",), 7: ("Diagnostics", "Display", "LogSink")}),
+    ("Driver Contract", {0: ("BootSelect",), 1: ("Flash",), 3: ("I2cBus", "StreamPort", "SubControl"), 5: ("Clock", "Reset"), 6: ("SandboxArch",)}),
+)
+BOARD = ("Board Definition", "Board Bring-Up", "Board Extension", "Boot Action Program", "Shared Bus")
+MCU = {0: ("Reset and Jump",), 1: ("Flash Driver", "Slot Store Driver"), 2: ("Link Drivers",), 5: ("Watchdog Driver", "Execution Setup"), 6: ("Architecture Kind",)}
+MCU_STRIP = "MCU Definition"
+SILICON = ("ROM Loader", "boot2", "Vendor 2nd Stage", "Protection Unit", "Peripherals")
+LIBRARIES = ("dagon-format", "dagon-proto", "dagon-events", "Retained Codecs")
+PROOF = ("dagon-conform", "dagon-sim", "dagon-retained-model")
+DIRECT = ("ROM Loader Client", "Trusted Extension")
 
+PORT_ROWS = ("PC Host Ports", "Replaceable Ports", "Driver Contract")
 
-RP, STM, ESP = "targets/mcu/rp2040/src/", "targets/mcu/stm32f401re/src/", "targets/mcu/esp32s3/src/"
-COMMON, PORT, BOARD = "targets/mcu/common/src/", "crates/dagon-port/src/lib.rs", "targets/boards/waveshare-rp2040-touch-lcd-1.28/src/"
-
-# Abbreviation -> what it is, its module and crate. `needle`: text the first path must hold. `extend`: a contributor writes this.
-MODULES = {
-    # OS and boot
-    "Exec": _m("タスクの実行（embassy）", "Task executor (embassy)", "dagon_mcu_*::exec", "dagon-mcu-rp2040", [RP + "exec.rs", STM + "exec.rs"], extend=True),
-    "Stage0": _m("最初に動き、ブートローダを選ぶ", "Runs first, picks the boot loader", "stage0", "dagon-rp2040-stage0", ["targets/mcu/rp2040/stage0/src", "targets/mcu/stm32f401re/stage0/src"], extend=True),
-    "BootM": _m("ブートの手順", "Boot sequence", "dagon_boot", "dagon-boot", ["crates/dagon-boot/src/lib.rs"]),
-    "BootDec": _m("ブートの判断", "Boot decision", "dagon_core::boot", "dagon-core", ["crates/dagon-core/src/boot.rs"]),
-    "BootSel": _m("ブートローダ A/B の選択", "Boot loader A/B choice", "dagon_core::bootcore", "dagon-core", ["crates/dagon-core/src/bootcore.rs"]),
-    # System services
-    "EvtM": _m("イベントの配信とチェーン", "Event delivery and chain", "dagon_events::compose", "dagon-events", ["crates/dagon-events/src/compose.rs"]),
-    "StateM": _m("状態機械", "State machines", "dagon_events::machine", "dagon-events", ["crates/dagon-events/src/machine.rs"]),
-    "Publish": _m("公開の状態", "Published state", "dagon_events::published", "dagon-events", ["crates/dagon-events/src/published.rs"]),
-    "PortList": _m("置き換えられるポートの一覧", "Catalog of replaceable ports", "dagon_events::ports", "dagon-events", ["crates/dagon-events/src/ports.rs"]),
-    "Hooks": _m("アプリのチェーン", "The app's chain", "dagon_mcu_common::hooks", "dagon-mcu-common", [COMMON + "hooks.rs"]),
-    "WdgM": _m("ウォッチドッグの管理", "Watchdog manager", "dagon_mcu_common::guard", "dagon-mcu-common", [COMMON + "guard.rs"]),
-    "Liveness": _m("タスクの生存の確認", "Task liveness", "dagon_mcu_common::liveness", "dagon-mcu-common", [COMMON + "liveness.rs"]),
-    "Snapshot": _m("アプリの状態", "App snapshot", "dagon_agent::snapshot", "dagon-agent", ["crates/dagon-agent/src/snapshot.rs"]),
-    "View": _m("画面に出す内容", "What a screen shows", "dagon_mcu_rp2040::view", "dagon-mcu-rp2040", [RP + "view.rs"]),
-    # Memory services
-    "ImgM": _m("イメージのライフサイクル", "Image lifecycle", "dagon_agent::images", "dagon-agent", ["crates/dagon-agent/src/images.rs"]),
-    "LogM": _m("状態ログ", "State log", "dagon_core::log", "dagon-core", ["crates/dagon-core/src/log.rs"]),
-    # Crypto services
-    "Sign": _m("署名の検証", "Signature check", "dagon_format::verify_signed", "dagon-format", ["crates/dagon-format/src/lib.rs"], "pub fn verify_signed"),
-    "Digest": _m("ヘッダと本体の検証", "Header and body check", "dagon_format::header", "dagon-format", ["crates/dagon-format/src/header.rs"], "pub fn verify_header"),
-    "Key": _m("組み込む公開鍵", "Built-in public key", "dagon_core::key", "dagon-core", ["crates/dagon-core/src/key.rs"]),
-    # Communication services
-    "Agent": _m("書き込みのエージェント", "Write agent", "dagon_agent::agent", "dagon-agent", ["crates/dagon-agent/src/agent.rs"]),
-    "Serve": _m("応答のループ", "Serving loop", "dagon_mcu_common::serve", "dagon-mcu-common", [COMMON + "serve.rs"]),
-    "Relay": _m("親機の中継", "The hub's relay", "dagon_mcu_rp2040::relay", "dagon-mcu-rp2040", [RP + "relay/mod.rs"]),
-    "Frame": _m("フレームの切り出し", "Cutting frames", "dagon_mcu_common::frames", "dagon-mcu-common", [COMMON + "frames.rs"]),
-    "Nodes": _m("子機の一覧", "The list of children", "dagon_mcu_rp2040::nodes", "dagon-mcu-rp2040", [RP + "nodes.rs"]),
-    "HubCmd": _m("親機のコマンド", "Hub commands", "dagon_mcu_rp2040::cmd", "dagon-mcu-rp2040", [RP + "cmd.rs"]),
-    # Onboard abstraction
-    "WdgIf": _m("ウォッチドッグのトレイト", "Watchdog trait", "dagon_port::Watchdog", "dagon-port", [PORT], "pub trait Watchdog"),
-    "RstIf": _m("リセットのトレイト", "Reset trait", "dagon_port::Reset", "dagon-port", [PORT], "pub trait Reset"),
-    "ClkIf": _m("時間のトレイト", "Clock trait", "dagon_port::Clock", "dagon-port", [PORT], "pub trait Clock"),
-    "BootIf": _m("ブート切り替えのトレイト", "Boot select traits", "dagon_port::BootSelectS, BootSelectV", "dagon-port", [PORT], "pub trait BootSelectV"),
-    # Memory abstraction
-    "FlsIf": _m("フラッシュのトレイト", "Flash trait", "dagon_port::Flash", "dagon-port", [PORT], "pub trait Flash"),
-    "SlotStore": _m("スロットのストアのトレイト", "Slot store trait", "dagon_agent::SlotStore", "dagon-agent", ["crates/dagon-agent/src/lib.rs"], "pub trait SlotStore"),
-    "SharedFls": _m("フラッシュの共有", "Shared flash", "dagon_mcu_common::shared", "dagon-mcu-common", [COMMON + "shared.rs"]),
-    "MappedFls": _m("マップされたフラッシュの読み出し", "Mapped flash reads", "dagon_mcu_common::mapped", "dagon-mcu-common", [COMMON + "mapped.rs"]),
-    # Communication abstraction
-    "LinkIf": _m("ノードのリンクのトレイト", "Node link trait", "dagon_port::Link", "dagon-port", [PORT], "pub trait Link"),
-    "LinkHop": _m("上りと下りの 1 つの面", "One interface for every hop", "dagon_mcu_common::link", "dagon-mcu-common", [COMMON + "link.rs"]),
-    "LinkKinds": _m("リンクの種類の一覧", "List of link kinds", "dagon_format::link", "dagon-format", ["crates/dagon-format/src/link.rs"]),
-    "I2cIf": _m("I2C バスのトレイト", "I2C bus trait", "dagon_port::I2cBus", "dagon-port", [PORT], "pub trait I2cBus"),
-    "StreamIf": _m("バイト列のトレイト", "Byte stream trait", "dagon_port::StreamPort", "dagon-port", [PORT], "pub trait StreamPort"),
-    "SubIf": _m("子機の制御線のトレイト", "Child control line trait", "dagon_port::SubControl", "dagon-port", [PORT], "pub trait SubControl"),
-    "UartIf": _m("バイト列の上のリクエスト", "Requests over a byte stream", "dagon_mcu_common::uart", "dagon-mcu-common", [COMMON + "uart.rs"]),
-    # I/O
-    "Bus": _m("共有のバスとデバイス", "Shared bus and devices", "dagon_events::board", "dagon-events", ["crates/dagon-events/src/board.rs"]),
-    "Screen": _m("ホーム画面", "Home screen", "dagon_board_*::screen", "dagon-board-waveshare-rp2040-touch-lcd-1-28", [BOARD + "screen.rs"], extend=True),
-    "Display": _m("ディスプレイのタスク", "Display task", "dagon_board_*::display", "dagon-board-waveshare-rp2040-touch-lcd-1-28", [BOARD + "display.rs"], extend=True),
-    "Gc9a01": _m("LCD のドライバ", "LCD driver", "dagon_board_*::gc9a01", "dagon-board-waveshare-rp2040-touch-lcd-1-28", [BOARD + "gc9a01.rs"], extend=True),
-    # MCU drivers
-    "Wdg": _m("ウォッチドッグのドライバ", "Watchdog driver", "dagon_mcu_*::watchdog, esp32s3::sys", "dagon-mcu-rp2040", [RP + "watchdog.rs", STM + "watchdog.rs", ESP + "sys.rs"], extend=True),
-    "Clock": _m("クロックの設定", "Clock set-up", "dagon_mcu_stm32f401re::clocks", "dagon-mcu-stm32f401re", [STM + "clocks.rs"], extend=True),
-    "Trial": _m("試行のセルとウォッチドッグ", "Trial cell and watchdog", "stm32f401re::trial, esp32s3::trial", "dagon-mcu-stm32f401re", [STM + "trial.rs", ESP + "trial.rs"], extend=True),
-    "ImgStart": _m("イメージの起動", "Starting an image", "dagon_mcu_rp2040::arm", "dagon-mcu-rp2040", [RP + "arm.rs"], extend=True),
-    "OtaData": _m("otadata の読み書き", "otadata", "dagon_mcu_esp32s3::otadata", "dagon-mcu-esp32s3", [ESP + "otadata.rs"], extend=True),
-    "BootSelV": _m("ベンダーのブートの切り替え", "Vendor boot select", "dagon_mcu_esp32s3::boot", "dagon-mcu-esp32s3", [ESP + "boot.rs"], extend=True),
-    "RomMode": _m("ROM のダウンロードモード", "ROM download mode", "dagon_mcu_esp32s3::rom", "dagon-mcu-esp32s3", [ESP + "rom.rs"], extend=True),
-    # Memory drivers
-    "Fls": _m("フラッシュのドライバ", "Flash driver", "dagon_mcu_*::flash", "dagon-mcu-rp2040", [RP + "flash.rs", STM + "flash.rs", ESP + "flash.rs"], extend=True),
-    "Store": _m("スロットのストアの実装", "Slot store implementation", "dagon_mcu_*::store", "dagon-mcu-rp2040", [RP + "store.rs", STM + "store.rs", ESP + "store.rs"], extend=True),
-    # Communication drivers
-    "UsbCdc": _m("USB CDC", "USB CDC", "dagon_mcu_rp2040::usb, esp32s3::links", "dagon-mcu-rp2040", [RP + "usb.rs", ESP + "links.rs"], extend=True),
-    "I2c": _m("I2C のコントローラ", "I2C controller", "dagon_mcu_rp2040::links", "dagon-mcu-rp2040", [RP + "links.rs"], extend=True),
-    "I2cTgt": _m("I2C のターゲット", "I2C target", "dagon_mcu_stm32f401re::mailbox", "dagon-mcu-stm32f401re", [STM + "mailbox.rs"], extend=True),
-    "Uart": _m("UART", "UART", "dagon_mcu_esp32s3::links", "dagon-mcu-esp32s3", [ESP + "links.rs"], extend=True),
-    "PioUart": _m("PIO の UART", "PIO UART", "dagon_mcu_rp2040::links", "dagon-mcu-rp2040", [RP + "links.rs"], extend=True),
-    "SubCtl": _m("子機の制御線", "Child control lines", "dagon_mcu_rp2040::sub", "dagon-mcu-rp2040", [RP + "sub.rs"], extend=True),
-    # Trusted boot extensions
-    "BootExt": _m("信頼されたブート拡張", "Trusted boot extension", "targets/boot-extension-template", "hub-boot-screen", ["targets/boot-extension-template", "samples/hub-boot-screen"], extend=True),
-    # Libraries
-    "Format": _m("バイトのレイアウト", "Byte layouts", "dagon_format", "dagon-format", ["crates/dagon-format/src/lib.rs"]),
-    "Proto": _m("リンクのプロトコル", "Link protocol", "dagon_proto", "dagon-proto", ["crates/dagon-proto/src/lib.rs"]),
-    "Crc": _m("CRC-32", "CRC-32", "dagon_format::crc32", "dagon-format", ["crates/dagon-format/src/lib.rs"], "pub fn crc32"),
-    "Sha": _m("SHA-256", "SHA-256", "dagon_format::Sha256", "dagon-format", ["crates/dagon-format/src/lib.rs"], "pub struct Sha256"),
-    "Ed25519": _m("Ed25519", "Ed25519", "ed25519-compact", "ed25519-compact", ["crates/dagon-format/Cargo.toml"], "ed25519-compact"),
-    "LE": _m("リトルエンディアンの読み書き", "Little-endian access", "dagon_format::le", "dagon-format", ["crates/dagon-format/src/le.rs"]),
-    "Version": _m("イメージのバージョン", "Image version", "dagon_format::version", "dagon-format", ["crates/dagon-format/src/version.rs"]),
-    # Common
-    "McuDef": _m("マイコンの定義", "MCU definition", "targets/mcu/*/dagon-mcu.toml", "dagon-topology", ["targets/mcu/rp2040/dagon-mcu.toml"], extend=True),
-    "BrdDef": _m("ボードの定義", "Board definition", "targets/boards/*/dagon-board.toml", "dagon-topology", ["targets/boards/nucleo-f401re/dagon-board.toml"], extend=True),
-    "MemMap": _m("フラッシュの配置", "Flash layout", "dagon_mcu_*::layout", "dagon-mcu-rp2040", [RP + "layout.rs", STM + "layout.rs", ESP + "layout.rs"], extend=True),
-    "Pins": _m("定義から生成するピンと定数", "Pins and constants from the definition", "dagon_topology::defs::codegen", "dagon-topology", ["crates/dagon-topology/src/defs/codegen.rs"]),
-    "Wiring": _m("生成するブートの配線", "Generated boot wiring", "dagon_cli::extgen", "dagon-cli", ["crates/dagon-cli/src/extgen.rs"], "boot_wiring"),
-    "Tag": _m("ノードのターゲットのタグ", "Node's target tag", "dagon_mcu_common::tag", "dagon-mcu-common", [COMMON + "tag.rs"]),
+# Component -> one line (Japanese, English).
+COMPONENTS = {
+    "dagon CLI": ("バイナリ名 dagon のコマンド", "The binary named dagon"),
+    "dagon serve": ("Console のためのローカルのサーバ", "The local server for the Console"),
+    "DAGON Console": ("ブラウザの UI", "The browser UI"),
+    "Claude Code Plugin": ("移植と構成の生成のスキル、サブエージェント、フック", "Porting and topology skills, subagents and hooks"),
+    "Host Extension Chain": ("ホストの拡張を順に呼ぶチェーン", "The chain of host extensions, in order"),
+    "Action Definitions": ("イベントの後で動かすアクションのデータ", "Data for actions run after an event"),
+    "Agent Definitions": ("エージェントとそのつなぎ方のデータ", "Data for agents and their ways"),
+    "Project Generator": ("構成からプロジェクトを作る（`dagon new`、`dagon gen`）", "Renders a project from the topology (`dagon new`, `dagon gen`)"),
+    "Definition Registry": ("ボードとマイコンの定義を持つ", "Holds the definitions of boards and MCUs"),
+    "Topology Check": ("構成の YAML を読み、検証規則を適用する", "Reads the topology YAML and applies the validation rules"),
+    "Node Build": ("dagon.toml の `[build.<id>]` に従ってノードごとに cargo build する", "Runs cargo build per node from `[build.<id>]` in dagon.toml"),
+    "Operations": ("apply、status、recover の手順", "The apply, status and recover procedures"),
+    "Host Machines": ("ホストの操作の状態機械", "State machines of host operations"),
+    "Release Builder": ("検査の後でマニフェストを署名し、パッケージファイル（.dgb）を作る", "Signs the manifest after its checks and makes the package file (.dgb)"),
+    "AI Agent Link": ("dagon ai のコマンド", "The dagon ai commands"),
+    "Protection Planner": ("拡張の保護マップの計画と確認", "Plans and checks extensions' protection maps"),
+    "Event Stream": ("ホストのイベントの配信", "Delivers host events"),
+    "Catalog": ("すべてのイベントとポートの一覧", "Lists every event and port"),
+    "BuildRunner": ("ビルドを実行するポート", "Port that runs builds"),
+    "Transport": ("親機へのバイト列のポート", "Port for the byte stream to the hub"),
+    "confirm_plan": ("書き込みの前の確認の判断点", "Decision point before a write"),
+    "Signer": ("署名のポート", "Port that signs"),
+    "KeyStore": ("署名の鍵の置き場所のポート", "Port for where the signing key is kept"),
+    "Agent": ("エージェントのポート", "Port for an agent"),
+    "Action": ("アクションのポート", "Port for an action"),
+    "Cargo Runner": ("cargo で動くビルド", "Builds through cargo"),
+    "Serial": ("CLI のシリアルポートの Transport", "The CLI's serial port Transport"),
+    "Web Serial": ("dagon-wasm の Web Serial の Transport", "dagon-wasm's Web Serial Transport"),
+    "Simulator Link": ("dagon-sim の模擬リンク", "dagon-sim's simulated link"),
+    "ROM Writers": ("PC の dagon-romlink による ROM の手順", "ROM procedures on the PC through dagon-romlink"),
+    "File Key Pair": ("ファイルの鍵の組", "Key pair in files"),
+    "DAGON Link": ("ホスト、親機、ノードのあいだのフレームとコマンド", "Frames and commands between host, hub and nodes"),
+    "Release Bundle": ("パッケージファイル（.dgb）の形式", "Format of the package file (.dgb)"),
+    "Image Header": ("署名付きのイメージのヘッダ", "Header of a signed image"),
+    "Topology Binary": ("親機が持つ構成の形式", "Format of the topology the hub holds"),
+    "VERSION": ("ノードのバージョンと状態の問い合わせ", "Query of a node's versions and state"),
+    "User Application": ("利用者のアプリ", "The user's app"),
+    "User Extensions": ("利用者の拡張", "The user's extensions"),
+    "Library Extensions": ("ライブラリが提供する拡張。ボードの拡張と利用者の拡張のあいだで動く", "Extensions a library provides, run between the board's and the user's"),
+    "Boot Start": ("ブートのレイヤーの起動", "Starts the boot layer"),
+    "App Start": ("アプリのレイヤーの起動", "Starts the app layer"),
+    "Relay Start": ("リレーのレイヤーの起動", "Starts the relay layer"),
+    "Chain Composer": ("拡張のチェーンの合成", "Composes the extension chain"),
+    "Extension API": ("拡張が触れる面", "What an extension may touch"),
+    "Stage0 Sequence": ("リセットの後で最初に動く手順", "The first steps after a reset"),
+    "Boot Sequence": ("ブートローダの手順", "The boot loader's steps"),
+    "Boot Action Interpreter": ("ブートのアクションプログラムの実行", "Runs boot action programs"),
+    "Image Lifecycle": ("スロットのイメージの状態機械", "State machine of a slot's image"),
+    "Update Session": ("書き込みのセッションの状態機械", "State machine of a write session"),
+    "Wire Protocol": ("リンクのメッセージとセッションの対応", "Maps link messages onto the session"),
+    "Serving Loop": ("リクエストに答えるループ", "The loop that answers requests"),
+    "Recovery Entry": ("復旧の経路への入り口", "Entry to a recovery path"),
+    "Relay": ("要求をホップごとに中継し、子機の有無を追跡し、進み具合の表示の状態を持つ", "Forwards requests hop by hop, tracks child presence and holds progress display state"),
+    "Coordinator": ("保存したリリースをノードに対して実行する", "Runs a stored release across nodes"),
+    "Release Store": ("リリースの面 N/P とその昇格を持つ", "Holds the release faces N/P and their promotion"),
+    "Node Recovery": ("ノードごとの復旧の段階と、回数に上限のある再試行", "Per-node recovery tiers with bounded retries"),
+    "Bus Guardian": ("共有のバスを直列化し、バスの固まりと切り離しを扱う", "Serialises a shared bus; handles a stuck bus and isolation"),
+    "Topology Copy": ("親機が持つ構成のコピー。アトミックに置き換え、親機が自分でピンを動かす前に署名付きマニフェストに照らして確かめる", "The hub's copy of the topology, replaced atomically and checked against the signed manifest before the hub drives pins by itself"),
+    "Liveness Guard": ("タスクの生存を条件とするキック", "Kicks the watchdog on task liveness"),
+    "Reboot Gate": ("先に返答し、上限のある遅れを待ってからリセットする", "Replies first, waits a bounded delay, then resets"),
+    "Entry Gate": ("拡張の呼び出しの入り口", "Entry to an extension call"),
+    "Service ABI": ("拡張から DAGON への唯一の呼び出し", "An extension's only call into DAGON"),
+    "Operation Cancellation": ("途中の特権の操作の取り消し", "Cancels a privileged operation part-way"),
+    "Fault Unwind": ("フォールトと超過からの戻り", "Returns from a fault or overrun"),
+    "Lockup Fuse": ("ロックアップした拡張の記録", "Records an extension that locked up"),
+    "Reset Cleanup": ("リセットの後のペリフェラルの初期化", "Reinitialises peripherals after a reset"),
+    "Publisher": ("待てる公開の状態を書く", "Writes the waitable published state"),
+    "Boot Record Writer": ("ブートのイベントを保持メモリに書く", "Writes boot events to retained memory"),
+    "Boot Replay": ("起動時にブートのイベントを出し直す", "Re-emits boot events at start"),
+    "VERSION Responder": ("VERSION に答える", "Answers VERSION"),
+    "Boot Decision": ("どのスロットを起動するかの判断", "Decides which slot starts"),
+    "Core Chooser": ("stage0 がブートローダのスロットを選ぶ", "stage0 picks the boot loader slot"),
+    "State Log Fold": ("記録から状態を畳み込む", "Folds records into state"),
+    "Delivery Plan": ("順序、試行の窓、昇格の判断", "Order, trial window, promotion judgement"),
+    "Recovery Policy": ("状態と失敗の回数から復旧の段階を選ぶ", "Chooses a recovery tier from state and failure counts"),
+    "Constraint Evaluator": ("マニフェストの制約を確かめる", "Checks manifest constraints"),
+    "Trust Rule": ("署名と鍵の 1 つの認証の決まり", "The one rule for signatures and keys"),
+    "Deadline Book": ("ガードの後ろの純粋な期限の計算", "Pure deadline accounting behind the guard"),
+    "DecisionPolicy": ("ブートの方針のポート", "Port for boot policy"),
+    "BoardBringUp": ("ボードの立ち上げのポート", "Port for bringing up the board"),
+    "SlotStore": ("イメージの置き場所のポート", "Port for where images live"),
+    "LogStorage": ("状態ログの置き場所のポート", "Port for where the state log lives"),
+    "SelfCheck": ("確定のときの自己検査のポート", "Port for the self-check at confirm"),
+    "UpdateTransport": ("リンクのバイト列のポート", "Port for a link's bytes"),
+    "UpdateProtocol": ("メッセージのポート", "Port for messages"),
+    "Recovery": ("追加の復旧の経路のポート", "Port for an added recovery path"),
+    "ChildLink": ("親機から子機へのリンクのポート", "Port for the hub's link to a child"),
+    "ImageVerifier": ("ヘッダの署名の検証のポート", "Port for verifying a header's signature"),
+    "Digest": ("本体のハッシュのポート", "Port for the body hash"),
+    "CryptoProvider": ("暗号の基本要素のポート", "Port for crypto primitives"),
+    "WatchdogDriver": ("ウォッチドッグのポート", "Port for the watchdog"),
+    "Diagnostics": ("追加の診断のポート", "Port for added diagnostics"),
+    "Display": ("表示のポート", "Port for display"),
+    "LogSink": ("ログの行き先のポート", "Port for where logs go"),
+    "BootSelect": ("kind S はジャンプ、kind V はベンダーの選択情報の操作", "Kind S: the jump; kind V: the vendor's selection data"),
+    "Flash": ("フラッシュの消去、書き込み、読み出し", "Flash erase, write and read"),
+    "I2cBus": ("親機の I2C バス", "The hub's I2C bus"),
+    "StreamPort": ("親機のバイト列", "The hub's byte stream"),
+    "SubControl": ("子機の制御線", "A child's control lines"),
+    "Clock": ("時間", "Time"),
+    "Reset": ("システムのリセット", "System reset"),
+    "SandboxArch": ("1 つのアーキテクチャの特権の入口とアンワインドのレジスタ", "Privilege entry and unwind registers for one architecture"),
+    "Board Definition": ("ボードのデータ", "The board's data"),
+    "Board Bring-Up": ("ボードの電源、ピン、バスの準備", "Prepares the board's power, pins and buses"),
+    "Board Extension": ("ボードが持つ拡張", "The board's own extension"),
+    "Boot Action Program": ("ブートの宣言的なプログラム", "Declarative program at boot"),
+    "Shared Bus": ("複数の者が使うボードのバス", "A board bus several parties use"),
+    "Reset and Jump": ("リセットとイメージへのジャンプ", "Reset, and the jump to an image"),
+    "Flash Driver": ("フラッシュのドライバ", "The flash driver"),
+    "Slot Store Driver": ("kind S のログ、または kind V のベンダーデータ", "A kind S log or kind V vendor data"),
+    "Link Drivers": ("ノードの Link の実装", "Implement the node's Link"),
+    "Watchdog Driver": ("ウォッチドッグのドライバ", "The watchdog driver"),
+    "Execution Setup": ("実行モデルに従うエグゼキュータの優先度", "Executor priorities per the execution model"),
+    "Architecture Kind": ("保護ハードウェアの種類ごとの実装", "Implementation per protection kind"),
+    "MCU Definition": ("マイコンのデータ", "The MCU's data"),
+    "ROM Loader": ("マイコンの ROM のローダ", "The MCU's ROM loader"),
+    "boot2": ("RP2040 のブート ROM の次に動く 256 バイト", "The 256 bytes after the RP2040's boot ROM"),
+    "Vendor 2nd Stage": ("ベンダーの 2nd stage", "The vendor's 2nd stage"),
+    "Protection Unit": ("メモリの保護ハードウェア", "Memory protection hardware"),
+    "Peripherals": ("マイコンのペリフェラル", "The MCU's peripherals"),
+    "dagon-format": ("イメージヘッダ、マニフェスト、状態ログ、構成のバイト配置", "Byte layouts of the image header, manifest, state log and topology"),
+    "dagon-proto": ("フレーム、コマンド、エラーの定義", "Frames, commands and errors"),
+    "dagon-events": ("イベント、状態機械、拡張", "Events, state machines, extensions"),
+    "Retained Codecs": ("ブート記録、ヒューズ、構成の本体の形式", "Boot record, fuse and topology body formats"),
+    "dagon-conform": ("実機とシミュレータに共通の適合試験", "Conformance tests shared by hardware and the simulator"),
+    "dagon-sim": ("模擬フラッシュ、模擬リンク、模擬 ROM ローダ、故障注入", "Simulated flash, links and ROM loader, with fault injection"),
+    "dagon-retained-model": ("保持の形式の実行可能なモデル", "Executable model of the retained formats"),
+    "ROM Loader Client": ("別のマイコンの ROM ローダを動かす", "Drives another MCU's ROM loader"),
+    "Trusted Extension": ("特権で動く拡張", "An extension that runs privileged"),
 }
-
-COLORS = dict(bg="#ffffff", app="#5f6b7a", api="#c0392b", mcu="#10161d", services="#5b4bb0", abstraction="#1f7a5a", drivers="#a83e66",
-              libs="#a8660a", common="#1f6fb0", box="#d9600b", text="#ffffff", legend="#3a4450")
 
 WORDS = {
-    "ja": {"app": "アプリ層", "api": "DAGON の API（イベント、フック、ポート）", "mcu": "マイコン", "libs": "ライブラリ", "common": "共通", "os": "OS とブート",
-           "sys": "システムサービス", "mem": "メモリサービス", "cry": "暗号サービス", "com": "通信サービス", "ob": "オンボードの抽象化", "mema": "メモリの抽象化", "coma": "通信の抽象化",
-           "io": "I/O の抽象化", "mcud": "マイコンのドライバ", "memd": "メモリのドライバ", "comd": "通信のドライバ", "iod": "I/O のドライバ", "cdd": "信頼された\nブート拡張",
-           "legend": "点線の箱は、マイコン、ボード、拡張を足すときに書くものです。各箱の一覧はドキュメントの「しくみ」にあります。"},
-    "en": {"app": "Application Layer", "api": "DAGON API (events, hooks, ports)", "mcu": "Microcontroller", "libs": "Libraries", "common": "Common", "os": "OS, boot",
-           "sys": "System Services", "mem": "Memory Services", "cry": "Crypto Services", "com": "Communication Services", "ob": "Onboard Abstraction", "mema": "Memory Abstraction", "coma": "Communication Abstraction",
-           "io": "I/O Abstraction", "mcud": "MCU Drivers", "memd": "Memory Drivers", "comd": "Communication Drivers", "iod": "I/O Drivers", "cdd": "Trusted Boot\nExtensions",
-           "legend": "Dotted boxes are what you write to add an MCU, board or extension. The list of boxes is in the docs' Explanation."},
+    "ja": {"title": "DAGON のソフトウェアアーキテクチャ", "component": "コンポーネント", "port": "ポートと取り決め", "contract": "ノードと PC の共通の形式", "hub": "Hub の列は親機のイメージだけ", "vendor": "シリコンとベンダー"},
+    "en": {"title": "DAGON's software architecture", "component": "Component", "port": "Port or contract", "contract": "Format shared by PC and node", "hub": "The Hub column is hub images only", "vendor": "Silicon and vendor"},
 }
 
-STYLE = (f"<style>.a-b{{font:600 12.5px 'Segoe UI',system-ui,'Noto Sans JP',sans-serif;fill:{COLORS['text']}}}"
-         f".a-t{{font:700 13.5px 'Segoe UI',system-ui,'Noto Sans JP',sans-serif;fill:{COLORS['text']}}}"
-         f".a-l{{font:12px 'Segoe UI',system-ui,'Noto Sans JP',sans-serif;fill:{COLORS['legend']}}}</style>")
+BOX, BOX2 = 21, 33  # one line, two lines
+GAP = 4
+CHAR = 6.15
 
 
-def _t(x, y, cls, words, anchor="middle"):
-    return f'<text x="{round(x, 1)}" y="{round(y, 1)}" class="{cls}" text-anchor="{anchor}">{escape(words)}</text>'
+def _text(x, y, fill, size, words, weight=500, anchor="middle"):
+    return f'<text x="{round(x, 1)}" y="{round(y, 1)}" fill="{fill}" font-family="{FONT}" font-size="{size}" font-weight="{weight}" text-anchor="{anchor}">{escape(words)}</text>'
 
 
-def _rect(x, y, w, h, fill):
-    return f'<rect x="{round(x, 1)}" y="{round(y, 1)}" width="{round(w, 1)}" height="{round(h, 1)}" fill="{fill}"/>'
+def _rect(x, y, w, h, fill, stroke="none", rx=3, dash=""):
+    extra = f' stroke-dasharray="{dash}"' if dash else ""
+    return f'<rect x="{round(x, 1)}" y="{round(y, 1)}" width="{round(w, 1)}" height="{round(h, 1)}" rx="{rx}" fill="{fill}" stroke="{stroke}"{extra}/>'
 
 
-def _box(x, y, w, h, name):
-    dotted = ' stroke="#ffffff" stroke-width="1.2" stroke-dasharray="2 2"' if MODULES[name]["extend"] else ""
-    return (f'<rect x="{round(x, 1)}" y="{round(y, 1)}" width="{round(w, 1)}" height="{round(h, 1)}" rx="2" fill="{COLORS["box"]}"{dotted}/>'
-            + _t(x + w / 2, y + h / 2 + 4.5, "a-b", name))
+def _lines(name, width):
+    if len(name) * CHAR <= width - 6:
+        return [name]
+    if " " not in name:
+        cut = name.rfind("-") + 1
+        return [name[:cut], name[cut:]] if cut else [name]
+    words = name.split(" ")
+    best = min(range(1, len(words)), key=lambda i: abs(len(" ".join(words[:i])) - len(" ".join(words[i:]))))
+    return [" ".join(words[:best]), " ".join(words[best:])]
 
 
-def _width(name):
-    return max(52, 8.2 * len(name) + 16)
+def _bh(name, width):
+    return BOX2 if len(_lines(name, width)) == 2 else BOX
 
 
-def _flow(x, y, w, h, names):
-    """Boxes wrapped into rows, centred in the area."""
-    rows, row, used = [], [], 0
-    for n in names:
-        bw = _width(n)
-        if row and used + bw + 6 > w:
-            rows.append((row, used))
-            row, used = [], 0
-        row.append(n)
-        used += bw + (6 if used else 0)
-    rows.append((row, used))
-    total = len(rows) * BOX_H + (len(rows) - 1) * 7
-    out = []
-    by = y + (h - total) / 2
-    for row, used in rows:
-        bx = x + (w - used) / 2
-        for n in row:
-            out.append(_box(bx, by, _width(n), BOX_H, n))
-            bx += _width(n) + 6
-        by += BOX_H + 7
-    return out
+def _box(x, y, w, name, kind="component"):
+    fill, stroke, colour, dash = {"component": (LAYER3, "none", PAPER, ""), "port": (WATER, ACCENT, ACCENT, ""), "contract": (LAYER2, ATTENTION, ATTENTION, ""),
+                                  "hub": (LAYER3, ATTENTION, PAPER, "3 2"), "hubport": (WATER, ATTENTION, ACCENT, "3 2"), "vendor": (LAYER2, HAIR, MUTED, "")}[kind]
+    h = _bh(name, w)
+    out = [_rect(x, y, w, h, fill, stroke, dash=dash)]
+    lines = _lines(name, w)
+    for i, line in enumerate(lines):
+        out.append(_text(x + w / 2, y + 14.5 + i * 13, colour, 12, line))
+    return out, h
 
 
-def _cell(x0, x1, y0, y1, fill, title, names):
-    lines = title.split("\n")
-    out = [_rect(x0, y0, x1 - x0, y1 - y0, fill)]
-    out += [_t((x0 + x1) / 2, y0 + 18 + i * 17, "a-t", line) for i, line in enumerate(lines)]
-    top = y0 + 8 + 17 * len(lines)
-    return out + _flow(x0 + 8, top, x1 - x0 - 16, y1 - top - 4, names)
+def _label(x, y, w, name, colour):
+    words, lines, line = name.split(" "), [], ""
+    for word in words:
+        if line and len(line + " " + word) * 6.6 > w:
+            lines.append(line)
+            line = word
+        else:
+            line = (line + " " + word).strip()
+    lines.append(line)
+    return [_text(x, y + 15 + i * 14, colour, 12.5, l, 700, "start") for i, l in enumerate(lines)]
 
 
-def mcu_names():
-    return [tomllib.loads(p.read_text(encoding="utf-8"))["name"] for p in sorted((ROOT / "targets/mcu").glob("*/dagon-mcu.toml"))]
+def _full(x0, x1, y, names, kind="component"):
+    n = len(names)
+    w = (x1 - x0 - GAP * (n - 1)) / n
+    return [p for i, name in enumerate(names) for p in _box(x0 + i * (w + GAP), y, w, name, kind)[0]]
+
+
+def _stack_h(names, w):
+    return sum(_bh(n, w) for n in names) + GAP * (len(names) - 1) if names else 0
 
 
 def node_svg(lang):
-    w = WORDS[lang]
-    c = COLORS
-    # rows and columns
-    top, y_abs, y_drv, y_end = 96, 292, 408, 546
-    os_x0, os_x1 = 86, 196
-    cols = dict(sys=(200, 440), mem=(444, 590), cry=(594, 720), com=(724, 1106), io=(1110, 1252), cd=(1256, 1394))
-    out = [f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 {W} {H}" role="img" aria-label="{escape(w["app"])}" style="max-width:100%;height:auto">',
-           STYLE, _rect(0, 0, W, H, c["bg"])]
-    # the two side blocks
-    out += _cell(6, 82, 6, 300, c["libs"], w["libs"], [])
-    for i, n in enumerate(("Format", "Proto", "Crc", "Sha", "Ed25519", "LE", "Version")):
-        out.append(_box(12, 32 + i * 37, 64, 30, n))
-    out += _cell(6, 82, 304, y_end, c["common"], w["common"], [])
-    for i, n in enumerate(("McuDef", "BrdDef", "MemMap", "Pins", "Wiring", "Tag")):
-        out.append(_box(12, 330 + i * 35, 64, 30, n))
-    # bands
-    out += [_rect(86, 6, W - 92, 40, c["app"]), _t((86 + W - 6) / 2, 31, "a-t", w["app"])]
-    out += [_rect(86, 50, W - 92, 42, c["api"]), _t((86 + W - 6) / 2, 76, "a-t", w["api"])]
-    # OS and boot, Services down to Drivers
-    out.append(_rect(os_x0, top, os_x1 - os_x0, y_end - top, c["services"]))
-    out.append(_t((os_x0 + os_x1) / 2, top + 18, "a-t", w["os"]))
-    out.append(_box(os_x0 + 5, top + 28, 34, y_end - top - 34, "Exec"))
-    for i, n in enumerate(("Stage0", "BootM", "BootDec", "BootSel")):
-        out.append(_box(os_x0 + 43, top + 28 + i * 40, 62, 32, n))
-    # Services
-    S = c["services"]
-    out += _cell(*cols["sys"], top, y_abs - 4, S, w["sys"], ["EvtM", "StateM", "Publish", "PortList", "Hooks", "WdgM", "Liveness", "Snapshot", "View"])
-    out += _cell(*cols["mem"], top, y_abs - 4, S, w["mem"], ["ImgM", "LogM"])
-    out += _cell(*cols["cry"], top, y_abs - 4, S, w["cry"], ["Sign", "Digest", "Key"])
-    out += _cell(*cols["com"], top, y_abs - 4, S, w["com"], ["Agent", "Serve", "Relay", "Frame", "Nodes", "HubCmd"])
-    # Abstraction: nothing under Crypto, so Memory takes its width
-    A = c["abstraction"]
-    out += _cell(*cols["sys"], y_abs, y_drv - 4, A, w["ob"], ["WdgIf", "RstIf", "ClkIf", "BootIf"])
-    out += _cell(cols["mem"][0], cols["cry"][1], y_abs, y_drv - 4, A, w["mema"], ["FlsIf", "SlotStore", "SharedFls", "MappedFls"])
-    out += _cell(*cols["com"], y_abs, y_drv - 4, A, w["coma"], ["LinkIf", "LinkHop", "LinkKinds", "I2cIf", "StreamIf", "SubIf", "UartIf"])
-    out += _cell(*cols["io"], top, y_drv - 4, A, w["io"], ["Bus", "Screen"])
-    # Drivers
-    D = c["drivers"]
-    out += _cell(*cols["sys"], y_drv, y_end, D, w["mcud"], ["Wdg", "Clock", "Trial", "ImgStart", "OtaData", "BootSelV", "RomMode"])
-    out += _cell(cols["mem"][0], cols["cry"][1], y_drv, y_end, D, w["memd"], ["Fls", "Store"])
-    out += _cell(*cols["com"], y_drv, y_end, D, w["comd"], ["UsbCdc", "I2c", "I2cTgt", "Uart", "PioUart", "SubCtl"])
-    out += _cell(*cols["io"], y_drv, y_end, D, w["iod"], ["Display", "Gc9a01"])
-    # Complex drivers: the whole height
-    out += _cell(*cols["cd"], top, y_end, A, w["cdd"], ["BootExt"])
-    # Microcontroller
-    out += [_rect(86, 550, W - 92, 28, c["mcu"]), _t((86 + W - 6) / 2, 569, "a-t", f"{w['mcu']} ({', '.join(mcu_names())})")]
-    out.append(_t(6, 594, "a-l", w["legend"], "start"))
-    out.append("</svg>")
-    return "".join(out) + "\n"
+    t = WORDS[lang]
+    body = [_text(10, 22, PAPER, 15, t["title"], 700, "start")]
+    y = 32
+    # the PC, across the whole width
+    label_w, x0, x1 = 112, 126, W - 10
+    col_w = (x1 - x0 - GAP * (PC_COLS - 1)) / PC_COLS
+    for name, form, cells in PC_ROWS:
+        port = name in PORT_ROWS
+        h = BOX + 8 if form == "full" else max(_stack_h(c, col_w) for c in cells) + 8
+        h = max(h, 8 + 14 * (1 + (len(name) * 6.6 > label_w)))
+        body.append(_rect(10, y, W - 20, h, LAYER1, rx=4))
+        body.append(_rect(10, y, 3, h, PROGRESS, rx=1))
+        body += _label(18, y + 1, label_w, name, PROGRESS)
+        if form == "full":
+            body += _full(x0, x1, y + 4, cells)
+        else:
+            for i, names in enumerate(cells):
+                by = y + 4
+                for n in names:
+                    part, bh = _box(x0 + i * (col_w + GAP), by, col_w, n, "port" if port else "component")
+                    body += part
+                    by += bh + GAP
+        y += h + 3
+    # the contracts between them
+    y += 3
+    body.append(_rect(10, y, W - 20, BOX + 8, LAYER1, rx=4))
+    body.append(_rect(10, y, 3, BOX + 8, ATTENTION, rx=1))
+    body += _label(18, y + 1, label_w, "Contracts", ATTENTION)
+    body += _full(x0, x1, y + 4, CONTRACTS, "contract")
+    y += BOX + 8 + 6
+    # the device: side blocks, then rows
+    side_w, row_w = 112, 100
+    side_x1 = 10 + side_w
+    mx0 = side_x1 + 6 + row_w
+    right_w = 112
+    mx1 = W - 10 - right_w - 6
+    c_w = (mx1 - mx0 - GAP * (len(COLUMNS) - 1)) / len(COLUMNS)
+    dev_top = y
+    rows = []
+
+    def band(name, h):
+        nonlocal y
+        rows.append(_rect(side_x1 + 6, y, mx1 - side_x1 - 6, h, LAYER1, rx=4))
+        rows.append(_rect(side_x1 + 6, y, 3, h, ACCENT, rx=1))
+        rows.extend(_label(side_x1 + 13, y + 1, row_w - 8, name, ACCENT))
+        return y
+
+    for name, names in DEVICE_TOP:
+        h = BOX + 8 + (12 if len(name) * 6.6 > row_w - 8 else 0) + (16 if len(name) * 6.6 > 1.7 * (row_w - 8) else 0)
+        by = band(name, h)
+        rows += _full(mx0, mx1, by + (h - BOX) / 2, names)
+        y += h + 3
+    # column titles
+    y += 1
+    for i, title in enumerate(COLUMNS):
+        rows.append(_text(mx0 + i * (c_w + GAP) + c_w / 2, y + 12, ATTENTION if i == HUB else ACCENT, 12, title, 700))
+    y += 18
+    for name, cells in DEVICE_COLS:
+        port = name in PORT_ROWS
+        h = max(_stack_h(cells.get(i, ()), c_w) for i in range(len(COLUMNS))) + 8
+        h = max(h, 36)
+        by = band(name, h)
+        for i in range(len(COLUMNS)):
+            cy = by + 4
+            for n in cells.get(i, ()):
+                kind = ("hubport" if port else "hub") if i == HUB else ("port" if port else "component")
+                part, bh = _box(mx0 + i * (c_w + GAP), cy, c_w, n, kind)
+                rows += part
+                cy += bh + GAP
+        y += h + 3
+    h = BOX + 8
+    by = band("Board Package", h)
+    rows += _full(mx0, mx1, by + 4, BOARD)
+    y += h + 3
+    h = max(_stack_h(MCU.get(i, ()), c_w) for i in range(len(COLUMNS))) + 8 + BOX + GAP
+    by = band("MCU Package", h)
+    for i in range(len(COLUMNS)):
+        cy = by + 4
+        for n in MCU.get(i, ()):
+            part, bh = _box(mx0 + i * (c_w + GAP), cy, c_w, n)
+            rows += part
+            cy += bh + GAP
+    rows += _full(mx0, mx1, by + h - BOX - 4, (MCU_STRIP,))
+    y += h + 3
+    h = BOX + 8
+    by = band("Silicon and Vendor", h + 8)
+    rows += _full(mx0, mx1, by + 8, SILICON, "vendor")
+    y += h + 8
+    dev_bottom = y
+    # side blocks
+    side = []
+    mid = dev_top + (dev_bottom - dev_top) * 0.56
+
+    def block(x, top, bottom, width, title, names, colour):
+        out = [_rect(x, top, width, bottom - top, LAYER1, rx=4), _rect(x, top, width, 3, colour, rx=1)]
+        out.extend(_label(x + 7, top + 3, width - 12, title, colour))
+        by = top + 24 + (14 if len(title) * 6.6 > width - 12 else 0)
+        for n in names:
+            part, bh = _box(x + 5, by, width - 10, n)
+            out += part
+            by += bh + GAP
+        return out
+
+    side += block(10, dev_top, mid - 3, side_w, "Libraries", LIBRARIES, ACCENT)
+    side += block(10, mid, dev_bottom, side_w, "Proof", PROOF, PROGRESS)
+    side += block(mx1 + 6, dev_top, dev_bottom, right_w, "Direct Hardware Parts", DIRECT, ACCENT)
+    # legend
+    y += 8
+    lx, legend = 10, []
+    for kind_fill, stroke, dash, words in ((LAYER3, "none", "", t["component"]), (WATER, ACCENT, "", t["port"]), (LAYER2, ATTENTION, "", t["contract"]),
+                                           (LAYER3, ATTENTION, "3 2", t["hub"]), (LAYER2, HAIR, "", t["vendor"])):
+        legend.append(_rect(lx, y, 22, 14, kind_fill, stroke, dash=dash))
+        legend.append(_text(lx + 28, y + 11.5, MUTED, 11.5, words, 400, "start"))
+        lx += 28 + len(words) * (11.5 if lang == "ja" else 6) + 20
+    height = y + 24
+    head = [f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 {W} {round(height)}" role="img" aria-label="{escape(t["title"])}" style="max-width:100%;height:auto">',
+            _rect(0, 0, W, height, INK, rx=0)]
+    return "".join(head + body + rows + side + ['<g class="legend">'] + legend + ["</g></svg>"]) + "\n"
 
 
-def legend_table(lang):
-    head = {"ja": "| 略称 | 役割 | モジュール | crate |", "en": "| Abbreviation | What it is | Module | Crate |"}[lang]
-    rows = [f"| {a} | {m['role'][lang]} | `{m['module']}` | `{m['crate']}` |" for a, m in MODULES.items()]
-    return "\n".join([head, "|---|---|---|---|", *rows]) + "\n"
+def component_table(lang):
+    i = 0 if lang == "ja" else 1
+    head = {"ja": "| コンポーネント | 設計上の役割 |", "en": "| Component | Role in the design |"}[lang]
+    return "\n".join([head, "|---|---|", *(f"| {name} | {lines[i]} |" for name, lines in COMPONENTS.items())]) + "\n"
 
 
 FIGURES = {"node": node_svg}
+# The code's own dependency rule, which site/scripts/test_site.py keeps: these crates name no MCU or board.
 NO_MCU = ("dagon-port", "dagon-format", "dagon-proto", "dagon-core", "dagon-boot", "dagon-events", "dagon-agent")
 HAL = ("embassy-rp", "embassy-stm32", "esp-hal", "cortex-m")

@@ -289,7 +289,7 @@ describe('update from the page with dagon-host apply against the mock hub', () =
   test('boot core and app in one write: the boot core\'s confirmation does not finish the node; only the app\'s makes 100 %', async () => {
     const { op } = await sentTo();
     op.takeFile('v1.1.0.dgb', RELEASE);
-    const feed = (e: Omit<UpdateEvent, 'node'>) => (op as unknown as { onEvent(e: UpdateEvent): void }).onEvent({ node: 1, ...e });
+    const feed = (e: Omit<UpdateEvent, 'node' | 'shown'>) => (op as unknown as { onEvent(e: UpdateEvent): void }).onEvent({ node: 1, shown: Math.min(99, e.percent), ...e });
     const app = op.fileVersions.seg!;
     const was = op.live.seg!.hello!.activeVersion;
     for (const phase of [PHASE.transfer, PHASE.verify, PHASE.reboot, PHASE.confirm]) feed({ phase, percent: 100, version: app, bootCore: true });
@@ -646,5 +646,25 @@ describe('update from the page with dagon-host apply against the mock hub', () =
     expect([op.state, op.failed, op.progress.hub.stage]).toEqual(['stopped', 'hub', 'previous']);
     expect(op.status).toBe(ANNOUNCE.A13previous('メイン'));
     expect(v(t.helloOf('hub').activeVersion)).toBe('1.0.0');
+  }, 60_000);
+
+  test('a node left out by its check is no node that did not answer', async () => {
+    const { op } = await sentTo();
+    op.toggleSkip('watch');
+    op.takeFile('v1.1.0.dgb', RELEASE);
+    await op.update();
+    expect(op.state).toBe('done');
+    expect(op.finished).toEqual({ kind: 'updated', left: 0, leftOut: 1 });
+  }, 60_000);
+
+  test('what stands in the way of a write is known before anything is sent', async () => {
+    const { op } = await sentTo();
+    expect(op.noWrite(RELEASE)).toBe(null);
+    for (const n of op.reach) op.toggleSkip(n.id);
+    expect(op.noWrite(RELEASE)).toBe('noneChecked');
+    for (const n of op.reach) op.toggleSkip(n.id);
+    op.takeFile('v1.1.0.dgb', RELEASE);
+    await op.update();
+    expect(op.noWrite(RELEASE)).toMatchObject({ same: op.fileVersions.hub });
   }, 60_000);
 });

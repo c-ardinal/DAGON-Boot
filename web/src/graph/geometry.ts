@@ -1,6 +1,6 @@
 // Link geometry: vertical cubic Béziers from a parent's bottom port to a
-// child's top port, plus what the wire bundle needs (offset wires, tie and
-// label positions by arc length).
+// child's top port (a cable's rest shape, see cable.ts), and where the wire
+// bundle's strands and ties sit.
 
 export interface Pt {
   x: number;
@@ -22,47 +22,6 @@ export function pointAt([p0, p1, p2, p3]: Bezier, t: number): Pt {
   const c = 3 * u * t * t;
   const d = t * t * t;
   return { x: a * p0.x + b * p1.x + c * p2.x + d * p3.x, y: a * p0.y + b * p1.y + c * p2.y + d * p3.y };
-}
-
-/** Unit tangent at t. */
-export function tangentAt([p0, p1, p2, p3]: Bezier, t: number): Pt {
-  const u = 1 - t;
-  const x = 3 * u * u * (p1.x - p0.x) + 6 * u * t * (p2.x - p1.x) + 3 * t * t * (p3.x - p2.x);
-  const y = 3 * u * u * (p1.y - p0.y) + 6 * u * t * (p2.y - p1.y) + 3 * t * t * (p3.y - p2.y);
-  const n = Math.hypot(x, y) || 1;
-  return { x: x / n, y: y / n };
-}
-
-const SAMPLES = 64;
-
-/** Cumulative chord lengths at t = i / SAMPLES. */
-export function lengthTable(b: Bezier): number[] {
-  const out = [0];
-  let prev = b[0];
-  for (let i = 1; i <= SAMPLES; i++) {
-    const p = pointAt(b, i / SAMPLES);
-    out.push(out[i - 1] + Math.hypot(p.x - prev.x, p.y - prev.y));
-    prev = p;
-  }
-  return out;
-}
-
-/** Parameter t at arc length s (clamped). */
-export function tAtLength(table: number[], s: number): number {
-  const total = table[table.length - 1];
-  if (s <= 0) return 0;
-  if (s >= total) return 1;
-  let i = 1;
-  while (table[i] < s) i++;
-  const f = (s - table[i - 1]) / (table[i] - table[i - 1]);
-  return (i - 1 + f) / SAMPLES;
-}
-
-// horizontal shift instead of a true offset curve. Exact enough for
-// links that run mostly downwards; switch to a normal-offset polyline if
-// links get steep sideways runs.
-export function shifted(b: Bezier, dx: number): Bezier {
-  return b.map((p) => ({ x: p.x + dx, y: p.y })) as unknown as Bezier;
 }
 
 export function pathD([p0, p1, p2, p3]: Bezier): string {

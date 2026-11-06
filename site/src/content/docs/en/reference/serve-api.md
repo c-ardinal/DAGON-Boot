@@ -37,8 +37,8 @@ Host and Origin checks (403 otherwise).
 | `POST` | `/v1/kept` |  | Keeps a package about to be written, once it verifies with the project's key; answers its id. |
 | `GET` | `/v1/bootcore/{node}` |  | The node's signed boot core (the ROM path): [provision.&lt;node&gt;] bootcore, else &lt;provision_dir&gt;/&lt;node&gt;/bootcore.img. |
 | `GET` | `/v1/stage0/{node}` |  | Stage0's bytes for the ROM path's full rewrite of an MCU with a stage0, as provision wrote them: &lt;provision_dir&gt;/&lt;node&gt;/stage0.bin. Stage0 carries no signature; the host checks it fits the MCU's stage0 region before writing it. |
-| `GET` | `/v1/layout` |  | 呼び名 and editor positions (404 before the first save). |
-| `PUT` | `/v1/layout` |  | A JSON object, written whole. |
+| `GET` | `/v1/layout` |  | 呼び名 and editor positions (an empty layout before the first save). |
+| `PUT` | `/v1/layout` |  | A layout of this format, written whole. |
 | `POST` | `/v1/conform` | refused | The 12 conformance tests on `node` through the hub, after the page hands over the port. |
 | `GET` | `/v1/conform/{node}` | refused | The node's last conformance result (404 before the first run). |
 | `POST` | `/v1/ai/topology` | refused | A job; the model's questions go to the page. |

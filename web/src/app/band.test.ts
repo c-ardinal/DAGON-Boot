@@ -1,7 +1,31 @@
 import { describe, expect, test } from 'vitest';
-import { bandOf, connectNotice } from './band.ts';
-import { BAND, BUTTON, SIM, WRITE } from './copy.ts';
+import { bandOf, connectNotice, prepareSentence } from './band.ts';
+import { BAND, BUTTON, DEFINE, SIM, WRITE } from './copy.ts';
 import { MACHINE, view, type ConnectFailure, type L } from './machine.ts';
+
+describe('準備 says the next true step about the build', () => {
+  const at = (p: Partial<Parameters<typeof prepareSentence>[0]>) => prepareSentence({ needsSkeleton: false, building: false, built: false, ...p });
+
+  test('before a build: build', () => expect(at({})).toBe(DEFINE.readySentence));
+  test('no skeleton: the skeleton first, whatever else', () => expect(at({ needsSkeleton: true, built: true })).toBe(DEFINE.skeletonFirst));
+  test('while it runs: wait, not build again', () => expect(at({ building: true })).toBe(DEFINE.buildingSentence));
+
+  test('after it: write. No longer asks for a build', () => {
+    expect(at({ built: true })).toBe(DEFINE.builtSentence);
+    expect(at({ built: true })).not.toContain('ビルド');
+  });
+});
+
+describe('書込 with nothing written yet', () => {
+  const ready = (built: boolean) => bandOf('ready', { hasConfig: true }, { built }).sentence;
+
+  test('with a build it asks for the press, not for a file', () => {
+    expect(ready(true)).toBe(BAND.M13built.sentence);
+    expect(ready(true)).not.toContain('パッケージファイル');
+  });
+
+  test('without one it asks for a file', () => expect(ready(false)).toBe(BAND.M13.sentence));
+});
 
 describe('how a failed connection is told', () => {
   test('what the user must fix opens a dialog; choosing nothing is a toast; anything else is neither', () => {

@@ -1,6 +1,6 @@
 // What the bottom band shows in each state: cause chip, one sentence, and the
 // named buttons the machine allows there.
-import { BAND, BAND_CHIP, BAND_FOR, BUTTON, BUTTON_FOR, SIM, WRITE, type BandCopy } from './copy.ts';
+import { BAND, BAND_CHIP, BAND_FOR, BUTTON, BUTTON_FOR, DEFINE, SIM, WRITE, type BandCopy } from './copy.ts';
 import { view, type Action, type Ctx, type L } from './machine.ts';
 import type { Finish, Progress } from './operate.svelte.ts';
 import type { ReconnectNote } from '../serial/transport.ts';
@@ -27,6 +27,8 @@ export interface Names {
   unwritten?: number;
   /** The update covers the nodes left after a recovery. */
   rest?: boolean;
+  /** There is a build to write: the main action writes it. */
+  built?: boolean;
   /** dagon demo: the 親機 is simulated, so no device list appears. */
   sim?: boolean;
   /** What the last run left (done): the band says only that. */
@@ -81,7 +83,7 @@ function words(s: L, c: Ctx, n: Names): BandCopy {
     case 'sendFailed':
       return BAND.M12;
     case 'ready':
-      return BAND.M13;
+      return n.built ? BAND.M13built : BAND.M13;
     case 'nodesSilent':
       // Nothing left to update first: recovery is the main action.
       return c.answering === false ? BAND.M62 : BAND.M62b;
@@ -116,11 +118,12 @@ function words(s: L, c: Ctx, n: Names): BandCopy {
   }
 }
 
-/** done says only what is true: all updated, some not (they did not answer), or one node rolled back or recovered. */
+/** done says only what is true: all updated, the checked ones updated, some not (they did not answer), or one node rolled back or recovered. */
 function done(f: Finish | null | undefined): BandCopy {
   if (f?.kind === 'rolledBack') return BAND_FOR.M66back(f.name, f.version);
   if (f?.kind === 'recovered') return BAND_FOR.M66fixed(f.name, f.version);
   if (f?.kind === 'updated' && f.left > 0) return BAND_FOR.M66some(f.left);
+  if (f?.kind === 'updated' && f.leftOut) return BAND.M66checked;
   return BAND.M66;
 }
 
@@ -129,6 +132,13 @@ function label(a: Action, n: Names): string {
   if (a === 'updateResponding') return BUTTON_FOR.updateResponding(n.responding ?? 0);
   if (a === 'update' && n.rest) return BUTTON_FOR.updateRest;
   return BUTTON[a];
+}
+
+/** 準備's next step with nothing wrong: what is true of the build now. `built`: this 構成 was built since it last changed. */
+export function prepareSentence(s: { needsSkeleton: boolean; building: boolean; built: boolean }): string {
+  if (s.needsSkeleton) return DEFINE.skeletonFirst;
+  if (s.building) return DEFINE.buildingSentence;
+  return s.built ? DEFINE.builtSentence : DEFINE.readySentence;
 }
 
 export function bandOf(s: L, c: Ctx, n: Names = {}): Band {

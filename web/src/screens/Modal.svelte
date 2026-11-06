@@ -118,6 +118,7 @@
     font: 400 var(--t-small) / 24px var(--f-ja);
   }
   footer {
+    flex-wrap: wrap;
     display: flex;
     align-items: center;
     gap: var(--s-3);
@@ -133,6 +134,8 @@
     color: var(--c-accent);
     font: 700 var(--t-small) / 1 var(--f-ja);
     cursor: pointer;
+    flex: none;
+    white-space: nowrap;
   }
   .more:focus-visible {
     outline: var(--st-w-focus) solid var(--c-paper);

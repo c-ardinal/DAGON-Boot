@@ -29,7 +29,8 @@
   let field = $state<HTMLInputElement>();
   let mark = $state(72);
   let pos = $state<{ x: number; y: number } | null>(null);
-  let open = $state(true);
+  /** Closed until asked for or answering: the canvas stays clear for what the nodes show. */
+  let open = $state(false);
   let text = $state('');
   let answered = $state(false);
   let bubbleEl = $state<HTMLElement>();
@@ -96,8 +97,9 @@
     if (!st) return null;
     const obs = obstacles();
     const step = mark / 4;
-    for (let y = st.height - mark - 3 * MARGIN; y >= MARGIN; y -= step) {
-      for (let x = st.width - mark - 3 * MARGIN; x >= MARGIN; x -= step) {
+    // The right edge first, up from the bottom: over the zoom, where no notice comes.
+    for (let x = st.width - mark - MARGIN; x >= MARGIN; x -= step) {
+      for (let y = st.height - mark - 3 * MARGIN; y >= MARGIN; y -= step) {
         if (!free({ x, y, w: mark, h: mark }, st, obs)) continue;
         const s = SIDES.find((v) => !open || free(bubbleBox(x, y, v), st, obs));
         if (s) {
@@ -174,6 +176,7 @@
     if (n <= seen) return void (seen = n);
     seen = n;
     if (agent.messages[n - 1].role !== 'dagon') return;
+    open = true;
     answered = true;
     const t = setTimeout(() => (answered = false), REPLIED_MS);
     return () => clearTimeout(t);

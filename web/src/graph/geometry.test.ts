@@ -1,21 +1,13 @@
 import { describe, expect, test } from 'vitest';
-import { lengthTable, neighbour, pointAt, tAtLength, tangentAt, tieLengths, verticalLink, wireOffsets } from './geometry.ts';
+import { neighbour, pointAt, tieLengths, verticalLink, wireOffsets } from './geometry.ts';
 
 describe('link geometry', () => {
   const b = verticalLink({ x: 100, y: 0 }, { x: 300, y: 400 });
 
   test('leaves and enters vertically', () => {
-    expect(tangentAt(b, 0)).toEqual({ x: 0, y: 1 });
-    expect(tangentAt(b, 1)).toEqual({ x: 0, y: 1 });
+    expect(b[1].x).toBe(b[0].x);
+    expect(b[2].x).toBe(b[3].x);
     expect(pointAt(b, 0.5)).toEqual({ x: 200, y: 200 });
-  });
-
-  test('arc length round trip', () => {
-    const table = lengthTable(b);
-    const total = table[table.length - 1];
-    expect(total).toBeGreaterThan(400);
-    const p = pointAt(b, tAtLength(table, 32));
-    expect(Math.hypot(p.x - 100, p.y)).toBeCloseTo(32, 0);
   });
 
   test('ties sit 32 px from each port, 20 % on short links', () => {

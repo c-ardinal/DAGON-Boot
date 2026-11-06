@@ -2,58 +2,41 @@ import { readFileSync } from 'node:fs';
 import { createRawSnippet } from 'svelte';
 import { render } from 'svelte/server';
 import { describe, expect, test } from 'vitest';
-import { BUILD, WRITE } from '../app/copy.ts';
+import { WRITE } from '../app/copy.ts';
 import StopModal from './StopModal.svelte';
 
-const html = (back: boolean, linked: boolean) =>
+const html = () =>
   render(StopModal, {
     props: {
       target: '[3] ウォッチ',
-      back,
       reason: '理由',
       fix: '次にすること',
-      linked,
-      onask: () => undefined,
       onclose: () => undefined,
       onmore: () => undefined,
-      buttons: createRawSnippet(() => ({ render: () => '<button>復旧する</button>' })),
+      buttons: createRawSnippet(() => ({ render: () => '<button>書き込む</button>' })),
     },
   }).body;
-const ask = `data-control="ask"`;
 
-describe('the modal of a stopped write', () => {
-  test('its headings carry modal-h, and that style lives with Modal so it reaches every modal\'s body', () => {
-    expect(html(true, true).match(/<h3 class="modal-h[^"]*"/g)).toHaveLength(2);
+describe('the modal of a write that could not be done', () => {
+  test("its headings carry modal-h, and that style lives with Modal so it reaches every modal's body", () => {
+    expect(html().match(/<h3 class="modal-h[^"]*"/g)).toHaveLength(2);
     const source = (rel: string) => new TextDecoder().decode(readFileSync(new URL(rel, import.meta.url)));
     expect(source('./Modal.svelte')).toMatch(/dialog :global\(\.modal-h\) \{/);
     expect(source('../App.svelte')).not.toMatch(/^\s*\.modal-h \{/m);
   });
 
-  test('went back and an agent is linked: 失敗の理由を聞く, before the band\'s actions', () => {
-    const b = html(true, true);
-    expect(b).toContain(WRITE.previous);
-    expect(b).toContain(`${ask}`);
-    expect(b).toContain(BUILD.askAgent);
-    expect(b.indexOf(BUILD.askAgent)).toBeLessThan(b.indexOf('復旧する'));
-  });
-
-  test('no link: the action is absent, the rest of the modal stays', () => {
-    const b = html(true, false);
-    expect(b).not.toContain(ask);
-    expect(b).not.toContain(BUILD.askAgent);
+  test('says it failed, why, what to do, and the actions after them', () => {
+    const b = html();
+    expect(b).toContain(WRITE.failed);
     expect(b).toContain('理由');
-    expect(b).toContain('復旧する');
+    expect(b.indexOf('次にすること')).toBeLessThan(b.indexOf('書き込む</button>'));
   });
 
   test('its own label, when the outcome has one', () => {
     const b = render(StopModal, {
-      props: { target: '[2] 7セグ', back: false, label: WRITE.coreBack.label, reason: WRITE.coreBack.detail, fix: WRITE.coreBack.next, linked: false, onask: () => undefined, onclose: () => undefined, onmore: () => undefined, buttons: createRawSnippet(() => ({ render: () => '<span></span>' })) },
+      props: { target: '[2] 7セグ', label: WRITE.coreBack.label, reason: WRITE.coreBack.detail, fix: WRITE.coreBack.next, onclose: () => undefined, onmore: () => undefined, buttons: createRawSnippet(() => ({ render: () => '<button>x</button>' })) },
     }).body;
     for (const words of [WRITE.coreBack.label, WRITE.coreBack.detail, WRITE.coreBack.next]) expect(b).toContain(words);
     expect(b).not.toContain(WRITE.failed);
-  });
-
-  test('stopped without going back: no record to ask about, so no action', () => {
-    expect(html(false, true)).not.toContain(ask);
   });
 });

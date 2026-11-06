@@ -28,7 +28,7 @@ SOURCE = PAGE / "SOURCE"
 CRATES = ["dagon-wasm", "dagon-host", "dagon-format", "dagon-proto", "dagon-topology",
           "dagon-sign", "dagon-romlink", "dagon-conform", "dagon-port", "dagon-core",
           "dagon-agent"]
-WEB_SKIP = {"node_modules", "dist", "pkg"}
+WEB_SKIP = {"node_modules", "dist", "pkg", "test-results", "playwright-report"}
 # The definition files dagon-topology embeds (its build.rs discovers them; a
 # test keeps this list equal to what it embeds).
 EMBEDDED = ROOT / "crates" / "dagon-topology" / "builtin-files.txt"

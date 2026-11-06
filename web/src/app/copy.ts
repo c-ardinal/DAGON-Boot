@@ -75,6 +75,8 @@ export const BAND = {
   M10: { sentence: '実際の配線と同じか確かめてから、親機へ送ってください。' },
   M12: { chip: '× 送信失敗', sentence: 'USB ケーブルを確かめてから、もう一度送ってください。' },
   M13: { sentence: 'パッケージファイルをこの画面に置くか、選んでください。' },
+  /** ready with a build to write: the main action writes it. */
+  M13built: { sentence: '書き込むノードにチェックを入れて、『書き込む』を押してください。' },
   /** M14 / M15 / M28: label-value pair, no sentence. */
   M14: { pair: ['目安', '約 1 分'] },
   M18: { sentence: '何も書いていないので、準備でもう一度ビルドするか、正しいファイルを選んでください。' },
@@ -104,7 +106,8 @@ export const BAND = {
   M63: { sentence: '確かめ終わるまで、そのまま待ってください。' },
   M64: { sentence: '親機が再起動したら自動でつなぎ直すので、そのまま待ってください。' },
   M65: { pair: ['目安', '約 1 分'], sentence: '止まったノードへ書き込むと、新しいバージョンで動きます。' },
-  M66: { sentence: 'すべてのノードが新しいバージョンで動いています。' },
+  M66: { sentence: 'すべてのノードへ書き込みました。' },
+  M66checked: { sentence: 'チェックしたノードへ書き込みました。' },
   M67: { sentence: 'CLI の作業が終わると、自動でつなぎ直します。' },
 } as const satisfies Record<string, BandCopy>;
 
@@ -445,7 +448,6 @@ export const PARTS = {
   heading: '部品',
   hint: 'ドラッグで置く',
   close: '部品を閉じる',
-  closeOrder: '書き込みの順を閉じる',
   open: '部品を開く',
 } as const;
 
@@ -481,10 +483,10 @@ export const CANVAS = {
   dotResponding: '応答',
   dotFound: '発見',
   /** M49 during an update, and after it stopped. */
-  dotProgress: '進み具合',
+  dotProgress: '全ノードの進み具合',
   dotPercent: '%',
   dotStopped: '% 停止',
-  dotProgressName: (n: number, stopped: boolean) => `進み具合 ${n}%${stopped ? '、停止' : ''}`,
+  dotProgressName: (n: number, stopped: boolean) => `全ノードの進み具合 ${n}%${stopped ? '、停止' : ''}`,
   dotRespondingName: (n: number, of: number) => `応答 ${n}/${of}、${of} つのノードのうち ${n} つが応答`,
   dotFoundName: (n: number) => `発見 ${n}`,
   /** S19 */
@@ -577,12 +579,6 @@ export const LINK_WHY = {
   taken: 'このノードはもう親機とつながっています',
   under: (name: string) => `このノードはもう ${name} の下です`,
   loop: 'このノードの下にあるノードにはつなげません',
-} as const;
-
-/** Left column. */
-export const ORDER = {
-  heading: '書き込みの順',
-  none: 'なし',
 } as const;
 
 /** Right column. */
@@ -686,6 +682,7 @@ export const RECONNECT = {
 /** Help in the header, and the operating-mode key list. */
 export const HELP = {
   heading: '困ったとき',
+  close: '困ったときを閉じる',
   rows: [
     ['一覧が空のとき', 'データ用のケーブルに替えてください（充電専用では出ません）。'],
     ['「DAGON hub」が無い', '親機の画面が点いているか確かめてください。'],
@@ -698,6 +695,9 @@ export const HELP = {
     ['Tab', 'ノードへ移る'],
     ['矢印', '隣のノードへ'],
     ['Enter', '選ぶ'],
+    ['F', 'キャンバス全体を表示する'],
+    ['Ctrl + ホイール', 'キャンバスを拡大・縮小する'],
+    ['ドラッグ', 'キャンバスやノードを動かす'],
   ],
 } as const;
 
@@ -722,7 +722,7 @@ export const ANNOUNCE = {
   A11percent: (n: number) => `進み具合 ${n}%`,
   A12: '親機 再起動中、自動で再接続',
   A13: (name: string) => `書き込み 停止、${name}`,
-  A13core: (name: string) => `${name} ブートコアは元のまま`,
+  A13core: (name: string) => `${name} ブートローダは元のまま`,
   A13previous: (name: string) => `${name} 前のバージョン`,
   A14: (version: string) => `完了、${version}`,
   A21timeout: '親機 再接続 時間切れ',
@@ -734,7 +734,7 @@ export const ANNOUNCE = {
 
 /** Words that never appear in operating-mode guidance, chips or results. */
 export const FORBIDDEN_WORDS = [
-  '署名', 'ROM', 'CDC', 'ブートローダ', 'エラーコード', 'トポロジ',
+  '署名', 'ROM', 'CDC', 'ブートコア', 'エラーコード', 'トポロジ',
   'マニフェスト', 'ハッシュ', 'ポート', 'シリアル', 'フラッシュ', 'ファームウェア',
   'パーティション', 'コマンド', 'タイムアウト', 'WASM', 'Web Serial', '確定', '試行中',
   '巻き戻り', '不正', '致命的', '無効',
@@ -844,7 +844,7 @@ export const DEFINE = {
   /** The parts window. */
   search: '製品・マイコンを探す',
   byMcuOwn: 'マイコン',
-  ownBoard: (mcu: string) => `${mcu}（自作ボード）`,
+  ownBoard: 'ボード',
   count: (n: number) => `${n} 個`,
   placed: '配置済み',
   firstHeading: 'はじめに',
@@ -884,8 +884,12 @@ export const DEFINE = {
   toOperate: '書込へ',
   /** Writes the 構成 back to the project's YAML through dagon serve. */
   save: '保存',
-  fixSentence: '直すと、親機へ送れます。',
-  /** C19: E6, nodes updating skips; the 構成 is valid as it is. */
+  fixSentence: '直すと、ビルドできます。',
+  readySentence: 'ビルドしてから、書込で書き込みます。',
+  buildingSentence: 'ビルドが終わるまで、そのまま待ってください。',
+  builtSentence: '書込に切り替えて、ノードへ書き込みます。',
+  skeletonFirst: '先に雛形を作ると、ビルドできます。',
+  /** Nodes updating skips; the 構成 is valid as it is. */
   notYetSentence: (k: number) => `書き込めないノードが ${k} つあります。構成はこのままで使え、書き込みではそのノードを飛ばします。`,
   /** The 構成 of the release file chosen in 書込 replaces this one (undoable, saved to the YAML). */
   importFileTopology: 'ファイルの構成を取り込む',
@@ -1139,6 +1143,28 @@ export const SIM = {
 export const MENU = {
   button: 'メニューを開く',
   restart: '最初からやり直す',
+  groups: { project: 'プロジェクト', define: '構成', connect: 'つなぐ', dagon: 'DAGON', help: '困ったとき' },
+  save: '保存する',
+  arrange: '自動で並べる',
+  place: 'パッケージファイルを置く',
+  rollback: '前のバージョンに戻す',
+  applyProposal: 'DAGON の案を反映する',
+  cli: 'CLI につなぎ直す',
+  keys: 'キー操作',
+  copyLog: '記録をコピーする',
+  wiring: '配線表を見る',
+  copyUrl: 'この URL をコピーする',
+  copied: 'コピーした',
+  /** Why an item cannot be used now. */
+  off: {
+    notDefine: '準備で使えます。',
+    notGraph: 'グラフの表示で使えます。',
+    notConnected: '親機につないでから使えます。',
+    notIdle: '今の動きが終わってから使えます。',
+    noNode: 'ノードを選んでから使えます。',
+    noProposal: 'DAGON の案はありません。',
+    nothing: 'これ以上ありません。',
+  },
   restartHeading: 'やり直しの確認',
   restartSentence: 'このページの記録を消して、始めの画面に戻ります（元に戻せません。プロジェクトのファイルと基板の中のプログラムは変わりません）。',
   restartConfirm: '消して最初からやり直す',
@@ -1179,6 +1205,8 @@ export const NOTICE = {
 } as const;
 
 export const BUILD = {
+  /** A node with no [build.*] in dagon.toml: nothing to build until the skeleton is made. */
+  noSkeleton: { reason: 'このノードの雛形がまだありません。', stale: 'DAGON のソースが変わったので、雛形が古くなっています。', fix: '雛形を作ると、ビルドできるようになります。' },
   run: 'ビルドする',
   title: 'ビルドする',
   state: {
@@ -1198,7 +1226,16 @@ export const BUILD = {
   askAgent: '失敗の理由を聞く',
 } as const;
 
+/** The project's layout file (呼び名 and card places). */
+export const LAYOUT = {
+  refused: '× 配置を読めない',
+  refusedDetail: '配置のファイルが読めないので、自動の配置で開きました。保存すると置き換わります。',
+} as const;
+
 export const WRITE = {
+  noneChecked: { label: 'ノードを選ぶ', detail: '書き込むノードのカードにチェックを入れてください。' },
+  alreadyOn: (v: string) => ({ label: `すべて ${v}`, detail: `チェックしたノードはすでに ${v} で動いているので、書き込みませんでした。` }),
+  pickVersion: 'バージョンを選んで書き込む',
   run: '書き込む',
   go: '{n} ノードへ書き込む',
   toast: {
@@ -1228,9 +1265,9 @@ export const WRITE = {
   },
   /** The new boot core failed its check: the node runs its confirmed one, the app was not written. */
   coreBack: {
-    label: '↺ ブートコアは元のまま',
-    detail: '新しいブートコアが自分の検査に通らなかったので、動いていたブートコアに戻りました。ノードは動いています。アプリは書き込んでいません。',
-    next: 'ブートコアを直してバージョンを上げ、ビルドしてから、もう一度書き込んでください。',
+    label: '↺ ブートローダは元のまま',
+    detail: '新しいブートローダが自分の検査に通らなかったので、動いていたブートローダに戻りました。ノードは動いています。アプリは書き込んでいません。',
+    next: 'ブートローダを直してバージョンを上げ、ビルドしてから、もう一度書き込んでください。',
   },
   /** A silent node with a ROM entry: said once, before anything is touched. */
   rom: {

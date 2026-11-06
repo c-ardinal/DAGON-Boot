@@ -36,10 +36,24 @@ const lastBuilding = (lines: string[], reach: readonly string[]): string | null 
   return null;
 };
 
-/** The node being built now, for its card; null when nothing runs. */
+/** The node being built now, for its card; null when nothing runs or the running job named none. */
 export function buildingNode(j: BuildJobs, reach: readonly string[]): string | null {
   const running = [j.sign, j.build].find((x) => x?.state === 'running');
   return running ? lastBuilding(running.lines, reach) : null;
+}
+
+/** A job keeps only its latest lines, so a name can scroll off while that node still builds: what the running job named last. */
+export interface BuildingMemo {
+  job: number | null;
+  node: string | null;
+}
+
+/** `buildingNode`, holding the running job's last name; a job that ended, or a new one, names nobody until it does. */
+export function buildingNow(j: BuildJobs, reach: readonly string[], memo: BuildingMemo): BuildingMemo {
+  const running = [j.sign, j.build].find((x) => x?.state === 'running');
+  if (!running) return { job: null, node: null };
+  const named = lastBuilding(running.lines, reach);
+  return { job: running.id, node: named ?? (memo.job === running.id ? memo.node : null) };
 }
 
 export interface BuildFailure {
@@ -51,6 +65,8 @@ export interface BuildFailure {
   line: number | null;
   /** Nodes built before it stopped. */
   others: number;
+  /** The skeleton is what stands in the way: the node has no [build.*] ('none'), or its boot crate changed since `dagon gen` ('stale'). */
+  skeleton: 'none' | 'stale' | null;
 }
 
 /** cargo's first error and the place under it (dagon build stops at the first node that fails). */
@@ -60,7 +76,7 @@ const CARGO_PLACE = /^\s*-->\s*(.+):(\d+):\d+\s*$/;
 /** What the failure dialog says about the failed step. */
 export function buildFailure(j: BuildJobs, reach: readonly string[]): BuildFailure {
   const failed = [j.build, j.sign, j.release].find((x) => x?.state === 'failed') ?? null;
-  const plain = { node: null, reason: jobReason(failed), file: null, line: null, others: 0 };
+  const plain = { node: null, reason: jobReason(failed), file: null, line: null, others: 0, skeleton: /^no \[build\./.test(jobReason(failed) ?? '') ? ('none' as const) : failed?.lines.some((l) => l.includes('run `dagon gen`')) ? ('stale' as const) : null };
   if (failed && failed === j.sign) {
     const named = /^(\S+): (.*)$/s.exec(plain.reason ?? '');
     return named && reach.includes(named[1]) ? { ...plain, node: named[1], reason: named[2] } : plain;
@@ -74,7 +90,7 @@ export function buildFailure(j: BuildJobs, reach: readonly string[]): BuildFailu
   const shown = path.replace(/\\/g, '/');
   const built = new Set(lines.flatMap((l) => BUILDING.exec(l)?.[1] ?? []));
   built.delete(node);
-  return { node, reason: `${shown}:${line}  ${CARGO_ERROR.exec(lines[at])![1]}`, file: shown.split('/').pop()!, line: Number(line), others: built.size };
+  return { node, reason: `${shown}:${line}  ${CARGO_ERROR.exec(lines[at])![1]}`, file: shown.split('/').pop()!, line: Number(line), others: built.size, skeleton: null };
 }
 
 /**

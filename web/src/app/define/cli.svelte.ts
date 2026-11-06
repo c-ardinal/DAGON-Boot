@@ -28,6 +28,8 @@ export interface Hello {
   key_id: string | null;
   /** The developer's public key (64 hex digits) the page verifies releases with. */
   release_key?: string;
+  /** Nodes with a [build.*] in dagon.toml: the others have no skeleton yet. */
+  build_nodes?: string[];
   /** MCU families POST /v1/flash can write (rp2040, stm32f401re). */
   flash_mcus?: string[];
   /** `dagon demo`: a simulator, never a real hub (its speed, and the 子機 set to fail). */
@@ -76,10 +78,29 @@ export type ProjectResult = 'opened' | 'missing' | 'key' | 'busy' | 'exists' | '
 
 /** GET/PUT /v1/layout: what the YAML does not hold, in a file beside it. */
 export interface Layout {
+  /** The file's format number. */
+  format?: number;
   /** 呼び名 by node id. */
   names?: Record<string, string>;
   /** Editor positions by node id. */
   positions?: Record<string, { x: number; y: number }>;
+}
+
+/** The layout format this page reads and writes (GET /v1/hello `formats.layout`). */
+export const LAYOUT_FORMAT = 1;
+
+/** A layout file as read: its shape checked, or why it is refused. Coordinates are finite numbers or the file is not taken. */
+export function parseLayout(v: unknown): { layout: Layout } | { refused: string } {
+  if (typeof v !== 'object' || v === null || Array.isArray(v)) return { refused: 'not an object' };
+  const { format, names, positions } = v as Record<string, unknown>;
+  if (format !== undefined && format !== LAYOUT_FORMAT) return { refused: `format ${String(format)}` };
+  const isMap = (x: unknown): x is Record<string, unknown> => typeof x === 'object' && x !== null && !Array.isArray(x);
+  if (names !== undefined && !(isMap(names) && Object.values(names).every((n) => typeof n === 'string'))) return { refused: 'names' };
+  if (positions !== undefined) {
+    const point = (p: unknown) => isMap(p) && Number.isFinite(p.x) && Number.isFinite(p.y);
+    if (!(isMap(positions) && Object.values(positions).every(point))) return { refused: 'positions' };
+  }
+  return { layout: { format: LAYOUT_FORMAT, names: names as Layout['names'], positions: positions as Layout['positions'] } };
 }
 
 /** How saving the 構成 to the project's YAML went. */
@@ -126,6 +147,10 @@ export interface CliDeps {
 export class Cli {
   state = $state<CliState>('none');
   hello = $state<Hello | null>(null);
+  /** Events about a job the page has not yet been told the number of. */
+  private early: Record<string, unknown>[] = [];
+  /** Why the project's layout file was not taken, or null. */
+  layoutRefused = $state<string | null>(null);
   /** The open project's definitions did not load (GET /v1/definitions 500): the builtin set is not used in their place. */
   defsFailed = $state(false);
   jobs = $state<Job[]>([]);
@@ -256,6 +281,12 @@ export class Cli {
   /** One serve event. */
   event(e: Record<string, unknown>): void {
     const job = this.jobs.find((j) => j.id === e.job);
+    // serve starts a job before the page has its answer: what it says meanwhile waits for the job.
+    if (!job && typeof e.job === 'number' && String(e.type).startsWith('job.')) {
+      this.early.push(e);
+      this.early.splice(0, this.early.length - MAX_LINES);
+      return;
+    }
     switch (e.type) {
       case 'job.state':
         if (job) {
@@ -298,6 +329,9 @@ export class Cli {
     const r = await this.json<{ job: number }>('POST', path, body);
     const job: Job = { id: r.job, kind, state: 'queued', target, stage: '', percent: null, lines: [], result: null, question: null, started: this.d.now(), ended: null };
     this.jobs = [job, ...this.jobs];
+    const said = this.early.filter((e) => e.job === r.job);
+    this.early = this.early.filter((e) => e.job !== r.job);
+    said.forEach((e) => this.event(e));
     return this.jobs[0];
   }
 
@@ -448,7 +482,17 @@ export class Cli {
   async loadLayout(): Promise<Layout | null> {
     if (!this.has('layout')) return null;
     const r = await this.call('GET', 'layout');
-    return r.ok ? ((await r.json()) as Layout) : null;
+    if (!r.ok) {
+      this.layoutRefused = ((await r.json().catch(() => ({}))) as { error?: string }).error ?? String(r.status);
+      return null;
+    }
+    const read = parseLayout(await r.json());
+    if ('refused' in read) {
+      this.layoutRefused = read.refused;
+      return null;
+    }
+    this.layoutRefused = null;
+    return read.layout;
   }
 
   /** PUT /v1/layout: the whole layout file; false when serve did not take it. */

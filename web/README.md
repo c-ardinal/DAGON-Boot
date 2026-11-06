@@ -36,6 +36,7 @@ npm run build     # svelte-check, then vite build into dist/ (target chrome89)
 npm run build:demo -- --outDir <dir> --emptyOutDir   # the public demo (simulator, test key)
 npm run preview   # serves dist/ on http://127.0.0.1:4173
 npm test          # Vitest
+npm run e2e       # the Console in a real browser: the layout sweep over window sizes (npx playwright install chromium first)
 npm run fonts     # re-fetch the font subsets after screen text changes
 ```
 
@@ -76,10 +77,10 @@ A simulated hub plugs in as one more `Transport` in `src/serial/devHub.ts`, unde
 | `src/app/sample.ts` | The sample 構成 (`topology/sample.yaml` plus names and wiring). |
 | `src/app/connect.ts` | Device chooser and error mapping. |
 | `src/app/copy.ts` | All screen and announcement text. |
-| `src/graph/` | The layered graph: own SVG (layers, wire bundles, ties, ports) + HTML (nodes, chips), roving focus with arrow keys. |
+| `src/graph/` | The graph: own SVG (wire bundles, ties) + HTML (nodes, chips, ports) under a view only pan, zoom and fit change; links are damped cables (`cable.ts`); roving focus with arrow keys. |
 | `src/app/start.svelte.ts` | The start screen: making and opening projects through serve (GET /v1/project, GET /v1/fs, POST /v1/project/open, /new). |
 | `src/app/define/` | 準備: the document and its history, the check's problems, the 構成 differences of a release (otherTopology), and the serve link (`cli.svelte.ts`: passphrase, API, events, saving the YAML). |
-| `src/screens/` | Header, menu and its restart dialog, start screen, bottom band, update order (left column), detail (right column), hub reconnect dialog; `define/` holds 準備's columns. |
+| `src/screens/` | Header, menu popover and its restart dialog, start screen, bottom band, the columns over the canvas (focal number, parts, detail, zoom, notices), hub reconnect dialog; `define/` holds 準備's columns. |
 | `src/styles/tokens.css` | Design tokens: colour, type, spacing, radius, z-index, motion. |
 
 `Transport` carries whole frames: the page owns choosing and opening the device, and the protocol

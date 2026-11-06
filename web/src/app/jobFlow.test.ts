@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'vitest';
 import type { Job } from './define/cli.svelte.ts';
-import { buildFailure, buildingNode, buildStateOf, firstWriteNodes } from './jobFlow.ts';
+import { buildFailure, buildingNode, buildingNow, buildStateOf, firstWriteNodes} from './jobFlow.ts';
 
 const job = (p: Partial<Job>): Job => ({ id: 1, kind: 'build', state: 'running', target: '', stage: '', percent: null, lines: [], result: null, question: null, started: 0, ended: null, ...p });
 const none = { build: null, sign: null, release: null };
@@ -53,6 +53,32 @@ describe('which card says ビルド中', () => {
   });
 });
 
+describe('the node being built, over a whole build', () => {
+  const none2 = { job: null, node: null };
+  const running = (lines: string[], id = 1) => ({ ...none, build: job({ id, state: 'running', lines }) });
+
+  test('names nobody until cargo does, then only the one it names', () => {
+    let m = buildingNow(running([]), reach, none2);
+    expect(m.node).toBeNull();
+    m = buildingNow(running(['hub: building slot a']), reach, m);
+    expect(m.node).toBe('hub');
+    m = buildingNow(running(['hub: building slot a', 'seg: building slot a']), reach, m);
+    expect(m.node).toBe('seg');
+  });
+
+  test('holds the name under long compiler output, while the same job runs', () => {
+    let m = buildingNow(running(['seg: building slot a']), reach, none2);
+    m = buildingNow(running(['   Compiling x', '   Compiling y']), reach, m);
+    expect(m.node).toBe('seg');
+  });
+
+  test('another job does not inherit it, and an ended job names nobody', () => {
+    const m = buildingNow(running(['seg: building slot a']), reach, none2);
+    expect(buildingNow({ ...none, sign: job({ id: 2, kind: 'sign', state: 'running', lines: [] }) }, reach, m).node).toBeNull();
+    expect(buildingNow({ ...none, build: job({ state: 'succeeded', lines: ['seg: building slot a'] }) }, reach, m)).toEqual(none2);
+  });
+});
+
 describe('what a failed build says', () => {
   // As cargo prints it through dagon build, on Windows.
   const cargo = [
@@ -68,18 +94,24 @@ describe('what a failed build says', () => {
   ];
 
   test('the failed node, the place and the compiler message; how many nodes before it were built', () => {
-    expect(buildFailure({ ...none, build: job({ state: 'failed', lines: cargo }) }, reach)).toEqual({ node: 'seg', reason: 'src/app.rs:55  mismatched types', file: 'app.rs', line: 55, others: 1 });
+    expect(buildFailure({ ...none, build: job({ state: 'failed', lines: cargo }) }, reach)).toEqual({ node: 'seg', reason: 'src/app.rs:55  mismatched types', file: 'app.rs', line: 55, others: 1, skeleton: null });
   });
 
   test('a failure without a compiler line gives the job\'s last line', () => {
     const f = buildFailure({ ...none, build: job({ state: 'failed', lines: ['no [build.hub] in dagon.toml'] }) }, reach);
-    expect(f).toEqual({ node: null, reason: 'no [build.hub] in dagon.toml', file: null, line: null, others: 0 });
+    expect(f).toEqual({ node: null, reason: 'no [build.hub] in dagon.toml', file: null, line: null, others: 0, skeleton: 'none' });
+  });
+
+  test('a boot crate changed since `dagon gen`: the skeleton is what to make again', () => {
+    const lines = ['hub: building the boot core for slot a', '  boot/hub/graph.stamp: the boot crate of node hub changed since its dependency graph was checked: run `dagon gen`'];
+    const f = buildFailure({ ...none, sign: job({ kind: 'sign', state: 'failed', lines }) }, reach);
+    expect(f.skeleton).toBe('stale');
   });
 
   test('a failed signing step names no line and no other nodes', () => {
     const sign = job({ kind: 'sign', state: 'failed', lines: ['the signing key is not available'] });
     const f = buildFailure({ ...none, build: job({ state: 'succeeded', lines: cargo.slice(0, 3) }), sign }, reach);
-    expect(f).toEqual({ node: null, reason: 'the signing key is not available', file: null, line: null, others: 0 });
+    expect(f).toEqual({ node: null, reason: 'the signing key is not available', file: null, line: null, others: 0, skeleton: null });
   });
 });
 

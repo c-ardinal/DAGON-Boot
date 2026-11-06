@@ -34,7 +34,7 @@
   });
 </script>
 
-<!-- Toast: bottom-right, left of the zoom pill; it rises once as it arrives and sinks as it goes, and never moves to catch the eye. -->
+<!-- Toast: at the foot of the canvas's middle column, so right beside the zoom pill; it rises once as it arrives and sinks as it goes, and never moves to catch the eye. -->
 <div
   transition:rise
   class="toast"
@@ -54,14 +54,13 @@
 
 <style>
   .toast {
-    position: absolute;
-    right: calc(var(--m-edge) + var(--h-button) + var(--s-3));
-    bottom: var(--m-edge);
-    z-index: var(--z-announce);
     display: flex;
+    flex: none;
     align-items: center;
+    align-self: flex-end;
     gap: var(--s-3);
-    width: var(--w-toast);
+    width: min(var(--w-toast), 100%);
+    pointer-events: auto;
     padding: var(--s-3) var(--s-4);
     border: 1px solid var(--c-line);
     border-radius: var(--r-m);
@@ -83,6 +82,8 @@
     white-space: nowrap;
   }
   .more {
+    flex: none;
+    white-space: nowrap;
     height: var(--h-text-button);
     padding: 0;
     border: 0;

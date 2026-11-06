@@ -9,10 +9,13 @@ use serde::Deserialize;
 /// The `dagon serve` HTTP API number (GET /v1/hello `api`).
 pub const SERVE_API: u32 = 1;
 
+/// The format of the layout file beside the 構成 (GET /v1/layout).
+pub const LAYOUT_FORMAT: u32 = 1;
+
 const COMPAT: &str = include_str!("../../../compat.toml");
 
 /// Each contract and the number this dagon reads and writes.
-pub fn formats() -> [(&'static str, u32); 12] {
+pub fn formats() -> [(&'static str, u32); 13] {
     use dagon_format::{bundle, header, manifest, statelog, topology};
     [
         ("wire", u32::from(dagon_proto::PROTO_VERSION)),
@@ -24,6 +27,7 @@ pub fn formats() -> [(&'static str, u32); 12] {
         ("topology-yaml", dagon_topology::SCHEMA_VERSION),
         ("definitions", dagon_topology::defs::FORMAT),
         ("serve-api", SERVE_API),
+        ("layout", LAYOUT_FORMAT),
         ("event", u32::from(dagon_catalog::EVENT_FORMAT)),
         ("extension-manifest", dagon_extension::MANIFEST_FORMAT),
         (

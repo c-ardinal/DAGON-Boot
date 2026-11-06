@@ -7,10 +7,11 @@
     d: Define;
     /** "ノードを加える": the node list places nodes. */
     onaddnode: () => void;
+    /** The open tab (the menu opens 配線). */
+    tab?: number;
   }
 
-  let { d, onaddnode }: Props = $props();
-  let tab = $state(0);
+  let { d, onaddnode, tab = $bindable(0) }: Props = $props();
   const c = $derived(d.config);
   const unlinked = $derived(d.doc.topo.nodes.find((n) => n.role === 'node' && !(d.doc.topo.links ?? []).some((l) => l.to === n.id)));
   const nameOf = (id: string) => c.nodes.find((n) => n.id === id)?.name ?? id;

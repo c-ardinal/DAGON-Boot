@@ -1,6 +1,6 @@
 # The Japanese of what gen.py copies from English sources, keyed by that English. gen.py fails on a missing or unused key.
 
-"A JSON object, written whole." = "JSON オブジェクト。全体をまとめて書きます。"
+"A layout of this format, written whole." = "この形式の配置ファイル。全体をまとめて書きます。"
 "A device on a board bus: `id` (`a-z 0-9 - _`), `bus`, `addr`, `max_transfer` (required: the most data bytes it takes in one transfer, from its datasheet; the bus port and boot programs keep to it), `regs = [{ name, reg }]` (its registers by name, `a-z 0-9 _`), `writable` (registers anything outside DAGON may write: numbers or names of `regs`)." = "ボードのバス上のデバイス: `id`（`a-z 0-9 - _`）、`bus`、`addr`、`max_transfer`（必須: 1 回の転送で受け取れるデータの最大バイト数。データシートから取ります。バスのポートとブートプログラムはこれを守ります）、`regs = [{ name, reg }]`（名前付きのレジスタ、`a-z 0-9 _`）、`writable`（DAGON の外のものが書いてよいレジスタ: `regs` の番号か名前）。"
 "A folder with a dagon.toml." = "dagon.toml のあるフォルダ。"
 "A job's state, stage, progress, log lines, question and result." = "作業の状態、段階、進み具合、ログの行、質問、結果。"
@@ -166,4 +166,5 @@
 "target thumbv6m-none-eabi" = "ターゲット thumbv6m-none-eabi"
 "target thumbv7em-none-eabihf" = "ターゲット thumbv7em-none-eabihf"
 "topology source: its `dagon:` key (dagon-topology SCHEMA_VERSION)" = "構成のソース: その `dagon:` キー（dagon-topology SCHEMA_VERSION）"
-"呼び名 and editor positions (404 before the first save)." = "呼び名とエディタの位置（最初の保存の前は 404）。"
+"呼び名 and editor positions (an empty layout before the first save)." = "呼び名とエディタの位置（最初の保存の前は空の配置）。"
+"the layout file beside the 構成: its `format` (dagon-cli versions::LAYOUT_FORMAT)" = "構成の隣の配置ファイル: その `format`（dagon-cli versions::LAYOUT_FORMAT）"

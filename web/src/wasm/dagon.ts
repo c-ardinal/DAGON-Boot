@@ -10,6 +10,7 @@ import init, {
   load_definitions,
   mcu_connection,
   mcu_trial_ms,
+  trial_percent,
   release_versions,
   use_builtin_definitions,
   supported_boards as boards,
@@ -80,7 +81,10 @@ export interface UpdateEvent {
   /** Topology node index. */
   node: number;
   phase: number;
+  /** The phase's own progress: this image's bytes during TRANSFER. */
   percent: number;
+  /** The node's one progress number, what its display is told (dagon-host). */
+  shown: number;
   version: number;
   /** About the node's boot core, written before its app: its confirmation is not the node's. */
   bootCore: boolean;
@@ -142,6 +146,8 @@ export interface Host {
   pushTopology(bin: Uint8Array): Promise<void>;
   watch(kind: TargetKind, addr: number): Promise<WatchRound>;
   /** `dagon apply`; rejects with a Refusal (or a reason) when nothing was sent. */
+  /** Topology node `node`'s trial period: how much of its one progress number the trial weighs. */
+  setTrialMs(node: number, ms: number): void;
   apply(bundle: Uint8Array, topology: Uint8Array, nodes: number[] | null, onEvent: (e: UpdateEvent) => void): Promise<NodeResult[]>;
   confirm(kind: TargetKind, addr: number, force: boolean): Promise<ConfirmResult>;
   /** How a write would reach topology node `node` now; changes nothing. */
@@ -164,6 +170,7 @@ export function newHost(link: HostLink): Host {
     discover: () => h.discover(),
     pushTopology: (bin) => h.push_topology(bin),
     watch: (k, a) => h.watch(k, a),
+    setTrialMs: (n, ms) => h.setTrialMs(n, ms),
     apply: (b, t, n, on) => h.apply(b, t, n ? Uint8Array.from(n) : undefined, on),
     confirm: (k, a, f) => h.confirm(k, a, f),
     writePath: (n, t) => h.write_path(n, t),
@@ -234,6 +241,11 @@ export function useDefinitions(json: string | null, failed = false): 'loaded' | 
 }
 
 /** How the user connects `mcu` for a write (its definition's [connection]); null for an unknown MCU. */
+/** dagon-host's one progress number during a node's trial, which reports nothing by itself. */
+export function trialPercent(xferMs: number, onTrialMs: number, trialMs: number | null, floor: number): number {
+  return trial_percent(xferMs, onTrialMs, trialMs ?? undefined, floor);
+}
+
 /** How long a new image of `mcu` may take to start and pass its self-check (`[watchdog] trial_ms`); null without one. */
 export function trialMs(mcu: string): number | null {
   return mcu_trial_ms(mcu) ?? null;

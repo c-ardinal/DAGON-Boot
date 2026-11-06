@@ -68,18 +68,18 @@ describe('what a failed build says', () => {
   ];
 
   test('the failed node, the place and the compiler message; how many nodes before it were built', () => {
-    expect(buildFailure({ ...none, build: job({ state: 'failed', lines: cargo }) }, reach)).toEqual({ node: 'seg', reason: 'src/app.rs:55  mismatched types', file: 'app.rs', line: 55, others: 1 });
+    expect(buildFailure({ ...none, build: job({ state: 'failed', lines: cargo }) }, reach)).toEqual({ node: 'seg', reason: 'src/app.rs:55  mismatched types', file: 'app.rs', line: 55, others: 1, noSkeleton: false });
   });
 
   test('a failure without a compiler line gives the job\'s last line', () => {
     const f = buildFailure({ ...none, build: job({ state: 'failed', lines: ['no [build.hub] in dagon.toml'] }) }, reach);
-    expect(f).toEqual({ node: null, reason: 'no [build.hub] in dagon.toml', file: null, line: null, others: 0 });
+    expect(f).toEqual({ node: null, reason: 'no [build.hub] in dagon.toml', file: null, line: null, others: 0, noSkeleton: true });
   });
 
   test('a failed signing step names no line and no other nodes', () => {
     const sign = job({ kind: 'sign', state: 'failed', lines: ['the signing key is not available'] });
     const f = buildFailure({ ...none, build: job({ state: 'succeeded', lines: cargo.slice(0, 3) }), sign }, reach);
-    expect(f).toEqual({ node: null, reason: 'the signing key is not available', file: null, line: null, others: 0 });
+    expect(f).toEqual({ node: null, reason: 'the signing key is not available', file: null, line: null, others: 0, noSkeleton: false });
   });
 });
 

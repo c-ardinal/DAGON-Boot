@@ -647,4 +647,24 @@ describe('update from the page with dagon-host apply against the mock hub', () =
     expect(op.status).toBe(ANNOUNCE.A13previous('メイン'));
     expect(v(t.helloOf('hub').activeVersion)).toBe('1.0.0');
   }, 60_000);
+
+  test('a node left out by its check is no node that did not answer', async () => {
+    const { op } = await sentTo();
+    op.toggleSkip('watch');
+    op.takeFile('v1.1.0.dgb', RELEASE);
+    await op.update();
+    expect(op.state).toBe('done');
+    expect(op.finished).toEqual({ kind: 'updated', left: 0, leftOut: 1 });
+  }, 60_000);
+
+  test('what stands in the way of a write is known before anything is sent', async () => {
+    const { op } = await sentTo();
+    expect(op.noWrite(RELEASE)).toBe(null);
+    for (const n of op.reach) op.toggleSkip(n.id);
+    expect(op.noWrite(RELEASE)).toBe('noneChecked');
+    for (const n of op.reach) op.toggleSkip(n.id);
+    op.takeFile('v1.1.0.dgb', RELEASE);
+    await op.update();
+    expect(op.noWrite(RELEASE)).toMatchObject({ same: op.fileVersions.hub });
+  }, 60_000);
 });

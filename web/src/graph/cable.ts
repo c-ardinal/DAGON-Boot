@@ -49,6 +49,8 @@ export class CableField {
     for (const key of this.bundles.keys()) if (!(key in routes)) this.bundles.delete(key);
     for (const [key, r] of Object.entries(routes)) {
       const rest = restPoints(r);
+      // A route that is no place (bad coordinates) never moves a cable, and so never keeps the frames running.
+      if (!rest.every((p) => Number.isFinite(p.x) && Number.isFinite(p.y))) continue;
       const b = this.bundles.get(key);
       if (!b) {
         this.bundles.set(key, { rest, at: rest.map((p) => ({ ...p })), speed: rest.map(() => ({ x: 0, y: 0 })) });

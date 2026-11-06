@@ -646,6 +646,8 @@ fn hello(server: &Server) -> Response {
                 "reconnect": if m.stays_on_reboot() { "stays" } else { "reopen" },
             })
         }),
+        // The nodes with a [build.*] in dagon.toml: the others have no skeleton yet.
+        "build_nodes": cfg.as_ref().map(|c| c.build.keys().cloned().collect::<Vec<_>>()),
         // The MCU families POST /v1/flash can write.
         "flash_mcus": flash_mcus,
         // null until a project is open (the page shows the start screen).
@@ -1413,16 +1415,53 @@ fn layout_path(server: &Server) -> Result<PathBuf, Response> {
     inside(&cfg, &p.with_file_name(name)).map_err(|e| Response::error(403, &e))
 }
 
-/// GET /v1/layout: 呼び名 and editor positions (404 before the first save).
+/// GET /v1/layout: 呼び名 and editor positions (an empty layout before the first save).
 fn layout_get(server: &Server) -> Res {
     let p = layout_path(server)?;
+    if !p.exists() {
+        return Ok(json_ok(json!({ "format": crate::versions::LAYOUT_FORMAT })));
+    }
     let bytes = crate::paths::read_capped(&p, MAX_LAYOUT)
-        .map_err(|_| Response::error(404, "no layout yet"))?
+        .map_err(|e| Response::error(500, &e.to_string()))?
         .ok_or_else(|| Response::error(413, "the layout file is too large"))?;
+    let v: Value = serde_json::from_slice(&bytes)
+        .map_err(|_| Response::error(422, "the layout file is not JSON"))?;
+    check_layout(&v).map_err(|e| Response::error(422, &e))?;
     Ok(Response::bytes("application/json", bytes))
 }
 
-/// PUT /v1/layout: a JSON object, written whole.
+/// A layout file's shape: its format number (or none, read as this one),
+/// `names` as strings and `positions` as `{x, y}` numbers, by node id.
+fn check_layout(v: &Value) -> Result<(), String> {
+    let o = v.as_object().ok_or("layout must be a JSON object")?;
+    if let Some(n) = o.get("format") {
+        let ours = u64::from(crate::versions::LAYOUT_FORMAT);
+        if n.as_u64() != Some(ours) {
+            return Err(format!("layout format {n}; this dagon reads {ours}"));
+        }
+    }
+    if let Some(names) = o.get("names") {
+        let ok = names
+            .as_object()
+            .is_some_and(|m| m.values().all(Value::is_string));
+        if !ok {
+            return Err("layout names must be strings by node id".into());
+        }
+    }
+    if let Some(places) = o.get("positions") {
+        let number =
+            |p: &Value, k: &str| p.get(k).and_then(Value::as_f64).is_some_and(f64::is_finite);
+        let ok = places
+            .as_object()
+            .is_some_and(|m| m.values().all(|p| number(p, "x") && number(p, "y")));
+        if !ok {
+            return Err("layout positions must be {x, y} numbers by node id".into());
+        }
+    }
+    Ok(())
+}
+
+/// PUT /v1/layout: a layout of this format, written whole.
 // Writes the project's layout file, the user's file the page edits.
 #[allow(clippy::disallowed_methods)]
 fn layout_put(server: &Server, req: &Request) -> Res {
@@ -1431,9 +1470,7 @@ fn layout_put(server: &Server, req: &Request) -> Res {
     }
     let v: Value = serde_json::from_slice(&req.body)
         .map_err(|_| Response::error(400, "layout must be JSON"))?;
-    if !v.is_object() {
-        return Err(Response::error(400, "layout must be a JSON object"));
-    }
+    check_layout(&v).map_err(|e| Response::error(400, &e))?;
     let p = layout_path(server)?;
     let text = serde_json::to_vec_pretty(&v).map_err(|e| Response::error(500, &e.to_string()))?;
     let _lock = server
@@ -1652,6 +1689,26 @@ pub fn static_file(web: &Path, path: &str) -> Option<(Vec<u8>, &'static str)> {
 #[allow(clippy::disallowed_methods)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_layout_is_of_this_format_with_names_and_finite_places() {
+        assert!(check_layout(
+            &json!({"format": 1, "names": {"a": "A"}, "positions": {"a": {"x": 1, "y": -2.5}}})
+        )
+        .is_ok());
+        assert!(check_layout(&json!({"names": {}})).is_ok());
+        for bad in [
+            json!([]),
+            json!({"format": 2}),
+            json!({"format": "1"}),
+            json!({"names": {"a": 1}}),
+            json!({"positions": {"a": {"x": 1}}}),
+            json!({"positions": {"a": {"x": "1", "y": 2}}}),
+            json!({"positions": {"a": {"x": null, "y": 2}}}),
+        ] {
+            assert!(check_layout(&bad).is_err(), "{bad}");
+        }
+    }
 
     /// RFC 8032 section 7.1 TEST 1 key (public test data).
     fn test_key() -> ed25519_compact::KeyPair {

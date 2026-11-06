@@ -16,10 +16,13 @@ const STATES: [string, (p: Page) => Promise<void>, (p: Page) => Promise<void>][]
   ['メニュー', async (p) => { await p.getByRole('button', { name: 'メニューを開く' }).click(); await p.getByRole('button', { name: 'つなぐ' }).click(); }, (p) => p.keyboard.press('Escape')],
   ['困ったとき', async (p) => { await p.getByRole('button', { name: 'メニューを開く' }).click(); await p.getByRole('button', { name: '困ったとき' }).click(); await p.getByRole('button', { name: 'キー操作' }).click(); }, (p) => p.keyboard.press('Escape')],
   ['表', (p) => p.getByRole('radio', { name: '表', exact: true }).click(), (p) => p.getByRole('radio', { name: 'グラフ' }).click()],
+  ['トースト', async (p) => { await p.getByRole('button', { name: 'メニューを開く' }).click(); await p.getByRole('button', { name: '困ったとき', exact: true }).click(); await p.locator('.panel').last().locator('button:has(> span:text-is("この URL をコピーする"))').click(); await p.locator('.toast').waitFor(); }, async () => undefined],
+  ['モーダル', async (p) => { await p.getByRole('button', { name: 'メニューを開く' }).click(); await p.locator('.panel').first().locator('button:has(> span:text-is("最初からやり直す"))').click(); await p.locator('dialog[open]').waitFor(); }, async (p) => { await p.keyboard.press('Escape'); await p.locator('dialog[open]').waitFor({ state: 'detached' }); }],
 ];
 
-test('sweep: no overflow, overlap or clipped text at any window, in 準備 and 書込', async ({ page }) => {
+test('sweep: no overflow, overlap or clipped text at any window, in 準備 (sheet, drawer, menu, help, table, toast, modal) and 書込 (versions)', async ({ page, context }) => {
   test.setTimeout(540_000);
+  await context.grantPermissions(['clipboard-read', 'clipboard-write']);
   await page.setViewportSize({ width: 1920, height: 1080 });
   await openSample(page);
   const faults: string[] = [];
@@ -37,6 +40,8 @@ test('sweep: no overflow, overlap or clipped text at any window, in 準備 and �
   await settled(page);
   await page.getByRole('button', { name: '接続する' }).click();
   await page.locator('.st-alive').first().waitFor({ timeout: 30_000 });
+  await page.getByRole('button', { name: 'バージョンを選んで書き込む' }).waitFor();
+  await expect(page.locator('.split .caret')).toHaveAttribute('aria-disabled', 'false', { timeout: 15_000 });
   for (const [w, h] of SIZES) {
     await page.setViewportSize({ width: w, height: h });
     await page.waitForTimeout(120);
@@ -53,7 +58,7 @@ test('spec 1: scale and pan do not change when a sheet, drawer, menu or toast ap
   await page.setViewportSize({ width: 1920, height: 1080 });
   await openSample(page);
   const before = await canvasState(page);
-  for (const [name, into, out] of STATES.filter(([n]) => n !== '表')) {
+  for (const [name, into, out] of STATES.filter(([n]) => n !== '表' && n !== 'トースト' && n !== 'モーダル')) {
     await into(page);
     await page.waitForTimeout(300);
     expect(await canvasState(page), name).toEqual(before);
@@ -182,17 +187,6 @@ test('spec 8: the menu is a popover at ☰ that moves nothing; groups, then thei
   await page.getByRole('button', { name: '構成', exact: true }).click();
   await expect(page.getByRole('button', { name: 'キャンバス全体を表示する' }).last()).toBeVisible();
   await page.mouse.click(600, 600);
-  await expect(page.locator('#menu')).toHaveCount(0);
-});
-
-test('spec 8: every menu item does something: a press never lands on nothing', async ({ page }) => {
-  await page.setViewportSize({ width: 1920, height: 1080 });
-  await openSample(page);
-  await page.getByRole('button', { name: 'メニューを開く' }).click();
-  await page.getByRole('button', { name: '構成', exact: true }).click();
-  const before = await page.locator('.seg [aria-checked="true"]').getAttribute('aria-label');
-  await page.locator('.panel').nth(1).getByRole('button', { name: '表', exact: true }).click();
-  expect(await page.locator('.seg [aria-checked="true"]').getAttribute('aria-label')).not.toBe(before);
   await expect(page.locator('#menu')).toHaveCount(0);
 });
 

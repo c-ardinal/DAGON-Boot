@@ -133,6 +133,8 @@
     color: var(--c-accent);
     font: 700 var(--t-small) / 1 var(--f-ja);
     cursor: pointer;
+    flex: none;
+    white-space: nowrap;
   }
   .more:focus-visible {
     outline: var(--st-w-focus) solid var(--c-paper);

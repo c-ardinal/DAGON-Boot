@@ -112,10 +112,18 @@
   /** A name's size on a card at 100 % (--t-small inside the canvas). */
   const NAME_PX = 14;
   /** Card heights before they are measured (px). */
-  const EST_H = { normal: 120, compact: 56 };
+  const EST_H = { normal: 140, compact: 56 };
   /** Room above a top 親機 for its uplink card, and around the graph when fitting (px). */
   const UPLINK_ROOM = 84;
   const SIDE = 24;
+  /** Between a bundle's outer strand and its chip, and the chip's height (px). */
+  const CHIP_CLEAR = 12;
+  const CHIP_H = 22;
+  /** How far from a leaning run a chip stands so the run passes clear over its whole height. */
+  const clearOf = (width: number, dir: Pt) => {
+    const down = Math.max(0.2, Math.abs(dir.y));
+    return (width / 2) / down + (CHIP_H / 2) * (Math.abs(dir.x) / down) + CHIP_CLEAR;
+  };
   /** A press moves this far before it is a drag, not a click (px). */
   const DRAG_PX = 4;
 
@@ -124,8 +132,8 @@
   let canvas: HTMLDivElement;
   let boxEl = $state<HTMLDivElement>();
 
-  /** Card geometry of each class (normal, compact): width and gaps, in canvas px; the zoom alone scales them. */
-  const sizes = (compact: boolean) => (compact ? { w: 176, gapX: 20, gapY: 48 } : { w: 260, gapX: 40, gapY: 72 });
+  /** Card geometry of each class (normal, compact): width and gaps, in canvas px; the zoom alone scales them. The rows stand far apart: the links' length is what lets a cable sweep and read. */
+  const sizes = (compact: boolean) => (compact ? { w: 176, gapX: 20, gapY: 96 } : { w: 260, gapX: 80, gapY: 176 });
   const nodesOf = $derived((config?.nodes ?? []).map((n) => ({ id: n.id, hub: n.role === 'hub' })));
   const compact = $derived(nodesOf.length >= COMPACT_FROM || view.zoom * NAME_PX < NAME_MIN_PX);
   const S = $derived(sizes(compact));
@@ -347,10 +355,11 @@
             const { p, dir } = along(points, lengths, s);
             return { p, deg: (Math.atan2(dir.y, dir.x) * 180) / Math.PI - 90, len: width + 4 };
           });
-      // Compact cards: the chip sits lower on the link, clear of the card above.
-      const mid = along(points, lengths, total * (compact ? 0.7 : 0.5)).p;
+      const { p: mid, dir: midDir } = along(points, lengths, total * 0.5);
+      // Beside the strands, on the side the cable leans out to.
+      const outward = route[3].x < route[0].x ? -1 : 1;
       const label = bundleLabel(l);
-      return { l, key, open, start: route[0], strands: offsets.map((o) => strandPath(points, o)), ties, mid, label, name: LINK.name(LINK.bundle(l.kind, l.wires.length, l.wires.filter((w) => w.shared).length, label.slice(l.kind.length + 1)), nameOf(l.from), nameOf(l.to), l.addr), skipped: !!config?.nodes.find((n) => n.id === l.to)?.notYet };
+      return { l, key, open, outward, clear: clearOf(width, midDir), start: route[0], strands: offsets.map((o) => strandPath(points, o)), ties, mid, label, name: LINK.name(LINK.bundle(l.kind, l.wires.length, l.wires.filter((w) => w.shared).length, label.slice(l.kind.length + 1)), nameOf(l.from), nameOf(l.to), l.addr), skipped: !!config?.nodes.find((n) => n.id === l.to)?.notYet };
     }),
   );
 
@@ -415,7 +424,6 @@
     return st.slots.slice(0, 2).map((s, i) => ({ row: SLOT.rows[i], text: s.state === 0 ? SLOT.states[0] : versionText(s.version), on: st.active === i }));
   }
 
-  /** Marks of the boot state: ✓ settled, ◐ waiting for the check, ↺ went back. */
   /** Each node's state mark: from the page's chip, the water level and the watch. */
   const states = $derived(
     Object.fromEntries(
@@ -578,8 +586,6 @@
               <rect class="tie" x={-tie.len / 2} y={-3} width={tie.len} height={6} rx="3" transform="translate({tie.p.x} {tie.p.y}) rotate({tie.deg})" />
             {/each}
           </g>
-          <circle transition:fade cx={d.start.x} cy={d.start.y} r="6" class="end" />
-          {#if d.l.kind === 'I2C'}<circle transition:fade|global cx={d.start.x} cy={d.start.y} r="3" class="end" />{/if}
         {/each}
         {#if wire}<path d={pathD(verticalLink(wire.a, wire.b))} class="temp" class:bad={wire.bad} />{/if}
       </svg>
@@ -636,14 +642,11 @@
             {#if slots}
               <span class="slotline" translate="no">{#each slots as sl (sl.row)}<span class:on={sl.on}>{sl.row} {sl.text}</span>{/each}</span>
             {/if}
-            {#if m === 'skeleton'}
-              <span class="chips"><span class="skeleton chip-sk"></span></span>
-            {:else if m}
-              <span class="chips"
-                >{#if m.chip}<span in:rise={{ dur: '--dur-quick' }} out:lateFade class="chip" class:silent={m.silent} class:uns={!!n.notYet && m.chip === NODE.notYet}>{m.chip}</span>{/if}</span
-              >
-              {#if m?.note}<span class="note">{m.note}</span>{/if}
-            {/if}
+            <!-- The chip's row is always there, so no card changes height when a chip comes. -->
+            <span class="chips"
+              >{#if m === 'skeleton'}<span class="skeleton chip-sk"></span>{:else if m?.chip}<span in:rise={{ dur: '--dur-quick' }} out:lateFade class="chip" class:silent={m.silent} class:uns={!!n.notYet && m.chip === NODE.notYet}>{m.chip}</span>{/if}</span
+            >
+            {#if m && m !== 'skeleton' && m.note}<span class="note">{m.note}</span>{/if}
           </span>
           {#if level !== undefined}<span in:fade out:lateFade={{ shown: confirmedOf(n.id) ? 100 : undefined }} class="pct" aria-hidden="true" style:--shown={Math.round(level)}></span>{/if}
         </button>
@@ -665,7 +668,7 @@
         {#if n.role !== 'hub' || linked}
           <span transition:fade|global class="port in" class:linked aria-hidden="true" style:left="{at(n.id).x + NODE_W / 2}px" style:top="{at(n.id).y}px" class:ok={wire !== null && wire.from !== n.id && reasons[n.id] === null}></span>
         {/if}
-        {#if onlink}
+        {#if onlink && !(config?.links ?? []).some((x) => x.from === n.id)}
           <!-- svelte-ignore a11y_no_static_element_interactions -->
           <span
             transition:fade|global
@@ -680,12 +683,26 @@
       {/each}
 
       {#each drawn as d (d.key)}
+        <!-- A link's end on its parent, over the card's edge; in 準備 another link can start from it. -->
+        <!-- svelte-ignore a11y_no_static_element_interactions -->
+        <span
+          transition:fade
+          class="port end"
+          class:out={!!onlink}
+          class:i2c={d.l.kind === 'I2C'}
+          aria-hidden="true"
+          title={onlink ? LINK.portOut(nameOf(d.l.from)) : undefined}
+          style:left="{d.start.x}px"
+          style:top="{d.start.y}px"
+          onpointerdown={(e) => portDown(e, d.l.from)}
+        ></span>
         <button
           transition:fade
           class="link-chip"
           class:selected={d.open}
           class:uns={d.skipped}
-          style:left="{d.mid.x}px"
+          class:leftward={d.outward < 0}
+          style:left="{d.mid.x + d.outward * d.clear}px"
           style:top="{d.mid.y}px"
           data-key={d.key}
           tabindex={focusKey === d.key ? 0 : -1}
@@ -1058,6 +1075,7 @@
     display: flex;
     flex-wrap: wrap;
     gap: 4px;
+    min-height: 20px;
     margin-top: 4px;
   }
   .chip {
@@ -1206,6 +1224,17 @@
       border-color var(--dur-quick) var(--ease-out),
       background-color var(--dur-quick) var(--ease-out);
   }
+  .port.end {
+    background: var(--c-ink);
+  }
+  /* An I2C bus's end: the double ring the links draw for a shared bus. */
+  .port.i2c::after {
+    content: '';
+    position: absolute;
+    inset: 2px;
+    border-radius: 50%;
+    background: var(--c-line);
+  }
   .port.out {
     pointer-events: auto;
     cursor: crosshair;
@@ -1228,7 +1257,7 @@
     z-index: var(--z-chip);
     height: 22px;
     padding: 0 10px;
-    transform: translate(-50%, -50%);
+    transform: translateY(-50%);
     border: 1px solid var(--c-line);
     border-radius: var(--r-full);
     background: var(--c-ink);
@@ -1236,6 +1265,9 @@
     font: 700 var(--t-11) / 20px var(--f-ja);
     white-space: nowrap;
     cursor: pointer;
+  }
+  .link-chip.leftward {
+    transform: translate(-100%, -50%);
   }
   .link-chip.uns {
     border-style: dashed;

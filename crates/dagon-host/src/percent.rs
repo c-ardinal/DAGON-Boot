@@ -5,8 +5,9 @@
 //! The transfer and the trial weigh as long as each takes: the transfer's time
 //! is projected from the bytes sent so far, the trial's is the MCU definition's
 //! `[watchdog] trial_ms`. Without a trial period only the bytes count. Only the
-//! confirmation makes 100, and the number never moves back, also when a second
-//! image (the boot core, then the app) starts its own transfer.
+//! confirmation makes 100, and within one run the number never moves back, also
+//! when a second image (the boot core, then the app) starts its own transfer. A
+//! new run of the same node starts again from 0.
 
 use dagon_proto::payload::phase;
 

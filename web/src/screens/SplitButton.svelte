@@ -23,16 +23,24 @@
   let { label, onmain, off = false, pickName, options, onpick, pickOff = false, control, mainEl = $bindable() }: Props = $props();
   let open = $state(false);
   const none = $derived(pickOff || options.length === 0);
+  let caret = $state<HTMLButtonElement>();
+  /** Escape gives the focus back to what opened the list. */
+  function close() {
+    if (open && document.activeElement?.closest('.list')) caret?.focus();
+    open = false;
+  }
 </script>
 
 <!-- One decision, one control: the button writes the default, its dropdown part writes the chosen one. They never part or wrap. -->
-<span class="split" use:dismiss={() => (open = false)}>
+<span class="split" use:dismiss={close}>
   <button class="button-primary-header main" data-control={control} aria-disabled={off} bind:this={mainEl} onclick={onmain}><span>{label}</span></button>
   <button
     class="button-primary-header caret"
+    bind:this={caret}
     data-control={control}
     aria-label={pickName}
     title={pickName}
+    aria-haspopup="true"
     aria-expanded={open}
     aria-disabled={none}
     onclick={() => {
@@ -47,6 +55,7 @@
           translate="no"
           onclick={() => {
             open = false;
+            mainEl?.focus();
             onpick(o.id);
           }}>{o.label}{#if o.note}<small>{o.note}</small>{/if}</button
         >

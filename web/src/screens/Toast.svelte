@@ -38,7 +38,6 @@
 <div
   transition:rise
   class="toast"
-  data-avoid=""
   class:error={notice.error}
   role={notice.error ? 'alert' : 'status'}
   title={notice.detail}
@@ -83,6 +82,8 @@
     white-space: nowrap;
   }
   .more {
+    flex: none;
+    white-space: nowrap;
     height: var(--h-text-button);
     padding: 0;
     border: 0;

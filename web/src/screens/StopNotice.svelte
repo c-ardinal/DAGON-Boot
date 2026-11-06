@@ -1,13 +1,14 @@
 <script lang="ts">
-  import type { Snippet } from 'svelte';
+  import { untrack, type Snippet } from 'svelte';
   import { BUILD, NOTICE } from '../app/copy.ts';
   import { rise } from '../app/motion.ts';
   import Icon from './Icon.svelte';
 
   interface Props {
     word: string;
-    /** The node it is about: `node` is its card, which this notice must not cover. */
+    /** The node it is about, `[n] name`. */
     target: string;
+    /** That node's card, which this notice must not cover. */
     card: () => Element | null | undefined;
     reason: string;
     fix: string;
@@ -23,17 +24,24 @@
   let el = $state<HTMLElement>();
   /** It rests low beside the zoom; over the node's card it stands at the top instead. */
   let high = $state(false);
-  $effect(() => {
+  /** Over the canvas nothing else takes Escape while it stands. */
+  const key = (e: KeyboardEvent) => {
+    if (e.key === 'Escape') onclose();
+  };
+  function place() {
     const c = card()?.getBoundingClientRect();
     const n = el?.getBoundingClientRect();
-    if (c && n && c.left < n.right && n.left < c.right && c.top < n.bottom && n.top < c.bottom) high = true;
+    if (c && n && c.left < n.right && n.left < c.right && c.top < n.bottom && n.top < c.bottom) high = !high;
+  }
+  $effect(() => {
+    if (el) untrack(place);
   });
 </script>
 
 <!-- A write that went back: told beside the graph, with no scrim, so the card's change is seen as it happens. -->
-<div transition:rise bind:this={el} class="notice" class:high role="alert" data-avoid="" data-stop-notice="">
+<svelte:window onkeydown={key} onresize={place} />
+<div transition:rise bind:this={el} class="notice" class:high role="alert" data-stop-notice="">
   <header>
-    <Icon name="undo-2" />
     <strong>{word}</strong>
     <span translate="no">{target}</span>
     <button class="button-icon" aria-label={NOTICE.close} title={NOTICE.close} onclick={onclose}><span class="layer"><Icon name="x" /></span></button>
@@ -72,10 +80,8 @@
     align-items: center;
     gap: var(--s-3);
   }
-  header :global(.icon:first-child) {
-    color: var(--st-attention);
-  }
   strong {
+    color: var(--st-attention);
     font: 700 var(--t-body) / 24px var(--f-ja);
   }
   header span {
@@ -92,12 +98,14 @@
     flex: 1;
   }
   .more {
+    flex: none;
     height: var(--h-text-button);
     padding: 0;
     border: 0;
     background: none;
     color: var(--c-accent);
     font: 700 var(--t-small) / 1 var(--f-ja);
+    white-space: nowrap;
     cursor: pointer;
   }
   .more:focus-visible {

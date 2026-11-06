@@ -289,6 +289,7 @@ impl<T: Transport, C: Clock> Host<T, C> {
         to: Target,
         on_event: &mut dyn FnMut(Event),
     ) -> Result<Version, T::Error> {
+        self.write = Default::default();
         let st = self.status(to).await?;
         let r = self.update_inner(b, node, to, &st, on_event).await;
         if let Err(e) = &r {
@@ -629,6 +630,7 @@ impl<T: Transport, C: Clock> Host<T, C> {
         node: u8,
         on_event: &mut dyn FnMut(Event),
     ) -> Result<Version, T::Error> {
+        self.write = Default::default();
         let st = self.status(to).await?.status;
         let other = rollback_slot(&st).ok_or(Error::NoPreviousVersion)?;
         let v = st.slots[other as usize].version;
@@ -649,6 +651,7 @@ impl<T: Transport, C: Clock> Host<T, C> {
         a: &RecoverAssets<'_>,
         on_event: &mut dyn FnMut(Event),
     ) -> Result<(RecoverPath, Version), T::Error> {
+        self.write = Default::default();
         let (b, topo) = check_release(a.release, a.topology, Some(a.pubkey))?;
         let to = Target::of_node(&topo, node).ok_or(Error::Unreachable { node })?;
         match self.hello(to).await {

@@ -173,7 +173,7 @@
   --w-parts: 240px;
   --w-menu: 320px;
   --w-bubble: 360px;
-  --zoom-default: 1.25; /* the first view of a project: the most it takes when the graph has room */
+  --zoom-default: 1.5; /* the first view of a project: the most it takes when the graph has room */
 }
 
 /* The 2560 px theme of the design (wqhd). */
@@ -208,7 +208,6 @@
     --w-sheet: 488px;
     --w-parts: 344px;
     --w-bubble: 516px;
-    --zoom-default: 1.5;
   }
 }
 

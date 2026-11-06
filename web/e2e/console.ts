@@ -35,13 +35,13 @@ export async function layoutFaults(page: Page): Promise<string[]> {
     if (scrollX || scrollY) faults.push('page scrolled');
 
     // Everything fixed to the window stays inside it.
-    for (const e of document.querySelectorAll('header, #band, .drawer, .tools, .float, .focal, .pill, .toast, .notice, .panel, #help, .split, .list')) {
+    for (const e of document.querySelectorAll('.frame > header, #band, .drawer, .tools, .float, .focal, .pill, .toast, .notice, .panel, #help, .split, .edit-area.table, dialog[open]')) {
       const r = e.getBoundingClientRect();
       if (r.width === 0) continue;
       if (r.left < -0.5 || r.top < -0.5 || r.right > w + 0.5 || r.bottom > h + 0.5) faults.push(`${name(e)} outside the window: ${Math.round(r.left)},${Math.round(r.top)},${Math.round(r.right)},${Math.round(r.bottom)}`);
     }
     // The overlay's peers and the bars do not overlap.
-    const peers = [...document.querySelectorAll('.tools, .float, .focal, .pill, .toast, .notice, .drawer, #band')].filter((e) => e.getBoundingClientRect().width > 0);
+    const peers = [...document.querySelectorAll('.tools, .float, .focal, .pill, .toast, .notice, .edit-area.table, .drawer, #band')].filter((e) => e.getBoundingClientRect().width > 0);
     for (let i = 0; i < peers.length; i++) {
       for (let j = i + 1; j < peers.length; j++) {
         if (peers[i].contains(peers[j]) || peers[j].contains(peers[i])) continue;
@@ -50,21 +50,25 @@ export async function layoutFaults(page: Page): Promise<string[]> {
       }
     }
     // Header controls inside the bar, on one row.
-    const bar = document.querySelector('header')!.getBoundingClientRect();
-    for (const e of document.querySelectorAll('header .modes, header .split > button, header .actions > button, header .button-icon')) {
+    const bar = document.querySelector('.frame > header')!.getBoundingClientRect();
+    for (const e of document.querySelectorAll('.frame > header .modes, .frame > header .split > button, .frame > header .actions > button, .frame > header .button-icon')) {
       const r = e.getBoundingClientRect();
       if (r.top < bar.top - 0.5 || r.bottom > bar.bottom + 0.5) faults.push(`${name(e)} outside the header bar`);
     }
-    const [left, right] = [document.querySelector('header .left')!.getBoundingClientRect(), document.querySelector('header .right')!.getBoundingClientRect()];
+    const [left, right] = [document.querySelector('.frame > header .left')!.getBoundingClientRect(), document.querySelector('.frame > header .right')!.getBoundingClientRect()];
     if (left.right > right.left + 0.5) faults.push('header sides overlap');
     // Text with no way to read it: a truncated name carries its full text in a title.
-    for (const e of document.querySelectorAll('header *, #band *, .drawer [role="tab"], .tools *, .pill *, .toast *, .notice *, .focal *, .panel *, .list *')) {
+    for (const e of document.querySelectorAll('header *, #band *, .drawer [role="tab"], .tools *, .pill *, .toast *, .notice *, .focal *, .panel *, .list *, dialog[open] *')) {
       const el = e as HTMLElement;
       if (el.closest('.visually-hidden') || !el.textContent?.trim() || el.children.length) continue;
       if (el.scrollWidth > el.clientWidth + 1 && getComputedStyle(el).overflowX !== 'visible' && !el.closest('[title]')) faults.push(`${name(el)} clipped: ${el.textContent.trim().slice(0, 24)}`);
       const c = el.getBoundingClientRect();
       const box = el.closest('button, .pill, .toast, .notice')?.getBoundingClientRect();
       if (box && c.width && (c.left < box.left - 0.5 || c.right > box.right + 0.5 || c.top < box.top - 0.5 || c.bottom > box.bottom + 0.5)) faults.push(`${name(el)} over its frame: ${el.textContent.trim().slice(0, 24)}`);
+    }
+    // A label never breaks: a button's words stay on one line.
+    for (const b of document.querySelectorAll<HTMLElement>('.more, #band button, .toast button')) {
+      if (b.textContent?.trim() && b.offsetHeight > 0 && getComputedStyle(b).whiteSpace !== 'nowrap') faults.push(`${name(b)} can wrap: ${b.textContent.trim().slice(0, 16)}`);
     }
     return faults;
   });

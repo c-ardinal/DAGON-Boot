@@ -41,7 +41,7 @@
   import Problems from './screens/define/Problems.svelte';
   import Table from './screens/define/Table.svelte';
   import CliPanel from './screens/define/CliPanel.svelte';
-  import { Cli, jobReason, type Layout } from './app/define/cli.svelte.ts';
+  import { Cli, jobReason, LAYOUT_FORMAT, type Layout } from './app/define/cli.svelte.ts';
   import { CLI_LINK, CLI_STATE } from './app/copy.ts';
   import Reconnect from './screens/Reconnect.svelte';
   import Header from './screens/Header.svelte';
@@ -53,7 +53,7 @@
   import RomConfirm from './screens/RomConfirm.svelte';
   import { answerConsent } from './app/factory.ts';
   import Toast, { type Notice } from './screens/Toast.svelte';
-  import { CONN, FILE, HELP, MENU, NOTICE, SIM, START, TABLE, fill as fillIn } from './app/copy.ts';
+  import { CONN, FILE, HELP, LAYOUT, MENU, NOTICE, SIM, START, TABLE, fill as fillIn } from './app/copy.ts';
   import { devHub } from './serial/devHub.ts';
   import { DEMO_SITE } from './app/site.ts';
   import { serveSim, type SimStand } from './serial/serveSim.ts';
@@ -187,6 +187,7 @@
     const yaml = await cli.loadTopology().catch(() => null);
     // 呼び名 and positions live beside the YAML (GET /v1/layout).
     projectLayout = (await cli.loadLayout().catch(() => null)) ?? {};
+    if (cli.layoutRefused) notice = { word: LAYOUT.refused, error: true, detail: `${LAYOUT.refusedDetail}（${cli.layoutRefused}）` };
     local = false;
     op.reset();
     d.reset();
@@ -212,7 +213,7 @@
     untrack(() => {
       if (names === layoutNames) return;
       layoutNames = names;
-      projectLayout = { ...projectLayout, names: { ...d.doc.names } };
+      projectLayout = { ...projectLayout, format: LAYOUT_FORMAT, names: { ...d.doc.names } };
       void cli.saveLayout(projectLayout);
     });
   });
@@ -366,7 +367,7 @@
   /** Where the user put cards, kept in the project's layout file. */
   let positions = $state.raw<Record<string, { x: number; y: number }>>({});
   function savePositions() {
-    projectLayout = { ...projectLayout, positions };
+    projectLayout = { ...projectLayout, format: LAYOUT_FORMAT, positions };
     if (!local) void cli.saveLayout(projectLayout);
   }
   let tableTab = $state(0);
@@ -381,7 +382,6 @@
     if (stopped('link', at)) return;
     if (!agent.status) await agent.refresh();
     if (!agent.status) return showWhy(AGENT.errors.OLD_CLI.text, at);
-    menuOpen = false;
     linkOpen = true;
   }
   async function agree(choice: AgentChoice) {
@@ -447,6 +447,8 @@
     { id: 'talk', label: DRAWER.talk },
     { id: 'log', label: DRAWER.log },
   ]);
+  /** serve names the nodes that can be built; a node without one has no skeleton yet. */
+  const needsSkeleton = $derived(!!cli.hello?.build_nodes && d.config.reach.some((id) => !cli.hello?.build_nodes?.includes(id)));
   /** 定義's next step in one sentence (the status row), and its failure cause. */
   const defineNext = $derived.by((): { cause?: string; sentence: string } => {
     const firstError = d.problems.find((p) => p.severity === 'error');
@@ -459,6 +461,7 @@
     if (firstError) return { sentence: DEFINE.fixSentence };
     if (d.notYet) return { sentence: DEFINE.notYetSentence(d.notYet) };
     if (d.doc.topo.nodes.length === 0) return { sentence: CANVAS.empty };
+    if (needsSkeleton) return { sentence: DEFINE.skeletonFirst };
     return { sentence: DEFINE.readySentence };
   });
   const savedLabel = $derived(local ? '' : d.unsaved ? SAVE.unsaved : autosave.pending ? STATUS.saving : STATUS.saved);
@@ -827,6 +830,12 @@
       notice = { word: BAND.M58.chip, error: true, detail: BAND.M58.sentence };
       return;
     }
+    const no = op.noWrite(pkg.bytes);
+    if (no === 'noneChecked') return void (notice = { word: WRITE.noneChecked.label, detail: WRITE.noneChecked.detail });
+    if (no) {
+      const said = WRITE.alreadyOn(versionText(no.same));
+      return void (notice = { word: said.label, detail: said.detail });
+    }
     op.takeFile(pkg.name, pkg.bytes);
     if (op.state === 'fileReady') await op.update();
   }
@@ -997,7 +1006,7 @@
   const next = $derived(
     mode === 'define'
       ? defineNext
-      : { cause: band.chip, sentence: [band.pair ? `${band.pair[0]} ${band.pair[1]}` : '', band.sentence ?? ''].filter(Boolean).join('　') },
+      : { cause: band.chip, sentence: band.sentence ?? '' },
   );
   const dot = $derived.by((): Dot | null => {
     const c = op.config;
@@ -1142,6 +1151,7 @@
   // 中止: the modal goes with the job.
   $effect(() => {
     if (skeletonJob?.state === 'cancelled') untrack(() => (skeleton = null));
+    if (skeletonJob?.state === 'succeeded') untrack(() => void cli.refreshHello());
   });
   async function makeSkeleton() {
     skeleton = { id: null };
@@ -1190,12 +1200,12 @@
   const writeAction = $derived(
     op.state === 'silentHub' ? null : op.state === 'ready' && !op.latestMissing && band.secondary.some((b) => b.action === 'useLatest') ? 'useLatest' : (band.primary?.action ?? null),
   );
-  const writeControl = $derived(writeAction ? CONTROL_OF[writeAction] : 'flash');
+  const writeControl = $derived(WRITABLE.has(op.state) ? 'update' : writeAction ? CONTROL_OF[writeAction] : 'flash');
   const writeOff = $derived(op.state === 'choosing' || (op.state !== 'silentHub' && !WRITABLE.has(op.state) && (writeAction === null || !RUNS.has(writeAction))));
   function write() {
     if (writeOff) return;
-    if (writeAction === null) return void (factory = hubId ? { node: hubId, id: null } : null);
     if (WRITABLE.has(op.state)) return void writeVersion();
+    if (writeAction === null) return void (factory = hubId ? { node: hubId, id: null } : null);
     act(writeAction);
   }
 
@@ -1395,7 +1405,7 @@
       title={screen === 'work' ? (d.doc.topo.name ?? '') : ''}
     >
       {#snippet menu()}
-        {#if menuOpen}<Menu groups={menuGroups} last={menuLast} onclose={() => (menuOpen = false)} />{/if}
+        {#if menuOpen}<Menu groups={menuGroups} last={menuLast} onclose={() => ((menuOpen = false), document.querySelector<HTMLElement>('[aria-controls="menu"]')?.focus())} />{/if}
       {/snippet}
     </Header>
     {#if screen === 'start'}
@@ -1570,11 +1580,8 @@
   {#if stopOpen && stopNode && !op.wentBack}
     <StopModal
       target={`[${stopNode.no}] ${stopNode.name}`}
-      back={false}
       reason={next.cause ?? WRITE.failed}
       fix={next.sentence}
-      linked={false}
-      onask={() => undefined}
       onclose={() => (stopClosed = op.failed)}
       onmore={() => ((drawerTab = 'log'), (stopClosed = op.failed))}
     >
@@ -1591,14 +1598,22 @@
     {@const at = d.config.nodes.find((n) => n.id === f.node)}
     <Modal title={BUILD.title} chip={{ text: BUILD.state.failed, kind: 'error' }} target={at ? `[${at.no}] ${at.name} · nodes/${at.id}/` : undefined} onclose={() => (buildFailureOpen = false)} onmore={() => ((drawerTab = 'jobs'), (buildFailureOpen = false))}>
       <h3 class="modal-h">{NOTICE.reason}</h3>
-      <p class="modal-mono">{buildStartFailed ? BUILD.startFailed : f.reason}</p>
-      <h3 class="modal-h">{NOTICE.fix}</h3>
-      <p>{f.file ? fillIn(BUILD.fail.fix, { file: f.file, line: f.line ?? 0 }) : BUILD.fail.plain}{f.others ? fillIn(BUILD.fail.others, { n: f.others }) : ''}</p>
+      {#if f.noSkeleton}
+        <p>{BUILD.noSkeleton.reason}</p>
+        <h3 class="modal-h">{NOTICE.fix}</h3>
+        <p>{BUILD.noSkeleton.fix}</p>
+      {:else}
+        <p class="modal-mono">{buildStartFailed ? BUILD.startFailed : f.reason}</p>
+        <h3 class="modal-h">{NOTICE.fix}</h3>
+        <p>{f.file ? fillIn(BUILD.fail.fix, { file: f.file, line: f.line ?? 0 }) : BUILD.fail.plain}{f.others ? fillIn(BUILD.fail.others, { n: f.others }) : ''}</p>
+      {/if}
       {#snippet actions()}
-        {#if agent.linked}
+        {#if f.noSkeleton}
+          <button class="button-primary" data-control="gen" onclick={() => ((buildFailureOpen = false), void makeSkeleton())}>{SKELETON.make}</button>
+        {:else if agent.linked}
           <button class="button-secondary" data-control="ask" onclick={(e) => askWhy(e.currentTarget, () => (buildFailureOpen = false))}>{BUILD.askAgent}</button>
         {/if}
-        <button class="button-primary" data-control="build" onclick={() => void build()}>{BUILD.retry}</button>
+        {#if !f.noSkeleton}<button class="button-primary" data-control="build" onclick={() => void build()}>{BUILD.retry}</button>{/if}
       {/snippet}
     </Modal>
   {/if}

@@ -330,6 +330,13 @@ fn the_number_on_the_hubs_screen_is_the_number_every_caller_is_told() {
     )
     .unwrap();
     assert!(seen > 10, "{seen}");
+
+    // A new run on the same node starts from 0: the 100 of the write is not held over.
+    let mut numbers = Vec::new();
+    block_on(h.rollback(SEG_AT, SEG, &mut |e| numbers.push(e.shown))).unwrap();
+    assert_eq!(numbers.first(), Some(&0), "{numbers:?}");
+    assert_eq!(numbers.last(), Some(&100), "{numbers:?}");
+    assert!(numbers.windows(2).all(|w| w[0] <= w[1]), "{numbers:?}");
 }
 
 #[test]

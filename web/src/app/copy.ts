@@ -105,6 +105,7 @@ export const BAND = {
   M64: { sentence: '親機が再起動したら自動でつなぎ直すので、そのまま待ってください。' },
   M65: { pair: ['目安', '約 1 分'], sentence: '止まったノードへ書き込むと、新しいバージョンで動きます。' },
   M66: { sentence: 'すべてのノードが新しいバージョンで動いています。' },
+  M66checked: { sentence: 'チェックしたノードへ書き込みました。' },
   M67: { sentence: 'CLI の作業が終わると、自動でつなぎ直します。' },
 } as const satisfies Record<string, BandCopy>;
 
@@ -480,10 +481,10 @@ export const CANVAS = {
   dotResponding: '応答',
   dotFound: '発見',
   /** M49 during an update, and after it stopped. */
-  dotProgress: '進み具合',
+  dotProgress: '全ノードの進み具合',
   dotPercent: '%',
   dotStopped: '% 停止',
-  dotProgressName: (n: number, stopped: boolean) => `進み具合 ${n}%${stopped ? '、停止' : ''}`,
+  dotProgressName: (n: number, stopped: boolean) => `全ノードの進み具合 ${n}%${stopped ? '、停止' : ''}`,
   dotRespondingName: (n: number, of: number) => `応答 ${n}/${of}、${of} つのノードのうち ${n} つが応答`,
   dotFoundName: (n: number) => `発見 ${n}`,
   /** S19 */
@@ -881,6 +882,7 @@ export const DEFINE = {
   save: '保存',
   fixSentence: '直すと、親機へ送れます。',
   readySentence: 'ビルドしてから、書込で書き込みます。',
+  skeletonFirst: '先に雛形を作ると、ビルドできます。',
   /** C19: E6, nodes updating skips; the 構成 is valid as it is. */
   notYetSentence: (k: number) => `書き込めないノードが ${k} つあります。構成はこのままで使え、書き込みではそのノードを飛ばします。`,
   /** The 構成 of the release file chosen in 書込 replaces this one (undoable, saved to the YAML). */
@@ -1197,6 +1199,8 @@ export const NOTICE = {
 } as const;
 
 export const BUILD = {
+  /** A node with no [build.*] in dagon.toml: nothing to build until the skeleton is made. */
+  noSkeleton: { reason: 'このノードの雛形がまだありません。', fix: '雛形を作ると、ビルドできるようになります。' },
   run: 'ビルドする',
   title: 'ビルドする',
   state: {
@@ -1216,7 +1220,15 @@ export const BUILD = {
   askAgent: '失敗の理由を聞く',
 } as const;
 
+/** The project's layout file (呼び名 and card places). */
+export const LAYOUT = {
+  refused: '× 配置を読めない',
+  refusedDetail: '配置のファイルが読めないので、自動の配置で開きました。保存すると置き換わります。',
+} as const;
+
 export const WRITE = {
+  noneChecked: { label: 'ノードを選ぶ', detail: '書き込むノードのカードにチェックを入れてください。' },
+  alreadyOn: (v: string) => ({ label: `すべて ${v}`, detail: `チェックしたノードはすでに ${v} で動いているので、書き込みませんでした。` }),
   pickVersion: 'バージョンを選んで書き込む',
   run: '書き込む',
   go: '{n} ノードへ書き込む',

@@ -80,7 +80,7 @@
     {#if onmenu}
       <!-- Pressing ☰ again closes it: the press is inside the anchor. -->
       <span class="anchor" use:dismiss={() => menuOpen && onmenu()}>
-        <button class="button-icon" aria-label={MENU.button} title={MENU.button} aria-expanded={menuOpen} aria-controls="menu" onclick={onmenu}
+        <button class="button-icon" aria-label={MENU.button} title={MENU.button} aria-haspopup="true" aria-expanded={menuOpen} aria-controls="menu" onclick={onmenu}
           ><span class="layer"><Icon name="menu" /></span></button
         >
         {@render menu?.()}

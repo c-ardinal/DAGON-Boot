@@ -76,7 +76,7 @@ export function waterOf(progress: Record<string, Progress>): Record<string, numb
  * node rolled back to its previous version, or a node recovered.
  */
 export type Finish =
-  | { kind: 'updated'; left: number }
+  | { kind: 'updated'; left: number; leftOut?: number }
   | { kind: 'rolledBack'; name: string; version: string }
   | { kind: 'recovered'; name: string; version: string };
 
@@ -300,6 +300,18 @@ export class Operate {
   /** Answering nodes not yet on the chosen release's version (all answering ones before an update ran). */
   get needUpdate(): number {
     return this.reach.filter((n) => this.live[n.id]?.responding === true && !this.updated.has(n.id)).length;
+  }
+
+  /** What stands in the way of writing `bytes` to the checked nodes, before anything is sent: none checked, or every checked node already on it. */
+  noWrite(bytes: Uint8Array): 'noneChecked' | { same: number } | null {
+    const nodes = this.answering();
+    if (nodes.length === 0) return 'noneChecked';
+    const given = releaseVersions(bytes);
+    const reach = this.reach;
+    const of = (id: string) => given.get(reach.findIndex((n) => n.id === id));
+    const first = of(nodes[0]);
+    const same = first !== undefined && nodes.every((id) => of(id) === this.live[id]?.hello?.activeVersion);
+    return same ? { same: first } : null;
   }
 
   get responding(): number {
@@ -788,7 +800,7 @@ export class Operate {
   private done(): void {
     const v = Object.values(this.sentVersion)[0];
     this.status = ANNOUNCE.A14(v === undefined ? '' : versionText(v));
-    this.finished = { kind: 'updated', left: this.reach.filter((n) => !this.updated.has(n.id)).length };
+    this.finished = { kind: 'updated', left: this.reach.filter((n) => !this.updated.has(n.id) && !this.skip.has(n.id)).length, ...(this.skip.size ? { leftOut: this.skip.size } : {}) };
     this.go(this.state === 'hubRestarting' ? 'confirmed' : this.state === 'reconnectNeeded' ? 'reconnected' : 'doneNoHub');
     this.startWatching();
   }

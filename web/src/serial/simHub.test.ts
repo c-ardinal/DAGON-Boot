@@ -1,11 +1,10 @@
 import { readFileSync } from 'node:fs';
-import { createRawSnippet } from 'svelte';
 import { render } from 'svelte/server';
 import { describe, expect, test } from 'vitest';
 import { Agent } from '../app/agent.svelte.ts';
 import { BUILD } from '../app/copy.ts';
 import { Operate } from '../app/operate.svelte.ts';
-import StopModal from '../screens/StopModal.svelte';
+import StopNotice from '../screens/StopNotice.svelte';
 import { trialMs } from '../wasm/dagon.ts';
 import type { LinkClock } from './hostLink.ts';
 import { simulator } from './simHub.ts';
@@ -98,17 +97,17 @@ describe('a write the simulator sends back, as dagon demo --sim-fail watch does'
   }
 
   const modal = (op: Operate, linked: boolean) =>
-    render(StopModal, {
+    render(StopNotice, {
       props: {
+        word: 'w',
         target: `[3] ${op.failed}`,
-        back: op.wentBack,
+        card: () => null,
         reason: '',
         fix: '',
         linked,
         onask: () => undefined,
         onclose: () => undefined,
         onmore: () => undefined,
-        buttons: createRawSnippet(() => ({ render: () => '<button>x</button>' })),
       },
     }).body;
 

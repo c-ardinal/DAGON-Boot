@@ -93,6 +93,17 @@ describe('cables', () => {
     expect(f.shapes().k).toEqual(restPoints(route(200)));
   });
 
+  test('a route that is no place leaves the cable where it is and at rest', () => {
+    const f = new CableField();
+    f.route({ k: route(100) });
+    f.route({ k: verticalLink({ x: NaN, y: 0 }, { x: 0, y: Infinity }) });
+    expect(f.atRest).toBe(true);
+    expect(f.shapes().k).toEqual(restPoints(route(100)));
+    f.route({ fresh: verticalLink({ x: NaN, y: 0 }, { x: 0, y: 1 }) });
+    expect(f.atRest).toBe(true);
+    expect(f.shapes().fresh).toBeUndefined();
+  });
+
   test('a link gone is gone', () => {
     const f = moved(100);
     f.route({});

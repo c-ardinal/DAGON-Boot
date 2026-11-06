@@ -228,10 +228,23 @@ pub fn serve(listener: TcpListener, server: Arc<Server>) {
 
 fn connection(mut stream: TcpStream, server: &Arc<Server>) {
     let _ = stream.set_read_timeout(Some(HTTP_TIMEOUT));
-    let req = match http::read_request(&mut stream) {
+    let limit = |r: &Request| {
+        // A package only for who holds the passphrase: it is read into memory.
+        if r.method == "POST" && r.path == "/v1/kept" && http::authorized(r, &server.pass) {
+            api::largest_package(server)
+        } else {
+            http::MAX_BODY
+        }
+    };
+    let req = match http::read_request(&mut stream, &limit) {
         Ok(r) => r,
         Err(e) => {
-            let _ = http::write_response(&mut stream, &Response::error(400, &e));
+            let status = if e.starts_with(http::TOO_LARGE) {
+                413
+            } else {
+                400
+            };
+            let _ = http::write_response(&mut stream, &Response::error(status, &e));
             return;
         }
     };

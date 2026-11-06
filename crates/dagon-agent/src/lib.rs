@@ -143,7 +143,7 @@ dagon_events::state_machine! {
         }
     }
 
-    /// The update session: an offer, the header, the body, the end.
+    /// The write session: an offer, the header, the body, the end.
     pub machine session in App {
         initial Idle;
         states {
@@ -152,7 +152,7 @@ dagon_events::state_machine! {
             Body { target: u8, slot: u8, len: u32, next: u32 },
         }
         transitions {
-            /// An update passed every DAGON guard; `accept_update` is asked
+            /// A write passed every DAGON guard; `accept_update` is asked
             /// next.
             update_offered(target: u8, slot: u8, body_len: u32): Idle
                 => Header { target, slot, body_len, got: 0 }
@@ -248,7 +248,7 @@ dagon_events::state_machine! {
             hello(): Ready => Ready emits Hello = 0x31 {} observe(live, host);
             /// Status answered.
             status_asked(): Ready => Ready emits StatusAsked = 0x32 {} observe(live, host);
-            /// An update was refused, by a DAGON guard or by an extension's
+            /// A write was refused, by a DAGON guard or by an extension's
             /// `accept_update`.
             update_refused(status: u8, by_extension: bool): Ready => Ready
                 emits UpdateRefused = 0x33 { status: u8, by_extension: bool }

@@ -5,7 +5,7 @@
   </picture>
 </p>
 
-<p align="center"><b>Safely write new programs to a group of connected microcontrollers from your PC</b></p>
+<p align="center"><b>The distributed microcontroller designs of professionals, made easy for many. As microcontrollers are added, writing stays the same operation as for one, and safe.</b></p>
 
 <p align="center">
   <a href="https://c-ardinal.github.io/DAGON-Boot/demo/">Try the demo</a> ·
@@ -21,11 +21,22 @@
 
 ## What is DAGON?
 
-When you build something from a few microcontrollers (small computers), you will want to change their programs afterwards. Opening the case and reconnecting cables each time is hard work, and a failed write can leave a board dead.
+A beautiful design with a muddy operation. Even a compact build that splits its work across microcontrollers means taking it apart, swapping cables and using one write tool per MCU every time a program changes. Sometimes the design itself is compromised because writing would be hell.
 
-With DAGON, one microcontroller on your PC's USB (the hub, 親機) passes new versions on to the others (the children, 子機). If a write stops part-way, the running version stays; if a new version does not work, the node goes back to the previous one by itself.
+DAGON makes the distributed multi-microcontroller designs of professionals and specialists easy for a wide range of people, from those starting electronics with AI to individual developers who care for compactness and finish.
 
-As a developer you choose the boards, draw how they connect and write your application in Rust. DAGON takes care of start-up, flash layout, signing and the writing steps.
+Before assembly, you write each node directly once. After that no write pattern is touched and nothing is opened. Through one microcontroller on your PC's USB (the hub, 親機), you write to the ones beyond it (the children, 子機) with the same operation as one node. More nodes take more time; the operation does not grow.
+
+Writing is safe. Every image is signed, a node runs a new version on trial, and it goes back to the previous one by itself when the new one does not work. If a write stops part-way, the running version stays.
+
+What sets DAGON apart is handling mixed MCUs by drawing the 構成 (the setup). As a developer you choose the boards, draw how they connect and write your application. DAGON takes care of start-up, flash layout, signing and the writing steps.
+
+## Documentation
+
+- [Getting started](https://c-ardinal.github.io/DAGON-Boot/doc/en/getting-started/): try it, install, from a new project to a new version
+- [How-to guides](https://c-ardinal.github.io/DAGON-Boot/doc/en/how-to/): your own board, swapping a link, AI help
+- [Explanation](https://c-ardinal.github.io/DAGON-Boot/doc/en/explanation/): words, events and extensions, versioning rules
+- [Reference](https://c-ardinal.github.io/DAGON-Boot/doc/en/reference/): commands, HTTP API, events, definition formats, Rust API
 
 ## Features
 
@@ -33,7 +44,7 @@ As a developer you choose the boards, draw how they connect and write your appli
 - **Get a project that builds**: `dagon new` and `dagon gen` give every node a Rust crate with its start-up, its wiring and an empty `app.rs` for your code.
 - **Write in one go**: `dagon deploy` builds, signs, packages and writes in one command. In the Console you write with each node's progress in view.
 - **Go back when it fails**: every image is signed. A node runs a new version on trial and goes back when it cannot be confirmed; `dagon rollback` goes back by hand.
-- **Update the boot core too**: the boot core itself lives in two slots and is updated like an app (RP2040, STM32F401), going back if the new one fails.
+- **Write the boot loader too**: the boot loader itself lives in two slots and is written like an app (RP2040, STM32F401), going back if the new one fails.
 - **Extend it**: without changing DAGON's source, add extensions that receive events, answer decisions and replace parts (ports).
 - **Ask an AI**: a new project comes with Claude Code instructions and skills, and `dagon ai link` connects an agent with your consent. The API key stays in the OS credential store.
 
@@ -64,7 +75,7 @@ dagon demo
 
 ## Prerequisites
 
-- [Rust](https://rustup.rs) (and a C compiler when building from source)
+- [Rust](https://rustup.rs): applications are written in Rust only (and a C compiler when building from source)
 - Chrome or Edge 89 or later to connect real boards (it uses Web Serial)
 - `dagon doctor` checks the tools each MCU needs ([list](https://c-ardinal.github.io/DAGON-Boot/doc/en/reference/tools/))
 
@@ -79,11 +90,22 @@ dagon doctor
 dagon serve
 ```
 
-`dagon new` makes `dagon.toml`, the topology file (the three-node sample) and a signing key pair, with the secret key outside the project. Open the address `dagon serve` prints to go on in the Console. From building to the first write, see [From a new project to an update](https://c-ardinal.github.io/DAGON-Boot/doc/en/getting-started/first-project/).
+`dagon new` makes `dagon.toml`, the topology file (the three-node sample) and a signing key pair, with the secret key outside the project. Open the address `dagon serve` prints to go on in the Console. From building to the first write, see [From a new project to a new version](https://c-ardinal.github.io/DAGON-Boot/doc/en/getting-started/first-project/).
 
 You can also add DAGON to existing firmware ([how](https://c-ardinal.github.io/DAGON-Boot/doc/en/how-to/existing-firmware/)).
 
 ## How it works
+
+<img src="assets/architecture/node-en.svg" alt="The node firmware's layers and functional stacks" width="100%">
+
+| To do this | Touch | Steps |
+|---|---|---|
+| Write your app | `targets/mcu/*/template/src/app.rs` becomes the node's `src/app.rs` | [From a new project to a new version](https://c-ardinal.github.io/DAGON-Boot/doc/en/getting-started/first-project/) |
+| Add an extension | `targets/boot-extension-template/`, `crates/dagon-events/src/ports.rs` | [Extension manifest](https://c-ardinal.github.io/DAGON-Boot/doc/en/reference/extension-manifest/) |
+| Add a board | `targets/boards/*/dagon-board.toml` | [Your own board](https://c-ardinal.github.io/DAGON-Boot/doc/en/how-to/own-board/) |
+| Add an MCU | `targets/mcu/*/dagon-mcu.toml`, `crates/dagon-port/src/lib.rs` | [Adding an MCU or a link](https://c-ardinal.github.io/DAGON-Boot/doc/en/how-to/new-mcu-or-link/) |
+| Add a link or transport | `crates/dagon-format/src/link.rs`, `targets/mcu/*/src/links.rs`, `crates/dagon-host/src/lib.rs` | [Adding an MCU or a link](https://c-ardinal.github.io/DAGON-Boot/doc/en/how-to/new-mcu-or-link/) |
+| Add an agent | `crates/dagon-cli/agents/`, `~/.dagon/agents/*.toml` | [Agent definition format](https://c-ardinal.github.io/DAGON-Boot/doc/en/reference/agent-definition/) |
 
 ```mermaid
 flowchart LR
@@ -97,8 +119,7 @@ flowchart LR
 3. A node writes the new image beside the running one and starts it on trial.
 4. When its self-check passes it confirms; otherwise a watchdog reset takes it back to the previous version.
 
-> [!WARNING]
-> What has been checked on hardware is in [Limitations](https://c-ardinal.github.io/DAGON-Boot/doc/en/explanation/limitations/). Boot core updates are unproven on hardware: the last hardware run came before the write flow changed, and the current scenario set has not been run since. Power cuts and writing the F401 through its ROM have not been run on hardware either. Signing keys are files on the PC; there is no hardware root of trust.
+What DAGON does not do is in [Limitations](https://c-ardinal.github.io/DAGON-Boot/doc/en/explanation/limitations/).
 
 ## Dependencies and external data
 
@@ -106,13 +127,6 @@ flowchart LR
 - Libraries: Rust crates and npm packages, used unmodified (embassy, esp-hal, ed25519-compact, Svelte, Vite, Astro and others)
 - Vendor parts: the ESP-IDF 2nd stage, `rp2040-boot2`, the STM32F401 ROM boot loader
 - Fonts and icons: Doto, DotGothic16, Zen Kaku Gothic New, JetBrains Mono (SIL OFL 1.1), Lucide (ISC)
-- Values in the MCU and board definitions: taken from the makers' datasheets and board documents, with the source in comments in the definition files
+- Values in the MCU and board definitions: taken from the makers' datasheets and board documents; a value whose source has not been checked is marked `unverified` in the definition
 
 The full list and licences are in [Licenses](https://c-ardinal.github.io/DAGON-Boot/doc/en/reference/licenses/).
-
-## Documentation
-
-- [Getting started](https://c-ardinal.github.io/DAGON-Boot/doc/en/getting-started/): try it, install, from a new project to an update
-- [How-to guides](https://c-ardinal.github.io/DAGON-Boot/doc/en/how-to/): your own board, swapping a link, AI help
-- [Explanation](https://c-ardinal.github.io/DAGON-Boot/doc/en/explanation/): words, events and extensions, versioning rules
-- [Reference](https://c-ardinal.github.io/DAGON-Boot/doc/en/reference/): commands, HTTP API, events, definition formats, Rust API

@@ -17,9 +17,13 @@ pub const TP_VERSION: u16 = 1;
 pub const HEAD_SIZE: usize = 0x20;
 pub const NODE_SIZE: usize = 32;
 pub const LINK_SIZE: usize = 16;
-pub const MAX_NODES: usize = 8;
-pub const MAX_LINKS: usize = 7;
-/// Largest canonical binary (8 nodes, 7 links, 16 constraints).
+/// The one node limit: the topology check, the Console and every write use it.
+pub const MAX_NODES: usize = 32;
+/// One link per node but the coordinator.
+pub const MAX_LINKS: usize = MAX_NODES - 1;
+// A count is one stored byte, and a constraint's node mask has 32 bits.
+const _: () = assert!(MAX_NODES <= 32 && MAX_LINKS <= u8::MAX as usize);
+/// Largest canonical binary.
 pub const MAX_SIZE: usize = total_size(MAX_NODES, MAX_LINKS, MAX_CONSTRAINTS);
 
 pub const fn total_size(nodes: usize, links: usize, constraints: usize) -> usize {

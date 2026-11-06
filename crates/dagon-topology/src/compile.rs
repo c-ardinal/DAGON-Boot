@@ -237,6 +237,7 @@ fn constraint(t: &Topology, c: &Constraint) -> Result<BinConstraint, CompileErro
     Ok(match c {
         Constraint::Lockstep(ids) => BinConstraint {
             kind: constraint_kind::LOCKSTEP_PROTO,
+            // `MAX_NODES` is held to the mask's 32 bits where it is defined.
             node_mask: ids
                 .iter()
                 .map(|id| index_of(t, id).map(|i| 1u32 << i))

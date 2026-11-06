@@ -40,7 +40,7 @@ const filled = [
   copy.DEFINE.problems(2),
   copy.DEFINE.cautions(1),
   copy.INSPECT.inUse('7セグのリセット'),
-  ...Object.values(copy.RULE_FIX).map((f) => f({ to: '7セグ', board: 'NUCLEO-F401RE', id: 'seg', many: false })),
+  ...Object.values(copy.RULE_FIX).map((f) => f({ to: '7セグ', board: 'NUCLEO-F401RE', id: 'seg', many: false, max: 32 })),
 ];
 
 const shownExcept = (...skip: string[]) =>

@@ -65,12 +65,18 @@ fn from_topology<F: Flash>(flash: &mut F) -> Option<Subs> {
         };
         let to = l.to as usize;
         let tag = (to < t.node_count()).then(|| t.node(to).target_tag)?;
-        let _ = subs.push(SubNode {
-            index: l.to,
-            name: short_name(&tag),
-            link: lk,
-            addr,
-        });
+        // The home screen shows the first ones; the rest are still written.
+        if subs
+            .push(SubNode {
+                index: l.to,
+                name: short_name(&tag),
+                link: lk,
+                addr,
+            })
+            .is_err()
+        {
+            break;
+        }
     }
     Some(subs)
 }

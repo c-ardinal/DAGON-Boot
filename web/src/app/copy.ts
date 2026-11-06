@@ -553,7 +553,6 @@ export const NODE = {
     'second-hub': '2 つ目の親機の側にあるため',
     deep: '子機の先にあるため',
     'link-kind': 'このつながりの種類では、書き込みが届かないため',
-    'too-many': '書き込みは親機とその子機 7 つまでのため',
     unreachable: 'どの親機からもリンクがたどれないため',
     'cut-invalid': '書き込みが届く部分だけでは確認を通らないため（dagon topo check で理由を見られます）',
   } as Record<string, string>,
@@ -777,6 +776,8 @@ export interface FixWords {
   board: string;
   id: string;
   many: boolean;
+  /** The node limit. */
+  max: number;
   /** A size such as "512 KiB". */
   size?: string;
   /** The node is one updating skips: its link is not a thing to fix. */
@@ -786,7 +787,7 @@ export interface FixWords {
 /** How to fix each rule, one sentence. */
 export const RULE_FIX: Record<string, (w: FixWords) => string> = {
   'V-01': () => 'dagon の新しいバージョンで書き出したファイルを読み込んでください。',
-  'V-02': (w) => (w.many ? 'ノードを 32 までにしてください。' : `名前「${w.id}」の 2 つのどちらかを変えてください。`),
+  'V-02': (w) => (w.many ? `ノードを ${w.max} までにしてください。` : `名前「${w.id}」の 2 つのどちらかを変えてください。`),
   'V-03': () => '親機を 1 つだけにしてください。',
   'V-04': () => '子機どうしのリンクを消し、親機とつないでください。',
   'V-05': (w) => `${w.to}を親機とリンクでつないでください。`,

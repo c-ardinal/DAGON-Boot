@@ -892,7 +892,7 @@ fn sixteen_writers() {
 fn carrier_list_matches_the_spec() {
     let doc = std::fs::read_to_string(concat!(
         env!("CARGO_MANIFEST_DIR"),
-        "/../../site/src/content/docs/explanation/retained-formats.md"
+        "/../../site/src/content/docs/en/explanation/retained-formats.md"
     ))
     .unwrap();
     let text = doc.split_whitespace().collect::<Vec<_>>().join(" ");

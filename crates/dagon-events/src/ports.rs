@@ -314,7 +314,7 @@ pub const PORTS: &[Port] = &[
     ),
     port(
         "SessionGuards",
-        "the update session's guards: target, slot, header signature and compatibility, body digest",
+        "the write session's guards: target, slot, header signature and compatibility, body digest",
         &[on(Boot, DAGON), on(App, DAGON)],
         Never("every protocol's triggers pass the same guards; replacing them would let a transport write what DAGON refuses"),
         "",

@@ -108,7 +108,7 @@ describe('define session', () => {
     d.place('nucleo-f401re', 'NUCLEO-F401RE');
     expect(d.selected).toBe('node:nucleo');
     const p = d.problems.find((x) => x.rule === 'V-05')!;
-    expect([p.short, p.select, p.sentence]).toEqual(['つながっていないノード', 'node:nucleo', RULE_FIX['V-05']({ to: 'nucleo', board: 'nucleo-f401re', id: 'nucleo', many: false })]);
+    expect([p.short, p.select, p.sentence]).toEqual(['つながっていないノード', 'node:nucleo', RULE_FIX['V-05']({ to: 'nucleo', board: 'nucleo-f401re', id: 'nucleo', many: false, max: 32 })]);
     d.selected = null;
     d.fix(p);
     expect(d.selected).toBe('node:nucleo');

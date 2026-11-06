@@ -14,3 +14,4 @@ dagon-sim = { path = "../dagon-sim" }
 
 [dev-dependencies]
 serde_json = "1"
+toml = "0.8"

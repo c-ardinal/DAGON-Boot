@@ -3,6 +3,7 @@
 //!
 //! `DAGON_BLESS=1` writes the generated documents instead of comparing.
 
+use std::cell::RefCell;
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::PathBuf;
 
@@ -32,6 +33,25 @@ fn check(rel: &str, generated: &str) {
     );
 }
 
+/// The Japanese of what the catalogs say, keyed by their English.
+const JA_TABLE: &str = "site/i18n/catalog-ja.toml";
+
+fn ja_table() -> BTreeMap<String, String> {
+    toml::from_str(&read(JA_TABLE)).unwrap_or_else(|e| panic!("{JA_TABLE}: {e}"))
+}
+
+/// `make` run with the Japanese table; the English it asked for and the table lacks fail.
+fn with_japanese<T>(make: impl FnOnce(Lang<'_>) -> T) -> (T, BTreeSet<String>) {
+    let table = ja_table();
+    let asked = RefCell::new(BTreeSet::new());
+    let look_up = |en: &str| {
+        asked.borrow_mut().insert(en.to_string());
+        table.get(en).cloned().unwrap_or_else(|| en.to_string())
+    };
+    let made = make(Lang::Ja(&look_up));
+    (made, asked.into_inner())
+}
+
 /// Every `.rs` file under `dir`, build output and vendored trees left out.
 fn rust_files(dir: &std::path::Path) -> Vec<PathBuf> {
     fn walk(dir: &std::path::Path, out: &mut Vec<PathBuf>) {
@@ -55,10 +75,8 @@ fn rust_files(dir: &std::path::Path) -> Vec<PathBuf> {
 
 #[test]
 fn events_md_is_generated() {
-    check(
-        "site/src/content/docs/reference/events.md",
-        &events_md(&machines(), Lang::Ja),
-    );
+    let (ja, _) = with_japanese(|lang| events_md(&machines(), lang));
+    check("site/src/content/docs/reference/events.md", &ja);
     check(
         "site/src/content/docs/en/reference/events.md",
         &events_md(&machines(), Lang::En),
@@ -67,10 +85,8 @@ fn events_md_is_generated() {
 
 #[test]
 fn ports_md_is_generated() {
-    check(
-        "site/src/content/docs/reference/ports.md",
-        &ports_md(PORTS, Lang::Ja),
-    );
+    let (ja, _) = with_japanese(|lang| ports_md(PORTS, lang));
+    check("site/src/content/docs/reference/ports.md", &ja);
     check(
         "site/src/content/docs/en/reference/ports.md",
         &ports_md(PORTS, Lang::En),
@@ -80,15 +96,51 @@ fn ports_md_is_generated() {
 /// Section 2.1 of the design holds the port table generated from PORTS.
 #[test]
 fn the_design_port_table_is_generated() {
-    const DESIGN: &str = "site/src/content/docs/en/explanation/lifecycle-events.md";
     const BEGIN: &str = "<!-- generated from dagon_events::PORTS -->\n";
     const END: &str = "<!-- end of generated table -->\n";
-    let text = read(DESIGN);
-    let a = text.find(BEGIN).expect("the design's table markers") + BEGIN.len();
-    let b = a + text[a..].find(END).expect("the design's end marker");
-    let mut whole = text.clone();
-    whole.replace_range(a..b, &design_ports_table(PORTS));
-    check(DESIGN, &whole);
+    let (ja, _) = with_japanese(|lang| design_ports_table(PORTS, lang));
+    for (design, table) in [
+        ("site/src/content/docs/explanation/lifecycle-events.md", ja),
+        (
+            "site/src/content/docs/en/explanation/lifecycle-events.md",
+            design_ports_table(PORTS, Lang::En),
+        ),
+    ] {
+        let text = read(design);
+        let a = text.find(BEGIN).expect("the design's table markers") + BEGIN.len();
+        let b = a + text[a..].find(END).expect("the design's end marker");
+        let mut whole = text.clone();
+        whole.replace_range(a..b, &table);
+        check(design, &whole);
+    }
+}
+
+/// A new or changed description fails until it is translated, and the
+/// table holds nothing the catalogs no longer say.
+#[test]
+fn the_japanese_table_is_exactly_what_the_catalogs_say() {
+    let (_, asked) = with_japanese(|lang| {
+        events_md(&machines(), lang);
+        ports_md(PORTS, lang);
+        design_ports_table(PORTS, lang);
+    });
+    let have: BTreeSet<String> = ja_table().into_keys().collect();
+    let missing: Vec<_> = asked.difference(&have).collect();
+    let unused: Vec<_> = have.difference(&asked).collect();
+    assert!(
+        missing.is_empty() && unused.is_empty(),
+        "{JA_TABLE}: add a Japanese value for missing, drop unused\nmissing:\n{}\nunused:\n{}",
+        missing
+            .iter()
+            .map(|s| s.as_str())
+            .collect::<Vec<_>>()
+            .join("\n"),
+        unused
+            .iter()
+            .map(|s| s.as_str())
+            .collect::<Vec<_>>()
+            .join("\n"),
+    );
 }
 
 #[test]
@@ -282,10 +334,11 @@ fn conflicts_across_machines_of_a_layer_are_named() {
 
 #[test]
 fn a_machine_renders_every_transition() {
-    let ja = events_md(&[one::CATALOG], Lang::Ja);
+    let ja = events_md(&[one::CATALOG], Lang::Ja(&|en| format!("訳 {en}")));
     assert!(ja.contains(
-        "## レイヤー `boot`\n\n### 状態機械 `one`\n\nFirst.\n\n状態: `A` (最初の状態), `B`。"
+        "## レイヤー `boot`\n\n### 状態機械 `one`\n\n訳 First.\n\n状態: `A` (最初の状態), `B`。"
     ));
+    assert!(ja.contains("| action | 訳 Went. |"));
     let md = events_md(&[one::CATALOG], Lang::En);
     assert!(md
         .contains("## Layer `boot`\n\n### Machine `one`\n\nFirst.\n\nStates: `A` (initial), `B`."));

@@ -65,7 +65,7 @@ pub fn release_topology(bundle: &[u8], current: &str) -> Result<JsValue, JsError
 /// The part updating reaches (dagon_topology::cut_with): `{reach: [id],
 /// skipped: {id: why}}`. `reach` is in the compiled topology's node order
 /// (the indices dagon-host uses); every other node is in `skipped` with
-/// `second-hub`, `deep`, `link-kind`, `too-many`, `unreachable`, or
+/// `second-hub`, `deep`, `link-kind`, `unreachable`, or
 /// `cut-invalid` for all when the part does not pass the checks on its
 /// own. `null` when the YAML does not parse or has errors (its problems
 /// say what to fix first).

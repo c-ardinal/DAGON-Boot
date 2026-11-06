@@ -9,7 +9,7 @@
 <script lang="ts">
   import { DEFINE, PARTS } from '../../app/copy.ts';
   import type { Define } from '../../app/define/define.svelte.ts';
-  import { canPlace, MAX_NODES, mcus } from '../../app/define/model.ts';
+  import { canPlace, maxNodes, mcus } from '../../app/define/model.ts';
   import { dagonReady, supportedBoards } from '../../wasm/dagon.ts';
   import Icon from '../Icon.svelte';
 
@@ -37,7 +37,7 @@
   /** 製品 / マイコン: one list each (one long list stops scaling as boards and MCUs grow). */
   let tab = $state<'product' | 'mcu'>('product');
   const match = (...t: string[]) => !q.trim() || t.some((s) => s.toLowerCase().includes(q.trim().toLowerCase()));
-  const full = $derived(d.doc.topo.nodes.length >= MAX_NODES);
+  const full = $derived(d.doc.topo.nodes.length >= maxNodes());
   const used = (key: Part['key']) => d.doc.topo.nodes.filter((n) => ('board' in key ? n.board === key.board : !n.board && n.mcu === key.mcu)).length;
 
   /** Enter, double-click (and the 置く of the table) place without a pointer: as "置く" always did. */

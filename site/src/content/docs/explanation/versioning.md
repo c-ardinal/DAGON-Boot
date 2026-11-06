@@ -1,202 +1,146 @@
 ---
-title: "Versions and releases"
-description: "How DAGON's components and contracts are numbered, and how a change picks its version."
+title: "バージョンとリリース"
+description: "DAGON の部品と取り決めの番号の付け方と、変更からバージョンを決める方法です。"
 ---
 
-:::note
-このページは英語だけです。
-:::
+DAGON は、別々にリリースするいくつかの部品でできています。部品はそれぞれ自分の
+[SemVer](https://semver.org/) のバージョンを持ち、部品のあいだの互換性の取り決め（ファイルの形式、プロトコル、API）は、それぞれ自分の整数の形式番号を持ちます。このページは両方のルールを示します。同じ変更を見れば、だれでも同じバージョンにたどり着けるようにするためです。
 
-DAGON is made of several components that are released on their own. Each
-carries its own [SemVer](https://semver.org/) version, and every
-compatibility contract between them (a file format, a protocol, an API)
-carries its own integer format number. This page gives the rules for both,
-so that anyone looking at the same change reaches the same version.
+部品と取り決めの一覧は、ここには置きません。唯一の置き場所は
+[`compat.toml`](https://github.com/c-ardinal/DAGON-Boot/blob/main/compat.toml) で、すべての部品のバージョン、ファイル、crate、読み書きする形式番号と、取り決めごとのいまの番号があります。CLI のテストがコードと crate のマニフェストに照らして確かめるので、ずれることはありません。
 
-The list of components and contracts is not kept here. It is
-[`compat.toml`](https://github.com/c-ardinal/DAGON-Boot/blob/main/compat.toml), the single source: every component with
-its version, files, packages and the format numbers it reads and writes,
-and the number each contract is at. The CLI's tests check it against the
-code and the package manifests, so it cannot drift.
+## 部品
 
-## Components
+部品とは、利用者がインストールする、書き込む、または依存するもので、リリースをまたいで続くものです。CLI（配信するページを含む）、ブートローダ、マイコンの定義、ボードの定義、ライブラリの crate がこれにあたります。サンプル（デモのファームウェアを含む）、テスト用のアプリ、立ち上げとダンプのプログラム、テスト用のイメージは部品ではありません。これらは `0.0.0` のまま `publish = false` とします。
 
-A component is something a user installs, flashes or depends on that
-lives on from release to release: the CLI (with the page it serves), a
-boot core, an MCU package, a board package, a library crate. Samples
-(including demo firmware), test apps, bring-up and dump programs and test
-images are not components; they stay at `0.0.0` with `publish = false`.
+新しい部品は `0.1.0` から始めます。
 
-A new component starts at `0.1.0`.
+### compat.toml での部品の書き方
 
-### How a component is written in compat.toml
+`[[component]]` の項目ごとに、次の欄があります。
 
-Each `[[component]]` entry has:
-
-| Field | Meaning |
+| 欄 | 意味 |
 |---|---|
-| `name` | The component's name. It is also the commit scope (`feat(<name>):`) and the tag prefix (`<name>-v<version>`) |
-| `version` | Its SemVer version |
-| `paths` | The files it owns. A file belongs to the component with the longest matching path, so a boot core inside an MCU package's folder is its own component. A file outside every component (README, `scripts/`, `.github/`, samples) never needs a release |
-| `packages` | The Cargo packages that carry this version in their own `Cargo.toml`; a component made of several packages gives them all the same version. There is no version shared through the workspace |
-| `formats` | For each contract it uses, the format numbers it reads and writes |
+| `name` | 部品の名前。コミットのスコープ（`feat(<name>):`）とタグの接頭辞（`<name>-v<version>`）にもなります |
+| `version` | SemVer のバージョン |
+| `paths` | その部品のファイル。ファイルは、一致するパスがいちばん長い部品に属します。そのため、マイコンの定義のフォルダの中にあるブートローダは、独立した部品です。どの部品にも属さないファイル（README、`scripts/`、`.github/`、サンプル）には、リリースは要りません |
+| `packages` | このバージョンを自分の `Cargo.toml` に持つ Cargo パッケージ。複数の crate でできた部品は、すべて同じバージョンにします。ワークスペースで共有するバージョンはありません |
+| `formats` | 使う取り決めごとに、読み書きする形式番号 |
 
-The CLI's entry also stands for the page it serves: `web/package.json`
-carries the same version.
+CLI の項目は、配信するページの分も兼ねています。`web/package.json` も同じバージョンを持ちます。
 
-### Adding a component
+### 部品を足す
 
-1. Add its `[[component]]` entry to `compat.toml` with version `0.1.0`.
-2. Set `version = "0.1.0"` in each of its packages.
-3. Run the CLI's tests (`cargo test -p dagon-cli versions`). They fail when
-   a package's version differs from its entry, when a listed path does not
-   exist, or when a package outside every entry is not `0.0.0`.
+1. `compat.toml` に、バージョン `0.1.0` の `[[component]]` の項目を足します。
+2. その部品の各 crate に `version = "0.1.0"` を設定します。
+3. CLI のテストを実行します（`cargo test -p dagon-cli versions`）。crate のバージョンが項目と違うとき、一覧のパスが存在しないとき、どの項目にも属さない crate が `0.0.0` でないときに失敗します。
 
-## Contracts and format numbers
+## 取り決めと形式番号
 
-A contract's format number is separate from every product version: a
-component can go from 0.1.0 to 0.4.2 while it still writes the same format
-number.
+取り決めの形式番号は、製品のどのバージョンとも別のものです。部品が 0.1.0 から 0.4.2 に進んでも、同じ形式番号のまま書き出すことがあります。
 
-`[formats]` in `compat.toml` names every contract and the number it is at
-(listed in [Contracts and components](/en/reference/contracts/));
-the comment beside each says where the number is written and which code
-constant holds it. Every artifact and message of a contract states its
-number, and a reader refuses a number it does not read with a message that
-names both numbers (for example `release.dgb is bundle format 2; this
-dagon 0.1.0 reads bundle format 1`).
+`compat.toml` の `[formats]` には、すべての取り決めといまの番号があります（一覧は[取り決めと部品](/reference/contracts/)）。それぞれの横のコメントが、番号の書かれる場所と、番号を持つコードの定数を示します。取り決めの成果物とメッセージは、どれも自分の番号を示します。読む側は、読めない番号を受け付けず、両方の番号を挙げたメッセージを出します（例: `release.dgb is bundle format 2; this
+dagon 0.1.0 reads bundle format 1`）。
 
-One contract has a default: MCU and board definition files
-(`dagon-mcu.toml`, `dagon-board.toml`) that leave out `format` are read as
-format 1, so files users write by hand keep loading. DAGON's own definition
-files always state it. Every other contract always carries its number.
+既定の値がある取り決めが 1 つあります。マイコンとボードの定義ファイル（`dagon-mcu.toml`、`dagon-board.toml`）は、`format` を省くと形式 1 として読みます。利用者が手で書いたファイルを読み込めるようにするためです。DAGON 自身の定義ファイルは必ず書きます。ほかの取り決めは、必ず番号を持ちます。
 
-Image versions are not component versions. The version in a signed image
-header (given when the image is signed, or the default a first install
-uses) is the version of that image on the device, chosen by the project.
-It has no relation to the version of the boot core component that built
-it.
+イメージのバージョンは、部品のバージョンではありません。署名付きのイメージのヘッダにあるバージョン（イメージの署名のときに与えるか、最初のインストールが使う既定の値）は、デバイス上のそのイメージのバージョンで、プロジェクトが決めます。そのイメージをビルドしたブートローダの部品のバージョンとは関係ありません。
 
-### Adding a contract
+### 取り決めを足す
 
-1. Give the artifact or message a number field, starting at 1, and make
-   its readers refuse other numbers.
-2. Add the contract to `[formats]` in `compat.toml` and to each component
-   that reads or writes it.
-3. Add the code constant to the CLI's list of format numbers
-   (`crates/dagon-cli/src/versions.rs`); its tests fail while the table and
-   the code disagree.
+1. 成果物またはメッセージに、1 から始まる番号の欄を持たせ、読む側がほかの番号を受け付けないようにします。
+2. `compat.toml` の `[formats]` と、それを読み書きする各部品に、その取り決めを足します。
+3. CLI の形式番号の一覧（`crates/dagon-cli/src/versions.rs`）に、コードの定数を足します。表とコードが一致しないあいだは、そのテストが失敗します。
 
-## What kind of change is it
+## どの種類の変更か
 
-Decide for each component whose files the change touches.
+変更が触れるファイルの部品ごとに決めます。
 
-**Breaking**: a user of that component must change something.
+**破壊的な変更**: その部品の利用者が何かを変えなければならないもの。
 
-- The CLI: a command, flag, config key, exit code or machine-readable
-  output (JSON, `--version` lines, API fields) removed or changed in
-  meaning; or an old format number no longer read.
-- A boot core: an old image or state log format no longer accepted, or a
-  device needs its ROM re-provisioned (rewritten through the boot ROM) to
-  take the new version.
-- An MCU or board package: its public Rust API, or its definition keys,
-  changed incompatibly.
-- A library crate: an incompatible public API change, as
-  [cargo-semver-checks](https://github.com/obi1kenobi/cargo-semver-checks)
-  reports it.
+- CLI: コマンド、フラグ、設定のキー、終了コード、機械が読む出力（JSON、`--version` の行、API の欄）をなくす、または意味を変える。または、古い形式番号を読まなくなる。
+- ブートローダ: 古いイメージや状態ログの形式を受け付けなくなる。または、新しいバージョンを受け取るために、デバイスの ROM からの準備のやり直し（ブート ROM を通した書き直し）が必要になる。
+- マイコンやボードの定義: 公開の Rust API や定義のキーを、互換性のない形で変える。
+- ライブラリの crate: [cargo-semver-checks](https://github.com/obi1kenobi/cargo-semver-checks) が報告する、互換性のない公開 API の変更。
 
-**Feature**: a new capability, and everything that worked keeps working.
+**機能の追加**: 新しくできることが増え、動いていたものはすべて動き続けるもの。
 
-**Fix**: behaviour corrected to what the documentation already promises,
-with no new capability.
+**修正**: 動作を、文書がすでに約束している内容に直すもの。新しくできることは増えません。
 
-**No release**: documentation, tests, CI, and refactors that change no
-shipped behaviour.
+**リリースなし**: 文書、テスト、CI、配布する動作を変えないリファクタリング。
 
-When one change is several kinds, the largest one counts.
+1 つの変更が複数の種類にあたるときは、いちばん大きいものを使います。
 
-## From the kind to the version
+## 種類からバージョンへ
 
-| Kind | While `0.x.y` | From `1.0.0` |
+| 種類 | `0.x.y` のあいだ | `1.0.0` から |
 |---|---|---|
-| Breaking | `0.(x+1).0` | `(MAJOR+1).0.0` |
-| Feature | `0.x.(y+1)` | `MAJOR.(MINOR+1).0` |
-| Fix | `0.x.(y+1)` | `MAJOR.MINOR.(PATCH+1)` |
-| No release | unchanged | unchanged |
+| 破壊的な変更 | `0.(x+1).0` | `(MAJOR+1).0.0` |
+| 機能の追加 | `0.x.(y+1)` | `MAJOR.(MINOR+1).0` |
+| 修正 | `0.x.(y+1)` | `MAJOR.MINOR.(PATCH+1)` |
+| リリースなし | 変えない | 変えない |
 
-The `0.x` rule is Cargo's: a change in the left-most non-zero number is
-breaking. Only the maintainers declare `1.0.0`.
+`0.x` のルールは Cargo のものです。いちばん左の 0 でない数字の変更が、破壊的な変更にあたります。`1.0.0` を宣言するのはメンテナだけです。
 
-Several changes between two releases: take the largest kind over all of
-them and bump once.
+2 つのリリースのあいだに複数の変更があるときは、全体でいちばん大きい種類を取り、1 回だけ上げます。
 
-### Dependencies
+### 依存
 
-Only components whose files changed are bumped. When a dependency is
-bumped, a component that depends on it is bumped only if its own API or
-behaviour changes as a result, and then by the same rules. Otherwise it is
-rebuilt against the new dependency and keeps its version until its own
-next release.
+上げるのは、ファイルが変わった部品だけです。依存先が上がっても、それに依存する部品を上げるのは、その結果として自分の API や動作が変わるときだけで、同じルールに従います。それ以外のときは、新しい依存先に対してビルドするだけで、自分の次のリリースまでバージョンを変えません。
 
-### Format numbers
+### 形式番号
 
-- `+1` when a reader of the old number would misread the new data or must
-  refuse it.
-- A component that starts reading a new number and still reads the old
-  one: feature.
-- A component that stops reading or writing an old number: breaking.
-- A change an old reader handles correctly (for example a field in a
-  reserved area that old readers ignore by design) keeps the number.
+- 古い番号の読み手が新しいデータを読み違える、または受け付けてはならないときは `+1` します。
+- 部品が新しい番号を読み始め、古い番号も読み続けるときは、機能の追加です。
+- 部品が古い番号を読まなくなる、または書かなくなるときは、破壊的な変更です。
+- 古い読み手が正しく扱える変更（例: 古い読み手が設計上無視する予約領域の欄）では、番号を変えません。
 
-## Decision flow
+## 判断の流れ
 
 ```mermaid
 flowchart TD
-    A[A change] --> B{Does it touch the files<br/>of a component?}
-    B -- no --> N[No release]
-    B -- yes, for each one --> C{Does it change shipped behaviour<br/>or public API?}
-    C -- no: docs, tests, CI, refactor --> N
-    C -- yes --> F{Does it change data another<br/>component reads or writes?}
-    F -- yes --> G{Would an old reader misread it<br/>or have to refuse it?}
-    G -- yes --> H[Format number +1, then go on]
-    G -- no --> D
-    F -- no --> D
-    H --> D{Must a user of this component<br/>change anything?}
-    D -- yes --> BR[Breaking<br/>0.x: 0.x+1.0 / 1.0+: MAJOR]
-    D -- no --> E{New capability?}
-    E -- yes --> FE[Feature<br/>0.x: patch / 1.0+: MINOR]
-    E -- no --> FX[Fix<br/>PATCH]
+    A[変更] --> B{部品のファイルに<br/>触れるか}
+    B -- いいえ --> N[リリースなし]
+    B -- はい、部品ごとに --> C{配布する動作や<br/>公開 API を変えるか}
+    C -- いいえ: 文書、テスト、CI、リファクタリング --> N
+    C -- はい --> F{ほかの部品が読み書きする<br/>データを変えるか}
+    F -- はい --> G{古い読み手が読み違える、<br/>または受け付けてはならないか}
+    G -- はい --> H[形式番号を +1 して先へ]
+    G -- いいえ --> D
+    F -- いいえ --> D
+    H --> D{この部品の利用者が<br/>何かを変える必要があるか}
+    D -- はい --> BR[破壊的な変更<br/>0.x: 0.x+1.0 / 1.0 以降: MAJOR]
+    D -- いいえ --> E{新しくできることが増えるか}
+    E -- はい --> FE[機能の追加<br/>0.x: patch / 1.0 以降: MINOR]
+    E -- いいえ --> FX[修正<br/>PATCH]
 ```
 
-The same in words:
+同じことを言葉で書くと、次のとおりです。
 
-1. List the components whose files the change touches. None: no release.
-2. For each: no shipped behaviour or public API change: no release for it.
-3. If it changes data another component reads or writes and an old reader
-   would misread or refuse it, add 1 to that format number.
-4. Must a user of the component change anything (including: an old format
-   number is no longer read or written)? Breaking.
-5. Otherwise, a new capability? Feature. If not, fix.
+1. 変更が触れるファイルの部品を挙げます。無ければ、リリースはありません。
+2. それぞれについて、配布する動作も公開 API も変わらなければ、その部品のリリースはありません。
+3. ほかの部品が読み書きするデータを変え、古い読み手が読み違える、または受け付けないなら、その形式番号に 1 を足します。
+4. その部品の利用者が何かを変える必要があれば（古い形式番号を読まなくなる、書かなくなる場合を含む）、破壊的な変更です。
+5. それ以外で、新しくできることが増えれば機能の追加、増えなければ修正です。
 
-## Examples
+## 例
 
-| Change | Result |
+| 変更 | 結果 |
 |---|---|
-| The CLI gains a subcommand | CLI feature |
-| A CLI flag is renamed | CLI breaking |
-| A JSON output of the CLI gains a field | CLI feature |
-| A boot core fixes a CRC check bug | boot core fix |
-| Image header format N+1, which boot cores reading only N cannot read | image header format +1; a boot core that reads N and N+1: feature; the CLI: breaking only when it stops writing N |
-| A README typo | no release |
-| A board package adds a definition key the definition reader already accepts | board package feature |
-| A library crate removes a public function | that library breaking (cargo-semver-checks) |
-| A refactor inside a library with no API or behaviour change | no release |
-| The protocol library adds a command and the CLI starts using it | protocol library feature, CLI feature; components that only rebuild against them keep their versions |
+| CLI にサブコマンドが増える | CLI の機能の追加 |
+| CLI のフラグの名前を変える | CLI の破壊的な変更 |
+| CLI の JSON 出力に欄が増える | CLI の機能の追加 |
+| ブートローダの CRC 検査の不具合を直す | ブートローダの修正 |
+| イメージのヘッダの形式 N+1 で、N だけを読むブートローダには読めない | イメージのヘッダの形式を +1。N と N+1 を読むブートローダは機能の追加。CLI は N を書かなくなるときだけ破壊的な変更 |
+| README の誤字 | リリースなし |
+| ボードの定義が、定義の読み手がすでに受け付ける定義のキーを足す | ボードの定義の機能の追加 |
+| ライブラリの crate が公開の関数を消す | そのライブラリの破壊的な変更（cargo-semver-checks） |
+| API も動作も変えない、ライブラリの中のリファクタリング | リリースなし |
+| プロトコルのライブラリがコマンドを足し、CLI がそれを使い始める | プロトコルのライブラリの機能の追加、CLI の機能の追加。それらに対してビルドするだけの部品は、バージョンを変えません |
 
-## Commits
+## コミット
 
-Commits follow [Conventional Commits](https://www.conventionalcommits.org/)
-with the component's `name` as the scope:
+コミットは [Conventional Commits](https://www.conventionalcommits.org/) に従い、部品の `name` をスコープにします。
 
 ```
 feat(<component>): <a new capability>
@@ -205,42 +149,22 @@ feat(<component>)!: <a change users must act on>
 docs: <no release>
 ```
 
-- `feat` is a feature, `fix` (and `perf`) a fix; `docs`, `test`, `ci`,
-  `refactor`, `chore`, `style`, `build` need no release.
-- `!` after the scope, or a `BREAKING CHANGE:` footer, marks a breaking
-  change.
-- A commit that touches several components names the main one; the bump
-  check counts the commit, at its kind, for every component whose files it
-  touches. This can ask more of a component than its own change needs;
-  split such a commit into one per component to avoid that.
+- `feat` は機能の追加、`fix`（と `perf`）は修正です。`docs`、`test`、`ci`、`refactor`、`chore`、`style`、`build` にリリースは要りません。
+- スコープの後の `!` か、`BREAKING CHANGE:` のフッターが、破壊的な変更を示します。
+- 複数の部品に触れるコミットは、主な部品を名前にします。バージョンの確認は、そのコミットをその種類で、ファイルに触れたすべての部品に数えます。そのため、部品自身の変更に必要な以上のものを求めることがあります。避けるには、コミットを部品ごとに分けてください。
 
-## Releases
+## リリース
 
-- One tag per component release: `<name>-v<version>`, for example
-  `<name>-v0.2.0`.
-- Pre-releases for maintainer trials: `-rc.N` (`<name>-v0.2.0-rc.1`). The
-  release that follows drops the suffix and keeps the version.
-- Release files carry the component name and version in their names.
-- A component's changelog is made from the commits since its last tag that
-  touch its files: `python scripts/changelog.py <name> [--from <tag>]
-  [--to <rev>]` prints the section (Breaking, Features, Fixes), reading
-  commits exactly as the bump check does.
-- `python scripts/bump_check.py <name>` checks that the version in
-  `compat.toml` is at least what the commits since the component's last tag
-  require. The release workflow (`.github/workflows/release.yml`) runs it
-  for every pushed `<name>-v<version>` tag, taking the component from the
-  tag, and fails a tag that names no component or another version. The
-  workflow says which components then build release files.
-- Nothing is pushed, tagged on the remote or published without the
-  maintainers' OK.
+- 部品のリリースごとにタグを 1 つ付けます: `<name>-v<version>`（例: `<name>-v0.2.0`）。
+- メンテナの試用のためのプレリリースは `-rc.N` です（`<name>-v0.2.0-rc.1`）。その次のリリースは、接尾辞を外し、バージョンはそのままです。
+- リリースのファイルの名前には、部品の名前とバージョンが入ります。
+- 部品の変更履歴は、その部品の最後のタグ以降のコミットのうち、そのファイルに触れるものから作ります: `python scripts/changelog.py <name> [--from <tag>]
+  [--to <rev>]` がその節（Breaking、Features、Fixes）を出力します。コミットの読み方はバージョンの確認とまったく同じです。
+- `python scripts/bump_check.py <name>` は、`compat.toml` のバージョンが、その部品の最後のタグ以降のコミットが求める以上であることを確かめます。リリースのワークフロー（`.github/workflows/release.yml`）は、push された `<name>-v<version>` のタグごとにこれを実行し、部品をタグから取ります。部品を指さないタグや、別のバージョンを指すタグは失敗にします。その後でどの部品のリリースのファイルをビルドするかは、ワークフローが示します。
+- メンテナの了承なしに、push も、リモートへのタグ付けも、公開もしません。
 
-## Compatibility between components
+## 部品のあいだの互換性
 
-Two components work together when, for every contract they both use, they
-share a format number in their `formats` entries in `compat.toml`.
+2 つの部品が一緒に動くのは、両方が使うすべての取り決めについて、`compat.toml` の `formats` の項目に共通の形式番号があるときです。
 
-The CLI shows what it knows: `dagon --version` and `GET /v1/hello` give its
-version and every format number it reads and writes; `dagon status` and
-`dagon doctor` also list the component versions of the CLI's own release.
-For a connected device, the CLI compares the numbers the device reports
-with its own entry and warns on a combination the table does not allow.
+CLI は、自分が知っていることを示します。`dagon --version` と `GET /v1/hello` は、自分のバージョンと、読み書きするすべての形式番号を示します。`dagon status` と `dagon doctor` は、CLI 自身のリリースの部品のバージョンも挙げます。つながっているデバイスについては、CLI はデバイスが報告する番号を自分の項目と比べ、表が認めない組み合わせには警告を出します。

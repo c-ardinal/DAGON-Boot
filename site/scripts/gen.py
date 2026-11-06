@@ -4,20 +4,25 @@
     python site/scripts/gen.py --check   # exit 1 when a page differs from its source
 
 Each page says which source it comes from; nobody edits a generated page. The
-pages' headings and fixed text are in both languages; descriptions copied from
-a source (doc comments, clap help) stay in the source's language, English, and
-the Japanese page says which.
+pages' headings and fixed text are in both languages. Descriptions copied from
+a source (doc comments, compat.toml notes) are English there; the Japanese page
+takes them from site/i18n/ja.toml, keyed by that English, so a changed or new
+description fails until it is translated. Only the command help stays English,
+and the Japanese page says so.
 
 The sources are read as text (Rust and TOML) with Python 3.11+; the command
 line page runs `dagon help-markdown` (DAGON_BIN, else `cargo run`).
 """
 import functools
+import itertools
 import os
 import pathlib
 import re
 import subprocess
 import sys
 import tomllib
+
+import architecture
 
 ROOT = pathlib.Path(__file__).resolve().parents[2]
 OUT = ROOT / "site" / "src" / "content" / "docs"
@@ -28,6 +33,28 @@ LANGS = {"ja": "", "en": "en/"}
 
 def tr(lang, ja, en):
     return ja if lang == "ja" else en
+
+
+I18N = ROOT / "site" / "i18n" / "ja.toml"
+MISSING = set()
+USED = set()
+
+
+@functools.cache
+def i18n():
+    return tomllib.loads(I18N.read_text(encoding="utf-8"))
+
+
+def say(lang, text):
+    """`text` from a source, in `lang`. A missing Japanese key is recorded; main fails on it."""
+    key = " ".join(str(text).split())
+    if lang != "ja" or not key:
+        return text
+    USED.add(key)
+    if key not in i18n():
+        MISSING.add(key)
+        return text
+    return i18n()[key]
 
 
 def page(lang, title, description, sources, body, english=""):
@@ -121,7 +148,7 @@ def serve_api(lang="en"):
         doc = fn_doc(handler(rhs)) or (above[2:].strip() if above.startswith("//") else "")
         # A doc that starts with its own route ("POST /v1/sim/write: ...") keeps only the rest.
         doc = re.sub(r"^(GET|POST|PUT|DELETE) /v1/\S*( \([^)]*\)| \{[^}]*\})?:\s*", "", doc)
-        doc = doc[:1].upper() + doc[1:]
+        doc = say(lang, doc[:1].upper() + doc[1:])
         short = path[len("/v1/"):]
         demo = any(short == r or short.startswith(r + "/") for r in refused)
         rows.append(f"| `{method}` | `{path}` | {word if demo else ''} | {cell(doc)} |")
@@ -164,7 +191,7 @@ its own simulator and project and never touches real hardware, other
 projects or an agent.
 """
     return page(lang, "Serve HTTP API", tr(lang, "dagon serve のすべてのルートです。", "Every route of dagon serve, from its router."),
-                ["crates/dagon-cli/src/serve/api.rs"], body, english="「内容」の列")
+                ["crates/dagon-cli/src/serve/api.rs"], body)
 
 
 # ---------------------------------------------------------------- agents
@@ -234,7 +261,7 @@ def type_word(t, lang="en"):
 
 def field_table(fields, lang="en"):
     rows = [
-        f"| `{n}` | {type_word(t, lang)} | {tr(lang, '任意' if opt else '必須', 'no' if opt else 'yes')} | {cell(d)} |"
+        f"| `{n}` | {type_word(t, lang)} | {tr(lang, '任意' if opt else '必須', 'no' if opt else 'yes')} | {cell(say(lang, d))} |"
         for n, t, opt, d in fields
     ]
     head = tr(lang, "| キー | 型 | 必須か | 意味 |", "| Key | Type | Required | Meaning |")
@@ -248,7 +275,7 @@ def agent_definition(lang="en"):
     kinds = re.findall(r'"([a-z-]+)"', re.search(r"pub const KINDS: \[&str; \d+\] = \[(.*?)\];", src).group(1))
     kind_list = ", ".join(f"`{k}`" for k in kinds)
     via = rust_enum_values(AGENTS / "command.rs", "SystemVia")
-    via_list = ", ".join(f"`{v}` ({cell(d)})" for v, d in via)
+    via_list = ", ".join(f"`{v}` ({cell(say(lang, d))})" for v, d in via)
     builtin = []
     for f in sorted((ROOT / "crates" / "dagon-cli" / "agents").glob("*.toml")):
         a = tomllib.loads(f.read_text(encoding="utf-8"))
@@ -334,7 +361,7 @@ number refuses the file and says why.
 """
     return page(lang, tr(lang, "エージェント定義の形式", "Agent definition format"),
                 tr(lang, "エージェントの定義ファイルのキーです。", "The keys of an agent definition file, from the types dagon reads it into."),
-                ["crates/dagon-cli/src/agents/", "crates/dagon-cli/agents/"], body, english="「意味」の列")
+                ["crates/dagon-cli/src/agents/", "crates/dagon-cli/agents/"], body)
 
 
 # ---------------------------------------------------------------- boards and MCUs
@@ -367,9 +394,9 @@ def boards(lang="en"):
     table_m, table_b = "\n".join(rows_m), "\n".join(rows_b)
     if lang == "ja":
         body = f"""
-このリリースの `targets/mcu/` のマイコンのパッケージと、`targets/boards/` のボードのパッケージです。
-パッケージのフォルダを足すと行が増えます。どちらのファイルの形式も
-[MCU and board definitions](/reference/definitions/) にあります。
+このリリースの `targets/mcu/` のマイコンの定義と、`targets/boards/` のボードの定義です。
+定義のフォルダを足すと行が増えます。どちらのファイルの形式も
+[マイコンとボードの定義](/reference/definitions/)にあります。
 
 ## マイコン
 
@@ -439,7 +466,7 @@ def contracts(lang="en"):
     # The comment beside each format number says where it is written; tomllib drops comments.
     section = re.search(r"^\[formats\]\n(.*?)^\[", text, re.M | re.S).group(1)
     notes = dict(re.findall(r"^([a-z0-9-]+)\s*=\s*\d+\s*#\s*(.*)$", section, re.M))
-    rows_f = [f"| `{k}` | {v} | {cell(notes.get(k, ''))} |" for k, v in compat["formats"].items()]
+    rows_f = [f"| `{k}` | {v} | {cell(say(lang, notes.get(k, '')))} |" for k, v in compat["formats"].items()]
     rows_c = []
     for c in compat.get("component", []):
         fmts = ", ".join(f"`{k}` {'/'.join(map(str, v))}" for k, v in c.get("formats", {}).items())
@@ -450,7 +477,7 @@ def contracts(lang="en"):
         body = f"""
 DAGON の部品のあいだの取り決めとその番号、部品ごとのバージョンと、読み書きする形式の番号です。
 どれも `compat.toml` にあるとおりです。変えるときの決まりは
-[Versions and releases](/explanation/versioning/) にあります。
+[バージョンとリリース](/explanation/versioning/)にあります。
 
 ## 取り決め
 
@@ -460,7 +487,7 @@ DAGON の部品のあいだの取り決めとその番号、部品ごとのバ�
 
 ## 部品
 
-| 部品 | バージョン | パッケージ | 形式 |
+| 部品 | バージョン | crate | 形式 |
 |---|---|---|---|
 {table_c}
 """
@@ -485,7 +512,7 @@ writes, as `compat.toml` holds them. The rules for changing them are in
 """
     return page(lang, tr(lang, "取り決めと部品", "Contracts and components"),
                 tr(lang, "取り決めごとの形式の番号と、部品ごとのバージョンです。", "Every contract's format number and every component's version, from compat.toml."),
-                ["compat.toml"], body, english="「番号の置き場所」の列")
+                ["compat.toml"], body)
 
 
 # ---------------------------------------------------------------- tools by MCU
@@ -497,8 +524,8 @@ def tools(lang="en"):
         m = tomllib.loads(f.read_text(encoding="utf-8"))
         for d in m.get("doctor", []):
             how = f"`{' '.join(d['fix'])}`" if "fix" in d else ""
-            note = d.get("hint", "") + (slow if d.get("slow") else "")
-            rows.append(f"| {cell(m['name'])} | {cell(d['what'])} | {how} | {cell(note.strip())} |")
+            note = say(lang, d.get("hint", "")) + (slow if d.get("slow") else "")
+            rows.append(f"| {cell(m['name'])} | {cell(say(lang, d['what']))} | {how} | {cell(note.strip())} |")
     table = "\n".join(rows)
     if lang == "ja":
         body = f"""
@@ -523,7 +550,7 @@ no administrator rights.
 """
     return page(lang, tr(lang, "マイコンごとのツール", "Tools by MCU"),
                 tr(lang, "dagon doctor がマイコンごとに確かめるものです。", "What dagon doctor checks for each MCU, from the MCU definitions."),
-                ["targets/mcu/*/dagon-mcu.toml"], body, english="「ツール」の列と「補足」の列")
+                ["targets/mcu/*/dagon-mcu.toml"], body)
 
 
 # ---------------------------------------------------------------- Rust API
@@ -554,7 +581,7 @@ def rust_api(lang="en"):
             # rustdoc names a crate's page after its library, else after its first binary.
             target = (pkg["name"] if lib.is_file() else cargo.get("bin", [{"name": pkg["name"]}])[0]["name"]).replace("-", "_")
             what = pkg.get("description") or crate_doc(lib if lib.is_file() else manifest.parent / "src" / "main.rs")
-            rows.append(f"| [`{pkg['name']}`](/api/{target}/) | {cell(what)} |")
+            rows.append(f"| [`{pkg['name']}`](/api/{target}/) | {cell(say(lang, what))} |")
     table = "\n".join(rows)
     if lang == "ja":
         body = f"""
@@ -575,7 +602,7 @@ published with these pages; each name below opens its crate.
 {table}
 """
     return page(lang, "Rust API", tr(lang, "ワークスペースの crate と rustdoc です。", "The workspace crates and their rustdoc."),
-                ["Cargo.toml"], body, english="「中身」の列と rustdoc の本文")
+                ["Cargo.toml"], body, english="rustdoc の本文")
 
 
 PAGES = {
@@ -594,11 +621,11 @@ PAGES = {
 EXTENSION = ROOT / "crates" / "dagon-extension" / "src" / "manifest.rs"
 
 
-def extension_keys():
+def extension_keys(lang):
     """The key tables of dagon-extension.toml, from the types the manifest is read into."""
-    return (f"{field_table(rust_struct(EXTENSION, 'Raw'))}\n\n"
-            f"`[capabilities]`:\n\n{field_table(rust_struct(EXTENSION, 'Capabilities'))}\n\n"
-            f"`[limits]`:\n\n{field_table(rust_struct(EXTENSION, 'Limits'))}\n")
+    return (f"{field_table(rust_struct(EXTENSION, 'Raw'), lang)}\n\n"
+            f"`[capabilities]`:\n\n{field_table(rust_struct(EXTENSION, 'Capabilities'), lang)}\n\n"
+            f"`[limits]`:\n\n{field_table(rust_struct(EXTENSION, 'Limits'), lang)}\n")
 
 
 DEFS = ROOT / "crates" / "dagon-topology" / "src" / "defs"
@@ -618,7 +645,11 @@ def is_table(name):
     return bool(m) and "tag =" in src[max(0, m.start() - 200):m.start()].splitlines()[-1]
 
 
-def def_rows(path, struct, prefix=""):
+KINDS = {"table": "テーブル", "tables": "テーブルの配列", "string": "文字列", "boolean": "真偽値", "integer": "整数",
+         "array of strings": "文字列の配列", "array of booleans": "真偽値の配列", "array of integers": "整数の配列"}
+
+
+def def_rows(lang, path, struct, prefix=""):
     """Key rows of a definition file's table, from the struct it is read into."""
     rows = []
     for key, t, optional, doc in rust_struct(path, struct):
@@ -631,19 +662,21 @@ def def_rows(path, struct, prefix=""):
             shown = f"`{key}`"
             kind = {"String": "string", "bool": "boolean"}.get(inner, "integer" if re.fullmatch(r"[ui]\d+", inner) else "string")
             kind = f"array of {kind}s" if outer == "Vec" else kind
-        rows.append(f"| {shown} | {kind} | {'no' if optional else 'yes'} | {cell(doc)} |")
-    return "| Key | Type | Required | Meaning |\n|---|---|---|---|\n" + "\n".join(rows) + "\n"
+        needed = tr(lang, "任意" if optional else "必須", "no" if optional else "yes")
+        rows.append(f"| {shown} | {tr(lang, KINDS[kind], kind)} | {needed} | {cell(say(lang, doc))} |")
+    head = tr(lang, "| キー | 型 | 必須か | 意味 |", "| Key | Type | Required | Meaning |")
+    return head + "\n|---|---|---|---|\n" + "\n".join(rows) + "\n"
 
 
 REGION_BEGIN = "<!-- generated from {}: python site/scripts/gen.py -->\n"
 REGION_END = "<!-- end of generated table -->\n"
 # (hand-written page, what the region is generated from, the region's text); a page may hold several.
-# These pages are in English only, at the root of the content, so their regions are too.
 REGIONS = [
     ("reference/extension-manifest.md", "dagon-extension's manifest types", extension_keys),
-    ("reference/definitions.md", "dagon-topology's McuDef", lambda: def_rows(DEFS / "mod.rs", "McuDef")),
-    ("reference/definitions.md", "dagon-topology's Isolation", lambda: def_rows(DEFS / "isolation.rs", "Isolation", "isolation")),
-    ("reference/definitions.md", "dagon-topology's BoardDef", lambda: def_rows(DEFS / "mod.rs", "BoardDef")),
+    ("reference/definitions.md", "dagon-topology's McuDef", lambda lang: def_rows(lang, DEFS / "mod.rs", "McuDef")),
+    ("reference/definitions.md", "dagon-topology's Isolation", lambda lang: def_rows(lang, DEFS / "isolation.rs", "Isolation", "isolation")),
+    ("reference/definitions.md", "dagon-topology's BoardDef", lambda lang: def_rows(lang, DEFS / "mod.rs", "BoardDef")),
+    ("explanation/index.md", "site/scripts/architecture.py", lambda lang: f"<div>{architecture.node_svg(lang)}</div>\n\n{architecture.legend_table(lang)}"),
 ]
 
 
@@ -657,17 +690,17 @@ def with_region(text, source, body):
 def main(argv):
     check = "--check" in argv
     stale = []
-    for name in dict.fromkeys(n for n, _, _ in REGIONS):
-        path = OUT / name
-        old = path.read_text(encoding="utf-8")
-        new = old
-        for _, source, make in (r for r in REGIONS if r[0] == name):
-            new = with_region(new, source, make())
-        if check and new != old:
-            stale.append(path.as_posix())
-        elif not check:
-            path.write_text(new, encoding="utf-8", newline="\n")
     for lang, folder in LANGS.items():
+        for name in dict.fromkeys(n for n, _, _ in REGIONS):
+            path = OUT / f"{folder}{name}"
+            old = path.read_text(encoding="utf-8")
+            new = old
+            for _, source, make in (r for r in REGIONS if r[0] == name):
+                new = with_region(new, source, make(lang))
+            if check and new != old:
+                stale.append(path.as_posix())
+            elif not check:
+                path.write_text(new, encoding="utf-8", newline="\n")
         for name, make in PAGES.items():
             text = make(lang)
             path = OUT / f"{folder}reference" / name
@@ -677,6 +710,20 @@ def main(argv):
             else:
                 path.parent.mkdir(parents=True, exist_ok=True)
                 path.write_text(text, encoding="utf-8", newline="\n")
+    for (figure, make), lang in itertools.product(architecture.FIGURES.items(), LANGS):
+        # What the READMEs show. A test run writes to a temporary OUT, never here.
+        path = ROOT / "assets" / "architecture" / f"{figure}-{lang}.svg"
+        if check and (not path.is_file() or path.read_text(encoding="utf-8") != make(lang)):
+            stale.append(path.as_posix())
+        elif not check and OUT == ROOT / "site" / "src" / "content" / "docs":
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(make(lang), encoding="utf-8", newline="\n")
+    unused = sorted(k for k in set(i18n()) - USED)
+    if MISSING or unused:
+        print(f"{I18N.relative_to(ROOT).as_posix()}: add a Japanese value for the first list, drop the second")
+        print("\n".join(f"missing: {k}" for k in sorted(MISSING)))
+        print("\n".join(f"unused: {k}" for k in unused))
+        return 1
     if stale:
         print("generated pages differ from their sources; run: " + REGEN)
         print("\n".join(stale))

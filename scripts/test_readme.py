@@ -14,7 +14,6 @@ from test_markers import NOTICE_EN, NOTICE_JA, NOTICE_FILES  # noqa: E402
 
 JA = ROOT / "README.md"
 EN = ROOT / "README.en.md"
-NOTICE_MCUS = 3
 
 
 def structure(path):
@@ -56,7 +55,7 @@ class Readmes(unittest.TestCase):
 
     def test_the_notice_says_how_many_microcontrollers_there_are(self):
         mcus = definitions("mcu", "dagon-mcu.toml")
-        self.assertEqual(len(mcus), NOTICE_MCUS, "the notice says 3種類のマイコン / three kinds")
+        self.assertEqual(len(mcus), 3, "the notice says 3種類のマイコン / three kinds")
         self.assertIn("3種類のマイコン", NOTICE_JA)
         self.assertIn("three kinds of microcontroller", NOTICE_EN)
 

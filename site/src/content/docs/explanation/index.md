@@ -84,7 +84,7 @@ DAGON が読み書きする形式、プロトコル、API には、どれも番�
 | App Start | アプリのレイヤーの起動 |
 | Relay Start | リレーのレイヤーの起動 |
 | Chain Composer | 拡張のチェーンの合成 |
-| Extension API | 拡張が触れる面 |
+| Extension API | 拡張が触れてよい範囲 |
 | Stage0 Sequence | リセットの後で最初に動く手順 |
 | Boot Sequence | ブートローダの手順 |
 | Boot Action Interpreter | ブートのアクションプログラムの実行 |
@@ -114,10 +114,10 @@ DAGON が読み書きする形式、プロトコル、API には、どれも番�
 | Boot Decision | どのスロットを起動するかの判断 |
 | Core Chooser | stage0 がブートローダのスロットを選ぶ |
 | State Log Fold | 記録から状態を畳み込む |
-| Delivery Plan | 順序、試行の窓、昇格の判断 |
+| Delivery Plan | 順序、試行の時間枠、昇格の判断 |
 | Recovery Policy | 状態と失敗の回数から復旧の段階を選ぶ |
 | Constraint Evaluator | マニフェストの制約を確かめる |
-| Trust Rule | 署名と鍵の 1 つの認証の決まり |
+| Trust Rule | 署名と鍵についての 1 つの認証の決まり |
 | Deadline Book | ガードの後ろの純粋な期限の計算 |
 | DecisionPolicy | ブートの方針のポート |
 | BoardBringUp | ボードの立ち上げのポート |

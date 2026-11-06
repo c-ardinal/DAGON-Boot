@@ -5,7 +5,7 @@ description: "プロジェクトを始め、構成を描き、ビルドし、最
 
 このページの例は見本の構成です。丸い LCD の RP2040 親機、NUCLEO-F401RE（I2C）、M5StopWatch（UART）の 3 つのノードです。手順 2 で自分の構成に置き換えられます。
 
-子機のサンプルのアプリの動きは `samples/f401-app` と `samples/esp32s3-app` にあります。
+子機のサンプルアプリの動きは `samples/f401-app` と `samples/esp32s3-app` にあります。
 
 `dagon` コマンドとツールは、先に[入れる](/getting-started/install/)の手順で用意します。
 
@@ -26,7 +26,7 @@ cd my-fleet
 
 秘密鍵はプロジェクトの外、git の作業ツリーの外に置かれます。`dagon.toml` には公開鍵の場所だけが書かれます。
 
-署名の鍵をどう守るかは利用者が選びます。DAGON は、選んだ置き場所から鍵を受け取るポート（[`KeyStore`](/reference/ports/)）を持ちます。既定は鍵のファイルです。
+署名の鍵をどう守るかは利用者が選びます。DAGON は選んだ置き場所から鍵を受け取るポート（[`KeyStore`](/reference/ports/)）を持ちます。既定は鍵のファイルです。
 
 署名するときは、秘密鍵のファイルの場所を `dagon` に教えます。
 
@@ -42,7 +42,7 @@ export DAGON_SIGNING_KEY=~/.dagon/keys/my-fleet/dagon-signing.key
 dagon serve
 ```
 
-DAGON Console がブラウザに開きます。127.0.0.1 だけで動き、使い捨てのパスフレーズが付きます。プロジェクトが無いときは、作るか開く画面から始まります。
+DAGON Console がブラウザに開きます。127.0.0.1 だけで動き、使い捨てのパスフレーズが付きます。プロジェクトが無いときは、プロジェクトを作るか開く画面から始まります。
 
 1. ノードリストからノードを置きます。製品でもマイコンでも選べます。
 2. ノードをリンクでつなぎます。
@@ -98,11 +98,11 @@ dagon gen
 - 書き直すのは `src/wiring.rs` と、`Cargo.toml` の DAGON の crate の行だけです。
 - `app.rs` には触れません。`main.rs` にも、`--force-main` のとき以外は触れません。
 
-`dagon new` と `dagon gen` は、シンボリックリンクやジャンクションを通して書き込みも削除もしません。`nodes/<id>`（または `nodes`、`dagon gen` が書くファイル）がそれにあたるノードは、理由を示して飛ばします。そのあと `dagon gen` はエラーで終わります。
+`dagon new` と `dagon gen` は、シンボリックリンクやジャンクションを通してファイルを保存も削除もしません。`nodes/<id>`（または `nodes`、`dagon gen` が書くファイル）がそれにあたるノードは、理由を示して飛ばします。そのあと `dagon gen` はエラーで終わります。
 
 ## 4. ビルドする
 
-構成を描いたら、ビルドの前に `dagon doctor` がその構成のマイコンに要るツールを確かめ、`dagon doctor --fix` が管理者の権限が要らないものを入れます。
+構成を描いたら、ビルドの前に `dagon doctor` がその構成のマイコンに要るツールを確かめ、`dagon doctor --fix` が管理者の権限の要らないものを入れます。
 
 ```sh
 dagon build            # または: dagon build seg
@@ -115,8 +115,8 @@ dagon build            # または: dagon build seg
 ノードのバージョンは、その crate の `Cargo.toml` の `version` です。ブートローダのバージョンは、ブート用 crate の `Cargo.toml` の `version` です。書き込む変更ごとに、そこで上げてください。
 
 - 最初の書き込みも同じバージョンで署名します。
-- `--version` は要りません。書いた場合は同じ値でなければなりません。違うとコマンドは止まり、どこが違うかを示します。
-- ビルドは、その crate 自身の `Cargo.lock` の項目だけを上げたバージョンにそろえます。ほかの crate は固定したままです。
+- `--version` は要りません。付けた場合は同じ値でなければなりません。違うとコマンドは止まり、どこが違うかを示します。
+- ビルドはその crate 自身の `Cargo.lock` の項目だけを上げたバージョンにそろえます。ほかの crate は固定したままです。
 
 ### ブートローダ
 
@@ -192,7 +192,7 @@ dagon status
 - 通信のバージョン
 - MCU の ID
 
-`unknown` は、それを伝えられないノード（伝える前に作られたエージェントや stage0）です。親機をつないでいれば、`dagon doctor` もツールの確認のあとに同じ行を出します。
+`unknown` は、それを伝えられないノード（伝えるようになる前に作られたエージェントや stage0）です。親機をつないでいれば、`dagon doctor` もツールの確認のあとに同じ行を出します。
 
 ### `dagon flash` を使わないとき
 
@@ -263,6 +263,6 @@ dagon rollback --node seg
 dagon deploy seg
 ```
 
-そのことを伝えて確かめてから（`--yes` で省略）、ROM ローダで書き込みます。ROM ローダが無いマイコンでは `dagon flash` を案内します。
+応答しないことを伝え、確認を求めてから（`--yes` で省略）、ROM ローダで書き込みます。ROM ローダが無いマイコンでは `dagon flash` を案内します。
 
 すべてのコマンドとオプションは `dagon --help` で確認できます。

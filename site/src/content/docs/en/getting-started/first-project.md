@@ -26,7 +26,9 @@ cd my-fleet
 
 The secret key stays outside the project and outside any git work tree. `dagon.toml` only names the public key.
 
-Tell `dagon` where the secret key is when you sign:
+How to protect the signing key is your choice. DAGON has a port ([`KeyStore`](/en/reference/ports/)) that receives the key from where you chose to keep it. The default is the key file.
+
+Tell `dagon` where the secret key file is when you sign:
 
 ```sh
 export DAGON_SIGNING_KEY=~/.dagon/keys/my-fleet/dagon-signing.key

@@ -56,7 +56,7 @@ DAGON が読み書きする形式、プロトコル、API には、どれも番�
 | Transport | 親機へのバイト列のポート |
 | confirm_plan | 書き込みの前の確認の判断点 |
 | Signer | 署名のポート |
-| KeyStore | 署名の鍵の置き場所のポート |
+| KeyStore | 利用者が選んだ置き場所（環境変数、OS のキーストア、1Password など）から署名の鍵を受け取るポート |
 | Agent | エージェントのポート |
 | Action | アクションのポート |
 | Cargo Runner | cargo で動くビルド |

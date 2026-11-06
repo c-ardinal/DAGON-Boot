@@ -57,7 +57,7 @@ The figure below is DAGON's software design.
 | Transport | Port for the byte stream to the hub |
 | confirm_plan | Decision point before a write |
 | Signer | Port that signs |
-| KeyStore | Port for where the signing key is kept |
+| KeyStore | Port that receives the signing key from where the user chose to keep it (an environment variable, the OS key store, 1Password and so on) |
 | Agent | Port for an agent |
 | Action | Port for an action |
 | Cargo Runner | Builds through cargo |

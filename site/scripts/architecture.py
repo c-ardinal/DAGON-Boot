@@ -76,7 +76,7 @@ COMPONENTS = {
     "Transport": ("親機へのバイト列のポート", "Port for the byte stream to the hub"),
     "confirm_plan": ("書き込みの前の確認の判断点", "Decision point before a write"),
     "Signer": ("署名のポート", "Port that signs"),
-    "KeyStore": ("署名の鍵の置き場所のポート", "Port for where the signing key is kept"),
+    "KeyStore": ("利用者が選んだ置き場所（環境変数、OS のキーストア、1Password など）から署名の鍵を受け取るポート", "Port that receives the signing key from where the user chose to keep it (an environment variable, the OS key store, 1Password and so on)"),
     "Agent": ("エージェントのポート", "Port for an agent"),
     "Action": ("アクションのポート", "Port for an action"),
     "Cargo Runner": ("cargo で動くビルド", "Builds through cargo"),

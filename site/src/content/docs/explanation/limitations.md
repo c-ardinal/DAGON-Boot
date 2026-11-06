@@ -5,7 +5,7 @@ description: "設計との違いと、DAGON がしないことです。仕様上
 
 ## 仕様上の制限
 
-- 署名の鍵は PC 上のファイルで、公開鍵はファームウェアに組み込まれます。ハードウェアの信頼の起点（セキュアブートのヒューズやハードウェアの鍵保管）はありません。鍵をどう守るかは利用者が選びます。
+- 署名の鍵をどう守るかは利用者が選びます。DAGON は決めません。ハードウェアの信頼の起点（セキュアブートのヒューズやハードウェアの鍵保管）を使うかどうかも、その選択です。
 - `dagon conform` は同期の試験手順を動かすもので CLI 専用です。ブラウザでは適合試験を実行しません。
 
 ## 今後解決する予定
@@ -23,6 +23,10 @@ description: "設計との違いと、DAGON がしないことです。仕様上
 - ESP32-S3 の隔離のレベルは `none` です。PMS と WCL のレジスタをプログラムするコードがありません。
 - 実行時のサンドボックスはありません（Service ABI、Entry Gate、Operation Cancellation、Fault Unwind）。定義の検査と保護マップの生成はあります。
 
+署名の鍵:
+
+- 署名の鍵はファイルからだけ読みます。環境変数 `DAGON_SIGNING_KEY` が持つのもファイルのパスです。ほかの手段（環境変数、OS のキーストア、1Password など）をポートで選ぶことはできません。
+
 値と ID:
 
 - USB の VID:PID `c0de:cafe` は試験用の ID で、コードに固定されています。割り当てを受けたものではありません。
@@ -32,7 +36,7 @@ description: "設計との違いと、DAGON がしないことです。仕様上
 
 設計の図にあってコードに無いコンポーネント:
 
-- 置き換えのトレイトが無いポート: BuildRunner、Signer、KeyStore、DecisionPolicy、LogStorage、SelfCheck、UpdateTransport、UpdateProtocol、Recovery、ChildLink、ImageVerifier、Digest、CryptoProvider、WatchdogDriver、Diagnostics、Display、LogSink、Agent、Action
+- 置き換えのトレイトが無いポート: BuildRunner、Signer、DecisionPolicy、LogStorage、SelfCheck、UpdateTransport、UpdateProtocol、Recovery、ChildLink、ImageVerifier、Digest、CryptoProvider、WatchdogDriver、Diagnostics、Display、LogSink、Agent、Action
 - 親機: Coordinator、Release Store、Bus Guardian。書き込みは PC が親機を通して進めます。
 - ホスト: Host Extension Chain、Action Definitions
 - ブート: Boot Record Writer、Boot Action Interpreter

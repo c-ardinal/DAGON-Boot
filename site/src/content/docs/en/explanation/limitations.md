@@ -5,7 +5,7 @@ description: "Where the code differs from the design and what DAGON does not do,
 
 ## By design
 
-- Signing keys are files on the PC and the public key is built into the firmware. There is no hardware root of trust (no secure boot fuses, no key storage in hardware). How to protect the keys is the user's choice.
+- How to protect the signing key is the user's choice. DAGON does not decide it. Whether to use a hardware root of trust (secure boot fuses, key storage in hardware) is part of that choice.
 - `dagon conform` drives the synchronous test sequence and is CLI only. The browser does not run conformance tests.
 
 ## Planned
@@ -23,6 +23,10 @@ Extension isolation:
 - The ESP32-S3's isolation level is `none`. No code programs the PMS and WCL registers.
 - There is no sandbox at run time (Service ABI, Entry Gate, Operation Cancellation, Fault Unwind). Definitions are checked and protection maps are generated.
 
+The signing key:
+
+- The signing key is read only from a file. The environment variable `DAGON_SIGNING_KEY` also holds a file's path. No port lets you choose another means (an environment variable, the OS key store, 1Password and so on).
+
 Values and IDs:
 
 - The USB VID:PID `c0de:cafe` is a test ID, fixed in the code. It is not an assigned one.
@@ -32,7 +36,7 @@ Values and IDs:
 
 Components in the design figure that the code does not have:
 
-- Ports with no replaceable trait: BuildRunner, Signer, KeyStore, DecisionPolicy, LogStorage, SelfCheck, UpdateTransport, UpdateProtocol, Recovery, ChildLink, ImageVerifier, Digest, CryptoProvider, WatchdogDriver, Diagnostics, Display, LogSink, Agent, Action
+- Ports with no replaceable trait: BuildRunner, Signer, DecisionPolicy, LogStorage, SelfCheck, UpdateTransport, UpdateProtocol, Recovery, ChildLink, ImageVerifier, Digest, CryptoProvider, WatchdogDriver, Diagnostics, Display, LogSink, Agent, Action
 - On the hub: Coordinator, Release Store, Bus Guardian. The PC drives a write through the hub.
 - On the host: Host Extension Chain, Action Definitions
 - At boot: Boot Record Writer, Boot Action Interpreter

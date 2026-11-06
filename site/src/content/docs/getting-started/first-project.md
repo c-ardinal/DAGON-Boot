@@ -26,7 +26,9 @@ cd my-fleet
 
 秘密鍵はプロジェクトの外、git の作業ツリーの外に置かれます。`dagon.toml` には公開鍵の場所だけが書かれます。
 
-署名するときは、秘密鍵の場所を `dagon` に教えます。
+署名の鍵をどう守るかは利用者が選びます。DAGON は、選んだ置き場所から鍵を受け取るポート（[`KeyStore`](/reference/ports/)）を持ちます。既定は鍵のファイルです。
+
+署名するときは、秘密鍵のファイルの場所を `dagon` に教えます。
 
 ```sh
 export DAGON_SIGNING_KEY=~/.dagon/keys/my-fleet/dagon-signing.key

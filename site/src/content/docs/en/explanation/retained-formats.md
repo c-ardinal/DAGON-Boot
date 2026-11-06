@@ -379,11 +379,12 @@ clears a trip whose id is installed.
 
 Power-on clears the watchdog flag: a lockup not yet classified is lost,
 never forged. Foreign bytes may destroy records the same way; a destroyed
-clear verdict lets a later watchdog reset classify that interrupted call
+clean verdict lets a later watchdog reset classify that interrupted call
 (one that never returned) as a lockup, and a destroyed clear-done record
 lets a clear request still pending clear the same extension's next trip
 once more. A full cell makes its layer arm nothing
-until the host clears a trip.
+until one of its records is freed; a trip whose id is installed stays, since no
+clear request exists (3.6).
 
 ### 3.8 Versioning
 
@@ -496,12 +497,12 @@ fixed cases in `tests/fixed.rs` name the property they guard.
 | P23 | The boot core's run leaves the app's cell unchanged; the app's start acts on it. |
 | P24 | A trip whose id is no longer installed is freed by its layer's start; a new build runs again. |
 | P25 | Records of another fuse layout are never acted on. |
-| P26 | A trip of an installed id disappears only by the host's clear. |
+| P26 | A trip of an installed id disappears only by a clear request, which exists only in the model (3.6). |
 
 ## 7. Boot core trial cell
 
 Stage0 counts the starts of a pending boot core in two retained words,
-not in flash: stage0 then has no flash writer (it is never updated, so it
+not in flash: stage0 then has no flash writer (it is never written again, so it
 holds as little code as it can), and a writer bug cannot turn into a
 stage0 that never starts anything. `dagon_core::bootcore` is the codec and
 its tests are the proof.
@@ -529,8 +530,8 @@ production codec and stage0's and the boot core's rules
 good or broken (a broken core passes stage0's check and fails its own),
 a reset or a power loss (the cell then cleared or random) after any store
 to the cell (the cell check's included, in the MCUs' order: word 0, then
-word 1), 10,000 seeded scenarios in `cargo test` and 1,000,000 in the
-full profile. Its properties, checked after every operation:
+word 1), seeded scenarios in `cargo test` and many more in
+the full profile. Its properties, checked after every operation:
 
 | Id | Property |
 |---|---|
@@ -539,7 +540,7 @@ full profile. Its properties, checked after every operation:
 | C3 | A broken core is never confirmed. |
 
 The MCU packages' sweeps (`a_power_cut_at_every_flash_step_leaves_a_bootable_core`)
-add the flash side: a cut at every flash operation of an update,
+add the flash side: a cut at every flash operation of a write,
 compaction of the state log included. A cell that does not hold what is
 written to it at all is found by `bootcore::cell_holds`, run by the
 started boot core and by the app: such a node takes no boot core, and a

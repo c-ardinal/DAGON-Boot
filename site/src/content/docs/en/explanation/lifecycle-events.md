@@ -9,7 +9,7 @@ event; how board packages, libraries and applications extend DAGON in
 every layer, the boot stage included, by observing events, answering
 the few decision points and replacing parts of DAGON through ports; how
 the MCU's protection hardware keeps extensions from touching what makes
-an update safe; how board values and boot-time actions come from
+a write safe; how board values and boot-time actions come from
 definitions; and how the model is versioned. It is the reference for
 the implementation and for anyone extending DAGON.
 
@@ -211,7 +211,7 @@ Generated order at start: `app.starting` → `app.store_opened` (or
 | `app.link_up` / `app.link_down` | a DAGON link carries frames (its first frame, at start or after it went down) / stopped (a reply could not be sent, or the link closed) | `link`, `addr` |
 | `app.request` / `app.replied` | a request arrived (any protocol) / its reply left | `protocol`, `cmd`, `seq`, `via` / `status`, `ms` |
 | `app.hello` / `app.status_asked` / `app.version_asked` | identity / status / VERSION answered | `via` |
-| `app.update_offered` | an update request passed every DAGON guard; **decision** `accept_update` | `target`, `slot`, `body_len` |
+| `app.update_offered` | a write request passed every DAGON guard; **decision** `accept_update` | `target`, `slot`, `body_len` |
 | `app.update_refused` | refused | `status`, `by: Dagon \| Extension` |
 | `app.header_verified` / `app.header_rejected` | header signature and compatibility (through the verifier port) | `slot`, `version`, `key_id` / `status` |
 | `app.transfer_started`, `app.transfer_progress`, `app.transfer_aborted` | erase done / each chunk written / idle timeout, store error, new request | `target`, `slot`, `len` / `done`, `total` / `cause` |
@@ -532,8 +532,8 @@ Registration per layer:
   (`.ext.text`, `.ext.data`, `.ext.bss`) that the protection map of 4.4
   isolates. The chain is `const`-constructed (no allocation); handlers
   are called synchronously from the boot machine through the entry gate (4.1), each call under its `max_run_us`. The signed boot core
-  image contains the extensions, so an update of an extension is an
-  update of the boot core through the ROM path like any boot core
+  image contains the extensions, so writing a changed extension is a
+  write of the boot core through the ROM path like any boot core
   change.
 - **App (embassy).** `node::start` / `board::start` take an `App`:
   the self-check function, `exts: Option<&'static mut (dyn Extension +
@@ -961,9 +961,9 @@ whose passing shape is its format. What the design fixes here:
   the boot record and not an input to `plan`, `commit`, `self_check` or
   `confirm`;
 - a tripped fuse is reported on VERSION (0x07) and by `dagon status`
-  ("extension <id> disabled after a lockup"), and cleared by the host
-  through the agent or when the identity it names no longer exists in
-  the running images.
+  ("extension <id> disabled after a lockup"), and cleared when the
+  identity it names no longer exists in the running images. DAGON has no
+  request that clears one: neither the protocol nor the CLI has it (5.5).
 
 A fault inside DAGON's own fault handler is DAGON's halt with the diag
 code.
@@ -1272,33 +1272,27 @@ The one authentication rule, applied by every verifier in the chain
   from it), and code that can write flash without the signing key (a
   trusted-code bug, or an attacker with flash access) can make stage0
   start an unsigned core.
-  The measured cost of the verifier: the STM32F401RE stage0 is 8,216
-  bytes with digests only and about 23,960 with the Ed25519 verifier
-  (ed25519-compact `opt_size`), past its 16 KiB sector; the RP2040 stage0
-  is 7,484 of its 16,384 bytes with digests only (Waveshare board, boot2
-  included), so a verifier of that size does not fit there either within
-  the margin below. When the log's choice does not
+  A verifier does not fit either stage0's region within the margin below.
+  When the log's choice does not
   check out (a corrupt slot, or a record naming a slot without a core),
   stage0 tries the other slots on their own before it has nothing to
   start. On a self-boot MCU without a stage0, the boot core is the root
   and is verified by the host before it is written and by the agent when
-  it is written through the update path.
+  it is written through the write path.
 - **Stage0 budget.** The MCU definition's `[layout] stage0.size` is the
   whole of stage0 (vector table, the log reader, the checks, the trial
   cell); the image's memory.x gives it exactly that region, so the link
   fails when stage0 outgrows it. RP2040: 16 KiB with boot2 (the boot
   ROM's 256-byte second stage). STM32F401RE: 16 KiB, all of sector 0
   where the core fetches its reset vector (the smallest erase unit
-  holding it, so no update ever erases stage0). Every build must leave
+  holding it, so no write ever erases stage0). Every build must leave
   1/16 of the region free (`scripts/stage0_size.py`, in CI): the board-less
   build and one per board whose definition names the MCU, since a board
-  puts its boot LED and halt pattern into stage0. Stage0 is never updated
+  puts its boot LED and halt pattern into stage0. Stage0 is never written
   in the field but is rebuilt for every new node with the toolchain of
   that build, so an image without spare room becomes a first write that
-  cannot be built. Both stage0s use the compact SHA-256 rounds: on the
-  RP2040 the unrolled ones took stage0 from 7,484 to over 16,384 bytes,
-  for about 1.2 s less boot time on a full 128 KiB boot core slot at the
-  ROSC clock stage0 runs on. A stage0 that needs more
+  cannot be built. Both stage0s use the compact SHA-256 rounds, since
+  the unrolled ones do not fit the RP2040's region. A stage0 that needs more
   takes a larger region before the first public release; formats before
   that release carry no compatibility promise (6).
 - **No erase under a trial watchdog.** Stage0 never writes flash, and the
@@ -1321,7 +1315,7 @@ The one authentication rule, applied by every verifier in the chain
   written through the MCU's ROM loader at provisioning. ROM loaders
   verify nothing of DAGON's: whoever can drive the ROM loader can
   replace the root, and with it every rule. The chain therefore holds
-  against every update path DAGON offers (its wire, a replaced transport
+  against every write path DAGON offers (its wire, a replaced transport
   such as UDS, the hub relay) and not against physical reprogramming
   through the ROM. Where the MCU offers protection of the root image,
   the definition lists it with its levels (`[isolation]
@@ -1798,7 +1792,7 @@ to (4.7).
 
 ## 8. Examples
 
-### 8.1 Splash and update progress on a display (app)
+### 8.1 Splash and write progress on a display (app)
 
 ```rust
 #[embassy_executor::task]
@@ -1875,9 +1869,9 @@ impl Extension for DefmtLog {
 Or asynchronously, without touching the serving task's time: a task that
 drains `events.recent()` from the `Reader` (owned `EventRecord`s, 2.4).
 
-### 8.4 A replaced update transport and protocol: UDS over CAN
+### 8.4 A replaced write transport and protocol: UDS over CAN
 
-An automotive node is updated by a diagnostic tester speaking UDS
+An automotive node is written by a diagnostic tester speaking UDS
 (ISO 14229) over CAN with ISO-TP (ISO 15765-2), not by DAGON's wire
 over a serial link. One plug-in provides two ports and runs at boot and
 in the app.
@@ -2141,9 +2135,7 @@ below keep code and data to it.
 The tables are what the MCU packages do; the budgets are each MCU
 definition's.
 
-**STM32F401RE** (`flash_op = "fetch-stall"`, `erase_unit` one 128 KiB
-sector, `erase_unit_max_ms` 4000 unverified (DS10086, 128 KiB sector
-erase), `masked_max_us` unmeasured, IWDG `confirmed_ms = 8000`)
+**STM32F401RE** (`flash_op = "fetch-stall"`, `erase_unit` one sector)
 
 | Work | Runs in | Priority |
 |---|---|---|
@@ -2153,16 +2145,13 @@ erase), `masked_max_us` unmeasured, IWDG `confirmed_ms = 8000`)
 | Watchdog feeding | the app's feeder task, gated by the guard | thread mode |
 | The sandbox timer (4.3) | SysTick | above every capability interrupt |
 
-During an erase nothing executes until the sector is done (4 s by the
-unverified value); the IWDG counts from the request's feed (8 s
-confirmed). The own
+During an erase nothing executes until the sector is done; the IWDG counts
+from the request's feed. The own
 I2C address is NACKed for the whole request, so the parent's polls are
 NACKed by the peripheral without the CPU, and the parent retries until
 its own deadline.
 
-**RP2040** (`flash_op = "xip-off-masked"`, `erase_unit` one 4 KiB
-sector, `erase_unit_max_ms` 400 unverified (the board's QSPI flash part
-decides it), `masked_max_us` unmeasured, watchdog 8000 ms)
+**RP2040** (`flash_op = "xip-off-masked"`, `erase_unit` one sector)
 
 | Work | Runs in | Priority |
 |---|---|---|
@@ -2171,15 +2160,12 @@ decides it), `masked_max_us` unmeasured, watchdog 8000 ms)
 | Flash erase and program | the PC task, through the slot store's `SharedFlash` handle | one sector or page per operation, masked by the driver |
 | Watchdog feeding | the feeder task, gated by the guard | thread mode |
 
-Each flash operation masks interrupts for one sector erase (400 ms by the
-unverified value) or one page program; the slot store reports progress to the
+Each flash operation masks interrupts for one sector erase or one page program; the slot store reports progress to the
 guard between sectors. The USB controller NAKs the host meanwhile and
 the host retries. The topology copy is read through the same flash
 driver it is written with.
 
-**ESP32-S3** (`flash_op = "cache-off-masked"`, `erase_unit` one 64 KiB
-block, `erase_unit_max_ms` 2000 unverified (the board's SPI flash part
-decides it), `masked_max_us` unmeasured, RTC WDT 4000 ms)
+**ESP32-S3** (`flash_op = "cache-off-masked"`, `erase_unit` one block)
 
 | Work | Runs in | Priority |
 |---|---|---|
@@ -2187,8 +2173,7 @@ decides it), `masked_max_us` unmeasured, RTC WDT 4000 ms)
 | Watchdog feeding (once confirmed, gated by liveness) | the link task | Priority2 |
 | The app's tasks | thread mode | lowest |
 
-Each flash operation masks interrupts for one block erase (2 s by the
-unverified value); the slot store feeds the watchdog between blocks. The UART receive
+Each flash operation masks interrupts for one block erase; the slot store feeds the watchdog between blocks. The UART receive
 FIFO keeps what fits; a frame cut by the stall is dropped by the 20 ms
 gap rule and the requester retries. USB Serial/JTAG NAKs the host
 meanwhile.

@@ -1,6 +1,6 @@
 ---
-title: "From a new project to an update"
-description: "Start a project, draw its topology, build, write the first version, then update and go back."
+title: "From a new project to a new version"
+description: "Start a project, draw its topology, build, write the first version, then write a new one and go back."
 ---
 
 The example is the sample: an RP2040 hub with a round LCD, a
@@ -163,7 +163,7 @@ and `dagon provision <id>` make the same files from `[provision.<id>]`
 tables in `dagon.toml` (`stage0` for the hub, `bootcore`, `app`,
 `version`); the MCU package READMEs show how to build the boot images.
 
-## 6. Update, and go back
+## 6. Write a new version, and go back
 
 Change your code, then:
 
@@ -195,7 +195,7 @@ them, and `dagon apply out/deploy/v1.0.0.dgb` writes one from the command
 line.
 
 Applying checks the signatures and that the release was built for this
-topology, sends the topology to the hub, updates the children and then the
+topology, sends the topology to the hub, writes the children and then the
 hub. A node runs the new version on trial; if it is not confirmed, its
 watchdog resets it and it boots the previous version again.
 

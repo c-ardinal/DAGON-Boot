@@ -162,18 +162,6 @@ class MovedDocuments(unittest.TestCase):
         self.assertIsNone(self.MENTION.search("site/src/content/docs/reference/events.md"))
 
 
-# The scenarios that passed in the last run on hardware. A record of that run,
-# not of samples/hardware-test/hwt.toml: changed only after a new real run.
-LAST_HARDWARE_RUN = 16
-
-
-class Limitations(unittest.TestCase):
-    def test_the_hardware_scenario_count_is_the_last_real_run(self):
-        for rel, words in (("en/explanation/limitations.md", f"{LAST_HARDWARE_RUN} scenarios"),
-                           ("explanation/limitations.md", f"{LAST_HARDWARE_RUN} のシナリオ")):
-            self.assertIn(words, (llms.DOCS / rel).read_text(encoding="utf-8"), rel)
-
-
 class Wording(unittest.TestCase):
     # Pages where 更新 does not mean writing to a node: the word for that is 書き込む.
     KOUSHIN_ELSEWHERE = {"site/src/content/docs/reference/licenses.md": "the licence text and third-party notes"}

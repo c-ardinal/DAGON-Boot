@@ -55,7 +55,7 @@ No plug-in replaces these, trusted or not.
 | Part | What it is | Layers | Why not a port |
 |---|---|---|---|
 | `ImageLifecycle` | the image-lifecycle machine over the slot store and the state log | boot, app | the only writer of persistent image state; every change emits its event and keeps the confirm rule |
-| `SessionGuards` | the update session's guards: target, slot, header signature and compatibility, body digest | boot, app | every protocol's triggers pass the same guards; replacing them would let a transport write what DAGON refuses |
+| `SessionGuards` | the write session's guards: target, slot, header signature and compatibility, body digest | boot, app | every protocol's triggers pass the same guards; replacing them would let a transport write what DAGON refuses |
 | `BootRecord` | the retained record of boot events the app replays | boot, app | its format is DAGON's retained contract and it is never an input to a boot or confirm decision |
 | `Composition` | the order of a layer's chain (publisher, board package, libraries, user) and the decision bounds | boot, app, relay, host | it is what makes every extension see every event and keeps answers bounded |
 | `Sandbox` | the entry gate, the service calls, the protection map and the lockup fuse | boot, app, relay | it is what keeps extensions away from DAGON's state |

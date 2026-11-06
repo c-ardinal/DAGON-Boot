@@ -181,8 +181,7 @@ and trusted sources as they are; the boot core's build refuses to build
 without that stamp or when any of them changed since (run `dagon gen`
 again). There is no decision point at boot: the slot
 the boot core starts is decided by DAGON alone, so an extension cannot
-change it. The calls share the boot core's flash budget (the
-STM32F401RE's is 32,256 bytes) and its watchdog: one that does not
+change it. The calls share the boot core's flash budget and its watchdog: one that does not
 return makes the watchdog reset the chip.
 
 Once `boot/<id>/Cargo.lock` exists, `dagon gen` resolves the graph with

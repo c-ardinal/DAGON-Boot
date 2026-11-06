@@ -1,6 +1,6 @@
 ---
 title: "Adding DAGON to existing firmware"
-description: "Give a firmware you already have DAGON's agent and updates."
+description: "Give a firmware you already have DAGON's agent and writes."
 ---
 
 For firmware that is not a `dagon new` project:

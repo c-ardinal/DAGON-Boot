@@ -1,11 +1,11 @@
 ---
 title: How DAGON works
-description: The ideas behind DAGON's updates, formats and extensions.
+description: The ideas behind DAGON's writes, formats and extensions.
 sidebar:
   order: 0
 ---
 
-DAGON is the boot stage and the update path of every node in a 構成. A
+DAGON is the boot stage and the write path of every node in a 構成. A
 親機 (hub) on your PC's USB passes each new version on to the 子機
 (nodes) over I2C or UART. A node writes the new image beside the running
 one, starts it on trial and keeps it only once the new version confirms

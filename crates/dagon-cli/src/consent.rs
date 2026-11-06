@@ -20,7 +20,7 @@ use crate::keystore::Keys;
 pub const SENDS: [&str; 3] = [
     "構成と定義の事実（ノード・リンク・部品・設定値）",
     "選んだノードやリンク",
-    "確かめた結果（問題・◇ 未対応・更新の記録）",
+    "確かめた結果（問題・◇ 未対応・書き込みの記録）",
 ];
 pub const NEVER_SENDS: [&str; 3] = ["鍵", "コマンドとその出力の全文", "ファイルのパス"];
 
@@ -688,6 +688,19 @@ mod tests {
             Value::Null
         );
         std::fs::remove_dir_all(&h).unwrap();
+    }
+
+    #[test]
+    fn the_consent_lists_say_writing_and_the_consent_format_stays() {
+        assert!(
+            SENDS.iter().any(|s| s.contains("書き込みの記録")),
+            "{SENDS:?}"
+        );
+        for s in SENDS.iter().chain(&NEVER_SENDS) {
+            assert!(!s.contains("更新"), "{s}");
+        }
+        // The words shown are not part of the recorded consent: its format does not move with them.
+        assert_eq!(FILE_VERSION, 1);
     }
 
     #[test]

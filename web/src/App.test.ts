@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs';
 import { render } from 'svelte/server';
 import { afterEach, describe, expect, test, vi } from 'vitest';
 import App from './App.svelte';
@@ -24,6 +25,14 @@ function stubBrowser(search: string, serial: unknown) {
 }
 
 afterEach(() => vi.unstubAllGlobals());
+
+describe('失敗の理由を聞く', () => {
+  test('every modal offering it goes through the one path that closes the modal', () => {
+    const app = new TextDecoder().decode(readFileSync(new URL('./App.svelte', import.meta.url)));
+    expect(app).not.toContain('askDagon(BUILD.askAgent');
+    expect(app.match(/askWhy\((?:at|e\.currentTarget), /g)).toHaveLength(2);
+  });
+});
 
 describe('first paint without dagon-wasm', () => {
   test('the page opens on the start screen: make or open, recent projects, no mode switch or steps yet', () => {

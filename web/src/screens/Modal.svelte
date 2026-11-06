@@ -47,6 +47,11 @@
 </dialog>
 
 <style>
+  /* Headings in a modal's body, which each caller writes through the children snippet. */
+  dialog :global(.modal-h) {
+    margin: 0;
+    font: 700 var(--t-caption) / 16px var(--f-ja);
+  }
   dialog {
     width: var(--w-modal);
     max-width: calc(100vw - 2 * var(--m-edge));

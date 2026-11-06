@@ -2329,6 +2329,40 @@ fn unlinking_cancels_a_running_topology_draft() {
 }
 
 #[test]
+fn a_rollback_record_in_the_request_reaches_the_agent() {
+    let sent = Arc::new(std::sync::Mutex::new(Vec::new()));
+    let log = sent.clone();
+    let fake: Arc<super::jobs::AgentApi> = Arc::new(move |p: &crate::agents::Prompt| {
+        log.lock().unwrap().push(p.user.clone());
+        Ok(said("試したバージョンが確認されないまま戻りました。", None))
+    });
+    let (a, _) = linked_with("ask-rollback", fake);
+    let record = serde_json::json!({
+        "node": "seg",
+        "failed_version": "1.1.0",
+        "returned_version": "1.0.0",
+        "reason": "ROLLED BACK",
+        "node_state": { "trial": false, "last_reason": 3 },
+    });
+    let q = serde_json::json!({ "question": "失敗の理由を聞く", "kind": "failure", "rollback": record });
+    let (st, body) = post(&a, "/v1/agent/ask", q);
+    assert_eq!(st, 200, "{body}");
+    let (st, _) = post(
+        &a,
+        "/v1/agent/ask",
+        serde_json::json!({ "question": "次は？" }),
+    );
+    assert_eq!(st, 200);
+    let sent = sent.lock().unwrap();
+    assert!(sent[0].contains("\"rollback\"") && sent[0].contains("\"failed_version\": \"1.1.0\""));
+    assert!(!sent[1].contains("\"rollback\""), "no record, no key");
+    // A malformed record is refused like any other field: nothing is sent.
+    let bad = serde_json::json!({ "question": "x", "rollback": { "node": "C:/x" } });
+    assert_eq!(post(&a, "/v1/agent/ask", bad).0, 400);
+    assert_eq!(sent.len(), 2);
+}
+
+#[test]
 fn a_topology_file_too_large_to_send_is_refused_without_a_call() {
     let (fake, calls) = counting(said("はい。", None), || {});
     let (a, _) = linked_with("ask-large", fake);

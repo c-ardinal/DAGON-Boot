@@ -17,6 +17,8 @@ interface SimHub {
   advance(ms: number): void;
   /** Erases the I2C node at `addr` (only its ROM loader is left). */
   wipe(addr: number): boolean;
+  /** The watch's next version crashes at boot, so its write goes back (`dagon demo --sim-fail watch`). */
+  failWatch(): boolean;
 }
 
 type SimulatorClass = new (seed: number) => SimHub;

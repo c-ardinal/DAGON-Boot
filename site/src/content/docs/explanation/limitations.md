@@ -23,6 +23,10 @@ description: "設計との違いと、DAGON がしないことです。仕様上
 - 実行時のサンドボックスはありません（Service ABI、Entry Gate、Operation Cancellation、Fault Unwind、Lockup Fuse、Reset Cleanup、SandboxArch）。定義の検査と保護マップの生成はあります。
 - 保護マップを生成できる種類は `armv6m-mpu` と `armv7m-mpu` だけです。
 
+OS:
+
+- macOS での動作は、どの実行でも確かめていません。Linux と Windows は CI で確かめます。
+
 リンク:
 
 - ファームウェアがあるリンクの種類は `usb-cdc`、`uart`、`i2c` だけです。`ble`、`wifi-tcp`、`ethernet`、`can` にはありません。

@@ -3,15 +3,15 @@ title: "入れる"
 description: "DAGON に要るツールと dagon コマンドです。"
 ---
 
-## 要るツール
+## DAGON を動かすために要るもの
 
-| ツール | 要る場面 | 入れ方 |
+| 要るもの | 要る場面 | 入れ方 |
 |---|---|---|
-| Rust（`rustup`） | いつも | <https://rustup.rs> |
-| C コンパイラ | `dagon` コマンドをソースからビルドするとき（`ring` crate） | Windows は MSVC の Build Tools、ほかは `cc` |
 | Chrome か Edge 89 以降 | DAGON Console（Web Serial） | — |
+| Rust stable（1.95.0 で確認） | `dagon` コマンドを `cargo install` で入れるとき | <https://rustup.rs> |
+| C コンパイラ | `dagon` コマンドを `cargo install` で入れるとき（`ring` crate） | Windows は MSVC の C++ ビルドツール、Linux は gcc か clang、macOS は Xcode Command Line Tools |
 
-マイコンごとに要るツールは[マイコンごとのツール](/reference/tools/)にあります。
+`dagon` コマンドをビルド済みのファイルで入れるなら、ほかに要りません。
 
 ## `dagon` コマンドを入れる
 
@@ -29,11 +29,11 @@ description: "DAGON に要るツールと dagon コマンドです。"
 dagon --help
 ```
 
-DAGON Console は `dagon` に組み込まれています。Node.js が要るのは、DAGON Console そのものを開発するときだけです（`web/README.md`）。
+DAGON Console は `dagon` に組み込まれています。Node.js は要りません。
 
-## ツールを確かめる
+## ファームウェアを開発するためのツール
 
-足りないツールを `dagon` に確かめさせます。
+ファームウェアを開発するには、[Rust](https://rustup.rs) と[マイコンごとのツール](/reference/tools/)が要ります。足りないものを `dagon` に確かめさせます。
 
 ```sh
 dagon doctor           # あるものと足りないもの

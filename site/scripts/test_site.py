@@ -358,6 +358,20 @@ class Translation(unittest.TestCase):
                     self.assertEqual(ja[what], en[what])
 
 
+class ToolKinds(unittest.TestCase):
+    def test_every_doctor_entry_has_a_kind(self):
+        gen.NO_KIND.clear()
+        for lang in gen.LANGS:
+            gen.tools(lang)
+        self.assertEqual(gen.NO_KIND, set())
+
+    def test_an_entry_without_a_kind_fails_the_generator(self):
+        gen.NO_KIND.clear()
+        self.assertEqual(gen.tool_kind("en", {"what": "new tool", "probe": ["new-tool"]}), "")
+        self.assertEqual(gen.main(["--check"]), 1)
+        gen.NO_KIND.clear()
+
+
 class GeneratedJapanese(unittest.TestCase):
     def test_a_description_without_a_japanese_key_fails_the_generator(self):
         gen.MISSING.clear()

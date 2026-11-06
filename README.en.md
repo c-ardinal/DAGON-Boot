@@ -44,7 +44,7 @@ DAGON handles mixed kinds of microcontroller once you draw the setup. As a devel
 
 - **Draw the setup**: In DAGON Console, which runs in your browser, you draw the microcontrollers and their links as a graph. Wiring and pins are checked at every edit.
 - **Get a project that builds**: `dagon new` and `dagon gen` make a Rust crate for each microcontroller, with its start-up, its wiring and an empty `app.rs` for your code.
-- **Write in one go**: `dagon deploy` builds, signs, makes the package and writes in one command. In DAGON Console you write with each microcontroller's progress in view.
+- **Write in one go**: `dagon deploy` goes from building and signing through making the package to writing, all in one go. In DAGON Console you write while following each microcontroller's progress graphically.
 - **Go back when it fails**: Every image is signed. A microcontroller starts a new version on trial and goes back to the previous version when it cannot be confirmed. `dagon rollback` goes back by hand.
 - **Write the boot loader too**: The boot loader itself lives in two slots and is written like an app. If the new one does not work, the previous one comes back.
 - **Extend DAGON**: Without changing DAGON's source, add extensions that receive events, answer decisions and replace parts (ports).
@@ -62,12 +62,13 @@ Every step can also be done with the `dagon` command.
 
 ## Prerequisites
 
-- [Rust](https://rustup.rs): applications are written in Rust only.
-- A C compiler: needed to build the `dagon` command from source.
-- Chrome or Edge 89 or later
-- The tools for each microcontroller: `dagon doctor` checks them ([list](https://c-ardinal.github.io/DAGON-Boot/doc/en/reference/tools/)).
+What running DAGON needs:
 
-The `dagon` command can also be installed from prebuilt files. The steps are in [Install](https://c-ardinal.github.io/DAGON-Boot/doc/en/getting-started/install/).
+- Chrome or Edge 89 or later
+- The `dagon` command: the prebuilt files need nothing else
+  - With `cargo install`, Rust stable (checked on 1.95.0) and a C compiler (the MSVC C++ build tools on Windows, gcc or clang on Linux, the Xcode Command Line Tools on macOS)
+
+How to install the `dagon` command is in [Install](https://c-ardinal.github.io/DAGON-Boot/doc/en/getting-started/install/).
 
 ## Try it
 
@@ -93,7 +94,9 @@ dagon serve
 
 `dagon new` makes `dagon.toml`, the setup file and a signing key pair. The setup file holds a sample setup of three microcontrollers. The secret key is kept outside the project.
 
-`dagon doctor` checks the tools this setup needs.
+Applications are written in [Rust](https://rustup.rs) only.
+
+`dagon doctor` checks the tools each microcontroller needs ([list](https://c-ardinal.github.io/DAGON-Boot/doc/en/reference/tools/)), and `dagon doctor --fix` installs what needs no administrator rights.
 
 Open the address `dagon serve` prints to go on in DAGON Console.
 
@@ -131,16 +134,21 @@ The figure below is DAGON's software design.
 
 ## Where to change things
 
-For each thing you may want to do, this table shows what to touch and the steps.
+### When you use DAGON
 
 | To do this | Touch | Steps |
 | --- | --- | --- |
 | Write your app | `nodes/<id>/src/app.rs` | [From a new project to a new version](https://c-ardinal.github.io/DAGON-Boot/doc/en/getting-started/first-project/) |
 | Add an extension | `targets/boot-extension-template/`, `crates/dagon-events/src/ports.rs` | [Extension manifest](https://c-ardinal.github.io/DAGON-Boot/doc/en/reference/extension-manifest/) |
 | Add a board | `targets/boards/*/dagon-board.toml` | [Your own board](https://c-ardinal.github.io/DAGON-Boot/doc/en/how-to/own-board/) |
+| Add an agent | `crates/dagon-cli/agents/`, `~/.dagon/agents/*.toml` | [Agent definition format](https://c-ardinal.github.io/DAGON-Boot/doc/en/reference/agent-definition/) |
+
+### When you add to DAGON itself
+
+| To do this | Touch | Steps |
+| --- | --- | --- |
 | Add an MCU | `targets/mcu/*/dagon-mcu.toml`, `crates/dagon-port/src/lib.rs` | [Adding an MCU or a link](https://c-ardinal.github.io/DAGON-Boot/doc/en/how-to/new-mcu-or-link/) |
 | Add a link or transport | `crates/dagon-format/src/link.rs`, `targets/mcu/*/src/links.rs`, `crates/dagon-host/src/lib.rs` | [Adding an MCU or a link](https://c-ardinal.github.io/DAGON-Boot/doc/en/how-to/new-mcu-or-link/) |
-| Add an agent | `crates/dagon-cli/agents/`, `~/.dagon/agents/*.toml` | [Agent definition format](https://c-ardinal.github.io/DAGON-Boot/doc/en/reference/agent-definition/) |
 
 ## Dependencies and external data
 

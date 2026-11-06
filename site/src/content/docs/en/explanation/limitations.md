@@ -23,6 +23,10 @@ Extension isolation:
 - There is no sandbox at run time (Service ABI, Entry Gate, Operation Cancellation, Fault Unwind, Lockup Fuse, Reset Cleanup, SandboxArch). Definitions are checked and protection maps are generated.
 - Protection maps can be generated only for the kinds `armv6m-mpu` and `armv7m-mpu`.
 
+Operating systems:
+
+- Running on macOS is not confirmed by any run. CI runs Linux and Windows.
+
 Links:
 
 - Firmware exists only for the link kinds `usb-cdc`, `uart` and `i2c`. `ble`, `wifi-tcp`, `ethernet` and `can` have none.

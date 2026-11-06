@@ -399,7 +399,7 @@ where
         .collect::<Vec<_>>()
         .join(", ");
     if !ask(&format!(
-        "{names} does not answer. Writing through the ROM loader rewrites all the contents. \
+        "No answer from {names}. Writing through the ROM loader rewrites all their contents. \
          A loose wire also stops an answer: check it first.\n"
     )) {
         return Err(format!(

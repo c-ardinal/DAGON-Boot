@@ -107,7 +107,9 @@ export function writePercent(k: WriteTrack, now: number, trialMs: number | null)
   if (k.done) return 100;
   let p: number;
   if (k.xferMs === null) {
-    if (k.t0 === null || k.xferPct <= 0) p = 0;
+    // Nothing transferred before the reboot (a rollback): the trial is all there is to count.
+    if (k.t0 === null && k.rebootAt !== null && trialMs !== null) p = (100 * Math.max(0, now - k.rebootAt)) / trialMs;
+    else if (k.t0 === null || k.xferPct <= 0) p = 0;
     else if (trialMs === null) p = k.xferPct;
     else {
       const elapsed = Math.max(0, now - k.t0);
@@ -120,6 +122,9 @@ export function writePercent(k: WriteTrack, now: number, trialMs: number | null)
   }
   return Math.max(k.floor, Math.min(99, p));
 }
+
+/** States in which a node's write or recovery really goes on, so its % may rise with the clock. */
+const WORKING: ReadonlySet<L> = new Set(['writing', 'hubRestarting', 'recovering']);
 
 const NO_TRACK: WriteTrack = { t0: null, xferPct: 0, xferMs: null, rebootAt: null, done: false, floor: 0 };
 
@@ -251,6 +256,8 @@ export class Operate {
   skip = $state(new Set<string>());
   /** Each node's write so far, for its one % (see writePercent). */
   track = $state<Record<string, WriteTrack>>({});
+  /** When the work last stopped (clock time); Infinity while it runs. */
+  private stillSince = $state(Infinity);
   /** The package being written could not be kept in the project (it is written all the same). */
   keepFailed = $state(false);
   /** What the last update, recovery or rollback left (done). */
@@ -331,6 +338,7 @@ export class Operate {
     const to = next(this.state, ev);
     if (to === this.state && ev !== 'placeSample') return;
     this.state = to;
+    this.stillSince = WORKING.has(to) ? Infinity : Math.min(this.stillSince, this.now());
     this.latestMissing = false;
     // Out of the hub's reboot (confirmed, stopped, lost, ...): no version to keep a reopened device by any more.
     if (to !== 'hubRestarting' && to !== 'reconnectNeeded') this.transport?.expectHub?.(null);
@@ -567,9 +575,13 @@ export class Operate {
     }
   }
 
-  /** Update progress over the target nodes, 0–100. */
-  get overall(): number {
-    const p = this.targets.map((id) => this.progress[id]?.percent ?? 0);
+  /**
+   * Progress at `now`, 0–100: the node being recovered or rolled back, else the nodes' one % averaged over the
+   * write's targets. Like theirs, it never moves back while a run lasts and reaches 100 only when all confirmed.
+   */
+  overallAt(now: number): number {
+    const ids = this.recovering !== null && this.running !== 'update' ? [this.recovering] : this.targets;
+    const p = ids.map((id) => this.percentOf(id, now));
     return p.length ? Math.floor(p.reduce((a, b) => a + b, 0) / p.length) : 0;
   }
 
@@ -624,10 +636,10 @@ export class Operate {
     this.skip = next;
   }
 
-  /** Node `id`'s one % for its write, at the clock's `now`. */
+  /** Node `id`'s one % for its write or recovery, at the clock's `now`; time stops counting when the work stops. */
   percentOf(id: string, now = this.now()): number {
     const k = this.track[id];
-    return k ? writePercent(k, now, this.deps.trialMs?.(id) ?? null) : 0;
+    return k ? writePercent(k, Math.min(now, this.stillSince), this.deps.trialMs?.(id) ?? null) : 0;
   }
 
   /** The write's check of node `id` once a file is chosen (fileReady): an unchecked node is not written. Targets keep update order. */
@@ -700,7 +712,7 @@ export class Operate {
   private trackEvent(id: string, e: UpdateEvent): void {
     const now = this.now();
     const k = this.track[id] ?? { ...NO_TRACK };
-    if (e.phase === PHASE.transfer) {
+    if (e.phase === PHASE.transfer || e.phase === PHASE.rom) {
       // A new image (after a boot core's reboot) starts its own transfer.
       const fresh = k.t0 === null || k.xferMs !== null;
       const base = fresh ? { ...k, floor: this.percentOf(id, now), t0: now, xferMs: null, rebootAt: null, done: false } : k;
@@ -708,7 +720,8 @@ export class Operate {
     } else if (e.phase === PHASE.verify) {
       this.track[id] = { ...k, xferPct: 100, xferMs: Math.max(1, now - (k.t0 ?? now)) };
     } else if (e.phase === PHASE.reboot) {
-      this.track[id] = { ...k, rebootAt: now };
+      // A recovery may reboot without a VERIFY: its transfer ends here.
+      this.track[id] = { ...k, xferMs: k.xferMs ?? (k.t0 === null ? null : Math.max(1, now - k.t0)), rebootAt: now };
     } else if (e.phase === PHASE.confirm && !e.bootCore) {
       this.track[id] = { ...k, done: true };
     }
@@ -1004,8 +1017,10 @@ export class Operate {
     this.running = kind;
     this.startedAt = Date.now();
     this.progress = { ...this.progress, [n.id]: { stage: 'writing', percent: 0 } };
+    this.track = { ...this.track, [n.id]: { ...NO_TRACK } };
     const on = (e: UpdateEvent) => {
       if (my !== this.session || this.reach[e.node]?.id !== n.id) return;
+      this.trackEvent(n.id, e);
       if (e.phase === PHASE.rom) this.progress[n.id] = { stage: 'lastResort', percent: e.percent };
       else if (e.phase === PHASE.transfer) this.progress[n.id] = { stage: 'writing', percent: e.percent };
       // TRANSFER and REBOOT carry the version the node is given (FAILED carries the one it runs).
@@ -1030,6 +1045,7 @@ export class Operate {
     this.startedAt = null;
     this.recovered = r;
     this.progress[n.id] = { stage: 'done', percent: 100 };
+    this.track[n.id] = { ...(this.track[n.id] ?? NO_TRACK), done: true };
     this.finishRun(n, r.version);
     this.live[n.id] = { ...(this.live[n.id] ?? UNKNOWN), responding: true, lastSeen: Date.now() };
     const rest = this.file?.verdict === 'pass' ? Object.entries(this.progress).filter(([, p]) => p.stage === 'unwritten').map(([id]) => id) : [];

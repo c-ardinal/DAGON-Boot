@@ -130,6 +130,7 @@
   }
   progress::-webkit-progress-value {
     background: var(--c-paper);
+    transition: width var(--dur-line) var(--ease-steady);
   }
   .none {
     margin: var(--s-3) 0 0;

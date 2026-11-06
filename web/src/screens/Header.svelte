@@ -161,6 +161,9 @@
     color: var(--c-muted);
     font: 700 var(--t-small) / 1 var(--f-ja);
     cursor: pointer;
+    transition:
+      background-color var(--dur-quick) var(--ease-out),
+      color var(--dur-quick) var(--ease-out);
   }
   .modes button[aria-checked='true'] {
     background: var(--c-paper);

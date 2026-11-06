@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { modal } from '../app/motion.ts';
   import { UNSAVED } from '../app/copy.ts';
 
   interface Props {
@@ -22,7 +23,7 @@
 </script>
 
 <!-- leaving with edits the project's YAML does not have. -->
-<dialog bind:this={dialog} aria-labelledby="unsaved-h" aria-describedby="unsaved-s" onclose={onstay}>
+<dialog bind:this={dialog} transition:modal|global aria-labelledby="unsaved-h" aria-describedby="unsaved-s" onclose={onstay}>
   <h2 id="unsaved-h">{UNSAVED.heading}</h2>
   <p class="cause">{reason}</p>
   <p id="unsaved-s">{UNSAVED.sentence}</p>

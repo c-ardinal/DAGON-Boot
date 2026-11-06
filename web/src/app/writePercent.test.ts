@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'vitest';
-import { writePercent } from './operate.svelte.ts';
+import { writePercent, type WriteTrack } from './operate.svelte.ts';
 
 // One % per node over its whole write: the transfer by bytes, then the node's
 // trial (its MCU definition's [watchdog] trial_ms) by time, the two parts
@@ -34,5 +34,37 @@ describe('one % per node from transfer to confirmation', () => {
 
   test('a second image (boot core, then app) never moves the % back', () => {
     expect(writePercent({ ...start, floor: 60, xferPct: 10 }, 1100, 4000)).toBe(60);
+  });
+
+  test('read on the page tick, between events, the % never moves back and stays under 100 until confirmation', () => {
+    const trial = 4000;
+    const TICK = 250;
+    let k: WriteTrack = { ...start };
+    let now = 1000;
+    let lastTick = now;
+    const shown: number[] = [];
+    // Every event redraws with the clock of the last tick; every tick redraws with the new clock.
+    const step = (ms: number, event?: (at: number) => WriteTrack) => {
+      for (let t = 0; t < ms; t += 50) {
+        now += 50;
+        if (now - lastTick >= TICK) {
+          lastTick = now;
+          shown.push(writePercent(k, lastTick, trial));
+        }
+      }
+      if (event) k = event(now);
+      shown.push(writePercent(k, lastTick, trial));
+    };
+    for (const image of [0, 1]) {
+      k = { ...k, floor: image ? writePercent(k, now, trial) : 0, t0: now, xferPct: 0, xferMs: null, rebootAt: null };
+      const t0 = now;
+      for (let pct = 5; pct <= 100; pct += 5) step(90, () => ({ ...k, xferPct: pct }));
+      step(50, (at) => ({ ...k, xferMs: at - t0 }));
+      step(200, (at) => ({ ...k, rebootAt: at }));
+      step(6000);
+    }
+    expect(Math.max(...shown)).toBeLessThan(100);
+    shown.forEach((p, i) => expect(p, `sample ${i}`).toBeGreaterThanOrEqual(shown[i - 1] ?? 0));
+    expect(writePercent({ ...k, done: true }, lastTick, trial)).toBe(100);
   });
 });

@@ -92,15 +92,29 @@
   --z-dialog: 60;
   --z-announce: 70;
 
-  /* motion */
-  --ease-out: cubic-bezier(0.23, 1, 0.32, 1);
-  --ease-in-out: cubic-bezier(0.77, 0, 0.175, 1);
+  /* motion: the one vocabulary. One-shot values show what changed; the loops are for work in progress. */
+  --ease-out: cubic-bezier(0.23, 1, 0.32, 1); /* what enters, leaves or settles */
+  --ease-in-out: cubic-bezier(0.77, 0, 0.175, 1); /* a loop that turns back */
+  --ease-steady: linear; /* rate-driven progress and loops */
   --dur-press: 120ms;
   --dur-flash: 90ms;
-  --dur-quick: 160ms;
-  --dur-ui: 200ms;
-  --dur-line: 260ms;
-  --dur-reduced: 150ms;
+  --dur-quick: 160ms; /* small things: a chip, a mark, a hint */
+  --dur-nudge: 160ms; /* a small thing that moves or grows: a port under the pointer */
+  --dur-ui: 200ms; /* surfaces and screens */
+  --dur-line: 260ms; /* cards and lines moving to a new place */
+  --dur-settle: 480ms; /* the water leaving a card: long enough to read the outcome */
+  --dur-tick: 250ms; /* how often progress is read */
+  --dur-rise: 1000ms; /* the % and its water: as long as a node takes between two progress reports, so they keep moving between them */
+  --dur-reduced: 150ms; /* every fade under reduced motion */
+  --dur-march: 600ms;
+  --dur-think: 1200ms;
+  --dur-float: 3600ms;
+  --dur-drift-front: 4200ms;
+  --dur-drift-back: 7000ms;
+  --enter-shift: 8px;
+  --enter-scale: 0.97;
+  --move: 1; /* how much of a drawn or poured movement plays */
+  --t-place: left var(--dur-line) var(--ease-out), top var(--dur-line) var(--ease-out);
 
   /* The Console design's own tokens, same names and values as the design file
      (desktop; the 2560 px values follow below). */
@@ -208,6 +222,22 @@
 @media (max-width: 767px) {
   :root {
     --t-display-size: 4rem;
+  }
+}
+
+/* Reduced motion, for every transition at once: nothing travels, what is left is a short fade. The loops stop where they are declared. */
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --enter-shift: 0px;
+    --enter-scale: 1;
+    --move: 0;
+    --dur-press: 0ms;
+    --dur-nudge: 0ms;
+    --dur-line: 0ms;
+    --dur-rise: 0ms;
+    --dur-ui: var(--dur-reduced);
+    --dur-quick: var(--dur-reduced);
+    --dur-settle: var(--dur-reduced);
   }
 }
 

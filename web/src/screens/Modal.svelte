@@ -1,6 +1,7 @@
 <script lang="ts">
   import type { Snippet } from 'svelte';
   import { NOTICE } from '../app/copy.ts';
+  import { modal } from '../app/motion.ts';
   import Icon from './Icon.svelte';
 
   interface Props {
@@ -27,7 +28,7 @@
 </script>
 
 <!-- Notice/Modal: centred, w-modal wide; the scrim (::backdrop) covers the whole window. -->
-<dialog bind:this={el} aria-labelledby="modal-h" oncancel={(e) => (onclose ? onclose() : e.preventDefault())}>
+<dialog bind:this={el} transition:modal|global aria-labelledby="modal-h" oncancel={(e) => (onclose ? onclose() : e.preventDefault())}>
   <header>
     <h2 id="modal-h">{title}</h2>
     {#if chip}<span class="chip {chip.kind}">{chip.text}</span>{/if}
@@ -62,14 +63,14 @@
     background: var(--c-layer-1);
     color: var(--c-paper);
     overflow: auto;
+    flex-direction: column;
+    gap: var(--s-4);
   }
   dialog::backdrop {
     background: var(--c-scrim);
   }
   dialog[open] {
     display: flex;
-    flex-direction: column;
-    gap: var(--s-4);
   }
   header {
     display: flex;

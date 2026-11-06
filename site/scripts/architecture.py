@@ -55,7 +55,7 @@ PORT_ROWS = ("PC Host Ports", "Replaceable Ports", "Driver Contract")
 # Component -> one line (Japanese, English).
 COMPONENTS = {
     "dagon CLI": ("バイナリ名 dagon のコマンド", "The binary named dagon"),
-    "dagon serve": ("Console のためのローカルのサーバ", "The local server for the Console"),
+    "dagon serve": ("DAGON Console のためのローカルのサーバ", "The local server for DAGON Console"),
     "DAGON Console": ("ブラウザの UI", "The browser UI"),
     "Claude Code Plugin": ("移植と構成の生成のスキル、サブエージェント、フック", "Porting and topology skills, subagents and hooks"),
     "Host Extension Chain": ("ホストの拡張を順に呼ぶチェーン", "The chain of host extensions, in order"),
@@ -76,7 +76,7 @@ COMPONENTS = {
     "Transport": ("親機へのバイト列のポート", "Port for the byte stream to the hub"),
     "confirm_plan": ("書き込みの前の確認の判断点", "Decision point before a write"),
     "Signer": ("署名のポート", "Port that signs"),
-    "KeyStore": ("署名の鍵の置き場所のポート", "Port for where the signing key is kept"),
+    "KeyStore": ("利用者が選んだ置き場所（環境変数、OS のキーストア、1Password など）から署名の鍵を受け取るポート", "Port that receives the signing key from where the user chose to keep it (an environment variable, the OS key store, 1Password and so on)"),
     "Agent": ("エージェントのポート", "Port for an agent"),
     "Action": ("アクションのポート", "Port for an action"),
     "Cargo Runner": ("cargo で動くビルド", "Builds through cargo"),

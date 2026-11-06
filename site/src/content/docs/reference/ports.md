@@ -9,13 +9,13 @@ editUrl: false
 `DAGON_BLESS=1 cargo test -p dagon-catalog --test docs` でもう一度生成してください。
 :::
 
-ポートは、プラグインが置き換えられる DAGON の部品です。置き換えは、一覧のレイヤーで、リンクされた
-イメージの中だけに効きます。既定は DAGON 自身の実装です。プラグインのマニフェストは、そのポートがある
+ポートは、拡張が置き換えられる DAGON の部品です。置き換えは、一覧のレイヤーで、リンクされた
+イメージの中だけに効きます。既定は DAGON 自身の実装です。拡張のマニフェストは、そのポートがある
 レイヤーでだけポートを提供でき、1 つのイメージで 1 つのポートを提供できるのは 1 つだけです。
 
 信頼の区分:
 
-- *untrusted*: どのプラグインでも使えます。レイヤーのサンドボックスの中で、マニフェストで宣言した能力で
+- *untrusted*: どの拡張でも使えます。レイヤーのサンドボックスの中で、マニフェストで宣言した能力で
   動き、DAGON は一覧のサービスを通してだけ呼びます。
 - *untrusted, additive*: untrusted と同じで、足すだけです。DAGON 自身の実装は残ります。
 - *trusted only*: 宣言して署名した、信頼する拡張だけが使えます。特権で動き、サービスは呼びません。
@@ -31,7 +31,7 @@ editUrl: false
 | `WatchdogDriver` | ブートと試行を守るウォッチドッグ | boot, app | マイコンのもの | trusted only | – |
 | `SlotStore` | イメージの置き場所 | boot, app | マイコンの定義のフラッシュの配置 | trusted only | – |
 | `LogStorage` | 状態ログの置き場所 | boot, app | マイコンの定義のフラッシュの配置 | trusted only | – |
-| `Recovery` | 追加の復旧の経路: 転送のためのサービスの時間枠、ベンダーのダウンロードモード | boot, app | マイコンとボードの定義のとおりの BOOTSEL/UF2、factory、ROM の入り口 | untrusted, additive (プラグインは経路を足すだけで、DAGON のものを消せません) | return, transport, time, memory |
+| `Recovery` | 追加の復旧の経路: 転送のためのサービスの時間枠、ベンダーのダウンロードモード | boot, app | マイコンとボードの定義のとおりの BOOTSEL/UF2、factory、ROM の入り口 | untrusted, additive (拡張は経路を足すだけで、DAGON のものを消せません) | return, transport, time, memory |
 | `Diagnostics` | 追加の VERSION の TLV、追加のステータス、UDS の DID の表 | boot, app, relay | なし | untrusted | return, time, memory |
 | `Display` | 段階やブートの結果の見え方 | boot, app, relay | boot: アクションプログラムを通した、ボードの定義の `[boot] led` と `halt`; app, relay: なし | untrusted (ブート時は、宣言されたピンとバスでサンドボックスの中で動きます) | return, pins, buses, time, memory |
 | `LogSink` | `Recent` のあふれと拡張のログの行き先 | app, relay, host | なし | untrusted | return, events, time, memory |
@@ -39,7 +39,7 @@ editUrl: false
 | `BoardBringUp` | アプリの起動時のボードの電源、ピン、バス | app, relay | ボードの定義のもの | untrusted | return, pins, buses, time, memory |
 | `ChildLink` | 親機が子機に届く方法 | relay | I2C コントローラ、PIO UART | untrusted | return, buses, transport, dma, time, memory |
 | `Signer` | イメージとリリースの署名 | host | ファイルの鍵の組 | untrusted (ホストは定義上信頼されます。検証するのはデバイスです) | – |
-| `KeyStore` | 署名の鍵の置き場所 | host | ファイルの鍵の組 | untrusted (ホストは定義上信頼されます。検証するのはデバイスです) | – |
+| `KeyStore` | 利用者が選んだ置き場所（環境変数、OS のキーストア、1Password など）から署名の鍵を受け取る | host | ファイルの鍵の組 | untrusted (ホストは定義上信頼されます。検証するのはデバイスです) | – |
 | `BuildRunner` | ノードのイメージのビルド | host | cargo | untrusted | – |
 | `Agent` | CLI とページがリクエストを渡す外部のエージェント | host | データで定義（エージェントの定義） | untrusted | – |
 | `Action` | ホストのイベントの後で実行するプログラムやリクエスト | host | データで定義（アクションの定義） | untrusted | – |

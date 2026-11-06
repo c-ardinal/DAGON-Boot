@@ -19,7 +19,7 @@ description: "DAGON のライセンス、依存ライブラリのライセンス
 - `webpki-roots` は CDLA-Permissive-2.0 です（`dagon ai topology` の TLS クライアントが使う外部データ、Mozilla のルート証明書のデータを含みます）。
 - `subtle`、`rp-pac`、`rp2040-boot2`、`source-map-js` は BSD-3-Clause です。
 - `lightningcss`（MPL-2.0）は web のビルドツールのビルド時の依存だけで、DAGON Console には何も含まれません。
-- DAGON Console に含まれる npm のコードは、Svelte のクライアント用ランタイムと、それが読み込む `clsx` と `esm-env`（いずれも MIT）だけです。他の npm パッケージはビルドとテストの道具です（表の "Ships in" 列）。
+- DAGON Console に含まれる npm のコードは、Svelte のクライアント用ランタイムと、それが読み込む `clsx` と `esm-env`（いずれも MIT）だけです。他の npm のライブラリはビルドとテストの道具です（表の "Ships in" 列）。
 - `web/public/fonts/` の書体は SIL Open Font License 1.1 です: Doto、DotGothic16、Zen Kaku Gothic New、JetBrains Mono（ライセンス文はファイルの隣にあります。`web/README.md` を参照）。
 - 親機の表示の日本語の状態語は、Noto Sans JP（SIL Open Font License 1.1）から作ったビットマップです（ライセンス文は `targets/boards/waveshare-rp2040-touch-lcd-1.28/fonts/`）。
 
@@ -447,7 +447,7 @@ npm packages (`web/package-lock.json`): 86. Only those marked "page" ship in the
 ## 使用していないコンポーネント (公開されているブートローダ実装は使用していません)
 
 
-公開されているブートローダ実装（例: embassy-boot、MCUboot、wolfBoot）のコードもロジックも使っていません。起動の判断、イメージとリリースの形式、状態ログ、更新のプロトコル、受け手はこのプロジェクトのために書いたものです。
+公開されているブートローダ実装（例: embassy-boot、MCUboot、wolfBoot）のコードもロジックも使っていません。起動の判断、イメージとリリースの形式、状態ログ、書き込みのプロトコル、受け手はこのプロジェクトのために書いたものです。
 
 
 ## 無改変のベンダーコンポーネント

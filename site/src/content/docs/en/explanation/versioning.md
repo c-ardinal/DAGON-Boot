@@ -17,11 +17,10 @@ code and the package manifests, so it cannot drift.
 
 ## Components
 
-A component is something a user installs, flashes or depends on that
-lives on from release to release: the CLI (with the page it serves), a
-boot loader, an MCU package, a board package, a library crate. Samples
-(including demo firmware), test apps, bring-up and dump programs and test
-images are not components; they stay at `0.0.0` with `publish = false`.
+A component is something a user installs, flashes or depends on that lives on from release to release.
+
+- Components: the CLI (with the page it serves), a boot loader, an MCU definition, a board definition, a library crate
+- Not components: samples (including demo firmware), test apps, bring-up and dump programs and test images. They stay at `0.0.0` with `publish = false`.
 
 A new component starts at `0.1.0`.
 
@@ -33,7 +32,7 @@ Each `[[component]]` entry has:
 |---|---|
 | `name` | The component's name. It is also the commit scope (`feat(<name>):`) and the tag prefix (`<name>-v<version>`) |
 | `version` | Its SemVer version |
-| `paths` | The files it owns. A file belongs to the component with the longest matching path, so a boot loader inside an MCU package's folder is its own component. A file outside every component (README, `scripts/`, `.github/`, samples) never needs a release |
+| `paths` | The files it owns. A file belongs to the component with the longest matching path, so a boot loader inside an MCU definition's folder is its own component. A file outside every component (README, `scripts/`, `.github/`, samples) never needs a release |
 | `packages` | The Cargo packages that carry this version in their own `Cargo.toml`; a component made of several packages gives them all the same version. There is no version shared through the workspace |
 | `formats` | For each contract it uses, the format numbers it reads and writes |
 
@@ -59,19 +58,12 @@ number.
 the comment beside each says where the number is written and which code
 constant holds it. Every artifact and message of a contract states its
 number, and a reader refuses a number it does not read with a message that
-names both numbers (for example `release.dgb is bundle format 2; this
-dagon 0.1.0 reads bundle format 1`).
+names both numbers (for example `release.dgb is bundle format 2; this dagon 0.1.0 reads bundle format 1`).
 
 One contract has a default: MCU and board definition files
 (`dagon-mcu.toml`, `dagon-board.toml`) that leave out `format` are read as
 format 1, so files users write by hand keep loading. DAGON's own definition
 files always state it. Every other contract always carries its number.
-
-Image versions are not component versions. The version in a signed image
-header (given when the image is signed, or the default a first install
-uses) is the version of that image on the device, chosen by the project.
-It has no relation to the version of the boot loader component that built
-it.
 
 ### Adding a contract
 
@@ -82,6 +74,14 @@ it.
 3. Add the code constant to the CLI's list of format numbers
    (`crates/dagon-cli/src/versions.rs`); its tests fail while the table and
    the code disagree.
+
+## Image versions
+
+Image versions are not component versions. The version in a signed image
+header (given when the image is signed, or the default a first install
+uses) is the version of that image on the device, chosen by the project.
+It has no relation to the version of the boot loader component that built
+it.
 
 ## What kind of change is it
 
@@ -95,7 +95,7 @@ Decide for each component whose files the change touches.
 - A boot loader: an old image or state log format no longer accepted, or a
   device needs its ROM re-provisioned (rewritten through the boot ROM) to
   take the new version.
-- An MCU or board package: its public Rust API, or its definition keys,
+- An MCU or board definition: its public Rust API, or its definition keys,
   changed incompatibly.
 - A library crate: an incompatible public API change, as
   [cargo-semver-checks](https://github.com/obi1kenobi/cargo-semver-checks)
@@ -184,7 +184,7 @@ The same in words:
 | A boot loader fixes a CRC check bug | boot loader fix |
 | Image header format N+1, which boot loaders reading only N cannot read | image header format +1; a boot loader that reads N and N+1: feature; the CLI: breaking only when it stops writing N |
 | A README typo | no release |
-| A board package adds a definition key the definition reader already accepts | board package feature |
+| A board definition adds a definition key the definition reader already accepts | board definition feature |
 | A library crate removes a public function | that library breaking (cargo-semver-checks) |
 | A refactor inside a library with no API or behaviour change | no release |
 | The protocol library adds a command and the CLI starts using it | protocol library feature, CLI feature; components that only rebuild against them keep their versions |
@@ -218,8 +218,7 @@ docs: <no release>
   release that follows drops the suffix and keeps the version.
 - Release files carry the component name and version in their names.
 - A component's changelog is made from the commits since its last tag that
-  touch its files: `python scripts/changelog.py <name> [--from <tag>]
-  [--to <rev>]` prints the section (Breaking, Features, Fixes), reading
+  touch its files: `python scripts/changelog.py <name> [--from <tag>] [--to <rev>]` prints the section (Breaking, Features, Fixes), reading
   commits exactly as the bump check does.
 - `python scripts/bump_check.py <name>` checks that the version in
   `compat.toml` is at least what the commits since the component's last tag

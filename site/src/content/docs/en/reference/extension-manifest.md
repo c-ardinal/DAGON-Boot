@@ -196,7 +196,7 @@ The boot events come as fast as the boot loader works:
 each other with only the state log's flash reads between them,
 `boot.slot_chosen` or `boot.no_image` follows the image check, and
 `boot.before_jump` comes right before the app starts and takes the chip
-over. Whatever an extension shows lasts only until then, and every wait
+over. Whatever an extension shows lasts only up to that point, and every wait
 in a handler adds to the boot.
 
 A minimal trusted boot extension to copy is

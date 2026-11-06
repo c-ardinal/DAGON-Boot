@@ -52,13 +52,22 @@ MARKERS = [
 COMPILED = [(what, re.compile(p)) for what, p in MARKERS]
 
 # The one notice naming the event, word for word, in the four files that carry it; no pattern is loosened for it.
-NOTICE_JA = '2026/11/8現在、"Built with Claude: Japan 2026"向けに3種類のマイコンだけがサポートされているα版の状態です。正式リリースまでに破壊的変更が行われるリスクが有ることをご理解下さい。'
-NOTICE_EN = 'As of November 8, 2026, this is an alpha that supports only three kinds of microcontroller, made for "Built with Claude: Japan 2026". Please understand that breaking changes may be made before the official release.'
+# Its two sentences sit on two lines in the READMEs and on one line on the site.
+NOTICE_JA_LINES = (
+    '2026/11/8現在、"Built with Claude: Japan 2026"向けに3種類のマイコンだけがサポートされているα版の状態です。',
+    "正式リリースまでに破壊的変更が行われるリスクが有ることをご理解下さい。",
+)
+NOTICE_EN_LINES = (
+    'As of November 8, 2026, this is an alpha that supports only three kinds of microcontroller, made for "Built with Claude: Japan 2026".',
+    "Please understand that breaking changes may be made before the official release.",
+)
+NOTICE_JA = "".join(NOTICE_JA_LINES)
+NOTICE_EN = " ".join(NOTICE_EN_LINES)
 NOTICE_FILES = {
-    "README.md": NOTICE_JA,
-    "README.en.md": NOTICE_EN,
-    "site/src/content/docs/index.mdx": NOTICE_JA,
-    "site/src/content/docs/en/index.mdx": NOTICE_EN,
+    "README.md": NOTICE_JA_LINES,
+    "README.en.md": NOTICE_EN_LINES,
+    "site/src/content/docs/index.mdx": (NOTICE_JA,),
+    "site/src/content/docs/en/index.mdx": (NOTICE_EN,),
 }
 
 # Values that look like a marker but are fixed by someone else.
@@ -108,7 +117,9 @@ def hits():
             continue
         text = data.decode("utf-8", errors="replace")
         for no, line in enumerate(text.splitlines(), 1):
-            for what, word in line_hits(line.replace(NOTICE_FILES.get(name, "\0"), "")):
+            for text in NOTICE_FILES.get(name, ()):
+                line = line.replace(text, "")
+            for what, word in line_hits(line):
                 yield f"{name}:{no}: {what} '{word}'"
 
 

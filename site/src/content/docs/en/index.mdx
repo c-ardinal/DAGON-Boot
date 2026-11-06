@@ -1,36 +1,41 @@
 ---
 title: DAGON
-description: The distributed microcontroller designs of professionals, made easy for many. As microcontrollers are added, writing stays the same operation as for one, and safe.
+description: The distributed microcontroller designs of professionals, in more people's hands. As microcontrollers are added, writing takes no more work, and it stays safe.
 template: splash
 hero:
-  tagline: The distributed microcontroller designs of professionals, made easy for many. As microcontrollers are added, writing stays the same operation as for one, and safe.
+  tagline: The distributed microcontroller designs of professionals, in more people's hands. As microcontrollers are added, writing takes no more work, and it stays safe.
 ---
 
 :::caution
 As of November 8, 2026, this is an alpha that supports only three kinds of microcontroller, made for "Built with Claude: Japan 2026". Please understand that breaking changes may be made before the official release.
 :::
 
-Try DAGON Console in the browser: [the demo](~/demo/).
+Try the [DAGON Console demo](~/demo/) in the browser.
 
-A beautiful design with a muddy operation: taking things apart, swapping
-cables, one write tool per MCU, every time a program changes. DAGON makes the
-distributed multi-microcontroller designs of professionals and specialists easy
-for a wide range of people, from those starting electronics with AI to individual
-developers who care for compactness and finish.
+A beautiful design with a muddy operation.
+Every time a program changes, you take things apart, swap cables and use one write tool per MCU.
 
-Before assembly, you write each node directly once. After that no write pattern
-is touched and nothing is opened. Through the hub, you write to the children beyond it with
-the same operation as one node. More nodes take more time; the operation does not grow. Every image is signed, and a node runs a new
-version on trial and goes back to the previous one by itself when it does not
-work.
+DAGON makes the distributed multi-microcontroller designs of professionals and specialists easy for a wide range of people, from those starting electronics with AI to individual developers who care for compactness and finish.
 
-Mixed MCUs are handled by drawing the 構成 (the setup). Applications are written
-in Rust.
+Before assembly, you write each node directly once.
+After that, one connection writes every node.
+If that port is outside the case, the case stays closed.
+Otherwise the case is opened only for that one connection.
+Through the hub on your PC, you write to the children beyond it with the same operation as one node.
+More nodes take more time; the operation does not grow.
+
+Every image is signed.
+A node runs a new version on trial and goes back to the previous one by itself when it does not work.
+
+Mixed MCUs are handled by drawing the 構成 (the setup).
+
+Applications are written in Rust.
+
+Words such as node and hub are in [What the words mean](/en/explanation/words/).
 
 These pages are in four parts:
 
 - [Getting started](/en/getting-started/): try DAGON and set it up.
 - [How-to guides](/en/how-to/): steps for one task each.
 - [Explanation](/en/explanation/): how DAGON works and why.
-- [Reference](/en/reference/): every route, event, format and board,
-  generated from DAGON's own sources.
+- [Reference](/en/reference/): every route, event, format and board, generated from DAGON's own sources.

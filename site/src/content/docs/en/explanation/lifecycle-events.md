@@ -3,17 +3,15 @@ title: "Lifecycle events and extensions"
 description: "One model for boot loader, agent, relay and host: state machines, events, ports and protection."
 ---
 
-This document is the design of DAGON's lifecycle-event and extension
-model: how every state transition in every layer is an observable
-event; how board packages, libraries and applications extend DAGON in
-every layer, the boot stage included, by observing events, answering
-the few decision points and replacing parts of DAGON through ports; how
-the MCU's protection hardware keeps extensions from touching what makes
-a write safe; how board values and boot-time actions come from
-definitions; and how the model is versioned. It is the reference for
-the implementation and for anyone extending DAGON.
+This document is the design of DAGON's lifecycle-event and extension model. It is the reference for the implementation and for anyone extending DAGON. It shows:
 
-The goal: DAGON and user code fully separated. A user (a board package,
+- How every state transition in every layer is an observable event
+- How board definitions, libraries and applications extend DAGON in every layer, the boot stage included, by observing events, answering the few decision points and replacing parts of DAGON through ports
+- How the MCU's protection hardware keeps extensions from touching what makes a write safe
+- How board values and boot-time actions come from definitions
+- How the model is versioned
+
+The goal: DAGON and user code fully separated. A user (a board definition,
 a library, an application) meets every need through DAGON's public API,
 events, extension ports and definitions; nothing in DAGON is edited,
 copied or forked; DAGON holds no knowledge of any sample, board or
@@ -21,12 +19,15 @@ peripheral. The model is written for needs that are not known in advance
 (an automotive diagnostic transport, added security processing, a
 display, a different storage), not for a fixed list.
 
-Terms: *boot loader* is the image DAGON runs before the app (stage0 and
-the boot loader on a self-boot MCU; the vendor 2nd stage on a
-vendor-stage2 MCU); *stage0* is the small program that runs first after a reset and picks the boot loader slot to start; *agent* is `dagon-agent` inside the app; *relay* is
-the hub's PC link and sub-node links; *host* is `dagon-host` driven by
-the CLI and `dagon serve`; an *extension* is code or data outside DAGON
-that DAGON runs at one of its extension points. 親機/子機 are hub/node.
+The words of this document:
+
+- *boot loader*: the image DAGON runs before the app (stage0 and the boot loader on a self-boot MCU; the vendor 2nd stage on a vendor-stage2 MCU).
+- *stage0*: the small program that runs first after a reset. It picks the boot loader slot to start.
+- *agent*: `dagon-agent` inside the app.
+- *relay*: the hub's PC link and sub-node links.
+- *host*: `dagon-host` driven by the CLI and `dagon serve`.
+- *extension*: code or data outside DAGON that DAGON runs at one of its extension points.
+- 親機/子機: hub/node.
 
 ## 1. State machines and their events
 
@@ -63,7 +64,7 @@ path changes persistent image state outside this machine.
 
 | Transition | Layer | Guard (status on refusal) | Persisted as | Event |
 |---|---|---|---|---|
-| `erase` | app | XFER_BEGIN passed every guard and `accept_update`; from `Empty`, `Written`, `Pending` or `Reverted` (never from the active or the confirmed slot). From `Pending` because the protocol lets a new image replace one set pending but not yet started; the erased header no longer matches the SLOT_PENDING record, so the slot reads empty | slot body and header place erased | `app.transfer_started` |
+| `erase` | app | XFER_BEGIN passed every guard and `accept_update`; from `Empty`, `Written`, `Pending` or `Reverted` (never from the active or the confirmed slot). From `Pending` because the protocol lets a new image replace one set pending but not started; the erased header no longer matches the SLOT_PENDING record, so the slot reads empty | slot body and header place erased | `app.transfer_started` |
 | `written` | app | XFER_END: body digest equals the header's, header written and re-verified | header in place | `app.written { slot, version }` |
 | `pending_set` | app | SET_PENDING: header present, signature and compatibility, body digest; never the running slot; from `Written`, `Reverted`, `Pending` (a repeated SET_PENDING appends again) or `Confirmed` (the confirmed slot set pending again while the other slot is on trial, which switches back to it) | SLOT_PENDING record / vendor selection | `app.pending_set { slot, version }` |
 | `pending_moved` | app | SET_PENDING on the other slot while this one is `Pending` or `Trial`, and this slot is not the confirmed one | the same SLOT_PENDING record (the log names one pending slot) | `app.pending_moved { from, to }` |
@@ -97,7 +98,7 @@ the store, and the port's mutators (`erase`, `write`, `write_header`,
 makes, inside the transition that emits the change's event. The
 `SlotStore` trait remains the port a board implements. The agent owns the
 store and hands it to no one; the board's other resources (a flash
-reader, the watchdog) are handles the MCU package keeps for itself. What
+reader, the watchdog) are handles the MCU definition keeps for itself. What
 those handles reach (a raw flash driver, a simulator's provisioning
 helpers) is outside this guarantee: it is trusted code of the board or
 bench, like anything with flash access in the same image, and the
@@ -165,7 +166,7 @@ app's agent replays them at start as the same `boot.*` events with
 | `boot.watchdog_armed` | watchdog started (4.1); from here extensions run | `period_ms` | yes |
 | `boot.log_read` | the state log read | `ok`, `pending`, `confirmed`, `attempts` | yes |
 | `boot.before_decision` | `plan` is about to run; the last event before the decision | `pending`, `confirmed`, `attempts` | yes |
-| `boot.decision_planned` | the decision is known, nothing written yet | `Decision` | yes |
+| `boot.decision_planned` | the decision is known, nothing written | `Decision` | yes |
 | `boot.core_slot_chosen` | stage0 picked the boot loader slot | `slot`, `version` | no |
 | `boot.slot_chosen` | image lifecycle `chosen` | `slot`, `trial`, `version`, `entry` | yes |
 | `boot.attempt_recorded`, `boot.rollback`, `boot.no_image` | image lifecycle (1.1) | | yes |
@@ -189,7 +190,7 @@ len, next }`; every protocol request is a transition (self-transitions
 for HELLO, STATUS, VERSION and progress). The protocol itself is a port
 (2.1): the machine's triggers are protocol-neutral (`update_offered`,
 `header_chunk`, `data_chunk`, `transfer_end`, `switch`, `reboot`,
-`confirm`, `status`), and a protocol plug-in (DAGON wire, UDS, …) maps
+`confirm`, `status`), and a protocol extension (DAGON wire, UDS, …) maps
 its messages onto them.
 
 Generated order at start: `app.starting` → `app.store_opened` (or
@@ -230,7 +231,7 @@ The relay is also an app (its own agent emits `app.*`). Its own machine:
 PC link up/down, a quiet window after a relayed request or a display
 request, per-child `Unknown → Present | Absent` from polls and relayed
 replies, and a progress screen. Child links are ports (a child protocol
-plug-in may relay UDS as well as DAGON frames).
+extension may relay UDS as well as DAGON frames).
 
 | Event | When | Payload |
 |---|---|---|
@@ -380,18 +381,18 @@ other record is refused, not guessed.
 ## 2. The extension model
 
 One shape in every layer: **ports** DAGON exposes for replacement,
-**plug-ins** that provide a port, observe events and answer decisions,
+**extensions** that provide a port, observe events and answer decisions,
 **events** with no-op defaults, and **one composition order** (board
-package → libraries → user). The execution context differs (an
+definition → libraries → user). The execution context differs (an
 unprivileged sandbox in the boot loader and, where the MCU allows it, in
 the app; embassy tasks in apps; threads and JSON on the host), the shape
-does not. A declarative action program (5.2) is the simplest plug-in
+does not. A declarative action program (5.2) is the simplest extension
 kind, for uses that need no code.
 
 ### 2.1 Ports
 
 A port is a trait DAGON calls for one replaceable part, with DAGON's own
-implementation as the default. A plug-in that provides a port replaces
+implementation as the default. An extension that provides a port replaces
 that part for the image it is linked into. Ports exist in every layer.
 
 The port catalog is one table in code, `dagon_events::PORTS`, one
@@ -414,17 +415,17 @@ a reason, so one source answers "can this be replaced".
 | `CryptoProvider` (the primitives the verifier and digest use; hardware acceleration, HSM) | boot, app, host | software | trusted only | – |
 | `DecisionPolicy` (attempt limit, which slot wins) | boot | `max_attempts` from the definition, pending before confirmed | trusted only | – |
 | `WatchdogDriver` (the watchdog that guards boot and trial) | boot, app | the MCU's | trusted only | – |
-| `SlotStore` (where images live) | boot, app | the MCU package's flash layout | trusted only | – |
-| `LogStorage` (where the state log lives) | boot, app | the MCU package's flash layout | trusted only | – |
-| `Recovery` (an additional recovery path: a service window for a transport, a vendor download mode) | boot, app | BOOTSEL/UF2, factory, ROM entry as the MCU and board define | untrusted, additive (a plug-in adds a path, never removes DAGON's) | return, transport, time, memory |
+| `SlotStore` (where images live) | boot, app | the MCU definition's flash layout | trusted only | – |
+| `LogStorage` (where the state log lives) | boot, app | the MCU definition's flash layout | trusted only | – |
+| `Recovery` (an additional recovery path: a service window for a transport, a vendor download mode) | boot, app | BOOTSEL/UF2, factory, ROM entry as the MCU and board define | untrusted, additive (an extension adds a path, never removes DAGON's) | return, transport, time, memory |
 | `Diagnostics` (extra VERSION TLVs, extra status, a UDS DID table) | boot, app, relay | none | untrusted | return, time, memory |
 | `Display` (what a phase or a boot outcome looks like) | boot, app, relay | boot: the `[boot] led` and `halt` of the board definition through the action program; app, relay: none | untrusted (at boot it runs in the sandbox with the declared pins and buses) | return, pins, buses, time, memory |
 | `LogSink` (where `Recent` overflow and extension logs go) | app, relay, host | none | untrusted | return, events, time, memory |
 | `SelfCheck` (the health answer when a slot on trial is confirmed) | app | healthy | untrusted (a decision point, 3) | return, time, memory |
-| `BoardBringUp` (the board's power, pins and buses at app start) | app, relay | the board package's | untrusted | return, pins, buses, time, memory |
+| `BoardBringUp` (the board's power, pins and buses at app start) | app, relay | the board definition's | untrusted | return, pins, buses, time, memory |
 | `ChildLink` (how a hub reaches a child) | relay | I2C controller, PIO UART | untrusted | return, buses, transport, dma, time, memory |
 | `Signer` (signing images and releases) | host | file key pair | untrusted (the host is trusted by definition; the device verifies) | – |
-| `KeyStore` (where the signing key is kept) | host | file key pair | untrusted (the host is trusted by definition; the device verifies) | – |
+| `KeyStore` (receives the signing key from where the user chose to keep it (an environment variable, the OS key store, 1Password and so on)) | host | file key pair | untrusted (the host is trusted by definition; the device verifies) | – |
 | `BuildRunner` (building node images) | host | cargo | untrusted | – |
 | `Agent` (an external agent the CLI and the page hand requests to) | host | data-defined (agent definitions) | untrusted | – |
 | `Action` (a program or request run after a host event) | host | data-defined (action definitions) | untrusted | – |
@@ -439,9 +440,9 @@ catalog allows). Every other port's replacement
 runs in the layer's sandbox (4) with the capabilities its manifest
 declares.
 
-### 2.2 Plug-ins and the manifest
+### 2.2 Extensions and the manifest
 
-A plug-in is a Rust crate (or, for the simplest kind, an action program
+An extension is a Rust crate (or, for the simplest kind, an action program
 in a definition) with a manifest, `dagon-extension.toml`:
 
 ```toml
@@ -507,19 +508,19 @@ pub struct Nop;  // no extension
 #[macro_export] macro_rules! extensions { ($a:expr $(, $b:expr)*) => { … nested Chain::new … } }
 ```
 
-Order: **publisher → board package → libraries → user**, always, in
+Order: **publisher → board definition → libraries → user**, always, in
 every layer. The layer's start (the boot loader's generated `main`, the
-MCU package's `start`, the host's `Host::new`) builds the chain itself
+MCU definition's `start`, the host's `Host::new`) builds the chain itself
 with `compose` (layers with published state and decision points: app,
 relay) or `compose_unpublished` (boot loader, host): the publisher for the
-`Published` state (2.4), then the board package's chain, then the
+`Published` state (2.4), then the board definition's chain, then the
 user's `extensions![..]` (libraries first, then the app's own). The
 result is an opaque `Composed`: its parts cannot be reached or
 reordered, it is not an extension, and only the layer start holds it.
 User code cannot put itself first, and `extensions![..]` never contains
 the publisher. Notifications reach every extension;
 decisions stop at the first non-abstaining answer. A port can be
-provided by at most one plug-in per image: `dagon gen` refuses a project
+provided by at most one extension per image: `dagon gen` refuses a project
 whose chain provides a port twice (a library and the user both bringing
 an `UpdateProtocol`), naming both.
 
@@ -542,10 +543,10 @@ Registration per layer:
   task owns the chain) and `confirm` (`ByHost`, or `Own`: the start
   confirms the app's trial). The start runs the board's `BoardBringUp`
   port (`app.bring_up`; a board without one emits nothing) and then the
-  own confirm before the link serves. The board package's extension
+  own confirm before the link serves. The board definition's extension
   (the board definition's `extension()`; on ESP32-S3 `NodePeripherals::
   board_extension`) takes the chain's board place. The agent stays the
-  start's and its serving task's: no public function hands it out. The MCU package creates and keeps the layer's
+  start's and its serving task's: no public function hands it out. The MCU definition creates and keeps the layer's
   `Published`, composes it, and returns a `Reader` to the app. The
   agent's machines deliver every event into the chain, and the chain
   asks the decision methods at the three points. Where the MCU's isolation
@@ -567,7 +568,7 @@ The app's agent takes the composed chain and nothing else:
 `Agent::new(config, store, chain)`, where `chain` is `compose`'s result.
 There is no separate hooks trait; observing events and answering
 `accept_update`, `allow_reboot_now` and `self_check` are `Extension`
-methods. The MCU packages' `start` still accepts the app's
+methods. The MCU definitions' `start` still accepts the app's
 `fn() -> bool` self-check and wraps it as a one-method extension
 (`SelfCheck`) in the user part of the chain, after the app's extensions:
 it never abstains, so placed first it would hide their answers.
@@ -591,8 +592,8 @@ the head of the chain copies each event into:
   rest, and the producer never waits. `seq` wraps and compares by serial
   arithmetic.
 
-Both live in one `Published<S, N>` that the layer package (the MCU
-package, the host) creates, keeps and hands to `compose` by exclusive
+Both live in one `Published<S, N>` that the layer crate (the MCU
+definition, the host) creates, keeps and hands to `compose` by exclusive
 reference, so the chain is its only writer. Display, log and app tasks
 get a `Reader` (receivers, the latest state, the recent ring), which
 only reads. The relay's display state is the same type with the relay's
@@ -616,7 +617,7 @@ read; this is what lets variants be added without advancing
 `EVENT_FORMAT`. The CLI prints the same events with `--events` (one JSON
 line each).
 
-Actions are the host's data-defined plug-in kind, like agent
+Actions are the host's data-defined extension kind, like agent
 definitions: a TOML file naming what to run and when, over transport
 kinds DAGON implements. The command transport (environment allow-list,
 fresh working folder, process group, time and output limits) is one
@@ -651,7 +652,7 @@ built. DAGON has no built-in search path.
 
 Everything not in this table is a notification. There is no decision
 point in the boot loader: nothing outside DAGON influences what the boot
-core starts, except a trusted plug-in that provides `DecisionPolicy`
+loader starts, except a trusted extension that provides `DecisionPolicy`
 (4.7), which is then that part of DAGON.
 
 | # | Decision | Layer | Who may answer (first non-abstaining in order) | Bound | Default | Never overridable |
@@ -662,7 +663,7 @@ core starts, except a trusted plug-in that provides `DecisionPolicy`
 | 3.4 | `confirm_plan(&Prepared) -> bool` | host | the interactive user (TTY, page) or `--yes`; actions and host extensions cannot | until the user answers | ask | key check and image verification happen before the plan is shown |
 
 Bounds are measured: the composed chain times each extension's call on
-its own with the layer's clock (DAGON's, from the MCU package; not a
+its own with the layer's clock (DAGON's, from the MCU definition; not a
 port); a late answer is ignored, as an abstention, and the chain emits
 `app.extension_overran { id, point, us }` (`id` is the extension's id,
 its 64-bit FNV-1a hash in the record); in a sandboxed layer the timer
@@ -823,7 +824,7 @@ of any extension in its image could have touched: the kind record's
 where the MCU has one, else `reinit` through each port's default), and
 the list of blocks comes from the image's manifests, so the cleanup is
 generated with the protection map and runs at `boot.hal_ready` (boot
-core) and before `app.bring_up` (app), ahead of the first service call.
+loader) and before `app.bring_up` (app), ahead of the first service call.
 A peripheral DAGON itself uses (its link, its LED) is reinitialised by
 DAGON's own bring-up after any reset. The conformance
 build triggers a watchdog reset from inside each service's
@@ -854,7 +855,7 @@ moment. No extension pointer outlives the call that passed it.
 #### Conformance at the cancellation boundaries
 
 For every service with a non-empty cancellation column, the MCU
-package's conformance build runs the call with the timer set to fire at
+definition's conformance build runs the call with the timer set to fire at
 each boundary (before the mutex, holding the mutex, after the transfer
 started, after completion before collect, during collect, after
 collect), checks that DAGON's next use of the same bus or channel
@@ -1022,7 +1023,7 @@ names are replaced before they leave the machine ([MCU and board definitions](/e
 The capability record is checked twice: `dagon gen` plans against the
 definition's numbers and refuses a definition whose numbers are outside
 the kind's allowed set (below); at boot and in the conformance build the
-MCU package reads the unit's own registers (`MPU_TYPE` on Cortex-M, the
+MCU definition reads the unit's own registers (`MPU_TYPE` on Cortex-M, the
 SAU type register, the count of writable `pmpcfg` entries and the
 smallest NAPOT size that reads back on RISC-V, the PMS version
 registers) and refuses to enable a level whose record the hardware does
@@ -1057,7 +1058,7 @@ addresses the kind's alignment rule allows (the linker script is
 generated from the same result), assigns the declared windows, and
 refuses with a clear message when the entries do not fit (`extension
 uds-can needs 5 windows; 3 fit after code, data and stack on a
-8-region armv6m-mpu`). `check` runs in the MCU package's test against
+8-region armv6m-mpu`). `check` runs in the MCU definition's test against
 the generated tables and the definition; the conformance build executes
 a write to each privileged block from an extension on the device and
 expects the fault event. Adding an MCU of a known kind touches no code;
@@ -1073,12 +1074,12 @@ Per kind, what the hardware gives and what the generator does with it:
 | `armv8m-tz` | ARMv8-M with the Security Extension | three independent records: `sau_regions` ∈ {0, 4, 8}, `s_mpu_regions` and `ns_mpu_regions` each ∈ {0, 4, 8, 12, 16}, all read back; plus the `idau` table of the MCU's fixed attribution and the `mpc`/`ppc` units the definition lists; DAGON is Secure, extensions Non-secure and unprivileged under the NS-MPU; the service ABI is the Secure gateway (`SG` veneers in an NSC region) | Secure and Non-secure faults, `SecureFault` | the strongest: Secure memory is invisible to extensions even when privileged in the Non-secure state; bus masters are attributed Secure/Non-secure by the interconnect and the definition lists each master's attribution | the IDAU/MPC/PPC configuration is MCU-specific data; a master the interconnect cannot attribute must stay Secure-only; attribution may come from the IDAU alone (`sau_regions = 0` with a complete `idau` table is a valid `tz` definition) or from IDAU plus SAU; the level is `none` only when neither can attribute the extension regions |
 | `riscv-pmp` | RISC-V PMP | `pmp_entries` ∈ {0, 16, 64} as implemented (read back by probing which `pmpcfg` entries are writable), address modes NA4 (4 B, if `na4`), NAPOT (from 8 B, the implementation's `grain` read back), TOR (any range on the granule, if `tor`); U-mode for extensions, M-mode for DAGON; `critical_section = mstatus-mie` | `mcause`, `mtval` (address), no hardware stacking | denial for U-mode of everything not granted; XN per entry | without ePMP, M-mode is not restricted by PMP; entries are few and TOR consumes an entry per boundary; 0 entries is `none` |
 | `riscv-epmp` | RISC-V ePMP (Smepmp) | as PMP, plus `mseccfg` machine-mode lockdown and shared regions | as PMP | as PMP, and DAGON can forbid M-mode execution from extension memory | |
-| `esp-pms` | Espressif Permission Control + World Controller | `worlds`, `memory_regions`, `peripheral_slots`, `gdma_channels` as the part implements (read back from the PMS version and region registers); `critical_section = xtensa-level`; per-world (World 0 DAGON, World 1 extensions) permissions on internal memory regions, external memory through the MMU, each peripheral, each GDMA channel; applied per core; lockable | `EXCCAUSE`/`EXCVADDR`, World-switch exception | denial for World 1 of everything not granted, on every core, including GDMA | the PMS/WCL registers must be programmed by DAGON's MCU package (no HAL driver); until then `none` |
+| `esp-pms` | Espressif Permission Control + World Controller | `worlds`, `memory_regions`, `peripheral_slots`, `gdma_channels` as the part implements (read back from the PMS version and region registers); `critical_section = xtensa-level`; per-world (World 0 DAGON, World 1 extensions) permissions on internal memory regions, external memory through the MMU, each peripheral, each GDMA channel; applied per core; lockable | `EXCCAUSE`/`EXCVADDR`, World-switch exception | denial for World 1 of everything not granted, on every core, including GDMA | the PMS/WCL registers must be programmed by DAGON's MCU definition (no HAL driver) |
 | `none` | no usable unit | | | time measured, events recorded | memory, flash, watchdog, hang (4.5) |
 
 The level a definition may claim follows from the kind: `mpu` for the
 MPU and PMP kinds, `pms` for `esp-pms`, `tz` for `armv8m-tz`, `none`
-otherwise or until the package implements the kind.
+otherwise.
 
 ### 4.5 Isolation level per MCU, and the three examples
 
@@ -1152,9 +1153,8 @@ is a service), IO_BANK0/QSPI and PADS `0x4001_4000`–`0x4001_C000`
 
 **ESP32-S3** — `kind = "esp-pms"`, two `[[core]]`, `boot_extensions =
 false` (vendor stage 2, no DAGON boot stage), `fault_address = true`,
-`unwind = "xtensa-world"`, `level = "none"` until the MCU package
-programs the PMS and WCL registers (the HAL exposes no driver), then
-`pms` for the app (Espressif ESP32-S3 TRM, "World Controller" and
+`unwind = "xtensa-world"`, `level = "pms"` for the app; the MCU definition
+programs the PMS and WCL registers, as the HAL exposes no driver (Espressif ESP32-S3 TRM, "World Controller" and
 "Permission Control" chapters). Generated map at `pms`:
 
 | Resource | World 1 (extension) | Notes |
@@ -1169,11 +1169,14 @@ programs the PMS and WCL registers (the HAL exposes no driver), then
 Not guaranteed by any level: what a declared capability can do in the
 physical world. A pin the manifest declares can cut the board's power
 if the wiring lets it; a bus write to a declared device's writable
-register can change that device's state. The manifest declares; `dagon
-gen` shows the declared capabilities of every extension in the project;
-the board definition narrows a bus capability to a device and a register
-set and a pin to its allowed levels; and the board author owns the
-wiring. Whether a peripheral is window-eligible is the MCU definition's
+register can change that device's state. Each has its part:
+
+- The manifest declares the capabilities.
+- `dagon gen` shows the declared capabilities of every extension in the project.
+- The board definition narrows a bus capability to a device and a register set and a pin to its allowed levels.
+- The board author owns the wiring.
+
+Whether a peripheral is window-eligible is the MCU definition's
 statement that it cannot write memory, route interrupts or clocks, or
 share state with DAGON (11); the checker refuses a definition that
 marks a bus master eligible.
@@ -1184,7 +1187,7 @@ construction.
 
 ### 4.7 Trusted extensions and the authenticated chain
 
-A plug-in that provides a trusted-only port (2.1) replaces a part that
+An extension that provides a trusted-only port (2.1) replaces a part that
 the safety rules are made of. It is accepted only when:
 
 1. its manifest says `trusted = true` and names the trusted ports it
@@ -1198,21 +1201,25 @@ the safety rules are made of. It is accepted only when:
    `#[path]` let the compiler read any of them; running cargo inside the
    extension's own folder therefore changes its hash. The hash is of the
    source because the linked bytes do not exist when `dagon gen` runs.
+
    `dagon gen` checks the hash (and names the one it found when they
    differ), then checks the boot crate's dependency graph on the host:
    cargo resolves it with every feature for every target (`--locked` once
    its `Cargo.lock` exists), a superset of any one build of it, and every
    package built into it (normal and build dependencies) must be DAGON's,
    inside a declared trusted extension's folder (and so in its hash), or
-   a registry crate with a checksum in the boot crate's `Cargo.lock`. The
-   check passed, gen writes `graph.stamp`: the SHA-256 of the boot
+   a registry crate with a checksum in the boot crate's `Cargo.lock`.
+
+   The check passed, gen writes `graph.stamp`: the SHA-256 of the boot
    crate's `Cargo.toml`, its `Cargo.lock` and each trusted extension's
    source hash. The boot loader's build recomputes that stamp and refuses
    to build when it is missing or differs, so a boot crate whose graph
    was not checked for exactly its current inputs is never built. The
    graph is checked on the host and not in the build script because a
    build script sees neither the outer build's features nor, offline,
-   every crate cargo would resolve. Not covered: the registry crates the
+   every crate cargo would resolve.
+
+   Not covered: the registry crates the
    extension depends on (pinned by checksum, not reviewed), and source
    an extension includes from outside its own folder (`include!` or
    `#[path]` with a path leaving it), which trusted code is reviewed for
@@ -1225,7 +1232,7 @@ the safety rules are made of. It is accepted only when:
    and the first bytes of their source hashes for display (0x08) and
    the full hashes for identity (0x09).
 
-A plug-in may also be trusted without providing any port: an observer
+An extension may also be trusted without providing any port: an observer
 whose manifest says `trusted = true` and observes events only. It is
 accepted under items 2 to 4 above, answers no decision point, and each
 of its handler calls is timed against its manifest's `max_run_us` like
@@ -1260,7 +1267,9 @@ The one authentication rule, applied by every verifier in the chain
   and the boot loader before `chosen` on a trial boot (and checks the
   digest on every boot). A boot loader image is verified under the rule
   by the agent before `written` and again before `pending_set` (the
-  SLOT_PENDING record names its header digest). On a self-boot MCU with
+  SLOT_PENDING record names its header digest).
+
+  On a self-boot MCU with
   a stage0 whose definition sets `[layout] stage0_verifies`, stage0
   checks the boot loader header's signature under the project key built
   into it as well as the digests. Where it is left out, stage0 checks
@@ -1273,10 +1282,13 @@ The one authentication rule, applied by every verifier in the chain
   trusted-code bug, or an attacker with flash access) can make stage0
   start an unsigned core.
   A verifier does not fit either stage0's region within the margin below.
+
   When the log's choice does not
   check out (a corrupt slot, or a record naming a slot without a core),
   stage0 tries the other slots on their own before it has nothing to
-  start. On a self-boot MCU without a stage0, the boot loader is the root
+  start.
+
+  On a self-boot MCU without a stage0, the boot loader is the root
   and is verified by the host before it is written and by the agent when
   it is written through the write path.
 - **Stage0 budget.** The MCU definition's `[layout] stage0.size` is the
@@ -1337,7 +1349,7 @@ API-shape guarantees only:
 | Rule | Enforced by |
 |---|---|
 | No store access | Extensions receive read-only payloads copied into their own region; applications get `ImageView` (2.3); the slot store's mutators are reachable only through the image-lifecycle machine. |
-| Verify/confirm order | The machines' transitions are the only state changes: `self_check` is consulted only inside the `confirmed` transition after the "on trial" guard; `accept_update` only after the DAGON guards. An extension's answer is a validated `enum` (`RETURN`), never a closure DAGON executes. A protocol plug-in produces triggers; the session machine runs the guards. |
+| Verify/confirm order | The machines' transitions are the only state changes: `self_check` is consulted only inside the `confirmed` transition after the "on trial" guard; `accept_update` only after the DAGON guards. An extension's answer is a validated `enum` (`RETURN`), never a closure DAGON executes. A protocol extension produces triggers; the session machine runs the guards. |
 | Time | Decision bounds in 3; notifications have the same bound, preempted at a hardware level, measured at `none`. |
 | Watchdog | No service touches it. |
 | Reboot | 3.2: capped delay, never refused. |
@@ -1350,28 +1362,27 @@ command transport's limits, and no host extension answers a decision
 
 ### 4.9 Conformance cases
 
-The MCU package's conformance build runs, from an extension on the
-device, and expects the recorded outcome: a write to each privileged
-block of the definition (fault), a read of DAGON code (fault), a jump
-into DAGON code (fault), a forged service id (fault), a service pointer
-outside the region and a length that overflows (refused), an invalid
-unprivileged stack pointer before a service call (the kind's documented
-outcome: flagged stacking error and unwind, or lockup, watchdog reset,
-fuse set and the extension disabled on the next boot), a loop past the
-budget (overran), an interrupt storm from a declared peripheral (source
-disabled), a DMA request through a window that is not eligible (refused
-at generation), nested faults (one unwind), a timer and a fault in the
-same call (one unwind), an attempt to start another core where the MCU
-has one (fault), and on a `pms` MCU a GDMA access from World 1
-(denied). Added for the services: the cancellation-boundary cases of 4.2 and the
-reset-time contract case (a watchdog reset inside each non-preemptible
-part, then first use succeeds); for the fuse: the scenarios of its
-model requirements (5.5), run on the device. The cases are generated from the
-definition (one per privileged block, one per core, one per bus master,
-one per service cancellation boundary), so a new MCU gets its cases from
-its definition. Each case is also a scenario of the
-executable model (5.5), which checks that the boot reaches the same
-decision as without the extension.
+The MCU definition's conformance build runs these from an extension on the device, and expects the recorded outcome:
+
+- A write to each privileged block of the definition (fault)
+- A read of DAGON code (fault)
+- A jump into DAGON code (fault)
+- A forged service id (fault)
+- A service pointer outside the region and a length that overflows (refused)
+- An invalid unprivileged stack pointer before a service call (the kind's documented outcome: flagged stacking error and unwind, or lockup, watchdog reset, fuse set and the extension disabled on the next boot)
+- A loop past the budget (overran)
+- An interrupt storm from a declared peripheral (source disabled)
+- A DMA request through a window that is not eligible (refused at generation)
+- Nested faults (one unwind)
+- A timer and a fault in the same call (one unwind)
+- An attempt to start another core where the MCU has one (fault)
+- On a `pms` MCU, a GDMA access from World 1 (denied)
+- For the services: the cancellation-boundary cases of 4.2 and the reset-time contract case (a watchdog reset inside each non-preemptible part, then first use succeeds)
+- For the fuse: the scenarios of its model requirements (5.5), run on the device
+
+The cases are generated from the definition (one per privileged block, one per core, one per bus master, one per service cancellation boundary), so a new MCU gets its cases from its definition.
+
+Each case is also a scenario of the executable model (5.5), which checks that the boot reaches the same decision as without the extension.
 
 ### 4.10 Other architectures in the same model
 
@@ -1385,7 +1396,7 @@ small closed set of mechanisms behind a trait:
 | Sandbox timer | `[isolation.capabilities] timer` | `systick`, `riscv-mtime`, `timer-group` |
 | Watchdog | `[watchdog] kind, trial_ms, confirmed_ms` | the `WatchdogDriver` port's defaults per kind (`iwdg`, `rp-watchdog`, `rtc-wdt`, …) |
 | Boot record placement | `[boot.record] kind, at, survives, rings, entropy` (entropy: the source of a start-up word that differs between starts; required for a boot record) | `noinit-ram`, `retained-registers` (5.5) |
-| Lockup fuse | `[boot.record] fuse`, `[watchdog] flag` (none, or the register or package source of a reset-surviving, start-acknowledged watchdog-reset flag) | fuse available only with a flag; the loader reports it unavailable otherwise (5.5) |
+| Lockup fuse | `[boot.record] fuse`, `[watchdog] flag` (none, or the register or MCU definition source of a reset-surviving, start-acknowledged watchdog-reset flag) | fuse available only with a flag; the loader reports it unavailable otherwise (5.5) |
 | Root protection | `[isolation] root_protection` | per MCU family, applied by `dagon provision` |
 | Caches and TCM | `[isolation] cache, tcm` | window attributes and bounce-buffer placement (below) |
 
@@ -1442,7 +1453,7 @@ definition reader refuses unknown keys, so a definition that uses these
 tables states the `definitions` format that has them (6). `dagon gen`
 writes `boot_wiring.rs` for the boot loader build (`LED`, `HALT`,
 `PROGRAM`, `RECORD`, the extension chain type and its protection map); a
-board package ships its definition and the boot loader build reads it the
+board definition ships its definition and the boot loader build reads it the
 same way. The MCU crates take these constants and hold no pin, pattern
 or environment-variable default of their own.
 
@@ -1455,7 +1466,7 @@ or environment-variable default of their own.
 For a board that needs an LED pattern or a power-hold line and no code,
 the board definition holds a declarative, bounded program that DAGON
 interprets. It is an extension like any other in the chain (the board
-package position), observes action-capable events, and runs under the
+definition position), observes action-capable events, and runs under the
 same rules: only from `WatchdogArmed` on, only on declared pins, buses
 and devices.
 
@@ -1498,7 +1509,7 @@ treats the program as invalid as a whole (`boot.program_skipped`).
 
 A board resource several parties need is shared, not owned.
 
-- A bus the board package needs for bring-up and recovery and the app
+- A bus the board definition needs for bring-up and recovery and the app
   needs for its own devices is exported as `pub static SYS_I2C:
   Shared<I2c<'static, Blocking>>` (`dagon_events::Shared<T>`, an
   `embassy_sync::mutex::Mutex` taken with `try_lock`), used through
@@ -1512,14 +1523,14 @@ A board resource several parties need is shared, not owned.
   device. Each device is a `[[device]]` of the board definition with its
   writable registers and its `max_transfer` (from the device's
   datasheet); the port refuses other registers and longer transfers. The
-  package exports its device constants and register-level functions, so
+  definition exports its device constants and register-level functions, so
   an app copies nothing.
-- Board bring-up is the board package's extension on `app.bring_up`
+- Board bring-up is the board definition's extension on `app.bring_up`
   (the `BoardBringUp` port); a user step is an extension later in the
   chain on the same event, or a task waiting for `Latest.phase ==
   Serving`.
-- A board package holds the board, not what is stacked on it; a stacked
-  peripheral's driver lives with the app that uses it, and the package
+- A board definition holds the board, not what is stacked on it; a stacked
+  peripheral's driver lives with the app that uses it, and the definition
   hands out the bus pins as plain peripherals.
 
 ### 5.4 VERSION query
@@ -1536,17 +1547,17 @@ smallest link payload (10).
 
 | id | Value |
 |---|---|
-| 0x01 | boot core version (`Version`, LE u32) |
+| 0x01 | boot loader version (`Version`, LE u32) |
 | 0x02 | installed boot image identity: first 8 bytes of its SHA-256 |
 | 0x03 | agent (`dagon-agent`) version |
-| 0x04 | MCU package version |
-| 0x05 | board package version |
+| 0x04 | MCU definition version |
+| 0x05 | board definition version |
 | 0x06 | MCU identity (5.5): the value the image header and the compiled topology carry; with len 2 the image header's `mcu_id`, u16 LE |
 | 0x07 | isolation (4.5): `level u8`, `kind u8`, `boot_extensions u8`, `root_protection` (kind and exact level as the definition enumerates them, e.g. `rdp1`/`rdp2`, the write-protected sectors, and whether the level is reversible), `fuse` (Clear, or Tripped with the disabled extension's identity as the model encodes it, 5.5) |
 | 0x08 | extensions, for display: per linked extension `id` (up to 32 bytes), `trusted u8`, first 8 bytes of its source hash (4.7); repeated TLVs, one per extension |
 | 0x09 | extensions, for identity: per trusted extension its full 32-byte source hash (4.7); repeated TLVs |
 | 0x0A | stage0 version: the version mark stage0 carries in its region (`dagon_format::stage0`; `Version`, LE u32); omitted for a stage0 without the mark and on a vendor-stage2 MCU |
-| 0x0B | boot core slots A, B: `active u8` (the running slot), then per slot `state u8` (STATUS slot state) and `version` (LE u32) |
+| 0x0B | boot loader slots A, B: `active u8` (the running slot), then per slot `state u8` (STATUS slot state) and `version` (LE u32) |
 | 0x0C | app slots A, B, factory, in the shape of 0x0B |
 | 0x0D | wire version the agent speaks (`PROTO_VERSION`, u8) |
 | 0x10 | formats: pairs `(format id u8, number u8)`: wire, image-header, state-log, event, definitions, boot-program, boot-record, extension-manifest |
@@ -1566,7 +1577,7 @@ was compiled against:
   its length by walking the vendor image's segment table, hashes it
   (0x02), and omits 0x01. The host matches 0x02 against the identity
   recorded at provisioning (`host.provision.recorded`, kept in the
-  project) and against the MCU package's vendor table, and shows the
+  project) and against the MCU definition's vendor table, and shows the
   version or "unknown vendor stage (hash …)".
 
 `dagon status` prints one line per node with these values, the isolation
@@ -1661,7 +1672,7 @@ and the limits of each claim.
   fuse that names that call (reset survival as the MCU definition
   declares; power loss may lose a fuse but never forge one).
 - **Hand-off.** A fuse armed by an app or relay call survives the boot
-  core's start unchanged (the boot loader records it and does not clear
+  loader's start unchanged (the boot loader records it and does not clear
   or act on another layer's fuse) and is read by the app's start, which
   disables the named extension for its run; a fuse armed by a boot-loader
   call is acted on by the boot loader's next start.
@@ -1681,7 +1692,7 @@ and the limits of each claim.
 - **Watchdog flag.** The fuse needs a watchdog-reset flag that survives
   every reset other than power-on and is cleared only when a start
   acknowledges it. The MCU definition declares whether the MCU has one
-  and where it comes from (a hardware register, or one the MCU package
+  and where it comes from (a hardware register, or one the MCU definition
   provides); without it the fuse is unavailable on that MCU and the
   definition loader says so.
 
@@ -1774,21 +1785,15 @@ no longer emitted stays in the catalog, marked `retired`, until the next
 
 ## 7. Attaching and detaching a DAGON-enabled app
 
-The boot loader expects a slot with a signed header for this MCU (by its
-identity, 5.5), target tag and slot, a body whose digest matches, a
-vector table at the body start, and an app that feeds the watchdog the
-boot loader armed (on trial: confirm within the trial period or be rolled
-back). An app that does not link DAGON can still be installed through
-the ROM path and runs after signing; it never confirms, so it rolls back
-after `max_attempts` unless installed as confirmed by `dagon provision`.
-To attach DAGON: add the MCU and board packages, call `start` with an
-extension chain (`Nop` is valid), read the published events through the
-`Reader` it returns, keep the guard fed. To detach: stop calling `start`; the boot loader still
-verifies and counts attempts, still runs its own extensions and still
-writes the boot record; the host sees no identity reply and `dagon
-status` says so. No extension, event, definition or boot action changes
-what the boot loader checks, except a trusted extension that is declared
-to (4.7).
+The boot loader expects a slot with a signed header for this MCU (by its identity, 5.5), target tag and slot, a body whose digest matches, a vector table at the body start, and an app that feeds the watchdog the boot loader armed (on trial: confirm within the trial period or be rolled back).
+
+An app that does not link DAGON can still be installed through the ROM path and runs after signing. It never confirms, so it rolls back after `max_attempts` unless installed as confirmed by `dagon provision`.
+
+To attach DAGON: add the MCU and board definitions, call `start` with an extension chain (`Nop` is valid), read the published events through the `Reader` it returns, keep the guard fed.
+
+To detach: stop calling `start`. The boot loader still verifies and counts attempts, still runs its own extensions and still writes the boot record. The host sees no identity reply and `dagon status` says so.
+
+No extension, event, definition or boot action changes what the boot loader checks, except a trusted extension that is declared to (4.7).
 
 ## 8. Examples
 
@@ -1873,7 +1878,7 @@ drains `events.recent()` from the `Reader` (owned `EventRecord`s, 2.4).
 
 An automotive node is written by a diagnostic tester speaking UDS
 (ISO 14229) over CAN with ISO-TP (ISO 15765-2), not by DAGON's wire
-over a serial link. One plug-in provides two ports and runs at boot and
+over a serial link. One extension provides two ports and runs at boot and
 in the app.
 
 Manifest:
@@ -1895,7 +1900,7 @@ stack_bytes = 2048
 ram_bytes = 8192
 ```
 
-Boot stage. The boot loader links the plug-in into `.ext.*`, and the
+Boot stage. The boot loader links the extension into `.ext.*`, and the
 generated map (4.4) grants it the CAN1 register block, window-eligible in
 the MCU definition, and its own memory; the flash
 controller, the state log, the watchdog and DAGON's RAM are denied.
@@ -1903,13 +1908,13 @@ From `WatchdogArmed` the boot machine polls the `UpdateTransport` port
 between its steps for a bounded window (`[boot] service_window_ms` in
 the project, capped by the trial period): a tester that sends
 `DiagnosticSessionControl(programmingSession)` keeps the boot loader in
-its recovery path (`boot.recovery { path: Service }`) and the plug-in's
+its recovery path (`boot.recovery { path: Service }`) and the extension's
 `UpdateProtocol` maps `RequestDownload` → `update_offered`,
 `TransferData` → `header_chunk`/`data_chunk`, `RequestTransferExit` →
 `transfer_end`, `RoutineControl(switchSlot)` → `switch`, `ECUReset` →
 `reboot`; the session machine runs every DAGON guard and the verifier
 port on each trigger exactly as for the DAGON wire, so a tester cannot
-skip the signature or write the active slot. The plug-in's `Diagnostics`
+skip the signature or write the active slot. The extension's `Diagnostics`
 port answers `ReadDataByIdentifier` for the identifiers it declares
 (the versions and the isolation level from the same values VERSION
 carries). Each handler call runs under `max_run_us`; a stuck CAN
@@ -1918,15 +1923,15 @@ without the window.
 
 App stage. The same crate, in the app's chain, provides the same ports
 to the agent: the serving task reads frames from the `UpdateTransport`
-(ISO-TP reassembly inside the plug-in), the `UpdateProtocol` turns UDS
+(ISO-TP reassembly inside the extension), the `UpdateProtocol` turns UDS
 services into session triggers, and the agent's replies go back the
-same way. `accept_update` and `self_check` stay with the board package,
+same way. `accept_update` and `self_check` stay with the board definition,
 libraries or the app (`decides = []` here). At level `mpu` the handlers
 run unprivileged with the CAN window as their only peripheral; at level
 `none` the same code runs, and `dagon status` shows the node as
 "extensions unguarded".
 
-What the plug-in cannot do, at any level, through the API: reach the
+What the extension cannot do, at any level, through the API: reach the
 slot store or the log (no handle), confirm a slot (not a decision it
 declares), or change what the boot loader starts. What it cannot do at
 `mpu`/`pms` whatever its code does: write flash, touch the watchdog,
@@ -1960,7 +1965,7 @@ impl Extension for Bench {
 | Arbitrary code at boot with lints, dependency allow-lists and conformance scans as the barrier | Those inspect source, not what runs; a callback could loop until the watchdog resets the chip, write any register or flash. The barrier is the MCU's protection unit plus a preempting timer (4.1), and where an MCU has neither, the definition says `none` and the product says so. |
 | A boot-time veto answered by an extension | Any untrusted answer that turns a `Boot` into a rollback lets a faulty extension keep a valid image from ever running. Boot policy is DAGON's `DecisionPolicy` port; replacing it is a trusted extension (4.7), declared, signed and shown. |
 | Public slot store mutators with the agent as one user among others | Persistent image state could then change without its event and without the confirm rule; the image-lifecycle machine is the only writer. |
-| A fixed hook trait extended with a method per new timing | No composition, no payload stream for displays, no replacement of parts, and the list must be fixed again at every timing not foreseen. Kept only as a deprecated facade. |
+| A fixed hook trait extended with a method per new timing | No composition, no payload stream for displays, no replacement of parts, and the list must be fixed again at every timing not foreseen. |
 | A hand-maintained event enum checked against a hand-maintained catalog | Two lists can agree while a transition emits nothing; only a primitive that cannot change state without emitting makes the catalog derived. |
 | Linker-section registries (`linkme`) | Entry order undefined; hidden registration by libraries; `dyn` dispatch cost and size. |
 | `dyn Extension` list with `alloc` on the device | No alloc below the host; a static slice reintroduces the registry problem. |
@@ -1972,7 +1977,6 @@ impl Extension for Bench {
 | A fixed reboot-delay cap | A number chosen once is wrong for an MCU with a shorter trial watchdog; the cap derives from the MCU definition's periods. |
 | A boot record with CRC-covered headers updated in place | A count, state or CRC updated in place cannot be made atomic against a reset: a torn update invalidates every event the header covers; a hand-off that locates another writer's section by its header couples the writers' formats. |
 | Specifying the retained-memory and identity formats in prose | A format whose correctness depends on every interleaving of resets, partial writes and version skew is shown correct by an executable model with randomized fault injection, not by prose (5.5). |
-| A built-in example topology and `demo` command in the CLI | Trying DAGON without hardware is the simulator's job (`dagon sim` runs any topology with its definitions); a browser try page is a separate published page. DAGON holds no board or topology of its own. |
 
 ## 10. Size limits and where they come from
 
@@ -1995,7 +1999,7 @@ listed, and a test asserts each pair.
 | Live event payload | ≤ 16 bytes for boot events (by value); larger app/host payloads by reference | `dagon-events` size assertions | `Published` snapshot; the compact form |
 | `EventRecord` | 24 bytes: `layer`, `kind`, `flags`, `dropped`, `seq u32`, `payload [u8; 16]` | `state_machine!` `compact` attribute (a generated test asserts every kind has one) | `Recent<N>`; the boot record's compact form reuses the first 3 payload bytes |
 | Catalog | no numeric cap; `kind` is `u8` per layer | `state_machine!` | the record `kind u8` (a generated test fails at 256 kinds in a layer); serve stream |
-| Recent ring | `N` chosen by the layer package | `Published<S, N>` | the layer package's `Published`; overflow counts `dropped` |
+| Recent ring | `N` chosen by the layer crate | `Published<S, N>` | the layer crate's `Published`; overflow counts `dropped` |
 | Decision bounds | 50 ms; `REBOOT_DELAY_MAX = min(trial_ms, confirmed_ms) / 2` | `dagon-events` constants; the MCU definition's `[watchdog]` | the serving task's timer; `boot_wiring.rs` |
 
 ## 11. Bus masters and privileged control blocks: the definition schema
@@ -2061,7 +2065,7 @@ block write memory, and how does the design keep it privileged.
 
 What runs where in DAGON's own code, how long DAGON's code may mask
 interrupts, and what a flash operation stops, per MCU. This section is
-normative: the MCU packages are written to it, the MCU definitions carry
+normative: the MCU definitions are written to it, the MCU definitions carry
 its hardware facts (`[execution]`, `[watchdog]`), and the checks named
 below keep code and data to it.
 
@@ -2083,14 +2087,12 @@ below keep code and data to it.
    clippy: `targets/mcu/clippy.toml` refuses every masking primitive
    (`critical_section::with` and `acquire`, `cortex_m::interrupt::free`
    and `disable`, a critical-section `blocking_mutex::Mutex::lock`) in the
-   MCU packages and their boot images (stage0, boot loaders), by resolved
+   MCU definitions and their boot images (stage0, boot loaders), by resolved
    path, so an alias or a wrapper does not hide
    one. The functions that mask (the watchdog guard's state update, the
    relay's shared display state) carry `#[allow(clippy::disallowed_methods)]`
    with their reason, and a test keeps the list and the exemptions as they
-   are reviewed. Every request starts with a gated feed through the
-   serving loop's `ServeHost::feed` (the RP2040 relay's PC loop through
-   the guard's `progress`).
+   are reviewed.
 3. **Flash operations are hardware facts.** What an erase or program
    stops is the definition's `[execution] flash_op`:
    - `fetch-stall`: single-bank flash the code runs from; instruction
@@ -2108,7 +2110,8 @@ below keep code and data to it.
    datasheet maximum `erase_unit_max_ms`.
 4. **The watchdog outlasts one erase.** `erase_unit_max_ms` is below
    `[watchdog] confirmed_ms` (checked when a definition is loaded); every
-   request starts with a gated feed, and a longer erase is split into
+   request starts with a gated feed through the serving loop's `ServeHost::feed`
+   (the RP2040 relay's PC loop through the guard's `progress`). A longer erase is split into
    erase units with a gated feed between them. A pending image's trial
    is a window of its own: the guard's trial policy decides whether
    anything is fed while it lasts (`app.watchdog_taken` reports it).
@@ -2125,14 +2128,14 @@ below keep code and data to it.
    same reply.
 7. **Facts say how far they are established.** A definition's hardware
    fact is a number checked against its source (the definition's comment
-   cites the document and table), `{ unverified = N }` (a value not yet
-   checked against its source) or `"unmeasured"` (no value yet). Tools and
+   cites the document and table), `{ unverified = N }` (a value not
+   checked against its source) or `"unmeasured"` (no value). Tools and
    documents report the last two as not established; a check that needs a
    value uses an unverified one; none is relied on in a release.
 
 ### 12.2 Per MCU
 
-The tables are what the MCU packages do; the budgets are each MCU
+The tables are what the MCU definitions do; the budgets are each MCU
 definition's.
 
 **STM32F401RE** (`flash_op = "fetch-stall"`, `erase_unit` one sector)
@@ -2178,11 +2181,10 @@ FIFO keeps what fits; a frame cut by the stall is dropped by the 20 ms
 gap rule and the requester retries. USB Serial/JTAG NAKs the host
 meanwhile.
 
-### 12.3 Measured on hardware
+### 12.3 How the budgets are set
 
-None of the budgets above is established by measurement. For each MCU, a
-release relies on them only once these are measured on the boards: the longest critical section
-of DAGON's own code (`masked_max_us`: the worst measured plus a margin),
+For each MCU, the budgets are set from these values on the boards: the longest critical section
+of DAGON's own code (`masked_max_us`: the worst value plus a margin),
 the worst-case erase time of the board's flash part (and its datasheet
 value, cited in the definition), the watchdog margin left at the end of
 one erase, and the link's recovery after it (the parent's retry

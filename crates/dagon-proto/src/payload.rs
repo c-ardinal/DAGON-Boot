@@ -19,8 +19,8 @@ pub mod mode {
 /// XFER_BEGIN / SET_PENDING / CONFIRM / STATUS `target`.
 pub mod target {
     pub const APP: u8 = 0;
-    /// A boot core slot (A/B) of a self-boot MCU with a stage0; the new
-    /// boot core confirms itself, so CONFIRM never names it.
+    /// A boot loader slot (A/B) of a self-boot MCU with a stage0; the new
+    /// boot loader confirms itself, so CONFIRM never names it.
     pub const BOOTCORE: u8 = 1;
     /// The recovery agent's slot (`slot = 2`, factory) of a vendor-stage2
     /// MCU; written with its header last, never set pending or confirmed.
@@ -30,7 +30,7 @@ pub mod target {
 }
 
 /// STATUS request: empty for the APP slots, or one `target` byte
-/// (`target::BOOTCORE`: the boot core slots, in the same response shape).
+/// (`target::BOOTCORE`: the boot loader slots, in the same response shape).
 /// A device that keeps no such slots answers `Status::Unsupported`; one
 /// that predates the byte answers `Status::Arg`.
 pub fn parse_status_req(b: &[u8]) -> Result<u8, Status> {
@@ -352,7 +352,7 @@ pub fn parse_version_req(b: &[u8]) -> Result<(), Status> {
 /// value the node cannot determine is left out; a reader skips ids it
 /// does not know and values of a length it does not read.
 pub mod version_id {
-    /// The running boot core's version (`Version`, u32 LE).
+    /// The running boot loader's version (`Version`, u32 LE).
     pub const BOOTCORE: u8 = 0x01;
     /// The image header `mcu_id` (u16 LE).
     pub const MCU: u8 = 0x06;
@@ -369,17 +369,17 @@ pub mod version_id {
     /// site/src/content/docs/en/explanation/lifecycle-events.md 5.4 lists them (a test keeps that
     /// table equal to this one). This agent sends the ids named above.
     pub const TABLE: [(u8, &str); 16] = [
-        (0x01, "boot core version (`Version`, LE u32)"),
+        (0x01, "boot loader version (`Version`, LE u32)"),
         (0x02, "installed boot image identity: first 8 bytes of its SHA-256"),
         (0x03, "agent (`dagon-agent`) version"),
-        (0x04, "MCU package version"),
-        (0x05, "board package version"),
+        (0x04, "MCU definition version"),
+        (0x05, "board definition version"),
         (0x06, "MCU identity (5.5): the value the image header and the compiled topology carry; with len 2 the image header's `mcu_id`, u16 LE"),
         (0x07, "isolation (4.5): `level u8`, `kind u8`, `boot_extensions u8`, `root_protection` (kind and exact level as the definition enumerates them, e.g. `rdp1`/`rdp2`, the write-protected sectors, and whether the level is reversible), `fuse` (Clear, or Tripped with the disabled extension's identity as the model encodes it, 5.5)"),
         (0x08, "extensions, for display: per linked extension `id` (up to 32 bytes), `trusted u8`, first 8 bytes of its source hash (4.7); repeated TLVs, one per extension"),
         (0x09, "extensions, for identity: per trusted extension its full 32-byte source hash (4.7); repeated TLVs"),
         (0x0A, "stage0 version: the version mark stage0 carries in its region (`dagon_format::stage0`; `Version`, LE u32); omitted for a stage0 without the mark and on a vendor-stage2 MCU"),
-        (0x0B, "boot core slots A, B: `active u8` (the running slot), then per slot `state u8` (STATUS slot state) and `version` (LE u32)"),
+        (0x0B, "boot loader slots A, B: `active u8` (the running slot), then per slot `state u8` (STATUS slot state) and `version` (LE u32)"),
         (0x0C, "app slots A, B, factory, in the shape of 0x0B"),
         (0x0D, "wire version the agent speaks (`PROTO_VERSION`, u8)"),
         (0x10, "formats: pairs `(format id u8, number u8)`: wire, image-header, state-log, event, definitions, boot-program, boot-record, extension-manifest"),
@@ -470,7 +470,7 @@ pub struct VersionResp {
     pub wire: Option<u8>,
     pub mcu_id: Option<u16>,
     pub stage0: Option<Version>,
-    /// The running boot core ([`version_id::BOOTCORE`]).
+    /// The running boot loader ([`version_id::BOOTCORE`]).
     pub boot_core: Option<Version>,
     pub core_slots: Option<VersionSlots<2>>,
     pub app_slots: Option<VersionSlots<3>>,
@@ -876,7 +876,7 @@ mod tests {
         let n = full.encode(&mut b).unwrap();
         assert_eq!(VersionResp::parse(&b[..n]), Ok(full));
 
-        // Only what the node knows: no stage0, no boot core.
+        // Only what the node knows: no stage0, no boot loader.
         let some = VersionResp {
             stage0: None,
             boot_core: None,

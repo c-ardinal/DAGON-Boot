@@ -5,16 +5,26 @@ sidebar:
   order: 0
 ---
 
+## 書き込み
+
 DAGON は、構成の中のすべてのノードの起動と書き込みを受け持ちます。
 PC の USB につないだ親機が、新しいバージョンを I2C か UART で子機へ渡します。
-ノードは新しいイメージを動いているものの隣に書き、試しに起動します。
-新しいバージョンが自分で確定したときだけそれを使い続け、そうでなければ自分で前のバージョンに戻ります。
+ノードは新しいイメージを、動いているイメージとは別のスロットに書き込み、試しに起動します。
+新しいバージョンが自分で確定したときだけ、それを使い続けます。
+そうでなければ、自分で前のバージョンに戻ります。
 
-DAGON の中の状態の変化は、どれも状態機械の遷移です。遷移はどれもイベントを出します（[イベント](/reference/events/)）。
+## イベントと拡張
+
+DAGON の中の状態の変化は、どれも状態機械の遷移です。
+遷移はどれもイベントを出します（[イベント](/reference/events/)）。
 拡張はそのイベントを受け取り、いくつかの判断に[ポート](/reference/ports/)を通して答えます。
+
+## 番号
 
 DAGON が読み書きする形式、プロトコル、API には、どれも番号があります。
 知らない番号は、読む側が理由を示して受け付けません。
+
+## ソフトウェアの設計
 
 次の図は DAGON が目指すソフトウェアの設計です。今のバージョンがどこまで実装しているかは示していません。
 
@@ -25,7 +35,7 @@ DAGON が読み書きする形式、プロトコル、API には、どれも番�
 | コンポーネント | 設計上の役割 |
 |---|---|
 | dagon CLI | バイナリ名 dagon のコマンド |
-| dagon serve | Console のためのローカルのサーバ |
+| dagon serve | DAGON Console のためのローカルのサーバ |
 | DAGON Console | ブラウザの UI |
 | Claude Code Plugin | 移植と構成の生成のスキル、サブエージェント、フック |
 | Host Extension Chain | ホストの拡張を順に呼ぶチェーン |
@@ -155,8 +165,11 @@ DAGON が読み書きする形式、プロトコル、API には、どれも番�
 | Trusted Extension | 特権で動く拡張 |
 <!-- end of generated table -->
 
-- [このページの言葉](/explanation/words/)
+## ページ
+
+- [言葉の意味](/explanation/words/)
 - [バージョンとリリース](/explanation/versioning/)
-- [ライフサイクルイベントと拡張](/explanation/lifecycle-events/)と、そこから実行可能なモデルに任せている[保持と永続の形式](/explanation/retained-formats/)
+- [ライフサイクルイベントと拡張](/explanation/lifecycle-events/)
+- [保持と永続の形式](/explanation/retained-formats/): ライフサイクルイベントの設計が実行可能なモデルに任せている形式
 - [リポジトリ](/explanation/repository/)
 - [制限事項](/explanation/limitations/)

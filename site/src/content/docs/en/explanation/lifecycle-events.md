@@ -3,15 +3,13 @@ title: "Lifecycle events and extensions"
 description: "One model for boot loader, agent, relay and host: state machines, events, ports and protection."
 ---
 
-This document is the design of DAGON's lifecycle-event and extension
-model: how every state transition in every layer is an observable
-event; how board packages, libraries and applications extend DAGON in
-every layer, the boot stage included, by observing events, answering
-the few decision points and replacing parts of DAGON through ports; how
-the MCU's protection hardware keeps extensions from touching what makes
-a write safe; how board values and boot-time actions come from
-definitions; and how the model is versioned. It is the reference for
-the implementation and for anyone extending DAGON.
+This document is the design of DAGON's lifecycle-event and extension model. It is the reference for the implementation and for anyone extending DAGON. It shows:
+
+- How every state transition in every layer is an observable event
+- How board packages, libraries and applications extend DAGON in every layer, the boot stage included, by observing events, answering the few decision points and replacing parts of DAGON through ports
+- How the MCU's protection hardware keeps extensions from touching what makes a write safe
+- How board values and boot-time actions come from definitions
+- How the model is versioned
 
 The goal: DAGON and user code fully separated. A user (a board package,
 a library, an application) meets every need through DAGON's public API,

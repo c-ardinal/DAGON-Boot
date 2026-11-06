@@ -176,16 +176,41 @@ class Wording(unittest.TestCase):
             rel = p.relative_to(ROOT).as_posix()
             if rel in self.KOUSHIN_ELSEWHERE:
                 continue
-            found += [f"{rel}:{n}" for n, line in enumerate(p.read_text(encoding="utf-8").splitlines(), 1) if "更新" in line]
+            # The README's opening calls what is written after the first time 更新用イメージ: a kind of image, not the act.
+            found += [f"{rel}:{n}" for n, line in enumerate(p.read_text(encoding="utf-8").splitlines(), 1) if "更新" in line.replace("更新用イメージ", "")]
         self.assertEqual(found, [])
 
     # Words the Japanese pages do not use for DAGON's own things.
-    NOT_SAID = ["ブートコア", "給餌", "見守り", "武装", "運び手", "開始者", "トライアル", "将来の", "マイコンのパッケージ", "ボードのパッケージ", "MCU のパッケージ", "ルールます", "破損していないの記録"]
+    NOT_SAID = ["ブートコア", "給餌", "見守り", "武装", "運び手", "開始者", "トライアル", "将来の", "マイコンのパッケージ", "ボードのパッケージ", "MCU のパッケージ", "ルールます", "破損していないの記録",
+                # パッケージ is the .dgb file and nothing else; the verb is 書き込む, in full.
+                "npm パッケージ", "Cargo パッケージ", "書込み", "初回書", "書く前",
+                # Names of the English pages' columns.
+                "Up links", "Down links"]
 
     def test_the_japanese_pages_do_not_use_these_words(self):
         pages = [p for p in llms.DOCS.rglob("*.md*") if p.relative_to(llms.DOCS).parts[0] != "en"]
         pages += [ROOT / "README.md", ROOT / "site" / "i18n" / "ja.toml", ROOT / "site" / "i18n" / "catalog-ja.toml"]
         found = [f"{p.relative_to(ROOT).as_posix()}: {w}" for p in pages for w in self.NOT_SAID if w in p.read_text(encoding="utf-8")]
+        self.assertEqual(found, [])
+
+    def test_console_goes_by_its_full_name_on_the_pages(self):
+        found = []
+        for p in llms.DOCS.rglob("*.md*"):
+            if p.name in ("cli.md", "licenses.md"):  # the command help and third-party text are quoted as they are
+                continue
+            text = re.sub(r"<div><svg.*?</svg></div>", "", p.read_text(encoding="utf-8"), flags=re.S)
+            found += [f"{p.relative_to(ROOT).as_posix()}: {m}" for m in re.findall(r".{0,20}(?<!DAGON )Console.{0,20}", text)]
+        self.assertEqual(found, [])
+
+    def test_a_japanese_page_links_a_page_by_its_japanese_title(self):
+        found = []
+        for p in llms.DOCS.rglob("*.md*"):
+            if p.relative_to(llms.DOCS).parts[0] == "en":
+                continue
+            for label, target in re.findall(r"\[([^\]]+)\]\(/([\w/-]+)/(?:#[^)]*)?\)", p.read_text(encoding="utf-8")):
+                en = next((f for f in (llms.DOCS / "en" / f"{target}{e}" for e in (".md", ".mdx", "/index.md")) if f.is_file()), None)
+                if en and llms.frontmatter(en)[0] == label != llms.frontmatter(llms.DOCS / en.relative_to(llms.DOCS / "en"))[0]:
+                    found.append(f"{p.relative_to(ROOT).as_posix()}: {label}")
         self.assertEqual(found, [])
 
     def test_every_page_is_in_both_languages(self):

@@ -5,19 +5,27 @@ sidebar:
   order: 0
 ---
 
-DAGON is the boot stage and the write path of every node in a 構成. A
-親機 (hub) on your PC's USB passes each new version on to the 子機
-(nodes) over I2C or UART. A node writes the new image beside the running
-one, starts it on trial and keeps it only once the new version confirms
-itself; otherwise it goes back to the previous version by itself.
+## Writing
+
+DAGON is the boot stage and the write path of every node in a 構成.
+A 親機 (hub) on your PC's USB passes each new version on to the 子機 (children) over I2C or UART.
+A node writes the new image to a different slot from the running image and starts it on trial.
+It keeps it only once the new version confirms itself.
+Otherwise it goes back to the previous version by itself.
+
+## Events and extensions
 
 Every state change in DAGON is a transition of a state machine, and every
 transition emits an event (see [Events](/en/reference/events/)). Extensions
 observe those events and answer a few decisions through
 [ports](/en/reference/ports/).
 
+## Numbers
+
 Every format, protocol and API DAGON reads or writes carries a number, and
 a reader refuses a number it does not know.
+
+## The software design
 
 The figure below is the software design DAGON aims for. It does not show how much of it the current version implements.
 
@@ -28,7 +36,7 @@ The figure below is the software design DAGON aims for. It does not show how muc
 | Component | Role in the design |
 |---|---|
 | dagon CLI | The binary named dagon |
-| dagon serve | The local server for the Console |
+| dagon serve | The local server for DAGON Console |
 | DAGON Console | The browser UI |
 | Claude Code Plugin | Porting and topology skills, subagents and hooks |
 | Host Extension Chain | The chain of host extensions, in order |
@@ -158,9 +166,11 @@ The figure below is the software design DAGON aims for. It does not show how muc
 | Trusted Extension | An extension that runs privileged |
 <!-- end of generated table -->
 
-- [Words used here](/en/explanation/words/)
+## Pages
+
+- [What the words mean](/en/explanation/words/)
 - [Versions and releases](/en/explanation/versioning/)
-- [Lifecycle events and extensions](/en/explanation/lifecycle-events/), and the
-  [retained and persistent formats](/en/explanation/retained-formats/) it leaves to an executable model
+- [Lifecycle events and extensions](/en/explanation/lifecycle-events/)
+- [Retained and persistent formats](/en/explanation/retained-formats/): the formats the lifecycle design leaves to an executable model
 - [The repository](/en/explanation/repository/)
 - [Limitations](/en/explanation/limitations/)

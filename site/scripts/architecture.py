@@ -55,7 +55,7 @@ PORT_ROWS = ("PC Host Ports", "Replaceable Ports", "Driver Contract")
 # Component -> one line (Japanese, English).
 COMPONENTS = {
     "dagon CLI": ("バイナリ名 dagon のコマンド", "The binary named dagon"),
-    "dagon serve": ("Console のためのローカルのサーバ", "The local server for the Console"),
+    "dagon serve": ("DAGON Console のためのローカルのサーバ", "The local server for DAGON Console"),
     "DAGON Console": ("ブラウザの UI", "The browser UI"),
     "Claude Code Plugin": ("移植と構成の生成のスキル、サブエージェント、フック", "Porting and topology skills, subagents and hooks"),
     "Host Extension Chain": ("ホストの拡張を順に呼ぶチェーン", "The chain of host extensions, in order"),

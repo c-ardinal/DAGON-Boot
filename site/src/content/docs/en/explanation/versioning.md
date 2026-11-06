@@ -59,19 +59,12 @@ number.
 the comment beside each says where the number is written and which code
 constant holds it. Every artifact and message of a contract states its
 number, and a reader refuses a number it does not read with a message that
-names both numbers (for example `release.dgb is bundle format 2; this
-dagon 0.1.0 reads bundle format 1`).
+names both numbers (for example `release.dgb is bundle format 2; this dagon 0.1.0 reads bundle format 1`).
 
 One contract has a default: MCU and board definition files
 (`dagon-mcu.toml`, `dagon-board.toml`) that leave out `format` are read as
 format 1, so files users write by hand keep loading. DAGON's own definition
 files always state it. Every other contract always carries its number.
-
-Image versions are not component versions. The version in a signed image
-header (given when the image is signed, or the default a first install
-uses) is the version of that image on the device, chosen by the project.
-It has no relation to the version of the boot loader component that built
-it.
 
 ### Adding a contract
 
@@ -82,6 +75,14 @@ it.
 3. Add the code constant to the CLI's list of format numbers
    (`crates/dagon-cli/src/versions.rs`); its tests fail while the table and
    the code disagree.
+
+## Image versions
+
+Image versions are not component versions. The version in a signed image
+header (given when the image is signed, or the default a first install
+uses) is the version of that image on the device, chosen by the project.
+It has no relation to the version of the boot loader component that built
+it.
 
 ## What kind of change is it
 
@@ -218,8 +219,7 @@ docs: <no release>
   release that follows drops the suffix and keeps the version.
 - Release files carry the component name and version in their names.
 - A component's changelog is made from the commits since its last tag that
-  touch its files: `python scripts/changelog.py <name> [--from <tag>]
-  [--to <rev>]` prints the section (Breaking, Features, Fixes), reading
+  touch its files: `python scripts/changelog.py <name> [--from <tag>] [--to <rev>]` prints the section (Breaking, Features, Fixes), reading
   commits exactly as the bump check does.
 - `python scripts/bump_check.py <name>` checks that the version in
   `compat.toml` is at least what the commits since the component's last tag

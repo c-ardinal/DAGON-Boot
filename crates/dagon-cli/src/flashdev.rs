@@ -676,14 +676,16 @@ mod tests {
         assert_eq!(other.label, "USB c0de:cafe X");
     }
 
-    /// The timing tests run one after another: the scan lock is
-    /// process-wide, so a scan from a parallel test would make theirs busy.
-    fn timing_tests_alone() -> MutexGuard<'static, ()> {
+    /// Every test that scans runs alone: the scan lock and the kept reads
+    /// are process-wide, so a scan from a parallel test makes theirs busy
+    /// or forgets the read they kept (it was of a volume not in its roots).
+    fn scans_alone() -> MutexGuard<'static, ()> {
         static ALONE: Mutex<()> = Mutex::new(());
         ALONE.lock().unwrap_or_else(|e| e.into_inner())
     }
 
     fn drives(roots: &[PathBuf]) -> Vec<Candidate> {
+        let _alone = scans_alone();
         let (found, late) = uf2_drives(roots, &RP, Duration::from_secs(5), read_info);
         assert!(late.is_empty());
         found
@@ -824,7 +826,7 @@ mod tests {
 
     #[test]
     fn a_volume_that_does_not_answer_is_skipped_not_waited_for() {
-        let _alone = timing_tests_alone();
+        let _alone = scans_alone();
         fn read(file: &Path) -> Option<String> {
             if file.starts_with("/hung") {
                 std::thread::sleep(Duration::from_secs(5));
@@ -891,7 +893,7 @@ mod tests {
 
     #[test]
     fn a_silent_volume_holds_one_thread_and_is_asked_again_later() {
-        let _alone = timing_tests_alone();
+        let _alone = scans_alone();
         static GATE: Gate = Gate::new();
         static READS: AtomicUsize = AtomicUsize::new(0);
         fn read(_: &Path) -> Option<String> {
@@ -922,7 +924,7 @@ mod tests {
 
     #[test]
     fn a_read_that_finishes_after_its_scan_is_used_by_the_next() {
-        let _alone = timing_tests_alone();
+        let _alone = scans_alone();
         static READS_DONE: AtomicUsize = AtomicUsize::new(0);
         // The volume answers only once the test opens the gate: the first
         // scan has given up by then, whatever the machine's load.
@@ -947,7 +949,7 @@ mod tests {
 
     #[test]
     fn a_late_read_is_kept_per_info_file_and_dropped_once_unmounted() {
-        let _alone = timing_tests_alone();
+        let _alone = scans_alone();
         static GATE: Gate = Gate::new();
         fn read(_: &Path) -> Option<String> {
             GATE.read()
@@ -970,7 +972,7 @@ mod tests {
 
     #[test]
     fn three_concurrent_scans_all_get_a_slow_volume() {
-        let _alone = timing_tests_alone();
+        let _alone = scans_alone();
         static GATE: Gate = Gate::new();
         static ENTERED: AtomicUsize = AtomicUsize::new(0);
         fn read(_: &Path) -> Option<String> {
@@ -997,7 +999,7 @@ mod tests {
 
     #[test]
     fn a_scan_kept_waiting_by_another_reports_busy_and_finds_it_next_time() {
-        let _alone = timing_tests_alone();
+        let _alone = scans_alone();
         static GATE: Gate = Gate::new();
         static ENTERED: AtomicUsize = AtomicUsize::new(0);
         fn read(_: &Path) -> Option<String> {

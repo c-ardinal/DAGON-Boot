@@ -66,15 +66,15 @@ class Readmes(unittest.TestCase):
             self.assertEqual(re.findall(r".{0,20}(?<!DAGON )Console.{0,20}", path.read_text(encoding="utf-8")), [], path.name)
 
     def test_requirements_come_before_the_first_command_that_needs_them(self):
-        for path, browser, rust in ((JA, "- ChromeかEdge 89以降\n", "- Rust 1.95.0以降"), (EN, "- Chrome or Edge 89 or later\n", "- Rust 1.95.0 or later")):
+        for path, browser, rust in ((JA, "ChromeかEdge 89以降", "- Rust 1.95.0以降"), (EN, "Chrome or Edge 89 or later", "- Rust 1.95.0 or later")):
             text = path.read_text(encoding="utf-8")
-            self.assertLess(text.index(browser), text.index("dagon demo\n"), path.name)
+            self.assertLess(text.index(browser), text.index("dagon demo "), path.name)
             self.assertLess(text.index(rust), text.index("cargo install"), path.name)
 
     def test_building_it_yourself_stays_out_of_trying_it(self):
         for path, start, end, heading, next_heading in (
-            (JA, "## まず試す", "## 自分のプロジェクトを始める", "## 自分でビルドする", "## 依存しているものと外部のデータ"),
-            (EN, "## Try it", "## Start your own project", "## Build it yourself", "## Dependencies and external data"),
+            (JA, "## 試してみる", "## 自分のプロジェクトを始める", "### DAGONを自分でビルドする", "## 依存しているものと外部のデータ"),
+            (EN, "## Try it", "## Start your own project", "### Building DAGON yourself", "## Dependencies and external data"),
         ):
             text = path.read_text(encoding="utf-8")
             section = text[text.index(start):text.index(end)]
@@ -88,9 +88,9 @@ class Readmes(unittest.TestCase):
         for path in (JA, EN):
             self.assertNotIn("cd my-fleet\ndagon doctor", path.read_text(encoding="utf-8"), path.name)
 
-    def test_the_figure_says_word_for_word_what_it_shows(self):
-        self.assertIn("次の図はDAGONのソフトウェアの設計です。", JA.read_text(encoding="utf-8"))
-        self.assertIn("The figure below is DAGON's software design.", EN.read_text(encoding="utf-8"))
+    def test_the_figure_sits_under_a_heading_that_says_what_it_shows(self):
+        self.assertIn("### ソフトウェアアーキテクチャ\n\n<img src=\"assets/architecture/node-ja.svg\"", JA.read_text(encoding="utf-8"))
+        self.assertIn("### Software architecture\n\n<img src=\"assets/architecture/node-en.svg\"", EN.read_text(encoding="utf-8"))
 
     def test_the_notice_says_how_many_microcontrollers_there_are(self):
         mcus = definitions("mcu", "dagon-mcu.toml")

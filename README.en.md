@@ -68,45 +68,39 @@ Try the [DAGON Console demo](https://c-ardinal.github.io/DAGON-Boot/demo/) with 
 
 ### Install and try
 
-On your own PC, you can also try it without hardware, using the simulator.
+On your own PC, you can also try it without hardware, in the browser (Chrome or Edge 89 or later), using the simulator.
 
-Install the `dagon` command. The first line is for Linux and macOS, the second for Windows.
+#### Install
+
+Linux / macOS
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/c-ardinal/DAGON-Boot/main/install.sh | sh
 ```
 
+Windows
+
 ```powershell
 irm https://raw.githubusercontent.com/c-ardinal/DAGON-Boot/main/install.ps1 | iex
 ```
 
-The browser it uses:
-
-- Chrome or Edge 89 or later
-
-Start the demo:
+#### Run the demo
 
 ```sh
-dagon demo
+dagon demo    # opens DAGON Console at the address it prints
+dagon sim run # runs end-to-end scenarios in the simulator
 ```
-
-`dagon demo` opens DAGON Console at the address it prints. `dagon sim run` runs end-to-end scenarios in the simulator.
 
 ## Start your own project
 
 ```sh
-dagon new my-fleet
+dagon new my-fleet  # generates the files a project needs
 cd my-fleet
-dagon serve
+dagon serve         # starts DAGON Console; draw the setup in the browser
+dagon doctor        # checks that the setup can be built
 ```
 
-`dagon new` makes `dagon.toml`, the setup file and a signing key pair. The setup file holds a sample setup of three microcontrollers. The secret key is kept outside the project.
-
-Applications are written in [Rust](https://rustup.rs) only.
-
-`dagon serve` opens the browser, and you go on in DAGON Console.
-
-Once the setup is drawn, before building, `dagon doctor` checks the tools the microcontrollers in it need ([list](https://c-ardinal.github.io/DAGON-Boot/doc/en/reference/tools/)), and `dagon doctor --fix` installs what needs no administrator rights.
+`dagon doctor` checks the tools the microcontrollers in the setup need ([list](https://c-ardinal.github.io/DAGON-Boot/doc/en/reference/tools/)), and `dagon doctor --fix` installs those that need no administrator rights.
 
 From building to the first write, see [From a new project to a new version](https://c-ardinal.github.io/DAGON-Boot/doc/en/getting-started/first-project/).
 
@@ -128,21 +122,19 @@ flowchart LR
 1. The PC checks the package's signatures and that the package fits this setup.
 2. The PC sends the setup to the hub.
 3. Through the hub, the PC sends each microcontroller its new image. Children come first and the hub last.
-4. A microcontroller writes the new image to a different place from the running image.
+4. A microcontroller writes the new image to a slot other than the running one.
 5. The microcontroller starts the new image on trial.
 6. When its self-check passes, it confirms the new version. Otherwise it resets and goes back to the previous version.
 
 What DAGON does not do is in [Limitations](https://c-ardinal.github.io/DAGON-Boot/doc/en/explanation/limitations/).
 
-## DAGON's design
+## DAGON's design information
 
-The figure below is DAGON's software design.
+### Software architecture
 
 <img src="assets/architecture/node-en.svg" alt="DAGON's software design, in layers and components" width="100%">
 
-## Where to change things
-
-### When you use DAGON
+### Reference for using DAGON
 
 | To do this | Touch | Steps |
 | --- | --- | --- |
@@ -150,7 +142,7 @@ The figure below is DAGON's software design.
 | Add an extension | `extensions/<id>/dagon-extension.toml`, `[extensions]` in `dagon.toml` | [Extension manifest](https://c-ardinal.github.io/DAGON-Boot/doc/en/reference/extension-manifest/) |
 | Add an agent | `~/.dagon/agents/*.toml` | [Agent definition format](https://c-ardinal.github.io/DAGON-Boot/doc/en/reference/agent-definition/) |
 
-### When you add to DAGON itself
+### Reference for changing DAGON itself
 
 | To do this | Touch | Steps |
 | --- | --- | --- |
@@ -158,16 +150,12 @@ The figure below is DAGON's software design.
 | Add an MCU | `targets/mcu/<id>/` | [Adding an MCU or a link](https://c-ardinal.github.io/DAGON-Boot/doc/en/how-to/new-mcu-or-link/) |
 | Add a link or transport | `crates/dagon-format/src/link.rs`, `targets/mcu/*/src/links.rs`, `crates/dagon-host/src/lib.rs` | [Adding an MCU or a link](https://c-ardinal.github.io/DAGON-Boot/doc/en/how-to/new-mcu-or-link/) |
 
-## Build it yourself
-
-These are the steps to build the `dagon` command from source, whether or not you change DAGON.
+### Building DAGON yourself
 
 It needs two things:
 
 - Rust 1.95.0 or later
 - A C compiler (the Visual Studio 2022 C++ build tools on Windows, gcc 13 or later on Linux, Xcode Command Line Tools 16.4 or later on macOS)
-
-Build and install it:
 
 ```sh
 cargo install --git https://github.com/c-ardinal/DAGON-Boot --tag cli-v<version> dagon-cli
@@ -183,4 +171,4 @@ From a clone, it is `cargo install --path crates/dagon-cli`.
 - Fonts and icons: Doto, DotGothic16, Zen Kaku Gothic New, JetBrains Mono (SIL OFL 1.1), Lucide (ISC)
 - Values in the MCU and board definitions: taken from the makers' datasheets and board documents. A value whose source has not been checked is marked `unverified` in the definition.
 
-The full list and licences are in [Licenses](https://c-ardinal.github.io/DAGON-Boot/doc/en/reference/licenses/).
+The list and licences are in [Licenses](https://c-ardinal.github.io/DAGON-Boot/doc/en/reference/licenses/).

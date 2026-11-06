@@ -8,8 +8,8 @@ description: "DAGON に要るツールと dagon コマンドです。"
 | 要るもの | 要る場面 | 入れ方 |
 |---|---|---|
 | Chrome か Edge 89 以降 | DAGON Console（Web Serial） | — |
-| Rust 1.95.0 以降 | `dagon` コマンドを `cargo install` で入れるとき | <https://rustup.rs> |
-| C コンパイラ | `dagon` コマンドを `cargo install` で入れるとき（`ring` crate） | Windows は Visual Studio 2022 の C++ ビルドツール、Linux は gcc 13 以降、macOS は Xcode Command Line Tools 16.4 以降 |
+| Rust 1.95.0 以降 | `dagon` コマンドを自分でビルドするとき | <https://rustup.rs> |
+| C コンパイラ | `dagon` コマンドを自分でビルドするとき（`ring` crate） | Windows は Visual Studio 2022 の C++ ビルドツール、Linux は gcc 13 以降、macOS は Xcode Command Line Tools 16.4 以降 |
 
 `dagon` コマンドをビルド済みのファイルで入れるなら、ほかに要りません。
 

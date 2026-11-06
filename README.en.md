@@ -66,7 +66,7 @@ What running DAGON needs:
 
 - Chrome or Edge 89 or later
 - The `dagon` command: the prebuilt files need nothing else
-  - With `cargo install`, Rust 1.95.0 or later and a C compiler (the Visual Studio 2022 C++ build tools on Windows, gcc 13 or later on Linux, Xcode Command Line Tools 16.4 or later on macOS)
+  - To build it yourself, Rust 1.95.0 or later and a C compiler (the Visual Studio 2022 C++ build tools on Windows, gcc 13 or later on Linux, Xcode Command Line Tools 16.4 or later on macOS)
 
 How to install the `dagon` command is in [Install](https://c-ardinal.github.io/DAGON-Boot/doc/en/getting-started/install/).
 

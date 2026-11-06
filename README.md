@@ -66,7 +66,7 @@ DAGONを動かすために必要なものです。
 
 - Chrome か Edge 89 以降
 - `dagon` コマンド: ビルド済みのファイルなら、ほかに要りません
-  - `cargo install` で入れるなら、Rust 1.95.0 以降と C コンパイラ（Windows は Visual Studio 2022 の C++ ビルドツール、Linux は gcc 13 以降、macOS は Xcode Command Line Tools 16.4 以降）
+  - 自分でビルドするなら、Rust 1.95.0 以降と C コンパイラ（Windows は Visual Studio 2022 の C++ ビルドツール、Linux は gcc 13 以降、macOS は Xcode Command Line Tools 16.4 以降）
 
 `dagon`コマンドの入れ方は[入れる](https://c-ardinal.github.io/DAGON-Boot/doc/getting-started/install/)にあります。
 

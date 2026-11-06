@@ -64,7 +64,7 @@ class Readmes(unittest.TestCase):
     def test_requirements_come_before_the_first_command_that_needs_them(self):
         for path, heading in ((JA, "## 必要なもの"), (EN, "## Prerequisites")):
             text = path.read_text(encoding="utf-8")
-            self.assertLess(text.index(heading), text.index("cargo install"), path.name)
+            self.assertLess(text.index(heading), text.index("dagon demo"), path.name)
 
     def test_requirements_say_what_running_dagon_needs(self):
         for path, heading, next_heading, line in ((JA, "## 必要なもの", "## まず試す", "- Chrome か Edge 89 以降\n"), (EN, "## Prerequisites", "## Try it", "- Chrome or Edge 89 or later\n")):

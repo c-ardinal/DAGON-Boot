@@ -8,8 +8,8 @@ description: "The tools DAGON needs and the dagon command."
 | What | When | How |
 |---|---|---|
 | Chrome or Edge 89+ | DAGON Console (Web Serial) | — |
-| Rust 1.95.0 or later | installing the `dagon` command with `cargo install` | <https://rustup.rs> |
-| A C compiler | installing the `dagon` command with `cargo install` (the `ring` crate) | the Visual Studio 2022 C++ build tools on Windows, gcc 13 or later on Linux, Xcode Command Line Tools 16.4 or later on macOS |
+| Rust 1.95.0 or later | building the `dagon` command yourself | <https://rustup.rs> |
+| A C compiler | building the `dagon` command yourself (the `ring` crate) | the Visual Studio 2022 C++ build tools on Windows, gcc 13 or later on Linux, Xcode Command Line Tools 16.4 or later on macOS |
 
 With the prebuilt `dagon` command, nothing else is needed.
 

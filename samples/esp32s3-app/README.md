@@ -34,7 +34,7 @@ in the same digits, instead of the version:
 
 | Phase | Screen |
 |---|---|
-| transferring | `d` and the number DAGON told the node, the same as the Console's % (`d---` when it told none), and a bar below it that fills from left to right |
+| transferring | `d` and the number DAGON told the node, the same as the DAGON Console's % (`d---` when it told none), and a bar below it that fills from left to right |
 | verifying | `ChEc` |
 | written | `donE` |
 | pending (next boot) | `PEnd` |

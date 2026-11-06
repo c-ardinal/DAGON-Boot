@@ -217,7 +217,7 @@ Generated order at start: `app.starting` → `app.store_opened` (or
 | `app.transfer_started`, `app.transfer_progress`, `app.transfer_aborted` | erase done / each chunk written / idle timeout, store error, new request | `target`, `slot`, `len` / `done`, `total` / `cause` |
 | `app.verify_started`, `app.verify_ok`, `app.verify_failed` | body hashing and read-back | `len` / `slot`, `version` / `status` |
 | `app.written`, `app.pending_set`, `app.pending_moved`, `app.pending_refused`, `app.confirmed`, `app.demoted`, `app.confirm_refused` | image lifecycle (1.1) | |
-| `app.percent_told` | the host told the write's one progress number (the same as the Console's %; during a transfer, only when the node can take it; display tasks read `AppSnapshot::percent`) | `percent` |
+| `app.percent_told` | the host told the write's one progress number (the same as the DAGON Console's %; during a transfer, only when the node can take it; display tasks read `AppSnapshot::percent`) | `percent` |
 | `app.reboot_requested` | reboot accepted; **decision** `allow_reboot_now` | `mode` |
 | `app.before_reboot` | reply has left; reset follows | |
 | `app.self_check` | confirm while on trial; **decision** `self_check` | `slot`, `version` |

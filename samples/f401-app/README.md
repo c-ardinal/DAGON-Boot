@@ -50,7 +50,7 @@ DAGON updates the node:
 
 | Phase | Display |
 |---|---|
-| transferring | `d` and the number DAGON told the node, the same as the Console's % (`d---` when it told none) |
+| transferring | `d` and the number DAGON told the node, the same as the DAGON Console's % (`d---` when it told none) |
 | verifying | `ChEc` |
 | written | `donE` |
 | pending (next boot) | `PEnd` |

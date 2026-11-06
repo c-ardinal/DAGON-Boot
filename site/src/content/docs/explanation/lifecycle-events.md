@@ -122,7 +122,7 @@ len, next }` です。プロトコルのリクエストはどれも遷移です�
 | `app.transfer_started`、`app.transfer_progress`、`app.transfer_aborted` | 消去が終わった / 各チャンクを書いた / 無通信のタイムアウト、ストアのエラー、新しいリクエスト | `target`、`slot`、`len` / `done`、`total` / `cause` |
 | `app.verify_started`、`app.verify_ok`、`app.verify_failed` | 本体のハッシュと読み返し | `len` / `slot`、`version` / `status` |
 | `app.written`、`app.pending_set`、`app.pending_moved`、`app.pending_refused`、`app.confirmed`、`app.demoted`、`app.confirm_refused` | イメージのライフサイクル（1.1） | |
-| `app.percent_told` | ホストが、書き込みの進み具合のひとつの数字を伝えた（Console の % と同じ。転送のあいだ、ノードが受けられるときだけ。表示のタスクは `AppSnapshot::percent` で読みます） | `percent` |
+| `app.percent_told` | ホストが、書き込みの進み具合のひとつの数字を伝えた（DAGON Console の % と同じ。転送のあいだ、ノードが受けられるときだけ。表示のタスクは `AppSnapshot::percent` で読みます） | `percent` |
 | `app.reboot_requested` | 再起動を受け付けた。**判断** `allow_reboot_now` | `mode` |
 | `app.before_reboot` | 返答が出た。リセットが続きます | |
 | `app.self_check` | 試行中の確定。**判断** `self_check` | `slot`、`version` |

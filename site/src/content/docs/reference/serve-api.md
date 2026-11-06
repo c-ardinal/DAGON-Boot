@@ -22,7 +22,7 @@ Host and Origin checks (403 otherwise).
 | `PUT` | `/v1/agent/key/{agent}/{way}` | refused | Registers the way's key in the OS credential store. The answer is GET /v1/agent's body (whether a key is registered, never the key). |
 | `DELETE` | `/v1/agent/key/{agent}/{way}` | refused | Removes the way's key (fine when none was registered). |
 | `POST` | `/v1/agent/ask` | refused | One question to DAGON, answered in this request. |
-| `GET` | `/v1/targets` |  | Firmware packages with their features, and the board table. Packages are directories with a Cargo.toml: `targets/<pkg>`, one level deeper for the support packages (`targets/mcu/<mcu>`, `targets/boards/<board>`), and the sample apps under `samples/<pkg>`; in a generated project, `nodes/<id>`. |
+| `GET` | `/v1/targets` |  | The project's firmware packages (each `[build.<id>]` package of dagon.toml) with their features, and the board table. |
 | `GET` | `/v1/definitions` |  | The definitions in use as `Registry::to_json` gives them, for the page's dagon-wasm (`load_definitions`). |
 | `GET` | `/v1/topology` |  | The project's 構成 YAML as it is on disk (404 before the first save). |
 | `PUT` | `/v1/topology` |  | Writes the topology YAML after the same check `dagon topo check` runs. |

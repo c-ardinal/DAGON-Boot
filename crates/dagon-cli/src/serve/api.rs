@@ -631,14 +631,12 @@ fn json_ok(v: Value) -> Response {
     Response::json(200, &v)
 }
 
-/// Firmware packages with their features, and the board table. Packages are
-/// directories with a Cargo.toml: `targets/<pkg>`, one level deeper for the
-/// support packages (`targets/mcu/<mcu>`, `targets/boards/<board>`), and the
-/// sample apps under `samples/<pkg>`; in a generated project, `nodes/<id>`.
+/// The project's firmware packages (each `[build.<id>]` package of dagon.toml)
+/// with their features, and the board table.
 fn targets(server: &Server) -> Res {
     let cfg = config(server).map_err(|e| Response::error(500, &e))?;
     let mut out = Vec::new();
-    for rel in package_dirs(&cfg.base) {
+    for rel in package_dirs(&cfg) {
         let Ok(text) = std::fs::read_to_string(cfg.base.join(&rel).join("Cargo.toml")) else {
             continue;
         };
@@ -701,53 +699,24 @@ fn definitions(server: &Server) -> Res {
     ))
 }
 
-/// Package directories relative to `base`, `/`-separated and sorted:
-/// `targets/*` and `samples/*` with a Cargo.toml, and for a directory under
-/// `targets/` without one (a group such as `mcu` or `boards`), its children.
-fn package_dirs(base: &std::path::Path) -> Vec<String> {
-    fn children(dir: &std::path::Path) -> Vec<PathBuf> {
-        let mut v: Vec<PathBuf> = std::fs::read_dir(dir)
-            .map(|d| d.filter_map(|e| e.ok().map(|e| e.path())).collect())
-            .unwrap_or_default();
-        v.retain(|p| p.is_dir());
-        v.sort();
-        v
-    }
-    let rel = |p: &std::path::Path| {
-        p.strip_prefix(base)
-            .unwrap_or(p)
-            .components()
-            .map(|c| c.as_os_str().to_string_lossy().into_owned())
-            .collect::<Vec<_>>()
-            .join("/")
-    };
-    let mut out = Vec::new();
-    for d in children(&base.join("targets")) {
-        if d.join("Cargo.toml").is_file() {
-            out.push(rel(&d));
-        } else {
-            out.extend(
-                children(&d)
-                    .into_iter()
-                    .filter(|c| c.join("Cargo.toml").is_file())
-                    .map(|c| rel(&c)),
-            );
-        }
-    }
-    // A generated project's node crates.
-    out.extend(
-        children(&base.join("nodes"))
-            .into_iter()
-            .filter(|c| c.join("Cargo.toml").is_file())
-            .map(|c| rel(&c)),
-    );
-    out.extend(
-        children(&base.join("samples"))
-            .into_iter()
-            .filter(|c| c.join("Cargo.toml").is_file())
-            .map(|c| rel(&c)),
-    );
-    out
+/// The packages dagon.toml names (`[build.<id>]`), relative to it,
+/// `/`-separated, sorted and each once. A package outside the project is left
+/// out: no path outside it reaches the page.
+fn package_dirs(cfg: &Config) -> Vec<String> {
+    let dirs: std::collections::BTreeSet<String> = cfg
+        .build
+        .values()
+        .filter(|b| b.package.is_relative() && inside(cfg, &b.package).is_ok())
+        .map(|b| {
+            b.package
+                .components()
+                .filter(|c| !matches!(c, std::path::Component::CurDir))
+                .map(|c| c.as_os_str().to_string_lossy().into_owned())
+                .collect::<Vec<_>>()
+                .join("/")
+        })
+        .collect();
+    dirs.into_iter().collect()
 }
 
 fn topology_path(server: &Server) -> Result<PathBuf, Response> {
@@ -1740,35 +1709,31 @@ mod tests {
     }
 
     #[test]
-    fn package_dirs_cover_support_packages_and_samples() {
+    fn package_dirs_are_the_build_packages_inside_the_project() {
         let base = std::env::temp_dir().join(format!("dagon-pkgdirs-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&base);
-        for d in [
-            "targets/f401-app",
-            "targets/mcu/esp32s3",
-            "targets/boards/m5stopwatch",
-            "targets/esp32s3-2ndstage",
-            "samples/esp32s3-app",
-        ] {
-            std::fs::create_dir_all(base.join(d)).unwrap();
-            if d != "targets/esp32s3-2ndstage" {
-                std::fs::write(
-                    base.join(d).join("Cargo.toml"),
-                    "[package]
-",
-                )
-                .unwrap();
-            }
-        }
-        assert_eq!(
-            package_dirs(&base),
-            [
-                "targets/boards/m5stopwatch",
-                "targets/f401-app",
-                "targets/mcu/esp32s3",
-                "samples/esp32s3-app",
+        std::fs::create_dir_all(&base).unwrap();
+        let build = |p: &str| crate::config::BuildInputs {
+            package: PathBuf::from(p),
+            bin: None,
+            features: Vec::new(),
+            slot_b_feature: None,
+            version: None,
+        };
+        let outside = base.parent().unwrap().join("elsewhere");
+        let cfg = Config {
+            base: base.clone(),
+            build: [
+                ("b".to_string(), build("fw/b")),
+                ("a".to_string(), build("./fw/a")),
+                ("twin".to_string(), build("fw/a")),
+                ("up".to_string(), build("../elsewhere")),
+                ("far".to_string(), build(outside.to_str().unwrap())),
             ]
-        );
+            .into(),
+            ..Config::default()
+        };
+        assert_eq!(package_dirs(&cfg), ["fw/a", "fw/b"]);
         let _ = std::fs::remove_dir_all(&base);
     }
 

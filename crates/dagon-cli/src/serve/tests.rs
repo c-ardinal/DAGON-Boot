@@ -587,18 +587,26 @@ fn without_a_release_key_the_page_carries_none() {
 }
 
 #[test]
-fn targets_lists_the_generated_node_crates() {
+fn targets_lists_the_packages_dagon_toml_names_and_no_folder_by_its_name() {
     let a = start("nodes");
-    std::fs::create_dir_all(a.dir.join("nodes/seg")).unwrap();
     std::fs::write(
-        a.dir.join("nodes/seg/Cargo.toml"),
-        "[package]
-name = \"seg\"
-[features]
-slot-b = []
-",
+        a.dir.join("dagon.toml"),
+        "topology = \"topology/t.yaml\"\n\
+         [build.seg]\npackage = \"firmware/seg\"\n\
+         [build.none]\npackage = \"firmware/no-manifest\"\n",
     )
     .unwrap();
+    let manifest = "[package]\nname = \"seg\"\n[features]\nslot-b = []\n";
+    // Folders with a package in them that the project does not name.
+    for d in [
+        "firmware/seg",
+        "targets/board",
+        "samples/app",
+        "nodes/other",
+    ] {
+        std::fs::create_dir_all(a.dir.join(d)).unwrap();
+        std::fs::write(a.dir.join(d).join("Cargo.toml"), manifest).unwrap();
+    }
     let (st, body) = http(
         &a,
         "GET",
@@ -608,12 +616,15 @@ slot-b = []
     );
     assert_eq!(st, 200);
     let v: serde_json::Value = serde_json::from_str(&body).unwrap();
-    let t = &v["targets"][0];
-    assert_eq!(
-        (t["dir"].as_str(), t["name"].as_str()),
-        (Some("nodes/seg"), Some("seg"))
-    );
-    assert_eq!(t["features"][0], "slot-b");
+    let dirs: Vec<&str> = v["targets"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|t| t["dir"].as_str().unwrap())
+        .collect();
+    assert_eq!(dirs, ["firmware/seg"]);
+    assert_eq!(v["targets"][0]["name"], "seg");
+    assert_eq!(v["targets"][0]["features"][0], "slot-b");
 }
 
 #[test]

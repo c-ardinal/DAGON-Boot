@@ -1,27 +1,43 @@
 ---
 title: "入れる"
-description: "DAGON に要るツールと dagon コマンドです。"
+description: "dagon コマンドをリリースから入れる方法と、自分でビルドする方法です。"
 ---
 
-## DAGON を動かすために要るもの
+## リリースから入れる
 
-| 要るもの | 要る場面 | 入れ方 |
-|---|---|---|
-| Chrome か Edge 89 以降 | DAGON Console（Web Serial） | — |
-| Rust 1.95.0 以降 | `dagon` コマンドを `cargo install` で入れるとき | <https://rustup.rs> |
-| C コンパイラ | `dagon` コマンドを `cargo install` で入れるとき（`ring` crate） | Windows は Visual Studio 2022 の C++ ビルドツール、Linux は gcc 13 以降、macOS は Xcode Command Line Tools 16.4 以降 |
+Linux と macOS:
 
-`dagon` コマンドをビルド済みのファイルで入れるなら、ほかに要りません。
+```sh
+curl -fsSL https://raw.githubusercontent.com/c-ardinal/DAGON-Boot/main/install.sh | sh
+```
 
-## `dagon` コマンドを入れる
+Windows（PowerShell）:
 
-次のどれかで入れます。
+```powershell
+irm https://raw.githubusercontent.com/c-ardinal/DAGON-Boot/main/install.ps1 | iex
+```
 
-- ビルド済みのファイル: 使うバージョンの GitHub のリリース（`cli-v<version>`）から、自分のシステム用のアーカイブを取ります（Windows は `dagon-cli-<version>-<target>.zip`、それ以外は `dagon-cli-<version>-<target>.tar.gz`）。`.sha256` のファイルで確かめてから、`dagon` を `PATH` の通った場所に置きます。
-- `cargo binstall dagon-cli --git https://github.com/c-ardinal/DAGON-Boot`: 同じアーカイブを取ります。`cargo-binstall` が要ります。
-- ソースからビルド: `cargo install --git https://github.com/c-ardinal/DAGON-Boot --tag cli-v<version> dagon-cli`
+スクリプトは次のことをします。
+
+1. 自分のシステム用のアーカイブを、最新のリリース（`cli-v<version>`）から取ります。
+2. `.sha256` のファイルで確かめます。合わないときは止まります。
+3. `dagon` を、管理者の権限の要らないフォルダに置きます。Linux と macOS は `~/.local/bin`、Windows は `%LOCALAPPDATA%\Programs\dagon` です。
+4. Windows はそのフォルダをユーザーの PATH に足します。Linux と macOS は足し方を表示します。
+5. したことを表示します。
+
+スクリプトは環境変数を読みます。
+
+| 環境変数 | 意味 |
+|---|---|
+| `DAGON_VERSION` | 入れるバージョン。`install.sh` は引数でも受け取ります（`sh -s -- <version>`） |
+| `DAGON_INSTALL_DIR` | 置くフォルダ |
+| `DAGON_NO_MODIFY_PATH` | `install.ps1` で、PATH を変えず足し方を表示します |
+
+`cargo binstall dagon-cli --git https://github.com/c-ardinal/DAGON-Boot` でも同じアーカイブを取ります。`cargo-binstall` が要ります。
 
 このリポジトリのクローンも git の submodule も要りません。
+
+DAGON Console を開くブラウザは Chrome か Edge 89 以降です（Web Serial）。
 
 入ったことを確かめます。
 
@@ -30,6 +46,21 @@ dagon --help
 ```
 
 DAGON Console は `dagon` に組み込まれています。Node.js は要りません。
+
+## 自分でビルドする
+
+`dagon` コマンドをソースからビルドする手順です。DAGON に手を加えるかどうかによらず同じです。
+
+| 要るもの | 入れ方 |
+|---|---|
+| Rust 1.95.0 以降 | <https://rustup.rs> |
+| C コンパイラ（`ring` crate） | Windows は Visual Studio 2022 の C++ ビルドツール、Linux は gcc 13 以降、macOS は Xcode Command Line Tools 16.4 以降 |
+
+```sh
+cargo install --git https://github.com/c-ardinal/DAGON-Boot --tag cli-v<version> dagon-cli
+```
+
+クローンからは `cargo install --path crates/dagon-cli` です。
 
 ## ファームウェアを開発するためのツール
 

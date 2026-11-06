@@ -60,25 +60,35 @@ PCに繋いだ1つのマイコンを通してその先のマイコンにも、�
 | STM32F401RE | NUCLEO-F401RE                   |
 | ESP32-S3    | M5StopWatch                     |
 
-## 必要なもの
-
-DAGONを動かすために必要なものです。
-
-- Chrome か Edge 89 以降
-- `dagon` コマンド: ビルド済みのファイルなら、ほかに要りません
-  - `cargo install` で入れるなら、Rust 1.95.0 以降と C コンパイラ（Windows は Visual Studio 2022 の C++ ビルドツール、Linux は gcc 13 以降、macOS は Xcode Command Line Tools 16.4 以降）
-
-`dagon`コマンドの入れ方は[入れる](https://c-ardinal.github.io/DAGON-Boot/doc/getting-started/install/)にあります。
-
 ## まず試す
+
+### インストールせずに試す
 
 インストールも実機も不要で[DAGON Consoleのデモ](https://c-ardinal.github.io/DAGON-Boot/demo/)を試せます。模擬の親機と子機を相手に、書き込みと前のバージョンへの戻し方を体験できます。ファイルの読み書き、実際の機器との接続、AI連携操作はデモでは使えません。
 
+### インストールして試す
+
 手元のPCでも、シミュレータを用いて実機なしで試せます。
 
-1. [GitHub Releases](https://github.com/c-ardinal/DAGON-Boot/releases)から、自分のシステム用のファイルを取ります。
-2. `dagon`をPATHの通った場所に置きます。
-3. `dagon demo`を実行します。
+`dagon`コマンドを入れます。上がLinuxとmacOS、下がWindowsです。
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/c-ardinal/DAGON-Boot/main/install.sh | sh
+```
+
+```powershell
+irm https://raw.githubusercontent.com/c-ardinal/DAGON-Boot/main/install.ps1 | iex
+```
+
+ブラウザは次のものを使います。
+
+- Chrome か Edge 89 以降
+
+デモを始めます。
+
+```sh
+dagon demo
+```
 
 `dagon demo`は表示したアドレスでDAGON Consoleを開きます。`dagon sim run`はシミュレータ上で通しのシナリオを実行します。
 
@@ -148,6 +158,23 @@ DAGONがしないことは[制限事項](https://c-ardinal.github.io/DAGON-Boot/
 | ------------------ | ----------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------- |
 | マイコンを足す     | `targets/mcu/*/dagon-mcu.toml`、`crates/dagon-port/src/lib.rs`                                  | [マイコンとリンクを足す](https://c-ardinal.github.io/DAGON-Boot/doc/how-to/new-mcu-or-link/) |
 | リンクや転送を足す | `crates/dagon-format/src/link.rs`、`targets/mcu/*/src/links.rs`、`crates/dagon-host/src/lib.rs` | [マイコンとリンクを足す](https://c-ardinal.github.io/DAGON-Boot/doc/how-to/new-mcu-or-link/) |
+
+## 自分でビルドする
+
+`dagon`コマンドをソースからビルドする手順です。DAGONに手を加えるかどうかによらず同じです。
+
+必要なものは次の2つです。
+
+- Rust 1.95.0 以降
+- C コンパイラ（Windows は Visual Studio 2022 の C++ ビルドツール、Linux は gcc 13 以降、macOS は Xcode Command Line Tools 16.4 以降）
+
+ビルドして入れます。
+
+```sh
+cargo install --git https://github.com/c-ardinal/DAGON-Boot dagon-cli
+```
+
+クローンからは`cargo install --path crates/dagon-cli`です。
 
 ## 依存しているものと外部のデータ
 

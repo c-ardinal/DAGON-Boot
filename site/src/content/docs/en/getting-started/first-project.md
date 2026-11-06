@@ -22,7 +22,7 @@ cd my-fleet
 - `topology.yaml`: the sample topology, or your own with `--from <yaml>`.
 - `.gitignore`
 - The Claude Code files ([Claude help in your project](/en/how-to/claude-help/))
-- A signing key pair, if none exists yet: in `~/.dagon/keys/my-fleet`, or elsewhere with `--keys <dir>`.
+- A signing key pair, if none exists: in `~/.dagon/keys/my-fleet`, or elsewhere with `--keys <dir>`.
 
 The secret key stays outside the project and outside any git work tree. `dagon.toml` only names the public key.
 

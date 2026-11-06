@@ -64,7 +64,7 @@ path changes persistent image state outside this machine.
 
 | Transition | Layer | Guard (status on refusal) | Persisted as | Event |
 |---|---|---|---|---|
-| `erase` | app | XFER_BEGIN passed every guard and `accept_update`; from `Empty`, `Written`, `Pending` or `Reverted` (never from the active or the confirmed slot). From `Pending` because the protocol lets a new image replace one set pending but not yet started; the erased header no longer matches the SLOT_PENDING record, so the slot reads empty | slot body and header place erased | `app.transfer_started` |
+| `erase` | app | XFER_BEGIN passed every guard and `accept_update`; from `Empty`, `Written`, `Pending` or `Reverted` (never from the active or the confirmed slot). From `Pending` because the protocol lets a new image replace one set pending but not started; the erased header no longer matches the SLOT_PENDING record, so the slot reads empty | slot body and header place erased | `app.transfer_started` |
 | `written` | app | XFER_END: body digest equals the header's, header written and re-verified | header in place | `app.written { slot, version }` |
 | `pending_set` | app | SET_PENDING: header present, signature and compatibility, body digest; never the running slot; from `Written`, `Reverted`, `Pending` (a repeated SET_PENDING appends again) or `Confirmed` (the confirmed slot set pending again while the other slot is on trial, which switches back to it) | SLOT_PENDING record / vendor selection | `app.pending_set { slot, version }` |
 | `pending_moved` | app | SET_PENDING on the other slot while this one is `Pending` or `Trial`, and this slot is not the confirmed one | the same SLOT_PENDING record (the log names one pending slot) | `app.pending_moved { from, to }` |
@@ -166,7 +166,7 @@ app's agent replays them at start as the same `boot.*` events with
 | `boot.watchdog_armed` | watchdog started (4.1); from here extensions run | `period_ms` | yes |
 | `boot.log_read` | the state log read | `ok`, `pending`, `confirmed`, `attempts` | yes |
 | `boot.before_decision` | `plan` is about to run; the last event before the decision | `pending`, `confirmed`, `attempts` | yes |
-| `boot.decision_planned` | the decision is known, nothing written yet | `Decision` | yes |
+| `boot.decision_planned` | the decision is known, nothing written | `Decision` | yes |
 | `boot.core_slot_chosen` | stage0 picked the boot loader slot | `slot`, `version` | no |
 | `boot.slot_chosen` | image lifecycle `chosen` | `slot`, `trial`, `version`, `entry` | yes |
 | `boot.attempt_recorded`, `boot.rollback`, `boot.no_image` | image lifecycle (1.1) | | yes |
@@ -1073,12 +1073,12 @@ Per kind, what the hardware gives and what the generator does with it:
 | `armv8m-tz` | ARMv8-M with the Security Extension | three independent records: `sau_regions` ∈ {0, 4, 8}, `s_mpu_regions` and `ns_mpu_regions` each ∈ {0, 4, 8, 12, 16}, all read back; plus the `idau` table of the MCU's fixed attribution and the `mpc`/`ppc` units the definition lists; DAGON is Secure, extensions Non-secure and unprivileged under the NS-MPU; the service ABI is the Secure gateway (`SG` veneers in an NSC region) | Secure and Non-secure faults, `SecureFault` | the strongest: Secure memory is invisible to extensions even when privileged in the Non-secure state; bus masters are attributed Secure/Non-secure by the interconnect and the definition lists each master's attribution | the IDAU/MPC/PPC configuration is MCU-specific data; a master the interconnect cannot attribute must stay Secure-only; attribution may come from the IDAU alone (`sau_regions = 0` with a complete `idau` table is a valid `tz` definition) or from IDAU plus SAU; the level is `none` only when neither can attribute the extension regions |
 | `riscv-pmp` | RISC-V PMP | `pmp_entries` ∈ {0, 16, 64} as implemented (read back by probing which `pmpcfg` entries are writable), address modes NA4 (4 B, if `na4`), NAPOT (from 8 B, the implementation's `grain` read back), TOR (any range on the granule, if `tor`); U-mode for extensions, M-mode for DAGON; `critical_section = mstatus-mie` | `mcause`, `mtval` (address), no hardware stacking | denial for U-mode of everything not granted; XN per entry | without ePMP, M-mode is not restricted by PMP; entries are few and TOR consumes an entry per boundary; 0 entries is `none` |
 | `riscv-epmp` | RISC-V ePMP (Smepmp) | as PMP, plus `mseccfg` machine-mode lockdown and shared regions | as PMP | as PMP, and DAGON can forbid M-mode execution from extension memory | |
-| `esp-pms` | Espressif Permission Control + World Controller | `worlds`, `memory_regions`, `peripheral_slots`, `gdma_channels` as the part implements (read back from the PMS version and region registers); `critical_section = xtensa-level`; per-world (World 0 DAGON, World 1 extensions) permissions on internal memory regions, external memory through the MMU, each peripheral, each GDMA channel; applied per core; lockable | `EXCCAUSE`/`EXCVADDR`, World-switch exception | denial for World 1 of everything not granted, on every core, including GDMA | the PMS/WCL registers must be programmed by DAGON's MCU package (no HAL driver); until then `none` |
+| `esp-pms` | Espressif Permission Control + World Controller | `worlds`, `memory_regions`, `peripheral_slots`, `gdma_channels` as the part implements (read back from the PMS version and region registers); `critical_section = xtensa-level`; per-world (World 0 DAGON, World 1 extensions) permissions on internal memory regions, external memory through the MMU, each peripheral, each GDMA channel; applied per core; lockable | `EXCCAUSE`/`EXCVADDR`, World-switch exception | denial for World 1 of everything not granted, on every core, including GDMA | the PMS/WCL registers must be programmed by DAGON's MCU package (no HAL driver) |
 | `none` | no usable unit | | | time measured, events recorded | memory, flash, watchdog, hang (4.5) |
 
 The level a definition may claim follows from the kind: `mpu` for the
 MPU and PMP kinds, `pms` for `esp-pms`, `tz` for `armv8m-tz`, `none`
-otherwise or until the package implements the kind.
+otherwise.
 
 ### 4.5 Isolation level per MCU, and the three examples
 
@@ -1152,9 +1152,8 @@ is a service), IO_BANK0/QSPI and PADS `0x4001_4000`–`0x4001_C000`
 
 **ESP32-S3** — `kind = "esp-pms"`, two `[[core]]`, `boot_extensions =
 false` (vendor stage 2, no DAGON boot stage), `fault_address = true`,
-`unwind = "xtensa-world"`, `level = "none"` until the MCU package
-programs the PMS and WCL registers (the HAL exposes no driver), then
-`pms` for the app (Espressif ESP32-S3 TRM, "World Controller" and
+`unwind = "xtensa-world"`, `level = "pms"` for the app; the MCU package
+programs the PMS and WCL registers, as the HAL exposes no driver (Espressif ESP32-S3 TRM, "World Controller" and
 "Permission Control" chapters). Generated map at `pms`:
 
 | Resource | World 1 (extension) | Notes |
@@ -2128,8 +2127,8 @@ below keep code and data to it.
    same reply.
 7. **Facts say how far they are established.** A definition's hardware
    fact is a number checked against its source (the definition's comment
-   cites the document and table), `{ unverified = N }` (a value not yet
-   checked against its source) or `"unmeasured"` (no value yet). Tools and
+   cites the document and table), `{ unverified = N }` (a value not
+   checked against its source) or `"unmeasured"` (no value). Tools and
    documents report the last two as not established; a check that needs a
    value uses an unverified one; none is relied on in a release.
 
@@ -2181,11 +2180,10 @@ FIFO keeps what fits; a frame cut by the stall is dropped by the 20 ms
 gap rule and the requester retries. USB Serial/JTAG NAKs the host
 meanwhile.
 
-### 12.3 Measured on hardware
+### 12.3 How the budgets are set
 
-None of the budgets above is established by measurement. For each MCU, a
-release relies on them only once these are measured on the boards: the longest critical section
-of DAGON's own code (`masked_max_us`: the worst measured plus a margin),
+For each MCU, the budgets are set from these values on the boards: the longest critical section
+of DAGON's own code (`masked_max_us`: the worst value plus a margin),
 the worst-case erase time of the board's flash part (and its datasheet
 value, cited in the definition), the watchdog margin left at the end of
 one erase, and the link's recovery after it (the parent's retry

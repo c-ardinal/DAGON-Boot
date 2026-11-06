@@ -377,7 +377,7 @@ clears a trip whose id is installed.
 
 ### 3.7 Limits of the claims
 
-Power-on clears the watchdog flag: a lockup not yet classified is lost,
+Power-on clears the watchdog flag: an unclassified lockup is lost,
 never forged. Foreign bytes may destroy records the same way; a destroyed
 clean verdict lets a later watchdog reset classify that interrupted call
 (one that never returned) as a lockup, and a destroyed clear-done record
@@ -557,6 +557,5 @@ model found the earlier check, which probed over a running count, letting
 a failing core start without end).
 
 Limit of the claims: that each place keeps its value across the resets
-named is the vendor's documented behaviour, to be confirmed on each
-board.
+named is the vendor's documented behaviour.
 

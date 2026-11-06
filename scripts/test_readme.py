@@ -67,8 +67,8 @@ class Readmes(unittest.TestCase):
             self.assertLess(text.index(heading), text.index("cargo install"), path.name)
 
     def test_the_figure_says_word_for_word_what_it_shows(self):
-        self.assertIn("次の図は DAGON が目指すソフトウェアの設計です。今のバージョンがどこまで実装しているかは示していません。", JA.read_text(encoding="utf-8"))
-        self.assertIn("The figure below is the software design DAGON aims for. It does not show how much of it the current version implements.", EN.read_text(encoding="utf-8"))
+        self.assertIn("次の図は DAGON のソフトウェアの設計です。", JA.read_text(encoding="utf-8"))
+        self.assertIn("The figure below is DAGON's software design.", EN.read_text(encoding="utf-8"))
 
     def test_the_notice_says_how_many_microcontrollers_there_are(self):
         mcus = definitions("mcu", "dagon-mcu.toml")

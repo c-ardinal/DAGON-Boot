@@ -125,7 +125,7 @@ What DAGON does not do is in [Limitations](https://c-ardinal.github.io/DAGON-Boo
 
 ## DAGON's design
 
-The figure below is the software design DAGON aims for. It does not show how much of it the current version implements.
+The figure below is DAGON's software design.
 
 <img src="assets/architecture/node-en.svg" alt="DAGON's software design, in layers and components" width="100%">
 

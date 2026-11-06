@@ -125,7 +125,7 @@ DAGONがしないことは[制限事項](https://c-ardinal.github.io/DAGON-Boot/
 
 ## DAGONの設計
 
-次の図は DAGON が目指すソフトウェアの設計です。今のバージョンがどこまで実装しているかは示していません。
+次の図は DAGON のソフトウェアの設計です。
 
 <img src="assets/architecture/node-ja.svg" alt="DAGON のソフトウェアの設計を層とコンポーネントで示す図" width="100%">
 

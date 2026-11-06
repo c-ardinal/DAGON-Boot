@@ -22,7 +22,7 @@ cd my-fleet
 - `topology.yaml`: 見本の構成です。`--from <yaml>` を付けると自分の構成になります。
 - `.gitignore`
 - Claude Code のファイル（[プロジェクトでの Claude の手助け](/how-to/claude-help/)）
-- 署名の鍵の組（まだ無いとき）: `~/.dagon/keys/my-fleet` に作ります。`--keys <dir>` で場所を変えられます。
+- 署名の鍵の組（無いとき）: `~/.dagon/keys/my-fleet` に作ります。`--keys <dir>` で場所を変えられます。
 
 秘密鍵はプロジェクトの外、git の作業ツリーの外に置かれます。`dagon.toml` には公開鍵の場所だけが書かれます。
 

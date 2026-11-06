@@ -141,7 +141,6 @@
   header {
     grid-area: header;
     position: relative;
-    container-type: inline-size;
     display: grid;
     grid-template-columns: minmax(0, 1fr) auto minmax(max-content, 1fr);
     align-items: center;
@@ -234,12 +233,6 @@
     flex: none;
     align-items: center;
     gap: var(--s-1);
-  }
-  /* Below this bar width the edit group would meet the actions: it gives way to ☰, where the same items always are. */
-  @container (max-width: 1100px) {
-    .edit {
-      display: none;
-    }
   }
   /* The graph／表 segment: a pill of two icons, the current one filled. */
   .seg {

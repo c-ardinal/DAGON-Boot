@@ -124,6 +124,7 @@
   }
   h2 {
     margin: 0 0 var(--s-4);
+    padding-right: var(--s-6);
     font: 700 var(--t-heading) / 28px var(--f-ja);
   }
   h2:focus {

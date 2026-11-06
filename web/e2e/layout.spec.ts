@@ -1,5 +1,5 @@
 import { expect, test, type Page } from '@playwright/test';
-import { canvasState, layoutFaults, openSample, settled } from './console.ts';
+import { boxes, canvasState, layoutFaults, openSample, settled } from './console.ts';
 
 // The viewport matrix (ulthar config.json `viewport_matrix`) from 1024 wide up, the page's own 2560 theme edge (2559/2560) added.
 const WIDTHS = [1024, 1280, 1366, 1440, 1920, 2020, 2400, 2559, 2560];
@@ -162,10 +162,17 @@ test('undo, redo, the view toggle and the connection are in the header; the edit
   await page.setViewportSize({ width: 1024, height: 768 });
   await page.getByRole('radio', { name: '準備' }).click();
   await settled(page);
-  expect(await page.locator('header .edit').evaluate((e) => getComputedStyle(e).display)).toBe('none');
+  expect(await page.locator('header .edit').count()).toBe(0);
   await page.getByRole('button', { name: 'メニューを開く' }).click();
   await page.getByRole('button', { name: '構成', exact: true }).click();
   await expect(page.locator('.panel').last().locator('button:has(span:text-is("元に戻す"))')).toBeVisible();
+  await expect(page.locator('.panel').last().locator('button:has(span:text-is("表で見る"))')).toBeVisible();
+  await page.keyboard.press('Escape');
+  await page.setViewportSize({ width: 1920, height: 1080 });
+  await settled(page);
+  await page.getByRole('button', { name: 'メニューを開く' }).click();
+  await page.getByRole('button', { name: '構成', exact: true }).click();
+  await expect(page.locator('.panel').last().locator('button:has(span:text-is("表で見る"))')).toHaveCount(0);
 });
 
 test('a sheet closes by its ×, by Escape and by the canvas background; deleting asks first', async ({ page }) => {

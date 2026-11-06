@@ -273,7 +273,7 @@
     display: flex;
     align-items: flex-start;
     gap: var(--s-2);
-    margin: 0 0 var(--s-4);
+    margin: 0 var(--s-6) var(--s-4) 0;
   }
   h2 {
     flex: 1;

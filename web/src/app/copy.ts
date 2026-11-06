@@ -1187,6 +1187,9 @@ export const MENU = {
   rollback: '前のバージョンに戻す',
   applyProposal: 'DAGON の案を反映する',
   cli: 'CLI の接続と API キーを見る',
+  /** The view toggle, in the menu only while the bar is too narrow to hold it. */
+  viewTable: '表で見る',
+  viewGraph: 'グラフで見る',
   keys: 'キー操作',
   copyLog: '記録をコピーする',
   copyUrl: 'この URL をコピーする',
@@ -1201,6 +1204,8 @@ export const MENU = {
     parts: '左に部品の窓を開きます（ドラッグでキャンバスに置けます）',
     arrange: '動かしたカードを親機から順の並びに戻します',
     fit: 'ノードがすべて見える大きさと位置にします',
+    viewTable: 'ノード・リンク・配線を表にして見ます',
+    viewGraph: 'ノードとリンクを図にして見ます',
     connect: 'USB でつないだ親機と通信を始めます',
     disconnect: '親機との通信を止めます（USB は抜いても大丈夫です）',
     place: 'パソコンにある .dgb ファイルを選び、その中身をノードへ書き込みます',

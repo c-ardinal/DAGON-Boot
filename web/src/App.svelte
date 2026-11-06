@@ -781,6 +781,18 @@
     if (id && !stopped('recover')) void op.writeNode({ id, confirmed: true });
   }
   const romNode = $derived(op.config?.nodes.find((n) => n.id === romAsk) ?? null);
+  /** The bar's width: under this the edit tools would meet the actions, so they live in ☰ alone (its items are always there). */
+  const BAR_TOOLS_MIN = 1100;
+  let barNarrow = $state(false);
+  $effect(() => {
+    const bar = document.querySelector('.frame > header');
+    if (!bar) return;
+    const look = () => (barNarrow = bar.getBoundingClientRect().width < BAR_TOOLS_MIN);
+    look();
+    const ro = new ResizeObserver(look);
+    ro.observe(bar);
+    return () => ro.disconnect();
+  });
   /** ×, Escape or the canvas background: the sheet closes (the selection goes). */
   function closeSheet() {
     if (mode === 'define') {
@@ -1138,6 +1150,8 @@
         { label: DEFINE.redo, hint: MENU.hint.redo, key: 'Ctrl+Shift+Z', control: 'edit', off: mode !== 'define' ? MENU.off.notDefine : d.canRedo ? null : MENU.off.noRedo, run: () => d.redo() },
         { label: PARTS.open, hint: MENU.hint.parts, off: mode !== 'define' ? MENU.off.notDefine : partsOpen ? MENU.off.partsOpen : null, run: () => (partsOpen = true) },
         { label: MENU.arrange, hint: MENU.hint.arrange, off: Object.keys(positions).length ? null : MENU.off.arranged, run: () => ((positions = {}), savePositions()) },
+        // The view toggle leaves the menu while the header holds it.
+        ...(barNarrow ? [{ label: d.view === 'graph' ? MENU.viewTable : MENU.viewGraph, hint: d.view === 'graph' ? MENU.hint.viewTable : MENU.hint.viewGraph, off: mode !== 'define' ? MENU.off.notDefine : null, run: () => (d.view = d.view === 'graph' ? 'table' : 'graph') }] : []),
         { label: ZOOM.fit, hint: MENU.hint.fit, key: 'F', off: mode === 'define' && d.view !== 'graph' ? MENU.off.notGraph : null, run: () => graph?.fit() },
       ],
     },
@@ -1442,7 +1456,7 @@
       bind:helpOpen
       {helpKeys}
       title={screen === 'work' ? (d.doc.topo.name ?? '') : ''}
-      edit={screen === 'work' && mode === 'define' ? { canUndo: d.canUndo, canRedo: d.canRedo, onundo: () => d.undo(), onredo: () => d.redo(), view: d.view, onview: (v) => (d.view = v) } : undefined}
+      edit={screen === 'work' && mode === 'define' && !barNarrow ? { canUndo: d.canUndo, canRedo: d.canRedo, onundo: () => d.undo(), onredo: () => d.redo(), view: d.view, onview: (v) => (d.view = v) } : undefined}
       hub={screen === 'work' ? { connected, locked: hubLocked, hint: op.state === 'idle' || op.state === 'choosing' ? band.sentence : undefined, onpress: toggleHub } : undefined}
     >
       {#snippet menu()}

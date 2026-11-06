@@ -303,6 +303,7 @@
   }
   .title {
     margin: 0 0 var(--s-3);
+    padding-right: var(--s-6);
     font: 700 var(--t-heading) / 28px var(--f-ja);
     letter-spacing: 0.02em;
     font-feature-settings: 'palt';

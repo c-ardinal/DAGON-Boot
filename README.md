@@ -96,7 +96,9 @@ dagon serve
 
 ## しくみ
 
-<img src="assets/architecture/node-ja.svg" alt="ノードのファームウェアの層と機能ごとのスタックを示す図" width="100%">
+次の図は DAGON が目指すソフトウェアの設計です。今のバージョンがどこまで実装しているかは示していません。
+
+<img src="assets/architecture/node-ja.svg" alt="DAGON のソフトウェアの設計を層とコンポーネントで示す図" width="100%">
 
 | やりたいこと | 触る場所 | 手順 |
 |---|---|---|

@@ -215,6 +215,20 @@ test('spec 9: the band says one sentence in readable type', async ({ page }) => 
   expect(colour).toBe(paper);
 });
 
+test('spec 9: the longest sentence wraps and the band grows over the canvas, moving nothing and covering nothing', async ({ page }) => {
+  for (const [width, height] of [[1024, 600], [1920, 1080]]) {
+    await page.setViewportSize({ width, height });
+    await openSample(page);
+    const before = await canvasState(page);
+    await page.locator('#band .sentence').evaluate((e) => {
+      e.textContent = '終わるまで電源と USB を抜かず、このページを開いたままにしてください。途中で止まっても、ノードは前のバージョンのまま動きます。'.repeat(3);
+    });
+    await page.waitForTimeout(120);
+    expect(await canvasState(page)).toEqual(before);
+    expect(await layoutFaults(page)).toEqual([]);
+  }
+});
+
 test('spec 16: dragging a card pulls its cable behind it, ends on the ports, and the view stays', async ({ page }) => {
   await page.setViewportSize({ width: 1920, height: 1080 });
   await openSample(page);

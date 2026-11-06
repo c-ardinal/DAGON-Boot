@@ -8,7 +8,7 @@ description: "リポジトリにあるもの、その場所、DAGONそのもの�
 | パス | 内容 |
 |---|---|
 | `crates/` | DAGONのcrate。一覧は[Rust API](/reference/rust-api/)にあります |
-| `targets/` | MCUごと（`targets/mcu/*`）とボードごと（`targets/boards/*`）の定義、RP2040親機のファームウェア、立ち上げ用ツール |
+| `targets/` | MCUごと（`targets/mcu/*`）とボードごと（`targets/boards/*`）の定義、RP2040親機のファームウェア |
 | `samples/` | 定義を使うサンプルのアプリ（DAGONの一部ではない） |
 | `web/` | DAGON Console（Svelte、Vite、TypeScript）。できることは`web/README.md`にあります |
 | `topology/` | 構成の例 |
@@ -23,7 +23,6 @@ description: "リポジトリにあるもの、その場所、DAGONそのもの�
 - `wasm32-unknown-unknown`のターゲット（ターゲットはすべて`rust-toolchain.toml`にあります）
 - `crates/dagon-wasm`用の`wasm-pack` 0.15.1（対応する`wasm-bindgen`と`wasm-opt`はこのツールが自分で取得します）
 - `web/`用のNode.jsとnpm
-- RP2040の立ち上げ用イメージに使う`elf2uf2-rs`
 - ESP32-S3の2nd stageを`targets/esp32s3-2ndstage`からビルドし直すときはESP-IDF v6.1。ビルド済みの無改変のものを`targets/mcu/esp32s3/vendor/bootloader.bin`として同梱しています（`vendor/PROVENANCE.md`）。
 
 ### クローンを使う

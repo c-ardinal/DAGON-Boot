@@ -44,12 +44,26 @@ describe('DAGON and its agent (site/src/content/docs/reference/agent-api.md)', (
     await a.ask('次は？', 'next');
     const rollback = { node: 'watch', failed_version: '1.1.0', returned_version: '1.0.0', reason: 'ROLLED BACK', node_state: { trial: false, last_reason: 3 } };
     let record: typeof rollback | null = rollback;
-    a.record = () => record;
+    a.record = async () => record;
     await a.ask('失敗の理由を聞く', 'failure');
     record = null;
     await a.ask('次は？', 'next');
     expect(sent.map((s) => 'rollback' in s.body)).toEqual([false, true, false]);
     expect(sent[1].body.rollback).toEqual(rollback);
+  });
+
+  test('a question waits for the record to be complete, showing thinking meanwhile', async () => {
+    const sent: unknown[] = [];
+    const a = new Agent(async (_m, path, body) => (path === 'agent' ? json({ linked: true }) : (sent.push(body), json({ answer: 'はい。' }))));
+    await a.refresh();
+    let read = (_: null) => undefined as void;
+    a.record = () => new Promise((r) => (read = r));
+    const asked = a.ask('失敗の理由を聞く', 'failure');
+    await now();
+    expect([sent.length, a.thinking]).toEqual([0, true]);
+    read(null);
+    await asked;
+    expect([sent.length, a.thinking]).toEqual([1, false]);
   });
 
   test('asking why from a modal closes it first, so its scrim does not cover the answer', async () => {

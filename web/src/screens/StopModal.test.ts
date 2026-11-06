@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs';
 import { createRawSnippet } from 'svelte';
 import { render } from 'svelte/server';
 import { describe, expect, test } from 'vitest';
@@ -21,6 +22,13 @@ const html = (back: boolean, linked: boolean) =>
 const ask = `data-control="ask"`;
 
 describe('the modal of a stopped write', () => {
+  test('its headings carry modal-h, and that style lives with Modal so it reaches every modal\'s body', () => {
+    expect(html(true, true).match(/<h3 class="modal-h[^"]*"/g)).toHaveLength(2);
+    const source = (rel: string) => new TextDecoder().decode(readFileSync(new URL(rel, import.meta.url)));
+    expect(source('./Modal.svelte')).toMatch(/dialog :global\(\.modal-h\) \{/);
+    expect(source('../App.svelte')).not.toMatch(/^\s*\.modal-h \{/m);
+  });
+
   test('went back and an agent is linked: 失敗の理由を聞く, before the band\'s actions', () => {
     const b = html(true, true);
     expect(b).toContain(WRITE.previous);

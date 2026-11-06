@@ -56,7 +56,7 @@ export interface RollbackRecord {
   returned_version: string;
   /** dagon-host's short reason (`ROLLED BACK`). */
   reason: string;
-  /** What the node's STATUS reported then; null while unread or when it did not answer. */
+  /** What the node's STATUS reported then; null when it did not answer. */
   node_state: { trial: boolean; last_reason: number } | null;
 }
 
@@ -125,8 +125,8 @@ export class Agent {
 
   /** The lock table's check, set by the page: true when it is stopped now (the page has shown why). */
   guard: (kind: 'ask' | 'link') => boolean = () => false;
-  /** The page's record of a write that went back, sent with every question while there is one. */
-  record: () => RollbackRecord | null = () => null;
+  /** The page's record of a write that went back, once complete; sent with every question while there is one. */
+  record: () => Promise<RollbackRecord | null> = async () => null;
 
   constructor(private readonly api: AgentApi) {}
 
@@ -186,8 +186,8 @@ export class Agent {
     const history = this.messages.slice(-HISTORY).map((m) => ({ role: m.role, text: [m.text, m.more].filter(Boolean).join('\n\n') }));
     this.messages = [...this.messages, { role: 'user', text: question }];
     this.thinking = true;
-    const rollback = this.record();
     try {
+      const rollback = await this.record();
       const r = await this.api('POST', 'agent/ask', { question, kind, ...(selection ? { selection } : {}), ...(rollback ? { rollback } : {}), history });
       if (!r.ok) return this.say(problemOf(r.status, await codeOf(r)));
       const a = (await r.json()) as { answer: string; proposal?: Proposal | null };

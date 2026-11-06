@@ -56,5 +56,5 @@ export function resultChip(stage: Progress['stage']): { chip: string; spoken: st
   return r ? { chip: r.word, spoken: r.word.slice(2), silent: r.silent } : null;
 }
 
-/** While any node needs attention or failed,the other busy lights stand still (one moving thing at a time). */
+/** While any node needs attention or failed, the other busy lights stand still (one moving thing at a time). */
 export const lightsStill = (states: readonly NodeState[]): boolean => states.some((s) => s === 'error' || s === 'attention');

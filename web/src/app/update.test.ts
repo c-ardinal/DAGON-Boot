@@ -1,5 +1,5 @@
 import { readFileSync } from 'node:fs';
-import { describe, expect, test, vi } from 'vitest';
+import { describe, expect, test } from 'vitest';
 import type { LinkClock } from '../serial/hostLink.ts';
 import { MockTransport, SAMPLE_HUB_HELLO, type MockOptions } from '../serial/mock.ts';
 import { PHASE, versionText, type UpdateEvent } from '../wasm/dagon.ts';
@@ -457,8 +457,8 @@ describe('update from the page with dagon-host apply against the mock hub', () =
     op.takeFile('sample-1.1.0.dgb', RELEASE);
     await op.update();
     expect([op.state, op.failed, op.progress.watch.stage]).toEqual(['stopped', 'watch', 'previous']);
-    await vi.waitFor(() => expect(op.rollbackRecord?.node_state).not.toBeNull());
-    expect(op.rollbackRecord).toEqual({
+    // Asked at once: the question waits for the node's STATUS, so null can only mean it did not answer.
+    expect(await op.settledRollbackRecord()).toEqual({
       node: 'watch',
       failed_version: '1.1.0',
       returned_version: '1.0.0',

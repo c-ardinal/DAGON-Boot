@@ -1,6 +1,11 @@
 import { readFileSync } from 'node:fs';
+import { createRawSnippet } from 'svelte';
+import { render } from 'svelte/server';
 import { describe, expect, test } from 'vitest';
+import { Agent } from '../app/agent.svelte.ts';
+import { BUILD } from '../app/copy.ts';
 import { Operate } from '../app/operate.svelte.ts';
+import StopModal from '../screens/StopModal.svelte';
 import { trialMs } from '../wasm/dagon.ts';
 import type { LinkClock } from './hostLink.ts';
 import { simulator } from './simHub.ts';
@@ -54,5 +59,68 @@ describe('the browser simulator takes the links and flash their real time', () =
       const [from, to] = writing[id] ?? [0, 0];
       expect(to - from, `${id}: simulated ms in transfer`).toBeGreaterThan(3_000);
     }
+  }, 120_000);
+});
+
+describe('a write the simulator sends back, as dagon demo --sim-fail watch does', () => {
+  /** A write of the sample release to the simulator, with the watch's new version crashing at boot. */
+  async function wentBack(): Promise<Operate> {
+    const sim = simulator(12, (hub) => hub.failWatch())!;
+    expect(sim, 'built with the sim feature (npm run wasm:dev)').not.toBeNull();
+    const op = new Operate({
+      open: async () => (await sim.transport.open(), sim.transport),
+      reselect: async () => (await sim.transport.open(), sim.transport),
+      clock: sim.clock,
+      latest: async () => RELEASE,
+      bootcore: async () => null,
+      stage0: async () => null,
+      trialMs: (id) => trialMs(MCU[id] ?? ''),
+    });
+    await op.connect();
+    await op.push();
+    op.takeFile('sample-full-1.1.0.dgb', RELEASE);
+    await op.update();
+    return op;
+  }
+
+  const modal = (op: Operate, linked: boolean) =>
+    render(StopModal, {
+      props: {
+        target: `[3] ${op.failed}`,
+        back: op.wentBack,
+        reason: '',
+        fix: '',
+        linked,
+        onask: () => undefined,
+        onclose: () => undefined,
+        onmore: () => undefined,
+        buttons: createRawSnippet(() => ({ render: () => '<button>x</button>' })),
+      },
+    }).body;
+
+  test('from the simulator\'s failure to the action, and the real record goes with the question', async () => {
+    const op = await wentBack();
+    expect([op.state, op.failed, op.progress.watch.stage, op.wentBack]).toEqual(['stopped', 'watch', 'previous', true]);
+    expect(modal(op, true)).toContain(BUILD.askAgent);
+    expect(modal(op, false)).not.toContain(BUILD.askAgent);
+
+    const sent: Record<string, unknown>[] = [];
+    const agent = new Agent(async (_m, path, body) => {
+      const reply = path === 'agent' ? { linked: true } : (sent.push(body as Record<string, unknown>), { answer: 'はい。' });
+      return new Response(JSON.stringify(reply), { status: 200 });
+    });
+    agent.record = () => op.settledRollbackRecord();
+    await agent.refresh();
+    await agent.askWhy(
+      () => false,
+      () => undefined,
+    );
+    expect(sent[0].rollback).toEqual({
+      node: 'watch',
+      failed_version: '1.1.0',
+      returned_version: '1.0.0',
+      reason: 'ROLLED BACK',
+      node_state: { trial: false, last_reason: 3 },
+    });
   }, 120_000);
 });

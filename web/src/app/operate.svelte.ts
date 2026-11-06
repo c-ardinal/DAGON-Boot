@@ -255,9 +255,19 @@ export class Operate {
   /** What the last update, recovery or rollback left (done). */
   finished = $state<Finish | null>(null);
   private backRecord = $state.raw<RollbackRecord | null>(null);
+  private backRead: Promise<void> = Promise.resolve();
+  /** The node the write stopped at is back on its previous version. */
+  get wentBack(): boolean {
+    return !!this.failed && this.progress[this.failed]?.stage === 'previous';
+  }
   /** The record of the write that went back, while the node stays stopped on it; else null. */
   get rollbackRecord(): RollbackRecord | null {
-    return this.failed && this.progress[this.failed]?.stage === 'previous' ? this.backRecord : null;
+    return this.wentBack ? this.backRecord : null;
+  }
+  /** The record once the node's STATUS was read or missed: its node_state null then means it did not answer. */
+  async settledRollbackRecord(): Promise<RollbackRecord | null> {
+    await this.backRead;
+    return this.rollbackRecord;
   }
   /** Nodes on the chosen release's version since it was chosen (an update, its rest, a recovery). */
   private updated = new Set<string>();
@@ -740,7 +750,7 @@ export class Operate {
     const f = why?.running != null ? { stage: 'previous' as const } : failureStage(why?.reason ?? 'NO ANSWER');
     // A stopped update has no "cannot fix" yet: an unnamed failure is a refusal of the update.
     this.stopAt(n.id, f.stage === 'cannotFix' ? 'refused' : f.stage, f.reason);
-    if (why?.running != null) void this.recordBack(n.id, why.running, why.reason);
+    if (why?.running != null) this.backRead = this.recordBack(n.id, why.running, why.reason);
   }
 
   /** Keeps what a write that went back left: the versions and reason at once, then what the node reports now. */
@@ -859,7 +869,7 @@ export class Operate {
     this.alert = '';
     if (!mine) {
       this.stopAt(hub.id, 'previous');
-      void this.recordBack(hub.id, r.version, 'ROLLED BACK');
+      this.backRead = this.recordBack(hub.id, r.version, 'ROLLED BACK');
       return;
     }
     this.progress[hub.id] = { stage: 'done', percent: 100 };

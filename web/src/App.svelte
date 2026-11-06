@@ -1003,7 +1003,7 @@
   d.guard = (k) => stopped(k);
   cli.guard = (k) => stopped(k);
   agent.guard = (k) => stopped(k);
-  agent.record = () => op.rollbackRecord;
+  agent.record = () => op.settledRollbackRecord();
   /** Band actions as lock-table operations. */
   const CONTROL_OF: Partial<Record<Action, Control>> = {
     chooseFile: 'file', updateResponding: 'file', otherFile: 'file', useLatest: 'update', update: 'update',
@@ -1521,7 +1521,7 @@
     </Modal>
   {/if}
   {#if stopOpen && stopNode}
-    {@const back = op.progress[stopNode.id]?.stage === 'previous'}
+    {@const back = op.wentBack}
     {@const running = op.live[stopNode.id]?.hello?.activeVersion}
     <StopModal
       target={`[${stopNode.no}] ${stopNode.name}`}
@@ -1576,10 +1576,6 @@
 <svelte:window onkeydown={defineKeys} />
 
 <style>
-  .modal-h {
-    margin: 0;
-    font: 700 var(--t-caption) / 16px var(--f-ja);
-  }
   .modal-mono {
     margin: 0;
     font: 400 var(--t-mono) / 24px var(--f-mono);

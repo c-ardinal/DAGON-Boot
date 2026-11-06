@@ -64,7 +64,7 @@ cargo install --git https://github.com/c-ardinal/DAGON-Boot --tag cli-v<version>
 
 ## ファームウェアを開発するためのツール
 
-ファームウェアを開発するには、[Rust](https://rustup.rs) と[マイコンごとのツール](/reference/tools/)が要ります。足りないものを `dagon` に確かめさせます。
+ファームウェアを開発するには、[Rust](https://rustup.rs) と[マイコンごとのツール](/reference/tools/)が要ります。構成を描いたら、ビルドの前に足りないものを `dagon` に確かめさせます。
 
 ```sh
 dagon doctor           # あるものと足りないもの

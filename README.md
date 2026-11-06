@@ -97,7 +97,6 @@ dagon demo
 ```sh
 dagon new my-fleet
 cd my-fleet
-dagon doctor
 dagon serve
 ```
 
@@ -105,9 +104,9 @@ dagon serve
 
 アプリは[Rust](https://rustup.rs)だけで書きます。
 
-`dagon doctor`はマイコンごとに必要なツール（[一覧](https://c-ardinal.github.io/DAGON-Boot/doc/reference/tools/)）を確かめ、`dagon doctor --fix`は管理者の権限が要らないものを入れます。
+`dagon serve`がブラウザを開き、DAGON Consoleで続けられます。
 
-`dagon serve`が表示するアドレスを開くと、DAGON Consoleで続けられます。
+構成を描いたら、ビルドの前に`dagon doctor`がその構成のマイコンに必要なツール（[一覧](https://c-ardinal.github.io/DAGON-Boot/doc/reference/tools/)）を確かめ、`dagon doctor --fix`が管理者の権限が要らないものを入れます。
 
 ビルドから最初の書き込みまでは[はじめから書き込みまで](https://c-ardinal.github.io/DAGON-Boot/doc/getting-started/first-project/)を見てください。
 
@@ -145,18 +144,18 @@ DAGONがしないことは[制限事項](https://c-ardinal.github.io/DAGON-Boot/
 
 ### DAGONを使うとき
 
-| やりたいこと       | 触る場所                                                               | 手順                                                                                                |
-| ------------------ | ---------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------- |
-| アプリを書く       | `nodes/<id>/src/app.rs`                                                | [はじめから書き込みまで](https://c-ardinal.github.io/DAGON-Boot/doc/getting-started/first-project/) |
-| 拡張を足す         | `targets/boot-extension-template/`、`crates/dagon-events/src/ports.rs` | [拡張のマニフェスト](https://c-ardinal.github.io/DAGON-Boot/doc/reference/extension-manifest/)      |
-| ボードを足す       | `targets/boards/*/dagon-board.toml`                                    | [自分のボード](https://c-ardinal.github.io/DAGON-Boot/doc/how-to/own-board/)                        |
-| エージェントを足す | `crates/dagon-cli/agents/`、`~/.dagon/agents/*.toml`                   | [エージェント定義の形式](https://c-ardinal.github.io/DAGON-Boot/doc/reference/agent-definition/)    |
+| やりたいこと       | 触る場所                                                             | 手順                                                                                                |
+| ------------------ | -------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------- |
+| アプリを書く       | `nodes/<id>/src/app.rs`                                              | [はじめから書き込みまで](https://c-ardinal.github.io/DAGON-Boot/doc/getting-started/first-project/) |
+| 拡張を足す         | `extensions/<id>/dagon-extension.toml`、`dagon.toml`の`[extensions]` | [拡張のマニフェスト](https://c-ardinal.github.io/DAGON-Boot/doc/reference/extension-manifest/)      |
+| エージェントを足す | `~/.dagon/agents/*.toml`                                             | [エージェント定義の形式](https://c-ardinal.github.io/DAGON-Boot/doc/reference/agent-definition/)    |
 
 ### DAGONそのものに足すとき
 
 | やりたいこと       | 触る場所                                                                                        | 手順                                                                                         |
 | ------------------ | ----------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------- |
-| マイコンを足す     | `targets/mcu/*/dagon-mcu.toml`、`crates/dagon-port/src/lib.rs`                                  | [マイコンとリンクを足す](https://c-ardinal.github.io/DAGON-Boot/doc/how-to/new-mcu-or-link/) |
+| ボードを足す       | `targets/boards/*/dagon-board.toml`                                                             | [自分のボード](https://c-ardinal.github.io/DAGON-Boot/doc/how-to/own-board/)                 |
+| マイコンを足す     | `targets/mcu/<id>/`                                                                             | [マイコンとリンクを足す](https://c-ardinal.github.io/DAGON-Boot/doc/how-to/new-mcu-or-link/) |
 | リンクや転送を足す | `crates/dagon-format/src/link.rs`、`targets/mcu/*/src/links.rs`、`crates/dagon-host/src/lib.rs` | [マイコンとリンクを足す](https://c-ardinal.github.io/DAGON-Boot/doc/how-to/new-mcu-or-link/) |
 
 ## 自分でビルドする
@@ -171,7 +170,7 @@ DAGONがしないことは[制限事項](https://c-ardinal.github.io/DAGON-Boot/
 ビルドして入れます。
 
 ```sh
-cargo install --git https://github.com/c-ardinal/DAGON-Boot dagon-cli
+cargo install --git https://github.com/c-ardinal/DAGON-Boot --tag cli-v<version> dagon-cli
 ```
 
 クローンからは`cargo install --path crates/dagon-cli`です。

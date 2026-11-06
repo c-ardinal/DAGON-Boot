@@ -102,6 +102,8 @@ dagon gen
 
 ## 4. ビルドする
 
+構成を描いたら、ビルドの前に `dagon doctor` がその構成のマイコンに要るツールを確かめ、`dagon doctor --fix` が管理者の権限が要らないものを入れます。
+
 ```sh
 dagon build            # または: dagon build seg
 ```

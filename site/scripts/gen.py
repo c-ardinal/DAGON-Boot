@@ -517,6 +517,28 @@ writes, as `compat.toml` holds them. The rules for changing them are in
 
 # ---------------------------------------------------------------- tools by MCU
 
+# What a `[[doctor]]` entry's probe runs says what kind of tool it checks. The
+# definition reader refuses unknown keys, so the kind is not a key of the entry.
+TOOL_KINDS = {
+    ("rustup", "target"): ("Rust ターゲット", "Rust target"),
+    ("rustup", "toolchain"): ("コンパイラ", "compiler"),
+    ("espup",): ("コンパイラ", "compiler"),
+    ("espflash",): ("書き込みツール", "write tool"),
+    ("probe-rs", "--version"): ("書き込みツール", "write tool"),
+    ("probe-rs", "list"): ("ドライバ", "driver"),
+}
+NO_KIND = set()
+
+
+def tool_kind(lang, entry):
+    """The kind of a `[[doctor]]` entry in `lang`. A probe not listed is recorded; main fails on it."""
+    for prefix, words in TOOL_KINDS.items():
+        if tuple(entry["probe"][:len(prefix)]) == prefix:
+            return tr(lang, *words)
+    NO_KIND.add(entry["what"])
+    return ""
+
+
 def tools(lang="en"):
     rows = []
     slow = tr(lang, "（時間がかかります）", " (takes a while)")
@@ -525,7 +547,7 @@ def tools(lang="en"):
         for d in m.get("doctor", []):
             how = f"`{' '.join(d['fix'])}`" if "fix" in d else ""
             note = say(lang, d.get("hint", "")) + (slow if d.get("slow") else "")
-            rows.append(f"| {cell(m['name'])} | {cell(say(lang, d['what']))} | {how} | {cell(note.strip())} |")
+            rows.append(f"| {cell(m['name'])} | {tool_kind(lang, d)} | {cell(say(lang, d['what']))} | {how} | {cell(note.strip())} |")
     table = "\n".join(rows)
     if lang == "ja":
         body = f"""
@@ -533,8 +555,8 @@ Rust のほかに、マイコンごとに要るツールです。マイコンの
 `dagon doctor` はプロジェクトの中ではそのマイコンの分を、外ではすべてのマイコンの分を確かめます。
 `dagon doctor --fix` は、管理者の権限が要らないものを入れます。
 
-| マイコン | ツール | 入れ方 | 補足 |
-|---|---|---|---|
+| マイコン | 種類 | ツール | 入れ方 | 補足 |
+|---|---|---|---|---|
 {table}
 """
     else:
@@ -544,8 +566,8 @@ entries name them. `dagon doctor` checks them in a project (every MCU
 outside one), and `dagon doctor --fix` runs the install commands that need
 no administrator rights.
 
-| MCU | Tool | Install | Note |
-|---|---|---|---|
+| MCU | Kind | Tool | Install | Note |
+|---|---|---|---|---|
 {table}
 """
     return page(lang, tr(lang, "マイコンごとのツール", "Tools by MCU"),
@@ -718,6 +740,10 @@ def main(argv):
         elif not check and OUT == ROOT / "site" / "src" / "content" / "docs":
             path.parent.mkdir(parents=True, exist_ok=True)
             path.write_text(make(lang), encoding="utf-8", newline="\n")
+    if NO_KIND:
+        print("site/scripts/gen.py TOOL_KINDS: say what kind of tool these check")
+        print("\n".join(f"no kind: {k}" for k in sorted(NO_KIND)))
+        return 1
     unused = sorted(k for k in set(i18n()) - USED)
     if MISSING or unused:
         print(f"{I18N.relative_to(ROOT).as_posix()}: add a Japanese value for the first list, drop the second")

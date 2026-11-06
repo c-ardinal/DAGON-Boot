@@ -66,6 +66,13 @@ class Readmes(unittest.TestCase):
             text = path.read_text(encoding="utf-8")
             self.assertLess(text.index(heading), text.index("cargo install"), path.name)
 
+    def test_requirements_say_what_running_dagon_needs(self):
+        for path, heading, next_heading, line in ((JA, "## 必要なもの", "## まず試す", "- Chrome か Edge 89 以降\n"), (EN, "## Prerequisites", "## Try it", "- Chrome or Edge 89 or later\n")):
+            text = path.read_text(encoding="utf-8")
+            section = text[text.index(heading):text.index(next_heading)]
+            self.assertIn(line, section, path.name)
+            self.assertNotIn("dagon doctor", section, path.name)
+
     def test_the_figure_says_word_for_word_what_it_shows(self):
         self.assertIn("次の図は DAGON のソフトウェアの設計です。", JA.read_text(encoding="utf-8"))
         self.assertIn("The figure below is DAGON's software design.", EN.read_text(encoding="utf-8"))

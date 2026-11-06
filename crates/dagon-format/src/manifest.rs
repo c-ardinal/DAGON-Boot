@@ -11,7 +11,9 @@ pub const HEAD_SIZE: usize = 0x50;
 pub const ENTRY_SIZE: usize = 64;
 pub const CONSTRAINT_SIZE: usize = 16;
 pub const SIG_SIZE: usize = 64;
-pub const MAX_ENTRIES: usize = 16;
+/// Images a node can have in a release: app A and B, boot core A and B, agent.
+pub const IMAGES_PER_NODE: usize = 5;
+pub const MAX_ENTRIES: usize = crate::topology::MAX_NODES * IMAGES_PER_NODE;
 pub const MAX_CONSTRAINTS: usize = 16;
 
 pub mod entry_flags {

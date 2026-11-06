@@ -17,8 +17,8 @@ pub use crate::view::{merge, Home, Node, Progress, Seen, Shade};
 /// No own polling (and the progress screen stays) for this long after a
 /// RELAY or SHOW: the PC drives the nodes.
 const QUIET_AFTER_PC: Duration = Duration::from_secs(10);
-/// Topology node indexes are below 8.
-const MAX_INDEX: usize = 8;
+/// Topology node indexes are below this.
+const MAX_INDEX: usize = dagon_format::topology::MAX_NODES;
 
 static SUBS: Mutex<Cs, RefCell<Subs>> = Mutex::new(RefCell::new(Subs::new()));
 static SEEN: Mutex<Cs, Cell<[Seen; MAX_INDEX]>> = Mutex::new(Cell::new(

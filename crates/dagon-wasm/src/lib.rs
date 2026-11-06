@@ -51,6 +51,12 @@ pub struct BoardInfo {
     pub is_default: bool,
 }
 
+/// The format's node limit: the Console's too.
+#[wasm_bindgen]
+pub fn max_nodes() -> u32 {
+    dagon_format::topology::MAX_NODES as u32
+}
+
 #[wasm_bindgen]
 pub fn supported_boards() -> Vec<BoardInfo> {
     with_registry(|reg| {

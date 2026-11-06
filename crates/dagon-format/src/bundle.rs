@@ -11,7 +11,8 @@ pub const MAGIC: [u8; 4] = *b"DGBN";
 pub const BN_VERSION: u16 = 1;
 pub const HEAD_SIZE: usize = 16;
 pub const ITEM_SIZE: usize = 16;
-pub const MAX_ITEMS: usize = 16;
+/// Every manifest entry and the topology.
+pub const MAX_ITEMS: usize = crate::manifest::MAX_ENTRIES + 1;
 
 pub mod dest {
     /// Image for the hub itself.

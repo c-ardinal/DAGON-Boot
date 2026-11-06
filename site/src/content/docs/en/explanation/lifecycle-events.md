@@ -147,8 +147,7 @@ settles its trial before any app runs. STATUS with the target byte
 and confirmed core); a board whose MCU definition declares no boot loader
 slots answers `Unsupported`. The number and placement of the boot loader
 slots come from the MCU definition's `[[slot]] image = "bootcore"`
-entries (two for every MCU that has them; a single-slot MCU would keep
-one: the app then writes the boot loader, and the boot loader writes the app).
+entries (two for every MCU that has them).
 
 Boot-stage extensions (2) and the boot action program (5.2) run only
 from `WatchdogArmed` on: every event before it is recorded and replayed

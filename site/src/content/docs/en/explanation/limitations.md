@@ -27,6 +27,11 @@ Links:
 
 - Firmware exists only for the link kinds `usb-cdc`, `uart` and `i2c`. `ble`, `wifi-tcp`, `ethernet` and `can` have none.
 
+Identity and VERSION:
+
+- The MCU identity is a hand-assigned 16-bit `wire_id`, carried in the image header, the identity reply, VERSION 0x06 and the topology node. It is not the 64-bit name hash of the design.
+- VERSION answers only ids 0x01, 0x06, 0x0A, 0x0B, 0x0C and 0x0D, and refuses a non-empty request.
+
 The signing key:
 
 - The signing key is read only from a file. The environment variable `DAGON_SIGNING_KEY` also holds a file's path. No port lets you choose another means (an environment variable, the OS key store, 1Password and so on).
@@ -40,7 +45,7 @@ Values and IDs:
 
 Components in the design figure that the code does not have:
 
-- Ports with no replaceable trait: BuildRunner, Signer, DecisionPolicy, LogStorage, UpdateTransport, UpdateProtocol, Recovery, ChildLink, ImageVerifier, Digest, CryptoProvider, Diagnostics, Display, LogSink, Agent, Action
+- Ports with no replaceable trait: BuildRunner, Signer, DecisionPolicy, LogStorage, UpdateProtocol, Recovery, ChildLink, ImageVerifier, Digest, CryptoProvider, Diagnostics, Display, LogSink, Agent, Action
 - On the hub: Coordinator, Release Store, Bus Guardian. The PC drives a write through the hub.
 - The write plan: the Delivery Plan's trial window and promotion judgement
 - Recovery: Recovery Policy's and Node Recovery's automatic choice of tier and bounded retry

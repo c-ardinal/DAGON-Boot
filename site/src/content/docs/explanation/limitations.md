@@ -27,6 +27,11 @@ description: "設計との違いと、DAGON がしないことです。仕様上
 
 - ファームウェアがあるリンクの種類は `usb-cdc`、`uart`、`i2c` だけです。`ble`、`wifi-tcp`、`ethernet`、`can` にはありません。
 
+識別と VERSION:
+
+- マイコンの識別は、手で割り当てた 16 ビットの `wire_id` です。イメージのヘッダ、識別の返答、VERSION の 0x06、構成のノードが持ちます。設計の、名前のハッシュから導く 64 ビットの識別ではありません。
+- VERSION が答えるのは id 0x01、0x06、0x0A、0x0B、0x0C、0x0D だけです。空でないリクエストは拒みます。
+
 署名の鍵:
 
 - 署名の鍵はファイルからだけ読みます。環境変数 `DAGON_SIGNING_KEY` が持つのもファイルのパスです。ほかの手段（環境変数、OS のキーストア、1Password など）をポートで選ぶことはできません。
@@ -40,7 +45,7 @@ description: "設計との違いと、DAGON がしないことです。仕様上
 
 設計の図にあってコードに無いコンポーネント:
 
-- 置き換えのトレイトが無いポート: BuildRunner、Signer、DecisionPolicy、LogStorage、UpdateTransport、UpdateProtocol、Recovery、ChildLink、ImageVerifier、Digest、CryptoProvider、Diagnostics、Display、LogSink、Agent、Action
+- 置き換えのトレイトが無いポート: BuildRunner、Signer、DecisionPolicy、LogStorage、UpdateProtocol、Recovery、ChildLink、ImageVerifier、Digest、CryptoProvider、Diagnostics、Display、LogSink、Agent、Action
 - 親機: Coordinator、Release Store、Bus Guardian。書き込みは PC が親機を通して進めます。
 - 書き込みの計画: Delivery Plan の試行の窓と昇格の判断
 - 復旧: Recovery Policy と Node Recovery の、段階の自動の選択と回数に上限のある再試行

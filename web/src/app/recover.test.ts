@@ -114,11 +114,16 @@ describe('recovery from the page with dagon-host recover', () => {
     expect(op.coreWentBack).toBe(true);
     expect(op.wentBack).toBe(false);
     expect(op.status).toBe(ANNOUNCE.A13core('7セグ'));
-    op.selected = 'node:seg';
-    await op.round();
-    expect(op.live.seg.responding).toBe(true);
-    expect(op.live.seg.hello?.activeVersion).toBe(app);
-    expect(v(op.live.seg.core?.slots[op.live.seg.core.active].version)).toBe('1.0.0');
+    // What the node says afterwards, read as a new connection would.
+    await op.disconnect();
+    const after = session(sim.transport, sim.clock);
+    await after.connect();
+    await after.push();
+    after.selected = 'node:seg';
+    await after.round();
+    expect(after.live.seg.responding).toBe(true);
+    expect(after.live.seg.hello?.activeVersion).toBe(app);
+    expect(v(after.live.seg.core?.slots[after.live.seg.core.active].version)).toBe('1.0.0');
   }, 120_000);
 
   test('the same package with a good boot core writes through', async () => {

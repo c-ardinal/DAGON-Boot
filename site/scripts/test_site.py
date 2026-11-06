@@ -1,6 +1,8 @@
 """Checks of the site's generators: python -m unittest discover -s site/scripts -p "test_*.py"."""
+import json
 import pathlib
 import re
+import subprocess
 import sys
 import tempfile
 import tomllib
@@ -196,7 +198,31 @@ class Wording(unittest.TestCase):
         self.assertNotIn("yet", notice)
 
 
+def cargo_deps():
+    """Package name -> its dependencies' names, from `cargo metadata` of the root and the packages outside it."""
+    manifests = [ROOT / "Cargo.toml", ROOT / "samples/f401-app/Cargo.toml", ROOT / "samples/hub-boot-screen/Cargo.toml", ROOT / "targets/rp2040-hub/Cargo.toml"]
+    for sub in ("rp2040", "rp2040/stage0", "rp2040/bootcore", "stm32f401re", "stm32f401re/stage0", "stm32f401re/bootcore", "esp32s3", "common"):
+        manifests.append(ROOT / "targets/mcu" / sub / "Cargo.toml")
+    manifests += sorted((ROOT / "targets/boards").glob("*/Cargo.toml"))
+    deps = {}
+    for m in manifests:
+        out = subprocess.run(["cargo", "metadata", "--no-deps", "--offline", "--format-version", "1", "--manifest-path", str(m)],
+                             cwd=ROOT, capture_output=True, text=True, encoding="utf-8", check=True).stdout
+        for p in json.loads(out)["packages"]:
+            deps.setdefault(p["name"], set()).update(d["name"] for d in p["dependencies"] if d["kind"] in (None, "build"))
+    return deps
+
+
 class Architecture(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.deps = cargo_deps()
+
+    def test_the_core_names_no_mcu_or_board(self):
+        for name in gen.architecture.NO_MCU:
+            bad = [d for d in self.deps[name] if d.startswith(("dagon-mcu", "dagon-board")) or d in gen.architecture.HAL]
+            self.assertEqual(bad, [], name)
+
     def test_the_figure_draws_exactly_the_components_in_the_table(self):
         a = gen.architecture
         for name, lines in a.COMPONENTS.items():

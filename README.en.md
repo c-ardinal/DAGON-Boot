@@ -96,7 +96,7 @@ You can also add DAGON to existing firmware ([how](https://c-ardinal.github.io/D
 
 ## How it works
 
-The figure below is DAGON's software design.
+The figure below is the software design DAGON aims for. It does not show how much of it the current version implements.
 
 <img src="assets/architecture/node-en.svg" alt="DAGON's software design, in layers and components" width="100%">
 

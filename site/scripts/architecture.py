@@ -57,12 +57,12 @@ COMPONENTS = {
     "dagon CLI": ("バイナリ名 dagon のコマンド", "The binary named dagon"),
     "dagon serve": ("Console のためのローカルのサーバ", "The local server for the Console"),
     "DAGON Console": ("ブラウザの UI", "The browser UI"),
-    "Claude Code Plugin": ("移植とトポロジ生成のスキル、サブエージェント、フック", "Porting and topology skills, subagents and hooks"),
+    "Claude Code Plugin": ("移植と構成の生成のスキル、サブエージェント、フック", "Porting and topology skills, subagents and hooks"),
     "Host Extension Chain": ("ホストの拡張を順に呼ぶチェーン", "The chain of host extensions, in order"),
     "Action Definitions": ("イベントの後で動かすアクションのデータ", "Data for actions run after an event"),
     "Agent Definitions": ("エージェントとそのつなぎ方のデータ", "Data for agents and their ways"),
-    "Project Generator": ("構成からプロジェクトを作る（`dagon new`、`dagon gen`）", "Renders a project from the 構成 (`dagon new`, `dagon gen`)"),
-    "Definition Registry": ("対応ボードの表を持つ", "Holds the supported-board table"),
+    "Project Generator": ("構成からプロジェクトを作る（`dagon new`、`dagon gen`）", "Renders a project from the topology (`dagon new`, `dagon gen`)"),
+    "Definition Registry": ("ボードとマイコンの定義を持つ", "Holds the definitions of boards and MCUs"),
     "Topology Check": ("構成の YAML を読み、検証規則を適用する", "Reads the topology YAML and applies the validation rules"),
     "Node Build": ("dagon.toml の `[build.<id>]` に従ってノードごとに cargo build する", "Runs cargo build per node from `[build.<id>]` in dagon.toml"),
     "Operations": ("apply、status、recover の手順", "The apply, status and recover procedures"),
@@ -88,11 +88,11 @@ COMPONENTS = {
     "DAGON Link": ("ホスト、親機、ノードのあいだのフレームとコマンド", "Frames and commands between host, hub and nodes"),
     "Release Bundle": ("パッケージファイル（.dgb）の形式", "Format of the package file (.dgb)"),
     "Image Header": ("署名付きのイメージのヘッダ", "Header of a signed image"),
-    "Topology Binary": ("親機が持つ構成の形式", "Format of the setup the hub holds"),
+    "Topology Binary": ("親機が持つ構成の形式", "Format of the topology the hub holds"),
     "VERSION": ("ノードのバージョンと状態の問い合わせ", "Query of a node's versions and state"),
     "User Application": ("利用者のアプリ", "The user's app"),
     "User Extensions": ("利用者の拡張", "The user's extensions"),
-    "Library Extensions": ("拡張のチェーンの中ほど", "The middle of the extension chain"),
+    "Library Extensions": ("ライブラリが提供する拡張。ボードの拡張と利用者の拡張のあいだで動く", "Extensions a library provides, run between the board's and the user's"),
     "Boot Start": ("ブートのレイヤーの起動", "Starts the boot layer"),
     "App Start": ("アプリのレイヤーの起動", "Starts the app layer"),
     "Relay Start": ("リレーのレイヤーの起動", "Starts the relay layer"),
@@ -111,7 +111,7 @@ COMPONENTS = {
     "Release Store": ("リリースの面 N/P とその昇格を持つ", "Holds the release faces N/P and their promotion"),
     "Node Recovery": ("ノードごとの復旧の段階と、回数に上限のある再試行", "Per-node recovery tiers with bounded retries"),
     "Bus Guardian": ("共有のバスを直列化し、バスの固まりと切り離しを扱う", "Serialises a shared bus; handles a stuck bus and isolation"),
-    "Topology Copy": ("親機が持つ構成のコピー。アトミックに置き換え、親機が自分でピンを動かす前に署名付きマニフェストに照らして確かめる", "The hub's copy of the 構成, replaced atomically and checked against the signed manifest before the hub drives pins by itself"),
+    "Topology Copy": ("親機が持つ構成のコピー。アトミックに置き換え、親機が自分でピンを動かす前に署名付きマニフェストに照らして確かめる", "The hub's copy of the topology, replaced atomically and checked against the signed manifest before the hub drives pins by itself"),
     "Liveness Guard": ("タスクの生存を条件とするキック", "Kicks the watchdog on task liveness"),
     "Reboot Gate": ("先に返答し、上限のある遅れを待ってからリセットする", "Replies first, waits a bounded delay, then resets"),
     "Entry Gate": ("拡張の呼び出しの入り口", "Entry to an extension call"),
@@ -174,7 +174,7 @@ COMPONENTS = {
     "Vendor 2nd Stage": ("ベンダーの 2nd stage", "The vendor's 2nd stage"),
     "Protection Unit": ("メモリの保護ハードウェア", "Memory protection hardware"),
     "Peripherals": ("マイコンのペリフェラル", "The MCU's peripherals"),
-    "dagon-format": ("イメージヘッダ、マニフェスト、状態ログ、トポロジのバイト配置", "Byte layouts of the image header, manifest, state log and topology"),
+    "dagon-format": ("イメージヘッダ、マニフェスト、状態ログ、構成のバイト配置", "Byte layouts of the image header, manifest, state log and topology"),
     "dagon-proto": ("フレーム、コマンド、エラーの定義", "Frames, commands and errors"),
     "dagon-events": ("イベント、状態機械、拡張", "Events, state machines, extensions"),
     "Retained Codecs": ("ブート記録、ヒューズ、構成の本体の形式", "Boot record, fuse and topology body formats"),
@@ -375,8 +375,11 @@ def node_svg(lang):
 
 def component_table(lang):
     i = 0 if lang == "ja" else 1
-    head = {"ja": "| コンポーネント | 役割 |", "en": "| Component | What it is |"}[lang]
+    head = {"ja": "| コンポーネント | 設計上の役割 |", "en": "| Component | Role in the design |"}[lang]
     return "\n".join([head, "|---|---|", *(f"| {name} | {lines[i]} |" for name, lines in COMPONENTS.items())]) + "\n"
 
 
 FIGURES = {"node": node_svg}
+# The code's own dependency rule, which site/scripts/test_site.py keeps: these crates name no MCU or board.
+NO_MCU = ("dagon-port", "dagon-format", "dagon-proto", "dagon-core", "dagon-boot", "dagon-events", "dagon-agent")
+HAL = ("embassy-rp", "embassy-stm32", "esp-hal", "cortex-m")

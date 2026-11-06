@@ -96,7 +96,7 @@ dagon serve
 
 ## しくみ
 
-次の図は DAGON のソフトウェアの設計です。
+次の図は DAGON が目指すソフトウェアの設計です。今のバージョンがどこまで実装しているかは示していません。
 
 <img src="assets/architecture/node-ja.svg" alt="DAGON のソフトウェアの設計を層とコンポーネントで示す図" width="100%">
 

@@ -23,7 +23,7 @@ def m(ja, en, shown, pkg, paths, images="", kind=CORE):
 STACKS = {"ja": ("通信", "メモリ", "書き込みとブート", "システム"), "en": ("Communication", "Memory", "Write and boot", "System")}
 # Layers top to bottom; each holds one cell per stack, each cell its modules.
 LAYERS = [
-    dict(name=("アプリ", "Application"), rule=("公開 API だけを使い\nます。", "Public API only."),
+    dict(name=("アプリ", "Application"), rule=("公開 API だけを使います。", "Public API only."),
          cells=[[m("あなたのアプリ", "Your app", "nodes/<id>/src/app.rs", "f401-app", ["targets/mcu/stm32f401re/template/src/app.rs"], "A", TRAIT)], [],
                 [], [m("拡張", "Extensions", "dagon-extension.toml", "hub-boot-screen", ["targets/boot-extension-template"], "BA", TRAIT)]]),
     dict(name=("インターフェース", "Interface"), rule=("アプリと拡張が触れる\n面です。イベントを作る\nのは DAGON だけです。", "All an app or extension\nmay touch. Only DAGON\nmakes events."),

@@ -53,6 +53,8 @@ usb_hint = { vid = 0x303A, pid = 0x1001 }
 clock_hz = 40_000_000
 clocks_per_bit = 1
 frac_bits = 4
+# Bit rates the firmware runs the link at: a link's baud is one of these on both ends.
+bauds = [115_200, 230_400, 460_800, 921_600]
 
 # Link kinds the firmware implements (src/links.rs LINK_KINDS).
 [links]

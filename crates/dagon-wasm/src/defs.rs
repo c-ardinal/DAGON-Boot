@@ -86,6 +86,29 @@ pub fn coordinator_uart0(mcu: &str) -> JsValue {
     })
 }
 
+/// The UART speeds a link from `from` to `to` may run at: those both MCU
+/// definitions' `[link_uart] bauds` name (an end whose definition names
+/// none, or an unknown MCU, constrains nothing). The Console offers only
+/// these, as the topology check (V-26) accepts only these.
+#[wasm_bindgen]
+pub fn uart_bauds(from: &str, to: &str) -> Vec<u32> {
+    with_registry(|reg| {
+        let lists: Vec<&[u32]> = [from, to]
+            .into_iter()
+            .filter_map(|id| reg.mcu(id).and_then(|m| m.link_uart.as_ref()))
+            .map(|u| u.bauds.as_slice())
+            .collect();
+        let Some((first, rest)) = lists.split_first() else {
+            return Vec::new();
+        };
+        first
+            .iter()
+            .copied()
+            .filter(|b| rest.iter().all(|l| l.contains(b)))
+            .collect()
+    })
+}
+
 /// The I2C addresses of the ROM loaders defined (never probed with DAGON
 /// frames, reserved on a bus with a node reached through its ROM).
 #[wasm_bindgen]

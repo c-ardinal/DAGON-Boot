@@ -153,8 +153,9 @@ pub const MCU: &[Requirement<McuCheck>] = &[
             "link_uart.clock_hz",
             "link_uart.clocks_per_bit",
             "link_uart.frac_bits",
+            "link_uart.bauds[]",
         ],
-        rule: "clock_hz >= 1; clocks_per_bit >= 1; frac_bits <= 24",
+        rule: "clock_hz >= 1; clocks_per_bit >= 1; frac_bits <= 24; bauds not empty, each one the UART makes within 2 %",
         check: link_uart,
     },
     Requirement {
@@ -544,7 +545,7 @@ fn coordinator(m: &McuDef) -> Result<(), String> {
 }
 
 fn link_uart(m: &McuDef) -> Result<(), String> {
-    let Some(u) = m.link_uart else {
+    let Some(u) = &m.link_uart else {
         return Ok(());
     };
     fail(u.clock_hz == 0 || u.clocks_per_bit == 0, || {
@@ -552,6 +553,20 @@ fn link_uart(m: &McuDef) -> Result<(), String> {
     })?;
     fail(u.frac_bits > 24, || {
         "link_uart.frac_bits must be at most 24".into()
+    })?;
+    fail(u.bauds.is_empty(), || {
+        "link_uart.bauds must name at least one bit rate".into()
+    })?;
+    let off = u.bauds.iter().find(|&&b| {
+        !u.baud_error(b)
+            .is_some_and(|e| e.abs() <= super::MAX_BAUD_ERROR)
+    });
+    fail(off.is_some(), || {
+        format!(
+            "link_uart.bauds: this UART cannot run at {} within {:.0} %",
+            off.unwrap(),
+            super::MAX_BAUD_ERROR * 100.0
+        )
     })
 }
 

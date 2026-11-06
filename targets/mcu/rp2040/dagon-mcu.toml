@@ -85,6 +85,8 @@ uart0_rx = [1, 13, 17, 29]
 clock_hz = 125_000_000
 clocks_per_bit = 8
 frac_bits = 0
+# Bit rates the firmware runs the link at: a link's baud is one of these on both ends.
+bauds = [115_200, 230_400]
 
 # Link kinds the firmware implements (src/kinds.rs LINK_KINDS).
 [links]

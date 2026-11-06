@@ -20,7 +20,7 @@ const MAX_TAG_LEN: usize = 16;
 /// errors add up; an 8N1 receiver that samples mid-bit loses the frame at
 /// half a bit over its 10 bits, 5 % between the ends, and 2 % a side keeps
 /// a margin for clock tolerance and edge timing below that.
-const MAX_BAUD_ERROR: f64 = 0.02;
+use crate::defs::MAX_BAUD_ERROR;
 /// Standard and fast mode; each ROM I2C bootloader's `max_hz` caps it further.
 const I2C_SPEEDS: &[u32] = &[100_000, 400_000];
 const I2C_ADDR_MIN: u8 = 0x08;
@@ -951,14 +951,19 @@ impl<'a> Ctx<'a> {
                 if !links::available_in(self.reg, &m.id, dir).contains(&LinkKind::Uart) {
                     continue;
                 }
-                let what = match m.link_uart.map(|u| (u.actual_baud(baud), u.baud_error(baud))) {
+                let u = m.link_uart.as_ref();
+                let what = match u.map(|u| (u.runs(baud), u.actual_baud(baud), u.baud_error(baud))) {
                     None => "cannot be checked: its MCU definition has no [link_uart]".into(),
-                    Some((Some(a), Some(e))) if e.abs() > MAX_BAUD_ERROR => format!(
+                    Some((_, Some(a), Some(e))) if e.abs() > MAX_BAUD_ERROR => format!(
                         "runs at {a:.0} bit/s, {:+.2} %; each end of a UART link must be within {:.0} %",
                         e * 100.0,
                         MAX_BAUD_ERROR * 100.0
                     ),
-                    Some((Some(_), Some(_))) => continue,
+                    Some((false, Some(_), Some(_))) => format!(
+                        "is not a speed its firmware runs the link at; its definition names {:?}",
+                        u.map(|u| u.bauds.as_slice()).unwrap_or(&[])
+                    ),
+                    Some((true, Some(_), Some(_))) => continue,
                     Some(_) => "cannot make it".into(),
                 };
                 self.err(

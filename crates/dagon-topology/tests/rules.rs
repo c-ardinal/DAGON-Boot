@@ -470,6 +470,22 @@ fn v24_an_uplink_belongs_to_a_coordinator() {
 }
 
 #[test]
+fn v26_refuses_a_baud_the_definitions_do_not_name_even_when_the_uart_makes_it() {
+    // 115212 is 0.01 % off 115200, which both ends make; neither definition
+    // names it, so it is refused: only a listed speed can be set or built.
+    let got = messages(&mutate("baud: 115200", "baud: 115212"), "V-26");
+    assert_eq!(got.len(), 2, "{got:?}");
+    assert!(got[0].starts_with("baud 115212: hub (RP2040) is not a speed its firmware runs the link at; its definition names [115200, 230400]"), "{}", got[0]);
+    assert!(
+        got[1].starts_with(
+            "baud 115212: watch (ESP32-S3) is not a speed its firmware runs the link at"
+        ),
+        "{}",
+        got[1]
+    );
+}
+
+#[test]
 fn v26_uart_baud_must_be_within_two_percent_on_both_ends() {
     // RP2040's link UART: 125 MHz / 8 / a whole divider; ESP32-S3's:
     // 40 MHz / (n + k/16).
@@ -483,14 +499,14 @@ fn v26_uart_baud_must_be_within_two_percent_on_both_ends() {
     );
     for bad in ["921600", "1000000"] {
         let r = check_str(&mutate("baud: 115200", &format!("baud: {bad}")));
-        let v26: Vec<_> = r.errors().filter(|i| i.rule == "V-26").collect();
+        // The hub cannot run it; the watch may refuse it too, as a speed its definition does not name.
+        let v26: Vec<_> = r
+            .errors()
+            .filter(|i| i.rule == "V-26" && i.message.contains("hub (RP2040)"))
+            .collect();
         assert_eq!(v26.len(), 1, "{bad}: {:?}", r.issues);
         assert_eq!(v26[0].path, "links[1].baud");
-        assert!(
-            v26[0].message.contains("hub (RP2040)"),
-            "{}",
-            v26[0].message
-        );
+        assert!(v26[0].message.contains("+"), "{}", v26[0].message);
     }
     // Neither end can divide its clock down to these.
     for none in ["0", "100000000"] {
@@ -509,7 +525,7 @@ fn v26_refuses_a_uart_end_whose_mcu_states_no_link_uart() {
     // An ESP32-S3 definition without [link_uart]: its firmware runs the
     // UART link, but no speed on it is known to work, so none is accepted,
     // the default included.
-    let block = "[link_uart]\\nclock_hz = 40000000\\nclocks_per_bit = 1\\nfrac_bits = 4\\n";
+    let block = "[link_uart]\\nbauds = [115200, 230400, 460800, 921600]\\nclock_hz = 40000000\\nclocks_per_bit = 1\\nfrac_bits = 4\\n";
     let json = Registry::builtin().to_json();
     assert!(json.contains(block), "the esp32s3 [link_uart] block moved");
     let reg = Registry::from_json(&json.replacen(block, "", 1)).unwrap();

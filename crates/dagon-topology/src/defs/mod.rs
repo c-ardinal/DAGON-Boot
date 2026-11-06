@@ -285,16 +285,29 @@ pub struct Coordinator {
 /// How the UART the MCU package's firmware runs DAGON's UART links on makes
 /// a bit rate: `clock_hz` divided by `clocks_per_bit` times a divider with
 /// `frac_bits` fraction bits, the divider rounded down (as the HAL the
-/// package builds with computes it).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+/// package builds with computes it). `bauds` lists the bit rates that
+/// firmware runs its link at: a link's `baud` must be one of them on both
+/// ends (V-26), and the Console offers only those, so no speed the
+/// definition does not name can be set or built.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct LinkUart {
     pub clock_hz: u32,
     pub clocks_per_bit: u32,
     pub frac_bits: u8,
+    pub bauds: Vec<u32>,
 }
 
+/// How far a UART end may run from the link's `baud` (a fraction): each
+/// end of a link must be within it.
+pub const MAX_BAUD_ERROR: f64 = 0.02;
+
 impl LinkUart {
+    /// Whether `baud` is one this firmware runs its link at.
+    pub fn runs(&self, baud: u32) -> bool {
+        self.bauds.contains(&baud)
+    }
+
     /// The bit rate this UART runs at when asked for `baud`; `None` when
     /// it cannot divide its clock down to it (0, or faster than the clock).
     pub fn actual_baud(&self, baud: u32) -> Option<f64> {
@@ -457,9 +470,11 @@ pub struct McuDef {
     pub coordinator: Option<Coordinator>,
     /// How the UART the MCU package runs DAGON's UART links on makes a bit rate, as its HAL
     /// computes it: `clock_hz` divided by `clocks_per_bit` times a divider with `frac_bits`
-    /// fraction bits, rounded down. The topology check (V-26) refuses a link `baud` either end
-    /// makes more than 2 % off. Required on an MCU whose `[links]` has `uart`: without it, every
-    /// UART link that MCU's firmware runs is refused, since no speed on it is known to work.
+    /// fraction bits, rounded down. `bauds` lists the bit rates the firmware runs its link at;
+    /// the topology check (V-26) refuses a link `baud` that either end's list does not name or
+    /// that either end makes more than 2 % off, and the Console offers only the speeds both
+    /// ends name. Required on an MCU whose `[links]` has `uart`: without it, every UART link
+    /// that MCU's firmware runs is refused, since no speed on it is known to work.
     pub link_uart: Option<LinkUart>,
     /// ROM I2C bootloader (`stm32-i2c-rom`): `name` (as check messages call it), `addr`, `max_hz`,
     /// `erase_sectors`, `pairs = [{ controller, sda, scl }]` it listens on.

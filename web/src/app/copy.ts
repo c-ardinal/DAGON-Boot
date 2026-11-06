@@ -1228,7 +1228,7 @@ export const WRITE = {
   /** The new boot core failed its check: the node runs its confirmed one, the app was not written. */
   coreBack: {
     label: '↺ ブートコアは元のまま',
-    detail: '新しいブートコアが自分の検査に通らなかったので、確定しているブートコアに戻りました。ノードは動いています。アプリは書き込んでいません。',
+    detail: '新しいブートコアが自分の検査に通らなかったので、動いていたブートコアに戻りました。ノードは動いています。アプリは書き込んでいません。',
     next: 'ブートコアを直してバージョンを上げ、ビルドしてから、もう一度書き込んでください。',
   },
   /** A silent node with a ROM entry: said once, before anything is touched. */

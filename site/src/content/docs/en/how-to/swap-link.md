@@ -31,6 +31,6 @@ dagon demo --uplink uart          # or usb-cdc (default), wifi-tcp
 ```
 
 The simulated uplink follows the demo 構成: change the 親機's uplink in
-定義 (USB, UART, Wi-Fi) and the same update runs over the other medium, with
+定義 (USB, UART, Wi-Fi) and the same write runs over the other medium, with
 its own frame size, speed and behaviour while the 親機 reboots (USB CDC
 and Wi-Fi reconnect; a UART adapter stays).

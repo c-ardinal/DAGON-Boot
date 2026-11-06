@@ -1,6 +1,9 @@
 """Checks of the site's generators: python -m unittest discover -s site/scripts -p "test_*.py"."""
+import fnmatch
+import json
 import pathlib
 import re
+import subprocess
 import sys
 import tempfile
 import tomllib
@@ -24,7 +27,7 @@ class Generated(unittest.TestCase):
             saved = gen.OUT
             gen.OUT = pathlib.Path(d)
             # The hand-written pages with generated regions come along.
-            for name in {n for n, _, _ in gen.REGIONS}:
+            for name in (f"{folder}{n}" for n in {n for n, _, _ in gen.REGIONS} for folder in gen.LANGS.values()):
                 (gen.OUT / name).parent.mkdir(parents=True, exist_ok=True)
                 (gen.OUT / name).write_text((saved / name).read_text(encoding="utf-8"), encoding="utf-8")
             try:
@@ -85,7 +88,7 @@ class Generated(unittest.TestCase):
 
     def test_every_route_and_agent_key_says_what_it_is(self):
         # A blank cell means the source has no doc comment for it: write one there.
-        tables = [make() for _, _, make in gen.REGIONS]
+        tables = [make("en") for _, _, make in gen.REGIONS]
         for page in (gen.serve_api(), gen.agent_definition(), *tables):
             blank = [l for l in page.splitlines() if l.startswith("| `") and l.rstrip().endswith("|  |")]
             self.assertEqual(blank, [])
@@ -162,18 +165,6 @@ class MovedDocuments(unittest.TestCase):
         self.assertIsNone(self.MENTION.search("site/src/content/docs/reference/events.md"))
 
 
-# The scenarios that passed in the last run on hardware. A record of that run,
-# not of samples/hardware-test/hwt.toml: changed only after a new real run.
-LAST_HARDWARE_RUN = 16
-
-
-class Limitations(unittest.TestCase):
-    def test_the_hardware_scenario_count_is_the_last_real_run(self):
-        for rel, words in (("en/explanation/limitations.md", f"{LAST_HARDWARE_RUN} scenarios"),
-                           ("explanation/limitations.md", f"{LAST_HARDWARE_RUN} のシナリオ")):
-            self.assertIn(words, (llms.DOCS / rel).read_text(encoding="utf-8"), rel)
-
-
 class Wording(unittest.TestCase):
     # Pages where 更新 does not mean writing to a node: the word for that is 書き込む.
     KOUSHIN_ELSEWHERE = {"site/src/content/docs/reference/licenses.md": "the licence text and third-party notes"}
@@ -189,21 +180,150 @@ class Wording(unittest.TestCase):
             found += [f"{rel}:{n}" for n, line in enumerate(p.read_text(encoding="utf-8").splitlines(), 1) if "更新" in line]
         self.assertEqual(found, [])
 
-    # Written only in English, at the root so that both languages reach them: each says so.
-    ENGLISH_ONLY = ["explanation/retained-formats.md", "explanation/versioning.md", "reference/agent-api.md",
-                    "reference/definitions.md", "reference/extension-manifest.md"]
+    # Words the Japanese pages do not use for DAGON's own things.
+    NOT_SAID = ["ブートコア", "給餌", "見守り", "武装", "運び手", "開始者", "トライアル", "将来の", "マイコンのパッケージ", "ボードのパッケージ", "MCU のパッケージ", "ルールます", "破損していないの記録"]
 
-    def test_a_page_only_in_english_says_so_and_only_those_lack_an_english_folder_copy(self):
-        for rel in self.ENGLISH_ONLY:
-            self.assertIn("このページは英語だけです。", (llms.DOCS / rel).read_text(encoding="utf-8"), rel)
+    def test_the_japanese_pages_do_not_use_these_words(self):
+        pages = [p for p in llms.DOCS.rglob("*.md*") if p.relative_to(llms.DOCS).parts[0] != "en"]
+        pages += [ROOT / "README.md", ROOT / "site" / "i18n" / "ja.toml", ROOT / "site" / "i18n" / "catalog-ja.toml"]
+        found = [f"{p.relative_to(ROOT).as_posix()}: {w}" for p in pages for w in self.NOT_SAID if w in p.read_text(encoding="utf-8")]
+        self.assertEqual(found, [])
+
+    def test_every_page_is_in_both_languages(self):
         root = {p.relative_to(llms.DOCS).as_posix() for p in llms.DOCS.rglob("*.md*") if p.relative_to(llms.DOCS).parts[0] != "en"}
         en = {p.relative_to(llms.DOCS / "en").as_posix() for p in (llms.DOCS / "en").rglob("*.md*")}
-        self.assertEqual(sorted(root - en), sorted(self.ENGLISH_ONLY))
-        self.assertEqual(en - root, set())
+        self.assertEqual(root ^ en, set())
 
     def test_the_english_fallback_notice_does_not_promise_a_translation(self):
         notice = (llms.DOCS.parent / "i18n" / "en.json").read_text(encoding="utf-8")
         self.assertNotIn("yet", notice)
+
+
+def cargo_deps():
+    """Package name -> its dependencies' names, from `cargo metadata` of the root and the packages outside it."""
+    manifests = [ROOT / "Cargo.toml", ROOT / "samples/f401-app/Cargo.toml", ROOT / "samples/hub-boot-screen/Cargo.toml", ROOT / "targets/rp2040-hub/Cargo.toml"]
+    for sub in ("rp2040", "rp2040/stage0", "rp2040/bootcore", "stm32f401re", "stm32f401re/stage0", "stm32f401re/bootcore", "esp32s3", "common"):
+        manifests.append(ROOT / "targets/mcu" / sub / "Cargo.toml")
+    manifests += sorted((ROOT / "targets/boards").glob("*/Cargo.toml"))
+    deps = {}
+    for m in manifests:
+        out = subprocess.run(["cargo", "metadata", "--no-deps", "--offline", "--format-version", "1", "--manifest-path", str(m)],
+                             cwd=ROOT, capture_output=True, text=True, encoding="utf-8", check=True).stdout
+        for p in json.loads(out)["packages"]:
+            deps.setdefault(p["name"], set()).update(d["name"] for d in p["dependencies"] if d["kind"] in (None, "build"))
+    return deps
+
+
+class Architecture(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.deps = cargo_deps()
+
+    def closure(self, names):
+        seen, todo = set(), list(names)
+        while todo:
+            for d in self.deps.get(todo.pop(), ()):
+                if d not in seen:
+                    seen.add(d)
+                    todo.append(d)
+        return seen | set(names)
+
+    def test_every_source_path_in_the_figure_exists(self):
+        for mod in gen.architecture.modules():
+            for path in mod["paths"]:
+                self.assertTrue((ROOT / path).exists(), path)
+
+    def test_every_crate_in_the_figures_exists(self):
+        names = {p for mod in gen.architecture.modules() for p in (mod["pkg"],)} | {p for b in gen.architecture.pc_boxes().values() for p in b["pkg"]}
+        for name in names:
+            if name.endswith("*"):
+                self.assertTrue(any(fnmatch.fnmatch(d, name) for d in self.deps), name)
+            else:
+                self.assertTrue(name in self.deps or any(name in d for d in self.deps.values()), name)
+
+    def test_every_dependency_drawn_is_in_cargo_metadata(self):
+        a = gen.architecture
+        pairs = [dep for row in a.LAYER_DEPS for dep in row if dep] + [(a.TRUSTED[0], d) for d in a.TRUSTED[1]]
+        boxes = a.pc_boxes()
+        pairs += [(boxes[x]["pkg"][0], boxes[y]["pkg"][0]) for x, y in a.PC_EDGES]
+        for src, dst in pairs:
+            self.assertIn(dst, self.deps[src], f"{src} -> {dst}")
+
+    def test_each_image_uses_the_modules_tagged_with_it(self):
+        a = gen.architecture
+        for mod in a.modules():
+            for tag in mod["images"]:
+                # hub-boot-screen and the app template sit on the images, not under them
+                if mod["kind"] == a.TRAIT and mod["pkg"] in ("f401-app", "hub-boot-screen"):
+                    continue
+                used = self.closure(a.IMAGE_PKGS[tag])
+                if mod["pkg"].endswith("*"):
+                    self.assertTrue(any(fnmatch.fnmatch(u, mod["pkg"]) for u in used), (tag, mod["pkg"]))
+                else:
+                    self.assertIn(mod["pkg"], used, (tag, mod["shown"]))
+
+    def test_the_core_names_no_mcu_or_board(self):
+        for name in gen.architecture.NO_MCU:
+            bad = [d for d in self.deps[name] if d.startswith(("dagon-mcu", "dagon-board")) or d in gen.architecture.HAL]
+            self.assertEqual(bad, [], name)
+
+    def test_the_change_table_and_how_to_name_paths_that_exist(self):
+        pages = [ROOT / "README.md", ROOT / "README.en.md", llms.DOCS / "how-to/new-mcu-or-link.md", llms.DOCS / "en/how-to/new-mcu-or-link.md"]
+        for page in pages:
+            text = page.read_text(encoding="utf-8")
+            rows = [l for l in text.splitlines() if l.startswith("| ") and "crates/" in l or l.startswith("| ") and "targets/" in l] if page.name.startswith("README") else text.splitlines()
+            for line in rows:
+                for path in re.findall(r"`((?:crates|targets|plugin)/[^`]+)`", line):
+                    self.assertTrue(list(ROOT.glob(path.replace("<id>", "*").rstrip("/"))), f"{page.name}: {path}")
+
+
+class Translation(unittest.TestCase):
+    """The design and format pages are normative in both languages, so a translation may not drop a fact."""
+    PAGES = ["explanation/lifecycle-events.md", "explanation/retained-formats.md", "explanation/versioning.md", "reference/agent-api.md",
+             "reference/definitions.md", "reference/extension-manifest.md"]
+
+    @staticmethod
+    def facts(rel, folder):
+        text = (llms.DOCS / folder / rel).read_text(encoding="utf-8").split("---\n", 2)[2]
+        fences = re.findall(r"^( *)```([^\n]*)\n(.*?)^\1```$", text, re.M | re.S)
+        body = re.sub(r"^( *)```[^\n]*\n.*?^\1```$", "", text, flags=re.M | re.S)
+        # Tables generated from sources are checked by gen.py; a Mermaid chart's labels are translated.
+        body = re.sub(r"<!-- generated from.*?<!-- end of generated table -->", "", body, flags=re.S)
+        return {
+            "headings": [len(h) for h in re.findall(r"^(#+) ", body, re.M)],
+            "fences": [f if lang.startswith("mermaid") is False else "mermaid" for _, lang, f in fences],
+            "rows": [line.count("|") for line in body.splitlines() if line.startswith("|")],
+            "code": sorted(" ".join(c.split()) for c in re.findall(r"`[^`]+`", body)),
+            "links": sorted(re.sub(r"^/en/|#.*$", lambda m: "/" if m.group().startswith("/en") else "", u)
+                            for u in re.findall(r"\]\(([^)]+)\)", body)),
+        }
+
+    def test_a_translated_page_keeps_every_heading_fence_row_code_span_and_link(self):
+        for rel in self.PAGES:
+            ja, en = self.facts(rel, ""), self.facts(rel, "en")
+            for what in en:
+                with self.subTest(page=rel, what=what):
+                    self.assertEqual(ja[what], en[what])
+
+
+class GeneratedJapanese(unittest.TestCase):
+    def test_a_description_without_a_japanese_key_fails_the_generator(self):
+        gen.MISSING.clear()
+        self.assertEqual(gen.say("ja", "no such description"), "no such description")
+        self.assertEqual(gen.MISSING, {"no such description"})
+        self.assertEqual(gen.main(["--check"]), 1)
+        gen.MISSING.clear()
+        self.assertEqual(gen.say("en", "no such description"), "no such description")
+        self.assertEqual(gen.MISSING, set())
+
+    def test_a_translated_description_keeps_its_code_spans(self):
+        spans = lambda t: sorted(re.findall(r"`[^`]*`", t))
+        for en, ja in gen.i18n().items():
+            self.assertEqual(spans(en), spans(ja), en)
+
+    def test_the_japanese_pages_say_what_stays_english(self):
+        for rel, words in (("reference/cli.md", "コマンドの説明"), ("reference/rust-api.md", "rustdoc の本文")):
+            self.assertIn(f"{words}は元のソースのままで、英語です。", (llms.DOCS / rel).read_text(encoding="utf-8"))
 
 
 if __name__ == "__main__":

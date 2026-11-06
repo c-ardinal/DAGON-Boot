@@ -6,33 +6,32 @@ editUrl: false
 
 :::note
 `compat.toml` から生成しています。直接編集せず、`python site/scripts/gen.py` でもう一度生成してください。
-「番号の置き場所」の列は元のソースのままで、英語です。
 :::
 
 DAGON の部品のあいだの取り決めとその番号、部品ごとのバージョンと、読み書きする形式の番号です。
 どれも `compat.toml` にあるとおりです。変えるときの決まりは
-[Versions and releases](/explanation/versioning/) にあります。
+[バージョンとリリース](/explanation/versioning/)にあります。
 
 ## 取り決め
 
 | 取り決め | 形式の番号 | 番号の置き場所 |
 |---|---|---|
-| `wire` | 1 | frames and payloads between host, hub and nodes: byte 2 of every frame, HELLO proto_ver (dagon-proto PROTO_VERSION) |
-| `image-header` | 1 | signed 512-byte image header: offset 0x004 (dagon-format header::HDR_VERSION) |
-| `state-log` | 1 | boot core and app state log faces: offset 0x004 (dagon-format statelog::FORMAT_VERSION) |
-| `manifest` | 1 | release manifest: offset 4 (dagon-format manifest::MF_VERSION) |
-| `bundle` | 1 | release file .dgb: offset 4 (dagon-format bundle::BN_VERSION) |
-| `topology-bin` | 1 | compiled topology: offset 4 (dagon-format topology::TP_VERSION) |
-| `topology-yaml` | 1 | topology source: its `dagon:` key (dagon-topology SCHEMA_VERSION) |
-| `definitions` | 1 | dagon-mcu.toml / dagon-board.toml / [board.&lt;id&gt;]: `format` key, left out = 1 (dagon-topology defs::FORMAT) |
-| `serve-api` | 1 | dagon serve HTTP API: GET /v1/hello `api` (dagon-cli versions::SERVE_API) |
-| `event` | 1 | lifecycle event kinds, codes, payloads and EventRecord (dagon-events EVENT_FORMAT) |
-| `extension-manifest` | 1 | dagon-extension.toml: its `format` key (dagon-extension MANIFEST_FORMAT) |
-| `boot-program` | 1 | boot action program ops in a board's [boot]: the generated BOOT_PROGRAM_FORMAT (dagon-topology defs::board_boot::BOOT_PROGRAM_FORMAT) |
+| `wire` | 1 | ホスト、親機、ノードのあいだのフレームとペイロード: すべてのフレームのバイト 2、HELLO の proto_ver（dagon-proto PROTO_VERSION） |
+| `image-header` | 1 | 署名付きの 512 バイトのイメージのヘッダ: オフセット 0x004（dagon-format header::HDR_VERSION） |
+| `state-log` | 1 | ブートローダとアプリの状態ログの面: オフセット 0x004（dagon-format statelog::FORMAT_VERSION） |
+| `manifest` | 1 | リリースのマニフェスト: オフセット 4（dagon-format manifest::MF_VERSION） |
+| `bundle` | 1 | リリースのファイル .dgb: オフセット 4（dagon-format bundle::BN_VERSION） |
+| `topology-bin` | 1 | コンパイル済みの構成: オフセット 4（dagon-format topology::TP_VERSION） |
+| `topology-yaml` | 1 | 構成のソース: その `dagon:` キー（dagon-topology SCHEMA_VERSION） |
+| `definitions` | 1 | dagon-mcu.toml / dagon-board.toml / [board.&lt;id&gt;]: `format` キー。省くと 1（dagon-topology defs::FORMAT） |
+| `serve-api` | 1 | dagon serve の HTTP API: GET /v1/hello の `api`（dagon-cli versions::SERVE_API） |
+| `event` | 1 | ライフサイクルイベントの種類、コード、ペイロード、EventRecord（dagon-events EVENT_FORMAT） |
+| `extension-manifest` | 1 | dagon-extension.toml: その `format` キー（dagon-extension MANIFEST_FORMAT） |
+| `boot-program` | 1 | ボードの [boot] にあるブートのアクションプログラムの操作: 生成される BOOT_PROGRAM_FORMAT（dagon-topology defs::board_boot::BOOT_PROGRAM_FORMAT） |
 
 ## 部品
 
-| 部品 | バージョン | パッケージ | 形式 |
+| 部品 | バージョン | crate | 形式 |
 |---|---|---|---|
 | `cli` | 0.1.0 | `dagon-cli` | `wire` 1, `image-header` 1, `state-log` 1, `manifest` 1, `bundle` 1, `topology-bin` 1, `topology-yaml` 1, `definitions` 1, `serve-api` 1, `event` 1, `extension-manifest` 1, `boot-program` 1 |
 | `boot-rp2040` | 0.1.0 | `dagon-rp2040-stage0`, `dagon-rp2040-bootcore` | `image-header` 1, `state-log` 1, `event` 1 |

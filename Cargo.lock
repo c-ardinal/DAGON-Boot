@@ -492,6 +492,7 @@ dependencies = [
  "dagon-events",
  "dagon-sim",
  "serde_json",
+ "toml",
 ]
 
 [[package]]

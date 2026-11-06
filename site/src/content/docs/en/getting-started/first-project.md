@@ -1,6 +1,6 @@
 ---
-title: "From a new project to an update"
-description: "Start a project, draw its topology, build, write the first version, then update and go back."
+title: "From a new project to a new version"
+description: "Start a project, draw its topology, build, write the first version, then write a new one and go back."
 ---
 
 The example is the sample: an RP2040 hub with a round LCD, a
@@ -85,30 +85,30 @@ dagon build            # or: dagon build seg
 Each node is built into `out/build/<id>/app-a.elf` and, for slot B,
 `app-b.elf` (an ESP32-S3 image serves both slots, so it has one), with the
 public key from `dagon.toml` embedded. A node's version is the `version`
-in its crate's `Cargo.toml` (its boot core's, in its boot crate's
+in its crate's `Cargo.toml` (its boot loader's, in its boot crate's
 `Cargo.toml`); raise it there for every change you write. The first write
 signs with the same versions. `--version` is not needed; if given, it must
-be the same or the command stops and says which. A node's boot core goes into the
+be the same or the command stops and says which. A node's boot loader goes into the
 package with its app, and the node writes it only when its version differs
-from the boot core it runs: a changed boot core is written once its version
+from the boot loader it runs: a changed boot loader is written once its version
 is raised, as with apps. The build brings the crate's own entry in its
 `Cargo.lock` to the raised version and changes nothing else there; every
 other package stays as locked. `dagon gen` keeps the boot crate's
 `version`: it is the one field of that file that is yours, and raising it
 needs no new `dagon gen`.
 
-To see a node refuse a bad boot core, build one that fails its own check: the
+To see a node refuse a bad boot loader, build one that fails its own check: the
 boot crate's `no-confirm` feature, turned on for a release by
 `boot_features = ["no-confirm"]` in `[build.<id>]`. `boot_features` names
 features of the node's boot crate; `dagon deploy` and DAGON Console build the
-release's boot core with them, and a first write never does. Raise the boot
+release's boot loader with them, and a first write never does. Raise the boot
 crate's version and write: the write stops, and the node keeps running its
-confirmed boot core with its app as it was. Take the line out afterwards, or
+confirmed boot loader with its app as it was. Take the line out afterwards, or
 the next write sends a failing core again.
 
 ## 5. Write the first version (once per node)
 
-A node needs its boot core and first application written once over its own
+A node needs its boot loader and first application written once over its own
 cable. With `DAGON_SIGNING_KEY` set (step 1), connect the node and run:
 
 ```sh
@@ -129,9 +129,9 @@ before writing. `--dry-run` still does everything up to
 the write: it builds the parts and the app and makes the first-install
 files in the provision folder (`out/provision/<id>/` beside `dagon.toml`,
 or under `provision_dir` when `dagon.toml` sets it; `--out <dir>`
-chooses another), and only leaves the board untouched. It builds the boot core (and the hub's `stage0`) from the DAGON
+chooses another), and only leaves the board untouched. It builds the boot loader (and the hub's `stage0` (the small program that runs first after a reset)) from the DAGON
 clone the CLI was built from (or `DAGON_HOME`) and the node's app, all
-with the public half of your signing key. The boot cores accept the sample's
+with the public half of your signing key. The boot loaders accept the sample's
 tags (`hub-rp2040-lcd`, `seg-f401-7seg`), so keep those tags in
 `topology.yaml` for these boards.
 
@@ -153,7 +153,7 @@ Then connect the hub and check that every node answers:
 dagon status
 ```
 
-Each node's line `versions:` names its stage0, boot core slots A/B (and the
+Each node's line `versions:` names its stage0, boot loader slots A/B (and the
 running one), app slots, wire version and MCU id; "unknown" is a node that
 cannot tell (an agent or stage0 built before it reported them). With the hub
 connected, `dagon doctor` prints the same lines after its tool checks.
@@ -163,7 +163,7 @@ and `dagon provision <id>` make the same files from `[provision.<id>]`
 tables in `dagon.toml` (`stage0` for the hub, `bootcore`, `app`,
 `version`); the MCU package READMEs show how to build the boot images.
 
-## 6. Update, and go back
+## 6. Write a new version, and go back
 
 Change your code, then:
 
@@ -195,7 +195,7 @@ them, and `dagon apply out/deploy/v1.0.0.dgb` writes one from the command
 line.
 
 Applying checks the signatures and that the release was built for this
-topology, sends the topology to the hub, updates the children and then the
+topology, sends the topology to the hub, writes the children and then the
 hub. A node runs the new version on trial; if it is not confirmed, its
 watchdog resets it and it boots the previous version again.
 

@@ -374,7 +374,7 @@ fn claude_code_answers_through_the_command_path() {
 fn doc() -> String {
     std::fs::read_to_string(
         Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("../../site/src/content/docs/reference/agent-api.md"),
+            .join("../../site/src/content/docs/en/reference/agent-api.md"),
     )
     .unwrap()
 }
@@ -439,7 +439,7 @@ fn transport_kind_names_round_trip() {
     }
 }
 
-/// The authoritative sections of site/src/content/docs/reference/agent-api.md say exactly what the code
+/// The authoritative sections of site/src/content/docs/en/reference/agent-api.md say exactly what the code
 /// has: an extra, missing or stale entry fails.
 #[test]
 fn the_contract_document_follows_the_code() {

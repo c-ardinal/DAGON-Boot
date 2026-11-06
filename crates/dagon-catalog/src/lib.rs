@@ -135,20 +135,30 @@ fn notes(e: &Entry) -> String {
 }
 
 /// The language of a generated page. Its headings and fixed text follow it;
-/// what the catalogs themselves say (doc comments, notes) stays in English.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Lang {
+/// what the catalogs themselves say (doc comments, notes) is English in the
+/// code, and the Japanese page takes it through the given table lookup.
+#[derive(Clone, Copy)]
+pub enum Lang<'a> {
     /// The site's root (`site/src/content/docs/reference/`).
-    Ja,
+    Ja(&'a dyn Fn(&str) -> String),
     /// `site/src/content/docs/en/reference/`.
     En,
 }
 
+/// What a catalog says, in `lang`, as a table cell.
+fn said(lang: Lang<'_>, text: &str) -> String {
+    let one_line = text.split_whitespace().collect::<Vec<_>>().join(" ");
+    match lang {
+        Lang::Ja(look_up) if !one_line.is_empty() => cell(&look_up(&one_line)),
+        _ => cell(&one_line),
+    }
+}
+
 /// The site's Events page in `lang`.
-pub fn events_md(machines: &[Catalog], lang: Lang) -> String {
+pub fn events_md(machines: &[Catalog], lang: Lang<'_>) -> String {
     let mut s = String::new();
     match lang {
-        Lang::Ja => events_intro_ja(&mut s),
+        Lang::Ja(_) => events_intro_ja(&mut s),
         Lang::En => events_intro_en(&mut s),
     }
     for d in DECISIONS {
@@ -157,11 +167,11 @@ pub fn events_md(machines: &[Catalog], lang: Lang) -> String {
             "| `{}` | {} | {} | {} | {} | {} | {} |",
             d.id,
             d.layer.name(),
-            cell(d.answers),
-            cell(d.answered_by),
-            cell(d.bound),
-            cell(d.default),
-            cell(d.never)
+            said(lang, d.answers),
+            said(lang, d.answered_by),
+            said(lang, d.bound),
+            said(lang, d.default),
+            said(lang, d.never)
         );
     }
     for layer in Layer::ALL {
@@ -170,7 +180,7 @@ pub fn events_md(machines: &[Catalog], lang: Lang) -> String {
             continue;
         }
         let _ = match lang {
-            Lang::Ja => write!(s, "\n## レイヤー `{}`\n", layer.name()),
+            Lang::Ja(_) => write!(s, "\n## レイヤー `{}`\n", layer.name()),
             Lang::En => write!(s, "\n## Layer `{}`\n", layer.name()),
         };
         for m in mine {
@@ -184,8 +194,7 @@ fn events_intro_ja(s: &mut String) {
     s.push_str(
         "---\ntitle: イベント\ndescription: DAGON が出すすべてのイベントです。\neditUrl: false\n---\n\n\
          :::note\n状態機械のカタログから生成しています。直接編集せず、\n\
-         `DAGON_BLESS=1 cargo test -p dagon-catalog --test docs` でもう一度生成してください。\n\
-         判断点の表の中身と、状態機械とイベントの説明は、元のソースのままで英語です。\n:::\n\n\
+         `DAGON_BLESS=1 cargo test -p dagon-catalog --test docs` でもう一度生成してください。\n:::\n\n\
          DAGON の状態の変化は、どれも状態機械の遷移で、遷移はどれもイベントを 1 つ出します。\n\
          このページは状態機械の宣言から作っているので、すべてのイベントが載っています。\n\n",
     );
@@ -208,7 +217,7 @@ fn events_intro_ja(s: &mut String) {
          - **備考**: *action* はブートのアクションプログラムを動かせます。*retired* はもう出さず、\n\
          \x20 次のイベントの形式まで残しています。\n\n\
          ## 判断点\n\n\
-         ここに無いものは通知です。答えは、チェーンの順（公開元、ボードパッケージ、ライブラリ、利用者）で\n\
+         ここに無いものは通知です。答えは、チェーンの順（公開元、ボードの定義、ライブラリ、利用者）で\n\
          最初のものが使われます。どの拡張も答えなければ、既定の値を使います。\n\n\
          | 判断 | レイヤー | 問い | 答える側 | 時間の上限 | 既定 | してはいけないこと |\n\
          |---|---|---|---|---|---|---|\n",
@@ -253,9 +262,9 @@ fn events_intro_en(s: &mut String) {
     );
 }
 
-fn machine_md(s: &mut String, m: &Catalog, lang: Lang) {
+fn machine_md(s: &mut String, m: &Catalog, lang: Lang<'_>) {
     let (machine, initial, states_word, head) = match lang {
-        Lang::Ja => (
+        Lang::Ja(_) => (
             "状態機械",
             "最初の状態",
             "状態",
@@ -270,7 +279,7 @@ fn machine_md(s: &mut String, m: &Catalog, lang: Lang) {
     };
     let _ = write!(s, "\n### {machine} `{}`\n\n", m.machine);
     if !m.doc.trim().is_empty() {
-        let _ = write!(s, "{}\n\n", cell(m.doc));
+        let _ = write!(s, "{}\n\n", said(lang, m.doc));
     }
     let states: Vec<_> = m
         .states
@@ -284,7 +293,7 @@ fn machine_md(s: &mut String, m: &Catalog, lang: Lang) {
         })
         .collect();
     let _ = match lang {
-        Lang::Ja => write!(s, "{states_word}: {}。\n\n", states.join(", ")),
+        Lang::Ja(_) => write!(s, "{states_word}: {}。\n\n", states.join(", ")),
         Lang::En => write!(s, "{states_word}: {}.\n\n", states.join(", ")),
     };
     let _ = writeln!(s, "{head}\n|---|---|---|---|---|---|---|");
@@ -301,12 +310,12 @@ fn machine_md(s: &mut String, m: &Catalog, lang: Lang) {
             payload(e),
             observed(e),
             notes(e),
-            cell(e.doc)
+            said(lang, e.doc)
         );
     }
 }
 
-fn trust(p: &Port) -> String {
+fn trust(p: &Port, lang: Lang<'_>) -> String {
     let t = match p.trust {
         Trust::Untrusted => "untrusted",
         Trust::Additive => "untrusted, additive",
@@ -316,7 +325,7 @@ fn trust(p: &Port) -> String {
     if p.note.is_empty() {
         t.into()
     } else {
-        format!("{t} ({})", cell(p.note))
+        format!("{t} ({})", said(lang, p.note))
     }
 }
 
@@ -328,7 +337,7 @@ fn layer_names(p: &Port) -> String {
 
 /// The default per layer; layers with one default share an entry
 /// (`boot, app: X; host: Y`), and a single default stands alone.
-fn defaults(p: &Port) -> String {
+fn defaults(p: &Port, lang: Lang<'_>) -> String {
     let mut groups: Vec<(Vec<&str>, &str)> = Vec::new();
     for d in p.layers {
         match groups.iter_mut().find(|(_, v)| *v == d.default) {
@@ -337,11 +346,11 @@ fn defaults(p: &Port) -> String {
         }
     }
     if let [(_, only)] = groups.as_slice() {
-        return cell(only);
+        return said(lang, only);
     }
     groups
         .iter()
-        .map(|(names, v)| format!("{}: {}", names.join(", "), cell(v)))
+        .map(|(names, v)| format!("{}: {}", names.join(", "), said(lang, v)))
         .collect::<Vec<_>>()
         .join("; ")
 }
@@ -356,19 +365,24 @@ fn services(p: &Port) -> String {
 
 /// The port table of the design document (section 2.1), between its
 /// generated-table markers.
-pub fn design_ports_table(ports: &[Port]) -> String {
-    let mut s = String::from(
-        "| Port | Layers | Default | Trust policy | Services |\n|---|---|---|---|---|\n",
-    );
+pub fn design_ports_table(ports: &[Port], lang: Lang<'_>) -> String {
+    let mut s = String::from(match lang {
+        Lang::Ja(_) => {
+            "| ポート | レイヤー | 既定 | 信頼の方針 | サービス |\n|---|---|---|---|---|\n"
+        }
+        Lang::En => {
+            "| Port | Layers | Default | Trust policy | Services |\n|---|---|---|---|---|\n"
+        }
+    });
     for p in ports.iter().filter(|p| p.trust.is_port()) {
         let _ = writeln!(
             s,
             "| `{}` ({}) | {} | {} | {} | {} |",
             p.id,
-            cell(p.what),
+            said(lang, p.what),
             layer_names(p),
-            defaults(p),
-            trust(p),
+            defaults(p, lang),
+            trust(p, lang),
             services(p)
         );
     }
@@ -378,8 +392,7 @@ pub fn design_ports_table(ports: &[Port]) -> String {
 const PORTS_INTRO_JA: &str =
     "---\ntitle: ポート\ndescription: DAGON の拡張が使うすべてのポートです。\neditUrl: false\n---\n\n\
      :::note\n`dagon_events::PORTS` から生成しています。直接編集せず、\n\
-     `DAGON_BLESS=1 cargo test -p dagon-catalog --test docs` でもう一度生成してください。\n\
-     表の中の説明は、元のソースのままで英語です。\n:::\n\n\
+     `DAGON_BLESS=1 cargo test -p dagon-catalog --test docs` でもう一度生成してください。\n:::\n\n\
      ポートは、プラグインが置き換えられる DAGON の部品です。置き換えは、一覧のレイヤーで、リンクされた\n\
      イメージの中だけに効きます。既定は DAGON 自身の実装です。プラグインのマニフェストは、そのポートがある\n\
      レイヤーでだけポートを提供でき、1 つのイメージで 1 つのポートを提供できるのは 1 つだけです。\n\n\
@@ -397,9 +410,9 @@ const PORTS_NOT_JA: &str = "\n## ポートではない部品\n\n\
      |---|---|---|---|\n";
 
 /// The site's Ports page in `lang`.
-pub fn ports_md(ports: &[Port], lang: Lang) -> String {
+pub fn ports_md(ports: &[Port], lang: Lang<'_>) -> String {
     let (intro, not_ports) = match lang {
-        Lang::Ja => (PORTS_INTRO_JA, PORTS_NOT_JA),
+        Lang::Ja(_) => (PORTS_INTRO_JA, PORTS_NOT_JA),
         Lang::En => (PORTS_INTRO_EN, PORTS_NOT_EN),
     };
     let mut s = String::from(intro);
@@ -408,10 +421,10 @@ pub fn ports_md(ports: &[Port], lang: Lang) -> String {
             s,
             "| `{}` | {} | {} | {} | {} | {} |",
             p.id,
-            cell(p.what),
+            said(lang, p.what),
             layer_names(p),
-            defaults(p),
-            trust(p),
+            defaults(p, lang),
+            trust(p, lang),
             services(p)
         );
     }
@@ -422,9 +435,9 @@ pub fn ports_md(ports: &[Port], lang: Lang) -> String {
                 s,
                 "| `{}` | {} | {} | {} |",
                 p.id,
-                cell(p.what),
+                said(lang, p.what),
                 layer_names(p),
-                cell(why)
+                said(lang, why)
             );
         }
     }

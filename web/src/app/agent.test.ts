@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'vitest';
 import { Agent, consentProblem, problemOf, splitAnswer, type AgentApi, type AgentStatus } from './agent.svelte.ts';
 import { agentMock } from './agentMock.ts';
-import { AGENT } from './copy.ts';
+import { AGENT, BUILD } from './copy.ts';
 
 const json = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } });
 const now = () => Promise.resolve();
@@ -50,6 +50,38 @@ describe('DAGON and its agent (site/src/content/docs/reference/agent-api.md)', (
     await a.ask('次は？', 'next');
     expect(sent.map((s) => 'rollback' in s.body)).toEqual([false, true, false]);
     expect(sent[1].body.rollback).toEqual(rollback);
+  });
+
+  test('asking why from a modal closes it first, so its scrim does not cover the answer', async () => {
+    const order: string[] = [];
+    const a = new Agent(async (_m, path, body) => {
+      if (path === 'agent') return json({ linked: true });
+      order.push(`sent ${(body as { kind: string }).kind}`);
+      return json({ answer: 'はい。' });
+    });
+    await a.refresh();
+    await a.askWhy(
+      () => false,
+      () => order.push('closed'),
+      { node: 'seg' },
+    );
+    expect(order).toEqual(['closed', 'sent failure']);
+    expect(a.messages[0]).toEqual({ role: 'user', text: BUILD.askAgent });
+  });
+
+  test('asking why while the lock table stops it: the modal stays open and nothing is sent', async () => {
+    const order: string[] = [];
+    const a = new Agent(async (_m, path) => {
+      if (path === 'agent') return json({ linked: true });
+      order.push('sent');
+      return json({ answer: 'はい。' });
+    });
+    await a.refresh();
+    await a.askWhy(
+      () => true,
+      () => order.push('closed'),
+    );
+    expect(order).toEqual([]);
   });
 
   test('not linked: a question sends nothing and says how to link (serve refuses it too)', async () => {

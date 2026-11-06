@@ -2,7 +2,7 @@
 // GET /v1/agent, POST/DELETE /v1/agent/link (consent asked once, when
 // linking), POST /v1/agent/ask (no confirmation per question). The key never
 // comes here; the provider's name is shown only in the linking step.
-import { AGENT } from './copy.ts';
+import { AGENT, BUILD } from './copy.ts';
 
 /** One way to reach an agent: its own login through a program, or an HTTP API with a key. */
 export interface AgentWay {
@@ -197,6 +197,13 @@ export class Agent {
     } finally {
       this.thinking = false;
     }
+  }
+
+  /** A modal's 失敗の理由を聞く: the modal closes first, because its scrim would cover the answer; a stopped question leaves it open. */
+  async askWhy(isStopped: () => boolean, close: () => void, selection?: Selection): Promise<void> {
+    if (isStopped()) return;
+    close();
+    await this.ask(BUILD.askAgent, 'failure', selection);
   }
 
   private say(p: AgentProblem) {

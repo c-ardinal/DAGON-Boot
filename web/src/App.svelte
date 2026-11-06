@@ -3,6 +3,7 @@
   import { bandOf } from './app/band.ts';
   import { AGENT, ANNOUNCE, BAND, BUILD, BUTTON, CANVAS, DEFINE, DIFF, DRAWER, JOBS, SKELETON, WRITE, HUB, LOCK, SHEET, STATUS, ZOOM, HUB_TOGGLE, MODE, NODE, ORDER, PRODUCT, RECONNECT, SAVE, SKIP, STEP, TIME } from './app/copy.ts';
   import { webSerial } from './app/connect.ts';
+  import { resultChip } from './app/nodeState.ts';
   import { HUB_LOCKED, hubOf, view, type Action } from './app/machine.ts';
   import { Operate, waterOf, type Progress, type ReleaseFile } from './app/operate.svelte.ts';
   import { keptChoices, type Kept } from './app/kept.ts';
@@ -419,11 +420,8 @@
     if (stopped('ask', at)) return;
     void agent.ask(text, kind, selection());
   }
-  /** The stop modal's 失敗の理由を聞く: it closes, because a modal's scrim would cover DAGON's answer. */
-  function askWhy(at: Element) {
-    if (stopped('ask', at)) return;
-    stopClosed = op.failed;
-    void agent.ask(BUILD.askAgent, 'failure', selection());
+  function askWhy(at: Element, close: () => void) {
+    void agent.askWhy(() => stopped('ask', at), close, selection());
   }
   /** 『反映する』: the proposal goes in as one 構成 edit (undoable) and is saved like any edit. */
   function applyProposal(i: number, at: Element) {
@@ -696,19 +694,11 @@
   const diffChips = $derived(Object.fromEntries(fileDiff.flatMap((r) => r.nodes).map((id) => [id, { chip: DIFF.chip, spoken: DIFF.spoken, silent: true }])));
   /** a flat minute per node, the copy's 目安; measure per link and image size if it misleads. */
   const MINUTES_PER_NODE = 1;
-  /** On the cards while and after writing: → the new version, then 前のバージョンに戻った / 書き込めなかった; nothing once confirmed. */
-  const RESULT: Partial<Record<Progress['stage'], { word: string; silent: boolean }>> = {
-    previous: { word: WRITE.previous, silent: false },
-    refused: { word: WRITE.failed, silent: true },
-    silent: { word: WRITE.failed, silent: true },
-    cannotFix: { word: WRITE.failed, silent: true },
-    unwritten: { word: WRITE.failed, silent: true },
-  };
+  /** On the cards while writing: → the new version; after it, what the write left (resultChip). */
   const cardChipOf = (id: string, p: Progress): Chip | null => {
     const to = op.fileVersions[id];
     if (FILLING_STAGES.has(p.stage)) return to === undefined ? null : { chip: WRITE.to(versionText(to)), spoken: WRITE.to(versionText(to)), silent: false };
-    const r = RESULT[p.stage];
-    return r ? { chip: r.word, spoken: r.word.slice(2), silent: r.silent } : null;
+    return resultChip(p.stage);
   };
   const progressChips = $derived(
     Object.fromEntries(
@@ -1539,7 +1529,7 @@
       reason={back && running !== undefined ? fillIn(WRITE.rolled.reason, { version: versionText(running) }) : (next.cause ?? WRITE.failed)}
       fix={back ? WRITE.rolled.next : next.sentence}
       linked={agent.linked}
-      onask={askWhy}
+      onask={(at) => askWhy(at, () => (stopClosed = op.failed))}
       onclose={() => (stopClosed = op.failed)}
       onmore={() => ((drawerTab = 'log'), (stopClosed = op.failed))}
     >
@@ -1561,7 +1551,7 @@
       <p class="modal-mono">{jobReason(failed)}</p>
       {#snippet actions()}
         {#if agent.linked}
-          <button class="button-secondary" data-control="ask" onclick={(e) => askDagon(BUILD.askAgent, 'failure', e.currentTarget)}>{BUILD.askAgent}</button>
+          <button class="button-secondary" data-control="ask" onclick={(e) => askWhy(e.currentTarget, () => (buildFailureOpen = false))}>{BUILD.askAgent}</button>
         {/if}
         <button class="button-primary" data-control="build" onclick={() => void build()}>{BUILD.retry}</button>
       {/snippet}

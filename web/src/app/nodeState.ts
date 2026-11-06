@@ -1,4 +1,5 @@
-import { STATE } from './copy.ts';
+import { NODE, STATE, WRITE } from './copy.ts';
+import type { Progress } from './operate.svelte.ts';
 
 /** The six node states, each with its own mark (shape + colour) at the card's top-right. */
 export type NodeState = keyof typeof STATE;
@@ -37,5 +38,23 @@ export function nodeState(s: StateInput): NodeState {
   return s.responding ? 'alive' : 'silent';
 }
 
-/** While any node needs attention or failed, the other busy lights stand still (one moving thing at a time). */
+/**
+ * What a write left on a card: red only for a node that failed. A node the
+ * stopped write never reached did not fail, so its state stays the watch's.
+ * Nothing once confirmed or while it runs.
+ */
+const RESULT: Partial<Record<Progress['stage'], { word: string; silent: boolean }>> = {
+  previous: { word: WRITE.previous, silent: false },
+  refused: { word: WRITE.failed, silent: true },
+  silent: { word: WRITE.failed, silent: true },
+  cannotFix: { word: WRITE.failed, silent: true },
+  unwritten: { word: NODE.unwritten, silent: false },
+};
+
+export function resultChip(stage: Progress['stage']): { chip: string; spoken: string; silent: boolean } | null {
+  const r = RESULT[stage];
+  return r ? { chip: r.word, spoken: r.word.slice(2), silent: r.silent } : null;
+}
+
+/** While any node needs attention or failed,the other busy lights stand still (one moving thing at a time). */
 export const lightsStill = (states: readonly NodeState[]): boolean => states.some((s) => s === 'error' || s === 'attention');

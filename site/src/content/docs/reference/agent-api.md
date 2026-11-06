@@ -340,7 +340,7 @@ the first way of the first agent is the default.
 
 - 構成と定義の事実（ノード・リンク・部品・設定値）
 - 選んだノードやリンク
-- 確かめた結果（問題・◇ 未対応・更新の記録）
+- 確かめた結果（問題・◇ 未対応・書き込みの記録）
 
 ### Never sends
 

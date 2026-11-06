@@ -16,6 +16,8 @@ import pages  # noqa: E402
 
 ROOT = gen.ROOT
 sys.path.insert(0, str(ROOT / "scripts"))
+import architecture  # noqa: E402
+from ja_spacing import lines_with_spaces, spaces  # noqa: E402
 from test_markers import NOTICE_EN_LINES, NOTICE_JA_LINES  # noqa: E402
 
 NOTICE_LINES = (*NOTICE_JA_LINES, *NOTICE_EN_LINES)
@@ -182,9 +184,9 @@ class Wording(unittest.TestCase):
         self.assertEqual(found, [])
 
     # Words the Japanese pages do not use for DAGON's own things.
-    NOT_SAID = ["ブートコア", "給餌", "見守り", "武装", "運び手", "開始者", "トライアル", "将来の", "マイコンのパッケージ", "ボードのパッケージ", "MCU のパッケージ", "ルールます", "破損していないの記録",
+    NOT_SAID = ["ブートコア", "給餌", "見守り", "武装", "運び手", "開始者", "トライアル", "将来の", "マイコンのパッケージ", "ボードのパッケージ", "MCUのパッケージ", "ルールます", "破損していないの記録",
                 # パッケージ is the .dgb file and nothing else; the verb is 書き込む, in full.
-                "npm パッケージ", "Cargo パッケージ", "書込み", "初回書", "書く前",
+                "npmパッケージ", "Cargoパッケージ", "書込み", "初回書", "書く前",
                 # One word for one thing.
                 "クレート",
                 # A sentence says what it refers to, and who does it.
@@ -202,7 +204,7 @@ class Wording(unittest.TestCase):
         # DAGON's own word is 拡張.
         pages = [p for p in llms.DOCS.rglob("*.md*") if p.relative_to(llms.DOCS).parts[0] != "en"]
         found = [f"{p.name}:{n}" for p in pages for n, line in enumerate(p.read_text(encoding="utf-8").splitlines(), 1)
-                 if "プラグイン" in line.replace("Claude Code のプラグイン", "")]
+                 if "プラグイン" in line.replace("Claude Codeのプラグイン", "")]
         self.assertEqual(found, [])
 
     def test_the_english_design_pages_use_one_word_for_each_thing(self):
@@ -241,7 +243,7 @@ class Wording(unittest.TestCase):
         self.assertEqual(found, [])
 
     # Pages state requirements and facts of the design, never what was run, measured or confirmed.
-    REPORTED = re.compile(r"\d で確認|確かめていません|確かめていない|確認済|実機で確かめ|実機で測定|シミュレータでだけ|CI で|ボードごとには|モデルは.*見つけ"
+    REPORTED = re.compile(r"\dで確認|確かめていません|確かめていない|確認済|実機で確かめ|実機で測定|シミュレータでだけ|CIで|ボードごとには|モデルは.*見つけ"
                           r"|(?i:\bin CI\b|\bCI runs\b|tested on|checked on \d|confirmed on \d|not verified|not confirmed by|not run on hardware|the model found|measured on hardware|\d+ of \d+ pass)")
     # What the words describe here is a rule for a definition's data, not something that was run.
     REPORTED_QUOTES = ["出典を確かめていない", "ボードで確かめていない", "グラフを確かめていない", "確かめていないと報告"]
@@ -349,6 +351,26 @@ class Architecture(unittest.TestCase):
                     self.assertTrue(list(ROOT.glob(path.replace("<id>", "*").rstrip("/"))), f"{page.name}: {path}")
 
 
+class JapaneseSpacing(unittest.TestCase):
+    """Japanese takes no half-width space beside Latin letters, digits or code."""
+
+    def test_the_japanese_pages_have_no_such_space(self):
+        pages = [p for p in llms.DOCS.rglob("*.md*") if p.relative_to(llms.DOCS).parts[0] != "en"]
+        found = {p.relative_to(llms.DOCS).as_posix(): lines_with_spaces(p.read_text(encoding="utf-8")) for p in pages}
+        self.assertEqual({k: v for k, v in found.items() if v}, {})
+
+    def test_the_japanese_sources_have_no_such_space(self):
+        values = [*gen.i18n().values(), *tomllib.loads((ROOT / "site/i18n/catalog-ja.toml").read_text(encoding="utf-8")).values(),
+                  *(ja for ja, _ in architecture.COMPONENTS.values())]
+        self.assertEqual([v for v in values if spaces(v)], [])
+
+    def test_what_the_rule_finds_and_leaves(self):
+        for text in ("DAGON とは", "1 か所", "`dagon new` と", "は `x`", "[Rust](https://rustup.rs) だけ", "**DAGON** は", "---\ntitle: DAGON を試す\n---\n"):
+            self.assertTrue(spaces(text), text)
+        for text in ("DAGON Console", "`a の b`", "```\nDAGON を\n```\n", "### 1.1 名前", "| 親機 |", "- 名前", "**名前。** DAGON", "**`x`** の", "50 ms"):
+            self.assertEqual(spaces(text), [], text)
+
+
 class Translation(unittest.TestCase):
     """The design and format pages are normative in both languages, so a translation may not drop a fact."""
     PAGES = ["explanation/lifecycle-events.md", "explanation/retained-formats.md", "explanation/versioning.md", "reference/agent-api.md",
@@ -408,7 +430,7 @@ class GeneratedJapanese(unittest.TestCase):
             self.assertEqual(spans(en), spans(ja), en)
 
     def test_the_japanese_pages_say_what_stays_english(self):
-        for rel, words in (("reference/cli.md", "コマンドの説明"), ("reference/rust-api.md", "rustdoc の本文")):
+        for rel, words in (("reference/cli.md", "コマンドの説明"), ("reference/rust-api.md", "rustdocの本文")):
             self.assertIn(f"{words}は元のソースのままで、英語です。", (llms.DOCS / rel).read_text(encoding="utf-8"))
 
 

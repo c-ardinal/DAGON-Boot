@@ -7,7 +7,7 @@ description: "一覧に無いボードを、マイコンで選んで使います
 
 一覧に無いボードは、載っているマイコンで選びます。フラッシュ容量と、親機につないだピンは自分で書きます。
 
-`topology.yaml` のそのノードから `board:` を外します。
+`topology.yaml`のそのノードから`board:`を外します。
 
 ```yaml
   - id: seg
@@ -18,15 +18,15 @@ description: "一覧に無いボードを、マイコンで選んで使います
     tag: seg-f401-7seg
 ```
 
-ボードの値を `dagon.toml` に書きます。
+ボードの値を`dagon.toml`に書きます。
 
 ```toml
 [board.seg]
 flash_bytes = 524288
 ```
 
-I2C の子機では、リンクにノード側のピン（`node_pins`）を書きます。
+I2Cの子機では、リンクにノード側のピン（`node_pins`）を書きます。
 
-足りないものは、検査と `dagon gen` が知らせます。
+足りないものは、検査と`dagon gen`が知らせます。
 
-Claude Code と一緒に進めるときは `add-a-board-by-mcu` スキルを使います。
+Claude Codeと一緒に進めるときは`add-a-board-by-mcu`スキルを使います。

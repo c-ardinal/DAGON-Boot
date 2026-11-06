@@ -180,7 +180,7 @@ pub fn events_md(machines: &[Catalog], lang: Lang<'_>) -> String {
             continue;
         }
         let _ = match lang {
-            Lang::Ja(_) => write!(s, "\n## レイヤー `{}`\n", layer.name()),
+            Lang::Ja(_) => write!(s, "\n## レイヤー`{}`\n", layer.name()),
             Lang::En => write!(s, "\n## Layer `{}`\n", layer.name()),
         };
         for m in mine {
@@ -192,10 +192,10 @@ pub fn events_md(machines: &[Catalog], lang: Lang<'_>) -> String {
 
 fn events_intro_ja(s: &mut String) {
     s.push_str(
-        "---\ntitle: イベント\ndescription: DAGON が出すすべてのイベントです。\neditUrl: false\n---\n\n\
+        "---\ntitle: イベント\ndescription: DAGONが出すすべてのイベントです。\neditUrl: false\n---\n\n\
          :::note\n状態機械のカタログから生成しています。直接編集せず、\n\
-         `DAGON_BLESS=1 cargo test -p dagon-catalog --test docs` でもう一度生成してください。\n:::\n\n\
-         DAGON の状態の変化は、どれも状態機械の遷移で、遷移はどれもイベントを 1 つ出します。\n\
+         `DAGON_BLESS=1 cargo test -p dagon-catalog --test docs`でもう一度生成してください。\n:::\n\n\
+         DAGONの状態の変化は、どれも状態機械の遷移で、遷移はどれもイベントを1つ出します。\n\
          このページは状態機械の宣言から作っているので、すべてのイベントが載っています。\n\n",
     );
     let _ = write!(
@@ -206,15 +206,15 @@ fn events_intro_ja(s: &mut String) {
     );
     s.push_str(
         "## 表の見方\n\n\
-         - **種類**: `layer.kind`。ペイロードの型名を snake case にしたものです。\n\
+         - **種類**: `layer.kind`。ペイロードの型名をsnake caseにしたものです。\n\
          - **コード**: そのレイヤーの中での種類の番号です（`EventRecord.kind`）。\n\
-         - **遷移**: イベントを出すメソッドと、移る前後の状態です（`*` はどの状態でも）。\n\
+         - **遷移**: イベントを出すメソッドと、移る前後の状態です（`*`はどの状態でも）。\n\
          - **ペイロード**: フィールドと、記録の中でのバイト数です（`EventRecord.payload`、順に並び、\n\
-         \x20 合わせて 16 バイトまで）。\n\
-         - **受け取り**: *live* は同じイメージの拡張が起きたときに、*replay* は起動時にアプリのエージェントが\n\
-         \x20 `replayed: true` を付けて出し直したものを、*host* は CLI、serve のイベント、`--events`、\n\
+         \x20 合わせて16バイトまで）。\n\
+         - **受け取り**: *live*は同じイメージの拡張が起きたときに、*replay*は起動時にアプリのエージェントが\n\
+         \x20 `replayed: true`を付けて出し直したものを、*host*はCLI、serveのイベント、`--events`、\n\
          \x20 アクションが受け取ります。\n\
-         - **備考**: *action* はブートのアクションプログラムを動かせます。*retired* はもう出さず、\n\
+         - **備考**: *action*はブートのアクションプログラムを動かせます。*retired*はもう出さず、\n\
          \x20 次のイベントの形式まで残しています。\n\n\
          ## 判断点\n\n\
          ここに無いものは通知です。答えは、チェーンの順（公開元、ボードの定義、ライブラリ、利用者）で\n\
@@ -271,13 +271,13 @@ fn machine_md(s: &mut String, m: &Catalog, lang: Lang<'_>) {
             "| 種類 | コード | 遷移 | ペイロード | 受け取り | 備考 | 説明 |",
         ),
         Lang::En => (
-            "Machine",
+            "Machine ",
             "initial",
             "States",
             "| Kind | Code | Transition | Payload | Observed | Notes | Description |",
         ),
     };
-    let _ = write!(s, "\n### {machine} `{}`\n\n", m.machine);
+    let _ = write!(s, "\n### {machine}`{}`\n\n", m.machine);
     if !m.doc.trim().is_empty() {
         let _ = write!(s, "{}\n\n", said(lang, m.doc));
     }
@@ -390,16 +390,16 @@ pub fn design_ports_table(ports: &[Port], lang: Lang<'_>) -> String {
 }
 
 const PORTS_INTRO_JA: &str =
-    "---\ntitle: ポート\ndescription: DAGON の拡張が使うすべてのポートです。\neditUrl: false\n---\n\n\
-     :::note\n`dagon_events::PORTS` から生成しています。直接編集せず、\n\
-     `DAGON_BLESS=1 cargo test -p dagon-catalog --test docs` でもう一度生成してください。\n:::\n\n\
-     ポートは、拡張が置き換えられる DAGON の部品です。置き換えは、一覧のレイヤーで、リンクされた\n\
-     イメージの中だけに効きます。既定は DAGON 自身の実装です。拡張のマニフェストは、そのポートがある\n\
-     レイヤーでだけポートを提供でき、1 つのイメージで 1 つのポートを提供できるのは 1 つだけです。\n\n\
+    "---\ntitle: ポート\ndescription: DAGONの拡張が使うすべてのポートです。\neditUrl: false\n---\n\n\
+     :::note\n`dagon_events::PORTS`から生成しています。直接編集せず、\n\
+     `DAGON_BLESS=1 cargo test -p dagon-catalog --test docs`でもう一度生成してください。\n:::\n\n\
+     ポートは、拡張が置き換えられるDAGONの部品です。置き換えは、一覧のレイヤーで、リンクされた\n\
+     イメージの中だけに効きます。既定はDAGON自身の実装です。拡張のマニフェストは、そのポートがある\n\
+     レイヤーでだけポートを提供でき、1つのイメージで1つのポートを提供できるのは1つだけです。\n\n\
      信頼の区分:\n\n\
      - *untrusted*: どの拡張でも使えます。レイヤーのサンドボックスの中で、マニフェストで宣言した能力で\n\
-     \x20 動き、DAGON は一覧のサービスを通してだけ呼びます。\n\
-     - *untrusted, additive*: untrusted と同じで、足すだけです。DAGON 自身の実装は残ります。\n\
+     \x20 動き、DAGONは一覧のサービスを通してだけ呼びます。\n\
+     - *untrusted, additive*: untrustedと同じで、足すだけです。DAGON自身の実装は残ります。\n\
      - *trusted only*: 宣言して署名した、信頼する拡張だけが使えます。特権で動き、サービスは呼びません。\n\n\
      | ポート | 役割 | レイヤー | 既定 | 信頼 | サービス |\n\
      |---|---|---|---|---|---|\n";

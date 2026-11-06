@@ -10,6 +10,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "scripts"))
+from ja_spacing import lines_with_spaces  # noqa: E402
 from test_markers import NOTICE_EN, NOTICE_JA, NOTICE_FILES  # noqa: E402
 
 JA = ROOT / "README.md"
@@ -57,12 +58,15 @@ class Readmes(unittest.TestCase):
     def test_the_japanese_readme_says_microcontroller(self):
         self.assertNotIn("ノード", JA.read_text(encoding="utf-8"))
 
+    def test_the_japanese_readme_has_no_space_beside_latin_digits_or_code(self):
+        self.assertEqual(lines_with_spaces(JA.read_text(encoding="utf-8")), [])
+
     def test_console_goes_by_its_full_name(self):
         for path in (JA, EN):
             self.assertEqual(re.findall(r".{0,20}(?<!DAGON )Console.{0,20}", path.read_text(encoding="utf-8")), [], path.name)
 
     def test_requirements_come_before_the_first_command_that_needs_them(self):
-        for path, browser, rust in ((JA, "- Chrome か Edge 89 以降\n", "- Rust 1.95.0 以降"), (EN, "- Chrome or Edge 89 or later\n", "- Rust 1.95.0 or later")):
+        for path, browser, rust in ((JA, "- ChromeかEdge 89以降\n", "- Rust 1.95.0以降"), (EN, "- Chrome or Edge 89 or later\n", "- Rust 1.95.0 or later")):
             text = path.read_text(encoding="utf-8")
             self.assertLess(text.index(browser), text.index("dagon demo\n"), path.name)
             self.assertLess(text.index(rust), text.index("cargo install"), path.name)
@@ -85,7 +89,7 @@ class Readmes(unittest.TestCase):
             self.assertNotIn("cd my-fleet\ndagon doctor", path.read_text(encoding="utf-8"), path.name)
 
     def test_the_figure_says_word_for_word_what_it_shows(self):
-        self.assertIn("次の図は DAGON のソフトウェアの設計です。", JA.read_text(encoding="utf-8"))
+        self.assertIn("次の図はDAGONのソフトウェアの設計です。", JA.read_text(encoding="utf-8"))
         self.assertIn("The figure below is DAGON's software design.", EN.read_text(encoding="utf-8"))
 
     def test_the_notice_says_how_many_microcontrollers_there_are(self):
@@ -114,7 +118,7 @@ class Readmes(unittest.TestCase):
         self.assertTrue(compilers)
         self.assertEqual(len(compilers), len(set(re.findall(r"\{ os: ([a-z]+)", release))))
         docs = ROOT / "site/src/content/docs"
-        for path, word in ((JA, f"Rust {rust} 以降"), (EN, f"Rust {rust} or later"), (docs / "getting-started/install.md", f"Rust {rust} 以降"), (docs / "en/getting-started/install.md", f"Rust {rust} or later")):
+        for path, word in ((JA, f"Rust {rust}以降"), (EN, f"Rust {rust} or later"), (docs / "getting-started/install.md", f"Rust {rust}以降"), (docs / "en/getting-started/install.md", f"Rust {rust} or later")):
             text = path.read_text(encoding="utf-8")
             self.assertIn(word, text, path.name)
             for cc in compilers:

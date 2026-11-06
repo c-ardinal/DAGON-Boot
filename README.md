@@ -11,7 +11,7 @@
   <a href="https://c-ardinal.github.io/DAGON-Boot/demo/">デモを試す</a> ·
   <a href="https://c-ardinal.github.io/DAGON-Boot/doc/">開発用ドキュメント</a> ·
   <a href="README.en.md">English Readme</a> ·
-  ライセンス: MIT または Apache-2.0
+  ライセンス: MITまたはApache-2.0
 </p>
 
 > [!IMPORTANT]
@@ -82,7 +82,7 @@ irm https://raw.githubusercontent.com/c-ardinal/DAGON-Boot/main/install.ps1 | ie
 
 ブラウザは次のものを使います。
 
-- Chrome か Edge 89 以降
+- ChromeかEdge 89以降
 
 デモを始めます。
 
@@ -136,9 +136,9 @@ DAGONがしないことは[制限事項](https://c-ardinal.github.io/DAGON-Boot/
 
 ## DAGONの設計
 
-次の図は DAGON のソフトウェアの設計です。
+次の図はDAGONのソフトウェアの設計です。
 
-<img src="assets/architecture/node-ja.svg" alt="DAGON のソフトウェアの設計を層とコンポーネントで示す図" width="100%">
+<img src="assets/architecture/node-ja.svg" alt="DAGONのソフトウェアの設計を層とコンポーネントで示す図" width="100%">
 
 ## 変更する場所
 
@@ -164,8 +164,8 @@ DAGONがしないことは[制限事項](https://c-ardinal.github.io/DAGON-Boot/
 
 必要なものは次の2つです。
 
-- Rust 1.95.0 以降
-- C コンパイラ（Windows は Visual Studio 2022 の C++ ビルドツール、Linux は gcc 13 以降、macOS は Xcode Command Line Tools 16.4 以降）
+- Rust 1.95.0以降
+- Cコンパイラ（WindowsはVisual Studio 2022のC++ビルドツール、Linuxはgcc 13以降、macOSはXcode Command Line Tools 16.4以降）
 
 ビルドして入れます。
 

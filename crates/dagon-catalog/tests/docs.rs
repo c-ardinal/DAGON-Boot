@@ -336,7 +336,7 @@ fn conflicts_across_machines_of_a_layer_are_named() {
 fn a_machine_renders_every_transition() {
     let ja = events_md(&[one::CATALOG], Lang::Ja(&|en| format!("訳 {en}")));
     assert!(ja.contains(
-        "## レイヤー `boot`\n\n### 状態機械 `one`\n\n訳 First.\n\n状態: `A` (最初の状態), `B`。"
+        "## レイヤー`boot`\n\n### 状態機械`one`\n\n訳 First.\n\n状態: `A` (最初の状態), `B`。"
     ));
     assert!(ja.contains("| action | 訳 Went. |"));
     let md = events_md(&[one::CATALOG], Lang::En);

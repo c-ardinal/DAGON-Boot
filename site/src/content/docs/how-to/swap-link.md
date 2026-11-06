@@ -15,11 +15,11 @@ description: "ノードのつながり方を変え、新しい構成を送りま
     uplink: { kind: uart, host: browser }   # pc-cli | browser | embedded
 ```
 
-`uplink` を書かなければ、PC の dagon への `usb-cdc` です。
+`uplink`を書かなければ、PCのdagonへの`usb-cdc`です。
 
 上りのつながりは、コンパイルした構成に入りません。そのため、今ある構成とそのパッケージは変わりません。
 
-## DAGON Console で選ぶ
+## DAGON Consoleで選ぶ
 
 「準備」のインスペクタで、リンクごとの種類と、親機の上りのつながりを選べます。
 
@@ -28,9 +28,9 @@ description: "ノードのつながり方を変え、新しい構成を送りま
 どちらかの端のファームウェアが実装していない種類には ◇ まだ使えない が付きます。
 
 - 構成には書けます（問題「まだ使えないつながり」）。
-- `dagon gen` は、そのつながりの名前を挙げて断ります（`uplink of hub over ble: not available yet on rp2040`）。
+- `dagon gen`は、そのつながりの名前を挙げて断ります（`uplink of hub over ble: not available yet on rp2040`）。
 
-ファームウェアにある種類は、[ボードとマイコン](/reference/boards/)の「上りのつながり」と「下りのつながり」の列にあります。上りは PC や親機へ、下りは子機へのつながりです。元のデータは各マイコンの定義の `[links]` です。
+ファームウェアにある種類は、[ボードとマイコン](/reference/boards/)の「上りのつながり」と「下りのつながり」の列にあります。上りはPCや親機へ、下りは子機へのつながりです。元のデータは各マイコンの定義の`[links]`です。
 
 ## デモで見る
 
@@ -46,4 +46,4 @@ dagon demo --uplink uart          # または usb-cdc（既定）、wifi-tcp
 
 - フレームの大きさ
 - 速さ
-- 親機の再起動中のふるまい（USB CDC と Wi-Fi はつなぎ直し、UART アダプタはつながったまま）
+- 親機の再起動中のふるまい（USB CDCとWi-Fiはつなぎ直し、UARTアダプタはつながったまま）

@@ -1365,6 +1365,15 @@ fn kept_post(server: &Server, req: &Request) -> Res {
         .map_err(|e| Response::error(422, &e))
 }
 
+/// The most `POST /v1/kept` takes: by the open project's definitions, which
+/// may add larger MCUs, else the built-in ones.
+pub(super) fn largest_package(server: &Server) -> usize {
+    match config(server).and_then(|c| crate::defs::registry(&c)) {
+        Ok(reg) => crate::kept::largest_package(&reg),
+        Err(_) => crate::kept::largest_package(dagon_topology::defs::Registry::builtin()),
+    }
+}
+
 /// GET /v1/bootcore/{node}: the node's signed boot core (the ROM path):
 /// [provision.<node>] bootcore, else <provision_dir>/<node>/bootcore.img.
 fn bootcore_get(server: &Server, node: &str) -> Res {

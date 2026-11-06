@@ -130,6 +130,27 @@ pub(crate) fn read(cfg: &Config, pubkey: &[u8; 32], id: &str) -> Result<Vec<u8>,
     Ok(bytes)
 }
 
+/// The most bytes a package can take: every image of every node in the
+/// largest slots `reg` defines, and the most the format holds around them.
+pub(crate) fn largest_package(reg: &dagon_topology::defs::Registry) -> usize {
+    use dagon_format::{bundle, header::HEADER_SIZE, manifest, topology};
+    let node = reg
+        .mcus()
+        .iter()
+        .map(|m| {
+            let images = m.slots.iter();
+            images.map(|s| HEADER_SIZE + s.max_payload as usize).sum()
+        })
+        .max()
+        .unwrap_or(0);
+    let around = bundle::head_size(bundle::MAX_ITEMS)
+        + manifest::total_size(manifest::MAX_ENTRIES, manifest::MAX_CONSTRAINTS)
+        + topology::MAX_SIZE
+        // Items are 4-byte aligned.
+        + 3 * (bundle::MAX_ITEMS + 1);
+    topology::MAX_NODES * node + around
+}
+
 #[cfg(test)]
 // Tests set up and inspect their own scratch folders directly.
 #[allow(clippy::disallowed_methods)]
@@ -137,6 +158,33 @@ mod tests {
     use super::*;
 
     const V100: Version = Version::new(1, 0, 0);
+
+    /// The bound holds a real package's overhead, and the largest node at the limit.
+    #[test]
+    fn the_largest_package_holds_every_image_of_every_node_at_the_limit() {
+        use dagon_format::topology::MAX_NODES;
+        let reg = dagon_topology::defs::Registry::builtin();
+        let most = largest_package(reg);
+        let mut biggest = 0;
+        for m in reg.mcus() {
+            let images: usize = m
+                .slots
+                .iter()
+                .map(|s| dagon_format::header::HEADER_SIZE + s.max_payload as usize)
+                .sum();
+            biggest = biggest.max(images);
+        }
+        assert!(most >= MAX_NODES * biggest);
+        // What a real package adds around its images fits what the bound leaves.
+        let (dir, _, _, key) = area("bound");
+        let pkg = crate::demo::package_with(&key, V100, V100).unwrap();
+        let view = dagon_format::bundle::BundleView::parse(&pkg).unwrap();
+        let images: usize = (0..view.item_count())
+            .map(|i| view.item(i).length as usize)
+            .sum();
+        assert!(pkg.len() - images <= most - MAX_NODES * biggest);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
     const V110: Version = Version::new(1, 1, 0);
 
     fn area(

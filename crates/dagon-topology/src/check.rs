@@ -13,8 +13,7 @@ use crate::schema::{ControlKind, Link, LinkKind, Node, Role, Tier, Topology, Uar
 
 pub const SCHEMA_VERSION: u32 = 1;
 /// Nodes a 構成 may describe (and the editor draw).
-const MAX_NODES: usize = 32;
-use crate::reach::MAX_UPDATABLE_NODES;
+use dagon_format::topology::MAX_NODES;
 const MAX_ID_LEN: usize = 15;
 const MAX_TAG_LEN: usize = 16;
 /// How far each end of a UART link may be from its `baud`. The two ends'
@@ -415,8 +414,8 @@ impl<'a> Ctx<'a> {
 
     /// Valid shapes that updating does not reach yet, told as information
     /// (never errors): more than one coordinator and their trees, nodes
-    /// below a 子機, links of a kind the compiled topology cannot carry, and
-    /// nodes beyond eight. Updating covers one 親機 with its direct 子機
+    /// below a 子機 and links of a kind the compiled topology cannot carry.
+    /// Updating covers one 親機 with its direct 子機
     /// and skips the rest (see [`crate::updatable`]).
     fn v23(&mut self) {
         let hubs: Vec<&str> = self
@@ -426,14 +425,6 @@ impl<'a> Ctx<'a> {
             .filter(|n| n.role == Role::Coordinator)
             .map(|n| n.id.as_str())
             .collect();
-        let n = self.t.nodes.len();
-        if n > MAX_UPDATABLE_NODES {
-            self.info(
-                "V-23",
-                "nodes",
-                format!("{n} nodes; updating reaches {MAX_UPDATABLE_NODES} and skips the rest"),
-            );
-        }
         if hubs.len() > 1 {
             self.info(
                 "V-23",

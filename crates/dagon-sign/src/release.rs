@@ -13,9 +13,6 @@ use ed25519_compact::KeyPair;
 
 use crate::image::{self, capabilities_ok, parse_version, port_kind_of, sign};
 
-/// Size of one hub bundle store face (4 MiB flash layout).
-pub const SUB_BUNDLE_LIMIT: usize = 884_736;
-
 /// An image placed in the bundle, in manifest entry order.
 #[derive(Debug, Clone, Copy)]
 pub struct ReleaseItem<'a> {
@@ -198,7 +195,6 @@ pub fn build(
             },
         })
         .collect();
-    check_sub_bundle_size(&items)?;
     assemble(name, release_seq, &items, topology_bin, key)
 }
 
@@ -269,10 +265,14 @@ fn place<'a>(
     })
 }
 
-/// RB-02: 1..=16 entries, one release_seq, no duplicate slot, A/B pairs whole.
+/// RB-02: 1..=`MAX_ENTRIES` entries, one release_seq, no duplicate slot, A/B pairs whole.
 fn check_set(reg: &Registry, t: &Topology, placed: &[Placed<'_>]) -> Result<u32, ReleaseError> {
     if !(1..=manifest::MAX_ENTRIES).contains(&placed.len()) {
-        return Err(fail("RB-02", "R-NODE", "a release holds 1 to 16 images"));
+        return Err(fail(
+            "RB-02",
+            "R-NODE",
+            format!("a release holds 1 to {} images", manifest::MAX_ENTRIES),
+        ));
     }
     let seq = placed[0].header.release_seq;
     if placed.iter().any(|p| p.header.release_seq != seq) {
@@ -370,23 +370,4 @@ fn check_constraints(t: &Topology, placed: &[Placed<'_>]) -> Result<(), ReleaseE
 
 fn version(s: &str) -> Result<dagon_format::Version, ReleaseError> {
     parse_version(s).ok_or_else(|| fail("RB-05", "R-COMPAT", format!("bad version '{s}'")))
-}
-
-/// RB-03: head + manifest + every `SUB_STORE` image fit one hub store face.
-fn check_sub_bundle_size(items: &[ReleaseItem<'_>]) -> Result<(), ReleaseError> {
-    let subs: Vec<_> = items.iter().filter(|i| i.dest == dest::SUB_STORE).collect();
-    let size = bundle::head_size(subs.len())
-        + manifest::total_size(items.len(), 0).next_multiple_of(4)
-        + subs
-            .iter()
-            .map(|i| i.image.len().next_multiple_of(4))
-            .sum::<usize>();
-    if size > SUB_BUNDLE_LIMIT {
-        return Err(fail(
-            "RB-03",
-            "R-BUNDLE",
-            format!("sub-node bundle is {size} bytes, limit {SUB_BUNDLE_LIMIT}"),
-        ));
-    }
-    Ok(())
 }

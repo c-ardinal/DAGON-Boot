@@ -2,7 +2,7 @@
 // shapes of dagon-topology's schema) plus the page-side display names. Every
 // edit is a pure function returning a new document, so undo keeps snapshots.
 // Validity is never decided here: topo_check (dagon-topology in WASM) does it.
-import { board_template, coordinator_capable, coordinator_uart0, link_kinds, rom_i2c_addrs, supported_mcus, topo_cut, topo_parse } from '../../wasm/pkg/dagon_wasm.js';
+import { board_template, coordinator_capable, coordinator_uart0, link_kinds, max_nodes, rom_i2c_addrs, supported_mcus, topo_cut, topo_parse } from '../../wasm/pkg/dagon_wasm.js';
 import { defaultBoard, type Board } from '../../wasm/dagon.ts';
 import { INSPECT } from '../copy.ts';
 import type { Config, Link as GLink, Node as GNode, Skip, UplinkHost, Wire } from '../sample.ts';
@@ -131,8 +131,8 @@ export interface BoardTemplate {
   coordinator: { i2c: { controller: string; sda: number; scl: number }; pioUart: { tx: number; rx: number } } | null;
 }
 
-/** Nodes the editor places and draws; updating reaches 8 and skips the rest. */
-export const MAX_NODES = 32;
+/** Nodes the editor places and draws: the format's limit. */
+export const maxNodes = (): number => max_nodes();
 const I2C_FIRST = 0x08;
 const I2C_LAST = 0x77;
 const I2C_SPEED = 400_000;
@@ -208,7 +208,7 @@ function freeId(t: Topo, base: string): string {
 
 /** Whether a board can be placed now: a known board and room left (the same board again is a second one of it). */
 export function canPlace(doc: Doc, board: string): boolean {
-  return template(board) !== null && doc.topo.nodes.length < MAX_NODES;
+  return template(board) !== null && doc.topo.nodes.length < maxNodes();
 }
 
 /** "置く": a board with no link of its own (it cannot be a 子機) is a 親機, the second and on too; else a 子機. */
@@ -236,7 +236,7 @@ export function place(doc: Doc, board: string, name?: string): { doc: Doc; id: s
 /** "置く" by MCU: a node without a board (P1); flash size and pins are the developer's to fill. */
 export function placeMcu(doc: Doc, mcu: string): { doc: Doc; id: string } {
   const m = mcus().find((x) => x.id === mcu);
-  if (!m || doc.topo.nodes.length >= MAX_NODES) return { doc, id: '' };
+  if (!m || doc.topo.nodes.length >= maxNodes()) return { doc, id: '' };
   const t = doc.topo;
   const asHub = !hub(t) && coordinator_capable(mcu);
   const id = asHub ? freeId(t, 'hub') : freeId(t, mcu);

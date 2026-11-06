@@ -1,5 +1,5 @@
 //! The part of a 構成 updating reaches: the first 親機 and the 子機
-//! linked straight to it over I2C or UART, up to eight nodes. Everything
+//! linked straight to it over I2C or UART. Everything
 //! else is a valid definition that updating skips (V-23 tells why).
 
 use std::collections::BTreeSet;
@@ -7,9 +7,6 @@ use std::collections::BTreeSet;
 use crate::defs::Registry;
 use crate::schema::{Constraint, Role, Topology};
 use crate::{check_with, Report};
-
-/// Nodes the compiled topology can carry (the hub's table size).
-pub const MAX_UPDATABLE_NODES: usize = dagon_format::topology::MAX_NODES;
 
 /// Why updating skips a node.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -20,8 +17,6 @@ pub enum Skip {
     Deep,
     /// Linked to the 親機 by a kind the compiled topology cannot carry (CAN, Ethernet, ...).
     LinkKind,
-    /// Beyond the eight nodes updating covers (the 親機 and its first seven 子機).
-    TooMany,
     /// No chain of links up to the first 親機 (unlinked, a loop of 子機, or
     /// no 親機 at all).
     Unreachable,
@@ -37,7 +32,6 @@ impl Skip {
             Skip::SecondHub => "second-hub",
             Skip::Deep => "deep",
             Skip::LinkKind => "link-kind",
-            Skip::TooMany => "too-many",
             Skip::Unreachable => "unreachable",
             Skip::CutInvalid => "cut-invalid",
         }
@@ -51,7 +45,6 @@ impl Skip {
             }
             Skip::Deep => "it is below a 子機; updating reaches the 親機's direct 子機 only",
             Skip::LinkKind => "its link kind is not one updating can use yet (I2C or UART)",
-            Skip::TooMany => "updating reaches the 親機 and its first 7 子機",
             Skip::Unreachable => "no chain of links leads to it from the first 親機",
             Skip::CutInvalid => {
                 "the part updating would reach does not pass `dagon topo check` on its own"
@@ -107,7 +100,7 @@ fn checked(reg: &Registry, t: &Topology, sub: Topology, skipped: Vec<(String, Sk
 
 /// The updatable part of `t` and the nodes it leaves out, in `nodes` order.
 /// The first 親機 is always in it; its direct I2C/UART 子機 follow in
-/// `nodes` order up to eight nodes in all. The part keeps `nodes` order, so
+/// `nodes` order. The part keeps `nodes` order, so
 /// a 構成 updating reaches whole compiles to the same bytes as before.
 /// Every node not in the part is skipped with a reason.
 pub fn updatable(t: &Topology) -> (Topology, Vec<(String, Skip)>) {
@@ -122,7 +115,6 @@ pub fn updatable(t: &Topology) -> (Topology, Vec<(String, Skip)>) {
     for n in &t.nodes {
         let why = match skip_of(t, first, &n.id) {
             Ok(()) if Some(n.id.as_str()) == first => None,
-            Ok(()) if keep.len() >= MAX_UPDATABLE_NODES => Some(Skip::TooMany),
             Ok(()) => {
                 keep.insert(&n.id);
                 None
@@ -357,36 +349,31 @@ links:
         (t, cut)
     }
 
+    /// What the check allows, updating reaches: nothing is left out for its count.
     #[test]
-    fn eight_children_listed_before_the_hub_keep_the_hub_and_its_first_seven() {
-        let (_, cut) = checked(&fan(8, true));
-        assert_eq!(cut.skipped, [("n7".to_string(), Skip::TooMany)]);
-        let part = cut.topology.expect("an updatable part");
-        let ids: Vec<&str> = part.nodes.iter().map(|n| n.id.as_str()).collect();
-        // nodes order is kept: the compiled index of each node is its place here.
-        assert_eq!(ids, ["n0", "n1", "n2", "n3", "n4", "n5", "n6", "hub"]);
-        assert_eq!(part.links.len(), 7);
-        assert_eq!(part.update.order.last().map(String::as_str), Some("hub"));
-        let bin = crate::compile_str(&fan(8, true)).unwrap();
-        let v = dagon_format::topology::TopologyView::parse(&bin).unwrap();
-        assert_eq!((v.node_count(), v.link_count()), (8, 7));
-        assert_eq!(v.node(7).role, dagon_format::topology::role::COORDINATOR);
+    fn a_topology_at_the_limit_is_reached_whole() {
+        let children = dagon_format::topology::MAX_NODES - 1;
+        for hub_last in [true, false] {
+            let (t, cut) = checked(&fan(children, hub_last));
+            assert!(cut.skipped.is_empty(), "{:?}", cut.skipped);
+            let part = cut.topology.expect("an updatable part");
+            assert_eq!(part.nodes.len(), t.nodes.len());
+            let bin = crate::compile_str(&fan(children, hub_last)).unwrap();
+            let v = dagon_format::topology::TopologyView::parse(&bin).unwrap();
+            assert_eq!((v.node_count(), v.link_count()), (children + 1, children));
+        }
     }
 
     #[test]
-    fn more_than_eight_children_after_the_hub_skip_the_last_ones() {
-        let (_, cut) = checked(&fan(9, false));
-        assert_eq!(
-            cut.skipped,
-            [
-                ("n7".to_string(), Skip::TooMany),
-                ("n8".to_string(), Skip::TooMany)
-            ]
+    fn one_node_over_the_limit_is_an_error_of_the_check() {
+        let t = parse_str(&fan(dagon_format::topology::MAX_NODES, false)).unwrap();
+        let report = check_with(Registry::builtin(), &t);
+        assert!(!report.is_pushable());
+        assert!(
+            report.issues.iter().any(|i| i.rule == "V-02"),
+            "{}",
+            report.to_json()
         );
-        let part = cut.topology.unwrap();
-        assert_eq!(part.nodes[0].id, "hub");
-        assert_eq!(part.nodes.len(), 8);
-        assert!(crate::compile_str(&fan(9, false)).is_ok());
     }
 
     #[test]

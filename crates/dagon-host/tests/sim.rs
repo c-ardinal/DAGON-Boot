@@ -728,6 +728,125 @@ fn an_answering_node_takes_the_normal_transfer_without_a_confirmation() {
     assert_eq!(path, RecoverPath::Retransfer);
 }
 
+/// A 構成 at the limit: the 親機 and a 子機 for every node left, all on I2C.
+fn yaml_at_the_limit() -> String {
+    let children = dagon_format::topology::MAX_NODES - 1;
+    let mut nodes = String::new();
+    let mut links = String::new();
+    let mut tiers = String::new();
+    let mut order = String::new();
+    for i in 0..children {
+        nodes += &format!(
+            "  - id: n{i}\n    mcu: stm32f401re\n    board: nucleo-f401re\n    role: node\n    \
+             port: self-boot\n    flash_map: f401-default\n    max_attempts: 3\n    \
+             listen_window_ms: 50\n    tag: n{i}-f401\n"
+        );
+        links += &format!(
+            "  - from: hub\n    to: n{i}\n    kind: i2c\n    bus: i2c-main\n    addr: {}\n    \
+             node_pins: {{ sda: PB4, scl: PA8 }}\n    \
+             control: {{ kind: cooperative, rom_entry: stm32-i2c-rom }}\n",
+            0x10 + i
+        );
+        tiers += &format!("  n{i}: [local]\n");
+        order += &format!("n{i}, ");
+    }
+    format!(
+        "dagon: 1\nname: limit\nnodes:\n  - id: hub\n    mcu: rp2040\n    \
+         board: waveshare-rp2040-touch-lcd-1.28\n    role: coordinator\n    port: self-boot\n    \
+         flash_map: rp2040-4m\n    max_attempts: 3\n    listen_window_ms: 0\n    tag: {hub}\n\
+         {nodes}buses:\n  - id: i2c-main\n    kind: i2c\n    controller: i2c0\n    sda: 16\n    \
+         scl: 17\n    speed_hz: 400000\n    pullups: external\nlinks:\n{links}recovery:\n  \
+         hub: [local]\n{tiers}update:\n  order: [{order}hub]\n",
+        hub = hub_tag()
+    )
+}
+
+/// An F401 app as built: the sample's is about 93 KB.
+const F401_APP_BYTES: usize = 93 * 1024;
+
+/// `tag`'s app for the F401 at its real size.
+fn f401_app(tag: &str, slot: u8, v: Version, fill: u8) -> Vec<u8> {
+    let (flags, caps) = image::default_bits(image_kind::APP);
+    let spec = ImageSpec {
+        image_kind: image_kind::APP,
+        port_kind: image::port_kind_of("self-boot").unwrap(),
+        mcu_id: image::mcu_id_of("stm32f401re").unwrap(),
+        slot: image::slot("stm32f401re", image_kind::APP, slot).unwrap(),
+        version: v,
+        build_flags: flags,
+        release_seq: 1,
+        min_bootcore_version: Version::new(1, 0, 0),
+        target_tag: target_tag(tag),
+        proto_version: 1,
+        capabilities: caps,
+    };
+    sign_image(&spec, &vec![fill; F401_APP_BYTES], &key()).unwrap()
+}
+
+/// One release writes every node of a 構成 at the limit, its apps at their
+/// real size, each to its other slot and confirmed.
+#[test]
+fn one_write_reaches_every_node_of_a_topology_at_the_limit() {
+    let children = dagon_format::topology::MAX_NODES - 1;
+    let yaml = yaml_at_the_limit();
+    let (old, new) = (Version::new(1, 0, 0), Version::new(1, 1, 0));
+    let tag = |i: usize| format!("n{i}-f401");
+    let s = sim();
+    {
+        let mut hub = s.hub.borrow_mut();
+        let now = hub.now_ms();
+        for i in 0..children {
+            let mut cfg = dagon_sim::f401_config(*key().pk);
+            cfg.target_tag = target_tag(&tag(i));
+            let mut n = dagon_sim::SimNode::new(
+                cfg,
+                dagon_sim::SimFlash::stm32f401xe(i as u64),
+                dagon_sim::Layout::STM32F401XE,
+            );
+            n.i2c_addr = Some(0x10 + i as u8);
+            n.provision(&img("stm32f401re", &tag(i), 0, old, 0x20), 0)
+                .unwrap();
+            n.reset(now);
+            hub.add_i2c(n, false);
+        }
+    }
+    let t = dagon_topology::parse_str(&yaml).unwrap();
+    let topo = topology(&yaml);
+    let mut images = vec![hub_img(0, new), hub_img(1, new)];
+    for i in 0..children {
+        images.push(f401_app(&tag(i), 0, new, 0x30));
+        images.push(f401_app(&tag(i), 1, new, 0x31));
+    }
+    let bundle = dagon_sign::release::build(
+        dagon_topology::defs::Registry::builtin(),
+        &t,
+        &topo,
+        &images,
+        "limit",
+        &key(),
+    )
+    .unwrap()
+    .bundle;
+    let out = block_on(host(&s).apply(&bundle, &topo, &key().pk, None, &mut |_| {})).unwrap();
+    assert_eq!(out.len(), children + 1);
+    for r in &out {
+        assert!(
+            matches!(r.outcome, Outcome::Done(v) if v == new),
+            "{}: {:?}",
+            r.node,
+            r.outcome
+        );
+    }
+    for i in 0..children {
+        let st = block_on(host(&s).status(Target::I2c(0x10 + i as u8))).unwrap();
+        assert_eq!(
+            (st.hello.active_version, st.hello.trial),
+            (new, false),
+            "n{i}"
+        );
+    }
+}
+
 #[test]
 fn rom_session_gives_up_after_three_attempts() {
     let s = sim();

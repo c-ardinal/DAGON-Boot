@@ -62,19 +62,19 @@ describe('bottom band', () => {
   });
 
   // Updating the answering nodes comes first; recovery is beside it.
-  test('a node stopped answering: update the answering ones first, recovery beside it, a power and wiring hint', () => {
+  test('a node stopped answering: update the answering ones, a power and wiring hint; it is written from its card', () => {
     const b = bandOf('nodesSilent', { hasConfig: true, answering: true }, { stuck: 'ウォッチ', responding: 2 });
     expect([b.sentence, b.primary?.label, b.secondary.map((x) => x.label)]).toEqual([
       BAND.M62b.sentence,
       '応答する 2 つだけ先に書き込む',
-      ['ウォッチを復旧する'],
+      [],
     ]);
     expect(b.sentence).toMatch(/電源と配線/);
   });
 
-  test('no node answers at all: recovery is the main action, nothing to update first', () => {
+  test('no node answers at all: writing it is the main action, nothing to update first', () => {
     const b = bandOf('nodesSilent', { hasConfig: true, answering: false }, { stuck: 'ウォッチ', responding: 0 });
-    expect([b.primary?.label, b.secondary]).toEqual(['ウォッチを復旧する', []]);
+    expect([b.primary?.label, b.secondary]).toEqual(['ウォッチへ書き込む', []]);
   });
 
   // One short sentence in every operating state, done and no-answer included.

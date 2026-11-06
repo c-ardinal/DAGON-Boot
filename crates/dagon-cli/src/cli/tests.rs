@@ -246,22 +246,6 @@ fn todays_invocations() -> Vec<(&'static str, Command)> {
             }),
         ),
         (
-            "recover seg",
-            C::Recover(RecoverArgs {
-                node: "seg".into(),
-                ..Default::default()
-            }),
-        ),
-        (
-            "recover watch --release r.dgb --bootcore b.img",
-            C::Recover(RecoverArgs {
-                node: "watch".into(),
-                release: s("r.dgb"),
-                bootcore: s("b.img"),
-                ..Default::default()
-            }),
-        ),
-        (
             "rollback --node seg",
             C::Rollback(RollbackArgs {
                 node: "seg".into(),

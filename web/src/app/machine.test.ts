@@ -103,8 +103,8 @@ describe('operating-mode state machine', () => {
     for (const s of ['sending', 'writing', 'hubRestarting', 'reconnectNeeded', 'recovering', 'cliTurn'] as L[]) expect(HUB_LOCKED.has(s), s).toBe(true);
   });
 
-  test('nodesSilent: the answering nodes are updated first and recovery is beside it', () => {
-    expect(view('nodesSilent', { hasConfig: true })).toMatchObject({ primary: 'updateResponding', secondary: ['recover'] });
+  test('nodesSilent: the answering nodes are updated first; a silent one is written from its card', () => {
+    expect(view('nodesSilent', { hasConfig: true })).toMatchObject({ primary: 'updateResponding', secondary: [] });
     expect(view('nodesSilent', { hasConfig: true, answering: false })).toMatchObject({ primary: 'recover', secondary: [] });
   });
 

@@ -1,6 +1,6 @@
 //! The factory recovery agent end to end on the host: the dagon-agent over
 //! `EspStore`, running factory with blank otadata, receiving signed images
-//! into the OTA slots, like `dagon recover watch` through the hub.
+//! into the OTA slots, like `dagon deploy watch` through the hub.
 
 use std::cell::{RefCell, RefMut};
 

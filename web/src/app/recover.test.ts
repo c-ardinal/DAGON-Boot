@@ -81,10 +81,14 @@ describe('recovery from the page with dagon-host recover', () => {
     const op = session(sim.transport, sim.clock);
     await silentNode(op);
     expect(op.recoverTarget?.id).toBe('seg');
-    // With other nodes answering, recovery is beside "update those first".
-    expect(bandOf(op.state, op.ctx, { stuck: op.recoverTarget?.name }).secondary.map((b) => b.label)).toEqual([BUTTON_FOR.recover('7セグ')]);
+    // With other nodes answering, the band only updates those; the silent one is written from its card.
+    expect(bandOf(op.state, op.ctx, { stuck: op.recoverTarget?.name }).secondary).toEqual([]);
 
-    await op.recover();
+    // Asked first, with nothing moved: cancelling here erases nothing.
+    expect(await op.writeNode({ id: 'seg' })).toBe('confirm');
+    expect(op.state).toBe('nodesSilent');
+
+    await op.writeNode({ id: 'seg', confirmed: true });
     expect(op.state).toBe('done');
     expect(op.recovered).toMatchObject({ path: 'rom', rom: { attempts: 1 } });
     expect(v(op.recovered?.version)).toBe('1.1.0');
@@ -94,11 +98,27 @@ describe('recovery from the page with dagon-host recover', () => {
     expect(op.live.seg.hello?.trial).toBe(false);
   }, 120_000);
 
+  test('a silent node without a ROM entry gets the direct write: nothing runs', async () => {
+    const t = new MockTransport({ quiet: ['uart'] });
+    const op = session(t, fastClock());
+    await silentNode(op);
+    expect(await op.writeNode({ id: 'watch' })).toBe('direct');
+    expect(op.state).toBe('nodesSilent');
+    expect(op.recovered).toBeNull();
+  }, 120_000);
+
+  test('an answering node is not asked: the normal transfer', async () => {
+    const { t, op } = await stoppedAt({ refuse: { 'i2c:66': 0x07 } });
+    t.setRefuse('i2c:66');
+    expect(await op.writeNode()).toBeUndefined();
+    expect(op.recovered?.path).toBe('retransfer');
+  }, 120_000);
+
   test('re-transfer: a refusal that stops the update, recovery fails (recoverFailed), again after the fix, then the rest', async () => {
     const { t, op } = await stoppedAt({ refuse: { 'i2c:66': 0x07 } });
     expect(op.recoverTarget?.id).toBe('seg');
 
-    await op.recover();
+    await op.writeNode();
     // The node refused again: its reason stays (× 書き込めない), not a generic failure nor 応答なし.
     expect(op.state).toBe('recoverFailed');
     expect(op.progress.seg).toMatchObject({ stage: 'refused', reason: 'E_FLASH' });
@@ -107,7 +127,7 @@ describe('recovery from the page with dagon-host recover', () => {
     expect(op.recoverTarget?.id).toBe('seg');
 
     t.setRefuse('i2c:66');
-    await op.recover();
+    await op.writeNode();
     expect(op.recovered?.path).toBe('retransfer');
     expect([op.state, op.targets, op.rest]).toEqual(['fileReady', ['hub', 'watch'], true]);
     expect(bandOf(op.state, op.ctx, { rest: op.rest }).primary?.label).toBe(BUTTON_FOR.updateRest);
@@ -121,7 +141,7 @@ describe('recovery from the page with dagon-host recover', () => {
     const { t, op } = await stoppedAt({ refuse: { uart: 0x07 }, factory: ['uart'] });
     expect(op.recoverTarget?.id).toBe('watch');
     t.setRefuse('uart');
-    await op.recover();
+    await op.writeNode();
     expect(op.recovered?.path).toBe('factory');
     expect(op.state).toBe('fileReady');
     expect(t.helloOf('uart').mode).toBe(0);
@@ -132,9 +152,10 @@ describe('recovery from the page with dagon-host recover', () => {
     sim.hub().wipe(0x42);
     const op = session(sim.transport, sim.clock, async (p) => (p === LATEST_RELEASE ? null : site(p)));
     await silentNode(op);
-    expect(await op.recover()).toBe('needFile');
+    expect(await op.writeNode()).toBe('needFile');
     expect(op.state).toBe('nodesSilent');
-    await op.recover({ name: 'sample-1.1.0.dgb', bytes: SITE[LATEST_RELEASE] });
+    expect(await op.writeNode({ chosen: { name: 'sample-1.1.0.dgb', bytes: SITE[LATEST_RELEASE] } })).toBe('confirm');
+    await op.writeNode({ confirmed: true });
     expect([op.state, op.recovered?.path]).toEqual(['done', 'rom']);
   }, 120_000);
 
@@ -143,7 +164,7 @@ describe('recovery from the page with dagon-host recover', () => {
     sim.hub().wipe(0x42);
     const op = session(sim.transport, sim.clock, async (p) => (p === LATEST_RELEASE ? site(p) : null));
     await silentNode(op);
-    await op.recover();
+    await op.writeNode({ confirmed: true });
     expect([op.state, op.progress.seg.stage]).toEqual(['recoverFailed', 'cannotFix']);
   }, 120_000);
 
@@ -172,7 +193,7 @@ describe('recovery from the page with dagon-host recover', () => {
   test('recovery refused for another configuration says 構成不一致, as the update does', async () => {
     const { op } = await stoppedAt({ refuse: { 'i2c:66': 0x07 } });
     op.config = { ...SAMPLE_CONFIG, yaml: SIM_PAIR_YAML };
-    await op.recover();
+    await op.writeNode();
     expect(op.state).toBe('recoverFailed');
     expect(op.progress.seg).toMatchObject({ stage: 'refused', reason: 'topology' });
     expect(NODE.refused.topology).toBe('× 構成不一致');
@@ -183,7 +204,7 @@ describe('recovery from the page with dagon-host recover', () => {
     const t = new MockTransport({ quiet: ['i2c:66'] });
     const op = session(t, fastClock(), async (p) => (p === LATEST_RELEASE ? new TextEncoder().encode('not a release') : null));
     await silentNode(op);
-    await op.recover();
+    await op.writeNode();
     expect(op.state).toBe('recoverFailed');
     expect(op.progress.seg).toMatchObject({ stage: 'refused', reason: 'format' });
     expect(NODE.refused.format).toBe('× 形式違い');
@@ -196,12 +217,12 @@ describe('recovery from the page with dagon-host recover', () => {
     await silentNode(op);
     const bad = SITE[LATEST_RELEASE].slice();
     bad[bad.length - 1] ^= 1;
-    await op.recover({ name: 'tampered.dgb', bytes: bad });
+    await op.writeNode({ chosen: { name: 'tampered.dgb', bytes: bad } });
     expect([op.state, op.alert]).toEqual(['nodesSilent', ANNOUNCE.A10source]);
-    await op.recover({ name: 'notes.txt', bytes: new TextEncoder().encode('hello') });
+    await op.writeNode({ chosen: { name: 'notes.txt', bytes: new TextEncoder().encode('hello') } });
     expect([op.state, op.alert]).toEqual(['nodesSilent', ANNOUNCE.A10format]);
     op.config = { ...SAMPLE_CONFIG, yaml: SIM_PAIR_YAML };
-    await op.recover({ name: 'sample-1.1.0.dgb', bytes: SITE[LATEST_RELEASE] });
+    await op.writeNode({ chosen: { name: 'sample-1.1.0.dgb', bytes: SITE[LATEST_RELEASE] } });
     expect([op.state, op.alert]).toEqual(['nodesSilent', ANNOUNCE.A10topology]);
   }, 120_000);
 
@@ -230,7 +251,7 @@ describe('recovery from the page with dagon-host recover', () => {
     expect([op.failed, op.recoverTarget?.id]).toEqual(['hub', 'hub']);
     t.setRefuse('hub');
     t.setHubAway(Infinity);
-    await op.recover();
+    await op.writeNode();
     expect([op.state, op.alert]).toEqual(['reconnectNeeded', ANNOUNCE.A21timeout]);
     expect(t.helloOf('hub').trial).toBe(true);
 

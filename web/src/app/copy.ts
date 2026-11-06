@@ -17,7 +17,7 @@ export const SKIP = {
 export const STEP = {
   label: '手順',
   of: '/03',
-  names: { 1: 'つなぐ', 2: 'ファイル', 3: '書き込み', recover: '復旧' } as Record<1 | 2 | 3 | 'recover', string>,
+  names: { 1: 'つなぐ', 2: 'ファイル', 3: '書き込み', recover: '書き込み' } as Record<1 | 2 | 3 | 'recover', string>,
   of3: (s: Step): 1 | 2 | 3 | 'recover' => (s === 'recover' ? s : s <= 3 ? 1 : s === 4 ? 2 : 3),
 } as const;
 
@@ -61,7 +61,7 @@ export const BUTTON = {
   otherFile: '別のファイルを選ぶ',
   update: 'ノードへ書き込む',
   reconnect: '接続し直す',
-  recoverAgain: '止まったノードを復旧する',
+  recoverAgain: 'もう一度試す',
   copyLog: '記録をコピー',
   retrySample: '見本を作り直す',
   placeInDefine: '見本を準備に置く',
@@ -70,7 +70,7 @@ export const BUTTON = {
 
 /** Buttons named after a node or a count. */
 export const BUTTON_FOR = {
-  recover: (name: string) => `${name}を復旧する`,
+  recover: (name: string) => `${name}へ書き込む`,
   updateResponding: (n: number) => `応答する ${n} つだけ先に書き込む`,
   /** M50: the update after a recovery, over the nodes not written yet. */
   updateRest: '残りのノードへ書き込む',
@@ -101,7 +101,7 @@ export const BAND = {
   M19: { sentence: '何も書いていないので、別のファイルを選んでください。' },
   M20: { sentence: '何も書いていないので、この構成向けのファイルを選んでください。' },
   M22: { sentence: '終わるまで電源と USB を抜かず、このページを開いたままにしてください。途中で止まっても、ノードは前のバージョンのまま動きます。' },
-  M33: { sentence: '基板どうしの配線が抜けていないか確かめてから、もう一度直してください。' },
+  M33: { sentence: '基板どうしの配線が抜けていないか確かめてから、もう一度試してください。' },
   M34: { sentence: 'USB ケーブルを挿し直してから、もう一度つないでください。' },
   M35: { chip: '× 作成失敗', sentence: 'そのフォルダに書き込めるか確かめてから、もう一度選んでください。' },
   /** M58: "最新のリリースを使う" found no release in the project. */
@@ -114,15 +114,15 @@ export const BAND = {
   M60: { sentence: '見つかったノードが降りてくるまで、そのまま待ってください。' },
   M61: { sentence: '送り終わるまで、USB を抜かないでください。' },
   /**
-   * The answering nodes are updated first, recovery is the side action:
+   * The answering nodes are updated first, a silent one from its card:
    * nodesSilent, with a power and wiring hint for the silent ones.
    */
   M62b: { sentence: '応答しないノードは電源と配線を確かめ、応答するノードから先に書き込んでください。' },
   /** M62: nodesSilent when the answering nodes need nothing more (already updated, or after 「応答する n つだけ先に書き込む」). */
-  M62: { pair: ['目安', '約 1 分'], sentence: '印の付いたノードは、復旧すると元どおりに動きます。' },
+  M62: { pair: ['目安', '約 1 分'], sentence: '印の付いたノードは、書き込むと元どおりに動きます。' },
   M63: { sentence: '確かめ終わるまで、そのまま待ってください。' },
   M64: { sentence: '親機が再起動したら自動でつなぎ直すので、そのまま待ってください。' },
-  M65: { pair: ['目安', '約 1 分'], sentence: '止まったノードを復旧すると、新しいバージョンで動きます。' },
+  M65: { pair: ['目安', '約 1 分'], sentence: '止まったノードへ書き込むと、新しいバージョンで動きます。' },
   M66: { sentence: 'すべてのノードが新しいバージョンで動いています。' },
   M67: { sentence: 'CLI の作業が終わると、自動でつなぎ直します。' },
 } as const satisfies Record<string, BandCopy>;
@@ -141,7 +141,7 @@ export const HUB_TOGGLE = {
     writing: '書き込みが終わるまで、切断できません。',
     hubRestarting: '親機とつなぎ直すまで、切断できません。',
     reconnectNeeded: '親機とつなぎ直すまで、切断できません。',
-    recovering: '復旧が終わるまで、切断できません。',
+    recovering: '書き込みが終わるまで、切断できません。',
     cliTurn: 'CLI の作業が終わるまで、切断できません。',
   } as Partial<Record<string, string>>,
 } as const;
@@ -171,7 +171,7 @@ export const BAND_CHIP = {
 export const BAND_FOR = {
   M29: (stuck: string) => ({ pair: ['目安', '約 1 分'] as const, sentence: `${stuck}を直すと、残りのノードへ書き込めます。` }),
   /** done when M66 is not true: the nodes that did not answer were not updated. */
-  M66some: (n: number) => ({ sentence: `応答しなかった ${n} つのノードは前のままなので、電源と配線を確かめてから復旧してください。` }),
+  M66some: (n: number) => ({ sentence: `応答しなかった ${n} つのノードは前のままなので、電源と配線を確かめてから書き込んでください。` }),
   /** done after 「前のバージョンに戻す」. */
   M66back: (name: string, version: string) => ({ sentence: `${name}は前のバージョン ${version} で動いています。` }),
   /** done after a recovery with nothing left to update. */
@@ -200,7 +200,7 @@ export const LOCK = {
     flash: '書き込み',
     release: 'リリース',
     update: '書き込み',
-    recover: '復旧',
+    recover: '書き込み',
     rollback: '前のバージョンに戻す',
     connect: 'つなぐ・切断',
     project: 'プロジェクトの切替',
@@ -250,17 +250,17 @@ export const LOCK = {
       },
     },
     recovering: {
-      name: '復旧中',
+      name: '書き込み中',
       why: {
-        edit: '復旧中は構成を変えられません',
-        flash: '復旧で親機を使っているので、書き込めません',
-        update: '復旧が終わってから使えます',
-        recover: '復旧しています',
-        rollback: '復旧が終わってから使えます',
-        connect: '復旧中に切断すると、復旧が止まります',
-        project: '復旧が終わるまで使えません',
-        apply: '復旧中は構成を変えられません',
-        file: '復旧が終わるまで使えません',
+        edit: '書き込み中は構成を変えられません',
+        flash: '親機を使っているので、書き込めません',
+        update: '書き込みが終わってから使えます',
+        recover: '書き込んでいます',
+        rollback: '書き込みが終わってから使えます',
+        connect: '書き込み中に切断すると、書き込みが止まります',
+        project: '書き込みが終わるまで使えません',
+        apply: '書き込み中は構成を変えられません',
+        file: '書き込みが終わるまで使えません',
       },
     },
     flashing: {
@@ -557,7 +557,7 @@ export const NODE = {
   refusedOther: '× 受付拒否',
   /** S04 during a recovery. */
   lastResort: '◎ 最後の手段',
-  cannotFix: '× 復旧不可',
+  cannotFix: '× 書き込めず',
   /** W7: full spoken state of a chip. */
   respondingName: '応答あり',
   silentName: '応答なし、2 回続けて返事がない',
@@ -613,7 +613,7 @@ export const DETAIL = {
   introHeading: 'はじめに',
   /** M42: the same three steps as the header. */
   introSteps: ['つなぐ', 'ファイル', '書き込み'],
-  introNote: '止まっても 復旧で戻せる',
+  introNote: '止まっても 書き直せる',
   /** S36 */
   rtt: '往復',
   lastSeen: '最後の応答',
@@ -747,7 +747,7 @@ export const ANNOUNCE = {
   A14: (version: string) => `完了、${version}`,
   A21timeout: '親機 再接続 時間切れ',
   A15: (name: string, version: string) => `${name} ${version} に戻した`,
-  A16: (name: string, rest: number) => `${name} 復旧済み、残り ${rest}`,
+  A16: (name: string, rest: number) => `${name} 書き込み済み、残り ${rest}`,
   /** "最新のリリースを使う" found no release in the project. */
   A22latest: 'リリース なし',
 } as const;
@@ -1245,13 +1245,18 @@ export const WRITE = {
     reason: '新しいバージョンで起動を続けられず、前のバージョン {version} に戻りました。ノードは動いています。',
     next: 'アプリを直してビルドしてから、もう一度書き込んでください。',
   },
+  /** A silent node with a ROM entry: said once, before anything is touched. */
+  rom: {
+    silent: '× 応答なし',
+    body: '{node} が応答しません。書き込むと、中身をすべて書き換えます。配線の抜けでも応答しなくなるので、確かめてから進めてください。',
+  },
   factory: {
     first: '◇ 初回',
     intro: '{node} の DAGON が応答しないため、USB で直接書き込みます。初めての書き込みと、DAGON が消えたときだけの手順です。',
     steps: '手順',
     drive: 'ドライブ',
     waiting: '… 待機中',
-    after: '書き終わったら閉じて、接続します。残りのノードは「書き込む」で DAGON 経由で書き込みます。応答しない子機は、そのカードから直接書き込みます。',
+    after: '書き終わったら閉じて、接続します。残りのノードは「書き込む」で DAGON 経由で書き込みます。応答しない子機は、そのカードの「書き込む」から書き込みます。',
     cancel: '中止',
     childIntro: '{node} は親機から届かないため、この子機を直接つないで書き込みます。',
     howToConnect: 'つなぎ方',
@@ -1273,9 +1278,5 @@ export const CONN = {
     connected: '接続済 {node}',
     lost: '接続が切れた {node}',
   },
-} as const;
-
-export const RECOVER = {
-  fix: '電源と配線を確かめてから、復旧します。復旧中は構成を変えられません。',
 } as const;
 

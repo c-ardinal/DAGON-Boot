@@ -191,7 +191,7 @@ watchdog resets it and it boots the previous version again.
 
 ```sh
 dagon rollback --node seg     # back to the previously confirmed version
-dagon recover seg             # a node that no longer answers
+dagon deploy seg              # also a node that no longer answers: says so, asks, then rewrites it through its ROM loader, or names `dagon flash` when it has none
 ```
 
 `dagon --help` lists every command and option.

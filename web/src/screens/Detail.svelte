@@ -21,14 +21,11 @@
     first?: readonly string[];
     /** Opens the direct writing of the node. */
     onfirst?: (id: string) => void;
-    /** The node the 親機 can recover now, and the button's words. */
-    recover?: { id: string; label: string } | null;
-    onrecover?: () => void;
     /** The last recovery, for its figures under 詳しく見る. */
     recovery?: { id: string; result: RecoverResult } | null;
   }
 
-  let { config, live, selected, connected, act = false, onkeep, onback, first = [], onfirst, recover = null, onrecover, recovery = null }: Props = $props();
+  let { config, live, selected, connected, act = false, onkeep, onback, first = [], onfirst, recovery = null }: Props = $props();
 
   function recoveryRows(id: string): [string, string][] {
     if (recovery?.id !== id) return [];
@@ -243,10 +240,9 @@
         </details>
       {/if}
     {/if}
-    {#if (onfirst && first.includes(n.id)) || recover?.id === n.id}
+    {#if onfirst && first.includes(n.id)}
       <div class="actions">
-        {#if recover?.id === n.id}<button class="secondary" data-control="recover" onclick={() => onrecover?.()}>{recover.label}</button>{/if}
-        {#if onfirst && first.includes(n.id)}<button class="secondary" data-control="flash" onclick={() => onfirst(n.id)}>{WRITE.run}</button>{/if}
+        <button class="secondary" data-control="flash" onclick={() => onfirst(n.id)}>{WRITE.run}</button>
       </div>
     {/if}
   </section>

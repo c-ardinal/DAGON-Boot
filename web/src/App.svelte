@@ -43,6 +43,7 @@
   import SkeletonModal from './screens/SkeletonModal.svelte';
   import Modal from './screens/Modal.svelte';
   import FactoryModal from './screens/FactoryModal.svelte';
+  import RomConfirm from './screens/RomConfirm.svelte';
   import { answerConsent } from './app/factory.ts';
   import Toast, { type Notice } from './screens/Toast.svelte';
   import { CONN, FILE, NOTICE, SIM, fill as fillIn } from './app/copy.ts';
@@ -725,24 +726,36 @@
     const input = e.currentTarget as HTMLInputElement;
     const f = input.files?.[0];
     input.value = '';
-    if (f && stopped(pickForRecovery ? 'recover' : 'file')) return void (pickForRecovery = false);
+    if (f && stopped(pickForRecovery ? 'recover' : 'file')) return void (pickForRecovery = null);
     const forRecovery = pickForRecovery;
-    pickForRecovery = false;
+    pickForRecovery = null;
     if (!f) return;
     const bytes = new Uint8Array(await f.arrayBuffer());
-    if (forRecovery) void op.recover({ name: f.name, bytes });
+    if (forRecovery) void writeOne(forRecovery.id, { name: f.name, bytes });
     else op.takeFile(f.name, bytes);
   }
 
-  /** The file chooser is open for a recovery that found no release. */
-  let pickForRecovery = false;
-  async function recover(again = false) {
+  /** The file chooser is open for a one-node write that found no release. */
+  let pickForRecovery: { id?: string } | null = null;
+  /** The silent node whose ROM write waits for the user's word. */
+  let romAsk = $state<string | null>(null);
+  /** 「書き込む」 on one node: the way it answers decides what comes next. */
+  async function writeOne(id?: string, chosen?: { name: string; bytes: Uint8Array }, again = false) {
     if (stopped('recover')) return;
-    if ((await (again ? op.retry() : op.recover())) === 'needFile') {
-      pickForRecovery = true;
+    const r = await (again ? op.retry() : op.writeNode({ id, chosen }));
+    const node = id ?? op.recoverTarget?.id ?? null;
+    if (r === 'needFile') {
+      pickForRecovery = { id };
       fileInput?.click();
-    }
+    } else if (r === 'direct' && node) factory = { node, id: null };
+    else if (r === 'confirm') romAsk = node;
   }
+  function writeRom() {
+    const id = romAsk;
+    romAsk = null;
+    if (id && !stopped('recover')) void op.writeNode({ id, confirmed: true });
+  }
+  const romNode = $derived(op.config?.nodes.find((n) => n.id === romAsk) ?? null);
   /** The sheet shows only when it holds something. */
   const sheetShown = $derived(
     mode === 'define'
@@ -1095,12 +1108,6 @@
   let factory = $state<{ node: string; id: number | null } | null>(null);
   const hubId = $derived((hubNode ?? op.config?.nodes.find((n) => n.role === 'hub'))?.id ?? null);
   const factoryNode = $derived(op.config?.nodes.find((n) => n.id === factory?.node) ?? null);
-  /** The stuck node the 親機 can recover through the hub, on its card's sheet. */
-  const recoverOffer = $derived.by(() => {
-    const b = [band.primary, ...band.secondary].find((x) => x?.action === 'recover');
-    const n = op.recoverTarget;
-    return op.state === 'nodesSilent' && b && n ? { id: n.id, label: b.label } : null;
-  });
   /** Nodes whose first write can start from their card: not in dagon demo, whose nodes are simulated. */
   const firstNodes = $derived(mode === 'operate' && !cli.sim && cli.has('flash') ? firstWriteNodes(op.config?.nodes ?? [], op.live, connected) : []);
   const factoryMcu = $derived(d.doc.topo.nodes.find((n) => n.id === factoryNode?.id)?.mcu ?? '');
@@ -1145,9 +1152,9 @@
       case 'useLatest':
         return void op.useLatest();
       case 'recover':
-        return void recover();
+        return void writeOne();
       case 'recoverAgain':
-        return void recover(true);
+        return void writeOne(undefined, undefined, true);
       case 'defineFix':
         return switchMode('define');
       case 'push':
@@ -1331,9 +1338,7 @@
         onkeep={(id) => !stopped('rollback') && void op.keepTrial(id)}
         onback={(id) => !stopped('rollback') && void op.rollback(id)}
         first={firstNodes}
-        onfirst={(id) => (factory = { node: id, id: null })}
-        recover={recoverOffer}
-        onrecover={() => act('recover')}
+        onfirst={(id) => (op.state === 'nodesSilent' || op.state === 'stopped' || op.state === 'recoverFailed' ? void writeOne(id) : (factory = { node: id, id: null }))}
         recovery={op.recovering && op.recovered ? { id: op.recovering, result: op.recovered } : null}
       />
 {/snippet}
@@ -1427,7 +1432,7 @@
     aria-hidden="true"
     bind:this={fileInput}
     onchange={picked}
-    oncancel={() => (pickForRecovery = false)}
+    oncancel={() => (pickForRecovery = null)}
   />
   {#if ghost?.shown}
     <div class="ghost" aria-hidden="true" style:left="{ghost.x + 8}px" style:top="{ghost.y + 8}px">{ghost.part.name}</div>
@@ -1507,6 +1512,9 @@
         {/if}
       {/snippet}
     </Modal>
+  {/if}
+{#if romNode}
+    <RomConfirm node={romNode.name} onwrite={writeRom} oncancel={() => (romAsk = null)} />
   {/if}
   {#if buildFailureOpen}
     {@const f = buildFailure(buildJobs, d.config.reach)}

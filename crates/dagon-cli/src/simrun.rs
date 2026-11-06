@@ -333,13 +333,20 @@ fn s4() -> R {
         OLD,
         4000,
     );
+    let roms = dagon_host::rom::rom_maps(dagon_topology::defs::Registry::builtin());
+    let way =
+        block_on(w.host().write_path(SEG, &w.topology, &roms)).map_err(|e| format!("{e:?}"))?;
+    if way != dagon_host::WritePath::Rom {
+        return Err(format!("expected the ROM path, got {way:?}"));
+    }
     let assets = RecoverAssets {
         release: &w.release,
         topology: &w.topology,
         pubkey: &w.key.pk,
         bootcore: Some(&boot),
         stage0: Some(&[0x5A; 0x100]),
-        roms: &dagon_host::rom::rom_maps(dagon_topology::defs::Registry::builtin()),
+        roms: &roms,
+        rom_confirmed: true,
     };
     let (path, v) =
         block_on(w.host().recover(SEG, &assets, &mut |_| {})).map_err(|e| format!("{e:?}"))?;
@@ -378,8 +385,113 @@ pub fn run() -> Result<(), String> {
 }
 
 #[cfg(test)]
+// Tests set up and inspect their own scratch folders directly.
+#[allow(clippy::disallowed_methods)]
 mod tests {
     use super::*;
+
+    /// One write of `seg` as `dagon deploy` runs it: files as `dagon flash`
+    /// leaves them; `ask` answers the ROM question and counts it.
+    fn write_seg(
+        w: &World,
+        roms: &[dagon_host::rom::RomMap],
+        yes: bool,
+        asked: &mut u32,
+    ) -> Result<Vec<u8>, String> {
+        let dir =
+            std::env::temp_dir().join(format!("dagon-write-silent-{}-{yes}", std::process::id()));
+        let seg_dir = dir.join("seg");
+        std::fs::create_dir_all(&seg_dir).unwrap();
+        let boot = sign(
+            &w.key,
+            "stm32f401re",
+            image_kind::BOOTCORE,
+            &topology_tag("seg"),
+            0,
+            OLD,
+            4000,
+        );
+        std::fs::write(seg_dir.join("bootcore.img"), &boot).unwrap();
+        std::fs::write(seg_dir.join(crate::commands::STAGE0_FILE), [0x5A; 0x100]).unwrap();
+        let t = dagon_topology::parse_str(YAML).unwrap();
+        let r = crate::device::write_silent_nodes(
+            &mut w.host(),
+            &t,
+            &w.topology,
+            &w.release,
+            &w.key.pk,
+            &["seg".to_string()],
+            roms,
+            &dir,
+            &mut |_| {
+                *asked += 1;
+                yes
+            },
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+        r
+    }
+
+    fn wipe(w: &World) {
+        let mut hub = w.sim.hub.borrow_mut();
+        let now = hub.now_ms();
+        let node = seg(&mut hub);
+        node.flash().erase_all().unwrap();
+        node.reset(now);
+        node.flash().clear_ops();
+    }
+
+    fn all_roms() -> Vec<dagon_host::rom::RomMap> {
+        dagon_host::rom::rom_maps(dagon_topology::defs::Registry::builtin())
+    }
+
+    #[test]
+    fn deploy_asks_then_rewrites_a_silent_node_through_its_rom() {
+        let w = world().unwrap();
+        wipe(&w);
+        let mut asked = 0;
+        assert_eq!(
+            write_seg(&w, &all_roms(), true, &mut asked).unwrap(),
+            Vec::<u8>::new()
+        );
+        assert_eq!(asked, 1);
+        w.expect(SEG_AT, NEW).unwrap();
+    }
+
+    #[test]
+    fn deploy_cancelled_at_the_question_erases_nothing() {
+        let w = world().unwrap();
+        wipe(&w);
+        let mut asked = 0;
+        let e = write_seg(&w, &all_roms(), false, &mut asked).unwrap_err();
+        assert!(e.contains("seg"), "{e}");
+        assert_eq!(asked, 1);
+        let mut hub = w.sim.hub.borrow_mut();
+        let node = seg(&mut hub);
+        assert!(!node.boot0(), "BOOT0 stays low");
+        assert!(node.flash().ops().is_empty(), "nothing erased");
+    }
+
+    #[test]
+    fn deploy_sends_a_silent_node_without_rom_entry_to_the_direct_write() {
+        let w = world().unwrap();
+        wipe(&w);
+        let mut asked = 0;
+        let e = write_seg(&w, &[], true, &mut asked).unwrap_err();
+        assert!(e.contains("dagon flash seg"), "{e}");
+        assert_eq!(asked, 0);
+    }
+
+    #[test]
+    fn deploy_leaves_an_answering_node_to_the_normal_transfer() {
+        let w = world().unwrap();
+        let mut asked = 0;
+        assert_eq!(
+            write_seg(&w, &all_roms(), true, &mut asked).unwrap(),
+            vec![SEG]
+        );
+        assert_eq!(asked, 0);
+    }
 
     /// `dagon status` and `dagon doctor` print these lines: every node's
     /// versions, and "unknown" for an agent that predates VERSION.

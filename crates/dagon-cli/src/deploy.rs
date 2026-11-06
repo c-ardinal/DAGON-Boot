@@ -343,14 +343,36 @@ pub fn command(a: &DeployArgs) -> Result<(), String> {
         ));
     }
     let mut host = crate::serial::host(a.port.as_deref())?;
-    crate::device::apply_bundle(
+    let reg = crate::defs::registry(&cfg)?;
+    let topology = dagon_topology::compile_with(&reg, &t).map_err(|e| e.to_string())?;
+    let mut ask = |question: &str| {
+        if yes {
+            print!("{question}");
+            return true;
+        }
+        confirm(question, &mut std::io::stdin().lock())
+    };
+    let answering = crate::device::write_silent_nodes(
         &mut host,
-        &crate::defs::registry(&cfg)?,
-        &p.bundle,
         &t,
-        Some(&key.pk),
-        None,
+        &topology,
+        &p.bundle,
+        &key.pk,
+        &nodes,
+        &dagon_host::rom::rom_maps(&reg),
+        &cfg.provision_dir(),
+        &mut ask,
     )?;
+    if !answering.is_empty() {
+        crate::device::apply_bundle(
+            &mut host,
+            &reg,
+            &p.bundle,
+            &t,
+            Some(&key.pk),
+            Some(&answering),
+        )?;
+    }
     // Only an applied release is the one the next deploy counts from.
     crate::genfs::write_out(&cfg.base, &release_out(&cfg)?, &p.bundle)
 }

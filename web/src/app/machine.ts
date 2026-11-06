@@ -86,9 +86,8 @@ export const MACHINE: Record<L, Spec> = {
   },
   nodesSilent: {
     step: 4,
-    // Updating the nodes that answer comes first; recovery is the side action.
+    // The nodes that answer come first; a silent one is written from its card.
     primary: (c) => (c.answering === false ? 'recover' : 'updateResponding'),
-    secondary: (c) => (c.answering === false ? [] : ['recover']),
     on: { recover: 'recovering', watchOk: 'ready', updateResponding: 'reading', rollback: 'recovering', ...leave },
   },
   reading: { step: 4, on: { read: 'verifying', ...leave } },

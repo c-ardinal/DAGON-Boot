@@ -94,14 +94,6 @@ describe('a node card opens its first write', () => {
     expect(first(firstHtml('node:seg', { first: ['hub'], onfirst: () => undefined }))).toBeNull();
   });
 
-  test('the node the 親機 can recover offers that too; another node does not', () => {
-    const offer = { recover: { id: 'seg', label: 'segを復旧する' }, onrecover: () => undefined };
-    const button = (b: string) => /<button[^>]*data-control="recover"[^>]*>([^<]*)<\/button>/.exec(b);
-    expect(button(firstHtml('node:seg', offer))?.[1]).toBe('segを復旧する');
-    expect(button(firstHtml('node:hub', offer))).toBeNull();
-    expect(button(firstHtml('node:seg'))).toBeNull();
-  });
-
   test('without the action offered (準備) there is none', () => {
     expect(first(firstHtml('node:seg'))).toBeNull();
   });

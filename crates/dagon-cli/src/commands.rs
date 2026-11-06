@@ -429,7 +429,7 @@ pub(crate) fn provision_files(
 
     let stage0 = stage0_payload(mcu, node, inputs)?;
     if let Some(s) = &stage0 {
-        // The ROM path's full rewrite (`dagon recover`) writes it again.
+        // The ROM path's full rewrite (`dagon deploy` of a silent node) writes it again.
         let p = dir.join(STAGE0_FILE);
         write_file(&p, s)?;
         println!("{}: {} bytes", p.display(), s.len());

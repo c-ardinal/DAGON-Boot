@@ -1,11 +1,11 @@
-//! `status`, `apply`, `rollback`, `recover`, `topo push`: thin shells over
+//! `status`, `apply`, `rollback`, `topo push`: thin shells over
 //! dagon-host on the hub's serial port.
 
 use std::path::{Path, PathBuf};
 
 use dagon_format::header::port_kind;
 use dagon_format::Version;
-use dagon_host::{Clock, Event, Host, NodeState, Outcome, Target, Transport};
+use dagon_host::{Clock, Event, Host, NodeState, Outcome, Target, Transport, WritePath};
 use dagon_proto::payload::{phase, SlotState, StatusResp, VersionResp, VersionSlots};
 use dagon_proto::Status;
 use dagon_sign::to_hex;
@@ -13,7 +13,7 @@ use dagon_sim::block_on;
 use dagon_topology::defs::Registry;
 use dagon_topology::Topology;
 
-use crate::cli::{ApplyArgs, RecoverArgs, RollbackArgs, StatusArgs, TopoPushArgs};
+use crate::cli::{ApplyArgs, RollbackArgs, StatusArgs, TopoPushArgs};
 use crate::config::{load_key, read_file, read_topology, Config};
 use crate::serial;
 
@@ -332,81 +332,90 @@ pub(crate) fn pubkey(
     }
 }
 
-pub fn recover(a: &RecoverArgs) -> Res {
-    let node = a.node.as_str();
-    let cfg = Config::load(a.config.as_deref())?;
-    let t = read_topology(&cfg, &cfg.topology_path(a.topology.as_deref())?)?;
-    let bin = topology_bin(&crate::defs::registry(&cfg)?, &t)?;
-    let index =
-        t.nodes
-            .iter()
-            .position(|n| n.id == node)
-            .ok_or_else(|| format!("no updatable node '{node}' in the topology"))? as u8;
-    let dgb = a
-        .release
-        .as_ref()
-        .map(PathBuf::from)
-        .or(cfg.release.clone())
-        .ok_or("no release: pass --release <dgb> or set release in dagon.toml")?;
-    let release = read_file(&dgb)?;
-    crate::versions::check_number("bundle", &dgb.display().to_string(), &release)?;
-    let boot_path = a.bootcore.as_deref().map_or_else(
-        || cfg.provision_dir().join(node).join("bootcore.img"),
-        PathBuf::from,
-    );
-    // Only the ROM path needs it; a missing file is reported if it gets there.
-    let boot = std::fs::read(&boot_path).ok();
-    // stage0 as provision wrote it, for an MCU with a stage0.
-    let stage0 = std::fs::read(
-        cfg.provision_dir()
-            .join(node)
-            .join(crate::commands::STAGE0_FILE),
-    )
-    .ok();
-    let key = pubkey(a.pubkey.as_deref(), a.key.as_deref(), &cfg)?;
-    let roms = dagon_host::rom::rom_maps(&crate::defs::registry(&cfg)?);
-    let assets = dagon_host::RecoverAssets {
-        release: &release,
-        topology: &bin,
-        pubkey: &key,
-        bootcore: boot.as_deref(),
-        stage0: stage0.as_deref(),
-        roms: &roms,
-    };
-    let mut host = serial::host(a.port.as_deref())?;
-    let mut print = |e: Event| {
-        println!(
-            "{node}: {} {}% ({})",
-            phase_name(e.phase),
-            e.percent,
-            e.version
-        );
-        print_times(node, &e);
-    };
-    let (path, v) = block_on(host.recover(index, &assets, &mut print)).map_err(|e| match e {
-        dagon_host::Error::NoImage { .. } if boot.is_none() => format!(
-            "{node} does not answer; the ROM path needs {}",
-            boot_path.display()
-        ),
-        e => format!("recover {node}: {e:?}"),
+/// The silent nodes of a write, before any transfer: one with a ROM entry is
+/// rewritten through it once `ask` says yes; one without goes to the direct
+/// write and nothing is written. Returns the indices of those that answer,
+/// for the normal transfer.
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn write_silent_nodes<T: Transport, C: Clock>(
+    host: &mut Host<T, C>,
+    t: &Topology,
+    topology: &[u8],
+    release: &[u8],
+    key: &[u8; 32],
+    nodes: &[String],
+    roms: &[dagon_host::rom::RomMap],
+    provision: &std::path::Path,
+    ask: &mut dyn FnMut(&str) -> bool,
+) -> Result<Vec<u8>, String>
+where
+    T::Error: std::fmt::Debug,
+{
+    // A hub routes by its topology, so a node is silent only after it has one.
+    block_on(host.push_topology(topology)).map_err(|e| match e {
+        dagon_host::Error::Timeout => {
+            let hub = t.nodes.first().map_or("hub", |n| n.id.as_str());
+            format!("the hub does not answer; write it directly: dagon flash {hub}")
+        }
+        e => format!("{e:?}"),
     })?;
-    match path {
-        dagon_host::RecoverPath::Rom(s) => println!(
-            "{node}: rewritten through the ROM loader, {v}; {} frames, max round trip {} ms, \
-             {} ms, {} session(s){}",
-            s.frames,
-            s.max_rtt_ms,
-            s.elapsed_ms,
-            s.attempts,
-            if s.no_stretch {
-                ""
-            } else {
-                ", stretching commands"
+    let mut answering = Vec::new();
+    let mut rom = Vec::new();
+    for node in nodes {
+        let index = t
+            .nodes
+            .iter()
+            .position(|n| &n.id == node)
+            .ok_or_else(|| format!("no updatable node '{node}' in the topology"))?
+            as u8;
+        match block_on(host.write_path(index, topology, roms)).map_err(|e| format!("{e:?}"))? {
+            WritePath::Transfer => answering.push(index),
+            WritePath::Rom => rom.push((node, index)),
+            WritePath::Direct => {
+                return Err(format!(
+                    "{node} does not answer; write it directly: dagon flash {node}"
+                ))
             }
-        ),
-        p => println!("{node}: {p:?}, {v}"),
+        }
     }
-    Ok(())
+    for (node, index) in rom {
+        let boot_path = provision.join(node).join("bootcore.img");
+        let boot = std::fs::read(&boot_path).map_err(|_| {
+            format!(
+                "{node} does not answer; its ROM write needs {}",
+                boot_path.display()
+            )
+        })?;
+        // Stage0 as the first write left it, for an MCU with a stage0.
+        let stage0 = std::fs::read(provision.join(node).join(crate::commands::STAGE0_FILE)).ok();
+        if !ask(&format!(
+            "{node} does not answer. Writing it through its ROM loader rewrites all its \
+             contents. A loose wire also stops an answer: check it first.\n"
+        )) {
+            return Err(format!("stopped; {node} was not touched"));
+        }
+        let assets = dagon_host::RecoverAssets {
+            release,
+            topology,
+            pubkey: key,
+            bootcore: Some(&boot),
+            stage0: stage0.as_deref(),
+            roms,
+            rom_confirmed: true,
+        };
+        let mut print = |e: Event| {
+            println!(
+                "{node}: {} {}% ({})",
+                phase_name(e.phase),
+                e.percent,
+                e.version
+            );
+        };
+        let (_, v) = block_on(host.recover(index, &assets, &mut print))
+            .map_err(|e| format!("{node}: {e:?}"))?;
+        println!("{node}: rewritten through the ROM loader, {v}");
+    }
+    Ok(answering)
 }
 
 pub fn apply(a: &ApplyArgs) -> Res {

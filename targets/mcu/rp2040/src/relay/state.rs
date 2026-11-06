@@ -122,7 +122,12 @@ pub fn home() -> Home {
         ..Default::default()
     };
     for sub in subs() {
-        let s = locked(&SEEN, |t| t.borrow().get(sub.index as usize).copied().unwrap_or_default());
+        let s = locked(&SEEN, |t| {
+            t.borrow()
+                .get(sub.index as usize)
+                .copied()
+                .unwrap_or_default()
+        });
         let _ = home.subs.push(Node {
             node: sub,
             version: s.version,

@@ -94,7 +94,17 @@ from the boot core it runs: a changed boot core is written once its version
 is raised, as with apps. The build brings the crate's own entry in its
 `Cargo.lock` to the raised version and changes nothing else there; every
 other package stays as locked. `dagon gen` keeps the boot crate's
-`version`: it is the one field of that file that is yours.
+`version`: it is the one field of that file that is yours, and raising it
+needs no new `dagon gen`.
+
+To see a node refuse a bad boot core, build one that fails its own check: the
+boot crate's `no-confirm` feature, turned on for a release by
+`boot_features = ["no-confirm"]` in `[build.<id>]`. `boot_features` names
+features of the node's boot crate; `dagon deploy` and DAGON Console build the
+release's boot core with them, and a first write never does. Raise the boot
+crate's version and write: the write stops, and the node keeps running its
+confirmed boot core with its app as it was. Take the line out afterwards, or
+the next write sends a failing core again.
 
 ## 5. Write the first version (once per node)
 

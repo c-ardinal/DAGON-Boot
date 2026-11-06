@@ -3,6 +3,12 @@ import { NODE, STATE, WRITE } from './copy.ts';
 import { lightsStill, nodeState, resultChip, STATE_ICON } from './nodeState.ts';
 
 describe('the chip a node keeps after a write', () => {
+  test('a boot core that went back says so on the card, and it is not a red failure', () => {
+    const c = resultChip('coreBack')!;
+    expect(c.chip).toBe(WRITE.coreBack.label);
+    expect(c.silent).toBe(false);
+  });
+
   test('a node the stopped write never reached: not written, no error chip, its state stays what the watch saw', () => {
     const c = resultChip('unwritten')!;
     expect(c).toEqual({ chip: NODE.unwritten, spoken: '未書き込み', silent: false });

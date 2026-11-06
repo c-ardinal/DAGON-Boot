@@ -15,7 +15,7 @@ description: "What DAGON does not do, and where its guarantees stop."
 - The USB VID:PID `c0de:cafe` is a test ID, not an assigned one.
 - The last run on hardware passed 16 scenarios on all three nodes (hub RP2040,
   F401, ESP32-S3), before the write flow changed. The current scenario set has
-  not been run since; `samples/hardware-test` runs it. Boot core updates are
-  unproven on hardware. The F401's ROM recovery has not been run on hardware.
+  not been run since; `samples/hardware-test` runs it. Boot core update
+  scenarios exist (`core-seg`, `core-hub`) but have not yet been run on hardware. The F401's ROM recovery has not been run on hardware.
 - `dagon conform` drives the synchronous test sequence and is CLI only; the
   browser does not run conformance tests.

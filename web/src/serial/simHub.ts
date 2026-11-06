@@ -17,6 +17,8 @@ interface SimHub {
   advance(ms: number): void;
   /** Erases the I2C node at `addr` (only its ROM loader is left). */
   wipe(addr: number): boolean;
+  /** Boot core `major.minor.patch` of the I2C node at `addr` fails its own check. */
+  failCore(addr: number, major: number, minor: number, patch: number): boolean;
   /** The watch's next version crashes at boot, so its write goes back (`dagon demo --sim-fail watch`). */
   failWatch(): boolean;
 }

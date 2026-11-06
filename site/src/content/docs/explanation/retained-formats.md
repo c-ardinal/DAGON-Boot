@@ -372,11 +372,12 @@ the flag and the armed record, so the next start repeats the decision.
 
 ### 3.6 Clearing
 
-`dagon extension reset` reaches the agent, which frees an app trip in its
-own cell, or stores a clear request for a boot-core trip; the boot core's
-next start turns the trip into clear-done, and each side frees its record
-when it sees the other's. One request clears one trip. Nothing else clears
-a trip whose id is installed.
+DAGON has no request that clears a trip yet: neither the protocol nor the CLI
+has one. This is what the format's model holds for one: the agent frees an app
+trip in its own cell, or stores a clear request for a boot-core trip; the boot
+core's next start turns the trip into clear-done, and each side frees its
+record when it sees the other's. One request clears one trip. Nothing else
+clears a trip whose id is installed.
 
 ### 3.7 Limits of the claims
 

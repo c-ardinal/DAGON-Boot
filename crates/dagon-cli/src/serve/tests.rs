@@ -263,7 +263,9 @@ fn hello_reports_keys_without_their_values() {
         .unwrap()
         .iter()
         .any(|f| f == "build"));
-    assert!(v["api_key"].is_boolean() && v["key"].is_boolean());
+    assert!(v["key"].is_boolean());
+    // Whether an agent can be reached is GET /v1/agent's `available`, said once.
+    assert!(v.get("api_key").is_none(), "{body}");
     // The CLI version, the API number the page checks, every format number.
     assert_eq!(v["cli"], env!("CARGO_PKG_VERSION"));
     assert_eq!(v["api"], crate::versions::SERVE_API);
@@ -1993,8 +1995,6 @@ fn a_registered_key_makes_the_api_way_available() {
     );
     let v: serde_json::Value = serde_json::from_str(&get(&a, "/v1/agent").1).unwrap();
     assert_eq!(v["available"], true);
-    let hello: serde_json::Value = serde_json::from_str(&get(&a, "/v1/hello").1).unwrap();
-    assert_eq!(hello["api_key"], true);
 }
 
 /// A linked server whose agent is `fake` (no network).

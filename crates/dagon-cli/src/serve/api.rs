@@ -604,8 +604,6 @@ fn hello(server: &Server) -> Response {
         "formats": crate::versions::formats().into_iter().collect::<std::collections::BTreeMap<_, _>>(),
         "workspace": workspace,
         "features": features,
-        // The way DAGON uses (linked, else the default) can be used here.
-        "api_key": crate::consent::status(super::project::home(server).ok().as_deref(), &agents_of(server), server.keys())["available"],
         "key": key.is_some(),
         "key_id": key,
         "release_key": server.release_key().map(|k| to_hex(&k)),

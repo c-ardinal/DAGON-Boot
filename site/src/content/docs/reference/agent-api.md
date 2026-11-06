@@ -148,9 +148,6 @@ In `dagon demo` every route that would reach an agent answers 403
 calls a real agent. `GET /v1/agent` still answers, and `ai_topology` is left out
 of the demo's `features`.
 
-`GET /v1/hello` keeps `api_key` (same value as `available` of GET /v1/agent;
-the name is kept for the page).
-
 ## POST /v1/agent/ask
 
 One question to DAGON, answered in the same request (no job, no events).

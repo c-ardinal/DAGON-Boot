@@ -33,8 +33,9 @@ As a developer you choose the boards, draw how they connect and write your appli
 - **Get a project that builds**: `dagon new` and `dagon gen` give every node a Rust crate with its start-up, its wiring and an empty `app.rs` for your code.
 - **Write in one go**: `dagon deploy` builds, signs, packages and writes in one command. In the Console you write with each node's progress in view.
 - **Go back when it fails**: every image is signed. A node runs a new version on trial and goes back when it cannot be confirmed; `dagon rollback` goes back by hand.
+- **Update the boot core too**: the boot core itself lives in two slots and is updated like an app (RP2040, STM32F401), going back if the new one fails.
 - **Extend it**: without changing DAGON's source, add extensions that receive events, answer decisions and replace parts (ports).
-- **Ask an AI**: a new project comes with Claude Code instructions and skills, and `dagon ai link` connects an agent with your consent.
+- **Ask an AI**: a new project comes with Claude Code instructions and skills, and `dagon ai link` connects an agent with your consent. The API key stays in the OS credential store.
 
 Every step is also a `dagon` command.
 
@@ -97,7 +98,7 @@ flowchart LR
 4. When its self-check passes it confirms; otherwise a watchdog reset takes it back to the previous version.
 
 > [!WARNING]
-> What has been checked on hardware is in [Limitations](https://c-ardinal.github.io/DAGON-Boot/doc/en/explanation/limitations/). Power cuts and writing the F401 through its ROM have not been run on hardware. Signing keys are files on the PC; there is no hardware root of trust.
+> What has been checked on hardware is in [Limitations](https://c-ardinal.github.io/DAGON-Boot/doc/en/explanation/limitations/). Boot core updates are unproven on hardware: the last hardware run came before the write flow changed, and the current scenario set has not been run since. Power cuts and writing the F401 through its ROM have not been run on hardware either. Signing keys are files on the PC; there is no hardware root of trust.
 
 ## Dependencies and external data
 

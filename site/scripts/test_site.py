@@ -162,12 +162,15 @@ class MovedDocuments(unittest.TestCase):
         self.assertIsNone(self.MENTION.search("site/src/content/docs/reference/events.md"))
 
 
+# The scenarios that passed in the last run on hardware. A record of that run,
+# not of samples/hardware-test/hwt.toml: changed only after a new real run.
+LAST_HARDWARE_RUN = 16
+
+
 class Limitations(unittest.TestCase):
-    def test_the_hardware_scenario_count_is_the_hardware_tests(self):
-        hwt = tomllib.loads((ROOT / "samples" / "hardware-test" / "hwt.toml").read_text(encoding="utf-8"))
-        ran = [s for s in hwt["scenario"] if not any(step.get("do") == "skip" for step in s["steps"])]
-        for rel, words in (("en/explanation/limitations.md", f"{len(ran)} scenarios"),
-                           ("explanation/limitations.md", f"{len(ran)} のシナリオ")):
+    def test_the_hardware_scenario_count_is_the_last_real_run(self):
+        for rel, words in (("en/explanation/limitations.md", f"{LAST_HARDWARE_RUN} scenarios"),
+                           ("explanation/limitations.md", f"{LAST_HARDWARE_RUN} のシナリオ")):
             self.assertIn(words, (llms.DOCS / rel).read_text(encoding="utf-8"), rel)
 
 

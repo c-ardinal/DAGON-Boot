@@ -80,6 +80,10 @@ class Readmes(unittest.TestCase):
             self.assertEqual(text.count(next_heading), 1, path.name)
             self.assertLess(text[text.index(heading):].index(next_heading), text[text.index(heading):].index("\n## ", 3) + 2, path.name)
 
+    def test_doctor_runs_once_the_setup_is_drawn(self):
+        for path in (JA, EN):
+            self.assertNotIn("cd my-fleet\ndagon doctor", path.read_text(encoding="utf-8"), path.name)
+
     def test_the_figure_says_word_for_word_what_it_shows(self):
         self.assertIn("次の図は DAGON のソフトウェアの設計です。", JA.read_text(encoding="utf-8"))
         self.assertIn("The figure below is DAGON's software design.", EN.read_text(encoding="utf-8"))
@@ -101,7 +105,7 @@ class Readmes(unittest.TestCase):
     def test_no_dagon_release_number(self):
         # Which version to install is the user's choice.
         for path in (JA, EN):
-            self.assertEqual(re.findall(r"cli-v\d[\w.]*|--tag \S+|dagon-cli[ -]\d[\w.]*", path.read_text(encoding="utf-8")), [], path.name)
+            self.assertEqual(re.findall(r"cli-v\d[\w.]*|--tag (?!cli-v<version>)\S+|dagon-cli[ -]\d[\w.]*", path.read_text(encoding="utf-8")), [], path.name)
 
     def test_the_stated_versions_are_the_ones_the_workflows_build_with(self):
         rust = tomllib.loads((ROOT / "rust-toolchain.toml").read_text(encoding="utf-8"))["toolchain"]["channel"]

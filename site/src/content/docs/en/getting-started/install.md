@@ -64,7 +64,7 @@ From a clone, it is `cargo install --path crates/dagon-cli`.
 
 ## The tools for developing firmware
 
-Developing firmware needs [Rust](https://rustup.rs) and the [tools each MCU needs](/en/reference/tools/). Let `dagon` check for missing ones:
+Developing firmware needs [Rust](https://rustup.rs) and the [tools each MCU needs](/en/reference/tools/). Once the setup is drawn, before building, let `dagon` check for missing ones:
 
 ```sh
 dagon doctor           # what is there and what is missing

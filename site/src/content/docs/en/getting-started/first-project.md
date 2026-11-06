@@ -102,6 +102,8 @@ Write your application in `nodes/<id>/src/app.rs`. It has two things:
 
 ## 4. Build
 
+Once the topology is drawn, before building, `dagon doctor` checks the tools the MCUs in it need, and `dagon doctor --fix` installs what needs no administrator rights.
+
 ```sh
 dagon build            # or: dagon build seg
 ```

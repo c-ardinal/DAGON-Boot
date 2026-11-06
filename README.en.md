@@ -26,7 +26,7 @@ A product can give each of its microcontrollers the role that suits it best and 
 
 DAGON makes the distributed microcontroller designs that professionals and specialists use workable for a wide range of people, from those starting electronics with AI to individual developers who do not compromise on design.
 
-The first time only, you connect each microcontroller directly, one at a time, and write its factory image. After that, one connection is enough, and you do not need to connect them one at a time. If that port is outside the case, the case stays closed. Otherwise the case is opened only for that one connection.
+The first time only, you connect each microcontroller directly, one at a time, and write its factory image. After that, one connection is enough, and you do not need to connect them one at a time.
 Through one microcontroller connected to your PC, you write to the microcontrollers beyond it with a single operation. More microcontrollers take more time; the operation does not grow.
 
 Update images are all signed and written safely. A microcontroller starts a new version on trial and goes back to the previous version by itself if it does not work. If a write stops part-way, the running version stays.
@@ -97,7 +97,6 @@ dagon demo
 ```sh
 dagon new my-fleet
 cd my-fleet
-dagon doctor
 dagon serve
 ```
 
@@ -105,9 +104,9 @@ dagon serve
 
 Applications are written in [Rust](https://rustup.rs) only.
 
-`dagon doctor` checks the tools each microcontroller needs ([list](https://c-ardinal.github.io/DAGON-Boot/doc/en/reference/tools/)), and `dagon doctor --fix` installs what needs no administrator rights.
+`dagon serve` opens the browser, and you go on in DAGON Console.
 
-Open the address `dagon serve` prints to go on in DAGON Console.
+Once the setup is drawn, before building, `dagon doctor` checks the tools the microcontrollers in it need ([list](https://c-ardinal.github.io/DAGON-Boot/doc/en/reference/tools/)), and `dagon doctor --fix` installs what needs no administrator rights.
 
 From building to the first write, see [From a new project to a new version](https://c-ardinal.github.io/DAGON-Boot/doc/en/getting-started/first-project/).
 
@@ -148,15 +147,15 @@ The figure below is DAGON's software design.
 | To do this | Touch | Steps |
 | --- | --- | --- |
 | Write your app | `nodes/<id>/src/app.rs` | [From a new project to a new version](https://c-ardinal.github.io/DAGON-Boot/doc/en/getting-started/first-project/) |
-| Add an extension | `targets/boot-extension-template/`, `crates/dagon-events/src/ports.rs` | [Extension manifest](https://c-ardinal.github.io/DAGON-Boot/doc/en/reference/extension-manifest/) |
-| Add a board | `targets/boards/*/dagon-board.toml` | [Your own board](https://c-ardinal.github.io/DAGON-Boot/doc/en/how-to/own-board/) |
-| Add an agent | `crates/dagon-cli/agents/`, `~/.dagon/agents/*.toml` | [Agent definition format](https://c-ardinal.github.io/DAGON-Boot/doc/en/reference/agent-definition/) |
+| Add an extension | `extensions/<id>/dagon-extension.toml`, `[extensions]` in `dagon.toml` | [Extension manifest](https://c-ardinal.github.io/DAGON-Boot/doc/en/reference/extension-manifest/) |
+| Add an agent | `~/.dagon/agents/*.toml` | [Agent definition format](https://c-ardinal.github.io/DAGON-Boot/doc/en/reference/agent-definition/) |
 
 ### When you add to DAGON itself
 
 | To do this | Touch | Steps |
 | --- | --- | --- |
-| Add an MCU | `targets/mcu/*/dagon-mcu.toml`, `crates/dagon-port/src/lib.rs` | [Adding an MCU or a link](https://c-ardinal.github.io/DAGON-Boot/doc/en/how-to/new-mcu-or-link/) |
+| Add a board | `targets/boards/*/dagon-board.toml` | [Your own board](https://c-ardinal.github.io/DAGON-Boot/doc/en/how-to/own-board/) |
+| Add an MCU | `targets/mcu/<id>/` | [Adding an MCU or a link](https://c-ardinal.github.io/DAGON-Boot/doc/en/how-to/new-mcu-or-link/) |
 | Add a link or transport | `crates/dagon-format/src/link.rs`, `targets/mcu/*/src/links.rs`, `crates/dagon-host/src/lib.rs` | [Adding an MCU or a link](https://c-ardinal.github.io/DAGON-Boot/doc/en/how-to/new-mcu-or-link/) |
 
 ## Build it yourself
@@ -171,7 +170,7 @@ It needs two things:
 Build and install it:
 
 ```sh
-cargo install --git https://github.com/c-ardinal/DAGON-Boot dagon-cli
+cargo install --git https://github.com/c-ardinal/DAGON-Boot --tag cli-v<version> dagon-cli
 ```
 
 From a clone, it is `cargo install --path crates/dagon-cli`.

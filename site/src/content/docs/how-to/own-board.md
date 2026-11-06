@@ -1,16 +1,12 @@
 ---
-title: "Your own board (chosen by MCU)"
-description: "Use a board that is not in the list by choosing its MCU."
+title: "自分のボード（マイコンで選ぶ）"
+description: "一覧に無いボードを、マイコンで選んで使います。"
 ---
 
-**Choose by board or by MCU.** A board from the table brings its pins,
-default link and extras; you only pick it. Any other board with one of
-these MCUs can be chosen by its MCU: you give its flash size and the pins
-wired to the hub (see [Your own board](/reference/boards/)).
+**ボードでもマイコンでも選べます。** 対応表のボードは、ピン・既定のリンク・付属の部品を持っているので、選ぶだけです。同じマイコンを載せたほかのボードはマイコンで選び、フラッシュ容量と親機につないだピンを入れます（[自分のボード（マイコンで選ぶ）](/reference/boards/)を参照）。
 
 
-Leave out `board:` for the node in `topology.yaml` and give its facts in
-`dagon.toml`:
+`topology.yaml` のそのノードから `board:` を外し、ボードの値を `dagon.toml` に書きます:
 
 ```yaml
   - id: seg
@@ -26,6 +22,4 @@ Leave out `board:` for the node in `topology.yaml` and give its facts in
 flash_bytes = 524288
 ```
 
-For an I2C child, the link names the pins on the node (`node_pins`). The
-check and `dagon gen` tell you what is still missing; the
-`add-a-board-by-mcu` skill walks through it with you.
+I2C の子機では、リンクにノード側のピン（`node_pins`）を書きます。足りないものは検査と `dagon gen` が知らせます。`add-a-board-by-mcu` スキルを使えば Claude と一緒に進められます。

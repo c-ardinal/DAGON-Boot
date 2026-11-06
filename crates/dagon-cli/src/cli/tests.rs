@@ -648,7 +648,7 @@ fn documents_name_only_commands_the_cli_has() {
     let mut files = vec![
         root.join("CHANGELOG.md"),
         root.join("README.md"),
-        root.join("README.ja.md"),
+        root.join("README.en.md"),
     ];
     let mut dirs = vec![root.join("site/src/content/docs"), root.join("samples")];
     while let Some(d) = dirs.pop() {

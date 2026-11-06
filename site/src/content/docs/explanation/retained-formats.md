@@ -3,8 +3,12 @@ title: "Retained and persistent formats"
 description: "The boot record, the lockup fuse, the MCU identity and the compiled topology's layout."
 ---
 
+:::note
+このページは英語だけです。
+:::
+
 This document is the normative specification of the formats that
-[lifecycle-events.md section 5.5](/explanation/lifecycle-events/#55-boot-record-mcu-identity-and-compiled-topology-requirements-and-the-executable-model)
+[lifecycle-events.md section 5.5](/en/explanation/lifecycle-events/#55-boot-record-mcu-identity-and-compiled-topology-requirements-and-the-executable-model)
 leaves to an executable model: the boot record, the lockup fuse, the MCU
 identity and the compiled topology's node layout and replacement. Every
 shape here is the one `crates/dagon-retained-model` proves; a change to a

@@ -1,20 +1,11 @@
 ---
-title: "Limitations"
-description: "What DAGON does not do, and where its guarantees stop."
+title: "制限事項"
+description: "DAGON がしないこと、保証の届く範囲です。"
 ---
 
-- The ESP32-S3 uses the official ESP-IDF 2nd stage. If that 2nd stage itself
-  is broken, DAGON cannot rescue the board; it has to be reflashed over USB
-  with the vendor tools.
-- Signing keys are files on the PC and the public key is built into the
-  firmware. There is no hardware root of trust (no secure boot fuses, no key
-  storage in hardware).
-- Power cuts have not been run on hardware. In the simulator, `dagon sim run`
-  has one power-cut scenario (a cut during a transfer to the F401), and DAGON's
-  tests cut the power at every flash operation of the hub's update.
-- The USB VID:PID `c0de:cafe` is a test ID, not an assigned one.
-- On hardware, 16 scenarios pass on all three nodes (hub RP2040, F401,
-  ESP32-S3); `samples/hardware-test` runs them. The F401's ROM recovery has not
-  been run on hardware.
-- `dagon conform` drives the synchronous test sequence and is CLI only; the
-  browser does not run conformance tests.
+- ESP32-S3 は公式の ESP-IDF の 2nd stage を使います。その 2nd stage 自体が壊れた場合、DAGON では救えません。ベンダーのツールで USB から書き直す必要があります。
+- 署名の鍵は PC 上のファイルで、公開鍵はファームウェアに組み込まれます。ハードウェアの信頼の起点（セキュアブートのヒューズやハードウェアの鍵保管）はありません。
+- 実機では電断を試していません。シミュレータでは、`dagon sim run` に電断のシナリオが 1 つあり（F401 への転送中の電断）、DAGON のテストは親機への書き込みのすべてのフラッシュ操作で電断を起こします。
+- USB の VID:PID `c0de:cafe` は試験用の ID で、割り当てを受けたものではありません。
+- 最後に実機で実行したときは、16 のシナリオが 3 つのノードすべて（親機の RP2040、F401、ESP32-S3）で成功しました。これは書き込みの流れを変える前の結果で、いまのシナリオ一式は、その後実行していません。実行するのは `samples/hardware-test` です。ブートコアの入れ替えのシナリオ（`core-seg`、`core-hub`）はありますが、実機ではまだ実行していません。F401 の ROM 復旧は実機で実行していません。
+- `dagon conform` は同期の試験手順を動かすもので CLI 専用です。ブラウザでは適合試験を実行しません。

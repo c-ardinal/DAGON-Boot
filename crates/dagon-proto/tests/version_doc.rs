@@ -1,4 +1,4 @@
-//! The VERSION id table of site/src/content/docs/explanation/lifecycle-events.md (5.4) is
+//! The VERSION id table of site/src/content/docs/en/explanation/lifecycle-events.md (5.4) is
 //! `version_id::TABLE`, row for row, and every id the reply encodes is in
 //! it: an id added to one side only fails here.
 
@@ -8,7 +8,7 @@ use dagon_proto::payload::{version_id, VersionResp, VersionSlots};
 fn doc_rows() -> Vec<String> {
     let path = concat!(
         env!("CARGO_MANIFEST_DIR"),
-        "/../../site/src/content/docs/explanation/lifecycle-events.md"
+        "/../../site/src/content/docs/en/explanation/lifecycle-events.md"
     );
     let doc = std::fs::read_to_string(path).unwrap_or_else(|e| panic!("{path}: {e}"));
     let section = doc
@@ -37,7 +37,7 @@ fn the_doc_table_is_the_code_table() {
     let (doc, code) = (doc_rows(), code_rows());
     assert!(
         doc == code,
-        "site/src/content/docs/explanation/lifecycle-events.md 5.4 must hold exactly these rows:\n{}",
+        "site/src/content/docs/en/explanation/lifecycle-events.md 5.4 must hold exactly these rows:\n{}",
         code.join("\n")
     );
 }

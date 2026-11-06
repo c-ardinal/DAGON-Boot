@@ -6,7 +6,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::PathBuf;
 
-use dagon_catalog::{conflicts, design_ports_table, events_md, machines, ports_md, REGISTRY};
+use dagon_catalog::{conflicts, design_ports_table, events_md, machines, ports_md, Lang, REGISTRY};
 use dagon_events::{state_machine, Layer, PORTS};
 
 const BLESS: &str = "`DAGON_BLESS=1 cargo test -p dagon-catalog --test docs`";
@@ -57,19 +57,30 @@ fn rust_files(dir: &std::path::Path) -> Vec<PathBuf> {
 fn events_md_is_generated() {
     check(
         "site/src/content/docs/reference/events.md",
-        &events_md(&machines()),
+        &events_md(&machines(), Lang::Ja),
+    );
+    check(
+        "site/src/content/docs/en/reference/events.md",
+        &events_md(&machines(), Lang::En),
     );
 }
 
 #[test]
 fn ports_md_is_generated() {
-    check("site/src/content/docs/reference/ports.md", &ports_md(PORTS));
+    check(
+        "site/src/content/docs/reference/ports.md",
+        &ports_md(PORTS, Lang::Ja),
+    );
+    check(
+        "site/src/content/docs/en/reference/ports.md",
+        &ports_md(PORTS, Lang::En),
+    );
 }
 
 /// Section 2.1 of the design holds the port table generated from PORTS.
 #[test]
 fn the_design_port_table_is_generated() {
-    const DESIGN: &str = "site/src/content/docs/explanation/lifecycle-events.md";
+    const DESIGN: &str = "site/src/content/docs/en/explanation/lifecycle-events.md";
     const BEGIN: &str = "<!-- generated from dagon_events::PORTS -->\n";
     const END: &str = "<!-- end of generated table -->\n";
     let text = read(DESIGN);
@@ -271,7 +282,11 @@ fn conflicts_across_machines_of_a_layer_are_named() {
 
 #[test]
 fn a_machine_renders_every_transition() {
-    let md = events_md(&[one::CATALOG]);
+    let ja = events_md(&[one::CATALOG], Lang::Ja);
+    assert!(ja.contains(
+        "## レイヤー `boot`\n\n### 状態機械 `one`\n\nFirst.\n\n状態: `A` (最初の状態), `B`。"
+    ));
+    let md = events_md(&[one::CATALOG], Lang::En);
     assert!(md
         .contains("## Layer `boot`\n\n### Machine `one`\n\nFirst.\n\nStates: `A` (initial), `B`."));
     assert!(md.contains(

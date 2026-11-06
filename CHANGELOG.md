@@ -36,4 +36,4 @@ protocol and API starts at format 1; `dagon --version` prints the numbers this
   Agents are definition files, and API keys stay in the OS credential store.
 
 Known limits are in
-[Limitations](site/src/content/docs/explanation/limitations.md).
+[Limitations](site/src/content/docs/en/explanation/limitations.md).

@@ -1,43 +1,27 @@
 ---
-title: "Licenses"
-description: "DAGON's license, its dependencies' licenses and the components it uses unmodified."
+title: "ライセンス"
+description: "DAGON のライセンス、依存ライブラリのライセンス、改変せずに使うコンポーネントです。"
 ---
 
-Everything written for DAGON Boot in this repository is licensed under
-either of the [MIT license](https://github.com/c-ardinal/DAGON-Boot/blob/main/LICENSE-MIT) or the
-[Apache License, Version 2.0](https://github.com/c-ardinal/DAGON-Boot/blob/main/LICENSE-APACHE), at your option.
+このリポジトリで DAGON Boot のために書いたものは、[MIT ライセンス](https://github.com/c-ardinal/DAGON-Boot/blob/main/LICENSE-MIT) と [Apache License, Version 2.0](https://github.com/c-ardinal/DAGON-Boot/blob/main/LICENSE-APACHE) のどちらかを選んで利用できます。
 
 
-## Dependencies and their licenses
+## 依存ライブラリとそのライセンス
 
 
-Generated from every `Cargo.lock` in the repository and
-`web/package-lock.json` by `python scripts/licences.py`.
+リポジトリ内のすべての `Cargo.lock` と `web/package-lock.json` から `python scripts/licences.py` で生成しています（表は英語のままです）。
 
-Points to note:
+注意点:
 
-- `serialport` (MPL-2.0) is used unmodified by the `dagon` CLI. If you
-  distribute a `dagon` binary, MPL-2.0 requires that the source of
-  `serialport` be available: it is the published crate at
-  <https://crates.io/crates/serialport> (repository
-  <https://github.com/serialport/serialport-rs>).
-- `unescaper` is offered under MIT OR GPL-3.0-only; it is used under MIT.
-- `ring` is Apache-2.0 AND ISC (both apply).
-- `webpki-roots` is CDLA-Permissive-2.0 (it carries the Mozilla root
-  certificate data, external data used by the TLS client of
-  `dagon ai topology`).
-- `subtle`, `rp-pac`, `rp2040-boot2` and `source-map-js` are BSD-3-Clause.
-- `lightningcss` (MPL-2.0) is a build-time dependency of the web tooling
-  only; nothing from it ships in DAGON Console.
-- DAGON Console ships the Svelte client runtime and the two packages it
-  imports, `clsx` and `esm-env` (all MIT); every other npm package is a
-  build or test tool (column "Ships in").
-- Fonts in `web/public/fonts/` are under the SIL Open Font License 1.1:
-  Doto, DotGothic16, Zen Kaku Gothic New and JetBrains Mono (licence texts
-  next to the files; see `web/README.md`).
-- The hub display's Japanese state words use bitmaps rasterised from Noto
-  Sans JP (SIL Open Font License 1.1; licence in
-  `targets/boards/waveshare-rp2040-touch-lcd-1.28/fonts/`).
+- `serialport`（MPL-2.0）は `dagon` CLI が改変せずに使っています。`dagon` の実行ファイルを配布する場合、MPL-2.0 により `serialport` のソースを入手できるようにする必要があります。公開されている crate <https://crates.io/crates/serialport>（リポジトリ <https://github.com/serialport/serialport-rs>）がそのソースです。
+- `unescaper` は MIT OR GPL-3.0-only で提供されており、MIT で使っています。
+- `ring` は Apache-2.0 AND ISC（両方が適用されます）。
+- `webpki-roots` は CDLA-Permissive-2.0 です（`dagon ai topology` の TLS クライアントが使う外部データ、Mozilla のルート証明書のデータを含みます）。
+- `subtle`、`rp-pac`、`rp2040-boot2`、`source-map-js` は BSD-3-Clause です。
+- `lightningcss`（MPL-2.0）は web のビルドツールのビルド時の依存だけで、DAGON Console には何も含まれません。
+- DAGON Console に含まれる npm のコードは、Svelte のクライアント用ランタイムと、それが読み込む `clsx` と `esm-env`（いずれも MIT）だけです。他の npm パッケージはビルドとテストの道具です（表の "Ships in" 列）。
+- `web/public/fonts/` の書体は SIL Open Font License 1.1 です: Doto、DotGothic16、Zen Kaku Gothic New、JetBrains Mono（ライセンス文はファイルの隣にあります。`web/README.md` を参照）。
+- 親機の表示の日本語の状態語は、Noto Sans JP（SIL Open Font License 1.1）から作ったビットマップです（ライセンス文は `targets/boards/waveshare-rp2040-touch-lcd-1.28/fonts/`）。
 
 Rust crates: 316 packages, 350 name/version pairs. "Used by": `crates/` is the host workspace, `samples/...` the sample apps, other names are firmware packages under `targets/`.
 
@@ -452,41 +436,24 @@ npm packages (`web/package-lock.json`): 86. Only those marked "page" ship in the
 | zimmerframe | 1.1.5 | MIT | build/test |
 
 
-## Boundary of self-authored code
+## 自作コードの範囲
 
 
-- Written for DAGON Boot: everything under `crates/`, `targets/` (except the
-  vendor parts below), `web/src/`, `web/scripts/`, `plugin/`, `topology/` and
-  `scripts/`.
-- Used as dependencies, unmodified, through Cargo and npm: the crates and
-  packages listed above (for example embassy, esp-hal, ed25519-compact, sha2,
-  serde, Svelte, Vite).
-- Unmodified vendor components: see below.
+- DAGON Boot のために書いたもの: `crates/`、`targets/`（下の無改変のベンダーコンポーネントを除く）、`web/src/`、`site/`、`samples/`、`web/scripts/`、`plugin/`、`topology/`、`scripts/` のすべて。
+- Cargo と npm を通して改変せずに使う依存: 上の表の crate とパッケージ（例: embassy、esp-hal、ed25519-compact、sha2、serde、Svelte、Vite）。
+- 無改変のベンダーコンポーネント: 下を参照。
 
 
-## Components not used (no public bootloader implementation is used)
+## 使用していないコンポーネント (公開されているブートローダ実装は使用していません)
 
 
-No code or logic from public bootloader implementations (for example
-embassy-boot, MCUboot, wolfBoot) is used. The boot decision, the image and
-release formats, the state log, the update protocol and the receivers are
-written for this project.
+公開されているブートローダ実装（例: embassy-boot、MCUboot、wolfBoot）のコードもロジックも使っていません。起動の判断、イメージとリリースの形式、状態ログ、更新のプロトコル、受け手はこのプロジェクトのために書いたものです。
 
 
-## Unmodified vendor components
+## 無改変のベンダーコンポーネント
 
 
-- ESP32-S3 2nd stage boot loader: the official ESP-IDF v6.1 bootloader, built
-  from the official source with app rollback enabled
-  (`targets/esp32s3-2ndstage`: only the project files and the sdkconfig
-  options in `vendor/sdkconfig.defaults` are ours). Bundled unmodified as
-  `targets/mcu/esp32s3/vendor/bootloader.bin` with its provenance and licence
-  (`vendor/PROVENANCE.md`, `vendor/LICENSE-ESP-IDF`).
-- `esp-bootloader-esp-idf` (crate, MIT OR Apache-2.0): used unmodified by
-  the ESP32-S3 port to read and write otadata, which is how a slot is
-  selected for that 2nd stage.
-- RP2040 boot2: the generic 03h second-stage loader from the `rp2040-boot2`
-  crate (BSD-3-Clause), placed unmodified at the start of flash by
-  `targets/mcu/rp2040/stage0`.
-- The STM32F401 system memory boot loader in ROM (used for recovery through
-  its documented I2C protocol).
+- ESP32-S3 の 2nd stage ブートローダ: 公式の ESP-IDF v6.1 のブートローダを、アプリのロールバックを有効にして公式のソースからビルドしたもの（`targets/esp32s3-2ndstage` で自作したのはプロジェクトのファイルと `vendor/sdkconfig.defaults` の sdkconfig オプションだけ）。無改変のまま `targets/mcu/esp32s3/vendor/bootloader.bin` として、出どころとライセンスを添えて同梱している（`vendor/PROVENANCE.md`、`vendor/LICENSE-ESP-IDF`）。
+- `esp-bootloader-esp-idf`（crate、MIT OR Apache-2.0）: ESP32-S3 のポートが otadata の読み書きに改変せずに使っています。この 2nd stage でのスロットの選択は otadata で行います。
+- RP2040 の boot2: `rp2040-boot2` crate（BSD-3-Clause）の generic 03h の second stage を、`targets/mcu/rp2040/stage0` がフラッシュの先頭に改変せずに置いています。
+- STM32F401 の ROM にあるシステムメモリのブートローダ（文書化された I2C の手順で復旧に使います）。

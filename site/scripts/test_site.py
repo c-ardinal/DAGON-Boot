@@ -25,20 +25,28 @@ class Generated(unittest.TestCase):
             gen.OUT = pathlib.Path(d)
             # The hand-written pages with generated regions come along.
             for name in {n for n, _, _ in gen.REGIONS}:
+                (gen.OUT / name).parent.mkdir(parents=True, exist_ok=True)
                 (gen.OUT / name).write_text((saved / name).read_text(encoding="utf-8"), encoding="utf-8")
             try:
                 self.assertEqual(gen.main([]), 0)
-                page = gen.OUT / "boards.md"
+                page = gen.OUT / "reference" / "boards.md"
                 page.write_text(page.read_text(encoding="utf-8").replace("rp2040", "rp2041"), encoding="utf-8")
                 self.assertEqual(gen.main(["--check"]), 1)
                 page.unlink()
                 self.assertEqual(gen.main(["--check"]), 1)
                 self.assertEqual(gen.main([]), 0)
-                hand = gen.OUT / "extension-manifest.md"
+                hand = gen.OUT / "reference" / "extension-manifest.md"
                 hand.write_text(hand.read_text(encoding="utf-8").replace("| `trusted` |", "| `trust` |"), encoding="utf-8")
                 self.assertEqual(gen.main(["--check"]), 1, "a generated region edited by hand")
             finally:
                 gen.OUT = saved
+
+    def test_each_language_has_its_own_reference_page(self):
+        for name in gen.PAGES:
+            ja = (gen.OUT / "reference" / name).read_text(encoding="utf-8")
+            en = (gen.OUT / "en" / "reference" / name).read_text(encoding="utf-8")
+            self.assertIn("から生成しています", ja, name)
+            self.assertIn("Generated from", en, name)
 
     def test_every_route_of_the_router_is_listed(self):
         router = (gen.SERVE / "api.rs").read_text(encoding="utf-8").split("pub fn handle(", 1)[1].split("\n    };", 1)[0]
@@ -91,10 +99,9 @@ class Llms(unittest.TestCase):
         text = llms.render("https://example.invalid/site")
         self.assertIn("https://example.invalid/site/demo/", text)
         for p in llms.DOCS.rglob("*.md*"):
-            if p.relative_to(llms.DOCS).parts[0] == "ja":
-                continue
-            self.assertIn(llms.frontmatter(p)[0], text, p)
-        self.assertNotIn("/doc/ja/", text)
+            self.assertIn(f"[{llms.frontmatter(p)[0]}]", text, p)
+        self.assertIn("https://example.invalid/site/doc/getting-started/install/", text)
+        self.assertIn("https://example.invalid/site/doc/en/getting-started/install/", text)
 
 
 class Examples(unittest.TestCase):
@@ -155,21 +162,25 @@ class MovedDocuments(unittest.TestCase):
         self.assertIsNone(self.MENTION.search("site/src/content/docs/reference/events.md"))
 
 
+# The scenarios that passed in the last run on hardware. A record of that run,
+# not of samples/hardware-test/hwt.toml: changed only after a new real run.
+LAST_HARDWARE_RUN = 16
+
+
 class Limitations(unittest.TestCase):
-    def test_the_hardware_scenario_count_is_the_hardware_tests(self):
-        hwt = tomllib.loads((ROOT / "samples" / "hardware-test" / "hwt.toml").read_text(encoding="utf-8"))
-        ran = [s for s in hwt["scenario"] if not any(step.get("do") == "skip" for step in s["steps"])]
-        for rel, words in (("explanation/limitations.md", f"{len(ran)} scenarios"),
-                           ("ja/explanation/limitations.md", f"{len(ran)} のシナリオ")):
+    def test_the_hardware_scenario_count_is_the_last_real_run(self):
+        for rel, words in (("en/explanation/limitations.md", f"{LAST_HARDWARE_RUN} scenarios"),
+                           ("explanation/limitations.md", f"{LAST_HARDWARE_RUN} のシナリオ")):
             self.assertIn(words, (llms.DOCS / rel).read_text(encoding="utf-8"), rel)
 
 
 class Wording(unittest.TestCase):
     # Pages where 更新 does not mean writing to a node: the word for that is 書き込む.
-    KOUSHIN_ELSEWHERE = {"site/src/content/docs/ja/reference/licenses.md": "the licence text and third-party notes"}
+    KOUSHIN_ELSEWHERE = {"site/src/content/docs/reference/licenses.md": "the licence text and third-party notes"}
 
     def test_writing_to_a_node_is_not_called_koushin_in_japanese(self):
-        pages = [*llms.DOCS.joinpath("ja").rglob("*.md*"), ROOT / "README.ja.md"]
+        pages = [p for p in llms.DOCS.rglob("*.md*") if p.relative_to(llms.DOCS).parts[0] != "en"]
+        pages.append(ROOT / "README.md")
         found = []
         for p in pages:
             rel = p.relative_to(ROOT).as_posix()
@@ -178,11 +189,21 @@ class Wording(unittest.TestCase):
             found += [f"{rel}:{n}" for n, line in enumerate(p.read_text(encoding="utf-8").splitlines(), 1) if "更新" in line]
         self.assertEqual(found, [])
 
-    def test_a_japanese_page_in_english_says_only_that(self):
-        # Starlight's own notice says a translation is missing ("まだ"); the site replaces it.
-        notice = (llms.DOCS.parent / "i18n" / "ja.json").read_text(encoding="utf-8")
-        self.assertIn("このページは英語です。", notice)
-        self.assertNotIn("まだ", notice)
+    # Written only in English, at the root so that both languages reach them: each says so.
+    ENGLISH_ONLY = ["explanation/retained-formats.md", "explanation/versioning.md", "reference/agent-api.md",
+                    "reference/definitions.md", "reference/extension-manifest.md"]
+
+    def test_a_page_only_in_english_says_so_and_only_those_lack_an_english_folder_copy(self):
+        for rel in self.ENGLISH_ONLY:
+            self.assertIn("このページは英語だけです。", (llms.DOCS / rel).read_text(encoding="utf-8"), rel)
+        root = {p.relative_to(llms.DOCS).as_posix() for p in llms.DOCS.rglob("*.md*") if p.relative_to(llms.DOCS).parts[0] != "en"}
+        en = {p.relative_to(llms.DOCS / "en").as_posix() for p in (llms.DOCS / "en").rglob("*.md*")}
+        self.assertEqual(sorted(root - en), sorted(self.ENGLISH_ONLY))
+        self.assertEqual(en - root, set())
+
+    def test_the_english_fallback_notice_does_not_promise_a_translation(self):
+        notice = (llms.DOCS.parent / "i18n" / "en.json").read_text(encoding="utf-8")
+        self.assertNotIn("yet", notice)
 
 
 if __name__ == "__main__":

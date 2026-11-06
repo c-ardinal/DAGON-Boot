@@ -134,9 +134,88 @@ fn notes(e: &Entry) -> String {
     n.join(", ")
 }
 
-/// The site's Events page (`site/src/content/docs/reference/events.md`).
-pub fn events_md(machines: &[Catalog]) -> String {
+/// The language of a generated page. Its headings and fixed text follow it;
+/// what the catalogs themselves say (doc comments, notes) stays in English.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Lang {
+    /// The site's root (`site/src/content/docs/reference/`).
+    Ja,
+    /// `site/src/content/docs/en/reference/`.
+    En,
+}
+
+/// The site's Events page in `lang`.
+pub fn events_md(machines: &[Catalog], lang: Lang) -> String {
     let mut s = String::new();
+    match lang {
+        Lang::Ja => events_intro_ja(&mut s),
+        Lang::En => events_intro_en(&mut s),
+    }
+    for d in DECISIONS {
+        let _ = writeln!(
+            s,
+            "| `{}` | {} | {} | {} | {} | {} | {} |",
+            d.id,
+            d.layer.name(),
+            cell(d.answers),
+            cell(d.answered_by),
+            cell(d.bound),
+            cell(d.default),
+            cell(d.never)
+        );
+    }
+    for layer in Layer::ALL {
+        let mine: Vec<_> = machines.iter().filter(|m| m.layer == layer).collect();
+        if mine.is_empty() {
+            continue;
+        }
+        let _ = match lang {
+            Lang::Ja => write!(s, "\n## レイヤー `{}`\n", layer.name()),
+            Lang::En => write!(s, "\n## Layer `{}`\n", layer.name()),
+        };
+        for m in mine {
+            machine_md(&mut s, m, lang);
+        }
+    }
+    s
+}
+
+fn events_intro_ja(s: &mut String) {
+    s.push_str(
+        "---\ntitle: イベント\ndescription: DAGON が出すすべてのイベントです。\neditUrl: false\n---\n\n\
+         :::note\n状態機械のカタログから生成しています。直接編集せず、\n\
+         `DAGON_BLESS=1 cargo test -p dagon-catalog --test docs` でもう一度生成してください。\n\
+         判断点の表の中身と、状態機械とイベントの説明は、元のソースのままで英語です。\n:::\n\n\
+         DAGON の状態の変化は、どれも状態機械の遷移で、遷移はどれもイベントを 1 つ出します。\n\
+         このページは状態機械の宣言から作っているので、すべてのイベントが載っています。\n\n",
+    );
+    let _ = write!(
+        s,
+        "イベントの形式: {EVENT_FORMAT}（`dagon_events::EVENT_FORMAT`）。種類やペイロードのフィールドを足しても\n\
+         番号は変わりません。名前を変える、消す、意味を変えるときは番号が変わります。読む側は、\n\
+         知らない種類とフィールドを読み飛ばし、読めない形式の番号は受け付けません。\n\n"
+    );
+    s.push_str(
+        "## 表の見方\n\n\
+         - **種類**: `layer.kind`。ペイロードの型名を snake case にしたものです。\n\
+         - **コード**: そのレイヤーの中での種類の番号です（`EventRecord.kind`）。\n\
+         - **遷移**: イベントを出すメソッドと、移る前後の状態です（`*` はどの状態でも）。\n\
+         - **ペイロード**: フィールドと、記録の中でのバイト数です（`EventRecord.payload`、順に並び、\n\
+         \x20 合わせて 16 バイトまで）。\n\
+         - **受け取り**: *live* は同じイメージの拡張が起きたときに、*replay* は起動時にアプリのエージェントが\n\
+         \x20 `replayed: true` を付けて出し直したものを、*host* は CLI、serve のイベント、`--events`、\n\
+         \x20 アクションが受け取ります。\n\
+         - **備考**: *action* はブートのアクションプログラムを動かせます。*retired* はもう出さず、\n\
+         \x20 次のイベントの形式まで残しています。\n\n\
+         ## 判断点\n\n\
+         ここに無いものは通知です。答えは、チェーンの順（公開元、ボードパッケージ、ライブラリ、利用者）で\n\
+         最初のものが使われます。どの拡張も答えなければ、既定の値を使います。\n\n\
+         | 判断 | レイヤー | 問い | 答える側 | 時間の上限 | 既定 | してはいけないこと |\n\
+         |---|---|---|---|---|---|---|\n",
+    );
+}
+
+fn events_intro_en(s: &mut String) {
     s.push_str(
         "---\ntitle: Events\ndescription: Every event DAGON emits, from the state machines' catalogs.\neditUrl: false\n---\n\n\
          :::note\nGenerated from the state machines' catalogs; do not edit. Regenerate with\n\
@@ -172,34 +251,24 @@ pub fn events_md(machines: &[Catalog]) -> String {
          | Decision | Layer | Question | Answered by | Bound | Default | Never |\n\
          |---|---|---|---|---|---|---|\n",
     );
-    for d in DECISIONS {
-        let _ = writeln!(
-            s,
-            "| `{}` | {} | {} | {} | {} | {} | {} |",
-            d.id,
-            d.layer.name(),
-            cell(d.answers),
-            cell(d.answered_by),
-            cell(d.bound),
-            cell(d.default),
-            cell(d.never)
-        );
-    }
-    for layer in Layer::ALL {
-        let mine: Vec<_> = machines.iter().filter(|m| m.layer == layer).collect();
-        if mine.is_empty() {
-            continue;
-        }
-        let _ = write!(s, "\n## Layer `{}`\n", layer.name());
-        for m in mine {
-            machine_md(&mut s, m);
-        }
-    }
-    s
 }
 
-fn machine_md(s: &mut String, m: &Catalog) {
-    let _ = write!(s, "\n### Machine `{}`\n\n", m.machine);
+fn machine_md(s: &mut String, m: &Catalog, lang: Lang) {
+    let (machine, initial, states_word, head) = match lang {
+        Lang::Ja => (
+            "状態機械",
+            "最初の状態",
+            "状態",
+            "| 種類 | コード | 遷移 | ペイロード | 受け取り | 備考 | 説明 |",
+        ),
+        Lang::En => (
+            "Machine",
+            "initial",
+            "States",
+            "| Kind | Code | Transition | Payload | Observed | Notes | Description |",
+        ),
+    };
+    let _ = write!(s, "\n### {machine} `{}`\n\n", m.machine);
     if !m.doc.trim().is_empty() {
         let _ = write!(s, "{}\n\n", cell(m.doc));
     }
@@ -208,17 +277,17 @@ fn machine_md(s: &mut String, m: &Catalog) {
         .iter()
         .map(|st| {
             if *st == m.initial {
-                format!("`{st}` (initial)")
+                format!("`{st}` ({initial})")
             } else {
                 format!("`{st}`")
             }
         })
         .collect();
-    let _ = write!(s, "States: {}.\n\n", states.join(", "));
-    s.push_str(
-        "| Kind | Code | Transition | Payload | Observed | Notes | Description |\n\
-         |---|---|---|---|---|---|---|\n",
-    );
+    let _ = match lang {
+        Lang::Ja => write!(s, "{states_word}: {}。\n\n", states.join(", ")),
+        Lang::En => write!(s, "{states_word}: {}.\n\n", states.join(", ")),
+    };
+    let _ = writeln!(s, "{head}\n|---|---|---|---|---|---|---|");
     for e in m.entries {
         let _ = writeln!(
             s,
@@ -306,9 +375,63 @@ pub fn design_ports_table(ports: &[Port]) -> String {
     s
 }
 
-/// The site's Ports page (`site/src/content/docs/reference/ports.md`).
-pub fn ports_md(ports: &[Port]) -> String {
-    let mut s = String::from(
+const PORTS_INTRO_JA: &str =
+    "---\ntitle: ポート\ndescription: DAGON の拡張が使うすべてのポートです。\neditUrl: false\n---\n\n\
+     :::note\n`dagon_events::PORTS` から生成しています。直接編集せず、\n\
+     `DAGON_BLESS=1 cargo test -p dagon-catalog --test docs` でもう一度生成してください。\n\
+     表の中の説明は、元のソースのままで英語です。\n:::\n\n\
+     ポートは、プラグインが置き換えられる DAGON の部品です。置き換えは、一覧のレイヤーで、リンクされた\n\
+     イメージの中だけに効きます。既定は DAGON 自身の実装です。プラグインのマニフェストは、そのポートがある\n\
+     レイヤーでだけポートを提供でき、1 つのイメージで 1 つのポートを提供できるのは 1 つだけです。\n\n\
+     信頼の区分:\n\n\
+     - *untrusted*: どのプラグインでも使えます。レイヤーのサンドボックスの中で、マニフェストで宣言した能力で\n\
+     \x20 動き、DAGON は一覧のサービスを通してだけ呼びます。\n\
+     - *untrusted, additive*: untrusted と同じで、足すだけです。DAGON 自身の実装は残ります。\n\
+     - *trusted only*: 宣言して署名した、信頼する拡張だけが使えます。特権で動き、サービスは呼びません。\n\n\
+     | ポート | 役割 | レイヤー | 既定 | 信頼 | サービス |\n\
+     |---|---|---|---|---|---|\n";
+
+const PORTS_NOT_JA: &str = "\n## ポートではない部品\n\n\
+     信頼する拡張でも、次のものは置き換えられません。\n\n\
+     | 部品 | 内容 | レイヤー | ポートではない理由 |\n\
+     |---|---|---|---|\n";
+
+/// The site's Ports page in `lang`.
+pub fn ports_md(ports: &[Port], lang: Lang) -> String {
+    let (intro, not_ports) = match lang {
+        Lang::Ja => (PORTS_INTRO_JA, PORTS_NOT_JA),
+        Lang::En => (PORTS_INTRO_EN, PORTS_NOT_EN),
+    };
+    let mut s = String::from(intro);
+    for p in ports.iter().filter(|p| p.trust.is_port()) {
+        let _ = writeln!(
+            s,
+            "| `{}` | {} | {} | {} | {} | {} |",
+            p.id,
+            cell(p.what),
+            layer_names(p),
+            defaults(p),
+            trust(p),
+            services(p)
+        );
+    }
+    s.push_str(not_ports);
+    for p in ports {
+        if let Trust::Never(why) = p.trust {
+            let _ = writeln!(
+                s,
+                "| `{}` | {} | {} | {} |",
+                p.id,
+                cell(p.what),
+                layer_names(p),
+                cell(why)
+            );
+        }
+    }
+    s
+}
+
+const PORTS_INTRO_EN: &str =
         "---\ntitle: Ports\ndescription: Every port DAGON's extensions use, from the catalogs.\neditUrl: false\n---\n\n\
          :::note\nGenerated from `dagon_events::PORTS`; do not edit. Regenerate with\n\
          `DAGON_BLESS=1 cargo test -p dagon-catalog --test docs`.\n:::\n\n\
@@ -325,37 +448,9 @@ pub fn ports_md(ports: &[Port]) -> String {
          - *trusted only*: only a trusted extension, declared and signed; it runs\n\
          \x20 privileged and calls no services.\n\n\
          | Port | What it does | Layers | Default | Trust | Services |\n\
-         |---|---|---|---|---|---|\n",
-    );
-    for p in ports.iter().filter(|p| p.trust.is_port()) {
-        let _ = writeln!(
-            s,
-            "| `{}` | {} | {} | {} | {} | {} |",
-            p.id,
-            cell(p.what),
-            layer_names(p),
-            defaults(p),
-            trust(p),
-            services(p)
-        );
-    }
-    s.push_str(
-        "\n## Parts that are not ports\n\n\
+         |---|---|---|---|---|---|\n";
+
+const PORTS_NOT_EN: &str = "\n## Parts that are not ports\n\n\
          No plug-in replaces these, trusted or not.\n\n\
          | Part | What it is | Layers | Why not a port |\n\
-         |---|---|---|---|\n",
-    );
-    for p in ports {
-        if let Trust::Never(why) = p.trust {
-            let _ = writeln!(
-                s,
-                "| `{}` | {} | {} | {} |",
-                p.id,
-                cell(p.what),
-                layer_names(p),
-                cell(why)
-            );
-        }
-    }
-    s
-}
+         |---|---|---|---|\n";

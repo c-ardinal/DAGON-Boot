@@ -101,33 +101,6 @@ and confirmed) and APP-A; the chip erase blanks face B. The display shows
 samples/f401-app/target/thumbv7em-none-eabihf/release/f401-app` prints
 `app 1.1.0 slot 0`.
 
-## Trial and rollback without a hub
-
-Put a signed 1.2.0 into APP-B and mark it pending with a fresh log
-(`f401-testimg log` only reads the image headers, so it works with images
-from `dagon image sign`):
-
-```sh
-(cd samples/f401-app && cargo build --release --features slot-b --target-dir target/slot-b)
-dagon image sign samples/f401-app/target/slot-b/thumbv7em-none-eabihf/release/f401-app \
-  --node seg --version 1.2.0 --slot b --out out/seg-b-1.2.0.img \
-  --key /path/outside/the/repo/dagon-signing.key
-(cd targets/f401-testimg && cargo run --release -- log ../../out/seg-log.bin \
-  ../../out/provision/seg/app-a.img ../../out/seg-b-1.2.0.img)
-probe-rs download --chip STM32F401RETx --binary-format bin --base-address 0x08040000 out/seg-b-1.2.0.img
-probe-rs download --chip STM32F401RETx --binary-format bin --base-address 0x08008000 out/seg-log.bin
-probe-rs reset --chip STM32F401RETx
-```
-
-Expected: ` 120` on trial (RTT `app 1.2.0 slot 1`). With no CONFIRM
-the app stops feeding after 30 s, the watchdog resets it 4 s later, and after
-the third attempt the boot core rolls back: ` 110` again, RTT
-`last_reason=` the trial-exhausted code. About two minutes in total.
-
-To see a trial confirmed instead, confirm it from the 親機 (`dagon
-deploy`), or build the 1.2.0 image with `--features slot-b,confirm`: it stays
-on ` 120` after further resets.
-
 ## Conformance build
 
 `--features conform` adds CONF_RUN in front of the agent: the node-side

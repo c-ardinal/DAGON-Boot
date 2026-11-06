@@ -20,7 +20,7 @@ code and the package manifests, so it cannot drift.
 A component is something a user installs, flashes or depends on that lives on from release to release.
 
 - Components: the CLI (with the page it serves), a boot loader, an MCU definition, a board definition, a library crate
-- Not components: samples (including demo firmware), test apps, bring-up and dump programs and test images. They stay at `0.0.0` with `publish = false`.
+- Not components: samples (including demo firmware) and test apps. They stay at `0.0.0` with `publish = false`.
 
 A new component starts at `0.1.0`.
 

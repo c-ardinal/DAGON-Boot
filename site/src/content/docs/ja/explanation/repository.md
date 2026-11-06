@@ -7,7 +7,7 @@ description: "リポジトリにあるもの、その場所、DAGON そのもの
 
 - 形式とプロトコル: `dagon-format` と `dagon-proto`。`crates/dagon-format/golden/` の黄金ベクタで照合しています。
 - ノード側: `dagon-agent`（非稼働スロットへイメージを受け取り、署名と SHA-256 を検査し、切り替えと確定を行う）と `dagon-core`（起動の判断: 回数を限った試行起動と巻き戻し）。
-- PC 側: `dagon-host`（状態、自動で見つける、構成の送信、更新、前のバージョンに戻す、確定、復旧）、`dagon-romlink`（STM32 の I2C ROM ブートローダの手順）、`dagon` CLI。これらは `dagon-sim`（F401 子機付きの模擬親機、電断点付きのフラッシュ、損失のあるリンク、ROM ブートローダの模擬）を相手にテストしています。
+- PC 側: `dagon-host`（状態、自動で見つける、構成の送信、書き込み、前のバージョンに戻す、確定、復旧）、`dagon-romlink`（STM32 の I2C ROM ブートローダの手順）、`dagon` CLI。これらは `dagon-sim`（F401 子機付きの模擬親機、電断点付きのフラッシュ、損失のあるリンク、ROM ブートローダの模擬）を相手にテストしています。
 - プロジェクト: `dagon new`、`dagon gen`、`dagon build` が、MCU ごと（`targets/mcu/*`）とボードごと（`targets/boards/*`）の支援パッケージの上にノードの crate を作り、ビルドします。
 - `dagon conform`: `dagon-conform` の 12 件の適合試験。模擬の F401 に対し、親機経由でも直結でも 12 件すべて合格します。
 - 構成 YAML: 22 件の検証規則と対応ボードの表（`dagon-topology`）。`topology/sample.yaml` はこれを通ります。
@@ -24,7 +24,7 @@ description: "リポジトリにあるもの、その場所、DAGON そのもの
 | `crates/dagon-proto` | 通信プロトコル v1: フレーム、コマンド、ペイロード |
 | `crates/dagon-port` | ボードの trait（フラッシュ、リンク、リセット、ウォッチドッグ、起動先の選択、I2C、子機の制御線） |
 | `crates/dagon-core` | 起動の判断（試行、回数、巻き戻し） |
-| `crates/dagon-agent` | ノード側の更新の受け手 |
+| `crates/dagon-agent` | ノード側で書き込みを受ける部分 |
 | `crates/dagon-conform` | 12 件の適合試験と結果ファイルの形式 |
 | `crates/dagon-sim` | シミュレータ: フラッシュ、リンク、ROM ブートローダ、ノード、親機 |
 | `crates/dagon-topology` | 構成 YAML、検証規則、対応ボード |

@@ -72,6 +72,8 @@ interface Device {
   slots: Slot[];
   active: number;
   confirmed: number;
+  /** The last reboot fell back to the previous slot. */
+  fellBack?: boolean;
   /** Transfer in progress: target slot (or the topology), header and body bytes. */
   xfer: { target: number; slot: number; hdr: number[]; body: number[] } | null;
   /** Slot to run on the next REBOOT. */
@@ -307,6 +309,7 @@ function reboot(dev: Device, fallBack: boolean): void {
   if (next === null) return;
   if (fallBack) {
     dev.slots[next].state = SLOT_REVERTED;
+    dev.fellBack = true;
     return;
   }
   dev.active = next;
@@ -316,6 +319,8 @@ function reboot(dev: Device, fallBack: boolean): void {
 const STATUS_LEN = 71;
 const SLOT_LEN = 21;
 const LOG_GENERATION = 12;
+/** STATUS last_reason after a fall back (dagon_format::statelog::reason). */
+const REASON_TRIAL_EXHAUSTED = 3;
 
 /** STATUS body: 3 × {state, version, digest16}, active, confirmed, attempts, last_reason, log_generation. */
 function encodeStatus(dev: Device): Uint8Array {
@@ -327,7 +332,7 @@ function encodeStatus(dev: Device): Uint8Array {
     if (s.state !== SLOT_EMPTY) out.fill(0xa4 + i, i * SLOT_LEN + 5, i * SLOT_LEN + SLOT_LEN);
   });
   const tail = 3 * SLOT_LEN;
-  out.set([dev.active, dev.confirmed, 0, 0], tail);
+  out.set([dev.active, dev.confirmed, 0, dev.fellBack ? REASON_TRIAL_EXHAUSTED : 0], tail);
   dv.setUint32(tail + 4, LOG_GENERATION, true);
   return out;
 }

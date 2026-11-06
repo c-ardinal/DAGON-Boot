@@ -1,6 +1,6 @@
 <script lang="ts">
   import type { Snippet } from 'svelte';
-  import { NOTICE } from '../app/copy.ts';
+  import { BUILD, NOTICE } from '../app/copy.ts';
   import { rise } from '../app/motion.ts';
   import Icon from './Icon.svelte';
 
@@ -13,10 +13,13 @@
     fix: string;
     onclose: () => void;
     onmore: () => void;
+    /** An agent is linked: asking why is offered. */
+    linked: boolean;
+    onask: (at: Element) => void;
     actions?: Snippet;
   }
 
-  let { word, target, card, reason, fix, onclose, onmore, actions }: Props = $props();
+  let { word, target, card, reason, fix, onclose, onmore, linked, onask, actions }: Props = $props();
   let el = $state<HTMLElement>();
   /** It rests low beside the zoom; over the node's card it stands at the top instead. */
   let high = $state(false);
@@ -40,6 +43,7 @@
   <footer>
     <button class="more" onclick={onmore}>{NOTICE.more}</button>
     <span class="grow"></span>
+    {#if linked}<button class="button-secondary" data-control="ask" onclick={(e) => onask(e.currentTarget)}>{BUILD.askAgent}</button>{/if}
     {@render actions?.()}
   </footer>
 </div>

@@ -1,6 +1,30 @@
 import { describe, expect, test } from 'vitest';
-import { STATE } from './copy.ts';
-import { lightsStill, nodeState, STATE_ICON } from './nodeState.ts';
+import { NODE, STATE, WRITE } from './copy.ts';
+import { lightsStill, nodeState, resultChip, STATE_ICON } from './nodeState.ts';
+
+describe('the chip a node keeps after a write', () => {
+  test('a node the stopped write never reached: not written, no error chip, its state stays what the watch saw', () => {
+    const c = resultChip('unwritten')!;
+    expect(c).toEqual({ chip: NODE.unwritten, spoken: '未書き込み', silent: false });
+    expect(nodeState({ connected: true, responding: true, chip: c.chip })).toBe('alive');
+  });
+
+  test.each(['refused', 'silent', 'cannotFix'] as const)('a node that failed (%s) is an error', (stage) => {
+    const c = resultChip(stage)!;
+    expect(c).toMatchObject({ chip: WRITE.failed, silent: true });
+    expect(nodeState({ connected: true, responding: true, chip: c.chip })).toBe('error');
+  });
+
+  test('a node that went back asks for attention, not an error', () => {
+    const c = resultChip('previous')!;
+    expect(c).toMatchObject({ chip: WRITE.previous, silent: false });
+    expect(nodeState({ connected: true, responding: true, chip: c.chip })).toBe('attention');
+  });
+
+  test('confirmed or still running: no result chip', () => {
+    for (const stage of ['done', 'waiting', 'writing'] as const) expect(resultChip(stage)).toBeNull();
+  });
+});
 
 describe('node state', () => {
   test.each([

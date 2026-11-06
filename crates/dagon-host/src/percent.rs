@@ -1,6 +1,7 @@
 //! A node's one progress number over its whole write, from the first byte to
-//! its confirmation. The node's display (SHOW) and every caller read this one
-//! calculation, so the two never disagree.
+//! its confirmation. The hub's display and the display of the node being
+//! written (SHOW) and every caller read this one calculation, so they never
+//! disagree.
 //!
 //! The transfer and the trial weigh as long as each takes: the transfer's time
 //! is projected from the bytes sent so far, the trial's is the MCU definition's
@@ -51,11 +52,17 @@ pub(crate) struct WriteTrack {
     node: Option<u8>,
     started_ms: u64,
     xfer_ms: Option<u64>,
+    rebooted_ms: Option<u64>,
     /// What was last said: the number never goes under it.
     shown: u8,
 }
 
 impl WriteTrack {
+    /// What was last said.
+    pub(crate) fn shown(&self) -> u8 {
+        self.shown
+    }
+
     /// Takes one report and returns the number to show for it.
     pub(crate) fn report(
         &mut self,
@@ -87,9 +94,19 @@ impl WriteTrack {
                 self.xfer_ms = Some(xfer);
                 trial_percent(xfer, 0, trial_ms, self.shown)
             }
-            phase::REBOOT => self.shown,
+            phase::REBOOT => {
+                self.rebooted_ms = Some(now_ms);
+                self.shown
+            }
             phase::CONFIRM if !boot_core => 100,
-            phase::CONFIRM => self.shown,
+            // The boot core's trial has passed: what a caller counted for it
+            // stays when the next image's transfer starts.
+            phase::CONFIRM => match (self.xfer_ms, self.rebooted_ms) {
+                (Some(xfer), Some(at)) => {
+                    trial_percent(xfer, now_ms.saturating_sub(at), trial_ms, self.shown)
+                }
+                _ => self.shown,
+            },
             // The ROM path has no trial: its bytes are the whole write.
             phase::ROM => percent.min(BEFORE_CONFIRMED).max(self.shown),
             _ => percent,
@@ -144,9 +161,12 @@ mod tests {
         t.report(1, phase::TRANSFER, 0, true, 0, TRIAL);
         t.report(1, phase::TRANSFER, 100, true, 4000, TRIAL);
         let core = t.report(1, phase::VERIFY, 100, true, 4000, TRIAL);
-        assert_eq!(t.report(1, phase::CONFIRM, 100, true, 6000, TRIAL), core);
+        assert_eq!(t.report(1, phase::REBOOT, 0, true, 4000, TRIAL), core);
+        // 4 s of transfer and 2 s of its 4 s trial: what the Console counted.
+        let trial = t.report(1, phase::CONFIRM, 100, true, 6000, TRIAL);
+        assert_eq!((core, trial), (50, 75));
         t.report(1, phase::TRANSFER, 0, false, 6000, TRIAL);
-        assert_eq!(t.report(1, phase::TRANSFER, 10, false, 6100, TRIAL), core);
+        assert_eq!(t.report(1, phase::TRANSFER, 10, false, 6100, TRIAL), trial);
         assert_eq!(t.report(1, phase::CONFIRM, 100, false, 9000, TRIAL), 100);
     }
 

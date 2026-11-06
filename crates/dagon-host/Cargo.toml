@@ -17,6 +17,7 @@ dagon-topology = { path = "../dagon-topology", optional = true }
 defs = ["dep:dagon-topology"]
 
 [dev-dependencies]
+dagon-agent = { path = "../dagon-agent" }
 # The tests build ROM maps from the builtin definitions.
 dagon-host = { path = ".", features = ["defs"] }
 dagon-sign = { path = "../dagon-sign" }

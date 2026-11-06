@@ -166,3 +166,4 @@ stage0 のある self-boot のマイコンの、ブートローダのスロッ�
 | `app.confirm_refused` | 0x3a | `confirm_refused`: Ready → Ready | `status: u8` (1 B) | live, host |  | 確定を拒んだ（試行中でない、自己検査、ストア）。 |
 | `app.reboot_requested` | 0x3b | `reboot_requested`: Ready → Ready | `mode: u8` (1 B), `delay_ms: u32` (4 B) | live, host |  | `allow_reboot_now` の後で、再起動を受け付けた。 |
 | `app.before_reboot` | 0x3c | `before_reboot`: Ready → Ready | – | live |  | 返答が出た。リセットが続く。 |
+| `app.percent_told` | 0x3d | `percent_told`: Ready → Ready | `percent: u8` (1 B) | live |  | ホストが、書き込みの進み具合のひとつの数字をノードに伝えた。ホストの呼び出し側がこのノードに見せる数字と同じ。 |

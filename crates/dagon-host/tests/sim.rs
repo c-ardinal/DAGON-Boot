@@ -339,6 +339,77 @@ fn the_number_on_the_hubs_screen_is_the_number_every_caller_is_told() {
     assert!(numbers.windows(2).all(|w| w[0] <= w[1]), "{numbers:?}");
 }
 
+/// What the node's own display reads: the snapshot its app folds.
+fn seg_snapshot(s: &Sim) -> dagon_agent::snapshot::AppSnapshot {
+    let mut hub = s.hub.borrow_mut();
+    hub.i2c_node(NODE_I2C_ADDR).unwrap().app_snapshot()
+}
+
+#[test]
+fn the_number_a_node_is_told_is_the_consoles_at_every_step() {
+    use dagon_agent::snapshot::Phase;
+    let s = sim();
+    let mut h = host(&s);
+    h.trial_ms = vec![(0, 4000), (SEG, 4000)];
+    let mut told: Option<u8> = None;
+    let mut steps = 0;
+    block_on(
+        h.apply(&release(), &topology(&yaml()), &key().pk, None, &mut |e| {
+            // The tell follows its event: at the next step of the bytes the
+            // snapshot holds what the last step said.
+            if let (phase::TRANSFER, Some(n)) = (e.phase, told) {
+                assert_eq!(seg_snapshot(&s).percent, Some(n), "{e:?}");
+                steps += 1;
+            }
+            told = (e.node == SEG && e.phase == phase::TRANSFER).then_some(e.shown);
+            // Past the bytes the node is told no number: it shows its step.
+            if e.node == SEG && e.phase != phase::TRANSFER {
+                let snapshot = seg_snapshot(&s);
+                assert_eq!(snapshot.percent, None, "{e:?}");
+                assert_ne!(snapshot.phase, Phase::Transferring, "{e:?}");
+            }
+        }),
+    )
+    .unwrap();
+    assert!(steps >= 10, "{steps}");
+}
+
+#[test]
+fn telling_a_node_costs_a_write_at_most_a_request_per_step_and_an_old_agent_none() {
+    let seg_data_ms = |predates: &[u8]| {
+        let s = sim();
+        s.hub.borrow_mut().i2c_node(NODE_I2C_ADDR).unwrap().predates = predates.to_vec();
+        let mut h = host(&s);
+        let mut t = None;
+        let mut steps = 0u32;
+        let outcome = block_on(h.apply(
+            &release(),
+            &topology(&yaml()),
+            &key().pk,
+            Some(&[SEG]),
+            &mut |e| {
+                t = e.times.or(t);
+                steps += u32::from(e.phase == phase::TRANSFER && e.percent > 0);
+            },
+        ))
+        .unwrap();
+        // The display never decides the write.
+        assert!(
+            matches!(outcome[0].outcome, Outcome::Done(_)),
+            "{outcome:?}"
+        );
+        (t.unwrap().data_ms, steps)
+    };
+    // One relayed request in the simulator: the PC's round trip and the
+    // mailbox polls.
+    const RELAYED_MS: u32 = 6;
+    let (told, steps) = seg_data_ms(&[]);
+    // An agent built before the tell refuses the first one, before any
+    // data: nothing more is sent to it.
+    let (old, _) = seg_data_ms(&[Cmd::Show as u8]);
+    assert_eq!(told - old, steps * RELAYED_MS, "one request per step");
+}
+
 #[test]
 fn full_apply_then_rollback() {
     let s = sim();
@@ -1530,14 +1601,24 @@ fn the_f401_takes_a_new_boot_core_through_the_release() {
     )
     .unwrap()
     .bundle;
+    // Both images' numbers reach the node, the Console's at every step.
+    let mut told: Option<u8> = None;
+    let mut core_steps = 0;
     let out = block_on(host(&s).apply(
         &rel,
         &topology(&yaml()),
         &key().pk,
         Some(&[SEG]),
-        &mut |_| {},
+        &mut |e| {
+            if let (phase::TRANSFER, Some(n)) = (e.phase, told) {
+                assert_eq!(seg_snapshot(&s).percent, Some(n), "{e:?}");
+            }
+            told = (e.phase == phase::TRANSFER).then_some(e.shown);
+            core_steps += usize::from(e.boot_core && told.is_some());
+        },
     ))
     .unwrap();
+    assert!(core_steps > 0);
     assert!(
         matches!(out[0].outcome, Outcome::Done(x) if x == v),
         "{:?}",

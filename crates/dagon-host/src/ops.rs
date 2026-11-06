@@ -109,7 +109,7 @@ pub struct XferTimes {
     /// header chunk (XFER_BEGIN for an image without header). The header's
     /// other requests are in no phase.
     pub erase_ms: u32,
-    /// The image body (XFER_DATA), with the hub LCD's progress updates.
+    /// The image body (XFER_DATA), with the displays' progress updates.
     pub data_ms: u32,
     /// XFER_END: the node's digest over what it wrote.
     pub verify_ms: u32,
@@ -763,6 +763,12 @@ impl<T: Transport, C: Clock> Host<T, C> {
             total_len: (hdr.len() + body.len()) as u32,
             hdr_len: hdr.len() as u16,
         };
+        // The hub's display already hears every number from `emit`. The tell
+        // comes before XFER_BEGIN, so the node's number is there all through
+        // the erase, when it answers nothing.
+        let mut tell = show.filter(|_| to != Target::Hub);
+        let mut told = None;
+        self.tell(to, &mut tell, &mut told).await;
         let mut p = [0u8; 8];
         let n = begin.encode(&mut p).expect("8 bytes");
         let begin_wait = if hdr.is_empty() { erase } else { REQUEST_MS };
@@ -794,6 +800,7 @@ impl<T: Transport, C: Clock> Host<T, C> {
                 if let Some((node, v)) = show {
                     self.emit(on_event, node, phase::TRANSFER, shown, v).await;
                 }
+                self.tell(to, &mut tell, &mut told).await;
             }
         }
         let t2 = self.clock.now_ms();
@@ -897,13 +904,44 @@ impl<T: Transport, C: Clock> Host<T, C> {
             version,
             text,
         };
+        self.show_to(Target::Hub, &show).await;
+    }
+
+    /// One SHOW, never resent; `false` when it was not taken.
+    async fn show_to(&mut self, to: Target, show: &Show<'_>) -> bool {
         let mut p = [0u8; 7 + payload::SHOW_TEXT_MAX];
         let Ok(n) = show.encode(&mut p) else {
+            return false;
+        };
+        self.call_once(to, Cmd::Show, &p[..n], REQUEST_MS)
+            .await
+            .is_ok()
+    }
+
+    /// Tells the node being written its one number when it moved, for its
+    /// own display. A display must not cost a write: a node that does not
+    /// take it (an agent that predates it answers `Unsupported`) is told
+    /// nothing more for this image, and a link that truly failed is the next
+    /// transfer request's to report.
+    async fn tell(&mut self, to: Target, who: &mut Option<(u8, Version)>, told: &mut Option<u8>) {
+        let Some((node, version)) = *who else {
             return;
         };
-        let _ = self
-            .call_once(Target::Hub, Cmd::Show, &p[..n], REQUEST_MS)
-            .await;
+        let percent = self.write.shown();
+        if *told == Some(percent) {
+            return;
+        }
+        *told = Some(percent);
+        let show = Show {
+            node,
+            phase: phase::TRANSFER,
+            percent,
+            version,
+            text: &[],
+        };
+        if !self.show_to(to, &show).await {
+            *who = None;
+        }
     }
 }
 

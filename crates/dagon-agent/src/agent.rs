@@ -8,8 +8,8 @@ use dagon_format::header::{self, image_kind, slot_binding, ImageHeader, HEADER_S
 use dagon_format::{FormatError, Sha256};
 use dagon_port::{Link, LinkError, Reset};
 use dagon_proto::payload::{
-    self, reboot_mode, target, HelloReq, HelloResp, SetPending, SlotState, StatusResp, VersionResp,
-    VersionSlots, XferBegin, XferChunk, IMAGE_HDR_LEN,
+    self, phase, reboot_mode, target, HelloReq, HelloResp, SetPending, Show, SlotState, StatusResp,
+    VersionResp, VersionSlots, XferBegin, XferChunk, IMAGE_HDR_LEN,
 };
 use dagon_proto::{
     flags, frame_len, max_payload, split_status, Cmd, Frame, Status, HEADER_LEN, MAX_FRAME,
@@ -299,8 +299,20 @@ impl<S: SlotStore, X: AppChain> Agent<S, X> {
             Some(Cmd::SetPending) => self.set_pending(SetPending::parse(p)?),
             Some(Cmd::Reboot) => self.reboot(payload::parse_u8(p)?),
             Some(Cmd::Confirm) => self.confirm(payload::parse_u8(p)?),
+            Some(Cmd::Show) => self.show(Show::parse(p)?),
             _ => Err(Status::Unsupported),
         }
+    }
+
+    /// SHOW to a node: touches no flash and no session, so it is safe
+    /// between the chunks of a transfer. Only a transfer's number is for the
+    /// node's display; past the bytes its own phase says where it is.
+    fn show(&mut self, s: Show<'_>) -> Handled {
+        if s.phase == phase::TRANSFER {
+            let percent = s.percent.min(100);
+            noted(self.requests.percent_told(&mut self.chain, percent));
+        }
+        Ok((0, None))
     }
 
     fn body(&mut self) -> &mut [u8] {

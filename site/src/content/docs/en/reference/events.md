@@ -170,3 +170,4 @@ States: `Ready` (initial).
 | `app.confirm_refused` | 0x3a | `confirm_refused`: Ready → Ready | `status: u8` (1 B) | live, host |  | A confirm was refused (not on trial, self-check, store). |
 | `app.reboot_requested` | 0x3b | `reboot_requested`: Ready → Ready | `mode: u8` (1 B), `delay_ms: u32` (4 B) | live, host |  | A reboot was accepted, after `allow_reboot_now`. |
 | `app.before_reboot` | 0x3c | `before_reboot`: Ready → Ready | – | live |  | The reply has left; the reset follows. |
+| `app.percent_told` | 0x3d | `percent_told`: Ready → Ready | `percent: u8` (1 B) | live |  | The host told the node its write's one progress number, the one the host's caller shows for this node. |

@@ -18,11 +18,11 @@ pub const RESULT_MS: u32 = 5_000;
 /// Chosen so the display stays readable; change it to suit your device.
 pub const TRIAL_BLINK_MS: u32 = 1_000;
 
-/// The pattern for `phase` (`progress`: bytes received and expected while
-/// transferring), `since_ms` after the phase began; `None`: the version.
-pub fn pattern(phase: Phase, progress: Option<(u32, u32)>, since_ms: u32) -> Option<[u8; DIGITS]> {
+/// The pattern for `phase` (`percent`: the number the host told this node
+/// while transferring), `since_ms` after the phase began; `None`: the version.
+pub fn pattern(phase: Phase, percent: Option<u8>, since_ms: u32) -> Option<[u8; DIGITS]> {
     let word = match phase {
-        Phase::Transferring => return percent(progress),
+        Phase::Transferring => return told(percent),
         Phase::Verifying => "ChEc",
         Phase::Written => "donE",
         Phase::Pending => "PEnd",
@@ -36,11 +36,11 @@ pub fn pattern(phase: Phase, progress: Option<(u32, u32)>, since_ms: u32) -> Opt
     render(word)
 }
 
-/// `d` and the share received, 0 to 100 %.
-fn percent(progress: Option<(u32, u32)>) -> Option<[u8; DIGITS]> {
-    let pct = match progress {
-        Some((done, total)) if total > 0 => (u64::from(done) * 100 / u64::from(total)).min(100),
-        _ => 0,
+/// `d` and the number, the one the host's caller shows; `d---` while the host
+/// has told none, so no number of this node's own competes with it.
+fn told(percent: Option<u8>) -> Option<[u8; DIGITS]> {
+    let Some(pct) = percent else {
+        return render("d---");
     };
     let mut buf = Buf::default();
     write!(buf, "d{pct:>3}").ok()?;
@@ -62,15 +62,12 @@ mod tests {
     }
 
     #[test]
-    fn transfer_shows_its_percentage() {
-        let at = |done, total| pattern(Phase::Transferring, Some((done, total)), 0);
-        assert_eq!(at(0, 1000), word("d  0"));
-        assert_eq!(at(421, 1000), word("d 42"));
-        assert_eq!(at(1000, 1000), word("d100"));
-        // A large image does not overflow; nothing known yet is 0 %.
-        assert_eq!(at(u32::MAX, u32::MAX), word("d100"));
-        assert_eq!(at(5, 0), word("d  0"));
-        assert_eq!(pattern(Phase::Transferring, None, 0), word("d  0"));
+    fn transfer_shows_the_number_it_was_told_and_none_of_its_own() {
+        let at = |n| pattern(Phase::Transferring, Some(n), 0);
+        assert_eq!(at(0), word("d  0"));
+        assert_eq!(at(42), word("d 42"));
+        assert_eq!(at(99), word("d 99"));
+        assert_eq!(pattern(Phase::Transferring, None, 0), word("d---"));
     }
 
     #[test]
@@ -109,7 +106,7 @@ mod tests {
     #[test]
     fn every_phase_looks_different() {
         let shown = [
-            pattern(Phase::Transferring, Some((1, 2)), 0),
+            pattern(Phase::Transferring, Some(50), 0),
             pattern(Phase::Verifying, None, 0),
             pattern(Phase::Written, None, 0),
             pattern(Phase::Pending, None, 0),

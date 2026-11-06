@@ -29,12 +29,12 @@ stays dark and nothing else changes.
 
 While DAGON updates the watch, `display_task` follows the node's published
 events (the `AppEvents` that `board::start` returns: dagon-agent's
-`AppSnapshot` phase and progress; `src/screen.rs`, host tested) and draws,
+`AppSnapshot` phase and percent; `src/screen.rs`, host tested) and draws,
 in the same digits, instead of the version:
 
 | Phase | Screen |
 |---|---|
-| transferring | `d` and the share received (`d  0` to `d100`), and a bar below it that fills from left to right |
+| transferring | `d` and the number DAGON told the node, the same as the Console's % (`d---` when it told none), and a bar below it that fills from left to right |
 | verifying | `ChEc` |
 | written | `donE` |
 | pending (next boot) | `PEnd` |
@@ -45,8 +45,8 @@ in the same digits, instead of the version:
 | failed | `FAIL` for 5 s, then the version |
 | starting, idle | the version |
 
-The screen is redrawn only when what it shows changes (at most once per
-percent while transferring).
+The screen is redrawn only when what it shows changes (once for each number
+DAGON tells it while transferring).
 
 ### Panel power and initialisation
 

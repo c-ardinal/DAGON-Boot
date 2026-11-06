@@ -802,12 +802,16 @@ fn retried_request_is_not_executed_twice() {
 }
 
 #[test]
+fn show_answers_ok_and_a_malformed_one_is_refused() {
+    let mut n = Node::new(Probe::default());
+    assert_eq!(n.call(Cmd::Show, &[1, 1, 42, 0, 0, 0, 0]).0, Status::Ok);
+    assert_eq!(n.call(Cmd::Show, &[1, 2, 99, 0, 0, 0, 0]).0, Status::Ok);
+    assert_eq!(n.call(Cmd::Show, &[1, 1]).0, Status::Arg);
+}
+
+#[test]
 fn unknown_and_hub_commands_are_unsupported_on_nodes() {
     let mut n = Node::new(Probe::default());
-    assert_eq!(
-        n.call(Cmd::Show, &[1, 1, 0, 0, 0, 0, 0]).0,
-        Status::Unsupported
-    );
     // The app handles ENTER_ROM before the agent sees it.
     assert_eq!(n.call(Cmd::EnterRom, &[1]).0, Status::Unsupported);
     let begin = XferBegin {

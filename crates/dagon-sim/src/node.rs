@@ -8,9 +8,11 @@ use crate::store::{Boot, Layout, SimStore};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, MutexGuard};
 
+use dagon_agent::snapshot::AppSnapshot;
 use dagon_agent::{Agent, Config, SlotStore, StoreError};
 use dagon_events::{
-    compose, Bounds, Composed, Ctx, Extension, Health, Layer, Nop, Published, TrialInfo, Watchdog,
+    compose, Bounds, Composed, Ctx, Extension, Health, Layer, Nop, Published, Reader, TrialInfo,
+    Watchdog,
 };
 use dagon_format::statelog::slot;
 use dagon_port::BusError;
@@ -76,13 +78,13 @@ impl Extension for SimCheck {
 }
 
 /// The app layer's chain of a simulated node.
-pub type SimChain = Composed<&'static Published<(), 8>, Nop, SimCheck, fn() -> u64>;
+pub type SimChain = Composed<&'static Published<AppSnapshot, 8>, Nop, SimCheck, fn() -> u64>;
 
 /// The chain of a simulated node, made once with the node: its resets
 /// restart the agent over the same chain, as the publisher outlives the
 /// simulated app.
 fn chain(check: SimCheck) -> SimChain {
-    let events: &'static mut Published<(), 8> = Box::leak(Box::new(Published::new()));
+    let events: &'static mut Published<AppSnapshot, 8> = Box::leak(Box::new(Published::new()));
     let now: fn() -> u64 = || 0;
     compose(
         Layer::App,
@@ -99,6 +101,8 @@ const TRIAL_WDT_MS: u32 = 10_000;
 
 pub struct SimNode {
     agent: Agent<SimStore, SimChain>,
+    /// What the app's display tasks read.
+    events: Reader<AppSnapshot, 8>,
     /// The board's own handle on the flash the agent's store uses: its
     /// boot core, ROM loader and power.
     store: SimStore,
@@ -131,8 +135,11 @@ impl SimNode {
     pub fn new(cfg: Config, flash: SimFlash, layout: Layout) -> Self {
         let store = SimStore::new(flash, layout, cfg.pubkey);
         let check = SimCheck::default();
+        let app = chain(check.clone());
+        let events = app.reader();
         let mut n = SimNode {
-            agent: Agent::new(cfg.clone(), store.clone(), chain(check.clone())),
+            agent: Agent::new(cfg.clone(), store.clone(), app),
+            events,
             store,
             check,
             cfg,
@@ -158,6 +165,11 @@ impl SimNode {
 
     pub fn config(&self) -> &Config {
         &self.cfg
+    }
+
+    /// What a display task of the node's app reads now.
+    pub fn app_snapshot(&self) -> AppSnapshot {
+        self.events.latest().map(|l| l.state).unwrap_or_default()
     }
 
     pub fn run(&self) -> Run {

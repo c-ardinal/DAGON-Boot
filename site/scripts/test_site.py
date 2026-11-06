@@ -155,6 +155,15 @@ class MovedDocuments(unittest.TestCase):
         self.assertIsNone(self.MENTION.search("site/src/content/docs/reference/events.md"))
 
 
+class Limitations(unittest.TestCase):
+    def test_the_hardware_scenario_count_is_the_hardware_tests(self):
+        hwt = tomllib.loads((ROOT / "samples" / "hardware-test" / "hwt.toml").read_text(encoding="utf-8"))
+        ran = [s for s in hwt["scenario"] if not any(step.get("do") == "skip" for step in s["steps"])]
+        for rel, words in (("explanation/limitations.md", f"{len(ran)} scenarios"),
+                           ("ja/explanation/limitations.md", f"{len(ran)} のシナリオ")):
+            self.assertIn(words, (llms.DOCS / rel).read_text(encoding="utf-8"), rel)
+
+
 class Wording(unittest.TestCase):
     def test_a_japanese_page_in_english_says_only_that(self):
         # Starlight's own notice says a translation is missing ("まだ"); the site replaces it.

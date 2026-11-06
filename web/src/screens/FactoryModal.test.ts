@@ -22,10 +22,42 @@ const html = (j: Job | null, canWrite = true) =>
 /** The footer button with this label: its attributes. */
 const button = (body: string, label: string) => new RegExp(`<button[^>]*>${label}</button>`).exec(body)?.[0] ?? '';
 
+describe('direct writing modal of a 子機', () => {
+  const child = (j: Job | null) =>
+    render(FactoryModal, {
+      props: {
+        node: { label: '[2] 7セグ', target: '[2] 7セグ（子機）· NUCLEO-F401RE' },
+        how: { label: 'USB', hint: 'ST-LINK 側の USB をつなぐ' },
+        canWrite: true,
+        child: true,
+        job: j,
+        onwrite: () => undefined,
+        oncancel: () => undefined,
+        onclose: () => undefined,
+        onmore: () => undefined,
+      },
+    }).body;
+
+  test('says it is written directly because the 親機 does not reach it, and how to connect it', () => {
+    const b = child(null);
+    expect(b).toContain('[2] 7セグ（子機）');
+    expect(b).toContain(fill(WRITE.factory.childIntro, { node: '[2] 7セグ' }));
+    expect(b).toContain(WRITE.factory.howToConnect);
+    expect(b).toContain('ST-LINK 側の USB をつなぐ');
+    expect(button(b, WRITE.run)).toContain('aria-disabled="false"');
+  });
+
+  test('a failure says it could not be written, whatever the reason', () => {
+    const b = child(job({ state: 'failed', lines: ['probe not found'] }));
+    expect(b).toContain(WRITE.failed);
+    expect(b).toContain('probe not found');
+  });
+});
+
 describe('direct writing modal', () => {
-  test('before writing: 初回, why and how, 中止 and 書き込む, closable', () => {
+  test('before writing: why and how, 中止 and 書き込む, closable', () => {
     const b = html(null);
-    expect(b).toContain(WRITE.factory.first);
+    expect(b).not.toContain('初回');
     expect(b).toContain(fill(WRITE.factory.intro, { node: '[1] メイン' }));
     expect(b).toContain('BOOTSEL を押したまま USB をつなぐ');
     expect(button(b, WRITE.factory.cancel)).toContain('aria-disabled="false"');
@@ -86,5 +118,10 @@ describe('the modal press is the consent serve asks for', () => {
     expect(answerConsent(job({ state: 'running' }), answer, seen)).toBe(false);
     expect(answerConsent(job({ kind: 'build', state: 'question', question: { id: 'q', text: '?' } }), answer, seen)).toBe(false);
     expect(answer).not.toHaveBeenCalled();
+  });
+  test('このあと is for the 親機: a 子機 goes on from its own card', () => {
+    const props = { node: { label: '[2] seg', target: '[2] seg' }, how: [], canWrite: true, job: null, onwrite: () => undefined, oncancel: () => undefined, onclose: () => undefined, onmore: () => undefined } as never;
+    expect(render(FactoryModal, { props }).body).toContain(WRITE.factory.after);
+    expect(render(FactoryModal, { props: { ...(props as object), child: true } as never }).body).not.toContain(WRITE.factory.after);
   });
 });

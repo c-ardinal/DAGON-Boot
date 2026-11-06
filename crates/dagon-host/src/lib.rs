@@ -17,8 +17,8 @@ pub mod rom;
 pub use dagon_romlink::{RomError, Stats as RomStats};
 pub use ops::{
     check_release, reason, ConfirmOutcome, Discovery, Event, NodeOutcome, NodeState, Outcome,
-    RecoverAssets, RecoverPath, XferTimes, CONFIRM_RETRY_MS, NODE_POLL_MS, NODE_TRIAL_MAX_MS,
-    NODE_TRIAL_MS,
+    RecoverAssets, RecoverPath, WritePath, XferTimes, CONFIRM_RETRY_MS, NODE_POLL_MS,
+    NODE_TRIAL_MAX_MS, NODE_TRIAL_MS,
 };
 pub use percent::{transfer_percent, trial_percent};
 
@@ -140,6 +140,11 @@ pub enum Error<E> {
     },
     /// The topology gives no relay route to the node.
     Unreachable {
+        node: u8,
+    },
+    /// The node does not answer and its ROM path was not confirmed; nothing
+    /// was touched.
+    RomNotConfirmed {
         node: u8,
     },
     /// No valid image in the other slot to go back to.

@@ -246,22 +246,6 @@ fn todays_invocations() -> Vec<(&'static str, Command)> {
             }),
         ),
         (
-            "recover seg",
-            C::Recover(RecoverArgs {
-                node: "seg".into(),
-                ..Default::default()
-            }),
-        ),
-        (
-            "recover watch --release r.dgb --bootcore b.img",
-            C::Recover(RecoverArgs {
-                node: "watch".into(),
-                release: s("r.dgb"),
-                bootcore: s("b.img"),
-                ..Default::default()
-            }),
-        ),
-        (
             "rollback --node seg",
             C::Rollback(RollbackArgs {
                 node: "seg".into(),
@@ -650,6 +634,54 @@ fn no_command_and_version_flags() {
     assert!(bare.command.is_none() && !bare.version);
     assert!(parse("--version").unwrap().version);
     assert!(parse("-V").unwrap().version);
+}
+
+/// `dagon <word>` in backticks or at the start of a code line of the repo's
+/// documents is a command this CLI has, or one the design documents describe
+/// as not built yet.
+#[test]
+fn documents_name_only_commands_the_cli_has() {
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+    const DESIGNED: [&str; 3] = ["events", "extension", "mcu"];
+    let known: Vec<String> = Cli::command()
+        .get_subcommands()
+        .map(|c| c.get_name().to_string())
+        .chain(DESIGNED.map(String::from))
+        .collect();
+    let mut files = vec![
+        root.join("CHANGELOG.md"),
+        root.join("README.md"),
+        root.join("README.ja.md"),
+    ];
+    let mut dirs = vec![root.join("site/src/content/docs"), root.join("samples")];
+    while let Some(d) = dirs.pop() {
+        for e in std::fs::read_dir(&d).unwrap().flatten() {
+            let p = e.path();
+            if p.is_dir() {
+                dirs.push(p);
+            } else if p.extension().is_some_and(|x| x == "md") {
+                files.push(p);
+            }
+        }
+    }
+    let mut bad = Vec::new();
+    for f in files {
+        let text = std::fs::read_to_string(&f).unwrap();
+        for line in text.lines() {
+            let from_tick = line.split("`dagon ").skip(1).map(str::to_string);
+            let from_start = line.strip_prefix("dagon ").map(str::to_string);
+            for rest in from_tick.chain(from_start) {
+                let word: String = rest
+                    .chars()
+                    .take_while(|c| c.is_ascii_alphanumeric() || *c == '-')
+                    .collect();
+                if word.starts_with(|c: char| c.is_ascii_alphabetic()) && !known.contains(&word) {
+                    bad.push(format!("{}: dagon {word}", f.display()));
+                }
+            }
+        }
+    }
+    assert!(bad.is_empty(), "{bad:#?}");
 }
 
 #[test]

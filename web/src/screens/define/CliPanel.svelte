@@ -1,25 +1,16 @@
 <script lang="ts">
-  import { CLI_LINK, CLI_NAV, FLASH, JOBS, NODE, PROJECT, RELEASE_STEPS } from '../../app/copy.ts';
+  import { CLI_LINK, CLI_NAV, JOBS } from '../../app/copy.ts';
   import type { Cli, Job } from '../../app/define/cli.svelte.ts';
   import { KeyDraft, type Agent } from '../../app/agent.svelte.ts';
-  import type { Autosave } from '../../app/define/autosave.svelte.ts';
-  import type { Define } from '../../app/define/define.svelte.ts';
-  import { boardMissing } from '../../app/define/model.ts';
-  import { mcuConnection } from '../../wasm/dagon.ts';
 
   interface Props {
     cli: Cli;
-    d: Define;
-    /** The one way the 構成 goes to the project's YAML. */
-    autosave: Autosave;
-    panel: 'link' | 'jobs' | 'release' | 'project' | 'flash';
-    /** "このリリースを運用で使う": hand the .dgb to the operate mode. */
-    onuse: (name: string, bytes: Uint8Array) => void;
+    panel: 'link' | 'jobs';
     /** The agent link: the API key of each way that takes one is registered here (CLI 連携). */
     agent?: Agent;
   }
 
-  let { cli, d, autosave, panel, onuse, agent }: Props = $props();
+  let { cli, panel, agent }: Props = $props();
 
   /** Every way that takes an API key, as GET /v1/agent lists them. */
   const keyWays = $derived((agent?.status?.agents ?? []).flatMap((a) => a.ways.filter((w) => w.key != null).map((w) => ({ a, w }))));
@@ -33,59 +24,13 @@
   }
 
   const ready = $derived(cli.state === 'ready');
-  const nodes = $derived(d.config.nodes);
-  /** The nodes the project, build, sign and write work on: those updating reaches (the rest are skipped, V-23). */
-  const ids = $derived(d.config.reach);
-  /** Making and building the project: no errors (a part not updatable yet is information) and every board filled. */
-  const clean = $derived(!d.problems.some((p) => p.severity === 'error' || p.rule === 'B-01'));
-  const latest = (kind: string) => cli.jobs.find((j) => j.kind === kind);
-  const ok = (kind: string) => latest(kind)?.state === 'succeeded';
   let selectedJob = $state<number | null>(null);
-  /** Nodes whose 書き込む was pressed and whose job serve has not answered yet. */
-  let starting = $state<string[]>([]);
-  async function flashNode(id: string) {
-    if (starting.includes(id)) return;
-    starting = [...starting, id];
-    try {
-      await cli.flash(id);
-    } finally {
-      starting = starting.filter((s) => s !== id);
-    }
-  }
   const job = $derived(cli.jobs.find((j) => j.id === selectedJob) ?? cli.jobs[0]);
-  let version = $state('1.0.0');
-  let releaseName = $state('release');
-  const versionOk = $derived(/^\d+\.\d+\.\d+$/.test(version));
   const elapsed = (j: Job) => {
     const s = Math.round(((j.ended ?? Date.now()) - j.started) / 1000);
     return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
   };
-  const release = $derived(latest('release')?.result as { release?: string; bytes?: number; topology_sha256?: string } | null);
-  const generated = (id: string) => latest('gen')?.state === 'succeeded' && (latest('gen')!.target.split(' · ').includes(id) || latest('gen')!.target === '');
-  /** The hub first (it confirms the nodes behind it). */
-  const flashOrder = $derived([...nodes].sort((a, b) => (a.role === 'hub' ? -1 : b.role === 'hub' ? 1 : 0)));
-  const flashJob = (id: string) => cli.jobs.find((j) => j.kind === 'flash' && j.target === id);
-  const mcuOf = (id: string) => d.doc.topo.nodes.find((n) => n.id === id)?.mcu ?? '';
-
-  async function makeProject() {
-    // The project is made from the YAML: after the saves queued before it, and not from a 構成 serve did not take.
-    await autosave.whenSaved(() => cli.gen(ids));
-  }
-
-  async function use() {
-    if (!release?.release) return;
-    onuse(`${release.release}.dgb`, await cli.releaseBytes(release.release));
-  }
 </script>
-
-{#snippet notYet(why: string)}
-  <span class="chip">{NODE.notYet}</span>
-  <p>{NODE.notYetWhy[why] ?? ''}</p>
-{/snippet}
-
-{#snippet stateChip(j: Job | undefined)}
-  {#if j}<span class="chip" class:bad={j.state === 'failed'}>{JOBS.states[j.state] ?? j.state}</span>{/if}
-{/snippet}
 
 <section class="panel" aria-labelledby="panel-h">
   {#if panel === 'link' || !ready}
@@ -141,87 +86,6 @@
       </ol>
       <p class="pair"><span class="label">{CLI_LINK.withoutCli[0]}</span> {CLI_LINK.withoutCli[1]}</p>
     {/if}
-  {:else if panel === 'project'}
-    <h2 id="panel-h" tabindex="-1">{PROJECT.heading}</h2>
-    <ul class="rows">
-      {#each nodes as n (n.id)}
-        <li>
-          <span class="who"><strong>{n.name}</strong><span translate="no">{n.product} · {n.mcu}</span></span>
-          {#if n.notYet}
-            {@render notYet(n.notYet)}
-          {:else}
-            <span class="chip">{boardMissing(d.doc, n.id) ? PROJECT.boardUnset : generated(n.id) ? PROJECT.made : PROJECT.notMade}</span>
-            <span class="here"><span class="label">{PROJECT.writeHere}</span> <code translate="no">nodes/{n.id}/src/app.rs</code></span>
-          {/if}
-        </li>
-      {/each}
-    </ul>
-    {#if !clean}<p>{PROJECT.fixFirst}</p>{/if}
-    <button class="primary" data-control="gen" aria-disabled={!clean || !cli.has('gen')} onclick={() => clean && cli.has('gen') && void makeProject()}>{PROJECT.make}</button>
-    {@render stateChip(latest('gen'))}
-  {:else if panel === 'flash'}
-    <h2 id="panel-h" tabindex="-1">{FLASH.heading}</h2>
-    <p>{FLASH.hubFirst}</p>
-    <ul class="rows">
-      {#each flashOrder as n (n.id)}
-        {@const fam = mcuConnection(mcuOf(n.id))}
-        {@const fj = flashJob(n.id)}
-        {@const flashing = starting.includes(n.id) || fj?.state === 'queued' || fj?.state === 'running' || fj?.state === 'question'}
-        <li>
-          <span class="who"><strong>{n.name}</strong><span translate="no">{n.product} · {n.mcu}</span></span>
-          {#if n.notYet}
-            {@render notYet(n.notYet)}
-          {:else}
-          {#if fam}<span class="pair"><span class="label">{FLASH.via}</span> {fam.label}</span>{#if cli.canFlash(mcuOf(n.id))}<p>{fam.hint}</p>{/if}{/if}
-          {#if fj?.question}
-            <p>{FLASH.confirm(n.name)}</p>
-            <button class="secondary" onclick={() => void cli.answer(fj, FLASH.no)}>{FLASH.no}</button>
-            <button class="primary" onclick={() => void cli.answer(fj, FLASH.yes)}>{FLASH.yes}</button>
-          {/if}
-          <span class="chip">{fj?.state === 'succeeded' ? FLASH.done : fj?.state === 'running' || fj?.state === 'question' ? FLASH.running : fj?.state === 'failed' ? FLASH.notFound : ''}</span>
-          {#if cli.canFlash(mcuOf(n.id))}
-            <button class="primary" data-control="flash" disabled={flashing} onclick={() => void flashNode(n.id)}>{FLASH.write}</button>
-          {:else}
-            <p>{FLASH.otherTools}</p>
-          {/if}
-          {/if}
-        </li>
-      {/each}
-    </ul>
-  {:else if panel === 'release'}
-    <h2 id="panel-h" tabindex="-1">{RELEASE_STEPS.heading}</h2>
-    <ol class="stages">
-      <li>
-        <h3><span class="n">01</span>{RELEASE_STEPS.steps[0]} {@render stateChip(latest('build'))}</h3>
-        <button class="secondary" data-control="build" aria-disabled={!cli.has('build')} onclick={() => cli.has('build') && void cli.build(ids)}>{RELEASE_STEPS.build}</button>
-      </li>
-      <li>
-        <h3><span class="n">02</span>{RELEASE_STEPS.steps[1]} {@render stateChip(latest('sign'))}</h3>
-        {#if !cli.hello?.key}<p>{RELEASE_STEPS.noKey}</p>{:else}<p class="pair"><span class="label">{RELEASE_STEPS.keyLabel}</span> <span translate="no">{(cli.hello.key_id ?? '').slice(0, 8)}…</span></p>{/if}
-        {#if !ok('build')}<p>{RELEASE_STEPS.buildFirst}</p>{/if}
-        <button class="secondary" data-control="build" aria-disabled={!ok('build') || !cli.hello?.key} onclick={() => ok('build') && cli.hello?.key && void cli.sign(ids)}>{RELEASE_STEPS.sign}</button>
-      </li>
-      <li>
-        <h3><span class="n">03</span>{RELEASE_STEPS.steps[2]} {@render stateChip(latest('release'))}</h3>
-        {#if !ok('sign')}<p>{RELEASE_STEPS.signFirst}</p>{/if}
-        {#if d.errors}<p>{RELEASE_STEPS.fixFirst}</p>{/if}
-        <div class="grid">
-          <label>{RELEASE_STEPS.version}<input bind:value={version} aria-invalid={!versionOk} aria-describedby="version-help" translate="no" /></label>
-          <label>{RELEASE_STEPS.name}<input bind:value={releaseName} translate="no" /></label>
-        </div>
-        {#if !versionOk}<p id="version-help" class="bad">{RELEASE_STEPS.versionHelp}</p>{/if}
-        <button class="secondary" data-control="release" aria-disabled={!ok('sign') || !!d.errors || !versionOk} onclick={() => ok('sign') && !d.errors && versionOk && void cli.release(version, releaseName)}>{RELEASE_STEPS.makeRelease}</button>
-        {#if release?.release}
-          <p class="pair" translate="no"><span class="label">{release.release}.dgb</span> {Math.ceil((release.bytes ?? 0) / 1024)} KB</p>
-        {/if}
-      </li>
-      <li>
-        <h3><span class="n">04</span>{RELEASE_STEPS.steps[3]}</h3>
-        <div class="actions">
-          <button class="primary" aria-disabled={!release?.release} onclick={() => void use()}>{RELEASE_STEPS.useInOperate}</button>
-        </div>
-      </li>
-    </ol>
   {:else}
     <h2 id="panel-h" tabindex="-1">{JOBS.heading}</h2>
     {#if cli.jobs.length === 0}
@@ -293,7 +157,6 @@
     margin: 0;
   }
   .steps,
-  .stages,
   .rows {
     display: grid;
     gap: var(--s-3);
@@ -305,8 +168,7 @@
     display: flex;
     gap: var(--s-3);
   }
-  .rows li,
-  .stages li {
+  .rows li {
     display: grid;
     gap: var(--s-2);
     padding: var(--s-4);
@@ -325,14 +187,8 @@
     color: var(--c-signal);
     font-weight: 700;
   }
-  code,
   .num {
     font: 400 var(--t-mono-size) / var(--t-mono-lh) var(--f-mono);
-  }
-  .grid {
-    display: grid;
-    grid-template-columns: 1fr 1fr;
-    gap: var(--s-3);
   }
   label {
     display: grid;
@@ -347,9 +203,6 @@
     border-radius: var(--r-s);
     background: var(--c-ink);
     color: var(--c-paper);
-  }
-  [aria-invalid='true'] {
-    border-color: var(--c-signal);
   }
   .actions {
     display: flex;

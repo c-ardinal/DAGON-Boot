@@ -1,6 +1,7 @@
 import { render } from 'svelte/server';
 import { describe, expect, test } from 'vitest';
 import { SAMPLE_CONFIG } from '../app/sample.ts';
+import { STATE } from '../app/copy.ts';
 import Graph from './Graph.svelte';
 
 const html = (props: Record<string, unknown> = {}) =>

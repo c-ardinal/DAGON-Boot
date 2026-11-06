@@ -1,7 +1,16 @@
 import { describe, expect, test } from 'vitest';
-import { bandOf } from './band.ts';
+import { bandOf, connectNotice } from './band.ts';
 import { BAND, BUTTON, SIM } from './copy.ts';
 import { MACHINE, view, type ConnectFailure, type L } from './machine.ts';
+
+describe('how a failed connection is told', () => {
+  test('what the user must fix opens a dialog; choosing nothing is a toast; anything else is neither', () => {
+    expect(connectNotice('portFailed')).toBe('modal');
+    expect(connectNotice('silentHub')).toBe('modal');
+    expect(connectNotice('notChosen')).toBe('toast');
+    for (const s of ['idle', 'choosing', 'checking', 'ready', 'writing', 'stopped'] as const) expect(connectNotice(s), s).toBeNull();
+  });
+});
 
 describe('bottom band', () => {
   // No "見本を置く" beside it: the sample comes from the start screen only.
@@ -53,19 +62,23 @@ describe('bottom band', () => {
   });
 
   // Updating the answering nodes comes first; recovery is beside it.
-  test('a node stopped answering: update the answering ones first, recovery beside it, a power and wiring hint', () => {
+  test('a node stopped answering: update the answering ones, a power and wiring hint; it is written from its card', () => {
     const b = bandOf('nodesSilent', { hasConfig: true, answering: true }, { stuck: 'ウォッチ', responding: 2 });
     expect([b.sentence, b.primary?.label, b.secondary.map((x) => x.label)]).toEqual([
       BAND.M62b.sentence,
       '応答する 2 つだけ先に書き込む',
-      ['ウォッチを復旧する'],
+      [],
     ]);
     expect(b.sentence).toMatch(/電源と配線/);
   });
 
-  test('no node answers at all: recovery is the main action, nothing to update first', () => {
+  test('no node answers at all: writing it is the main action, nothing to update first', () => {
     const b = bandOf('nodesSilent', { hasConfig: true, answering: false }, { stuck: 'ウォッチ', responding: 0 });
-    expect([b.primary?.label, b.secondary]).toEqual(['ウォッチを復旧する', []]);
+    expect([b.primary?.label, b.secondary]).toEqual(['ウォッチへ書き込む', []]);
+  });
+
+  test('sending failed needs the user: a modal, not a toast', () => {
+    expect(connectNotice('sendFailed')).toBe('modal');
   });
 
   // One short sentence in every operating state, done and no-answer included.

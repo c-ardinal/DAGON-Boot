@@ -691,6 +691,9 @@ impl<T: Transport, C: Clock> Host<T, C> {
             None => None,
         };
         let log = crate::rom::first_log(boot_hdr, app_hdr, map)?;
+        if !a.rom_confirmed {
+            return Err(Error::RomNotConfirmed { node });
+        }
         let regions = crate::rom::regions(boot, app, &log, stage0, map);
         let plan = dagon_romlink::Plan {
             erase: &map.erase,
@@ -712,6 +715,24 @@ impl<T: Transport, C: Clock> Host<T, C> {
         self.await_version(to, v).await?;
         self.emit(on_event, node, phase::CONFIRM, 100, v).await;
         Ok((RecoverPath::Rom(stats), v))
+    }
+
+    /// How a write of topology node `node` would reach it now. Asks the node
+    /// HELLO and changes nothing.
+    pub async fn write_path(
+        &mut self,
+        node: u8,
+        topology: &[u8],
+        roms: &[RomMap],
+    ) -> Result<WritePath, T::Error> {
+        let topo = TopologyView::parse(topology)?;
+        let to = Target::of_node(&topo, node).ok_or(Error::Unreachable { node })?;
+        match self.hello(to).await {
+            Ok(_) => Ok(WritePath::Transfer),
+            Err(Error::Transport(e)) => Err(Error::Transport(e)),
+            Err(_) if rom_map(&topo, node, roms).is_some() => Ok(WritePath::Rom),
+            Err(_) => Ok(WritePath::Direct),
+        }
     }
 
     /// XFER_BEGIN, XFER_HDR chunks, XFER_DATA chunks, XFER_END with digest
@@ -957,6 +978,20 @@ pub struct RecoverAssets<'a> {
     pub stage0: Option<&'a [u8]>,
     /// ROM maps of the MCUs that have a ROM I2C loader (from the Registry).
     pub roms: &'a [RomMap],
+    /// The user was told the node does not answer and its contents will be
+    /// rewritten, and went on. Without it the ROM path touches nothing.
+    pub rom_confirmed: bool,
+}
+
+/// How a write reaches a node ([`Host::write_path`]).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum WritePath {
+    /// It answers: the normal transfer.
+    Transfer,
+    /// It does not answer and its MCU and link have the ROM entry.
+    Rom,
+    /// It does not answer and has no ROM entry: the factory write, directly.
+    Direct,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -988,6 +1023,7 @@ pub fn reason<E>(e: &Error<E>) -> &'static str {
         Error::BootCoreRefused => "NO BOOT CORE TRIAL",
         Error::DigestMismatch => "E_DIGEST",
         Error::NoImage { .. } => "NO IMAGE",
+        Error::RomNotConfirmed { .. } => "ROM NOT CONFIRMED",
         _ => "FAILED",
     }
 }

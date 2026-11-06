@@ -8,7 +8,7 @@ use core::cell::RefCell;
 
 use dagon_host::{
     check_release, reason, Clock, ConfirmOutcome, Discovery, Error, Event, Host, NodeOutcome,
-    NodeState, Outcome, RecoverAssets, RecoverPath, RomStats, Target, Transport,
+    NodeState, Outcome, RecoverAssets, RecoverPath, RomStats, Target, Transport, WritePath,
 };
 use dagon_proto::payload::{HelloResp, SlotInfo, StatusResp, VersionResp, VersionSlots};
 use js_sys::{Array, Object, Promise, Reflect, Uint8Array};
@@ -475,13 +475,33 @@ impl WasmHost {
         })
     }
 
-    /// `dagon recover`: rewrites topology node `node` from `release` (checked
-    /// under the built-in key): the normal transfer when it answers (its
-    /// app, or the factory agent), else the STM32 ROM loader through the
+    /// How a write would reach topology node `node` now (`'transfer'`, `'rom'`
+    /// or `'direct'`). Asks the node HELLO and changes nothing.
+    pub fn write_path(&self, node: u8, topology: Vec<u8>) -> Promise {
+        self.run(|h, _| async move {
+            let mut h = h.try_borrow_mut().map_err(|_| busy())?;
+            let roms = crate::defs::with_registry(dagon_host::rom::rom_maps);
+            let way = h
+                .write_path(node, &topology, &roms)
+                .await
+                .map_err(|e| JsValue::from(JsError::new(refusal(&e))))?;
+            Ok(match way {
+                WritePath::Transfer => "transfer",
+                WritePath::Rom => "rom",
+                WritePath::Direct => "direct",
+            }
+            .into())
+        })
+    }
+
+    /// Writes topology node `node` from `release` (checked under the built-in
+    /// key): the normal transfer when it answers (its app, or the factory
+    /// agent), else, with `rom_confirmed`, the STM32 ROM loader through the
     /// hub with `bootcore`. Resolves to `{path: 'retransfer' | 'factory' |
     /// 'rom', version, rom}` (`rom`: `{attempts, frames, maxRttMs,
     /// elapsedMs, noStretch}` on the ROM path); rejects with the refusal
     /// kind or dagon-host's reason.
+    #[allow(clippy::too_many_arguments)]
     pub fn recover(
         &self,
         node: u8,
@@ -489,6 +509,7 @@ impl WasmHost {
         topology: Vec<u8>,
         bootcore: Option<Vec<u8>>,
         stage0: Option<Vec<u8>>,
+        rom_confirmed: bool,
         on_event: js_sys::Function,
     ) -> Promise {
         self.run(|h, _| async move {
@@ -505,6 +526,7 @@ impl WasmHost {
                 bootcore: bootcore.as_deref(),
                 stage0: stage0.as_deref(),
                 roms: &roms,
+                rom_confirmed,
             };
             let (path, v) = h
                 .recover(node, &assets, &mut emit)

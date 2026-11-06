@@ -30,7 +30,6 @@ Commands:
   status     Show HELLO, STATUS and VERSION of the hub and each topology node
   apply      Write a release package to the nodes
   conform    Run the 12 conformance tests on a node
-  recover    Rewrite a node from the release
   rollback   Go back to the node's previously confirmed version
   new        Make a project folder
   gen        Make one Rust crate per node in nodes/<id> on the board support packages
@@ -476,45 +475,6 @@ Options:
           Print help (see a summary with '-h')
 ```
 
-## dagon recover
-
-```text
-Rewrite a node from the release
-
-Uses the normal transfer if the node answers, else the MCU's ROM loader (boot core from <provision_dir>/<node>/bootcore.img by default).
-
-Usage: dagon recover [OPTIONS] <NODE>
-
-Arguments:
-  <NODE>
-          Node id in the topology
-
-Options:
-      --release <DGB>
-          Release package [default: release in dagon.toml]
-
-      --bootcore <IMG>
-          Signed boot core image for the ROM path [default: <provision_dir>/<node>/bootcore.img]
-
-      --port <NAME>
-          Serial port of the hub [default: the USB device c0de:cafe or named "DAGON hub"]
-
-      --topology <YAML>
-          Topology YAML [default: topology in dagon.toml]
-
-      --pubkey <FILE>
-          Public key file the release is verified with [default: pubkey in dagon.toml, else the public half of the signing key]
-
-      --key <FILE>
-          Secret signing key file, outside any git work tree [default: $DAGON_SIGNING_KEY]
-
-      --config <FILE>
-          Project file the defaults come from [default: ./dagon.toml]
-
-  -h, --help
-          Print help (see a summary with '-h')
-```
-
 ## dagon rollback
 
 ```text
@@ -637,7 +597,7 @@ Options:
           Version to deploy; must equal each node crate's version
 
       --yes
-          Write without asking
+          Write without asking, the ROM question of a silent node included
 
       --bootcore
           Refuse a node with boot core slots that has no boot crate

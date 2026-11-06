@@ -71,7 +71,7 @@ says whether a version on trial may be confirmed. `dagon gen` can run
 again any time the topology changes: it rewrites `src/wiring.rs` and the
 DAGON package lines of `Cargo.toml`, and never touches `app.rs` (nor
 `main.rs`, unless `--force-main`). DAGON Console does the same with
-"プロジェクトを作る". `dagon new`, `dagon init` and `dagon gen` never write
+"プロジェクトを作る". `dagon new` and `dagon gen` never write
 or remove anything through a symbolic link or a junction: a node whose
 `nodes/<id>` (or `nodes`, or any file gen writes) is one is skipped with
 the reason, and `dagon gen` then exits with an error.
@@ -86,9 +86,9 @@ Each node is built into `out/build/<id>/app-a.elf` and, for slot B,
 `app-b.elf` (an ESP32-S3 image serves both slots, so it has one), with the
 public key from `dagon.toml` embedded. A node's version is the `version`
 in its crate's `Cargo.toml` (its boot core's, in its boot crate's
-`Cargo.toml`); raise it there for every change you write. A `version` in
-`[build.<id>]` or `--version` is not needed; if given, it must be the same
-or the command stops and says which. A node's boot core goes into the
+`Cargo.toml`); raise it there for every change you write. The first write
+signs with the same versions. `--version` is not needed; if given, it must
+be the same or the command stops and says which. A node's boot core goes into the
 package with its app, and the node writes it only when its version differs
 from the boot core it runs: a changed boot core is written once its version
 is raised, as with apps. The build brings the crate's own entry in its
@@ -191,7 +191,7 @@ watchdog resets it and it boots the previous version again.
 
 ```sh
 dagon rollback --node seg     # back to the previously confirmed version
-dagon recover seg             # a node that no longer answers
+dagon deploy seg              # also a node that no longer answers: says so, asks (`--yes` answers), then rewrites it through its ROM loader, or names `dagon flash` when it has none
 ```
 
 `dagon --help` lists every command and option.

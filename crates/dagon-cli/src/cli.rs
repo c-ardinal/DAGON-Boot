@@ -77,11 +77,6 @@ pub enum Command {
     /// into the images folder (default for both: out/conform/<id> next to
     /// dagon.toml).
     Conform(ConformArgs),
-    /// Rewrite a node from the release
-    ///
-    /// Uses the normal transfer if the node answers, else the MCU's ROM loader
-    /// (boot core from <provision_dir>/<node>/bootcore.img by default).
-    Recover(RecoverArgs),
     /// Go back to the node's previously confirmed version
     ///
     /// Boots the node's other slot and confirms it there.
@@ -377,29 +372,6 @@ pub struct ConformArgs {
 }
 
 #[derive(Debug, Default, PartialEq, Args)]
-pub struct RecoverArgs {
-    /// Node id in the topology
-    pub node: String,
-    /// Release package [default: release in dagon.toml]
-    #[arg(long, value_name = "DGB")]
-    pub release: Option<String>,
-    /// Signed boot core image for the ROM path
-    /// [default: <provision_dir>/<node>/bootcore.img]
-    #[arg(long, value_name = "IMG")]
-    pub bootcore: Option<String>,
-    #[arg(long, value_name = "NAME", help = HUB_PORT)]
-    pub port: Option<String>,
-    #[arg(long, value_name = "YAML", help = TOPOLOGY)]
-    pub topology: Option<String>,
-    #[arg(long, value_name = "FILE", help = PUBKEY)]
-    pub pubkey: Option<String>,
-    #[arg(long, value_name = "FILE", help = KEY)]
-    pub key: Option<String>,
-    #[arg(long, value_name = "FILE", help = CONFIG)]
-    pub config: Option<String>,
-}
-
-#[derive(Debug, Default, PartialEq, Args)]
 pub struct RollbackArgs {
     /// Node id in the topology
     #[arg(long, value_name = "ID")]
@@ -460,7 +432,7 @@ pub struct DeployArgs {
     /// Version to deploy; must equal each node crate's version
     #[arg(long, value_name = "X.Y.Z")]
     pub version: Option<String>,
-    /// Write without asking
+    /// Write without asking, the ROM question of a silent node included
     #[arg(long)]
     pub yes: bool,
     /// Refuse a node with boot core slots that has no boot crate

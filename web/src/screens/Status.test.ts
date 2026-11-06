@@ -1,7 +1,7 @@
 import { createRawSnippet } from 'svelte';
 import { render } from 'svelte/server';
 import { describe, expect, test } from 'vitest';
-import { DRAWER, HUB_TOGGLE, NOTICE, STATUS } from '../app/copy.ts';
+import { BAND, DRAWER, HUB_TOGGLE, NOTICE, STATUS } from '../app/copy.ts';
 import Drawer from './Drawer.svelte';
 import Status from './Status.svelte';
 import Toast from './Toast.svelte';
@@ -27,6 +27,11 @@ const status = (p: Partial<Parameters<typeof Status>[1]> = {}) =>
   }).body;
 
 describe('status row', () => {
+  test('which device to choose is on the button that opens the list', () => {
+    expect(status({ hubHint: BAND.M03.sentence })).toMatch(new RegExp(`data-control="connect"[^>]*title="${BAND.M03.sentence}"`));
+    expect(status()).not.toMatch(/data-control="connect"[^>]*title=/);
+  });
+
   test('where the 親機 stands, the one sentence, marks, the connection action last', () => {
     const body = status();
     const at = (s: string) => body.indexOf(s);

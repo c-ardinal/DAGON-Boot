@@ -131,7 +131,7 @@ export interface BoardTemplate {
   coordinator: { i2c: { controller: string; sda: number; scl: number }; pioUart: { tx: number; rx: number } } | null;
 }
 
-/** Nodes the editor places and draws; updating reaches 8 and skips the rest. */
+/** Nodes the editor places and draws: the format's limit. */
 export const maxNodes = (): number => max_nodes();
 const I2C_FIRST = 0x08;
 const I2C_LAST = 0x77;

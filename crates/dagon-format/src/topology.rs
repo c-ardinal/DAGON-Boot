@@ -21,6 +21,8 @@ pub const LINK_SIZE: usize = 16;
 pub const MAX_NODES: usize = 32;
 /// One link per node but the coordinator.
 pub const MAX_LINKS: usize = MAX_NODES - 1;
+// A count is one stored byte, and a constraint's node mask has 32 bits.
+const _: () = assert!(MAX_NODES <= 32 && MAX_LINKS <= u8::MAX as usize);
 /// Largest canonical binary.
 pub const MAX_SIZE: usize = total_size(MAX_NODES, MAX_LINKS, MAX_CONSTRAINTS);
 

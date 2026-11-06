@@ -761,8 +761,30 @@ fn yaml_at_the_limit() -> String {
     )
 }
 
-/// One release writes every node of a 構成 at the limit, each to its other
-/// slot and confirmed.
+/// An F401 app as built: the sample's is about 93 KB.
+const F401_APP_BYTES: usize = 93 * 1024;
+
+/// `tag`'s app for the F401 at its real size.
+fn f401_app(tag: &str, slot: u8, v: Version, fill: u8) -> Vec<u8> {
+    let (flags, caps) = image::default_bits(image_kind::APP);
+    let spec = ImageSpec {
+        image_kind: image_kind::APP,
+        port_kind: image::port_kind_of("self-boot").unwrap(),
+        mcu_id: image::mcu_id_of("stm32f401re").unwrap(),
+        slot: image::slot("stm32f401re", image_kind::APP, slot).unwrap(),
+        version: v,
+        build_flags: flags,
+        release_seq: 1,
+        min_bootcore_version: Version::new(1, 0, 0),
+        target_tag: target_tag(tag),
+        proto_version: 1,
+        capabilities: caps,
+    };
+    sign_image(&spec, &vec![fill; F401_APP_BYTES], &key()).unwrap()
+}
+
+/// One release writes every node of a 構成 at the limit, its apps at their
+/// real size, each to its other slot and confirmed.
 #[test]
 fn one_write_reaches_every_node_of_a_topology_at_the_limit() {
     let children = dagon_format::topology::MAX_NODES - 1;
@@ -792,8 +814,8 @@ fn one_write_reaches_every_node_of_a_topology_at_the_limit() {
     let topo = topology(&yaml);
     let mut images = vec![hub_img(0, new), hub_img(1, new)];
     for i in 0..children {
-        images.push(img("stm32f401re", &tag(i), 0, new, 0x30));
-        images.push(img("stm32f401re", &tag(i), 1, new, 0x31));
+        images.push(f401_app(&tag(i), 0, new, 0x30));
+        images.push(f401_app(&tag(i), 1, new, 0x31));
     }
     let bundle = dagon_sign::release::build(
         dagon_topology::defs::Registry::builtin(),

@@ -13,6 +13,8 @@ pub const HEAD_SIZE: usize = 16;
 pub const ITEM_SIZE: usize = 16;
 /// Every manifest entry and the topology.
 pub const MAX_ITEMS: usize = crate::manifest::MAX_ENTRIES + 1;
+// Both counts are one stored byte.
+const _: () = assert!(MAX_ITEMS <= u8::MAX as usize);
 
 pub mod dest {
     /// Image for the hub itself.

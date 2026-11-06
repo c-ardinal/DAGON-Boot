@@ -54,8 +54,8 @@ fn one_node_over_the_limit_is_refused() {
     );
 }
 
-// A release can carry every image of every node at the limit and the topology,
-// and both counts still fit the byte that stores them.
-const _: () = assert!(MAX_ENTRIES >= tp::MAX_NODES * manifest::IMAGES_PER_NODE);
-const _: () = assert!(bundle::MAX_ITEMS > MAX_ENTRIES);
-const _: () = assert!(bundle::MAX_ITEMS <= u8::MAX as usize);
+#[test]
+fn a_package_holds_every_image_of_every_node_at_the_limit() {
+    assert_eq!(MAX_ENTRIES, tp::MAX_NODES * manifest::IMAGES_PER_NODE);
+    assert_eq!(bundle::MAX_ITEMS, MAX_ENTRIES + 1, "and the topology");
+}

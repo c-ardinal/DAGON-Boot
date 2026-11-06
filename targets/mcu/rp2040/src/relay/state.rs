@@ -21,7 +21,7 @@ const QUIET_AFTER_PC: Duration = Duration::from_secs(10);
 const MAX_INDEX: usize = dagon_format::topology::MAX_NODES;
 
 static SUBS: Mutex<Cs, RefCell<Subs>> = Mutex::new(RefCell::new(Subs::new()));
-static SEEN: Mutex<Cs, Cell<[Seen; MAX_INDEX]>> = Mutex::new(Cell::new(
+static SEEN: Mutex<Cs, RefCell<[Seen; MAX_INDEX]>> = Mutex::new(RefCell::new(
     [Seen {
         version: None,
         shade: Shade::Unknown,
@@ -39,7 +39,7 @@ pub static REDRAW: Signal<Cs, ()> = Signal::new();
 
 /// The values above are read and written only here. The one place the
 /// relay masks interrupts: each closure copies or replaces a small value
-/// (at most the three-entry node list), well inside `[execution]
+/// (one node's entry, or the three-entry node list), well inside `[execution]
 /// masked_max_us`; none reaches the flash or waits.
 #[allow(clippy::disallowed_methods)]
 fn locked<T, R>(m: &Mutex<Cs, T>, f: impl FnOnce(&T) -> R) -> R {
@@ -70,15 +70,13 @@ pub fn set_seen_at(link: u8, addr: u8, seen: Seen) {
 
 pub fn set_seen(index: u8, seen: Seen) {
     let changed = locked(&SEEN, |s| {
-        let mut all = s.get();
-        let slot = all.get_mut(index as usize);
+        let mut all = s.borrow_mut();
         let mut changed = false;
-        if let Some(old) = slot {
+        if let Some(old) = all.get_mut(index as usize) {
             let new = merge(*old, seen);
             changed = *old != new;
             *old = new;
         }
-        s.set(all);
         changed
     });
     if changed {
@@ -113,7 +111,6 @@ pub fn expire_progress() -> bool {
 
 /// What the home screen shows now.
 pub fn home() -> Home {
-    let seen = locked(&SEEN, |s| s.get());
     let hub = locked(&HUB, |h| h.get());
     let mut home = Home {
         hub: Node {
@@ -125,7 +122,7 @@ pub fn home() -> Home {
         ..Default::default()
     };
     for sub in subs() {
-        let s = seen.get(sub.index as usize).copied().unwrap_or_default();
+        let s = locked(&SEEN, |t| t.borrow().get(sub.index as usize).copied().unwrap_or_default());
         let _ = home.subs.push(Node {
             node: sub,
             version: s.version,

@@ -414,8 +414,8 @@ impl<'a> Ctx<'a> {
 
     /// Valid shapes that updating does not reach yet, told as information
     /// (never errors): more than one coordinator and their trees, nodes
-    /// below a 子機, links of a kind the compiled topology cannot carry, and
-    /// nodes beyond eight. Updating covers one 親機 with its direct 子機
+    /// below a 子機 and links of a kind the compiled topology cannot carry.
+    /// Updating covers one 親機 with its direct 子機
     /// and skips the rest (see [`crate::updatable`]).
     fn v23(&mut self) {
         let hubs: Vec<&str> = self

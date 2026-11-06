@@ -9,12 +9,12 @@ description: "What DAGON does not do, and where its guarantees stop."
 - Signing keys are files on the PC and the public key is built into the
   firmware. There is no hardware root of trust (no secure boot fuses, no key
   storage in hardware).
-- A systematic survey of power cuts at every flash operation on real
-  hardware has not been done; power cuts are tested in the simulator.
+- Power cuts have not been run on hardware. In the simulator, `dagon sim run`
+  has one power-cut scenario (a cut during a transfer to the F401), and DAGON's
+  tests cut the power at every flash operation of the hub's update.
 - The USB VID:PID `c0de:cafe` is a test ID, not an assigned one.
-- Checked on hardware: the hub firmware (RP2040 with LCD) is flashed and
-  starts. Not checked on hardware: the hub's communication with the PC and
-  its display, the F401 and ESP32-S3 node firmware, and the full three-node
-  flow.
+- On hardware, 16 scenarios pass on all three nodes (hub RP2040, F401,
+  ESP32-S3); `samples/hardware-test` runs them. The F401's ROM recovery has not
+  been run on hardware.
 - `dagon conform` drives the synchronous test sequence and is CLI only; the
   browser does not run conformance tests.

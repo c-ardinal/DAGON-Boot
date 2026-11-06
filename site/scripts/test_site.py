@@ -155,7 +155,29 @@ class MovedDocuments(unittest.TestCase):
         self.assertIsNone(self.MENTION.search("site/src/content/docs/reference/events.md"))
 
 
+class Limitations(unittest.TestCase):
+    def test_the_hardware_scenario_count_is_the_hardware_tests(self):
+        hwt = tomllib.loads((ROOT / "samples" / "hardware-test" / "hwt.toml").read_text(encoding="utf-8"))
+        ran = [s for s in hwt["scenario"] if not any(step.get("do") == "skip" for step in s["steps"])]
+        for rel, words in (("explanation/limitations.md", f"{len(ran)} scenarios"),
+                           ("ja/explanation/limitations.md", f"{len(ran)} のシナリオ")):
+            self.assertIn(words, (llms.DOCS / rel).read_text(encoding="utf-8"), rel)
+
+
 class Wording(unittest.TestCase):
+    # Pages where 更新 does not mean writing to a node: the word for that is 書き込む.
+    KOUSHIN_ELSEWHERE = {"site/src/content/docs/ja/reference/licenses.md": "the licence text and third-party notes"}
+
+    def test_writing_to_a_node_is_not_called_koushin_in_japanese(self):
+        pages = [*llms.DOCS.joinpath("ja").rglob("*.md*"), ROOT / "README.ja.md"]
+        found = []
+        for p in pages:
+            rel = p.relative_to(ROOT).as_posix()
+            if rel in self.KOUSHIN_ELSEWHERE:
+                continue
+            found += [f"{rel}:{n}" for n, line in enumerate(p.read_text(encoding="utf-8").splitlines(), 1) if "更新" in line]
+        self.assertEqual(found, [])
+
     def test_a_japanese_page_in_english_says_only_that(self):
         # Starlight's own notice says a translation is missing ("まだ"); the site replaces it.
         notice = (llms.DOCS.parent / "i18n" / "ja.json").read_text(encoding="utf-8")

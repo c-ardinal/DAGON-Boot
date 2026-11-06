@@ -263,7 +263,9 @@ fn hello_reports_keys_without_their_values() {
         .unwrap()
         .iter()
         .any(|f| f == "build"));
-    assert!(v["api_key"].is_boolean() && v["key"].is_boolean());
+    assert!(v["key"].is_boolean());
+    // Whether an agent can be reached is GET /v1/agent's `available`, said once.
+    assert!(v.get("api_key").is_none(), "{body}");
     // The CLI version, the API number the page checks, every format number.
     assert_eq!(v["cli"], env!("CARGO_PKG_VERSION"));
     assert_eq!(v["api"], crate::versions::SERVE_API);
@@ -585,33 +587,16 @@ fn without_a_release_key_the_page_carries_none() {
 }
 
 #[test]
-fn targets_lists_the_generated_node_crates() {
+fn no_route_lists_packages_by_folder() {
     let a = start("nodes");
-    std::fs::create_dir_all(a.dir.join("nodes/seg")).unwrap();
-    std::fs::write(
-        a.dir.join("nodes/seg/Cargo.toml"),
-        "[package]
-name = \"seg\"
-[features]
-slot-b = []
-",
-    )
-    .unwrap();
-    let (st, body) = http(
+    let (st, _) = http(
         &a,
         "GET",
         "/v1/targets",
         &[("Authorization", &auth(&a))],
         b"",
     );
-    assert_eq!(st, 200);
-    let v: serde_json::Value = serde_json::from_str(&body).unwrap();
-    let t = &v["targets"][0];
-    assert_eq!(
-        (t["dir"].as_str(), t["name"].as_str()),
-        (Some("nodes/seg"), Some("seg"))
-    );
-    assert_eq!(t["features"][0], "slot-b");
+    assert_eq!(st, 404);
 }
 
 #[test]
@@ -634,7 +619,7 @@ fn a_projects_own_words_reach_the_page_only_as_plain_names() {
     .unwrap();
     let ok = [("Authorization", auth(&a))];
     let ok: Vec<(&str, &str)> = ok.iter().map(|(k, v)| (*k, v.as_str())).collect();
-    for route in ["/v1/targets", "/v1/definitions", "/v1/hello"] {
+    for route in ["/v1/definitions", "/v1/hello"] {
         let (st, body) = http(&a, "GET", route, &ok, b"");
         assert_eq!(st, 200, "{route}: {body}");
         assert!(
@@ -642,22 +627,15 @@ fn a_projects_own_words_reach_the_page_only_as_plain_names() {
             "{route}: {body}"
         );
     }
-    let (_, body) = http(&a, "GET", "/v1/targets", &ok, b"");
-    let v: serde_json::Value = serde_json::from_str(&body).unwrap();
-    let product = |id: &str| {
-        v["boards"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .find(|b| b["id"] == id)
-            .map(|b| b["product"].clone())
-    };
-    assert_eq!(product("my-pico"), Some("project-text".into()));
-    assert_eq!(product("my-two"), Some("My Two".into()));
+    let (_, body) = http(&a, "GET", "/v1/definitions", &ok, b"");
+    let reg = dagon_topology::defs::Registry::from_json(&body).unwrap();
+    let product = |id: &str| reg.board(id).map(|b| b.product.as_str());
+    assert_eq!(product("my-pico"), Some("project-text"));
+    assert_eq!(product("my-two"), Some("My Two"));
     // Builtin boards keep their own product names.
     assert_eq!(
         product("waveshare-rp2040-touch-lcd-1.28"),
-        Some("Waveshare RP2040-Touch-LCD-1.28".into())
+        Some("Waveshare RP2040-Touch-LCD-1.28")
     );
 }
 
@@ -1993,8 +1971,6 @@ fn a_registered_key_makes_the_api_way_available() {
     );
     let v: serde_json::Value = serde_json::from_str(&get(&a, "/v1/agent").1).unwrap();
     assert_eq!(v["available"], true);
-    let hello: serde_json::Value = serde_json::from_str(&get(&a, "/v1/hello").1).unwrap();
-    assert_eq!(hello["api_key"], true);
 }
 
 /// A linked server whose agent is `fake` (no network).

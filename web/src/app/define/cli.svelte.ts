@@ -24,7 +24,6 @@ export interface Hello {
   formats?: Record<string, number>;
   workspace: string | null;
   features: string[];
-  api_key: boolean;
   key: boolean;
   key_id: string | null;
   /** The developer's public key (64 hex digits) the page verifies releases with. */

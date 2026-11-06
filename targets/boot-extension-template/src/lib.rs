@@ -1,13 +1,6 @@
-//! A trusted boot extension to copy. The boot core calls `on_event` for
-//! every boot event from `boot.watchdog_armed` to `boot.before_jump` or
-//! `boot.halt` (site/src/content/docs/reference/events.md, layer `boot`), each call within the
-//! manifest's `max_run_us`. It runs privileged in the boot core: what it
-//! drives (a display, a pin) it reaches through the MCU's HAL itself.
-//! Nothing it does changes which slot the boot core starts.
-//!
-//! This one counts the events and keeps what the decision was; replace
-//! `on_event` with what the node should do (show the boot's progress on a
-//! display, light a pin on `boot.halt`).
+//! A trusted boot extension to copy: this one counts the events and keeps
+//! what the decision was; replace `on_event` with what the node should do.
+//! The rules it runs under: <https://c-ardinal.github.io/DAGON-Boot/doc/reference/extension-manifest/#boot-extensions>
 #![no_std]
 
 use dagon_boot::sequence;
@@ -44,7 +37,7 @@ impl Extension for BootCount {
 
     fn on_event(&mut self, e: &Event<'_>, _ctx: &Ctx<'_>) {
         self.events += 1;
-        // Each event's payload as its type (site/src/content/docs/reference/events.md, layer `boot`).
+        // Each event's payload as its type (<https://c-ardinal.github.io/DAGON-Boot/doc/reference/events/>, layer `boot`).
         if let Some(c) = e.get::<sequence::SlotChosen>() {
             self.chosen = Some((c.slot, c.trial));
         }

@@ -15,7 +15,7 @@ ROOT = Path(__file__).resolve().parent.parent
 # entry: what it catches, and the pattern.
 MARKERS = [
     ("shortcut marker", r"(?i)ponytail"),
-    ("event name", r"(?i)hackathon|ハッカソン"),
+    ("event name", r"(?i)hackathon|ハッカソン|built with claude"),
     # "desk" as its own word or a name part (desk_x, deskX, SimDesk), not inside helpdesk or desktop.
     ("desk wording", r"(?i:(?<![a-z])desk(?!top))|(?<=[a-z])Desk|机|デスク"),
     # PM as the role word, not a clock time (3 PM, 11:30 PM).
@@ -49,6 +49,16 @@ MARKERS = [
     ("calendar date", r"\b20\d\d-[01]\d(?:-[0-3]\d)?(?![\d-])(?![T ]\d\d:)"),
 ]
 COMPILED = [(what, re.compile(p)) for what, p in MARKERS]
+
+# The one notice naming the event, word for word, in the four files that carry it; no pattern is loosened for it.
+NOTICE_JA = '2026/11/8現在、"Built with Claude: Japan 2026"向けに3種類のマイコンだけがサポートされているα版の状態です。正式リリースまでに破壊的変更が行われるリスクが有ることをご理解下さい。'
+NOTICE_EN = 'As of November 8, 2026, this is an alpha that supports only three kinds of microcontroller, made for "Built with Claude: Japan 2026". Please understand that breaking changes may be made before the official release.'
+NOTICE_FILES = {
+    "README.md": NOTICE_JA,
+    "README.en.md": NOTICE_EN,
+    "site/src/content/docs/index.mdx": NOTICE_JA,
+    "site/src/content/docs/en/index.mdx": NOTICE_EN,
+}
 
 # Values that look like a marker but are fixed by someone else.
 ALLOWED = [
@@ -97,7 +107,7 @@ def hits():
             continue
         text = data.decode("utf-8", errors="replace")
         for no, line in enumerate(text.splitlines(), 1):
-            for what, word in line_hits(line):
+            for what, word in line_hits(line.replace(NOTICE_FILES.get(name, "\0"), "")):
                 yield f"{name}:{no}: {what} '{word}'"
 
 
@@ -105,6 +115,11 @@ class Markers(unittest.TestCase):
     def test_no_internal_process_markers(self):
         found = list(hits())
         self.assertEqual(found, [], f"{len(found)} marker(s):\n" + "\n".join(found))
+
+    def test_the_notice_is_refused_anywhere_but_where_it_belongs(self):
+        self.assertTrue(list(line_hits(NOTICE_JA)))
+        self.assertTrue(list(line_hits(NOTICE_EN)))
+        self.assertTrue(list(line_hits(NOTICE_JA + "。")))
 
     def test_the_patterns_catch_what_they_are_for(self):
         for s in ["// ponytail: x", "(owner 11/3)", "SC-S0", "§7.6", "L21", "11/5",

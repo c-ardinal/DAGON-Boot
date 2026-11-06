@@ -5,56 +5,113 @@
   </picture>
 </p>
 
-# DAGON Boot (DIY Assured-update Gateway for Own Nodes)
+<p align="center"><b>つなげた複数のマイコンへ、PC から安全に新しいプログラムを書き込む</b></p>
 
-[日本語版 / Japanese: README.ja.md](README.ja.md)
+<p align="center">
+  <a href="https://c-ardinal.github.io/DAGON-Boot/demo/">デモを試す</a> ·
+  <a href="https://c-ardinal.github.io/DAGON-Boot/doc/">ドキュメント</a> ·
+  <a href="README.en.md">English</a> ·
+  ライセンス: MIT または Apache-2.0
+</p>
 
-**Make hardware that works, easily, and keep growing it after it ships.**
+> [!IMPORTANT]
+> 2026/11/8現在、"Built with Claude: Japan 2026"向けに3種類のマイコンだけがサポートされているα版の状態です。正式リリースまでに破壊的変更が行われるリスクが有ることをご理解下さい。
 
-DAGON Boot is for developers, from first-timers to experienced firmware
-engineers, who build something out of a few microcontrollers and want to
-keep improving it once it is on a shelf, the wall or the wrist. You choose
-the boards (or just their MCUs), draw how they connect, and write your
-application in Rust. DAGON takes care of the rest:
+![DAGON Console で、7 セグ表示のノードへ新しいバージョンを書き込んでいる画面](assets/console/console-writing.png)
 
-- **A project that builds.** `dagon new` and `dagon gen` give every node a
-  Rust crate with its start-up, its wiring and an empty `app.rs` for your
-  code. Flash layout, image headers, linker addresses and the boot loader
-  are decided for you.
-- **Safe updates for the whole group.** One hub on your PC's USB sends each
-  node its new version. Every image is signed; a node runs a new version on
-  trial and goes back to the previous one by itself when the new one never
-  gets confirmed. A node that no longer answers can be rewritten through the
-  hub.
-- **A browser tool and a command line that do the same.** DAGON Console
-  (`dagon serve`) shows the nodes and links as a graph, checks them as you
-  edit, builds, signs and updates. Every step is also a `dagon` command.
-- **Help from Claude.** A new project comes with Claude Code instructions
-  and skills for the common questions: a failing build, a board that is not
-  in the list, a problem in the topology.
+## DAGON とは
 
-## Documentation
+マイコン（小さなコンピュータ）をいくつか組み合わせて何かを作ると、作ったあとでプログラムを直したくなります。そのたびにケースを開けてケーブルをつなぎ直すのは大変で、書き込みに失敗すれば動かなくなることもあります。
 
-The documentation is published at <https://c-ardinal.github.io/DAGON-Boot/doc/>,
-with DAGON Console on a simulator at <https://c-ardinal.github.io/DAGON-Boot/demo/>.
-Its pages are the files under [`site/src/content/docs`](site/src/content/docs):
+DAGON があれば、USB で PC につないだ 1 つのマイコン（親機）を通して、ほかのマイコン（子機）にも新しいバージョンを書き込めます。書き込みが途中で止まっても動いているバージョンはそのまま残り、新しいバージョンがうまく動かなければ、ノードが自分で前のバージョンに戻ります。
 
-- [Try DAGON](site/src/content/docs/getting-started/index.md), [Install](site/src/content/docs/getting-started/install.md)
-  and [From a new project to an update](site/src/content/docs/getting-started/first-project.md)
-- How-to guides: [your own board](site/src/content/docs/how-to/own-board.md),
-  [swapping a link](site/src/content/docs/how-to/swap-link.md),
-  [adding DAGON to existing firmware](site/src/content/docs/how-to/existing-firmware.md),
-  [Claude help in your project](site/src/content/docs/how-to/claude-help.md)
-- Explanation: [words used here](site/src/content/docs/explanation/words.md),
-  [versions and releases](site/src/content/docs/explanation/versioning.md),
-  [lifecycle events and extensions](site/src/content/docs/explanation/lifecycle-events.md),
-  [the repository](site/src/content/docs/explanation/repository.md),
-  [limitations](site/src/content/docs/explanation/limitations.md)
-- Reference: [boards and MCUs](site/src/content/docs/reference/boards.md), [tools by MCU](site/src/content/docs/reference/tools.md),
-  [serve HTTP API](site/src/content/docs/reference/serve-api.md), [events](site/src/content/docs/reference/events.md),
-  [extension manifest](site/src/content/docs/reference/extension-manifest.md),
-  [licenses](site/src/content/docs/reference/licenses.md)
+開発者は、ボードを選び、つなぎ方を描き、アプリを Rust で書きます。起動のしくみ、フラッシュの配置、署名、書き込みの手順は DAGON が受け持ちます。
 
-## License
+## できること
 
-MIT or Apache-2.0, at your option ([LICENSE-MIT](LICENSE-MIT), [LICENSE-APACHE](LICENSE-APACHE)).
+- **構成を描く**: ブラウザで動く DAGON Console で、ノードとそのつながりをグラフに描きます。編集のたびに配線やピンの問題を確かめます。
+- **ビルドできるプロジェクトを作る**: `dagon new` と `dagon gen` が、ノードごとに起動処理と配線と、自分のコードを書く空の `app.rs` を持つ Rust の crate を作ります。
+- **まとめて書き込む**: `dagon deploy` または Console から、ビルド、署名、パッケージ作成、書き込みまでを 1 回の操作で行います。ノードごとの進み具合が見えます。
+- **失敗しても戻る**: イメージはすべて署名付きです。ノードは新しいバージョンを試しに起動し、確定できなければ前のバージョンに戻ります。`dagon rollback` で手でも戻せます。
+- **拡張する**: DAGON のソースを変えずに、イベントを受け取る、判断に答える、部品（ポート）を置き換える拡張を足せます。
+- **AI に頼る**: 新しいプロジェクトには Claude Code 用の指示とスキルが入っています。`dagon ai link` で、同意のうえエージェントとつなげます。
+
+どの操作も `dagon` コマンドでできます。
+
+## 対応しているハードウェア
+
+| マイコン | 定義のあるボード |
+|---|---|
+| RP2040 | Waveshare RP2040-Touch-LCD-1.28 |
+| STM32F401RE | NUCLEO-F401RE |
+| ESP32-S3 | M5StopWatch |
+
+親機にできるのは RP2040 です。ほかのボードもマイコンを選べば使えます（[自分のボード](https://c-ardinal.github.io/DAGON-Boot/doc/how-to/own-board/)）。詳しい一覧は[ボードとマイコン](https://c-ardinal.github.io/DAGON-Boot/doc/reference/boards/)にあります。
+
+## まず試す
+
+ブラウザだけで、[DAGON Console のデモ](https://c-ardinal.github.io/DAGON-Boot/demo/)を試せます。インストールも実機も要りません。模擬の親機と子機を相手に、書き込みと前のバージョンへの戻し方を操作できます。ファイルの読み書き、機器との接続、API キーの操作はデモでは使えません。
+
+手元の PC でも、実機なしで試せます。
+
+```sh
+cargo install --git https://github.com/c-ardinal/DAGON-Boot --tag cli-v0.1.0 dagon-cli
+dagon demo
+```
+
+`dagon demo` は表示したアドレスで Console を開きます。`dagon sim run` はシミュレータ上で通しのシナリオを実行します。
+
+## 必要なもの
+
+- [Rust](https://rustup.rs)（ソースからビルドするときは C コンパイラも）
+- 実機につなぐときは Chrome か Edge 89 以降（Web Serial を使います）
+- マイコンごとのツールは `dagon doctor` が確かめます（[一覧](https://c-ardinal.github.io/DAGON-Boot/doc/reference/tools/)）
+
+ビルド済みのファイルからの入れ方は[入れる](https://c-ardinal.github.io/DAGON-Boot/doc/getting-started/install/)にあります。
+
+## 自分のプロジェクトを始める
+
+```sh
+dagon new my-fleet
+cd my-fleet
+dagon doctor
+dagon serve
+```
+
+`dagon new` は `dagon.toml` と構成のファイル（見本の 3 ノード）、署名の鍵を作ります。秘密鍵はプロジェクトの外に置かれます。`dagon serve` が表示するアドレスを開くと Console で続けられます。ビルドから最初の書き込みまでは[はじめから書き込みまで](https://c-ardinal.github.io/DAGON-Boot/doc/getting-started/first-project/)を見てください。
+
+既にあるファームウェアに組み込むこともできます（[手順](https://c-ardinal.github.io/DAGON-Boot/doc/how-to/existing-firmware/)）。
+
+## しくみ
+
+```mermaid
+flowchart LR
+  PC["PC<br>dagon / DAGON Console"] -- USB --> HUB["親機<br>RP2040"]
+  HUB -- I2C --> SEG["子機<br>STM32F401RE"]
+  HUB -- UART --> WATCH["子機<br>ESP32-S3"]
+```
+
+1. PC が署名付きのパッケージの署名と構成を確かめ、親機へ送ります。
+2. 親機が子機へ中継します。子機から順に書き込み、親機は最後です。
+3. ノードは新しいイメージを動いているものの隣に書き、試しに起動します。
+4. 自己確認が通れば確定し、通らなければウォッチドッグのリセットで前のバージョンに戻ります。
+
+> [!WARNING]
+> 実機での確認の範囲は[制限事項](https://c-ardinal.github.io/DAGON-Boot/doc/explanation/limitations/)にあります。電断と F401 の ROM 経由の書き込みは実機で試していません。署名の鍵は PC 上のファイルで、ハードウェアの信頼の起点はありません。
+
+## 依存しているものと外部のデータ
+
+- 自作の範囲: `crates/`、`targets/`（下のベンダー部品を除く）、`web/`、`site/`、`samples/`、`plugin/`、`topology/`、`scripts/`
+- 依存ライブラリ: Rust の crate と npm パッケージを改変せずに使っています（embassy、esp-hal、ed25519-compact、Svelte、Vite、Astro など）
+- ベンダー部品: ESP-IDF の 2nd stage、`rp2040-boot2`、STM32F401 の ROM ブートローダ
+- 書体とアイコン: Doto、DotGothic16、Zen Kaku Gothic New、JetBrains Mono（SIL OFL 1.1）、Lucide（ISC）
+- マイコンとボードの定義の値: 各社のデータシートとボードの資料から取り、定義ファイルのコメントに出典を書いています
+
+全部の一覧とライセンスは[ライセンス](https://c-ardinal.github.io/DAGON-Boot/doc/reference/licenses/)にあります。
+
+## ドキュメント
+
+- [はじめに](https://c-ardinal.github.io/DAGON-Boot/doc/getting-started/): 試す、入れる、はじめから書き込みまで
+- [やり方](https://c-ardinal.github.io/DAGON-Boot/doc/how-to/): 自分のボード、つながりの差し替え、AI の手助け
+- [しくみ](https://c-ardinal.github.io/DAGON-Boot/doc/explanation/): 言葉の意味、イベントと拡張、バージョンの決まり
+- [リファレンス](https://c-ardinal.github.io/DAGON-Boot/doc/reference/): コマンド、HTTP API、イベント、定義の形式、Rust API

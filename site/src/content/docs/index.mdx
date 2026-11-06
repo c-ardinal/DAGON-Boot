@@ -1,25 +1,25 @@
 ---
 title: DAGON
-description: Make hardware that works, easily, and keep growing it after it ships.
+description: 動くハードウェアを簡単に作り、作ったあとも育て続ける。
 template: splash
 hero:
-  tagline: Make hardware that works, easily, and keep growing it after it ships.
+  tagline: 動くハードウェアを簡単に作り、作ったあとも育て続ける。
 ---
 
-Try DAGON Console in the browser: [the demo](~/demo/).
+:::caution
+2026/11/8現在、"Built with Claude: Japan 2026"向けに3種類のマイコンだけがサポートされているα版の状態です。正式リリースまでに破壊的変更が行われるリスクが有ることをご理解下さい。
+:::
 
-DAGON is for developers who build something out of a few microcontrollers
-and want to keep improving it once it is in use. You choose the boards (or
-just their MCUs), draw how they connect, and write your application in
-Rust; DAGON gives every node a project that builds, and updates the whole
-group safely: every image is signed, a node runs a new version on trial and
-goes back to the previous one by itself when the new one is never
-confirmed.
+[DAGON Console のデモ](~/demo/)をブラウザで試せます。
 
-These pages are in four parts:
+DAGON は、いくつかのマイコンを組み合わせて何かを作り、使い始めたあとも良くしていきたい開発者のためのものです。
+ボード（またはそのマイコン）を選び、つなぎ方を描き、アプリを Rust で書きます。
+DAGON は、ノードごとにビルドできるプロジェクトを用意し、全体を安全に書き換えます。
+イメージはすべて署名付きです。ノードは新しいバージョンを試しに起動し、確定されなければ自分で前のバージョンに戻ります。
 
-- [Getting started](/getting-started/): try DAGON and set it up.
-- [How-to guides](/how-to/): steps for one task each.
-- [Explanation](/explanation/): how DAGON works and why.
-- [Reference](/reference/): every route, event, format and board,
-  generated from DAGON's own sources.
+このページは 4 つに分かれています。
+
+- [はじめに](/getting-started/): DAGON を試し、使えるようにします。
+- [やり方](/how-to/): 1 つの作業ごとの手順です。
+- [しくみ](/explanation/): DAGON がどう動くか、なぜそうなっているかです。
+- [リファレンス](/reference/): ルート、イベント、形式、ボードの一覧です。DAGON 自身のソースから作っています。

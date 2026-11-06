@@ -23,10 +23,6 @@ description: "設計との違いと、DAGON がしないことです。仕様上
 - 実行時のサンドボックスはありません（Service ABI、Entry Gate、Operation Cancellation、Fault Unwind、Lockup Fuse、Reset Cleanup、SandboxArch）。定義の検査と保護マップの生成はあります。
 - 保護マップを生成できる種類は `armv6m-mpu` と `armv7m-mpu` だけです。
 
-OS:
-
-- macOS での動作は、どの実行でも確かめていません。Linux と Windows は CI で確かめます。
-
 リンク:
 
 - ファームウェアがあるリンクの種類は `usb-cdc`、`uart`、`i2c` だけです。`ble`、`wifi-tcp`、`ethernet`、`can` にはありません。
@@ -43,9 +39,8 @@ OS:
 値と ID:
 
 - USB の VID:PID `c0de:cafe` は試験用の ID で、コードに固定されています。割り当てを受けたものではありません。
-- DAGON のマイコンの定義には、出典を確かめていない値があります。定義の中で `unverified` と示します。
-- 実行モデルの上限（[12 節](/explanation/lifecycle-events/#12-実行モデル)）は、実機で測定した値ではありません。
-- ブートローダの試行のセルが値を保つことは、ベンダーの文書だけによります。ボードごとには確かめていません。
+- DAGON のマイコンの定義には、`unverified` の印が付いた値があります。
+- 実行モデルの上限（[12 節](/explanation/lifecycle-events/#12-実行モデル)）は、12.3 の決め方で決めた値ではありません。
 
 設計の図にあってコードに無いコンポーネント:
 

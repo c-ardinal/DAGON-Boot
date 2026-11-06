@@ -45,7 +45,7 @@ What the proofs assume of the hardware and what they inject:
   interrupted program leaves a prefix programmed. Every byte, including a
   commit byte whose program was interrupted, reads the same on every read
   until the next erase or program (no weak bits); flash that can return
-  different values for a partly programmed byte needs its MCU package to
+  different values for a partly programmed byte needs its MCU definition to
   read the commit byte back until two reads agree.
 - **Foreign bytes.** Any byte may also be overwritten by something that is
   not the format's writer: a writer of another layout of the same stage,
@@ -328,7 +328,7 @@ across any later reset other than power-on, cleared only when a start
 acknowledges it. A start acknowledges it when it stored everything it
 had to (`complete`). The MCU definition declares whether the MCU has
 such a flag and its source (`[watchdog] flag`: a hardware register whose
-reset flags persist until cleared, or a flag the MCU package provides,
+reset flags persist until cleared, or a flag the MCU definition provides,
 e.g. in a retained register it sets on a watchdog reset). An MCU without
 one has no fuse: the definition loader reports the fuse as unavailable,
 and its layers run sandboxed calls without a lockup fuse.
@@ -539,7 +539,7 @@ the full profile. Its properties, checked after every operation:
 | C2 | With no further fault, at most `max + 1` boots end the trial: no core is pending and a core runs. |
 | C3 | A broken core is never confirmed. |
 
-The MCU packages' sweeps (`a_power_cut_at_every_flash_step_leaves_a_bootable_core`)
+The MCU definitions' sweeps (`a_power_cut_at_every_flash_step_leaves_a_bootable_core`)
 add the flash side: a cut at every flash operation of a write,
 compaction of the state log included.
 

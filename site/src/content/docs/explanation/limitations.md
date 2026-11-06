@@ -6,7 +6,6 @@ description: "設計との違いと、DAGON がしないことです。仕様上
 ## 仕様上の制限
 
 - 署名の鍵をどう守るかは利用者が選びます。DAGON は決めません。ハードウェアの信頼の起点（セキュアブートのヒューズやハードウェアの鍵保管）を使うかどうかも、その選択です。
-- `dagon conform` は同期の試験手順を動かすもので CLI 専用です。ブラウザでは適合試験を実行しません。
 
 ## 今後解決する予定
 
@@ -21,7 +20,12 @@ description: "設計との違いと、DAGON がしないことです。仕様上
 拡張の隔離:
 
 - ESP32-S3 の隔離のレベルは `none` です。PMS と WCL のレジスタをプログラムするコードがありません。
-- 実行時のサンドボックスはありません（Service ABI、Entry Gate、Operation Cancellation、Fault Unwind）。定義の検査と保護マップの生成はあります。
+- 実行時のサンドボックスはありません（Service ABI、Entry Gate、Operation Cancellation、Fault Unwind、Lockup Fuse、Reset Cleanup、SandboxArch）。定義の検査と保護マップの生成はあります。
+- 保護マップを生成できる種類は `armv6m-mpu` と `armv7m-mpu` だけです。
+
+リンク:
+
+- ファームウェアがあるリンクの種類は `usb-cdc`、`uart`、`i2c` だけです。`ble`、`wifi-tcp`、`ethernet`、`can` にはありません。
 
 署名の鍵:
 
@@ -36,7 +40,10 @@ description: "設計との違いと、DAGON がしないことです。仕様上
 
 設計の図にあってコードに無いコンポーネント:
 
-- 置き換えのトレイトが無いポート: BuildRunner、Signer、DecisionPolicy、LogStorage、SelfCheck、UpdateTransport、UpdateProtocol、Recovery、ChildLink、ImageVerifier、Digest、CryptoProvider、WatchdogDriver、Diagnostics、Display、LogSink、Agent、Action
+- 置き換えのトレイトが無いポート: BuildRunner、Signer、DecisionPolicy、LogStorage、UpdateTransport、UpdateProtocol、Recovery、ChildLink、ImageVerifier、Digest、CryptoProvider、Diagnostics、Display、LogSink、Agent、Action
 - 親機: Coordinator、Release Store、Bus Guardian。書き込みは PC が親機を通して進めます。
+- 書き込みの計画: Delivery Plan の試行の窓と昇格の判断
+- 復旧: Recovery Policy と Node Recovery の、段階の自動の選択と回数に上限のある再試行
 - ホスト: Host Extension Chain、Action Definitions
 - ブート: Boot Record Writer、Boot Action Interpreter
+- Retained Codecs: ファームウェアにはありません。実行可能なモデルの中にだけあります。

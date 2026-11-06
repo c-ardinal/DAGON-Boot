@@ -155,8 +155,6 @@ It chooses among the devices the writer reports: every probe-rs probe, every ser
 
 `dagon flash` builds the boot loader (and the hub's `stage0`) from the project's DAGON source (`[dagon]` in `dagon.toml`), with the node's app, all with the public half of your signing key.
 
-The boot loaders accept the sample's tags (`hub-rp2040-lcd`, `seg-f401-7seg`), so keep those tags in `topology.yaml` for these boards.
-
 ### Trying it without touching the board
 
 `--dry-run` does everything up to the write. It builds the parts and the app and makes the first-write files in the provision folder, and only leaves the board untouched.

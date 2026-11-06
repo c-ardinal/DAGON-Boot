@@ -6,7 +6,6 @@ description: "Where the code differs from the design and what DAGON does not do,
 ## By design
 
 - How to protect the signing key is the user's choice. DAGON does not decide it. Whether to use a hardware root of trust (secure boot fuses, key storage in hardware) is part of that choice.
-- `dagon conform` drives the synchronous test sequence and is CLI only. The browser does not run conformance tests.
 
 ## Planned
 
@@ -21,7 +20,12 @@ The hub and the boot:
 Extension isolation:
 
 - The ESP32-S3's isolation level is `none`. No code programs the PMS and WCL registers.
-- There is no sandbox at run time (Service ABI, Entry Gate, Operation Cancellation, Fault Unwind). Definitions are checked and protection maps are generated.
+- There is no sandbox at run time (Service ABI, Entry Gate, Operation Cancellation, Fault Unwind, Lockup Fuse, Reset Cleanup, SandboxArch). Definitions are checked and protection maps are generated.
+- Protection maps can be generated only for the kinds `armv6m-mpu` and `armv7m-mpu`.
+
+Links:
+
+- Firmware exists only for the link kinds `usb-cdc`, `uart` and `i2c`. `ble`, `wifi-tcp`, `ethernet` and `can` have none.
 
 The signing key:
 
@@ -36,7 +40,10 @@ Values and IDs:
 
 Components in the design figure that the code does not have:
 
-- Ports with no replaceable trait: BuildRunner, Signer, DecisionPolicy, LogStorage, SelfCheck, UpdateTransport, UpdateProtocol, Recovery, ChildLink, ImageVerifier, Digest, CryptoProvider, WatchdogDriver, Diagnostics, Display, LogSink, Agent, Action
+- Ports with no replaceable trait: BuildRunner, Signer, DecisionPolicy, LogStorage, UpdateTransport, UpdateProtocol, Recovery, ChildLink, ImageVerifier, Digest, CryptoProvider, Diagnostics, Display, LogSink, Agent, Action
 - On the hub: Coordinator, Release Store, Bus Guardian. The PC drives a write through the hub.
+- The write plan: the Delivery Plan's trial window and promotion judgement
+- Recovery: Recovery Policy's and Node Recovery's automatic choice of tier and bounded retry
 - On the host: Host Extension Chain, Action Definitions
 - At boot: Boot Record Writer, Boot Action Interpreter
+- Retained Codecs: not in the firmware. They exist only in the executable model.

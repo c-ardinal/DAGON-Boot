@@ -368,8 +368,8 @@ the flag and the armed record, so the next start repeats the decision.
 
 ### 3.6 Clearing
 
-`dagon extension reset` reaches the agent, which frees an app trip in its
-own cell, or stores a clear request for a boot-core trip; the boot core's
+A clear request reaches the agent (the CLI has no command that sends one),
+which frees an app trip in its own cell, or stores a clear request for a boot-core trip; the boot core's
 next start turns the trip into clear-done, and each side frees its record
 when it sees the other's. One request clears one trip. Nothing else clears
 a trip whose id is installed.

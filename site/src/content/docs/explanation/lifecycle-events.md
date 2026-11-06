@@ -345,8 +345,8 @@ a test there fails while a crate that depends on `dagon-events` is
 missing. A state no transition reaches, a transition without `emits` or
 an `observe` path, a duplicate code, an oversized payload, a second
 `state_machine!` in a crate, or a machine outside it are compile
-errors. `dagon events catalog` prints the catalogs; [イベント](/ja/reference/events/) is
-generated from them and a test keeps the two equal.
+errors. [イベント](/ja/reference/events/) is generated from the catalogs and a
+test keeps the two equal.
 
 Decision points (3) are never `emits` clauses: a new one is a design
 change written here first, with its bound, default, answering parties
@@ -1676,9 +1676,9 @@ and the limits of each claim.
   recorded as stale and cleared by the layer that would have acted on
   it, never by another layer; an extension whose artifact hash changed
   is a new identity and runs again.
-- **Clearing.** The host clears a tripped fuse through the agent
-  (`dagon extension reset <node>`); nothing else clears a fuse whose
-  identity still exists.
+- **Clearing.** A tripped fuse is cleared by a request through the agent
+  (retained-formats.md 3.6); the CLI has no command that
+  sends one, and nothing else clears a fuse whose identity still exists.
 - **Versioned.** The fuse carries what a reader needs to refuse a layout
   it does not read (6); bytes of another layout are never acted on.
 - **Size and placement.** Declared in the MCU definition next to the
@@ -2011,8 +2011,7 @@ Every MCU definition lists every register block the MCU has
 `privileged_why`; the checker refuses a definition whose kind is not
 `none` and that lacks a block of each required class, or that marks a
 bus master window-eligible. The generated map (4.4), the conformance
-cases (4.9) and the table `dagon mcu show <id>` prints all derive from
-that list; nothing below is maintained by hand elsewhere. The three
+cases (4.9) derive from that list; nothing below is maintained by hand elsewhere. The three
 tables here are the lists of the three shipped definitions, as examples
 of the judgement the schema asks a definition author to make: can the
 block write memory, and how does the design keep it privileged.

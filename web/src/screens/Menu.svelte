@@ -1,73 +1,151 @@
-<script lang="ts">
-  import { AGENT, HELP, MENU, START } from '../app/copy.ts';
-  import { rise } from '../app/motion.ts';
-  import type { StartChoice } from '../app/start.svelte.ts';
-  import { DEMO_SITE } from '../app/site.ts';
-
-  interface Props {
-    /** 新しく作る / 見本から新しく作る / 開く: all go to the start screen (the project is saved, nothing to confirm). */
-    onstart: (c: StartChoice) => void;
-    /** "最初からやり直す": asks first. */
-    onrestart: () => void;
-    /** Held while an update or recovery runs. */
-    locked: boolean;
-    restartButton?: HTMLButtonElement;
-    /** DAGON: not linked, "DAGON と連携する…"; linked, "DAGON と話す" and "DAGON との連携を外す…". */
-    agentLinked: boolean;
-    onlink: (at: Element) => void;
-    ontalk: () => void;
-    onunlink: () => void;
-    /** 困ったとき (on phones the bar has no room for its button). */
-    onhelp: () => void;
+<script lang="ts" module>
+  export interface MenuItem {
+    label: string;
+    run: () => void;
+    /** The operation in the lock table, when it has one. */
+    control?: string;
+    /** Why it cannot be used now: it stays, dimmed, and says so. */
+    off?: string | null;
+    /** The key that does the same. */
+    key?: string;
+    /** Destroys something: red, under a separator. */
+    danger?: boolean;
   }
 
-  let { onstart, onrestart, locked, restartButton = $bindable(), agentLinked, onlink, ontalk, onunlink, onhelp }: Props = $props();
-  const ITEMS: [StartChoice, string][] = [
-    ['new', START.new],
-    ['sample', START.create.sample],
-    ['open', START.open],
-  ];
+  export interface MenuGroup {
+    label: string;
+    items: MenuItem[];
+  }
 </script>
 
-<!-- The menu: a fold under the header that pushes the content down; the right column stays as it was. -->
-<nav id="menu" transition:rise class="menu" aria-label={MENU.button}>
-  <ul>
-    {#each ITEMS as [c, label] (c)}
-      <li><button class="secondary" data-control={DEMO_SITE && c === 'open' ? 'open' : 'project'} aria-disabled={locked} onclick={() => !locked && onstart(c)}>{label}</button></li>
+<script lang="ts">
+  import { MENU } from '../app/copy.ts';
+  import { rise } from '../app/motion.ts';
+  import Icon from './Icon.svelte';
+
+  interface Props {
+    groups: MenuGroup[];
+    /** Below the groups, under a separator. */
+    last: MenuItem;
+    /** After an item ran. */
+    onclose: () => void;
+  }
+
+  let { groups, last, onclose }: Props = $props();
+  let openGroup = $state<string | null>(null);
+  const shown = $derived(groups.find((g) => g.label === openGroup));
+
+  function press(i: MenuItem) {
+    if (i.off) return;
+    onclose();
+    i.run();
+  }
+</script>
+
+{#snippet row(i: MenuItem)}
+  <li>
+    <button class="row" class:danger={i.danger} data-control={i.control} aria-disabled={!!i.off} title={i.off ?? undefined} onclick={() => press(i)}>
+      <span>{i.label}</span>
+      {#if i.key}<kbd translate="no">{i.key}</kbd>{/if}
+    </button>
+  </li>
+{/snippet}
+
+<!-- Anchored to ☰, over the page: nothing under it moves. Groups first, the group's items beside them on the side the window has room. -->
+<nav id="menu" transition:rise={{ dur: '--dur-quick' }} class="menu" aria-label={MENU.button}>
+  <ul class="panel">
+    {#each groups as g (g.label)}
+      <li>
+        <button class="row" aria-expanded={openGroup === g.label} onpointerenter={() => (openGroup = g.label)} onclick={() => (openGroup = g.label)}>
+          <Icon name="chevron-left" size="var(--i-s)" />
+          <span>{g.label}</span>
+        </button>
+      </li>
     {/each}
-    <li><button class="secondary" data-control="project" aria-disabled={locked} bind:this={restartButton} onclick={() => !locked && onrestart()}>{MENU.restart}</button></li>
-    <li class="help"><button class="secondary" onclick={onhelp}>{HELP.heading}</button></li>
-    {#if agentLinked}
-      <li class="agent"><button class="secondary" data-control="ask" onclick={ontalk}>{AGENT.menuTalk}</button></li>
-      <li><button class="secondary" onclick={onunlink}>{AGENT.menuUnlink}</button></li>
-    {:else}
-      <li class="agent"><button class="secondary" data-control="link" onclick={(e) => onlink(e.currentTarget)}>{AGENT.menuLink}</button></li>
-    {/if}
+    <li class="sep" role="separator"></li>
+    {@render row(last)}
   </ul>
+  {#if shown}
+    <ul class="panel" aria-label={shown.label}>
+      {#each shown.items.filter((i) => !i.danger) as i (i.label)}
+        {@render row(i)}
+      {/each}
+      {#if shown.items.some((i) => i.danger)}
+        <li class="sep" role="separator"></li>
+        {#each shown.items.filter((i) => i.danger) as i (i.label)}
+          {@render row(i)}
+        {/each}
+      {/if}
+    </ul>
+  {/if}
 </nav>
 
 <style>
   .menu {
-    grid-area: menu;
-    padding: var(--s-4) var(--s-5);
-    border-bottom: 1px solid var(--c-line);
-    background: var(--c-layer-1);
-  }
-  ul {
+    position: absolute;
+    z-index: var(--z-announce);
+    top: 100%;
+    right: 0;
     display: flex;
-    flex-wrap: wrap;
-    gap: var(--s-3);
+    flex-direction: row-reverse;
+    align-items: flex-start;
+    gap: var(--s-2);
+  }
+  .panel {
+    width: var(--w-menu);
+    max-height: calc(100vh - var(--h-bar) - var(--s-4));
     margin: 0;
-    padding: 0;
+    padding: var(--s-2) 0;
+    overflow: auto;
+    border: 1px solid var(--c-paper);
+    border-radius: var(--r-m);
+    background: var(--c-layer-1);
     list-style: none;
   }
-  .agent {
-    margin-left: auto;
+  .row {
+    display: flex;
+    align-items: center;
+    gap: var(--s-3);
+    width: 100%;
+    height: var(--h-row);
+    padding: 0 var(--s-4);
+    border: 0;
+    background: none;
+    color: var(--c-paper);
+    font: 400 var(--t-small) / 1 var(--f-ja);
+    text-align: left;
+    cursor: pointer;
   }
-  /* The bar shows 困ったとき on wider windows; the menu carries it on phones. */
-  @media (min-width: 768px) {
-    .help {
-      display: none;
+  .row span {
+    flex: 1;
+    min-width: 0;
+  }
+  .row[aria-expanded='true'] {
+    background: var(--c-layer-2);
+  }
+  .row.danger {
+    color: var(--c-signal);
+  }
+  .row[aria-disabled='true'] {
+    color: var(--c-muted);
+    cursor: default;
+  }
+  @media (hover: hover) and (pointer: fine) {
+    .row:not([aria-disabled='true']):hover {
+      background: var(--c-layer-2);
     }
+  }
+  .row:focus-visible {
+    outline: var(--st-w-focus) solid var(--c-paper);
+    outline-offset: calc(-1 * var(--st-w-focus));
+  }
+  kbd {
+    color: var(--c-muted);
+    font: 400 var(--t-caption) / 1 var(--f-mono);
+  }
+  .sep {
+    height: 1px;
+    margin: var(--s-2) 0;
+    background: var(--c-layer-2);
   }
 </style>

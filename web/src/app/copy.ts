@@ -464,7 +464,6 @@ export const PARTS = {
   heading: '部品',
   hint: 'ドラッグで置く',
   close: '部品を閉じる',
-  closeOrder: '書き込みの順を閉じる',
   open: '部品を開く',
 } as const;
 
@@ -599,12 +598,6 @@ export const LINK_WHY = {
   loop: 'このノードの下にあるノードにはつなげません',
 } as const;
 
-/** Left column. */
-export const ORDER = {
-  heading: '書き込みの順',
-  none: 'なし',
-} as const;
-
 /** Right column. */
 export const DETAIL = {
   /** M40 */
@@ -707,6 +700,7 @@ export const RECONNECT = {
 /** Help in the header, and the operating-mode key list. */
 export const HELP = {
   heading: '困ったとき',
+  close: '困ったときを閉じる',
   rows: [
     ['一覧が空のとき', 'データ用のケーブルに替えてください（充電専用では出ません）。'],
     ['「DAGON hub」が無い', '親機の画面が点いているか確かめてください。'],
@@ -719,6 +713,9 @@ export const HELP = {
     ['Tab', 'ノードへ移る'],
     ['矢印', '隣のノードへ'],
     ['Enter', '選ぶ'],
+    ['F', 'キャンバス全体を表示する'],
+    ['Ctrl + ホイール', 'キャンバスを拡大・縮小する'],
+    ['ドラッグ', 'キャンバスやノードを動かす'],
   ],
 } as const;
 
@@ -862,7 +859,7 @@ export const DEFINE = {
   /** The parts window. */
   search: '製品・マイコンを探す',
   byMcuOwn: 'マイコン',
-  ownBoard: (mcu: string) => `${mcu}（自作ボード）`,
+  ownBoard: 'ボード',
   count: (n: number) => `${n} 個`,
   placed: '配置済み',
   firstHeading: 'はじめに',
@@ -903,6 +900,7 @@ export const DEFINE = {
   /** Writes the 構成 back to the project's YAML through dagon serve. */
   save: '保存',
   fixSentence: '直すと、親機へ送れます。',
+  readySentence: 'ビルドしてから、書込で書き込みます。',
   /** C19: E6, nodes updating skips; the 構成 is valid as it is. */
   notYetSentence: (k: number) => `書き込めないノードが ${k} つあります。構成はこのままで使え、書き込みではそのノードを飛ばします。`,
   /** The 構成 of the release file chosen in 書込 replaces this one (undoable, saved to the YAML). */
@@ -1188,6 +1186,31 @@ export const SIM = {
 export const MENU = {
   button: 'メニューを開く',
   restart: '最初からやり直す',
+  groups: { project: 'プロジェクト', define: '構成', connect: 'つなぐ', dagon: 'DAGON', help: '困ったとき' },
+  save: '保存する',
+  arrange: '自動で並べる',
+  send: '構成を送り直す',
+  place: 'パッケージファイルを置く',
+  rollback: '前のバージョンに戻す',
+  recover: '止まったノードを復旧する',
+  applyProposal: 'DAGON の案を反映する',
+  cli: 'CLI につなぎ直す',
+  keys: 'キー操作',
+  copyLog: '記録をコピーする',
+  wiring: '配線表を見る',
+  copyUrl: 'この URL をコピーする',
+  copied: 'コピーした',
+  /** Why an item cannot be used now. */
+  off: {
+    notDefine: '準備で使えます。',
+    notGraph: 'グラフの表示で使えます。',
+    notConnected: '親機につないでから使えます。',
+    notIdle: '今の動きが終わってから使えます。',
+    noNode: 'ノードを選んでから使えます。',
+    noStuck: '止まったノードはありません。',
+    noProposal: 'DAGON の案はありません。',
+    nothing: 'これ以上ありません。',
+  },
   restartHeading: 'やり直しの確認',
   restartSentence: 'このページの記録を消して、始めの画面に戻ります（元に戻せません。プロジェクトのファイルと基板の中のプログラムは変わりません）。',
   restartConfirm: '消して最初からやり直す',
@@ -1252,6 +1275,7 @@ export const BUILD = {
 } as const;
 
 export const WRITE = {
+  pickVersion: 'バージョンを選んで書き込む',
   run: '書き込む',
   go: '{n} ノードへ書き込む',
   toast: {

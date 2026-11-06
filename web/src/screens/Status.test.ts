@@ -9,18 +9,17 @@ import Toast from './Toast.svelte';
 const status = (p: Partial<Parameters<typeof Status>[1]> = {}) =>
   render(Status, {
     props: {
-      hub: '○ 未接続',
+      hub: '未接続',
+      connected: false,
       hubAction: HUB_TOGGLE.connect,
       onhub: () => undefined,
       state: '待機',
       cli: 'CLI 0.4.0',
-      key: null,
-      problems: 0,
-      unreachable: 0,
-      progress: null,
-      mode: '運用',
+      cliReady: true,
+      oncli: () => undefined,
       saved: STATUS.saved,
-      sentence: '',
+      savedOk: true,
+      sentence: '親機につないでください。',
       status: '',
       alert: '',
       ...p,
@@ -28,12 +27,21 @@ const status = (p: Partial<Parameters<typeof Status>[1]> = {}) =>
   }).body;
 
 describe('status row', () => {
-  test('information left in the design order, the connection action last', () => {
-    const body = status({ progress: '書き込み 53%' });
+  test('where the 親機 stands, the one sentence, marks, the connection action last', () => {
+    const body = status();
     const at = (s: string) => body.indexOf(s);
-    const order = ['○ 未接続', '待機', 'CLI 0.4.0', `${STATUS.key} —`, `${DRAWER.problems} 0`, '書き込み 53%', '運用', STATUS.saved, HUB_TOGGLE.connect];
+    const order = ['未接続', '親機につないでください。', `aria-label="${STATUS.saved}"`, 'aria-label="CLI 0.4.0"', HUB_TOGGLE.connect];
     expect(order.map(at)).toEqual([...order.map(at)].sort((a, b) => a - b));
     expect(order.every((s) => at(s) >= 0)).toBe(true);
+  });
+
+  test('the sentence is shown, not only spoken', () => {
+    expect(status()).toMatch(/<p class="sentence[^>]*>.*親機につないでください。<\/p>/);
+  });
+
+  test('what shows elsewhere is not repeated in the band', () => {
+    const body = status();
+    for (const word of [DRAWER.problems, '準備', '書込']) expect(body).not.toContain(word);
   });
 
   test('a held connection stays focusable and says why', () => {

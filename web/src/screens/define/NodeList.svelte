@@ -89,7 +89,7 @@
         {/each}
       {:else}
         {#each mcuList.filter((m) => match(m.name)) as m (m.id)}
-          {@render row({ key: { mcu: m.id }, name: DEFINE.ownBoard(m.name) }, m.name, !full)}
+          {@render row({ key: { mcu: m.id }, name: DEFINE.ownBoard }, m.name, !full)}
         {/each}
       {/if}
     </ul>

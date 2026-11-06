@@ -1,14 +1,18 @@
 <script lang="ts">
   import { tick, untrack } from 'svelte';
   import { bandOf } from './app/band.ts';
-  import { AGENT, ANNOUNCE, BAND, BUILD, BUTTON, CANVAS, DEFINE, DIFF, DRAWER, JOBS, SKELETON, WRITE, HUB, LOCK, SHEET, STATUS, ZOOM, HUB_TOGGLE, MODE, NODE, ORDER, PRODUCT, RECONNECT, SAVE, SKIP, STEP, TIME } from './app/copy.ts';
+  import { AGENT, ANNOUNCE, BAND, BUILD, BUTTON, CANVAS, DEFINE, DIFF, DRAWER, JOBS, SKELETON, WRITE, HUB, LOCK, SHEET, STATUS, ZOOM, HUB_TOGGLE, MODE, NODE, PRODUCT, RECONNECT, SAVE, SKIP, STEP, TIME } from './app/copy.ts';
   import { webSerial } from './app/connect.ts';
   import { fade, rise, tokenMs } from './app/motion.ts';
   import { HUB_LOCKED, hubOf, view, type Action } from './app/machine.ts';
   import { Operate, waterOf, type Progress, type ReleaseFile } from './app/operate.svelte.ts';
   import { keptChoices, type Kept } from './app/kept.ts';
   import { logStages } from './app/stageLog.svelte.ts';
-  import Graph, { type Chip, type Dot } from './graph/Graph.svelte';
+  import Graph, { COMPACT_FROM, newView, ZOOM_LIMITS, type Chip, type View } from './graph/Graph.svelte';
+  import Focal, { type Dot } from './screens/Focal.svelte';
+  import Icon from './screens/Icon.svelte';
+  import SplitButton from './screens/SplitButton.svelte';
+  import StopNotice from './screens/StopNotice.svelte';
   import Status from './screens/Status.svelte';
   import Drawer, { type DrawerTab } from './screens/Drawer.svelte';
   import Timeline, { type StageEvent } from './screens/Timeline.svelte';
@@ -25,7 +29,7 @@
   import { problemChip } from './app/define/problems.ts';
   import { SAMPLE_CONFIG, SAMPLE_YAML } from './app/sample.ts';
   import { Start, type StartChoice } from './app/start.svelte.ts';
-  import Menu from './screens/Menu.svelte';
+  import Menu, { type MenuGroup, type MenuItem } from './screens/Menu.svelte';
   import Restart from './screens/Restart.svelte';
   import Unsaved from './screens/Unsaved.svelte';
   import { Autosave } from './app/define/autosave.svelte.ts';
@@ -45,8 +49,7 @@
   import FactoryModal from './screens/FactoryModal.svelte';
   import { answerConsent } from './app/factory.ts';
   import Toast, { type Notice } from './screens/Toast.svelte';
-  import { CONN, FILE, NOTICE, SIM, fill as fillIn } from './app/copy.ts';
-  import OrderList from './screens/OrderList.svelte';
+  import { CONN, FILE, HELP, MENU, NOTICE, SIM, START, fill as fillIn } from './app/copy.ts';
   import { devHub } from './serial/devHub.ts';
   import { DEMO_SITE } from './app/site.ts';
   import { serveSim, type SimStand } from './serial/serveSim.ts';
@@ -191,6 +194,8 @@
       }
     }
     layoutNames = JSON.stringify(d.doc.names);
+    positions = projectLayout.positions ?? {};
+    canvasView = newView();
     enterWork(want);
   }
 
@@ -224,15 +229,17 @@
     local = true;
     op.reset();
     d.reset();
+    positions = {};
+    canvasView = newView();
     if (c === 'sample') d.load(fromYaml(SAMPLE_YAML, Object.fromEntries(SAMPLE_CONFIG.nodes.map((n) => [n.id, n.name]))), SAMPLE_YAML);
     enterWork('define');
   }
 
-  /** The menu under the header, and its one confirmation. */
+  /** The menu's popover, and its one confirmation. */
   let menuOpen = $state(false);
   let helpOpen = $state(false);
+  let helpKeys = $state(false);
   let restartOpen = $state(false);
-  let restartButton = $state<HTMLButtonElement>();
   /** Menu 新しく作る / 見本から新しく作る / 開く: the 構成 is saved first (or the dialog asks). */
   function toStart(c: StartChoice) {
     if (stopped(DEMO_SITE && c === 'open' ? 'open' : 'project')) return;
@@ -269,7 +276,7 @@
 
   function cancelRestart() {
     restartOpen = false;
-    void tick().then(() => restartButton?.focus());
+    void tick().then(() => document.querySelector<HTMLElement>('[aria-controls="menu"]')?.focus());
   }
 
   /** 運用 pressed while it cannot be entered: M69 (or 未保存) in the band until the 構成 changes. */
@@ -376,8 +383,16 @@
   }
   const fileDiff = $derived(op.state === 'otherTopology' && op.fileTopology ? topoDiff(d.doc.topo, op.fileTopology as unknown as Topo, d.doc.names) : []);
 
-  /** Define mode's drawing scale: up to 32 ノード fit by zooming out; the canvas scrolls to pan. */
-  let zoom = $state(1);
+  /** The canvas's zoom and pan, the user's: kept across modes and views, new for each project. */
+  let canvasView = $state<View>(newView());
+  /** Where the user put cards, kept in the project's layout file. */
+  let positions = $state.raw<Record<string, { x: number; y: number }>>({});
+  function savePositions() {
+    projectLayout = { ...projectLayout, positions };
+    if (!local) void cli.saveLayout(projectLayout);
+  }
+  /** The free part of the canvas (between the floating columns): what a fit fills. */
+  let midEl = $state<HTMLElement>();
 
   /** The linking dialog, and requests to open DAGON's bubble. */
   let linkOpen = $state(false);
@@ -462,7 +477,7 @@
     if (firstError) return { sentence: DEFINE.fixSentence };
     if (d.notYet) return { sentence: DEFINE.notYetSentence(d.notYet) };
     if (d.doc.topo.nodes.length === 0) return { sentence: CANVAS.empty };
-    return { sentence: '' };
+    return { sentence: DEFINE.readySentence };
   });
   const savedLabel = $derived(local ? '' : d.unsaved ? SAVE.unsaved : autosave.pending ? STATUS.saving : STATUS.saved);
   /** Where each flow step leads (02–04 open their CLI sheet in 定義; 05 is 運用). */
@@ -515,11 +530,6 @@
     why = why && { ...why, x, y };
   }
 
-  /** Widths of the floating windows, so the trees centre between them. */
-  let partsW = $state(0);
-  let sheetW = $state(0);
-  let sheetH = $state(0);
-
   /** Ctrl+Z / Ctrl+Shift+Z anywhere but in a field; Delete and L on the canvas; Ctrl+J the drawer. */
   function defineKeys(e: KeyboardEvent) {
     if (screen === 'work' && e.key.toLowerCase() === 'j' && (e.ctrlKey || e.metaKey)) {
@@ -530,6 +540,13 @@
     if (screen === 'work' && agent.linked && e.key === '/' && !/^(INPUT|SELECT|TEXTAREA)$/.test(t.tagName)) {
       e.preventDefault();
       return void dagonOpen++;
+    }
+    if (screen === 'work' && !/^(INPUT|SELECT|TEXTAREA)$/.test(t.tagName)) {
+      if (e.key.toLowerCase() === 'f' && !e.ctrlKey && !e.metaKey) return graph?.fit();
+      if ((e.ctrlKey || e.metaKey) && (e.key === '+' || e.key === '=' || e.key === '-')) {
+        e.preventDefault();
+        return graph?.zoomBy(e.key === '-' ? 1 / ZOOM_LIMITS.step : ZOOM_LIMITS.step);
+      }
     }
     if (mode !== 'define') return;
     const el = e.target as HTMLElement;
@@ -600,67 +617,8 @@
   }
 
   let primaryEl = $state<HTMLButtonElement>();
-  // Phones start with the canvas: the parts window opens from "＋ 部品".
-  let partsOpen = $state(globalThis.innerWidth === undefined || innerWidth >= 768);
-  /** 運用's update order: the top-left stays clear there; it opens from its button. */
-  let orderOpen = $state(false);
+  let partsOpen = $state(true);
   let nextEl = $state<HTMLElement>();
-  /** wide ≥ 1280 px: three columns; drawer 768–1279 px: the update order opens from the header; narrow ≤ 767 px: one column. */
-  let layout = $state<'wide' | 'drawer' | 'narrow'>('wide');
-  $effect(() => {
-    const narrowMq = matchMedia('(max-width: 767px)');
-    const drawerMq = matchMedia('(max-width: 1279px)');
-    const on = () => (layout = narrowMq.matches ? 'narrow' : drawerMq.matches ? 'drawer' : 'wide');
-    on();
-    narrowMq.addEventListener('change', on);
-    drawerMq.addEventListener('change', on);
-    return () => {
-      narrowMq.removeEventListener('change', on);
-      drawerMq.removeEventListener('change', on);
-    };
-  });
-
-  let drawerOpen = $state(false);
-  let drawerEl = $state<HTMLElement>();
-  let drawerButton = $state<HTMLButtonElement>();
-  $effect(() => {
-    if (layout !== 'drawer') drawerOpen = false;
-  });
-
-  async function openDrawer() {
-    drawerOpen = true;
-    await tick();
-    (focusables()[0] ?? drawerEl)?.focus();
-  }
-
-  function closeDrawer() {
-    drawerOpen = false;
-    drawerButton?.focus();
-  }
-
-  function focusables(): HTMLElement[] {
-    return [...(drawerEl?.querySelectorAll<HTMLElement>('button, [href], summary, [tabindex]:not([tabindex="-1"])') ?? [])];
-  }
-
-  /** Keeps Tab inside the open drawer; Escape closes it and returns focus to its header button. */
-  function drawerKeys(e: KeyboardEvent) {
-    if (e.key === 'Escape') {
-      e.preventDefault();
-      return closeDrawer();
-    }
-    if (e.key !== 'Tab') return;
-    const f = focusables();
-    if (f.length === 0) return e.preventDefault();
-    const first = f[0];
-    const last = f[f.length - 1];
-    if (e.shiftKey && (document.activeElement === first || document.activeElement === drawerEl)) {
-      e.preventDefault();
-      last.focus();
-    } else if (!e.shiftKey && document.activeElement === last) {
-      e.preventDefault();
-      first.focus();
-    }
-  }
 
   /** Buttons whose procedures this page runs; the others show as unavailable. */
   const RUNS: ReadonlySet<Action> = new Set([
@@ -668,6 +626,8 @@
     'chooseFile', 'updateResponding', 'otherFile', 'update', 'useLatest', 'recover', 'recoverAgain', 'defineFix',
   ]);
 
+  /** States 書き込む writes in directly: the hub answers and nothing runs. */
+  const WRITABLE: ReadonlySet<string> = new Set(['ready', 'nodesSilent', 'done']);
   /** States that show the update's progress (node chips, percent, the dot number). */
   const UPDATING: ReadonlySet<string> = new Set(['writing', 'hubRestarting', 'reconnectNeeded', 'stopped', 'done', 'recovering', 'recoverFailed']);
   /** States whose dot number and update-order rows show percent. */
@@ -756,19 +716,16 @@
       if (s === 'failed') buildFailureOpen = true;
     });
   });
-  /** While building, only the card of the node cargo builds now says so; nothing stays once it is done. */
-  const buildingChips = $derived.by((): Record<string, Chip> => {
-    if (buildJob?.state !== 'running') return {};
-    const line = [...buildJob.lines].reverse().find((l) => /^\S+: building /.test(l));
+  /** While building, the node cargo builds now carries the edge light; every node waits under it until cargo names one, and while signing. */
+  const building = $derived.by((): readonly string[] => {
+    if (buildState !== 'running') return [];
+    const line = buildJob?.state === 'running' ? [...buildJob.lines].reverse().find((l) => /^\S+: building /.test(l)) : undefined;
     const id = line?.slice(0, line.indexOf(':'));
-    return id && d.config.reach.includes(id) ? { [id]: { chip: BUILD.state.running, spoken: BUILD.state.running, silent: false } } : {};
+    return id && d.config.reach.includes(id) ? [id] : d.config.reach;
   });
   const chips = $derived(updating ? progressChips : diffChips);
   /** The water in each node while it is written (writing, hubRestarting, recovering). */
   const fill = $derived(PERCENT.has(op.state) ? Object.fromEntries(Object.keys(waterOf(op.progress)).map((id) => [id, op.percentOf(id, nowMs)])) : {});
-  const percent = $derived(
-    PERCENT.has(op.state) ? Object.fromEntries(Object.keys(op.progress).map((id) => [id, op.percentOf(id, nowMs)])) : {},
-  );
   // The comparison stays while the update runs (P14: never silently replaced).
   /** The refusal modal: why the package cannot be written and what to do; closing leaves the band's buttons. */
   let refusalClosed = $state<ReleaseFile | null>(null);
@@ -811,12 +768,6 @@
       ? cliPanel !== null || d.selected !== null
       : !op.config || op.selected !== null || (!!op.recovering && !!op.recovered),
   );
-  $effect(() => {
-    if (!sheetShown || layout === 'narrow') sheetW = 0;
-  });
-  $effect(() => {
-    if (layout === 'narrow' || !(mode === 'define' ? partsOpen : orderOpen)) partsW = 0;
-  });
   /** Node actions in the detail: while watching, with nothing running. */
   const nodeActions = $derived(['ready', 'nodesSilent', 'done'].includes(op.state));
 
@@ -846,7 +797,6 @@
     begin: (start) => {
       tlStart = start;
       tlEvents = [];
-      if (drawerTab === null) drawerTab = 'timeline';
     },
     add: (events) => (tlEvents = [...tlEvents, ...events]),
   });
@@ -854,7 +804,6 @@
   /** 書込's version picker: the latest build (the project's newest release) first, then the kept packages; writing an older one is going back. */
   let latest = $state<{ bytes: Uint8Array; label: string } | null>(null);
   let kept = $state<Kept[]>([]);
-  let chosen = $state('latest');
   /** One version for all of a package's nodes names it; otherwise it is 最新のビルド. */
   function labelOf(bytes: Uint8Array): string {
     const one = [...new Set([...releaseVersions(bytes).values()].map(versionText))];
@@ -868,7 +817,6 @@
     const bytes = await fetchLatest().catch(() => null);
     latest = bytes ? { bytes, label: labelOf(bytes) } : null;
     kept = served ? await cli.keptList().catch(() => []) : [];
-    if (chosen === 'latest' ? !latest : !kept.some((k) => k.id === chosen)) chosen = latest ? 'latest' : (kept[0]?.id ?? 'latest');
   }
   const versionChoices = $derived([
     ...(latest ? [{ id: 'latest', label: latest.label }] : []),
@@ -878,10 +826,10 @@
     // Again on entering 書込 and after each write (the written package was kept).
     if (mode === 'operate' && (op.state === 'ready' || op.state === 'done')) untrack(() => void loadVersions());
   });
-  /** 書き込む while watching: the chosen version, checked against the 構成, to the checked cards. */
-  async function writeChosen() {
+  /** 書き込む while watching: the version (the latest build unless one was chosen), checked against the 構成, to the checked cards. */
+  async function writeVersion(id = latest ? 'latest' : (kept[0]?.id ?? 'latest')) {
     if (stopped('update')) return;
-    const pkg = chosen === 'latest' ? (latest ? { name: `${latest.label}.dgb`, bytes: latest.bytes } : null) : await cli.keptBytes(chosen).then((b) => (b ? { name: `${chosen}.dgb`, bytes: b } : null));
+    const pkg = id === 'latest' ? (latest ? { name: `${latest.label}.dgb`, bytes: latest.bytes } : null) : await cli.keptBytes(id).then((b) => (b ? { name: `${id}.dgb`, bytes: b } : null));
     if (!pkg) {
       notice = { word: BAND.M58.chip, error: true, detail: BAND.M58.sentence };
       return;
@@ -1059,9 +1007,9 @@
     const c = op.config;
     if (!c || !connected || op.state === 'checking') return null;
     if (PERCENT.has(op.state)) {
-      const stopped = op.state === 'stopped';
+      const halted = op.state === 'stopped';
       const overall = op.overallAt(nowMs);
-      const progress = { label: CANVAS.dotProgress, value: overall, unit: stopped ? CANVAS.dotStopped : CANVAS.dotPercent, name: CANVAS.dotProgressName(overall, stopped) };
+      const progress = { label: CANVAS.dotProgress, value: overall, unit: halted ? CANVAS.dotStopped : CANVAS.dotPercent, name: CANVAS.dotProgressName(overall, halted) };
       if (op.startedAt === null) return progress;
       // 経過 under the number, 残り beside it (the estimate less the time gone).
       const gone = Math.max(0, wallMs - op.startedAt);
@@ -1085,9 +1033,7 @@
           sending: false,
           selected: d.selected,
           onselect: (k: string) => (d.selected = d.selected === k ? null : k),
-          dot: defineDot,
-          chips: { ...defineChips, ...buildingChips },
-          inset: layout === 'narrow' ? { left: 0, right: 0, bottom: sheetShown ? sheetH : 0 } : { left: partsW, right: sheetW },
+          chips: defineChips,
           dropOn,
           canLink: (from: string, to: string) => d.linkRefusal(from, to),
           onlink: (from: string, to: string) => !stopped('edit') && d.link(to, from),
@@ -1100,10 +1046,8 @@
           sending: op.state === 'sending',
           selected: op.selected,
           onselect: (k: string) => op.select(op.selected === k ? null : k),
-          dot,
           chips,
           fill,
-          inset: { left: partsW, right: sheetW },
           checks: Object.fromEntries(op.reach.map((n) => [n.id, !op.skip.has(n.id)])),
           oncheck: (id: string) => op.toggleSkip(id),
           checksLocked: updating && !['done', 'recoverFailed'].includes(op.state),
@@ -1122,6 +1066,80 @@
     if (op.focusRequest === 0) return;
     void tick().then(() => (band.primary ? primaryEl : nextEl)?.focus());
   });
+
+  /** 記録 and the page's address, to paste elsewhere; a refused clipboard says so. */
+  async function copyText(text: string) {
+    try {
+      await navigator.clipboard.writeText(text);
+      notice = { word: MENU.copied };
+    } catch {
+      notice = { word: MENU.copied.replace('した', 'できない'), error: true };
+    }
+  }
+  const selectedNode = $derived(op.selected?.startsWith('node:') ? op.selected.slice(5) : null);
+  const lastProposal = $derived(agent.messages.map((m) => !!m.proposal && !m.applied).lastIndexOf(true));
+  const idle = $derived(WRITABLE.has(op.state));
+  /** The ☰ menu: only operations that run here; a group's items by how often they are used. */
+  const menuGroups = $derived<MenuGroup[]>([
+    {
+      label: MENU.groups.project,
+      items: [
+        { label: START.new, control: 'project', off: modeLocked ? MENU.off.notIdle : null, run: () => toStart('new') },
+        { label: START.open, control: DEMO_SITE ? 'open' : 'project', off: modeLocked ? MENU.off.notIdle : null, run: () => toStart('open') },
+        { label: MENU.save, off: local || screen !== 'work' ? MENU.off.nothing : null, run: () => void save() },
+      ],
+    },
+    {
+      label: MENU.groups.define,
+      items: [
+        { label: DEFINE.undo, key: 'Ctrl+Z', control: 'edit', off: mode !== 'define' ? MENU.off.notDefine : d.canUndo ? null : MENU.off.nothing, run: () => d.undo() },
+        { label: DEFINE.redo, key: 'Ctrl+Shift+Z', control: 'edit', off: mode !== 'define' ? MENU.off.notDefine : d.canRedo ? null : MENU.off.nothing, run: () => d.redo() },
+        { label: PARTS.open, off: mode !== 'define' ? MENU.off.notDefine : partsOpen ? MENU.off.nothing : null, run: () => (partsOpen = true) },
+        { label: MENU.arrange, off: Object.keys(positions).length ? null : MENU.off.nothing, run: () => ((positions = {}), savePositions()) },
+        { label: d.view === 'graph' ? DEFINE.table : DEFINE.graph, off: mode !== 'define' ? MENU.off.notDefine : null, run: () => (d.view = d.view === 'graph' ? 'table' : 'graph') },
+        { label: ZOOM.fit, key: 'F', off: mode === 'define' && d.view !== 'graph' ? MENU.off.notGraph : null, run: () => graph?.fit() },
+      ],
+    },
+    {
+      label: MENU.groups.connect,
+      items: [
+        { label: connected ? HUB_TOGGLE.disconnect : HUB_TOGGLE.connect, control: 'connect', off: hubLocked, run: toggleHub },
+        { label: DEFINE.connectDiscover, control: 'connect', off: !connected ? MENU.off.notConnected : idle ? null : MENU.off.notIdle, run: () => void op.discover() },
+        { label: MENU.send, off: !connected ? MENU.off.notConnected : idle ? null : MENU.off.notIdle, run: () => void sendDefined() },
+        { label: MENU.place, control: 'file', off: !connected ? MENU.off.notConnected : idle ? null : MENU.off.notIdle, run: () => fileInput?.click() },
+        { label: MENU.rollback, control: 'rollback', off: !connected ? MENU.off.notConnected : !idle ? MENU.off.notIdle : selectedNode ? null : MENU.off.noNode, run: () => selectedNode && void op.rollback(selectedNode) },
+        { label: MENU.recover, control: 'recover', off: op.recoverTarget ? null : MENU.off.noStuck, run: () => void recover() },
+      ],
+    },
+    {
+      label: MENU.groups.dagon,
+      items: [
+        ...(agent.linked
+          ? [
+              { label: AGENT.menuTalk, control: 'ask', run: () => void dagonOpen++ },
+              { label: MENU.applyProposal, control: 'apply', off: lastProposal < 0 ? MENU.off.noProposal : null, run: () => applyProposal(lastProposal, document.body) },
+            ]
+          : [{ label: AGENT.menuLink, control: 'link', run: () => void openLink(document.querySelector('[aria-controls="menu"]')) }]),
+        { label: MENU.cli, run: openCli },
+        ...(agent.linked ? [{ label: AGENT.menuUnlink, danger: true, run: () => void unlink() }] : []),
+      ],
+    },
+    {
+      label: MENU.groups.help,
+      items: [
+        { label: HELP.heading, run: () => ((helpKeys = false), (helpOpen = true)) },
+        { label: MENU.keys, run: () => ((helpKeys = true), (helpOpen = true)) },
+        { label: MENU.copyLog, off: notes.length ? null : MENU.off.nothing, run: () => void copyText(notes.map((n) => `${n.at} ${n.text}`).join('\n')) },
+        { label: MENU.copyUrl, run: () => void copyText(location.href) },
+      ],
+    },
+  ]);
+  const menuLast = $derived<MenuItem>({ label: MENU.restart, control: 'project', danger: true, off: modeLocked ? MENU.off.notIdle : null, run: () => (restartOpen = true) });
+  function openCli() {
+    if (mode !== 'define') switchMode('define');
+    d.selected = null;
+    cliPanel = 'link';
+  }
 
   /** 雛形を作る: the modal is open while `skeleton` is set; `id` is serve's job once it has taken it. */
   let skeleton = $state<{ id: number | null } | null>(null);
@@ -1171,13 +1189,11 @@
     op.state === 'silentHub' ? null : op.state === 'ready' && !op.latestMissing && band.secondary.some((b) => b.action === 'useLatest') ? 'useLatest' : (band.primary?.action ?? null),
   );
   const writeControl = $derived(writeAction ? CONTROL_OF[writeAction] : 'flash');
-  /** States 書き込む writes in directly: the hub answers and nothing runs. */
-  const WRITABLE: ReadonlySet<string> = new Set(['ready', 'nodesSilent', 'done']);
   const writeOff = $derived(op.state === 'choosing' || (op.state !== 'silentHub' && !WRITABLE.has(op.state) && (writeAction === null || !RUNS.has(writeAction))));
   function write() {
     if (writeOff) return;
     if (writeAction === null) return void (factory = { id: null });
-    if (WRITABLE.has(op.state)) return void writeChosen();
+    if (WRITABLE.has(op.state)) return void writeVersion();
     act(writeAction);
   }
 
@@ -1244,31 +1260,14 @@
   <NodeList {d} ondrag={startPart} onclose={() => (partsOpen = false)} />
 {/snippet}
 
-{#snippet zoomBar(scale: number)}
-  {#if mode === 'define'}
-    <button class="wide-only" data-control="edit" aria-disabled={!d.canUndo} title="{DEFINE.undo} (Ctrl+Z)" onclick={() => d.undo()}>{DEFINE.undo}</button>
-    <button class="wide-only" data-control="edit" aria-disabled={!d.canRedo} title="{DEFINE.redo} (Ctrl+Shift+Z)" onclick={() => d.redo()}>{DEFINE.redo}</button>
-    <span class="seg" role="radiogroup" aria-label="{DEFINE.graph}・{DEFINE.table}">
-      <button role="radio" aria-checked={d.view === 'graph'} onclick={() => (d.view = 'graph')}>{DEFINE.graph}</button>
-      <button role="radio" aria-checked={d.view === 'table'} onclick={() => (d.view = 'table')}>{DEFINE.table}</button>
-    </span>
+{#snippet stopActions()}
+  {#each band.secondary as b (b.label)}
+    <button class="button-secondary" data-control={CONTROL_OF[b.action]} aria-disabled={!RUNS.has(b.action)} onclick={() => RUNS.has(b.action) && ((stopClosed = op.failed), act(b.action))}>{b.label}</button>
+  {/each}
+  {#if band.primary}
+    {@const p = band.primary}
+    <button class="button-primary" data-control={CONTROL_OF[p.action]} aria-disabled={!RUNS.has(p.action)} onclick={() => RUNS.has(p.action) && ((stopClosed = op.failed), act(p.action))}>{p.label}</button>
   {/if}
-  {#if mode === 'operate' || d.view === 'graph'}
-    <ZoomPill {scale} canIn={zoom < 2} canOut={zoom > 0.5} onin={() => (zoom = Math.min(2, zoom * 1.2))} onout={() => (zoom = Math.max(0.5, zoom / 1.2))} onfit={() => (zoom = 1)} />
-  {/if}
-{/snippet}
-
-{#snippet canvas()}
-  <main id="canvas" tabindex="-1" aria-describedby="canvas-help" class:define={mode === 'define'}>
-    <p id="canvas-help" class="visually-hidden">{CANVAS.describe}</p>
-    {#if mode === 'operate' || d.view === 'graph'}
-      <!-- One graph for both modes: changing mode moves the same cards to their places. -->
-      <Graph bind:this={graph} {zoom} controls={zoomBar} {...graphProps} />
-    {:else}
-      <div in:fade class="edit-area" data-control="edit"><Table {d} onaddnode={() => document.querySelector<HTMLElement>('#list-h')?.focus()} /></div>
-      <div class="zoom">{@render zoomBar(1)}</div>
-    {/if}
-  </main>
 {/snippet}
 
 {#snippet defineRight()}
@@ -1285,12 +1284,17 @@
     <button class="button-primary-header" data-control="gen" bind:this={primaryEl} aria-disabled={blocked} title={blocked ? SKELETON.disabled : undefined} onclick={() => !blocked && void makeSkeleton()}><span>{SKELETON.make}</span></button>
     <button class="button-secondary-header" data-control="build" aria-disabled={buildState === 'running'} onclick={() => buildState !== 'running' && void build()}><span>{BUILD.run}</span></button>
   {:else}
-    {#if versionChoices.length}
-      <select class="button-secondary-header version" aria-label={WRITE.version} data-control="update" disabled={updating} onchange={(e) => (chosen = e.currentTarget.value)}>
-        {#each versionChoices as c (c.id)}<option value={c.id} selected={c.id === chosen} translate="no">{c.label}</option>{/each}
-      </select>
-    {/if}
-    <button class="button-primary-header" data-control={writeControl} bind:this={primaryEl} aria-disabled={writeOff} onclick={write}><span>{WRITE.run}</span></button>
+    <SplitButton
+      label={WRITE.run}
+      onmain={write}
+      off={writeOff}
+      control={writeControl}
+      pickName={WRITE.pickVersion}
+      options={versionChoices.map((c) => (c.id === 'latest' && c.label !== WRITE.latest ? { ...c, note: WRITE.latest } : c))}
+      pickOff={!WRITABLE.has(op.state)}
+      onpick={(id) => void writeVersion(id)}
+      bind:mainEl={primaryEl}
+    />
   {/if}
 {/snippet}
 
@@ -1341,15 +1345,6 @@
   {/if}
 {/snippet}
 
-{#snippet left()}
-  {#if mode === 'define'}{@render defineLeft()}{:else}{@render operateLeft()}{/if}
-{/snippet}
-
-{#snippet operateLeft()}
-  <button class="x close-order" aria-label={PARTS.closeOrder} title={PARTS.closeOrder} onclick={() => (orderOpen = false)}>×</button>
-  <OrderList config={op.config} selected={op.selected} onselect={(k) => op.select(k)} fold={layout === 'narrow'} {percent} />
-{/snippet}
-
 {#snippet right()}
   {#if mode === 'define'}{@render defineRight()}{:else}{@render operateRight()}{/if}
 {/snippet}
@@ -1373,7 +1368,7 @@
   <a class="skip" href="#canvas">{SKIP.canvas}</a>
   <a class="skip" href="#band">{SKIP.next}</a>
   <!-- The DOM follows the visual order of each layout, so Tab order matches what is seen. -->
-  <div class="frame {layout}" data-locks={locksNow} class:work={screen === 'work'} class:open={drawerOpen} class:modal={restartOpen || autosave.asking !== null}>
+  <div class="frame" data-locks={locksNow} class:work={screen === 'work'} class:modal={restartOpen || autosave.asking !== null}>
     <Header
       sim={simulated}
       {mode}
@@ -1385,65 +1380,105 @@
       onmenu={() => (menuOpen = !menuOpen)}
       actions={screen === 'work' ? actions : undefined}
       bind:helpOpen
+      {helpKeys}
       title={screen === 'work' ? (d.doc.topo.name ?? '') : ''}
-    />
-    {#if menuOpen}
-      <Menu
-        onstart={toStart}
-        onrestart={() => (restartOpen = true)}
-        locked={modeLocked}
-        bind:restartButton
-        agentLinked={agent.linked}
-        onlink={openLink}
-        ontalk={() => ((menuOpen = false), dagonOpen++)}
-        onunlink={() => void unlink()}
-        onhelp={() => ((menuOpen = false), (helpOpen = true))}
-      />
-    {/if}
+    >
+      {#snippet menu()}
+        {#if menuOpen}<Menu groups={menuGroups} last={menuLast} onclose={() => (menuOpen = false)} />{/if}
+      {/snippet}
+    </Header>
     {#if screen === 'start'}
-      <aside class="left"></aside>
       <StartScreen s={start} served={cli.state === 'ready'} />
     {:else}
-      <!-- The graph fills the stage; the parts window (top-left) and the sheet (right) float over it only when they hold something. -->
+      <!-- The canvas's box is the whole stage, whatever floats over it. Three columns float over the free part: each column stacks what shares a side, so they cannot overlap. -->
       <div in:fade class="stage">
-        {@render canvas()}
-        {#if mode === 'define' ? partsOpen : orderOpen}
-          <aside transition:rise class="float parts" data-avoid="" aria-label={mode === 'define' ? PARTS.heading : ORDER.heading} bind:offsetWidth={partsW}>{@render left()}</aside>
-        {:else}
-          <button transition:fade class="secondary tray-open" onclick={() => (mode === 'define' ? (partsOpen = true) : (orderOpen = true))}>{mode === 'define' ? PARTS.open : ORDER.heading}</button>
-        {/if}
+        <main id="canvas" tabindex="-1" aria-describedby="canvas-help">
+          <p id="canvas-help" class="visually-hidden">{CANVAS.describe}</p>
+          {#if mode === 'operate' || d.view === 'graph'}
+            <!-- One graph for both modes: changing mode moves the same cards to their places. -->
+            <Graph bind:this={graph} bind:view={canvasView} bind:positions onmoved={savePositions} freeArea={() => midEl?.getBoundingClientRect()} {building} {...graphProps} />
+          {/if}
+        </main>
+        <div class="overlay">
+          <div class="col">
+            {#if mode === 'define'}
+              <!-- Undo, redo: top-left, where editors keep them and next to what they change. -->
+              <div class="tools">
+                <button class="button-icon" data-control="edit" aria-disabled={!d.canUndo} aria-label={DEFINE.undo} title="{DEFINE.undo} (Ctrl+Z)" onclick={() => d.undo()}><span class="layer"><Icon name="undo-2" /></span></button>
+                <button class="button-icon" data-control="edit" aria-disabled={!d.canRedo} aria-label={DEFINE.redo} title="{DEFINE.redo} (Ctrl+Shift+Z)" onclick={() => d.redo()}><span class="layer"><Icon name="redo-2" /></span></button>
+                {#if !partsOpen}
+                  <button transition:fade class="button-icon" aria-label={PARTS.open} title={PARTS.open} onclick={() => (partsOpen = true)}><span class="layer"><Icon name="plus" /></span></button>
+                {/if}
+              </div>
+              {#if partsOpen}
+                <aside transition:rise class="float parts" data-avoid="" aria-label={PARTS.heading}><NodeList {d} ondrag={startPart} onclose={() => (partsOpen = false)} /></aside>
+              {/if}
+            {/if}
+            <span class="grow"></span>
+            {#if mode === 'define' ? d.view === 'graph' : dot}
+              <Focal dot={mode === 'define' ? defineDot : dot!} small={(graphProps.config?.nodes.length ?? 0) >= COMPACT_FROM} />
+            {/if}
+          </div>
+          <div class="col mid" bind:this={midEl}>
+            {#if mode === 'define' && d.view === 'table'}
+              <div in:fade class="edit-area table" data-control="edit"><Table {d} onaddnode={() => document.querySelector<HTMLElement>('#list-h')?.focus()} /></div>
+            {/if}
+            {#if stopOpen && stopNode && op.progress[stopNode.id]?.stage === 'previous'}
+              {@const running = op.live[stopNode.id]?.hello?.activeVersion}
+              <StopNotice
+                word={WRITE.previous}
+                target={`[${stopNode.no}] ${stopNode.name}`}
+                card={() => document.querySelector(`[data-key="node:${stopNode.id}"]`)}
+                reason={running !== undefined ? fillIn(WRITE.rolled.reason, { version: versionText(running) }) : WRITE.previous}
+                fix={WRITE.rolled.next}
+                onclose={() => (stopClosed = op.failed)}
+                onmore={() => ((drawerTab = 'log'), (stopClosed = op.failed))}
+                actions={stopActions}
+              />
+            {/if}
+            {#if notice}<Toast {notice} onmore={() => (drawerTab = 'log')} ondone={() => (notice = null)} />{/if}
+          </div>
+          <div class="col end">
+            {#if mode === 'define'}
+              <!-- Graph or table: top-right of what it switches, away from the edit tools. -->
+              <div class="tools seg" role="radiogroup" aria-label="{DEFINE.graph}・{DEFINE.table}">
+                <button class="button-icon" role="radio" aria-checked={d.view === 'graph'} aria-label={DEFINE.graph} title={DEFINE.graph} onclick={() => (d.view = 'graph')}><span class="layer"><Icon name="network" /></span></button>
+                <button class="button-icon" role="radio" aria-checked={d.view === 'table'} aria-label={DEFINE.table} title={DEFINE.table} onclick={() => (d.view = 'table')}><span class="layer"><Icon name="table-2" /></span></button>
+              </div>
+            {/if}
+            {#if sheetShown}
+              <aside transition:rise class="float sheet" aria-label={SHEET} data-avoid="">{@render right()}</aside>
+            {/if}
+            <span class="grow"></span>
+            {#if mode === 'operate' || d.view === 'graph'}
+              <ZoomPill scale={canvasView.zoom} canIn={canvasView.zoom < ZOOM_LIMITS.max} canOut={canvasView.zoom > ZOOM_LIMITS.min} onin={() => graph?.zoomBy(ZOOM_LIMITS.step)} onout={() => graph?.zoomBy(1 / ZOOM_LIMITS.step)} onfit={() => graph?.fit()} />
+            {/if}
+          </div>
+        </div>
+        <div class="dock" data-avoid="">
+          <Drawer tabs={drawerTabs} open={drawerTab} onpick={(id) => (drawerTab = id)} onclose={() => (drawerTab = null)} body={drawerBody} />
+          <Status
+            hub={connected && hubNode ? `[${hubNode.no}] ${hubNode.name}` : HUB[hub]}
+            {connected}
+            hubAction={connected ? HUB_TOGGLE.disconnect : HUB_TOGGLE.connect}
+            onhub={toggleHub}
+            {hubLocked}
+            state={stateName(lockStates)}
+            cli={cli.hello?.key_id ? `${cliLabel}　${STATUS.key} ${cli.hello.key_id.slice(0, 8)}` : cliLabel}
+            cliReady={cli.state === 'ready'}
+            oncli={openCli}
+            saved={savedLabel}
+            savedOk={!d.unsaved && !autosave.pending}
+            sentence={[next.cause, next.sentence].filter(Boolean).join(' ')}
+            status={d.status || op.status}
+            alert={op.alert || (cli.defsFailed ? DEFINE.defsSentence : '')}
+            bind:nextEl
+          />
+        </div>
         {#if agent.linked}
           <Dagon {agent} place={cli.hello?.workspace ?? d.doc.topo.name ?? 'local'} onask={askDagon} onapply={applyProposal} ontalk={() => (drawerTab = 'talk')} openRequest={dagonOpen} />
         {/if}
-        {#if notice}<Toast {notice} onmore={() => (drawerTab = 'log')} ondone={() => (notice = null)} />{/if}
-        {#if sheetShown}
-          <aside transition:rise class="float sheet right" aria-label={SHEET} data-avoid="" bind:offsetWidth={sheetW} bind:offsetHeight={sheetH}>{@render right()}</aside>
-        {/if}
       </div>
-      <Drawer tabs={drawerTabs} open={drawerTab} onpick={(id) => (drawerTab = id)} onclose={() => (drawerTab = null)} body={drawerBody} />
-      <Status
-        hub={connected && hubNode ? `${HUB[hub]} [${hubNode.no}] ${hubNode.name}（${NODE.roleHub}）` : HUB[hub]}
-        hubAction={connected ? HUB_TOGGLE.disconnect : HUB_TOGGLE.connect}
-        onhub={toggleHub}
-        {hubLocked}
-        state={stateName(lockStates)}
-        cli={cliLabel}
-        oncli={() => {
-          if (mode !== 'define') switchMode('define');
-          d.selected = null;
-          cliPanel = 'link';
-        }}
-        key={cli.hello?.key_id?.slice(0, 8) ?? null}
-        problems={problemCount}
-        unreachable={d.notYet}
-        progress={PERCENT.has(op.state) ? `${LOCK.controls.update} ${op.overallAt(nowMs)}%` : null}
-        sentence={[next.cause, next.sentence].filter(Boolean).join(' ')}
-        mode={mode === 'define' ? MODE.define : MODE.operate}
-        saved={savedLabel}
-        status={d.status || op.status}
-        alert={op.alert || (cli.defsFailed ? DEFINE.defsSentence : '')}
-        bind:nextEl
-      />
     {/if}
   </div>
   <!-- Fixed, so the hidden chooser never adds a line under the full-height frame. -->
@@ -1517,22 +1552,14 @@
       {/snippet}
     </Modal>
   {/if}
-  {#if stopOpen && stopNode}
-    {@const back = op.progress[stopNode.id]?.stage === 'previous'}
-    {@const running = op.live[stopNode.id]?.hello?.activeVersion}
-    <Modal title={WRITE.run} chip={{ text: back ? WRITE.previous : WRITE.failed, kind: back ? 'info' : 'error' }} target={`[${stopNode.no}] ${stopNode.name}`} onclose={() => (stopClosed = op.failed)} onmore={() => ((drawerTab = 'log'), (stopClosed = op.failed))}>
+  {#if stopOpen && stopNode && op.progress[stopNode.id]?.stage !== 'previous'}
+    <Modal title={WRITE.run} chip={{ text: WRITE.failed, kind: 'error' }} target={`[${stopNode.no}] ${stopNode.name}`} onclose={() => (stopClosed = op.failed)} onmore={() => ((drawerTab = 'log'), (stopClosed = op.failed))}>
       <h3 class="modal-h">{NOTICE.reason}</h3>
-      <p>{back && running !== undefined ? fillIn(WRITE.rolled.reason, { version: versionText(running) }) : (next.cause ?? WRITE.failed)}</p>
+      <p>{next.cause ?? WRITE.failed}</p>
       <h3 class="modal-h">{NOTICE.fix}</h3>
-      <p>{back ? WRITE.rolled.next : next.sentence}</p>
+      <p>{next.sentence}</p>
       {#snippet actions()}
-        {#each band.secondary as b (b.label)}
-          <button class="button-secondary" data-control={CONTROL_OF[b.action]} aria-disabled={!RUNS.has(b.action)} onclick={() => RUNS.has(b.action) && ((stopClosed = op.failed), act(b.action))}>{b.label}</button>
-        {/each}
-        {#if band.primary}
-          {@const p = band.primary}
-          <button class="button-primary" data-control={CONTROL_OF[p.action]} aria-disabled={!RUNS.has(p.action)} onclick={() => RUNS.has(p.action) && ((stopClosed = op.failed), act(p.action))}>{p.label}</button>
-        {/if}
+        {@render stopActions()}
       {/snippet}
     </Modal>
   {/if}
@@ -1599,88 +1626,6 @@
     font-family: var(--f-mono);
     overflow-wrap: anywhere;
   }
-  main.define {
-    position: relative;
-  }
-  .zoom {
-    position: absolute;
-    right: 0.75rem;
-    bottom: 0.75rem;
-    z-index: var(--z-chrome);
-    display: flex;
-    gap: 2px;
-    padding: 2px;
-    border: 1px solid var(--c-hair);
-    border-radius: var(--r-full);
-    background: var(--c-layer-1);
-  }
-  .zoom button:not(.button-icon),
-  :global(.graph .zoom button:not(.button-icon)) {
-    height: 1.5rem;
-    min-width: 1.5rem;
-    padding: 0 0.5rem;
-    border: 0;
-    border-radius: var(--r-full);
-    background: none;
-    color: var(--c-muted);
-    font: 400 var(--t-12) / 1 var(--f-ja);
-    cursor: pointer;
-  }
-  :global(.graph .zoom button:not(.button-icon)[aria-checked='true']),
-  .zoom button[aria-checked='true'] {
-    background: var(--c-paper);
-    color: var(--c-ink);
-  }
-  :global(.graph .zoom .seg),
-  .seg {
-    display: flex;
-    gap: 2px;
-  }
-  :global(.graph .zoom .pct),
-  .pct {
-    display: grid;
-    place-items: center;
-    padding: 0 0.5rem;
-    color: var(--c-muted);
-    font: 500 var(--t-12) / 1 var(--f-mono);
-  }
-  @media (hover: hover) and (pointer: fine) {
-    :global(.graph .zoom button:not(.button-icon):hover) {
-      background: var(--c-layer-3);
-      color: var(--c-paper);
-    }
-  }
-  @media (max-width: 767px), (pointer: coarse) {
-    :global(.graph .zoom button:not(.button-icon)),
-    .tb {
-      min-height: 44px;
-      min-width: 44px;
-    }
-  }
-  .close-order {
-    position: absolute;
-    top: 0.375rem;
-    right: 0.375rem;
-    width: 1.5rem;
-    height: 1.5rem;
-    border: 0;
-    border-radius: var(--r-full);
-    background: none;
-    color: var(--c-muted);
-    cursor: pointer;
-  }
-  @media (max-width: 767px) {
-    :global(.graph .zoom .wide-only),
-    .zoom .wide-only {
-      display: none;
-    }
-  }
-  .tray-open {
-    position: absolute;
-    z-index: var(--z-chrome);
-    top: 0.75rem;
-    left: 0.75rem;
-  }
   .skip {
     position: absolute;
     left: var(--s-4);
@@ -1695,77 +1640,108 @@
   }
   .frame {
     display: grid;
-    grid-template-areas:
-      'header header header'
-      'help help help'
-      'menu menu menu'
-      'left canvas right'
-      'band band band';
-    grid-template-rows: auto auto auto minmax(0, 1fr) auto;
-    grid-template-columns: var(--w-left) minmax(0, 1fr) var(--w-right);
+    grid-template-areas: 'header' 'canvas' 'band';
+    grid-template-rows: auto minmax(0, 1fr) auto;
+    grid-template-columns: minmax(0, 1fr);
     height: 100vh;
+    overflow: hidden;
   }
-  /* The start page: one centred column under the bar, its status line at the bottom. */
-  .frame:not(.work) {
-    grid-template-areas: 'header' 'help' 'menu' 'canvas' 'right' 'band';
-    grid-template-rows: auto auto auto auto minmax(0, 1fr) auto;
-    grid-template-columns: minmax(0, 1fr);
-  }
-  .frame:not(.work) > .left {
-    display: none;
-  }
-  /* Work: the graph is the whole stage; a drawer under it, the band at the bottom. */
+  /* Work: the stage holds everything under the bar. */
   .frame.work {
-    grid-template-areas: 'header' 'help' 'menu' 'canvas' 'drawer' 'band';
-    grid-template-rows: auto auto auto minmax(0, 1fr) auto auto;
-    grid-template-columns: minmax(0, 1fr);
+    grid-template-areas: 'header' 'canvas';
+    grid-template-rows: auto minmax(0, 1fr);
   }
-  .left {
-    grid-area: left;
-    min-height: 0;
-    overflow: auto;
-    background: var(--c-ink);
-    border-right: 1px solid var(--c-line);
-  }
+  /* The canvas spans both rows, so its box does not depend on the dock; the overlay is what is left above the dock. */
   .stage {
     grid-area: canvas;
     position: relative;
     display: grid;
+    grid-template-rows: minmax(0, 1fr) auto;
+    grid-template-columns: minmax(0, 1fr);
     min-height: 0;
+    overflow: clip;
   }
   main {
-    grid-area: canvas;
+    grid-area: 1 / 1 / 3 / 2;
     display: grid;
     min-height: 0;
     background: var(--c-layer-0);
   }
-  .stage > main {
-    grid-area: auto;
-  }
   main:focus {
     outline: none;
   }
-  /* Floating windows: over the graph, apart from its edges, never under the focal number. */
-  /* PartsWindow and DetailSheet: L1 surfaces with a 1 px frame, no shadow. */
-  .float {
-    position: absolute;
+  .overlay {
+    grid-area: 1 / 1 / 2 / 2;
     z-index: var(--z-chrome);
-    top: var(--s-4);
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr) auto;
+    gap: var(--s-4);
+    min-height: 0;
+    padding: var(--s-4) var(--m-edge) var(--m-edge);
+    pointer-events: none;
+  }
+  .dock {
+    grid-area: 2 / 1 / 3 / 2;
+    z-index: var(--z-chrome);
+    min-width: 0;
+  }
+  /* A column: what shares a side, top to bottom; it gives way by scrolling its window, never by covering the next. */
+  .col {
+    display: flex;
+    flex-direction: column;
+    gap: var(--s-3);
+    min-width: 0;
+    min-height: 0;
+  }
+  .col.mid {
+    justify-content: flex-end;
+  }
+  .col.end {
+    align-items: flex-end;
+  }
+  .grow {
+    flex: 1;
+    min-height: 0;
+  }
+  .tools {
+    display: flex;
+    flex: none;
+    gap: var(--s-1);
+    pointer-events: auto;
+  }
+  /* The graph / table segment: a pill of two icons, the current one filled. */
+  .seg {
+    gap: 0;
+    border: 1px solid var(--c-line);
+    border-radius: var(--r-full);
+    background: var(--c-ink);
+  }
+  .seg [aria-checked='true'] :global(.layer) {
+    background: var(--c-paper);
+    color: var(--c-ink);
+  }
+  .table {
+    flex: 1;
+    min-height: 0;
+    overflow: auto;
+    pointer-events: auto;
+  }
+  /* Floating windows: L1 surfaces with a 1 px frame, no shadow. */
+  .float {
+    flex: 0 1 auto;
+    min-height: 0;
     overflow: auto;
     border: 1px solid var(--c-line);
     border-radius: var(--r-l);
     background: var(--c-layer-1);
+    pointer-events: auto;
   }
   .float.parts {
-    left: var(--s-4);
+    display: flex;
     width: var(--w-parts);
-    /* The focal number keeps the bottom-left: the window stops above it. */
-    max-height: calc(100% - 9.5rem - 1.5rem);
   }
   .float.sheet {
-    right: var(--s-4);
     width: var(--w-sheet);
-    max-height: calc(100% - 1.5rem);
   }
   .log-none,
   .log {
@@ -1829,29 +1805,6 @@
   .log time {
     color: var(--c-muted);
     font-family: var(--f-mono);
-  }
-  /* The start screen on phones: one column, top to bottom. */
-  .frame.narrow:not(.work) {
-    grid-template-areas: 'header' 'help' 'menu' 'band' 'canvas' 'right' 'left' 'drawer';
-    grid-template-rows: auto;
-    grid-template-columns: minmax(0, 1fr);
-    height: auto;
-  }
-  /* Phones: the same one window; the parts drop from the bar, the sheet rises from the status row. */
-  .narrow .float.parts {
-    top: 0.5rem;
-    left: 0.5rem;
-    right: 0.5rem;
-    width: auto;
-    max-height: min(50vh, calc(100% - 7rem));
-  }
-  .narrow .float.sheet {
-    top: auto;
-    left: 0.5rem;
-    right: 0.5rem;
-    bottom: 0.5rem;
-    width: auto;
-    max-height: 45vh;
   }
   .why {
     position: fixed;

@@ -26,7 +26,7 @@
   let { tabs, open, onpick, onclose, body }: Props = $props();
 </script>
 
-<!-- The tab strip always stays; the body opens under it (the canvas above shrinks, no overlap). -->
+<!-- The tab strip always stays; the body opens under it, over the canvas, whose box does not change. -->
 <section in:fade class="drawer" class:open={open !== null} aria-label={DRAWER.label}>
   <div class="tabs" role="tablist" aria-label={DRAWER.label}>
     <div class="scroll">

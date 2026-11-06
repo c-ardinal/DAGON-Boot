@@ -11,6 +11,7 @@
 extern crate alloc;
 
 mod ops;
+mod percent;
 pub mod rom;
 
 pub use dagon_romlink::{RomError, Stats as RomStats};
@@ -19,6 +20,7 @@ pub use ops::{
     RecoverAssets, RecoverPath, XferTimes, CONFIRM_RETRY_MS, NODE_POLL_MS, NODE_TRIAL_MAX_MS,
     NODE_TRIAL_MS,
 };
+pub use percent::{transfer_percent, trial_percent};
 
 use alloc::boxed::Box;
 use alloc::vec;
@@ -201,6 +203,11 @@ pub struct Host<T: Transport, C: Clock> {
     pub node_poll_ms: u32,
     /// A node's boot core is being written: the events say so.
     core_write: bool,
+    /// The node being written, for its one progress number.
+    write: percent::WriteTrack,
+    /// Each node's trial period by topology index (`[watchdog] trial_ms`):
+    /// how much of its progress number the trial weighs. Unset: only bytes count.
+    pub trial_ms: Vec<(u8, u32)>,
     /// Lines about steps that are retried (a CONFIRM sent again), for the
     /// caller's log; `None`: not shown.
     pub note: Option<Note>,
@@ -218,6 +225,8 @@ impl<T: Transport, C: Clock> Host<T, C> {
             stale: true,
             node_poll_ms: ops::NODE_POLL_MS,
             core_write: false,
+            write: percent::WriteTrack::default(),
+            trial_ms: Vec::new(),
             note: None,
         }
     }

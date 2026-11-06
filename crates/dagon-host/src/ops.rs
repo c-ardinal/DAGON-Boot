@@ -90,7 +90,10 @@ pub struct Event {
     pub node: u8,
     /// SHOW phase (`payload::phase`).
     pub phase: u8,
+    /// The phase's own progress: the bytes of this image during TRANSFER.
     pub percent: u8,
+    /// The node's one progress number (`percent.rs`), what its display is told.
+    pub shown: u8,
     pub version: Version,
     /// On the VERIFY event of a written image: how long its phases took.
     pub times: Option<XferTimes>,
@@ -301,6 +304,7 @@ impl<T: Transport, C: Clock> Host<T, C> {
                 node,
                 phase: ph,
                 percent: 0,
+                shown: 0,
                 version: v,
                 times: None,
                 boot_core: false,
@@ -814,18 +818,20 @@ impl<T: Transport, C: Clock> Host<T, C> {
         percent: u8,
         version: Version,
     ) {
+        let shown = self.shown_of(node, ph, percent);
         on_event(Event {
             node,
             phase: ph,
             percent,
+            shown,
             version,
             times: None,
             boot_core: self.core_write,
         });
-        self.show(node, ph, percent, version, &[]).await;
+        self.show(node, ph, shown, version, &[]).await;
     }
 
-    /// VERIFY 100 % of an image written in `times`.
+    /// VERIFY of an image written in `times`.
     async fn emit_verified(
         &mut self,
         on_event: &mut dyn FnMut(Event),
@@ -833,15 +839,29 @@ impl<T: Transport, C: Clock> Host<T, C> {
         version: Version,
         times: XferTimes,
     ) {
+        let shown = self.shown_of(node, phase::VERIFY, 100);
         on_event(Event {
             node,
             phase: phase::VERIFY,
             percent: 100,
+            shown,
             version,
             times: Some(times),
             boot_core: self.core_write,
         });
-        self.show(node, phase::VERIFY, 100, version, &[]).await;
+        self.show(node, phase::VERIFY, shown, version, &[]).await;
+    }
+
+    /// The node's one number for this report.
+    fn shown_of(&mut self, node: u8, ph: u8, percent: u8) -> u8 {
+        let trial = self
+            .trial_ms
+            .iter()
+            .find(|(n, _)| *n == node)
+            .map(|(_, ms)| *ms);
+        let now = self.clock.now_ms();
+        self.write
+            .report(node, ph, percent, self.core_write, now, trial)
     }
 
     /// SHOW on the hub LCD, best effort.

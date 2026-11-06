@@ -128,9 +128,25 @@ fn fail<E>(e: &Error<E>) -> JsValue {
 
 // Holding the borrow across awaits is the one-call-at-a-time guard: an
 // overlapping call fails `try_borrow_mut` and rejects with `busy`.
+/// A node's one progress number `on_trial_ms` into its trial, after a transfer
+/// of `xfer_ms` (dagon-host's calculation; a trial reports nothing by itself).
+#[wasm_bindgen]
+pub fn trial_percent(xfer_ms: f64, on_trial_ms: f64, trial_ms: Option<u32>, floor: u8) -> u8 {
+    dagon_host::trial_percent(xfer_ms as u64, on_trial_ms as u64, trial_ms, floor)
+}
+
 #[allow(clippy::await_holding_refcell_ref)]
 #[wasm_bindgen]
 impl WasmHost {
+    /// Topology node `node`'s trial period: how much of its one progress number the trial weighs.
+    #[wasm_bindgen(js_name = setTrialMs)]
+    pub fn set_trial_ms(&self, node: u8, ms: u32) -> Result<(), JsValue> {
+        let mut h = self.host.try_borrow_mut().map_err(|_| busy())?;
+        h.trial_ms.retain(|(n, _)| *n != node);
+        h.trial_ms.push((node, ms));
+        Ok(())
+    }
+
     #[wasm_bindgen(constructor)]
     pub fn new(link: HostLink) -> WasmHost {
         WasmHost {
@@ -417,6 +433,7 @@ fn event_js(e: &Event) -> JsValue {
     set(&o, "node", e.node.into());
     set(&o, "phase", e.phase.into());
     set(&o, "percent", e.percent.into());
+    set(&o, "shown", e.shown.into());
     set(&o, "bootCore", e.boot_core.into());
     set(&o, "version", e.version.raw().into());
     o.into()

@@ -20,8 +20,7 @@ import {
   type Refusal,
   type StatusResp,
   type VersionResp,
-  type UpdateEvent,
-} from '../wasm/dagon.ts';
+  type UpdateEvent, trialPercent } from '../wasm/dagon.ts';
 import { FAILURE_BAND } from './band.ts';
 import { ConnectError, wasmReady } from './connect.ts';
 import { ANNOUNCE, FILE } from './copy.ts';
@@ -86,41 +85,29 @@ export type Finish =
  * second image (boot core, then app) starts.
  */
 export interface WriteTrack {
-  t0: number | null;
-  xferPct: number;
+  /** What dagon-host last said for the node. */
+  shown: number;
+  /** The transfer took this long (it is verified); null while it runs. */
   xferMs: number | null;
+  t0: number | null;
   rebootAt: number | null;
   done: boolean;
-  floor: number;
 }
 
 /**
- * One % over a node's whole write: the transfer by its bytes, then the
- * trial (start-up and self-check until CONFIRM) by time against the MCU
- * definition's `[watchdog] trial_ms`; the two parts weigh what each takes
- * (the transfer's time projected from its byte rate until it is verified).
- * Only the confirmation makes 100. Without a trial deadline only the bytes
- * count.
+ * A node's one % at `now`, the same number its display is told: dagon-host's
+ * calculation in every part. During a transfer it is the last number dagon-host
+ * reported; after it, the trial reports nothing, so its time is read here
+ * against the MCU definition's `[watchdog] trial_ms`. Only the confirmation
+ * makes 100.
  */
 export function writePercent(k: WriteTrack, now: number, trialMs: number | null): number {
   if (k.done) return 100;
-  let p: number;
-  if (k.xferMs === null) {
-    if (k.t0 === null || k.xferPct <= 0) p = 0;
-    else if (trialMs === null) p = k.xferPct;
-    else {
-      const elapsed = Math.max(0, now - k.t0);
-      p = (100 * elapsed) / ((elapsed * 100) / k.xferPct + trialMs);
-    }
-  } else if (trialMs === null) p = 99;
-  else {
-    const onTrial = k.rebootAt === null ? 0 : Math.min(trialMs, Math.max(0, now - k.rebootAt));
-    p = (100 * (k.xferMs + onTrial)) / (k.xferMs + trialMs);
-  }
-  return Math.max(k.floor, Math.min(99, p));
+  if (k.xferMs === null) return k.shown;
+  return trialPercent(k.xferMs, k.rebootAt === null ? 0 : Math.max(0, now - k.rebootAt), trialMs, k.shown);
 }
 
-const NO_TRACK: WriteTrack = { t0: null, xferPct: 0, xferMs: null, rebootAt: null, done: false, floor: 0 };
+const NO_TRACK: WriteTrack = { shown: 0, xferMs: null, t0: null, rebootAt: null, done: false };
 
 /** The chosen release and dagon-host's verdict on it. */
 export interface ReleaseFile {
@@ -645,7 +632,7 @@ export class Operate {
     const nodes = this.targets.map((id) => reach.findIndex((n) => n.id === id));
     let results: NodeResult[];
     try {
-      results = await this.call((h) => h.apply(f.bytes, topo_compile(c.yaml), nodes, (e) => void (my === this.session && this.onEvent(e))));
+      results = await this.call((h) => (this.tellTrials(h), h.apply(f.bytes, topo_compile(c.yaml), nodes, (e) => void (my === this.session && this.onEvent(e)))));
     } catch {
       // The release passed the same check before, so only the link can fail here.
       if (my === this.session) this.lose();
@@ -687,15 +674,24 @@ export class Operate {
     if (e.phase === PHASE.transfer) {
       // A new image (after a boot core's reboot) starts its own transfer.
       const fresh = k.t0 === null || k.xferMs !== null;
-      const base = fresh ? { ...k, floor: this.percentOf(id, now), t0: now, xferMs: null, rebootAt: null, done: false } : k;
-      this.track[id] = { ...base, xferPct: e.percent };
+      this.track[id] = { ...k, shown: e.shown, ...(fresh ? { t0: now, xferMs: null, rebootAt: null, done: false } : {}) };
+    } else if (e.phase === PHASE.rom) {
+      this.track[id] = { ...k, shown: e.shown, t0: k.t0 ?? now };
     } else if (e.phase === PHASE.verify) {
-      this.track[id] = { ...k, xferPct: 100, xferMs: Math.max(1, now - (k.t0 ?? now)) };
+      this.track[id] = { ...k, shown: e.shown, xferMs: Math.max(1, now - (k.t0 ?? now)) };
     } else if (e.phase === PHASE.reboot) {
-      this.track[id] = { ...k, rebootAt: now };
+      this.track[id] = { ...k, shown: e.shown, rebootAt: now };
     } else if (e.phase === PHASE.confirm && !e.bootCore) {
       this.track[id] = { ...k, done: true };
     }
+  }
+
+  /** Tells dagon-host each node's trial period, for the node's one %. */
+  private tellTrials(h: Host): void {
+    this.reach.forEach((n, i) => {
+      const ms = this.deps.trialMs?.(n.id) ?? null;
+      if (ms !== null) h.setTrialMs(i, ms);
+    });
   }
 
   /** The hub reboots onto `version`: dagon-host reopens it for 45 s (hubRestarting), keeping only that hub. */
@@ -953,8 +949,10 @@ export class Operate {
     this.running = kind;
     this.startedAt = Date.now();
     this.progress = { ...this.progress, [n.id]: { stage: 'writing', percent: 0 } };
+    this.track = { ...this.track, [n.id]: { ...NO_TRACK } };
     const on = (e: UpdateEvent) => {
       if (my !== this.session || this.reach[e.node]?.id !== n.id) return;
+      this.trackEvent(n.id, e);
       if (e.phase === PHASE.rom) this.progress[n.id] = { stage: 'lastResort', percent: e.percent };
       else if (e.phase === PHASE.transfer) this.progress[n.id] = { stage: 'writing', percent: e.percent };
       // TRANSFER and REBOOT carry the version the node is given (FAILED carries the one it runs).
@@ -967,7 +965,7 @@ export class Operate {
     };
     let r: RecoverResult;
     try {
-      r = await this.call((h) => run(h, on));
+      r = await this.call((h) => (this.tellTrials(h), run(h, on)));
     } catch (e) {
       if (my !== this.session) return;
       this.reconnectUntil = null;

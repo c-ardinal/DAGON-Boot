@@ -11,7 +11,7 @@ use dagon_format::header::{image_kind, mcu_id, target_tag};
 use dagon_format::Version;
 use dagon_host::{
     rom, Clock, ConfirmOutcome, Error, Event, Host, NodeOutcome, Outcome, RecoverAssets,
-    RecoverPath, Target, Transport, CONFIRM_RETRY_MS,
+    RecoverPath, Target, Transport, WritePath, CONFIRM_RETRY_MS,
 };
 use dagon_proto::payload::{phase, SlotState};
 use dagon_proto::{flags, Cmd, Status};
@@ -600,6 +600,7 @@ fn recover_seg(s: &Sim) -> (RecoverPath, Version) {
         bootcore: Some(&boot),
         stage0: Some(&STAGE0),
         roms: &roms(),
+        rom_confirmed: true,
     };
     block_on(host(s).recover(SEG, &assets, &mut |_| {})).unwrap()
 }
@@ -649,6 +650,84 @@ fn erased_f401_comes_back_through_the_rom_loader() {
     }
 }
 
+/// A silent node with a ROM entry waits for the confirmation: nothing is
+/// erased, no line moves and no ROM event goes out before it.
+#[test]
+fn a_silent_node_with_rom_entry_waits_for_the_confirmation() {
+    let s = sim();
+    wipe_seg(&s);
+    let (rel, topo, boot) = (release(), topology(&yaml()), bootcore());
+    assert_eq!(
+        block_on(host(&s).write_path(SEG, &topo, &roms())).unwrap(),
+        WritePath::Rom
+    );
+    let ask = RecoverAssets {
+        release: &rel,
+        topology: &topo,
+        pubkey: &key().pk,
+        bootcore: Some(&boot),
+        stage0: Some(&STAGE0),
+        roms: &roms(),
+        rom_confirmed: false,
+    };
+    s.hub
+        .borrow_mut()
+        .i2c_node(NODE_I2C_ADDR)
+        .unwrap()
+        .flash()
+        .clear_ops();
+    let mut events = 0;
+    let r = block_on(host(&s).recover(SEG, &ask, &mut |_| events += 1));
+    assert!(
+        matches!(r, Err(Error::RomNotConfirmed { node: SEG })),
+        "{r:?}"
+    );
+    assert_eq!(events, 0);
+    {
+        let mut hub = s.hub.borrow_mut();
+        let node = hub.i2c_node(NODE_I2C_ADDR).unwrap();
+        assert!(!node.boot0(), "BOOT0 stays low");
+        assert!(node.flash().ops().is_empty(), "nothing erased");
+    }
+    // Confirmed: the ROM path.
+    let (path, _) = recover_seg(&s);
+    assert!(matches!(path, RecoverPath::Rom(_)), "{path:?}");
+}
+
+/// A silent node whose MCU or link has no ROM entry is for the factory write.
+#[test]
+fn a_silent_node_without_rom_entry_is_written_directly() {
+    let s = sim();
+    wipe_seg(&s);
+    let topo = topology(&yaml());
+    assert_eq!(
+        block_on(host(&s).write_path(SEG, &topo, &[])).unwrap(),
+        WritePath::Direct
+    );
+}
+
+/// An answering node takes the normal transfer, confirmed or not.
+#[test]
+fn an_answering_node_takes_the_normal_transfer_without_a_confirmation() {
+    let s = sim();
+    let (rel, topo, boot) = (release(), topology(&yaml()), bootcore());
+    assert_eq!(
+        block_on(host(&s).write_path(SEG, &topo, &roms())).unwrap(),
+        WritePath::Transfer
+    );
+    let assets = RecoverAssets {
+        release: &rel,
+        topology: &topo,
+        pubkey: &key().pk,
+        bootcore: Some(&boot),
+        stage0: Some(&STAGE0),
+        roms: &roms(),
+        rom_confirmed: false,
+    };
+    let (path, _) = block_on(host(&s).recover(SEG, &assets, &mut |_| {})).unwrap();
+    assert_eq!(path, RecoverPath::Retransfer);
+}
+
 #[test]
 fn rom_session_gives_up_after_three_attempts() {
     let s = sim();
@@ -666,6 +745,7 @@ fn rom_session_gives_up_after_three_attempts() {
         bootcore: Some(&boot),
         stage0: Some(&STAGE0),
         roms: &roms(),
+        rom_confirmed: true,
     };
     let r = block_on(host(&s).recover(SEG, &assets, &mut |_| {}));
     assert!(
@@ -703,6 +783,7 @@ fn rom_path_needs_a_valid_boot_core() {
         bootcore: Some(&boot),
         stage0: Some(&STAGE0),
         roms: &roms(),
+        rom_confirmed: true,
     };
     let r = block_on(host(&s).recover(SEG, &assets, &mut |_| {}));
     assert!(matches!(r, Err(Error::Format(_))));

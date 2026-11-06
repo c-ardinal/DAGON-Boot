@@ -22,15 +22,13 @@ provision_dir = "out/provision"
 # `dagon build` (and the page's build button through `dagon serve`): one
 # table per node. The package is built with `cargo build --release` for slot
 # A and, with slot_b_feature, again for slot B, into
-# out/build/<id>/app-a.elf and app-b.elf; `version` is what signing uses.
+# out/build/<id>/app-a.elf and app-b.elf; signing uses the crate's version.
 # Builds embed the key from DAGON_PUBKEY (see the firmware READMEs).
 #
 # [build.seg]
 # package = "samples/f401-app"
 # slot_b_feature = "slot-b"
-# version = "1.1.0"
 #
 # [build.hub]
 # package = "targets/rp2040-hub"
 # slot_b_feature = "slot-b"
-# version = "1.1.0"

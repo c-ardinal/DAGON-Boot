@@ -1,5 +1,8 @@
 import { describe, expect, test } from 'vitest';
-import { HUB_LOCKED, LEAVING, MACHINE, hubOf, next, view, type Ctx, type Ev, type L } from './machine.ts';
+import { HUB_LOCKED, MACHINE, NODE_WRITE, hubOf, next, view, type Ctx, type Ev, type L } from './machine.ts';
+
+/** Buttons that leave this page or mode instead of moving the machine. */
+const LEAVING: ReadonlySet<string> = new Set(['reload', 'defineFix']);
 
 const STATES = Object.keys(MACHINE) as L[];
 const CTXS: Ctx[] = [
@@ -10,8 +13,8 @@ const CTXS: Ctx[] = [
 ];
 
 describe('operating-mode state machine', () => {
-  test('has the 28 states', () => {
-    expect(STATES).toHaveLength(28);
+  test('has the 27 states', () => {
+    expect(STATES).toHaveLength(27);
   });
 
   test.each(STATES)('%s: at most one main action and two side actions, never the same one twice', (s) => {
@@ -22,7 +25,8 @@ describe('operating-mode state machine', () => {
     }
   });
 
-  test.each(STATES)('%s: no dead end (a way out by the user or by a bounded result)', (s) => {
+  // unsupported is its own page, with its own button.
+  test.each(STATES.filter((s) => s !== 'unsupported'))('%s: no dead end (a way out by the user or by a bounded result)', (s) => {
     const leaves = Object.values(MACHINE[s].on).some((to) => to !== s);
     const primaries = CTXS.map((c) => view(s, c).primary);
     expect(leaves || primaries.every((p) => p !== null && LEAVING.has(p))).toBe(true);
@@ -103,9 +107,13 @@ describe('operating-mode state machine', () => {
     for (const s of ['sending', 'writing', 'hubRestarting', 'reconnectNeeded', 'recovering', 'cliTurn'] as L[]) expect(HUB_LOCKED.has(s), s).toBe(true);
   });
 
-  test('nodesSilent: the answering nodes are updated first and recovery is beside it', () => {
-    expect(view('nodesSilent', { hasConfig: true })).toMatchObject({ primary: 'updateResponding', secondary: ['recover'] });
+  test('nodesSilent: the answering nodes are updated first; a silent one is written from its card', () => {
+    expect(view('nodesSilent', { hasConfig: true })).toMatchObject({ primary: 'updateResponding', secondary: [] });
     expect(view('nodesSilent', { hasConfig: true, answering: false })).toMatchObject({ primary: 'recover', secondary: [] });
+  });
+
+  test.each([...NODE_WRITE])('%s: a write of one node can start', (s) => {
+    expect(MACHINE[s].on.recover ?? MACHINE[s].on.recoverAgain).toBe('recovering');
   });
 
   test('an event that does not apply keeps the state', () => {

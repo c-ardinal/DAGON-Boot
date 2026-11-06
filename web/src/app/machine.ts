@@ -5,26 +5,24 @@
 export type L =
   | 'unsupported' | 'idle' | 'choosing' | 'notChosen' | 'portFailed' | 'checking' | 'silentHub' | 'scanning' | 'scanned' | 'sending'
   | 'sendFailed' | 'ready' | 'nodesSilent' | 'reading' | 'verifying' | 'fileRefused' | 'otherTopology' | 'fileReady' | 'writing' | 'hubRestarting'
-  | 'reconnectNeeded' | 'stopped' | 'done' | 'recovering' | 'recoverFailed' | 'lost' | 'sampleError' | 'cliTurn';
+  | 'reconnectNeeded' | 'stopped' | 'done' | 'recovering' | 'recoverFailed' | 'lost' | 'cliTurn';
 
 /** What a bottom-band button does. */
 export type Action =
-  | 'copyUrl' | 'connectDiscover' | 'connect' | 'placeSample' | 'reselect' | 'reload'
+  | 'connectDiscover' | 'connect' | 'reselect' | 'reload'
   | 'push' | 'pushAgain' | 'scanAgain' | 'defineFix' | 'chooseFile' | 'useLatest'
   | 'recover' | 'updateResponding' | 'otherFile' | 'update'
-  | 'reconnect' | 'recoverAgain' | 'copyLog' | 'retrySample' | 'placeInDefine' | 'showJobs';
-
-/** Actions that leave this page or mode instead of moving the machine. */
-export const LEAVING: ReadonlySet<Action> = new Set(['copyUrl', 'reload', 'defineFix', 'copyLog', 'placeInDefine', 'showJobs']);
+  | 'reconnect' | 'recoverAgain';
 
 /** Things that happen: button presses (same names as their action) and results. */
 export type Ev =
-  | Exclude<Action, 'copyUrl' | 'reload' | 'defineFix' | 'copyLog' | 'placeInDefine' | 'showJobs'>
+  | Exclude<Action, 'reload' | 'defineFix'>
+  | 'placeSample'
   | 'dismissed' | 'openFailed' | 'wasmFailed' | 'chosen' | 'noAnswer'
   | 'helloDiscover' | 'helloConfigured' | 'scanned' | 'pushed' | 'pushFailed'
   | 'watchAlarm' | 'watchOk' | 'read' | 'badSource' | 'topoDiff' | 'pass'
   | 'hubTurn' | 'nodeStuck' | 'doneNoHub' | 'confirmed' | 'autoFailed' | 'reconnected' | 'revertedOnReconnect'
-  | 'fixedNoRest' | 'fixedRest' | 'gaveUp' | 'rollback' | 'sampleFailed' | 'cliClaim' | 'cliReturn' | 'lost'
+  | 'fixedNoRest' | 'fixedRest' | 'gaveUp' | 'rollback' | 'cliClaim' | 'cliReturn' | 'lost'
   /** The header's 切断: back to idle, not lost. */
   | 'disconnect';
 
@@ -56,12 +54,12 @@ const toLost = { lost: 'lost' } as const;
 const leave = { lost: 'lost', disconnect: 'idle' } as const;
 
 export const MACHINE: Record<L, Spec> = {
-  unsupported: { step: null, primary: 'copyUrl', on: {} },
+  unsupported: { step: null, on: {} },
   idle: {
     step: (c) => (c.hasConfig ? 1 : 2),
     primary: (c) => (c.hasConfig ? 'connect' : 'connectDiscover'),
     // The sample comes from the start screen, not from here.
-    on: { connect: 'choosing', connectDiscover: 'choosing', placeSample: 'idle', sampleFailed: 'sampleError' },
+    on: { connect: 'choosing', connectDiscover: 'choosing', placeSample: 'idle' },
   },
   // The chooser is open: the button stays (busy) and a second press changes nothing.
   choosing: { step: 1, primary: 'connect', on: { connect: 'choosing', dismissed: 'notChosen', openFailed: 'portFailed', wasmFailed: 'portFailed', chosen: 'checking' } },
@@ -82,13 +80,12 @@ export const MACHINE: Record<L, Spec> = {
     primary: 'chooseFile',
     secondary: ['useLatest'],
     // rollback: M38's "前のバージョンに戻す" for a node left on trial.
-    on: { push: 'sending', watchAlarm: 'nodesSilent', chooseFile: 'reading', useLatest: 'reading', cliClaim: 'cliTurn', rollback: 'recovering', ...leave },
+    on: { recover: 'recovering', push: 'sending', watchAlarm: 'nodesSilent', chooseFile: 'reading', useLatest: 'reading', cliClaim: 'cliTurn', rollback: 'recovering', ...leave },
   },
   nodesSilent: {
     step: 4,
-    // Updating the nodes that answer comes first; recovery is the side action.
+    // The nodes that answer come first; a silent one is written from its card.
     primary: (c) => (c.answering === false ? 'recover' : 'updateResponding'),
-    secondary: (c) => (c.answering === false ? [] : ['recover']),
     on: { recover: 'recovering', watchOk: 'ready', updateResponding: 'reading', rollback: 'recovering', ...leave },
   },
   reading: { step: 4, on: { read: 'verifying', ...leave } },
@@ -101,19 +98,18 @@ export const MACHINE: Record<L, Spec> = {
     secondary: ['defineFix'],
     on: { otherFile: 'reading', ...leave },
   },
-  fileReady: { step: 5, primary: 'update', secondary: ['otherFile'], on: { update: 'writing', otherFile: 'reading', watchAlarm: 'nodesSilent', ...leave } },
+  fileReady: { step: 5, primary: 'update', secondary: ['otherFile'], on: { recover: 'recovering', update: 'writing', otherFile: 'reading', watchAlarm: 'nodesSilent', ...leave } },
   writing: { step: 5, on: { hubTurn: 'hubRestarting', nodeStuck: 'stopped', doneNoHub: 'done', ...toLost } },
   // nodeStuck: the hub came back in time but on its previous version.
   hubRestarting: { step: 5, on: { confirmed: 'done', autoFailed: 'reconnectNeeded', nodeStuck: 'stopped' } },
   reconnectNeeded: { step: 5, primary: 'reconnect', on: { reconnect: 'reconnectNeeded', reconnected: 'done', revertedOnReconnect: 'stopped' } },
   stopped: { step: 5, primary: 'recover', on: { recover: 'recovering', ...leave } },
-  done: { step: 6, secondary: ['otherFile'], on: { watchAlarm: 'nodesSilent', rollback: 'recovering', otherFile: 'reading', ...leave } },
+  done: { step: 6, secondary: ['otherFile'], on: { recover: 'recovering', watchAlarm: 'nodesSilent', rollback: 'recovering', otherFile: 'reading', ...leave } },
   // hubTurn: recovering or rolling back the hub reboots it; reconnecting is hubRestarting / reconnectNeeded's.
   recovering: { step: 'recover', on: { fixedNoRest: 'done', fixedRest: 'fileReady', gaveUp: 'recoverFailed', hubTurn: 'hubRestarting', ...toLost } },
-  recoverFailed: { step: 'recover', primary: 'recoverAgain', secondary: ['copyLog'], on: { recoverAgain: 'recovering', ...leave } },
+  recoverFailed: { step: 'recover', primary: 'recoverAgain', on: { recoverAgain: 'recovering', ...leave } },
   lost: { step: 1, primary: 'reconnect', on: { reconnect: 'choosing' } },
-  sampleError: { step: 2, primary: 'retrySample', secondary: ['placeInDefine'], on: { retrySample: 'idle' } },
-  cliTurn: { step: 4, secondary: ['showJobs'], on: { cliReturn: 'ready', ...toLost } },
+  cliTurn: { step: 4, on: { cliReturn: 'ready', ...toLost } },
 };
 
 /** Where `ev` leads from `s`; the same state when `ev` does not apply there. */
@@ -139,7 +135,7 @@ export type HubState = 'idle' | 'checking' | 'connected' | 'reconnecting' | 'los
 
 export function hubOf(s: L): HubState {
   switch (s) {
-    case 'unsupported': case 'idle': case 'choosing': case 'notChosen': case 'portFailed': case 'silentHub': case 'sampleError':
+    case 'unsupported': case 'idle': case 'choosing': case 'notChosen': case 'portFailed': case 'silentHub': 
       return 'idle';
     case 'checking':
       return 'checking';
@@ -162,4 +158,6 @@ export function hubOf(s: L): HubState {
 export const HUB_LOCKED: ReadonlySet<L> = new Set(['choosing', 'scanning', 'sending', 'writing', 'hubRestarting', 'reconnectNeeded', 'recovering', 'cliTurn']);
 
 /** States in which nodes are watched every round (no transfer running). */
+/** States a write of one node can start in (the hub answers, nothing runs). */
+export const NODE_WRITE: ReadonlySet<L> = new Set(['ready', 'nodesSilent', 'fileReady', 'done', 'stopped', 'recoverFailed']);
 export const WATCHED: ReadonlySet<L> = new Set(['scanned', 'ready', 'nodesSilent', 'fileReady', 'done']);

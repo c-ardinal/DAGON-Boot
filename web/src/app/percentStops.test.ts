@@ -76,7 +76,7 @@ describe('the % runs only while work is really in progress', () => {
     expect(op.state).toBe('stopped');
     seen.length = 0;
     (op as unknown as { transport: MockTransport }).transport.setRefuse('i2c:66');
-    await op.recover();
+    await op.writeNode();
     expect(op.progress.seg.stage).toBe('done');
     const during = seen.filter((s) => s.state === 'recovering');
     expect(during.length).toBeGreaterThan(0);

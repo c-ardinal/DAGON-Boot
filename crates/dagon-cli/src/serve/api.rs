@@ -34,6 +34,35 @@ pub(super) fn inside(cfg: &Config, p: &Path) -> Result<PathBuf, String> {
     crate::paths::contained(&cfg.base, p)
 }
 
+/// `dagon gen`, one node at a time: a cancel takes effect before the next
+/// node; those made stay. Each line goes out once as it is made.
+fn gen_nodes(
+    config: &Path,
+    only: &[String],
+    force: bool,
+    log: &mut dyn FnMut(&str),
+    cancel: &AtomicBool,
+) -> Result<Vec<String>, String> {
+    let ids = if only.is_empty() {
+        let cfg = Config::load(Some(&config.to_string_lossy()))?;
+        let t = read_topology(&cfg, &inside(&cfg, &cfg.topology_path(None)?)?)?;
+        t.nodes.iter().map(|n| n.id.clone()).collect()
+    } else {
+        only.to_vec()
+    };
+    let mut lines: Vec<String> = Vec::new();
+    for id in &ids {
+        stop_if(cancel)?;
+        for l in crate::scaffold::gen_project(config, std::slice::from_ref(id), force)? {
+            if !lines.contains(&l) {
+                log(&l);
+                lines.push(l);
+            }
+        }
+    }
+    Ok(lines)
+}
+
 fn stop_if(cancel: &AtomicBool) -> Result<(), String> {
     if cancel.load(Ordering::Relaxed) {
         Err("cancelled".into())
@@ -171,7 +200,6 @@ pub fn handle(server: &Arc<Server>, req: &Request) -> Response {
         ("PUT", ["agent", "key", agent, way]) => key_put(server, agent, way, req),
         ("DELETE", ["agent", "key", agent, way]) => key_delete(server, agent, way),
         ("POST", ["agent", "ask"]) => agent_ask(server, req),
-        ("GET", ["targets"]) => targets(server),
         ("GET", ["definitions"]) => definitions(server),
         ("GET", ["topology"]) => topology_get(server),
         ("PUT", ["topology"]) => topology_put(server, req),
@@ -340,13 +368,11 @@ fn gen_start(server: &Arc<Server>, req: &Request) -> Res {
     match server.spawn("gen", move |job| {
         let (config, _, _) = job.project()?;
         let config = config.ok_or("no project is open")?;
+        let cancel = job.cancel_flag();
         let lines = {
             let _lock = s.files.lock().map_err(|_| "lock".to_string())?;
-            crate::scaffold::gen_project(&config, &only, force)?
+            gen_nodes(&config, &only, force, &mut |l| job.log(l), &cancel)?
         };
-        for l in &lines {
-            job.log(l);
-        }
         let skipped: Vec<&String> = lines.iter().filter(|l| l.starts_with("skipped")).collect();
         Ok(json!({ "lines": lines.len(), "skipped": skipped }))
     }) {
@@ -604,8 +630,6 @@ fn hello(server: &Server) -> Response {
         "formats": crate::versions::formats().into_iter().collect::<std::collections::BTreeMap<_, _>>(),
         "workspace": workspace,
         "features": features,
-        // The way DAGON uses (linked, else the default) can be used here.
-        "api_key": crate::consent::status(super::project::home(server).ok().as_deref(), &agents_of(server), server.keys())["available"],
         "key": key.is_some(),
         "key_id": key,
         "release_key": server.release_key().map(|k| to_hex(&k)),
@@ -631,41 +655,6 @@ fn hello(server: &Server) -> Response {
 
 fn json_ok(v: Value) -> Response {
     Response::json(200, &v)
-}
-
-/// Firmware packages with their features, and the board table. Packages are
-/// directories with a Cargo.toml: `targets/<pkg>`, one level deeper for the
-/// support packages (`targets/mcu/<mcu>`, `targets/boards/<board>`), and the
-/// sample apps under `samples/<pkg>`; in a generated project, `nodes/<id>`.
-fn targets(server: &Server) -> Res {
-    let cfg = config(server).map_err(|e| Response::error(500, &e))?;
-    let mut out = Vec::new();
-    for rel in package_dirs(&cfg.base) {
-        let Ok(text) = std::fs::read_to_string(cfg.base.join(&rel).join("Cargo.toml")) else {
-            continue;
-        };
-        let Ok(v) = toml::from_str::<toml::Value>(&text) else {
-            continue;
-        };
-        let features: Vec<String> = v
-            .get("features")
-            .and_then(|f| f.as_table())
-            .map(|t| t.keys().filter(|k| *k != "default").cloned().collect())
-            .unwrap_or_default();
-        out.push(json!({
-            "dir": rel,
-            "name": v.get("package").and_then(|p| p.get("name")).and_then(|n| n.as_str()),
-            "features": features,
-        }));
-    }
-    let reg = project_registry(&cfg).map_err(|e| Response::error(500, &e))?;
-    let boards: Vec<Value> = reg
-        .boards()
-        .iter()
-        // A project's own words were made safe when its definitions loaded.
-        .map(|b| json!({"id": b.id, "product": b.product, "mcu": b.mcu}))
-        .collect();
-    Ok(json_ok(json!({ "targets": out, "boards": boards })))
 }
 
 /// What the page is told when the open project's definitions do not load
@@ -701,55 +690,6 @@ fn definitions(server: &Server) -> Res {
         "application/json",
         reg.to_json().into_bytes(),
     ))
-}
-
-/// Package directories relative to `base`, `/`-separated and sorted:
-/// `targets/*` and `samples/*` with a Cargo.toml, and for a directory under
-/// `targets/` without one (a group such as `mcu` or `boards`), its children.
-fn package_dirs(base: &std::path::Path) -> Vec<String> {
-    fn children(dir: &std::path::Path) -> Vec<PathBuf> {
-        let mut v: Vec<PathBuf> = std::fs::read_dir(dir)
-            .map(|d| d.filter_map(|e| e.ok().map(|e| e.path())).collect())
-            .unwrap_or_default();
-        v.retain(|p| p.is_dir());
-        v.sort();
-        v
-    }
-    let rel = |p: &std::path::Path| {
-        p.strip_prefix(base)
-            .unwrap_or(p)
-            .components()
-            .map(|c| c.as_os_str().to_string_lossy().into_owned())
-            .collect::<Vec<_>>()
-            .join("/")
-    };
-    let mut out = Vec::new();
-    for d in children(&base.join("targets")) {
-        if d.join("Cargo.toml").is_file() {
-            out.push(rel(&d));
-        } else {
-            out.extend(
-                children(&d)
-                    .into_iter()
-                    .filter(|c| c.join("Cargo.toml").is_file())
-                    .map(|c| rel(&c)),
-            );
-        }
-    }
-    // A generated project's node crates.
-    out.extend(
-        children(&base.join("nodes"))
-            .into_iter()
-            .filter(|c| c.join("Cargo.toml").is_file())
-            .map(|c| rel(&c)),
-    );
-    out.extend(
-        children(&base.join("samples"))
-            .into_iter()
-            .filter(|c| c.join("Cargo.toml").is_file())
-            .map(|c| rel(&c)),
-    );
-    out
 }
 
 fn topology_path(server: &Server) -> Result<PathBuf, Response> {
@@ -955,9 +895,16 @@ fn sign_nodes(
         let (built, elfs) = nodebuild::last_build(cfg, node)?;
         let ver = built
             .version
-            .ok_or_else(|| format!("{node} was built without a version in [build.{node}]"))?;
+            .ok_or_else(|| format!("{node} was built without a version; build it again"))?;
         let parsed = version(&ver)?;
         ready.push((node, ver, parsed, elfs));
+    }
+    let mut flat = Vec::new();
+    for (node, ver, parsed, elfs) in ready {
+        let mut built = crate::deploy::release_inputs(cfg, t, vec![(node.clone(), parsed, elfs)])
+            .map_err(|e| format!("{node}: {e}"))?;
+        let (_, _, elfs) = built.pop().ok_or("no build")?;
+        flat.push((node, ver, parsed, elfs));
     }
     // All images are signed in memory first; files change only after
     // every one succeeded, so a bad ELF, a signing error or a cancel
@@ -965,7 +912,7 @@ fn sign_nodes(
     let reg = crate::defs::registry(cfg)?;
     let mut out = Vec::new();
     let mut signed = Vec::new();
-    for (node, ver, parsed, elfs) in ready {
+    for (node, ver, parsed, elfs) in flat {
         let opts = SignOpts {
             version: parsed,
             release_seq: 1,
@@ -990,7 +937,8 @@ fn sign_nodes(
                 &elf,
                 Some(&opts),
                 key,
-            )?;
+            )
+            .map_err(|e| format!("{node}: {e}"))?;
             log(&format!(
                 "{node}: slot {slot} signed, {} bytes, {ver}",
                 img.len()
@@ -1742,39 +1690,6 @@ mod tests {
     }
 
     #[test]
-    fn package_dirs_cover_support_packages_and_samples() {
-        let base = std::env::temp_dir().join(format!("dagon-pkgdirs-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&base);
-        for d in [
-            "targets/f401-app",
-            "targets/mcu/esp32s3",
-            "targets/boards/m5stopwatch",
-            "targets/esp32s3-2ndstage",
-            "samples/esp32s3-app",
-        ] {
-            std::fs::create_dir_all(base.join(d)).unwrap();
-            if d != "targets/esp32s3-2ndstage" {
-                std::fs::write(
-                    base.join(d).join("Cargo.toml"),
-                    "[package]
-",
-                )
-                .unwrap();
-            }
-        }
-        assert_eq!(
-            package_dirs(&base),
-            [
-                "targets/boards/m5stopwatch",
-                "targets/f401-app",
-                "targets/mcu/esp32s3",
-                "samples/esp32s3-app",
-            ]
-        );
-        let _ = std::fs::remove_dir_all(&base);
-    }
-
-    #[test]
     fn a_signed_boot_core_is_recorded_with_its_node_so_a_release_takes_it() {
         let files = sign_swaps(
             "seg",
@@ -1793,6 +1708,37 @@ mod tests {
         let rec: SignRecord = serde_json::from_slice(record.as_ref().unwrap()).unwrap();
         let listed: Vec<&str> = rec.images.iter().map(|(f, _)| f.as_str()).collect();
         assert_eq!(listed, ["seg-a.img", "seg-b.img", "bootcore-seg-a.img"]);
+    }
+
+    /// 中止 of 雛形を作る: the node being made finishes, the next is not started.
+    #[test]
+    fn gen_stops_between_nodes_when_cancelled() {
+        let d = std::env::temp_dir().join(format!("dagon-gen-cancel-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&d);
+        let dir = d.join("proj");
+        let here = std::fs::canonicalize(crate::dagonsrc::BUILT_FROM).unwrap();
+        let src = crate::dagonsrc::NewSource::Clone(crate::config::plain_path(here));
+        crate::scaffold::new_project(&dir, "proj", crate::scaffold::SAMPLE, &d.join("keys"), &src)
+            .unwrap();
+        let config = dir.join(crate::config::CONFIG_FILE);
+        let cancel = AtomicBool::new(false);
+        let r = gen_nodes(
+            &config,
+            &[],
+            false,
+            &mut |_| cancel.store(true, Ordering::Relaxed),
+            &cancel,
+        );
+        assert_eq!(r.unwrap_err(), "cancelled");
+        assert!(dir.join("nodes/hub/Cargo.toml").exists());
+        assert!(!dir.join("nodes/seg").exists());
+        // Not cancelled: every node, and each line once.
+        let lines = gen_nodes(&config, &[], false, &mut |_| {}, &AtomicBool::new(false)).unwrap();
+        assert!(dir.join("nodes/watch/Cargo.toml").exists());
+        let mut once = lines.clone();
+        once.dedup();
+        assert_eq!(lines, once);
+        let _ = std::fs::remove_dir_all(&d);
     }
 
     /// `dagon new` and `dagon gen`, built and signed once; then the app
@@ -1873,6 +1819,38 @@ mod tests {
     #[ignore = "builds firmware for the STM32F401"]
     fn raised_versions_reach_the_package_f401() {
         raised_versions_reach_the_package("seg");
+    }
+
+    /// An ESP32-S3 app is signed as the flat image its OTA slots hold, as in
+    /// `dagon deploy`, never as the ELF: the ELF's sections are mapped far from
+    /// the slot. A stand-in ELF stops at that step, whether espflash is
+    /// installed or not, and the failure names the node.
+    #[test]
+    fn signing_an_esp32s3_node_goes_through_its_esp_image() {
+        let (cfg, _) = built_area("esp");
+        let t =
+            dagon_topology::parse_str(include_str!("../../../../topology/sample.yaml")).unwrap();
+        let dir = cfg.base.join("out/build/watch");
+        std::fs::create_dir_all(&dir).unwrap();
+        let body = vec![0x41u8; 1500];
+        std::fs::write(dir.join("app-a.elf"), &body).unwrap();
+        let rec = nodebuild::BuildRecord {
+            version: Some("0.1.0".into()),
+            slots: vec![('a', sha_hex(&body))],
+        };
+        std::fs::write(dir.join("build.json"), serde_json::to_string(&rec).unwrap()).unwrap();
+        let watch = ["watch".to_string()];
+        let e = sign_nodes(
+            &cfg,
+            &t,
+            &watch,
+            &test_key(),
+            &mut |_| {},
+            &AtomicBool::new(false),
+        )
+        .unwrap_err();
+        assert!(e.starts_with("watch: ") && e.contains("espflash"), "{e}");
+        let _ = std::fs::remove_dir_all(&cfg.base);
     }
 
     #[test]

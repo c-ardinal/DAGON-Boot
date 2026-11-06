@@ -27,8 +27,6 @@ use crate::flashdev::{self, Pick, DRIVE_WAIT};
 use crate::nodebuild;
 use crate::scaffold::Want;
 
-/// Version of the first install when dagon.toml gives none.
-const FIRST_VERSION: &str = "1.0.0";
 /// The stage0 part (the layout's `stage0` region); every other part is
 /// the boot image of the first install.
 const STAGE0: &str = "stage0";
@@ -472,7 +470,7 @@ fn inputs(
     let source = in_source.then_some(root.as_path());
     build_app(cfg, node, fw_key, source, paths, log, cancel)?;
     let stage0 = built.iter().find(|p| p.0 == STAGE0).map(|p| p.1.clone());
-    let version = cfg.build.get(node).and_then(|b| b.version.clone());
+    let (version, bootcore_version) = first_versions(cfg, node)?;
     Ok(ProvisionInputs {
         stage0,
         // The boot core, or the agent that stands where it is.
@@ -482,11 +480,25 @@ fn inputs(
             .map(|p| p.1.clone())
             .ok_or("no boot image part")?,
         app: nodebuild::elf_path(cfg, node, 'a'),
-        version: Some(version.unwrap_or_else(|| FIRST_VERSION.into())),
-        bootcore_version: None,
+        version: Some(version),
+        bootcore_version,
         release_seq: None,
         proto_version: None,
     })
+}
+
+/// The versions a first write signs node `node` with: its crate's Cargo.toml
+/// `version`, and its boot crate's for its boot core (none without a boot
+/// crate: an MCU without one has no boot core of its own).
+fn first_versions(cfg: &Config, node: &str) -> Result<(String, Option<String>), String> {
+    let app = crate::deploy::app_version(cfg, node, None)?;
+    let boot = cfg.base.join(crate::extgen::BOOT_CRATES).join(node);
+    let core = boot
+        .join("Cargo.toml")
+        .is_file()
+        .then(|| crate::srcver::crate_version(&boot))
+        .transpose()?;
+    Ok((app.to_string(), core.map(|v| v.to_string())))
 }
 
 /// Builds `node`'s app with the firmware key (`source`: the DAGON source
@@ -807,7 +819,7 @@ fn esp_files(
     let csv =
         std::fs::read_to_string(&csv_path).map_err(|e| format!("{}: {e}", csv_path.display()))?;
     let l = esp::layout(mcu)?;
-    let version = crate::commands::version(i.version.as_deref().unwrap_or(FIRST_VERSION))?;
+    let version = crate::commands::version(i.version.as_deref().ok_or("no app version")?)?;
     let opts = crate::commands::SignOpts {
         version,
         release_seq: i.release_seq.unwrap_or(1),
@@ -1121,11 +1133,54 @@ mod tests {
                     bin: None,
                     features: vec![],
                     slot_b_feature: Some("slot-b".into()),
-                    version: None,
                 },
             );
         }
         (cfg, dagon_topology::parse_str(YAML).unwrap())
+    }
+
+    #[test]
+    fn a_first_write_signs_with_the_versions_in_the_crates() {
+        let base =
+            std::env::temp_dir().join(format!("dagon-first-versions-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&base);
+        let manifest = |rel: &str, v: &str| {
+            let dir = base.join(rel);
+            std::fs::create_dir_all(&dir).unwrap();
+            std::fs::write(
+                dir.join("Cargo.toml"),
+                format!("[package]\nname = \"x\"\nversion = \"{v}\"\n"),
+            )
+            .unwrap();
+        };
+        manifest("nodes/seg", "0.1.0");
+        manifest("boot/seg", "0.2.0");
+        manifest("nodes/watch", "0.3.0");
+        let mut cfg = Config {
+            base: base.clone(),
+            ..Config::default()
+        };
+        for id in ["seg", "watch"] {
+            cfg.build.insert(
+                id.into(),
+                crate::config::BuildInputs {
+                    package: PathBuf::from(format!("nodes/{id}")),
+                    bin: None,
+                    features: vec![],
+                    slot_b_feature: None,
+                },
+            );
+        }
+        assert_eq!(
+            first_versions(&cfg, "seg").unwrap(),
+            ("0.1.0".to_string(), Some("0.2.0".to_string()))
+        );
+        assert_eq!(
+            first_versions(&cfg, "watch").unwrap(),
+            ("0.3.0".to_string(), None)
+        );
+        assert!(first_versions(&cfg, "nope").is_err());
+        let _ = std::fs::remove_dir_all(&base);
     }
 
     /// What the builds hand to the file step, as raw stand-in payloads.
@@ -1139,7 +1194,7 @@ mod tests {
             stage0: with_stage0.then(|| file("stage0.bin", 2000)),
             bootcore: file("boot.bin", 4000),
             app: file("app.bin", 8000),
-            version: Some(FIRST_VERSION.into()),
+            version: Some("0.1.0".into()),
             bootcore_version: None,
             release_seq: None,
             proto_version: None,
@@ -1497,7 +1552,6 @@ mod tests {
                 bin: None,
                 features: vec![],
                 slot_b_feature: None,
-                version: Some("1.0.0".into()),
             },
         );
         let out = cfg.base.join("out/watch");

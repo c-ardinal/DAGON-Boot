@@ -1,6 +1,6 @@
 import { render } from 'svelte/server';
 import { describe, expect, test } from 'vitest';
-import { DETAIL } from '../app/copy.ts';
+import { DETAIL, WRITE } from '../app/copy.ts';
 import type { Live } from '../app/operate.svelte.ts';
 import { SAMPLE_CONFIG } from '../app/sample.ts';
 import type { HelloResp } from '../serial/hello.ts';
@@ -77,5 +77,24 @@ describe('node detail: VERSION under 詳しく見る', () => {
 
   test('not read yet: no row', () => {
     expect(row(detail(answered(PORT_SELF_BOOT, undefined)), 'stage0')).toBeNull();
+  });
+});
+
+describe('a node card opens its first write', () => {
+  const firstHtml = (selected: string, props: Record<string, unknown> = {}) =>
+    render(Detail, { props: { config: SAMPLE_CONFIG, live: {}, selected, connected: false, ...props } }).body;
+  const first = (b: string) => /<button[^>]*data-control="flash"[^>]*>([^<]*)<\/button>/.exec(b);
+
+  test.each(SAMPLE_CONFIG.nodes.map((n) => n.id))('%s: no node answering, its first write can be started from its card', (id) => {
+    const b = firstHtml(`node:${id}`, { first: [id], onfirst: () => undefined });
+    expect(first(b)?.[1]).toBe(WRITE.run);
+  });
+
+  test('a node whose DAGON answers has no such action', () => {
+    expect(first(firstHtml('node:seg', { first: ['hub'], onfirst: () => undefined }))).toBeNull();
+  });
+
+  test('without the action offered (準備) there is none', () => {
+    expect(first(firstHtml('node:seg'))).toBeNull();
   });
 });

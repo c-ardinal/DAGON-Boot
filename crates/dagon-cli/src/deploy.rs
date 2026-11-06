@@ -85,8 +85,8 @@ pub(crate) fn release_versions(
     crate::kept::versions_of(t, &bytes, pubkey).map_err(|e| format!("{}: {e}", path.display()))
 }
 
-/// Node `node`'s app version: its crate's Cargo.toml `version`; a
-/// `version` in `[build.<id>]` and `given` (`--version`) must be the same.
+/// Node `node`'s app version: its crate's Cargo.toml `version`; `given`
+/// (`--version`) must be the same.
 pub(crate) fn app_version(
     cfg: &Config,
     node: &str,
@@ -98,8 +98,6 @@ pub(crate) fn app_version(
         .ok_or_else(|| format!("no [build.{node}] in dagon.toml"))?;
     let what = b.package.join("Cargo.toml").display().to_string();
     let source = crate::srcver::crate_version(&cfg.base.join(&b.package))?;
-    let source = crate::srcver::agreed(source, b.version.as_deref(), &what)
-        .map_err(|e| format!("[build.{node}] {e}"))?;
     crate::srcver::agreed(source, given, &what)
 }
 
@@ -241,6 +239,15 @@ pub(crate) fn prepare(
     })
 }
 
+/// `question` answered by `--yes`, else read from `input`.
+fn answer(yes: bool, question: &str, input: &mut dyn BufRead) -> bool {
+    if yes {
+        print!("{question}");
+        return true;
+    }
+    confirm(question, input)
+}
+
 /// Shows `listing` and reads one line: `y` or `yes` continues.
 pub(crate) fn confirm(listing: &str, input: &mut dyn BufRead) -> bool {
     print!("{listing}continue? [y/N] ");
@@ -345,14 +352,30 @@ pub fn command(a: &DeployArgs) -> Result<(), String> {
         ));
     }
     let mut host = crate::serial::host(a.port.as_deref())?;
-    crate::device::apply_bundle(
+    let reg = crate::defs::registry(&cfg)?;
+    let topology = dagon_topology::compile_with(&reg, &t).map_err(|e| e.to_string())?;
+    let mut ask = |question: &str| answer(yes, question, &mut std::io::stdin().lock());
+    let answering = crate::device::write_silent_nodes(
         &mut host,
-        &crate::defs::registry(&cfg)?,
-        &p.bundle,
         &t,
-        Some(&key.pk),
-        None,
+        &topology,
+        &p.bundle,
+        &key.pk,
+        &nodes,
+        &dagon_host::rom::rom_maps(&reg),
+        &cfg.provision_dir(),
+        &mut ask,
     )?;
+    if !answering.is_empty() {
+        crate::device::apply_bundle(
+            &mut host,
+            &reg,
+            &p.bundle,
+            &t,
+            Some(&key.pk),
+            Some(&answering),
+        )?;
+    }
     // Only an applied release is the one the next deploy counts from.
     crate::genfs::write_out(&cfg.base, &release_out(&cfg)?, &p.bundle)
 }

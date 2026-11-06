@@ -1,12 +1,14 @@
 <script lang="ts">
   import { tick, untrack } from 'svelte';
-  import { bandOf } from './app/band.ts';
+  import { bandOf, connectNotice } from './app/band.ts';
   import { AGENT, ANNOUNCE, BAND, BUILD, BUTTON, CANVAS, DEFINE, DIFF, DRAWER, JOBS, SKELETON, WRITE, HUB, LOCK, SHEET, STATUS, ZOOM, HUB_TOGGLE, MODE, NODE, ORDER, PRODUCT, RECONNECT, SAVE, SKIP, STEP, TIME } from './app/copy.ts';
   import { webSerial } from './app/connect.ts';
   import { fade, rise, tokenMs } from './app/motion.ts';
+  import { resultChip } from './app/nodeState.ts';
   import { HUB_LOCKED, hubOf, view, type Action } from './app/machine.ts';
   import { Operate, waterOf, type Progress, type ReleaseFile } from './app/operate.svelte.ts';
   import { keptChoices, type Kept } from './app/kept.ts';
+  import { buildFailure, buildingNode, buildStateOf, firstWriteNodes, type BuildState } from './app/jobFlow.ts';
   import { logStages } from './app/stageLog.svelte.ts';
   import Graph, { type Chip, type Dot } from './graph/Graph.svelte';
   import Status from './screens/Status.svelte';
@@ -42,7 +44,9 @@
   import ZoomPill from './screens/ZoomPill.svelte';
   import SkeletonModal from './screens/SkeletonModal.svelte';
   import Modal from './screens/Modal.svelte';
+  import StopModal from './screens/StopModal.svelte';
   import FactoryModal from './screens/FactoryModal.svelte';
+  import RomConfirm from './screens/RomConfirm.svelte';
   import { answerConsent } from './app/factory.ts';
   import Toast, { type Notice } from './screens/Toast.svelte';
   import { CONN, FILE, NOTICE, SIM, fill as fillIn } from './app/copy.ts';
@@ -279,19 +283,11 @@
     locked = { why, at: d.revision };
   }
   const cliLabel = $derived(cli.state === 'ready' ? CLI_STATE.ready(cli.hello?.cli ?? '') : CLI_STATE[cli.state]);
-  let cliPanel = $state<'link' | 'jobs' | 'release' | 'project' | 'flash' | null>(null);
+  let cliPanel = $state<'link' | null>(null);
   const runningJobs = $derived(cli.jobs.filter((j) => j.state === 'running' || j.state === 'queued' || j.state === 'question').length);
   $effect(() => {
     if (d.selected) cliPanel = null;
   });
-
-  /** "このリリースを運用で使う" (X03): the release goes to the operate mode's file check. */
-  async function useRelease(name: string, bytes: Uint8Array) {
-    if (stopped('file')) return;
-    if (!(await autosave.ready())) return lock('unsaved');
-    switchMode('operate');
-    op.takeFile(name, bytes);
-  }
 
   /** 運用 / 定義. The define document goes to the operate canvas when leaving define mode. */
   let mode = $state<'operate' | 'define'>('define');
@@ -321,16 +317,6 @@
   $effect(() => {
     if (screen === 'work') history.replaceState(history.state, '', `${location.pathname}${location.search}#mode=${mode}`);
   });
-
-  /** "親機へ送る" / "つないで、親機へ送る" from define mode: the operate session sends the document. */
-  async function sendDefined() {
-    if (stopped('connect')) return;
-    // The 親機 gets the saved 構成 only.
-    if (!(await autosave.ready())) return lock('unsaved');
-    op.useConfig(d.config);
-    if (!connected) await op.connect();
-    if (connected && op.config) await op.push();
-  }
 
   /** Development stand-ins (?mock, ?sim without serve): an unsaved 構成 on the page, nothing to save to. */
   let local = $state(false);
@@ -366,14 +352,6 @@
     if (cli.defsFailed) autosave.cancel();
   }
 
-  /** "ファイルの構成を取り込む": the release's 構成 replaces this one (undoable) and goes to the YAML. */
-  async function importFileTopology() {
-    const t = op.fileTopology;
-    // Editing stopped (the lock table): nothing is replaced and nothing is saved.
-    if (!t || !d.importRelease(t as unknown as Topo)) return;
-    op.fileTopology = null;
-    await save();
-  }
   const fileDiff = $derived(op.state === 'otherTopology' && op.fileTopology ? topoDiff(d.doc.topo, op.fileTopology as unknown as Topo, d.doc.names) : []);
 
   /** Define mode's drawing scale: up to 32 ノード fit by zooming out; the canvas scrolls to pan. */
@@ -418,6 +396,9 @@
   function askDagon(text: string, kind: AskKind, at: Element) {
     if (stopped('ask', at)) return;
     void agent.ask(text, kind, selection());
+  }
+  function askWhy(at: Element, close: () => void) {
+    void agent.askWhy(() => stopped('ask', at), close, selection());
   }
   /** 『反映する』: the proposal goes in as one 構成 edit (undoable) and is saved like any edit. */
   function applyProposal(i: number, at: Element) {
@@ -465,15 +446,6 @@
     return { sentence: '' };
   });
   const savedLabel = $derived(local ? '' : d.unsaved ? SAVE.unsaved : autosave.pending ? STATUS.saving : STATUS.saved);
-  /** Where each flow step leads (02–04 open their CLI sheet in 定義; 05 is 運用). */
-  function goStep(step: 'define' | 'project' | 'build' | 'flash' | 'update') {
-    if (step === 'update') return switchMode('operate');
-    if (mode !== 'define') switchMode('define');
-    d.selected = null;
-    cliPanel = step === 'define' ? null : step === 'build' ? 'release' : step;
-    if (step === 'define' && problemCount > 0) drawerTab = 'problems';
-  }
-
   let graph = $state<ReturnType<typeof Graph>>();
   /** The node a dragged part would go under (highlighted on the canvas). */
   let dropOn = $state<string | null>(null);
@@ -620,48 +592,6 @@
     };
   });
 
-  let drawerOpen = $state(false);
-  let drawerEl = $state<HTMLElement>();
-  let drawerButton = $state<HTMLButtonElement>();
-  $effect(() => {
-    if (layout !== 'drawer') drawerOpen = false;
-  });
-
-  async function openDrawer() {
-    drawerOpen = true;
-    await tick();
-    (focusables()[0] ?? drawerEl)?.focus();
-  }
-
-  function closeDrawer() {
-    drawerOpen = false;
-    drawerButton?.focus();
-  }
-
-  function focusables(): HTMLElement[] {
-    return [...(drawerEl?.querySelectorAll<HTMLElement>('button, [href], summary, [tabindex]:not([tabindex="-1"])') ?? [])];
-  }
-
-  /** Keeps Tab inside the open drawer; Escape closes it and returns focus to its header button. */
-  function drawerKeys(e: KeyboardEvent) {
-    if (e.key === 'Escape') {
-      e.preventDefault();
-      return closeDrawer();
-    }
-    if (e.key !== 'Tab') return;
-    const f = focusables();
-    if (f.length === 0) return e.preventDefault();
-    const first = f[0];
-    const last = f[f.length - 1];
-    if (e.shiftKey && (document.activeElement === first || document.activeElement === drawerEl)) {
-      e.preventDefault();
-      last.focus();
-    } else if (!e.shiftKey && document.activeElement === last) {
-      e.preventDefault();
-      first.focus();
-    }
-  }
-
   /** Buttons whose procedures this page runs; the others show as unavailable. */
   const RUNS: ReadonlySet<Action> = new Set([
     'connectDiscover', 'connect', 'reselect', 'reconnect', 'push', 'pushAgain', 'scanAgain', 'reload',
@@ -690,19 +620,11 @@
   const diffChips = $derived(Object.fromEntries(fileDiff.flatMap((r) => r.nodes).map((id) => [id, { chip: DIFF.chip, spoken: DIFF.spoken, silent: true }])));
   /** a flat minute per node, the copy's 目安; measure per link and image size if it misleads. */
   const MINUTES_PER_NODE = 1;
-  /** On the cards while and after writing: → the new version, then 前のバージョンに戻った / 書き込めなかった; nothing once confirmed. */
-  const RESULT: Partial<Record<Progress['stage'], { word: string; silent: boolean }>> = {
-    previous: { word: WRITE.previous, silent: false },
-    refused: { word: WRITE.failed, silent: true },
-    silent: { word: WRITE.failed, silent: true },
-    cannotFix: { word: WRITE.failed, silent: true },
-    unwritten: { word: WRITE.failed, silent: true },
-  };
+  /** On the cards while writing: → the new version; after it, what the write left (resultChip). */
   const cardChipOf = (id: string, p: Progress): Chip | null => {
     const to = op.fileVersions[id];
     if (FILLING_STAGES.has(p.stage)) return to === undefined ? null : { chip: WRITE.to(versionText(to)), spoken: WRITE.to(versionText(to)), silent: false };
-    const r = RESULT[p.stage];
-    return r ? { chip: r.word, spoken: r.word.slice(2), silent: r.silent } : null;
+    return resultChip(p.stage);
   };
   const progressChips = $derived(
     Object.fromEntries(
@@ -721,34 +643,44 @@
   const buildJob = $derived(jobOf(buildIds.build));
   const signJob = $derived(jobOf(buildIds.sign));
   const releaseJob = $derived(jobOf(buildIds.release));
-  /** Where the build stands: null before any, else running, done or failed (signing counts as building). */
-  const buildState = $derived.by(() => {
-    const jobs = [buildJob, signJob, releaseJob].filter((j) => j !== null);
-    if (jobs.length === 0) return null;
-    if (jobs.some((j) => j.state === 'failed')) return 'failed';
-    if (releaseJob?.state === 'succeeded' || (buildJob?.state === 'succeeded' && !cli.hello?.key)) return 'done';
-    return 'running';
-  });
+  /** Serve would not take one of the build's jobs. */
+  let buildStartFailed = $state(false);
+  const buildJobs = $derived({ build: buildJob, sign: signJob, release: releaseJob });
+  const buildState = $derived(buildStateOf(buildJobs, buildStartFailed));
   async function build() {
     if (stopped('build') || !cli.has('build')) return;
     buildFailureOpen = false;
+    buildStartFailed = false;
     buildIds = { build: null, sign: null, release: null };
-    await autosave.whenSaved(async () => {
-      const j = await cli.build(d.config.reach);
-      buildIds = { build: j?.id ?? null, sign: null, release: null };
-    });
+    try {
+      await autosave.whenSaved(async () => {
+        const j = await cli.build(d.config.reach);
+        buildIds = { build: j?.id ?? null, sign: null, release: null };
+      });
+    } catch {
+      buildStartFailed = true;
+    }
   }
+  /** Starts the next step of the build; a step serve would not take ends it as a failure. */
+  function buildStep(step: 'sign' | 'release', start: () => Promise<{ id: number } | null>) {
+    buildIds = { ...buildIds, [step]: -1 };
+    void start()
+      .then((j) => {
+        if (!j) buildStartFailed = true;
+        buildIds = { ...buildIds, [step]: j?.id ?? -1 };
+      })
+      .catch(() => (buildStartFailed = true));
+  }
+  let buildAnnounced: BuildState = null;
   $effect(() => {
     const s = buildState;
+    // Each step's end starts the next while the state stays "running".
+    const [built, signed] = [buildJob?.state, signJob?.state];
     untrack(() => {
-      if (buildJob?.state === 'succeeded' && buildIds.sign === null && cli.hello?.key) {
-        buildIds = { ...buildIds, sign: -1 };
-        void cli.sign(d.config.reach).then((j) => (buildIds = { ...buildIds, sign: j?.id ?? null }));
-      }
-      if (signJob?.state === 'succeeded' && buildIds.release === null) {
-        buildIds = { ...buildIds, release: -1 };
-        void cli.release().then((j) => (buildIds = { ...buildIds, release: j?.id ?? null }));
-      }
+      if (built === 'succeeded' && buildIds.sign === null) buildStep('sign', () => cli.sign(d.config.reach));
+      if (signed === 'succeeded' && buildIds.release === null) buildStep('release', () => cli.release());
+      if (s === buildAnnounced) return;
+      buildAnnounced = s;
       if (s === 'done') {
         notice = { word: fillIn(BUILD.toast.done, { n: d.config.reach.length }) };
         void loadVersions();
@@ -758,10 +690,8 @@
   });
   /** While building, only the card of the node cargo builds now says so; nothing stays once it is done. */
   const buildingChips = $derived.by((): Record<string, Chip> => {
-    if (buildJob?.state !== 'running') return {};
-    const line = [...buildJob.lines].reverse().find((l) => /^\S+: building /.test(l));
-    const id = line?.slice(0, line.indexOf(':'));
-    return id && d.config.reach.includes(id) ? { [id]: { chip: BUILD.state.running, spoken: BUILD.state.running, silent: false } } : {};
+    const id = buildingNode(buildJobs, d.config.reach);
+    return id ? { [id]: { chip: BUILD.state.running, spoken: BUILD.state.running, silent: false } } : {};
   });
   const chips = $derived(updating ? progressChips : diffChips);
   /** The water in each node while it is written (writing, hubRestarting, recovering). */
@@ -773,6 +703,13 @@
   /** The refusal modal: why the package cannot be written and what to do; closing leaves the band's buttons. */
   let refusalClosed = $state<ReleaseFile | null>(null);
   const refusalOpen = $derived(op.file !== null && (op.state === 'fileRefused' || op.state === 'otherTopology') && refusalClosed !== op.file);
+  /** A connection the user must fix: its next step, until closed (or the state moves on). */
+  let connectClosed = $state(false);
+  const connectModal = $derived(connectNotice(op.state) === 'modal' && !connectClosed);
+  $effect(() => {
+    void op.state;
+    connectClosed = false;
+  });
   /** A write that stopped at a node (back on its previous version, or not written): what happened and what to do, until closed. */
   let stopClosed = $state<string | null>(null);
   const stopNode = $derived(op.state === 'stopped' && op.failed ? (op.config?.nodes.find((n) => n.id === op.failed) ?? null) : null);
@@ -787,24 +724,36 @@
     const input = e.currentTarget as HTMLInputElement;
     const f = input.files?.[0];
     input.value = '';
-    if (f && stopped(pickForRecovery ? 'recover' : 'file')) return void (pickForRecovery = false);
+    if (f && stopped(pickForRecovery ? 'recover' : 'file')) return void (pickForRecovery = null);
     const forRecovery = pickForRecovery;
-    pickForRecovery = false;
+    pickForRecovery = null;
     if (!f) return;
     const bytes = new Uint8Array(await f.arrayBuffer());
-    if (forRecovery) void op.recover({ name: f.name, bytes });
+    if (forRecovery) void writeOne(forRecovery.id, { name: f.name, bytes });
     else op.takeFile(f.name, bytes);
   }
 
-  /** The file chooser is open for a recovery that found no release. */
-  let pickForRecovery = false;
-  async function recover(again = false) {
+  /** The file chooser is open for a one-node write that found no release. */
+  let pickForRecovery: { id?: string } | null = null;
+  /** The silent node whose ROM write waits for the user's word. */
+  let romAsk = $state<string | null>(null);
+  /** 「書き込む」 on one node: the way it answers decides what comes next. */
+  async function writeOne(id?: string, chosen?: { name: string; bytes: Uint8Array }, again = false) {
     if (stopped('recover')) return;
-    if ((await (again ? op.retry() : op.recover())) === 'needFile') {
-      pickForRecovery = true;
+    const r = await (again ? op.retry() : op.writeNode({ id, chosen }));
+    const node = id ?? op.recoverTarget?.id ?? null;
+    if (r === 'needFile') {
+      pickForRecovery = { id };
       fileInput?.click();
-    }
+    } else if (r === 'direct' && node) factory = { node, id: null };
+    else if (r === 'confirm') romAsk = node;
   }
+  function writeRom() {
+    const id = romAsk;
+    romAsk = null;
+    if (id && !stopped('recover')) void op.writeNode({ id, confirmed: true });
+  }
+  const romNode = $derived(op.config?.nodes.find((n) => n.id === romAsk) ?? null);
   /** The sheet shows only when it holds something. */
   const sheetShown = $derived(
     mode === 'define'
@@ -1007,6 +956,7 @@
   d.guard = (k) => stopped(k);
   cli.guard = (k) => stopped(k);
   agent.guard = (k) => stopped(k);
+  agent.record = () => op.settledRollbackRecord();
   /** Band actions as lock-table operations. */
   const CONTROL_OF: Partial<Record<Action, Control>> = {
     chooseFile: 'file', updateResponding: 'file', otherFile: 'file', useLatest: 'update', update: 'update',
@@ -1021,6 +971,8 @@
   function toggleHub() {
     if (stopped('connect')) return;
     if (hubLocked) {
+      // Seen where the button is, in either mode; the status row's sentence is for screen readers.
+      showWhy(hubLocked, document.querySelector('[data-control="connect"]'));
       hubNotice = { at: op.state, why: hubLocked };
       if (mode === 'operate') void tick().then(() => nextEl?.focus());
       return;
@@ -1087,6 +1039,7 @@
           onselect: (k: string) => (d.selected = d.selected === k ? null : k),
           dot: defineDot,
           chips: { ...defineChips, ...buildingChips },
+          busy: buildingNode(buildJobs, d.config.reach),
           inset: layout === 'narrow' ? { left: 0, right: 0, bottom: sheetShown ? sheetH : 0 } : { left: partsW, right: sheetW },
           dropOn,
           canLink: (from: string, to: string) => d.linkRefusal(from, to),
@@ -1124,7 +1077,7 @@
   });
 
   /** 雛形を作る: the modal is open while `skeleton` is set; `id` is serve's job once it has taken it. */
-  let skeleton = $state<{ id: number | null } | null>(null);
+  let skeleton = $state<{ id: number | null; failure?: string } | null>(null);
   const skeletonJob = $derived(skeleton?.id == null ? null : (cli.jobs.find((j) => j.id === skeleton?.id) ?? null));
   // 中止: the modal goes with the job.
   $effect(() => {
@@ -1133,9 +1086,13 @@
   async function makeSkeleton() {
     skeleton = { id: null };
     let job: Awaited<ReturnType<typeof cli.gen>> = null;
-    // Made from the saved YAML: after the saves queued before it.
-    await autosave.whenSaved(async () => (job = await cli.gen(d.config.reach)));
-    skeleton = job ? { id: (job as { id: number }).id } : null;
+    try {
+      // Made from the saved YAML: after the saves queued before it.
+      await autosave.whenSaved(async () => (job = await cli.gen(d.config.reach)));
+      skeleton = job ? { id: (job as { id: number }).id } : null;
+    } catch {
+      skeleton = { id: null, failure: SKELETON.startFailed };
+    }
   }
 
   /** The non-blocking notice on screen (bottom-right), or null. */
@@ -1161,9 +1118,12 @@
   });
   // A failure or warning the user must notice: its short word on a toast, the sentence behind it.
   $effect(() => {
-    const cause = next.cause;
-    // A stop or refusal that needs the user opens its modal instead.
-    if (cause && !untrack(() => refusalOpen || stopNode !== null)) untrack(() => (notice = { word: cause, error: cause.startsWith('×'), detail: next.sentence }));
+    // 準備 has its own sentence, but a connection that failed there is told all the same.
+    const bad = connectNotice(op.state);
+    const cause = bad === 'toast' ? band.chip : next.cause;
+    const detail = bad === 'toast' ? band.sentence : next.sentence;
+    // What needs the user opens its modal instead.
+    if (cause && bad !== 'modal' && !untrack(() => refusalOpen || stopNode !== null)) untrack(() => (notice = { word: cause, error: cause.startsWith('×'), detail }));
   });
 
   /** 書き込む: the 親機 answered nothing (silentHub) → writing directly over USB; otherwise the next step of writing through DAGON. */
@@ -1176,20 +1136,27 @@
   const writeOff = $derived(op.state === 'choosing' || (op.state !== 'silentHub' && !WRITABLE.has(op.state) && (writeAction === null || !RUNS.has(writeAction))));
   function write() {
     if (writeOff) return;
-    if (writeAction === null) return void (factory = { id: null });
+    if (writeAction === null) return void (factory = hubId ? { node: hubId, id: null } : null);
     if (WRITABLE.has(op.state)) return void writeChosen();
     act(writeAction);
   }
 
   /** Writing directly over USB to the 親機 whose DAGON answered nothing (the hub first: it reaches the rest). */
-  let factory = $state<{ id: number | null } | null>(null);
-  const factoryNode = $derived(hubNode ?? op.config?.nodes.find((n) => n.role === 'hub') ?? null);
+  let factory = $state<{ node: string; id: number | null } | null>(null);
+  const hubId = $derived((hubNode ?? op.config?.nodes.find((n) => n.role === 'hub'))?.id ?? null);
+  const factoryNode = $derived(op.config?.nodes.find((n) => n.id === factory?.node) ?? null);
+  /** Nodes whose first write can start from their card: not in dagon demo, whose nodes are simulated. */
+  const firstNodes = $derived(mode === 'operate' && !cli.sim && cli.has('flash') ? firstWriteNodes(op.config?.nodes ?? [], op.live, connected, op.state) : []);
   const factoryMcu = $derived(d.doc.topo.nodes.find((n) => n.id === factoryNode?.id)?.mcu ?? '');
   const factoryJob = $derived(factory?.id == null ? null : (cli.jobs.find((j) => j.id === factory?.id) ?? null));
   async function factoryWrite() {
     if (!factoryNode || stopped('flash')) return;
-    const j = await cli.flash(factoryNode.id);
-    factory = { id: j?.id ?? null };
+    const node = factoryNode.id;
+    const j = await cli.flash(node).catch(() => {
+      notice = { word: WRITE.failed, error: true, detail: BUILD.startFailed };
+      return null;
+    });
+    factory = { node, id: j?.id ?? null };
   }
   // Pressing 書き込む in the modal is the consent serve's write asks for.
   const consentAnswered = new Set<string>();
@@ -1222,9 +1189,9 @@
       case 'useLatest':
         return void op.useLatest();
       case 'recover':
-        return void recover();
+        return void writeOne();
       case 'recoverAgain':
-        return void recover(true);
+        return void writeOne(undefined, undefined, true);
       case 'defineFix':
         return switchMode('define');
       case 'push':
@@ -1273,7 +1240,7 @@
 
 {#snippet defineRight()}
   {#if cliPanel}
-    <CliPanel {cli} {d} {autosave} {agent} panel={cliPanel} onuse={useRelease} />
+    <CliPanel {cli} {agent} panel={cliPanel} />
   {:else if d.selected}
     <div class="edit-area" data-control="edit"><Inspector {d} /></div>
   {/if}
@@ -1282,7 +1249,7 @@
 {#snippet actions()}
   {#if mode === 'define'}
     {@const blocked = problemCount > 0 || d.doc.topo.nodes.length === 0}
-    <button class="button-primary-header" data-control="gen" bind:this={primaryEl} aria-disabled={blocked} title={blocked ? SKELETON.disabled : undefined} onclick={() => !blocked && void makeSkeleton()}><span>{SKELETON.make}</span></button>
+    <button class="button-primary-header" data-control="gen" bind:this={primaryEl} aria-disabled={blocked} onclick={() => !blocked && void makeSkeleton()}><span>{SKELETON.make}</span></button>
     <button class="button-secondary-header" data-control="build" aria-disabled={buildState === 'running'} onclick={() => buildState !== 'running' && void build()}><span>{BUILD.run}</span></button>
   {:else}
     {#if versionChoices.length}
@@ -1329,7 +1296,7 @@
   {:else if tab === 'timeline'}
     <Timeline rows={(op.config?.nodes ?? []).filter((n) => op.targets.includes(n.id)).map((n) => ({ id: n.id, name: `[${n.no}] ${n.name}` }))} events={tlEvents} now={tlNow} label={stageWord} />
   {:else if tab === 'jobs'}
-    <CliPanel {cli} {d} {autosave} panel="jobs" onuse={useRelease} />
+    <CliPanel {cli} panel="jobs" />
   {:else if tab === 'log'}
     {#if notes.length === 0}
       <p class="log-none">{DRAWER.logNone}</p>
@@ -1363,6 +1330,8 @@
         act={nodeActions}
         onkeep={(id) => !stopped('rollback') && void op.keepTrial(id)}
         onback={(id) => !stopped('rollback') && void op.rollback(id)}
+        first={firstNodes}
+        onfirst={(id) => (connected ? void writeOne(id) : (factory = { node: id, id: null }))}
         recovery={op.recovering && op.recovered ? { id: op.recovering, result: op.recovered } : null}
       />
 {/snippet}
@@ -1373,7 +1342,7 @@
   <a class="skip" href="#canvas">{SKIP.canvas}</a>
   <a class="skip" href="#band">{SKIP.next}</a>
   <!-- The DOM follows the visual order of each layout, so Tab order matches what is seen. -->
-  <div class="frame {layout}" data-locks={locksNow} class:work={screen === 'work'} class:open={drawerOpen} class:modal={restartOpen || autosave.asking !== null}>
+  <div class="frame {layout}" data-locks={locksNow} class:work={screen === 'work'} class:modal={restartOpen || autosave.asking !== null}>
     <Header
       sim={simulated}
       {mode}
@@ -1425,6 +1394,7 @@
         hub={connected && hubNode ? `${HUB[hub]} [${hubNode.no}] ${hubNode.name}（${NODE.roleHub}）` : HUB[hub]}
         hubAction={connected ? HUB_TOGGLE.disconnect : HUB_TOGGLE.connect}
         onhub={toggleHub}
+        hubHint={op.state === 'idle' || op.state === 'choosing' ? band.sentence : undefined}
         {hubLocked}
         state={stateName(lockStates)}
         cli={cliLabel}
@@ -1456,7 +1426,7 @@
     aria-hidden="true"
     bind:this={fileInput}
     onchange={picked}
-    oncancel={() => (pickForRecovery = false)}
+    oncancel={() => (pickForRecovery = null)}
   />
   {#if ghost?.shown}
     <div class="ghost" aria-hidden="true" style:left="{ghost.x + 8}px" style:top="{ghost.y + 8}px">{ghost.part.name}</div>
@@ -1481,7 +1451,8 @@
   {/if}
   {#if factory && factoryNode}
     <FactoryModal
-      node={{ label: `[${factoryNode.no}] ${factoryNode.name}`, target: `[${factoryNode.no}] ${factoryNode.name}（${NODE.roleHub}）· ${factoryNode.product}` }}
+      node={{ label: `[${factoryNode.no}] ${factoryNode.name}`, target: `[${factoryNode.no}] ${factoryNode.name}（${factoryNode.role === 'hub' ? NODE.roleHub : NODE.roleNode}）· ${factoryNode.product}` }}
+      child={factoryNode.role !== 'hub'}
       how={mcuConnection(factoryMcu)}
       canWrite={cli.canFlash(factoryMcu)}
       job={factoryJob}
@@ -1518,14 +1489,19 @@
     </Modal>
   {/if}
   {#if stopOpen && stopNode}
-    {@const back = op.progress[stopNode.id]?.stage === 'previous'}
+    {@const back = op.wentBack}
     {@const running = op.live[stopNode.id]?.hello?.activeVersion}
-    <Modal title={WRITE.run} chip={{ text: back ? WRITE.previous : WRITE.failed, kind: back ? 'info' : 'error' }} target={`[${stopNode.no}] ${stopNode.name}`} onclose={() => (stopClosed = op.failed)} onmore={() => ((drawerTab = 'log'), (stopClosed = op.failed))}>
-      <h3 class="modal-h">{NOTICE.reason}</h3>
-      <p>{back && running !== undefined ? fillIn(WRITE.rolled.reason, { version: versionText(running) }) : (next.cause ?? WRITE.failed)}</p>
-      <h3 class="modal-h">{NOTICE.fix}</h3>
-      <p>{back ? WRITE.rolled.next : next.sentence}</p>
-      {#snippet actions()}
+    <StopModal
+      target={`[${stopNode.no}] ${stopNode.name}`}
+      {back}
+      reason={back && running !== undefined ? fillIn(WRITE.rolled.reason, { version: versionText(running) }) : (next.cause ?? WRITE.failed)}
+      fix={back ? WRITE.rolled.next : next.sentence}
+      linked={agent.linked}
+      onask={(at) => askWhy(at, () => (stopClosed = op.failed))}
+      onclose={() => (stopClosed = op.failed)}
+      onmore={() => ((drawerTab = 'log'), (stopClosed = op.failed))}
+    >
+      {#snippet buttons()}
         {#each band.secondary as b (b.label)}
           <button class="button-secondary" data-control={CONTROL_OF[b.action]} aria-disabled={!RUNS.has(b.action)} onclick={() => RUNS.has(b.action) && ((stopClosed = op.failed), act(b.action))}>{b.label}</button>
         {/each}
@@ -1534,24 +1510,43 @@
           <button class="button-primary" data-control={CONTROL_OF[p.action]} aria-disabled={!RUNS.has(p.action)} onclick={() => RUNS.has(p.action) && ((stopClosed = op.failed), act(p.action))}>{p.label}</button>
         {/if}
       {/snippet}
-    </Modal>
+    </StopModal>
+  {/if}
+{#if romNode}
+    <RomConfirm node={romNode.name} onwrite={writeRom} oncancel={() => (romAsk = null)} />
   {/if}
   {#if buildFailureOpen}
-    {@const failed = [buildJob, signJob, releaseJob].find((j) => j?.state === 'failed')}
-    <Modal title={BUILD.title} chip={{ text: BUILD.state.failed, kind: 'error' }} target={d.config.reach.map((id) => `nodes/${id}/`).join(' · ')} onclose={() => (buildFailureOpen = false)} onmore={() => ((drawerTab = 'jobs'), (buildFailureOpen = false))}>
+    {@const f = buildFailure(buildJobs, d.config.reach)}
+    {@const at = d.config.nodes.find((n) => n.id === f.node)}
+    <Modal title={BUILD.title} chip={{ text: BUILD.state.failed, kind: 'error' }} target={at ? `[${at.no}] ${at.name} · nodes/${at.id}/` : undefined} onclose={() => (buildFailureOpen = false)} onmore={() => ((drawerTab = 'jobs'), (buildFailureOpen = false))}>
       <h3 class="modal-h">{NOTICE.reason}</h3>
-      <p class="modal-mono">{jobReason(failed)}</p>
+      <p class="modal-mono">{buildStartFailed ? BUILD.startFailed : f.reason}</p>
+      <h3 class="modal-h">{NOTICE.fix}</h3>
+      <p>{f.file ? fillIn(BUILD.fail.fix, { file: f.file, line: f.line ?? 0 }) : BUILD.fail.plain}{f.others ? fillIn(BUILD.fail.others, { n: f.others }) : ''}</p>
       {#snippet actions()}
         {#if agent.linked}
-          <button class="button-secondary" data-control="ask" onclick={(e) => askDagon(BUILD.askAgent, 'failure', e.currentTarget)}>{BUILD.askAgent}</button>
+          <button class="button-secondary" data-control="ask" onclick={(e) => askWhy(e.currentTarget, () => (buildFailureOpen = false))}>{BUILD.askAgent}</button>
         {/if}
         <button class="button-primary" data-control="build" onclick={() => void build()}>{BUILD.retry}</button>
+      {/snippet}
+    </Modal>
+  {/if}
+  {#if connectModal}
+    <Modal title={HUB_TOGGLE.connect} chip={{ text: band.chip ?? '', kind: 'error' }} onclose={() => (connectClosed = true)}>
+      <h3 class="modal-h">{NOTICE.fix}</h3>
+      <p>{band.sentence}</p>
+      {#snippet actions()}
+        {#if band.primary}
+          {@const p = band.primary}
+          <button class="button-primary" data-control={CONTROL_OF[p.action]} onclick={() => ((connectClosed = true), act(p.action))}>{p.label}</button>
+        {/if}
       {/snippet}
     </Modal>
   {/if}
   {#if skeleton}
     <SkeletonModal
       job={skeletonJob}
+      failure={skeleton.failure ?? null}
       place={cli.hello?.workspace ?? d.doc.topo.name ?? ''}
       nodes={d.config.nodes.filter((n) => d.config.reach.includes(n.id)).map((n) => [`[${n.no}] ${n.name}`, `nodes/${n.id}/`] as [string, string])}
       onclose={() => (skeleton = null)}
@@ -1568,10 +1563,6 @@
 <svelte:window onkeydown={defineKeys} />
 
 <style>
-  .modal-h {
-    margin: 0;
-    font: 700 var(--t-caption) / 16px var(--f-ja);
-  }
   .modal-mono {
     margin: 0;
     font: 400 var(--t-mono) / 24px var(--f-mono);

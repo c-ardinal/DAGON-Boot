@@ -54,10 +54,10 @@ python samples/hardware-test/hwt.py selftest
 - `dagon deploy` is never answered in advance: its plan (each node and the
   version it goes to, and the package file) is read first and must be
   exactly the step's; otherwise the harness answers `n` and fails.
-- `dagon rollback`, `apply` and `recover` ask nothing; the harness checks
+- `dagon rollback` and `apply` ask nothing; the harness checks
   what they will do before calling them (rollback: the other slot holds a
   confirmed version; apply: only the deliberately bad releases, which must
-  be refused; recover: the named release exists).
+  be refused).
 - The throwaway key of the foreign-key scenario is made in a temporary
   folder and deleted as soon as its release is built; only its key_id is
   recorded.
@@ -100,8 +100,7 @@ interrupted by killing the CLI at 30 % on each node (old version keeps
 running, the retry succeeds); a tampered release (plain, and with the item
 CRC recomputed) and a release signed with a throwaway key (refused by
 `dagon apply` before any write; every slot unchanged); A/B back and forth
-three times; `dagon recover seg` while it answers; F401 ROM recovery
-(SKIPPED); a final good deploy.
+three times; F401 ROM write (SKIPPED); a final good deploy.
 
 Test versions are 2.0.N (the format is major.minor.patch only, no
 pre-release tags). A node's version is its crate's: before each deploy step
@@ -121,7 +120,7 @@ Nothing in the DAGON packages changes.
 
 ## Not automated
 
-- F401 ROM recovery: `dagon recover` uses the ROM path only for an F401
+- F401 ROM write: `dagon deploy` uses the ROM path only for an F401
   that does not answer; making it silent needs an erase outside the normal
   confirmation.
 - Interrupting by resetting the 親機: the CLI has no command that resets the

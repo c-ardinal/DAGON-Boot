@@ -24,7 +24,6 @@ export interface Hello {
   formats?: Record<string, number>;
   workspace: string | null;
   features: string[];
-  api_key: boolean;
   key: boolean;
   key_id: string | null;
   /** The developer's public key (64 hex digits) the page verifies releases with. */
@@ -497,10 +496,5 @@ export class Cli {
   /** "最初からやり直す": the jobs this page shows are its records too (serve's files stay). */
   clearJobs(): void {
     this.jobs = [];
-  }
-
-  /** GET/PUT /v1/nodes/{id}/board, when serve offers it. */
-  saveBoard(id: string, fields: { flash_bytes?: number }): Promise<unknown> {
-    return this.json('PUT', `nodes/${encodeURIComponent(id)}/board`, fields);
   }
 }

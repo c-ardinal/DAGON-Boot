@@ -53,7 +53,6 @@ sync = { seg = "f401-app", watch = "esp32s3-app" }
 #                                             dagon apply must refuse it, nothing changes
 #   rollback node                            dagon rollback; the node is on the version its
 #                                             other slot held, confirmed, slot flipped
-#   recover  node of                         dagon recover with the release of `of`
 #   skip     reason                          recorded as SKIPPED
 
 [[scenario]]
@@ -151,14 +150,9 @@ steps = [
 ]
 
 [[scenario]]
-id = "recover-seg"
-title = "dagon recover seg while it answers (normal transfer path)"
-steps = [{ do = "recover", node = "seg", of = "2.0.16" }]
-
-[[scenario]]
 id = "rom-recovery"
-title = "F401 recovery through the hub's ROM path"
-steps = [{ do = "skip", reason = "dagon recover takes the ROM path only when the F401 does not answer HELLO; no CLI step makes a healthy F401 silent without a write the normal confirmation does not allow (erasing it), and this path is run only when it can be undone safely" }]
+title = "F401 written through the hub's ROM path"
+steps = [{ do = "skip", reason = "dagon deploy takes the ROM path only when the F401 does not answer HELLO; no CLI step makes a healthy F401 silent without a write the normal confirmation does not allow" }]
 
 [[scenario]]
 id = "final"

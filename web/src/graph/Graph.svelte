@@ -70,6 +70,8 @@
     controls?: Snippet<[number]>;
     /** The id of the node a dragged part would go under (highlighted). */
     dropOn?: string | null;
+    /** 準備: the node being built: its card says 作業中. */
+    busy?: string | null;
     /** 書込: each writable node's card check (true: it is written next); none in 準備. */
     checks?: Record<string, boolean>;
     /** A card check pressed. */
@@ -97,6 +99,7 @@
     onrefuse,
     controls,
     dropOn = null,
+    busy = null,
     checks = {},
     oncheck,
     checksLocked = false,
@@ -289,7 +292,7 @@
     Object.fromEntries(
       (config?.nodes ?? []).map((n): [string, NodeState] => {
         const l = live[n.id];
-        return [n.id, nodeState({ connected, responding: l?.responding, trial: !!l?.hello?.trial, chip: chips[n.id]?.chip, writing: fill[n.id] !== undefined, unreachable: !!n.notYet })];
+        return [n.id, nodeState({ connected, responding: l?.responding, trial: !!l?.hello?.trial, chip: chips[n.id]?.chip, writing: fill[n.id] !== undefined || busy === n.id, unreachable: !!n.notYet })];
       }),
     ),
   );

@@ -2,7 +2,7 @@
 // GET /v1/agent, POST/DELETE /v1/agent/link (consent asked once, when
 // linking), POST /v1/agent/ask (no confirmation per question). The key never
 // comes here; the provider's name is shown only in the linking step.
-import { AGENT } from './copy.ts';
+import { AGENT, BUILD } from './copy.ts';
 
 /** One way to reach an agent: its own login through a program, or an HTTP API with a key. */
 export interface AgentWay {
@@ -48,6 +48,17 @@ export interface AgentStatus {
 
 export type AskKind = 'problem' | 'next' | 'propose' | 'failure' | 'free';
 export type Selection = { node: string } | { link: { from: string; to: string } };
+
+/** The record of a write that went back to the previous version, as POST /v1/agent/ask takes it. */
+export interface RollbackRecord {
+  node: string;
+  failed_version: string;
+  returned_version: string;
+  /** dagon-host's short reason (`ROLLED BACK`). */
+  reason: string;
+  /** What the node's STATUS reported then; null when it did not answer. */
+  node_state: { trial: boolean; last_reason: number } | null;
+}
 
 export interface Proposal {
   /** Lines prefixed ' ', '-', '+'. */
@@ -114,6 +125,8 @@ export class Agent {
 
   /** The lock table's check, set by the page: true when it is stopped now (the page has shown why). */
   guard: (kind: 'ask' | 'link') => boolean = () => false;
+  /** The page's record of a write that went back, once complete; sent with every question while there is one. */
+  record: () => Promise<RollbackRecord | null> = async () => null;
 
   constructor(private readonly api: AgentApi) {}
 
@@ -174,7 +187,8 @@ export class Agent {
     this.messages = [...this.messages, { role: 'user', text: question }];
     this.thinking = true;
     try {
-      const r = await this.api('POST', 'agent/ask', { question, kind, ...(selection ? { selection } : {}), history });
+      const rollback = await this.record();
+      const r = await this.api('POST', 'agent/ask', { question, kind, ...(selection ? { selection } : {}), ...(rollback ? { rollback } : {}), history });
       if (!r.ok) return this.say(problemOf(r.status, await codeOf(r)));
       const a = (await r.json()) as { answer: string; proposal?: Proposal | null };
       this.messages = [...this.messages, { role: 'dagon', ...splitAnswer(a.answer), proposal: a.proposal ?? null }];
@@ -183,6 +197,13 @@ export class Agent {
     } finally {
       this.thinking = false;
     }
+  }
+
+  /** A modal's 失敗の理由を聞く: the modal closes first, because its scrim would cover the answer; a stopped question leaves it open. */
+  async askWhy(isStopped: () => boolean, close: () => void, selection?: Selection): Promise<void> {
+    if (isStopped()) return;
+    close();
+    await this.ask(BUILD.askAgent, 'failure', selection);
   }
 
   private say(p: AgentProblem) {

@@ -6,7 +6,7 @@
 //! (dagon-sim's `TimedHub`, the model `dagon demo` uses too). Built with the
 //! `sim` feature only.
 
-use dagon_sim::{sample_hub, TimedHub};
+use dagon_sim::{sample_hub, TimedHub, TrialApp};
 use wasm_bindgen::prelude::*;
 
 #[wasm_bindgen]
@@ -55,6 +55,17 @@ impl Simulator {
             return false;
         }
         node.reset(now);
+        true
+    }
+
+    /// The watch's next version crashes at boot, so its write goes back
+    /// (what `dagon demo --sim-fail watch` sets up).
+    #[wasm_bindgen(js_name = failWatch)]
+    pub fn fail_watch(&mut self) -> bool {
+        let Some((_, watch)) = self.0.hub_mut().bus.uart.as_mut() else {
+            return false;
+        };
+        watch.trial_app = TrialApp::CrashesAtBoot;
         true
     }
 }

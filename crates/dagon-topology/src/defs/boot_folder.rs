@@ -329,9 +329,29 @@ fn normalized(bytes: &[u8]) -> Vec<u8> {
     out
 }
 
+/// `text` without the version line of what `start` opens (the first line
+/// that equals it): the crate's own version, which is the developer's to
+/// raise and changes no dependency graph.
+fn without_own_version(text: &str, start: &str) -> String {
+    let mut out = String::with_capacity(text.len());
+    let (mut inside, mut done) = (false, false);
+    for line in text.split_inclusive('\n') {
+        let bare = line.trim_end();
+        if !done && inside && bare.starts_with("version") && bare[7..].trim_start().starts_with('=')
+        {
+            done = true;
+            continue;
+        }
+        inside = inside || bare == start;
+        out.push_str(line);
+    }
+    out
+}
+
 impl BootFolder {
     /// The stamp of the boot crate's current inputs: SHA-256 over its
-    /// `Cargo.toml`, its `Cargo.lock` (empty when there is none) and each
+    /// `Cargo.toml` and `Cargo.lock` (empty when there is none), both
+    /// without the crate's own version, and each
     /// trusted extension's id and source hash, which must equal what
     /// dagon.toml declares. The host check writes it after the graph
     /// passed ([`BootFolder::check_graph`]); the boot core's build
@@ -340,10 +360,24 @@ impl BootFolder {
         self.check_hashes()?;
         let mut sha = dagon_format::Sha256::new();
         sha.update(b"dagon boot graph 1\0");
-        for f in ["Cargo.toml", "Cargo.lock"] {
+        let read = |f: &str| {
             let bytes = normalized(&std::fs::read(self.dir.join(f)).unwrap_or_default());
-            sha.update(&(bytes.len() as u64).to_le_bytes());
-            sha.update(&bytes);
+            String::from_utf8_lossy(&bytes).into_owned()
+        };
+        let manifest = read("Cargo.toml");
+        let name = manifest
+            .lines()
+            .skip_while(|l| l.trim_end() != "[package]")
+            .find(|l| l.starts_with("name"))
+            .unwrap_or_default()
+            .trim_end()
+            .to_string();
+        for text in [
+            without_own_version(&manifest, "[package]"),
+            without_own_version(&read("Cargo.lock"), &name),
+        ] {
+            sha.update(&(text.len() as u64).to_le_bytes());
+            sha.update(text.as_bytes());
         }
         for (dir, t) in self.trusted_dirs() {
             sha.update(t.id.as_bytes());
@@ -512,6 +546,35 @@ mod tests {
             assert!(f.verify_stamp().is_err(), "{}", change.0);
             std::fs::write(&path, &before).unwrap();
         }
+        std::fs::remove_dir_all(&d).unwrap();
+    }
+
+    /// The crate's own version is the developer's to raise: it changes no
+    /// graph, so the check `dagon gen` made still holds. Another package's
+    /// version in the lock file does change the graph.
+    #[test]
+    fn raising_the_boot_crate_s_own_version_keeps_its_stamp() {
+        let (d, f) = project("raise", "", "");
+        let lock = |own: &str, other: &str| {
+            format!(
+                "version = 4\n\n[[package]]\nname = \"n-boot\"\nversion = \"{own}\"\n\
+                 dependencies = [\"x\"]\n\n[[package]]\nname = \"x\"\nversion = \"{other}\"\n"
+            )
+        };
+        std::fs::write(f.dir.join("Cargo.lock"), lock("0.1.0", "1.0.0")).unwrap();
+        std::fs::write(f.dir.join(STAMP_FILE), stamp_text(&f.stamp().unwrap())).unwrap();
+        let manifest = f.dir.join("Cargo.toml");
+        let text = std::fs::read_to_string(&manifest).unwrap();
+        std::fs::write(
+            &manifest,
+            text.replace("version = \"0.1.0\"", "version = \"0.2.0\""),
+        )
+        .unwrap();
+        std::fs::write(f.dir.join("Cargo.lock"), lock("0.2.0", "1.0.0")).unwrap();
+        let again = BootFolder::read(&f.dir).unwrap();
+        again.verify_stamp().unwrap();
+        std::fs::write(f.dir.join("Cargo.lock"), lock("0.2.0", "1.0.1")).unwrap();
+        assert!(again.verify_stamp().is_err(), "another package's version");
         std::fs::remove_dir_all(&d).unwrap();
     }
 

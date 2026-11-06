@@ -1,11 +1,12 @@
 import { expect, test, type Page } from '@playwright/test';
 import { canvasState, layoutFaults, openSample, settled } from './console.ts';
 
-const WIDTHS = [1024, 1280, 1366, 1440, 1600, 1920, 2560, 3840];
-const HEIGHTS = [600, 768, 900, 1080, 1440, 2160];
+// The viewport matrix (ulthar config.json `viewport_matrix`) from 1024 wide up, the page's own 2560 theme edge (2559/2560) added.
+const WIDTHS = [1024, 1280, 1366, 1440, 1920, 2020, 2400, 2559, 2560];
+const HEIGHTS = [700, 800, 1080, 1347, 1440];
 
-/** The windows swept: each width at its low and tall ends and every height at a common width. */
-const SIZES = [...WIDTHS.flatMap((w) => [[w, 600], [w, 1080]]), ...HEIGHTS.map((h) => [1920, h]), [2560, 1440], [3840, 2160]] as const;
+/** The windows swept: each width at its low and tall ends, every height at a common width, and the matrix's own presets. */
+const SIZES = [...WIDTHS.flatMap((w) => [[w, 700], [w, 1080]]), ...HEIGHTS.map((h) => [1920, h]), [1366, 768], [2560, 1440], [1024, 768]] as const;
 
 /** Each state puts the page into it and takes it out again. */
 const STATES: [string, (p: Page) => Promise<void>, (p: Page) => Promise<void>][] = [
@@ -28,10 +29,18 @@ test('sweep: no overflow, overlap or clipped text at any window, in 準備 (shee
   const faults: string[] = [];
   for (const [w, h] of SIZES) {
     await page.setViewportSize({ width: w, height: h });
+    const rest = await boxes(page);
     for (const [name, into, out] of STATES) {
       await into(page);
       await page.waitForTimeout(260);
       for (const f of await layoutFaults(page)) faults.push(`${w}x${h} ${name}: ${f}`);
+      // Nothing that stands on the page vibrates: its box is the same a few frames later.
+      const a = await boxes(page);
+      await page.waitForTimeout(120);
+      const b = await boxes(page);
+      for (const k of Object.keys(a)) if (a[k] !== b[k]) faults.push(`${w}x${h} ${name}: ${k} moved ${a[k]} -> ${b[k]}`);
+      // A sheet, drawer, menu or toast opening moves none of the standing parts (the DAGON mark, the zoom, the focal number, the header).
+      for (const k of Object.keys(rest)) if (name !== '表' && name !== 'モーダル' && a[k] !== undefined && a[k] !== rest[k]) faults.push(`${w}x${h} ${name}: ${k} moved for it ${rest[k]} -> ${a[k]}`);
       await out(page);
     }
   }

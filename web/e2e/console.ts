@@ -24,6 +24,20 @@ export async function canvasState(page: Page): Promise<{ transform: string; box:
   });
 }
 
+/** The boxes of the parts that stand on the page (never move for a sheet, drawer, menu or toast), by name. */
+export async function boxes(page: Page): Promise<Record<string, string>> {
+  return page.evaluate(() => {
+    const out: Record<string, string> = {};
+    for (const sel of ['.frame > header', 'header .modes', 'header .actions', '.pill', '.focal', '.dagon', '.drawer .tabs', '#band']) {
+      const e = document.querySelector(sel);
+      if (!e) continue;
+      const r = e.getBoundingClientRect();
+      if (r.width) out[sel] = [r.left, r.top, r.width, r.height].map((v) => Math.round(v)).join(',');
+    }
+    return out;
+  });
+}
+
 /** What the sweep measures on the page as it stands; empty when nothing is wrong. */
 export async function layoutFaults(page: Page): Promise<string[]> {
   return page.evaluate(() => {

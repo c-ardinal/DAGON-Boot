@@ -1,7 +1,16 @@
 import { describe, expect, test } from 'vitest';
-import { bandOf } from './band.ts';
+import { bandOf, connectNotice } from './band.ts';
 import { BAND, BUTTON, SIM } from './copy.ts';
 import { MACHINE, view, type ConnectFailure, type L } from './machine.ts';
+
+describe('how a failed connection is told', () => {
+  test('what the user must fix opens a dialog; choosing nothing is a toast; anything else is neither', () => {
+    expect(connectNotice('portFailed')).toBe('modal');
+    expect(connectNotice('silentHub')).toBe('modal');
+    expect(connectNotice('notChosen')).toBe('toast');
+    for (const s of ['idle', 'choosing', 'checking', 'ready', 'writing', 'stopped'] as const) expect(connectNotice(s), s).toBeNull();
+  });
+});
 
 describe('bottom band', () => {
   // No "見本を置く" beside it: the sample comes from the start screen only.

@@ -48,6 +48,16 @@ export const FAILURE_BAND = {
   unavailable: BAND.M57,
 } as const;
 
+/**
+ * How a failed connection is told. What the user must fix before anything
+ * works opens a dialog (reason and next step); choosing no device in the
+ * browser's list may be what they meant, so it is a toast.
+ */
+export function connectNotice(s: L): 'modal' | 'toast' | null {
+  if (s === 'portFailed' || s === 'silentHub') return 'modal';
+  return s === 'notChosen' ? 'toast' : null;
+}
+
 /** One short sentence in every operating state; unsupported has no band. */
 function words(s: L, c: Ctx, n: Names): BandCopy {
   switch (s) {

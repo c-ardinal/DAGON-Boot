@@ -10,6 +10,8 @@
     how: { label: string; hint: string } | null;
     /** serve can write this MCU itself. */
     canWrite: boolean;
+    /** A 子機: connected directly because the 親機 does not reach it. */
+    child?: boolean;
     /** The flash job once started. */
     job: Job | null;
     onwrite: () => void;
@@ -18,7 +20,7 @@
     onmore: () => void;
   }
 
-  let { node, how, canWrite, job, onwrite, oncancel, onclose, onmore }: Props = $props();
+  let { node, how, canWrite, child = false, job, onwrite, oncancel, onclose, onmore }: Props = $props();
 
   /** Writing has started once serve runs the job: from then on it cannot be stopped. */
   const writing = $derived(job?.state === 'running');
@@ -28,7 +30,7 @@
     done
       ? ({ text: WRITE.state.done, kind: 'ok' } as const)
       : failed
-        ? ({ text: FLASH.notFound, kind: 'error' } as const)
+        ? ({ text: WRITE.failed, kind: 'error' } as const)
         : writing
           ? ({ text: WRITE.state.writing, kind: 'active' } as const)
           : job
@@ -39,8 +41,8 @@
 
 <!-- First (or factory) writing over USB: only for a node whose DAGON does not answer. -->
 <Modal title={WRITE.run} {chip} target={node.target} onclose={writing ? undefined : onclose} {onmore}>
-  <p>{fill(WRITE.factory.intro, { node: node.label })}</p>
-  <h3>{WRITE.factory.steps}</h3>
+  <p>{fill(child ? WRITE.factory.childIntro : WRITE.factory.intro, { node: node.label })}</p>
+  <h3>{child ? WRITE.factory.howToConnect : WRITE.factory.steps}</h3>
   {#if how}
     <p><b>{how.label}</b>{canWrite ? `　${how.hint}` : ''}</p>
   {/if}

@@ -1045,37 +1045,6 @@ export const JOBS = {
   answer: 'つないだ',
 } as const;
 
-/** 署名とリリース. */
-export const RELEASE_STEPS = {
-  heading: '署名とリリース',
-  steps: ['ビルド', '署名', 'リリース', '渡す'],
-  build: 'ビルド',
-  sign: '署名',
-  makeRelease: 'リリースを作る',
-  useInOperate: 'このリリースを書込で使う',
-  keyLabel: '鍵',
-  sizeLabel: '大きさ',
-  version: 'バージョン',
-  versionHelp: '1.1.0 のように数字 3 つで書いてください。',
-  name: '名前',
-  buildFirst: '先にビルドしてください。',
-  signFirst: '先に署名してください。',
-  noKey: 'ターミナルで dagon key gen を実行してから、署名してください。',
-  fixFirst: '直すと、親機へ送れます。',
-  done: '✓ 完了',
-} as const;
-
-/** プロジェクト. */
-export const PROJECT = {
-  heading: 'プロジェクト',
-  make: '雛形を作る',
-  made: '✓ 生成済み',
-  notMade: '● 未生成',
-  boardUnset: '▲ ボード 未設定',
-  writeHere: 'ここに書く',
-  fixFirst: '直すと、プロジェクトを作れます。',
-} as const;
-
 /** 書き込み. */
 export const FLASH = {
   heading: '書き込み',
@@ -1206,21 +1175,16 @@ export const SKELETON = {
     done: '✓ 作成済',
     failed: '! 失敗',
   },
-  row: {
-    waiting: '○ 待ち',
-    notMade: '○ 未作成',
-  },
   where: '作った場所',
   next: {
     '1': 'エディタで、各ノードの src/app.rs にアプリのコードを書く（main.rs と wiring.rs は DAGON が作るので、触らなくてよい）',
     '2': '準備で「ビルドする」、続けて書込で「書き込む」',
     heading: '次にすること',
   },
-  copyPath: '場所をコピー',
   fail: {
-    reason: '{path} に書き込めません。フォルダが読み取り専用です。',
-    fix: 'フォルダの読み取り専用を外してから、「もう一度作る」を押します。作成済みのノードはそのまま残ります。',
+    fix: '理由を直してから、「もう一度作る」を押します。作成済みのノードはそのまま残ります。',
   },
+  startFailed: 'dagon serve が受け付けませんでした',
   retry: 'もう一度作る',
   cancel: '中止',
 } as const;
@@ -1238,15 +1202,17 @@ export const BUILD = {
   title: 'ビルドする',
   state: {
     running: '… ビルド中',
-    done: '✓ ビルド済',
     failed: '! ビルド失敗',
   },
   toast: {
     done: 'ビルド済 {n} ノード',
   },
   fail: {
-    fix: 'エディタで app.rs の {line} 行目を直してから、もう一度ビルドします。ほかの {n} ノードはビルド済みです。',
+    fix: 'エディタで {file} の {line} 行目を直してから、もう一度ビルドします。',
+    others: 'ほかの {n} ノードはビルド済みです。',
+    plain: '理由を直してから、もう一度ビルドします。',
   },
+  startFailed: 'dagon serve が受け付けませんでした',
   retry: 'もう一度ビルドする',
   askAgent: '失敗の理由を聞く',
 } as const;
@@ -1285,9 +1251,9 @@ export const WRITE = {
     steps: '手順',
     drive: 'ドライブ',
     waiting: '… 待機中',
-    after: '書き終わると、DAGON 経由で残りのノードへ続けます。DAGON の無い子機があれば、その子機をつなぐ手順を続けて出します。',
+    after: '書き終わったら閉じて、接続します。残りのノードは「書き込む」で DAGON 経由で書き込みます。応答しない子機は、そのカードから直接書き込みます。',
     cancel: '中止',
-    childIntro: '{node} は親機から届かないため、この子機を直接つないで書き込んでいます。',
+    childIntro: '{node} は親機から届かないため、この子機を直接つないで書き込みます。',
     howToConnect: 'つなぎ方',
     cancelLocked: '書き込み中',
   },
@@ -1303,15 +1269,6 @@ export const STATE = {
 } as const;
 
 export const CONN = {
-  chip: '● USB 接続中',
-  status: {
-    connected: '● 接続済 {node}（親機）· {via}',
-    none: '○ 未接続',
-    child: '● 接続済 {node}（子機）· {via}',
-  },
-  send: {
-    disabled: '親機が未接続',
-  },
   toast: {
     connected: '接続済 {node}',
     lost: '接続が切れた {node}',

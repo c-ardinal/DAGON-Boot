@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { DETAIL, NODE, NODE_ACTION, SLOT, TRIAL_CHOICE, WIRING } from '../app/copy.ts';
+  import { DETAIL, NODE, NODE_ACTION, SLOT, TRIAL_CHOICE, WIRING, WRITE } from '../app/copy.ts';
   import type { Live } from '../app/operate.svelte.ts';
   import type { Config, Link, Node } from '../app/sample.ts';
   import { previousVersion } from '../app/slots.ts';
@@ -17,11 +17,18 @@
     onkeep?: (id: string) => void;
     /** "前のバージョンに戻す". */
     onback?: (id: string) => void;
+    /** Nodes whose first write can be started here (their DAGON does not answer). */
+    first?: readonly string[];
+    /** Opens the direct writing of the node. */
+    onfirst?: (id: string) => void;
+    /** The node the 親機 can recover now, and the button's words. */
+    recover?: { id: string; label: string } | null;
+    onrecover?: () => void;
     /** The last recovery, for its figures under 詳しく見る. */
     recovery?: { id: string; result: RecoverResult } | null;
   }
 
-  let { config, live, selected, connected, act = false, onkeep, onback, recovery = null }: Props = $props();
+  let { config, live, selected, connected, act = false, onkeep, onback, first = [], onfirst, recover = null, onrecover, recovery = null }: Props = $props();
 
   function recoveryRows(id: string): [string, string][] {
     if (recovery?.id !== id) return [];
@@ -235,6 +242,12 @@
           </dl>
         </details>
       {/if}
+    {/if}
+    {#if (onfirst && first.includes(n.id)) || recover?.id === n.id}
+      <div class="actions">
+        {#if recover?.id === n.id}<button class="secondary" data-control="recover" onclick={() => onrecover?.()}>{recover.label}</button>{/if}
+        {#if onfirst && first.includes(n.id)}<button class="secondary" data-control="flash" onclick={() => onfirst(n.id)}>{WRITE.run}</button>{/if}
+      </div>
     {/if}
   </section>
 {/snippet}

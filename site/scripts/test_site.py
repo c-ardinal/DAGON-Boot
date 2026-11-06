@@ -219,48 +219,24 @@ class Architecture(unittest.TestCase):
     def setUpClass(cls):
         cls.deps = cargo_deps()
 
-    def closure(self, names):
-        seen, todo = set(), list(names)
-        while todo:
-            for d in self.deps.get(todo.pop(), ()):
-                if d not in seen:
-                    seen.add(d)
-                    todo.append(d)
-        return seen | set(names)
-
-    def test_every_source_path_in_the_figure_exists(self):
-        for mod in gen.architecture.modules():
+    def test_every_module_in_the_figure_exists(self):
+        for name, mod in gen.architecture.MODULES.items():
             for path in mod["paths"]:
-                self.assertTrue((ROOT / path).exists(), path)
+                self.assertTrue((ROOT / path).exists(), f"{name}: {path}")
+            if mod["needle"]:
+                self.assertIn(mod["needle"], (ROOT / mod["paths"][0]).read_text(encoding="utf-8"), name)
+            self.assertTrue(mod["crate"] in self.deps or any(mod["crate"] in d for d in self.deps.values()), f"{name}: {mod['crate']}")
 
-    def test_every_crate_in_the_figures_exists(self):
-        names = {p for mod in gen.architecture.modules() for p in (mod["pkg"],)} | {p for b in gen.architecture.pc_boxes().values() for p in b["pkg"]}
-        for name in names:
-            if name.endswith("*"):
-                self.assertTrue(any(fnmatch.fnmatch(d, name) for d in self.deps), name)
-            else:
-                self.assertTrue(name in self.deps or any(name in d for d in self.deps.values()), name)
+    def test_the_figure_draws_exactly_the_modules_in_the_table(self):
+        for lang in gen.LANGS:
+            svg = gen.architecture.node_svg(lang)
+            for name in gen.architecture.MODULES:
+                self.assertIn(f">{name}</text>", svg, name)
+            drawn = re.findall(r'class="a-b"[^>]*>([^<]+)</text>', svg)
+            self.assertEqual(sorted(drawn), sorted(gen.architecture.MODULES))
 
-    def test_every_dependency_drawn_is_in_cargo_metadata(self):
-        a = gen.architecture
-        pairs = [dep for row in a.LAYER_DEPS for dep in row if dep] + [(a.TRUSTED[0], d) for d in a.TRUSTED[1]]
-        boxes = a.pc_boxes()
-        pairs += [(boxes[x]["pkg"][0], boxes[y]["pkg"][0]) for x, y in a.PC_EDGES]
-        for src, dst in pairs:
-            self.assertIn(dst, self.deps[src], f"{src} -> {dst}")
-
-    def test_each_image_uses_the_modules_tagged_with_it(self):
-        a = gen.architecture
-        for mod in a.modules():
-            for tag in mod["images"]:
-                # hub-boot-screen and the app template sit on the images, not under them
-                if mod["kind"] == a.TRAIT and mod["pkg"] in ("f401-app", "hub-boot-screen"):
-                    continue
-                used = self.closure(a.IMAGE_PKGS[tag])
-                if mod["pkg"].endswith("*"):
-                    self.assertTrue(any(fnmatch.fnmatch(u, mod["pkg"]) for u in used), (tag, mod["pkg"]))
-                else:
-                    self.assertIn(mod["pkg"], used, (tag, mod["shown"]))
+    def test_every_mcu_in_the_figure_is_in_targets(self):
+        self.assertEqual(len(gen.architecture.mcu_names()), len(list((ROOT / "targets/mcu").glob("*/dagon-mcu.toml"))))
 
     def test_the_core_names_no_mcu_or_board(self):
         for name in gen.architecture.NO_MCU:

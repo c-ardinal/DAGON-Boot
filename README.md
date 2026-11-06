@@ -96,9 +96,7 @@ dagon serve
 
 ## しくみ
 
-<img src="assets/architecture/node-ja.svg" alt="ノードのファームウェアの層と機能ごとのスタック" width="100%">
-
-<img src="assets/architecture/pc-ja.svg" alt="PC 側の層" width="100%">
+<img src="assets/architecture/node-ja.svg" alt="ノードのファームウェアの層と機能ごとのスタックを示す図" width="100%">
 
 | やりたいこと | 触る場所 | 手順 |
 |---|---|---|

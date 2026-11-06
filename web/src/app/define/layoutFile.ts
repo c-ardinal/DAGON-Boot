@@ -1,6 +1,6 @@
 // The project's layout file (呼び名 and card places) as the page keeps it. PUT /v1/layout replaces the file whole, so a
 // file not read (a newer format, damage, a failed request) is never written over: every change first tries to read it
-// again, and what was in it stays under the change once it can be read.
+// again, and once it can be read the editor takes what it holds before anything is written.
 import { LAYOUT_FORMAT, type Layout } from './cli.svelte.ts';
 
 export interface LayoutPort {
@@ -17,7 +17,11 @@ export class LayoutFile {
   /** Writes run one after another (PUT /v1/layout is not ordered by itself). */
   private chain: Promise<unknown> = Promise.resolve();
 
-  constructor(private readonly port: LayoutPort) {}
+  /** `adopt`: the file could be read only after the project opened; what it holds goes into the editor. */
+  constructor(
+    private readonly port: LayoutPort,
+    private readonly adopt: (read: Layout) => void,
+  ) {}
 
   /** Reads the file as a project opens; `false` when it could not be. */
   async open(): Promise<boolean> {
@@ -27,26 +31,25 @@ export class LayoutFile {
     return !this.unread;
   }
 
-  /** Whole names or positions from the page. `false`: not written, the file stays as it is. */
-  change(part: Pick<Layout, 'names'> | Pick<Layout, 'positions'>): Promise<boolean> {
+  /**
+   * Whole names or positions from the editor, asked for only when their turn comes, so they hold what a read before
+   * them brought. `false`: not written, the file stays as it is.
+   */
+  change(part: () => Pick<Layout, 'names'> | Pick<Layout, 'positions'>): Promise<boolean> {
     const next = this.chain.then(() => this.write(part));
     this.chain = next;
     return next;
   }
 
-  private async write(part: Pick<Layout, 'names'> | Pick<Layout, 'positions'>): Promise<boolean> {
-    let merged: Layout = part;
+  private async write(part: () => Pick<Layout, 'names'> | Pick<Layout, 'positions'>): Promise<boolean> {
     if (this.unread) {
       const read = await this.read();
       if (read === null) return false;
       this.unread = false;
       this.current = read;
-      merged = {
-        ...('names' in part ? { names: { ...read.names, ...part.names } } : {}),
-        ...('positions' in part ? { positions: { ...read.positions, ...part.positions } } : {}),
-      };
+      this.adopt(read);
     }
-    this.current = { ...this.current, format: LAYOUT_FORMAT, ...merged };
+    this.current = { ...this.current, format: LAYOUT_FORMAT, ...part() };
     return this.port.saveLayout(this.current);
   }
 

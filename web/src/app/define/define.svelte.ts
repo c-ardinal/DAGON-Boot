@@ -244,6 +244,14 @@ export class Define {
     return true;
   }
 
+  /** 呼び名 read only after the project opened: under the ones here, in the undo history too, so undoing cannot drop them. No edit. */
+  adoptNames(names: Record<string, string>): void {
+    const under = (doc: Doc): Doc => ({ ...doc, names: { ...names, ...doc.names } });
+    this.doc = under(this.doc);
+    this.past = this.past.map(under);
+    this.future = this.future.map(under);
+  }
+
   /** A project's 構成 as opened (no undo back past it); `text` is its YAML as written. */
   load(doc: Doc, text?: string): void {
     this.source = text === undefined ? null : { text, as: toYaml(doc.topo) };

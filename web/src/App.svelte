@@ -209,15 +209,20 @@
   }
 
   /** The project's layout file; names follow the edits. */
-  const layoutFile = new LayoutFile(cli);
+  const layoutFile = new LayoutFile(cli, (read) => {
+    d.adoptNames(read.names ?? {});
+    layoutNames = JSON.stringify(d.doc.names);
+    positions = { ...read.positions, ...positions };
+  });
   let layoutNames = '';
   $effect(() => {
     const names = JSON.stringify(d.doc.names);
-    if (screen !== 'work' || local) return;
+    // With no 構成 read, the editor knows none of the file's nodes: its names say nothing about them.
+    if (screen !== 'work' || local || d.notRead) return;
     untrack(() => {
       if (names === layoutNames) return;
       layoutNames = names;
-      void layoutFile.change({ names: { ...d.doc.names } });
+      void layoutFile.change(() => ({ names: { ...d.doc.names } }));
     });
   });
 
@@ -371,10 +376,7 @@
   let positions = $state.raw<Record<string, { x: number; y: number }>>({});
   function savePositions() {
     if (local) return;
-    // A file read only now brought the places it holds.
-    void layoutFile.change({ positions }).then(() => {
-      if (!layoutFile.unread && layoutFile.current.positions) positions = layoutFile.current.positions;
-    });
+    void layoutFile.change(() => ({ positions }));
   }
   let tableTab = $state(0);
   /** The free part of the canvas (between the floating columns): what a fit fills. */

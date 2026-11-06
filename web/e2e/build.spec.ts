@@ -183,3 +183,28 @@ test('dragging a card writes a layout file that was read', async ({ page }) => {
   await page.mouse.up();
   await expect.poll(() => s.puts.length).toBe(1);
 });
+
+test('a layout read that failed and then recovered through a drag: a later rename keeps the names it did not touch', async ({ page }) => {
+  const layout: { status: number; body: { names?: Record<string, string> } & Record<string, unknown> } = { status: 500, body: { error: 'no' } };
+  const s = await serve(page, { buildNodes: [], layout });
+  await open(page);
+  await expect(page.locator('.toast')).toContainText('配置を読めない');
+  layout.status = 200;
+  layout.body = { format: 1, names: { seg: '保存した7セグ', hub: '保存した親機' }, positions: { hub: { x: 10, y: 20 } } };
+  const card = page.locator('.node').nth(1);
+  const at = (await card.boundingBox())!;
+  await page.mouse.move(at.x + 60, at.y + 12);
+  await page.mouse.down();
+  await page.mouse.move(at.x + 160, at.y + 72);
+  await page.mouse.up();
+  await expect.poll(() => s.puts.length).toBe(1);
+  expect(JSON.parse(s.puts[0]).names).toEqual(layout.body.names);
+  // What the file held is on the canvas now.
+  await expect(page.locator('.node', { hasText: '保存した親機' })).toHaveCount(1);
+
+  await page.locator('.node', { hasText: '保存した7セグ' }).click();
+  await page.getByLabel('呼び名', { exact: true }).fill('新しい7セグ');
+  await page.getByLabel('呼び名', { exact: true }).press('Tab');
+  await expect.poll(() => s.puts.length).toBe(2);
+  expect(JSON.parse(s.puts[1]).names).toEqual({ seg: '新しい7セグ', hub: '保存した親機' });
+});

@@ -1,5 +1,3 @@
-import { readdirSync, readFileSync, statSync } from 'node:fs';
-import { join } from 'node:path';
 import { render } from 'svelte/server';
 import { describe, expect, test } from 'vitest';
 import { BUILD, DEFINE, WRITE, ZOOM } from '../app/copy.ts';
@@ -7,17 +5,12 @@ import SplitButton from './SplitButton.svelte';
 import StopNotice from './StopNotice.svelte';
 import ZoomPill from './ZoomPill.svelte';
 
-const SRC = join(__dirname, '..');
-const sources = (dir: string): string[] =>
-  readdirSync(dir).flatMap((f) => {
-    const p = join(dir, f);
-    if (statSync(p).isDirectory()) return f === 'pkg' ? [] : sources(p);
-    return /\.(ts|svelte)$/.test(f) && f !== 'console.test.ts' ? [p] : [];
-  });
-const withWord = (w: RegExp) => sources(SRC).filter((p) => w.test(readFileSync(p, 'utf8')));
+const SOURCES = Object.entries(import.meta.glob<string>(['../**/*.ts', '../**/*.svelte', '!../wasm/pkg/**', '!./console.test.ts'], { query: '?raw', import: 'default', eager: true }));
+const withWord = (w: RegExp) => SOURCES.filter(([, text]) => w.test(text)).map(([p]) => p);
 
 describe('words that are gone', () => {
   test('自作 is nowhere, tests included: an MCU entry is a ボード', () => {
+    expect(SOURCES.length).toBeGreaterThan(50);
     expect(withWord(/自作/)).toEqual([]);
     expect(DEFINE.ownBoard).toBe('ボード');
   });
@@ -27,7 +20,7 @@ describe('words that are gone', () => {
   });
 
   test('no screen fixes a layout by reading the window width', () => {
-    expect(sources(SRC).filter((p) => /\.svelte$/.test(p) && /matchMedia\('\(m(ax|in)-width/.test(readFileSync(p, 'utf8')))).toEqual([]);
+    expect(withWord(/matchMedia\('\(m(ax|in)-width/)).toEqual([]);
   });
 });
 

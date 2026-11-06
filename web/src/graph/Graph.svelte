@@ -1008,7 +1008,9 @@
     white-space: nowrap;
     font: 700 var(--t-small) / 20px var(--f-ja);
   }
+  /* The card in the hand is over the others. */
   .node.dragging {
+    z-index: var(--z-drag);
     cursor: grabbing;
   }
   .role {

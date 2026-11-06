@@ -1234,7 +1234,7 @@ export const LAYOUT = {
 
 export const WRITE = {
   noneChecked: { label: 'ノードを選ぶ', detail: '書き込むノードのカードにチェックを入れてください。' },
-  alreadyOn: (v: string) => ({ label: `すべて ${v}`, detail: `チェックしたノードはすでに ${v} で動いているので、書き込みませんでした。` }),
+  alreadyOn: (v: string) => ({ label: `すべて ${v}`, detail: `チェックしたノードはすでに ${v} で動いていて、ブートローダも同じなので、書き込みませんでした。` }),
   pickVersion: 'バージョンを選んで書き込む',
   run: '書き込む',
   go: '{n} ノードへ書き込む',
@@ -1254,6 +1254,7 @@ export const WRITE = {
   pick: (name: string) => `${name}へ書き込む`,
   /** On a card while it is written: the version it gets. */
   to: (v: string) => `→ ${v}`,
+  toCore: (v: string) => `→ ブートローダ ${v}`,
   /** On a card after the write: it went back, or it could not be written. */
   previous: '↺ 前のバージョンに戻った',
   failed: '× 書き込めなかった',

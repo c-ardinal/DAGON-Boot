@@ -659,12 +659,12 @@ describe('update from the page with dagon-host apply against the mock hub', () =
 
   test('what stands in the way of a write is known before anything is sent', async () => {
     const { op } = await sentTo();
-    expect(op.noWrite(RELEASE)).toBe(null);
+    expect(await op.noWrite(RELEASE)).toBe(null);
     for (const n of op.reach) op.toggleSkip(n.id);
-    expect(op.noWrite(RELEASE)).toBe('noneChecked');
+    expect(await op.noWrite(RELEASE)).toBe('noneChecked');
     for (const n of op.reach) op.toggleSkip(n.id);
     op.takeFile('v1.1.0.dgb', RELEASE);
     await op.update();
-    expect(op.noWrite(RELEASE)).toMatchObject({ same: op.fileVersions.hub });
+    expect(await op.noWrite(RELEASE)).toMatchObject({ same: op.fileVersions.hub });
   }, 60_000);
 });

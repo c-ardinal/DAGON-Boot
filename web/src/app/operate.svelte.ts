@@ -8,6 +8,7 @@ import {
   PHASE,
   check_release_for,
   newHost,
+  releaseCoreVersions,
   releaseVersions,
   release_topology,
   topo_compile,
@@ -26,7 +27,7 @@ import {
 import type { RollbackRecord } from './agent.svelte.ts';
 import { FAILURE_BAND } from './band.ts';
 import { ConnectError, wasmReady } from './connect.ts';
-import { ANNOUNCE, FILE } from './copy.ts';
+import { ANNOUNCE, FILE, WRITE } from './copy.ts';
 import { HUB_LOCKED, NODE_WRITE, WATCHED, next, type ConnectFailure, type Ctx, type Ev, type L } from './machine.ts';
 import { SAMPLE_CONFIG, targetKey, type Config, type Node } from './sample.ts';
 
@@ -53,6 +54,14 @@ export interface Progress {
   percent: number;
   /** dagon-host's reason when the node refused (`E_FLASH`, `E_SIGNATURE`, ...). */
   reason?: string;
+  /** The boot core version being written, while it is; the app's write has none. */
+  core?: number;
+}
+
+/** On a node's card while it is written: what is being written now (its boot core comes first when that differs), or null when not known. */
+export function writingTo(p: Progress, app: number | undefined): string | null {
+  if (p.core !== undefined) return WRITE.toCore(versionText(p.core));
+  return app === undefined ? null : WRITE.to(versionText(app));
 }
 
 /** Stages in which a node's water rises with its progress; a finished or stopped node drains. */
@@ -320,16 +329,33 @@ export class Operate {
     return this.reach.filter((n) => this.live[n.id]?.responding === true && !this.updated.has(n.id)).length;
   }
 
-  /** What stands in the way of writing `bytes` to the checked nodes, before anything is sent: none checked, or every checked node already on it. */
-  noWrite(bytes: Uint8Array): 'noneChecked' | { same: number } | null {
+  /**
+   * What stands in the way of writing `bytes` to the checked nodes, before anything is sent: none checked, or every
+   * checked node already on its app and its boot core. A boot core is compared as dagon-host's update_core does, against
+   * what the node answers now; one that cannot be read is not called the same, so the write goes and says why.
+   */
+  async noWrite(bytes: Uint8Array): Promise<'noneChecked' | { same: number } | null> {
     const nodes = this.answering();
     if (nodes.length === 0) return 'noneChecked';
     const given = releaseVersions(bytes);
+    const cores = releaseCoreVersions(bytes);
     const reach = this.reach;
-    const of = (id: string) => given.get(reach.findIndex((n) => n.id === id));
-    const first = of(nodes[0]);
-    const same = first !== undefined && nodes.every((id) => of(id) === this.live[id]?.hello?.activeVersion);
-    return same ? { same: first } : null;
+    const at = (id: string) => reach.findIndex((n) => n.id === id);
+    const first = given.get(at(nodes[0]));
+    if (first === undefined || !nodes.every((id) => given.get(at(id)) === this.live[id]?.hello?.activeVersion)) return null;
+    for (const id of nodes) {
+      const held = cores.get(at(id));
+      if (held && !held.includes((await this.runningCore(id)) ?? NaN)) return null;
+    }
+    return { same: first };
+  }
+
+  /** The version of the boot core node `id` runs now; null when it cannot be read. */
+  private async runningCore(id: string): Promise<number | null> {
+    const n = this.reach.find((x) => x.id === id);
+    if (!n) return null;
+    const core = await this.call((h) => h.bootCoreStatus(n.target.kind, n.target.addr)).catch(() => null);
+    return core?.slots[core.active]?.version ?? null;
   }
 
   get responding(): number {
@@ -709,9 +735,9 @@ export class Operate {
     const was = this.progress[n.id] ?? { stage: 'waiting', percent: 0 };
     if (e.phase === PHASE.transfer || e.phase === PHASE.verify) {
       if (was.stage !== 'writing') this.status = ANNOUNCE.A11(n.name);
-      this.progress[n.id] = { stage: 'writing', percent: e.phase === PHASE.verify ? 100 : e.percent };
+      this.progress[n.id] = { stage: 'writing', percent: e.phase === PHASE.verify ? 100 : e.percent, ...(e.bootCore ? { core: e.version } : {}) };
     } else if (e.phase === PHASE.reboot && n.role === 'hub') {
-      this.progress[n.id] = { stage: 'rebooting', percent: 100 };
+      this.progress[n.id] = { stage: 'rebooting', percent: 100, ...(e.bootCore ? { core: e.version } : {}) };
       this.hubAway(this.sentVersion[n.id]);
     } else if (e.phase === PHASE.confirm && !e.bootCore) {
       // Only the app's confirmation finishes the node; its boot core's comes before it.

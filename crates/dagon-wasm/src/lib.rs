@@ -122,6 +122,23 @@ pub fn release_versions(bundle: &[u8]) -> Vec<u32> {
         .collect()
 }
 
+/// The boot core versions `bundle` holds for each node, as
+/// `[node_index, raw_version]` pairs (a node with A/B images appears once per
+/// image). A node whose running boot core is none of them gets one written
+/// (dagon-host `update_core`). Empty when the bundle does not parse.
+#[wasm_bindgen]
+pub fn release_core_versions(bundle: &[u8]) -> Vec<u32> {
+    let Ok(b) = BundleView::parse(bundle) else {
+        return Vec::new();
+    };
+    let m = b.manifest();
+    (0..m.entry_count())
+        .map(|i| m.entry(i))
+        .filter(|e| e.image_kind == dagon_format::header::image_kind::BOOTCORE)
+        .flat_map(|e| [u32::from(e.node_index), e.version.raw()])
+        .collect()
+}
+
 /// Decoded HELLO response body.
 #[wasm_bindgen]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

@@ -11,6 +11,7 @@ import init, {
   mcu_connection,
   mcu_trial_ms,
   trial_percent,
+  release_core_versions,
   release_versions,
   use_builtin_definitions,
   supported_boards as boards,
@@ -325,6 +326,14 @@ export function releaseVersions(bundle: Uint8Array): Map<number, number> {
   const flat = release_versions(bundle);
   const out = new Map<number, number>();
   for (let i = 0; i + 1 < flat.length; i += 2) if (!out.has(flat[i])) out.set(flat[i], flat[i + 1]);
+  return out;
+}
+
+/** The boot core versions a release holds for each topology node (by node index); a node without any is absent. */
+export function releaseCoreVersions(bundle: Uint8Array): Map<number, number[]> {
+  const flat = release_core_versions(bundle);
+  const out = new Map<number, number[]>();
+  for (let i = 0; i + 1 < flat.length; i += 2) out.set(flat[i], [...(out.get(flat[i]) ?? []), flat[i + 1]]);
   return out;
 }
 

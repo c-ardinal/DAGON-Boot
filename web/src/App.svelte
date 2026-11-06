@@ -6,7 +6,7 @@
   import { fade, rise, tokenMs } from './app/motion.ts';
   import { resultChip } from './app/nodeState.ts';
   import { HUB_LOCKED, hubOf, view, type Action } from './app/machine.ts';
-  import { Operate, waterOf, type Progress, type ReleaseFile } from './app/operate.svelte.ts';
+  import { Operate, waterOf, writingTo, type Progress, type ReleaseFile } from './app/operate.svelte.ts';
   import { keptChoices, type Kept } from './app/kept.ts';
   import { buildFailure, buildingNow, buildStateOf, firstWriteNodes, type BuildingMemo, type BuildState } from './app/jobFlow.ts';
   import { logStages } from './app/stageLog.svelte.ts';
@@ -629,7 +629,10 @@
   /** On the cards while writing: → the new version; after it, what the write left (resultChip). */
   const cardChipOf = (id: string, p: Progress): Chip | null => {
     const to = op.fileVersions[id];
-    if (FILLING_STAGES.has(p.stage)) return to === undefined ? null : { chip: WRITE.to(versionText(to)), spoken: WRITE.to(versionText(to)), silent: false };
+    if (FILLING_STAGES.has(p.stage)) {
+      const said = writingTo(p, to);
+      return said === null ? null : { chip: said, spoken: said, silent: false };
+    }
     return resultChip(p.stage);
   };
   const progressChips = $derived(
@@ -833,7 +836,7 @@
       notice = { word: BAND.M58.chip, error: true, detail: BAND.M58.sentence };
       return;
     }
-    const no = op.noWrite(pkg.bytes);
+    const no = await op.noWrite(pkg.bytes);
     if (no === 'noneChecked') return void (notice = { word: WRITE.noneChecked.label, detail: WRITE.noneChecked.detail });
     if (no) {
       const said = WRITE.alreadyOn(versionText(no.same));

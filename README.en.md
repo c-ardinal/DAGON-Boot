@@ -44,7 +44,7 @@ DAGON handles mixed kinds of microcontroller once you draw the setup. As a devel
 
 - **Draw the setup**: In DAGON Console, which runs in your browser, you draw the microcontrollers and their links as a graph. Wiring and pins are checked at every edit.
 - **Get a project that builds**: `dagon new` and `dagon gen` make a Rust crate for each microcontroller, with its start-up, its wiring and an empty `app.rs` for your code.
-- **Write in one go**: `dagon deploy` builds, signs, makes the package and writes in one command. In DAGON Console you write with each microcontroller's progress in view.
+- **Write in one go**: `dagon deploy` goes from building and signing through making the package to writing, all in one go. In DAGON Console you write while following each microcontroller's progress graphically.
 - **Go back when it fails**: Every image is signed. A microcontroller starts a new version on trial and goes back to the previous version when it cannot be confirmed. `dagon rollback` goes back by hand.
 - **Write the boot loader too**: The boot loader itself lives in two slots and is written like an app. If the new one does not work, the previous one comes back.
 - **Extend DAGON**: Without changing DAGON's source, add extensions that receive events, answer decisions and replace parts (ports).

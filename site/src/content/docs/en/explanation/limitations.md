@@ -5,12 +5,8 @@ description: "Where the code differs from the design and what DAGON does not do,
 
 ## By design
 
-- Signing keys are files on the PC and the public key is built into the firmware. There is no hardware root of trust (no secure boot fuses, no key storage in hardware).
-- The USB VID:PID `c0de:cafe` is a test ID, not an assigned one.
+- Signing keys are files on the PC and the public key is built into the firmware. There is no hardware root of trust (no secure boot fuses, no key storage in hardware). How to protect the keys is the user's choice.
 - `dagon conform` drives the synchronous test sequence and is CLI only. The browser does not run conformance tests.
-- A definition value whose source has not been checked is marked `unverified` in the definition.
-- The execution model's budgets ([section 12](/en/explanation/lifecycle-events/#12-execution-model)) are not values measured on hardware.
-- That the boot loader's trial cell keeps its value rests on the vendors' documents. It is not checked per board.
 
 ## Planned
 
@@ -26,6 +22,13 @@ Extension isolation:
 
 - The ESP32-S3's isolation level is `none`. No code programs the PMS and WCL registers.
 - There is no sandbox at run time (Service ABI, Entry Gate, Operation Cancellation, Fault Unwind). Definitions are checked and protection maps are generated.
+
+Values and IDs:
+
+- The USB VID:PID `c0de:cafe` is a test ID, fixed in the code. It is not an assigned one.
+- DAGON's own MCU definitions hold values whose source has not been checked. They are marked `unverified` in the definition.
+- The execution model's budgets ([section 12](/en/explanation/lifecycle-events/#12-execution-model)) are not values measured on hardware.
+- That the boot loader's trial cell keeps its value rests only on the vendors' documents. It is not checked per board.
 
 Components in the design figure that the code does not have:
 

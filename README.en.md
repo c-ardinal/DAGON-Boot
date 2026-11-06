@@ -5,7 +5,7 @@
   </picture>
 </p>
 
-<p align="center"><b>Safely write new programs to a group of connected microcontrollers from your PC</b></p>
+<p align="center"><b>The distributed microcontroller designs of professionals, made easy for many. However many nodes and however deep inside, writing is the same operation as one node, and safe.</b></p>
 
 <p align="center">
   <a href="https://c-ardinal.github.io/DAGON-Boot/demo/">Try the demo</a> ·
@@ -21,11 +21,15 @@
 
 ## What is DAGON?
 
-When you build something from a few microcontrollers (small computers), you will want to change their programs afterwards. Opening the case and reconnecting cables each time is hard work, and a failed write can leave a board dead.
+A beautiful design with a muddy operation. Even a compact build that splits its work across microcontrollers means taking it apart, swapping cables and using one write tool per MCU every time a program changes. Sometimes the design itself is compromised because writing would be hell.
 
-With DAGON, one microcontroller on your PC's USB (the hub, 親機) passes new versions on to the others (the children, 子機). If a write stops part-way, the running version stays; if a new version does not work, the node goes back to the previous one by itself.
+DAGON makes the distributed multi-microcontroller designs of professionals and specialists easy for a wide range of people, from those starting electronics with AI to makers who care for compactness and finish.
 
-As a developer you choose the boards, draw how they connect and write your application in Rust. DAGON takes care of start-up, flash layout, signing and the writing steps.
+Before assembly, you write each node directly once. After that no write pattern is touched and nothing is opened. Through one microcontroller on your PC's USB (the hub, 親機), you write to the others (the children, 子機), however deep inside and however many, with the same operation as one node. More nodes take more time; the operation does not grow.
+
+Writing is safe. Every image is signed, a node runs a new version on trial, and it goes back to the previous one by itself when the new one does not work. If a write stops part-way, the running version stays.
+
+What sets DAGON apart is handling mixed MCUs by drawing the 構成 (the setup). As a developer you choose the boards, draw how they connect and write your application in Rust. Applications are Rust only. DAGON takes care of start-up, flash layout, signing and the writing steps.
 
 ## Features
 
@@ -64,7 +68,7 @@ dagon demo
 
 ## Prerequisites
 
-- [Rust](https://rustup.rs) (and a C compiler when building from source)
+- [Rust](https://rustup.rs): applications are written in Rust only (and a C compiler when building from source)
 - Chrome or Edge 89 or later to connect real boards (it uses Web Serial)
 - `dagon doctor` checks the tools each MCU needs ([list](https://c-ardinal.github.io/DAGON-Boot/doc/en/reference/tools/))
 

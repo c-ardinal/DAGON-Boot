@@ -80,13 +80,13 @@ The figure below is DAGON's software design.
 | Serving Loop | The loop that answers requests |
 | Recovery Entry | Entry to a recovery path |
 | Relay | Relays from the hub to children |
-| Coordinator | The hub drives writes to children |
-| Release Store | Packages kept on the hub |
+| Coordinator | Runs a stored release across nodes |
+| Release Store | Holds the release faces N/P and their promotion |
 | Node Recovery | Recovers a child from the hub |
-| Bus Guardian | Guards the children's bus |
+| Bus Guardian | Serialises a shared bus; handles a stuck bus and isolation |
 | Topology Copy | The copy of the setup on the hub |
 | Liveness Guard | Kicks the watchdog on task liveness |
-| Reboot Gate | Decides when a reboot happens |
+| Reboot Gate | Replies first, waits a bounded delay, then resets |
 | Entry Gate | Entry to an extension call |
 | Service ABI | An extension's only call into DAGON |
 | Operation Cancellation | Cancels a privileged operation part-way |
@@ -100,11 +100,11 @@ The figure below is DAGON's software design.
 | Boot Decision | Decides which slot starts |
 | Core Chooser | stage0 picks the boot loader slot |
 | State Log Fold | Folds records into state |
-| Delivery Plan | Plans the order of writes to children |
-| Recovery Policy | Policy for recovering a child |
-| Constraint Evaluator | Evaluates version constraints |
+| Delivery Plan | Order, trial window, promotion judgement |
+| Recovery Policy | Chooses a recovery tier from state and failure counts |
+| Constraint Evaluator | Checks manifest constraints |
 | Trust Rule | The one rule for signatures and keys |
-| Deadline Book | Keeps tasks' deadlines |
+| Deadline Book | Pure deadline accounting behind the guard |
 | DecisionPolicy | Port for boot policy |
 | BoardBringUp | Port for bringing up the board |
 | SlotStore | Port for where images live |
@@ -128,7 +128,7 @@ The figure below is DAGON's software design.
 | SubControl | A child's control lines |
 | Clock | Time |
 | Reset | System reset |
-| SandboxArch | Contract with the protection hardware |
+| SandboxArch | Privilege entry and unwind registers for one architecture |
 | Board Definition | The board's data |
 | Board Bring-Up | Prepares the board's power, pins and buses |
 | Board Extension | The board's own extension |
@@ -150,7 +150,7 @@ The figure below is DAGON's software design.
 | dagon-format | Byte layouts |
 | dagon-proto | The link protocol |
 | dagon-events | Events, state machines, extensions |
-| Retained Codecs | Encoding of the retained formats |
+| Retained Codecs | Boot record, fuse and topology body formats |
 | dagon-conform | Conformance tests |
 | dagon-sim | The simulator |
 | dagon-retained-model | Executable model of the retained formats |

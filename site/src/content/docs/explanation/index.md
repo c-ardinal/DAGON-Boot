@@ -77,13 +77,13 @@ DAGON が読み書きする形式、プロトコル、API には、どれも番�
 | Serving Loop | リクエストに答えるループ |
 | Recovery Entry | 復旧の経路への入り口 |
 | Relay | 親機から子機への中継 |
-| Coordinator | 親機が子機への書き込みを進める |
-| Release Store | 親機に置くパッケージ |
+| Coordinator | 保存したリリースをノードに対して実行する |
+| Release Store | リリースの面 N/P とその昇格を持つ |
 | Node Recovery | 親機から子機を復旧する |
-| Bus Guardian | 子機のバスを守る |
+| Bus Guardian | 共有のバスを直列化し、バスの固まりと切り離しを扱う |
 | Topology Copy | 親機にある構成のコピー |
 | Liveness Guard | タスクの生存を条件とするキック |
-| Reboot Gate | 再起動の時機の判断 |
+| Reboot Gate | 先に返答し、上限のある遅れを待ってからリセットする |
 | Entry Gate | 拡張の呼び出しの入り口 |
 | Service ABI | 拡張から DAGON への唯一の呼び出し |
 | Operation Cancellation | 途中の特権の操作の取り消し |
@@ -97,11 +97,11 @@ DAGON が読み書きする形式、プロトコル、API には、どれも番�
 | Boot Decision | どのスロットを起動するかの判断 |
 | Core Chooser | stage0 がブートローダのスロットを選ぶ |
 | State Log Fold | 記録から状態を畳み込む |
-| Delivery Plan | 子機に書き込む順の計画 |
-| Recovery Policy | 子機の復旧の方針 |
-| Constraint Evaluator | バージョンの制約の評価 |
+| Delivery Plan | 順序、試行の窓、昇格の判断 |
+| Recovery Policy | 状態と失敗の回数から復旧の段階を選ぶ |
+| Constraint Evaluator | マニフェストの制約を確かめる |
 | Trust Rule | 署名と鍵の 1 つの認証の決まり |
-| Deadline Book | タスクの期限の記録 |
+| Deadline Book | ガードの後ろの純粋な期限の計算 |
 | DecisionPolicy | ブートの方針のポート |
 | BoardBringUp | ボードの立ち上げのポート |
 | SlotStore | イメージの置き場所のポート |
@@ -125,7 +125,7 @@ DAGON が読み書きする形式、プロトコル、API には、どれも番�
 | SubControl | 子機の制御線 |
 | Clock | 時間 |
 | Reset | システムのリセット |
-| SandboxArch | 保護ハードウェアとの取り決め |
+| SandboxArch | 1 つのアーキテクチャの特権の入口とアンワインドのレジスタ |
 | Board Definition | ボードのデータ |
 | Board Bring-Up | ボードの電源、ピン、バスの準備 |
 | Board Extension | ボードが持つ拡張 |
@@ -147,7 +147,7 @@ DAGON が読み書きする形式、プロトコル、API には、どれも番�
 | dagon-format | バイトのレイアウト |
 | dagon-proto | リンクのプロトコル |
 | dagon-events | イベント、状態機械、拡張 |
-| Retained Codecs | 保持メモリの形式の符号化 |
+| Retained Codecs | ブート記録、ヒューズ、構成の本体の形式 |
 | dagon-conform | 適合試験 |
 | dagon-sim | シミュレータ |
 | dagon-retained-model | 保持の形式の実行可能なモデル |

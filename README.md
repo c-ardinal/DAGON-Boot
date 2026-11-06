@@ -60,7 +60,7 @@ PCに繋いだ1つのマイコンを通してその先のマイコンにも、�
 | STM32F401RE | NUCLEO-F401RE                   |
 | ESP32-S3    | M5StopWatch                     |
 
-## まず試す
+## 試してみる
 
 ### インストールせずに試す
 
@@ -68,45 +68,39 @@ PCに繋いだ1つのマイコンを通してその先のマイコンにも、�
 
 ### インストールして試す
 
-手元のPCでも、シミュレータを用いて実機なしで試せます。
+手元のPCでも、ブラウザ上(ChromeかEdge 89以降)でシミュレータを用いて実機なしで試せます。
 
-`dagon`コマンドを入れます。上がLinuxとmacOS、下がWindowsです。
+#### インストール
+
+Linux / macOS
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/c-ardinal/DAGON-Boot/main/install.sh | sh
 ```
 
+Windows
+
 ```powershell
 irm https://raw.githubusercontent.com/c-ardinal/DAGON-Boot/main/install.ps1 | iex
 ```
 
-ブラウザは次のものを使います。
-
-- ChromeかEdge 89以降
-
-デモを始めます。
+#### デモ実行
 
 ```sh
-dagon demo
+dagon demo    // 表示したアドレスでDAGON Consoleを開きます
+dagon sim run // シミュレータ上で通しのシナリオを実行します
 ```
-
-`dagon demo`は表示したアドレスでDAGON Consoleを開きます。`dagon sim run`はシミュレータ上で通しのシナリオを実行します。
 
 ## 自分のプロジェクトを始める
 
 ```sh
-dagon new my-fleet
+dagon new my-fleet  // プロジェクトに必要なファイル一式を生成
 cd my-fleet
-dagon serve
+dagon serve         // DAGON Consoleを起動。ブラウザ上で構成を描く
+dagon doctor        // 構成に従ったビルドが出来る状態か検査
 ```
 
-`dagon new`は`dagon.toml`、構成のファイル、署名の鍵を作ります。構成のファイルには、見本として3つのマイコンの構成が入ります。秘密鍵はプロジェクトの外に置かれます。
-
-アプリは[Rust](https://rustup.rs)だけで書きます。
-
-`dagon serve`がブラウザを開きます。続きはDAGON Consoleでできます。
-
-構成を描いたら、ビルドの前に`dagon doctor`がその構成のマイコンに必要なツール（[一覧](https://c-ardinal.github.io/DAGON-Boot/doc/reference/tools/)）を確かめ、`dagon doctor --fix`が管理者の権限の要らないものを入れます。
+`dagon doctor`ではその構成のマイコンに必要なツール（[一覧](https://c-ardinal.github.io/DAGON-Boot/doc/reference/tools/)）を確かめ、`dagon doctor --fix`を実行すると管理者の権限の要らないものを自動で導入します。
 
 ビルドから最初の書き込みまでは[はじめから書き込みまで](https://c-ardinal.github.io/DAGON-Boot/doc/getting-started/first-project/)を見てください。
 
@@ -128,21 +122,19 @@ flowchart LR
 1. PCがパッケージの署名を確かめ、パッケージがこの構成に合うことを確かめます。
 2. PCが構成を親機へ送ります。
 3. PCが親機を通して、マイコンごとに新しいイメージを送ります。子機が先で、親機は最後です。
-4. マイコンは動いているイメージとは別の場所に新しいイメージを書き込みます。
+4. マイコンは動いているスロットとは別のスロットに新しいイメージを書き込みます。
 5. マイコンは新しいイメージを試しに起動します。
 6. 自己確認が通れば、新しいバージョンに確定します。通らなければ、リセットして前のバージョンに戻ります。
 
 DAGONがしないことは[制限事項](https://c-ardinal.github.io/DAGON-Boot/doc/explanation/limitations/)にあります。
 
-## DAGONの設計
+## DAGONの設計情報
 
-次の図はDAGONのソフトウェアの設計です。
+### ソフトウェアアーキテクチャ
 
 <img src="assets/architecture/node-ja.svg" alt="DAGONのソフトウェアの設計を層とコンポーネントで示す図" width="100%">
 
-## 変更する場所
-
-### DAGONを使うとき
+### DAGONを使用する場合の参照情報
 
 | やりたいこと       | 触る場所                                                             | 手順                                                                                                |
 | ------------------ | -------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------- |
@@ -150,7 +142,7 @@ DAGONがしないことは[制限事項](https://c-ardinal.github.io/DAGON-Boot/
 | 拡張を足す         | `extensions/<id>/dagon-extension.toml`、`dagon.toml`の`[extensions]` | [拡張のマニフェスト](https://c-ardinal.github.io/DAGON-Boot/doc/reference/extension-manifest/)      |
 | エージェントを足す | `~/.dagon/agents/*.toml`                                             | [エージェント定義の形式](https://c-ardinal.github.io/DAGON-Boot/doc/reference/agent-definition/)    |
 
-### DAGONそのものに足すとき
+### DAGON自体に変更を加える場合の参照情報
 
 | やりたいこと       | 触る場所                                                                                        | 手順                                                                                         |
 | ------------------ | ----------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------- |
@@ -158,16 +150,12 @@ DAGONがしないことは[制限事項](https://c-ardinal.github.io/DAGON-Boot/
 | マイコンを足す     | `targets/mcu/<id>/`                                                                             | [マイコンとリンクを足す](https://c-ardinal.github.io/DAGON-Boot/doc/how-to/new-mcu-or-link/) |
 | リンクや転送を足す | `crates/dagon-format/src/link.rs`、`targets/mcu/*/src/links.rs`、`crates/dagon-host/src/lib.rs` | [マイコンとリンクを足す](https://c-ardinal.github.io/DAGON-Boot/doc/how-to/new-mcu-or-link/) |
 
-## 自分でビルドする
-
-`dagon`コマンドをソースからビルドする手順です。DAGONに手を加えるかどうかによらず同じです。
+### DAGONを自分でビルドする
 
 必要なものは次の2つです。
 
 - Rust 1.95.0以降
 - Cコンパイラ（WindowsはVisual Studio 2022のC++ビルドツール、Linuxはgcc 13以降、macOSはXcode Command Line Tools 16.4以降）
-
-ビルドして入れます。
 
 ```sh
 cargo install --git https://github.com/c-ardinal/DAGON-Boot --tag cli-v<version> dagon-cli
@@ -183,4 +171,4 @@ cargo install --git https://github.com/c-ardinal/DAGON-Boot --tag cli-v<version>
 - 書体とアイコン: Doto、DotGothic16、Zen Kaku Gothic New、JetBrains Mono（SIL OFL 1.1）、Lucide（ISC）
 - マイコンとボードの定義の値: 各社のデータシートとボードの資料から取っています。出典を確かめていない値は、定義の中で`unverified`と示します。
 
-全部の一覧とライセンスは[ライセンス](https://c-ardinal.github.io/DAGON-Boot/doc/reference/licenses/)にあります。
+一覧とライセンスは[ライセンス](https://c-ardinal.github.io/DAGON-Boot/doc/reference/licenses/)にあります。

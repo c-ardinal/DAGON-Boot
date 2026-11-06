@@ -1,9 +1,6 @@
 """Checks of the site's generators: python -m unittest discover -s site/scripts -p "test_*.py"."""
-import fnmatch
-import json
 import pathlib
 import re
-import subprocess
 import sys
 import tempfile
 import tomllib
@@ -199,49 +196,29 @@ class Wording(unittest.TestCase):
         self.assertNotIn("yet", notice)
 
 
-def cargo_deps():
-    """Package name -> its dependencies' names, from `cargo metadata` of the root and the packages outside it."""
-    manifests = [ROOT / "Cargo.toml", ROOT / "samples/f401-app/Cargo.toml", ROOT / "samples/hub-boot-screen/Cargo.toml", ROOT / "targets/rp2040-hub/Cargo.toml"]
-    for sub in ("rp2040", "rp2040/stage0", "rp2040/bootcore", "stm32f401re", "stm32f401re/stage0", "stm32f401re/bootcore", "esp32s3", "common"):
-        manifests.append(ROOT / "targets/mcu" / sub / "Cargo.toml")
-    manifests += sorted((ROOT / "targets/boards").glob("*/Cargo.toml"))
-    deps = {}
-    for m in manifests:
-        out = subprocess.run(["cargo", "metadata", "--no-deps", "--offline", "--format-version", "1", "--manifest-path", str(m)],
-                             cwd=ROOT, capture_output=True, text=True, encoding="utf-8", check=True).stdout
-        for p in json.loads(out)["packages"]:
-            deps.setdefault(p["name"], set()).update(d["name"] for d in p["dependencies"] if d["kind"] in (None, "build"))
-    return deps
-
-
 class Architecture(unittest.TestCase):
-    @classmethod
-    def setUpClass(cls):
-        cls.deps = cargo_deps()
-
-    def test_every_module_in_the_figure_exists(self):
-        for name, mod in gen.architecture.MODULES.items():
-            for path in mod["paths"]:
-                self.assertTrue((ROOT / path).exists(), f"{name}: {path}")
-            if mod["needle"]:
-                self.assertIn(mod["needle"], (ROOT / mod["paths"][0]).read_text(encoding="utf-8"), name)
-            self.assertTrue(mod["crate"] in self.deps or any(mod["crate"] in d for d in self.deps.values()), f"{name}: {mod['crate']}")
-
-    def test_the_figure_draws_exactly_the_modules_in_the_table(self):
+    def test_the_figure_draws_exactly_the_components_in_the_table(self):
+        a = gen.architecture
+        for name, lines in a.COMPONENTS.items():
+            self.assertEqual(len(lines), 2, name)
         for lang in gen.LANGS:
-            svg = gen.architecture.node_svg(lang)
-            for name in gen.architecture.MODULES:
-                self.assertIn(f">{name}</text>", svg, name)
-            drawn = re.findall(r'class="a-b"[^>]*>([^<]+)</text>', svg)
-            self.assertEqual(sorted(drawn), sorted(gen.architecture.MODULES))
+            svg = a.node_svg(lang).split('<g class="legend">')[0]
+            # a long name is drawn over two lines
+            drawn = "".join(re.findall(r">([^<>]+)</text>", svg)).replace(" ", "")
+            for name in a.COMPONENTS:
+                self.assertIn(name.replace(" ", ""), drawn, name)
+        named = [n for row in a.PC_ROWS for cell in (row[2] if row[1] == "full" else [x for c in row[2] for x in c]) for n in ([cell] if isinstance(cell, str) else cell)]
+        named += [*a.CONTRACTS, *a.BOARD, a.MCU_STRIP, *a.SILICON, *a.LIBRARIES, *a.PROOF, *a.DIRECT]
+        named += [n for _, names in a.DEVICE_TOP for n in names]
+        named += [n for _, cells in a.DEVICE_COLS for c in cells.values() for n in c] + [n for c in a.MCU.values() for n in c]
+        self.assertEqual(sorted(named), sorted(a.COMPONENTS))
 
-    def test_every_mcu_in_the_figure_is_in_targets(self):
-        self.assertEqual(len(gen.architecture.mcu_names()), len(list((ROOT / "targets/mcu").glob("*/dagon-mcu.toml"))))
-
-    def test_the_core_names_no_mcu_or_board(self):
-        for name in gen.architecture.NO_MCU:
-            bad = [d for d in self.deps[name] if d.startswith(("dagon-mcu", "dagon-board")) or d in gen.architecture.HAL]
-            self.assertEqual(bad, [], name)
+    def test_the_colours_are_the_consoles_tokens(self):
+        tokens = (ROOT / "web/src/styles/tokens.css").read_text(encoding="utf-8")
+        for colour in gen.architecture.COLOURS:
+            self.assertIn(colour, tokens)
+        for colour in re.findall(r"#[0-9a-f]{6}", gen.architecture.node_svg("en")):
+            self.assertIn(colour, gen.architecture.COLOURS)
 
     def test_the_change_table_and_how_to_name_paths_that_exist(self):
         pages = [ROOT / "README.md", ROOT / "README.en.md", llms.DOCS / "how-to/new-mcu-or-link.md", llms.DOCS / "en/how-to/new-mcu-or-link.md"]

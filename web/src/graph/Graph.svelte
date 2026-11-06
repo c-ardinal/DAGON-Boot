@@ -1209,9 +1209,10 @@
   }
 
   /* Ports: the lower one starts a drag, the upper one takes it. */
+  /* Over the cards, also the one in the hand: a port is never half hidden. */
   .port {
     position: absolute;
-    z-index: calc(var(--z-node) + 1);
+    z-index: calc(var(--z-drag) + 1);
     width: 14px;
     height: 14px;
     margin: -7px 0 0 -7px;

@@ -721,7 +721,7 @@ export const ANNOUNCE = {
   A11percent: (n: number) => `進み具合 ${n}%`,
   A12: '親機 再起動中、自動で再接続',
   A13: (name: string) => `書き込み 停止、${name}`,
-  A13core: (name: string) => `${name} ブートコアは元のまま`,
+  A13core: (name: string) => `${name} ブートローダは元のまま`,
   A13previous: (name: string) => `${name} 前のバージョン`,
   A14: (version: string) => `完了、${version}`,
   A21timeout: '親機 再接続 時間切れ',
@@ -733,7 +733,7 @@ export const ANNOUNCE = {
 
 /** Words that never appear in operating-mode guidance, chips or results. */
 export const FORBIDDEN_WORDS = [
-  '署名', 'ROM', 'CDC', 'ブートローダ', 'エラーコード', 'トポロジ',
+  '署名', 'ROM', 'CDC', 'ブートコア', 'エラーコード', 'トポロジ',
   'マニフェスト', 'ハッシュ', 'ポート', 'シリアル', 'フラッシュ', 'ファームウェア',
   'パーティション', 'コマンド', 'タイムアウト', 'WASM', 'Web Serial', '確定', '試行中',
   '巻き戻り', '不正', '致命的', '無効',
@@ -1260,9 +1260,9 @@ export const WRITE = {
   },
   /** The new boot core failed its check: the node runs its confirmed one, the app was not written. */
   coreBack: {
-    label: '↺ ブートコアは元のまま',
-    detail: '新しいブートコアが自分の検査に通らなかったので、動いていたブートコアに戻りました。ノードは動いています。アプリは書き込んでいません。',
-    next: 'ブートコアを直してバージョンを上げ、ビルドしてから、もう一度書き込んでください。',
+    label: '↺ ブートローダは元のまま',
+    detail: '新しいブートローダが自分の検査に通らなかったので、動いていたブートローダに戻りました。ノードは動いています。アプリは書き込んでいません。',
+    next: 'ブートローダを直してバージョンを上げ、ビルドしてから、もう一度書き込んでください。',
   },
   /** A silent node with a ROM entry: said once, before anything is touched. */
   rom: {

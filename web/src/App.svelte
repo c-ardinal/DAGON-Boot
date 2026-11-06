@@ -695,11 +695,13 @@
       if (s === 'failed') buildFailureOpen = true;
     });
   });
+  let lastNamed: string | null = null;
   /** While building, the node cargo builds now carries the edge light; every node waits under it until cargo names one, and while signing. */
   const building = $derived.by((): readonly string[] => {
-    if (buildState !== 'running') return [];
-    const id = buildingNode(buildJobs, d.config.reach);
-    return id ? [id] : d.config.reach;
+    if (buildState !== 'running') return (lastNamed = null), [];
+    // A job keeps only its latest lines: under cargo's long output the node named earlier is still the one being built.
+    lastNamed = buildingNode(buildJobs, d.config.reach) ?? lastNamed;
+    return lastNamed ? [lastNamed] : d.config.reach;
   });
   const chips = $derived(updating ? progressChips : diffChips);
   /** The water in each node while it is written (writing, hubRestarting, recovering). */

@@ -1,6 +1,6 @@
 ---
 title: "プロジェクトでの Claude の手助け"
-description: "新しいプロジェクトに入る Claude Code の指示とスキル、DAGON の移植に使うプラグインです。"
+description: "新しいプロジェクトに入る Claude Code の指示とスキル、DAGON の移植に使う Claude Code のプラグインです。"
 ---
 
 `dagon new` は、プロジェクトに Claude Code のファイルも書きます。プロジェクトのフォルダで開いた Claude Code は、構成のファイル、コマンド、守ることを知った状態で始まります。

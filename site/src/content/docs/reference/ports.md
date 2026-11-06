@@ -31,7 +31,7 @@ editUrl: false
 | `WatchdogDriver` | ブートと試行を守るウォッチドッグ | boot, app | マイコンのもの | trusted only | – |
 | `SlotStore` | イメージの置き場所 | boot, app | マイコンの定義のフラッシュの配置 | trusted only | – |
 | `LogStorage` | 状態ログの置き場所 | boot, app | マイコンの定義のフラッシュの配置 | trusted only | – |
-| `Recovery` | 追加の復旧の経路: 転送のためのサービスの時間枠、ベンダーのダウンロードモード | boot, app | マイコンとボードの定義のとおりの BOOTSEL/UF2、factory、ROM の入り口 | untrusted, additive (プラグインは経路を足すだけで、DAGON のものを消せません) | return, transport, time, memory |
+| `Recovery` | 追加の復旧の経路: 転送のためのサービスの時間枠、ベンダーのダウンロードモード | boot, app | マイコンとボードの定義のとおりの BOOTSEL/UF2、factory、ROM の入り口 | untrusted, additive (拡張は経路を足すだけで、DAGON のものを消せません) | return, transport, time, memory |
 | `Diagnostics` | 追加の VERSION の TLV、追加のステータス、UDS の DID の表 | boot, app, relay | なし | untrusted | return, time, memory |
 | `Display` | 段階やブートの結果の見え方 | boot, app, relay | boot: アクションプログラムを通した、ボードの定義の `[boot] led` と `halt`; app, relay: なし | untrusted (ブート時は、宣言されたピンとバスでサンドボックスの中で動きます) | return, pins, buses, time, memory |
 | `LogSink` | `Recent` のあふれと拡張のログの行き先 | app, relay, host | なし | untrusted | return, events, time, memory |

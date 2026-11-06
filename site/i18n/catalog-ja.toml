@@ -68,7 +68,7 @@
 "`UpdateOffer` -> `Accept`" = "`UpdateOffer` -> `Accept`"
 "`max_attempts` from the definition, pending before confirmed" = "定義の `max_attempts`、確定より待機を先に"
 "a decision point, 3" = "判断点、3"
-"a plug-in adds a path, never removes DAGON's" = "プラグインは経路を足すだけで、DAGON のものを消せません"
+"a plug-in adds a path, never removes DAGON's" = "拡張は経路を足すだけで、DAGON のものを消せません"
 "a program or request run after a host event" = "ホストのイベントの後で実行するプログラムやリクエスト"
 "accept" = "受け入れる"
 "accepting what DAGON refused (not asked then)" = "DAGON が拒んだものを受け入れること（そのときは尋ねません）"

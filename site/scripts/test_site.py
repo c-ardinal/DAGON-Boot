@@ -193,6 +193,13 @@ class Wording(unittest.TestCase):
         found = [f"{p.relative_to(ROOT).as_posix()}: {w}" for p in pages for w in self.NOT_SAID if w in p.read_text(encoding="utf-8")]
         self.assertEqual(found, [])
 
+    def test_plugin_is_only_the_claude_code_plugin_in_japanese(self):
+        # DAGON's own word is 拡張. reference/ports.md's lead is written in dagon-catalog and follows when that crate changes.
+        pages = [p for p in llms.DOCS.rglob("*.md*") if p.relative_to(llms.DOCS).parts[0] != "en" and p.name != "ports.md"]
+        found = [f"{p.name}:{n}" for p in pages for n, line in enumerate(p.read_text(encoding="utf-8").splitlines(), 1)
+                 if "プラグイン" in line.replace("Claude Code のプラグイン", "")]
+        self.assertEqual(found, [])
+
     def test_console_goes_by_its_full_name_on_the_pages(self):
         found = []
         for p in llms.DOCS.rglob("*.md*"):

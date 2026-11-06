@@ -169,11 +169,7 @@ fn build_node(
     let link_baud = link_baud(cfg, id)?;
     let out_rel = clear_output(cfg, id)?;
     let mut built = Vec::new();
-    // The version is the crate's own; a `version` in [build.<id>] must agree.
-    let source = crate::srcver::crate_version(&dir)?;
-    let what = format!("{}", b.package.join("Cargo.toml").display());
-    let version = crate::srcver::agreed(source, b.version.as_deref(), &what)
-        .map_err(|e| format!("[build.{id}] {e}"))?;
+    let version = crate::srcver::crate_version(&dir)?;
     let mut record = BuildRecord {
         version: Some(version.to_string()),
         slots: Vec::new(),
@@ -585,7 +581,6 @@ mod tests {
                 bin: None,
                 features: vec![],
                 slot_b_feature: None,
-                version: None,
             },
         );
         let mut lines = Vec::new();
@@ -658,7 +653,6 @@ mod tests {
                 bin: None,
                 features: vec![],
                 slot_b_feature: None,
-                version: None,
             },
         );
         let quiet = &AtomicBool::new(false);
@@ -689,7 +683,6 @@ mod tests {
             bin: None,
             features: vec!["conform".into()],
             slot_b_feature: Some("slot-b".into()),
-            version: Some("1.1.0".into()),
         };
         assert!(ok.validate().is_ok());
         let with = |f: &dyn Fn(&mut BuildInputs)| {
@@ -704,7 +697,6 @@ mod tests {
         // A name cargo would read as an option.
         assert!(with(&|b| b.bin = Some("--offline".into())).is_err());
         assert!(with(&|b| b.features = vec!["-x".into()]).is_err());
-        assert!(with(&|b| b.version = Some("one".into())).is_err());
     }
 
     #[test]
@@ -721,7 +713,6 @@ mod tests {
             bin: None,
             features: vec![],
             slot_b_feature: None,
-            version: None,
         };
         let dir = package_dir(&cfg, &sample, Some(&here)).unwrap();
         assert!(dir.join("Cargo.toml").is_file(), "{}", dir.display());
@@ -793,7 +784,6 @@ mod tests {
                 bin: None,
                 features: vec![],
                 slot_b_feature: Some("slot-b".into()),
-                version: None,
             },
         );
         let mut lines = Vec::new();

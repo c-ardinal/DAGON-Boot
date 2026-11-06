@@ -40,7 +40,6 @@ fn work_area(name: &str) -> (Config, Topology) {
                 bin: None,
                 features: vec![],
                 slot_b_feature: Some("slot-b".into()),
-                version: None,
             },
         );
     }
@@ -184,7 +183,7 @@ fn the_plan_names_the_package_and_each_node_s_old_and_new_version() {
 
 #[test]
 fn a_version_given_must_be_the_crate_s_own() {
-    let (mut cfg, _) = work_area("given");
+    let (cfg, _) = work_area("given");
     assert_eq!(
         app_version(&cfg, "seg", None).unwrap(),
         Version::new(1, 0, 1)
@@ -198,11 +197,6 @@ fn a_version_given_must_be_the_crate_s_own() {
         e.contains("1.1.0") && e.contains("1.0.1") && e.contains("Cargo.toml"),
         "{e}"
     );
-    // A version in [build.<id>] is held to the same rule.
-    cfg.build.get_mut("seg").unwrap().version = Some("2.0.0".into());
-    assert!(app_version(&cfg, "seg", None)
-        .unwrap_err()
-        .contains("2.0.0"));
     let _ = std::fs::remove_dir_all(&cfg.base);
 }
 

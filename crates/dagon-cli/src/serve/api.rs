@@ -955,7 +955,7 @@ fn sign_nodes(
         let (built, elfs) = nodebuild::last_build(cfg, node)?;
         let ver = built
             .version
-            .ok_or_else(|| format!("{node} was built without a version in [build.{node}]"))?;
+            .ok_or_else(|| format!("{node} was built without a version; build it again"))?;
         let parsed = version(&ver)?;
         ready.push((node, ver, parsed, elfs));
     }

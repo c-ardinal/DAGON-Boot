@@ -85,8 +85,8 @@ pub(crate) fn release_versions(
     crate::kept::versions_of(t, &bytes, pubkey).map_err(|e| format!("{}: {e}", path.display()))
 }
 
-/// Node `node`'s app version: its crate's Cargo.toml `version`; a
-/// `version` in `[build.<id>]` and `given` (`--version`) must be the same.
+/// Node `node`'s app version: its crate's Cargo.toml `version`; `given`
+/// (`--version`) must be the same.
 pub(crate) fn app_version(
     cfg: &Config,
     node: &str,
@@ -98,8 +98,6 @@ pub(crate) fn app_version(
         .ok_or_else(|| format!("no [build.{node}] in dagon.toml"))?;
     let what = b.package.join("Cargo.toml").display().to_string();
     let source = crate::srcver::crate_version(&cfg.base.join(&b.package))?;
-    let source = crate::srcver::agreed(source, b.version.as_deref(), &what)
-        .map_err(|e| format!("[build.{node}] {e}"))?;
     crate::srcver::agreed(source, given, &what)
 }
 

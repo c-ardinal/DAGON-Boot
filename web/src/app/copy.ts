@@ -1229,7 +1229,13 @@ export const BUILD = {
 /** The project's layout file (呼び名 and card places). */
 export const LAYOUT = {
   refused: '× 配置を読めない',
-  refusedDetail: '配置のファイルが読めないので、自動の配置で開きました。保存すると置き換わります。',
+  refusedDetail: '配置のファイルを読めないので、自動の配置で開きました。ファイルは変えず、配置と呼び名の変更は保存しません。',
+} as const;
+
+/** The project's 構成 could not be read as it opened: nothing replaces it. */
+export const TOPOLOGY_READ = {
+  label: '× 構成を読めない',
+  detail: '構成のファイルを読めないので、変更は保存しません。プロジェクトを開き直してください。',
 } as const;
 
 export const WRITE = {

@@ -48,6 +48,8 @@ export class Define {
   alert = $state('');
   /** The last file read did not parse. */
   unreadable = $state(false);
+  /** The project's YAML was not read as it opened: saving would replace what was not seen, until a 構成 is loaded or read from a file. */
+  notRead = $state(false);
   /** Bumped to ask the page to focus the inspector field `focusField`. */
   focusRequest = $state(0);
   focusField = $state('');
@@ -237,6 +239,7 @@ export class Define {
       return false;
     }
     this.unreadable = false;
+    this.notRead = false;
     this.selected = null;
     return true;
   }
@@ -249,6 +252,7 @@ export class Define {
     this.doc = doc;
     this.selected = null;
     this.unreadable = false;
+    this.notRead = false;
     this.revision++;
     this.savedAt = this.revision;
     this.saveFailure = null;

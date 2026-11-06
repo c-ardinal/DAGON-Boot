@@ -79,7 +79,8 @@ test('a node whose boot loader alone differs is written, and its card says the b
   const fixture = (name: string) => fileURLToPath(new URL(`../../crates/dagon-sim/fixtures/${name}`, import.meta.url));
   // What the project's latest build is: the apps at 1.1.0, then the same apps with the F401's boot loader at 1.1.0.
   let latest = 'sample-1.1.0.dgb';
-  await page.route('**/sample-full-1.1.0.dgb*', (route) => route.fulfill({ path: fixture(latest) }));
+  // The file itself, not the module that names its address (`?url`).
+  await page.route((url) => url.pathname.endsWith('/sample-full-1.1.0.dgb') && !url.search, (route) => route.fulfill({ path: fixture(latest) }));
   await toWrite(page, 'sim');
   for (const n of ['hub', 'watch'] as const) await check(page, n).click();
   await page.locator('.split .main').click();

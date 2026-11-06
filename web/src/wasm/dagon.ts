@@ -11,6 +11,7 @@ import init, {
   mcu_connection,
   mcu_trial_ms,
   trial_percent,
+  release_agent_digest,
   release_core_versions,
   release_versions,
   use_builtin_definitions,
@@ -337,6 +338,11 @@ export function releaseCoreVersions(bundle: Uint8Array): Map<number, number[]> {
   const out = new Map<number, number[]>();
   for (let i = 0; i + 1 < flat.length; i += 2) out.set(flat[i], [...(out.get(flat[i]) ?? []), flat[i + 1]]);
   return out;
+}
+
+/** The header digest of the recovery agent a release holds for a topology node; null when it holds none. */
+export function releaseAgentDigest(bundle: Uint8Array, node: number): Uint8Array | null {
+  return release_agent_digest(bundle, node) ?? null;
 }
 
 /** `major.minor.patch` of a raw version u32. */

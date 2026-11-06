@@ -227,6 +227,26 @@ describe('recovery from the page with dagon-host recover', () => {
     expect(op.progress.seg.core).toBeUndefined();
   }, 120_000);
 
+  test('a package whose only difference is a recovery agent is written, then said to be the same', async () => {
+    const sim = simulator(13)!;
+    const op = session(sim.transport, sim.clock);
+    await op.connect();
+    await op.push();
+    op.takeFile('sample-1.1.0.dgb', repo('crates/dagon-sim/fixtures/sample-1.1.0.dgb'));
+    await op.update();
+    expect(op.state).toBe('done');
+    await op.round();
+    const agent = repo('crates/dagon-sim/fixtures/sample-agent-1.1.0.dgb');
+    op.toggleSkip('hub');
+    op.toggleSkip('seg');
+    expect(await op.noWrite(agent)).toBe(null);
+    op.takeFile('sample-agent-1.1.0.dgb', agent);
+    await op.update();
+    expect(op.state).toBe('done');
+    await op.round();
+    expect(await op.noWrite(agent)).toMatchObject({ same: op.fileVersions.watch });
+  }, 180_000);
+
   test('a boot core that cannot be read is not called the same', async () => {
     const sim = simulator(13)!;
     const op = session(sim.transport, sim.clock);

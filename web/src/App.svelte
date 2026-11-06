@@ -41,7 +41,8 @@
   import Problems from './screens/define/Problems.svelte';
   import Table from './screens/define/Table.svelte';
   import CliPanel from './screens/define/CliPanel.svelte';
-  import { Cli, jobReason, LAYOUT_FORMAT, type Layout } from './app/define/cli.svelte.ts';
+  import { Cli, jobReason } from './app/define/cli.svelte.ts';
+  import { LayoutFile } from './app/define/layoutFile.ts';
   import { CLI_LINK, CLI_STATE } from './app/copy.ts';
   import Reconnect from './screens/Reconnect.svelte';
   import Header from './screens/Header.svelte';
@@ -53,7 +54,7 @@
   import RomConfirm from './screens/RomConfirm.svelte';
   import { answerConsent } from './app/factory.ts';
   import Toast, { type Notice } from './screens/Toast.svelte';
-  import { CONN, FILE, HELP, LAYOUT, MENU, NOTICE, SIM, START, TABLE, fill as fillIn } from './app/copy.ts';
+  import { CONN, FILE, HELP, LAYOUT, MENU, NOTICE, SIM, START, TABLE, TOPOLOGY_READ, fill as fillIn } from './app/copy.ts';
   import { devHub } from './serial/devHub.ts';
   import { DEMO_SITE } from './app/site.ts';
   import { serveSim, type SimStand } from './serial/serveSim.ts';
@@ -184,28 +185,31 @@
   /** The open project's 構成 (its YAML through serve): 運用 when it has no problems, else 定義. */
   // The start screen is reached only through `leave` (menu, 最初からやり直す), so no unsaved edit is here when a project opens.
   async function openWork(want?: 'operate' | 'define') {
-    const yaml = await cli.loadTopology().catch(() => null);
+    const yaml = await cli.loadTopology().catch(() => undefined);
     // 呼び名 and positions live beside the YAML (GET /v1/layout).
-    projectLayout = (await cli.loadLayout().catch(() => null)) ?? {};
-    if (cli.layoutRefused) notice = { word: LAYOUT.refused, error: true, detail: `${LAYOUT.refusedDetail}（${cli.layoutRefused}）` };
+    if (!(await layoutFile.open())) notice = { word: LAYOUT.refused, error: true, detail: `${LAYOUT.refusedDetail}（${cli.layoutRefused}）` };
     local = false;
     op.reset();
     d.reset();
     if (yaml) {
       try {
-        d.load(fromYaml(yaml, projectLayout.names ?? {}), yaml);
+        d.load(fromYaml(yaml, layoutFile.current.names ?? {}), yaml);
       } catch {
         d.unreadable = true;
+        d.notRead = true;
       }
+    } else if (yaml === undefined) {
+      d.notRead = true;
+      notice = { word: TOPOLOGY_READ.label, error: true, detail: TOPOLOGY_READ.detail };
     }
     layoutNames = JSON.stringify(d.doc.names);
-    positions = projectLayout.positions ?? {};
+    positions = layoutFile.current.positions ?? {};
     canvasView = newView();
     enterWork(want);
   }
 
-  /** The project's layout file as last read or written; names follow the edits. */
-  let projectLayout: Layout = {};
+  /** The project's layout file; names follow the edits. */
+  const layoutFile = new LayoutFile(cli);
   let layoutNames = '';
   $effect(() => {
     const names = JSON.stringify(d.doc.names);
@@ -213,8 +217,7 @@
     untrack(() => {
       if (names === layoutNames) return;
       layoutNames = names;
-      projectLayout = { ...projectLayout, format: LAYOUT_FORMAT, names: { ...d.doc.names } };
-      void cli.saveLayout(projectLayout);
+      void layoutFile.change({ names: { ...d.doc.names } });
     });
   });
 
@@ -332,7 +335,7 @@
   const autosave = new Autosave(d, {
     put: (yaml) => cli.saveTopology(yaml),
     enabled: () => screen === 'work' && !local,
-    blocked: () => cli.defsFailed,
+    blocked: () => cli.defsFailed || d.notRead,
   });
   $effect(() => {
     void d.revision;
@@ -367,8 +370,11 @@
   /** Where the user put cards, kept in the project's layout file. */
   let positions = $state.raw<Record<string, { x: number; y: number }>>({});
   function savePositions() {
-    projectLayout = { ...projectLayout, format: LAYOUT_FORMAT, positions };
-    if (!local) void cli.saveLayout(projectLayout);
+    if (local) return;
+    // A file read only now brought the places it holds.
+    void layoutFile.change({ positions }).then(() => {
+      if (!layoutFile.unread && layoutFile.current.positions) positions = layoutFile.current.positions;
+    });
   }
   let tableTab = $state(0);
   /** The free part of the canvas (between the floating columns): what a fit fills. */

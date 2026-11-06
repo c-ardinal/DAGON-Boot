@@ -68,6 +68,8 @@ const I2C_SCAN: core::ops::RangeInclusive<u8> = 0x08..=0x77;
 /// XFER_HDR / XFER_DATA bytes before the data: the offset.
 const CHUNK_HEAD: usize = 4;
 const PERCENT_STEP: u8 = 10;
+/// The recovery agent's slot (STATUS slot 2).
+const FACTORY_SLOT: u8 = 2;
 
 /// HELLO and STATUS of one target.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -351,7 +353,7 @@ impl<T: Transport, C: Clock> Host<T, C> {
         to: Target,
         on_event: &mut dyn FnMut(Event),
     ) -> Result<bool, T::Error> {
-        const FACTORY: u8 = 2;
+        const FACTORY: u8 = FACTORY_SLOT;
         let Some(img) = image_of(b, node, image_kind::AGENT, FACTORY) else {
             return Ok(false);
         };
@@ -1112,6 +1114,13 @@ fn plan(b: &BundleView<'_>, topo: &TopologyView<'_>, only: Option<&[u8]>) -> Vec
     });
     nodes.dedup();
     nodes
+}
+
+/// The header digest of the recovery agent `bundle` holds for `node`: the node
+/// gets it written when its factory slot holds another ([`Host::apply`]).
+pub fn agent_digest(b: &BundleView<'_>, node: u8) -> Option<[u8; 16]> {
+    let raw = image_of(b, node, image_kind::AGENT, FACTORY_SLOT)?.get(..HEADER_SIZE)?;
+    Some(dagon_format::header::header_digest16(raw.try_into().ok()?))
 }
 
 /// Slot neither running nor confirmed.

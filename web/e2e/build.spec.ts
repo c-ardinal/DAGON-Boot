@@ -6,10 +6,11 @@ const PASS = '0123456789abcdef0123456789abcdef';
 const KEY = '00'.repeat(32);
 
 /** A dagon serve that does what the test says when it says: a build advances only on `send`. */
-async function serve(page: Page, opts: { buildNodes: string[]; earlyEvents?: boolean }) {
+async function serve(page: Page, opts: { buildNodes: string[]; earlyEvents?: boolean; layout?: { status: number; body: unknown } }) {
   let ws: WebSocketRoute | undefined;
   let job = 0;
   const started: string[] = [];
+  const puts: string[] = [];
   await page.routeWebSocket('**/v1/events', (w) => {
     ws = w;
     w.onMessage(() => undefined);
@@ -35,7 +36,11 @@ async function serve(page: Page, opts: { buildNodes: string[]; earlyEvents?: boo
       case 'topology':
         return route.fulfill({ status: 200, contentType: 'text/yaml', body: SAMPLE });
       case 'layout':
-        return json({ format: 1 });
+        if (route.request().method() === 'PUT') {
+          puts.push(route.request().postData() ?? '');
+          return json({ saved: true });
+        }
+        return opts.layout ? json(opts.layout.body, opts.layout.status) : json({ format: 1 });
       case 'kept':
         return json({ kept: [] });
       default:
@@ -45,6 +50,7 @@ async function serve(page: Page, opts: { buildNodes: string[]; earlyEvents?: boo
   const send = (e: Record<string, unknown>) => ws!.send(JSON.stringify(e));
   return {
     started,
+    puts,
     state: (id: number, state: string) => send({ type: 'job.state', job: id, state }),
     log: (id: number, ...lines: string[]) => send({ type: 'job.log', job: id, lines }),
   };
@@ -145,4 +151,35 @@ test('no [build.*] yet: the band leads to the skeleton', async ({ page }) => {
   await serve(page, { buildNodes: [] });
   await open(page);
   await expect(sentence(page)).toContainText('雛形を作る');
+});
+
+for (const [what, layout] of [
+  ['a newer format', { status: 200, body: { format: 2, names: { seg: 'x' }, positions: { seg: { x: 1, y: 2 } } } }],
+  ['a failed read', { status: 500, body: { error: 'no' } }],
+] as const) {
+  test(`dragging a card does not write over a layout file not read: ${what}`, async ({ page }) => {
+    const s = await serve(page, { buildNodes: [], layout });
+    await open(page);
+    await expect(page.locator('.toast')).toContainText('配置を読めない');
+    const card = page.locator('.node').nth(1);
+    const at = (await card.boundingBox())!;
+    await page.mouse.move(at.x + 60, at.y + 12);
+    await page.mouse.down();
+    await page.mouse.move(at.x + 160, at.y + 72);
+    await page.mouse.up();
+    await page.waitForTimeout(500);
+    expect((await card.boundingBox())!.x).toBeGreaterThan(at.x);
+    expect(s.puts).toEqual([]);
+  });
+}
+
+test('dragging a card writes a layout file that was read', async ({ page }) => {
+  const s = await serve(page, { buildNodes: [] });
+  await open(page);
+  const at = (await page.locator('.node').nth(1).boundingBox())!;
+  await page.mouse.move(at.x + 60, at.y + 12);
+  await page.mouse.down();
+  await page.mouse.move(at.x + 160, at.y + 72);
+  await page.mouse.up();
+  await expect.poll(() => s.puts.length).toBe(1);
 });

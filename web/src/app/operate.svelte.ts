@@ -8,6 +8,7 @@ import {
   PHASE,
   check_release_for,
   newHost,
+  releaseAgentDigest,
   releaseCoreVersions,
   releaseVersions,
   release_topology,
@@ -57,6 +58,11 @@ export interface Progress {
   /** The boot core version being written, while it is; the app's write has none. */
   core?: number;
 }
+
+/** The recovery agent's slot in STATUS. */
+const FACTORY_SLOT = 2;
+
+const sameBytes = (a: Uint8Array | null, b: Uint8Array): boolean => a !== null && a.length === b.length && a.every((x, i) => x === b[i]);
 
 /** On a node's card while it is written: what is being written now (its boot core comes first when that differs), or null when not known. */
 export function writingTo(p: Progress, app: number | undefined): string | null {
@@ -331,8 +337,9 @@ export class Operate {
 
   /**
    * What stands in the way of writing `bytes` to the checked nodes, before anything is sent: none checked, or every
-   * checked node already on its app and its boot core. A boot core is compared as dagon-host's update_core does, against
-   * what the node answers now; one that cannot be read is not called the same, so the write goes and says why.
+   * checked node already on its app, its boot core and its recovery agent. Those two are compared as dagon-host's
+   * update_core and update_agent do, against what the node answers now; one that cannot be read is not called the same,
+   * so the write goes and says why.
    */
   async noWrite(bytes: Uint8Array): Promise<'noneChecked' | { same: number; coreToo: boolean } | null> {
     const nodes = this.answering();
@@ -345,12 +352,22 @@ export class Operate {
     if (first === undefined || !nodes.every((id) => given.get(at(id)) === this.live[id]?.hello?.activeVersion)) return null;
     let coreToo = false;
     for (const id of nodes) {
+      const agent = releaseAgentDigest(bytes, at(id));
+      if (agent && !sameBytes(await this.factoryDigest(id), agent)) return null;
       const held = cores.get(at(id));
       if (!held) continue;
       if (!held.includes((await this.runningCore(id)) ?? NaN)) return null;
       coreToo = true;
     }
     return { same: first, coreToo };
+  }
+
+  /** The header digest of what node `id` holds in its factory slot; null when it cannot be read. */
+  private async factoryDigest(id: string): Promise<Uint8Array | null> {
+    const n = this.reach.find((x) => x.id === id);
+    if (!n) return null;
+    const st = await this.call((h) => h.status(n.target.kind, n.target.addr)).catch(() => null);
+    return st?.status.slots[FACTORY_SLOT]?.digest16 ?? null;
   }
 
   /** The version of the boot core node `id` runs now; null when it cannot be read. */

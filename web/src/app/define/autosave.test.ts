@@ -2,7 +2,7 @@ import { describe, expect, test } from 'vitest';
 import { Autosave, AUTOSAVE_MS, type Timers } from './autosave.svelte.ts';
 import type { SaveResult } from './cli.svelte.ts';
 import { Define } from './define.svelte.ts';
-import { setLink } from './model.ts';
+import { setLink, toYaml } from './model.ts';
 
 /** Timers the test runs by hand. */
 function manualTimers() {
@@ -186,5 +186,30 @@ describe("blocked (the project's definitions do not load)", () => {
     await settle();
     expect(puts).toEqual([]);
     expect(a.pending).toBe(true);
+  });
+});
+
+describe('a 構成 not read as the project opened', () => {
+  test('is not replaced by an automatic save, until a 構成 is read from a file', async () => {
+    const d = new Define();
+    const puts: string[] = [];
+    const a = new Autosave(d, {
+      put: async (yaml) => {
+        puts.push(yaml);
+        return 'saved';
+      },
+      enabled: () => true,
+      blocked: () => d.notRead,
+      timers: manualTimers().timers,
+    });
+    d.notRead = true;
+    d.placeSample();
+    expect(await a.now()).toBe(false);
+    expect(puts).toEqual([]);
+    // A bad file picked changes nothing about it.
+    expect(d.importYaml(': : not yaml [')).toBe(false);
+    expect(d.notRead).toBe(true);
+    expect(d.importYaml(toYaml(d.doc.topo))).toBe(true);
+    expect(d.notRead).toBe(false);
   });
 });

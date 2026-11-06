@@ -16,8 +16,8 @@ pub mod rom;
 
 pub use dagon_romlink::{RomError, Stats as RomStats};
 pub use ops::{
-    check_release, reason, ConfirmOutcome, Discovery, Event, NodeOutcome, NodeState, Outcome,
-    RecoverAssets, RecoverPath, WritePath, XferTimes, CONFIRM_RETRY_MS, NODE_POLL_MS,
+    agent_digest, check_release, reason, ConfirmOutcome, Discovery, Event, NodeOutcome, NodeState,
+    Outcome, RecoverAssets, RecoverPath, WritePath, XferTimes, CONFIRM_RETRY_MS, NODE_POLL_MS,
     NODE_TRIAL_MAX_MS, NODE_TRIAL_MS,
 };
 pub use percent::{transfer_percent, trial_percent};

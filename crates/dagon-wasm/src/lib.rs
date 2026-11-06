@@ -139,6 +139,14 @@ pub fn release_core_versions(bundle: &[u8]) -> Vec<u32> {
         .collect()
 }
 
+/// The header digest of the recovery agent `bundle` holds for `node`, compared
+/// with its factory slot as dagon-host does; none when it holds no agent.
+#[wasm_bindgen]
+pub fn release_agent_digest(bundle: &[u8], node: u8) -> Option<Vec<u8>> {
+    let b = BundleView::parse(bundle).ok()?;
+    dagon_host::agent_digest(&b, node).map(|d| d.to_vec())
+}
+
 /// Decoded HELLO response body.
 #[wasm_bindgen]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

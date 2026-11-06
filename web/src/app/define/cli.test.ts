@@ -240,6 +240,16 @@ describe('dagon serve link', () => {
     expect(j?.lines).toEqual(['hub: building slot a']);
   });
 
+  test('a 構成 not read is not an empty one: only 404 says the project has none yet', async () => {
+    for (const [status, none] of [[404, true], [500, false]] as const) {
+      const f = fake();
+      const cli = new Cli({ ...f.deps, fetch: (async (url: string, init: RequestInit) => (url === '/v1/topology' ? new Response('', { status }) : f.deps.fetch!(url, init))) as unknown as typeof fetch });
+      await cli.connect();
+      if (none) expect(await cli.loadTopology()).toBeNull();
+      else await expect(cli.loadTopology()).rejects.toThrow();
+    }
+  });
+
   test('the layout (呼び名, positions) is read and written whole through serve, only with the layout feature', async () => {
     const f = fake();
     const cli = new Cli(f.deps);

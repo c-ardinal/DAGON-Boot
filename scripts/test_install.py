@@ -145,7 +145,7 @@ class InstallSh(unittest.TestCase):
         self.dir = root / "bin"
         self.good = tar_gz(["dagon"])
 
-    def run_script(self, *args, shell="sh", system="Linux", machine="x86_64", env=None):
+    def run_script(self, *args, shell="sh", system="Linux", machine="x86_64", env=None, cwd=None):
         environment = {
             **os.environ,
             "PATH": f"{self.fake}{os.pathsep}{os.environ['PATH']}",
@@ -157,7 +157,7 @@ class InstallSh(unittest.TestCase):
         }
         environment.pop("DAGON_VERSION", None) if not (env and "DAGON_VERSION" in env) else None
         # Piped, as the one-liner runs it.
-        return subprocess.run([shutil.which(shell), "-s", "--", *args], input=SH.read_bytes(), env=environment, capture_output=True)
+        return subprocess.run([shutil.which(shell), "-s", "--", *args], input=SH.read_bytes(), env=environment, capture_output=True, cwd=cwd)
 
     def assert_nothing_installed(self, r):
         self.assertNotEqual(r.returncode, 0, r.stdout)
@@ -235,6 +235,17 @@ class InstallSh(unittest.TestCase):
             self.assertEqual(code, 0, err)
         self.assertEqual([p.name for p in self.dir.iterdir()], ["dagon"])
         self.assertEqual((self.dir / "dagon").read_bytes(), b"binary dagon")
+
+    def test_a_relative_folder_is_installed_and_reported_whole(self):
+        root = pathlib.Path(self.tmp.name)
+        work = root / "work"
+        work.mkdir()
+        self.release.publish("1.2.3", LINUX, self.good, ".tar.gz")
+        r = self.run_script(env={"DAGON_INSTALL_DIR": "bin"}, cwd=work)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual((work / "bin" / "dagon").read_bytes(), b"binary dagon")
+        self.assertNotIn(b'export PATH="bin:', r.stdout)
+        self.assertNotIn(b"installed in bin", r.stdout)
 
     def test_a_new_install_replaces_the_old_one(self):
         self.dir.mkdir()
@@ -334,7 +345,7 @@ class InstallPs1(unittest.TestCase):
         self.harness.write_text(FAKE_IWR + f"\nGet-Content -Raw -LiteralPath '{PS1}' | Invoke-Expression\n", encoding="utf-8")
         self.good = a_zip(["dagon.exe"])
 
-    def run_script(self, machine="AMD64", env=None):
+    def run_script(self, machine="AMD64", env=None, cwd=None):
         environment = {
             **os.environ,
             "FAKE_RELEASE": str(self.release.root),
@@ -347,7 +358,7 @@ class InstallPs1(unittest.TestCase):
         environment.pop("PROCESSOR_ARCHITEW6432", None)
         if not (env and "DAGON_VERSION" in env):
             environment.pop("DAGON_VERSION", None)
-        return subprocess.run([powershell(), "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", str(self.harness)], env=environment, capture_output=True)
+        return subprocess.run([powershell(), "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", str(self.harness)], env=environment, capture_output=True, cwd=cwd)
 
     def assert_nothing_installed(self, r):
         self.assertNotEqual(r.returncode, 0, r.stdout)
@@ -377,6 +388,21 @@ class InstallPs1(unittest.TestCase):
         self.assertEqual(r.returncode, 0, r.stderr)
         self.assertIn(b"dagon 1.2.3", r.stdout)
         self.assertEqual([u for u in self.release.urls() if u.startswith(API)], [API + "1", API + "2"])
+
+    def test_a_relative_folder_follows_powershells_location(self):
+        # .NET resolves a relative path against the process's folder, here A.
+        root = pathlib.Path(self.tmp.name)
+        a, b = root / "A", root / "B"
+        (a / "bin").mkdir(parents=True)
+        (b / "bin").mkdir(parents=True)
+        self.harness.write_text(f"Set-Location -LiteralPath '{b}'\n" + self.harness.read_text(encoding="utf-8"), encoding="utf-8")
+        self.release.publish("1.2.3", WINDOWS, self.good, ".zip")
+        r = self.run_script(env={"DAGON_INSTALL_DIR": ".\\bin"}, cwd=a)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(list((a / "bin").iterdir()), [], "nothing in the process's folder")
+        self.assertEqual([p.name for p in (b / "bin").iterdir()], ["dagon.exe"])
+        self.assertEqual((b / "bin" / "dagon.exe").read_bytes(), b"binary dagon.exe")
+        self.assertIn(str(b / "bin").encode(), r.stdout.replace(b"\r\n", b""))
 
     def test_a_new_install_replaces_the_old_one(self):
         self.dir.mkdir()

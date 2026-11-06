@@ -52,6 +52,9 @@ function Install-Dagon {
 
     $dir = $env:DAGON_INSTALL_DIR
     if (-not $dir) { $dir = Join-Path $env:LOCALAPPDATA 'Programs\dagon' }
+    # Absolute from here on: .NET calls below resolve a relative path against the
+    # process's folder, which is not PowerShell's current location.
+    $dir = $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($dir)
     $archive = "dagon-cli-$version-$target.zip"
     $url = "https://github.com/$repo/releases/download/cli-v$version/$archive"
 

@@ -82,6 +82,10 @@ main() {
     esac
 
     dir="${DAGON_INSTALL_DIR:-${HOME:?set HOME or DAGON_INSTALL_DIR}/.local/bin}"
+    case "$dir" in
+        /* | [A-Za-z]:[\\/]*) ;;
+        *) dir="$PWD/$dir" ;;
+    esac
     archive="dagon-cli-$version-$target.tar.gz"
     url="https://github.com/$REPO/releases/download/cli-v$version/$archive"
 

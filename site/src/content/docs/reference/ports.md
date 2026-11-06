@@ -1,30 +1,27 @@
 ---
-title: Ports
-description: Every port DAGON's extensions use, from the catalogs.
+title: ポート
+description: DAGON の拡張が使うすべてのポートです。
 editUrl: false
 ---
 
 :::note
-Generated from `dagon_events::PORTS`; do not edit. Regenerate with
-`DAGON_BLESS=1 cargo test -p dagon-catalog --test docs`.
+`dagon_events::PORTS` から生成しています。直接編集せず、
+`DAGON_BLESS=1 cargo test -p dagon-catalog --test docs` でもう一度生成してください。
+表の中の説明は、元のソースのままで英語です。
 :::
 
-A port is a part of DAGON that a plug-in replaces, in the layers listed, for
-the image it is linked into; DAGON's own implementation is the default. A
-plug-in's manifest may provide a port only in layers the port exists in, and
-one image has at most one provider per port.
+ポートは、プラグインが置き換えられる DAGON の部品です。置き換えは、一覧のレイヤーで、リンクされた
+イメージの中だけに効きます。既定は DAGON 自身の実装です。プラグインのマニフェストは、そのポートがある
+レイヤーでだけポートを提供でき、1 つのイメージで 1 つのポートを提供できるのは 1 つだけです。
 
-Trust:
+信頼の区分:
 
-- *untrusted*: any plug-in; it runs in the layer's sandbox with the
-  capabilities its manifest declares and calls DAGON only through the
-  services listed.
-- *untrusted, additive*: as untrusted, and it only adds; DAGON's own
-  implementation stays.
-- *trusted only*: only a trusted extension, declared and signed; it runs
-  privileged and calls no services.
+- *untrusted*: どのプラグインでも使えます。レイヤーのサンドボックスの中で、マニフェストで宣言した能力で
+  動き、DAGON は一覧のサービスを通してだけ呼びます。
+- *untrusted, additive*: untrusted と同じで、足すだけです。DAGON 自身の実装は残ります。
+- *trusted only*: 宣言して署名した、信頼する拡張だけが使えます。特権で動き、サービスは呼びません。
 
-| Port | What it does | Layers | Default | Trust | Services |
+| ポート | 役割 | レイヤー | 既定 | 信頼 | サービス |
 |---|---|---|---|---|---|
 | `UpdateTransport` | bytes in and out of a link | boot, app, relay, host | boot, app, relay: USB CDC, UART, I2C target, PIO UART; host: serial | untrusted | return, transport, dma, time, memory |
 | `UpdateProtocol` | messages ↔ session triggers: identity, status, transfer, switch, reboot, confirm | boot, app, relay, host | the DAGON wire | untrusted (it cannot skip a guard: the session machine runs the guards, not the protocol) | return, time, memory |
@@ -48,11 +45,11 @@ Trust:
 | `Agent` | an external agent the CLI and the page hand requests to | host | data-defined (agent definitions) | untrusted | – |
 | `Action` | a program or request run after a host event | host | data-defined (action definitions) | untrusted | – |
 
-## Parts that are not ports
+## ポートではない部品
 
-No plug-in replaces these, trusted or not.
+信頼する拡張でも、次のものは置き換えられません。
 
-| Part | What it is | Layers | Why not a port |
+| 部品 | 内容 | レイヤー | ポートではない理由 |
 |---|---|---|---|
 | `ImageLifecycle` | the image-lifecycle machine over the slot store and the state log | boot, app | the only writer of persistent image state; every change emits its event and keeps the confirm rule |
 | `SessionGuards` | the update session's guards: target, slot, header signature and compatibility, body digest | boot, app | every protocol's triggers pass the same guards; replacing them would let a transport write what DAGON refuses |

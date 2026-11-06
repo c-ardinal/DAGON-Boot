@@ -506,7 +506,7 @@ pub struct McuDef {
     /// source the MCU has no lockup fuse.
     pub watchdog: Option<Watchdog>,
     /// Hardware facts of the execution model
-    /// (site/src/content/docs/explanation/lifecycle-events.md, "Execution model"): `masked_max_us`
+    /// (site/src/content/docs/en/explanation/lifecycle-events.md, "Execution model"): `masked_max_us`
     /// (longest DAGON's own code masks interrupts, 1..=1000), `flash_op` (what an erase or program
     /// stops: `fetch-stall`, `xip-off-masked`, `cache-off-masked`), `erase_unit` (largest unit
     /// DAGON erases in one operation, a power of two), `erase_unit_max_ms` (that erase's datasheet

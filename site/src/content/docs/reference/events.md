@@ -1,69 +1,66 @@
 ---
-title: Events
-description: Every event DAGON emits, from the state machines' catalogs.
+title: イベント
+description: DAGON が出すすべてのイベントです。
 editUrl: false
 ---
 
 :::note
-Generated from the state machines' catalogs; do not edit. Regenerate with
-`DAGON_BLESS=1 cargo test -p dagon-catalog --test docs`.
+状態機械のカタログから生成しています。直接編集せず、
+`DAGON_BLESS=1 cargo test -p dagon-catalog --test docs` でもう一度生成してください。
+判断点の表の中身と、状態機械とイベントの説明は、元のソースのままで英語です。
 :::
 
-Every state change in DAGON is a transition of a state machine, and every
-transition emits one event. This page is generated from the machines'
-declarations, so it lists every event there is.
+DAGON の状態の変化は、どれも状態機械の遷移で、遷移はどれもイベントを 1 つ出します。
+このページは状態機械の宣言から作っているので、すべてのイベントが載っています。
 
-Event format: 1 (`dagon_events::EVENT_FORMAT`). Adding a kind or a payload
-field keeps the number; renaming or removing one, or changing its meaning, moves
-it. A reader ignores kinds and fields it does not know and refuses a format
-number it does not read.
+イベントの形式: 1（`dagon_events::EVENT_FORMAT`）。種類やペイロードのフィールドを足しても
+番号は変わりません。名前を変える、消す、意味を変えるときは番号が変わります。読む側は、
+知らない種類とフィールドを読み飛ばし、読めない形式の番号は受け付けません。
 
-## Reading the tables
+## 表の見方
 
-- **Kind**: `layer.kind`, the payload type's name in snake case.
-- **Code**: the kind's number within its layer (`EventRecord.kind`).
-- **Transition**: the method that emits it, and the states it moves between
-  (`*` is any state).
-- **Payload**: the fields, each with its bytes in the owned record
-  (`EventRecord.payload`, in order, 16 bytes at most).
-- **Observed**: *live* by extensions in the same image as it happens; *replay*
-  re-emitted by the app's agent at start with `replayed: true`; *host* by the
-  CLI, the serve event stream, `--events` and actions.
-- **Notes**: *action*: a boot action program may run on it; *retired*: no longer
-  emitted, kept until the next event format.
+- **種類**: `layer.kind`。ペイロードの型名を snake case にしたものです。
+- **コード**: そのレイヤーの中での種類の番号です（`EventRecord.kind`）。
+- **遷移**: イベントを出すメソッドと、移る前後の状態です（`*` はどの状態でも）。
+- **ペイロード**: フィールドと、記録の中でのバイト数です（`EventRecord.payload`、順に並び、
+  合わせて 16 バイトまで）。
+- **受け取り**: *live* は同じイメージの拡張が起きたときに、*replay* は起動時にアプリのエージェントが
+  `replayed: true` を付けて出し直したものを、*host* は CLI、serve のイベント、`--events`、
+  アクションが受け取ります。
+- **備考**: *action* はブートのアクションプログラムを動かせます。*retired* はもう出さず、
+  次のイベントの形式まで残しています。
 
-## Decision points
+## 判断点
 
-Everything not listed here is a notification. Each answer is the first one in
-the chain's order (publisher, board package, libraries, user); when every
-extension abstains, the default applies.
+ここに無いものは通知です。答えは、チェーンの順（公開元、ボードパッケージ、ライブラリ、利用者）で
+最初のものが使われます。どの拡張も答えなければ、既定の値を使います。
 
-| Decision | Layer | Question | Answered by | Bound | Default | Never |
+| 判断 | レイヤー | 問い | 答える側 | 時間の上限 | 既定 | してはいけないこと |
 |---|---|---|---|---|---|---|
 | `accept_update` | app | `UpdateOffer` -> `Accept` | board package, libraries, user (first answer wins) | each call within `DECISION_BOUND_MS` (a later answer is ignored); asked after every DAGON guard passed, before erase | accept | accepting what DAGON refused (not asked then) |
 | `allow_reboot_now` | app | `RebootRequest` -> `Delay` | board package, libraries, user (first answer wins) | each call within `DECISION_BOUND_MS`; `Now` or `After(ms)`, ms capped at half the shorter watchdog period of the MCU definition; DAGON replies first and keeps feeding while it waits | now | refusing a reboot; a delay beyond the cap |
 | `self_check` | app | `TrialInfo` -> `Health` | board package, libraries, user (first answer wins) | each call within `DECISION_BOUND_MS` (a later answer is ignored); `Pending` keeps the "state" status and the host retries | healthy | confirming a slot not on trial; confirming outside the `confirmed` transition |
 | `confirm_plan` | host | the deploy listing -> yes or no | the interactive user (terminal, page) or `--yes`; never actions or host extensions | until the user answers | ask | skipping the key check and image verification, done before the listing is shown |
 
-## Layer `boot`
+## レイヤー `boot`
 
-### Machine `boot_extensions`
+### 状態機械 `boot_extensions`
 
 Boot-stage extension calls and their time limits.
 
-States: `Ready` (initial).
+状態: `Ready` (最初の状態)。
 
-| Kind | Code | Transition | Payload | Observed | Notes | Description |
+| 種類 | コード | 遷移 | ペイロード | 受け取り | 備考 | 説明 |
 |---|---|---|---|---|---|---|
 | `boot.extension_overran` | 0xf0 | `overran`: Ready → Ready | `id: ExtId` (8 B), `budget_us: u32` (4 B), `us: u32` (4 B) | live |  | An extension's handler ran longer than its `budget_us` (the manifest's `max_run_us`); the boot went on with the same decision. |
 
-### Machine `sequence`
+### 状態機械 `sequence`
 
 The boot core's sequence from the armed watchdog to the jump or the halt. Its events reach the boot core's extensions as they happen; nothing an extension does changes the decision.
 
-States: `Started` (initial), `WatchdogArmed`, `LogRead`, `BeforeDecision`, `Chosen`, `NoImage`, `Jumping`, `Halted`.
+状態: `Started` (最初の状態), `WatchdogArmed`, `LogRead`, `BeforeDecision`, `Chosen`, `NoImage`, `Jumping`, `Halted`。
 
-| Kind | Code | Transition | Payload | Observed | Notes | Description |
+| 種類 | コード | 遷移 | ペイロード | 受け取り | 備考 | 説明 |
 |---|---|---|---|---|---|---|
 | `boot.watchdog_armed` | 0x01 | `watchdog_armed`: Started → WatchdogArmed | `period_ms: u32` (4 B) | live |  | The watchdog runs with the trial period; from here extensions run. |
 | `boot.log_read` | 0x02 | `log_read`: WatchdogArmed → LogRead | `ok: bool` (1 B), `pending: bool` (1 B), `confirmed: bool` (1 B), `attempts: u8` (1 B) | live |  | The state log was read (`ok: false`: no valid face). |
@@ -73,25 +70,25 @@ States: `Started` (initial), `WatchdogArmed`, `LogRead`, `BeforeDecision`, `Chos
 | `boot.before_jump` | 0x06 | `before_jump`: Chosen → Jumping | `slot: u8` (1 B), `trial: bool` (1 B) | live |  | The last event before control leaves DAGON. |
 | `boot.halt` | 0x07 | `halt`: NoImage → Halted | – | live |  | The boot core stays here for good. |
 
-## Layer `app`
+## レイヤー `app`
 
-### Machine `decisions`
+### 状態機械 `decisions`
 
 Decision calls to extensions and their bound.
 
-States: `Ready` (initial).
+状態: `Ready` (最初の状態)。
 
-| Kind | Code | Transition | Payload | Observed | Notes | Description |
+| 種類 | コード | 遷移 | ペイロード | 受け取り | 備考 | 説明 |
 |---|---|---|---|---|---|---|
 | `app.extension_overran` | 0xf0 | `overran`: Ready → Ready | `id: ExtId` (8 B), `point: DecisionId` (1 B), `us: u32` (4 B) | live |  | An extension answered a decision point after `DECISION_BOUND_MS`; its answer was ignored. |
 
-### Machine `image`
+### 状態機械 `image`
 
 The lifecycle of one image slot (the two APP slots, and the hub's topology copy). The slot store's mutators run only inside these transitions. `trial_started` and `rolled_back` are the boot core's changes, replayed at start from the slot store.
 
-States: `Empty` (initial), `Written`, `Pending`, `Trial`, `Confirmed`, `Reverted`.
+状態: `Empty` (最初の状態), `Written`, `Pending`, `Trial`, `Confirmed`, `Reverted`。
 
-| Kind | Code | Transition | Payload | Observed | Notes | Description |
+| 種類 | コード | 遷移 | ペイロード | 受け取り | 備考 | 説明 |
 |---|---|---|---|---|---|---|
 | `app.transfer_started` | 0x20 | `erase`: Empty \| Written \| Pending \| Reverted → Empty | `target: u8` (1 B), `slot: u8` (1 B), `len: u32` (4 B) | live, host |  | The slot was erased for a new image (never the running or the confirmed slot). |
 | `app.written` | 0x21 | `written`: Empty → Written | `target: u8` (1 B), `slot: u8` (1 B), `version: Version` (4 B) | live, host |  | The body verified and the header written and read back: the slot holds an image. |
@@ -103,13 +100,13 @@ States: `Empty` (initial), `Written`, `Pending`, `Trial`, `Confirmed`, `Reverted
 | `app.rolled_back` | 0x27 | `rolled_back`: Pending \| Trial → Reverted | `from: u8` (1 B), `to: u8` (1 B), `reason: u8` (1 B) | replay, host |  | The boot core rolled the slot back (attempts exhausted, or the pending image failed its check) and started `to`. |
 | `app.pending_withdrawn` | 0x28 | `pending_withdrawn`: Pending \| Trial → Confirmed | `slot: u8` (1 B), `version: Version` (4 B) | live, replay, host |  | The confirmed slot had been set pending again; another slot was set pending, or the boot core ended its trial: it is the confirmed slot again. |
 
-### Machine `core_image`
+### 状態機械 `core_image`
 
 The lifecycle of one boot core slot of a self-boot MCU with a stage0 (its definition's `bootcore` slots), kept in the boot core records of the state log. The agent writes a new core into the idle slot and sets it pending; stage0 tries it and the core settles the trial itself: `confirmed` by the new core after its own check, `rolled_back` by the old one when stage0 gave the new one up. The app sees those at its next start.
 
-States: `Empty` (initial), `Written`, `Pending`, `Confirmed`, `Reverted`.
+状態: `Empty` (最初の状態), `Written`, `Pending`, `Confirmed`, `Reverted`。
 
-| Kind | Code | Transition | Payload | Observed | Notes | Description |
+| 種類 | コード | 遷移 | ペイロード | 受け取り | 備考 | 説明 |
 |---|---|---|---|---|---|---|
 | `app.core_transfer_started` | 0x40 | `erase`: Empty \| Written \| Pending \| Reverted → Empty | `slot: u8` (1 B), `len: u32` (4 B) | live, host |  | The idle boot core slot was erased for a new core (never the running or the confirmed core's slot). |
 | `app.core_written` | 0x41 | `written`: Empty → Written | `slot: u8` (1 B), `version: Version` (4 B) | live, host |  | The core's body verified and its header written and read back. |
@@ -118,13 +115,13 @@ States: `Empty` (initial), `Written`, `Pending`, `Confirmed`, `Reverted`.
 | `app.core_demoted` | 0x44 | `demoted`: Confirmed → Written | `slot: u8` (1 B), `version: Version` (4 B) | host |  | Another core confirmed itself; this one is no longer. |
 | `app.core_rolled_back` | 0x45 | `rolled_back`: Pending → Reverted | `from: u8` (1 B), `to: u8` (1 B), `reason: u8` (1 B) | replay, host |  | Stage0 gave the pending core up (its starts ran out, or its image failed the check) and the core in `to` recorded it. |
 
-### Machine `session`
+### 状態機械 `session`
 
 The update session: an offer, the header, the body, the end.
 
-States: `Idle` (initial), `Header`, `Body`.
+状態: `Idle` (最初の状態), `Header`, `Body`。
 
-| Kind | Code | Transition | Payload | Observed | Notes | Description |
+| 種類 | コード | 遷移 | ペイロード | 受け取り | 備考 | 説明 |
 |---|---|---|---|---|---|---|
 | `app.update_offered` | 0x10 | `update_offered`: Idle → Header | `target: u8` (1 B), `slot: u8` (1 B), `body_len: u32` (4 B) | live, host |  | An update passed every DAGON guard; `accept_update` is asked next. |
 | `app.header_received` | 0x11 | `header_received`: Header → Header | `got: u16` (2 B) | live |  | Header bytes received so far. |
@@ -133,13 +130,13 @@ States: `Idle` (initial), `Header`, `Body`.
 | `app.verify_started` | 0x14 | `verify_started`: Body → Idle | `target: u8` (1 B), `slot: u8` (1 B), `len: u32` (4 B) | live |  | The whole body arrived; it is hashed and read back next. |
 | `app.transfer_aborted` | 0x15 | `aborted`: Header \| Body → Idle | `cause: AbortCause` (1 B) | live, host |  | The transfer was dropped. |
 
-### Machine `node`
+### 状態機械 `node`
 
 The node's start and its DAGON links: what the MCU package's start and serving loop report through the agent.
 
-States: `Off` (initial), `Up`.
+状態: `Off` (最初の状態), `Up`。
 
-| Kind | Code | Transition | Payload | Observed | Notes | Description |
+| 種類 | コード | 遷移 | ペイロード | 受け取り | 備考 | 説明 |
 |---|---|---|---|---|---|---|
 | `app.starting` | 0x01 | `starting`: * → Up | `tag: NameDigest` (8 B), `role: u8` (1 B), `mode: u8` (1 B) | live |  | DAGON's start began (the agent was made, or restarted); the slot store is read next. `tag`: the node's image target tag as a name digest (`NameDigest`: the compact form "digest prefix", made as MCU identities are); a host resolves it from the topology's node tags. |
 | `app.watchdog_taken` | 0x02 | `watchdog_taken`: Up → Up | `period_ms: u32` (4 B), `trial_policy: TrialPolicy` (5 B) | live |  | The start took over the boot core's watchdog: its period, and what the guard does with it while the image is on trial. |
@@ -149,13 +146,13 @@ States: `Off` (initial), `Up`.
 | `app.request` | 0x05 | `request`: Up → Up | `protocol: u8` (1 B), `cmd: u8` (1 B), `seq: u8` (1 B), `via: u8` (1 B) | live |  | A request arrived on link `via`. |
 | `app.replied` | 0x06 | `replied`: Up → Up | `status: u8` (1 B), `ms: u32` (4 B) | live |  | The reply to the last request left, `ms` after it arrived. |
 
-### Machine `requests`
+### 状態機械 `requests`
 
 Requests answered or refused, and the decision points asked.
 
-States: `Ready` (initial).
+状態: `Ready` (最初の状態)。
 
-| Kind | Code | Transition | Payload | Observed | Notes | Description |
+| 種類 | コード | 遷移 | ペイロード | 受け取り | 備考 | 説明 |
 |---|---|---|---|---|---|---|
 | `app.store_opened` | 0x30 | `store_opened`: Ready → Ready | `active: u8` (1 B), `trial: bool` (1 B), `version: Version` (4 B), `attempts: u8` (1 B), `last_reason: u8` (1 B) | live |  | The slot store was read at start. |
 | `app.hello` | 0x31 | `hello`: Ready → Ready | – | live, host |  | Identity answered. |

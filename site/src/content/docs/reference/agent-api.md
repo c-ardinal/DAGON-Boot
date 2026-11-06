@@ -3,6 +3,10 @@ title: "Agent link: serve API"
 description: "How DAGON reaches its agent through dagon serve: routes, consent, keys and what is sent."
 ---
 
+:::note
+このページは英語だけです。
+:::
+
 DAGON talks to an agent through one interface. Agents are data: an agent
 (id, name, provider) and the ways to reach it, each of a transport kind DAGON
 implements (see Builtin agents and Transport kinds below). The user consents once, when linking,
@@ -281,7 +285,7 @@ pass_env = ["MY_AGENT_HOME"]  # optional: more variables the program needs
 ```
 
 Every key, its type and whether it is required are in
-[Agent definition format](/reference/agent-definition/), generated from the
+[Agent definition format](/en/reference/agent-definition/), generated from the
 types dagon reads the file into. Each `kind` is one of the Transport kinds below.
 
 The agent replies with one JSON object (the reply format is in the system
@@ -328,7 +332,7 @@ counts as not linked: the user links again.
 ## Builtin agents
 
 The agents shipped with dagon (`crates/dagon-cli/agents/*.toml`) and their
-ways, in order, are listed in [Agent definition format](/reference/agent-definition/#builtin-agents);
+ways, in order, are listed in [Agent definition format](/en/reference/agent-definition/#builtin-agents);
 the first way of the first agent is the default.
 
 ## What linking sends
@@ -356,7 +360,7 @@ says which number it reads.
 ## CLI
 
 The `dagon ai` commands (`link`, `unlink`, `key`, `ask`, `topology`) and their
-options are in [Command line](/reference/cli/#dagon-ai). Linking shows the
+options are in [Command line](/en/reference/cli/#dagon-ai). Linking shows the
 consent text (agent and way, where the login or key stays, sends, never
 sends, how to unlink) and records consent on `y`; every AI command refuses
 until DAGON is linked, and `dagon ai ask` never changes the topology file.

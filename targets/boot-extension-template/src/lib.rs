@@ -1,6 +1,6 @@
 //! A trusted boot extension to copy: this one counts the events and keeps
 //! what the decision was; replace `on_event` with what the node should do.
-//! The rules it runs under: <https://c-ardinal.github.io/DAGON-Boot/doc/reference/extension-manifest/#boot-extensions>
+//! The rules it runs under: <https://c-ardinal.github.io/DAGON-Boot/doc/en/reference/extension-manifest/#boot-extensions>
 #![no_std]
 
 use dagon_boot::sequence;
@@ -37,7 +37,7 @@ impl Extension for BootCount {
 
     fn on_event(&mut self, e: &Event<'_>, _ctx: &Ctx<'_>) {
         self.events += 1;
-        // Each event's payload as its type (<https://c-ardinal.github.io/DAGON-Boot/doc/reference/events/>, layer `boot`).
+        // Each event's payload as its type (<https://c-ardinal.github.io/DAGON-Boot/doc/en/reference/events/>, layer `boot`).
         if let Some(c) = e.get::<sequence::SlotChosen>() {
             self.chosen = Some((c.slot, c.trial));
         }

@@ -1,16 +1,15 @@
 ---
-title: How-to guides
-description: Steps for one task each.
+title: やり方
+description: 1 つの作業ごとの手順です。
 sidebar:
   order: 0
 ---
 
-Each guide covers one task. The path from a new project to an update is
-[From a new project to an update](/getting-started/first-project/); these
-guides go from there:
+1 つの作業ごとに手順をまとめています。
+新しいプロジェクトから書き込みまでは[はじめから書き込みまで](/getting-started/first-project/)にあります。
+ここの手順は、そこから先の作業です。
 
-- [Your own board (chosen by MCU)](/how-to/own-board/): a board that is not
-  in the [list](/reference/boards/).
-- [Swapping a link](/how-to/swap-link/): change how a node is linked.
-- [Adding DAGON to existing firmware](/how-to/existing-firmware/).
-- [Claude help in your project](/how-to/claude-help/).
+- [自分のボード（マイコンで選ぶ）](/how-to/own-board/): [一覧](/reference/boards/)に無いボードを使う
+- [つながりを差し替える](/how-to/swap-link/): ノードのつながり方を変える
+- [既にあるファームウェアに DAGON を組み込む](/how-to/existing-firmware/)
+- [プロジェクトでの Claude の手助け](/how-to/claude-help/)

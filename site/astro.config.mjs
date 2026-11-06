@@ -32,22 +32,23 @@ export default defineConfig({
   integrations: [
     starlight({
       title: 'DAGON',
-      // English is the default: the generated references come from English sources and the Japanese pages fall back to them.
+      // Japanese is the default, at the root; English is under /en/. A page written only in English
+      // sits at the root and says so, and /en/ falls back to it.
       defaultLocale: 'root',
       locales: {
-        root: { label: 'English', lang: 'en' },
-        ja: { label: '日本語', lang: 'ja' },
+        root: { label: '日本語', lang: 'ja' },
+        en: { label: 'English', lang: 'en' },
       },
       social: [{ icon: 'github', label: 'GitHub', href: 'https://github.com/c-ardinal/DAGON-Boot' }],
       sidebar: [
-        { label: 'Getting started', translations: { ja: 'はじめに' }, items: [{ autogenerate: { directory: 'getting-started' } }] },
-        { label: 'How-to guides', translations: { ja: 'やり方' }, items: [{ autogenerate: { directory: 'how-to' } }] },
-        { label: 'Explanation', translations: { ja: 'しくみ' }, items: [{ autogenerate: { directory: 'explanation' } }] },
-        { label: 'Reference', translations: { ja: 'リファレンス' }, items: [{ autogenerate: { directory: 'reference' } }] },
+        { label: 'はじめに', translations: { en: 'Getting started' }, items: [{ autogenerate: { directory: 'getting-started' } }] },
+        { label: 'やり方', translations: { en: 'How-to guides' }, items: [{ autogenerate: { directory: 'how-to' } }] },
+        { label: 'しくみ', translations: { en: 'Explanation' }, items: [{ autogenerate: { directory: 'explanation' } }] },
+        { label: 'リファレンス', translations: { en: 'Reference' }, items: [{ autogenerate: { directory: 'reference' } }] },
       ],
       plugins: [
         starlightLinksValidator({
-          // Japanese pages may fall back to the English ones.
+          // /en/ falls back to the pages written only in English.
           errorOnFallbackPages: false,
           // The Rust API pages are rustdoc's, copied in beside the site after it is built.
           // The demo is the Console's own build, beside the docs.

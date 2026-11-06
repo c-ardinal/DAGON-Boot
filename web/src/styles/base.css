@@ -387,10 +387,6 @@ dialog[open]::backdrop {
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .primary,
-  .primary .arrow {
-    transition: none;
-  }
   .primary:active {
     transform: none;
   }

@@ -62,7 +62,7 @@ describe('update from the page with dagon-host apply against the mock hub', () =
     expect(op.state).toBe('done');
     expect(op.status).toBe(ANNOUNCE.A14('1.1.0'));
     expect(Object.values(op.progress).map((p) => p.stage)).toEqual(['done', 'done', 'done']);
-    expect(op.overall).toBe(100);
+    expect(op.overallAt(op.now())).toBe(100);
     for (const k of ['hub', 'i2c:66', 'uart'] as const) {
       expect([v(t.helloOf(k).activeVersion), t.helloOf(k).trial], k).toEqual(['1.1.0', false]);
     }

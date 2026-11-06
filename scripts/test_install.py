@@ -329,6 +329,32 @@ class Scripts(unittest.TestCase):
         named |= set(re.findall(r"'([\w]+-pc-windows-msvc)'", PS1.read_text(encoding="utf-8")))
         self.assertEqual(named, built)
 
+    def test_the_scripts_read_what_the_release_publishes(self):
+        made = (ROOT / "scripts/release.py").read_text(encoding="utf-8")
+        self.assertIn("dagon-cli-{version}-{target}{'.zip' if windows else '.tar.gz'}", made)
+        self.assertIn('archive.name + ".sha256"', made)
+        self.assertIn("dagon-cli-$version-$target.tar.gz", SH.read_text(encoding="utf-8"))
+        self.assertIn("dagon-cli-$version-$target.zip", PS1.read_text(encoding="utf-8"))
+        for script in (SH, PS1):
+            text = script.read_text(encoding="utf-8")
+            self.assertIn("/releases/download/cli-v$version/", text, script.name)
+            self.assertIn(".sha256", text, script.name)
+
+    def test_only_a_cli_tag_publishes_and_only_after_every_build(self):
+        release = (ROOT / ".github/workflows/release.yml").read_text(encoding="utf-8")
+        jobs = dict(re.findall(r"(?ms)^  ([a-z0-9-]+):\n(.*?)(?=^  [a-z0-9-]+:\n|\Z)", release.split("\njobs:\n", 1)[1]))
+        self.assertEqual(release.split("\njobs:\n", 1)[0].split("permissions:", 1)[1].split(), ["contents:", "read"])
+        publish = jobs["publish"]
+        self.assertIn("needs: build\n", publish)
+        self.assertIn("if: startsWith(github.ref, 'refs/tags/cli-v')\n", publish)
+        self.assertIn("contents: write\n", publish)
+        self.assertIn('gh release create "$TAG" out/release/*', publish)
+        self.assertEqual(re.findall(r"uses: (?!actions/)\S+", publish), [])
+        for name, job in jobs.items():
+            if name != "publish":
+                self.assertNotIn("contents: write", job, name)
+                self.assertNotIn("gh release", job, name)
+
     def test_no_script_elevates_or_runs_what_it_downloads(self):
         self.assertEqual(re.findall(r"(?m)^[^#]*\b(sudo|eval)\b", SH.read_text(encoding="utf-8")), [])
         self.assertEqual(re.findall(r"(?mi)^[^#]*\b(RunAs|Invoke-Expression|iex)\b", PS1.read_text(encoding="utf-8")), [])

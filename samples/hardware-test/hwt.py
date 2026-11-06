@@ -31,7 +31,7 @@ HERE = Path(__file__).resolve().parent
 PROMPT = "continue? [y/N] "
 # dagon commands that can write to a board; cli() marks the run as written
 # before starting one, so no call site can forget.
-MUTATING = {"deploy", "apply", "rollback", "recover", "flash", "provision", "rescue"}
+MUTATING = {"deploy", "apply", "rollback", "flash", "provision", "rescue"}
 
 LINE = re.compile(
     r"^(?P<id>[\w-]+): version (?P<version>\S+)(?P<trial> \(on trial\))?, mcu (?P<mcu>\S+), "
@@ -324,14 +324,6 @@ class Run:
                 raise Fail(f"{node}: other slot holds no confirmed version; nothing to roll back to")
             rc, cmd, log, st = self.rollback(node, before, name)
             return cmd, rc, log, st, f"{node} back on {want}"
-        if kind == "recover":
-            node, v = s["node"], s["of"]
-            dgb = self.project / "out" / "deploy" / f"v{v}.dgb"
-            expect(dgb.is_file(), f"no release {dgb}")
-            rc, _, cmd, log = self.cli(["recover", node, "--release", str(dgb)], name)
-            expect(rc == 0, f"recover rc={rc}")
-            st = self.wait_settled({node: v}, f"{name}-after")
-            return cmd, rc, log, st, ""
         raise Fail(f"unknown step kind {kind}")
 
     def rollback(self, node, before, name):

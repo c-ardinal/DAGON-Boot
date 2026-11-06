@@ -144,8 +144,10 @@ export interface Host {
   /** `dagon apply`; rejects with a Refusal (or a reason) when nothing was sent. */
   apply(bundle: Uint8Array, topology: Uint8Array, nodes: number[] | null, onEvent: (e: UpdateEvent) => void): Promise<NodeResult[]>;
   confirm(kind: TargetKind, addr: number, force: boolean): Promise<ConfirmResult>;
-  /** `dagon recover` of topology node `node`; rejects with a Refusal or dagon-host's reason. */
-  recover(node: number, release: Uint8Array, topology: Uint8Array, bootcore: Uint8Array | null, stage0: Uint8Array | null, onEvent: (e: UpdateEvent) => void): Promise<RecoverResult>;
+  /** How a write would reach topology node `node` now; changes nothing. */
+  writePath(node: number, topology: Uint8Array): Promise<'transfer' | 'rom' | 'direct'>;
+  /** Writes topology node `node`; the ROM path only with `romConfirmed`. Rejects with a Refusal or dagon-host's reason. */
+  recover(node: number, release: Uint8Array, topology: Uint8Array, bootcore: Uint8Array | null, stage0: Uint8Array | null, romConfirmed: boolean, onEvent: (e: UpdateEvent) => void): Promise<RecoverResult>;
   /** Back to the version in the other slot; resolves to it. */
   rollback(kind: TargetKind, addr: number, node: number, onEvent: (e: UpdateEvent) => void): Promise<number>;
   /** Releases the WASM side; calls still running finish on their own. */
@@ -164,7 +166,8 @@ export function newHost(link: HostLink): Host {
     watch: (k, a) => h.watch(k, a),
     apply: (b, t, n, on) => h.apply(b, t, n ? Uint8Array.from(n) : undefined, on),
     confirm: (k, a, f) => h.confirm(k, a, f),
-    recover: (n, r, t, b, s, on) => h.recover(n, r, t, b ?? undefined, s ?? undefined, on),
+    writePath: (n, t) => h.write_path(n, t),
+    recover: (n, r, t, b, s, c, on) => h.recover(n, r, t, b ?? undefined, s ?? undefined, c, on),
     rollback: (k, a, n, on) => h.rollback(k, a, n, on),
     free: () => h.free(),
   };

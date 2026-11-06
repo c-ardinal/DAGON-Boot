@@ -26,7 +26,7 @@ import type { RollbackRecord } from './agent.svelte.ts';
 import { FAILURE_BAND } from './band.ts';
 import { ConnectError, wasmReady } from './connect.ts';
 import { ANNOUNCE, FILE } from './copy.ts';
-import { HUB_LOCKED, WATCHED, next, type ConnectFailure, type Ctx, type Ev, type L } from './machine.ts';
+import { HUB_LOCKED, NODE_WRITE, WATCHED, next, type ConnectFailure, type Ctx, type Ev, type L } from './machine.ts';
 import { SAMPLE_CONFIG, targetKey, type Config, type Node } from './sample.ts';
 
 /** What the page knows about one node from the hub. */
@@ -883,7 +883,7 @@ export class Operate {
     this.startWatching();
   }
 
-  /** The node "（ノード）を復旧する" names: the stopped one (stopped, recoverFailed) or the first silent one (nodesSilent). */
+  /** The node a write names without an id: the stopped one (stopped, recoverFailed) or the first silent one (nodesSilent). */
   get recoverTarget(): Node | undefined {
     const id = this.state === 'recoverFailed' ? this.recovering : this.state === 'stopped' ? this.failed : this.stuck?.id;
     return this.reach.find((n) => n.id === id);
@@ -906,16 +906,23 @@ export class Operate {
   }
 
   /**
-   * "（ノード）を復旧する": dagon-host's recover with the release on the
-   * screen (else the project's latest) and, for the ROM path, the project's
-   * boot core. Without any release it asks for one (`needFile`); `chosen`
-   * is that file.
+   * 「書き込む」 on one node (`id`, else the stuck one): the normal transfer
+   * when it answers; silent, `direct` without a ROM entry and, with one,
+   * `confirm` until `confirmed`, nothing touched before that. Takes the
+   * release on the screen (else the project's latest) and, for the ROM path,
+   * the project's boot core. Without any release it asks for one
+   * (`needFile`); `chosen` is that file.
    */
-  async recover(chosen?: { name: string; bytes: Uint8Array }): Promise<'needFile' | void> {
+  async writeNode(o: { id?: string; chosen?: { name: string; bytes: Uint8Array }; confirmed?: boolean } = {}): Promise<'needFile' | 'direct' | 'confirm' | void> {
     const c = this.config;
-    const n = this.recoverTarget;
-    if (!c || !n || !['nodesSilent', 'stopped', 'recoverFailed'].includes(this.state)) return;
+    const chosen = o.chosen;
+    const n = o.id ? this.reach.find((x) => x.id === o.id) : this.recoverTarget;
+    if (!c || !n || !NODE_WRITE.has(this.state)) return;
     const topo = topo_compile(c.yaml);
+    const index = this.reach.indexOf(n);
+    // A link that fails here fails the write itself, with its reason.
+    const way = await this.call((h) => h.writePath(index, topo)).catch(() => 'transfer' as const);
+    if (way === 'direct') return 'direct';
     let release = chosen?.bytes ?? (this.file?.verdict === 'pass' ? this.file.bytes : null);
     if (chosen) {
       try {
@@ -929,17 +936,25 @@ export class Operate {
     release ??= await this.latest();
     if (!release) return 'needFile';
     const bytes = release;
+    if (way === 'rom' && !o.confirmed) {
+      // A release the host would refuse is not worth the question: the refusal comes with its reason, nothing touched.
+      try {
+        check_release_for(bytes, topo);
+        return 'confirm';
+      } catch {
+        // Below.
+      }
+    }
     const bootcore = (await this.deps.bootcore?.(n.id).catch(() => null)) ?? null;
-    const index = this.reach.indexOf(n);
     const stage0 = (await this.deps.stage0?.(n.id).catch(() => null)) ?? null;
-    await this.runRecovery(n, 'recover', (h, on) => h.recover(index, bytes, topo, bootcore, stage0, on));
+    await this.runRecovery(n, 'recover', (h, on) => h.recover(index, bytes, topo, bootcore, stage0, !!o.confirmed, on));
   }
 
-  /** "もう一度直す" (recoverFailed): the operation that failed, again (a rollback stays a rollback). */
-  async retry(): Promise<'needFile' | void> {
+  /** "もう一度試す" (recoverFailed): the operation that failed, again (a rollback stays a rollback). */
+  async retry(): Promise<'needFile' | 'direct' | 'confirm' | void> {
     if (this.state !== 'recoverFailed') return;
     if (this.lastKind === 'rollback' && this.recovering) return this.rollback(this.recovering);
-    return this.recover();
+    return this.writeNode();
   }
 
   /** "前のバージョンに戻す" (the detail of a node, UC-O10 / M38): the version in the other slot. */
@@ -966,7 +981,7 @@ export class Operate {
     await this.refreshStatus(id);
   }
 
-  /** What ran last in recovering, so "もう一度直す" repeats it. */
+  /** What ran last in recovering, so "もう一度試す" repeats it. */
   private lastKind: 'recover' | 'rollback' = 'recover';
 
   private async runRecovery(

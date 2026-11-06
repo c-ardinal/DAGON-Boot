@@ -194,6 +194,6 @@ install as above (steps 1 to 4, over USB-C), then:
    Expected as above; the run leaves the watch on the other slot, confirmed.
 4. Factory path: select factory (blank otadata, for example by
    `espflash erase-region 0xD000 0x2000` over USB-C), plug out USB-C again,
-   then `dagon recover watch`: HELLO answers mode 3, the image goes into
+   then `dagon deploy watch`: HELLO answers mode 3, the image goes into
    ota_0 or ota_1, SET_PENDING, REBOOT, and the app answers mode 0 on trial
    until CONFIRM.

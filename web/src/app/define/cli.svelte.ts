@@ -497,9 +497,4 @@ export class Cli {
   clearJobs(): void {
     this.jobs = [];
   }
-
-  /** GET/PUT /v1/nodes/{id}/board, when serve offers it. */
-  saveBoard(id: string, fields: { flash_bytes?: number }): Promise<unknown> {
-    return this.json('PUT', `nodes/${encodeURIComponent(id)}/board`, fields);
-  }
 }

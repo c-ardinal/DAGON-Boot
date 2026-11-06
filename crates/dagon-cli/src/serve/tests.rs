@@ -306,7 +306,7 @@ fn build_settings_round_trip_and_keep_the_file() {
     let (st, body) = http(&a, "GET", "/v1/nodes/seg/build", &h, b"");
     assert_eq!(st, 200);
     assert!(body.contains("targets/f401-app"));
-    let new = br#"{"package":"targets/f401-app","slot_b_feature":"slot-b","version":"1.1.0"}"#;
+    let new = br#"{"package":"targets/f401-app","slot_b_feature":"slot-b"}"#;
     assert_eq!(http(&a, "PUT", "/v1/nodes/hub/build", &h, new).0, 200);
     let bad = br#"{"package":"../../outside"}"#;
     assert_eq!(http(&a, "PUT", "/v1/nodes/x/build", &h, bad).0, 400);
@@ -454,7 +454,7 @@ fn saves_replace_existing_files() {
             std::fs::read_to_string(a.dir.join("topology/t.yaml")).unwrap(),
             y
         );
-        let body = format!(r#"{{"package":"targets/f401-app","version":"1.0.0","bin":"{name}"}}"#);
+        let body = format!(r#"{{"package":"targets/f401-app","bin":"{name}"}}"#);
         assert_eq!(
             http(&a, "PUT", "/v1/nodes/seg/build", &h, body.as_bytes()).0,
             200
@@ -544,7 +544,7 @@ fn concurrent_build_setting_writes_all_land() {
             let a = a.clone();
             std::thread::spawn(move || {
                 let b = auth(&a);
-                let body = format!(r#"{{"package":"targets/n{i}","version":"1.0.{i}"}}"#);
+                let body = format!(r#"{{"package":"targets/n{i}"}}"#);
                 let path = format!("/v1/nodes/n{i}/build");
                 http(&a, "PUT", &path, &[("Authorization", &b)], body.as_bytes()).0
             })

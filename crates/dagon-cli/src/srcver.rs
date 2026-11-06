@@ -1,8 +1,7 @@
 //! A node's version comes from its source: the `version` of the node
 //! crate's Cargo.toml for its app, of its boot crate's for its boot core.
-//! Build, release and deploy read it there; a version given anywhere else
-//! (`--version`, `version` in `[build.<id>]`) must be the same or the
-//! command is refused.
+//! Build, release, deploy and the first write read it there; a `--version`
+//! given must be the same or the command is refused.
 
 use std::path::Path;
 

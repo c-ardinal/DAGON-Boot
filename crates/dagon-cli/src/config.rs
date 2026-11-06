@@ -43,14 +43,11 @@ pub struct BuildInputs {
     /// Feature that links the application for slot B.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub slot_b_feature: Option<String>,
-    /// Version the built application is signed with.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub version: Option<String>,
 }
 
 impl BuildInputs {
     /// Checks the values a browser may write: a relative package path that
-    /// stays inside the work area, plain names, a valid version.
+    /// stays inside the work area, plain names.
     pub fn validate(&self) -> Result<(), String> {
         let inside = self.package.is_relative()
             && self
@@ -63,7 +60,7 @@ impl BuildInputs {
         self.validate_names()
     }
 
-    /// Plain names (bin, features) and a valid version.
+    /// Plain names (bin, features).
     pub fn validate_names(&self) -> Result<(), String> {
         let plain = |s: &str| {
             !s.is_empty()
@@ -78,9 +75,6 @@ impl BuildInputs {
             .chain(&self.slot_b_feature);
         if let Some(bad) = names.into_iter().find(|n| !plain(n)) {
             return Err(format!("'{bad}' is not a plain name"));
-        }
-        if let Some(v) = &self.version {
-            crate::commands::version(v)?;
         }
         Ok(())
     }

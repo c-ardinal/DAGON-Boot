@@ -71,7 +71,7 @@ A simulated hub plugs in as one more `Transport` in `src/serial/devHub.ts`, unde
 | `src/serial/hostLink.ts` | The byte link `dagon-host` runs on, over a `Transport`; the device under it can be replaced (the hub chosen again after its reboot). |
 | `src/wasm/dagon.ts` | The only entry to `crates/dagon-wasm`: frame encoding and stream cutting, HELLO request / response, version text, board table, topology check and compile, release verification. `src/wasm/pkg/` is build output and not committed. |
 | `src/app/machine.ts` | Operating-mode state machine: states, main and side actions, transitions (`machine.test.ts` checks one main action at most and no dead ends). |
-| `src/app/operate.svelte.ts` | The operating-mode session: connect, find, send, monitoring every `watch_interval_ms()`, release check and update (`apply`, hub reconnect, confirm rule), recovery (`recover`: re-transfer, factory, ROM path) and going back (`rollback`), all through `dagon-host` in `dagon-wasm`. |
+| `src/app/operate.svelte.ts` | The operating-mode session: connect, find, send, monitoring every `watch_interval_ms()`, release check and update (`apply`, hub reconnect, confirm rule), one node's write (`writeNode`: re-transfer, factory, ROM path after the question) and going back (`rollback`), all through `dagon-host` in `dagon-wasm`. |
 | `src/app/band.ts` | Bottom band per state: cause chip, sentence, named buttons. |
 | `src/app/sample.ts` | The sample 構成 (`topology/sample.yaml` plus names and wiring). |
 | `src/app/connect.ts` | Device chooser and error mapping. |

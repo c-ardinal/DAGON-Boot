@@ -78,7 +78,6 @@ fn main() -> ExitCode {
         Command::Status(a) => run(device::status(&a)),
         Command::Apply(a) => run(device::apply(&a)),
         Command::Conform(a) => run(conform::command(&a)),
-        Command::Recover(a) => run(device::recover(&a)),
         Command::Rollback(a) => run(device::rollback(&a)),
         Command::New(a) => run(scaffold::new_command(&a)),
         Command::Gen(a) => run(scaffold::gen_command(&a)),

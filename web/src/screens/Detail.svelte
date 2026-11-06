@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { DETAIL, NODE, NODE_ACTION, SLOT, TRIAL_CHOICE, WIRING } from '../app/copy.ts';
+  import { DETAIL, NODE, NODE_ACTION, SLOT, TRIAL_CHOICE, WIRING, WRITE } from '../app/copy.ts';
   import type { Live } from '../app/operate.svelte.ts';
   import type { Config, Link, Node } from '../app/sample.ts';
   import { previousVersion } from '../app/slots.ts';
@@ -17,11 +17,15 @@
     onkeep?: (id: string) => void;
     /** "前のバージョンに戻す". */
     onback?: (id: string) => void;
+    /** Nodes whose first write can be started here (their DAGON does not answer). */
+    first?: readonly string[];
+    /** Opens the direct writing of the node. */
+    onfirst?: (id: string) => void;
     /** The last recovery, for its figures under 詳しく見る. */
     recovery?: { id: string; result: RecoverResult } | null;
   }
 
-  let { config, live, selected, connected, act = false, onkeep, onback, recovery = null }: Props = $props();
+  let { config, live, selected, connected, act = false, onkeep, onback, first = [], onfirst, recovery = null }: Props = $props();
 
   function recoveryRows(id: string): [string, string][] {
     if (recovery?.id !== id) return [];
@@ -236,11 +240,16 @@
         </details>
       {/if}
     {/if}
+    {#if onfirst && first.includes(n.id)}
+      <div class="actions">
+        <button class="secondary" data-control="flash" onclick={() => onfirst(n.id)}>{WRITE.run}</button>
+      </div>
+    {/if}
   </section>
 {/snippet}
 
 {#snippet wiring(l: Link)}
-  <section class="wiring" data-print aria-labelledby="wiring-h">
+  <section class="wiring" aria-labelledby="wiring-h">
     <h2 id="wiring-h" class="title">{WIRING.heading}</h2>
     <div class="scroll">
     <table class="wires">
@@ -268,7 +277,6 @@
     </dl>
     <div class="actions">
       <button class="secondary" onclick={() => copyWiring(l)}>{WIRING.copy}</button>
-      <button class="secondary" onclick={() => window.print()}>{WIRING.print}</button>
     </div>
   </section>
 {/snippet}
@@ -399,10 +407,5 @@
     flex-wrap: wrap;
     gap: var(--s-3);
     margin-top: var(--s-5);
-  }
-  @media print {
-    .actions {
-      display: none;
-    }
   }
 </style>

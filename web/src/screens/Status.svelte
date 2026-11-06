@@ -7,6 +7,8 @@
     /** The text button at the right end: 接続する / 切断する. */
     hubAction: string;
     onhub?: () => void;
+    /** Which device to choose in the browser's list, on the button that opens it. */
+    hubHint?: string;
     /** Why connecting or disconnecting is held now (the button stays focusable and says it). */
     hubLocked?: string | null;
     /** The lock table's state now (待機, 書き込み中 …). */
@@ -29,7 +31,7 @@
     nextEl?: HTMLElement;
   }
 
-  let { hub, hubAction, onhub, hubLocked = null, state, cli, oncli, key, problems, unreachable, progress, mode, saved, sentence, status, alert, nextEl = $bindable() }: Props = $props();
+  let { hub, hubAction, onhub, hubHint, hubLocked = null, state, cli, oncli, key, problems, unreachable, progress, mode, saved, sentence, status, alert, nextEl = $bindable() }: Props = $props();
 </script>
 
 <!-- StatusRow: information left, the connection's action right. -->
@@ -45,7 +47,7 @@
   <span>{mode}</span>
   {#if saved}<span>{saved}</span>{/if}
   {#if onhub}
-    <button class="text" data-control="connect" aria-disabled={hubLocked !== null} aria-describedby={hubLocked ? 'hub-why' : undefined} onclick={onhub}>{hubAction}</button>
+    <button class="text" data-control="connect" title={hubHint} aria-disabled={hubLocked !== null} aria-describedby={hubLocked ? 'hub-why' : undefined} onclick={onhub}>{hubAction}</button>
     {#if hubLocked}<span id="hub-why" class="visually-hidden">{hubLocked}</span>{/if}
   {/if}
   <div class="visually-hidden" role="status">{status}</div>

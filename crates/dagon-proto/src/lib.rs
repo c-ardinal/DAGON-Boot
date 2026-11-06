@@ -39,7 +39,7 @@ pub const MAX_FRAME: usize = frame_len(max_payload::USB);
 pub enum Cmd {
     Hello = 0x01,
     Status = 0x02,
-    /// What the node runs: stage0, boot core and app versions, wire
+    /// What the node runs: stage0, boot loader and app versions, wire
     /// version, MCU id (`payload::VersionResp`). Additive: an agent that
     /// predates it answers `Status::Unsupported`.
     Version = 0x03,

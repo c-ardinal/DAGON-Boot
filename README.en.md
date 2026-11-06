@@ -5,81 +5,82 @@
   </picture>
 </p>
 
-<p align="center"><b>The distributed microcontroller designs of professionals, made easy for many. As microcontrollers are added, writing stays the same operation as for one, and safe.</b></p>
+<p align="center"><b>The distributed microcontroller designs of professionals, in more people's hands. As microcontrollers are added, writing takes no more work, and it stays safe.</b></p>
 
 <p align="center">
   <a href="https://c-ardinal.github.io/DAGON-Boot/demo/">Try the demo</a> ·
-  <a href="https://c-ardinal.github.io/DAGON-Boot/doc/en/">Documentation</a> ·
-  <a href="README.md">日本語</a> ·
+  <a href="https://c-ardinal.github.io/DAGON-Boot/doc/en/">Developer documentation</a> ·
+  <a href="README.md">日本語 Readme</a> ·
   License: MIT or Apache-2.0
 </p>
 
 > [!IMPORTANT]
-> As of November 8, 2026, this is an alpha that supports only three kinds of microcontroller, made for "Built with Claude: Japan 2026". Please understand that breaking changes may be made before the official release.
-
-![DAGON Console writing a new version to the 7-segment node (the Console's screens are in Japanese)](assets/console/console-writing.png)
+> As of November 8, 2026, this is an alpha that supports only three kinds of microcontroller, made for "Built with Claude: Japan 2026".
+> Please understand that breaking changes may be made before the official release.
 
 ## What is DAGON?
 
-A beautiful design with a muddy operation. Even a compact build that splits its work across microcontrollers means taking it apart, swapping cables and using one write tool per MCU every time a program changes. Sometimes the design itself is compromised because writing would be hell.
+A beautiful design with a muddy operation.
 
-DAGON makes the distributed multi-microcontroller designs of professionals and specialists easy for a wide range of people, from those starting electronics with AI to individual developers who care for compactness and finish.
+A product can give each of its microcontrollers the role that suits it best and have them work together well. Even so, changing a program can mean taking the product apart and swapping cables, or struggling with a different write tool for each microcontroller. To get around this, people build their own way of changing programs, or compromise the design because operating it is too hard.
 
-Before assembly, you write each node directly once. After that no write pattern is touched and nothing is opened. Through one microcontroller on your PC's USB (the hub, 親機), you write to the ones beyond it (the children, 子機) with the same operation as one node. More nodes take more time; the operation does not grow.
+DAGON makes the distributed microcontroller designs that professionals and specialists use workable for a wide range of people, from those starting electronics with AI to individual developers who do not compromise on design.
 
-Writing is safe. Every image is signed, a node runs a new version on trial, and it goes back to the previous one by itself when the new one does not work. If a write stops part-way, the running version stays.
+The first time only, you connect each microcontroller directly, one at a time, and write its factory image. After that, you do not need to open the case or connect them one at a time.
+Through one microcontroller connected to your PC, you write to the microcontrollers beyond it with a single operation. More microcontrollers take more time; the operation does not grow.
 
-What sets DAGON apart is handling mixed MCUs by drawing the 構成 (the setup). As a developer you choose the boards, draw how they connect and write your application. DAGON takes care of start-up, flash layout, signing and the writing steps.
+Update images are all signed and written safely. A microcontroller starts a new version on trial and goes back to the previous version by itself if it does not work. If a write stops part-way, the running version stays.
+
+DAGON handles mixed kinds of microcontroller once you draw the setup. As a developer you choose the boards, draw how they connect and write your application. DAGON takes care of start-up, flash layout, signing and the writing steps.
 
 ## Documentation
 
 - [Getting started](https://c-ardinal.github.io/DAGON-Boot/doc/en/getting-started/): try it, install, from a new project to a new version
 - [How-to guides](https://c-ardinal.github.io/DAGON-Boot/doc/en/how-to/): your own board, swapping a link, AI help
-- [Explanation](https://c-ardinal.github.io/DAGON-Boot/doc/en/explanation/): words, events and extensions, versioning rules
+- [Explanation](https://c-ardinal.github.io/DAGON-Boot/doc/en/explanation/): what the words mean, events and extensions, versioning rules
 - [Reference](https://c-ardinal.github.io/DAGON-Boot/doc/en/reference/): commands, HTTP API, events, definition formats, Rust API
 
 ## Features
 
-- **Draw the setup**: DAGON Console, in your browser, shows the nodes and their links as a graph and checks wiring and pins as you edit.
-- **Get a project that builds**: `dagon new` and `dagon gen` give every node a Rust crate with its start-up, its wiring and an empty `app.rs` for your code.
-- **Write in one go**: `dagon deploy` builds, signs, packages and writes in one command. In the Console you write with each node's progress in view.
-- **Go back when it fails**: every image is signed. A node runs a new version on trial and goes back when it cannot be confirmed; `dagon rollback` goes back by hand.
-- **Write the boot loader too**: the boot loader itself lives in two slots and is written like an app (RP2040, STM32F401), going back if the new one fails.
-- **Extend it**: without changing DAGON's source, add extensions that receive events, answer decisions and replace parts (ports).
-- **Ask an AI**: a new project comes with Claude Code instructions and skills, and `dagon ai link` connects an agent with your consent. The API key stays in the OS credential store.
+- **Draw the setup**: In DAGON Console, which runs in your browser, you draw the microcontrollers and their links as a graph. Wiring and pins are checked at every edit.
+- **Get a project that builds**: `dagon new` and `dagon gen` make a Rust crate for each microcontroller, with its start-up, its wiring and an empty `app.rs` for your code.
+- **Write in one go**: `dagon deploy` builds, signs, makes the package and writes in one command. In DAGON Console you write with each microcontroller's progress in view.
+- **Go back when it fails**: Every image is signed. A microcontroller starts a new version on trial and goes back to the previous version when it cannot be confirmed. `dagon rollback` goes back by hand.
+- **Write the boot loader too**: The boot loader itself lives in two slots and is written like an app. If the new one does not work, the previous one comes back.
+- **Extend DAGON**: Without changing DAGON's source, add extensions that receive events, answer decisions and replace parts (ports).
+- **Get help from AI**: A new project comes with Claude Code instructions and skills. `dagon ai link` connects an agent with your consent. The API key stays in the OS credential store.
 
-Every step is also a `dagon` command.
+Every step can also be done with the `dagon` command.
 
 ## Supported hardware
 
-| MCU | Boards with a definition |
-|---|---|
-| RP2040 | Waveshare RP2040-Touch-LCD-1.28 |
-| STM32F401RE | NUCLEO-F401RE |
-| ESP32-S3 | M5StopWatch |
+| MCU         | Board                           |
+| ----------- | ------------------------------- |
+| RP2040      | Waveshare RP2040-Touch-LCD-1.28 |
+| STM32F401RE | NUCLEO-F401RE                   |
+| ESP32-S3    | M5StopWatch                     |
 
-The hub is an RP2040. Other boards work by choosing their MCU ([your own board](https://c-ardinal.github.io/DAGON-Boot/doc/en/how-to/own-board/)). The full list is in [Boards and MCUs](https://c-ardinal.github.io/DAGON-Boot/doc/en/reference/boards/).
+## Prerequisites
+
+- [Rust](https://rustup.rs): applications are written in Rust only.
+- A C compiler: needed to build the `dagon` command from source.
+- Chrome or Edge 89 or later
+- The tools for each microcontroller: `dagon doctor` checks them ([list](https://c-ardinal.github.io/DAGON-Boot/doc/en/reference/tools/)).
+
+The `dagon` command can also be installed from prebuilt files. The steps are in [Install](https://c-ardinal.github.io/DAGON-Boot/doc/en/getting-started/install/).
 
 ## Try it
 
-In your browser, try the [DAGON Console demo](https://c-ardinal.github.io/DAGON-Boot/demo/). It needs no install and no hardware: you write to a simulated hub and its children and go back to a previous version. File input and output, device connection and API keys are not available in the demo.
+Try the [DAGON Console demo](https://c-ardinal.github.io/DAGON-Boot/demo/) with no install and no hardware. You write to a simulated hub and its children and go back to a previous version. Reading and writing files, connecting real devices and AI link operations are not available in the demo.
 
-On your own PC, also without hardware:
+On your own PC, you can also try it without hardware, using the simulator.
 
 ```sh
 cargo install --git https://github.com/c-ardinal/DAGON-Boot --tag cli-v0.1.0 dagon-cli
 dagon demo
 ```
 
-`dagon demo` opens the Console at the address it prints. `dagon sim run` runs end-to-end scenarios in the simulator.
-
-## Prerequisites
-
-- [Rust](https://rustup.rs): applications are written in Rust only (and a C compiler when building from source)
-- Chrome or Edge 89 or later to connect real boards (it uses Web Serial)
-- `dagon doctor` checks the tools each MCU needs ([list](https://c-ardinal.github.io/DAGON-Boot/doc/en/reference/tools/))
-
-Installing from the release archives is in [Install](https://c-ardinal.github.io/DAGON-Boot/doc/en/getting-started/install/).
+`dagon demo` opens DAGON Console at the address it prints. `dagon sim run` runs end-to-end scenarios in the simulator.
 
 ## Start your own project
 
@@ -90,24 +91,21 @@ dagon doctor
 dagon serve
 ```
 
-`dagon new` makes `dagon.toml`, the topology file (the three-node sample) and a signing key pair, with the secret key outside the project. Open the address `dagon serve` prints to go on in the Console. From building to the first write, see [From a new project to a new version](https://c-ardinal.github.io/DAGON-Boot/doc/en/getting-started/first-project/).
+`dagon new` makes `dagon.toml`, the setup file and a signing key pair. The setup file holds a sample setup of three microcontrollers. The secret key is kept outside the project.
 
-You can also add DAGON to existing firmware ([how](https://c-ardinal.github.io/DAGON-Boot/doc/en/how-to/existing-firmware/)).
+`dagon doctor` checks the tools this setup needs.
 
-## How it works
+Open the address `dagon serve` prints to go on in DAGON Console.
 
-The figure below is the software design DAGON aims for. It does not show how much of it the current version implements.
+From building to the first write, see [From a new project to a new version](https://c-ardinal.github.io/DAGON-Boot/doc/en/getting-started/first-project/).
 
-<img src="assets/architecture/node-en.svg" alt="DAGON's software design, in layers and components" width="100%">
+You can also add DAGON to existing firmware ([steps](https://c-ardinal.github.io/DAGON-Boot/doc/en/how-to/existing-firmware/)).
 
-| To do this | Touch | Steps |
-|---|---|---|
-| Write your app | `targets/mcu/*/template/src/app.rs` becomes the node's `src/app.rs` | [From a new project to a new version](https://c-ardinal.github.io/DAGON-Boot/doc/en/getting-started/first-project/) |
-| Add an extension | `targets/boot-extension-template/`, `crates/dagon-events/src/ports.rs` | [Extension manifest](https://c-ardinal.github.io/DAGON-Boot/doc/en/reference/extension-manifest/) |
-| Add a board | `targets/boards/*/dagon-board.toml` | [Your own board](https://c-ardinal.github.io/DAGON-Boot/doc/en/how-to/own-board/) |
-| Add an MCU | `targets/mcu/*/dagon-mcu.toml`, `crates/dagon-port/src/lib.rs` | [Adding an MCU or a link](https://c-ardinal.github.io/DAGON-Boot/doc/en/how-to/new-mcu-or-link/) |
-| Add a link or transport | `crates/dagon-format/src/link.rs`, `targets/mcu/*/src/links.rs`, `crates/dagon-host/src/lib.rs` | [Adding an MCU or a link](https://c-ardinal.github.io/DAGON-Boot/doc/en/how-to/new-mcu-or-link/) |
-| Add an agent | `crates/dagon-cli/agents/`, `~/.dagon/agents/*.toml` | [Agent definition format](https://c-ardinal.github.io/DAGON-Boot/doc/en/reference/agent-definition/) |
+## How writing works
+
+The microcontroller connected to your PC over USB is the hub. The microcontrollers beyond it are its children.
+
+The figure below is the sample setup.
 
 ```mermaid
 flowchart LR
@@ -116,19 +114,40 @@ flowchart LR
   HUB -- UART --> WATCH["Child<br>ESP32-S3"]
 ```
 
-1. The PC checks the signed package's signatures and topology, and sends it to the hub.
-2. The hub relays to the children. Children are written first and the hub last.
-3. A node writes the new image beside the running one and starts it on trial.
-4. When its self-check passes it confirms; otherwise a watchdog reset takes it back to the previous version.
+1. The PC checks the package's signatures and that the package fits this setup.
+2. The PC sends the setup to the hub.
+3. Through the hub, the PC sends each microcontroller its new image. Children come first and the hub last.
+4. A microcontroller writes the new image to a different place from the running image.
+5. The microcontroller starts the new image on trial.
+6. When its self-check passes, it confirms the new version. Otherwise it resets and goes back to the previous version.
 
 What DAGON does not do is in [Limitations](https://c-ardinal.github.io/DAGON-Boot/doc/en/explanation/limitations/).
+
+## DAGON's design
+
+The figure below is DAGON's software design.
+
+<img src="assets/architecture/node-en.svg" alt="DAGON's software design, in layers and components" width="100%">
+
+## Where to change things
+
+For each thing you may want to do, this table shows what to touch and the steps.
+
+| To do this | Touch | Steps |
+| --- | --- | --- |
+| Write your app | `nodes/<id>/src/app.rs` | [From a new project to a new version](https://c-ardinal.github.io/DAGON-Boot/doc/en/getting-started/first-project/) |
+| Add an extension | `targets/boot-extension-template/`, `crates/dagon-events/src/ports.rs` | [Extension manifest](https://c-ardinal.github.io/DAGON-Boot/doc/en/reference/extension-manifest/) |
+| Add a board | `targets/boards/*/dagon-board.toml` | [Your own board](https://c-ardinal.github.io/DAGON-Boot/doc/en/how-to/own-board/) |
+| Add an MCU | `targets/mcu/*/dagon-mcu.toml`, `crates/dagon-port/src/lib.rs` | [Adding an MCU or a link](https://c-ardinal.github.io/DAGON-Boot/doc/en/how-to/new-mcu-or-link/) |
+| Add a link or transport | `crates/dagon-format/src/link.rs`, `targets/mcu/*/src/links.rs`, `crates/dagon-host/src/lib.rs` | [Adding an MCU or a link](https://c-ardinal.github.io/DAGON-Boot/doc/en/how-to/new-mcu-or-link/) |
+| Add an agent | `crates/dagon-cli/agents/`, `~/.dagon/agents/*.toml` | [Agent definition format](https://c-ardinal.github.io/DAGON-Boot/doc/en/reference/agent-definition/) |
 
 ## Dependencies and external data
 
 - Written for this project: `crates/`, `targets/` (except the vendor parts below), `web/`, `site/`, `samples/`, `plugin/`, `topology/`, `scripts/`
-- Libraries: Rust crates and npm packages, used unmodified (embassy, esp-hal, ed25519-compact, Svelte, Vite, Astro and others)
+- Libraries: Rust and npm libraries, used unmodified (embassy, esp-hal, ed25519-compact, Svelte, Vite, Astro and others).
 - Vendor parts: the ESP-IDF 2nd stage, `rp2040-boot2`, the STM32F401 ROM boot loader
 - Fonts and icons: Doto, DotGothic16, Zen Kaku Gothic New, JetBrains Mono (SIL OFL 1.1), Lucide (ISC)
-- Values in the MCU and board definitions: taken from the makers' datasheets and board documents; a value whose source has not been checked is marked `unverified` in the definition
+- Values in the MCU and board definitions: taken from the makers' datasheets and board documents. A value whose source has not been checked is marked `unverified` in the definition.
 
 The full list and licences are in [Licenses](https://c-ardinal.github.io/DAGON-Boot/doc/en/reference/licenses/).

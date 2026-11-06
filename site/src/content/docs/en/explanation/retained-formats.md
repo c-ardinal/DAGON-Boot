@@ -45,7 +45,7 @@ What the proofs assume of the hardware and what they inject:
   interrupted program leaves a prefix programmed. Every byte, including a
   commit byte whose program was interrupted, reads the same on every read
   until the next erase or program (no weak bits); flash that can return
-  different values for a partly programmed byte needs its MCU package to
+  different values for a partly programmed byte needs its MCU definition to
   read the commit byte back until two reads agree.
 - **Foreign bytes.** Any byte may also be overwritten by something that is
   not the format's writer: a writer of another layout of the same stage,
@@ -328,7 +328,7 @@ across any later reset other than power-on, cleared only when a start
 acknowledges it. A start acknowledges it when it stored everything it
 had to (`complete`). The MCU definition declares whether the MCU has
 such a flag and its source (`[watchdog] flag`: a hardware register whose
-reset flags persist until cleared, or a flag the MCU package provides,
+reset flags persist until cleared, or a flag the MCU definition provides,
 e.g. in a retained register it sets on a watchdog reset). An MCU without
 one has no fuse: the definition loader reports the fuse as unavailable,
 and its layers run sandboxed calls without a lockup fuse.
@@ -371,13 +371,13 @@ the flag and the armed record, so the next start repeats the decision.
 DAGON has no request that clears a trip: neither the protocol nor the CLI
 has one. This is what the format's model holds for one: the agent frees an app
 trip in its own cell, or stores a clear request for a boot-loader trip; the boot
-core's next start turns the trip into clear-done, and each side frees its
+loader's next start turns the trip into clear-done, and each side frees its
 record when it sees the other's. One request clears one trip. Nothing else
 clears a trip whose id is installed.
 
 ### 3.7 Limits of the claims
 
-Power-on clears the watchdog flag: a lockup not yet classified is lost,
+Power-on clears the watchdog flag: an unclassified lockup is lost,
 never forged. Foreign bytes may destroy records the same way; a destroyed
 clean verdict lets a later watchdog reset classify that interrupted call
 (one that never returned) as a lockup, and a destroyed clear-done record
@@ -442,7 +442,7 @@ Each bank starts with a 64-byte header:
 Bytes 1 to 3 and 48 to 63 are programmed as zero and not checked by a
 reader (bytes 1 to 3 are under the CRC).
 
-followed by the body. A bank counts when its commit byte is `0xC1`, its
+The body follows the header. A bank counts when its commit byte is `0xC1`, its
 length fits, its CRC matches and its body's SHA-256 equals the header's.
 The copy is the counted bank with the newer sequence (serial order);
 there is none when no bank counts.
@@ -476,7 +476,7 @@ fixed cases in `tests/fixed.rs` name the property they guard.
 | P2 | Every replayed event is a held append of the reader's layout; no torn write is accepted. |
 | P3 | Every store of a writer lies in its own ring, whatever bytes the region holds. |
 | P4 | A writer never appends an identity it appended before in its sequence, and continues ahead of every number it used (outside 2.7); a boot number is held for one boot. |
-| P5 | The reader never reports a newer boot before an older one; pairs it cannot order are marked uncertain; per pair, an unordered pair has different openers, or one opener in two sequences, or one opener's numbers 2^30 or more apart. |
+| P5 | The reader never reports a newer boot before an older one; pairs it cannot order are marked uncertain; an unordered pair has different openers, or one opener in two sequences, or one opener's numbers 2^30 or more apart. |
 | P6 | Every replayed boot holds the events of one boot, and one boot is one replayed boot (outside the split boots of 2.7). |
 | P7 | An append lost before any replay is covered by a window or gap: at once when its own writer overwrote it, when other bytes destroyed it, once an entry the writer appended later is held. |
 | P8 | `plan`, `commit` and `confirm` take only the state log (compile-time). |
@@ -539,12 +539,16 @@ the full profile. Its properties, checked after every operation:
 | C2 | With no further fault, at most `max + 1` boots end the trial: no core is pending and a core runs. |
 | C3 | A broken core is never confirmed. |
 
-The MCU packages' sweeps (`a_power_cut_at_every_flash_step_leaves_a_bootable_core`)
+The MCU definitions' sweeps (`a_power_cut_at_every_flash_step_leaves_a_bootable_core`)
 add the flash side: a cut at every flash operation of a write,
-compaction of the state log included. A cell that does not hold what is
+compaction of the state log included.
+
+A cell that does not hold what is
 written to it at all is found by `bootcore::cell_holds`, run by the
 started boot loader and by the app: such a node takes no boot loader, and a
-pending core that finds it so rolls itself back. A cell with a word that
+pending core that finds it so rolls itself back.
+
+A cell with a word that
 holds a count was written by stage0, so it holds, and the check writes
 nothing over it; only a cell counting nothing gets a probe (a value no
 cell word takes) and its old value back, word by word, each read back, so
@@ -553,6 +557,5 @@ model found the earlier check, which probed over a running count, letting
 a failing core start without end).
 
 Limit of the claims: that each place keeps its value across the resets
-named is the vendor's documented behaviour, to be confirmed on each
-board.
+named is the vendor's documented behaviour.
 

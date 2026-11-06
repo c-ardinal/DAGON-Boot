@@ -487,8 +487,8 @@ pub struct McuDef {
     /// bus master: its streams, each selecting one of `channels` requests), `dma_requests = [{
     /// signal, controller, stream, channel }]` (the block's rows of the MCU's DMA request mapping
     /// table: `signal` `a-z 0-9` such as `tx`, `rx`, `ch1`, `up`; one cell serves one block). Board
-    /// packages and MCU templates take DMA streams from these (first row of the request on a stream
-    /// not yet taken).
+    /// packages and MCU templates take DMA streams from these (first row of the request on a free
+    /// stream).
     #[serde(default, rename = "peripheral")]
     pub peripherals: Vec<Peripheral>,
     /// Every processor core, `id`; DAGON runs on the first.
@@ -511,7 +511,7 @@ pub struct McuDef {
     /// stops: `fetch-stall`, `xip-off-masked`, `cache-off-masked`), `erase_unit` (largest unit
     /// DAGON erases in one operation, a power of two), `erase_unit_max_ms` (that erase's datasheet
     /// maximum; below `watchdog.confirmed_ms`). A fact is a number checked against its source (cite
-    /// it in a comment), `{ unverified = N }` or `"unmeasured"` (no value yet; not for
+    /// it in a comment), `{ unverified = N }` or `"unmeasured"` (no value; not for
     /// `erase_unit_max_ms`).
     pub execution: Option<Execution>,
     /// `scratch = { at, size }`: flash a conformance build erases and writes; apart from every
@@ -605,7 +605,7 @@ pub struct BoardDef {
     /// Definition order never decides it.
     #[serde(default)]
     pub default: bool,
-    /// `[{ pin, label }]`; `label` left out until confirmed on the board.
+    /// `[{ pin, label }]`; `label` left out when not confirmed on the board.
     #[serde(default)]
     pub header: Vec<HeaderPin>,
     /// `[{ controller, sda, scl }]` pairs usable from the header.

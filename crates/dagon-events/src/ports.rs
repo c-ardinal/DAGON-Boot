@@ -1,4 +1,4 @@
-//! The port catalog: every part of DAGON a plug-in can replace, and the
+//! The port catalog: every part of DAGON an extension can replace, and the
 //! parts it cannot, one record each. `site/src/content/docs/reference/ports.md`, the manifest
 //! validator and the sandbox service tables derive from it.
 
@@ -7,14 +7,14 @@ use crate::catalog::Layer;
 /// Who may replace a part.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Trust {
-    /// Any plug-in; it runs in the layer's sandbox with the capabilities
+    /// Any extension; it runs in the layer's sandbox with the capabilities
     /// its manifest declares.
     Untrusted,
-    /// Any plug-in, and it only adds: DAGON's own implementation stays.
+    /// Any extension, and it only adds: DAGON's own implementation stays.
     Additive,
     /// Only a trusted extension, declared and signed; it runs privileged.
     TrustedOnly,
-    /// Not a port: no plug-in replaces it, for the reason given.
+    /// Not a port: no extension replaces it, for the reason given.
     Never(&'static str),
 }
 
@@ -110,9 +110,9 @@ const LINKS: &str = "USB CDC, UART, I2C target, PIO UART";
 const WIRE: &str = "the DAGON wire";
 const NONE: &str = "none";
 const DAGON: &str = "DAGON's";
-const FLASH: &str = "the MCU package's flash layout";
+const FLASH: &str = "the MCU definition's flash layout";
 const RECOVERY: &str = "BOOTSEL/UF2, factory, ROM entry as the MCU and board define";
-const BOARD: &str = "the board package's";
+const BOARD: &str = "the board definition's";
 const KEY: &str = "file key pair";
 
 use Layer::{App, Boot, Host, Relay};
@@ -206,7 +206,7 @@ pub const PORTS: &[Port] = &[
         "an additional recovery path: a service window for a transport, a vendor download mode",
         &[on(Boot, RECOVERY), on(App, RECOVERY)],
         Additive,
-        "a plug-in adds a path, never removes DAGON's",
+        "an extension adds a path, never removes DAGON's",
         &[S::Return, S::Transport, S::Time, S::Memory],
     ),
     port(
@@ -274,7 +274,7 @@ pub const PORTS: &[Port] = &[
     ),
     port(
         "KeyStore",
-        "where the signing key is kept",
+        "receives the signing key from where the user chose to keep it (an environment variable, the OS key store, 1Password and so on)",
         &[on(Host, KEY)],
         Untrusted,
         "the host is trusted by definition; the device verifies",
@@ -330,7 +330,7 @@ pub const PORTS: &[Port] = &[
     ),
     port(
         "Composition",
-        "the order of a layer's chain (publisher, board package, libraries, user) and the decision bounds",
+        "the order of a layer's chain (publisher, board definition, libraries, user) and the decision bounds",
         &[on(Boot, DAGON), on(App, DAGON), on(Relay, DAGON), on(Host, DAGON)],
         Never("it is what makes every extension see every event and keeps answers bounded"),
         "",

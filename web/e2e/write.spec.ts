@@ -9,7 +9,7 @@ const toWrite = async (page: Page, query: string, size = { width: 1920, height: 
   await openSample(page, query);
   await page.getByRole('radio', { name: '書込' }).click();
   await settled(page);
-  await page.locator('#band').getByRole('button', { name: '接続する' }).click();
+  await page.locator('header').getByRole('button', { name: '接続する' }).click();
   await page.locator('.st-alive').first().waitFor({ timeout: 60_000 });
   await expect(page.locator('.split .main')).toHaveAttribute('aria-disabled', 'false', { timeout: 30_000 });
   await expect(page.locator('.split .caret')).toHaveAttribute('aria-disabled', 'false', { timeout: 30_000 });

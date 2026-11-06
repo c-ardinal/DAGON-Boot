@@ -108,7 +108,7 @@
   }: Props = $props();
 
   /** Names on the cards never get smaller than this on screen (px): past it the cards turn compact and hold the name at this size. */
-  const NAME_MIN_PX = 13;
+  const NAME_MIN_PX = 12;
   /** A name's size on a card at 100 % (--t-small inside the canvas). */
   const NAME_PX = 14;
   /** Card heights before they are measured (px). */
@@ -118,7 +118,7 @@
   const SIDE = 24;
   /** Between a bundle's outer strand and its chip, and the chip's height (px). */
   const CHIP_CLEAR = 12;
-  const CHIP_H = 22;
+  const CHIP_H = 24;
   /** How far from a leaning run a chip stands so the run passes clear over its whole height. */
   const clearOf = (width: number, dir: Pt) => {
     const down = Math.max(0.2, Math.abs(dir.y));
@@ -133,7 +133,7 @@
   let boxEl = $state<HTMLDivElement>();
 
   /** Card geometry of each class (normal, compact): width and gaps, in canvas px; the zoom alone scales them. The rows stand far apart: the links' length is what lets a cable sweep and read. */
-  const sizes = (compact: boolean) => (compact ? { w: 208, gapX: 20, gapY: 96 } : { w: 260, gapX: 80, gapY: 176 });
+  const sizes = (compact: boolean) => (compact ? { w: 208, gapX: 20, gapY: 80 } : { w: 260, gapX: 80, gapY: 128 });
   const nodesOf = $derived((config?.nodes ?? []).map((n) => ({ id: n.id, hub: n.role === 'hub' })));
   const compact = $derived(nodesOf.length >= COMPACT_FROM || view.zoom * NAME_PX < NAME_MIN_PX);
   const S = $derived(sizes(compact));
@@ -218,6 +218,20 @@
     });
   });
 
+  /** Everything placed, in canvas px, as the cards stand (`c`: as if compact or not, from the tree's own layout for that class). */
+  function boundsAt(c: boolean) {
+    const s = sizes(c);
+    const est = c ? EST_H.compact : EST_H.normal;
+    const h = (id: string) => (c === compact ? hOf(id) : est);
+    const t = treeLayout(nodesOf, config?.links ?? [], { ...s, h });
+    const cards = (config?.nodes ?? []).map((n) => {
+      const p = positions[n.id] ?? { x: t.at[n.id].x - t.width / 2, y: t.at[n.id].y };
+      return { ...p, w: s.w, h: h(n.id), top: tops.some((x) => x.id === n.id) ? UPLINK_ROOM : 0 };
+    });
+    const x = Math.min(...cards.map((c) => c.x));
+    const y = Math.min(...cards.map((c) => c.y - c.top));
+    return { x, y, w: Math.max(...cards.map((c) => c.x + c.w)) - x, h: Math.max(...cards.map((c) => c.y + c.h)) - y };
+  }
   /** Everything placed, in canvas px. */
   function bounds() {
     const cards = (config?.nodes ?? []).map((n) => ({ ...pos[n.id], h: hOf(n.id), top: tops.some((t) => t.id === n.id) ? UPLINK_ROOM : 0 }));
@@ -230,13 +244,24 @@
   let gliding = $state(false);
   const clampZoom = (z: number) => Math.min(ZOOM_LIMITS.max, Math.max(ZOOM_LIMITS.min, z));
 
-  /** The explicit fit: the whole graph in the free part of the window, at most `cap`. */
+  /** The zoom at which `b` fills `free`, at most `cap`. */
+  const zoomFor = (b: { w: number; h: number }, free: DOMRect, cap: number) => clampZoom(Math.min(cap, free.width / (b.w + 2 * SIDE), free.height / (b.h + 2 * SIDE)));
+  /** The zoom under which the cards turn compact. */
+  const COMPACT_ZOOM = NAME_MIN_PX / NAME_PX;
+
+  /** The explicit fit: the whole graph in the free part of the window, at most `cap`; the same answer each time, whatever the cards were. */
   export function fit(cap: number = firstZoom(), smooth = true) {
     if (!boxEl || !config?.nodes.length) return;
     const box = boxEl.getBoundingClientRect();
     const free = freeArea?.() ?? box;
-    const b = bounds();
-    const zoom = clampZoom(Math.min(cap, free.width / (b.w + 2 * SIDE), free.height / (b.h + 2 * SIDE)));
+    // The normal cards' bounds decide; when they would not fit at a zoom that keeps them normal, the compact layout is fitted and the zoom is held under the compact threshold so the result stays compact.
+    const many = nodesOf.length >= COMPACT_FROM;
+    let b = boundsAt(false);
+    let zoom = many ? 0 : zoomFor(b, free, cap);
+    if (zoom < COMPACT_ZOOM) {
+      b = boundsAt(true);
+      zoom = Math.min(zoomFor(b, free, cap), many ? cap : COMPACT_ZOOM * 0.99);
+    }
     gliding = smooth;
     view = {
       zoom,
@@ -828,7 +853,7 @@
     border-radius: var(--r-m);
     background: var(--c-ink);
     color: var(--c-muted);
-    font: 400 var(--t-12) / calc(28px - 2px) var(--f-ja);
+    font: 400 var(--t-caption) / 24px var(--f-ja);
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
@@ -848,7 +873,7 @@
     border: 1px dashed var(--c-line);
     border-radius: var(--r-m);
     color: var(--c-muted);
-    font: 400 var(--t-13) / 1.45 var(--f-ja);
+    font: 400 var(--t-small) / 20px var(--f-ja);
     text-align: center;
   }
 
@@ -864,7 +889,7 @@
     background: var(--c-ink);
     color: var(--c-paper);
     text-align: left;
-    font: 400 var(--t-small) / 1.45 var(--f-ja);
+    font: 400 var(--t-small) / 20px var(--f-ja);
     cursor: pointer;
     overflow: hidden;
     transition:
@@ -1034,7 +1059,7 @@
   }
   .ver {
     margin-left: auto;
-    font: 400 var(--t-version) / 24px var(--f-version);
+    font: 400 var(--t-version) / 24px var(--f-mono);
     font-variant-numeric: tabular-nums;
   }
   .ver-sk {
@@ -1084,7 +1109,7 @@
     border: 1px solid var(--c-line);
     border-radius: var(--r-full);
     background: var(--c-ink);
-    font: 700 var(--t-11) / 1 var(--f-ja);
+    font: 700 var(--t-caption) / 1 var(--f-ja);
     white-space: nowrap;
     transition:
       border-color var(--dur-ui) var(--ease-out),
@@ -1096,14 +1121,14 @@
     min-height: 16px;
     gap: 8px;
     color: var(--c-muted);
-    font: 500 var(--t-11) / 1.5 var(--f-mono);
+    font: 500 var(--t-caption) / 20px var(--f-mono);
   }
   .slotline .on {
     color: var(--c-paper);
   }
   .slotline .on::before {
     content: '▸';
-    margin-right: 2px;
+    margin-right: var(--s-1);
   }
   .compact .slotline {
     display: none;
@@ -1128,7 +1153,7 @@
     text-overflow: ellipsis;
     white-space: nowrap;
     color: var(--c-muted);
-    font: 400 var(--t-11) / 1.4 var(--f-ja);
+    font: 400 var(--t-caption) / 16px var(--f-ja);
   }
   /* The number counts up with the water: the browser moves --shown between the values it is given. */
   @property --shown {
@@ -1138,9 +1163,9 @@
   }
   .pct {
     position: absolute;
-    right: 12px;
-    bottom: 10px;
-    font: 400 24px / 1 var(--f-version);
+    right: var(--s-3);
+    bottom: var(--s-3);
+    font: 400 var(--t-version) / 24px var(--f-mono);
     counter-reset: shown var(--shown);
     transition: --shown var(--dur-rise) var(--ease-steady);
   }
@@ -1161,13 +1186,13 @@
   .compact .hd b {
     flex: 1;
     min-width: 0;
-    font-size: max(var(--t-small), calc(13px / var(--zoom)));
+    font-size: max(var(--t-caption), calc(var(--t-caption) / var(--zoom)));
   }
   .compact .bd {
     padding-top: 0;
   }
   .compact .chips {
-    margin-top: 2px;
+    margin-top: var(--s-1);
   }
 
   /* Water gauge: the level moves by transform; the edge is a CSS mask (no drawn illustration). */
@@ -1196,12 +1221,12 @@
     mask: radial-gradient(36px 9px at 50% 100%, #000 96%, transparent 100%) 0 0 / 64px 12px repeat-x;
   }
   .crest.front {
-    top: -10px;
+    top: -12px;
     background: var(--wave-front);
     animation: drift var(--dur-drift-front) var(--ease-steady) infinite;
   }
   .crest.back {
-    top: -14px;
+    top: -16px;
     background: var(--wave-back);
     animation: drift var(--dur-drift-back) var(--ease-steady) infinite reverse;
   }
@@ -1216,9 +1241,9 @@
   .port {
     position: absolute;
     z-index: calc(var(--z-drag) + 1);
-    width: 14px;
-    height: 14px;
-    margin: -7px 0 0 -7px;
+    width: 16px;
+    height: 16px;
+    margin: -8px 0 0 -8px;
     border: 2px solid var(--c-line);
     border-radius: 50%;
     background: var(--c-ink);
@@ -1235,7 +1260,7 @@
   .port.i2c::after {
     content: '';
     position: absolute;
-    inset: 2px;
+    inset: 4px;
     border-radius: 50%;
     background: var(--c-line);
   }
@@ -1259,14 +1284,14 @@
   .link-chip {
     position: absolute;
     z-index: var(--z-chip);
-    height: 22px;
-    padding: 0 10px;
+    height: 24px;
+    padding: 0 var(--s-2);
     transform: translateY(-50%);
     border: 1px solid var(--c-line);
     border-radius: var(--r-full);
     background: var(--c-ink);
     color: var(--c-paper);
-    font: 700 var(--t-11) / 20px var(--f-ja);
+    font: 700 var(--t-caption) / 20px var(--f-ja);
     white-space: nowrap;
     cursor: pointer;
   }

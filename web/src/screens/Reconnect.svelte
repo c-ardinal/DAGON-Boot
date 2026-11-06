@@ -71,12 +71,12 @@
   }
   h2 {
     margin: 0 0 var(--s-4);
-    font: 700 var(--t-heading-size) / var(--t-heading-lh) var(--f-ja);
+    font: 700 var(--t-small) / 20px var(--f-ja);
     letter-spacing: 0.02em;
   }
   p {
     margin: 0 0 var(--s-5);
-    font: 400 var(--t-body-size) / var(--t-body-lh) var(--f-ja);
+    font: 400 var(--t-small) / 20px var(--f-ja);
   }
   .primary {
     display: flex;
@@ -84,7 +84,7 @@
   }
   details {
     margin-top: var(--s-5);
-    font: 400 var(--t-small-size) / var(--t-small-lh) var(--f-ja);
+    font: 400 var(--t-caption) / 16px var(--f-ja);
   }
   summary {
     color: var(--c-muted);

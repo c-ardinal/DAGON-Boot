@@ -2,7 +2,7 @@
 // shapes of dagon-topology's schema) plus the page-side display names. Every
 // edit is a pure function returning a new document, so undo keeps snapshots.
 // Validity is never decided here: topo_check (dagon-topology in WASM) does it.
-import { board_template, coordinator_capable, coordinator_uart0, link_kinds, max_nodes, rom_i2c_addrs, supported_mcus, topo_cut, topo_parse } from '../../wasm/pkg/dagon_wasm.js';
+import { board_template, coordinator_capable, coordinator_uart0, link_kinds, max_nodes, rom_i2c_addrs, supported_mcus, topo_cut, topo_parse, uart_bauds } from '../../wasm/pkg/dagon_wasm.js';
 import { defaultBoard, type Board } from '../../wasm/dagon.ts';
 import { INSPECT } from '../copy.ts';
 import type { Config, Link as GLink, Node as GNode, Skip, UplinkHost, Wire } from '../sample.ts';
@@ -62,6 +62,18 @@ export const LINK_KINDS: LinkKind[] = ['usb-cdc', 'uart', 'i2c', 'ble', 'wifi-tc
 /** Kinds `mcu`'s firmware implements up (to the PC or the 親機) and down (to 子機); the rest are not available yet. */
 export function linkKinds(mcu: string): { up: LinkKind[]; down: LinkKind[] } {
   return link_kinds(mcu) as { up: LinkKind[]; down: LinkKind[] };
+}
+
+/** The UART speeds both ends' MCU definitions name (`[link_uart] bauds`): the only ones a link may be set to. */
+export function uartBauds(from: TNode | undefined, to: TNode | undefined): number[] {
+  return Array.from(uart_bauds(from?.mcu ?? '', to?.mcu ?? ''));
+}
+
+/** The 親機's pins a link or bus may use: its board's header (numbered GPIOs), as the check (V-07) allows. */
+export function hubHeaderPins(h: TNode | undefined): number[] {
+  const board = h ? (h.board ?? defaultBoard(h.mcu)) : undefined;
+  const header = board ? (template(board)?.header ?? []) : [];
+  return header.map((p) => Number(p.replace(/^GPIO/, ''))).filter((n) => Number.isFinite(n));
 }
 
 /** Whether a hop of `kind` from `from` to `to` is one both firmwares implement. */

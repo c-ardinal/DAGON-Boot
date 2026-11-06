@@ -86,9 +86,10 @@
   <h1 id="start-h" class="title" translate="no">{PRODUCT}</h1>
   <p class="sub">{START.sub}</p>
   <div class="choices">
-    <button class="button-primary" bind:this={first} aria-disabled={!s.usable('new')} onclick={() => s.usable('new') && (modal = 'how')}>{START.new}</button>
-    <button class="button-secondary" data-control={DEMO_SITE ? 'open' : undefined} aria-disabled={!s.usable('open')} onclick={() => s.usable('open') && void toOpen()}>{START.open}</button>
+    <button class="button-primary" bind:this={first} aria-disabled={!s.usable('new')} title={s.usable('new') || DEMO_SITE ? undefined : CLI_LINK.needCli} onclick={() => s.usable('new') && (modal = 'how')}>{START.new}</button>
+    <button class="button-secondary" data-control={DEMO_SITE ? 'open' : undefined} aria-disabled={!s.usable('open')} title={s.usable('open') || DEMO_SITE ? undefined : CLI_LINK.needCli} onclick={() => s.usable('open') && void toOpen()}>{START.open}</button>
   </div>
+  {#if !served && !s.usable('new')}<p class="why">{CLI_LINK.needCli}</p>{/if}
   <section class="recent" aria-labelledby="recent-h">
     <h2 id="recent-h">{START.recent}</h2>
     {#if s.recent.length === 0}
@@ -108,7 +109,6 @@
 </main>
 
 <footer id="band" class="band" tabindex="-1">
-  {#if !served && !s.usable('new')}<p>{CLI_LINK.needCli}</p>{/if}
   {#if fail && !modal}{@render failure()}{/if}
 </footer>
 
@@ -186,6 +186,11 @@
   .choices {
     display: flex;
     gap: var(--s-2);
+  }
+  .why {
+    margin: 0;
+    color: var(--c-paper);
+    font: 400 var(--t-small) / 20px var(--f-ja);
   }
   h2,
   h3 {
@@ -271,7 +276,7 @@
   .row-sk {
     display: block;
     height: 40px;
-    margin: 2px 0;
+    margin: var(--s-1) 0;
   }
   .options {
     display: grid;

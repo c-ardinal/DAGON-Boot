@@ -1,7 +1,7 @@
 import { createRawSnippet } from 'svelte';
 import { render } from 'svelte/server';
 import { describe, expect, test } from 'vitest';
-import { BAND, DRAWER, HUB_TOGGLE, NOTICE, STATUS } from '../app/copy.ts';
+import { DRAWER, NOTICE, STATUS } from '../app/copy.ts';
 import Drawer from './Drawer.svelte';
 import Status from './Status.svelte';
 import Toast from './Toast.svelte';
@@ -11,8 +11,6 @@ const status = (p: Partial<Parameters<typeof Status>[1]> = {}) =>
     props: {
       hub: '未接続',
       connected: false,
-      hubAction: HUB_TOGGLE.connect,
-      onhub: () => undefined,
       state: '待機',
       cli: 'CLI 0.4.0',
       cliReady: true,
@@ -27,15 +25,14 @@ const status = (p: Partial<Parameters<typeof Status>[1]> = {}) =>
   }).body;
 
 describe('status row', () => {
-  test('which device to choose is on the button that opens the list', () => {
-    expect(status({ hubHint: BAND.M03.sentence })).toMatch(new RegExp(`data-control="connect"[^>]*title="${BAND.M03.sentence}"`));
-    expect(status()).not.toMatch(/data-control="connect"[^>]*title=/);
+  test('the connection action is not in the band: it lives in the header', () => {
+    expect(status()).not.toMatch(/data-control="connect"/);
   });
 
-  test('where the 親機 stands, the one sentence, marks, the connection action last', () => {
+  test('where the 親機 stands, the one sentence, then the marks', () => {
     const body = status();
     const at = (s: string) => body.indexOf(s);
-    const order = ['未接続', '親機につないでください。', `aria-label="${STATUS.saved}"`, 'aria-label="CLI 0.4.0"', HUB_TOGGLE.connect];
+    const order = ['未接続', '親機につないでください。', `aria-label="${STATUS.saved}"`, 'aria-label="CLI 0.4.0"'];
     expect(order.map(at)).toEqual([...order.map(at)].sort((a, b) => a - b));
     expect(order.every((s) => at(s) >= 0)).toBe(true);
   });
@@ -47,12 +44,6 @@ describe('status row', () => {
   test('what shows elsewhere is not repeated in the band', () => {
     const body = status();
     for (const word of [DRAWER.problems, '準備', '書込']) expect(body).not.toContain(word);
-  });
-
-  test('a held connection stays focusable and says why', () => {
-    const body = status({ hubLocked: '書き込みが終わるまで、切断できません。' });
-    expect(body).toMatch(/data-control="connect" aria-disabled="true" aria-describedby="hub-why"/);
-    expect(body).toContain('書き込みが終わるまで、切断できません。');
   });
 });
 

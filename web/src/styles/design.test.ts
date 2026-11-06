@@ -4,8 +4,8 @@
 import { readFileSync } from 'node:fs';
 import { describe, expect, test } from 'vitest';
 
-const files = Object.keys(import.meta.glob(['../**/*.svelte', '../**/*.css'], { query: '?raw' })).map((p) => new URL(p, import.meta.url));
-const read = (u: URL) => readFileSync(u, 'utf8');
+const files = Object.keys(import.meta.glob(['../**/*.svelte', '../**/*.css'])).map((p) => new URL(p, import.meta.url));
+const read = (u: URL): string => new TextDecoder().decode(readFileSync(u));
 const name = (u: URL) => u.pathname.split('/src/')[1];
 
 /** The type scale: one role, one token; nothing else sizes text. */
@@ -58,8 +58,10 @@ describe('design rules', () => {
         if (v === 'inherit') continue;
         // The size: the first token or length of a `font:` shorthand, or the value of `font-size:`.
         const size = m[1] ? v : (/(var\(--t-[a-z0-9-]+\)|\d*\.?\d+(?:px|rem|em|%))(?=\s*\/|\s)/.exec(v)?.[1] ?? v);
-        const ok = /^var\(--t-([a-z]+)\)$/.exec(size);
-        if (!ok || !SCALE.includes(ok[1])) faults.push(`${name(u)}: ${m[0].trim()}`);
+        // Only scale tokens size text: no literal length, and every --t- token named is one of the scale (a canvas card may hold a token's size over the zoom).
+        const tokens = [...size.matchAll(/var\(--t-([a-z]+)\)/g)].map((t) => t[1]);
+        const ok = tokens.length > 0 && tokens.every((t) => SCALE.includes(t)) && !/\d(px|rem|em)/.test(size);
+        if (!ok) faults.push(`${name(u)}: ${m[0].trim()}`);
       }
     }
     expect(faults).toEqual([]);

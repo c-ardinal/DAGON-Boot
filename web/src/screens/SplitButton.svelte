@@ -75,7 +75,7 @@
     border-bottom-right-radius: 0;
   }
   .caret {
-    margin-left: 1px;
+    margin-left: 0;
   }
   .caret :global(> span) {
     padding: 0 var(--s-2);
@@ -106,7 +106,7 @@
     border: 0;
     background: none;
     color: var(--c-paper);
-    font: 400 var(--t-version) / 1 var(--f-version);
+    font: 400 var(--t-version) / 1 var(--f-mono);
     text-align: left;
     white-space: nowrap;
     cursor: pointer;

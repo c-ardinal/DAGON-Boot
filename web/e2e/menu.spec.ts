@@ -20,8 +20,8 @@ async function offWithReason(page: Page, group: string, label: string) {
 }
 
 const connect = async (page: Page) => {
-  await page.locator('#band').getByRole('button', { name: '接続する' }).click();
-  await page.locator('#band').getByRole('button', { name: '切断する' }).waitFor({ timeout: 30_000 });
+  await page.locator('header').getByRole('button', { name: '接続する' }).click();
+  await page.locator('header').getByRole('button', { name: '切断する' }).waitFor({ timeout: 30_000 });
   await page.locator('.st-alive').first().waitFor({ timeout: 30_000 });
 };
 
@@ -99,12 +99,6 @@ const ITEMS: Record<string, { query?: string; check: (p: Page) => Promise<void> 
       expect((await p.locator('.node').nth(1).boundingBox())!.x).toBeCloseTo(before.x, 0);
     },
   },
-  '構成/表': {
-    check: async (p) => {
-      await press(p, '構成', '表');
-      await expect(p.getByRole('radio', { name: '表', exact: true })).toHaveAttribute('aria-checked', 'true');
-    },
-  },
   '構成/キャンバス全体を表示する': {
     check: async (p) => {
       const first = await canvasState(p);
@@ -120,7 +114,7 @@ const ITEMS: Record<string, { query?: string; check: (p: Page) => Promise<void> 
   'つなぐ/接続する': {
     check: async (p) => {
       await press(p, 'つなぐ', '接続する');
-      await expect(p.locator('#band').getByRole('button', { name: '切断する' })).toBeVisible({ timeout: 30_000 });
+      await expect(p.locator('header').getByRole('button', { name: '切断する' })).toBeVisible({ timeout: 30_000 });
     },
   },
   'つなぐ/パッケージファイルを置く': {
@@ -184,13 +178,7 @@ const ITEMS: Record<string, { query?: string; check: (p: Page) => Promise<void> 
   '困ったとき/キー操作': {
     check: async (p) => {
       await press(p, '困ったとき', 'キー操作');
-      await expect(p.locator('#help details')).toHaveJSProperty('open', true);
-    },
-  },
-  '困ったとき/配線表を見る': {
-    check: async (p) => {
-      await press(p, '困ったとき', '配線表を見る');
-      await expect(p.getByRole('tab', { name: '配線' })).toHaveAttribute('aria-selected', 'true');
+      await expect(p.locator('#help h2')).toHaveText('キー操作');
     },
   },
   '困ったとき/記録をコピーする': {

@@ -124,7 +124,7 @@
   }
   h2 {
     margin: 0 0 var(--s-4);
-    font: 700 var(--t-title-size) / var(--t-title-lh) var(--f-ja);
+    font: 700 var(--t-heading) / 28px var(--f-ja);
   }
   h2:focus {
     outline: none;
@@ -134,13 +134,13 @@
     align-items: center;
     gap: var(--s-3);
     margin: var(--s-4) 0 var(--s-3);
-    font: 700 var(--t-heading-size) / var(--t-heading-lh) var(--f-ja);
+    font: 700 var(--t-small) / 20px var(--f-ja);
   }
   p {
     margin: 0 0 var(--s-3);
   }
   .n {
-    font: 400 var(--t-body-size) / 1 var(--f-version);
+    font: 400 var(--t-small) / 1 var(--f-mono);
     color: var(--c-muted);
   }
   .pairs {
@@ -153,8 +153,12 @@
   .label {
     color: var(--c-muted);
   }
+  /* A value stays on one line: it scrolls sideways rather than breaking mid-word. */
   .pairs dd {
     margin: 0;
+    min-width: 0;
+    overflow-x: auto;
+    white-space: nowrap;
   }
   .steps,
   .rows {
@@ -180,7 +184,7 @@
   }
   .chip {
     justify-self: start;
-    font: 700 var(--t-small-size) / var(--t-small-lh) var(--f-ja);
+    font: 700 var(--t-caption) / 16px var(--f-ja);
   }
   .bad,
   .cause {
@@ -188,13 +192,13 @@
     font-weight: 700;
   }
   .num {
-    font: 400 var(--t-mono-size) / var(--t-mono-lh) var(--f-mono);
+    font: 400 var(--t-mono) / 20px var(--f-mono);
   }
   label {
     display: grid;
     gap: var(--s-1);
     min-width: 0;
-    font: 700 var(--t-small-size) / var(--t-small-lh) var(--f-ja);
+    font: 700 var(--t-caption) / 16px var(--f-ja);
   }
   input {
     min-height: var(--h-secondary);
@@ -225,7 +229,7 @@
     width: 100%;
     border-collapse: collapse;
     margin-bottom: var(--s-4);
-    font: 400 var(--t-small-size) / var(--t-small-lh) var(--f-ja);
+    font: 400 var(--t-caption) / 16px var(--f-ja);
   }
   th {
     color: var(--c-muted);
@@ -252,7 +256,7 @@
     overflow: auto;
     padding: var(--s-3);
     border: 1px solid var(--c-line);
-    font: 400 var(--t-mono-size) / var(--t-mono-log-lh) var(--f-mono);
+    font: 400 var(--t-mono) / 20px var(--f-mono);
     white-space: pre-wrap;
   }
 </style>

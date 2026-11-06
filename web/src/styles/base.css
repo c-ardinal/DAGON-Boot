@@ -45,9 +45,8 @@ html {
   color-scheme: dark;
   background: var(--c-ink);
   color: var(--c-paper);
-  font: 400 var(--t-body-size) / var(--t-body-lh) var(--f-ja);
+  font: 400 var(--t-small) / 20px var(--f-ja);
   /* the root follows the window's width and height; every size is in rem. 16 px at 1440×900. */
-  font-size: clamp(14px, calc(6.64px + 0.4vw + 0.4vh), 22px);
   font-variant-numeric: tabular-nums;
 }
 
@@ -88,7 +87,7 @@ button {
   border: 1px solid var(--c-line);
   border-radius: var(--r-full);
   background: var(--c-ink);
-  font: 700 var(--t-body-size) / 1 var(--f-ja);
+  font: 700 var(--t-small) / 1 var(--f-ja);
   white-space: nowrap;
   cursor: pointer;
   outline: 3px solid transparent;
@@ -187,13 +186,13 @@ dialog[open]::backdrop {
   align-items: center;
   gap: var(--s-2);
   height: var(--h-primary);
-  padding: 0 0.875rem;
+  padding: 0 var(--s-3);
   border: 0;
   border-radius: var(--r-full);
   /* the main action is blue; red is for failures only. */
   background: var(--c-accent);
   color: var(--c-ink);
-  font: 700 var(--t-body-size) / 1 var(--f-ja);
+  font: 700 var(--t-small) / 1 var(--f-ja);
   white-space: nowrap;
   cursor: pointer;
   outline: 3px solid transparent;
@@ -246,7 +245,9 @@ dialog[open]::backdrop {
   border-radius: var(--r-m);
   font: 700 var(--t-body) / 1 var(--f-ja);
   white-space: nowrap;
-  transition: background-color var(--dur-feedback) var(--ease-out);
+  transition:
+    background-color var(--dur-feedback) var(--ease-out),
+    transform var(--dur-press) var(--ease-out);
 }
 .button-primary-header > span {
   background: var(--c-accent);
@@ -302,7 +303,8 @@ dialog[open]::backdrop {
   cursor: pointer;
   transition:
     background-color var(--dur-feedback) var(--ease-out),
-    opacity var(--dur-quick) var(--ease-out);
+    opacity var(--dur-quick) var(--ease-out),
+    transform var(--dur-press) var(--ease-out);
 }
 .button-primary {
   background: var(--c-accent);
@@ -323,6 +325,44 @@ dialog[open]::backdrop {
 }
 .button-primary:not([aria-disabled='true']):active {
   background: var(--c-accent-press);
+}
+/* Press feedback on every button: it gives a little under the pointer, at once. */
+.button-primary:not([aria-disabled='true']):active,
+.button-secondary:not([aria-disabled='true']):active,
+.button-destructive:not([aria-disabled='true']):active,
+.button-icon:not([aria-disabled='true']):active > .layer,
+.button-primary-header:not([aria-disabled='true']):active > span,
+.button-secondary-header:not([aria-disabled='true']):active > span {
+  transform: scale(0.97);
+}
+/* Button/Destructive: the same shape as primary, red fill; destroying actions only, after a confirmation. */
+.button-destructive {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  gap: var(--s-2);
+  height: var(--h-button);
+  padding: 0 var(--s-5);
+  border: 1px solid transparent;
+  border-radius: var(--r-m);
+  background: var(--c-signal);
+  color: var(--c-ink);
+  font: 700 var(--t-body) / 1 var(--f-ja);
+  white-space: nowrap;
+  cursor: pointer;
+  transition:
+    background-color var(--dur-feedback) var(--ease-out),
+    transform var(--dur-press) var(--ease-out);
+}
+@media (hover: hover) and (pointer: fine) {
+  .button-destructive:hover {
+    background: var(--c-signal-hover);
+  }
+}
+.button-destructive:focus-visible {
+  outline: var(--st-w-focus) solid var(--c-paper);
+  outline-offset: 2px;
 }
 .button-primary[aria-disabled='true'],
 .button-secondary[aria-disabled='true'] {
@@ -354,7 +394,9 @@ dialog[open]::backdrop {
   display: inline-flex;
   padding: var(--p-layer);
   border-radius: var(--r-full);
-  transition: background-color var(--dur-feedback) var(--ease-out);
+  transition:
+    background-color var(--dur-feedback) var(--ease-out),
+    transform var(--dur-press) var(--ease-out);
 }
 @media (hover: hover) and (pointer: fine) {
   .button-icon:not([aria-disabled='true']):hover > .layer {
@@ -381,7 +423,7 @@ dialog[open]::backdrop {
   border-radius: var(--r-full);
   background: var(--c-ink);
   color: var(--c-paper);
-  font: 700 var(--t-caption-size) / 1 var(--f-ja);
+  font: 700 var(--t-caption) / 1 var(--f-ja);
   letter-spacing: 0.04em;
   white-space: nowrap;
 }
@@ -393,7 +435,13 @@ dialog[open]::backdrop {
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .primary:active {
+  .primary:active,
+  .button-primary:active,
+  .button-secondary:active,
+  .button-destructive:active,
+  .button-icon:active > .layer,
+  .button-primary-header:active > span,
+  .button-secondary-header:active > span {
     transform: none;
   }
 }

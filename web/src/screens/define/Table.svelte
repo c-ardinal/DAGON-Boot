@@ -1,7 +1,7 @@
 <script lang="ts">
   import { INSPECT, TABLE, WIRING } from '../../app/copy.ts';
   import type { Define } from '../../app/define/define.svelte.ts';
-  import { connect, removeLink, removeNode } from '../../app/define/model.ts';
+  import { connect } from '../../app/define/model.ts';
 
   interface Props {
     d: Define;
@@ -57,7 +57,7 @@
               <td translate="no">{[n.reset, n.boot].filter(Boolean).join(' · ')}</td>
               <td class="ops">
                 <button class="secondary" onclick={() => edit(`node:${n.id}`)}>{TABLE.edit}</button>
-                <button class="secondary" onclick={() => d.apply(removeNode(d.doc, n.id))}>{TABLE.remove}</button>
+                <button class="secondary destructive" onclick={() => d.requestRemove(`node:${n.id}`)}>{TABLE.remove}</button>
               </td>
             </tr>
           {/each}
@@ -67,7 +67,7 @@
       <table>
         <thead><tr>{#each TABLE.linkCols as h (h)}<th scope="col">{h}</th>{/each}<th></th></tr></thead>
         <tbody>
-          {#each c.links as l, i (l.to)}
+          {#each c.links as l (l.to)}
             <tr>
               <td>{nameOf(l.from)}</td>
               <th scope="row">{nameOf(l.to)}</th>
@@ -76,7 +76,7 @@
               <td translate="no">{l.wires.map((w) => w.hubPin).filter((p) => p.startsWith('GPIO')).join(' · ')}</td>
               <td class="ops">
                 <button class="secondary" onclick={() => edit(`link:${l.to}`)}>{TABLE.edit}</button>
-                <button class="secondary" onclick={() => d.apply(removeLink(d.doc, i))}>{TABLE.remove}</button>
+                <button class="secondary destructive" onclick={() => d.requestRemove(`link:${l.to}`)}>{TABLE.remove}</button>
               </td>
             </tr>
           {/each}
@@ -102,7 +102,9 @@
     display: grid;
     grid-template-rows: auto auto minmax(0, 1fr);
     gap: var(--s-3);
+    min-width: 0;
     min-height: 0;
+    height: 100%;
     padding: var(--s-4) var(--s-5);
   }
   .tools {
@@ -120,7 +122,7 @@
     border-bottom: 3px solid transparent;
     background: none;
     color: var(--c-muted);
-    font: 700 var(--t-body-size) / var(--t-body-lh) var(--f-ja);
+    font: 700 var(--t-small) / 20px var(--f-ja);
     cursor: pointer;
   }
   [role='tab'][aria-selected='true'] {
@@ -134,7 +136,7 @@
   table {
     width: 100%;
     border-collapse: collapse;
-    font: 400 var(--t-small-size) / var(--t-small-lh) var(--f-ja);
+    font: 400 var(--t-caption) / 16px var(--f-ja);
   }
   thead th {
     position: sticky;
@@ -152,8 +154,16 @@
   tbody th {
     text-align: left;
   }
+  /* The actions stay at the right edge while the columns scroll under them. */
   .ops {
+    position: sticky;
+    right: 0;
     display: flex;
     gap: var(--s-2);
+    background: var(--c-layer-0);
+  }
+  .destructive {
+    border-color: var(--c-signal);
+    color: var(--c-signal);
   }
 </style>

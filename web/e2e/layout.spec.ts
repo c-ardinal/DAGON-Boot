@@ -47,7 +47,7 @@ test('sweep: no overflow, overlap or clipped text at any window, in 準備 (shee
   await page.setViewportSize({ width: 1920, height: 1080 });
   await page.getByRole('radio', { name: '書込' }).click();
   await settled(page);
-  await page.getByRole('button', { name: '接続する' }).click();
+  await page.locator('header').getByRole('button', { name: '接続する' }).click();
   await page.locator('.st-alive').first().waitFor({ timeout: 30_000 });
   await page.getByRole('button', { name: 'バージョンを選んで書き込む' }).waitFor();
   await expect(page.locator('.split .caret')).toHaveAttribute('aria-disabled', 'false', { timeout: 15_000 });
@@ -140,24 +140,58 @@ test('version choice and write are one split button; no separate dropdown', asyn
   expect(caret!.y).toBe(main!.y);
 });
 
-test('undo and redo are icons at the canvas top-left, in 準備 only; the view toggle is two icons at its top-right', async ({ page }) => {
+test('undo, redo, the view toggle and the connection are in the header; the edit tools in 準備 only', async ({ page }) => {
   await page.setViewportSize({ width: 1920, height: 1080 });
   await openSample(page);
-  const stage = (await page.locator('.stage').boundingBox())!;
+  const bar = (await page.locator('.frame > header').boundingBox())!;
+  const inBar = (b: { y: number; height: number }) => b.y >= bar.y && b.y + b.height <= bar.y + bar.height;
   const undo = (await page.getByRole('button', { name: '元に戻す' }).boundingBox())!;
   const redo = (await page.getByRole('button', { name: 'やり直す' }).boundingBox())!;
-  expect(undo.x - stage.x).toBeLessThan(80);
-  expect(undo.y - stage.y).toBeLessThan(40);
+  const seg = (await page.locator('header .seg').boundingBox())!;
+  const hub = (await page.locator('header').getByRole('button', { name: '接続する' }).boundingBox())!;
+  for (const b of [undo, redo, seg, hub]) expect(inBar(b)).toBe(true);
   expect(redo.x).toBeGreaterThan(undo.x);
-  const seg = (await page.locator('.seg').boundingBox())!;
-  expect(stage.x + stage.width - (seg.x + seg.width)).toBeLessThan(40);
-  expect(seg.y - stage.y).toBeLessThan(40);
+  expect(seg.x).toBeGreaterThan(redo.x);
   for (const name of ['元に戻す', 'やり直す']) expect((await page.getByRole('button', { name }).innerText()).trim()).toBe('');
-  for (const name of ['グラフ', '表']) expect((await page.getByRole('radio', { name, exact: true }).innerText()).trim()).toBe('');
   await page.getByRole('radio', { name: '書込' }).click();
   await settled(page);
   expect(await page.getByRole('button', { name: '元に戻す' }).count()).toBe(0);
-  expect(await page.locator('.seg').count()).toBe(0);
+  expect(await page.locator('header .seg').count()).toBe(0);
+  await expect(page.locator('header').getByRole('button', { name: '接続する' })).toBeVisible();
+  // At a narrow bar the edit tools give way to ☰, where they always are.
+  await page.setViewportSize({ width: 1024, height: 768 });
+  await page.getByRole('radio', { name: '準備' }).click();
+  await settled(page);
+  expect(await page.locator('header .edit').evaluate((e) => getComputedStyle(e).display)).toBe('none');
+  await page.getByRole('button', { name: 'メニューを開く' }).click();
+  await page.getByRole('button', { name: '構成', exact: true }).click();
+  await expect(page.locator('.panel').last().locator('button:has(span:text-is("元に戻す"))')).toBeVisible();
+});
+
+test('a sheet closes by its ×, by Escape and by the canvas background; deleting asks first', async ({ page }) => {
+  await page.setViewportSize({ width: 1920, height: 1080 });
+  await openSample(page);
+  await page.locator('.node').first().dispatchEvent('click');
+  await expect(page.locator('.sheet')).toBeVisible();
+  await page.getByRole('button', { name: 'シートを閉じる' }).click();
+  await expect(page.locator('.sheet')).toHaveCount(0);
+  await page.locator('.node').first().dispatchEvent('click');
+  await page.keyboard.press('Escape');
+  await expect(page.locator('.sheet')).toHaveCount(0);
+  await page.locator('.node').first().dispatchEvent('click');
+  const box = (await page.locator('.box').boundingBox())!;
+  await page.mouse.click(box.x + 40, box.y + box.height - 200);
+  await expect(page.locator('.sheet')).toHaveCount(0);
+  const nodes = await page.locator('.node').count();
+  await page.locator('.node').nth(1).dispatchEvent('click');
+  await page.getByRole('button', { name: 'このノードを消す' }).click();
+  await expect(page.locator('dialog[open]')).toBeVisible();
+  expect(await page.locator('.node').count()).toBe(nodes);
+  await page.locator('dialog[open]').getByRole('button', { name: 'やめる' }).click();
+  expect(await page.locator('.node').count()).toBe(nodes);
+  await page.getByRole('button', { name: 'このノードを消す' }).click();
+  await page.locator('dialog[open]').getByRole('button', { name: '消す' }).click();
+  await expect(page.locator('.node')).toHaveCount(nodes - 1);
 });
 
 test('the zoom readout stays inside the pill, every part on its axis, at the bottom-right', async ({ page }) => {

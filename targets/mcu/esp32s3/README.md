@@ -219,7 +219,7 @@ from a trial, REBOOT without CONFIRM: the 2nd stage rolls back.
 cargo build --release                       # the library for Xtensa
 # receiver, liveness, trial watchdog, ROM entry and factory flow on the host
 # (test builds: the host tests sign with their own keys)
-DAGON_ALLOW_TEST_KEY=1 cargo +stable test --lib --target x86_64-pc-windows-msvc
+DAGON_ALLOW_TEST_KEY=1 cargo +1.95.0 test --lib --target x86_64-pc-windows-msvc
 ```
 
 Features: `conform` answers CONF_RUN (CT-01/02/03/07/08) in front of the

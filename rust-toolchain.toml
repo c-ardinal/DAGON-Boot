@@ -1,3 +1,4 @@
 [toolchain]
-channel = "stable"
+channel = "1.95.0"
+components = ["rustfmt", "clippy"]
 targets = ["thumbv6m-none-eabi", "thumbv7em-none-eabihf", "wasm32-unknown-unknown"]

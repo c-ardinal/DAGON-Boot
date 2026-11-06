@@ -23,10 +23,6 @@ Extension isolation:
 - There is no sandbox at run time (Service ABI, Entry Gate, Operation Cancellation, Fault Unwind, Lockup Fuse, Reset Cleanup, SandboxArch). Definitions are checked and protection maps are generated.
 - Protection maps can be generated only for the kinds `armv6m-mpu` and `armv7m-mpu`.
 
-Operating systems:
-
-- Running on macOS is not confirmed by any run. CI runs Linux and Windows.
-
 Links:
 
 - Firmware exists only for the link kinds `usb-cdc`, `uart` and `i2c`. `ble`, `wifi-tcp`, `ethernet` and `can` have none.
@@ -43,9 +39,8 @@ The signing key:
 Values and IDs:
 
 - The USB VID:PID `c0de:cafe` is a test ID, fixed in the code. It is not an assigned one.
-- DAGON's own MCU definitions hold values whose source has not been checked. They are marked `unverified` in the definition.
-- The execution model's budgets ([section 12](/en/explanation/lifecycle-events/#12-execution-model)) are not values measured on hardware.
-- That the boot loader's trial cell keeps its value rests only on the vendors' documents. It is not checked per board.
+- DAGON's own MCU definitions hold values marked `unverified`.
+- The execution model's budgets ([section 12](/en/explanation/lifecycle-events/#12-execution-model)) are not set the way 12.3 says.
 
 Components in the design figure that the code does not have:
 

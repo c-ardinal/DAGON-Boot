@@ -240,6 +240,26 @@ class Wording(unittest.TestCase):
         found = [p.name for p in (ROOT / "README.md", ROOT / "README.en.md", *llms.DOCS.rglob("*.md*")) if flat.search(p.read_text(encoding="utf-8"))]
         self.assertEqual(found, [])
 
+    # Pages state requirements and facts of the design, never what was run, measured or confirmed.
+    REPORTED = re.compile(r"\d で確認|確かめていません|確かめていない|確認済|実機で確かめ|実機で測定|シミュレータでだけ|CI で|ボードごとには|モデルは.*見つけ"
+                          r"|(?i:\bin CI\b|\bCI runs\b|tested on|checked on \d|confirmed on \d|not verified|not confirmed by|not run on hardware|the model found|measured on hardware|\d+ of \d+ pass)")
+    # What the words describe here is a rule for a definition's data, not something that was run.
+    REPORTED_QUOTES = ["出典を確かめていない", "ボードで確かめていない", "グラフを確かめていない", "確かめていないと報告"]
+
+    def test_no_page_reports_what_was_run(self):
+        found = []
+        for p in (ROOT / "README.md", ROOT / "README.en.md", *llms.DOCS.rglob("*.md*")):
+            for n, line in enumerate(p.read_text(encoding="utf-8").splitlines(), 1):
+                for quote in self.REPORTED_QUOTES:
+                    line = line.replace(quote, "")
+                if self.REPORTED.search(line):
+                    found.append(f"{p.name}:{n}")
+        self.assertEqual(found, [])
+
+    def test_no_page_names_a_dagon_release(self):
+        found = [p.name for p in llms.DOCS.rglob("*.md*") if re.search(r"cli-v\d", p.read_text(encoding="utf-8"))]
+        self.assertEqual(found, [])
+
     def test_console_goes_by_its_full_name_on_the_pages(self):
         found = []
         for p in llms.DOCS.rglob("*.md*"):

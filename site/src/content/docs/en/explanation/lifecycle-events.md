@@ -36,7 +36,7 @@ state machine, and every transition emits its event. The machines are
 declared once each with `state_machine!` (1.7). The normative catalog is
 the generated one: [Events](/en/reference/events/), produced from the machines'
 `CATALOG` constants (kind, payload, attributes, observer path) and
-checked against them in CI. The event tables in this section are
+checked against them by a test. The event tables in this section are
 illustrative examples of what the machines produce; they carry no entry
 the generated catalog does not, and when the two differ the generated
 catalog is right. 1.8 shows, with the same caveat, how each class of
@@ -1297,7 +1297,7 @@ The one authentication rule, applied by every verifier in the chain
   ROM's 256-byte second stage). STM32F401RE: 16 KiB, all of sector 0
   where the core fetches its reset vector (the smallest erase unit
   holding it, so no write ever erases stage0). Every build must leave
-  1/16 of the region free (`scripts/stage0_size.py`, in CI): the board-less
+  1/16 of the region free (`scripts/stage0_size.py`): the board-less
   build and one per board whose definition names the MCU, since a board
   puts its boot LED and halt pattern into stage0. Stage0 is never written
   in the field but is rebuilt for every new node with the toolchain of

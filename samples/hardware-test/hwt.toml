@@ -53,6 +53,16 @@ sync = { seg = "f401-app", watch = "esp32s3-app" }
 #                                             dagon apply must refuse it, nothing changes
 #   rollback node                            dagon rollback; the node is on the version its
 #                                             other slot held, confirmed, slot flipped
+#   core     node version [expect]           sets the node's boot crate version
+#                                             (boot/<node>/Cargo.toml) to `version`, the app
+#                                             stays on the version it runs; dagon deploy, its
+#                                             plan checked as above
+#            expect = "ok"          (default) `dagon status`: boot core `version`, running and
+#                                             confirmed, in the slot that was idle
+#            expect = "rolled-back"           built with boot_features = no-confirm (the core
+#                                             fails its own check); the CLI fails with
+#                                             BootCoreRolledBack; the core it ran is running and
+#                                             confirmed, the other is not; the node answers
 #   skip     reason                          recorded as SKIPPED
 
 [[scenario]]
@@ -147,6 +157,24 @@ steps = [
   { do = "deploy", version = "2.0.14" },
   { do = "deploy", version = "2.0.15" },
   { do = "deploy", version = "2.0.16" },
+]
+
+[[scenario]]
+id = "core-seg"
+title = "seg boot core to the idle slot, back to the other, and a failing one goes back"
+steps = [
+  { do = "core", node = "seg", version = "2.1.1" },
+  { do = "core", node = "seg", version = "2.1.2" },
+  { do = "core", node = "seg", version = "2.1.3", expect = "rolled-back" },
+]
+
+[[scenario]]
+id = "core-hub"
+title = "hub boot core to the idle slot, back to the other, and a failing one goes back"
+steps = [
+  { do = "core", node = "hub", version = "2.1.4" },
+  { do = "core", node = "hub", version = "2.1.5" },
+  { do = "core", node = "hub", version = "2.1.6", expect = "rolled-back" },
 ]
 
 [[scenario]]

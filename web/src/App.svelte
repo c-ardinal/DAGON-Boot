@@ -618,6 +618,7 @@
     silent: NODE.silent,
     refused: NODE.refusedOther,
     previous: NODE.previous,
+    coreBack: WRITE.coreBack.label,
     unwritten: NODE.unwritten,
   };
   /** Stages in which a card shows → the new version and its one %. */
@@ -990,6 +991,7 @@
       stuck: op.recoverTarget?.name,
       responding: op.responding,
       unwritten,
+      stopped: op.failed ? op.progress[op.failed]?.stage : undefined,
       rest: op.rest && op.state === 'fileReady',
       finish: op.finished,
       refused: op.returnRefused?.kind,
@@ -1580,8 +1582,9 @@
   {#if stopOpen && stopNode && !op.wentBack}
     <StopModal
       target={`[${stopNode.no}] ${stopNode.name}`}
-      reason={next.cause ?? WRITE.failed}
-      fix={next.sentence}
+      label={op.coreWentBack ? WRITE.coreBack.label : undefined}
+      reason={op.coreWentBack ? WRITE.coreBack.detail : (next.cause ?? WRITE.failed)}
+      fix={op.coreWentBack ? WRITE.coreBack.next : next.sentence}
       onclose={() => (stopClosed = op.failed)}
       onmore={() => ((drawerTab = 'log'), (stopClosed = op.failed))}
     >

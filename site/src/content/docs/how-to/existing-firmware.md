@@ -1,34 +1,20 @@
 ---
-title: "Adding DAGON to existing firmware"
-description: "Give a firmware you already have DAGON's agent and updates."
+title: "既にあるファームウェアに DAGON を組み込む"
+description: "手元のファームウェアに DAGON のエージェントと書き込みを足します。"
 ---
 
-For firmware that is not a `dagon new` project:
+`dagon new` のプロジェクトではないファームウェアの場合:
 
-1. Add the crates as git dependencies pinned to a release tag, for example
-   `dagon-agent = { git = "<repository URL>", tag = "<release tag>" }`, and
-   the same for `dagon-format`, `dagon-proto`, `dagon-port` and, for a boot
-   core, `dagon-core`.
-2. On a supported MCU, use the MCU package (`targets/mcu/<mcu>`: flash
-   layout, linker map, boot images, watchdog, links) and a board package
-   (`targets/boards/<board id>`), or implement the MCU package's `BoardDef`
-   for your own board; the MCU package READMEs show a complete app in about
-   20 lines. On another MCU, lay out the flash the same way: a boot core,
-   two state log faces, and slots A and B, each starting with the 512-byte
-   signed image header and the body at slot start + 0x200.
-3. Implement the `dagon-port` traits for your board (`Flash`, `Link`,
-   `Reset`, `Watchdog`, and `BootSelectS` or `BootSelectV`) and a
-   `dagon_agent::SlotStore`, compose the app layer's chain (your
-   extensions answer the decision points and observe the events, see
-   [Events](/reference/events/)), then start the agent with your link:
+1. crate をリリースのタグに固定した git 依存として加えます。例: `dagon-agent = { git = "<リポジトリの URL>", tag = "<リリースのタグ>" }`。`dagon-format`、`dagon-proto`、`dagon-port`、ブートコアを作るなら `dagon-core` も同様です。
+2. 対応するマイコンなら、MCU のパッケージ（`targets/mcu/<mcu>`。フラッシュの配置、リンカの割り付け、ブート用のイメージ、見守り、リンク）とボードのパッケージ（`targets/boards/<board id>`）を使うか、自分のボード用に MCU のパッケージの `BoardDef` を実装します。MCU のパッケージの README に、約 20 行の完全なアプリがあります。ほかのマイコンでは同じ形にフラッシュを割り付けます: ブートコア、状態ログ 2 面、スロット A と B。各スロットの先頭に 512 バイトの署名付きイメージヘッダ、本体はスロット先頭 + 0x200。
+3. ボード用に `dagon-port` の trait（`Flash`、`Link`、`Reset`、`Watchdog`、`BootSelectS` か `BootSelectV`）と `dagon_agent::SlotStore` を実装し、アプリ層のチェーンを組み立て（拡張が判断点に答え、イベントを受け取ります。[Events](/reference/events/) を参照）、リンクを渡してエージェントを起動します:
 
    ```rust
    let chain = dagon_events::compose(Layer::App, events, board_exts, user_exts, bounds);
    let cfg = dagon_agent::Config { pubkey, mcu_id, port_kind, target_tag, role, mode, max_payload };
    let mut agent = dagon_agent::Agent::new(cfg, store, chain);
-   agent.run(&mut link, &mut reset).await;                    // serves requests forever
+   agent.run(&mut link, &mut reset).await;                    // 要求に応え続ける
    ```
 
-   Feed the watchdog while confirmed, and only for a limited time while on
-   trial, so an image that is never confirmed is reset and rolled back.
-4. Check the port with `dagon conform`.
+   確定済みのあいだはウォッチドッグに給餌し、試行中は限られた時間だけ給餌して、確定されないイメージがリセットされ巻き戻るようにします。
+4. `dagon conform` で移植を確かめます。

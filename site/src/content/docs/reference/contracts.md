@@ -1,21 +1,21 @@
 ---
-title: Contracts and components
-description: Every contract's format number and every component's version, from compat.toml.
+title: 取り決めと部品
+description: 取り決めごとの形式の番号と、部品ごとのバージョンです。
 editUrl: false
 ---
 
 :::note
-Generated from `compat.toml`; do not edit. Regenerate with `python site/scripts/gen.py`.
+`compat.toml` から生成しています。直接編集せず、`python site/scripts/gen.py` でもう一度生成してください。
+「番号の置き場所」の列は元のソースのままで、英語です。
 :::
 
-Every contract between DAGON's components and the number it is at, and
-every component with its version and the format numbers it reads and
-writes, as `compat.toml` holds them. The rules for changing them are in
-[Versions and releases](/explanation/versioning/).
+DAGON の部品のあいだの取り決めとその番号、部品ごとのバージョンと、読み書きする形式の番号です。
+どれも `compat.toml` にあるとおりです。変えるときの決まりは
+[Versions and releases](/explanation/versioning/) にあります。
 
-## Contracts
+## 取り決め
 
-| Contract | Format | Where the number is written |
+| 取り決め | 形式の番号 | 番号の置き場所 |
 |---|---|---|
 | `wire` | 1 | frames and payloads between host, hub and nodes: byte 2 of every frame, HELLO proto_ver (dagon-proto PROTO_VERSION) |
 | `image-header` | 1 | signed 512-byte image header: offset 0x004 (dagon-format header::HDR_VERSION) |
@@ -30,9 +30,9 @@ writes, as `compat.toml` holds them. The rules for changing them are in
 | `extension-manifest` | 1 | dagon-extension.toml: its `format` key (dagon-extension MANIFEST_FORMAT) |
 | `boot-program` | 1 | boot action program ops in a board's [boot]: the generated BOOT_PROGRAM_FORMAT (dagon-topology defs::board_boot::BOOT_PROGRAM_FORMAT) |
 
-## Components
+## 部品
 
-| Component | Version | Packages | Formats |
+| 部品 | バージョン | パッケージ | 形式 |
 |---|---|---|---|
 | `cli` | 0.1.0 | `dagon-cli` | `wire` 1, `image-header` 1, `state-log` 1, `manifest` 1, `bundle` 1, `topology-bin` 1, `topology-yaml` 1, `definitions` 1, `serve-api` 1, `event` 1, `extension-manifest` 1, `boot-program` 1 |
 | `boot-rp2040` | 0.1.0 | `dagon-rp2040-stage0`, `dagon-rp2040-bootcore` | `image-header` 1, `state-log` 1, `event` 1 |

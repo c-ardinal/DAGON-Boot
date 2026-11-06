@@ -1,64 +1,64 @@
 ---
-title: Agent definition format
-description: The keys of an agent definition file, from the types dagon reads it into.
+title: エージェント定義の形式
+description: エージェントの定義ファイルのキーです。
 editUrl: false
 ---
 
 :::note
-Generated from `crates/dagon-cli/src/agents/`, `crates/dagon-cli/agents/`; do not edit. Regenerate with `python site/scripts/gen.py`.
+`crates/dagon-cli/src/agents/`, `crates/dagon-cli/agents/` から生成しています。直接編集せず、`python site/scripts/gen.py` でもう一度生成してください。
+「意味」の列は元のソースのままで、英語です。
 :::
 
-An agent is a TOML file: the builtin ones ship with `dagon`, and you add your
-own in `~/.dagon/agents/*.toml` (never in a project). Unknown keys, a kind
-DAGON does not implement or an id that is taken make the file not load.
+エージェントは TOML ファイルです。組み込みのものは `dagon` に入っていて、自分のものは
+`~/.dagon/agents/*.toml` に足します（プロジェクトの中には置きません）。知らないキー、
+DAGON に無い種類、使われている id があるファイルは読み込みません。
 
-Definition format: **1** (`dagon_agent = 1`). A dagon that reads another
-number refuses the file and says why.
+定義の形式: **1**（`dagon_agent = 1`）。別の番号のファイルは、理由を示して受け付けません。
 
-## Agent
+## エージェント
 
-| Key | Type | Required | Meaning |
+| キー | 型 | 必須か | 意味 |
 |---|---|---|---|
-| `dagon_agent` | integer | yes | The definition format, `FORMAT`. |
-| `id` | string | yes | The agent's id: lower-case letters, digits and '-', up to 32; unique among all agents. |
-| `name` | string | yes | The name the linking texts show. |
-| `provider` | string | yes | Who makes the agent, shown after its name. |
-| `ways` | `[[ways]]` tables | yes | The ways to reach the agent, in order; the first is the default. |
+| `dagon_agent` | 整数 | 必須 | The definition format, `FORMAT`. |
+| `id` | 文字列 | 必須 | The agent's id: lower-case letters, digits and '-', up to 32; unique among all agents. |
+| `name` | 文字列 | 必須 | The name the linking texts show. |
+| `provider` | 文字列 | 必須 | Who makes the agent, shown after its name. |
+| `ways` | `[[ways]]` テーブル | 必須 | The ways to reach the agent, in order; the first is the default. |
 
 ## `[[ways]]`
 
-| Key | Type | Required | Meaning |
+| キー | 型 | 必須か | 意味 |
 |---|---|---|---|
-| `id` | string | yes | The way's id, unique within its agent (same characters as an agent id). |
-| `name` | string | yes | The name the linking texts show for this way. |
-| `transport` | `[ways.transport]` table | yes | How DAGON reaches the agent this way: one of the transport kinds and its keys. |
+| `id` | 文字列 | 必須 | The way's id, unique within its agent (same characters as an agent id). |
+| `name` | 文字列 | 必須 | The name the linking texts show for this way. |
+| `transport` | `[ways.transport]` テーブル | 必須 | How DAGON reaches the agent this way: one of the transport kinds and its keys. |
 
 ## `[ways.transport]`
 
-`kind` is one of: `command`, `messages-http`.
+`kind` は次のどれかです: `command`, `messages-http`。
 
 ### `kind = "command"`
 
-| Key | Type | Required | Meaning |
+| キー | 型 | 必須か | 意味 |
 |---|---|---|---|
-| `program` | string | yes | A name looked up on PATH, or a path. |
-| `args` | array of strings | no | The arguments, in order; `{system_file}` is replaced by the system text's file when `system = "file"`. |
-| `system` | string | no | How the system text reaches the program. |
-| `pass_env` | array of strings | no | Environment variables passed on besides `BASE_ENV` (names only). |
+| `program` | 文字列 | 必須 | A name looked up on PATH, or a path. |
+| `args` | 文字列の配列 | 任意 | The arguments, in order; `{system_file}` is replaced by the system text's file when `system = "file"`. |
+| `system` | 文字列 | 任意 | How the system text reaches the program. |
+| `pass_env` | 文字列の配列 | 任意 | Environment variables passed on besides `BASE_ENV` (names only). |
 
-`system` is one of: `stdin` (Before the user text on stdin.), `file` (In a file in the call's folder, named by the `{system_file}` arg.).
+`system` は次のどれかです: `stdin` (Before the user text on stdin.), `file` (In a file in the call's folder, named by the `{system_file}` arg.)。
 
 ### `kind = "messages-http"`
 
-| Key | Type | Required | Meaning |
+| キー | 型 | 必須か | 意味 |
 |---|---|---|---|
-| `url` | string | yes | The messages endpoint, https only. |
-| `version` | string | yes | The `anthropic-version` header. |
-| `model` | string | yes | The model named in each request. |
-| `model_env` | string | no | An environment variable that overrides `model`, if set. |
+| `url` | 文字列 | 必須 | The messages endpoint, https only. |
+| `version` | 文字列 | 必須 | The `anthropic-version` header. |
+| `model` | 文字列 | 必須 | The model named in each request. |
+| `model_env` | 文字列 | 任意 | An environment variable that overrides `model`, if set. |
 
-## Builtin agents
+## 組み込みのエージェント
 
-| Id | Name | Provider | Ways |
+| Id | 名前 | 提供元 | つなぎ方 |
 |---|---|---|---|
 | `claude` | Claude | Anthropic | `claude-code` (command), `api` (messages-http) |

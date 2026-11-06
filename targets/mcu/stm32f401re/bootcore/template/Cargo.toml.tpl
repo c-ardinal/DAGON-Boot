@@ -19,6 +19,8 @@ path = "boot.rs"
 test = false
 
 [features]
+# Test build that fails its own check, so its trial goes back to the confirmed core.
+no-confirm = ["dagon-stm32f401re-bootcore/no-confirm"]
 # Linked for boot core slot B (a release carries a core for each slot).
 slot-b = ["dagon-stm32f401re-bootcore/slot-b"]
 

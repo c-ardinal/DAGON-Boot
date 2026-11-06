@@ -1,10 +1,9 @@
 ---
-title: "Words used here"
-description: "node, hub, child and topology as these pages use them."
+title: "このページの言葉"
+description: "ノード、親機、子機、構成の意味です。"
 ---
 
-- **node**: one microcontroller of your setup.
-- **hub**: the node on the PC's USB. It relays updates to the other nodes.
-- **child**: a node the hub reaches over I2C or UART.
-- **topology**: the nodes, how they are linked, and the update order
-  (`topology.yaml`).
+- **ノード**: 構成の中の 1 つのマイコン。
+- **親機**: PC と USB でつながるノード。ほかのノードへの書き込みを中継します。
+- **子機**: 親機から I2C か UART でつながるノード。
+- **構成**: ノード、そのリンク、書き込みの順番（`topology.yaml`）。

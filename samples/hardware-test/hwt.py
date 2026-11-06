@@ -39,6 +39,9 @@ LINE = re.compile(
     r"last reason (?P<reason>\d+), \[(?P<slots>.*)\]$"
 )
 SLOT = re.compile(r"([ABF]):(\w+) ([^,\s]+)")
+# `dagon status`' versions line of a node; the boot core part is
+# `A:Confirmed 1.0.0 (running), B:Empty`, or `none (...)` / `unknown`.
+VERSIONS = re.compile(r"^(?P<id>[\w-]+): versions: stage0 [^;]+; boot core (?P<core>[^;]+); ")
 # `dagon deploy`'s plan before its prompt (deploy-plan.txt is one, as the CLI prints it):
 #   deploy to <n> node(s) (<package file>):
 #     <node>  <version now, or (none)> -> <new version>
@@ -52,7 +55,12 @@ def parse_status(text, coordinator="hub"):
     """`dagon status` output -> {node: {...}}; a node without an answer maps
     to None. The CLI names the coordinator `hub` whatever its id."""
     out = {}
+    boots = {}
     for line in text.splitlines():
+        v = VERSIONS.match(line.strip())
+        if v:
+            boots[v["id"]] = parse_core(v["core"])
+            continue
         m = LINE.match(line.strip())
         if m:
             slots = {s: {"state": st, "version": v} for s, st, v in SLOT.findall(m["slots"])}
@@ -68,8 +76,22 @@ def parse_status(text, coordinator="hub"):
             }
         elif re.match(r"^[\w-]+: (no answer|not reachable)", line.strip()):
             out[line.split(":")[0]] = None
+    for k, n in out.items():
+        if n:
+            n["boot"] = boots.get(k)
     if "hub" in out and coordinator != "hub":
         out[coordinator] = out.pop("hub")
+    return out
+
+
+def parse_core(text):
+    """The boot core part of a versions line -> {"running": slot, slot: {...}};
+    None for a node without boot core slots, or when they are not known."""
+    found = re.findall(r"([AB]):(\w+)(?: ([^\s,]+))?( \(running\))?", text)
+    if not found:
+        return None
+    out = {s: {"state": st, "version": v or None} for s, st, v, _ in found}
+    out["running"] = next((s for s, _, _, r in found if r), None)
     return out
 
 
@@ -112,6 +134,17 @@ def set_crate_version(manifest, version):
     new = head + sep + table + nxt + tail
     if new != text:
         Path(manifest).write_text(new, encoding="utf-8", newline="\n")
+
+
+@contextlib.contextmanager
+def crate_version_back(manifest, version, keep):
+    """Sets the crate's version back to `version` however the block ends,
+    unless `keep()` says what was written took over."""
+    try:
+        yield
+    finally:
+        if not keep():
+            set_crate_version(manifest, version)
 
 
 def select(scs, only, start):
@@ -288,14 +321,15 @@ class Run:
         cfg = tomllib.loads((self.project / "dagon.toml").read_text(encoding="utf-8"))
         return self.project / cfg["build"][node]["package"] / "Cargo.toml"
 
-    def fail_config(self, nodes):
-        """dagon.hwt-fail.toml: dagon.toml with the self-check-failing feature for `nodes`."""
+    def fail_config(self, nodes, key="features"):
+        """dagon.hwt-fail.toml: dagon.toml with the self-check-failing feature for
+        `nodes`, of their app (`features`) or their boot core (`boot_features`)."""
         text = (self.project / "dagon.toml").read_text(encoding="utf-8")
         for n in nodes:
             head = f"[build.{n}]\n"
             if head not in text:
                 raise Fail(f"no [build.{n}] in dagon.toml")
-            text = text.replace(head, f'{head}features = ["{self.setup["fail_feature"]}"]\n', 1)
+            text = text.replace(head, f'{head}{key} = ["{self.setup["fail_feature"]}"]\n', 1)
         p = self.project / "dagon.hwt-fail.toml"
         p.write_text(text, encoding="utf-8")
         return p
@@ -315,6 +349,8 @@ class Run:
             return "-", 0, None, before, ""
         if kind == "deploy":
             return self.deploy(name, s, before)
+        if kind == "core":
+            return self.core_update(name, s, before)
         if kind in ("tamper", "foreign"):
             return self.refused(name, s, before)
         if kind == "rollback":
@@ -376,6 +412,44 @@ class Run:
         for k in self.nodes:
             expect(core(st[k]) == core(before[k]), f"{k}: changed after the interrupt")
         return cmd, rc, log, st, f"killed at {inter[1]}%"
+
+    def core_update(self, name, s, before):
+        """Raises the node's boot crate to the step's version and writes the node
+        with its app on the version it runs (a write also takes the app to its
+        other slot). Asserted through `dagon status`' versions lines. A failing
+        core's version is taken back afterwards, so later steps do not write it."""
+        node, v = s["node"], s["version"]
+        n = before[node]
+        expect(n and n["boot"] and n["boot"]["running"],
+               f"{node}: no running boot core in its versions line")
+        failing = s.get("expect") == "rolled-back"
+        manifest = self.project / "boot" / node / "Cargo.toml"
+        if failing and f'\n{self.setup["fail_feature"]} = ' not in manifest.read_text(encoding="utf-8"):
+            raise Fail(f"{manifest}: no {self.setup['fail_feature']} feature; run dagon gen")
+        app = n["version"]
+        release = self.project / "out" / "deploy" / f"v{app}.dgb"
+        set_crate_version(self.crate(node), app)
+        was = n["boot"][n["boot"]["running"]]["version"]
+        took_over = []
+        with crate_version_back(manifest, was, keep=lambda: bool(took_over)):
+            set_crate_version(manifest, v)
+            cfg = self.fail_config([node], "boot_features") if failing else None
+            rc, text, cmd, log = self.cli(["deploy", node, "--key", self.key], name, config=cfg,
+                                          plan=(app, [node], release))
+            if failing:
+                expect(rc != 0 and "BootCoreRolledBack" in text,
+                       f"deploy of a failing boot core: rc={rc}, no BootCoreRolledBack")
+                st = self.wait_settled({node: app}, f"{name}-after")
+                check_core_back(st[node], n["boot"])
+                # The write stopped at the core: the app did not move, nor did any other node.
+                unchanged(before, st, self.nodes, slots=True)
+                return cmd, rc, log, st, f"{node} back on boot core slot {n['boot']['running']}"
+            expect(rc == 0, f"deploy rc={rc}")
+            st = self.wait_settled({node: app}, f"{name}-after")
+            check_core_on(st[node], v, n["boot"])
+            unchanged(before, st, [k for k in self.nodes if k != node])
+            took_over.append(True)
+            return cmd, rc, log, st, f"{node} boot core {v} on slot {st[node]['boot']['running']}"
 
     def refused(self, name, s, before):
         if s["do"] == "tamper":
@@ -580,6 +654,27 @@ def expect(cond, msg):
         raise Fail(msg)
 
 
+def check_core_on(n, v, was):
+    """`n`'s boot core: `v` confirmed and running, in the slot that was idle."""
+    b = n and n["boot"]
+    expect(b, "no boot core in the versions line")
+    slot = b["running"]
+    expect(slot and slot != was["running"], f"boot core slot did not change: {b}")
+    expect(b[slot] == {"state": "Confirmed", "version": v}, f"want boot core {v} confirmed: {b}")
+
+
+def check_core_back(n, was):
+    """`n`'s boot core: still the one it was, confirmed; the other one is not."""
+    b = n and n["boot"]
+    expect(b, "no boot core in the versions line")
+    slot = was["running"]
+    expect(b["running"] == slot, f"boot core left slot {slot}: {b}")
+    expect(b[slot] == {"state": "Confirmed", "version": was[slot]["version"]},
+           f"want boot core {was[slot]['version']} confirmed: {b}")
+    other = "AB"[1 - "AB".index(slot)]
+    expect(b[other]["state"] != "Confirmed", f"the failing boot core is confirmed: {b}")
+
+
 def check_on(st, node, v, flipped_from):
     n = st[node]
     expect(settled(n) and n["version"] == v, f"{node}: want {v} confirmed, got {core(n)}")
@@ -691,6 +786,7 @@ def selftest():
     selftest_select()
     selftest_restore()
     selftest_set_bin()
+    selftest_core()
     with throwaway_dir() as d:
         (d / "k").mkdir()
         (d / "k" / "dagon-signing.key").write_text("x")
@@ -702,6 +798,91 @@ def selftest():
         assert not d.exists()
     print("selftest ok")
     return 0
+
+
+def selftest_core():
+    """The boot core of `dagon status`' versions lines, and what the boot core
+    steps conclude from it."""
+    def status(node, core):
+        return parse_status(
+            f"{node}: version 2.0.4, mcu 0x0002, active 0, confirmed 0, attempts 0, last reason 0, "
+            "[A:Confirmed 2.0.4, B:Written 2.0.3, F:Empty 0.0.0]\n"
+            f"{node}: boot core 0.1.0 (slot A, digest abababababababab), [A:Confirmed 0.1.0, B:Empty 0.0.0]\n"
+            f"{node}: versions: stage0 0.1.0; boot core {core}; "
+            "app A:Confirmed 2.0.4 (running), B:Written 2.0.3, F:Empty; wire 1; mcu 0x0002\n")[node]
+
+    start = status("seg", "A:Confirmed 0.1.0 (running), B:Empty")
+    assert start["boot"] == {"running": "A", "A": {"state": "Confirmed", "version": "0.1.0"},
+                             "B": {"state": "Empty", "version": None}}
+    assert start["version"] == "2.0.4" and settled(start), start
+    assert status("seg", "A:Written 0.1.0, B:Confirmed 2.1.1 (running)")["boot"]["A"]["version"] == "0.1.0"
+    assert status("watch", "none (vendor 2nd stage)")["boot"] is None
+    assert status("seg", "unknown")["boot"] is None
+    # A hub's lines are named `hub` whatever its id; so its boot core too.
+    assert parse_status("hub: versions: stage0 0.1.0; boot core A:Confirmed 0.1.0 (running), B:Empty; "
+                        "app A:Confirmed 1.0.0 (running), B:Empty, F:Empty; wire 1; mcu 0x0001\n"
+                        "hub: version 1.0.0, mcu 0x0001, wire 1, active 0, confirmed 0, attempts 0, "
+                        "last reason 0, [A:Confirmed 1.0.0, B:Empty 0.0.0, F:Empty 0.0.0]\n",
+                        "boss")["boss"]["boot"]["running"] == "A"
+
+    a_to_b = status("seg", "A:Written 0.1.0, B:Confirmed 2.1.1 (running)")
+    check_core_on(a_to_b, "2.1.1", start["boot"])
+    b_to_a = status("seg", "A:Confirmed 2.1.2 (running), B:Written 2.1.1")
+    check_core_on(b_to_a, "2.1.2", a_to_b["boot"])
+    bad = [
+        (a_to_b, "2.1.9", start["boot"]),  # another version than the step's
+        (start, "0.1.0", start["boot"]),  # the slot did not change
+        (status("seg", "A:Written 0.1.0, B:Pending 2.1.1 (running)"), "2.1.1", start["boot"]),  # not confirmed
+        (status("seg", "unknown"), "2.1.1", start["boot"]),  # no versions line
+    ]
+    for args in bad:
+        try:
+            check_core_on(*args)
+            raise AssertionError(f"accepted {args}")
+        except Fail:
+            pass
+    back = status("seg", "A:Confirmed 2.1.2 (running), B:Reverted 2.1.3")
+    check_core_back(back, b_to_a["boot"])
+    for n in (status("seg", "A:Written 2.1.2, B:Confirmed 2.1.3 (running)"),  # it took over
+              status("seg", "A:Pending 2.1.2 (running), B:Reverted 2.1.3"),  # not confirmed
+              status("seg", "A:Confirmed 2.1.2 (running), B:Confirmed 2.1.3")):  # both
+        try:
+            check_core_back(n, b_to_a["boot"])
+            raise AssertionError(f"accepted {n}")
+        except Fail:
+            pass
+
+    with throwaway_dir() as d:
+        m = d / "Cargo.toml"
+        m.write_text('[package]\nname = "b"\nversion = "2.1.3"\n', encoding="utf-8")
+        version = lambda: tomllib.loads(m.read_text(encoding="utf-8"))["package"]["version"]
+        try:
+            with crate_version_back(m, "2.1.2", keep=lambda: False):
+                raise Fail("the step failed")
+        except Fail:
+            pass
+        assert version() == "2.1.2", "restored when the step fails"
+        m.write_text('[package]\nname = "b"\nversion = "2.1.3"\n', encoding="utf-8")
+        with crate_version_back(m, "2.1.2", keep=lambda: True):
+            pass
+        assert version() == "2.1.3", "a confirmed core keeps its version"
+        with crate_version_back(m, "2.1.2", keep=lambda: False):
+            pass
+        assert version() == "2.1.2", "a core that went back does not"
+
+    with throwaway_dir() as d:
+        (d / "dagon.toml").write_text('[build.seg]\npackage = "nodes/seg"\n', encoding="utf-8")
+        r = argparse.Namespace(project=d, setup={"fail_feature": "no-confirm"})
+        p = Run.fail_config(r, ["seg"], "boot_features")
+        assert tomllib.loads(p.read_text(encoding="utf-8"))["build"]["seg"]["boot_features"] == ["no-confirm"]
+
+    # The scenarios: each node's boot core over both slots, then the failing one.
+    scs = {s["id"]: s for s in tomllib.loads((HERE / "hwt.toml").read_text(encoding="utf-8"))["scenario"]}
+    for node in ("seg", "hub"):
+        steps = scs[f"core-{node}"]["steps"]
+        assert [s["do"] for s in steps] == ["core"] * 3 and all(s["node"] == node for s in steps), steps
+        assert [s.get("expect", "ok") for s in steps] == ["ok", "ok", "rolled-back"], steps
+        assert len({s["version"] for s in steps}) == 3
 
 
 def selftest_set_bin():

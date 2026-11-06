@@ -1,11 +1,9 @@
 ---
-title: "Swapping a link"
-description: "Change how a node is linked and send the new topology."
+title: "つながりを差し替える"
+description: "ノードのつながり方を変え、新しい構成を送ります。"
 ---
 
-Every hop in a 構成 has a kind: `usb-cdc`, `uart`, `i2c`, `ble`,
-`wifi-tcp`, `ethernet` or `can`. A 親機 can also declare its uplink, the
-hop towards whatever drives it, and what is at the other end:
+構成のホップには、それぞれ種類があります: `usb-cdc`、`uart`、`i2c`、`ble`、`wifi-tcp`、`ethernet`、`can`。親機は、上り（親機を動かす側へ）のつながりと、その先にあるものも書けます:
 
 ```yaml
   - id: hub
@@ -13,24 +11,12 @@ hop towards whatever drives it, and what is at the other end:
     uplink: { kind: uart, host: browser }   # pc-cli | browser | embedded
 ```
 
-Without `uplink` it is `usb-cdc` to dagon on a PC, as before; the uplink is
-not part of the compiled topology, so existing 構成 and their releases stay
-the same. In DAGON Console's 定義 the inspector offers each kind for a link
-and, on the 親機, for its uplink. Kinds the firmware of either end does not
-implement yet are marked ◇ まだ使えない; the 構成 may still name them
-(problem まだ使えないつながり), and `dagon gen` refuses them with the hop's
-name (`uplink of hub over ble: not available yet on rp2040`). The
-link kinds each MCU's firmware offers (its definition's `[links]`; up:
-towards the PC or the 親機, down: to 子機) are the Up links and Down links
-columns of [Boards and MCUs](/reference/boards/).
+`uplink` を書かなければ、これまでどおりパソコンの dagon への `usb-cdc` です。上りのつながりはコンパイルした構成に入らないので、今ある構成とそのリリースは変わりません。DAGON Console の準備では、インスペクタでリンクごとの種類と、親機の上りのつながりを選べます。どちらかの端のファームウェアがまだ実装していない種類には ◇ まだ使えない が付きます。構成には書けます（問題「まだ使えないつながり」）が、`dagon gen` はそのホップの名前を挙げて断ります（`uplink of hub over ble: not available yet on rp2040`）。ファームウェアにあるつながりの種類（各 MCU の定義の `[links]`。上り: パソコンや親機へ、下り: 子機へ）は、[Boards and MCUs](/reference/boards/) の Up links と Down links の列にあります。
 
-The demo shows the swap without new radios:
+デモでは、新しい無線なしで差し替えを見られます:
 
 ```sh
-dagon demo --uplink uart          # or usb-cdc (default), wifi-tcp
+dagon demo --uplink uart          # または usb-cdc（既定）、wifi-tcp
 ```
 
-The simulated uplink follows the demo 構成: change the 親機's uplink in
-定義 (USB, UART, Wi-Fi) and the same update runs over the other medium, with
-its own frame size, speed and behaviour while the 親機 reboots (USB CDC
-and Wi-Fi reconnect; a UART adapter stays).
+模擬の上りのつながりはデモの構成に従います。準備で親機の上りのつながりを変える（USB、UART、Wi-Fi）と、同じ書き込みが別の媒体で動きます。媒体ごとに、フレームの大きさ、速さ、親機の再起動中のふるまい（USB CDC と Wi-Fi はつなぎ直し、UART アダプタはつながったまま）が違います。

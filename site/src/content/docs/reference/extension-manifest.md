@@ -3,11 +3,15 @@ title: "Extension manifest"
 description: "dagon-extension.toml, the extension keys of dagon.toml and the files dagon gen writes from them."
 ---
 
+:::note
+このページは英語だけです。
+:::
+
 An extension is a Rust crate with a `dagon-extension.toml` next to its
 `Cargo.toml`. The manifest says what the extension replaces, observes and
 answers, and what it needs. `dagon gen` checks it against the port catalog
-([ports.md](/reference/ports/)), the event catalog ([events.md](/reference/events/)) and the
-node's MCU and board definitions ([MCU and board definitions](/reference/definitions/)),
+([ports.md](/en/reference/ports/)), the event catalog ([events.md](/en/reference/events/)) and the
+node's MCU and board definitions ([MCU and board definitions](/en/reference/definitions/)),
 then writes the node's protection files.
 
 ## dagon-extension.toml (`extension-manifest` format 1)
@@ -161,7 +165,7 @@ image).
 The boot core runs its extensions privileged, so it runs only trusted
 ones (manifest `trusted = true`, listed with their source hash under
 `[extensions.nodes.<id>] trusted`). From `boot.watchdog_armed` to
-`boot.before_jump` or `boot.halt`, each boot event ([Events](/reference/events/), layer
+`boot.before_jump` or `boot.halt`, each boot event ([Events](/en/reference/events/), layer
 `boot`) reaches, in chain order, the extensions whose `observes` names
 it, each call timed against its `max_run_us`: a call that takes longer
 is not stopped, but the boot core then delivers `boot.extension_overran`

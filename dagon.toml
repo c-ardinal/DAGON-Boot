@@ -24,6 +24,8 @@ provision_dir = "out/provision"
 # A and, with slot_b_feature, again for slot B, into
 # out/build/<id>/app-a.elf and app-b.elf; signing uses the crate's version.
 # Builds embed the key from DAGON_PUBKEY (see the firmware READMEs).
+# boot_features: features of the node's boot crate for its boot core in a
+# release (a first write never uses them).
 #
 # [build.seg]
 # package = "samples/f401-app"

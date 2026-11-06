@@ -1,78 +1,52 @@
 ---
-title: "The repository"
-description: "What the repository holds, where, and how to work on DAGON itself."
+title: "リポジトリ"
+description: "リポジトリにあるもの、その場所、DAGON そのものを開発するときのことです。"
 ---
 
-What the code and its tests show:
+このリポジトリのコードとテストが示していること:
 
-- Formats and protocol: `dagon-format` and `dagon-proto`, checked against the
-  golden vectors in `crates/dagon-format/golden/`.
-- The node side: `dagon-agent` (receives an image into the inactive slot,
-  checks signature and SHA-256, switches and confirms) and `dagon-core` (the
-  boot decision: trial with a bounded number of attempts, then rollback).
-- The PC side: `dagon-host` (status, discover, topology push, apply, rollback,
-  confirm, recover), `dagon-romlink` (the STM32 I2C ROM loader procedure) and
-  the `dagon` CLI, tested against `dagon-sim`, a simulated hub with an F401
-  node, flash with power-cut points, lossy links and the ROM loader.
-- Projects: `dagon new`, `dagon gen` and `dagon build` make and build the
-  node crates on the support packages per MCU (`targets/mcu/*`) and per
-  board (`targets/boards/*`).
-- `dagon conform`: the 12 conformance tests of `dagon-conform`; 12 of 12 pass
-  against the simulated F401, through the hub and directly.
-- Topology YAML: 22 validation rules and the supported-board table
-  (`dagon-topology`); `topology/sample.yaml` passes them.
-- DAGON Console (`web/`, served by `dagon serve`; `web/README.md` lists what
-  it does).
-- Firmware: the RP2040 hub (`targets/rp2040-hub`), the F401 demo node
-  (`samples/f401-app`) and the ESP32-S3 node (`targets/boards/m5stopwatch`,
-  `samples/esp32s3-app`). Limitations says which of them have been checked
-  on the hardware.
+- 形式とプロトコル: `dagon-format` と `dagon-proto`。`crates/dagon-format/golden/` の黄金ベクタで照合しています。
+- ノード側: `dagon-agent`（非稼働スロットへイメージを受け取り、署名と SHA-256 を検査し、切り替えと確定を行う）と `dagon-core`（起動の判断: 回数を限った試行起動と巻き戻し）。
+- PC 側: `dagon-host`（状態、自動で見つける、構成の送信、書き込み、前のバージョンに戻す、確定、復旧）、`dagon-romlink`（STM32 の I2C ROM ブートローダの手順）、`dagon` CLI。これらは `dagon-sim`（F401 子機付きの模擬親機、電断点付きのフラッシュ、損失のあるリンク、ROM ブートローダの模擬）を相手にテストしています。
+- プロジェクト: `dagon new`、`dagon gen`、`dagon build` が、MCU ごと（`targets/mcu/*`）とボードごと（`targets/boards/*`）の支援パッケージの上にノードの crate を作り、ビルドします。
+- `dagon conform`: `dagon-conform` の 12 件の適合試験。模擬の F401 に対し、親機経由でも直結でも 12 件すべて合格します。
+- 構成 YAML: 22 件の検証規則と対応ボードの表（`dagon-topology`）。`topology/sample.yaml` はこれを通ります。
+- DAGON Console（`web/`。`dagon serve` が配る。できることは `web/README.md` を参照）。
+- ファームウェア: RP2040 親機（`targets/rp2040-hub`）、F401 のデモ子機（`samples/f401-app`）、ESP32-S3 子機（`targets/boards/m5stopwatch`、`samples/esp32s3-app`）。どれを実機で確認したかは「制限事項」にあります。
 
 
-## Repository layout
+## リポジトリの構成
 
 
-| Path | Contents |
+| パス | 内容 |
 |---|---|
-| `crates/dagon-format` | Image header, manifest, release bundle, state log, topology binary; golden vectors |
-| `crates/dagon-proto` | Link protocol v1: frames, commands, payloads |
-| `crates/dagon-port` | Board traits (flash, link, reset, watchdog, boot select, I2C, sub MCU lines) |
-| `crates/dagon-core` | Boot decision (trial, attempts, rollback) |
-| `crates/dagon-agent` | Node-side receiver of updates |
-| `crates/dagon-conform` | The 12 conformance tests and the result file format |
-| `crates/dagon-sim` | Simulator: flash, links, ROM loader, nodes, hub |
-| `crates/dagon-topology` | Topology YAML, validation rules, supported boards |
-| `crates/dagon-sign` | Keys, image signing, release build, first-install files |
-| `crates/dagon-host` | PC-side procedures shared by the CLI and DAGON Console |
-| `crates/dagon-romlink` | STM32 I2C ROM loader procedure |
-| `crates/dagon-cli` | The `dagon` command, with DAGON Console built in |
-| `crates/dagon-wasm` | WebAssembly bindings for DAGON Console |
-| `targets/` | Support packages per MCU (`targets/mcu/*`) and per board (`targets/boards/*`); RP2040 hub firmware; bring-up tools |
-| `samples/` | Sample apps built on the support packages (not part of DAGON) |
-| `web/` | DAGON Console (Svelte, Vite, TypeScript) |
-| `topology/` | Example topologies |
-| `plugin/` | Claude Code plugin (agents, skills, hooks) used to port DAGON to new MCUs |
-| `scripts/licences.py` | Generates the dependency licence tables below |
+| `crates/dagon-format` | イメージヘッダ、マニフェスト、リリースバンドル、状態ログ、構成バイナリ、黄金ベクタ |
+| `crates/dagon-proto` | 通信プロトコル v1: フレーム、コマンド、ペイロード |
+| `crates/dagon-port` | ボードの trait（フラッシュ、リンク、リセット、ウォッチドッグ、起動先の選択、I2C、子機の制御線） |
+| `crates/dagon-core` | 起動の判断（試行、回数、巻き戻し） |
+| `crates/dagon-agent` | ノード側で書き込みを受ける部分 |
+| `crates/dagon-conform` | 12 件の適合試験と結果ファイルの形式 |
+| `crates/dagon-sim` | シミュレータ: フラッシュ、リンク、ROM ブートローダ、ノード、親機 |
+| `crates/dagon-topology` | 構成 YAML、検証規則、対応ボード |
+| `crates/dagon-sign` | 鍵、イメージの署名、リリースの作成、初期導入用ファイル |
+| `crates/dagon-host` | CLI と DAGON Console が共有する PC 側の手順 |
+| `crates/dagon-romlink` | STM32 の I2C ROM ブートローダの手順 |
+| `crates/dagon-cli` | `dagon` コマンド（DAGON Console を組み込み） |
+| `crates/dagon-wasm` | DAGON Console 用の WebAssembly バインディング |
+| `targets/` | MCU ごと（`targets/mcu/*`）とボードごと（`targets/boards/*`）の支援パッケージ、RP2040 親機のファームウェア、立ち上げ用ツール |
+| `samples/` | 支援パッケージを使うサンプルのアプリ（DAGON の一部ではない） |
+| `web/` | DAGON Console（Svelte、Vite、TypeScript） |
+| `topology/` | 構成の例 |
+| `plugin/` | 新しいマイコンへの移植に使う Claude Code のプラグイン（エージェント、スキル、フック） |
+| `scripts/licences.py` | 下の依存ライブラリのライセンス表を生成する |
 
 
-## Working on DAGON itself
+## DAGON そのものを開発するとき
 
 
-- Everything in [Prerequisites](/getting-started/install/), plus the
-  `wasm32-unknown-unknown` target (all targets are in `rust-toolchain.toml`)
-- `wasm-pack` 0.15.1 for `crates/dagon-wasm` (it fetches the matching
-  `wasm-bindgen` and `wasm-opt` itself), and Node.js and npm for `web/`
-- ESP-IDF v6.1 to rebuild the ESP32-S3 2nd stage from
-  `targets/esp32s3-2ndstage` (bundled prebuilt as
-  `targets/mcu/esp32s3/vendor/bootloader.bin`, unmodified ESP-IDF v6.1;
-  only needed to rebuild it, see `vendor/PROVENANCE.md`)
-- `elf2uf2-rs` for the RP2040 bring-up image
-- `cargo install --path crates/dagon-cli` installs the CLI from your clone;
-  projects then use the clone with `dagon new --dagon-path <clone>` (or
-  `DAGON_HOME`)
-- Release archives: `python scripts/release.py [--target <triple>]` builds
-  `out/release/dagon-cli-<version>-<target>.*` with the page built in;
-  `.github/workflows/release.yml` does the same for each platform when a
-  `cli-v*` tag is pushed, after `scripts/bump_check.py` confirms the
-  version is at least what the commits require, and keeps them as workflow
-  artifacts (it publishes nothing). Versioning rules: [Versions and releases](/explanation/versioning/)
+- [必要なもの](/getting-started/install/)のすべてと、`wasm32-unknown-unknown` のターゲット（ターゲットはすべて `rust-toolchain.toml` にあります）
+- `crates/dagon-wasm` 用の `wasm-pack` 0.15.1（対応する `wasm-bindgen` と `wasm-opt` は自分で取得します）と、`web/` 用の Node.js と npm
+- ESP32-S3 の 2nd stage を `targets/esp32s3-2ndstage` からビルドし直すときは ESP-IDF v6.1（ビルド済みのものを `targets/mcu/esp32s3/vendor/bootloader.bin` として同梱している。無改変の ESP-IDF v6.1。`vendor/PROVENANCE.md` を参照）
+- RP2040 の立ち上げ用イメージに使う `elf2uf2-rs`
+- `cargo install --path crates/dagon-cli` でクローンから CLI を入れます。プロジェクトは `dagon new --dagon-path <クローン>`（または `DAGON_HOME`）でそのクローンを使います
+- リリースのアーカイブ: `python scripts/release.py [--target <triple>]` が、ページを組み込んだ `out/release/dagon-cli-<version>-<target>.*` を作ります。`.github/workflows/release.yml` は `cli-v*` のタグが push されたときに、コミットが求める上げ幅にバージョンが足りているかを `scripts/bump_check.py` で確かめてから各プラットフォームで同じことをし、ワークフローの成果物として残します（公開はしません）

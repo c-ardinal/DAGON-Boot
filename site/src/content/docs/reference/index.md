@@ -1,30 +1,19 @@
 ---
-title: Reference
-description: Generated from DAGON's own sources; each page names its source.
+title: リファレンス
+description: DAGON 自身のソースから作るページです。どのページも元のソースを書いています。
 sidebar:
   order: 0
 ---
 
-Every page in this part is generated from the source DAGON itself reads,
-and the repository's checks fail when a page and its source differ.
+ここのページは、DAGON 自身が読むソースから作っています。
+ページと元のソースが食い違うと、リポジトリの検査が失敗します。
+ページは英語です。
 
-- [Command line](/reference/cli/): every `dagon` command, from its clap definitions.
-- [Serve HTTP API](/reference/serve-api/): every route of `dagon serve`.
-- [Events](/reference/events/) and [Ports](/reference/ports/): every
-  event and port extensions use.
-- [Agent definition format](/reference/agent-definition/): the agent files
-  DAGON reads.
-- [Boards and MCUs](/reference/boards/): every board and MCU definition.
-- [Contracts and components](/reference/contracts/): every format number and
-  component version, from `compat.toml`.
-- [Tools by MCU](/reference/tools/): what `dagon doctor` checks for each MCU.
-- [Rust API](/reference/rust-api/): the workspace crates and their rustdoc.
-
-Written by hand, with their lists generated or checked by tests:
-
-- [Agent link: serve API](/reference/agent-api/): linking DAGON's agent, the
-  questions and the keys.
-- [Extension manifest](/reference/extension-manifest/) and
-  [MCU and board definitions](/reference/definitions/), their key tables
-  generated from the types DAGON reads the files into.
-- [Licenses](/reference/licenses/).
+- [Command line](/reference/cli/): `dagon` のすべてのコマンド（clap の定義から）
+- [Serve HTTP API](/reference/serve-api/): `dagon serve` のすべてのルート
+- [イベント](/reference/events/)と[ポート](/reference/ports/): 拡張が使うすべてのイベントとポート
+- [エージェント定義の形式](/reference/agent-definition/): DAGON が読むエージェントのファイル
+- [ボードとマイコン](/reference/boards/): すべてのボードとマイコンの定義
+- [Tools by MCU](/reference/tools/): `dagon doctor` がマイコンごとに確かめるツール
+- [Rust API](/reference/rust-api/): ワークスペースの crate とその rustdoc
+- [ライセンス](/reference/licenses/)

@@ -1,16 +1,16 @@
 ---
-title: Command line (dagon)
-description: Every dagon command, from its clap definitions.
+title: コマンド（dagon）
+description: dagon のすべてのコマンドです。
 editUrl: false
 ---
 
 :::note
-Generated from `crates/dagon-cli/src/cli.rs`; do not edit. Regenerate with `python site/scripts/gen.py`.
+`crates/dagon-cli/src/cli.rs` から生成しています。直接編集せず、`python site/scripts/gen.py` でもう一度生成してください。
+コマンドの説明は元のソースのままで、英語です。
 :::
 
-Every `dagon` command, its arguments and options, as `dagon <command> --help`
-prints them. Most commands take their defaults from `./dagon.toml` (or
-`--config <file>`).
+`dagon` のすべてのコマンド、引数、オプションです。`dagon <command> --help` が表示するものと同じです。
+多くのコマンドは、既定の値を `./dagon.toml`（または `--config <file>`）から取ります。
 
 ## dagon
 

@@ -637,21 +637,18 @@ fn no_command_and_version_flags() {
 }
 
 /// `dagon <word>` in backticks or at the start of a code line of the repo's
-/// documents is a command this CLI has, or one the design documents describe
-/// as not built yet.
+/// documents is a command this CLI has.
 #[test]
 fn documents_name_only_commands_the_cli_has() {
     let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
-    const DESIGNED: [&str; 3] = ["events", "extension", "mcu"];
     let known: Vec<String> = Cli::command()
         .get_subcommands()
         .map(|c| c.get_name().to_string())
-        .chain(DESIGNED.map(String::from))
         .collect();
     let mut files = vec![
         root.join("CHANGELOG.md"),
         root.join("README.md"),
-        root.join("README.ja.md"),
+        root.join("README.en.md"),
     ];
     let mut dirs = vec![root.join("site/src/content/docs"), root.join("samples")];
     while let Some(d) = dirs.pop() {

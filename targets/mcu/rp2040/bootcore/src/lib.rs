@@ -163,10 +163,11 @@ pub fn run<E: Extension>(chain: E, limits: &'static [BootExtension]) -> ! {
         WDT_MS,
     );
     let decision = boot.decision();
-    let healthy = match decision {
-        Decision::Boot { slot, .. } => app_verifies(&mut flash, slot),
-        Decision::NoImage => false,
-    };
+    let healthy = !cfg!(feature = "no-confirm")
+        && match decision {
+            Decision::Boot { slot, .. } => app_verifies(&mut flash, slot),
+            Decision::NoImage => false,
+        };
     match bl::settle_core(
         &mut flash,
         LINKED_SLOT,

@@ -1,4 +1,4 @@
-# The execution model (site/src/content/docs/explanation/lifecycle-events.md, section 12): no flash
+# The execution model (site/src/content/docs/en/explanation/lifecycle-events.md, section 12): no flash
 # operation, and nothing without a bound in microseconds, runs with
 # interrupts masked by DAGON's own code. Every way to mask is refused in the
 # MCU packages (clippy resolves the path, so a `use .. as ..` alias or a

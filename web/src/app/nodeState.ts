@@ -45,6 +45,7 @@ export function nodeState(s: StateInput): NodeState {
  */
 const RESULT: Partial<Record<Progress['stage'], { word: string; silent: boolean }>> = {
   previous: { word: WRITE.previous, silent: false },
+  coreBack: { word: WRITE.coreBack.label, silent: false },
   refused: { word: WRITE.failed, silent: true },
   silent: { word: WRITE.failed, silent: true },
   cannotFix: { word: WRITE.failed, silent: true },

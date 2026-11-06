@@ -31,4 +31,12 @@ describe('the modal of a write that could not be done', () => {
     expect(b).toContain('理由');
     expect(b.indexOf('次にすること')).toBeLessThan(b.indexOf('書き込む</button>'));
   });
+
+  test('its own label, when the outcome has one', () => {
+    const b = render(StopModal, {
+      props: { target: '[2] 7セグ', label: WRITE.coreBack.label, reason: WRITE.coreBack.detail, fix: WRITE.coreBack.next, onclose: () => undefined, onmore: () => undefined, buttons: createRawSnippet(() => ({ render: () => '<button>x</button>' })) },
+    }).body;
+    for (const words of [WRITE.coreBack.label, WRITE.coreBack.detail, WRITE.coreBack.next]) expect(b).toContain(words);
+    expect(b).not.toContain(WRITE.failed);
+  });
 });

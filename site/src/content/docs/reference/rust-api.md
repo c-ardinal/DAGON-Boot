@@ -1,17 +1,18 @@
 ---
 title: Rust API
-description: The workspace crates and their rustdoc.
+description: ワークスペースの crate と rustdoc です。
 editUrl: false
 ---
 
 :::note
-Generated from `Cargo.toml`; do not edit. Regenerate with `python site/scripts/gen.py`.
+`Cargo.toml` から生成しています。直接編集せず、`python site/scripts/gen.py` でもう一度生成してください。
+「中身」の列と rustdoc の本文は元のソースのままで、英語です。
 :::
 
-The Rust API documentation (rustdoc) of every crate in the workspace is
-published with these pages; each name below opens its crate.
+ワークスペースのすべての crate の Rust API の文書（rustdoc）を、このサイトと一緒に公開しています。
+下の名前を選ぶと、その crate を開きます。
 
-| Crate | What it holds |
+| Crate | 中身 |
 |---|---|
 | [`dagon-agent`](/api/dagon_agent/) | DAGON agent: embedded in an application, it answers HELLO/STATUS/VERSION, receives images into the inactive slot, switches the boot target and confirms. |
 | [`dagon-boot`](/api/dagon_boot/) | The boot core's sequence as a state machine: every step from the armed watchdog to the jump or the halt is an event the boot core's extensions observe |

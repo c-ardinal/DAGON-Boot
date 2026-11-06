@@ -23,7 +23,7 @@ ROOT = pathlib.Path(__file__).resolve().parent.parent
 SH = ROOT / "install.sh"
 PS1 = ROOT / "install.ps1"
 RELEASES = "https://github.com/c-ardinal/DAGON-Boot/releases/download/"
-API = "https://api.github.com/repos/c-ardinal/DAGON-Boot/releases?per_page=100"
+API = "https://api.github.com/repos/c-ardinal/DAGON-Boot/releases?per_page=100&page="
 LINUX = "x86_64-unknown-linux-gnu"
 WINDOWS = "x86_64-pc-windows-msvc"
 # Newest first, as GitHub lists them; other components and a pre-release among them.
@@ -41,12 +41,21 @@ while [ $# -gt 0 ]; do
 done
 printf '%s\n' "$url" >> "$FAKE_RELEASE/urls.log"
 case "$url" in
-    https://api.github.com/*) file="$FAKE_RELEASE/releases.json" ;;
+    https://api.github.com/*)
+        page="${url##*page=}"
+        file="$FAKE_RELEASE/releases-$page.json"
+        if [ ! -f "$file" ] && [ "$page" != 1 ]; then echo '[]'; exit 0; fi
+        ;;
     https://github.com/c-ardinal/DAGON-Boot/releases/download/*) file="$FAKE_RELEASE/${url#https://github.com/c-ardinal/DAGON-Boot/releases/download/}" ;;
     *) exit 22 ;;
 esac
 [ -f "$file" ] || exit 22
 if [ -n "$out" ]; then cp "$file" "$out"; else cat "$file"; fi
+"""
+# Holds a run between staging its file and renaming it, so overlapping runs meet there.
+SLOW_MV = """#!/bin/sh
+sleep 1
+exec "$REAL_MV" "$@"
 """
 FAKE_UNAME = """#!/bin/sh
 case "$1" in
@@ -59,7 +68,11 @@ function Invoke-WebRequest {
     param([string]$Uri, [string]$OutFile, [switch]$UseBasicParsing)
     Add-Content -LiteralPath (Join-Path $env:FAKE_RELEASE 'urls.log') -Value $Uri
     $prefix = 'https://github.com/c-ardinal/DAGON-Boot/releases/download/'
-    if ($Uri.StartsWith('https://api.github.com/')) { $file = Join-Path $env:FAKE_RELEASE 'releases.json' }
+    if ($Uri.StartsWith('https://api.github.com/')) {
+        $page = $Uri.Substring($Uri.LastIndexOf('page=') + 5)
+        $file = Join-Path $env:FAKE_RELEASE "releases-$page.json"
+        if (-not (Test-Path -LiteralPath $file) -and $page -ne '1') { return [pscustomobject]@{ Content = '[]' } }
+    }
     elseif ($Uri.StartsWith($prefix)) { $file = Join-Path $env:FAKE_RELEASE $Uri.Substring($prefix.Length) }
     else { throw "unexpected $Uri" }
     if (-not (Test-Path -LiteralPath $file)) { throw "404 $Uri" }
@@ -92,7 +105,10 @@ def a_zip(names):
 class FakeRelease:
     def __init__(self, root):
         self.root = pathlib.Path(root)
-        (self.root / "releases.json").write_text(json.dumps([{"tag_name": t} for t in TAGS], indent=2), encoding="utf-8")
+        self.list_page(1, TAGS)
+
+    def list_page(self, page, tags, indent=2):
+        (self.root / f"releases-{page}.json").write_text(json.dumps([{"tag_name": t, "name": t} for t in tags], indent=indent), encoding="utf-8")
 
     def publish(self, version, target, data, suffix, checksum=None):
         folder = self.root / f"cli-v{version}"
@@ -174,6 +190,71 @@ class InstallSh(unittest.TestCase):
                 self.assertIn(b"dagon 1.2.2", r.stdout)
                 self.assertNotIn(API, self.release.urls()[-2:])
 
+    def test_a_stable_cli_release_on_a_later_page_is_found(self):
+        self.release.list_page(1, [f"bootcore-rp2040-v{n}.0.0" for n in range(99)] + ["cli-v3.0.0-rc.1"])
+        self.release.list_page(2, ["mcu-rp2040-v1.0.0", "cli-v1.2.3", "cli-v1.2.2"])
+        self.release.publish("1.2.3", LINUX, self.good, ".tar.gz")
+        r = self.run_script()
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn(b"dagon 1.2.3", r.stdout)
+        self.assertEqual([u for u in self.release.urls() if u.startswith(API)], [API + "1", API + "2"])
+
+    def test_a_list_without_a_cli_release_stops_when_the_pages_run_out(self):
+        self.release.list_page(1, ["bootcore-rp2040-v1.0.0"])
+        self.release.list_page(2, ["mcu-rp2040-v1.0.0"])
+        r = self.run_script()
+        self.assert_nothing_installed(r)
+        self.assertIn(b"no release", r.stderr)
+        self.assertEqual([u for u in self.release.urls() if u.startswith(API)], [API + "1", API + "2", API + "3"])
+
+    def test_a_list_on_one_line_gives_the_newest_cli_release(self):
+        self.release.list_page(1, TAGS, indent=None)
+        self.release.publish("1.2.3", LINUX, self.good, ".tar.gz")
+        r = self.run_script()
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn(b"dagon 1.2.3", r.stdout)
+
+    def test_overlapping_installs_each_succeed_and_leave_one_whole_file(self):
+        with open(self.fake / "mv", "w", newline="\n", encoding="utf-8") as f:
+            f.write(SLOW_MV)
+        (self.fake / "mv").chmod(0o755)
+        self.release.publish("1.2.3", LINUX, self.good, ".tar.gz")
+        env = {
+            **os.environ,
+            "PATH": f"{self.fake}{os.pathsep}{os.environ['PATH']}",
+            "REAL_MV": shutil.which("mv"),
+            "FAKE_RELEASE": str(self.release.root),
+            "FAKE_SYSTEM": "Linux",
+            "FAKE_MACHINE": "x86_64",
+            "DAGON_INSTALL_DIR": str(self.dir),
+            "DAGON_VERSION": "1.2.3",
+        }
+        runs = [subprocess.Popen([shutil.which("sh"), str(SH)], env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE) for _ in range(6)]
+        results = [(r.communicate(), r.returncode) for r in runs]
+        for (_, err), code in results:
+            self.assertEqual(code, 0, err)
+        self.assertEqual([p.name for p in self.dir.iterdir()], ["dagon"])
+        self.assertEqual((self.dir / "dagon").read_bytes(), b"binary dagon")
+
+    def test_a_new_install_replaces_the_old_one(self):
+        self.dir.mkdir()
+        (self.dir / "dagon").write_bytes(b"old")
+        self.release.publish("1.2.3", LINUX, self.good, ".tar.gz")
+        r = self.run_script()
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual([p.name for p in self.dir.iterdir()], ["dagon"])
+        self.assertEqual((self.dir / "dagon").read_bytes(), b"binary dagon")
+
+    def test_a_failed_run_removes_its_own_staged_file_and_no_other(self):
+        self.dir.mkdir()
+        (self.dir / ".dagon.new").write_bytes(b"not this run's")
+        with open(self.fake / "chmod", "w", newline="\n", encoding="utf-8") as f:
+            f.write("#!/bin/sh\nexit 1\n")
+        (self.fake / "chmod").chmod(0o755)
+        self.release.publish("1.2.3", LINUX, self.good, ".tar.gz")
+        self.assertNotEqual(self.run_script().returncode, 0)
+        self.assertEqual([p.name for p in self.dir.iterdir()], [".dagon.new"])
+
     def test_a_wrong_checksum_stops_it(self):
         self.release.publish("1.2.3", LINUX, self.good, ".tar.gz", checksum="0" * 64)
         r = self.run_script()
@@ -207,7 +288,7 @@ class InstallSh(unittest.TestCase):
         self.assert_nothing_installed(self.run_script("9.9.9"))
 
     def test_an_unreadable_list_of_releases_stops_it(self):
-        (self.release.root / "releases.json").unlink()
+        (self.release.root / "releases-1.json").unlink()
         self.assert_nothing_installed(self.run_script())
 
     def test_a_version_that_is_not_one_stops_it(self):
@@ -287,6 +368,46 @@ class InstallPs1(unittest.TestCase):
         self.assertEqual(r.returncode, 0, r.stderr)
         self.assertIn(b"dagon 1.2.2", r.stdout)
         self.assertNotIn(API, self.release.urls())
+
+    def test_a_stable_cli_release_on_a_later_page_is_found(self):
+        self.release.list_page(1, [f"bootcore-rp2040-v{n}.0.0" for n in range(99)] + ["cli-v3.0.0-rc.1"])
+        self.release.list_page(2, ["mcu-rp2040-v1.0.0", "cli-v1.2.3", "cli-v1.2.2"])
+        self.release.publish("1.2.3", WINDOWS, self.good, ".zip")
+        r = self.run_script()
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn(b"dagon 1.2.3", r.stdout)
+        self.assertEqual([u for u in self.release.urls() if u.startswith(API)], [API + "1", API + "2"])
+
+    def test_a_new_install_replaces_the_old_one(self):
+        self.dir.mkdir()
+        (self.dir / "dagon.exe").write_bytes(b"old")
+        self.release.publish("1.2.3", WINDOWS, self.good, ".zip")
+        r = self.run_script()
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual([p.name for p in self.dir.iterdir()], ["dagon.exe"])
+        self.assertEqual((self.dir / "dagon.exe").read_bytes(), b"binary dagon.exe")
+
+    def test_a_list_without_a_cli_release_stops_when_the_pages_run_out(self):
+        self.release.list_page(1, ["bootcore-rp2040-v1.0.0"])
+        r = self.run_script()
+        self.assert_nothing_installed(r)
+        self.assertEqual([u for u in self.release.urls() if u.startswith(API)], [API + "1", API + "2"])
+
+    def test_overlapping_installs_each_succeed_and_leave_one_whole_file(self):
+        # Held after Copy-Item, so overlapping runs meet between staging and the rename.
+        text = self.harness.read_text(encoding="utf-8")
+        slow = "function Copy-Item { Microsoft.PowerShell.Management\\Copy-Item @args; Start-Sleep -Milliseconds 1500 }\n"
+        self.harness.write_text(slow + text, encoding="utf-8")
+        self.release.publish("1.2.3", WINDOWS, self.good, ".zip")
+        env = {**os.environ, "FAKE_RELEASE": str(self.release.root), "PROCESSOR_ARCHITECTURE": "AMD64", "DAGON_INSTALL_DIR": str(self.dir),
+               "DAGON_NO_MODIFY_PATH": "1", "DAGON_VERSION": "1.2.3"}
+        env.pop("PROCESSOR_ARCHITEW6432", None)
+        runs = [subprocess.Popen([powershell(), "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", str(self.harness)], env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE) for _ in range(4)]
+        results = [(r.communicate(), r.returncode) for r in runs]
+        for (_, err), code in results:
+            self.assertEqual(code, 0, err)
+        self.assertEqual([p.name for p in self.dir.iterdir()], ["dagon.exe"])
+        self.assertEqual((self.dir / "dagon.exe").read_bytes(), b"binary dagon.exe")
 
     def test_a_wrong_checksum_stops_it(self):
         self.release.publish("1.2.3", WINDOWS, self.good, ".zip", checksum="0" * 64)

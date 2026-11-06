@@ -13,6 +13,8 @@
 # runs nothing.
 
 REPO="c-ardinal/DAGON-Boot"
+# A list that never ends stops here instead of running forever.
+MAX_PAGES=100
 
 fail() {
     echo "dagon install: $1" >&2
@@ -36,12 +38,23 @@ target_of() {
 
 latest_version() {
     # Every component has its own releases: only cli-v<version> counts, and a
-    # pre-release does not. The list comes newest first.
-    list="$(fetch "https://api.github.com/repos/$REPO/releases?per_page=100")" \
-        || fail "cannot read the list of releases; name a version with DAGON_VERSION"
-    found="$(printf '%s\n' "$list" | sed -n 's/.*"tag_name": *"cli-v\([0-9][0-9]*\.[0-9][0-9]*\.[0-9][0-9]*\)".*/\1/p' | head -n 1)"
-    [ -n "$found" ] || fail "no release of the dagon command found"
-    printf '%s\n' "$found"
+    # pre-release does not. The list comes newest first, a page at a time; the
+    # page after the last one holds no release.
+    page=1
+    while [ "$page" -le "$MAX_PAGES" ]; do
+        list="$(fetch "https://api.github.com/repos/$REPO/releases?per_page=100&page=$page")" \
+            || fail "cannot read the list of releases; name a version with DAGON_VERSION"
+        found="$(printf '%s\n' "$list" | tr ',' '\n' | sed -n 's/.*"tag_name": *"cli-v\([0-9][0-9]*\.[0-9][0-9]*\.[0-9][0-9]*\)".*/\1/p' | head -n 1)"
+        if [ -n "$found" ]; then
+            printf '%s\n' "$found"
+            return 0
+        fi
+        case "$list" in
+            *'"tag_name"'*) page=$((page + 1)) ;;
+            *) break ;;
+        esac
+    done
+    fail "no release of the dagon command found"
 }
 
 sha256_of() {
@@ -73,7 +86,8 @@ main() {
     url="https://github.com/$REPO/releases/download/cli-v$version/$archive"
 
     tmp="$(mktemp -d)" || fail "cannot make a temporary folder"
-    trap 'rm -rf "$tmp"' EXIT
+    staged=""
+    trap 'rm -rf "$tmp"; [ -z "$staged" ] || rm -f "$staged"' EXIT
 
     fetch -o "$tmp/$archive" "$url" || fail "cannot download $url"
     fetch -o "$tmp/$archive.sha256" "$url.sha256" || fail "cannot download $url.sha256"
@@ -91,9 +105,13 @@ main() {
     [ -f "$tmp/unpacked/dagon" ] || fail "$archive holds no dagon"
 
     mkdir -p "$dir" || fail "cannot make $dir"
-    cp "$tmp/unpacked/dagon" "$dir/.dagon.new" || fail "cannot write to $dir"
-    chmod 755 "$dir/.dagon.new"
-    mv -f "$dir/.dagon.new" "$dir/dagon" || fail "cannot write to $dir"
+    # A file of this run's own in the destination, so installs that overlap
+    # never share one and the rename below is atomic.
+    staged="$(mktemp "$dir/.dagon.XXXXXX")" || fail "cannot write to $dir"
+    cp "$tmp/unpacked/dagon" "$staged" || fail "cannot write to $dir"
+    chmod 755 "$staged" || fail "cannot write to $dir"
+    mv -f "$staged" "$dir/dagon" || fail "cannot write to $dir"
+    staged=""
 
     echo "dagon $version ($target) installed in $dir"
     case ":${PATH:-}:" in

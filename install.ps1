@@ -32,15 +32,21 @@ function Install-Dagon {
     $version = $env:DAGON_VERSION
     if (-not $version) {
         # Every component has its own releases: only cli-v<version> counts, and
-        # a pre-release does not. The list comes newest first.
-        try {
-            $list = Invoke-WebRequest -UseBasicParsing -Uri "https://api.github.com/repos/$repo/releases?per_page=100"
-        } catch {
-            throw 'dagon install: cannot read the list of releases; name a version with $env:DAGON_VERSION'
+        # a pre-release does not. The list comes newest first, a page at a time;
+        # the page after the last one holds no release. A list that never ends
+        # stops at 100 pages instead of running forever.
+        for ($page = 1; $page -le 100 -and -not $version; $page++) {
+            try {
+                $list = Invoke-WebRequest -UseBasicParsing -Uri "https://api.github.com/repos/$repo/releases?per_page=100&page=$page"
+            } catch {
+                throw 'dagon install: cannot read the list of releases; name a version with $env:DAGON_VERSION'
+            }
+            $content = [string]$list.Content
+            $found = [regex]::Match($content, '"tag_name":\s*"cli-v(\d+\.\d+\.\d+)"')
+            if ($found.Success) { $version = $found.Groups[1].Value }
+            elseif ($content -notmatch '"tag_name"') { break }
         }
-        $found = [regex]::Match([string]$list.Content, '"tag_name":\s*"cli-v(\d+\.\d+\.\d+)"')
-        if (-not $found.Success) { throw 'dagon install: no release of the dagon command found' }
-        $version = $found.Groups[1].Value
+        if (-not $version) { throw 'dagon install: no release of the dagon command found' }
     }
     if ($version -notmatch '^[0-9][0-9A-Za-z.-]*$') { throw "dagon install: not a version: $version" }
 
@@ -49,6 +55,7 @@ function Install-Dagon {
     $archive = "dagon-cli-$version-$target.zip"
     $url = "https://github.com/$repo/releases/download/cli-v$version/$archive"
 
+    $staged = $null
     $tmp = Join-Path ([IO.Path]::GetTempPath()) ([IO.Path]::GetRandomFileName())
     New-Item -ItemType Directory -Path $tmp | Out-Null
     try {
@@ -71,9 +78,27 @@ function Install-Dagon {
         if (-not (Test-Path -LiteralPath $exe -PathType Leaf)) { throw "dagon install: $archive holds no dagon.exe" }
 
         New-Item -ItemType Directory -Force -Path $dir | Out-Null
-        Copy-Item -LiteralPath $exe -Destination (Join-Path $dir 'dagon.exe') -Force
+        # A file of this run's own in the destination, so installs that overlap
+        # never share one and the rename below is atomic.
+        $staged = Join-Path $dir ('.dagon.' + [IO.Path]::GetRandomFileName())
+        ([IO.File]::Open($staged, [IO.FileMode]::CreateNew, [IO.FileAccess]::Write)).Close()
+        Copy-Item -LiteralPath $exe -Destination $staged -Force
+        $dest = Join-Path $dir 'dagon.exe'
+        # Another install may hold the file for a moment, or may make it first.
+        for ($try = 1; ; $try++) {
+            try {
+                if (Test-Path -LiteralPath $dest) { [IO.File]::Replace($staged, $dest, [NullString]::Value) }
+                else { [IO.File]::Move($staged, $dest) }
+                $staged = $null
+                break
+            } catch {
+                if ($try -ge 50) { throw "dagon install: cannot write to ${dir}: $_" }
+                Start-Sleep -Milliseconds 100
+            }
+        }
     } finally {
         Remove-Item -LiteralPath $tmp -Recurse -Force -ErrorAction SilentlyContinue
+        if ($staged) { Remove-Item -LiteralPath $staged -Force -ErrorAction SilentlyContinue }
     }
 
     Write-Output "dagon $version ($target) installed in $dir"

@@ -103,6 +103,23 @@ test('a node whose boot loader alone differs is written, and its card says the b
   await expect(page.locator('.node.st-busy')).toHaveCount(0);
 });
 
+test('a package the nodes already run, chosen as a file: the band and the toast do not claim a write', async ({ page }) => {
+  const small = fileURLToPath(new URL('../../crates/dagon-sim/fixtures/sample-1.1.0.dgb', import.meta.url));
+  await page.route((url) => url.pathname.endsWith('/sample-full-1.1.0.dgb') && !url.search, (route) => route.fulfill({ path: small }));
+  await toWrite(page, 'sim');
+  await page.locator('.split .main').click();
+  await expect(page.locator('.node.st-busy').first()).toBeVisible({ timeout: 30_000 });
+  await finished(page);
+  await expect(page.locator('.toast')).toContainText('書き込み済み 3 ノード');
+  await page.locator('.toast').waitFor({ state: 'detached', timeout: 10_000 });
+
+  await page.locator('input[type=file]').setInputFiles(small);
+  await page.locator('.split .main').click();
+  await expect(page.locator('.toast')).toContainText('書き込み不要', { timeout: 60_000 });
+  await expect(page.locator('#band .sentence')).toContainText('書き込みませんでした');
+  await expect(page.locator('.node', { hasText: '書き込み不要' })).toHaveCount(3);
+});
+
 for (const size of [{ width: 1920, height: 1080 }, { width: 1280, height: 720 }, { width: 1024, height: 600 }]) {
   test(`at ${size.width}x${size.height} a write that went back is told without a scrim, never over its node`, async ({ page }) => {
     await toWrite(page, 'sim&fail', size);

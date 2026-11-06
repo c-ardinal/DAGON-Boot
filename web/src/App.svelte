@@ -627,6 +627,7 @@
     previous: NODE.previous,
     coreBack: WRITE.coreBack.label,
     unwritten: NODE.unwritten,
+    unchanged: NODE.unchanged,
   };
   /** Stages in which a card shows → the new version and its one %. */
   const FILLING_STAGES: ReadonlySet<Progress['stage']> = new Set(['writing', 'lastResort', 'rebooting']);
@@ -1196,7 +1197,12 @@
     });
   });
   $effect(() => {
-    if (op.state === 'done') untrack(() => (notice = { word: fillIn(WRITE.toast.done, { n: op.targets.length }) }));
+    if (op.state !== 'done') return;
+    untrack(() => {
+      const f = op.finished;
+      const wrote = f?.kind === 'updated' ? (f.wrote ?? op.targets.length) : op.targets.length;
+      notice = { word: wrote ? fillIn(WRITE.toast.done, { n: wrote }) : WRITE.toast.none };
+    });
   });
   // A consent of a version this dagon does not read: a failure the user must notice.
   $effect(() => {

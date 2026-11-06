@@ -118,11 +118,13 @@ function words(s: L, c: Ctx, n: Names): BandCopy {
   }
 }
 
-/** done says only what is true: all updated, the checked ones updated, some not (they did not answer), or one node rolled back or recovered. */
+/** done says only what is true: all updated, the checked ones updated, some not (they did not answer), some or all already on it, or one node rolled back or recovered. */
 function done(f: Finish | null | undefined): BandCopy {
   if (f?.kind === 'rolledBack') return BAND_FOR.M66back(f.name, f.version);
   if (f?.kind === 'recovered') return BAND_FOR.M66fixed(f.name, f.version);
   if (f?.kind === 'updated' && f.left > 0) return BAND_FOR.M66some(f.left);
+  if (f?.kind === 'updated' && f.same && !f.wrote) return BAND.M66none;
+  if (f?.kind === 'updated' && f.same) return BAND_FOR.M66part(f.wrote ?? 0, f.same);
   if (f?.kind === 'updated' && f.leftOut) return BAND.M66checked;
   return BAND.M66;
 }

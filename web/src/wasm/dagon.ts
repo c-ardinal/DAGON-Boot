@@ -90,6 +90,8 @@ export interface UpdateEvent {
   shown: number;
   /** dagon-host's clock when it reckoned `shown`: the page counts a trial's time from the same moments. */
   atMs: number;
+  /** This run has written an image to the node; false on the last report of a node left as it was. */
+  wrote: boolean;
   version: number;
   /** About the node's boot core, written before its app: its confirmation is not the node's. */
   bootCore: boolean;

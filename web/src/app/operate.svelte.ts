@@ -52,7 +52,7 @@ const UNKNOWN: Live = { responding: null, rttMs: null, lastSeen: null, hello: nu
 
 /** Where one node is in an update (the node chip and the update-order row). */
 export interface Progress {
-  stage: 'waiting' | 'writing' | 'lastResort' | 'rebooting' | 'done' | 'silent' | 'refused' | 'previous' | 'coreBack' | 'unwritten' | 'cannotFix';
+  stage: 'waiting' | 'writing' | 'lastResort' | 'rebooting' | 'done' | 'unchanged' | 'silent' | 'refused' | 'previous' | 'coreBack' | 'unwritten' | 'cannotFix';
   percent: number;
   /** dagon-host's reason when the node refused (`E_FLASH`, `E_SIGNATURE`, ...). */
   reason?: string;
@@ -65,11 +65,19 @@ const FACTORY_SLOT = 2;
 
 const sameBytes = (a: Uint8Array | null, b: Uint8Array): boolean => a !== null && a.length === b.length && a.every((x, i) => x === b[i]);
 
-/** The package's app for a node is what it runs, off trial: dagon-host's normal write leaves it out. */
-function appUnchanged(bytes: Uint8Array, node: number, st: { hello: HelloResp; status: StatusResp }): boolean {
+/** STATUS slot states (dagon_proto::payload::SlotState) that decide what the next reset runs. */
+const SLOT = { pending: 2, trying: 3, confirmed: 4 } as const;
+
+/** The running slot is the confirmed one and no slot waits for the next boot or is on trial (dagon-host's slots_settled). */
+export function slotsSettled(st: StatusResp): boolean {
+  return st.active === st.confirmed && st.slots[st.active]?.state === SLOT.confirmed && !st.slots.some((s) => s.state === SLOT.pending || s.state === SLOT.trying);
+}
+
+/** The package's app for a node is what it runs, and nothing else is about to: dagon-host's normal write leaves it out. */
+export function appUnchanged(bytes: Uint8Array, node: number, st: { hello: HelloResp; status: StatusResp }): boolean {
   const running = st.status.slots[st.status.active]?.digest16 ?? null;
   const app = releaseAppDigest(bytes, node, st.status.active);
-  return !st.hello.trial && app !== null && sameBytes(running, app);
+  return !st.hello.trial && slotsSettled(st.status) && app !== null && sameBytes(running, app);
 }
 
 /** On a node's card while it is written: what is being written now (its boot core comes first when that differs), or null when not known. */
@@ -99,7 +107,7 @@ export function waterOf(progress: Record<string, Progress>): Record<string, numb
  * node rolled back to its previous version, or a node recovered.
  */
 export type Finish =
-  | { kind: 'updated'; left: number; leftOut?: number }
+  | { kind: 'updated'; left: number; leftOut?: number; wrote?: number; same?: number }
   | { kind: 'rolledBack'; name: string; version: string }
   | { kind: 'recovered'; name: string; version: string };
 
@@ -306,6 +314,8 @@ export class Operate {
   }
   /** Nodes on the chosen release's version since it was chosen (an update, its rest, a recovery). */
   private updated = new Set<string>();
+  /** Nodes this run really wrote an image to; the others among `updated` were already on it. */
+  private wrote = new Set<string>();
   /** The run hubRestarting / reconnectNeeded belong to, so done says what it did. */
   private running: 'update' | 'recover' | 'rollback' = 'update';
 
@@ -380,12 +390,12 @@ export class Operate {
     return this.call((h) => h.status(n.target.kind, n.target.addr)).catch(() => null);
   }
 
-  /** The version of the boot core node `id` runs now; null when it cannot be read. */
+  /** The version of the boot core node `id` runs now; null when it cannot be read, or another waits for the next boot. */
   private async runningCore(id: string): Promise<number | null> {
     const n = this.reach.find((x) => x.id === id);
     if (!n) return null;
     const core = await this.call((h) => h.bootCoreStatus(n.target.kind, n.target.addr)).catch(() => null);
-    return core?.slots[core.active]?.version ?? null;
+    return core && slotsSettled(core) ? (core.slots[core.active]?.version ?? null) : null;
   }
 
   get responding(): number {
@@ -736,6 +746,7 @@ export class Operate {
     this.failed = null;
     this.sentVersion = {};
     this.coreSent = {};
+    this.wrote = new Set();
     this.progress = Object.fromEntries(this.targets.map((id) => [id, { stage: 'waiting', percent: 0 }]));
     this.track = Object.fromEntries(this.targets.map((id) => [id, { ...NO_TRACK }]));
     // topology node index = position in reach (true for the sample, which follows its YAML).
@@ -771,8 +782,9 @@ export class Operate {
       this.hubAway(this.sentVersion[n.id]);
     } else if (e.phase === PHASE.confirm && !e.bootCore) {
       // Only the app's confirmation finishes the node; its boot core's comes before it.
-      this.progress[n.id] = { stage: 'done', percent: 100 };
+      this.progress[n.id] = { stage: e.wrote ? 'done' : 'unchanged', percent: 100 };
       this.updated.add(n.id);
+      if (e.wrote) this.wrote.add(n.id);
       // The card shows the version the node now runs.
       const was = this.live[n.id];
       if (was?.hello) this.live[n.id] = { ...was, hello: { ...was.hello, activeVersion: e.version, trial: false } };
@@ -881,7 +893,13 @@ export class Operate {
     // An app left unchanged is on the package's version too.
     const v = Object.values(this.sentVersion)[0] ?? Object.values(this.fileVersions)[0];
     this.status = ANNOUNCE.A14(v === undefined ? '' : versionText(v));
-    this.finished = { kind: 'updated', left: this.reach.filter((n) => !this.updated.has(n.id) && !this.skip.has(n.id)).length, ...(this.skip.size ? { leftOut: this.skip.size } : {}) };
+    this.finished = {
+      kind: 'updated',
+      left: this.reach.filter((n) => !this.updated.has(n.id) && !this.skip.has(n.id)).length,
+      wrote: this.wrote.size,
+      same: this.reach.filter((n) => this.updated.has(n.id) && !this.wrote.has(n.id)).length,
+      ...(this.skip.size ? { leftOut: this.skip.size } : {}),
+    };
     this.go(this.state === 'hubRestarting' ? 'confirmed' : this.state === 'reconnectNeeded' ? 'reconnected' : 'doneNoHub');
     this.startWatching();
   }
@@ -981,6 +999,7 @@ export class Operate {
     this.progress[hub.id] = { stage: 'done', percent: 100 };
     if (this.running === 'update') {
       this.updated.add(hub.id);
+      this.wrote.add(hub.id);
       return this.done();
     }
     this.finishRun(hub, r.version);

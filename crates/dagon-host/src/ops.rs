@@ -96,6 +96,9 @@ pub struct Event {
     pub percent: u8,
     /// The node's one progress number (`percent.rs`), what its display is told.
     pub shown: u8,
+    /// This run has written an image to the node: false on the last report
+    /// of a node left as it was, which is no confirmation of anything.
+    pub wrote: bool,
     /// The host's clock when this number was reckoned: a caller that counts
     /// the trial's time on from it reckons with the same moments.
     pub at_ms: u64,
@@ -313,6 +316,7 @@ impl<T: Transport, C: Clock> Host<T, C> {
                 phase: ph,
                 percent: 0,
                 shown: 0,
+                wrote: self.write.wrote(),
                 at_ms,
                 version: v,
                 times: None,
@@ -412,12 +416,13 @@ impl<T: Transport, C: Clock> Host<T, C> {
         let running = cs.slots.get(usize::from(cs.active)).copied();
         // By version, as apps: a changed boot core is written only when its
         // version (its boot crate's) was raised.
-        let installed = cores.iter().any(|img| {
-            img.get(..HEADER_SIZE)
-                .and_then(|h| <&[u8; HEADER_SIZE]>::try_from(h).ok())
-                .and_then(|h| ImageHeader::parse(h).ok())
-                .is_some_and(|h| running.is_some_and(|r| r.version == h.version))
-        });
+        let installed = slots_settled(&cs)
+            && cores.iter().any(|img| {
+                img.get(..HEADER_SIZE)
+                    .and_then(|h| <&[u8; HEADER_SIZE]>::try_from(h).ok())
+                    .and_then(|h| ImageHeader::parse(h).ok())
+                    .is_some_and(|h| running.is_some_and(|r| r.version == h.version))
+            });
         if installed {
             return Ok(false);
         }
@@ -498,8 +503,13 @@ impl<T: Transport, C: Clock> Host<T, C> {
                     "node {node}: app {running} not written, it is what the node runs"
                 ));
             }
-            self.emit(on_event, node, phase::CONFIRM, 100, running)
-                .await;
+            // With nothing written there is nothing confirmed to show.
+            if self.write.wrote() {
+                self.emit(on_event, node, phase::CONFIRM, 100, running)
+                    .await;
+            } else {
+                self.report(on_event, node, phase::CONFIRM, 100, running);
+            }
             return Ok(running);
         }
         let slot = free_slot(&st.status).ok_or(Error::NoImage { node })?;
@@ -872,18 +882,32 @@ impl<T: Transport, C: Clock> Host<T, C> {
         percent: u8,
         version: Version,
     ) {
+        let shown = self.report(on_event, node, ph, percent, version);
+        self.show(node, ph, shown, version, &[]).await;
+    }
+
+    /// Reports `ev` to the caller only; returns its number.
+    fn report(
+        &mut self,
+        on_event: &mut dyn FnMut(Event),
+        node: u8,
+        ph: u8,
+        percent: u8,
+        version: Version,
+    ) -> u8 {
         let (shown, at_ms) = self.shown_of(node, ph, percent);
         on_event(Event {
             node,
             phase: ph,
             percent,
             shown,
+            wrote: self.write.wrote(),
             at_ms,
             version,
             times: None,
             boot_core: self.core_write,
         });
-        self.show(node, ph, shown, version, &[]).await;
+        shown
     }
 
     /// VERIFY of an image written in `times`.
@@ -900,6 +924,7 @@ impl<T: Transport, C: Clock> Host<T, C> {
             phase: phase::VERIFY,
             percent: 100,
             shown,
+            wrote: self.write.wrote(),
             at_ms,
             version,
             times: Some(times),
@@ -1152,11 +1177,26 @@ fn image_digest(b: &BundleView<'_>, node: u8, kind: u8, slot: u8) -> Option<[u8;
 fn app_unchanged(b: &BundleView<'_>, node: u8, st: &NodeState) -> bool {
     let active = st.status.active;
     !st.hello.trial
+        && slots_settled(&st.status)
         && st
             .status
             .slots
             .get(usize::from(active))
             .is_some_and(|s| app_digest(b, node, active) == Some(s.digest16))
+}
+
+/// The running slot is the confirmed one and no slot waits for the next boot
+/// or is on trial: what runs now is what the next reset runs.
+fn slots_settled(st: &StatusResp) -> bool {
+    st.active == st.confirmed
+        && st
+            .slots
+            .get(usize::from(st.active))
+            .is_some_and(|s| s.state == SlotState::Confirmed)
+        && !st
+            .slots
+            .iter()
+            .any(|s| matches!(s.state, SlotState::Pending | SlotState::Trying))
 }
 
 /// Slot neither running nor confirmed.

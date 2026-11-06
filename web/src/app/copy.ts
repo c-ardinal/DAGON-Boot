@@ -108,6 +108,7 @@ export const BAND = {
   M65: { pair: ['目安', '約 1 分'], sentence: '止まったノードへ書き込むと、新しいバージョンで動きます。' },
   M66: { sentence: 'すべてのノードへ書き込みました。' },
   M66checked: { sentence: 'チェックしたノードへ書き込みました。' },
+  M66none: { sentence: 'チェックしたノードはすでにこのパッケージの内容なので、書き込みませんでした。' },
   M67: { sentence: 'CLI の作業が終わると、自動でつなぎ直します。' },
 } as const satisfies Record<string, BandCopy>;
 
@@ -157,6 +158,8 @@ export const BAND_FOR = {
   /** done when M66 is not true: the nodes that did not answer were not updated. */
   M66some: (n: number) => ({ sentence: `応答しなかった ${n} つのノードは前のままなので、電源と配線を確かめてから書き込んでください。` }),
   /** done after 「前のバージョンに戻す」. */
+  /** done when some nodes were already on the package. */
+  M66part: (wrote: number, same: number) => ({ sentence: `${wrote} つのノードへ書き込み、${same} つのノードはすでに同じ内容なので、書き込みませんでした。` }),
   M66back: (name: string, version: string) => ({ sentence: `${name}は前のバージョン ${version} で動いています。` }),
   /** done after a recovery with nothing left to update. */
   M66fixed: (name: string, version: string) => ({ sentence: `${name}は直り、${version} で動いています。` }),
@@ -518,6 +521,7 @@ export const NODE = {
   waiting: '… 待ち',
   done: '✓ 完了',
   unwritten: '… 未書き込み',
+  unchanged: '✓ 書き込み不要',
   rebooting: '… 再起動中',
   previous: '↺ 前のバージョン',
   /**
@@ -1246,6 +1250,7 @@ export const WRITE = {
   go: '{n} ノードへ書き込む',
   toast: {
     done: '書き込み済み {n} ノード',
+    none: '書き込み不要',
   },
   state: {
     writing: '… 書き込み中',

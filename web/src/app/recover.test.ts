@@ -6,9 +6,9 @@ import { simulator } from '../serial/simHub.ts';
 import type { Transport } from '../serial/transport.ts';
 import { PHASE, versionText } from '../wasm/dagon.ts';
 import { bandOf } from './band.ts';
-import { ANNOUNCE, BAND, BUTTON_FOR, NODE, WRITE } from './copy.ts';
+import { ANNOUNCE, BAND, BAND_FOR, BUTTON_FOR, NODE, WRITE } from './copy.ts';
 import { SAMPLE_CONFIG } from './sample.ts';
-import { Operate, failureStage, hubBack, writingTo } from './operate.svelte.ts';
+import { Operate, failureStage, hubBack, slotsSettled, writingTo } from './operate.svelte.ts';
 
 const repo = (rel: string) => new Uint8Array(readFileSync(new URL(`../../../${rel}`, import.meta.url)));
 /** The project's files dagon serve hands out (release/latest, the boot core): the sample release 1.1.0 and the F401 boot core, both under the test key. */
@@ -256,6 +256,37 @@ describe('recovery from the page with dagon-host recover', () => {
     await op.rollback('watch');
     expect(v(op.live.watch.hello?.activeVersion)).toBe('1.0.0');
   }, 180_000);
+
+  test('a package every checked node already runs, chosen as a file: nothing is written and nothing says so', async () => {
+    const sim = simulator(13)!;
+    const op = session(sim.transport, sim.clock);
+    await op.connect();
+    await op.push();
+    const file = repo('crates/dagon-sim/fixtures/sample-1.1.0.dgb');
+    op.takeFile('sample-1.1.0.dgb', file);
+    await op.update();
+    expect(op.finished).toMatchObject({ kind: 'updated', wrote: 3, same: 0 });
+    await op.round();
+    op.takeFile('sample-1.1.0.dgb', file);
+    await op.update();
+    expect(op.state).toBe('done');
+    expect(op.finished).toMatchObject({ kind: 'updated', wrote: 0, same: 3 });
+    expect(bandOf(op.state, op.ctx, { finish: op.finished }).sentence).toBe(BAND.M66none.sentence);
+    expect(op.progress.seg).toMatchObject({ stage: 'unchanged', percent: 100 });
+    expect(NODE.unchanged).toContain('書き込み');
+    // One written, the others as they were: the sentence says which is which.
+    expect(bandOf('done', op.ctx, { finish: { kind: 'updated', left: 0, wrote: 1, same: 2 } }).sentence).toBe(BAND_FOR.M66part(1, 2).sentence);
+  }, 240_000);
+
+  test('a slot waiting for the next boot is not called unchanged', () => {
+    const slot = (state: number) => ({ state, version: 1, digest16: new Uint8Array(16) });
+    const st = (states: number[], active = 0, confirmed = 0) => ({ active, confirmed, slots: states.map(slot) }) as never;
+    expect(slotsSettled(st([4, 1, 4]))).toBe(true);
+    expect(slotsSettled(st([4, 2, 4]))).toBe(false);
+    expect(slotsSettled(st([4, 3, 4]))).toBe(false);
+    expect(slotsSettled(st([3, 4, 4], 0, 1))).toBe(false);
+    expect(slotsSettled(st([1, 4, 4], 0, 0))).toBe(false);
+  });
 
   test('a boot core that cannot be read is not called the same', async () => {
     const sim = simulator(13)!;

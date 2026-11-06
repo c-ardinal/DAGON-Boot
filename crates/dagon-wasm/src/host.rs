@@ -435,6 +435,7 @@ fn event_js(e: &Event) -> JsValue {
     set(&o, "percent", e.percent.into());
     set(&o, "shown", e.shown.into());
     set(&o, "atMs", (e.at_ms as f64).into());
+    set(&o, "wrote", e.wrote.into());
     set(&o, "bootCore", e.boot_core.into());
     set(&o, "version", e.version.raw().into());
     o.into()

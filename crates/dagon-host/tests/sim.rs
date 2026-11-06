@@ -1729,6 +1729,7 @@ fn a_boot_loader_only_write_keeps_the_app_to_go_back_to() {
         "{events:?}"
     );
     let last = events.last().unwrap();
+    assert!(last.wrote, "the boot core was written");
     assert_eq!(
         (last.phase, last.shown, last.boot_core, last.version),
         (phase::CONFIRM, 100, false, v1)
@@ -1758,10 +1759,54 @@ fn nothing_differing_writes_nothing_and_says_the_node_is_on_it() {
     let apps = [seg_img(0, v1), seg_img(1, v1)];
     write_seg(&s, &apps);
     let before = block_on(host(&s).status(SEG_AT)).unwrap().status;
+    s.faults.borrow_mut().seen.clear();
     let events = write_seg(&s, &apps);
     assert_eq!(events.len(), 1, "{events:?}");
-    assert_eq!((events[0].phase, events[0].shown), (phase::CONFIRM, 100));
+    assert_eq!(
+        (events[0].phase, events[0].shown, events[0].wrote),
+        (phase::CONFIRM, 100, false)
+    );
+    // Nothing was confirmed: no display is told so.
+    assert_eq!(count(&s, Cmd::Show), 0);
     assert_eq!(block_on(host(&s).status(SEG_AT)).unwrap().status, before);
+}
+
+#[test]
+fn a_slot_waiting_for_the_next_boot_is_no_app_to_leave_alone() {
+    let s = sim();
+    let (x, y) = (Version::new(1, 1, 0), Version::new(1, 2, 0));
+    let same = [seg_img(0, x), seg_img(1, x)];
+    write_seg(&s, &same);
+    let st = block_on(host(&s).status(SEG_AT)).unwrap().status;
+    assert_eq!(st.active, 1);
+    // Y goes into the other slot and is set pending; its REBOOT never arrives.
+    s.faults.borrow_mut().drop_req.push((Cmd::Reboot as u8, 1));
+    let pkg = package(&[seg_img(0, y), seg_img(1, y)]);
+    let _ = block_on(host(&s).apply(
+        &pkg,
+        &topology(&yaml()),
+        &key().pk,
+        Some(&[SEG]),
+        &mut |_| {},
+    ));
+    let st = block_on(host(&s).status(SEG_AT)).unwrap().status;
+    assert_eq!(st.active, 1, "still on X");
+    assert_eq!(st.slots[0].state, SlotState::Pending, "{st:?}");
+
+    // X again: not called the same, or Y would boot at the next reset.
+    let events = write_seg(&s, &same);
+    assert!(
+        events.iter().any(|e| e.phase == phase::TRANSFER),
+        "{events:?}"
+    );
+    let st = block_on(host(&s).status(SEG_AT)).unwrap().status;
+    assert_eq!(st.slots[usize::from(st.active)].version, x);
+    assert!(
+        !st.slots
+            .iter()
+            .any(|x| matches!(x.state, SlotState::Pending | SlotState::Trying)),
+        "{st:?}"
+    );
 }
 
 #[test]

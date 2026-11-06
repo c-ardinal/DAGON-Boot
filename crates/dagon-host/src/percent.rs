@@ -57,12 +57,18 @@ pub(crate) struct WriteTrack {
     rebooted_ms: Option<u64>,
     /// What was last said: the number never goes under it.
     shown: u8,
+    wrote: bool,
 }
 
 impl WriteTrack {
     /// What was last said.
     pub(crate) fn shown(&self) -> u8 {
         self.shown
+    }
+
+    /// An image's bytes have gone to the node in this run.
+    pub(crate) fn wrote(&self) -> bool {
+        self.wrote
     }
 
     /// Takes one report and returns the number to show for it.
@@ -81,6 +87,7 @@ impl WriteTrack {
                 ..WriteTrack::default()
             };
         }
+        self.wrote |= matches!(ph, phase::TRANSFER | phase::ROM);
         self.shown = match ph {
             phase::TRANSFER => {
                 // Every image's transfer opens with a 0 % report.

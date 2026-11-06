@@ -611,6 +611,7 @@
     silent: NODE.silent,
     refused: NODE.refusedOther,
     previous: NODE.previous,
+    coreBack: WRITE.coreBack.label,
     unwritten: NODE.unwritten,
   };
   /** Stages in which a card shows → the new version and its one %. */
@@ -1499,8 +1500,9 @@
     <StopModal
       target={`[${stopNode.no}] ${stopNode.name}`}
       {back}
-      reason={back && running !== undefined ? fillIn(WRITE.rolled.reason, { version: versionText(running) }) : (next.cause ?? WRITE.failed)}
-      fix={back ? WRITE.rolled.next : next.sentence}
+      label={op.coreWentBack ? WRITE.coreBack.label : undefined}
+      reason={op.coreWentBack ? WRITE.coreBack.detail : back && running !== undefined ? fillIn(WRITE.rolled.reason, { version: versionText(running) }) : (next.cause ?? WRITE.failed)}
+      fix={op.coreWentBack ? WRITE.coreBack.next : back ? WRITE.rolled.next : next.sentence}
       linked={agent.linked}
       onask={(at) => askWhy(at, () => (stopClosed = op.failed))}
       onclose={() => (stopClosed = op.failed)}

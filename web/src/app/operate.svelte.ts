@@ -48,7 +48,7 @@ const UNKNOWN: Live = { responding: null, rttMs: null, lastSeen: null, hello: nu
 
 /** Where one node is in an update (the node chip and the update-order row). */
 export interface Progress {
-  stage: 'waiting' | 'writing' | 'lastResort' | 'rebooting' | 'done' | 'silent' | 'refused' | 'previous' | 'unwritten' | 'cannotFix';
+  stage: 'waiting' | 'writing' | 'lastResort' | 'rebooting' | 'done' | 'silent' | 'refused' | 'previous' | 'coreBack' | 'unwritten' | 'cannotFix';
   percent: number;
   /** dagon-host's reason when the node refused (`E_FLASH`, `E_SIGNATURE`, ...). */
   reason?: string;
@@ -186,6 +186,7 @@ export const LATEST_NAME = 'latest.dgb';
 export function failureStage(reason: string): Pick<Progress, 'stage' | 'reason'> {
   if (reason === 'NO ANSWER') return { stage: 'silent' };
   if (reason === 'ROLLED BACK') return { stage: 'previous' };
+  if (reason === 'BOOT CORE ROLLED BACK') return { stage: 'coreBack' };
   // A refused release (source, key, topology, format) keeps its kind: the chip says which.
   if (REFUSALS.includes(reason) || reason.startsWith('E_') || reason === 'REJECTED') return { stage: 'refused', reason };
   return { stage: 'cannotFix' };
@@ -259,6 +260,10 @@ export class Operate {
   /** The node the write stopped at is back on its previous version. */
   get wentBack(): boolean {
     return !!this.failed && this.progress[this.failed]?.stage === 'previous';
+  }
+  /** The node the write stopped at is back on its confirmed boot core. */
+  get coreWentBack(): boolean {
+    return !!this.failed && this.progress[this.failed]?.stage === 'coreBack';
   }
   /** The record of the write that went back, while the node stays stopped on it; else null. */
   get rollbackRecord(): RollbackRecord | null {
@@ -772,7 +777,7 @@ export class Operate {
     const n = this.config!.nodes.find((x) => x.id === id)!;
     this.failed = id;
     this.progress[id] = { stage, percent: this.progress[id]?.percent ?? 0, reason };
-    this.status = stage === 'previous' ? ANNOUNCE.A13previous(n.name) : ANNOUNCE.A13(n.name);
+    this.status = stage === 'previous' ? ANNOUNCE.A13previous(n.name) : stage === 'coreBack' ? ANNOUNCE.A13core(n.name) : ANNOUNCE.A13(n.name);
     this.go(this.state === 'reconnectNeeded' ? 'revertedOnReconnect' : 'nodeStuck');
     this.startWatching();
   }

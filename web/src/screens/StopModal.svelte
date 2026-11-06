@@ -8,6 +8,8 @@
     target: string;
     /** It went back to its previous version (else it could not be written). */
     back: boolean;
+    /** The outcome's own word beside the title, for one that is neither. */
+    label?: string;
     reason: string;
     fix: string;
     /** An agent is linked: asking why is offered for a write that went back. */
@@ -19,10 +21,10 @@
     buttons: Snippet;
   }
 
-  let { target, back, reason, fix, linked, onask, onclose, onmore, buttons }: Props = $props();
+  let { target, back, label, reason, fix, linked, onask, onclose, onmore, buttons }: Props = $props();
 </script>
 
-<Modal title={WRITE.run} chip={{ text: back ? WRITE.previous : WRITE.failed, kind: back ? 'info' : 'error' }} {target} {onclose} {onmore}>
+<Modal title={WRITE.run} chip={{ text: label ?? (back ? WRITE.previous : WRITE.failed), kind: back || label ? 'info' : 'error' }} {target} {onclose} {onmore}>
   <h3 class="modal-h">{NOTICE.reason}</h3>
   <p>{reason}</p>
   <h3 class="modal-h">{NOTICE.fix}</h3>

@@ -98,6 +98,40 @@ describe('recovery from the page with dagon-host recover', () => {
     expect(op.live.seg.hello?.trial).toBe(false);
   }, 120_000);
 
+  test('a boot core that went back: its own outcome, the node answers on its confirmed core and the app stays', async () => {
+    const sim = simulator(13)!;
+    const before = sim.hub();
+    expect(before.failCore(0x42, 1, 1, 0)).toBe(true);
+    const op = session(sim.transport, sim.clock);
+    await op.connect();
+    await op.push();
+    await op.round();
+    const app = op.live.seg.hello?.activeVersion;
+    op.takeFile('sample-core-1.1.0.dgb', repo('crates/dagon-sim/fixtures/sample-core-1.1.0.dgb'));
+    await op.update();
+    expect(op.state).toBe('stopped');
+    expect(op.progress.seg.stage).toBe('coreBack');
+    expect(op.coreWentBack).toBe(true);
+    expect(op.wentBack).toBe(false);
+    expect(op.status).toBe(ANNOUNCE.A13core('7セグ'));
+    op.selected = 'node:seg';
+    await op.round();
+    expect(op.live.seg.responding).toBe(true);
+    expect(op.live.seg.hello?.activeVersion).toBe(app);
+    expect(v(op.live.seg.core?.slots[op.live.seg.core.active].version)).toBe('1.0.0');
+  }, 120_000);
+
+  test('the same package with a good boot core writes through', async () => {
+    const sim = simulator(13)!;
+    const op = session(sim.transport, sim.clock);
+    await op.connect();
+    await op.push();
+    op.takeFile('sample-core-1.1.0.dgb', repo('crates/dagon-sim/fixtures/sample-core-1.1.0.dgb'));
+    await op.update();
+    expect(op.state).toBe('done');
+    expect(op.coreWentBack).toBe(false);
+  }, 120_000);
+
   // Every state a write can start in: the node's answer decides, not the page.
   test.each(['ready', 'fileReady', 'done'] as const)('%s: a silent node with a ROM entry is asked, then written through its ROM', async (at) => {
     const sim = simulator(11)!;

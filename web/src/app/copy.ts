@@ -723,6 +723,7 @@ export const ANNOUNCE = {
   A11percent: (n: number) => `進み具合 ${n}%`,
   A12: '親機 再起動中、自動で再接続',
   A13: (name: string) => `書き込み 停止、${name}`,
+  A13core: (name: string) => `${name} ブートコアは元のまま`,
   A13previous: (name: string) => `${name} 前のバージョン`,
   A14: (version: string) => `完了、${version}`,
   A21timeout: '親機 再接続 時間切れ',
@@ -1223,6 +1224,12 @@ export const WRITE = {
   rolled: {
     reason: '新しいバージョンで起動を続けられず、前のバージョン {version} に戻りました。ノードは動いています。',
     next: 'アプリを直してビルドしてから、もう一度書き込んでください。',
+  },
+  /** The new boot core failed its check: the node runs its confirmed one, the app was not written. */
+  coreBack: {
+    label: '↺ ブートコアは元のまま',
+    detail: '新しいブートコアが自分の検査に通らなかったので、確定しているブートコアに戻りました。ノードは動いています。アプリは書き込んでいません。',
+    next: 'ブートコアを直してバージョンを上げ、ビルドしてから、もう一度書き込んでください。',
   },
   /** A silent node with a ROM entry: said once, before anything is touched. */
   rom: {

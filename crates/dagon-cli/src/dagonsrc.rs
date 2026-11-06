@@ -133,6 +133,7 @@ fn checkout(git: &str, tag: &str, base: &Path) -> Result<PathBuf, String> {
     for k in crate::nodebuild::secret_env() {
         cmd.env_remove(k);
     }
+    crate::nodebuild::plain_output(&mut cmd);
     let o = cmd
         .args(["metadata", "--format-version", "1", "--manifest-path"])
         .arg(dir.join("Cargo.toml"))

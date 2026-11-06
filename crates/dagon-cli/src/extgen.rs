@@ -349,6 +349,7 @@ fn boot_graph_stamp(p: &ProjectRef<'_>, id: &str, mcu: &str) -> Result<(String, 
     for k in crate::nodebuild::secret_env() {
         cmd.env_remove(k);
     }
+    crate::nodebuild::plain_output(&mut cmd);
     cmd.args(["metadata", "--format-version", "1", "--all-features"])
         .arg("--manifest-path")
         .arg(dir.join("Cargo.toml"))

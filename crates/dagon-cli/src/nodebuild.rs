@@ -271,6 +271,12 @@ const INHERITED_BUILD_ENV: [&str; 7] = [
     "CARGO_ENCODED_RUSTFLAGS",
 ];
 
+/// cargo's lines are read as text, on the page and in messages: a colour
+/// setting in the caller's environment or cargo configuration stays out of them.
+pub fn plain_output(cmd: &mut Command) {
+    cmd.env("CARGO_TERM_COLOR", "never");
+}
+
 /// Removes the CLI's secrets, and build settings inherited from a parent
 /// cargo, from a child's environment.
 fn scrub(cmd: &mut Command) {
@@ -280,6 +286,7 @@ fn scrub(cmd: &mut Command) {
     for k in INHERITED_BUILD_ENV {
         cmd.env_remove(k);
     }
+    plain_output(cmd);
 }
 
 enum Line {
@@ -553,6 +560,11 @@ mod tests {
         assert!(
             removed.iter().any(|k| k == "RUSTUP_TOOLCHAIN"),
             "toolchain file wins"
+        );
+        assert!(
+            cmd.get_envs()
+                .any(|(k, v)| k == "CARGO_TERM_COLOR" && v == Some("never".as_ref())),
+            "cargo's lines reach the page and files as plain text"
         );
     }
 

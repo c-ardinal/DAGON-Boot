@@ -24,21 +24,21 @@ DAGON が読み書きする形式、プロトコル、API には、どれも番�
 
 | コンポーネント | 役割 |
 |---|---|
-| dagon CLI | すべての操作を行うコマンド |
+| dagon CLI | バイナリ名 dagon のコマンド |
 | dagon serve | Console のためのローカルのサーバ |
-| DAGON Console | 構成を描き、書き込む画面 |
-| Claude Code Plugin | Claude Code に DAGON を教える追加機能 |
+| DAGON Console | ブラウザの UI |
+| Claude Code Plugin | 移植とトポロジ生成のスキル、サブエージェント、フック |
 | Host Extension Chain | ホストの拡張を順に呼ぶチェーン |
 | Action Definitions | イベントの後で動かすアクションのデータ |
 | Agent Definitions | エージェントとそのつなぎ方のデータ |
-| Project Generator | 構成からノードの crate を作る |
-| Definition Registry | マイコンとボードの定義を読み込む |
-| Topology Check | 構成の検証 |
-| Node Build | ノードのイメージのビルド |
-| Operations | 書き込み、戻す、確定、復旧の手順 |
+| Project Generator | — |
+| Definition Registry | 対応ボードの表を持つ |
+| Topology Check | 構成の YAML を読み、検証規則を適用する |
+| Node Build | dagon.toml の `[build.<id>]` に従ってノードごとに cargo build する |
+| Operations | apply、status、recover の手順 |
 | Host Machines | ホストの操作の状態機械 |
-| Release Builder | 署名したイメージからパッケージを作る |
-| AI Agent Link | 同意のうえでエージェントに尋ねる |
+| Release Builder | 検査の後でマニフェストを署名し、パッケージファイル（.dgb）を作る |
+| AI Agent Link | dagon ai のコマンド |
 | Protection Planner | 拡張の保護マップの計画と確認 |
 | Event Stream | ホストのイベントの配信 |
 | Catalog | すべてのイベントとポートの一覧 |
@@ -50,10 +50,10 @@ DAGON が読み書きする形式、プロトコル、API には、どれも番�
 | Agent | エージェントのポート |
 | Action | アクションのポート |
 | Cargo Runner | cargo で動くビルド |
-| Serial | シリアルポートの転送 |
-| Web Serial | ブラウザの転送 |
-| Simulator Link | シミュレータへの転送 |
-| ROM Writers | ROM を通した最初の書き込み |
+| Serial | CLI のシリアルポートの Transport |
+| Web Serial | dagon-wasm の Web Serial の Transport |
+| Simulator Link | dagon-sim の模擬リンク |
+| ROM Writers | PC の dagon-romlink による ROM の手順 |
 | File Key Pair | ファイルの鍵の組 |
 | DAGON Link | ホスト、親機、ノードのあいだのフレームとコマンド |
 | Release Bundle | パッケージファイル（.dgb）の形式 |
@@ -62,7 +62,7 @@ DAGON が読み書きする形式、プロトコル、API には、どれも番�
 | VERSION | ノードのバージョンと状態の問い合わせ |
 | User Application | 利用者のアプリ |
 | User Extensions | 利用者の拡張 |
-| Library Extensions | ライブラリが持ち込む拡張 |
+| Library Extensions | 拡張のチェーンの中ほど |
 | Boot Start | ブートのレイヤーの起動 |
 | App Start | アプリのレイヤーの起動 |
 | Relay Start | リレーのレイヤーの起動 |
@@ -76,12 +76,12 @@ DAGON が読み書きする形式、プロトコル、API には、どれも番�
 | Wire Protocol | リンクのメッセージとセッションの対応 |
 | Serving Loop | リクエストに答えるループ |
 | Recovery Entry | 復旧の経路への入り口 |
-| Relay | 親機から子機への中継 |
+| Relay | 要求をホップごとに中継し、子機の有無を追跡し、進み具合の表示の状態を持つ |
 | Coordinator | 保存したリリースをノードに対して実行する |
 | Release Store | リリースの面 N/P とその昇格を持つ |
-| Node Recovery | 親機から子機を復旧する |
+| Node Recovery | ノードごとの復旧の段階と、回数に上限のある再試行 |
 | Bus Guardian | 共有のバスを直列化し、バスの固まりと切り離しを扱う |
-| Topology Copy | 親機にある構成のコピー |
+| Topology Copy | 親機が持つ構成のコピー。アトミックに置き換え、親機が自分でピンを動かす前に署名付きマニフェストに照らして確かめる |
 | Liveness Guard | タスクの生存を条件とするキック |
 | Reboot Gate | 先に返答し、上限のある遅れを待ってからリセットする |
 | Entry Gate | 拡張の呼び出しの入り口 |
@@ -118,7 +118,7 @@ DAGON が読み書きする形式、プロトコル、API には、どれも番�
 | Diagnostics | 追加の診断のポート |
 | Display | 表示のポート |
 | LogSink | ログの行き先のポート |
-| BootSelect | ブートの対象の切り替え |
+| BootSelect | kind S はジャンプ、kind V はベンダーの選択情報の操作 |
 | Flash | フラッシュの消去、書き込み、読み出し |
 | I2cBus | 親機の I2C バス |
 | StreamPort | 親機のバイト列 |
@@ -133,10 +133,10 @@ DAGON が読み書きする形式、プロトコル、API には、どれも番�
 | Shared Bus | 複数の者が使うボードのバス |
 | Reset and Jump | リセットとイメージへのジャンプ |
 | Flash Driver | フラッシュのドライバ |
-| Slot Store Driver | スロットのストアの実装 |
-| Link Drivers | リンクのドライバ |
+| Slot Store Driver | kind S のログ、または kind V のベンダーデータ |
+| Link Drivers | ノードの Link の実装 |
 | Watchdog Driver | ウォッチドッグのドライバ |
-| Execution Setup | 割り込みと実行の準備 |
+| Execution Setup | 実行モデルに従うエグゼキュータの優先度 |
 | Architecture Kind | 保護ハードウェアの種類ごとの実装 |
 | MCU Definition | マイコンのデータ |
 | ROM Loader | マイコンの ROM のローダ |
@@ -144,14 +144,14 @@ DAGON が読み書きする形式、プロトコル、API には、どれも番�
 | Vendor 2nd Stage | ベンダーの 2nd stage |
 | Protection Unit | メモリの保護ハードウェア |
 | Peripherals | マイコンのペリフェラル |
-| dagon-format | バイトのレイアウト |
-| dagon-proto | リンクのプロトコル |
+| dagon-format | イメージヘッダ、マニフェスト、状態ログ、トポロジのバイト配置 |
+| dagon-proto | フレーム、コマンド、エラーの定義 |
 | dagon-events | イベント、状態機械、拡張 |
 | Retained Codecs | ブート記録、ヒューズ、構成の本体の形式 |
-| dagon-conform | 適合試験 |
-| dagon-sim | シミュレータ |
+| dagon-conform | 実機とシミュレータに共通の適合試験 |
+| dagon-sim | 模擬フラッシュ、模擬リンク、模擬 ROM ローダ、故障注入 |
 | dagon-retained-model | 保持の形式の実行可能なモデル |
-| ROM Loader Client | 親機から子機の ROM ローダを動かす |
+| ROM Loader Client | 別のマイコンの ROM ローダを動かす |
 | Trusted Extension | 特権で動く拡張 |
 <!-- end of generated table -->
 

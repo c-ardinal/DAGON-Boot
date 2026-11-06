@@ -27,21 +27,21 @@ The figure below is DAGON's software design.
 
 | Component | What it is |
 |---|---|
-| dagon CLI | The command for every operation |
+| dagon CLI | The binary named dagon |
 | dagon serve | The local server for the Console |
-| DAGON Console | The page that draws the setup and writes |
-| Claude Code Plugin | Teaches Claude Code about DAGON |
+| DAGON Console | The browser UI |
+| Claude Code Plugin | Porting and topology skills, subagents and hooks |
 | Host Extension Chain | The chain of host extensions, in order |
 | Action Definitions | Data for actions run after an event |
 | Agent Definitions | Data for agents and their ways |
-| Project Generator | Makes node crates from the setup |
-| Definition Registry | Loads MCU and board definitions |
-| Topology Check | Validates the setup |
-| Node Build | Builds node images |
-| Operations | Write, go back, confirm and recover procedures |
+| Project Generator | — |
+| Definition Registry | Holds the supported-board table |
+| Topology Check | Reads the topology YAML and applies the validation rules |
+| Node Build | Runs cargo build per node from `[build.<id>]` in dagon.toml |
+| Operations | The apply, status and recover procedures |
 | Host Machines | State machines of host operations |
-| Release Builder | Makes packages from signed images |
-| AI Agent Link | Asks an agent, with consent |
+| Release Builder | Signs the manifest after its checks and makes the package file (.dgb) |
+| AI Agent Link | The dagon ai commands |
 | Protection Planner | Plans and checks extensions' protection maps |
 | Event Stream | Delivers host events |
 | Catalog | Lists every event and port |
@@ -53,10 +53,10 @@ The figure below is DAGON's software design.
 | Agent | Port for an agent |
 | Action | Port for an action |
 | Cargo Runner | Builds through cargo |
-| Serial | Serial port transport |
-| Web Serial | Browser transport |
-| Simulator Link | Transport to the simulator |
-| ROM Writers | First writes through the ROM |
+| Serial | The CLI's serial port Transport |
+| Web Serial | dagon-wasm's Web Serial Transport |
+| Simulator Link | dagon-sim's simulated link |
+| ROM Writers | ROM procedures on the PC through dagon-romlink |
 | File Key Pair | Key pair in files |
 | DAGON Link | Frames and commands between host, hub and nodes |
 | Release Bundle | Format of the package file (.dgb) |
@@ -65,7 +65,7 @@ The figure below is DAGON's software design.
 | VERSION | Query of a node's versions and state |
 | User Application | The user's app |
 | User Extensions | The user's extensions |
-| Library Extensions | Extensions libraries bring |
+| Library Extensions | The middle of the extension chain |
 | Boot Start | Starts the boot layer |
 | App Start | Starts the app layer |
 | Relay Start | Starts the relay layer |
@@ -79,12 +79,12 @@ The figure below is DAGON's software design.
 | Wire Protocol | Maps link messages onto the session |
 | Serving Loop | The loop that answers requests |
 | Recovery Entry | Entry to a recovery path |
-| Relay | Relays from the hub to children |
+| Relay | Forwards requests hop by hop, tracks child presence and holds progress display state |
 | Coordinator | Runs a stored release across nodes |
 | Release Store | Holds the release faces N/P and their promotion |
-| Node Recovery | Recovers a child from the hub |
+| Node Recovery | Per-node recovery tiers with bounded retries |
 | Bus Guardian | Serialises a shared bus; handles a stuck bus and isolation |
-| Topology Copy | The copy of the setup on the hub |
+| Topology Copy | The hub's copy of the 構成, replaced atomically and checked against the signed manifest before the hub drives pins by itself |
 | Liveness Guard | Kicks the watchdog on task liveness |
 | Reboot Gate | Replies first, waits a bounded delay, then resets |
 | Entry Gate | Entry to an extension call |
@@ -121,7 +121,7 @@ The figure below is DAGON's software design.
 | Diagnostics | Port for added diagnostics |
 | Display | Port for display |
 | LogSink | Port for where logs go |
-| BootSelect | Switches the boot target |
+| BootSelect | Kind S: the jump; kind V: the vendor's selection data |
 | Flash | Flash erase, write and read |
 | I2cBus | The hub's I2C bus |
 | StreamPort | The hub's byte stream |
@@ -136,10 +136,10 @@ The figure below is DAGON's software design.
 | Shared Bus | A board bus several parties use |
 | Reset and Jump | Reset, and the jump to an image |
 | Flash Driver | The flash driver |
-| Slot Store Driver | Implements the slot store |
-| Link Drivers | The link drivers |
+| Slot Store Driver | A kind S log or kind V vendor data |
+| Link Drivers | Implement the node's Link |
 | Watchdog Driver | The watchdog driver |
-| Execution Setup | Sets up interrupts and execution |
+| Execution Setup | Executor priorities per the execution model |
 | Architecture Kind | Implementation per protection kind |
 | MCU Definition | The MCU's data |
 | ROM Loader | The MCU's ROM loader |
@@ -147,14 +147,14 @@ The figure below is DAGON's software design.
 | Vendor 2nd Stage | The vendor's 2nd stage |
 | Protection Unit | Memory protection hardware |
 | Peripherals | The MCU's peripherals |
-| dagon-format | Byte layouts |
-| dagon-proto | The link protocol |
+| dagon-format | Byte layouts of the image header, manifest, state log and topology |
+| dagon-proto | Frames, commands and errors |
 | dagon-events | Events, state machines, extensions |
 | Retained Codecs | Boot record, fuse and topology body formats |
-| dagon-conform | Conformance tests |
-| dagon-sim | The simulator |
+| dagon-conform | Conformance tests shared by hardware and the simulator |
+| dagon-sim | Simulated flash, links and ROM loader, with fault injection |
 | dagon-retained-model | Executable model of the retained formats |
-| ROM Loader Client | Drives a child's ROM loader from the hub |
+| ROM Loader Client | Drives another MCU's ROM loader |
 | Trusted Extension | An extension that runs privileged |
 <!-- end of generated table -->
 

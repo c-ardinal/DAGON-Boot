@@ -683,7 +683,7 @@ overruns or faults. Nothing an untrusted extension does changes the boot
 decision, the signature, rollback or watchdog rules, or the confirm
 rule.
 
-The model is written for MCUs DAGON does not support yet. Everything
+The model is written for MCUs DAGON does not support. Everything
 MCU-specific in it is **data in the MCU definition**: the protection
 hardware kind and its parameters, the bus masters and privileged
 control blocks with their address ranges, the fault and unwinding
@@ -1561,8 +1561,8 @@ was compiled against:
   slot's header (0x01) and hashes the image (0x02).
 - **Self-boot with a trailer header**: the app reads the trailer (0x01)
   and hashes the body (0x02).
-- **Vendor-stage2**: the installed bootloader has no DAGON header. The
-  app reads it from flash at the vendor's bootloader offset, determines
+- **Vendor-stage2**: the installed boot loader has no DAGON header. The
+  app reads it from flash at the vendor's boot loader offset, determines
   its length by walking the vendor image's segment table, hashes it
   (0x02), and omits 0x01. The host matches 0x02 against the identity
   recorded at provisioning (`host.provision.recorded`, kept in the
@@ -1670,7 +1670,7 @@ and the limits of each claim.
   recorded as stale and cleared by the layer that would have acted on
   it, never by another layer; an extension whose artifact hash changed
   is a new identity and runs again.
-- **Clearing.** DAGON has no request that clears a tripped fuse yet: neither
+- **Clearing.** DAGON has no request that clears a tripped fuse: neither
   the protocol nor the CLI has one, so a fuse whose identity still exists
   stays tripped. retained-formats.md 3.6 is the format's model of a clear.
 - **Versioned.** The fuse carries what a reader needs to refuse a layout
@@ -2180,8 +2180,8 @@ meanwhile.
 
 ### 12.3 Measured on hardware
 
-None of the budgets above is established yet. For each MCU, measured on
-the boards before a release relies on them: the longest critical section
+None of the budgets above is established by measurement. For each MCU, a
+release relies on them only once these are measured on the boards: the longest critical section
 of DAGON's own code (`masked_max_us`: the worst measured plus a margin),
 the worst-case erase time of the board's flash part (and its datasheet
 value, cited in the definition), the watchdog margin left at the end of

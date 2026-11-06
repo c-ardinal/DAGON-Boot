@@ -96,7 +96,18 @@ You can also add DAGON to existing firmware ([how](https://c-ardinal.github.io/D
 
 ## How it works
 
-<img src="assets/architecture/architecture-en.svg" alt="DAGON's layers: on the node side the app, DAGON services, boot, MCU and board, and hardware; on the PC side DAGON Console, the dagon command, dagon-host and others" width="100%">
+<img src="assets/architecture/node-en.svg" alt="The node firmware's layers and functional stacks" width="100%">
+
+<img src="assets/architecture/pc-en.svg" alt="The PC side's layers" width="100%">
+
+| To do this | Touch | Steps |
+|---|---|---|
+| Write your app | `targets/mcu/*/template/src/app.rs` becomes the node's `src/app.rs` | [From a new project to a new version](https://c-ardinal.github.io/DAGON-Boot/doc/en/getting-started/first-project/) |
+| Add an extension | `targets/boot-extension-template/`, `crates/dagon-events/src/ports.rs` | [Extension manifest](https://c-ardinal.github.io/DAGON-Boot/doc/en/reference/extension-manifest/) |
+| Add a board | `targets/boards/*/dagon-board.toml` | [Your own board](https://c-ardinal.github.io/DAGON-Boot/doc/en/how-to/own-board/) |
+| Add an MCU | `targets/mcu/*/dagon-mcu.toml`, `crates/dagon-port/src/lib.rs` | [Adding an MCU or a link](https://c-ardinal.github.io/DAGON-Boot/doc/en/how-to/new-mcu-or-link/) |
+| Add a link or transport | `crates/dagon-format/src/link.rs`, `targets/mcu/*/src/links.rs`, `crates/dagon-host/src/lib.rs` | [Adding an MCU or a link](https://c-ardinal.github.io/DAGON-Boot/doc/en/how-to/new-mcu-or-link/) |
+| Add an agent | `crates/dagon-cli/agents/`, `~/.dagon/agents/*.toml` | [Agent definition format](https://c-ardinal.github.io/DAGON-Boot/doc/en/reference/agent-definition/) |
 
 ```mermaid
 flowchart LR
@@ -118,6 +129,6 @@ What DAGON does not do is in [Limitations](https://c-ardinal.github.io/DAGON-Boo
 - Libraries: Rust crates and npm packages, used unmodified (embassy, esp-hal, ed25519-compact, Svelte, Vite, Astro and others)
 - Vendor parts: the ESP-IDF 2nd stage, `rp2040-boot2`, the STM32F401 ROM boot loader
 - Fonts and icons: Doto, DotGothic16, Zen Kaku Gothic New, JetBrains Mono (SIL OFL 1.1), Lucide (ISC)
-- Values in the MCU and board definitions: taken from the makers' datasheets and board documents, with the source in comments in the definition files
+- Values in the MCU and board definitions: taken from the makers' datasheets and board documents; a value whose source has not been checked is marked `unverified` in the definition
 
 The full list and licences are in [Licenses](https://c-ardinal.github.io/DAGON-Boot/doc/en/reference/licenses/).

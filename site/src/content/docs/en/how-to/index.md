@@ -13,4 +13,5 @@ guides go from there:
   in the [list](/en/reference/boards/).
 - [Swapping a link](/en/how-to/swap-link/): change how a node is linked.
 - [Adding DAGON to existing firmware](/en/how-to/existing-firmware/).
+- [Adding an MCU or a link](/en/how-to/new-mcu-or-link/): give DAGON a new MCU or link.
 - [Claude help in your project](/en/how-to/claude-help/).

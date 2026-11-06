@@ -368,7 +368,7 @@ the flag and the armed record, so the next start repeats the decision.
 
 ### 3.6 Clearing
 
-DAGON has no request that clears a trip yet: neither the protocol nor the CLI
+DAGON has no request that clears a trip: neither the protocol nor the CLI
 has one. This is what the format's model holds for one: the agent frees an app
 trip in its own cell, or stores a clear request for a boot-loader trip; the boot
 core's next start turns the trip into clear-done, and each side frees its

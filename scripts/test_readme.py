@@ -53,6 +53,12 @@ class Readmes(unittest.TestCase):
         for rel, text in NOTICE_FILES.items():
             self.assertIn(text, (ROOT / rel).read_text(encoding="utf-8"), rel)
 
+    def test_the_notice_says_how_many_microcontrollers_there_are(self):
+        mcus = definitions("mcu", "dagon-mcu.toml")
+        self.assertEqual(len(mcus), 3, "the notice says 3種類のマイコン / three kinds")
+        self.assertIn("3種類のマイコン", NOTICE_JA)
+        self.assertIn("three kinds of microcontroller", NOTICE_EN)
+
     def test_every_mcu_and_board_is_named(self):
         names = [m["name"] for m in definitions("mcu", "dagon-mcu.toml")]
         names += [b["product"] for b in definitions("boards", "dagon-board.toml")]

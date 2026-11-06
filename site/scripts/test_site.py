@@ -1,6 +1,9 @@
 """Checks of the site's generators: python -m unittest discover -s site/scripts -p "test_*.py"."""
+import fnmatch
+import json
 import pathlib
 import re
+import subprocess
 import sys
 import tempfile
 import tomllib
@@ -177,6 +180,15 @@ class Wording(unittest.TestCase):
             found += [f"{rel}:{n}" for n, line in enumerate(p.read_text(encoding="utf-8").splitlines(), 1) if "更新" in line]
         self.assertEqual(found, [])
 
+    # Words the Japanese pages do not use for DAGON's own things.
+    NOT_SAID = ["ブートコア", "給餌", "見守り", "武装", "運び手", "開始者", "トライアル", "将来の", "マイコンのパッケージ", "ボードのパッケージ", "MCU のパッケージ", "ルールます", "破損していないの記録"]
+
+    def test_the_japanese_pages_do_not_use_these_words(self):
+        pages = [p for p in llms.DOCS.rglob("*.md*") if p.relative_to(llms.DOCS).parts[0] != "en"]
+        pages += [ROOT / "README.md", ROOT / "site" / "i18n" / "ja.toml", ROOT / "site" / "i18n" / "catalog-ja.toml"]
+        found = [f"{p.relative_to(ROOT).as_posix()}: {w}" for p in pages for w in self.NOT_SAID if w in p.read_text(encoding="utf-8")]
+        self.assertEqual(found, [])
+
     def test_every_page_is_in_both_languages(self):
         root = {p.relative_to(llms.DOCS).as_posix() for p in llms.DOCS.rglob("*.md*") if p.relative_to(llms.DOCS).parts[0] != "en"}
         en = {p.relative_to(llms.DOCS / "en").as_posix() for p in (llms.DOCS / "en").rglob("*.md*")}
@@ -187,14 +199,82 @@ class Wording(unittest.TestCase):
         self.assertNotIn("yet", notice)
 
 
+def cargo_deps():
+    """Package name -> its dependencies' names, from `cargo metadata` of the root and the packages outside it."""
+    manifests = [ROOT / "Cargo.toml", ROOT / "samples/f401-app/Cargo.toml", ROOT / "samples/hub-boot-screen/Cargo.toml", ROOT / "targets/rp2040-hub/Cargo.toml"]
+    for sub in ("rp2040", "rp2040/stage0", "rp2040/bootcore", "stm32f401re", "stm32f401re/stage0", "stm32f401re/bootcore", "esp32s3", "common"):
+        manifests.append(ROOT / "targets/mcu" / sub / "Cargo.toml")
+    manifests += sorted((ROOT / "targets/boards").glob("*/Cargo.toml"))
+    deps = {}
+    for m in manifests:
+        out = subprocess.run(["cargo", "metadata", "--no-deps", "--offline", "--format-version", "1", "--manifest-path", str(m)],
+                             cwd=ROOT, capture_output=True, text=True, encoding="utf-8", check=True).stdout
+        for p in json.loads(out)["packages"]:
+            deps.setdefault(p["name"], set()).update(d["name"] for d in p["dependencies"] if d["kind"] in (None, "build"))
+    return deps
+
+
 class Architecture(unittest.TestCase):
-    def test_every_name_in_the_diagram_is_in_the_repository(self):
-        for lang in gen.LANGS:
-            svg = gen.architecture.svg(lang)
-            for crate in set(re.findall(r"\bdagon-[a-z]+\b", svg)) - {"dagon-mcu", "dagon-board", "dagon-extension"}:
-                self.assertTrue((ROOT / "crates" / crate / "Cargo.toml").is_file(), crate)
-            for folder in re.findall(r"\b(?:targets|web)/[a-z0-9/-]*", svg):
-                self.assertTrue((ROOT / folder.rstrip("/")).is_dir(), folder)
+    @classmethod
+    def setUpClass(cls):
+        cls.deps = cargo_deps()
+
+    def closure(self, names):
+        seen, todo = set(), list(names)
+        while todo:
+            for d in self.deps.get(todo.pop(), ()):
+                if d not in seen:
+                    seen.add(d)
+                    todo.append(d)
+        return seen | set(names)
+
+    def test_every_source_path_in_the_figure_exists(self):
+        for mod in gen.architecture.modules():
+            for path in mod["paths"]:
+                self.assertTrue((ROOT / path).exists(), path)
+
+    def test_every_crate_in_the_figures_exists(self):
+        names = {p for mod in gen.architecture.modules() for p in (mod["pkg"],)} | {p for b in gen.architecture.pc_boxes().values() for p in b["pkg"]}
+        for name in names:
+            if name.endswith("*"):
+                self.assertTrue(any(fnmatch.fnmatch(d, name) for d in self.deps), name)
+            else:
+                self.assertTrue(name in self.deps or any(name in d for d in self.deps.values()), name)
+
+    def test_every_dependency_drawn_is_in_cargo_metadata(self):
+        a = gen.architecture
+        pairs = [dep for row in a.LAYER_DEPS for dep in row if dep] + [(a.TRUSTED[0], d) for d in a.TRUSTED[1]]
+        boxes = a.pc_boxes()
+        pairs += [(boxes[x]["pkg"][0], boxes[y]["pkg"][0]) for x, y in a.PC_EDGES]
+        for src, dst in pairs:
+            self.assertIn(dst, self.deps[src], f"{src} -> {dst}")
+
+    def test_each_image_uses_the_modules_tagged_with_it(self):
+        a = gen.architecture
+        for mod in a.modules():
+            for tag in mod["images"]:
+                # hub-boot-screen and the app template sit on the images, not under them
+                if mod["kind"] == a.TRAIT and mod["pkg"] in ("f401-app", "hub-boot-screen"):
+                    continue
+                used = self.closure(a.IMAGE_PKGS[tag])
+                if mod["pkg"].endswith("*"):
+                    self.assertTrue(any(fnmatch.fnmatch(u, mod["pkg"]) for u in used), (tag, mod["pkg"]))
+                else:
+                    self.assertIn(mod["pkg"], used, (tag, mod["shown"]))
+
+    def test_the_core_names_no_mcu_or_board(self):
+        for name in gen.architecture.NO_MCU:
+            bad = [d for d in self.deps[name] if d.startswith(("dagon-mcu", "dagon-board")) or d in gen.architecture.HAL]
+            self.assertEqual(bad, [], name)
+
+    def test_the_change_table_and_how_to_name_paths_that_exist(self):
+        pages = [ROOT / "README.md", ROOT / "README.en.md", llms.DOCS / "how-to/new-mcu-or-link.md", llms.DOCS / "en/how-to/new-mcu-or-link.md"]
+        for page in pages:
+            text = page.read_text(encoding="utf-8")
+            rows = [l for l in text.splitlines() if l.startswith("| ") and "crates/" in l or l.startswith("| ") and "targets/" in l] if page.name.startswith("README") else text.splitlines()
+            for line in rows:
+                for path in re.findall(r"`((?:crates|targets|plugin)/[^`]+)`", line):
+                    self.assertTrue(list(ROOT.glob(path.replace("<id>", "*").rstrip("/"))), f"{page.name}: {path}")
 
 
 class Translation(unittest.TestCase):

@@ -181,5 +181,3 @@ that run past 32 bits are errors. Inline `[board.<id>]` boards have no
 package, so they may not list parts.
 Doctor `fix` and writer commands from a project definition never run
 without the user's explicit confirmation.
-
-Importing Arduino, Zephyr or probe-rs data is a future item.

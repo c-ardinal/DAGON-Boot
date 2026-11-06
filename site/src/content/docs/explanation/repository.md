@@ -8,7 +8,7 @@ description: "リポジトリにあるもの、その場所、DAGON そのもの
 - 形式とプロトコル: `dagon-format` と `dagon-proto`。`crates/dagon-format/golden/` の黄金ベクタで照合しています。
 - ノード側: `dagon-agent`（非稼働スロットへイメージを受け取り、署名と SHA-256 を検査し、切り替えと確定を行う）と `dagon-core`（起動の判断: 回数を限った試行起動と巻き戻し）。
 - PC 側: `dagon-host`（状態、自動で見つける、構成の送信、書き込み、前のバージョンに戻す、確定、復旧）、`dagon-romlink`（STM32 の I2C ROM ブートローダの手順）、`dagon` CLI。これらは `dagon-sim`（F401 子機付きの模擬親機、電断点付きのフラッシュ、損失のあるリンク、ROM ブートローダの模擬）を相手にテストしています。
-- プロジェクト: `dagon new`、`dagon gen`、`dagon build` が、MCU ごと（`targets/mcu/*`）とボードごと（`targets/boards/*`）の支援パッケージの上にノードの crate を作り、ビルドします。
+- プロジェクト: `dagon new`、`dagon gen`、`dagon build` が、MCU ごと（`targets/mcu/*`）とボードごと（`targets/boards/*`）の定義の上にノードの crate を作り、ビルドします。
 - `dagon conform`: `dagon-conform` の 12 件の適合試験。模擬の F401 に対し、親機経由でも直結でも 12 件すべて合格します。
 - 構成 YAML: 22 件の検証規則と対応ボードの表（`dagon-topology`）。`topology/sample.yaml` はこれを通ります。
 - DAGON Console（`web/`。`dagon serve` が配る。できることは `web/README.md` を参照）。
@@ -33,8 +33,8 @@ description: "リポジトリにあるもの、その場所、DAGON そのもの
 | `crates/dagon-romlink` | STM32 の I2C ROM ブートローダの手順 |
 | `crates/dagon-cli` | `dagon` コマンド（DAGON Console を組み込み） |
 | `crates/dagon-wasm` | DAGON Console 用の WebAssembly バインディング |
-| `targets/` | MCU ごと（`targets/mcu/*`）とボードごと（`targets/boards/*`）の支援パッケージ、RP2040 親機のファームウェア、立ち上げ用ツール |
-| `samples/` | 支援パッケージを使うサンプルのアプリ（DAGON の一部ではない） |
+| `targets/` | MCU ごと（`targets/mcu/*`）とボードごと（`targets/boards/*`）の定義、RP2040 親機のファームウェア、立ち上げ用ツール |
+| `samples/` | 定義を使うサンプルのアプリ（DAGON の一部ではない） |
 | `web/` | DAGON Console（Svelte、Vite、TypeScript） |
 | `topology/` | 構成の例 |
 | `plugin/` | 新しいマイコンへの移植に使う Claude Code のプラグイン（エージェント、スキル、フック） |

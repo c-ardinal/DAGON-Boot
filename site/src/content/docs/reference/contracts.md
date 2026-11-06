@@ -31,7 +31,7 @@ DAGON の部品のあいだの取り決めとその番号、部品ごとのバ�
 
 ## 部品
 
-| 部品 | バージョン | パッケージ | 形式 |
+| 部品 | バージョン | crate | 形式 |
 |---|---|---|---|
 | `cli` | 0.1.0 | `dagon-cli` | `wire` 1, `image-header` 1, `state-log` 1, `manifest` 1, `bundle` 1, `topology-bin` 1, `topology-yaml` 1, `definitions` 1, `serve-api` 1, `event` 1, `extension-manifest` 1, `boot-program` 1 |
 | `boot-rp2040` | 0.1.0 | `dagon-rp2040-stage0`, `dagon-rp2040-bootcore` | `image-header` 1, `state-log` 1, `event` 1 |

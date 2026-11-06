@@ -14,6 +14,7 @@ The sources are read as text (Rust and TOML) with Python 3.11+; the command
 line page runs `dagon help-markdown` (DAGON_BIN, else `cargo run`).
 """
 import functools
+import itertools
 import os
 import pathlib
 import re
@@ -393,8 +394,8 @@ def boards(lang="en"):
     table_m, table_b = "\n".join(rows_m), "\n".join(rows_b)
     if lang == "ja":
         body = f"""
-このリリースの `targets/mcu/` のマイコンのパッケージと、`targets/boards/` のボードのパッケージです。
-パッケージのフォルダを足すと行が増えます。どちらのファイルの形式も
+このリリースの `targets/mcu/` のマイコンの定義と、`targets/boards/` のボードの定義です。
+定義のフォルダを足すと行が増えます。どちらのファイルの形式も
 [マイコンとボードの定義](/reference/definitions/)にあります。
 
 ## マイコン
@@ -486,7 +487,7 @@ DAGON の部品のあいだの取り決めとその番号、部品ごとのバ�
 
 ## 部品
 
-| 部品 | バージョン | パッケージ | 形式 |
+| 部品 | バージョン | crate | 形式 |
 |---|---|---|---|
 {table_c}
 """
@@ -675,7 +676,7 @@ REGIONS = [
     ("reference/definitions.md", "dagon-topology's McuDef", lambda lang: def_rows(lang, DEFS / "mod.rs", "McuDef")),
     ("reference/definitions.md", "dagon-topology's Isolation", lambda lang: def_rows(lang, DEFS / "isolation.rs", "Isolation", "isolation")),
     ("reference/definitions.md", "dagon-topology's BoardDef", lambda lang: def_rows(lang, DEFS / "mod.rs", "BoardDef")),
-    ("explanation/index.md", "site/scripts/architecture.py", lambda lang: f"<div>{architecture.svg(lang)}</div>\n"),
+    ("explanation/index.md", "site/scripts/architecture.py", lambda lang: "".join(f"<div>{make(lang)}</div>\n" for make in architecture.FIGURES.values())),
 ]
 
 
@@ -709,14 +710,14 @@ def main(argv):
             else:
                 path.parent.mkdir(parents=True, exist_ok=True)
                 path.write_text(text, encoding="utf-8", newline="\n")
-    for lang in LANGS:
+    for (figure, make), lang in itertools.product(architecture.FIGURES.items(), LANGS):
         # What the READMEs show. A test run writes to a temporary OUT, never here.
-        path = ROOT / "assets" / "architecture" / f"architecture-{lang}.svg"
-        if check and (not path.is_file() or path.read_text(encoding="utf-8") != architecture.svg(lang)):
+        path = ROOT / "assets" / "architecture" / f"{figure}-{lang}.svg"
+        if check and (not path.is_file() or path.read_text(encoding="utf-8") != make(lang)):
             stale.append(path.as_posix())
         elif not check and OUT == ROOT / "site" / "src" / "content" / "docs":
             path.parent.mkdir(parents=True, exist_ok=True)
-            path.write_text(architecture.svg(lang), encoding="utf-8", newline="\n")
+            path.write_text(make(lang), encoding="utf-8", newline="\n")
     unused = sorted(k for k in set(i18n()) - USED)
     if MISSING or unused:
         print(f"{I18N.relative_to(ROOT).as_posix()}: add a Japanese value for the first list, drop the second")

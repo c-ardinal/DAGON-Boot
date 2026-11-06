@@ -96,7 +96,18 @@ dagon serve
 
 ## しくみ
 
-<img src="assets/architecture/architecture-ja.svg" alt="DAGON の層の図: ノード側はアプリ、DAGON のサービス、ブート、マイコンとボード、ハードウェアの順で、PC 側は DAGON Console、dagon コマンド、dagon-host など" width="100%">
+<img src="assets/architecture/node-ja.svg" alt="ノードのファームウェアの層と機能ごとのスタック" width="100%">
+
+<img src="assets/architecture/pc-ja.svg" alt="PC 側の層" width="100%">
+
+| やりたいこと | 触る場所 | 手順 |
+|---|---|---|
+| アプリを書く | `targets/mcu/*/template/src/app.rs` がノードの `src/app.rs` になります | [はじめから書き込みまで](https://c-ardinal.github.io/DAGON-Boot/doc/getting-started/first-project/) |
+| 拡張を足す | `targets/boot-extension-template/`、`crates/dagon-events/src/ports.rs` | [拡張のマニフェスト](https://c-ardinal.github.io/DAGON-Boot/doc/reference/extension-manifest/) |
+| ボードを足す | `targets/boards/*/dagon-board.toml` | [自分のボード](https://c-ardinal.github.io/DAGON-Boot/doc/how-to/own-board/) |
+| マイコンを足す | `targets/mcu/*/dagon-mcu.toml`、`crates/dagon-port/src/lib.rs` | [マイコンとリンクを足す](https://c-ardinal.github.io/DAGON-Boot/doc/how-to/new-mcu-or-link/) |
+| リンクや転送を足す | `crates/dagon-format/src/link.rs`、`targets/mcu/*/src/links.rs`、`crates/dagon-host/src/lib.rs` | [マイコンとリンクを足す](https://c-ardinal.github.io/DAGON-Boot/doc/how-to/new-mcu-or-link/) |
+| エージェントを足す | `crates/dagon-cli/agents/`、`~/.dagon/agents/*.toml` | [エージェント定義の形式](https://c-ardinal.github.io/DAGON-Boot/doc/reference/agent-definition/) |
 
 ```mermaid
 flowchart LR
@@ -118,6 +129,6 @@ DAGON がしないことは[制限事項](https://c-ardinal.github.io/DAGON-Boot
 - 依存ライブラリ: Rust の crate と npm パッケージを改変せずに使っています（embassy、esp-hal、ed25519-compact、Svelte、Vite、Astro など）
 - ベンダー部品: ESP-IDF の 2nd stage、`rp2040-boot2`、STM32F401 の ROM ブートローダ
 - 書体とアイコン: Doto、DotGothic16、Zen Kaku Gothic New、JetBrains Mono（SIL OFL 1.1）、Lucide（ISC）
-- マイコンとボードの定義の値: 各社のデータシートとボードの資料から取り、定義ファイルのコメントに出典を書いています
+- マイコンとボードの定義の値: 各社のデータシートとボードの資料から取っています。出典を確かめていない値は、定義の中で `unverified` と示します
 
 全部の一覧とライセンスは[ライセンス](https://c-ardinal.github.io/DAGON-Boot/doc/reference/licenses/)にあります。

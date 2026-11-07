@@ -5,7 +5,7 @@ import { canvasState, openSample, settled } from './console.ts';
 async function row(page: Page, group: string | null, label: string) {
   await page.getByRole('button', { name: 'メニューを開く' }).click();
   if (group) await page.locator('.panel').first().getByRole('button', { name: group, exact: true }).click();
-  return page.locator('.panel').last().locator(`button:has(> span:text-is("${label}"))`);
+  return page.locator('.panel').last().locator(`button:has(span:text-is("${label}"))`);
 }
 
 const press = async (page: Page, group: string | null, label: string) => (await row(page, group, label)).click();
@@ -20,8 +20,8 @@ async function offWithReason(page: Page, group: string, label: string) {
 }
 
 const connect = async (page: Page) => {
-  await page.locator('header').getByRole('button', { name: '接続する' }).click();
-  await page.locator('header').getByRole('button', { name: '切断する' }).waitFor({ timeout: 30_000 });
+  await page.locator('header .hub').click();
+  await expect(page.locator('header .hub')).toHaveText('切断する', { timeout: 30_000 });
   await page.locator('.st-alive').first().waitFor({ timeout: 30_000 });
 };
 
@@ -114,7 +114,7 @@ const ITEMS: Record<string, { query?: string; check: (p: Page) => Promise<void> 
   'つなぐ/接続する': {
     check: async (p) => {
       await press(p, 'つなぐ', '接続する');
-      await expect(p.locator('header').getByRole('button', { name: '切断する' })).toBeVisible({ timeout: 30_000 });
+      await expect(p.locator('header .hub')).toHaveText('切断する', { timeout: 30_000 });
     },
   },
   'つなぐ/パッケージファイルを置く': {
@@ -146,9 +146,9 @@ const ITEMS: Record<string, { query?: string; check: (p: Page) => Promise<void> 
       await expect(p.locator('.why')).toBeVisible();
     },
   },
-  'DAGON/CLI につなぎ直す': {
+  'DAGON/CLI の接続と API キーを見る': {
     check: async (p) => {
-      await press(p, 'DAGON', 'CLI につなぎ直す');
+      await press(p, 'DAGON', 'CLI の接続と API キーを見る');
       await expect(p.locator('.float.sheet')).toBeVisible();
     },
   },
@@ -225,11 +225,11 @@ test('the table above covers every item the menu shows, linked or not', async ({
     await start(page, query);
     await page.getByRole('button', { name: 'メニューを開く' }).click();
     const first = page.locator('.panel').first();
-    for (const r of await first.locator('button:not([aria-expanded])').all()) shown.add(`/${(await r.innerText()).trim()}`);
+    for (const r of await first.locator('button:not([aria-expanded]) .words > span:first-child').all()) shown.add(`/${(await r.innerText()).trim()}`);
     for (const g of await first.locator('button[aria-expanded]').all()) {
       const group = (await g.innerText()).trim();
       await g.click();
-      for (const r of await page.locator('.panel').last().locator('button span').all()) shown.add(`${group}/${(await r.innerText()).trim()}`);
+      for (const r of await page.locator('.panel').last().locator('button .words > span:first-child').all()) shown.add(`${group}/${(await r.innerText()).trim()}`);
     }
   }
   expect([...shown].sort()).toEqual(Object.keys(ITEMS).sort());

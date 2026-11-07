@@ -238,8 +238,9 @@
   .seg {
     display: flex;
     gap: 0;
+    /* Its frame is drawn inside the buttons' hit area, so the group stays the bar's 44 px and nothing shifts by a pixel. */
     margin-left: var(--s-2);
-    border: 1px solid var(--c-line);
+    box-shadow: inset 0 0 0 1px var(--c-line);
     border-radius: var(--r-full);
     background: var(--c-ink);
   }

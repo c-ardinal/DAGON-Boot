@@ -152,7 +152,7 @@ test('the mascot does not move when a toast comes', async ({ page, context }) =>
   const before = await at();
   await page.getByRole('button', { name: 'メニューを開く' }).click();
   await page.getByRole('button', { name: '困ったとき', exact: true }).click();
-  await page.locator('.panel').last().locator('button:has(> span:text-is("この URL をコピーする"))').click();
+  await page.locator('.panel').last().locator('button:has(span:text-is("この URL をコピーする"))').click();
   await page.locator('.toast').waitFor();
   await settled(page);
   expect(await at()).toEqual(before);

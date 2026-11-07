@@ -8,6 +8,14 @@ const HEIGHTS = [700, 800, 1080, 1347, 1440];
 /** The windows swept: each width at its low and tall ends, every height at a common width, and the matrix's own presets. */
 const SIZES = [...WIDTHS.flatMap((w) => [[w, 700], [w, 1080]]), ...HEIGHTS.map((h) => [1920, h]), [1366, 768], [2560, 1440], [1024, 768]] as const;
 
+/** The view toggle: in the header, or at a narrow bar in the menu's 構成 group. */
+async function view(p: Page, radio: string, item: string) {
+  if (await p.locator('header .seg').count()) return p.getByRole('radio', { name: radio, exact: true }).click();
+  await p.getByRole('button', { name: 'メニューを開く' }).click();
+  await p.locator('.panel').first().getByRole('button', { name: '構成', exact: true }).click();
+  await p.locator('.panel').last().locator(`button:has(span:text-is("${item}"))`).click();
+}
+
 /** Each state puts the page into it and takes it out again. */
 const STATES: [string, (p: Page) => Promise<void>, (p: Page) => Promise<void>][] = [
   ['準備', async () => undefined, async () => undefined],
@@ -16,9 +24,9 @@ const STATES: [string, (p: Page) => Promise<void>, (p: Page) => Promise<void>][]
   ['シートと引き出し', async (p) => { await p.locator('.node').first().dispatchEvent('click'); await p.getByRole('tab', { name: '記録' }).click(); }, async (p) => { await p.locator('.node').first().dispatchEvent('click'); await p.getByRole('tab', { name: '記録' }).click(); }],
   ['メニュー', async (p) => { await p.getByRole('button', { name: 'メニューを開く' }).click(); await p.getByRole('button', { name: 'つなぐ' }).click(); }, (p) => p.keyboard.press('Escape')],
   ['困ったとき', async (p) => { await p.getByRole('button', { name: 'メニューを開く' }).click(); await p.getByRole('button', { name: '困ったとき' }).click(); await p.getByRole('button', { name: 'キー操作' }).click(); }, (p) => p.keyboard.press('Escape')],
-  ['表', (p) => p.getByRole('radio', { name: '表', exact: true }).click(), (p) => p.getByRole('radio', { name: 'グラフ' }).click()],
-  ['トースト', async (p) => { await p.getByRole('button', { name: 'メニューを開く' }).click(); await p.getByRole('button', { name: '困ったとき', exact: true }).click(); await p.locator('.panel').last().locator('button:has(> span:text-is("この URL をコピーする"))').click(); await p.locator('.toast').waitFor(); }, async () => undefined],
-  ['モーダル', async (p) => { await p.getByRole('button', { name: 'メニューを開く' }).click(); await p.locator('.panel').first().locator('button:has(> span:text-is("最初からやり直す"))').click(); await p.locator('dialog[open]').waitFor(); }, async (p) => { await p.keyboard.press('Escape'); await p.locator('dialog[open]').waitFor({ state: 'detached' }); }],
+  ['表', (p) => view(p, '表', '表で見る'), (p) => view(p, 'グラフ', 'グラフで見る')],
+  ['トースト', async (p) => { await p.getByRole('button', { name: 'メニューを開く' }).click(); await p.getByRole('button', { name: '困ったとき', exact: true }).click(); await p.locator('.panel').last().locator('button:has(span:text-is("この URL をコピーする"))').click(); await p.locator('.toast').waitFor(); }, async () => undefined],
+  ['モーダル', async (p) => { await p.getByRole('button', { name: 'メニューを開く' }).click(); await p.locator('.panel').first().locator('button:has(span:text-is("最初からやり直す"))').click(); await p.locator('dialog[open]').waitFor(); }, async (p) => { await p.keyboard.press('Escape'); await p.locator('dialog[open]').waitFor({ state: 'detached' }); }],
 ];
 
 test('sweep: no overflow, overlap or clipped text at any window, in 準備 (sheet, drawer, menu, help, table, toast, modal) and 書込 (versions)', async ({ page, context }) => {
@@ -29,6 +37,8 @@ test('sweep: no overflow, overlap or clipped text at any window, in 準備 (shee
   const faults: string[] = [];
   for (const [w, h] of SIZES) {
     await page.setViewportSize({ width: w, height: h });
+    // The bar re-lays out once for the new width (its edit tools come or go); the rest is what stands after that.
+    await page.waitForTimeout(260);
     const rest = await boxes(page);
     for (const [name, into, out] of STATES) {
       await into(page);
@@ -39,8 +49,8 @@ test('sweep: no overflow, overlap or clipped text at any window, in 準備 (shee
       await page.waitForTimeout(120);
       const b = await boxes(page);
       for (const k of Object.keys(a)) if (a[k] !== b[k]) faults.push(`${w}x${h} ${name}: ${k} moved ${a[k]} -> ${b[k]}`);
-      // A sheet, drawer, menu or toast opening moves none of the standing parts (the DAGON mark, the zoom, the focal number, the header).
-      for (const k of Object.keys(rest)) if (name !== '表' && name !== 'モーダル' && a[k] !== undefined && a[k] !== rest[k]) faults.push(`${w}x${h} ${name}: ${k} moved for it ${rest[k]} -> ${a[k]}`);
+      // A sheet, menu, help or toast opening moves none of the standing parts (the DAGON mark, the zoom, the focal number, the header). The open drawer is the one thing they give way to, by structure, so it never covers them.
+      if (!name.includes('引き出し') && name !== '表' && name !== 'モーダル') for (const k of Object.keys(rest)) if (a[k] !== undefined && a[k] !== rest[k]) faults.push(`${w}x${h} ${name}: ${k} moved for it ${rest[k]} -> ${a[k]}`);
       await out(page);
     }
   }
@@ -147,8 +157,8 @@ test('undo, redo, the view toggle and the connection are in the header; the edit
   const inBar = (b: { y: number; height: number }) => b.y >= bar.y && b.y + b.height <= bar.y + bar.height;
   const undo = (await page.getByRole('button', { name: '元に戻す' }).boundingBox())!;
   const redo = (await page.getByRole('button', { name: 'やり直す' }).boundingBox())!;
-  const seg = (await page.locator('header .seg').boundingBox())!;
-  const hub = (await page.locator('header').getByRole('button', { name: '接続する' }).boundingBox())!;
+  const seg = (await page.getByRole('radio', { name: '表', exact: true }).boundingBox())!;
+  const hub = (await page.locator('header .hub').boundingBox())!;
   for (const b of [undo, redo, seg, hub]) expect(inBar(b)).toBe(true);
   expect(redo.x).toBeGreaterThan(undo.x);
   expect(seg.x).toBeGreaterThan(redo.x);

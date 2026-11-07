@@ -2,11 +2,13 @@
 #   <Pages URL>/doc/   the documentation (Starlight), with the Rust API at doc/api/
 #   <Pages URL>/demo/  DAGON Console on the simulator (no files, devices or keys)
 #   <Pages URL>/llms.txt
-# It runs only when started by hand from the Actions tab. No secrets: the demo
+# It runs when main is merged and can be started by hand from the Actions tab. No secrets: the demo
 # verifies its prepared release with the public RFC 8032 test key.
 name: pages
 
 on:
+  push:
+    branches: [main]
   workflow_dispatch:
 
 permissions:

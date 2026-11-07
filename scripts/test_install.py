@@ -190,6 +190,23 @@ class InstallSh(unittest.TestCase):
                 self.assertIn(b"dagon 1.2.2", r.stdout)
                 self.assertNotIn(API, self.release.urls()[-2:])
 
+    def test_a_pre_release_is_installed_when_named(self):
+        self.release.publish("2.0.0-rc.1", LINUX, self.good, ".tar.gz")
+        for kwargs in ({"args": ("2.0.0-rc.1",)}, {"env": {"DAGON_VERSION": "2.0.0-rc.1"}}):
+            with self.subTest(**kwargs):
+                r = self.run_script(*kwargs.get("args", ()), env=kwargs.get("env"))
+                self.assertEqual(r.returncode, 0, r.stderr)
+                self.assertIn(b"dagon 2.0.0-rc.1", r.stdout)
+                self.assertIn(f"{RELEASES}cli-v2.0.0-rc.1/dagon-cli-2.0.0-rc.1-{LINUX}.tar.gz", self.release.urls())
+
+    def test_a_list_of_only_pre_releases_installs_nothing_without_a_version(self):
+        self.release.list_page(1, ["cli-v2.0.0-rc.1"])
+        self.release.publish("2.0.0-rc.1", LINUX, self.good, ".tar.gz")
+        r = self.run_script()
+        self.assert_nothing_installed(r)
+        self.assertIn(b"no release", r.stderr)
+        self.assertEqual([u for u in self.release.urls() if not u.startswith(API)], [])
+
     def test_a_stable_cli_release_on_a_later_page_is_found(self):
         self.release.list_page(1, [f"bootcore-rp2040-v{n}.0.0" for n in range(99)] + ["cli-v3.0.0-rc.1"])
         self.release.list_page(2, ["mcu-rp2040-v1.0.0", "cli-v1.2.3", "cli-v1.2.2"])
@@ -380,6 +397,21 @@ class InstallPs1(unittest.TestCase):
         self.assertIn(b"dagon 1.2.2", r.stdout)
         self.assertNotIn(API, self.release.urls())
 
+    def test_a_pre_release_is_installed_when_named(self):
+        self.release.publish("2.0.0-rc.1", WINDOWS, self.good, ".zip")
+        r = self.run_script(env={"DAGON_VERSION": "2.0.0-rc.1"})
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn(b"dagon 2.0.0-rc.1", r.stdout)
+        self.assertIn(f"{RELEASES}cli-v2.0.0-rc.1/dagon-cli-2.0.0-rc.1-{WINDOWS}.zip", self.release.urls())
+
+    def test_a_list_of_only_pre_releases_installs_nothing_without_a_version(self):
+        self.release.list_page(1, ["cli-v2.0.0-rc.1"])
+        self.release.publish("2.0.0-rc.1", WINDOWS, self.good, ".zip")
+        r = self.run_script()
+        self.assert_nothing_installed(r)
+        self.assertIn(b"no release", r.stderr)
+        self.assertEqual([u for u in self.release.urls() if not u.startswith(API)], [])
+
     def test_a_stable_cli_release_on_a_later_page_is_found(self):
         self.release.list_page(1, [f"bootcore-rp2040-v{n}.0.0" for n in range(99)] + ["cli-v3.0.0-rc.1"])
         self.release.list_page(2, ["mcu-rp2040-v1.0.0", "cli-v1.2.3", "cli-v1.2.2"])
@@ -486,6 +518,17 @@ class Scripts(unittest.TestCase):
             text = script.read_text(encoding="utf-8")
             self.assertIn("/releases/download/cli-v$version/", text, script.name)
             self.assertIn(".sha256", text, script.name)
+
+    def test_the_build_names_its_archives_from_the_pushed_tag_through_the_environment(self):
+        release = (ROOT / ".github/workflows/release.yml").read_text(encoding="utf-8")
+        step = release.split("- name: Build the archive\n", 1)[1].split("- uses:", 1)[0]
+        # A manual run has no tag: github.ref_name is then a branch.
+        self.assertIn("TAG: ${{ github.ref_type == 'tag' && github.ref_name || '' }}\n", step)
+        self.assertIn('${TAG:+--tag "$TAG"}', step)
+        # $TAG reads the environment only in bash; the Windows default shell differs.
+        self.assertIn("shell: bash\n", step)
+        run = step.split("run:", 1)[1]
+        self.assertNotIn("github.ref", run)
 
     def test_only_a_cli_tag_publishes_and_only_after_every_build(self):
         release = (ROOT / ".github/workflows/release.yml").read_text(encoding="utf-8")

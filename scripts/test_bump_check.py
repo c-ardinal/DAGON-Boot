@@ -6,6 +6,7 @@ import importlib.util
 import pathlib
 import shutil
 import subprocess
+import sys
 import tempfile
 import tomllib
 import unittest
@@ -73,6 +74,76 @@ class Ownership(unittest.TestCase):
         )
         self.assertIsNone(bc.component_of_tag("v0.1.0", comps))
         self.assertIsNone(bc.component_of_tag("rp2040-hub-v0.1.0", comps))
+
+
+def cli_version():
+    return next(c["version"] for c in bc.load_components() if c["name"] == "cli")
+
+
+def a_later_version():
+    return f"{bc.parse_version(cli_version())[0][0] + 1}.0.0"
+
+
+class ReleaseTag(unittest.TestCase):
+    NOT_A_TAG = "is not"
+
+    def test_a_final_tag_and_a_pre_release_of_the_compat_version_carry_their_version(self):
+        self.assertEqual(bc.tag_version("cli-v0.1.0", "cli", "0.1.0"), "0.1.0")
+        self.assertEqual(bc.tag_version("cli-v0.1.0-rc.1", "cli", "0.1.0"), "0.1.0-rc.1")
+        self.assertEqual(bc.tag_version("cli-v0.1.0-rc.12", "cli", "0.1.0"), "0.1.0-rc.12")
+
+    def test_any_other_tag_is_refused(self):
+        for bad in ("cli-v0.2.0", "cli-v0.2.0-rc.1", "cli-v0.1.0-rc", "cli-v0.1.0-rc.", "cli-v0.1.0-rc.01",
+                    "cli-v0.1.0-rc.1x", "cli-v0.1.0-beta.1", "cli-v0.1.0-rc.1-rc.2", "cli-v0.1.0-rc.1/../x",
+                    "cli-v0x1x0", "boot-rp2040-v0.1.0", "v0.1.0"):
+            with self.subTest(bad=bad):
+                with self.assertRaisesRegex(ValueError, self.NOT_A_TAG):
+                    bc.tag_version(bad, "cli", "0.1.0")
+
+    def bump_check(self, tag):
+        return subprocess.run([sys.executable, str(HERE / "bump_check.py"), "--tag", tag],
+                              capture_output=True, text=True, encoding="utf-8")
+
+    def test_the_command_takes_both_tags_of_the_compat_version(self):
+        # Whether the commits since the last tag need a bump is another check's answer.
+        for tag in (f"cli-v{cli_version()}", f"cli-v{cli_version()}-rc.1"):
+            with self.subTest(tag=tag):
+                self.assertNotIn(self.NOT_A_TAG, self.bump_check(tag).stderr)
+
+    def test_the_command_fails_a_pre_release_of_another_version(self):
+        r = self.bump_check(f"cli-v{a_later_version()}-rc.1")
+        self.assertEqual(r.returncode, 1)
+        self.assertIn(self.NOT_A_TAG, r.stderr)
+
+
+rspec = importlib.util.spec_from_file_location("release", HERE / "release.py")
+rel = importlib.util.module_from_spec(rspec)
+rspec.loader.exec_module(rel)
+
+
+class ReleaseNaming(unittest.TestCase):
+    def test_without_a_tag_the_version_is_the_compat_one(self):
+        self.assertEqual(rel.release_version(None), cli_version())
+
+    def test_a_final_tag_names_the_compat_version(self):
+        self.assertEqual(rel.release_version(f"cli-v{cli_version()}"), cli_version())
+
+    def test_a_pre_release_tag_names_its_own_version(self):
+        self.assertEqual(rel.release_version(f"cli-v{cli_version()}-rc.1"), f"{cli_version()}-rc.1")
+
+    def test_archive_names_are_the_ones_the_install_scripts_build(self):
+        self.assertEqual(rel.archive_name("1.2.3", "x86_64-unknown-linux-gnu"), "dagon-cli-1.2.3-x86_64-unknown-linux-gnu.tar.gz")
+        self.assertEqual(rel.archive_name("1.2.3-rc.1", "x86_64-unknown-linux-gnu"), "dagon-cli-1.2.3-rc.1-x86_64-unknown-linux-gnu.tar.gz")
+        self.assertEqual(rel.archive_name("1.2.3-rc.1", "x86_64-pc-windows-msvc"), "dagon-cli-1.2.3-rc.1-x86_64-pc-windows-msvc.zip")
+
+    def test_a_tag_of_another_version_or_component_fails_before_any_build(self):
+        for bad in (f"cli-v{a_later_version()}-rc.1", f"boot-rp2040-v{cli_version()}", f"cli-v{cli_version()}-beta.1"):
+            with self.subTest(bad=bad):
+                r = subprocess.run([sys.executable, str(HERE / "release.py"), "--tag", bad],
+                                   capture_output=True, text=True, encoding="utf-8")
+                self.assertEqual(r.returncode, 1)
+                self.assertIn("is not", r.stderr)
+                self.assertNotIn("+ ", r.stdout)
 
 
 cspec = importlib.util.spec_from_file_location("changelog", HERE / "changelog.py")

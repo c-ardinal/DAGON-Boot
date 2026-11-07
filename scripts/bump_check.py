@@ -10,7 +10,8 @@ and compat.toml.
     python scripts/bump_check.py --tag <tag being released>
 
 With --tag (the release build passes the pushed tag) the tag must also be
-`<component>-v<version>`; without a component, the tag names it. A commit
+`<component>-v<version>` or the pre-release `<component>-v<version>-rc.N`;
+without a component, the tag names it. A commit
 counts for every component whose files it touches. Exit 0: enough; 1: not
 enough, a bad tag or an unknown component.
 """
@@ -33,6 +34,15 @@ def parse_version(v):
     if not m:
         raise ValueError(f"{v}: not x.y.z or x.y.z-rc.N")
     return tuple(int(g) for g in m.groups()[:3]), m.group(4) is not None
+
+
+def tag_version(tag, name, version):
+    """The version a release tag of `name` carries when compat.toml has
+    `version`. N has no leading zero, as SemVer requires."""
+    expected = f"{name}-v{version}"
+    if not re.fullmatch(re.escape(expected) + r"(-rc\.(0|[1-9]\d*))?", tag):
+        raise ValueError(f"tag {tag} is not {expected} or {expected}-rc.N (compat.toml)")
+    return tag[len(name) + 2:]
 
 
 def commit_kind(subject, body):
@@ -150,8 +160,11 @@ def main():
         sys.exit(f"no component {a.component} in compat.toml")
     version = c["version"]
     problems = []
-    if a.tag and a.tag != f"{a.component}-v{version}":
-        problems.append(f"tag {a.tag} is not {a.component}-v{version} (compat.toml)")
+    if a.tag:
+        try:
+            tag_version(a.tag, a.component, version)
+        except ValueError as e:
+            problems.append(str(e))
     prev, tag = last_release(a.component, version)
     kinds = commits_since(tag, a.component, comps, c["paths"]) if prev else []
     for k, s in kinds:

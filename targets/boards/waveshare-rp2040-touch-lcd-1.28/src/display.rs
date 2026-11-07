@@ -78,6 +78,7 @@ pub async fn task(mut pins: Pins, frame: &'static mut Frame, lease: Lease) {
             .draw(frame);
         if cfg!(feature = "diag") {
             let _ = uptime(frame);
+            let _ = usb_info(frame);
         }
         panel.flush(frame).await;
     }
@@ -129,6 +130,57 @@ fn clock_info<D: DrawTarget<Color = Rgb565>>(d: &mut D) -> Result<(), D::Error> 
             .into_styled(PrimitiveStyle::with_fill(Rgb565::BLACK))
             .draw(d)?;
         Text::with_alignment(&line, at, style, Alignment::Center).draw(d)?;
+    }
+    Ok(())
+}
+
+/// USB bring-up state, three lines above the TEST KEY line (over the
+/// bottom 子機 ring when there is one):
+/// `L` PLL_USB locked, `E` CLK_USB enabled, `P` SIE_CTRL.PULLUP_EN,
+/// `r` chip revision (1 = B0/B1, the E5 fix applies), `M` MAIN_CTRL;
+/// `S` SIE_STATUS and its VBUS_DETECTED, CONNECTED, BUS_RESET, SUSPENDED
+/// bits, `n` bus resets / E5 fixes run; `rst` CHIP_RESET, `wd` WATCHDOG
+/// REASON (1 timer, 2 force).
+fn usb_info<D: DrawTarget<Color = Rgb565>>(d: &mut D) -> Result<(), D::Error> {
+    use core::sync::atomic::Ordering::Relaxed;
+    use dagon_mcu_rp2040::usb::{BUS_RESETS, E5_FIXES};
+    use embassy_rp::pac;
+    let b = |v: bool| u8::from(v);
+    let sie = pac::USB.sie_status().read();
+    let mut lines: [String<32>; 3] = Default::default();
+    let _ = write!(
+        lines[0],
+        "L{} E{} P{} r{} M{:x}",
+        b(pac::PLL_USB.cs().read().lock()),
+        b(pac::CLOCKS.clk_usb_ctrl().read().enable()),
+        b(pac::USB.sie_ctrl().read().pullup_en()),
+        pac::SYSINFO.chip_id().read().revision(),
+        pac::USB.main_ctrl().read().0,
+    );
+    let _ = write!(
+        lines[1],
+        "S{:08x} {}{}{}{} n{}/{}",
+        sie.0,
+        b(sie.vbus_detected()),
+        b(sie.connected()),
+        b(sie.bus_reset()),
+        b(sie.suspended()),
+        BUS_RESETS.load(Relaxed),
+        E5_FIXES.load(Relaxed),
+    );
+    let _ = write!(
+        lines[2],
+        "rst{:x} wd{:x}",
+        pac::VREG_AND_CHIP_RESET.chip_reset().read().0,
+        pac::WATCHDOG.reason().read().0,
+    );
+    let style = MonoTextStyle::new(&FONT_6X10, Rgb565::WHITE);
+    for (i, line) in lines.iter().enumerate() {
+        let at = Point::new(120, 190 + 11 * i as i32);
+        Rectangle::new(at - Point::new(80, 9), Size::new(160, 11))
+            .into_styled(PrimitiveStyle::with_fill(Rgb565::BLACK))
+            .draw(d)?;
+        Text::with_alignment(line, at, style, Alignment::Center).draw(d)?;
     }
     Ok(())
 }

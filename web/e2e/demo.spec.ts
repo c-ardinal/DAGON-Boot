@@ -1,7 +1,7 @@
 import { expect, test, type Page } from '@playwright/test';
 import { openSample } from './console.ts';
 
-/** `?demo`: what `dagon demo` and the demo page are; `agent=linked`: the worst case, an agent that says it is linked. */
+/** `?demo`: what the demo page is; `agent=linked`: the worst case, an agent that says it is linked. */
 const DEMO = 'sim&demo&agent=linked';
 const MARK = '.dagon .mark';
 const BUBBLE = 'デモでは会話できません。dagon serve で連携すると相談できます。';
@@ -76,6 +76,41 @@ test('in the demo the mark stays, floating and dragged', async ({ page }) => {
   await page.mouse.move(600, 300, { steps: 5 });
   await page.mouse.up();
   expect((await page.locator(MARK).boundingBox())!.x).not.toBe(at.x);
+});
+
+test('dragging the mark with its bubble open moves only the mark: no layout read per move, one storage write on the drop', async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await openSample(page, DEMO);
+  await page.locator(MARK).click();
+  await expect(page.getByText(BUBBLE)).toBeVisible();
+  await page.evaluate(() => {
+    const w = window as unknown as { count: { rects: number; writes: number } };
+    w.count = { rects: 0, writes: 0 };
+    const rect = Element.prototype.getBoundingClientRect;
+    Element.prototype.getBoundingClientRect = function () {
+      w.count.rects++;
+      return rect.call(this);
+    };
+    const set = Storage.prototype.setItem;
+    Storage.prototype.setItem = function (k, v) {
+      w.count.writes++;
+      return set.call(this, k, v);
+    };
+  });
+  const count = () => page.evaluate(() => ({ ...(window as unknown as { count: { rects: number; writes: number } }).count }));
+  const at = (await page.locator(MARK).boundingBox())!;
+  await page.mouse.move(at.x + at.width / 2, at.y + at.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(600, 300, { steps: 30 });
+  // Before the fix one move cost ~7000 bubble placements (~48k layout reads, ~25 s). The stage settling may still place it once (a few boxes), never per move.
+  const during = await count();
+  expect(during.writes).toBe(0);
+  expect(during.rects).toBeLessThan(30);
+  await page.mouse.up();
+  expect((await count()).writes).toBe(1);
+  const moved = (await page.locator(MARK).boundingBox())!;
+  expect(Math.abs(moved.x + moved.width / 2 - 600)).toBeLessThan(2);
+  await expect(page.getByText(BUBBLE)).toBeVisible();
 });
 
 test('outside the demo the same openers are there', async ({ page }) => {

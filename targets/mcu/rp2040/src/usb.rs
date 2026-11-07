@@ -15,7 +15,8 @@ use embassy_rp::Peri;
 use embassy_time::{with_timeout, Duration, Timer};
 use embassy_usb::class::cdc_acm::{CdcAcmClass, State};
 use embassy_usb::driver::EndpointError;
-use embassy_usb::UsbDevice;
+use embassy_usb::{Handler, UsbDevice};
+use portable_atomic::{AtomicU32, Ordering};
 use static_cell::StaticCell;
 
 use crate::frames::FrameReader;
@@ -42,6 +43,12 @@ type Cdc = CdcAcmClass<'static, UsbDriver>;
 
 static USB_BUFS: StaticCell<([u8; 256], [u8; 256], [u8; 64])> = StaticCell::new();
 static USB_STATE: StaticCell<State> = StaticCell::new();
+static E5: StaticCell<E5Fix> = StaticCell::new();
+
+/// Bus resets the device has seen, and how many ran the RP2040-E5 fix
+/// (the board's `diag` display shows both).
+pub static BUS_RESETS: AtomicU32 = AtomicU32::new(0);
+pub static E5_FIXES: AtomicU32 = AtomicU32::new(0);
 
 /// The USB device (run it with [`run`]) and the DAGON frame link over its
 /// CDC serial class. `product` and `serial` show on the host.
@@ -55,6 +62,7 @@ pub fn new(
     cfg.product = Some(product);
     cfg.serial_number = Some(serial);
     let (config_desc, bos_desc, control_buf) = USB_BUFS.init(([0; 256], [0; 256], [0; 64]));
+    disconnect_and_reset();
     let mut builder = embassy_usb::Builder::new(
         Driver::new(usb, UsbIrqs),
         cfg,
@@ -63,6 +71,7 @@ pub fn new(
         &mut [],
         control_buf,
     );
+    builder.handler(E5.init(E5Fix));
     let class = CdcAcmClass::new(&mut builder, USB_STATE.init(State::new()), USB_PACKET);
     let link = CdcLink {
         class,
@@ -73,6 +82,92 @@ pub fn new(
         last: 0,
     };
     (builder.build(), link)
+}
+
+/// A reset that keeps power (the watchdog, the self-update reboot) leaves
+/// the pull-up on and USBCTRL configured, so the host never sees the device
+/// leave and does not enumerate it again. Drop off the bus long enough for
+/// the host to see a disconnect, then start USBCTRL from its reset state.
+fn disconnect_and_reset() {
+    use embassy_rp::pac;
+    pac::USB.sie_ctrl().modify(|w| {
+        w.set_pullup_en(false);
+        w.set_transceiver_pd(true);
+    });
+    embassy_time::block_for(Duration::from_millis(100));
+    pac::RESETS.reset().modify(|w| w.set_usbctrl(true));
+    embassy_time::block_for(Duration::from_micros(10));
+    pac::RESETS.reset().modify(|w| w.set_usbctrl(false));
+    while !pac::RESETS.reset_done().read().usbctrl() {}
+}
+
+/// RP2040-E5 (B0/B1 silicon): after a bus reset the device waits for
+/// 800 us of J before it counts as connected, which a busy bus may never
+/// give it. As pico-sdk's rp2040_usb_device_enumeration.c: on each bus
+/// reset (pull-up on, B0/B1 only) wait for SE0 to end, force J on DP
+/// through GPIO15's USB debug mux for 1 ms, then hand DP back to the PHY
+/// and restore GPIO15. The waits are bounded so a wedged line cannot
+/// stall the high-priority executor until the watchdog fires.
+struct E5Fix;
+
+const E5_SE0_LIMIT: Duration = Duration::from_millis(50);
+const E5_FORCE_J: Duration = Duration::from_millis(1);
+const E5_CONNECT_LIMIT: Duration = Duration::from_millis(10);
+const E5_DP_GPIO: usize = 15;
+const LINE_SE0: u8 = 0;
+/// GPIO function 8: USB debug muxing.
+const FUNC_USB_MUX: u8 = 8;
+
+impl Handler for E5Fix {
+    fn reset(&mut self) {
+        use embassy_rp::pac;
+        use embassy_rp::pac::io::vals::{Inover, Oeover};
+        BUS_RESETS.fetch_add(1, Ordering::Relaxed);
+        let usb = pac::USB;
+        let b0_b1 = pac::SYSINFO.chip_id().read().revision() == 1;
+        if !b0_b1 || !usb.sie_ctrl().read().pullup_en() {
+            return;
+        }
+        E5_FIXES.fetch_add(1, Ordering::Relaxed);
+        wait_until(E5_SE0_LIMIT, || {
+            usb.sie_status().read().line_state() != LINE_SE0
+        });
+        let ctrl = pac::IO_BANK0.gpio(E5_DP_GPIO).ctrl();
+        let pad = pac::PADS_BANK0.gpio(E5_DP_GPIO);
+        let (ctrl_prev, pad_prev) = (ctrl.read(), pad.read());
+        pad.modify(|w| {
+            w.set_pue(true);
+            w.set_pde(true);
+        });
+        ctrl.modify(|w| {
+            w.set_oeover(Oeover::DISABLE);
+            w.set_funcsel(FUNC_USB_MUX);
+            w.set_inover(Inover::HIGH);
+        });
+        usb.usbphy_direct().modify(|w| w.set_dp_pullup_en(true));
+        usb.usbphy_direct_override()
+            .modify(|w| w.set_dp_pullup_en_override_en(true));
+        usb.usb_muxing().write(|w| {
+            w.set_to_digital_pad(true);
+            w.set_softcon(true);
+        });
+        embassy_time::block_for(E5_FORCE_J);
+        wait_until(E5_CONNECT_LIMIT, || usb.sie_status().read().connected());
+        usb.usb_muxing().write(|w| {
+            w.set_to_phy(true);
+            w.set_softcon(true);
+        });
+        usb.usbphy_direct_override()
+            .modify(|w| w.set_dp_pullup_en_override_en(false));
+        ctrl.write_value(ctrl_prev);
+        pad.write_value(pad_prev);
+    }
+}
+
+/// Spins until `done` holds or `limit` has passed.
+fn wait_until(limit: Duration, done: impl Fn() -> bool) {
+    let end = embassy_time::Instant::now() + limit;
+    while !done() && embassy_time::Instant::now() < end {}
 }
 
 /// Runs the USB device.

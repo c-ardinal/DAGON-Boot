@@ -68,7 +68,6 @@ the way asks for consent again).
 - 400 `agent and way must name a defined agent and way` /
   `consent must be true` (only the JSON boolean `true` counts); nothing is
   recorded.
-- 403 in `dagon demo` (linking is refused there; GET still works).
 - 500 `the consent could not be saved`.
 
 Linking does not need the way to be available (the user may install Claude
@@ -79,7 +78,6 @@ Code or register the key afterwards).
 Withdraws the consent (also fine when none was recorded).
 
 - 200: the same body as GET /v1/agent (now `linked: false`).
-- 403 in `dagon demo`.
 - **Unlinking waits for an agent call in flight.** Every call holds the
   consent from its check until the call ends (a shared lock on
   `~/.dagon/agent.lock`, one handle per call, so threads and processes such as
@@ -107,7 +105,7 @@ keeps it in no storage and clears its field once sent.
 - 400 `this way takes no key` (a login way), or `key must be a string`, or
   why the key is refused; nothing is stored.
 - 404 `no such agent and way`.
-- 403 in `dagon demo`, or the Host/Origin check (another origin is refused).
+- 403: the Host/Origin check (another origin is refused).
 - 503 `AGENT_KEY_STORE`: the OS credential store cannot be used here (for
   example Linux without a running Secret Service); `error` says why and how
   to install or start one. Nothing is stored anywhere else.
@@ -142,11 +140,6 @@ Match on `code`, not on the text. A consent file of a version this dagon does
 not read answers 409 `AGENT_CONSENT_VERSION` instead, on every route above. Once linked the routes behave as before
 (`/v1/ai/topology` starts a job; a way that cannot be used here fails inside
 the job with its reason, e.g. `no API key is registered for claude/api`).
-
-In `dagon demo` every route that would reach an agent answers 403
-(`/v1/agent/link` POST/DELETE, `/v1/agent/ask`, `/v1/ai/...`): a demo never
-calls a real agent. `GET /v1/agent` still answers, and `ai_topology` is left out
-of the demo's `features`.
 
 ## POST /v1/agent/ask
 
@@ -218,7 +211,7 @@ Errors (all `{ "error": "...", "code": "..." }` except the 400s):
 | Status | code | When |
 |---|---|---|
 | 400 | (none) | body is not JSON or a field breaks the rules above |
-| 403 | (none) | `dagon demo`, or the Host/Origin check |
+| 403 | (none) | the Host/Origin check |
 | 401 | (none) | no passphrase |
 | 409 | `AGENT_NOT_LINKED` | not linked, or the linked agent/way is no longer defined |
 | 409 | `AGENT_NOT_LINKED` | also: unlinked while the question was being answered (no further call is made) |

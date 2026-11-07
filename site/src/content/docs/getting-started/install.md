@@ -29,7 +29,7 @@ irm https://raw.githubusercontent.com/c-ardinal/DAGON-Boot/main/install.ps1 | ie
 
 | 環境変数 | 意味 |
 |---|---|
-| `DAGON_VERSION` | 入れるバージョン。`install.sh`は引数でも受け取ります（`sh -s -- <version>`） |
+| `DAGON_VERSION` | 入れるバージョン。`install.sh`は引数でも受け取ります（`sh -s -- <version>`）。プレリリース（`<version>-rc.N`）は、こうして指定したときだけ入ります |
 | `DAGON_INSTALL_DIR` | 置くフォルダ |
 | `DAGON_NO_MODIFY_PATH` | `install.ps1`で、PATHを変えず足し方を表示します |
 

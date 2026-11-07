@@ -29,7 +29,7 @@ The script reads these environment variables:
 
 | Variable | Meaning |
 |---|---|
-| `DAGON_VERSION` | The version to install. `install.sh` also takes it as an argument (`sh -s -- <version>`) |
+| `DAGON_VERSION` | The version to install. `install.sh` also takes it as an argument (`sh -s -- <version>`). A pre-release (`<version>-rc.N`) is installed only when named this way |
 | `DAGON_INSTALL_DIR` | The folder to put it in |
 | `DAGON_NO_MODIFY_PATH` | With `install.ps1`, leaves PATH as it is and says how to add the folder |
 

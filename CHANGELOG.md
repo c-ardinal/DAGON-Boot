@@ -27,8 +27,9 @@ protocol and API starts at format 1; `dagon --version` prints the numbers this
   ROM loader after asking.
 - **DAGON Console.** `dagon serve` opens the browser tool on your own PC: draw
   the 構成, build, and write to the nodes with each node's progress on its card.
-- **Try it without boards.** `dagon demo` runs DAGON Console on a simulated 親機
-  with two 子機, and `dagon sim run` runs end-to-end scenarios in the simulator.
+- **Try it without boards.** The [online demo](https://c-ardinal.github.io/DAGON-Boot/demo/)
+  runs DAGON Console on a simulated 親機 with two 子機 in the browser, and
+  `dagon sim run` runs end-to-end scenarios in the simulator.
 - **Extensions.** Boards, libraries and applications observe DAGON's events,
   answer its decision points and replace its ports, declared in a manifest that
   `dagon gen` checks.

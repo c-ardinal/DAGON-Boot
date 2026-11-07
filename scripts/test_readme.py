@@ -68,7 +68,7 @@ class Readmes(unittest.TestCase):
     def test_requirements_come_before_the_first_command_that_needs_them(self):
         for path, browser, rust in ((JA, "ChromeかEdge 89以降", "- Rust 1.95.0以降"), (EN, "Chrome or Edge 89 or later", "- Rust 1.95.0 or later")):
             text = path.read_text(encoding="utf-8")
-            self.assertLess(text.index(browser), text.index("dagon demo "), path.name)
+            self.assertLess(text.index(browser), text.index("](https://c-ardinal.github.io/DAGON-Boot/demo/)"), path.name)
             self.assertLess(text.index(rust), text.index("cargo install"), path.name)
 
     def test_building_it_yourself_stays_out_of_trying_it(self):

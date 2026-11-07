@@ -46,14 +46,6 @@ fn sign(input: &str, node: &str, version: &str, out: &str) -> ImageSignArgs {
     }
 }
 
-fn demo() -> DemoArgs {
-    DemoArgs {
-        sim_speed: "1".into(),
-        uplink: "usb-cdc".into(),
-        ..Default::default()
-    }
-}
-
 /// The invocations the README, the docs, the samples, the scripts and the
 /// tests run, each with the request it stands for.
 fn todays_invocations() -> Vec<(&'static str, Command)> {
@@ -410,36 +402,6 @@ fn todays_invocations() -> Vec<(&'static str, Command)> {
             }),
         ),
         ("sim run", C::Sim(SimCmd::Run)),
-        ("demo", C::Demo(demo())),
-        (
-            "demo --sim-fail watch",
-            C::Demo(DemoArgs {
-                sim_fail: s("watch"),
-                ..demo()
-            }),
-        ),
-        (
-            "demo --sim-speed 4",
-            C::Demo(DemoArgs {
-                sim_speed: "4".into(),
-                ..demo()
-            }),
-        ),
-        (
-            "demo --uplink uart",
-            C::Demo(DemoArgs {
-                uplink: "uart".into(),
-                ..demo()
-            }),
-        ),
-        (
-            "demo --port 8471 --no-open",
-            C::Demo(DemoArgs {
-                port: s("8471"),
-                no_open: true,
-                ..demo()
-            }),
-        ),
         ("ai link", C::Ai(AiCmd::Link(AgentWay::default()))),
         (
             "ai link --way api",
@@ -601,10 +563,7 @@ fn bad_command_lines_are_usage_errors() {
         ("flash", ErrorKind::MissingRequiredArgument),
         ("new", ErrorKind::MissingRequiredArgument),
         ("sim run now", ErrorKind::UnknownArgument),
-        ("demo --sim-fail hub", ErrorKind::InvalidValue),
-        ("demo extra", ErrorKind::UnknownArgument),
         ("ai link --way", ErrorKind::InvalidValue),
-        ("demo --uplink can", ErrorKind::InvalidValue),
         ("ai ask", ErrorKind::MissingRequiredArgument),
         ("ai unlink now", ErrorKind::UnknownArgument),
         ("ai key status --way api", ErrorKind::UnknownArgument),

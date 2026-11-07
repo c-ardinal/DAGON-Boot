@@ -64,11 +64,11 @@ Every step can also be done with the `dagon` command.
 
 ### Without installing
 
-Try the [DAGON Console demo](https://c-ardinal.github.io/DAGON-Boot/demo/) with no install and no hardware. You write to a simulated hub and its children and go back to a previous version. Reading and writing files, connecting real devices and AI link operations are not available in the demo.
+In the browser (Chrome or Edge 89 or later), try the [DAGON Console demo](https://c-ardinal.github.io/DAGON-Boot/demo/) with no install and no hardware. You write to a simulated hub and its children and go back to a previous version. Reading and writing files, connecting real devices and AI link operations are not available in the demo.
 
 ### Install and try
 
-On your own PC, you can also try it without hardware, in the browser (Chrome or Edge 89 or later), using the simulator.
+On your own PC, you can also try it without hardware, using the simulator.
 
 #### Install
 
@@ -84,10 +84,9 @@ Windows
 irm https://raw.githubusercontent.com/c-ardinal/DAGON-Boot/main/install.ps1 | iex
 ```
 
-#### Run the demo
+#### Try it in the simulator
 
 ```sh
-dagon demo    # opens DAGON Console at the address it prints
 dagon sim run # runs end-to-end scenarios in the simulator
 ```
 

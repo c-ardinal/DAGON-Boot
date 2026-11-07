@@ -132,11 +132,8 @@ def route_path(parts):
 
 def serve_api(lang="en"):
     api = (SERVE / "api.rs").read_text(encoding="utf-8")
-    refused = re.search(r"const DEMO_REFUSED: \[&str; \d+\] = \[(.*?)\];", api, re.S)
-    refused = re.findall(r'"([^"]+)"', refused.group(1)) if refused else []
     rows = []
     router = api.split("pub fn handle(", 1)[1].split("\n    };", 1)[0].splitlines()
-    word = tr(lang, "拒否", "refused")
     for i, line in enumerate(router):
         m = ARM.match(line)
         if not m:
@@ -149,9 +146,7 @@ def serve_api(lang="en"):
         # A doc that starts with its own route ("POST /v1/sim/write: ...") keeps only the rest.
         doc = re.sub(r"^(GET|POST|PUT|DELETE) /v1/\S*( \([^)]*\)| \{[^}]*\})?:\s*", "", doc)
         doc = say(lang, doc[:1].upper() + doc[1:])
-        short = path[len("/v1/"):]
-        demo = any(short == r or short.startswith(r + "/") for r in refused)
-        rows.append(f"| `{method}` | `{path}` | {word if demo else ''} | {cell(doc)} |")
+        rows.append(f"| `{method}` | `{path}` | {cell(doc)} |")
     events = re.search(r'path == "(/v1/events)"', (SERVE / "mod.rs").read_text(encoding="utf-8"))
     ws = events.group(1) if events else "/v1/events"
     table = "\n".join(rows)
@@ -161,15 +156,12 @@ def serve_api(lang="en"):
 `/v1/`へのリクエストには、serveが表示したアドレスの合言葉を
 `Authorization: Bearer <passphrase>`で付けます（無いと401）。HostとOriginの確認も通ります（通らないと403）。
 
-| メソッド | パス | `dagon demo` | 内容 |
-|---|---|---|---|
+| メソッド | パス | 内容 |
+|---|---|---|
 {table}
 
 `{ws}`はWebSocketです。ページが最初のメッセージで合言葉を送ると、serveのイベント
 （作業の進み具合、ログ、結果、質問、親機の受け渡し）を受け取ります。
-
-「{word}」のルートは、`dagon demo`の実行中は403を返します。デモは自分の模擬の親機と子機、
-自分のプロジェクトだけを使い、実機、ほかのプロジェクト、エージェントには触れません。
 """
     else:
         body = f"""
@@ -178,17 +170,13 @@ Every route is under `dagon serve`, on the loopback address it prints. Every
 `Authorization: Bearer <passphrase>` (401 without it), and passes serve's
 Host and Origin checks (403 otherwise).
 
-| Method | Path | `dagon demo` | What it does |
-|---|---|---|---|
+| Method | Path | What it does |
+|---|---|---|
 {table}
 
 `{ws}` is a WebSocket: the page sends the passphrase as its
 first message, then receives serve's events (job progress, logs, results,
 questions and the hub hand-over).
-
-A route marked *{word}* answers 403 while `dagon demo` runs: the demo has
-its own simulator and project and never touches real hardware, other
-projects or an agent.
 """
     return page(lang, "Serve HTTP API", tr(lang, "dagon serveのすべてのルートです。", "Every route of dagon serve, from its router."),
                 ["crates/dagon-cli/src/serve/api.rs"], body)

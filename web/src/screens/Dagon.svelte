@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { tick } from 'svelte';
+  import { tick, untrack } from 'svelte';
   import type { Agent, AskKind } from '../app/agent.svelte.ts';
   import { AGENT } from '../app/copy.ts';
   import { rise, tokenMs } from '../app/motion.ts';
@@ -166,31 +166,45 @@
     ro.observe(st);
     const mo = new MutationObserver(later);
     mo.observe(scope, { subtree: true, childList: true });
-    sync();
+    // Untracked: placing the bubble reads the stage it has just written, which would rerun this effect without end.
+    untrack(sync);
     return () => (cancelAnimationFrame(frame), clearTimeout(settled), ro.disconnect(), mo.disconnect());
   });
 
-  let drag: { id: number; dx: number; dy: number; x0: number; y0: number; moved: boolean; at: Point } | null = null;
+  let drag: { id: number; dx: number; dy: number; x0: number; y0: number; moved: boolean; from: Point; at: Point } | null = null;
+  /** How far a drag has carried the mark, drawn as a translate once a frame: nothing else is placed again until the drop. */
+  let nudge = $state<Point | null>(null);
+  let dragFrame = 0;
   /** The click that ends a drag opens nothing. */
   let dragged = false;
   function down(e: PointerEvent) {
     if (!root || e.button !== 0) return;
     dragged = false;
     (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
-    drag = { id: e.pointerId, dx: e.clientX - root.offsetLeft, dy: e.clientY - root.offsetTop, x0: e.clientX, y0: e.clientY, moved: false, at: { x: root.offsetLeft, y: root.offsetTop } };
+    drag = { id: e.pointerId, dx: e.clientX - root.offsetLeft, dy: e.clientY - root.offsetTop, x0: e.clientX, y0: e.clientY, moved: false, from: { x: root.offsetLeft, y: root.offsetTop }, at: { x: root.offsetLeft, y: root.offsetTop } };
   }
   function move(e: PointerEvent) {
     if (!drag || e.pointerId !== drag.id) return;
     if (Math.hypot(e.clientX - drag.x0, e.clientY - drag.y0) > DRAG_PX) drag.moved = true;
     if (!drag.moved) return;
-    drag.at = { x: e.clientX - drag.dx, y: e.clientY - drag.dy };
-    pos = toCorner(drag.at);
+    drag.at = inStage({ x: e.clientX - drag.dx, y: e.clientY - drag.dy });
+    if (dragFrame) return;
+    dragFrame = requestAnimationFrame(() => {
+      dragFrame = 0;
+      if (drag) nudge = { x: drag.at.x - drag.from.x, y: drag.at.y - drag.from.y };
+    });
+  }
+  function endDrag() {
+    cancelAnimationFrame(dragFrame);
+    dragFrame = 0;
+    nudge = null;
+    drag = null;
   }
   function up(e: PointerEvent) {
     if (!drag || e.pointerId !== drag.id) return;
     dragged = drag.moved;
     const at = drag.at;
-    drag = null;
+    endDrag();
     if (!dragged) return;
     pos = toCorner(settle(at));
     try {
@@ -243,8 +257,8 @@
 </script>
 
 <!-- svelte-ignore a11y_no_static_element_interactions -->
-<div class="dagon" class:thinking={agent.thinking} class:answered bind:this={root} style:right={shown && `${shown.r}px`} style:bottom={shown && `${shown.b}px`} data-avoid="" onkeydown={keys}>
-  <button class="mark" bind:this={markEl} aria-label={AGENT.name} aria-expanded={open} title={open ? AGENT.markClose : AGENT.markOpen} onpointerdown={down} onpointermove={move} onpointerup={up} onpointercancel={() => (drag = null)} onclick={press}>
+<div class="dagon" class:thinking={agent.thinking} class:answered bind:this={root} style:right={shown && `${shown.r}px`} style:bottom={shown && `${shown.b}px`} style:translate={nudge && `${nudge.x}px ${nudge.y}px`} data-avoid="" onkeydown={keys}>
+  <button class="mark" bind:this={markEl} aria-label={AGENT.name} aria-expanded={open} title={open ? AGENT.markClose : AGENT.markOpen} onpointerdown={down} onpointermove={move} onpointerup={up} onpointercancel={endDrag} onclick={press}>
     <span class="shadow" aria-hidden="true"></span>
     <img src="./icons/dagon-256.png" srcset="./icons/dagon-256.png 256w, ./icons/dagon-512.png 512w" sizes="96px" alt="" draggable="false" />
   </button>

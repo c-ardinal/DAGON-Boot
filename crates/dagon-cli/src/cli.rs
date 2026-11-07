@@ -124,10 +124,6 @@ pub enum Command {
     /// Run the simulator
     #[command(subcommand)]
     Sim(SimCmd),
-    /// DAGON Console against a simulated hub with two child nodes
-    ///
-    /// Uses a demo key made for it: try updates without boards.
-    Demo(DemoArgs),
     /// Work with an AI agent
     #[command(subcommand)]
     Ai(AiCmd),
@@ -513,30 +509,6 @@ pub struct ServeArgs {
 pub enum SimCmd {
     /// Run the simulator scenarios (no hardware)
     Run,
-}
-
-#[derive(Debug, Default, PartialEq, Args)]
-pub struct DemoArgs {
-    #[arg(long, value_name = "X", default_value = "1", help = format!(
-        "Simulation speed factor, {} to {}",
-        crate::demo::SPEEDS.start(),
-        crate::demo::SPEEDS.end(),
-    ))]
-    pub sim_speed: String,
-    /// Child node whose update fails and falls back
-    #[arg(long, value_name = "ID", value_parser = crate::demo::NODES)]
-    pub sim_fail: Option<String>,
-    /// Link from the PC to the simulated hub
-    #[arg(long, value_name = "KIND", default_value = "usb-cdc", value_parser = uplinks())]
-    pub uplink: String,
-    #[arg(long, value_name = "N", help = LISTEN_PORT)]
-    pub port: Option<String>,
-    #[arg(long, help = NO_OPEN)]
-    pub no_open: bool,
-}
-
-fn uplinks() -> [&'static str; 3] {
-    crate::serve::Medium::ALL.map(|m| m.kind().name())
 }
 
 #[derive(Debug, PartialEq, Subcommand)]

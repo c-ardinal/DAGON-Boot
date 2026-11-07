@@ -21,7 +21,9 @@ mod sim;
 
 /// What may become a file name (node ids, package ids).
 pub(crate) use api::plain as plain_id;
-pub use sim::{Medium, SimDevice};
+#[cfg(test)]
+pub use sim::Medium;
+pub use sim::SimDevice;
 mod ws;
 
 use std::io::Write;

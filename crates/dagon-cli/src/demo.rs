@@ -20,13 +20,11 @@ use dagon_sign::image::{self, sign_image, ImageSpec};
 use dagon_sim::{demo_hub, watch_config, Layout, SimFlash, SimHub, SimLink, SimNode, TrialApp};
 use ed25519_compact::KeyPair;
 
-use crate::cli::{DemoArgs, ServeArgs};
 use crate::serve::Medium;
 
 const YAML: &str = include_str!("../../../topology/sample.yaml");
 /// Marks a folder this command made (and may make again).
 const MARK: &str = ".dagon-demo";
-const DEMO_DIR: &str = "dagon-demo";
 const RELEASE: &str = "demo-1.1.0";
 const OLD: Version = Version::new(1, 0, 0);
 const NEW: Version = Version::new(1, 1, 0);
@@ -36,9 +34,6 @@ const HUB_LEN: usize = dagon_sim::sample::HUB_APP_BYTES;
 const SEG_LEN: usize = dagon_sim::sample::SEG_APP_BYTES;
 const CORE_LEN: usize = 16 * 1024;
 const WATCH_LEN: usize = dagon_sim::sample::WATCH_APP_BYTES;
-pub(crate) const SPEEDS: std::ops::RangeInclusive<f64> = 0.1..=20.0;
-/// The 子機 a failure can be set on.
-pub(crate) const NODES: [&str; 2] = ["seg", "watch"];
 
 /// A node of the simulator: MCU, port kind, target tag.
 struct Board {
@@ -225,79 +220,6 @@ pub fn project(dir: &Path, uplink: Medium) -> Result<(PathBuf, KeyPair), String>
     Ok((dir.join(crate::config::CONFIG_FILE), key))
 }
 
-/// The demo's folder name, one per user: a temporary folder may be shared
-/// (Linux /tmp), and user names that differ only in punctuation or
-/// non-ASCII letters must not share one, so it carries a hash of the name.
-fn demo_dir_name(user: &str) -> String {
-    use sha1::{Digest, Sha1};
-    let hex: String = Sha1::digest(user.as_bytes())[..8]
-        .iter()
-        .map(|b| format!("{b:02x}"))
-        .collect();
-    format!("{DEMO_DIR}-{hex}")
-}
-
-/// The one switch: this process's home is a folder inside the demo's, which
-/// [`project`] made afresh, so each start is unlinked with no recent projects
-/// and nothing of the last run; and it opens no credential store.
-fn keep_off_the_users_settings(dir: &Path) -> Result<(), String> {
-    let home = dir.join("home");
-    crate::config::write_file(&home.join(".dagon").join(MARK), b"dagon demo's own home\n")?;
-    crate::consent::use_own_home(home);
-    crate::keystore::close();
-    Ok(())
-}
-
-/// `dagon demo`: `--sim-fail` and `--uplink` are checked by the parser
-/// against [`NODES`] and the simulated media.
-pub fn command(a: &DemoArgs) -> Result<(), String> {
-    let speed: f64 = a
-        .sim_speed
-        .parse()
-        .map_err(|_| "--sim-speed must be a number")?;
-    if !SPEEDS.contains(&speed) {
-        return Err(format!(
-            "--sim-speed must be {} to {}",
-            SPEEDS.start(),
-            SPEEDS.end()
-        ));
-    }
-    let fail = a.sim_fail.as_deref();
-    let uplink = Medium::ALL
-        .into_iter()
-        .find(|m| m.kind().name() == a.uplink)
-        .ok_or_else(|| format!("--uplink: no simulated link {}", a.uplink))?;
-    let user = std::env::var("USERNAME")
-        .or_else(|_| std::env::var("USER"))
-        .unwrap_or_default();
-    let dir = std::env::temp_dir().join(demo_dir_name(&user));
-    let (config, key) = project(&dir, uplink)?;
-    keep_off_the_users_settings(&dir)?;
-    let hub = sim_hub(&key, fail, 1)?;
-    let mut sim = crate::serve::SimDevice::new(hub, speed, fail.map(String::from));
-    sim.set_medium(uplink);
-    sim.notes = vec![
-        format!(
-            "demo: a SIMULATED hub (親機 + 2 子機, sample) over {}, speed x{speed}{}",
-            uplink.kind().name(),
-            fail.map_or(String::new(), |f| format!(", {f}'s update set to fail"))
-        ),
-        format!(
-            "demo: DEMO key {} in {} (made for this demo; not your key)",
-            crate::config::key_id_text(&key.pk),
-            dir.join("demo-key").display()
-        ),
-    ];
-    let sim = Arc::new(sim);
-    let serve = ServeArgs {
-        config: Some(config.to_string_lossy().into_owned()),
-        port: a.port.clone(),
-        no_open: a.no_open,
-        ..Default::default()
-    };
-    crate::serve::run(&serve, Some(sim))
-}
-
 #[cfg(test)]
 // Tests set up and inspect their own scratch folders directly.
 #[allow(clippy::disallowed_methods)]
@@ -334,17 +256,6 @@ mod tests {
             .collect();
         found.sort();
         assert_eq!(found, ["ai.rs", "consent.rs", "flash.rs"]);
-    }
-
-    #[test]
-    fn each_user_name_has_its_own_demo_folder() {
-        let names = ["ab", "a.b", "a b", "山田", "田中", ""].map(demo_dir_name);
-        let distinct: std::collections::HashSet<_> = names.iter().collect();
-        assert_eq!(distinct.len(), names.len());
-        assert_eq!(demo_dir_name("ab"), demo_dir_name("ab"));
-        assert!(names
-            .iter()
-            .all(|n| n.starts_with("dagon-demo-") && n.is_ascii()));
     }
 
     #[test]
@@ -540,17 +451,5 @@ mod tests {
         assert_eq!(run(&mut h, &back), ["done 1.0.0"; 3]);
         assert_eq!(core(&mut h), OLD);
         let _ = std::fs::remove_dir_all(&dir);
-    }
-
-    #[test]
-    fn options_are_checked() {
-        // The parser refuses an unknown 子機 or uplink (cli tests); the speed
-        // is checked here.
-        for bad in ["0", "fast"] {
-            assert!(
-                command(&crate::cli::args(&["--sim-speed", bad])).is_err(),
-                "{bad}"
-            );
-        }
     }
 }

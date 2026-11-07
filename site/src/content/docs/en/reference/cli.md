@@ -39,7 +39,6 @@ Commands:
   doctor     Check the tools each MCU family of the topology needs
   serve      Start DAGON Console, the browser tool, and its API on 127.0.0.1
   sim        Run the simulator
-  demo       DAGON Console against a simulated hub with two child nodes
   ai         Work with an AI agent
   help       Print this message or the help of the given subcommand(s)
 
@@ -747,42 +746,6 @@ Usage: dagon sim run
 Options:
   -h, --help
           Print help
-```
-
-## dagon demo
-
-```text
-DAGON Console against a simulated hub with two child nodes
-
-Uses a demo key made for it: try updates without boards.
-
-Usage: dagon demo [OPTIONS]
-
-Options:
-      --sim-speed <X>
-          Simulation speed factor, 0.1 to 20
-          
-          [default: 1]
-
-      --sim-fail <ID>
-          Child node whose update fails and falls back
-          
-          [possible values: seg, watch]
-
-      --uplink <KIND>
-          Link from the PC to the simulated hub
-          
-          [default: usb-cdc]
-          [possible values: usb-cdc, uart, wifi-tcp]
-
-      --port <N>
-          TCP port on 127.0.0.1 [default: a free port]
-
-      --no-open
-          Do not open the browser; the address and passphrase are printed
-
-  -h, --help
-          Print help (see a summary with '-h')
 ```
 
 ## dagon ai

@@ -31,19 +31,3 @@ A kind the firmware of either end does not implement is marked ◇ まだ使え�
 - `dagon gen` refuses it and names the link (`uplink of hub over ble: not available yet on rp2040`).
 
 The kinds the firmware offers are in the Up links and Down links columns of [Boards and MCUs](/en/reference/boards/). Up is towards the PC or the 親機, and down is to 子機. The data comes from each MCU definition's `[links]`.
-
-## In the demo
-
-The demo shows the swap without new radios:
-
-```sh
-dagon demo --uplink uart          # or usb-cdc (default), wifi-tcp
-```
-
-The simulated uplink follows the demo 構成. Change the 親機's uplink (USB, UART, Wi-Fi) in 準備 and the same write runs over the other medium.
-
-Each medium has its own:
-
-- Frame size
-- Speed
-- Behaviour while the 親機 reboots (USB CDC and Wi-Fi reconnect; a UART adapter stays)

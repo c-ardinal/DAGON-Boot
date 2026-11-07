@@ -10,6 +10,7 @@ mod conform;
 mod consent;
 mod dagonsrc;
 mod defs;
+#[cfg(test)]
 mod demo;
 mod deploy;
 mod device;
@@ -87,7 +88,6 @@ fn main() -> ExitCode {
         Command::Doctor(a) => run(doctor::command(&a)),
         Command::Serve(a) => run(serve::command(&a)),
         Command::Sim(SimCmd::Run) => run(simrun::run()),
-        Command::Demo(a) => run(demo::command(&a)),
         Command::Ai(AiCmd::Link(a)) => run(consent::link_command(&a)),
         Command::Ai(AiCmd::Unlink) => run(consent::unlink_command()),
         Command::Ai(AiCmd::Key(k)) => run(keystore::command(&k)),

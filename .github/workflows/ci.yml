@@ -1,4 +1,4 @@
-# Runs on every push and pull request: the checks that keep the places
+# Runs on pull requests and build tags (*-v*) only: the checks that keep the places
 # holding one fact in step (parity tests), plus the usual lint and test
 # gates. No secrets; the token is read-only.
 #
@@ -7,8 +7,9 @@
 name: ci
 
 on:
-  push:
   pull_request:
+  push:
+    tags: ["*-v*"]
 
 permissions:
   contents: read

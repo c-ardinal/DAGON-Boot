@@ -71,10 +71,7 @@ export async function layoutFaults(page: Page): Promise<string[]> {
     const peers = [...document.querySelectorAll('.tools, .float, .focal, .pill, .toast, .notice, .edit-area.table, .drawer, #band, .dagon .mark, .bubble, header .modes, header .right > *')].filter((e) => e.getBoundingClientRect().width > 0);
     for (let i = 0; i < peers.length; i++) {
       for (let j = i + 1; j < peers.length; j++) {
-        if (peers[i].contains(peers[j]) || peers[j].contains(peers[i])) continue;
-        // The mark keeps its place when the drawer opens (only a drag moves it), standing over the drawer's foot.
-        if (peers[i].matches('.dagon .mark') && peers[j].matches('.drawer') || peers[j].matches('.dagon .mark') && peers[i].matches('.drawer')) continue;
-        const [a, b] = [peers[i].getBoundingClientRect(), peers[j].getBoundingClientRect()];
+        if (peers[i].contains(peers[j]) || peers[j].contains(peers[i])) continue;        const [a, b] = [peers[i].getBoundingClientRect(), peers[j].getBoundingClientRect()];
         if (Math.min(a.right, b.right) - Math.max(a.left, b.left) > 0.5 && Math.min(a.bottom, b.bottom) - Math.max(a.top, b.top) > 0.5) faults.push(`${name(peers[i])} overlaps ${name(peers[j])}`);
       }
     }

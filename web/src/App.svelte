@@ -1571,11 +1571,11 @@
               <span class="mark-room"></span>
             {/if}
           </div>
+          {#if agentLinked || simulated}
+            <!-- Over the columns, from the free area's bottom-right as the zoom is: no sheet, table or toast moves it; the drawer carries it up with the zoom; a drag places it. -->
+            <Dagon {agent} demo={simulated} place={cli.hello?.workspace ?? d.doc.topo.name ?? 'local'} bind:open={bubbleOpen} onask={askDagon} onapply={applyProposal} ontalk={() => (drawerTab = 'talk')} openRequest={dagonOpen} />
+          {/if}
         </div>
-        {#if agentLinked || simulated}
-          <!-- On the stage, outside every column: no sheet, drawer, table or toast moves it, only the user's drag. -->
-          <Dagon {agent} demo={simulated} place={cli.hello?.workspace ?? d.doc.topo.name ?? 'local'} bind:open={bubbleOpen} onask={askDagon} onapply={applyProposal} ontalk={() => (drawerTab = 'talk')} openRequest={dagonOpen} />
-        {/if}
         <div class="dock" data-avoid="">
           <Drawer tabs={drawerTabs} open={drawerTab} onpick={(id) => (drawerTab = id)} onclose={() => (drawerTab = null)} body={drawerBody} />
           <Status
@@ -1828,6 +1828,7 @@
     outline: none;
   }
   .overlay {
+    position: relative;
     grid-area: 1 / 1 / 2 / 2;
     z-index: var(--z-chrome);
     display: grid;

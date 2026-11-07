@@ -60,7 +60,8 @@ test('sweep: no overflow, overlap, clipped text or clipped focus ring at any win
       for (const k of Object.keys(a)) if (a[k] !== b[k]) faults.push(`${w}x${h} ${name}: ${k} moved ${a[k]} -> ${b[k]}`);
       // A sheet, menu, help or toast opening moves none of the standing parts (the DAGON mark, the zoom, the focal number, the header). The open drawer is the one thing they give way to, by structure, so it never covers them.
       // The open drawer is what the zoom and the focal number give way to, by structure; everything else moves for nothing.
-      const still = name.includes('引き出し') ? ['.frame > header', 'header .modes', 'header .actions', '.dagon', '.dagon .mark'] : Object.keys(rest);
+      // The mark stands by the zoom and rises with it.
+      const still = name.includes('引き出し') ? ['.frame > header', 'header .modes', 'header .actions'] : Object.keys(rest);
       for (const k of still) if (a[k] !== undefined && rest[k] !== undefined && a[k] !== rest[k]) faults.push(`${w}x${h} ${name}: ${k} moved for it ${rest[k]} -> ${a[k]}`);
       await out(page);
     }
@@ -110,6 +111,15 @@ test('the mark: just left of the zoom in every view and mode, moved only by a dr
   expect(Math.round(mark.y + mark.height)).toBe(Math.round(pill.y + pill.height));
   expect(mark.x + mark.width).toBeLessThanOrEqual(pill.x);
   expect(pill.x - mark.x - mark.width).toBeLessThan(20);
+  // The open drawer carries it up with the zoom, never over it.
+  await page.locator('.drawer [role="tab"]').first().click();
+  await page.waitForTimeout(400);
+  const [up, pillUp, drawer] = [await box(page, '.dagon .mark'), await box(page, '.pill'), await box(page, '.drawer')];
+  expect(Math.round(up.y + up.height)).toBe(Math.round(pillUp.y + pillUp.height));
+  expect(up.y + up.height).toBeLessThanOrEqual(drawer.y);
+  await page.locator('.drawer [role="tab"]').first().click();
+  await page.waitForTimeout(400);
+  expect(await box(page, '.dagon .mark')).toEqual(mark);
   await view(page, '表', '表で見る');
   expect(await box(page, '.dagon .mark')).toEqual(mark);
   await view(page, 'グラフ', 'グラフで見る');

@@ -29,6 +29,8 @@
   const DRAG_PX = 4;
 
   type Point = { x: number; y: number };
+  /** A place as the zoom pill has one: from the free area's bottom-right corner, so the opening drawer carries it up. */
+  type Corner = { r: number; b: number };
 
   let root = $state<HTMLDivElement>();
   let bubbleEl = $state<HTMLElement>();
@@ -36,7 +38,7 @@
   let text = $state('');
   let answered = $state(false);
   /** Where the user put it; null: the default place, kept by the stylesheet. Only a drag changes it. */
-  let pos = $state<Point | null>(null);
+  let pos = $state<Corner | null>(null);
   let stage = $state({ w: 0, h: 0, mark: 0 });
   /** The bubble's corner, from the mark's. */
   let bubbleAt = $state<Point>({ x: 0, y: 0 });
@@ -52,28 +54,30 @@
       y: Math.min(Math.max(MARGIN, p.y), Math.max(MARGIN, stage.h - stage.mark - MARGIN)),
     };
   }
+  const toPoint = (c: Corner): Point => ({ x: stage.w - stage.mark - c.r, y: stage.h - stage.mark - c.b });
+  const toCorner = (p: Point): Corner => ({ r: stage.w - stage.mark - p.x, b: stage.h - stage.mark - p.y });
   /** The kept place is shown inside a smaller window without being forgotten: a larger one brings it back. */
-  const shown = $derived(pos && (stage.w ? inStage(pos) : pos));
+  const shown = $derived(pos && (stage.w ? toCorner(inStage(toPoint(pos))) : pos));
 
   $effect(() => {
     pos = readPlace(key);
   });
-  function readPlace(k: string): Point | null {
+  function readPlace(k: string): Corner | null {
     try {
       const kept = JSON.parse(localStorage.getItem(k) ?? 'null');
-      return Number.isFinite(kept?.x) && Number.isFinite(kept?.y) ? { x: kept.x, y: kept.y } : null;
+      return Number.isFinite(kept?.r) && Number.isFinite(kept?.b) ? { r: kept.r, b: kept.b } : null;
     } catch {
       // Storage may be off: the place then lasts for this page only.
       return null;
     }
   }
 
-  /** What the mark's drop and the bubble keep off, in the stage's coordinates. */
+  /** What the mark's drop and the bubble keep off on the stage, in the coordinates of the free area the mark stands in. */
   function obstacles(cards = true): { left: number; top: number; right: number; bottom: number }[] {
-    const st = root?.parentElement;
-    if (!st) return [];
-    const o = st.getBoundingClientRect();
-    return [...st.querySelectorAll<HTMLElement>('[data-avoid], .toast')]
+    const scope = root?.closest('.stage');
+    if (!scope || !root?.parentElement) return [];
+    const o = root.parentElement.getBoundingClientRect();
+    return [...scope.querySelectorAll<HTMLElement>('[data-avoid], .toast')]
       .filter((e) => !root?.contains(e) && (cards || !e.closest('main')))
       .map((e) => e.getBoundingClientRect())
       .map((r) => ({ left: r.left - o.left, top: r.top - o.top, right: r.right - o.left, bottom: r.bottom - o.top }));
@@ -99,9 +103,8 @@
   function placeBubble() {
     if (!open || !bubbleEl || !root) return;
     const [mx, my, s] = [root.offsetLeft, root.offsetTop, root.offsetWidth];
-    // A low window: the bubble is no taller than the room over the dock, its body scrolls.
-    const dock = root.parentElement?.querySelector<HTMLElement>('.dock')?.offsetHeight ?? 0;
-    bubbleMax = Math.max(0, stage.h - dock - 2 * MARGIN);
+    // A low window: the bubble is no taller than the free area, its body scrolls.
+    bubbleMax = Math.max(0, stage.h - 2 * MARGIN);
     const [w, h] = [bubbleEl.offsetWidth, Math.min(bubbleEl.offsetHeight, bubbleMax)];
     const sides: [number, number][] = [
       [mx - MARGIN - w, my + s - h],
@@ -110,7 +113,8 @@
       [mx + s + MARGIN, my],
     ];
     const spot = (cards: boolean): [number, number] | undefined => {
-      const obs = [...obstacles(cards), { left: mx, top: my, right: mx + s, bottom: my + s }];
+      // A gap around each: the bubble's measured width is whole pixels, the boxes are not.
+      const obs = [...obstacles(cards).map((r) => ({ left: r.left - MARGIN, top: r.top - MARGIN, right: r.right + MARGIN, bottom: r.bottom + MARGIN })), { left: mx, top: my, right: mx + s, bottom: my + s }];
       const free = (x: number, y: number) => x >= MARGIN && y >= MARGIN && x + w <= stage.w - MARGIN && y + h <= stage.h - MARGIN && !obs.some((r) => covers(r, { x, y, w, h }));
       const beside = sides.find(([x, y]) => free(x, y));
       if (beside) return beside;
@@ -146,12 +150,13 @@
   /** The window and what stands on the stage change: the mark stays; the bubble finds its side again. */
   $effect(() => {
     const st = root?.parentElement;
-    if (!st || !root) return;
+    const scope = root?.closest('.stage');
+    if (!st || !scope || !root) return;
     const mark = root;
     const sync = () => {
       stage = { w: st.clientWidth, h: st.clientHeight, mark: mark.offsetWidth };
       // A sheet or toast growing with its content is no mutation of the stage: watched for size too.
-      for (const e of st.querySelectorAll('.float, .toast')) ro.observe(e);
+      for (const e of scope.querySelectorAll('.float, .toast')) ro.observe(e);
       placeSoon();
     };
     // Next frame: changing a box inside the observer's callback would report a resize loop.
@@ -160,31 +165,34 @@
     const ro = new ResizeObserver(later);
     ro.observe(st);
     const mo = new MutationObserver(later);
-    mo.observe(st, { subtree: true, childList: true });
+    mo.observe(scope, { subtree: true, childList: true });
     sync();
     return () => (cancelAnimationFrame(frame), clearTimeout(settled), ro.disconnect(), mo.disconnect());
   });
 
-  let drag: { id: number; dx: number; dy: number; x0: number; y0: number; moved: boolean } | null = null;
+  let drag: { id: number; dx: number; dy: number; x0: number; y0: number; moved: boolean; at: Point } | null = null;
   /** The click that ends a drag opens nothing. */
   let dragged = false;
   function down(e: PointerEvent) {
     if (!root || e.button !== 0) return;
     dragged = false;
     (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
-    drag = { id: e.pointerId, dx: e.clientX - root.offsetLeft, dy: e.clientY - root.offsetTop, x0: e.clientX, y0: e.clientY, moved: false };
+    drag = { id: e.pointerId, dx: e.clientX - root.offsetLeft, dy: e.clientY - root.offsetTop, x0: e.clientX, y0: e.clientY, moved: false, at: { x: root.offsetLeft, y: root.offsetTop } };
   }
   function move(e: PointerEvent) {
     if (!drag || e.pointerId !== drag.id) return;
     if (Math.hypot(e.clientX - drag.x0, e.clientY - drag.y0) > DRAG_PX) drag.moved = true;
-    if (drag.moved) pos = { x: e.clientX - drag.dx, y: e.clientY - drag.dy };
+    if (!drag.moved) return;
+    drag.at = { x: e.clientX - drag.dx, y: e.clientY - drag.dy };
+    pos = toCorner(drag.at);
   }
   function up(e: PointerEvent) {
     if (!drag || e.pointerId !== drag.id) return;
     dragged = drag.moved;
+    const at = drag.at;
     drag = null;
-    if (!dragged || !pos) return;
-    pos = settle(pos);
+    if (!dragged) return;
+    pos = toCorner(settle(at));
     try {
       localStorage.setItem(key, JSON.stringify(pos));
     } catch {
@@ -235,7 +243,7 @@
 </script>
 
 <!-- svelte-ignore a11y_no_static_element_interactions -->
-<div class="dagon" class:thinking={agent.thinking} class:answered bind:this={root} style:left={shown && `${shown.x}px`} style:top={shown && `${shown.y}px`} data-avoid="" onkeydown={keys}>
+<div class="dagon" class:thinking={agent.thinking} class:answered bind:this={root} style:right={shown && `${shown.r}px`} style:bottom={shown && `${shown.b}px`} data-avoid="" onkeydown={keys}>
   <button class="mark" bind:this={markEl} aria-label={AGENT.name} aria-expanded={open} title={open ? AGENT.markClose : AGENT.markOpen} onpointerdown={down} onpointermove={move} onpointerup={up} onpointercancel={() => (drag = null)} onclick={press}>
     <span class="shadow" aria-hidden="true"></span>
     <img src="./icons/dagon-256.png" srcset="./icons/dagon-256.png 256w, ./icons/dagon-512.png 512w" sizes="96px" alt="" draggable="false" />
@@ -276,12 +284,13 @@
 </div>
 
 <style>
-  /* The default place: just left of the zoom, its foot on the zoom's foot (the closed drawer's tabs and the status line under it), in every view. A drag's place comes as left and top. */
+  /* In the free area over the canvas, as the zoom pill is: by default just left of the zoom, its foot on the zoom's foot, in every view; the opening drawer carries it up. A drag's place comes as right and bottom. */
   .dagon {
     position: absolute;
-    z-index: calc(var(--z-chrome) + 1);
+    z-index: 1;
     right: calc(var(--m-edge) + var(--h-button) + var(--s-3));
-    bottom: calc(var(--h-dock) + var(--m-edge));
+    bottom: var(--m-edge);
+    pointer-events: auto;
     width: var(--w-mark);
     height: var(--w-mark);
   }

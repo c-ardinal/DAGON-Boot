@@ -178,7 +178,7 @@ The provision folder is `out/provision/<id>/` beside `dagon.toml`, or under `pro
 
 ### Checking that nodes answer
 
-Connect the hub and check that every node answers:
+Connect the hub directly to a USB port of the PC ([Limitations](/en/explanation/limitations/)), and check that every node answers:
 
 ```sh
 dagon status

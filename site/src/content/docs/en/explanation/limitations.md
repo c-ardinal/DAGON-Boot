@@ -13,6 +13,7 @@ The hub and the boot:
 
 - Only an RP2040 can be the hub. The relay code lives in that MCU's definition.
 - DAGON writes the hub and the children beyond it. Nothing beyond a child can be written.
+- Through some USB hubs, the PC does not see the hub again after it updates itself and restarts. Connect the hub directly to a USB port of the PC.
 - There are no single-slot layouts.
 - The boot loader does not communicate and does not write the app.
 - The ESP32-S3 uses the official ESP-IDF 2nd stage. If that 2nd stage itself is broken, DAGON cannot rescue the board; it has to be rewritten over USB with the vendor tools.

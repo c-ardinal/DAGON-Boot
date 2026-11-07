@@ -1,8 +1,9 @@
-# Runs when a component release tag (<component>-v<version>,
-# site/src/content/docs/explanation/versioning.md) is pushed. Every such tag first passes the bump
-# check: the tag names a component of compat.toml with that version, and
-# the version is at least what the commits since the component's last tag
-# require. Only a CLI tag (cli-v<version>) then builds the dagon
+# Runs when a component release tag (<component>-v<version> or
+# <component>-v<version>-rc.N, site/src/content/docs/explanation/versioning.md)
+# is pushed. Every such tag first passes the bump check: the tag names a
+# component of compat.toml with that version, and the version is at least what
+# the commits since the component's last tag require. Only a CLI tag
+# (cli-v<version>, with or without -rc.N) then builds the dagon
 # executables and, once every build has passed, publishes the GitHub release
 # install.sh and install.ps1 read. A manual run builds and publishes nothing.
 name: release build
@@ -68,7 +69,13 @@ jobs:
       - name: Rust target
         run: rustup target add ${{ matrix.target }}
       - name: Build the archive
-        run: python scripts/release.py --target ${{ matrix.target }} --out out/release
+        shell: bash
+        # Through the environment, not pasted into the script: a tag name is
+        # pusher-controlled text. A manual run has no tag and names its archives
+        # from compat.toml.
+        env:
+          TAG: ${{ github.ref_type == 'tag' && github.ref_name || '' }}
+        run: python scripts/release.py --target ${{ matrix.target }} --out out/release ${TAG:+--tag "$TAG"}
       - uses: actions/upload-artifact@v4
         with:
           name: dagon-${{ matrix.target }}

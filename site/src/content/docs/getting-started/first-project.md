@@ -178,7 +178,7 @@ provisionのフォルダは`dagon.toml`の横の`out/provision/<id>/`です。`d
 
 ### 応答を確かめる
 
-親機をつなぎ、すべてのノードが応答するか確かめます。
+親機はPCのUSBポートに直接つなぎます（[制限事項](/explanation/limitations/)）。すべてのノードが応答するか確かめます。
 
 ```sh
 dagon status

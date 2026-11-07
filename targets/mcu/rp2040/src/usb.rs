@@ -55,6 +55,7 @@ pub fn new(
     cfg.product = Some(product);
     cfg.serial_number = Some(serial);
     let (config_desc, bos_desc, control_buf) = USB_BUFS.init(([0; 256], [0; 256], [0; 64]));
+    disconnect_and_reset();
     let mut builder = embassy_usb::Builder::new(
         Driver::new(usb, UsbIrqs),
         cfg,
@@ -73,6 +74,23 @@ pub fn new(
         last: 0,
     };
     (builder.build(), link)
+}
+
+/// A reset that keeps power (the watchdog, the self-update reboot) leaves
+/// the pull-up on and USBCTRL configured, so the host never sees the device
+/// leave and does not enumerate it again. Drop off the bus long enough for
+/// the host to see a disconnect, then start USBCTRL from its reset state.
+fn disconnect_and_reset() {
+    use embassy_rp::pac;
+    pac::USB.sie_ctrl().modify(|w| {
+        w.set_pullup_en(false);
+        w.set_transceiver_pd(true);
+    });
+    embassy_time::block_for(Duration::from_millis(100));
+    pac::RESETS.reset().modify(|w| w.set_usbctrl(true));
+    embassy_time::block_for(Duration::from_micros(10));
+    pac::RESETS.reset().modify(|w| w.set_usbctrl(false));
+    while !pac::RESETS.reset_done().read().usbctrl() {}
 }
 
 /// Runs the USB device.

@@ -25,7 +25,7 @@ default = ["relay"]
 hal = ["dep:embassy-rp", "dep:embassy-time", "dep:dagon-agent", "dep:dagon-events", "dep:static_cell", "dep:portable-atomic"]
 # DAGON over USB CDC (device, frame link, agent serving loop) and DAGON's
 # high-priority executor (SWI_IRQ_0).
-usb = ["hal", "embassy-rp?/rt", "dep:embassy-usb", "dep:embassy-executor"]
+usb = ["hal", "embassy-rp?/rt", "embassy-rp?/unstable-pac", "dep:embassy-usb", "dep:embassy-executor"]
 # The 親機 relay (PC link, sub-node links, ROM recovery path).
 relay = ["usb", "dep:embassy-sync", "dep:embassy-futures"]
 # The final binary's memory.x comes from this package: an APP slot body

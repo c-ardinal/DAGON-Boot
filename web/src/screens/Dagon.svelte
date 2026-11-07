@@ -128,8 +128,8 @@
     cursor: pointer;
   }
   .mark:focus-visible {
-    outline: 2px solid var(--c-paper);
-    outline-offset: 4px;
+    outline: var(--st-w-focus) solid var(--c-paper);
+    outline-offset: 2px;
     border-radius: var(--r-m);
   }
   .mark img {

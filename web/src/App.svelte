@@ -605,7 +605,10 @@
     if (took) opened = t;
   }
 
-  let primaryEl = $state<HTMLButtonElement>();
+  let genEl = $state<HTMLButtonElement>();
+  let writeEl = $state<HTMLButtonElement>();
+  /** The mode's main action, the one the band's 次へ focuses. */
+  const primaryEl = $derived(mode === 'define' ? genEl : writeEl);
   let partsOpen = $state(true);
   let nextEl = $state<HTMLElement>();
 
@@ -1373,10 +1376,10 @@
   {/if}
 {/snippet}
 
-{#snippet actions()}
-  {#if mode === 'define'}
+{#snippet actions(m: 'define' | 'operate')}
+  {#if m === 'define'}
     {@const blocked = problemCount > 0 || d.doc.topo.nodes.length === 0}
-    <button class="button-primary-header" data-control="gen" bind:this={primaryEl} aria-disabled={blocked} title={blocked ? SKELETON.makeWhy : undefined} onclick={() => !blocked && void makeSkeleton()}><span>{SKELETON.make}</span></button>
+    <button class="button-primary-header" data-control="gen" bind:this={genEl} aria-disabled={blocked} title={blocked ? SKELETON.makeWhy : undefined} onclick={() => !blocked && void makeSkeleton()}><span>{SKELETON.make}</span></button>
     <button class="button-secondary-header" data-control="build" aria-disabled={buildState === 'running'} title={buildState === 'running' ? BUILD.runningWhy : undefined} onclick={() => buildState !== 'running' && void build()}><span>{BUILD.run}</span></button>
   {:else}
     <SplitButton
@@ -1388,7 +1391,7 @@
       options={versionChoices.map((c) => (c.id === 'latest' && c.label !== WRITE.latest ? { ...c, note: WRITE.latest } : c))}
       pickOff={!WRITABLE.has(op.state)}
       onpick={(id) => void writeVersion(id)}
-      bind:mainEl={primaryEl}
+      bind:mainEl={writeEl}
     />
   {/if}
 {/snippet}
@@ -1479,7 +1482,7 @@
       bind:helpOpen
       {helpKeys}
       title={screen === 'work' ? (d.doc.topo.name ?? '') : ''}
-      edit={screen === 'work' && mode === 'define' && !barNarrow ? { canUndo: d.canUndo, canRedo: d.canRedo, onundo: () => d.undo(), onredo: () => d.redo(), view: d.view, onview: (v) => (d.view = v) } : undefined}
+      edit={screen === 'work' && !barNarrow ? { canUndo: d.canUndo, canRedo: d.canRedo, onundo: () => d.undo(), onredo: () => d.redo(), view: d.view, onview: (v) => (d.view = v) } : undefined}
       hub={screen === 'work' ? { connected, locked: hubLocked, hint: op.state === 'idle' || op.state === 'choosing' ? band.sentence : undefined, onpress: toggleHub } : undefined}
     >
       {#snippet menu()}
@@ -1612,7 +1615,7 @@
       <p>{c.sentence}</p>
       {#snippet actions()}
         <button class="button-secondary" onclick={no}>{CONFIRM.cancel}</button>
-        <button class="button-destructive" onclick={() => ((ask = null), c.run())}>{c.label}</button>
+        <button class="button-destructive" onclick={() => { const { run } = c; ask = null; run(); }}>{c.label}</button>
       {/snippet}
     </Modal>
   {/if}

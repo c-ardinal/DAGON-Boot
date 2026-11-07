@@ -78,6 +78,11 @@ button {
   white-space: nowrap;
 }
 
+/* A control brought into view by focus keeps room for its ring: no scroll edge cuts it. */
+:where(*) {
+  scroll-padding: var(--s-2);
+}
+
 /* Shared controls. Focus never adds an outer ring: the control's own border
    turns into a 3 px paper frame (1 px border + 2 px inside), so nothing moves.
    The transparent outline shows up in forced-colors mode. */

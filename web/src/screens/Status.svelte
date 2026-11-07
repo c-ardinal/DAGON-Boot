@@ -95,8 +95,9 @@
     line-height: 1;
     cursor: pointer;
   }
+  /* The ring stays inside the band's 4 px padding (h-status = the text button + 2 × s-1): at the window's bottom edge nothing cuts it. */
   button:focus-visible {
     outline: var(--st-w-focus) solid var(--c-paper);
-    outline-offset: 2px;
+    outline-offset: 1px;
   }
 </style>

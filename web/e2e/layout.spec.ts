@@ -1,5 +1,5 @@
 import { expect, test, type Page } from '@playwright/test';
-import { boxes, canvasState, layoutFaults, openSample, settled } from './console.ts';
+import { boxes, canvasState, focusFaults, layoutFaults, openSample, settled } from './console.ts';
 
 // The viewport matrix (ulthar config.json `viewport_matrix`) from 1024 wide up, the page's own 2560 theme edge (2559/2560) added.
 const WIDTHS = [1024, 1099, 1100, 1280, 1366, 1440, 1920, 2020, 2400, 2559, 2560];
@@ -29,12 +29,16 @@ const STATES: [string, (p: Page) => Promise<void>, (p: Page) => Promise<void>][]
   ['モーダル', async (p) => { await p.getByRole('button', { name: 'メニューを開く' }).click(); await p.locator('.panel').first().locator('button:has(span:text-is("最初からやり直す"))').click(); await p.locator('dialog[open]').waitFor(); }, async (p) => { await p.keyboard.press('Escape'); await p.locator('dialog[open]').waitFor({ state: 'detached' }); }],
 ];
 
-test('sweep: no overflow, overlap or clipped text at any window, in 準備 (sheet, drawer, menu, help, table, toast, modal) and 書込 (versions)', async ({ page, context }) => {
+test('sweep: no overflow, overlap, clipped text or clipped focus ring at any window, in 準備 (sheet, drawer, menu, help, table, toast, modal) and 書込 (versions)', async ({ page, context }) => {
   test.setTimeout(1_500_000);
   await context.grantPermissions(['clipboard-read', 'clipboard-write']);
   await page.setViewportSize({ width: 1920, height: 1080 });
-  await openSample(page);
+  await page.goto('/?sim');
+  await page.waitForTimeout(700);
   const faults: string[] = [];
+  // The start screen too: its first button is focused for the user.
+  for (const f of await focusFaults(page)) faults.push(`1920x1080 開始: ${f}`);
+  await openSample(page);
   for (const [w, h] of SIZES) {
     await page.setViewportSize({ width: w, height: h });
     // The bar re-lays out once for the new width (its edit tools come or go); the rest is what stands after that.
@@ -44,6 +48,7 @@ test('sweep: no overflow, overlap or clipped text at any window, in 準備 (shee
       await into(page);
       await page.waitForTimeout(260);
       for (const f of await layoutFaults(page)) faults.push(`${w}x${h} ${name}: ${f}`);
+      for (const f of await focusFaults(page)) faults.push(`${w}x${h} ${name}: ${f}`);
       // Nothing that stands on the page vibrates: its box is the same a few frames later.
       const a = await boxes(page);
       await page.waitForTimeout(120);
@@ -79,6 +84,7 @@ test('sweep: no overflow, overlap or clipped text at any window, in 準備 (shee
     await page.setViewportSize({ width: w, height: h });
     await page.waitForTimeout(120);
     for (const f of await layoutFaults(page)) faults.push(`${w}x${h} 書込: ${f}`);
+    for (const f of await focusFaults(page)) faults.push(`${w}x${h} 書込: ${f}`);
     await page.getByRole('button', { name: 'バージョンを選んで書き込む' }).click();
     await page.waitForTimeout(200);
     for (const f of await layoutFaults(page)) faults.push(`${w}x${h} 書込 バージョン: ${f}`);

@@ -65,7 +65,7 @@ export async function layoutFaults(page: Page): Promise<string[]> {
     }
     // Header controls inside the bar, on one row.
     const bar = document.querySelector('.frame > header')!.getBoundingClientRect();
-    for (const e of document.querySelectorAll('.frame > header .modes, .frame > header .split > button, .frame > header .actions > button, .frame > header .button-icon')) {
+    for (const e of document.querySelectorAll('.frame > header .modes, .frame > header .split > button, .frame > header .actions .set > button, .frame > header .button-icon')) {
       const r = e.getBoundingClientRect();
       if (r.top < bar.top - 0.5 || r.bottom > bar.bottom + 0.5) faults.push(`${name(e)} outside the header bar`);
     }
@@ -84,7 +84,7 @@ export async function layoutFaults(page: Page): Promise<string[]> {
     const scale = [160, 28, 44, 20, 16, 14, 12, 13, 18, 112];
     const onStep = (v: string) => { const n = parseFloat(v); return !n || Math.abs(n) % 4 === 0; };
     for (const e of document.querySelectorAll<HTMLElement>('.frame > header *, .sheet *, .drawer *, .pill *, .toast *, .focal *, .panel *, #help *, dialog[open] *, #band *')) {
-      if (e.closest('.visually-hidden, svg, .box')) continue;
+      if (e.closest('.visually-hidden, svg, .box') || e.tagName === 'OPTION') continue;
       const c = getComputedStyle(e);
       for (const k of ['paddingTop', 'paddingRight', 'paddingBottom', 'paddingLeft', 'marginTop', 'marginRight', 'marginBottom', 'marginLeft', 'rowGap', 'columnGap'] as const) {
         if (!onStep(c[k])) faults.push(`${name(e)} rendered ${k} ${c[k]}`);
@@ -96,5 +96,58 @@ export async function layoutFaults(page: Page): Promise<string[]> {
       if (b.textContent?.trim() && b.offsetHeight > 0 && getComputedStyle(b).whiteSpace !== 'nowrap') faults.push(`${name(b)} can wrap: ${b.textContent.trim().slice(0, 16)}`);
     }
     return faults;
+  });
+}
+
+/**
+ * Every focusable element, focused in turn as the keyboard would reach it: its focus ring (outline or
+ * shadow) lies inside every ancestor that clips (overflow, contain: paint, clip-path) and inside the window.
+ * Scroll positions the focusing moved are put back.
+ */
+export async function focusFaults(page: Page): Promise<string[]> {
+  // One Tab first: focus moved by script then shows the ring (:focus-visible) as a keyboard user sees it.
+  await page.keyboard.press('Tab');
+  return page.evaluate(() => {
+    const faults: string[] = [];
+    const name = (e: Element) => `${e.tagName.toLowerCase()}.${String(e.getAttribute('class') ?? '').split(' ')[0]}${e.getAttribute('aria-label') ? `[${e.getAttribute('aria-label')}]` : ''}`;
+    const clips = (c: CSSStyleDeclaration) => c.overflowX !== 'visible' || c.overflowY !== 'visible' || c.contain.includes('paint') || c.clipPath !== 'none';
+    // The outline past the border, and any outer (not inset) shadow: x/y offset + blur + spread.
+    const ringExtent = (c: CSSStyleDeclaration) => {
+      let r = c.outlineStyle !== 'none' ? parseFloat(c.outlineWidth) + parseFloat(c.outlineOffset) : 0;
+      for (const part of c.boxShadow.split(/,(?![^(]*\))/)) {
+        if (part.includes('inset')) continue;
+        const m = /(-?[\d.]+)px (-?[\d.]+)px (-?[\d.]+)px (-?[\d.]+)px/.exec(part);
+        if (m) r = Math.max(r, Math.max(Math.abs(+m[1]), Math.abs(+m[2])) + +m[3] + +m[4]);
+      }
+      return r;
+    };
+    const had = document.activeElement as HTMLElement | null;
+    const scrolled = new Map<Element, [number, number]>();
+    const all = document.querySelectorAll<HTMLElement>('a[href], button, input, select, textarea, summary, [tabindex]:not([tabindex="-1"]), [contenteditable]');
+    for (const el of all) {
+      if (el.closest('.visually-hidden, [inert], [aria-hidden="true"]') || (el as HTMLButtonElement).disabled || !el.getClientRects().length) continue;
+      el.focus();
+      if (document.activeElement !== el || !el.matches(':focus-visible')) continue;
+      const ring = ringExtent(getComputedStyle(el));
+      if (ring <= 0) continue;
+      const r = el.getBoundingClientRect();
+      const box = { left: r.left - ring, top: r.top - ring, right: r.right + ring, bottom: r.bottom + ring };
+      const within = (b: { left: number; top: number; right: number; bottom: number }, c: { left: number; top: number; right: number; bottom: number }) => b.left >= c.left - 0.5 && b.top >= c.top - 0.5 && b.right <= c.right + 0.5 && b.bottom <= c.bottom + 0.5;
+      // Only an element that is itself in view: one panned or scrolled out of a window is the window's matter, not the ring's.
+      const cut = (c: { left: number; top: number; right: number; bottom: number }) => within(r, c) && !within(box, c);
+      if (cut({ left: 0, top: 0, right: innerWidth, bottom: innerHeight })) faults.push(`${name(el)} focus ring outside the window`);
+      for (let a = el.parentElement; a; a = a.parentElement) {
+        if (!clips(getComputedStyle(a))) continue;
+        if (!scrolled.has(a)) scrolled.set(a, [a.scrollLeft, a.scrollTop]);
+        const b = a.getBoundingClientRect();
+        if (cut({ left: b.left + a.clientLeft, top: b.top + a.clientTop, right: b.left + a.clientLeft + a.clientWidth, bottom: b.top + a.clientTop + a.clientHeight })) faults.push(`${name(el)} focus ring clipped by ${name(a)}`);
+      }
+    }
+    for (const [a, [l, t]] of scrolled) {
+      a.scrollLeft = l;
+      a.scrollTop = t;
+    }
+    had?.focus();
+    return [...new Set(faults)];
   });
 }

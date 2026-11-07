@@ -398,4 +398,9 @@
     font: 700 var(--t-small) / 20px var(--f-ja);
     margin-bottom: var(--s-3);
   }
+  summary:focus-visible {
+    outline: var(--st-w-focus) solid var(--c-paper);
+    outline-offset: 2px;
+    border-radius: var(--r-s);
+  }
 </style>

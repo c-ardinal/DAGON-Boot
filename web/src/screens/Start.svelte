@@ -165,10 +165,11 @@
     flex-direction: column;
     align-items: stretch;
     gap: var(--s-4);
-    width: min(var(--w-modal), calc(100% - 2 * var(--s-4)));
+    /* The column scrolls when the window is short; its sides keep room for the focus ring of a full-width button. */
+    width: min(calc(var(--w-modal) + 2 * var(--s-2)), calc(100% - 2 * var(--s-4)));
     min-height: 0;
     margin: 0 auto;
-    padding: var(--s-6) 0 var(--s-4);
+    padding: var(--s-6) var(--s-2) var(--s-4);
     overflow: auto;
   }
   .start:focus {

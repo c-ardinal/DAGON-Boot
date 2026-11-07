@@ -23,15 +23,15 @@
     sim?: boolean;
     /** The open project's name. */
     title?: string;
-    /** The mode's main actions (header-size buttons), right of the toggle. */
-    actions?: Snippet;
+    /** Each mode's main actions (header-size buttons), right of the toggle: both sets are laid out, the other mode's hidden, so the right side is one width in every mode. */
+    actions?: Snippet<[Mode]>;
     /** The menu's popover, anchored to ☰. */
     menu?: Snippet;
     /** 困ったとき is open (the menu opens it). */
     helpOpen?: boolean;
     /** It opened on the keys: their own popover. */
     helpKeys?: boolean;
-    /** 準備's edit tools: undo, redo and the graph／表 toggle (absent in 書込 and on the start screen). */
+    /** The edit tools: undo, redo and the graph／表 toggle (absent on the start screen and in a narrow bar); shown in 準備, laid out but hidden in 書込. */
     edit?: { canUndo: boolean; canRedo: boolean; onundo: () => void; onredo: () => void; view: 'graph' | 'table'; onview: (v: 'graph' | 'table') => void };
     /** 接続する／切断する: the one connection action, beside the main actions (absent on the start screen). */
     hub?: { connected: boolean; locked: string | null; hint?: string; onpress: () => void };
@@ -62,25 +62,6 @@
   ] as const;
   const off = (m: Mode) => (modeLocked && mode !== m) || (m === 'operate' && operateLocked && mode !== m);
 
-  /** The widest the right side has been with and without the edit tools: both modes then take the same room, so the centred toggle never jumps when the mode changes. */
-  let rightEl = $state<HTMLElement>();
-  let widest = $state<Record<string, number>>({});
-  const rightMin = $derived(widest[edit ? 'edit' : 'plain'] ?? 0);
-  $effect(() => {
-    const el = rightEl;
-    if (!el) return;
-    const look = () => {
-      let w = 0;
-      for (const c of el.children) w += (c as HTMLElement).getBoundingClientRect().width;
-      w += 16 * Math.max(0, el.children.length - 1);
-      const k = edit ? 'edit' : 'plain';
-      if (w > (widest[k] ?? 0)) widest = { ...widest, [k]: Math.ceil(w) };
-    };
-    look();
-    const ro = new ResizeObserver(look);
-    for (const c of el.children) ro.observe(c);
-    return () => ro.disconnect();
-  });
   function pick(m: Mode) {
     if (mode === m) return;
     if (m === 'operate' && operateLocked && !modeLocked) return onlocked?.();
@@ -102,10 +83,10 @@
       {/each}
     </div>
   {/if}
-  <div class="right" bind:this={rightEl} style:min-width="{rightMin}px">
+  <div class="right">
     {#if edit}
-      <!-- Undo, redo and the view toggle: where editors keep them (Jakob); when the bar is too narrow for them they live in ☰ alone. -->
-      <div class="edit" transition:fade={{ dur: '--dur-quick' }}>
+      <!-- Undo, redo and the view toggle: where editors keep them (Jakob); when the bar is too narrow for them they live in ☰ alone. In 書込 they keep their room, unseen, so the toggle stands still across modes. -->
+      <div class="edit" class:off={mode !== 'define'} inert={mode !== 'define'} in:fade={{ dur: '--dur-quick' }}>
         <button class="button-icon" data-control="edit" aria-disabled={!edit.canUndo} aria-label={DEFINE.undo} title={edit.canUndo ? `${DEFINE.undo} (Ctrl+Z)` : MENU.off.noUndo} onclick={() => edit?.canUndo && edit.onundo()}><span class="layer"><Icon name="undo-2" /></span></button>
         <button class="button-icon" data-control="edit" aria-disabled={!edit.canRedo} aria-label={DEFINE.redo} title={edit.canRedo ? `${DEFINE.redo} (Ctrl+Shift+Z)` : MENU.off.noRedo} onclick={() => edit?.canRedo && edit.onredo()}><span class="layer"><Icon name="redo-2" /></span></button>
         <div class="seg" role="radiogroup" aria-label="{DEFINE.graph}・{DEFINE.table}">
@@ -114,7 +95,11 @@
         </div>
       </div>
     {/if}
-    {#if actions}<div class="actions">{@render actions()}</div>{/if}
+    {#if actions}
+      <div class="actions">
+        {#each MODES as [m] (m)}<div class="set" class:off={m !== mode} inert={m !== mode}>{@render actions(m)}</div>{/each}
+      </div>
+    {/if}
     {#if hub}
       <!-- Button/Text: the connection's state and its one action, next to what needs it (書き込む). -->
       <button class="hub" class:on={hub.connected} data-control="connect" title={hub.locked ?? hub.hint} aria-disabled={hub.locked !== null} onclick={hub.onpress}>
@@ -157,7 +142,7 @@
 {/if}
 
 <style>
-  /* The bar: brand left, mode toggle centre, tools and actions right. The two sides stand equal so the toggle is centred; the name gives way first, the actions never do. */
+  /* The bar: brand left, mode toggle centre, tools and actions right. The two sides stand equal so the toggle is centred; the name gives way first, the actions never do. The right side lays out both modes' parts, so its width and the toggle's place do not change with the mode. */
   header {
     grid-area: header;
     position: relative;
@@ -254,6 +239,15 @@
     flex: none;
     align-items: center;
     gap: var(--s-1);
+    transition:
+      opacity var(--dur-quick) var(--ease-out),
+      visibility var(--dur-quick);
+  }
+  /* The other mode's parts keep their room: hidden, not gone, and out of the Tab order (inert). */
+  .edit.off,
+  .set.off {
+    visibility: hidden;
+    opacity: 0;
   }
   /* The graph／表 segment: a pill of two icons, the current one filled. */
   /* The same segmented control as 準備／書込: a pill of pills, 28 px in the 44 px bar. */
@@ -279,11 +273,21 @@
     background: var(--c-paper);
     color: var(--c-ink);
   }
+  /* Both modes' action sets in one cell: the cell is as wide as the wider set, in every mode. */
   .actions {
-    display: flex;
+    display: grid;
     flex: none;
     align-items: center;
+  }
+  .set {
+    grid-area: 1 / 1;
+    display: flex;
+    justify-self: end;
+    align-items: center;
     gap: var(--s-3);
+    transition:
+      opacity var(--dur-quick) var(--ease-out),
+      visibility var(--dur-quick);
   }
   /* 接続する／切断する: accent text in a 44 px hit area; connected shows the plug on the paper. */
   .hub {
@@ -310,7 +314,7 @@
   }
   .hub:focus-visible {
     outline: var(--st-w-focus) solid var(--c-paper);
-    outline-offset: -2px;
+    outline-offset: calc(-1 * var(--st-w-focus));
     border-radius: var(--r-s);
   }
   /* 模擬: on the paper, not the signal colour (it is no fault), and never animated. */

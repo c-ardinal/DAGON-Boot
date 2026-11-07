@@ -205,9 +205,9 @@ const ITEMS: Record<string, { query?: string; check: (p: Page) => Promise<void> 
       expect(await p.evaluate(() => navigator.clipboard.readText())).toBe(await p.evaluate(() => location.href));
     },
   },
-  '/最初からやり直す': {
+  'プロジェクト/最初からやり直す': {
     check: async (p) => {
-      await press(p, null, '最初からやり直す');
+      await press(p, 'プロジェクト', '最初からやり直す');
       await expect(p.locator('dialog[open]')).toBeVisible();
     },
   },

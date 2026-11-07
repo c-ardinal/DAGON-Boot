@@ -121,8 +121,9 @@
 
   /** `dagon serve`: the page is always its page; K0/K3 when it cannot be reached. */
   const cli = new Cli();
+  const demoStandIn = import.meta.env.DEV && params.has('demo');
   /** The 親機 and 子機 are simulated: `dagon demo` through serve, or the demo page's own simulator. */
-  const simulated = $derived(cli.sim !== null || DEMO_SITE);
+  const simulated = $derived(cli.sim !== null || DEMO_SITE || demoStandIn);
   /** The 定義 document: the project's 構成 as edited (its YAML is the one source of truth). */
   const d = new Define();
   /** DAGON's link to its agent through serve (development: `?agent` stands in for serve's routes). */
@@ -130,6 +131,8 @@
   const agentStandIn = import.meta.env.DEV && dev && params.has('agent');
   const agent = new Agent(import.meta.env.DEV && agentStandIn ? agentMock(params, () => d.config.yaml) : (m, p, b) => cli.api(m, p, b));
   if (agentStandIn) void agent.refresh();
+  /** One condition closes every path to linking, talking, keys and the CLI sheet: linked is never true in a demo. */
+  const agentLinked = $derived(!simulated && agent.linked);
   /** Web Serial, which the page never uses while it drives the simulator. */
   const ports = webSerial(serial, () => cli.sim !== null);
   cli.onDevice = (need) => (need ? op.handOver() : op.cliReturned());
@@ -387,7 +390,7 @@
   let linkOpen = $state(false);
   let dagonOpen = $state(0);
   async function openLink(at?: Element | null) {
-    if (cli.sim) return showWhy(AGENT.demoLink, at);
+    if (simulated) return;
     if (stopped('link', at)) return;
     if (!agent.status) await agent.refresh();
     if (!agent.status) return showWhy(AGENT.errors.OLD_CLI.text, at);
@@ -453,7 +456,7 @@
     { id: 'jobs', label: DRAWER.jobs, ...(runningJobs ? { count: runningJobs } : {}) },
     { id: 'output', label: DRAWER.output },
     { id: 'timeline', label: DRAWER.timeline },
-    { id: 'talk', label: DRAWER.talk },
+    ...(simulated ? [] : [{ id: 'talk', label: DRAWER.talk }]),
     { id: 'log', label: DRAWER.log },
   ]);
   /** serve names the nodes that can be built; a node without one has no skeleton yet. */
@@ -521,7 +524,7 @@
       return pickTab(drawerTab ?? 'problems');
     }
     const t = e.target as HTMLElement;
-    if (screen === 'work' && agent.linked && e.key === '/' && !/^(INPUT|SELECT|TEXTAREA)$/.test(t.tagName)) {
+    if (screen === 'work' && (agentLinked || simulated) && e.key === '/' && !/^(INPUT|SELECT|TEXTAREA)$/.test(t.tagName)) {
       e.preventDefault();
       return void dagonOpen++;
     }
@@ -1169,6 +1172,7 @@
         { label: START.new, hint: MENU.hint.new, control: 'project', off: modeLocked ? MENU.off.notIdle : null, run: () => toStart('new') },
         { label: START.open, hint: MENU.hint.open, control: DEMO_SITE ? 'open' : 'project', off: modeLocked ? MENU.off.notIdle : null, run: () => toStart('open') },
         { label: MENU.save, hint: MENU.hint.save, off: local || screen !== 'work' ? MENU.off.noProject : null, run: () => void save() },
+        { label: MENU.restart, hint: MENU.hint.restart, control: 'project', danger: true, off: modeLocked ? MENU.off.notIdle : null, run: () => (restartOpen = true) },
       ],
     },
     {
@@ -1194,14 +1198,14 @@
     {
       label: MENU.groups.dagon,
       items: [
-        ...(agent.linked
+        ...(agentLinked
           ? [
               { label: AGENT.menuTalk, hint: MENU.hint.talk, control: 'ask', run: () => void dagonOpen++ },
               { label: MENU.applyProposal, hint: MENU.hint.apply, control: 'apply', off: lastProposal < 0 ? MENU.off.noProposal : null, run: () => applyProposal(lastProposal, document.body) },
             ]
-          : [{ label: AGENT.menuLink, hint: MENU.hint.link, control: 'link', run: () => void openLink(document.querySelector('[aria-controls="menu"]')) }]),
-        { label: MENU.cli, hint: MENU.hint.cli, run: openCli },
-        ...(agent.linked ? [{ label: AGENT.menuUnlink, hint: MENU.hint.unlink, danger: true, run: () => confirmThen(CONFIRM.unlink, () => void unlink()) }] : []),
+          : [{ label: AGENT.menuLink, hint: MENU.hint.link, control: 'link', off: simulated ? MENU.off.demo : null, run: () => void openLink(document.querySelector('[aria-controls="menu"]')) }]),
+        { label: MENU.cli, hint: MENU.hint.cli, off: simulated ? MENU.off.demo : null, run: openCli },
+        ...(agentLinked ? [{ label: AGENT.menuUnlink, hint: MENU.hint.unlink, danger: true, run: () => confirmThen(CONFIRM.unlink, () => void unlink()) }] : []),
       ],
     },
     {
@@ -1220,8 +1224,8 @@
     const v = previousVersion(op.live[id]?.status);
     confirmThen(CONFIRM.rollback(n ? `[${n.no}] ${n.name}` : id, v ?? ''), () => void op.rollback(id));
   }
-  const menuLast = $derived<MenuItem>({ label: MENU.restart, hint: MENU.hint.restart, control: 'project', danger: true, off: modeLocked ? MENU.off.notIdle : null, run: () => (restartOpen = true) });
   function openCli() {
+    if (simulated) return;
     if (mode !== 'define') switchMode('define');
     d.selected = null;
     cliPanel = 'link';
@@ -1496,7 +1500,7 @@
       hub={screen === 'work' ? { connected, locked: hubLocked, hint: op.state === 'idle' || op.state === 'choosing' ? band.sentence : undefined, onpress: toggleHub } : undefined}
     >
       {#snippet menu()}
-        {#if menuOpen}<Menu groups={menuGroups} last={menuLast} onclose={() => ((menuOpen = false), document.querySelector<HTMLElement>('[aria-controls="menu"]')?.focus())} />{/if}
+        {#if menuOpen}<Menu groups={menuGroups} onclose={() => ((menuOpen = false), document.querySelector<HTMLElement>('[aria-controls="menu"]')?.focus())} />{/if}
       {/snippet}
     </Header>
     {#if screen === 'start'}
@@ -1544,7 +1548,7 @@
                 fix={WRITE.rolled.next}
                 onclose={() => (stopClosed = op.failed)}
                 onmore={() => ((drawerTab = 'log'), (stopClosed = op.failed))}
-                linked={agent.linked}
+                linked={agentLinked}
                 onask={(at) => askWhy(at, () => (stopClosed = op.failed))}
                 actions={stopActions}
               />
@@ -1562,13 +1566,16 @@
             <span class="grow"></span>
             {#if mode === 'operate' || d.view === 'graph'}
               <ZoomPill scale={canvasView.zoom} canIn={canvasView.zoom < ZOOM_LIMITS.max} canOut={canvasView.zoom > ZOOM_LIMITS.min} onin={() => graph?.zoomBy(ZOOM_LIMITS.step)} onout={() => graph?.zoomBy(1 / ZOOM_LIMITS.step)} onfit={() => graph?.fit()} />
+            {:else if agentLinked || simulated}
+              <!-- No zoom in the table: the sheet still stops above the mark, which keeps its place. -->
+              <span class="mark-room"></span>
             {/if}
           </div>
+          {#if agentLinked || simulated}
+            <!-- Over the columns, from the free area's bottom-right as the zoom is: no sheet, table or toast moves it; the drawer carries it up with the zoom; a drag places it. -->
+            <Dagon {agent} demo={simulated} place={cli.hello?.workspace ?? d.doc.topo.name ?? 'local'} bind:open={bubbleOpen} onask={askDagon} onapply={applyProposal} ontalk={() => (drawerTab = 'talk')} openRequest={dagonOpen} />
+          {/if}
         </div>
-        {#if agent.linked}
-          <!-- The DAGON mark: the stage's top-right corner, outside every column, so no sheet, drawer, table or toast moves it; the sheet column starts under it and its bubble opens to its left. -->
-          <div class="mark-spot"><Dagon {agent} bind:open={bubbleOpen} onask={askDagon} onapply={applyProposal} ontalk={() => (drawerTab = 'talk')} openRequest={dagonOpen} /></div>
-        {/if}
         <div class="dock" data-avoid="">
           <Drawer tabs={drawerTabs} open={drawerTab} onpick={(id) => (drawerTab = id)} onclose={() => (drawerTab = null)} body={drawerBody} />
           <Status
@@ -1577,7 +1584,7 @@
             state={stateName(lockStates)}
             cli={cli.hello?.key_id ? `${cliLabel}　${STATUS.key} ${cli.hello.key_id.slice(0, 8)}` : cliLabel}
             cliReady={cli.state === 'ready'}
-            oncli={openCli}
+            oncli={simulated ? undefined : openCli}
             saved={savedLabel}
             savedOk={!d.unsaved && !autosave.pending}
             sentence={[next.cause, next.sentence].filter(Boolean).join(' ')}
@@ -1710,7 +1717,7 @@
       {#snippet actions()}
         {#if f.skeleton}
           <button class="button-primary" data-control="gen" onclick={() => ((buildFailureOpen = false), void makeSkeleton())}>{SKELETON.make}</button>
-        {:else if agent.linked}
+        {:else if agentLinked}
           <button class="button-secondary" data-control="ask" onclick={(e) => askWhy(e.currentTarget, () => (buildFailureOpen = false))}>{BUILD.askAgent}</button>
         {/if}
         {#if !f.skeleton}<button class="button-primary" data-control="build" onclick={() => void build()}>{BUILD.retry}</button>{/if}
@@ -1821,6 +1828,7 @@
     outline: none;
   }
   .overlay {
+    position: relative;
     grid-area: 1 / 1 / 2 / 2;
     z-index: var(--z-chrome);
     display: grid;
@@ -1899,24 +1907,18 @@
     top: var(--s-4);
     right: var(--s-2);
   }
-  /* The DAGON mark's spot: the stage's top-right, under the bar, over the columns; the end column leaves it its room. */
-  .mark-spot {
-    position: absolute;
-    z-index: calc(var(--z-chrome) + 1);
-    top: var(--s-4);
-    right: var(--m-edge);
-    pointer-events: none;
+  /* The mark's default place, bottom right beside the zoom (Dagon.svelte), stays free: the table ends above it, a toast stands left of it. */
+  .mark-room {
+    width: var(--h-button);
+    flex: none;
+    height: var(--w-mark);
   }
-  .frame:has(.mark-spot) .col.end {
-    padding-top: calc(var(--w-mark) + var(--s-3));
+  .frame:has(:global(.dagon)) .edit-area.table {
+    margin-bottom: calc(var(--w-mark) + var(--s-3));
   }
-  /* The table leaves the mark its column too: nothing of the table stands under it. */
-  .frame:has(.mark-spot) .edit-area.table {
+  .frame:has(:global(.dagon)) .col.mid > :global(.toast) {
+    max-width: calc(100% - var(--w-mark) - var(--s-3));
     margin-right: calc(var(--w-mark) + var(--s-3));
-  }
-  /* While the sheet is open the bubble opens left of the sheet, not of the mark alone: nothing of it lies over the sheet. */
-  .frame:has(.float.sheet) :global(.bubble) {
-    right: calc(var(--w-sheet) + var(--s-3));
   }
   .log-none,
   .log {

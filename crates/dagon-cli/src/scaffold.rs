@@ -1104,10 +1104,7 @@ pub fn new_command(a: &NewArgs) -> Result<(), String> {
 }
 
 fn home() -> Result<PathBuf, String> {
-    std::env::var_os("USERPROFILE")
-        .or_else(|| std::env::var_os("HOME"))
-        .map(PathBuf::from)
-        .ok_or_else(|| "cannot find the home folder; pass --keys <dir>".into())
+    crate::consent::home().map_err(|_| "cannot find the home folder; pass --keys <dir>".into())
 }
 
 /// Claude Code instructions and skills for the developer's own Claude Code:

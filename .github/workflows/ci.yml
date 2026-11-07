@@ -1,6 +1,7 @@
 # Runs on every push and pull request: the checks that keep the places
 # holding one fact in step (parity tests), plus the usual lint and test
-# gates. No secrets; the token is read-only.
+# gates. No secrets; the token is read-only (the Xtensa toolchain step reads it
+# so espup's GitHub API calls are not rate-limited).
 #
 # The standalone Cargo packages with host tests (boards, MCUs, samples) are
 # not listed here: scripts/ci_crates.py derives them from the repository.
@@ -161,6 +162,10 @@ jobs:
       - name: Xtensa toolchain
         if: matrix.lint.toolchain == 'esp'
         uses: esp-rs/xtensa-toolchain@ec6d36527049a7f4fb2cb0c1a644668c1bb8a2a4 # v1.7.0
+        # espup downloads the toolchain through the GitHub releases API; the
+        # runner's read-only token keeps it off the anonymous rate limit.
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
         with:
           default: false
           buildtargets: esp32s3

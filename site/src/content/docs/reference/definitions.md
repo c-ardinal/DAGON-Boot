@@ -82,7 +82,7 @@ description: "dagon-mcu.tomlとdagon-board.toml: DAGONがマイコンやボー�
 | `i2c_target` | 真偽値 | 任意 | ボードがI2Cのターゲットになれるか。 |
 | `drawing` | 文字列 | 必須 | UIの図。 |
 | `default` | 真偽値 | 任意 | `true`: マイコンだけを指定したノードを確かめるときのボード（既定のボードがすでにある組み込みのマイコンの既定を、プロジェクトは置き換えられません。印の付いたボードが2つあると読み込みません）。マイコンごとに、こう指定できるボードは最大1つです。マイコンの唯一のボードは、これが無くても既定です。ボードが複数で印が無いマイコンには既定がありません（そのノードはボードの事実なしで確かめます）。定義の順で決まることはありません。 |
-| `[[header]]` | テーブルの配列 | 任意 | `[{ pin, label }]`。ボードで確かめていない`label`は省きます。 |
+| `[[header]]` | テーブルの配列 | 任意 | `[{ pin, label }]`。ボードで確かめていない`label`は省きます。構成がこのボードで名指しできるピンのすべてです（親機側の`pins`・`control`・バスの`sda`/`scl`。ノード側の`node_pins`は`i2c`から選びます）。構成の確認（V-07）はそれ以外を受け付けず、DAGON Consoleはこれだけを選べるようにします。 |
 | `[[i2c]]` | テーブルの配列 | 任意 | ヘッダから使える`[{ controller, sda, scl }]`の組。 |
 | `[default_link]` | テーブル | 任意 | 構成が別に指定しないときの、ノードのボードの配線: `kind`（`i2c`、`uart`、`can`、`ethernet`）、`iface`（`hw-uart0`、`pio-uart`）、`addr`、`baud`、`control`（`full`、`cooperative`）、`rom_entry`（`force-download-boot`、`m5pm1`、`stm32-i2c-rom`）。親機では省きます。 |
 | `[coordinator]` | テーブル | 任意 | このボードが親機のときに、ページが新しいリンクを配線するピン: `i2c = { controller, sda, scl }`（新しいI2Cバス。`controller`はボードの`i2c`のどれか）と`pio_uart = { tx, rx }`（新しいPIO UARTリンク）。マイコンの`gpio_count`より小さい番号のGPIOです。マイコンに`[coordinator]`があるボードだけです。 |

@@ -4,7 +4,7 @@
 import { topo_check } from '../../wasm/dagon.ts';
 import { topo_cut } from '../../wasm/pkg/dagon_wasm.js';
 import { RULE_FIX, RULE_SHORT, type FixWords } from '../copy.ts';
-import { boardMissing, flashTooSmall, maxNodes, type Doc } from './model.ts';
+import { boardMissing, definedPins, flashTooSmall, maxNodes, template, type Doc } from './model.ts';
 
 export interface Issue {
   rule: string;
@@ -70,6 +70,8 @@ function sentence(i: Issue, w: Where, doc: Doc, skipped: Record<string, string>)
     max: maxNodes(),
     size: i.rule === 'B-02' ? i.message : undefined,
     skipped: (link?.to ?? w.node ?? '') in skipped,
+    pins: definedPins(t.nodes.find((n) => n.role === 'coordinator')).map((n) => `GPIO${n}`).join('・') || undefined,
+    pairs: (link?.to ? (template(t.nodes.find((n) => n.id === link.to)?.board ?? '')?.i2cPairs ?? []) : []).map((p) => `${p.sda}・${p.scl}`).join('、') || undefined,
   };
   return RULE_FIX[i.rule]?.(fill) ?? '';
 }

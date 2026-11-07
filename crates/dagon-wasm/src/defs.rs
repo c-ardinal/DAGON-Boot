@@ -87,16 +87,19 @@ pub fn coordinator_uart0(mcu: &str) -> JsValue {
 }
 
 /// The UART speeds a link from `from` to `to` may run at: those both MCU
-/// definitions' `[link_uart] bauds` name (an end whose definition names
-/// none, or an unknown MCU, constrains nothing). The Console offers only
+/// definitions' `[link_uart] bauds` name; an end whose definition names
+/// none leaves nothing, as the check (V-26) refuses every speed on it. The Console offers only
 /// these, as the topology check (V-26) accepts only these.
 #[wasm_bindgen]
 pub fn uart_bauds(from: &str, to: &str) -> Vec<u32> {
     with_registry(|reg| {
         let lists: Vec<&[u32]> = [from, to]
             .into_iter()
-            .filter_map(|id| reg.mcu(id).and_then(|m| m.link_uart.as_ref()))
-            .map(|u| u.bauds.as_slice())
+            .map(|id| {
+                reg.mcu(id)
+                    .and_then(|m| m.link_uart.as_ref())
+                    .map_or(&[][..], |u| u.bauds.as_slice())
+            })
             .collect();
         let Some((first, rest)) = lists.split_first() else {
             return Vec::new();

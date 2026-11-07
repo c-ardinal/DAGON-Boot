@@ -28,7 +28,7 @@ export async function canvasState(page: Page): Promise<{ transform: string; box:
 export async function boxes(page: Page): Promise<Record<string, string>> {
   return page.evaluate(() => {
     const out: Record<string, string> = {};
-    for (const sel of ['.frame > header', 'header .modes', 'header .actions', '.pill', '.focal', '.dagon', '.drawer .tabs', '#band']) {
+    for (const sel of ['.frame > header', 'header .modes', 'header .actions', '.pill', '.focal', '.dagon', '.dagon .mark', '.bubble', '.drawer .tabs', '#band']) {
       const e = document.querySelector(sel);
       if (!e) continue;
       const r = e.getBoundingClientRect();
@@ -49,13 +49,13 @@ export async function layoutFaults(page: Page): Promise<string[]> {
     if (scrollX || scrollY) faults.push('page scrolled');
 
     // Everything fixed to the window stays inside it.
-    for (const e of document.querySelectorAll('.frame > header, #band, .drawer, .tools, .float, .focal, .pill, .toast, .notice, .panel, #help, .split, .edit-area.table, dialog[open]')) {
+    for (const e of document.querySelectorAll('.frame > header, #band, .drawer, .tools, .float, .focal, .pill, .toast, .notice, .panel, #help, .split, .edit-area.table, .dagon, .bubble, dialog[open]')) {
       const r = e.getBoundingClientRect();
       if (r.width === 0) continue;
       if (r.left < -0.5 || r.top < -0.5 || r.right > w + 0.5 || r.bottom > h + 0.5) faults.push(`${name(e)} outside the window: ${Math.round(r.left)},${Math.round(r.top)},${Math.round(r.right)},${Math.round(r.bottom)}`);
     }
     // The overlay's peers and the bars do not overlap.
-    const peers = [...document.querySelectorAll('.tools, .float, .focal, .pill, .toast, .notice, .edit-area.table, .drawer, #band')].filter((e) => e.getBoundingClientRect().width > 0);
+    const peers = [...document.querySelectorAll('.tools, .float, .focal, .pill, .toast, .notice, .edit-area.table, .drawer, #band, .dagon .mark, .bubble, header .modes, header .right > *')].filter((e) => e.getBoundingClientRect().width > 0);
     for (let i = 0; i < peers.length; i++) {
       for (let j = i + 1; j < peers.length; j++) {
         if (peers[i].contains(peers[j]) || peers[j].contains(peers[i])) continue;
@@ -79,6 +79,17 @@ export async function layoutFaults(page: Page): Promise<string[]> {
       const c = el.getBoundingClientRect();
       const box = el.closest('button, .pill, .toast, .notice')?.getBoundingClientRect();
       if (box && c.width && (c.left < box.left - 0.5 || c.right > box.right + 0.5 || c.top < box.top - 0.5 || c.bottom > box.bottom + 0.5)) faults.push(`${name(el)} over its frame: ${el.textContent.trim().slice(0, 24)}`);
+    }
+    // Rendered spacing and type: what the browser lays out, not what the source says (a rem on a 14 px root would pass the source and fail here).
+    const scale = [160, 28, 44, 20, 16, 14, 12, 13, 18, 112];
+    const onStep = (v: string) => { const n = parseFloat(v); return !n || Math.abs(n) % 4 === 0; };
+    for (const e of document.querySelectorAll<HTMLElement>('.frame > header *, .sheet *, .drawer *, .pill *, .toast *, .focal *, .panel *, #help *, dialog[open] *, #band *')) {
+      if (e.closest('.visually-hidden, svg, .box')) continue;
+      const c = getComputedStyle(e);
+      for (const k of ['paddingTop', 'paddingRight', 'paddingBottom', 'paddingLeft', 'marginTop', 'marginRight', 'marginBottom', 'marginLeft', 'rowGap', 'columnGap'] as const) {
+        if (!onStep(c[k])) faults.push(`${name(e)} rendered ${k} ${c[k]}`);
+      }
+      if (e.textContent?.trim() && !e.children.length && !scale.includes(Math.round(parseFloat(c.fontSize) * 100) / 100)) faults.push(`${name(e)} rendered font-size ${c.fontSize}`);
     }
     // A label never breaks: a button's words stay on one line.
     for (const b of document.querySelectorAll<HTMLElement>('.more, #band button, .toast button')) {

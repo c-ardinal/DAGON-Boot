@@ -302,8 +302,12 @@
     padding: var(--s-5);
   }
   .title {
-    margin: 0 0 var(--s-3);
-    padding-right: var(--s-6);
+    position: sticky;
+    z-index: 1;
+    top: calc(-1 * var(--s-5));
+    margin: calc(-1 * var(--s-5)) 0 var(--s-3);
+    padding: var(--s-5) var(--s-6) var(--s-2) 0;
+    background: var(--c-layer-1);
     font: 700 var(--t-heading) / 28px var(--f-ja);
     letter-spacing: 0.02em;
     font-feature-settings: 'palt';

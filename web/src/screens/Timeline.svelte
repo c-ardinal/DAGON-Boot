@@ -64,11 +64,11 @@
     margin: 0;
     padding: var(--s-3) var(--s-5);
     color: var(--c-muted);
-    font: 400 var(--t-caption) / 20px var(--f-ja);
+    font: 400 var(--t-small) / 20px var(--f-ja);
   }
   .tl {
     padding: var(--s-1) var(--s-3);
-    font: 400 var(--t-caption) / 1 var(--f-ja);
+    font: 400 var(--t-small) / 1 var(--f-ja);
   }
   .row {
     display: grid;
@@ -109,9 +109,9 @@
   .blk {
     position: absolute;
     top: 0;
-    height: 0.875rem;
+    height: 16px;
     overflow: hidden;
-    padding: 0 0.25rem;
+    padding: 0 var(--s-1);
     border-radius: 2px;
     color: var(--c-paper);
     font: 500 var(--t-caption) / 16px var(--f-ja);
@@ -139,7 +139,7 @@
   }
   .legend {
     display: flex;
-    gap: 0.75rem;
+    gap: var(--s-3);
     padding: var(--s-1) 0 0 var(--s-9);
     color: var(--c-muted);
     font-size: var(--t-caption);
@@ -147,9 +147,9 @@
   .legend .blk {
     position: static;
     display: inline-block;
-    width: 0.875rem;
-    height: 0.625rem;
-    margin-right: 0.25rem;
+    width: 16px;
+    height: 8px;
+    margin-right: var(--s-1);
     padding: 0;
     vertical-align: -1px;
   }

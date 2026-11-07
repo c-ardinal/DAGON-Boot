@@ -117,13 +117,13 @@ const ITEMS: Record<string, { query?: string; check: (p: Page) => Promise<void> 
       await expect(p.locator('header .hub')).toHaveText('切断する', { timeout: 30_000 });
     },
   },
-  'つなぐ/パッケージファイルを置く': {
+  'つなぐ/パッケージファイルを選んで書き込む': {
     check: async (p) => {
-      await offWithReason(p, 'つなぐ', 'パッケージファイルを置く');
+      await offWithReason(p, 'つなぐ', 'パッケージファイルを選んで書き込む');
       await p.getByRole('radio', { name: '書込' }).click();
       await connect(p);
       const chooser = p.waitForEvent('filechooser', { timeout: 5000 });
-      await press(p, 'つなぐ', 'パッケージファイルを置く');
+      await press(p, 'つなぐ', 'パッケージファイルを選んで書き込む');
       await chooser;
     },
   },
@@ -137,6 +137,8 @@ const ITEMS: Record<string, { query?: string; check: (p: Page) => Promise<void> 
       await p.locator('.node').nth(1).dispatchEvent('click');
       const before = await sentence(p);
       await press(p, 'つなぐ', '前のバージョンに戻す');
+      // Going back asks first, like every change that cannot be undone.
+      await p.locator('dialog[open]').getByRole('button', { name: '戻す' }).click();
       await expect.poll(() => sentence(p), { timeout: 15_000 }).not.toBe(before);
     },
   },
@@ -166,6 +168,7 @@ const ITEMS: Record<string, { query?: string; check: (p: Page) => Promise<void> 
     check: async (p) => {
       await expect(p.locator('.dagon')).toBeVisible();
       await press(p, 'DAGON', 'DAGON との連携を外す');
+      await p.locator('dialog[open]').getByRole('button', { name: '連携を外す' }).click();
       await expect(p.locator('.dagon')).toHaveCount(0);
     },
   },

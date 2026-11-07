@@ -380,6 +380,7 @@ export const AGENT = {
   thinking: '返事を待っています…',
   placeholder: '質問を入力（/ キーでここに移ります）',
   send: '質問を送る',
+  sendWhy: '質問を入力すると送れます',
   questions: [
     ['problem', '問題を聞く'],
     ['next', '次の手順を聞く'],
@@ -444,6 +445,8 @@ export const ZOOM = {
   out: 'キャンバスを縮小する',
   fit: 'キャンバス全体を表示する',
   in: 'キャンバスを拡大する',
+  maxWhy: 'これ以上大きくできません',
+  minWhy: 'これ以上小さくできません',
 } as const;
 
 /** The parts window. */
@@ -600,7 +603,7 @@ export const DETAIL = {
   /** S36 */
   rtt: '往復',
   lastSeen: '最後の応答',
-  attempts: '試行回数',
+  attempts: '試した回数',
   lastReason: '最後に戻った理由',
   ms: (n: number) => `${n} ms`,
   none: 'なし',
@@ -804,6 +807,9 @@ export interface FixWords {
   size?: string;
   /** The node is one updating skips: its link is not a thing to fix. */
   skipped?: boolean;
+  /** The pins the 親機's definition allows, and the I2C pairs the node's board defines, for the fix sentences. */
+  pins?: string;
+  pairs?: string;
 }
 
 /** How to fix each rule, one sentence. */
@@ -814,17 +820,17 @@ export const RULE_FIX: Record<string, (w: FixWords) => string> = {
   'V-04': () => '子機どうしのリンクを消し、親機とつないでください。',
   'V-05': (w) => `${w.to}を親機とリンクでつないでください。`,
   'V-06': (w) => `『直す』で ${w.board} に合う起動の方式にしてください。`,
-  'V-07': () => '親機のピンを、16・17・18・26・27・28 のどれかに変えてください。',
+  'V-07': (w) => `そのノードの定義にあるピン（${w.pins ?? '定義のピン'}）のどれかに変えてください。`,
   'V-08': () => '重なったピンのどちらか 1 か所を、空いているピンに変えてください。',
   'V-09': () => '『直す』で親機のもう一方の UART に替えてください。',
   'V-10': () => 'UART のリンクを 1 本減らしてください。',
   'V-11': (w) => `${w.to}の起動の切り替え方を選んでください（最後の手段で直すときに使います）。`,
-  'V-12': () => '詳しい設定の「直し方の順番」から最後の手段を外してください。',
-  'V-13': (w) => `${w.to}を PA8・PB4、PB6・PB7、PB10・PB3 のどれかの組につないでください。`,
+  'V-12': (w) => `構成の YAML で ${w.to}の recovery から rom-forced（最後の手段）を外してください。`,
+  'V-13': (w) => `${w.to}を、そのボードの I2C の組（${w.pairs ?? '定義の組'}）のどれかにつないでください。`,
   'V-14': () => '『直す』で親機を最後にして並べてください。',
   'V-15': () => '互換の決まりから、無いノードを外してください。',
   'V-16': () => '既定の配置に戻してください。',
-  'V-17': () => '共有の 2 本線（I2C）を親機の GPIO 16・17 にしてください。',
+  'V-17': (w) => `共有の 2 本線（I2C）を親機の定義にあるピン（${w.pins ?? '定義のピン'}）にしてください。`,
   'V-18': (w) => `${w.to}のアドレスを、空いている番号に変えてください。`,
   'V-20': () => '共有の 2 本線（I2C）の速さを 400 kHz 以下にしてください。',
   'V-21': (w) => `${w.to}は UART でつないでください。`,
@@ -926,7 +932,7 @@ export const DEFINE = {
 /** Inspector labels; 詳しい設定 shows the schema names as they are. */
 export const INSPECT = {
   name: '呼び名',
-  id: '名前 id',
+  id: 'ID（英数字）',
   role: '役割',
   roles: { coordinator: '親機', node: '子機' } as Record<string, string>,
   product: '製品名・MCU',
@@ -942,8 +948,14 @@ export const INSPECT = {
   freeAddr: '空いている番号',
   nodePins: '相手側のピン',
   uartPins: '親機のピン',
-  uartTx: '親機の TX ピン',
-  uartRx: '親機の RX ピン',
+  uartTx: (from: string) => `${from}の TX ピン`,
+  uartRx: (from: string) => `${from}の RX ピン`,
+  /** A value from a file that the definition does not name: kept, marked, refused by the check. */
+  undefinedPin: '（定義にない）',
+  maxAttempts: '起動を試す回数',
+  listenWindow: '返事を待つ時間（ミリ秒）',
+  flashMap: 'メモリの配置（flash_map）',
+  tag: '目印（tag）',
   baud: '速さ（ボーレート）',
   /** No speed both ends' definitions name: the link cannot be set up with these MCUs. */
   noBaud: 'この 2 つのマイコンに共通の速さがありません',
@@ -988,15 +1000,20 @@ export const CONFIRM = {
   linkSentence: 'このリンクを構成から消します。元に戻す（Ctrl+Z）で戻せます。',
   remove: '消す',
   cancel: 'やめる',
+  /** The other destructive actions: the same modal, their own words. */
+  unlink: { title: 'DAGON との連携を外す', sentence: 'AI のエージェントとのつながりと、送ることへの同意を取り消します。質問はできなくなります。', label: '連携を外す' },
+  key: { title: 'API キーを削除する', sentence: '登録した API キーを OS の資格情報ストアから消します。もう一度使うには登録し直します。', label: '削除する' },
+  rollback: (name: string, version: string) => ({ title: `${name}を前のバージョンに戻す`, sentence: `${name}を前のバージョン ${version} で起動し直します。いまのバージョンは残り、もう一度書き込めます。`, label: '戻す' }),
 } as const;
 
 /** The table view. */
 export const TABLE = {
   tabs: ['ノード', 'リンク', '配線'],
-  nodeCols: ['番号', '呼び名', '製品名 · MCU', '役割', 'つなぎ方', 'ピン'],
+  nodeCols: ['番号', '呼び名', '製品名・MCU', '役割', 'つなぎ方', 'ピン'],
   linkCols: ['元', '先', '種類', 'アドレス', 'ピン'],
   addNode: 'ノードを加える',
   addLink: 'リンクを加える',
+  addLinkWhy: 'つながっていない子機はありません',
   edit: '編集',
   remove: '消す',
 } as const;
@@ -1147,6 +1164,8 @@ export const START = {
   recent: '最近のプロジェクト',
   recentNone: 'なし',
   up: '上へ',
+  upWhy: 'いちばん上のフォルダです',
+  goWhy: '名前を入れ、場所を選ぶと作れます',
   place: '場所',
   name: '名前',
   cantMake: '× 作成失敗',
@@ -1183,7 +1202,7 @@ export const MENU = {
   groups: { project: 'プロジェクト', define: '構成', connect: 'つなぐ', dagon: 'DAGON', help: '困ったとき' },
   save: '保存する',
   arrange: '自動で並べる',
-  place: 'パッケージファイルを置く',
+  place: 'パッケージファイルを選んで書き込む',
   rollback: '前のバージョンに戻す',
   applyProposal: 'DAGON の案を反映する',
   cli: 'CLI の接続と API キーを見る',
@@ -1247,6 +1266,7 @@ export const fill = (s: string, v: Record<string, string | number>): string => s
 
 export const SKELETON = {
   make: '雛形を作る',
+  makeWhy: 'ノードを置き、問題を直すと作れます',
   title: '雛形を作る',
   state: {
     running: '… 作成中',
@@ -1279,6 +1299,7 @@ export const BUILD = {
   /** A node with no [build.*] in dagon.toml: nothing to build until the skeleton is made. */
   noSkeleton: { reason: 'このノードの雛形がまだありません。', stale: 'DAGON のソースが変わったので、雛形が古くなっています。', fix: '雛形を作ると、ビルドできるようになります。' },
   run: 'ビルドする',
+  runningWhy: 'ビルドしています',
   title: 'ビルドする',
   state: {
     running: '… ビルド中',

@@ -12,7 +12,7 @@
 </script>
 
 <script lang="ts">
-  import type { Snippet } from 'svelte';
+  import { untrack, type Snippet } from 'svelte';
   import { DRAWER } from '../app/copy.ts';
   import { fade } from '../app/motion.ts';
   import Icon from './Icon.svelte';
@@ -30,6 +30,10 @@
 
   /** The user's height (px), kept across reloads; null until dragged, when the token's default holds. */
   let height = $state<number | null>(read());
+  // A kept value is limited as a dragged one is (a stored 1 would leave no body).
+  $effect(() => {
+    if (height !== null) untrack(() => (height = limit(height!)));
+  });
   /** The stage above must keep room for its tools: at most this share of the window. */
   const MAX_SHARE = 0.6;
   const STEP = 4;
@@ -89,7 +93,7 @@
   {#if open}
     <!-- The handle: the open drawer's top edge, dragged to change its height. -->
     <!-- svelte-ignore a11y_no_noninteractive_tabindex a11y_no_noninteractive_element_interactions -->
-    <div class="handle" role="separator" aria-orientation="horizontal" aria-label={DRAWER.resize} title={DRAWER.resize} tabindex="0" onpointerdown={grab} onkeydown={keys}></div>
+    <div class="handle" role="separator" aria-orientation="horizontal" aria-valuenow={Math.round(section?.getBoundingClientRect().height ?? height ?? 0)} aria-valuemin={120} aria-valuemax={Math.round((globalThis.innerHeight ?? 0) * MAX_SHARE)} aria-label={DRAWER.resize} title={DRAWER.resize} tabindex="0" onpointerdown={grab} onkeydown={keys}></div>
   {/if}
   <div class="tabs" role="tablist" aria-label={DRAWER.label}>
     <div class="scroll">
@@ -109,7 +113,7 @@
   </div>
   {#if open}
     {#key open}
-      <div in:fade={{ dur: '--dur-quick' }} class="body" id="drawer-body" role="tabpanel" aria-labelledby="drawer-tab-{open}" tabindex="-1">
+      <div transition:fade={{ dur: '--dur-quick' }} class="body" id="drawer-body" role="tabpanel" aria-labelledby="drawer-tab-{open}" tabindex="-1">
         {@render body(open)}
       </div>
     {/key}

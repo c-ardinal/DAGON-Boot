@@ -10,6 +10,7 @@ const name = (u: URL) => u.pathname.split('/src/')[1];
 
 /** The type scale: one role, one token; nothing else sizes text. */
 const SCALE = ['display', 'version', 'title', 'heading', 'body', 'small', 'caption', 'mono'];
+/** base.css declares the root 16 px, so every rem and em below is 16 px. */
 const ROOT_PX = 16;
 const STEP = 4;
 
@@ -20,11 +21,11 @@ function css(u: URL): string {
 }
 
 /** Lengths in a declaration value: `12px`, `0.75rem`, `-8px`; `0` and `var()` are left alone. */
-const lengths = (value: string) => [...value.matchAll(/(-?\d*\.?\d+)(px|rem)/g)].map((m) => (m[2] === 'rem' ? Number(m[1]) * ROOT_PX : Number(m[1])));
+const lengths = (value: string) => [...value.matchAll(/(-?\d*\.?\d+)(px|rem|em)/g)].map((m) => (m[2] === 'px' ? Number(m[1]) : Number(m[1]) * ROOT_PX));
 const onScale = (px: number) => Math.abs(px) % STEP === 0;
 
 /** Properties that are spacing: the distance between things and the room inside them. */
-const SPACING = /^\s*(padding|margin|gap|row-gap|column-gap|inset|top|right|bottom|left)(-[a-z]+)?\s*:\s*([^;]+);/gm;
+const SPACING = /^\s*(padding|margin|gap|row-gap|column-gap|inset|top|right|bottom|left)(-[a-z-]+)?\s*:\s*([^;]+);/gm;
 
 describe('design rules', () => {
   test('files are found', () => {
@@ -50,12 +51,13 @@ describe('design rules', () => {
 
   test('text is sized only by the type scale tokens', () => {
     const faults: string[] = [];
-    const sizeOf = /^\s*font(-size)?\s*:\s*([^;]+);/gm;
+    const sizeOf = /^\s*font(-size)?\s*:\s*([^;\n]+;?(?: \/\* root[^\n]*)?)/gm;
     for (const u of files) {
       if (u.pathname.endsWith('tokens.css')) continue;
       for (const m of css(u).matchAll(sizeOf)) {
-        const v = m[2].trim();
-        if (v === 'inherit') continue;
+        const v = m[2].trim().replace(/;$/, '');
+        // The root's 16 px is the rem unit, not a text role.
+        if (v === 'inherit' || v.startsWith('16px; /* root')) continue;
         // The size: the first token or length of a `font:` shorthand, or the value of `font-size:`.
         const size = m[1] ? v : (/(var\(--t-[a-z0-9-]+\)|\d*\.?\d+(?:px|rem|em|%))(?=\s*\/|\s)/.exec(v)?.[1] ?? v);
         // Only scale tokens size text: no literal length, and every --t- token named is one of the scale (a canvas card may hold a token's size over the zoom).

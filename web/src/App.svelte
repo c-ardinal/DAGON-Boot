@@ -8,6 +8,7 @@
   import { HUB_LOCKED, hubOf, view, type Action } from './app/machine.ts';
   import { Operate, waterOf, writingTo, type Progress, type ReleaseFile } from './app/operate.svelte.ts';
   import { keptChoices, type Kept } from './app/kept.ts';
+  import { previousVersion } from './app/slots.ts';
   import { buildFailure, buildingNow, buildStateOf, firstWriteNodes, type BuildingMemo, type BuildState } from './app/jobFlow.ts';
   import { logStages } from './app/stageLog.svelte.ts';
   import Graph, { COMPACT_FROM, newView, ZOOM_LIMITS, type Chip, type View } from './graph/Graph.svelte';
@@ -448,7 +449,7 @@
   }
   const problemCount = $derived(d.problems.filter((p) => p.severity === 'error').length);
   const drawerTabs = $derived<DrawerTab[]>([
-    { id: 'problems', label: DRAWER.problems, count: problemCount, alarm: problemCount > 0 },
+    { id: 'problems', label: DRAWER.problems, count: problemCount + d.notYet, alarm: problemCount > 0 },
     { id: 'jobs', label: DRAWER.jobs, ...(runningJobs ? { count: runningJobs } : {}) },
     { id: 'output', label: DRAWER.output },
     { id: 'timeline', label: DRAWER.timeline },
@@ -524,7 +525,8 @@
       e.preventDefault();
       return void dagonOpen++;
     }
-    if (screen === 'work' && e.key === 'Escape' && !menuOpen && !helpOpen && !document.querySelector('dialog[open], .split .list')) {
+    // Escape closes the top thing only: a dialog, the version list, the menu, the help, a notice or the bubble take it first.
+    if (screen === 'work' && e.key === 'Escape' && !menuOpen && !helpOpen && !document.querySelector('dialog[open], .split .list, [data-stop-notice], .bubble')) {
       if (why) why = null;
       return closeSheet();
     }
@@ -800,12 +802,27 @@
       d.selected = null;
     } else op.select(null);
   }
-  /** A press on the canvas's empty part (not a card, port or chip) is a click on the background. */
+  /** A press on the canvas's empty part that does not move (a pan is not a click) closes the sheet. */
+  let pressAt: { x: number; y: number } | null = null;
+  function canvasDown(e: PointerEvent) {
+    pressAt = { x: e.clientX, y: e.clientY };
+  }
   function canvasPress(e: MouseEvent) {
     const el = e.target as HTMLElement;
-    if (el.closest('button, .port, .link-chip, a, input')) return;
+    const moved = !pressAt || Math.hypot(e.clientX - pressAt.x, e.clientY - pressAt.y) > DRAG_PX;
+    pressAt = null;
+    if (moved || el.closest('button, .port, .link-chip, a, input')) return;
     if (el.closest('.box') && !el.closest('.node')) closeSheet();
   }
+  /** Every destructive action asks through this one modal: what, why, then the red button. */
+  let ask = $state<{ title: string; sentence: string; label: string; run: () => void } | null>(null);
+  const confirmThen = (c: { title: string; sentence: string; label: string }, run: () => void) => (ask = { ...c, run });
+  /** The free part of the canvas a fit fills: the middle column less the room a toast stands in, so a notice never covers a card of the fit view. */
+  const TOAST_ROOM = 64;
+  const fitArea = () => {
+    const r = midEl?.getBoundingClientRect();
+    return r && new DOMRect(r.left, r.top, r.width, Math.max(0, r.height - TOAST_ROOM));
+  };
   /** The sheet shows only when it holds something. */
   const sheetShown = $derived(
     mode === 'define'
@@ -1160,7 +1177,7 @@
       items: [
         { label: connected ? HUB_TOGGLE.disconnect : HUB_TOGGLE.connect, hint: connected ? MENU.hint.disconnect : MENU.hint.connect, control: 'connect', off: hubLocked, run: toggleHub },
         { label: MENU.place, hint: MENU.hint.place, control: 'file', off: !connected ? MENU.off.notConnected : idle ? null : MENU.off.notIdle, run: () => fileInput?.click() },
-        { label: MENU.rollback, hint: MENU.hint.rollback, control: 'rollback', off: !connected ? MENU.off.notConnected : !idle ? MENU.off.notIdle : selectedNode ? null : MENU.off.noNode, run: () => selectedNode && void op.rollback(selectedNode) },
+        { label: MENU.rollback, hint: MENU.hint.rollback, control: 'rollback', off: !connected ? MENU.off.notConnected : !idle ? MENU.off.notIdle : selectedNode ? null : MENU.off.noNode, run: () => selectedNode && askRollback(selectedNode) },
       ],
     },
     {
@@ -1173,7 +1190,7 @@
             ]
           : [{ label: AGENT.menuLink, hint: MENU.hint.link, control: 'link', run: () => void openLink(document.querySelector('[aria-controls="menu"]')) }]),
         { label: MENU.cli, hint: MENU.hint.cli, run: openCli },
-        ...(agent.linked ? [{ label: AGENT.menuUnlink, hint: MENU.hint.unlink, danger: true, run: () => void unlink() }] : []),
+        ...(agent.linked ? [{ label: AGENT.menuUnlink, hint: MENU.hint.unlink, danger: true, run: () => confirmThen(CONFIRM.unlink, () => void unlink()) }] : []),
       ],
     },
     {
@@ -1186,6 +1203,12 @@
       ],
     },
   ]);
+  /** 前のバージョンに戻す, from the menu or the sheet: asks first, like every change that cannot be undone. */
+  function askRollback(id: string) {
+    const n = op.config?.nodes.find((x) => x.id === id);
+    const v = previousVersion(op.live[id]?.status);
+    confirmThen(CONFIRM.rollback(n ? `[${n.no}] ${n.name}` : id, v ?? ''), () => void op.rollback(id));
+  }
   const menuLast = $derived<MenuItem>({ label: MENU.restart, hint: MENU.hint.restart, control: 'project', danger: true, off: modeLocked ? MENU.off.notIdle : null, run: () => (restartOpen = true) });
   function openCli() {
     if (mode !== 'define') switchMode('define');
@@ -1344,7 +1367,7 @@
 
 {#snippet defineRight()}
   {#if cliPanel}
-    <CliPanel {cli} {agent} panel={cliPanel} />
+    <CliPanel {cli} {agent} panel={cliPanel} onconfirm={(run) => confirmThen(CONFIRM.key, run)} />
   {:else if d.selected}
     <div class="edit-area" data-control="edit"><Inspector {d} /></div>
   {/if}
@@ -1353,8 +1376,8 @@
 {#snippet actions()}
   {#if mode === 'define'}
     {@const blocked = problemCount > 0 || d.doc.topo.nodes.length === 0}
-    <button class="button-primary-header" data-control="gen" bind:this={primaryEl} aria-disabled={blocked} onclick={() => !blocked && void makeSkeleton()}><span>{SKELETON.make}</span></button>
-    <button class="button-secondary-header" data-control="build" aria-disabled={buildState === 'running'} onclick={() => buildState !== 'running' && void build()}><span>{BUILD.run}</span></button>
+    <button class="button-primary-header" data-control="gen" bind:this={primaryEl} aria-disabled={blocked} title={blocked ? SKELETON.makeWhy : undefined} onclick={() => !blocked && void makeSkeleton()}><span>{SKELETON.make}</span></button>
+    <button class="button-secondary-header" data-control="build" aria-disabled={buildState === 'running'} title={buildState === 'running' ? BUILD.runningWhy : undefined} onclick={() => buildState !== 'running' && void build()}><span>{BUILD.run}</span></button>
   {:else}
     <SplitButton
       label={WRITE.run}
@@ -1429,7 +1452,7 @@
         {connected}
         act={nodeActions}
         onkeep={(id) => !stopped('rollback') && void op.keepTrial(id)}
-        onback={(id) => !stopped('rollback') && void op.rollback(id)}
+        onback={(id) => !stopped('rollback') && askRollback(id)}
         first={firstNodes}
         onfirst={(id) => (connected ? void writeOne(id) : (factory = { node: id, id: null }))}
         recovery={op.recovering && op.recovered ? { id: op.recovering, result: op.recovered } : null}
@@ -1469,11 +1492,11 @@
       <!-- The canvas's box is the whole stage, whatever floats over it. Three columns float over the free part: each column stacks what shares a side, so they cannot overlap. -->
       <div in:fade class="stage">
         <!-- svelte-ignore a11y_click_events_have_key_events a11y_no_noninteractive_element_interactions -->
-        <main id="canvas" tabindex="-1" aria-describedby="canvas-help" onclick={canvasPress}>
+        <main id="canvas" tabindex="-1" aria-describedby="canvas-help" onpointerdown={canvasDown} onclick={canvasPress}>
           <p id="canvas-help" class="visually-hidden">{CANVAS.describe}</p>
           {#if mode === 'operate' || d.view === 'graph'}
             <!-- One graph for both modes: changing mode moves the same cards to their places. -->
-            <Graph bind:this={graph} bind:view={canvasView} bind:positions onmoved={savePositions} freeArea={() => midEl?.getBoundingClientRect()} {building} {...graphProps} />
+            <Graph bind:this={graph} bind:view={canvasView} bind:positions onmoved={savePositions} freeArea={fitArea} {building} {...graphProps} />
           {/if}
         </main>
         <div class="overlay">
@@ -1496,7 +1519,7 @@
           </div>
           <div class="col mid" bind:this={midEl}>
             {#if mode === 'define' && d.view === 'table'}
-              <div in:fade class="edit-area table" data-control="edit"><Table {d} bind:tab={tableTab} onaddnode={() => document.querySelector<HTMLElement>('#list-h')?.focus()} /></div>
+              <div transition:fade class="edit-area table" data-control="edit"><Table {d} bind:tab={tableTab} onaddnode={() => document.querySelector<HTMLElement>('#list-h')?.focus()} /></div>
             {/if}
             {#if stopOpen && stopNode && op.wentBack}
               {@const running = op.live[stopNode.id]?.hello?.activeVersion}
@@ -1519,20 +1542,20 @@
             {#if sheetShown}
               <!-- The sheet: its × at the top right; Escape and the canvas background close it too. -->
               <aside transition:rise class="float sheet" aria-label={SHEET} data-avoid="">
-                <button class="button-icon sheet-close" aria-label={SHEET_CLOSE} title="{SHEET_CLOSE} (Esc)" onclick={closeSheet}><span class="layer"><Icon name="x" /></span></button>
+                <div class="sheet-bar"><button class="button-icon sheet-close" aria-label={SHEET_CLOSE} title="{SHEET_CLOSE} (Esc)" onclick={closeSheet}><span class="layer"><Icon name="x" /></span></button></div>
                 {#key d.selected ?? op.selected ?? cliPanel}<div in:fade={{ dur: '--dur-quick' }}>{@render right()}</div>{/key}
               </aside>
             {/if}
             <span class="grow"></span>
-            {#if agent.linked}
-              <!-- The DAGON mark: a fixed spot above the zoom, in the column's flow, so nothing moves it. -->
-              <Dagon {agent} onask={askDagon} onapply={applyProposal} ontalk={() => (drawerTab = 'talk')} openRequest={dagonOpen} />
-            {/if}
             {#if mode === 'operate' || d.view === 'graph'}
               <ZoomPill scale={canvasView.zoom} canIn={canvasView.zoom < ZOOM_LIMITS.max} canOut={canvasView.zoom > ZOOM_LIMITS.min} onin={() => graph?.zoomBy(ZOOM_LIMITS.step)} onout={() => graph?.zoomBy(1 / ZOOM_LIMITS.step)} onfit={() => graph?.fit()} />
             {/if}
           </div>
         </div>
+        {#if agent.linked}
+          <!-- The DAGON mark: the stage's top-right corner, outside every column, so no sheet, drawer, table or toast moves it; the sheet column starts under it and its bubble opens to its left. -->
+          <div class="mark-spot"><Dagon {agent} onask={askDagon} onapply={applyProposal} ontalk={() => (drawerTab = 'talk')} openRequest={dagonOpen} /></div>
+        {/if}
         <div class="dock" data-avoid="">
           <Drawer tabs={drawerTabs} open={drawerTab} onpick={(id) => (drawerTab = id)} onclose={() => (drawerTab = null)} body={drawerBody} />
           <Status
@@ -1578,16 +1601,18 @@
   {#if restartOpen}
     <Restart onconfirm={restart} oncancel={cancelRestart} />
   {/if}
-  {#if d.askRemove}
-    {@const key = d.askRemove}
+  {#if ask || d.askRemove}
+    {@const key = d.askRemove ?? ''}
     {@const isNode = key.startsWith('node:')}
     {@const l = isNode ? null : d.doc.topo.links?.find((x) => `link:${x.to}` === key)}
     {@const nameOf = (id: string) => d.doc.names[id] ?? id}
-    <Modal title={isNode ? CONFIRM.node(nameOf(key.slice(5))) : CONFIRM.link(nameOf(l?.from ?? ''), nameOf(l?.to ?? ''))} chip={{ text: CONFIRM.remove, kind: 'error' }} onclose={() => d.answerRemove(false)}>
-      <p>{isNode ? CONFIRM.nodeSentence : CONFIRM.linkSentence}</p>
+    {@const c = ask ?? { title: isNode ? CONFIRM.node(nameOf(key.slice(5))) : CONFIRM.link(nameOf(l?.from ?? ''), nameOf(l?.to ?? '')), sentence: isNode ? CONFIRM.nodeSentence : CONFIRM.linkSentence, label: CONFIRM.remove, run: () => d.answerRemove(true) }}
+    {@const no = () => (ask ? (ask = null) : d.answerRemove(false))}
+    <Modal title={c.title} chip={{ text: c.label, kind: 'error' }} onclose={no}>
+      <p>{c.sentence}</p>
       {#snippet actions()}
-        <button class="button-secondary" onclick={() => d.answerRemove(false)}>{CONFIRM.cancel}</button>
-        <button class="button-destructive" onclick={() => d.answerRemove(true)}>{CONFIRM.remove}</button>
+        <button class="button-secondary" onclick={no}>{CONFIRM.cancel}</button>
+        <button class="button-destructive" onclick={() => ((ask = null), c.run())}>{c.label}</button>
       {/snippet}
     </Modal>
   {/if}
@@ -1846,20 +1871,36 @@
     width: var(--w-parts);
   }
   .float.sheet {
-    position: relative;
     width: var(--w-sheet);
+  }
+  /* The × rides a zero-height sticky strip at the sheet's top, so it stays while the body scrolls. */
+  .sheet-bar {
+    position: sticky;
+    z-index: 2;
+    top: 0;
+    height: 0;
   }
   .sheet-close {
     position: absolute;
-    z-index: 1;
     top: var(--s-2);
     right: var(--s-2);
+  }
+  /* The DAGON mark's spot: the stage's top-right, under the bar, over the columns; the end column leaves it its room. */
+  .mark-spot {
+    position: absolute;
+    z-index: calc(var(--z-chrome) + 1);
+    top: var(--s-4);
+    right: var(--m-edge);
+    pointer-events: none;
+  }
+  .frame:has(.mark-spot) .col.end {
+    padding-top: calc(var(--w-mark) + var(--s-3));
   }
   .log-none,
   .log {
     margin: 0;
     padding: var(--s-3) var(--s-5);
-    font: 400 var(--t-mono) / 20px var(--f-ja);
+    font: 400 var(--t-small) / 20px var(--f-ja);
   }
   .log {
     list-style: none;
@@ -1877,7 +1918,7 @@
     margin: 0;
     padding: var(--s-3) var(--s-5);
     list-style: none;
-    font: 400 var(--t-caption) / 16px var(--f-ja);
+    font: 400 var(--t-small) / 20px var(--f-ja);
   }
   .talk p {
     margin: 0;

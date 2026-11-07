@@ -97,7 +97,7 @@
       </div>
       <form onsubmit={send} data-control="ask">
         <input bind:this={field} bind:value={text} aria-label={AGENT.question} placeholder={AGENT.placeholder} maxlength="2000" />
-        <button class="button-icon send" type="submit" aria-label={AGENT.send} title={AGENT.send} aria-disabled={!text.trim()}><span class="layer"><Icon name="send-horizontal" /></span></button>
+        <button class="button-icon send" type="submit" aria-label={AGENT.send} title={text.trim() ? AGENT.send : AGENT.sendWhy} aria-disabled={!text.trim()}><span class="layer"><Icon name="send-horizontal" /></span></button>
       </form>
     </section>
   {/if}
@@ -108,9 +108,14 @@
   .dagon {
     position: relative;
     flex: none;
+    position: relative;
     width: var(--w-mark);
     height: var(--w-mark);
     pointer-events: auto;
+  }
+  .mark {
+    width: var(--w-mark);
+    height: var(--w-mark);
   }
   .mark {
     position: relative;
@@ -183,8 +188,8 @@
   /* The bubble opens to the left of the mark, its foot on the mark's foot (the mark stands at the right edge, low). */
   .bubble {
     position: absolute;
+    top: 0;
     right: calc(100% + var(--s-3));
-    bottom: 0;
     width: var(--w-bubble);
     display: grid;
     gap: var(--s-2);
@@ -193,7 +198,8 @@
     border-radius: var(--r-m);
     background: var(--c-layer-1);
     box-shadow: 0 8px 24px rgb(0 0 0 / 0.45);
-    transform-origin: right bottom;
+    transform-origin: right top;
+    pointer-events: auto;
   }
   .bubble p {
     margin: 0;

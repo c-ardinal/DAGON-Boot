@@ -621,6 +621,9 @@ pub struct BoardDef {
     #[serde(default)]
     pub default: bool,
     /// `[{ pin, label }]`; `label` left out when not confirmed on the board.
+    /// Every pin a topology may name on this board, as a link end on it (a hub's `pins`,
+    /// `control`, bus `sda`/`scl`; a node's `node_pins` come from `i2c`): the check (V-07)
+    /// refuses any other, and DAGON Console offers only these.
     #[serde(default)]
     pub header: Vec<HeaderPin>,
     /// `[{ controller, sda, scl }]` pairs usable from the header.

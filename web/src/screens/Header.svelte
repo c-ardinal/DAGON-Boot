@@ -1,6 +1,6 @@
 <script lang="ts">
   import { DEFINE, HELP, HUB_TOGGLE, MENU, MODE, PRODUCT, SIM } from '../app/copy.ts';
-  import { rise } from '../app/motion.ts';
+  import { fade, rise } from '../app/motion.ts';
   import { dismiss } from './dismiss.ts';
   import Icon from './Icon.svelte';
   import type { Snippet } from 'svelte';
@@ -61,6 +61,26 @@
     ['operate', MODE.operate],
   ] as const;
   const off = (m: Mode) => (modeLocked && mode !== m) || (m === 'operate' && operateLocked && mode !== m);
+
+  /** The widest the right side has been with and without the edit tools: both modes then take the same room, so the centred toggle never jumps when the mode changes. */
+  let rightEl = $state<HTMLElement>();
+  let widest = $state<Record<string, number>>({});
+  const rightMin = $derived(widest[edit ? 'edit' : 'plain'] ?? 0);
+  $effect(() => {
+    const el = rightEl;
+    if (!el) return;
+    const look = () => {
+      let w = 0;
+      for (const c of el.children) w += (c as HTMLElement).getBoundingClientRect().width;
+      w += 16 * Math.max(0, el.children.length - 1);
+      const k = edit ? 'edit' : 'plain';
+      if (w > (widest[k] ?? 0)) widest = { ...widest, [k]: Math.ceil(w) };
+    };
+    look();
+    const ro = new ResizeObserver(look);
+    for (const c of el.children) ro.observe(c);
+    return () => ro.disconnect();
+  });
   function pick(m: Mode) {
     if (mode === m) return;
     if (m === 'operate' && operateLocked && !modeLocked) return onlocked?.();
@@ -68,7 +88,7 @@
   }
 </script>
 
-<!-- TopBar: brand left, mode toggle centre, then what every sequence needs: edit tools (準備), main actions, the connection, ☰. -->
+<!-- TopBar: brand left, the mode toggle on the bar's centre line in every mode, then what every sequence needs: edit tools (準備, gone under 1100 px of bar), main actions, the connection, ☰. -->
 <header>
   <div class="left">
     <span class="brand" translate="no"><img class="mark" src="./icons/dagon-256.png" alt="" width="24" height="24" /><span class="name">{PRODUCT}</span></span>
@@ -82,12 +102,12 @@
       {/each}
     </div>
   {/if}
-  <div class="right">
+  <div class="right" bind:this={rightEl} style:min-width="{rightMin}px">
     {#if edit}
       <!-- Undo, redo and the view toggle: where editors keep them (Jakob); when the bar is too narrow for them they live in ☰ alone. -->
-      <div class="edit">
-        <button class="button-icon" data-control="edit" aria-disabled={!edit.canUndo} aria-label={DEFINE.undo} title="{DEFINE.undo} (Ctrl+Z)" onclick={() => edit?.canUndo && edit.onundo()}><span class="layer"><Icon name="undo-2" /></span></button>
-        <button class="button-icon" data-control="edit" aria-disabled={!edit.canRedo} aria-label={DEFINE.redo} title="{DEFINE.redo} (Ctrl+Shift+Z)" onclick={() => edit?.canRedo && edit.onredo()}><span class="layer"><Icon name="redo-2" /></span></button>
+      <div class="edit" transition:fade={{ dur: '--dur-quick' }}>
+        <button class="button-icon" data-control="edit" aria-disabled={!edit.canUndo} aria-label={DEFINE.undo} title={edit.canUndo ? `${DEFINE.undo} (Ctrl+Z)` : MENU.off.noUndo} onclick={() => edit?.canUndo && edit.onundo()}><span class="layer"><Icon name="undo-2" /></span></button>
+        <button class="button-icon" data-control="edit" aria-disabled={!edit.canRedo} aria-label={DEFINE.redo} title={edit.canRedo ? `${DEFINE.redo} (Ctrl+Shift+Z)` : MENU.off.noRedo} onclick={() => edit?.canRedo && edit.onredo()}><span class="layer"><Icon name="redo-2" /></span></button>
         <div class="seg" role="radiogroup" aria-label="{DEFINE.graph}・{DEFINE.table}">
           <button class="button-icon" role="radio" aria-checked={edit.view === 'graph'} aria-label={DEFINE.graph} title={DEFINE.graph} onclick={() => edit?.onview('graph')}><span class="layer"><Icon name="network" /></span></button>
           <button class="button-icon" role="radio" aria-checked={edit.view === 'table'} aria-label={DEFINE.table} title={DEFINE.table} onclick={() => edit?.onview('table')}><span class="layer"><Icon name="table-2" /></span></button>
@@ -196,6 +216,7 @@
     text-overflow: ellipsis;
   }
   /* ModeToggle: a pill, segments are pills too (radius = height / 2). */
+  /* On the bar's centre line while the sides leave room; the right side keeps one width across modes, so it never jumps when the mode changes. */
   .modes {
     display: flex;
     flex: none;
@@ -235,16 +256,26 @@
     gap: var(--s-1);
   }
   /* The graph／表 segment: a pill of two icons, the current one filled. */
+  /* The same segmented control as 準備／書込: a pill of pills, 28 px in the 44 px bar. */
   .seg {
     display: flex;
     gap: 0;
-    /* Its frame is drawn inside the buttons' hit area, so the group stays the bar's 44 px and nothing shifts by a pixel. */
     margin-left: var(--s-2);
-    box-shadow: inset 0 0 0 1px var(--c-line);
+    padding: var(--p-toggle);
+    border: 1px solid var(--c-line);
     border-radius: var(--r-full);
     background: var(--c-ink);
   }
-  .seg [aria-checked='true'] :global(.layer) {
+  .seg .button-icon {
+    height: calc(var(--h-control) - 2 * var(--p-toggle) - 2px);
+    padding: 0 var(--s-2);
+    border-radius: var(--r-full);
+    color: var(--c-muted);
+  }
+  .seg .button-icon > :global(.layer) {
+    padding: 0;
+  }
+  .seg [aria-checked='true'] {
     background: var(--c-paper);
     color: var(--c-ink);
   }

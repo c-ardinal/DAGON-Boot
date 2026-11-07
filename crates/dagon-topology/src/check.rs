@@ -66,6 +66,7 @@ pub fn check_with(reg: &Registry, t: &Topology) -> Report {
     c.v05();
     c.v06();
     c.v07_v08();
+    c.v07_every_end();
     c.v09();
     c.v10();
     c.v11();
@@ -587,6 +588,84 @@ impl<'a> Ctx<'a> {
             }
         }
         pins
+    }
+
+    /// Every pin on every link end is one its own definition defines: a `from`
+    /// node's `pins` and `control` pins on its board's header (or its MCU's GPIO
+    /// range when it names only an MCU), a `to` node's `node_pins` as one of its
+    /// board's I2C pairs. Links from the 親機 are covered by `v07_v08`.
+    fn v07_every_end(&mut self) {
+        let hub = self.coordinator().map(|c| c.id.clone());
+        for (i, l) in self.links() {
+            let p = link_path(i);
+            if Some(&l.from) != hub.as_ref() {
+                let mut pins: Vec<(String, u8)> = Vec::new();
+                // A hw-uart0 link runs on the MCU's own UART0 pair, judged below (V-09), not on the header.
+                if let (Some(u), false) = (l.pins, l.iface == Some(UartIface::HwUart0)) {
+                    pins.push((format!("{p}.pins.tx"), u.tx));
+                    pins.push((format!("{p}.pins.rx"), u.rx));
+                }
+                if let Some(g) = l.control.nrst {
+                    pins.push((format!("{p}.control.nrst"), g));
+                }
+                if let Some(g) = l.control.boot {
+                    pins.push((format!("{p}.control.boot"), g));
+                }
+                let from_board = self.node_board(&l.from);
+                let from_mcu = self.t.node(&l.from).and_then(|n| self.reg.mcu(&n.mcu));
+                for (path, gpio) in pins {
+                    let name = format!("GPIO{gpio}");
+                    if let Some(b) = from_board {
+                        // A header that names no numbered GPIO (PB4, PA8) defines no numeric pin: nothing to judge a number against.
+                        if !b.header.iter().any(|h| h.pin.starts_with("GPIO")) {
+                            continue;
+                        }
+                        if !b.header.iter().any(|h| h.pin == name) {
+                            let avail: Vec<_> = b.header.iter().map(|h| h.pin.as_str()).collect();
+                            self.err(
+                                "V-07",
+                                path,
+                                format!("{name} is not on the {} header {avail:?}", b.product),
+                            );
+                        }
+                    } else if let Some(m) = from_mcu.filter(|m| m.gpio_count > 0) {
+                        if gpio >= m.gpio_count {
+                            let msg =
+                                format!("{name} is not a {} GPIO (0-{})", m.id, m.gpio_count - 1);
+                            self.err("V-07", path, msg);
+                        }
+                    }
+                }
+                if l.iface == Some(UartIface::HwUart0) {
+                    if let (Some(c), Some(u)) =
+                        (from_mcu.and_then(|m| m.coordinator.as_ref()), l.pins)
+                    {
+                        if !c.uart0_tx.contains(&u.tx) || !c.uart0_rx.contains(&u.rx) {
+                            let msg = format!("GPIO{}/{} is not a UART0 TX/RX pair", u.tx, u.rx);
+                            self.err("V-09", format!("{p}.pins"), msg);
+                        }
+                    }
+                }
+            }
+            if let (Some(np), Some(b)) = (l.node_pins.as_ref(), self.node_board(&l.to)) {
+                if !b
+                    .i2c_pairs
+                    .iter()
+                    .any(|r| r.sda == np.sda && r.scl == np.scl)
+                {
+                    let pairs: Vec<_> = b
+                        .i2c_pairs
+                        .iter()
+                        .map(|r| format!("{}/{}", r.sda, r.scl))
+                        .collect();
+                    let msg = format!(
+                        "{}/{} is not an I2C pair of {}: {pairs:?}",
+                        np.sda, np.scl, b.product
+                    );
+                    self.err("V-07", format!("{p}.node_pins"), msg);
+                }
+            }
+        }
     }
 
     fn v07_v08(&mut self) {

@@ -91,7 +91,7 @@
   }
   h2 {
     margin: 0 0 var(--s-4);
-    font: 700 var(--t-small) / 20px var(--f-ja);
+    font: 700 var(--t-heading) / 28px var(--f-ja);
     letter-spacing: 0.02em;
   }
   p {
@@ -136,7 +136,7 @@
   }
   ul {
     margin: 0;
-    padding-left: 1.2em;
+    padding-left: var(--s-5);
   }
   .undo {
     color: var(--c-muted);

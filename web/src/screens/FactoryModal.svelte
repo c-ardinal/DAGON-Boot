@@ -59,7 +59,7 @@
     {#if canWrite && !done}
       <!-- 中止 only before writing starts: stopping half way can leave the node unable to start. -->
       <button class="button-secondary" aria-disabled={writing} title={writing ? WRITE.factory.cancelLocked : undefined} onclick={() => !writing && oncancel()}>{WRITE.factory.cancel}</button>
-      <button class="button-primary" data-control="flash" aria-disabled={!!job && !failed} onclick={() => (!job || failed) && onwrite()}>{failed ? WRITE.retry : WRITE.run}</button>
+      <button class="button-primary" data-control="flash" aria-disabled={!!job && !failed} title={job && !failed ? WRITE.factory.cancelLocked : undefined} onclick={() => (!job || failed) && onwrite()}>{failed ? WRITE.retry : WRITE.run}</button>
     {/if}
   {/snippet}
 </Modal>

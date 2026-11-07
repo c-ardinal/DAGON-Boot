@@ -470,6 +470,23 @@ fn v24_an_uplink_belongs_to_a_coordinator() {
 }
 
 #[test]
+fn v07_refuses_node_pins_that_are_not_an_i2c_pair_of_the_board() {
+    let got = messages(
+        &mutate(
+            "node_pins: { sda: PB4, scl: PA8 }",
+            "node_pins: { sda: PZ9, scl: PZ8 }",
+        ),
+        "V-07",
+    );
+    assert_eq!(got.len(), 1, "{got:?}");
+    assert!(
+        got[0].starts_with("PZ9/PZ8 is not an I2C pair of NUCLEO-F401RE"),
+        "{}",
+        got[0]
+    );
+}
+
+#[test]
 fn v26_refuses_a_baud_the_definitions_do_not_name_even_when_the_uart_makes_it() {
     // 115212 is 0.01 % off 115200, which both ends make; neither definition
     // names it, so it is refused: only a listed speed can be set or built.

@@ -267,15 +267,16 @@ pub const BOARD: &[Requirement<BoardCheck>] = &[
     Requirement {
         engine: "topology default link",
         fields: &["default_link.addr", "default_link.baud"],
-        rule: "addr in 0x08..=0x77; baud >= 1",
-        check: |b, _| {
+        rule: "addr in 0x08..=0x77; baud one of the MCU's link_uart.bauds",
+        check: |b, m| {
             let Some(l) = b.default_link else {
                 return Ok(());
             };
             fail(l.addr.is_some_and(|a| !I2C_ADDRS.contains(&a)), || {
                 "default_link.addr is outside 0x08..=0x77".into()
             })?;
-            fail(l.baud == Some(0), || "default_link.baud is 0".into())
+            fail(l.baud == Some(0), || "default_link.baud is 0".into())?;
+            default_link_baud(b, m)
         },
     },
     Requirement {
@@ -540,6 +541,22 @@ fn coordinator(m: &McuDef) -> Result<(), String> {
             "UART0 pin GPIO{} is not below gpio_count {}",
             bad.unwrap(),
             m.gpio_count
+        )
+    })
+}
+
+/// A board's `[default_link] baud` is a speed its MCU's `[link_uart] bauds` names.
+pub(crate) fn default_link_baud(b: &BoardDef, m: &McuDef) -> Result<(), String> {
+    let (Some(l), Some(u)) = (b.default_link.as_ref(), m.link_uart.as_ref()) else {
+        return Ok(());
+    };
+    let Some(baud) = l.baud else {
+        return Ok(());
+    };
+    fail(!u.runs(baud), || {
+        format!(
+            "default_link.baud {baud} is not in the MCU's link_uart.bauds {:?}",
+            u.bauds
         )
     })
 }

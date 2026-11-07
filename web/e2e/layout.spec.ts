@@ -2,8 +2,8 @@ import { expect, test, type Page } from '@playwright/test';
 import { boxes, canvasState, layoutFaults, openSample, settled } from './console.ts';
 
 // The viewport matrix (ulthar config.json `viewport_matrix`) from 1024 wide up, the page's own 2560 theme edge (2559/2560) added.
-const WIDTHS = [1024, 1280, 1366, 1440, 1920, 2020, 2400, 2559, 2560];
-const HEIGHTS = [700, 800, 1080, 1347, 1440];
+const WIDTHS = [1024, 1099, 1100, 1280, 1366, 1440, 1920, 2020, 2400, 2559, 2560];
+const HEIGHTS = [600, 700, 800, 1080, 1347, 1440];
 
 /** The windows swept: each width at its low and tall ends, every height at a common width, and the matrix's own presets. */
 const SIZES = [...WIDTHS.flatMap((w) => [[w, 700], [w, 1080]]), ...HEIGHTS.map((h) => [1920, h]), [1366, 768], [2560, 1440], [1024, 768]] as const;
@@ -30,7 +30,7 @@ const STATES: [string, (p: Page) => Promise<void>, (p: Page) => Promise<void>][]
 ];
 
 test('sweep: no overflow, overlap or clipped text at any window, in 準備 (sheet, drawer, menu, help, table, toast, modal) and 書込 (versions)', async ({ page, context }) => {
-  test.setTimeout(540_000);
+  test.setTimeout(1_500_000);
   await context.grantPermissions(['clipboard-read', 'clipboard-write']);
   await page.setViewportSize({ width: 1920, height: 1080 });
   await openSample(page);
@@ -50,9 +50,23 @@ test('sweep: no overflow, overlap or clipped text at any window, in 準備 (shee
       const b = await boxes(page);
       for (const k of Object.keys(a)) if (a[k] !== b[k]) faults.push(`${w}x${h} ${name}: ${k} moved ${a[k]} -> ${b[k]}`);
       // A sheet, menu, help or toast opening moves none of the standing parts (the DAGON mark, the zoom, the focal number, the header). The open drawer is the one thing they give way to, by structure, so it never covers them.
-      if (!name.includes('引き出し') && name !== '表' && name !== 'モーダル') for (const k of Object.keys(rest)) if (a[k] !== undefined && a[k] !== rest[k]) faults.push(`${w}x${h} ${name}: ${k} moved for it ${rest[k]} -> ${a[k]}`);
+      // The open drawer is what the zoom and the focal number give way to, by structure; everything else moves for nothing.
+      const still = name.includes('引き出し') ? ['.frame > header', 'header .modes', 'header .actions', '.dagon', '.dagon .mark'] : Object.keys(rest);
+      for (const k of still) if (a[k] !== undefined && rest[k] !== undefined && a[k] !== rest[k]) faults.push(`${w}x${h} ${name}: ${k} moved for it ${rest[k]} -> ${a[k]}`);
       await out(page);
     }
+  }
+  // The mode toggle and the mark stand still across modes at every width.
+  for (const [w, h] of SIZES) {
+    await page.setViewportSize({ width: w, height: h });
+    await page.waitForTimeout(260);
+    const prep = await boxes(page);
+    await page.getByRole('radio', { name: '書込' }).click();
+    await page.waitForTimeout(300);
+    const write = await boxes(page);
+    for (const k of ['header .modes', '.frame > header', '.dagon .mark']) if (prep[k] !== undefined && prep[k] !== write[k]) faults.push(`${w}x${h} 準備→書込: ${k} moved ${prep[k]} -> ${write[k]}`);
+    await page.getByRole('radio', { name: '準備' }).click();
+    await page.waitForTimeout(300);
   }
   await page.setViewportSize({ width: 1920, height: 1080 });
   await page.getByRole('radio', { name: '書込' }).click();

@@ -46,8 +46,12 @@ html {
   background: var(--c-ink);
   color: var(--c-paper);
   font: 400 var(--t-small) / 20px var(--f-ja);
-  /* the root follows the window's width and height; every size is in rem. 16 px at 1440×900. */
+  /* Every size is a px token of the one scale; the root is 16 px so a rem anywhere is 16 px, as the design test assumes. */
+  font-size: 16px; /* root: the one size that is not a role, the rem unit itself */
   font-variant-numeric: tabular-nums;
+  /* One scrollbar for every scrolling surface: thin, in the line colour, no arrows. */
+  scrollbar-width: thin;
+  scrollbar-color: var(--c-line) transparent;
 }
 
 html,

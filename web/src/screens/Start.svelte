@@ -61,7 +61,7 @@
   {:else if s.list}
     {@const list = s.list}
     <div class="crumb">
-      <button class="button-secondary small" aria-disabled={!list.parent} onclick={() => list.parent && void s.browse(list.parent)}>{START.up}</button>
+      <button class="button-secondary small" aria-disabled={!list.parent} title={list.parent ? undefined : START.upWhy} onclick={() => list.parent && void s.browse(list.parent)}>{START.up}</button>
       <span class="mono" translate="no">{list.path}</span>
     </div>
     <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
@@ -98,7 +98,7 @@
       <ul>
         {#each s.recent as r (r.path)}
           <li>
-            <button class="row" aria-disabled={!s.online} onclick={() => s.online && void s.open(r.path)}>
+            <button class="row" aria-disabled={!s.online} title={s.online ? undefined : CLI_LINK.needCli} onclick={() => s.online && void s.open(r.path)}>
               <Icon name="folder" size="var(--i-s)" /><span class="name">{r.name}</span><span class="mono path" translate="no">{r.path}</span><Icon name="chevron-right" size="var(--i-s)" />
             </button>
           </li>
@@ -137,7 +137,7 @@
     {@render failure()}
     {#snippet actions()}
       <button class="button-secondary" onclick={() => (modal = 'how')}>{START.create.back}</button>
-      <button class="button-primary" aria-disabled={!s.list || s.loading || !s.name.trim()} onclick={() => void s.make()}>{START.create.go}</button>
+      <button class="button-primary" aria-disabled={!s.list || s.loading || !s.name.trim()} title={!s.list || s.loading || !s.name.trim() ? START.goWhy : undefined} onclick={() => void s.make()}>{START.create.go}</button>
     {/snippet}
   </Modal>
 {:else if modal === 'open'}

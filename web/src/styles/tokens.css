@@ -111,7 +111,7 @@
   --dur-feedback: 100ms;
   --busy-light: 48px;
   /* type roles (px): the one scale; the same role is the same size everywhere. */
-  --t-display: 112px; /* the focal number */
+  --t-display: 160px; /* the focal number */
   --t-version: 20px; /* a card's version */
   --t-title: 28px; /* the start page's title */
   --t-heading: 20px; /* headings of sheets, windows and modals */

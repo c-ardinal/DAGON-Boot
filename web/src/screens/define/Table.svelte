@@ -34,7 +34,7 @@
 <div class="table-view">
   <div class="tools">
     <button class="secondary" onclick={onaddnode}>{TABLE.addNode}</button>
-    <button class="secondary" aria-disabled={!unlinked} onclick={() => unlinked && d.apply(connect(d.doc, unlinked.id))}>{TABLE.addLink}</button>
+    <button class="secondary" aria-disabled={!unlinked} title={unlinked ? undefined : TABLE.addLinkWhy} onclick={() => unlinked && d.apply(connect(d.doc, unlinked.id))}>{TABLE.addLink}</button>
   </div>
   <!-- svelte-ignore a11y_interactive_supports_focus -->
   <div role="tablist" tabindex="-1" onkeydown={keys}>
@@ -154,13 +154,12 @@
   tbody th {
     text-align: left;
   }
-  /* The actions stay at the right edge while the columns scroll under them. */
+  /* The actions end the row; a narrow window scrolls the table sideways, nothing hides under anything. */
   .ops {
-    position: sticky;
-    right: 0;
-    display: flex;
-    gap: var(--s-2);
-    background: var(--c-layer-0);
+    white-space: nowrap;
+  }
+  .ops button + button {
+    margin-left: var(--s-2);
   }
   .destructive {
     border-color: var(--c-signal);

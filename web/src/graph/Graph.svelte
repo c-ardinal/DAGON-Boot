@@ -108,7 +108,7 @@
   }: Props = $props();
 
   /** Names on the cards never get smaller than this on screen (px): past it the cards turn compact and hold the name at this size. */
-  const NAME_MIN_PX = 12;
+  const NAME_MIN_PX = 13;
   /** A name's size on a card at 100 % (--t-small inside the canvas). */
   const NAME_PX = 14;
   /** Card heights before they are measured (px). */
@@ -1186,7 +1186,7 @@
   .compact .hd b {
     flex: 1;
     min-width: 0;
-    font-size: max(var(--t-caption), calc(var(--t-caption) / var(--zoom)));
+    font-size: max(var(--t-caption), calc(13 * var(--t-caption) / 12 / var(--zoom)));
   }
   .compact .bd {
     padding-top: 0;

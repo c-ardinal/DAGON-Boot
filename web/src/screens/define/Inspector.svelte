@@ -6,8 +6,8 @@
     boardMissing,
     connect,
     freeAddrs,
+    definedPins,
     hopAvailable,
-    hubHeaderPins,
     LINK_KINDS,
     removeLink,
     setBoard,
@@ -18,6 +18,7 @@
     setNode,
     setUplink,
     template,
+    uart0Pairs,
     uartBauds,
     type LinkKind,
     type TLink,
@@ -40,8 +41,9 @@
   const busIndex = $derived(d.selected?.startsWith('bus:') ? Number(d.selected.slice(4)) : -1);
   const bus = $derived(busIndex >= 0 ? t.buses?.[busIndex] : undefined);
   const hub = $derived(t.nodes.find((n) => n.role === 'coordinator'));
-  /** The 親機's header pins: the only pins a link or bus may be set to (the check refuses any other). */
-  const hubPins = $derived(hubHeaderPins(hub));
+  /** The 親機's own pins: what a bus or a link from it may be set to (the check refuses any other). */
+  const hubPins = $derived(definedPins(hub));
+  const MAX_ATTEMPTS = [1, 2, 3, 4, 5];
   const nodeLink = $derived(node ? (t.links ?? []).findIndex((l) => l.to === node.id) : -1);
   const name = (id: string) => d.doc.names[id] ?? id;
   const byId = (id: string) => t.nodes.find((n) => n.id === id);
@@ -86,12 +88,13 @@
   {/each}
 {/snippet}
 
-<!-- A pin chosen from the 親機's header: the only pins the check accepts; another user of the pin is named. -->
-{#snippet pinSelect(field: string, label: string, value: number | undefined, self: string, onpick: (n: number | undefined) => void)}
+<!-- A pin chosen from its own end's definition: the only pins the check accepts; a value from a file that is not defined stays, flagged; another user of the pin is named. -->
+{#snippet pinSelect(field: string, label: string, value: number | undefined, self: string, pins: number[], onpick: (n: number | undefined) => void)}
   <label
     >{label}<select data-field={field} value={value ?? ''} aria-invalid={issues(field).length > 0} onchange={(e) => onpick(num(e.currentTarget.value))}>
       <option value="">{INSPECT.unset}</option>
-      {#each hubPins as n (n)}
+      {#if value !== undefined && !pins.includes(value)}<option value={value} translate="no">GPIO{value}{INSPECT.undefinedPin}</option>{/if}
+      {#each pins as n (n)}
         {@const other = usedBy(n, self)}
         <option value={n} translate="no">GPIO{n}{other ? INSPECT.inUse(other) : ''}</option>
       {/each}
@@ -134,8 +137,10 @@
           value={nodeLink >= 0 ? (t.links ?? [])[nodeLink].from : ''}
           onchange={(e) => {
             const parent = e.currentTarget.value;
+            // なし removes the link: that is a deletion, so it asks first like every other.
+            if (!parent) return void (nodeLink >= 0 && d.requestRemove(`link:${node.id}`));
             const without = nodeLink >= 0 ? removeLink(d.doc, nodeLink) : d.doc;
-            d.apply(parent ? connect(without, node.id, parent) : without);
+            d.apply(connect(without, node.id, parent));
           }}
         >
           <option value="">{INSPECT.none}</option>
@@ -178,10 +183,15 @@
     <details>
       <summary>{INSPECT.advanced}</summary>
       <div class="fields" translate="no">
-        <label>max_attempts<input data-field="max_attempts" type="number" min="1" max="5" value={node.max_attempts ?? ''} onchange={(e) => d.apply(setNode(d.doc, node.id, 'max_attempts', num(e.currentTarget.value)))} /></label>
-        <label>listen_window_ms<input type="number" min="0" value={node.listen_window_ms ?? ''} onchange={(e) => d.apply(setNode(d.doc, node.id, 'listen_window_ms', num(e.currentTarget.value)))} /></label>
-        <label>flash_map<input data-field="flash_map" value={node.flash_map ?? ''} onchange={(e) => d.apply(setNode(d.doc, node.id, 'flash_map', e.currentTarget.value))} />{@render bad('flash_map')}</label>
-        <label>tag<input data-field="tag" value={node.tag} onchange={(e) => d.apply(setNode(d.doc, node.id, 'tag', e.currentTarget.value))} />{@render bad('tag')}</label>
+        <label
+          >{INSPECT.maxAttempts}<select data-field="max_attempts" value={node.max_attempts ?? ''} onchange={(e) => d.apply(setNode(d.doc, node.id, 'max_attempts', num(e.currentTarget.value)))}>
+            <option value="">{INSPECT.unset}</option>
+            {#each MAX_ATTEMPTS as n (n)}<option value={n}>{n}</option>{/each}
+          </select></label
+        >
+        <label>{INSPECT.listenWindow}<input type="number" min="0" step="100" value={node.listen_window_ms ?? ''} onchange={(e) => d.apply(setNode(d.doc, node.id, 'listen_window_ms', num(e.currentTarget.value)))} /></label>
+        <label>{INSPECT.flashMap}<input data-field="flash_map" value={node.flash_map ?? ''} onchange={(e) => d.apply(setNode(d.doc, node.id, 'flash_map', e.currentTarget.value))} />{@render bad('flash_map')}</label>
+        <label>{INSPECT.tag}<input data-field="tag" value={node.tag} onchange={(e) => d.apply(setNode(d.doc, node.id, 'tag', e.currentTarget.value))} />{@render bad('tag')}</label>
       </div>
     </details>
   {:else if link}
@@ -222,12 +232,14 @@
         >
       {:else if link.kind === 'uart'}
         {@const bauds = uartBauds(from, to)}
-        {@render pinSelect('pins', INSPECT.uartTx, link.pins?.tx, `${link.to}.tx`, (n) => d.apply(setLink(d.doc, linkIndex, 'pins.tx', n)))}
-        {@render pinSelect('pins.rx', INSPECT.uartRx, link.pins?.rx, `${link.to}.rx`, (n) => d.apply(setLink(d.doc, linkIndex, 'pins.rx', n)))}
+        {@const fromPins = link.iface === 'hw-uart0' ? uart0Pairs(from).flatMap((p) => [p.tx, p.rx]) : definedPins(from)}
+        {@render pinSelect('pins', INSPECT.uartTx(name(link.from)), link.pins?.tx, `${link.to}.tx`, link.iface === 'hw-uart0' ? uart0Pairs(from).map((p) => p.tx) : fromPins, (n) => d.apply(setLink(d.doc, linkIndex, 'pins.tx', n)))}
+        {@render pinSelect('pins.rx', INSPECT.uartRx(name(link.from)), link.pins?.rx, `${link.to}.rx`, link.iface === 'hw-uart0' ? uart0Pairs(from).map((p) => p.rx) : fromPins, (n) => d.apply(setLink(d.doc, linkIndex, 'pins.rx', n)))}
         <label
-          >{INSPECT.baud}<select data-field="baud" value={link.baud ?? ''} aria-invalid={issues('baud').length > 0} aria-disabled={bauds.length === 0} onchange={(e) => d.apply(setLink(d.doc, linkIndex, 'baud', num(e.currentTarget.value)))}>
-            {#if bauds.length === 0}<option value="">{INSPECT.noBaud}</option>{/if}
-            {#each [...new Set([...(link.baud !== undefined && bauds.includes(link.baud) ? [link.baud] : []), ...bauds])] as b (b)}<option value={b}>{b}</option>{/each}
+          >{INSPECT.baud}<select data-field="baud" value={link.baud ?? ''} aria-invalid={issues('baud').length > 0} title={bauds.length === 0 ? INSPECT.noBaud : undefined} onchange={(e) => d.apply(setLink(d.doc, linkIndex, 'baud', num(e.currentTarget.value)))}>
+            <option value="">{bauds.length === 0 ? INSPECT.noBaud : INSPECT.unset}</option>
+            {#if link.baud !== undefined && !bauds.includes(link.baud)}<option value={link.baud}>{link.baud}{INSPECT.undefinedPin}</option>{/if}
+            {#each bauds as b (b)}<option value={b}>{b}</option>{/each}
           </select>{@render bad('baud')}</label
         >
       {/if}
@@ -240,8 +252,8 @@
   {:else if bus}
     <div class="head"><h2 id="inspector-h" tabindex="-1">{INSPECT.bus}</h2></div>
     <div class="fields">
-      {@render pinSelect('sda', INSPECT.busSda, bus.sda, 'bus', (n) => d.apply(setBus(d.doc, busIndex, 'sda', n)))}
-      {@render pinSelect('scl', INSPECT.busScl, bus.scl, 'bus', (n) => d.apply(setBus(d.doc, busIndex, 'scl', n)))}
+      {@render pinSelect('sda', INSPECT.busSda, bus.sda, 'bus', hubPins, (n) => d.apply(setBus(d.doc, busIndex, 'sda', n)))}
+      {@render pinSelect('scl', INSPECT.busScl, bus.scl, 'bus', hubPins, (n) => d.apply(setBus(d.doc, busIndex, 'scl', n)))}
       <label
         >{INSPECT.speed}<select data-field="speed_hz" value={bus.speed_hz} onchange={(e) => d.apply(setBus(d.doc, busIndex, 'speed_hz', Number(e.currentTarget.value)))}>
           {#each Object.entries(INSPECT.speeds) as [hz, label] (hz)}<option value={Number(hz)}>{label}</option>{/each}
@@ -259,8 +271,9 @@
 
 {#snippet controlPins(l: TLink, i: number)}
   {#if l.control?.kind === 'full'}
-    {@render pinSelect('control.nrst', INSPECT.reset, l.control.nrst, `${l.to}.nrst`, (n) => d.apply(setLink(d.doc, i, 'control.nrst', n)))}
-    {@render pinSelect('control.boot', INSPECT.boot, l.control.boot, `${l.to}.boot`, (n) => d.apply(setLink(d.doc, i, 'control.boot', n)))}
+    {@const owner = definedPins(byId(l.from))}
+    {@render pinSelect('control.nrst', INSPECT.reset, l.control.nrst, `${l.to}.nrst`, owner, (n) => d.apply(setLink(d.doc, i, 'control.nrst', n)))}
+    {@render pinSelect('control.boot', INSPECT.boot, l.control.boot, `${l.to}.boot`, owner, (n) => d.apply(setLink(d.doc, i, 'control.boot', n)))}
   {/if}
 {/snippet}
 
@@ -269,11 +282,17 @@
     padding: var(--s-5);
   }
   /* The sheet's head: its name, and the one destructive action at the top right. */
+  /* The head stays at the top while the fields scroll under it. */
   .head {
+    position: sticky;
+    z-index: 1;
+    top: calc(-1 * var(--s-5));
     display: flex;
     align-items: flex-start;
     gap: var(--s-2);
-    margin: 0 var(--s-6) var(--s-4) 0;
+    margin: calc(-1 * var(--s-5)) var(--s-6) var(--s-4) 0;
+    padding: var(--s-5) 0 var(--s-2);
+    background: var(--c-layer-1);
   }
   h2 {
     flex: 1;

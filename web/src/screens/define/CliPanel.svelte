@@ -8,9 +8,11 @@
     panel: 'link' | 'jobs';
     /** The agent link: the API key of each way that takes one is registered here (CLI 連携). */
     agent?: Agent;
+    /** Asks before the API key is removed (the page's one confirmation modal). */
+    onconfirm?: (run: () => void) => void;
   }
 
-  let { cli, panel, agent }: Props = $props();
+  let { cli, panel, agent, onconfirm }: Props = $props();
 
   /** Every way that takes an API key, as GET /v1/agent lists them. */
   const keyWays = $derived((agent?.status?.agents ?? []).flatMap((a) => a.ways.filter((w) => w.key != null).map((w) => ({ a, w }))));
@@ -59,7 +61,7 @@
                 <label>{CLI_LINK.keys.input}<input type="password" autocomplete="off" spellcheck="false" translate="no" bind:value={draft.value} /></label>
                 <div class="actions">
                   <button type="submit" class="secondary" aria-disabled={!draft.value.trim()} title={draft.value.trim() ? undefined : CLI_LINK.keys.saveWhy}>{CLI_LINK.keys.save}</button>
-                  {#if w.key}<button type="button" class="secondary destructive" title={CLI_LINK.keys.removeWhy} onclick={() => void draft.remove()}>{CLI_LINK.keys.remove}</button>{/if}
+                  {#if w.key}<button type="button" class="secondary destructive" title={CLI_LINK.keys.removeWhy} onclick={() => (onconfirm ? onconfirm(() => void draft.remove()) : void draft.remove())}>{CLI_LINK.keys.remove}</button>{/if}
                 </div>
               </form>
               {#if draft.problem}<p class="bad">{draft.problem.label ?? ''} {draft.problem.text}</p>{/if}
@@ -123,8 +125,12 @@
     padding: var(--s-5);
   }
   h2 {
-    margin: 0 0 var(--s-4);
-    padding-right: var(--s-6);
+    position: sticky;
+    z-index: 1;
+    top: calc(-1 * var(--s-5));
+    margin: calc(-1 * var(--s-5)) 0 var(--s-4);
+    padding: var(--s-5) var(--s-6) var(--s-2) 0;
+    background: var(--c-layer-1);
     font: 700 var(--t-heading) / 28px var(--f-ja);
   }
   h2:focus {
@@ -152,7 +158,10 @@
   }
   .pairs dt,
   .label {
-    color: var(--c-muted);
+    display: block;
+    margin-bottom: var(--s-2);
+    color: var(--c-paper);
+    font: 700 var(--t-caption) / 16px var(--f-ja);
   }
   /* A value stays on one line: it scrolls sideways rather than breaking mid-word. */
   .pairs dd {

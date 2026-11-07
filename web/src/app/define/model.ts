@@ -69,12 +69,25 @@ export function uartBauds(from: TNode | undefined, to: TNode | undefined): numbe
   return Array.from(uart_bauds(from?.mcu ?? '', to?.mcu ?? ''));
 }
 
-/** The 親機's pins a link or bus may use: its board's header (numbered GPIOs), as the check (V-07) allows. */
-export function hubHeaderPins(h: TNode | undefined): number[] {
-  const board = h ? (h.board ?? defaultBoard(h.mcu)) : undefined;
-  const header = board ? (template(board)?.header ?? []) : [];
-  return header.map((p) => Number(p.replace(/^GPIO/, ''))).filter((n) => Number.isFinite(n));
+/** The pins a node's own end of a link may use, as the check (V-07) allows: its board's header, or, named by MCU alone, that MCU's GPIO range. */
+export function definedPins(n: TNode | undefined): number[] {
+  if (!n) return [];
+  if (n.board) return (template(n.board)?.header ?? []).map((p) => Number(p.replace(/^GPIO/, ''))).filter((x) => Number.isFinite(x));
+  const count = mcus().find((m) => m.id === n.mcu)?.gpioCount ?? 0;
+  return Array.from({ length: count }, (_, i) => i);
 }
+
+/** The UART0 pairs a node's MCU runs a hw-uart0 link on (its `[coordinator]`), as V-09 allows. */
+export function uart0Pairs(n: TNode | undefined): { tx: number; rx: number }[] {
+  const p = n ? (coordinator_uart0(n.mcu) as { tx: number; rx: number } | null) : null;
+  return p ? [p] : [];
+}
+
+/** The speed a new link from `h` to `n` starts at: the first both definitions name; none when they share none (the check then asks). */
+const firstBaud = (h: TNode, n: TNode): { baud?: number } => {
+  const b = uartBauds(h, n)[0];
+  return b === undefined ? {} : { baud: b };
+};
 
 /** Whether a hop of `kind` from `from` to `to` is one both firmwares implement. */
 export function hopAvailable(kind: LinkKind, from: TNode | undefined, to: TNode | undefined): boolean {
@@ -308,12 +321,12 @@ export function connect(doc: Doc, id: string, parent?: string): Doc {
   // A node chosen by MCU links like its MCU's default board, if any (its pins are the developer's).
   const stand = n.board ?? defaultBoard(n.mcu);
   const tpl = stand ? template(stand) : null;
-  const d = tpl?.link ?? { kind: 'uart' as const, iface: 'pio-uart', addr: null, baud: 115200, control: 'cooperative' as const, romEntry: null };
+  const d = tpl?.link ?? { kind: 'uart' as const, iface: 'pio-uart', addr: null, baud: null, control: 'cooperative' as const, romEntry: null };
   if (h.role !== 'coordinator' || n.role === 'coordinator') {
     // Below a 子機 the board's own way into its loader, as under the 親機 (V-11 asks for it on every UART link).
     const control: TControl = { kind: d.control, ...(d.romEntry ? { rom_entry: d.romEntry } : {}) };
     const link: TLink =
-      n.role === 'coordinator' ? { from: h.id, to: id, kind: 'can' } : { from: h.id, to: id, kind: 'uart', iface: 'hw-uart0', ...uart0Pins(t, h), baud: 115200, control };
+      n.role === 'coordinator' ? { from: h.id, to: id, kind: 'can' } : { from: h.id, to: id, kind: 'uart', iface: 'hw-uart0', ...uart0Pins(t, h), ...firstBaud(h, n), control };
     return { ...doc, topo: { ...t, links: [...(t.links ?? []), link] } };
   }
   let buses = t.buses ?? [];
@@ -339,7 +352,7 @@ export function connect(doc: Doc, id: string, parent?: string): Doc {
       kind: 'uart',
       iface: d.iface ?? 'pio-uart',
       pins: hubUart(h),
-      baud: d.baud ?? 115200,
+      ...(d.baud !== null && uartBauds(h, n).includes(d.baud) ? { baud: d.baud } : firstBaud(h, n)),
       control: { kind: d.control, ...(d.romEntry ? { rom_entry: d.romEntry } : {}) },
     };
   }
@@ -415,7 +428,7 @@ export function setLinkKind(doc: Doc, index: number, kind: LinkKind): Doc {
   if (tpl?.link?.kind === kind && h.role === 'coordinator') return connect(without, l.to, h.id);
   const link: TLink =
     kind === 'uart'
-      ? { from: h.id, to: l.to, kind, iface: 'pio-uart', pins: hubUart(h), baud: 115200, control: { kind: 'cooperative' } }
+      ? { from: h.id, to: l.to, kind, iface: 'pio-uart', pins: hubUart(h), ...firstBaud(h, n ?? h), control: { kind: 'cooperative' } }
       : { from: h.id, to: l.to, kind, bus: t.buses?.[0]?.id ?? 'i2c-main', addr: freeAddrs(t)[0], control: { kind: 'full' } };
   const buses = kind === 'i2c' && !t.buses?.length ? [hubBus(h)] : t.buses;
   return { ...without, topo: { ...t, buses, links: [...(t.links ?? []), link] } };

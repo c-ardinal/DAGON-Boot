@@ -1,7 +1,7 @@
 import { expect, test, type Page } from '@playwright/test';
 import { openSample } from './console.ts';
 
-/** `?demo`: what `dagon demo` and the demo page are; `agent=linked`: the worst case, an agent that says it is linked. */
+/** `?demo`: what the demo page is; `agent=linked`: the worst case, an agent that says it is linked. */
 const DEMO = 'sim&demo&agent=linked';
 const MARK = '.dagon .mark';
 const BUBBLE = 'デモでは会話できません。dagon serve で連携すると相談できます。';

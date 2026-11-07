@@ -11,7 +11,9 @@ use std::sync::{Condvar, Mutex};
 use std::time::{Duration, Instant};
 
 pub use dagon_sim::Medium;
-use dagon_sim::{SimHub, TimedHub};
+#[cfg(test)]
+use dagon_sim::SimHub;
+use dagon_sim::TimedHub;
 
 pub struct SimDevice {
     state: Mutex<State>,
@@ -32,6 +34,7 @@ struct State {
 }
 
 impl SimDevice {
+    #[cfg(test)]
     pub fn new(hub: SimHub, speed: f64, fail: Option<String>) -> SimDevice {
         let sim0 = hub.now_ms();
         SimDevice {

@@ -281,20 +281,9 @@ pub fn status(home: Option<&Path>, agents: &Agents, keys: &Keys) -> Value {
     })
 }
 
-/// The home this process uses instead of the user's: `dagon demo`'s own.
-static OWN_HOME: std::sync::OnceLock<PathBuf> = std::sync::OnceLock::new();
-
-/// From here on this process keeps its settings in `dir`, not the user's home.
-pub fn use_own_home(dir: PathBuf) {
-    let _ = OWN_HOME.set(dir);
-}
-
 /// The one place the user's home folder is found: agent.json, recent.json,
 /// the agents' definitions and the signing keys all live under it.
 pub fn home() -> Result<PathBuf, String> {
-    if let Some(own) = OWN_HOME.get() {
-        return Ok(own.clone());
-    }
     std::env::var_os("USERPROFILE")
         .or_else(|| std::env::var_os("HOME"))
         .map(PathBuf::from)

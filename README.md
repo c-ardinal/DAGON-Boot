@@ -64,11 +64,11 @@ PCに繋いだ1つのマイコンを通してその先のマイコンにも、�
 
 ### インストールせずに試す
 
-インストールも実機も不要で[DAGON Consoleのデモ](https://c-ardinal.github.io/DAGON-Boot/demo/)を試せます。模擬の親機と子機を相手に、書き込みと前のバージョンへの戻し方を体験できます。ファイルの読み書き、実際の機器との接続、AI連携操作はデモでは使えません。
+インストールも実機も不要で、ブラウザ(ChromeかEdge 89以降)で[DAGON Consoleのデモ](https://c-ardinal.github.io/DAGON-Boot/demo/)を試せます。模擬の親機と子機を相手に、書き込みと前のバージョンへの戻し方を体験できます。ファイルの読み書き、実際の機器との接続、AI連携操作はデモでは使えません。
 
 ### インストールして試す
 
-手元のPCでも、ブラウザ上(ChromeかEdge 89以降)でシミュレータを用いて実機なしで試せます。
+手元のPCでも、シミュレータを用いて実機なしで試せます。
 
 #### インストール
 
@@ -84,10 +84,9 @@ Windows
 irm https://raw.githubusercontent.com/c-ardinal/DAGON-Boot/main/install.ps1 | iex
 ```
 
-#### デモ実行
+#### シミュレータで試す
 
 ```sh
-dagon demo    # 表示したアドレスでDAGON Consoleを開きます
 dagon sim run # シミュレータ上で通しのシナリオを実行します
 ```
 

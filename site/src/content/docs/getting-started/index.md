@@ -19,23 +19,6 @@ sidebar:
 
 先に`dagon`コマンドを[入れます](/getting-started/install/)。
 
-### `dagon demo`
-
-```sh
-dagon demo                         # 模擬のノードで DAGON Console を開く
-dagon demo --sim-fail watch        # 同じで、watch への書き込みが失敗して元に戻る
-dagon demo --sim-speed 4           # 4 倍の速さで動かす
-```
-
-`dagon demo`はDAGON Consoleを開きます。相手は模擬の親機と子機の3つのノードです（見本の構成: hub、seg、watch、すべて1.0.0）。`dagon sim run`と同じシミュレータを、実機と同じdagon-hostのコードで動かします。
-
-- つないで新しいバージョン（demo-1.1.0）を選ぶと、3つのノードすべてに書き込めます。進み具合も見られます。
-- `--sim-fail seg`か`--sim-fail watch`を付けると、その子機の新しいバージョンが起動時に落ち、1.0.0に戻ります。
-- リンクとフラッシュには実機に近い時間がかかります。`--sim-speed`で0.1〜20倍にできます。
-- ヘッダには常に「模擬」が出ます。
-
-デモは一時フォルダにデモ自身のプロジェクト（`dagon-demo-<ユーザー名のハッシュ>`）を作ります。起動のたびに新しく作ります。デモ専用のDEMOの鍵も作ります。あなたの鍵は使いません。デモで署名したものは実機では動きません。
-
 ### `dagon sim run`
 
 ```sh

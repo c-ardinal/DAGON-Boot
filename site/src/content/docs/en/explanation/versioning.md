@@ -214,18 +214,26 @@ docs: <no release>
 
 - One tag per component release: `<name>-v<version>`, for example
   `<name>-v0.2.0`.
-- Pre-releases for maintainer trials: `-rc.N` (`<name>-v0.2.0-rc.1`). The
-  release that follows drops the suffix and keeps the version.
-- Release files carry the component name and version in their names.
+- Pre-releases for maintainer trials: `-rc.N` (`<name>-v0.2.0-rc.1`). The tag
+  alone makes one: `compat.toml` and the crates stay at `0.2.0`, so
+  `dagon --version` also says `0.2.0`. The release that follows drops the
+  suffix and keeps the version.
+- Release files carry the component name and the tag's version in their names
+  (`dagon-cli-0.2.0-rc.1-<target>.tar.gz`).
+- A CLI pre-release is published on GitHub as a pre-release. `install.sh` and
+  `install.ps1` do not choose one unless that version (`0.2.0-rc.1`) is named.
+  `cargo binstall` looks for the archive of the crate's version, so it does
+  not install a pre-release.
 - A component's changelog is made from the commits since its last tag that
   touch its files: `python scripts/changelog.py <name> [--from <tag>] [--to <rev>]` prints the section (Breaking, Features, Fixes), reading
   commits exactly as the bump check does.
 - `python scripts/bump_check.py <name>` checks that the version in
   `compat.toml` is at least what the commits since the component's last tag
   require. The release workflow (`.github/workflows/release.yml`) runs it
-  for every pushed `<name>-v<version>` tag, taking the component from the
-  tag, and fails a tag that names no component or another version. The
-  workflow says which components then build release files.
+  for every pushed `<name>-v<version>` and `<name>-v<version>-rc.N` tag, taking
+  the component from the tag, and fails a tag that names no component or a
+  version other than the one in `compat.toml`. The workflow says which
+  components then build release files.
 - Nothing is pushed, tagged on the remote or published without the
   maintainers' OK.
 

@@ -112,6 +112,31 @@ pub fn uart_bauds(from: &str, to: &str) -> Vec<u32> {
     })
 }
 
+/// The I2C bus speeds a bus joining the nodes on `mcus` may run at: those
+/// every MCU definition's `[link_i2c] hzs` name; one whose definition names
+/// none leaves nothing, as the check (V-20) refuses every speed on it.
+#[wasm_bindgen]
+pub fn i2c_hzs(mcus: Vec<String>) -> Vec<u32> {
+    with_registry(|reg| {
+        let lists: Vec<&[u32]> = mcus
+            .iter()
+            .map(|id| {
+                reg.mcu(id)
+                    .and_then(|m| m.link_i2c.as_ref())
+                    .map_or(&[][..], |u| u.hzs.as_slice())
+            })
+            .collect();
+        let Some((first, rest)) = lists.split_first() else {
+            return Vec::new();
+        };
+        first
+            .iter()
+            .copied()
+            .filter(|b| rest.iter().all(|l| l.contains(b)))
+            .collect()
+    })
+}
+
 /// The I2C addresses of the ROM loaders defined (never probed with DAGON
 /// frames, reserved on a bus with a node reached through its ROM).
 #[wasm_bindgen]

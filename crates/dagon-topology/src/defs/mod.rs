@@ -298,6 +298,16 @@ pub struct LinkUart {
     pub bauds: Vec<u32>,
 }
 
+/// The I2C bus speeds the MCU package's firmware runs DAGON's I2C link at,
+/// as controller or target. A bus's `speed_hz` must be one of them on every
+/// node on the bus (V-20), and the Console offers only those, so no speed
+/// the definition does not name can be set or built.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct LinkI2c {
+    pub hzs: Vec<u32>,
+}
+
 /// How far a UART end may run from the link's `baud` (a fraction): each
 /// end of a link must be within it.
 pub const MAX_BAUD_ERROR: f64 = 0.02;
@@ -476,6 +486,12 @@ pub struct McuDef {
     /// ends name. Required on an MCU whose `[links]` has `uart`: without it, every UART link
     /// that MCU's firmware runs is refused, since no speed on it is known to work.
     pub link_uart: Option<LinkUart>,
+    /// The I2C bus speeds the MCU package's firmware runs DAGON's I2C link at, as controller or
+    /// target: `hzs`. The topology check (V-20) refuses a bus `speed_hz` that any node's list does
+    /// not name, and DAGON Console offers only the speeds every node on the bus names. Required on
+    /// an MCU whose `[links]` has `i2c`: without it, every I2C bus that MCU's firmware is on is
+    /// refused, since no speed on it is known to work.
+    pub link_i2c: Option<LinkI2c>,
     /// ROM I2C bootloader (`stm32-i2c-rom`): `name` (as check messages call it), `addr`, `max_hz`,
     /// `erase_sectors`, `pairs = [{ controller, sda, scl }]` it listens on.
     pub rom_i2c: Option<RomI2c>,

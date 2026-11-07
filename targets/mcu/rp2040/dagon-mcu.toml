@@ -88,6 +88,12 @@ frac_bits = 0
 # Bit rates the firmware runs the link at: a link's baud is one of these on both ends.
 bauds = [115_200, 230_400]
 
+# Bus speeds the firmware runs DAGON's I2C link at (template/src/board.rs
+# i2c::Config.frequency): standard mode 100 kHz and fast mode 400 kHz (RP2040
+# datasheet 4.3, I2C). A bus's speed_hz is one of these on every node on it.
+[link_i2c]
+hzs = [100_000, 400_000]
+
 # Link kinds the firmware implements (src/kinds.rs LINK_KINDS).
 [links]
 up = ["usb-cdc"]

@@ -20,6 +20,8 @@
     template,
     uart0Pairs,
     uartBauds,
+    i2cHzs,
+    busNodes,
     type LinkKind,
     type TLink,
     type UplinkHost,
@@ -41,6 +43,8 @@
   const busIndex = $derived(d.selected?.startsWith('bus:') ? Number(d.selected.slice(4)) : -1);
   const bus = $derived(busIndex >= 0 ? t.buses?.[busIndex] : undefined);
   const hub = $derived(t.nodes.find((n) => n.role === 'coordinator'));
+  /** The bus speeds every node on the selected bus names in its MCU definition: the only ones it may be set to. */
+  const hzs = $derived(bus ? i2cHzs(busNodes(t, bus.id)) : []);
   /** The 親機's own pins: what a bus or a link from it may be set to (the check refuses any other). */
   const hubPins = $derived(definedPins(hub));
   const MAX_ATTEMPTS = [1, 2, 3, 4, 5];
@@ -254,9 +258,12 @@
     <div class="fields">
       {@render pinSelect('sda', INSPECT.busSda, bus.sda, 'bus', hubPins, (n) => d.apply(setBus(d.doc, busIndex, 'sda', n)))}
       {@render pinSelect('scl', INSPECT.busScl, bus.scl, 'bus', hubPins, (n) => d.apply(setBus(d.doc, busIndex, 'scl', n)))}
+      <!-- Only the speeds every node's definition names; a speed set otherwise is shown as such until changed. -->
       <label
-        >{INSPECT.speed}<select data-field="speed_hz" value={bus.speed_hz} onchange={(e) => d.apply(setBus(d.doc, busIndex, 'speed_hz', Number(e.currentTarget.value)))}>
-          {#each Object.entries(INSPECT.speeds) as [hz, label] (hz)}<option value={Number(hz)}>{label}</option>{/each}
+        >{INSPECT.speed}<select data-field="speed_hz" value={bus.speed_hz ?? ''} aria-invalid={issues('speed_hz').length > 0} title={hzs.length === 0 ? INSPECT.noSpeed : undefined} onchange={(e) => d.apply(setBus(d.doc, busIndex, 'speed_hz', num(e.currentTarget.value)))}>
+          <option value="">{hzs.length === 0 ? INSPECT.noSpeed : INSPECT.unset}</option>
+          {#if bus.speed_hz !== undefined && !hzs.includes(bus.speed_hz)}<option value={bus.speed_hz}>{INSPECT.hz(bus.speed_hz)}{INSPECT.undefinedPin}</option>{/if}
+          {#each hzs as hz (hz)}<option value={hz}>{INSPECT.hz(hz)}</option>{/each}
         </select>{@render bad('speed_hz')}</label
       >
       <label

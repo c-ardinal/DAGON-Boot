@@ -59,7 +59,7 @@ describe('define document', () => {
     for (const b of ['waveshare-rp2040-touch-lcd-1.28', 'nucleo-f401re', 'm5stopwatch']) doc = place(doc, b).doc;
     doc = connect(connect(doc, 'nucleo'), 'm5stopwatch');
     // The values the page held before it read them from the definition.
-    expect(doc.topo.buses).toEqual([{ id: 'i2c-main', kind: 'i2c', controller: 'i2c0', sda: 16, scl: 17, speed_hz: 400_000, pullups: 'external' }]);
+    expect(doc.topo.buses).toEqual([{ id: 'i2c-main', kind: 'i2c', controller: 'i2c0', sda: 16, scl: 17, speed_hz: 100_000, pullups: 'external' }]);
     expect(doc.topo.links!.find((l) => l.kind === 'uart')!.pins).toEqual({ tx: 26, rx: 27 });
     const yaml = toYaml(doc.topo);
     expect(yaml.indexOf('controller')).toBeLessThan(yaml.indexOf('sda: 16'));

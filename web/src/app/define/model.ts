@@ -2,7 +2,7 @@
 // shapes of dagon-topology's schema) plus the page-side display names. Every
 // edit is a pure function returning a new document, so undo keeps snapshots.
 // Validity is never decided here: topo_check (dagon-topology in WASM) does it.
-import { board_template, coordinator_capable, coordinator_uart0, link_kinds, max_nodes, rom_i2c_addrs, supported_mcus, topo_cut, topo_parse, uart_bauds } from '../../wasm/pkg/dagon_wasm.js';
+import { board_template, coordinator_capable, coordinator_uart0, i2c_hzs, link_kinds, max_nodes, rom_i2c_addrs, supported_mcus, topo_cut, topo_parse, uart_bauds } from '../../wasm/pkg/dagon_wasm.js';
 import { defaultBoard, type Board } from '../../wasm/dagon.ts';
 import { INSPECT } from '../copy.ts';
 import type { Config, Link as GLink, Node as GNode, Skip, UplinkHost, Wire } from '../sample.ts';
@@ -62,6 +62,17 @@ export const LINK_KINDS: LinkKind[] = ['usb-cdc', 'uart', 'i2c', 'ble', 'wifi-tc
 /** Kinds `mcu`'s firmware implements up (to the PC or the 親機) and down (to 子機); the rest are not available yet. */
 export function linkKinds(mcu: string): { up: LinkKind[]; down: LinkKind[] } {
   return link_kinds(mcu) as { up: LinkKind[]; down: LinkKind[] };
+}
+
+/** The I2C bus speeds every one of `nodes`' MCU definitions names (`[link_i2c] hzs`): the only ones a bus joining them may be set to. */
+export function i2cHzs(nodes: (TNode | undefined)[]): number[] {
+  return Array.from(i2c_hzs(nodes.map((n) => n?.mcu ?? '')));
+}
+
+/** The nodes on bus `id`: each end of every I2C link over it. */
+export function busNodes(t: Topo, id: string): TNode[] {
+  const ids = new Set((t.links ?? []).filter((l) => l.kind === 'i2c' && l.bus === id).flatMap((l) => [l.from, l.to]));
+  return t.nodes.filter((n) => ids.has(n.id));
 }
 
 /** The UART speeds both ends' MCU definitions name (`[link_uart] bauds`): the only ones a link may be set to. */
@@ -160,7 +171,6 @@ export interface BoardTemplate {
 export const maxNodes = (): number => max_nodes();
 const I2C_FIRST = 0x08;
 const I2C_LAST = 0x77;
-const I2C_SPEED = 400_000;
 
 export function template(board: string): BoardTemplate | null {
   return board_template(board) as BoardTemplate | null;
@@ -172,9 +182,10 @@ function hubPins(h: TNode): BoardTemplate['coordinator'] {
   return (board ? template(board)?.coordinator : null) ?? null;
 }
 
-/** A new I2C bus on 親機 `h`; without defined pins the check asks for them. */
-function hubBus(h: TNode): TBus {
-  return { id: 'i2c-main', kind: 'i2c', ...hubPins(h)?.i2c, speed_hz: I2C_SPEED, pullups: 'external' } as TBus;
+/** A new I2C bus on 親機 `h` towards `n`: the first speed both definitions name (none: the check asks); without defined pins the check asks for them. */
+function hubBus(h: TNode, n: TNode): TBus {
+  const hz = i2cHzs([h, n])[0];
+  return { id: 'i2c-main', kind: 'i2c', ...hubPins(h)?.i2c, ...(hz === undefined ? {} : { speed_hz: hz }), pullups: 'external' } as TBus;
 }
 
 /** UART0 pins for a link from `h`: its MCU's [coordinator] pair, else the 親機 MCU's; none defined: the check asks for them. */
@@ -332,7 +343,7 @@ export function connect(doc: Doc, id: string, parent?: string): Doc {
   let buses = t.buses ?? [];
   let link: TLink;
   if (d.kind === 'i2c') {
-    if (!buses.length) buses = [hubBus(h)];
+    if (!buses.length) buses = [hubBus(h, n)];
     const free = freeAddrs(t);
     const addr = d.addr !== null && free.includes(d.addr) ? d.addr : free[0];
     const pins = tpl?.i2cPairs[0];
@@ -430,7 +441,7 @@ export function setLinkKind(doc: Doc, index: number, kind: LinkKind): Doc {
     kind === 'uart'
       ? { from: h.id, to: l.to, kind, iface: 'pio-uart', pins: hubUart(h), ...firstBaud(h, n ?? h), control: { kind: 'cooperative' } }
       : { from: h.id, to: l.to, kind, bus: t.buses?.[0]?.id ?? 'i2c-main', addr: freeAddrs(t)[0], control: { kind: 'full' } };
-  const buses = kind === 'i2c' && !t.buses?.length ? [hubBus(h)] : t.buses;
+  const buses = kind === 'i2c' && !t.buses?.length ? [hubBus(h, n ?? h)] : t.buses;
   return { ...without, topo: { ...t, buses, links: [...(t.links ?? []), link] } };
 }
 

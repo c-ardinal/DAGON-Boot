@@ -966,7 +966,10 @@ export const INSPECT = {
   bus: '共有の 2 本線（I2C）',
   busPins: 'ピン',
   speed: '速さ',
-  speeds: { 100000: '100 kHz', 400000: '400 kHz' } as Record<number, string>,
+  /** No speed every node's definition names: the bus cannot be set up with these MCUs. */
+  noSpeed: 'このバスのマイコンに共通の速さがありません',
+  /** A bus speed as the user reads it. */
+  hz: (hz: number) => `${hz / 1000} kHz`,
   pullups: 'プルアップ',
   pullupKinds: { external: '外付け', board: '基板上' } as Record<string, string>,
   inUse: (what: string) => `（使用中: ${what}）`,

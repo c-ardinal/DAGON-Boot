@@ -22,7 +22,6 @@ const MAX_TAG_LEN: usize = 16;
 /// a margin for clock tolerance and edge timing below that.
 use crate::defs::MAX_BAUD_ERROR;
 /// Standard and fast mode; each ROM I2C bootloader's `max_hz` caps it further.
-const I2C_SPEEDS: &[u32] = &[100_000, 400_000];
 const I2C_ADDR_MIN: u8 = 0x08;
 const I2C_ADDR_MAX: u8 = 0x77;
 
@@ -981,25 +980,62 @@ impl<'a> Ctx<'a> {
         }
     }
 
+    /// A bus's speed is one every node on it runs its I2C link at, from
+    /// their MCUs' `[link_i2c]`; a node whose MCU states none is refused (no
+    /// speed is known to work on it). The slowest ROM loader reached over
+    /// the bus caps it.
     fn v20(&mut self) {
         for (i, b) in self.t.buses.iter().enumerate() {
-            // The slowest ROM loader reached over this bus caps its speed.
-            let rom_cap = self
+            let on_bus: Vec<&Link> = self
                 .links()
                 .filter(|(_, l)| l.kind == LinkKind::I2c && l.bus.as_ref() == Some(&b.id))
-                .filter_map(|(_, l)| self.forced_rom(&l.to))
+                .map(|(_, l)| l)
+                .collect();
+            let rom_cap = on_bus
+                .iter()
+                .filter_map(|l| self.forced_rom(&l.to))
                 .min_by_key(|r| r.max_hz);
-            let over_cap = |s: u32| rom_cap.is_some_and(|r| s > r.max_hz);
-            if b.speed_hz
-                .is_some_and(|s| !I2C_SPEEDS.contains(&s) || over_cap(s))
-            {
+            let speed = b.i2c_hz();
+            let path = format!("buses[{i}].speed_hz");
+            // The speeds every node's firmware runs the bus at; a node whose firmware runs no I2C link here is V-23's.
+            let mut named: Option<Vec<u32>> = None;
+            for l in &on_bus {
+                for (id, dir) in [(&l.from, Dir::Down), (&l.to, Dir::Up)] {
+                    let Some(m) = self.t.node(id).and_then(|n| self.reg.mcu(&n.mcu)) else {
+                        continue;
+                    };
+                    if !links::available_in(self.reg, &m.id, dir).contains(&LinkKind::I2c) {
+                        continue;
+                    }
+                    let Some(u) = &m.link_i2c else {
+                        self.err(
+                            "V-20",
+                            path.clone(),
+                            format!(
+                                "speed_hz {speed}: {id} ({}) cannot be checked: its MCU definition has no [link_i2c]",
+                                m.name
+                            ),
+                        );
+                        continue;
+                    };
+                    named = Some(match named {
+                        None => u.hzs.clone(),
+                        Some(n) => n.into_iter().filter(|h| u.hzs.contains(h)).collect(),
+                    });
+                }
+            }
+            let over_cap = rom_cap.is_some_and(|r| speed > r.max_hz);
+            if named.as_ref().is_some_and(|n| !n.contains(&speed)) || over_cap {
                 let limit = rom_cap.map_or(String::new(), |r| {
                     format!(" ({} limit {})", r.name, r.max_hz)
                 });
                 self.err(
                     "V-20",
-                    format!("buses[{i}].speed_hz"),
-                    format!("speed_hz must be one of {I2C_SPEEDS:?}{limit}"),
+                    path,
+                    format!(
+                        "speed_hz must be one of {:?}{limit}",
+                        named.unwrap_or_default()
+                    ),
                 );
             }
             if !matches!(b.pullups.as_deref(), Some("external" | "board")) {

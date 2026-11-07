@@ -59,6 +59,9 @@ sub = "sk-ant-FAKE-TOKEN-4242/bootcore"
 [links]
 up = ["i2c"]
 
+[link_i2c]
+hzs = [100_000, 400_000]
+
 [rom_i2c]
 name = "Fake ROM loader"
 addr = 0x3A

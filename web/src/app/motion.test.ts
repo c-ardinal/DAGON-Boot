@@ -81,11 +81,11 @@ describe('motion values come only from the tokens', () => {
 });
 
 describe('continuous motion is for work in progress only', () => {
-  test('whatever loops belongs to a busy state, and stops under reduced motion', () => {
+  test('whatever loops belongs to a busy state or the DAGON mark\'s floating, and stops under reduced motion', () => {
     for (const rel of sources) {
       const css = cssOf(rel);
       for (const m of css.matchAll(/([^{}]+)\{[^{}]*\banimation[^;}]*\binfinite\b/g)) {
-        expect(m[1].trim(), `${rel}: what loops`).toMatch(/busy|thinking|crest/);
+        expect(m[1].trim(), `${rel}: what loops`).toMatch(/busy|thinking|crest|\.mark img|\.shadow/);
         expect(css, `${rel}: stopped under reduced motion`).toMatch(/prefers-reduced-motion: reduce\)\s*\{[\s\S]*animation: none/);
       }
     }
@@ -105,14 +105,14 @@ describe('reduced motion turns every transition into an immediate or fade-only c
 
   test('nothing travels by a CSS transition under it: what moves takes a duration reduced motion makes 0', () => {
     const reduced = reducedTokens();
-    const place = baseValue('--t-place');
+    const place = baseValue('--tr-place');
     // translate and scale come only from tokens that reduced motion makes nothing.
     const moving = /^(?:transform|rotate|left|right|top|bottom|width|height|inline-size|block-size|d|cx|cy|r|x|y|zoom|margin(?:-\w+)?|--shown)\b/;
     for (const rel of sources) {
       if (rel === 'styles/tokens.css') continue;
       for (const { prop, value } of motionDecls(cssOf(rel))) {
         if (prop !== 'transition' || value.trim() === 'none') continue;
-        for (const part of value.replace('var(--t-place)', place).split(',')) {
+        for (const part of value.replace('var(--tr-place)', place).split(',')) {
           const p = part.trim();
           if (!moving.test(p)) continue;
           const dur = /var\((--dur-[\w-]+)\)/.exec(p)?.[1] ?? '';

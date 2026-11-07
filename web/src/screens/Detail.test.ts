@@ -1,6 +1,6 @@
 import { render } from 'svelte/server';
 import { describe, expect, test } from 'vitest';
-import { DETAIL, WRITE } from '../app/copy.ts';
+import { DETAIL, SLOT, WRITE } from '../app/copy.ts';
 import type { Live } from '../app/operate.svelte.ts';
 import { SAMPLE_CONFIG } from '../app/sample.ts';
 import type { HelloResp } from '../serial/hello.ts';
@@ -49,6 +49,17 @@ const VERSION: VersionResp = {
   coreSlots: { active: 0, slots: [{ state: 4, version: V(1, 0, 0) }, { state: 1, version: V(1, 1, 0) }] },
   appSlots: null,
 };
+
+describe('node detail: the boot loader has its own slots', () => {
+  test('the boot loader slots A and B stand beside the app slots, with which one runs', () => {
+    const core = { slots: [{ state: 4, version: 0x01000000, digest16: new Uint8Array(16) }, { state: 0, version: 0, digest16: new Uint8Array(16) }], active: 0, confirmed: 0, attempts: 0, lastReason: 0, logGeneration: 0 };
+    const body = detail({ ...answered(1, null), core } as unknown as Live);
+    expect(body).toContain(SLOT.coreHeading);
+    const at = body.indexOf(SLOT.coreHeading);
+    expect(body.slice(at)).toContain(SLOT.inUse);
+    expect(body.slice(at)).toContain(SLOT.states[0]);
+  });
+});
 
 describe('node detail: VERSION under 詳しく見る', () => {
   test('stage0 and each boot core slot with the running one', () => {

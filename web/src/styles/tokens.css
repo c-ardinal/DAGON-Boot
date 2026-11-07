@@ -19,65 +19,37 @@
   --c-hover: #141413;
   --c-scrim: rgb(10 10 10 / 0.8);
 
-  /* type families */
+  /* type families: the dot face is the focal number's only; versions and counts read in the mono face. */
   --f-dot: 'Doto', 'JetBrains Mono', monospace;
-  --f-version: 'DotGothic16', 'JetBrains Mono', 'Yu Gothic UI', monospace;
   --f-ja: 'Zen Kaku Gothic New', 'Hiragino Sans', 'Hiragino Kaku Gothic ProN', 'Yu Gothic UI', 'Meiryo',
     'Noto Sans JP', system-ui, sans-serif;
   --f-mono: 'JetBrains Mono', Consolas, 'Courier New', monospace;
 
-  /* type steps: size / line-height (rem, 1rem = 16px) */
-  --t-display-size: 7rem; /* 112, the focal number */
-  --t-display-lh: 1;
-  --t-version-size: 1.5rem; /* 24, the card's version */
-  --t-version-lh: 1.1;
-  --t-version-small-size: 0.875rem; /* 14, in lists and tables */
-  --t-version-small-lh: 1.2;
-  --t-title-size: 1.25rem; /* 20, the start page's title only */
-  --t-title-lh: 1.3;
-  --t-heading-size: 0.875rem; /* 14, headings of sheets and windows */
-  --t-heading-lh: 1.3;
-  --t-body-size: 0.8125rem; /* 13, UI text */
-  --t-body-lh: 1.45;
-  --t-small-size: 0.75rem; /* 12, labels and values */
-  --t-small-lh: 1.45;
-  --t-caption-size: 0.6875rem; /* 11, chips and small labels */
-  --t-caption-lh: 1.4;
-  --t-mono-size: 0.75rem; /* 12 */
-  --t-mono-lh: 1.5;
-  --t-mono-log-lh: 1.54;
-
-  /* dense steps: 11 chips, 12 values, 13 UI text, 14 version */
-  --t-11: 0.6875rem;
-  --t-12: 0.75rem;
-  --t-13: 0.8125rem;
-  --t-14: 0.875rem;
-
   /* spacing: 4px steps only */
-  --s-1: 0.25rem;
-  --s-2: 0.5rem;
-  --s-3: 0.75rem;
-  --s-4: 1rem;
-  --s-5: 1.5rem;
-  --s-6: 2rem;
-  --s-7: 3rem;
-  --s-8: 4rem;
-  --s-9: 6rem;
+  --s-1: 4px;
+  --s-2: 8px;
+  --s-3: 12px;
+  --s-4: 16px;
+  --s-5: 24px;
+  --s-6: 32px;
+  --s-7: 48px;
+  --s-8: 64px;
+  --s-9: 96px;
 
-  /* component sizes */
-  --h-header: 2.75rem; /* 44, the one bar */
-  --h-band: 1.5rem; /* 24, the status row */
-  --h-primary: 1.75rem; /* 28 */
-  --h-secondary: 1.75rem; /* 28 */
-  --h-chip: 1.25rem; /* 20 */
-  --w-node: 16.25rem; /* 260, a normal card */
-  --w-left: 14.5rem; /* the parts window */
-  --w-right: 18rem; /* the sheet */
+  /* legacy component sizes still read by a few components */
+  --h-header: 44px;
+  --h-band: 24px;
+  --h-primary: 28px;
+  --h-secondary: 28px;
+  --h-chip: 20px;
+  --w-node: 260px;
+  --w-left: 232px;
+  --w-right: 288px;
 
   /* radius */
   --r-0: 0;
   --r-s: 6px;
-  --r-m: 0.75rem;
+  --r-m: 12px;
   --r-l: 20px;
   --r-full: 9999px;
 
@@ -114,7 +86,7 @@
   --enter-shift: 8px;
   --enter-scale: 0.97;
   --move: 1; /* how much of a drawn or poured movement plays */
-  --t-place: left var(--dur-line) var(--ease-out), top var(--dur-line) var(--ease-out);
+  --tr-place: left var(--dur-line) var(--ease-out), top var(--dur-line) var(--ease-out);
 
   /* The Console design's own tokens, same names and values as the design file
      (desktop; the 2560 px values follow below). */
@@ -138,15 +110,15 @@
   --dur-orbit: 1600ms;
   --dur-feedback: 100ms;
   --busy-light: 48px;
-  /* type roles (px) */
-  --t-display: 160px;
-  --t-version: 20px;
-  --t-title: 28px;
-  --t-heading: 20px;
-  --t-body: 16px;
-  --t-small: 14px;
-  --t-caption: 12px;
-  --t-mono: 13px;
+  /* type roles (px): the one scale; the same role is the same size everywhere. */
+  --t-display: 160px; /* the focal number */
+  --t-version: 20px; /* a card's version */
+  --t-title: 28px; /* the start page's title */
+  --t-heading: 20px; /* headings of sheets, windows and modals */
+  --t-body: 16px; /* buttons and card product names */
+  --t-small: 14px; /* UI text: labels, rows, sentences */
+  --t-caption: 12px; /* chips, hints, values in lists */
+  --t-mono: 13px; /* code, ids and logs */
   /* component sizes */
   --h-bar: 44px;
   --h-status: 32px;
@@ -157,6 +129,7 @@
   --h-text-button: 24px;
   --h-row: 44px;
   --h-drawer: 176px;
+  --h-drawer-min: 120px;
   --m-edge: 24px;
   --p-hit: 8px;
   --p-layer: 4px;
@@ -173,12 +146,14 @@
   --w-parts: 240px;
   --w-menu: 320px;
   --w-bubble: 360px;
+  --w-mark: 72px; /* the DAGON mark */
   --zoom-default: 1.5; /* the first view of a project: the most it takes when the graph has room */
 }
 
 /* The 2560 px theme of the design (wqhd). */
 @media (min-width: 2560px) {
   :root {
+    --t-display: 160px;
     --t-version: 28px;
     --t-title: 44px;
     --t-heading: 28px;
@@ -194,6 +169,7 @@
     --h-button-header: 44px;
     --h-text-button: 36px;
     --h-drawer: 264px;
+    --h-drawer-min: 160px;
     --m-edge: 32px;
     --p-hit: 12px;
     --p-layer: 8px;
@@ -208,22 +184,17 @@
     --w-sheet: 488px;
     --w-parts: 344px;
     --w-bubble: 516px;
+    --w-mark: 96px;
   }
 }
 
 /* Phones and touch screens: every control is at least 44 × 44 px (viewport-matrix touch-target-44). */
 @media (max-width: 767px), (pointer: coarse) {
   :root {
-    --h-header: max(56px, 3.5rem);
-    --h-band: max(45px, 2.75rem);
-    --h-secondary: max(44px, 2.75rem);
-    --h-primary: max(44px, 2.75rem);
-  }
-}
-
-@media (max-width: 767px) {
-  :root {
-    --t-display-size: 4rem;
+    --h-header: 56px;
+    --h-band: 44px;
+    --h-secondary: 44px;
+    --h-primary: 44px;
   }
 }
 

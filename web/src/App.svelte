@@ -8,6 +8,7 @@
   import { HUB_LOCKED, hubOf, view, type Action } from './app/machine.ts';
   import { Operate, waterOf, writingTo, type Progress, type ReleaseFile } from './app/operate.svelte.ts';
   import { keptChoices, type Kept } from './app/kept.ts';
+  import { previousVersion } from './app/slots.ts';
   import { buildFailure, buildingNow, buildStateOf, firstWriteNodes, type BuildingMemo, type BuildState } from './app/jobFlow.ts';
   import { logStages } from './app/stageLog.svelte.ts';
   import Graph, { COMPACT_FROM, newView, ZOOM_LIMITS, type Chip, type View } from './graph/Graph.svelte';
@@ -54,7 +55,7 @@
   import RomConfirm from './screens/RomConfirm.svelte';
   import { answerConsent } from './app/factory.ts';
   import Toast, { type Notice } from './screens/Toast.svelte';
-  import { CONN, FILE, HELP, LAYOUT, MENU, NOTICE, SIM, START, TABLE, TOPOLOGY_READ, fill as fillIn } from './app/copy.ts';
+  import { CONFIRM, CONN, FILE, HELP, LAYOUT, MENU, NOTICE, SHEET_CLOSE, SIM, START, TOPOLOGY_READ, fill as fillIn } from './app/copy.ts';
   import { devHub } from './serial/devHub.ts';
   import { DEMO_SITE } from './app/site.ts';
   import { serveSim, type SimStand } from './serial/serveSim.ts';
@@ -120,8 +121,9 @@
 
   /** `dagon serve`: the page is always its page; K0/K3 when it cannot be reached. */
   const cli = new Cli();
+  const demoStandIn = import.meta.env.DEV && params.has('demo');
   /** The 親機 and 子機 are simulated: `dagon demo` through serve, or the demo page's own simulator. */
-  const simulated = $derived(cli.sim !== null || DEMO_SITE);
+  const simulated = $derived(cli.sim !== null || DEMO_SITE || demoStandIn);
   /** The 定義 document: the project's 構成 as edited (its YAML is the one source of truth). */
   const d = new Define();
   /** DAGON's link to its agent through serve (development: `?agent` stands in for serve's routes). */
@@ -129,6 +131,8 @@
   const agentStandIn = import.meta.env.DEV && dev && params.has('agent');
   const agent = new Agent(import.meta.env.DEV && agentStandIn ? agentMock(params, () => d.config.yaml) : (m, p, b) => cli.api(m, p, b));
   if (agentStandIn) void agent.refresh();
+  /** One condition closes every path to linking, talking, keys and the CLI sheet: linked is never true in a demo. */
+  const agentLinked = $derived(!simulated && agent.linked);
   /** Web Serial, which the page never uses while it drives the simulator. */
   const ports = webSerial(serial, () => cli.sim !== null);
   cli.onDevice = (need) => (need ? op.handOver() : op.cliReturned());
@@ -386,7 +390,7 @@
   let linkOpen = $state(false);
   let dagonOpen = $state(0);
   async function openLink(at?: Element | null) {
-    if (cli.sim) return showWhy(AGENT.demoLink, at);
+    if (simulated) return;
     if (stopped('link', at)) return;
     if (!agent.status) await agent.refresh();
     if (!agent.status) return showWhy(AGENT.errors.OLD_CLI.text, at);
@@ -452,7 +456,7 @@
     { id: 'jobs', label: DRAWER.jobs, ...(runningJobs ? { count: runningJobs } : {}) },
     { id: 'output', label: DRAWER.output },
     { id: 'timeline', label: DRAWER.timeline },
-    { id: 'talk', label: DRAWER.talk },
+    ...(simulated ? [] : [{ id: 'talk', label: DRAWER.talk }]),
     { id: 'log', label: DRAWER.log },
   ]);
   /** serve names the nodes that can be built; a node without one has no skeleton yet. */
@@ -520,9 +524,18 @@
       return pickTab(drawerTab ?? 'problems');
     }
     const t = e.target as HTMLElement;
-    if (screen === 'work' && agent.linked && e.key === '/' && !/^(INPUT|SELECT|TEXTAREA)$/.test(t.tagName)) {
+    if (screen === 'work' && (agentLinked || simulated) && e.key === '/' && !/^(INPUT|SELECT|TEXTAREA)$/.test(t.tagName)) {
       e.preventDefault();
       return void dagonOpen++;
+    }
+    // Escape closes the top thing only: a dialog, the version list or a notice take it first; then the bubble, the menu, the help, the sheet.
+    if (screen === 'work' && e.key === 'Escape' && bubbleOpen && !document.querySelector('dialog[open], .split .list, [data-stop-notice]')) {
+      e.preventDefault();
+      return void (bubbleOpen = false);
+    }
+    if (screen === 'work' && e.key === 'Escape' && !menuOpen && !helpOpen && !document.querySelector('dialog[open], .split .list, [data-stop-notice]')) {
+      if (why) why = null;
+      return closeSheet();
     }
     if (screen === 'work' && !/^(INPUT|SELECT|TEXTAREA)$/.test(t.tagName)) {
       if (e.key.toLowerCase() === 'f' && !e.ctrlKey && !e.metaKey) return graph?.fit();
@@ -544,7 +557,7 @@
     if (e.key === 'Delete') {
       e.preventDefault();
       if (stopped('edit')) return;
-      d.removeSelected();
+      d.requestRemove();
     } else if (e.key === 'l' || e.key === 'L') {
       d.focusField = 'connect';
       d.focusRequest++;
@@ -599,7 +612,10 @@
     if (took) opened = t;
   }
 
-  let primaryEl = $state<HTMLButtonElement>();
+  let genEl = $state<HTMLButtonElement>();
+  let writeEl = $state<HTMLButtonElement>();
+  /** The mode's main action, the one the band's 次へ focuses. */
+  const primaryEl = $derived(mode === 'define' ? genEl : writeEl);
   let partsOpen = $state(true);
   let nextEl = $state<HTMLElement>();
 
@@ -633,8 +649,6 @@
   const FILLING_STAGES: ReadonlySet<Progress['stage']> = new Set(['writing', 'lastResort', 'rebooting']);
   const updating = $derived(UPDATING.has(op.state));
   const diffChips = $derived(Object.fromEntries(fileDiff.flatMap((r) => r.nodes).map((id) => [id, { chip: DIFF.chip, spoken: DIFF.spoken, silent: true }])));
-  /** a flat minute per node, the copy's 目安; measure per link and image size if it misleads. */
-  const MINUTES_PER_NODE = 1;
   /** On the cards while writing: → the new version; after it, what the write left (resultChip). */
   const cardChipOf = (id: string, p: Progress): Chip | null => {
     const to = op.fileVersions[id];
@@ -733,6 +747,12 @@
   let stopClosed = $state<string | null>(null);
   const stopNode = $derived(op.state === 'stopped' && op.failed ? (op.config?.nodes.find((n) => n.id === op.failed) ?? null) : null);
   const stopOpen = $derived(stopNode !== null && stopClosed !== op.failed);
+  /** What the node or the link said, in the user's words: the cause, then what to do (the band's sentence when nothing more is known). */
+  const failWhy = $derived.by(() => {
+    const p = op.failed ? op.progress[op.failed] : undefined;
+    const w = (p?.reason && WRITE.why[p.reason]) || (p?.stage && WRITE.why[p.stage]);
+    return w ?? { reason: next.cause ?? WRITE.failed, fix: next.sentence };
+  });
   $effect(() => {
     if (op.state !== 'stopped') stopClosed = null;
   });
@@ -773,6 +793,50 @@
     if (id && !stopped('recover')) void op.writeNode({ id, confirmed: true });
   }
   const romNode = $derived(op.config?.nodes.find((n) => n.id === romAsk) ?? null);
+  /** The bar's width: under this the edit tools would meet the actions, so they live in ☰ alone (its items are always there). */
+  const BAR_TOOLS_MIN = 1100;
+  let barNarrow = $state(false);
+  $effect(() => {
+    const bar = document.querySelector('.frame > header');
+    if (!bar) return;
+    const look = () => (barNarrow = bar.getBoundingClientRect().width < BAR_TOOLS_MIN);
+    look();
+    const ro = new ResizeObserver(look);
+    ro.observe(bar);
+    return () => ro.disconnect();
+  });
+  /** ×, Escape or the canvas background: the sheet closes (the selection goes). */
+  function closeSheet() {
+    if (mode === 'define') {
+      cliPanel = null;
+      d.selected = null;
+    } else op.select(null);
+  }
+  /** A press on the canvas's empty part that does not move (a pan is not a click) closes the sheet. */
+  let pressAt: { x: number; y: number } | null = null;
+  function canvasDown(e: PointerEvent) {
+    pressAt = { x: e.clientX, y: e.clientY };
+  }
+  function canvasPress(e: MouseEvent) {
+    const el = e.target as HTMLElement;
+    const moved = !pressAt || Math.hypot(e.clientX - pressAt.x, e.clientY - pressAt.y) > DRAG_PX;
+    pressAt = null;
+    if (moved || el.closest('button, .port, .link-chip, a, input')) return;
+    if (el.closest('.box') && !el.closest('.node')) closeSheet();
+  }
+  /** Every destructive action asks through this one modal: what, why, then the red button. */
+  let ask = $state<{ title: string; sentence: string; label: string; run: () => void } | null>(null);
+  /** The DAGON bubble is open: Escape closes it first, wherever focus is. */
+  let bubbleOpen = $state(false);
+  const confirmThen = (c: { title: string; sentence: string; label: string }, run: () => void) => (ask = { ...c, run });
+  /** The free part of the canvas a fit fills: the middle column less the room a toast stands in, so a notice never covers a card of the fit view. */
+  const TOAST_ROOM = 64;
+  const fitArea = () => {
+    const r = midEl?.getBoundingClientRect();
+    return r && new DOMRect(r.left, r.top, r.width, Math.max(0, r.height - TOAST_ROOM));
+  };
+  /** The whole middle column: the fit falls back to it when the toast's room alone would make the cards compact. */
+  const wholeArea = () => midEl?.getBoundingClientRect();
   /** The sheet shows only when it holds something. */
   const sheetShown = $derived(
     mode === 'define'
@@ -957,10 +1021,8 @@
   $effect(() => {
     addEventListener('click', lockClick, true);
     addEventListener('keydown', lockKeys, true);
-    if (DEMO_SITE) {
-      addEventListener('pointerover', lockHint, true);
-      addEventListener('focusin', lockHint, true);
-    }
+    addEventListener('pointerover', lockHint, true);
+    addEventListener('focusin', lockHint, true);
     return () => {
       removeEventListener('click', lockClick, true);
       removeEventListener('keydown', lockKeys, true);
@@ -988,7 +1050,7 @@
     if (stopped('connect')) return;
     if (hubLocked) {
       // Seen where the button is, in either mode; the status row's sentence is for screen readers.
-      showWhy(hubLocked, document.querySelector('[data-control="connect"]'));
+      showWhy(hubLocked, document.querySelector('header [data-control="connect"]'));
       hubNotice = { at: op.state, why: hubLocked };
       if (mode === 'operate') void tick().then(() => nextEl?.focus());
       return;
@@ -1036,11 +1098,9 @@
       const overall = op.overallAt(nowMs);
       const progress = { label: CANVAS.dotProgress, value: overall, unit: halted ? CANVAS.dotStopped : CANVAS.dotPercent, name: CANVAS.dotProgressName(overall, halted) };
       if (op.startedAt === null) return progress;
-      // 経過 under the number, 残り beside it (the estimate less the time gone).
+      // 経過 under the number: the one time that is measured, not guessed.
       const gone = Math.max(0, wallMs - op.startedAt);
-      const nodes = op.state === 'recovering' ? 1 : Math.max(1, op.targets.length);
-      const left = nodes * MINUTES_PER_NODE * 60_000 - gone;
-      return { ...progress, sub: [TIME.elapsed, TIME.clock(gone)] as const, more: [[TIME.left, TIME.about(left)]] as const };
+      return { ...progress, sub: [TIME.elapsed, TIME.clock(gone)] as const };
     }
     if (op.state === 'scanning' || op.state === 'scanned') return { label: CANVAS.dotFound, value: op.found, name: CANVAS.dotFoundName(op.found) };
     // Out of the nodes updating reaches: the others are never watched.
@@ -1109,56 +1169,63 @@
     {
       label: MENU.groups.project,
       items: [
-        { label: START.new, control: 'project', off: modeLocked ? MENU.off.notIdle : null, run: () => toStart('new') },
-        { label: START.open, control: DEMO_SITE ? 'open' : 'project', off: modeLocked ? MENU.off.notIdle : null, run: () => toStart('open') },
-        { label: MENU.save, off: local || screen !== 'work' ? MENU.off.nothing : null, run: () => void save() },
+        { label: START.new, hint: MENU.hint.new, control: 'project', off: modeLocked ? MENU.off.notIdle : null, run: () => toStart('new') },
+        { label: START.open, hint: MENU.hint.open, control: DEMO_SITE ? 'open' : 'project', off: modeLocked ? MENU.off.notIdle : null, run: () => toStart('open') },
+        { label: MENU.save, hint: MENU.hint.save, off: local || screen !== 'work' ? MENU.off.noProject : null, run: () => void save() },
+        { label: MENU.restart, hint: MENU.hint.restart, control: 'project', danger: true, off: modeLocked ? MENU.off.notIdle : null, run: () => (restartOpen = true) },
       ],
     },
     {
       label: MENU.groups.define,
       items: [
-        { label: DEFINE.undo, key: 'Ctrl+Z', control: 'edit', off: mode !== 'define' ? MENU.off.notDefine : d.canUndo ? null : MENU.off.nothing, run: () => d.undo() },
-        { label: DEFINE.redo, key: 'Ctrl+Shift+Z', control: 'edit', off: mode !== 'define' ? MENU.off.notDefine : d.canRedo ? null : MENU.off.nothing, run: () => d.redo() },
-        { label: PARTS.open, off: mode !== 'define' ? MENU.off.notDefine : partsOpen ? MENU.off.nothing : null, run: () => (partsOpen = true) },
-        { label: MENU.arrange, off: Object.keys(positions).length ? null : MENU.off.nothing, run: () => ((positions = {}), savePositions()) },
-        { label: d.view === 'graph' ? DEFINE.table : DEFINE.graph, off: mode !== 'define' ? MENU.off.notDefine : null, run: () => (d.view = d.view === 'graph' ? 'table' : 'graph') },
-        { label: ZOOM.fit, key: 'F', off: mode === 'define' && d.view !== 'graph' ? MENU.off.notGraph : null, run: () => graph?.fit() },
+        { label: DEFINE.undo, hint: MENU.hint.undo, key: 'Ctrl+Z', control: 'edit', off: mode !== 'define' ? MENU.off.notDefine : d.canUndo ? null : MENU.off.noUndo, run: () => d.undo() },
+        { label: DEFINE.redo, hint: MENU.hint.redo, key: 'Ctrl+Shift+Z', control: 'edit', off: mode !== 'define' ? MENU.off.notDefine : d.canRedo ? null : MENU.off.noRedo, run: () => d.redo() },
+        { label: PARTS.open, hint: MENU.hint.parts, off: mode !== 'define' ? MENU.off.notDefine : partsOpen ? MENU.off.partsOpen : null, run: () => (partsOpen = true) },
+        { label: MENU.arrange, hint: MENU.hint.arrange, off: Object.keys(positions).length ? null : MENU.off.arranged, run: () => ((positions = {}), savePositions()) },
+        // The view toggle leaves the menu while the header holds it.
+        ...(barNarrow ? [{ label: d.view === 'graph' ? MENU.viewTable : MENU.viewGraph, hint: d.view === 'graph' ? MENU.hint.viewTable : MENU.hint.viewGraph, off: mode !== 'define' ? MENU.off.notDefine : null, run: () => (d.view = d.view === 'graph' ? 'table' : 'graph') }] : []),
+        { label: ZOOM.fit, hint: MENU.hint.fit, key: 'F', off: mode === 'define' && d.view !== 'graph' ? MENU.off.notGraph : null, run: () => graph?.fit() },
       ],
     },
     {
       label: MENU.groups.connect,
       items: [
-        { label: connected ? HUB_TOGGLE.disconnect : HUB_TOGGLE.connect, control: 'connect', off: hubLocked, run: toggleHub },
-        { label: MENU.place, control: 'file', off: !connected ? MENU.off.notConnected : idle ? null : MENU.off.notIdle, run: () => fileInput?.click() },
-        { label: MENU.rollback, control: 'rollback', off: !connected ? MENU.off.notConnected : !idle ? MENU.off.notIdle : selectedNode ? null : MENU.off.noNode, run: () => selectedNode && void op.rollback(selectedNode) },
+        { label: connected ? HUB_TOGGLE.disconnect : HUB_TOGGLE.connect, hint: connected ? MENU.hint.disconnect : MENU.hint.connect, control: 'connect', off: hubLocked, run: toggleHub },
+        { label: MENU.place, hint: MENU.hint.place, control: 'file', off: !connected ? MENU.off.notConnected : idle ? null : MENU.off.notIdle, run: () => fileInput?.click() },
+        { label: MENU.rollback, hint: MENU.hint.rollback, control: 'rollback', off: !connected ? MENU.off.notConnected : !idle ? MENU.off.notIdle : selectedNode ? null : MENU.off.noNode, run: () => selectedNode && askRollback(selectedNode) },
       ],
     },
     {
       label: MENU.groups.dagon,
       items: [
-        ...(agent.linked
+        ...(agentLinked
           ? [
-              { label: AGENT.menuTalk, control: 'ask', run: () => void dagonOpen++ },
-              { label: MENU.applyProposal, control: 'apply', off: lastProposal < 0 ? MENU.off.noProposal : null, run: () => applyProposal(lastProposal, document.body) },
+              { label: AGENT.menuTalk, hint: MENU.hint.talk, control: 'ask', run: () => void dagonOpen++ },
+              { label: MENU.applyProposal, hint: MENU.hint.apply, control: 'apply', off: lastProposal < 0 ? MENU.off.noProposal : null, run: () => applyProposal(lastProposal, document.body) },
             ]
-          : [{ label: AGENT.menuLink, control: 'link', run: () => void openLink(document.querySelector('[aria-controls="menu"]')) }]),
-        { label: MENU.cli, run: openCli },
-        ...(agent.linked ? [{ label: AGENT.menuUnlink, danger: true, run: () => void unlink() }] : []),
+          : [{ label: AGENT.menuLink, hint: MENU.hint.link, control: 'link', off: simulated ? MENU.off.demo : null, run: () => void openLink(document.querySelector('[aria-controls="menu"]')) }]),
+        { label: MENU.cli, hint: MENU.hint.cli, off: simulated ? MENU.off.demo : null, run: openCli },
+        ...(agentLinked ? [{ label: AGENT.menuUnlink, hint: MENU.hint.unlink, danger: true, run: () => confirmThen(CONFIRM.unlink, () => void unlink()) }] : []),
       ],
     },
     {
       label: MENU.groups.help,
       items: [
-        { label: HELP.heading, run: () => ((helpKeys = false), (helpOpen = true)) },
-        { label: MENU.keys, run: () => ((helpKeys = true), (helpOpen = true)) },
-        { label: MENU.wiring, off: d.doc.topo.nodes.length ? null : MENU.off.nothing, run: () => (switchMode('define'), (d.view = 'table'), (tableTab = TABLE.tabs.indexOf('配線'))) },
-        { label: MENU.copyLog, off: notes.length ? null : MENU.off.nothing, run: () => void copyText(notes.map((n) => `${n.at} ${n.text}`).join('\n')) },
-        { label: MENU.copyUrl, run: () => void copyText(location.href) },
+        { label: HELP.heading, hint: MENU.hint.help, run: () => ((helpKeys = false), (helpOpen = true)) },
+        { label: MENU.keys, hint: MENU.hint.keys, run: () => ((helpKeys = true), (helpOpen = true)) },
+        { label: MENU.copyLog, hint: MENU.hint.copyLog, off: notes.length ? null : MENU.off.noLog, run: () => void copyText(notes.map((n) => `${n.at} ${n.text}`).join('\n')) },
+        { label: MENU.copyUrl, hint: MENU.hint.copyUrl, run: () => void copyText(location.href) },
       ],
     },
   ]);
-  const menuLast = $derived<MenuItem>({ label: MENU.restart, control: 'project', danger: true, off: modeLocked ? MENU.off.notIdle : null, run: () => (restartOpen = true) });
+  /** 前のバージョンに戻す, from the menu or the sheet: asks first, like every change that cannot be undone. */
+  function askRollback(id: string) {
+    const n = op.config?.nodes.find((x) => x.id === id);
+    const v = previousVersion(op.live[id]?.status);
+    confirmThen(CONFIRM.rollback(n ? `[${n.no}] ${n.name}` : id, v ?? ''), () => void op.rollback(id));
+  }
   function openCli() {
+    if (simulated) return;
     if (mode !== 'define') switchMode('define');
     d.selected = null;
     cliPanel = 'link';
@@ -1315,28 +1382,30 @@
 
 {#snippet defineRight()}
   {#if cliPanel}
-    <CliPanel {cli} {agent} panel={cliPanel} />
+    <CliPanel {cli} {agent} panel={cliPanel} onconfirm={(run) => confirmThen(CONFIRM.key, run)} />
   {:else if d.selected}
     <div class="edit-area" data-control="edit"><Inspector {d} /></div>
   {/if}
 {/snippet}
 
-{#snippet actions()}
-  {#if mode === 'define'}
+{#snippet actions(m: 'define' | 'operate')}
+  {#if m === 'define'}
     {@const blocked = problemCount > 0 || d.doc.topo.nodes.length === 0}
-    <button class="button-primary-header" data-control="gen" bind:this={primaryEl} aria-disabled={blocked} onclick={() => !blocked && void makeSkeleton()}><span>{SKELETON.make}</span></button>
-    <button class="button-secondary-header" data-control="build" aria-disabled={buildState === 'running'} onclick={() => buildState !== 'running' && void build()}><span>{BUILD.run}</span></button>
+    <button class="button-primary-header" data-control="gen" bind:this={genEl} aria-disabled={blocked} title={blocked ? SKELETON.makeWhy : undefined} onclick={() => !blocked && void makeSkeleton()}><span>{SKELETON.make}</span></button>
+    <button class="button-secondary-header" data-control="build" aria-disabled={buildState === 'running'} title={buildState === 'running' ? BUILD.runningWhy : undefined} onclick={() => buildState !== 'running' && void build()}><span>{BUILD.run}</span></button>
   {:else}
     <SplitButton
       label={WRITE.run}
       onmain={write}
       off={writeOff}
+      offWhy={op.state === 'choosing' ? HUB_TOGGLE.locked.choosing : !connected ? WRITE.offWhy.notConnected : WRITE.offWhy.busy}
+      pickOffWhy={WRITE.pickOffWhy}
       control={writeControl}
       pickName={WRITE.pickVersion}
       options={versionChoices.map((c) => (c.id === 'latest' && c.label !== WRITE.latest ? { ...c, note: WRITE.latest } : c))}
       pickOff={!WRITABLE.has(op.state)}
       onpick={(id) => void writeVersion(id)}
-      bind:mainEl={primaryEl}
+      bind:mainEl={writeEl}
     />
   {/if}
 {/snippet}
@@ -1400,7 +1469,7 @@
         {connected}
         act={nodeActions}
         onkeep={(id) => !stopped('rollback') && void op.keepTrial(id)}
-        onback={(id) => !stopped('rollback') && void op.rollback(id)}
+        onback={(id) => !stopped('rollback') && askRollback(id)}
         first={firstNodes}
         onfirst={(id) => (connected ? void writeOne(id) : (factory = { node: id, id: null }))}
         recovery={op.recovering && op.recovered ? { id: op.recovering, result: op.recovered } : null}
@@ -1422,14 +1491,16 @@
       operateLocked={d.operable !== 'ok'}
       onlocked={() => lock(d.operable)}
       {menuOpen}
-      onmenu={() => (menuOpen = !menuOpen)}
+      onmenu={() => ((menuOpen = !menuOpen), menuOpen && (bubbleOpen = false))}
       actions={screen === 'work' ? actions : undefined}
       bind:helpOpen
       {helpKeys}
       title={screen === 'work' ? (d.doc.topo.name ?? '') : ''}
+      edit={screen === 'work' && !barNarrow ? { canUndo: d.canUndo, canRedo: d.canRedo, onundo: () => d.undo(), onredo: () => d.redo(), view: d.view, onview: (v) => (d.view = v) } : undefined}
+      hub={screen === 'work' ? { connected, locked: hubLocked, hint: op.state === 'idle' || op.state === 'choosing' ? band.sentence : undefined, onpress: toggleHub } : undefined}
     >
       {#snippet menu()}
-        {#if menuOpen}<Menu groups={menuGroups} last={menuLast} onclose={() => ((menuOpen = false), document.querySelector<HTMLElement>('[aria-controls="menu"]')?.focus())} />{/if}
+        {#if menuOpen}<Menu groups={menuGroups} onclose={() => ((menuOpen = false), document.querySelector<HTMLElement>('[aria-controls="menu"]')?.focus())} />{/if}
       {/snippet}
     </Header>
     {#if screen === 'start'}
@@ -1437,24 +1508,23 @@
     {:else}
       <!-- The canvas's box is the whole stage, whatever floats over it. Three columns float over the free part: each column stacks what shares a side, so they cannot overlap. -->
       <div in:fade class="stage">
-        <main id="canvas" tabindex="-1" aria-describedby="canvas-help">
+        <!-- svelte-ignore a11y_click_events_have_key_events a11y_no_noninteractive_element_interactions -->
+        <main id="canvas" tabindex="-1" aria-describedby="canvas-help" onpointerdown={canvasDown} onclick={canvasPress}>
           <p id="canvas-help" class="visually-hidden">{CANVAS.describe}</p>
           {#if mode === 'operate' || d.view === 'graph'}
             <!-- One graph for both modes: changing mode moves the same cards to their places. -->
-            <Graph bind:this={graph} bind:view={canvasView} bind:positions onmoved={savePositions} freeArea={() => midEl?.getBoundingClientRect()} {building} {...graphProps} />
+            <Graph bind:this={graph} bind:view={canvasView} bind:positions onmoved={savePositions} freeArea={fitArea} {wholeArea} {building} {...graphProps} />
           {/if}
         </main>
         <div class="overlay">
           <div class="col">
             {#if mode === 'define'}
-              <!-- Undo, redo: top-left, where editors keep them and next to what they change. -->
-              <div class="tools" data-avoid="">
-                <button class="button-icon" data-control="edit" aria-disabled={!d.canUndo} aria-label={DEFINE.undo} title="{DEFINE.undo} (Ctrl+Z)" onclick={() => d.undo()}><span class="layer"><Icon name="undo-2" /></span></button>
-                <button class="button-icon" data-control="edit" aria-disabled={!d.canRedo} aria-label={DEFINE.redo} title="{DEFINE.redo} (Ctrl+Shift+Z)" onclick={() => d.redo()}><span class="layer"><Icon name="redo-2" /></span></button>
-                {#if !partsOpen}
+              {#if !partsOpen}
+                <!-- The parts opener: where the window it opens stands. -->
+                <div class="tools" data-avoid="">
                   <button transition:fade class="button-icon" aria-label={PARTS.open} title={PARTS.open} onclick={() => (partsOpen = true)}><span class="layer"><Icon name="plus" /></span></button>
-                {/if}
-              </div>
+                </div>
+              {/if}
               {#if partsOpen}
                 <aside transition:rise class="float parts" data-avoid="" aria-label={PARTS.heading}><NodeList {d} ondrag={startPart} onclose={() => (partsOpen = false)} /></aside>
               {/if}
@@ -1466,7 +1536,7 @@
           </div>
           <div class="col mid" bind:this={midEl}>
             {#if mode === 'define' && d.view === 'table'}
-              <div in:fade class="edit-area table" data-control="edit"><Table {d} bind:tab={tableTab} onaddnode={() => document.querySelector<HTMLElement>('#list-h')?.focus()} /></div>
+              <div transition:fade class="edit-area table" data-control="edit"><Table {d} bind:tab={tableTab} onaddnode={() => document.querySelector<HTMLElement>('#list-h')?.focus()} /></div>
             {/if}
             {#if stopOpen && stopNode && op.wentBack}
               {@const running = op.live[stopNode.id]?.hello?.activeVersion}
@@ -1478,7 +1548,7 @@
                 fix={WRITE.rolled.next}
                 onclose={() => (stopClosed = op.failed)}
                 onmore={() => ((drawerTab = 'log'), (stopClosed = op.failed))}
-                linked={agent.linked}
+                linked={agentLinked}
                 onask={(at) => askWhy(at, () => (stopClosed = op.failed))}
                 actions={stopActions}
               />
@@ -1486,35 +1556,35 @@
             {#if notice}<Toast {notice} onmore={() => (drawerTab = 'log')} ondone={() => (notice = null)} />{/if}
           </div>
           <div class="col end">
-            {#if mode === 'define'}
-              <!-- Graph or table: top-right of what it switches, away from the edit tools. -->
-              <div class="tools seg" data-avoid="" role="radiogroup" aria-label="{DEFINE.graph}・{DEFINE.table}">
-                <button class="button-icon" role="radio" aria-checked={d.view === 'graph'} aria-label={DEFINE.graph} title={DEFINE.graph} onclick={() => (d.view = 'graph')}><span class="layer"><Icon name="network" /></span></button>
-                <button class="button-icon" role="radio" aria-checked={d.view === 'table'} aria-label={DEFINE.table} title={DEFINE.table} onclick={() => (d.view = 'table')}><span class="layer"><Icon name="table-2" /></span></button>
-              </div>
-            {/if}
             {#if sheetShown}
-              <aside transition:rise class="float sheet" aria-label={SHEET} data-avoid="">{@render right()}</aside>
+              <!-- The sheet: its × at the top right; Escape and the canvas background close it too. -->
+              <aside transition:rise class="float sheet" aria-label={SHEET} data-avoid="">
+                <div class="sheet-bar"><button class="button-icon sheet-close" aria-label={SHEET_CLOSE} title="{SHEET_CLOSE} (Esc)" onclick={closeSheet}><span class="layer"><Icon name="x" /></span></button></div>
+                {#key d.selected ?? op.selected ?? cliPanel}<div in:fade={{ dur: '--dur-quick' }}>{@render right()}</div>{/key}
+              </aside>
             {/if}
             <span class="grow"></span>
             {#if mode === 'operate' || d.view === 'graph'}
               <ZoomPill scale={canvasView.zoom} canIn={canvasView.zoom < ZOOM_LIMITS.max} canOut={canvasView.zoom > ZOOM_LIMITS.min} onin={() => graph?.zoomBy(ZOOM_LIMITS.step)} onout={() => graph?.zoomBy(1 / ZOOM_LIMITS.step)} onfit={() => graph?.fit()} />
+            {:else if agentLinked || simulated}
+              <!-- No zoom in the table: the sheet still stops above the mark, which keeps its place. -->
+              <span class="mark-room"></span>
             {/if}
           </div>
+          {#if agentLinked || simulated}
+            <!-- Over the columns, from the free area's bottom-right as the zoom is: no sheet, table or toast moves it; the drawer carries it up with the zoom; a drag places it. -->
+            <Dagon {agent} demo={simulated} place={cli.hello?.workspace ?? d.doc.topo.name ?? 'local'} bind:open={bubbleOpen} onask={askDagon} onapply={applyProposal} ontalk={() => (drawerTab = 'talk')} openRequest={dagonOpen} />
+          {/if}
         </div>
         <div class="dock" data-avoid="">
           <Drawer tabs={drawerTabs} open={drawerTab} onpick={(id) => (drawerTab = id)} onclose={() => (drawerTab = null)} body={drawerBody} />
           <Status
             hub={connected && hubNode ? `[${hubNode.no}] ${hubNode.name}` : stageWord(HUB[hub])}
             {connected}
-            hubAction={connected ? HUB_TOGGLE.disconnect : HUB_TOGGLE.connect}
-            onhub={toggleHub}
-            hubHint={op.state === 'idle' || op.state === 'choosing' ? band.sentence : undefined}
-            {hubLocked}
             state={stateName(lockStates)}
             cli={cli.hello?.key_id ? `${cliLabel}　${STATUS.key} ${cli.hello.key_id.slice(0, 8)}` : cliLabel}
             cliReady={cli.state === 'ready'}
-            oncli={openCli}
+            oncli={simulated ? undefined : openCli}
             saved={savedLabel}
             savedOk={!d.unsaved && !autosave.pending}
             sentence={[next.cause, next.sentence].filter(Boolean).join(' ')}
@@ -1523,9 +1593,6 @@
             bind:nextEl
           />
         </div>
-        {#if agent.linked}
-          <Dagon {agent} place={cli.hello?.workspace ?? d.doc.topo.name ?? 'local'} onask={askDagon} onapply={applyProposal} ontalk={() => (drawerTab = 'talk')} openRequest={dagonOpen} />
-        {/if}
       </div>
     {/if}
   </div>
@@ -1553,6 +1620,21 @@
   {/if}
   {#if restartOpen}
     <Restart onconfirm={restart} oncancel={cancelRestart} />
+  {/if}
+  {#if ask || d.askRemove}
+    {@const key = d.askRemove ?? ''}
+    {@const isNode = key.startsWith('node:')}
+    {@const l = isNode ? null : d.doc.topo.links?.find((x) => `link:${x.to}` === key)}
+    {@const nameOf = (id: string) => d.doc.names[id] ?? id}
+    {@const c = ask ?? { title: isNode ? CONFIRM.node(nameOf(key.slice(5))) : CONFIRM.link(nameOf(l?.from ?? ''), nameOf(l?.to ?? '')), sentence: isNode ? CONFIRM.nodeSentence : CONFIRM.linkSentence, label: CONFIRM.remove, run: () => d.answerRemove(true) }}
+    {@const no = () => (ask ? (ask = null) : d.answerRemove(false))}
+    <Modal title={c.title} chip={{ text: c.label, kind: 'error' }} onclose={no}>
+      <p>{c.sentence}</p>
+      {#snippet actions()}
+        <button class="button-secondary" onclick={no}>{CONFIRM.cancel}</button>
+        <button class="button-destructive" onclick={() => { const { run } = c; ask = null; run(); }}>{c.label}</button>
+      {/snippet}
+    </Modal>
   {/if}
   {#if autosave.asking}
     <Unsaved
@@ -1605,8 +1687,8 @@
     <StopModal
       target={`[${stopNode.no}] ${stopNode.name}`}
       label={op.coreWentBack ? WRITE.coreBack.label : undefined}
-      reason={op.coreWentBack ? WRITE.coreBack.detail : (next.cause ?? WRITE.failed)}
-      fix={op.coreWentBack ? WRITE.coreBack.next : next.sentence}
+      reason={op.coreWentBack ? WRITE.coreBack.detail : failWhy.reason}
+      fix={op.coreWentBack ? WRITE.coreBack.next : failWhy.fix}
       onclose={() => (stopClosed = op.failed)}
       onmore={() => ((drawerTab = 'log'), (stopClosed = op.failed))}
     >
@@ -1635,7 +1717,7 @@
       {#snippet actions()}
         {#if f.skeleton}
           <button class="button-primary" data-control="gen" onclick={() => ((buildFailureOpen = false), void makeSkeleton())}>{SKELETON.make}</button>
-        {:else if agent.linked}
+        {:else if agentLinked}
           <button class="button-secondary" data-control="ask" onclick={(e) => askWhy(e.currentTarget, () => (buildFailureOpen = false))}>{BUILD.askAgent}</button>
         {/if}
         {#if !f.skeleton}<button class="button-primary" data-control="build" onclick={() => void build()}>{BUILD.retry}</button>{/if}
@@ -1683,7 +1765,7 @@
   .modal-diff {
     width: 100%;
     border-collapse: collapse;
-    font: 400 var(--t-small-size) / var(--t-small-lh) var(--f-ja);
+    font: 400 var(--t-caption) / 16px var(--f-ja);
   }
   .modal-diff caption {
     margin-bottom: var(--s-2);
@@ -1746,6 +1828,7 @@
     outline: none;
   }
   .overlay {
+    position: relative;
     grid-area: 1 / 1 / 2 / 2;
     z-index: var(--z-chrome);
     display: grid;
@@ -1788,17 +1871,6 @@
     gap: var(--s-1);
     pointer-events: auto;
   }
-  /* The graph / table segment: a pill of two icons, the current one filled. */
-  .seg {
-    gap: 0;
-    border: 1px solid var(--c-line);
-    border-radius: var(--r-full);
-    background: var(--c-ink);
-  }
-  .seg [aria-checked='true'] :global(.layer) {
-    background: var(--c-paper);
-    color: var(--c-ink);
-  }
   .table {
     flex: 1;
     min-height: 0;
@@ -1822,11 +1894,37 @@
   .float.sheet {
     width: var(--w-sheet);
   }
+  /* The × rides a zero-height sticky strip at the sheet's top, so it stays while the body scrolls. */
+  .sheet-bar {
+    position: sticky;
+    z-index: 2;
+    top: 0;
+    height: 0;
+  }
+  /* On the head's line: the × stands level with the sheet's own top-right action (the head's trash). */
+  .sheet-close {
+    position: absolute;
+    top: var(--s-4);
+    right: var(--s-2);
+  }
+  /* The mark's default place, bottom right beside the zoom (Dagon.svelte), stays free: the table ends above it, a toast stands left of it. */
+  .mark-room {
+    width: var(--h-button);
+    flex: none;
+    height: var(--w-mark);
+  }
+  .frame:has(:global(.dagon)) .edit-area.table {
+    margin-bottom: calc(var(--w-mark) + var(--s-3));
+  }
+  .frame:has(:global(.dagon)) .col.mid > :global(.toast) {
+    max-width: calc(100% - var(--w-mark) - var(--s-3));
+    margin-right: calc(var(--w-mark) + var(--s-3));
+  }
   .log-none,
   .log {
     margin: 0;
     padding: var(--s-3) var(--s-5);
-    font: 400 var(--t-mono-size) / var(--t-mono-log-lh) var(--f-ja);
+    font: 400 var(--t-small) / 20px var(--f-ja);
   }
   .log {
     list-style: none;
@@ -1844,14 +1942,14 @@
     margin: 0;
     padding: var(--s-3) var(--s-5);
     list-style: none;
-    font: 400 var(--t-small-size) / var(--t-small-lh) var(--f-ja);
+    font: 400 var(--t-small) / 20px var(--f-ja);
   }
   .talk p {
     margin: 0;
   }
   .talk .who {
     color: var(--c-muted);
-    font-size: var(--t-caption-size);
+    font-size: var(--t-caption);
   }
   .talk .user p {
     color: var(--c-muted);
@@ -1870,7 +1968,7 @@
     padding: var(--s-2) var(--s-3);
     border: 1px solid var(--c-line);
     border-radius: var(--r-s);
-    font: 400 var(--t-mono-size) / var(--t-mono-lh) var(--f-mono);
+    font: 400 var(--t-mono) / 20px var(--f-mono);
     overflow-x: auto;
   }
   /* A proposal's diff: added lines in blue, removed ones muted and struck (not red: nothing failed). */
@@ -1894,18 +1992,18 @@
     border-radius: var(--r-s);
     background: var(--c-layer-2);
     color: var(--c-paper);
-    font: 400 var(--t-small-size) / var(--t-small-lh) var(--f-ja);
+    font: 400 var(--t-caption) / 16px var(--f-ja);
     box-shadow: 0 0.25rem 1rem rgb(0 0 0 / 0.5);
     pointer-events: none;
   }
   .ghost {
     position: fixed;
     z-index: var(--z-announce);
-    padding: 0.375rem 0.625rem;
+    padding: var(--s-1) var(--s-2);
     border: 1px solid var(--c-paper);
     border-radius: var(--r-m);
     background: var(--c-ink);
-    font: 400 var(--t-12) / 1.3 var(--f-ja);
+    font: 400 var(--t-caption) / 20px var(--f-ja);
     opacity: 0.9;
     pointer-events: none;
   }

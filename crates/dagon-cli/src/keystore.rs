@@ -94,10 +94,21 @@ fn why(e: Error) -> String {
     }
 }
 
+/// `dagon demo`: this process never opens the OS store.
+static CLOSED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// From here on this process uses no credential store.
+pub fn close() {
+    CLOSED.store(true, std::sync::atomic::Ordering::Relaxed);
+}
+
 impl Keys {
     /// The OS store. Found once per process; when it cannot be used, why
     /// (asked again next time, so a store started later is found).
     pub fn os() -> Keys {
+        if CLOSED.load(std::sync::atomic::Ordering::Relaxed) {
+            return Keys(Err("dagon demo uses no credential store".into()));
+        }
         static FOUND: OnceLock<Arc<CredentialStore>> = OnceLock::new();
         if let Some(s) = FOUND.get() {
             return Keys(Ok(s.clone()));

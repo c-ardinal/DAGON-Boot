@@ -39,7 +39,7 @@
   }
   h1 {
     margin: 0;
-    font: 700 var(--t-title-size) / var(--t-title-lh) var(--f-ja);
+    font: 700 var(--t-heading) / 28px var(--f-ja);
     letter-spacing: 0.02em;
     font-feature-settings: 'palt';
   }
@@ -58,7 +58,7 @@
     margin: 0;
   }
   code {
-    font: 500 var(--t-mono-size) / var(--t-mono-lh) var(--f-mono);
+    font: 500 var(--t-mono) / 20px var(--f-mono);
     overflow-wrap: anywhere;
   }
   button {
@@ -68,12 +68,12 @@
     border-radius: var(--r-m);
     background: var(--c-ink);
     color: var(--c-paper);
-    font: 700 var(--t-body-size) / 1 var(--f-ja);
+    font: 700 var(--t-small) / 1 var(--f-ja);
     cursor: pointer;
   }
   button:focus-visible {
     border: 3px solid var(--c-paper);
-    padding: 0 calc(var(--s-5) - 2px);
+    padding: 0 var(--s-5);
     outline: 3px solid transparent;
     outline-offset: -3px;
   }

@@ -8,6 +8,8 @@
     off?: string | null;
     /** The key that does the same. */
     key?: string;
+    /** What happens when it is pressed, under the name. */
+    hint?: string;
     /** Destroys something: red, under a separator. */
     danger?: boolean;
   }
@@ -25,13 +27,11 @@
 
   interface Props {
     groups: MenuGroup[];
-    /** Below the groups, under a separator. */
-    last: MenuItem;
     /** After an item ran. */
     onclose: () => void;
   }
 
-  let { groups, last, onclose }: Props = $props();
+  let { groups, onclose }: Props = $props();
   let openGroup = $state<string | null>(null);
   const shown = $derived(groups.find((g) => g.label === openGroup));
 
@@ -45,7 +45,7 @@
 {#snippet row(i: MenuItem)}
   <li>
     <button class="row" class:danger={i.danger} data-control={i.control} aria-disabled={!!i.off} title={i.off ?? undefined} onclick={() => press(i)}>
-      <span>{i.label}</span>
+      <span class="words"><span>{i.label}</span>{#if i.hint}<small>{i.off ?? i.hint}</small>{/if}</span>
       {#if i.key}<kbd translate="no">{i.key}</kbd>{/if}
     </button>
   </li>
@@ -62,8 +62,6 @@
         </button>
       </li>
     {/each}
-    <li class="sep" role="separator"></li>
-    {@render row(last)}
   </ul>
   {#if shown}
     <ul class="panel" aria-label={shown.label}>
@@ -107,8 +105,9 @@
     align-items: center;
     gap: var(--s-3);
     width: 100%;
-    height: var(--h-row);
-    padding: 0 var(--s-4);
+    min-height: var(--h-row);
+    padding: var(--s-2) var(--s-4);
+    transition: background-color var(--dur-quick) var(--ease-out);
     border: 0;
     background: none;
     color: var(--c-paper);
@@ -116,9 +115,16 @@
     text-align: left;
     cursor: pointer;
   }
-  .row span {
+  .row .words {
     flex: 1;
+    display: grid;
     min-width: 0;
+    gap: var(--s-1);
+    white-space: normal;
+  }
+  .row small {
+    color: var(--c-muted);
+    font: 400 var(--t-caption) / 16px var(--f-ja);
   }
   .row[aria-expanded='true'] {
     background: var(--c-layer-2);

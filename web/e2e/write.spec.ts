@@ -1,6 +1,6 @@
 import { fileURLToPath } from 'node:url';
 import { expect, test, type Page } from '@playwright/test';
-import { layoutFaults, openSample, settled } from './console.ts';
+import { disabledFaults, layoutFaults, openSample, settled } from './console.ts';
 
 test.setTimeout(360_000);
 
@@ -9,7 +9,7 @@ const toWrite = async (page: Page, query: string, size = { width: 1920, height: 
   await openSample(page, query);
   await page.getByRole('radio', { name: '書込' }).click();
   await settled(page);
-  await page.locator('#band').getByRole('button', { name: '接続する' }).click();
+  await page.locator('header').getByRole('button', { name: '接続する' }).click();
   await page.locator('.st-alive').first().waitFor({ timeout: 60_000 });
   await expect(page.locator('.split .main')).toHaveAttribute('aria-disabled', 'false', { timeout: 30_000 });
   await expect(page.locator('.split .caret')).toHaveAttribute('aria-disabled', 'false', { timeout: 30_000 });
@@ -39,6 +39,8 @@ test('the split button writes the checked nodes, again after done, and says when
   });
   await page.locator('.split .main').click();
   await expect(page.locator('.node.st-busy').first()).toBeVisible({ timeout: 30_000 });
+  // While writing, whatever cannot be pressed says why.
+  expect(await disabledFaults(page)).toEqual([]);
   await finished(page);
   expect(await page.evaluate(() => [...(window as unknown as { seen: Set<string> }).seen])).toEqual([JSON.stringify(before)]);
   await expect(page.locator('.toast')).toBeVisible();
@@ -152,7 +154,7 @@ test('the mascot does not move when a toast comes', async ({ page, context }) =>
   const before = await at();
   await page.getByRole('button', { name: 'メニューを開く' }).click();
   await page.getByRole('button', { name: '困ったとき', exact: true }).click();
-  await page.locator('.panel').last().locator('button:has(> span:text-is("この URL をコピーする"))').click();
+  await page.locator('.panel').last().locator('button:has(span:text-is("この URL をコピーする"))').click();
   await page.locator('.toast').waitFor();
   await settled(page);
   expect(await at()).toEqual(before);

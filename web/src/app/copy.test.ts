@@ -87,8 +87,14 @@ describe('copy', () => {
       copy.BAND_FOR.M29('7セグ').sentence,
       copy.CANVAS.empty,
       copy.DETAIL.nothingSelected,
-      ...copy.HELP.rows.map(([, s]) => s),
     ];
+    // 困ったとき: each row is the real cause and the next step, two or three polite sentences.
+    for (const [, s] of copy.HELP.rows) {
+      expect(s.match(/。/g)?.length, s).toBeGreaterThanOrEqual(2);
+      expect(s.match(/。/g)?.length, s).toBeLessThanOrEqual(3);
+      expect(s.endsWith('。'), s).toBe(true);
+      expect(s, s).not.toMatch(/[!！]/);
+    }
     // M57's two sentences are the copy table's own: the cause, then the step. M22's reason left its brackets.
     const twoSentences: string[] = [copy.BAND.M57.sentence, copy.BAND.M22.sentence];
     for (const s of sentences) {

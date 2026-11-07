@@ -17,9 +17,9 @@
 
 <!-- ZoomPill: a vertical stack, + on top; the readout between + and −, on the straight part of the pill where the round ends cannot touch it. -->
 <div class="pill" data-avoid="" role="toolbar" aria-label={ZOOM.label} aria-orientation="vertical">
-  <button class="button-icon" aria-label={ZOOM.in} title="{ZOOM.in} (Ctrl++)" aria-disabled={!canIn} onclick={() => canIn && onin()}><span class="layer"><Icon name="plus" /></span></button>
+  <button class="button-icon" aria-label={ZOOM.in} title={canIn ? `${ZOOM.in} (Ctrl++)` : ZOOM.maxWhy} aria-disabled={!canIn} onclick={() => canIn && onin()}><span class="layer"><Icon name="plus" /></span></button>
   <span class="pct">{Math.round(scale * 100)}%</span>
-  <button class="button-icon" aria-label={ZOOM.out} title="{ZOOM.out} (Ctrl+-)" aria-disabled={!canOut} onclick={() => canOut && onout()}><span class="layer"><Icon name="minus" /></span></button>
+  <button class="button-icon" aria-label={ZOOM.out} title={canOut ? `${ZOOM.out} (Ctrl+-)` : ZOOM.minWhy} aria-disabled={!canOut} onclick={() => canOut && onout()}><span class="layer"><Icon name="minus" /></span></button>
   <button class="button-icon" aria-label={ZOOM.fit} title="{ZOOM.fit} (F)" onclick={onfit}><span class="layer"><Icon name="maximize" /></span></button>
 </div>
 

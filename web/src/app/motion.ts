@@ -44,6 +44,24 @@ interface Timing {
 const eased = (dur: string) => ({ duration: tokenMs(dur), easing: curve('--ease-out') });
 
 /** A surface entering or leaving (toast, floating window, card, popover): it fades and rises a little. */
+/** A `.segmented` radio group's sliding thumb (base.css): stands under the checked choice, wherever that is. */
+export function thumb(group: HTMLElement): { destroy: () => void } {
+  const place = () => {
+    const on = group.querySelector<HTMLElement>('[aria-checked="true"]');
+    if (!on) return;
+    group.style.setProperty('--thumb-x', `${on.offsetLeft}px`);
+    group.style.setProperty('--thumb-y', `${on.offsetTop}px`);
+    group.style.setProperty('--thumb-w', `${on.offsetWidth}px`);
+    group.style.setProperty('--thumb-h', `${on.offsetHeight}px`);
+  };
+  place();
+  const checked = new MutationObserver(place);
+  checked.observe(group, { subtree: true, attributeFilter: ['aria-checked'] });
+  const sized = new ResizeObserver(place);
+  sized.observe(group);
+  return { destroy: () => (checked.disconnect(), sized.disconnect()) };
+}
+
 export function rise(_el: Element, { dur = '--dur-ui' }: Timing = {}): TransitionConfig {
   const shift = parseFloat(token('--enter-shift'));
   const scale = parseFloat(token('--enter-scale'));

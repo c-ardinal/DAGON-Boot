@@ -285,16 +285,39 @@ pub struct Coordinator {
 /// How the UART the MCU package's firmware runs DAGON's UART links on makes
 /// a bit rate: `clock_hz` divided by `clocks_per_bit` times a divider with
 /// `frac_bits` fraction bits, the divider rounded down (as the HAL the
-/// package builds with computes it).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+/// package builds with computes it). `bauds` lists the bit rates that
+/// firmware runs its link at: a link's `baud` must be one of them on both
+/// ends (V-26), and the Console offers only those, so no speed the
+/// definition does not name can be set or built.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct LinkUart {
     pub clock_hz: u32,
     pub clocks_per_bit: u32,
     pub frac_bits: u8,
+    pub bauds: Vec<u32>,
 }
 
+/// The I2C bus speeds the MCU package's firmware runs DAGON's I2C link at,
+/// as controller or target. A bus's `speed_hz` must be one of them on every
+/// node on the bus (V-20), and the Console offers only those, so no speed
+/// the definition does not name can be set or built.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct LinkI2c {
+    pub hzs: Vec<u32>,
+}
+
+/// How far a UART end may run from the link's `baud` (a fraction): each
+/// end of a link must be within it.
+pub const MAX_BAUD_ERROR: f64 = 0.02;
+
 impl LinkUart {
+    /// Whether `baud` is one this firmware runs its link at.
+    pub fn runs(&self, baud: u32) -> bool {
+        self.bauds.contains(&baud)
+    }
+
     /// The bit rate this UART runs at when asked for `baud`; `None` when
     /// it cannot divide its clock down to it (0, or faster than the clock).
     pub fn actual_baud(&self, baud: u32) -> Option<f64> {
@@ -457,10 +480,18 @@ pub struct McuDef {
     pub coordinator: Option<Coordinator>,
     /// How the UART the MCU package runs DAGON's UART links on makes a bit rate, as its HAL
     /// computes it: `clock_hz` divided by `clocks_per_bit` times a divider with `frac_bits`
-    /// fraction bits, rounded down. The topology check (V-26) refuses a link `baud` either end
-    /// makes more than 2 % off. Required on an MCU whose `[links]` has `uart`: without it, every
-    /// UART link that MCU's firmware runs is refused, since no speed on it is known to work.
+    /// fraction bits, rounded down. `bauds` lists the bit rates the firmware runs its link at;
+    /// the topology check (V-26) refuses a link `baud` that either end's list does not name or
+    /// that either end makes more than 2 % off, and DAGON Console offers only the speeds both
+    /// ends name. Required on an MCU whose `[links]` has `uart`: without it, every UART link
+    /// that MCU's firmware runs is refused, since no speed on it is known to work.
     pub link_uart: Option<LinkUart>,
+    /// The I2C bus speeds the MCU package's firmware runs DAGON's I2C link at, as controller or
+    /// target: `hzs`. The topology check (V-20) refuses a bus `speed_hz` that any node's list does
+    /// not name, and DAGON Console offers only the speeds every node on the bus names. Required on
+    /// an MCU whose `[links]` has `i2c`: without it, every I2C bus that MCU's firmware is on is
+    /// refused, since no speed on it is known to work.
+    pub link_i2c: Option<LinkI2c>,
     /// ROM I2C bootloader (`stm32-i2c-rom`): `name` (as check messages call it), `addr`, `max_hz`,
     /// `erase_sectors`, `pairs = [{ controller, sda, scl }]` it listens on.
     pub rom_i2c: Option<RomI2c>,
@@ -606,6 +637,9 @@ pub struct BoardDef {
     #[serde(default)]
     pub default: bool,
     /// `[{ pin, label }]`; `label` left out when not confirmed on the board.
+    /// Every pin a topology may name on this board, as a link end on it (a hub's `pins`,
+    /// `control`, bus `sda`/`scl`; a node's `node_pins` come from `i2c`): the check (V-07)
+    /// refuses any other, and DAGON Console offers only these.
     #[serde(default)]
     pub header: Vec<HeaderPin>,
     /// `[{ controller, sda, scl }]` pairs usable from the header.

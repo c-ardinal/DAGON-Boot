@@ -111,6 +111,6 @@
   ol li::before {
     content: counter(step);
     color: var(--c-accent);
-    font: 400 var(--t-version) / 24px var(--f-version);
+    font: 400 var(--t-version) / 24px var(--f-mono);
   }
 </style>

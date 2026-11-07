@@ -19,6 +19,28 @@ describe('define session', () => {
     expect(d.doc.topo.links ?? []).toEqual([]);
   });
 
+  test('deleting asks first: nothing goes until the confirmation says so, and then it is one undoable edit', () => {
+    const d = new Define();
+    d.load(fromYaml(SAMPLE_YAML));
+    const nodes = d.doc.topo.nodes.length;
+    d.selected = 'node:seg';
+    d.requestRemove();
+    expect(d.askRemove).toBe('node:seg');
+    expect(d.doc.topo.nodes.length).toBe(nodes);
+    d.answerRemove(false);
+    expect([d.askRemove, d.doc.topo.nodes.length, d.canUndo]).toEqual([null, nodes, false]);
+    d.requestRemove('link:watch');
+    d.answerRemove(true);
+    expect(d.doc.topo.links?.some((l) => l.to === 'watch')).toBe(false);
+    expect(d.doc.topo.nodes.length).toBe(nodes);
+    d.undo();
+    expect(d.doc.topo.links?.some((l) => l.to === 'watch')).toBe(true);
+    // A stopped edit asks nothing.
+    d.guard = () => true;
+    d.requestRemove('node:seg');
+    expect(d.askRemove).toBe(null);
+  });
+
   test('importing a topology identical to the 構成 is no change: no revision, nothing to save, no undo step', () => {
     const d = new Define();
     d.load(fromYaml(SAMPLE_YAML));

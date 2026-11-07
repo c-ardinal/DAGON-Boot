@@ -26,7 +26,9 @@
   let high = $state(false);
   /** Over the canvas nothing else takes Escape while it stands. */
   const key = (e: KeyboardEvent) => {
-    if (e.key === 'Escape') onclose();
+    if (e.key !== 'Escape') return;
+    e.stopImmediatePropagation();
+    onclose();
   };
   /** With little room it says only its word and its actions; the sentences stay in the record and on the title. */
   let tight = $state(false);

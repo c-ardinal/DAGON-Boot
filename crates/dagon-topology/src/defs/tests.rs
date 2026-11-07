@@ -377,12 +377,20 @@ fn fake_sample(addr: &str) -> crate::Topology {
 
 /// A registry with the fake MCU (its ROM I2C loader capped at `max_hz`).
 fn fake_registry(name: &str, max_hz: u32) -> Registry {
+    fake_registry_with(name, max_hz, "")
+}
+
+/// The fake MCU with a ROM loader capped at `max_hz`, and `extra` TOML after it.
+fn fake_registry_with(name: &str, max_hz: u32, extra: &str) -> Registry {
     let dir = scratch(name);
     let rom = format!(
         "\n[rom_i2c]\nname = \"Fake ROM loader\"\naddr = 0x3A\nmax_hz = {max_hz}\n\
          pairs = [{{ controller = \"i2c0\", sda = \"GPIO2\", scl = \"GPIO3\" }}]\n"
     );
-    write(&dir.join("m/dagon-mcu.toml"), &format!("{FAKE_MCU}{rom}"));
+    write(
+        &dir.join("m/dagon-mcu.toml"),
+        &format!("{FAKE_MCU}{rom}{extra}"),
+    );
     std::fs::create_dir_all(dir.join("m/bootcore")).unwrap();
     let board = FAKE_BOARD.replace("product", "[board.fake-board]\nproduct");
     write(
@@ -396,6 +404,35 @@ fn fake_registry(name: &str, max_hz: u32) -> Registry {
 
 fn rules(r: &crate::Report) -> Vec<&'static str> {
     r.errors().map(|i| i.rule).collect()
+}
+
+#[test]
+fn v20_bus_speeds_come_from_every_node_on_the_bus() {
+    let t = fake_sample("0x42");
+    let messages = |reg: &Registry| -> Vec<String> {
+        crate::check_with(reg, &t)
+            .errors()
+            .filter(|i| i.rule == "V-20")
+            .map(|i| i.message.clone())
+            .collect()
+    };
+    // The fake 子機's firmware runs its I2C link at 100 kHz only: the sample's
+    // 400 kHz bus is refused, and the message names what every node names.
+    let slow = fake_registry_with(
+        "v20-named",
+        400_000,
+        "[links]\nup = [\"i2c\"]\n[link_i2c]\nhzs = [100_000]\n",
+    );
+    assert_eq!(
+        messages(&slow),
+        ["speed_hz must be one of [100000] (Fake ROM loader limit 400000)"]
+    );
+    // Its firmware runs I2C links but its definition names no speed: nothing is known to work.
+    let none = fake_registry_with("v20-none", 400_000, "[links]\nup = [\"i2c\"]\n");
+    assert_eq!(
+        messages(&none),
+        ["speed_hz 400000: seg (FAKE-M0) cannot be checked: its MCU definition has no [link_i2c]"]
+    );
 }
 
 #[test]

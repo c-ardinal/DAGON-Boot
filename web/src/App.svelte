@@ -121,8 +121,11 @@
 
   /** `dagon serve`: the page is always its page; K0/K3 when it cannot be reached. */
   const cli = new Cli();
+  const demoStandIn = import.meta.env.DEV && params.has('demo');
   /** The 親機 and 子機 are simulated: `dagon demo` through serve, or the demo page's own simulator. */
-  const simulated = $derived(cli.sim !== null || DEMO_SITE);
+  const simulated = $derived(cli.sim !== null || DEMO_SITE || demoStandIn);
+  /** One condition closes every path to linking, talking, keys and the CLI sheet: linked is never true in a demo. */
+  const agentLinked = $derived(!simulated && agent.linked);
   /** The 定義 document: the project's 構成 as edited (its YAML is the one source of truth). */
   const d = new Define();
   /** DAGON's link to its agent through serve (development: `?agent` stands in for serve's routes). */
@@ -387,7 +390,7 @@
   let linkOpen = $state(false);
   let dagonOpen = $state(0);
   async function openLink(at?: Element | null) {
-    if (cli.sim) return showWhy(AGENT.demoLink, at);
+    if (simulated) return;
     if (stopped('link', at)) return;
     if (!agent.status) await agent.refresh();
     if (!agent.status) return showWhy(AGENT.errors.OLD_CLI.text, at);
@@ -453,7 +456,7 @@
     { id: 'jobs', label: DRAWER.jobs, ...(runningJobs ? { count: runningJobs } : {}) },
     { id: 'output', label: DRAWER.output },
     { id: 'timeline', label: DRAWER.timeline },
-    { id: 'talk', label: DRAWER.talk },
+    ...(simulated ? [] : [{ id: 'talk', label: DRAWER.talk }]),
     { id: 'log', label: DRAWER.log },
   ]);
   /** serve names the nodes that can be built; a node without one has no skeleton yet. */
@@ -521,7 +524,7 @@
       return pickTab(drawerTab ?? 'problems');
     }
     const t = e.target as HTMLElement;
-    if (screen === 'work' && agent.linked && e.key === '/' && !/^(INPUT|SELECT|TEXTAREA)$/.test(t.tagName)) {
+    if (screen === 'work' && (agentLinked || simulated) && e.key === '/' && !/^(INPUT|SELECT|TEXTAREA)$/.test(t.tagName)) {
       e.preventDefault();
       return void dagonOpen++;
     }
@@ -1195,14 +1198,14 @@
     {
       label: MENU.groups.dagon,
       items: [
-        ...(agent.linked
+        ...(agentLinked
           ? [
               { label: AGENT.menuTalk, hint: MENU.hint.talk, control: 'ask', run: () => void dagonOpen++ },
               { label: MENU.applyProposal, hint: MENU.hint.apply, control: 'apply', off: lastProposal < 0 ? MENU.off.noProposal : null, run: () => applyProposal(lastProposal, document.body) },
             ]
-          : [{ label: AGENT.menuLink, hint: MENU.hint.link, control: 'link', run: () => void openLink(document.querySelector('[aria-controls="menu"]')) }]),
-        { label: MENU.cli, hint: MENU.hint.cli, run: openCli },
-        ...(agent.linked ? [{ label: AGENT.menuUnlink, hint: MENU.hint.unlink, danger: true, run: () => confirmThen(CONFIRM.unlink, () => void unlink()) }] : []),
+          : [{ label: AGENT.menuLink, hint: MENU.hint.link, control: 'link', off: simulated ? MENU.off.demo : null, run: () => void openLink(document.querySelector('[aria-controls="menu"]')) }]),
+        { label: MENU.cli, hint: MENU.hint.cli, off: simulated ? MENU.off.demo : null, run: openCli },
+        ...(agentLinked ? [{ label: AGENT.menuUnlink, hint: MENU.hint.unlink, danger: true, run: () => confirmThen(CONFIRM.unlink, () => void unlink()) }] : []),
       ],
     },
     {
@@ -1222,6 +1225,7 @@
     confirmThen(CONFIRM.rollback(n ? `[${n.no}] ${n.name}` : id, v ?? ''), () => void op.rollback(id));
   }
   function openCli() {
+    if (simulated) return;
     if (mode !== 'define') switchMode('define');
     d.selected = null;
     cliPanel = 'link';
@@ -1544,7 +1548,7 @@
                 fix={WRITE.rolled.next}
                 onclose={() => (stopClosed = op.failed)}
                 onmore={() => ((drawerTab = 'log'), (stopClosed = op.failed))}
-                linked={agent.linked}
+                linked={agentLinked}
                 onask={(at) => askWhy(at, () => (stopClosed = op.failed))}
                 actions={stopActions}
               />
@@ -1562,15 +1566,15 @@
             <span class="grow"></span>
             {#if mode === 'operate' || d.view === 'graph'}
               <ZoomPill scale={canvasView.zoom} canIn={canvasView.zoom < ZOOM_LIMITS.max} canOut={canvasView.zoom > ZOOM_LIMITS.min} onin={() => graph?.zoomBy(ZOOM_LIMITS.step)} onout={() => graph?.zoomBy(1 / ZOOM_LIMITS.step)} onfit={() => graph?.fit()} />
-            {:else if agent.linked}
+            {:else if agentLinked || simulated}
               <!-- No zoom in the table: the sheet still stops above the mark, which keeps its place. -->
               <span class="mark-room"></span>
             {/if}
           </div>
         </div>
-        {#if agent.linked}
+        {#if agentLinked || simulated}
           <!-- On the stage, outside every column: no sheet, drawer, table or toast moves it, only the user's drag. -->
-          <Dagon {agent} place={cli.hello?.workspace ?? d.doc.topo.name ?? 'local'} bind:open={bubbleOpen} onask={askDagon} onapply={applyProposal} ontalk={() => (drawerTab = 'talk')} openRequest={dagonOpen} />
+          <Dagon {agent} demo={simulated} place={cli.hello?.workspace ?? d.doc.topo.name ?? 'local'} bind:open={bubbleOpen} onask={askDagon} onapply={applyProposal} ontalk={() => (drawerTab = 'talk')} openRequest={dagonOpen} />
         {/if}
         <div class="dock" data-avoid="">
           <Drawer tabs={drawerTabs} open={drawerTab} onpick={(id) => (drawerTab = id)} onclose={() => (drawerTab = null)} body={drawerBody} />
@@ -1580,7 +1584,7 @@
             state={stateName(lockStates)}
             cli={cli.hello?.key_id ? `${cliLabel}　${STATUS.key} ${cli.hello.key_id.slice(0, 8)}` : cliLabel}
             cliReady={cli.state === 'ready'}
-            oncli={openCli}
+            oncli={simulated ? undefined : openCli}
             saved={savedLabel}
             savedOk={!d.unsaved && !autosave.pending}
             sentence={[next.cause, next.sentence].filter(Boolean).join(' ')}
@@ -1713,7 +1717,7 @@
       {#snippet actions()}
         {#if f.skeleton}
           <button class="button-primary" data-control="gen" onclick={() => ((buildFailureOpen = false), void makeSkeleton())}>{SKELETON.make}</button>
-        {:else if agent.linked}
+        {:else if agentLinked}
           <button class="button-secondary" data-control="ask" onclick={(e) => askWhy(e.currentTarget, () => (buildFailureOpen = false))}>{BUILD.askAgent}</button>
         {/if}
         {#if !f.skeleton}<button class="button-primary" data-control="build" onclick={() => void build()}>{BUILD.retry}</button>{/if}

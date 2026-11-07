@@ -28,9 +28,9 @@ const MAX_ENTRIES: usize = 500;
 pub(super) fn home(server: &Server) -> Result<PathBuf, Response> {
     let h = match server.home.get() {
         Some(h) => h.clone().into_os_string(),
-        None => std::env::var_os("USERPROFILE")
-            .or_else(|| std::env::var_os("HOME"))
-            .ok_or_else(|| Response::error(500, "no home folder"))?,
+        None => crate::consent::home()
+            .map_err(|_| Response::error(500, "no home folder"))?
+            .into_os_string(),
     };
     std::fs::canonicalize(h).map_err(|_| Response::error(500, "home folder not found"))
 }

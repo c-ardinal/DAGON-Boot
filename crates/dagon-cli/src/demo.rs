@@ -237,6 +237,17 @@ fn demo_dir_name(user: &str) -> String {
     format!("{DEMO_DIR}-{hex}")
 }
 
+/// The one switch: this process's home is a folder inside the demo's, which
+/// [`project`] made afresh, so each start is unlinked with no recent projects
+/// and nothing of the last run; and it opens no credential store.
+fn keep_off_the_users_settings(dir: &Path) -> Result<(), String> {
+    let home = dir.join("home");
+    crate::config::write_file(&home.join(".dagon").join(MARK), b"dagon demo's own home\n")?;
+    crate::consent::use_own_home(home);
+    crate::keystore::close();
+    Ok(())
+}
+
 /// `dagon demo`: `--sim-fail` and `--uplink` are checked by the parser
 /// against [`NODES`] and the simulated media.
 pub fn command(a: &DemoArgs) -> Result<(), String> {
@@ -261,6 +272,7 @@ pub fn command(a: &DemoArgs) -> Result<(), String> {
         .unwrap_or_default();
     let dir = std::env::temp_dir().join(demo_dir_name(&user));
     let (config, key) = project(&dir, uplink)?;
+    keep_off_the_users_settings(&dir)?;
     let hub = sim_hub(&key, fail, 1)?;
     let mut sim = crate::serve::SimDevice::new(hub, speed, fail.map(String::from));
     sim.set_medium(uplink);
@@ -291,6 +303,38 @@ pub fn command(a: &DemoArgs) -> Result<(), String> {
 #[allow(clippy::disallowed_methods)]
 mod tests {
     use super::*;
+
+    /// The demo's switch holds because every setting finds the home through
+    /// `consent::home`: a new direct lookup would escape it. (flash.rs only
+    /// hides the real home in messages; ai.rs reads it in a test.)
+    #[test]
+    fn the_home_folder_is_found_in_one_place() {
+        fn sources(dir: &Path, out: &mut Vec<PathBuf>) {
+            for e in std::fs::read_dir(dir).unwrap().flatten() {
+                let p = e.path();
+                if p.is_dir() {
+                    sources(&p, out);
+                } else if p.extension().is_some_and(|x| x == "rs") {
+                    out.push(p);
+                }
+            }
+        }
+        let src = Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
+        let mut files = Vec::new();
+        sources(&src, &mut files);
+        let lookup = ["var_os(\"USERPROFILE\")", "var(\"USERPROFILE\")"];
+        let mut found: Vec<_> = files
+            .iter()
+            .filter(|f| {
+                let text = std::fs::read_to_string(f).unwrap();
+                lookup.iter().any(|l| text.contains(l))
+            })
+            .map(|f| f.file_name().unwrap().to_string_lossy().into_owned())
+            .filter(|f| f != "demo.rs")
+            .collect();
+        found.sort();
+        assert_eq!(found, ["ai.rs", "consent.rs", "flash.rs"]);
+    }
 
     #[test]
     fn each_user_name_has_its_own_demo_folder() {

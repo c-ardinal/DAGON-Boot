@@ -7,6 +7,8 @@
 
   interface Props {
     agent: Agent;
+    /** A demo: the mark stays, its bubble says it does not talk. */
+    demo?: boolean;
     /** Where the position is kept: one per project. */
     place: string;
     /** Sends a question (the lock table may stop it: `ask`). */
@@ -21,7 +23,7 @@
     open?: boolean;
   }
 
-  let { agent, place, onask, onapply, ontalk, openRequest, open = $bindable(false) }: Props = $props();
+  let { agent, demo = false, place, onask, onapply, ontalk, openRequest, open = $bindable(false) }: Props = $props();
 
   const MARGIN = 12;
   const DRAG_PX = 4;
@@ -225,7 +227,9 @@
 
   {#if open}
     <section transition:rise={{ dur: '--dur-quick' }} class="bubble" style:left="{bubbleAt.x}px" style:top="{bubbleAt.y}px" aria-label={AGENT.name} aria-live="polite" bind:this={bubbleEl}>
-      {#if agent.thinking}
+      {#if demo}
+        <p>{AGENT.demoBubble}</p>
+      {:else if agent.thinking}
         <p class="muted">{AGENT.thinking}</p>
       {:else if reply}
         <p class:failed={reply.failed}>{reply.text}</p>
@@ -240,15 +244,17 @@
       {:else}
         <p class="muted">{AGENT.hello}</p>
       {/if}
-      <div class="qs">
-        {#each AGENT.questions as [kind, q] (kind)}
-          <button class="q" data-control="ask" onclick={(e) => onask(q, kind, e.currentTarget)}>{q}</button>
-        {/each}
-      </div>
-      <form onsubmit={send} data-control="ask">
-        <input bind:this={field} bind:value={text} aria-label={AGENT.question} placeholder={AGENT.placeholder} maxlength="2000" />
-        <button class="button-icon send" type="submit" aria-label={AGENT.send} title={text.trim() ? AGENT.send : AGENT.sendWhy} aria-disabled={!text.trim()}><span class="layer"><Icon name="send-horizontal" /></span></button>
-      </form>
+      {#if !demo}
+        <div class="qs">
+          {#each AGENT.questions as [kind, q] (kind)}
+            <button class="q" data-control="ask" onclick={(e) => onask(q, kind, e.currentTarget)}>{q}</button>
+          {/each}
+        </div>
+        <form onsubmit={send} data-control="ask">
+          <input bind:this={field} bind:value={text} aria-label={AGENT.question} placeholder={AGENT.placeholder} maxlength="2000" />
+          <button class="button-icon send" type="submit" aria-label={AGENT.send} title={text.trim() ? AGENT.send : AGENT.sendWhy} aria-disabled={!text.trim()}><span class="layer"><Icon name="send-horizontal" /></span></button>
+        </form>
+      {/if}
     </section>
   {/if}
 </div>

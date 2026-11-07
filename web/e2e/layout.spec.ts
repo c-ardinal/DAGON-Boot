@@ -28,7 +28,7 @@ const STATES: [string, (p: Page) => Promise<void>, (p: Page) => Promise<void>][]
   ['トースト', async (p) => { await p.getByRole('button', { name: 'メニューを開く' }).click(); await p.getByRole('button', { name: '困ったとき', exact: true }).click(); await p.locator('.panel').last().locator('button:has(span:text-is("この URL をコピーする"))').click(); await p.locator('.toast').waitFor(); }, async () => undefined],
   ['バブル', (p) => p.locator('.dagon .mark').click(), (p) => p.locator('.dagon .mark').click()],
   ['バブルとシート', async (p) => { await p.locator('.node').first().dispatchEvent('click'); await p.locator('.dagon .mark').click(); }, async (p) => { await p.locator('.dagon .mark').click(); await p.locator('.node').first().dispatchEvent('click'); }],
-  ['モーダル', async (p) => { await p.getByRole('button', { name: 'メニューを開く' }).click(); await p.locator('.panel').first().locator('button:has(span:text-is("最初からやり直す"))').click(); await p.locator('dialog[open]').waitFor(); }, async (p) => { await p.keyboard.press('Escape'); await p.locator('dialog[open]').waitFor({ state: 'detached' }); }],
+  ['モーダル', async (p) => { await p.getByRole('button', { name: 'メニューを開く' }).click(); await p.locator('.panel').first().getByRole('button', { name: 'プロジェクト', exact: true }).click(); await p.locator('.panel').last().locator('button:has(span:text-is("最初からやり直す"))').click(); await p.locator('dialog[open]').waitFor(); }, async (p) => { await p.keyboard.press('Escape'); await p.locator('dialog[open]').waitFor({ state: 'detached' }); }],
 ];
 
 test('sweep: no overflow, overlap, clipped text or clipped focus ring at any window, in 準備 (sheet, drawer, menu, help, table, toast, modal) and 書込 (versions)', async ({ page, context }) => {
@@ -99,6 +99,91 @@ test('sweep: no overflow, overlap, clipped text or clipped focus ring at any win
     await page.keyboard.press('Escape');
   }
   expect(faults).toEqual([]);
+});
+
+const box = async (p: Page, sel: string) => (await p.locator(sel).first().boundingBox())!;
+
+test('the mark: just left of the zoom in every view and mode, moved only by a drag, kept across reloads, and a click still opens the bubble', async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await openSample(page, 'sim&agent=linked');
+  const [mark, pill] = [await box(page, '.dagon .mark'), await box(page, '.pill')];
+  expect(Math.round(mark.y + mark.height)).toBe(Math.round(pill.y + pill.height));
+  expect(mark.x + mark.width).toBeLessThanOrEqual(pill.x);
+  expect(pill.x - mark.x - mark.width).toBeLessThan(20);
+  await view(page, '表', '表で見る');
+  expect(await box(page, '.dagon .mark')).toEqual(mark);
+  await view(page, 'グラフ', 'グラフで見る');
+  await page.getByRole('radio', { name: '書込' }).click();
+  expect(await box(page, '.dagon .mark')).toEqual(mark);
+  await page.getByRole('radio', { name: '準備' }).click();
+
+  await page.mouse.move(mark.x + mark.width / 2, mark.y + mark.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(600, 300, { steps: 5 });
+  await page.mouse.up();
+  await expect(page.locator('.bubble')).toHaveCount(0);
+  const moved = await box(page, '.dagon .mark');
+  expect(Math.abs(moved.x + moved.width / 2 - 600)).toBeLessThan(2);
+  await page.getByRole('radio', { name: '書込' }).click();
+  expect(await box(page, '.dagon .mark')).toEqual(moved);
+  await page.getByRole('radio', { name: '準備' }).click();
+  await openSample(page, 'sim&agent=linked');
+  await expect.poll(async () => (await box(page, '.dagon .mark')).x).toBe(moved.x);
+
+  // Wherever it is, the bubble keeps off the sheet.
+  await page.locator('.node').first().dispatchEvent('click');
+  await page.locator('.dagon .mark').click();
+  await expect(page.locator('.bubble')).toBeVisible();
+  await page.waitForTimeout(250);
+  expect(await layoutFaults(page)).toEqual([]);
+});
+
+test('the mark floats, and stands still under reduced motion', async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await openSample(page, 'sim&agent=linked');
+  const name = () => page.locator('.dagon .mark img').evaluate((e) => getComputedStyle(e).animationName);
+  expect(await name()).not.toBe('none');
+  await page.emulateMedia({ reducedMotion: 'reduce' });
+  expect(await name()).toBe('none');
+});
+
+test('the menu: 最初からやり直す is the プロジェクト submenu\'s last item', async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await openSample(page, 'sim');
+  await page.getByRole('button', { name: 'メニューを開く' }).click();
+  await expect(page.locator('.panel').first().locator('button:has(span:text-is("最初からやり直す"))')).toHaveCount(0);
+  await page.locator('.panel').first().getByRole('button', { name: 'プロジェクト', exact: true }).click();
+  const words = await page.locator('.panel').last().locator('.words > span').allInnerTexts();
+  expect(words).toEqual(['プロジェクトを作る', 'プロジェクトを開く', '保存する', '最初からやり直す']);
+});
+
+test('every segmented toggle slides one thumb to the choice, keeping its box; under reduced motion it does not slide', async ({ page }) => {
+  await page.setViewportSize({ width: 1920, height: 1080 });
+  await openSample(page, 'sim');
+  const thumb = (sel: string) => page.locator(sel).evaluate((e) => {
+    const s = getComputedStyle(e, '::before');
+    return { x: new DOMMatrix(s.transform).m41, width: parseFloat(s.width), property: s.transitionProperty, duration: s.transitionDuration };
+  });
+  for (const [group, from, to] of [['header .modes', '準備', '書込'], ['header .seg', 'グラフ', '表']]) {
+    const start = await box(page, group);
+    const before = await thumb(group);
+    expect(before.property).toContain('transform');
+    const target = await page.getByRole('radio', { name: to, exact: true }).evaluate((e) => (e as HTMLElement).offsetLeft);
+    // Under way, a few frames after the press: past the old choice, short of the new.
+    const during = await page.getByRole('radio', { name: to, exact: true }).evaluate(async (e, sel) => {
+      (e as HTMLElement).click();
+      for (let i = 0; i < 4; i++) await new Promise(requestAnimationFrame);
+      return new DOMMatrix(getComputedStyle(document.querySelector(sel)!, '::before').transform).m41;
+    }, group);
+    expect(during).toBeGreaterThan(Math.min(before.x, target));
+    expect(during).toBeLessThan(Math.max(before.x, target));
+    await expect.poll(async () => (await thumb(group)).x).toBe(target);
+    expect(await box(page, group)).toEqual(start);
+    await page.getByRole('radio', { name: from, exact: true }).click();
+    await expect.poll(async () => (await thumb(group)).x).toBe(before.x);
+  }
+  await page.emulateMedia({ reducedMotion: 'reduce' });
+  expect((await thumb('header .modes')).duration.split(', ')).toEqual(['0s', '0s']);
 });
 
 test('Escape closes the open bubble wherever focus is, before anything under it', async ({ page }) => {

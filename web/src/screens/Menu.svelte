@@ -27,13 +27,11 @@
 
   interface Props {
     groups: MenuGroup[];
-    /** Below the groups, under a separator. */
-    last: MenuItem;
     /** After an item ran. */
     onclose: () => void;
   }
 
-  let { groups, last, onclose }: Props = $props();
+  let { groups, onclose }: Props = $props();
   let openGroup = $state<string | null>(null);
   const shown = $derived(groups.find((g) => g.label === openGroup));
 
@@ -64,8 +62,6 @@
         </button>
       </li>
     {/each}
-    <li class="sep" role="separator"></li>
-    {@render row(last)}
   </ul>
   {#if shown}
     <ul class="panel" aria-label={shown.label}>

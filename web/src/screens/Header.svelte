@@ -1,6 +1,6 @@
 <script lang="ts">
   import { DEFINE, HELP, HUB_TOGGLE, MENU, MODE, PRODUCT, SIM } from '../app/copy.ts';
-  import { fade, rise } from '../app/motion.ts';
+  import { fade, rise, thumb } from '../app/motion.ts';
   import { dismiss } from './dismiss.ts';
   import Icon from './Icon.svelte';
   import type { Snippet } from 'svelte';
@@ -77,7 +77,7 @@
     {#if sim}<span class="sim" role="note" aria-label={SIM.label} title={SIM.label}>{SIM.badge}</span>{/if}
   </div>
   {#if onmode}
-    <div class="modes" role="radiogroup" aria-label={MODE.label}>
+    <div class="modes segmented" use:thumb role="radiogroup" aria-label={MODE.label}>
       {#each MODES as [m, label] (m)}
         <button role="radio" aria-checked={mode === m} aria-disabled={off(m)} title={off(m) ? (modeLocked ? MODE.offWhy.locked : MODE.offWhy.operate) : undefined} onclick={() => pick(m)}>{label}</button>
       {/each}
@@ -89,7 +89,7 @@
       <div class="edit" class:off={mode !== 'define'} inert={mode !== 'define'} in:fade={{ dur: '--dur-quick' }}>
         <button class="button-icon" data-control="edit" aria-disabled={!edit.canUndo} aria-label={DEFINE.undo} title={edit.canUndo ? `${DEFINE.undo} (Ctrl+Z)` : MENU.off.noUndo} onclick={() => edit?.canUndo && edit.onundo()}><span class="layer"><Icon name="undo-2" /></span></button>
         <button class="button-icon" data-control="edit" aria-disabled={!edit.canRedo} aria-label={DEFINE.redo} title={edit.canRedo ? `${DEFINE.redo} (Ctrl+Shift+Z)` : MENU.off.noRedo} onclick={() => edit?.canRedo && edit.onredo()}><span class="layer"><Icon name="redo-2" /></span></button>
-        <div class="seg" role="radiogroup" aria-label="{DEFINE.graph}・{DEFINE.table}">
+        <div class="seg segmented" use:thumb role="radiogroup" aria-label="{DEFINE.graph}・{DEFINE.table}">
           <button class="button-icon" role="radio" aria-checked={edit.view === 'graph'} aria-label={DEFINE.graph} title={DEFINE.graph} onclick={() => edit?.onview('graph')}><span class="layer"><Icon name="network" /></span></button>
           <button class="button-icon" role="radio" aria-checked={edit.view === 'table'} aria-label={DEFINE.table} title={DEFINE.table} onclick={() => edit?.onview('table')}><span class="layer"><Icon name="table-2" /></span></button>
         </div>
@@ -223,7 +223,6 @@
       color var(--dur-quick) var(--ease-out);
   }
   .modes button[aria-checked='true'] {
-    background: var(--c-paper);
     color: var(--c-ink);
   }
   .modes button[aria-disabled='true'] {
@@ -265,12 +264,12 @@
     padding: 0 var(--s-2);
     border-radius: var(--r-full);
     color: var(--c-muted);
+    transition: color var(--dur-quick) var(--ease-out);
   }
   .seg .button-icon > :global(.layer) {
     padding: 0;
   }
   .seg [aria-checked='true'] {
-    background: var(--c-paper);
     color: var(--c-ink);
   }
   /* Both modes' action sets in one cell: the cell is as wide as the wider set, in every mode. */

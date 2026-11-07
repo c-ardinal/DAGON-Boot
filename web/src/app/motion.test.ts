@@ -81,11 +81,11 @@ describe('motion values come only from the tokens', () => {
 });
 
 describe('continuous motion is for work in progress only', () => {
-  test('whatever loops belongs to a busy state, and stops under reduced motion', () => {
+  test('whatever loops belongs to a busy state or the DAGON mark\'s floating, and stops under reduced motion', () => {
     for (const rel of sources) {
       const css = cssOf(rel);
       for (const m of css.matchAll(/([^{}]+)\{[^{}]*\banimation[^;}]*\binfinite\b/g)) {
-        expect(m[1].trim(), `${rel}: what loops`).toMatch(/busy|thinking|crest/);
+        expect(m[1].trim(), `${rel}: what loops`).toMatch(/busy|thinking|crest|\.mark img|\.shadow/);
         expect(css, `${rel}: stopped under reduced motion`).toMatch(/prefers-reduced-motion: reduce\)\s*\{[\s\S]*animation: none/);
       }
     }

@@ -1169,6 +1169,7 @@
         { label: START.new, hint: MENU.hint.new, control: 'project', off: modeLocked ? MENU.off.notIdle : null, run: () => toStart('new') },
         { label: START.open, hint: MENU.hint.open, control: DEMO_SITE ? 'open' : 'project', off: modeLocked ? MENU.off.notIdle : null, run: () => toStart('open') },
         { label: MENU.save, hint: MENU.hint.save, off: local || screen !== 'work' ? MENU.off.noProject : null, run: () => void save() },
+        { label: MENU.restart, hint: MENU.hint.restart, control: 'project', danger: true, off: modeLocked ? MENU.off.notIdle : null, run: () => (restartOpen = true) },
       ],
     },
     {
@@ -1220,7 +1221,6 @@
     const v = previousVersion(op.live[id]?.status);
     confirmThen(CONFIRM.rollback(n ? `[${n.no}] ${n.name}` : id, v ?? ''), () => void op.rollback(id));
   }
-  const menuLast = $derived<MenuItem>({ label: MENU.restart, hint: MENU.hint.restart, control: 'project', danger: true, off: modeLocked ? MENU.off.notIdle : null, run: () => (restartOpen = true) });
   function openCli() {
     if (mode !== 'define') switchMode('define');
     d.selected = null;
@@ -1496,7 +1496,7 @@
       hub={screen === 'work' ? { connected, locked: hubLocked, hint: op.state === 'idle' || op.state === 'choosing' ? band.sentence : undefined, onpress: toggleHub } : undefined}
     >
       {#snippet menu()}
-        {#if menuOpen}<Menu groups={menuGroups} last={menuLast} onclose={() => ((menuOpen = false), document.querySelector<HTMLElement>('[aria-controls="menu"]')?.focus())} />{/if}
+        {#if menuOpen}<Menu groups={menuGroups} onclose={() => ((menuOpen = false), document.querySelector<HTMLElement>('[aria-controls="menu"]')?.focus())} />{/if}
       {/snippet}
     </Header>
     {#if screen === 'start'}
@@ -1562,12 +1562,15 @@
             <span class="grow"></span>
             {#if mode === 'operate' || d.view === 'graph'}
               <ZoomPill scale={canvasView.zoom} canIn={canvasView.zoom < ZOOM_LIMITS.max} canOut={canvasView.zoom > ZOOM_LIMITS.min} onin={() => graph?.zoomBy(ZOOM_LIMITS.step)} onout={() => graph?.zoomBy(1 / ZOOM_LIMITS.step)} onfit={() => graph?.fit()} />
+            {:else if agent.linked}
+              <!-- No zoom in the table: the sheet still stops above the mark, which keeps its place. -->
+              <span class="mark-room"></span>
             {/if}
           </div>
         </div>
         {#if agent.linked}
-          <!-- The DAGON mark: the stage's top-right corner, outside every column, so no sheet, drawer, table or toast moves it; the sheet column starts under it and its bubble opens to its left. -->
-          <div class="mark-spot"><Dagon {agent} bind:open={bubbleOpen} onask={askDagon} onapply={applyProposal} ontalk={() => (drawerTab = 'talk')} openRequest={dagonOpen} /></div>
+          <!-- On the stage, outside every column: no sheet, drawer, table or toast moves it, only the user's drag. -->
+          <Dagon {agent} place={cli.hello?.workspace ?? d.doc.topo.name ?? 'local'} bind:open={bubbleOpen} onask={askDagon} onapply={applyProposal} ontalk={() => (drawerTab = 'talk')} openRequest={dagonOpen} />
         {/if}
         <div class="dock" data-avoid="">
           <Drawer tabs={drawerTabs} open={drawerTab} onpick={(id) => (drawerTab = id)} onclose={() => (drawerTab = null)} body={drawerBody} />
@@ -1899,24 +1902,17 @@
     top: var(--s-4);
     right: var(--s-2);
   }
-  /* The DAGON mark's spot: the stage's top-right, under the bar, over the columns; the end column leaves it its room. */
-  .mark-spot {
-    position: absolute;
-    z-index: calc(var(--z-chrome) + 1);
-    top: var(--s-4);
-    right: var(--m-edge);
-    pointer-events: none;
+  /* The mark's default place, bottom right beside the zoom (Dagon.svelte), stays free: the table ends above it, a toast stands left of it. */
+  .mark-room {
+    flex: none;
+    height: var(--w-mark);
   }
-  .frame:has(.mark-spot) .col.end {
-    padding-top: calc(var(--w-mark) + var(--s-3));
+  .frame:has(:global(.dagon)) .edit-area.table {
+    margin-bottom: calc(var(--w-mark) + var(--s-3));
   }
-  /* The table leaves the mark its column too: nothing of the table stands under it. */
-  .frame:has(.mark-spot) .edit-area.table {
+  .frame:has(:global(.dagon)) .col.mid > :global(.toast) {
+    max-width: calc(100% - var(--w-mark) - var(--s-3));
     margin-right: calc(var(--w-mark) + var(--s-3));
-  }
-  /* While the sheet is open the bubble opens left of the sheet, not of the mark alone: nothing of it lies over the sheet. */
-  .frame:has(.float.sheet) :global(.bubble) {
-    right: calc(var(--w-sheet) + var(--s-3));
   }
   .log-none,
   .log {

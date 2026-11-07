@@ -446,6 +446,26 @@ dialog[open]::backdrop {
   background: var(--c-layer-2);
 }
 
+/* A segmented toggle: one thumb under the group's choices, slid to the checked one by `thumb` (motion.ts). */
+.segmented {
+  position: relative;
+  isolation: isolate;
+}
+.segmented::before {
+  content: '';
+  position: absolute;
+  z-index: -1;
+  top: 0;
+  left: 0;
+  width: var(--thumb-w, 0);
+  height: var(--thumb-h, 0);
+  border-radius: var(--r-full);
+  background: var(--c-paper);
+  transform: translate(var(--thumb-x, 0), var(--thumb-y, 0));
+  transition:
+    transform var(--dur-line) var(--ease-out),
+    width var(--dur-line) var(--ease-out);
+}
 @media (prefers-reduced-motion: reduce) {
   .primary:active,
   .button-primary:active,

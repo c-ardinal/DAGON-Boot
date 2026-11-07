@@ -185,8 +185,9 @@ test('undo, redo, the view toggle and the connection are in the header; the edit
   for (const name of ['元に戻す', 'やり直す']) expect((await page.getByRole('button', { name }).innerText()).trim()).toBe('');
   await page.getByRole('radio', { name: '書込' }).click();
   await settled(page);
+  // The edit tools keep their room in 書込 but are neither seen nor reachable.
   expect(await page.getByRole('button', { name: '元に戻す' }).count()).toBe(0);
-  expect(await page.locator('header .seg').count()).toBe(0);
+  await expect(page.locator('header .seg')).toBeHidden();
   await expect(page.locator('header').getByRole('button', { name: '接続する' })).toBeVisible();
   // At a narrow bar the edit tools give way to ☰, where they always are.
   await page.setViewportSize({ width: 1024, height: 768 });

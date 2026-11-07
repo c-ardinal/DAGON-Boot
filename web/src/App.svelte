@@ -124,8 +124,6 @@
   const demoStandIn = import.meta.env.DEV && params.has('demo');
   /** The 親機 and 子機 are simulated: `dagon demo` through serve, or the demo page's own simulator. */
   const simulated = $derived(cli.sim !== null || DEMO_SITE || demoStandIn);
-  /** One condition closes every path to linking, talking, keys and the CLI sheet: linked is never true in a demo. */
-  const agentLinked = $derived(!simulated && agent.linked);
   /** The 定義 document: the project's 構成 as edited (its YAML is the one source of truth). */
   const d = new Define();
   /** DAGON's link to its agent through serve (development: `?agent` stands in for serve's routes). */
@@ -133,6 +131,8 @@
   const agentStandIn = import.meta.env.DEV && dev && params.has('agent');
   const agent = new Agent(import.meta.env.DEV && agentStandIn ? agentMock(params, () => d.config.yaml) : (m, p, b) => cli.api(m, p, b));
   if (agentStandIn) void agent.refresh();
+  /** One condition closes every path to linking, talking, keys and the CLI sheet: linked is never true in a demo. */
+  const agentLinked = $derived(!simulated && agent.linked);
   /** Web Serial, which the page never uses while it drives the simulator. */
   const ports = webSerial(serial, () => cli.sim !== null);
   cli.onDevice = (need) => (need ? op.handOver() : op.cliReturned());
@@ -1908,6 +1908,7 @@
   }
   /* The mark's default place, bottom right beside the zoom (Dagon.svelte), stays free: the table ends above it, a toast stands left of it. */
   .mark-room {
+    width: var(--h-button);
     flex: none;
     height: var(--w-mark);
   }

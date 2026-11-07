@@ -2,7 +2,7 @@
   import { tick } from 'svelte';
   import type { Agent, AskKind } from '../app/agent.svelte.ts';
   import { AGENT } from '../app/copy.ts';
-  import { rise } from '../app/motion.ts';
+  import { rise, tokenMs } from '../app/motion.ts';
   import Icon from './Icon.svelte';
 
   interface Props {
@@ -40,6 +40,7 @@
   let stage = $state({ w: 0, h: 0, mark: 0 });
   /** The bubble's corner, from the mark's. */
   let bubbleAt = $state<Point>({ x: 0, y: 0 });
+  let bubbleMax = $state(0);
 
   const key = $derived(`dagon-pos:${place}`);
   const last = $derived(agent.messages.map((m) => m.role).lastIndexOf('dagon'));
@@ -68,12 +69,12 @@
   }
 
   /** What the mark's drop and the bubble keep off, in the stage's coordinates. */
-  function obstacles(): { left: number; top: number; right: number; bottom: number }[] {
+  function obstacles(cards = true): { left: number; top: number; right: number; bottom: number }[] {
     const st = root?.parentElement;
     if (!st) return [];
     const o = st.getBoundingClientRect();
     return [...st.querySelectorAll<HTMLElement>('[data-avoid], .toast')]
-      .filter((e) => !root?.contains(e))
+      .filter((e) => !root?.contains(e) && (cards || !e.closest('main')))
       .map((e) => e.getBoundingClientRect())
       .map((r) => ({ left: r.left - o.left, top: r.top - o.top, right: r.right - o.left, bottom: r.bottom - o.top }));
   }
@@ -94,21 +95,26 @@
     return q;
   }
 
-  /** Beside the mark where that is free; else the free spot nearest it: nothing of the bubble lies over the sheet, wherever the mark is. */
+  /** Beside the mark where that is free; else the free spot nearest it, over the cards when the windows leave no other: nothing of the bubble lies over the sheet or a toast, wherever the mark is. */
   function placeBubble() {
     if (!open || !bubbleEl || !root) return;
     const [mx, my, s] = [root.offsetLeft, root.offsetTop, root.offsetWidth];
-    const [w, h] = [bubbleEl.offsetWidth, bubbleEl.offsetHeight];
-    const obs = [...obstacles(), { left: mx, top: my, right: mx + s, bottom: my + s }];
-    const free = (x: number, y: number) => x >= MARGIN && y >= MARGIN && x + w <= stage.w - MARGIN && y + h <= stage.h - MARGIN && !obs.some((r) => covers(r, { x, y, w, h }));
+    // A low window: the bubble is no taller than the room over the dock, its body scrolls.
+    const dock = root.parentElement?.querySelector<HTMLElement>('.dock')?.offsetHeight ?? 0;
+    bubbleMax = Math.max(0, stage.h - dock - 2 * MARGIN);
+    const [w, h] = [bubbleEl.offsetWidth, Math.min(bubbleEl.offsetHeight, bubbleMax)];
     const sides: [number, number][] = [
       [mx - MARGIN - w, my + s - h],
       [mx - MARGIN - w, my],
       [mx + s + MARGIN, my + s - h],
       [mx + s + MARGIN, my],
     ];
-    let best = sides.find(([x, y]) => free(x, y));
-    if (!best) {
+    const spot = (cards: boolean): [number, number] | undefined => {
+      const obs = [...obstacles(cards), { left: mx, top: my, right: mx + s, bottom: my + s }];
+      const free = (x: number, y: number) => x >= MARGIN && y >= MARGIN && x + w <= stage.w - MARGIN && y + h <= stage.h - MARGIN && !obs.some((r) => covers(r, { x, y, w, h }));
+      const beside = sides.find(([x, y]) => free(x, y));
+      if (beside) return beside;
+      let best: [number, number] | undefined;
       let nearest = Infinity;
       const step = s / 3;
       for (let x = MARGIN; x + w <= stage.w - MARGIN; x += step) {
@@ -117,8 +123,9 @@
           if (d < nearest && free(x, y)) [nearest, best] = [d, [x, y]];
         }
       }
-    }
-    const [x, y] = best ?? sides[0];
+      return best;
+    };
+    const [x, y] = spot(true) ?? spot(false) ?? sides[0];
     bubbleAt = { x: x - mx, y: y - my };
   }
 
@@ -126,8 +133,15 @@
     void open;
     void bubbleEl;
     void shown;
-    void tick().then(placeBubble);
+    void tick().then(placeSoon);
   });
+  /** A sheet or toast still rising measures small: look again when it has settled. */
+  let settled = 0;
+  function placeSoon() {
+    placeBubble();
+    clearTimeout(settled);
+    settled = window.setTimeout(placeBubble, tokenMs('--dur-line'));
+  }
 
   /** The window and what stands on the stage change: the mark stays; the bubble finds its side again. */
   $effect(() => {
@@ -136,9 +150,10 @@
     const mark = root;
     const sync = () => {
       stage = { w: st.clientWidth, h: st.clientHeight, mark: mark.offsetWidth };
-      placeBubble();
+      // A sheet or toast growing with its content is no mutation of the stage: watched for size too.
+      for (const e of st.querySelectorAll('.float, .toast')) ro.observe(e);
+      placeSoon();
     };
-    sync();
     // Next frame: changing a box inside the observer's callback would report a resize loop.
     let frame = 0;
     const later = () => (cancelAnimationFrame(frame), (frame = requestAnimationFrame(sync)));
@@ -146,7 +161,8 @@
     ro.observe(st);
     const mo = new MutationObserver(later);
     mo.observe(st, { subtree: true, childList: true });
-    return () => (cancelAnimationFrame(frame), ro.disconnect(), mo.disconnect());
+    sync();
+    return () => (cancelAnimationFrame(frame), clearTimeout(settled), ro.disconnect(), mo.disconnect());
   });
 
   let drag: { id: number; dx: number; dy: number; x0: number; y0: number; moved: boolean } | null = null;
@@ -226,7 +242,7 @@
   </button>
 
   {#if open}
-    <section transition:rise={{ dur: '--dur-quick' }} class="bubble" style:left="{bubbleAt.x}px" style:top="{bubbleAt.y}px" aria-label={AGENT.name} aria-live="polite" bind:this={bubbleEl}>
+    <section transition:rise={{ dur: '--dur-quick' }} class="bubble" style:left="{bubbleAt.x}px" style:top="{bubbleAt.y}px" style:max-height={bubbleMax ? `${bubbleMax}px` : null} aria-label={AGENT.name} aria-live="polite" bind:this={bubbleEl}>
       {#if demo}
         <p>{AGENT.demoBubble}</p>
       {:else if agent.thinking}
@@ -344,6 +360,7 @@
   /* Its place comes from `placeBubble`. */
   .bubble {
     position: absolute;
+    overflow: auto;
     width: var(--w-bubble);
     display: grid;
     gap: var(--s-2);

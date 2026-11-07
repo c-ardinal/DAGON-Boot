@@ -121,7 +121,7 @@
   --t-mono: 13px; /* code, ids and logs */
   /* component sizes */
   --h-bar: 44px;
-  --h-dock: calc(var(--h-status) + var(--h-row) + 1px); /* the closed drawer's tabs, its edge, and the status line */
+  --h-dock: calc(var(--h-status) + var(--h-row) + var(--st-w-thin)); /* the closed drawer's tabs, its edge, and the status line */
   --h-status: 32px;
   --h-control: 28px;
   --h-button: 44px;

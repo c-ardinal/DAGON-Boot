@@ -61,7 +61,7 @@
   {:else if s.list}
     {@const list = s.list}
     <div class="crumb">
-      <button class="button-secondary small" aria-disabled={!list.parent} onclick={() => list.parent && void s.browse(list.parent)}>{START.up}</button>
+      <button class="button-secondary small" aria-disabled={!list.parent} title={list.parent ? undefined : START.upWhy} onclick={() => list.parent && void s.browse(list.parent)}>{START.up}</button>
       <span class="mono" translate="no">{list.path}</span>
     </div>
     <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
@@ -86,9 +86,10 @@
   <h1 id="start-h" class="title" translate="no">{PRODUCT}</h1>
   <p class="sub">{START.sub}</p>
   <div class="choices">
-    <button class="button-primary" bind:this={first} aria-disabled={!s.usable('new')} onclick={() => s.usable('new') && (modal = 'how')}>{START.new}</button>
-    <button class="button-secondary" data-control={DEMO_SITE ? 'open' : undefined} aria-disabled={!s.usable('open')} onclick={() => s.usable('open') && void toOpen()}>{START.open}</button>
+    <button class="button-primary" bind:this={first} aria-disabled={!s.usable('new')} title={s.usable('new') || DEMO_SITE ? undefined : CLI_LINK.needCli} onclick={() => s.usable('new') && (modal = 'how')}>{START.new}</button>
+    <button class="button-secondary" data-control={DEMO_SITE ? 'open' : undefined} aria-disabled={!s.usable('open')} title={s.usable('open') || DEMO_SITE ? undefined : CLI_LINK.needCli} onclick={() => s.usable('open') && void toOpen()}>{START.open}</button>
   </div>
+  {#if !served && !s.usable('new')}<p class="why">{CLI_LINK.needCli}</p>{/if}
   <section class="recent" aria-labelledby="recent-h">
     <h2 id="recent-h">{START.recent}</h2>
     {#if s.recent.length === 0}
@@ -97,7 +98,7 @@
       <ul>
         {#each s.recent as r (r.path)}
           <li>
-            <button class="row" aria-disabled={!s.online} onclick={() => s.online && void s.open(r.path)}>
+            <button class="row" aria-disabled={!s.online} title={s.online ? undefined : CLI_LINK.needCli} onclick={() => s.online && void s.open(r.path)}>
               <Icon name="folder" size="var(--i-s)" /><span class="name">{r.name}</span><span class="mono path" translate="no">{r.path}</span><Icon name="chevron-right" size="var(--i-s)" />
             </button>
           </li>
@@ -108,7 +109,6 @@
 </main>
 
 <footer id="band" class="band" tabindex="-1">
-  {#if !served && !s.usable('new')}<p>{CLI_LINK.needCli}</p>{/if}
   {#if fail && !modal}{@render failure()}{/if}
 </footer>
 
@@ -137,7 +137,7 @@
     {@render failure()}
     {#snippet actions()}
       <button class="button-secondary" onclick={() => (modal = 'how')}>{START.create.back}</button>
-      <button class="button-primary" aria-disabled={!s.list || s.loading || !s.name.trim()} onclick={() => void s.make()}>{START.create.go}</button>
+      <button class="button-primary" aria-disabled={!s.list || s.loading || !s.name.trim()} title={!s.list || s.loading || !s.name.trim() ? START.goWhy : undefined} onclick={() => void s.make()}>{START.create.go}</button>
     {/snippet}
   </Modal>
 {:else if modal === 'open'}
@@ -165,10 +165,11 @@
     flex-direction: column;
     align-items: stretch;
     gap: var(--s-4);
-    width: min(var(--w-modal), calc(100% - 2 * var(--s-4)));
+    /* The column scrolls when the window is short; its sides keep room for the focus ring of a full-width button. */
+    width: min(calc(var(--w-modal) + 2 * var(--s-2)), calc(100% - 2 * var(--s-4)));
     min-height: 0;
     margin: 0 auto;
-    padding: var(--s-6) 0 var(--s-4);
+    padding: var(--s-6) var(--s-2) var(--s-4);
     overflow: auto;
   }
   .start:focus {
@@ -186,6 +187,11 @@
   .choices {
     display: flex;
     gap: var(--s-2);
+  }
+  .why {
+    margin: 0;
+    color: var(--c-paper);
+    font: 400 var(--t-small) / 20px var(--f-ja);
   }
   h2,
   h3 {
@@ -271,7 +277,7 @@
   .row-sk {
     display: block;
     height: 40px;
-    margin: 2px 0;
+    margin: var(--s-1) 0;
   }
   .options {
     display: grid;

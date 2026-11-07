@@ -153,9 +153,16 @@ pub const MCU: &[Requirement<McuCheck>] = &[
             "link_uart.clock_hz",
             "link_uart.clocks_per_bit",
             "link_uart.frac_bits",
+            "link_uart.bauds[]",
         ],
-        rule: "clock_hz >= 1; clocks_per_bit >= 1; frac_bits <= 24",
+        rule: "clock_hz >= 1; clocks_per_bit >= 1; frac_bits <= 24; bauds not empty, each one the UART makes within 2 %",
         check: link_uart,
+    },
+    Requirement {
+        engine: "topology check V-20",
+        fields: &["link_i2c.hzs[]"],
+        rule: "hzs not empty",
+        check: link_i2c,
     },
     Requirement {
         engine: "topology check V-18/V-20, host ROM path",
@@ -266,15 +273,16 @@ pub const BOARD: &[Requirement<BoardCheck>] = &[
     Requirement {
         engine: "topology default link",
         fields: &["default_link.addr", "default_link.baud"],
-        rule: "addr in 0x08..=0x77; baud >= 1",
-        check: |b, _| {
+        rule: "addr in 0x08..=0x77; baud one of the MCU's link_uart.bauds",
+        check: |b, m| {
             let Some(l) = b.default_link else {
                 return Ok(());
             };
             fail(l.addr.is_some_and(|a| !I2C_ADDRS.contains(&a)), || {
                 "default_link.addr is outside 0x08..=0x77".into()
             })?;
-            fail(l.baud == Some(0), || "default_link.baud is 0".into())
+            fail(l.baud == Some(0), || "default_link.baud is 0".into())?;
+            default_link_baud(b, m)
         },
     },
     Requirement {
@@ -543,8 +551,24 @@ fn coordinator(m: &McuDef) -> Result<(), String> {
     })
 }
 
+/// A board's `[default_link] baud` is a speed its MCU's `[link_uart] bauds` names.
+pub(crate) fn default_link_baud(b: &BoardDef, m: &McuDef) -> Result<(), String> {
+    let (Some(l), Some(u)) = (b.default_link.as_ref(), m.link_uart.as_ref()) else {
+        return Ok(());
+    };
+    let Some(baud) = l.baud else {
+        return Ok(());
+    };
+    fail(!u.runs(baud), || {
+        format!(
+            "default_link.baud {baud} is not in the MCU's link_uart.bauds {:?}",
+            u.bauds
+        )
+    })
+}
+
 fn link_uart(m: &McuDef) -> Result<(), String> {
-    let Some(u) = m.link_uart else {
+    let Some(u) = &m.link_uart else {
         return Ok(());
     };
     fail(u.clock_hz == 0 || u.clocks_per_bit == 0, || {
@@ -552,7 +576,28 @@ fn link_uart(m: &McuDef) -> Result<(), String> {
     })?;
     fail(u.frac_bits > 24, || {
         "link_uart.frac_bits must be at most 24".into()
+    })?;
+    fail(u.bauds.is_empty(), || {
+        "link_uart.bauds must name at least one bit rate".into()
+    })?;
+    let off = u.bauds.iter().find(|&&b| {
+        !u.baud_error(b)
+            .is_some_and(|e| e.abs() <= super::MAX_BAUD_ERROR)
+    });
+    fail(off.is_some(), || {
+        format!(
+            "link_uart.bauds: this UART cannot run at {} within {:.0} %",
+            off.unwrap(),
+            super::MAX_BAUD_ERROR * 100.0
+        )
     })
+}
+
+fn link_i2c(m: &McuDef) -> Result<(), String> {
+    fail(
+        m.link_i2c.as_ref().is_some_and(|u| u.hzs.is_empty()),
+        || "link_i2c.hzs must name at least one bus speed".into(),
+    )
 }
 
 fn hub_pins(b: &BoardDef, m: &McuDef) -> Result<(), String> {

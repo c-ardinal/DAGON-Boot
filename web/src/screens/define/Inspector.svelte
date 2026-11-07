@@ -6,10 +6,10 @@
     boardMissing,
     connect,
     freeAddrs,
+    definedPins,
     hopAvailable,
     LINK_KINDS,
     removeLink,
-    removeNode,
     setBoard,
     setBus,
     setLink,
@@ -18,11 +18,16 @@
     setNode,
     setUplink,
     template,
+    uart0Pins,
+    uartBauds,
+    i2cHzs,
+    busNodes,
     type LinkKind,
     type TLink,
     type UplinkHost,
   } from '../../app/define/model.ts';
   import { problemChip, type Problem } from '../../app/define/problems.ts';
+  import Icon from '../Icon.svelte';
 
   interface Props {
     d: Define;
@@ -38,7 +43,11 @@
   const busIndex = $derived(d.selected?.startsWith('bus:') ? Number(d.selected.slice(4)) : -1);
   const bus = $derived(busIndex >= 0 ? t.buses?.[busIndex] : undefined);
   const hub = $derived(t.nodes.find((n) => n.role === 'coordinator'));
-  const hubPins = $derived((hub?.board ? template(hub.board)?.header : null) ?? []);
+  /** The bus speeds every node on the selected bus names in its MCU definition: the only ones it may be set to. */
+  const hzs = $derived(bus ? i2cHzs(busNodes(t, bus.id)) : []);
+  /** The 親機's own pins: what a bus or a link from it may be set to (the check refuses any other). */
+  const hubPins = $derived(definedPins(hub));
+  const MAX_ATTEMPTS = [1, 2, 3, 4, 5];
   const nodeLink = $derived(node ? (t.links ?? []).findIndex((l) => l.to === node.id) : -1);
   const name = (id: string) => d.doc.names[id] ?? id;
   const byId = (id: string) => t.nodes.find((n) => n.id === id);
@@ -46,8 +55,8 @@
   const UPLINK_KINDS: LinkKind[] = ['usb-cdc', 'uart', 'ble', 'wifi-tcp', 'ethernet'];
   const HOSTS: UplinkHost[] = ['pc-cli', 'browser', 'embedded'];
   const kindLabel = (k: string) => INSPECT.kinds[k] ?? INSPECT.kindsMore[k] ?? k;
+  const kindOption = (k: LinkKind, ok: boolean) => (ok ? kindLabel(k) : INSPECT.notYetOption(kindLabel(k)));
   const hex = (a: number) => `0x${a.toString(16).padStart(2, '0')}`;
-  const gpioNo = (pin: string) => Number(pin.replace(/^GPIO/, ''));
 
   /** Problems on the selected item at `field` (or below it). */
   function issues(field: string): Problem[] {
@@ -59,9 +68,9 @@
     for (const l of t.links ?? []) {
       if (`${l.to}.nrst` !== self && l.control?.nrst === n) return `${name(l.to)}の${INSPECT.reset}`;
       if (`${l.to}.boot` !== self && l.control?.boot === n) return `${name(l.to)}の${INSPECT.boot}`;
-      if (l.pins && (l.pins.tx === n || l.pins.rx === n)) return name(l.to);
+      if (l.pins && `${l.to}.tx` !== self && `${l.to}.rx` !== self && (l.pins.tx === n || l.pins.rx === n)) return name(l.to);
     }
-    for (const b of t.buses ?? []) if (b.sda === n || b.scl === n) return INSPECT.bus;
+    for (const b of t.buses ?? []) if (self !== 'bus' && (b.sda === n || b.scl === n)) return INSPECT.bus;
     return null;
   }
 
@@ -83,10 +92,28 @@
   {/each}
 {/snippet}
 
+<!-- A pin chosen from its own end's definition: the only pins the check accepts; a value from a file that is not defined stays, flagged; another user of the pin is named. -->
+{#snippet pinSelect(field: string, label: string, value: number | undefined, self: string, pins: number[], onpick: (n: number | undefined) => void)}
+  <label
+    >{label}<select data-field={field} value={value ?? ''} aria-invalid={issues(field).length > 0} onchange={(e) => onpick(num(e.currentTarget.value))}>
+      <option value="">{INSPECT.unset}</option>
+      {#if value !== undefined && !pins.includes(value)}<option value={value} translate="no">GPIO{value}{INSPECT.undefinedPin}</option>{/if}
+      {#each pins as n (n)}
+        {@const other = usedBy(n, self)}
+        <option value={n} translate="no">GPIO{n}{other ? INSPECT.inUse(other) : ''}</option>
+      {/each}
+    </select>{@render bad(field)}</label
+  >
+{/snippet}
+
 <section class="inspector" bind:this={root} aria-labelledby="inspector-h">
   {#if node}
-    <h2 id="inspector-h" tabindex="-1">{name(node.id)}</h2>
-    <div class="grid">
+    <div class="head">
+      <h2 id="inspector-h" tabindex="-1">{name(node.id)}</h2>
+      <!-- Destructive: red, top right; a modal confirms before anything goes. -->
+      <button class="button-icon trash" aria-label={INSPECT.removeNode} title={INSPECT.removeNode} onclick={() => d.requestRemove(`node:${node.id}`)}><span class="layer"><Icon name="trash-2" /></span></button>
+    </div>
+    <div class="fields">
       <label>{INSPECT.name}<input value={d.doc.names[node.id] ?? ''} onchange={(e) => d.apply(setName(d.doc, node.id, e.currentTarget.value))} /></label>
       <label
         >{INSPECT.id}<input
@@ -101,6 +128,7 @@
           }}
         />{@render bad('id')}</label
       >
+      <div class="field"><span class="label">{INSPECT.product}</span><span class="value" translate="no" title="{d.config.nodes.find((n) => n.id === node.id)?.product}・{d.config.nodes.find((n) => n.id === node.id)?.mcu}">{d.config.nodes.find((n) => n.id === node.id)?.product}・{d.config.nodes.find((n) => n.id === node.id)?.mcu}</span></div>
       <label
         >{INSPECT.role}<select data-field="role" value={node.role} onchange={(e) => d.apply(setNode(d.doc, node.id, 'role', e.currentTarget.value))}>
           <option value="coordinator">{INSPECT.roles.coordinator}</option>
@@ -113,37 +141,38 @@
           value={nodeLink >= 0 ? (t.links ?? [])[nodeLink].from : ''}
           onchange={(e) => {
             const parent = e.currentTarget.value;
+            const current = nodeLink >= 0 ? (t.links ?? [])[nodeLink].from : '';
+            // The same parent again changes nothing: the link keeps its settings.
+            if (parent === current) return;
+            // なし removes the link: that is a deletion, so it asks first like every other; until the answer the control shows the true value.
+            if (!parent) {
+              e.currentTarget.value = current;
+              return void (nodeLink >= 0 && d.requestRemove(`link:${node.id}`));
+            }
             const without = nodeLink >= 0 ? removeLink(d.doc, nodeLink) : d.doc;
-            d.apply(parent ? connect(without, node.id, parent) : without);
+            d.apply(connect(without, node.id, parent));
           }}
         >
           <option value="">{INSPECT.none}</option>
           {#each t.nodes.filter((x) => x.id !== node.id) as p (p.id)}<option value={p.id}>{name(p.id)}</option>{/each}
         </select></label
       >
-    </div>
-    <!-- A 親機 linked from another node has that node above it (つなぐ先); one nobody links to has its own uplink. -->
-    {#if node.role === 'coordinator' && nodeLink < 0}
-      {@const up = node.uplink ?? { kind: 'usb-cdc' as LinkKind, host: 'pc-cli' as UplinkHost }}
-      <fieldset class="seg kinds">
-        <legend>{INSPECT.uplink}</legend>
-        {#each UPLINK_KINDS as k (k)}
-          {@const ok = hopAvailable(k, undefined, node)}
-          <label class:not-yet={!ok}
-            ><input type="radio" name="uplink" value={k} checked={up.kind === k} onchange={() => d.apply(setUplink(d.doc, node.id, { kind: k, host: up.host ?? 'pc-cli' }))} />{kindLabel(k)}{#if !ok}<span class="not-yet-mark">◇ {INSPECT.notYet}</span>{/if}</label
-          >
-        {/each}
-      </fieldset>
-      <label class="host"
-        >{INSPECT.uplinkHost}<select value={up.host ?? 'pc-cli'} onchange={(e) => d.apply(setUplink(d.doc, node.id, { kind: up.kind, host: e.currentTarget.value as UplinkHost }))}>
-          {#each HOSTS as h (h)}<option value={h}>{INSPECT.hosts[h]}</option>{/each}
-        </select></label
-      >
-      {@render bad('uplink')}
-    {/if}
-    {#if !node.board}
-      <h3>{INSPECT.board}{#if boardMissing(d.doc, node.id)}&ensp;<span class="warn">{INSPECT.boardUnset}</span>{/if}</h3>
-      <div class="grid">
+      <!-- A 親機 linked from another node has that node above it (つなぐ先); one nobody links to has its own uplink. -->
+      {#if node.role === 'coordinator' && nodeLink < 0}
+        {@const up = node.uplink ?? { kind: 'usb-cdc' as LinkKind, host: 'pc-cli' as UplinkHost }}
+        <label
+          >{INSPECT.uplink}<select data-field="uplink" value={up.kind} onchange={(e) => d.apply(setUplink(d.doc, node.id, { kind: e.currentTarget.value as LinkKind, host: up.host ?? 'pc-cli' }))}>
+            {#each UPLINK_KINDS as k (k)}<option value={k}>{kindOption(k, hopAvailable(k, undefined, node))}</option>{/each}
+          </select>{@render bad('uplink')}</label
+        >
+        <label
+          >{INSPECT.uplinkHost}<select value={up.host ?? 'pc-cli'} onchange={(e) => d.apply(setUplink(d.doc, node.id, { kind: up.kind, host: e.currentTarget.value as UplinkHost }))}>
+            {#each HOSTS as h (h)}<option value={h}>{INSPECT.hosts[h]}</option>{/each}
+          </select></label
+        >
+      {/if}
+      {#if !node.board}
+        <h3>{INSPECT.board}{#if boardMissing(d.doc, node.id)}&ensp;<span class="warn">{INSPECT.boardUnset}</span>{/if}</h3>
         <label
           >{INSPECT.flashSize}<select
             data-field="board.flash"
@@ -156,36 +185,39 @@
             {#each [18, 19, 20, 21, 22, 23, 24, 25] as p (p)}<option value={2 ** p}>{2 ** p >= 2 ** 20 ? `${2 ** (p - 20)} MiB` : `${2 ** (p - 10)} KiB`}</option>{/each}
           </select><span id="flash-help" class="help">{INSPECT.flashHelp}</span>{@render bad('board.flash')}</label
         >
-      </div>
-    {/if}
-    <dl class="pair"><dt>{INSPECT.product}</dt><dd translate="no">{d.config.nodes.find((n) => n.id === node.id)?.product} · {d.config.nodes.find((n) => n.id === node.id)?.mcu}</dd></dl>
-    {#if nodeLink >= 0}
-      {@render controlPins((t.links ?? [])[nodeLink], nodeLink)}
-    {/if}
+      {/if}
+      {#if nodeLink >= 0}
+        {@render controlPins((t.links ?? [])[nodeLink], nodeLink)}
+      {/if}
+    </div>
     <details>
       <summary>{INSPECT.advanced}</summary>
-      <div class="grid" translate="no">
-        <label>max_attempts<input data-field="max_attempts" type="number" min="1" max="5" value={node.max_attempts ?? ''} onchange={(e) => d.apply(setNode(d.doc, node.id, 'max_attempts', num(e.currentTarget.value)))} /></label>
-        <label>listen_window_ms<input type="number" min="0" value={node.listen_window_ms ?? ''} onchange={(e) => d.apply(setNode(d.doc, node.id, 'listen_window_ms', num(e.currentTarget.value)))} /></label>
-        <label>flash_map<input data-field="flash_map" value={node.flash_map ?? ''} onchange={(e) => d.apply(setNode(d.doc, node.id, 'flash_map', e.currentTarget.value))} />{@render bad('flash_map')}</label>
-        <label>tag<input data-field="tag" value={node.tag} onchange={(e) => d.apply(setNode(d.doc, node.id, 'tag', e.currentTarget.value))} />{@render bad('tag')}</label>
+      <div class="fields" translate="no">
+        <label
+          >{INSPECT.maxAttempts}<select data-field="max_attempts" value={node.max_attempts ?? ''} onchange={(e) => d.apply(setNode(d.doc, node.id, 'max_attempts', num(e.currentTarget.value)))}>
+            <option value="">{INSPECT.unset}</option>
+            {#each MAX_ATTEMPTS as n (n)}<option value={n}>{n}</option>{/each}
+          </select></label
+        >
+        <label>{INSPECT.listenWindow}<input type="number" min="0" step="100" value={node.listen_window_ms ?? ''} onchange={(e) => d.apply(setNode(d.doc, node.id, 'listen_window_ms', num(e.currentTarget.value)))} /></label>
+        <label>{INSPECT.flashMap}<input data-field="flash_map" value={node.flash_map ?? ''} onchange={(e) => d.apply(setNode(d.doc, node.id, 'flash_map', e.currentTarget.value))} />{@render bad('flash_map')}</label>
+        <label>{INSPECT.tag}<input data-field="tag" value={node.tag} onchange={(e) => d.apply(setNode(d.doc, node.id, 'tag', e.currentTarget.value))} />{@render bad('tag')}</label>
       </div>
     </details>
-    <button class="secondary" onclick={() => { d.apply(removeNode(d.doc, node.id)); d.selected = null; }}>{INSPECT.removeNode}</button>
   {:else if link}
-    <h2 id="inspector-h" tabindex="-1">{name(link.from)} → {name(link.to)}</h2>
-    <fieldset class="seg kinds">
-      <legend>{INSPECT.kind}</legend>
-      {#each LINK_KINDS as k (k)}
-        {@const ok = hopAvailable(k, byId(link.from), byId(link.to))}
-        <label class:not-yet={!ok}
-          ><input type="radio" name="kind" value={k} checked={link.kind === k} onchange={() => d.apply(setLinkKind(d.doc, linkIndex, k as TLink['kind']))} />{kindLabel(k)}{#if !ok}<span class="not-yet-mark">◇ {INSPECT.notYet}</span>{/if}</label
-        >
-      {/each}
-    </fieldset>
-    {@render bad('kind')}
-    {#if link.kind === 'i2c'}
-      <div class="grid">
+    {@const from = byId(link.from)}
+    {@const to = byId(link.to)}
+    <div class="head">
+      <h2 id="inspector-h" tabindex="-1" title="{name(link.from)} → {name(link.to)}">{name(link.from)} → {name(link.to)}</h2>
+      <button class="button-icon trash" aria-label={INSPECT.removeLink} title={INSPECT.removeLink} onclick={() => d.requestRemove(`link:${link.to}`)}><span class="layer"><Icon name="trash-2" /></span></button>
+    </div>
+    <div class="fields">
+      <label
+        >{INSPECT.kind}<select data-field="kind" value={link.kind} aria-invalid={issues('kind').length > 0} onchange={(e) => d.apply(setLinkKind(d.doc, linkIndex, e.currentTarget.value as TLink['kind']))}>
+          {#each LINK_KINDS as k (k)}<option value={k}>{kindOption(k, hopAvailable(k, from, to))}</option>{/each}
+        </select>{@render bad('kind')}</label
+      >
+      {#if link.kind === 'i2c'}
         <label
           >{INSPECT.addr}<select data-field="addr" value={link.addr} aria-invalid={issues('addr').length > 0} onchange={(e) => d.apply(setLink(d.doc, linkIndex, 'addr', Number(e.currentTarget.value)))}>
             {#each [...new Set([...(link.addr !== undefined ? [link.addr] : []), ...freeAddrs(t, linkIndex)])].sort((a, b) => a - b) as a (a)}
@@ -203,35 +235,41 @@
             }}
           >
             <option value="">{INSPECT.unset}</option>
-            {#each template(t.nodes.find((n) => n.id === link.to)?.board ?? '')?.i2cPairs ?? [] as p (p.sda)}
-              <option value="{p.sda}/{p.scl}">{p.sda} · {p.scl}</option>
+            {#each template(to?.board ?? '')?.i2cPairs ?? [] as p (p.sda)}
+              <option value="{p.sda}/{p.scl}">{p.sda}・{p.scl}</option>
             {/each}
           </select>{@render bad('node_pins')}</label
         >
-      </div>
-    {:else if link.kind === 'uart'}
-      <div class="grid">
-        <label>{INSPECT.uartPins} TX<input data-field="pins" type="number" value={link.pins?.tx ?? ''} onchange={(e) => d.apply(setLink(d.doc, linkIndex, 'pins.tx', num(e.currentTarget.value)))} />{@render bad('pins')}</label>
-        <label>{INSPECT.uartPins} RX<input type="number" value={link.pins?.rx ?? ''} onchange={(e) => d.apply(setLink(d.doc, linkIndex, 'pins.rx', num(e.currentTarget.value)))} /></label>
-        <label>{INSPECT.baud}<input data-field="baud" type="number" value={link.baud ?? ''} onchange={(e) => d.apply(setLink(d.doc, linkIndex, 'baud', num(e.currentTarget.value)))} /></label>
-      </div>
-    {/if}
-    {@render controlPins(link, linkIndex)}
-    <div class="actions">
+      {:else if link.kind === 'uart'}
+        {@const bauds = uartBauds(from, to)}
+        {@const uart0 = link.iface === 'hw-uart0' ? uart0Pins(from) : null}
+        {@render pinSelect('pins', INSPECT.uartTx(name(link.from)), link.pins?.tx, `${link.to}.tx`, uart0?.tx ?? definedPins(from), (n) => d.apply(setLink(d.doc, linkIndex, 'pins.tx', n)))}
+        {@render pinSelect('pins.rx', INSPECT.uartRx(name(link.from)), link.pins?.rx, `${link.to}.rx`, uart0?.rx ?? definedPins(from), (n) => d.apply(setLink(d.doc, linkIndex, 'pins.rx', n)))}
+        <label
+          >{INSPECT.baud}<select data-field="baud" value={link.baud ?? ''} aria-invalid={issues('baud').length > 0} title={bauds.length === 0 ? INSPECT.noBaud : undefined} onchange={(e) => d.apply(setLink(d.doc, linkIndex, 'baud', num(e.currentTarget.value)))}>
+            <option value="">{bauds.length === 0 ? INSPECT.noBaud : INSPECT.unset}</option>
+            {#if link.baud !== undefined && !bauds.includes(link.baud)}<option value={link.baud}>{link.baud}{INSPECT.undefinedPin}</option>{/if}
+            {#each bauds as b (b)}<option value={b}>{b}</option>{/each}
+          </select>{@render bad('baud')}</label
+        >
+      {/if}
+      {@render controlPins(link, linkIndex)}
       {#if link.kind === 'i2c'}
         {@const b = (t.buses ?? []).findIndex((x) => x.id === link.bus)}
         {#if b >= 0}<button class="secondary" onclick={() => (d.selected = `bus:${b}`)}>{INSPECT.bus}</button>{/if}
       {/if}
-      <button class="secondary" onclick={() => { d.apply(removeLink(d.doc, linkIndex)); d.selected = null; }}>{INSPECT.removeLink}</button>
     </div>
   {:else if bus}
-    <h2 id="inspector-h" tabindex="-1">{INSPECT.bus}</h2>
-    <div class="grid">
-      <label>{INSPECT.busPins} SDA<input data-field="sda" type="number" value={bus.sda} onchange={(e) => d.apply(setBus(d.doc, busIndex, 'sda', num(e.currentTarget.value)))} />{@render bad('sda')}</label>
-      <label>{INSPECT.busPins} SCL<input type="number" value={bus.scl} onchange={(e) => d.apply(setBus(d.doc, busIndex, 'scl', num(e.currentTarget.value)))} /></label>
+    <div class="head"><h2 id="inspector-h" tabindex="-1">{INSPECT.bus}</h2></div>
+    <div class="fields">
+      {@render pinSelect('sda', INSPECT.busSda, bus.sda, 'bus', hubPins, (n) => d.apply(setBus(d.doc, busIndex, 'sda', n)))}
+      {@render pinSelect('scl', INSPECT.busScl, bus.scl, 'bus', hubPins, (n) => d.apply(setBus(d.doc, busIndex, 'scl', n)))}
+      <!-- Only the speeds every node's definition names; a speed set otherwise is shown as such until changed. -->
       <label
-        >{INSPECT.speed}<select data-field="speed_hz" value={bus.speed_hz} onchange={(e) => d.apply(setBus(d.doc, busIndex, 'speed_hz', Number(e.currentTarget.value)))}>
-          {#each Object.entries(INSPECT.speeds) as [hz, label] (hz)}<option value={Number(hz)}>{label}</option>{/each}
+        >{INSPECT.speed}<select data-field="speed_hz" value={bus.speed_hz ?? ''} aria-invalid={issues('speed_hz').length > 0} title={hzs.length === 0 ? INSPECT.noSpeed : undefined} onchange={(e) => d.apply(setBus(d.doc, busIndex, 'speed_hz', num(e.currentTarget.value)))}>
+          <option value="">{hzs.length === 0 ? INSPECT.noSpeed : INSPECT.unset}</option>
+          {#if bus.speed_hz !== undefined && !hzs.includes(bus.speed_hz)}<option value={bus.speed_hz}>{INSPECT.hz(bus.speed_hz)}{INSPECT.undefinedPin}</option>{/if}
+          {#each hzs as hz (hz)}<option value={hz}>{INSPECT.hz(hz)}</option>{/each}
         </select>{@render bad('speed_hz')}</label
       >
       <label
@@ -246,26 +284,9 @@
 
 {#snippet controlPins(l: TLink, i: number)}
   {#if l.control?.kind === 'full'}
-    <div class="grid">
-      {#each [['nrst', INSPECT.reset], ['boot', INSPECT.boot]] as [k, label] (k)}
-        {@const v = l.control[k as 'nrst' | 'boot']}
-        <label
-          >{label}<select
-            data-field="control.{k}"
-            value={v ?? ''}
-            aria-invalid={issues(`control.${k}`).length > 0}
-            onchange={(e) => d.apply(setLink(d.doc, i, `control.${k}`, num(e.currentTarget.value)))}
-          >
-            <option value="">{INSPECT.unset}</option>
-            {#each hubPins as pin (pin)}
-              {@const n = gpioNo(pin)}
-              {@const other = usedBy(n, `${l.to}.${k}`)}
-              <option value={n} translate="no">{pin}{other ? INSPECT.inUse(other) : ''}</option>
-            {/each}
-          </select>{@render bad(`control.${k}`)}</label
-        >
-      {/each}
-    </div>
+    {@const owner = definedPins(byId(l.from))}
+    {@render pinSelect('control.nrst', INSPECT.reset, l.control.nrst, `${l.to}.nrst`, owner, (n) => d.apply(setLink(d.doc, i, 'control.nrst', n)))}
+    {@render pinSelect('control.boot', INSPECT.boot, l.control.boot, `${l.to}.boot`, owner, (n) => d.apply(setLink(d.doc, i, 'control.boot', n)))}
   {/if}
 {/snippet}
 
@@ -273,24 +294,65 @@
   .inspector {
     padding: var(--s-5);
   }
+  /* The sheet's head: its name, and the one destructive action at the top right. */
+  /* The head stays at the top while the fields scroll under it. */
+  .head {
+    position: sticky;
+    z-index: 1;
+    top: 0;
+    display: flex;
+    align-items: flex-start;
+    gap: var(--s-2);
+    margin: calc(-1 * var(--s-5)) var(--s-6) var(--s-4) 0;
+    padding: var(--s-5) 0 var(--s-2);
+    background: var(--c-layer-1);
+  }
   h2 {
-    margin: 0 0 var(--s-4);
-    font: 700 var(--t-title-size) / var(--t-title-lh) var(--f-ja);
+    flex: 1;
+    min-width: 0;
+    margin: 0;
+    overflow: hidden;
+    font: 700 var(--t-heading) / 28px var(--f-ja);
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
   h2:focus {
     outline: none;
   }
-  .grid {
+  /* A short window: the head scrolls with the fields, so a field is never behind it. */
+  @media (max-height: 720px) {
+    .head {
+      position: static;
+    }
+  }
+  .trash {
+    margin: -8px -8px -8px 0;
+    color: var(--c-signal);
+  }
+  /* One column: every field gets the sheet's whole width, so no value is cut short. */
+  .fields {
     display: grid;
-    grid-template-columns: 1fr 1fr;
+    grid-template-columns: minmax(0, 1fr);
     gap: var(--s-4);
     margin-bottom: var(--s-4);
   }
-  label {
+  label,
+  .field {
     display: grid;
     min-width: 0;
     gap: var(--s-2);
-    font: 700 var(--t-small-size) / var(--t-small-lh) var(--f-ja);
+    font: 700 var(--t-caption) / 16px var(--f-ja);
+  }
+  /* A read-only value in the same label style as every field; it stays on one line. */
+  .value {
+    min-height: var(--h-secondary);
+    padding: 0 var(--s-3);
+    overflow: hidden;
+    border: 1px solid transparent;
+    color: var(--c-paper);
+    font: 400 var(--t-mono) / 28px var(--f-mono);
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
   input,
   select {
@@ -302,17 +364,37 @@
     border-radius: var(--r-s);
     background: var(--c-ink);
     color: var(--c-paper);
-    font: 400 var(--t-mono-size) / var(--t-mono-lh) var(--f-mono);
+    font: 400 var(--t-mono) / 20px var(--f-mono);
+    transition: border-color var(--dur-quick) var(--ease-out);
+  }
+  /* The dropdown's own look: the ▾ sits 12 px from the edge, on the 4 px scale. */
+  select {
+    appearance: none;
+    padding-right: var(--s-7);
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23f1efe8' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
+    background-repeat: no-repeat;
+    background-position: right var(--s-3) center;
+    background-size: var(--i-s) var(--i-s);
+    cursor: pointer;
+  }
+  select[aria-disabled='true'] {
+    color: var(--c-muted);
+  }
+  input:focus-visible,
+  select:focus-visible {
+    outline: none;
+    border-color: var(--c-paper);
+    box-shadow: inset 0 0 0 1px var(--c-paper);
   }
   [aria-invalid='true'] {
     border-color: var(--c-signal);
   }
   h3 {
-    margin: var(--s-4) 0 var(--s-3);
-    font: 700 var(--t-heading-size) / var(--t-heading-lh) var(--f-ja);
+    margin: var(--s-2) 0 0;
+    font: 700 var(--t-small) / 20px var(--f-ja);
   }
   .warn {
-    font: 700 var(--t-small-size) / var(--t-small-lh) var(--f-ja);
+    font: 700 var(--t-caption) / 16px var(--f-ja);
   }
   .help {
     color: var(--c-muted);
@@ -320,89 +402,24 @@
   }
   .error {
     color: var(--c-signal);
-    font: 700 var(--t-small-size) / var(--t-small-lh) var(--f-ja);
+    font: 700 var(--t-caption) / 16px var(--f-ja);
   }
   .warning,
   .unsupported {
     color: var(--c-paper);
-    font: 700 var(--t-small-size) / var(--t-small-lh) var(--f-ja);
-  }
-  .pair {
-    display: grid;
-    grid-template-columns: auto 1fr;
-    gap: var(--s-4);
-    margin: 0 0 var(--s-4);
-  }
-  .pair dt {
-    color: var(--c-muted);
-  }
-  .pair dd {
-    margin: 0;
-    font: 400 var(--t-mono-size) / var(--t-mono-lh) var(--f-mono);
+    font: 700 var(--t-caption) / 16px var(--f-ja);
   }
   details {
     margin: var(--s-4) 0;
   }
-  .actions {
-    display: flex;
-    flex-wrap: wrap;
-    gap: var(--s-3);
-  }
   summary {
     cursor: pointer;
-    font: 700 var(--t-body-size) / var(--t-body-lh) var(--f-ja);
+    font: 700 var(--t-small) / 20px var(--f-ja);
     margin-bottom: var(--s-3);
   }
-  .seg {
-    display: grid;
-    grid-template-columns: 1fr 1fr;
-    gap: 0;
-    margin: 0 0 var(--s-4);
-    padding: 0;
-    border: 0;
-  }
-  .seg legend {
-    margin-bottom: var(--s-2);
-    font: 700 var(--t-small-size) / var(--t-small-lh) var(--f-ja);
-  }
-  .seg label {
-    flex: 1;
-    display: block;
-    padding: var(--s-2) var(--s-3);
-    border: 1px solid var(--c-line);
-    font-weight: 400;
-    cursor: pointer;
-  }
-  .seg label:has(input:checked) {
-    background: var(--c-paper);
-    color: var(--c-ink);
-  }
-  /* A kind the firmware does not implement yet: still choosable (the 構成
-     may describe it), marked like a shape not updatable yet (◇, dashed). */
-  .seg label.not-yet {
-    border-style: dashed;
-  }
-  .not-yet-mark {
-    display: block;
-    margin-top: var(--s-1);
-    font: 400 var(--t-small-size) / 1 var(--f-ja);
-    color: var(--c-muted);
-  }
-  .seg label.not-yet:has(input:checked) .not-yet-mark {
-    color: var(--c-ink);
-  }
-  .host {
-    display: grid;
-    gap: var(--s-1);
-    margin: 0 0 var(--s-4);
-  }
-  .seg input {
-    position: absolute;
-    opacity: 0;
-    min-height: 0;
-  }
-  .seg label:focus-within {
-    outline: 3px solid var(--c-paper);
+  summary:focus-visible {
+    outline: var(--st-w-focus) solid var(--c-paper);
     outline-offset: 2px;
+    border-radius: var(--r-s);
   }
 </style>

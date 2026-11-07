@@ -25,7 +25,7 @@
 use std::path::{Path, PathBuf};
 
 use dagon_topology::defs::Registry;
-use dagon_topology::schema::{LinkKind, Node, Role, Topology};
+use dagon_topology::schema::{LinkKind, Node, Role, Topology, DEFAULT_I2C_HZ};
 use serde::Deserialize;
 
 use crate::cli::{GenArgs, NewArgs};
@@ -74,7 +74,7 @@ fn hub_link(t: &Topology, child: &str) -> Option<String> {
                 "HubLink::I2c {{ sda: {}, scl: {}, speed_hz: {}, addr: {:#04x}, nrst: {}, boot: {} }}",
                 bus.sda,
                 bus.scl,
-                bus.speed_hz.unwrap_or(100_000),
+                bus.i2c_hz(),
                 l.addr.unwrap_or(0),
                 opt(ctl.nrst),
                 opt(ctl.boot)
@@ -105,8 +105,7 @@ pub fn wiring_rs(t: &Topology, n: &Node, board: Option<&BoardFacts>) -> String {
                     .bus
                     .as_ref()
                     .and_then(|b| t.buses.iter().find(|x| &x.id == b))
-                    .and_then(|b| b.speed_hz)
-                    .unwrap_or(100_000);
+                    .map_or(DEFAULT_I2C_HZ, |b| b.i2c_hz());
                 let pins = l.node_pins.as_ref();
                 let s = |v: Option<&String>| v.map_or("None".into(), |p| format!("Some({p:?})"));
                 format!(
@@ -527,7 +526,7 @@ pub fn wiring_placeholders(
     );
     put(
         "down_i2c_hz",
-        bus.map_or("0".into(), |b| b.speed_hz.unwrap_or(100_000).to_string()),
+        bus.map_or("0".into(), |b| b.i2c_hz().to_string()),
     );
     let uarts: Vec<_> = downs.iter().filter(|l| l.kind == LinkKind::Uart).collect();
     if uarts.len() > 1 {

@@ -6,13 +6,6 @@
     /** The 親機 this page is connected to, or the words for none. */
     hub: string;
     connected: boolean;
-    /** The text button at the right end: 接続する / 切断する. */
-    hubAction: string;
-    onhub?: () => void;
-    /** Which device to choose in the browser's list, on the button that opens it. */
-    hubHint?: string;
-    /** Why connecting or disconnecting is held now (the button stays focusable and says it). */
-    hubLocked?: string | null;
     /** The lock table's state now (待機, 書き込み中 …), for screen readers. */
     state: string;
     /** How dagon serve stands; the icon opens its sheet. */
@@ -29,7 +22,7 @@
     nextEl?: HTMLElement;
   }
 
-  let { hub, connected, hubAction, onhub, hubHint, hubLocked = null, state, cli, cliReady, oncli, saved, savedOk, sentence, status, alert, nextEl = $bindable() }: Props = $props();
+  let { hub, connected, state, cli, cliReady, oncli, saved, savedOk, sentence, status, alert, nextEl = $bindable() }: Props = $props();
 </script>
 
 <!-- The band: where the 親機 stands, the one sentence where the eye lands after an action, the connection's action at the end. -->
@@ -38,10 +31,6 @@
   <p class="sentence" tabindex="-1" bind:this={nextEl}><span class="visually-hidden">{LOCK.stateLabel} {state} </span>{sentence}</p>
   {#if saved}<span class="mark" class:ok={savedOk} title={saved} role="img" aria-label={saved}><Icon name={savedOk ? 'check' : 'circle-dashed'} size="var(--i-s)" /></span>{/if}
   {#if oncli}<button class="mark" class:ok={cliReady} title={cli} aria-label={cli} onclick={oncli}><Icon name="terminal" size="var(--i-s)" /></button>{/if}
-  {#if onhub}
-    <button class="text" data-control="connect" title={hubHint} aria-disabled={hubLocked !== null} aria-describedby={hubLocked ? 'hub-why' : undefined} onclick={onhub}>{hubAction}</button>
-    {#if hubLocked}<span id="hub-why" class="visually-hidden">{hubLocked}</span>{/if}
-  {/if}
   <div class="visually-hidden" role="status">{status}</div>
   <div class="visually-hidden" role="alert">{alert}</div>
 </footer>
@@ -106,18 +95,9 @@
     line-height: 1;
     cursor: pointer;
   }
-  /* Button/Text: the connection's action, accent, no border and no fill. */
-  .text {
-    color: var(--c-accent);
-    font: 700 var(--t-small) / 1 var(--f-ja);
-    white-space: nowrap;
-  }
-  .text[aria-disabled='true'] {
-    color: var(--c-muted);
-    cursor: not-allowed;
-  }
+  /* The ring stays inside the band's 4 px padding (h-status = the text button + 2 × s-1): at the window's bottom edge nothing cuts it. */
   button:focus-visible {
     outline: var(--st-w-focus) solid var(--c-paper);
-    outline-offset: 2px;
+    outline-offset: 1px;
   }
 </style>

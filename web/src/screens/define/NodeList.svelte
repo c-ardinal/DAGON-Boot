@@ -161,6 +161,7 @@
   .search input {
     flex: 1;
     min-width: 0;
+    padding: 0;
     border: 0;
     background: none;
     color: var(--c-paper);
@@ -186,10 +187,10 @@
     grid-template-columns: auto 1fr auto;
     color: var(--c-paper);
     align-items: center;
-    gap: 0.375rem;
+    gap: var(--s-2);
     min-height: 2rem;
     margin: 0 var(--s-1);
-    padding: 0.1875rem var(--s-2);
+    padding: var(--s-1) var(--s-2);
     border-radius: var(--r-s);
     cursor: grab;
     user-select: none;
@@ -224,7 +225,7 @@
   }
   .used {
     color: var(--c-muted);
-    font-size: var(--t-11);
+    font-size: var(--t-caption);
   }
   @media (max-width: 767px), (pointer: coarse) {
     .part {

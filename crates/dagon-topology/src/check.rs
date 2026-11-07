@@ -20,9 +20,8 @@ const MAX_TAG_LEN: usize = 16;
 /// errors add up; an 8N1 receiver that samples mid-bit loses the frame at
 /// half a bit over its 10 bits, 5 % between the ends, and 2 % a side keeps
 /// a margin for clock tolerance and edge timing below that.
-const MAX_BAUD_ERROR: f64 = 0.02;
+use crate::defs::MAX_BAUD_ERROR;
 /// Standard and fast mode; each ROM I2C bootloader's `max_hz` caps it further.
-const I2C_SPEEDS: &[u32] = &[100_000, 400_000];
 const I2C_ADDR_MIN: u8 = 0x08;
 const I2C_ADDR_MAX: u8 = 0x77;
 
@@ -66,6 +65,7 @@ pub fn check_with(reg: &Registry, t: &Topology) -> Report {
     c.v05();
     c.v06();
     c.v07_v08();
+    c.v07_every_end();
     c.v09();
     c.v10();
     c.v11();
@@ -114,6 +114,45 @@ pub fn effective_tiers(t: &Topology, id: &str) -> Vec<Tier> {
 /// size against the project's `[board.<id>]`, not against a stand-in board.
 fn named_board<'r>(reg: &'r Registry, n: &Node) -> Option<&'r BoardDef> {
     n.board.as_deref().and_then(|id| reg.board(id))
+}
+
+/// What V-07 holds against `gpio` on `n`'s own end of a link: nothing when the node's
+/// definition defines it. A named board judges by its header (one naming no numbered GPIO
+/// judges nothing); a node named by MCU alone judges by that MCU's GPIO range, never by a
+/// stand-in board.
+pub fn pin_fault(reg: &Registry, mcu: &str, board: Option<&str>, gpio: u8) -> Option<String> {
+    let name = format!("GPIO{gpio}");
+    if let Some(b) = board.and_then(|id| reg.board(id)) {
+        if !b.header.iter().any(|h| h.pin.starts_with("GPIO")) {
+            return None;
+        }
+        if b.header.iter().any(|h| h.pin == name) {
+            return None;
+        }
+        let avail: Vec<_> = b.header.iter().map(|h| h.pin.as_str()).collect();
+        return Some(format!(
+            "{name} is not on the {} header {avail:?}",
+            b.product
+        ));
+    }
+    let m = reg.mcu(mcu).filter(|m| m.gpio_count > 0)?;
+    (gpio >= m.gpio_count)
+        .then(|| format!("{name} is not a {} GPIO (0-{})", m.id, m.gpio_count - 1))
+}
+
+/// The pins a hw-uart0 link from `n` may use: its MCU's UART0 TX pins and RX pins (V-09),
+/// each one its own definition defines (V-07). The Console offers exactly these.
+pub fn uart0_choices(reg: &Registry, mcu: &str, board: Option<&str>) -> (Vec<u8>, Vec<u8>) {
+    let Some(c) = reg.mcu(mcu).and_then(|m| m.coordinator.as_ref()) else {
+        return (Vec::new(), Vec::new());
+    };
+    let ok = |pins: &[u8]| {
+        pins.iter()
+            .copied()
+            .filter(|&g| pin_fault(reg, mcu, board, g).is_none())
+            .collect()
+    };
+    (ok(&c.uart0_tx), ok(&c.uart0_rx))
 }
 
 /// Board for a node's capabilities (I2C target, ROM loader pins): the named
@@ -589,6 +628,67 @@ impl<'a> Ctx<'a> {
         pins
     }
 
+    /// Every pin on every link end is one its own definition defines: a `from`
+    /// node's `pins` and `control` pins on its board's header (or its MCU's GPIO
+    /// range when it names only an MCU), a `to` node's `node_pins` as one of its
+    /// board's I2C pairs. Links from the 親機 are covered by `v07_v08`.
+    fn v07_every_end(&mut self) {
+        let hub = self.coordinator().map(|c| c.id.clone());
+        for (i, l) in self.links() {
+            let p = link_path(i);
+            if Some(&l.from) != hub.as_ref() {
+                let mut pins: Vec<(String, u8)> = Vec::new();
+                // A hw-uart0 link runs on the MCU's own UART0 pair, judged below (V-09), not on the header.
+                if let (Some(u), false) = (l.pins, l.iface == Some(UartIface::HwUart0)) {
+                    pins.push((format!("{p}.pins.tx"), u.tx));
+                    pins.push((format!("{p}.pins.rx"), u.rx));
+                }
+                if let Some(g) = l.control.nrst {
+                    pins.push((format!("{p}.control.nrst"), g));
+                }
+                if let Some(g) = l.control.boot {
+                    pins.push((format!("{p}.control.boot"), g));
+                }
+                let from_mcu = self.t.node(&l.from).and_then(|n| self.reg.mcu(&n.mcu));
+                if let Some(n) = self.t.node(&l.from) {
+                    for (path, gpio) in pins {
+                        if let Some(msg) = pin_fault(self.reg, &n.mcu, n.board.as_deref(), gpio) {
+                            self.err("V-07", path, msg);
+                        }
+                    }
+                }
+                if l.iface == Some(UartIface::HwUart0) {
+                    if let (Some(c), Some(u)) =
+                        (from_mcu.and_then(|m| m.coordinator.as_ref()), l.pins)
+                    {
+                        if !c.uart0_tx.contains(&u.tx) || !c.uart0_rx.contains(&u.rx) {
+                            let msg = format!("GPIO{}/{} is not a UART0 TX/RX pair", u.tx, u.rx);
+                            self.err("V-09", format!("{p}.pins"), msg);
+                        }
+                    }
+                }
+            }
+            if let (Some(np), Some(b)) = (l.node_pins.as_ref(), self.node_board(&l.to)) {
+                if !b
+                    .i2c_pairs
+                    .iter()
+                    .any(|r| r.sda == np.sda && r.scl == np.scl)
+                {
+                    let pairs: Vec<_> = b
+                        .i2c_pairs
+                        .iter()
+                        .map(|r| format!("{}/{}", r.sda, r.scl))
+                        .collect();
+                    let msg = format!(
+                        "{}/{} is not an I2C pair of {}: {pairs:?}",
+                        np.sda, np.scl, b.product
+                    );
+                    self.err("V-07", format!("{p}.node_pins"), msg);
+                }
+            }
+        }
+    }
+
     fn v07_v08(&mut self) {
         let pins = self.coordinator_pins();
         if let Some(board) = self.coordinator_board() {
@@ -902,25 +1002,62 @@ impl<'a> Ctx<'a> {
         }
     }
 
+    /// A bus's speed is one every node on it runs its I2C link at, from
+    /// their MCUs' `[link_i2c]`; a node whose MCU states none is refused (no
+    /// speed is known to work on it). The slowest ROM loader reached over
+    /// the bus caps it.
     fn v20(&mut self) {
         for (i, b) in self.t.buses.iter().enumerate() {
-            // The slowest ROM loader reached over this bus caps its speed.
-            let rom_cap = self
+            let on_bus: Vec<&Link> = self
                 .links()
                 .filter(|(_, l)| l.kind == LinkKind::I2c && l.bus.as_ref() == Some(&b.id))
-                .filter_map(|(_, l)| self.forced_rom(&l.to))
+                .map(|(_, l)| l)
+                .collect();
+            let rom_cap = on_bus
+                .iter()
+                .filter_map(|l| self.forced_rom(&l.to))
                 .min_by_key(|r| r.max_hz);
-            let over_cap = |s: u32| rom_cap.is_some_and(|r| s > r.max_hz);
-            if b.speed_hz
-                .is_some_and(|s| !I2C_SPEEDS.contains(&s) || over_cap(s))
-            {
+            let speed = b.i2c_hz();
+            let path = format!("buses[{i}].speed_hz");
+            // The speeds every node's firmware runs the bus at; a node whose firmware runs no I2C link here is V-23's.
+            let mut named: Option<Vec<u32>> = None;
+            for l in &on_bus {
+                for (id, dir) in [(&l.from, Dir::Down), (&l.to, Dir::Up)] {
+                    let Some(m) = self.t.node(id).and_then(|n| self.reg.mcu(&n.mcu)) else {
+                        continue;
+                    };
+                    if !links::available_in(self.reg, &m.id, dir).contains(&LinkKind::I2c) {
+                        continue;
+                    }
+                    let Some(u) = &m.link_i2c else {
+                        self.err(
+                            "V-20",
+                            path.clone(),
+                            format!(
+                                "speed_hz {speed}: {id} ({}) cannot be checked: its MCU definition has no [link_i2c]",
+                                m.name
+                            ),
+                        );
+                        continue;
+                    };
+                    named = Some(match named {
+                        None => u.hzs.clone(),
+                        Some(n) => n.into_iter().filter(|h| u.hzs.contains(h)).collect(),
+                    });
+                }
+            }
+            let over_cap = rom_cap.is_some_and(|r| speed > r.max_hz);
+            if named.as_ref().is_some_and(|n| !n.contains(&speed)) || over_cap {
                 let limit = rom_cap.map_or(String::new(), |r| {
                     format!(" ({} limit {})", r.name, r.max_hz)
                 });
                 self.err(
                     "V-20",
-                    format!("buses[{i}].speed_hz"),
-                    format!("speed_hz must be one of {I2C_SPEEDS:?}{limit}"),
+                    path,
+                    format!(
+                        "speed_hz must be one of {:?}{limit}",
+                        named.unwrap_or_default()
+                    ),
                 );
             }
             if !matches!(b.pullups.as_deref(), Some("external" | "board")) {
@@ -951,14 +1088,19 @@ impl<'a> Ctx<'a> {
                 if !links::available_in(self.reg, &m.id, dir).contains(&LinkKind::Uart) {
                     continue;
                 }
-                let what = match m.link_uart.map(|u| (u.actual_baud(baud), u.baud_error(baud))) {
+                let u = m.link_uart.as_ref();
+                let what = match u.map(|u| (u.runs(baud), u.actual_baud(baud), u.baud_error(baud))) {
                     None => "cannot be checked: its MCU definition has no [link_uart]".into(),
-                    Some((Some(a), Some(e))) if e.abs() > MAX_BAUD_ERROR => format!(
+                    Some((_, Some(a), Some(e))) if e.abs() > MAX_BAUD_ERROR => format!(
                         "runs at {a:.0} bit/s, {:+.2} %; each end of a UART link must be within {:.0} %",
                         e * 100.0,
                         MAX_BAUD_ERROR * 100.0
                     ),
-                    Some((Some(_), Some(_))) => continue,
+                    Some((false, Some(_), Some(_))) => format!(
+                        "is not a speed its firmware runs the link at; its definition names {:?}",
+                        u.map(|u| u.bauds.as_slice()).unwrap_or(&[])
+                    ),
+                    Some((true, Some(_), Some(_))) => continue,
                     Some(_) => "cannot make it".into(),
                 };
                 self.err(

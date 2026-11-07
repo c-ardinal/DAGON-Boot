@@ -195,9 +195,26 @@ export class Define {
     this.status = ANNOUNCE.A01(name, r.doc.topo.nodes.find((n) => n.id === r.id)!.role === 'coordinator');
   }
 
-  /** Delete on the selected node or link (A03). */
-  removeSelected(): void {
-    const s = this.selected;
+  /** What the user asked to delete (`node:id` / `link:to`): a modal confirms before anything goes. */
+  askRemove = $state<string | null>(null);
+
+  /** The trash button, Delete key or the table's 消す: nothing is deleted until confirmed. */
+  requestRemove(key: string | null = this.selected): void {
+    if (!key || this.guard('edit')) return;
+    this.askRemove = key;
+  }
+
+  /** The confirmation's answer: the item goes (undoable), or nothing changes. */
+  answerRemove(yes: boolean): void {
+    const key = this.askRemove;
+    this.askRemove = null;
+    if (!yes || !key) return;
+    this.removeSelected(key);
+  }
+
+  /** Deletes the node or link at `key` (A03). */
+  removeSelected(key: string | null = this.selected): void {
+    const s = key;
     if (!s) return;
     if (s.startsWith('node:')) {
       const id = s.slice(5);
@@ -208,7 +225,7 @@ export class Define {
       const i = (this.doc.topo.links ?? []).findIndex((l) => l.to === s.slice(5));
       if (i < 0 || !this.apply(removeLink(this.doc, i))) return;
     }
-    this.selected = null;
+    if (this.selected === s) this.selected = null;
   }
 
   /** "直す" on a problem: select its item and focus its field. */

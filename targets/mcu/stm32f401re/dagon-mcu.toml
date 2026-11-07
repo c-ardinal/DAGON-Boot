@@ -88,6 +88,12 @@ pairs = [
     { controller = "i2c2", sda = "PB3", scl = "PB10" },
 ]
 
+# Bus speeds the firmware's I2C target (template/src/board.rs, slave mode)
+# follows: standard mode 100 kHz and fast mode 400 kHz (RM0368 18.3, I2C).
+# A bus's speed_hz is one of these on every node on it.
+[link_i2c]
+hzs = [100_000, 400_000]
+
 # Link kinds the firmware implements (src/links.rs LINK_KINDS).
 [links]
 up = ["i2c"]

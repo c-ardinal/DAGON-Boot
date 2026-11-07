@@ -470,6 +470,39 @@ fn v24_an_uplink_belongs_to_a_coordinator() {
 }
 
 #[test]
+fn v07_refuses_node_pins_that_are_not_an_i2c_pair_of_the_board() {
+    let got = messages(
+        &mutate(
+            "node_pins: { sda: PB4, scl: PA8 }",
+            "node_pins: { sda: PZ9, scl: PZ8 }",
+        ),
+        "V-07",
+    );
+    assert_eq!(got.len(), 1, "{got:?}");
+    assert!(
+        got[0].starts_with("PZ9/PZ8 is not an I2C pair of NUCLEO-F401RE"),
+        "{}",
+        got[0]
+    );
+}
+
+#[test]
+fn v26_refuses_a_baud_the_definitions_do_not_name_even_when_the_uart_makes_it() {
+    // 115212 is 0.01 % off 115200, which both ends make; neither definition
+    // names it, so it is refused: only a listed speed can be set or built.
+    let got = messages(&mutate("baud: 115200", "baud: 115212"), "V-26");
+    assert_eq!(got.len(), 2, "{got:?}");
+    assert!(got[0].starts_with("baud 115212: hub (RP2040) is not a speed its firmware runs the link at; its definition names [115200, 230400]"), "{}", got[0]);
+    assert!(
+        got[1].starts_with(
+            "baud 115212: watch (ESP32-S3) is not a speed its firmware runs the link at"
+        ),
+        "{}",
+        got[1]
+    );
+}
+
+#[test]
 fn v26_uart_baud_must_be_within_two_percent_on_both_ends() {
     // RP2040's link UART: 125 MHz / 8 / a whole divider; ESP32-S3's:
     // 40 MHz / (n + k/16).
@@ -483,14 +516,14 @@ fn v26_uart_baud_must_be_within_two_percent_on_both_ends() {
     );
     for bad in ["921600", "1000000"] {
         let r = check_str(&mutate("baud: 115200", &format!("baud: {bad}")));
-        let v26: Vec<_> = r.errors().filter(|i| i.rule == "V-26").collect();
+        // The hub cannot run it; the watch may refuse it too, as a speed its definition does not name.
+        let v26: Vec<_> = r
+            .errors()
+            .filter(|i| i.rule == "V-26" && i.message.contains("hub (RP2040)"))
+            .collect();
         assert_eq!(v26.len(), 1, "{bad}: {:?}", r.issues);
         assert_eq!(v26[0].path, "links[1].baud");
-        assert!(
-            v26[0].message.contains("hub (RP2040)"),
-            "{}",
-            v26[0].message
-        );
+        assert!(v26[0].message.contains("+"), "{}", v26[0].message);
     }
     // Neither end can divide its clock down to these.
     for none in ["0", "100000000"] {
@@ -509,7 +542,7 @@ fn v26_refuses_a_uart_end_whose_mcu_states_no_link_uart() {
     // An ESP32-S3 definition without [link_uart]: its firmware runs the
     // UART link, but no speed on it is known to work, so none is accepted,
     // the default included.
-    let block = "[link_uart]\\nclock_hz = 40000000\\nclocks_per_bit = 1\\nfrac_bits = 4\\n";
+    let block = "[link_uart]\\nbauds = [115200, 230400, 460800, 921600]\\nclock_hz = 40000000\\nclocks_per_bit = 1\\nfrac_bits = 4\\n";
     let json = Registry::builtin().to_json();
     assert!(json.contains(block), "the esp32s3 [link_uart] block moved");
     let reg = Registry::from_json(&json.replacen(block, "", 1)).unwrap();
@@ -550,4 +583,23 @@ fn both_ends_of_a_uart_link_take_its_baud_from_the_topology() {
         Ok(Some(dagon_topology::schema::DEFAULT_BAUD))
     );
     assert_eq!(t.uart_baud("watch"), t.uart_baud("hub"));
+}
+
+#[test]
+fn v07_judges_a_pin_by_the_named_board_only_and_the_uart0_choices_follow() {
+    use dagon_topology::{pin_fault, uart0_choices};
+    let reg = Registry::builtin();
+    // A node named by MCU alone: its MCU's GPIO range, never a stand-in board's header.
+    assert_eq!(pin_fault(reg, "rp2040", None, 2), None);
+    assert!(pin_fault(reg, "rp2040", None, 40).is_some());
+    // A named board: its header.
+    let board = Some("waveshare-rp2040-touch-lcd-1.28");
+    assert_eq!(pin_fault(reg, "rp2040", board, 16), None);
+    assert!(pin_fault(reg, "rp2040", board, 0).is_some());
+    // What a hw-uart0 link may use is what V-09 and V-07 accept together.
+    let (tx, rx) = uart0_choices(reg, "rp2040", board);
+    assert!(tx.contains(&16) && rx.contains(&17));
+    assert!(!tx.contains(&0) && !rx.contains(&1));
+    let (tx, rx) = uart0_choices(reg, "rp2040", None);
+    assert_eq!((tx, rx), (vec![0, 12, 16, 28], vec![1, 13, 17, 29]));
 }

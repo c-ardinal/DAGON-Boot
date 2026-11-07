@@ -41,12 +41,12 @@
   .focal {
     display: grid;
     flex: none;
-    gap: 2px;
+    gap: var(--s-1);
     pointer-events: none;
   }
   .lbl {
     color: var(--c-muted);
-    font: 400 var(--t-13) / 1.3 var(--f-ja);
+    font: 400 var(--t-small) / 20px var(--f-ja);
   }
   .row {
     display: flex;
@@ -55,7 +55,7 @@
   }
   .num {
     color: var(--c-paper);
-    font: 700 var(--t-display-size) / 0.9 var(--f-dot);
+    font: 700 var(--t-display) / 1 var(--f-dot);
     letter-spacing: 0.02em;
     font-variant-numeric: tabular-nums;
   }
@@ -64,17 +64,18 @@
   }
   .of {
     color: var(--c-muted);
-    font: 700 2.75rem / 1 var(--f-dot);
+    font: 700 var(--t-title) / 1 var(--f-ja);
   }
   .small .num {
-    font-size: 4rem;
+    font-size: var(--t-title);
+    line-height: 32px;
   }
   .small .of {
-    font-size: 1.75rem;
+    font-size: var(--t-small);
   }
   .sub {
     color: var(--c-paper);
-    font: 400 var(--t-13) / 1.45 var(--f-ja);
+    font: 400 var(--t-small) / 20px var(--f-ja);
     white-space: nowrap;
   }
   .sub .k {

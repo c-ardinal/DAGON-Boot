@@ -13,8 +13,8 @@ pub mod schema;
 pub use reach::{cut_with, updatable, Cut, Skip};
 
 pub use check::{
-    check, check_str, check_str_with, check_with, effective_tiers, rom_forced_unavailable,
-    SCHEMA_VERSION,
+    check, check_str, check_str_with, check_with, effective_tiers, pin_fault,
+    rom_forced_unavailable, uart0_choices, SCHEMA_VERSION,
 };
 pub use compile::{
     compile, compile_str, compile_with, mcu_id_of, parse_str, parse_version, port_kind_of,

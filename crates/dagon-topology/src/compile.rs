@@ -19,7 +19,6 @@ use crate::schema::{Constraint, ControlKind, Link, LinkKind, Role, RomEntry, Tie
 use crate::{check_with, effective_tiers, Report, Topology};
 
 const DEFAULT_MAX_ATTEMPTS: u8 = 3;
-const DEFAULT_I2C_HZ: u32 = 400_000;
 const MAX_TIERS: usize = 3;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -182,7 +181,7 @@ fn link(t: &Topology, l: &Link) -> Result<TopoLink, CompileError> {
                 tp::iface::I2C_BUS,
                 bus.sda,
                 bus.scl,
-                bus.speed_hz.unwrap_or(DEFAULT_I2C_HZ),
+                bus.i2c_hz(),
                 l.addr.ok_or_else(|| missing("addr"))?,
                 bus_id as u8,
             )

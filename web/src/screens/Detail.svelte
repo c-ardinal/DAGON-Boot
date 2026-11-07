@@ -207,6 +207,22 @@
           {#each SLOT.rows as row (row)}<span class="skeleton"></span>{/each}
         </div>
       {/if}
+      {@const core = l?.core}
+      {#if core}
+        <h3>{SLOT.coreHeading}</h3>
+        <table class="slots" class:stale={l?.responding === false}>
+          <tbody>
+            {#each SLOT.coreRows as row, i (row)}
+              {@const slot = core.slots[i]}
+              <tr>
+                <th scope="row">{row}</th>
+                <td class="v" translate="no">{slot && slot.state !== SLOT_EMPTY ? versionText(slot.version) : ''}</td>
+                <td>{slot ? (i === core.active ? SLOT.inUse : (SLOT.states[slot.state] ?? '')) : ''}</td>
+              </tr>
+            {/each}
+          </tbody>
+        </table>
+      {/if}
       {@const back = previousVersion(l?.status)}
       {#if act && l?.responding && l.hello?.trial}
         <p class="choice">{TRIAL_CHOICE.sentence}</p>
@@ -285,9 +301,20 @@
   .detail {
     padding: var(--s-5);
   }
+  /* A short window: the head scrolls with the fields, so a field is never behind it. */
+  @media (max-height: 720px) {
+    .title {
+      position: static;
+    }
+  }
   .title {
-    margin: 0 0 var(--s-3);
-    font: 700 var(--t-title-size) / var(--t-title-lh) var(--f-ja);
+    position: sticky;
+    z-index: 1;
+    top: 0;
+    margin: calc(-1 * var(--s-5)) 0 var(--s-3);
+    padding: var(--s-5) var(--s-6) var(--s-2) 0;
+    background: var(--c-layer-1);
+    font: 700 var(--t-heading) / 28px var(--f-ja);
     letter-spacing: 0.02em;
     font-feature-settings: 'palt';
     text-wrap: balance;
@@ -297,19 +324,19 @@
   }
   .choice {
     margin: var(--s-4) 0 var(--s-3);
-    font: 400 var(--t-body-size) / var(--t-body-lh) var(--f-ja);
+    font: 400 var(--t-small) / 20px var(--f-ja);
   }
   h3 {
     margin: var(--s-4) 0 var(--s-3);
     padding-top: var(--s-4);
     border-top: 1px solid var(--c-line);
-    font: 700 var(--t-heading-size) / var(--t-heading-lh) var(--f-ja);
+    font: 700 var(--t-small) / 20px var(--f-ja);
     letter-spacing: 0.02em;
     font-feature-settings: 'palt';
   }
   .lead {
     margin: 0;
-    font: 400 var(--t-body-size) / var(--t-body-lh) var(--f-ja);
+    font: 400 var(--t-small) / 20px var(--f-ja);
   }
   .intro {
     display: grid;
@@ -317,44 +344,50 @@
     margin: 0;
     padding: 0;
     list-style: none;
-    font: 400 var(--t-body-size) / var(--t-body-lh) var(--f-ja);
+    font: 400 var(--t-small) / 20px var(--f-ja);
     text-wrap: pretty;
   }
   .n {
     display: inline-block;
     width: var(--s-6);
-    font: 400 var(--t-body-size) / 1 var(--f-version);
+    font: 400 var(--t-small) / 1 var(--f-mono);
     font-variant-numeric: tabular-nums;
     color: var(--c-muted);
   }
   .note {
     margin: var(--s-4) 0 0;
     color: var(--c-muted);
-    font: 400 var(--t-small-size) / var(--t-small-lh) var(--f-ja);
+    font: 400 var(--t-caption) / 16px var(--f-ja);
   }
   .pairs {
     display: grid;
-    grid-template-columns: minmax(6rem, max-content) 1fr;
+    grid-template-columns: max-content minmax(0, 1fr);
     gap: var(--s-2) var(--s-4);
     align-items: baseline;
     margin: 0;
-    font: 400 var(--t-small-size) / var(--t-small-lh) var(--f-ja);
+    font: 400 var(--t-small) / 20px var(--f-ja);
   }
   dt {
     color: var(--c-muted);
+    white-space: nowrap;
   }
+  /* A value stays on one line: it scrolls sideways rather than breaking mid-word. */
   dd {
+    min-width: 0;
     margin: 0;
+    overflow-x: auto;
     font-variant-numeric: tabular-nums;
+    white-space: nowrap;
   }
   table {
     width: 100%;
     border-collapse: collapse;
-    font: 400 var(--t-small-size) / var(--t-small-lh) var(--f-ja);
+    font: 400 var(--t-small) / 20px var(--f-ja);
   }
   th,
   td {
-    height: 2.5rem;
+    height: 40px;
+    white-space: nowrap;
     padding: var(--s-2) var(--s-3);
     border-bottom: 1px solid var(--c-line);
     text-align: left;
@@ -364,7 +397,7 @@
     color: var(--c-muted);
   }
   .v {
-    font: 400 var(--t-version-small-size) / 1 var(--f-version);
+    font: 400 var(--t-small) / 1 var(--f-mono);
     font-variant-numeric: tabular-nums;
   }
   .stale {
@@ -381,23 +414,22 @@
     margin-top: var(--s-6);
   }
   summary {
-    font: 700 var(--t-small-size) / var(--t-small-lh) var(--f-ja);
+    font: 700 var(--t-caption) / 16px var(--f-ja);
     cursor: pointer;
   }
   .raw {
     display: grid;
-    grid-template-columns: max-content 1fr;
+    grid-template-columns: max-content minmax(0, 1fr);
     gap: var(--s-1) var(--s-4);
     margin: var(--s-2) 0 0;
-    font: 500 var(--t-mono-size) / var(--t-mono-log-lh) var(--f-mono);
-    overflow-wrap: anywhere;
+    font: 500 var(--t-mono) / 20px var(--f-mono);
   }
   .scroll {
     overflow-x: auto;
   }
   .wires {
     font-family: var(--f-mono);
-    font-size: var(--t-mono-size);
+    font-size: var(--t-mono);
   }
   .wires :is(th, td):last-child {
     white-space: nowrap;

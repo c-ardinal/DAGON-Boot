@@ -92,6 +92,16 @@ pub struct Bus {
     pub pullups: Option<String>,
 }
 
+/// The I2C bus speed a 構成 gets when its bus leaves `speed_hz` out.
+pub const DEFAULT_I2C_HZ: u32 = 400_000;
+
+impl Bus {
+    /// `speed_hz`, or [`DEFAULT_I2C_HZ`] when left out.
+    pub fn i2c_hz(&self) -> u32 {
+        self.speed_hz.unwrap_or(DEFAULT_I2C_HZ)
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum BusKind {

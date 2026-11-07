@@ -1,7 +1,7 @@
 <script lang="ts">
   import { INSPECT, TABLE, WIRING } from '../../app/copy.ts';
   import type { Define } from '../../app/define/define.svelte.ts';
-  import { connect, removeLink, removeNode } from '../../app/define/model.ts';
+  import { connect } from '../../app/define/model.ts';
 
   interface Props {
     d: Define;
@@ -34,7 +34,7 @@
 <div class="table-view">
   <div class="tools">
     <button class="secondary" onclick={onaddnode}>{TABLE.addNode}</button>
-    <button class="secondary" aria-disabled={!unlinked} onclick={() => unlinked && d.apply(connect(d.doc, unlinked.id))}>{TABLE.addLink}</button>
+    <button class="secondary" aria-disabled={!unlinked} title={unlinked ? undefined : TABLE.addLinkWhy} onclick={() => unlinked && d.apply(connect(d.doc, unlinked.id))}>{TABLE.addLink}</button>
   </div>
   <!-- svelte-ignore a11y_interactive_supports_focus -->
   <div role="tablist" tabindex="-1" onkeydown={keys}>
@@ -51,13 +51,13 @@
             <tr>
               <td>{n.no}</td>
               <th scope="row">{n.name}</th>
-              <td translate="no">{n.product} · {n.mcu}</td>
+              <td class="product" translate="no" title="{n.product} · {n.mcu}">{n.product} · {n.mcu}</td>
               <td>{INSPECT.roles[n.role === 'hub' ? 'coordinator' : 'node']}</td>
               <td translate="no">{n.via}</td>
               <td translate="no">{[n.reset, n.boot].filter(Boolean).join(' · ')}</td>
               <td class="ops">
                 <button class="secondary" onclick={() => edit(`node:${n.id}`)}>{TABLE.edit}</button>
-                <button class="secondary" onclick={() => d.apply(removeNode(d.doc, n.id))}>{TABLE.remove}</button>
+                <button class="secondary destructive" onclick={() => d.requestRemove(`node:${n.id}`)}>{TABLE.remove}</button>
               </td>
             </tr>
           {/each}
@@ -67,7 +67,7 @@
       <table>
         <thead><tr>{#each TABLE.linkCols as h (h)}<th scope="col">{h}</th>{/each}<th></th></tr></thead>
         <tbody>
-          {#each c.links as l, i (l.to)}
+          {#each c.links as l (l.to)}
             <tr>
               <td>{nameOf(l.from)}</td>
               <th scope="row">{nameOf(l.to)}</th>
@@ -76,7 +76,7 @@
               <td translate="no">{l.wires.map((w) => w.hubPin).filter((p) => p.startsWith('GPIO')).join(' · ')}</td>
               <td class="ops">
                 <button class="secondary" onclick={() => edit(`link:${l.to}`)}>{TABLE.edit}</button>
-                <button class="secondary" onclick={() => d.apply(removeLink(d.doc, i))}>{TABLE.remove}</button>
+                <button class="secondary destructive" onclick={() => d.requestRemove(`link:${l.to}`)}>{TABLE.remove}</button>
               </td>
             </tr>
           {/each}
@@ -102,7 +102,9 @@
     display: grid;
     grid-template-rows: auto auto minmax(0, 1fr);
     gap: var(--s-3);
+    min-width: 0;
     min-height: 0;
+    height: 100%;
     padding: var(--s-4) var(--s-5);
   }
   .tools {
@@ -120,7 +122,7 @@
     border-bottom: 3px solid transparent;
     background: none;
     color: var(--c-muted);
-    font: 700 var(--t-body-size) / var(--t-body-lh) var(--f-ja);
+    font: 700 var(--t-small) / 20px var(--f-ja);
     cursor: pointer;
   }
   [role='tab'][aria-selected='true'] {
@@ -134,7 +136,7 @@
   table {
     width: 100%;
     border-collapse: collapse;
-    font: 400 var(--t-small-size) / var(--t-small-lh) var(--f-ja);
+    font: 400 var(--t-caption) / 16px var(--f-ja);
   }
   thead th {
     position: sticky;
@@ -147,13 +149,30 @@
   td {
     padding: var(--s-2) var(--s-3);
     border-bottom: 1px solid var(--c-line);
+  }
+  /* Names and actions stay on one line; a value (pins, a way) may wrap so every column fits the window. */
+  th,
+  .ops {
     white-space: nowrap;
   }
   tbody th {
     text-align: left;
   }
+  /* Every column fits the window: the product's name alone gives way, cut with its full text on hover. */
+  .product {
+    max-width: 0;
+    width: 100%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
   .ops {
-    display: flex;
-    gap: var(--s-2);
+    white-space: nowrap;
+  }
+  .ops button + button {
+    margin-left: var(--s-2);
+  }
+  .destructive {
+    border-color: var(--c-signal);
+    color: var(--c-signal);
   }
 </style>

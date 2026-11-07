@@ -2,7 +2,7 @@
 // shapes of dagon-topology's schema) plus the page-side display names. Every
 // edit is a pure function returning a new document, so undo keeps snapshots.
 // Validity is never decided here: topo_check (dagon-topology in WASM) does it.
-import { board_template, coordinator_capable, coordinator_uart0, link_kinds, max_nodes, rom_i2c_addrs, supported_mcus, topo_cut, topo_parse } from '../../wasm/pkg/dagon_wasm.js';
+import { board_template, coordinator_capable, i2c_hzs, rom_i2c_pairs, uart0_choices, link_kinds, max_nodes, rom_i2c_addrs, supported_mcus, topo_cut, topo_parse, uart_bauds } from '../../wasm/pkg/dagon_wasm.js';
 import { defaultBoard, type Board } from '../../wasm/dagon.ts';
 import { INSPECT } from '../copy.ts';
 import type { Config, Link as GLink, Node as GNode, Skip, UplinkHost, Wire } from '../sample.ts';
@@ -63,6 +63,46 @@ export const LINK_KINDS: LinkKind[] = ['usb-cdc', 'uart', 'i2c', 'ble', 'wifi-tc
 export function linkKinds(mcu: string): { up: LinkKind[]; down: LinkKind[] } {
   return link_kinds(mcu) as { up: LinkKind[]; down: LinkKind[] };
 }
+
+/** The I2C bus speeds every one of `nodes`' MCU definitions names (`[link_i2c] hzs`): the only ones a bus joining them may be set to. */
+export function i2cHzs(nodes: (TNode | undefined)[]): number[] {
+  return Array.from(i2c_hzs(nodes.map((n) => n?.mcu ?? '')));
+}
+
+/** The nodes on bus `id`: each end of every I2C link over it. */
+export function busNodes(t: Topo, id: string): TNode[] {
+  const ids = new Set((t.links ?? []).filter((l) => l.kind === 'i2c' && l.bus === id).flatMap((l) => [l.from, l.to]));
+  return t.nodes.filter((n) => ids.has(n.id));
+}
+
+/** The UART speeds both ends' MCU definitions name (`[link_uart] bauds`): the only ones a link may be set to. */
+export function uartBauds(from: TNode | undefined, to: TNode | undefined): number[] {
+  return Array.from(uart_bauds(from?.mcu ?? '', to?.mcu ?? ''));
+}
+
+/** The pins a node's own end of a link may use, as the check (V-07) allows: its board's header, or, named by MCU alone, that MCU's GPIO range. */
+export function definedPins(n: TNode | undefined): number[] {
+  if (!n) return [];
+  if (n.board) return (template(n.board)?.header ?? []).map((p) => Number(p.replace(/^GPIO/, ''))).filter((x) => Number.isFinite(x));
+  const count = mcus().find((m) => m.id === n.mcu)?.gpioCount ?? 0;
+  return Array.from({ length: count }, (_, i) => i);
+}
+
+/** The pins a hw-uart0 link from `n` may use: what V-09 and V-07 accept together, from the one function the check reads. */
+export function uart0Pins(n: TNode | undefined): { tx: number[]; rx: number[] } {
+  return n ? (uart0_choices(n.mcu, n.board) as { tx: number[]; rx: number[] }) : { tx: [], rx: [] };
+}
+
+/** The pin pairs `n`'s ROM loader listens on, as V-13 accepts. */
+export function romI2cPairs(n: TNode | undefined): { sda: string; scl: string }[] {
+  return n ? (rom_i2c_pairs(n.mcu) as { sda: string; scl: string }[]) : [];
+}
+
+/** The speed a new link from `h` to `n` starts at: the first both definitions name; none when they share none (the check then asks). */
+const firstBaud = (h: TNode, n: TNode): { baud?: number } => {
+  const b = uartBauds(h, n)[0];
+  return b === undefined ? {} : { baud: b };
+};
 
 /** Whether a hop of `kind` from `from` to `to` is one both firmwares implement. */
 export function hopAvailable(kind: LinkKind, from: TNode | undefined, to: TNode | undefined): boolean {
@@ -135,7 +175,6 @@ export interface BoardTemplate {
 export const maxNodes = (): number => max_nodes();
 const I2C_FIRST = 0x08;
 const I2C_LAST = 0x77;
-const I2C_SPEED = 400_000;
 
 export function template(board: string): BoardTemplate | null {
   return board_template(board) as BoardTemplate | null;
@@ -147,15 +186,16 @@ function hubPins(h: TNode): BoardTemplate['coordinator'] {
   return (board ? template(board)?.coordinator : null) ?? null;
 }
 
-/** A new I2C bus on 親機 `h`; without defined pins the check asks for them. */
-function hubBus(h: TNode): TBus {
-  return { id: 'i2c-main', kind: 'i2c', ...hubPins(h)?.i2c, speed_hz: I2C_SPEED, pullups: 'external' } as TBus;
+/** A new I2C bus on 親機 `h` towards `n`: the first speed both definitions name (none: the check asks); without defined pins the check asks for them. */
+function hubBus(h: TNode, n: TNode): TBus {
+  const hz = i2cHzs([h, n])[0];
+  return { id: 'i2c-main', kind: 'i2c', ...hubPins(h)?.i2c, ...(hz === undefined ? {} : { speed_hz: hz }), pullups: 'external' } as TBus;
 }
 
 /** UART0 pins for a link from `h`: its MCU's [coordinator] pair, else the 親機 MCU's; none defined: the check asks for them. */
-function uart0Pins(t: Topo, h: TNode): { pins?: { tx: number; rx: number } } {
-  const pins = (coordinator_uart0(h.mcu) ?? coordinator_uart0(hub(t)?.mcu ?? '')) as { tx: number; rx: number } | null;
-  return pins ? { pins } : {};
+function firstUart0(t: Topo, h: TNode): { pins?: { tx: number; rx: number } } {
+  const c = [uart0Pins(h), uart0Pins(hub(t))].find((p) => p.tx.length && p.rx.length);
+  return c ? { pins: { tx: c.tx[0], rx: c.rx[0] } } : {};
 }
 
 function hubUart(h: TNode): { tx: number; rx: number } {
@@ -296,18 +336,18 @@ export function connect(doc: Doc, id: string, parent?: string): Doc {
   // A node chosen by MCU links like its MCU's default board, if any (its pins are the developer's).
   const stand = n.board ?? defaultBoard(n.mcu);
   const tpl = stand ? template(stand) : null;
-  const d = tpl?.link ?? { kind: 'uart' as const, iface: 'pio-uart', addr: null, baud: 115200, control: 'cooperative' as const, romEntry: null };
+  const d = tpl?.link ?? { kind: 'uart' as const, iface: 'pio-uart', addr: null, baud: null, control: 'cooperative' as const, romEntry: null };
   if (h.role !== 'coordinator' || n.role === 'coordinator') {
     // Below a 子機 the board's own way into its loader, as under the 親機 (V-11 asks for it on every UART link).
     const control: TControl = { kind: d.control, ...(d.romEntry ? { rom_entry: d.romEntry } : {}) };
     const link: TLink =
-      n.role === 'coordinator' ? { from: h.id, to: id, kind: 'can' } : { from: h.id, to: id, kind: 'uart', iface: 'hw-uart0', ...uart0Pins(t, h), baud: 115200, control };
+      n.role === 'coordinator' ? { from: h.id, to: id, kind: 'can' } : { from: h.id, to: id, kind: 'uart', iface: 'hw-uart0', ...firstUart0(t, h), ...firstBaud(h, n), control };
     return { ...doc, topo: { ...t, links: [...(t.links ?? []), link] } };
   }
   let buses = t.buses ?? [];
   let link: TLink;
   if (d.kind === 'i2c') {
-    if (!buses.length) buses = [hubBus(h)];
+    if (!buses.length) buses = [hubBus(h, n)];
     const free = freeAddrs(t);
     const addr = d.addr !== null && free.includes(d.addr) ? d.addr : free[0];
     const pins = tpl?.i2cPairs[0];
@@ -327,7 +367,7 @@ export function connect(doc: Doc, id: string, parent?: string): Doc {
       kind: 'uart',
       iface: d.iface ?? 'pio-uart',
       pins: hubUart(h),
-      baud: d.baud ?? 115200,
+      ...(d.baud !== null && uartBauds(h, n).includes(d.baud) ? { baud: d.baud } : firstBaud(h, n)),
       control: { kind: d.control, ...(d.romEntry ? { rom_entry: d.romEntry } : {}) },
     };
   }
@@ -403,9 +443,9 @@ export function setLinkKind(doc: Doc, index: number, kind: LinkKind): Doc {
   if (tpl?.link?.kind === kind && h.role === 'coordinator') return connect(without, l.to, h.id);
   const link: TLink =
     kind === 'uart'
-      ? { from: h.id, to: l.to, kind, iface: 'pio-uart', pins: hubUart(h), baud: 115200, control: { kind: 'cooperative' } }
+      ? { from: h.id, to: l.to, kind, iface: 'pio-uart', pins: hubUart(h), ...firstBaud(h, n ?? h), control: { kind: 'cooperative' } }
       : { from: h.id, to: l.to, kind, bus: t.buses?.[0]?.id ?? 'i2c-main', addr: freeAddrs(t)[0], control: { kind: 'full' } };
-  const buses = kind === 'i2c' && !t.buses?.length ? [hubBus(h)] : t.buses;
+  const buses = kind === 'i2c' && !t.buses?.length ? [hubBus(h, n ?? h)] : t.buses;
   return { ...without, topo: { ...t, buses, links: [...(t.links ?? []), link] } };
 }
 

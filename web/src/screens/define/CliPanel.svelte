@@ -8,9 +8,11 @@
     panel: 'link' | 'jobs';
     /** The agent link: the API key of each way that takes one is registered here (CLI 連携). */
     agent?: Agent;
+    /** Asks before the API key is removed (the page's one confirmation modal). */
+    onconfirm?: (run: () => void) => void;
   }
 
-  let { cli, panel, agent }: Props = $props();
+  let { cli, panel, agent, onconfirm }: Props = $props();
 
   /** Every way that takes an API key, as GET /v1/agent lists them. */
   const keyWays = $derived((agent?.status?.agents ?? []).flatMap((a) => a.ways.filter((w) => w.key != null).map((w) => ({ a, w }))));
@@ -59,7 +61,7 @@
                 <label>{CLI_LINK.keys.input}<input type="password" autocomplete="off" spellcheck="false" translate="no" bind:value={draft.value} /></label>
                 <div class="actions">
                   <button type="submit" class="secondary" aria-disabled={!draft.value.trim()} title={draft.value.trim() ? undefined : CLI_LINK.keys.saveWhy}>{CLI_LINK.keys.save}</button>
-                  {#if w.key}<button type="button" class="secondary destructive" title={CLI_LINK.keys.removeWhy} onclick={() => void draft.remove()}>{CLI_LINK.keys.remove}</button>{/if}
+                  {#if w.key}<button type="button" class="secondary destructive" title={CLI_LINK.keys.removeWhy} onclick={() => (onconfirm ? onconfirm(() => void draft.remove()) : void draft.remove())}>{CLI_LINK.keys.remove}</button>{/if}
                 </div>
               </form>
               {#if draft.problem}<p class="bad">{draft.problem.label ?? ''} {draft.problem.text}</p>{/if}
@@ -122,9 +124,20 @@
   .panel {
     padding: var(--s-5);
   }
+  /* A short window: the head scrolls with the fields, so a field is never behind it. */
+  @media (max-height: 720px) {
+    h2 {
+      position: static;
+    }
+  }
   h2 {
-    margin: 0 0 var(--s-4);
-    font: 700 var(--t-title-size) / var(--t-title-lh) var(--f-ja);
+    position: sticky;
+    z-index: 1;
+    top: 0;
+    margin: calc(-1 * var(--s-5)) 0 var(--s-4);
+    padding: var(--s-5) var(--s-6) var(--s-2) 0;
+    background: var(--c-layer-1);
+    font: 700 var(--t-heading) / 28px var(--f-ja);
   }
   h2:focus {
     outline: none;
@@ -134,13 +147,13 @@
     align-items: center;
     gap: var(--s-3);
     margin: var(--s-4) 0 var(--s-3);
-    font: 700 var(--t-heading-size) / var(--t-heading-lh) var(--f-ja);
+    font: 700 var(--t-small) / 20px var(--f-ja);
   }
   p {
     margin: 0 0 var(--s-3);
   }
   .n {
-    font: 400 var(--t-body-size) / 1 var(--f-version);
+    font: 400 var(--t-small) / 1 var(--f-mono);
     color: var(--c-muted);
   }
   .pairs {
@@ -151,10 +164,17 @@
   }
   .pairs dt,
   .label {
-    color: var(--c-muted);
+    display: block;
+    margin-bottom: var(--s-2);
+    color: var(--c-paper);
+    font: 700 var(--t-caption) / 16px var(--f-ja);
   }
+  /* A value stays on one line: it scrolls sideways rather than breaking mid-word. */
   .pairs dd {
     margin: 0;
+    min-width: 0;
+    overflow-x: auto;
+    white-space: nowrap;
   }
   .steps,
   .rows {
@@ -180,7 +200,7 @@
   }
   .chip {
     justify-self: start;
-    font: 700 var(--t-small-size) / var(--t-small-lh) var(--f-ja);
+    font: 700 var(--t-caption) / 16px var(--f-ja);
   }
   .bad,
   .cause {
@@ -188,13 +208,13 @@
     font-weight: 700;
   }
   .num {
-    font: 400 var(--t-mono-size) / var(--t-mono-lh) var(--f-mono);
+    font: 400 var(--t-mono) / 20px var(--f-mono);
   }
   label {
     display: grid;
     gap: var(--s-1);
     min-width: 0;
-    font: 700 var(--t-small-size) / var(--t-small-lh) var(--f-ja);
+    font: 700 var(--t-caption) / 16px var(--f-ja);
   }
   input {
     min-height: var(--h-secondary);
@@ -225,7 +245,7 @@
     width: 100%;
     border-collapse: collapse;
     margin-bottom: var(--s-4);
-    font: 400 var(--t-small-size) / var(--t-small-lh) var(--f-ja);
+    font: 400 var(--t-caption) / 16px var(--f-ja);
   }
   th {
     color: var(--c-muted);
@@ -252,7 +272,7 @@
     overflow: auto;
     padding: var(--s-3);
     border: 1px solid var(--c-line);
-    font: 400 var(--t-mono-size) / var(--t-mono-log-lh) var(--f-mono);
+    font: 400 var(--t-mono) / 20px var(--f-mono);
     white-space: pre-wrap;
   }
 </style>

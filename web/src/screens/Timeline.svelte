@@ -64,15 +64,15 @@
     margin: 0;
     padding: var(--s-3) var(--s-5);
     color: var(--c-muted);
-    font: 400 var(--t-12) / 1.5 var(--f-ja);
+    font: 400 var(--t-small) / 20px var(--f-ja);
   }
   .tl {
-    padding: 2px var(--s-3) 0.25rem;
-    font: 400 var(--t-12) / 1 var(--f-ja);
+    padding: var(--s-1) var(--s-3);
+    font: 400 var(--t-small) / 1 var(--f-ja);
   }
   .row {
     display: grid;
-    grid-template-columns: 7rem 1fr;
+    grid-template-columns: var(--s-9) 1fr;
     align-items: center;
     height: 1.25rem;
   }
@@ -92,12 +92,12 @@
   }
   .tick {
     position: absolute;
-    top: 2px;
+    top: 0;
     height: 0.875rem;
-    padding-left: 0.1875rem;
+    padding-left: var(--s-1);
     border-left: 1px solid var(--c-hair);
     color: var(--c-muted);
-    font: 500 var(--t-11) / 1 var(--f-mono);
+    font: 500 var(--t-caption) / 1 var(--f-mono);
   }
   .cursor {
     position: absolute;
@@ -108,13 +108,13 @@
   }
   .blk {
     position: absolute;
-    top: 1px;
-    height: 0.875rem;
+    top: 0;
+    height: 16px;
     overflow: hidden;
-    padding: 0 0.25rem;
+    padding: 0 var(--s-1);
     border-radius: 2px;
     color: var(--c-paper);
-    font: 500 var(--t-11) / 0.875rem var(--f-ja);
+    font: 500 var(--t-caption) / 16px var(--f-ja);
     white-space: nowrap;
   }
   .st-writing {
@@ -139,17 +139,17 @@
   }
   .legend {
     display: flex;
-    gap: 0.75rem;
-    padding: 2px 0 0 7rem;
+    gap: var(--s-3);
+    padding: var(--s-1) 0 0 var(--s-9);
     color: var(--c-muted);
-    font-size: var(--t-11);
+    font-size: var(--t-caption);
   }
   .legend .blk {
     position: static;
     display: inline-block;
-    width: 0.875rem;
-    height: 0.625rem;
-    margin-right: 0.25rem;
+    width: 16px;
+    height: 8px;
+    margin-right: var(--s-1);
     padding: 0;
     vertical-align: -1px;
   }

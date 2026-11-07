@@ -301,10 +301,16 @@
   .detail {
     padding: var(--s-5);
   }
+  /* A short window: the head scrolls with the fields, so a field is never behind it. */
+  @media (max-height: 720px) {
+    .title {
+      position: static;
+    }
+  }
   .title {
     position: sticky;
     z-index: 1;
-    top: calc(-1 * var(--s-5));
+    top: 0;
     margin: calc(-1 * var(--s-5)) 0 var(--s-3);
     padding: var(--s-5) var(--s-6) var(--s-2) 0;
     background: var(--c-layer-1);

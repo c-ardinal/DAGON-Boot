@@ -161,6 +161,7 @@
   .search input {
     flex: 1;
     min-width: 0;
+    padding: 0;
     border: 0;
     background: none;
     color: var(--c-paper);

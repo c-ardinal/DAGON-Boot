@@ -15,12 +15,15 @@
     onpick: (id: string) => void;
     /** The dropdown part cannot be used now. */
     pickOff?: boolean;
+    /** Why the main button or the list cannot be used, on hover. */
+    offWhy?: string;
+    pickOffWhy?: string;
     /** The operation in the lock table. */
     control?: string;
     mainEl?: HTMLButtonElement;
   }
 
-  let { label, onmain, off = false, pickName, options, onpick, pickOff = false, control, mainEl = $bindable() }: Props = $props();
+  let { label, onmain, off = false, pickName, options, onpick, pickOff = false, control, mainEl = $bindable(), offWhy, pickOffWhy }: Props = $props();
   let open = $state(false);
   const none = $derived(pickOff || options.length === 0);
   let caret = $state<HTMLButtonElement>();
@@ -33,13 +36,13 @@
 
 <!-- One decision, one control: the button writes the default, its dropdown part writes the chosen one. They never part or wrap. -->
 <span class="split" use:dismiss={close}>
-  <button class="button-primary-header main" data-control={control} aria-disabled={off} bind:this={mainEl} onclick={onmain}><span>{label}</span></button>
+  <button class="button-primary-header main" data-control={control} aria-disabled={off} title={off ? offWhy : undefined} bind:this={mainEl} onclick={onmain}><span>{label}</span></button>
   <button
     class="button-primary-header caret"
     bind:this={caret}
     data-control={control}
     aria-label={pickName}
-    title={pickName}
+    title={none ? (pickOffWhy ?? pickName) : pickName}
     aria-haspopup="true"
     aria-expanded={open}
     aria-disabled={none}

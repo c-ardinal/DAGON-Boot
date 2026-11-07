@@ -79,7 +79,7 @@
   {#if onmode}
     <div class="modes" role="radiogroup" aria-label={MODE.label}>
       {#each MODES as [m, label] (m)}
-        <button role="radio" aria-checked={mode === m} aria-disabled={off(m)} onclick={() => pick(m)}>{label}</button>
+        <button role="radio" aria-checked={mode === m} aria-disabled={off(m)} title={off(m) ? (modeLocked ? MODE.offWhy.locked : MODE.offWhy.operate) : undefined} onclick={() => pick(m)}>{label}</button>
       {/each}
     </div>
   {/if}

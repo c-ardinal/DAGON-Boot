@@ -771,7 +771,7 @@ export const RULE_SHORT: Record<string, string> = {
   'V-04': '子機どうしのリンク',
   'V-05': 'つながっていないノード',
   'V-06': '起動の方式',
-  'V-07': '親機に無いピン',
+  'V-07': '定義に無いピン',
   'V-08': 'ピンの重なり',
   'V-09': 'UART のピン',
   'V-10': 'UART の数',
@@ -807,9 +807,10 @@ export interface FixWords {
   size?: string;
   /** The node is one updating skips: its link is not a thing to fix. */
   skipped?: boolean;
-  /** The pins the 親機's definition allows, and the I2C pairs the node's board defines, for the fix sentences. */
+  /** For the fix sentences, read from what the check reads: the pins the pin's own node defines, the pairs its ROM loader listens on, the speeds every node on the bus names. */
   pins?: string;
   pairs?: string;
+  hzs?: string;
 }
 
 /** How to fix each rule, one sentence. */
@@ -825,14 +826,14 @@ export const RULE_FIX: Record<string, (w: FixWords) => string> = {
   'V-09': () => '『直す』で親機のもう一方の UART に替えてください。',
   'V-10': () => 'UART のリンクを 1 本減らしてください。',
   'V-11': (w) => `${w.to}の起動の切り替え方を選んでください（最後の手段で直すときに使います）。`,
-  'V-12': (w) => `構成の YAML で ${w.to}の recovery から rom-forced（最後の手段）を外してください。`,
+  'V-12': (w) => `${w.to}の直し方の順番から、最後の手段を外してください。`,
   'V-13': (w) => `${w.to}を、そのボードの I2C の組（${w.pairs ?? '定義の組'}）のどれかにつないでください。`,
   'V-14': () => '『直す』で親機を最後にして並べてください。',
   'V-15': () => '互換の決まりから、無いノードを外してください。',
   'V-16': () => '既定の配置に戻してください。',
   'V-17': (w) => `共有の 2 本線（I2C）を親機の定義にあるピン（${w.pins ?? '定義のピン'}）にしてください。`,
   'V-18': (w) => `${w.to}のアドレスを、空いている番号に変えてください。`,
-  'V-20': () => '共有の 2 本線（I2C）の速さを 400 kHz 以下にしてください。',
+  'V-20': (w) => `共有の 2 本線（I2C）の速さを、つながるノードの定義にあるもの（${w.hzs ?? '定義の速さ'}）のどれかにしてください。`,
   'V-21': (w) => `${w.to}は UART でつないでください。`,
   'V-22': (w) => `最後の手段で復旧するには、『直す』で ${w.to}のリセット・起動の配線を設定してください（このままでも親機へ送れます）。`,
   'V-23': () => 'この構成のままで正しく使えます。いまの書き込みはこの部分に届かないため、書き込みではこの部分を飛ばします。',
@@ -851,6 +852,8 @@ export const MODE = {
   operate: '書込',
   define: '準備',
   label: 'モード',
+  /** Why a mode cannot be chosen, on hover. */
+  offWhy: { locked: '書き込みが終わるまで、モードは変えられません', operate: '構成を作り、問題を直すと、書込を使えます' },
   /** 書込 or 親機へ送る pressed while the 構成 is not in the project's YAML. */
   lockedUnsaved: { sentence: '構成を保存すると、書込と親機へ送るを使えます。' },
   /** M69: 書込 pressed with no 構成 or one with problems. */
@@ -954,8 +957,8 @@ export const INSPECT = {
   undefinedPin: '（定義にない）',
   maxAttempts: '起動を試す回数',
   listenWindow: '返事を待つ時間（ミリ秒）',
-  flashMap: 'メモリの配置（flash_map）',
-  tag: '目印（tag）',
+  flashMap: 'メモリの配置',
+  tag: '目印',
   baud: '速さ（ボーレート）',
   /** No speed both ends' definitions name: the link cannot be set up with these MCUs. */
   noBaud: 'この 2 つのマイコンに共通の速さがありません',
@@ -1338,6 +1341,12 @@ export const WRITE = {
   alreadyOn: (v: string, coreToo: boolean) => ({ label: `すべて ${v}`, detail: `チェックしたノードはすでに ${v} で動いて${coreToo ? 'いて、ブートローダも同じなので' : 'いるので'}、書き込みませんでした。` }),
   pickVersion: 'バージョンを選んで書き込む',
   run: '書き込む',
+  /** Why 書き込む cannot be pressed, on hover. */
+  offWhy: { notConnected: '接続すると書き込めます', busy: '今の書き込みが終わると、また書き込めます' },
+  /** Why the version list cannot be opened, on hover. */
+  pickOffWhy: '接続してバージョンが分かると選べます',
+  /** Why a card's check cannot be changed, on hover. */
+  checksLockedWhy: '書き込みが終わるまで、チェックは変えられません',
   go: '{n} ノードへ書き込む',
   toast: {
     done: '書き込み済み {n} ノード',

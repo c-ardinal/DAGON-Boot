@@ -2,7 +2,7 @@
 // shapes of dagon-topology's schema) plus the page-side display names. Every
 // edit is a pure function returning a new document, so undo keeps snapshots.
 // Validity is never decided here: topo_check (dagon-topology in WASM) does it.
-import { board_template, coordinator_capable, coordinator_uart0, i2c_hzs, link_kinds, max_nodes, rom_i2c_addrs, supported_mcus, topo_cut, topo_parse, uart_bauds } from '../../wasm/pkg/dagon_wasm.js';
+import { board_template, coordinator_capable, i2c_hzs, rom_i2c_pairs, uart0_choices, link_kinds, max_nodes, rom_i2c_addrs, supported_mcus, topo_cut, topo_parse, uart_bauds } from '../../wasm/pkg/dagon_wasm.js';
 import { defaultBoard, type Board } from '../../wasm/dagon.ts';
 import { INSPECT } from '../copy.ts';
 import type { Config, Link as GLink, Node as GNode, Skip, UplinkHost, Wire } from '../sample.ts';
@@ -88,10 +88,14 @@ export function definedPins(n: TNode | undefined): number[] {
   return Array.from({ length: count }, (_, i) => i);
 }
 
-/** The UART0 pairs a node's MCU runs a hw-uart0 link on (its `[coordinator]`), as V-09 allows. */
-export function uart0Pairs(n: TNode | undefined): { tx: number; rx: number }[] {
-  const p = n ? (coordinator_uart0(n.mcu) as { tx: number; rx: number } | null) : null;
-  return p ? [p] : [];
+/** The pins a hw-uart0 link from `n` may use: what V-09 and V-07 accept together, from the one function the check reads. */
+export function uart0Pins(n: TNode | undefined): { tx: number[]; rx: number[] } {
+  return n ? (uart0_choices(n.mcu, n.board) as { tx: number[]; rx: number[] }) : { tx: [], rx: [] };
+}
+
+/** The pin pairs `n`'s ROM loader listens on, as V-13 accepts. */
+export function romI2cPairs(n: TNode | undefined): { sda: string; scl: string }[] {
+  return n ? (rom_i2c_pairs(n.mcu) as { sda: string; scl: string }[]) : [];
 }
 
 /** The speed a new link from `h` to `n` starts at: the first both definitions name; none when they share none (the check then asks). */
@@ -189,9 +193,9 @@ function hubBus(h: TNode, n: TNode): TBus {
 }
 
 /** UART0 pins for a link from `h`: its MCU's [coordinator] pair, else the 親機 MCU's; none defined: the check asks for them. */
-function uart0Pins(t: Topo, h: TNode): { pins?: { tx: number; rx: number } } {
-  const pins = (coordinator_uart0(h.mcu) ?? coordinator_uart0(hub(t)?.mcu ?? '')) as { tx: number; rx: number } | null;
-  return pins ? { pins } : {};
+function firstUart0(t: Topo, h: TNode): { pins?: { tx: number; rx: number } } {
+  const c = [uart0Pins(h), uart0Pins(hub(t))].find((p) => p.tx.length && p.rx.length);
+  return c ? { pins: { tx: c.tx[0], rx: c.rx[0] } } : {};
 }
 
 function hubUart(h: TNode): { tx: number; rx: number } {
@@ -337,7 +341,7 @@ export function connect(doc: Doc, id: string, parent?: string): Doc {
     // Below a 子機 the board's own way into its loader, as under the 親機 (V-11 asks for it on every UART link).
     const control: TControl = { kind: d.control, ...(d.romEntry ? { rom_entry: d.romEntry } : {}) };
     const link: TLink =
-      n.role === 'coordinator' ? { from: h.id, to: id, kind: 'can' } : { from: h.id, to: id, kind: 'uart', iface: 'hw-uart0', ...uart0Pins(t, h), ...firstBaud(h, n), control };
+      n.role === 'coordinator' ? { from: h.id, to: id, kind: 'can' } : { from: h.id, to: id, kind: 'uart', iface: 'hw-uart0', ...firstUart0(t, h), ...firstBaud(h, n), control };
     return { ...doc, topo: { ...t, links: [...(t.links ?? []), link] } };
   }
   let buses = t.buses ?? [];

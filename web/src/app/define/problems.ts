@@ -3,8 +3,8 @@
 // says how to fix it and finds the item and field it points at.
 import { topo_check } from '../../wasm/dagon.ts';
 import { topo_cut } from '../../wasm/pkg/dagon_wasm.js';
-import { RULE_FIX, RULE_SHORT, type FixWords } from '../copy.ts';
-import { boardMissing, definedPins, flashTooSmall, maxNodes, template, type Doc } from './model.ts';
+import { INSPECT, RULE_FIX, RULE_SHORT, type FixWords } from '../copy.ts';
+import { boardMissing, busNodes, definedPins, flashTooSmall, i2cHzs, maxNodes, romI2cPairs, type Doc } from './model.ts';
 
 export interface Issue {
   rule: string;
@@ -70,8 +70,10 @@ function sentence(i: Issue, w: Where, doc: Doc, skipped: Record<string, string>)
     max: maxNodes(),
     size: i.rule === 'B-02' ? i.message : undefined,
     skipped: (link?.to ?? w.node ?? '') in skipped,
-    pins: definedPins(t.nodes.find((n) => n.role === 'coordinator')).map((n) => `GPIO${n}`).join('・') || undefined,
-    pairs: (link?.to ? (template(t.nodes.find((n) => n.id === link.to)?.board ?? '')?.i2cPairs ?? []) : []).map((p) => `${p.sda}・${p.scl}`).join('、') || undefined,
+    // The pin's own node: a `to` node's node_pins, else the `from` node's pins and control pins.
+    pins: definedPins(t.nodes.find((n) => n.id === (w.rest.startsWith('node_pins') ? link?.to : (link?.from ?? w.node)))).map((n) => `GPIO${n}`).join('・') || undefined,
+    pairs: romI2cPairs(t.nodes.find((n) => n.id === link?.to)).map((p) => `${p.sda}・${p.scl}`).join('、') || undefined,
+    hzs: w.bus !== undefined && t.buses?.[w.bus] ? i2cHzs(busNodes(t, t.buses[w.bus].id)).map(INSPECT.hz).join('・') || undefined : undefined,
   };
   return RULE_FIX[i.rule]?.(fill) ?? '';
 }

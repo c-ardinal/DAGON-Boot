@@ -51,7 +51,7 @@
             <tr>
               <td>{n.no}</td>
               <th scope="row">{n.name}</th>
-              <td translate="no">{n.product} · {n.mcu}</td>
+              <td class="product" translate="no" title="{n.product} · {n.mcu}">{n.product} · {n.mcu}</td>
               <td>{INSPECT.roles[n.role === 'hub' ? 'coordinator' : 'node']}</td>
               <td translate="no">{n.via}</td>
               <td translate="no">{[n.reset, n.boot].filter(Boolean).join(' · ')}</td>
@@ -149,12 +149,22 @@
   td {
     padding: var(--s-2) var(--s-3);
     border-bottom: 1px solid var(--c-line);
+  }
+  /* Names and actions stay on one line; a value (pins, a way) may wrap so every column fits the window. */
+  th,
+  .ops {
     white-space: nowrap;
   }
   tbody th {
     text-align: left;
   }
-  /* The actions end the row; a narrow window scrolls the table sideways, nothing hides under anything. */
+  /* Every column fits the window: the product's name alone gives way, cut with its full text on hover. */
+  .product {
+    max-width: 0;
+    width: 100%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
   .ops {
     white-space: nowrap;
   }

@@ -1,6 +1,6 @@
 import { fileURLToPath } from 'node:url';
 import { expect, test, type Page } from '@playwright/test';
-import { layoutFaults, openSample, settled } from './console.ts';
+import { disabledFaults, layoutFaults, openSample, settled } from './console.ts';
 
 test.setTimeout(360_000);
 
@@ -39,6 +39,8 @@ test('the split button writes the checked nodes, again after done, and says when
   });
   await page.locator('.split .main').click();
   await expect(page.locator('.node.st-busy').first()).toBeVisible({ timeout: 30_000 });
+  // While writing, whatever cannot be pressed says why.
+  expect(await disabledFaults(page)).toEqual([]);
   await finished(page);
   expect(await page.evaluate(() => [...(window as unknown as { seen: Set<string> }).seen])).toEqual([JSON.stringify(before)]);
   await expect(page.locator('.toast')).toBeVisible();

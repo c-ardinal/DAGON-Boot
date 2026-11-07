@@ -26,6 +26,8 @@ const STATES: [string, (p: Page) => Promise<void>, (p: Page) => Promise<void>][]
   ['困ったとき', async (p) => { await p.getByRole('button', { name: 'メニューを開く' }).click(); await p.getByRole('button', { name: '困ったとき' }).click(); await p.getByRole('button', { name: 'キー操作' }).click(); }, (p) => p.keyboard.press('Escape')],
   ['表', (p) => view(p, '表', '表で見る'), (p) => view(p, 'グラフ', 'グラフで見る')],
   ['トースト', async (p) => { await p.getByRole('button', { name: 'メニューを開く' }).click(); await p.getByRole('button', { name: '困ったとき', exact: true }).click(); await p.locator('.panel').last().locator('button:has(span:text-is("この URL をコピーする"))').click(); await p.locator('.toast').waitFor(); }, async () => undefined],
+  ['バブル', (p) => p.locator('.dagon .mark').click(), (p) => p.locator('.dagon .mark').click()],
+  ['バブルとシート', async (p) => { await p.locator('.node').first().dispatchEvent('click'); await p.locator('.dagon .mark').click(); }, async (p) => { await p.locator('.dagon .mark').click(); await p.locator('.node').first().dispatchEvent('click'); }],
   ['モーダル', async (p) => { await p.getByRole('button', { name: 'メニューを開く' }).click(); await p.locator('.panel').first().locator('button:has(span:text-is("最初からやり直す"))').click(); await p.locator('dialog[open]').waitFor(); }, async (p) => { await p.keyboard.press('Escape'); await p.locator('dialog[open]').waitFor({ state: 'detached' }); }],
 ];
 
@@ -38,7 +40,8 @@ test('sweep: no overflow, overlap, clipped text or clipped focus ring at any win
   const faults: string[] = [];
   // The start screen too: its first button is focused for the user.
   for (const f of await focusFaults(page)) faults.push(`1920x1080 開始: ${f}`);
-  await openSample(page);
+  // The agent is linked: the DAGON mark and its bubble stand on the page too.
+  await openSample(page, 'sim&agent=linked');
   for (const [w, h] of SIZES) {
     await page.setViewportSize({ width: w, height: h });
     // The bar re-lays out once for the new width (its edit tools come or go); the rest is what stands after that.
@@ -46,7 +49,8 @@ test('sweep: no overflow, overlap, clipped text or clipped focus ring at any win
     const rest = await boxes(page);
     for (const [name, into, out] of STATES) {
       await into(page);
-      await page.waitForTimeout(260);
+      // The drawer's height and the bar's tools settle within the longest motion token.
+      await page.waitForTimeout(400);
       for (const f of await layoutFaults(page)) faults.push(`${w}x${h} ${name}: ${f}`);
       for (const f of await focusFaults(page)) faults.push(`${w}x${h} ${name}: ${f}`);
       // Nothing that stands on the page vibrates: its box is the same a few frames later.
@@ -66,9 +70,13 @@ test('sweep: no overflow, overlap, clipped text or clipped focus ring at any win
     await page.setViewportSize({ width: w, height: h });
     await page.waitForTimeout(260);
     const prep = await boxes(page);
+    // The first view at this window, in both modes: full cards, never compact (the sample is small).
+    const compact = async (mode: string) => { await page.keyboard.press('f'); await page.waitForTimeout(400); if (await page.locator('.node.compact').count()) faults.push(`${w}x${h} ${mode}: the first view has compact cards`); };
+    await compact('準備');
     await page.getByRole('radio', { name: '書込' }).click();
     await page.waitForTimeout(300);
     const write = await boxes(page);
+    await compact('書込');
     for (const k of ['header .modes', '.frame > header', '.dagon .mark']) if (prep[k] !== undefined && prep[k] !== write[k]) faults.push(`${w}x${h} 準備→書込: ${k} moved ${prep[k]} -> ${write[k]}`);
     await page.getByRole('radio', { name: '準備' }).click();
     await page.waitForTimeout(300);
@@ -93,11 +101,43 @@ test('sweep: no overflow, overlap, clipped text or clipped focus ring at any win
   expect(faults).toEqual([]);
 });
 
+test('Escape closes the open bubble wherever focus is, before anything under it', async ({ page }) => {
+  await page.setViewportSize({ width: 1920, height: 1080 });
+  await openSample(page, 'sim&agent=linked');
+  await page.locator('.node').first().dispatchEvent('click');
+  await page.locator('.dagon .mark').click();
+  await expect(page.locator('.bubble')).toBeVisible();
+  await page.locator('header .hub').focus();
+  await page.keyboard.press('Escape');
+  await expect(page.locator('.bubble')).toHaveCount(0);
+  // The sheet under it is still there: one Escape, one thing.
+  await expect(page.locator('.float.sheet')).toBeVisible();
+  await page.keyboard.press('Escape');
+  await expect(page.locator('.float.sheet')).toHaveCount(0);
+});
+
+test('つながる親 なし asks first; cancelling shows the true parent, and picking it again keeps the link as it is', async ({ page }) => {
+  await page.setViewportSize({ width: 1920, height: 1080 });
+  await openSample(page);
+  await page.locator('.node').nth(1).dispatchEvent('click');
+  const parent = page.locator('[data-field="connect"]');
+  await expect(parent).toHaveValue('hub');
+  const chips = await page.locator('.link-chip').allInnerTexts();
+  await parent.selectOption('');
+  await expect(page.locator('dialog[open]')).toBeVisible();
+  await page.locator('dialog[open]').getByRole('button', { name: 'やめる' }).click();
+  await expect(page.locator('dialog[open]')).toHaveCount(0);
+  await expect(parent).toHaveValue('hub');
+  await parent.selectOption('hub');
+  await expect(page.locator('dialog[open]')).toHaveCount(0);
+  expect(await page.locator('.link-chip').allInnerTexts()).toEqual(chips);
+});
+
 test('scale and pan do not change when a sheet, drawer, menu or toast appears', async ({ page }) => {
   await page.setViewportSize({ width: 1920, height: 1080 });
   await openSample(page);
   const before = await canvasState(page);
-  for (const [name, into, out] of STATES.filter(([n]) => n !== '表' && n !== 'トースト' && n !== 'モーダル')) {
+  for (const [name, into, out] of STATES.filter(([n]) => n !== '表' && n !== 'トースト' && n !== 'モーダル' && !n.startsWith('バブル'))) {
     await into(page);
     await page.waitForTimeout(300);
     expect(await canvasState(page), name).toEqual(before);

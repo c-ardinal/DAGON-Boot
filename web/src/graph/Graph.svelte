@@ -61,6 +61,8 @@
     onmoved?: () => void;
     /** The free part of the window (client px) a fit puts the graph in; read only when fitting. */
     freeArea?: () => DOMRect | undefined;
+    /** The whole area, tried when `freeArea` alone would make the fit compact. */
+    wholeArea?: () => DOMRect | undefined;
     /** Nodes being written: how full their water is, 0–100. */
     fill?: Record<string, number>;
     /** Nodes being built now: their frame carries the edge light. */
@@ -95,6 +97,7 @@
     positions = $bindable({}),
     onmoved,
     freeArea,
+    wholeArea,
     fill = {},
     building = [],
     canLink,
@@ -253,11 +256,17 @@
   export function fit(cap: number = firstZoom(), smooth = true) {
     if (!boxEl || !config?.nodes.length) return;
     const box = boxEl.getBoundingClientRect();
-    const free = freeArea?.() ?? box;
+    let free = freeArea?.() ?? box;
     // The normal cards' bounds decide; when they would not fit at a zoom that keeps them normal, the compact layout is fitted and the zoom is held under the compact threshold so the result stays compact.
     const many = nodesOf.length >= COMPACT_FROM;
     let b = boundsAt(false);
     let zoom = many ? 0 : zoomFor(b, free, cap);
+    // The room kept for a toast never turns the cards compact: the whole area is used then, and a toast stands over the fit.
+    const whole = wholeArea?.();
+    if (!many && zoom < COMPACT_ZOOM && whole && zoomFor(b, whole, cap) >= COMPACT_ZOOM) {
+      free = whole;
+      zoom = zoomFor(b, whole, cap);
+    }
     if (zoom < COMPACT_ZOOM) {
       b = boundsAt(true);
       zoom = Math.min(zoomFor(b, free, cap), many ? cap : COMPACT_ZOOM * 0.99);
@@ -681,6 +690,7 @@
             aria-checked={check}
             aria-label={WRITE.pick(`[${n.no}] ${n.name}`)}
             aria-disabled={checksLocked}
+            title={checksLocked ? WRITE.checksLockedWhy : undefined}
             data-avoid=""
             style:left="{at(n.id).x}px"
             style:top="{at(n.id).y}px"

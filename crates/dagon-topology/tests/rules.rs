@@ -584,3 +584,22 @@ fn both_ends_of_a_uart_link_take_its_baud_from_the_topology() {
     );
     assert_eq!(t.uart_baud("watch"), t.uart_baud("hub"));
 }
+
+#[test]
+fn v07_judges_a_pin_by_the_named_board_only_and_the_uart0_choices_follow() {
+    use dagon_topology::{pin_fault, uart0_choices};
+    let reg = Registry::builtin();
+    // A node named by MCU alone: its MCU's GPIO range, never a stand-in board's header.
+    assert_eq!(pin_fault(reg, "rp2040", None, 2), None);
+    assert!(pin_fault(reg, "rp2040", None, 40).is_some());
+    // A named board: its header.
+    let board = Some("waveshare-rp2040-touch-lcd-1.28");
+    assert_eq!(pin_fault(reg, "rp2040", board, 16), None);
+    assert!(pin_fault(reg, "rp2040", board, 0).is_some());
+    // What a hw-uart0 link may use is what V-09 and V-07 accept together.
+    let (tx, rx) = uart0_choices(reg, "rp2040", board);
+    assert!(tx.contains(&16) && rx.contains(&17));
+    assert!(!tx.contains(&0) && !rx.contains(&1));
+    let (tx, rx) = uart0_choices(reg, "rp2040", None);
+    assert_eq!((tx, rx), (vec![0, 12, 16, 28], vec![1, 13, 17, 29]));
+}

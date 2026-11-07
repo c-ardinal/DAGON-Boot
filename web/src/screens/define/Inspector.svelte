@@ -18,7 +18,7 @@
     setNode,
     setUplink,
     template,
-    uart0Pairs,
+    uart0Pins,
     uartBauds,
     i2cHzs,
     busNodes,
@@ -141,8 +141,14 @@
           value={nodeLink >= 0 ? (t.links ?? [])[nodeLink].from : ''}
           onchange={(e) => {
             const parent = e.currentTarget.value;
-            // なし removes the link: that is a deletion, so it asks first like every other.
-            if (!parent) return void (nodeLink >= 0 && d.requestRemove(`link:${node.id}`));
+            const current = nodeLink >= 0 ? (t.links ?? [])[nodeLink].from : '';
+            // The same parent again changes nothing: the link keeps its settings.
+            if (parent === current) return;
+            // なし removes the link: that is a deletion, so it asks first like every other; until the answer the control shows the true value.
+            if (!parent) {
+              e.currentTarget.value = current;
+              return void (nodeLink >= 0 && d.requestRemove(`link:${node.id}`));
+            }
             const without = nodeLink >= 0 ? removeLink(d.doc, nodeLink) : d.doc;
             d.apply(connect(without, node.id, parent));
           }}
@@ -236,9 +242,9 @@
         >
       {:else if link.kind === 'uart'}
         {@const bauds = uartBauds(from, to)}
-        {@const fromPins = link.iface === 'hw-uart0' ? uart0Pairs(from).flatMap((p) => [p.tx, p.rx]) : definedPins(from)}
-        {@render pinSelect('pins', INSPECT.uartTx(name(link.from)), link.pins?.tx, `${link.to}.tx`, link.iface === 'hw-uart0' ? uart0Pairs(from).map((p) => p.tx) : fromPins, (n) => d.apply(setLink(d.doc, linkIndex, 'pins.tx', n)))}
-        {@render pinSelect('pins.rx', INSPECT.uartRx(name(link.from)), link.pins?.rx, `${link.to}.rx`, link.iface === 'hw-uart0' ? uart0Pairs(from).map((p) => p.rx) : fromPins, (n) => d.apply(setLink(d.doc, linkIndex, 'pins.rx', n)))}
+        {@const uart0 = link.iface === 'hw-uart0' ? uart0Pins(from) : null}
+        {@render pinSelect('pins', INSPECT.uartTx(name(link.from)), link.pins?.tx, `${link.to}.tx`, uart0?.tx ?? definedPins(from), (n) => d.apply(setLink(d.doc, linkIndex, 'pins.tx', n)))}
+        {@render pinSelect('pins.rx', INSPECT.uartRx(name(link.from)), link.pins?.rx, `${link.to}.rx`, uart0?.rx ?? definedPins(from), (n) => d.apply(setLink(d.doc, linkIndex, 'pins.rx', n)))}
         <label
           >{INSPECT.baud}<select data-field="baud" value={link.baud ?? ''} aria-invalid={issues('baud').length > 0} title={bauds.length === 0 ? INSPECT.noBaud : undefined} onchange={(e) => d.apply(setLink(d.doc, linkIndex, 'baud', num(e.currentTarget.value)))}>
             <option value="">{bauds.length === 0 ? INSPECT.noBaud : INSPECT.unset}</option>
@@ -293,7 +299,7 @@
   .head {
     position: sticky;
     z-index: 1;
-    top: calc(-1 * var(--s-5));
+    top: 0;
     display: flex;
     align-items: flex-start;
     gap: var(--s-2);
@@ -312,6 +318,12 @@
   }
   h2:focus {
     outline: none;
+  }
+  /* A short window: the head scrolls with the fields, so a field is never behind it. */
+  @media (max-height: 720px) {
+    .head {
+      position: static;
+    }
   }
   .trash {
     margin: -8px -8px -8px 0;

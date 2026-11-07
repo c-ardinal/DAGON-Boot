@@ -15,13 +15,13 @@
     ontalk: () => void;
     /** Bumped from outside (the menu's "DAGON と話す", the / key): opens the bubble and focuses its field. */
     openRequest: number;
+    /** The bubble is open; the page closes it on Escape wherever focus is. */
+    open?: boolean;
   }
 
-  let { agent, onask, onapply, ontalk, openRequest }: Props = $props();
+  let { agent, onask, onapply, ontalk, openRequest, open = $bindable(false) }: Props = $props();
 
   let field = $state<HTMLInputElement>();
-  /** Closed until asked for or answering: the canvas stays clear for what the nodes show. */
-  let open = $state(false);
   let text = $state('');
   let answered = $state(false);
 

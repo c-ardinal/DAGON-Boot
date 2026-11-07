@@ -525,8 +525,12 @@
       e.preventDefault();
       return void dagonOpen++;
     }
-    // Escape closes the top thing only: a dialog, the version list, the menu, the help, a notice or the bubble take it first.
-    if (screen === 'work' && e.key === 'Escape' && !menuOpen && !helpOpen && !document.querySelector('dialog[open], .split .list, [data-stop-notice], .bubble')) {
+    // Escape closes the top thing only: a dialog, the version list or a notice take it first; then the bubble, the menu, the help, the sheet.
+    if (screen === 'work' && e.key === 'Escape' && bubbleOpen && !document.querySelector('dialog[open], .split .list, [data-stop-notice]')) {
+      e.preventDefault();
+      return void (bubbleOpen = false);
+    }
+    if (screen === 'work' && e.key === 'Escape' && !menuOpen && !helpOpen && !document.querySelector('dialog[open], .split .list, [data-stop-notice]')) {
       if (why) why = null;
       return closeSheet();
     }
@@ -819,6 +823,8 @@
   }
   /** Every destructive action asks through this one modal: what, why, then the red button. */
   let ask = $state<{ title: string; sentence: string; label: string; run: () => void } | null>(null);
+  /** The DAGON bubble is open: Escape closes it first, wherever focus is. */
+  let bubbleOpen = $state(false);
   const confirmThen = (c: { title: string; sentence: string; label: string }, run: () => void) => (ask = { ...c, run });
   /** The free part of the canvas a fit fills: the middle column less the room a toast stands in, so a notice never covers a card of the fit view. */
   const TOAST_ROOM = 64;
@@ -826,6 +832,8 @@
     const r = midEl?.getBoundingClientRect();
     return r && new DOMRect(r.left, r.top, r.width, Math.max(0, r.height - TOAST_ROOM));
   };
+  /** The whole middle column: the fit falls back to it when the toast's room alone would make the cards compact. */
+  const wholeArea = () => midEl?.getBoundingClientRect();
   /** The sheet shows only when it holds something. */
   const sheetShown = $derived(
     mode === 'define'
@@ -1386,6 +1394,8 @@
       label={WRITE.run}
       onmain={write}
       off={writeOff}
+      offWhy={op.state === 'choosing' ? HUB_TOGGLE.locked.choosing : !connected ? WRITE.offWhy.notConnected : WRITE.offWhy.busy}
+      pickOffWhy={WRITE.pickOffWhy}
       control={writeControl}
       pickName={WRITE.pickVersion}
       options={versionChoices.map((c) => (c.id === 'latest' && c.label !== WRITE.latest ? { ...c, note: WRITE.latest } : c))}
@@ -1477,7 +1487,7 @@
       operateLocked={d.operable !== 'ok'}
       onlocked={() => lock(d.operable)}
       {menuOpen}
-      onmenu={() => (menuOpen = !menuOpen)}
+      onmenu={() => ((menuOpen = !menuOpen), menuOpen && (bubbleOpen = false))}
       actions={screen === 'work' ? actions : undefined}
       bind:helpOpen
       {helpKeys}
@@ -1499,7 +1509,7 @@
           <p id="canvas-help" class="visually-hidden">{CANVAS.describe}</p>
           {#if mode === 'operate' || d.view === 'graph'}
             <!-- One graph for both modes: changing mode moves the same cards to their places. -->
-            <Graph bind:this={graph} bind:view={canvasView} bind:positions onmoved={savePositions} freeArea={fitArea} {building} {...graphProps} />
+            <Graph bind:this={graph} bind:view={canvasView} bind:positions onmoved={savePositions} freeArea={fitArea} {wholeArea} {building} {...graphProps} />
           {/if}
         </main>
         <div class="overlay">
@@ -1557,7 +1567,7 @@
         </div>
         {#if agent.linked}
           <!-- The DAGON mark: the stage's top-right corner, outside every column, so no sheet, drawer, table or toast moves it; the sheet column starts under it and its bubble opens to its left. -->
-          <div class="mark-spot"><Dagon {agent} onask={askDagon} onapply={applyProposal} ontalk={() => (drawerTab = 'talk')} openRequest={dagonOpen} /></div>
+          <div class="mark-spot"><Dagon {agent} bind:open={bubbleOpen} onask={askDagon} onapply={applyProposal} ontalk={() => (drawerTab = 'talk')} openRequest={dagonOpen} /></div>
         {/if}
         <div class="dock" data-avoid="">
           <Drawer tabs={drawerTabs} open={drawerTab} onpick={(id) => (drawerTab = id)} onclose={() => (drawerTab = null)} body={drawerBody} />
@@ -1883,9 +1893,10 @@
     top: 0;
     height: 0;
   }
+  /* On the head's line: the × stands level with the sheet's own top-right action (the head's trash). */
   .sheet-close {
     position: absolute;
-    top: var(--s-2);
+    top: var(--s-4);
     right: var(--s-2);
   }
   /* The DAGON mark's spot: the stage's top-right, under the bar, over the columns; the end column leaves it its room. */
@@ -1898,6 +1909,14 @@
   }
   .frame:has(.mark-spot) .col.end {
     padding-top: calc(var(--w-mark) + var(--s-3));
+  }
+  /* The table leaves the mark its column too: nothing of the table stands under it. */
+  .frame:has(.mark-spot) .edit-area.table {
+    margin-right: calc(var(--w-mark) + var(--s-3));
+  }
+  /* While the sheet is open the bubble opens left of the sheet, not of the mark alone: nothing of it lies over the sheet. */
+  .frame:has(.float.sheet) :global(.bubble) {
+    right: calc(var(--w-sheet) + var(--s-3));
   }
   .log-none,
   .log {

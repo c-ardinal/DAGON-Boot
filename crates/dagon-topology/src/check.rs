@@ -116,6 +116,45 @@ fn named_board<'r>(reg: &'r Registry, n: &Node) -> Option<&'r BoardDef> {
     n.board.as_deref().and_then(|id| reg.board(id))
 }
 
+/// What V-07 holds against `gpio` on `n`'s own end of a link: nothing when the node's
+/// definition defines it. A named board judges by its header (one naming no numbered GPIO
+/// judges nothing); a node named by MCU alone judges by that MCU's GPIO range, never by a
+/// stand-in board.
+pub fn pin_fault(reg: &Registry, mcu: &str, board: Option<&str>, gpio: u8) -> Option<String> {
+    let name = format!("GPIO{gpio}");
+    if let Some(b) = board.and_then(|id| reg.board(id)) {
+        if !b.header.iter().any(|h| h.pin.starts_with("GPIO")) {
+            return None;
+        }
+        if b.header.iter().any(|h| h.pin == name) {
+            return None;
+        }
+        let avail: Vec<_> = b.header.iter().map(|h| h.pin.as_str()).collect();
+        return Some(format!(
+            "{name} is not on the {} header {avail:?}",
+            b.product
+        ));
+    }
+    let m = reg.mcu(mcu).filter(|m| m.gpio_count > 0)?;
+    (gpio >= m.gpio_count)
+        .then(|| format!("{name} is not a {} GPIO (0-{})", m.id, m.gpio_count - 1))
+}
+
+/// The pins a hw-uart0 link from `n` may use: its MCU's UART0 TX pins and RX pins (V-09),
+/// each one its own definition defines (V-07). The Console offers exactly these.
+pub fn uart0_choices(reg: &Registry, mcu: &str, board: Option<&str>) -> (Vec<u8>, Vec<u8>) {
+    let Some(c) = reg.mcu(mcu).and_then(|m| m.coordinator.as_ref()) else {
+        return (Vec::new(), Vec::new());
+    };
+    let ok = |pins: &[u8]| {
+        pins.iter()
+            .copied()
+            .filter(|&g| pin_fault(reg, mcu, board, g).is_none())
+            .collect()
+    };
+    (ok(&c.uart0_tx), ok(&c.uart0_rx))
+}
+
 /// Board for a node's capabilities (I2C target, ROM loader pins): the named
 /// one, else its MCU's default board (`Registry::default_board`).
 fn board_for<'r>(reg: &'r Registry, n: &Node) -> Option<&'r BoardDef> {
@@ -610,27 +649,10 @@ impl<'a> Ctx<'a> {
                 if let Some(g) = l.control.boot {
                     pins.push((format!("{p}.control.boot"), g));
                 }
-                let from_board = self.node_board(&l.from);
                 let from_mcu = self.t.node(&l.from).and_then(|n| self.reg.mcu(&n.mcu));
-                for (path, gpio) in pins {
-                    let name = format!("GPIO{gpio}");
-                    if let Some(b) = from_board {
-                        // A header that names no numbered GPIO (PB4, PA8) defines no numeric pin: nothing to judge a number against.
-                        if !b.header.iter().any(|h| h.pin.starts_with("GPIO")) {
-                            continue;
-                        }
-                        if !b.header.iter().any(|h| h.pin == name) {
-                            let avail: Vec<_> = b.header.iter().map(|h| h.pin.as_str()).collect();
-                            self.err(
-                                "V-07",
-                                path,
-                                format!("{name} is not on the {} header {avail:?}", b.product),
-                            );
-                        }
-                    } else if let Some(m) = from_mcu.filter(|m| m.gpio_count > 0) {
-                        if gpio >= m.gpio_count {
-                            let msg =
-                                format!("{name} is not a {} GPIO (0-{})", m.id, m.gpio_count - 1);
+                if let Some(n) = self.t.node(&l.from) {
+                    for (path, gpio) in pins {
+                        if let Some(msg) = pin_fault(self.reg, &n.mcu, n.board.as_deref(), gpio) {
                             self.err("V-07", path, msg);
                         }
                     }

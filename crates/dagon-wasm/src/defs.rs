@@ -137,6 +137,48 @@ pub fn i2c_hzs(mcus: Vec<String>) -> Vec<u32> {
     })
 }
 
+/// The pins a hw-uart0 link from a node on `mcu` (and `board`, or none) may use:
+/// `{tx: [..], rx: [..]}`, what V-09 and V-07 accept together.
+#[wasm_bindgen]
+pub fn uart0_choices(mcu: &str, board: Option<String>) -> JsValue {
+    with_registry(|reg| {
+        let (tx, rx) = dagon_topology::uart0_choices(reg, mcu, board.as_deref());
+        let o = Object::new();
+        let _ = js_sys::Reflect::set(
+            &o,
+            &"tx".into(),
+            &tx.into_iter().map(JsValue::from).collect::<js_sys::Array>(),
+        );
+        let _ = js_sys::Reflect::set(
+            &o,
+            &"rx".into(),
+            &rx.into_iter().map(JsValue::from).collect::<js_sys::Array>(),
+        );
+        o.into()
+    })
+}
+
+/// The pin pairs `mcu`'s ROM I2C bootloader listens on: `[{sda, scl}]`, what V-13 accepts.
+#[wasm_bindgen]
+pub fn rom_i2c_pairs(mcu: &str) -> JsValue {
+    with_registry(|reg| {
+        let pairs = reg
+            .mcu(mcu)
+            .and_then(|m| m.rom_i2c.as_ref())
+            .map_or(&[][..], |r| r.pairs.as_slice());
+        pairs
+            .iter()
+            .map(|p| {
+                let o = Object::new();
+                let _ = js_sys::Reflect::set(&o, &"sda".into(), &p.sda.as_str().into());
+                let _ = js_sys::Reflect::set(&o, &"scl".into(), &p.scl.as_str().into());
+                JsValue::from(o)
+            })
+            .collect::<js_sys::Array>()
+            .into()
+    })
+}
+
 /// The I2C addresses of the ROM loaders defined (never probed with DAGON
 /// frames, reserved on a bus with a node reached through its ROM).
 #[wasm_bindgen]

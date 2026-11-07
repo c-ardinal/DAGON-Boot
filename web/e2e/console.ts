@@ -39,7 +39,20 @@ export async function boxes(page: Page): Promise<Record<string, string>> {
 }
 
 /** What the sweep measures on the page as it stands; empty when nothing is wrong. */
+const DISABLED_REASONS = `globalThis.disabledReasons = () => {
+  const out = [];
+  for (const e of document.querySelectorAll('[aria-disabled="true"]')) {
+    if (!e.getClientRects().length || e.closest('[inert], .visually-hidden')) continue;
+    const own = (e.getAttribute('aria-label') ?? e.textContent ?? '').trim();
+    const title = (e.getAttribute('title') ?? '').trim();
+    const tag = e.tagName.toLowerCase() + '.' + String(e.getAttribute('class') ?? '').split(' ')[0] + (e.getAttribute('aria-label') ? '[' + e.getAttribute('aria-label') + ']' : '');
+    if (!title || title === own) out.push(tag + ' disabled with no reason');
+  }
+  return out;
+}`;
+
 export async function layoutFaults(page: Page): Promise<string[]> {
+  await page.evaluate(DISABLED_REASONS);
   return page.evaluate(() => {
     const faults: string[] = [];
     const name = (e: Element) => `${e.tagName.toLowerCase()}.${String(e.getAttribute('class') ?? '').split(' ')[0]}${e.getAttribute('aria-label') ? `[${e.getAttribute('aria-label')}]` : ''}`;
@@ -81,9 +94,10 @@ export async function layoutFaults(page: Page): Promise<string[]> {
       if (box && c.width && (c.left < box.left - 0.5 || c.right > box.right + 0.5 || c.top < box.top - 0.5 || c.bottom > box.bottom + 0.5)) faults.push(`${name(el)} over its frame: ${el.textContent.trim().slice(0, 24)}`);
     }
     // Rendered spacing and type: what the browser lays out, not what the source says (a rem on a 14 px root would pass the source and fail here).
-    const scale = [160, 28, 44, 20, 16, 14, 12, 13, 18, 112];
+    // The type scale, and the 2560 theme's own t-mono (18) and t-title (44).
+    const scale = [160, 28, 20, 16, 14, 12, 13, 18, 44];
     const onStep = (v: string) => { const n = parseFloat(v); return !n || Math.abs(n) % 4 === 0; };
-    for (const e of document.querySelectorAll<HTMLElement>('.frame > header *, .sheet *, .drawer *, .pill *, .toast *, .focal *, .panel *, #help *, dialog[open] *, #band *')) {
+    for (const e of document.querySelectorAll<HTMLElement>('.frame > header *, .sheet *, .float.parts *, .edit-area.table *, .bubble *, .drawer *, .pill *, .toast *, .focal *, .panel *, #help *, dialog[open] *, #band *')) {
       if (e.closest('.visually-hidden, svg, .box') || e.tagName === 'OPTION') continue;
       const c = getComputedStyle(e);
       for (const k of ['paddingTop', 'paddingRight', 'paddingBottom', 'paddingLeft', 'marginTop', 'marginRight', 'marginBottom', 'marginLeft', 'rowGap', 'columnGap'] as const) {
@@ -91,12 +105,27 @@ export async function layoutFaults(page: Page): Promise<string[]> {
       }
       if (e.textContent?.trim() && !e.children.length && !scale.includes(Math.round(parseFloat(c.fontSize) * 100) / 100)) faults.push(`${name(e)} rendered font-size ${c.fontSize}`);
     }
+    // The table fits its window: no column is lost to a sideways scroll.
+    for (const e of document.querySelectorAll<HTMLElement>('.table-view .scroll')) {
+      if (e.scrollWidth > e.clientWidth + 1) faults.push(`table scrolls sideways ${e.scrollWidth} in ${e.clientWidth}`);
+    }
+    faults.push(...disabledReasons());
     // A label never breaks: a button's words stay on one line.
     for (const b of document.querySelectorAll<HTMLElement>('.more, #band button, .toast button')) {
       if (b.textContent?.trim() && b.offsetHeight > 0 && getComputedStyle(b).whiteSpace !== 'nowrap') faults.push(`${name(b)} can wrap: ${b.textContent.trim().slice(0, 16)}`);
     }
     return faults;
   });
+}
+
+/** Every visible disabled control carries a reason on hover: a title that is not merely its name. */
+export async function disabledFaults(page: Page): Promise<string[]> {
+  await page.evaluate(DISABLED_REASONS);
+  return page.evaluate(() => disabledReasons());
+}
+
+declare global {
+  function disabledReasons(): string[];
 }
 
 /**
@@ -128,6 +157,18 @@ export async function focusFaults(page: Page): Promise<string[]> {
       if (el.closest('.visually-hidden, [inert], [aria-hidden="true"]') || (el as HTMLButtonElement).disabled || !el.getClientRects().length) continue;
       el.focus();
       if (document.activeElement !== el || !el.matches(':focus-visible')) continue;
+      // Nothing sticky in its scroll window lies over it (WCAG 2.4.11): the field scrolled in under a head is unseen.
+      const port = (() => { for (let a = el.parentElement; a; a = a.parentElement) { const o = getComputedStyle(a).overflowY; if (o === 'auto' || o === 'scroll') return a; } return null; })();
+      // An element riding a sticky strip itself (the sheet's ×) stands over the head, not under it.
+      const rides = (() => { for (let a = el.parentElement; a && a !== port; a = a.parentElement) if (getComputedStyle(a).position === 'sticky') return true; return false; })();
+      if (port && !rides) {
+        const r0 = el.getBoundingClientRect();
+        for (const st of port.querySelectorAll<HTMLElement>('*')) {
+          if (getComputedStyle(st).position !== 'sticky' || st.contains(el)) continue;
+          const b = st.getBoundingClientRect();
+          if (Math.min(r0.right, b.right) - Math.max(r0.left, b.left) > 0.5 && Math.min(r0.bottom, b.bottom) - Math.max(r0.top, b.top) > 0.5) faults.push(`${name(el)} hidden under ${name(st)}`);
+        }
+      }
       const ring = ringExtent(getComputedStyle(el));
       if (ring <= 0) continue;
       const r = el.getBoundingClientRect();

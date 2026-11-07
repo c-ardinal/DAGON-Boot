@@ -89,7 +89,7 @@
 </script>
 
 <!-- The tab strip always stays; the body opens under it, over the canvas, whose box does not change. -->
-<section in:fade bind:this={section} class="drawer" class:open={open !== null} style:height={open !== null && height !== null ? `${height}px` : undefined} aria-label={DRAWER.label}>
+<section in:fade bind:this={section} class="drawer" class:open={open !== null} style:height={open !== null ? (height !== null ? `${height}px` : undefined) : 'var(--h-row)'} aria-label={DRAWER.label}>
   {#if open}
     <!-- The handle: the open drawer's top edge, dragged to change its height. -->
     <!-- svelte-ignore a11y_no_noninteractive_tabindex a11y_no_noninteractive_element_interactions -->
@@ -113,7 +113,7 @@
   </div>
   {#if open}
     {#key open}
-      <div transition:fade={{ dur: '--dur-quick' }} class="body" id="drawer-body" role="tabpanel" aria-labelledby="drawer-tab-{open}" tabindex="-1">
+      <div in:fade={{ dur: '--dur-quick' }} class="body" id="drawer-body" role="tabpanel" aria-labelledby="drawer-tab-{open}" tabindex="-1">
         {@render body(open)}
       </div>
     {/key}
@@ -128,14 +128,19 @@
     flex: 0 1 auto;
     flex-direction: column;
     min-height: var(--h-row);
+    /* Opening and closing move the height; the body is clipped meanwhile, the handle's 4 px above the edge kept. */
+    overflow: clip;
+    overflow-clip-margin: 4px;
     border-top: 1px solid var(--c-line);
     background: var(--c-layer-0);
     user-select: none;
+    transition: height var(--dur-line) var(--ease-out);
   }
   /* In a low window the drawer gives way (its body scrolls; the tabs stay), so the focal number and the zoom keep their room above it. */
+  /* The open drawer leaves the end column its room: the bar, the band, the mark, the zoom pill (three buttons and its number) and their gaps. */
   .drawer.open {
     height: var(--h-drawer);
-    max-height: 60vh;
+    max-height: min(60vh, calc(100vh - var(--h-bar) - var(--h-status) - var(--w-mark) - 3 * var(--h-button) - 6 * var(--s-4)));
   }
   .handle {
     position: absolute;

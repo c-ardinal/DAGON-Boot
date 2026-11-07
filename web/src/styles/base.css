@@ -49,9 +49,6 @@ html {
   /* Every size is a px token of the one scale; the root is 16 px so a rem anywhere is 16 px, as the design test assumes. */
   font-size: 16px; /* root: the one size that is not a role, the rem unit itself */
   font-variant-numeric: tabular-nums;
-  /* One scrollbar for every scrolling surface: thin, in the line colour, no arrows. */
-  scrollbar-width: thin;
-  scrollbar-color: var(--c-line) transparent;
 }
 
 html,
@@ -78,9 +75,15 @@ button {
   white-space: nowrap;
 }
 
-/* A control brought into view by focus keeps room for its ring: no scroll edge cuts it. */
+/* Every scrolling surface: one thin scrollbar in the line colour, no arrows; and a control brought into view by focus keeps room for its ring. */
 :where(*) {
+  scrollbar-width: thin;
+  scrollbar-color: var(--c-line) transparent;
   scroll-padding: var(--s-2);
+}
+/* The sheet's sticky head: a focused field scrolls in under it, never behind it. */
+.float.sheet {
+  scroll-padding-top: calc(var(--s-5) + var(--h-secondary) + 2 * var(--s-2));
 }
 
 /* Shared controls. Focus never adds an outer ring: the control's own border

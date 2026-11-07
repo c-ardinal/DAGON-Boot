@@ -1,0 +1,61 @@
+[package]
+name = "dagon-esp32s3-app"
+version = "0.0.0"
+edition = "2021"
+license = "MIT OR Apache-2.0"
+publish = false
+
+# Sample: the M5StopWatch demo app (ota_0/ota_1 image), not part of DAGON.
+# DAGON comes in through the board package (dagon-board-m5stopwatch) and the
+# MCU package's public API (node, liveness). Standalone workspace, built with
+# the espup Xtensa toolchain.
+[workspace]
+
+[features]
+# Conformance build: the node answers CONF_RUN (node-side tests).
+conform = ["dagon-mcu-esp32s3/conform"]
+# Test build that refuses CONFIRM, so its trial always rolls back.
+no-confirm = []
+# ENTER_ROM method 2 through the M5PM1 power manager (unconfirmed values).
+pmic-download = ["dagon-board-m5stopwatch/pmic-download"]
+
+[lib]
+path = "src/lib.rs"
+
+[[bin]]
+name = "app"
+path = "src/main.rs"
+test = false
+
+[dependencies]
+dagon-mcu-esp32s3 = { path = "../../targets/mcu/esp32s3" }
+# The published AppSnapshot the screen follows.
+dagon-agent = { path = "../../crates/dagon-agent" }
+
+# The firmware; the library (`digits`) also builds and tests on the host.
+[target.'cfg(target_arch = "xtensa")'.dependencies]
+dagon-board-m5stopwatch = { path = "../../targets/boards/m5stopwatch" }
+esp-hal = { version = "1.2.2", features = ["esp32s3", "unstable"] }
+esp-bootloader-esp-idf = { version = "0.6.0", features = ["esp32s3"] }
+esp-rtos = { version = "0.4.0", features = ["esp32s3", "embassy"] }
+embassy-executor = "0.10"
+embassy-time = "0.5"
+
+[profile.release]
+opt-level = "s"
+lto = "fat"
+codegen-units = 1
+debug = 2
+
+# Size-tuned Ed25519: at "s" the field arithmetic is inlined into one
+# function of several hundred KiB.
+[profile.release.package.ed25519-compact]
+opt-level = "z"
+
+[profile.dev]
+opt-level = "s"
+
+# esp-bootloader-esp-idf computes `ota_seq - 1` for any counted seq, 0 included
+# (otadata written by older tools); release builds already wrap.
+[profile.dev.package.esp-bootloader-esp-idf]
+overflow-checks = false

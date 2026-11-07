@@ -1,0 +1,684 @@
+//! The Rust a build script writes from a board definition, so a board
+//! package or a boot stage holds no board fact of its own: the board id and
+//! flash size, the link address, the boot LED and halt pattern, pins and
+//! buses by name, and the devices on the buses with their registers.
+//!
+//! Every name used here is checked on load (`board_boot::wiring` and
+//! `tables`): identifiers are generated only from names the loader accepted.
+
+use std::fmt::Write as _;
+use std::path::{Path, PathBuf};
+
+use super::board_boot::{code_ident, code_names, type_name as camel, Active, HaltPattern};
+use super::boot_folder::{BootFolder, BOOT_FOLDER_ENV};
+use super::load::{self, BOARD_FILE, MCU_FILE};
+use super::{BoardDef, DefError, McuDef, Registry, Source};
+
+/// How a HAL names the singletons of pins and register blocks.
+pub struct Hal<'a> {
+    /// Path of the HAL's peripheral singletons (`embassy_rp::peripherals`).
+    pub peripherals: &'a str,
+    /// The singleton of a definition name (`GPIO16` → `PIN_16`, `i2c0` →
+    /// `I2C0`).
+    pub name: &'a dyn Fn(&str) -> String,
+    /// The singletons take a lifetime (`GPIO47<'d>`).
+    pub lifetime: bool,
+}
+
+/// A board's definition as a build script reads it: the board, its MCU,
+/// and every file the validation read.
+#[derive(Debug)]
+pub struct Loaded {
+    pub board: BoardDef,
+    pub mcu: McuDef,
+    pub files: Vec<PathBuf>,
+}
+
+fn def_err(at: impl std::fmt::Display, msg: impl Into<String>) -> DefError {
+    DefError {
+        at: at.to_string(),
+        msg: msg.into(),
+    }
+}
+
+/// The root of the DAGON source tree a package folder sits in
+/// (`<root>/targets/…/<package>`).
+fn tree_root(dir: &Path) -> Result<&Path, DefError> {
+    dir.ancestors()
+        .find(|a| a.file_name().is_some_and(|n| n == "targets"))
+        .and_then(Path::parent)
+        .ok_or_else(|| def_err(dir.display(), "not inside a DAGON source tree's targets/"))
+}
+
+/// The `id` of the definition `dir/file`.
+fn id_in(dir: &Path, file: &str) -> Result<String, DefError> {
+    let path = dir.join(file);
+    let text =
+        std::fs::read_to_string(&path).map_err(|e| def_err(path.display(), e.to_string()))?;
+    let table: toml::Table = text
+        .parse()
+        .map_err(|e: toml::de::Error| def_err(path.display(), e.to_string()))?;
+    table
+        .get("id")
+        .and_then(|v| v.as_str())
+        .map(str::to_string)
+        .ok_or_else(|| def_err(path.display(), "no id"))
+}
+
+fn loaded(sources: &[Source<'_>], reg: &Registry, board: &BoardDef) -> Result<Loaded, DefError> {
+    Ok(Loaded {
+        board: board.clone(),
+        mcu: reg.mcu(&board.mcu).expect("checked on load").clone(),
+        files: load::files(sources)?,
+    })
+}
+
+/// A board package's own definition (`dir/dagon-board.toml`) and its MCU,
+/// validated with the source tree it sits in.
+pub fn package_board(dir: &Path) -> Result<Loaded, DefError> {
+    let sources = [Source::Tree(tree_root(dir)?)];
+    let reg = Registry::load(&sources)?;
+    let id = id_in(dir, BOARD_FILE)?;
+    loaded(
+        &sources,
+        &reg,
+        reg.board(&id).expect("loaded with the tree"),
+    )
+}
+
+/// The board a boot stage of the MCU package at `mcu_dir` is built for,
+/// from the source tree plus, when given, a project's dagon.toml (its
+/// inline `[board.<id>]` boards). Never a guess: `board` names it, and may
+/// be left out only when the MCU has exactly one board and no project is
+/// given.
+pub fn boot_board(
+    mcu_dir: &Path,
+    board: Option<&str>,
+    project: Option<&Path>,
+) -> Result<Loaded, DefError> {
+    let mut sources = vec![Source::Tree(tree_root(mcu_dir)?)];
+    sources.extend(project.map(Source::Project));
+    let reg = Registry::load(&sources)?;
+    let mcu = id_in(mcu_dir, MCU_FILE)?;
+    let at = format!("MCU '{mcu}'");
+    let of_mcu: Vec<&BoardDef> = reg.boards().iter().filter(|b| b.mcu == mcu).collect();
+    let b = match (board, &of_mcu[..]) {
+        (Some(id), _) => *of_mcu
+            .iter()
+            .find(|b| b.id == id)
+            .ok_or_else(|| def_err(&at, format!("no board '{id}' of this MCU")))?,
+        (None, [only]) if project.is_none() => *only,
+        (None, []) => return Err(def_err(&at, "no board definition of this MCU")),
+        (None, _) => {
+            let ids: Vec<&str> = of_mcu.iter().map(|b| b.id.as_str()).collect();
+            return Err(def_err(
+                &at,
+                format!("name the node's board ({})", ids.join(", ")),
+            ));
+        }
+    };
+    loaded(&sources, &reg, b)
+}
+
+/// `GPIO25` → 25 for MCUs that number their pins.
+fn gpio_number(pin: &str) -> Option<u8> {
+    pin.strip_prefix("GPIO")?.parse().ok()
+}
+
+fn opt<T: std::fmt::Display>(v: Option<T>) -> String {
+    v.map_or("None".into(), |v| format!("Some({v})"))
+}
+
+/// The constants of board `b`, for `include!` from a build script's
+/// output.
+pub fn board_rs(b: &BoardDef) -> String {
+    let mut o = format!(
+        "// Written by the package's build script from board `{}`'s definition.\n\n",
+        b.id
+    );
+    let boot = b.boot.clone().unwrap_or_default();
+    let led = boot.led.as_deref();
+    let blink = boot
+        .halt
+        .filter(|h| h.pattern == HaltPattern::Blink)
+        .map(|h| h.period_ms);
+    let link = b.default_link;
+    let _ = writeln!(
+        o,
+        "/// The board id.\npub const BOARD_ID: &str = {:?};\n\
+         /// Flash size in bytes.\npub const FLASH_BYTES: u32 = {:#x};\n\
+         /// `[default_link] addr`: the node's I2C target address.\npub const DEFAULT_LINK_ADDR: Option<u8> = {};\n\
+         /// `[default_link] baud`.\npub const DEFAULT_LINK_BAUD: Option<u32> = {};\n\
+         /// `[boot] led` as a GPIO number (MCUs that number their pins).\npub const BOOT_LED_GPIO: Option<u8> = {};\n\
+         /// `[boot] led_active`.\npub const BOOT_LED_ACTIVE_HIGH: bool = {};\n\
+         /// `[boot] halt` when it blinks: the period in ms.\npub const HALT_BLINK_PERIOD_MS: Option<u32> = {};\n",
+        b.id,
+        b.flash_bytes,
+        opt(link.and_then(|l| l.addr).map(|a| format!("{a:#04x}"))),
+        opt(link.and_then(|l| l.baud)),
+        opt(led.and_then(gpio_number)),
+        boot.led_active == Active::High,
+        opt(blink),
+    );
+    for x in &b.buses {
+        let bus = code_ident(&x.id).to_uppercase();
+        if let Some(hz) = x.hz {
+            let _ = writeln!(
+                o,
+                "/// Clock of bus `{}`.\npub const BUS_{bus}_HZ: u32 = {hz};",
+                x.id
+            );
+        }
+        if let Some(baud) = x.baud {
+            let _ = writeln!(
+                o,
+                "/// Bit rate of bus `{}`.\npub const BUS_{bus}_BAUD: u32 = {baud};",
+                x.id
+            );
+        }
+    }
+    for d in &b.devices {
+        let dev = code_ident(&d.id).to_uppercase();
+        let _ = writeln!(
+            o,
+            "/// Device `{}` on bus `{}`: its 7-bit address and the registers anyone outside DAGON may write.\n\
+             pub const DEVICE_{dev}_ADDR: u8 = {:#04x};\npub const DEVICE_{dev}_WRITABLE: &[u8] = &{:?};",
+            d.id,
+            d.bus,
+            d.addr,
+            d.writable_regs()
+        );
+        for r in &d.regs {
+            let _ = writeln!(
+                o,
+                "/// Register `{}` of device `{}`.\npub const DEVICE_{dev}_REG_{}: u8 = {:#04x};",
+                r.name,
+                d.id,
+                r.name.to_uppercase(),
+                r.reg
+            );
+        }
+    }
+    o
+}
+
+/// The board's devices as `dagon_events::Device` capabilities (the only
+/// way one is made), for a package that depends on `dagon-events`.
+pub fn devices_rs(b: &BoardDef) -> String {
+    let mut o = format!(
+        "// Written by the package's build script from board `{}`'s definition.\n\n",
+        b.id
+    );
+    for d in &b.devices {
+        let dev = code_ident(&d.id).to_uppercase();
+        let _ = writeln!(
+            o,
+            "/// `[[device]] {}` on bus `{}`.\n\
+             // SAFETY: the address and writable registers of a device the\n\
+             // definition loader accepted.\n\
+             #[allow(unsafe_code)]\n\
+             pub const {dev}: ::dagon_events::Device = unsafe {{\n    \
+             ::dagon_events::Device::from_definition({:#04x}, &{:?}, {})\n}};",
+            d.id,
+            d.bus,
+            d.addr,
+            d.writable_regs(),
+            d.max_transfer
+        );
+    }
+    o
+}
+
+/// The pin and block types of board `b` and the `take!` macro that moves
+/// them out of the HAL's peripherals, for `include!` beside [`board_rs`].
+pub fn pins_rs(b: &BoardDef, hal: &Hal<'_>) -> String {
+    let mut o = format!(
+        "// Written by the package's build script from board `{}`'s definition.\n\n",
+        b.id
+    );
+    let names = code_names(b);
+    let lt = if hal.lifetime { "<'d>" } else { "" };
+    for (n, def) in &names {
+        let _ = writeln!(
+            o,
+            "/// `{def}`.\npub type {}{lt} = {}::{}{lt};",
+            camel(n),
+            hal.peripherals,
+            (hal.name)(def)
+        );
+    }
+    o.push_str(
+        "\n/// Takes a pin or block of the definition out of the HAL's peripherals:\n\
+         /// `take!(p.lcd_cs)` (`$crate::take!` from an exported macro).\n\
+         #[macro_export]\nmacro_rules! take {\n",
+    );
+    for (n, def) in &names {
+        let _ = writeln!(o, "    ($p:ident . {n}) => {{ $p.{} }};", (hal.name)(def));
+    }
+    o.push_str("}\n");
+    o
+}
+
+/// How a HAL names DMA streams, their interrupts and its binding macro
+/// (embassy-stm32: `DMA1_CH4`, `DMA1_STREAM4`).
+pub struct DmaHal<'a> {
+    /// Path of the HAL's peripheral singletons.
+    pub peripherals: &'a str,
+    /// The singleton of stream `n` of controller `ctl` (a definition id).
+    pub stream: &'a dyn Fn(&str, u8) -> String,
+    /// The interrupt of that stream.
+    pub interrupt: &'a dyn Fn(&str, u8) -> String,
+    /// The interrupt handler type, generic over the stream singleton.
+    pub handler: &'a str,
+    /// The HAL's interrupt binding macro.
+    pub bind: &'a str,
+}
+
+/// The DMA streams of board `b`'s `dma = true` buses
+/// ([`super::dma::board_streams`]): per bus `<Bus>TxDma` and `<Bus>RxDma`
+/// types, `take_dma!(p.<bus>_tx)` arms, and `bind_<bus>_dma!`, which is
+/// the HAL's binding macro with that bus's stream interrupts added (the
+/// package that opens the bus binds them; another bus is its user's).
+pub fn dma_rs(b: &BoardDef, m: &McuDef, hal: &DmaHal<'_>) -> Result<String, DefError> {
+    let buses = super::dma::board_streams(b, m).map_err(|e| def_err(&b.id, e))?;
+    let mut o = format!(
+        "// Written by the package's build script from board `{}`'s definition and\n\
+         // MCU `{}`'s DMA request mapping.\n\n",
+        b.id, m.id
+    );
+    let mut take = String::new();
+    for x in &buses {
+        let bus = code_ident(&x.bus.id);
+        let mut arms = String::new();
+        for (dir, s) in [("tx", &x.tx), ("rx", &x.rx)] {
+            let one = (hal.stream)(&s.controller, s.stream);
+            let _ = writeln!(
+                o,
+                "/// Bus `{}` {dir}: {} stream {}, request channel {}.\npub type {}{}Dma = {}::{one};",
+                x.bus.id,
+                s.controller,
+                s.stream,
+                s.channel,
+                camel(&bus),
+                camel(dir),
+                hal.peripherals
+            );
+            let _ = writeln!(take, "    ($p:ident . {bus}_{dir}) => {{ $p.{one} }};");
+            let _ = writeln!(
+                arms,
+                "            {} => {}<{}::{one}>;",
+                (hal.interrupt)(&s.controller, s.stream),
+                hal.handler,
+                hal.peripherals
+            );
+        }
+        let _ = writeln!(
+            o,
+            "\n/// `{bind}!` with bus `{id}`'s DMA stream interrupts added:\n\
+             /// `bind_{bus}_dma!(pub struct Irqs {{ .. }});`.\n#[macro_export]\n\
+             macro_rules! bind_{bus}_dma {{\n    ($vis:vis struct $name:ident {{ $($body:tt)* }}) => {{\n        \
+             {bind}!($vis struct $name {{\n            $($body)*\n{arms}        }});\n    }};\n}}",
+            bind = hal.bind,
+            id = x.bus.id,
+        );
+    }
+    o.push_str(
+        "\n/// Takes a DMA stream of the definition out of the HAL's peripherals:\n\
+         /// `take_dma!(p.link_tx)`.\n#[macro_export]\nmacro_rules! take_dma {\n",
+    );
+    o.push_str(&take);
+    o.push_str("}\n");
+    Ok(o)
+}
+
+/// A board package's build script, for a board with `dma = true` buses:
+/// writes `dma.rs` ([`dma_rs`]) into `OUT_DIR` from the package's own
+/// definition. Call it beside [`package_build`].
+pub fn dma_build(hal: &DmaHal<'_>) {
+    let l = package_board(&manifest_dir()).unwrap_or_else(|e| panic!("{e}"));
+    let rs = dma_rs(&l.board, &l.mcu, hal).unwrap_or_else(|e| panic!("{e}"));
+    write(&out_dir().join("dma.rs"), &rs);
+}
+
+fn write(path: &Path, text: &str) {
+    std::fs::write(path, text).unwrap_or_else(|e| panic!("{}: {e}", path.display()));
+}
+
+fn out_dir() -> PathBuf {
+    std::env::var_os("OUT_DIR")
+        .expect("run from a build script")
+        .into()
+}
+
+fn manifest_dir() -> PathBuf {
+    std::env::var_os("CARGO_MANIFEST_DIR")
+        .expect("run from a build script")
+        .into()
+}
+
+fn watch(files: &[PathBuf]) {
+    for f in files {
+        println!("cargo:rerun-if-changed={}", f.display());
+    }
+}
+
+/// The bit rate of the node's UART link a firmware build is given: `dagon`
+/// sets it from the topology ([`crate::Topology::uart_baud`]) for every
+/// build of a node, so both ends of a link are built with one value.
+pub const LINK_BAUD_ENV: &str = "DAGON_LINK_BAUD";
+
+/// `LINK_BAUD`, the bit rate a board package runs DAGON's UART link at:
+/// `env` ([`LINK_BAUD_ENV`]) when set, else the board's own value
+/// (`[default_link] baud`, or the baud of its `dagon = true` UART bus).
+/// A value that is not a bit rate fails the build, naming it.
+pub fn link_baud_rs(b: &BoardDef, env: Option<&str>) -> Result<String, String> {
+    let own = b.default_link.and_then(|l| l.baud).or_else(|| {
+        b.buses
+            .iter()
+            .find(|x| x.dagon && x.baud.is_some())
+            .and_then(|x| x.baud)
+    });
+    let baud = match env.filter(|v| !v.is_empty()) {
+        Some(v) => match v.parse::<u32>() {
+            Ok(n) if n > 0 => Some(n),
+            _ => {
+                return Err(format!(
+                    "{LINK_BAUD_ENV}={v:?} is not a bit rate (1 or more)"
+                ))
+            }
+        },
+        None => own,
+    };
+    Ok(format!(
+        "/// The bit rate of DAGON's UART link: the topology's for this node \
+         when built by dagon ({LINK_BAUD_ENV}), else the board's own.\n\
+         pub const LINK_BAUD: Option<u32> = {};\n",
+        opt(baud)
+    ))
+}
+
+/// A board package's build script: writes `def.rs` ([`board_rs`]),
+/// `pins.rs` ([`pins_rs`]) and `devices.rs` ([`devices_rs`]) into
+/// `OUT_DIR` from the package's own definition, and reruns when any
+/// definition the validation read changes; a definition that does not
+/// load fails the build with the loader's message.
+pub fn package_build(hal: &Hal<'_>) {
+    let l = package_board(&manifest_dir()).unwrap_or_else(|e| panic!("{e}"));
+    watch(&l.files);
+    println!("cargo:rerun-if-env-changed={LINK_BAUD_ENV}");
+    let env = std::env::var(LINK_BAUD_ENV).ok();
+    let baud = link_baud_rs(&l.board, env.as_deref()).unwrap_or_else(|e| panic!("{e}"));
+    write(&out_dir().join("def.rs"), &(board_rs(&l.board) + &baud));
+    write(&out_dir().join("pins.rs"), &pins_rs(&l.board, hal));
+    write(&out_dir().join("devices.rs"), &devices_rs(&l.board));
+}
+
+/// What a boot stage's build reads: its MCU package folder and the node's
+/// boot folder ([`BOOT_FOLDER_ENV`], required).
+fn boot_inputs() -> (PathBuf, BootFolder) {
+    let dir = manifest_dir();
+    let mcu = dir
+        .ancestors()
+        .find(|a| a.join(MCU_FILE).is_file())
+        .unwrap_or_else(|| panic!("{}: not inside an MCU package", dir.display()))
+        .to_path_buf();
+    println!("cargo:rerun-if-env-changed={BOOT_FOLDER_ENV}");
+    let folder = std::env::var_os(BOOT_FOLDER_ENV).map(PathBuf::from).unwrap_or_else(|| {
+        panic!(
+            "{BOOT_FOLDER_ENV} is unset: a boot stage is built for one node. Run `dagon gen`, then build \
+             the node's boot crate in boot/<id> (it sets {BOOT_FOLDER_ENV}), or set \
+             {BOOT_FOLDER_ENV}=<project>/boot/<id> for stage0"
+        )
+    });
+    let f = BootFolder::read(&folder).unwrap_or_else(|e| panic!("{BOOT_FOLDER_ENV}: {e}"));
+    println!(
+        "cargo:rerun-if-changed={}",
+        folder.join("Cargo.toml").display()
+    );
+    let own = id_in(&mcu, MCU_FILE).unwrap_or_else(|e| panic!("{e}"));
+    assert!(
+        f.meta.mcu == own,
+        "{BOOT_FOLDER_ENV}: node {} is on MCU {}; this boot stage is for {own}",
+        f.meta.node,
+        f.meta.mcu
+    );
+    (mcu, f)
+}
+
+/// A boot stage's build script (in a folder of the MCU package): writes
+/// `board.rs` ([`board_rs`]) and, with a HAL, `pins.rs` into `OUT_DIR` for
+/// the board of the node whose boot folder [`BOOT_FOLDER_ENV`] names (a
+/// board of the source tree or of the node's project), and returns that
+/// board; a node without a board gets no LED and no halt pattern
+/// ([`no_board_rs`]). A build without the boot folder, or with one of a
+/// node on another MCU, fails.
+pub fn boot_build(hal: Option<&Hal<'_>>) -> Option<BoardDef> {
+    let (mcu, f) = boot_inputs();
+    let Some(board) = f.meta.board.as_deref() else {
+        write(&out_dir().join("board.rs"), &no_board_rs(&f.meta.node));
+        if hal.is_some() {
+            write(&out_dir().join("pins.rs"), NO_PINS_RS);
+        }
+        return None;
+    };
+    let l = boot_board(&mcu, Some(board), f.project().as_deref()).unwrap_or_else(|e| panic!("{e}"));
+    watch(&l.files);
+    write(&out_dir().join("board.rs"), &board_rs(&l.board));
+    if let Some(hal) = hal {
+        write(&out_dir().join("pins.rs"), &pins_rs(&l.board, hal));
+    }
+    Some(l.board)
+}
+
+/// A boot core library's build script: [`BootFolder::verify_stamp`] for
+/// the node's boot folder, so the build refuses a boot crate whose
+/// dependency graph the host check (`dagon gen`) did not pass for exactly
+/// its current `Cargo.toml`, `Cargo.lock` and trusted extension sources.
+/// The graph itself is checked on the host, where cargo can resolve it
+/// (all features, every target); a build script cannot reproduce the
+/// outer build's features or resolve offline reliably.
+pub fn boot_verify_stamp() {
+    let (_, f) = boot_inputs();
+    println!(
+        "cargo:rerun-if-changed={}",
+        f.dir.join(super::boot_folder::STAMP_FILE).display()
+    );
+    println!(
+        "cargo:rerun-if-changed={}",
+        f.dir.join("Cargo.lock").display()
+    );
+    // A whole folder, so a file added to an extension reruns the check.
+    watch(&f.trusted_folders());
+    f.verify_stamp().unwrap_or_else(|e| panic!("{e}"));
+}
+
+/// `board.rs` of a node without a board: no boot LED, no halt pattern.
+pub fn no_board_rs(node: &str) -> String {
+    format!(
+        "// Written by the package's build script: node `{node}` names no board.\n\n\
+         /// `[boot] led` as a GPIO number: none.\npub const BOOT_LED_GPIO: Option<u8> = None;\n\
+         /// `[boot] led_active`.\npub const BOOT_LED_ACTIVE_HIGH: bool = true;\n\
+         /// `[boot] halt` when it blinks: none.\npub const HALT_BLINK_PERIOD_MS: Option<u32> = None;\n"
+    )
+}
+
+/// `pins.rs` of a node without a board: nothing to take.
+const NO_PINS_RS: &str = "// Written by the package's build script: the node names no board.\n\n\
+                          #[macro_export]\nmacro_rules! take {\n    ($p:ident . $name:ident) => {\n        \
+                          compile_error!(\"the node names no board: no pin to take\")\n    };\n}\n";
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn upper(s: &str) -> String {
+        s.to_uppercase()
+    }
+
+    #[test]
+    fn writes_every_board_fact_by_name() {
+        let reg = Registry::builtin();
+        let b = reg.board("waveshare-rp2040-touch-lcd-1.28").unwrap();
+        let hal = Hal {
+            peripherals: "hal::peripherals",
+            name: &upper,
+            lifetime: true,
+        };
+        let rs = board_rs(b) + &pins_rs(b, &hal);
+        for want in [
+            "pub const BOOT_LED_GPIO: Option<u8> = Some(25);",
+            "pub type BootLed<'d> = hal::peripherals::GPIO25<'d>;",
+            "($p:ident . child_i2c_sda) => { $p.GPIO16 };",
+            "pub const BUS_CHILD_I2C_HZ: u32 = 400000;",
+        ] {
+            assert!(rs.contains(want), "{want} in\n{rs}");
+        }
+        assert!(!board_rs(b).contains("macro_rules"));
+        let m5 = reg.board("m5stopwatch").unwrap();
+        let rs = board_rs(m5) + &devices_rs(m5);
+        for want in [
+            "pub const DEVICE_IOE_REG_OUT_L: u8 = 0x05;",
+            "pub const DEVICE_IOE_WRITABLE: &[u8] = &[3, 5, 19];",
+            "::dagon_events::Device::from_definition(0x4f, &[3, 5, 19], 2)",
+        ] {
+            assert!(rs.contains(want), "{want} in\n{rs}");
+        }
+    }
+
+    #[test]
+    fn link_baud_is_the_builds_and_else_the_boards_own() {
+        let reg = Registry::builtin();
+        let want = |v: &str| format!("pub const LINK_BAUD: Option<u32> = {v};");
+        for id in ["waveshare-rp2040-touch-lcd-1.28", "m5stopwatch"] {
+            let b = reg.board(id).unwrap();
+            // Both ends of a link get the same value from the build.
+            assert!(link_baud_rs(b, Some("230400"))
+                .unwrap()
+                .contains(&want("Some(230400)")));
+            assert!(link_baud_rs(b, None)
+                .unwrap()
+                .contains(&want("Some(115200)")));
+            assert!(link_baud_rs(b, Some(""))
+                .unwrap()
+                .contains(&want("Some(115200)")));
+            for bad in ["0", "fast", "-1", "4294967296"] {
+                let e = link_baud_rs(b, Some(bad)).unwrap_err();
+                assert!(e.contains(LINK_BAUD_ENV) && e.contains(bad), "{e}");
+            }
+        }
+        let f401 = reg.board("nucleo-f401re").unwrap();
+        assert!(link_baud_rs(f401, None).unwrap().contains(&want("None")));
+    }
+
+    #[test]
+    fn dma_streams_come_from_the_mcu_definition() {
+        let reg = Registry::builtin();
+        let b = reg.board("nucleo-f401re").unwrap();
+        let m = reg.mcu(&b.mcu).unwrap();
+        let stream = |c: &str, n: u8| format!("{}_CH{n}", c.to_uppercase());
+        let irq = |c: &str, n: u8| format!("{}_STREAM{n}", c.to_uppercase());
+        let hal = DmaHal {
+            peripherals: "hal::peripherals",
+            stream: &stream,
+            interrupt: &irq,
+            handler: "hal::dma::InterruptHandler",
+            bind: "hal::bind_interrupts",
+        };
+        let rs = dma_rs(b, m, &hal).unwrap();
+        for want in [
+            // I2C3: tx stream 4 (channel 3), rx stream 1 (channel 1), the
+            // first of each in RM0368's table.
+            "pub type LinkTxDma = hal::peripherals::DMA1_CH4;",
+            "pub type LinkRxDma = hal::peripherals::DMA1_CH1;",
+            "pub type ArduinoI2cTxDma = hal::peripherals::DMA1_CH6;",
+            "pub type ArduinoI2cRxDma = hal::peripherals::DMA1_CH0;",
+            "($p:ident . link_rx) => { $p.DMA1_CH1 };",
+            "macro_rules! bind_link_dma",
+            "DMA1_STREAM4 => hal::dma::InterruptHandler<hal::peripherals::DMA1_CH4>;",
+            "macro_rules! bind_arduino_i2c_dma",
+        ] {
+            assert!(rs.contains(want), "{want} in\n{rs}");
+        }
+        // The VCP is handed out without DMA.
+        assert!(!rs.contains("Vcp"), "{rs}");
+    }
+
+    fn tree(name: &str, boards: &[(&str, &str)]) -> (PathBuf, PathBuf) {
+        let dir = std::env::temp_dir().join(format!("dagon-codegen-{name}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let src = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../targets/mcu/rp2040");
+        let mcu = dir.join("targets/mcu/rp2040");
+        for part in ["stage0", "bootcore"] {
+            std::fs::create_dir_all(mcu.join(part)).unwrap();
+        }
+        std::fs::copy(src.join(MCU_FILE), mcu.join(MCU_FILE)).unwrap();
+        for (id, extra) in boards {
+            let board = dir.join("targets/boards").join(id);
+            std::fs::create_dir_all(&board).unwrap();
+            std::fs::write(
+                board.join(BOARD_FILE),
+                format!(
+                    "id = {id:?}\nproduct = \"P\"\nmcu = \"rp2040\"\nflash_bytes = 0x40_0000\n\
+                     drawing = \"x\"\n{extra}[boot]\nled = \"GPIO25\"\nhalt = {{ pattern = \"blink\", period_ms = 200 }}\n\
+                     [[pin]]\npin = \"GPIO25\"\nname = \"led\"\n"
+                ),
+            )
+            .unwrap();
+        }
+        (dir, mcu)
+    }
+
+    #[test]
+    fn a_synthetic_board_package_reads_its_definition() {
+        let (dir, mcu) = tree("one", &[("pico-like", "")]);
+        let l = package_board(&dir.join("targets/boards/pico-like")).unwrap();
+        assert_eq!(
+            (l.board.id.as_str(), l.mcu.id.as_str()),
+            ("pico-like", "rp2040")
+        );
+        // Watches every definition the validation read, the MCU's included.
+        assert!(l.files.iter().any(|f| f.ends_with("rp2040/dagon-mcu.toml")));
+        assert!(l
+            .files
+            .iter()
+            .any(|f| f.ends_with("pico-like/dagon-board.toml")));
+        // The MCU's only board needs no name.
+        assert_eq!(boot_board(&mcu, None, None).unwrap().board.id, "pico-like");
+        let rs = board_rs(&l.board);
+        assert!(
+            rs.contains("HALT_BLINK_PERIOD_MS: Option<u32> = Some(200)"),
+            "{rs}"
+        );
+        assert!(boot_board(&mcu, Some("nope"), None).is_err());
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn a_boot_build_never_guesses_the_board() {
+        // Two boards, one marked default: still named explicitly.
+        let (dir, mcu) = tree("two", &[("a-board", "default = true\n"), ("b-board", "")]);
+        let e = boot_board(&mcu, None, None).unwrap_err();
+        assert!(
+            e.msg.contains("name the node's board") && e.msg.contains("a-board, b-board"),
+            "{e}"
+        );
+        assert_eq!(
+            boot_board(&mcu, Some("b-board"), None).unwrap().board.id,
+            "b-board"
+        );
+        // A project's inline board, by name only.
+        let project = dir.join("dagon.toml");
+        std::fs::write(
+            &project,
+            "[board.mine]\nproduct = \"Mine\"\nmcu = \"rp2040\"\nflash_bytes = 0x40_0000\n\
+             drawing = \"x\"\n[board.mine.boot]\nled = \"GPIO2\"\n[[board.mine.pin]]\npin = \"GPIO2\"\n",
+        )
+        .unwrap();
+        let e = boot_board(&mcu, None, Some(&project)).unwrap_err();
+        assert!(e.msg.contains("name the node's board"), "{e}");
+        let l = boot_board(&mcu, Some("mine"), Some(&project)).unwrap();
+        assert_eq!(l.board.boot.unwrap().led.as_deref(), Some("GPIO2"));
+        assert!(l.files.contains(&project));
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+}

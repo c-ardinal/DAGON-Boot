@@ -1,0 +1,343 @@
+# Runs on pull requests and build tags (*-v*) only: the checks that keep the places
+# holding one fact in step (parity tests), plus the usual lint and test
+# gates. No secrets; the token is read-only.
+#
+# The standalone Cargo packages with host tests (boards, MCUs, samples) are
+# not listed here: scripts/ci_crates.py derives them from the repository.
+name: ci
+
+on:
+  pull_request:
+  push:
+    tags: ["*-v*"]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+  # The firmware packages embed a release key; tests use the public test key.
+  DAGON_ALLOW_TEST_KEY: "1"
+
+jobs:
+  rust:
+    name: rust (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        # Windows too: path, home and process handling differ there
+        # (crates/dagon-cli, dagon-topology, dagon-sign have per-OS tests).
+        os: [ubuntu-24.04, windows-2025]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - name: Rust from rust-toolchain.toml
+        # The default too: a test builds a generated project outside the repository,
+        # where no rust-toolchain.toml applies.
+        shell: bash
+        run: |
+          rustup toolchain install
+          rustup default "$(sed -n 's/^channel = "\([^"]*\)".*/\1/p' rust-toolchain.toml)"
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
+      - name: Every platform's crates
+        # A test reads the whole dependency graph with --offline.
+        run: cargo fetch --locked
+      - name: Test the workspace
+        run: cargo test --workspace --locked
+      - name: Generated catalogs up to date (the site's Events and Ports pages)
+        run: cargo test -p dagon-catalog --test docs --locked
+      - name: Format
+        if: matrix.os == 'ubuntu-24.04'
+        run: cargo fmt --all --check
+      - name: Clippy
+        if: matrix.os == 'ubuntu-24.04'
+        run: cargo clippy --workspace --all-targets --locked -- -D warnings
+      - name: Plugin hook tests
+        # The hook's drive and backslash paths exist only here; the scripts job
+        # runs the same tests on Linux.
+        if: matrix.os == 'windows-2025'
+        # The tests make real commits.
+        env:
+          GIT_AUTHOR_NAME: ci
+          GIT_AUTHOR_EMAIL: ci@example.invalid
+          GIT_COMMITTER_NAME: ci
+          GIT_COMMITTER_EMAIL: ci@example.invalid
+        run: node --test plugin/hooks/guard.test.mjs
+
+  plan:
+    name: standalone packages
+    runs-on: ubuntu-24.04
+    outputs:
+      dirs: ${{ steps.list.outputs.dirs }}
+      lints: ${{ steps.list.outputs.lints }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version: "3.12"
+      - id: list
+        run: |
+          echo "dirs=$(python scripts/ci_crates.py --json)" >> "$GITHUB_OUTPUT"
+          echo "lints=$(python scripts/ci_crates.py --firmware-lint)" >> "$GITHUB_OUTPUT"
+
+  standalone:
+    name: ${{ matrix.dir }}
+    needs: plan
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        dir: ${{ fromJSON(needs.plan.outputs.dirs) }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - name: Rust from rust-toolchain.toml
+        # The default too: a test builds a generated project outside the repository,
+        # where no rust-toolchain.toml applies.
+        shell: bash
+        run: |
+          rustup toolchain install
+          rustup default "$(sed -n 's/^channel = "\([^"]*\)".*/\1/p' rust-toolchain.toml)"
+      # Host tests of firmware packages: the host target, no firmware features
+      # (the READMEs give the same command). The pinned Rust by name skips a package's own
+      # toolchain file (the ESP one).
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
+        with:
+          workspaces: ${{ matrix.dir }}
+      - name: The pinned Rust by name
+        run: sed -n 's/^channel = "\(.*\)"/RUST=\1/p' rust-toolchain.toml >> "$GITHUB_ENV"
+      - name: Format
+        env:
+          DIR: ${{ matrix.dir }}
+        run: cargo +"$RUST" fmt --check --manifest-path "$DIR/Cargo.toml"
+      - name: Clippy
+        # The library; a package without one is linted whole.
+        env:
+          DIR: ${{ matrix.dir }}
+        run: |
+          host="$(rustc +"$RUST" -vV | sed -n 's/^host: //p')"
+          if cargo metadata --no-deps --format-version 1 --manifest-path "$DIR/Cargo.toml" \
+              | jq -e 'any(.packages[].targets[]; .kind | index("lib"))' > /dev/null; then
+            scope=--lib
+          else
+            scope=--all-targets
+          fi
+          cargo +"$RUST" clippy --no-default-features $scope --target "$host" \
+            --manifest-path "$DIR/Cargo.toml" -- -D warnings
+      - name: Test on the host
+        env:
+          DIR: ${{ matrix.dir }}
+        run: |
+          host="$(rustc +"$RUST" -vV | sed -n 's/^host: //p')"
+          cargo +"$RUST" test --no-default-features --target "$host" \
+            --manifest-path "$DIR/Cargo.toml"
+
+  # Clippy over the MCU packages' firmware code (node, relay, the ESP32-S3
+  # link task), which the host-only clippy above does not compile: the
+  # masking rule of the execution model is a clippy rule
+  # (targets/mcu/clippy.toml). The runs come from each package's
+  # `[package.metadata.dagon.lint]` (scripts/ci_crates.py --firmware-lint).
+  firmware-lint:
+    name: clippy ${{ matrix.lint.dir }} [${{ matrix.lint.features }}]
+    needs: plan
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        lint: ${{ fromJSON(needs.plan.outputs.lints) }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - name: Rust from rust-toolchain.toml
+        # The default too: a test builds a generated project outside the repository,
+        # where no rust-toolchain.toml applies.
+        shell: bash
+        run: |
+          rustup toolchain install
+          rustup default "$(sed -n 's/^channel = "\([^"]*\)".*/\1/p' rust-toolchain.toml)"
+      # The ESP32-S3 package builds with Espressif's Xtensa toolchain (its
+      # rust-toolchain.toml names `esp`).
+      - name: Xtensa toolchain
+        if: matrix.lint.toolchain == 'esp'
+        uses: esp-rs/xtensa-toolchain@ec6d36527049a7f4fb2cb0c1a644668c1bb8a2a4 # v1.7.0
+        with:
+          default: false
+          buildtargets: esp32s3
+          ldproxy: false
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
+        with:
+          workspaces: ${{ matrix.lint.dir }}
+      - name: Clippy (firmware target)
+        env:
+          DIR: ${{ matrix.lint.dir }}
+          TARGET: ${{ matrix.lint.target }}
+          FEATURES: ${{ matrix.lint.features }}
+          LINT_ENV: ${{ toJSON(matrix.lint.env) }}
+        # In the package's folder: its rust-toolchain.toml and
+        # .cargo/config.toml (the repository's, or its own) apply.
+        run: |
+          eval "$(jq -r 'to_entries[] | "export \(.key)=\(.value | @sh)"' <<< "$LINT_ENV")"
+          cd "$DIR"
+          args=(clippy --release)
+          if [ -n "$TARGET" ]; then
+            rustup target add "$TARGET"
+            args+=(--target "$TARGET")
+          fi
+          if [ -n "$FEATURES" ]; then
+            args+=(--features "$FEATURES")
+          fi
+          cargo "${args[@]}" -- -D warnings
+
+  # Each stage0 built in release, without a board and for every board of
+  # its MCU, and measured against the region its MCU definition gives it
+  # (`[layout] stage0`), leaving 1/16 of it free.
+  stage0-size:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - name: Rust from rust-toolchain.toml
+        # The default too: a test builds a generated project outside the repository,
+        # where no rust-toolchain.toml applies.
+        shell: bash
+        run: |
+          rustup toolchain install
+          rustup default "$(sed -n 's/^channel = "\([^"]*\)".*/\1/p' rust-toolchain.toml)"
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version: "3.12"
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
+        with:
+          workspaces: targets/mcu/rp2040/stage0
+      - name: Build and measure
+        run: |
+          for t in $(python scripts/stage0_size.py --targets); do rustup target add "$t"; done
+          python scripts/stage0_size.py
+      # The compact SHA-256 rounds the stage0s are built with, on the host:
+      # digests of an independent implementation over block edges and a
+      # full boot core slot.
+      - name: Compact SHA-256 matches
+        env:
+          RUSTFLAGS: --cfg sha2_backend="soft" --cfg sha2_backend_soft="compact"
+        run: cargo test -p dagon-format --test sha256_backends --locked
+
+  # `dagon new` and `dagon gen`, then each self-boot node's generated boot
+  # crate built for both boot core slots and signed for each, as a release
+  # does (crates/dagon-cli/src/scaffold/tests.rs); and an app crate's and a
+  # boot crate's raised versions reaching the package after `dagon gen` and
+  # the build (crates/dagon-cli/src/serve/api.rs).
+  boot-crates:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - name: Rust from rust-toolchain.toml
+        # The default too: a test builds a generated project outside the repository,
+        # where no rust-toolchain.toml applies.
+        shell: bash
+        run: |
+          rustup toolchain install
+          rustup default "$(sed -n 's/^channel = "\([^"]*\)".*/\1/p' rust-toolchain.toml)"
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version: "3.12"
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
+      - name: Build and sign both slots
+        run: |
+          for t in $(python scripts/stage0_size.py --targets); do rustup target add "$t"; done
+          cargo test -p dagon-cli --bin dagon --locked -- --ignored gen_boot_core_slots_sign
+          cargo test -p dagon-cli --bin dagon --locked -- --ignored raised_versions_reach_the_package
+
+  web:
+    runs-on: ubuntu-24.04
+    defaults:
+      run:
+        working-directory: web
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - run: npm ci
+      # The page's WebAssembly is built by wasm-pack (npm test builds it first).
+      - run: npm install --global wasm-pack@0.15.1
+      - name: Tests (vitest)
+        run: npm test
+      - name: Types (svelte-check)
+        run: npx svelte-check --tsconfig ./tsconfig.json
+      # The Console in a real browser: the layout sweep, the view, every menu item.
+      - name: Browser (Playwright)
+        run: |
+          npx playwright install --with-deps chromium
+          npm run e2e
+
+  # The documentation site and the Console demo it publishes: the generated
+  # reference pages match their sources, the examples parse, the site builds
+  # with every internal link resolving, and the demo build compiles.
+  site:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version: "3.12"
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: |
+            site/package-lock.json
+            web/package-lock.json
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
+      - name: Generated reference pages up to date
+        run: python site/scripts/gen.py --check
+      - name: Site script tests
+        run: python -m unittest discover -s site/scripts -p "test_*.py"
+      - name: Examples parse
+        run: python site/scripts/examples.py
+      - name: Build the site and check its links
+        working-directory: site
+        run: |
+          npm ci
+          npm run build
+      - name: Build the Console demo
+        working-directory: web
+        run: |
+          npm ci
+          npm install --global wasm-pack@0.15.1
+          npm run build:demo -- --outDir ../site/dist/demo --emptyOutDir
+      - name: What the two pages carry
+        # The page dagon serve hands out (as committed; the scripts job checks it
+        # is built from its sources) carries none of the demo, and neither page
+        # names an agent product.
+        run: python site/scripts/pages.py --demo site/dist/demo
+
+  scripts:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version: "3.12"
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: "22"
+      - name: Page up to date
+        run: python scripts/page.py check
+      - name: Script tests
+        run: python -m unittest discover -s scripts -p "test_*.py"
+      - name: Sample script tests
+        run: python -m unittest discover -s samples/demo-data -p "test_*.py"
+      - name: Plugin hook tests
+        # The tests make real commits.
+        env:
+          GIT_AUTHOR_NAME: ci
+          GIT_AUTHOR_EMAIL: ci@example.invalid
+          GIT_COMMITTER_NAME: ci
+          GIT_COMMITTER_EMAIL: ci@example.invalid
+        run: node --test plugin/hooks/guard.test.mjs

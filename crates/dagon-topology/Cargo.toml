@@ -1,0 +1,31 @@
+[package]
+name = "dagon-topology"
+edition.workspace = true
+license.workspace = true
+version = "0.1.0"
+
+[dependencies]
+dagon-format = { path = "../dagon-format" }
+serde = { version = "1", features = ["derive"] }
+yaml_serde = "0.10"
+# The definition format (dagon-mcu.toml, dagon-board.toml); already in the
+# lock file through dagon-cli. display: an inline [board.<id>] keeps its
+# TOML text for the JSON form.
+toml = { version = "0.8", default-features = false, features = ["parse", "display"] }
+# The definitions' JSON form for the browser (Registry::to_json); already in
+# the lock file through dagon-cli.
+serde_json = "1"
+
+[build-dependencies]
+# Reads which text files a builtin MCU definition names (build.rs).
+toml = { version = "0.8", default-features = false, features = ["parse"] }
+
+[dev-dependencies]
+# Parity tests: the definitions match the built-in tables (these crates depend
+# on this one; the cycle is through dev-dependencies only).
+# The MCU packages' layout.rs files, included by tests/defs_layout.rs.
+dagon-core = { path = "../dagon-core" }
+dagon-port = { path = "../dagon-port" }
+dagon-host = { path = "../dagon-host", features = ["defs"] }
+dagon-romlink = { path = "../dagon-romlink" }
+dagon-sign = { path = "../dagon-sign" }

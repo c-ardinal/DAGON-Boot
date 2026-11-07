@@ -1,0 +1,27 @@
+[package]
+name = "dagon-agent"
+edition.workspace = true
+license.workspace = true
+version = "0.1.0"
+
+[features]
+# Lets a SlotStore implementation's own host tests call its mutators
+# (`Transition::for_store_tests`). Refused on bare-metal targets.
+store-tests = []
+
+[dependencies]
+dagon-events = { path = "../dagon-events" }
+dagon-format = { path = "../dagon-format" }
+dagon-proto = { path = "../dagon-proto" }
+dagon-port = { path = "../dagon-port" }
+
+# Hosted builds (tests, simulators, the browser page) lock the published
+# events with the standard library; bare-metal builds take the MCU's.
+[target.'cfg(not(target_os = "none"))'.dependencies]
+critical-section = { version = "1.1", features = ["std"] }
+
+[dev-dependencies]
+# Its own tests share their slot store with the bench (`store-tests`).
+dagon-agent = { path = ".", features = ["store-tests"] }
+dagon-core = { path = "../dagon-core" }
+ed25519-compact = { version = "2.6", default-features = false }

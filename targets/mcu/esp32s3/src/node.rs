@@ -1,0 +1,585 @@
+//! The DAGON side of a running image: [`start`] takes the peripherals DAGON
+//! owns and runs the link task on a high-priority interrupt executor.
+//!
+//! - The link task is the only owner of the link UART (on the board's pins),
+//!   USB Serial/JTAG, the flash, the RTC/super watchdogs and whatever the
+//!   board's `BoardDef` implementation holds (e.g. an internal I2C bus). It runs
+//!   the board's `BoardBringUp` port once before serving (`app.bring_up`;
+//!   a board without one emits nothing) and, with `Confirm::Own`, confirms
+//!   the app's trial.
+//!   It waits on both links with interrupt-driven async reads (no polling),
+//!   serves each request (CONF_RUN in a conformance build, ENTER_ROM, the
+//!   agent) and replies on the link the request came in on. Agent access is
+//!   serialized here.
+//! - It runs at [`LINK_PRIORITY`], above the thread-mode executor where the
+//!   app's own tasks run, so the app's work never delays DAGON traffic.
+//! - Watchdog: the RTC WDT (4 s from start) is not fed at all while on
+//!   trial, so an image that is not confirmed in time is reset and rolled
+//!   back. Once confirmed it is fed only while every task registered in the
+//!   [`Liveness`] registry is within its deadline; the link task registers
+//!   too and announces a budget for every request. The link task holds the
+//!   watchdog; the slot store feeds it through a handle while it erases.
+//! - REBOOT: the reset follows the reply after the delay `allow_reboot_now`
+//!   asked for, the link task idle and feeding meanwhile.
+//! - UART and USB receivers drop a partial frame after 20 ms without a byte
+//!   (inclusive). Bytes of one read share its completion time; after a
+//!   synchronous section of 20 ms or more any partial frame is dropped, since
+//!   the FIFO may have collected bytes with gaps the read cannot see. Residual
+//!   limit: a whole frame that arrived entirely during such a section is
+//!   accepted even if its own bytes had gaps.
+//! - Liveness: the link lease holds the CPU only around synchronous work
+//!   (decide the reply, flash, CONFIRM check), not across awaits.
+//! - ENTER_ROM: the ROM switch happens only after the OK has left the node;
+//!   otherwise the node stays in the app ([`ROM_REPLY_LOST`] counts it).
+
+use core::cell::RefCell;
+use core::sync::atomic::{AtomicBool, AtomicU32, Ordering};
+
+use crate::{
+    board::{BoardDef, PlainBoard},
+    boot::EspBootSelect,
+    flash::EspFlash,
+    framer::{INTER_BYTE_TIMEOUT_MS, MAX_UART_FRAME},
+    links::{self, Kind},
+    otadata::ENTRY_LEN,
+    sys::{EspClock, EspReset, RtcWatchdog},
+    TRIAL_WDT_MS,
+};
+use dagon_agent::{
+    reply_status, Agent, SlotStore, StoreError, TrialPolicy, IDLE_TIMEOUT_MS, NO_ADDR,
+};
+use dagon_events::{Published, Watchdog as Periods};
+pub use dagon_mcu_common::hooks::BoardExtension;
+pub use dagon_mcu_common::hooks::{always, App, AppEvents, Confirm, NodeChain, SelfCheck};
+use dagon_mcu_common::hooks::{finish_start, node_chain, Events};
+use dagon_mcu_common::link::Link as DagonLink;
+use dagon_port::{BootSelectV, Reset, Watchdog};
+use dagon_proto::payload::SlotState;
+use embassy_executor::{SendSpawner, Spawner};
+use embassy_futures::select::{select3, Either3};
+use embassy_time::{Duration, Instant, Timer};
+use esp_bootloader_esp_idf::partitions::FlashStorage;
+use esp_hal::{
+    interrupt::Priority,
+    peripherals::{FLASH, FROM_CPU_INTR1, LPWR, RTC_TIMER, USB_DEVICE},
+    rtc_cntl::{Rtc, Swd},
+    uart::Uart,
+    usb::usb_serial_jtag::UsbSerialJtag,
+    Blocking,
+};
+use esp_rtos::embassy::InterruptExecutor;
+use static_cell::StaticCell;
+
+use crate::liveness::{Lease, Liveness};
+use crate::rom::{self, Method, Step};
+use crate::serve::{self, Next, Then};
+use crate::store::{EspStore, Otadata};
+use crate::trial::TrialWatchdog;
+use crate::Version;
+
+/// Priority of the link executor (the app's tasks run in thread mode, below).
+pub const LINK_PRIORITY: Priority = Priority::Priority2;
+/// The link task wakes at least this often to feed the watchdog.
+const FEED_PERIOD: Duration = Duration::from_millis(500);
+/// Time one request may take, a full slot erase included.
+const REQUEST_BUDGET_MS: u32 = 120_000;
+
+/// Everything DAGON owns on the chip, handed over by the board crate.
+pub struct NodePeripherals<'d> {
+    pub rtc_timer: RTC_TIMER<'d>,
+    /// The link UART on the board's pins, configured with
+    /// `link::uart_config(baud)` (8N1 at the board's link bit rate).
+    pub uart: Uart<'d, Blocking>,
+    pub usb_device: USB_DEVICE<'d>,
+    pub flash: FLASH<'d>,
+    /// The board's default node tag (`DAGON_TARGET_TAG` overrides it).
+    pub target_tag: &'static str,
+    /// Board extras (bring-up, optional PMIC ROM entry).
+    pub board: &'d mut dyn BoardDef,
+    /// The board package's extension, which the start puts in the node's
+    /// chain after the publisher and before the app's: it observes every
+    /// event and answers the decision points before the app.
+    pub board_extension: Option<BoardExtension>,
+}
+
+/// How the node identifies itself, and what the app hands DAGON (its
+/// self-check, extensions and who confirms).
+pub struct NodeConfig {
+    /// HELLO mode: `payload::mode::APP` (ota_0/ota_1) or `AGENT` (factory).
+    pub mode: u8,
+    pub app: App,
+}
+
+impl NodeConfig {
+    /// App image (ota_0/ota_1): HELLO mode app.
+    pub const fn app(app: App) -> Self {
+        Self {
+            mode: dagon_proto::payload::mode::APP,
+            app,
+        }
+    }
+
+    /// Factory recovery agent: HELLO mode agent, confirms without a check.
+    pub const fn factory() -> Self {
+        Self {
+            mode: dagon_proto::payload::mode::AGENT,
+            app: App::new(always),
+        }
+    }
+}
+
+/// Proof that the RTC WDT runs; [`start`] requires it.
+pub struct WatchdogArmed(());
+
+/// Starts the RTC WDT (4 s) right away. Call it first, right after
+/// `esp_hal::init` (which stops every watchdog), so an image that stalls
+/// before [`start`] still resets and, on trial, rolls back. This is the only
+/// start: the link task never restarts it and feeds it only once it knows
+/// the image is confirmed.
+pub fn arm_watchdog(rtc_timer: RTC_TIMER<'_>) -> WatchdogArmed {
+    RtcWatchdog::new(Rtc::new(rtc_timer).rwdt).start(TRIAL_WDT_MS);
+    WatchdogArmed(())
+}
+
+/// Version of the running image from the startup STATUS (its header in the
+/// dagon partition); `None` before the link task has read it, or when the
+/// running slot has no header.
+pub fn running_version() -> Option<Version> {
+    VERSION_KNOWN
+        .load(Ordering::Acquire)
+        .then(|| Version::from_raw(RUNNING_VERSION.load(Ordering::Acquire)))
+}
+
+static RUNNING_VERSION: AtomicU32 = AtomicU32::new(0);
+static VERSION_KNOWN: AtomicBool = AtomicBool::new(false);
+
+fn publish_startup(store: &mut Store) {
+    let st = store.status();
+    let has_header = st
+        .slots
+        .get(st.active as usize)
+        .is_some_and(|s| s.digest16 != [0; 16]);
+    if has_header {
+        let v = st.slots[st.active as usize].version;
+        RUNNING_VERSION.store(v.raw(), Ordering::Release);
+        VERSION_KNOWN.store(true, Ordering::Release);
+    }
+}
+
+/// The board definition of a board without extras (`board::PlainBoard`), for
+/// `NodePeripherals::board` when the app wires the link itself. Call once;
+/// a second call resets the chip (there is only one link task).
+pub fn plain_board() -> &'static mut PlainBoard {
+    static PLAIN: StaticCell<PlainBoard> = StaticCell::new();
+    PLAIN
+        .try_init(PlainBoard)
+        .unwrap_or_else(|| esp_hal::system::software_reset())
+}
+
+/// Milliseconds since boot, wrapping: the time base of [`Liveness`] deadlines
+/// (the one the watchdog checks them against).
+pub fn now_ms() -> u32 {
+    use dagon_port::Clock;
+    (EspClock.now_us() / 1000) as u32
+}
+
+/// What the link task starts with besides the peripherals.
+struct Start {
+    mode: u8,
+    confirm: Confirm,
+    chain: NodeChain,
+}
+
+/// Starts the DAGON side: the link task on a high-priority interrupt
+/// executor driven by software interrupt 1 (`esp_rtos::start` takes 0).
+/// Call once, after `esp_rtos::start`. Returns the node's events (the
+/// app's extensions in `cfg.app` see the same ones). If the flashed
+/// partition table does not match, the task stops and the watchdog resets
+/// the chip.
+pub fn start(
+    _armed: WatchdogArmed,
+    mut p: NodePeripherals<'static>,
+    link_irq: FROM_CPU_INTR1<'static>,
+    cfg: NodeConfig,
+    liveness: &'static Liveness,
+) -> AppEvents {
+    static EXECUTOR: StaticCell<InterruptExecutor<1>> = StaticCell::new();
+    static EVENTS: StaticCell<Events> = StaticCell::new();
+    let now_us: fn() -> u64 = || {
+        use dagon_port::Clock;
+        EspClock.now_us()
+    };
+    let periods = Periods::new(TRIAL_WDT_MS, TRIAL_WDT_MS);
+    let events = EVENTS.init(Published::new());
+    let board = p.board_extension.take();
+    let (chain, events) = node_chain(
+        events,
+        board,
+        cfg.app.exts,
+        cfg.app.self_check,
+        now_us,
+        periods,
+    );
+    let start = Start {
+        mode: cfg.mode,
+        confirm: cfg.app.confirm,
+        chain,
+    };
+    let spawner: SendSpawner = EXECUTOR
+        .init(InterruptExecutor::new(link_irq))
+        .start(LINK_PRIORITY);
+    spawner.spawn(bootstrap(p, start, liveness).expect("link bootstrap spawned once"));
+    events
+}
+
+/// Hands the link task its peripherals on the link executor itself: the
+/// link task holds non-`Send` state, so it is spawned from there.
+#[embassy_executor::task]
+async fn bootstrap(p: NodePeripherals<'static>, start: Start, liveness: &'static Liveness) {
+    // SAFETY: awaited inside an embassy task, so the context comes from the
+    // embassy executor (the documented way to spawn on an InterruptExecutor).
+    let spawner = unsafe { Spawner::for_current_executor() }.await;
+    spawner.spawn(link_task(p, start, liveness).expect("link task spawned once"));
+}
+
+#[embassy_executor::task]
+async fn link_task(p: NodePeripherals<'static>, start: Start, liveness: &'static Liveness) {
+    if let Some(link) = Link::new(p, start, liveness) {
+        link.run().await;
+    }
+    // No link: the RTC WDT, already running, resets the chip.
+}
+
+type Wdt = TrialWatchdog<RtcWatchdog, EspClock>;
+
+/// The slot store's handle on the trial watchdog the link task holds.
+#[derive(Clone, Copy)]
+struct SharedWdt(&'static RefCell<Wdt>);
+
+impl Watchdog for SharedWdt {
+    fn start(&mut self, timeout_ms: u32) {
+        self.0.borrow_mut().start(timeout_ms);
+    }
+    fn feed(&mut self) {
+        self.0.borrow_mut().feed();
+    }
+}
+
+type Store = EspStore<EspFlash<'static, 'static>, EspBootSelect<'static, 'static>, SharedWdt>;
+type Node = Agent<Store, NodeChain>;
+
+impl Otadata for EspBootSelect<'_, '_> {
+    fn running(&self) -> u8 {
+        self.current_slot()
+    }
+    fn entries(&self) -> Result<[[u8; ENTRY_LEN]; 2], StoreError> {
+        EspBootSelect::entries(self).map_err(|_| StoreError::Flash)
+    }
+    fn set_next(&mut self, slot: u8) -> Result<(), StoreError> {
+        BootSelectV::set_next(self, slot).map_err(|_| StoreError::Flash)
+    }
+    fn confirm(&mut self) -> Result<(), StoreError> {
+        EspBootSelect::confirm(self).map_err(|_| StoreError::Flash)
+    }
+    fn withdraw(&mut self, slot: u8) -> Result<(), StoreError> {
+        EspBootSelect::withdraw(self, slot).map_err(|_| StoreError::Flash)
+    }
+}
+
+/// What ENTER_ROM needs besides the RWDT: the super watchdog and the board
+/// (method 2).
+struct RomBoard {
+    swd: Swd,
+    board: &'static mut dyn BoardDef,
+}
+
+#[derive(Clone, Copy)]
+enum Via {
+    Uart,
+    Usb,
+}
+
+impl Via {
+    /// The link kind's code in events.
+    fn code(self) -> u8 {
+        match self {
+            Via::Uart => Kind::Uart.code(),
+            Via::Usb => Kind::UsbCdc.code(),
+        }
+    }
+}
+
+/// The link task: both uplinks (common [`DagonLink`]s), the agent and
+/// the trial watchdog.
+struct Link {
+    agent: Node,
+    /// Whether each uplink (`Via` order) carries frames: up from its first
+    /// frame, down when a reply cannot be sent on it.
+    up: [bool; 2],
+    wdt: &'static RefCell<Wdt>,
+    /// The flash, for a conformance build's tests.
+    #[cfg(feature = "conform")]
+    storage: &'static RefCell<FlashStorage<'static>>,
+    uart: links::Uart,
+    usb: links::UsbCdc,
+    board: RomBoard,
+    lease: Lease,
+}
+
+fn trying(store: &mut Store) -> bool {
+    let st = store.status();
+    st.slots
+        .get(st.active as usize)
+        .is_some_and(|s| s.state == SlotState::Trying)
+}
+
+impl Link {
+    fn new(p: NodePeripherals<'static>, start: Start, liveness: &'static Liveness) -> Option<Self> {
+        static STORAGE: StaticCell<RefCell<FlashStorage<'static>>> = StaticCell::new();
+        static WDT: StaticCell<RefCell<Wdt>> = StaticCell::new();
+        // Armed by `arm_watchdog`; not restarted here (a start feeds it).
+        let rtc = Rtc::new(p.rtc_timer);
+        let rwdt = RtcWatchdog::new(rtc.rwdt);
+
+        let storage = STORAGE.init(RefCell::new(FlashStorage::new(p.flash)));
+        let boot = EspBootSelect::new(storage).ok()?;
+        let wdt = WDT.init(RefCell::new(
+            TrialWatchdog::new(rwdt, EspClock).with_liveness(liveness),
+        ));
+        let mut store = EspStore::new(EspFlash::new(storage), boot, SharedWdt(wdt));
+        let trial = trying(&mut store);
+        if trial {
+            wdt.borrow_mut().begin_trial();
+        } else {
+            wdt.borrow_mut().end_trial();
+        }
+        publish_startup(&mut store);
+        let mut agent = Agent::new(
+            crate::config(start.mode, crate::target_tag(p.target_tag)),
+            store,
+            start.chain,
+        );
+        // The trial watchdog never feeds while on trial.
+        agent.watchdog_taken(TRIAL_WDT_MS, TrialPolicy::NeverFeed);
+        // Board bring-up, once, before the links open and anything is
+        // served; then the app's own confirm, if it asked.
+        let id = p.board.id();
+        if !finish_start(&mut agent, id.zip(p.board.bring_up_port()), start.confirm) {
+            wdt.borrow_mut().end_trial();
+        }
+        let board = RomBoard {
+            swd: rtc.swd,
+            board: p.board,
+        };
+        let uart = links::Uart::new(p.uart.into_async());
+        let usb = links::UsbCdc::new(UsbSerialJtag::new(p.usb_device).into_async());
+        Some(Self {
+            agent,
+            up: [false; 2],
+            wdt,
+            #[cfg(feature = "conform")]
+            storage,
+            uart,
+            usb,
+            board,
+            lease: liveness.register_preempting()?,
+        })
+    }
+
+    async fn run(mut self) {
+        let idle = Duration::from_millis(IDLE_TIMEOUT_MS.into());
+        let mut last = Instant::now();
+        let mut req = [0u8; MAX_UART_FRAME];
+        loop {
+            self.wdt.borrow_mut().feed();
+            if last.elapsed() >= idle {
+                self.agent.abort();
+                last = Instant::now();
+            }
+            let ev = select3(
+                self.uart.read_frame(),
+                self.usb.read_frame(),
+                Timer::after(FEED_PERIOD),
+            )
+            .await;
+            let (n, via) = match ev {
+                Either3::First(Ok(f)) => (copy(&mut req, f), Via::Uart),
+                Either3::Second(Ok(f)) => (copy(&mut req, f), Via::Usb),
+                _ => continue,
+            };
+            last = Instant::now();
+            if self.serve(&req[..n], via).await >= INTER_BYTE_TIMEOUT_MS {
+                // Bytes that came in meanwhile wait in the FIFO and read as
+                // one batch with one time: no partial frame may run across
+                // that section.
+                self.uart.drop_partial();
+                self.usb.drop_partial();
+            }
+        }
+    }
+
+    /// Answers one request; resets after the reply to REBOOT, switches to the
+    /// ROM loader after the reply to ENTER_ROM if that reply left the node.
+    /// Returns the longest synchronous section (ms) it ran.
+    async fn serve(&mut self, frame: &[u8], via: Via) -> u32 {
+        // Every request starts with a gated feed (execution model, section
+        // 12, rule 4); on trial the trial watchdog feeds nothing.
+        self.wdt.borrow_mut().feed();
+        let start = now_ms();
+        let up = &mut self.up[via as usize];
+        if !*up {
+            *up = true;
+            self.agent.link_up(via.code(), NO_ADDR);
+        }
+        self.agent.request(frame, via.code());
+        self.lease.busy(start, REQUEST_BUDGET_MS);
+        self.lease.hold_cpu(start);
+        let mut out = [0u8; REPLY_MAX];
+        let decided = self.decide(frame, &mut out);
+        let mut held = self.lease.release_cpu(now_ms());
+        if let Some((n, then)) = decided {
+            let sent = match via {
+                Via::Uart => self.uart.write_frame(&out[..n]).await,
+                Via::Usb => self.usb.write_frame(&out[..n]).await,
+            }
+            .is_ok();
+            if !sent {
+                self.up[via as usize] = false;
+                self.agent.link_down(via.code(), NO_ADDR);
+            } else if let Some(status) = reply_status(&out[..n]) {
+                self.agent.replied(status, now_ms().wrapping_sub(start));
+            }
+            held = held.max(self.after_reply(serve::next(then, sent)).await);
+        }
+        self.lease.idle();
+        held
+    }
+
+    /// The synchronous part: the reply to send and what follows it.
+    fn decide(&mut self, frame: &[u8], out: &mut [u8; REPLY_MAX]) -> Option<(usize, Then)> {
+        let max = dagon_proto::max_payload::UART;
+        let mut rom_reply = [0u8; rom::REPLY_LEN];
+        let pmic = self.board.board.pmic_download_supported();
+        if let Some((n, method)) = rom::enter_rom_request(frame, max, pmic, &mut rom_reply) {
+            out[..n].copy_from_slice(&rom_reply[..n]);
+            return Some((n, method.map_or(Then::Nothing, Then::Rom)));
+        }
+        #[cfg(feature = "conform")]
+        if let Some(n) = self.conform(frame, &mut out[..]) {
+            return Some((n, Then::Nothing));
+        }
+        let agent = &mut self.agent;
+        let mut refusal = [0u8; crate::REFUSAL_LEN];
+        let st = agent.images().status();
+        if let Some(n) = crate::refuse_set_pending_on_trial(st, frame, &mut refusal) {
+            out[..n].copy_from_slice(&refusal[..n]);
+            return Some((n, Then::Nothing));
+        }
+        let reply = agent.handle(frame)?;
+        let n = reply.frame.len();
+        out.get_mut(..n)?.copy_from_slice(reply.frame);
+        let then = if reply.reboot {
+            Then::Reboot(reply.reboot_delay_ms)
+        } else {
+            Then::CheckTrial
+        };
+        Some((n, then))
+    }
+
+    /// Runs the step after a reply; returns how long it kept the CPU (ms).
+    async fn after_reply(&mut self, next: Next) -> u32 {
+        match next {
+            Next::Stay => 0,
+            Next::EnterRom(m) => enter_rom(m, &mut self.board, self.wdt.borrow_mut().inner()),
+            Next::RomReplyLost => {
+                ROM_REPLY_LOST.fetch_add(1, Ordering::Relaxed);
+                0
+            }
+            Next::Reset(ms) => self.reset_after(ms).await,
+            Next::CheckTrial => {
+                self.lease.hold_cpu(now_ms());
+                let mut wdt = self.wdt.borrow_mut();
+                if wdt.on_trial() && !self.agent.images().on_trial() {
+                    wdt.end_trial();
+                }
+                drop(wdt);
+                self.lease.release_cpu(now_ms())
+            }
+        }
+    }
+
+    /// Waits `ms` (capped below the watchdog period by the chain), idle
+    /// and feeding, then resets.
+    async fn reset_after(&mut self, ms: u32) -> ! {
+        self.lease.idle();
+        let until = Instant::now() + Duration::from_millis(ms.into());
+        while Instant::now() < until {
+            self.wdt.borrow_mut().feed();
+            Timer::at(until.min(Instant::now() + FEED_PERIOD)).await;
+        }
+        self.agent.before_reboot();
+        EspReset.reset()
+    }
+
+    /// CONF_RUN in a conformance build, on the definition's scratch
+    /// (`[conformance] scratch`: no image, header or selection data is
+    /// there); without one the request falls through to the agent
+    /// (E_UNSUPPORTED).
+    #[cfg(feature = "conform")]
+    fn conform(&mut self, frame: &[u8], out: &mut [u8]) -> Option<usize> {
+        use crate::layout::REGIONS;
+        use dagon_conform::node::{handle_frame, NodeSetup};
+        use dagon_proto::{Cmd, Frame};
+
+        let max = dagon_proto::max_payload::UART;
+        if Frame::decode(frame, max).ok()?.0.cmd != Cmd::ConfRun as u8 {
+            return None;
+        }
+        let (scratch, _) = crate::CONFORM_SCRATCH?;
+        let setup = NodeSetup {
+            declared: &REGIONS,
+            scratch,
+        };
+        let mut flash = EspFlash::new(self.storage);
+        let wdt = self.wdt;
+        handle_frame(frame, max, &mut flash, &setup, out, &mut || {
+            wdt.borrow_mut().feed()
+        })
+    }
+}
+
+/// ENTER_ROM requests not acted on because their OK did not leave the node.
+pub static ROM_REPLY_LOST: AtomicU32 = AtomicU32::new(0);
+
+/// Room for the largest reply frame (agent STATUS 84 B, CONF_RUN 82 B).
+const REPLY_MAX: usize = 128;
+
+/// Copies a received frame out of its link (the link task answers on it).
+fn copy(req: &mut [u8; MAX_UART_FRAME], f: &[u8]) -> usize {
+    let n = f.len().min(MAX_UART_FRAME);
+    req[..n].copy_from_slice(&f[..n]);
+    n
+}
+
+/// Runs [`rom::steps`] after the reply has been sent: watchdogs off, the
+/// method, then a software reset (into the ROM loader if the method took,
+/// otherwise back into the agent).
+fn enter_rom(method: Method, board: &mut RomBoard, rwdt: &mut RtcWatchdog) -> ! {
+    for step in rom::steps(method) {
+        match step {
+            Step::StopWatchdogs => {
+                rwdt.stop();
+                // `Swd::disable` turns the super watchdog's auto-feed on.
+                board.swd.disable();
+            }
+            Step::ForceDownloadBoot => {
+                LPWR::regs()
+                    .option1()
+                    .modify(|_, w| w.force_download_boot().set_bit());
+            }
+            Step::PmicDownload => board.board.pmic_download(),
+            Step::Reset => break,
+        }
+    }
+    esp_hal::system::software_reset()
+}

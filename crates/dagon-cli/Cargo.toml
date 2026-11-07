@@ -1,0 +1,78 @@
+[package]
+name = "dagon-cli"
+edition.workspace = true
+license.workspace = true
+version = "0.1.0"
+description = "DAGON Boot command line tool"
+repository = "https://github.com/c-ardinal/DAGON-Boot"
+
+# cargo binstall dagon-cli: the archives scripts/release.py makes, attached
+# to the GitHub release of the tag cli-v<version>.
+[package.metadata.binstall]
+pkg-url = "{ repo }/releases/download/cli-v{ version }/dagon-cli-{ version }-{ target }{ archive-suffix }"
+bin-dir = "{ bin }{ binary-ext }"
+pkg-fmt = "tgz"
+
+[package.metadata.binstall.overrides.x86_64-pc-windows-msvc]
+pkg-fmt = "zip"
+
+[[bin]]
+name = "dagon"
+path = "src/main.rs"
+
+[dependencies]
+# MIT OR Apache-2.0. Every command and option is a clap definition: parsing,
+# --help and usage errors all come from it.
+clap = { version = "4.6", features = ["derive"] }
+dagon-format = { path = "../dagon-format" }
+ed25519-compact = { version = "2", default-features = false }
+serde = { version = "1", features = ["derive"] }
+toml = "0.8"
+dagon-topology = { path = "../dagon-topology" }
+dagon-sign = { path = "../dagon-sign" }
+dagon-proto = { path = "../dagon-proto" }
+dagon-sim = { path = "../dagon-sim" }
+dagon-host = { path = "../dagon-host", features = ["defs"] }
+dagon-port = { path = "../dagon-port" }
+dagon-conform = { path = "../dagon-conform" }
+dagon-catalog = { path = "../dagon-catalog" }
+dagon-extension = { path = "../dagon-extension" }
+# MPL-2.0. No libudev: Linux builds need no system library.
+serialport = { version = "4.10", default-features = false }
+# MIT OR Apache-2.0. Blocking HTTPS for messages-http agents (rustls, no system TLS library).
+ureq = { version = "3.5", default-features = false, features = ["rustls"] }
+serde_json = "1"
+# MIT OR Apache-2.0, already used by dagon-topology: dagon ai ask reads the
+# topology as plain data to send it without comments or the project's words.
+yaml_serde = "0.10"
+# dagon serve. All MIT OR Apache-2.0 and already in the lock file except
+# sha1 (RustCrypto, same family as sha2): request parsing, the WebSocket
+# accept key, the passphrase and editing dagon.toml without losing comments.
+httparse = "1"
+sha1 = "0.11"
+base64 = "0.23"
+getrandom = "0.4"
+toml_edit = "0.22"
+# MIT OR Apache-2.0 (keyring-rs). Agent API keys live only in the OS
+# credential store: keyring-core is the store interface (with an in-memory
+# mock for tests), and each platform links its own native store below, as
+# keyring-rs advises for applications (no file or home-made fallback).
+keyring-core = "1"
+# Apache-2.0. `dagon ai key set` reads the key from the terminal without echo.
+rpassword = "7"
+
+[target.'cfg(target_os = "macos")'.dependencies]
+apple-native-keyring-store = { version = "1", features = ["keychain"] }
+
+# The Secret Service over pure-Rust D-Bus (zbus) with pure-Rust crypto: no
+# libdbus or OpenSSL needed to build.
+[target.'cfg(all(unix, not(any(target_os = "macos", target_os = "ios", target_os = "android"))))'.dependencies]
+zbus-secret-service-keyring-store = { version = "1", features = ["crypto-rust"] }
+
+[target.'cfg(windows)'.dependencies]
+windows-native-keyring-store = { version = "1", default-features = false }
+# MIT OR Apache-2.0 (watchexec). A command agent runs in a Windows job
+# object through a safe API: the program and everything it starts stop
+# together, by PID-free job termination, and also when dagon itself ends
+# (kill-on-close). Unix uses std's process groups instead.
+command-group = "5.0.1"

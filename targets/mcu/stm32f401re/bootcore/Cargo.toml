@@ -1,0 +1,53 @@
+[package]
+name = "dagon-stm32f401re-bootcore"
+edition = "2021"
+license = "MIT OR Apache-2.0"
+version = "0.1.0"
+publish = false
+
+# The boot core library a node's boot crate links: `dagon gen` renders
+# template/ into boot/<id>/ of a project for every STM32F401RE node (`bootcore`).
+# Firmware clippy runs in CI (scripts/ci_crates.py --firmware-lint): the
+# masking rule of the execution model applies to the boot images too.
+# DAGON_TARGET_TAG names which images this boot stage accepts and
+# DAGON_BOOT_CRATE the node's boot folder; neither changes the code, so
+# the lint uses a neutral tag and the boot folder in lint/.
+[package.metadata.dagon]
+bootcore = "stm32f401re"
+lint = { features = ["", "slot-b"], env = { DAGON_TARGET_TAG = "lint", DAGON_BOOT_CRATE = "lint" } }
+
+# Standalone: built for thumbv7em only, so it stays out of the host workspace.
+# Its memory.x and verifying key come from dagon-mcu-stm32f401re.
+[workspace]
+
+[features]
+# Test build that fails its own check, so its trial always goes back to the
+# confirmed core.
+no-confirm = []
+# Linked for boot core slot B (a release carries a core for each slot).
+slot-b = ["dagon-mcu-stm32f401re/slot-b"]
+
+[dependencies]
+dagon-mcu-stm32f401re = { path = "..", default-features = false, features = ["hal", "image-bootcore"] }
+dagon-boot = { path = "../../../../crates/dagon-boot" }
+dagon-core = { path = "../../../../crates/dagon-core" }
+dagon-events = { path = "../../../../crates/dagon-events" }
+dagon-format = { path = "../../../../crates/dagon-format" }
+dagon-port = { path = "../../../../crates/dagon-port" }
+embassy-stm32 = { version = "0.6.0", features = ["stm32f401re"] }
+cortex-m = { version = "0.7", features = ["critical-section-single-core"] }
+cortex-m-rt = "0.7"
+# Smaller verifier code, so the boot extensions keep room in slot A.
+
+ed25519-compact = { version = "2.6", default-features = false, features = ["opt_size"] }
+
+[build-dependencies]
+# The board facts and the linked extensions' check from the node's boot folder.
+dagon-topology = { path = "../../../../crates/dagon-topology" }
+
+[profile.release]
+opt-level = "z"
+lto = "fat"
+codegen-units = 1
+panic = "abort"
+debug = true

@@ -1,0 +1,32 @@
+[package]
+name = "dagon-board-nucleo-f401re"
+edition = "2021"
+license = "MIT OR Apache-2.0"
+version = "0.1.0"
+publish = false
+
+# DAGON board package for the NUCLEO-F401RE (topology board id
+# `nucleo-f401re`). Built for thumbv7em; its board facts come from
+# dagon-board.toml at build time. Host build of the facts alone:
+#   cargo test --no-default-features --target <host triple>
+[workspace]
+
+[package.metadata.dagon]
+board = "nucleo-f401re"
+
+[features]
+default = ["hal"]
+hal = ["dep:dagon-mcu-stm32f401re", "dep:embassy-stm32", "dep:embassy-executor"]
+# Forwarded to the MCU package: link the app for APP slot B.
+slot-b = ["dagon-mcu-stm32f401re/slot-b"]
+# Forwarded to the MCU package: the conformance build.
+conform = ["dagon-mcu-stm32f401re/conform"]
+
+[dependencies]
+embassy-executor = { version = "0.10", optional = true }
+dagon-mcu-stm32f401re = { path = "../../mcu/stm32f401re", features = ["node"], optional = true }
+embassy-stm32 = { version = "0.6.0", features = ["stm32f401re"], optional = true }
+
+[build-dependencies]
+# Reads and checks dagon-board.toml with the rest of the source tree.
+dagon-topology = { path = "../../../crates/dagon-topology" }

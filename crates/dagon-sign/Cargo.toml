@@ -1,0 +1,11 @@
+[package]
+name = "dagon-sign"
+edition.workspace = true
+license.workspace = true
+version = "0.1.0"
+
+[dependencies]
+dagon-format = { path = "../dagon-format" }
+dagon-topology = { path = "../dagon-topology" }
+ed25519-compact = { version = "2", default-features = false, features = ["random", "std"] }
+sha2 = "0.11"

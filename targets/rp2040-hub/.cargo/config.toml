@@ -1,0 +1,9 @@
+[build]
+target = "thumbv6m-none-eabi"
+
+[target.thumbv6m-none-eabi]
+rustflags = ["-C", "link-arg=--nmagic", "-C", "link-arg=-Tlink.x"]
+
+[env]
+# The hub's image target tag (its boot core is built with the same).
+DAGON_TARGET_TAG = { value = "hub-rp2040-lcd", force = true }

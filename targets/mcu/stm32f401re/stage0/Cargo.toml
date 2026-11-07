@@ -1,0 +1,32 @@
+[package]
+name = "dagon-stm32f401re-stage0"
+edition = "2021"
+license = "MIT OR Apache-2.0"
+version = "0.1.0"
+publish = false
+
+# Firmware clippy runs in CI (scripts/ci_crates.py --firmware-lint).
+[package.metadata.dagon]
+lint = { features = [""] }
+
+# Standalone: built for thumbv7em only, so it stays out of the host workspace.
+# Its memory.x comes from dagon-mcu-stm32f401re (`image-stage0`).
+[workspace]
+
+[dependencies]
+dagon-mcu-stm32f401re = { path = "..", default-features = false, features = ["image-stage0"] }
+dagon-mcu-common = { path = "../../common" }
+dagon-core = { path = "../../../../crates/dagon-core" }
+dagon-format = { path = "../../../../crates/dagon-format" }
+cortex-m = { version = "0.7", features = ["critical-section-single-core"] }
+cortex-m-rt = "0.7"
+panic-halt = "1"
+# The smaller verifier code, when the definition has stage0 verify.
+ed25519-compact = { version = "2.6", default-features = false, features = ["opt_size"] }
+
+[profile.release]
+opt-level = "z"
+lto = "fat"
+codegen-units = 1
+panic = "abort"
+debug = true

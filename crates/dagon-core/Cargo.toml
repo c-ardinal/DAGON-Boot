@@ -1,0 +1,13 @@
+[package]
+name = "dagon-core"
+edition.workspace = true
+license.workspace = true
+version = "0.1.0"
+
+[dependencies]
+dagon-format = { path = "../dagon-format" }
+dagon-proto = { path = "../dagon-proto" }
+dagon-port = { path = "../dagon-port" }
+
+[dev-dependencies]
+ed25519-compact = { version = "2.6", default-features = false }

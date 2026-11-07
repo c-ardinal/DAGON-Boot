@@ -1,0 +1,26 @@
+[package]
+name = "dagon-host"
+edition.workspace = true
+license.workspace = true
+version = "0.1.0"
+
+[dependencies]
+dagon-conform = { path = "../dagon-conform" }
+dagon-format = { path = "../dagon-format" }
+dagon-port = { path = "../dagon-port" }
+dagon-proto = { path = "../dagon-proto" }
+dagon-romlink = { path = "../dagon-romlink" }
+# `defs`: ROM maps from the MCU definitions (std callers: CLI, browser).
+dagon-topology = { path = "../dagon-topology", optional = true }
+
+[features]
+defs = ["dep:dagon-topology"]
+
+[dev-dependencies]
+dagon-agent = { path = "../dagon-agent" }
+# The tests build ROM maps from the builtin definitions.
+dagon-host = { path = ".", features = ["defs"] }
+dagon-sign = { path = "../dagon-sign" }
+dagon-sim = { path = "../dagon-sim" }
+dagon-topology = { path = "../dagon-topology" }
+ed25519-compact = { version = "2.6", default-features = false }

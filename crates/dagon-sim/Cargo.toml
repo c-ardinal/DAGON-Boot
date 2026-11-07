@@ -1,0 +1,20 @@
+[package]
+name = "dagon-sim"
+edition.workspace = true
+license.workspace = true
+version = "0.1.0"
+
+[dependencies]
+dagon-agent = { path = "../dagon-agent" }
+# The kind S state log's fold and STATUS mapping (one for every store).
+dagon-core = { path = "../dagon-core" }
+dagon-events = { path = "../dagon-events" }
+dagon-format = { path = "../dagon-format" }
+dagon-port = { path = "../dagon-port" }
+dagon-proto = { path = "../dagon-proto" }
+# The MCU definitions: each board's boot attempt limit.
+dagon-topology = { path = "../dagon-topology" }
+
+[dev-dependencies]
+dagon-sign = { path = "../dagon-sign" }
+ed25519-compact = { version = "2.6", default-features = false }

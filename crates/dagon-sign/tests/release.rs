@@ -1,0 +1,468 @@
+//! Image signing and release building against the dagon-format golden
+//! vectors, using the RFC 8032 section 7.1 "TEST 1" key (public test data).
+
+use dagon_format::bundle::{dest, BundleView, NO_ENTRY};
+use dagon_format::header::{build_flags, capabilities, image_kind, target_tag, HEADER_SIZE};
+use dagon_format::manifest::ManifestView;
+use dagon_format::{sha256, Version};
+use dagon_sign::image::{self, sign_image, verify_image, ImageSpec, TEST_PUBLIC_KEY};
+use dagon_sign::provision::{self, FlashImage};
+use dagon_sign::release::{self, ReleaseItem};
+use dagon_topology::Topology;
+use ed25519_compact::{KeyPair, Seed};
+
+/// The RP2040 UF2 family ID (the UF2 spec's registry).
+const UF2_FAMILY_RP2040: u32 = 0xE48B_FF56;
+
+/// The first-install file of a builtin MCU (its writer takes one file).
+fn first_file(
+    mcu: &str,
+    stage0: Option<&[u8]>,
+    boot: (&image::Slot, &[u8]),
+    app: (&image::Slot, &[u8]),
+) -> Vec<u8> {
+    let def = dagon_topology::defs::Registry::builtin().mcu(mcu).unwrap();
+    provision::first_install_file(def, stage0, boot, app).unwrap()
+}
+
+const TEST_SEED: [u8; 32] = [
+    0x9d, 0x61, 0xb1, 0x9d, 0xef, 0xfd, 0x5a, 0x60, 0xba, 0x84, 0x4a, 0xf4, 0x92, 0xec, 0x2c, 0xc4,
+    0x44, 0x49, 0xc5, 0x69, 0x7b, 0x32, 0x69, 0x19, 0x70, 0x3b, 0xac, 0x03, 0x1c, 0xae, 0x7f, 0x60,
+];
+
+fn key() -> KeyPair {
+    KeyPair::from_seed(Seed::new(TEST_SEED))
+}
+
+fn golden(name: &str) -> Vec<u8> {
+    let path = format!(
+        "{}/../dagon-format/golden/{name}",
+        env!("CARGO_MANIFEST_DIR")
+    );
+    std::fs::read(&path).unwrap_or_else(|e| panic!("{path}: {e}"))
+}
+
+fn body(slot: u8) -> Vec<u8> {
+    (0..1024u32)
+        .map(|i| (i * 7 + 3 + slot as u32 * 0x40) as u8)
+        .collect()
+}
+
+fn spec(mcu: &str, kind: u8, slot: u8, tag: &str, version: Version) -> ImageSpec {
+    let (flags, caps) = image::default_bits(kind);
+    ImageSpec {
+        image_kind: kind,
+        port_kind: image::port_kind_of("self-boot").unwrap(),
+        mcu_id: image::mcu_id_of(mcu).unwrap(),
+        slot: image::slot(mcu, kind, slot).unwrap(),
+        version,
+        build_flags: flags,
+        release_seq: 1,
+        min_bootcore_version: Version::new(1, 0, 0),
+        target_tag: target_tag(tag),
+        proto_version: 1,
+        capabilities: caps,
+    }
+}
+
+fn f401_app(slot: u8) -> Vec<u8> {
+    let s = spec(
+        "stm32f401re",
+        image_kind::APP,
+        slot,
+        "seg-f401-7seg",
+        Version::new(1, 1, 0),
+    );
+    sign_image(&s, &body(slot), &key()).unwrap()
+}
+
+#[test]
+fn key_is_the_test_key() {
+    assert_eq!(*key().pk, TEST_PUBLIC_KEY);
+}
+
+#[test]
+fn image_sign_reproduces_golden_image() {
+    let img = f401_app(0);
+    assert_eq!(img, golden("image_f401_app_a.img"));
+    let h = verify_image(&img, &TEST_PUBLIC_KEY).unwrap();
+    assert_eq!(
+        h.build_flags,
+        build_flags::TEST_KEY,
+        "test key sets TEST_KEY"
+    );
+    assert_eq!(h.capabilities, capabilities::CONFIRM_BY_HUB);
+
+    let mut bad = img.clone();
+    bad[HEADER_SIZE] ^= 1;
+    assert!(verify_image(&bad, &TEST_PUBLIC_KEY).is_err());
+}
+
+#[test]
+fn release_assemble_reproduces_golden_manifest_and_bundle() {
+    let images = [f401_app(0), f401_app(1)];
+    let items: Vec<ReleaseItem> = images
+        .iter()
+        .map(|image| ReleaseItem {
+            image,
+            node_index: 1,
+            dest: dest::SUB_STORE,
+        })
+        .collect();
+    let topo = topology_bin();
+    assert_eq!(topo, golden("topology_sample.bin"));
+    let r = release::assemble("release-1.1", 1, &items, &topo, &key()).unwrap();
+    assert_eq!(r.manifest, golden("manifest.bin"));
+    assert_eq!(r.bundle, golden("release.dgb"));
+    ManifestView::parse(&r.manifest)
+        .unwrap()
+        .verify(&TEST_PUBLIC_KEY)
+        .unwrap();
+    BundleView::parse(&r.bundle)
+        .unwrap()
+        .verify(&TEST_PUBLIC_KEY)
+        .unwrap();
+}
+
+const SAMPLE_YAML: &str = include_str!("../../../topology/sample.yaml");
+
+fn sample() -> Topology {
+    dagon_topology::parse_str(SAMPLE_YAML).unwrap()
+}
+
+fn hub_app(slot: u8) -> Vec<u8> {
+    let s = spec(
+        "rp2040",
+        image_kind::APP,
+        slot,
+        "hub-rp2040-lcd",
+        Version::new(1, 1, 0),
+    );
+    sign_image(&s, &body(slot ^ 1), &key()).unwrap()
+}
+
+fn topology_bin() -> Vec<u8> {
+    dagon_topology::compile(&sample()).unwrap()
+}
+
+#[test]
+fn release_build_with_the_sample() {
+    let t = sample();
+    // Hub images first on purpose: the build orders entries by update.order.
+    let images = vec![hub_app(1), hub_app(0), f401_app(1), f401_app(0)];
+    let r = release::build(
+        dagon_topology::defs::Registry::builtin(),
+        &t,
+        &topology_bin(),
+        &images,
+        "release-1.1",
+        &key(),
+    )
+    .unwrap();
+    let b = BundleView::parse(&r.bundle).unwrap();
+    b.verify(&TEST_PUBLIC_KEY).unwrap();
+    let m = b.manifest();
+    assert_eq!(
+        m.fields().topology_sha256,
+        sha256(&golden("topology_sample.bin")),
+        "manifest binds the compiled sample topology"
+    );
+    let order: Vec<(u8, u8, u8)> = (0..m.entry_count())
+        .map(|i| {
+            let e = m.entry(i);
+            (e.node_index, e.slot_binding, e.order_rank)
+        })
+        .collect();
+    assert_eq!(
+        order,
+        [(1, 0, 0), (1, 1, 1), (0, 0, 2), (0, 1, 3)],
+        "seg before hub"
+    );
+    let dests: Vec<(u8, u8)> = (0..b.item_count())
+        .map(|i| (b.item(i).entry_index, b.item(i).dest))
+        .collect();
+    assert_eq!(
+        dests,
+        [
+            (0, dest::SUB_STORE),
+            (1, dest::SUB_STORE),
+            (2, dest::HUB_DIRECT),
+            (3, dest::HUB_DIRECT),
+            (NO_ENTRY, dest::TOPOLOGY)
+        ]
+    );
+    assert_eq!(
+        b.item_bytes(b.topology_item().unwrap()),
+        &topology_bin()[..]
+    );
+}
+
+/// The ESP32-S3 boots through the vendor's 2nd stage: its definition
+/// declares no boot core slots, so a boot core image for it is refused,
+/// saying why. The hub and the F401 take boot core A/B pairs.
+#[test]
+fn boot_cores_go_only_to_nodes_whose_mcu_keeps_boot_core_slots() {
+    let t = sample();
+    let reg = dagon_topology::defs::Registry::builtin();
+    let core = |mcu: &str, tag: &str, port: &str, slot: u8| {
+        let mut s = spec(mcu, image_kind::BOOTCORE, slot, tag, Version::new(1, 1, 0));
+        s.port_kind = image::port_kind_of(port).unwrap();
+        sign_image(&s, &body(slot), &key()).unwrap()
+    };
+    // Placed like the watch's app (the ESP32-S3 has no boot core slot).
+    let (flags, caps) = image::default_bits(image_kind::BOOTCORE);
+    let watch_core = ImageSpec {
+        image_kind: image_kind::BOOTCORE,
+        port_kind: image::port_kind_of("vendor-stage2").unwrap(),
+        build_flags: flags,
+        capabilities: caps,
+        ..spec(
+            "esp32s3",
+            image_kind::APP,
+            0,
+            "watch-s3",
+            Version::new(1, 1, 0),
+        )
+    };
+    let watch_core = sign_image(&watch_core, &body(0), &key()).unwrap();
+    let e = release::build(reg, &t, &topology_bin(), &[watch_core], "r", &key()).unwrap_err();
+    assert!(
+        e.message.contains("keeps no boot core slots"),
+        "{}",
+        e.message
+    );
+    let images = vec![
+        core("rp2040", "hub-rp2040-lcd", "self-boot", 0),
+        core("rp2040", "hub-rp2040-lcd", "self-boot", 1),
+        core("stm32f401re", "seg-f401-7seg", "self-boot", 0),
+        core("stm32f401re", "seg-f401-7seg", "self-boot", 1),
+    ];
+    release::build(reg, &t, &topology_bin(), &images, "r", &key()).unwrap();
+}
+
+#[test]
+fn release_build_rejects_bad_sets() {
+    let t = sample();
+    let topo = topology_bin();
+    let check = |images: Vec<Vec<u8>>| {
+        release::build(
+            dagon_topology::defs::Registry::builtin(),
+            &t,
+            &topo,
+            &images,
+            "r",
+            &key(),
+        )
+        .unwrap_err()
+        .check
+    };
+
+    assert_eq!(check(vec![f401_app(0)]), "RB-02", "slot B missing");
+    assert_eq!(
+        check(vec![f401_app(0), f401_app(0), f401_app(1)]),
+        "RB-02",
+        "duplicate"
+    );
+
+    let mut tampered = f401_app(1);
+    tampered[0x18] ^= 1;
+    assert_eq!(check(vec![f401_app(0), tampered]), "RB-01");
+
+    let other = KeyPair::from_seed(Seed::new([7; 32]));
+    let s = spec(
+        "stm32f401re",
+        image_kind::APP,
+        1,
+        "seg-f401-7seg",
+        Version::new(1, 1, 0),
+    );
+    let foreign = sign_image(&s, &body(1), &other).unwrap();
+    assert_eq!(check(vec![f401_app(0), foreign]), "RB-01", "other key");
+
+    let s = spec(
+        "stm32f401re",
+        image_kind::APP,
+        1,
+        "nobody",
+        Version::new(1, 1, 0),
+    );
+    let stray = sign_image(&s, &body(1), &key()).unwrap();
+    assert_eq!(check(vec![f401_app(0), stray]), "RB-02", "unknown tag");
+
+    let mut s = spec(
+        "stm32f401re",
+        image_kind::APP,
+        1,
+        "seg-f401-7seg",
+        Version::new(1, 1, 0),
+    );
+    s.proto_version = 2;
+    let skewed = sign_image(&s, &body(1), &key()).unwrap();
+    let images = vec![f401_app(0), skewed];
+    assert!(release::build(
+        dagon_topology::defs::Registry::builtin(),
+        &t,
+        &topo,
+        &images,
+        "r",
+        &key()
+    )
+    .is_ok());
+    let yaml = format!("{SAMPLE_YAML}\nconstraints:\n  - lockstep: [hub, seg]\n");
+    let locked = dagon_topology::parse_str(&yaml).unwrap();
+    let topo = dagon_topology::compile(&locked).unwrap();
+    let err = release::build(
+        dagon_topology::defs::Registry::builtin(),
+        &locked,
+        &topo,
+        &images,
+        "r",
+        &key(),
+    )
+    .unwrap_err();
+    assert_eq!(err.check, "RB-05", "lockstep proto");
+}
+
+#[test]
+fn sign_rejects_unverified_bootcore() {
+    let mut s = spec(
+        "stm32f401re",
+        image_kind::BOOTCORE,
+        0,
+        "seg-f401-7seg",
+        Version::new(1, 0, 0),
+    );
+    s.build_flags = 0;
+    assert_eq!(
+        sign_image(&s, &body(0), &key()),
+        Err(image::ImageError::Capability)
+    );
+}
+
+#[test]
+fn f401_flash_places_stage0_log_bootcore_and_app() {
+    let boot_spec = spec(
+        "stm32f401re",
+        image_kind::BOOTCORE,
+        0,
+        "seg-f401-7seg",
+        Version::new(1, 0, 0),
+    );
+    let boot = sign_image(&boot_spec, &body(2), &key()).unwrap();
+    let app = f401_app(0);
+    let app_slot = image::slot("stm32f401re", image_kind::APP, 0).unwrap();
+    let stage0 = vec![0x5A; 0x2400];
+    let bin = first_file(
+        "stm32f401re",
+        Some(&stage0),
+        (&boot_spec.slot, &boot),
+        (&app_slot, &app),
+    );
+    assert_eq!(
+        &bin[..stage0.len()],
+        &stage0[..],
+        "stage0 at the reset vector"
+    );
+    assert!(bin[stage0.len()..0x4000].iter().all(|&b| b == 0xFF));
+    // One log for both targets: face A holds the boot core's and the
+    // app's PROVISION and CONFIRMED, face B is erased.
+    assert_eq!(
+        &bin[0x4000..0x4020],
+        &golden("statelog_face.bin")[..32],
+        "face header gen 1"
+    );
+    let rec = |i: usize| {
+        let at = 0x4020 + i * 32;
+        dagon_format::statelog::Record::parse(bin[at..at + 32].try_into().unwrap()).unwrap()
+    };
+    use dagon_format::statelog::{kind, target};
+    let got: Vec<_> = (0..4)
+        .map(|i| (rec(i).target, rec(i).kind, rec(i).slot))
+        .collect();
+    assert_eq!(
+        got,
+        [
+            (target::BOOTCORE, kind::PROVISION, 0),
+            (target::BOOTCORE, kind::CONFIRMED, 0),
+            (target::APP, kind::PROVISION, 0),
+            (target::APP, kind::CONFIRMED, 0),
+        ]
+    );
+    assert!(bin[0x40A0..0x1_0000].iter().all(|&b| b == 0xFF));
+    assert_eq!(&bin[0x1_0000..0x1_0200], &boot[..HEADER_SIZE]);
+    assert_eq!(&bin[0x1_0200..0x1_0200 + 1024], &boot[HEADER_SIZE..]);
+    assert_eq!(&bin[0x2_0000..], &app[..]);
+}
+
+/// Sector start address -> UF2 block indices that write into it.
+fn uf2_sectors(uf2: &[u8]) -> std::collections::BTreeMap<u32, Vec<u32>> {
+    let word = |b: &[u8], i: usize| u32::from_le_bytes(b[i * 4..i * 4 + 4].try_into().unwrap());
+    let mut m = std::collections::BTreeMap::<u32, Vec<u32>>::new();
+    for b in uf2.chunks(512) {
+        m.entry(word(b, 3) & !0xFFF).or_default().push(word(b, 5));
+    }
+    m
+}
+
+#[test]
+fn rescue_uf2_writes_whole_sectors_in_aligned_runs() {
+    // stage0 ending mid-sector, as a real build does.
+    let stage0 = vec![0xA5; 0x3954];
+    let boot = sign_image(
+        &spec(
+            "rp2040",
+            image_kind::BOOTCORE,
+            0,
+            "hub-rp2040-lcd",
+            Version::new(1, 0, 0),
+        ),
+        &body(0),
+        &key(),
+    )
+    .unwrap();
+    let app = sign_image(
+        &spec(
+            "rp2040",
+            image_kind::APP,
+            0,
+            "hub-rp2040-lcd",
+            Version::new(1, 0, 0),
+        ),
+        &body(1),
+        &key(),
+    )
+    .unwrap();
+    let bs = image::slot("rp2040", image_kind::BOOTCORE, 0).unwrap();
+    let as_ = image::slot("rp2040", image_kind::APP, 0).unwrap();
+    let uf2 = first_file("rp2040", Some(&stage0), (&bs, &boot), (&as_, &app));
+    let sectors = uf2_sectors(&uf2);
+    assert!(sectors.contains_key(&0x1000_3000), "stage0 tail sector");
+    for (s, blocks) in &sectors {
+        let first = blocks[0];
+        assert_eq!(blocks.len(), 16, "sector {s:#x} written whole");
+        assert_eq!(first % 16, 0, "sector {s:#x} starts at block {first}");
+        assert!(
+            blocks.iter().zip(first..).all(|(b, i)| *b == i),
+            "{s:#x} consecutive"
+        );
+    }
+    let total = u32::from_le_bytes(uf2[24..28].try_into().unwrap());
+    assert_eq!(total as usize, uf2.len() / 512);
+}
+
+#[test]
+fn uf2_blocks_are_well_formed() {
+    let mut f = FlashImage::default();
+    f.put(0x1000_0000, &[1; 300]);
+    let uf2 = f.to_uf2(UF2_FAMILY_RP2040);
+    assert_eq!(uf2.len(), 16 * 512, "one whole 4 KiB sector");
+    let word = |b: &[u8], i: usize| u32::from_le_bytes(b[i * 4..i * 4 + 4].try_into().unwrap());
+    let second = &uf2[512..];
+    assert_eq!(word(second, 0), 0x0A32_4655);
+    assert_eq!(word(second, 3), 0x1000_0100, "target address");
+    assert_eq!((word(second, 5), word(second, 6)), (1, 16), "block 1 of 16");
+    assert_eq!(word(second, 7), UF2_FAMILY_RP2040);
+    assert_eq!(&second[32..32 + 44], &[1; 44]);
+    assert_eq!(second[32 + 44], 0xFF);
+    assert_eq!(word(second, 127), 0x0AB1_6F30);
+}

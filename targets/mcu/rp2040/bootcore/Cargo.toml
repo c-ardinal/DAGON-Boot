@@ -1,0 +1,54 @@
+[package]
+name = "dagon-rp2040-bootcore"
+edition = "2021"
+license = "MIT OR Apache-2.0"
+version = "0.1.0"
+publish = false
+
+# The boot core library a node's boot crate links: `dagon gen` renders
+# template/ into boot/<id>/ of a project for every RP2040 node (`bootcore`).
+# Firmware clippy runs in CI (scripts/ci_crates.py --firmware-lint): the
+# masking rule of the execution model applies to the boot images too.
+# DAGON_TARGET_TAG names which images this boot stage accepts and
+# DAGON_BOOT_CRATE the node's boot folder; neither changes the code, so
+# the lint uses a neutral tag and the boot folder in lint/.
+[package.metadata.dagon]
+bootcore = "rp2040"
+lint = { features = ["", "slot-b"], env = { DAGON_TARGET_TAG = "lint", DAGON_BOOT_CRATE = "lint" } }
+
+# Standalone: built for thumbv6m only, so it stays out of the host workspace.
+# Its memory.x and verifying key come from dagon-mcu-rp2040.
+[workspace]
+
+[features]
+# Backlight patterns at each step and on panic (bring-up diagnostics).
+diag = ["dagon-mcu-rp2040/diag-panic"]
+# Test build that fails its own check, so its trial always goes back to the
+# confirmed core.
+no-confirm = []
+# Linked for boot core slot B (a release carries a core for each slot).
+slot-b = ["dagon-mcu-rp2040/slot-b"]
+
+[dependencies]
+dagon-mcu-rp2040 = { path = "..", default-features = false, features = ["hal", "image-bootcore"] }
+dagon-boot = { path = "../../../../crates/dagon-boot" }
+dagon-core = { path = "../../../../crates/dagon-core" }
+dagon-events = { path = "../../../../crates/dagon-events" }
+dagon-format = { path = "../../../../crates/dagon-format" }
+dagon-port = { path = "../../../../crates/dagon-port" }
+embassy-rp = { version = "0.10.0", features = ["rp2040", "critical-section-impl", "boot2-none", "unstable-pac"] }
+embassy-time = "0.5"
+cortex-m = "0.7"
+cortex-m-rt = "0.7"
+panic-halt = "1"
+
+[build-dependencies]
+# The board facts and the linked extensions' check from the node's boot folder.
+dagon-topology = { path = "../../../../crates/dagon-topology" }
+
+[profile.release]
+opt-level = "z"
+lto = "fat"
+codegen-units = 1
+panic = "abort"
+debug = true

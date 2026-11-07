@@ -1,0 +1,247 @@
+// DAGON, the page's side of the agent link (site/src/content/docs/reference/agent-api.md on the CLI):
+// GET /v1/agent, POST/DELETE /v1/agent/link (consent asked once, when
+// linking), POST /v1/agent/ask (no confirmation per question). The key never
+// comes here; the provider's name is shown only in the linking step.
+import { AGENT, BUILD } from './copy.ts';
+
+/** One way to reach an agent: its own login through a program, or an HTTP API with a key. */
+export interface AgentWay {
+  id: string;
+  name: string;
+  kind: 'command' | 'messages-http' | string;
+  /** It can be used on this machine now (program on PATH, key registered). */
+  available: boolean;
+  /** A way that takes an API key: whether one is in the OS credential store; null (or absent) for a login way. */
+  key?: boolean | null;
+}
+
+export interface AgentDef {
+  id: string;
+  name: string;
+  provider: string;
+  ways: AgentWay[];
+}
+
+/** The agent and the way DAGON talks through. */
+export interface AgentChoice {
+  agent: string;
+  way: string;
+}
+
+export interface AgentStatus {
+  agents: AgentDef[];
+  /** The way the linking step preselects. */
+  default: AgentChoice;
+  linked: boolean;
+  consent: (AgentChoice & { at: string }) | null;
+  /** The linked (or default) way can be used here. */
+  available: boolean;
+  /** The agent's name for the linking texts ("Claude (Anthropic)"). */
+  provider: { id: string; name: string };
+  /** User definition files that did not load. */
+  errors: string[];
+  /** Why the recorded consent cannot be read (a version this dagon does not read), else null. */
+  consent_error?: string | null;
+  sends: string[];
+  never_sends: string[];
+}
+
+export type AskKind = 'problem' | 'next' | 'propose' | 'failure' | 'free';
+export type Selection = { node: string } | { link: { from: string; to: string } };
+
+/** The record of a write that went back to the previous version, as POST /v1/agent/ask takes it. */
+export interface RollbackRecord {
+  node: string;
+  failed_version: string;
+  returned_version: string;
+  /** dagon-host's short reason (`ROLLED BACK`). */
+  reason: string;
+  /** What the node's STATUS reported then; null when it did not answer. */
+  node_state: { trial: boolean; last_reason: number } | null;
+}
+
+export interface Proposal {
+  /** Lines prefixed ' ', '-', '+'. */
+  yaml_diff: string;
+  /** The whole 構成 YAML the proposal leads to. */
+  topology: string;
+}
+
+export interface Message {
+  role: 'user' | 'dagon';
+  text: string;
+  /** The rest of an answer after its first sentence (the 会話 tab only). */
+  more?: string;
+  proposal?: Proposal | null;
+  /** A reply that is a failure (red), not information. */
+  failed?: boolean;
+  /** The proposal went into the 構成. */
+  applied?: boolean;
+}
+
+/** Why a call did not go through: information unless `failed`. */
+export interface AgentProblem {
+  /** A short word for a notice (toast); the text is its detail. */
+  label?: string;
+  text: string;
+  failed: boolean;
+}
+
+/** One HTTP call to serve: the Cli in the product, a stand-in in tests and the dev mock. */
+export type AgentApi = (method: string, path: string, body?: unknown) => Promise<Response>;
+
+/** Questions sent with the conversation's last turns, at most this many. */
+const HISTORY = 10;
+/** The bubble shows the first sentence only, cut to this many characters. */
+export const BUBBLE_MAX = 110;
+
+export function problemOf(status: number, code: string | undefined): AgentProblem {
+  const known = code ? (AGENT.errors as Record<string, AgentProblem>)[code] : undefined;
+  if (known) return known;
+  if (status === 403) return AGENT.errors.DEMO;
+  if (status === 404) return AGENT.errors.OLD_CLI;
+  return AGENT.errors.AGENT_FAILED;
+}
+
+/** The notice for a consent this dagon cannot read (GET /v1/agent's consent_error), or null. */
+export function consentProblem(s: AgentStatus | null): AgentProblem | null {
+  return s?.consent_error ? AGENT.errors.AGENT_CONSENT_VERSION : null;
+}
+
+/** The answer's first part (up to the first blank line, ≤ 110 characters) and the rest. */
+export function splitAnswer(answer: string): { text: string; more?: string } {
+  const at = answer.indexOf('\n\n');
+  const head = (at < 0 ? answer : answer.slice(0, at)).trim();
+  const rest = at < 0 ? '' : answer.slice(at + 2).trim();
+  const text = head.length > BUBBLE_MAX ? `${head.slice(0, BUBBLE_MAX - 1)}…` : head;
+  const more = [head.length > BUBBLE_MAX ? head : '', rest].filter(Boolean).join('\n\n');
+  return more ? { text, more } : { text };
+}
+
+export class Agent {
+  status = $state<AgentStatus | null>(null);
+  thinking = $state(false);
+  messages = $state<Message[]>([]);
+
+  /** The lock table's check, set by the page: true when it is stopped now (the page has shown why). */
+  guard: (kind: 'ask' | 'link') => boolean = () => false;
+  /** The page's record of a write that went back, once complete; sent with every question while there is one. */
+  record: () => Promise<RollbackRecord | null> = async () => null;
+
+  constructor(private readonly api: AgentApi) {}
+
+  /** Linked: DAGON is shown and questions go out without asking again. */
+  get linked(): boolean {
+    return this.status?.linked === true;
+  }
+
+  async refresh(): Promise<void> {
+    try {
+      const r = await this.api('GET', 'agent');
+      this.status = r.ok ? ((await r.json()) as AgentStatus) : null;
+    } catch {
+      this.status = null;
+    }
+  }
+
+  /** POST (with the chosen agent and way) or DELETE /v1/agent/link; null when it went through, else why not. */
+  async setLink(choice: AgentChoice | null): Promise<AgentProblem | null> {
+    if (this.guard('link')) return { text: '', failed: false };
+    try {
+      const r = choice ? await this.api('POST', 'agent/link', { ...choice, consent: true }) : await this.api('DELETE', 'agent/link');
+      if (!r.ok) return problemOf(r.status, await codeOf(r));
+      this.status = (await r.json()) as AgentStatus;
+      if (!choice) this.messages = [];
+      return null;
+    } catch {
+      return AGENT.errors.AGENT_FAILED;
+    }
+  }
+
+  /**
+   * PUT (with the key) or DELETE /v1/agent/key/<agent>/<way>: the key goes only to the local serve, which keeps
+   * it in the OS credential store; nothing of it stays here. null when it went through, else why not.
+   */
+  async setKey(choice: AgentChoice, key: string | null): Promise<AgentProblem | null> {
+    const path = `agent/key/${encodeURIComponent(choice.agent)}/${encodeURIComponent(choice.way)}`;
+    try {
+      const r = key === null ? await this.api('DELETE', path) : await this.api('PUT', path, { key });
+      if (!r.ok) {
+        const body = (await r.json().catch(() => ({}))) as { error?: unknown; code?: unknown };
+        if (body.code === 'AGENT_KEY_STORE' && typeof body.error === 'string') return { ...AGENT.errors.AGENT_KEY_STORE, text: body.error };
+        return r.status === 400 ? AGENT.errors.KEY_REFUSED : problemOf(r.status, typeof body.code === 'string' ? body.code : undefined);
+      }
+      this.status = (await r.json()) as AgentStatus;
+      return null;
+    } catch {
+      return AGENT.errors.AGENT_FAILED;
+    }
+  }
+
+  /** Sends a question at once (consent was given when linking); the answer or why not joins the conversation. */
+  async ask(question: string, kind: AskKind, selection?: Selection): Promise<void> {
+    if (this.guard('ask')) return;
+    // Sending needs the consent given when linking: without it nothing leaves the page (serve refuses too).
+    if (!this.linked) return this.say(AGENT.errors.AGENT_NOT_LINKED);
+    const history = this.messages.slice(-HISTORY).map((m) => ({ role: m.role, text: [m.text, m.more].filter(Boolean).join('\n\n') }));
+    this.messages = [...this.messages, { role: 'user', text: question }];
+    this.thinking = true;
+    try {
+      const rollback = await this.record();
+      const r = await this.api('POST', 'agent/ask', { question, kind, ...(selection ? { selection } : {}), ...(rollback ? { rollback } : {}), history });
+      if (!r.ok) return this.say(problemOf(r.status, await codeOf(r)));
+      const a = (await r.json()) as { answer: string; proposal?: Proposal | null };
+      this.messages = [...this.messages, { role: 'dagon', ...splitAnswer(a.answer), proposal: a.proposal ?? null }];
+    } catch {
+      this.say(AGENT.errors.AGENT_FAILED);
+    } finally {
+      this.thinking = false;
+    }
+  }
+
+  /** A modal's 失敗の理由を聞く: the modal closes first, because its scrim would cover the answer; a stopped question leaves it open. */
+  async askWhy(isStopped: () => boolean, close: () => void, selection?: Selection): Promise<void> {
+    if (isStopped()) return;
+    close();
+    await this.ask(BUILD.askAgent, 'failure', selection);
+  }
+
+  private say(p: AgentProblem) {
+    this.messages = [...this.messages, { role: 'dagon', text: p.text, failed: p.failed }];
+  }
+
+  /** The proposal of message `i` went into the 構成. */
+  applied(i: number) {
+    this.messages = this.messages.map((m, k) => (k === i ? { ...m, applied: true } : m));
+  }
+}
+
+/**
+ * The key field of one way. What is typed stays only until it is sent: the field is cleared before the
+ * request leaves, whatever the answer, and nothing of it is kept in any browser storage.
+ */
+export class KeyDraft {
+  value = $state('');
+  problem = $state<AgentProblem | null>(null);
+
+  constructor(
+    private readonly agent: Agent,
+    readonly choice: AgentChoice,
+  ) {}
+
+  async save(): Promise<void> {
+    const key = this.value;
+    this.value = '';
+    if (!key.trim()) return;
+    this.problem = await this.agent.setKey(this.choice, key);
+  }
+
+  async remove(): Promise<void> {
+    this.problem = await this.agent.setKey(this.choice, null);
+  }
+}
+
+async function codeOf(r: Response): Promise<string | undefined> {
+  const body = (await r.json().catch(() => ({}))) as { code?: unknown };
+  return typeof body.code === 'string' ? body.code : undefined;
+}

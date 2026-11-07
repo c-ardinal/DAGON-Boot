@@ -1,0 +1,30 @@
+[package]
+name = "dagon-wasm"
+edition.workspace = true
+license.workspace = true
+version = "0.0.0"
+publish = false
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+dagon-format = { path = "../dagon-format" }
+dagon-host = { path = "../dagon-host", features = ["defs"] }
+# The simulator (`sim` feature): test and development builds only.
+dagon-sim = { path = "../dagon-sim", optional = true }
+dagon-port = { path = "../dagon-port", optional = true }
+dagon-proto = { path = "../dagon-proto" }
+dagon-topology = { path = "../dagon-topology" }
+yaml_serde = "0.10"
+js-sys = "0.3.107"
+wasm-bindgen = "0.2.130"
+wasm-bindgen-futures = "0.4"
+
+[features]
+# Simulator: the simulated hub as a byte link (tests, `npm run dev`'s `?sim`).
+sim = ["dep:dagon-sim", "dep:dagon-port"]
+
+[dev-dependencies]
+dagon-sign = { path = "../dagon-sign" }
+ed25519-compact = { version = "2.6", default-features = false }

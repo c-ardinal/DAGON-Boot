@@ -1,0 +1,32 @@
+[package]
+name = "hub-boot-screen"
+version = "0.0.0"
+edition = "2021"
+license = "MIT OR Apache-2.0"
+publish = false
+description = "Sample trusted boot extension: the RP2040 hub's round LCD shows the boot core's steps"
+
+# Standalone: the hub's boot crate links it by path (copied from
+# targets/boot-extension-template); its host tests run on their own.
+[workspace]
+
+[dependencies]
+dagon-boot = { path = "../../crates/dagon-boot" }
+dagon-events = { path = "../../crates/dagon-events" }
+
+# The panel's SPI, pins and the microsecond timer, taken straight from the
+# HAL the boot core runs on (the version the MCU package uses), and the
+# backlight through the MCU package's LED, which the boot core selects from
+# the board's `[boot] led`. No feature beyond what the boot core already
+# enables.
+[target.'cfg(target_os = "none")'.dependencies]
+dagon-mcu-rp2040 = { path = "../../targets/mcu/rp2040", default-features = false }
+embassy-rp = { version = "0.10.0", default-features = false, features = ["rp2040", "unstable-pac"] }
+
+[dev-dependencies]
+critical-section = { version = "1.1", features = ["std"] }
+# Real boot core runs on DAGON's boot test bench (crates/dagon-core/tests/bench).
+dagon-core = { path = "../../crates/dagon-core" }
+dagon-format = { path = "../../crates/dagon-format" }
+dagon-port = { path = "../../crates/dagon-port" }
+ed25519-compact = { version = "2.6", default-features = false }

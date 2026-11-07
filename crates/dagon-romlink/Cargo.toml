@@ -1,0 +1,8 @@
+[package]
+name = "dagon-romlink"
+edition.workspace = true
+license.workspace = true
+version = "0.1.0"
+
+[dependencies]
+dagon-port = { path = "../dagon-port" }

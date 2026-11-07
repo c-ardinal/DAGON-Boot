@@ -1,0 +1,256 @@
+/* Design tokens: colour, type, spacing, radius, elevation, motion. Only these
+   values are used in components; contrast pairs that fail AA (paper on signal,
+   signal or muted on paper) are never combined. */
+:root {
+  /* colour */
+  --c-ink: #0a0a0a;
+  --c-layer-0: #0f0f0e;
+  --c-layer-1: #141413;
+  --c-layer-2: #1e1e1c;
+  --c-paper: #f1efe8;
+  --c-muted: #9a9892;
+  --c-line: #7a7873;
+  --c-hair: #2c2b29;
+  --c-layer-3: #282725;
+  /* red: failures and danger only */
+  --c-signal: #ff4b3a;
+  /* blue (water): the next step, progress, information */
+  --c-accent: #3cb4f0;
+  --c-hover: #141413;
+  --c-scrim: rgb(10 10 10 / 0.8);
+
+  /* type families */
+  --f-dot: 'Doto', 'JetBrains Mono', monospace;
+  --f-version: 'DotGothic16', 'JetBrains Mono', 'Yu Gothic UI', monospace;
+  --f-ja: 'Zen Kaku Gothic New', 'Hiragino Sans', 'Hiragino Kaku Gothic ProN', 'Yu Gothic UI', 'Meiryo',
+    'Noto Sans JP', system-ui, sans-serif;
+  --f-mono: 'JetBrains Mono', Consolas, 'Courier New', monospace;
+
+  /* type steps: size / line-height (rem, 1rem = 16px) */
+  --t-display-size: 7rem; /* 112, the focal number */
+  --t-display-lh: 1;
+  --t-version-size: 1.5rem; /* 24, the card's version */
+  --t-version-lh: 1.1;
+  --t-version-small-size: 0.875rem; /* 14, in lists and tables */
+  --t-version-small-lh: 1.2;
+  --t-title-size: 1.25rem; /* 20, the start page's title only */
+  --t-title-lh: 1.3;
+  --t-heading-size: 0.875rem; /* 14, headings of sheets and windows */
+  --t-heading-lh: 1.3;
+  --t-body-size: 0.8125rem; /* 13, UI text */
+  --t-body-lh: 1.45;
+  --t-small-size: 0.75rem; /* 12, labels and values */
+  --t-small-lh: 1.45;
+  --t-caption-size: 0.6875rem; /* 11, chips and small labels */
+  --t-caption-lh: 1.4;
+  --t-mono-size: 0.75rem; /* 12 */
+  --t-mono-lh: 1.5;
+  --t-mono-log-lh: 1.54;
+
+  /* dense steps: 11 chips, 12 values, 13 UI text, 14 version */
+  --t-11: 0.6875rem;
+  --t-12: 0.75rem;
+  --t-13: 0.8125rem;
+  --t-14: 0.875rem;
+
+  /* spacing: 4px steps only */
+  --s-1: 0.25rem;
+  --s-2: 0.5rem;
+  --s-3: 0.75rem;
+  --s-4: 1rem;
+  --s-5: 1.5rem;
+  --s-6: 2rem;
+  --s-7: 3rem;
+  --s-8: 4rem;
+  --s-9: 6rem;
+
+  /* component sizes */
+  --h-header: 2.75rem; /* 44, the one bar */
+  --h-band: 1.5rem; /* 24, the status row */
+  --h-primary: 1.75rem; /* 28 */
+  --h-secondary: 1.75rem; /* 28 */
+  --h-chip: 1.25rem; /* 20 */
+  --w-node: 16.25rem; /* 260, a normal card */
+  --w-left: 14.5rem; /* the parts window */
+  --w-right: 18rem; /* the sheet */
+
+  /* radius */
+  --r-0: 0;
+  --r-s: 6px;
+  --r-m: 0.75rem;
+  --r-l: 20px;
+  --r-full: 9999px;
+
+  /* z-index */
+  --z-layer: 0;
+  --z-link: 10;
+  --z-node: 20;
+  --z-chip: 30;
+  --z-drag: 40;
+  --z-chrome: 50;
+  --z-scrim: 55;
+  --z-dialog: 60;
+  --z-announce: 70;
+
+  /* motion: the one vocabulary. One-shot values show what changed; the loops are for work in progress. */
+  --ease-out: cubic-bezier(0.23, 1, 0.32, 1); /* what enters, leaves or settles */
+  --ease-in-out: cubic-bezier(0.77, 0, 0.175, 1); /* a loop that turns back */
+  --ease-steady: linear; /* rate-driven progress and loops */
+  --dur-press: 120ms;
+  --dur-flash: 90ms;
+  --dur-quick: 160ms; /* small things: a chip, a mark, a hint */
+  --dur-nudge: 160ms; /* a small thing that moves or grows: a port under the pointer */
+  --dur-ui: 200ms; /* surfaces and screens */
+  --dur-line: 260ms; /* cards and lines moving to a new place */
+  --dur-settle: 480ms; /* the water leaving a card: long enough to read the outcome */
+  --dur-tick: 250ms; /* how often progress is read */
+  --dur-rise: 1000ms; /* the % and its water: as long as a node takes between two progress reports, so they keep moving between them */
+  --dur-reduced: 150ms; /* every fade under reduced motion */
+  --dur-march: 600ms;
+  --dur-think: 1200ms;
+  --dur-float: 3600ms;
+  --dur-drift-front: 4200ms;
+  --dur-drift-back: 7000ms;
+  --enter-shift: 8px;
+  --enter-scale: 0.97;
+  --move: 1; /* how much of a drawn or poured movement plays */
+  --t-place: left var(--dur-line) var(--ease-out), top var(--dur-line) var(--ease-out);
+
+  /* The Console design's own tokens, same names and values as the design file
+     (desktop; the 2560 px values follow below). */
+  --c-water: #123a4c;
+  --c-attention: #f5a524;
+  --c-progress: #b48cf2;
+  --c-accent-hover: #6ec9f4;
+  --c-accent-press: #2a9fd6;
+  --c-signal-hover: #ff7467;
+  --c-signal-press: #e0402f;
+  /* node and link states (one meaning per channel) */
+  --st-idle: var(--c-line);
+  --st-alive: var(--c-muted);
+  --st-silent: var(--c-line);
+  --st-busy: var(--c-progress);
+  --st-attention: var(--c-attention);
+  --st-error: var(--c-signal);
+  --st-w-thin: 1px;
+  --st-w-strong: 2px;
+  --st-w-focus: 3px;
+  --dur-orbit: 1600ms;
+  --dur-feedback: 100ms;
+  --busy-light: 48px;
+  /* type roles (px) */
+  --t-display: 160px;
+  --t-version: 20px;
+  --t-title: 28px;
+  --t-heading: 20px;
+  --t-body: 16px;
+  --t-small: 14px;
+  --t-caption: 12px;
+  --t-mono: 13px;
+  /* component sizes */
+  --h-bar: 44px;
+  --h-status: 32px;
+  --h-control: 28px;
+  --h-button: 44px;
+  --h-button-small: 32px;
+  --h-button-header: 28px;
+  --h-text-button: 24px;
+  --h-row: 44px;
+  --h-drawer: 176px;
+  --m-edge: 24px;
+  --p-hit: 8px;
+  --p-layer: 4px;
+  --p-toggle: 4px;
+  --p-bar-gap: 24px;
+  --p-icon-gap: 24px;
+  --i-s: 16px;
+  --i-m: 20px;
+  --i-l: 24px;
+  --i-state: 16px;
+  --w-modal: 560px;
+  --w-toast: 360px;
+  --w-sheet: 340px;
+  --w-parts: 240px;
+  --w-menu: 320px;
+  --w-bubble: 360px;
+  --zoom-default: 1.5; /* the first view of a project: the most it takes when the graph has room */
+}
+
+/* The 2560 px theme of the design (wqhd). */
+@media (min-width: 2560px) {
+  :root {
+    --t-version: 28px;
+    --t-title: 44px;
+    --t-heading: 28px;
+    --t-body: 20px;
+    --t-small: 16px;
+    --t-caption: 14px;
+    --t-mono: 18px;
+    --h-bar: 68px;
+    --h-status: 48px;
+    --h-control: 44px;
+    --h-button: 68px;
+    --h-button-small: 48px;
+    --h-button-header: 44px;
+    --h-text-button: 36px;
+    --h-drawer: 264px;
+    --m-edge: 32px;
+    --p-hit: 12px;
+    --p-layer: 8px;
+    --p-bar-gap: 32px;
+    --p-icon-gap: 32px;
+    --i-s: 20px;
+    --i-m: 28px;
+    --i-l: 32px;
+    --i-state: 20px;
+    --w-modal: 800px;
+    --w-toast: 480px;
+    --w-sheet: 488px;
+    --w-parts: 344px;
+    --w-bubble: 516px;
+  }
+}
+
+/* Phones and touch screens: every control is at least 44 × 44 px (viewport-matrix touch-target-44). */
+@media (max-width: 767px), (pointer: coarse) {
+  :root {
+    --h-header: max(56px, 3.5rem);
+    --h-band: max(45px, 2.75rem);
+    --h-secondary: max(44px, 2.75rem);
+    --h-primary: max(44px, 2.75rem);
+  }
+}
+
+@media (max-width: 767px) {
+  :root {
+    --t-display-size: 4rem;
+  }
+}
+
+/* Reduced motion, for every transition at once: nothing travels, what is left is a short fade. The loops stop where they are declared. */
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --enter-shift: 0px;
+    --enter-scale: 1;
+    --move: 0;
+    --dur-press: 0ms;
+    --dur-nudge: 0ms;
+    --dur-line: 0ms;
+    --dur-rise: 0ms;
+    --dur-ui: var(--dur-reduced);
+    --dur-quick: var(--dur-reduced);
+    --dur-settle: var(--dur-reduced);
+  }
+}
+
+@media (prefers-contrast: more) {
+  :root {
+    --c-line: var(--c-paper);
+  }
+}
+
+@media (prefers-reduced-transparency: reduce) {
+  :root {
+    --c-scrim: var(--c-ink);
+  }
+}

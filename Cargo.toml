@@ -1,0 +1,17 @@
+[workspace]
+resolver = "2"
+# Firmware packages (targets/, samples/) are standalone; the MCU packages
+# under targets/mcu/ run their host tests on their own.
+members = ["crates/*"]
+exclude = ["targets/esp32s3-*"]
+
+[workspace.package]
+edition = "2021"
+license = "MIT OR Apache-2.0"
+
+[profile.release]
+opt-level = "z"
+lto = "fat"
+codegen-units = 1
+panic = "abort"
+debug = true

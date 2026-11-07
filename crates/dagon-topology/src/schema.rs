@@ -1,0 +1,347 @@
+//! Topology YAML schema (schema version 1).
+
+use std::collections::BTreeMap;
+
+use serde::Deserialize;
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Topology {
+    pub dagon: u32,
+    pub name: String,
+    pub nodes: Vec<Node>,
+    #[serde(default)]
+    pub buses: Vec<Bus>,
+    #[serde(default)]
+    pub links: Vec<Link>,
+    #[serde(default)]
+    pub recovery: BTreeMap<String, Vec<Tier>>,
+    pub update: Update,
+    #[serde(default)]
+    pub constraints: Vec<Constraint>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Node {
+    pub id: String,
+    /// Checked against the port registry by V-06, so kept as text.
+    pub mcu: String,
+    pub board: Option<String>,
+    pub role: Role,
+    /// Checked against the MCU by V-06, so kept as text.
+    pub port: String,
+    pub flash_map: Option<String>,
+    pub max_attempts: Option<u8>,
+    pub listen_window_ms: Option<u16>,
+    pub tag: String,
+    /// A 親機's hop towards the PC (or whatever drives it); omitted: USB CDC
+    /// to dagon on a PC, as before. Not part of the compiled topology.
+    #[serde(default)]
+    pub uplink: Option<Uplink>,
+}
+
+/// A 親機's uplink: the kind of hop, and what is at its other end.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Uplink {
+    pub kind: LinkKind,
+    #[serde(default)]
+    pub host: UplinkHost,
+}
+
+impl Default for Uplink {
+    fn default() -> Self {
+        Uplink {
+            kind: LinkKind::UsbCdc,
+            host: UplinkHost::PcCli,
+        }
+    }
+}
+
+/// What drives a 親機 through its uplink.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum UplinkHost {
+    /// dagon on a PC.
+    #[default]
+    PcCli,
+    /// DAGON Console in a browser (a PC or a phone).
+    Browser,
+    /// A custom device of the developer's own.
+    Embedded,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum Role {
+    Coordinator,
+    Node,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Bus {
+    pub id: String,
+    pub kind: BusKind,
+    pub controller: String,
+    pub sda: u8,
+    pub scl: u8,
+    pub speed_hz: Option<u32>,
+    /// `external` or `board`; missing or `none` is reported by V-20.
+    pub pullups: Option<String>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum BusKind {
+    I2c,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Link {
+    pub from: String,
+    pub to: String,
+    pub kind: LinkKind,
+    pub bus: Option<String>,
+    pub addr: Option<u8>,
+    pub node_pins: Option<NodePins>,
+    pub iface: Option<UartIface>,
+    pub pins: Option<UartPins>,
+    pub baud: Option<u32>,
+    /// Required for I2C and UART links (V-01); CAN and Ethernet links may omit it.
+    #[serde(default)]
+    pub control: Control,
+}
+
+/// The kind of one hop. A 構成 may name any; which ones an MCU's firmware
+/// implements is in [`crate::links`] (the rest are "not available yet").
+/// Generates [`LinkKind`] from the one list of link kinds
+/// (`dagon_format::with_link_kinds!`).
+macro_rules! link_kind_enum {
+    (() $( $v:ident = $c:literal, $n:literal; )*) => {
+        /// A hop's medium, by the name a 構成 uses.
+        #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Deserialize)]
+        pub enum LinkKind {
+            $( #[serde(rename = $n)] $v, )*
+        }
+
+        impl LinkKind {
+            /// Every kind, in the list's order.
+            pub const ALL: &'static [LinkKind] = &[$(LinkKind::$v),*];
+
+            /// The name a 構成 uses.
+            pub fn name(self) -> &'static str {
+                match self {
+                    $( LinkKind::$v => $n, )*
+                }
+            }
+
+            /// The variant of the firmware's `links::Kind` (the same list).
+            pub fn variant(self) -> &'static str {
+                match self {
+                    $( LinkKind::$v => stringify!($v), )*
+                }
+            }
+        }
+    };
+}
+
+dagon_format::with_link_kinds!([link_kind_enum]());
+
+impl LinkKind {
+    /// Kinds the compiled topology can carry between a 親機 and a 子機.
+    pub fn compiles(self) -> bool {
+        matches!(self, LinkKind::I2c | LinkKind::Uart)
+    }
+}
+
+/// Node-side I2C pin names (MCU pin names such as `PB4`).
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct NodePins {
+    pub sda: String,
+    pub scl: String,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum UartIface {
+    HwUart0,
+    PioUart,
+}
+
+/// Coordinator-side UART GPIOs.
+#[derive(Debug, Clone, Copy, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct UartPins {
+    pub tx: u8,
+    pub rx: u8,
+}
+
+#[derive(Debug, Clone, Default, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Control {
+    #[serde(default = "cooperative")]
+    pub kind: ControlKind,
+    pub nrst: Option<u8>,
+    pub boot: Option<u8>,
+    pub rom_entry: Option<RomEntry>,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum ControlKind {
+    Full,
+    #[default]
+    Cooperative,
+}
+
+fn cooperative() -> ControlKind {
+    ControlKind::Cooperative
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum RomEntry {
+    ForceDownloadBoot,
+    M5pm1,
+    Stm32I2cRom,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum Tier {
+    Local,
+    Redistribute,
+    RomForced,
+    RomCoop,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Update {
+    pub order: Vec<String>,
+}
+
+/// One of `lockstep: [ids]`, `requires: {node, needs, min}` or
+/// `min_bootcore: {node, min}`.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(try_from = "ConstraintEntry")]
+pub enum Constraint {
+    /// These nodes must all run the same release.
+    Lockstep(Vec<String>),
+    /// `node` needs `needs` at version `min` or later.
+    Requires {
+        node: String,
+        needs: String,
+        min: String,
+    },
+    /// `node` needs a boot core at version `min` or later.
+    MinBootcore { node: String, min: String },
+}
+
+/// Single-key mapping form of `Constraint` as written in YAML.
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ConstraintEntry {
+    lockstep: Option<Vec<String>>,
+    requires: Option<RequiresEntry>,
+    min_bootcore: Option<MinBootcoreEntry>,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct RequiresEntry {
+    node: String,
+    needs: String,
+    min: String,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct MinBootcoreEntry {
+    node: String,
+    min: String,
+}
+
+impl TryFrom<ConstraintEntry> for Constraint {
+    type Error = &'static str;
+
+    fn try_from(e: ConstraintEntry) -> Result<Self, Self::Error> {
+        match (e.lockstep, e.requires, e.min_bootcore) {
+            (Some(ids), None, None) => Ok(Self::Lockstep(ids)),
+            (None, Some(r), None) => Ok(Self::Requires {
+                node: r.node,
+                needs: r.needs,
+                min: r.min,
+            }),
+            (None, None, Some(m)) => Ok(Self::MinBootcore {
+                node: m.node,
+                min: m.min,
+            }),
+            _ => Err("a constraint has exactly one of lockstep, requires, min_bootcore"),
+        }
+    }
+}
+
+impl Constraint {
+    pub fn node_refs(&self) -> Vec<&str> {
+        match self {
+            Self::Lockstep(ids) => ids.iter().map(String::as_str).collect(),
+            Self::Requires { node, needs, .. } => vec![node, needs],
+            Self::MinBootcore { node, .. } => vec![node],
+        }
+    }
+}
+
+impl Topology {
+    pub fn node(&self, id: &str) -> Option<&Node> {
+        self.nodes.iter().find(|n| n.id == id)
+    }
+
+    /// A 親機's uplink as used (the default when it names none).
+    pub fn uplink(n: &Node) -> Uplink {
+        n.uplink.unwrap_or_default()
+    }
+
+    /// The link that reaches node `id`, if any.
+    pub fn link_to(&self, id: &str) -> Option<&Link> {
+        self.links.iter().find(|l| l.to == id)
+    }
+
+    /// The bit rate node `id`'s firmware runs its UART link at: its uplink's
+    /// when that is UART, else the one of its UART links to 子機 (`None`
+    /// when it has no UART link). Both ends of a link are built with this
+    /// value, so they always agree. Down links at different rates are
+    /// refused: a node's firmware drives one UART link speed.
+    pub fn uart_baud(&self, id: &str) -> Result<Option<u32>, String> {
+        if let Some(l) = self.link_to(id).filter(|l| l.kind == LinkKind::Uart) {
+            return Ok(Some(l.uart_baud()));
+        }
+        let mut rates = self
+            .links
+            .iter()
+            .filter(|l| l.from == id && l.kind == LinkKind::Uart)
+            .map(Link::uart_baud);
+        let first = rates.next();
+        match rates.find(|b| Some(*b) != first) {
+            Some(other) => Err(format!(
+                "{id}: its UART links run at {} and {other} bit/s; give them one baud",
+                first.unwrap_or_default()
+            )),
+            None => Ok(first),
+        }
+    }
+}
+
+/// A UART link's bit rate when the topology gives no `baud`.
+pub const DEFAULT_BAUD: u32 = 115_200;
+
+impl Link {
+    /// `baud`, or [`DEFAULT_BAUD`] when left out.
+    pub fn uart_baud(&self) -> u32 {
+        self.baud.unwrap_or(DEFAULT_BAUD)
+    }
+}

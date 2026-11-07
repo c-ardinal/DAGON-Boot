@@ -1,0 +1,101 @@
+# Runs when a component release tag (<component>-v<version>,
+# site/src/content/docs/explanation/versioning.md) is pushed. Every such tag first passes the bump
+# check: the tag names a component of compat.toml with that version, and
+# the version is at least what the commits since the component's last tag
+# require. Only a CLI tag (cli-v<version>) then builds the dagon
+# executables and, once every build has passed, publishes the GitHub release
+# install.sh and install.ps1 read. A manual run builds and publishes nothing.
+name: release build
+
+on:
+  push:
+    # Every component's tag; bump_check.py refuses one naming no component.
+    tags: ["*-v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  bump-check:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # The commits since the component's last tag.
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Bump check (the tag names the component)
+        if: startsWith(github.ref, 'refs/tags/')
+        # Through the environment, not pasted into the script: a tag name is
+        # pusher-controlled text.
+        env:
+          TAG: ${{ github.ref_name }}
+        run: python scripts/bump_check.py --tag "$TAG"
+      - name: Bump check (cli, run by hand)
+        if: ${{ !startsWith(github.ref, 'refs/tags/') }}
+        run: python scripts/bump_check.py cli
+
+  build:
+    needs: bump-check
+    if: startsWith(github.ref_name, 'cli-v') || github.event_name == 'workflow_dispatch'
+    strategy:
+      fail-fast: false
+      matrix:
+        # macOS labels as listed in github.com/actions/runner-images (README):
+        # macos-15 is Arm64, macos-15-intel is x64;
+        # macos-13 and macos-14 are retired.
+        # `cc`: the C compiler of that image, which the README and the install page state
+        # (github.com/actions/runner-images, each image's Readme).
+        include:
+          - { os: windows-2025, target: x86_64-pc-windows-msvc, cc: "Visual Studio 2022" }
+          - { os: macos-15, target: aarch64-apple-darwin, cc: "Xcode Command Line Tools 16.4" }
+          - { os: macos-15-intel, target: x86_64-apple-darwin, cc: "Xcode Command Line Tools 16.4" }
+          - { os: ubuntu-24.04, target: x86_64-unknown-linux-gnu, cc: "gcc 13" }
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Rust from rust-toolchain.toml
+        shell: bash
+        run: |
+          rustup toolchain install
+          rustup default "$(sed -n 's/^channel = "\([^"]*\)".*/\1/p' rust-toolchain.toml)"
+      - name: Rust target
+        run: rustup target add ${{ matrix.target }}
+      - name: Build the archive
+        run: python scripts/release.py --target ${{ matrix.target }} --out out/release
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dagon-${{ matrix.target }}
+          path: out/release/*
+          if-no-files-found: error
+
+  publish:
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/cli-v')
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: out/release
+          merge-multiple: true
+      - name: Publish the release
+        # Through the environment, not pasted into the script: a tag name is
+        # pusher-controlled text.
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          case "$TAG" in
+            *-rc.*) kind=--prerelease ;;
+            *) kind= ;;
+          esac
+          gh release create "$TAG" out/release/* --verify-tag --title "$TAG" --generate-notes $kind

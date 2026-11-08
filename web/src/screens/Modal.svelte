@@ -6,7 +6,7 @@
 
   interface Props {
     title: string;
-    /** The state chip beside the title (… 作成中, ✓ 完了, ! 失敗). */
+    /** The state chip beside the title (… 生成中, ✓ 完了, ! 失敗). */
     chip?: { text: string; kind: 'active' | 'ok' | 'error' | 'info' } | null;
     /** What the modal acts on, in mono under the title (a project, a node). */
     target?: string;

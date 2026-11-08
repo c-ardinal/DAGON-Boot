@@ -1799,7 +1799,7 @@ mod tests {
         assert_eq!(listed, ["seg-a.img", "seg-b.img", "bootcore-seg-a.img"]);
     }
 
-    /// 中止 of 雛形を作る: the node being made finishes, the next is not started.
+    /// 中止 of 雛形を生成: the node being made finishes, the next is not started.
     #[test]
     fn gen_stops_between_nodes_when_cancelled() {
         let d = std::env::temp_dir().join(format!("dagon-gen-cancel-{}", std::process::id()));

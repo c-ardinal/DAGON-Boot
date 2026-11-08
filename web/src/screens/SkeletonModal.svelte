@@ -36,7 +36,7 @@
   );
 </script>
 
-<!-- 雛形を作る: running (what is being made, 中止 only), success (where it was made, what to do next), failure (reason, fix, もう一度作る). -->
+<!-- 雛形を生成: running (what is being made, 中止 only), success (where it was made, what to do next), failure (reason, fix, もう一度生成する). -->
 <Modal title={SKELETON.title} {chip} target={place} onclose={state === 'running' ? undefined : onclose} {onmore}>
   {#if state === 'running'}
     <ul>

@@ -150,7 +150,7 @@ test('an edit after a build asks for a build again', async ({ page }) => {
 test('no [build.*] yet: the band leads to the skeleton', async ({ page }) => {
   await serve(page, { buildNodes: [] });
   await open(page);
-  await expect(sentence(page)).toContainText('雛形を作る');
+  await expect(sentence(page)).toContainText('雛形を生成する');
 });
 
 for (const [what, layout] of [

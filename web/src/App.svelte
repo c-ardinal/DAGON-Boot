@@ -1231,7 +1231,7 @@
     cliPanel = 'link';
   }
 
-  /** 雛形を作る: the modal is open while `skeleton` is set; `id` is serve's job once it has taken it. */
+  /** 雛形を生成する: the modal is open while `skeleton` is set; `id` is serve's job once it has taken it. */
   let skeleton = $state<{ id: number | null; failure?: string } | null>(null);
   const skeletonJob = $derived(skeleton?.id == null ? null : (cli.jobs.find((j) => j.id === skeleton?.id) ?? null));
   // 中止: the modal goes with the job.

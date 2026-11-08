@@ -22,7 +22,7 @@
 
 A beautiful design with a muddy operation.
 
-[![DAGON Boot demo video](https://img.youtube.com/vi/9SH4c6mgJNY/maxresdefault.jpg)](https://www.youtube.com/watch?v=9SH4c6mgJNY)
+[![DAGON Boot demo video](assets/demo-video/thumbnail.jpg)](https://www.youtube.com/watch?v=9SH4c6mgJNY)
 
 A product can give each of its microcontrollers the role that suits it best and have them work together well. Even so, changing a program can mean taking the product apart and swapping cables, or struggling with a different write tool for each microcontroller. To get around this, people build their own way of changing programs, or compromise the design because operating it is too hard.
 

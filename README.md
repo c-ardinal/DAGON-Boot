@@ -22,7 +22,7 @@
 
 設計は美しいのに、運用が泥くさい。
 
-[![DAGON Bootデモ動画](https://img.youtube.com/vi/9SH4c6mgJNY/maxresdefault.jpg)](https://www.youtube.com/watch?v=9SH4c6mgJNY)
+[![DAGON Bootデモ動画](assets/demo-video/thumbnail.jpg)](https://www.youtube.com/watch?v=9SH4c6mgJNY)
 
 分散されたマイコンごとに最適な役割を与え、各マイコンが協調して素晴らしい働きをするプロダクトでも、プログラムを直すために分解してケーブルをつなぎ替えたり、マイコンごとに異なる書き込みツールを使うことに苦労することがあります。これを解決するためにプログラムを直すための独自の仕組みを構築したり、運用が大変すぎるからと設計のほうを妥協することもあります。
 

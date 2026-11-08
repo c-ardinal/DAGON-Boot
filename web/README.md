@@ -13,7 +13,7 @@ The one build of its own is the public demo (`npm run build:demo`, Vite mode `de
 `src/app/site.ts`): the same page on the simulator (`?sim` below) compiled into the
 browser, with the repository's test-key release and F401 boot core as its files. It never calls
 serve, reads or writes no files, opens no device and holds no keys; the controls for those
-(開く, 雛形を作る, ビルド, 書き込み over USB, リリース, DAGON に聞く / 連携, choosing a package file)
+(開く, 雛形を生成する, ビルド, 書き込み over USB, リリース, DAGON に聞く / 連携, choosing a package file)
 stay visible, dimmed, and give the reason in the lock table's `site` row on hover, focus and
 press. Every other build compiles the flag to false and leaves the demo's parts out.
 

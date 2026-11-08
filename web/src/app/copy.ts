@@ -182,7 +182,7 @@ export const UNSUPPORTED = {
 export const LOCK = {
   controls: {
     edit: '構成の編集',
-    gen: '雛形を作る',
+    gen: '雛形を生成する',
     build: 'ビルド',
     flash: '書き込み',
     release: 'リリース',
@@ -917,7 +917,7 @@ export const DEFINE = {
   readySentence: 'ビルドしてから、書込で書き込みます。',
   buildingSentence: 'ビルドが終わるまで、そのまま待ってください。',
   builtSentence: '書込に切り替えて、ノードへ書き込みます。',
-  skeletonFirst: '先に雛形を作ると、ビルドできます。',
+  skeletonFirst: '先に雛形を生成すると、ビルドできます。',
   /** Nodes updating skips; the 構成 is valid as it is. */
   notYetSentence: (k: number) => `書き込めないノードが ${k} つあります。構成はこのままで使え、書き込みではそのノードを飛ばします。`,
   /** The 構成 of the release file chosen in 書込 replaces this one (undoable, saved to the YAML). */
@@ -1073,7 +1073,7 @@ export const CLI_LINK = {
   yes: 'あり',
   no: 'なし',
   features: '使える機能',
-  featureNames: { gen: '雛形を作る', build: 'ビルド', sign: '署名', release: 'リリースを作る', flash: '書き込む', topology_save: '構成を作業場所に保存' } as Record<string, string>,
+  featureNames: { gen: '雛形を生成する', build: 'ビルド', sign: '署名', release: 'リリースを作る', flash: '書き込む', topology_save: '構成を作業場所に保存' } as Record<string, string>,
   unsupported: '非対応',
 } as const;
 
@@ -1165,7 +1165,7 @@ export const START = {
     go: 'プロジェクトを作る',
   },
   /** Under the product's name on the start page. */
-  sub: 'ノードとリンクの構成を描くと、ノードごとのアプリの雛形を作れます。',
+  sub: 'ノードとリンクの構成を描くと、ノードごとのアプリの雛形を生成できます。',
   open: 'プロジェクトを開く',
   recent: '最近のプロジェクト',
   recentNone: 'なし',
@@ -1272,25 +1272,25 @@ export const MENU = {
 export const fill = (s: string, v: Record<string, string | number>): string => s.replace(/\{(\w+)\}/g, (m, k: string) => (k in v ? String(v[k]) : m));
 
 export const SKELETON = {
-  make: '雛形を作る',
-  makeWhy: 'ノードを置き、問題を直すと作れます',
-  title: '雛形を作る',
+  make: '雛形を生成する',
+  makeWhy: 'ノードを置き、問題を直すと生成できます',
+  title: '雛形を生成する',
   state: {
-    running: '… 作成中',
-    done: '✓ 作成済',
+    running: '… 生成中',
+    done: '✓ 生成済',
     failed: '! 失敗',
   },
-  where: '作った場所',
+  where: '生成先',
   next: {
-    '1': 'エディタで、各ノードの src/app.rs にアプリのコードを書く（main.rs と wiring.rs は DAGON が作るので、触らなくてよい）',
+    '1': 'エディタで、各ノードの src/app.rs にアプリのコードを書く（main.rs と wiring.rs は DAGON が生成するので、触らなくてよい）',
     '2': '準備で「ビルドする」、続けて書込で「書き込む」',
     heading: '次にすること',
   },
   fail: {
-    fix: '理由を直してから、「もう一度作る」を押します。作成済みのノードはそのまま残ります。',
+    fix: '理由を直してから、「もう一度生成する」を押します。生成済みのノードはそのまま残ります。',
   },
   startFailed: 'dagon serve が受け付けませんでした',
-  retry: 'もう一度作る',
+  retry: 'もう一度生成する',
   cancel: '中止',
 } as const;
 
@@ -1304,7 +1304,7 @@ export const NOTICE = {
 
 export const BUILD = {
   /** A node with no [build.*] in dagon.toml: nothing to build until the skeleton is made. */
-  noSkeleton: { reason: 'このノードの雛形がまだありません。', stale: 'DAGON のソースが変わったので、雛形が古くなっています。', fix: '雛形を作ると、ビルドできるようになります。' },
+  noSkeleton: { reason: 'このノードの雛形がまだありません。', stale: 'DAGON のソースが変わったので、雛形が古くなっています。', fix: '雛形を生成すると、ビルドできるようになります。' },
   run: 'ビルドする',
   runningWhy: 'ビルドしています',
   title: 'ビルドする',

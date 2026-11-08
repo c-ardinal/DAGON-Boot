@@ -12,7 +12,7 @@ const nodes: [string, string][] = [
 const html = (j: Job | null, failure: string | null = null) =>
   render(SkeletonModal, { props: { job: j, failure, place: 'C:/work/home-garden', nodes, onclose: () => undefined, oncancel: () => undefined, onretry: () => undefined, onmore: () => undefined } }).body;
 
-describe('雛形を作る modal', () => {
+describe('雛形を生成する modal', () => {
   test('progress: what is being made and 中止 only, no close; no number the job never reports', () => {
     const b = html(job({ percent: null }));
     expect(b).toContain(SKELETON.state.running);
@@ -39,7 +39,7 @@ describe('雛形を作る modal', () => {
     expect(b).not.toContain('場所をコピー');
   });
 
-  test('a node dagon gen skipped is a failure with its reason, never 作成済', () => {
+  test('a node dagon gen skipped is a failure with its reason, never 生成済', () => {
     const b = html(job({ state: 'succeeded', result: { lines: 3, skipped: ['skipped    nodes/seg7: no template for this board'] } }));
     expect(b).toContain(SKELETON.state.failed);
     expect(b).not.toContain(SKELETON.state.done);
@@ -47,7 +47,7 @@ describe('雛形を作る modal', () => {
     expect(b).toContain(SKELETON.retry);
   });
 
-  test('a job serve would not take: the reason and もう一度作る, and it can be closed', () => {
+  test('a job serve would not take: the reason and もう一度生成する, and it can be closed', () => {
     const b = html(null, SKELETON.startFailed);
     expect(b).toContain(SKELETON.state.failed);
     expect(b).toContain(SKELETON.startFailed);
@@ -55,7 +55,7 @@ describe('雛形を作る modal', () => {
     expect(b).toContain(`aria-label="${NOTICE.close}"`);
   });
 
-  test('failure: the reason and もう一度作る', () => {
+  test('failure: the reason and もう一度生成する', () => {
     const b = html(job({ state: 'failed', lines: ['started', 'nodes/seg7/ に書き込めません'] }));
     expect(b).toContain(SKELETON.state.failed);
     expect(b).toContain(NOTICE.reason);

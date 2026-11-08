@@ -12,7 +12,7 @@ const nodes: [string, string][] = [
 const html = (j: Job | null, failure: string | null = null) =>
   render(SkeletonModal, { props: { job: j, failure, place: 'C:/work/home-garden', nodes, onclose: () => undefined, oncancel: () => undefined, onretry: () => undefined, onmore: () => undefined } }).body;
 
-describe('雛形を生成する modal', () => {
+describe('雛形を生成 modal', () => {
   test('progress: what is being made and 中止 only, no close; no number the job never reports', () => {
     const b = html(job({ percent: null }));
     expect(b).toContain(SKELETON.state.running);

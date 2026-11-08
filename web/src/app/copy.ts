@@ -182,7 +182,7 @@ export const UNSUPPORTED = {
 export const LOCK = {
   controls: {
     edit: '構成の編集',
-    gen: '雛形を生成する',
+    gen: '雛形を生成',
     build: 'ビルド',
     flash: '書き込み',
     release: 'リリース',
@@ -1272,9 +1272,9 @@ export const MENU = {
 export const fill = (s: string, v: Record<string, string | number>): string => s.replace(/\{(\w+)\}/g, (m, k: string) => (k in v ? String(v[k]) : m));
 
 export const SKELETON = {
-  make: '雛形を生成する',
+  make: '雛形を生成',
   makeWhy: 'ノードを置き、問題を直すと生成できます',
-  title: '雛形を生成する',
+  title: '雛形を生成',
   state: {
     running: '… 生成中',
     done: '✓ 生成済',

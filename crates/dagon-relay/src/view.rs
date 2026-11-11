@@ -6,7 +6,11 @@ use dagon_format::Version;
 use dagon_proto::payload::{HelloResp, Show, SlotState, StatusResp, SHOW_TEXT_MAX};
 use heapless::String;
 
-use crate::nodes::{LinkedNode, MAX_LINKED};
+use crate::nodes::LinkedNode;
+
+/// Linked nodes a home screen has rows for: the first ones of the relay's
+/// list. The relay itself serves every linked node.
+pub const HOME_ROWS: usize = 3;
 
 /// How a node is doing, as far as this node knows.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -59,8 +63,9 @@ impl From<&Show<'_>> for Progress {
 /// Everything a home screen shows.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Home {
-    pub hub: Node,
-    pub linked: heapless::Vec<Node, MAX_LINKED>,
+    /// This node.
+    pub own: Node,
+    pub linked: heapless::Vec<Node, HOME_ROWS>,
     pub progress: Option<Progress>,
 }
 

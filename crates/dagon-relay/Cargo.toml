@@ -8,4 +8,16 @@ version = "0.1.0"
 dagon-format = { path = "../dagon-format" }
 dagon-port = { path = "../dagon-port" }
 dagon-proto = { path = "../dagon-proto" }
+embassy-futures = "0.1"
+# The state's critical-section mutex and signal, the link ports' channels.
+embassy-sync = "0.8"
 heapless = "0.9"
+
+[dev-dependencies]
+# The relay names no agent type: the agent crate reaches dagon-events, whose
+# crates each register their machines (dagon-catalog), and the relay has no
+# machine of its own. The host test drives a real agent.
+dagon-agent = { path = "../dagon-agent" }
+# The host test: the agent's chain, the simulator's nodes, store and bus.
+dagon-events = { path = "../dagon-events" }
+dagon-sim = { path = "../dagon-sim" }

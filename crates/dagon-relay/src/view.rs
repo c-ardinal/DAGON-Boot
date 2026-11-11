@@ -1,13 +1,14 @@
-//! What a home screen shows about the 親機 and its 子機, independent of
-//! the HAL so the rules (and a display's layout) run in host tests.
+//! What a home screen shows about this node and the nodes linked to it,
+//! independent of the HAL so the rules (and a display's layout) run in host
+//! tests.
 
 use dagon_format::Version;
 use dagon_proto::payload::{HelloResp, Show, SlotState, StatusResp, SHOW_TEXT_MAX};
 use heapless::String;
 
-use crate::nodes::{SubNode, MAX_SUBS};
+use crate::nodes::{LinkedNode, MAX_LINKED};
 
-/// How a node is doing, as far as the 親機 knows.
+/// How a node is doing, as far as this node knows.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum Shade {
     #[default]
@@ -21,7 +22,7 @@ pub enum Shade {
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct Node {
-    pub node: SubNode,
+    pub node: LinkedNode,
     pub version: Option<Version>,
     pub shade: Shade,
 }
@@ -59,7 +60,7 @@ impl From<&Show<'_>> for Progress {
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Home {
     pub hub: Node,
-    pub subs: heapless::Vec<Node, MAX_SUBS>,
+    pub linked: heapless::Vec<Node, MAX_LINKED>,
     pub progress: Option<Progress>,
 }
 

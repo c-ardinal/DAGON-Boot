@@ -53,6 +53,7 @@ writes, as `compat.toml` holds them. The rules for changing them are in
 | `events` | 0.1.0 | `dagon-events` | `event` 1 |
 | `port` | 0.1.0 | `dagon-port` |  |
 | `agent` | 0.1.0 | `dagon-agent` | `wire` 1, `image-header` 1 |
+| `relay` | 0.1.0 | `dagon-relay` | `wire` 1, `topology-bin` 1 |
 | `host` | 0.1.0 | `dagon-host` | `wire` 1, `image-header` 1, `state-log` 1, `bundle` 1, `topology-bin` 1 |
 | `extension` | 0.1.0 | `dagon-extension` | `extension-manifest` 1, `definitions` 1, `boot-program` 1 |
 | `topology` | 0.1.0 | `dagon-topology` | `topology-bin` 1, `topology-yaml` 1, `definitions` 1, `boot-program` 1 |

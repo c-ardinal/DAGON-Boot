@@ -617,6 +617,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "dagon-relay"
+version = "0.1.0"
+dependencies = [
+ "dagon-format",
+ "dagon-port",
+ "dagon-proto",
+ "heapless",
+]
+
+[[package]]
 name = "dagon-retained-model"
 version = "0.0.0"
 dependencies = [

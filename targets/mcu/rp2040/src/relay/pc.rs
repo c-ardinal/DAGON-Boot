@@ -17,12 +17,14 @@ use embassy_rp::Peri;
 use embassy_time::{Instant, Timer};
 use heapless::Vec;
 
-use super::nodes::{self, SubNode};
+use dagon_relay::cmd;
+use dagon_relay::nodes::{self, LinkedNode};
+use dagon_relay::view::{Progress, Seen};
+
 use super::ports::{Op, Port, Req, I2C_PORT, UART_PORT};
-use super::state::{self, Progress, Seen};
+use super::state;
 use super::task;
 use crate::arm::step;
-use crate::cmd;
 use crate::node::AppAgent;
 use crate::sub::SubLines;
 use crate::usb;
@@ -44,7 +46,7 @@ pub struct Pc {
     pub sub: Option<SubLines<'static>>,
     pub has_i2c: bool,
     pub has_uart: bool,
-    pub fallback: &'static [SubNode],
+    pub fallback: &'static [LinkedNode],
     pub watch: &'static dyn Watch,
     pub resp: [u8; MAX_FRAME],
 }
@@ -121,7 +123,12 @@ impl Pc {
     fn publish(&mut self, subs: bool) {
         state::set_hub(Seen::from_status(self.agent.images().status()));
         if subs {
-            state::set_subs(nodes::load(&mut self.flash, self.fallback));
+            state::set_subs(nodes::load(
+                &mut self.flash,
+                crate::layout::TOPOLOGY,
+                &crate::RELAY_LINKS,
+                self.fallback,
+            ));
         }
     }
 
@@ -201,7 +208,7 @@ impl Pc {
     }
 
     async fn relay(&mut self, r: &Relay<'_>) -> (Status, usize) {
-        if !cmd::relay_fits(r.link, r.addr, r.inner.len()) {
+        if !cmd::relay_fits(&crate::RELAY_LINKS, r.link, r.addr, r.inner.len()) {
             return (Status::Arg, 0);
         }
         let (port, present) = if r.link == link::I2C0 {

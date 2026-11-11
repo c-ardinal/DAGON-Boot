@@ -43,6 +43,7 @@ diag-panic = ["dagon-mcu-rp2040/diag-panic"]
 dagon-mcu-rp2040 = { path = "../../mcu/rp2040", default-features = false }
 dagon-format = { path = "../../../crates/dagon-format" }
 dagon-proto = { path = "../../../crates/dagon-proto" }
+dagon-relay = { path = "../../../crates/dagon-relay" }
 embassy-rp = { version = "0.10.0", features = ["rp2040"], optional = true }
 embassy-time = { version = "0.5", optional = true }
 embassy-executor = { version = "0.10", optional = true }

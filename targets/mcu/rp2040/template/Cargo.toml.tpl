@@ -17,8 +17,10 @@ test = false
 slot-b = ["dagon-mcu-rp2040/slot-b"]
 
 [dependencies]
-# DAGON MCU support (the package line is rewritten by dagon gen).
+# DAGON MCU support and the relay (the package lines are rewritten by
+# dagon gen).
 {{dep:dagon-mcu-rp2040}}
+{{dep:dagon-relay}}
 embassy-rp = { version = "0.10.0", features = ["rp2040", "time-driver", "critical-section-impl"] }
 embassy-executor = { version = "0.10", features = ["platform-cortex-m", "executor-thread"] }
 embassy-time = "0.5"

@@ -156,6 +156,7 @@ dependencies = [
  "dagon-mcu-common",
  "dagon-port",
  "dagon-proto",
+ "dagon-relay",
  "heapless",
 ]
 
@@ -172,6 +173,16 @@ name = "dagon-proto"
 version = "0.1.0"
 dependencies = [
  "dagon-format",
+]
+
+[[package]]
+name = "dagon-relay"
+version = "0.1.0"
+dependencies = [
+ "dagon-format",
+ "dagon-port",
+ "dagon-proto",
+ "heapless",
 ]
 
 [[package]]

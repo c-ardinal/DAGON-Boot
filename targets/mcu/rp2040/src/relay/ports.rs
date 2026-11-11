@@ -12,11 +12,12 @@ use embassy_sync::channel::Channel;
 use embassy_time::{with_timeout, Duration, Timer};
 use heapless::Vec;
 
-use super::state::{self, Seen};
+use super::state;
 use super::task;
 use crate::links::{I2cLink, PioStream, RpI2c, I2C_FRAME};
 use crate::uart::{UartLink, UART_FRAME};
 use crate::watchdog::Watch;
+use dagon_relay::view::Seen;
 
 const POLL_EVERY: Duration = Duration::from_secs(2);
 /// Largest request or response body carried through a port.

@@ -111,6 +111,7 @@
 "The packages kept in the project (out/deploy), newest version first, each with the version it gives each node." = "プロジェクトに残してあるパッケージ（out/deploy）。新しいバージョンから順に、各ノードに与えるバージョンとともに返します。"
 "The project's 構成 YAML as it is on disk (404 before the first save)." = "ディスクにあるとおりの、プロジェクトの構成のYAML（最初の保存の前は404）。"
 "The protection hardware: `armv6m-mpu`, `armv7m-mpu`, `armv8m-mpu`, `armv8m-tz`, `riscv-pmp`, `riscv-epmp`, `esp-pms`, `none`." = "保護のハードウェア: `armv6m-mpu`、`armv7m-mpu`、`armv8m-mpu`、`armv8m-tz`、`riscv-pmp`、`riscv-epmp`、`esp-pms`、`none`。"
+"The relay: how a node reaches the nodes linked to it, independent of any MCU." = "リレー: ノードが、リンクでつながったほかのノードに届く仕組み。どのMCUにも依存しません。"
 "The time service." = "時間のサービス。"
 "The tools the project's MCUs need, by its definitions. Nobody can confirm a command here, so a check the project itself defines is reported as one for the terminal's `dagon doctor`." = "定義に基づく、プロジェクトのマイコンに要るツール。ここではだれもコマンドを確認できないので、プロジェクト自身が定義する確認は、ターミナルの`dagon doctor`で行うものとして報告します。"
 "The way's id, unique within its agent (same characters as an agent id)." = "つなぎ方のid。そのエージェントの中で重複しないこと（文字はエージェントのidと同じ）。"

@@ -25,6 +25,7 @@ published with these pages; each name below opens its crate.
 | [`dagon-host`](/api/dagon_host/) | Host-side procedures shared by the CLI and the browser: discover, status, topology push, apply, rollback, confirm, recover. |
 | [`dagon-port`](/api/dagon_port/) | Port contract: what a board provides to DAGON. |
 | [`dagon-proto`](/api/dagon_proto/) | DAGON link v1: frame format (shared by USB CDC, UART and I2C), the command set, status codes, request/response payloads and the I2C mailbox state. |
+| [`dagon-relay`](/api/dagon_relay/) | The relay: how a node reaches the nodes linked to it, independent of any MCU. |
 | [`dagon-retained-model`](/api/dagon_retained_model/) | Executable model of DAGON's retained and persistent formats under fault injection |
 | [`dagon-romlink`](/api/dagon_romlink/) | STM32 system-memory boot loader on I2C (ST AN4221), driven from the host through the hub's NRST/BOOT0 lines and raw I2C transactions. |
 | [`dagon-sign`](/api/dagon_sign/) | Signing for DAGON: keys, signed images, release bundles and first-install flash contents. |

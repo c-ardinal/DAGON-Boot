@@ -26,6 +26,7 @@ rustdocの本文は元のソースのままで、英語です。
 | [`dagon-host`](/api/dagon_host/) | CLIとブラウザが共有するホスト側の手順: 検出、状態、構成の送信、適用、ロールバック、確定、復旧。 |
 | [`dagon-port`](/api/dagon_port/) | ポートの取り決め: ボードがDAGONに用意するもの。 |
 | [`dagon-proto`](/api/dagon_proto/) | DAGONのリンクv1: フレームの形式（USB CDC、UART、I2Cで共通）、コマンドの集合、ステータスコード、リクエストとレスポンスのペイロード、I2Cのメールボックスの状態。 |
+| [`dagon-relay`](/api/dagon_relay/) | リレー: ノードが、リンクでつながったほかのノードに届く仕組み。どのMCUにも依存しません。 |
 | [`dagon-retained-model`](/api/dagon_retained_model/) | 障害注入の下での、DAGONの保持と永続の形式の実行可能なモデル |
 | [`dagon-romlink`](/api/dagon_romlink/) | I2CのSTM32システムメモリのブートローダ（ST AN4221）。ホストから、親機のNRST/BOOT0の線と生のI2Cのやり取りで動かします。 |
 | [`dagon-sign`](/api/dagon_sign/) | DAGONの署名: 鍵、署名付きのイメージ、リリースのバンドル、最初のインストールのフラッシュの中身。 |

@@ -11,7 +11,7 @@ The layer figure is in [Explanation](/en/explanation/).
 
 1. Make the crate `dagon-mcu-<id>` in `targets/mcu/<id>/`, with its own `[workspace]`. The root `Cargo.toml` does not change.
 2. Write `dagon-mcu.toml`. The keys are in [MCU and board definitions](/en/reference/definitions/); adding the folder adds the definition.
-3. Implement the traits of `crates/dagon-port/src/lib.rs`: `Flash`, `Link`, `Reset`, `Clock`, `Watchdog`, and by boot kind `BootSelectS` or `BootSelectV`. An MCU that can be the hub also implements `StreamPort`, `I2cBus` and `SubControl`.
+3. Implement the traits of `crates/dagon-port/src/lib.rs`: `Flash`, `Link`, `Reset`, `Watchdog`, and by boot kind `BootSelectS` or `BootSelectV`. An MCU that can be the hub also implements `StreamPort`, `I2cBus` and `SubControl`. The microsecond clock is not a port but DAGON's own: the MCU package implements `Clock` of `crates/dagon-events/src/compose.rs`.
 4. Implement `SlotStore` of `crates/dagon-agent/src/lib.rs` (`targets/mcu/stm32f401re/src/store.rs` is an example).
 5. An MCU with DAGON's boot stage provides `stage0/` and `bootcore/` (`targets/mcu/stm32f401re/` is an example).
 6. Every MCU provides `template/`, from which `dagon gen` makes the node crates.

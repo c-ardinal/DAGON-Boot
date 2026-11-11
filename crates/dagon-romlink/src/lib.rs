@@ -54,7 +54,7 @@ pub mod cmd {
 
 /// Monotonic time source (shared with dagon-host).
 #[allow(async_fn_in_trait)]
-pub trait Clock {
+pub trait HostClock {
     fn now_ms(&self) -> u64;
     async fn sleep_ms(&mut self, ms: u32);
 }
@@ -62,7 +62,7 @@ pub trait Clock {
 /// The hub as seen by the ROM procedure: its I2C bus (all transactions go
 /// to [`ROM_ADDR`]), the node's NRST/BOOT0 lines and a clock.
 #[allow(async_fn_in_trait)]
-pub trait RomLink: I2cBus + SubControl + Clock {
+pub trait RomLink: I2cBus + SubControl + HostClock {
     /// Timeout for the following I2C transactions (a stretching command
     /// holds the bus for seconds).
     fn set_timeout_ms(&mut self, _ms: u32) {}
@@ -562,7 +562,7 @@ mod tests {
         }
     }
 
-    impl Clock for Fake {
+    impl HostClock for Fake {
         fn now_ms(&self) -> u64 {
             self.now
         }

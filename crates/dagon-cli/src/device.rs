@@ -5,7 +5,7 @@ use std::path::{Path, PathBuf};
 
 use dagon_format::header::port_kind;
 use dagon_format::Version;
-use dagon_host::{Clock, Event, Host, NodeState, Outcome, Target, Transport, WritePath};
+use dagon_host::{Event, Host, HostClock, NodeState, Outcome, Target, Transport, WritePath};
 use dagon_proto::payload::{phase, SlotState, StatusResp, VersionResp, VersionSlots};
 use dagon_proto::Status;
 use dagon_sign::to_hex;
@@ -212,7 +212,7 @@ pub(crate) fn doctor_versions(
 }
 
 /// The hub's VERSION line, then each node's.
-pub(crate) fn version_lines<T: Transport, C: Clock>(
+pub(crate) fn version_lines<T: Transport, C: HostClock>(
     host: &mut Host<T, C>,
     nodes: &[(String, Option<Target>)],
 ) -> Vec<String> {
@@ -232,7 +232,7 @@ pub(crate) fn version_lines<T: Transport, C: Clock>(
 
 /// Rolls topology node `node` back to the version in its other slot and
 /// confirms it there; returns that version.
-pub fn rollback_node<T: Transport, C: Clock>(
+pub fn rollback_node<T: Transport, C: HostClock>(
     host: &mut Host<T, C>,
     reg: &Registry,
     t: &Topology,
@@ -338,7 +338,7 @@ pub(crate) fn pubkey(
 /// `ask` answers for all of them. Then each is rewritten through its ROM.
 /// Returns the indices of the nodes that answer, for the normal transfer.
 #[allow(clippy::too_many_arguments)]
-pub(crate) fn write_silent_nodes<T: Transport, C: Clock>(
+pub(crate) fn write_silent_nodes<T: Transport, C: HostClock>(
     host: &mut Host<T, C>,
     t: &Topology,
     topology: &[u8],
@@ -482,7 +482,7 @@ pub fn apply(a: &ApplyArgs) -> Res {
 /// Applies `bundle` (verified under `key`, or unverified when `None`) to
 /// the nodes of `t` through `host`, printing progress and one result line
 /// per node.
-pub fn apply_bundle<T: Transport, C: Clock>(
+pub fn apply_bundle<T: Transport, C: HostClock>(
     host: &mut Host<T, C>,
     reg: &Registry,
     bundle: &[u8],

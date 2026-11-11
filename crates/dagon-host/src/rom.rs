@@ -14,7 +14,7 @@ use dagon_proto::{Cmd, Status};
 use dagon_romlink::{Region, RomLink, FRAME_TIMEOUT_MS, ROM_ADDR};
 
 use crate::ops::Event;
-use crate::{Clock, Error, Host, Target, Transport};
+use crate::{Error, Host, HostClock, Target, Transport};
 
 /// Where an image goes: its header and its payload, and the largest
 /// payload that fits.
@@ -196,7 +196,7 @@ pub fn regions<'a>(
 
 /// The hub's NRST/BOOT0 and raw I2C, with progress mirrored as events and
 /// SHOW phase ROM.
-pub(crate) struct HubRom<'h, T: Transport, C: Clock> {
+pub(crate) struct HubRom<'h, T: Transport, C: HostClock> {
     pub host: &'h mut Host<T, C>,
     pub on_event: &'h mut dyn FnMut(Event),
     pub node: u8,
@@ -217,7 +217,7 @@ fn bus_error<E>(e: Error<E>) -> BusError {
     }
 }
 
-impl<T: Transport, C: Clock> HubRom<'_, T, C> {
+impl<T: Transport, C: HostClock> HubRom<'_, T, C> {
     async fn raw(&mut self, addr: u8, data: &[u8], buf: &mut [u8]) -> Result<(), BusError> {
         if addr != ROM_ADDR {
             return Err(BusError::Nack);
@@ -241,7 +241,7 @@ impl<T: Transport, C: Clock> HubRom<'_, T, C> {
     }
 }
 
-impl<T: Transport, C: Clock> I2cBus for HubRom<'_, T, C> {
+impl<T: Transport, C: HostClock> I2cBus for HubRom<'_, T, C> {
     async fn write(&mut self, addr: u8, data: &[u8]) -> Result<(), BusError> {
         self.raw(addr, data, &mut []).await
     }
@@ -253,7 +253,7 @@ impl<T: Transport, C: Clock> I2cBus for HubRom<'_, T, C> {
     }
 }
 
-impl<T: Transport, C: Clock> SubControl for HubRom<'_, T, C> {
+impl<T: Transport, C: HostClock> SubControl for HubRom<'_, T, C> {
     async fn set_lines(&mut self, nrst: Nrst, boot0_high: bool) -> Result<(), BusError> {
         self.host
             .call(
@@ -268,7 +268,7 @@ impl<T: Transport, C: Clock> SubControl for HubRom<'_, T, C> {
     }
 }
 
-impl<T: Transport, C: Clock> Clock for HubRom<'_, T, C> {
+impl<T: Transport, C: HostClock> HostClock for HubRom<'_, T, C> {
     fn now_ms(&self) -> u64 {
         self.host.clock.now_ms()
     }
@@ -277,7 +277,7 @@ impl<T: Transport, C: Clock> Clock for HubRom<'_, T, C> {
     }
 }
 
-impl<T: Transport, C: Clock> RomLink for HubRom<'_, T, C> {
+impl<T: Transport, C: HostClock> RomLink for HubRom<'_, T, C> {
     fn set_timeout_ms(&mut self, ms: u32) {
         self.timeout = ms;
     }
@@ -295,7 +295,7 @@ impl<T: Transport, C: Clock> RomLink for HubRom<'_, T, C> {
     }
 }
 
-impl<'h, T: Transport, C: Clock> HubRom<'h, T, C> {
+impl<'h, T: Transport, C: HostClock> HubRom<'h, T, C> {
     pub fn new(
         host: &'h mut Host<T, C>,
         on_event: &'h mut dyn FnMut(Event),

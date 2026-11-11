@@ -40,10 +40,10 @@ DEVICE_COLS = (
                     4: ("Trust Rule",), 5: ("Deadline Book",)}),
     ("Replaceable Ports", {0: ("DecisionPolicy", "BoardBringUp"), 1: ("SlotStore", "LogStorage", "SelfCheck"), 2: ("UpdateTransport", "UpdateProtocol", "Recovery"),
                            3: ("ChildLink",), 4: ("ImageVerifier", "Digest", "CryptoProvider"), 5: ("WatchdogDriver",), 7: ("Diagnostics", "Display", "LogSink")}),
-    ("Driver Contract", {0: ("BootSelect",), 1: ("Flash",), 3: ("I2cBus", "StreamPort", "SubControl"), 5: ("Clock", "Reset"), 6: ("SandboxArch",)}),
+    ("Driver Contract", {0: ("BootSelect",), 1: ("Flash",), 3: ("I2cBus", "StreamPort", "SubControl"), 5: ("Reset",), 6: ("SandboxArch",)}),
 )
 BOARD = ("Board Definition", "Board Bring-Up", "Board Extension", "Boot Action Program", "Shared Bus")
-MCU = {0: ("Reset and Jump",), 1: ("Flash Driver", "Slot Store Driver"), 2: ("Link Drivers",), 5: ("Watchdog Driver", "Execution Setup"), 6: ("Architecture Kind",)}
+MCU = {0: ("Reset and Jump",), 1: ("Flash Driver", "Slot Store Driver"), 2: ("Link Drivers",), 5: ("Watchdog Driver", "Clock", "Execution Setup"), 6: ("Architecture Kind",)}
 MCU_STRIP = "MCU Definition"
 SILICON = ("ROM Loader", "boot2", "Vendor 2nd Stage", "Protection Unit", "Peripherals")
 LIBRARIES = ("dagon-format", "dagon-proto", "dagon-events", "Retained Codecs")
@@ -153,7 +153,6 @@ COMPONENTS = {
     "I2cBus": ("親機のI2Cバス", "The hub's I2C bus"),
     "StreamPort": ("親機のバイト列", "The hub's byte stream"),
     "SubControl": ("子機の制御線", "A child's control lines"),
-    "Clock": ("時間", "Time"),
     "Reset": ("システムのリセット", "System reset"),
     "SandboxArch": ("1つのアーキテクチャの特権の入口とアンワインドのレジスタ", "Privilege entry and unwind registers for one architecture"),
     "Board Definition": ("ボードのデータ", "The board's data"),
@@ -166,6 +165,7 @@ COMPONENTS = {
     "Slot Store Driver": ("kind Sのログ、またはkind Vのベンダーデータ", "A kind S log or kind V vendor data"),
     "Link Drivers": ("ノードのLinkの実装", "Implement the node's Link"),
     "Watchdog Driver": ("ウォッチドッグのドライバ", "The watchdog driver"),
+    "Clock": ("DAGON自身のマイクロ秒の時計（dagon-eventsの`Clock`）。マイコンのcrateが用意する", "DAGON's own microsecond clock (`Clock` of dagon-events), provided by the MCU package"),
     "Execution Setup": ("実行モデルに従うエグゼキュータの優先度", "Executor priorities per the execution model"),
     "Architecture Kind": ("保護ハードウェアの種類ごとの実装", "Implementation per protection kind"),
     "MCU Definition": ("マイコンのデータ", "The MCU's data"),

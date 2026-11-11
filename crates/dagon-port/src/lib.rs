@@ -2,11 +2,11 @@
 //!
 //! Node side: [`Flash`], [`Link`] (with [`LinkKind`], [`LinkError`],
 //! [`Reconnect`], [`NO_ADDR`]), [`Reset`], boot selection ([`BootSelectS`]
-//! for kind S, [`BootSelectV`] for kind V), [`Clock`], [`Watchdog`].
+//! for kind S, [`BootSelectV`] for kind V), [`Watchdog`].
 //! Hub side: [`StreamPort`], [`I2cBus`], [`SubControl`].
 //!
 //! Link-type and hub-side traits are async (they wait on peripherals or on a
-//! remote hub); flash, clock and watchdog are blocking. This crate only
+//! remote hub); flash and watchdog are blocking. This crate only
 //! declares traits; `unsafe` belongs in the board implementations (jump,
 //! RAM-resident flash routines, registers).
 //!
@@ -212,12 +212,6 @@ pub trait BootSelectV {
     fn current_slot(&self) -> u8;
     fn set_next(&mut self, slot: u8) -> Result<(), BootSelectError>;
     fn select_factory(&mut self) -> Result<(), BootSelectError>;
-}
-
-/// Monotonic time.
-pub trait Clock {
-    fn now_us(&self) -> u64;
-    fn delay_us(&mut self, us: u32);
 }
 
 /// Resets the system unless fed within the timeout after `start`.

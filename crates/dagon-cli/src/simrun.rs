@@ -9,7 +9,7 @@ use dagon_format::bundle::{dest, BundleView};
 use dagon_format::header::{image_kind, target_tag, HEADER_SIZE, SIGNED_LEN};
 use dagon_format::statelog::reason;
 use dagon_format::Version;
-use dagon_host::{Clock, Error, Host, Outcome, RecoverAssets, RecoverPath, Target, Transport};
+use dagon_host::{Error, Host, HostClock, Outcome, RecoverAssets, RecoverPath, Target, Transport};
 use dagon_proto::payload::SlotState;
 use dagon_proto::Status;
 use dagon_sign::image::{self, sign_image, ImageSpec};
@@ -82,7 +82,7 @@ impl Transport for Sim {
     }
 }
 
-impl Clock for Sim {
+impl HostClock for Sim {
     fn now_ms(&self) -> u64 {
         self.hub.borrow().now_ms()
     }

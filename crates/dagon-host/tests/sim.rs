@@ -10,7 +10,7 @@ use dagon_conform::timeout::REQUEST_MS;
 use dagon_format::header::{image_kind, mcu_id, target_tag};
 use dagon_format::Version;
 use dagon_host::{
-    rom, Clock, ConfirmOutcome, Error, Event, Host, NodeOutcome, Outcome, RecoverAssets,
+    rom, ConfirmOutcome, Error, Event, Host, HostClock, NodeOutcome, Outcome, RecoverAssets,
     RecoverPath, Target, Transport, WritePath, CONFIRM_RETRY_MS,
 };
 use dagon_proto::payload::{phase, SlotState};
@@ -241,7 +241,7 @@ impl Transport for Sim {
     }
 }
 
-impl Clock for Sim {
+impl HostClock for Sim {
     fn now_ms(&self) -> u64 {
         self.hub.borrow().now_ms()
     }

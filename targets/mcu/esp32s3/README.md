@@ -12,7 +12,7 @@ and not on the board. Kind V: the stock ESP-IDF 2nd stage with app rollback
 | `rom`, `serve` | ENTER_ROM and what follows a reply |
 | `link` | link UART settings (`uart_config(baud)`: 8N1 at the bit rate the board's definition gives) |
 | `links` | the node's uplinks as `Link`s (`Uart`, `UsbCdc`) and `LINK_KINDS` |
-| `flash`, `boot`, `sys` | `Flash`, `BootSelectV` over otadata, `Clock` / `Watchdog` / `Reset` |
+| `flash`, `boot`, `sys` | `Flash`, `BootSelectV` over otadata, `Watchdog` / `Reset`, and DAGON's microsecond clock (`dagon_events::Clock`) |
 | `layout`, `partitions.csv`, `otadata`, `framer` | partition table (needs 8 MB flash or more), otadata, frame cutter |
 | `board` | the `BoardDef` trait a board crate implements |
 

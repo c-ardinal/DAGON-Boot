@@ -3,8 +3,10 @@
 - One `trait Link` (dagon-port's); link kinds as an enum only where
   `dagon_format::with_link_kinds!` generates them; no `Agent::run`;
   dagon-port does not depend on dagon-agent (dagon-agent depends on it).
-- The existing-firmware guide's serving loop is lines of the MCU packages'
-  serving loop, in order, and every `dagon_*` path it names exists.
+- The existing-firmware guide's serving loop is the MCU definitions'
+  serving loop, whole: one contiguous run of its lines from the link's
+  kind to the end of the loop, comments aside; every `dagon_*` path the
+  guide names exists.
 
     python -m unittest discover -s scripts -p "test_*.py"
 """
@@ -75,10 +77,29 @@ def rust_blocks(md):
     return re.findall(r"^\s*```rust\n(.*?)^\s*```", md, re.M | re.S)
 
 
-def in_order(snippet, source):
-    """Each snippet line is part of a source line, in source order."""
-    it = iter(source)
-    return all(any(line in s for s in it) for line in snippet)
+LOOP_FIRST = "let (via, addr) = (link.kind().code(), link.addr());"
+LOOP_LAST = "return Exit::Reboot;"
+
+
+def is_excerpt(snippet, source):
+    """`snippet` equals a contiguous run of `source` lines (both already
+    stripped of indentation, blank lines and comments)."""
+    n = len(snippet)
+    return n > 0 and any(source[i : i + n] == snippet for i in range(len(source) - n + 1))
+
+
+def is_whole_loop(snippet, source):
+    """The excerpt runs from the link's kind to the end of the loop, so no
+    branch of it (a failed write, a failed flush) is left out."""
+    if not snippet or snippet[0] != LOOP_FIRST or LOOP_LAST not in snippet:
+        return False
+    tail = snippet[snippet.index(LOOP_LAST) + 1 :]
+    return tail == ["}", "}", "}"] and is_excerpt(snippet, source)
+
+
+def trait_link_files(texts):
+    """Paths (keys of `texts`) defining a `trait Link`, once per definition."""
+    return [path for path, text in texts.items() for _ in re.finditer(r"\btrait\s+Link\b", text)]
 
 
 def dependency_names(manifest):
@@ -99,8 +120,21 @@ def dependency_names(manifest):
 
 class OneLinkContract(unittest.TestCase):
     def test_one_trait_link(self):
-        found = [rel(p) for p in rust_files() for _ in re.finditer(r"\btrait\s+Link\b", p.read_text(encoding="utf-8"))]
+        found = trait_link_files({rel(p): p.read_text(encoding="utf-8") for p in rust_files()})
         self.assertEqual(found, ["crates/dagon-port/src/lib.rs"])
+
+    def test_the_check_catches_a_second_trait_link(self):
+        texts = {"a.rs": "pub trait Link {\n}\n", "b.rs": "trait  Link: Sized {}\n", "c.rs": "trait Linked {}\n"}
+        self.assertEqual(trait_link_files(texts), ["a.rs", "b.rs"])
+
+    def test_the_check_catches_a_dependency_on_dagon_agent(self):
+        for manifest in (
+            {"dependencies": {"dagon-agent": {"path": "../dagon-agent"}}},
+            {"dev-dependencies": {"dagon-agent": "0.1"}},
+            {"target": {"cfg(test)": {"dependencies": {"dagon-agent": "0.1"}}}},
+        ):
+            self.assertIn("dagon-agent", dependency_names(manifest), manifest)
+        self.assertNotIn("dagon-agent", dependency_names({"dependencies": {"dagon-format": "0.1"}}))
 
     def test_link_kinds_are_generated_only(self):
         kinds = kind_variants()
@@ -139,7 +173,7 @@ class ExistingFirmwareGuide(unittest.TestCase):
             snippets.append([code_lines(b) for b in blocks])
             for b in blocks:
                 lines = code_lines(b)
-                self.assertTrue(in_order(lines, source), f"{rel(g)}: not lines of {rel(SERVE)}, in order:\n" + "\n".join(lines))
+                self.assertTrue(is_whole_loop(lines, source), f"{rel(g)}: not the whole loop of {rel(SERVE)}, line for line:\n" + "\n".join(lines))
         self.assertEqual(snippets[0], snippets[1], "the Japanese and English guides show the same code")
 
     def test_handle_loop_parts_are_shown(self):
@@ -156,9 +190,59 @@ class ExistingFirmwareGuide(unittest.TestCase):
                 defined = rf"\bpub (?:const |async )*(?:fn|struct|trait|enum|const|type|mod) {item}\b|\bpub use [^;]*\b{item}\b"
                 self.assertRegex(text, defined, f"{rel(g)} names {path}")
 
-    def test_the_order_check_rejects_a_foreign_line(self):
-        self.assertFalse(in_order(["agent.run(&mut link, &mut reset).await;"], ["loop {", "agent.handle(r)"]))
-        self.assertTrue(in_order(["match agent.handle(r) {"], ["None => match agent.handle(r) {"]))
+    def test_the_excerpt_check_rejects_a_changed_loop(self):
+        source = code_lines(SERVE.read_text(encoding="utf-8"))
+        start = source.index(LOOP_FIRST)
+        end = source.index(LOOP_LAST, start) + 4
+        whole = source[start:end]
+        self.assertTrue(is_whole_loop(whole, source))
+        # The write result dropped, so a reply that failed could still reboot.
+        wrote = whole.index("let wrote = match host.intercept(agent, request) {")
+        dropped = whole[:wrote] + ["match host.intercept(agent, request) {"] + whole[wrote + 1 :]
+        self.assertFalse(is_whole_loop(dropped, source))
+        for i in range(1, len(whole) - 1):
+            self.assertFalse(is_whole_loop(whole[:i] + whole[i + 1 :], source), f"line {i} left out: {whole[i]}")
+        self.assertFalse(is_whole_loop(whole[:-1], source))
+        self.assertFalse(is_whole_loop(DROPPED_WRITE_RESULT, source))
+
+
+# An earlier version of the guide's loop: lines of the real loop in order,
+# with the write result dropped. It must not pass.
+DROPPED_WRITE_RESULT = [
+    "let (via, addr) = (link.kind().code(), link.addr());",
+    "loop {",
+    "let read = link.read_frame().await;",
+    "let request = match read {",
+    "Ok(r) => r,",
+    "Err(LinkError::Timeout) => {",
+    "continue;",
+    "}",
+    "Err(LinkError::Closed) => {",
+    "return Exit::Closed;",
+    "}",
+    "Err(e) => {",
+    "host.on_error(e);",
+    "continue;",
+    "}",
+    "};",
+    "agent.request(request, via);",
+    "let mut reboot = None;",
+    "match agent.handle(request) {",
+    "Some(reply) => {",
+    "reboot = reply.reboot.then_some(reply.reboot_delay_ms);",
+    "link.write_frame(reply.frame).await",
+    "}",
+    "None => link.no_reply().await,",
+    "};",
+    "if let Some(delay_ms) = reboot {",
+    "if link.flush().await.is_ok() {",
+    "host.wait_ms(delay_ms).await;",
+    "agent.before_reboot();",
+    "return Exit::Reboot;",
+    "}",
+    "}",
+    "}",
+]
 
 
 if __name__ == "__main__":

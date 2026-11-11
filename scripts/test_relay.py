@@ -1,4 +1,4 @@
-"""The relay's link contract has one home.
+"""The relay's link contract and the relay crate have one home each.
 
 - Exactly one `trait NodeLink`, in dagon-port.
 - One production definition each of the frame helpers `hello_request` and
@@ -6,15 +6,31 @@
   builders, which share the name, are listed with their reason.
 - dagon-port does not depend, directly or through its path dependencies,
   on dagon-agent, dagon-events or dagon-mcu-common.
+- dagon-relay's normal dependencies are among RELAY_ALLOWED, and nothing
+  they reach through path dependencies is embassy-time, dagon-sim or an
+  MCU or board package; dagon-sim and dagon-wasm do not depend on it.
+- dagon-relay names no link id or topology interface of a particular MCU
+  (`link::I2C0`, `link::PIO_UART`, `iface::I2C_BUS`, `iface::PIO_UART`):
+  the MCU package passes its links in.
+- No Rust file names the paths the relay crate replaced:
+  `dagon_mcu_rp2040::{nodes, view, cmd}`, the node items once under
+  `dagon_mcu_rp2040::relay` (`named`, the node type), or those modules
+  inside the RP2040 MCU package, which re-exports nothing of dagon-relay.
+  No Rust file names the replaced node names (`SubNode`, `Subs`,
+  `MAX_SUBS`) or brings an item in under a sub, parent or child name.
 
     python -m unittest discover -s scripts -p "test_*.py"
 """
+import functools
 import re
 import tomllib
 import unittest
 from pathlib import Path
 
 from rust_source import ROOT, code_only, rust_texts
+
+# The self-tests plant a line in one file of the tree many times over.
+code_of = functools.lru_cache(maxsize=None)(code_only)
 
 PORT_LIB = "crates/dagon-port/src/lib.rs"
 PORT_MANIFEST = "crates/dagon-port/Cargo.toml"
@@ -28,6 +44,40 @@ HELPERS = {
     "hello_answer": [PORT_LIB],
 }
 FORBIDDEN_DEPS = {"dagon-agent", "dagon-events", "dagon-mcu-common"}
+
+RELAY_MANIFEST = "crates/dagon-relay/Cargo.toml"
+RELAY_SRC = "crates/dagon-relay/src/"
+# The relay's dependency direction: what it may name, and what nothing it
+# reaches may be (the relay is MCU-independent and no_std; dagon-sim is
+# for its tests only).
+RELAY_ALLOWED = {
+    "dagon-agent", "dagon-port", "dagon-proto", "dagon-format",
+    "heapless", "embassy-sync", "embassy-futures", "portable-atomic",
+}
+RELAY_FORBIDDEN = {"embassy-time", "dagon-sim"}
+RELAY_FORBIDDEN_PREFIXES = ("dagon-mcu-", "dagon-board-")
+# Packages that must not depend on the relay (the simulator stays as is).
+RELAY_FREE = ("crates/dagon-sim/Cargo.toml", "crates/dagon-wasm/Cargo.toml")
+MCU_LINK_NAMES = re.compile(r"\b(?:link\s*::\s*(?:I2C0|PIO_UART)|iface\s*::\s*(?:I2C_BUS|PIO_UART))\b")
+RP_PACKAGE = "targets/mcu/rp2040/src/"
+MOVED = r"(?:nodes|view|cmd)"
+OLD_PATHS = (
+    re.compile(rf"\bdagon_mcu_rp2040\s*::\s*{MOVED}\b"),
+    re.compile(rf"\bdagon_mcu_rp2040\s*::\s*\{{[^}}]*\b{MOVED}\b"),
+)
+OLD_PATHS_INSIDE = (
+    re.compile(rf"\bcrate\s*::\s*{MOVED}\b"),
+    re.compile(rf"\bcrate\s*::\s*\{{[^}}]*\b{MOVED}\b"),
+    re.compile(rf"\bmod\s+{MOVED}\b"),
+    re.compile(r"\bpub\s*(?:\([^)]*\)\s*)?use\s+(?:::\s*)?dagon_relay\b"),
+)
+OLD_RELAY_ITEMS = r"(?:named|LinkedNode|SubNode|nodes)"
+OLD_NAMES = (
+    re.compile(rf"\bdagon_mcu_rp2040\s*::\s*relay\s*::\s*{OLD_RELAY_ITEMS}\b"),
+    re.compile(rf"\bdagon_mcu_rp2040\s*::\s*relay\s*::\s*\{{[^}}]*\b{OLD_RELAY_ITEMS}\b"),
+    re.compile(r"\b(?:SubNode|Subs|MAX_SUBS)\b"),
+    re.compile(r"\bas\s+(?:\w*_)?(?:[Ss]ub|[Pp]arent|[Cc]hild|SUB|PARENT|CHILD)(?:[A-Z_]\w*)?\b"),
+)
 
 TEST_MOD = re.compile(r"#\[cfg\(test\)\]\s*(?:#\[[^\]]*\]\s*)*(?:pub(?:\([^)]*\))?\s+)?mod\s+\w+\s*\{")
 
@@ -96,10 +146,19 @@ def resolve(key, entry, manifest_dir, workspace):
     return entry.get("package", key), path
 
 
-def dependency_closure(manifest_path, read):
-    """Package names of every dependency of the package at `manifest_path`,
-    following path dependencies; `read(path)` returns a manifest's TOML
-    text. dagon-port and its path dependencies are members of the root
+def normal_deps(manifest):
+    """(key, entry) of every normal dependency: `[dependencies]` and each
+    `[target.*.dependencies]`."""
+    out = list(manifest.get("dependencies", {}).items())
+    for table in manifest.get("target", {}).values():
+        out.extend(table.get("dependencies", {}).items())
+    return out
+
+
+def dependency_closure(manifest_path, read, deps=manifest_deps):
+    """Package names of every dependency of the package at `manifest_path`
+    (the tables `deps` returns), following path dependencies; `read(path)`
+    returns a manifest's TOML text. These packages are members of the root
     workspace, so `workspace = true` resolves there."""
     workspace = tomllib.loads(read(Path("Cargo.toml"))).get("workspace", {}).get("dependencies", {})
     seen, visited, todo = set(), set(), [Path(manifest_path)]
@@ -108,7 +167,7 @@ def dependency_closure(manifest_path, read):
         if m.as_posix() in visited:
             continue
         visited.add(m.as_posix())
-        for key, entry in manifest_deps(tomllib.loads(read(m))):
+        for key, entry in deps(tomllib.loads(read(m))):
             name, path = resolve(key, entry, m.parent, workspace)
             seen.add(name)
             if path is not None:
@@ -130,9 +189,40 @@ def read_manifest(path):
     return (ROOT / path).read_text(encoding="utf-8")
 
 
-def problems(texts, read=read_manifest):
-    codes = {path: code_only(text) for path, text in texts.items()}
+def relay_dependency_problems(read):
+    try:
+        manifest = tomllib.loads(read(Path(RELAY_MANIFEST)))
+    except FileNotFoundError:
+        return [f"{RELAY_MANIFEST} is missing"]
+    workspace = tomllib.loads(read(Path("Cargo.toml"))).get("workspace", {}).get("dependencies", {})
     out = []
+    direct = {resolve(k, e, Path(RELAY_MANIFEST).parent, workspace)[0] for k, e in normal_deps(manifest)}
+    if extra := sorted(direct - RELAY_ALLOWED):
+        out.append(f"dagon-relay depends on {extra}, outside {sorted(RELAY_ALLOWED)}")
+    reached = dependency_closure(RELAY_MANIFEST, read, normal_deps)
+    if bad := sorted(n for n in reached if n in RELAY_FORBIDDEN or n.startswith(RELAY_FORBIDDEN_PREFIXES)):
+        out.append(f"dagon-relay reaches {bad}")
+    for m in RELAY_FREE:
+        if "dagon-relay" in dependency_closure(m, read):
+            out.append(f"{m} depends on dagon-relay")
+    return out
+
+
+def relay_source_problems(codes):
+    out = []
+    for path, code in sorted(codes.items()):
+        if path.startswith(RELAY_SRC) and (m := MCU_LINK_NAMES.search(code)):
+            out.append(f"{path} names {m.group(0)}: the MCU package passes its links in")
+        rules = OLD_PATHS + OLD_NAMES + (OLD_PATHS_INSIDE if path.startswith(RP_PACKAGE) else ())
+        for rule in rules:
+            if m := rule.search(code):
+                out.append(f"{path} names the old path {' '.join(m.group(0).split())}")
+    return out
+
+
+def problems(texts, read=read_manifest):
+    codes = {path: code_of(text) for path, text in texts.items()}
+    out = relay_dependency_problems(read) + relay_source_problems(codes)
     if (t := definitions(codes, "NodeLink", r"\btrait\s+{name}\b")) != [PORT_LIB]:
         out.append(f"trait NodeLink in {t}, expected only {PORT_LIB}")
     for name, expected in HELPERS.items():
@@ -224,6 +314,106 @@ class OneNodeLinkContract(unittest.TestCase):
 
     def test_a_renamed_allowed_dependency_passes(self):
         self.assertEqual(self.with_manifests({PORT_MANIFEST: '\n[dev-dependencies]\nformat = { package = "dagon-format", path = "../dagon-format" }\n'}), [])
+
+
+class RelayCrate(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.texts = rust_texts()
+
+    def with_entries(self, planted):
+        """problems() with `planted` (path -> (table header, entry line)):
+        the entry goes first into that table, which is added when the
+        manifest has none."""
+        def read(p):
+            text = read_manifest(p)
+            if (plant := planted.get(p.as_posix())) is None:
+                return text
+            header, entry = plant
+            head = f"{header}\n"
+            if text.startswith(head) or f"\n{head}" in text:
+                at = text.index(head) if text.startswith(head) else text.index(f"\n{head}") + 1
+                return text[:at + len(head)] + f"{entry}\n" + text[at + len(head):]
+            return f"{text}\n{head}{entry}\n"
+        return problems(self.texts, read)
+
+    def test_a_dependency_outside_the_allowed_set_fails(self):
+        for entry in (
+            'embassy-time = "0.5"',
+            'dagon-sim = { path = "../dagon-sim" }',
+            'dagon-events = { path = "../dagon-events" }',
+            'clock = { package = "embassy-time", version = "0.5" }',
+            'dagon-mcu-rp2040 = { path = "../../targets/mcu/rp2040" }',
+        ):
+            for header in ("[dependencies]", "[target.'cfg(target_os = \"none\")'.dependencies]"):
+                with self.subTest(entry=entry, header=header):
+                    self.assertTrue(self.with_entries({RELAY_MANIFEST: (header, entry)}))
+
+    def test_a_forbidden_package_through_a_path_dependency_fails(self):
+        for entry in ('embassy-time = "0.5"', 'dagon-board-x = "0.1"'):
+            with self.subTest(entry=entry):
+                self.assertTrue(self.with_entries({PORT_MANIFEST: ("[dependencies]", entry)}))
+
+    def test_the_simulator_as_a_dev_dependency_passes(self):
+        planted = {RELAY_MANIFEST: ("[dev-dependencies]", 'dagon-sim = { path = "../dagon-sim" }')}
+        self.assertEqual(self.with_entries(planted), [])
+
+    def test_the_simulator_depending_on_the_relay_fails(self):
+        for m in RELAY_FREE:
+            for header in ("[dependencies]", "[dev-dependencies]"):
+                with self.subTest(manifest=m, header=header):
+                    self.assertTrue(self.with_entries({m: (header, 'dagon-relay = { path = "../dagon-relay" }')}))
+
+    def test_a_missing_relay_crate_fails(self):
+        def read(p):
+            if p.as_posix() == RELAY_MANIFEST:
+                raise FileNotFoundError(p)
+            return read_manifest(p)
+        self.assertTrue(problems(self.texts, read))
+
+    def test_an_mcu_link_name_in_the_relay_fails(self):
+        for name in ("link::I2C0", "link :: PIO_UART", "iface::I2C_BUS", "iface::PIO_UART"):
+            with self.subTest(name=name):
+                planted = {**self.texts, f"{RELAY_SRC}planted.rs": f"const X: u8 = {name};\n"}
+                self.assertTrue(problems(planted))
+
+    def test_an_mcu_link_name_in_a_comment_or_outside_the_relay_passes(self):
+        planted = {
+            **self.texts,
+            f"{RELAY_SRC}planted.rs": "// link::I2C0\nconst S: &str = \"iface::PIO_UART\";\n",
+            f"{RP_PACKAGE}planted.rs": "const X: u8 = link::I2C0;\n",
+        }
+        self.assertEqual(problems(planted), [])
+
+    def test_an_old_path_fails(self):
+        for path, code in (
+            ("targets/boards/x/src/screen.rs", "use dagon_mcu_rp2040::view::Home;\n"),
+            ("targets/boards/x/src/screen.rs", "use dagon_mcu_rp2040::{arm, nodes::HUB};\n"),
+            ("targets/mcu/rp2040/tests/x.rs", "fn f() { dagon_mcu_rp2040::cmd::relay_fits(); }\n"),
+            (f"{RP_PACKAGE}lib.rs", "pub mod nodes;\n"),
+            (f"{RP_PACKAGE}relay/mod.rs", "pub use crate::view;\n"),
+            (f"{RP_PACKAGE}relay/pc.rs", "use crate::{cmd, node};\n"),
+            (f"{RP_PACKAGE}relay/mod.rs", "pub use dagon_relay::nodes::{named, LinkedNode as SubNode};\n"),
+            (f"{RP_PACKAGE}relay/mod.rs", "pub use dagon_relay::nodes::named;\n"),
+            (f"{RP_PACKAGE}lib.rs", "pub(crate) use ::dagon_relay::view;\n"),
+            ("targets/rp2040-hub/src/main.rs", "use dagon_mcu_rp2040::relay::{self, named, RelayConfig};\n"),
+            ("targets/rp2040-hub/src/main.rs", "static W: [dagon_mcu_rp2040::relay::LinkedNode; 0] = [];\n"),
+            ("targets/rp2040-hub/src/main.rs", "static W: [SubNode; 0] = [];\n"),
+            ("targets/boards/x/src/screen.rs", "use dagon_relay::nodes::LinkedNode as Child;\n"),
+            ("targets/boards/x/src/screen.rs", "use dagon_relay::nodes::MAX_LINKED as MAX_SUBS;\n"),
+            ("crates/dagon-relay/src/nodes.rs", "pub type Subs = LinkedNodes;\n"),
+        ):
+            with self.subTest(path=path, code=code):
+                self.assertTrue(problems({**self.texts, path: self.texts.get(path, "") + "\n" + code}))
+
+    def test_the_new_paths_and_other_modules_pass(self):
+        planted = {
+            **self.texts,
+            "targets/boards/x/src/screen.rs": "use dagon_relay::view::Home;\nuse dagon_mcu_rp2040::node;\n// dagon_mcu_rp2040::view\n",
+            "crates/dagon-host/src/planted.rs": "mod view;\nuse crate::nodes;\n",
+            f"{RP_PACKAGE}planted.rs": "use dagon_relay::nodes::LinkedNode;\nuse crate::sub::SubLines;\nuse x::Node as Peer;\n",
+        }
+        self.assertEqual(problems(planted), [])
 
 
 if __name__ == "__main__":

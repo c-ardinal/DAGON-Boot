@@ -41,7 +41,7 @@ Trust:
 | `LogSink` | where `Recent` overflow and extension logs go | app, relay, host | none | untrusted | return, events, time, memory |
 | `SelfCheck` | the health answer when a slot on trial is confirmed | app | healthy | untrusted (a decision point, 3) | return, time, memory |
 | `BoardBringUp` | the board's power, pins and buses at app start | app, relay | the board definition's | untrusted | return, pins, buses, time, memory |
-| `ChildLink` | how a hub reaches a child | relay | I2C controller, PIO UART | untrusted | return, buses, transport, dma, time, memory |
+| `NodeLink` | how a node reaches another node over a link, through `dagon_port::NodeLink` | relay | I2C controller, PIO UART | untrusted | return, buses, transport, dma, time, memory |
 | `Signer` | signing images and releases | host | file key pair | untrusted (the host is trusted by definition; the device verifies) | – |
 | `KeyStore` | receives the signing key from where the user chose to keep it (an environment variable, the OS key store, 1Password and so on) | host | file key pair | untrusted (the host is trusted by definition; the device verifies) | – |
 | `BuildRunner` | building node images | host | cargo | untrusted | – |

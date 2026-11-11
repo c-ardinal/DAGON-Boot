@@ -94,7 +94,7 @@
 "file key pair" = "ファイルの鍵の組"
 "header signature, key lookup" = "ヘッダの署名、鍵の検索"
 "healthy" = "健全"
-"how a hub reaches a child" = "親機が子機に届く方法"
+"how a node reaches another node over a link, through `dagon_port::NodeLink`" = "`dagon_port::NodeLink`で、ノードがリンクの先の別のノードに届く方法"
 "it cannot skip a guard: the session machine runs the guards, not the protocol" = "ガードは飛ばせません。ガードを実行するのはセッションの状態機械で、プロトコルではありません"
 "it is what keeps extensions away from DAGON's state" = "拡張をDAGONの状態から遠ざけているものです"
 "it is what makes every extension see every event and keeps answers bounded" = "すべての拡張がすべてのイベントを見られるようにし、答えを有界に保つものです"

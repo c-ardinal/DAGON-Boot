@@ -261,7 +261,7 @@ dagon_events::state_machine! {
 | `LogSink` (`Recent`のあふれと拡張のログの行き先) | app, relay, host | なし | untrusted | return, events, time, memory |
 | `SelfCheck` (試行中のスロットを確定するときの健全さの答え) | app | 健全 | untrusted (判断点、3) | return, time, memory |
 | `BoardBringUp` (アプリの起動時のボードの電源、ピン、バス) | app, relay | ボードの定義のもの | untrusted | return, pins, buses, time, memory |
-| `ChildLink` (親機が子機に届く方法) | relay | I2Cコントローラ、PIO UART | untrusted | return, buses, transport, dma, time, memory |
+| `NodeLink` (`dagon_port::NodeLink`で、ノードがリンクの先の別のノードに届く方法) | relay | I2Cコントローラ、PIO UART | untrusted | return, buses, transport, dma, time, memory |
 | `Signer` (イメージとリリースの署名) | host | ファイルの鍵の組 | untrusted (ホストは定義上信頼されます。検証するのはデバイスです) | – |
 | `KeyStore` (利用者が選んだ置き場所（環境変数、OSのキーストア、1Passwordなど）から署名の鍵を受け取る) | host | ファイルの鍵の組 | untrusted (ホストは定義上信頼されます。検証するのはデバイスです) | – |
 | `BuildRunner` (ノードのイメージのビルド) | host | cargo | untrusted | – |
@@ -335,7 +335,7 @@ pub struct Nop;  // no extension
 - **アプリ（embassy）。**`node::start` / `board::start`は`App`を受け取ります。自己検査の関数、`exts: Option<&'static mut (dyn Extension +
   Send)>`（`static`に置いたアプリの`extensions![..]`。embassyのタスクはジェネリックにできず、応答のタスクがチェーンを持つので、ジェネリックではなく参照です）、`confirm`（`ByHost`か`Own`: 起動がアプリの試行を確定します）です。起動は、リンクが応答を始める前に、ボードの`BoardBringUp`のポート（`app.bring_up`。無いボードは何も出しません）を実行し、次に自分の確定をします。ボードの定義の拡張（ボードの定義の`extension()`。ESP32-S3では`NodePeripherals::
   board_extension`）が、チェーンのボードの場所に入ります。エージェントは起動とその応答のタスクのものにとどまり、渡す公開の関数はありません。マイコンの定義のコードがレイヤーの`Published`を作って持ち、合成し、アプリに`Reader`を返します。エージェントの状態機械がすべてのイベントをチェーンに届け、チェーンが3つの点で判断のメソッドに尋ねます。マイコンの隔離のレベルが許すところでは（4.5）、応答のタスクはブート時と同じサンドボックスの下で、チェーンのハンドラを非特権で動かします。それ以外では、時間の上限を測って報告しながら、普通のコードとして動かします。
-- **リレー。** リレー自身のエージェントは、同じチェーンを持つアプリです。リレーの状態機械のイベントと`ChildLink`のポートはそこを通ります。
+- **リレー。** リレー自身のエージェントは、同じチェーンを持つアプリです。リレーの状態機械のイベントと`NodeLink`のポートはそこを通ります。
 - **ホスト。**`dagon-host`は、CLIがプロジェクトの`dagon.toml`（`[host] extensions`）から作ったチェーンを`Box<dyn Extension>`として受け取ります。データで定義する種類（エージェントの定義、アクションの定義、プログラムやデバイスで指定するシリアルやCANのアダプタのような転送の定義）と、`dagon_host::Transport`、`Signer`、`BuildRunner`を実装するRustのcrateで、crateはCLIのビルドのワークスペースの依存として読み込みます。ホストは利用者の権限で動き、そのサンドボックスはOSです。
 
 アプリのエージェントは、合成されたチェーンだけを受け取ります。`Agent::new(config, store, chain)`で、`chain`は`compose`の結果です。別のフックのトレイトはありません。イベントの観測と、`accept_update`、`allow_reboot_now`、`self_check`への応答は`Extension`のメソッドです。マイコンの定義のコードの`start`は、アプリの`fn() -> bool`の自己検査も引き続き受け付け、1メソッドの拡張（`SelfCheck`）に包んで、チェーンの利用者の部分の、アプリの拡張の後に置きます。これは棄権しないので、先に置くと拡張の答えを隠してしまうからです。

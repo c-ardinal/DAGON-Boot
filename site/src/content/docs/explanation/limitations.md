@@ -45,7 +45,7 @@ description: "設計との違いと、DAGONがしないことです。仕様上�
 
 設計の図にあってコードに無いコンポーネント:
 
-- 置き換えのトレイトが無いポート: BuildRunner、Signer、DecisionPolicy、LogStorage、UpdateProtocol、Recovery、ChildLink、ImageVerifier、Digest、CryptoProvider、Diagnostics、Display、LogSink、Agent、Action
+- 置き換えのトレイトが無いポート: BuildRunner、Signer、DecisionPolicy、LogStorage、UpdateProtocol、Recovery、ImageVerifier、Digest、CryptoProvider、Diagnostics、Display、LogSink、Agent、Action
 - 親機: Coordinator、Release Store、Bus Guardian。書き込みはPCが親機を通して進めます。
 - 書き込みの計画: Delivery Planの試行の時間枠と昇格の判断
 - 復旧: Recovery PolicyとNode Recoveryの、段階の自動の選択と回数に上限のある再試行

@@ -45,7 +45,7 @@ Values and IDs:
 
 Components in the design figure that the code does not have:
 
-- Ports with no replaceable trait: BuildRunner, Signer, DecisionPolicy, LogStorage, UpdateProtocol, Recovery, ChildLink, ImageVerifier, Digest, CryptoProvider, Diagnostics, Display, LogSink, Agent, Action
+- Ports with no replaceable trait: BuildRunner, Signer, DecisionPolicy, LogStorage, UpdateProtocol, Recovery, ImageVerifier, Digest, CryptoProvider, Diagnostics, Display, LogSink, Agent, Action
 - On the hub: Coordinator, Release Store, Bus Guardian. The PC drives a write through the hub.
 - The write plan: the Delivery Plan's trial window and promotion judgement
 - Recovery: Recovery Policy's and Node Recovery's automatic choice of tier and bounded retry

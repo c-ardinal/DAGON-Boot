@@ -9,8 +9,8 @@
 
 use core::fmt::Write as _;
 
-use dagon_mcu_rp2040::view::{Home, Node, Progress, Shade};
 use dagon_proto::payload::phase;
+use dagon_relay::view::{Home, Node, Progress, Shade};
 use embedded_graphics::mono_font::ascii::{FONT_10X20, FONT_6X10};
 use embedded_graphics::mono_font::{MonoFont, MonoTextStyle};
 use embedded_graphics::pixelcolor::Rgb565;
@@ -57,12 +57,12 @@ pub fn draw<D: DrawTarget<Color = Rgb565>>(
     d.clear(Rgb565::BLACK)?;
     let p = home.progress.as_ref();
     node(d, HUB_AT, HUB_D, &home.hub, p, &FONT_10X20)?;
-    for (&at, n) in sub_at(home.subs.len()).iter().zip(&home.subs) {
+    for (&at, n) in sub_at(home.linked.len()).iter().zip(&home.linked) {
         node(d, at, SUB_D, n, p, &FONT_6X10)?;
     }
     if let Some(p) = p {
         let name = core::iter::once(&home.hub)
-            .chain(&home.subs)
+            .chain(&home.linked)
             .find(|n| n.node.index == p.node)
             .map_or("?", |n| n.node.name());
         let mut line: String<64> = String::new();

@@ -7,9 +7,9 @@ use std::format;
 use std::vec::Vec;
 
 use dagon_format::Version;
-use dagon_mcu_rp2040::nodes::{named, HUB};
-use dagon_mcu_rp2040::view::{Home, Node, Progress, Shade};
 use dagon_proto::payload::{link, phase};
+use dagon_relay::nodes::{named, HUB};
+use dagon_relay::view::{Home, Node, Progress, Shade};
 use embedded_graphics::geometry::Dimensions;
 use embedded_graphics::pixelcolor::RgbColor;
 use embedded_graphics::primitives::Rectangle;
@@ -84,7 +84,7 @@ fn home(subs: &[Shade]) -> Home {
     };
     for (i, &s) in subs.iter().enumerate() {
         let _ = h
-            .subs
+            .linked
             .push(node(i as u8 + 1, ["seg", "watch", "mesh"][i], s));
     }
     h

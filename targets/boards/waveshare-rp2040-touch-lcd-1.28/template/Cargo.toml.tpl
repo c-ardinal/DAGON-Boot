@@ -17,9 +17,11 @@ test = false
 slot-b = ["dagon-board-waveshare-rp2040-touch-lcd-1-28/slot-b"]
 
 [dependencies]
-# DAGON board support (the package lines are rewritten by dagon gen).
+# DAGON board support and the relay (the package lines are rewritten by
+# dagon gen).
 {{dep:dagon-board-waveshare-rp2040-touch-lcd-1-28}}
 {{dep:dagon-mcu-rp2040}}
+{{dep:dagon-relay}}
 embassy-rp = { version = "0.10.0", features = ["rp2040", "time-driver", "critical-section-impl"] }
 embassy-executor = { version = "0.10", features = ["platform-cortex-m", "executor-thread"] }
 embassy-time = "0.5"

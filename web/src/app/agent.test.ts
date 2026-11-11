@@ -126,7 +126,7 @@ describe('DAGON and its agent (site/src/content/docs/reference/agent-api.md)', (
     }
   });
 
-  test('dagon demo refuses linking: said calmly', async () => {
+  test('a refused link (403) is said calmly', async () => {
     const a = new Agent(async () => json({ error: 'demo' }, 403));
     expect(await a.setLink({ agent: 'claude', way: 'api' })).toEqual(AGENT.errors.DEMO);
   });

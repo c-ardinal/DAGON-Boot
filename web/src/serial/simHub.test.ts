@@ -75,7 +75,7 @@ describe('the browser simulator takes the links and flash their real time', () =
   }, 120_000);
 });
 
-describe('a write the simulator sends back, as dagon demo --sim-fail watch does', () => {
+describe('a write the simulator sends back, the watch crashing at boot', () => {
   /** A write of the sample release to the simulator, with the watch's new version crashing at boot. */
   async function wentBack(): Promise<Operate> {
     const sim = simulator(12, (hub) => hub.failWatch())!;

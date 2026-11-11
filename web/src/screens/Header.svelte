@@ -19,7 +19,7 @@
     onlocked?: () => void;
     menuOpen?: boolean;
     onmenu?: () => void;
-    /** `dagon demo`: the hub is simulated (模擬, always shown). */
+    /** The hub is simulated (模擬, always shown). */
     sim?: boolean;
     /** The open project's name. */
     title?: string;

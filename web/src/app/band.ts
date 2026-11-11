@@ -29,7 +29,7 @@ export interface Names {
   rest?: boolean;
   /** There is a build to write: the main action writes it. */
   built?: boolean;
-  /** dagon demo: the 親機 is simulated, so no device list appears. */
+  /** The 親機 is simulated, so no device list appears. */
   sim?: boolean;
   /** What the last run left (done): the band says only that. */
   finish?: Finish | null;

@@ -17,13 +17,11 @@ mod http;
 mod jobs;
 mod project;
 mod recent;
-mod sim;
 
 /// What may become a file name (node ids, package ids).
 pub(crate) use api::plain as plain_id;
 #[cfg(test)]
-pub use sim::Medium;
-pub use sim::SimDevice;
+pub use dagon_sim::Medium;
 mod ws;
 
 use std::io::Write;
@@ -81,13 +79,8 @@ fn start_key(
     }
 }
 
+/// `dagon serve`.
 pub fn command(a: &ServeArgs) -> Result<(), String> {
-    run(a, None)
-}
-
-/// `dagon serve`, with the simulator of `dagon demo` when `sim` is
-/// given (the page then reaches it instead of a real hub).
-pub fn run(a: &ServeArgs, sim: Option<Arc<SimDevice>>) -> Result<(), String> {
     // serve's output is a log for a person (a terminal, or a file it is
     // sent to): the banner opens it. Machine-readable output never has it.
     println!("{}\n", crate::banner_text());
@@ -125,12 +118,6 @@ pub fn run(a: &ServeArgs, sim: Option<Arc<SimDevice>>) -> Result<(), String> {
     })?;
     if let Some(k) = key {
         server.set_release_key(k);
-    }
-    if let Some(s) = sim {
-        for line in &s.notes {
-            println!("{line}");
-        }
-        let _ = server.sim.set(s);
     }
     if web.as_os_str().is_empty() {
         println!("DAGON Console: built into this executable");

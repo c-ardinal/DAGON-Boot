@@ -1,8 +1,7 @@
-//! `dagon demo`: DAGON Console against a simulator, no boards needed.
-//! The 親機 (RP2040) with its two 子機 (the F401 on I2C, the ESP32-S3 watch
-//! on the UART), all on 1.0.0, as dagon-sim simulates them for `dagon sim
-//! run`; the page drives them with the same dagon-host code as real
-//! hardware (see serve::sim for the link and its timing).
+//! The sample project on the simulator, for tests: the 親機 (RP2040) with
+//! its two 子機 (the F401 on I2C, the ESP32-S3 watch on the UART), all on
+//! 1.0.0, as dagon-sim simulates them for `dagon sim run`, driven by the
+//! same dagon-host code as real hardware, with the links' timing.
 //!
 //! Everything is made fresh at start in a demo folder under the system's
 //! temporary folder: a demo key pair (never the developer's key), the
@@ -12,7 +11,6 @@
 //! 子機's new version crash at boot, so its update falls back to 1.0.0.
 
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
 
 use dagon_format::header::{image_kind, target_tag};
 use dagon_format::Version;
@@ -20,7 +18,7 @@ use dagon_sign::image::{self, sign_image, ImageSpec};
 use dagon_sim::{demo_hub, watch_config, Layout, SimFlash, SimHub, SimLink, SimNode, TrialApp};
 use ed25519_compact::KeyPair;
 
-use crate::serve::Medium;
+use dagon_sim::Medium;
 
 const YAML: &str = include_str!("../../../topology/sample.yaml");
 /// Marks a folder this command made (and may make again).
@@ -191,7 +189,7 @@ pub fn project(dir: &Path, uplink: Medium) -> Result<(PathBuf, KeyPair), String>
     if dir.exists() {
         if !dir.join(MARK).is_file() {
             return Err(format!(
-                "{} exists and was not made by dagon demo; remove it or move it away",
+                "{} exists and was not made by the demo fixture; remove it or move it away",
                 dir.display()
             ));
         }
@@ -199,13 +197,16 @@ pub fn project(dir: &Path, uplink: Medium) -> Result<(PathBuf, KeyPair), String>
     }
     std::fs::create_dir_all(dir).map_err(|e| format!("cannot create {}: {e}", dir.display()))?;
     let write = |rel: &str, bytes: &[u8]| crate::config::write_file(&dir.join(rel), bytes);
-    write(MARK, b"made by dagon demo; replaced on its next start\n")?;
+    write(
+        MARK,
+        b"made by the demo fixture; replaced on its next start\n",
+    )?;
     let k = dagon_sign::generate_to_dir(&dir.join("demo-key")).map_err(|e| e.to_string())?;
     let key = dagon_sign::load_key_pair(&k.secret_path).map_err(|e| e.to_string())?;
     write("topology.yaml", yaml(uplink).as_bytes())?;
     write(
         crate::config::CONFIG_FILE,
-        b"# The dagon demo project (simulator). Its key is a DEMO key made\n\
+        b"# The demo project (simulator). Its key is a DEMO key made\n\
           # for this demo only; nothing it signs runs on real boards.\n\
           topology = \"topology.yaml\"\n\
           pubkey = \"demo-key/dagon-signing.pub\"\n\
@@ -283,36 +284,46 @@ mod tests {
         std::fs::remove_file(dir.join(MARK)).unwrap();
         assert!(project(&dir, Medium::UsbCdc)
             .unwrap_err()
-            .contains("not made by dagon demo"));
+            .contains("not made by the demo fixture"));
         let _ = std::fs::remove_dir_all(&dir);
     }
 
     use dagon_host::{Host, Outcome};
-    use std::time::{Duration, Instant};
+    use dagon_sim::TimedHub;
+    use std::cell::RefCell;
+    use std::rc::Rc;
 
-    /// dagon-host's link to the simulator, as the page has it through serve.
-    struct Link(Arc<crate::serve::SimDevice>, Vec<u8>);
+    /// The simulator as dagon-host's transport and clock: answers arrive
+    /// when the uplink would have carried them.
+    #[derive(Clone)]
+    struct Link(Rc<RefCell<TimedHub>>, Vec<u8>);
+
+    impl Link {
+        fn new(hub: SimHub, uplink: Medium) -> Link {
+            let mut t = TimedHub::new(hub);
+            t.set_medium(uplink);
+            Link(Rc::new(RefCell::new(t)), Vec::new())
+        }
+    }
 
     impl dagon_host::Transport for Link {
         type Error = ();
         fn max_payload(&self) -> usize {
-            self.0.medium().max_payload()
+            self.0.borrow().medium().max_payload()
         }
         fn reconnect_kind(&self) -> dagon_host::Reconnect {
-            if self.0.medium().stays_on_reboot() {
+            if self.0.borrow().medium().stays_on_reboot() {
                 dagon_host::Reconnect::Stays
             } else {
                 dagon_host::Reconnect::Reopen
             }
         }
         async fn write(&mut self, bytes: &[u8]) -> Result<(), ()> {
-            self.0.write(bytes);
+            self.0.borrow_mut().write(bytes);
             Ok(())
         }
         async fn read(&mut self, buf: &mut [u8]) -> Result<usize, ()> {
-            if self.1.is_empty() {
-                self.1 = self.0.read(Duration::from_millis(2));
-            }
+            self.1.extend(self.0.borrow_mut().read());
             let n = buf.len().min(self.1.len());
             buf[..n].copy_from_slice(&self.1[..n]);
             self.1.drain(..n);
@@ -323,37 +334,32 @@ mod tests {
         }
     }
 
-    /// The page's clock at the demo's speed.
-    struct Clock(Instant, f64);
-
-    impl dagon_host::Clock for Clock {
+    impl dagon_host::Clock for Link {
         fn now_ms(&self) -> u64 {
-            (self.0.elapsed().as_secs_f64() * 1_000.0 * self.1) as u64
+            self.0.borrow().now_ms()
         }
         async fn sleep_ms(&mut self, ms: u32) {
-            std::thread::sleep(Duration::from_secs_f64(ms as f64 / 1_000.0 / self.1));
+            self.0.borrow_mut().advance_ms(u64::from(ms));
         }
     }
 
-    /// Release demo-1.1.0 applied to every node through the demo link.
+    fn host(hub: SimHub, uplink: Medium) -> Host<Link, Link> {
+        let link = Link::new(hub, uplink);
+        Host::new(link.clone(), link)
+    }
+
+    /// Release demo-1.1.0 applied to every node.
     fn update(name: &str, fail: Option<&str>) -> Vec<(u8, String)> {
         update_over(name, fail, Medium::UsbCdc)
     }
 
     fn update_over(name: &str, fail: Option<&str>, uplink: Medium) -> Vec<(u8, String)> {
-        const SPEED: f64 = 50.0;
         let dir = std::env::temp_dir().join(format!("dagon-demo-{name}-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         let (_, key) = project(&dir, Medium::UsbCdc).unwrap();
         let bundle = std::fs::read(dir.join(format!("out/release/{RELEASE}.dgb"))).unwrap();
         let topo = dagon_topology::compile_str(&yaml(uplink)).unwrap();
-        let dev = Arc::new(crate::serve::SimDevice::new(
-            sim_hub(&key, fail, 1).unwrap(),
-            SPEED,
-            None,
-        ));
-        dev.set_medium(uplink);
-        let mut h = Host::new(Link(dev, Vec::new()), Clock(Instant::now(), SPEED));
+        let mut h = host(sim_hub(&key, fail, 1).unwrap(), uplink);
         let out = dagon_sim::block_on(h.apply(&bundle, &topo, &key.pk, None, &mut |_| {})).unwrap();
         let _ = std::fs::remove_dir_all(&dir);
         out.into_iter()
@@ -378,7 +384,7 @@ mod tests {
     }
 
     #[test]
-    fn the_whole_sample_updates_through_the_demo_link() {
+    fn the_whole_sample_updates_on_the_simulator() {
         let out = update("all", None);
         assert_eq!(out.len(), 3, "{out:?}");
         assert!(out.iter().all(|(_, w)| w == "done 1.1.0"), "{out:?}");
@@ -413,21 +419,15 @@ mod tests {
 
     #[test]
     fn a_kept_past_version_is_written_back_to_every_node() {
-        const SPEED: f64 = 50.0;
         let dir = std::env::temp_dir().join(format!("dagon-demo-back-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         let (config, key) = project(&dir, Medium::UsbCdc).unwrap();
         let cfg = crate::config::Config::load(Some(&config.to_string_lossy())).unwrap();
         let t = dagon_topology::parse_str(&yaml(Medium::UsbCdc)).unwrap();
         let topo = dagon_topology::compile_str(&yaml(Medium::UsbCdc)).unwrap();
-        let dev = Arc::new(crate::serve::SimDevice::new(
-            sim_hub(&key, None, 1).unwrap(),
-            SPEED,
-            None,
-        ));
-        let mut h = Host::new(Link(dev, Vec::new()), Clock(Instant::now(), SPEED));
+        let mut h = host(sim_hub(&key, None, 1).unwrap(), Medium::UsbCdc);
         let new = std::fs::read(dir.join(format!("out/release/{RELEASE}.dgb"))).unwrap();
-        let run = |h: &mut Host<Link, Clock>, b: &[u8]| -> Vec<String> {
+        let run = |h: &mut Host<Link, Link>, b: &[u8]| -> Vec<String> {
             dagon_sim::block_on(h.apply(b, &topo, &key.pk, None, &mut |_| {}))
                 .unwrap()
                 .into_iter()
@@ -438,7 +438,7 @@ mod tests {
                 .collect()
         };
         assert_eq!(run(&mut h, &new), ["done 1.1.0"; 3]);
-        let core = |h: &mut Host<Link, Clock>| {
+        let core = |h: &mut Host<Link, Link>| {
             let cs = dagon_sim::block_on(
                 h.boot_core_status(dagon_host::Target::I2c(dagon_sim::NODE_I2C_ADDR)),
             )

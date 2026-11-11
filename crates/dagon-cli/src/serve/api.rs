@@ -8,7 +8,6 @@ use std::sync::Arc;
 use dagon_format::header::{image_kind, slot_binding, ImageHeader, HEADER_SIZE};
 use dagon_sign::to_hex;
 use dagon_topology::defs::{page_safe as plain_name, Registry};
-use dagon_topology::schema::{Uplink, UplinkHost};
 use serde_json::{json, Value};
 
 use super::http::{Request, Response};
@@ -186,9 +185,6 @@ fn nodes_of(v: &Value) -> Result<Vec<String>, Response> {
 pub fn handle(server: &Arc<Server>, req: &Request) -> Response {
     let path = req.path.split('?').next().unwrap_or("");
     let parts: Vec<&str> = path.trim_start_matches("/v1/").split('/').collect();
-    if server.sim.get().is_some() && demo_refuses(&parts) {
-        return Response::error(403, "not in dagon demo (a simulator with its own project)");
-    }
     if parts.first() == Some(&"ai") && !agent_linked(server) {
         return consent_refusal(server);
     }
@@ -234,99 +230,9 @@ pub fn handle(server: &Arc<Server>, req: &Request) -> Response {
         ("POST", ["gen"]) => gen_start(server, req),
         ("POST", ["flash"]) => start(server, req, "flash", super::devjobs::job_flash),
         ("POST", ["doctor"]) => start(server, req, "doctor", super::devjobs::job_doctor),
-        ("POST", ["sim", "write"]) => sim_write(server, req),
-        ("GET", ["sim", "read"]) => sim_read(server, req),
         _ => Ok(Response::error(404, "no such endpoint")),
     };
     r.unwrap_or_else(|e| e)
-}
-
-/// What dagon demo refuses: other projects (opening one would load its
-/// signing key) and everything that touches real hardware or the machine.
-/// Never a real agent in a demo either: linking, questions, AI routes.
-const DEMO_REFUSED: [&str; 12] = [
-    "agent/link",
-    "agent/key",
-    "agent/ask",
-    "ai",
-    "project/open",
-    "project/new",
-    "project/init",
-    "fs",
-    "flash",
-    "doctor",
-    "conform",
-    "device",
-];
-
-fn demo_refuses(parts: &[&str]) -> bool {
-    let route = parts.join("/");
-    DEMO_REFUSED
-        .iter()
-        .any(|r| route == *r || route.starts_with(&format!("{r}/")))
-}
-
-/// Features dagon demo leaves out of hello (the page hides them).
-const DEMO_HIDDEN: [&str; 5] = ["project", "flash", "doctor", "conform", "ai_topology"];
-
-/// The simulated medium a 構成's 親機 uplink names (None: not one the
-/// demo simulates, or no 親機).
-/// The medium `dagon demo` simulates for a 構成's 親機: Ok(None) without a
-/// 親機, Err(uplink) for one it cannot simulate (a kind other than USB, UART
-/// or Wi-Fi, or a custom device driving it), so the link on the screen is
-/// always the one in use.
-fn demo_uplink(yaml: &str) -> Result<Option<super::sim::Medium>, Uplink> {
-    let Some(hub) = dagon_topology::parse_str(yaml).ok().and_then(|t| {
-        t.nodes
-            .into_iter()
-            .find(|n| n.role == dagon_topology::schema::Role::Coordinator)
-    }) else {
-        return Ok(None);
-    };
-    let u = dagon_topology::Topology::uplink(&hub);
-    match super::sim::Medium::of(u.kind) {
-        Some(m) if u.host != UplinkHost::Embedded => Ok(Some(m)),
-        _ => Err(u),
-    }
-}
-
-fn host_name(h: UplinkHost) -> &'static str {
-    match h {
-        UplinkHost::PcCli => "pc-cli",
-        UplinkHost::Browser => "browser",
-        UplinkHost::Embedded => "embedded",
-    }
-}
-
-/// The longest GET /v1/sim/read waits for an answer.
-const SIM_READ_MAX_MS: u64 = 1_000;
-
-fn sim_of(server: &Server) -> Result<&Arc<super::SimDevice>, Response> {
-    server
-        .sim
-        .get()
-        .ok_or_else(|| Response::error(404, "no simulator (dagon demo)"))
-}
-
-/// POST /v1/sim/write: bytes for the simulated hub's USB port.
-fn sim_write(server: &Server, req: &Request) -> Res {
-    sim_of(server)?.write(&req.body);
-    Ok(json_ok(json!({})))
-}
-
-/// GET /v1/sim/read?wait=<ms>: what the simulated hub answered (empty
-/// when nothing came within the wait).
-fn sim_read(server: &Server, req: &Request) -> Res {
-    let sim = sim_of(server)?;
-    let wait = req
-        .path
-        .split_once('?')
-        .and_then(|(_, q)| q.split('&').find_map(|kv| kv.strip_prefix("wait=")))
-        .and_then(|w| w.parse::<u64>().ok())
-        .unwrap_or(0)
-        .min(SIM_READ_MAX_MS);
-    let bytes = sim.read(std::time::Duration::from_millis(wait));
-    Ok(Response::bytes("application/octet-stream", bytes))
 }
 
 /// What this serve offers the page. `flash` and `doctor` join when this
@@ -616,12 +522,6 @@ fn hello(server: &Server) -> Response {
         .map(|m| m.id)
         .filter(|m| plain_name(m))
         .collect();
-    let sim = server.sim.get();
-    let mut features = FEATURES.to_vec();
-    if sim.is_some() {
-        features.retain(|f| !DEMO_HIDDEN.contains(f));
-        features.push("sim");
-    }
     json_ok(json!({
         "cli": env!("CARGO_PKG_VERSION"),
         // The serve API number (the page refuses one it does not expect)
@@ -629,23 +529,12 @@ fn hello(server: &Server) -> Response {
         "api": crate::versions::SERVE_API,
         "formats": crate::versions::formats().into_iter().collect::<std::collections::BTreeMap<_, _>>(),
         "workspace": workspace,
-        "features": features,
+        "features": FEATURES,
         "key": key.is_some(),
         "key_id": key,
         "release_key": server.release_key().map(|k| to_hex(&k)),
-        // The simulator of dagon demo: the page shows 模擬 and reaches
-        // it through /v1/sim.
-        "sim": sim.map(|s| {
-            let m = s.medium();
-            json!({
-                "speed": s.speed,
-                "fail": s.fail,
-                // The simulated uplink: its kind, frame size and reboot behaviour.
-                "uplink": m.kind().name(),
-                "max_payload": m.max_payload(),
-                "reconnect": if m.stays_on_reboot() { "stays" } else { "reopen" },
-            })
-        }),
+        // Always null: serve has no simulator; the field stays so hello keeps its shape under serve-api 1.
+        "sim": Value::Null,
         // The nodes with a [build.*] in dagon.toml: the others have no skeleton yet.
         "build_nodes": cfg.as_ref().map(|c| c.build.keys().cloned().collect::<Vec<_>>()),
         // The MCU families POST /v1/flash can write.
@@ -732,29 +621,11 @@ fn topology_put(server: &Server, req: &Request) -> Res {
     let cut = dagon_topology::parse_str(yaml)
         .ok()
         .map(|t| dagon_topology::cut_with(&reg, &t));
-    // dagon demo: the 構成's uplink picks the simulated medium; one the
-    // demo cannot simulate is not saved, so the 構成 and the medium agree.
-    let medium = match server.sim.get().map(|_| demo_uplink(yaml)) {
-        Some(Err(u)) => {
-            return Err(Response::json(
-                422,
-                &json!({
-                    "report": report_json,
-                    "demo_uplink": { "kind": u.kind.name(), "host": host_name(u.host) },
-                }),
-            ))
-        }
-        Some(Ok(m)) => m,
-        None => None,
-    };
     let _lock = server
         .files
         .lock()
         .map_err(|_| Response::error(500, "lock"))?;
     crate::paths::write_atomic(&p, yaml.as_bytes()).map_err(|e| Response::error(500, &e))?;
-    if let (Some(sim), Some(m)) = (server.sim.get(), medium) {
-        sim.set_medium(m);
-    }
     Ok(json_ok(
         json!({ "report": report_json, "updatable": cut.as_ref().is_some_and(|c| c.topology.is_some()), "reach": cut.as_ref().map(|c| c.reach.clone()).unwrap_or_default(), "skipped": skipped_of(cut.as_ref()) }),
     ))

@@ -57,17 +57,17 @@ static FRAME: static_cell::ConstStaticCell<gc9a01::Frame> =
 /// and the STM32 control lines (PC and link tasks on DAGON's high-priority
 /// executor, the feeder on `spawner`), the touch controller held out of
 /// reset, and with `display` the home screen on `spawner` (guard task
-/// [`DISPLAY_TASK`]). Declare the guard with
-/// `dagon_mcu_rp2040::relay::levels()`. Returns what DAGON does not use,
-/// for the app's own tasks, and the 親機's events. The board has no
-/// bring-up, so no `app.bring_up` is emitted.
+/// [`DISPLAY_TASK`]), drawn from the relay's state in `setup`. Declare the
+/// guard with `dagon_mcu_rp2040::relay::levels()`. Returns what DAGON does
+/// not use, for the app's own tasks, and the node's events. The board has
+/// no bring-up, so no `app.bring_up` is emitted.
 #[cfg(feature = "relay")]
 pub fn start<const N: usize>(
     spawner: embassy_executor::Spawner,
     dagon: DagonParts,
     io: Io,
     guard: &'static dagon_mcu_rp2040::watchdog::Guard<N>,
-    cfg: dagon_mcu_rp2040::relay::RelayConfig,
+    setup: dagon_mcu_rp2040::relay::Setup,
     uplink: Kind,
     downlinks: &[Kind],
 ) -> (Spare, dagon_mcu_rp2040::node::AppEvents) {
@@ -89,7 +89,7 @@ pub fn start<const N: usize>(
     let wants = |k: Kind| downlinks.contains(&k);
     // The STM32 recovery lines belong to the I2C downlink (ROM path).
     let links = dagon_mcu_rp2040::relay::Links {
-        sub: wants(Kind::I2c).then(|| io.sub_ctl.lines()),
+        lines: wants(Kind::I2c).then(|| io.sub_ctl.lines()),
         uart: wants(Kind::Uart).then(|| downlink_uart(io.sub_uart)),
         i2c: wants(Kind::I2c).then(|| downlink_i2c(io.sub_i2c)),
     };
@@ -103,10 +103,13 @@ pub fn start<const N: usize>(
     {
         spare.display = Some(io.display);
     }
-    let events = dagon_mcu_rp2040::relay::start::<Board, N>(spawner, dagon, links, guard, cfg);
     #[cfg(feature = "display")]
-    spawner
-        .spawn(display::task(display, FRAME.take(), guard.lease(DISPLAY_TASK)).expect("task pool"));
+    let state = setup.state;
+    let events = dagon_mcu_rp2040::relay::start::<Board, N>(spawner, dagon, links, guard, setup);
+    #[cfg(feature = "display")]
+    spawner.spawn(
+        display::task(display, FRAME.take(), state, guard.lease(DISPLAY_TASK)).expect("task pool"),
+    );
     (spare, events)
 }
 

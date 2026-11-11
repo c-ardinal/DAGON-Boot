@@ -1,6 +1,6 @@
-//! The round LCD (GC9A01A, 240x240) task of the 親機 relay: it draws the
-//! home screen ([`crate::screen`]) from `dagon_mcu_rp2040::relay::state`
-//! and sends whole frames to the panel.
+//! The round LCD (GC9A01A, 240x240) task of the relay node: it draws the
+//! home screen ([`crate::screen`]) from the relay's [`State`] and sends
+//! whole frames to the panel.
 
 use core::fmt::Write as _;
 
@@ -15,8 +15,8 @@ use embedded_graphics::text::{Alignment, Text};
 use heapless::String;
 
 use dagon_mcu_rp2040::arm::step;
-use dagon_mcu_rp2040::relay::state;
-use dagon_mcu_rp2040::watchdog::Lease;
+use dagon_mcu_rp2040::watchdog::{now_ms, Lease};
+use dagon_relay::State;
 
 use crate::gc9a01::{Frame, Panel};
 use crate::screen;
@@ -29,12 +29,12 @@ const HEARTBEAT: Duration = Duration::from_secs(1);
 /// The LCD task (lowest priority, thread mode). It alone owns SPI1 and the
 /// panel pins. It draws into the RAM frame and sends whole frames by DMA,
 /// so it never holds the CPU for long. The backlight goes on after the
-/// first full frame. It redraws when [`state::REDRAW`] fires and toggles a
+/// first full frame. It redraws when `state` changed and toggles a
 /// heartbeat square every second. The `diag` build first shows a test
 /// pattern and the clock set-up for 3 s and a seconds counter.
 /// `lease`: the display's guard task (thread mode, `Background`).
 #[embassy_executor::task]
-pub async fn task(mut pins: Pins, frame: &'static mut Frame, lease: Lease) {
+pub async fn task(mut pins: Pins, frame: &'static mut Frame, state: &'static State, lease: Lease) {
     // A whole piece of drawing must end within the default work limit.
     let busy = || lease.watch.busy(lease.task);
     busy();
@@ -49,20 +49,20 @@ pub async fn task(mut pins: Pins, frame: &'static mut Frame, lease: Lease) {
         Timer::after_secs(3).await;
         busy();
     }
-    let mut shown = state::home();
+    let mut shown = state.home();
     let _ = screen::draw(frame, &shown, dagon_mcu_rp2040::TEST_KEY);
     panel.flush(frame).await;
     pins.backlight.set_high();
     let mut beat = false;
     loop {
         lease.idle();
-        let event = select(state::REDRAW.wait(), Timer::after(HEARTBEAT)).await;
+        let event = select(state.changed(), Timer::after(HEARTBEAT)).await;
         busy();
         if matches!(event, Either::Second(())) {
-            state::expire_progress();
+            state.expire_progress(now_ms());
             beat = !beat;
         }
-        let home = state::home();
+        let home = state.home();
         if home != shown {
             step(15);
             let _ = screen::draw(frame, &home, dagon_mcu_rp2040::TEST_KEY);

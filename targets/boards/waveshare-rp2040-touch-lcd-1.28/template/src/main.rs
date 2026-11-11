@@ -12,7 +12,7 @@ mod wiring;
 
 use dagon_board_waveshare_rp2040_touch_lcd_1_28::{self as board, Board, BoardDef};
 use dagon_mcu_rp2040::links::{self, Kind};
-use dagon_mcu_rp2040::relay::{self, RelayConfig};
+use dagon_mcu_rp2040::relay::{self, Setup};
 use dagon_mcu_rp2040::watchdog::{now_ms, Guard, Trial};
 use embassy_executor::Spawner;
 use panic_halt as _;
@@ -38,13 +38,22 @@ static GUARD: Guard<TASKS> =
 #[embassy_executor::main]
 async fn main(spawner: Spawner) {
     let (dagon, io) = Board::split(embassy_rp::init(Default::default()));
-    let cfg = RelayConfig {
+    let setup = Setup {
         // DAGON_TARGET_TAG in .cargo/config.toml (the boot core uses it too).
         tag: dagon_mcu_rp2040::target_tag!(),
+        // This node's index in the 構成 (wiring.rs).
+        index: wiring::NODE.index,
+        // The role the 構成 gives this node (wiring.rs).
+        role: if wiring::NODE.hub {
+            relay::role::HUB
+        } else {
+            relay::role::NODE
+        },
         name: "{{node}}",
-        fallback: &[],
         app: app::dagon(),
+        state: relay::new_state(),
+        relay: Default::default(),
     };
-    let (spare, _events) = board::start(spawner, dagon, io, &GUARD, cfg, UPLINK, DOWNLINKS);
+    let (spare, _events) = board::start(spawner, dagon, io, &GUARD, setup, UPLINK, DOWNLINKS);
     app::start(spawner, spare, &GUARD, board::APP_TASKS);
 }

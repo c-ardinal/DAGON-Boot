@@ -8,7 +8,7 @@ use std::vec::Vec;
 
 use dagon_format::Version;
 use dagon_proto::payload::{link, phase};
-use dagon_relay::nodes::{named, HUB};
+use dagon_relay::nodes::named;
 use dagon_relay::view::{Home, Node, Progress, Shade};
 use embedded_graphics::geometry::Dimensions;
 use embedded_graphics::pixelcolor::RgbColor;
@@ -75,8 +75,8 @@ fn node(index: u8, name: &str, shade: Shade) -> Node {
 
 fn home(subs: &[Shade]) -> Home {
     let mut h = Home {
-        hub: Node {
-            node: HUB,
+        own: Node {
+            node: named(0, "relay", 0, 0),
             version: Some(Version::new(1, 0, 0)),
             shade: Shade::Confirmed,
         },

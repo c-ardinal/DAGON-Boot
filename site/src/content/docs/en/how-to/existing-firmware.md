@@ -8,7 +8,7 @@ These steps are for firmware that is not a `dagon new` project.
 1. Add the crates as git dependencies pinned to a release tag, for example `dagon-agent = { git = "<repository URL>", tag = "<release tag>" }`. Do the same for `dagon-format`, `dagon-proto` and `dagon-port`. For a boot loader, add `dagon-core` too.
 2. Prepare the MCU and board definitions.
 
-   - On a supported MCU: use the MCU definition (`targets/mcu/<mcu>`: flash layout, linker map, boot images, watchdog, links). For the board, use a board definition (`targets/boards/<board id>`), or implement the MCU definition's `BoardDef` for your own board. The MCU definition READMEs show a complete app in about 20 lines.
+   - On a supported MCU: use the MCU definition (`targets/mcu/<mcu>`: flash layout, linker map, boot images, watchdog, links). For the board, use a board definition (`targets/boards/<board id>`), or implement `BoardCore` (`targets/mcu/common`: board id, flash size, bring-up, extension) and the MCU definition's `BoardDef` (the peripheral split) for your own board. The MCU definition READMEs show a complete app in about 20 lines.
    - On another MCU: lay out the flash the same way: a boot loader, two state log faces, and slots A and B. Each slot starts with the 512-byte signed image header, and the body is at slot start + 0x200.
 
 3. Implement the `dagon-port` traits for your board (`Flash`, `Link`, `Reset`, `Watchdog`, and `BootSelectS` or `BootSelectV`) and a `dagon_agent::SlotStore`.

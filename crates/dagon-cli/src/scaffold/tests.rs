@@ -1,7 +1,6 @@
 //! Projects generated into temporary folders, with a stand-in DAGON clone
 //! holding packages named and declared like the board support packages.
 
-use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
 use super::*;
@@ -108,7 +107,6 @@ fn sample_uses_each_packages_template_and_skips_what_is_missing() {
         &base,
         &sample(),
         &src,
-        &BTreeMap::new(),
         &[],
         false,
     )
@@ -158,7 +156,6 @@ fn gen_keeps_the_developers_code_and_refreshes_only_generated_parts() {
         &base,
         &sample(),
         &src,
-        &BTreeMap::new(),
         &[],
         false,
     )
@@ -181,7 +178,6 @@ fn gen_keeps_the_developers_code_and_refreshes_only_generated_parts() {
         &base,
         &t2,
         &src,
-        &BTreeMap::new(),
         &["watch".into()],
         false,
     )
@@ -203,7 +199,6 @@ fn gen_keeps_the_developers_code_and_refreshes_only_generated_parts() {
         &base,
         &t2,
         &src,
-        &BTreeMap::new(),
         &["watch".into()],
         true,
     )
@@ -238,27 +233,124 @@ fn a_node_chosen_by_mcu_finds_the_package_that_declares_the_mcu() {
     };
     let yaml = SAMPLE.replace("    board: nucleo-f401re\n", "");
     let t = dagon_topology::parse_str(&yaml).unwrap();
-    let mut boards = BTreeMap::new();
-    boards.insert(
-        "seg".to_string(),
-        BoardFacts {
-            flash_bytes: Some(512 * 1024),
-        },
-    );
     let base = project(&d);
     let r = gen(
         dagon_topology::defs::Registry::builtin(),
         &base,
         &t,
         &src,
-        &boards,
         &["seg".into()],
         false,
     )
     .unwrap();
     assert!(r.skipped.is_empty(), "{:?}", r.skipped);
     assert!(read(&base, "nodes/seg/Cargo.toml").contains("dagon-mcu-stm32f401 = { path = "));
-    assert!(read(&base, "nodes/seg/src/wiring.rs").contains("flash_bytes: Some(524288)"));
+    assert!(read(&base, "nodes/seg/src/wiring.rs").contains("flash_bytes: None,"));
+}
+
+/// The text of every fenced block of `lang` in a Markdown page.
+fn fences(md: &str, lang: &str) -> Vec<String> {
+    let open = format!("```{lang}");
+    let mut out = Vec::new();
+    let mut lines = md.lines();
+    while let Some(l) = lines.next() {
+        if l.trim_end() == open {
+            let body: Vec<&str> = lines.by_ref().take_while(|l| l.trim() != "```").collect();
+            out.push(body.join("\n") + "\n");
+        }
+    }
+    out
+}
+
+/// The sample with node `id`'s entry replaced by `entry` (a `- id:` item).
+fn with_node(id: &str, entry: &str) -> String {
+    let head = format!("  - id: {id}");
+    let mut out = String::new();
+    let mut skipping = false;
+    for l in SAMPLE.lines() {
+        if l == head {
+            skipping = true;
+            out.push_str(entry);
+            continue;
+        }
+        if skipping && (l.starts_with("  - ") || !l.starts_with("    ")) {
+            skipping = false;
+        }
+        if !skipping {
+            out.push_str(l);
+            out.push('\n');
+        }
+    }
+    out
+}
+
+/// A new project from the sample, with node `id`'s entry replaced by
+/// `entry` and `extra` added to its dagon.toml; `dagon gen` of that node.
+fn gen_with(name: &str, id: &str, entry: &str, extra: &str) -> (PathBuf, Vec<String>) {
+    let d = tmp(name);
+    let dir = d.join("proj");
+    new_project(&dir, "proj", &with_node(id, entry), &d.join("keys"), &dev()).unwrap();
+    let config = dir.join(crate::config::CONFIG_FILE);
+    let toml = read(&dir, crate::config::CONFIG_FILE) + extra;
+    std::fs::write(&config, toml).unwrap();
+    let lines = gen_project(&config, &[id.to_string()], false).unwrap_or_else(|e| panic!("{e}"));
+    (dir, lines)
+}
+
+#[test]
+fn the_own_board_guide_runs_through_gen() {
+    let pages = [
+        (
+            "how-to/own-board.md",
+            include_str!("../../../../site/src/content/docs/how-to/own-board.md"),
+        ),
+        (
+            "en/how-to/own-board.md",
+            include_str!("../../../../site/src/content/docs/en/how-to/own-board.md"),
+        ),
+    ];
+    for (page, md) in pages {
+        let (yaml, toml) = (fences(md, "yaml"), fences(md, "toml"));
+        assert_eq!((yaml.len(), toml.len()), (1, 1), "{page}");
+        let entry: yaml_serde::Value = yaml_serde::from_str(&yaml[0]).unwrap();
+        let node = &entry[0];
+        let id = node["id"].as_str().unwrap();
+        let board = node["board"]
+            .as_str()
+            .unwrap_or_else(|| panic!("{page}: the node names no board"));
+        let defs: toml::Table = toml::from_str(&toml[0]).unwrap();
+        let flash = defs["board"][board]["flash_bytes"].as_integer().unwrap();
+
+        let (dir, lines) = gen_with(&format!("guide-{id}"), id, &yaml[0], &toml[0]);
+        assert!(
+            !lines.iter().any(|l| l.starts_with("skipped")),
+            "{page}: {lines:?}"
+        );
+        let wiring = read(&dir, &format!("nodes/{id}/src/wiring.rs"));
+        assert!(
+            wiring.contains(&format!("flash_bytes: Some({flash}),")),
+            "{page}: {wiring}"
+        );
+        let _ = std::fs::remove_dir_all(dir.parent().unwrap());
+    }
+}
+
+#[test]
+fn a_node_chosen_by_mcu_is_told_to_name_a_board_definition() {
+    let entry = "  - id: seg\n    mcu: stm32f401re\n    role: node\n    port: self-boot\n    \
+                 flash_map: f401-default\n    tag: seg-f401-7seg\n";
+    let (dir, lines) = gen_with("by-mcu-note", "seg", entry, "");
+    assert!(!lines.iter().any(|l| l.starts_with("skipped")), "{lines:?}");
+    assert!(read(&dir, "nodes/seg/src/wiring.rs").contains("flash_bytes: None,"));
+    assert!(
+        lines.contains(
+            &"note: seg is chosen by MCU; for its flash size, define its board in \
+              [board.<board id>] of dagon.toml and name it in the node's board:"
+                .to_string()
+        ),
+        "{lines:?}"
+    );
+    let _ = std::fs::remove_dir_all(dir.parent().unwrap());
 }
 
 #[test]
@@ -287,7 +379,6 @@ fn a_release_source_pins_the_git_tag_and_reads_its_packages_from_cargos_checkout
         &base,
         &sample(),
         &src,
-        &BTreeMap::new(),
         &["watch".into()],
         false,
     )
@@ -307,7 +398,6 @@ fn a_release_source_pins_the_git_tag_and_reads_its_packages_from_cargos_checkout
         &base,
         &sample(),
         &missing,
-        &BTreeMap::new(),
         &["seg".into()],
         false,
     );
@@ -434,7 +524,6 @@ fn regen_restores_a_deleted_dagon_dependency() {
         &base,
         &sample(),
         &src,
-        &BTreeMap::new(),
         &["seg".into()],
         false,
     )
@@ -451,7 +540,6 @@ fn regen_restores_a_deleted_dagon_dependency() {
         &base,
         &sample(),
         &src,
-        &BTreeMap::new(),
         &["seg".into()],
         false,
     )
@@ -473,7 +561,6 @@ fn regen_adds_a_dagon_package_the_template_newly_needs() {
         &base,
         &sample(),
         &src,
-        &BTreeMap::new(),
         &["seg".into()],
         false,
     )
@@ -494,7 +581,6 @@ fn regen_adds_a_dagon_package_the_template_newly_needs() {
         &base,
         &sample(),
         &src,
-        &BTreeMap::new(),
         &["seg".into()],
         false,
     )
@@ -534,7 +620,6 @@ fn topology_names_and_tags_cannot_break_out_of_generated_code() {
         &base,
         &t,
         &src,
-        &BTreeMap::new(),
         &["seg".into()],
         false,
     )
@@ -761,7 +846,6 @@ fn gen_refresh_replaces_a_renamed_dagon_dependency() {
         &base,
         &sample(),
         &src,
-        &BTreeMap::new(),
         &nodes,
         false,
     )
@@ -772,7 +856,6 @@ fn gen_refresh_replaces_a_renamed_dagon_dependency() {
         &base,
         &sample(),
         &src,
-        &BTreeMap::new(),
         &nodes,
         false,
     )
@@ -1001,7 +1084,6 @@ fn templates_get_the_hops_and_gen_refuses_one_not_available_yet() {
         &base,
         &sample(),
         &src,
-        &BTreeMap::new(),
         &["seg".into()],
         false,
     )
@@ -1022,7 +1104,6 @@ fn templates_get_the_hops_and_gen_refuses_one_not_available_yet() {
         &base,
         &ble,
         &src,
-        &BTreeMap::new(),
         &["hub".into()],
         false,
     )
@@ -1043,7 +1124,6 @@ fn templates_get_the_hops_and_gen_refuses_one_not_available_yet() {
         &base,
         &wifi,
         &src,
-        &BTreeMap::new(),
         &["seg".into()],
         false,
     )
@@ -1159,7 +1239,6 @@ fn gen_skips_a_node_folder_reached_through_a_junction() {
         &base,
         &sample(),
         &src,
-        &BTreeMap::new(),
         &["watch".into()],
         false,
     )

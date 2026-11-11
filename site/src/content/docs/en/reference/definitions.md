@@ -163,6 +163,11 @@ A project's `dagon.toml` may define boards inline as `[board.<id>]` tables
 `mcu_files = ["defs/my-mcu/dagon-mcu.toml"]`; files a definition references
 resolve inside its own folder.
 
+The `<id>` of `[board.<id>]` is a board id, the id a node's `board:` names;
+a `[board.<id>]` table of `dagon.toml` is always a board definition. A node
+on such a board has no board package: `dagon gen` makes it from its MCU
+package and writes the board's `flash_bytes` into its `wiring.rs`.
+
 ## Validation
 
 Every number a definition holds is checked against what the engine that

@@ -6,8 +6,9 @@ use std::cell::RefCell;
 
 use dagon_agent::{Agent, Config, SlotStore, StoreError, Transition};
 use dagon_conform::node::{self, NodeSetup, RESPONSE_MAX};
-use dagon_conform::pc::{link_max_payload, Channel, Images, NoAnswer, Runner, SetupError};
+use dagon_conform::pc::{Channel, Images, NoAnswer, Runner, SetupError};
 use dagon_conform::report::{Progress, Report, Verdict};
+use dagon_conform::timeout::link_limits;
 use dagon_conform::CTS;
 use dagon_events::{compose, Bounds, Composed, Layer, Nop, Published, Watchdog};
 use dagon_format::header::*;
@@ -313,7 +314,8 @@ struct FakeNode {
 
 impl FakeNode {
     fn new(link: LinkKind, faults: Faults) -> Self {
-        let max_payload = link_max_payload(link);
+        let max_payload =
+            link_limits(link).map_or(dagon_proto::max_payload::UART, |l| l.max_payload);
         let cfg = Config {
             pubkey: *keypair().pk,
             mcu_id: mcu_id::STM32F401XE,
@@ -552,8 +554,8 @@ fn twelve_of_twelve_over_uart_and_again_from_the_new_slot() {
 
 #[test]
 fn twelve_of_twelve_over_i2c_with_fragmented_header() {
-    let mut n = FakeNode::new(LinkKind::I2cTarget, Faults::default());
-    let r = run(&mut n, LinkKind::I2cTarget);
+    let mut n = FakeNode::new(LinkKind::I2c, Faults::default());
+    let r = run(&mut n, LinkKind::I2c);
     assert_all_pass(&r);
     let ct09 = r.results.iter().find(|x| x.id == 9).unwrap();
     assert!(ct09.measured > 0);
@@ -715,7 +717,7 @@ fn handle_frame_passes_other_commands_on() {
 
 #[test]
 fn result_file_shape() {
-    let mut r = Report::unreachable(LinkKind::I2cTarget);
+    let mut r = Report::unreachable(LinkKind::I2c);
     r.results[0].verdict = Verdict::Pass;
     r.results[0].measured = 2;
     r.results[1].verdict = Verdict::Fail;
@@ -778,6 +780,37 @@ fn confirm_lost_on_reboot_fails_ct11_and_ct18() {
     assert_eq!(verdict(&r, 10), Verdict::Pass);
     assert_eq!(verdict(&r, 11), Verdict::Fail);
     assert_eq!(verdict(&r, 18), Verdict::Fail);
+}
+
+/// Every link kind of the list is either judged with its own limits or
+/// refused at setup; conform never guesses limits for a kind.
+#[test]
+fn every_link_kind_is_judged_or_refused() {
+    let imgs = Imgs::new();
+    let mut signer = sign;
+    for &kind in LinkKind::ALL {
+        let mut n = FakeNode::new(kind, Faults::default());
+        let r = Runner::new(&mut n, kind, imgs.images(), &mut signer);
+        match link_limits(kind) {
+            Some(l) => {
+                assert!(l.max_payload > 0 && l.floor_bps > 0, "{kind:?}");
+                assert!(r.is_ok(), "{kind:?} has limits but was refused");
+            }
+            None => assert_eq!(r.err(), Some(SetupError::UnsupportedLink(kind))),
+        }
+    }
+    let ble = SetupError::UnsupportedLink(LinkKind::Ble).to_string();
+    assert!(ble.contains("ble"), "{ble}");
+}
+
+/// The result file names the link as the 構成 does.
+#[test]
+fn result_file_names_the_link_kind_as_the_topology_does() {
+    let mut s = String::new();
+    Report::unreachable(LinkKind::UsbCdc)
+        .write_json(&mut s, "hub", Progress::default())
+        .unwrap();
+    assert!(s.contains("\"link\": \"usb-cdc\","), "{s}");
 }
 
 #[test]

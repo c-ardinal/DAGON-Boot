@@ -29,7 +29,7 @@
 //! | `schema` | string | always [`SCHEMA`] |
 //! | `node` | string | topology node id under test |
 //! | `mcu_id`, `port_kind` | number or null | from the node's HELLO; null if it never answered |
-//! | `link` | string | `"i2c"`, `"uart"` or `"usb"` |
+//! | `link` | string | the 構成's name of the link kind (`LinkKind::name`: `"i2c"`, `"uart"`, `"usb-cdc"`, …) |
 //! | `iteration`, `elapsed_s` | number or null | porting loop counters; null outside a porting run |
 //! | `passed` | number | tests with verdict `"pass"` |
 //! | `total` | number | always 12 |
@@ -122,11 +122,7 @@ impl Report {
 
     /// Writes the result file (see the module docs).
     pub fn write_json<W: Write>(&self, w: &mut W, node: &str, progress: Progress) -> fmt::Result {
-        let link = match self.link {
-            LinkKind::I2cTarget => "i2c",
-            LinkKind::Uart => "uart",
-            LinkKind::UsbCdc => "usb",
-        };
+        let link = self.link.name();
         w.write_str("{\n  \"schema\": ")?;
         string(w, SCHEMA.as_bytes())?;
         w.write_str(",\n  \"node\": ")?;

@@ -109,6 +109,8 @@ description: "dagon-mcu.tomlとdagon-board.toml: DAGONがマイコンやボー�
 
 プロジェクトの`dagon.toml`は、ボードを`[board.<id>]`のテーブルとしてその場で定義でき（`id`を除いたボードのスキーマ）、マイコンのファイルを`mcu_files = ["defs/my-mcu/dagon-mcu.toml"]`で登録できます。定義が参照するファイルは、その定義のフォルダの中で解決します。
 
+`[board.<id>]`の`<id>`はボードのidで、ノードの`board:`がこのidを指します。`dagon.toml`の`[board.<id>]`は、いつもボードの定義です。そのボードにはボードのcrateが無いので、そのボードを指すノードは、`dagon gen`がマイコンのcrateから作り、ボードの`flash_bytes`を`wiring.rs`に書きます。
+
 ## 検証
 
 定義の数値はどれも、それを読むエンジンが必要とするものに照らして確かめます。エンジンはその要件を`dagon-topology/src/defs/requirements.rs`で宣言します（UF2の`sector`: 256以上の2のべき乗。ログの`face_size`: 96バイト以上。スロットはヘッダより大きいこと。どのリージョンもすべてのフラッシュマップの中にあり、重ならないことなど）。要件を宣言していない数値の欄があると、テストが失敗します。

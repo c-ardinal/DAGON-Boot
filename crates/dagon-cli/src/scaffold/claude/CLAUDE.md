@@ -18,11 +18,14 @@ Use these words with the developer, and count in ノード ("3 ノード").
 
 - `dagon.toml`: project settings. `topology`, `pubkey` (the public key the
   firmware embeds), `[dagon]` (where the DAGON crates come from),
-  `[build.<id>]` (how `dagon build` builds a node), `[board.<id>]` (facts
-  for a node chosen by MCU, such as `flash_bytes`), `[provision.<id>]`
-  (first-write inputs).
+  `[build.<id>]` (how `dagon build` builds a node), `[board.<board id>]`
+  (a whole board definition for a board not in DAGON's table; the table
+  name is the board id, never a node id), `[provision.<id>]` (first-write
+  inputs).
 - `topology.yaml`: the 構成. A node with `board:` uses that board's
-  package; a node with only `mcu:` uses the MCU package.
+  package; a node with only `mcu:`, or with `board:` naming a board
+  defined in `dagon.toml`, uses the MCU package (with that board's
+  `flash_bytes`).
 - `nodes/<id>/`: one Rust crate per node, made by `dagon gen`.
   - `src/app.rs`: the developer's application. Code changes go here (and
     in files the developer added).

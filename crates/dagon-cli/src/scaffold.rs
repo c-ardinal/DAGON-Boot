@@ -5,7 +5,8 @@
 //!
 //! ```text
 //! <project>/
-//!   dagon.toml          topology, [dagon] crate source, [build.<id>], [board.<id>]
+//!   dagon.toml          topology, [dagon] crate source, [build.<id>], board
+//!                       definitions ([board.<board id>])
 //!   topology.yaml
 //!   nodes/<id>/Cargo.toml, .cargo/config.toml, (ESP) rust-toolchain.toml
 //!   nodes/<id>/src/main.rs   start-up, written once (--force-main rewrites)
@@ -24,7 +25,7 @@
 
 use std::path::{Path, PathBuf};
 
-use dagon_topology::defs::Registry;
+use dagon_topology::defs::{BoardDef, Origin, Registry};
 use dagon_topology::schema::{LinkKind, Node, Role, Topology, DEFAULT_I2C_HZ};
 use serde::Deserialize;
 
@@ -44,13 +45,6 @@ pub struct DagonSource {
     pub tag: Option<String>,
     /// A local clone (development); relative to dagon.toml.
     pub path: Option<PathBuf>,
-}
-
-/// Board facts for a node chosen by MCU only (`[board.<id>]`).
-#[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct BoardFacts {
-    pub flash_bytes: Option<u32>,
 }
 
 /// A file written (or kept) by gen, relative to the project.
@@ -92,9 +86,9 @@ fn hub_link(t: &Topology, child: &str) -> Option<String> {
     })
 }
 
-/// wiring.rs for node `n`: constants only, from the topology (and
-/// `[board.<id>]` for a node chosen by MCU).
-pub fn wiring_rs(t: &Topology, n: &Node, board: Option<&BoardFacts>) -> String {
+/// wiring.rs for node `n`: constants only, from the topology, and
+/// `flash_bytes` for a node whose crate comes from its MCU package.
+pub fn wiring_rs(t: &Topology, n: &Node, flash_bytes: Option<u32>) -> String {
     let hub = n.role == Role::Coordinator;
     let link = if hub {
         "Link::Hub".to_string()
@@ -119,9 +113,7 @@ pub fn wiring_rs(t: &Topology, n: &Node, board: Option<&BoardFacts>) -> String {
             None => "Link::Hub".to_string(),
         }
     };
-    let flash = board
-        .and_then(|b| b.flash_bytes)
-        .map_or("None".into(), |f| format!("Some({f})"));
+    let flash = flash_bytes.map_or("None".into(), |f| format!("Some({f})"));
     let children: Vec<String> = if hub {
         t.update
             .order
@@ -197,18 +189,29 @@ pub(crate) fn write(
 }
 
 /// What a node needs: its board package, or its MCU package when the node
-/// names no board.
+/// names no board or a board defined in its dagon.toml (which has no
+/// package).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Want {
     Board(String),
     Mcu(String),
 }
 
-pub fn want_of(n: &Node) -> Want {
+pub fn want_of(reg: &Registry, n: &Node) -> Want {
     match &n.board {
-        Some(b) => Want::Board(b.clone()),
-        None => Want::Mcu(n.mcu.clone()),
+        Some(b) if project_board(reg, n).is_none() => Want::Board(b.clone()),
+        _ => Want::Mcu(n.mcu.clone()),
     }
+}
+
+/// The board definition node `n` names when the project wrote it in its
+/// dagon.toml (`[board.<board id>]`): a board with no package, so the MCU
+/// package's crate takes the board's flash size from wiring.rs.
+fn project_board<'a>(reg: &'a Registry, n: &Node) -> Option<&'a BoardDef> {
+    let id = n.board.as_deref()?;
+    (reg.board_origin(id) == Some(Origin::Project))
+        .then(|| reg.board(id))
+        .flatten()
 }
 
 /// The conventional package name: `dagon-board-<board id>` or
@@ -815,7 +818,7 @@ fn node_files(
     src: &DagonSource,
     base: &Path,
 ) -> Result<Vec<(String, String)>, String> {
-    let want = want_of(n);
+    let want = want_of(reg, n);
     // The release's checkout (fetched by cargo) or the local clone: the
     // templates come from the same version the crates depend on.
     let root = crate::dagonsrc::root(src, base)?;
@@ -853,7 +856,6 @@ pub fn gen(
     base: &Path,
     t: &Topology,
     src: &DagonSource,
-    boards: &std::collections::BTreeMap<String, BoardFacts>,
     only: &[String],
     force_main: bool,
 ) -> Result<GenReport, String> {
@@ -890,7 +892,8 @@ pub fn gen(
                 _ => write(base, &path, &text, false, &mut r.written)?,
             }
         }
-        let wiring = wiring_rs(t, n, boards.get(&n.id));
+        let flash = project_board(reg, n).map(|b| b.flash_bytes);
+        let wiring = wiring_rs(t, n, flash);
         write(
             base,
             &format!("{dir}/src/wiring.rs"),
@@ -940,13 +943,12 @@ pub fn add_build_tables(
     Ok(added)
 }
 
-/// The `[dagon]` and `[board.<id>]` tables of dagon.toml.
+/// The `[dagon]` and `[extensions]` tables of dagon.toml (its board
+/// definitions are read with the other definitions, `defs::registry`).
 #[derive(Debug, Default, Deserialize)]
 struct ProjectTables {
     #[serde(default)]
     dagon: DagonSource,
-    #[serde(default)]
-    board: std::collections::BTreeMap<String, BoardFacts>,
     #[serde(default)]
     extensions: crate::extgen::Extensions,
 }
@@ -994,15 +996,7 @@ pub fn gen_project(config: &Path, only: &[String], force: bool) -> Result<Vec<St
         return Err(format!("no updatable node '{bad}' in the topology"));
     }
     let reg = crate::defs::registry(&cfg)?;
-    let report = gen(
-        &reg,
-        &cfg.base,
-        &t,
-        &tables.dagon,
-        &tables.board,
-        only,
-        force,
-    )?;
+    let report = gen(&reg, &cfg.base, &t, &tables.dagon, only, force)?;
     let mut out: Vec<String> = report
         .written
         .iter()
@@ -1035,19 +1029,12 @@ pub fn gen_project(config: &Path, only: &[String], force: bool) -> Result<Vec<St
     for id in add_build_tables(&reg, config, &t)? {
         out.push(format!("added      [build.{id}] to dagon.toml"));
     }
-    for n in &t.nodes {
-        if n.board.is_none()
-            && tables
-                .board
-                .get(&n.id)
-                .and_then(|b| b.flash_bytes)
-                .is_none()
-        {
-            out.push(format!(
-                "note: {} is chosen by MCU; set flash_bytes in [board.{}]",
-                n.id, n.id
-            ));
-        }
+    for n in t.nodes.iter().filter(|n| n.board.is_none()) {
+        out.push(format!(
+            "note: {} is chosen by MCU; for its flash size, define its board in \
+             [board.<board id>] of dagon.toml and name it in the node's board:",
+            n.id
+        ));
     }
     out.push(match cfg.pubkey {
         Some(_) => "next: dagon build (the firmware embeds pubkey from dagon.toml as DAGON_PUBKEY)"

@@ -4,121 +4,15 @@
 //! (`LINK_KINDS`) and constructs them as `links::<Kind>::new(..)`; a board
 //! package names the pins (`uplink_<kind>()` / `downlink_<kind>()`).
 //!
-//! The kind names are the 構成's: `usb-cdc`, `uart`, `i2c`, `ble`,
-//! `wifi-tcp`, `ethernet`, `can`. Kinds without an implementation exist in
-//! the tables as names only ([`Support::NotYet`]); a project that asks for
+//! The kind names are the 構成's, from the one list of link kinds
+//! (`dagon_format::with_link_kinds!`). Kinds without an implementation
+//! exist in the tables as names only ([`Support::NotYet`]); a project that asks for
 //! one fails to build with a message naming the hop.
 
-/// Why a frame could not be read or written.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum LinkError {
-    /// Nothing complete arrived within the link's own wait (a tick, not a
-    /// failure: serve loops use it to drop abandoned transfers).
-    Timeout,
-    /// A frame longer than the link carries.
-    Overflow,
-    /// What arrived is not a valid frame (checked by the link).
-    Corrupt,
-    /// The peer went away or the medium failed.
-    Closed,
-}
-
-/// What the peer sees when this end restarts (a reboot after an update).
-/// The same split as dagon-host's `Reconnect` (`Reopen` / `Stays`).
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Reconnect {
-    /// The link goes away with this end and the peer opens it again: a USB
-    /// device re-enumerates; a TCP connection (wifi-tcp, ethernet) or a BLE
-    /// connection is dropped by the restart and connected anew.
-    Reenumerates,
-    /// The link stays (UART, I2C, CAN): the peer keeps it open and simply
-    /// sees silence while the node restarts.
-    Persistent,
-}
-
-/// One end of a DAGON hop carrying whole frames (frozen wire format,
-/// unchanged by the medium).
-#[allow(async_fn_in_trait)]
-pub trait Link {
-    /// Largest payload one frame may carry on this link.
-    fn max_payload(&self) -> usize;
-
-    /// What the peer sees when this end restarts.
-    fn reconnect(&self) -> Reconnect;
-
-    /// The link's kind (its code goes into `app.link_up`, `app.request`).
-    fn kind(&self) -> Kind;
-
-    /// This node's own address on the link (`app.link_up` `addr`): the I2C
-    /// target address; [`dagon_agent::NO_ADDR`] where a link has none.
-    fn addr(&self) -> u8 {
-        dagon_agent::NO_ADDR
-    }
-
-    /// Waits for the next complete frame; the slice stays valid until the
-    /// next call. [`LinkError::Timeout`] after the link's own tick with
-    /// nothing complete.
-    async fn read_frame(&mut self) -> Result<&[u8], LinkError>;
-
-    /// Sends one frame.
-    async fn write_frame(&mut self, frame: &[u8]) -> Result<(), LinkError>;
-
-    /// Done with the request just read without answering it (not a valid
-    /// request, or not for this node): the link must be ready for the next
-    /// request (an I2C target stops NACKing; the request stays unanswered
-    /// and the peer resends). Default: nothing to do.
-    async fn no_reply(&mut self) -> Result<(), LinkError> {
-        Ok(())
-    }
-
-    /// Returns once everything written has left this end (the peer has
-    /// read it, or it is on the wire), so a reset right after loses
-    /// nothing. Default: at once.
-    async fn flush(&mut self) -> Result<(), LinkError> {
-        Ok(())
-    }
-}
-
-/// Generates [`Kind`] from `dagon_format::with_link_kinds!`.
-macro_rules! kind_enum {
-    (() $( $v:ident = $c:literal, $n:literal; )*) => {
-        /// A hop's medium, as the 構成 names it. The discriminant is the
-        /// kind's code in events. Generated from the one list of link kinds
-        /// (`dagon_format::with_link_kinds!`).
-        #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-        #[repr(u8)]
-        #[non_exhaustive]
-        pub enum Kind {
-            $( $v = $c, )*
-        }
-
-        impl Kind {
-            /// Every kind, in code order.
-            pub const ALL: &'static [Kind] = &[$(Kind::$v),*];
-
-            /// The kind's code in events (`app.link_up` `link`,
-            /// `app.request` `via`).
-            pub const fn code(self) -> u8 {
-                self as u8
-            }
-
-            /// The 構成's name of the kind.
-            pub const fn name(self) -> &'static str {
-                match self {
-                    $( Kind::$v => $n, )*
-                }
-            }
-        }
-    };
-}
-
-dagon_format::with_link_kinds!([kind_enum]());
-
-impl Kind {
-    pub fn from_name(name: &str) -> Option<Kind> {
-        Kind::ALL.iter().copied().find(|k| k.name() == name)
-    }
-}
+/// The frame link interface and the kind type are dagon-port's (one
+/// interface for every MCU and for relays); `Kind` is
+/// [`dagon_port::LinkKind`] under the name the MCU packages use.
+pub use dagon_port::{Link, LinkError, LinkKind as Kind, Reconnect};
 
 /// Whether an MCU package offers a kind in one direction.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -258,22 +152,6 @@ mod tests {
     ];
 
     link_requirements!("test-mcu", &TABLE);
-
-    #[test]
-    fn names_round_trip() {
-        for k in Kind::ALL {
-            assert_eq!(Kind::from_name(k.name()), Some(*k));
-        }
-        assert_eq!(Kind::from_name("usb"), None);
-    }
-
-    #[test]
-    fn codes_are_distinct_and_never_zero() {
-        for (i, k) in Kind::ALL.iter().enumerate() {
-            assert_ne!(k.code(), 0);
-            assert!(Kind::ALL[i + 1..].iter().all(|o| o.code() != k.code()));
-        }
-    }
 
     #[test]
     fn the_matrix_lists_every_kind_absent_ones_as_no() {

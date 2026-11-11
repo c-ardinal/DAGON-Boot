@@ -1,6 +1,7 @@
 //! Port contract: what a board provides to DAGON.
 //!
-//! Node side: [`Flash`], [`Link`], [`Reset`], boot selection ([`BootSelectS`]
+//! Node side: [`Flash`], [`Link`] (with [`LinkKind`], [`LinkError`],
+//! [`Reconnect`], [`NO_ADDR`]), [`Reset`], boot selection ([`BootSelectS`]
 //! for kind S, [`BootSelectV`] for kind V), [`Clock`], [`Watchdog`].
 //! Hub side: [`StreamPort`], [`I2cBus`], [`SubControl`].
 //!
@@ -9,8 +10,10 @@
 //! declares traits; `unsafe` belongs in the board implementations (jump,
 //! RAM-resident flash routines, registers).
 //!
-//! Compatibility rule: these traits are frozen. Any method added later comes
-//! with a default implementation, so existing ports keep compiling.
+//! Compatibility rule: these traits, [`Link`] included, are frozen. Any
+//! method added later comes with a default implementation, so existing
+//! ports and links keep compiling. [`LinkKind`] is non-exhaustive: a new
+//! kind is one entry of `dagon_format::with_link_kinds!`.
 #![no_std]
 #![allow(async_fn_in_trait)]
 
@@ -52,39 +55,124 @@ pub trait Flash {
     fn write(&mut self, addr: u32, data: &[u8]) -> Result<(), FlashError>;
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum LinkKind {
-    Uart,
-    I2cTarget,
-    UsbCdc,
-}
+/// `app.link_up` / `app.link_down` `addr` of a link without an address.
+pub const NO_ADDR: u8 = 0xFF;
 
+/// Why a frame could not be read or written.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum LinkError {
+    /// Nothing complete arrived within the link's own wait (a tick, not a
+    /// failure: serve loops use it to drop abandoned transfers).
     Timeout,
-    /// Frame longer than the buffer or the link's max payload.
+    /// A frame longer than the link carries.
     Overflow,
-    Io,
+    /// What arrived is not a valid frame (checked by the link).
+    Corrupt,
+    /// The peer went away or the medium failed.
+    Closed,
 }
 
-/// Node side of a DAGON link, carrying whole frames.
+/// What the peer sees when this end restarts (a reboot after an update).
+/// The same split as dagon-host's `Reconnect` (`Reopen` / `Stays`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Reconnect {
+    /// The link goes away with this end and the peer opens it again: a USB
+    /// device re-enumerates; a TCP connection (wifi-tcp, ethernet) or a BLE
+    /// connection is dropped by the restart and connected anew.
+    Reenumerates,
+    /// The link stays (UART, I2C, CAN): the peer keeps it open and simply
+    /// sees silence while the node restarts.
+    Persistent,
+}
+
+/// One end of a DAGON hop carrying whole frames (frozen wire format,
+/// unchanged by the medium): up to the PC or a parent node, or down to a
+/// child node.
 ///
-/// UART implementations cut frames out of the byte stream by SOF search and
-/// CRC. I2C target implementations run the mailbox: after `recv_frame`
-/// returns, the node may erase or write flash before calling `send_frame`, so
-/// the implementation must never stretch the clock in that window (NACK the
+/// An I2C target implementation runs the mailbox: after `read_frame`
+/// returns, the node may erase or write flash before answering, so the
+/// implementation must never stretch the clock in that window (NACK the
 /// own address, or answer BUSY from RAM).
 pub trait Link {
-    /// Waits up to `timeout_ms` for one complete frame; returns its length.
-    async fn recv_frame(&mut self, buf: &mut [u8], timeout_ms: u32) -> Result<usize, LinkError>;
+    /// Largest payload one frame may carry on this link.
+    fn max_payload(&self) -> usize;
 
-    /// Sends one frame and returns only once it has left the node: the last
-    /// bit is on the wire (UART: transmitter empty, not just queued; USB: the
-    /// host has taken the data) or, on an I2C target, the master has read the
-    /// whole response. Callers reset right after the reply to REBOOT, so
-    /// returning earlier would lose that reply.
-    async fn send_frame(&mut self, frame: &[u8]) -> Result<(), LinkError>;
+    /// What the peer sees when this end restarts.
+    fn reconnect(&self) -> Reconnect;
+
+    /// The link's kind (its code goes into `app.link_up`, `app.request`).
     fn kind(&self) -> LinkKind;
+
+    /// This node's own address on the link (`app.link_up` `addr`): the I2C
+    /// target address; [`NO_ADDR`] where a link has none.
+    fn addr(&self) -> u8 {
+        NO_ADDR
+    }
+
+    /// Waits for the next complete frame; the slice stays valid until the
+    /// next call. [`LinkError::Timeout`] after the link's own tick with
+    /// nothing complete.
+    async fn read_frame(&mut self) -> Result<&[u8], LinkError>;
+
+    /// Sends one frame.
+    async fn write_frame(&mut self, frame: &[u8]) -> Result<(), LinkError>;
+
+    /// Done with the request just read without answering it (not a valid
+    /// request, or not for this node): the link must be ready for the next
+    /// request (an I2C target stops NACKing; the request stays unanswered
+    /// and the peer resends). Default: nothing to do.
+    async fn no_reply(&mut self) -> Result<(), LinkError> {
+        Ok(())
+    }
+
+    /// Returns once everything written has left this end (the peer has
+    /// read it, or it is on the wire), so a reset right after loses
+    /// nothing. Default: at once.
+    async fn flush(&mut self) -> Result<(), LinkError> {
+        Ok(())
+    }
+}
+
+/// Generates [`LinkKind`] from `dagon_format::with_link_kinds!`.
+macro_rules! link_kind_enum {
+    (() $( $v:ident = $c:literal, $n:literal; )*) => {
+        /// A hop's medium, as the 構成 names it. The discriminant is the
+        /// kind's code in events. Generated from the one list of link kinds
+        /// (`dagon_format::with_link_kinds!`).
+        #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+        #[repr(u8)]
+        #[non_exhaustive]
+        pub enum LinkKind {
+            $( $v = $c, )*
+        }
+
+        impl LinkKind {
+            /// Every kind, in code order.
+            pub const ALL: &'static [LinkKind] = &[$(LinkKind::$v),*];
+
+            /// The kind's code in events (`app.link_up` `link`,
+            /// `app.request` `via`).
+            pub const fn code(self) -> u8 {
+                self as u8
+            }
+
+            /// The 構成's name of the kind.
+            pub const fn name(self) -> &'static str {
+                match self {
+                    $( LinkKind::$v => $n, )*
+                }
+            }
+        }
+    };
+}
+
+dagon_format::with_link_kinds!([link_kind_enum]());
+
+impl LinkKind {
+    /// The kind the 構成 names `name`; `None` for a name not in the list.
+    pub fn from_name(name: &str) -> Option<LinkKind> {
+        LinkKind::ALL.iter().copied().find(|k| k.name() == name)
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -186,5 +274,26 @@ pub trait SubControl {
     /// Resets the sub MCU with a ~10 ms NRST pulse, BOOT0 as given.
     async fn pulse_reset(&mut self, boot0_high: bool) -> Result<(), BusError> {
         self.set_lines(Nrst::Pulse, boot0_high).await
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn link_kind_names_round_trip() {
+        for k in LinkKind::ALL {
+            assert_eq!(LinkKind::from_name(k.name()), Some(*k));
+        }
+        assert_eq!(LinkKind::from_name("usb"), None);
+    }
+
+    #[test]
+    fn link_kind_codes_are_distinct_and_never_zero() {
+        for (i, k) in LinkKind::ALL.iter().enumerate() {
+            assert_ne!(k.code(), 0);
+            assert!(LinkKind::ALL[i + 1..].iter().all(|o| o.code() != k.code()));
+        }
     }
 }

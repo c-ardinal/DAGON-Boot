@@ -73,6 +73,33 @@ pub enum SetupError {
     Unreachable,
     /// The first HELLO announced a `max_payload` too small for any XFER chunk.
     BadHello,
+    /// The run has no limits for this link kind ([`timeout::link_limits`])
+    /// and does not judge it.
+    UnsupportedLink(LinkKind),
+}
+
+impl core::fmt::Display for SetupError {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        match self {
+            SetupError::BadImage(i) => {
+                write!(f, "image {i} is not a valid signed image for its slot")
+            }
+            SetupError::SameVersion => {
+                f.write_str("no-confirm images have the same version as good")
+            }
+            SetupError::Unreachable => f.write_str("the node did not answer HELLO"),
+            SetupError::BadHello => {
+                f.write_str("HELLO announced a max_payload too small to transfer")
+            }
+            SetupError::UnsupportedLink(k) => {
+                write!(
+                    f,
+                    "conform has no limits for link kind {}; it is not judged",
+                    k.name()
+                )
+            }
+        }
+    }
 }
 
 /// Smallest usable HELLO `max_payload`: 4-byte offset + 1 data byte.
@@ -138,6 +165,7 @@ impl<'a> Img<'a> {
 pub struct Runner<'a, 's, C: Channel> {
     ch: C,
     link: LinkKind,
+    limits: timeout::LinkLimits,
     good: [Img<'a>; 2],
     no_confirm: [Img<'a>; 2],
     sign: Signer<'s>,
@@ -149,13 +177,14 @@ pub struct Runner<'a, 's, C: Channel> {
 type Step<T> = Result<T, Detail>;
 
 impl<'a, 's, C: Channel> Runner<'a, 's, C> {
-    /// Checks the images and greets the node.
+    /// Checks the link kind and the images, and greets the node.
     pub fn new(
         mut ch: C,
         link: LinkKind,
         images: Images<'a>,
         sign: Signer<'s>,
     ) -> Result<Self, SetupError> {
+        let limits = timeout::link_limits(link).ok_or(SetupError::UnsupportedLink(link))?;
         let img = |i: usize, raw| Img::new(raw, (i % 2) as u8).ok_or(SetupError::BadImage(i));
         let good = [img(0, images.good[0])?, img(1, images.good[1])?];
         let no_confirm = [img(2, images.no_confirm[0])?, img(3, images.no_confirm[1])?];
@@ -169,6 +198,7 @@ impl<'a, 's, C: Channel> Runner<'a, 's, C> {
         Ok(Runner {
             ch,
             link,
+            limits,
             good,
             no_confirm,
             sign,
@@ -363,7 +393,7 @@ impl<'a, 's, C: Channel> Runner<'a, 's, C> {
             return Err(detail!("XFER_END: digest mismatch"));
         }
         let ms = (self.ch.now_ms() - t0) as u32;
-        let limit = timeout::transfer_ms(raw.len() as u32, self.link);
+        let limit = timeout::transfer_ms(raw.len() as u32, self.limits);
         if ms > limit {
             return Err(detail!("transfer took {} ms, limit {}", ms, limit));
         }
@@ -587,7 +617,7 @@ impl<'a, 's, C: Channel> Runner<'a, 's, C> {
         let other = 1 - exp.active as usize;
         let a = st.slots[exp.active as usize];
         let o = st.slots[other];
-        let link_max = link_max_payload(self.link) as u16;
+        let link_max = self.limits.max_payload as u16;
         let checks: [(&str, bool); 17] = [
             (
                 "proto_ver",
@@ -640,15 +670,6 @@ fn expect_ok(cmd: Cmd, s: Status) -> Step<()> {
         Ok(())
     } else {
         Err(detail!("{:?}: {:?}", cmd, s))
-    }
-}
-
-/// The payload limit an agent on `link` announces in HELLO.
-pub const fn link_max_payload(link: LinkKind) -> usize {
-    match link {
-        LinkKind::I2cTarget => dagon_proto::max_payload::I2C,
-        LinkKind::Uart => dagon_proto::max_payload::UART,
-        LinkKind::UsbCdc => dagon_proto::max_payload::USB,
     }
 }
 

@@ -265,6 +265,9 @@ dependencies = [
 [[package]]
 name = "dagon-port"
 version = "0.1.0"
+dependencies = [
+ "dagon-format",
+]
 
 [[package]]
 name = "dagon-proto"

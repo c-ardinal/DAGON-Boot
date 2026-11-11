@@ -8,9 +8,12 @@ recovery path) and the link drivers. Topology MCU id `rp2040`, flash map
 `rp2040-4m`. RP2040 nodes are 親機.
 
 Board-specific values (pins, which link is wired where, flash size, display
-and other extras) live in a board package that implements [`BoardDef`]
-(`src/node.rs`), for example `../../boards/waveshare-rp2040-touch-lcd-1.28`.
-A board without a package needs only its own `BoardDef` and links (see
+and other extras) live in a board package that implements two traits:
+[`BoardCore`] (`../common/src/hooks.rs`: board id, flash size, bring-up,
+extension), which every MCU package shares, and [`BoardDef`]
+(`src/node.rs`: the diagnostic LED and the peripheral split), for example
+`../../boards/waveshare-rp2040-touch-lcd-1.28`. A board without a package
+needs only its own `BoardCore` and `BoardDef` and links (see
 `template/src/board.rs`).
 
 ## A 親機 with your own task
@@ -248,4 +251,5 @@ digits) and is embedded at build time. Unset, the build fails, unless
 cargo test --no-default-features --target <host triple>
 ```
 
+[`BoardCore`]: ../common/src/hooks.rs
 [`BoardDef`]: src/node.rs

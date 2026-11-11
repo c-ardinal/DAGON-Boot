@@ -63,7 +63,7 @@ pub mod usb;
 pub mod watchdog;
 
 #[cfg(feature = "hal")]
-pub use node::BoardDef;
+pub use node::{BoardCore, BoardDef};
 
 /// This node's image target tag, from `DAGON_TARGET_TAG` at build time
 /// (empty if unset). The boot core accepts only images with this tag, and

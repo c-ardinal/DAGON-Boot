@@ -10,10 +10,12 @@
 //! less fails to build, a larger one keeps the rest for the app.
 
 use dagon_agent::{Agent, Config, SlotStore};
-use dagon_events::{BoardBringUp, Published, Watchdog as Periods};
+use dagon_events::{Published, Watchdog as Periods};
 use dagon_format::header::{mcu_id, port_kind, target_tag};
-pub use dagon_mcu_common::hooks::{always, App, AppEvents, Confirm, NodeChain, SelfCheck};
-use dagon_mcu_common::hooks::{finish_start, node_chain, BoardExtension, Events};
+pub use dagon_mcu_common::hooks::{
+    always, App, AppEvents, BoardCore, Confirm, NodeChain, SelfCheck,
+};
+use dagon_mcu_common::hooks::{finish_start, node_chain, Events};
 use dagon_proto::max_payload;
 use dagon_proto::payload::{mode, SlotState, StatusResp};
 use embassy_rp::peripherals::{FLASH, USB, WATCHDOG};
@@ -33,14 +35,11 @@ pub struct DagonParts {
     pub usb: Peri<'static, USB>,
 }
 
-/// A board with an RP2040: its identity, flash size and how the chip's
+/// A board with an RP2040: on top of its [`BoardCore`] (identity, flash
+/// size, bring-up, extension), its diagnostic LED and how the chip's
 /// peripherals split between DAGON and the app. A board package (or a
-/// generated `wiring.rs` for a board without one) implements it.
-pub trait BoardDef {
-    /// The topology's board id.
-    const BOARD_ID: &'static str;
-    /// Flash size in bytes (check-only, see the module docs).
-    const FLASH_SIZE: usize;
+/// generated `wiring.rs` for a board without one) implements both.
+pub trait BoardDef: BoardCore {
     /// GPIO of an LED the diagnostic panic handler may blink.
     const DIAG_LED: Option<u8>;
     /// That LED lights at a high level (else at low).
@@ -49,19 +48,6 @@ pub trait BoardDef {
     type UserIo;
     /// Splits the chip's peripherals.
     fn split(p: Peripherals) -> (DagonParts, Self::UserIo);
-    /// The board's `BoardBringUp` port, which [`open`] runs before the
-    /// links serve (`app.bring_up`). Default: none, so no bring-up runs and
-    /// no `app.bring_up` is emitted. Called once.
-    fn bring_up_port() -> Option<&'static mut dyn BoardBringUp> {
-        None
-    }
-    /// The board package's extension, which the start puts in the node's
-    /// chain after the publisher and before the app's: it observes every
-    /// event and answers the decision points before the app. Default:
-    /// none. Called once.
-    fn extension() -> Option<BoardExtension> {
-        None
-    }
 }
 
 /// The agent of an RP2040 node; its chain holds the app's extensions and

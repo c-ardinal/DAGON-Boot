@@ -16,10 +16,11 @@
 //! | Sub-node NRST (open drain), BOOT0 | GPIO18, 28 |
 //! | Diagnostic blink codes | GPIO25 (backlight) |
 //!
-//! With `hal` (on by default): `Board` implements `BoardDef`: DAGON takes
-//! the flash, the watchdog and USB; the app gets `Io`. `start` runs the
-//! DAGON 親機 on this board: the relay (`dagon_mcu_rp2040::relay`) over the
-//! board's links and, with `display`, the home screen ([`screen`]). Guard
+//! With `hal` (on by default): `Board` implements `BoardCore` and
+//! `BoardDef`: DAGON takes the flash, the watchdog and USB; the app gets
+//! `Io`. `start` runs the DAGON 親機 on this board: the relay
+//! (`dagon_mcu_rp2040::relay`) over the board's links and, with `display`,
+//! the home screen ([`screen`]). Guard
 //! tasks: the relay's 0..3, the display `DISPLAY_TASK`, the app's from
 //! `APP_TASKS`. This package binds the I2C0, PIO0 and DMA_IRQ_0 interrupts
 //! (`Irqs`). Without `hal` only the screen layout builds (host tests).

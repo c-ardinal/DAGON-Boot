@@ -4,7 +4,7 @@
 use dagon_mcu_rp2040::links::{I2cLink, Kind, PioStream, RpI2c};
 pub use dagon_mcu_rp2040::node::DagonParts;
 use dagon_mcu_rp2040::sub::SubLines;
-pub use dagon_mcu_rp2040::BoardDef;
+pub use dagon_mcu_rp2040::{BoardCore, BoardDef};
 use embassy_rp::gpio::{Level, Output};
 use embassy_rp::i2c::{self, I2c};
 use embassy_rp::interrupt::typelevel::{Binding, DMA_IRQ_0, I2C0_IRQ, PIO0_IRQ_0};
@@ -122,9 +122,12 @@ pub fn downlink_uart(p: SubUart) -> PioStream<'static, PIO0, 0, 1> {
     p.stream(Irqs)
 }
 
-impl BoardDef for Board {
+impl BoardCore for Board {
     const BOARD_ID: &'static str = BOARD_ID;
     const FLASH_SIZE: usize = FLASH_SIZE;
+}
+
+impl BoardDef for Board {
     const DIAG_LED: Option<u8> = Some(DIAG_LED);
     const DIAG_LED_ACTIVE_HIGH: bool = crate::DIAG_LED_ACTIVE_HIGH;
     type UserIo = Io;

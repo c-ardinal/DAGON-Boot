@@ -3,7 +3,7 @@
 DAGON board package for the Waveshare RP2040-Touch-LCD-1.28 (topology board
 id `waveshare-rp2040-touch-lcd-1.28`; Cargo package names cannot hold the
 `.`, so it reads `-1-28` there). It implements the RP2040 MCU package's
-`BoardDef` and adds the board's extras. Every board fact is read from
+`BoardCore` and `BoardDef` and adds the board's extras. Every board fact is read from
 `dagon-board.toml` when the package builds (`build.rs`): `def` holds the
 constants (bus speeds, the boot LED), `def::pins` the pin and block types
 and `take!`.

@@ -1,7 +1,8 @@
 # dagon-board-nucleo-f401re
 
 DAGON board package for the NUCLEO-F401RE (topology board id
-`nucleo-f401re`). It implements the STM32F401RE MCU package's `BoardDef`.
+`nucleo-f401re`). It implements the STM32F401RE MCU package's `BoardCore`
+and `BoardDef`.
 Every board fact is read from `dagon-board.toml` when the package builds
 (`build.rs`): `def` holds the constants, `def::pins` the pin and block types
 and `take!`.

@@ -2,9 +2,10 @@
 //! answering: a request the rules reject must get the same status from the
 //! sim; one they accept reaches the bus (and times out there).
 
-use dagon_mcu_rp2040::cmd;
+use dagon_mcu_rp2040::RELAY_LINKS;
 use dagon_proto::payload::{boot0, link, nrst, I2cRaw, Relay, Show, SubCtl};
 use dagon_proto::{finish, frame_len, max_payload, split_status, Cmd, Frame, Status};
+use dagon_relay::cmd;
 use dagon_sim::{demo_hub, SimHub};
 
 fn ask(h: &mut SimHub, c: Cmd, payload: &[u8]) -> Status {
@@ -45,7 +46,7 @@ fn relay_rules_match_the_sim() {
         (9, 0x42, 12),
     ];
     for (l, a, len) in cases {
-        let want = if cmd::relay_fits(l, a, len) {
+        let want = if cmd::relay_fits(&RELAY_LINKS, l, a, len) {
             Status::Timeout
         } else {
             Status::Arg

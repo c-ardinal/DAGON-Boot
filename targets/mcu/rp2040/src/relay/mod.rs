@@ -11,14 +11,12 @@
 //! (`Background`). [`start`] also spawns the watchdog feeder on the app's
 //! executor.
 
-pub use crate::nodes;
 mod pc;
 mod ports;
 pub mod state;
 
-pub use nodes::{named, SubNode};
-
 use dagon_proto::payload::role;
+use dagon_relay::nodes::LinkedNode;
 use embassy_executor::Spawner;
 use embassy_rp::peripherals::{I2C0, PIO0};
 
@@ -59,8 +57,8 @@ pub struct RelayConfig {
     pub tag: &'static str,
     /// USB product name shown on the host.
     pub name: &'static str,
-    /// Sub nodes to poll while no topology display copy is stored.
-    pub fallback: &'static [SubNode],
+    /// Linked nodes to poll while no topology display copy is stored.
+    pub fallback: &'static [LinkedNode],
     /// The 親機 app's self-check, extensions and who confirms.
     pub app: App,
 }

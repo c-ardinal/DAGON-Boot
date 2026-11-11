@@ -42,6 +42,7 @@ dagon-core = { path = "../../../crates/dagon-core" }
 dagon-format = { path = "../../../crates/dagon-format" }
 dagon-port = { path = "../../../crates/dagon-port" }
 dagon-proto = { path = "../../../crates/dagon-proto" }
+dagon-relay = { path = "../../../crates/dagon-relay" }
 dagon-mcu-common = { path = "../common" }
 dagon-agent = { path = "../../../crates/dagon-agent", optional = true }
 dagon-events = { path = "../../../crates/dagon-events", optional = true }

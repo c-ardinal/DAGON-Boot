@@ -334,6 +334,7 @@ dependencies = [
  "dagon-mcu-common",
  "dagon-port",
  "dagon-proto",
+ "dagon-relay",
  "dagon-sim",
  "ed25519-compact",
  "embassy-executor",
@@ -360,6 +361,16 @@ name = "dagon-proto"
 version = "0.1.0"
 dependencies = [
  "dagon-format",
+]
+
+[[package]]
+name = "dagon-relay"
+version = "0.1.0"
+dependencies = [
+ "dagon-format",
+ "dagon-port",
+ "dagon-proto",
+ "heapless 0.9.3",
 ]
 
 [[package]]

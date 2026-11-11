@@ -11,8 +11,8 @@ use embassy_sync::blocking_mutex::Mutex;
 use embassy_sync::signal::Signal;
 use embassy_time::{Duration, Instant};
 
-use crate::nodes::{self, Subs};
-pub use crate::view::{merge, Home, Node, Progress, Seen, Shade};
+use dagon_relay::nodes::{self, LinkedNodes};
+use dagon_relay::view::{merge, Home, Node, Progress, Seen, Shade};
 
 /// No own polling (and the progress screen stays) for this long after a
 /// RELAY or SHOW: the PC drives the nodes.
@@ -20,7 +20,7 @@ const QUIET_AFTER_PC: Duration = Duration::from_secs(10);
 /// Topology node indexes are below this.
 const MAX_INDEX: usize = dagon_format::topology::MAX_NODES;
 
-static SUBS: Mutex<Cs, RefCell<Subs>> = Mutex::new(RefCell::new(Subs::new()));
+static SUBS: Mutex<Cs, RefCell<LinkedNodes>> = Mutex::new(RefCell::new(LinkedNodes::new()));
 static SEEN: Mutex<Cs, RefCell<[Seen; MAX_INDEX]>> = Mutex::new(RefCell::new(
     [Seen {
         version: None,
@@ -46,12 +46,12 @@ fn locked<T, R>(m: &Mutex<Cs, T>, f: impl FnOnce(&T) -> R) -> R {
     m.lock(f)
 }
 
-pub fn set_subs(subs: Subs) {
+pub fn set_subs(subs: LinkedNodes) {
     locked(&SUBS, |s| *s.borrow_mut() = subs);
     REDRAW.signal(());
 }
 
-pub fn subs() -> Subs {
+pub fn subs() -> LinkedNodes {
     locked(&SUBS, |s| s.borrow().clone())
 }
 
@@ -128,7 +128,7 @@ pub fn home() -> Home {
                 .copied()
                 .unwrap_or_default()
         });
-        let _ = home.subs.push(Node {
+        let _ = home.linked.push(Node {
             node: sub,
             version: s.version,
             shade: s.shade,

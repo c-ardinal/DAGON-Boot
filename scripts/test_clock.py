@@ -25,6 +25,7 @@ CLOCK_NAMES = [
 PUBLIC_ITEM = re.compile(r"\bpub\s+(?:struct|enum|union|trait|type)\s+Clock\b")
 PUBLIC_USE = re.compile(r"\bpub\s+use\b([^;]*);")
 RAW_STRING = re.compile(r'b?r(#*)"')
+RAW_IDENT = re.compile(r"r#[A-Za-z_]")
 USE_TOKEN = re.compile(r"::|[{},*]|\w+")
 
 
@@ -39,7 +40,8 @@ def rust_texts():
 
 def code_only(text):
     """`text` with each comment (line, nested block) and each string, raw
-    string, char and byte literal replaced by one space; lifetimes stay."""
+    string, char and byte literal replaced by one space; lifetimes stay, and
+    a raw identifier `r#name` reads as `name`."""
     out, i, n = [], 0, len(text)
     while i < n:
         c = text[i]
@@ -59,6 +61,9 @@ def code_only(text):
             close = '"' + m.group(1)
             j = text.find(close, m.end())
             i = n if j < 0 else j + len(close)
+        elif RAW_IDENT.match(text, i) and (i == 0 or not (text[i - 1].isalnum() or text[i - 1] == "_")):
+            i += 2
+            continue
         elif c == '"':
             i += 1
             while i < n and text[i] != '"':
@@ -191,11 +196,21 @@ class OneClockPerRole(unittest.TestCase):
         self.assertEqual(problems({**self.texts, lib: without + "\npub use crate::compose::Clock;\n"}), [])
         self.assertTrue(problems({**self.texts, lib: without + "\npub use other::Clock;\n"}))
 
+    def test_a_raw_identifier_fails(self):
+        for extra in (
+            "\npub use other::Ticks as r#Clock;\n",
+            "\npub type r#Clock = u64;\n",
+            "\npub trait r#Clock {}\n",
+        ):
+            with self.subTest(extra=extra):
+                self.assertTrue(problems(self.planted("crates/dagon-host/src/lib.rs", extra)))
+
     def test_a_definition_in_a_comment_or_string_passes(self):
         for extra in (
             "\n/* pub trait Clock {} /* nested */ pub type Clock = u8; */\n",
             '\nconst DOC: &str = "pub trait Clock {} \\" pub type Clock = u8;";\n',
             '\nconst RAW: &str = r##"pub use x::Clock; "# trait Clock"##;\n',
+            '\nconst R: &str = r#"pub trait Clock {}"#; const BR: &[u8] = br#"pub type r#Clock = u8;"#;\n',
             "\nconst Q: char = '\"'; const E: char = '\\''; const B: u8 = b'\"'; const T: &str = \"pub trait Clock\";\n",
             "\nfn f<'a>(x: &'a str) -> &'a str { x } // pub trait Clock\n",
         ):

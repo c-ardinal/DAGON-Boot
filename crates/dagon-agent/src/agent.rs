@@ -6,14 +6,11 @@ use dagon_events::{
 };
 use dagon_format::header::{self, image_kind, slot_binding, ImageHeader, HEADER_SIZE};
 use dagon_format::{FormatError, Sha256};
-use dagon_port::{Link, LinkError, Reset};
 use dagon_proto::payload::{
     self, phase, reboot_mode, target, HelloReq, HelloResp, SetPending, Show, SlotState, StatusResp,
     VersionResp, VersionSlots, XferBegin, XferChunk, IMAGE_HDR_LEN,
 };
-use dagon_proto::{
-    flags, frame_len, max_payload, split_status, Cmd, Frame, Status, HEADER_LEN, MAX_FRAME,
-};
+use dagon_proto::{flags, frame_len, max_payload, split_status, Cmd, Frame, Status, HEADER_LEN};
 
 use crate::images::{ImageStore, ImageView};
 use crate::{
@@ -226,38 +223,6 @@ impl<S: SlotStore, X: AppChain> Agent<S, X> {
     /// before the reset.
     pub fn before_reboot(&mut self) {
         noted(self.requests.before_reboot(&mut self.chain));
-    }
-
-    /// Serves frames on `link` forever. On REBOOT it sends the reply, emits
-    /// `app.before_reboot` and resets (a delay `allow_reboot_now` asked for
-    /// is the caller's to keep: use [`Agent::handle`] in a loop that can
-    /// wait).
-    pub async fn run<L: Link, R: Reset>(&mut self, link: &mut L, reset: &mut R) {
-        let mut buf = [0u8; MAX_FRAME];
-        let n = frame_len(self.cfg.max_payload as usize).min(MAX_FRAME);
-        loop {
-            let len = match link.recv_frame(&mut buf[..n], IDLE_TIMEOUT_MS).await {
-                Ok(len) => len,
-                Err(LinkError::Timeout) => {
-                    self.abort();
-                    continue;
-                }
-                Err(_) => continue,
-            };
-            let reboot = match self.handle(&buf[..len]) {
-                Some(reply) => {
-                    let reboot = reply.reboot;
-                    // A lost reply is recovered by the sender's retry (same seq).
-                    let _ = link.send_frame(reply.frame).await;
-                    reboot
-                }
-                None => false,
-            };
-            if reboot {
-                self.before_reboot();
-                reset.reset();
-            }
-        }
     }
 
     /// Handles one request frame. `None`: not a valid request (dropped

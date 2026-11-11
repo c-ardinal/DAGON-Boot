@@ -508,8 +508,7 @@ pub struct Config {
     pub trial_attempts: u8,
 }
 
-/// `app.link_up` / `app.link_down` `addr` of a link without an address.
-pub const NO_ADDR: u8 = 0xFF;
+pub use dagon_port::NO_ADDR;
 
 /// A name in an event's owned form: the first 8 bytes of the SHA-256 of a
 /// domain prefix and the name (as MCU identities are formed). A host maps

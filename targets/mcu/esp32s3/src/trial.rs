@@ -5,7 +5,8 @@
 //! a [`Liveness`] registry attached only while every task is within the
 //! deadline it announced.
 
-use dagon_port::{Clock, Watchdog};
+use dagon_events::Clock;
+use dagon_port::Watchdog;
 
 use crate::liveness::Liveness;
 
@@ -44,7 +45,7 @@ impl<W: Watchdog, C: Clock> TrialWatchdog<W, C> {
     }
 
     /// Milliseconds since boot, wrapping (the [`Liveness`] time base).
-    pub fn now_ms(&self) -> u32 {
+    pub fn now_ms(&mut self) -> u32 {
         (self.clock.now_us() / 1000) as u32
     }
 
@@ -105,10 +106,9 @@ mod tests {
 
     struct Fake(Rc<Cell<u64>>);
     impl Clock for Fake {
-        fn now_us(&self) -> u64 {
+        fn now_us(&mut self) -> u64 {
             self.0.get()
         }
-        fn delay_us(&mut self, _: u32) {}
     }
 
     #[test]

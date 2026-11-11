@@ -1,8 +1,8 @@
-//! `Clock`, `Watchdog` and `Reset`.
+//! `Clock` (DAGON's microsecond clock), `Watchdog` and `Reset`.
 
-use dagon_port::{Clock, Reset, ResetCause, Watchdog};
+use dagon_events::Clock;
+use dagon_port::{Reset, ResetCause, Watchdog};
 use esp_hal::{
-    delay::Delay,
     rtc_cntl::{Rwdt, RwdtStage, SocResetReason},
     time::{Duration, Instant},
 };
@@ -10,12 +10,8 @@ use esp_hal::{
 pub struct EspClock;
 
 impl Clock for EspClock {
-    fn now_us(&self) -> u64 {
+    fn now_us(&mut self) -> u64 {
         Instant::now().duration_since_epoch().as_micros()
-    }
-
-    fn delay_us(&mut self, us: u32) {
-        Delay::new().delay_micros(us);
     }
 }
 

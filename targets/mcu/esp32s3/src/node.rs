@@ -179,7 +179,7 @@ pub fn plain_board() -> &'static mut PlainBoard {
 /// Milliseconds since boot, wrapping: the time base of [`Liveness`] deadlines
 /// (the one the watchdog checks them against).
 pub fn now_ms() -> u32 {
-    use dagon_port::Clock;
+    use dagon_events::Clock;
     (EspClock.now_us() / 1000) as u32
 }
 
@@ -206,7 +206,7 @@ pub fn start(
     static EXECUTOR: StaticCell<InterruptExecutor<1>> = StaticCell::new();
     static EVENTS: StaticCell<Events> = StaticCell::new();
     let now_us: fn() -> u64 = || {
-        use dagon_port::Clock;
+        use dagon_events::Clock;
         EspClock.now_us()
     };
     let periods = Periods::new(TRIAL_WDT_MS, TRIAL_WDT_MS);

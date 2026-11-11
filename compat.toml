@@ -170,6 +170,13 @@ paths = ["crates/dagon-agent"]
 formats = { wire = [1], image-header = [1] }
 
 [[component]]
+name = "relay"
+version = "0.1.0"
+packages = ["dagon-relay"]
+paths = ["crates/dagon-relay"]
+formats = { wire = [1], topology-bin = [1] }
+
+[[component]]
 name = "host"
 version = "0.1.0"
 packages = ["dagon-host"]

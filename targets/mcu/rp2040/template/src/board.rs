@@ -124,7 +124,7 @@ pub fn links(io: Io, uplink: Kind, downlinks: &[Kind]) -> (Links, Spare) {
     let links = Links {
         i2c,
         uart,
-        sub: None,
+        lines: None,
     };
     (links, io.spare)
 }

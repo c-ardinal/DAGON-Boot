@@ -211,8 +211,8 @@ mod usb_node {
     /// watchdog feeder on `spawner` (the app's executor). `tag` is the
     /// node's image target tag (also the USB product name); `app` holds
     /// the self-check, the app's extensions and who confirms ([`open`]).
-    /// Returns the node's events. A 親機 uses `crate::relay::start`
-    /// instead.
+    /// Returns the node's events. A node that relays uses
+    /// `crate::relay::start` instead.
     pub fn start<B: BoardDef, const N: usize>(
         spawner: Spawner,
         parts: DagonParts,

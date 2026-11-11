@@ -257,8 +257,8 @@ pub const PORTS: &[Port] = &[
         &[S::Return, S::Pins, S::Buses, S::Time, S::Memory],
     ),
     port(
-        "ChildLink",
-        "how a hub reaches a child",
+        "NodeLink",
+        "how a node reaches another node over a link, through `dagon_port::NodeLink`",
         &[on(Relay, "I2C controller, PIO UART")],
         Untrusted,
         "",

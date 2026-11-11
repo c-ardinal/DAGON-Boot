@@ -39,7 +39,7 @@ DEVICE_COLS = (
     ("Core Logic", {0: ("Boot Decision", "Core Chooser"), 1: ("State Log Fold",), 3: ("Delivery Plan", "Recovery Policy", "Constraint Evaluator"),
                     4: ("Trust Rule",), 5: ("Deadline Book",)}),
     ("Replaceable Ports", {0: ("DecisionPolicy", "BoardBringUp"), 1: ("SlotStore", "LogStorage", "SelfCheck"), 2: ("UpdateTransport", "UpdateProtocol", "Recovery"),
-                           3: ("ChildLink",), 4: ("ImageVerifier", "Digest", "CryptoProvider"), 5: ("WatchdogDriver",), 7: ("Diagnostics", "Display", "LogSink")}),
+                           3: ("NodeLink",), 4: ("ImageVerifier", "Digest", "CryptoProvider"), 5: ("WatchdogDriver",), 7: ("Diagnostics", "Display", "LogSink")}),
     ("Driver Contract", {0: ("BootSelect",), 1: ("Flash",), 3: ("I2cBus", "StreamPort", "SubControl"), 5: ("Reset",), 6: ("SandboxArch",)}),
 )
 BOARD = ("Board Definition", "Board Bring-Up", "Board Extension", "Boot Action Program", "Shared Bus")
@@ -140,7 +140,7 @@ COMPONENTS = {
     "UpdateTransport": ("リンクのバイト列のポート", "Port for a link's bytes"),
     "UpdateProtocol": ("メッセージのポート", "Port for messages"),
     "Recovery": ("追加の復旧の経路のポート", "Port for an added recovery path"),
-    "ChildLink": ("親機から子機へのリンクのポート", "Port for the hub's link to a child"),
+    "NodeLink": ("リンクの先の別のノードに届くポート", "Port for reaching another node over a link"),
     "ImageVerifier": ("ヘッダの署名の検証のポート", "Port for verifying a header's signature"),
     "Digest": ("本体のハッシュのポート", "Port for the body hash"),
     "CryptoProvider": ("暗号の基本要素のポート", "Port for crypto primitives"),

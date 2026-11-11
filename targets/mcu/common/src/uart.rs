@@ -6,9 +6,9 @@
 //! - garbage (boot logs, broken frames) is skipped by SOF search and CRC;
 //! - only a response (RESP flag) with the request's seq is taken.
 
-use dagon_port::StreamPort;
-use dagon_proto::payload::{HelloReq, HelloResp};
-use dagon_proto::{flags, frame_len, max_payload, split_status, Cmd, Frame, Status, PROTO_VERSION};
+use dagon_port::{NodeLink, StreamPort, NO_ADDR};
+use dagon_proto::payload::{link, HelloResp};
+use dagon_proto::{flags, frame_len, max_payload, Status};
 
 use crate::frames::{FrameReader, GAP_MS};
 use crate::link::{Kind, Link, LinkError, Reconnect};
@@ -17,26 +17,11 @@ pub const UART_FRAME: usize = frame_len(max_payload::UART);
 /// Timeout of the hub's own display HELLO on the UART.
 pub const HELLO_TIMEOUT_MS: u16 = 200;
 
-/// The hub's own read-only HELLO request (seq from the 0x80..=0xFF space).
-pub fn hello_request(max: usize, seq: u8, out: &mut [u8; 32]) -> Option<usize> {
-    let body = HelloReq {
-        proto_ver: PROTO_VERSION as u32,
-        max_payload: max as u16,
-    }
-    .encode(&mut out[8..])
-    .ok()?;
-    dagon_proto::finish(out, 0, seq, Cmd::Hello as u8, body).ok()
-}
+/// The HELLO frame helpers keep their path here: they are public API of
+/// this package (and of the MCU packages re-exporting `uart`).
+pub use dagon_port::{hello_answer, hello_request};
 
-pub fn hello_answer(resp: &[u8], max: usize) -> Option<HelloResp> {
-    let (f, _) = Frame::decode(resp, max).ok()?;
-    match split_status(f.payload)? {
-        (Status::Ok, b) => HelloResp::parse(b).ok(),
-        _ => None,
-    }
-}
-
-/// UART link to a child node (the requesting end); `now` gives
+/// UART link to another node (the requesting end); `now` gives
 /// milliseconds on a monotonic clock. As a [`Link`], `write_frame` sends a
 /// request and starts its deadline ([`UartLink::set_timeout`]) and
 /// `read_frame` returns the next complete frame before that deadline.
@@ -91,14 +76,32 @@ impl<S: StreamPort, C: Fn() -> u64> UartLink<S, C> {
     }
 
     pub async fn hello(&mut self, seq: u8) -> Option<HelloResp> {
-        let mut req = [0u8; 32];
-        let n = hello_request(max_payload::UART, seq, &mut req)?;
-        let mut resp = [0u8; 64];
-        let len = self
-            .exchange(&req[..n], HELLO_TIMEOUT_MS, &mut resp)
-            .await
-            .ok()?;
-        hello_answer(&resp[..len], max_payload::UART)
+        NodeLink::hello(self, NO_ADDR, seq).await
+    }
+}
+
+/// The UART has no addresses: `addr` is ignored.
+impl<S: StreamPort, C: Fn() -> u64> NodeLink for UartLink<S, C> {
+    fn link_id(&self) -> u8 {
+        link::PIO_UART
+    }
+
+    fn max_payload(&self) -> usize {
+        max_payload::UART
+    }
+
+    fn hello_timeout_ms(&self) -> u16 {
+        HELLO_TIMEOUT_MS
+    }
+
+    async fn exchange(
+        &mut self,
+        _addr: u8,
+        frame: &[u8],
+        timeout_ms: u16,
+        out: &mut [u8],
+    ) -> Result<usize, Status> {
+        UartLink::exchange(self, frame, timeout_ms, out).await
     }
 }
 
@@ -169,6 +172,7 @@ mod tests {
     use core::cell::Cell;
     use dagon_port::BusError;
     use dagon_proto::payload::HelloResp;
+    use dagon_proto::Cmd;
     use dagon_sim::block_on;
     use std::rc::Rc;
     use std::vec::Vec;

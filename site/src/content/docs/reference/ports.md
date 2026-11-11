@@ -37,7 +37,7 @@ editUrl: false
 | `LogSink` | `Recent`のあふれと拡張のログの行き先 | app, relay, host | なし | untrusted | return, events, time, memory |
 | `SelfCheck` | 試行中のスロットを確定するときの健全さの答え | app | 健全 | untrusted (判断点、3) | return, time, memory |
 | `BoardBringUp` | アプリの起動時のボードの電源、ピン、バス | app, relay | ボードの定義のもの | untrusted | return, pins, buses, time, memory |
-| `ChildLink` | 親機が子機に届く方法 | relay | I2Cコントローラ、PIO UART | untrusted | return, buses, transport, dma, time, memory |
+| `NodeLink` | `dagon_port::NodeLink`で、ノードがリンクの先の別のノードに届く方法 | relay | I2Cコントローラ、PIO UART | untrusted | return, buses, transport, dma, time, memory |
 | `Signer` | イメージとリリースの署名 | host | ファイルの鍵の組 | untrusted (ホストは定義上信頼されます。検証するのはデバイスです) | – |
 | `KeyStore` | 利用者が選んだ置き場所（環境変数、OSのキーストア、1Passwordなど）から署名の鍵を受け取る | host | ファイルの鍵の組 | untrusted (ホストは定義上信頼されます。検証するのはデバイスです) | – |
 | `BuildRunner` | ノードのイメージのビルド | host | cargo | untrusted | – |

@@ -3,7 +3,9 @@
 //! Node side: [`Flash`], [`Link`] (with [`LinkKind`], [`LinkError`],
 //! [`Reconnect`], [`NO_ADDR`]), [`Reset`], boot selection ([`BootSelectS`]
 //! for kind S, [`BootSelectV`] for kind V), [`Watchdog`].
-//! Hub side: [`StreamPort`], [`I2cBus`], [`SubControl`].
+//! Hub side: [`StreamPort`], [`I2cBus`], [`SubControl`], and [`NodeLink`]
+//! for each link the relay reaches other nodes over (with its HELLO frames,
+//! [`hello_request`] and [`hello_answer`]).
 //!
 //! Link-type and hub-side traits are async (they wait on peripherals or on a
 //! remote hub); flash and watchdog are blocking. This crate only
@@ -16,6 +18,9 @@
 //! kind is one entry of `dagon_format::with_link_kinds!`.
 #![no_std]
 #![allow(async_fn_in_trait)]
+
+use dagon_proto::payload::{HelloReq, HelloResp};
+use dagon_proto::{split_status, Cmd, Frame, Status, PROTO_VERSION};
 
 /// How a board switches between A/B images.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -241,6 +246,81 @@ pub trait I2cBus {
     async fn write_read(&mut self, addr: u8, data: &[u8], buf: &mut [u8]) -> Result<(), BusError>;
 }
 
+/// The node's own read-only HELLO request frame (`seq` from the 0x80..=0xFF
+/// space), offering `max` payload bytes; returns its length.
+pub fn hello_request(max: usize, seq: u8, out: &mut [u8; 32]) -> Option<usize> {
+    let body = HelloReq {
+        proto_ver: PROTO_VERSION as u32,
+        max_payload: max as u16,
+    }
+    .encode(&mut out[8..])
+    .ok()?;
+    dagon_proto::finish(out, 0, seq, Cmd::Hello as u8, body).ok()
+}
+
+/// The HELLO answer in the response frame `resp`; `None` for a frame that
+/// is not a successful answer.
+pub fn hello_answer(resp: &[u8], max: usize) -> Option<HelloResp> {
+    let (f, _) = Frame::decode(resp, max).ok()?;
+    match split_status(f.payload)? {
+        (Status::Ok, b) => HelloResp::parse(b).ok(),
+        _ => None,
+    }
+}
+
+/// Room for a HELLO answer frame (37 bytes) in [`NodeLink::hello`]. A longer
+/// frame is not a HELLO answer.
+const HELLO_ANSWER_MAX: usize = 64;
+
+/// Another node, reachable over this link at an address. The link has no
+/// direction: the node at the other end may be anywhere in the 構成. A
+/// link whose medium has no addresses (a point-to-point UART) ignores
+/// `addr`.
+pub trait NodeLink {
+    /// The link's id in relayed requests (`dagon_proto::payload::link`).
+    fn link_id(&self) -> u8;
+
+    /// Largest payload one frame may carry on this link.
+    fn max_payload(&self) -> usize;
+
+    /// How long [`NodeLink::hello`] waits for the answer.
+    fn hello_timeout_ms(&self) -> u16;
+
+    /// Sends the request frame `frame` to the node at `addr` and stores its
+    /// response frame in `out`; returns the response's length.
+    /// [`Status::Timeout`] when no response is complete within `timeout_ms`.
+    async fn exchange(
+        &mut self,
+        addr: u8,
+        frame: &[u8],
+        timeout_ms: u16,
+        out: &mut [u8],
+    ) -> Result<usize, Status>;
+
+    /// Asks the node at `addr` for its HELLO with request `seq`; `None`
+    /// without a valid answer within [`NodeLink::hello_timeout_ms`].
+    async fn hello(&mut self, addr: u8, seq: u8) -> Option<HelloResp> {
+        let max = self.max_payload();
+        let mut req = [0u8; 32];
+        let n = hello_request(max, seq, &mut req)?;
+        let mut resp = [0u8; HELLO_ANSWER_MAX];
+        let timeout_ms = self.hello_timeout_ms();
+        let len = self
+            .exchange(addr, &req[..n], timeout_ms, &mut resp)
+            .await
+            .ok()?;
+        hello_answer(&resp[..len], max)
+    }
+
+    /// Raw bus access to `addr`, outside DAGON frames: one write
+    /// transaction of `write` (if not empty), then one read transaction
+    /// filling `read` (if not empty). Default: [`Status::Unsupported`].
+    async fn raw(&mut self, addr: u8, write: &[u8], read: &mut [u8]) -> Result<(), Status> {
+        let _ = (addr, write, read);
+        Err(Status::Unsupported)
+    }
+}
+
 /// NRST action, as in the SUBCTL command.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[repr(u8)]
@@ -281,6 +361,105 @@ mod tests {
             assert_eq!(LinkKind::from_name(k.name()), Some(*k));
         }
         assert_eq!(LinkKind::from_name("usb"), None);
+    }
+
+    /// Polls a future that never waits.
+    fn ready<F: core::future::Future>(f: F) -> F::Output {
+        let mut f = core::pin::pin!(f);
+        let mut cx = core::task::Context::from_waker(core::task::Waker::noop());
+        match f.as_mut().poll(&mut cx) {
+            core::task::Poll::Ready(v) => v,
+            core::task::Poll::Pending => panic!("the future waited"),
+        }
+    }
+
+    /// Answers a HELLO from `addr` only, and records the request.
+    struct OneNode {
+        addr: u8,
+        asked: Option<(u8, u16, [u8; 32], usize)>,
+    }
+
+    impl NodeLink for OneNode {
+        fn link_id(&self) -> u8 {
+            7
+        }
+        fn max_payload(&self) -> usize {
+            256
+        }
+        fn hello_timeout_ms(&self) -> u16 {
+            40
+        }
+        async fn exchange(
+            &mut self,
+            addr: u8,
+            frame: &[u8],
+            timeout_ms: u16,
+            out: &mut [u8],
+        ) -> Result<usize, Status> {
+            let mut req = [0u8; 32];
+            req[..frame.len()].copy_from_slice(frame);
+            self.asked = Some((addr, timeout_ms, req, frame.len()));
+            if addr != self.addr {
+                return Err(Status::Timeout);
+            }
+            let h = HelloResp {
+                proto_ver: 1,
+                role: 1,
+                port_kind: 2,
+                mcu_id: 3,
+                mode: 0,
+                active_version: dagon_format::Version::new(1, 2, 0),
+                trial: false,
+                key_id: [0; 8],
+                max_payload: 256,
+            };
+            out[8] = Status::Ok as u8;
+            let n = h.encode(&mut out[9..]).unwrap();
+            Ok(dagon_proto::finish(
+                out,
+                dagon_proto::flags::RESP,
+                frame[4],
+                Cmd::Hello as u8,
+                1 + n,
+            )
+            .unwrap())
+        }
+    }
+
+    #[test]
+    fn hello_asks_with_the_links_payload_and_timeout() {
+        let mut link = OneNode {
+            addr: 0x42,
+            asked: None,
+        };
+        let h = ready(link.hello(0x42, 0x85)).expect("answer");
+        assert_eq!(h.active_version, dagon_format::Version::new(1, 2, 0));
+        let (addr, timeout_ms, req, n) = link.asked.unwrap();
+        assert_eq!((addr, timeout_ms), (0x42, 40));
+        let (f, _) = Frame::decode(&req[..n], 256).unwrap();
+        assert_eq!((f.seq, f.cmd), (0x85, Cmd::Hello as u8));
+        assert_eq!(HelloReq::parse(f.payload).unwrap().max_payload, 256);
+    }
+
+    #[test]
+    fn hello_without_an_answer_is_none() {
+        let mut link = OneNode {
+            addr: 0x42,
+            asked: None,
+        };
+        assert!(ready(link.hello(0x43, 0x86)).is_none());
+    }
+
+    #[test]
+    fn raw_is_unsupported_by_default() {
+        let mut link = OneNode {
+            addr: 0x42,
+            asked: None,
+        };
+        assert_eq!(
+            ready(link.raw(0x42, &[1], &mut [0; 1])),
+            Err(Status::Unsupported)
+        );
     }
 
     #[test]

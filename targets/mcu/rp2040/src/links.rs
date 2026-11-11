@@ -16,10 +16,9 @@ pub type I2c<'d, T> = I2cLink<RpI2c<'d, T>>;
 pub type Uart<'d, P, const TX: usize, const RX: usize> =
     crate::uart::UartLink<PioStream<'d, P, TX, RX>, fn() -> u64>;
 
-use crate::uart::{hello_answer, hello_request};
-use dagon_port::{BusError, I2cBus, StreamPort};
+use dagon_port::{BusError, I2cBus, NodeLink, StreamPort};
 use dagon_proto::mailbox::{self, STATE_LEN};
-use dagon_proto::payload::HelloResp;
+use dagon_proto::payload::{link, HelloResp};
 use dagon_proto::{frame_len, max_payload, Frame, Status};
 use embassy_rp::i2c::Instance as I2cInstance;
 use embassy_rp::i2c::{self, AbortReason, Async};
@@ -98,8 +97,8 @@ fn deadline(timeout_ms: u16) -> Instant {
     Instant::now() + Duration::from_millis(timeout_ms as u64)
 }
 
-/// I2C controller link to child nodes: mailbox exchanges and raw ROM
-/// transactions. As a [`Link`], it talks to the node at the address set
+/// I2C controller link to other nodes on the bus: mailbox exchanges and
+/// raw ROM transactions. As a [`Link`], it talks to the node at the address set
 /// by [`I2cLink::target`]: `write_frame` writes the request (a NACK, an
 /// absent or busy node, is retried until the deadline, which starts
 /// there) and `read_frame` polls the 3-byte state every 2 ms until the
@@ -170,14 +169,36 @@ impl<I: I2cBus> I2cLink<I> {
     }
 
     pub async fn hello(&mut self, addr: u8, seq: u8) -> Option<HelloResp> {
-        let mut req = [0u8; 32];
-        let n = hello_request(max_payload::I2C, seq, &mut req)?;
-        let mut resp = [0u8; I2C_FRAME];
-        let len = self
-            .exchange(addr, &req[..n], POLL_TIMEOUT_I2C_MS, &mut resp)
-            .await
-            .ok()?;
-        hello_answer(&resp[..len], max_payload::I2C)
+        NodeLink::hello(self, addr, seq).await
+    }
+}
+
+/// `raw` is the I2C_RAW transfer ([`I2cLink::rom`]).
+impl<I: I2cBus> NodeLink for I2cLink<I> {
+    fn link_id(&self) -> u8 {
+        link::I2C0
+    }
+
+    fn max_payload(&self) -> usize {
+        max_payload::I2C
+    }
+
+    fn hello_timeout_ms(&self) -> u16 {
+        POLL_TIMEOUT_I2C_MS
+    }
+
+    async fn exchange(
+        &mut self,
+        addr: u8,
+        frame: &[u8],
+        timeout_ms: u16,
+        out: &mut [u8],
+    ) -> Result<usize, Status> {
+        I2cLink::exchange(self, addr, frame, timeout_ms, out).await
+    }
+
+    async fn raw(&mut self, addr: u8, write: &[u8], read: &mut [u8]) -> Result<(), Status> {
+        self.rom(addr, write, read).await
     }
 }
 

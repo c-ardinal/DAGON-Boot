@@ -656,6 +656,29 @@ fn definitions_state_their_format_and_unknown_formats_are_refused() {
 }
 
 #[test]
+fn a_board_table_is_a_whole_board_definition() {
+    let dir = scratch("board-table");
+    // A node's values alone are no board: refused, naming what is missing.
+    write(
+        &dir.join("dagon.toml"),
+        "[board.seg]\nflash_bytes = 524288\n",
+    );
+    let e = Registry::load(&[Source::Project(&dir.join("dagon.toml"))]).unwrap_err();
+    assert!(e.msg.contains("missing field `product`"), "{e}");
+    assert!(e.at.contains("[board.seg]"), "{e}");
+
+    write(
+        &dir.join("dagon.toml"),
+        "[board.my-f401]\nproduct = \"My F401\"\nmcu = \"stm32f401re\"\n\
+         flash_bytes = 524288\ndrawing = \"nucleo-64\"\n",
+    );
+    let r = Registry::load(&[Source::Project(&dir.join("dagon.toml"))]).unwrap();
+    assert_eq!(r.board("my-f401").map(|b| b.flash_bytes), Some(524288));
+    assert_eq!(r.board_origin("my-f401"), Some(Origin::Project));
+    std::fs::remove_dir_all(dir).unwrap();
+}
+
+#[test]
 fn board_with_an_unknown_mcu_is_rejected() {
     let dir = scratch("nomcu");
     let board = FAKE_BOARD.replace("product", "[board.lone]\nproduct");

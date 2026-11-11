@@ -5,7 +5,8 @@
   type or signature and its default.
 - Comments and literals are not code (rust_source.code_only).
 - No other trait declares `const BOARD_ID` or `const FLASH_SIZE`: an MCU
-  package's `BoardDef` extends `BoardCore` instead of repeating them.
+  package's `BoardDef` extends `BoardCore` instead of repeating them, with
+  or without attributes in front.
 
     python -m unittest discover -s scripts -p "test_*.py"
 """
@@ -21,6 +22,8 @@ MEMBER_NAMES = (*SHARED_CONSTS, "bring_up_port", "extension")
 TRAIT = re.compile(r"\btrait\s+(\w+)")
 CONST = re.compile(r"const\s+(\w+)")
 SPACE_BY_PUNCT = re.compile(r"\s*([^\w\s'])\s*")
+ATTRIBUTE = re.compile(r"#!?\[")
+BRACKETS = {"(": 1, "[": 1, "{": 1, ")": -1, "]": -1, "}": -1}
 
 
 def normal(item):
@@ -42,18 +45,31 @@ MEMBERS = sorted(
 
 def items(code, start):
     """The top-level items of the block opening at `code[start]` (`{`),
-    each normalized: one ends at a `;` or at the `}` closing its body."""
+    each normalized with its attributes: one ends at a `;` or at the `}`
+    closing its body, outside any bracket."""
     out, depth, begin = [], 0, start + 1
     for i in range(start + 1, len(code)):
         c = code[i]
         if c == "}" and depth == 0:
             break
-        depth += {"{": 1, "}": -1}.get(c, 0)
+        depth += BRACKETS.get(c, 0)
         if (c == ";" or c == "}") and depth == 0:
             if code[begin:i].strip():
                 out.append(normal(code[begin : i + 1]))
             begin = i + 1
     return out
+
+
+def bare(item):
+    """A normalized item without its leading attributes (`#[..]`, `#![..]`)."""
+    while m := ATTRIBUTE.match(item):
+        depth, i = 0, m.end() - 1
+        for i in range(i, len(item)):
+            depth += BRACKETS.get(item[i], 0)
+            if depth == 0:
+                break
+        item = item[i + 1 :]
+    return item
 
 
 def traits(code):
@@ -77,7 +93,7 @@ def findings(texts):
                 if sorted(declared) != MEMBERS:
                     found.append(f"{path}: BoardCore declares {sorted(declared)}, not {MEMBERS}")
                 continue
-            repeated = [m[1] for d in declared if (m := CONST.match(d)) and m[1] in SHARED_CONSTS]
+            repeated = [m[1] for d in declared if (m := CONST.match(bare(d))) and m[1] in SHARED_CONSTS]
             if repeated:
                 found.append(f"{path}: trait {name} declares {repeated}; extend BoardCore")
     if homes != [HOME]:
@@ -125,6 +141,30 @@ class OneBoardCore(unittest.TestCase):
         for name in SHARED_CONSTS:
             repeated = BOARD_DEF.replace("    type UserIo;", f"    const {name}: usize;\n    type UserIo;")
             self.assertTrue(findings({HOME: CORE, "mcu/node.rs": repeated}), name)
+
+    def test_the_check_catches_a_repeated_const_behind_attributes(self):
+        for member in (
+            "#[allow(dead_code)] const FLASH_SIZE: usize;",
+            "#[cfg(test)] #[doc(hidden)] const BOARD_ID: &'static str;",
+            '#[doc = "x; y"]\n    #[cfg(all(test, any(a, b)))] const BOARD_ID: &\'static str;',
+            "#[cfg_attr(test, doc = [1; 2])] const FLASH_SIZE: usize;",
+            "/// the size\n    const FLASH_SIZE: usize;",
+        ):
+            repeated = BOARD_DEF.replace("    type UserIo;", f"    {member}\n    type UserIo;")
+            self.assertTrue(findings({HOME: CORE, "mcu/node.rs": repeated}), member)
+        inner = BOARD_DEF.replace("    type UserIo;", "    #![allow(dead_code)]\n    const BOARD_ID: &'static str;")
+        self.assertTrue(findings({HOME: CORE, "mcu/node.rs": inner}))
+
+    def test_attributes_in_board_core_are_compared_whole(self):
+        for old in ("const FLASH_SIZE: usize;", "fn extension()"):
+            for attr in ("#[cfg(test)] ", "#[doc(hidden)] #[allow(unused)] ", "#[cfg_attr(x, doc = [0; 1])] "):
+                self.assertTrue(findings({HOME: CORE.replace(old, attr + old)}), attr + old)
+
+    def test_a_semicolon_in_brackets_does_not_split_a_member(self):
+        fn = "    fn split(p: Peripherals) -> (DagonParts, Self::UserIo);\n"
+        board_def = BOARD_DEF.replace(fn, fn + "    fn raw(b: [u8; 4]) -> [u16; 2];\n")
+        self.assertEqual(findings({HOME: CORE, "mcu/node.rs": board_def}), [])
+        self.assertEqual(traits(code_only(board_def))[0][1][-1], "fn raw(b:[u8;4])->[u16;2];")
 
     def test_the_check_catches_a_duplicate_named_after_a_comment(self):
         for planted in (

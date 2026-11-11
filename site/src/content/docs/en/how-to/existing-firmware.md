@@ -13,19 +13,30 @@ These steps are for firmware that is not a `dagon new` project.
 
 3. Implement the `dagon-port` traits for your board (`Flash`, `Link`, `Reset`, `Watchdog`, and `BootSelectS` or `BootSelectV`) and a `dagon_agent::SlotStore`.
 4. Compose the app layer's chain with `dagon_events::compose`, and create the agent by passing a `dagon_agent::Config` and your `SlotStore` to `dagon_agent::Agent::new`. Your extensions answer the decision points and observe the events (see [Events](/en/reference/events/)).
-5. Write the loop that reads a request frame from your link (`dagon_port::Link`), writes the answer of `Agent::handle`, and resets when asked to. Below is an excerpt of the loop the MCU definitions use (`targets/mcu/common/src/serve.rs`). `host` is what differs between MCUs (clock, logging, waiting). When it returns `Exit::Reboot`, the caller resets.
+5. Write the loop that reads a request frame from your link (`dagon_port::Link`), writes the answer of `Agent::handle`, and resets when asked to. Below is the loop the MCU definitions use (`targets/mcu/common/src/serve.rs`), as it is. `host` is what differs between MCUs (clock, watchdog reports, logging, waiting). When the answer could not be written (`wrote` is `Err`), the loop does not reset and waits for the next request; it resets only after the reply to a reboot was written and has left (`flush`). When it returns `Exit::Reboot`, the caller resets.
 
    ```rust
    let (via, addr) = (link.kind().code(), link.addr());
+   let mut up = false;
+   let mut last_request: Option<u64> = None;
    loop {
+       host.idle();
        let read = link.read_frame().await;
+       host.busy();
        let request = match read {
            Ok(r) => r,
            Err(LinkError::Timeout) => {
-               // after IDLE_TIMEOUT_MS without requests, agent.abort() drops the transfer (left out)
+               let idle = IDLE_TIMEOUT_MS as u64;
+               if last_request.is_some_and(|t| host.now_ms().saturating_sub(t) >= idle) {
+                   agent.abort();
+                   last_request = None;
+               }
                continue;
            }
            Err(LinkError::Closed) => {
+               if up {
+                   agent.link_down(via, addr);
+               }
                return Exit::Closed;
            }
            Err(e) => {
@@ -33,19 +44,54 @@ These steps are for firmware that is not a `dagon new` project.
                continue;
            }
        };
+       host.feed();
+       if !up {
+           up = true;
+           agent.link_up(via, addr);
+       }
+       let arrived = host.now_ms();
+       last_request = Some(arrived);
+       // Byte 5 of a frame is the command.
+       let cmd = request.get(5).copied().unwrap_or(0);
        agent.request(request, via);
+       host.on_request();
        let mut reboot = None;
-       // a conformance build answering first (host.intercept) is left out
-       match agent.handle(request) {
-           Some(reply) => {
-               reboot = reply.reboot.then_some(reply.reboot_delay_ms);
-               link.write_frame(reply.frame).await
+       let mut status = None;
+       let wrote = match host.intercept(agent, request) {
+           Some(answer) => {
+               status = reply_status(answer);
+               link.write_frame(answer).await
            }
-           None => link.no_reply().await,
+           None => match agent.handle(request) {
+               Some(reply) => {
+                   reboot = reply.reboot.then_some(reply.reboot_delay_ms);
+                   status = reply_status(reply.frame);
+                   link.write_frame(reply.frame).await
+               }
+               // Not a valid request, or not for this node: no answer, but
+               // the link must take the next request.
+               None => link.no_reply().await,
+           },
        };
-       // a reply that could not be written: wait for the next request (left out)
+       host.after(agent, cmd);
+       match (wrote, status) {
+           (Err(e), _) => {
+               host.on_error(e);
+               up = false;
+               agent.link_down(via, addr);
+               continue;
+           }
+           (Ok(()), Some(s)) => {
+               let ms = host.now_ms().saturating_sub(arrived);
+               agent.replied(s, u32::try_from(ms).unwrap_or(u32::MAX));
+           }
+           (Ok(()), None) => {}
+       }
+       // Reset only once the reply has left; a link that cannot tell (a
+       // new request came first) keeps serving instead.
        if let Some(delay_ms) = reboot {
            if link.flush().await.is_ok() {
+               host.idle();
                host.wait_ms(delay_ms).await;
                agent.before_reboot();
                return Exit::Reboot;

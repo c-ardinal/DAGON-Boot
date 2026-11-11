@@ -245,13 +245,18 @@ fn twelve_of_twelve_through_the_hub() {
     let to = Target::I2c(dagon_sim::NODE_I2C_ADDR);
     let report = run(&mut host, to, link_of(to), &images(), &mut sign);
     assert_all_pass(&report);
-    assert_eq!(report.link, LinkKind::I2cTarget);
+    assert_eq!(report.link, LinkKind::I2c);
 
     let j = json(&report, "seg");
     assert!(j.starts_with("{\n  \"schema\": \"dagon-conform/1\""));
     assert!(j.contains("\"node\": \"seg\"") && j.contains("\"passed\": 12"));
     let h = html(&report, "seg<x>");
     assert!(h.contains("12 of 12 passed") && h.contains("seg&lt;x&gt;"));
+    // The link is named as the 構成 names it, in both files.
+    assert!(
+        j.contains("\"link\": \"i2c\"") && h.contains("Link i2c,"),
+        "{h}"
+    );
     assert!(!h.contains("<script") && !h.contains("http"));
 }
 

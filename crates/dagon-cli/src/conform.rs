@@ -84,7 +84,7 @@ pub fn run<T: Transport, C: Clock>(
     match Runner::new(ch, link, imgs, sign) {
         Ok(mut r) => r.run_all(),
         Err(e) => {
-            eprintln!("conform: setup failed: {e:?}");
+            eprintln!("conform: setup failed: {e}");
             Report::unreachable(link)
         }
     }
@@ -114,11 +114,7 @@ fn esc(s: &str) -> String {
 /// assets).
 pub fn html(report: &Report, node: &str) -> String {
     let mut s = String::new();
-    let link = match report.link {
-        LinkKind::I2cTarget => "I2C",
-        LinkKind::Uart => "UART",
-        LinkKind::UsbCdc => "USB",
-    };
+    let link = report.link.name();
     let _ = write!(
         s,
         "<!doctype html>\n<html lang=\"en\"><head><meta charset=\"utf-8\">\
@@ -171,7 +167,7 @@ pub fn html(report: &Report, node: &str) -> String {
 
 fn link_of(to: Target) -> LinkKind {
     match to {
-        Target::I2c(_) => LinkKind::I2cTarget,
+        Target::I2c(_) => LinkKind::I2c,
         // Direct USB runs as the UART link (same payload limit and speed floor).
         Target::Uart | Target::Hub => LinkKind::Uart,
     }

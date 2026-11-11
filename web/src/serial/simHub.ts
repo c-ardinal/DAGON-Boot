@@ -1,7 +1,7 @@
 // The simulator (dagon-sim's SimHub through dagon-wasm's Simulator) as a
 // Transport and the clock dagon-host runs on: the same HostLink path as Web
 // Serial, with the F401's ROM loader simulated. Answers arrive when the links
-// and flash would have carried them (the model `dagon demo` uses too). Present
+// and flash would have carried them (dagon-sim's timing model). Present
 // only in builds with the `sim` feature (tests, `npm run dev`, the demo page);
 // `simulator()` is null otherwise.
 import * as pkg from '../wasm/pkg/dagon_wasm.js';
@@ -19,7 +19,7 @@ interface SimHub {
   wipe(addr: number): boolean;
   /** Boot core `major.minor.patch` of the I2C node at `addr` fails its own check. */
   failCore(addr: number, major: number, minor: number, patch: number): boolean;
-  /** The watch's next version crashes at boot, so its write goes back (`dagon demo --sim-fail watch`). */
+  /** The watch's next version crashes at boot, so its write goes back. */
   failWatch(): boolean;
 }
 

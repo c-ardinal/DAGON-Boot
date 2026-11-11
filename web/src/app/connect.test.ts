@@ -27,7 +27,7 @@ describe('Web Serial rejections', () => {
   });
 });
 
-describe('dagon demo never opens Web Serial', () => {
+describe('Web Serial', () => {
   function fakeSerial() {
     const listeners: Record<string, ((e: Event) => void)[]> = {};
     let chooser = 0;
@@ -42,22 +42,9 @@ describe('dagon demo never opens Web Serial', () => {
     return { serial, fire, chooser: () => chooser };
   }
 
-  test('while the page drives the simulator, a plugged device and the chooser reach no port', async () => {
-    const f = fakeSerial();
-    const ws = webSerial(f.serial, () => true);
-    const seen: string[] = [];
-    ws.on('connect', (e) => seen.push(e.type));
-    ws.on('disconnect', (e) => seen.push(e.type));
-    f.fire('connect');
-    f.fire('disconnect');
-    expect(seen).toEqual([]);
-    await expect(ws.chooseAndOpen()).rejects.toThrow();
-    expect(f.chooser()).toBe(0);
-  });
-
   test('with a real hub, Web Serial works as before', async () => {
     const f = fakeSerial();
-    const ws = webSerial(f.serial, () => false);
+    const ws = webSerial(f.serial);
     const seen: string[] = [];
     ws.on('connect', (e) => seen.push(e.type));
     f.fire('connect');

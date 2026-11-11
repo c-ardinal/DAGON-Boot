@@ -55,8 +55,6 @@ Host and Origin checks (403 otherwise).
 | `POST` | `/v1/gen` | `dagon gen` for the open project; dagon.toml is edited under the files lock. |
 | `POST` | `/v1/flash` | `device` names one of the candidates the writer reports; with several and none named, the job ends with the candidates (written: false) and writes nothing. |
 | `POST` | `/v1/doctor` | The tools the project's MCUs need, by its definitions. Nobody can confirm a command here, so a check the project itself defines is reported as one for the terminal's `dagon doctor`. |
-| `POST` | `/v1/sim/write` | Bytes for the simulated hub's USB port. |
-| `GET` | `/v1/sim/read` | What the simulated hub answered (empty when nothing came within the wait). |
 
 `/v1/events` is a WebSocket: the page sends the passphrase as its
 first message, then receives serve's events (job progress, logs, results,

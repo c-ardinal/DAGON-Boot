@@ -58,7 +58,6 @@
   import { CONFIRM, CONN, FILE, HELP, LAYOUT, MENU, NOTICE, SHEET_CLOSE, SIM, START, TOPOLOGY_READ, fill as fillIn } from './app/copy.ts';
   import { devHub } from './serial/devHub.ts';
   import { DEMO_SITE } from './app/site.ts';
-  import { serveSim, type SimStand } from './serial/serveSim.ts';
   import { MockTransport } from './serial/mock.ts';
   import { WebSerialTransport, type Transport } from './serial/transport.ts';
   import Unsupported from './Unsupported.svelte';
@@ -73,24 +72,16 @@
   if (serial || dev) dagonReady().catch(() => undefined);
 
   let opened: Transport | null = null;
-  /** `dagon demo`'s simulator through serve, made once serve says it has one; null for a real hub. */
-  let simStand: SimStand | null = null;
-  function simHub(): SimStand | null {
-    const s = cli.sim;
-    if (!s) return null;
-    simStand ??= serveSim(cli, s.speed);
-    return simStand;
-  }
   const op = new Operate({
     open: async () => {
-      const t = stand?.transport ?? simHub()?.transport ?? null;
+      const t = stand?.transport ?? null;
       if (t) await t.open();
       opened = t ?? (await ports.chooseAndOpen());
       return opened;
     },
     // The stand-in hub comes back by itself; a real one is chosen again in the browser.
     reselect: async () => {
-      if ((dev || simHub()) && opened) {
+      if (dev && opened) {
         if (opened instanceof MockTransport) opened.replug();
         await opened.open();
         return opened;
@@ -101,7 +92,7 @@
     timer: true,
     // The simulator's clock runs at the demo's speed; a real hub keeps the default.
     get clock() {
-      return stand?.clock ?? simHub()?.clock;
+      return stand?.clock;
     },
     // The CLI gave the hub back: the device the page had, opened again without the chooser.
     again: async () => {
@@ -122,8 +113,8 @@
   /** `dagon serve`: the page is always its page; K0/K3 when it cannot be reached. */
   const cli = new Cli();
   const demoStandIn = import.meta.env.DEV && params.has('demo');
-  /** The 親機 and 子機 are simulated: `dagon demo` through serve, or the demo page's own simulator. */
-  const simulated = $derived(cli.sim !== null || DEMO_SITE || demoStandIn);
+  /** The 親機 and 子機 are simulated: the demo page's own simulator. */
+  const simulated = DEMO_SITE || demoStandIn;
   /** The 定義 document: the project's 構成 as edited (its YAML is the one source of truth). */
   const d = new Define();
   /** DAGON's link to its agent through serve (development: `?agent` stands in for serve's routes). */
@@ -133,8 +124,7 @@
   if (agentStandIn) void agent.refresh();
   /** One condition closes every path to linking, talking, keys and the CLI sheet: linked is never true in a demo. */
   const agentLinked = $derived(!simulated && agent.linked);
-  /** Web Serial, which the page never uses while it drives the simulator. */
-  const ports = webSerial(serial, () => cli.sim !== null);
+  const ports = webSerial(serial);
   cli.onDevice = (need) => (need ? op.handOver() : op.cliReturned());
 
   /** The start screen until a project is open; then 定義 and 運用. */
@@ -949,7 +939,7 @@
   /** The lock table's states now, leftmost first. */
   const lockStates = $derived(
     activeStates({
-      // the page has no demo playback of its own yet; `dagon demo`'s simulator is driven by the user like a real one.
+      // the page has no demo playback of its own; a simulator is driven by the user like a real hub.
       demo: false,
       updating: ['writing', 'hubRestarting', 'reconnectNeeded'].includes(op.state),
       recovering: op.state === 'recovering',
@@ -1304,8 +1294,8 @@
   let factory = $state<{ node: string; id: number | null } | null>(null);
   const hubId = $derived((hubNode ?? op.config?.nodes.find((n) => n.role === 'hub'))?.id ?? null);
   const factoryNode = $derived(op.config?.nodes.find((n) => n.id === factory?.node) ?? null);
-  /** Nodes whose first write can start from their card: not in dagon demo, whose nodes are simulated. */
-  const firstNodes = $derived(mode === 'operate' && !cli.sim && cli.has('flash') ? firstWriteNodes(op.config?.nodes ?? [], op.live, connected, op.state) : []);
+  /** Nodes whose first write can start from their card (serve's flash). */
+  const firstNodes = $derived(mode === 'operate' && cli.has('flash') ? firstWriteNodes(op.config?.nodes ?? [], op.live, connected, op.state) : []);
   const factoryMcu = $derived(d.doc.topo.nodes.find((n) => n.id === factoryNode?.id)?.mcu ?? '');
   const factoryJob = $derived(factory?.id == null ? null : (cli.jobs.find((j) => j.id === factory?.id) ?? null));
   async function factoryWrite() {
@@ -1476,7 +1466,7 @@
       />
 {/snippet}
 
-{#if !serial && !dev && !cli.sim}
+{#if !serial && !dev}
   <Unsupported />
 {:else}
   <a class="skip" href="#canvas">{SKIP.canvas}</a>

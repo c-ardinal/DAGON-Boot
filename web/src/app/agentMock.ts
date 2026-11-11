@@ -1,6 +1,6 @@
 // Development stand-in for serve's agent routes (site/src/content/docs/reference/agent-api.md), until
 // the CLI side is merged: `?agent` links on the page only, `?agent=linked`
-// starts linked, `&agentdemo` refuses linking as `dagon demo` does. The
+// starts linked, `&agentdemo` refuses linking (403). The
 // answers are fixed sentences, never an agent's.
 import type { AgentApi, AgentStatus } from './agent.svelte.ts';
 

@@ -45,7 +45,7 @@ describe('bottom band', () => {
     expect(b.secondary).toEqual([]);
   });
 
-  test('dagon demo: before connecting, the band says no device list appears for the simulated 親機', () => {
+  test('simulated: before connecting, the band says no device list appears for the simulated 親機', () => {
     for (const st of ['idle', 'choosing'] as const) {
       expect(bandOf(st, { hasConfig: true }, { sim: true }).sentence).toBe(SIM.connect.sentence);
     }

@@ -1128,11 +1128,6 @@ export const SAVE = {
   unsaved: '● 未保存',
   /** 422: the CLI's own check refused the 構成. */
   invalid: { chip: '× 保存失敗', sentence: '問題を直してから、もう一度保存してください。' },
-  /** 422 in dagon demo: an uplink the demo cannot simulate. */
-  demoLink: {
-    chip: '× デモ非対応',
-    sentence: 'デモで試せる親機の接続元は、パソコンかブラウザから USB・UART・Wi-Fi でつないだものです。そのどれかを選んでください。',
-  },
   /** 409: a job holds the project. */
   busy: { chip: '… 作業中', sentence: '作業が終わってから、もう一度保存してください。' },
   failed: { chip: '× 保存失敗', sentence: 'ターミナルで dagon serve が動いているか確かめてから、もう一度保存してください。' },
@@ -1191,7 +1186,7 @@ export const START = {
   initAsk: 'このフォルダに dagon.toml を作りますか。',
 } as const;
 
-/** `dagon demo`: the simulator, marked wherever the page is. */
+/** The simulator (the demo page, the development stand-in), marked wherever the page is. */
 export const SIM = {
   badge: '模擬',
   label: '模擬の親機と子機（実機ではありません）',

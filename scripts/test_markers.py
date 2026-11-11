@@ -123,7 +123,37 @@ def hits():
                 yield f"{name}:{no}: {what} '{word}'"
 
 
+# `dagon serve` has no simulator: the browser simulator runs in the page itself
+# (web/src/serial/simHub.ts, which the name check leaves alone), and `dagon sim`
+# is the CLI's. These names belonged to a serve-side simulator.
+SERVE_SIM_NAMES = re.compile(
+    r"server\.sim|/v1/sim|demo_uplink|serveSim|simHub(?!\.ts)|simWrite|simRead|simUplink"
+    r"|demoLink|DEMO_REFUSED|DEMO_HIDDEN|demo_refuses"
+)
+SERVE_SIM_DIRS = ["crates/", "web/src/", "site/src/"]
+
+
+def serve_sim_hits():
+    out = subprocess.run(
+        ["git", "-C", str(ROOT), "ls-files", "-z", "--cached", "--others", "--exclude-standard", "--", *SERVE_SIM_DIRS],
+        check=True,
+        capture_output=True,
+    ).stdout
+    for name in sorted(set(out.decode("utf-8").split("\0"))):
+        path = ROOT / name
+        if not name or not path.is_file():
+            continue
+        for no, line in enumerate(path.read_text("utf-8", errors="replace").splitlines(), 1):
+            m = SERVE_SIM_NAMES.search(line)
+            if m:
+                yield f"{name}:{no}: '{m.group(0)}'"
+
+
 class Markers(unittest.TestCase):
+    def test_serve_has_no_simulator(self):
+        found = list(serve_sim_hits())
+        self.assertEqual(found, [], f"{len(found)} serve simulator name(s):\n" + "\n".join(found))
+
     def test_no_internal_process_markers(self):
         found = list(hits())
         self.assertEqual(found, [], f"{len(found)} marker(s):\n" + "\n".join(found))

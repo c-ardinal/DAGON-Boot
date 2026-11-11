@@ -2,7 +2,6 @@ import { describe, expect, test } from 'vitest';
 import { Cli, CONSOLE_VERSION, SERVE_API, type CliDeps, parseLayout } from './cli.svelte.ts';
 import pkg from '../../../package.json';
 import { Define } from './define.svelte.ts';
-import { SAVE } from '../copy.ts';
 
 const PASS = '0123456789abcdef0123456789abcdef';
 const HELLO = { cli: '0.1.0', api: 1, workspace: 'my-fleet', features: ['build', 'sign', 'release', 'gen'], key: true, key_id: '3f9a21c7aabbccdd' };
@@ -322,24 +321,6 @@ describe('dagon serve link', () => {
     d.undo();
     await save();
     expect([d.saveFailure, d.unsaved, d.doc.topo.nodes]).toEqual(['failed', true, []]);
-  });
-
-  test('dagon demo refuses an uplink it cannot simulate: not saved, and the page says why', async () => {
-    const f = fake();
-    const base = f.deps.fetch!;
-    f.deps.fetch = (async (url: string, init: RequestInit) => {
-      if (url === '/v1/topology' && init.method === 'PUT') {
-        return Response.json({ report: { issues: [] }, demo_uplink: { kind: 'ble', host: 'browser' } }, { status: 422 });
-      }
-      return base(url, init);
-    }) as unknown as typeof fetch;
-    const cli = new Cli(f.deps);
-    await cli.connect();
-    const d = new Define();
-    d.placeSample();
-    d.saved(d.revision, await cli.saveTopology(d.exportYaml().text));
-    expect([d.saveFailure, d.unsaved]).toEqual(['demoLink', true]);
-    expect(SAVE.demoLink.sentence).toContain('USB');
   });
 });
 

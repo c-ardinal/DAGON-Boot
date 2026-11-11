@@ -48,22 +48,13 @@ export async function wasmReady(ready: () => Promise<unknown> = dagonReady): Pro
   }
 }
 
-/**
- * Web Serial as the page may use it: none while it drives `dagon demo`'s
- * simulator, so the demo never opens a real port, not even when a
- * device is plugged in during a reconnect.
- */
-export function webSerial(serial: Serial | undefined, isSim: () => boolean) {
-  const real = () => (isSim() ? undefined : serial);
+/** Web Serial as the page uses it: choosing a port, and its connect and disconnect events. */
+export function webSerial(serial: Serial | undefined) {
   return {
     chooseAndOpen: async (): Promise<WebSerialTransport> => {
-      const s = real();
-      if (!s) throw new ConnectError('not-found');
-      return chooseAndOpen(s);
+      if (!serial) throw new ConnectError('not-found');
+      return chooseAndOpen(serial);
     },
-    on: (type: 'connect' | 'disconnect', f: (e: Event) => void) =>
-      serial?.addEventListener(type, (e) => {
-        if (real()) f(e);
-      }),
+    on: (type: 'connect' | 'disconnect', f: (e: Event) => void) => serial?.addEventListener(type, f),
   };
 }

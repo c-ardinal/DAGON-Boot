@@ -21,10 +21,12 @@
 
 use dagon_agent::{Agent, Config, SlotStore};
 pub use dagon_core::log::LogError;
-use dagon_events::{BoardBringUp, Published, Watchdog as Periods};
+use dagon_events::{Published, Watchdog as Periods};
 use dagon_format::header::{port_kind, target_tag, ImageHeader, HEADER_SIZE};
 use dagon_format::Version;
-pub use dagon_mcu_common::hooks::{always, App, AppEvents, Confirm, NodeChain, SelfCheck};
+pub use dagon_mcu_common::hooks::{
+    always, App, AppEvents, BoardCore, Confirm, NodeChain, SelfCheck,
+};
 use dagon_mcu_common::hooks::{finish_start, node_chain, BoardExtension, Events, UserExtensions};
 use dagon_mcu_common::link::LinkError;
 use dagon_mcu_common::serve::{serve as dagon_serve, Exit, ServeHost};
@@ -80,14 +82,11 @@ pub struct DagonParts<L> {
     pub link: L,
 }
 
-/// A board with an STM32F401RE: its identity, flash size and how the
-/// chip's peripherals split between DAGON and the app. A board package (or
-/// a generated `wiring.rs` for a board without one) implements it.
-pub trait BoardDef {
-    /// The topology's board id.
-    const BOARD_ID: &'static str;
-    /// Flash size in bytes (check-only, see the module docs).
-    const FLASH_SIZE: usize;
+/// A board with an STM32F401RE: on top of its [`BoardCore`] (identity,
+/// flash size, bring-up, extension), its DAGON link and how the chip's
+/// peripherals split between DAGON and the app. A board package (or a
+/// generated `wiring.rs` for a board without one) implements both.
+pub trait BoardDef: BoardCore {
     /// The DAGON link's peripherals and pins.
     type Link;
     /// Everything the app gets (pins and peripherals DAGON does not use).
@@ -97,19 +96,6 @@ pub trait BoardDef {
     /// Opens the DAGON link: the I2C target at the node's address, and its
     /// registers (the address is NACKed while a request runs).
     fn open_link(link: Self::Link) -> (I2cTarget, pac::i2c::I2c);
-    /// The board's `BoardBringUp` port, which [`start`] runs before the
-    /// link serves (`app.bring_up`). Default: none, so no bring-up runs and
-    /// no `app.bring_up` is emitted. Called once.
-    fn bring_up_port() -> Option<&'static mut dyn BoardBringUp> {
-        None
-    }
-    /// The board package's extension, which the start puts in the node's
-    /// chain after the publisher and before the app's: it observes every
-    /// event and answers the decision points before the app. Default:
-    /// none. Called once.
-    fn extension() -> Option<BoardExtension> {
-        None
-    }
 }
 
 /// A handle on the one flash driver (see the module docs).

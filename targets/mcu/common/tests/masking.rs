@@ -1,13 +1,14 @@
 //! The execution model's rule for DAGON's own code (site/src/content/docs/en/explanation/
 //! lifecycle-events.md, section 12, rule 2) is enforced by clippy:
 //! `targets/mcu/clippy.toml` refuses every way to mask interrupts in the MCU
-//! packages (clippy resolves the path, so an alias or a wrapper does not
-//! hide it). This test keeps that list in place and keeps the exemptions to
-//! the one reviewed function that masks.
+//! packages, and `crates/dagon-relay/clippy.toml` in the relay they run
+//! (clippy resolves the path, so an alias or a wrapper does not hide it).
+//! This test keeps those lists in place and keeps the exemptions to the
+//! reviewed functions that mask.
 
 use std::path::{Path, PathBuf};
 
-/// Every masking primitive the MCU packages may reach.
+/// Every masking primitive the MCU packages and the relay may reach.
 const MASKING: &[&str] = &[
     "critical_section::with",
     "critical_section::acquire",
@@ -26,14 +27,18 @@ const LIFTS: &[&str] = &[
     "expect(clippy::all",
 ];
 
+/// The directories (from the repository root) whose code runs inside the
+/// MCU packages, each with its clippy.toml.
+const SCANNED: &[&str] = &["targets/mcu", "crates/dagon-relay"];
+
 /// The functions allowed to mask, by file: each says why on itself.
 const EXEMPT: &[(&str, &str)] = &[
-    ("common/src/guard.rs", "fn with_state"),
-    ("rp2040/src/relay/state.rs", "fn locked"),
+    ("targets/mcu/common/src/guard.rs", "fn with_state"),
+    ("crates/dagon-relay/src/state.rs", "fn locked"),
 ];
 
-fn mcu_dir() -> PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR")).join("..")
+fn repo_root() -> PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR")).join("../../..")
 }
 
 fn rust_files(dir: &Path, out: &mut Vec<PathBuf>) {
@@ -52,21 +57,25 @@ fn rust_files(dir: &Path, out: &mut Vec<PathBuf>) {
 
 #[test]
 fn clippy_refuses_every_masking_primitive() {
-    let conf = std::fs::read_to_string(mcu_dir().join("clippy.toml")).unwrap();
-    let table: toml_like::Paths = toml_like::paths(&conf);
-    for m in MASKING {
-        assert!(
-            table.iter().any(|p| p == m),
-            "targets/mcu/clippy.toml must refuse {m}"
-        );
+    for dir in SCANNED {
+        let conf = std::fs::read_to_string(repo_root().join(dir).join("clippy.toml")).unwrap();
+        let table: toml_like::Paths = toml_like::paths(&conf);
+        for m in MASKING {
+            assert!(
+                table.iter().any(|p| p == m),
+                "{dir}/clippy.toml must refuse {m}"
+            );
+        }
     }
 }
 
 #[test]
 fn only_the_reviewed_function_may_mask() {
-    let root = mcu_dir();
+    let root = repo_root();
     let mut files = Vec::new();
-    rust_files(&root, &mut files);
+    for dir in SCANNED {
+        rust_files(&root.join(dir), &mut files);
+    }
     let mut found = Vec::new();
     for f in &files {
         let text = std::fs::read_to_string(f).unwrap_or_default();

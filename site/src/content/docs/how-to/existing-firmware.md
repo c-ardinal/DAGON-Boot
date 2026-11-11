@@ -12,14 +12,47 @@ description: "手元のファームウェアにDAGONのエージェントと書�
    - ほかのマイコン: 同じ形にフラッシュを割り付けます。ブートローダ、状態ログ2面、スロットAとBです。各スロットの先頭に512バイトの署名付きイメージヘッダを置き、本体はスロット先頭 + 0x200に置きます。
 
 3. ボード用に`dagon-port`のtrait（`Flash`、`Link`、`Reset`、`Watchdog`、`BootSelectS`か`BootSelectV`）と`dagon_agent::SlotStore`を実装します。
-4. アプリ層のチェーンを組み立て、リンクを渡してエージェントを起動します。拡張が判断点に答え、イベントを受け取ります（[イベント](/reference/events/)）。
+4. アプリ層のチェーンを`dagon_events::compose`で組み立て、`dagon_agent::Config`と`SlotStore`の実装を`dagon_agent::Agent::new`に渡して、エージェントを作ります。拡張が判断点に答え、イベントを受け取ります（[イベント](/reference/events/)）。
+5. リンク（`dagon_port::Link`）から要求のフレームを読み、`Agent::handle`の答えを書き、求められたリセットをする繰り返しを書きます。次は、マイコンの定義が使っている繰り返し（`targets/mcu/common/src/serve.rs`）の抜き出しです。`host`はマイコンごとに違う部分（時計、記録、待ち）です。`Exit::Reboot`で戻ったら、呼んだ側がリセットします。
 
    ```rust
-   let chain = dagon_events::compose(Layer::App, events, board_exts, user_exts, bounds);
-   let cfg = dagon_agent::Config { pubkey, mcu_id, port_kind, target_tag, role, mode, max_payload };
-   let mut agent = dagon_agent::Agent::new(cfg, store, chain);
-   agent.run(&mut link, &mut reset).await;                    // 要求に応え続ける
+   let (via, addr) = (link.kind().code(), link.addr());
+   loop {
+       let read = link.read_frame().await;
+       let request = match read {
+           Ok(r) => r,
+           Err(LinkError::Timeout) => {
+               // 要求のないままIDLE_TIMEOUT_MSがたったら、agent.abort()で転送を捨てる（省略）
+               continue;
+           }
+           Err(LinkError::Closed) => {
+               return Exit::Closed;
+           }
+           Err(e) => {
+               host.on_error(e);
+               continue;
+           }
+       };
+       agent.request(request, via);
+       let mut reboot = None;
+       // 適合試験のビルドが先に答える部分（host.intercept）は省略
+       match agent.handle(request) {
+           Some(reply) => {
+               reboot = reply.reboot.then_some(reply.reboot_delay_ms);
+               link.write_frame(reply.frame).await
+           }
+           None => link.no_reply().await,
+       };
+       // 答えを書けなかったときは、次の要求を待つ（省略）
+       if let Some(delay_ms) = reboot {
+           if link.flush().await.is_ok() {
+               host.wait_ms(delay_ms).await;
+               agent.before_reboot();
+               return Exit::Reboot;
+           }
+       }
+   }
    ```
 
-5. ウォッチドッグをキックします。確定済みのあいだはキックし続け、試行中は限られた時間だけキックします。こうすると、確定されないイメージはリセットされて前のバージョンに戻ります。
-6. `dagon conform`で移植を確かめます。
+6. ウォッチドッグをキックします。確定済みのあいだはキックし続け、試行中は限られた時間だけキックします。こうすると、確定されないイメージはリセットされて前のバージョンに戻ります。
+7. `dagon conform`で移植を確かめます。

@@ -9,7 +9,7 @@ use dagon_conform::pc::{Channel, Images, NoAnswer, Runner, Signer};
 use dagon_conform::report::{CtResult, Progress, Report};
 use dagon_conform::{Label, CTS};
 use dagon_format::header::SIGN_DOMAIN;
-use dagon_host::{Clock, Error, Host, Target, Transport};
+use dagon_host::{Error, Host, HostClock, Target, Transport};
 use dagon_port::LinkKind;
 use dagon_sim::block_on;
 
@@ -31,12 +31,12 @@ pub const IMAGE_FILES: [&str; 4] = [
 ];
 
 /// dagon-conform's synchronous channel over a dagon-host session.
-pub struct HostChannel<'h, T: Transport, C: Clock> {
+pub struct HostChannel<'h, T: Transport, C: HostClock> {
     pub host: &'h mut Host<T, C>,
     pub to: Target,
 }
 
-impl<T: Transport, C: Clock> Channel for HostChannel<'_, T, C> {
+impl<T: Transport, C: HostClock> Channel for HostChannel<'_, T, C> {
     fn request(
         &mut self,
         cmd: dagon_proto::Cmd,
@@ -69,7 +69,7 @@ impl<T: Transport, C: Clock> Channel for HostChannel<'_, T, C> {
 
 /// Runs all 12 tests. `images` are good A, good B, no-confirm A, no-confirm
 /// B; `sign` signs re-built headers for the compatibility test.
-pub fn run<T: Transport, C: Clock>(
+pub fn run<T: Transport, C: HostClock>(
     host: &mut Host<T, C>,
     to: Target,
     link: LinkKind,

@@ -3,7 +3,7 @@
 use std::io::{self, Read, Write};
 use std::time::{Duration, Instant};
 
-use dagon_host::{Clock, Host, Transport};
+use dagon_host::{Host, HostClock, Transport};
 use serialport::{SerialPort, SerialPortType};
 
 /// USB IDs and product string of the hub's CDC interface.
@@ -107,7 +107,7 @@ impl Transport for Serial {
 
 pub struct Wall(Instant);
 
-impl Clock for Wall {
+impl HostClock for Wall {
     fn now_ms(&self) -> u64 {
         self.0.elapsed().as_millis() as u64
     }

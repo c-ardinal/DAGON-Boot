@@ -150,7 +150,7 @@ impl Transport for HubSim {
     }
 }
 
-impl Clock for HubSim {
+impl HostClock for HubSim {
     fn now_ms(&self) -> u64 {
         self.hub.borrow().now_ms()
     }
@@ -201,7 +201,7 @@ impl Transport for DirectSim {
     }
 }
 
-impl Clock for DirectSim {
+impl HostClock for DirectSim {
     fn now_ms(&self) -> u64 {
         self.now.get()
     }

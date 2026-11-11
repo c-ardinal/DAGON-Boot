@@ -1,13 +1,13 @@
-//! dagon-host for the page: a [`Transport`] and [`Clock`] over a JavaScript
-//! link object (Web Serial, or the simulated hub in development), and the
-//! procedures the page calls. The page only moves bytes; every request,
-//! timeout and retry is dagon-host's.
+//! dagon-host for the page: a [`Transport`] and [`HostClock`] over a
+//! JavaScript link object (Web Serial, or the simulated hub in development),
+//! and the procedures the page calls. The page only moves bytes; every
+//! request, timeout and retry is dagon-host's.
 
 use alloc::rc::Rc;
 use core::cell::RefCell;
 
 use dagon_host::{
-    check_release, reason, Clock, ConfirmOutcome, Discovery, Error, Event, Host, NodeOutcome,
+    check_release, reason, ConfirmOutcome, Discovery, Error, Event, Host, HostClock, NodeOutcome,
     NodeState, Outcome, RecoverAssets, RecoverPath, RomStats, Target, Transport, WritePath,
 };
 use dagon_proto::payload::{HelloResp, SlotInfo, StatusResp, VersionResp, VersionSlots};
@@ -89,7 +89,7 @@ impl Transport for JsTransport {
     }
 }
 
-impl Clock for JsClock {
+impl HostClock for JsClock {
     fn now_ms(&self) -> u64 {
         self.0.now() as u64
     }

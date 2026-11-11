@@ -334,7 +334,7 @@ mod tests {
         }
     }
 
-    impl dagon_host::Clock for Link {
+    impl dagon_host::HostClock for Link {
         fn now_ms(&self) -> u64 {
             self.0.borrow().now_ms()
         }

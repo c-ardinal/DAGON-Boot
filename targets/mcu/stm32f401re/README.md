@@ -7,9 +7,12 @@ the node over I2C). Topology MCU id `stm32f401re`, flash map
 `f401-default`.
 
 Board-specific values (the link's I2C peripheral, pins and address, flash
-size, LEDs and displays) live in a board package that implements
-[`BoardDef`] (`src/node.rs`), for example `../../boards/nucleo-f401re`. A
-board without a package needs only its own `BoardDef`.
+size, LEDs and displays) live in a board package that implements two
+traits: [`BoardCore`] (`../common/src/hooks.rs`: board id, flash size,
+bring-up, extension), which every MCU package shares, and [`BoardDef`]
+(`src/node.rs`: the DAGON link and the peripheral split), for example
+`../../boards/nucleo-f401re`. A board without a package needs only its own
+`BoardCore` and `BoardDef`.
 
 ## A minimal app
 
@@ -97,7 +100,7 @@ the `App` gives the self-check (whether a version on trial may be
 confirmed), the app's extensions (`exts`: they observe every `app.*` event
 and answer the decision points, after the board package in the chain) and
 `confirm` (`Confirm::Own`: the start confirms a trial itself before the
-link serves). The board's `BoardDef::bring_up_port` runs before the link
+link serves). The board's `BoardCore::bring_up_port` runs before the link
 serves (`app.bring_up`); a board without one emits nothing. `start`
 returns the node's events (`AppEvents`) for display and log tasks. An app
 that keeps `embassy_stm32::Peripherals` itself passes `dagon_pins!(p)`
@@ -105,7 +108,7 @@ instead of splitting. Build with `DAGON_PUBKEY` set (below);
 `--features slot-b` links the same app for slot B. The agent is the
 start's and its serving task's only: no public function hands it out, so
 application code reaches DAGON through `AppEvents`, its extensions and
-`Confirm`. The board definition's `BoardDef::extension` is the board
+`Confirm`. The board definition's `BoardCore::extension` is the board
 package's place in the chain (after the publisher, before the app's
 extensions). A REBOOT reply
 is followed by the delay the app's `allow_reboot_now` asked for, the
@@ -238,4 +241,5 @@ digits) and is embedded at build time. Unset, the build fails, unless
 cargo test --no-default-features --target <host triple>
 ```
 
+[`BoardCore`]: ../common/src/hooks.rs
 [`BoardDef`]: src/node.rs

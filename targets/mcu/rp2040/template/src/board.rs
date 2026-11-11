@@ -10,7 +10,7 @@ use dagon_mcu_rp2040::links::Kind;
 use dagon_mcu_rp2040::links::{I2cLink, RpI2c};
 #[cfg({{if_down_uart}})]
 use dagon_mcu_rp2040::links::PioStream;
-use dagon_mcu_rp2040::node::{BoardDef, DagonParts};
+use dagon_mcu_rp2040::node::{BoardCore, BoardDef, DagonParts};
 use dagon_mcu_rp2040::relay::Links;
 #[cfg({{if_down_i2c}})]
 use embassy_rp::i2c::{self, I2c};
@@ -57,12 +57,15 @@ pub struct Io {
 /// them out of `p` in `split`).
 pub struct Spare {}
 
-impl BoardDef for Board {
+impl BoardCore for Board {
     const BOARD_ID: &'static str = "{{node}}";
     const FLASH_SIZE: usize = match wiring::NODE.flash_bytes {
         Some(bytes) => bytes as usize,
         None => MIN_FLASH_SIZE,
     };
+}
+
+impl BoardDef for Board {
     /// An LED for DAGON's diagnostic blink codes, if any.
     const DIAG_LED: Option<u8> = None;
     type UserIo = Io;

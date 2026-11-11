@@ -6,7 +6,7 @@
 //! needs.
 
 use dagon_mcu_stm32f401re::layout::MIN_FLASH_SIZE;
-use dagon_mcu_stm32f401re::node::{BoardDef, DagonParts, I2cTarget};
+use dagon_mcu_stm32f401re::node::{BoardCore, BoardDef, DagonParts, I2cTarget};
 use embassy_stm32::i2c::{self, I2c, SlaveAddrConfig};
 use embassy_stm32::peripherals::{{{link_i2c}}, {{link_scl}}, {{link_sda}}};
 use embassy_stm32::peripherals::{{{link_tx_dma_ctl}}_CH{{link_tx_dma_stream}}, {{link_rx_dma_ctl}}_CH{{link_rx_dma_stream}}};
@@ -44,12 +44,15 @@ pub struct Link {
 /// them out of `p` in `split`).
 pub struct Io {}
 
-impl BoardDef for Board {
+impl BoardCore for Board {
     const BOARD_ID: &'static str = "{{node}}";
     const FLASH_SIZE: usize = match wiring::NODE.flash_bytes {
         Some(bytes) => bytes as usize,
         None => MIN_FLASH_SIZE,
     };
+}
+
+impl BoardDef for Board {
     type Link = Link;
     type UserIo = Io;
 

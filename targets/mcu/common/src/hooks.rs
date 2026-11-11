@@ -33,6 +33,30 @@ pub type UserExtensions = &'static mut (dyn Extension + Send);
 /// definition: like [`UserExtensions`], one value in a `static`.
 pub type BoardExtension = &'static mut (dyn Extension + Send);
 
+/// What every board tells its MCU package's start, whatever the MCU: its
+/// identity, flash size, bring-up and extension. The MCU package's
+/// `BoardDef` extends it with how that chip's peripherals split.
+pub trait BoardCore {
+    /// The topology's board id.
+    const BOARD_ID: &'static str;
+    /// Flash size in bytes (check-only, see the MCU package's `node`
+    /// module docs).
+    const FLASH_SIZE: usize;
+    /// The board's `BoardBringUp` port, which the MCU package's start runs
+    /// before the DAGON link serves (`app.bring_up`). Default: none, so no
+    /// bring-up runs and no `app.bring_up` is emitted. Called once.
+    fn bring_up_port() -> Option<&'static mut dyn BoardBringUp> {
+        None
+    }
+    /// The board package's extension, which the start puts in the node's
+    /// chain after the publisher and before the app's: it observes every
+    /// event and answers the decision points before the app. Default:
+    /// none. Called once.
+    fn extension() -> Option<BoardExtension> {
+        None
+    }
+}
+
 /// The user part of a node's chain: the application's extensions, then its
 /// self-check function.
 pub type UserPart = Chain<Option<UserExtensions>, SelfCheck>;

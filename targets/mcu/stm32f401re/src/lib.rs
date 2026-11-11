@@ -45,7 +45,7 @@ pub mod node;
 #[cfg(feature = "hal")]
 pub mod watchdog;
 #[cfg(feature = "node")]
-pub use node::BoardDef;
+pub use node::{BoardCore, BoardDef};
 
 pub use dagon_mcu_common::{liveness, tag};
 

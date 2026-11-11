@@ -13,11 +13,12 @@
 //! | User button B1 | PC13 |
 //! | A4, A5 (ADC1) | PC1, PC0 |
 //!
-//! [`Board`] implements `BoardDef`: DAGON takes the flash, the IWDG and the
-//! I2C3 target; the app gets [`Io`], with the Arduino I2C as plain
-//! peripherals (what is stacked on the headers is the app's: its driver
-//! binds the bus's interrupts). An app that keeps the chip's peripherals
-//! itself moves out only DAGON's with `dagon_pins!` and calls `start`.
+//! [`Board`] implements `BoardCore` and `BoardDef`: DAGON takes the flash,
+//! the IWDG and the I2C3 target; the app gets [`Io`], with the Arduino I2C
+//! as plain peripherals (what is stacked on the headers is the app's: its
+//! driver binds the bus's interrupts). An app that keeps the chip's
+//! peripherals itself moves out only DAGON's with `dagon_pins!` and calls
+//! `start`.
 //! This package binds the I2C3 interrupts and those of the link's DMA
 //! streams itself; the streams come from the MCU definition's request
 //! mapping ([`def::dma`]).
@@ -82,7 +83,7 @@ mod hal {
     pub use dagon_mcu_stm32f401re::node::DagonParts;
     use dagon_mcu_stm32f401re::node::{App, AppEvents, I2cTarget, LogError};
     use dagon_mcu_stm32f401re::watchdog::Guard;
-    pub use dagon_mcu_stm32f401re::BoardDef;
+    pub use dagon_mcu_stm32f401re::{BoardCore, BoardDef};
     use embassy_stm32::i2c::{self, I2c, SlaveAddrConfig};
     use embassy_stm32::peripherals::ADC1;
     use embassy_stm32::{pac, peripherals, Peri, Peripherals};
@@ -163,9 +164,12 @@ mod hal {
         pub pc1: Peri<'static, A4>,
     }
 
-    impl BoardDef for Board {
+    impl BoardCore for Board {
         const BOARD_ID: &'static str = BOARD_ID;
         const FLASH_SIZE: usize = FLASH_SIZE;
+    }
+
+    impl BoardDef for Board {
         type Link = Link;
         type UserIo = Io;
 

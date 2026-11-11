@@ -231,7 +231,8 @@ jobs:
   # crate built for both boot core slots and signed for each, as a release
   # does (crates/dagon-cli/src/scaffold/tests.rs); and an app crate's and a
   # boot crate's raised versions reaching the package after `dagon gen` and
-  # the build (crates/dagon-cli/src/serve/api.rs).
+  # the build (crates/dagon-cli/src/serve/api.rs); and a node with no board
+  # named, generated from its MCU package's template, built.
   boot-crates:
     runs-on: ubuntu-24.04
     steps:
@@ -252,6 +253,10 @@ jobs:
           for t in $(python scripts/stage0_size.py --targets); do rustup target add "$t"; done
           cargo test -p dagon-cli --bin dagon --locked -- --ignored gen_boot_core_slots_sign
           cargo test -p dagon-cli --bin dagon --locked -- --ignored raised_versions_reach_the_package
+      - name: Build each MCU package's template
+        run: |
+          cargo test -p dagon-cli --bin dagon --locked -- --ignored new_gen_build_rp2040_hub_by_mcu
+          cargo test -p dagon-cli --bin dagon --locked -- --ignored new_gen_build_f401_node_by_mcu
 
   web:
     runs-on: ubuntu-24.04

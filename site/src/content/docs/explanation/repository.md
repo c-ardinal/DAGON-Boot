@@ -8,7 +8,7 @@ description: "リポジトリにあるもの、その場所、DAGONそのもの�
 | パス | 内容 |
 |---|---|
 | `crates/` | DAGONのcrate。一覧は[Rust API](/reference/rust-api/)にあります |
-| `targets/` | MCUごと（`targets/mcu/*`）とボードごと（`targets/boards/*`）の定義、RP2040親機のファームウェア |
+| `targets/` | MCUごと（`targets/mcu/*`）とボードごと（`targets/boards/*`）の定義、RP2040のリレーノードのファームウェア（`targets/rp2040-hub`）。リレーそのものはマイコンに依存しない`crates/dagon-relay`にあり、リレーできるマイコンは定義の`[coordinator]`で決まります |
 | `samples/` | 定義を使うサンプルのアプリ（DAGONの一部ではない） |
 | `web/` | DAGON Console（Svelte、Vite、TypeScript）。できることは`web/README.md`にあります |
 | `topology/` | 構成の例 |

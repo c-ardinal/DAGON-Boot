@@ -11,7 +11,7 @@ description: "Where the code differs from the design and what DAGON does not do,
 
 The hub and the boot:
 
-- Only an RP2040 can be the hub. The relay code lives in that MCU's definition.
+- The relay (`dagon-relay`) does not depend on the MCU, and the `[coordinator]` section of an MCU definition decides whether that MCU may relay. The RP2040 is the only MCU with both that section and the code that runs the relay.
 - DAGON writes the hub and the children beyond it. Nothing beyond a child can be written.
 - Through some USB hubs, the PC does not see the hub again after it updates itself and restarts. Connect the hub directly to a USB port of the PC.
 - There are no single-slot layouts.

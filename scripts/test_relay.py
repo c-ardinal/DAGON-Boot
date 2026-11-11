@@ -64,7 +64,8 @@ def definitions(codes, name, pattern):
 
 
 def manifest_deps(manifest):
-    """(name, path or None) of every dependency in every dependency table."""
+    """(key, entry) of every dependency in every dependency table (normal,
+    dev, build, and each `[target.*]` one); an entry is a table or a version."""
     out = []
 
     def walk(table):
@@ -72,29 +73,46 @@ def manifest_deps(manifest):
             if not isinstance(value, dict):
                 continue
             if key.endswith("dependencies"):
-                out.extend((n, d.get("path") if isinstance(d, dict) else None) for n, d in value.items())
+                out.extend(value.items())
             else:
                 walk(value)
 
-    walk(manifest)
+    walk({k: v for k, v in manifest.items() if k != "workspace"})
     return out
 
 
+def resolve(key, entry, manifest_dir, workspace):
+    """(package name, manifest path or None) of one dependency: the name is
+    `package` when the entry renames it, else the key; `workspace = true`
+    takes the entry from the root `[workspace.dependencies]`, whose paths
+    are relative to the root."""
+    if isinstance(entry, dict) and entry.get("workspace") is True:
+        entry, manifest_dir = workspace.get(key, {}), Path(".")
+    if not isinstance(entry, dict):
+        return key, None
+    path = entry.get("path")
+    if path is not None:
+        path = Path(*_normal((manifest_dir / path / "Cargo.toml").as_posix().split("/")))
+    return entry.get("package", key), path
+
+
 def dependency_closure(manifest_path, read):
-    """Names of every dependency of the package at `manifest_path`, following
-    path dependencies; `read(path)` returns a manifest's TOML text."""
-    seen, todo = set(), [Path(manifest_path)]
-    visited = set()
+    """Package names of every dependency of the package at `manifest_path`,
+    following path dependencies; `read(path)` returns a manifest's TOML
+    text. dagon-port and its path dependencies are members of the root
+    workspace, so `workspace = true` resolves there."""
+    workspace = tomllib.loads(read(Path("Cargo.toml"))).get("workspace", {}).get("dependencies", {})
+    seen, visited, todo = set(), set(), [Path(manifest_path)]
     while todo:
         m = todo.pop()
-        key = m.as_posix()
-        if key in visited:
+        if m.as_posix() in visited:
             continue
-        visited.add(key)
-        for name, path in manifest_deps(tomllib.loads(read(m))):
+        visited.add(m.as_posix())
+        for key, entry in manifest_deps(tomllib.loads(read(m))):
+            name, path = resolve(key, entry, m.parent, workspace)
             seen.add(name)
             if path is not None:
-                todo.append(Path(*_normal((m.parent / path / "Cargo.toml").as_posix().split("/"))))
+                todo.append(path)
     return seen
 
 
@@ -175,6 +193,37 @@ class OneNodeLinkContract(unittest.TestCase):
         proto = "crates/dagon-proto/Cargo.toml"
         planted = read_manifest(proto) + '\ndagon-events = { path = "../dagon-events" }\n'
         self.assertTrue(problems(self.texts, lambda p: planted if p.as_posix() == proto else read_manifest(p)))
+
+    def with_manifests(self, planted):
+        """problems() with `planted` (path -> text appended to that manifest)."""
+        return problems(self.texts, lambda p: read_manifest(p) + planted.get(p.as_posix(), ""))
+
+    def test_a_renamed_dependency_fails(self):
+        for table in ("dependencies", "dev-dependencies", "build-dependencies", 'target."cfg(test)".dependencies'):
+            for entry in ('{ package = "dagon-agent", version = "0.1" }', '{ package = "dagon-mcu-common", path = "../../targets/mcu/common" }'):
+                with self.subTest(table=table, entry=entry):
+                    # The manifest ends in its [dependencies] table.
+                    header = "" if table == "dependencies" else f"[{table}]\n"
+                    self.assertTrue(self.with_manifests({PORT_MANIFEST: f"\n{header}alias = {entry}\n"}))
+
+    def test_a_renamed_dependency_through_a_path_dependency_fails(self):
+        proto = "crates/dagon-proto/Cargo.toml"
+        self.assertTrue(self.with_manifests({proto: '\nevents_alias = { package = "dagon-events", path = "../dagon-events" }\n'}))
+
+    def test_a_workspace_dependency_fails(self):
+        for root, port in (
+            ('\n[workspace.dependencies]\nagent_alias = { package = "dagon-agent", path = "crates/dagon-agent" }\n', "\n[dev-dependencies]\nagent_alias = { workspace = true }\n"),
+            ('\n[workspace.dependencies]\ndagon-events = { path = "crates/dagon-events" }\n', "\n[dev-dependencies]\ndagon-events = { workspace = true }\n"),
+            ('\n[workspace.dependencies]\nshared = { package = "dagon-format", path = "crates/dagon-format" }\n', "\n[dev-dependencies]\nshared = { workspace = true }\n"),
+        ):
+            with self.subTest(root=root):
+                planted = {"Cargo.toml": root, PORT_MANIFEST: port}
+                if "dagon-format" in root:
+                    planted["crates/dagon-format/Cargo.toml"] = '\nevents_alias = { package = "dagon-events", version = "0.1" }\n'
+                self.assertTrue(self.with_manifests(planted))
+
+    def test_a_renamed_allowed_dependency_passes(self):
+        self.assertEqual(self.with_manifests({PORT_MANIFEST: '\n[dev-dependencies]\nformat = { package = "dagon-format", path = "../dagon-format" }\n'}), [])
 
 
 if __name__ == "__main__":

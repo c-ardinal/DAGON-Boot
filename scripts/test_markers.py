@@ -123,14 +123,39 @@ def hits():
                 yield f"{name}:{no}: {what} '{word}'"
 
 
-# `dagon serve` has no simulator: the browser simulator runs in the page itself
-# (web/src/serial/simHub.ts, which the name check leaves alone), and `dagon sim`
-# is the CLI's. These names belonged to a serve-side simulator.
+# `dagon serve` has no simulator: the browser simulator runs in the page itself,
+# and `dagon sim` is the CLI's. These names belonged to a serve-side simulator;
+# file names and contents are both checked.
 SERVE_SIM_NAMES = re.compile(
-    r"server\.sim|/v1/sim|demo_uplink|serveSim|simHub(?!\.ts)|simWrite|simRead|simUplink"
+    r"server\.sim|/v1/sim|demo_uplink|serveSim|simHub|simWrite|simRead|simUplink"
     r"|demoLink|DEMO_REFUSED|DEMO_HIDDEN|demo_refuses"
 )
 SERVE_SIM_DIRS = ["crates/", "web/src/", "site/src/"]
+# The one exception: the browser simulator's module is named simHub.ts. Only these
+# files may carry that name, and in their contents only as the module path `simHub.ts`.
+SIMHUB_MODULE = {
+    "web/src/serial/simHub.ts": "the browser simulator (the demo page, development stand-in hubs)",
+    "web/src/serial/simHub.test.ts": "its own tests",
+    "web/src/serial/devHub.ts": "the stand-in hubs run on the browser simulator",
+    "web/src/app/recover.test.ts": "recovery is tested against the browser simulator",
+}
+
+
+def serve_sim_text_hits(name, text):
+    """The serve simulator names in `text`, a line of file `name` or the name itself."""
+    for m in SERVE_SIM_NAMES.finditer(text):
+        is_module = m.group(0) == "simHub" and name in SIMHUB_MODULE
+        if is_module and (text == name or text.startswith(".ts", m.end())):
+            continue
+        yield m.group(0)
+
+
+def serve_sim_file_hits(name, text):
+    for word in serve_sim_text_hits(name, name):
+        yield f"{name}: file name: '{word}'"
+    for no, line in enumerate(text.splitlines(), 1):
+        for word in serve_sim_text_hits(name, line):
+            yield f"{name}:{no}: '{word}'"
 
 
 def serve_sim_hits():
@@ -141,18 +166,35 @@ def serve_sim_hits():
     ).stdout
     for name in sorted(set(out.decode("utf-8").split("\0"))):
         path = ROOT / name
-        if not name or not path.is_file():
-            continue
-        for no, line in enumerate(path.read_text("utf-8", errors="replace").splitlines(), 1):
-            m = SERVE_SIM_NAMES.search(line)
-            if m:
-                yield f"{name}:{no}: '{m.group(0)}'"
+        if name and path.is_file():
+            yield from serve_sim_file_hits(name, path.read_text("utf-8", errors="replace"))
 
 
 class Markers(unittest.TestCase):
     def test_serve_has_no_simulator(self):
         found = list(serve_sim_hits())
         self.assertEqual(found, [], f"{len(found)} serve simulator name(s):\n" + "\n".join(found))
+
+    def test_the_serve_simulator_check_allows_only_the_browser_simulator_module(self):
+        refused = [
+            ("web/src/serial/serveSimHub.ts", ""),
+            ("web/src/serial/simHubServe.ts", ""),
+            ("crates/dagon-cli/src/serve/api.rs", "// the page's simHub"),
+            ("crates/dagon-cli/src/serve/api.rs", "include_str!(\"web/src/serial/simHub.ts\")"),
+            ("web/src/App.svelte", "import { simulator } from './serial/simHub.ts';"),
+            ("web/src/serial/devHub.ts", "function simHub() {}"),
+            ("web/src/serial/simHub.ts", "export const simHub = 1;"),
+        ]
+        for name, text in refused:
+            self.assertTrue(list(serve_sim_file_hits(name, text)), (name, text))
+        allowed = [
+            ("web/src/serial/simHub.ts", "export function simulator() {}"),
+            ("web/src/serial/simHub.test.ts", "import { simulator } from './simHub.ts';"),
+            ("web/src/serial/devHub.ts", "import { simulator } from './simHub.ts';"),
+            ("web/src/app/recover.test.ts", "import { simulator } from '../serial/simHub.ts';"),
+        ]
+        for name, text in allowed:
+            self.assertEqual(list(serve_sim_file_hits(name, text)), [], (name, text))
 
     def test_no_internal_process_markers(self):
         found = list(hits())

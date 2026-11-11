@@ -263,6 +263,9 @@ fn hello_reports_keys_without_their_values() {
         .unwrap()
         .iter()
         .any(|f| f == "build"));
+    // serve has no simulator: `sim` stays in hello's shape, always null.
+    assert_eq!(v.get("sim"), Some(&serde_json::Value::Null), "{body}");
+    assert!(!v["features"].as_array().unwrap().iter().any(|f| f == "sim"));
     assert!(v["key"].is_boolean());
     // Whether an agent can be reached is GET /v1/agent's `available`, said once.
     assert!(v.get("api_key").is_none(), "{body}");

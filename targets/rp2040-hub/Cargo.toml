@@ -19,6 +19,7 @@ diag = ["dagon-board-waveshare-rp2040-touch-lcd-1-28/diag"]
 dagon-board-waveshare-rp2040-touch-lcd-1-28 = { path = "../boards/waveshare-rp2040-touch-lcd-1.28", features = ["diag-panic"] }
 dagon-mcu-rp2040 = { path = "../mcu/rp2040" }
 dagon-proto = { path = "../../crates/dagon-proto" }
+dagon-relay = { path = "../../crates/dagon-relay" }
 embassy-rp = { version = "0.10.0", features = ["rp2040", "time-driver", "critical-section-impl", "boot2-none"] }
 embassy-executor = { version = "0.10", features = ["platform-cortex-m", "executor-thread", "executor-interrupt"] }
 cortex-m-rt = "0.7"

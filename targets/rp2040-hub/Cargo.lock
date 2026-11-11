@@ -1401,6 +1401,7 @@ dependencies = [
  "dagon-board-waveshare-rp2040-touch-lcd-1-28",
  "dagon-mcu-rp2040",
  "dagon-proto",
+ "dagon-relay",
  "embassy-executor",
  "embassy-rp",
  "portable-atomic",

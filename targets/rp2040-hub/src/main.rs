@@ -24,9 +24,10 @@ use dagon_board_waveshare_rp2040_touch_lcd_1_28 as board;
 use dagon_mcu_rp2040::arm::{led, step};
 use dagon_mcu_rp2040::links::Kind;
 use dagon_mcu_rp2040::node::{always, App};
-use dagon_mcu_rp2040::relay::{self, named, RelayConfig, SubNode};
+use dagon_mcu_rp2040::relay::{self, RelayConfig};
 use dagon_mcu_rp2040::watchdog::{now_ms, Guard, Trial};
 use dagon_proto::payload::link;
+use dagon_relay::nodes::{named, LinkedNode};
 use embassy_executor::Executor;
 use static_cell::StaticCell;
 
@@ -44,7 +45,7 @@ static EXECUTOR_LOW: StaticCell<Executor> = StaticCell::new();
 
 /// The sample's wiring, shown and polled until a topology display copy
 /// is stored.
-static SAMPLE_WIRING: [SubNode; 2] = [
+static SAMPLE_WIRING: [LinkedNode; 2] = [
     named(1, "seg", link::I2C0, 0x42),
     named(2, "watch", link::PIO_UART, link::UART_ADDR),
 ];

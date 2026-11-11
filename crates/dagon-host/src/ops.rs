@@ -16,7 +16,7 @@ use dagon_proto::payload::{
 use dagon_proto::{Cmd, Status};
 
 use crate::rom::RomMap;
-use crate::{Clock, Error, Host, Result, Target, Transport};
+use crate::{Error, Host, HostClock, Result, Target, Transport};
 
 /// REBOOT until the hub's new HELLO, reopening the port meanwhile. Stays
 /// well inside the 60 s the hub keeps its trial watchdog fed, so CONFIRM
@@ -150,7 +150,7 @@ pub enum ConfirmOutcome {
     NeedsChoice(Version),
 }
 
-impl<T: Transport, C: Clock> Host<T, C> {
+impl<T: Transport, C: HostClock> Host<T, C> {
     pub async fn status(&mut self, to: Target) -> Result<NodeState, T::Error> {
         let hello = self.hello(to).await?;
         let body = self.call(to, Cmd::Status, &[], REQUEST_MS).await?;

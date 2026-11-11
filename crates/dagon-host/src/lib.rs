@@ -3,8 +3,8 @@
 //!
 //! Everything runs through two small traits the caller supplies: a
 //! [`Transport`] carrying the byte stream to the hub (serial port, Web
-//! Serial, simulator) and a [`Clock`]. No std I/O and no async runtime, so
-//! the crate builds for WASM unchanged.
+//! Serial, simulator) and a [`HostClock`]. No std I/O and no async runtime,
+//! so the crate builds for WASM unchanged.
 #![no_std]
 #![forbid(unsafe_code)]
 
@@ -62,7 +62,7 @@ pub trait Transport {
 }
 
 /// Monotonic time source (the same trait the ROM procedure uses).
-pub use dagon_romlink::Clock;
+pub use dagon_romlink::HostClock;
 
 /// Where a request goes: the hub itself, or a node behind it via RELAY.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -192,7 +192,7 @@ pub type Note = Box<dyn FnMut(&str) + Send>;
 
 /// A session with one hub. Remembers the versions it applied, for the
 /// confirm rule after a manual reconnect.
-pub struct Host<T: Transport, C: Clock> {
+pub struct Host<T: Transport, C: HostClock> {
     pub transport: T,
     pub clock: C,
     seq: u8,
@@ -218,7 +218,7 @@ pub struct Host<T: Transport, C: Clock> {
     pub note: Option<Note>,
 }
 
-impl<T: Transport, C: Clock> Host<T, C> {
+impl<T: Transport, C: HostClock> Host<T, C> {
     pub fn new(transport: T, clock: C) -> Self {
         Host {
             transport,

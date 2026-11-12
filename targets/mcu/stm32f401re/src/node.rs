@@ -97,14 +97,15 @@ pub trait BoardDef: BoardCore {
     /// Opens the DAGON link: the I2C target at the node's address, and its
     /// registers (the address is NACKed while a request runs).
     fn open_link(link: Self::Link) -> (I2cTarget, pac::i2c::I2c);
-    /// The flash this board's nodes erase in, as erase regions: the
-    /// board's `[flash] erase_regions` when it carries its own flash part
-    /// (generated into its definition constants), else the MCU's default
-    /// (`ERASE_REGIONS`). The slot store plans every erase over these and
-    /// the MCU's slot layouts; a board without `[flash]` needs no code.
-    fn erase_regions() -> &'static [EraseRegion] {
-        &crate::ERASE_REGIONS
-    }
+    /// The flash this board's nodes erase in: the erase regions its build
+    /// generated (`ERASE_REGIONS` rows in a board package's def.rs, or in a
+    /// node's wiring.rs), which are the board's `[flash] erase_regions`
+    /// when it carries its own flash part, else the MCU's. Required, so no
+    /// board leaves them out:
+    /// `const ERASE_REGIONS: &'static [EraseRegion] = &EraseRegion::table(def::ERASE_REGIONS);`.
+    /// The slot store plans every erase over these and the MCU's slot
+    /// layouts.
+    const ERASE_REGIONS: &'static [EraseRegion];
 }
 
 /// A handle on the one flash driver (see the module docs).
@@ -238,7 +239,7 @@ pub fn start<B: BoardDef, const N: usize>(
             "the DAGON F401 layout needs 512 KiB of flash"
         )
     };
-    let (store, flash) = open_store(parts.flash, B::erase_regions())?;
+    let (store, flash) = open_store(parts.flash, B::ERASE_REGIONS)?;
     let period = watchdog_period_ms(on_trial(&store));
     install_watchdog(parts.iwdg, guard, period, &store);
     let (mut agent, events) = agent(tag, store, B::extension(), app.exts, app.self_check, guard);

@@ -40,14 +40,14 @@ pub struct KindSStore<F> {
     /// The trial cell holds what is written to it; without it no boot core
     /// is taken (stage0 could not count its starts).
     cell_holds: bool,
-    /// The erase regions the board returns (`BoardDef::erase_regions`).
+    /// The erase regions the board returns (`BoardDef::ERASE_REGIONS`).
     regions: &'static [EraseRegion],
     tail: Tail,
 }
 
 impl<F: Flash> KindSStore<F> {
     /// Loads the state log; fails when no log face is valid. `regions`:
-    /// what the board erases in (`BoardDef::erase_regions`).
+    /// what the board erases in (`BoardDef::ERASE_REGIONS`).
     pub fn load(
         mut flash: F,
         log: &LogLayout,

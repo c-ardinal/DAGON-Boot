@@ -48,14 +48,15 @@ pub trait BoardDef: BoardCore {
     type UserIo;
     /// Splits the chip's peripherals.
     fn split(p: Peripherals) -> (DagonParts, Self::UserIo);
-    /// The flash this board's nodes erase in, as erase regions: the
-    /// board's `[flash] erase_regions` when it carries its own flash part
-    /// (generated into its definition constants), else the MCU's default
-    /// (`ERASE_REGIONS`). The slot store plans every erase over these and
-    /// the MCU's slot layouts; a board without `[flash]` needs no code.
-    fn erase_regions() -> &'static [dagon_port::timeout::EraseRegion] {
-        &crate::ERASE_REGIONS
-    }
+    /// The flash this board's nodes erase in: the erase regions its build
+    /// generated (`ERASE_REGIONS` rows in a board package's def.rs, or in a
+    /// node's wiring.rs), which are the board's `[flash] erase_regions`
+    /// when it carries its own flash part, else the MCU's. Required, so no
+    /// board leaves them out:
+    /// `const ERASE_REGIONS: &'static [EraseRegion] = &EraseRegion::table(def::ERASE_REGIONS);`.
+    /// The slot store plans every erase over these and the MCU's slot
+    /// layouts.
+    const ERASE_REGIONS: &'static [dagon_port::timeout::EraseRegion];
 }
 
 /// The agent of an RP2040 node; its chain holds the app's extensions and
@@ -150,7 +151,7 @@ pub(crate) fn open<B: BoardDef, const N: usize>(
         flash,
         watch: guard,
         task,
-        regions: B::erase_regions(),
+        regions: B::ERASE_REGIONS,
     };
     let trial = on_trial(&store.status());
     guard.install(Wdt::new(watchdog), trial);

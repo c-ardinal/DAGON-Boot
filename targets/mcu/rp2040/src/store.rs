@@ -26,7 +26,7 @@ pub struct AppStore {
     pub(crate) flash: SharedFlash,
     pub(crate) watch: &'static dyn Watch,
     pub(crate) task: usize,
-    /// The erase regions the board returns (`BoardDef::erase_regions`).
+    /// The erase regions the board returns (`BoardDef::ERASE_REGIONS`).
     pub(crate) regions: &'static [EraseRegion],
 }
 

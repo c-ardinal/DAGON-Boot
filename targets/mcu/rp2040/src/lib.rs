@@ -33,11 +33,15 @@ use dagon_relay::{Addressing, RelayLink};
 
 // The constants this package's MCU definition states (`dagon-mcu.toml`):
 // `TRIAL_ATTEMPTS`, `MASKED_MAX_US` (`None` while unmeasured), `ERASE_REGIONS` (the MCU's
-// default erase regions, what `BoardDef::erase_regions` returns unless the board
-// carries its own flash part), `SLOT_LAYOUTS`,
+// default erase regions; a node's own come from its board's generated rows),
+// `SLOT_LAYOUTS`,
 // `ERASE_UNIT_MAX_MS` (the longest single erase), the `_KNOWN` flags (checked against their source),
 // `CONFORM_SCRATCH`. The boot stage and the app layer read these.
 include!(concat!(env!("OUT_DIR"), "/definition.rs"));
+
+/// An erase region, for a board's `BoardDef` (`EraseRegion::table` turns its
+/// generated `ERASE_REGIONS` rows into them).
+pub use dagon_port::timeout::EraseRegion;
 
 pub mod bl;
 pub mod image;

@@ -47,10 +47,23 @@ def production(codes, prefixes):
         yield path, code
 
 
+def const_items(code, name=None):
+    """Names of the const items `code` declares (`name` only, when given),
+    once per declaration; a const generic parameter (`<const N: usize>`)
+    declares none."""
+    out = []
+    for m in CONST.finditer(code):
+        if code[:m.start()].rstrip().endswith(("<", ",")):
+            continue
+        if name is None or m.group(1) == name:
+            out.append(m.group(1))
+    return out
+
+
 def timeout_consts(codes):
     """Names of the consts declared in dagon_port::timeout, outside its tests."""
     code = dict(production(codes, (TIMEOUT,))).get(TIMEOUT, "")
-    return sorted(set(CONST.findall(code)))
+    return sorted(set(const_items(code)))
 
 
 def const_problems(codes):
@@ -59,8 +72,7 @@ def const_problems(codes):
         return [f"{TIMEOUT} declares no const (the module is missing or moved)"]
     out = []
     for name in names:
-        rule = re.compile(rf"\bconst\s+{name}\s*:")
-        found = sorted(p for p, code in production(codes, CONST_DIRS) for _ in rule.finditer(code))
+        found = sorted(p for p, code in production(codes, CONST_DIRS) for _ in const_items(code, name))
         if found != [TIMEOUT]:
             out.append(f"const {name} defined in {found}, expected only {TIMEOUT}")
     return out
@@ -158,6 +170,12 @@ class HostDeps(unittest.TestCase):
             with self.subTest(extra=extra):
                 self.assertEqual(problems(self.planted("crates/dagon-host/src/ops.rs", extra)), [])
         self.assertEqual(problems({**self.texts, "crates/dagon-host/tests/x.rs": "const REQUEST_MS: u32 = 1;\n"}), [])
+
+    def test_a_const_generic_parameter_is_no_definition(self):
+        extra = "\nfn f<const REQUEST_MS: usize>() {}\nstruct S<T, const VERIFY_MS: u8>(T);\n"
+        self.assertEqual(problems(self.planted("crates/dagon-host/src/ops.rs", extra)), [])
+        codes = {p: relay.code_of(t) for p, t in self.planted(TIMEOUT, "\nfn g<const PLANTED_MS: usize>() {}\n").items()}
+        self.assertNotIn("PLANTED_MS", timeout_consts(codes))
 
     def test_a_missing_timeout_module_fails(self):
         self.assertTrue(problems({p: t for p, t in self.texts.items() if p != TIMEOUT}))

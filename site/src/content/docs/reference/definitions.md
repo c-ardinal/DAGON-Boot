@@ -15,7 +15,7 @@ description: "dagon-mcu.tomlとdagon-board.toml: DAGONがマイコンやボー�
 <!-- generated from dagon-topology's McuDef: python site/scripts/gen.py -->
 | キー | 型 | 必須か | 意味 |
 |---|---|---|---|
-| `format` | 整数 | 任意 | 定義の形式番号（`1`。省くと1です）。その番号を読まないdagonは、ファイルを受け付けません（site/src/content/docs/explanation/versioning.md）。 |
+| `format` | 整数 | 任意 | 定義の形式番号（`2`。省くと1です）。その番号を読まないdagonは、ファイルを受け付けません（site/src/content/docs/explanation/versioning.md）。 |
 | `id` | 文字列 | 必須 | 構成で使うマイコンのid（`stm32f401re`）。 |
 | `name` | 文字列 | 必須 | 表示名（`STM32F401RE`）。 |
 | `wire_id` | 整数 | 必須 | イメージのヘッダの`mcu_id`。重複しないこと。 |
@@ -39,7 +39,8 @@ description: "dagon-mcu.tomlとdagon-board.toml: DAGONがマイコンやボー�
 | `[[peripheral]]` | テーブルの配列 | 任意 | レジスタブロックごと: `id`、`base`、`size`、`window_eligible`（拡張がウィンドウとして得られる）、`bus_master`（メモリに書ける）、`privileged_why`（`dma`、`flash`、`watchdog`、`clock`、`reset`、`irq-routing`、`pinmux`、`power`、`rom`、`core-control`、`protection`、`shared`の1つか一覧）、`dma = { streams, channels }`（DMAコントローラ、つまりバスマスタ: そのストリーム。それぞれ`channels`個の要求の1つを選びます）、`dma_requests = [{ signal, controller, stream, channel }]`（マイコンのDMA要求の割り当て表のうち、このブロックの行: `signal`は`a-z 0-9`で`tx`、`rx`、`ch1`、`up`など。1つのセルは1つのブロックに使います）。ボードの定義とマイコンのテンプレートは、ここからDMAのストリームを取ります（取られていないストリームの、その要求の最初の行）。 |
 | `[[core]]` | テーブルの配列 | 任意 | プロセッサのコアごと、`id`。DAGONは最初のコアで動きます。 |
 | `[watchdog]` | テーブル | 任意 | `kind`（`iwdg`、`rp-watchdog`、`rtc-wdt`）、`trial_ms`（試行のブートで有効化）、`confirmed_ms`（それ以外で有効化）、`trial_attempts`（ブート段階がロールバックの前に待機中のイメージに与えるブートの回数: ブートローダの上限か、ベンダーの第2段階の上限）。アプリが再起動を遅らせられるのは、短いほうの周期の半分までです。マイコンの定義のビルドが、`trial_attempts`をブートローダとエージェントが使う定数にします。`flag`（必須）: ロックアップヒューズに要るウォッチドッグによるリセットのフラグ（ウォッチドッグによるリセットで立ち、電源投入以外のそれ以降のリセットでも残り、起動が確認すると消える）で、`none`、`register`（リセットのフラグのレジスタ。名前と出典をコメントで示します）、`package`（マイコンの定義のコードが保持）のどれかの事実です: `"register"`、`{ unverified = "package" }`、`"unmeasured"`。出所のあるフラグが無いマイコンには、ロックアップヒューズはありません。 |
-| `[execution]` | テーブル | 任意 | 実行モデルのハードウェアの事実（site/src/content/docs/en/explanation/lifecycle-events.mdの「Execution model」）: `masked_max_us`（DAGON自身のコードが割り込みを止める最長の時間、1..=1000）、`flash_op`（消去や書き込みが何を止めるか: `fetch-stall`、`xip-off-masked`、`cache-off-masked`）、`erase_unit`（DAGONが1回の操作で消去する最大の単位、2のべき乗）、`erase_unit_max_ms`（その消去のデータシートの最大値。`watchdog.confirmed_ms`より小さいこと）。事実とは、出所に照らして確かめた数値（コメントで出典を示します）、`{ unverified = N }`、または`"unmeasured"`（値が無い。`erase_unit_max_ms`には使えません）です。 |
+| `[execution]` | テーブル | 任意 | 実行モデルのハードウェアの事実（site/src/content/docs/en/explanation/lifecycle-events.mdの「Execution model」）: `masked_max_us`（DAGON自身のコードが割り込みを止める最長の時間、1..=1000）、`flash_op`（消去や書き込みが何を止めるか: `fetch-stall`、`xip-off-masked`、`cache-off-masked`）、`erase_regions = [{ start, len, unit, unit_max_ms }]`（DAGONが消去するフラッシュ: 領域ごとの消去の単位と、その単位の消去にかかるデータシートの最大の時間。単位の整数倍で、重ならないこと。`unit_max_ms`の2倍が`watchdog.trial_ms`と`watchdog.confirmed_ms`以下であること）。事実とは、出所に照らして確かめた数値（コメントで出典を示します）、`{ unverified = N }`、または`"unmeasured"`（値が無い。`unit_max_ms`には使えません）です。 |
+| `[[slot_layout]]` | テーブルの配列 | 任意 | ノードが受け取るXFERの対象とスロットのすべて: `target`（`app`、`bootcore`、`agent`、`topology`）、`slot`（`a`、`b`、`factory`）、`start`、`capacity`（ヘッダを除いた本体の最大の大きさ）、`header`（`start`にある`"inline"`か、`{ detached = <address> }`）、`partition`（任意: 本体の領域にあたるパーティション。パーティションの表と照らします）。対象とスロットごとに1つで、`[execution]`と一緒に書きます。`[[slot]]`のイメージはそれぞれ自分のものを持ち、最大の本体の消去は`erase_regions`の中に収まります。ノードもホストも、すべての消去をここから計画します。 |
 | `[conformance]` | テーブル | 任意 | `scratch = { at, size }`: 適合試験のビルドが消去して書くフラッシュ。どのスロット、ヘッダ、ログの面、stage0からも離します。 |
 | `[boot]` | テーブル | 任意 | `[boot.record]`、DAGONのブート段階を持つマイコン用: ブート記録とロックアップヒューズの場所。`kind`（`ram`の中の`noinit-ram`、`[[peripheral]]`の中の`retained-registers`）、`at`、`size`（最大4096）、`survives`（`reset-random`、`reset-cleared`、`power`: 電断の後に残るもの）、`entropy = { source, min_bits }`（必須。新しい記録のシーケンスが混ぜる起動時のワード: `source`は`rng`、`ring-osc`、`osc-capture`、`adc-noise`のどれか。`min_bits`はワードあたりの最小エントロピーで、事実です。値があるなら16以上）、`rings = [{ writer, at, size }]`（ブート段階ごとに1つ、ブートの順に、記録の中）、`fuse = { cells = [{ image, at, size }] }`（`bootcore`、`app`。記録の外）、`reserved`（記録が決してストアしないアドレス）。中のバイトのレイアウトは`boot-record`の取り決めのものです。 |
 | `boot_capabilities` | 文字列の配列 | 任意 | ボードのブートのアクションプログラムが、ピンのほかに使えるもの: `["i2c"]`で`bus_write`を使えます。 |
@@ -52,6 +53,14 @@ description: "dagon-mcu.tomlとdagon-board.toml: DAGONがマイコンやボー�
 - `uf2-drive`: `family`、`sector`、`info_file`、`info_header`、`board_id`（ブートROMのドライブは、情報ファイルが`info_header`で始まり、`Board-ID: <board_id>`の行を持つものです）。
 - `probe-rs`: `chip`。
 - `espflash`: `chip`、`flash_size`、`table_at`、`bootloader`、`checksums`、`usb_hint = { vid, pid }`。ヒントは、書き込みツールが報告する候補にラベルを付けるだけで、候補を絞りません。一致する候補を先頭に並べ、あらかじめ選んでおきます。
+
+### 消去と試行の待ち時間
+
+`[execution] erase_regions`は、DAGONが消去するフラッシュを示します。領域（`start`、`len`）ごとに`unit`バイトの単位で丸ごと消去し、フラッシュの操作1回で1単位を消去し、1単位にかかる時間は最大で`unit_max_ms`です。アドレスによって単位が違うマイコン（STM32F401の16、64、128KiBのセクタ）は、単位の大きさごとに1つの領域を挙げます。フラッシュがボードの部品であるマイコン（RP2040とESP32-S3）では、マイコンの領域は、候補のどの部品も持つ消去を使う既定の値です。4KiBのセクタで、1つにかかる時間はそれらの部品のセクタの消去の最大の時間のうち、いちばん長いものです。決まった部品を載せるボードは、それを`[flash]`に書きます（`part`、コメントでデータシートの出典を示し、同じ形の`erase_regions`）。その領域は、そのボードのノードではマイコンの領域をまるごと置き換え、マイコンのウォッチドッグとスロットの配置に照らして確かめます。`[[slot_layout]]`は、ノードが受け取る対象とスロットのすべてを、本体の始まり、最大の本体、ヘッダの置き場所（先頭の`"inline"`か、ESP32-S3がdagonパーティションにヘッダを置くような`{ detached = <address> }`）とともに挙げます。
+
+ノードの実際の領域（ボードに`[flash]`があればそれ、無ければマイコンのもの）とマイコンのスロットの配置から、1つの計画の関数（`dagon_port::timeout`）が転送の消去を決めます。転送が覆うバイト（スロットの先頭からのinlineのヘッダと本体、またはdetachedのヘッダと本体を別々に）と、それを含む領域の単位の1つ1つです。ノードのエージェントは、その計画だけをスロットのストアに渡します。ストアは領域をボードから受け取ります（`BoardDef::erase_regions`）。ホストと適合試験は、同じ定義から同じ転送を計画し、ノードが消去するリクエストを、計画した単位の`unit_max_ms`の合計に1000msを足した時間だけ待ちます。ノードの試行の待ち時間は`[watchdog] trial_ms`と`trial_attempts`から来ます。ホストは1回の試行の中で新しいバージョンのHELLOを確かめてCONFIRMを送り、新しいバージョンを待つ時間は`trial_attempts`回の試行を覆います（マイコンごとの値は、その待ち時間を作るときにホストの待ち時間と照らして確かめます）。
+
+マイコンの定義が無いノード、または`[watchdog]`の無い定義のノードには、ホストと適合試験は既定の値を使います。消去の待ち時間は30000ms、試行は8000msで、3回です。`[execution]`の無い定義のノードでは、消去の待ち時間が既定の30000msです。
 
 ### `[isolation]`
 
@@ -75,7 +84,7 @@ description: "dagon-mcu.tomlとdagon-board.toml: DAGONがマイコンやボー�
 <!-- generated from dagon-topology's BoardDef: python site/scripts/gen.py -->
 | キー | 型 | 必須か | 意味 |
 |---|---|---|---|
-| `format` | 整数 | 任意 | 定義の形式番号（`1`。省くと1です）。その番号を読まないdagonは、ファイルを受け付けません（site/src/content/docs/explanation/versioning.md）。 |
+| `format` | 整数 | 任意 | 定義の形式番号（`2`。省くと1です）。その番号を読まないdagonは、ファイルを受け付けません（site/src/content/docs/explanation/versioning.md）。 |
 | `id` | 文字列 | 必須 | `nodes[].board`で使うボードのid。 |
 | `product` | 文字列 | 必須 | 製品名。 |
 | `mcu` | 文字列 | 必須 | マイコンのid（定義されていること）。 |
@@ -93,6 +102,7 @@ description: "dagon-mcu.tomlとdagon-board.toml: DAGONがマイコンやボー�
 | `[[bus]]` | テーブルの配列 | 任意 | ボードのバス: `id`（`a-z 0-9 - _`）、`kind`（`i2c`、`spi`、`uart`、`can`）、`controller`（マイコンの`[[peripheral]]`）、信号ごとのピン（i2cは`sda`、`scl`。uartは`tx`と`rx`の両方かどちらか。canは`tx`、`rx`。spiは`sck`と、`mosi`と`miso`の両方かどちらか）、`hz`（i2c、spi）または`baud`（uart、can。`dagon = true`のUARTバスでは、dagonが構成の速度を渡さないビルドのリンクの速度。後述）、`dagon`（`true`: DAGON自身のリンクがここで動くので、バスもそのコントローラも拡張のものにはなりません）、`dma`（`true`: ボードの定義のコードはバスをDMAで開くか渡します。i2c、spi、uart。txとrxのストリームは、マイコンの`dma_requests`からバスの順に取り、ボードの定義のビルドが`<Bus>TxDma`/`<Bus>RxDma`、`take_dma!`、`bind_<bus>_dma!`として書き出します）。 |
 | `[[peripheral]]` | テーブルの配列 | 任意 | 拡張が宣言できるマイコンのブロックの、ボードでの名前: `id`、`mcu`（マイコンの`[[peripheral]]`のid。`dagon = true`のバスのコントローラは指定できません）。 |
 | `[[device]]` | テーブルの配列 | 任意 | ボードのバス上のデバイス: `id`（`a-z 0-9 - _`）、`bus`、`addr`、`max_transfer`（必須: 1回の転送で受け取れるデータの最大バイト数。データシートから取ります。バスのポートとブートプログラムはこれを守ります）、`regs = [{ name, reg }]`（名前付きのレジスタ、`a-z 0-9 _`）、`writable`（DAGONの外のものが書いてよいレジスタ: `regs`の番号か名前）。 |
+| `[flash]` | テーブル | 任意 | フラッシュがボードの部品であるマイコンで、ボードが載せるフラッシュの部品: `part`（コメントでデータシートの出典を示します）と、マイコンの`[execution]` `erase_regions`と同じ形の`erase_regions`（`start`、`len`、`unit`、`unit_max_ms`）。このボードのノードでは、マイコンの領域をまるごと置き換えます。マイコンのウォッチドッグとスロットの配置に照らして確かめます。省くと、マイコンの領域です。ノードもホストも、同じ領域からすべての消去を計画します。 |
 <!-- end of generated table -->
 
 ボードの定義は、DAGONのUARTリンクを、構成のリンクの`baud`で動かします。`dagon build`、`deploy`、`flash`は、ノードのすべてのビルド（アプリと復旧用のエージェント）に、そのノードのUARTリンクの速度を`DAGON_LINK_BAUD`として渡すので、両端が同じ値でビルドされます。これが無いビルド（単なる`cargo build`）は、`[default_link] baud`か、ボードの`dagon = true`のUARTバスの`baud`を使います。

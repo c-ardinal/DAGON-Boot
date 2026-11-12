@@ -11,6 +11,7 @@ Write the board definition in `dagon.toml`. The table name `[board.<board id>]` 
 
 ```toml
 [board.my-f401]
+format = 2
 product = "My F401 board"
 mcu = "stm32f401re"
 flash_bytes = 524288

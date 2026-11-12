@@ -26,7 +26,7 @@ errors; kind fields accept only the values listed below.
 <!-- generated from dagon-topology's McuDef: python site/scripts/gen.py -->
 | Key | Type | Required | Meaning |
 |---|---|---|---|
-| `format` | integer | no | Definition format number (`1`; left out means 1). A dagon that does not read the number refuses the file (site/src/content/docs/explanation/versioning.md). |
+| `format` | integer | no | Definition format number (`2`; left out means 1). A dagon that does not read the number refuses the file (site/src/content/docs/explanation/versioning.md). |
 | `id` | string | yes | MCU id used in topologies (`stm32f401re`). |
 | `name` | string | yes | Display name (`STM32F401RE`). |
 | `wire_id` | integer | yes | Image header `mcu_id`; unique. |
@@ -50,7 +50,8 @@ errors; kind fields accept only the values listed below.
 | `[[peripheral]]` | tables | no | Every register block: `id`, `base`, `size`, `window_eligible` (an extension may get it as a window), `bus_master` (it can write memory), `privileged_why` (one or a list of `dma`, `flash`, `watchdog`, `clock`, `reset`, `irq-routing`, `pinmux`, `power`, `rom`, `core-control`, `protection`, `shared`), `dma = { streams, channels }` (a DMA controller, a bus master: its streams, each selecting one of `channels` requests), `dma_requests = [{ signal, controller, stream, channel }]` (the block's rows of the MCU's DMA request mapping table: `signal` `a-z 0-9` such as `tx`, `rx`, `ch1`, `up`; one cell serves one block). Board packages and MCU templates take DMA streams from these (first row of the request on a free stream). |
 | `[[core]]` | tables | no | Every processor core, `id`; DAGON runs on the first. |
 | `[watchdog]` | table | no | `kind` (`iwdg`, `rp-watchdog`, `rtc-wdt`), `trial_ms` (armed on a trial boot), `confirmed_ms` (armed otherwise), `trial_attempts` (boots the boot stage gives a pending image before it rolls back: the boot core's limit, or the vendor second stage's). An app may delay a reboot by at most half the shorter period. The MCU package's build turns `trial_attempts` into the constant its boot core and its agent use. `flag` (required): the watchdog-reset flag the lockup fuse needs (set by a watchdog reset, kept over every later reset but power-on, cleared when a start acknowledges it), a fact of `none`, `register` (a reset-flag register; name it and its source in a comment) or `package` (the MCU package keeps it): `"register"`, `{ unverified = "package" }`, `"unmeasured"`. Without a flag with a source the MCU has no lockup fuse. |
-| `[execution]` | table | no | Hardware facts of the execution model (site/src/content/docs/en/explanation/lifecycle-events.md, "Execution model"): `masked_max_us` (longest DAGON's own code masks interrupts, 1..=1000), `flash_op` (what an erase or program stops: `fetch-stall`, `xip-off-masked`, `cache-off-masked`), `erase_unit` (largest unit DAGON erases in one operation, a power of two), `erase_unit_max_ms` (that erase's datasheet maximum; below `watchdog.confirmed_ms`). A fact is a number checked against its source (cite it in a comment), `{ unverified = N }` or `"unmeasured"` (no value; not for `erase_unit_max_ms`). |
+| `[execution]` | table | no | Hardware facts of the execution model (site/src/content/docs/en/explanation/lifecycle-events.md, "Execution model"): `masked_max_us` (longest DAGON's own code masks interrupts, 1..=1000), `flash_op` (what an erase or program stops: `fetch-stall`, `xip-off-masked`, `cache-off-masked`), `erase_regions = [{ start, len, unit, unit_max_ms }]` (the flash DAGON erases in: each region's erase unit and that unit's datasheet maximum erase time; whole units, not overlapping; 2 x `unit_max_ms` at most `watchdog.trial_ms` and `watchdog.confirmed_ms`). A fact is a number checked against its source (cite it in a comment), `{ unverified = N }` or `"unmeasured"` (no value; not for `unit_max_ms`). |
+| `[[slot_layout]]` | tables | no | Every XFER target and slot the node receives into: `target` (`app`, `bootcore`, `agent`, `topology`), `slot` (`a`, `b`, `factory`), `start`, `capacity` (largest body, header excluded), `header` (`"inline"` at `start`, or `{ detached = <address> }`), `partition` (optional: the partition the body region is, checked against the table). One per target and slot, with `[execution]`; each `[[slot]]` image has its own, and an erase of the largest body lies in `erase_regions`. The node and the host plan every erase from these. |
 | `[conformance]` | table | no | `scratch = { at, size }`: flash a conformance build erases and writes; apart from every slot, header, log face and stage0. |
 | `[boot]` | table | no | `[boot.record]`, for MCUs with a DAGON boot stage: where the boot record and the lockup fuse live. `kind` (`noinit-ram` inside `ram`, `retained-registers` inside a `[[peripheral]]`), `at`, `size` (at most 4096), `survives` (`reset-random`, `reset-cleared`, `power`: what a power loss leaves), `entropy = { source, min_bits }` (required; the start-up word a new record sequence mixes in: `source` one of `rng`, `ring-osc`, `osc-capture`, `adc-noise`; `min_bits` its min-entropy per word, a fact, at least 16 when it has a value), `rings = [{ writer, at, size }]` (one per boot stage, in boot order, inside the record), `fuse = { cells = [{ image, at, size }] }` (`bootcore`, `app`; outside the record), `reserved` (addresses the record never stores to). The byte layout inside is the `boot-record` contract's. |
 | `boot_capabilities` | array of strings | no | What a board's boot action program may use besides pins: `["i2c"]` allows `bus_write`. |
@@ -71,6 +72,47 @@ Writer kinds:
   `usb_hint = { vid, pid }`. The hint only labels candidates the writer
   tool reports; it never filters them. Matching candidates are listed first and
   pre-selected.
+
+### Erase and trial waits
+
+`[execution] erase_regions` describes the flash DAGON erases in: each
+region (`start`, `len`) is erased in whole units of `unit` bytes, one unit
+per flash operation, and one unit takes at most `unit_max_ms`. An MCU
+whose units differ by address (the STM32F401's 16, 64 and 128 KiB
+sectors) lists one region per unit size. Where the flash is a part on
+the board (the RP2040 and the ESP32-S3), the MCU's regions are a default
+that every candidate part supports: 4 KiB sectors, each taking the
+largest maximum sector erase time of those parts. A board that carries a
+known part states it in `[flash]` (`part`, its datasheet cited in a
+comment, and `erase_regions` in the same shape); its regions replace the
+MCU's whole for nodes on that board, and they are checked with the MCU's
+watchdog and slot layouts. `[[slot_layout]]` lists every
+target and slot the node receives into, with where its body starts, its
+largest body and where its header goes (`"inline"` at the start, or
+`{ detached = <address> }`, as the ESP32-S3's headers in its dagon
+partition).
+
+From a node's effective regions (its board's `[flash]` when present,
+else its MCU's) and its MCU's slot layouts, one planner
+(`dagon_port::timeout`) gives the erase of a
+transfer: the bytes it covers (an inline header and the body from the
+slot start, or a detached header and the body apart), and each whole unit
+of the region holding them. The node's agent hands exactly that plan to
+the slot store, which takes the regions from its board
+(`BoardDef::erase_regions`). The host and the conformance runner plan the
+same transfer from the same definitions and wait for the request the node
+erases on the sum of the planned units' `unit_max_ms` plus 1000 ms. A
+node's trial wait comes from `[watchdog] trial_ms` and `trial_attempts`:
+the host polls the new version's HELLO and sends CONFIRM inside one
+trial, and its wait for the new version covers `trial_attempts` trials
+(each MCU's values are checked against the host's waits when its
+timings are built).
+
+For a node whose MCU has no definition, or a definition without
+`[watchdog]`, the host and the conformance runner use the fallback: an
+erase wait of 30000 ms, a trial of 8000 ms and 3 attempts. A node whose
+definition has no `[execution]` gets the fallback erase wait of
+30000 ms.
 
 ### `[isolation]`
 
@@ -99,7 +141,7 @@ definition that leaves a class out is refused with the class named.
 <!-- generated from dagon-topology's BoardDef: python site/scripts/gen.py -->
 | Key | Type | Required | Meaning |
 |---|---|---|---|
-| `format` | integer | no | Definition format number (`1`; left out means 1). A dagon that does not read the number refuses the file (site/src/content/docs/explanation/versioning.md). |
+| `format` | integer | no | Definition format number (`2`; left out means 1). A dagon that does not read the number refuses the file (site/src/content/docs/explanation/versioning.md). |
 | `id` | string | yes | Board id used in `nodes[].board`. |
 | `product` | string | yes | Product name. |
 | `mcu` | string | yes | MCU id (must be defined). |
@@ -117,6 +159,7 @@ definition that leaves a class out is refused with the class named.
 | `[[bus]]` | tables | no | The board's buses: `id` (`a-z 0-9 - _`), `kind` (`i2c`, `spi`, `uart`, `can`), `controller` (an MCU `[[peripheral]]`), its pins by signal (`sda`, `scl` for i2c; `tx` and/or `rx` for uart; `tx`, `rx` for can; `sck` and `mosi` and/or `miso` for spi), `hz` (i2c, spi) or `baud` (uart, can; on a `dagon = true` UART bus the link speed of a build dagon does not give the topology's, see below), `dagon` (`true`: DAGON's own link runs on it, so neither the bus nor its controller is ever an extension's), `dma` (`true`: the board package opens or hands out the bus with DMA; i2c, spi, uart; its tx and rx streams come from the MCU's `dma_requests`, buses in order, and the board package's build writes them as `<Bus>TxDma`/`<Bus>RxDma`, `take_dma!` and `bind_<bus>_dma!`). |
 | `[[peripheral]]` | tables | no | Board names for MCU blocks extensions may declare: `id`, `mcu` (the MCU `[[peripheral]]` id; never the controller of a `dagon = true` bus). |
 | `[[device]]` | tables | no | A device on a board bus: `id` (`a-z 0-9 - _`), `bus`, `addr`, `max_transfer` (required: the most data bytes it takes in one transfer, from its datasheet; the bus port and boot programs keep to it), `regs = [{ name, reg }]` (its registers by name, `a-z 0-9 _`), `writable` (registers anything outside DAGON may write: numbers or names of `regs`). |
+| `[flash]` | table | no | The flash part the board carries, for an MCU whose flash is a board part: `part` (cite its datasheet in a comment) and `erase_regions` in the shape of the MCU's `[execution]` `erase_regions` (`start`, `len`, `unit`, `unit_max_ms`). They replace the MCU's regions whole for nodes on this board; checked with the MCU's watchdog and slot layouts. Left out: the MCU's regions. The node and the host plan every erase from the same regions. |
 <!-- end of generated table -->
 
 A board package runs DAGON's UART link at the topology link's `baud`:

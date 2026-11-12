@@ -837,6 +837,15 @@ impl Registry {
         }
     }
 
+    /// The board node `n` is on: the board it names, else its MCU's
+    /// default board ([`Registry::default_board`]).
+    pub fn node_board(&self, n: &crate::schema::Node) -> Option<&BoardDef> {
+        match &n.board {
+            Some(b) => self.board(b),
+            None => self.default_board(&n.mcu),
+        }
+    }
+
     /// Flash map by name, with its MCU.
     pub fn flash_map(&self, name: &str) -> Option<(&McuDef, &FlashMapDef)> {
         self.mcus

@@ -83,6 +83,7 @@ mod hal {
     pub use dagon_mcu_stm32f401re::node::DagonParts;
     use dagon_mcu_stm32f401re::node::{App, AppEvents, I2cTarget, LogError};
     use dagon_mcu_stm32f401re::watchdog::Guard;
+    use dagon_mcu_stm32f401re::EraseRegion;
     pub use dagon_mcu_stm32f401re::{BoardCore, BoardDef};
     use embassy_stm32::i2c::{self, I2c, SlaveAddrConfig};
     use embassy_stm32::peripherals::ADC1;
@@ -172,6 +173,8 @@ mod hal {
     impl BoardDef for Board {
         type Link = Link;
         type UserIo = Io;
+        const ERASE_REGIONS: &'static [EraseRegion] =
+            &EraseRegion::table(crate::def::ERASE_REGIONS);
 
         fn split(p: Peripherals) -> (DagonParts<Link>, Io) {
             let link = Link {

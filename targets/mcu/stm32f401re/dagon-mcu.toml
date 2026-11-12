@@ -2,7 +2,7 @@
 # src/layout.rs (sectors 16K x4, 64K, 128K x3); never move them. Sector 0
 # stage0, 1-2 the state log, 3 conformance scratch, 4 boot core A, 5-6 APP
 # A/B, 7 boot core B.
-format = 1
+format = 2
 id = "stm32f401re"
 name = "STM32F401RE"
 wire_id = 0x0002
@@ -61,6 +61,35 @@ header = "inline"
 at = 0x0804_0000
 size = 0x2_0000
 
+# What the node receives into: each slot above, header inline at its start.
+[[slot_layout]]
+target = "bootcore"
+slot = "a"
+start = 0x0801_0000
+capacity = 0xFE00
+header = "inline"
+
+[[slot_layout]]
+target = "bootcore"
+slot = "b"
+start = 0x0806_0000
+capacity = 0x1_FE00
+header = "inline"
+
+[[slot_layout]]
+target = "app"
+slot = "a"
+start = 0x0802_0000
+capacity = 0x1_FE00
+header = "inline"
+
+[[slot_layout]]
+target = "app"
+slot = "b"
+start = 0x0804_0000
+capacity = 0x1_FE00
+header = "inline"
+
 # First write: chip erase, flash.bin from the flash base, reset.
 [writer]
 kind = "probe-rs"
@@ -113,16 +142,21 @@ trial_attempts = 3
 flag = { unverified = "register" }
 
 # Single-bank flash: an erase or program stalls instruction fetch (nothing
-# runs; interrupts stay enabled and wait). DAGON erases one 128 KiB sector
-# per operation. Its maximum erase time is to be checked against the
-# STM32F401xD/xE datasheet (DS10086, flash memory programming
-# characteristics, 128 KiB sector erase): not yet verified. The masking
-# budget of DAGON's own code is to be measured on the board.
+# runs; interrupts stay enabled and wait). DAGON erases one sector per
+# operation, and the sectors are unequal (RM0368 section 3.3: 16 KiB x4,
+# 64 KiB, 128 KiB x3). Each sector's maximum erase time is the
+# STM32F401xD/xE datasheet's (DS10086, flash memory programming
+# characteristics, sector erase time at x8 parallelism: 16 KiB 800 ms,
+# 64 KiB 2400 ms, 128 KiB 4000 ms), not yet checked against the document.
+# The masking budget of DAGON's own code is to be measured on the board.
 [execution]
 masked_max_us = "unmeasured"
 flash_op = "fetch-stall"
-erase_unit = 0x2_0000
-erase_unit_max_ms = { unverified = 4_000 }
+erase_regions = [
+    { start = 0x0800_0000, len = 0x1_0000, unit = 0x4000, unit_max_ms = { unverified = 800 } },
+    { start = 0x0801_0000, len = 0x1_0000, unit = 0x1_0000, unit_max_ms = { unverified = 2_400 } },
+    { start = 0x0802_0000, len = 0x6_0000, unit = 0x2_0000, unit_max_ms = { unverified = 4_000 } },
+]
 
 # Sector 3 (16 KiB), used by no image or log.
 [conformance]

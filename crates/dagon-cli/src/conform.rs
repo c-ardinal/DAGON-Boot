@@ -5,11 +5,12 @@
 use std::fmt::Write as _;
 use std::path::PathBuf;
 
-use dagon_conform::pc::{Channel, Images, NoAnswer, Runner, Signer};
+use dagon_conform::pc::{Channel, Images, NoAnswer, Runner, Signer, Timings};
 use dagon_conform::report::{CtResult, Progress, Report};
 use dagon_conform::{Label, CTS};
 use dagon_format::header::SIGN_DOMAIN;
-use dagon_host::{Error, Host, HostClock, Target, Transport};
+use dagon_host::{Error, Host, HostClock, HostTimings, Target, Transport};
+use dagon_port::timeout::NodeTimings;
 use dagon_port::LinkKind;
 use dagon_sim::block_on;
 
@@ -68,20 +69,22 @@ impl<T: Transport, C: HostClock> Channel for HostChannel<'_, T, C> {
 }
 
 /// Runs all 12 tests. `images` are good A, good B, no-confirm A, no-confirm
-/// B; `sign` signs re-built headers for the compatibility test.
+/// B; `sign` signs re-built headers for the compatibility test; `timings`
+/// are the node's own limits (its MCU definition's).
 pub fn run<T: Transport, C: HostClock>(
     host: &mut Host<T, C>,
     to: Target,
     link: LinkKind,
     images: &[Vec<u8>; 4],
     sign: Signer<'_>,
+    timings: Timings<'_>,
 ) -> Report {
     let imgs = Images {
         good: [&images[0], &images[1]],
         no_confirm: [&images[2], &images[3]],
     };
     let ch = HostChannel { host, to };
-    match Runner::new(ch, link, imgs, sign) {
+    match Runner::new(ch, link, imgs, sign, timings) {
         Ok(mut r) => r.run_all(),
         Err(e) => {
             eprintln!("conform: setup failed: {e}");
@@ -193,11 +196,26 @@ pub(crate) fn node_target(
     }
 }
 
+/// Node `node`'s own limits from its MCU definition; the fallback for a
+/// node or an MCU the definitions do not name.
+pub(crate) fn node_timings(
+    reg: &dagon_topology::defs::Registry,
+    t: &dagon_topology::Topology,
+    node: &str,
+) -> Result<HostTimings, String> {
+    let i = t.nodes.iter().position(|n| n.id == node);
+    let all = dagon_host::node_timings(reg, t).map_err(|e| e.to_string())?;
+    Ok(i.and_then(|i| all.into_iter().nth(i))
+        .map_or(NodeTimings::FALLBACK, |(_, t)| t))
+}
+
 /// Runs the 12 tests on the hub's port and writes the result file and the
 /// report into `out`.
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn conform_files(
     node: &str,
     to: Target,
+    timings: &HostTimings,
     images_dir: &std::path::Path,
     out: &crate::genfs::Out,
     base: &std::path::Path,
@@ -209,7 +227,14 @@ pub(crate) fn conform_files(
     let images = [a?, b?, c?, d?];
     let mut sign = |m: &[u8]| *key.sk.sign([SIGN_DOMAIN, m].concat(), None);
     let mut host = serial::host(port)?;
-    let report = run(&mut host, to, link_of(to), &images, &mut sign);
+    let report = run(
+        &mut host,
+        to,
+        link_of(to),
+        &images,
+        &mut sign,
+        timings.borrowed(),
+    );
     crate::genfs::write_out(
         base,
         &out.join(RESULT_FILE)?,
@@ -227,14 +252,19 @@ pub fn command(a: &ConformArgs) -> Result<(), String> {
     let usb = a.usb;
     let node = a.node.as_str();
     let cfg = Config::load(a.config.as_deref())?;
-    let to = if usb {
-        Target::Hub
-    } else {
-        node_target(
-            &crate::defs::registry(&cfg)?,
-            &read_topology(&cfg, &cfg.topology_path(a.topology.as_deref())?)?,
-            node,
-        )?
+    // With --usb no topology is needed: the node's limits are its MCU
+    // definition's when the topology names it, else the fallback.
+    let reg = crate::defs::registry(&cfg)?;
+    let topology = cfg
+        .topology_path(a.topology.as_deref())
+        .and_then(|p| read_topology(&cfg, &p));
+    let (to, timings) = match (usb, topology) {
+        (false, t) => {
+            let t = t?;
+            (node_target(&reg, &t, node)?, node_timings(&reg, &t, node)?)
+        }
+        (true, Ok(t)) => (Target::Hub, node_timings(&reg, &t, node)?),
+        (true, Err(_)) => (Target::Hub, NodeTimings::FALLBACK),
     };
     let dir = a
         .images
@@ -250,7 +280,16 @@ pub fn command(a: &ConformArgs) -> Result<(), String> {
             crate::genfs::Out::Work(crate::genfs::Rel::new(format!("{CONFORM_DIR}/{node}"))?)
         }
     };
-    let report = conform_files(node, to, &dir, &out, &cfg.base, &key, a.port.as_deref())?;
+    let report = conform_files(
+        node,
+        to,
+        &timings,
+        &dir,
+        &out,
+        &cfg.base,
+        &key,
+        a.port.as_deref(),
+    )?;
     for c in CTS {
         if let Some(r) = report.results.iter().find(|r| r.id == c.id) {
             println!("{} {:<24} {}", Label(c.id), c.name, r.verdict.as_str());

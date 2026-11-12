@@ -1,6 +1,6 @@
 # DAGON MCU definition (format: targets/README.md). Slots come from
 # partitions.csv; addresses are flash offsets (images are MMU-mapped).
-format = 1
+format = 2
 id = "esp32s3"
 name = "ESP32-S3"
 wire_id = 0x0003
@@ -32,6 +32,33 @@ header = "detached"
 partition = "factory"
 header_partition = "dagon"
 header_offset = 0x2000
+
+# What the node receives into: APP slot A is ota_0 and slot B ota_1, the
+# recovery agent goes to factory; each header has its own 4 KiB sector at
+# the start of the dagon partition (0x71_0000).
+[[slot_layout]]
+target = "app"
+slot = "a"
+partition = "ota_0"
+start = 0x11_0000
+capacity = 0x30_0000
+header = { detached = 0x71_0000 }
+
+[[slot_layout]]
+target = "app"
+slot = "b"
+partition = "ota_1"
+start = 0x41_0000
+capacity = 0x30_0000
+header = { detached = 0x71_1000 }
+
+[[slot_layout]]
+target = "agent"
+slot = "factory"
+partition = "factory"
+start = 0x1_0000
+capacity = 0x10_0000
+header = { detached = 0x71_2000 }
 
 # First write: the bundled ESP-IDF 2nd stage, the partition table, the
 # board's factory agent, slot A and otadata. usb_hint labels the candidates
@@ -73,17 +100,32 @@ trial_attempts = 1
 flag = "unmeasured"
 
 # The flash cache is off during an operation; the flash driver masks
-# interrupts for each (handlers outside IRAM cannot run). DAGON erases at
-# most one 64 KiB block per operation. Its maximum erase time is the
-# board's SPI flash part's (64 KiB block erase in that part's datasheet):
-# the part is the board's, not named here, so the value is not yet
-# verified. The masking budget of DAGON's own code is to be measured on the
-# board.
+# interrupts for each (handlers outside IRAM cannot run). DAGON erases one
+# 4 KiB sector per operation over all of the flash map: the sector erase
+# every candidate part has, so no block erase is assumed. The flash is the
+# board's part (a board names it in [flash]); this default is the largest
+# 4 KiB sector erase time (tSE max) of the candidate parts:
+# - Winbond W25Q80JV, datasheet Revision C: tSE max 400 ms (the part
+#   pico-sdk 2.1.1's boot2_w25q080 is written for)
+# - Winbond W25X10CL, datasheet Revision G: tSE max 300 ms
+# - Renesas (Adesto) AT25SF128A, DS-AT25SF/QF128A-168 Rev. Q: tSE max
+#   300 ms at 85 C and at 105 C
+# - Winbond W25Q16JV (the Raspberry Pi Pico's part, Pico datasheet
+#   Release 21), datasheet Revision H: tSE max 400 ms
+# - the flash of the Espressif ESP32-S3-WROOM-1/1U (datasheet v1.8, Table
+#   6-8), ESP32-S3-WROOM-2 (v1.7, Table 6-7) and ESP32-S3-MINI-1/1U (v1.7,
+#   Table 6-8) modules, which name no part: tSE max 500 ms
+# ISSI IS25LP080D (pico-sdk's boot2_is25lp080) is not counted: its datasheet
+# could not be obtained, and it is to be checked against this value.
+# The value is the largest of these, 500 ms.
+# Unverified until checked on hardware. The masking budget of DAGON's own
+# code is to be measured on the board.
 [execution]
 masked_max_us = "unmeasured"
 flash_op = "cache-off-masked"
-erase_unit = 0x1_0000
-erase_unit_max_ms = { unverified = 2_000 }
+erase_regions = [
+    { start = 0x0, len = 0x100_0000, unit = 0x1000, unit_max_ms = { unverified = 500 } },
+]
 
 # The last 4 KiB of the dagon partition: after the three header sectors,
 # used by nothing.

@@ -83,7 +83,7 @@ const UART_BYTES_PER_MS: f64 = 11.0;
 const EXCHANGE_MS: f64 = 2.0;
 /// Sector erase before a transfer, and the final check after it.
 pub const ERASE_MS: f64 = 600.0;
-const VERIFY_MS: f64 = 150.0;
+const DIGEST_CHECK_MS: f64 = 150.0;
 
 /// Simulated ms the exchange of request `frame` takes on its links.
 pub fn exchange_ms(frame: &[u8], medium: Medium) -> f64 {
@@ -96,7 +96,7 @@ pub fn exchange_ms(frame: &[u8], medium: Medium) -> f64 {
     let usb = 2.0 * frame.len() as f64 / up_rate;
     let work = |inner_cmd: u8| match inner_cmd {
         c if c == Cmd::XferBegin as u8 => ERASE_MS,
-        c if c == Cmd::XferEnd as u8 => VERIFY_MS,
+        c if c == Cmd::XferEnd as u8 => DIGEST_CHECK_MS,
         _ => 0.0,
     };
     if cmd != Cmd::Relay as u8 {

@@ -167,12 +167,15 @@ fn publish_startup(store: &mut Store) {
 }
 
 /// The board definition of a board without extras (`board::PlainBoard`), for
-/// `NodePeripherals::board` when the app wires the link itself. Call once;
+/// `NodePeripherals::board` when the app wires the link itself, erasing in
+/// `regions` (the node's generated wiring.rs `ERASE_REGIONS`). Call once;
 /// a second call resets the chip (there is only one link task).
-pub fn plain_board() -> &'static mut PlainBoard {
+pub fn plain_board(
+    regions: &'static [dagon_port::timeout::EraseRegion],
+) -> &'static mut PlainBoard {
     static PLAIN: StaticCell<PlainBoard> = StaticCell::new();
     PLAIN
-        .try_init(PlainBoard)
+        .try_init(PlainBoard(regions))
         .unwrap_or_else(|| esp_hal::system::software_reset())
 }
 
@@ -346,7 +349,8 @@ impl Link {
         let wdt = WDT.init(RefCell::new(
             TrialWatchdog::new(rwdt, EspClock).with_liveness(liveness),
         ));
-        let mut store = EspStore::new(EspFlash::new(storage), boot, SharedWdt(wdt));
+        let regions = p.board.erase_regions();
+        let mut store = EspStore::new(EspFlash::new(storage), boot, SharedWdt(wdt), regions);
         let trial = trying(&mut store);
         if trial {
             wdt.borrow_mut().begin_trial();

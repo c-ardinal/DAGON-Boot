@@ -310,14 +310,23 @@ impl<S: SlotStore> ImageStore<S> {
         if !ok {
             return Err(Status::State);
         }
-        self.store
-            .erase(t, slot, len, &Transition(()))
-            .map_err(store_status)?;
+        self.erase_slot(t, slot, len).map_err(store_status)?;
         match t {
             target::BOOTCORE => done(self.core(slot)?.erase(out, slot, len)),
             _ => done(self.machine(t, slot)?.erase(out, t, slot, len)),
         }
         Ok(())
+    }
+
+    /// The store's erase for a new body of `len` bytes into `slot` of `t`:
+    /// the shared plan from its erase layout when it has one.
+    fn erase_slot(&mut self, t: u8, slot: u8, len: u32) -> Result<(), StoreError> {
+        let Some(layout) = self.store.erase_layout() else {
+            return self.store.erase(t, slot, len, &Transition(()));
+        };
+        let plan = crate::erase_plan(&layout, t, slot, len)?;
+        self.store
+            .erase_planned(t, slot, len, plan, &Transition(()))
     }
 
     /// Body bytes into a slot erased by [`ImageStore::erase`].
@@ -356,7 +365,7 @@ impl<S: SlotStore> ImageStore<S> {
             return Err(Status::State);
         }
         if let Err(s) = self.place_header(t, slot, hdr, verify) {
-            let undone = self.store.erase(t, slot, len, &Transition(()));
+            let undone = self.erase_slot(t, slot, len);
             self.status();
             return Err(if undone.is_ok() { s } else { Status::Flash });
         }

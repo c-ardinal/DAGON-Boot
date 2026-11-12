@@ -568,18 +568,21 @@ fn project(reg: &mut Registry, dagon_toml: &Path) -> Result<(), DefError> {
 }
 
 /// Refuses a definition in a format this reader does not know, before its
-/// fields are read (a newer format may have fields this one rejects).
+/// fields are read (a newer format may have fields this one rejects, an
+/// older one fields it no longer has). A file without `format` is format 1
+/// (site/src/content/docs/explanation/versioning.md).
 fn check_format(text: &str, at: impl fmt::Display) -> Result<(), DefError> {
     let n = toml::from_str::<toml::Table>(text)
         .ok()
-        .and_then(|t| t.get("format").cloned());
+        .and_then(|t| t.get("format").cloned())
+        .unwrap_or(toml::Value::Integer(1));
     match n {
-        None => Ok(()),
-        Some(toml::Value::Integer(n)) if n == i64::from(FORMAT) => Ok(()),
-        Some(v) => err(
+        toml::Value::Integer(n) if n == i64::from(FORMAT) => Ok(()),
+        v => err(
             at,
             format!(
-                "definition format {v}; this dagon reads definition format {FORMAT}                  (use a dagon release that reads it; site/src/content/docs/explanation/versioning.md)"
+                "definition format {v}; this dagon reads definition format {FORMAT} \
+                 (use a dagon release that reads it; site/src/content/docs/explanation/versioning.md)"
             ),
         ),
     }

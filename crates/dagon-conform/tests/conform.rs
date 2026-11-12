@@ -8,12 +8,12 @@ use dagon_agent::{Agent, Config, SlotStore, StoreError, Transition};
 use dagon_conform::node::{self, NodeSetup, RESPONSE_MAX};
 use dagon_conform::pc::{Channel, Images, NoAnswer, Runner, SetupError};
 use dagon_conform::report::{Progress, Report, Verdict};
-use dagon_conform::timeout::link_limits;
 use dagon_conform::CTS;
 use dagon_events::{compose, Bounds, Composed, Layer, Nop, Published, Watchdog};
 use dagon_format::header::*;
 use dagon_format::statelog::reason;
 use dagon_format::{key_id, sha256, Version};
+use dagon_port::timeout::{link_limits, NodeTimings};
 use dagon_port::{Flash, FlashError, FlashRegion, LinkKind};
 use dagon_proto::payload::*;
 use dagon_proto::{split_status, Cmd, Frame, Status, MAX_FRAME};
@@ -517,9 +517,15 @@ impl Imgs {
 fn run(node: &mut FakeNode, link: LinkKind) -> Report {
     let imgs = Imgs::new();
     let mut signer = sign;
-    Runner::new(node, link, imgs.images(), &mut signer)
-        .unwrap()
-        .run_all()
+    Runner::new(
+        node,
+        link,
+        imgs.images(),
+        &mut signer,
+        NodeTimings::FALLBACK,
+    )
+    .unwrap()
+    .run_all()
 }
 
 fn verdict(r: &Report, id: u8) -> Verdict {
@@ -623,15 +629,36 @@ fn setup_rejects_bad_inputs() {
     let mut n = FakeNode::new(LinkKind::Uart, Faults::default());
     let mut same = imgs.images();
     same.no_confirm = same.good;
-    let e = Runner::new(&mut n, LinkKind::Uart, same, &mut signer).err();
+    let e = Runner::new(
+        &mut n,
+        LinkKind::Uart,
+        same,
+        &mut signer,
+        NodeTimings::FALLBACK,
+    )
+    .err();
     assert_eq!(e, Some(SetupError::SameVersion));
     let mut swapped = imgs.images();
     swapped.good = [&imgs.good[1], &imgs.good[0]];
-    let e = Runner::new(&mut n, LinkKind::Uart, swapped, &mut signer).err();
+    let e = Runner::new(
+        &mut n,
+        LinkKind::Uart,
+        swapped,
+        &mut signer,
+        NodeTimings::FALLBACK,
+    )
+    .err();
     assert_eq!(e, Some(SetupError::BadImage(0)));
     let mut dead = FakeNode::new(LinkKind::Uart, Faults::default());
     dead.up_at = u64::MAX;
-    let e = Runner::new(&mut dead, LinkKind::Uart, imgs.images(), &mut signer).err();
+    let e = Runner::new(
+        &mut dead,
+        LinkKind::Uart,
+        imgs.images(),
+        &mut signer,
+        NodeTimings::FALLBACK,
+    )
+    .err();
     assert_eq!(e, Some(SetupError::Unreachable));
 }
 
@@ -790,7 +817,13 @@ fn every_link_kind_is_judged_or_refused() {
     let mut signer = sign;
     for &kind in LinkKind::ALL {
         let mut n = FakeNode::new(kind, Faults::default());
-        let r = Runner::new(&mut n, kind, imgs.images(), &mut signer);
+        let r = Runner::new(
+            &mut n,
+            kind,
+            imgs.images(),
+            &mut signer,
+            NodeTimings::FALLBACK,
+        );
         match link_limits(kind) {
             Some(l) => {
                 assert!(l.max_payload > 0 && l.floor_bps > 0, "{kind:?}");
@@ -822,7 +855,14 @@ fn tiny_hello_max_payload_is_rejected_at_setup() {
         ..Default::default()
     };
     let mut n = FakeNode::new(LinkKind::Uart, faults);
-    let e = Runner::new(&mut n, LinkKind::Uart, imgs.images(), &mut signer).err();
+    let e = Runner::new(
+        &mut n,
+        LinkKind::Uart,
+        imgs.images(),
+        &mut signer,
+        NodeTimings::FALLBACK,
+    )
+    .err();
     assert_eq!(e, Some(SetupError::BadHello));
 }
 

@@ -48,6 +48,15 @@ pub trait BoardDef: BoardCore {
     type UserIo;
     /// Splits the chip's peripherals.
     fn split(p: Peripherals) -> (DagonParts, Self::UserIo);
+    /// The flash this board's nodes erase in: the erase regions its build
+    /// generated (`ERASE_REGIONS` rows in a board package's def.rs, or in a
+    /// node's wiring.rs), which are the board's `[flash] erase_regions`
+    /// when it carries its own flash part, else the MCU's. Required, so no
+    /// board leaves them out:
+    /// `const ERASE_REGIONS: &'static [EraseRegion] = &EraseRegion::table(def::ERASE_REGIONS);`.
+    /// The slot store plans every erase over these and the MCU's slot
+    /// layouts.
+    const ERASE_REGIONS: &'static [dagon_port::timeout::EraseRegion];
 }
 
 /// The agent of an RP2040 node; its chain holds the app's extensions and
@@ -58,7 +67,7 @@ pub type AppAgent = Agent<AppStore, NodeChain>;
 /// hands out another for the package's own reads (the topology copy), both
 /// used by the serving task only. Flash operations run from RAM with XIP
 /// off and interrupts masked by the driver, one 4 KiB sector (or page) per
-/// operation (`ERASE_UNIT`, worst case `ERASE_UNIT_MAX_MS`); DAGON masks
+/// operation (`ERASE_REGIONS`, worst case `ERASE_UNIT_MAX_MS`); DAGON masks
 /// nothing around them.
 pub type SharedFlash = dagon_mcu_common::shared::SharedFlash<RpFlash>;
 
@@ -72,8 +81,6 @@ pub(crate) struct Opened {
     /// The app's read access to the node's events.
     pub(crate) events: AppEvents,
 }
-
-const _: () = assert!(crate::layout::SECTOR == crate::ERASE_UNIT);
 
 /// The guard task [`start`] gives DAGON's serving task; the app's tasks
 /// take the others.
@@ -144,6 +151,7 @@ pub(crate) fn open<B: BoardDef, const N: usize>(
         flash,
         watch: guard,
         task,
+        regions: B::ERASE_REGIONS,
     };
     let trial = on_trial(&store.status());
     guard.install(Wdt::new(watchdog), trial);

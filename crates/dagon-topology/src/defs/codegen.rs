@@ -11,6 +11,7 @@ use std::path::{Path, PathBuf};
 
 use super::board_boot::{code_ident, code_names, type_name as camel, Active, HaltPattern};
 use super::boot_folder::{BootFolder, BOOT_FOLDER_ENV};
+use super::execution::EraseRegionDef;
 use super::load::{self, BOARD_FILE, MCU_FILE};
 use super::{BoardDef, DefError, McuDef, Registry, Source};
 
@@ -199,6 +200,32 @@ pub fn board_rs(b: &BoardDef) -> String {
             );
         }
     }
+    o
+}
+
+/// The erase regions of nodes on a board (the loader's effective regions,
+/// `McuDef::erase_regions_on`), as `(start, len, unit, unit_max_ms)` rows a
+/// `BoardDef` turns into its erase regions (`EraseRegion::table`). Written
+/// into a board package's def.rs and a node's wiring.rs alike.
+pub fn erase_regions_rs(regions: &[EraseRegionDef]) -> String {
+    let mut o = format!(
+        "/// The erase regions of nodes on this board, as (start, len, unit,\n\
+         /// unit_max_ms): its `[flash] erase_regions` when it carries its own flash\n\
+         /// part, else its MCU's. Its `BoardDef` returns them.\n\
+         pub const ERASE_REGIONS: [(u32, u32, u32, u32); {}] = [\n",
+        regions.len()
+    );
+    for r in regions {
+        let _ = writeln!(
+            o,
+            "    ({:#x}, {:#x}, {:#x}, {}),",
+            r.start,
+            r.len,
+            r.unit,
+            r.unit_max_ms.value().unwrap_or(0)
+        );
+    }
+    o += "];\n";
     o
 }
 
@@ -397,7 +424,8 @@ pub fn link_baud_rs(b: &BoardDef, env: Option<&str>) -> Result<String, String> {
     ))
 }
 
-/// A board package's build script: writes `def.rs` ([`board_rs`]),
+/// A board package's build script: writes `def.rs` ([`board_rs`], the
+/// link speed and the effective erase regions, [`erase_regions_rs`]),
 /// `pins.rs` ([`pins_rs`]) and `devices.rs` ([`devices_rs`]) into
 /// `OUT_DIR` from the package's own definition, and reruns when any
 /// definition the validation read changes; a definition that does not
@@ -408,7 +436,9 @@ pub fn package_build(hal: &Hal<'_>) {
     println!("cargo:rerun-if-env-changed={LINK_BAUD_ENV}");
     let env = std::env::var(LINK_BAUD_ENV).ok();
     let baud = link_baud_rs(&l.board, env.as_deref()).unwrap_or_else(|e| panic!("{e}"));
-    write(&out_dir().join("def.rs"), &(board_rs(&l.board) + &baud));
+    let regions = l.mcu.erase_regions_on(Some(&l.board)).unwrap_or(&[]);
+    let def = board_rs(&l.board) + &baud + &erase_regions_rs(regions);
+    write(&out_dir().join("def.rs"), &def);
     write(&out_dir().join("pins.rs"), &pins_rs(&l.board, hal));
     write(&out_dir().join("devices.rs"), &devices_rs(&l.board));
 }
@@ -515,6 +545,37 @@ mod tests {
         s.to_uppercase()
     }
 
+    /// The effective regions become rows a `BoardDef` reads: a board's
+    /// `[flash]` replaces its MCU's.
+    #[test]
+    fn a_boards_erase_regions_are_generated() {
+        let reg = Registry::builtin();
+        let plain = reg.board("waveshare-rp2040-touch-lcd-1.28").unwrap();
+        let m = reg.mcu("rp2040").unwrap();
+        let mcu_rows = erase_regions_rs(m.erase_regions_on(Some(plain)).unwrap());
+        assert!(
+            mcu_rows.contains(
+                "[(u32, u32, u32, u32); 1] = [\n    (0x10000000, 0x400000, 0x1000, 500),\n];"
+            ),
+            "{mcu_rows}"
+        );
+        let mut b = plain.clone();
+        b.flash = Some(crate::defs::BoardFlash {
+            part: "W25Q16JV".into(),
+            erase_regions: vec![crate::defs::EraseRegionDef {
+                start: 0x1000_0000,
+                len: 0x40_0000,
+                unit: 0x1000,
+                unit_max_ms: crate::defs::Fact::Unverified { unverified: 400 },
+            }],
+        });
+        let rows = erase_regions_rs(m.erase_regions_on(Some(&b)).unwrap());
+        assert!(
+            rows.contains("    (0x10000000, 0x400000, 0x1000, 400),\n"),
+            "{rows}"
+        );
+    }
+
     #[test]
     fn writes_every_board_fact_by_name() {
         let reg = Registry::builtin();
@@ -618,7 +679,7 @@ mod tests {
             std::fs::write(
                 board.join(BOARD_FILE),
                 format!(
-                    "id = {id:?}\nproduct = \"P\"\nmcu = \"rp2040\"\nflash_bytes = 0x40_0000\n\
+                    "id = {id:?}\nformat = 2\nproduct = \"P\"\nmcu = \"rp2040\"\nflash_bytes = 0x40_0000\n\
                      drawing = \"x\"\n{extra}[boot]\nled = \"GPIO25\"\nhalt = {{ pattern = \"blink\", period_ms = 200 }}\n\
                      [[pin]]\npin = \"GPIO25\"\nname = \"led\"\n"
                 ),
@@ -670,7 +731,7 @@ mod tests {
         let project = dir.join("dagon.toml");
         std::fs::write(
             &project,
-            "[board.mine]\nproduct = \"Mine\"\nmcu = \"rp2040\"\nflash_bytes = 0x40_0000\n\
+            "[board.mine]\nformat = 2\nproduct = \"Mine\"\nmcu = \"rp2040\"\nflash_bytes = 0x40_0000\n\
              drawing = \"x\"\n[board.mine.boot]\nled = \"GPIO2\"\n[[board.mine.pin]]\npin = \"GPIO2\"\n",
         )
         .unwrap();

@@ -72,19 +72,32 @@ impl<T: Copy> Fact<T> {
 }
 
 /// `[execution]`.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Execution {
     /// Longest DAGON's own code masks interrupts (a critical section of
     /// its own, never a flash operation), in microseconds.
     pub masked_max_us: Fact,
     pub flash_op: FlashOp,
-    /// Largest unit DAGON erases in one flash operation (bytes).
-    pub erase_unit: u32,
+    /// The flash DAGON erases in, by region: each region's erase unit and
+    /// that unit's worst-case erase time. Every erase DAGON plans takes
+    /// whole units of the region holding the address
+    /// (`dagon_port::timeout::plan_erase`).
+    pub erase_regions: Vec<EraseRegionDef>,
+}
+
+/// One `[execution] erase_regions` entry.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct EraseRegionDef {
+    pub start: u32,
+    pub len: u32,
+    /// Bytes one erase operation covers here.
+    pub unit: u32,
     /// Worst-case time of one such erase (the flash's datasheet maximum),
-    /// in milliseconds; required (measured or not), the watchdog check
-    /// needs it.
-    pub erase_unit_max_ms: Fact,
+    /// in milliseconds; required (measured or not): the watchdog check and
+    /// every erase wait need it.
+    pub unit_max_ms: Fact,
 }
 
 /// `[conformance]`.
@@ -104,40 +117,68 @@ fn fail(cond: bool, msg: impl FnOnce() -> String) -> Result<(), String> {
     }
 }
 
-/// `[execution]`: budgets above 0, the erase unit a power of two, and two
-/// erases shorter than every watchdog period (trial and confirmed): the
-/// watchdog is fed between flash operations, so when an erase starts up
-/// to one operation has run since the last feed. An
-/// unverified or unmeasured value passes the check it can take; tools
-/// report it as not established.
+/// A board's `[flash]`: the flash part it carries (its datasheet cited in
+/// a comment) and how that part erases, in the MCU's shape. Its regions
+/// replace the MCU's `[execution] erase_regions` whole for nodes on the
+/// board.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct BoardFlash {
+    pub part: String,
+    pub erase_regions: Vec<EraseRegionDef>,
+}
+
+/// `[execution]`: the masking budget within its limit and the MCU's erase
+/// regions ([`erase_regions`]). An unverified or unmeasured value passes
+/// the check it can take; tools report it as not established.
 pub(super) fn execution(m: &McuDef) -> Result<(), String> {
-    let Some(e) = m.execution else { return Ok(()) };
+    let Some(e) = &m.execution else { return Ok(()) };
     let masked = e.masked_max_us.value();
     fail(
         masked.is_some_and(|v| v == 0 || v > MASKED_MAX_US_LIMIT),
         || format!("execution.masked_max_us must be 1..={MASKED_MAX_US_LIMIT}"),
     )?;
-    fail(!e.erase_unit.is_power_of_two(), || {
-        "execution.erase_unit must be a power of two".into()
+    erase_regions(&e.erase_regions, m, "execution.erase_regions")
+}
+
+/// Erase regions (`key`, an MCU's or a board's for MCU `m`): not empty,
+/// whole units, within 32 bits, not overlapping; and two of each region's
+/// erases shorter than every watchdog period of `m` (trial and confirmed):
+/// the watchdog is fed between flash operations, so when an erase starts
+/// up to one operation has run since the last feed.
+pub(super) fn erase_regions(
+    regions: &[EraseRegionDef],
+    m: &McuDef,
+    key: &str,
+) -> Result<(), String> {
+    fail(regions.is_empty(), || {
+        format!("{key} needs at least one region")
     })?;
-    let Some(erase_ms) = e.erase_unit_max_ms.value() else {
-        return Err("execution.erase_unit_max_ms needs a value (measured or not)".into());
-    };
-    fail(erase_ms == 0, || {
-        "execution.erase_unit_max_ms must be above 0".into()
-    })?;
-    let Some(w) = m.watchdog else { return Ok(()) };
-    for (name, period) in [("trial_ms", w.trial_ms), ("confirmed_ms", w.confirmed_ms)] {
-        fail(
-            u64::from(erase_ms) * ERASE_MARGIN > u64::from(period),
-            || {
+    for (i, r) in regions.iter().enumerate() {
+        let at = format!("{key}[{i}]");
+        fail(r.unit == 0 || r.len == 0 || r.len % r.unit != 0, || {
+            format!("{at}: len must be a whole number of units, both above 0")
+        })?;
+        fail(u64::from(r.start) + u64::from(r.len) > 1 << 32, || {
+            format!("{at} runs past 2^32")
+        })?;
+        let Some(ms) = r.unit_max_ms.value() else {
+            return Err(format!("{at}.unit_max_ms needs a value (measured or not)"));
+        };
+        fail(ms == 0, || format!("{at}.unit_max_ms must be above 0"))?;
+        for o in &regions[..i] {
+            fail(overlaps((r.start, r.len), (o.start, o.len)), || {
+                format!("{at} overlaps another erase region")
+            })?;
+        }
+        let Some(w) = m.watchdog else { continue };
+        for (name, period) in [("trial_ms", w.trial_ms), ("confirmed_ms", w.confirmed_ms)] {
+            fail(u64::from(ms) * ERASE_MARGIN > u64::from(period), || {
                 format!(
-                    "watchdog.{name} {period} must be at least {ERASE_MARGIN} x \
-                 execution.erase_unit_max_ms {erase_ms}: the watchdog is fed between \
-                 flash operations, and one may already have run when an erase starts"
-                )
-            },
-        )?;
+                        "watchdog.{name} {period} must be at least {ERASE_MARGIN} x                      {at}.unit_max_ms {ms}: the watchdog is fed between                      flash operations, and one may already have run when an erase starts"
+                    )
+            })?;
+        }
     }
     Ok(())
 }

@@ -64,7 +64,7 @@ fn set_state(e: &mut [u8; ENTRY_LEN], state: u32) {
 }
 
 impl FakeOta {
-    fn blank() -> Self {
+    pub(crate) fn blank() -> Self {
         Self {
             entries: [[0xFF; ENTRY_LEN]; 2],
             running: SLOT_FACTORY,
@@ -149,6 +149,7 @@ pub(crate) fn store() -> Store {
         FakeFlash(vec![0xFF; MIN_FLASH_SIZE as usize]),
         FakeOta::blank(),
         Feeds::default(),
+        &crate::ERASE_REGIONS,
     )
 }
 
@@ -570,8 +571,36 @@ fn a_cut_erase_never_boots_a_partial_image() {
 #[test]
 fn a_plain_board_has_no_bring_up() {
     use crate::board::{BoardDef, PlainBoard};
-    let mut b = PlainBoard;
+    let mut b = PlainBoard(&crate::ERASE_REGIONS);
     assert!(b.id().is_none());
     assert!(b.bring_up_port().is_none());
     assert!(b.id().zip(b.bring_up_port()).is_none());
+}
+
+/// Every target and slot the store receives into has the definition's one
+/// planner layout, with the store's capacity.
+#[test]
+fn every_slot_the_store_takes_has_one_planner_layout() {
+    let s = store();
+    for t in 0..=u8::MAX {
+        for slot in 0..=u8::MAX {
+            let cap = s.capacity(t, slot);
+            let layouts: Vec<_> = crate::SLOT_LAYOUTS
+                .iter()
+                .filter(|l| (l.target, l.slot) == (t, slot))
+                .collect();
+            match (cap, layouts.as_slice()) {
+                (0, []) => {}
+                (cap, [l]) => {
+                    assert_eq!(l.capacity, cap, "{t}/{slot}");
+                    let body = crate::layout::app_partition(slot).unwrap().offset;
+                    let header = dagon_port::timeout::HeaderPlace::Detached {
+                        at: header_addr(slot).unwrap(),
+                    };
+                    assert_eq!((l.start, l.header), (body, header), "{t}/{slot}");
+                }
+                _ => panic!("{t}/{slot}: capacity {cap}, layouts {layouts:?}"),
+            }
+        }
+    }
 }

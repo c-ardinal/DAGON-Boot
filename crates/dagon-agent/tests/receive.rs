@@ -12,6 +12,7 @@ use dagon_events::{
 };
 use dagon_format::header::*;
 use dagon_format::{key_id, sha256, Version};
+use dagon_port::timeout::{EraseLayout, EraseOp, EraseRegion, HeaderPlace, Plan, SlotLayout};
 use dagon_proto::payload::*;
 use dagon_proto::{flags, max_payload, split_status, Cmd, Frame, Status};
 use ed25519_compact::{KeyPair, Seed};
@@ -66,6 +67,9 @@ struct Mem {
     confirms: usize,
     /// Header bytes flipped on read-back (a flash fault).
     bad_readback: bool,
+    /// The erase layout the store reports, and the planned erases it got.
+    layout: Option<EraseLayout>,
+    planned: Vec<EraseOp>,
 }
 
 impl Mem {
@@ -88,6 +92,8 @@ impl Mem {
             pending: None,
             confirms: 0,
             bad_readback: false,
+            layout: None,
+            planned: Vec::new(),
         }
     }
 }
@@ -109,6 +115,20 @@ impl SlotStore for Mem {
         self.headers[slot as usize] = [0xFF; HEADER_SIZE];
         self.status.slots[slot as usize].state = SlotState::Empty;
         Ok(())
+    }
+    fn erase_layout(&self) -> Option<EraseLayout> {
+        self.layout
+    }
+    fn erase_planned(
+        &mut self,
+        t: u8,
+        slot: u8,
+        len: u32,
+        plan: Plan<'_>,
+        tr: &Transition,
+    ) -> Result<(), StoreError> {
+        self.planned.extend(plan);
+        self.erase(t, slot, len, tr)
     }
     fn write(
         &mut self,
@@ -381,6 +401,52 @@ impl Node {
     fn store(&mut self) -> std::cell::RefMut<'static, Mem> {
         self.mem.borrow_mut()
     }
+}
+
+const REGIONS: [EraseRegion; 1] = [EraseRegion {
+    start: 0x1000_0000,
+    len: 0x1_0000,
+    unit: 0x400,
+    unit_max_ms: 50,
+}];
+const SLOT_B: [SlotLayout; 1] = [SlotLayout {
+    target: target::APP,
+    slot: 1,
+    start: 0x1000_8000,
+    capacity: CAP as u32,
+    header: HeaderPlace::Inline,
+}];
+
+/// A store with an erase layout gets exactly the plan a host waits for,
+/// and a slot its layout has no plan for is refused.
+#[test]
+fn a_store_with_an_erase_layout_erases_the_shared_plan() {
+    let layout: EraseLayout = EraseLayout {
+        regions: &REGIONS,
+        slots: &SLOT_B,
+    };
+    let mut mem = Mem::new();
+    mem.layout = Some(layout);
+    let mut n = Node::with(mem, Probe::default());
+    let body = body();
+    assert_eq!(n.transfer(1, &image(1, &body)), Status::Ok);
+    let want: Vec<EraseOp> = layout
+        .plan(target::APP, 1, 512, body.len() as u32)
+        .unwrap()
+        .collect();
+    // 512 + 1000 bytes: two 1 KiB units from the slot start.
+    assert_eq!(want.len(), 2);
+    assert_eq!(n.store().planned, want);
+    // Slot A has no layout: nothing is erased.
+    let mut mem = Mem::new();
+    b_on_trial(&mut mem);
+    mem.status.slots[0].state = SlotState::Written;
+    mem.status.confirmed = 1;
+    mem.layout = Some(layout);
+    let mut n = Node::with(mem, Probe::default());
+    assert_eq!(n.transfer(0, &image(0, &body)), Status::Unsupported);
+    let m = n.store();
+    assert_eq!((m.erases, m.planned.len()), (0, 0));
 }
 
 fn body() -> Vec<u8> {

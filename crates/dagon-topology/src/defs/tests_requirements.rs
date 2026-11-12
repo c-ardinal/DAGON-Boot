@@ -57,6 +57,11 @@ fn paths(texts: &[&str]) -> BTreeSet<String> {
     out
 }
 
+/// A board `[flash]` table with a checked and an unverified erase time.
+const FLASH: &str = "\n[flash]\npart = \"W25Q16JV\"\nerase_regions = [\n\
+    { start = 0x0010_0000, len = 0x8000, unit = 0x1000, unit_max_ms = 400 },\n\
+    { start = 0x0010_8000, len = 0x8000, unit = 0x1000, unit_max_ms = { unverified = 400 } },\n]\n";
+
 #[test]
 fn every_numeric_field_has_a_declared_requirement_and_back() {
     let (mcu, board) = requirements::declared_fields();
@@ -67,7 +72,8 @@ fn every_numeric_field_has_a_declared_requirement_and_back() {
     mcu_texts.extend([FAKE_MCU, uf2.as_str(), detached.as_str(), isolated.as_str()]);
     let board_fake = format!("id = \"x\"\n{FAKE_BOARD}");
     let boot_fake = boot_board();
-    board_texts.extend([board_fake.as_str(), boot_fake.as_str()]);
+    let flash_fake = format!("{board_fake}{FLASH}");
+    board_texts.extend([board_fake.as_str(), boot_fake.as_str(), flash_fake.as_str()]);
     for (texts, declared) in [(mcu_texts, mcu), (board_texts, board)] {
         let found = paths(&texts);
         let declared: BTreeSet<String> = declared

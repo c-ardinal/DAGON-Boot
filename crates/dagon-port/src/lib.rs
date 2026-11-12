@@ -19,6 +19,8 @@
 #![no_std]
 #![allow(async_fn_in_trait)]
 
+pub mod timeout;
+
 use dagon_proto::payload::{HelloReq, HelloResp};
 use dagon_proto::{split_status, Cmd, Frame, Status, PROTO_VERSION};
 

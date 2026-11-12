@@ -8,8 +8,14 @@
 
 use dagon_events::BoardBringUp;
 
-/// Board extras the link task drives. Every method has a default, so a
-/// plain board implements nothing: `impl BoardDef for MyBoard {}`.
+/// Board extras the link task drives. Every method but
+/// [`BoardDef::erase_regions`] has a default; that one returns the erase
+/// regions the board's build generated, so a board cannot leave them out:
+///
+/// ```compile_fail
+/// struct NoRegions;
+/// impl dagon_mcu_esp32s3::board::BoardDef for NoRegions {}
+/// ```
 pub trait BoardDef: Send {
     /// The board definition's id (`dagon-board.toml` `id`), for
     /// `app.bring_up`; `None` for a board without one (no bring-up runs).
@@ -36,10 +42,23 @@ pub trait BoardDef: Send {
     /// watchdogs are stopped; return if it did not take (the node then
     /// resets back into the app).
     fn pmic_download(&mut self) {}
+
+    /// The flash this board's nodes erase in: the erase regions its build
+    /// generated (`ERASE_REGIONS` rows in a board package's def.rs, or in a
+    /// node's wiring.rs), which are the board's `[flash] erase_regions`
+    /// when it carries its own flash part, else the MCU's. Required, so no
+    /// board leaves them out. The slot store plans every erase over these
+    /// and the MCU's slot layouts.
+    fn erase_regions(&self) -> &'static [dagon_port::timeout::EraseRegion];
 }
 
-/// A board with no extras: only the link UART and USB Serial/JTAG.
-#[derive(Clone, Copy, Debug, Default)]
-pub struct PlainBoard;
+/// A board with no extras: only the link UART and USB Serial/JTAG, and the
+/// erase regions the node's build generated (wiring.rs `ERASE_REGIONS`).
+#[derive(Clone, Copy, Debug)]
+pub struct PlainBoard(pub &'static [dagon_port::timeout::EraseRegion]);
 
-impl BoardDef for PlainBoard {}
+impl BoardDef for PlainBoard {
+    fn erase_regions(&self) -> &'static [dagon_port::timeout::EraseRegion] {
+        self.0
+    }
+}

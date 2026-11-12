@@ -138,12 +138,18 @@ pub fn trial_percent(xfer_ms: f64, on_trial_ms: f64, trial_ms: Option<u32>, floo
 #[allow(clippy::await_holding_refcell_ref)]
 #[wasm_bindgen]
 impl WasmHost {
-    /// Topology node `node`'s trial period: how much of its one progress number the trial weighs.
-    #[wasm_bindgen(js_name = setTrialMs)]
-    pub fn set_trial_ms(&self, node: u8, ms: u32) -> Result<(), JsValue> {
+    /// Each node of the topology `yaml` gets its own limits from its MCU's
+    /// definition in use (`dagon_host::node_timings`): the wait for the
+    /// request it erases on, and its trial, which also weighs in its one
+    /// progress number. Throws with the reason when the topology does not
+    /// parse or a definition breaks a timing rule.
+    #[wasm_bindgen(js_name = setTimings)]
+    pub fn set_timings(&self, yaml: &str) -> Result<(), JsValue> {
+        let topo = dagon_topology::parse_str(yaml).map_err(|e| JsError::new(&e.to_string()))?;
+        let timings = crate::defs::with_registry(|reg| dagon_host::node_timings(reg, &topo))
+            .map_err(|e| JsError::new(&e.to_string()))?;
         let mut h = self.host.try_borrow_mut().map_err(|_| busy())?;
-        h.trial_ms.retain(|(n, _)| *n != node);
-        h.trial_ms.push((node, ms));
+        h.timings = timings;
         Ok(())
     }
 

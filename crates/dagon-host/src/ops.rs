@@ -4,11 +4,13 @@
 use alloc::format;
 use alloc::vec;
 use alloc::vec::Vec;
-use dagon_conform::timeout::{erase_ms, REBOOT_WAIT_MS, REQUEST_MS, VERIFY_MS};
 use dagon_format::bundle::BundleView;
 use dagon_format::header::{image_kind, slot_binding, HEADER_SIZE};
 use dagon_format::topology::{self, TopologyView};
 use dagon_format::{sha256, ImageHeader, Version};
+use dagon_port::timeout::{
+    CONFIRM_RETRY_MS, ERASE_FALLBACK_MS, REBOOT_WAIT_MS, REQUEST_MS, VERIFY_MS,
+};
 use dagon_proto::payload::{
     self, phase, reboot_mode, target, HelloResp, SetPending, Show, SlotState, StatusResp,
     VersionResp, XferBegin, XferChunk,
@@ -22,44 +24,6 @@ use crate::{Error, Host, HostClock, Result, Target, Transport};
 /// well inside the 60 s the hub keeps its trial watchdog fed, so CONFIRM
 /// always lands in time.
 pub const HUB_RECONNECT_MS: u32 = 45_000;
-/// Nodes (F401, watch) do not feed their watchdog on trial: an image gets
-/// about [`NODE_TRIAL_MS`] per boot attempt before it is reset. The new
-/// version's HELLO is polled this often so CONFIRM lands well inside one
-/// attempt (one poll costs at most two [`REQUEST_MS`] round trips).
-pub const NODE_POLL_MS: u32 = 300;
-/// Trial watchdog of a node's boot attempt: the shortest of the builtin MCU
-/// definitions' `[watchdog] trial_ms` (CONFIRM must land inside it).
-pub const NODE_TRIAL_MS: u32 = 4_000;
-/// The longest of them (a node's full local rollback takes up to its
-/// attempts of it). A test keeps both equal to the definitions.
-pub const NODE_TRIAL_MAX_MS: u32 = 8_000;
-/// Boot attempts before a node rolls back (F401; the watch tries once).
-pub const NODE_MAX_ATTEMPTS: u32 = 3;
-const _: () = {
-    // Poll pause plus a missed poll (RELAY wait + node wait) fits a trial.
-    assert!(NODE_POLL_MS + 2 * REQUEST_MS < NODE_TRIAL_MS);
-    // Waiting for the new HELLO covers a node's full local rollback
-    // (its attempts of the longest trial period plus start-up), so silence there is not
-    // taken for a lost node.
-    assert!(REBOOT_WAIT_MS >= NODE_MAX_ATTEMPTS * (NODE_TRIAL_MAX_MS + 1_000) + 2_000);
-};
-/// Pauses before CONFIRM is sent again after E_STATE: the image runs but its
-/// self-check does not pass yet (its tasks are still starting, e.g. the
-/// watch sample's first heartbeat behind the display start-up). Together
-/// (2.1 s) they stay inside one boot attempt ([`NODE_TRIAL_MS`]), part of
-/// which the reboot and the HELLO poll have already used; an image whose
-/// self-check never passes is still reset by its trial watchdog and rolls
-/// back. A target that confirms at once never waits.
-pub const CONFIRM_RETRY_MS: [u32; 5] = [100, 200, 400, 600, 800];
-const _: () = {
-    let mut total = 0;
-    let mut i = 0;
-    while i < CONFIRM_RETRY_MS.len() {
-        total += CONFIRM_RETRY_MS[i];
-        i += 1;
-    }
-    assert!(total + NODE_POLL_MS + 2 * REQUEST_MS < NODE_TRIAL_MS);
-};
 /// Pause between reopen attempts while the hub is away.
 pub const REOPEN_MS: u32 = 1_000;
 /// RELAY timeout per address while discovering.
@@ -209,7 +173,10 @@ impl<T: Transport, C: HostClock> Host<T, C> {
 
     /// Sends the topology canonical binary to the hub's display copy.
     pub async fn push_topology(&mut self, bin: &[u8]) -> Result<(), T::Error> {
-        TopologyView::parse(bin)?;
+        let topo = TopologyView::parse(bin)?;
+        let coordinator = (0..topo.node_count())
+            .find(|&i| topo.node(i).role == topology::role::COORDINATOR)
+            .and_then(|i| u8::try_from(i).ok());
         let hub = self.hello(Target::Hub).await?;
         let mut quiet = |_: Event| {};
         let xfer = Xfer {
@@ -218,6 +185,7 @@ impl<T: Transport, C: HostClock> Host<T, C> {
             hdr: &[],
             body: bin,
             show: None,
+            node: coordinator,
         };
         self.transfer(Target::Hub, &hub, xfer, &mut quiet)
             .await
@@ -381,6 +349,7 @@ impl<T: Transport, C: HostClock> Host<T, C> {
             hdr,
             body,
             show: Some((node, v)),
+            node: None,
         };
         let times = self.transfer(to, &st.hello, xfer, on_event).await?;
         let after = self.status(to).await?;
@@ -443,6 +412,7 @@ impl<T: Transport, C: HostClock> Host<T, C> {
             hdr,
             body,
             show: Some((node, v)),
+            node: None,
         };
         let times = match self.transfer(to, &hello, xfer, on_event).await {
             Err(Error::Rejected {
@@ -529,6 +499,7 @@ impl<T: Transport, C: HostClock> Host<T, C> {
             hdr,
             body,
             show: Some((node, v)),
+            node: None,
         };
         let times = self.transfer(to, &st.hello, xfer, on_event).await?;
         self.emit_verified(on_event, node, v, times).await;
@@ -788,8 +759,12 @@ impl<T: Transport, C: HostClock> Host<T, C> {
             hdr,
             body,
             show,
+            node,
         } = x;
-        let erase = erase_ms(hello.mcu_id);
+        let erase = match show.map(|(n, _)| n).or(node) {
+            Some(n) => self.erase_wait_ms(n, tgt, slot, hdr.len() as u32, body.len() as u32),
+            None => ERASE_FALLBACK_MS,
+        };
         let begin = XferBegin {
             target: tgt,
             slot,
@@ -935,11 +910,8 @@ impl<T: Transport, C: HostClock> Host<T, C> {
 
     /// The node's one number for this report, and the moment it was reckoned.
     fn shown_of(&mut self, node: u8, ph: u8, percent: u8) -> (u8, u64) {
-        let trial = self
-            .trial_ms
-            .iter()
-            .find(|(n, _)| *n == node)
-            .map(|(_, ms)| *ms);
+        // A node without an entry is counted with the fallback's trial.
+        let trial = Some(self.timings_of(node).trial_ms);
         let now = self.clock.now_ms();
         let shown = self
             .write
@@ -1131,6 +1103,8 @@ struct Xfer<'a> {
     body: &'a [u8],
     /// Node index and version for progress events.
     show: Option<(u8, Version)>,
+    /// The target's topology index when `show` names none (its timings).
+    node: Option<u8>,
 }
 
 /// Nodes with an APP or boot core image in the release, filtered by

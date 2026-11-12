@@ -2,7 +2,7 @@
 //! the slot start, boot target switches and confirms appended to the state
 //! log (one log holds the APP and the boot core records).
 
-use dagon_agent::{SlotStore, StoreError, Transition};
+use dagon_agent::{erase_plan, SlotStore, StoreError, Transition};
 use dagon_core::boot::SlotLayout;
 use dagon_core::log::{trial_room, Log, LogError, LogLayout, LogState, SlotRef};
 use dagon_format::header::{header_digest16, ImageHeader, HEADER_SIZE};
@@ -11,6 +11,7 @@ use dagon_format::{stage0, Version};
 
 use crate::layout::{STAGE0, STAGE0_SIZE};
 
+use dagon_port::timeout::{EraseLayout, EraseRegion, Plan};
 use dagon_port::{Flash, FlashError};
 use dagon_proto::payload::{target, StatusResp};
 
@@ -39,12 +40,20 @@ pub struct KindSStore<F> {
     /// The trial cell holds what is written to it; without it no boot core
     /// is taken (stage0 could not count its starts).
     cell_holds: bool,
+    /// The erase regions the board returns (`BoardDef::ERASE_REGIONS`).
+    regions: &'static [EraseRegion],
     tail: Tail,
 }
 
 impl<F: Flash> KindSStore<F> {
-    /// Loads the state log; fails when no log face is valid.
-    pub fn load(mut flash: F, log: &LogLayout, slots: SlotLayout) -> Result<Self, LogError> {
+    /// Loads the state log; fails when no log face is valid. `regions`:
+    /// what the board erases in (`BoardDef::ERASE_REGIONS`).
+    pub fn load(
+        mut flash: F,
+        log: &LogLayout,
+        slots: SlotLayout,
+        regions: &'static [EraseRegion],
+    ) -> Result<Self, LogError> {
         let log = Log::load(&mut flash, log)?;
         Ok(KindSStore {
             flash,
@@ -52,6 +61,7 @@ impl<F: Flash> KindSStore<F> {
             slots,
             cores: None,
             cell_holds: false,
+            regions,
             tail: Tail::default(),
         })
     }
@@ -140,15 +150,6 @@ impl<F: Flash> KindSStore<F> {
         };
         r.map_err(|_| StoreError::Flash)
     }
-
-    fn erase_size(&self, addr: u32) -> Result<u32, StoreError> {
-        self.flash
-            .geometry()
-            .iter()
-            .find(|r| addr >= r.start && addr - r.start < r.len)
-            .map(|r| r.erase_size)
-            .ok_or(StoreError::Range)
-    }
 }
 
 fn flash_err(_: FlashError) -> StoreError {
@@ -171,14 +172,36 @@ impl<F: Flash> SlotStore for KindSStore<F> {
         self.slot(t, s).map_or(0, |(_, size)| size - HDR)
     }
 
-    /// Erases from the slot start (header included) through the erase unit
-    /// holding the last body byte.
-    fn erase(&mut self, t: u8, s: u8, len: u32, _: &Transition) -> Result<(), StoreError> {
+    /// The definition's plan ([`SlotStore::erase_planned`]).
+    fn erase(&mut self, t: u8, s: u8, len: u32, tr: &Transition) -> Result<(), StoreError> {
+        let layout = self.erase_layout().ok_or(StoreError::Unsupported)?;
+        let plan = erase_plan(&layout, t, s, len)?;
+        self.erase_planned(t, s, len, plan, tr)
+    }
+
+    /// The board's erase regions and the MCU's slot layouts.
+    fn erase_layout(&self) -> Option<EraseLayout> {
+        Some(EraseLayout {
+            regions: self.regions,
+            slots: &crate::SLOT_LAYOUTS,
+        })
+    }
+
+    /// Erases the planned sectors (from the slot start, header included,
+    /// through the sector holding the last body byte), one flash operation
+    /// each.
+    fn erase_planned(
+        &mut self,
+        t: u8,
+        s: u8,
+        len: u32,
+        plan: Plan<'_>,
+        _: &Transition,
+    ) -> Result<(), StoreError> {
         self.body(t, s, 0, len as usize)?;
-        let (base, _) = self.slot(t, s)?;
-        let unit = self.erase_size(base)?;
-        let span = (HDR + len).div_ceil(unit) * unit;
-        self.flash.erase(base, span).map_err(flash_err)?;
+        for op in plan {
+            self.flash.erase(op.addr, op.len).map_err(flash_err)?;
+        }
         self.tail = Tail {
             end: len,
             ..Tail::default()

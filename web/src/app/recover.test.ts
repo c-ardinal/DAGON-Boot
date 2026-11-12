@@ -4,7 +4,7 @@ import type { LinkClock } from '../serial/hostLink.ts';
 import { MockTransport, type MockOptions } from '../serial/mock.ts';
 import { simulator } from '../serial/simHub.ts';
 import type { Transport } from '../serial/transport.ts';
-import { PHASE, versionText } from '../wasm/dagon.ts';
+import { PHASE, trialMs, versionText } from '../wasm/dagon.ts';
 import { bandOf } from './band.ts';
 import { ANNOUNCE, BAND, BAND_FOR, BUTTON_FOR, NODE, WRITE } from './copy.ts';
 import { SAMPLE_CONFIG } from './sample.ts';
@@ -182,7 +182,8 @@ describe('recovery from the page with dagon-host recover', () => {
   test('the one % never moves back across a boot loader and its app, and stays the number the node is told', async () => {
     const sim = simulator(13)!;
     const op = session(sim.transport, sim.clock);
-    op['deps'].trialMs = () => 4000;
+    // seg's trial from its MCU's definition, as dagon-host takes it.
+    op['deps'].trialMs = () => trialMs('stm32f401re');
     await op.connect();
     await op.push();
     op.toggleSkip('hub');

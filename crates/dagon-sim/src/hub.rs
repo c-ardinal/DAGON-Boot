@@ -18,7 +18,7 @@ use dagon_proto::{find_sof, flags, frame_len, max_payload, Cmd, Frame, FrameErro
 /// Cost of one PC <-> hub request on the simulated clock.
 pub const PC_ROUND_TRIP_MS: u64 = 2;
 /// Mailbox poll interval on I2C.
-pub const POLL_MS: u64 = 2;
+pub const MAILBOX_POLL_MS: u64 = 2;
 /// Low time of SUBCTL `nrst = PULSE`.
 pub const NRST_PULSE_MS: u64 = 10;
 
@@ -123,17 +123,17 @@ impl SimBus {
     }
 
     /// RELAY over I2C: write the request (retrying NACK), poll the 3-byte
-    /// state every [`POLL_MS`], read the response.
+    /// state every [`MAILBOX_POLL_MS`], read the response.
     pub fn i2c_exchange(&mut self, addr: u8, frame: &[u8], timeout_ms: u64) -> Option<Vec<u8>> {
         let deadline = self.now_ms + timeout_ms;
         while self.i2c_write(addr, frame).is_err() {
             if self.now_ms >= deadline {
                 return None;
             }
-            self.advance_ms(POLL_MS);
+            self.advance_ms(MAILBOX_POLL_MS);
         }
         loop {
-            self.advance_ms(POLL_MS);
+            self.advance_ms(MAILBOX_POLL_MS);
             let mut st = [0u8; STATE_LEN];
             let state = self
                 .i2c_read(addr, &mut st)

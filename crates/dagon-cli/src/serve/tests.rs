@@ -144,7 +144,7 @@ fn definitions_are_served_behind_the_same_guards_with_the_projects_boards() {
     std::fs::write(
         a.dir.join("dagon.toml"),
         format!(
-            "{toml}\n[board.my-pico]\nproduct = \"My Pico\"\nmcu = \"rp2040\"\n\
+            "{toml}\n[board.my-pico]\nformat = 2\nproduct = \"My Pico\"\nmcu = \"rp2040\"\n\
              flash_bytes = 0x40_0000\ndrawing = \"pico\"\n\
              default_link = {{ kind = \"i2c\", addr = 0x44, control = \"full\" }}\n"
         ),
@@ -610,11 +610,11 @@ fn a_projects_own_words_reach_the_page_only_as_plain_names() {
     std::fs::write(
         a.dir.join("dagon.toml"),
         format!(
-            "{toml}\n[board.my-pico]\nproduct = \"{secret}\"\nmcu = \"rp2040\"\n\
+            "{toml}\n[board.my-pico]\nformat = 2\nproduct = \"{secret}\"\nmcu = \"rp2040\"\n\
              flash_bytes = 0x40_0000\ndrawing = \"pico\"\n\
              header = [{{ pin = \"GPIO4\", label = \"{secret}\" }}]\n\
              default_link = {{ kind = \"i2c\", addr = 0x44, control = \"full\" }}\n\
-             [board.my-two]\nproduct = \"My Two\"\nmcu = \"rp2040\"\n\
+             [board.my-two]\nformat = 2\nproduct = \"My Two\"\nmcu = \"rp2040\"\n\
              flash_bytes = 0x40_0000\ndrawing = \"pico\"\n\
              default_link = {{ kind = \"i2c\", addr = 0x45, control = \"full\" }}\n"
         ),

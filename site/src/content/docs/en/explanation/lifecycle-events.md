@@ -1315,8 +1315,8 @@ The one authentication rule, applied by every verifier in the chain
   and the app's agent restores it at start (`SlotStore::keep_room`)
   after a power cut tore a record. Erases run only in the app, under a
   watchdog period the definition check proves long enough: both
-  `[watchdog]` periods are at least twice `[execution]
-  erase_unit_max_ms`.
+  `[watchdog]` periods are at least twice each `[execution]
+  erase_regions` entry's `unit_max_ms`.
 - **Trial cell.** A node whose trial cell does not hold what is written
   to it (`bootcore::cell_holds`, checked by the app's store and by the
   boot loader) takes no boot loader (XFER refused as unsupported), and a
@@ -2105,14 +2105,18 @@ below keep code and data to it.
      the flash driver masks interrupts for that one operation (handlers
      outside internal RAM cannot run).
 
-   Either way DAGON issues at most one erase unit (`[execution]
-   erase_unit`) per operation, and the time it may take is the
-   datasheet maximum `erase_unit_max_ms`.
-4. **The watchdog outlasts one erase.** `erase_unit_max_ms` is below
-   `[watchdog] confirmed_ms` (checked when a definition is loaded); every
-   request starts with a gated feed through the serving loop's `ServeHost::feed`
-   (the RP2040 relay's PC loop through the guard's `progress`). A longer erase is split into
-   erase units with a gated feed between them. A pending image's trial
+   Either way DAGON issues one erase unit of the region it erases in
+   (`[execution] erase_regions`) per operation, and the time it may take
+   is that region's datasheet maximum `unit_max_ms`. The agent plans every
+   erase from the definition's regions and `[[slot_layout]]`, and the
+   slot store performs exactly the planned operations; the host waits for
+   the same plan ([erase and trial waits](/en/reference/definitions/#erase-and-trial-waits)).
+4. **The watchdog outlasts one erase.** Twice each region's `unit_max_ms`
+   is at most `[watchdog] trial_ms` and `confirmed_ms` (checked when a
+   definition is loaded); every request starts with a gated feed through
+   the serving loop's `ServeHost::feed` (the RP2040 relay's PC loop through
+   the guard's `progress`). An erase of several units feeds, or reports
+   progress, between them. A pending image's trial
    is a window of its own: the guard's trial policy decides whether
    anything is fed while it lasts (`app.watchdog_taken` reports it).
 5. **Links during a stall.** A request is handled with the link closed
@@ -2138,7 +2142,7 @@ below keep code and data to it.
 The tables are what the MCU definitions do; the budgets are each MCU
 definition's.
 
-**STM32F401RE** (`flash_op = "fetch-stall"`, `erase_unit` one sector)
+**STM32F401RE** (`flash_op = "fetch-stall"`, erase unit one sector: 16, 64 or 128 KiB by region)
 
 | Work | Runs in | Priority |
 |---|---|---|
@@ -2154,7 +2158,7 @@ I2C address is NACKed for the whole request, so the parent's polls are
 NACKed by the peripheral without the CPU, and the parent retries until
 its own deadline.
 
-**RP2040** (`flash_op = "xip-off-masked"`, `erase_unit` one sector)
+**RP2040** (`flash_op = "xip-off-masked"`, erase unit one 4 KiB sector unless the board's `[flash]` says otherwise)
 
 | Work | Runs in | Priority |
 |---|---|---|
@@ -2168,7 +2172,7 @@ guard between sectors. The USB controller NAKs the host meanwhile and
 the host retries. The topology copy is read through the same flash
 driver it is written with.
 
-**ESP32-S3** (`flash_op = "cache-off-masked"`, `erase_unit` one block)
+**ESP32-S3** (`flash_op = "cache-off-masked"`, erase unit one 4 KiB sector unless the board's `[flash]` says otherwise)
 
 | Work | Runs in | Priority |
 |---|---|---|
@@ -2176,7 +2180,7 @@ driver it is written with.
 | Watchdog feeding (once confirmed, gated by liveness) | the link task | Priority2 |
 | The app's tasks | thread mode | lowest |
 
-Each flash operation masks interrupts for one block erase; the slot store feeds the watchdog between blocks. The UART receive
+Each flash operation masks interrupts for one erase unit; the slot store feeds the watchdog between units. The UART receive
 FIFO keeps what fits; a frame cut by the stall is dropped by the 20 ms
 gap rule and the requester retries. USB Serial/JTAG NAKs the host
 meanwhile.

@@ -148,7 +148,7 @@ fn registry(mcu: &str, files: &[(&str, &str)], board: &str) -> Registry {
 
 fn board_for(mcu: &str, id: &str, windows: &[(&str, &str)]) -> String {
     let mut b = format!(
-        "id = {id:?}\nproduct = \"Test\"\nmcu = {mcu:?}\nflash_bytes = 0x100_0000\ndrawing = \"pico\"\n\n\
+        "id = {id:?}\nformat = 2\nproduct = \"Test\"\nmcu = {mcu:?}\nflash_bytes = 0x100_0000\ndrawing = \"pico\"\n\n\
          [[pin]]\npin = \"GPIO2\"\n\n[[pin]]\npin = \"GPIO5\"\nboot = true\n"
     );
     for (board_id, mcu_id) in windows {
@@ -361,7 +361,8 @@ fn synthetic(kind: &str, regions: u32, min: u32, windows: u32, extra: &str) -> S
         ),
     };
     let mut t = format!(
-        r#"id = "synth"
+        r#"format = 2
+id = "synth"
 name = "SYNTH"
 wire_id = 0x7F02
 port = "self-boot"

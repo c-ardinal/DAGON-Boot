@@ -16,10 +16,11 @@
 //! | CT-18 | HELLO + STATUS after CT-11 and after CT-12 | every field matches the state those tests produced |
 
 use crate::report::{CtResult, Report, Verdict};
-use crate::{ct_info, detail, timeout, CtInfo, Detail, CTS};
+use crate::{ct_info, detail, CtInfo, Detail, CTS};
 use dagon_format::header::{self, ImageHeader, HEADER_SIZE, SIGNED_LEN};
 use dagon_format::statelog::reason;
 use dagon_format::{sha256, Version};
+use dagon_port::timeout::{self, EraseLayout, EraseRegion, NodeTimings, SlotLayout};
 use dagon_port::LinkKind;
 use dagon_proto::payload::{
     self, reboot_mode, role, target, ConfRunReq, ConfRunResp, HelloReq, HelloResp, SetPending,
@@ -166,6 +167,7 @@ pub struct Runner<'a, 's, C: Channel> {
     ch: C,
     link: LinkKind,
     limits: timeout::LinkLimits,
+    timings: Timings<'a>,
     good: [Img<'a>; 2],
     no_confirm: [Img<'a>; 2],
     sign: Signer<'s>,
@@ -176,13 +178,19 @@ pub struct Runner<'a, 's, C: Channel> {
 
 type Step<T> = Result<T, Detail>;
 
+/// The node's own limits, borrowed for the run.
+pub type Timings<'a> = NodeTimings<EraseLayout<&'a [EraseRegion], &'a [SlotLayout]>>;
+
 impl<'a, 's, C: Channel> Runner<'a, 's, C> {
-    /// Checks the link kind and the images, and greets the node.
+    /// Checks the link kind and the images, and greets the node. `timings`
+    /// are the node's own limits (its MCU definition's, or
+    /// [`NodeTimings::FALLBACK`]).
     pub fn new(
         mut ch: C,
         link: LinkKind,
         images: Images<'a>,
         sign: Signer<'s>,
+        timings: Timings<'a>,
     ) -> Result<Self, SetupError> {
         let limits = timeout::link_limits(link).ok_or(SetupError::UnsupportedLink(link))?;
         let img = |i: usize, raw| Img::new(raw, (i % 2) as u8).ok_or(SetupError::BadImage(i));
@@ -199,6 +207,7 @@ impl<'a, 's, C: Channel> Runner<'a, 's, C> {
             ch,
             link,
             limits,
+            timings,
             good,
             no_confirm,
             sign,
@@ -376,13 +385,21 @@ impl<'a, 's, C: Channel> Runner<'a, 's, C> {
         Ok(Status::Ok)
     }
 
+    /// Limit for the last XFER_HDR of a `body`-byte image to APP `slot`
+    /// (the node erases before it answers).
+    fn erase_wait_ms(&self, slot: u8, body: usize) -> u32 {
+        let body = u32::try_from(body).unwrap_or(u32::MAX);
+        self.timings
+            .erase_limit_ms(target::APP, slot, IMAGE_HDR_LEN.into(), body)
+    }
+
     /// Full transfer of `raw` to `slot`; returns the elapsed ms.
     fn transfer(&mut self, slot: u8, raw: &[u8]) -> Step<u32> {
         let t0 = self.ch.now_ms();
         let (hdr, body) = raw.split_at(HEADER_SIZE);
         let s = self.begin(slot, raw.len() as u32)?.status;
         expect_ok(Cmd::XferBegin, s)?;
-        let erase = timeout::erase_ms(self.hello.mcu_id);
+        let erase = self.erase_wait_ms(slot, body.len());
         let s = self.chunks(Cmd::XferHdr, hdr, erase)?;
         expect_ok(Cmd::XferHdr, s)?;
         let s = self.chunks(Cmd::XferData, body, timeout::REQUEST_MS)?;
@@ -472,7 +489,7 @@ impl<'a, 's, C: Channel> Runner<'a, 's, C> {
             h[SIGNED_LEN..].copy_from_slice(&sig);
             let s = self.begin(idle, img.raw.len() as u32)?.status;
             expect_ok(Cmd::XferBegin, s)?;
-            let erase = timeout::erase_ms(self.hello.mcu_id);
+            let erase = self.erase_wait_ms(idle, img.raw.len() - HEADER_SIZE);
             let s = self.chunks(Cmd::XferHdr, &h, erase)?;
             if s != Status::Compat {
                 return Err(detail!("wrong {}: {:?}, want Compat", field, s));

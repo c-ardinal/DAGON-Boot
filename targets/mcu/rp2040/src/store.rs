@@ -3,18 +3,16 @@
 //! copy, behind dagon-agent's `SlotStore`.
 
 use crate::image;
-use crate::layout::{
-    body_capacity, sectors, APP_LOG_LAYOUT, APP_SLOT, APP_SLOT_SIZE, BL_LOG_LAYOUT, BL_SLOT,
-    BL_SLOT_SIZE, HEADER_LEN, SECTOR, STAGE0, STAGE0_SIZE, TOPOLOGY, TOPOLOGY_SIZE,
-};
+use crate::layout::{APP_LOG_LAYOUT, APP_SLOT, BL_LOG_LAYOUT, BL_SLOT, STAGE0, STAGE0_SIZE};
 use crate::node::SharedFlash;
 use crate::watchdog::Watch;
 use crate::TRIAL_ATTEMPTS;
-use dagon_agent::{SlotStore, StoreError, Transition};
+use dagon_agent::{erase_plan, SlotStore, StoreError, Transition};
 use dagon_core::log::{trial_room, Log};
 use dagon_format::header::HEADER_SIZE;
 use dagon_format::statelog::{kind, slot};
 use dagon_format::{stage0, Version};
+use dagon_port::timeout::{EraseLayout, EraseRegion, Plan};
 use dagon_port::Flash;
 use dagon_proto::payload::{target, StatusResp};
 
@@ -28,22 +26,13 @@ pub struct AppStore {
     pub(crate) flash: SharedFlash,
     pub(crate) watch: &'static dyn Watch,
     pub(crate) task: usize,
+    /// The erase regions the board returns (`BoardDef::ERASE_REGIONS`).
+    pub(crate) regions: &'static [EraseRegion],
 }
 
 /// Where a target's region starts, where its body starts, body capacity.
 fn region(t: u8, slot: u8) -> Result<(u32, u32, u32), StoreError> {
-    match (t, slot) {
-        (target::APP, 0 | 1) => {
-            let base = APP_SLOT[slot as usize];
-            Ok((base, base + HEADER_LEN, body_capacity(APP_SLOT_SIZE)))
-        }
-        (target::BOOTCORE, 0 | 1) => {
-            let base = BL_SLOT[slot as usize];
-            Ok((base, base + HEADER_LEN, body_capacity(BL_SLOT_SIZE)))
-        }
-        (target::TOPOLOGY, 0) => Ok((TOPOLOGY, TOPOLOGY, TOPOLOGY_SIZE)),
-        _ => Err(StoreError::Unsupported),
-    }
+    crate::regions::region(t, slot).ok_or(StoreError::Unsupported)
 }
 
 fn body_at(t: u8, slot: u8, offset: u32, len: usize) -> Result<u32, StoreError> {
@@ -90,19 +79,41 @@ impl SlotStore for AppStore {
         region(t, slot).map_or(0, |(_, _, cap)| cap)
     }
 
-    fn erase(&mut self, t: u8, slot: u8, len: u32, _: &Transition) -> Result<(), StoreError> {
-        let (base, body, cap) = region(t, slot)?;
+    /// The definition's plan ([`SlotStore::erase_planned`]).
+    fn erase(&mut self, t: u8, slot: u8, len: u32, tr: &Transition) -> Result<(), StoreError> {
+        let layout = self.erase_layout().ok_or(StoreError::Unsupported)?;
+        let plan = erase_plan(&layout, t, slot, len)?;
+        self.erase_planned(t, slot, len, plan, tr)
+    }
+
+    /// The board's erase regions and the MCU's slot layouts.
+    fn erase_layout(&self) -> Option<EraseLayout> {
+        Some(EraseLayout {
+            regions: self.regions,
+            slots: &crate::SLOT_LAYOUTS,
+        })
+    }
+
+    /// Erases the planned sectors (from the region start, header included,
+    /// through the sector holding the last body byte).
+    fn erase_planned(
+        &mut self,
+        t: u8,
+        slot: u8,
+        len: u32,
+        plan: Plan<'_>,
+        _: &Transition,
+    ) -> Result<(), StoreError> {
+        let (_, _, cap) = region(t, slot)?;
         if len > cap {
             return Err(StoreError::Range);
         }
-        let end = base + sectors(body - base + len);
-        // Sector by sector so interrupts run and the watchdog is fed between.
-        let mut at = base;
-        while at < end {
-            self.flash.erase(at, SECTOR).map_err(flash_err)?;
+        // One operation at a time so interrupts run and the watchdog is
+        // fed between.
+        for op in plan {
+            self.flash.erase(op.addr, op.len).map_err(flash_err)?;
             // Lease renewal of the serving task, then a gated feed.
             self.watch.progress(self.task);
-            at += SECTOR;
         }
         Ok(())
     }

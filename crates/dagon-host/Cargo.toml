@@ -5,12 +5,12 @@ license.workspace = true
 version = "0.1.0"
 
 [dependencies]
-dagon-conform = { path = "../dagon-conform" }
 dagon-format = { path = "../dagon-format" }
 dagon-port = { path = "../dagon-port" }
 dagon-proto = { path = "../dagon-proto" }
 dagon-romlink = { path = "../dagon-romlink" }
-# `defs`: ROM maps from the MCU definitions (std callers: CLI, browser).
+# `defs`: ROM maps and node timings from the MCU definitions (std callers:
+# CLI, browser).
 dagon-topology = { path = "../dagon-topology", optional = true }
 
 [features]

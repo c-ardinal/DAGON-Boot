@@ -813,12 +813,9 @@ export class Operate {
     }
   }
 
-  /** Tells dagon-host each node's trial period, for the node's one %. */
+  /** Tells dagon-host each node's own limits from its MCU definition (erase wait, trial for the node's one %). */
   private tellTrials(h: Host): void {
-    this.reach.forEach((n, i) => {
-      const ms = this.deps.trialMs?.(n.id) ?? null;
-      if (ms !== null) h.setTrialMs(i, ms);
-    });
+    if (this.config) h.setTimings(this.config.yaml);
   }
 
   /** The hub reboots onto `version`: dagon-host reopens it for 45 s (hubRestarting), keeping only that hub. */

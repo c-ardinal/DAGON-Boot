@@ -731,7 +731,7 @@ mod tests {
         let project = dir.join("dagon.toml");
         std::fs::write(
             &project,
-            "[board.mine]\nformat = 2\nproduct = \"Mine\"\nmcu = \"rp2040\"\nflash_bytes = 0x40_0000\n\
+            "format = 1\n[board.mine]\nformat = 2\nproduct = \"Mine\"\nmcu = \"rp2040\"\nflash_bytes = 0x40_0000\n\
              drawing = \"x\"\n[board.mine.boot]\nled = \"GPIO2\"\n[[board.mine.pin]]\npin = \"GPIO2\"\n",
         )
         .unwrap();

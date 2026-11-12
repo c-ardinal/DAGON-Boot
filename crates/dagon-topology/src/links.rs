@@ -16,13 +16,8 @@ pub enum Dir {
     Down,
 }
 
-/// Link kinds `mcu`'s firmware implements in direction `dir` (builtin
-/// definitions); empty for an MCU it does not know.
-pub fn available(mcu: &str, dir: Dir) -> &'static [LinkKind] {
-    available_in(Registry::builtin(), mcu, dir)
-}
-
-/// [`available`] from the definitions of `reg`.
+/// Link kinds `mcu`'s firmware implements in direction `dir`, from the
+/// definitions of `reg`; empty for an MCU it does not know.
 pub fn available_in<'r>(reg: &'r Registry, mcu: &str, dir: Dir) -> &'r [LinkKind] {
     reg.mcu(mcu).map_or(&[], |m| match dir {
         Dir::Up => &m.links.up,
@@ -38,12 +33,8 @@ pub fn runs_in(reg: &Registry, mcu: &str, kind: LinkKind) -> bool {
         .any(|d| available_in(reg, mcu, d).contains(&kind))
 }
 
-/// Whether `mcu` knows of any link at all (else other rules report it).
-pub fn known(mcu: &str) -> bool {
-    known_in(Registry::builtin(), mcu)
-}
-
-/// [`known`] from the definitions of `reg`.
+/// Whether `mcu` knows of any link at all in `reg` (else other rules
+/// report it).
 pub fn known_in(reg: &Registry, mcu: &str) -> bool {
     !available_in(reg, mcu, Dir::Up).is_empty() || !available_in(reg, mcu, Dir::Down).is_empty()
 }
@@ -51,6 +42,14 @@ pub fn known_in(reg: &Registry, mcu: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn available(mcu: &str, dir: Dir) -> &'static [LinkKind] {
+        available_in(Registry::builtin(), mcu, dir)
+    }
+
+    fn known(mcu: &str) -> bool {
+        known_in(Registry::builtin(), mcu)
+    }
 
     #[test]
     fn the_sample_hops_are_available_and_radios_are_not() {

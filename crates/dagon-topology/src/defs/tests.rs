@@ -365,8 +365,17 @@ fn scratch(name: &str) -> PathBuf {
     d
 }
 
+/// Writes `text` at `path`; a dagon.toml gets the project format line on top.
 fn write(path: &Path, text: &str) {
     std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+    let text = if path.ends_with("dagon.toml") {
+        format!(
+            "format = 1
+{text}"
+        )
+    } else {
+        text.to_string()
+    };
     std::fs::write(path, text).unwrap();
 }
 
@@ -451,7 +460,7 @@ fn checks_and_compile_follow_a_project_registry() {
     let bin = crate::compile_with(&reg, &t).unwrap();
     assert!(!bin.is_empty());
     // The builtin set does not know the fake MCU.
-    assert!(rules(&crate::check(&t)).contains(&"V-06"));
+    assert!(rules(&crate::check_with(Registry::builtin(), &t)).contains(&"V-06"));
     assert!(crate::compile(&t).is_err());
     // Its ROM loader's address is reserved on the bus (from the definition).
     assert_eq!(
@@ -1275,7 +1284,7 @@ fn a_board_added_in_an_earlier_folder_changes_no_default_and_no_check() {
         .collect();
     assert_eq!(
         crate::check_str_with(&tree, &sample).to_json(),
-        crate::check_str(&sample).to_json()
+        crate::check_str_with(Registry::builtin(), &sample).to_json()
     );
     // Two defaults do not load.
     let marked = nucleo.replace(

@@ -28,13 +28,8 @@ use crate::defs::MAX_BAUD_ERROR;
 const I2C_ADDR_MIN: u8 = 0x08;
 const I2C_ADDR_MAX: u8 = 0x77;
 
-/// Parse YAML and run every rule. A document that does not parse yields a
-/// single V-01 error.
-pub fn check_str(yaml: &str) -> Report {
-    check_str_with(Registry::builtin(), yaml)
-}
-
-/// [`check_str`] against the MCUs and boards of `reg`.
+/// Parse YAML and run every rule against the MCUs and boards of `reg`. A
+/// document that does not parse yields a single V-01 error.
 pub fn check_str_with(reg: &Registry, yaml: &str) -> Report {
     match yaml_serde::from_str::<Topology>(yaml) {
         Ok(t) => check_with(reg, &t),
@@ -47,11 +42,6 @@ pub fn check_str_with(reg: &Registry, yaml: &str) -> Report {
             }],
         },
     }
-}
-
-/// Every rule against the builtin MCU and board definitions.
-pub fn check(t: &Topology) -> Report {
-    check_with(Registry::builtin(), t)
 }
 
 /// Every rule against the MCUs and boards of `reg`.

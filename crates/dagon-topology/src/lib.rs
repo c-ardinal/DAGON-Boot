@@ -6,6 +6,7 @@ mod check;
 mod compile;
 pub mod defs;
 pub mod links;
+pub mod project;
 mod reach;
 mod report;
 pub mod schema;
@@ -13,8 +14,8 @@ pub mod schema;
 pub use reach::{cut_with, updatable, Cut, Skip};
 
 pub use check::{
-    check, check_str, check_str_with, check_with, default_port, effective_tiers, pin_fault,
-    rom_forced_unavailable, uart0_choices, SCHEMA_VERSION,
+    check_str_with, check_with, default_port, effective_tiers, pin_fault, rom_forced_unavailable,
+    uart0_choices, SCHEMA_VERSION,
 };
 pub use compile::{
     compile, compile_str, compile_with, mcu_id_of, parse_str, parse_version, port_kind_of,

@@ -99,7 +99,9 @@ transfer: the bytes it covers (an inline header and the body from the
 slot start, or a detached header and the body apart), and each whole unit
 of the region holding them. The node's agent hands exactly that plan to
 the slot store, which takes the regions from its board
-(`BoardDef::erase_regions`). The host and the conformance runner plan the
+(`ERASE_REGIONS`, generated from the same definitions into the board
+package or the node's wiring.rs and required of every `BoardDef`). The
+host and the conformance runner plan the
 same transfer from the same definitions and wait for the request the node
 erases on the sum of the planned units' `unit_max_ms` plus 1000 ms. A
 node's trial wait comes from `[watchdog] trial_ms` and `trial_attempts`:

@@ -13,21 +13,24 @@ extern crate alloc;
 mod ops;
 mod percent;
 pub mod rom;
+mod timings;
 
 pub use dagon_romlink::{RomError, Stats as RomStats};
 pub use ops::{
     agent_digest, app_digest, check_release, reason, ConfirmOutcome, Discovery, Event, NodeOutcome,
-    NodeState, Outcome, RecoverAssets, RecoverPath, WritePath, XferTimes, CONFIRM_RETRY_MS,
-    NODE_POLL_MS, NODE_TRIAL_MAX_MS, NODE_TRIAL_MS,
+    NodeState, Outcome, RecoverAssets, RecoverPath, WritePath, XferTimes,
 };
 pub use percent::{transfer_percent, trial_percent};
+#[cfg(feature = "defs")]
+pub use timings::{mcu_timings, node_timings};
+pub use timings::{HostTimings, NodeTimingError};
 
 use alloc::boxed::Box;
 use alloc::vec;
 use alloc::vec::Vec;
-use dagon_conform::timeout::REQUEST_MS;
 use dagon_format::topology::{self, TopologyView};
 use dagon_format::{FormatError, Version};
+use dagon_port::timeout::{EraseLayout, EraseRegion, NodeTimings, SlotLayout, REQUEST_MS};
 use dagon_proto::payload::{link, HelloReq, HelloResp, Relay};
 use dagon_proto::{find_sof, flags, max_payload, split_status, Cmd, Frame, FrameError, Status};
 
@@ -204,15 +207,19 @@ pub struct Host<T: Transport, C: HostClock> {
     /// the port reopened): it is read away before the next request.
     stale: bool,
     /// Pause between a node's HELLO polls after REBOOT
-    /// ([`NODE_POLL_MS`]; tests show a longer one misses the trial).
+    /// ([`NODE_POLL_MS`](dagon_port::timeout::NODE_POLL_MS); tests show a
+    /// longer one misses the trial).
     pub node_poll_ms: u32,
     /// A node's boot core is being written: the events say so.
     core_write: bool,
     /// The node being written, for its one progress number.
     write: percent::WriteTrack,
-    /// Each node's trial period by topology index (`[watchdog] trial_ms`):
-    /// how much of its progress number the trial weighs. Unset: only bytes count.
-    pub trial_ms: Vec<(u8, u32)>,
+    /// Each node's own time limits by topology index, from its MCU
+    /// definition ([`node_timings`] under the `defs` feature): the wait for
+    /// the request it erases on, and its trial period, which also weighs in
+    /// its progress number. A node with no entry gets
+    /// [`NodeTimings::FALLBACK`].
+    pub timings: Vec<(u8, HostTimings)>,
     /// Lines about steps that are retried (a CONFIRM sent again), for the
     /// caller's log; `None`: not shown.
     pub note: Option<Note>,
@@ -228,12 +235,36 @@ impl<T: Transport, C: HostClock> Host<T, C> {
             applied: Vec::new(),
             opened: Vec::new(),
             stale: true,
-            node_poll_ms: ops::NODE_POLL_MS,
+            node_poll_ms: dagon_port::timeout::NODE_POLL_MS,
             core_write: false,
             write: percent::WriteTrack::default(),
-            trial_ms: Vec::new(),
+            timings: Vec::new(),
             note: None,
         }
+    }
+
+    /// Topology node `node`'s timings ([`Host::timings`], or
+    /// [`NodeTimings::FALLBACK`]).
+    pub fn timings_of(&self, node: u8) -> NodeTimings<EraseLayout<&[EraseRegion], &[SlotLayout]>> {
+        self.timings
+            .iter()
+            .find(|(n, _)| *n == node)
+            .map_or(NodeTimings::FALLBACK, |(_, t)| t.borrowed())
+    }
+
+    /// How long node `node` may take to answer the request it erases on,
+    /// for `hdr_len` + `body_len` bytes into `slot` of `target`
+    /// ([`NodeTimings::erase_limit_ms`]).
+    pub fn erase_wait_ms(
+        &self,
+        node: u8,
+        target: u8,
+        slot: u8,
+        hdr_len: u32,
+        body_len: u32,
+    ) -> u32 {
+        self.timings_of(node)
+            .erase_limit_ms(target, slot, hdr_len, body_len)
     }
 
     fn note(&mut self, line: &str) {

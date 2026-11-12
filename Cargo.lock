@@ -589,7 +589,6 @@ name = "dagon-host"
 version = "0.1.0"
 dependencies = [
  "dagon-agent",
- "dagon-conform",
  "dagon-format",
  "dagon-host",
  "dagon-port",

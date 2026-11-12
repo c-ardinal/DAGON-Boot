@@ -4,10 +4,10 @@
 
 use alloc::vec;
 use alloc::vec::Vec;
-use dagon_conform::timeout::REQUEST_MS;
 use dagon_format::header::{self, image_kind, HEADER_SIZE};
 use dagon_format::statelog::{self, kind, reason, slot, FaceHeader, Record};
 use dagon_format::{sha256, FormatError, ImageHeader};
+use dagon_port::timeout::REQUEST_MS;
 use dagon_port::{BusError, I2cBus, Nrst, SubControl};
 use dagon_proto::payload::{phase, I2cRaw};
 use dagon_proto::{Cmd, Status};

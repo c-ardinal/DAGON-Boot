@@ -6,13 +6,13 @@ use std::rc::Rc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 
-use dagon_conform::timeout::REQUEST_MS;
 use dagon_format::header::{image_kind, mcu_id, target_tag};
 use dagon_format::Version;
 use dagon_host::{
     rom, ConfirmOutcome, Error, Event, Host, HostClock, NodeOutcome, Outcome, RecoverAssets,
-    RecoverPath, Target, Transport, WritePath, CONFIRM_RETRY_MS,
+    RecoverPath, Target, Transport, WritePath,
 };
+use dagon_port::timeout::{CONFIRM_RETRY_MS, NODE_POLL_MS, REQUEST_MS};
 use dagon_proto::payload::{phase, SlotState};
 use dagon_proto::{flags, Cmd, Status};
 use dagon_sign::image::{self, sign_image, ImageSpec};
@@ -250,8 +250,22 @@ impl HostClock for Sim {
     }
 }
 
+/// A host with each node's timings from the builtin definitions.
 fn host(s: &Sim) -> Host<Sim, Sim> {
-    Host::new(s.clone(), s.clone())
+    let mut h = Host::new(s.clone(), s.clone());
+    let topo = dagon_topology::parse_str(&yaml()).unwrap();
+    h.timings = dagon_host::node_timings(dagon_topology::defs::Registry::builtin(), &topo).unwrap();
+    h
+}
+
+/// The shortest `[watchdog] trial_ms` of the builtin MCU definitions.
+fn shortest_trial_ms() -> u64 {
+    let reg = dagon_topology::defs::Registry::builtin();
+    let trials = reg
+        .mcus()
+        .iter()
+        .filter_map(|m| m.watchdog.map(|w| w.trial_ms));
+    trials.min().unwrap().into()
 }
 
 #[test]
@@ -321,7 +335,6 @@ fn version_of_a_stage0_without_its_mark_is_unknown() {
 fn the_number_on_the_hubs_screen_is_the_number_every_caller_is_told() {
     let s = sim();
     let mut h = host(&s);
-    h.trial_ms = vec![(0, 4000), (SEG, 4000)];
     let mut told: Option<u8> = None;
     let mut seen = 0;
     block_on(
@@ -358,7 +371,6 @@ fn the_number_a_node_is_told_is_the_consoles_at_every_step() {
     use dagon_agent::snapshot::Phase;
     let s = sim();
     let mut h = host(&s);
-    h.trial_ms = vec![(0, 4000), (SEG, 4000)];
     let mut told: Option<u8> = None;
     let mut steps = 0;
     block_on(
@@ -386,7 +398,6 @@ fn the_number_a_node_is_told_is_the_consoles_at_every_step() {
 fn a_lost_tell_is_told_again_at_the_next_step_and_never_resent() {
     let s = sim();
     let mut h = host(&s);
-    h.trial_ms = vec![(0, 4000), (SEG, 4000)];
     let (mut armed, mut last, mut steps, mut events) = (true, 0, 0, 0);
     let out = block_on(h.apply(
         &release(),
@@ -428,7 +439,9 @@ fn telling_a_node_costs_a_write_at_most_a_request_per_step_and_an_old_agent_none
         s.hub.borrow_mut().i2c_node(NODE_I2C_ADDR).unwrap().predates = predates.to_vec();
         let mut h = host(&s);
         let mut t = None;
-        let mut steps = 0u32;
+        // The node's number changes at most once per step of the bytes:
+        // each new number is one tell.
+        let mut numbers = std::collections::BTreeSet::new();
         let outcome = block_on(h.apply(
             &release(),
             &topology(&yaml()),
@@ -436,7 +449,9 @@ fn telling_a_node_costs_a_write_at_most_a_request_per_step_and_an_old_agent_none
             Some(&[SEG]),
             &mut |e| {
                 t = e.times.or(t);
-                steps += u32::from(e.phase == phase::TRANSFER && e.percent > 0);
+                if e.node == SEG && e.phase == phase::TRANSFER {
+                    numbers.insert(e.shown);
+                }
             },
         ))
         .unwrap();
@@ -445,16 +460,21 @@ fn telling_a_node_costs_a_write_at_most_a_request_per_step_and_an_old_agent_none
             matches!(outcome[0].outcome, Outcome::Done(_)),
             "{outcome:?}"
         );
-        (t.unwrap().data_ms, steps)
+        (t.unwrap().data_ms, numbers.len() as u32)
     };
     // One relayed request in the simulator: the PC's round trip and the
     // mailbox polls.
     const RELAYED_MS: u32 = 6;
-    let (told, steps) = seg_data_ms(&[]);
+    let (told, numbers) = seg_data_ms(&[]);
     // An agent built before the tell refuses the first one, before any
     // data: nothing more is sent to it.
     let (old, _) = seg_data_ms(&[Cmd::Show as u8]);
-    assert_eq!(told - old, steps * RELAYED_MS, "one request per step");
+    assert!(numbers > 1, "{numbers}");
+    assert_eq!(
+        told - old,
+        (numbers - 1) * RELAYED_MS,
+        "one request per new number"
+    );
 }
 
 #[test]
@@ -1260,6 +1280,42 @@ fn apply_seg(s: &Sim) -> Vec<NodeOutcome<()>> {
     .unwrap()
 }
 
+/// SEG's numbers through one write, with `timings` as the host's.
+fn seg_numbers(timings: Vec<(u8, dagon_host::HostTimings)>) -> Vec<u8> {
+    let s = sim();
+    let mut h = host(&s);
+    h.timings = timings;
+    let mut numbers = Vec::new();
+    block_on(h.apply(
+        &release(),
+        &topology(&yaml()),
+        &key().pk,
+        Some(&[SEG]),
+        &mut |e| numbers.push(e.shown),
+    ))
+    .unwrap();
+    numbers
+}
+
+/// A node the host has no timings for is counted with the fallback's
+/// trial, as if its entry were the fallback.
+#[test]
+fn a_node_without_timings_counts_the_fallback_trial() {
+    use dagon_port::timeout::NodeTimings;
+    let missing = seg_numbers(Vec::new());
+    let fallback = seg_numbers(vec![(SEG, NodeTimings::FALLBACK)]);
+    assert_eq!(missing, fallback);
+    // The fallback trial weighs: bytes alone would end the transfer higher.
+    let bytes_only = seg_numbers(vec![(
+        SEG,
+        NodeTimings {
+            trial_ms: 1,
+            ..NodeTimings::FALLBACK
+        },
+    )]);
+    assert_ne!(missing, bytes_only);
+}
+
 #[test]
 fn lost_xfer_data_replies_do_not_write_twice() {
     let clean = sim();
@@ -1339,12 +1395,11 @@ fn confirm_after_lost_polls(spacing: u32) -> u64 {
 
 #[test]
 fn polling_every_300_ms_is_what_keeps_confirm_inside_the_trial() {
-    use dagon_host::{NODE_POLL_MS, NODE_TRIAL_MS};
     let at_300 = confirm_after_lost_polls(NODE_POLL_MS);
-    assert!(at_300 < NODE_TRIAL_MS as u64, "{at_300} ms");
+    assert!(at_300 < shortest_trial_ms(), "{at_300} ms");
     let at_500 = confirm_after_lost_polls(500);
     assert!(
-        at_500 >= NODE_TRIAL_MS as u64,
+        at_500 >= shortest_trial_ms(),
         "{at_500} ms: 500 ms would miss it"
     );
 }
@@ -1483,20 +1538,6 @@ fn a_self_check_that_never_passes_fails_after_the_bounded_retries() {
     }
     let st = block_on(h.status(SEG_AT)).unwrap().status;
     assert_eq!((st.active, st.slots[1].state), (0, SlotState::Reverted));
-}
-
-/// The host's trial periods are the builtin definitions' shortest and
-/// longest `[watchdog] trial_ms` of the nodes (MCUs without a coordinator).
-#[test]
-fn the_host_trial_periods_follow_the_definitions() {
-    let reg = dagon_topology::defs::Registry::builtin();
-    let trials: Vec<u32> = reg
-        .mcus()
-        .iter()
-        .filter_map(|m| m.watchdog.map(|w| w.trial_ms))
-        .collect();
-    assert_eq!(trials.iter().min(), Some(&dagon_host::NODE_TRIAL_MS));
-    assert_eq!(trials.iter().max(), Some(&dagon_host::NODE_TRIAL_MAX_MS));
 }
 
 // Boot core A/B of the hub through a release.

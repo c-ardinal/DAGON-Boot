@@ -7,19 +7,18 @@
 //! - [`pc`]: the sequence the PC drives through the hub (CT-04, CT-09,
 //!   CT-10, CT-11, CT-12, CT-18, CT-20), plus the CONF_RUN calls for the
 //!   node-side tests.
-//! - [`timeout`]: per-stage time limits.
 //! - [`report`]: results and the result file (JSON) the CLI and the browser
 //!   read.
 //!
-//! The test list, the procedures and the limits are fixed here; a port only
-//! supplies the board traits and the images.
+//! The test list and the procedures are fixed here, the time limits in
+//! [`dagon_port::timeout`] (the node's own from its MCU definition); a port
+//! only supplies the board traits and the images.
 #![no_std]
 #![forbid(unsafe_code)]
 
 pub mod node;
 pub mod pc;
 pub mod report;
-pub mod timeout;
 
 use core::fmt;
 

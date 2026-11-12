@@ -86,9 +86,11 @@ fn hub_link(t: &Topology, child: &str) -> Option<String> {
     })
 }
 
-/// wiring.rs for node `n`: constants only, from the topology, and
-/// `flash_bytes` for a node whose crate comes from its MCU package.
-pub fn wiring_rs(t: &Topology, n: &Node, flash_bytes: Option<u32>) -> String {
+/// wiring.rs for the node at `index` in `t.nodes`: constants only, from
+/// the topology, and `flash_bytes` for a node whose crate comes from its
+/// MCU package.
+pub fn wiring_rs(t: &Topology, index: usize, flash_bytes: Option<u32>) -> String {
+    let n = &t.nodes[index];
     let hub = n.role == Role::Coordinator;
     let link = if hub {
         "Link::Hub".to_string()
@@ -140,10 +142,12 @@ pub fn wiring_rs(t: &Topology, n: &Node, flash_bytes: Option<u32>) -> String {
          Uart {{ tx: u8, rx: u8, baud: u32 }},\n}}\n\n\
          #[derive(Clone, Copy, Debug)]\npub struct Child {{\n    pub id: &'static str,\n    pub link: HubLink,\n}}\n\n\
          #[derive(Clone, Copy, Debug)]\npub struct Node {{\n    pub id: &'static str,\n    \
+         /// Its index in the compiled topology, which identifies it there (nodes may share a tag).\n    \
+         pub index: u8,\n    \
          pub tag: &'static str,\n    pub hub: bool,\n    pub max_attempts: u8,\n    pub link: Link,\n    \
          /// Flash size given for a board chosen by MCU (else the board package knows it).\n    \
          pub flash_bytes: Option<u32>,\n}}\n\n\
-         pub const NODE: Node = Node {{\n    id: {id:?},\n    tag: {tag:?},\n    hub: {hub},\n    \
+         pub const NODE: Node = Node {{\n    id: {id:?},\n    index: {index},\n    tag: {tag:?},\n    hub: {hub},\n    \
          max_attempts: {att},\n    link: {link},\n    flash_bytes: {flash},\n}};\n\n\
          /// The hub's children in update order (empty on a child).\n\
          pub const CHILDREN: &[Child] = &[\n{kids}];\n",
@@ -860,7 +864,7 @@ pub fn gen(
     force_main: bool,
 ) -> Result<GenReport, String> {
     let mut r = GenReport::default();
-    for n in &t.nodes {
+    for (index, n) in t.nodes.iter().enumerate() {
         if !only.is_empty() && !only.contains(&n.id) {
             continue;
         }
@@ -893,7 +897,7 @@ pub fn gen(
             }
         }
         let flash = project_board(reg, n).map(|b| b.flash_bytes);
-        let wiring = wiring_rs(t, n, flash);
+        let wiring = wiring_rs(t, index, flash);
         write(
             base,
             &format!("{dir}/src/wiring.rs"),

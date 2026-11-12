@@ -147,6 +147,43 @@ fn sample_uses_each_packages_template_and_skips_what_is_missing() {
 }
 
 #[test]
+fn gen_writes_each_nodes_index_in_the_compiled_topology() {
+    // Two nodes run images with the same tag: only the index tells them apart.
+    let d = tmp("index");
+    let src = clone(&d);
+    let base = project(&d);
+    let t =
+        dagon_topology::parse_str(&SAMPLE.replace("tag: watch-s3", "tag: seg-f401-7seg")).unwrap();
+    gen(
+        dagon_topology::defs::Registry::builtin(),
+        &base,
+        &t,
+        &src,
+        &[],
+        false,
+    )
+    .unwrap();
+    let bin = dagon_topology::compile(&t).unwrap();
+    let view = dagon_format::topology::TopologyView::parse(&bin).unwrap();
+    let index_of = |id: &str| -> u8 {
+        let wiring = read(&base, &format!("nodes/{id}/src/wiring.rs"));
+        let index = wiring
+            .lines()
+            .find_map(|l| l.strip_prefix("    index: ")?.strip_suffix(','));
+        index.unwrap_or_else(|| panic!("{wiring}")).parse().unwrap()
+    };
+    let (seg, watch) = (index_of("seg"), index_of("watch"));
+    assert_eq!((seg, watch), (1, 2));
+    // The compiled topology's links name the nodes by these indexes: the
+    // I2C link to seg and the UART link to watch.
+    let ends: Vec<(u8, u8)> = (0..view.link_count())
+        .map(|k| (view.link(k).to, view.link(k).iface))
+        .collect();
+    assert!(ends.contains(&(seg, dagon_format::topology::iface::I2C_BUS)));
+    assert!(ends.contains(&(watch, dagon_format::topology::iface::PIO_UART)));
+}
+
+#[test]
 fn gen_keeps_the_developers_code_and_refreshes_only_generated_parts() {
     let d = tmp("regen");
     let src = clone(&d);

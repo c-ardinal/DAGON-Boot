@@ -96,7 +96,7 @@ fn registry_with(name: &str, mcu: &str, boards: &str) -> Registry {
     std::fs::write(dir.join("m/dagon-mcu.toml"), mcu).unwrap();
     std::fs::write(
         dir.join("dagon.toml"),
-        format!("mcu_files = [\"m/dagon-mcu.toml\"]\n{boards}"),
+        format!("format = 1\nmcu_files = [\"m/dagon-mcu.toml\"]\n{boards}"),
     )
     .unwrap();
     let r = Registry::load(&[Source::Project(&dir.join("dagon.toml"))]);
@@ -198,7 +198,7 @@ fn a_boards_flash_regions_are_checked_with_its_mcu() {
         std::fs::create_dir_all(dir.join("m")).unwrap();
         std::fs::write(dir.join("m/dagon-mcu.toml"), nova(6_000, 2, 300)).unwrap();
         let text = format!(
-            "mcu_files = [\"m/dagon-mcu.toml\"]\n{}",
+            "format = 1\nmcu_files = [\"m/dagon-mcu.toml\"]\n{}",
             board("nova-bad", regions)
         );
         std::fs::write(dir.join("dagon.toml"), text).unwrap();

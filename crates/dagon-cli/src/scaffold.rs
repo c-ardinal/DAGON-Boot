@@ -87,9 +87,15 @@ fn hub_link(t: &Topology, child: &str) -> Option<String> {
 }
 
 /// wiring.rs for the node at `index` in `t.nodes`: constants only, from
-/// the topology, and `flash_bytes` for a node whose crate comes from its
-/// MCU package.
-pub fn wiring_rs(t: &Topology, index: usize, flash_bytes: Option<u32>) -> String {
+/// the topology, `flash_bytes` for a node whose crate comes from its MCU
+/// package, and the node's erase regions (`regions`: its board's `[flash]`
+/// when present, else its MCU's), which its `BoardDef` returns.
+pub fn wiring_rs(
+    t: &Topology,
+    index: usize,
+    flash_bytes: Option<u32>,
+    regions: &[dagon_topology::defs::EraseRegionDef],
+) -> String {
     let n = &t.nodes[index];
     let hub = n.role == Role::Coordinator;
     let link = if hub {
@@ -150,12 +156,13 @@ pub fn wiring_rs(t: &Topology, index: usize, flash_bytes: Option<u32>) -> String
          pub const NODE: Node = Node {{\n    id: {id:?},\n    index: {index},\n    tag: {tag:?},\n    hub: {hub},\n    \
          max_attempts: {att},\n    link: {link},\n    flash_bytes: {flash},\n}};\n\n\
          /// The hub's children in update order (empty on a child).\n\
-         pub const CHILDREN: &[Child] = &[\n{kids}];\n",
+         pub const CHILDREN: &[Child] = &[\n{kids}];\n\n{regions}",
         topo = t.name,
         id = n.id,
         tag = n.tag,
         att = n.max_attempts.unwrap_or(3),
-        kids = children.concat()
+        kids = children.concat(),
+        regions = dagon_topology::defs::codegen::erase_regions_rs(regions),
     )
 }
 
@@ -897,7 +904,11 @@ pub fn gen(
             }
         }
         let flash = project_board(reg, n).map(|b| b.flash_bytes);
-        let wiring = wiring_rs(t, index, flash);
+        let regions = reg
+            .mcu(&n.mcu)
+            .and_then(|m| m.erase_regions_on(reg.node_board(n)))
+            .unwrap_or(&[]);
+        let wiring = wiring_rs(t, index, flash, regions);
         write(
             base,
             &format!("{dir}/src/wiring.rs"),

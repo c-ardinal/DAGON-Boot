@@ -26,7 +26,7 @@ PAGE = ROOT / "crates" / "dagon-cli" / "page"
 SOURCE = PAGE / "SOURCE"
 # Crates compiled into the page's WebAssembly (dagon-wasm and what it uses).
 CRATES = ["dagon-wasm", "dagon-host", "dagon-format", "dagon-proto", "dagon-topology",
-          "dagon-sign", "dagon-romlink", "dagon-conform", "dagon-port", "dagon-core",
+          "dagon-sign", "dagon-romlink", "dagon-port", "dagon-core",
           "dagon-agent"]
 WEB_SKIP = {"node_modules", "dist", "pkg", "test-results", "playwright-report"}
 # The definition files dagon-topology embeds (its build.rs discovers them; a

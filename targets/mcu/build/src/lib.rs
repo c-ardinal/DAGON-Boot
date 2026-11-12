@@ -163,10 +163,6 @@ pub fn definition_rs(text: &str) -> String {
     out += "/// stage0_verifies`).\n";
     out += &format!("pub const STAGE0_VERIFIES: bool = {verifies};\n");
 
-    let unit = int(required(&t, "execution", "erase_unit"), "erase_unit");
-    out += "/// Largest unit one flash erase covers, bytes (`[execution] erase_unit`).\n";
-    out += &format!("pub const ERASE_UNIT: u32 = {unit:#x};\n");
-
     let (masked, masked_known) = fact(required(&t, "execution", "masked_max_us"), "masked_max_us");
     out += "/// Longest DAGON's own code masks interrupts, us (`[execution]\n";
     out += "/// masked_max_us`); `None` while it is not measured.\n";
@@ -174,16 +170,7 @@ pub fn definition_rs(text: &str) -> String {
     out += "/// `MASKED_MAX_US` is checked against its source.\n";
     out += &format!("pub const MASKED_MAX_US_KNOWN: bool = {masked_known};\n");
 
-    let (erase, erase_known) = fact(
-        required(&t, "execution", "erase_unit_max_ms"),
-        "erase_unit_max_ms",
-    );
-    let erase = erase.expect("[execution] erase_unit_max_ms needs a value");
-    out += "/// Worst-case time of one such erase, ms (`[execution]\n";
-    out += "/// erase_unit_max_ms`).\n";
-    out += &format!("pub const ERASE_UNIT_MAX_MS: u32 = {erase};\n");
-    out += "/// `ERASE_UNIT_MAX_MS` is checked against the flash's datasheet.\n";
-    out += &format!("pub const ERASE_UNIT_MAX_MS_KNOWN: bool = {erase_known};\n");
+    out += &erase_layout_rs(&t);
 
     let scratch = t
         .get("conformance")
@@ -199,14 +186,120 @@ pub fn definition_rs(text: &str) -> String {
     out
 }
 
+/// `[execution] erase_regions` (the MCU's default regions) and
+/// `[[slot_layout]]` as constants: a slot store composes its erase layout
+/// from the slot layouts and the regions its board returns. Also the
+/// longest single erase of the defaults, with whether every erase time is
+/// checked.
+fn erase_layout_rs(t: &toml::Table) -> String {
+    let regions = required(t, "execution", "erase_regions")
+        .as_array()
+        .expect("[execution] erase_regions is a list");
+    let field = |r: &toml::Value, key: &str| -> toml::Value {
+        r.get(key)
+            .cloned()
+            .unwrap_or_else(|| panic!("[execution] erase_regions: {key} is missing"))
+    };
+    let mut out = String::new();
+    let (mut longest, mut known) = (0, true);
+    out += "/// The MCU's erase regions (`[execution] erase_regions`): what a board\n";
+    out += "/// without `[flash]` erases in (its `BoardDef` returns them).\n";
+    out += &format!(
+        "pub const ERASE_REGIONS: [dagon_port::timeout::EraseRegion; {}] = [\n",
+        regions.len()
+    );
+    for r in regions {
+        let (ms, ms_known) = fact(&field(r, "unit_max_ms"), "unit_max_ms");
+        let ms = ms.expect("[execution] erase_regions: unit_max_ms needs a value");
+        longest = longest.max(ms);
+        known &= ms_known;
+        out += &format!(
+            "    dagon_port::timeout::EraseRegion {{ start: {:#x}, len: {:#x}, unit: {:#x}, \
+             unit_max_ms: {ms} }},\n",
+            int(&field(r, "start"), "start"),
+            int(&field(r, "len"), "len"),
+            int(&field(r, "unit"), "unit"),
+        );
+    }
+    out += "];\n";
+    let layouts = t
+        .get("slot_layout")
+        .and_then(|v| v.as_array())
+        .map_or(&[][..], |v| v.as_slice());
+    out += "/// Every target and slot the node receives into (`[[slot_layout]]`).\n";
+    out += &format!(
+        "pub const SLOT_LAYOUTS: [dagon_port::timeout::SlotLayout; {}] = [\n",
+        layouts.len()
+    );
+    for l in layouts {
+        out += &slot_layout_rs(l);
+    }
+    out += "];\n";
+    out += "/// The longest single erase, ms (the largest `unit_max_ms`).\n";
+    out += &format!("pub const ERASE_UNIT_MAX_MS: u32 = {longest};\n");
+    out += "/// Every `unit_max_ms` is checked against the flash's datasheet.\n";
+    out += &format!("pub const ERASE_UNIT_MAX_MS_KNOWN: bool = {known};\n");
+    out
+}
+
+/// One `[[slot_layout]]` as a `SlotLayout` element.
+fn slot_layout_rs(l: &toml::Value) -> String {
+    let word = |key: &str| {
+        l.get(key)
+            .and_then(|v| v.as_str())
+            .unwrap_or_else(|| panic!("[[slot_layout]] {key} is missing"))
+    };
+    let num = |key: &str| {
+        let v = l
+            .get(key)
+            .unwrap_or_else(|| panic!("[[slot_layout]] {key} is missing"));
+        int(v, key)
+    };
+    let target = match word("target") {
+        "app" => "APP",
+        "bootcore" => "BOOTCORE",
+        "agent" => "AGENT",
+        "topology" => "TOPOLOGY",
+        other => panic!("[[slot_layout]] target {other:?} is not a target"),
+    };
+    let slot = match word("slot") {
+        "a" => 0,
+        "b" => 1,
+        "factory" => 2,
+        other => panic!("[[slot_layout]] slot {other:?} is not a slot"),
+    };
+    let header = match l.get("header") {
+        Some(h) if h.as_str() == Some("inline") => "Inline".to_string(),
+        Some(h) => {
+            let at = h
+                .get("detached")
+                .unwrap_or_else(|| panic!("[[slot_layout]] header is inline or {{ detached }}"));
+            format!("Detached {{ at: {:#x} }}", int(at, "detached"))
+        }
+        None => panic!("[[slot_layout]] header is missing"),
+    };
+    format!(
+        "    dagon_port::timeout::SlotLayout {{ target: dagon_proto::payload::target::{target}, \
+         slot: {slot}, start: {:#x}, capacity: {:#x}, \
+         header: dagon_port::timeout::HeaderPlace::{header} }},\n",
+        num("start"),
+        num("capacity"),
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
     const DEF: &str = "[watchdog]\ntrial_attempts = 3\ntrial_ms = 4000\nconfirmed_ms = 8000\n\
-                       [execution]\nmasked_max_us = 50\nerase_unit = 0x1000\n\
-                       erase_unit_max_ms = 400\n\
-                       [conformance]\nscratch = { at = 0x100, size = 0x10 }\n";
+                       [execution]\nmasked_max_us = 50\n\
+                       erase_regions = [{ start = 0x0, len = 0x4000, unit = 0x1000, unit_max_ms = 400 },\n\
+                       { start = 0x4000, len = 0x8000, unit = 0x4000, unit_max_ms = 900 }]\n\
+                       [conformance]\nscratch = { at = 0x100, size = 0x10 }\n\
+                       [[slot_layout]]\ntarget = \"app\"\nslot = \"b\"\nstart = 0x4000\n\
+                       capacity = 0x3E00\nheader = \"inline\"\n\
+                       [[slot_layout]]\ntarget = \"agent\"\nslot = \"factory\"\nstart = 0x8000\n\
+                       capacity = 0x4000\nheader = { detached = 0x1000 }\n";
 
     #[test]
     fn constants_come_from_the_definition() {
@@ -221,9 +314,29 @@ mod tests {
             rs.contains("pub const STAGE0_VERIFIES: bool = false;\n"),
             "{rs}"
         );
-        assert!(rs.contains("pub const ERASE_UNIT: u32 = 0x1000;\n"), "{rs}");
         assert!(
-            rs.contains("pub const ERASE_UNIT_MAX_MS: u32 = 400;\n"),
+            rs.contains(
+                "EraseRegion { start: 0x4000, len: 0x8000, unit: 0x4000, unit_max_ms: 900 }"
+            ),
+            "{rs}"
+        );
+        assert!(
+            rs.contains(
+                "SlotLayout { target: dagon_proto::payload::target::APP, slot: 1, \
+                 start: 0x4000, capacity: 0x3e00, header: dagon_port::timeout::HeaderPlace::Inline }"
+            ),
+            "{rs}"
+        );
+        assert!(
+            rs.contains(
+                "SlotLayout { target: dagon_proto::payload::target::AGENT, slot: 2, \
+                 start: 0x8000, capacity: 0x4000, \
+                 header: dagon_port::timeout::HeaderPlace::Detached { at: 0x1000 } }"
+            ),
+            "{rs}"
+        );
+        assert!(
+            rs.contains("pub const ERASE_UNIT_MAX_MS: u32 = 900;\n"),
             "{rs}"
         );
         assert!(
@@ -242,10 +355,7 @@ mod tests {
     fn unverified_and_unmeasured_facts_are_marked() {
         let def = DEF
             .replace("masked_max_us = 50", "masked_max_us = \"unmeasured\"")
-            .replace(
-                "erase_unit_max_ms = 400",
-                "erase_unit_max_ms = { unverified = 400 }",
-            );
+            .replace("unit_max_ms = 400", "unit_max_ms = { unverified = 400 }");
         let rs = definition_rs(&def);
         assert!(
             rs.contains("pub const MASKED_MAX_US: Option<u32> = None;\n"),
@@ -256,7 +366,7 @@ mod tests {
             "{rs}"
         );
         assert!(
-            rs.contains("pub const ERASE_UNIT_MAX_MS: u32 = 400;\n"),
+            rs.contains("pub const ERASE_UNIT_MAX_MS: u32 = 900;\n"),
             "{rs}"
         );
         assert!(

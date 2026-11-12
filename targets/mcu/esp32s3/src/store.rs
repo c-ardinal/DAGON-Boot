@@ -14,20 +14,16 @@
 //!   stage starts factory when no OTA slot is valid), so there is nothing
 //!   to withdraw or select.
 
-use crate::layout::{
-    app_partition, Partition, DAGON, ERASE_UNIT, SLOT_A, SLOT_B, SLOT_FACTORY, WRITE_UNIT,
-};
+use crate::layout::{app_partition, Partition, DAGON, SLOT_A, SLOT_B, SLOT_FACTORY, WRITE_UNIT};
 use crate::otadata::{selected_view, Counted, ENTRY_LEN};
-use dagon_agent::{SlotStore, StoreError, Transition};
+use dagon_agent::{erase_plan, SlotStore, StoreError, Transition};
 use dagon_format::header::{self, ImageHeader, HEADER_SIZE};
+use dagon_port::timeout::{EraseLayout, EraseRegion, Plan};
 use dagon_port::{Flash, Watchdog};
 use dagon_proto::payload::{target, SlotState, StatusResp};
 
 /// One detached header sector per slot in the dagon partition.
 pub const HEADER_SECTOR: u32 = 0x1000;
-/// Largest erase step: the definition's erase unit (one block erase stays
-/// below the watchdog period, `[execution] erase_unit_max_ms`).
-const BLOCK: u32 = crate::ERASE_UNIT;
 const WORD: usize = WRITE_UNIT as usize;
 
 /// otadata as the receiver needs it.
@@ -64,6 +60,8 @@ pub struct EspStore<F, O, W> {
     /// Fed while erasing and writing (a handle; the MCU package's link
     /// task holds the watchdog).
     pub(crate) wdt: W,
+    /// The erase regions the board returns (`BoardDef::erase_regions`).
+    regions: &'static [EraseRegion],
     rx: Option<Rx>,
 }
 
@@ -91,11 +89,13 @@ fn flash_err<T>(r: Result<T, dagon_port::FlashError>) -> Result<T, StoreError> {
 }
 
 impl<F: Flash, O: Otadata, W: Watchdog> EspStore<F, O, W> {
-    pub fn new(flash: F, ota: O, wdt: W) -> Self {
+    /// `regions`: what the board erases in (`BoardDef::erase_regions`).
+    pub fn new(flash: F, ota: O, wdt: W, regions: &'static [EraseRegion]) -> Self {
         Self {
             flash,
             ota,
             wdt,
+            regions,
             rx: None,
         }
     }
@@ -105,23 +105,6 @@ impl<F: Flash, O: Otadata, W: Watchdog> EspStore<F, O, W> {
         let mut h = [0u8; HEADER_SIZE];
         self.read_header(slot, &mut h).ok()?;
         ImageHeader::parse(&h).ok().map(|_| h)
-    }
-
-    /// Erases `addr..addr + len` (erase-unit aligned), feeding in between.
-    fn erase_range(&mut self, mut addr: u32, len: u32) -> Result<(), StoreError> {
-        let end = addr + len;
-        while addr < end {
-            let step = if addr.is_multiple_of(BLOCK) && end - addr >= BLOCK {
-                BLOCK
-            } else {
-                ERASE_UNIT
-            };
-            self.wdt.feed();
-            flash_err(self.flash.erase(addr, step))?;
-            addr += step;
-        }
-        self.wdt.feed();
-        Ok(())
     }
 
     fn program(&mut self, addr: u32, data: &[u8]) -> Result<(), StoreError> {
@@ -199,9 +182,32 @@ impl<F: Flash, O: Otadata, W: Watchdog> SlotStore for EspStore<F, O, W> {
         ota_slot(t, slot).map_or(0, |p| p.size)
     }
 
-    /// Takes the slot out of the otadata selection, erases the header
-    /// sector (the slot then has no image), then the body's erase units.
-    fn erase(&mut self, t: u8, slot: u8, len: u32, _: &Transition) -> Result<(), StoreError> {
+    /// The definition's plan ([`SlotStore::erase_planned`]).
+    fn erase(&mut self, t: u8, slot: u8, len: u32, tr: &Transition) -> Result<(), StoreError> {
+        let layout = self.erase_layout().ok_or(StoreError::Unsupported)?;
+        let plan = erase_plan(&layout, t, slot, len)?;
+        self.erase_planned(t, slot, len, plan, tr)
+    }
+
+    /// The board's erase regions and the MCU's slot layouts.
+    fn erase_layout(&self) -> Option<EraseLayout> {
+        Some(EraseLayout {
+            regions: self.regions,
+            slots: &crate::SLOT_LAYOUTS,
+        })
+    }
+
+    /// Takes the slot out of the otadata selection, then erases the planned
+    /// units: the header sector first (the slot then has no image), then
+    /// the body's blocks, feeding between operations.
+    fn erase_planned(
+        &mut self,
+        t: u8,
+        slot: u8,
+        len: u32,
+        plan: Plan<'_>,
+        _: &Transition,
+    ) -> Result<(), StoreError> {
         let p = ota_slot(t, slot)?;
         // Never wipe what is running, whatever the caller thinks.
         if slot == self.ota.running() {
@@ -214,8 +220,11 @@ impl<F: Flash, O: Otadata, W: Watchdog> SlotStore for EspStore<F, O, W> {
         if t == target::APP {
             self.ota.withdraw(slot)?;
         }
-        self.erase_range(header_addr(slot)?, HEADER_SECTOR)?;
-        self.erase_range(p.offset, len.div_ceil(ERASE_UNIT) * ERASE_UNIT)?;
+        for op in plan {
+            self.wdt.feed();
+            flash_err(self.flash.erase(op.addr, op.len))?;
+        }
+        self.wdt.feed();
         self.rx = Some(Rx {
             slot,
             len,

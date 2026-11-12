@@ -36,6 +36,15 @@ pub trait BoardDef: Send {
     /// watchdogs are stopped; return if it did not take (the node then
     /// resets back into the app).
     fn pmic_download(&mut self) {}
+
+    /// The flash this board's nodes erase in, as erase regions: the
+    /// board's `[flash] erase_regions` when it carries its own flash part
+    /// (generated into its definition constants), else the MCU's default
+    /// (`ERASE_REGIONS`). The slot store plans every erase over these and
+    /// the MCU's slot layouts; a board without `[flash]` needs no code.
+    fn erase_regions(&self) -> &'static [dagon_port::timeout::EraseRegion] {
+        &crate::ERASE_REGIONS
+    }
 }
 
 /// A board with no extras: only the link UART and USB Serial/JTAG.

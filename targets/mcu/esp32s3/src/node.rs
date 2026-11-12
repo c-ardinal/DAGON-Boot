@@ -346,7 +346,8 @@ impl Link {
         let wdt = WDT.init(RefCell::new(
             TrialWatchdog::new(rwdt, EspClock).with_liveness(liveness),
         ));
-        let mut store = EspStore::new(EspFlash::new(storage), boot, SharedWdt(wdt));
+        let regions = p.board.erase_regions();
+        let mut store = EspStore::new(EspFlash::new(storage), boot, SharedWdt(wdt), regions);
         let trial = trying(&mut store);
         if trial {
             wdt.borrow_mut().begin_trial();

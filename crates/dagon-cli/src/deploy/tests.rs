@@ -267,7 +267,12 @@ fn a_generated_sample_project_deploys_every_node_including_the_esp32s3() {
     let yaml = include_str!("../../../../topology/sample.yaml");
     let t = dagon_topology::parse_str(yaml).unwrap();
     let toml = cfg.base.join("dagon.toml");
-    std::fs::write(&toml, "").unwrap();
+    std::fs::write(
+        &toml,
+        "format = 1
+",
+    )
+    .unwrap();
     crate::scaffold::add_build_tables(dagon_topology::defs::Registry::builtin(), &toml, &t)
         .unwrap();
     let gen = Config::load(Some(&toml.to_string_lossy())).unwrap();

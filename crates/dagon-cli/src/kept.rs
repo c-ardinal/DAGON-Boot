@@ -200,7 +200,11 @@ mod tests {
         std::fs::create_dir_all(&dir).unwrap();
         let yaml = crate::demo::yaml(crate::serve::Medium::UsbCdc);
         std::fs::write(dir.join("t.yaml"), &yaml).unwrap();
-        std::fs::write(dir.join("dagon.toml"), "topology = \"t.yaml\"\n").unwrap();
+        std::fs::write(
+            dir.join("dagon.toml"),
+            "format = 1\ntopology = \"t.yaml\"\n",
+        )
+        .unwrap();
         let cfg = Config::load(Some(&dir.join("dagon.toml").to_string_lossy())).unwrap();
         let t = dagon_topology::parse_str(&yaml).unwrap();
         let seed = [9u8; 32];

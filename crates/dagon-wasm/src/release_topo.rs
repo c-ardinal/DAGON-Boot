@@ -321,7 +321,8 @@ mod tests {
         let yaml = yaml_serde::to_string(&v).unwrap();
         assert!(yaml.contains("id: seg-f401-7seg"), "{yaml}");
         // The binary has no node pins: the define screen asks for them (V-01).
-        let report = dagon_topology::check_str(&yaml);
+        let report =
+            dagon_topology::check_str_with(dagon_topology::defs::Registry::builtin(), &yaml);
         assert!(report.issues.iter().any(|i| i.rule == "V-01"), "{report:?}");
     }
 

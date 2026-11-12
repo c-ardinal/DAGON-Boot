@@ -220,7 +220,8 @@ pub fn want_of(reg: &Registry, n: &Node) -> Want {
 
 /// The board definition node `n` names when the project wrote it in its
 /// dagon.toml (`[board.<board id>]`): a board with no package, so the MCU
-/// package's crate takes the board's flash size from wiring.rs.
+/// package's crate takes the board's flash size from wiring.rs. A built-in
+/// board the project overrides keeps its package (`Origin::Overridden`).
 fn project_board<'a>(reg: &'a Registry, n: &Node) -> Option<&'a BoardDef> {
     let id = n.board.as_deref()?;
     (reg.board_origin(id) == Some(Origin::Project))
@@ -974,6 +975,7 @@ struct ProjectTables {
 
 fn project_tables(config: &Path) -> Result<ProjectTables, String> {
     let text = std::fs::read_to_string(config).map_err(|e| format!("{}: {e}", config.display()))?;
+    dagon_topology::project::check(&text).map_err(|e| format!("{}: {e}", config.display()))?;
     toml::from_str(&text).map_err(|e| format!("{}: {e}", config.display()))
 }
 
@@ -1246,12 +1248,13 @@ pub fn init_project(
         .to_string_lossy()
         .replace('\\', "/");
     let toml = format!(
-        "# DAGON project {name:?}.\ntopology = {topology:?}\n\
+        "# DAGON project {name:?}.\nformat = {}\ntopology = {topology:?}\n\
          # Public key the firmware and the page verify images with (the secret\n\
          # key stays outside the project: DAGON_SIGNING_KEY).\npubkey = {pubkey:?}\n\n\
          # Where the generated crates and the boot images take DAGON from:\n\
          # a release (git and tag) or, for development, a local clone (path).\n\
          [dagon]\n{}",
+        dagon_topology::project::FORMAT,
         src.toml()
     );
     genfs::write(

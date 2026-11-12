@@ -208,6 +208,7 @@ pub fn project(dir: &Path, uplink: Medium) -> Result<(PathBuf, KeyPair), String>
         crate::config::CONFIG_FILE,
         b"# The demo project (simulator). Its key is a DEMO key made\n\
           # for this demo only; nothing it signs runs on real boards.\n\
+          format = 1\n\
           topology = \"topology.yaml\"\n\
           pubkey = \"demo-key/dagon-signing.pub\"\n\
           signing_key = \"demo-key/dagon-signing.key\"\n",

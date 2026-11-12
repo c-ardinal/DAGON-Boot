@@ -1659,7 +1659,7 @@ mod tests {
         let toml = cfg.base.join(crate::config::CONFIG_FILE);
         std::fs::write(
             &toml,
-            format!("mcu_files = [\"m/dagon-mcu.toml\"]\n{board}"),
+            format!("format = 1\nmcu_files = [\"m/dagon-mcu.toml\"]\n{board}"),
         )
         .unwrap();
         let yaml = YAML

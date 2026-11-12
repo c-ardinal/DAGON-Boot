@@ -222,7 +222,7 @@ fn connection(mut stream: TcpStream, server: &Arc<Server>) {
         if r.method == "POST" && r.path == "/v1/kept" && http::authorized(r, &server.pass) {
             api::largest_package(server)
         } else {
-            http::MAX_BODY
+            Ok(http::MAX_BODY)
         }
     };
     let req = match http::read_request(&mut stream, &limit) {
@@ -230,6 +230,8 @@ fn connection(mut stream: TcpStream, server: &Arc<Server>) {
         Err(e) => {
             let status = if e.starts_with(http::TOO_LARGE) {
                 413
+            } else if e.starts_with(http::NO_LIMIT) {
+                500
             } else {
                 400
             };

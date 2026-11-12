@@ -1,6 +1,6 @@
 # DAGON MCU definition (format: targets/README.md). Addresses match
 # src/layout.rs; never move them.
-format = 1
+format = 2
 id = "rp2040"
 name = "RP2040"
 wire_id = 0x0001
@@ -50,6 +50,43 @@ binding = "b"
 header = "inline"
 at = 0x1014_8000
 size = 0x10_0000
+
+# What the node receives into: each slot above (header inline at its
+# start), and the hub's display copy of the topology (no header).
+[[slot_layout]]
+target = "bootcore"
+slot = "a"
+start = 0x1000_8000
+capacity = 0x1_FE00
+header = "inline"
+
+[[slot_layout]]
+target = "bootcore"
+slot = "b"
+start = 0x1002_8000
+capacity = 0x1_FE00
+header = "inline"
+
+[[slot_layout]]
+target = "app"
+slot = "a"
+start = 0x1004_8000
+capacity = 0xF_FE00
+header = "inline"
+
+[[slot_layout]]
+target = "app"
+slot = "b"
+start = 0x1014_8000
+capacity = 0xF_FE00
+header = "inline"
+
+[[slot_layout]]
+target = "topology"
+slot = "a"
+start = 0x1024_8000
+capacity = 0x1000
+header = "inline"
 
 # First write: rescue.uf2 copied to the boot ROM drive (BOOT held at plug-in).
 [writer]
@@ -112,15 +149,31 @@ flag = { unverified = "package" }
 
 # Flash operations run from RAM with XIP off; the flash driver masks
 # interrupts and pauses core 1 for each. DAGON erases one 4 KiB sector per
-# operation. Its maximum erase time is the board's QSPI flash part's
-# (sector erase tSE in that part's datasheet): the part is the board's, not
-# named here, so the value is not yet verified. The masking budget of
-# DAGON's own code is to be measured on the board.
+# operation over all of the flash map: the sector erase every candidate
+# part has. The flash is the board's part (a board names it in [flash]);
+# this default is the largest 4 KiB sector erase time (tSE max) of the
+# candidate parts:
+# - Winbond W25Q80JV, datasheet Revision C: tSE max 400 ms (the part
+#   pico-sdk 2.1.1's boot2_w25q080 is written for)
+# - Winbond W25X10CL, datasheet Revision G: tSE max 300 ms
+# - Renesas (Adesto) AT25SF128A, DS-AT25SF/QF128A-168 Rev. Q: tSE max
+#   300 ms at 85 C and at 105 C
+# - Winbond W25Q16JV (the Raspberry Pi Pico's part, Pico datasheet
+#   Release 21), datasheet Revision H: tSE max 400 ms
+# - the flash of the Espressif ESP32-S3-WROOM-1/1U (datasheet v1.8, Table
+#   6-8), ESP32-S3-WROOM-2 (v1.7, Table 6-7) and ESP32-S3-MINI-1/1U (v1.7,
+#   Table 6-8) modules, which name no part: tSE max 500 ms
+# ISSI IS25LP080D (pico-sdk's boot2_is25lp080) is not counted: its datasheet
+# could not be obtained, and it is to be checked against this value.
+# The value is the largest of these, 500 ms.
+# Unverified until checked on hardware. The masking budget of DAGON's own
+# code is to be measured on the board.
 [execution]
 masked_max_us = "unmeasured"
 flash_op = "xip-off-masked"
-erase_unit = 0x1000
-erase_unit_max_ms = { unverified = 400 }
+erase_regions = [
+    { start = 0x1000_0000, len = 0x40_0000, unit = 0x1000, unit_max_ms = { unverified = 500 } },
+]
 
 # Protection hardware: the Cortex-M0+ ARMv6-M MPU, 8 regions of at least
 # 256 bytes (RP2040 datasheet section 2.4), read back from MPU_TYPE at boot.

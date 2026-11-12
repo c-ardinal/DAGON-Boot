@@ -244,6 +244,7 @@ pub fn rollback_node<T: Transport, C: HostClock>(
         .iter()
         .position(|n| n.id == node)
         .ok_or_else(|| format!("no updatable node '{node}' in the topology"))?;
+    host.timings = node_timings(reg, t)?;
     let bin = topology_bin(reg, t)?;
     let view = dagon_format::TopologyView::parse(&bin).map_err(|e| format!("{e:?}"))?;
     let to = Target::of_node(&view, i as u8)
@@ -279,8 +280,11 @@ pub fn topo_push(a: &TopoPushArgs) -> Res {
         Some(p) => PathBuf::from(p),
         None => cfg.topology_path(None)?,
     };
-    let bin = topology_bin(&crate::defs::registry(&cfg)?, &read_topology(&cfg, &path)?)?;
+    let reg = crate::defs::registry(&cfg)?;
+    let t = read_topology(&cfg, &path)?;
+    let bin = topology_bin(&reg, &t)?;
     let mut host = serial::host(a.port.as_deref())?;
+    host.timings = node_timings(&reg, &t)?;
     block_on(host.push_topology(&bin)).map_err(|e| format!("topo push: {e:?}"))?;
     println!(
         "{}: {} bytes sent to the hub, sha256 {}",
@@ -289,6 +293,15 @@ pub fn topo_push(a: &TopoPushArgs) -> Res {
         to_hex(&dagon_format::sha256(&bin))
     );
     Ok(())
+}
+
+/// Each node's own time limits from its MCU definition, for
+/// [`Host::timings`].
+pub(crate) fn node_timings(
+    reg: &Registry,
+    t: &Topology,
+) -> Result<Vec<(u8, dagon_host::HostTimings)>, String> {
+    dagon_host::node_timings(reg, t).map_err(|e| e.to_string())
 }
 
 /// How long a written image's erase, data and verify took, after its
@@ -493,6 +506,7 @@ pub fn apply_bundle<T: Transport, C: HostClock>(
 where
     T::Error: std::fmt::Debug,
 {
+    host.timings = node_timings(reg, t)?;
     let bin = topology_bin(reg, t)?;
     let ids: Vec<String> = t.nodes.iter().map(|n| n.id.clone()).collect();
     let name = |n: u8| ids.get(n as usize).map_or("?", String::as_str);

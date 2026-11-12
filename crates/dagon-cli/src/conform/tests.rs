@@ -101,7 +101,7 @@ impl HubSim {
             return None;
         }
         assert!(
-            r.timeout_ms as u32 >= dagon_conform::timeout::CONF_RUN_MS,
+            r.timeout_ms as u32 >= dagon_port::timeout::CONF_RUN_MS,
             "CONF_RUN relayed with {} ms",
             r.timeout_ms
         );
@@ -216,6 +216,15 @@ fn old_image() -> Vec<u8> {
     img(0, Version::new(1, 0, 0))
 }
 
+/// The F401's own limits, from its built-in definition.
+fn f401() -> dagon_host::HostTimings {
+    let m = dagon_topology::defs::Registry::builtin()
+        .mcu("stm32f401re")
+        .unwrap();
+    let reg = dagon_topology::defs::Registry::builtin();
+    dagon_host::mcu_timings(m, reg.default_board("stm32f401re")).unwrap()
+}
+
 fn sign(m: &[u8]) -> [u8; 64] {
     *key().sk.sign([SIGN_DOMAIN, m].concat(), None)
 }
@@ -243,7 +252,14 @@ fn twelve_of_twelve_through_the_hub() {
     };
     let mut host = Host::new(sim.clone(), sim);
     let to = Target::I2c(dagon_sim::NODE_I2C_ADDR);
-    let report = run(&mut host, to, link_of(to), &images(), &mut sign);
+    let report = run(
+        &mut host,
+        to,
+        link_of(to),
+        &images(),
+        &mut sign,
+        f401().borrowed(),
+    );
     assert_all_pass(&report);
     assert_eq!(report.link, LinkKind::I2c);
 
@@ -280,6 +296,7 @@ fn twelve_of_twelve_on_usb_as_uart() {
         link_of(Target::Hub),
         &images(),
         &mut sign,
+        f401().borrowed(),
     );
     assert_all_pass(&report);
     assert!(json(&report, "seg").contains("\"link\": \"uart\""));
@@ -295,7 +312,14 @@ fn unreachable_node_gives_a_full_not_run_file() {
     };
     let mut host = Host::new(sim.clone(), sim);
     let to = Target::I2c(dagon_sim::NODE_I2C_ADDR);
-    let report = run(&mut host, to, link_of(to), &images(), &mut sign);
+    let report = run(
+        &mut host,
+        to,
+        link_of(to),
+        &images(),
+        &mut sign,
+        f401().borrowed(),
+    );
     assert_eq!(report.passed(), 0);
     let j = json(&report, "seg");
     assert_eq!(j.matches("\"not_run\"").count(), 12);

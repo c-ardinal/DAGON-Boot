@@ -194,8 +194,13 @@ fn seg(hub: &mut SimHub) -> &mut dagon_sim::SimNode {
 }
 
 impl World {
+    /// A host with each node's limits from the built-in definitions.
     fn host(&self) -> Host<Sim, Sim> {
-        Host::new(self.sim.clone(), self.sim.clone())
+        let mut h = Host::new(self.sim.clone(), self.sim.clone());
+        let t = dagon_topology::parse_str(YAML).expect("sim topology parses");
+        h.timings = dagon_host::node_timings(dagon_topology::defs::Registry::builtin(), &t)
+            .expect("the built-in definitions pass the timing rules");
+        h
     }
 
     fn apply(&self, bundle: &[u8]) -> Result<Vec<Outcome<()>>, Error<()>> {

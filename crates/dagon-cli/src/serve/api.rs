@@ -1392,7 +1392,9 @@ fn job_conform(job: &mut Job, cfg: Config, v: Value) -> Result<Value, String> {
         .filter(|n| plain(n))
         .ok_or("node is required")?;
     let t = read_topology(&cfg, &inside(&cfg, &cfg.topology_path(None)?)?)?;
-    let to = crate::conform::node_target(&crate::defs::registry(&cfg)?, &t, node)?;
+    let reg = crate::defs::registry(&cfg)?;
+    let to = crate::conform::node_target(&reg, &t, node)?;
+    let timings = crate::conform::node_timings(&reg, &t, node)?;
     // Read and written as written (never resolved); the writes go through
     // genfs, which refuses a link on the way.
     let dir = cfg.base.join(crate::conform::CONFORM_DIR).join(node);
@@ -1404,7 +1406,7 @@ fn job_conform(job: &mut Job, cfg: Config, v: Value) -> Result<Value, String> {
     job.progress("waiting for the hub", None);
     let report = job.with_device(|job| {
         job.progress("running", None);
-        crate::conform::conform_files(node, to, &dir, &out, &cfg.base, &key, None)
+        crate::conform::conform_files(node, to, &timings, &dir, &out, &cfg.base, &key, None)
     })?;
     let file = crate::conform::json(&report, node);
     Ok(serde_json::from_str(&file).unwrap_or(Value::Null))

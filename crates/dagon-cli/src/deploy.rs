@@ -354,6 +354,7 @@ pub fn command(a: &DeployArgs) -> Result<(), String> {
     let mut host = crate::serial::host(a.port.as_deref())?;
     let reg = crate::defs::registry(&cfg)?;
     let topology = dagon_topology::compile_with(&reg, &t).map_err(|e| e.to_string())?;
+    host.timings = crate::device::node_timings(&reg, &t)?;
     let mut ask = |question: &str| answer(yes, question, &mut std::io::stdin().lock());
     let answering = crate::device::write_silent_nodes(
         &mut host,

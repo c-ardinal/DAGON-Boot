@@ -15,8 +15,8 @@
 //!   ([`PUBKEY`], [`TEST_KEY`]).
 //! - `usb`: DAGON over USB CDC ([`usb`]), DAGON's high-priority executor
 //!   ([`exec`]) and `node::start`.
-//! - `relay`: the 親機 relay ([`relay`]: PC link, relaying to sub nodes,
-//!   ROM recovery path, sub-node polling).
+//! - `relay`: the relay of `dagon-relay` on this MCU ([`relay`]: its
+//!   links built from RP2040 peripherals, its tasks and clock).
 //! - Linker memory map: an APP slot body by default (slot B with
 //!   `slot-b`), so apps need no build.rs; `image-stage0` / `image-bootcore`
 //!   for the boot images in `stage0/` and `bootcore/`.

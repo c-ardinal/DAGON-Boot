@@ -2,10 +2,14 @@
 
 DAGON for RP2040 firmware: the flash layout and linker map, the boot images
 (stage0 and the boot core), the flash port, the liveness-gated watchdog, the
-slot store, DAGON over USB CDC, DAGON's high-priority executor, the 親機
-relay (PC link, relaying to 子機 over I2C0 and a PIO UART, the STM32 ROM
-recovery path) and the link drivers. Topology MCU id `rp2040`, flash map
-`rp2040-4m`. RP2040 nodes are 親機.
+slot store, DAGON over USB CDC, DAGON's high-priority executor, the link
+drivers, and what runs the relay on this MCU: the relay itself is
+`dagon-relay` (`../../../crates/dagon-relay`), independent of the MCU; this
+package builds its links from RP2040 peripherals (USB CDC to the PC, I2C0
+and a PIO UART to other nodes, the NRST / BOOT0 lines of an STM32 node for
+the ROM recovery path) and runs it in its tasks (`relay`). The `[coordinator]`
+section of `dagon-mcu.toml` is what lets an RP2040 node relay. Topology MCU
+id `rp2040`, flash map `rp2040-4m`.
 
 Board-specific values (pins, which link is wired where, flash size, display
 and other extras) live in a board package that implements two traits:
@@ -41,7 +45,7 @@ DAGON_TARGET_TAG = { value = "my-hub", force = true }
 ```rust
 use dagon_board_waveshare_rp2040_touch_lcd_1_28::{self as board, Board, BoardDef};
 use dagon_mcu_rp2040::links::{self, Kind};
-use dagon_mcu_rp2040::relay::{self, RelayConfig};
+use dagon_mcu_rp2040::relay::{self, Setup};
 use dagon_mcu_rp2040::watchdog::{now_ms, Guard, Trial};
 
 // The hops, as dagon gen writes them from the 構成.
@@ -60,13 +64,20 @@ static GUARD: Guard<TASKS> = Guard::new(
 #[embassy_executor::main]
 async fn main(spawner: embassy_executor::Spawner) {
     let (dagon, io) = Board::split(embassy_rp::init(Default::default()));
-    let cfg = RelayConfig {
+    let setup = Setup {
         tag: dagon_mcu_rp2040::target_tag!(),
+        // The node's index in the 構成 (wiring.rs).
+        index: wiring::NODE.index,
+        // The role the 構成 gives this node (wiring.rs).
+        role: if wiring::NODE.hub { relay::role::HUB } else { relay::role::NODE },
         name: "my-hub",
-        fallback: &[],
         app: app::dagon(),
+        // The relay's state, shared with the display.
+        state: relay::new_state(),
+        // dagon_relay::Config: the relay's defaults.
+        relay: Default::default(),
     };
-    let (spare, _events) = board::start(spawner, dagon, io, &GUARD, cfg, UPLINK, DOWNLINKS);
+    let (spare, _events) = board::start(spawner, dagon, io, &GUARD, setup, UPLINK, DOWNLINKS);
     app::start(spawner, spare, &GUARD, board::APP_TASKS);
 }
 ```
@@ -105,11 +116,12 @@ async fn work(spare: Spare, lease: Lease) {
 ```
 
 `board::start` runs the relay: it opens the slot store and the agent
-(taking over the watchdog the boot core started), spawns the PC task and
-one task per sub-node link on DAGON's high-priority executor (`exec`, an
-interrupt executor on SWI_IRQ_0 at P1, guard tasks 0..3 `Preempting`), and
-the watchdog feeder and the display on `spawner` (thread mode,
-`Background`), and returns the board's `Spare` pins and peripherals (free
+(taking over the watchdog the boot core started), spawns the PC task
+(`dagon_relay::serve`) and one task per link (`dagon_relay::run_link`) on
+DAGON's high-priority executor (`exec`, an interrupt executor on SWI_IRQ_0
+at P1, guard tasks 0..3 `Preempting`), and the watchdog feeder and the
+display on `spawner` (thread mode, `Background`; the display reads the
+relay's state), and returns the board's `Spare` pins and peripherals (free
 GPIOs, I2C1, SPI0, UART0/1, PIO1, ADC, DMA channels) for the app. Your tasks run in thread mode below the relay, so they never
 delay it; a stuck one stops the feeding and the chip resets (a version on
 trial then rolls back). Build with `DAGON_PUBKEY` set (below);
@@ -177,7 +189,7 @@ link on the board's pins; link types are constructed as
 | (none) | layout, image checks, frames, liveness, tag check (host-testable) |
 | `hal` | `node`, `flash`, `watchdog`, `store`, `links`, `sub`; `PUBKEY` / `TEST_KEY` |
 | `usb` | `usb`, `exec` and `node::start` (this package binds `USBCTRL_IRQ` and `SWI_IRQ_0`) |
-| `relay` (default) | `relay`: the 親機 relay |
+| `relay` (default) | `relay`: runs `dagon-relay` on this MCU's links |
 | `slot-b` | link the app for APP slot B |
 | `image-stage0`, `image-bootcore` | link the boot images instead of an app |
 | `diag-panic` | a panic blinks the last `arm::step` code on the board's LED |

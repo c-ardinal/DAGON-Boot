@@ -3,7 +3,7 @@
 //! node.
 
 use dagon_proto::payload::I2cRaw;
-use dagon_proto::{frame_len, max_payload, Status};
+use dagon_proto::{max_payload, Status};
 
 use crate::RelayLink;
 
@@ -14,7 +14,7 @@ pub fn relay_fits(links: &[RelayLink], l: u8, addr: u8, inner_len: usize) -> boo
     links
         .iter()
         .find(|k| k.id == l)
-        .is_some_and(|k| k.addressing.accepts(addr) && inner_len <= frame_len(k.max_payload))
+        .is_some_and(|k| k.fits(addr, inner_len))
 }
 
 /// Longest I2C_RAW read that fits the USB response.

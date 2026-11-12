@@ -7,8 +7,10 @@
 - dagon-port does not depend, directly or through its path dependencies,
   on dagon-agent, dagon-events or dagon-mcu-common.
 - dagon-relay's normal dependencies are among RELAY_ALLOWED, and nothing
-  they reach through path dependencies is embassy-time, dagon-sim or an
-  MCU or board package; dagon-sim and dagon-wasm do not depend on it.
+  they reach through path dependencies is dagon-agent, dagon-events,
+  embassy-time, dagon-sim or an MCU or board package (the relay reaches
+  the node's agent through its own trait); dagon-sim and dagon-wasm do not
+  depend on it.
 - dagon-relay names no link id or topology interface of a particular MCU
   (`link::I2C0`, `link::PIO_UART`, `iface::I2C_BUS`, `iface::PIO_UART`):
   the MCU package passes its links in.
@@ -18,6 +20,25 @@
   inside the RP2040 MCU package, which re-exports nothing of dagon-relay.
   No Rust file names the replaced node names (`SubNode`, `Subs`,
   `MAX_SUBS`) or brings an item in under a sub, parent or child name.
+- The relay logic lives in dagon-relay only: it declares the serving
+  loop, the link worker, the request port, the configuration and the
+  state there; dagon-relay holds no `static` (its state is an instance its
+  caller owns) and no struct with a field per link kind (`i2c`, `uart`):
+  its links are a list. No production file under `targets/` declares the
+  relay logic items the RP2040 package once held (`Pc`, `Port`, `Req`,
+  `Resp`, `Op`, `RelayConfig`, the state's statics and functions), the
+  RP2040 package keeps its relay glue in one file (`relay.rs`), and no Rust
+  file names the old paths (`dagon_mcu_rp2040::relay::{state, pc, ports,
+  task, Pc, Port, RelayConfig}`, those modules inside the RP2040 package).
+- Neither dagon-relay nor the RP2040 relay glue assumes where the node sits
+  in the topology: no `role::HUB`, no item or field named hub, no "hub"
+  name, no node index 0 written as this node's (`named(0, ..)`, `index: 0`,
+  `index: Some(0)`); the caller injects the node's index and role.
+- The node's index is what identifies it: neither dagon-relay nor the
+  RP2040 relay glue finds the node by comparing an image tag (several nodes
+  may run images with one tag) or takes the index as optional, and each
+  template that starts the relay passes the index `dagon gen` writes
+  (`wiring::NODE.index`).
 
     python -m unittest discover -s scripts -p "test_*.py"
 """
@@ -51,10 +72,12 @@ RELAY_SRC = "crates/dagon-relay/src/"
 # reaches may be (the relay is MCU-independent and no_std; dagon-sim is
 # for its tests only).
 RELAY_ALLOWED = {
-    "dagon-agent", "dagon-port", "dagon-proto", "dagon-format",
-    "heapless", "embassy-sync", "embassy-futures", "portable-atomic",
+    "dagon-port", "dagon-proto", "dagon-format",
+    "heapless", "embassy-sync", "embassy-futures",
 }
-RELAY_FORBIDDEN = {"embassy-time", "dagon-sim"}
+# dagon-agent reaches dagon-events, whose crates each register their state
+# machines with dagon-catalog; the relay has none.
+RELAY_FORBIDDEN = {"dagon-agent", "dagon-events", "embassy-time", "dagon-sim"}
 RELAY_FORBIDDEN_PREFIXES = ("dagon-mcu-", "dagon-board-")
 # Packages that must not depend on the relay (the simulator stays as is).
 RELAY_FREE = ("crates/dagon-sim/Cargo.toml", "crates/dagon-wasm/Cargo.toml")
@@ -78,6 +101,52 @@ OLD_NAMES = (
     re.compile(r"\b(?:SubNode|Subs|MAX_SUBS)\b"),
     re.compile(r"\bas\s+(?:\w*_)?(?:[Ss]ub|[Pp]arent|[Cc]hild|SUB|PARENT|CHILD)(?:[A-Z_]\w*)?\b"),
 )
+
+# The relay logic dagon-relay declares: (kind, name).
+RELAY_LOGIC = (
+    ("fn", "serve"), ("fn", "run_link"), ("struct", "Port"),
+    ("struct", "State"), ("struct", "LinkRoute"), ("struct", "Config"),
+)
+# Relay logic items the RP2040 package held; no production file under
+# targets/ declares them again.
+OLD_LOGIC = re.compile(
+    r"\b(?:(?:struct|enum|type)\s+(?:Pc|Port|Req|Resp|Op|RelayConfig|LinkRoute)"
+    r"|fn\s+(?:run_link|relayed_seen|pc_quiet|pc_active|expire_progress|set_seen_at|set_seen)"
+    r"|static\s+(?:REDRAW|QUIET_UNTIL|I2C_PORT|UART_PORT|NEXT_ID))\b"
+)
+# Files under targets/ declaring a name OLD_LOGIC matches: path -> why it
+# is not the relay's.
+OLD_LOGIC_OTHERS = {
+    "targets/mcu/esp32s3/src/tests_factory.rs": "the ESP32-S3 host test's PC (a `#[cfg(test)]` module of its lib.rs), not the relay's",
+}
+OLD_LOGIC_ITEMS = r"(?:state|pc|ports|task|Pc|Port|RelayConfig)"
+OLD_LOGIC_PATHS = (
+    re.compile(rf"\bdagon_mcu_rp2040\s*::\s*relay\s*::\s*{OLD_LOGIC_ITEMS}\b"),
+    re.compile(rf"\bdagon_mcu_rp2040\s*::\s*relay\s*::\s*\{{[^}}]*\b{OLD_LOGIC_ITEMS}\b"),
+)
+OLD_LOGIC_INSIDE = (
+    re.compile(r"\b(?:crate|super)\s*::\s*(?:relay\s*::\s*)?(?:state|pc|ports|task)\s*::"),
+    re.compile(r"\bmod\s+(?:state|pc|ports|task)\b"),
+)
+RP_GLUE = f"{RP_PACKAGE}relay.rs"
+# A node's place in the topology written into the relay: a hub role, item,
+# field or name, or node index 0 as this node's.
+PLACE_IN_CODE = re.compile(
+    r"\brole\s*::\s*HUB\b|\b(?:const|static|fn)\s+HUB\b|\bhub\s*:|\bnamed\s*\(\s*0\s*,"
+    r"|\bindex\s*:\s*(?:Some\s*\(\s*)?0\b"
+)
+PLACE_IN_TEXT = re.compile(r'"hub"')
+# The node identified by an image tag, or an identity whose index may be
+# missing (and so is looked up by tag).
+TAG_IDENTITY = re.compile(
+    r"\b\w*tag\s*[!=]=|[!=]=\s*[&*]*[\w.:()]*?tag\b|\bindex\s*:\s*Option\s*<"
+)
+TEMPLATE_MAIN = re.compile(r"^targets/.+/template/src/main\.rs$")
+RELAY_SETUP = re.compile(r"\bSetup\s*\{")
+GENERATED_INDEX = re.compile(r"\bindex\s*:\s*wiring\s*::\s*NODE\s*\.\s*index\b")
+RELAY_STATIC = re.compile(r"\bstatic\s+(?:mut\s+)?\w+\s*:")
+STRUCT_BODY = re.compile(r"\bstruct\s+(\w+)[^;{]*\{")
+LINK_KIND_FIELD = re.compile(r"(?:^|[{,])\s*(?:pub(?:\([^)]*\))?\s+)?(\w*(?:i2c|uart)\w*)\s*:", re.IGNORECASE)
 
 TEST_MOD = re.compile(r"#\[cfg\(test\)\]\s*(?:#\[[^\]]*\]\s*)*(?:pub(?:\([^)]*\))?\s+)?mod\s+\w+\s*\{")
 
@@ -220,9 +289,62 @@ def relay_source_problems(codes):
     return out
 
 
+def production(code):
+    """`code` with its `#[cfg(test)]` modules blanked."""
+    for a, b in reversed(cfg_test_spans(code)):
+        code = code[:a] + " " * (b - a) + code[b:]
+    return code
+
+
+def struct_bodies(code):
+    """(name, body) of every braced struct in `code`."""
+    for m in STRUCT_BODY.finditer(code):
+        depth, i = 1, m.end()
+        while i < len(code) and depth:
+            depth += {"{": 1, "}": -1}.get(code[i], 0)
+            i += 1
+        yield m.group(1), code[m.end():i - 1]
+
+
+def relay_logic_problems(codes, texts):
+    out = []
+    relay = {p: production(c) for p, c in codes.items() if p.startswith(RELAY_SRC) and not is_test_path(p)}
+    for kind, name in RELAY_LOGIC:
+        if not any(re.search(rf"\b{kind}\s+{name}\b", c) for c in relay.values()):
+            out.append(f"dagon-relay declares no {kind} {name}")
+    for path, code in sorted(relay.items()):
+        if m := RELAY_STATIC.search(code):
+            out.append(f"{path} holds a static ({' '.join(m.group(0).split())}): the caller owns the relay's state")
+        for name, body in struct_bodies(code):
+            for f in LINK_KIND_FIELD.finditer(body):
+                out.append(f"{path}: struct {name} has a field {f.group(1)} for one link kind: the links are a list")
+    for path, code in sorted({**relay, RP_GLUE: production(codes.get(RP_GLUE, ""))}.items()):
+        if m := PLACE_IN_CODE.search(code):
+            out.append(f"{path} assumes the node's place ({' '.join(m.group(0).split())}): the caller injects it")
+        if m := TAG_IDENTITY.search(code):
+            out.append(f"{path} identifies the node by its tag ({' '.join(m.group(0).split())}): the index does")
+    for path, code in sorted(codes.items()):
+        if TEMPLATE_MAIN.match(path) and RELAY_SETUP.search(code) and not GENERATED_INDEX.search(code):
+            out.append(f"{path} starts the relay without the index dagon gen writes (wiring::NODE.index)")
+    for path, text in sorted(texts.items()):
+        if (path.startswith(RELAY_SRC) and not is_test_path(path) or path == RP_GLUE) and PLACE_IN_TEXT.search(production(text)):
+            out.append(f"{path} names this node \"hub\": the caller injects its name")
+    for path, code in sorted(codes.items()):
+        if path.startswith(f"{RP_PACKAGE}relay/"):
+            out.append(f"{path}: the RP2040 package keeps only the relay's glue, in relay.rs")
+        if path.startswith("targets/") and not is_test_path(path) and path not in OLD_LOGIC_OTHERS:
+            if m := OLD_LOGIC.search(production(code)):
+                out.append(f"{path} declares the relay logic item {' '.join(m.group(0).split())}")
+        rules = OLD_LOGIC_PATHS + (OLD_LOGIC_INSIDE if path.startswith(RP_PACKAGE) else ())
+        for rule in rules:
+            if m := rule.search(code):
+                out.append(f"{path} names the old relay path {' '.join(m.group(0).split())}")
+    return out
+
+
 def problems(texts, read=read_manifest):
     codes = {path: code_of(text) for path, text in texts.items()}
-    out = relay_dependency_problems(read) + relay_source_problems(codes)
+    out = relay_dependency_problems(read) + relay_source_problems(codes) + relay_logic_problems(codes, texts)
     if (t := definitions(codes, "NodeLink", r"\btrait\s+{name}\b")) != [PORT_LIB]:
         out.append(f"trait NodeLink in {t}, expected only {PORT_LIB}")
     for name, expected in HELPERS.items():
@@ -342,6 +464,8 @@ class RelayCrate(unittest.TestCase):
             'embassy-time = "0.5"',
             'dagon-sim = { path = "../dagon-sim" }',
             'dagon-events = { path = "../dagon-events" }',
+            'dagon-agent = { path = "../dagon-agent" }',
+            'portable-atomic = "1"',
             'clock = { package = "embassy-time", version = "0.5" }',
             'dagon-mcu-rp2040 = { path = "../../targets/mcu/rp2040" }',
         ):
@@ -350,12 +474,13 @@ class RelayCrate(unittest.TestCase):
                     self.assertTrue(self.with_entries({RELAY_MANIFEST: (header, entry)}))
 
     def test_a_forbidden_package_through_a_path_dependency_fails(self):
-        for entry in ('embassy-time = "0.5"', 'dagon-board-x = "0.1"'):
+        for entry in ('embassy-time = "0.5"', 'dagon-board-x = "0.1"', 'dagon-agent = { path = "../dagon-agent" }'):
             with self.subTest(entry=entry):
                 self.assertTrue(self.with_entries({PORT_MANIFEST: ("[dependencies]", entry)}))
 
     def test_the_simulator_as_a_dev_dependency_passes(self):
-        planted = {RELAY_MANIFEST: ("[dev-dependencies]", 'dagon-sim = { path = "../dagon-sim" }')}
+        # Under a second name: the relay's host test already names dagon-sim.
+        planted = {RELAY_MANIFEST: ("[dev-dependencies]", 'sim = { package = "dagon-sim", path = "../dagon-sim" }')}
         self.assertEqual(self.with_entries(planted), [])
 
     def test_the_simulator_depending_on_the_relay_fails(self):
@@ -414,6 +539,141 @@ class RelayCrate(unittest.TestCase):
             f"{RP_PACKAGE}planted.rs": "use dagon_relay::nodes::LinkedNode;\nuse crate::sub::SubLines;\nuse x::Node as Peer;\n",
         }
         self.assertEqual(problems(planted), [])
+
+
+class RelayLogic(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.texts = rust_texts()
+
+    def planted(self, path, extra):
+        return problems({**self.texts, path: self.texts.get(path, "") + "\n" + extra})
+
+    def test_a_static_in_the_relay_fails(self):
+        for code in (
+            "static STATE: State = State::new();\n",
+            "pub static mut SEEN: u8 = 0;\n",
+            "pub(crate) static PORTS: [Port; 2] = [Port::new(), Port::new()];\n",
+        ):
+            with self.subTest(code=code):
+                self.assertTrue(self.planted(f"{RELAY_SRC}state.rs", code))
+
+    def test_a_static_in_relay_test_code_or_a_const_passes(self):
+        for path, code in (
+            (f"{RELAY_SRC}state.rs", "#[cfg(test)]\nmod tests {\n    static N: u8 = 0;\n}\n"),
+            (f"{RELAY_SRC}state.rs", "const N: usize = 3;\n// static X: u8 = 0;\n"),
+            ("crates/dagon-relay/tests/planted.rs", "static N: u8 = 0;\n"),
+        ):
+            with self.subTest(path=path, code=code):
+                self.assertEqual(self.planted(path, code), [])
+
+    def test_a_field_per_link_kind_fails(self):
+        for code in (
+            "pub struct Links<A, B> { pub i2c: A, pub uart: B }\n",
+            "struct Relay {\n    has_i2c: bool,\n}\n",
+            "pub struct R<'a> { port: u8, pub(crate) Uart_port: &'a u8 }\n",
+        ):
+            with self.subTest(code=code):
+                self.assertTrue(self.planted(f"{RELAY_SRC}lib.rs", code))
+
+    def test_a_missing_relay_logic_item_fails(self):
+        for kind, name in RELAY_LOGIC:
+            with self.subTest(name=name):
+                texts = {
+                    p: re.sub(rf"\b{kind}\s+{name}\b", f"{kind} Renamed{name}", t) if p.startswith(RELAY_SRC) else t
+                    for p, t in self.texts.items()
+                }
+                self.assertTrue(problems(texts))
+
+    def test_relay_logic_declared_under_targets_fails(self):
+        for path, code in (
+            (f"{RP_PACKAGE}relay.rs", "pub struct Pc { x: u8 }\n"),
+            (f"{RP_PACKAGE}relay.rs", "pub enum Op { Relay }\n"),
+            (f"{RP_PACKAGE}relay.rs", "pub struct RelayConfig;\n"),
+            ("targets/boards/x/src/hal.rs", "pub static REDRAW: Signal<Cs, ()> = Signal::new();\n"),
+            ("targets/mcu/common/src/planted.rs", "pub async fn run_link() {}\n"),
+            ("targets/rp2040-hub/src/main.rs", "fn pc_quiet() -> bool { true }\n"),
+            (f"{RP_PACKAGE}relay/state.rs", "const X: u8 = 0;\n"),
+        ):
+            with self.subTest(path=path, code=code):
+                self.assertTrue(self.planted(path, code))
+
+    def test_an_old_relay_logic_path_fails(self):
+        for path, code in (
+            ("targets/boards/x/src/display.rs", "use dagon_mcu_rp2040::relay::state;\n"),
+            ("targets/boards/x/src/hal.rs", "fn f(c: dagon_mcu_rp2040::relay::RelayConfig) {}\n"),
+            ("targets/boards/x/src/hal.rs", "use dagon_mcu_rp2040::relay::{self, task};\n"),
+            (f"{RP_PACKAGE}relay.rs", "mod ports;\n"),
+            (f"{RP_PACKAGE}relay.rs", "pub mod state;\n"),
+            (f"{RP_PACKAGE}relay.rs", "fn f() { super::state::home(); }\n"),
+            (f"{RP_PACKAGE}node.rs", "use crate::relay::pc::Pc;\n"),
+        ):
+            with self.subTest(path=path, code=code):
+                self.assertTrue(self.planted(path, code))
+
+    def test_an_assumed_place_in_the_topology_fails(self):
+        for path, code in (
+            (f"{RELAY_SRC}pc.rs", "const R: u8 = role::HUB;\n"),
+            (f"{RELAY_SRC}nodes.rs", "pub const HUB: LinkedNode = named(1, \"x\", 0, 0);\n"),
+            (f"{RELAY_SRC}view.rs", "pub struct H { pub hub: Node }\n"),
+            (f"{RELAY_SRC}state.rs", "const OWN: LinkedNode = named(0, \"x\", 0, 0);\n"),
+            (f"{RELAY_SRC}state.rs", "fn own() -> LinkedNode { LinkedNode { index: 0, ..Default::default() } }\n"),
+            (f"{RELAY_SRC}nodes.rs", "const NAME: &str = \"hub\";\n"),
+            (RP_GLUE, "fn r() -> u8 { role::HUB }\n"),
+            (RP_GLUE, "const ME: Identity = Identity { index: Some(0), tag: \"\" };\n"),
+        ):
+            with self.subTest(path=path, code=code):
+                self.assertTrue(self.planted(path, code))
+
+    def test_an_identity_by_tag_fails(self):
+        for path, code in (
+            (f"{RELAY_SRC}nodes.rs", "fn f(t: &TopologyView, tag: [u8; 16]) -> Option<usize> {\n    (0..t.node_count()).find(|&i| t.node(i).target_tag == tag)\n}\n"),
+            (f"{RELAY_SRC}nodes.rs", "fn f(n: &TopoNode, me: Identity) -> bool { target_tag(me.tag) == n.target_tag }\n"),
+            (f"{RELAY_SRC}pc.rs", "fn f(a: &str, b: &str) -> bool { a != b.tag }\n"),
+            (f"{RELAY_SRC}nodes.rs", "pub struct Me { pub index: Option<u8> }\n"),
+            (RP_GLUE, "pub struct S { pub index: Option<u8> }\n"),
+        ):
+            with self.subTest(path=path, code=code):
+                self.assertTrue(self.planted(path, code))
+
+    def test_a_template_without_the_generated_index_fails(self):
+        for path in ("targets/mcu/rp2040/template/src/main.rs", "targets/boards/waveshare-rp2040-touch-lcd-1.28/template/src/main.rs"):
+            text = self.texts[path]
+            self.assertIn("wiring::NODE.index", text)
+            for index in ("0", "1"):
+                with self.subTest(path=path, index=index):
+                    texts = {**self.texts, path: text.replace("wiring::NODE.index", index)}
+                    self.assertTrue(problems(texts))
+
+    def test_a_tag_as_a_name_or_in_test_code_passes(self):
+        for path, code in (
+            (f"{RELAY_SRC}nodes.rs", "fn f(me: Identity) -> [u8; 16] { short_name(&target_tag(me.tag)) }\n"),
+            (f"{RELAY_SRC}nodes.rs", "#[cfg(test)]\nmod tests {\n    fn f(a: u8, tag: u8) -> bool { a == tag }\n}\n"),
+            ("crates/dagon-relay/tests/planted.rs", "fn f(a: u8, tag: u8) -> bool { a == tag }\n"),
+            ("targets/rp2040-hub/src/main.rs", "struct S { index: Option<u8> }\n"),
+        ):
+            with self.subTest(path=path, code=code):
+                self.assertEqual(self.planted(path, code), [])
+
+    def test_a_place_in_relay_tests_or_an_injected_role_passes(self):
+        for path, code in (
+            (f"{RELAY_SRC}nodes.rs", "#[cfg(test)]\nmod tests {\n    const A: u8 = role::HUB;\n    fn f() { named(0, \"hub\", 0, 0); }\n}\n"),
+            ("crates/dagon-relay/tests/planted.rs", "const R: u8 = role::HUB;\n"),
+            ("targets/rp2040-hub/src/main.rs", "const R: u8 = relay::role::HUB;\n"),
+            (RP_GLUE, "fn r(s: Setup) -> u8 { s.role }\n// role::HUB\n"),
+        ):
+            with self.subTest(path=path, code=code):
+                self.assertEqual(self.planted(path, code), [])
+
+    def test_the_glue_and_test_code_pass(self):
+        for path, code in (
+            (f"{RP_PACKAGE}relay.rs", "use dagon_relay::{serve, run_link, Port, State};\npub const TASKS: usize = 3;\n"),
+            ("targets/boards/x/src/hal.rs", "use dagon_mcu_rp2040::relay::{self, Links, Setup};\nfn f() { relay::levels::<4>(); }\n"),
+            ("targets/mcu/common/tests/planted.rs", "struct Port;\nenum Op { A }\n"),
+            ("targets/mcu/common/src/planted.rs", "#[cfg(test)]\nmod tests {\n    struct Pc;\n}\n// struct Port\n"),
+        ):
+            with self.subTest(path=path, code=code):
+                self.assertEqual(self.planted(path, code), [])
 
 
 if __name__ == "__main__":

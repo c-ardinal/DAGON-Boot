@@ -328,6 +328,8 @@ dependencies = [
  "dagon-format",
  "dagon-port",
  "dagon-proto",
+ "embassy-futures",
+ "embassy-sync",
  "heapless",
 ]
 

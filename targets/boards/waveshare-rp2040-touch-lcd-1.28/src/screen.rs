@@ -56,12 +56,12 @@ pub fn draw<D: DrawTarget<Color = Rgb565>>(
 ) -> Result<(), D::Error> {
     d.clear(Rgb565::BLACK)?;
     let p = home.progress.as_ref();
-    node(d, HUB_AT, HUB_D, &home.hub, p, &FONT_10X20)?;
+    node(d, HUB_AT, HUB_D, &home.own, p, &FONT_10X20)?;
     for (&at, n) in sub_at(home.linked.len()).iter().zip(&home.linked) {
         node(d, at, SUB_D, n, p, &FONT_6X10)?;
     }
     if let Some(p) = p {
-        let name = core::iter::once(&home.hub)
+        let name = core::iter::once(&home.own)
             .chain(&home.linked)
             .find(|n| n.node.index == p.node)
             .map_or("?", |n| n.node.name());

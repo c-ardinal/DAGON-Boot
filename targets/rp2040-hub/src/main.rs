@@ -1,6 +1,6 @@
-//! DAGON hub app (RP2040-Touch-LCD-1.28): the 親機 relay of the RP2040
-//! package (`dagon_mcu_rp2040::relay`) on the Waveshare board package, with
-//! the round display's home screen.
+//! DAGON hub app (RP2040-Touch-LCD-1.28): the relay (`dagon_relay`, started
+//! by `dagon_mcu_rp2040::relay`) on the Waveshare board package, with the
+//! round display's home screen.
 //!
 //! USB CDC carries DAGON frames from the PC. RELAY goes to the F401 on I2C0
 //! or the watch on the PIO UART, SHOW drives the LCD progress screen, SUBCTL
@@ -24,10 +24,11 @@ use dagon_board_waveshare_rp2040_touch_lcd_1_28 as board;
 use dagon_mcu_rp2040::arm::{led, step};
 use dagon_mcu_rp2040::links::Kind;
 use dagon_mcu_rp2040::node::{always, App};
-use dagon_mcu_rp2040::relay::{self, RelayConfig};
+use dagon_mcu_rp2040::relay::{self, Setup};
 use dagon_mcu_rp2040::watchdog::{now_ms, Guard, Trial};
 use dagon_proto::payload::link;
 use dagon_relay::nodes::{named, LinkedNode};
+use dagon_relay::Config;
 use embassy_executor::Executor;
 use static_cell::StaticCell;
 
@@ -58,11 +59,19 @@ fn main() -> ! {
     step(10);
     let (dagon, io) = Board::split(embassy_rp::init(Default::default()));
     step(11);
-    let cfg = RelayConfig {
+    let setup = Setup {
         tag: dagon_mcu_rp2040::target_tag!(),
+        // This firmware is the sample topology's coordinator, its node 0
+        // (SAMPLE_WIRING lists the others).
+        index: 0,
+        role: relay::role::HUB,
         name: "DAGON hub",
-        fallback: &SAMPLE_WIRING,
         app: App::new(always),
+        state: relay::new_state(),
+        relay: Config {
+            fallback: &SAMPLE_WIRING,
+            ..Config::default()
+        },
     };
     EXECUTOR_LOW.init(Executor::new()).run(|low| {
         step(12);
@@ -71,7 +80,7 @@ fn main() -> ! {
             dagon,
             io,
             &GUARD,
-            cfg,
+            setup,
             Kind::UsbCdc,
             &[Kind::I2c, Kind::Uart],
         );

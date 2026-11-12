@@ -85,6 +85,31 @@ pub struct EraseRegion {
     pub unit_max_ms: u32,
 }
 
+impl EraseRegion {
+    /// Regions from generated `(start, len, unit, unit_max_ms)` rows (a
+    /// board's or a node's generated erase regions), in a constant.
+    pub const fn table<const N: usize>(rows: [(u32, u32, u32, u32); N]) -> [EraseRegion; N] {
+        let mut out = [EraseRegion {
+            start: 0,
+            len: 0,
+            unit: 0,
+            unit_max_ms: 0,
+        }; N];
+        let mut i = 0;
+        while i < N {
+            let (start, len, unit, unit_max_ms) = rows[i];
+            out[i] = EraseRegion {
+                start,
+                len,
+                unit,
+                unit_max_ms,
+            };
+            i += 1;
+        }
+        out
+    }
+}
+
 /// Where a slot keeps its image header.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum HeaderPlace {

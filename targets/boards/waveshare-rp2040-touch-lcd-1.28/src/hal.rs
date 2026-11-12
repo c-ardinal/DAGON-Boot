@@ -4,6 +4,7 @@
 use dagon_mcu_rp2040::links::{I2cLink, Kind, PioStream, RpI2c};
 pub use dagon_mcu_rp2040::node::DagonParts;
 use dagon_mcu_rp2040::sub::SubLines;
+use dagon_mcu_rp2040::EraseRegion;
 pub use dagon_mcu_rp2040::{BoardCore, BoardDef};
 use embassy_rp::gpio::{Level, Output};
 use embassy_rp::i2c::{self, I2c};
@@ -131,6 +132,7 @@ impl BoardCore for Board {
 }
 
 impl BoardDef for Board {
+    const ERASE_REGIONS: &'static [EraseRegion] = &EraseRegion::table(crate::def::ERASE_REGIONS);
     const DIAG_LED: Option<u8> = Some(DIAG_LED);
     const DIAG_LED_ACTIVE_HIGH: bool = crate::DIAG_LED_ACTIVE_HIGH;
     type UserIo = Io;

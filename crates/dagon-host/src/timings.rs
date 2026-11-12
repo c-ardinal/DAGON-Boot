@@ -51,10 +51,7 @@ pub fn node_timings(
         .iter()
         .enumerate()
         .map(|(i, n)| {
-            let board = match &n.board {
-                Some(b) => reg.board(b),
-                None => reg.default_board(&n.mcu),
-            };
+            let board = reg.node_board(n);
             let t = match reg.mcu(&n.mcu) {
                 Some(m) => mcu_timings(m, board)?,
                 None => NodeTimings::FALLBACK,

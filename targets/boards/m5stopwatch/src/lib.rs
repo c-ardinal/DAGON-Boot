@@ -38,6 +38,7 @@ use dagon_events::{BoardBringUp, BusError, Device, Shared};
 use dagon_mcu_esp32s3::board::BoardDef;
 use dagon_mcu_esp32s3::liveness::Liveness;
 use dagon_mcu_esp32s3::node::{self, NodeConfig, NodePeripherals, WatchdogArmed};
+use dagon_mcu_esp32s3::EraseRegion;
 use def::devices;
 use def::pins::{Link, LinkRx, LinkTx, Sys, SysScl, SysSda};
 use esp_hal::{
@@ -144,9 +145,17 @@ impl BoardBringUp for M5StopWatch {
     }
 }
 
+/// The erase regions this board's build generated (`def::ERASE_REGIONS`).
+const ERASE_REGIONS: [EraseRegion; def::ERASE_REGIONS.len()] =
+    EraseRegion::table(def::ERASE_REGIONS);
+
 impl BoardDef for M5StopWatch {
     fn id(&self) -> Option<&'static str> {
         Some(BOARD_ID)
+    }
+
+    fn erase_regions(&self) -> &'static [EraseRegion] {
+        &ERASE_REGIONS
     }
 
     fn bring_up_port(&mut self) -> Option<&mut dyn BoardBringUp> {

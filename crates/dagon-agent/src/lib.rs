@@ -39,6 +39,7 @@ pub use images::{ImageView, Transition};
 use dagon_events::Compact;
 use dagon_format::header::HEADER_SIZE;
 use dagon_format::Version;
+use dagon_port::timeout::{EraseLayout, Plan, PlanError};
 use dagon_proto::payload::{self, StatusResp};
 
 // Links the standard library's critical section on hosted targets.
@@ -331,6 +332,34 @@ impl Compact for AbortCause {
     }
 }
 
+/// The erase a new body of `len` bytes into `slot` of `target` takes under
+/// `layout`: the shared planner ([`EraseLayout::plan`], the plan a host
+/// waits for) with the transfer's header length (none for the topology, an
+/// image header otherwise, as XFER_BEGIN requires). A target and slot the
+/// layout has no plan for is `Unsupported`; a body larger than the slot, or
+/// flash outside the erase regions, `Range`.
+pub fn erase_plan<
+    'l,
+    R: AsRef<[dagon_port::timeout::EraseRegion]>,
+    S: AsRef<[dagon_port::timeout::SlotLayout]>,
+>(
+    layout: &'l EraseLayout<R, S>,
+    target: u8,
+    slot: u8,
+    len: u32,
+) -> Result<Plan<'l>, StoreError> {
+    let hdr_len = match target {
+        payload::target::TOPOLOGY => 0,
+        _ => HEADER_SIZE as u32,
+    };
+    layout
+        .plan(target, slot, hdr_len, len)
+        .map_err(|e| match e {
+            PlanError::NoSlot => StoreError::Unsupported,
+            PlanError::TooLong | PlanError::Uncovered { .. } => StoreError::Range,
+        })
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum StoreError {
     /// Erase, program or read-back failed.
@@ -364,8 +393,36 @@ pub trait SlotStore {
 
     /// Erases what a new body of `len` bytes occupies (rounded up to the erase
     /// unit, not the whole slot) and, for APP, the slot's header place, which
-    /// must read back as erased until [`SlotStore::write_header`].
+    /// must read back as erased until [`SlotStore::write_header`]. Called
+    /// only for a store without an [`SlotStore::erase_layout`].
     fn erase(&mut self, target: u8, slot: u8, len: u32, t: &Transition) -> Result<(), StoreError>;
+
+    /// The flash this store erases in and the slots it receives into (the
+    /// MCU definition's `[execution] erase_regions` and `[[slot_layout]]`,
+    /// as the MCU package's build generates them). With one, the agent
+    /// plans every erase ([`dagon_port::timeout::EraseLayout::plan`], the
+    /// plan a host waits for) and hands it to [`SlotStore::erase_planned`];
+    /// a target and slot the layout has no plan for is refused. `None`:
+    /// the agent calls [`SlotStore::erase`].
+    fn erase_layout(&self) -> Option<EraseLayout> {
+        None
+    }
+
+    /// Performs exactly the erase operations of `plan` (whole erase units,
+    /// in order), for a new body of `len` bytes into `slot` of `target`,
+    /// and nothing else; the slot then reads as [`SlotStore::erase`] leaves
+    /// it. Without its own implementation: [`SlotStore::erase`].
+    fn erase_planned(
+        &mut self,
+        target: u8,
+        slot: u8,
+        len: u32,
+        plan: Plan<'_>,
+        t: &Transition,
+    ) -> Result<(), StoreError> {
+        let _ = plan;
+        self.erase(target, slot, len, t)
+    }
 
     /// Writes body bytes. Offsets arrive in order without gaps; chunks are
     /// not aligned to the flash write unit or page, so an implementation may
@@ -596,6 +653,19 @@ impl<S: SlotStore + ?Sized> SlotStore for &core::cell::RefCell<S> {
     }
     fn erase(&mut self, target: u8, slot: u8, len: u32, t: &Transition) -> Result<(), StoreError> {
         self.borrow_mut().erase(target, slot, len, t)
+    }
+    fn erase_layout(&self) -> Option<EraseLayout> {
+        self.borrow().erase_layout()
+    }
+    fn erase_planned(
+        &mut self,
+        target: u8,
+        slot: u8,
+        len: u32,
+        plan: Plan<'_>,
+        t: &Transition,
+    ) -> Result<(), StoreError> {
+        self.borrow_mut().erase_planned(target, slot, len, plan, t)
     }
     fn write(
         &mut self,

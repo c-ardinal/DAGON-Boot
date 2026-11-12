@@ -362,6 +362,8 @@ name = "dagon-topology"
 version = "0.1.0"
 dependencies = [
  "dagon-format",
+ "dagon-port",
+ "dagon-proto",
  "serde",
  "serde_json",
  "toml",

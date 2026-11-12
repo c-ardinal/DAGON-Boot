@@ -291,6 +291,7 @@ fn source_tree_loads_and_equals_builtin() {
 }
 
 pub(super) const FAKE_MCU: &str = r#"
+format = 2
 id = "fake-m0"
 name = "FAKE-M0"
 wire_id = 0x7F01
@@ -342,6 +343,7 @@ hint = "SWD probe"
 
 pub(super) const FAKE_BOARD: &str = r#"
 product = "Fake Board"
+format = 2
 mcu = "fake-m0"
 flash_bytes = 0x20_0000
 i2c_target = true
@@ -644,15 +646,29 @@ fn definitions_state_their_format_and_unknown_formats_are_refused() {
     for b in reg().boards() {
         assert_eq!(b.format, Some(super::FORMAT), "{}", b.id);
     }
-    // Absent means the current format; a newer one is refused by number,
-    // even when it carries fields this reader does not know.
-    project_registry("format-absent", FAKE_MCU, FAKE_BOARD).unwrap();
-    let mcu = format!("format = 2\nnew_key = 1\n{FAKE_MCU}");
+    // Absent means format 1, which this reader refuses by number, as it
+    // refuses a newer one even when it carries fields it does not know.
+    let want = "definition format 1; this dagon reads definition format 2 ";
+    let mcu = FAKE_MCU.replace("format = 2\n", "");
+    let e = project_registry("format-absent", &mcu, FAKE_BOARD).unwrap_err();
+    assert!(e.msg.contains(want), "{e}");
+    let board = FAKE_BOARD.replace("format = 2\n", "");
+    let e = project_registry("format-absent-board", FAKE_MCU, &board).unwrap_err();
+    assert!(e.msg.contains(want), "{e}");
+    let mcu = FAKE_MCU.replace("format = 2", "format = 3\nnew_key = 1");
     let e = project_registry("format-mcu", &mcu, FAKE_BOARD).unwrap_err();
-    assert!(e.msg.contains("definition format 2"), "{e}");
-    let board = FAKE_BOARD.replace("mcu = ", "format = 9\nmcu = ");
+    assert!(e.msg.contains("definition format 3"), "{e}");
+    let board = FAKE_BOARD.replace("format = 2", "format = 9");
     let e = project_registry("format-board", FAKE_MCU, &board).unwrap_err();
     assert!(e.msg.contains("definition format 9"), "{e}");
+    // Format 1 (an MCU's `erase_unit`) is refused by number.
+    let mcu = FAKE_MCU.replace("format = 2", "format = 1");
+    let e = project_registry("format-mcu-1", &mcu, FAKE_BOARD).unwrap_err();
+    let want = "definition format 1; this dagon reads definition format 2 ";
+    assert!(e.msg.contains(want), "{e}");
+    let board = FAKE_BOARD.replace("format = 2", "format = 1");
+    let e = project_registry("format-board-1", FAKE_MCU, &board).unwrap_err();
+    assert!(e.msg.contains(want), "{e}");
 }
 
 #[test]
@@ -661,7 +677,7 @@ fn a_board_table_is_a_whole_board_definition() {
     // A node's values alone are no board: refused, naming what is missing.
     write(
         &dir.join("dagon.toml"),
-        "[board.seg]\nflash_bytes = 524288\n",
+        "[board.seg]\nformat = 2\nflash_bytes = 524288\n",
     );
     let e = Registry::load(&[Source::Project(&dir.join("dagon.toml"))]).unwrap_err();
     assert!(e.msg.contains("missing field `product`"), "{e}");
@@ -669,7 +685,7 @@ fn a_board_table_is_a_whole_board_definition() {
 
     write(
         &dir.join("dagon.toml"),
-        "[board.my-f401]\nproduct = \"My F401\"\nmcu = \"stm32f401re\"\n\
+        "[board.my-f401]\nformat = 2\nproduct = \"My F401\"\nmcu = \"stm32f401re\"\n\
          flash_bytes = 524288\ndrawing = \"nucleo-64\"\n",
     );
     let r = Registry::load(&[Source::Project(&dir.join("dagon.toml"))]).unwrap();
@@ -967,7 +983,7 @@ fn the_json_form_round_trips_and_is_validated_again() {
     assert_eq!(back.mcus(), without_doctor(&project));
     assert_eq!(back.boards(), project.boards());
     // A project's entry is made safe again on receipt, whatever was sent.
-    let board = "id = 'x'\nproduct = '<b>C:/Users/me</b>'\nmcu = 'rp2040'\n\
+    let board = "format = 2\nid = 'x'\nproduct = '<b>C:/Users/me</b>'\nmcu = 'rp2040'\n\
                  flash_bytes = 0x400000\ndrawing = 'pico'\n";
     let sent = serde_json::json!({
         "mcus": [{
@@ -1029,11 +1045,11 @@ fn project_text_that_is_not_a_plain_name_leaves_as_a_generic_label() {
     write(
         &dir.join("dagon.toml"),
         &format!(
-            "[board.my-pico]\nproduct = \"C:/Users/me/{secret}\"\nmcu = \"rp2040\"\n\
+            "[board.my-pico]\nformat = 2\nproduct = \"C:/Users/me/{secret}\"\nmcu = \"rp2040\"\n\
              flash_bytes = 0x40_0000\ndrawing = \"pico\"\n\
              header = [{{ pin = \"GPIO4\", label = \"{secret}\" }}, {{ pin = \"GPIO5\", label = \"D5\" }}]\n\
              default_link = {{ kind = \"i2c\", addr = 0x44, control = \"full\" }}\n\
-             [board.my-two]\nproduct = \"My Two\"\nmcu = \"rp2040\"\n\
+             [board.my-two]\nformat = 2\nproduct = \"My Two\"\nmcu = \"rp2040\"\n\
              flash_bytes = 0x40_0000\ndrawing = \"pico\"\n\
              default_link = {{ kind = \"i2c\", addr = 0x45, control = \"full\" }}\n"
         ),

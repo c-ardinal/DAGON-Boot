@@ -10,7 +10,10 @@ use std::ops::RangeInclusive;
 use dagon_format::header::HEADER_SIZE;
 use dagon_format::statelog::{FACE_HEADER_SIZE, RECORD_SIZE};
 
-use super::{board_boot, dma, execution, isolation, Binding, BoardDef, McuDef, Placement, Writer};
+use super::{
+    board_boot, dma, execution, isolation, slot_layout, Binding, BoardDef, McuDef, Placement,
+    Writer,
+};
 
 /// Slot/header placement: an image header.
 pub const HEADER: u32 = HEADER_SIZE as u32;
@@ -62,7 +65,7 @@ pub const MCU: &[Requirement<McuCheck>] = &[
     Requirement {
         engine: "definition reader",
         fields: &["format"],
-        rule: "left out or FORMAT; checked before the other fields are read",
+        rule: "FORMAT (left out is 1); checked before the other fields are read",
         check: any,
     },
     Requirement {
@@ -216,12 +219,24 @@ pub const MCU: &[Requirement<McuCheck>] = &[
         engine: "execution model (flash operations, masking budget)",
         fields: &[
             "execution.masked_max_us",
-            "execution.erase_unit",
-            "execution.erase_unit_max_ms",
-            "execution.erase_unit_max_ms.unverified",
+            "execution.erase_regions[].start",
+            "execution.erase_regions[].len",
+            "execution.erase_regions[].unit",
+            "execution.erase_regions[].unit_max_ms",
+            "execution.erase_regions[].unit_max_ms.unverified",
         ],
-        rule: "each fact a number (checked against its source), { unverified = N } or \"unmeasured\" (erase_unit_max_ms needs a number either way); masked_max_us 1..=MASKED_MAX_US_LIMIT; erase_unit a power of two; erase_unit_max_ms >= 1, and 2 x erase_unit_max_ms <= watchdog.trial_ms and watchdog.confirmed_ms",
+        rule: "each fact a number (checked against its source), { unverified = N } or \"unmeasured\" (unit_max_ms needs a number either way); masked_max_us 1..=MASKED_MAX_US_LIMIT; at least one erase region; each region's len a whole number of units >= 1, start + len <= 2^32, no two overlapping; unit_max_ms >= 1, and 2 x unit_max_ms <= watchdog.trial_ms and watchdog.confirmed_ms",
         check: execution::execution,
+    },
+    Requirement {
+        engine: "erase planner (dagon_port::timeout, node and host)",
+        fields: &[
+            "slot_layout[].start",
+            "slot_layout[].capacity",
+            "slot_layout[].header.detached",
+        ],
+        rule: "only with [execution]; one per target and slot (topology: slot a); each slot[] image's target and slots have one, the slot it names agreeing with its start, largest body and header; a named partition is its start and size; the erase of the largest body, header included, lies in execution.erase_regions",
+        check: slot_layout::slot_layouts,
     },
     Requirement {
         engine: "conformance build (CONF_RUN scratch)",
@@ -251,8 +266,20 @@ pub const BOARD: &[Requirement<BoardCheck>] = &[
     Requirement {
         engine: "definition reader",
         fields: &["format"],
-        rule: "left out or FORMAT; checked before the other fields are read",
+        rule: "FORMAT (left out is 1); checked before the other fields are read",
         check: |_, _| Ok(()),
+    },
+    Requirement {
+        engine: "erase planner (dagon_port::timeout, node and host), with the board's MCU",
+        fields: &[
+            "flash.erase_regions[].start",
+            "flash.erase_regions[].len",
+            "flash.erase_regions[].unit",
+            "flash.erase_regions[].unit_max_ms",
+            "flash.erase_regions[].unit_max_ms.unverified",
+        ],
+        rule: "part named; the MCU's erase-region rules against the MCU's watchdog; the erase of each MCU slot layout's largest body lies in them",
+        check: slot_layout::board_flash,
     },
     Requirement {
         engine: "topology check V-16",

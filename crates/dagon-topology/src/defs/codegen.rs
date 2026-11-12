@@ -160,6 +160,28 @@ pub fn board_rs(b: &BoardDef) -> String {
         boot.led_active == Active::High,
         opt(blink),
     );
+    if let Some(f) = &b.flash {
+        let _ = writeln!(
+            o,
+            "/// `[flash] part`: the flash part the board carries.\npub const FLASH_PART: &str = {:?};\n\
+             /// `[flash] erase_regions`: what nodes on this board erase in, replacing the MCU's\n\
+             /// (the board's `BoardDef::erase_regions` returns them).\n\
+             pub const FLASH_ERASE_REGIONS: [dagon_port::timeout::EraseRegion; {}] = [",
+            f.part,
+            f.erase_regions.len()
+        );
+        for r in &f.erase_regions {
+            let _ = writeln!(
+                o,
+                "    dagon_port::timeout::EraseRegion {{ start: {:#x}, len: {:#x}, unit: {:#x}, unit_max_ms: {} }},",
+                r.start,
+                r.len,
+                r.unit,
+                r.unit_max_ms.value().unwrap_or(0)
+            );
+        }
+        let _ = writeln!(o, "];");
+    }
     for x in &b.buses {
         let bus = code_ident(&x.id).to_uppercase();
         if let Some(hz) = x.hz {
@@ -515,6 +537,37 @@ mod tests {
         s.to_uppercase()
     }
 
+    /// A board with `[flash]` gets its part and regions generated; one
+    /// without gets neither (its BoardDef returns the MCU's regions).
+    #[test]
+    fn a_boards_flash_regions_are_generated() {
+        let reg = Registry::builtin();
+        let plain = reg.board("waveshare-rp2040-touch-lcd-1.28").unwrap();
+        assert!(!board_rs(plain).contains("FLASH_ERASE_REGIONS"));
+        let mut b = plain.clone();
+        b.flash = Some(crate::defs::BoardFlash {
+            part: "W25Q16JV".into(),
+            erase_regions: vec![crate::defs::EraseRegionDef {
+                start: 0x1000_0000,
+                len: 0x40_0000,
+                unit: 0x1000,
+                unit_max_ms: crate::defs::Fact::Unverified { unverified: 400 },
+            }],
+        });
+        let rs = board_rs(&b);
+        assert!(
+            rs.contains("pub const FLASH_PART: &str = \"W25Q16JV\";"),
+            "{rs}"
+        );
+        assert!(
+            rs.contains(
+                "pub const FLASH_ERASE_REGIONS: [dagon_port::timeout::EraseRegion; 1] = [\n    \
+                 dagon_port::timeout::EraseRegion { start: 0x10000000, len: 0x400000, unit: 0x1000, unit_max_ms: 400 },\n];"
+            ),
+            "{rs}"
+        );
+    }
+
     #[test]
     fn writes_every_board_fact_by_name() {
         let reg = Registry::builtin();
@@ -618,7 +671,7 @@ mod tests {
             std::fs::write(
                 board.join(BOARD_FILE),
                 format!(
-                    "id = {id:?}\nproduct = \"P\"\nmcu = \"rp2040\"\nflash_bytes = 0x40_0000\n\
+                    "id = {id:?}\nformat = 2\nproduct = \"P\"\nmcu = \"rp2040\"\nflash_bytes = 0x40_0000\n\
                      drawing = \"x\"\n{extra}[boot]\nled = \"GPIO25\"\nhalt = {{ pattern = \"blink\", period_ms = 200 }}\n\
                      [[pin]]\npin = \"GPIO25\"\nname = \"led\"\n"
                 ),
@@ -670,7 +723,7 @@ mod tests {
         let project = dir.join("dagon.toml");
         std::fs::write(
             &project,
-            "[board.mine]\nproduct = \"Mine\"\nmcu = \"rp2040\"\nflash_bytes = 0x40_0000\n\
+            "[board.mine]\nformat = 2\nproduct = \"Mine\"\nmcu = \"rp2040\"\nflash_bytes = 0x40_0000\n\
              drawing = \"x\"\n[board.mine.boot]\nled = \"GPIO2\"\n[[board.mine.pin]]\npin = \"GPIO2\"\n",
         )
         .unwrap();

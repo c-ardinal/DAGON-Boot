@@ -12,6 +12,7 @@ pub mod isolation;
 mod load;
 mod project_text;
 pub mod requirements;
+pub mod slot_layout;
 #[cfg(test)]
 mod tests;
 #[cfg(test)]
@@ -27,13 +28,14 @@ use serde::Deserialize;
 use crate::schema::{ControlKind, LinkKind, RomEntry, UartIface};
 
 pub use board_boot::{BoardBoot, BoardBus, BoardDevice, BoardPeripheral, BoardPin};
-pub use execution::{Conformance, Execution, Fact, FlashOp};
+pub use execution::{BoardFlash, Conformance, EraseRegionDef, Execution, Fact, FlashOp};
 pub use isolation::{Core, Isolation, McuBoot, Peripheral, RecordPlacement, Watchdog};
 pub use load::{DefError, DefSource, Source, BUILTIN_FILES};
+pub use slot_layout::{HeaderDef, OwnedLayout, SlotLayoutDef, SlotName, TargetName};
 
 /// The `dagon-mcu.toml` / `dagon-board.toml` format number this reader
-/// reads (their `format` key; absent means this one).
-pub const FORMAT: u32 = 1;
+/// reads (their `format` key; absent means 1, which this reader refuses).
+pub const FORMAT: u32 = 2;
 
 use requirements::HEADER;
 
@@ -435,7 +437,7 @@ pub struct DoctorCheck {
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct McuDef {
-    /// Definition format number (`1`; left out means 1). A dagon that does not read the number
+    /// Definition format number (`2`; left out means 1). A dagon that does not read the number
     /// refuses the file (site/src/content/docs/explanation/versioning.md).
     pub format: Option<u32>,
     /// MCU id used in topologies (`stm32f401re`).
@@ -539,12 +541,21 @@ pub struct McuDef {
     /// Hardware facts of the execution model
     /// (site/src/content/docs/en/explanation/lifecycle-events.md, "Execution model"): `masked_max_us`
     /// (longest DAGON's own code masks interrupts, 1..=1000), `flash_op` (what an erase or program
-    /// stops: `fetch-stall`, `xip-off-masked`, `cache-off-masked`), `erase_unit` (largest unit
-    /// DAGON erases in one operation, a power of two), `erase_unit_max_ms` (that erase's datasheet
-    /// maximum; below `watchdog.confirmed_ms`). A fact is a number checked against its source (cite
-    /// it in a comment), `{ unverified = N }` or `"unmeasured"` (no value; not for
-    /// `erase_unit_max_ms`).
+    /// stops: `fetch-stall`, `xip-off-masked`, `cache-off-masked`), `erase_regions = [{ start, len,
+    /// unit, unit_max_ms }]` (the flash DAGON erases in: each region's erase unit and that unit's
+    /// datasheet maximum erase time; whole units, not overlapping; 2 x `unit_max_ms` at most
+    /// `watchdog.trial_ms` and `watchdog.confirmed_ms`). A fact is a number checked against its
+    /// source (cite it in a comment), `{ unverified = N }` or `"unmeasured"` (no value; not for
+    /// `unit_max_ms`).
     pub execution: Option<Execution>,
+    /// Every XFER target and slot the node receives into: `target` (`app`, `bootcore`, `agent`,
+    /// `topology`), `slot` (`a`, `b`, `factory`), `start`, `capacity` (largest body, header
+    /// excluded), `header` (`"inline"` at `start`, or `{ detached = <address> }`), `partition`
+    /// (optional: the partition the body region is, checked against the table). One per target
+    /// and slot, with `[execution]`; each `[[slot]]` image has its own, and an erase of the largest
+    /// body lies in `erase_regions`. The node and the host plan every erase from these.
+    #[serde(default, rename = "slot_layout")]
+    pub slot_layouts: Vec<SlotLayoutDef>,
     /// `scratch = { at, size }`: flash a conformance build erases and writes; apart from every
     /// slot, header, log face and stage0.
     pub conformance: Option<Conformance>,
@@ -613,7 +624,7 @@ pub struct DefaultLink {
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct BoardDef {
-    /// Definition format number (`1`; left out means 1). A dagon that does not read the number
+    /// Definition format number (`2`; left out means 1). A dagon that does not read the number
     /// refuses the file (site/src/content/docs/explanation/versioning.md).
     pub format: Option<u32>,
     /// Board id used in `nodes[].board`.
@@ -693,6 +704,12 @@ pub struct BoardDef {
     /// (registers anything outside DAGON may write: numbers or names of `regs`).
     #[serde(default, rename = "device")]
     pub devices: Vec<BoardDevice>,
+    /// The flash part the board carries, for an MCU whose flash is a board part: `part` (cite its
+    /// datasheet in a comment) and `erase_regions` in the shape of the MCU's `[execution]`
+    /// `erase_regions` (`start`, `len`, `unit`, `unit_max_ms`). They replace the MCU's regions
+    /// whole for nodes on this board; checked with the MCU's watchdog and slot layouts. Left out:
+    /// the MCU's regions. The node and the host plan every erase from the same regions.
+    pub flash: Option<BoardFlash>,
     /// As [`McuDef::package`] (inline project boards have none).
     #[serde(skip)]
     pub package: Option<std::path::PathBuf>,

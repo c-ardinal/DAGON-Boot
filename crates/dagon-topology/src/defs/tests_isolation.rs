@@ -73,11 +73,34 @@ confirmed_ms = 8_000
 trial_attempts = 3
 flag = "register"
 
+[[slot_layout]]
+target = "bootcore"
+slot = "a"
+start = 0x0010_0000
+capacity = 0x7E00
+header = {{ detached = 0x0010_7E00 }}
+
+[[slot_layout]]
+target = "app"
+slot = "a"
+start = 0x0011_0000
+capacity = 0x3_FE00
+header = "inline"
+
+[[slot_layout]]
+target = "app"
+slot = "b"
+start = 0x0015_0000
+capacity = 0x3_FE00
+header = "inline"
+
 [execution]
 masked_max_us = 50
 flash_op = "fetch-stall"
-erase_unit = 0x4000
-erase_unit_max_ms = 1_000
+erase_regions = [
+    {{ start = 0x0010_0000, len = 0x8000, unit = 0x4000, unit_max_ms = 500 }},
+    {{ start = 0x0010_8000, len = 0xF_8000, unit = 0x4000, unit_max_ms = 1_000 }},
+]
 
 [isolation]
 level = "mpu"
@@ -353,10 +376,12 @@ fn the_record_lies_inside_ram_within_its_limit() {
 fn execution_budgets_and_conformance_scratch_are_checked() {
     let with = |execution: &str, conformance: &str| {
         isolated(
-            "erase_unit_max_ms = 1_000
+            "unit_max_ms = 1_000 },
+]
 ",
             &format!(
-                "erase_unit_max_ms = {execution}
+                "unit_max_ms = {execution} }},
+]
 
 [conformance]
 scratch = {conformance}
@@ -384,7 +409,7 @@ scratch = {conformance}
     // Facts not yet established: an unverified value is still checked, an
     // unmeasured erase time is refused (the watchdog check needs one).
     let m = parse_mcu_text(&with("{ unverified = 1_000 }", free), &[]).unwrap();
-    assert!(!m.execution.unwrap().erase_unit_max_ms.is_known());
+    assert!(!m.execution.unwrap().erase_regions[1].unit_max_ms.is_known());
     let e = mcu_err(&with("{ unverified = 9_000 }", free));
     assert!(e.contains("must be at least 2 x"), "{e}");
     let e = mcu_err(&with("\"unmeasured\"", free));
@@ -392,6 +417,95 @@ scratch = {conformance}
     let unmeasured = isolated("masked_max_us = 50", "masked_max_us = \"unmeasured\"");
     let m = parse_mcu_text(&unmeasured, &[]).unwrap();
     assert_eq!(m.execution.unwrap().masked_max_us.value(), None);
+}
+
+/// `[execution] erase_regions` and `[[slot_layout]]`: regions are whole
+/// units apart from each other, every target and slot the node receives
+/// into has one layout that agrees with its `[[slot]]`, and the erase of
+/// its largest body lies in the regions.
+#[test]
+fn erase_regions_and_slot_layouts_are_checked() {
+    let m = parse_mcu_text(&isolated_mcu(), &[]).unwrap();
+    let layout = m.erase_layout().unwrap();
+    assert_eq!((layout.regions.len(), layout.slots.len()), (2, 3));
+    for (from, to, want) in [
+        (
+            "len = 0x8000, unit = 0x4000",
+            "len = 0x9000, unit = 0x4000",
+            "whole number of units",
+        ),
+        (
+            "len = 0x8000, unit = 0x4000",
+            "len = 0x8000, unit = 0",
+            "whole number of units",
+        ),
+        (
+            "start = 0x0010_8000, len",
+            "start = 0x0010_4000, len",
+            "overlaps another erase region",
+        ),
+        (
+            "start = 0x0010_8000, len = 0xF_8000",
+            "start = 0x0010_8000, len = 0x8000",
+            "lies in no execution.erase_regions",
+        ),
+        (
+            "start = 0x0010_0000, len = 0x8000",
+            "start = 0xFFFF_C000, len = 0x8000",
+            "runs past 2^32",
+        ),
+        (
+            "unit_max_ms = 500",
+            "unit_max_ms = 2_001",
+            "must be at least 2 x",
+        ),
+        (
+            "unit_max_ms = 500",
+            "unit_max_ms = \"unmeasured\"",
+            "needs a value",
+        ),
+        (
+            "target = \"app\"\nslot = \"b\"",
+            "target = \"app\"\nslot = \"a\"",
+            "is given twice",
+        ),
+        (
+            "target = \"app\"\nslot = \"b\"",
+            "target = \"topology\"\nslot = \"b\"",
+            "slot a only",
+        ),
+        (
+            "target = \"app\"\nslot = \"b\"",
+            "target = \"agent\"\nslot = \"factory\"",
+            "needs a slot_layout for app/b",
+        ),
+        (
+            "start = 0x0015_0000\ncapacity = 0x3_FE00",
+            "start = 0x0015_0000\ncapacity = 0x3_FC00",
+            "must be slot app/b's",
+        ),
+        (
+            "capacity = 0x7E00\nheader = { detached = 0x0010_7E00 }",
+            "capacity = 0x7E00\nheader = \"inline\"",
+            "must be slot bootcore/a's",
+        ),
+        (
+            "start = 0x0011_0000\ncapacity = 0x3_FE00",
+            "start = 0x0011_0000\ncapacity = 0x10_0000",
+            "lies in no execution.erase_regions",
+        ),
+    ] {
+        let text = isolated_mcu();
+        assert!(text.contains(from), "{from}");
+        let e = mcu_err(&text.replacen(from, to, 1));
+        assert!(e.contains(want), "{to}: {e}");
+    }
+    // Layouts need the regions to plan from.
+    let bare = isolated_mcu();
+    let at = bare.find("[execution]").unwrap();
+    let end = bare[at..].find("\n[isolation]").unwrap();
+    let e = mcu_err(&format!("{}{}", &bare[..at], &bare[at + end..]));
+    assert!(e.contains("needs [execution] erase_regions"), "{e}");
 }
 
 fn board(text: &str) -> BoardDef {

@@ -13,7 +13,7 @@ use dagon_events::{compose, Bounds, Composed, Layer, Nop, Published, Watchdog};
 use dagon_format::header::*;
 use dagon_format::statelog::{kind, reason, FaceHeader};
 use dagon_format::{key_id, sha256, Version};
-use dagon_mcu_stm32f401re::KindSStore;
+use dagon_mcu_stm32f401re::{KindSStore, ERASE_REGIONS};
 use dagon_port::{Flash, FlashError, FlashRegion};
 use dagon_proto::payload::*;
 use dagon_proto::{max_payload, split_status, Cmd, Frame, Status};
@@ -227,7 +227,7 @@ impl Node {
             let mut log = Log::load(m, &LOG).unwrap();
             decide(m, &mut log, &SLOTS, &cfg)
         };
-        let store = KindSStore::load(flash.clone(), &LOG, SLOTS).unwrap();
+        let store = KindSStore::load(flash.clone(), &LOG, SLOTS, &ERASE_REGIONS).unwrap();
         let node = Node {
             agent: Agent::new(config(), store, chain()),
             flash,
@@ -303,7 +303,7 @@ impl Node {
     /// STATUS as a fresh store reads it from the flash; the agent's view
     /// agrees.
     fn status(&mut self) -> StatusResp {
-        let st = KindSStore::load(self.flash.clone(), &LOG, SLOTS)
+        let st = KindSStore::load(self.flash.clone(), &LOG, SLOTS, &ERASE_REGIONS)
             .unwrap()
             .status();
         assert_eq!(*self.agent.images().status(), st);
@@ -418,14 +418,14 @@ fn new_image_in_the_rolled_back_slot_is_written() {
 
 #[test]
 fn topology_target_is_unsupported() {
-    let s = KindSStore::load(provisioned(), &LOG, SLOTS).unwrap();
+    let s = KindSStore::load(provisioned(), &LOG, SLOTS, &ERASE_REGIONS).unwrap();
     assert_eq!(s.capacity(target::TOPOLOGY, 0), 0);
     assert_eq!(s.capacity(target::APP, 2), 0);
 }
 
 #[test]
 fn unaligned_chunks_are_buffered_and_flushed_padded() {
-    let mut s = KindSStore::load(provisioned(), &LOG, SLOTS).unwrap();
+    let mut s = KindSStore::load(provisioned(), &LOG, SLOTS, &ERASE_REGIONS).unwrap();
     let t = Transition::for_store_tests();
     let data: Vec<u8> = (1..=10).collect();
     s.erase(target::APP, B, 10, &t).unwrap();

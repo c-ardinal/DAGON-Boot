@@ -14,7 +14,7 @@ use dagon_format::header::*;
 use dagon_format::statelog::{kind, FaceHeader};
 use dagon_format::{key_id, sha256, Version};
 use dagon_mcu_stm32f401re::layout::*;
-use dagon_mcu_stm32f401re::{KindSStore, TRIAL_ATTEMPTS};
+use dagon_mcu_stm32f401re::{KindSStore, ERASE_REGIONS, TRIAL_ATTEMPTS};
 use dagon_port::{Flash, FlashError, FlashRegion};
 use dagon_proto::payload::{target, SlotState};
 use ed25519_compact::{KeyPair, Seed};
@@ -189,7 +189,7 @@ fn installed_full() -> Cut {
 
 /// What the app's agent does at start (`KindSStore::keep_room`).
 fn app_start(f: &Cut) {
-    if let Ok(s) = KindSStore::load(f.clone(), &LOG, SLOTS) {
+    if let Ok(s) = KindSStore::load(f.clone(), &LOG, SLOTS, &ERASE_REGIONS) {
         let _ = s.with_cores(CORE_SLOTS, true).keep_room();
     }
 }
@@ -220,7 +220,7 @@ fn until_settled(f: &mut Cut, cell: &mut [u32; 2]) -> u8 {
 /// The agent's XFER and SET_PENDING with target BOOTCORE through the store.
 fn agent_writes(f: &Cut, img: &[u8]) -> Option<()> {
     let t = Transition::for_store_tests();
-    let mut s = KindSStore::load(f.clone(), &LOG, SLOTS)
+    let mut s = KindSStore::load(f.clone(), &LOG, SLOTS, &ERASE_REGIONS)
         .ok()?
         .with_cores(CORE_SLOTS, true);
     let st = s.target_status(target::BOOTCORE)?;
@@ -307,7 +307,7 @@ fn update_from(mut f: Cut, minor: u8, cut: Option<(usize, bool)>) -> (Cut, u8) {
 fn a_new_core_is_tried_confirms_itself_and_the_app_records_stay() {
     let (f, running) = update(1, None);
     assert_eq!(running, 1);
-    let mut s = KindSStore::load(f.clone(), &LOG, SLOTS)
+    let mut s = KindSStore::load(f.clone(), &LOG, SLOTS, &ERASE_REGIONS)
         .unwrap()
         .with_cores(CORE_SLOTS, true);
     let c = s.target_status(target::BOOTCORE).unwrap();
@@ -325,12 +325,12 @@ fn a_new_core_is_tried_confirms_itself_and_the_app_records_stay() {
 #[test]
 fn without_a_holding_trial_cell_no_boot_core_is_taken() {
     let f = installed();
-    let s = KindSStore::load(f.clone(), &LOG, SLOTS)
+    let s = KindSStore::load(f.clone(), &LOG, SLOTS, &ERASE_REGIONS)
         .unwrap()
         .with_cores(CORE_SLOTS, false);
     assert_eq!(s.capacity(target::BOOTCORE, 1), 0);
     assert!(s.capacity(target::APP, 1) > 0);
-    let s = KindSStore::load(f, &LOG, SLOTS)
+    let s = KindSStore::load(f, &LOG, SLOTS, &ERASE_REGIONS)
         .unwrap()
         .with_cores(CORE_SLOTS, true);
     assert!(s.capacity(target::BOOTCORE, 1) > 0);
@@ -340,7 +340,7 @@ fn without_a_holding_trial_cell_no_boot_core_is_taken() {
 fn a_core_that_fails_its_check_falls_back_to_the_old_one() {
     let (f, running) = update(BROKEN, None);
     assert_eq!(running, 0);
-    let mut s = KindSStore::load(f, &LOG, SLOTS)
+    let mut s = KindSStore::load(f, &LOG, SLOTS, &ERASE_REGIONS)
         .unwrap()
         .with_cores(CORE_SLOTS, true);
     let c = s.target_status(target::BOOTCORE).unwrap();
@@ -370,7 +370,7 @@ fn a_power_cut_at_every_flash_step_leaves_a_bootable_core() {
         for n in 0..ops {
             for half in [false, true] {
                 let (f, running) = update_from(start(), minor, Some((n, half)));
-                let mut s = KindSStore::load(f, &LOG, SLOTS)
+                let mut s = KindSStore::load(f, &LOG, SLOTS, &ERASE_REGIONS)
                     .unwrap()
                     .with_cores(CORE_SLOTS, true);
                 let c = s.target_status(target::BOOTCORE).unwrap();
@@ -386,4 +386,74 @@ fn a_power_cut_at_every_flash_step_leaves_a_bootable_core() {
             }
         }
     }
+}
+
+/// Every target and slot the store receives into has the definition's one
+/// planner layout, with the store's capacity; the largest body of each is
+/// one sector, one flash operation (two of which every watchdog period
+/// covers, as the definition check requires).
+#[test]
+fn every_slot_the_store_takes_has_one_planner_layout() {
+    use dagon_agent::erase_plan;
+    let s = KindSStore::load(installed(), &LOG, SLOTS, &ERASE_REGIONS)
+        .unwrap()
+        .with_cores(CORE_SLOTS, true);
+    let layout = s.erase_layout().unwrap();
+    for t in 0..=u8::MAX {
+        for slot in 0..=u8::MAX {
+            let cap = s.capacity(t, slot);
+            let layouts: Vec<_> = layout
+                .slots
+                .iter()
+                .filter(|l| (l.target, l.slot) == (t, slot))
+                .collect();
+            match (cap, layouts.as_slice()) {
+                (0, []) => {}
+                (cap, [l]) => {
+                    assert_eq!(l.capacity, cap, "{t}/{slot}");
+                    let start = match t {
+                        target::APP => SLOTS.slots[usize::from(slot)],
+                        _ => CORE_SLOTS[usize::from(slot)].0,
+                    };
+                    let inline = dagon_port::timeout::HeaderPlace::Inline;
+                    assert_eq!((l.start, l.header), (start, inline), "{t}/{slot}");
+                    assert_eq!(erase_plan(&layout, t, slot, cap).unwrap().count(), 1);
+                }
+                _ => panic!("{t}/{slot}: capacity {cap}, layouts {layouts:?}"),
+            }
+        }
+    }
+}
+
+/// Regions a board returns in place of the MCU's: one slower part erased
+/// in 64 KiB units over the boot core and APP sectors.
+static BOARD_REGIONS: [dagon_port::timeout::EraseRegion; 1] = [dagon_port::timeout::EraseRegion {
+    start: 0x0801_0000,
+    len: 0x7_0000,
+    unit: 0x1_0000,
+    unit_max_ms: 3_000,
+}];
+
+/// The store plans over the regions its board returns: another part
+/// changes the plan it erases.
+#[test]
+fn the_store_plans_over_its_boards_regions() {
+    use dagon_agent::erase_plan;
+    use dagon_port::timeout::EraseOp;
+    let plan = |regions: &'static [dagon_port::timeout::EraseRegion]| -> Vec<EraseOp> {
+        let s = KindSStore::load(installed(), &LOG, SLOTS, regions).unwrap();
+        let layout = s.erase_layout().unwrap();
+        erase_plan(&layout, target::APP, 1, 0x1_0000)
+            .unwrap()
+            .collect()
+    };
+    let op = |addr, len, max_ms| EraseOp { addr, len, max_ms };
+    assert_eq!(plan(&ERASE_REGIONS), [op(0x0804_0000, 0x2_0000, 4_000)]);
+    assert_eq!(
+        plan(&BOARD_REGIONS),
+        [
+            op(0x0804_0000, 0x1_0000, 3_000),
+            op(0x0805_0000, 0x1_0000, 3_000)
+        ]
+    );
 }

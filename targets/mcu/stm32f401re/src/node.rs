@@ -10,8 +10,8 @@
 //! flash tests through it); both are used by the serving task only. No
 //! flash operation runs with interrupts masked (the execution model of
 //! site/src/content/docs/en/explanation/lifecycle-events.md): an erase or program stalls instruction
-//! fetch for at most `ERASE_UNIT_MAX_MS` (the definition's 128 KiB sector
-//! erase maximum; `ERASE_UNIT_MAX_MS_KNOWN` says whether it is checked
+//! fetch for at most `ERASE_UNIT_MAX_MS` (the definition's longest sector
+//! erase, 128 KiB; `ERASE_UNIT_MAX_MS_KNOWN` says whether it is checked
 //! against the datasheet), below the confirmed IWDG period; every request starts
 //! with a gated feed, and the own I2C address is NACKed while a request
 //! runs, so the parent retries instead of meeting a stretched clock.
@@ -46,6 +46,7 @@ use crate::layout::{self, MIN_FLASH_SIZE};
 use crate::links;
 use crate::store::KindSStore;
 use crate::watchdog::{Guard, Iwdg, Watch};
+use dagon_port::timeout::EraseRegion;
 
 /// The DAGON link: an I2C target (listening at the node's address).
 pub type I2cTarget = I2c<'static, Async, MultiMaster>;
@@ -96,25 +97,30 @@ pub trait BoardDef: BoardCore {
     /// Opens the DAGON link: the I2C target at the node's address, and its
     /// registers (the address is NACKed while a request runs).
     fn open_link(link: Self::Link) -> (I2cTarget, pac::i2c::I2c);
+    /// The flash this board's nodes erase in, as erase regions: the
+    /// board's `[flash] erase_regions` when it carries its own flash part
+    /// (generated into its definition constants), else the MCU's default
+    /// (`ERASE_REGIONS`). The slot store plans every erase over these and
+    /// the MCU's slot layouts; a board without `[flash]` needs no code.
+    fn erase_regions() -> &'static [EraseRegion] {
+        &crate::ERASE_REGIONS
+    }
 }
 
 /// A handle on the one flash driver (see the module docs).
 pub type SharedFlash = dagon_mcu_common::shared::SharedFlash<F401Flash<'static>>;
 
-// One slot is one erase unit: a store erase is one flash operation, whose
-// worst case the watchdog period covers (checked on the definition).
-const _: () = assert!(layout::SLOTS.slot_len <= crate::ERASE_UNIT);
-const _: () = assert!(layout::CORE_SLOTS[0].1 <= crate::ERASE_UNIT);
-const _: () = assert!(layout::CORE_SLOTS[1].1 <= crate::ERASE_UNIT);
-
 /// Opens the slot store over the state log; returns it with the serving
 /// loop's handle on the flash. Call once.
-pub(crate) fn open_store(flash: Peri<'static, FLASH>) -> Result<(Store, SharedFlash), LogError> {
+pub(crate) fn open_store(
+    flash: Peri<'static, FLASH>,
+    regions: &'static [EraseRegion],
+) -> Result<(Store, SharedFlash), LogError> {
     use dagon_mcu_common::shared::{driver, FlashDriver};
     static FLASH_DRIVER: StaticCell<FlashDriver<F401Flash<'static>>> = StaticCell::new();
     let driver = FLASH_DRIVER.init(driver(F401Flash::new(flash)));
     let flash = SharedFlash::new(driver, &layout::FLASH_REGIONS);
-    let store = KindSStore::load(flash, &layout::LOG, layout::SLOTS)?
+    let store = KindSStore::load(flash, &layout::LOG, layout::SLOTS, regions)?
         .with_cores(layout::CORE_SLOTS, crate::trial::holds());
     Ok((store, flash))
 }
@@ -232,7 +238,7 @@ pub fn start<B: BoardDef, const N: usize>(
             "the DAGON F401 layout needs 512 KiB of flash"
         )
     };
-    let (store, flash) = open_store(parts.flash)?;
+    let (store, flash) = open_store(parts.flash, B::erase_regions())?;
     let period = watchdog_period_ms(on_trial(&store));
     install_watchdog(parts.iwdg, guard, period, &store);
     let (mut agent, events) = agent(tag, store, B::extension(), app.exts, app.self_check, guard);

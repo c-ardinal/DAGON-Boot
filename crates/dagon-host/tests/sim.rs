@@ -41,6 +41,8 @@ fn yaml() -> String {
 
 const SEG: u8 = 1;
 const SEG_AT: Target = Target::I2c(NODE_I2C_ADDR);
+/// The app slots of the seg node's MCU (STM32F401RE: A and B).
+const SEG_SLOTS: &[u8] = &[0, 1];
 
 fn key() -> KeyPair {
     KeyPair::from_seed(Seed::new(SEED))
@@ -354,7 +356,7 @@ fn the_number_on_the_hubs_screen_is_the_number_every_caller_is_told() {
 
     // A new run on the same node starts from 0: the 100 of the write is not held over.
     let mut numbers = Vec::new();
-    block_on(h.rollback(SEG_AT, SEG, &mut |e| numbers.push(e.shown))).unwrap();
+    block_on(h.rollback(SEG_AT, SEG, SEG_SLOTS, &mut |e| numbers.push(e.shown))).unwrap();
     assert_eq!(numbers.first(), Some(&0), "{numbers:?}");
     assert_eq!(numbers.last(), Some(&100), "{numbers:?}");
     assert!(numbers.windows(2).all(|w| w[0] <= w[1]), "{numbers:?}");
@@ -541,12 +543,31 @@ fn full_apply_then_rollback() {
     s.hub.borrow_mut().advance_ms(30_000);
     assert_eq!(block_on(h.status(SEG_AT)).unwrap().status.active, 1);
 
-    let back = block_on(h.rollback(SEG_AT, SEG, &mut |_| {})).unwrap();
+    let back = block_on(h.rollback(SEG_AT, SEG, SEG_SLOTS, &mut |_| {})).unwrap();
     assert_eq!(back, Version::new(1, 0, 0));
     let st = block_on(h.status(SEG_AT)).unwrap();
     assert_eq!((st.status.active, st.status.confirmed), (0, 0));
     assert_eq!(st.status.slots[0].state, SlotState::Confirmed);
     assert!(!st.hello.trial);
+}
+
+/// A node given one app slot has no previous version, whatever STATUS says
+/// about a slot B it does not have (here a stale written image there): the
+/// rollback answers so and no SET_PENDING goes out.
+#[test]
+fn a_one_slot_node_is_never_switched_to_a_slot_it_does_not_have() {
+    let s = sim();
+    let mut h = host(&s);
+    block_on(h.apply(&release(), &topology(&yaml()), &key().pk, None, &mut |_| {})).unwrap();
+    block_on(h.rollback(SEG_AT, SEG, SEG_SLOTS, &mut |_| {})).unwrap();
+    let st = block_on(h.status(SEG_AT)).unwrap().status;
+    assert_eq!((st.active, st.slots[1].state), (0, SlotState::Written));
+    let pending = count(&s, Cmd::SetPending);
+    let r = block_on(h.rollback(SEG_AT, SEG, &[0], &mut |_| {}));
+    assert!(matches!(r, Err(Error::NoPreviousVersion)), "{r:?}");
+    assert_eq!(count(&s, Cmd::SetPending), pending, "no SET_PENDING");
+    let after = block_on(h.status(SEG_AT)).unwrap().status;
+    assert_eq!((after.active, after.confirmed), (0, 0));
 }
 
 #[test]
@@ -672,7 +693,7 @@ fn node_that_falls_back_stops_the_run_and_confirm_rule() {
     }
     let st = block_on(h.status(SEG_AT)).unwrap().status;
     assert_eq!((st.active, st.slots[1].state), (0, SlotState::Reverted));
-    let r = block_on(h.rollback(SEG_AT, SEG, &mut |_| {}));
+    let r = block_on(h.rollback(SEG_AT, SEG, SEG_SLOTS, &mut |_| {}));
     assert!(matches!(r, Err(Error::NoPreviousVersion)));
 }
 
@@ -1788,7 +1809,7 @@ fn a_boot_loader_only_write_keeps_the_app_to_go_back_to() {
     );
 
     assert_eq!(
-        block_on(host(&s).rollback(SEG_AT, SEG, &mut |_| {})).unwrap(),
+        block_on(host(&s).rollback(SEG_AT, SEG, SEG_SLOTS, &mut |_| {})).unwrap(),
         v0
     );
 }

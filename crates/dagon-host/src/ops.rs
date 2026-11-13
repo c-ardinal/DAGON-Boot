@@ -628,17 +628,21 @@ impl<T: Transport, C: HostClock> Host<T, C> {
         Ok(ConfirmOutcome::Confirmed(v))
     }
 
-    /// Back to the version in the other slot: SET_PENDING, REBOOT, its
-    /// HELLO, CONFIRM. `node` is the topology index used for events.
+    /// Back to the version in another of the node's app slots: SET_PENDING,
+    /// REBOOT, its HELLO, CONFIRM. `node` is the topology index used for
+    /// events; `slots` are the node's app slots (STATUS entries) from its
+    /// MCU definition: no other entry is ever taken, so a node with one
+    /// slot has no previous version.
     pub async fn rollback(
         &mut self,
         to: Target,
         node: u8,
+        slots: &[u8],
         on_event: &mut dyn FnMut(Event),
     ) -> Result<Version, T::Error> {
         self.write = Default::default();
         let st = self.status(to).await?.status;
-        let other = rollback_slot(&st).ok_or(Error::NoPreviousVersion)?;
+        let other = rollback_slot(&st, slots).ok_or(Error::NoPreviousVersion)?;
         let v = st.slots[other as usize].version;
         self.switch_and_confirm(to, other, v, node, on_event)
             .await?;
@@ -984,21 +988,22 @@ fn chunk_len(max_payload: u16, link_max: usize) -> Option<usize> {
         .filter(|&c| c > 0)
 }
 
-/// The slot rollback returns to: another image slot than the running one,
-/// Confirmed (we run on trial) or Written (confirmed before the running slot
-/// took over); never a Reverted, pending or empty one. A node with one slot
-/// sends the others as empty, so it has none.
-fn rollback_slot(st: &StatusResp) -> Option<u8> {
-    if usize::from(st.active) >= StatusResp::IMAGE_SLOTS {
+/// The slot rollback returns to: another of the node's app `slots` than the
+/// running one, Confirmed (we run on trial) or Written (confirmed before the
+/// running slot took over); never a Reverted, pending or empty one, and
+/// never a STATUS entry outside `slots`. A node with one slot has none.
+fn rollback_slot(st: &StatusResp, slots: &[u8]) -> Option<u8> {
+    if !slots.contains(&st.active) {
         return None;
     }
-    (0..StatusResp::IMAGE_SLOTS as u8)
+    slots
+        .iter()
+        .copied()
         .filter(|&s| s != st.active)
         .find(|&s| {
-            matches!(
-                st.slots[usize::from(s)].state,
-                SlotState::Confirmed | SlotState::Written
-            )
+            st.slots
+                .get(usize::from(s))
+                .is_some_and(|i| matches!(i.state, SlotState::Confirmed | SlotState::Written))
         })
 }
 
@@ -1274,7 +1279,13 @@ mod tests {
             ..Default::default()
         };
         st.slots[0].state = SlotState::Confirmed;
-        assert_eq!(rollback_slot(&st), None);
+        assert_eq!(rollback_slot(&st, &[0]), None);
+        // A non-empty entry for a slot the node does not have is never taken.
+        st.slots[1].state = SlotState::Written;
+        assert_eq!(rollback_slot(&st, &[0]), None);
+        // Nor is a running slot outside them.
+        st.active = 1;
+        assert_eq!(rollback_slot(&st, &[0]), None);
     }
 
     #[test]
@@ -1286,7 +1297,7 @@ mod tests {
                 ..Default::default()
             };
             st.slots[(1 - active.min(1)) as usize].state = other;
-            rollback_slot(&st)
+            rollback_slot(&st, &[0, 1])
         };
         assert_eq!(with(1, SlotState::Written), Some(0));
         assert_eq!(with(0, SlotState::Confirmed), Some(1));

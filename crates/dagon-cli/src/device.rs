@@ -28,6 +28,8 @@ fn topology_bin(reg: &Registry, t: &Topology) -> Result<Vec<u8>, String> {
 pub(crate) struct Rows {
     pub app: Vec<u8>,
     pub core: Vec<u8>,
+    /// The app's image slots: `app` without the agent's factory slot.
+    pub image: Vec<u8>,
 }
 
 impl Rows {
@@ -36,8 +38,11 @@ impl Rows {
     pub(crate) fn of(reg: &Registry, mcu: &str) -> Option<Rows> {
         use dagon_topology::defs::TargetName;
         let m = reg.mcu(mcu)?;
+        let app = m.status_rows(TargetName::App);
+        let agent = m.status_rows(TargetName::Agent);
         Some(Rows {
-            app: m.status_rows(TargetName::App),
+            image: app.iter().copied().filter(|s| !agent.contains(s)).collect(),
+            app,
             core: m.status_rows(TargetName::Bootcore),
         })
     }
@@ -309,7 +314,9 @@ pub fn rollback_node<T: Transport, C: HostClock>(
     let view = dagon_format::TopologyView::parse(&bin).map_err(|e| format!("{e:?}"))?;
     let to = Target::of_node(&view, i as u8)
         .ok_or_else(|| format!("'{node}' is not reachable through the hub"))?;
-    block_on(host.rollback(to, i as u8, on_event)).map_err(|e| match e {
+    let mcu = &t.nodes[i].mcu;
+    let rows = Rows::of(reg, mcu).ok_or_else(|| format!("{node}: no MCU definition '{mcu}'"))?;
+    block_on(host.rollback(to, i as u8, &rows.image, on_event)).map_err(|e| match e {
         dagon_host::Error::NoPreviousVersion => {
             format!("'{node}' has no previously confirmed version to go back to")
         }
@@ -713,10 +720,16 @@ mod tests {
         let one = Rows {
             app: vec![0],
             core: vec![0],
+            image: vec![0],
         };
         assert_eq!(
             (rows.app.as_slice(), rows.core.as_slice()),
             (&[0, 1][..], &[0, 1][..])
+        );
+        assert_eq!(
+            Rows::of(reg, "esp32s3").unwrap().image,
+            [0, 1],
+            "no factory slot"
         );
         let mut st = StatusResp {
             active: 0,

@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'vitest';
 import type { SlotInfo, StatusResp } from '../wasm/dagon.ts';
-import { appRows, coreRows, imageRows, previousVersion } from './slots.ts';
+import { MENU } from './copy.ts';
+import { appRows, coreRows, imageRows, previousVersion, rollbackOff } from './slots.ts';
 
 const V100 = 0x0100_0000;
 const V110 = 0x0101_0000;
@@ -31,6 +32,18 @@ describe('previous version offered by "前のバージョンに戻す"', () => {
 
   test('a node with one slot has no previous version', () => {
     expect(previousVersion(status(0, slot(4, V110), slot(4, V100)), [0])).toBeNull();
+  });
+});
+
+describe('the menu offers going back only to a previous version', () => {
+  test('greyed with its reason when there is none, as on a node with one slot', () => {
+    expect(rollbackOff(status(0, slot(4, V110), slot(4, V100)), [0])).toBe(MENU.off.noPrevious);
+    expect(rollbackOff(status(0, slot(4, V100), slot(0, 0)), AB)).toBe(MENU.off.noPrevious);
+    expect(rollbackOff(null, AB)).toBe(MENU.off.noPrevious);
+  });
+
+  test('open when another slot holds the previous version', () => {
+    expect(rollbackOff(status(1, slot(4, V100), slot(4, V110)), AB)).toBeNull();
   });
 });
 

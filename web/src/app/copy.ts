@@ -1250,6 +1250,7 @@ export const MENU = {
     notConnected: '親機につないでから使えます。',
     notIdle: '今の動きが終わってから使えます。',
     noNode: 'ノードを選んでから使えます。',
+    noPrevious: '戻せる前のバージョンはありません。',
     noProposal: 'DAGON の案はありません。',
     noUndo: '取り消す変更はありません。',
     noRedo: 'やり直す変更はありません。',

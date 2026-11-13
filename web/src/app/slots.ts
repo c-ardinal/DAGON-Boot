@@ -1,6 +1,6 @@
 // Reading a node's slots (STATUS) for what the detail offers.
 import { statusRows, versionOlder, versionText, type StatusResp } from '../wasm/dagon.ts';
-import { SLOT } from './copy.ts';
+import { MENU, SLOT } from './copy.ts';
 
 const SLOT_WRITTEN = 1;
 const SLOT_CONFIRMED = 4;
@@ -31,6 +31,11 @@ export function coreRows(mcu: string | undefined): number[] {
  * took over). A newer written image is not a previous version; null when
  * there is none, as on a node with one slot.
  */
+/** Why going back is not offered (the menu greys it with this): no previous version, as on a node with one slot; null when it is. */
+export function rollbackOff(s: StatusResp | null | undefined, rows: number[]): string | null {
+  return previousVersion(s, rows) ? null : MENU.off.noPrevious;
+}
+
 export function previousVersion(s: StatusResp | null | undefined, rows: number[]): string | null {
   if (!s || !rows.includes(s.active)) return null;
   const running = s.slots[s.active].version;

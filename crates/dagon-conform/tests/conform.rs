@@ -152,6 +152,8 @@ impl Flash for MemFlash {
 // ---- slot store ---------------------------------------------------------
 
 struct Mem {
+    /// The APP slots the node has (A, then B).
+    slots: usize,
     status: StatusResp,
     bodies: [Vec<u8>; 2],
     headers: [[u8; HEADER_SIZE]; 2],
@@ -178,6 +180,7 @@ impl Mem {
             digest16: header_digest16(&hdr),
         };
         Mem {
+            slots: 2,
             status,
             bodies: [a, vec![0xFF; CAP]],
             headers: [hdr, [0xFF; HEADER_SIZE]],
@@ -190,8 +193,8 @@ impl SlotStore for Mem {
     fn status(&mut self) -> StatusResp {
         self.status
     }
-    fn capacity(&self, target: u8, _slot: u8) -> u32 {
-        if target == target::APP {
+    fn capacity(&self, target: u8, slot: u8) -> u32 {
+        if target == target::APP && usize::from(slot) < self.slots {
             CAP as u32
         } else {
             0
@@ -279,6 +282,8 @@ struct Faults {
     confirm_not_persisted: bool,
     /// HELLO announces this `max_payload`.
     hello_max_payload: Option<u16>,
+    /// The node has app slot A only.
+    one_slot: bool,
 }
 
 type Chain = Composed<&'static Published<(), 4>, Nop, Nop, fn() -> u64>;
@@ -328,7 +333,11 @@ impl FakeNode {
         };
         let mut flash = MemFlash::new();
         flash.erase_works = !faults.erase_does_nothing;
-        let mem: &'static RefCell<Mem> = Box::leak(Box::new(RefCell::new(Mem::new())));
+        let mut m = Mem::new();
+        if faults.one_slot {
+            m.slots = 1;
+        }
+        let mem: &'static RefCell<Mem> = Box::leak(Box::new(RefCell::new(m)));
         FakeNode {
             agent: Agent::new(cfg.clone(), mem, chain()),
             mem,
@@ -495,21 +504,34 @@ impl Channel for &mut FakeNode {
 }
 
 struct Imgs {
-    good: [Vec<u8>; 2],
-    noconf: [Vec<u8>; 2],
+    good: &'static [&'static [u8]],
+    noconf: &'static [&'static [u8]],
+}
+
+/// `images` kept for the whole test run.
+fn kept(images: Vec<Vec<u8>>) -> &'static [&'static [u8]] {
+    let refs: Vec<&'static [u8]> = images
+        .into_iter()
+        .map(|i| &*Box::leak(i.into_boxed_slice()))
+        .collect();
+    Box::leak(refs.into_boxed_slice())
 }
 
 impl Imgs {
     fn new() -> Self {
+        Self::slots(2)
+    }
+    /// Images for a node with `n` app slots.
+    fn slots(n: u8) -> Self {
         Imgs {
-            good: [image(0, V_GOOD, 3000), image(1, V_GOOD, 3000)],
-            noconf: [image(0, V_NOCONF, 2000), image(1, V_NOCONF, 2000)],
+            good: kept((0..n).map(|s| image(s, V_GOOD, 3000)).collect()),
+            noconf: kept((0..n).map(|s| image(s, V_NOCONF, 2000)).collect()),
         }
     }
-    fn images(&self) -> Images<'_> {
+    fn images(&self) -> Images<'static> {
         Images {
-            good: [&self.good[0], &self.good[1]],
-            no_confirm: [&self.noconf[0], &self.noconf[1]],
+            good: self.good,
+            no_confirm: self.noconf,
         }
     }
 }
@@ -579,6 +601,57 @@ fn erase_that_does_nothing_fails_ct02() {
     assert_eq!(verdict(&r, 1), Verdict::Pass);
 }
 
+/// A node with one app slot: the tests that write a slot other than the
+/// running one are not run (there is none); the others pass.
+#[test]
+fn a_one_slot_node_runs_every_test_that_needs_no_second_slot() {
+    let faults = Faults {
+        one_slot: true,
+        ..Default::default()
+    };
+    let mut n = FakeNode::new(LinkKind::Uart, faults);
+    let imgs = Imgs::slots(1);
+    let mut signer = sign;
+    let r = Runner::new(
+        &mut n,
+        LinkKind::Uart,
+        imgs.images(),
+        &mut signer,
+        NodeTimings::FALLBACK,
+    )
+    .unwrap()
+    .run_all();
+    for id in [9, 11, 12, 18, 20] {
+        assert_eq!(verdict(&r, id), Verdict::NotRun, "CT-{id}");
+    }
+    for id in [1, 2, 3, 4, 7, 8, 10] {
+        assert_eq!(verdict(&r, id), Verdict::Pass, "CT-{id}");
+    }
+    let st = n.mem.borrow().status;
+    assert_eq!((st.active, st.confirmed), (0, 0));
+}
+
+/// Images for more slots than the wire has, or a different number of good
+/// and no-confirm images, are refused at setup.
+#[test]
+fn setup_takes_one_image_per_slot_of_each_kind() {
+    let mut signer = sign;
+    let mut n = FakeNode::new(LinkKind::Uart, Faults::default());
+    let two = Imgs::new();
+    let one = Imgs::slots(1);
+    for (good, no_confirm) in [(two.good, one.noconf), (&[][..], &[][..])] {
+        let e = Runner::new(
+            &mut n,
+            LinkKind::Uart,
+            Images { good, no_confirm },
+            &mut signer,
+            NodeTimings::FALLBACK,
+        )
+        .err();
+        assert_eq!(e, Some(SetupError::Slots));
+    }
+}
+
 #[test]
 fn missing_rollback_fails_ct12_and_ct18() {
     let faults = Faults {
@@ -639,7 +712,8 @@ fn setup_rejects_bad_inputs() {
     .err();
     assert_eq!(e, Some(SetupError::SameVersion));
     let mut swapped = imgs.images();
-    swapped.good = [&imgs.good[1], &imgs.good[0]];
+    let other_way = [imgs.good[1], imgs.good[0]];
+    swapped.good = &other_way;
     let e = Runner::new(
         &mut n,
         LinkKind::Uart,

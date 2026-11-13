@@ -52,22 +52,34 @@ pub struct NoAnswer;
 /// with the release key. `signed_part` is header bytes `0..SIGNED_LEN`.
 pub type Signer<'s> = &'s mut dyn FnMut(&[u8]) -> [u8; 64];
 
-/// Images the run sends, index = slot (0 A, 1 B). Each is a full signed image
-/// (512-byte header + body); boards with slot-independent images pass the
-/// same image twice.
+/// Images the run sends, one per app slot the node has, index = slot (0 A,
+/// 1 B). Each is a full signed image (512-byte header + body); boards with
+/// slot-independent images pass the same image for each slot. With one app
+/// slot, the tests that write a slot other than the running one are not run.
 #[derive(Clone, Copy, Debug)]
 pub struct Images<'a> {
     /// A conformance build that confirms normally.
-    pub good: [&'a [u8]; 2],
-    /// A build that never confirms. Its version must differ from `good`.
-    pub no_confirm: [&'a [u8]; 2],
+    pub good: &'a [&'a [u8]],
+    /// A build that never confirms, as many as `good`. Its version must
+    /// differ from `good`.
+    pub no_confirm: &'a [&'a [u8]],
 }
+
+/// Room for the node's app slots: STATUS's A and B entries.
+const ROOM: usize = StatusResp::IMAGE_SLOTS;
+
+/// The tests that write a slot other than the running one: a node with one
+/// app slot has none, and they are not run.
+const NEED_AN_IDLE_SLOT: [u8; 5] = [9, 11, 12, 18, 20];
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum SetupError {
     /// An image is not a parsable header + body of the declared size and
-    /// digest; index into `good` then `no_confirm` (0..4).
+    /// digest for its slot; index into `good` then `no_confirm`.
     BadImage(usize),
+    /// `good` and `no_confirm` do not hold one image each per app slot (at
+    /// least one, at most STATUS's A and B, as many of each).
+    Slots,
     /// `no_confirm` has the same version as `good`.
     SameVersion,
     /// The first HELLO / STATUS did not answer.
@@ -85,6 +97,9 @@ impl core::fmt::Display for SetupError {
             SetupError::BadImage(i) => {
                 write!(f, "image {i} is not a valid signed image for its slot")
             }
+            SetupError::Slots => f.write_str(
+                "give one good and one no-confirm image per app slot of the node (one or two)",
+            ),
             SetupError::SameVersion => {
                 f.write_str("no-confirm images have the same version as good")
             }
@@ -168,8 +183,10 @@ pub struct Runner<'a, 's, C: Channel> {
     link: LinkKind,
     limits: timeout::LinkLimits,
     timings: Timings<'a>,
-    good: [Img<'a>; 2],
-    no_confirm: [Img<'a>; 2],
+    /// The node's app slots (the first `slots` entries of the images).
+    slots: u8,
+    good: [Option<Img<'a>>; ROOM],
+    no_confirm: [Option<Img<'a>>; ROOM],
     sign: Signer<'s>,
     hello: HelloResp,
     after_ct11: Option<Result<u32, Detail>>,
@@ -193,10 +210,25 @@ impl<'a, 's, C: Channel> Runner<'a, 's, C> {
         timings: Timings<'a>,
     ) -> Result<Self, SetupError> {
         let limits = timeout::link_limits(link).ok_or(SetupError::UnsupportedLink(link))?;
-        let img = |i: usize, raw| Img::new(raw, (i % 2) as u8).ok_or(SetupError::BadImage(i));
-        let good = [img(0, images.good[0])?, img(1, images.good[1])?];
-        let no_confirm = [img(2, images.no_confirm[0])?, img(3, images.no_confirm[1])?];
-        if (0..2).any(|s| no_confirm[s].parsed.version == good[s].parsed.version) {
+        let n = images.good.len();
+        if n == 0 || n > ROOM || images.no_confirm.len() != n {
+            return Err(SetupError::Slots);
+        }
+        let mut good = [None; ROOM];
+        let mut no_confirm = [None; ROOM];
+        for (i, (s, raw)) in images
+            .good
+            .iter()
+            .enumerate()
+            .chain(images.no_confirm.iter().enumerate())
+            .enumerate()
+        {
+            let img = Img::new(raw, s as u8).ok_or(SetupError::BadImage(i))?;
+            let set = if i < n { &mut good } else { &mut no_confirm };
+            set[s] = Some(img);
+        }
+        let version = |i: &Option<Img>| i.map(|i| i.parsed.version);
+        if (0..n).any(|s| version(&no_confirm[s]) == version(&good[s])) {
             return Err(SetupError::SameVersion);
         }
         let hello = hello_once(&mut ch).map_err(|_| SetupError::Unreachable)?;
@@ -208,6 +240,7 @@ impl<'a, 's, C: Channel> Runner<'a, 's, C> {
             link,
             limits,
             timings,
+            slots: n as u8,
             good,
             no_confirm,
             sign,
@@ -236,6 +269,9 @@ impl<'a, 's, C: Channel> Runner<'a, 's, C> {
         let Some(info) = ct_info(id) else {
             return CtResult::not_run(id);
         };
+        if self.slots < 2 && NEED_AN_IDLE_SLOT.contains(&id) {
+            return CtResult::not_run(id);
+        }
         let t0 = self.ch.now_ms();
         let r = self.dispatch(info);
         let duration_ms = (self.ch.now_ms() - t0) as u32;
@@ -324,13 +360,49 @@ impl<'a, 's, C: Channel> Runner<'a, 's, C> {
         }
     }
 
-    /// Running slot (A or B) and the other one.
+    /// The good image for `slot`.
+    fn good(&self, slot: u8) -> Step<Img<'a>> {
+        let img = self.good.get(usize::from(slot)).copied().flatten();
+        img.ok_or_else(|| detail!("no image for slot {}", slot))
+    }
+
+    /// The no-confirm image for `slot`.
+    fn no_confirm(&self, slot: u8) -> Step<Img<'a>> {
+        let img = self.no_confirm.get(usize::from(slot)).copied().flatten();
+        img.ok_or_else(|| detail!("no image for slot {}", slot))
+    }
+
+    /// An app slot of the node other than `slot`.
+    fn other_than(&self, slot: u8) -> Step<u8> {
+        (0..self.slots)
+            .find(|&s| s != slot)
+            .ok_or_else(|| detail!("no app slot besides slot {}", slot))
+    }
+
+    /// The running slot and another app slot of the node.
     fn slots(&mut self) -> Step<(StatusResp, u8, u8)> {
         let st = self.status()?;
-        if st.active > 1 {
-            return Err(detail!("running slot {} is not A or B", st.active));
+        if st.active >= self.slots {
+            return Err(detail!(
+                "running slot {} is not one of the node's {} app slots",
+                st.active,
+                self.slots
+            ));
         }
-        Ok((st, st.active, 1 - st.active))
+        Ok((st, st.active, self.other_than(st.active)?))
+    }
+
+    /// The running slot.
+    fn running(&mut self) -> Step<(StatusResp, u8)> {
+        let st = self.status()?;
+        if st.active >= self.slots {
+            return Err(detail!(
+                "running slot {} is not one of the node's {} app slots",
+                st.active,
+                self.slots
+            ));
+        }
+        Ok((st, st.active))
     }
 
     fn begin(&mut self, slot: u8, total_len: u32) -> Step<Resp> {
@@ -458,12 +530,12 @@ impl<'a, 's, C: Channel> Runner<'a, 's, C> {
     // ---- tests ----------------------------------------------------------
 
     fn ct04(&mut self) -> Step<u32> {
-        let (st, active, _) = self.slots()?;
+        let (st, active) = self.running()?;
         let mut targets = [Some(active), None];
-        if st.confirmed <= 1 && st.confirmed != active {
+        if st.confirmed < self.slots && st.confirmed != active {
             targets[1] = Some(st.confirmed);
         }
-        let len = self.good[active as usize].raw.len() as u32;
+        let len = self.good(active)?.raw.len() as u32;
         let mut rejected = 0;
         for slot in targets.into_iter().flatten() {
             let s = self.begin(slot, len)?.status;
@@ -477,7 +549,7 @@ impl<'a, 's, C: Channel> Runner<'a, 's, C> {
 
     fn ct20(&mut self) -> Step<u32> {
         let (_, _, idle) = self.slots()?;
-        let img = self.good[idle as usize];
+        let img = self.good(idle)?;
         let mut rejected = 0;
         for field in ["mcu_id", "target_tag"] {
             let mut h = img.hdr;
@@ -505,7 +577,7 @@ impl<'a, 's, C: Channel> Runner<'a, 's, C> {
                 .map_err(|d| detail!("HELLO {}: {:?}", i + 1, d))?;
         }
         let (_, _, idle) = self.slots()?;
-        let raw = self.good[idle as usize].raw;
+        let raw = self.good(idle)?.raw;
         if raw.len() - HEADER_SIZE < self.chunk_max() {
             return Err(detail!(
                 "image body below one full XFER_DATA ({} B)",
@@ -533,7 +605,7 @@ impl<'a, 's, C: Channel> Runner<'a, 's, C> {
     fn ct11(&mut self) -> Step<u32> {
         self.after_ct11 = None;
         let (st, prev, slot) = self.slots()?;
-        let img = self.good[slot as usize];
+        let img = self.good(slot)?;
         self.transfer(slot, img.raw)?;
         self.set_pending(slot)?;
         let v = img.parsed.version;
@@ -574,7 +646,7 @@ impl<'a, 's, C: Channel> Runner<'a, 's, C> {
     fn ct12(&mut self) -> Step<u32> {
         self.after_ct12 = None;
         let (st, prev, slot) = self.slots()?;
-        let img = self.no_confirm[slot as usize];
+        let img = self.no_confirm(slot)?;
         let prev_version = st.slots[prev as usize].version;
         if img.parsed.version == prev_version {
             return Err(detail!("no_confirm image has the running version"));
@@ -630,8 +702,8 @@ impl<'a, 's, C: Channel> Runner<'a, 's, C> {
         let h = self.hello()?;
         let st = self.status()?;
         // The good image of the running slot carries this node's identity.
-        let id = self.good[exp.active as usize].parsed;
-        let other = 1 - exp.active as usize;
+        let id = self.good(exp.active)?.parsed;
+        let other = usize::from(self.other_than(exp.active)?);
         let a = st.slots[exp.active as usize];
         let o = st.slots[other];
         let link_max = self.limits.max_payload as u16;

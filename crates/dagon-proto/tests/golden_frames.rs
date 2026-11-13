@@ -258,7 +258,7 @@ fn relay_vector() {
     let r = Relay::parse(decode(&file).payload).unwrap();
     assert_eq!(r, relay);
     assert_eq!(decode(r.inner).cmd, Cmd::Hello as u8);
-    // len 4 + 18; link 1 (the RP2040's i2c0), addr 0x42, timeout 300 ms, then the inner frame verbatim
+    // len 4 + 18; the link id of the RP2040's i2c0 entry, addr 0x42, timeout 300 ms, then the inner frame verbatim
     expect_at(
         &file,
         &[(5, &[0x50, 22, 0, 1, 0x42, 0x2C, 0x01]), (12, &inner)],

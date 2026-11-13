@@ -18,6 +18,11 @@ pub const PROGRAM_TOTAL_MAX_MS: u32 = 50;
 pub const PROGRAM_BUS_TIMEOUT_MS: u32 = 5;
 /// Most bytes one `bus_write` sends.
 pub const PROGRAM_BUS_BYTES_MAX: usize = 8;
+/// Shortest blinking halt period on the boot LED of a board whose MCU has
+/// a DAGON stage0: stage0 blinks its code in tenths of the period
+/// (`dagon_core::bootcore::blink_code`), and a tenth of a shorter one is
+/// no delay at all.
+pub const STAGE0_HALT_PERIOD_MIN_MS: u32 = 10;
 /// The `boot-program` format number a generated program table has.
 pub const BOOT_PROGRAM_FORMAT: u32 = 1;
 
@@ -573,6 +578,19 @@ pub(super) fn boot(b: &BoardDef, m: &McuDef) -> Result<(), String> {
         fail(h.pattern != HaltPattern::Off && h.period_ms == 0, || {
             "boot.halt.period_ms must be above 0 for a blinking pattern".into()
         })?;
+        let stage0_blinks = m.stage0.is_some() && boot.led.is_some();
+        fail(
+            stage0_blinks
+                && h.pattern == HaltPattern::Blink
+                && h.period_ms < STAGE0_HALT_PERIOD_MIN_MS,
+            || {
+                format!(
+                    "boot.halt.period_ms {}: stage0 shows its code with this blink, which needs at \
+                     least {STAGE0_HALT_PERIOD_MIN_MS} ms",
+                    h.period_ms
+                )
+            },
+        )?;
     }
     for a in &boot.actions {
         program(b, m, boot, a)?;

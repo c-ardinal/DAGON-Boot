@@ -766,6 +766,39 @@ fn slots_must_fit_and_not_overlap() {
     assert!(e.contains("flash_mapx"), "{e}");
 }
 
+/// `[stage0]` goes with a stage0 region of its size and names a key place
+/// stage0 can read; the key place defaults to stage0's flash.
+#[test]
+fn stage0_states_its_region_and_a_key_place_it_can_read() {
+    let with = |stage0: &str| {
+        FAKE_MCU.replace(
+            "[layout]\n",
+            "[layout]\nstage0 = { at = 0x0010_A000, size = 0x4000 }\n",
+        ) + stage0
+    };
+    let m = parse_mcu_text(&with("\n[stage0]\nregion_bytes = 0x4000\n"), &[]).unwrap();
+    let s = m.stage0.unwrap();
+    assert_eq!((s.key.as_str(), s.region_bytes), ("flash", 0x4000));
+    let e = mcu_err(&with("\n[stage0]\nkey = \"otp\"\nregion_bytes = 0x4000\n"));
+    assert!(
+        e.contains("stage0.key \"otp\": this MCU's stage0 cannot read a key from that place"),
+        "{e}"
+    );
+    let e = mcu_err(&with("\n[stage0]\nregion_bytes = 0x2000\n"));
+    assert!(
+        e.contains("is not the 0x4000 bytes of layout.stage0"),
+        "{e}"
+    );
+    let e = mcu_err(&with(""));
+    assert!(e.contains("layout.stage0 needs a [stage0] table"), "{e}");
+    let e = mcu_err(&(FAKE_MCU.to_string() + "\n[stage0]\nregion_bytes = 0x4000\n"));
+    assert!(e.contains("[stage0] needs layout.stage0"), "{e}");
+    let e = mcu_err(&with(
+        "\n[stage0]\nregion_bytes = 0x4000\nverifies = true\n",
+    ));
+    assert!(e.contains("unknown field `verifies`"), "{e}");
+}
+
 #[test]
 fn detached_headers_resolve_from_partitions_and_stay_inside() {
     let esp = reg().mcu("esp32s3").unwrap();

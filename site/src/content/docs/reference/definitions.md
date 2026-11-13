@@ -34,6 +34,7 @@ description: "dagon-mcu.tomlとdagon-board.toml: DAGONがマイコンやボー�
 | `[rom_i2c]` | テーブル | 任意 | ROMのI2Cブートローダ（`stm32-i2c-rom`）: `name`（確認のメッセージでの呼び名）、`addr`、`max_hz`、`erase_sectors`、待ち受ける`pairs = [{ controller, sda, scl }]`。 |
 | `[links]` | テーブル | 任意 | マイコンの定義のファームウェアが実装するリンクの種類（その`LINK_KINDS`）。 |
 | `[[link_port]]` | テーブルの配列 | 任意 | 構成のリンクの端が名前で示す、マイコンのリンクのインタフェース: `index`（0から255）、`name`（`a-z`、`0-9`、`-`）、`kind`（リンクの種類: `i2c`、`uart`、`can`、`ethernet`、`usb-cdc`、`ble`、`wifi-tcp`）。`index`と`name`はそれぞれ重なりません。リンクの端の`port`は、リンクの種類のこれらの名前のどれかです（構成の確認V-27）。コンパイル済みの構成はその`index`を持ちます。 |
+| `[[relay_link]]` | テーブルの配列 | 任意 | このマイコンのノードが中継するリンク。`[[link_port]]`ごとに1つまでです: `id`（RELAYのリンクの番号。1から254で、重なりません）、`port`（`[[link_port]]`の名前）、`addressing`（`"seven-bit"`: 構成が届く側の端に書くアドレス。アドレスのある種類で使います。`{ fixed = N }`（Nは0から255）: アドレスのない種類の、ただ1つの相手）、`max_payload`（1から、そのポートの種類のプロトコルの最大まで）。マイコンごとのファームウェアのビルドがこれを`RELAY_LINKS`として生成し、PCも同じ項目を読みます。 |
 | `[connection]` | テーブル | 必須 | 書き込みのときに利用者がつなぐ方法: `label`、`hint`。 |
 | `[[doctor]]` | テーブルの配列 | 任意 | ツールの確認: `what`、`probe`（コマンド）、`expect`（`"runs"`、`{ line = "..." }`、`{ prefix = "..." }`）、`fix`（コマンド）、`hint`、`slow`（`true`: `dagon doctor --fix`が、インストールに時間がかかることを始める前に伝えます）。 |
 | `[ram]` | テーブル | 任意 | `{ at, size }`: マイコンのRAMのすべて。イメージは、ブート記録、ヒューズのセル、拡張のリージョンより下のRAMを得ます。 |

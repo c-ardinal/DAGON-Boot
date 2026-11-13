@@ -23,7 +23,8 @@ table) follows at +0x200. The app is linked per slot: default A,
 `--features slot-b` for B.
 
 stage0 picks the boot core slot from its log (slot A while empty) and checks
-its SHA-256. The boot core runs dagon-core's boot decision over the app log
+its signature (under the key built into stage0) and its SHA-256; it starts no
+core whose signature does not verify. The boot core runs dagon-core's boot decision over the app log
 and slots: a pending slot is tried up to 3 times (signature + SHA-256, BOOT_ATTEMPT before the jump) and then rolled
 back; otherwise the confirmed slot is started after a SHA-256 check. The
 watchdog runs at 8 s. The app feeds it while confirmed, and on trial only for
@@ -38,7 +39,7 @@ warns and the LCD shows TEST KEY):
 
 ```sh
 export DAGON_PUBKEY=/path/outside/the/repo/dagon-signing.pub
-(cd targets/mcu/rp2040/stage0 && cargo build --release)
+(cd targets/mcu/rp2040/stage0 && DAGON_BOOT_CRATE=<project>/boot/<node> cargo build --release)
 (cd targets/mcu/rp2040/bootcore && DAGON_TARGET_TAG=hub-rp2040-lcd cargo build --release)
 (cd targets/rp2040-hub && cargo build --release)
 (cd targets/rp2040-hub && cargo build --release --features slot-b --target-dir target/slot-b)

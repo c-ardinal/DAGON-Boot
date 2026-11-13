@@ -231,9 +231,10 @@ version = "0.1.0"
 dependencies = [
  "cortex-m",
  "cortex-m-rt",
+ "dagon-core",
+ "dagon-ed25519",
  "dagon-format",
  "dagon-mcu-rp2040",
- "dagon-port",
  "dagon-topology",
  "panic-halt",
  "rp2040-boot2",

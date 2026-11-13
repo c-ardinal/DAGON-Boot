@@ -72,7 +72,8 @@ fn screens_of_a_boot(m: &mut Mem) -> Vec<Option<Screen>> {
         t
     };
     let mut chain = compose_boot(Probe(&mut seen), clock, limits);
-    let mut run = dagon_boot::BootRun::start(&mut chain, m, &LOG, &SLOTS, &cfg(), 8_000);
+    let mut run =
+        dagon_boot::BootRun::start(&mut chain, m, &LOG, &SLOTS, &cfg(), &verifier(), 8_000);
     run.before_jump(&mut chain);
     run.halt(&mut chain);
     seen

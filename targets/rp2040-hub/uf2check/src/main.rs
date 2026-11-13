@@ -12,6 +12,7 @@ use std::{env, fs};
 
 use dagon_core::boot::{self, BootConfig, Decision};
 use dagon_core::log::Log;
+use dagon_ed25519::Ed25519Compact;
 use dagon_format::header::{mcu_id, target_tag};
 use dagon_mcu_rp2040::bl;
 use dagon_mcu_rp2040::layout::*;
@@ -52,12 +53,17 @@ fn run() -> Result<String, String> {
 
     let mut log = Log::load(&mut flash, &APP_LOG_LAYOUT).map_err(|e| format!("app log: {e:?}"))?;
     let cfg = BootConfig {
-        pubkey,
         mcu_id: mcu_id::RP2040,
         target_tag: target_tag(tag),
         max_attempts: dagon_mcu_rp2040::TRIAL_ATTEMPTS,
     };
-    match boot::decide(&mut flash, &mut log, &APP_SLOTS, &cfg) {
+    match boot::decide(
+        &mut flash,
+        &mut log,
+        &APP_SLOTS,
+        &cfg,
+        &Ed25519Compact::new(pubkey),
+    ) {
         Decision::Boot { slot, trial, .. } => Ok(format!(
             "ok: boot core slot {s}, app slot {slot} (trial {trial}), log generation {}",
             log.generation

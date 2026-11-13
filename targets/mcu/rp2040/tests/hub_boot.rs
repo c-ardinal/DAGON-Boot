@@ -80,7 +80,7 @@ fn put_app(m: &mut Mem, kp: &KeyPair, slot: u8, minor: u8) -> SlotRef {
 fn status_now(m: &mut Mem, active: u8) -> dagon_proto::payload::StatusResp {
     let log = Log::load(m, &APP_LOG_LAYOUT).unwrap();
     let heads = [0u8, 1].map(|s| image::head_ref(m, APP_SLOT[s as usize], s));
-    log.state.status(heads, active, log.generation)
+    log.state.status(&heads, active, log.generation)
 }
 
 /// Flash with app A installed and the install log as `dagon rescue hub`

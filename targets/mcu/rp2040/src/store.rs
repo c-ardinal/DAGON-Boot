@@ -66,7 +66,7 @@ impl SlotStore for AppStore {
         let (state, generation) = Log::load(&mut self.flash, &APP_LOG_LAYOUT)
             .map_or((Default::default(), 0), |l| (l.state, l.generation));
         let heads = [0u8, 1].map(|s| image::head_ref(&mut self.flash, APP_SLOT[s as usize], s));
-        state.status(heads, ACTIVE, generation)
+        state.status(&heads, ACTIVE, generation)
     }
 
     /// No boot core capacity while the trial cell does not hold: stage0
@@ -198,7 +198,7 @@ impl SlotStore for AppStore {
                 let heads =
                     [0u8, 1].map(|s| image::head_ref(&mut self.flash, BL_SLOT[s as usize], s));
                 let running = core.confirmed.map_or(slot::A, |c| c.slot);
-                Some(core.status(heads, running, generation))
+                Some(core.status(&heads, running, generation))
             }
             _ => None,
         }

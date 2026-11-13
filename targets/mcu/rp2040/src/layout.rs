@@ -54,7 +54,7 @@ pub const APP_LOG_LAYOUT: LogLayout = LogLayout {
     face_len: LOG_FACE_SIZE,
 };
 pub const APP_SLOTS: SlotLayout = SlotLayout {
-    slots: APP_SLOT,
+    slots: &APP_SLOT,
     slot_len: APP_SLOT_SIZE,
 };
 

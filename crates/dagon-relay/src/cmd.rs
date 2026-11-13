@@ -5,12 +5,12 @@
 use dagon_proto::payload::I2cRaw;
 use dagon_proto::{max_payload, Status};
 
-use crate::RelayLink;
+use crate::RelayLinkDef;
 
 /// RELAY targets a node accepts: one of its `links`, an address that link
 /// accepts, and a frame within that link's limit. Anything else answers
 /// E_ARG.
-pub fn relay_fits(links: &[RelayLink], l: u8, addr: u8, inner_len: usize) -> bool {
+pub fn relay_fits(links: &[RelayLinkDef], l: u8, addr: u8, inner_len: usize) -> bool {
     links
         .iter()
         .find(|k| k.id == l)

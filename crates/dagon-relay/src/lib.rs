@@ -17,8 +17,9 @@
 //! - [`view`]: what a home screen shows about this node and the linked
 //!   nodes.
 //!
-//! The MCU package states the links its relay reaches nodes over, as a
-//! list of [`RelayLink`], where its flash holds the topology, its clock
+//! The MCU package states the links its relay reaches nodes over, as its
+//! definition's [`RelayLinkDef`] list (generated from `[[relay_link]]`),
+//! where its flash holds the topology, its clock
 //! ([`RelayClock`]), its watchdog guard ([`Liveness`]) and this node's own agent
 //! ([`OwnAgent`]); this crate names no link id or topology interface of its
 //! own. Embassy task functions cannot
@@ -34,54 +35,11 @@ mod port;
 mod state;
 pub mod view;
 
-use dagon_format::topology::TopoLink;
+use dagon_port::RelayLinkDef;
 
 pub use pc::{serve, Recovery, Relay};
 pub use port::{run_link, LinkRoute, Port};
 pub use state::State;
-
-/// How a link names the node it reaches.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-#[non_exhaustive]
-pub enum Addressing {
-    /// A 7-bit bus address; the topology gives it on the reached end of
-    /// the link (`addr`).
-    SevenBit,
-    /// One fixed address: the medium has no addresses.
-    Fixed(u8),
-}
-
-impl Addressing {
-    /// Whether `addr` names a node on such a link.
-    pub fn accepts(self, addr: u8) -> bool {
-        match self {
-            Addressing::SevenBit => addr < 0x80,
-            Addressing::Fixed(a) => addr == a,
-        }
-    }
-}
-
-/// One link a node relays over. A node's links form one list; the first
-/// entry that carries a topology link is the one that reaches its node.
-#[derive(Clone, Copy, Debug)]
-pub struct RelayLink {
-    /// Its link id (RELAY `link`).
-    pub id: u8,
-    /// Whether a topology link of this node runs over it: by the
-    /// interface, and by the bus where one interface has several.
-    pub carries: fn(&TopoLink) -> bool,
-    /// Its largest payload (`dagon_proto::max_payload`).
-    pub max_payload: usize,
-    pub addressing: Addressing,
-}
-
-impl RelayLink {
-    /// Whether a RELAY over this link may go to `addr` with an inner frame
-    /// of `inner_len` bytes.
-    pub fn fits(&self, addr: u8, inner_len: usize) -> bool {
-        self.addressing.accepts(addr) && inner_len <= dagon_proto::frame_len(self.max_payload)
-    }
-}
 
 /// The relay's settings. The defaults are the relay's own values; an MCU
 /// package or app changes only what its wiring needs.

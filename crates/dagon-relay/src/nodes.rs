@@ -9,7 +9,7 @@ use dagon_format::topology::{TopologyView, HEAD_SIZE, MAX_NODES, MAX_SIZE, NONE}
 use dagon_port::Flash;
 use heapless::Vec;
 
-use crate::{Addressing, RelayLink};
+use dagon_port::{Addressing, RelayLinkDef};
 
 /// The index of a node not found in the topology.
 pub const NO_INDEX: u8 = u8::MAX;
@@ -65,8 +65,8 @@ pub struct Loaded {
 }
 
 /// This node and its linked nodes: from the topology display copy at flash
-/// address `topology`, each link reached over the first of `links` that
-/// carries it, else `fallback`.
+/// address `topology`, each link reached over the entry of `links` on the
+/// port its end at this node names, else `fallback`.
 pub fn load<'l, F, I>(
     flash: &mut F,
     topology: u32,
@@ -76,7 +76,7 @@ pub fn load<'l, F, I>(
 ) -> Loaded
 where
     F: Flash,
-    I: Iterator<Item = &'l RelayLink> + Clone,
+    I: Iterator<Item = &'l RelayLinkDef> + Clone,
 {
     let own = LinkedNode {
         index: me.index,
@@ -92,7 +92,7 @@ where
 fn from_topology<'l, F, I>(flash: &mut F, at: u32, this: u8, links: I) -> Option<LinkedNodes>
 where
     F: Flash,
-    I: Iterator<Item = &'l RelayLink> + Clone,
+    I: Iterator<Item = &'l RelayLinkDef> + Clone,
 {
     let mut raw = [0u8; MAX_SIZE];
     flash.read(at, &mut raw[..HEAD_SIZE]).ok()?;
@@ -104,11 +104,12 @@ where
     let t = TopologyView::parse(&raw[..len]).ok()?;
     let mut nodes = LinkedNodes::new();
     for l in (0..t.link_count()).map(|i| t.link(i)) {
-        let Some(&far) = l.other(this) else {
+        let (Some(&near), Some(&far)) = (l.end(this), l.other(this)) else {
             continue;
         };
         let other = far.node;
-        let Some(k) = links.clone().find(|k| (k.carries)(&l)) else {
+        // The link this node's end runs on: its definition's entry for that port.
+        let Some(k) = links.clone().find(|k| k.port == near.port) else {
             continue;
         };
         let addr = match k.addressing {
@@ -117,6 +118,8 @@ where
             Addressing::SevenBit if far.addr != NONE => far.addr,
             Addressing::SevenBit => continue,
             Addressing::Fixed(a) => a,
+            // A way of addressing this relay does not know: no node reached.
+            _ => continue,
         };
         let Some(other_tag) =
             (usize::from(other) < t.node_count()).then(|| t.node(usize::from(other)).target_tag)
@@ -150,28 +153,32 @@ mod tests {
 
     use super::*;
     use dagon_format::topology::{encode, TopoEnd, TopoLink, TopoNode};
-    use dagon_port::{FlashError, FlashRegion};
+    use dagon_port::{FlashError, FlashRegion, LinkKind};
     use std::vec::Vec;
 
     const AT: u32 = 0x100;
-    const BUS: RelayLink = RelayLink {
+    // This test's own relay links, each on its port index.
+    const BUS: RelayLinkDef = RelayLinkDef {
         id: 7,
-        carries: |l| l.iface == 3 && l.bus_id == 0,
-        max_payload: 32,
+        port: 1,
+        kind: LinkKind::I2c,
         addressing: Addressing::SevenBit,
+        max_payload: 32,
     };
-    const SECOND_BUS: RelayLink = RelayLink {
+    const SECOND_BUS: RelayLinkDef = RelayLinkDef {
         id: 8,
-        carries: |l| l.iface == 3 && l.bus_id == 1,
-        max_payload: 32,
-        addressing: Addressing::SevenBit,
+        port: 2,
+        ..BUS
     };
-    const STREAM: RelayLink = RelayLink {
+    const STREAM: RelayLinkDef = RelayLinkDef {
         id: 9,
-        carries: |l| l.iface == 4,
-        max_payload: 64,
+        port: 3,
+        kind: LinkKind::Uart,
         addressing: Addressing::Fixed(0xFF),
+        max_payload: 64,
     };
+    /// A port none of the links runs on.
+    const NO_LINK: u8 = 9;
     const TAGS: [&str; 7] = [
         "relay-rp2040",
         "seg-f401-7seg",
@@ -207,14 +214,14 @@ mod tests {
     }
 
     /// A topology at [`AT`] of `count` nodes (tags from [`TAGS`]) and
-    /// `links` (from, to, interface, bus id); a link to node `n` has I2C
-    /// address 0x40 + n.
-    fn topology(count: usize, links: &[(u8, u8, u8, u8)]) -> Mem {
+    /// `links` (from, to, the port index of both ends); a link to node `n`
+    /// has I2C address 0x40 + n on its end at `n`, none at `from`.
+    fn topology(count: usize, links: &[(u8, u8, u8)]) -> Mem {
         tagged(&TAGS[..count], links)
     }
 
     /// [`topology`] with node `i` tagged `tags[i]`.
-    fn tagged(tags: &[&str], links: &[(u8, u8, u8, u8)]) -> Mem {
+    fn tagged(tags: &[&str], links: &[(u8, u8, u8)]) -> Mem {
         let nodes: Vec<TopoNode> = tags
             .iter()
             .enumerate()
@@ -226,18 +233,12 @@ mod tests {
             .collect();
         let links: Vec<TopoLink> = links
             .iter()
-            .map(|&(from, to, iface, bus_id)| {
-                let end = |node, addr| TopoEnd {
-                    node,
-                    port: 0,
-                    addr,
-                };
+            .map(|&(from, to, port)| {
+                let end = |node, addr| TopoEnd { node, port, addr };
                 let mut ends = [end(from, NONE), end(to, 0x40 + to)];
                 ends.sort_by_key(|e| e.node);
                 TopoLink {
                     ends,
-                    iface,
-                    bus_id,
                     ..TopoLink::default()
                 }
             })
@@ -247,49 +248,58 @@ mod tests {
         Mem(flash)
     }
 
-    /// Node 0 linked to one node per entry of `links` (interface, bus id).
-    fn stored(links: &[(u8, u8)]) -> Mem {
-        let l: Vec<_> = links
+    /// Node 0 linked to one node per entry of `ports` (the links' port index).
+    fn stored(ports: &[u8]) -> Mem {
+        let l: Vec<_> = ports
             .iter()
             .enumerate()
-            .map(|(i, &(iface, bus))| (0, i as u8 + 1, iface, bus))
+            .map(|(i, &port)| (0, i as u8 + 1, port))
             .collect();
-        topology(links.len() + 1, &l)
+        topology(ports.len() + 1, &l)
     }
 
     fn linked<'l>(
         flash: &mut Mem,
         me: Identity,
-        links: impl Iterator<Item = &'l RelayLink> + Clone,
+        links: impl Iterator<Item = &'l RelayLinkDef> + Clone,
     ) -> Vec<LinkedNode> {
         load(flash, AT, me, links, &[]).linked.to_vec()
     }
 
     #[test]
-    fn topology_links_map_through_the_given_links() {
-        let mut flash = stored(&[(3, 0), (4, 0), (5, 0)]);
+    fn topology_links_map_through_the_given_links_by_port() {
+        let mut flash = stored(&[BUS.port, STREAM.port, NO_LINK]);
         let got = linked(&mut flash, FIRST, [BUS, STREAM].iter());
-        assert_eq!(got, [named(1, "seg", 7, 0x41), named(2, "watch", 9, 0xFF)]);
+        assert_eq!(
+            got,
+            [
+                named(1, "seg", BUS.id, 0x41),
+                named(2, "watch", STREAM.id, 0xFF)
+            ]
+        );
     }
 
     #[test]
-    fn two_links_on_one_interface_reach_their_nodes_over_their_own_link() {
+    fn two_links_of_one_kind_reach_their_nodes_over_their_own_port() {
         let links = [BUS, SECOND_BUS, STREAM];
-        let got = linked(&mut stored(&[(3, 0), (3, 1)]), FIRST, links.iter());
-        assert_eq!(got, [named(1, "seg", 7, 0x41), named(2, "watch", 8, 0x42)]);
+        let got = linked(
+            &mut stored(&[BUS.port, SECOND_BUS.port]),
+            FIRST,
+            links.iter(),
+        );
+        assert_eq!(
+            got,
+            [
+                named(1, "seg", BUS.id, 0x41),
+                named(2, "watch", SECOND_BUS.id, 0x42)
+            ]
+        );
     }
 
     #[test]
-    fn a_topology_link_two_links_carry_goes_over_the_first_in_the_list() {
-        let any_bus = RelayLink {
-            id: 6,
-            carries: |l| l.iface == 3,
-            ..BUS
-        };
-        let got = linked(&mut stored(&[(3, 0)]), FIRST, [any_bus, BUS].iter());
-        assert_eq!(got, [named(1, "seg", 6, 0x41)]);
-        let got = linked(&mut stored(&[(3, 0)]), FIRST, [BUS, any_bus].iter());
-        assert_eq!(got, [named(1, "seg", 7, 0x41)]);
+    fn a_topology_link_on_a_port_no_entry_names_reaches_no_node() {
+        let got = linked(&mut stored(&[NO_LINK]), FIRST, [BUS, STREAM].iter());
+        assert_eq!(got, []);
     }
 
     #[test]
@@ -297,7 +307,12 @@ mod tests {
         // 0 -> 1 and 1 -> 3 do not touch node 2 and come first; 0 -> 2
         // reaches it at its `to` end over a stream, 2 -> 4 is its own bus
         // link. (The format lists links by their `to` node.)
-        let links = [(0, 1, 3, 0), (0, 2, 4, 0), (1, 3, 3, 0), (2, 4, 3, 0)];
+        let links = [
+            (0, 1, BUS.port),
+            (0, 2, STREAM.port),
+            (1, 3, BUS.port),
+            (2, 4, BUS.port),
+        ];
         let me = Identity {
             index: 2,
             tag: "watch-esp32",
@@ -306,7 +321,10 @@ mod tests {
         assert_eq!(got.own, named(2, "watch", 0, 0));
         assert_eq!(
             got.linked.as_slice(),
-            [named(0, "relay", 9, 0xFF), named(4, "fifth", 7, 0x44)]
+            [
+                named(0, "relay", STREAM.id, 0xFF),
+                named(4, "fifth", BUS.id, 0x44)
+            ]
         );
     }
 
@@ -316,7 +334,7 @@ mod tests {
             index: 1,
             tag: "seg-f401-7seg",
         };
-        let got = linked(&mut topology(2, &[(0, 1, 3, 0)]), me, [BUS].iter());
+        let got = linked(&mut topology(2, &[(0, 1, BUS.port)]), me, [BUS].iter());
         assert_eq!(got, []);
     }
 
@@ -328,36 +346,36 @@ mod tests {
             "relay-rp2040",
             "watch-esp32",
         ];
-        let links = [(2, 0, 3, 0), (1, 3, 3, 0)];
+        let links = [(2, 0, BUS.port), (1, 3, BUS.port)];
         let me = |index| Identity {
             index,
             tag: "relay-rp2040",
         };
         let got = load(&mut tagged(&tags, &links), AT, me(1), [BUS].iter(), &[]);
         assert_eq!(got.own, named(1, "relay", 0, 0));
-        assert_eq!(got.linked.as_slice(), [named(3, "watch", 7, 0x43)]);
+        assert_eq!(got.linked.as_slice(), [named(3, "watch", BUS.id, 0x43)]);
         let got = load(&mut tagged(&tags, &links), AT, me(2), [BUS].iter(), &[]);
         assert_eq!(got.own, named(2, "relay", 0, 0));
-        assert_eq!(got.linked.as_slice(), [named(0, "seg", 7, 0x40)]);
+        assert_eq!(got.linked.as_slice(), [named(0, "seg", BUS.id, 0x40)]);
     }
 
     #[test]
     fn every_linked_node_is_listed_beyond_a_screen_full() {
         let links = [
-            (0, 1, 3, 0),
-            (0, 2, 3, 0),
-            (0, 3, 3, 0),
-            (0, 4, 3, 0),
-            (0, 5, 4, 0),
+            (0, 1, BUS.port),
+            (0, 2, BUS.port),
+            (0, 3, BUS.port),
+            (0, 4, BUS.port),
+            (0, 5, STREAM.port),
         ];
         let got = linked(&mut topology(6, &links), FIRST, [BUS, STREAM].iter());
         assert_eq!(got.len(), 5);
-        assert_eq!(got[4], named(5, "sixth", 9, 0xFF));
+        assert_eq!(got[4], named(5, "sixth", STREAM.id, 0xFF));
     }
 
     #[test]
     fn no_stored_topology_gives_the_fallback() {
-        let fallback = [named(1, "a", 7, 0x42); 5];
+        let fallback = [named(1, "a", BUS.id, 0x42); 5];
         let got = load(
             &mut Mem(std::vec![0xFF; 64]),
             0,

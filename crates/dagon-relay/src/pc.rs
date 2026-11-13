@@ -18,7 +18,7 @@ use crate::{cmd, nodes, task, Config, LinkRoute, Liveness, OwnAgent, RelayClock,
 /// loader answers I2C_RAW on.
 pub struct Recovery<C> {
     pub lines: C,
-    /// Id of that link (one of the node's [`RelayLink`](crate::RelayLink)s).
+    /// Id of that link (one of the node's [`RelayLinkDef`](dagon_port::RelayLinkDef)s).
     pub link: u8,
 }
 
@@ -245,7 +245,7 @@ where
             .await;
         if status == Status::Ok {
             let answer = &self.resp[HEADER_LEN + 1..HEADER_LEN + 1 + n];
-            if let Some(seen) = relayed_seen(answer, route.link.max_payload) {
+            if let Some(seen) = relayed_seen(answer, usize::from(route.link.max_payload)) {
                 self.r.state.set_seen_at(r.link, r.addr, seen);
             }
         }

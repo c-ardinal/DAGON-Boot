@@ -118,6 +118,18 @@ fn target(kind: &str, addr: u8) -> Result<Target, JsValue> {
     }
 }
 
+/// How the host reaches each node of `topo`: from the node the PC is
+/// connected to, the 親機 the reachable part starts from.
+fn routes(
+    reg: &dagon_topology::defs::Registry,
+    topo: &dagon_topology::Topology,
+) -> dagon_host::Routes {
+    match dagon_topology::reach_root(topo) {
+        Some(local) => dagon_host::relay_routes(reg, topo, local),
+        None => dagon_host::Routes::failed(dagon_host::RouteError::Connected { nodes: Vec::new() }),
+    }
+}
+
 fn busy() -> JsValue {
     JsError::new("busy").into()
 }
@@ -143,14 +155,14 @@ impl WasmHost {
     /// request it erases on, and its trial, which also weighs in its one
     /// progress number; and each linked node is reached by the topology
     /// link joining it to the connected node and that node's MCU's relay
-    /// table (`dagon_host::configured_routes`). Throws with the reason when
+    /// table (`dagon_host::relay_routes` from the 親機 the reachable part
+    /// starts from, `dagon_topology::reach_root`). Throws with the reason when
     /// the topology does not parse or a definition breaks a timing rule.
     #[wasm_bindgen(js_name = setTimings)]
     pub fn set_timings(&self, yaml: &str) -> Result<(), JsValue> {
         let topo = dagon_topology::parse_str(yaml).map_err(|e| JsError::new(&e.to_string()))?;
         let (timings, links) = crate::defs::with_registry(|reg| {
-            dagon_host::node_timings(reg, &topo)
-                .map(|t| (t, dagon_host::configured_routes(reg, &topo)))
+            dagon_host::node_timings(reg, &topo).map(|t| (t, routes(reg, &topo)))
         })
         .map_err(|e| JsError::new(&e.to_string()))?;
         let mut h = self.host.try_borrow_mut().map_err(|_| busy())?;

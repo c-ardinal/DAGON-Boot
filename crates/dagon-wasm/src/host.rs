@@ -553,17 +553,26 @@ impl WasmHost {
         })
     }
 
-    /// Back to the version in the other slot (SET_PENDING, REBOOT, its
-    /// HELLO, CONFIRM). Resolves to that version; rejects with dagon-host's
-    /// reason (`FAILED` when there is no previous version to go back to).
-    pub fn rollback(&self, kind: &str, addr: u8, node: u8, on_event: js_sys::Function) -> Promise {
+    /// Back to the version in another of the node's app `slots` (its MCU
+    /// definition's, as `status_rows` gives them without the agent's;
+    /// SET_PENDING, REBOOT, its HELLO, CONFIRM). Resolves to that version;
+    /// rejects with dagon-host's reason (`FAILED` when there is no previous
+    /// version to go back to).
+    pub fn rollback(
+        &self,
+        kind: &str,
+        addr: u8,
+        node: u8,
+        slots: Vec<u8>,
+        on_event: js_sys::Function,
+    ) -> Promise {
         let to = target(kind, addr);
         self.run(|h, _| async move {
             let mut h = h.try_borrow_mut().map_err(|_| busy())?;
             let mut emit = |e: Event| {
                 let _ = on_event.call1(&JsValue::NULL, &event_js(&e));
             };
-            h.rollback(to?, node, &mut emit)
+            h.rollback(to?, node, &slots, &mut emit)
                 .await
                 .map(|v| JsValue::from(v.raw()))
                 .map_err(|e| fail(&e))

@@ -61,6 +61,12 @@ header = "inline"
 at = 0x0804_0000
 size = 0x2_0000
 
+# What writes each image kind: the app's agent writes the app slot it is
+# not running from and either boot core slot.
+[writers]
+app = ["app"]
+bootcore = ["app"]
+
 # What the node receives into: each slot above, header inline at its start.
 [[slot_layout]]
 target = "bootcore"

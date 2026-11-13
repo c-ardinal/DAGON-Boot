@@ -328,6 +328,10 @@ header = "inline"
 at = 0x0015_0000
 size = 0x4_0000
 
+[writers]
+app = ["app"]
+bootcore = ["app"]
+
 [writer]
 kind = "probe-rs"
 chip = "FAKE0"

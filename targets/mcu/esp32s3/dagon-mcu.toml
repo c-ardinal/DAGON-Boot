@@ -33,6 +33,12 @@ partition = "factory"
 header_partition = "dagon"
 header_offset = 0x2000
 
+# What writes each image kind: the factory agent writes the app, and a
+# confirmed app writes the factory agent.
+[writers]
+app = ["agent"]
+agent = ["app"]
+
 # What the node receives into: APP slot A is ota_0 and slot B ota_1, the
 # recovery agent goes to factory; each header has its own 4 KiB sector at
 # the start of the dagon partition (0x71_0000).

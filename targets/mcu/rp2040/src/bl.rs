@@ -18,7 +18,9 @@ use crate::TRIAL_ATTEMPTS;
 /// at reset (`dagon_core::bootcore::choose`). Reads flash only.
 pub fn choose<F: Flash>(flash: &mut F, cell: [u32; 2]) -> Result<Start<u32>, NoCore<Fail>> {
     let st = bootcore::read_state(flash, &BL_LOG_LAYOUT).unwrap_or_default();
-    bootcore::choose(&st, cell, TRIAL_ATTEMPTS, |s, r| check(flash, s, r))
+    bootcore::choose(&st, cell, TRIAL_ATTEMPTS, BL_SLOT.len() as u8, |s, r| {
+        check(flash, s, r)
+    })
 }
 
 /// The core image in slot `s`, against the record `r` when one names it.

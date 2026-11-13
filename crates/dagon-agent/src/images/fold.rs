@@ -21,7 +21,7 @@ use dagon_format::statelog::{kind, reason, slot as log_slot, target as log_targe
 use dagon_format::Version;
 use dagon_proto::payload::{target, SlotState, StatusResp};
 
-use super::{image, ImageStore, Transition};
+use super::{image, ImageStore, Transition, ROOM};
 use crate::{SlotStore, StoreError};
 
 /// The boot core's attempt limit in this model.
@@ -59,7 +59,7 @@ const OPS: [Op; 7] = [
 #[derive(Clone, Copy, Debug)]
 struct FoldStore {
     log: LogState,
-    header: [u8; 2],
+    header: [u8; ROOM],
 }
 
 const ERASED: u8 = 0xFF;
@@ -118,15 +118,16 @@ fn digest_of(hdr: &[u8; HEADER_SIZE]) -> u8 {
 
 impl SlotStore for FoldStore {
     fn status(&mut self) -> StatusResp {
-        let heads = [0u8, 1].map(|s| {
-            let d = self.header[usize::from(s)];
+        let heads: [_; ROOM] = core::array::from_fn(|i| {
+            let s = i as u8;
+            let d = self.header[i];
             (d != ERASED).then(|| SlotRef {
                 slot: s,
                 version: Version::new(1, 0, d.into()),
                 digest16: [d; 16],
             })
         });
-        self.log.status(heads, self.log.active(), 0)
+        self.log.status(&heads, self.log.active(), 0)
     }
 
     fn capacity(&self, t: u8, slot: u8) -> u32 {
@@ -275,7 +276,7 @@ impl Model {
 
     fn agrees(&mut self, path: &[Op]) {
         let st = self.images.status();
-        for (s, info) in (0u8..).zip(&st.slots[..2]) {
+        for (s, info) in (0u8..).zip(&st.slots[..ROOM]) {
             assert_eq!(
                 self.images.view().state(s),
                 Some(as_machine(info.state)),
@@ -344,7 +345,9 @@ fn a_rolled_back_marker_names_one_image() {
         }
         let st = m.images.status();
         assert!(
-            st.slots[..2].iter().all(|s| s.state != SlotState::Reverted),
+            st.slots[..ROOM]
+                .iter()
+                .all(|s| s.state != SlotState::Reverted),
             "{path:?}: {st:?}"
         );
     }

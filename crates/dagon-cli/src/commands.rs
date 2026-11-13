@@ -37,11 +37,27 @@ fn number(name: &str, s: &str) -> Result<u32, String> {
 }
 
 fn slot_arg(s: &str) -> Result<u8, String> {
-    match s {
-        "a" | "A" => Ok(slot_binding::A),
-        "b" | "B" => Ok(slot_binding::B),
+    let mut c = s.chars();
+    match (c.next(), c.next()) {
+        (Some(l), None) if slot_letters().any(|x| x == l.to_ascii_lowercase()) => Ok(binding_of(l)),
         _ => Err("--slot must be a or b".into()),
     }
+}
+
+/// The image header binding of slot letter `c` (`a` slot A, `b` slot B):
+/// the letter's place in the alphabet, as STATUS numbers the slots.
+pub(crate) fn binding_of(c: char) -> u8 {
+    (c.to_ascii_lowercase() as u8).wrapping_sub(b'a')
+}
+
+/// The letter of slot `binding`.
+pub(crate) fn slot_letter(binding: u8) -> char {
+    char::from(b'a' + binding)
+}
+
+/// The letters of every image slot the wire has room for (`a`, `b`).
+pub(crate) fn slot_letters() -> impl Iterator<Item = char> {
+    (0..dagon_proto::payload::StatusResp::IMAGE_SLOTS as u8).map(slot_letter)
 }
 
 /// Signs `input` (ELF or raw payload) for `node`, or, when `input` already is

@@ -32,7 +32,7 @@ pub const CORE_SLOTS: [(u32, u32); 2] = [(0x0801_0000, 0x1_0000), (0x0806_0000, 
 
 /// APP-A (sector 5) and APP-B (sector 6), header inline at the slot start.
 pub const SLOTS: SlotLayout = SlotLayout {
-    slots: [0x0802_0000, 0x0804_0000],
+    slots: &[0x0802_0000, 0x0804_0000],
     slot_len: 0x2_0000,
 };
 

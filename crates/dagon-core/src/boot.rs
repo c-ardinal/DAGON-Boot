@@ -12,11 +12,13 @@ use dagon_format::statelog::{kind, reason, target};
 use dagon_format::{Sha256, SigVerifier};
 use dagon_port::Flash;
 
-/// Where the APP slots live. Each slot starts with its 512-byte header; the
-/// body (vector table first) follows at `+HEADER_SIZE`.
+/// Where the APP slots live: one start address per slot the MCU definition
+/// gives the app, index = slot (A, then B when there is one). Each slot
+/// starts with its 512-byte header; the body (vector table first) follows at
+/// `+HEADER_SIZE`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct SlotLayout {
-    pub slots: [u32; 2],
+pub struct SlotLayout<'a> {
+    pub slots: &'a [u32],
     pub slot_len: u32,
 }
 

@@ -62,6 +62,21 @@ pub fn mcu_trial_ms(mcu: &str) -> Option<u32> {
     })
 }
 
+/// The STATUS entries a node of `mcu` fills for `target` (`app`, with the
+/// agent's factory slot; `bootcore`; `agent`), by wire slot (0 A, 1 B, 2
+/// factory), from its definition's slots; none for an unknown MCU or target.
+#[wasm_bindgen]
+pub fn status_rows(mcu: &str, target: &str) -> Option<Vec<u8>> {
+    use dagon_topology::defs::TargetName;
+    let t = match target {
+        "app" => TargetName::App,
+        "bootcore" => TargetName::Bootcore,
+        "agent" => TargetName::Agent,
+        _ => return None,
+    };
+    with_registry(|reg| reg.mcu(mcu).map(|m| m.status_rows(t)))
+}
+
 /// Whether `mcu` can be the coordinator (its definition has `[coordinator]`).
 #[wasm_bindgen]
 pub fn coordinator_capable(mcu: &str) -> bool {

@@ -8,7 +8,7 @@
   import { HUB_LOCKED, hubOf, view, type Action } from './app/machine.ts';
   import { Operate, waterOf, writingTo, type Progress, type ReleaseFile } from './app/operate.svelte.ts';
   import { keptChoices, type Kept } from './app/kept.ts';
-  import { previousVersion } from './app/slots.ts';
+  import { imageRows, previousVersion, rollbackOff } from './app/slots.ts';
   import { buildFailure, buildingNow, buildStateOf, firstWriteNodes, type BuildingMemo, type BuildState } from './app/jobFlow.ts';
   import { logStages } from './app/stageLog.svelte.ts';
   import Graph, { COMPACT_FROM, newView, ZOOM_LIMITS, type Chip, type View } from './graph/Graph.svelte';
@@ -1182,7 +1182,7 @@
       items: [
         { label: connected ? HUB_TOGGLE.disconnect : HUB_TOGGLE.connect, hint: connected ? MENU.hint.disconnect : MENU.hint.connect, control: 'connect', off: hubLocked, run: toggleHub },
         { label: MENU.place, hint: MENU.hint.place, control: 'file', off: !connected ? MENU.off.notConnected : idle ? null : MENU.off.notIdle, run: () => fileInput?.click() },
-        { label: MENU.rollback, hint: MENU.hint.rollback, control: 'rollback', off: !connected ? MENU.off.notConnected : !idle ? MENU.off.notIdle : selectedNode ? null : MENU.off.noNode, run: () => selectedNode && askRollback(selectedNode) },
+        { label: MENU.rollback, hint: MENU.hint.rollback, control: 'rollback', off: !connected ? MENU.off.notConnected : !idle ? MENU.off.notIdle : selectedNode ? rollbackOff(op.live[selectedNode]?.status, imageRows(op.config?.nodes.find((x) => x.id === selectedNode)?.mcuId)) : MENU.off.noNode, run: () => selectedNode && askRollback(selectedNode) },
       ],
     },
     {
@@ -1211,8 +1211,10 @@
   /** 前のバージョンに戻す, from the menu or the sheet: asks first, like every change that cannot be undone. */
   function askRollback(id: string) {
     const n = op.config?.nodes.find((x) => x.id === id);
-    const v = previousVersion(op.live[id]?.status);
-    confirmThen(CONFIRM.rollback(n ? `[${n.no}] ${n.name}` : id, v ?? ''), () => void op.rollback(id));
+    const v = previousVersion(op.live[id]?.status, imageRows(n?.mcuId));
+    // No previous version (one slot, or nothing confirmed before): nothing to go back to.
+    if (!v) return;
+    confirmThen(CONFIRM.rollback(n ? `[${n.no}] ${n.name}` : id, v), () => void op.rollback(id));
   }
   function openCli() {
     if (simulated) return;

@@ -195,7 +195,7 @@ impl SlotStore for Store {
             target::BOOTCORE if self.cores => {
                 let log = self.log();
                 let heads = [self.head(0), self.head(1)];
-                Some(log.core.status(heads, self.running, log.generation))
+                Some(log.core.status(&heads, self.running, log.generation))
             }
             _ => None,
         }

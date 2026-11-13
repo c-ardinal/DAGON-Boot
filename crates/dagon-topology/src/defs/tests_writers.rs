@@ -253,6 +253,24 @@ fn the_built_in_combinations_are_these() {
     assert_eq!(kinds_count(esp, ImageKind::Agent), 1);
 }
 
+/// The STATUS entries a node fills are the slots its definition gives:
+/// the app's (an `any` slot both A and B) and the agent's factory slot for
+/// the app; the boot core's for the boot core.
+#[test]
+fn status_rows_are_the_slots_the_definition_gives() {
+    use slot_layout::TargetName::{App, Bootcore};
+    let reg = Registry::builtin();
+    let rows = |m: &str, t| reg.mcu(m).unwrap().status_rows(t);
+    assert_eq!(rows("rp2040", App), [0, 1]);
+    assert_eq!(rows("rp2040", Bootcore), [0, 1]);
+    assert_eq!(rows("esp32s3", App), [0, 1, 2]);
+    assert!(rows("esp32s3", Bootcore).is_empty());
+    let one = with_single("stm32f401re", &["bootcore"]).unwrap();
+    let f401 = one.mcu("stm32f401re").unwrap();
+    assert_eq!(f401.status_rows(App), [0, 1]);
+    assert_eq!(f401.status_rows(Bootcore), [0]);
+}
+
 #[test]
 fn a_b_slot_without_an_a_slot_is_refused() {
     for m in Registry::builtin().mcus() {

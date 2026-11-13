@@ -22,7 +22,7 @@ pub const LOG: LogLayout = LogLayout {
     face_len: 0x4000,
 };
 pub const SLOTS: SlotLayout = SlotLayout {
-    slots: [0x0802_0000, 0x0804_0000],
+    slots: &[0x0802_0000, 0x0804_0000],
     slot_len: 0x2_0000,
 };
 pub const A: u8 = 0;

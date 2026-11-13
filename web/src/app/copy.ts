@@ -632,10 +632,10 @@ export const NODE_ACTION = {
   romAttempts: 'やり直し',
 } as const;
 
-/** Slot section. Inside it the rows are A / B / 予備. */
+/** Slot section. Its rows are labelled by STATUS entry (A / B / 予備); a node shows the ones its MCU definition gives. */
 export const SLOT = {
   heading: 'スロット',
-  /** The boot loader has its own two slots (dagon_proto VERSION's boot core slots). */
+  /** The boot loader's own slots, labelled by STATUS entry (dagon_proto VERSION's boot core slots). */
   coreHeading: 'ブートローダのスロット',
   rows: ['A', 'B', '予備'],
   coreRows: ['A', 'B'],
@@ -1250,6 +1250,7 @@ export const MENU = {
     notConnected: '親機につないでから使えます。',
     notIdle: '今の動きが終わってから使えます。',
     noNode: 'ノードを選んでから使えます。',
+    noPrevious: '戻せる前のバージョンはありません。',
     noProposal: 'DAGON の案はありません。',
     noUndo: '取り消す変更はありません。',
     noRedo: 'やり直す変更はありません。',

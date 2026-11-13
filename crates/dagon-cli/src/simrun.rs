@@ -617,7 +617,10 @@ mod tests {
     #[test]
     fn version_lines_of_the_hub_and_its_nodes() {
         let w = world().unwrap();
-        let nodes = [("seg".to_string(), Some(SEG_AT)), ("far".to_string(), None)];
+        let nodes = [
+            ("seg".to_string(), Some(SEG_AT), None),
+            ("far".to_string(), None, None),
+        ];
         let lines = crate::device::version_lines(&mut w.host(), &nodes);
         let s0 = dagon_sim::store::STAGE0_VERSION;
         assert_eq!(lines.len(), 3, "{lines:?}");

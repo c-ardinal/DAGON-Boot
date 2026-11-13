@@ -180,6 +180,29 @@ impl McuDef {
     pub fn timings(&self) -> NodeTimings<OwnedLayout> {
         self.timings_on(None)
     }
+
+    /// The STATUS entries a node of this MCU fills for XFER target `t`, by
+    /// wire slot (0 A, 1 B, 2 factory), in order: the slots its `[[slot]]`
+    /// entries make it receive into; for the app, the agent's slot too
+    /// (STATUS of the app carries the factory entry). Every other entry is
+    /// sent as empty.
+    pub fn status_rows(&self, t: TargetName) -> Vec<u8> {
+        let with_agent = [t, TargetName::Agent];
+        let targets = match t {
+            TargetName::App => &with_agent[..],
+            _ => &with_agent[..1],
+        };
+        let mut rows: Vec<u8> = self
+            .slots
+            .iter()
+            .flat_map(|s| received(s.image, s.binding))
+            .filter(|(r, _)| targets.contains(r))
+            .map(|(_, s)| s.wire())
+            .collect();
+        rows.sort_unstable();
+        rows.dedup();
+        rows
+    }
 }
 
 /// The (target, slot) pairs a `[[slot]]` makes the node receive into, the

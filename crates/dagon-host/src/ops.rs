@@ -375,9 +375,10 @@ impl<T: Transport, C: HostClock> Host<T, C> {
         app: Version,
         on_event: &mut dyn FnMut(Event),
     ) -> Result<bool, T::Error> {
-        let cores: Vec<&[u8]> = [slot_binding::A, slot_binding::B]
-            .into_iter()
-            .filter_map(|s| image_of(b, node, image_kind::BOOTCORE, s))
+        let core_slots = slots_of(b, node, image_kind::BOOTCORE);
+        let cores: Vec<&[u8]> = core_slots
+            .iter()
+            .filter_map(|&s| image_of(b, node, image_kind::BOOTCORE, s))
             .collect();
         if cores.is_empty() {
             return Ok(false);
@@ -396,7 +397,7 @@ impl<T: Transport, C: HostClock> Host<T, C> {
         if installed {
             return Ok(false);
         }
-        let slot = free_slot(&cs).ok_or(Error::NoImage { node })?;
+        let slot = free_slot(&core_slots, &cs).ok_or(Error::NoImage { node })?;
         let img = image_of(b, node, image_kind::BOOTCORE, slot).ok_or(Error::NoImage { node })?;
         let raw: &[u8; HEADER_SIZE] = img
             .get(..HEADER_SIZE)
@@ -483,7 +484,8 @@ impl<T: Transport, C: HostClock> Host<T, C> {
             }
             return Ok(running);
         }
-        let slot = free_slot(&st.status).ok_or(Error::NoImage { node })?;
+        let slots = slots_of(b, node, image_kind::APP);
+        let slot = free_slot(&slots, &st.status).ok_or(Error::NoImage { node })?;
         let img = image_for(b, node, slot).ok_or(Error::NoImage { node })?;
         // Unverified releases reach here too: check the length, not assume.
         let raw: &[u8; HEADER_SIZE] = img
@@ -626,17 +628,21 @@ impl<T: Transport, C: HostClock> Host<T, C> {
         Ok(ConfirmOutcome::Confirmed(v))
     }
 
-    /// Back to the version in the other slot: SET_PENDING, REBOOT, its
-    /// HELLO, CONFIRM. `node` is the topology index used for events.
+    /// Back to the version in another of the node's app slots: SET_PENDING,
+    /// REBOOT, its HELLO, CONFIRM. `node` is the topology index used for
+    /// events; `slots` are the node's app slots (STATUS entries) from its
+    /// MCU definition: no other entry is ever taken, so a node with one
+    /// slot has no previous version.
     pub async fn rollback(
         &mut self,
         to: Target,
         node: u8,
+        slots: &[u8],
         on_event: &mut dyn FnMut(Event),
     ) -> Result<Version, T::Error> {
         self.write = Default::default();
         let st = self.status(to).await?.status;
-        let other = rollback_slot(&st).ok_or(Error::NoPreviousVersion)?;
+        let other = rollback_slot(&st, slots).ok_or(Error::NoPreviousVersion)?;
         let v = st.slots[other as usize].version;
         self.switch_and_confirm(to, other, v, node, on_event)
             .await?;
@@ -982,20 +988,23 @@ fn chunk_len(max_payload: u16, link_max: usize) -> Option<usize> {
         .filter(|&c| c > 0)
 }
 
-/// The slot rollback returns to: the other slot, Confirmed (we run on
-/// trial) or Written (confirmed before the running slot took over); never a
-/// Reverted, pending or empty one.
-fn rollback_slot(st: &StatusResp) -> Option<u8> {
-    let other = match st.active {
-        0 => 1u8,
-        1 => 0,
-        _ => return None,
-    };
-    let ok = matches!(
-        st.slots[other as usize].state,
-        SlotState::Confirmed | SlotState::Written
-    );
-    ok.then_some(other)
+/// The slot rollback returns to: another of the node's app `slots` than the
+/// running one, Confirmed (we run on trial) or Written (confirmed before the
+/// running slot took over); never a Reverted, pending or empty one, and
+/// never a STATUS entry outside `slots`. A node with one slot has none.
+fn rollback_slot(st: &StatusResp, slots: &[u8]) -> Option<u8> {
+    if !slots.contains(&st.active) {
+        return None;
+    }
+    slots
+        .iter()
+        .copied()
+        .filter(|&s| s != st.active)
+        .find(|&s| {
+            st.slots
+                .get(usize::from(s))
+                .is_some_and(|i| matches!(i.state, SlotState::Confirmed | SlotState::Written))
+        })
 }
 
 /// Release `bundle` built for `topology` and, when `pubkey` is given,
@@ -1174,11 +1183,34 @@ fn slots_settled(st: &StatusResp) -> bool {
             .any(|s| matches!(s.state, SlotState::Pending | SlotState::Trying))
 }
 
-/// Slot neither running nor confirmed.
-fn free_slot(st: &StatusResp) -> Option<u8> {
-    [0u8, 1]
-        .into_iter()
-        .find(|&s| s != st.active && s != st.confirmed)
+/// Of the node's `slots`, the one to write: one neither running nor
+/// confirmed, or the only one when the node has one slot (an image other
+/// than the one in it writes it).
+fn free_slot(slots: &[u8], st: &StatusResp) -> Option<u8> {
+    match slots {
+        [only] => Some(*only),
+        _ => slots
+            .iter()
+            .copied()
+            .find(|&s| s != st.active && s != st.confirmed),
+    }
+}
+
+/// The slots of `kind` the release has images for on `node`: each slot an
+/// image is bound to, both image slots for an image bound to any slot.
+fn slots_of(b: &BundleView<'_>, node: u8, kind: u8) -> Vec<u8> {
+    let m = b.manifest();
+    let mut slots: Vec<u8> = (0..m.entry_count())
+        .map(|i| m.entry(i))
+        .filter(|e| e.node_index == node && e.image_kind == kind)
+        .flat_map(|e| match e.slot_binding {
+            slot_binding::ANY => (0..StatusResp::IMAGE_SLOTS as u8).collect(),
+            s => alloc::vec![s],
+        })
+        .collect();
+    slots.sort_unstable();
+    slots.dedup();
+    slots
 }
 
 /// APP image of `node` bound to `slot` (or to any slot).
@@ -1220,6 +1252,42 @@ mod tests {
         assert_eq!(chunk_len(1088, 256), Some(252), "link limit wins");
     }
 
+    /// The slot written is one the release has an image for: the free one
+    /// of two, the only one of one (another image than the one running
+    /// there writes it), none while every slot is taken.
+    #[test]
+    fn the_slot_written_is_one_of_the_nodes_slots() {
+        let st = |active, confirmed| StatusResp {
+            active,
+            confirmed,
+            ..Default::default()
+        };
+        assert_eq!(free_slot(&[0, 1], &st(0, 0)), Some(1));
+        assert_eq!(free_slot(&[0, 1], &st(1, 1)), Some(0));
+        assert_eq!(free_slot(&[0, 1], &st(1, 0)), None, "on trial in B");
+        assert_eq!(free_slot(&[0], &st(0, 0)), Some(0));
+        assert_eq!(free_slot(&[0], &st(2, 0)), Some(0), "from the factory slot");
+        assert_eq!(free_slot(&[], &st(0, 0)), None);
+    }
+
+    /// One slot holds the only image: no previous version to go back to.
+    #[test]
+    fn a_one_slot_node_has_no_previous_version() {
+        let mut st = StatusResp {
+            active: 0,
+            confirmed: 0,
+            ..Default::default()
+        };
+        st.slots[0].state = SlotState::Confirmed;
+        assert_eq!(rollback_slot(&st, &[0]), None);
+        // A non-empty entry for a slot the node does not have is never taken.
+        st.slots[1].state = SlotState::Written;
+        assert_eq!(rollback_slot(&st, &[0]), None);
+        // Nor is a running slot outside them.
+        st.active = 1;
+        assert_eq!(rollback_slot(&st, &[0]), None);
+    }
+
     #[test]
     fn rollback_only_to_a_previously_confirmed_slot() {
         let with = |active, other: SlotState| {
@@ -1229,7 +1297,7 @@ mod tests {
                 ..Default::default()
             };
             st.slots[(1 - active.min(1)) as usize].state = other;
-            rollback_slot(&st)
+            rollback_slot(&st, &[0, 1])
         };
         assert_eq!(with(1, SlotState::Written), Some(0));
         assert_eq!(with(0, SlotState::Confirmed), Some(1));

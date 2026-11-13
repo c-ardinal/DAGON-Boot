@@ -441,7 +441,7 @@ Options:
 ```text
 Run the 12 conformance tests on a node
 
-Runs through the hub, or with --usb on a node plugged in directly. The images folder holds good-a.img, good-b.img, no-confirm-a.img and no-confirm-b.img. Writes result.json and report.html into --out, else into the images folder (default for both: out/conform/<id> next to dagon.toml).
+Runs through the hub, or with --usb on a node plugged in directly. The images folder holds good-a.img and no-confirm-a.img, and good-b.img and no-confirm-b.img for a node with app slot B. Writes result.json and report.html into --out, else into the images folder (default for both: out/conform/<id> next to dagon.toml).
 
 Usage: dagon conform [OPTIONS] --node <ID>
 

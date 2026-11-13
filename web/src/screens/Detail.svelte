@@ -2,7 +2,7 @@
   import { DETAIL, NODE, NODE_ACTION, SLOT, TRIAL_CHOICE, WIRING, WRITE } from '../app/copy.ts';
   import type { Live } from '../app/operate.svelte.ts';
   import type { Config, Link, Node } from '../app/sample.ts';
-  import { previousVersion } from '../app/slots.ts';
+  import { appRows, coreRows, imageRows, previousVersion } from '../app/slots.ts';
   import { versionText, type RecoverResult, type StatusResp } from '../wasm/dagon.ts';
   import type { HelloResp } from '../serial/hello.ts';
 
@@ -46,8 +46,6 @@
   const SHORT_HEX = 4;
   /** HELLO port_kind of an MCU booted by its vendor's 2nd stage (dagon_format::header::port_kind). */
   const PORT_VENDOR_STAGE2 = 2;
-  /** Boot core slots A and B in VERSION (dagon_proto::payload::version_id::BOOTCORE_SLOTS). */
-  const CORE_SLOTS = 2;
 
   const clock = new Intl.DateTimeFormat('ja-JP', { hour: '2-digit', minute: '2-digit' });
   const hex = (b: Uint8Array) => Array.from(b, (x) => x.toString(16).padStart(2, '0')).join('');
@@ -131,7 +129,7 @@
     const absent = l.hello?.portKind === PORT_VENDOR_STAGE2 ? DETAIL.none : DETAIL.unknown;
     const rows: [string, string][] = [['stage0', v?.stage0 != null ? versionText(v.stage0) : absent]];
     const cs = v?.coreSlots;
-    for (let i = 0; i < CORE_SLOTS; i++) {
+    for (const i of coreRows(node?.mcuId)) {
       const x = cs?.slots[i];
       const value = x ? `state ${x.state} · ${versionText(x.version)}${i === cs?.active ? ' · running' : ''}` : absent;
       rows.push([`boot_core[${i}]`, value]);
@@ -193,9 +191,9 @@
       {#if l?.status}
         <table class="slots" class:stale={l.responding === false}>
           <tbody>
-            {#each SLOT.rows as row, i (row)}
+            {#each appRows(n.mcuId) as i (i)}
               <tr>
-                <th scope="row">{row}</th>
+                <th scope="row">{SLOT.rows[i]}</th>
                 <td class="v" translate="no">{slotVersion(i, l.status)}</td>
                 <td>{slotWord(i, l.status, l.hello)}</td>
               </tr>
@@ -204,7 +202,7 @@
         </table>
       {:else if l?.responding !== false}
         <div class="slots-sk" aria-hidden="true">
-          {#each SLOT.rows as row (row)}<span class="skeleton"></span>{/each}
+          {#each appRows(n.mcuId) as i (i)}<span class="skeleton"></span>{/each}
         </div>
       {/if}
       {@const core = l?.core}
@@ -212,10 +210,10 @@
         <h3>{SLOT.coreHeading}</h3>
         <table class="slots" class:stale={l?.responding === false}>
           <tbody>
-            {#each SLOT.coreRows as row, i (row)}
+            {#each coreRows(n.mcuId) as i (i)}
               {@const slot = core.slots[i]}
               <tr>
-                <th scope="row">{row}</th>
+                <th scope="row">{SLOT.coreRows[i]}</th>
                 <td class="v" translate="no">{slot && slot.state !== SLOT_EMPTY ? versionText(slot.version) : ''}</td>
                 <td>{slot ? (i === core.active ? SLOT.inUse : (SLOT.states[slot.state] ?? '')) : ''}</td>
               </tr>
@@ -223,7 +221,7 @@
           </tbody>
         </table>
       {/if}
-      {@const back = previousVersion(l?.status)}
+      {@const back = previousVersion(l?.status, imageRows(n.mcuId))}
       {#if act && l?.responding && l.hello?.trial}
         <p class="choice">{TRIAL_CHOICE.sentence}</p>
         <div class="actions">

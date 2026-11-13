@@ -155,12 +155,16 @@ impl Device {
     fn boot(&mut self, max: u8, fault: Option<Fault>) -> Result<u8, Cut> {
         let mut n = 0u8;
         let cores = self.cores;
-        let start = choose(&self.log, self.cell, max, |s, r| {
-            match cores[usize::from(s)] {
+        let start = choose(
+            &self.log,
+            self.cell,
+            max,
+            cores.len() as u8,
+            |s, r| match cores[usize::from(s)] {
                 Some(c) if r.is_none_or(|r| *r == c.at) => Ok(()),
                 _ => Err(()),
-            }
-        })
+            },
+        )
         .expect("a core always checks out here");
         if start.trial {
             self.trial_starts += 1;

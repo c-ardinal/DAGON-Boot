@@ -2,7 +2,7 @@
 //! `DAGON/IMG/1`. The payload is bound by `payload_sha256`.
 
 use crate::le::{arr, put_u16, put_u32, u16_at, u32_at};
-use crate::{sha256, verify_signed, FormatError, Version};
+use crate::{sha256, verify_signed, FormatError, SigVerifier, Version};
 
 pub const HEADER_SIZE: usize = 512;
 pub const MAGIC: [u8; 4] = *b"DGIM";
@@ -159,17 +159,17 @@ impl ImageHeader {
     }
 }
 
-/// Checks `key_id` against `pubkey`, then the Ed25519 signature, then parses.
+/// Checks `key_id` against `verifier`'s key, then the signature, then parses.
 /// Errors: `UnknownKey`, `BadSignature`, or a parse error.
-pub fn verify_header(
+pub fn verify_header<V: SigVerifier + ?Sized>(
     raw: &[u8; HEADER_SIZE],
-    pubkey: &[u8; 32],
+    verifier: &V,
 ) -> Result<ImageHeader, FormatError> {
-    if raw[0x048..0x050] != crate::key_id(pubkey) {
+    if raw[0x048..0x050] != verifier.key_id() {
         return Err(FormatError::UnknownKey);
     }
     let sig: [u8; 64] = arr(raw, SIGNED_LEN);
-    verify_signed(pubkey, SIGN_DOMAIN, &raw[..SIGNED_LEN], &sig)?;
+    verify_signed(verifier, SIGN_DOMAIN, &raw[..SIGNED_LEN], &sig)?;
     ImageHeader::parse(raw)
 }
 

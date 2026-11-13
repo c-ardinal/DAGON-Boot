@@ -299,6 +299,10 @@ pub struct StatusResp {
 
 impl StatusResp {
     pub const LEN: usize = 71;
+    /// The image slot entries (A, B) before the factory entry: the most
+    /// slots an image kind can have on the wire. A kind with fewer sends the
+    /// others as empty.
+    pub const IMAGE_SLOTS: usize = 2;
 
     pub fn parse(b: &[u8]) -> Result<Self, Status> {
         let mut r = Rd(b);

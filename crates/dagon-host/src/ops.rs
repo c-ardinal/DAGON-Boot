@@ -4,6 +4,7 @@
 use alloc::format;
 use alloc::vec;
 use alloc::vec::Vec;
+use dagon_ed25519::Ed25519Compact;
 use dagon_format::bundle::BundleView;
 use dagon_format::header::{image_kind, slot_binding, HEADER_SIZE};
 use dagon_format::topology::{self, TopologyView};
@@ -1007,7 +1008,7 @@ pub fn check_release<'a, E>(
 ) -> Result<(BundleView<'a>, TopologyView<'a>), E> {
     let b = BundleView::parse(bundle)?;
     if let Some(k) = pubkey {
-        b.verify(k)?;
+        b.verify(&Ed25519Compact::new(*k))?;
     }
     let topo = TopologyView::parse(topology)?;
     let release = b.manifest().fields().topology_sha256;

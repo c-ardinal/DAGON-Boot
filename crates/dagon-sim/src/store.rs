@@ -37,8 +37,9 @@ pub struct Layout {
     pub bootcore: (u32, u32),
     /// State log face (one erase unit).
     pub log: (u32, u32),
-    /// APP slots A and B: header inline at the slot start, body at +512.
-    pub slots: [(u32, u32); 2],
+    /// APP slots, index = slot (A, then B when the MCU definition gives
+    /// one): (start, length), header inline at the slot start, body at +512.
+    pub slots: &'static [(u32, u32)],
     /// Hub display copy of the topology (body only), if this board keeps one.
     pub topology: Option<(u32, u32)>,
     /// Factory (spare) slot, reported as STATUS slot 2: the recovery
@@ -46,8 +47,8 @@ pub struct Layout {
     /// first written by [`SimStore::provision_factory`]; never a boot
     /// target here.
     pub factory: Option<(u32, u32)>,
-    /// Boot core slots A/B behind a stage0, as the MCU definition's
-    /// `bootcore` slots declare them; `None`: the boot core is the
+    /// Boot core slots behind a stage0, as the MCU definition's `bootcore`
+    /// slots declare them (one or two); `None`: the boot core is the
     /// `bootcore` region alone.
     pub cores: Option<Cores>,
 }
@@ -55,7 +56,8 @@ pub struct Layout {
 /// Boot core slots (header inline at the slot start) and their log.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Cores {
-    pub slots: [(u32, u32); 2],
+    /// Index = slot (A, then B when there is one).
+    pub slots: &'static [(u32, u32)],
     pub log: LogLayout,
 }
 
@@ -67,11 +69,11 @@ impl Layout {
         mcu: "stm32f401re",
         bootcore: (0x0800_0000, 0x4000),
         log: (0x0800_4000, 0x4000),
-        slots: [(0x0802_0000, 0x2_0000), (0x0804_0000, 0x2_0000)],
+        slots: &[(0x0802_0000, 0x2_0000), (0x0804_0000, 0x2_0000)],
         topology: None,
         factory: None,
         cores: Some(Cores {
-            slots: [(0x0801_0000, 0x1_0000), (0x0806_0000, 0x2_0000)],
+            slots: &[(0x0801_0000, 0x1_0000), (0x0806_0000, 0x2_0000)],
             log: LogLayout {
                 faces: [0x0800_4000, 0x0800_8000],
                 face_len: 0x4000,
@@ -85,11 +87,11 @@ impl Layout {
         mcu: "rp2040",
         bootcore: (0x1000_0000, 0x1_0000),
         log: (0x1001_0000, 0x1000),
-        slots: [(0x1002_0000, 0x8_0000), (0x100A_0000, 0x8_0000)],
+        slots: &[(0x1002_0000, 0x8_0000), (0x100A_0000, 0x8_0000)],
         topology: Some((0x1012_0000, 0x1_0000)),
         factory: None,
         cores: Some(Cores {
-            slots: [(0x1013_0000, 0x1_0000), (0x1014_0000, 0x1_0000)],
+            slots: &[(0x1013_0000, 0x1_0000), (0x1014_0000, 0x1_0000)],
             log: LogLayout {
                 faces: [0x1015_0000, 0x1015_1000],
                 face_len: 0x1000,
@@ -103,7 +105,7 @@ impl Layout {
         mcu: "esp32s3",
         bootcore: (0x0000_0000, 0x1_0000),
         log: (0x0001_0000, 0x1000),
-        slots: [(0x0011_0000, 0x10_0000), (0x0021_0000, 0x10_0000)],
+        slots: &[(0x0011_0000, 0x10_0000), (0x0021_0000, 0x10_0000)],
         topology: None,
         factory: Some((0x0031_0000, 0x0F_0000)),
         cores: None,
@@ -216,13 +218,20 @@ impl SimStore {
 
     fn region(&self, t: u8, slot: u8) -> Result<(u32, u32), StoreError> {
         match t {
-            target::APP if slot < 2 => {
-                let (a, l) = self.layout.slots[slot as usize];
+            target::APP => {
+                let &(a, l) = self
+                    .layout
+                    .slots
+                    .get(usize::from(slot))
+                    .ok_or(StoreError::Unsupported)?;
                 Ok((a + HEADER_SIZE as u32, l - HEADER_SIZE as u32))
             }
-            target::BOOTCORE if slot < 2 => {
+            target::BOOTCORE => {
                 let c = self.layout.cores.ok_or(StoreError::Unsupported)?;
-                let (a, l) = c.slots[slot as usize];
+                let &(a, l) = c
+                    .slots
+                    .get(usize::from(slot))
+                    .ok_or(StoreError::Unsupported)?;
                 Ok((a + HEADER_SIZE as u32, l - HEADER_SIZE as u32))
             }
             target::AGENT if slot == 2 => {
@@ -234,12 +243,11 @@ impl SimStore {
         }
     }
 
-    /// Slot 0/1 = A/B, 2 = factory.
+    /// The app's slots by number, then the factory slot (STATUS slot 2).
     fn slot_base(&self, slot: u8) -> Option<u32> {
         match slot {
-            0 | 1 => Some(self.layout.slots[slot as usize].0),
-            2 => self.layout.factory.map(|f| f.0),
-            _ => None,
+            statelog::slot::FACTORY => self.layout.factory.map(|f| f.0),
+            s => self.layout.slots.get(usize::from(s)).map(|s| s.0),
         }
     }
 
@@ -416,7 +424,7 @@ impl SimStore {
 
     /// The header in boot core slot `slot` as a log reference.
     fn core_head(&mut self, slot: u8) -> Option<SlotRef> {
-        let (base, _) = self.layout.cores?.slots[usize::from(slot)];
+        let &(base, _) = self.layout.cores?.slots.get(usize::from(slot))?;
         let mut h = [0u8; HEADER_SIZE];
         self.flash().read(base, &mut h).ok()?;
         Some(SlotRef {
@@ -435,7 +443,13 @@ impl SimStore {
         if r.is_some_and(|r| *r != head) {
             return Err(());
         }
-        let (base, len) = self.layout.cores.ok_or(())?.slots[usize::from(s)];
+        let &(base, len) = self
+            .layout
+            .cores
+            .ok_or(())?
+            .slots
+            .get(usize::from(s))
+            .ok_or(())?;
         let mut raw = [0u8; HEADER_SIZE];
         self.flash().read(base, &mut raw).map_err(|_| ())?;
         let h = ImageHeader::parse(&raw).map_err(|_| ())?;
@@ -461,7 +475,10 @@ impl SimStore {
         for _ in 0..=max + 1 {
             let st = read_state(&mut Paged(self.flash()), &c.log).unwrap_or_default();
             let cell = *self.cell();
-            let start = choose(&st, cell, max, |s, r| self.core_check(s, r)).ok()?;
+            let start = choose(&st, cell, max, c.slots.len() as u8, |s, r| {
+                self.core_check(s, r)
+            })
+            .ok()?;
             *self.cell() = start.cell;
             let healthy = self.core_head(start.slot).map(|h| h.version) != self.broken_core;
             let settled = settle_log(
@@ -610,8 +627,10 @@ impl SlotStore for SimStore {
     /// record names, is reported as written.
     fn status(&mut self) -> StatusResp {
         let (ls, gen) = self.log_state();
-        let heads = [self.head(0), self.head(1)];
-        let mut st = ls.status(heads, ls.active(), gen);
+        let heads: Vec<_> = (0..self.layout.slots.len() as u8)
+            .map(|s| self.head(s))
+            .collect();
+        let mut st = ls.status(&heads, ls.active(), gen);
         if let Some(f) = self.head(2) {
             st.slots[2] = SlotInfo {
                 state: SlotState::Written,
@@ -734,9 +753,11 @@ impl SlotStore for SimStore {
                 let c = self.layout.cores?;
                 let log = Log::load(&mut Paged(self.flash()), &c.log).ok();
                 let (st, gen) = log.map_or((LogState::default(), 0), |l| (l.core, l.generation));
-                let heads = [self.core_head(0), self.core_head(1)];
+                let heads: Vec<_> = (0..c.slots.len() as u8)
+                    .map(|s| self.core_head(s))
+                    .collect();
                 let running = st.confirmed.map_or(slot_binding::A, |c| c.slot);
-                Some(st.status(heads, running, gen))
+                Some(st.status(&heads, running, gen))
             }
             _ => None,
         }

@@ -133,10 +133,12 @@ impl LogState {
         }
     }
 
-    /// STATUS of the APP slots. `heads[s]`: the image header now in slot
-    /// `s` as a reference (`slot = s`), `None` when it has none. A log
-    /// reference counts for a slot only while that same header is there.
-    pub fn status(&self, heads: [Option<SlotRef>; 2], active: u8, generation: u32) -> StatusResp {
+    /// STATUS of the slots of one image kind. `heads[s]`: the image header
+    /// now in slot `s` as a reference (`slot = s`), `None` when it has none;
+    /// one entry per slot the kind has, and a slot it does not have is sent
+    /// as empty. A log reference counts for a slot only while that same
+    /// header is there.
+    pub fn status(&self, heads: &[Option<SlotRef>], active: u8, generation: u32) -> StatusResp {
         let mut st = StatusResp {
             active,
             confirmed: self.confirmed.map_or(slot::NONE, |c| c.slot),
@@ -145,7 +147,7 @@ impl LogState {
             log_generation: generation,
             ..Default::default()
         };
-        for (info, head) in st.slots.iter_mut().zip(heads) {
+        for (info, head) in st.slots.iter_mut().zip(heads.iter().copied()) {
             let Some(h) = head else { continue };
             let state = if self.pending == Some(h) {
                 if self.attempts > 0 {
@@ -443,7 +445,7 @@ mod tests {
     }
 
     fn states(s: &LogState, heads: [Option<SlotRef>; 2]) -> [SlotState; 2] {
-        let st = s.status(heads, s.active(), 1);
+        let st = s.status(&heads, s.active(), 1);
         [st.slots[0].state, st.slots[1].state]
     }
 
@@ -455,7 +457,7 @@ mod tests {
             states(&s, [a, None]),
             [SlotState::Confirmed, SlotState::Empty]
         );
-        assert_eq!(s.status([a, None], 0, 1).confirmed, 0);
+        assert_eq!(s.status(&[a, None], 0, 1).confirmed, 0);
         let s = s.apply(&rec(kind::SLOT_PENDING, 1));
         assert_eq!(
             states(&s, [a, b]),
@@ -466,7 +468,7 @@ mod tests {
             states(&s, [a, b]),
             [SlotState::Confirmed, SlotState::Trying]
         );
-        assert_eq!(s.status([a, b], 1, 1).active, 1);
+        assert_eq!(s.status(&[a, b], 1, 1).active, 1);
         let s = s.apply(&rec(kind::ROLLBACK, 0));
         assert_eq!(
             states(&s, [a, b]),

@@ -283,15 +283,17 @@ pub struct NoCore<E> {
 /// before B: a core whose image checks out is always preferred to halting.
 /// Only when no slot checks out is there nothing to start. `check(slot,
 /// record)` is the MCU's image check of the core in `slot`, against the
-/// record when one names it.
+/// record when one names it. `slots` is how many boot core slots the MCU
+/// definition gives (slot A, then B); no other slot is checked on its own.
 pub fn choose<B, E>(
     st: &LogState,
     cell: [u32; 2],
     max: u8,
+    slots: u8,
     mut check: impl FnMut(u8, Option<&SlotRef>) -> Result<B, E>,
 ) -> Result<Start<B>, NoCore<E>> {
     let n = st.pending.map_or(0, |p| tried(cell, &p));
-    let mut tried_slot = [false; SLOTS];
+    let mut tried_slot = Tried::default();
     let run = match plan(st, n, max) {
         Plan::Try {
             pending,
@@ -329,8 +331,8 @@ pub fn choose<B, E>(
         }
         Err(why) => why,
     };
-    for s in 0..SLOTS as u8 {
-        if tried_slot[usize::from(s)] {
+    for s in 0..slots {
+        if tried_slot.has(s) {
             continue;
         }
         if let Ok(body) = check(s, None) {
@@ -359,13 +361,18 @@ pub fn choose<B, E>(
     })
 }
 
-/// Boot core slots stage0 chooses among.
-const SLOTS: usize = 2;
+/// The slots [`choose`] has checked, as bits by slot number.
+#[derive(Default)]
+struct Tried(u32);
 
-fn mark(tried: &mut [bool; SLOTS], s: u8) {
-    if let Some(t) = tried.get_mut(usize::from(s)) {
-        *t = true;
+impl Tried {
+    fn has(&self, s: u8) -> bool {
+        self.0.checked_shr(u32::from(s)).is_some_and(|b| b & 1 == 1)
     }
+}
+
+fn mark(tried: &mut Tried, s: u8) {
+    tried.0 |= 1u32.checked_shl(u32::from(s)).unwrap_or(0);
 }
 
 /// The trial cell as the boot core sees it at start.

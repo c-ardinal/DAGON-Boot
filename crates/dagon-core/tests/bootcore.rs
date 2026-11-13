@@ -92,10 +92,10 @@ fn stage0_tries_every_slot_before_it_gives_up() {
     };
     // Confirmed B is corrupt: A (no record names it) starts.
     let st = core_fold(&[rec(kind::PROVISION, target::BOOTCORE, b, 0)]);
-    let start = choose(&st, CLEARED, MAX, only(&[0])).unwrap();
+    let start = choose(&st, CLEARED, MAX, 2, only(&[0])).unwrap();
     assert_eq!((start.slot, start.trial), (0, false));
     // An empty log and a blank slot A: B.
-    let start = choose(&LogState::default(), CLEARED, MAX, only(&[1])).unwrap();
+    let start = choose(&LogState::default(), CLEARED, MAX, 2, only(&[1])).unwrap();
     assert_eq!(start.slot, 1);
     // Pending B fails its check, confirmed A is corrupt too: nothing but B
     // is left, and it fails; no slot checks out.
@@ -103,12 +103,12 @@ fn stage0_tries_every_slot_before_it_gives_up() {
         rec(kind::PROVISION, target::BOOTCORE, a, 0),
         rec(kind::SLOT_PENDING, target::BOOTCORE, b, 0),
     ]);
-    let e = choose(&st, CLEARED, MAX, only(&[])).unwrap_err();
+    let e = choose(&st, CLEARED, MAX, 2, only(&[])).unwrap_err();
     assert!(e.named);
     // Pending B ran out of starts and confirmed A is corrupt: B runs as the
     // last resort, not on trial, the count kept.
     let cell = trial_cell(&b, MAX);
-    let start = choose(&st, cell, MAX, only(&[1])).unwrap();
+    let start = choose(&st, cell, MAX, 2, only(&[1])).unwrap();
     assert_eq!((start.slot, start.trial, start.cell), (1, false, cell));
 }
 

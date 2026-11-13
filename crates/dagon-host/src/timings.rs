@@ -39,22 +39,6 @@ pub fn mcu_timings(
     Ok(t)
 }
 
-/// The links the hub relays over ([`Host::relay_links`](crate::Host::relay_links)):
-/// `[[relay_link]]` of the MCU definition in `reg` of `topo`'s coordinator
-/// (the first, where it has several); none without one.
-#[cfg(feature = "defs")]
-pub fn relay_links(
-    reg: &dagon_topology::defs::Registry,
-    topo: &dagon_topology::Topology,
-) -> Vec<dagon_port::RelayLinkDef> {
-    topo.nodes
-        .iter()
-        .find(|n| n.role == dagon_topology::schema::Role::Coordinator)
-        .and_then(|n| reg.mcu(&n.mcu))
-        .map(|m| m.relay_link_defs())
-        .unwrap_or_default()
-}
-
 /// Each node's timings by topology index, from its MCU's definition in
 /// `reg` on its board (the board it names, else its MCU's default board);
 /// an MCU missing from `reg` gets [`NodeTimings::FALLBACK`].

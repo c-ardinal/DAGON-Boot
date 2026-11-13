@@ -13,6 +13,7 @@ extern crate alloc;
 mod ops;
 mod percent;
 pub mod rom;
+mod routes;
 mod timings;
 
 pub use dagon_romlink::{RomError, Stats as RomStats};
@@ -22,7 +23,10 @@ pub use ops::{
 };
 pub use percent::{transfer_percent, trial_percent};
 #[cfg(feature = "defs")]
-pub use timings::{mcu_timings, node_timings, relay_links};
+pub use routes::{configured_routes, connected_node, relay_routes};
+pub use routes::{Route, RouteError, Routes};
+#[cfg(feature = "defs")]
+pub use timings::{mcu_timings, node_timings};
 pub use timings::{HostTimings, NodeTimingError};
 
 use alloc::boxed::Box;
@@ -31,7 +35,6 @@ use alloc::vec::Vec;
 use dagon_format::topology::{self, TopologyView};
 use dagon_format::{FormatError, Version};
 use dagon_port::timeout::{EraseLayout, EraseRegion, NodeTimings, SlotLayout, REQUEST_MS};
-use dagon_port::{Addressing, LinkKind, RelayLinkDef};
 use dagon_proto::payload::{HelloReq, HelloResp, Relay};
 use dagon_proto::{find_sof, flags, max_payload, split_status, Cmd, Frame, FrameError, Status};
 
@@ -97,23 +100,6 @@ impl Target {
             _ => None,
         }
     }
-
-    /// The hub's relay link to this node among `links` (the hub MCU's
-    /// definition's), and the address RELAY names it by: the first link of
-    /// its kind. `None` for the hub, or when `links` hold no such link.
-    fn relay(self, links: &[RelayLinkDef]) -> Option<(RelayLinkDef, u8)> {
-        let (kind, addr) = match self {
-            Target::Hub => return None,
-            Target::I2c(a) => (LinkKind::I2c, Some(a)),
-            Target::Uart => (LinkKind::Uart, None),
-        };
-        links.iter().find_map(|l| match (l.addressing, addr) {
-            _ if l.kind != kind => None,
-            (Addressing::SevenBit, Some(a)) => Some((*l, a)),
-            (Addressing::Fixed(f), None) => Some((*l, f)),
-            _ => None,
-        })
-    }
 }
 
 #[derive(Debug)]
@@ -148,9 +134,9 @@ pub enum Error<E> {
     Unreachable {
         node: u8,
     },
-    /// The hub relays over no link that reaches this target
-    /// ([`Host::relay_links`]); nothing was sent.
-    NoRelayLink(Target),
+    /// No relay route reaches this target ([`Host::routes`]); nothing was
+    /// sent.
+    Route(RouteError),
     /// The node does not answer and its ROM path was not confirmed; nothing
     /// was touched.
     RomNotConfirmed {
@@ -226,10 +212,11 @@ pub struct Host<T: Transport, C: HostClock> {
     /// its progress number. A node with no entry gets
     /// [`NodeTimings::FALLBACK`].
     pub timings: Vec<(u8, HostTimings)>,
-    /// The links the hub relays over, from its MCU definition
-    /// ([`relay_links`] under the `defs` feature): a node is reached over
-    /// the one of its link's kind. Empty: only the hub itself is reached.
-    pub relay_links: Vec<RelayLinkDef>,
+    /// How each linked node is reached from the node the PC is connected
+    /// to: the topology link joining them and the relay table entry for
+    /// the connected node's port ([`relay_routes`] under the `defs`
+    /// feature). Empty: only the connected node is reached.
+    pub routes: Routes,
     /// Lines about steps that are retried (a CONFIRM sent again), for the
     /// caller's log; `None`: not shown.
     pub note: Option<Note>,
@@ -249,7 +236,7 @@ impl<T: Transport, C: HostClock> Host<T, C> {
             core_write: false,
             write: percent::WriteTrack::default(),
             timings: Vec::new(),
-            relay_links: Vec::new(),
+            routes: Routes::default(),
             note: None,
         }
     }
@@ -321,10 +308,16 @@ impl<T: Transport, C: HostClock> Host<T, C> {
         }
     }
 
-    /// Largest payload of the hub's link to `to`; None for the hub (or no link).
+    /// Largest payload of the link to `to`; None for the connected node (or no route).
     fn node_link_max(&self, to: Target) -> Option<usize> {
-        to.relay(&self.relay_links)
-            .map(|(l, _)| usize::from(l.max_payload))
+        match to {
+            Target::Hub => None,
+            _ => self
+                .routes
+                .to(to)
+                .ok()
+                .map(|r| usize::from(r.link.max_payload)),
+        }
     }
 
     /// Version this session last applied to `to`.
@@ -494,11 +487,11 @@ impl<T: Transport, C: HostClock> Host<T, C> {
     ) -> Result<Vec<u8>, T::Error> {
         let route = match to {
             Target::Hub => None,
-            _ => Some(to.relay(&self.relay_links).ok_or(Error::NoRelayLink(to))?),
+            _ => Some(self.routes.to(to).map_err(Error::Route)?),
         };
-        let max = route.map_or(max_payload::USB, |(l, _)| usize::from(l.max_payload));
+        let max = route.map_or(max_payload::USB, |r| usize::from(r.link.max_payload));
         let seq = self.next_seq();
-        let relay = route.map(|(l, addr)| ((l.id, addr), self.next_seq()));
+        let relay = route.map(|r| ((r.link.id, r.addr), self.next_seq()));
         let mut attempt = 0;
         loop {
             let fl = if attempt == 0 { 0 } else { flags::RETRY };

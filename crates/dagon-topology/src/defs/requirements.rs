@@ -500,7 +500,10 @@ fn writers(m: &McuDef) -> Result<(), String> {
             .ok_or_else(|| format!("writers has no entry for {}", k.as_str()))?;
         fail(count(k) == 1 && by.iter().all(|w| *w == k), || {
             format!(
-                "{0} has one slot, and no other image on this MCU can write it: an image cannot                  rewrite the slot it runs from (writers.{0} = {1:?})",
+                concat!(
+                    "{0} has one slot, and no other image on this MCU can write it: ",
+                    "an image cannot rewrite the slot it runs from (writers.{0} = {1:?})"
+                ),
                 k.as_str(),
                 by.iter().map(|w| w.as_str()).collect::<Vec<_>>()
             )

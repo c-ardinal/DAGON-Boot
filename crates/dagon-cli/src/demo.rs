@@ -270,7 +270,7 @@ mod tests {
         let bundle = std::fs::read(dir.join(format!("out/release/{RELEASE}.dgb"))).unwrap();
         dagon_format::bundle::BundleView::parse(&bundle)
             .unwrap()
-            .verify(&key.pk)
+            .verify(&dagon_ed25519::Ed25519Compact::new(*key.pk))
             .unwrap();
         let pubkey = cfg.pubkey.clone().unwrap();
         assert_eq!(

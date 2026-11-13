@@ -9,6 +9,7 @@ publish = false
 crate-type = ["cdylib", "rlib"]
 
 [dependencies]
+dagon-ed25519 = { path = "../dagon-ed25519", features = ["compact"] }
 dagon-format = { path = "../dagon-format" }
 dagon-host = { path = "../dagon-host", features = ["defs"] }
 # The simulator (`sim` feature): test and development builds only.

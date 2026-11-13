@@ -293,7 +293,7 @@ fn a_generated_sample_project_deploys_every_node_including_the_esp32s3() {
     );
     assert!(BundleView::parse(&p.bundle)
         .unwrap()
-        .verify(&key().pk)
+        .verify(&dagon_ed25519::Ed25519Compact::new(*key().pk))
         .is_ok());
     let _ = std::fs::remove_dir_all(&cfg.base);
 }
